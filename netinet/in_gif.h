@@ -1,7 +1,7 @@
-/*	$OpenBSD: in_gif.h,v 1.5 2007/02/10 15:34:22 claudio Exp $	*/
+/*	$FreeBSD: src/sys/netinet/in_gif.h,v 1.12 2005/01/07 01:45:44 imp Exp $	*/
 /*	$KAME: in_gif.h,v 1.5 2000/04/14 08:36:02 itojun Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -33,7 +33,13 @@
 #ifndef _NETINET_IN_GIF_H_
 #define _NETINET_IN_GIF_H_
 
-void in_gif_input(struct mbuf *, ...);
+#define GIF_TTL		30
+
+struct gif_softc;
+void in_gif_input(struct mbuf *, int);
 int in_gif_output(struct ifnet *, int, struct mbuf *);
+int gif_encapcheck4(const struct mbuf *, int, int, void *);
+int in_gif_attach(struct gif_softc *);
+int in_gif_detach(struct gif_softc *);
 
 #endif /*_NETINET_IN_GIF_H_*/

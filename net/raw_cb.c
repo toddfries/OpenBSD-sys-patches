@@ -1,7 +1,4 @@
-/*	$OpenBSD: raw_cb.c,v 1.5 2003/12/10 07:22:42 itojun Exp $	*/
-/*	$NetBSD: raw_cb.c,v 1.9 1996/02/13 22:00:39 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1980, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,24 +27,23 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_cb.c	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/net/raw_cb.c,v 1.34 2006/06/02 08:27:15 rwatson Exp $
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/mbuf.h>
+#include <sys/domain.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mutex.h>
+#include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/domain.h>
-#include <sys/protosw.h>
-#include <sys/errno.h>
+#include <sys/systm.h>
 
-#include <net/if.h>
-#include <net/route.h>
 #include <net/raw_cb.h>
-#include <netinet/in.h>
 
 /*
- * Routines to manage the raw protocol control blocks. 
+ * Routines to manage the raw protocol control blocks.
  *
  * TODO:
  *	hash lookups by protocol family/protocol + address family
@@ -55,9 +51,11 @@
  *	redo address binding to allow wildcards
  */
 
-u_long	raw_sendspace = RAWSNDQ;
-u_long	raw_recvspace = RAWRCVQ;
-struct rawcbhead rawcb;
+struct mtx rawcb_mtx;
+struct rawcb_list_head rawcb_list;
+
+const static u_long	raw_sendspace = RAWSNDQ;
+const static u_long	raw_recvspace = RAWRCVQ;
 
 /*
  * Allocate a control block and a nominal amount
@@ -65,10 +63,10 @@ struct rawcbhead rawcb;
  */
 int
 raw_attach(so, proto)
-	struct socket *so;
+	register struct socket *so;
 	int proto;
 {
-	struct rawcb *rp = sotorawcb(so);
+	register struct rawcb *rp = sotorawcb(so);
 	int error;
 
 	/*
@@ -78,12 +76,15 @@ raw_attach(so, proto)
 	 */
 	if (rp == 0)
 		return (ENOBUFS);
-	if ((error = soreserve(so, raw_sendspace, raw_recvspace)) != 0)
+	error = soreserve(so, raw_sendspace, raw_recvspace);
+	if (error)
 		return (error);
 	rp->rcb_socket = so;
 	rp->rcb_proto.sp_family = so->so_proto->pr_domain->dom_family;
 	rp->rcb_proto.sp_protocol = proto;
-	LIST_INSERT_HEAD(&rawcb, rp, rcb_list);
+	mtx_lock(&rawcb_mtx);
+	LIST_INSERT_HEAD(&rawcb_list, rp, list);
+	mtx_unlock(&rawcb_mtx);
 	return (0);
 }
 
@@ -93,13 +94,16 @@ raw_attach(so, proto)
  */
 void
 raw_detach(rp)
-	struct rawcb *rp;
+	register struct rawcb *rp;
 {
 	struct socket *so = rp->rcb_socket;
 
-	so->so_pcb = 0;
-	sofree(so);
-	LIST_REMOVE(rp, rcb_list);
+	KASSERT(so->so_pcb == rp, ("raw_detach: so_pcb != rp"));
+
+	so->so_pcb = NULL;
+	mtx_lock(&rawcb_mtx);
+	LIST_REMOVE(rp, list);
+	mtx_unlock(&rawcb_mtx);
 #ifdef notdef
 	if (rp->rcb_laddr)
 		m_freem(dtom(rp->rcb_laddr));
@@ -109,7 +113,7 @@ raw_detach(rp)
 }
 
 /*
- * Disconnect and possibly release resources.
+ * Disconnect raw socket.
  */
 void
 raw_disconnect(rp)
@@ -121,23 +125,23 @@ raw_disconnect(rp)
 		m_freem(dtom(rp->rcb_faddr));
 	rp->rcb_faddr = 0;
 #endif
-	if (rp->rcb_socket->so_state & SS_NOFDREF)
-		raw_detach(rp);
 }
 
 #ifdef notdef
+#include <sys/mbuf.h>
+
 int
 raw_bind(so, nam)
-	struct socket *so;
+	register struct socket *so;
 	struct mbuf *nam;
 {
 	struct sockaddr *addr = mtod(nam, struct sockaddr *);
-	struct rawcb *rp;
+	register struct rawcb *rp;
 
 	if (ifnet == 0)
 		return (EADDRNOTAVAIL);
 	rp = sotorawcb(so);
-	nam = m_copym(nam, 0, M_COPYALL, M_WAITOK);
+	nam = m_copym(nam, 0, M_COPYALL, M_TRYWAIT);
 	rp->rcb_laddr = mtod(nam, struct sockaddr *);
 	return (0);
 }

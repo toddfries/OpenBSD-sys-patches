@@ -1,7 +1,4 @@
-/*	$OpenBSD: dir.h,v 1.10 2005/06/18 18:09:43 millert Exp $	*/
-/*	$NetBSD: dir.h,v 1.8 1996/03/09 19:42:41 scottr Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,11 +31,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)dir.h	8.4 (Berkeley) 8/10/94
+ *	@(#)dir.h	8.2 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/ufs/ufs/dir.h,v 1.12 2007/07/02 01:31:43 peter Exp $
  */
 
-#ifndef _DIR_H_
-#define	_DIR_H_
+#ifndef _UFS_UFS_DIR_H_
+#define	_UFS_UFS_DIR_H_
 
 /*
  * Theoretically, directories can be more than 2Gb in length, however, in
@@ -46,7 +44,7 @@
  * quantity to keep down the cost of doing lookup on a 32-bit machine.
  */
 #define	doff_t		int32_t
-#define	MAXDIRSIZE	(0x7fffffff)
+#define MAXDIRSIZE	(0x7fffffff)
 
 /*
  * A directory consists of some number of blocks of DIRBLKSIZ
@@ -95,6 +93,7 @@ struct	direct {
 #define	DT_REG		 8
 #define	DT_LNK		10
 #define	DT_SOCK		12
+#define	DT_WHT		14
 
 /*
  * Convert between stat structure types and directory types.
@@ -107,18 +106,18 @@ struct	direct {
  * the directory entry.  This requires the amount of space in struct direct
  * without the d_name field, plus enough space for the name with a terminating
  * null byte (dp->d_namlen+1), rounded up to a 4 byte boundary.
+ *
+ * 
  */
-#define DIRECTSIZ(namlen)						\
-	(((int)&((struct direct *)0)->d_name +				\
+#define	DIRECTSIZ(namlen)						\
+	(((uintptr_t)&((struct direct *)0)->d_name +			\
 	  ((namlen)+1)*sizeof(((struct direct *)0)->d_name[0]) + 3) & ~3)
 #if (BYTE_ORDER == LITTLE_ENDIAN)
 #define DIRSIZ(oldfmt, dp) \
-    ((oldfmt) ? \
-    ((sizeof(struct direct) - (MAXNAMLEN+1)) + (((dp)->d_type+1 + 3) &~ 3)) : \
-    ((sizeof(struct direct) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3)))
+    ((oldfmt) ? DIRECTSIZ((dp)->d_type) : DIRECTSIZ((dp)->d_namlen))
 #else
 #define DIRSIZ(oldfmt, dp) \
-    ((sizeof(struct direct) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3))
+    DIRECTSIZ((dp)->d_namlen)
 #endif
 #define OLDDIRFMT	1
 #define NEWDIRFMT	0

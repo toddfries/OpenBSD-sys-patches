@@ -1,7 +1,6 @@
-/*	$OpenBSD: tlphyreg.h,v 1.2 2002/05/04 11:30:06 fgsch Exp $	*/
 /*	$NetBSD: tlphyreg.h,v 1.1 1998/08/10 23:59:58 thorpej Exp $	*/
-
-/*
+ 
+/*-
  * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +27,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/mii/tlphyreg.h,v 1.3 2005/01/06 01:42:56 imp Exp $
  */
 
 #ifndef _DEV_MII_TLPHYREG_H_

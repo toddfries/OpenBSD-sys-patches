@@ -1,7 +1,7 @@
-/*	$OpenBSD: ip6protosw.h,v 1.7 2003/06/02 23:28:16 millert Exp $	*/
-/*	$KAME: ip6protosw.h,v 1.22 2001/02/08 18:02:08 itojun Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/ip6protosw.h,v 1.13 2005/01/07 02:30:34 imp Exp $	*/
+/*	$KAME: ip6protosw.h,v 1.25 2001/09/26 06:13:03 keiichi Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -45,7 +45,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -76,16 +76,17 @@ struct mbuf;
 struct sockaddr;
 struct socket;
 struct domain;
-struct proc;
+struct thread;
 struct ip6_hdr;
 struct icmp6_hdr;
 struct in6_addr;
+struct pr_usrreqs;
 
 /*
  * argument type for the last arg of pr_ctlinput().
  * should be consulted only with AF_INET6 family.
  *
- * IPv6 ICMP IPv6 [exthdrs] finalhdr paylaod
+ * IPv6 ICMP IPv6 [exthdrs] finalhdr payload
  * ^    ^    ^              ^
  * |    |    ip6c_ip6       ip6c_off
  * |    ip6c_icmp6
@@ -112,34 +113,41 @@ struct ip6ctlparam {
 };
 
 struct ip6protosw {
-	short 	pr_type;		/* socket type used for */
+	short	pr_type;		/* socket type used for */
 	struct	domain *pr_domain;	/* domain protocol a member of */
 	short	pr_protocol;		/* protocol number */
 	short	pr_flags;		/* see below */
 
 /* protocol-protocol hooks */
-					/* input to protocol (from below) */
-	int	(*pr_input)(struct mbuf **, int *, int);
-					/* output to protocol (from above) */
-	int	(*pr_output)(struct mbuf *, ...);
-					/* control input (from below) */
-	void	(*pr_ctlinput)(int, struct sockaddr *, void *);
-					/* control output (from above) */
-	int	(*pr_ctloutput)(int, struct socket *, int, int, struct mbuf **);
+	int	(*pr_input)		/* input to protocol (from below) */
+			__P((struct mbuf **, int *, int));
+	int	(*pr_output)		/* output to protocol (from above) */
+			__P((struct mbuf *, ...));
+	void	(*pr_ctlinput)		/* control input (from below) */
+			__P((int, struct sockaddr *, void *));
+	int	(*pr_ctloutput)		/* control output (from above) */
+			__P((struct socket *, struct sockopt *));
 
 /* user-protocol hook */
-					/* user request: see list below */
-	int	(*pr_usrreq)(struct socket *, int, struct mbuf *,
-		    struct mbuf *, struct mbuf *, struct proc *);
+	int	(*pr_usrreq)		/* user request: see list below */
+			__P((struct socket *, int, struct mbuf *,
+			     struct mbuf *, struct mbuf *, struct thread *));
 
 /* utility hooks */
-	void	(*pr_init)(void);	/* initialization hook */
+	void	(*pr_init)		/* initialization hook */
+			__P((void));
 
-	void	(*pr_fasttimo)(void);	/* fast timeout (200ms) */
-	void	(*pr_slowtimo)(void);	/* slow timeout (500ms) */
-	void	(*pr_drain)(void);	/* flush any excess space possible */
-					/* sysctl for protocol */
-	int	(*pr_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
+	void	(*pr_fasttimo)		/* fast timeout (200ms) */
+			__P((void));
+	void	(*pr_slowtimo)		/* slow timeout (500ms) */
+			__P((void));
+	void	(*pr_drain)		/* flush any excess space possible */
+			__P((void));
+	struct	pr_usrreqs *pr_usrreqs;	/* supersedes pr_usrreq() */
 };
+
+#ifdef _KERNEL
+extern struct ip6protosw inet6sw[];
+#endif
 
 #endif /* !_NETINET6_IP6PROTOSW_H_ */

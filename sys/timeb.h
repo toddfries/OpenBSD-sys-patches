@@ -1,6 +1,3 @@
-/*	$OpenBSD: timeb.h,v 1.5 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: timeb.h,v 1.10 1995/06/05 19:39:35 pk Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,6 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)timeb.h	8.2 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/sys/timeb.h,v 1.9 2004/04/07 04:19:50 imp Exp $
  */
 
 #ifndef _SYS_TIMEB_H_
@@ -44,7 +42,7 @@
 struct timeb {
 	time_t	time;			/* seconds since the Epoch */
 	unsigned short millitm;		/* + milliseconds since the Epoch */
-	short	timezone;		/* minutes west of UTC */
+	short	timezone;		/* minutes west of CUT */
 	short	dstflag;		/* DST == non-zero */
 };
 
@@ -52,9 +50,8 @@ struct timeb {
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int ftime(struct timeb *tp);
+int ftime(struct timeb *);
 __END_DECLS
 #endif /* _KERNEL */
 
-
-#endif /* !_SYS_TIMEB_H_ */
+#endif

@@ -1,5 +1,5 @@
-/*	$OpenBSD: uftdireg.h,v 1.11 2006/06/16 06:28:25 deraadt Exp $ 	*/
 /*	$NetBSD: uftdireg.h,v 1.6 2002/07/11 21:14:28 augustss Exp $ */
+/*	$FreeBSD: src/sys/dev/usb/uftdireg.h,v 1.3 2008/01/25 02:41:44 emaste Exp $	*/
 
 /*
  * Definitions for the FTDI USB Single Port Serial Converter -
@@ -8,8 +8,8 @@
  * The device is based on the FTDI FT8U100AX chip. It has a DB25 on one side,
  * USB on the other.
  *
- * Thanks to FTDI (http://www.ftdi.co.uk) for so kindly providing details
- * of the protocol required to talk to the device and ongoing assistance
+ * Thanx to FTDI (http://www.ftdi.co.uk) for so kindly providing details
+ * of the protocol required to talk to the device and ongoing assistence
  * during development.
  *
  * Bill Ryder - bryder@sgi.com of Silicon Graphics, Inc. is the original
@@ -91,11 +91,11 @@ enum {
 	ftdi_sio_b115200 = 9
 };
 
-#define FTDI_8U232AM_FREQ 3000000
+#define	FTDI_8U232AM_FREQ 3000000
 
 /* Bounds for normal divisors as 4-bit fixed precision ints. */
-#define FTDI_8U232AM_MIN_DIV 0x20
-#define FTDI_8U232AM_MAX_DIV 0x3fff8
+#define	FTDI_8U232AM_MIN_DIV 0x20
+#define	FTDI_8U232AM_MAX_DIV 0x3fff8
 
 /*
  * BmRequestType:  0100 0000B
@@ -175,7 +175,7 @@ enum {
  *   BmRequestType:  0100 0000b
  *   bRequest:       FTDI_SIO_SET_FLOW_CTRL
  *   wValue:         Xoff/Xon
- *   wIndex:         Protocol/Port - hIndex is protocol / lIndex is port
+ *   wIndex:         Protocol/Port - hIndex is protocl / lIndex is port
  *   wLength:        0
  *   Data:           None
  *

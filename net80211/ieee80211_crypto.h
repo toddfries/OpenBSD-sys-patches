@@ -1,9 +1,6 @@
-/*	$OpenBSD: ieee80211_crypto.h,v 1.13 2008/04/21 19:37:18 damien Exp $	*/
-/*	$NetBSD: ieee80211_crypto.h,v 1.2 2003/09/14 01:14:55 dyoung Exp $	*/
-
 /*-
  * Copyright (c) 2001 Atsushi Onoe
- * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
+ * Copyright (c) 2002-2007 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -14,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_crypto.h,v 1.2 2003/06/27 05:13:52 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_crypto.h,v 1.13 2007/06/11 03:36:54 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_CRYPTO_H_
 #define _NET80211_IEEE80211_CRYPTO_H_
@@ -36,118 +31,194 @@
 /*
  * 802.11 protocol crypto-related definitions.
  */
-
-/*
- * 802.11i ciphers.
- */
-enum ieee80211_cipher {
-	IEEE80211_CIPHER_NONE     = 0x00000000,
-	IEEE80211_CIPHER_USEGROUP = 0x00000001,
-	IEEE80211_CIPHER_WEP40    = 0x00000002,
-	IEEE80211_CIPHER_TKIP     = 0x00000004,
-	IEEE80211_CIPHER_CCMP     = 0x00000008,
-	IEEE80211_CIPHER_WEP104   = 0x00000010
-};
-
-/*
- * 802.11i Authentication and Key Management Protocols.
- */
-enum ieee80211_akm {
-	IEEE80211_AKM_NONE	= 0x00000000,
-	IEEE80211_AKM_IEEE8021X	= 0x00000001,
-	IEEE80211_AKM_PSK	= 0x00000002
-};
-
 #define	IEEE80211_KEYBUF_SIZE	16
+#define	IEEE80211_MICBUF_SIZE	(8+8)	/* space for both tx+rx keys */
 
-#define IEEE80211_TKIP_HDRLEN	8
-#define IEEE80211_TKIP_MICLEN	8
-#define IEEE80211_TKIP_ICVLEN	4
-#define IEEE80211_CCMP_HDRLEN	8
-#define IEEE80211_CCMP_MICLEN	8
+/*
+ * Old WEP-style key.  Deprecated.
+ */
+struct ieee80211_wepkey {
+	u_int		wk_len;		/* key length in bytes */
+	uint8_t		wk_key[IEEE80211_KEYBUF_SIZE];
+};
 
-#define IEEE80211_PMK_LEN	32
+struct ieee80211_cipher;
+
+/*
+ * Crypto key state.  There is sufficient room for all supported
+ * ciphers (see below).  The underlying ciphers are handled
+ * separately through loadable cipher modules that register with
+ * the generic crypto support.  A key has a reference to an instance
+ * of the cipher; any per-key state is hung off wk_private by the
+ * cipher when it is attached.  Ciphers are automatically called
+ * to detach and cleanup any such state when the key is deleted.
+ *
+ * The generic crypto support handles encap/decap of cipher-related
+ * frame contents for both hardware- and software-based implementations.
+ * A key requiring software crypto support is automatically flagged and
+ * the cipher is expected to honor this and do the necessary work.
+ * Ciphers such as TKIP may also support mixed hardware/software
+ * encrypt/decrypt and MIC processing.
+ */
+typedef uint16_t ieee80211_keyix;	/* h/w key index */
 
 struct ieee80211_key {
-	u_int8_t		k_id;		/* identifier (0-3) */
-	enum ieee80211_cipher	k_cipher;
-	u_int			k_flags;
-#define IEEE80211_KEY_GROUP	0x00000001	/* group key */
-#define IEEE80211_KEY_TX	0x00000002	/* Tx+Rx */
-
-	u_int			k_len;
-	u_int64_t		k_rsc[IEEE80211_NUM_TID];
-	u_int64_t		k_tsc;
-	u_int8_t		k_key[32];
-	void			*k_priv;
+	uint8_t		wk_keylen;	/* key length in bytes */
+	uint8_t		wk_pad;
+	uint16_t	wk_flags;
+#define	IEEE80211_KEY_XMIT	0x01	/* key used for xmit */
+#define	IEEE80211_KEY_RECV	0x02	/* key used for recv */
+#define	IEEE80211_KEY_GROUP	0x04	/* key used for WPA group operation */
+#define	IEEE80211_KEY_SWCRYPT	0x10	/* host-based encrypt/decrypt */
+#define	IEEE80211_KEY_SWMIC	0x20	/* host-based enmic/demic */
+	ieee80211_keyix	wk_keyix;	/* h/w key index */
+	ieee80211_keyix	wk_rxkeyix;	/* optional h/w rx key index */
+	uint8_t		wk_key[IEEE80211_KEYBUF_SIZE+IEEE80211_MICBUF_SIZE];
+#define	wk_txmic	wk_key+IEEE80211_KEYBUF_SIZE+0	/* XXX can't () right */
+#define	wk_rxmic	wk_key+IEEE80211_KEYBUF_SIZE+8	/* XXX can't () right */
+	uint64_t	wk_keyrsc;	/* key receive sequence counter */
+	uint64_t	wk_keytsc;	/* key transmit sequence counter */
+	const struct ieee80211_cipher *wk_cipher;
+	void		*wk_private;	/* private cipher state */
 };
+#define	IEEE80211_KEY_COMMON 		/* common flags passed in by apps */\
+	(IEEE80211_KEY_XMIT | IEEE80211_KEY_RECV | IEEE80211_KEY_GROUP)
 
-/* forward references */
+/*
+ * NB: these values are ordered carefully; there are lots of
+ * of implications in any reordering.  In particular beware
+ * that 4 is not used to avoid conflicting with IEEE80211_F_PRIVACY.
+ */
+#define	IEEE80211_CIPHER_WEP		0
+#define	IEEE80211_CIPHER_TKIP		1
+#define	IEEE80211_CIPHER_AES_OCB	2
+#define	IEEE80211_CIPHER_AES_CCM	3
+#define	IEEE80211_CIPHER_CKIP		5
+#define	IEEE80211_CIPHER_NONE		6	/* pseudo value */
+
+#define	IEEE80211_CIPHER_MAX		(IEEE80211_CIPHER_NONE+1)
+
+#define	IEEE80211_KEYIX_NONE	((ieee80211_keyix) -1)
+
+#if defined(__KERNEL__) || defined(_KERNEL)
+
 struct ieee80211com;
 struct ieee80211_node;
+struct mbuf;
 
-extern	void ieee80211_crypto_attach(struct ifnet *);
-extern	void ieee80211_crypto_detach(struct ifnet *);
+/*
+ * Crypto state kept in each ieee80211com.  Some of this
+ * can/should be shared when virtual AP's are supported.
+ *
+ * XXX save reference to ieee80211com to properly encapsulate state.
+ * XXX split out crypto capabilities from ic_caps
+ */
+struct ieee80211_crypto_state {
+	struct ieee80211_key	cs_nw_keys[IEEE80211_WEP_NKID];
+	ieee80211_keyix		cs_def_txkey;	/* default/group tx key index */
+	uint16_t		cs_max_keyix;	/* max h/w key index */
 
-extern	const u_int8_t *ieee80211_get_pmk(struct ieee80211com *,
-	    struct ieee80211_node *, const u_int8_t *);
+	int			(*cs_key_alloc)(struct ieee80211com *,
+					const struct ieee80211_key *,
+					ieee80211_keyix *, ieee80211_keyix *);
+	int			(*cs_key_delete)(struct ieee80211com *, 
+					const struct ieee80211_key *);
+	int			(*cs_key_set)(struct ieee80211com *,
+					const struct ieee80211_key *,
+					const uint8_t mac[IEEE80211_ADDR_LEN]);
+	void			(*cs_key_update_begin)(struct ieee80211com *);
+	void			(*cs_key_update_end)(struct ieee80211com *);
+};
 
-extern	struct ieee80211_key *ieee80211_get_txkey(struct ieee80211com *,
-	    const struct ieee80211_frame *, struct ieee80211_node *);
-extern	struct mbuf *ieee80211_encrypt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_key *);
-extern	struct mbuf *ieee80211_decrypt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *);
+void	ieee80211_crypto_attach(struct ieee80211com *);
+void	ieee80211_crypto_detach(struct ieee80211com *);
+int	ieee80211_crypto_newkey(struct ieee80211com *,
+		int cipher, int flags, struct ieee80211_key *);
+int	ieee80211_crypto_delkey(struct ieee80211com *,
+		struct ieee80211_key *);
+int	ieee80211_crypto_setkey(struct ieee80211com *,
+		struct ieee80211_key *, const uint8_t macaddr[IEEE80211_ADDR_LEN]);
+void	ieee80211_crypto_delglobalkeys(struct ieee80211com *);
 
-int ieee80211_set_key(struct ieee80211com *, struct ieee80211_node *,
-    struct ieee80211_key *);
-void ieee80211_delete_key(struct ieee80211com *, struct ieee80211_node *,
-    struct ieee80211_key *);
+/*
+ * Template for a supported cipher.  Ciphers register with the
+ * crypto code and are typically loaded as separate modules
+ * (the null cipher is always present).
+ * XXX may need refcnts
+ */
+struct ieee80211_cipher {
+	const char *ic_name;		/* printable name */
+	u_int	ic_cipher;		/* IEEE80211_CIPHER_* */
+	u_int	ic_header;		/* size of privacy header (bytes) */
+	u_int	ic_trailer;		/* size of privacy trailer (bytes) */
+	u_int	ic_miclen;		/* size of mic trailer (bytes) */
+	void*	(*ic_attach)(struct ieee80211com *, struct ieee80211_key *);
+	void	(*ic_detach)(struct ieee80211_key *);
+	int	(*ic_setkey)(struct ieee80211_key *);
+	int	(*ic_encap)(struct ieee80211_key *, struct mbuf *,
+			uint8_t keyid);
+	int	(*ic_decap)(struct ieee80211_key *, struct mbuf *, int);
+	int	(*ic_enmic)(struct ieee80211_key *, struct mbuf *, int);
+	int	(*ic_demic)(struct ieee80211_key *, struct mbuf *, int);
+};
+extern	const struct ieee80211_cipher ieee80211_cipher_none;
 
-int ieee80211_wep_set_key(struct ieee80211com *, struct ieee80211_key *);
-void ieee80211_wep_delete_key(struct ieee80211com *, struct ieee80211_key *);
-struct mbuf *
-ieee80211_wep_encrypt(struct ieee80211com *, struct mbuf *,
-    struct ieee80211_key *);
-struct mbuf *
-ieee80211_wep_decrypt(struct ieee80211com *, struct mbuf *,
-    struct ieee80211_key *);
+#define	IEEE80211_KEY_UNDEFINED(k) \
+	((k)->wk_cipher == &ieee80211_cipher_none)
 
-int ieee80211_tkip_set_key(struct ieee80211com *, struct ieee80211_key *);
-void ieee80211_tkip_delete_key(struct ieee80211com *, struct ieee80211_key *);
-struct mbuf *ieee80211_tkip_encrypt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_key *);
-struct mbuf *ieee80211_tkip_decrypt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_key *);
+void	ieee80211_crypto_register(const struct ieee80211_cipher *);
+void	ieee80211_crypto_unregister(const struct ieee80211_cipher *);
+int	ieee80211_crypto_available(u_int cipher);
 
-int ieee80211_ccmp_set_key(struct ieee80211com *, struct ieee80211_key *);
-void ieee80211_ccmp_delete_key(struct ieee80211com *, struct ieee80211_key *);
-struct mbuf *ieee80211_ccmp_encrypt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_key *);
-struct mbuf *ieee80211_ccmp_decrypt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_key *);
+struct ieee80211_key *ieee80211_crypto_encap(struct ieee80211com *,
+		struct ieee80211_node *, struct mbuf *);
+struct ieee80211_key *ieee80211_crypto_decap(struct ieee80211com *,
+		struct ieee80211_node *, struct mbuf *, int);
 
-extern	void ieee80211_tkip_mic(struct mbuf *, int, const u_int8_t *,
-	    u_int8_t[IEEE80211_TKIP_MICLEN]);
-extern	void ieee80211_michael_mic_failure(struct ieee80211com *, u_int64_t);
+/*
+ * Check and remove any MIC.
+ */
+static __inline int
+ieee80211_crypto_demic(struct ieee80211com *ic, struct ieee80211_key *k,
+	struct mbuf *m, int force)
+{
+	const struct ieee80211_cipher *cip = k->wk_cipher;
+	return (cip->ic_miclen > 0 ? cip->ic_demic(k, m, force) : 1);
+}
 
-extern	void ieee80211_eapol_key_mic(struct ieee80211_eapol_key *,
-		const u_int8_t *);
-extern	int ieee80211_eapol_key_check_mic(struct ieee80211_eapol_key *,
-		const u_int8_t *);
-extern	void ieee80211_eapol_key_encrypt(struct ieee80211com *,
-		struct ieee80211_eapol_key *, const u_int8_t *);
-extern	int ieee80211_eapol_key_decrypt(struct ieee80211_eapol_key *,
-		const u_int8_t *);
+/*
+ * Add any MIC.
+ */
+static __inline int
+ieee80211_crypto_enmic(struct ieee80211com *ic,
+	struct ieee80211_key *k, struct mbuf *m, int force)
+{
+	const struct ieee80211_cipher *cip = k->wk_cipher;
+	return (cip->ic_miclen > 0 ? cip->ic_enmic(k, m, force) : 1);
+}
 
-extern	void ieee80211_derive_ptk(const u_int8_t *, size_t, const u_int8_t *,
-	    const u_int8_t *, const u_int8_t *, const u_int8_t *, u_int8_t *,
-	    size_t);
-extern	int ieee80211_cipher_keylen(enum ieee80211_cipher);
-extern	void ieee80211_map_ptk(const struct ieee80211_ptk *,
-	    enum ieee80211_cipher, u_int64_t, struct ieee80211_key *);
-extern	void ieee80211_map_gtk(const u_int8_t *, enum ieee80211_cipher, int,
-	    int, u_int64_t, struct ieee80211_key *);
+/* 
+ * Reset key state to an unused state.  The crypto
+ * key allocation mechanism insures other state (e.g.
+ * key data) is properly setup before a key is used.
+ */
+static __inline void
+ieee80211_crypto_resetkey(struct ieee80211com *ic,
+	struct ieee80211_key *k, ieee80211_keyix ix)
+{
+	k->wk_cipher = &ieee80211_cipher_none;;
+	k->wk_private = k->wk_cipher->ic_attach(ic, k);
+	k->wk_keyix = k->wk_rxkeyix = ix;
+	k->wk_flags = IEEE80211_KEY_XMIT | IEEE80211_KEY_RECV;
+}
 
-
+/*
+ * Crypt-related notification methods.
+ */
+void	ieee80211_notify_replay_failure(struct ieee80211com *,
+		const struct ieee80211_frame *, const struct ieee80211_key *,
+		u_int64_t rsc);
+void	ieee80211_notify_michael_failure(struct ieee80211com *,
+		const struct ieee80211_frame *, u_int keyix);
+#endif /* defined(__KERNEL__) || defined(_KERNEL) */
 #endif /* _NET80211_IEEE80211_CRYPTO_H_ */

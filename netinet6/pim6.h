@@ -1,7 +1,7 @@
-/*	$OpenBSD: pim6.h,v 1.3 2005/12/10 01:30:14 deraadt Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/pim6.h,v 1.3 2005/01/07 02:30:35 imp Exp $	*/
 /*	$KAME: pim6.h,v 1.3 2000/03/25 07:23:58 sumikawa Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1998 WIDE Project.
  * All rights reserved.
  *
@@ -43,14 +43,14 @@
 #define PIM_VERSION	2
 struct pim {
 #if defined(BYTE_ORDER) && (BYTE_ORDER == LITTLE_ENDIAN)
-	u_int	pim_type:4, /* the PIM message type, currently they are:
+	u_char	pim_type:4, /* the PIM message type, currently they are:
 			     * Hello, Register, Register-Stop, Join/Prune,
 			     * Bootstrap, Assert, Graft (PIM-DM only),
 			     * Graft-Ack (PIM-DM only), C-RP-Adv
 			     */
 		pim_ver:4;  /* PIM version number; 2 for PIMv2 */
 #else
-	u_int	pim_ver:4,	/* PIM version */
+	u_char	pim_ver:4,	/* PIM version */
 		pim_type:4;	/* PIM type    */
 #endif
 	u_char  pim_rsv;	/* Reserved */

@@ -1,51 +1,52 @@
-/*	$OpenBSD: db_expr.c,v 1.8 2006/03/13 06:23:20 jsg Exp $	*/
-/*	$NetBSD: db_expr.c,v 1.5 1996/02/05 01:56:58 christos Exp $	*/
-
-/* 
+/*-
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
  *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
+ */
+/*
  *	Author: David B. Golub, Carnegie Mellon University
  *	Date:	7/90
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ddb/db_expr.c,v 1.17 2005/01/06 01:34:41 imp Exp $");
+
 #include <sys/param.h>
-#include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <machine/db_machdep.h>
-
+#include <ddb/ddb.h>
 #include <ddb/db_lex.h>
 #include <ddb/db_access.h>
 #include <ddb/db_command.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_extern.h>
-#include <ddb/db_variables.h>
 
-boolean_t
-db_term(db_expr_t *valuep)
+static boolean_t	db_add_expr(db_expr_t *valuep);
+static boolean_t	db_mult_expr(db_expr_t *valuep);
+static boolean_t	db_shift_expr(db_expr_t *valuep);
+static boolean_t	db_term(db_expr_t *valuep);
+static boolean_t	db_unary(db_expr_t *valuep);
+
+static boolean_t
+db_term(valuep)
+	db_expr_t *valuep;
 {
 	int	t;
 
@@ -58,7 +59,7 @@ db_term(db_expr_t *valuep)
 	    return (TRUE);
 	}
 	if (t == tNUMBER) {
-	    *valuep = db_tok_number;
+	    *valuep = (db_expr_t)db_tok_number;
 	    return (TRUE);
 	}
 	if (t == tDOT) {
@@ -98,8 +99,9 @@ db_term(db_expr_t *valuep)
 	return (FALSE);
 }
 
-boolean_t
-db_unary(db_expr_t *valuep)
+static boolean_t
+db_unary(valuep)
+	db_expr_t *valuep;
 {
 	int	t;
 
@@ -118,15 +120,16 @@ db_unary(db_expr_t *valuep)
 		db_error("Syntax error\n");
 		/*NOTREACHED*/
 	    }
-	    *valuep = db_get_value((db_addr_t)*valuep, sizeof(int), FALSE);
+	    *valuep = db_get_value((db_addr_t)*valuep, sizeof(void *), FALSE);
 	    return (TRUE);
 	}
 	db_unread_token(t);
 	return (db_term(valuep));
 }
 
-boolean_t
-db_mult_expr(db_expr_t *valuep)
+static boolean_t
+db_mult_expr(valuep)
+	db_expr_t *valuep;
 {
 	db_expr_t	lhs, rhs;
 	int		t;
@@ -161,8 +164,9 @@ db_mult_expr(db_expr_t *valuep)
 	return (TRUE);
 }
 
-boolean_t
-db_add_expr(db_expr_t *valuep)
+static boolean_t
+db_add_expr(valuep)
+	db_expr_t *valuep;
 {
 	db_expr_t	lhs, rhs;
 	int		t;
@@ -187,8 +191,9 @@ db_add_expr(db_expr_t *valuep)
 	return (TRUE);
 }
 
-boolean_t
-db_shift_expr(db_expr_t *valuep)
+static boolean_t
+db_shift_expr(valuep)
+	db_expr_t *valuep;
 {
 	db_expr_t	lhs, rhs;
 	int		t;
@@ -220,7 +225,8 @@ db_shift_expr(db_expr_t *valuep)
 }
 
 int
-db_expression(db_expr_t *valuep)
+db_expression(valuep)
+	db_expr_t *valuep;
 {
 	return (db_shift_expr(valuep));
 }

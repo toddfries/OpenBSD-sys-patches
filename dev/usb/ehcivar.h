@@ -1,7 +1,7 @@
-/*	$OpenBSD: ehcivar.h,v 1.13 2007/06/12 16:26:36 mbalmer Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/ehcivar.h,v 1.17 2007/06/14 16:23:31 imp Exp $	*/
 
-/*
+/*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -53,8 +53,9 @@ typedef struct ehci_soft_qh {
 	struct ehci_soft_qh *next;
 	struct ehci_soft_qh *prev;
 	struct ehci_soft_qtd *sqtd;
+	struct ehci_soft_qtd *inactivesqtd;
 	ehci_physaddr_t physaddr;
-	int islot;
+	int islot;		/* Interrupt list slot. */
 } ehci_soft_qh_t;
 #define EHCI_SQH_SIZE ((sizeof (struct ehci_soft_qh) + EHCI_QH_ALIGN - 1) / EHCI_QH_ALIGN * EHCI_QH_ALIGN)
 #define EHCI_SQH_CHUNK (EHCI_PAGE_SIZE / EHCI_SQH_SIZE)
@@ -75,42 +76,60 @@ struct ehci_xfer {
 
 #define EXFER(xfer) ((struct ehci_xfer *)(xfer))
 
-/* Information about an entry in the interrupt list. */
+/*
+ * Information about an entry in the interrupt list.
+ */
 struct ehci_soft_islot {
-	ehci_soft_qh_t *sqh;	/* Queue Head. */
+	ehci_soft_qh_t *sqh;		/* Queue Head. */
 };
 
 #define EHCI_FRAMELIST_MAXCOUNT	1024
-#define EHCI_IPOLLRATES		8 /* Poll rates (1ms, 2, 4, 8 .. 128) */
+#define EHCI_IPOLLRATES		8	/* Poll rates (1ms, 2, 4, 8 ... 128) */
 #define EHCI_INTRQHS		((1 << EHCI_IPOLLRATES) - 1)
-#define EHCI_IQHIDX(lev, pos) \
-	((((pos) & ((1 << (lev)) - 1)) | (1 << (lev))) - 1)
+#define EHCI_MAX_POLLRATE	(1 << (EHCI_IPOLLRATES - 1))
+#define EHCI_IQHIDX(lev, pos)	\
+    ((((pos) & ((1 << (lev)) - 1)) | (1 << (lev))) - 1)
 #define EHCI_ILEV_IVAL(lev)	(1 << (lev))
-
 
 #define EHCI_HASH_SIZE 128
 #define EHCI_COMPANION_MAX 8
 
+#define EHCI_SCFLG_DONEINIT	0x0001	/* ehci_init() has been called. */
+#define EHCI_SCFLG_LOSTINTRBUG	0x0002	/* workaround for VIA / ATI chipsets */
+
 typedef struct ehci_softc {
 	struct usbd_bus sc_bus;		/* base device */
+	int sc_flags;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	bus_size_t sc_size;
-	u_int sc_offs;			/* offset to operational regs */
-	int sc_flags;			/* misc flags */
-#define EHCIF_DROPPED_INTR_WORKAROUND	0x01
+#if defined(__FreeBSD__)
+	void *ih;
 
-	char sc_vendor[16];		/* vendor string for root hub */
+	struct resource *io_res;
+	struct resource *irq_res;
+#endif
+	u_int sc_offs;			/* offset to operational regs */
+
+	char sc_vendor[32];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
 	u_int32_t sc_cmd;		/* shadow of cmd reg during suspend */
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
+#endif
+
+	u_int sc_ncomp;
+	u_int sc_npcomp;
+	struct usbd_bus *sc_comps[EHCI_COMPANION_MAX];
 
 	usb_dma_t sc_fldma;
 	ehci_link_t *sc_flist;
 	u_int sc_flsize;
+#ifndef __FreeBSD__
 	u_int sc_rand;			/* XXX need proper intr scheduling */
+#endif
 
 	struct ehci_soft_islot sc_islots[EHCI_INTRQHS];
 
@@ -124,21 +143,24 @@ typedef struct ehci_softc {
 	u_int8_t sc_conf;		/* device configuration */
 	usbd_xfer_handle sc_intrxfer;
 	char sc_isreset;
+#ifdef USB_USE_SOFTINTR
 	char sc_softwake;
+#endif /* USB_USE_SOFTINTR */
 
 	u_int32_t sc_eintrs;
 	ehci_soft_qh_t *sc_async_head;
 
-	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
+	STAILQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
-	struct rwlock sc_doorbell_lock;
+	struct lock sc_doorbell_lock;
 
-	struct timeout sc_tmo_pcd;
-	struct timeout sc_tmo_intrlist;
-
-	struct device *sc_child;		/* /dev/usb# device */
+	struct callout sc_tmo_pcd;
+	struct callout sc_tmo_intrlist;
 
 	char sc_dying;
+#if defined(__NetBSD__)
+	struct usb_dma_reserve sc_dma_reserve;
+#endif
 } ehci_softc_t;
 
 #define EREAD1(sc, a) bus_space_read_1((sc)->iot, (sc)->ioh, (a))
@@ -157,5 +179,11 @@ typedef struct ehci_softc {
 usbd_status	ehci_init(ehci_softc_t *);
 int		ehci_intr(void *);
 int		ehci_detach(ehci_softc_t *, int);
-int		ehci_activate(struct device *, enum devact);
-void		ehci_shutdown(void *);
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+int		ehci_activate(device_t, enum devact);
+#endif
+void		ehci_power(int state, void *priv);
+void		ehci_shutdown(void *v);
+
+#define MS_TO_TICKS(ms) ((ms) * hz / 1000)
+

@@ -1,8 +1,8 @@
-/*	$OpenBSD: ip6_id.c,v 1.6 2008/04/18 06:42:20 djm Exp $	*/
-/*	$NetBSD: ip6_id.c,v 1.7 2003/09/13 21:32:59 itojun Exp $	*/
-/*	$KAME: ip6_id.c,v 1.8 2003/09/06 13:41:06 itojun Exp $	*/
+/*	$KAME: ip6_id.c,v 1.13 2003/09/16 09:11:19 itojun Exp $	*/
+/*	$OpenBSD: ip_id.c,v 1.6 2002/03/15 18:19:52 millert Exp $	*/
+/* $FreeBSD: src/sys/netinet6/ip6_id.c,v 1.8 2007/07/05 16:23:47 delphij Exp $ */
 
-/*
+/*-
  * Copyright (C) 2003 WIDE Project.
  * All rights reserved.
  *
@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  */
 
-/*
+/*-
  * Copyright 1998 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
@@ -48,6 +48,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Niels Provos.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -85,13 +90,17 @@
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
+#include <sys/libkern.h>
 
 #include <net/if.h>
+#include <net/route.h>
 #include <netinet/in.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 
-#include <dev/rndvar.h>
+#ifndef INT32_MAX
+#define INT32_MAX	0x7fffffffU
+#endif
 
 struct randomtab {
 	const int	ru_bits; /* resulting bits */
@@ -143,7 +152,6 @@ static u_int32_t randomid(struct randomtab *);
  * Do a fast modular exponation, returned value will be in the range
  * of 0 - (mod-1)
  */
-
 static u_int32_t
 pmod(u_int32_t gen, u_int32_t expo, u_int32_t mod)
 {
@@ -163,7 +171,7 @@ pmod(u_int32_t gen, u_int32_t expo, u_int32_t mod)
 }
 
 /*
- * Initializes the seed and chooses a suitable generator. Also toggles
+ * Initalizes the seed and chooses a suitable generator. Also toggles
  * the msb flag. The msb flag is used to generate two distinct
  * cycles of random numbers and thus avoiding reuse of ids.
  *
@@ -176,7 +184,7 @@ initid(struct randomtab *p)
 	u_int32_t j, i;
 	int noprime = 1;
 
-	p->ru_x = arc4random_uniform(p->ru_m);
+	p->ru_x = arc4random() % p->ru_m;
 
 	/* (bits - 1) bits of random seed */
 	p->ru_seed = arc4random() & (~0U >> (32 - p->ru_bits + 1));
@@ -189,7 +197,7 @@ initid(struct randomtab *p)
 	while (p->ru_b % 3 == 0)
 		p->ru_b += 2;
 
-	j = arc4random_uniform(p->ru_n);
+	j = arc4random() % p->ru_n;
 
 	/*
 	 * Do a fast gcd(j, RU_N - 1), so we can find a j with
@@ -218,12 +226,15 @@ static u_int32_t
 randomid(struct randomtab *p)
 {
 	int i, n;
+	u_int32_t tmp;
 
 	if (p->ru_counter >= p->ru_max || time_second > p->ru_reseed)
 		initid(p);
 
+	tmp = arc4random();
+
 	/* Skip a random number of ids */
-	n = arc4random() & 0x3;
+	n = tmp & 0x3; tmp = tmp >> 2;
 	if (p->ru_counter + n >= p->ru_max)
 		initid(p);
 
@@ -234,7 +245,7 @@ randomid(struct randomtab *p)
 
 	p->ru_counter += i;
 
-	return (p->ru_seed ^ pmod(p->ru_g, p->ru_seed2 + p->ru_x, p->ru_n)) |
+	return (p->ru_seed ^ pmod(p->ru_g, p->ru_seed2 ^ p->ru_x, p->ru_n)) |
 	    p->ru_msb;
 }
 

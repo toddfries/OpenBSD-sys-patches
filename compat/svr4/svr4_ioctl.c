@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_ioctl.c,v 1.12 2002/11/06 09:57:18 niklas Exp $	 */
-/*	$NetBSD: svr4_ioctl.c,v 1.16 1996/04/11 12:54:41 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -28,28 +26,25 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_ioctl.c,v 1.24 2005/09/28 07:03:02 rwatson Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/systm.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/ioctl.h>
-#include <sys/termios.h>
-#include <sys/tty.h>
+#include <sys/fcntl.h>
 #include <sys/socket.h>
-#include <sys/mount.h>
-#include <net/if.h>
-#include <sys/malloc.h>
+#include <sys/socketvar.h>
+#include <sys/systm.h>
 
-#include <sys/syscallargs.h>
-
+#include <compat/svr4/svr4.h>
 #include <compat/svr4/svr4_types.h>
 #include <compat/svr4/svr4_util.h>
 #include <compat/svr4/svr4_signal.h>
-#include <compat/svr4/svr4_syscallargs.h>
+#include <compat/svr4/svr4_proto.h>
 #include <compat/svr4/svr4_stropts.h>
 #include <compat/svr4/svr4_ioctl.h>
-#include <compat/svr4/svr4_jioctl.h>
 #include <compat/svr4/svr4_termios.h>
 #include <compat/svr4/svr4_ttold.h>
 #include <compat/svr4/svr4_filio.h>
@@ -84,76 +79,92 @@ svr4_decode_cmd(cmd, dir, c, num, argsiz)
 #endif
 
 int
-svr4_sys_ioctl(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_ioctl(td, uap)
+	register struct thread *td;
+	struct svr4_sys_ioctl_args *uap;
 {
-	struct svr4_sys_ioctl_args *uap = v;
+	int             *retval;
 	struct file	*fp;
-	struct filedesc	*fdp;
 	u_long		 cmd;
-	int (*fun)(struct file *, struct proc *, register_t *,
+	int (*fun)(struct file *, struct thread *, register_t *,
 			int, u_long, caddr_t);
-	int error = 0;
+	int error;
 #ifdef DEBUG_SVR4
 	char		 dir[4];
 	char		 c;
 	int		 num;
 	int		 argsiz;
 
-	svr4_decode_cmd(SCARG(uap, com), dir, &c, &num, &argsiz);
+	svr4_decode_cmd(uap->com, dir, &c, &num, &argsiz);
 
-	uprintf("svr4_ioctl(%d, _IO%s(%c, %d, %d), %p);\n", SCARG(uap, fd),
-	    dir, c, num, argsiz, SCARG(uap, data));
+	DPRINTF(("svr4_ioctl[%lx](%d, _IO%s(%c, %d, %d), %p);\n", uap->com, uap->fd,
+	    dir, c, num, argsiz, uap->data));
 #endif
-	fdp = p->p_fd;
-	cmd = SCARG(uap, com);
+	retval = td->td_retval;
+	cmd = uap->com;
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
-		return EBADF;
+	if ((error = fget(td, uap->fd, &fp)) != 0)
+		return (error);
 
-	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
+	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
+		fdrop(fp, td);
 		return EBADF;
+	}
+
+#if defined(DEBUG_SVR4)
+	if (fp->f_type == DTYPE_SOCKET) {
+	        struct socket *so = fp->f_data;
+		DPRINTF(("<<< IN: so_state = 0x%x\n", so->so_state));
+	}
+#endif
 
 	switch (cmd & 0xff00) {
+#ifndef BURN_BRIDGES
 	case SVR4_tIOC:
+	        DPRINTF(("ttold\n"));
 		fun = svr4_ttold_ioctl;
 		break;
+#endif
 
 	case SVR4_TIOC:
+	        DPRINTF(("term\n"));
 		fun = svr4_term_ioctl;
 		break;
 
 	case SVR4_STR:
+	        DPRINTF(("stream\n"));
 		fun = svr4_stream_ioctl;
 		break;
 
 	case SVR4_FIOC:
+                DPRINTF(("file\n"));
 		fun = svr4_fil_ioctl;
 		break;
 
 	case SVR4_SIOC:
+	        DPRINTF(("socket\n"));
 		fun = svr4_sock_ioctl;
-		break;
-
-	case SVR4_jIOC:
-		fun = svr4_jerq_ioctl;
 		break;
 
 	case SVR4_XIOC:
 		/* We do not support those */
-		error = EINVAL;
-		goto out;
+		fdrop(fp, td);
+		return EINVAL;
 
 	default:
+		fdrop(fp, td);
 		DPRINTF(("Unimplemented ioctl %lx\n", cmd));
-		error = 0;	/* XXX: really ENOSYS */
-		goto out;
+		return 0;	/* XXX: really ENOSYS */
 	}
-	FREF(fp);
-	error = (*fun)(fp, p, retval, SCARG(uap, fd), cmd, SCARG(uap, data));
-	FRELE(fp);
-out:
+#if defined(DEBUG_SVR4)
+	if (fp->f_type == DTYPE_SOCKET) {
+	        struct socket *so;
+
+	        so = fp->f_data;
+		DPRINTF((">>> OUT: so_state = 0x%x\n", so->so_state));
+	}
+#endif
+	error = (*fun)(fp, td, retval, uap->fd, cmd, uap->data);
+	fdrop(fp, td);
 	return (error);
 }

@@ -1,23 +1,17 @@
-/*	$OpenBSD: linux_file.c,v 1.23 2006/09/25 07:12:57 otto Exp $	*/
-/*	$NetBSD: linux_file.c,v 1.15 1996/05/20 01:59:09 fvdl Exp $	*/
-
-/*
- * Copyright (c) 1995 Frank van der Linden
+/*-
+ * Copyright (c) 1994-1995 Søren Schmidt
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *    notice, this list of conditions and the following disclaimer
+ *    in this position and unchanged.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed for the NetBSD Project
- *      by Frank van der Linden
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -32,878 +26,1321 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_file.c,v 1.106 2007/10/24 19:03:52 rwatson Exp $");
+
+#include "opt_compat.h"
+#include "opt_mac.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
+#include <sys/dirent.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mount.h>
+#include <sys/mutex.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
-#include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/filedesc.h>
-#include <sys/ioctl.h>
-#include <sys/kernel.h>
-#include <sys/mount.h>
-#include <sys/signalvar.h>
-#include <sys/uio.h>
-#include <sys/malloc.h>
-#include <sys/vnode.h>
+#include <sys/sx.h>
+#include <sys/syscallsubr.h>
+#include <sys/sysproto.h>
 #include <sys/tty.h>
-#include <sys/conf.h>
+#include <sys/unistd.h>
+#include <sys/vnode.h>
 
-#include <sys/syscallargs.h>
+#include <security/mac/mac_framework.h>
 
-#include <compat/linux/linux_types.h>
-#include <compat/linux/linux_signal.h>
-#include <compat/linux/linux_syscallargs.h>
-#include <compat/linux/linux_fcntl.h>
+#include <ufs/ufs/extattr.h>
+#include <ufs/ufs/quota.h>
+#include <ufs/ufs/ufsmount.h>
+
+#ifdef COMPAT_LINUX32
+#include <machine/../linux32/linux.h>
+#include <machine/../linux32/linux32_proto.h>
+#else
+#include <machine/../linux/linux.h>
+#include <machine/../linux/linux_proto.h>
+#endif
 #include <compat/linux/linux_util.h>
 
-#include <machine/linux_machdep.h>
-
-static int linux_to_bsd_ioflags(int);
-static int bsd_to_linux_ioflags(int);
-static void bsd_to_linux_flock(struct flock *, struct linux_flock *);
-static void linux_to_bsd_flock(struct linux_flock *, struct flock *);
-static void bsd_to_linux_stat(struct stat *, struct linux_stat *);
-static int linux_stat1(struct proc *, void *, register_t *, int);
-
-
-/*
- * Some file-related calls are handled here. The usual flag conversion
- * an structure conversion is done, and alternate emul path searching.
- */
-
-/*
- * The next two functions convert between the Linux and OpenBSD values
- * of the flags used in open(2) and fcntl(2).
- */
-static int
-linux_to_bsd_ioflags(lflags)
-	int lflags;
+int
+linux_creat(struct thread *td, struct linux_creat_args *args)
 {
-	int res = 0;
+    char *path;
+    int error;
 
-	res |= cvtto_bsd_mask(lflags, LINUX_O_WRONLY, O_WRONLY);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_RDONLY, O_RDONLY);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_RDWR, O_RDWR);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_CREAT, O_CREAT);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_EXCL, O_EXCL);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_NOCTTY, O_NOCTTY);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_TRUNC, O_TRUNC);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_NDELAY, O_NDELAY);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_SYNC, O_SYNC);
-	res |= cvtto_bsd_mask(lflags, LINUX_FASYNC, O_ASYNC);
-	res |= cvtto_bsd_mask(lflags, LINUX_O_APPEND, O_APPEND);
+    LCONVPATHEXIST(td, args->path, &path);
 
-	return res;
+#ifdef DEBUG
+	if (ldebug(creat))
+		printf(ARGS(creat, "%s, %d"), path, args->mode);
+#endif
+    error = kern_open(td, path, UIO_SYSSPACE, O_WRONLY | O_CREAT | O_TRUNC,
+	args->mode);
+    LFREEPATH(path);
+    return (error);
 }
 
+
 static int
-bsd_to_linux_ioflags(bflags)
-	int bflags;
+linux_common_open(struct thread *td, char *path, int l_flags, int mode, int openat)
 {
-	int res = 0;
+    struct proc *p = td->td_proc;
+    struct file *fp;
+    int fd;
+    int bsd_flags, error;
 
-	res |= cvtto_linux_mask(bflags, O_WRONLY, LINUX_O_WRONLY);
-	res |= cvtto_linux_mask(bflags, O_RDONLY, LINUX_O_RDONLY);
-	res |= cvtto_linux_mask(bflags, O_RDWR, LINUX_O_RDWR);
-	res |= cvtto_linux_mask(bflags, O_CREAT, LINUX_O_CREAT);
-	res |= cvtto_linux_mask(bflags, O_EXCL, LINUX_O_EXCL);
-	res |= cvtto_linux_mask(bflags, O_NOCTTY, LINUX_O_NOCTTY);
-	res |= cvtto_linux_mask(bflags, O_TRUNC, LINUX_O_TRUNC);
-	res |= cvtto_linux_mask(bflags, O_NDELAY, LINUX_O_NDELAY);
-	res |= cvtto_linux_mask(bflags, O_SYNC, LINUX_O_SYNC);
-	res |= cvtto_linux_mask(bflags, O_ASYNC, LINUX_FASYNC);
-	res |= cvtto_linux_mask(bflags, O_APPEND, LINUX_O_APPEND);
+    bsd_flags = 0;
+    switch (l_flags & LINUX_O_ACCMODE) {
+    case LINUX_O_WRONLY:
+	bsd_flags |= O_WRONLY;
+	break;
+    case LINUX_O_RDWR:
+	bsd_flags |= O_RDWR;
+	break;
+    default:
+	bsd_flags |= O_RDONLY;
+    }
+    if (l_flags & LINUX_O_NDELAY)
+	bsd_flags |= O_NONBLOCK;
+    if (l_flags & LINUX_O_APPEND)
+	bsd_flags |= O_APPEND;
+    if (l_flags & LINUX_O_SYNC)
+	bsd_flags |= O_FSYNC;
+    if (l_flags & LINUX_O_NONBLOCK)
+	bsd_flags |= O_NONBLOCK;
+    if (l_flags & LINUX_FASYNC)
+	bsd_flags |= O_ASYNC;
+    if (l_flags & LINUX_O_CREAT)
+	bsd_flags |= O_CREAT;
+    if (l_flags & LINUX_O_TRUNC)
+	bsd_flags |= O_TRUNC;
+    if (l_flags & LINUX_O_EXCL)
+	bsd_flags |= O_EXCL;
+    if (l_flags & LINUX_O_NOCTTY)
+	bsd_flags |= O_NOCTTY;
+    if (l_flags & LINUX_O_DIRECT)
+	bsd_flags |= O_DIRECT;
+    if (l_flags & LINUX_O_NOFOLLOW)
+	bsd_flags |= O_NOFOLLOW;
+    /* XXX LINUX_O_NOATIME: unable to be easily implemented. */
 
-	return res;
+    error = kern_open(td, path, UIO_SYSSPACE, bsd_flags, mode);
+    if (!error) {
+	    fd = td->td_retval[0];
+	    /*
+	     * XXX In between kern_open() and fget(), another process
+	     * having the same filedesc could use that fd without
+	     * checking below.
+	     */
+	    error = fget(td, fd, &fp);
+	    if (!error) {
+		    sx_slock(&proctree_lock);
+		    PROC_LOCK(p);
+		    if (!(bsd_flags & O_NOCTTY) &&
+			SESS_LEADER(p) && !(p->p_flag & P_CONTROLT)) {
+			    PROC_UNLOCK(p);
+			    sx_unlock(&proctree_lock);
+			    if (fp->f_type == DTYPE_VNODE)
+				    (void) fo_ioctl(fp, TIOCSCTTY, (caddr_t) 0,
+					     td->td_ucred, td);
+		    } else {
+			    PROC_UNLOCK(p);
+			    sx_sunlock(&proctree_lock);
+		    }
+		    if (l_flags & LINUX_O_DIRECTORY) {
+			    if (fp->f_type != DTYPE_VNODE ||
+				fp->f_vnode->v_type != VDIR) {
+				    error = ENOTDIR;
+			    }
+		    }
+		    fdrop(fp, td);
+		    /*
+		     * XXX as above, fdrop()/kern_close() pair is racy.
+		     */
+		    if (error)
+			    kern_close(td, fd);
+	    }
+    }
+
+#ifdef DEBUG
+    if (ldebug(open))
+	    printf(LMSG("open returns error %d"), error);
+#endif
+    if (!openat)
+	LFREEPATH(path);
+    return error;
 }
 
 /*
- * creat(2) is an obsolete function, but it's present as a Linux
- * system call, so let's deal with it.
+ * common code for linux *at set of syscalls
  *
- * Just call open(2) with the TRUNC, CREAT and WRONLY flags.
+ * works like this:
+ * if filename is absolute 
+ *    ignore dirfd
+ * else
+ *    if dirfd == AT_FDCWD 
+ *       return CWD/filename
+ *    else
+ *       return DIRFD/filename
  */
-int
-linux_sys_creat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+static int
+linux_at(struct thread *td, int dirfd, char *filename, char **newpath, char **freebuf)
 {
-	struct linux_sys_creat_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) mode;
-	} */ *uap = v;
-	struct sys_open_args oa;
-	caddr_t sg;
+   	struct file *fp;
+	int error = 0, vfslocked;
+	struct vnode *dvp;
+	struct filedesc *fdp = td->td_proc->p_fd;
+	char *fullpath = "unknown";
+	char *freepath = NULL;
 
-	sg = stackgap_init(p->p_emul);
-	LINUX_CHECK_ALT_CREAT(p, &sg, SCARG(uap, path));
+	/* don't do anything if the pathname is absolute */
+	if (*filename == '/') {
+	   	*newpath= filename;
+	   	return (0);
+	}
 
-	SCARG(&oa, path) = SCARG(uap, path);
-	SCARG(&oa, flags) = O_CREAT | O_TRUNC | O_WRONLY;
-	SCARG(&oa, mode) = SCARG(uap, mode);
-
-	return sys_open(p, &oa, retval);
-}
-
-/*
- * open(2). Take care of the different flag values, and let the
- * OpenBSD syscall do the real work. See if this operation
- * gives the current process a controlling terminal.
- * (XXX is this necessary?)
- */
-int
-linux_sys_open(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_open_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) flags;
-		syscallarg(int) mode;
-	} */ *uap = v;
-	int error, fl;
-	struct sys_open_args boa;
-	caddr_t sg;
-
-	sg = stackgap_init(p->p_emul);
-
-	fl = linux_to_bsd_ioflags(SCARG(uap, flags));
-
-	if (fl & O_CREAT)
-		LINUX_CHECK_ALT_CREAT(p, &sg, SCARG(uap, path));
-	else
-		LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	SCARG(&boa, path) = SCARG(uap, path);
-	SCARG(&boa, flags) = fl;
-	SCARG(&boa, mode) = SCARG(uap, mode);
-
-	if ((error = sys_open(p, &boa, retval)))
-		return error;
+	/* check for AT_FDWCD */
+	if (dirfd == LINUX_AT_FDCWD) {
+	   	FILEDESC_SLOCK(fdp);
+		dvp = fdp->fd_cdir;
+		vref(dvp);
+	   	FILEDESC_SUNLOCK(fdp);
+	} else {
+	   	error = fget(td, dirfd, &fp);
+		if (error)
+		   	return (error);
+		dvp = fp->f_vnode;
+		/* only a dir can be dfd */
+		if (dvp->v_type != VDIR) {
+		   	fdrop(fp, td);
+			return (ENOTDIR);
+		}
+		vref(dvp);
+		fdrop(fp, td);
+	}
 
 	/*
-	 * this bit from sunos_misc.c (and svr4_fcntl.c).
-	 * If we are a session leader, and we don't have a controlling
-	 * terminal yet, and the O_NOCTTY flag is not set, try to make
-	 * this the controlling terminal.
-	 */ 
-        if (!(fl & O_NOCTTY) && SESS_LEADER(p) && !(p->p_flag & P_CONTROLT)) {
-                struct filedesc *fdp = p->p_fd;
-                struct file     *fp;
-
-		if ((fp = fd_getfile(fdp, *retval)) == NULL)
-			return (EBADF);
-		FREF(fp);
-                if (fp->f_type == DTYPE_VNODE)
-                        (fp->f_ops->fo_ioctl) (fp, TIOCSCTTY, (caddr_t) 0, p);
-		FRELE(fp);
-        }
-	return 0;
+	 * XXXRW: This is bogus, as vn_fullpath() returns only an advisory
+	 * file path, and may fail in several common situations, including
+	 * for file systmes that don't use the name cache, and if the entry
+	 * for the file falls out of the name cache.  We should implement
+	 * openat() in the FreeBSD native system call layer properly (using a
+	 * requested starting directory), and have Linux and other ABIs wrap
+	 * the native implementation.
+	 */
+	error = vn_fullpath(td, dvp, &fullpath, &freepath);
+	if (!error) {
+	   	*newpath = malloc(strlen(fullpath) + strlen(filename) + 2, M_TEMP, M_WAITOK | M_ZERO);
+		*freebuf = freepath;
+		sprintf(*newpath, "%s/%s", fullpath, filename);
+	} else {
+		*newpath = NULL;
+	}
+	vfslocked = VFS_LOCK_GIANT(dvp->v_mount);
+	vrele(dvp);
+	VFS_UNLOCK_GIANT(vfslocked);
+	return (error);
 }
 
-/*
- * This appears to be part of a Linux attempt to switch to 64 bits file sizes.
- */
 int
-linux_sys_llseek(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_openat(struct thread *td, struct linux_openat_args *args)
 {
-	struct linux_sys_llseek_args /* {
-		syscallarg(int) fd;
-		syscallarg(uint32_t) ohigh;
-		syscallarg(uint32_t) olow;
-		syscallarg(caddr_t) res;
-		syscallarg(int) whence;
-	} */ *uap = v;
-	struct sys_lseek_args bla;
+   	char *newpath, *oldpath, *freebuf = NULL, *path;
+	int error;
+
+	oldpath = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
+	error = copyinstr(args->filename, oldpath, MAXPATHLEN, NULL);
+
+#ifdef DEBUG
+	if (ldebug(openat))
+		printf(ARGS(openat, "%i, %s, 0x%x, 0x%x"), args->dfd,
+		    oldpath, args->flags, args->mode);
+#endif
+
+	error = linux_at(td, args->dfd, oldpath, &newpath, &freebuf);
+	if (error)
+	   	return (error);
+#ifdef DEBUG
+	printf(LMSG("newpath: %s"), newpath);
+#endif
+    	if (args->flags & LINUX_O_CREAT)
+		LCONVPATH_SEG(td, newpath, &path, 1, UIO_SYSSPACE);
+    	else
+		LCONVPATH_SEG(td, newpath, &path, 0, UIO_SYSSPACE);
+	if (freebuf)
+	   	free(freebuf, M_TEMP);
+	if (*oldpath != '/')
+   	   	free(newpath, M_TEMP);
+
+	error = linux_common_open(td, path, args->flags, args->mode, 1);
+	free(oldpath, M_TEMP);
+	return (error);
+}
+
+int
+linux_open(struct thread *td, struct linux_open_args *args)
+{
+    char *path;
+
+    if (args->flags & LINUX_O_CREAT)
+	LCONVPATHCREAT(td, args->path, &path);
+    else
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(open))
+		printf(ARGS(open, "%s, 0x%x, 0x%x"),
+		    path, args->flags, args->mode);
+#endif
+
+    return linux_common_open(td, path, args->flags, args->mode, 0);
+}
+
+int
+linux_lseek(struct thread *td, struct linux_lseek_args *args)
+{
+
+    struct lseek_args /* {
+	int fd;
+	int pad;
+	off_t offset;
+	int whence;
+    } */ tmp_args;
+    int error;
+
+#ifdef DEBUG
+	if (ldebug(lseek))
+		printf(ARGS(lseek, "%d, %ld, %d"),
+		    args->fdes, (long)args->off, args->whence);
+#endif
+    tmp_args.fd = args->fdes;
+    tmp_args.offset = (off_t)args->off;
+    tmp_args.whence = args->whence;
+    error = lseek(td, &tmp_args);
+    return error;
+}
+
+int
+linux_llseek(struct thread *td, struct linux_llseek_args *args)
+{
+	struct lseek_args bsd_args;
 	int error;
 	off_t off;
 
-	off = SCARG(uap, olow) | (((off_t) SCARG(uap, ohigh)) << 32);
+#ifdef DEBUG
+	if (ldebug(llseek))
+		printf(ARGS(llseek, "%d, %d:%d, %d"),
+		    args->fd, args->ohigh, args->olow, args->whence);
+#endif
+	off = (args->olow) | (((off_t) args->ohigh) << 32);
 
-	SCARG(&bla, fd) = SCARG(uap, fd);
-	SCARG(&bla, offset) = off;
-	SCARG(&bla, whence) = SCARG(uap, whence);
+	bsd_args.fd = args->fd;
+	bsd_args.offset = off;
+	bsd_args.whence = args->whence;
 
-	if ((error = sys_lseek(p, &bla, retval)))
+	if ((error = lseek(td, &bsd_args)))
 		return error;
 
-	if ((error = copyout(retval, SCARG(uap, res), sizeof (off_t))))
+	if ((error = copyout(td->td_retval, args->res, sizeof (off_t))))
 		return error;
 
-	retval[0] = 0;
+	td->td_retval[0] = 0;
 	return 0;
 }
 
-/*
- * The next two functions take care of converting the flock
- * structure back and forth between Linux and OpenBSD format.
- * The only difference in the structures is the order of
- * the fields, and the 'whence' value.
- */
-static void
-bsd_to_linux_flock(bfp, lfp)
-	struct flock *bfp;
-	struct linux_flock *lfp;
-{
-
-	lfp->l_start = bfp->l_start;
-	lfp->l_len = bfp->l_len;
-	lfp->l_pid = bfp->l_pid;
-	lfp->l_whence = bfp->l_whence;
-	switch (bfp->l_type) {
-	case F_RDLCK:
-		lfp->l_type = LINUX_F_RDLCK;
-		break;
-	case F_UNLCK:
-		lfp->l_type = LINUX_F_UNLCK;
-		break;
-	case F_WRLCK:
-		lfp->l_type = LINUX_F_WRLCK;
-		break;
-	}
-}
-
-static void
-linux_to_bsd_flock(lfp, bfp)
-	struct linux_flock *lfp;
-	struct flock *bfp;
-{
-
-	bfp->l_start = lfp->l_start;
-	bfp->l_len = lfp->l_len;
-	bfp->l_pid = lfp->l_pid;
-	bfp->l_whence = lfp->l_whence;
-	switch (lfp->l_type) {
-	case LINUX_F_RDLCK:
-		bfp->l_type = F_RDLCK;
-		break;
-	case LINUX_F_UNLCK:
-		bfp->l_type = F_UNLCK;
-		break;
-	case LINUX_F_WRLCK:
-		bfp->l_type = F_WRLCK;
-		break;
-	}
-}
-
-/*
- * Most actions in the fcntl() call are straightforward; simply
- * pass control to the OpenBSD system call. A few commands need
- * conversions after the actual system call has done its work,
- * because the flag values and lock structure are different.
- */
 int
-linux_sys_fcntl(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_readdir(struct thread *td, struct linux_readdir_args *args)
 {
-	struct linux_sys_fcntl_args /* {
-		syscallarg(int) fd;
-		syscallarg(int) cmd;
-		syscallarg(void *) arg;
-	} */ *uap = v;
-	int fd, cmd, error, val;
-	caddr_t arg, sg;
-	struct linux_flock lfl;
-	struct flock *bfp, bfl;
-	struct sys_fcntl_args fca;
-	struct filedesc *fdp;
-	struct file *fp;
-	struct vnode *vp;
-	struct vattr va;
-	long pgid;
-	struct pgrp *pgrp;
-	struct tty *tp, *(*d_tty)(dev_t);
+	struct linux_getdents_args lda;
 
-	fd = SCARG(uap, fd);
-	cmd = SCARG(uap, cmd);
-	arg = (caddr_t) SCARG(uap, arg);
-
-	switch (cmd) {
-	case LINUX_F_DUPFD:
-		cmd = F_DUPFD;
-		break;
-	case LINUX_F_GETFD:
-		cmd = F_GETFD;
-		break;
-	case LINUX_F_SETFD:
-		cmd = F_SETFD;
-		break;
-	case LINUX_F_GETFL:
-		SCARG(&fca, fd) = fd;
-		SCARG(&fca, cmd) = F_GETFL;
-		SCARG(&fca, arg) = arg;
-		if ((error = sys_fcntl(p, &fca, retval)))
-			return error;
-		retval[0] = bsd_to_linux_ioflags(retval[0]);
-		return 0;
-	case LINUX_F_SETFL:
-		val = linux_to_bsd_ioflags((int)SCARG(uap, arg));
-		SCARG(&fca, fd) = fd;
-		SCARG(&fca, cmd) = F_SETFL;
-		SCARG(&fca, arg) = (caddr_t) val;
-		return sys_fcntl(p, &fca, retval);
-	case LINUX_F_GETLK:
-		sg = stackgap_init(p->p_emul);
-		if ((error = copyin(arg, &lfl, sizeof lfl)))
-			return error;
-		linux_to_bsd_flock(&lfl, &bfl);
-		bfp = (struct flock *) stackgap_alloc(&sg, sizeof *bfp);
-		SCARG(&fca, fd) = fd;
-		SCARG(&fca, cmd) = F_GETLK;
-		SCARG(&fca, arg) = bfp;
-		if ((error = copyout(&bfl, bfp, sizeof bfl)))
-			return error;
-		if ((error = sys_fcntl(p, &fca, retval)))
-			return error;
-		if ((error = copyin(bfp, &bfl, sizeof bfl)))
-			return error;
-		bsd_to_linux_flock(&bfl, &lfl);
-		error = copyout(&lfl, arg, sizeof lfl);
-		return error;
-		break;
-	case LINUX_F_SETLK:
-	case LINUX_F_SETLKW:
-		cmd = (cmd == LINUX_F_SETLK ? F_SETLK : F_SETLKW);
-		if ((error = copyin(arg, &lfl, sizeof lfl)))
-			return error;
-		linux_to_bsd_flock(&lfl, &bfl);
-		sg = stackgap_init(p->p_emul);
-		bfp = (struct flock *) stackgap_alloc(&sg, sizeof *bfp);
-		if ((error = copyout(&bfl, bfp, sizeof bfl)))
-			return error;
-		SCARG(&fca, fd) = fd;
-		SCARG(&fca, cmd) = cmd;
-		SCARG(&fca, arg) = bfp;
-		return sys_fcntl(p, &fca, retval);
-		break;
-	case LINUX_F_SETOWN:
-	case LINUX_F_GETOWN:	
-		/*
-		 * We need to route around the normal fcntl() for these calls,
-		 * since it uses TIOC{G,S}PGRP, which is too restrictive for
-		 * Linux F_{G,S}ETOWN semantics. For sockets, this problem
-		 * does not exist.
-		 */
-		fdp = p->p_fd;
-		if ((fp = fd_getfile(fdp, fd)) == NULL)
-			return (EBADF);
-		if (fp->f_type == DTYPE_SOCKET) {
-			cmd = cmd == LINUX_F_SETOWN ? F_SETOWN : F_GETOWN;
-			break;
-		}
-		vp = (struct vnode *)fp->f_data;
-		if (vp->v_type != VCHR)
-			return EINVAL;
-		FREF(fp);
-		error = VOP_GETATTR(vp, &va, p->p_ucred, p);
-		FRELE(fp);
-		if (error)
-			return error;
-		d_tty = cdevsw[major(va.va_rdev)].d_tty;
-		if (!d_tty || (!(tp = (*d_tty)(va.va_rdev))))
-			return EINVAL;
-		if (cmd == LINUX_F_GETOWN) {
-			retval[0] = tp->t_pgrp ? tp->t_pgrp->pg_id : NO_PID;
-			return 0;
-		}
-		if ((long)arg <= 0) {
-			pgid = -(long)arg;
-		} else {
-			struct proc *p1 = pfind((long)arg);
-			if (p1 == 0)
-				return (ESRCH);
-			pgid = (long)p1->p_pgrp->pg_id;
-		}
-		pgrp = pgfind(pgid);
-		if (pgrp == NULL || pgrp->pg_session != p->p_session)
-			return EPERM;
-		tp->t_pgrp = pgrp;
-		return 0;
-	default:
-		return EOPNOTSUPP;
-	}
-
-	SCARG(&fca, fd) = fd;
-	SCARG(&fca, cmd) = cmd;
-	SCARG(&fca, arg) = arg;
-
-	return sys_fcntl(p, &fca, retval);
+	lda.fd = args->fd;
+	lda.dent = args->dent;
+	lda.count = 1;
+	return linux_getdents(td, &lda);
 }
 
 /*
- * Convert a OpenBSD stat structure to a Linux stat structure.
- * Only the order of the fields and the padding in the structure
- * is different. linux_fakedev is a machine-dependent function
- * which optionally converts device driver major/minor numbers
- * (XXX horrible, but what can you do against code that compares
- * things against constant major device numbers? sigh)
+ * Note that linux_getdents(2) and linux_getdents64(2) have the same
+ * arguments. They only differ in the definition of struct dirent they
+ * operate on. We use this to common the code, with the exception of
+ * accessing struct dirent. Note that linux_readdir(2) is implemented
+ * by means of linux_getdents(2). In this case we never operate on
+ * struct dirent64 and thus don't need to handle it...
  */
-static void
-bsd_to_linux_stat(bsp, lsp)
-	struct stat *bsp;
-	struct linux_stat *lsp;
-{
 
-	lsp->lst_dev     = bsp->st_dev;
-	lsp->lst_ino     = bsp->st_ino;
-	lsp->lst_mode    = bsp->st_mode;
-	lsp->lst_nlink   = bsp->st_nlink;
-	lsp->lst_uid     = bsp->st_uid;
-	lsp->lst_gid     = bsp->st_gid;
-	lsp->lst_rdev    = linux_fakedev(bsp->st_rdev);
-	lsp->lst_size    = bsp->st_size;
-	lsp->lst_blksize = bsp->st_blksize;
-	lsp->lst_blocks  = bsp->st_blocks;
-	lsp->lst_atime   = bsp->st_atime;
-	lsp->lst_mtime   = bsp->st_mtime;
-	lsp->lst_ctime   = bsp->st_ctime;
-}
+struct l_dirent {
+	l_long		d_ino;
+	l_off_t		d_off;
+	l_ushort	d_reclen;
+	char		d_name[LINUX_NAME_MAX + 1];
+};
 
-/*
- * The stat functions below are plain sailing. stat and lstat are handled
- * by one function to avoid code duplication.
- */
-int
-linux_sys_fstat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_fstat_args /* {
-		syscallarg(int) fd;
-		syscallarg(linux_stat *) sp;
-	} */ *uap = v;
-	struct sys_fstat_args fsa;
-	struct linux_stat tmplst;
-	struct stat *st,tmpst;
-	caddr_t sg;
-	int error;
+struct l_dirent64 {
+	uint64_t	d_ino;
+	int64_t		d_off;
+	l_ushort	d_reclen;
+	u_char		d_type;
+	char		d_name[LINUX_NAME_MAX + 1];
+};
 
-	sg = stackgap_init(p->p_emul);
+#define LINUX_RECLEN(de,namlen) \
+    ALIGN((((char *)&(de)->d_name - (char *)de) + (namlen) + 1))
 
-	st = stackgap_alloc(&sg, sizeof (struct stat));
-
-	SCARG(&fsa, fd) = SCARG(uap, fd);
-	SCARG(&fsa, sb) = st;
-
-	if ((error = sys_fstat(p, &fsa, retval)))
-		return error;
-
-	if ((error = copyin(st, &tmpst, sizeof tmpst)))
-		return error;
-
-	bsd_to_linux_stat(&tmpst, &tmplst);
-
-	if ((error = copyout(&tmplst, SCARG(uap, sp), sizeof tmplst)))
-		return error;
-
-	return 0;
-}
+#define	LINUX_DIRBLKSIZ		512
 
 static int
-linux_stat1(p, v, retval, dolstat)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-	int dolstat;
+getdents_common(struct thread *td, struct linux_getdents64_args *args,
+    int is64bit)
 {
-	struct sys_stat_args sa;
-	struct linux_stat tmplst;
-	struct stat *st, tmpst;
-	caddr_t sg;
-	int error;
-	struct linux_sys_stat_args *uap = v;
+	struct dirent *bdp;
+	struct vnode *vp;
+	caddr_t inp, buf;		/* BSD-format */
+	int len, reclen;		/* BSD-format */
+	caddr_t outp;			/* Linux-format */
+	int resid, linuxreclen=0;	/* Linux-format */
+	struct file *fp;
+	struct uio auio;
+	struct iovec aiov;
+	off_t off;
+	struct l_dirent linux_dirent;
+	struct l_dirent64 linux_dirent64;
+	int buflen, error, eofflag, nbytes, justone;
+	u_long *cookies = NULL, *cookiep;
+	int ncookies, vfslocked;
 
-	sg = stackgap_init(p->p_emul);
-
-	st = stackgap_alloc(&sg, sizeof (struct stat));
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	SCARG(&sa, ub) = st;
-	SCARG(&sa, path) = SCARG(uap, path);
-
-	if ((error = (dolstat ? sys_lstat(p, &sa, retval) :
-				sys_stat(p, &sa, retval))))
-		return error;
-
-	if ((error = copyin(st, &tmpst, sizeof tmpst)))
-		return error;
-
-	bsd_to_linux_stat(&tmpst, &tmplst);
-
-	if ((error = copyout(&tmplst, SCARG(uap, sp), sizeof tmplst)))
-		return error;
-
-	return 0;
-}
-
-int
-linux_sys_stat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_stat_args /* {
-		syscallarg(char *) path;
-		syscallarg(struct linux_stat *) sp;
-	} */ *uap = v;
-
-	return linux_stat1(p, uap, retval, 0);
-}
-
-int
-linux_sys_lstat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_lstat_args /* {
-		syscallarg(char *) path;
-		syscallarg(struct linux_stat *) sp;
-	} */ *uap = v;
-
-	return linux_stat1(p, uap, retval, 1);
-}
-
-/*
- * The following syscalls are mostly here because of the alternate path check.
- */
-int
-linux_sys_access(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_access_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) flags;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return sys_access(p, uap, retval);
-}
-
-int
-linux_sys_unlink(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-
-{
-	struct linux_sys_unlink_args /* {
-		syscallarg(char *) path;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return sys_unlink(p, uap, retval);
-}
-
-int
-linux_sys_chdir(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_chdir_args /* {
-		syscallarg(char *) path;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return sys_chdir(p, uap, retval);
-}
-
-int
-linux_sys_mknod(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_mknod_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) mode;
-		syscallarg(int) dev;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	struct sys_mkfifo_args bma;
-
-	LINUX_CHECK_ALT_CREAT(p, &sg, SCARG(uap, path));
-
-	/*
-	 * BSD handles FIFOs separately
-	 */
-	if (S_ISFIFO(SCARG(uap, mode))) {
-		SCARG(&bma, path) = SCARG(uap, path);
-		SCARG(&bma, mode) = SCARG(uap, mode);
-		return sys_mkfifo(p, uap, retval);
+	nbytes = args->count;
+	if (nbytes == 1) {
+		/* readdir(2) case. Always struct dirent. */
+		if (is64bit)
+			return (EINVAL);
+		nbytes = sizeof(linux_dirent);
+		justone = 1;
 	} else
-		return sys_mknod(p, uap, retval);
+		justone = 0;
+
+	if ((error = getvnode(td->td_proc->p_fd, args->fd, &fp)) != 0)
+		return (error);
+
+	if ((fp->f_flag & FREAD) == 0) {
+		fdrop(fp, td);
+		return (EBADF);
+	}
+
+	vp = fp->f_vnode;
+	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
+	if (vp->v_type != VDIR) {
+		VFS_UNLOCK_GIANT(vfslocked);
+		fdrop(fp, td);
+		return (EINVAL);
+	}
+
+	off = fp->f_offset;
+
+	buflen = max(LINUX_DIRBLKSIZ, nbytes);
+	buflen = min(buflen, MAXBSIZE);
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_SYSSPACE;
+	auio.uio_td = td;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
+
+	if (cookies) {
+		free(cookies, M_TEMP);
+		cookies = NULL;
+	}
+
+#ifdef MAC
+	/*
+	 * Do directory search MAC check using non-cached credentials.
+	 */
+	if ((error = mac_vnode_check_readdir(td->td_ucred, vp)))
+		goto out;
+#endif /* MAC */
+	if ((error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, &ncookies,
+		 &cookies)))
+		goto out;
+
+	inp = buf;
+	outp = (caddr_t)args->dirent;
+	resid = nbytes;
+	if ((len = buflen - auio.uio_resid) <= 0)
+		goto eof;
+
+	cookiep = cookies;
+
+	if (cookies) {
+		/*
+		 * When using cookies, the vfs has the option of reading from
+		 * a different offset than that supplied (UFS truncates the
+		 * offset to a block boundary to make sure that it never reads
+		 * partway through a directory entry, even if the directory
+		 * has been compacted).
+		 */
+		while (len > 0 && ncookies > 0 && *cookiep <= off) {
+			bdp = (struct dirent *) inp;
+			len -= bdp->d_reclen;
+			inp += bdp->d_reclen;
+			cookiep++;
+			ncookies--;
+		}
+	}
+
+	while (len > 0) {
+		if (cookiep && ncookies == 0)
+			break;
+		bdp = (struct dirent *) inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3) {
+			error = EFAULT;
+			goto out;
+		}
+
+		if (bdp->d_fileno == 0) {
+			inp += reclen;
+			if (cookiep) {
+				off = *cookiep++;
+				ncookies--;
+			} else
+				off += reclen;
+
+			len -= reclen;
+			continue;
+		}
+
+		linuxreclen = (is64bit)
+		    ? LINUX_RECLEN(&linux_dirent64, bdp->d_namlen)
+		    : LINUX_RECLEN(&linux_dirent, bdp->d_namlen);
+
+		if (reclen > len || resid < linuxreclen) {
+			outp++;
+			break;
+		}
+
+		if (justone) {
+			/* readdir(2) case. */
+			linux_dirent.d_ino = (l_long)bdp->d_fileno;
+			linux_dirent.d_off = (l_off_t)linuxreclen;
+			linux_dirent.d_reclen = (l_ushort)bdp->d_namlen;
+			strcpy(linux_dirent.d_name, bdp->d_name);
+			error = copyout(&linux_dirent, outp, linuxreclen);
+		} else {
+			if (is64bit) {
+				linux_dirent64.d_ino = bdp->d_fileno;
+				linux_dirent64.d_off = (cookiep)
+				    ? (l_off_t)*cookiep
+				    : (l_off_t)(off + reclen);
+				linux_dirent64.d_reclen =
+				    (l_ushort)linuxreclen;
+				linux_dirent64.d_type = bdp->d_type;
+				strcpy(linux_dirent64.d_name, bdp->d_name);
+				error = copyout(&linux_dirent64, outp,
+				    linuxreclen);
+			} else {
+				linux_dirent.d_ino = bdp->d_fileno;
+				linux_dirent.d_off = (cookiep)
+				    ? (l_off_t)*cookiep
+				    : (l_off_t)(off + reclen);
+				linux_dirent.d_reclen = (l_ushort)linuxreclen;
+				strcpy(linux_dirent.d_name, bdp->d_name);
+				error = copyout(&linux_dirent, outp,
+				    linuxreclen);
+			}
+		}
+		if (error)
+			goto out;
+
+		inp += reclen;
+		if (cookiep) {
+			off = *cookiep++;
+			ncookies--;
+		} else
+			off += reclen;
+
+		outp += linuxreclen;
+		resid -= linuxreclen;
+		len -= reclen;
+		if (justone)
+			break;
+	}
+
+	if (outp == (caddr_t)args->dirent)
+		goto again;
+
+	fp->f_offset = off;
+	if (justone)
+		nbytes = resid + linuxreclen;
+
+eof:
+	td->td_retval[0] = nbytes - resid;
+
+out:
+	if (cookies)
+		free(cookies, M_TEMP);
+
+	VOP_UNLOCK(vp, 0, td);
+	VFS_UNLOCK_GIANT(vfslocked);
+	fdrop(fp, td);
+	free(buf, M_TEMP);
+	return (error);
 }
 
 int
-linux_sys_chmod(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_getdents(struct thread *td, struct linux_getdents_args *args)
 {
-	struct linux_sys_chmod_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) mode;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
 
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+#ifdef DEBUG
+	if (ldebug(getdents))
+		printf(ARGS(getdents, "%d, *, %d"), args->fd, args->count);
+#endif
 
-	return sys_chmod(p, uap, retval);
+	return (getdents_common(td, (struct linux_getdents64_args*)args, 0));
 }
 
 int
-linux_sys_chown16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_getdents64(struct thread *td, struct linux_getdents64_args *args)
 {
-	struct linux_sys_chown16_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) uid;
-		syscallarg(int) gid;
-	} */ *uap = v;
-	struct sys_chown_args bca;
-	caddr_t sg = stackgap_init(p->p_emul);
 
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+#ifdef DEBUG
+	if (ldebug(getdents64))
+		printf(ARGS(getdents64, "%d, *, %d"), args->fd, args->count);
+#endif
 
-	SCARG(&bca, path) = SCARG(uap, path);
-	SCARG(&bca, uid) = ((linux_uid_t)SCARG(uap, uid) == (linux_uid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, uid);
-	SCARG(&bca, gid) = ((linux_gid_t)SCARG(uap, gid) == (linux_gid_t)-1) ?
-		(gid_t)-1 : SCARG(uap, gid);
-	
-	return sys_chown(p, &bca, retval);
-}
-
-int
-linux_sys_fchown16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_fchown16_args /* {
-		syscallarg(int) fd;
-		syscallarg(int) uid;
-		syscallarg(int) gid;
-	} */ *uap = v;
-	struct sys_fchown_args bfa;
-
-	SCARG(&bfa, fd) = SCARG(uap, fd);
-	SCARG(&bfa, uid) = ((linux_uid_t)SCARG(uap, uid) == (linux_uid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, uid);
-	SCARG(&bfa, gid) = ((linux_gid_t)SCARG(uap, gid) == (linux_gid_t)-1) ?
-		(gid_t)-1 : SCARG(uap, gid);
-	
-	return sys_fchown(p, &bfa, retval);
-}
-
-int
-linux_sys_lchown16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_lchown16_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) uid;
-		syscallarg(int) gid;
-	} */ *uap = v;
-	struct sys_lchown_args bla;
-
-	SCARG(&bla, path) = SCARG(uap, path);
-	SCARG(&bla, uid) = ((linux_uid_t)SCARG(uap, uid) == (linux_uid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, uid);
-	SCARG(&bla, gid) = ((linux_gid_t)SCARG(uap, gid) == (linux_gid_t)-1) ?
-		(gid_t)-1 : SCARG(uap, gid);
-
-	return sys_lchown(p, &bla, retval);
-}
-
-int
-linux_sys_rename(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_rename_args /* {
-		syscallarg(char *) from;
-		syscallarg(char *) to;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, from));
-	LINUX_CHECK_ALT_CREAT(p, &sg, SCARG(uap, to));
-
-	return sys_rename(p, uap, retval);
-}
-
-int
-linux_sys_mkdir(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_mkdir_args /* {
-		syscallarg(char *) path;
-		syscallarg(int) mode;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_CREAT(p, &sg, SCARG(uap, path));
-
-	return sys_mkdir(p, uap, retval);
-}
-
-int
-linux_sys_rmdir(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_rmdir_args /* {
-		syscallarg(char *) path;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return sys_rmdir(p, uap, retval);
-}
-
-int
-linux_sys_symlink(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_symlink_args /* {
-		syscallarg(char *) path;
-		syscallarg(char *) to;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-	LINUX_CHECK_ALT_CREAT(p, &sg, SCARG(uap, to));
-
-	return sys_symlink(p, uap, retval);
-}
-
-int
-linux_sys_readlink(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_readlink_args /* {
-		syscallarg(char *) name;
-		syscallarg(char *) buf;
-		syscallarg(int) count;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, name));
-
-	return sys_readlink(p, uap, retval);
-}
-
-int
-linux_sys_truncate(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_truncate_args /* {
-		syscallarg(char *) path;
-		syscallarg(long) length;
-	} */ *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return compat_43_sys_truncate(p, uap, retval);
-}
-
-/*
- * This is just fsync() for now (just as it is in the Linux kernel)
- */
-int
-linux_sys_fdatasync(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_fdatasync_args /* {
-		syscallarg(int) fd;
-	} */ *uap = v;
-	return sys_fsync(p, uap, retval);
+	return (getdents_common(td, args, 1));
 }
 
 /*
- * pread(2).
+ * These exist mainly for hooks for doing /compat/linux translation.
  */
+
 int
-linux_sys_pread(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_access(struct thread *td, struct linux_access_args *args)
 {
-	struct linux_sys_pread_args /* {
-		syscallarg(int) fd;
-		syscallarg(void *) buf;
-		syscallarg(size_t) nbyte;
-		syscallarg(linux_off_t) offset;
-	} */ *uap = v;
-	struct sys_pread_args pra;
-	
-	SCARG(&pra, fd) = SCARG(uap, fd);
-	SCARG(&pra, buf) = SCARG(uap, buf);
-	SCARG(&pra, nbyte) = SCARG(uap, nbyte);
-	SCARG(&pra, offset) = SCARG(uap, offset);
-	
-	return sys_pread(p, &pra, retval);
+	char *path;
+	int error;
+
+	/* linux convention */
+	if (args->flags & ~(F_OK | X_OK | W_OK | R_OK))
+		return (EINVAL);
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(access))
+		printf(ARGS(access, "%s, %d"), path, args->flags);
+#endif
+	error = kern_access(td, path, UIO_SYSSPACE, args->flags);
+	LFREEPATH(path);
+
+	return (error);
+}
+
+int
+linux_unlink(struct thread *td, struct linux_unlink_args *args)
+{
+	char *path;
+	int error;
+	struct stat st;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(unlink))
+		printf(ARGS(unlink, "%s"), path);
+#endif
+
+	error = kern_unlink(td, path, UIO_SYSSPACE);
+	if (error == EPERM)
+		/* Introduce POSIX noncompliant behaviour of Linux */
+		if (kern_stat(td, path, UIO_SYSSPACE, &st) == 0)
+			if (S_ISDIR(st.st_mode))
+				error = EISDIR;
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_chdir(struct thread *td, struct linux_chdir_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(chdir))
+		printf(ARGS(chdir, "%s"), path);
+#endif
+	error = kern_chdir(td, path, UIO_SYSSPACE);
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_chmod(struct thread *td, struct linux_chmod_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(chmod))
+		printf(ARGS(chmod, "%s, %d"), path, args->mode);
+#endif
+	error = kern_chmod(td, path, UIO_SYSSPACE, args->mode);
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_mkdir(struct thread *td, struct linux_mkdir_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHCREAT(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(mkdir))
+		printf(ARGS(mkdir, "%s, %d"), path, args->mode);
+#endif
+	error = kern_mkdir(td, path, UIO_SYSSPACE, args->mode);
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_rmdir(struct thread *td, struct linux_rmdir_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(rmdir))
+		printf(ARGS(rmdir, "%s"), path);
+#endif
+	error = kern_rmdir(td, path, UIO_SYSSPACE);
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_rename(struct thread *td, struct linux_rename_args *args)
+{
+	char *from, *to;
+	int error;
+
+	LCONVPATHEXIST(td, args->from, &from);
+	/* Expand LCONVPATHCREATE so that `from' can be freed on errors */
+	error = linux_emul_convpath(td, args->to, UIO_USERSPACE, &to, 1);
+	if (to == NULL) {
+		LFREEPATH(from);
+		return (error);
+	}
+
+#ifdef DEBUG
+	if (ldebug(rename))
+		printf(ARGS(rename, "%s, %s"), from, to);
+#endif
+	error = kern_rename(td, from, to, UIO_SYSSPACE);
+	LFREEPATH(from);
+	LFREEPATH(to);
+	return (error);
+}
+
+int
+linux_symlink(struct thread *td, struct linux_symlink_args *args)
+{
+	char *path, *to;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+	/* Expand LCONVPATHCREATE so that `path' can be freed on errors */
+	error = linux_emul_convpath(td, args->to, UIO_USERSPACE, &to, 1);
+	if (to == NULL) {
+		LFREEPATH(path);
+		return (error);
+	}
+
+#ifdef DEBUG
+	if (ldebug(symlink))
+		printf(ARGS(symlink, "%s, %s"), path, to);
+#endif
+	error = kern_symlink(td, path, to, UIO_SYSSPACE);
+	LFREEPATH(path);
+	LFREEPATH(to);
+	return (error);
+}
+
+int
+linux_readlink(struct thread *td, struct linux_readlink_args *args)
+{
+	char *name;
+	int error;
+
+	LCONVPATHEXIST(td, args->name, &name);
+
+#ifdef DEBUG
+	if (ldebug(readlink))
+		printf(ARGS(readlink, "%s, %p, %d"), name, (void *)args->buf,
+		    args->count);
+#endif
+	error = kern_readlink(td, name, UIO_SYSSPACE, args->buf, UIO_USERSPACE,
+	    args->count);
+	LFREEPATH(name);
+	return (error);
+}
+
+int
+linux_truncate(struct thread *td, struct linux_truncate_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(truncate))
+		printf(ARGS(truncate, "%s, %ld"), path, (long)args->length);
+#endif
+
+	error = kern_truncate(td, path, UIO_SYSSPACE, args->length);
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_ftruncate(struct thread *td, struct linux_ftruncate_args *args)
+{
+	struct ftruncate_args /* {
+		int fd;
+		int pad;
+		off_t length;
+		} */ nuap;
+	   
+	nuap.fd = args->fd;
+	nuap.length = args->length;
+	return (ftruncate(td, &nuap));
+}
+
+int
+linux_link(struct thread *td, struct linux_link_args *args)
+{
+	char *path, *to;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+	/* Expand LCONVPATHCREATE so that `path' can be freed on errors */
+	error = linux_emul_convpath(td, args->to, UIO_USERSPACE, &to, 1);
+	if (to == NULL) {
+		LFREEPATH(path);
+		return (error);
+	}
+
+#ifdef DEBUG
+	if (ldebug(link))
+		printf(ARGS(link, "%s, %s"), path, to);
+#endif
+	error = kern_link(td, path, to, UIO_SYSSPACE);
+	LFREEPATH(path);
+	LFREEPATH(to);
+	return (error);
+}
+
+int
+linux_fdatasync(td, uap)
+	struct thread *td;
+	struct linux_fdatasync_args *uap;
+{
+	struct fsync_args bsd;
+
+	bsd.fd = uap->fd;
+	return fsync(td, &bsd);
+}
+
+int
+linux_pread(td, uap)
+	struct thread *td;
+	struct linux_pread_args *uap;
+{
+	struct pread_args bsd;
+	struct vnode *vp;
+	int error;
+
+	bsd.fd = uap->fd;
+	bsd.buf = uap->buf;
+	bsd.nbyte = uap->nbyte;
+	bsd.offset = uap->offset;
+
+	error = pread(td, &bsd);
+
+	if (error == 0) {
+   	   	/* This seems to violate POSIX but linux does it */
+   	   	if ((error = fgetvp(td, uap->fd, &vp)) != 0)
+   		   	return (error);
+		if (vp->v_type == VDIR) {
+   		   	vrele(vp);
+			return (EISDIR);
+		}
+		vrele(vp);
+	}
+
+	return (error);
+}
+
+int
+linux_pwrite(td, uap)
+	struct thread *td;
+	struct linux_pwrite_args *uap;
+{
+	struct pwrite_args bsd;
+
+	bsd.fd = uap->fd;
+	bsd.buf = uap->buf;
+	bsd.nbyte = uap->nbyte;
+	bsd.offset = uap->offset;
+	return pwrite(td, &bsd);
+}
+
+int
+linux_mount(struct thread *td, struct linux_mount_args *args)
+{
+	struct ufs_args ufs;
+	char fstypename[MFSNAMELEN];
+	char mntonname[MNAMELEN], mntfromname[MNAMELEN];
+	int error;
+	int fsflags;
+	void *fsdata;
+
+	error = copyinstr(args->filesystemtype, fstypename, MFSNAMELEN - 1,
+	    NULL);
+	if (error)
+		return (error);
+	error = copyinstr(args->specialfile, mntfromname, MNAMELEN - 1, NULL);
+	if (error)
+		return (error);
+	error = copyinstr(args->dir, mntonname, MNAMELEN - 1, NULL);
+	if (error)
+		return (error);
+
+#ifdef DEBUG
+	if (ldebug(mount))
+		printf(ARGS(mount, "%s, %s, %s"),
+		    fstypename, mntfromname, mntonname);
+#endif
+
+	if (strcmp(fstypename, "ext2") == 0) {
+		strcpy(fstypename, "ext2fs");
+		fsdata = &ufs;
+		ufs.fspec = mntfromname;
+#define DEFAULT_ROOTID		-2
+		ufs.export.ex_root = DEFAULT_ROOTID;
+		ufs.export.ex_flags =
+		    args->rwflag & LINUX_MS_RDONLY ? MNT_EXRDONLY : 0;
+	} else if (strcmp(fstypename, "proc") == 0) {
+		strcpy(fstypename, "linprocfs");
+		fsdata = NULL;
+	} else {
+		return (ENODEV);
+	}
+
+	fsflags = 0;
+
+	if ((args->rwflag & 0xffff0000) == 0xc0ed0000) {
+		/*
+		 * Linux SYNC flag is not included; the closest equivalent
+		 * FreeBSD has is !ASYNC, which is our default.
+		 */
+		if (args->rwflag & LINUX_MS_RDONLY)
+			fsflags |= MNT_RDONLY;
+		if (args->rwflag & LINUX_MS_NOSUID)
+			fsflags |= MNT_NOSUID;
+		if (args->rwflag & LINUX_MS_NOEXEC)
+			fsflags |= MNT_NOEXEC;
+		if (args->rwflag & LINUX_MS_REMOUNT)
+			fsflags |= MNT_UPDATE;
+	}
+
+	if (strcmp(fstypename, "linprocfs") == 0) {
+		error = kernel_vmount(fsflags,
+			"fstype", fstypename,
+			"fspath", mntonname,
+			NULL);
+	} else
+		error = EOPNOTSUPP;
+	return (error);
+}
+
+int
+linux_oldumount(struct thread *td, struct linux_oldumount_args *args)
+{
+	struct linux_umount_args args2;
+
+	args2.path = args->path;
+	args2.flags = 0;
+	return (linux_umount(td, &args2));
+}
+
+int
+linux_umount(struct thread *td, struct linux_umount_args *args)
+{
+	struct unmount_args bsd;
+
+	bsd.path = args->path;
+	bsd.flags = args->flags;	/* XXX correct? */
+	return (unmount(td, &bsd));
 }
 
 /*
- * pwrite(2).
+ * fcntl family of syscalls
  */
-int
-linux_sys_pwrite(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+
+struct l_flock {
+	l_short		l_type;
+	l_short		l_whence;
+	l_off_t		l_start;
+	l_off_t		l_len;
+	l_pid_t		l_pid;
+}
+#if defined(__amd64__) && defined(COMPAT_LINUX32)
+__packed
+#endif
+;
+
+static void
+linux_to_bsd_flock(struct l_flock *linux_flock, struct flock *bsd_flock)
 {
-	struct linux_sys_pwrite_args /* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(size_t) nbyte;
-		syscallarg(linux_off_t) offset;
-	} */ *uap = v;
-	struct sys_pwrite_args pra;
+	switch (linux_flock->l_type) {
+	case LINUX_F_RDLCK:
+		bsd_flock->l_type = F_RDLCK;
+		break;
+	case LINUX_F_WRLCK:
+		bsd_flock->l_type = F_WRLCK;
+		break;
+	case LINUX_F_UNLCK:
+		bsd_flock->l_type = F_UNLCK;
+		break;
+	default:
+		bsd_flock->l_type = -1;
+		break;
+	}
+	bsd_flock->l_whence = linux_flock->l_whence;
+	bsd_flock->l_start = (off_t)linux_flock->l_start;
+	bsd_flock->l_len = (off_t)linux_flock->l_len;
+	bsd_flock->l_pid = (pid_t)linux_flock->l_pid;
+}
 
-	SCARG(&pra, fd) = SCARG(uap, fd);
-	SCARG(&pra, buf) = SCARG(uap, buf);
-	SCARG(&pra, nbyte) = SCARG(uap, nbyte);
-	SCARG(&pra, offset) = SCARG(uap, offset);
+static void
+bsd_to_linux_flock(struct flock *bsd_flock, struct l_flock *linux_flock)
+{
+	switch (bsd_flock->l_type) {
+	case F_RDLCK:
+		linux_flock->l_type = LINUX_F_RDLCK;
+		break;
+	case F_WRLCK:
+		linux_flock->l_type = LINUX_F_WRLCK;
+		break;
+	case F_UNLCK:
+		linux_flock->l_type = LINUX_F_UNLCK;
+		break;
+	}
+	linux_flock->l_whence = bsd_flock->l_whence;
+	linux_flock->l_start = (l_off_t)bsd_flock->l_start;
+	linux_flock->l_len = (l_off_t)bsd_flock->l_len;
+	linux_flock->l_pid = (l_pid_t)bsd_flock->l_pid;
+}
 
-	return sys_pwrite(p, &pra, retval);
+#if defined(__i386__) || (defined(__amd64__) && defined(COMPAT_LINUX32))
+struct l_flock64 {
+	l_short		l_type;
+	l_short		l_whence;
+	l_loff_t	l_start;
+	l_loff_t	l_len;
+	l_pid_t		l_pid;
+}
+#if defined(__amd64__) && defined(COMPAT_LINUX32)
+__packed
+#endif
+;
+
+static void
+linux_to_bsd_flock64(struct l_flock64 *linux_flock, struct flock *bsd_flock)
+{
+	switch (linux_flock->l_type) {
+	case LINUX_F_RDLCK:
+		bsd_flock->l_type = F_RDLCK;
+		break;
+	case LINUX_F_WRLCK:
+		bsd_flock->l_type = F_WRLCK;
+		break;
+	case LINUX_F_UNLCK:
+		bsd_flock->l_type = F_UNLCK;
+		break;
+	default:
+		bsd_flock->l_type = -1;
+		break;
+	}
+	bsd_flock->l_whence = linux_flock->l_whence;
+	bsd_flock->l_start = (off_t)linux_flock->l_start;
+	bsd_flock->l_len = (off_t)linux_flock->l_len;
+	bsd_flock->l_pid = (pid_t)linux_flock->l_pid;
+}
+
+static void
+bsd_to_linux_flock64(struct flock *bsd_flock, struct l_flock64 *linux_flock)
+{
+	switch (bsd_flock->l_type) {
+	case F_RDLCK:
+		linux_flock->l_type = LINUX_F_RDLCK;
+		break;
+	case F_WRLCK:
+		linux_flock->l_type = LINUX_F_WRLCK;
+		break;
+	case F_UNLCK:
+		linux_flock->l_type = LINUX_F_UNLCK;
+		break;
+	}
+	linux_flock->l_whence = bsd_flock->l_whence;
+	linux_flock->l_start = (l_loff_t)bsd_flock->l_start;
+	linux_flock->l_len = (l_loff_t)bsd_flock->l_len;
+	linux_flock->l_pid = (l_pid_t)bsd_flock->l_pid;
+}
+#endif /* __i386__ || (__amd64__ && COMPAT_LINUX32) */
+
+static int
+fcntl_common(struct thread *td, struct linux_fcntl64_args *args)
+{
+	struct l_flock linux_flock;
+	struct flock bsd_flock;
+	struct file *fp;
+	long arg;
+	int error, result;
+
+	switch (args->cmd) {
+	case LINUX_F_DUPFD:
+		return (kern_fcntl(td, args->fd, F_DUPFD, args->arg));
+
+	case LINUX_F_GETFD:
+		return (kern_fcntl(td, args->fd, F_GETFD, 0));
+
+	case LINUX_F_SETFD:
+		return (kern_fcntl(td, args->fd, F_SETFD, args->arg));
+
+	case LINUX_F_GETFL:
+		error = kern_fcntl(td, args->fd, F_GETFL, 0);
+		result = td->td_retval[0];
+		td->td_retval[0] = 0;
+		if (result & O_RDONLY)
+			td->td_retval[0] |= LINUX_O_RDONLY;
+		if (result & O_WRONLY)
+			td->td_retval[0] |= LINUX_O_WRONLY;
+		if (result & O_RDWR)
+			td->td_retval[0] |= LINUX_O_RDWR;
+		if (result & O_NDELAY)
+			td->td_retval[0] |= LINUX_O_NONBLOCK;
+		if (result & O_APPEND)
+			td->td_retval[0] |= LINUX_O_APPEND;
+		if (result & O_FSYNC)
+			td->td_retval[0] |= LINUX_O_SYNC;
+		if (result & O_ASYNC)
+			td->td_retval[0] |= LINUX_FASYNC;
+#ifdef LINUX_O_NOFOLLOW
+		if (result & O_NOFOLLOW)
+			td->td_retval[0] |= LINUX_O_NOFOLLOW;
+#endif
+#ifdef LINUX_O_DIRECT
+		if (result & O_DIRECT)
+			td->td_retval[0] |= LINUX_O_DIRECT;
+#endif
+		return (error);
+
+	case LINUX_F_SETFL:
+		arg = 0;
+		if (args->arg & LINUX_O_NDELAY)
+			arg |= O_NONBLOCK;
+		if (args->arg & LINUX_O_APPEND)
+			arg |= O_APPEND;
+		if (args->arg & LINUX_O_SYNC)
+			arg |= O_FSYNC;
+		if (args->arg & LINUX_FASYNC)
+			arg |= O_ASYNC;
+#ifdef LINUX_O_NOFOLLOW
+		if (args->arg & LINUX_O_NOFOLLOW)
+			arg |= O_NOFOLLOW;
+#endif
+#ifdef LINUX_O_DIRECT
+		if (args->arg & LINUX_O_DIRECT)
+			arg |= O_DIRECT;
+#endif
+		return (kern_fcntl(td, args->fd, F_SETFL, arg));
+
+	case LINUX_F_GETLK:
+		error = copyin((void *)args->arg, &linux_flock,
+		    sizeof(linux_flock));
+		if (error)
+			return (error);
+		linux_to_bsd_flock(&linux_flock, &bsd_flock);
+		error = kern_fcntl(td, args->fd, F_GETLK, (intptr_t)&bsd_flock);
+		if (error)
+			return (error);
+		bsd_to_linux_flock(&bsd_flock, &linux_flock);
+		return (copyout(&linux_flock, (void *)args->arg,
+		    sizeof(linux_flock)));
+
+	case LINUX_F_SETLK:
+		error = copyin((void *)args->arg, &linux_flock,
+		    sizeof(linux_flock));
+		if (error)
+			return (error);
+		linux_to_bsd_flock(&linux_flock, &bsd_flock);
+		return (kern_fcntl(td, args->fd, F_SETLK,
+		    (intptr_t)&bsd_flock));
+
+	case LINUX_F_SETLKW:
+		error = copyin((void *)args->arg, &linux_flock,
+		    sizeof(linux_flock));
+		if (error)
+			return (error);
+		linux_to_bsd_flock(&linux_flock, &bsd_flock);
+		return (kern_fcntl(td, args->fd, F_SETLKW,
+		     (intptr_t)&bsd_flock));
+
+	case LINUX_F_GETOWN:
+		return (kern_fcntl(td, args->fd, F_GETOWN, 0));
+
+	case LINUX_F_SETOWN:
+		/*
+		 * XXX some Linux applications depend on F_SETOWN having no
+		 * significant effect for pipes (SIGIO is not delivered for
+		 * pipes under Linux-2.2.35 at least).
+		 */
+		error = fget(td, args->fd, &fp);
+		if (error)
+			return (error);
+		if (fp->f_type == DTYPE_PIPE) {
+			fdrop(fp, td);
+			return (EINVAL);
+		}
+		fdrop(fp, td);
+
+		return (kern_fcntl(td, args->fd, F_SETOWN, args->arg));
+	}
+
+	return (EINVAL);
+}
+
+int
+linux_fcntl(struct thread *td, struct linux_fcntl_args *args)
+{
+	struct linux_fcntl64_args args64;
+
+#ifdef DEBUG
+	if (ldebug(fcntl))
+		printf(ARGS(fcntl, "%d, %08x, *"), args->fd, args->cmd);
+#endif
+
+	args64.fd = args->fd;
+	args64.cmd = args->cmd;
+	args64.arg = args->arg;
+	return (fcntl_common(td, &args64));
+}
+
+#if defined(__i386__) || (defined(__amd64__) && defined(COMPAT_LINUX32))
+int
+linux_fcntl64(struct thread *td, struct linux_fcntl64_args *args)
+{
+	struct l_flock64 linux_flock;
+	struct flock bsd_flock;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(fcntl64))
+		printf(ARGS(fcntl64, "%d, %08x, *"), args->fd, args->cmd);
+#endif
+
+	switch (args->cmd) {
+	case LINUX_F_GETLK64:
+		error = copyin((void *)args->arg, &linux_flock,
+		    sizeof(linux_flock));
+		if (error)
+			return (error);
+		linux_to_bsd_flock64(&linux_flock, &bsd_flock);
+		error = kern_fcntl(td, args->fd, F_GETLK, (intptr_t)&bsd_flock);
+		if (error)
+			return (error);
+		bsd_to_linux_flock64(&bsd_flock, &linux_flock);
+		return (copyout(&linux_flock, (void *)args->arg,
+			    sizeof(linux_flock)));
+
+	case LINUX_F_SETLK64:
+		error = copyin((void *)args->arg, &linux_flock,
+		    sizeof(linux_flock));
+		if (error)
+			return (error);
+		linux_to_bsd_flock64(&linux_flock, &bsd_flock);
+		return (kern_fcntl(td, args->fd, F_SETLK,
+		    (intptr_t)&bsd_flock));
+
+	case LINUX_F_SETLKW64:
+		error = copyin((void *)args->arg, &linux_flock,
+		    sizeof(linux_flock));
+		if (error)
+			return (error);
+		linux_to_bsd_flock64(&linux_flock, &bsd_flock);
+		return (kern_fcntl(td, args->fd, F_SETLKW,
+		    (intptr_t)&bsd_flock));
+	}
+
+	return (fcntl_common(td, args));
+}
+#endif /* __i386__ || (__amd64__ && COMPAT_LINUX32) */
+
+int
+linux_chown(struct thread *td, struct linux_chown_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(chown))
+		printf(ARGS(chown, "%s, %d, %d"), path, args->uid, args->gid);
+#endif
+	error = kern_chown(td, path, UIO_SYSSPACE, args->uid, args->gid);
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_lchown(struct thread *td, struct linux_lchown_args *args)
+{
+	char *path;
+	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(lchown))
+		printf(ARGS(lchown, "%s, %d, %d"), path, args->uid, args->gid);
+#endif
+	error = kern_lchown(td, path, UIO_SYSSPACE, args->uid, args->gid);
+	LFREEPATH(path);
+	return (error);
 }

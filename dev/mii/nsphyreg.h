@@ -1,4 +1,3 @@
-/*	$OpenBSD: nsphyreg.h,v 1.3 2000/01/18 04:20:49 jason Exp $	*/
 /*	$NetBSD: nsphyreg.h,v 1.1 1998/08/10 23:58:39 thorpej Exp $	*/
 
 /*-
@@ -36,15 +35,15 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/mii/nsphyreg.h,v 1.2 1999/08/28 00:42:16 peter Exp $
  */
 
 #ifndef _DEV_MII_NSPHYREG_H_
 #define	_DEV_MII_NSPHYREG_H_
 
 /*
- * National Semiconductor DP83840 Ethernet PHY register definitions
- * Further documentation can be found at:
- *	http://www.national.com/pf/DP/DP83840A.html
+ * DP83840 registers.
  */
 
 #define	MII_NSPHY_DCR		0x12	/* Disconnect counter */
@@ -61,8 +60,6 @@
 #define	PCR_DESCRTODIS		0x2000	/* descrambler t/o disable */
 #define	PCR_REPEATER		0x1000	/* repeater mode */
 #define	PCR_ENCSEL		0x0800	/* encoder mode select */
-#define	PCR_TXREADYSEL		0x0400	/* use internal txrdy signal */
-#define	PCR_CONGCTRL		0x0100	/* congestion control */
 #define	PCR_CLK25MDIS		0x0080	/* CLK25M disable */
 #define	PCR_FLINK100		0x0040	/* force good link in 100mbps */
 #define	PCR_CIMDIS		0x0020	/* carrier integrity monitor disable */

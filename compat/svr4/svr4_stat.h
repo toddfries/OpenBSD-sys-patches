@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_stat.h,v 1.3 1999/10/07 16:14:28 brad Exp $	 */
-/*	$NetBSD: svr4_stat.h,v 1.4 1996/02/10 17:12:38 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_stat.h,v 1.5 2005/01/05 22:34:36 imp Exp $
  */
 
 #ifndef	_SVR4_STAT_H_
@@ -101,6 +101,5 @@ struct svr4_stat64 {
 #define	SVR4_PC_ASYNC_IO		10
 #define	SVR4_PC_PRIO_IO			11
 #define	SVR4_PC_SYNC_IO			12
-#define	SVR4_PC_FILESIZEBITS		67
 
 #endif /* !_SVR4_STAT_H_ */

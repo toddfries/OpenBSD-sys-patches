@@ -1,6 +1,3 @@
-/*	$OpenBSD: ptrace.h,v 1.10 2005/12/11 21:30:31 miod Exp $	*/
-/*	$NetBSD: ptrace.h,v 1.21 1996/02/09 18:25:26 christos Exp $	*/
-
 /*-
  * Copyright (c) 1984, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,21 +27,48 @@
  * SUCH DAMAGE.
  *
  *	@(#)ptrace.h	8.2 (Berkeley) 1/4/94
+ * $FreeBSD: src/sys/sys/ptrace.h,v 1.28 2006/02/06 09:41:56 davidxu Exp $
  */
 
 #ifndef	_SYS_PTRACE_H_
 #define	_SYS_PTRACE_H_
 
+#include <sys/_sigset.h>
+
 #define	PT_TRACE_ME	0	/* child declares it's being traced */
 #define	PT_READ_I	1	/* read word in child's I space */
 #define	PT_READ_D	2	/* read word in child's D space */
+/* was	PT_READ_U	3	 * read word in child's user structure */
 #define	PT_WRITE_I	4	/* write word in child's I space */
 #define	PT_WRITE_D	5	/* write word in child's D space */
+/* was	PT_WRITE_U	6	 * write word in child's user structure */
 #define	PT_CONTINUE	7	/* continue the child */
 #define	PT_KILL		8	/* kill the child process */
-#define	PT_ATTACH	9	/* attach to running process */
-#define	PT_DETACH	10	/* detach from running process */
-#define PT_IO		11	/* do I/O to/from the stopped process. */
+#define	PT_STEP		9	/* single step the child */
+
+#define	PT_ATTACH	10	/* trace some running process */
+#define	PT_DETACH	11	/* stop tracing a process */
+#define PT_IO		12	/* do I/O to/from stopped process. */
+#define	PT_LWPINFO	13	/* Info about the LWP that stopped. */
+#define PT_GETNUMLWPS	14	/* get total number of threads */
+#define PT_GETLWPLIST	15	/* get thread list */
+#define PT_CLEARSTEP	16	/* turn off single step */
+#define PT_SETSTEP	17	/* turn on single step */
+#define PT_SUSPEND	18	/* suspend a thread */
+#define PT_RESUME	19	/* resume a thread */
+
+#define	PT_TO_SCE	20
+#define	PT_TO_SCX	21
+#define	PT_SYSCALL	22
+
+#define PT_GETREGS      33	/* get general-purpose registers */
+#define PT_SETREGS      34	/* set general-purpose registers */
+#define PT_GETFPREGS    35	/* get floating-point registers */
+#define PT_SETFPREGS    36	/* set floating-point registers */
+#define PT_GETDBREGS    37	/* get debugging registers */
+#define PT_SETDBREGS    38	/* set debugging registers */
+#define PT_FIRSTMACH    64	/* for machine-specific requests */
+#include <machine/ptrace.h>	/* machine-specific requests, if any */
 
 struct ptrace_io_desc {
 	int	piod_op;	/* I/O operation */
@@ -61,58 +85,71 @@ struct ptrace_io_desc {
 #define PIOD_READ_I	3	/* Read from I space */
 #define PIOD_WRITE_I	4	/* Write to I space */
 
-#define PT_SET_EVENT_MASK	12
-#define PT_GET_EVENT_MASK	13
-
-typedef struct ptrace_event {
-	int	pe_set_event;
-} ptrace_event_t;
-
-#define PTRACE_FORK	0x0002	/* Report forks */
-
-#define PT_GET_PROCESS_STATE	14
-
-typedef struct ptrace_state {
-	int	pe_report_event;
-	pid_t	pe_other_pid;
-} ptrace_state_t;
-
-#define	PT_FIRSTMACH	32	/* for machine-specific requests */
-#include <machine/ptrace.h>	/* machine-specific requests, if any */
+/* Argument structure for PT_LWPINFO. */
+struct ptrace_lwpinfo {
+	lwpid_t	pl_lwpid;	/* LWP described. */
+	int	pl_event;	/* Event that stopped the LWP. */
+#define	PL_EVENT_NONE	0
+#define	PL_EVENT_SIGNAL	1
+	int	pl_flags;	/* LWP flags. */
+#define	PL_FLAG_SA	0x01	/* M:N thread */
+#define	PL_FLAG_BOUND	0x02	/* M:N bound thread */
+	sigset_t	pl_sigmask;	/* LWP signal mask */
+	sigset_t	pl_siglist;	/* LWP pending signal */
+};
 
 #ifdef _KERNEL
 
+#define	PTRACESTOP_SC(p, td, flag)				\
+	if ((p)->p_flag & P_TRACED && (p)->p_stops & (flag)) {	\
+		PROC_LOCK(p);					\
+		ptracestop((td), SIGTRAP);			\
+		PROC_UNLOCK(p);					\
+	}
 /*
- * There is a bunch of PT_ requests that are machine dependent, but not
- * optional. Check if they were defined by MD code here.
+ * The flags below are used for ptrace(2) tracing and have no relation
+ * to procfs.  They are stored in struct proc's p_stops member.
  */
-#if !defined(PT_GETREGS) || !defined(PT_SETREGS)
-#error Machine dependent ptrace not complete.
+#define	S_PT_SCE	0x000010000
+#define	S_PT_SCX	0x000020000
+
+int	ptrace_set_pc(struct thread *_td, unsigned long _addr);
+int	ptrace_single_step(struct thread *_td);
+int	ptrace_clear_single_step(struct thread *_td);
+
+#ifdef __HAVE_PTRACE_MACHDEP
+int	cpu_ptrace(struct thread *_td, int _req, void *_addr, int _data);
 #endif
 
+/*
+ * These are prototypes for functions that implement some of the
+ * debugging functionality exported by procfs / linprocfs and by the
+ * ptrace(2) syscall.  They used to be part of procfs, but they don't
+ * really belong there.
+ */
 struct reg;
-#if defined(PT_GETFPREGS) || defined(PT_SETFPREGS)
 struct fpreg;
+struct dbreg;
+struct uio;
+int	proc_read_regs(struct thread *_td, struct reg *_reg);
+int	proc_write_regs(struct thread *_td, struct reg *_reg);
+int	proc_read_fpregs(struct thread *_td, struct fpreg *_fpreg);
+int	proc_write_fpregs(struct thread *_td, struct fpreg *_fpreg);
+int	proc_read_dbregs(struct thread *_td, struct dbreg *_dbreg);
+int	proc_write_dbregs(struct thread *_td, struct dbreg *_dbreg);
+int	proc_sstep(struct thread *_td);
+int	proc_rwmem(struct proc *_p, struct uio *_uio);
+#ifdef COMPAT_IA32
+struct reg32;
+struct fpreg32;
+struct dbreg32;
+int	proc_read_regs32(struct thread *_td, struct reg32 *_reg32);
+int	proc_write_regs32(struct thread *_td, struct reg32 *_reg32);
+int	proc_read_fpregs32(struct thread *_td, struct fpreg32 *_fpreg32);
+int	proc_write_fpregs32(struct thread *_td, struct fpreg32 *_fpreg32);
+int	proc_read_dbregs32(struct thread *_td, struct dbreg32 *_dbreg32);
+int	proc_write_dbregs32(struct thread *_td, struct dbreg32 *_dbreg32);
 #endif
-
-void	proc_reparent(struct proc *child, struct proc *newparent);
-#ifdef PT_GETFPREGS
-int	process_read_fpregs(struct proc *p, struct fpreg *regs);
-#endif
-int	process_read_regs(struct proc *p, struct reg *regs);
-int	process_set_pc(struct proc *p, caddr_t addr);
-int	process_sstep(struct proc *p, int sstep);
-#ifdef PT_SETFPREGS
-int	process_write_fpregs(struct proc *p, struct fpreg *regs);
-#endif
-int	process_write_regs(struct proc *p, struct reg *regs);
-int	process_checkioperm(struct proc *, struct proc *);
-int	process_domem(struct proc *, struct proc *, struct uio *, int);
-
-#ifndef FIX_SSTEP
-#define FIX_SSTEP(p)
-#endif
-
 #else /* !_KERNEL */
 
 #include <sys/cdefs.h>

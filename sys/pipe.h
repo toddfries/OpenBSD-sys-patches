@@ -1,6 +1,4 @@
-/*	$OpenBSD: pipe.h,v 1.13 2005/11/21 18:16:46 millert Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1996 John S. Dyson
  * All rights reserved.
  *
@@ -19,17 +17,16 @@
  *    is allowed if this notation is included.
  * 5. Modifications may be freely made to this file if the above conditions
  *    are met.
+ *
+ * $FreeBSD: src/sys/sys/pipe.h,v 1.29 2005/01/07 02:29:23 imp Exp $
  */
 
 #ifndef _SYS_PIPE_H_
 #define _SYS_PIPE_H_
 
 #ifndef _KERNEL
-#include <sys/time.h>			/* for struct timeval */
-#include <sys/selinfo.h>			/* for struct selinfo */
-#include <uvm/uvm_extern.h>		/* for vm_page_t */
-#include <machine/param.h>		/* for PAGE_SIZE */
-#endif /* _KERNEL */
+#error "no user-servicable parts inside"
+#endif
 
 /*
  * Pipe buffer size, keep moderate in value, pipes take kva space.
@@ -41,6 +38,25 @@
 #ifndef BIG_PIPE_SIZE
 #define BIG_PIPE_SIZE	(64*1024)
 #endif
+
+#ifndef SMALL_PIPE_SIZE
+#define SMALL_PIPE_SIZE	PAGE_SIZE
+#endif
+
+/*
+ * PIPE_MINDIRECT MUST be smaller than PIPE_SIZE and MUST be bigger
+ * than PIPE_BUF.
+ */
+#ifndef PIPE_MINDIRECT
+#define PIPE_MINDIRECT	8192
+#endif
+
+#define PIPENPAGES	(BIG_PIPE_SIZE / PAGE_SIZE + 1)
+
+/*
+ * See sys_pipe.c for info on what these limits mean. 
+ */
+extern int	maxpipekva;
 
 /*
  * Pipe buffer information.
@@ -56,6 +72,16 @@ struct pipebuf {
 };
 
 /*
+ * Information to support direct transfers between processes for pipes.
+ */
+struct pipemapping {
+	vm_size_t	cnt;		/* number of chars in buffer */
+	vm_size_t	pos;		/* current position of transfer */
+	int		npages;		/* number of pages */
+	vm_page_t	ms[PIPENPAGES];	/* pages in source process */
+};
+
+/*
  * Bits in pipe_state.
  */
 #define PIPE_ASYNC	0x004	/* Async? I/O. */
@@ -64,8 +90,10 @@ struct pipebuf {
 #define PIPE_WANT	0x020	/* Pipe is wanted to be run-down. */
 #define PIPE_SEL	0x040	/* Pipe has a select active. */
 #define PIPE_EOF	0x080	/* Pipe is in EOF condition. */
-#define PIPE_LOCK	0x100	/* Process has exclusive access to pointers/data. */
+#define PIPE_LOCKFL	0x100	/* Process has exclusive access to pointers/data. */
 #define PIPE_LWANT	0x200	/* Process wants exclusive access to pointers/data. */
+#define PIPE_DIRECTW	0x400	/* Pipe direct write active. */
+#define PIPE_DIRECTOK	0x800	/* Direct mode ok. */
 
 /*
  * Per-pipe data structure.
@@ -73,18 +101,34 @@ struct pipebuf {
  */
 struct pipe {
 	struct	pipebuf pipe_buffer;	/* data storage */
+	struct	pipemapping pipe_map;	/* pipe mapping for direct I/O */
 	struct	selinfo pipe_sel;	/* for compat with select */
 	struct	timespec pipe_atime;	/* time of last access */
 	struct	timespec pipe_mtime;	/* time of last modify */
 	struct	timespec pipe_ctime;	/* time of status change */
-	int	pipe_pgid;		/* process/group for async I/O */
+	struct	sigio *pipe_sigio;	/* information for async I/O */
 	struct	pipe *pipe_peer;	/* link with other direction */
+	struct	pipepair *pipe_pair;	/* container structure pointer */
 	u_int	pipe_state;		/* pipe status info */
 	int	pipe_busy;		/* busy flag, mostly to handle rundown sanely */
+	int	pipe_present;		/* still present? */
 };
 
-#ifdef _KERNEL
-void	pipe_init(void);
-#endif /* _KERNEL */
+/*
+ * Container structure to hold the two pipe endpoints, mutex, and label
+ * pointer.
+ */
+struct pipepair {
+	struct pipe	pp_rpipe;
+	struct pipe	pp_wpipe;
+	struct mtx	pp_mtx;
+	struct label	*pp_label;
+};
+
+#define PIPE_MTX(pipe)		(&(pipe)->pipe_pair->pp_mtx)
+#define PIPE_LOCK(pipe)		mtx_lock(PIPE_MTX(pipe))
+#define PIPE_UNLOCK(pipe)	mtx_unlock(PIPE_MTX(pipe))
+#define PIPE_LOCK_ASSERT(pipe, type)  mtx_assert(PIPE_MTX(pipe), (type))
+
 
 #endif /* !_SYS_PIPE_H_ */

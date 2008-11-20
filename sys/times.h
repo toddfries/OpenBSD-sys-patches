@@ -1,6 +1,3 @@
-/*	$OpenBSD: times.h,v 1.5 2006/01/06 18:53:06 millert Exp $	*/
-/*	$NetBSD: times.h,v 1.8 1995/03/26 20:24:54 jtc Exp $	*/
-
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,17 +32,17 @@
  * SUCH DAMAGE.
  *
  *	@(#)times.h	8.4 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/sys/times.h,v 1.9 2004/04/07 04:19:50 imp Exp $
  */
 
 #ifndef	_SYS_TIMES_H_
 #define	_SYS_TIMES_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <sys/_types.h>
 
-#ifndef	_CLOCK_T_DEFINED_
-#define	_CLOCK_T_DEFINED_
+#ifndef _CLOCK_T_DECLARED
 typedef	__clock_t	clock_t;
+#define	_CLOCK_T_DECLARED
 #endif
 
 struct tms {
@@ -56,6 +53,8 @@ struct tms {
 };
 
 #ifndef _KERNEL
+#include <sys/cdefs.h>
+
 __BEGIN_DECLS
 clock_t	times(struct tms *);
 __END_DECLS

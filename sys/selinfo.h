@@ -1,5 +1,3 @@
-/*	$OpenBSD: selinfo.h,v 1.3 2007/07/25 23:11:53 art Exp $	*/
-
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -12,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,29 +27,34 @@
  * SUCH DAMAGE.
  *
  *	@(#)select.h	8.2 (Berkeley) 1/4/94
+ * $FreeBSD: src/sys/sys/selinfo.h,v 1.18 2004/08/15 06:24:42 jmg Exp $
  */
 
 #ifndef _SYS_SELINFO_H_
 #define	_SYS_SELINFO_H_
 
-#include <sys/event.h>			/* for struct klist */
+#include <sys/event.h>		/* for struct klist */
 
 /*
  * Used to maintain information about processes that wish to be
  * notified when I/O becomes possible.
  */
 struct selinfo {
-	pid_t	si_selpid;	/* process to be notified */
-	struct	klist si_note;	/* kernel note list */
+	TAILQ_ENTRY(selinfo)	si_thrlist;	/* list hung off of thread */
+	struct	thread *si_thread;	/* thread waiting */
+	struct	knlist si_note;	/* kernel note list */
 	short	si_flags;	/* see below */
 };
 #define	SI_COLL	0x0001		/* collision occurred */
 
-#ifdef _KERNEL
-struct proc;
+#define	SEL_WAITING(si)	\
+	((si)->si_thread != NULL || ((si)->si_flags & SI_COLL) != 0)
 
-void	selrecord(struct proc *selector, struct selinfo *);
-void	selwakeup(struct selinfo *);
+#ifdef _KERNEL
+void	clear_selinfo_list(struct thread *td);
+void	selrecord(struct thread *selector, struct selinfo *sip);
+void	selwakeup(struct selinfo *sip);
+void	selwakeuppri(struct selinfo *sip, int pri);
 #endif
 
 #endif /* !_SYS_SELINFO_H_ */

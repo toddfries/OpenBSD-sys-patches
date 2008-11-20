@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_sysconfig.h,v 1.2 1996/08/02 20:35:44 niklas Exp $	 */
-/*	$NetBSD: svr4_sysconfig.h,v 1.1 1995/07/02 06:16:10 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1995 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_sysconfig.h,v 1.4 2005/01/05 22:34:37 imp Exp $
  */
 
 #ifndef	_SVR4_SYSCONFIG_H_

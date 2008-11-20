@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_ttold.h,v 1.2 1996/08/02 20:35:46 niklas Exp $	 */
-/*	$NetBSD: svr4_ttold.h,v 1.2 1994/11/18 02:54:25 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_ttold.h,v 1.4 2005/01/05 22:34:37 imp Exp $
  */
 
 #ifndef	_SVR4_TTOLD_H_

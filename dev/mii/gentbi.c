@@ -1,5 +1,4 @@
-/*	$OpenBSD: gentbi.c,v 1.5 2008/05/13 02:24:08 brad Exp $	*/
-/*	$NetBSD: gentbi.c,v 1.12 2004/04/11 15:40:56 thorpej Exp $	*/
+/*	$NetBSD: gentbi.c,v 1.15 2006/03/29 07:05:24 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -74,45 +73,65 @@
  * All we have to do here is correctly report speed and duplex.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/gentbi.c,v 1.4 2007/10/29 21:11:55 marius Exp $");
+
+/*
+ * Driver for generic unknown ten-bit interfaces(1000BASE-{LX,SX}
+ * fiber interfaces).
+ */
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
+#include <sys/module.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/mii/miidevs.h>
+#include "miidevs.h"
 
-int	gentbimatch(struct device *, void *, void *);
-void	gentbiattach(struct device *, struct device *, void *);
+#include "miibus_if.h"
 
-struct cfattach gentbi_ca = {
-	sizeof(struct mii_softc), gentbimatch, gentbiattach,
-	    mii_phy_detach, mii_phy_activate
+static int	gentbi_probe(device_t);
+static int	gentbi_attach(device_t);
+
+static device_method_t gentbi_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		gentbi_probe),
+	DEVMETHOD(device_attach,	gentbi_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{0, 0}
 };
 
-struct cfdriver gentbi_cd = {
-	NULL, "gentbi", DV_DULL
+static devclass_t gentbi_devclass;
+
+static driver_t gentbi_driver = {
+	"gentbi",
+	gentbi_methods,
+	sizeof(struct mii_softc)
 };
 
-int	gentbi_service(struct mii_softc *, struct mii_data *, int);
-void	gentbi_status(struct mii_softc *);
+DRIVER_MODULE(gentbi, miibus, gentbi_driver, gentbi_devclass, 0, 0);
 
-const struct mii_phy_funcs gentbi_funcs = {
-	gentbi_service, gentbi_status, mii_phy_reset,
-};
+static int	gentbi_service(struct mii_softc *, struct mii_data *, int);
+static void	gentbi_status(struct mii_softc *);
 
-int
-gentbimatch(struct device *parent, void *match, void *aux)
+static int
+gentbi_probe(device_t dev)
 {
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
+	device_t parent;
+	struct mii_attach_args *ma;
 	int bmsr, extsr;
+
+	parent = device_get_parent(dev);
+	ma = device_get_ivars(dev);
 
 	/*
 	 * We match as a generic TBI if:
@@ -120,13 +139,13 @@ gentbimatch(struct device *parent, void *match, void *aux)
 	 *	- There is no media in the BMSR.
 	 *	- EXTSR has only 1000X.
 	 */
-	bmsr = (*mii->mii_readreg)(parent, ma->mii_phyno, MII_BMSR);
+	bmsr = MIIBUS_READREG(parent, ma->mii_phyno, MII_BMSR);
 	if ((bmsr & BMSR_EXTSTAT) == 0 || (bmsr & BMSR_MEDIAMASK) != 0)
-		return (0);
+		return (ENXIO);
 
-	extsr = (*mii->mii_readreg)(parent, ma->mii_phyno, MII_EXTSR);
+	extsr = MIIBUS_READREG(parent, ma->mii_phyno, MII_EXTSR);
 	if (extsr & (EXTSR_1000TFDX|EXTSR_1000THDX))
-		return (0);
+		return (ENXIO);
 
 	if (extsr & (EXTSR_1000XFDX|EXTSR_1000XHDX)) {
 		/*
@@ -134,30 +153,39 @@ gentbimatch(struct device *parent, void *match, void *aux)
 		 * priority higher than ukphy, but lower than what
 		 * specific drivers will return.
 		 */
-		return (2);
+		device_set_desc(dev, "Generic ten-bit interface");
+		return (BUS_PROBE_LOW_PRIORITY);
 	}
 
-	return (0);
+	return (ENXIO);
 }
 
-void
-gentbiattach(struct device *parent, struct device *self, void *aux)
+static int
+gentbi_attach(device_t dev)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
+	struct mii_softc *sc;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
 
-	printf(": Generic ten-bit interface, rev. %d\n",
-	    MII_REV(ma->mii_id2));
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	sc->mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->mii_dev);
+	LIST_INSERT_HEAD(&mii->mii_phys, sc, mii_list);
+
+	if (bootverbose)
+		device_printf(dev, "OUI 0x%06x, model 0x%04x, rev. %d\n",
+		    MII_OUI(ma->mii_id1, ma->mii_id2),
+		    MII_MODEL(ma->mii_id2), MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &gentbi_funcs;
+	sc->mii_service = gentbi_service;
 	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = MII_ANEGTICKS;
 
-	PHY_RESET(sc);
+	mii->mii_instance++;
+
+	mii_phy_reset(sc);
 
 	/*
 	 * Mask out all media in the BMSR.  We only are really interested
@@ -168,12 +196,15 @@ gentbiattach(struct device *parent, struct device *self, void *aux)
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
 
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
-	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK))
-		mii_phy_add_media(sc);
+	device_printf(dev, " ");
+	mii_phy_add_media(sc);
+	printf("\n");
+
+	MIIBUS_MEDIAINIT(sc->mii_dev);
+	return (0);
 }
 
-int
+static int
 gentbi_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -218,21 +249,17 @@ gentbi_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		if (mii_phy_tick(sc) == EJUSTRETURN)
 			return (0);
 		break;
-
-	case MII_DOWN:
-		mii_phy_down(sc);
-		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	gentbi_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);
 	return (0);
 }
 
-void
+static void
 gentbi_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -277,8 +304,7 @@ gentbi_status(struct mii_softc *sc)
 		anlpar = PHY_READ(sc, MII_ANLPAR);
 		if ((sc->mii_extcapabilities & EXTSR_1000XFDX) != 0 &&
 		    (anlpar & ANLPAR_X_FD) != 0)
-			mii->mii_media_active |=
-			    IFM_FDX;
+			mii->mii_media_active |= IFM_FDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

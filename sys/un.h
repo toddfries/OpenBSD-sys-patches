@@ -1,7 +1,4 @@
-/*	$OpenBSD: un.h,v 1.8 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: un.h,v 1.11 1996/02/04 02:12:47 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,44 +26,59 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)un.h	8.1 (Berkeley) 6/2/93
+ *	@(#)un.h	8.3 (Berkeley) 2/19/95
+ * $FreeBSD: src/sys/sys/un.h,v 1.29 2005/04/13 00:01:46 mdodd Exp $
  */
 
 #ifndef _SYS_UN_H_
-#define	_SYS_UN_H_
+#define _SYS_UN_H_
+
+#include <sys/cdefs.h>
+#include <sys/_types.h>
+
+#ifndef _SA_FAMILY_T_DECLARED
+typedef	__sa_family_t	sa_family_t;
+#define	_SA_FAMILY_T_DECLARED
+#endif
 
 /*
  * Definitions for UNIX IPC domain.
  */
-struct	sockaddr_un {
+struct sockaddr_un {
 	unsigned char	sun_len;	/* sockaddr len including null */
-	unsigned char	sun_family;	/* AF_UNIX */
+	sa_family_t	sun_family;	/* AF_UNIX */
 	char	sun_path[104];		/* path name (gag) */
 };
 
-#ifdef _KERNEL
-struct unpcb;
-struct socket;
+#if __BSD_VISIBLE
 
-int	unp_attach(struct socket *so);
-int	unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p);
-int	unp_connect(struct socket *so, struct mbuf *nam, struct proc *p);
-int	unp_connect2(struct socket *so, struct socket *so2);
-void	unp_detach(struct unpcb *unp);
-void	unp_discard(struct file *fp);
-void	unp_disconnect(struct unpcb *unp);
-void	unp_drop(struct unpcb *unp, int errno);
-void	unp_gc(void);
-void	unp_mark(struct file *fp);
-void	unp_scan(struct mbuf *m0, void (*op)(struct file *), int);
-void	unp_shutdown(struct unpcb *unp);
-int 	unp_externalize(struct mbuf *);
-int	unp_internalize(struct mbuf *, struct proc *);
-void 	unp_dispose(struct mbuf *);
+/* Socket options. */
+#define	LOCAL_PEERCRED		0x001	/* retrieve peer credentials */
+#define	LOCAL_CREDS		0x002	/* pass credentials to receiver */
+#define	LOCAL_CONNWAIT		0x004	/* connects block until accepted */
+
+#ifdef _KERNEL
+struct mbuf;
+struct socket;
+struct sockopt;
+
+int	uipc_connect2(struct socket *so1, struct socket *so2);
+int	uipc_ctloutput(struct socket *so, struct sockopt *sopt);
+int	uipc_usrreq(struct socket *so, int req, struct mbuf *m,
+		struct mbuf *nam, struct mbuf *control);
+void	unp_dispose(struct mbuf *m);
+int	unp_externalize(struct mbuf *mbuf, struct mbuf **controlp);
+void	unp_init(void);
+extern	struct pr_usrreqs uipc_usrreqs;
+
 #else /* !_KERNEL */
 
 /* actual length of an initialized sockaddr_un */
 #define SUN_LEN(su) \
 	(sizeof(*(su)) - sizeof((su)->sun_path) + strlen((su)->sun_path))
+
 #endif /* _KERNEL */
+
+#endif /* __BSD_VISIBLE */
+
 #endif /* !_SYS_UN_H_ */

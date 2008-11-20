@@ -1,9 +1,7 @@
-/*	$OpenBSD: udp_var.h,v 1.19 2008/05/24 19:48:32 thib Exp $	*/
-/*	$NetBSD: udp_var.h,v 1.12 1996/02/13 23:44:41 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1989, 1993
- *	The Regents of the University of California.  All rights reserved.
+ *	The Regents of the University of California.
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,17 +28,18 @@
  * SUCH DAMAGE.
  *
  *	@(#)udp_var.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/udp_var.h,v 1.33 2007/07/10 09:30:46 rwatson Exp $
  */
 
 #ifndef _NETINET_UDP_VAR_H_
-#define _NETINET_UDP_VAR_H_
+#define	_NETINET_UDP_VAR_H_
 
 /*
  * UDP kernel structures and variables.
  */
-struct	udpiphdr {
-	struct	ipovly ui_i;		/* overlaid ip structure */
-	struct	udphdr ui_u;		/* udp header */
+struct udpiphdr {
+	struct ipovly	ui_i;		/* overlaid ip structure */
+	struct udphdr	ui_u;		/* udp header */
 };
 #define	ui_x1		ui_i.ih_x1
 #define	ui_pr		ui_i.ih_pr
@@ -52,7 +51,7 @@ struct	udpiphdr {
 #define	ui_ulen		ui_u.uh_ulen
 #define	ui_sum		ui_u.uh_sum
 
-struct	udpstat {
+struct udpstat {
 				/* input statistics: */
 	u_long	udps_ipackets;		/* total input packets */
 	u_long	udps_hdrops;		/* packet shorter than header */
@@ -61,61 +60,53 @@ struct	udpstat {
 	u_long	udps_badlen;		/* data length larger than packet */
 	u_long	udps_noport;		/* no socket on port */
 	u_long	udps_noportbcast;	/* of above, arrived as broadcast */
-	u_long	udps_nosec;		/* dropped for lack of ipsec */
 	u_long	udps_fullsock;		/* not delivered, input socket full */
-	u_long	udps_pcbhashmiss;	/* input packets missing pcb hash */
-	u_long	udps_inhwcsum;		/* input hardware-csummed packets */
+	u_long	udpps_pcbcachemiss;	/* input packets missing pcb cache */
+	u_long	udpps_pcbhashmiss;	/* input packets not for hashed pcb */
 				/* output statistics: */
 	u_long	udps_opackets;		/* total output packets */
-	u_long	udps_outhwcsum;		/* output hardware-csummed packets */
+	u_long	udps_fastout;		/* output packets on fast path */
+	/* of no socket on port, arrived as multicast */
+	u_long	udps_noportmcast;
+	u_long	udps_filtermcast;	/* blocked by multicast filter */
 };
 
 /*
- * Names for UDP sysctl objects
+ * Names for UDP sysctl objects.
  */
-#define	UDPCTL_CHECKSUM		1 /* checksum UDP packets */
-#define	UDPCTL_BADDYNAMIC	2 /* return bad dynamic port bitmap */
-#define UDPCTL_RECVSPACE	3 /* receive buffer space */
-#define UDPCTL_SENDSPACE	4 /* send buffer space */
-#define UDPCTL_STATS		5 /* UDP statistics */
-#define UDPCTL_MAXID		6
+#define	UDPCTL_CHECKSUM		1	/* checksum UDP packets */
+#define	UDPCTL_STATS		2	/* statistics (read-only) */
+#define	UDPCTL_MAXDGRAM		3	/* max datagram size */
+#define	UDPCTL_RECVSPACE	4	/* default receive buffer space */
+#define	UDPCTL_PCBLIST		5	/* list of PCBs for UDP sockets */
+#define	UDPCTL_MAXID		6
 
-#define UDPCTL_NAMES { \
-	{ 0, 0 }, \
-	{ "checksum", CTLTYPE_INT }, \
-	{ "baddynamic", CTLTYPE_STRUCT }, \
-	{ "recvspace",  CTLTYPE_INT }, \
-	{ "sendspace",  CTLTYPE_INT }, \
-	{ "stats",	CTLTYPE_STRUCT } \
-}
-
-#define UDPCTL_VARS { \
-	NULL, \
-	&udpcksum, \
-	NULL, \
-	&udp_recvspace, \
-	&udp_sendspace, \
-	NULL \
+#define	UDPCTL_NAMES	{						\
+	{ 0, 0 },							\
+	{ "checksum", CTLTYPE_INT },					\
+	{ "stats", CTLTYPE_STRUCT },					\
+	{ "maxdgram", CTLTYPE_INT },					\
+	{ "recvspace", CTLTYPE_INT },					\
+	{ "pcblist", CTLTYPE_STRUCT },					\
 }
 
 #ifdef _KERNEL
-extern struct	inpcbtable udbtable;
-extern struct	udpstat udpstat;
+SYSCTL_DECL(_net_inet_udp);
 
-#if defined(INET6) && !defined(TCP6)
-void	udp6_ctlinput(int, struct sockaddr *, void *);
-int	udp6_input(struct mbuf **, int *, int);
-#endif /* INET6 && !TCP6 */
-void	 *udp_ctlinput(int, struct sockaddr *, void *);
-void	 udp_init(void);
-void	 udp_input(struct mbuf *, ...);
-#ifdef INET6
-int	 udp6_output(struct inpcb *, struct mbuf *, struct mbuf *,
-	struct mbuf *);
-#endif /* INET6 */
-int	 udp_output(struct mbuf *, ...);
-int	 udp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-int	 udp_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
-#endif /* _KERNEL */
-#endif /* _NETINET_UDP_VAR_H_ */
+extern struct pr_usrreqs	udp_usrreqs;
+extern struct inpcbhead		udb;
+extern struct inpcbinfo		udbinfo;
+extern u_long			udp_sendspace;
+extern u_long			udp_recvspace;
+extern struct udpstat		udpstat;
+extern int			udp_blackhole;
+extern int			udp_log_in_vain;
+
+void		 udp_ctlinput(int, struct sockaddr *, void *);
+void		 udp_init(void);
+void		 udp_input(struct mbuf *, int);
+struct inpcb	*udp_notify(struct inpcb *inp, int errno);
+int		 udp_shutdown(struct socket *so);
+#endif
+
+#endif

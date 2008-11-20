@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_gif.h,v 1.9 2003/12/03 14:51:05 markus Exp $	*/
+/*	$FreeBSD: src/sys/net/if_gif.h,v 1.19 2006/01/30 08:39:09 glebius Exp $	*/
 /*	$KAME: if_gif.h,v 1.17 2000/09/11 11:36:41 sumikawa Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -38,11 +38,26 @@
 #define _NET_IF_GIF_H_
 
 
+#ifdef _KERNEL
+#include "opt_inet.h"
+#include "opt_inet6.h"
+
 #include <netinet/in.h>
-/* XXX sigh, why route have struct route instead of pointer? */
+/* xxx sigh, why route have struct route instead of pointer? */
+
+struct encaptab;
+
+extern	void (*ng_gif_input_p)(struct ifnet *ifp, struct mbuf **mp,
+		int af);
+extern	void (*ng_gif_input_orphan_p)(struct ifnet *ifp, struct mbuf *m,
+		int af);
+extern	int  (*ng_gif_output_p)(struct ifnet *ifp, struct mbuf **mp);
+extern	void (*ng_gif_attach_p)(struct ifnet *ifp);
+extern	void (*ng_gif_detach_p)(struct ifnet *ifp);
 
 struct gif_softc {
-	struct ifnet	gif_if;	   /* common area */
+	struct ifnet	*gif_ifp;
+	struct mtx	gif_mtx;
 	struct sockaddr	*gif_psrc; /* Physical src addr */
 	struct sockaddr	*gif_pdst; /* Physical dst addr */
 	union {
@@ -52,8 +67,18 @@ struct gif_softc {
 #endif
 	} gifsc_gifscr;
 	int		gif_flags;
-	LIST_ENTRY(gif_softc) gif_list;	/* list of all gifs */
+	const struct encaptab *encap_cookie4;
+	const struct encaptab *encap_cookie6;
+	void		*gif_netgraph;	/* ng_gif(4) netgraph node info */
+	LIST_ENTRY(gif_softc) gif_list; /* all gif's are linked */
 };
+#define	GIF2IFP(sc)	((sc)->gif_ifp)
+#define	GIF_LOCK_INIT(sc)	mtx_init(&(sc)->gif_mtx, "gif softc",	\
+				     NULL, MTX_DEF)
+#define	GIF_LOCK_DESTROY(sc)	mtx_destroy(&(sc)->gif_mtx)
+#define	GIF_LOCK(sc)		mtx_lock(&(sc)->gif_mtx)
+#define	GIF_UNLOCK(sc)		mtx_unlock(&(sc)->gif_mtx)
+#define	GIF_LOCK_ASSERT(sc)	mtx_assert(&(sc)->gif_mtx, MA_OWNED)
 
 #define gif_ro gifsc_gifscr.gifscr_ro
 #ifdef INET6
@@ -64,11 +89,26 @@ struct gif_softc {
 #define	GIF_MTU_MIN	(1280)	/* Minimum MTU */
 #define	GIF_MTU_MAX	(8192)	/* Maximum MTU */
 
-extern LIST_HEAD(gif_softc_head, gif_softc) gif_softc_list;
+#define	MTAG_GIF	1080679712
+#define	MTAG_GIF_CALLED	0
+
+struct etherip_header {
+	u_int8_t eip_ver;	/* version/reserved */
+	u_int8_t eip_pad;	/* required padding byte */
+};
+#define ETHERIP_VER_VERS_MASK   0x0f
+#define ETHERIP_VER_RSVD_MASK   0xf0
+#define ETHERIP_VERSION         0x03
 
 /* Prototypes */
-int gif_output(struct ifnet *, struct mbuf *,
-		    struct sockaddr *, struct rtentry *);
+void gif_input(struct mbuf *, int, struct ifnet *);
+int gif_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+	       struct rtentry *);
 int gif_ioctl(struct ifnet *, u_long, caddr_t);
-void gif_start(struct ifnet *);
+int gif_set_tunnel(struct ifnet *, struct sockaddr *, struct sockaddr *);
+void gif_delete_tunnel(struct ifnet *);
+int gif_encapcheck(const struct mbuf *, int, int, void *);
+
+#endif /* _KERNEL */
+
 #endif /* _NET_IF_GIF_H_ */

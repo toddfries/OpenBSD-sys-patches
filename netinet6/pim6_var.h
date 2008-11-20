@@ -1,7 +1,7 @@
-/*	$OpenBSD: pim6_var.h,v 1.9 2007/12/14 18:33:41 deraadt Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/pim6_var.h,v 1.5 2005/08/10 07:10:02 obrien Exp $	*/
 /*	$KAME: pim6_var.h,v 1.8 2000/06/06 08:07:43 jinmei Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1998 WIDE Project.
  * All rights reserved.
  *
@@ -42,30 +42,27 @@
  */
 
 struct pim6stat {
-	u_int64_t pim6s_rcv_total;	/* total PIM messages received	*/
-	u_int64_t pim6s_rcv_tooshort;	/* received with too few bytes	*/
-	u_int64_t pim6s_rcv_badsum;	/* received with bad checksum	*/
-	u_int64_t pim6s_rcv_badversion;	/* received bad PIM version	*/
-	u_int64_t pim6s_rcv_registers;	/* received registers		*/
-	u_int64_t pim6s_rcv_badregisters; /* received invalid registers	*/
-	u_int64_t pim6s_snd_registers;	/* sent registers		*/
+	u_quad_t pim6s_rcv_total;	/* total PIM messages received	*/
+	u_quad_t pim6s_rcv_tooshort;	/* received with too few bytes	*/
+	u_quad_t pim6s_rcv_badsum;	/* received with bad checksum	*/
+	u_quad_t pim6s_rcv_badversion;	/* received bad PIM version	*/
+	u_quad_t pim6s_rcv_registers;	/* received registers		*/
+	u_quad_t pim6s_rcv_badregisters; /* received invalid registers	*/
+	u_quad_t pim6s_snd_registers;	/* sent registers		*/
 };
 
 #if (defined(KERNEL)) || (defined(_KERNEL))
-extern struct pim6stat pim6stat;
-int pim6_input(struct mbuf **, int *, int);
-int pim6_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+int pim6_input __P((struct mbuf **, int*, int));
 #endif /* KERNEL */
 
 /*
- * Names for PIM6 sysctl objects
+ * Names for PIM sysctl objects
  */
-#define PIM6CTL_STATS		1	/* PIM6 stats */
+#define PIM6CTL_STATS		1	/* statistics (read-only) */
 #define PIM6CTL_MAXID		2
 
 #define PIM6CTL_NAMES { \
 	{ 0, 0 }, \
-	{ "stats", CTLTYPE_NODE }, \
+	{ 0, 0 }, \
 }
-
 #endif /* _NETINET6_PIM6_VAR_H_ */

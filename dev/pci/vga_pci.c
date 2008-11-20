@@ -1,11 +1,6 @@
-/* $OpenBSD: vga_pci.c,v 1.32 2008/06/03 17:14:21 brad Exp $ */
-/* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
-
-/*
- * Copyright (c) 2001 Wasabi Systems, Inc.
+/*-
+ * Copyright (c) 2005 John Baldwin <jhb@FreeBSD.org>
  * All rights reserved.
- *
- * Written by Frank van der Linden for Wasabi Systems, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,460 +10,246 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed for the NetBSD Project by
- *	Wasabi Systems, Inc.
- * 4. The name of Wasabi Systems, Inc. may not be used to endorse
- *    or promote products derived from this software without specific prior
- *    written permission.
+ * 3. Neither the name of the author nor the names of any co-contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
-/*
- * Copyright (c) 1995, 1996 Carnegie-Mellon University.
- * All rights reserved.
- *
- * Author: Chris G. Demetriou
- *
- * Permission to use, copy, modify and distribute this software and
- * its documentation is hereby granted, provided that both the copyright
- * notice and this permission notice appear in all copies of the
- * software, derivative works or modified versions, and any portions
- * thereof, and that both notices appear in supporting documentation.
- *
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
- * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- *
- * Carnegie Mellon requests users of this software to return to
- *
- *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
- *  School of Computer Science
- *  Carnegie Mellon University
- *  Pittsburgh PA 15213-3890
- *
- * any improvements or extensions that they make and grant Carnegie the
- * rights to redistribute these changes.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
-#include "vga.h"
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/pci/vga_pci.c,v 1.5 2006/02/01 15:45:29 jhb Exp $");
+
+/*
+ * Simple driver for PCI VGA display devices.  Drivers such as agp(4) and
+ * drm(4) should attach as children of this device.
+ *
+ * XXX: The vgapci name is a hack until we somehow merge the isa vga driver
+ * in or rename it.
+ */
 
 #include <sys/param.h>
-#include <sys/systm.h>
+#include <sys/bus.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
-#include <sys/malloc.h>
-#include <sys/agpio.h>
-
-#include <uvm/uvm.h>
-
-#include <machine/bus.h>
+#include <sys/module.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 
-#include <dev/pci/agpvar.h>
+static int
+vga_pci_probe(device_t dev)
+{
 
-#include <dev/ic/mc6845reg.h>
-#include <dev/ic/pcdisplayvar.h>
-#include <dev/ic/vgareg.h>
-#include <dev/ic/vgavar.h>
-#include <dev/pci/vga_pcivar.h>
+	switch (pci_get_class(dev)) {
+	case PCIC_DISPLAY:
+		break;
+	case PCIC_OLD:
+		if (pci_get_subclass(dev) != PCIS_OLD_VGA)
+			return (ENXIO);
+		break;
+	default:
+		return (ENXIO);
+	}
+	device_set_desc(dev, "VGA-compatible display");
+	return (BUS_PROBE_GENERIC);
+}
 
+static int
+vga_pci_attach(device_t dev)
+{
 
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplayvar.h>
+	bus_generic_probe(dev);
 
-#ifdef VESAFB
-#include <dev/vesa/vesabiosvar.h>
-#endif
+	/* Always create a drm child for now to make it easier on drm. */
+	device_add_child(dev, "drm", -1);
+	bus_generic_attach(dev);
+	return (0);
+}
 
-#include "agp.h"
-#include "drmbase.h"
+static int
+vga_pci_suspend(device_t dev)
+{
 
-int	vga_pci_match(struct device *, void *, void *);
-void	vga_pci_attach(struct device *, struct device *, void *);
-paddr_t	vga_pci_mmap(void* v, off_t off, int prot);
-void	vga_pci_bar_init(struct vga_pci_softc *, struct pci_attach_args *);
+	return (bus_generic_suspend(dev));
+}
 
-#if NAGP > 0
-int	agpsubmatch(struct device *, void *, void *);
-int	agpbus_print(void *, const char *);
-#endif 
-#if NDRMBASE > 0
-int	drmsubmatch(struct device *, void *, void *);
-int	vga_drm_print(void *, const char *);
-#endif
+static int
+vga_pci_resume(device_t dev)
+{
 
-#ifdef VESAFB
-int vesafb_putcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
-int vesafb_getcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
-#endif
+	return (bus_generic_resume(dev));
+}
 
-struct cfattach vga_pci_ca = {
-	sizeof(struct vga_pci_softc), vga_pci_match, vga_pci_attach,
+/* Bus interface. */
+
+static int
+vga_pci_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
+{
+
+	return (BUS_READ_IVAR(device_get_parent(dev), dev, which, result));
+}
+
+static int
+vga_pci_write_ivar(device_t dev, device_t child, int which, uintptr_t value)
+{
+
+	return (EINVAL);
+}
+
+static struct resource *
+vga_pci_alloc_resource(device_t dev, device_t child, int type, int *rid,
+    u_long start, u_long end, u_long count, u_int flags)
+{
+
+	return (bus_alloc_resource(dev, type, rid, start, end, count, flags));
+}
+
+static int
+vga_pci_release_resource(device_t dev, device_t child, int type, int rid,
+    struct resource *r)
+{
+
+	return (bus_release_resource(dev, type, rid, r));
+}
+
+/* PCI interface. */
+
+static uint32_t
+vga_pci_read_config(device_t dev, device_t child, int reg, int width)
+{
+
+	return (pci_read_config(dev, reg, width));
+}
+
+static void
+vga_pci_write_config(device_t dev, device_t child, int reg, 
+    uint32_t val, int width)
+{
+
+	pci_write_config(dev, reg, val, width);
+}
+
+static int
+vga_pci_enable_busmaster(device_t dev, device_t child)
+{
+
+	device_printf(dev, "child %s requested pci_enable_busmaster\n",
+	    device_get_nameunit(child));
+	return (pci_enable_busmaster(dev));
+}
+
+static int
+vga_pci_disable_busmaster(device_t dev, device_t child)
+{
+
+	device_printf(dev, "child %s requested pci_disable_busmaster\n",
+	    device_get_nameunit(child));
+	return (pci_disable_busmaster(dev));
+}
+
+static int
+vga_pci_enable_io(device_t dev, device_t child, int space)
+{
+
+	device_printf(dev, "child %s requested pci_enable_io\n",
+	    device_get_nameunit(child));
+	return (pci_enable_io(dev, space));
+}
+
+static int
+vga_pci_disable_io(device_t dev, device_t child, int space)
+{
+
+	device_printf(dev, "child %s requested pci_disable_io\n",
+	    device_get_nameunit(child));
+	return (pci_disable_io(dev, space));
+}
+
+static int
+vga_pci_set_powerstate(device_t dev, device_t child, int state)
+{
+
+	device_printf(dev, "child %s requested pci_set_powerstate\n",
+	    device_get_nameunit(child));
+	return (pci_set_powerstate(dev, state));
+}
+
+static int
+vga_pci_get_powerstate(device_t dev, device_t child)
+{
+
+	device_printf(dev, "child %s requested pci_get_powerstate\n",
+	    device_get_nameunit(child));
+	return (pci_get_powerstate(dev));
+}
+
+static int
+vga_pci_assign_interrupt(device_t dev, device_t child)
+{
+
+	device_printf(dev, "child %s requested pci_assign_interrupt\n",
+	    device_get_nameunit(child));
+	return (PCI_ASSIGN_INTERRUPT(device_get_parent(dev), dev));
+}
+
+static int
+vga_pci_find_extcap(device_t dev, device_t child, int capability,
+    int *capreg)
+{
+
+	return (pci_find_extcap(dev, capability, capreg));
+}
+
+static device_method_t vga_pci_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		vga_pci_probe),
+	DEVMETHOD(device_attach,	vga_pci_attach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	DEVMETHOD(device_suspend,	vga_pci_suspend),
+	DEVMETHOD(device_resume,	vga_pci_resume),
+
+	/* Bus interface */
+	DEVMETHOD(bus_read_ivar,	vga_pci_read_ivar),
+	DEVMETHOD(bus_write_ivar,	vga_pci_write_ivar),
+	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
+	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
+
+	DEVMETHOD(bus_alloc_resource,	vga_pci_alloc_resource),
+	DEVMETHOD(bus_release_resource,	vga_pci_release_resource),
+	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
+	DEVMETHOD(bus_deactivate_resource, bus_generic_deactivate_resource),
+
+	/* PCI interface */
+	DEVMETHOD(pci_read_config,	vga_pci_read_config),
+	DEVMETHOD(pci_write_config,	vga_pci_write_config),
+	DEVMETHOD(pci_enable_busmaster,	vga_pci_enable_busmaster),
+	DEVMETHOD(pci_disable_busmaster, vga_pci_disable_busmaster),
+	DEVMETHOD(pci_enable_io,	vga_pci_enable_io),
+	DEVMETHOD(pci_disable_io,	vga_pci_disable_io),
+	DEVMETHOD(pci_get_powerstate,	vga_pci_get_powerstate),
+	DEVMETHOD(pci_set_powerstate,	vga_pci_set_powerstate),
+	DEVMETHOD(pci_assign_interrupt,	vga_pci_assign_interrupt),
+	DEVMETHOD(pci_find_extcap,	vga_pci_find_extcap),
+
+	{ 0, 0 }
 };
 
-#if NAGP > 0
-struct pci_attach_args agp_pchb_pa;
-int agp_pchb_pa_set = 0;
+static driver_t vga_pci_driver = {
+	"vgapci",
+	vga_pci_methods,
+	1,
+};
 
-void
-agp_set_pchb(struct pci_attach_args *pa)
-{
-	if (!agp_pchb_pa_set) {
-		memcpy(&agp_pchb_pa, pa, sizeof *pa);
-		agp_pchb_pa_set++;
-	}
-}
-#endif
+static devclass_t vga_devclass;
 
-int
-vga_pci_match(struct device *parent, void *match, void *aux)
-{
-	struct pci_attach_args *pa = aux;
-
-	if (DEVICE_IS_VGA_PCI(pa->pa_class) == 0)
-		return (0);
-
-	/* check whether it is disabled by firmware */
-	if ((pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG)
-	    & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE))
-	    != (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE))
-		return (0);
-
-	/* If it's the console, we have a winner! */
-	if (vga_is_console(pa->pa_iot, WSDISPLAY_TYPE_PCIVGA))
-		return (1);
-
-	/*
-	 * If we might match, make sure that the card actually looks OK.
-	 */
-	if (!vga_common_probe(pa->pa_iot, pa->pa_memt))
-		return (0);
-
-	return (1);
-}
-
-void
-vga_pci_attach(struct device *parent, struct device *self, void *aux)
-{
-	struct pci_attach_args *pa = aux;
-#if NAGP >0
-	struct agpbus_attach_args aba;
-#endif
-	pcireg_t reg;
-	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
-
-	/*
-	 * Enable bus master; X might need this for accelerated graphics.
-	 */
-	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	reg |= PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
-
-#ifdef VESAFB
-	if (vesabios_softc != NULL && vesabios_softc->sc_nmodes > 0) {
-		sc->sc_textmode = vesafb_get_mode(sc);
-		printf(", vesafb\n");
-		vga_extended_attach(self, pa->pa_iot, pa->pa_memt,
-		    WSDISPLAY_TYPE_PCIVGA, vga_pci_mmap);
-		return;
-	}
-#endif
-	printf("\n");
-	vga_common_attach(self, pa->pa_iot, pa->pa_memt,
-	    WSDISPLAY_TYPE_PCIVGA);
-
-	vga_pci_bar_init(sc, pa);
-
-#if NAGP > 0
-	/*
-	 * attach agp here instead of pchb so it can share mappings
-	 * with the DRM
-	 */
-	if (agp_pchb_pa_set) {
-		aba.apa_pci_args = agp_pchb_pa;
-		config_found_sm(self, &aba, agpbus_print, agpsubmatch);
-
-	}
-#endif
-
-#if NDRMBASE > 0
-	config_found_sm(self, aux, vga_drm_print, drmsubmatch);
-#endif
-}
-
-#if NAGP > 0
-int
-agpsubmatch(struct device *parent, void *match, void *aux)
-{
-	extern struct cfdriver agp_cd;
-	struct cfdata *cf = match;
-
-	/* only allow agp to attach */
-	if (cf->cf_driver == &agp_cd)
-		return ((*cf->cf_attach->ca_match)(parent, match, aux));
-	return (0);
-}
-
-int
-agpbus_print(void *vaa, const char *pnp)
-{
-	if (pnp)
-		printf("agp at %s", pnp);
-	return (UNCONF);
-}
-#endif
-
-#if NDRMBASE > 0
-int
-drmsubmatch(struct device *parent, void *match, void *aux)
-{
-	struct cfdata *cf = match;
-	struct cfdriver *cd;
-	size_t len = 0;
-	char *sm;
-
-	cd = cf->cf_driver;
-
-	/* is this a *drm device? */
-	len = strlen(cd->cd_name);
-	sm = cd->cd_name + len -3;
-	if (strncmp(sm,"drm",3) == 0)
-		return ((*cf->cf_attach->ca_match)(parent, match, aux));
-
-	return (0);
-}
-
-int
-vga_drm_print(void *aux, const char *pnp)
-{
-       if (pnp)
-               printf("direct rendering for %s", pnp);
-       return (UNSUPP);
-}
-#endif
-
-paddr_t
-vga_pci_mmap(void *v, off_t off, int prot)
-{
-#ifdef VESAFB
-	struct vga_config *vc = (struct vga_config *)v;
-	struct vga_pci_softc *sc = (struct vga_pci_softc *)vc->vc_softc;
-
-	if (sc->sc_mode == WSDISPLAYIO_MODE_DUMBFB) {
-		if (off < 0 || off > vesabios_softc->sc_size)
-			return (-1);
-		return atop(sc->sc_base + off);
-	}
-#endif
-	return -1;
-}
-
-int
-vga_pci_cnattach(bus_space_tag_t iot, bus_space_tag_t memt,
-    pci_chipset_tag_t pc, int bus, int device, int function)
-{
-	return (vga_cnattach(iot, memt, WSDISPLAY_TYPE_PCIVGA, 0));
-}
-
-int
-vga_pci_ioctl(void *v, u_long cmd, caddr_t addr, int flag, struct proc *pb)
-{
-	int error = 0;
-#ifdef VESAFB
-	struct vga_config *vc = (struct vga_config *)v;
-	struct vga_pci_softc *sc = (struct vga_pci_softc *)vc->vc_softc;
-	struct wsdisplay_fbinfo *wdf;
-	struct wsdisplay_gfx_mode *gfxmode;
-	int mode;
-#endif
-
-	switch (cmd) {
-#ifdef VESAFB
-	case WSDISPLAYIO_SMODE:
-		mode = *(u_int *)addr;
-		switch (mode) {
-		case WSDISPLAYIO_MODE_EMUL:
-			/* back to text mode */
-			vesafb_set_mode(sc, sc->sc_textmode);
-			sc->sc_mode = mode;
-			break;
-		case WSDISPLAYIO_MODE_DUMBFB:
-			if (sc->sc_gfxmode == -1)
-				return (-1);
-			vesafb_set_mode(sc, sc->sc_gfxmode);
-			sc->sc_mode = mode;
-			break;
-		default:
-			error = -1;
-		}
-		break;
-	case WSDISPLAYIO_GINFO:
-		if (sc->sc_gfxmode == -1)
-			return (-1);
-		wdf = (void *)addr;
-		wdf->height = sc->sc_height;
-		wdf->width = sc->sc_width;
-		wdf->depth = sc->sc_depth;
-		wdf->cmsize = 256;
-		break;
-
-	case WSDISPLAYIO_LINEBYTES:
-		if (sc->sc_gfxmode == -1)
-			return (-1);
-		*(u_int *)addr = sc->sc_linebytes;
-		break;
-
-	case WSDISPLAYIO_SVIDEO:
-	case WSDISPLAYIO_GVIDEO:
-		break;
-	case WSDISPLAYIO_GETCMAP:
-		if (sc->sc_depth == 8)
-			error = vesafb_getcmap(sc,
-			    (struct wsdisplay_cmap *)addr);
-		break;
-
-	case WSDISPLAYIO_PUTCMAP:
-		if (sc->sc_depth == 8)
-			error = vesafb_putcmap(sc,
-			    (struct wsdisplay_cmap *)addr);
-		break;
-
-	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
-		*(int *)addr = vesafb_get_supported_depth(sc);
-		break;
-		
-	case WSDISPLAYIO_SETGFXMODE:
-		gfxmode = (struct wsdisplay_gfx_mode *)addr;
-		sc->sc_gfxmode = vesafb_find_mode(sc, gfxmode->width,
-		    gfxmode->height, gfxmode->depth);
-		if (sc->sc_gfxmode == -1) 
-			error = -1;
-		break;
-
-#endif
-	default:
-		error = ENOTTY;
-	}
-
-	return (error);
-}
-
-#ifdef notyet
-void
-vga_pci_close(void *v)
-{
-}
-#endif
-
-/*
- * Prepare dev->bars to be used for information. we do this at startup
- * so we can do the whole array at once, dealing with 64-bit BARs correctly.
- */
-void
-vga_pci_bar_init(struct vga_pci_softc *dev, struct pci_attach_args *pa)
-{
-	pcireg_t type;
-	int addr = PCI_MAPREG_START, i = 0;
-	memcpy(&dev->pa, pa, sizeof(dev->pa));
-
-	while (i < VGA_PCI_MAX_BARS) {
-		dev->bars[i] = malloc(sizeof((*dev->bars[i])), M_DEVBUF,
-		    M_NOWAIT | M_ZERO);
-		if (dev->bars[i] == NULL) {
-			return;
-		}
-
-		dev->bars[i]->addr = addr;
-
-		type = dev->bars[i]->maptype = pci_mapreg_type(pa->pa_pc,
-		    pa->pa_tag, addr);
-		if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, addr,
-		    dev->bars[i]->maptype, &dev->bars[i]->base,
-		    &dev->bars[i]->maxsize, &dev->bars[i]->flags) != 0) {
-			free(dev->bars[i], M_DEVBUF);
-			dev->bars[i] = NULL;
-		}
-
-		addr+=4;
-		++i;
-	}
-}
-
-/*
- * Get the vga_pci_bar struct for the address in question. returns NULL if
- * invalid BAR is passed.
- */
-struct vga_pci_bar*
-vga_pci_bar_info(struct vga_pci_softc *dev, int no)
-{
-	if (dev == NULL || no > VGA_PCI_MAX_BARS)
-		return (NULL);
-	return (dev->bars[no]);
-}
-
-/*
- * map the BAR in question, returning the vga_pci_bar struct in case any more
- * processing needs to be done. Returns NULL on failure. Can be called multiple
- * times.
- */
-struct vga_pci_bar*
-vga_pci_bar_map(struct vga_pci_softc *dev, int addr, bus_size_t size,
-    int busflags)
-{
-	struct vga_pci_bar *bar = NULL;
-	int i;
-
-	if (dev == NULL) 
-		return (NULL);
-
-	for (i = 0; i < VGA_PCI_MAX_BARS; i++) {
-		if (dev->bars[i] && dev->bars[i]->addr == addr) {
-			bar = dev->bars[i];
-			break;
-		}
-	}
-	if (bar == NULL) {
-		printf("vga_pci_bar_map: given invalid address 0x%x\n", addr);
-		return (NULL);
-	}
-
-	if (bar->mapped == 0) {
-		if (pci_mapreg_map(&dev->pa, bar->addr, bar->maptype,
-		    bar->flags | busflags, &bar->bst, &bar->bsh, NULL,
-		    &bar->size, size)) {
-			printf("vga_pci_bar_map: can't map bar 0x%x\n", addr);
-			return (NULL);
-		}
-	}
-
-	bar->mapped++;
-	return (bar);
-}
-
-/*
- * "unmap" the BAR referred to by argument. If more than one place has mapped it
- * we just decrement the reference counter so nothing untoward happens.
- */
-void
-vga_pci_bar_unmap(struct vga_pci_bar *bar)
-{
-	if (bar != NULL && bar->mapped != 0) {
-		if (--bar->mapped == 0)
-			bus_space_unmap(bar->bst, bar->bsh, bar->size);
-	}
-}
+DRIVER_MODULE(vgapci, pci, vga_pci_driver, vga_devclass, 0, 0);

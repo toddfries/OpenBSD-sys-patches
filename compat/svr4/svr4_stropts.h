@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_stropts.h,v 1.5 2002/03/14 01:26:51 millert Exp $	*/
-/*	$NetBSD: svr4_stropts.h,v 1.9 1996/10/28 08:46:38 fvdl Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_stropts.h,v 1.6 2006/07/28 16:56:17 jhb Exp $
  */
 
 #ifndef	_SVR4_STROPTS_H_
@@ -81,6 +81,13 @@ struct svr4_strbuf {
 #define SVR4__I_BIND_RSVD    (SVR4_STR|242)
 #define SVR4__I_RELE_RSVD    (SVR4_STR|243)
 
+/*
+ * Service type definitions
+ */
+#define SVR4_T_COTS           1   /* Connection-orieted */
+#define SVR4_T_COTS_ORD       2   /* Local connection-oriented */
+#define SVR4_T_CLTS           3   /* Connectionless */
+
 /* Struct passed for SVR4_I_STR */
 struct svr4_strioctl {
 	u_long	 cmd;
@@ -89,16 +96,36 @@ struct svr4_strioctl {
 	char	*buf;
 };
 
+/*
+ * Bits for I_{G,S}ETSIG
+ */
+#define	SVR4_S_INPUT	0x0001		/* any message on read queue no HIPRI */
+#define	SVR4_S_HIPRI	0x0002		/* high prio message on read queue */
+#define	SVR4_S_OUTPUT	0x0004		/* write queue has free space */
+#define	SVR4_S_MSG	0x0008		/* signal message in read queue head */
+#define	SVR4_S_ERROR	0x0010		/* error message in read queue head */
+#define	SVR4_S_HANGUP	0x0020		/* hangup message in read queue head */
+#define	SVR4_S_RDNORM	0x0040		/* normal message on read queue */
+#define	SVR4_S_WRNORM	S_OUTPUT	/* write queue has free space */
+#define	SVR4_S_RDBAND	0x0080		/* out of band message on read queue */
+#define	SVR4_S_WRBAND	0x0100		/* write queue has free space for oob */
+#define	SVR4_S_BANDURG	0x0200		/* generate SIGURG instead of SIGPOLL */
+#define SVR4_S_ALLMASK	0x03ff		/* all events mask */
 
 /*
  * Our internal state for the stream
  * For now we keep almost nothing... In the future we can keep more
  * streams state.
+ *
+ * Locking key:
+ *      r - Read only field only set during creation
+ *      G - Giant
  */
 struct svr4_strm {
-	int	s_family;	/* socket family */
-	int	s_cmd;		/* last getmsg reply or putmsg request */
-	int	s_afd;		/* last accepted fd; [for fd_insert]	*/
+	int	s_family;	/* (r) socket family */
+	int	s_cmd;		/* (G) last getmsg reply or putmsg request */
+	int	s_afd;		/* (G) last accepted fd; [for fd_insert] */
+	int	s_eventmask;	/* (G) state info from I_SETSIG et al */
 };
 
 /*

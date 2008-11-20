@@ -1,8 +1,7 @@
-/*	$OpenBSD: tlphy.c,v 1.18 2006/12/27 19:11:09 kettenis Exp $	*/
-/*	$NetBSD: tlphy.c,v 1.26 2000/07/04 03:29:00 thorpej Exp $	*/
+/*	$NetBSD: tlphy.c,v 1.18 1999/05/14 11:40:28 drochner Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -38,7 +37,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
+/*-
  * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -67,6 +66,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/tlphy.c,v 1.22 2006/12/02 19:36:25 marius Exp $");
+
 /*
  * Driver for Texas Instruments's ThunderLAN PHYs
  */
@@ -74,94 +76,108 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <sys/module.h>
+#include <sys/bus.h>
+#include <sys/malloc.h>
 
 #include <machine/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/mii/miidevs.h>
+#include "miidevs.h"
 
 #include <dev/mii/tlphyreg.h>
-#include <dev/mii/tlphyvar.h>
 
-/* ThunderLAN PHY can only be on a ThunderLAN */
-#include <dev/pci/if_tlreg.h>
+#include "miibus_if.h"
 
 struct tlphy_softc {
 	struct mii_softc sc_mii;		/* generic PHY */
-	int sc_tlphycap;
 	int sc_need_acomp;
 };
 
-struct cfdriver tlphy_cd = {
-	NULL, "tlphy", DV_DULL
+static int tlphy_probe(device_t);
+static int tlphy_attach(device_t);
+
+static device_method_t tlphy_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		tlphy_probe),
+	DEVMETHOD(device_attach,	tlphy_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{ 0, 0 }
 };
 
-int	tlphymatch(struct device *, void *, void *);
-void	tlphyattach(struct device *, struct device *, void *);
+static devclass_t tlphy_devclass;
 
-struct cfattach tlphy_ca = {
-	sizeof(struct tlphy_softc), tlphymatch, tlphyattach, mii_phy_detach,
-	    mii_phy_activate
+static driver_t tlphy_driver = {
+	"tlphy",
+	tlphy_methods,
+	sizeof(struct tlphy_softc)
 };
 
-int	tlphy_service(struct mii_softc *, struct mii_data *, int);
-int	tlphy_mii_phy_auto(struct tlphy_softc *, int);
-void	tlphy_acomp(struct tlphy_softc *);
-void	tlphy_status(struct mii_softc *);
+DRIVER_MODULE(tlphy, miibus, tlphy_driver, tlphy_devclass, 0, 0);
 
-const struct mii_phy_funcs tlphy_funcs = {
-	tlphy_service, tlphy_status, mii_phy_reset,
-};
+static int	tlphy_service(struct mii_softc *, struct mii_data *, int);
+static int	tlphy_auto(struct tlphy_softc *);
+static void	tlphy_acomp(struct tlphy_softc *);
+static void	tlphy_status(struct tlphy_softc *);
 
 static const struct mii_phydesc tlphys[] = {
-	{ MII_OUI_xxTI,			MII_MODEL_xxTI_TLAN10T,
-	  MII_STR_xxTI_TLAN10T },
-
-	{ 0,			0,
-	  NULL },
+	MII_PHY_DESC(xxTI, TLAN10T),
+	MII_PHY_END
 };
 
-int
-tlphymatch(struct device *parent, void *match, void *aux)
+static int
+tlphy_probe(device_t dev)
 {
-	struct mii_attach_args *ma = aux;
 
-	if (mii_phy_match(ma, tlphys) != NULL)
-		return (10);
-
-	return (0);
+	return (mii_phy_dev_probe(dev, tlphys, BUS_PROBE_DEFAULT));
 }
 
-void
-tlphyattach(struct device *parent, struct device *self, void *aux)
+static int
+tlphy_attach(device_t dev)
 {
-	struct tlphy_softc *sc = (struct tlphy_softc *)self;
-	struct tl_softc *tlsc = (struct tl_softc *)self->dv_parent;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
-	const struct mii_phydesc *mpd;
+	device_t *devlist;
+	struct tlphy_softc *sc;
+	struct mii_softc *other;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
+	const char *sep = "";
+	int capmask, devs, i;
 
-	mpd = mii_phy_match(ma, tlphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	sc->sc_mii.mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->sc_mii.mii_dev);
+	LIST_INSERT_HEAD(&mii->mii_phys, &sc->sc_mii, mii_list);
 
 	sc->sc_mii.mii_inst = mii->mii_instance;
 	sc->sc_mii.mii_phy = ma->mii_phyno;
-	sc->sc_mii.mii_funcs = &tlphy_funcs;
+	sc->sc_mii.mii_service = tlphy_service;
 	sc->sc_mii.mii_pdata = mii;
-	sc->sc_mii.mii_flags = ma->mii_flags;
+
+	capmask = 0xFFFFFFFF;
+	if (mii->mii_instance) {
+		device_get_children(sc->sc_mii.mii_dev, &devlist, &devs);
+		for (i = 0; i < devs; i++) {
+			if (strcmp(device_get_name(devlist[i]), "tlphy")) {
+				other = device_get_softc(devlist[i]);
+				capmask &= ~other->mii_capabilities;
+				break;
+			}
+		}
+		free(devlist, M_TEMP);
+	}
+
+	mii->mii_instance++;
 
 	sc->sc_mii.mii_flags &= ~MIIF_NOISOLATE;
-	PHY_RESET(&sc->sc_mii);
+	mii_phy_reset(&sc->sc_mii);
 	sc->sc_mii.mii_flags |= MIIF_NOISOLATE;
 
 	/*
@@ -171,35 +187,45 @@ tlphyattach(struct device *parent, struct device *self, void *aux)
 	 * UTP connector.  The parent indicates this to us by specifying
 	 * the TLPHY_MEDIA_NO_10_T bit.
 	 */
-	sc->sc_tlphycap = tlsc->tl_product->tp_tlphymedia;
-	if ((sc->sc_tlphycap & TLPHY_MEDIA_NO_10_T) == 0)
-		sc->sc_mii.mii_capabilities =
-		    PHY_READ(&sc->sc_mii, MII_BMSR) & ma->mii_capmask;
-	else
-		sc->sc_mii.mii_capabilities = 0;
+	sc->sc_mii.mii_capabilities =
+	    PHY_READ(&sc->sc_mii, MII_BMSR) & capmask /*ma->mii_capmask*/;
 
+#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
 
-	if (sc->sc_tlphycap & TLPHY_MEDIA_10_2)
-		ifmedia_add(&mii->mii_media, IFM_MAKEWORD(IFM_ETHER,
-		    IFM_10_2, 0, sc->sc_mii.mii_inst), 0, NULL);
-	if (sc->sc_tlphycap & TLPHY_MEDIA_10_5)
-		ifmedia_add(&mii->mii_media, IFM_MAKEWORD(IFM_ETHER,
-		    IFM_10_5, 0, sc->sc_mii.mii_inst), 0, NULL);
-	if (sc->sc_mii.mii_capabilities & BMSR_MEDIAMASK)
-		mii_phy_add_media(&sc->sc_mii);
+	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->sc_mii.mii_inst),
+	    BMCR_ISO);
+
+	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, IFM_LOOP,
+	    sc->sc_mii.mii_inst), BMCR_LOOP);
+
+#define	PRINT(s)	printf("%s%s", sep, s); sep = ", "
+
+	device_printf(dev, " ");
+	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_2, 0, sc->sc_mii.mii_inst), 0);
+	PRINT("10base2/BNC");
+	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_5, 0, sc->sc_mii.mii_inst), 0);
+	PRINT("10base5/AUI");
+
+	if (sc->sc_mii.mii_capabilities & BMSR_MEDIAMASK) {
+		printf("%s", sep);
+		mii_add_media(&sc->sc_mii);
+	}
+
+	printf("\n");
+#undef ADD
+#undef PRINT
+	MIIBUS_MEDIAINIT(sc->sc_mii.mii_dev);
+	return (0);
 }
 
-int
+static int
 tlphy_service(struct mii_softc *self, struct mii_data *mii, int cmd)
 {
 	struct tlphy_softc *sc = (struct tlphy_softc *)self;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
 
-	if ((sc->sc_mii.mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
-
-	if ((sc->sc_mii.mii_flags & MIIF_DOINGAUTO) == 0 && sc->sc_need_acomp)
+	if (sc->sc_need_acomp)
 		tlphy_acomp(sc);
 
 	switch (cmd) {
@@ -235,53 +261,77 @@ tlphy_service(struct mii_softc *self, struct mii_data *mii, int cmd)
 			 * an autonegotiation cycle, so there's no such
 			 * thing as "already in auto mode".
 			 */
-			(void) tlphy_mii_phy_auto(sc, 1);
+			(void) tlphy_auto(sc);
 			break;
 		case IFM_10_2:
 		case IFM_10_5:
 			PHY_WRITE(&sc->sc_mii, MII_BMCR, 0);
 			PHY_WRITE(&sc->sc_mii, MII_TLPHY_CTRL, CTRL_AUISEL);
-			delay(100000);
+			DELAY(100000);
 			break;
 		default:
 			PHY_WRITE(&sc->sc_mii, MII_TLPHY_CTRL, 0);
-			delay(100000);
-			mii_phy_setmedia(&sc->sc_mii);
+			DELAY(100000);
+			PHY_WRITE(&sc->sc_mii, MII_ANAR,
+			    mii_anar(ife->ifm_media));
+			PHY_WRITE(&sc->sc_mii, MII_BMCR, ife->ifm_data);
 		}
 		break;
 
 	case MII_TICK:
-		/*
-		 * XXX WHAT ABOUT CHECKING LINK ON THE BNC/AUI?!
-		 */
-
 		/*
 		 * If we're not currently selected, just return.
 		 */
 		if (IFM_INST(ife->ifm_media) != sc->sc_mii.mii_inst)
 			return (0);
 
-		if (mii_phy_tick(&sc->sc_mii) == EJUSTRETURN)
+		/*
+		 * Is the interface even up?
+		 */
+		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
-		break;
 
-	case MII_DOWN:
-		mii_phy_down(&sc->sc_mii);
+		/*
+		 * Only used for autonegotiation.
+		 */
+		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
+			break;
+
+		/*
+		 * Check to see if we have link.  If we do, we don't
+		 * need to restart the autonegotiation process.  Read
+		 * the BMSR twice in case it's latched.
+		 *
+		 * XXX WHAT ABOUT CHECKING LINK ON THE BNC/AUI?!
+		 */
+		reg = PHY_READ(&sc->sc_mii, MII_BMSR) |
+		    PHY_READ(&sc->sc_mii, MII_BMSR);
+		if (reg & BMSR_LINK)
+			break;
+
+		/*
+		 * Only retry autonegotiation every 5 seconds.
+		 */
+		if (++sc->sc_mii.mii_ticks <= MII_ANEGTICKS)
+			break;
+
+		sc->sc_mii.mii_ticks = 0;
+		mii_phy_reset(&sc->sc_mii);
+		tlphy_auto(sc);
 		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(&sc->sc_mii);
+	tlphy_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(&sc->sc_mii, cmd);
 	return (0);
 }
 
-void
-tlphy_status(struct mii_softc *physc)
+static void
+tlphy_status(struct tlphy_softc *sc)
 {
-	struct tlphy_softc *sc = (void *) physc;
 	struct mii_data *mii = sc->sc_mii.mii_pdata;
 	int bmsr, bmcr, tlctrl;
 
@@ -318,17 +368,15 @@ tlphy_status(struct mii_softc *physc)
 	 */
 	if (bmcr & BMCR_FDX)
 		mii->mii_media_active |= IFM_FDX;
-	else
-		mii->mii_media_active |= IFM_HDX;
 	mii->mii_media_active |= IFM_10_T;
 }
 
-int
-tlphy_mii_phy_auto(struct tlphy_softc *sc, int waitfor)
+static int
+tlphy_auto(struct tlphy_softc *sc)
 {
 	int error;
 
-	switch ((error = mii_phy_auto(&sc->sc_mii, waitfor))) {
+	switch ((error = mii_phy_auto(&sc->sc_mii))) {
 	case EIO:
 		/*
 		 * Just assume we're not in full-duplex mode.
@@ -349,7 +397,7 @@ tlphy_mii_phy_auto(struct tlphy_softc *sc, int waitfor)
 	return (error);
 }
 
-void
+static void
 tlphy_acomp(struct tlphy_softc *sc)
 {
 	int aner, anlpar;

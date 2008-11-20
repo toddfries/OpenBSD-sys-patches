@@ -1,5 +1,4 @@
-/*	$OpenBSD: xmphyreg.h,v 1.5 2002/05/04 11:30:06 fgsch Exp $	*/
-/*
+/*-
  * Copyright (c) 2000
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
  *
@@ -30,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/mii/xmphyreg.h,v 1.1 2000/04/22 01:58:18 wpaul Exp $
+ * $FreeBSD: src/sys/dev/mii/xmphyreg.h,v 1.4 2005/01/06 01:42:56 imp Exp $
  */
 
 #ifndef _DEV_MII_XMPHYREG_H_
@@ -45,13 +44,14 @@
 #define XMPHY_BMCR_LOOP		0x4000
 #define XMPHY_BMCR_AUTOEN	0x1000	/* Autoneg enabled */
 #define XMPHY_BMCR_PDOWN	0x0800	/* Power down */
+#define XMPHY_BMCR_ISO		0x0400	/* Isolate */
 #define XMPHY_BMCR_STARTNEG	0x0200	/* Restart autoneg */
 #define XMPHY_BMCR_FDX		0x0100	/* Duplex mode */
 
 #define XMPHY_MII_BMSR		0x01
 #define XMPHY_BMSR_EXTSTS	0x0100	/* Extended status present */
 #define XMPHY_BMSR_ACOMP	0x0020	/* Autoneg complete */
-#define XMPHY_BMSR_RFAULT	0x0010	/* Remote fault condition occurred */
+#define XMPHY_BMSR_RFAULT	0x0010	/* Remote fault condition occured */
 #define XMPHY_BMSR_ANEG		0x0008	/* Autoneg capable */
 #define XMPHY_BMSR_LINK		0x0004	/* Link status */
 #define XMPHY_BMSR_EXT		0x0001	/* Extended capability */
@@ -61,16 +61,16 @@
 #define XMPHY_ANAR_ACK		0x4000	/* Next page or base received */
 #define XMPHY_ANAR_RFBITS	0x3000	/* Remote fault bits */
 #define XMPHY_ANAR_PAUSEBITS	0x0180	/* Pause bits */
-#define XMPHY_ANAR_FDX		0x0040	/* Select full duplex */
-#define XMPHY_ANAR_HDX		0x0020	/* Select half duplex */
+#define XMPHY_ANAR_HDX		0x0040	/* Select half duplex */
+#define XMPHY_ANAR_FDX		0x0020	/* Select full duplex */
 
 #define XMPHY_MII_ANLPAR	0x05
 #define XMPHY_ANLPAR_NP		0x8000	/* Next page */
 #define XMPHY_ANLPAR_ACK	0x4000	/* Next page or base received */
 #define XMPHY_ANLPAR_RFBITS	0x3000	/* Remote fault bits */
 #define XMPHY_ANLPAR_PAUSEBITS	0x0180	/* Pause bits */
-#define XMPHY_ANLPAR_FDX	0x0040	/* Select full duplex */
-#define XMPHY_ANLPAR_HDX	0x0020	/* Select half duplex */
+#define XMPHY_ANLPAR_HDX	0x0040	/* Select half duplex */
+#define XMPHY_ANLPAR_FDX	0x0020	/* Select full duplex */
 
 #define XMPHY_RF_OK		0x0000	/* No error -- link is good */
 #define XMPHY_RF_LINKFAIL	0x1000	/* Link failure */
@@ -78,8 +78,8 @@
 #define XMPHY_RF_ANEGFAIL	0x3000	/* Autonegotiation error */
 
 #define XMPHY_PAUSE_NOPAUSE	0x0000	/* No pause possible */
-#define XMPHY_PAUSE_ASYMMETRIC	0x0080	/* Asymmetric pause toward LP */
-#define XMPHY_PAUSE_SYMMETRIC	0x0100	/* Symmetric pause */
+#define XMPHY_PAUSE_ASYMETRIC	0x0080	/* Asymetric pause toward LP */
+#define XMPHY_PAUSE_SYMETRIC	0x0100	/* Symetric pause */
 #define XMPHY_PAUSE_BOTH	0x0180	/* Both sym and asym pause */
 
 #define XMPHY_MII_ANER		0x06

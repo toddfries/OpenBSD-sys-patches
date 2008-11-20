@@ -1,6 +1,3 @@
-/*	$OpenBSD: ufs_extern.h,v 1.29 2008/01/05 19:49:26 otto Exp $	*/
-/*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,127 +26,87 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ufs_extern.h	8.6 (Berkeley) 8/10/94
+ *	@(#)ufs_extern.h	8.10 (Berkeley) 5/14/95
+ * $FreeBSD: src/sys/ufs/ufs/ufs_extern.h,v 1.55 2005/03/14 10:21:16 phk Exp $
  */
 
-struct buf;
+#ifndef _UFS_UFS_EXTERN_H_
+#define	_UFS_UFS_EXTERN_H_
+
 struct componentname;
 struct direct;
-struct disklabel;
-struct dquot;
-struct fid;
-struct flock;
 struct indir;
 struct inode;
-struct mbuf;
 struct mount;
-struct nameidata;
-struct proc;
+struct netcred;
+struct thread;
+struct sockaddr;
 struct ucred;
-struct ufs_args;
-struct ufsmount;
-struct uio;
-struct vattr;
+struct ufid;
 struct vfsconf;
 struct vnode;
+struct vop_bmap_args;
+struct vop_cachedlookup_args;
+struct vop_generic_args;
+struct vop_inactive_args;
+struct vop_reclaim_args;
 
-__BEGIN_DECLS
-int	 ufs_access(void *);
-int	 ufs_advlock(void *);
-int	 ufs_bmap(void *);
-int	 ufs_close(void *);
-int	 ufs_create(void *);
-int	 ufs_getattr(void *);
-int	 ufs_inactive(void *);
-int	 ufs_ioctl(void *);
-int	 ufs_islocked(void *);
-int	 ufs_link(void *);
-int	 ufs_lock(void *);
-int	 ufs_lookup(void *);
-int	 ufs_mkdir(void *);
-int	 ufs_mknod(void *);
-int	 ufs_mmap(void *);
-int	 ufs_open(void *);
-int	 ufs_pathconf(void *);
-int	 ufs_print(void *);
-int	 ufs_readdir(void *);
-int	 ufs_readlink(void *);
-int	 ufs_remove(void *);
-int	 ufs_rename(void *);
-#define  ufs_revoke  vop_generic_revoke
-int	 ufs_rmdir(void *);
-int	 ufs_poll(void *);
-int	 ufs_kqfilter(void *);
-int	 ufs_setattr(void *);
-int	 ufs_strategy(void *);
-int	 ufs_symlink(void *);
-int	 ufs_unlock(void *);
-int	 ufsspec_close(void *);
-int	 ufsspec_read(void *);
-int	 ufsspec_write(void *);
+extern struct vop_vector ufs_fifoops;
+extern struct vop_vector ufs_vnodeops;
 
-#ifdef FIFO
-int	ufsfifo_read(void *);
-int	ufsfifo_write(void *);
-int	ufsfifo_close(void *);
-#endif
+int	 ufs_bmap(struct vop_bmap_args *);
+int	 ufs_bmaparray(struct vnode *, ufs2_daddr_t, ufs2_daddr_t *,
+	    struct buf *, int *, int *);
+int	 ufs_fhtovp(struct mount *, struct ufid *, struct vnode **);
+int	 ufs_checkpath(struct inode *, struct inode *, struct ucred *);
+void	 ufs_dirbad(struct inode *, doff_t, char *);
+int	 ufs_dirbadentry(struct vnode *, struct direct *, int);
+int	 ufs_dirempty(struct inode *, ino_t, struct ucred *);
+int	 ufs_extread(struct vop_read_args *);
+int	 ufs_extwrite(struct vop_write_args *);
+void	 ufs_makedirentry(struct inode *, struct componentname *,
+	    struct direct *);
+int	 ufs_direnter(struct vnode *, struct vnode *, struct direct *,
+	    struct componentname *, struct buf *);
+int	 ufs_dirremove(struct vnode *, struct inode *, int, int);
+int	 ufs_dirrewrite(struct inode *, struct inode *, ino_t, int, int);
+int	 ufs_getlbns(struct vnode *, ufs2_daddr_t, struct indir *, int *);
+int	 ufs_inactive(struct vop_inactive_args *);
+int	 ufs_init(struct vfsconf *);
+void	 ufs_itimes(struct vnode *vp);
+int	 ufs_lookup(struct vop_cachedlookup_args *);
+int	 ufs_readdir(struct vop_readdir_args *);
+int	 ufs_reclaim(struct vop_reclaim_args *);
+void	 ffs_snapgone(struct inode *);
+vfs_root_t ufs_root;
+int	 ufs_uninit(struct vfsconf *);
+int	 ufs_vinit(struct mount *, struct vop_vector *, struct vnode **);
 
-/* ufs_bmap.c */
-int ufs_bmaparray(struct vnode *, daddr64_t, daddr64_t *, struct indir *,
-		       int *, int *);
-int ufs_getlbns(struct vnode *, daddr64_t, struct indir *, int *);
-
-/* ufs_ihash.c */
-void ufs_ihashinit(void);
-struct vnode *ufs_ihashlookup(dev_t, ino_t);
-struct vnode *ufs_ihashget(dev_t, ino_t);
-int ufs_ihashins(struct inode *);
-void ufs_ihashrem(struct inode *);
-
-/* ufs_inode.c */
-int ufs_init(struct vfsconf *);
-int ufs_reclaim(struct vnode *, struct proc *);
-
-/* ufs_lookup.c */
-void ufs_dirbad(struct inode *, doff_t, char *);
-int ufs_dirbadentry(struct vnode *, struct direct *, int);
-void ufs_makedirentry(struct inode *, struct componentname *,
-			   struct direct *);
-int ufs_direnter(struct vnode *, struct vnode *, struct direct *,
-		      struct componentname *, struct buf *);
-int ufs_dirremove(struct vnode *, struct inode *, int, int);
-int ufs_dirrewrite(struct inode *, struct inode *,
-		        ino_t, int, int);
-int ufs_dirempty(struct inode *, ino_t, struct ucred *);
-int ufs_checkpath(struct inode *, struct inode *, struct ucred *);
-
-/* ufs_vfsops.c */
-int ufs_start(struct mount *, int, struct proc *);
-int ufs_root(struct mount *, struct vnode **);
-int ufs_quotactl(struct mount *, int, uid_t, caddr_t, struct proc *);
-int ufs_fhtovp(struct mount *, struct ufid *, struct vnode **);
-int ufs_check_export(struct mount *, struct mbuf *, int *,
-		struct ucred **);
-
-/* ufs_vnops.c */
-int ufs_vinit(struct mount *, int (**)(void *),
-	      int (**)(void *), struct vnode **);
-int ufs_makeinode(int, struct vnode *, struct vnode **,
-		  struct componentname *);
-
- 
 /*
- * Soft dependency function prototypes.
+ * Soft update function prototypes.
  */
-int  softdep_setup_directory_add(struct buf *, struct inode *, off_t,
-          long, struct buf *, int);
-void  softdep_change_directoryentry_offset(struct inode *, caddr_t,
-          caddr_t, caddr_t, int);
-void  softdep_setup_remove(struct buf *,struct inode *, struct inode *,
-          int);
-void  softdep_setup_directory_change(struct buf *, struct inode *,
-          struct inode *, long, int);
-void  softdep_change_linkcnt(struct inode *, int);
-int   softdep_slowdown(struct vnode *);
+int	softdep_setup_directory_add(struct buf *, struct inode *, off_t,
+	    ino_t, struct buf *, int);
+void	softdep_change_directoryentry_offset(struct inode *, caddr_t,
+	    caddr_t, caddr_t, int);
+void	softdep_setup_remove(struct buf *,struct inode *, struct inode *, int);
+void	softdep_setup_directory_change(struct buf *, struct inode *,
+	    struct inode *, ino_t, int);
+void	softdep_change_linkcnt(struct inode *);
+void	softdep_releasefile(struct inode *);
+int	softdep_slowdown(struct vnode *);
 
-__END_DECLS
+/*
+ * Flags to low-level allocation routines.  The low 16-bits are reserved
+ * for IO_ flags from vnode.h.
+ *
+ * Note: The general vfs code typically limits the sequential heuristic
+ * count to 127.  See sequential_heuristic() in kern/vfs_vnops.c
+ */
+#define BA_CLRBUF	0x00010000	/* Clear invalid areas of buffer. */
+#define BA_METAONLY	0x00020000	/* Return indirect block buffer. */
+#define BA_SEQMASK	0x7F000000	/* Bits holding seq heuristic. */
+#define BA_SEQSHIFT	24
+#define BA_SEQMAX	0x7F
+
+#endif /* !_UFS_UFS_EXTERN_H_ */

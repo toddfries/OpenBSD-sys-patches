@@ -6,8 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: timetc.h,v 1.2 2006/10/30 20:19:33 otto Exp $
- * $FreeBSD: src/sys/sys/timetc.h,v 1.57 2003/04/10 23:07:24 des Exp $
+ * $FreeBSD: src/sys/sys/timetc.h,v 1.58 2003/08/16 08:23:52 phk Exp $
  */
 
 #ifndef _SYS_TIMETC_H_
@@ -58,12 +57,11 @@ struct timecounter {
 		 * another timecounter higher means better.  Negative
 		 * means "only use at explicit request".
 		 */
+
 	void			*tc_priv;
 		/* Pointer to the timecounter's private parts. */
 	struct timecounter	*tc_next;
 		/* Pointer to the next timecounter. */
-	int64_t			tc_freq_adj;
-		/* Current frequency adjustment. */
 };
 
 extern struct timecounter *timecounter;
@@ -72,8 +70,9 @@ u_int64_t tc_getfrequency(void);
 void	tc_init(struct timecounter *tc);
 void	tc_setclock(struct timespec *ts);
 void	tc_ticktock(void);
-void	inittimecounter(void);
-int	sysctl_tc(int *, u_int, void *, size_t *, void *, size_t);
-int	tc_adjfreq(int64_t *, int64_t *);
+
+#ifdef SYSCTL_DECL
+SYSCTL_DECL(_kern_timecounter);
+#endif
 
 #endif /* !_SYS_TIMETC_H_ */

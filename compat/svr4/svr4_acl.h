@@ -1,8 +1,7 @@
-/*	$OpenBSD: svr4_acl.h,v 1.1 1997/02/13 19:45:16 niklas Exp $	*/
-/*	$NetBSD: svr4_acl.h,v 1.1 1996/12/06 03:23:30 christos Exp $	*/
-
-/*
- * Copyright (c) 1996 Christos Zoulas.  All rights reserved.
+/*-
+ * Copyright (c) 1998 Mark Newton
+ * Copyright (c) 1996 Christos Zoulas.  
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +27,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/compat/svr4/svr4_acl.h,v 1.4 2005/01/05 22:34:36 imp Exp $
  */
 #ifndef	_SVR4_ACL_H_
 #define	_SVR4_ACL_H_

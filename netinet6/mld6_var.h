@@ -1,7 +1,7 @@
-/*	$OpenBSD: mld6_var.h,v 1.6 2008/04/18 06:42:20 djm Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/mld6_var.h,v 1.7 2005/10/21 16:23:00 suz Exp $	*/
 /*	$KAME: mld6_var.h,v 1.4 2000/03/25 07:23:54 sumikawa Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1998 WIDE Project.
  * All rights reserved.
  *
@@ -35,13 +35,14 @@
 
 #ifdef _KERNEL
 
-#define MLD_RANDOM_DELAY(X)	(arc4random_uniform(X) + 1)
+#define MLD_RANDOM_DELAY(X) (arc4random() % (X) + 1)
 
 /*
  * States for MLD stop-listening processing
  */
 #define MLD_OTHERLISTENER			0
 #define MLD_IREPORTEDLAST			1
+#define	MLD_REPORTPENDING			2 /* implementation specific */
 
 void	mld6_init(void);
 void	mld6_input(struct mbuf *, int);

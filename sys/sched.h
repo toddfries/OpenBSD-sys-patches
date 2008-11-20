@@ -1,12 +1,6 @@
-/*	$OpenBSD: sched.h,v 1.18 2007/10/11 10:34:08 art Exp $	*/
-/* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
-
 /*-
- * Copyright (c) 1999 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Ross Harvey.
+ * Copyright (c) 1996, 1997
+ *      HD Associates, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -18,50 +12,16 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
-
-/*-
- * Copyright (c) 1982, 1986, 1991, 1993
- *	The Regents of the University of California.  All rights reserved.
- * (c) UNIX System Laboratories, Inc.
- * All or some portions of this file are derived from material licensed
- * to the University of California by American Telephone and Telegraph
- * Co. or Unix System Laboratories, Inc. and are reproduced herein with
- * the permission of UNIX System Laboratories, Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ *      This product includes software developed by HD Associates, Inc
+ *      and Jukka Antero Ukkonen.
+ * 4. Neither the name of the author nor the names of any co-contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY HD ASSOCIATES AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL HD ASSOCIATES OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -69,137 +29,191 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ */
+
+/*-
+ * Copyright (c) 2002, Jeffrey Roberson <jeff@freebsd.org>
+ * All rights reserved.
  *
- *	@(#)kern_clock.c	8.5 (Berkeley) 1/21/94
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice unmodified, this list of conditions, and the following
+ *    disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/sys/sched.h,v 1.33 2007/06/12 19:49:39 jeff Exp $
  */
 
-#ifndef	_SYS_SCHED_H_
-#define	_SYS_SCHED_H_
+#ifndef _SCHED_H_
+#define	_SCHED_H_
 
-#include <sys/queue.h>
+#ifdef _KERNEL
+/*
+ * General scheduling info.
+ *
+ * sched_load:
+ *	Total runnable non-ithread threads in the system.
+ *
+ * sched_runnable:
+ *	Runnable threads for this processor.
+ */
+int	sched_load(void);
+int	sched_rr_interval(void);
+int	sched_runnable(void);
+
+/* 
+ * Proc related scheduling hooks.
+ */
+void	sched_exit(struct proc *p, struct thread *childtd);
+void	sched_fork(struct thread *td, struct thread *childtd);
+void	sched_fork_exit(struct thread *td);
 
 /*
- * Posix defines a <sched.h> which may want to include <sys/sched.h>
+ * KSE Groups contain scheduling priority information.  They record the
+ * behavior of groups of KSEs and threads.
  */
+void	sched_class(struct thread *td, int class);
+void	sched_nice(struct proc *p, int nice);
 
 /*
- * CPU states.
- * XXX Not really scheduler state, but no other good place to put
- * it right now, and it really is per-CPU.
+ * Threads are switched in and out, block on resources, have temporary
+ * priorities inherited from their procs, and use up cpu time.
  */
-#define CP_USER		0
-#define CP_NICE		1
-#define CP_SYS		2
-#define CP_INTR		3
-#define CP_IDLE		4
-#define CPUSTATES	5
+void	sched_exit_thread(struct thread *td, struct thread *child);
+void	sched_fork_thread(struct thread *td, struct thread *child);
+void	sched_lend_prio(struct thread *td, u_char prio);
+void	sched_lend_user_prio(struct thread *td, u_char pri);
+fixpt_t	sched_pctcpu(struct thread *td);
+void	sched_prio(struct thread *td, u_char prio);
+void	sched_sleep(struct thread *td);
+void	sched_switch(struct thread *td, struct thread *newtd, int flags);
+void	sched_throw(struct thread *td);
+void	sched_unlend_prio(struct thread *td, u_char prio);
+void	sched_unlend_user_prio(struct thread *td, u_char pri);
+void	sched_user_prio(struct thread *td, u_char prio);
+void	sched_userret(struct thread *td);
+void	sched_wakeup(struct thread *td);
 
 /*
- * Per-CPU scheduler state.
- * XXX - expose to userland for now.
+ * Threads are moved on and off of run queues
  */
-struct schedstate_percpu {
-	struct timeval spc_runtime;	/* time curproc started running */
-	__volatile int spc_schedflags;	/* flags; see below */
-	u_int spc_schedticks;		/* ticks for schedclock() */
-	u_int64_t spc_cp_time[CPUSTATES]; /* CPU state statistics */
-	u_char spc_curpriority;		/* usrpri of curproc */
-	int spc_rrticks;		/* ticks until roundrobin() */
-	int spc_pscnt;			/* prof/stat counter */
-	int spc_psdiv;			/* prof/stat divisor */	
-	struct proc *spc_idleproc;	/* idle proc for this cpu */
-#ifdef notyet
-	struct proc *spc_reaper;	/* dead proc reaper */
+void	sched_add(struct thread *td, int flags);
+void	sched_clock(struct thread *td);
+void	sched_rem(struct thread *td);
+void	sched_tick(void);
+void	sched_relinquish(struct thread *td);
+struct thread *sched_choose(void);
+void	sched_idletd(void *);
+
+/*
+ * Binding makes cpu affinity permanent while pinning is used to temporarily
+ * hold a thread on a particular CPU.
+ */
+void	sched_bind(struct thread *td, int cpu);
+static __inline void sched_pin(void);
+void	sched_unbind(struct thread *td);
+static __inline void sched_unpin(void);
+int	sched_is_bound(struct thread *td);
+
+/*
+ * These procedures tell the process data structure allocation code how
+ * many bytes to actually allocate.
+ */
+int	sched_sizeof_proc(void);
+int	sched_sizeof_thread(void);
+
+static __inline void
+sched_pin(void)
+{
+	curthread->td_pinned++;
+}
+
+static __inline void
+sched_unpin(void)
+{
+	curthread->td_pinned--;
+}
+
+/* sched_add arguments (formerly setrunqueue) */
+#define	SRQ_BORING	0x0000		/* No special circumstances. */
+#define	SRQ_YIELDING	0x0001		/* We are yielding (from mi_switch). */
+#define	SRQ_OURSELF	0x0002		/* It is ourself (from mi_switch). */
+#define	SRQ_INTR	0x0004		/* It is probably urgent. */
+#define	SRQ_PREEMPTED	0x0008		/* has been preempted.. be kind */
+#define	SRQ_BORROWING	0x0010		/* Priority updated due to prio_lend */
+
+/* Switch stats. */
+#ifdef SCHED_STATS
+extern long switch_preempt;
+extern long switch_owepreempt;
+extern long switch_turnstile;
+extern long switch_sleepq;
+extern long switch_sleepqtimo;
+extern long switch_relinquish;
+extern long switch_needresched;
+#define SCHED_STAT_INC(var)     atomic_add_long(&(var), 1)
+#else
+#define SCHED_STAT_INC(var)
 #endif
-	LIST_HEAD(,proc) spc_deadproc;
+
+/* temporarily here */
+void schedinit(void);
+void sched_newproc(struct proc *p, struct thread *td);
+void sched_newthread(struct thread *td);
+#endif /* _KERNEL */
+
+/* POSIX 1003.1b Process Scheduling */
+
+/*
+ * POSIX scheduling policies
+ */
+#define SCHED_FIFO      1
+#define SCHED_OTHER     2
+#define SCHED_RR        3
+
+struct sched_param {
+        int     sched_priority;
 };
 
-#ifdef	_KERNEL
+/*
+ * POSIX scheduling declarations for userland.
+ */
+#ifndef _KERNEL
+#include <sys/cdefs.h>
+#include <sys/_types.h>
 
-/* spc_flags */
-#define SPCF_SEENRR             0x0001  /* process has seen roundrobin() */
-#define SPCF_SHOULDYIELD        0x0002  /* process should yield the CPU */
-#define SPCF_SWITCHCLEAR        (SPCF_SEENRR|SPCF_SHOULDYIELD)
-
-
-#define	NQS	32			/* 32 run queues. */
-#define	PPQ	(128 / NQS)		/* priorities per queue */
-#define NICE_WEIGHT 2			/* priorities per nice level */
-#define	ESTCPULIM(e) min((e), NICE_WEIGHT * PRIO_MAX - PPQ)
-
-extern int schedhz;			/* ideally: 16 */
-extern int rrticks_init;		/* ticks per roundrobin() */
-
-struct proc;
-void schedclock(struct proc *);
-struct cpu_info;
-void roundrobin(struct cpu_info *);
-
-void sched_init_cpu(struct cpu_info *);
-void sched_exit(struct proc *);
-void mi_switch(void);
-void cpu_switchto(struct proc *, struct proc *);
-struct proc *sched_chooseproc(void);
-void cpu_idle_enter(void);
-void cpu_idle_cycle(void);
-void cpu_idle_leave(void);
-
-extern volatile int sched_whichqs;
-#define sched_is_idle()	(sched_whichqs == 0)
-
-void sched_init_runqueues(void);
-void setrunqueue(struct proc *);
-void remrunqueue(struct proc *);
-
-/* Inherit the parent's scheduler history */
-#define scheduler_fork_hook(parent, child) do {				\
-	(child)->p_estcpu = (parent)->p_estcpu;				\
-} while (0)
-
-/* Chargeback parents for the sins of their children.  */
-#define scheduler_wait_hook(parent, child) do {				\
-	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
-} while (0)
-
-#ifndef IPL_SCHED
-#define IPL_SCHED IPL_HIGH
+#ifndef _PID_T_DECLARED
+typedef __pid_t         pid_t;
+#define _PID_T_DECLARED
 #endif
 
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-#include <sys/lock.h>
+struct timespec;
 
-/*
- * XXX Instead of using struct lock for the kernel lock and thus requiring us
- * XXX to implement simplelocks, causing all sorts of fine-grained locks all
- * XXX over our tree getting activated consuming both time and potentially
- * XXX introducing locking protocol bugs.
- */
-extern struct __mp_lock sched_lock;
+__BEGIN_DECLS
+int     sched_get_priority_max(int);
+int     sched_get_priority_min(int);
+int     sched_getparam(pid_t, struct sched_param *);
+int     sched_getscheduler(pid_t);
+int     sched_rr_get_interval(pid_t, struct timespec *);
+int     sched_setparam(pid_t, const struct sched_param *);
+int     sched_setscheduler(pid_t, int, const struct sched_param *);
+int     sched_yield(void);
+__END_DECLS
 
-#define	SCHED_ASSERT_LOCKED()	KASSERT(__mp_lock_held(&sched_lock))
-#define	SCHED_ASSERT_UNLOCKED()	KASSERT(__mp_lock_held(&sched_lock) == 0)
-
-#define	SCHED_LOCK(s)							\
-do {									\
-	s = splsched();							\
-	__mp_lock(&sched_lock);						\
-} while (/* CONSTCOND */ 0)
-
-#define	SCHED_UNLOCK(s)							\
-do {									\
-	__mp_unlock(&sched_lock);					\
-	splx(s);							\
-} while (/* CONSTCOND */ 0)
-
-#else /* ! MULTIPROCESSOR || LOCKDEBUG */
-
-#define	SCHED_ASSERT_LOCKED()		splassert(IPL_SCHED);
-#define	SCHED_ASSERT_UNLOCKED()		/* nothing */
-
-#define	SCHED_LOCK(s)			s = splsched()
-#define	SCHED_UNLOCK(s)			splx(s)
-
-#endif /* MULTIPROCESSOR || LOCKDEBUG */
-
-#endif	/* _KERNEL */
-#endif	/* _SYS_SCHED_H_ */
+#endif
+#endif /* !_SCHED_H_ */

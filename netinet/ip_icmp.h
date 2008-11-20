@@ -1,7 +1,4 @@
-/*	$OpenBSD: ip_icmp.h,v 1.21 2005/07/31 03:30:55 pascoe Exp $	*/
-/*	$NetBSD: ip_icmp.h,v 1.10 1996/02/13 23:42:28 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip_icmp.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/ip_icmp.h,v 1.26 2005/05/04 13:09:19 andre Exp $
  */
 
 #ifndef _NETINET_IP_ICMP_H_
@@ -38,87 +36,87 @@
 /*
  * Interface Control Message Protocol Definitions.
  * Per RFC 792, September 1981.
- * RFC 950, August 1985. (Address Mask Request / Reply)
- * RFC 1256, September 1991. (Router Advertisement and Solicitation)
- * RFC 1108, November 1991. (Param Problem, Missing Req. Option)
- * RFC 1393, January 1993. (Traceroute)
- * RFC 1475, June 1993. (Datagram Conversion Error)
- * RFC 1812, June 1995. (adm prohib, host precedence, precedence cutoff)
- * RFC 2002, October 1996. (Mobility changes to Router Advertisement)
  */
 
 /*
- * ICMP Router Advertisement data
+ * Internal of an ICMP Router Advertisement
  */
 struct icmp_ra_addr {
-	n_long ira_addr;
-	n_long ira_preference;
+	u_int32_t ira_addr;
+	u_int32_t ira_preference;
 };
 
 /*
  * Structure of an icmp header.
  */
-struct icmp {
-	u_int8_t  icmp_type;		/* type of message, see below */
-	u_int8_t  icmp_code;		/* type sub code */
-	u_int16_t icmp_cksum;		/* ones complement cksum of struct */
-	union {
-		u_int8_t  ih_pptr;		/* ICMP_PARAMPROB */
-		struct in_addr ih_gwaddr;	/* ICMP_REDIRECT */
-		struct ih_idseq {
-			  n_short icd_id;
-			  n_short icd_seq;
-		} ih_idseq;
-		int32_t   ih_void;
-
-		/* ICMP_UNREACH_NEEDFRAG -- Path MTU Discovery (RFC1191) */
-		struct ih_pmtu {
-			  n_short ipm_void;
-			  n_short ipm_nextmtu;
-		} ih_pmtu;
-
-		struct ih_rtradv {
-			u_int8_t irt_num_addrs;
-			u_int8_t irt_wpa;
-			n_short irt_lifetime;
-		} ih_rtradv;
-	} icmp_hun;
-#define	icmp_pptr	  icmp_hun.ih_pptr
-#define	icmp_gwaddr	  icmp_hun.ih_gwaddr
-#define	icmp_id		  icmp_hun.ih_idseq.icd_id
-#define	icmp_seq	  icmp_hun.ih_idseq.icd_seq
-#define	icmp_void	  icmp_hun.ih_void
-#define	icmp_pmvoid	  icmp_hun.ih_pmtu.ipm_void
-#define	icmp_nextmtu	  icmp_hun.ih_pmtu.ipm_nextmtu
-#define	icmp_num_addrs	  icmp_hun.ih_rtradv.irt_num_addrs
-#define	icmp_wpa	  icmp_hun.ih_rtradv.irt_wpa
-#define	icmp_lifetime	  icmp_hun.ih_rtradv.irt_lifetime
-	union {
-		struct id_ts {
-			  n_time its_otime;
-			  n_time its_rtime;
-			  n_time its_ttime;
-		} id_ts;
-		struct id_ip  {
-			  struct ip idi_ip;
-			  /* options and then 64 bits of data */
-		} id_ip;
-		u_int32_t id_mask;
-		int8_t	  id_data[1];
-	} icmp_dun;
-#define	icmp_otime	  icmp_dun.id_ts.its_otime
-#define	icmp_rtime	  icmp_dun.id_ts.its_rtime
-#define	icmp_ttime	  icmp_dun.id_ts.its_ttime
-#define	icmp_ip		  icmp_dun.id_ip.idi_ip
-#define	icmp_mask	  icmp_dun.id_mask
-#define	icmp_data	  icmp_dun.id_data
+struct icmphdr {
+	u_char	icmp_type;		/* type of message, see below */
+	u_char	icmp_code;		/* type sub code */
+	u_short	icmp_cksum;		/* ones complement cksum of struct */
 };
 
 /*
- * For IPv6 transition related ICMP errors.
+ * Structure of an icmp packet.
+ *
+ * XXX: should start with a struct icmphdr.
  */
-#define	ICMP_V6ADVLENMIN	(8 + sizeof(struct ip) + 40)
-#define	ICMP_V6ADVLEN(p)	(8 + ((p)->icmp_ip.ip_hl << 2) + 40)
+struct icmp {
+	u_char	icmp_type;		/* type of message, see below */
+	u_char	icmp_code;		/* type sub code */
+	u_short	icmp_cksum;		/* ones complement cksum of struct */
+	union {
+		u_char ih_pptr;			/* ICMP_PARAMPROB */
+		struct in_addr ih_gwaddr;	/* ICMP_REDIRECT */
+		struct ih_idseq {
+			n_short	icd_id;
+			n_short	icd_seq;
+		} ih_idseq;
+		int ih_void;
+
+		/* ICMP_UNREACH_NEEDFRAG -- Path MTU Discovery (RFC1191) */
+		struct ih_pmtu {
+			n_short ipm_void;
+			n_short ipm_nextmtu;
+		} ih_pmtu;
+
+		struct ih_rtradv {
+			u_char irt_num_addrs;
+			u_char irt_wpa;
+			u_int16_t irt_lifetime;
+		} ih_rtradv;
+	} icmp_hun;
+#define	icmp_pptr	icmp_hun.ih_pptr
+#define	icmp_gwaddr	icmp_hun.ih_gwaddr
+#define	icmp_id		icmp_hun.ih_idseq.icd_id
+#define	icmp_seq	icmp_hun.ih_idseq.icd_seq
+#define	icmp_void	icmp_hun.ih_void
+#define	icmp_pmvoid	icmp_hun.ih_pmtu.ipm_void
+#define	icmp_nextmtu	icmp_hun.ih_pmtu.ipm_nextmtu
+#define	icmp_num_addrs	icmp_hun.ih_rtradv.irt_num_addrs
+#define	icmp_wpa	icmp_hun.ih_rtradv.irt_wpa
+#define	icmp_lifetime	icmp_hun.ih_rtradv.irt_lifetime
+	union {
+		struct id_ts {			/* ICMP Timestamp */
+			n_time its_otime;	/* Originate */
+			n_time its_rtime;	/* Receive */
+			n_time its_ttime;	/* Transmit */
+		} id_ts;
+		struct id_ip  {
+			struct ip idi_ip;
+			/* options and then 64 bits of data */
+		} id_ip;
+		struct icmp_ra_addr id_radv;
+		u_int32_t id_mask;
+		char	id_data[1];
+	} icmp_dun;
+#define	icmp_otime	icmp_dun.id_ts.its_otime
+#define	icmp_rtime	icmp_dun.id_ts.its_rtime
+#define	icmp_ttime	icmp_dun.id_ts.its_ttime
+#define	icmp_ip		icmp_dun.id_ip.idi_ip
+#define	icmp_radv	icmp_dun.id_radv
+#define	icmp_mask	icmp_dun.id_mask
+#define	icmp_data	icmp_dun.id_data
+};
 
 /*
  * Lower bounds on packet lengths for various types.
@@ -137,26 +135,25 @@ struct icmp {
 
 /*
  * Definition of type and code field values.
- *	http://www.iana.org/assignments/icmp-parameters
  */
 #define	ICMP_ECHOREPLY		0		/* echo reply */
 #define	ICMP_UNREACH		3		/* dest unreachable, codes: */
-#define		ICMP_UNREACH_NET		0	/* bad net */
-#define		ICMP_UNREACH_HOST		1	/* bad host */
-#define		ICMP_UNREACH_PROTOCOL		2	/* bad protocol */
-#define		ICMP_UNREACH_PORT		3	/* bad port */
-#define		ICMP_UNREACH_NEEDFRAG		4	/* IP_DF caused drop */
-#define		ICMP_UNREACH_SRCFAIL		5	/* src route failed */
-#define		ICMP_UNREACH_NET_UNKNOWN	6	/* unknown net */
-#define		ICMP_UNREACH_HOST_UNKNOWN	7	/* unknown host */
-#define		ICMP_UNREACH_ISOLATED		8	/* src host isolated */
-#define		ICMP_UNREACH_NET_PROHIB		9	/* for crypto devs */
-#define		ICMP_UNREACH_HOST_PROHIB	10	/* ditto */
-#define		ICMP_UNREACH_TOSNET		11	/* bad tos for net */
-#define		ICMP_UNREACH_TOSHOST		12	/* bad tos for host */
-#define		ICMP_UNREACH_FILTER_PROHIB	13	/* prohibited access */
-#define		ICMP_UNREACH_HOST_PRECEDENCE	14	/* precedence violat'n*/
-#define		ICMP_UNREACH_PRECEDENCE_CUTOFF	15	/* precedence cutoff */
+#define		ICMP_UNREACH_NET	0		/* bad net */
+#define		ICMP_UNREACH_HOST	1		/* bad host */
+#define		ICMP_UNREACH_PROTOCOL	2		/* bad protocol */
+#define		ICMP_UNREACH_PORT	3		/* bad port */
+#define		ICMP_UNREACH_NEEDFRAG	4		/* IP_DF caused drop */
+#define		ICMP_UNREACH_SRCFAIL	5		/* src route failed */
+#define		ICMP_UNREACH_NET_UNKNOWN 6		/* unknown net */
+#define		ICMP_UNREACH_HOST_UNKNOWN 7		/* unknown host */
+#define		ICMP_UNREACH_ISOLATED	8		/* src host isolated */
+#define		ICMP_UNREACH_NET_PROHIB	9		/* prohibited access */
+#define		ICMP_UNREACH_HOST_PROHIB 10		/* ditto */
+#define		ICMP_UNREACH_TOSNET	11		/* bad tos for net */
+#define		ICMP_UNREACH_TOSHOST	12		/* bad tos for host */
+#define		ICMP_UNREACH_FILTER_PROHIB 13		/* admin prohib */
+#define		ICMP_UNREACH_HOST_PRECEDENCE 14		/* host prec vio. */
+#define		ICMP_UNREACH_PRECEDENCE_CUTOFF 15	/* prec cutoff */
 #define	ICMP_SOURCEQUENCH	4		/* packet lost, slow down */
 #define	ICMP_REDIRECT		5		/* shorter route, codes: */
 #define		ICMP_REDIRECT_NET	0		/* for network */
@@ -173,9 +170,9 @@ struct icmp {
 #define		ICMP_TIMXCEED_INTRANS	0		/* ttl==0 in transit */
 #define		ICMP_TIMXCEED_REASS	1		/* ttl==0 in reass */
 #define	ICMP_PARAMPROB		12		/* ip header bad */
-#define		ICMP_PARAMPROB_ERRATPTR 0		/* req. opt. absent */
+#define		ICMP_PARAMPROB_ERRATPTR 0		/* error at param ptr */
 #define		ICMP_PARAMPROB_OPTABSENT 1		/* req. opt. absent */
-#define		ICMP_PARAMPROB_LENGTH	2		/* bad length */
+#define		ICMP_PARAMPROB_LENGTH 2			/* bad length */
 #define	ICMP_TSTAMP		13		/* timestamp request */
 #define	ICMP_TSTAMPREPLY	14		/* timestamp reply */
 #define	ICMP_IREQ		15		/* information request */
@@ -205,16 +202,9 @@ struct icmp {
 	(type) == ICMP_MASKREQ || (type) == ICMP_MASKREPLY)
 
 #ifdef _KERNEL
-struct mbuf *
-	icmp_do_error(struct mbuf *, int, int, n_long, int);
 void	icmp_error(struct mbuf *, int, int, n_long, int);
-void	icmp_input(struct mbuf *, ...);
-void	icmp_init(void);
-void	icmp_reflect(struct mbuf *);
-void	icmp_send(struct mbuf *, struct mbuf *);
-int	icmp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-struct rtentry *
-	icmp_mtudisc_clone(struct sockaddr *);
-void	icmp_mtudisc(struct icmp *);
-#endif /* _KERNEL */
-#endif /* _NETINET_IP_ICMP_H_ */
+void	icmp_input(struct mbuf *, int);
+int	ip_next_mtu(int, int);
+#endif
+
+#endif

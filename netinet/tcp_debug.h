@@ -1,7 +1,4 @@
-/*	$OpenBSD: tcp_debug.h,v 1.7 2003/06/02 23:28:14 millert Exp $	*/
-/*	$NetBSD: tcp_debug.h,v 1.5 1994/06/29 06:38:38 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,20 +27,33 @@
  * SUCH DAMAGE.
  *
  *	@(#)tcp_debug.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/tcp_debug.h,v 1.16 2007/03/24 22:15:02 maxim Exp $
  */
 
 #ifndef _NETINET_TCP_DEBUG_H_
-#define _NETINET_TCP_DEBUG_H_
-
-#include <netinet6/tcpipv6.h>
+#define	_NETINET_TCP_DEBUG_H_
 
 struct	tcp_debug {
 	n_time	td_time;
 	short	td_act;
 	short	td_ostate;
 	caddr_t	td_tcb;
+	int	td_family;
+	/*
+	 * Co-existense of td_ti and td_ti6 below is ugly, but it is necessary
+	 * to achieve backword compatibility to some extent.
+	 */
 	struct	tcpiphdr td_ti;
-	struct  tcpipv6hdr td_ti6;
+	struct {
+#define	IP6_HDR_LEN	40	/* sizeof(struct ip6_hdr) */
+#if !defined(_KERNEL) && defined(INET6)
+		struct	ip6_hdr ip6;
+#else
+		u_char	ip6buf[IP6_HDR_LEN];
+#endif
+		struct	tcphdr th;
+	} td_ti6;
+#define	td_ip6buf	td_ti6.ip6buf
 	short	td_req;
 	struct	tcpcb td_cb;
 };
@@ -55,11 +65,16 @@ struct	tcp_debug {
 #define	TA_DROP		4
 
 #ifdef TANAMES
-char	*tanames[] =
+static const char	*tanames[] =
     { "input", "output", "user", "respond", "drop" };
-#endif /* TANAMES */
+#endif
 
 #define	TCP_NDEBUG 100
-extern struct	tcp_debug tcp_debug[];
-extern int	tcp_debx;
-#endif /* _NETINET_TCP_DEBUG_H_ */
+
+#ifndef _KERNEL
+/* XXX common variables for broken applications. */
+struct	tcp_debug tcp_debug[TCP_NDEBUG];
+int	tcp_debx;
+#endif
+
+#endif /* !_NETINET_TCP_DEBUG_H_ */

@@ -1,36 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.44 2008/05/07 12:58:54 norby Exp $	*/
-/*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
-
-/*
- * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the project nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -42,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -58,76 +26,47 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)if_loop.c	8.1 (Berkeley) 6/10/93
- */
-
-/*
- *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
- * 
- * NRL grants permission for redistribution and use in source and binary
- * forms, with or without modification, of the software and documentation
- * created at NRL provided that the following conditions are met:
- * 
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
- * 4. Neither the name of the NRL nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- * 
- * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
- * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL NRL OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
- * The views and conclusions contained in the software and documentation
- * are those of the authors and should not be interpreted as representing
- * official policies, either expressed or implied, of the US Naval
- * Research Laboratory (NRL).
+ *	@(#)if_loop.c	8.2 (Berkeley) 1/9/95
+ * $FreeBSD: src/sys/net/if_loop.c,v 1.113 2007/10/27 18:25:53 yar Exp $
  */
 
 /*
  * Loopback interface driver for protocol testing and timing.
  */
 
-#include "bpfilter.h"
+#include "opt_atalk.h"
+#include "opt_inet.h"
+#include "opt_inet6.h"
+#include "opt_ipx.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/module.h>
+#include <machine/bus.h>
+#include <sys/rman.h>
 #include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/ioctl.h>
-#include <sys/time.h>
-
-#include <machine/cpu.h>
+#include <sys/sockio.h>
+#include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_clone.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
+#include <net/bpf.h>
+#include <net/bpfdesc.h>
 
 #ifdef	INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
-#include <netinet/ip.h>
+#endif
+
+#ifdef IPX
+#include <netipx/ipx.h>
+#include <netipx/ipx_if.h>
 #endif
 
 #ifdef INET6
@@ -139,276 +78,265 @@
 #endif
 
 #ifdef NETATALK
-#include <netinet/if_ether.h>
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
 #endif
 
-#ifdef MPLS
-#include <netmpls/mpls.h>
-#endif
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
-
-#if defined(LARGE_LOMTU)
-#define LOMTU	(131072 +  MHLEN + MLEN)
+#ifdef TINY_LOMTU
+#define	LOMTU	(1024+512)
+#elif defined(LARGE_LOMTU)
+#define LOMTU	131072
 #else
-#define	LOMTU	(32768 +  MHLEN + MLEN)
-#endif
-  
-#ifdef ALTQ
-static void lo_altqstart(struct ifnet *);
+#define LOMTU	16384
 #endif
 
-int	loop_clone_create(struct if_clone *, int);
-int	loop_clone_destroy(struct ifnet *);
+#define LONAME	"lo"
 
-struct if_clone loop_cloner =
-    IF_CLONE_INITIALIZER("lo", loop_clone_create, loop_clone_destroy);
+struct lo_softc {
+	struct	ifnet *sc_ifp;
+};
 
-/* ARGSUSED */
-void
-loopattach(n)
-	int n;
+int		loioctl(struct ifnet *, u_long, caddr_t);
+static void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
+int		looutput(struct ifnet *ifp, struct mbuf *m,
+		    struct sockaddr *dst, struct rtentry *rt);
+static int	lo_clone_create(struct if_clone *, int, caddr_t);
+static void	lo_clone_destroy(struct ifnet *);
+
+struct ifnet *loif = NULL;			/* Used externally */
+
+static MALLOC_DEFINE(M_LO, LONAME, "Loopback Interface");
+
+IFC_SIMPLE_DECLARE(lo, 1);
+
+static void
+lo_clone_destroy(ifp)
+	struct ifnet *ifp;
 {
-	(void) loop_clone_create(&loop_cloner, 0);
-	if_clone_attach(&loop_cloner);
+	struct lo_softc *sc;
+	
+	sc = ifp->if_softc;
+
+	/* XXX: destroying lo0 will lead to panics. */
+	KASSERT(loif != ifp, ("%s: destroying lo0", __func__));
+
+	bpfdetach(ifp);
+	if_detach(ifp);
+	if_free(ifp);
+	free(sc, M_LO);
 }
 
-int
-loop_clone_create(ifc, unit)
+static int
+lo_clone_create(ifc, unit, params)
 	struct if_clone *ifc;
 	int unit;
+	caddr_t params;
 {
 	struct ifnet *ifp;
+	struct lo_softc *sc;
 
-	ifp = malloc(sizeof(*ifp), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (ifp == NULL)
-		return (ENOMEM);
+	MALLOC(sc, struct lo_softc *, sizeof(*sc), M_LO, M_WAITOK | M_ZERO);
+	ifp = sc->sc_ifp = if_alloc(IFT_LOOP);
+	if (ifp == NULL) {
+		free(sc, M_LO);
+		return (ENOSPC);
+	}
 
-	snprintf(ifp->if_xname, sizeof ifp->if_xname, "lo%d", unit);
-	ifp->if_softc = NULL;
+	if_initname(ifp, ifc->ifc_name, unit);
 	ifp->if_mtu = LOMTU;
 	ifp->if_flags = IFF_LOOPBACK | IFF_MULTICAST;
 	ifp->if_ioctl = loioctl;
 	ifp->if_output = looutput;
-	ifp->if_type = IFT_LOOP;
-	ifp->if_hdrlen = sizeof(u_int32_t);
-	ifp->if_addrlen = 0;
-	IFQ_SET_READY(&ifp->if_snd);
-#ifdef ALTQ
-	ifp->if_start = lo_altqstart;
-#endif
-	if (unit == 0) {
-		lo0ifp = ifp;
-		if_attachhead(ifp);
-		if_addgroup(lo0ifp, ifc->ifc_name);
-	} else
-		if_attach(ifp);
-	if_alloc_sadl(ifp);
-#if NBPFILTER > 0
-	bpfattach(&ifp->if_bpf, ifp, DLT_LOOP, sizeof(u_int32_t));
-#endif
+	ifp->if_snd.ifq_maxlen = ifqmaxlen;
+	ifp->if_softc = sc;
+	if_attach(ifp);
+	bpfattach(ifp, DLT_NULL, sizeof(u_int32_t));
+	if (loif == NULL)
+		loif = ifp;
+
 	return (0);
 }
 
-int
-loop_clone_destroy(ifp)
-	struct ifnet *ifp;
-{
-	if (ifp == lo0ifp)
-		return (EPERM);
+static int
+loop_modevent(module_t mod, int type, void *data) 
+{ 
+	switch (type) { 
+	case MOD_LOAD: 
+		if_clone_attach(&lo_cloner);
+		break; 
+	case MOD_UNLOAD: 
+		printf("loop module unload - not possible for this module type\n"); 
+		return EINVAL; 
+	default:
+		return EOPNOTSUPP;
+	} 
+	return 0; 
+} 
 
-	if_detach(ifp);
+static moduledata_t loop_mod = { 
+	"loop", 
+	loop_modevent, 
+	0
+}; 
 
-	free(ifp, M_DEVBUF);
-	return (0);
-}
+DECLARE_MODULE(loop, loop_mod, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY);
 
 int
 looutput(ifp, m, dst, rt)
 	struct ifnet *ifp;
-	struct mbuf *m;
+	register struct mbuf *m;
 	struct sockaddr *dst;
-	struct rtentry *rt;
+	register struct rtentry *rt;
 {
-	int s, isr;
-	struct ifqueue *ifq = 0;
+	u_int32_t af;
 
-	if ((m->m_flags & M_PKTHDR) == 0)
-		panic("looutput: no header mbuf");
-#if NBPFILTER > 0
-	/*
-	 * only send packets to bpf if they are real loopback packets;
-	 * looutput() is also called for SIMPLEX interfaces to duplicate
-	 * packets for local use. But don't dup them to bpf.
-	 */
-	if (ifp->if_bpf && (ifp->if_flags & IFF_LOOPBACK))
-		bpf_mtap_af(ifp->if_bpf, htonl(dst->sa_family), m,
-		    BPF_DIRECTION_OUT);
-#endif
-	m->m_pkthdr.rcvif = ifp;
+	M_ASSERTPKTHDR(m); /* check if we have the packet header */
 
 	if (rt && rt->rt_flags & (RTF_REJECT|RTF_BLACKHOLE)) {
 		m_freem(m);
 		return (rt->rt_flags & RTF_BLACKHOLE ? 0 :
-			rt->rt_flags & RTF_HOST ? EHOSTUNREACH : ENETUNREACH);
+		        rt->rt_flags & RTF_HOST ? EHOSTUNREACH : ENETUNREACH);
 	}
 
 	ifp->if_opackets++;
 	ifp->if_obytes += m->m_pkthdr.len;
-#ifdef ALTQ
-	/*
-	 * altq for loop is just for debugging.
-	 * only used when called for loop interface (not for
-	 * a simplex interface).
-	 */
-	if ((ALTQ_IS_ENABLED(&ifp->if_snd) || TBR_IS_ENABLED(&ifp->if_snd))
-	    && ifp->if_start == lo_altqstart) {
-		int32_t *afp;
-	        int error;
 
-		M_PREPEND(m, sizeof(int32_t), M_DONTWAIT);
-		if (m == 0)
-			return (ENOBUFS);
-		afp = mtod(m, int32_t *);
-		*afp = (int32_t)dst->sa_family;
-
-	        s = splnet();
-		IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-		(*ifp->if_start)(ifp);
-		splx(s);
-		return (error);
+	/* BPF writes need to be handled specially. */
+	if (dst->sa_family == AF_UNSPEC) {
+		bcopy(dst->sa_data, &af, sizeof(af));
+		dst->sa_family = af;
 	}
-#endif /* ALTQ */
-	switch (dst->sa_family) {
 
+#if 1	/* XXX */
+	switch (dst->sa_family) {
+	case AF_INET:
+	case AF_INET6:
+	case AF_IPX:
+	case AF_APPLETALK:
+		break;
+	default:
+		printf("looutput: af=%d unexpected\n", dst->sa_family);
+		m_freem(m);
+		return (EAFNOSUPPORT);
+	}
+#endif
+	return(if_simloop(ifp, m, dst->sa_family, 0));
+}
+
+/*
+ * if_simloop()
+ *
+ * This function is to support software emulation of hardware loopback,
+ * i.e., for interfaces with the IFF_SIMPLEX attribute. Since they can't
+ * hear their own broadcasts, we create a copy of the packet that we
+ * would normally receive via a hardware loopback.
+ *
+ * This function expects the packet to include the media header of length hlen.
+ */
+
+int
+if_simloop(ifp, m, af, hlen)
+	struct ifnet *ifp;
+	struct mbuf *m;
+	int af;
+	int hlen;
+{
+	int isr;
+
+	M_ASSERTPKTHDR(m);
+	m_tag_delete_nonpersistent(m);
+	m->m_pkthdr.rcvif = ifp;
+
+	/*
+	 * Let BPF see incoming packet in the following manner:
+	 *  - Emulated packet loopback for a simplex interface 
+	 *    (net/if_ethersubr.c)
+	 *	-> passes it to ifp's BPF
+	 *  - IPv4/v6 multicast packet loopback (netinet(6)/ip(6)_output.c)
+	 *	-> not passes it to any BPF
+	 *  - Normal packet loopback from myself to myself (net/if_loop.c)
+	 *	-> passes to lo0's BPF (even in case of IPv6, where ifp!=lo0)
+	 */
+	if (hlen > 0) {
+		if (bpf_peers_present(ifp->if_bpf)) {
+			bpf_mtap(ifp->if_bpf, m);
+		}
+	} else {
+		if (bpf_peers_present(loif->if_bpf)) {
+			if ((m->m_flags & M_MCAST) == 0 || loif == ifp) {
+				/* XXX beware sizeof(af) != 4 */
+				u_int32_t af1 = af;	
+
+				/*
+				 * We need to prepend the address family.
+				 */
+				bpf_mtap2(loif->if_bpf, &af1, sizeof(af1), m);
+			}
+		}
+	}
+
+	/* Strip away media header */
+	if (hlen > 0) {
+		m_adj(m, hlen);
+#ifndef __NO_STRICT_ALIGNMENT
+		/*
+		 * Some archs do not like unaligned data, so
+		 * we move data down in the first mbuf.
+		 */
+		if (mtod(m, vm_offset_t) & 3) {
+			KASSERT(hlen >= 3, ("if_simloop: hlen too small"));
+			bcopy(m->m_data, 
+			    (char *)(mtod(m, vm_offset_t) 
+				- (mtod(m, vm_offset_t) & 3)),
+			    m->m_len);
+			m->m_data -= (mtod(m,vm_offset_t) & 3);
+		}
+#endif
+	}
+
+	/* Deliver to upper layer protocol */
+	switch (af) {
 #ifdef INET
 	case AF_INET:
-		ifq = &ipintrq;
 		isr = NETISR_IP;
 		break;
 #endif
 #ifdef INET6
 	case AF_INET6:
-		ifq = &ip6intrq;
+		m->m_flags |= M_LOOP;
 		isr = NETISR_IPV6;
 		break;
-#endif /* INET6 */
+#endif
+#ifdef IPX
+	case AF_IPX:
+		isr = NETISR_IPX;
+		break;
+#endif
 #ifdef NETATALK
 	case AF_APPLETALK:
-		ifq = &atintrq2;
-		isr = NETISR_ATALK;
+		isr = NETISR_ATALK2;
 		break;
-#endif /* NETATALK */
-#ifdef MPLS
-	case AF_MPLS:
-		ifq = &mplsintrq;
-		isr = NETISR_MPLS;
-		break;
-#endif /* MPLS */
+#endif
 	default:
-		printf("%s: can't handle af%d\n", ifp->if_xname,
-			dst->sa_family);
+		printf("if_simloop: can't handle af=%d\n", af);
 		m_freem(m);
 		return (EAFNOSUPPORT);
 	}
-	s = splnet();
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
-		m_freem(m);
-		splx(s);
-		return (ENOBUFS);
-	}
-	IF_ENQUEUE(ifq, m);
-	schednetisr(isr);
 	ifp->if_ipackets++;
 	ifp->if_ibytes += m->m_pkthdr.len;
-	splx(s);
+	netisr_queue(isr, m);	/* mbuf is free'd on failure. */
 	return (0);
 }
 
-#ifdef ALTQ
-static void
-lo_altqstart(ifp)
-	struct ifnet *ifp;
-{
-	struct ifqueue *ifq;
-	struct mbuf *m;
-	int32_t af, *afp;
-	int s, isr;
-	
-	while (1) {
-		s = splnet();
-		IFQ_DEQUEUE(&ifp->if_snd, m);
-		splx(s);
-		if (m == NULL)
-			return;
-
-		afp = mtod(m, int32_t *);
-		af = *afp;
-		m_adj(m, sizeof(int32_t));
-
-		switch (af) {
-#ifdef INET
-		case AF_INET:
-			ifq = &ipintrq;
-			isr = NETISR_IP;
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			m->m_flags |= M_LOOP;
-			ifq = &ip6intrq;
-			isr = NETISR_IPV6;
-			break;
-#endif
-#ifdef MPLS
-		case AF_MPLS:
-			ifq = &mplsintrq;
-			isr = NETISR_MPLS;
-			break;
-#endif
-#ifdef NETATALK
-		case AF_APPLETALK:
-			ifq = &atintrq2;
-			isr = NETISR_ATALK;
-			break;
-#endif /* NETATALK */
-		default:
-			printf("lo_altqstart: can't handle af%d\n", af);
-			m_freem(m);
-			return;
-		}
-
-		s = splnet();
-		if (IF_QFULL(ifq)) {
-			IF_DROP(ifq);
-			m_freem(m);
-			splx(s);
-			return;
-		}
-		IF_ENQUEUE(ifq, m);
-		schednetisr(isr);
-		ifp->if_ipackets++;
-		ifp->if_ibytes += m->m_pkthdr.len;
-		splx(s);
-	}
-}
-#endif /* ALTQ */
-
 /* ARGSUSED */
-void
+static void
 lortrequest(cmd, rt, info)
 	int cmd;
 	struct rtentry *rt;
 	struct rt_addrinfo *info;
 {
-
-	if (rt)
-		rt->rt_rmx.rmx_mtu = LOMTU;
+	RT_LOCK_ASSERT(rt);
+	rt->rt_rmx.rmx_mtu = rt->rt_ifp->if_mtu;
 }
 
 /*
@@ -417,21 +345,21 @@ lortrequest(cmd, rt, info)
 /* ARGSUSED */
 int
 loioctl(ifp, cmd, data)
-	struct ifnet *ifp;
+	register struct ifnet *ifp;
 	u_long cmd;
 	caddr_t data;
 {
-	struct ifaddr *ifa;
-	struct ifreq *ifr;
-	int error = 0;
+	register struct ifaddr *ifa;
+	register struct ifreq *ifr = (struct ifreq *)data;
+	register int error = 0;
 
 	switch (cmd) {
 
 	case SIOCSIFADDR:
-		ifp->if_flags |= IFF_UP | IFF_RUNNING;
+		ifp->if_flags |= IFF_UP;
+		ifp->if_drv_flags |= IFF_DRV_RUNNING;
 		ifa = (struct ifaddr *)data;
-		if (ifa != 0)
-			ifa->ifa_rtrequest = lortrequest;
+		ifa->ifa_rtrequest = lortrequest;
 		/*
 		 * Everything else is done at a higher level.
 		 */
@@ -439,7 +367,6 @@ loioctl(ifp, cmd, data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
 		if (ifr == 0) {
 			error = EAFNOSUPPORT;		/* XXX */
 			break;
@@ -453,7 +380,7 @@ loioctl(ifp, cmd, data)
 #ifdef INET6
 		case AF_INET6:
 			break;
-#endif /* INET6 */
+#endif
 
 		default:
 			error = EAFNOSUPPORT;
@@ -462,12 +389,14 @@ loioctl(ifp, cmd, data)
 		break;
 
 	case SIOCSIFMTU:
-		ifr = (struct ifreq *)data;
 		ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
+	case SIOCSIFFLAGS:
+		break;
+
 	default:
-		error = ENOTTY;
+		error = EINVAL;
 	}
 	return (error);
 }

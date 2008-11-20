@@ -1,6 +1,3 @@
-/*	$OpenBSD: filio.h,v 1.5 2007/06/01 22:30:48 deraadt Exp $	*/
-/*	$NetBSD: filio.h,v 1.5 1994/06/29 06:44:14 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,6 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)filio.h	8.1 (Berkeley) 3/28/94
+ * $FreeBSD: src/sys/sys/filio.h,v 1.10 2007/04/05 21:10:53 pjd Exp $
  */
 
 #ifndef	_SYS_FILIO_H_
@@ -50,5 +48,15 @@
 #define	FIOASYNC	_IOW('f', 125, int)	/* set/clear async i/o */
 #define	FIOSETOWN	_IOW('f', 124, int)	/* set owner */
 #define	FIOGETOWN	_IOR('f', 123, int)	/* get owner */
+#define	FIODTYPE	_IOR('f', 122, int)	/* get d_flags type part */
+#define	FIOGETLBA	_IOR('f', 121, int)	/* get start blk # */
+struct fiodgname_arg {
+	int	len;
+	void	*buf;
+};
+#define	FIODGNAME	_IOW('f', 120, struct fiodgname_arg) /* get dev. name */
+/* Handle lseek SEEK_DATA and SEEK_HOLE for holey file knowledge. */
+#define	FIOSEEKDATA	_IOWR('f', 97, off_t)	/* SEEK_DATA */
+#define	FIOSEEKHOLE	_IOWR('f', 98, off_t)	/* SEEK_HOLE */
 
 #endif /* !_SYS_FILIO_H_ */

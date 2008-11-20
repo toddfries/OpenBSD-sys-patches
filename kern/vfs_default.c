@@ -1,15 +1,11 @@
-/*	$OpenBSD: vfs_default.c,v 1.37 2008/05/03 14:41:29 thib Exp $  */
-
-/*
- * Portions of this code are:
- *
+/*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
- * (c) UNIX System Laboratories, Inc.
- * All or some portions of this file are derived from material licensed
- * to the University of California by American Telephone and Telegraph
- * Co. or Unix System Laboratories, Inc. and are reproduced herein with
- * the permission of UNIX System Laboratories, Inc.
+ *
+ * This code is derived from software contributed
+ * to Berkeley by John Heidemann of the UCLA Ficus project.
+ *
+ * Source: * @(#)i405_init.c 2.10 92/04/27 UCLA Ficus project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -19,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,204 +32,646 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.138 2007/05/18 13:02:13 kib Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
-#include <sys/mount.h>
-#include <sys/vnode.h>
-#include <sys/namei.h>
-#include <sys/malloc.h>
-#include <sys/pool.h>
+#include <sys/bio.h>
+#include <sys/buf.h>
+#include <sys/conf.h>
 #include <sys/event.h>
-#include <miscfs/specfs/specdev.h>
+#include <sys/kernel.h>
+#include <sys/limits.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mount.h>
+#include <sys/mutex.h>
+#include <sys/unistd.h>
+#include <sys/vnode.h>
+#include <sys/poll.h>
 
-int filt_generic_readwrite(struct knote *, long);
-void filt_generic_detach(struct knote *);
+#include <vm/vm.h>
+#include <vm/vm_object.h>
+#include <vm/vm_extern.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
+#include <vm/vnode_pager.h>
+
+static int	vop_nolookup(struct vop_lookup_args *);
+static int	vop_nostrategy(struct vop_strategy_args *);
 
 /*
- * Eliminate all activity associated with the requested vnode
- * and with all vnodes aliased to the requested vnode.
+ * This vnode table stores what we want to do if the filesystem doesn't
+ * implement a particular VOP.
+ *
+ * If there is no specific entry here, we will return EOPNOTSUPP.
+ *
  */
+
+struct vop_vector default_vnodeops = {
+	.vop_default =		NULL,
+	.vop_bypass =		VOP_EOPNOTSUPP,
+
+	.vop_advlock =		VOP_EINVAL,
+	.vop_bmap =		vop_stdbmap,
+	.vop_close =		VOP_NULL,
+	.vop_fsync =		VOP_NULL,
+	.vop_getpages =		vop_stdgetpages,
+	.vop_getwritemount = 	vop_stdgetwritemount,
+	.vop_inactive =		VOP_NULL,
+	.vop_ioctl =		VOP_ENOTTY,
+	.vop_kqfilter =		vop_stdkqfilter,
+	.vop_islocked =		vop_stdislocked,
+	.vop_lease =		VOP_NULL,
+	.vop_lock1 =		vop_stdlock,
+	.vop_lookup =		vop_nolookup,
+	.vop_open =		VOP_NULL,
+	.vop_pathconf =		VOP_EINVAL,
+	.vop_poll =		vop_nopoll,
+	.vop_putpages =		vop_stdputpages,
+	.vop_readlink =		VOP_EINVAL,
+	.vop_revoke =		VOP_PANIC,
+	.vop_strategy =		vop_nostrategy,
+	.vop_unlock =		vop_stdunlock,
+	.vop_vptofh =		vop_stdvptofh,
+};
+
+/*
+ * Series of placeholder functions for various error returns for
+ * VOPs.
+ */
+
 int
-vop_generic_revoke(void *v)
+vop_eopnotsupp(struct vop_generic_args *ap)
 {
-	struct vop_revoke_args *ap = v;
-	struct vnode *vp, *vq;
-	struct proc *p = curproc;
+	/*
+	printf("vop_notsupp[%s]\n", ap->a_desc->vdesc_name);
+	*/
 
-#ifdef DIAGNOSTIC
-	if ((ap->a_flags & REVOKEALL) == 0)
-		panic("vop_generic_revoke");
-#endif
-
-	vp = ap->a_vp;
- 
-	if (vp->v_type == VBLK && vp->v_specinfo != 0) {
-		struct mount *mp = vp->v_specmountpoint;
-
-		/*
-		 * If we have a mount point associated with the vnode, we must
-		 * flush it out now, as to not leave a dangling zombie mount
-		 * point laying around in VFS.
-		 */
-		if (mp != NULL && !vfs_busy(mp, VB_WRITE|VB_WAIT))
-			dounmount(mp, MNT_FORCE | MNT_DOOMED, p, NULL);
-	}
-
-	if (vp->v_flag & VALIASED) {
-		/*
-		 * If a vgone (or vclean) is already in progress,
-		 * wait until it is done and return.
-		 */
-		if (vp->v_flag & VXLOCK) {
-			vp->v_flag |= VXWANT;
-			tsleep(vp, PINOD, "vop_generic_revokeall", 0);
-
-			return(0);
-		}
-
-		/*
-		 * Ensure that vp will not be vgone'd while we
-		 * are eliminating its aliases.
-		 */
-		vp->v_flag |= VXLOCK;
-		while (vp->v_flag & VALIASED) {
-			for (vq = *vp->v_hashchain; vq; vq = vq->v_specnext) {
-				if (vq->v_rdev != vp->v_rdev ||
-				    vq->v_type != vp->v_type || vp == vq)
-					continue;
-				vgone(vq);
-				break;
-			}
-		}
-
-		/*
-		 * Remove the lock so that vgone below will
-		 * really eliminate the vnode after which time
-		 * vgone will awaken any sleepers.
-		 */
-		vp->v_flag &= ~VXLOCK;
-	}
-
-	vgonel(vp, p);
-
-	return (0);
+	return (EOPNOTSUPP);
 }
 
 int
-vop_generic_bmap(void *v)
+vop_ebadf(struct vop_generic_args *ap)
 {
-	struct vop_bmap_args *ap = v;
 
-	if (ap->a_vpp)
-		*ap->a_vpp = ap->a_vp;
-	if (ap->a_bnp)
-		*ap->a_bnp = ap->a_bn;
-	if (ap->a_runp)
-		*ap->a_runp = 0;
-
-	return (0);
+	return (EBADF);
 }
 
 int
-vop_generic_bwrite(void *v)
+vop_enotty(struct vop_generic_args *ap)
 {
-	struct vop_bwrite_args *ap = v;
 
-	return (bwrite(ap->a_bp));
+	return (ENOTTY);
 }
 
 int
-vop_generic_abortop(void *v)
+vop_einval(struct vop_generic_args *ap)
 {
-	struct vop_abortop_args *ap = v;
- 
-	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
-		pool_put(&namei_pool, ap->a_cnp->cn_pnbuf);
+
+	return (EINVAL);
+}
+
+int
+vop_null(struct vop_generic_args *ap)
+{
 
 	return (0);
 }
 
 /*
- * Stubs to use when there is no locking to be done on the underlying object.
- * A minimal shared lock is necessary to ensure that the underlying object
- * is not revoked while an operation is in progress. So, an active shared
- * count should be maintained in an auxiliary vnode lock structure. However,
- * that's not done now.
+ * Helper function to panic on some bad VOPs in some filesystems.
  */
 int
-vop_generic_lock(void *v)
+vop_panic(struct vop_generic_args *ap)
 {
-	return (0);
-}
- 
-/*
- * Decrement the active use count. (Not done currently)
- */
-int
-vop_generic_unlock(void *v)
-{
-	return (0);
+
+	panic("filesystem goof: vop_panic[%s]", ap->a_desc->vdesc_name);
 }
 
 /*
- * Return whether or not the node is in use. (Not done currently)
+ * vop_std<something> and vop_no<something> are default functions for use by
+ * filesystems that need the "default reasonable" implementation for a
+ * particular operation.
+ *
+ * The documentation for the operations they implement exists (if it exists)
+ * in the VOP_<SOMETHING>(9) manpage (all uppercase).
  */
-int
-vop_generic_islocked(void *v)
+
+/*
+ * Default vop for filesystems that do not support name lookup
+ */
+static int
+vop_nolookup(ap)
+	struct vop_lookup_args /* {
+		struct vnode *a_dvp;
+		struct vnode **a_vpp;
+		struct componentname *a_cnp;
+	} */ *ap;
 {
-	return (0);
-}
-
-struct filterops generic_filtops = 
-	{ 1, NULL, filt_generic_detach, filt_generic_readwrite };
-
-int
-vop_generic_kqfilter(void *v)
-{
-	struct vop_kqfilter_args *ap = v;
-	struct knote *kn = ap->a_kn;
-
-	switch (kn->kn_filter) {
-	case EVFILT_READ:
-	case EVFILT_WRITE:
-		kn->kn_fop = &generic_filtops;
-		break;
-	default:
-		return (1);
-	}
-
-	return (0);
-}
-
-/* Trivial lookup routine that always fails. */
-int
-vop_generic_lookup(void *v)
-{
-	struct vop_lookup_args	*ap = v;
 
 	*ap->a_vpp = NULL;
 	return (ENOTDIR);
 }
 
-void
-filt_generic_detach(struct knote *kn)
+/*
+ *	vop_nostrategy:
+ *
+ *	Strategy routine for VFS devices that have none.
+ *
+ *	BIO_ERROR and B_INVAL must be cleared prior to calling any strategy
+ *	routine.  Typically this is done for a BIO_READ strategy call.
+ *	Typically B_INVAL is assumed to already be clear prior to a write
+ *	and should not be cleared manually unless you just made the buffer
+ *	invalid.  BIO_ERROR should be cleared either way.
+ */
+
+static int
+vop_nostrategy (struct vop_strategy_args *ap)
 {
+	printf("No strategy for buffer at %p\n", ap->a_bp);
+	vprint("vnode", ap->a_vp);
+	ap->a_bp->b_ioflags |= BIO_ERROR;
+	ap->a_bp->b_error = EOPNOTSUPP;
+	bufdone(ap->a_bp);
+	return (EOPNOTSUPP);
+}
+
+/*
+ * vop_stdpathconf:
+ *
+ * Standard implementation of POSIX pathconf, to get information about limits
+ * for a filesystem.
+ * Override per filesystem for the case where the filesystem has smaller
+ * limits.
+ */
+int
+vop_stdpathconf(ap)
+	struct vop_pathconf_args /* {
+	struct vnode *a_vp;
+	int a_name;
+	int *a_retval;
+	} */ *ap;
+{
+
+	switch (ap->a_name) {
+		case _PC_NAME_MAX:
+			*ap->a_retval = NAME_MAX;
+			return (0);
+		case _PC_PATH_MAX:
+			*ap->a_retval = PATH_MAX;
+			return (0);
+		case _PC_LINK_MAX:
+			*ap->a_retval = LINK_MAX;
+			return (0);
+		case _PC_MAX_CANON:
+			*ap->a_retval = MAX_CANON;
+			return (0);
+		case _PC_MAX_INPUT:
+			*ap->a_retval = MAX_INPUT;
+			return (0);
+		case _PC_PIPE_BUF:
+			*ap->a_retval = PIPE_BUF;
+			return (0);
+		case _PC_CHOWN_RESTRICTED:
+			*ap->a_retval = 1;
+			return (0);
+		case _PC_VDISABLE:
+			*ap->a_retval = _POSIX_VDISABLE;
+			return (0);
+		default:
+			return (EINVAL);
+	}
+	/* NOTREACHED */
+}
+
+/*
+ * Standard lock, unlock and islocked functions.
+ */
+int
+vop_stdlock(ap)
+	struct vop_lock1_args /* {
+		struct vnode *a_vp;
+		int a_flags;
+		struct thread *a_td;
+		char *file;
+		int line;
+	} */ *ap;
+{
+	struct vnode *vp = ap->a_vp;
+
+	return (_lockmgr(vp->v_vnlock, ap->a_flags, VI_MTX(vp), ap->a_td, ap->a_file, ap->a_line));
+}
+
+/* See above. */
+int
+vop_stdunlock(ap)
+	struct vop_unlock_args /* {
+		struct vnode *a_vp;
+		int a_flags;
+		struct thread *a_td;
+	} */ *ap;
+{
+	struct vnode *vp = ap->a_vp;
+
+	return (lockmgr(vp->v_vnlock, ap->a_flags | LK_RELEASE, VI_MTX(vp),
+	    ap->a_td));
+}
+
+/* See above. */
+int
+vop_stdislocked(ap)
+	struct vop_islocked_args /* {
+		struct vnode *a_vp;
+		struct thread *a_td;
+	} */ *ap;
+{
+
+	return (lockstatus(ap->a_vp->v_vnlock, ap->a_td));
+}
+
+/*
+ * Return true for select/poll.
+ */
+int
+vop_nopoll(ap)
+	struct vop_poll_args /* {
+		struct vnode *a_vp;
+		int  a_events;
+		struct ucred *a_cred;
+		struct thread *a_td;
+	} */ *ap;
+{
+	/*
+	 * Return true for read/write.  If the user asked for something
+	 * special, return POLLNVAL, so that clients have a way of
+	 * determining reliably whether or not the extended
+	 * functionality is present without hard-coding knowledge
+	 * of specific filesystem implementations.
+	 * Stay in sync with kern_conf.c::no_poll().
+	 */
+	if (ap->a_events & ~POLLSTANDARD)
+		return (POLLNVAL);
+
+	return (ap->a_events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
+}
+
+/*
+ * Implement poll for local filesystems that support it.
+ */
+int
+vop_stdpoll(ap)
+	struct vop_poll_args /* {
+		struct vnode *a_vp;
+		int  a_events;
+		struct ucred *a_cred;
+		struct thread *a_td;
+	} */ *ap;
+{
+	if (ap->a_events & ~POLLSTANDARD)
+		return (vn_pollrecord(ap->a_vp, ap->a_td, ap->a_events));
+	return (ap->a_events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
+}
+
+/*
+ * Return our mount point, as we will take charge of the writes.
+ */
+int
+vop_stdgetwritemount(ap)
+	struct vop_getwritemount_args /* {
+		struct vnode *a_vp;
+		struct mount **a_mpp;
+	} */ *ap;
+{
+	struct mount *mp;
+
+	/*
+	 * XXX Since this is called unlocked we may be recycled while
+	 * attempting to ref the mount.  If this is the case or mountpoint
+	 * will be set to NULL.  We only have to prevent this call from
+	 * returning with a ref to an incorrect mountpoint.  It is not
+	 * harmful to return with a ref to our previous mountpoint.
+	 */
+	mp = ap->a_vp->v_mount;
+	if (mp != NULL) {
+		vfs_ref(mp);
+		if (mp != ap->a_vp->v_mount) {
+			vfs_rel(mp);
+			mp = NULL;
+		}
+	}
+	*(ap->a_mpp) = mp;
+	return (0);
+}
+
+/* XXX Needs good comment and VOP_BMAP(9) manpage */
+int
+vop_stdbmap(ap)
+	struct vop_bmap_args /* {
+		struct vnode *a_vp;
+		daddr_t  a_bn;
+		struct bufobj **a_bop;
+		daddr_t *a_bnp;
+		int *a_runp;
+		int *a_runb;
+	} */ *ap;
+{
+
+	if (ap->a_bop != NULL)
+		*ap->a_bop = &ap->a_vp->v_bufobj;
+	if (ap->a_bnp != NULL)
+		*ap->a_bnp = ap->a_bn * btodb(ap->a_vp->v_mount->mnt_stat.f_iosize);
+	if (ap->a_runp != NULL)
+		*ap->a_runp = 0;
+	if (ap->a_runb != NULL)
+		*ap->a_runb = 0;
+	return (0);
 }
 
 int
-filt_generic_readwrite(struct knote *kn, long hint)
+vop_stdfsync(ap)
+	struct vop_fsync_args /* {
+		struct vnode *a_vp;
+		struct ucred *a_cred;
+		int a_waitfor;
+		struct thread *a_td;
+	} */ *ap;
 {
+	struct vnode *vp = ap->a_vp;
+	struct buf *bp;
+	struct bufobj *bo;
+	struct buf *nbp;
+	int error = 0;
+	int maxretry = 1000;     /* large, arbitrarily chosen */
+
+	VI_LOCK(vp);
+loop1:
 	/*
-	 * filesystem is gone, so set the EOF flag and schedule 
-	 * the knote for deletion.
+	 * MARK/SCAN initialization to avoid infinite loops.
 	 */
-	if (hint == NOTE_REVOKE) {
-		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
-		return (1);
+        TAILQ_FOREACH(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs) {
+                bp->b_vflags &= ~BV_SCANNED;
+		bp->b_error = 0;
 	}
 
-        kn->kn_data = 0;
+	/*
+	 * Flush all dirty buffers associated with a vnode.
+	 */
+loop2:
+	TAILQ_FOREACH_SAFE(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs, nbp) {
+		if ((bp->b_vflags & BV_SCANNED) != 0)
+			continue;
+		bp->b_vflags |= BV_SCANNED;
+		if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT, NULL))
+			continue;
+		VI_UNLOCK(vp);
+		KASSERT(bp->b_bufobj == &vp->v_bufobj,
+		    ("bp %p wrong b_bufobj %p should be %p",
+		    bp, bp->b_bufobj, &vp->v_bufobj));
+		if ((bp->b_flags & B_DELWRI) == 0)
+			panic("fsync: not dirty");
+		if ((vp->v_object != NULL) && (bp->b_flags & B_CLUSTEROK)) {
+			vfs_bio_awrite(bp);
+		} else {
+			bremfree(bp);
+			bawrite(bp);
+		}
+		VI_LOCK(vp);
+		goto loop2;
+	}
 
-        return (1);
+	/*
+	 * If synchronous the caller expects us to completely resolve all
+	 * dirty buffers in the system.  Wait for in-progress I/O to
+	 * complete (which could include background bitmap writes), then
+	 * retry if dirty blocks still exist.
+	 */
+	if (ap->a_waitfor == MNT_WAIT) {
+		bo = &vp->v_bufobj;
+		bufobj_wwait(bo, 0, 0);
+		if (bo->bo_dirty.bv_cnt > 0) {
+			/*
+			 * If we are unable to write any of these buffers
+			 * then we fail now rather than trying endlessly
+			 * to write them out.
+			 */
+			TAILQ_FOREACH(bp, &bo->bo_dirty.bv_hd, b_bobufs)
+				if ((error = bp->b_error) == 0)
+					continue;
+			if (error == 0 && --maxretry >= 0)
+				goto loop1;
+			error = EAGAIN;
+		}
+	}
+	VI_UNLOCK(vp);
+	if (error == EAGAIN)
+		vprint("fsync: giving up on dirty", vp);
+
+	return (error);
 }
+
+/* XXX Needs good comment and more info in the manpage (VOP_GETPAGES(9)). */
+int
+vop_stdgetpages(ap)
+	struct vop_getpages_args /* {
+		struct vnode *a_vp;
+		vm_page_t *a_m;
+		int a_count;
+		int a_reqpage;
+		vm_ooffset_t a_offset;
+	} */ *ap;
+{
+
+	return vnode_pager_generic_getpages(ap->a_vp, ap->a_m,
+	    ap->a_count, ap->a_reqpage);
+}
+
+int
+vop_stdkqfilter(struct vop_kqfilter_args *ap)
+{
+	return vfs_kqfilter(ap);
+}
+
+/* XXX Needs good comment and more info in the manpage (VOP_PUTPAGES(9)). */
+int
+vop_stdputpages(ap)
+	struct vop_putpages_args /* {
+		struct vnode *a_vp;
+		vm_page_t *a_m;
+		int a_count;
+		int a_sync;
+		int *a_rtvals;
+		vm_ooffset_t a_offset;
+	} */ *ap;
+{
+
+	return vnode_pager_generic_putpages(ap->a_vp, ap->a_m, ap->a_count,
+	     ap->a_sync, ap->a_rtvals);
+}
+
+int
+vop_stdvptofh(struct vop_vptofh_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+/*
+ * vfs default ops
+ * used to fill the vfs function table to get reasonable default return values.
+ */
+int
+vfs_stdroot (mp, flags, vpp, td)
+	struct mount *mp;
+	int flags;
+	struct vnode **vpp;
+	struct thread *td;
+{
+
+	return (EOPNOTSUPP);
+}
+
+int
+vfs_stdstatfs (mp, sbp, td)
+	struct mount *mp;
+	struct statfs *sbp;
+	struct thread *td;
+{
+
+	return (EOPNOTSUPP);
+}
+
+int
+vfs_stdquotactl (mp, cmds, uid, arg, td)
+	struct mount *mp;
+	int cmds;
+	uid_t uid;
+	void *arg;
+	struct thread *td;
+{
+
+	return (EOPNOTSUPP);
+}
+
+int
+vfs_stdsync(mp, waitfor, td)
+	struct mount *mp;
+	int waitfor;
+	struct thread *td;
+{
+	struct vnode *vp, *mvp;
+	int error, lockreq, allerror = 0;
+
+	lockreq = LK_EXCLUSIVE | LK_INTERLOCK;
+	if (waitfor != MNT_WAIT)
+		lockreq |= LK_NOWAIT;
+	/*
+	 * Force stale buffer cache information to be flushed.
+	 */
+	MNT_ILOCK(mp);
+loop:
+	MNT_VNODE_FOREACH(vp, mp, mvp) {
+
+		VI_LOCK(vp);
+		if (vp->v_bufobj.bo_dirty.bv_cnt == 0) {
+			VI_UNLOCK(vp);
+			continue;
+		}
+		MNT_IUNLOCK(mp);
+
+		if ((error = vget(vp, lockreq, td)) != 0) {
+			MNT_ILOCK(mp);
+			if (error == ENOENT) {
+				MNT_VNODE_FOREACH_ABORT_ILOCKED(mp, mvp);
+				goto loop;
+			}
+			continue;
+		}
+		error = VOP_FSYNC(vp, waitfor, td);
+		if (error)
+			allerror = error;
+
+		/* Do not turn this into vput.  td is not always curthread. */
+		VOP_UNLOCK(vp, 0, td);
+		vrele(vp);
+		MNT_ILOCK(mp);
+	}
+	MNT_IUNLOCK(mp);
+	return (allerror);
+}
+
+int
+vfs_stdnosync (mp, waitfor, td)
+	struct mount *mp;
+	int waitfor;
+	struct thread *td;
+{
+
+	return (0);
+}
+
+int
+vfs_stdvget (mp, ino, flags, vpp)
+	struct mount *mp;
+	ino_t ino;
+	int flags;
+	struct vnode **vpp;
+{
+
+	return (EOPNOTSUPP);
+}
+
+int
+vfs_stdfhtovp (mp, fhp, vpp)
+	struct mount *mp;
+	struct fid *fhp;
+	struct vnode **vpp;
+{
+
+	return (EOPNOTSUPP);
+}
+
+int
+vfs_stdinit (vfsp)
+	struct vfsconf *vfsp;
+{
+
+	return (0);
+}
+
+int
+vfs_stduninit (vfsp)
+	struct vfsconf *vfsp;
+{
+
+	return(0);
+}
+
+int
+vfs_stdextattrctl(mp, cmd, filename_vp, attrnamespace, attrname, td)
+	struct mount *mp;
+	int cmd;
+	struct vnode *filename_vp;
+	int attrnamespace;
+	const char *attrname;
+	struct thread *td;
+{
+
+	if (filename_vp != NULL)
+		VOP_UNLOCK(filename_vp, 0, td);
+	return (EOPNOTSUPP);
+}
+
+int
+vfs_stdsysctl(mp, op, req)
+	struct mount *mp;
+	fsctlop_t op;
+	struct sysctl_req *req;
+{
+
+	return (EOPNOTSUPP);
+}
+
+/* end of vfs default ops */

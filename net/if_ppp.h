@@ -1,56 +1,39 @@
-/*	$OpenBSD: if_ppp.h,v 1.8 2002/07/01 19:31:34 deraadt Exp $	*/
-/*	$NetBSD: if_ppp.h,v 1.11 1996/03/15 02:28:05 paulus Exp $	*/
-
 /*
  * if_ppp.h - Point-to-Point Protocol definitions.
- *
- * Copyright (c) 1984-2000 Carnegie Mellon University. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. The name "Carnegie Mellon University" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any legal
- *    details, please contact
- *      Office of Technology Transfer
- *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
- *
- * 4. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by Computing Services
- *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
- *
- * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
- * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
- * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
- * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
- * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _NET_IF_PPP_H_
-#define _NET_IF_PPP_H_
+/*-
+ * Copyright (c) 1989 Carnegie Mellon University.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms are permitted
+ * provided that the above copyright notice and this paragraph are
+ * duplicated in all such forms and that any documentation,
+ * advertising materials, and other materials related to such
+ * distribution and use acknowledge that the software was developed
+ * by Carnegie Mellon University.  The name of the
+ * University may not be used to endorse or promote products derived
+ * from this software without specific prior written permission.
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * $FreeBSD: src/sys/net/if_ppp.h,v 1.15 2005/01/07 01:45:34 imp Exp $
+ */
+
+#ifndef _IF_PPP_H_
+#define _IF_PPP_H_
+
+/* XXX this used to be self-contained. */
+#include <net/ppp_defs.h>
+#include <net/if.h>
 
 /*
  * Packet sizes
  */
 #define	PPP_MTU		1500	/* Default MTU (size of Info field) */
 #define PPP_MAXMRU	65000	/* Largest MRU we allow */
+#define PPP_MAXMTU	16384	/* Largest MTU we allow */
 
 /*
  * Bit definitions for flags.
@@ -79,8 +62,8 @@
  */
 #define SC_TIMEOUT	0x00000400	/* timeout is currently pending */
 #define SC_VJ_RESET	0x00000800	/* need to reset VJ decomp */
-#define SC_COMP_RUN	0x00001000	/* compressor has been inited */
-#define SC_DECOMP_RUN	0x00002000	/* decompressor has been inited */
+#define SC_COMP_RUN	0x00001000	/* compressor has been initiated */
+#define SC_DECOMP_RUN	0x00002000	/* decompressor has been initiated */
 #define SC_DC_ERROR	0x00004000	/* non-fatal decomp error detected */
 #define SC_DC_FERROR	0x00008000	/* fatal decomp error detected */
 #define SC_TBUSY	0x10000000	/* xmitter doesn't need a packet yet */
@@ -149,10 +132,8 @@ struct ifpppcstatsreq {
 #define SIOCGPPPSTATS	_IOWR('i', 123, struct ifpppstatsreq)
 #define SIOCGPPPCSTATS	_IOWR('i', 122, struct ifpppcstatsreq)
 
-#ifdef _KERNEL
-void pppattach(void);
-int pppoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
-		   struct rtentry *);
-void pppintr(void);
+#if !defined(ifr_mtu)
+#define ifr_mtu	ifr_ifru.ifru_metric
 #endif
-#endif /* _NET_IF_PPP_H_ */
+
+#endif /* _IF_PPP_H_ */

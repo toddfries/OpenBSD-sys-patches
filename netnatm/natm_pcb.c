@@ -1,7 +1,4 @@
-/*	$OpenBSD: natm_pcb.c,v 1.9 2007/10/06 02:18:39 krw Exp $	*/
-
-/*
- *
+/*-
  * Copyright (c) 1996 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -30,6 +27,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $NetBSD: natm_pcb.c,v 1.4 1996/11/09 03:26:27 chuck Exp $
  */
 
 /*
@@ -37,68 +36,64 @@
  * from trying to use each other's VCs.
  */
 
+#include "opt_ddb.h"
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netnatm/natm_pcb.c,v 1.18 2007/01/08 22:30:39 rwatson Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/queue.h>
-#include <sys/socket.h>
-#include <sys/protosw.h>
-#include <sys/domain.h>
-#include <sys/mbuf.h>
+#include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/systm.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
 
 #include <net/if.h>
-#include <net/radix.h>
-#include <net/route.h>
 
 #include <netinet/in.h>
 
 #include <netnatm/natm.h>
 
+#include <ddb/ddb.h>
+
+struct npcblist natm_pcbs;
+
 /*
  * npcb_alloc: allocate a npcb [in the free state]
  */
-
-struct natmpcb *npcb_alloc(wait)
-
-int wait;
+struct natmpcb *
+npcb_alloc(int wait)
 
 {
-  struct natmpcb *npcb;
+	struct natmpcb *npcb;
 
-  npcb = malloc(sizeof(*npcb), M_PCB, wait | M_ZERO);
-
-  if (npcb) {
-    npcb->npcb_flags = NPCB_FREE;
-  }
-  return(npcb);
+	npcb = malloc(sizeof(*npcb), M_PCB, wait | M_ZERO);
+	if (npcb != NULL)
+		npcb->npcb_flags = NPCB_FREE;
+	return (npcb);
 }
 
 
 /*
  * npcb_free: free a npcb
  */
-
-void npcb_free(npcb, op)
-
-struct natmpcb *npcb;
-int op;
-
+void
+npcb_free(struct natmpcb *npcb, int op)
 {
-  int s = splnet();
 
-  if ((npcb->npcb_flags & NPCB_FREE) == 0) {
-    LIST_REMOVE(npcb, pcblist);
-    npcb->npcb_flags = NPCB_FREE;
-  }
-  if (op == NPCB_DESTROY) {
-    if (npcb->npcb_inq) {
-      npcb->npcb_flags = NPCB_DRAIN;	/* flag for distruction */
-    } else {
-      free(npcb, M_PCB);		/* kill it! */
-    }
-  }
+	NATM_LOCK_ASSERT();
 
-  splx(s);
+	if ((npcb->npcb_flags & NPCB_FREE) == 0) {
+		LIST_REMOVE(npcb, pcblist);
+		npcb->npcb_flags = NPCB_FREE;
+	}
+	if (op == NPCB_DESTROY) {
+		if (npcb->npcb_inq) {
+			npcb->npcb_flags = NPCB_DRAIN;	/* flag for distruct. */
+		} else {
+			FREE(npcb, M_PCB);		/* kill it! */
+		}
+	}
 }
 
 
@@ -106,82 +101,64 @@ int op;
  * npcb_add: add or remove npcb from main list
  *   returns npcb if ok
  */
-
-struct natmpcb *npcb_add(npcb, ifp, vci, vpi)
-
-struct natmpcb *npcb;
-struct ifnet *ifp;
-u_int16_t vci;
-u_int8_t vpi;
-
+struct natmpcb *
+npcb_add(struct natmpcb *npcb, struct ifnet *ifp, u_int16_t vci, u_int8_t vpi)
 {
-  struct natmpcb *cpcb = NULL;		/* current pcb */
-  int s = splnet();
+	struct natmpcb *cpcb = NULL;		/* current pcb */
 
+	NATM_LOCK_ASSERT();
 
-  /*
-   * lookup required
-   */
+	/*
+	 * lookup required
+	 */
+	LIST_FOREACH(cpcb, &natm_pcbs, pcblist)
+		if (ifp == cpcb->npcb_ifp && vci == cpcb->npcb_vci &&
+		    vpi == cpcb->npcb_vpi)
+			break;
 
-  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
-    if (ifp == cpcb->npcb_ifp && vci == cpcb->npcb_vci && vpi == cpcb->npcb_vpi)
-      break;
-  }
-
-  /*
-   * add & something already there?
-   */
-
-  if (cpcb) {
-    cpcb = NULL;
-    goto done;					/* fail */
-  }
+	/*
+	 * add & something already there?
+	 */
+	if (cpcb) {
+		cpcb = NULL;
+		goto done;			/* fail */
+	}
     
-  /*
-   * need to allocate a pcb?
-   */
+	/*
+	 * need to allocate a pcb?
+	 */
+	if (npcb == NULL) {
+		/* could be called from lower half */
+		cpcb = npcb_alloc(M_NOWAIT);
+		if (cpcb == NULL) 
+			goto done;			/* fail */
+	} else {
+		cpcb = npcb;
+	}
 
-  if (npcb == NULL) {
-    cpcb = npcb_alloc(M_NOWAIT);	/* could be called from lower half */
-    if (cpcb == NULL) 
-      goto done;			/* fail */
-  } else {
-    cpcb = npcb;
-  }
+	cpcb->npcb_ifp = ifp;
+	cpcb->ipaddr.s_addr = 0;
+	cpcb->npcb_vci = vci;
+	cpcb->npcb_vpi = vpi;
+	cpcb->npcb_flags = NPCB_CONNECTED;
 
-  cpcb->npcb_ifp = ifp;
-  cpcb->ipaddr.s_addr = 0;
-  cpcb->npcb_vci = vci;
-  cpcb->npcb_vpi = vpi;
-  cpcb->npcb_flags = NPCB_CONNECTED;
-
-  LIST_INSERT_HEAD(&natm_pcbs, cpcb, pcblist);
+	LIST_INSERT_HEAD(&natm_pcbs, cpcb, pcblist);
 
 done:
-  splx(s);
-  return(cpcb);
+	return (cpcb);
 }
-
-
 
 #ifdef DDB
-
-int npcb_dump(void);
-
-int npcb_dump()
-
+DB_SHOW_COMMAND(natm, db_show_natm)
 {
-  struct natmpcb *cpcb;
+	struct natmpcb *cpcb;
 
-  printf("npcb dump:\n");
-  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
-    printf("if=%s, vci=%d, vpi=%d, IP=0x%x, sock=%p, flags=0x%x, inq=%d\n",
-	cpcb->npcb_ifp->if_xname, cpcb->npcb_vci, cpcb->npcb_vpi,
-	cpcb->ipaddr.s_addr, cpcb->npcb_socket, 
-	cpcb->npcb_flags, cpcb->npcb_inq);
-  }
-  printf("done\n");
-  return(0);
+	db_printf("npcb dump:\n");
+	LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
+		db_printf("if=%s, vci=%d, vpi=%d, IP=0x%x, sock=%p, "
+		    "flags=0x%x, inq=%d\n", cpcb->npcb_ifp->if_xname,
+		    cpcb->npcb_vci, cpcb->npcb_vpi, cpcb->ipaddr.s_addr,
+		    cpcb->npcb_socket, cpcb->npcb_flags, cpcb->npcb_inq);
+	}
 }
-
 #endif

@@ -1,60 +1,54 @@
-/*	$OpenBSD: db_lex.c,v 1.9 2006/03/13 06:23:20 jsg Exp $	*/
-/*	$NetBSD: db_lex.c,v 1.8 1996/02/05 01:57:05 christos Exp $	*/
-
-/* 
+/*-
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
  *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
+ */
+/*
  *	Author: David B. Golub, Carnegie Mellon University
  *	Date:	7/90
  */
-
 /*
  * Lexical analyzer.
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ddb/db_lex.c,v 1.22 2005/01/06 01:34:41 imp Exp $");
+
 #include <sys/param.h>
-#include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <machine/db_machdep.h>
-
+#include <ddb/ddb.h>
 #include <ddb/db_lex.h>
-#include <ddb/db_output.h>
-#include <ddb/db_command.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_extern.h>
-#include <ddb/db_var.h>
 
-char	db_line[120];
-char *	db_lp, *db_endlp;
+static char	db_line[120];
+static char *	db_lp, *db_endlp;
 
-db_expr_t db_tok_number;
-char	db_tok_string[TOK_STRING_SIZE];
+static int	db_lex(void);
+static void 	db_flush_line(void);
+static int 	db_read_char(void);
+static void 	db_unread_char(int);
 
 int
-db_read_line(void)
+db_read_line()
 {
 	int	i;
 
@@ -66,17 +60,17 @@ db_read_line(void)
 	return (i);
 }
 
-void
-db_flush_line(void)
+static void
+db_flush_line()
 {
 	db_lp = db_line;
 	db_endlp = db_line;
 }
 
-int	db_look_char = 0;
+static int	db_look_char = 0;
 
-int
-db_read_char(void)
+static int
+db_read_char()
 {
 	int	c;
 
@@ -86,27 +80,29 @@ db_read_char(void)
 	}
 	else if (db_lp >= db_endlp)
 	    c = -1;
-	else 
+	else
 	    c = *db_lp++;
 	return (c);
 }
 
-void
-db_unread_char(int c)
+static void
+db_unread_char(c)
+	int c;
 {
 	db_look_char = c;
 }
 
-int	db_look_token = 0;
+static int	db_look_token = 0;
 
 void
-db_unread_token(int t)
+db_unread_token(t)
+	int	t;
 {
 	db_look_token = t;
 }
 
 int
-db_read_token(void)
+db_read_token()
 {
 	int	t;
 
@@ -119,16 +115,21 @@ db_read_token(void)
 	return (t);
 }
 
+db_expr_t	db_tok_number;
+char	db_tok_string[TOK_STRING_SIZE];
+
+db_expr_t	db_radix = 16;
+
 void
-db_flush_lex(void)
+db_flush_lex()
 {
 	db_flush_line();
 	db_look_char = 0;
 	db_look_token = 0;
 }
 
-int
-db_lex(void)
+static int
+db_lex()
 {
 	int	c;
 
@@ -181,7 +182,8 @@ db_lex(void)
 		(c == '_'))
 	    {
 		db_error("Bad character in number\n");
-		/*NOTREACHED*/
+		db_flush_lex();
+		return (tEOF);
 	    }
 	    db_unread_char(c);
 	    return (tNUMBER);
@@ -196,10 +198,8 @@ db_lex(void)
 	    cp = db_tok_string;
 	    if (c == '\\') {
 		c = db_read_char();
-		if (c == '\n' || c == -1) {
+		if (c == '\n' || c == -1)
 		    db_error("Bad escape\n");
-		    /*NOTREACHED*/
-		}
 	    }
 	    *cp++ = c;
 	    while (1) {
@@ -207,19 +207,18 @@ db_lex(void)
 		if ((c >= 'A' && c <= 'Z') ||
 		    (c >= 'a' && c <= 'z') ||
 		    (c >= '0' && c <= '9') ||
-		    c == '_' || c == '\\' || c == ':')
+		    c == '_' || c == '\\' || c == ':' || c == '.')
 		{
 		    if (c == '\\') {
 			c = db_read_char();
-			if (c == '\n' || c == -1) {
+			if (c == '\n' || c == -1)
 			    db_error("Bad escape\n");
-			    /*NOTREACHED*/
-			}
 		    }
 		    *cp++ = c;
 		    if (cp == db_tok_string+sizeof(db_tok_string)) {
 			db_error("String too long\n");
-			/*NOTREACHED*/
+			db_flush_lex();
+			return (tEOF);
 		    }
 		    continue;
 		}

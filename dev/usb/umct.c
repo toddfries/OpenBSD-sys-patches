@@ -1,11 +1,6 @@
-/*	$OpenBSD: umct.c,v 1.27 2007/10/11 18:33:15 deraadt Exp $	*/
-/*	$NetBSD: umct.c,v 1.10 2003/02/23 04:20:07 simonb Exp $	*/
-/*
- * Copyright (c) 2001 The NetBSD Foundation, Inc.
+/*-
+ * Copyright (c) 2003 Scott Long
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Ichiro FUKUHARA (ichiro@ichiro.org).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,635 +10,502 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/usb/umct.c,v 1.18 2007/06/18 22:27:57 imp Exp $");
+
 /*
- * MCT USB-RS232 Interface Controller
- * http://www.mct.com.tw/prod/rs232.html
- * http://www.dlink.com/products/usb/dsbs25
+ * Driver for the MCT (Magic Control Technology) USB-RS232 Converter.
+ * Based on the superb documentation from the linux mct_u232 driver by
+ * Wolfgang Grandeggar <wolfgang@cec.ch>.
+ * This device smells a lot like the Belkin F5U103, except that it has
+ * suffered some mild brain-damage.  This driver is based off of the ubsa.c
+ * driver from Alexander Kabaev <kan@freebsd.org>.  Merging the two together
+ * might be useful, though the subtle differences might lead to lots of
+ * #ifdef's.
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/ioctl.h>
-#include <sys/conf.h>
+#include <sys/module.h>
+#include <sys/bus.h>
 #include <sys/tty.h>
-#include <sys/file.h>
-#include <sys/selinfo.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
-#include <sys/device.h>
-#include <sys/poll.h>
+#include <sys/taskqueue.h>
 
 #include <dev/usb/usb.h>
-#include <dev/usb/usbcdc.h>
-
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
-#include <dev/usb/usbdevs.h>
-#include <dev/usb/usb_quirks.h>
-
-#include <dev/usb/usbdevs.h>
+#include "usbdevs.h"
 #include <dev/usb/ucomvar.h>
 
-#include <dev/usb/umct.h>
+/* The UMCT advertises the standard 8250 UART registers */
+#define UMCT_GET_MSR		2	/* Get Modem Status Register */
+#define UMCT_GET_MSR_SIZE	1
+#define UMCT_GET_LCR		6	/* Get Line Control Register */
+#define UMCT_GET_LCR_SIZE	1
+#define UMCT_SET_BAUD		5	/* Set the Baud Rate Divisor */
+#define UMCT_SET_BAUD_SIZE	4
+#define UMCT_SET_LCR		7	/* Set Line Control Register */
+#define UMCT_SET_LCR_SIZE	1
+#define UMCT_SET_MCR		10	/* Set Modem Control Register */
+#define UMCT_SET_MCR_SIZE	1
 
-#ifdef UMCT_DEBUG
-#define DPRINTFN(n, x)  do { if (umctdebug > (n)) printf x; } while (0)
-int	umctdebug = 0;
-#else
-#define DPRINTFN(n, x)
-#endif
-#define DPRINTF(x) DPRINTFN(0, x)
+#define UMCT_INTR_INTERVAL	100
+#define UMCT_IFACE_INDEX	0
+#define UMCT_CONFIG_INDEX	1
 
-#define	UMCT_CONFIG_INDEX	0
-#define	UMCT_IFACE_INDEX	0
-
-struct	umct_softc {
-	struct device		 sc_dev;	/* base device */
-	usbd_device_handle	sc_udev;	/* USB device */
-	usbd_interface_handle	 sc_iface;	/* interface */
-	int			 sc_iface_number;	/* interface number */
-	u_int16_t		 sc_product;
-
-	int			 sc_intr_number;	/* interrupt number */
-	usbd_pipe_handle	 sc_intr_pipe;	/* interrupt pipe */
-	u_char			*sc_intr_buf;	/* interrupt buffer */
-	int			 sc_isize;
-
-	usb_cdc_line_state_t	 sc_line_state;	/* current line state */
-	u_char			 sc_dtr;	/* current DTR state */
-	u_char			 sc_rts;	/* current RTS state */
-	u_char			 sc_break;	/* set break */
-
-	u_char			 sc_status;
-
-	struct device		*sc_subdev;	/* ucom device */
-
-	u_char			 sc_dying;	/* disconnecting */
-
-	u_char			 sc_lsr;	/* Local status register */
-	u_char			 sc_msr;	/* umct status register */
-
-	u_int			 last_lcr;	/* keep lcr register */
+struct umct_softc {
+	struct ucom_softc	sc_ucom;
+	int			sc_iface_number;
+	usbd_interface_handle	sc_intr_iface;
+	int			sc_intr_number;
+	usbd_pipe_handle	sc_intr_pipe;
+	u_char			*sc_intr_buf;
+	int			sc_isize;
+	uint8_t			sc_lsr;
+	uint8_t			sc_msr;
+	uint8_t			sc_lcr;
+	uint8_t			sc_mcr;
+	struct task		sc_task;
 };
 
-/*
- * These are the maximum number of bytes transferred per frame.
- * The output buffer size cannot be increased due to the size encoding.
- */
-#define UMCTIBUFSIZE 256
-#define UMCTOBUFSIZE 256
+static void umct_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+static void umct_get_status(void *, int, u_char *, u_char *);
+static void umct_set(void *, int, int, int);
+static int  umct_param(void *, int, struct termios *);
+static int  umct_open(void *, int);
+static void umct_close(void *, int);
+static void umct_notify(void *, int count);
 
-void umct_init(struct umct_softc *);
-void umct_set_baudrate(struct umct_softc *, u_int);
-void umct_set_lcr(struct umct_softc *, u_int);
-void umct_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
-
-void umct_set(void *, int, int, int);
-void umct_dtr(struct umct_softc *, int);
-void umct_rts(struct umct_softc *, int);
-void umct_break(struct umct_softc *, int);
-void umct_set_line_state(struct umct_softc *);
-void umct_get_status(void *, int portno, u_char *lsr, u_char *msr);
-int  umct_param(void *, int, struct termios *);
-int  umct_open(void *, int);
-void umct_close(void *, int);
-
-struct	ucom_methods umct_methods = {
-	umct_get_status,
-	umct_set,
-	umct_param,
-	NULL,
-	umct_open,
-	umct_close,
-	NULL,
-	NULL,
+static struct ucom_callback umct_callback = {
+	umct_get_status,	/* ucom_get_status */
+	umct_set,		/* ucom_set */
+	umct_param,		/* ucom_param */
+	NULL,			/* ucom_ioctl */
+	umct_open,		/* ucom_open */
+	umct_close,		/* ucom_close */
+	NULL,			/* ucom_read */
+	NULL			/* ucom_write */
 };
 
-static const struct usb_devno umct_devs[] = {
-	/* MCT USB-232 Interface Products */
+static const struct umct_product {
+	uint16_t	vendor;
+	uint16_t	product;
+} umct_products[] = {
 	{ USB_VENDOR_MCT, USB_PRODUCT_MCT_USB232 },
-	/* Sitecom USB-232 Products */
 	{ USB_VENDOR_MCT, USB_PRODUCT_MCT_SITECOM_USB232 },
-	/* D-Link DU-H3SP USB BAY Hub Products */
 	{ USB_VENDOR_MCT, USB_PRODUCT_MCT_DU_H3SP_USB232 },
-	/* BELKIN F5U109 */
 	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U109 },
-	/* BELKIN F5U409 */
 	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U409 },
-};
-#define umct_lookup(v, p) usb_lookup(umct_devs, v, p)
-
-int umct_match(struct device *, void *, void *); 
-void umct_attach(struct device *, struct device *, void *); 
-int umct_detach(struct device *, int); 
-int umct_activate(struct device *, enum devact); 
-
-struct cfdriver umct_cd = { 
-	NULL, "umct", DV_DULL 
-}; 
-
-const struct cfattach umct_ca = { 
-	sizeof(struct umct_softc), 
-	umct_match, 
-	umct_attach, 
-	umct_detach, 
-	umct_activate, 
+	{ 0, 0 }
 };
 
-int
-umct_match(struct device *parent, void *match, void *aux)
+static device_probe_t	umct_match;
+static device_attach_t	umct_attach;
+static device_detach_t	umct_detach;
+
+static device_method_t umct_methods[] = {
+	DEVMETHOD(device_probe, umct_match),
+	DEVMETHOD(device_attach, umct_attach),
+	DEVMETHOD(device_detach, umct_detach),
+	{ 0, 0 }
+};
+
+static driver_t umct_driver = {
+	"ucom",
+	umct_methods,
+	sizeof(struct umct_softc)
+};
+
+DRIVER_MODULE(umct, uhub, umct_driver, ucom_devclass, usbd_driver_load, 0);
+MODULE_DEPEND(umct, usb, 1, 1, 1);
+MODULE_DEPEND(umct, ucom, UCOM_MINVER, UCOM_PREFVER, UCOM_MAXVER);
+MODULE_VERSION(umct, 1);
+
+static int
+umct_match(device_t self)
 {
-	struct usb_attach_arg *uaa = aux;
+	struct usb_attach_arg *uaa = device_get_ivars(self);
+	int i;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
 
-	return (umct_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+	for (i = 0; umct_products[i].vendor != 0; i++) {
+		if (umct_products[i].vendor == uaa->vendor &&
+		    umct_products[i].product == uaa->product) {
+			return (UMATCH_VENDOR_PRODUCT);
+		}
+	}
+
+	return (UMATCH_NONE);
 }
 
-void
-umct_attach(struct device *parent, struct device *self, void *aux)
+static int
+umct_attach(device_t self)
 {
-	struct umct_softc *sc = (struct umct_softc *)self;
-	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
+	struct umct_softc *sc = device_get_softc(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
+	usbd_device_handle dev;
+	struct ucom_softc *ucom;
 	usb_config_descriptor_t *cdesc;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-
-	char *devname = sc->sc_dev.dv_xname;
+	const char *devname;
 	usbd_status err;
 	int i;
-	struct ucom_attach_args uca;
 
-        sc->sc_udev = dev;
-	sc->sc_product = uaa->product;
+	dev = uaa->device;
+	bzero(sc, sizeof(struct umct_softc));
+	ucom = &sc->sc_ucom;
+	ucom->sc_dev = self;
+	ucom->sc_udev = dev;
+	ucom->sc_iface = uaa->iface;
 
-	DPRINTF(("\n\numct attach: sc=%p\n", sc));
-
-	/* initialize endpoints */
-	uca.bulkin = uca.bulkout = -1;
+	ucom->sc_bulkout_no = -1;
+	ucom->sc_bulkin_no = -1;
 	sc->sc_intr_number = -1;
 	sc->sc_intr_pipe = NULL;
 
-	/* Move the device into the configured state. */
+	devname = device_get_nameunit(ucom->sc_dev);
+
 	err = usbd_set_config_index(dev, UMCT_CONFIG_INDEX, 1);
 	if (err) {
-		printf("\n%s: failed to set configuration, err=%s\n",
-			devname, usbd_errstr(err));
-		sc->sc_dying = 1;
-		return;
+		printf("%s: failed to set configuration: %s\n",
+		    devname, usbd_errstr(err));
+		ucom->sc_dying = 1;
+		goto error;
 	}
 
-	/* get the config descriptor */
-	cdesc = usbd_get_config_descriptor(sc->sc_udev);
-
+	cdesc = usbd_get_config_descriptor(ucom->sc_udev);
 	if (cdesc == NULL) {
-		printf("%s: failed to get configuration descriptor\n",
-			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
-		return;
+		printf("%s: failed to get configuration descriptor\n", devname);
+		ucom->sc_dying = 1;
+		goto error;
 	}
 
-	/* get the interface */
 	err = usbd_device2interface_handle(dev, UMCT_IFACE_INDEX,
-							&sc->sc_iface);
+	    &ucom->sc_iface);
 	if (err) {
-		printf("\n%s: failed to get interface, err=%s\n",
-			devname, usbd_errstr(err));
-		sc->sc_dying = 1;
-		return;
+		printf("%s: failed to get interface: %s\n", devname,
+		    usbd_errstr(err));
+		ucom->sc_dying = 1;
+		goto error;
 	}
 
-	/* Find the bulk{in,out} and interrupt endpoints */
-
-	id = usbd_get_interface_descriptor(sc->sc_iface);
+	id = usbd_get_interface_descriptor(ucom->sc_iface);
 	sc->sc_iface_number = id->bInterfaceNumber;
 
 	for (i = 0; i < id->bNumEndpoints; i++) {
-		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
+		ed = usbd_interface2endpoint_descriptor(ucom->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor for %d\n",
-				sc->sc_dev.dv_xname, i);
-			sc->sc_dying = 1;
-			return;
+			    devname, i);
+			ucom->sc_dying = 1;
+			goto error;
 		}
 
 		/*
-		 * The Bulkin endpoint is marked as an interrupt. Since
-		 * we can't rely on the endpoint descriptor order, we'll
-		 * check the wMaxPacketSize field to differentiate.
+		 * The real bulk-in endpoint is also marked as an interrupt.
+		 * The only way to differentiate it from the real interrupt
+                 * endpoint is to look at the wMaxPacketSize field.
 		 */
-		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
-		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_INTERRUPT &&
-		    UGETW(ed->wMaxPacketSize) != 0x2) {
-			uca.bulkin = ed->bEndpointAddress;
-		} else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_OUT &&
-		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK) {
-			uca.bulkout = ed->bEndpointAddress;
-		} else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
-		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_INTERRUPT) {
-			sc->sc_intr_number = ed->bEndpointAddress;
-			sc->sc_isize = UGETW(ed->wMaxPacketSize);
+		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN) {
+			if (UGETW(ed->wMaxPacketSize) == 0x2) {
+				sc->sc_intr_number = ed->bEndpointAddress;
+				sc->sc_isize = UGETW(ed->wMaxPacketSize);
+			} else {
+				ucom->sc_bulkin_no = ed->bEndpointAddress;
+				ucom->sc_ibufsize = UGETW(ed->wMaxPacketSize);
+			}
+			continue;
 		}
-	}
 
-	if (uca.bulkin == -1) {
-		printf("%s: Could not find data bulk in\n",
-			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
-		return;
-	}
-
-	if (uca.bulkout == -1) {
-		printf("%s: Could not find data bulk out\n",
-			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
-		return;
-	}
-
-	if (sc->sc_intr_number== -1) {
-		printf("%s: Could not find interrupt in\n",
-			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
-		return;
-	}
-
-	sc->sc_dtr = sc->sc_rts = 0;
-	uca.portno = UCOM_UNK_PORTNO;
-	/* bulkin, bulkout set above */
-	uca.ibufsize = UMCTIBUFSIZE;
-	if (sc->sc_product == USB_PRODUCT_MCT_SITECOM_USB232)
-		uca.obufsize = 16; /* device is broken */
-	else
-		uca.obufsize = UMCTOBUFSIZE;
-	uca.ibufsizepad = UMCTIBUFSIZE;
-	uca.opkthdrlen = 0;
-	uca.device = dev;
-	uca.iface = sc->sc_iface;
-	uca.methods = &umct_methods;
-	uca.arg = sc;
-	uca.info = NULL;
-
-	umct_init(sc);
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   &sc->sc_dev);
-
-	DPRINTF(("umct: in=0x%x out=0x%x intr=0x%x\n",
-			uca.bulkin, uca.bulkout, sc->sc_intr_number ));
-	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
-}
-
-int
-umct_detach(struct device *self, int flags)
-{
-	struct umct_softc *sc = (struct umct_softc *)self;
-	int rv = 0;
-
-	DPRINTF(("umct_detach: sc=%p flags=%d\n", sc, flags));
-
-        if (sc->sc_intr_pipe != NULL) {
-                usbd_abort_pipe(sc->sc_intr_pipe);
-                usbd_close_pipe(sc->sc_intr_pipe);
-		free(sc->sc_intr_buf, M_USBDEV);
-                sc->sc_intr_pipe = NULL;
-        }
-
-	sc->sc_dying = 1;
-	if (sc->sc_subdev != NULL) {
-		rv = config_detach(sc->sc_subdev, flags);
-		sc->sc_subdev = NULL;
-	}
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
-
-	return (rv);
-}
-
-int
-umct_activate(struct device *self, enum devact act)
-{
-	struct umct_softc *sc = (struct umct_softc *)self;
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
-		break;
-	}
-	return (rv);
-}
-
-void
-umct_set_line_state(struct umct_softc *sc)
-{
-	usb_device_request_t req;
-	uByte ls;
-
-	ls = (sc->sc_dtr ? MCR_DTR : 0) |
-	     (sc->sc_rts ? MCR_RTS : 0);
-
-	DPRINTF(("umct_set_line_state: DTR=%d,RTS=%d,ls=%02x\n",
-			sc->sc_dtr, sc->sc_rts, ls));
-
-	req.bmRequestType = UMCT_SET_REQUEST;
-	req.bRequest = REQ_SET_MCR;
-	USETW(req.wValue, 0);
-	USETW(req.wIndex, sc->sc_iface_number);
-	USETW(req.wLength, LENGTH_SET_MCR);
-
-	(void)usbd_do_request(sc->sc_udev, &req, &ls);
-}
-
-void
-umct_set(void *addr, int portno, int reg, int onoff)
-{
-	struct umct_softc *sc = addr;
-
-	switch (reg) {
-	case UCOM_SET_DTR:
-		umct_dtr(sc, onoff);
-		break;
-	case UCOM_SET_RTS:
-		umct_rts(sc, onoff);
-		break;
-	case UCOM_SET_BREAK:
-		umct_break(sc, onoff);
-		break;
-	default:
-		break;
-	}
-}
-
-void
-umct_dtr(struct umct_softc *sc, int onoff)
-{
-
-	DPRINTF(("umct_dtr: onoff=%d\n", onoff));
-
-	if (sc->sc_dtr == onoff)
-		return;
-	sc->sc_dtr = onoff;
-
-	umct_set_line_state(sc);
-}
-
-void
-umct_rts(struct umct_softc *sc, int onoff)
-{
-	DPRINTF(("umct_rts: onoff=%d\n", onoff));
-
-	if (sc->sc_rts == onoff)
-		return;
-	sc->sc_rts = onoff;
-
-	umct_set_line_state(sc);
-}
-
-void
-umct_break(struct umct_softc *sc, int onoff)
-{
-	DPRINTF(("umct_break: onoff=%d\n", onoff));
-
-	umct_set_lcr(sc, onoff ? sc->last_lcr | LCR_SET_BREAK :
-		     sc->last_lcr);
-}
-
-void
-umct_set_lcr(struct umct_softc *sc, u_int data)
-{
-	usb_device_request_t req;
-	uByte adata;
-
-	adata = data;
-	req.bmRequestType = UMCT_SET_REQUEST;
-	req.bRequest = REQ_SET_LCR;
-	USETW(req.wValue, 0);
-	USETW(req.wIndex, sc->sc_iface_number);
-	USETW(req.wLength, LENGTH_SET_LCR);
-
-	/* XXX should check */
-	(void)usbd_do_request(sc->sc_udev, &req, &adata);
-}
-
-void
-umct_set_baudrate(struct umct_softc *sc, u_int rate)
-{
-        usb_device_request_t req;
-	uDWord arate;
-	u_int val;
-
-	if (sc->sc_product == USB_PRODUCT_MCT_SITECOM_USB232 ||
-	    sc->sc_product == USB_PRODUCT_BELKIN_F5U109) {
-		switch (rate) {
-		case    300: val = 0x01; break;
-		case    600: val = 0x02; break;
-		case   1200: val = 0x03; break;
-		case   2400: val = 0x04; break;
-		case   4800: val = 0x06; break;
-		case   9600: val = 0x08; break;
-		case  19200: val = 0x09; break;
-		case  38400: val = 0x0a; break;
-		case  57600: val = 0x0b; break;
-		case 115200: val = 0x0c; break;
-		default:     val = -1; break;
+		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_OUT) {
+			ucom->sc_bulkout_no = ed->bEndpointAddress;
+			if (uaa->product == USB_PRODUCT_MCT_SITECOM_USB232)
+				ucom->sc_obufsize = 16; /* device is broken */
+			else
+				ucom->sc_obufsize = UGETW(ed->wMaxPacketSize);
+			continue;
 		}
-	} else {
-		val = UMCT_BAUD_RATE(rate);
-	}
-	USETDW(arate, val);
 
-        req.bmRequestType = UMCT_SET_REQUEST;
-        req.bRequest = REQ_SET_BAUD_RATE;
-        USETW(req.wValue, 0);
-        USETW(req.wIndex, sc->sc_iface_number);
-        USETW(req.wLength, LENGTH_BAUD_RATE);
-
-	/* XXX should check */
-        (void)usbd_do_request(sc->sc_udev, &req, arate);
-}
-
-void
-umct_init(struct umct_softc *sc)
-{
-	umct_set_baudrate(sc, 9600);
-	umct_set_lcr(sc, LCR_DATA_BITS_8 | LCR_PARITY_NONE | LCR_STOP_BITS_1);
-}
-
-int
-umct_param(void *addr, int portno, struct termios *t)
-{
-	struct umct_softc *sc = addr;
-	u_int data = 0;
-
-	DPRINTF(("umct_param: sc=%p\n", sc));
-
-	DPRINTF(("umct_param: BAUDRATE=%d\n", t->c_ospeed));
-
-	if (ISSET(t->c_cflag, CSTOPB))
-		data |= LCR_STOP_BITS_2;
-	else
-		data |= LCR_STOP_BITS_1;
-	if (ISSET(t->c_cflag, PARENB)) {
-		if (ISSET(t->c_cflag, PARODD))
-			data |= LCR_PARITY_ODD;
-		else
-			data |= LCR_PARITY_EVEN;
-	} else
-		data |= LCR_PARITY_NONE;
-	switch (ISSET(t->c_cflag, CSIZE)) {
-	case CS5:
-		data |= LCR_DATA_BITS_5;
-		break;
-	case CS6:
-		data |= LCR_DATA_BITS_6;
-		break;
-	case CS7:
-		data |= LCR_DATA_BITS_7;
-		break;
-	case CS8:
-		data |= LCR_DATA_BITS_8;
-		break;
+		printf("%s: warning - unsupported endpoint 0x%x\n", devname,
+		    ed->bEndpointAddress);
 	}
 
-	umct_set_baudrate(sc, t->c_ospeed);
-
-	sc->last_lcr = data;
-	umct_set_lcr(sc, data);
-
-	return (0);
-}
-
-int
-umct_open(void *addr, int portno)
-{
-	struct umct_softc *sc = addr;
-	int err, lcr_data;
-
-	if (sc->sc_dying)
-		return (EIO);
-
-	DPRINTF(("umct_open: sc=%p\n", sc));
-
-	/* initialize LCR */
-        lcr_data = LCR_DATA_BITS_8 | LCR_PARITY_NONE |
-	    LCR_STOP_BITS_1;
-        umct_set_lcr(sc, lcr_data);
-
-	if (sc->sc_intr_number != -1 && sc->sc_intr_pipe == NULL) {
-		sc->sc_status = 0; /* clear status bit */
-		sc->sc_intr_buf = malloc(sc->sc_isize, M_USBDEV, M_WAITOK);
-		err = usbd_open_pipe_intr(sc->sc_iface, sc->sc_intr_number,
-			USBD_SHORT_XFER_OK, &sc->sc_intr_pipe, sc,
-			sc->sc_intr_buf, sc->sc_isize,
-			umct_intr, USBD_DEFAULT_INTERVAL);
-		if (err) {
-			DPRINTF(("%s: cannot open interrupt pipe (addr %d)\n",
-				sc->sc_dev.dv_xname, sc->sc_intr_number));
-					return (EIO);
-		}
+	if (sc->sc_intr_number == -1) {
+		printf("%s: Could not find interrupt in\n", devname);
+		ucom->sc_dying = 1;
+		goto error;
 	}
 
-	return (0);
+	sc->sc_intr_iface = ucom->sc_iface;
+
+	if (ucom->sc_bulkout_no == -1) {
+		printf("%s: Could not find data bulk out\n", devname);
+		ucom->sc_dying = 1;
+		goto error;
+	}
+
+	ucom->sc_parent = sc;
+	ucom->sc_portno = UCOM_UNK_PORTNO;
+	ucom->sc_opkthdrlen = 0;
+	ucom->sc_callback = &umct_callback;
+	ucom_attach(ucom);
+	TASK_INIT(&sc->sc_task, 0, umct_notify, sc);
+	return 0;
+
+error:
+	return ENXIO;
 }
 
-void
-umct_close(void *addr, int portno)
+static int
+umct_detach(device_t self)
 {
-	struct umct_softc *sc = addr;
-	int err;
+	struct umct_softc *sc = device_get_softc(self);
 
-	if (sc->sc_dying)
-		return;
-
-	DPRINTF(("umct_close: close\n"));
+	int rv;
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err));
-		err = usbd_close_pipe(sc->sc_intr_pipe);
-		if (err)
-			printf("%s: close interrupt pipe failed: %s\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
+		usbd_close_pipe(sc->sc_intr_pipe);
 		free(sc->sc_intr_buf, M_USBDEV);
 		sc->sc_intr_pipe = NULL;
 	}
+
+	sc->sc_ucom.sc_dying = 1;
+#if 0
+	taskqueue_drain(taskqueue_swi_giant);
+#endif
+	rv = ucom_detach(&sc->sc_ucom);
+	return (rv);
 }
 
-void
+static int
+umct_request(struct umct_softc *sc, uint8_t request, int len, uint32_t value)
+{
+	usb_device_request_t req;
+	usbd_status err;
+	uint8_t oval[4];
+
+	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
+	req.bRequest = request;
+	USETW(req.wValue, 0);
+	USETW(req.wIndex, sc->sc_iface_number);
+	USETW(req.wLength, len);
+	USETDW(oval, value);
+
+	err = usbd_do_request(sc->sc_ucom.sc_udev, &req, oval);
+	if (err)
+		printf("%s: ubsa_request: %s\n",
+		    device_get_nameunit(sc->sc_ucom.sc_dev), usbd_errstr(err));
+	return (err);
+}
+
+static void
 umct_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
-	struct umct_softc *sc = priv;
-	u_char *buf = sc->sc_intr_buf;
-	u_char mstatus;
+	struct umct_softc *sc;
+	u_char *buf;
 
-	if (sc->sc_dying)
+	sc = (struct umct_softc *)priv;
+	buf = sc->sc_intr_buf;
+	if (sc->sc_ucom.sc_dying)
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
 		if (status == USBD_NOT_STARTED || status == USBD_CANCELLED)
 			return;
 
-		DPRINTF(("%s: abnormal status: %s\n", sc->sc_dev.dv_xname,
-			usbd_errstr(status)));
 		usbd_clear_endpoint_stall_async(sc->sc_intr_pipe);
 		return;
 	}
 
-	DPRINTF(("%s: umct status = MSR:%02x, LSR:%02x\n",
-		 sc->sc_dev.dv_xname, buf[0],buf[1]));
+	sc->sc_msr = buf[0];
+	sc->sc_lsr = buf[1];
 
-	sc->sc_lsr = sc->sc_msr = 0;
-	mstatus = buf[0];
-	if (ISSET(mstatus, MSR_DSR))
-		sc->sc_msr |= UMSR_DSR;
-	if (ISSET(mstatus, MSR_DCD))
-		sc->sc_msr |= UMSR_DCD;
-	ucom_status_change((struct ucom_softc *)sc->sc_subdev);
+	/*
+	 * Defer notifying the ucom layer as it doesn't like to be bothered
+         * from an interrupt context.
+	 */
+	taskqueue_enqueue(taskqueue_swi_giant, &sc->sc_task);
 }
 
-void
+static void
+umct_notify(void *arg, int count)
+{
+	struct umct_softc *sc;
+
+	sc = (struct umct_softc *)arg;
+	if (sc->sc_ucom.sc_dying == 0)
+		ucom_status_change(&sc->sc_ucom);
+}
+
+static void
 umct_get_status(void *addr, int portno, u_char *lsr, u_char *msr)
 {
-	struct umct_softc *sc = addr;
+	struct umct_softc *sc;
 
-	DPRINTF(("umct_get_status:\n"));
-
+	sc = addr;
 	if (lsr != NULL)
 		*lsr = sc->sc_lsr;
 	if (msr != NULL)
 		*msr = sc->sc_msr;
+
+	return;
+}
+
+static void
+umct_set(void *addr, int portno, int reg, int onoff)
+{
+	struct umct_softc *sc;
+
+	sc = addr;
+	switch (reg) {
+	case UCOM_SET_BREAK:
+		sc->sc_lcr &= ~0x40;
+		sc->sc_lcr |= (onoff) ? 0x40 : 0;
+		umct_request(sc, UMCT_SET_LCR, UMCT_SET_LCR_SIZE, sc->sc_lcr);
+		break;
+	case UCOM_SET_DTR:
+		sc->sc_mcr &= ~0x01;
+		sc->sc_mcr |= (onoff) ? 0x01 : 0;
+		umct_request(sc, UMCT_SET_MCR, UMCT_SET_MCR_SIZE, sc->sc_mcr);
+		break;
+	case UCOM_SET_RTS:
+		sc->sc_mcr &= ~0x2;
+		sc->sc_mcr |= (onoff) ? 0x02 : 0;
+		umct_request(sc, UMCT_SET_MCR, UMCT_SET_MCR_SIZE, sc->sc_mcr);
+		break;
+	default:
+		break;
+	}
+}
+
+static int
+umct_calc_baud(u_int baud)
+{
+	switch(baud) {
+	case B300: return (0x1);
+	case B600: return (0x2);
+	case B1200: return (0x3);
+	case B2400: return (0x4);
+	case B4800: return (0x6);
+	case B9600: return (0x8);
+	case B19200: return (0x9);
+	case B38400: return (0xa);
+	case B57600: return (0xb);
+	case 115200: return (0xc);
+	case B0:
+	default:
+		break;
+	}
+
+	return (0x0);
+}
+
+static int
+umct_param(void *addr, int portno, struct termios *ti)
+{
+	struct umct_softc *sc;
+	uint32_t value;
+
+	sc = addr;
+	value = umct_calc_baud(ti->c_ospeed);
+	umct_request(sc, UMCT_SET_BAUD, UMCT_SET_BAUD_SIZE, value);
+
+	value = sc->sc_lcr & 0x40;
+
+	switch (ti->c_cflag & CSIZE) {
+	case CS5: value |= 0x0; break;
+	case CS6: value |= 0x1; break;
+	case CS7: value |= 0x2; break;
+	case CS8: value |= 0x3; break;
+	default: value |= 0x0; break;
+	}
+
+	value |= (ti->c_cflag & CSTOPB) ? 0x4 : 0;
+	if (ti->c_cflag & PARENB) {
+		value |= 0x8;
+		value |= (ti->c_cflag & PARODD) ? 0x0 : 0x10;
+	}
+
+	/*
+	 * XXX There doesn't seem to be a way to tell the device to use flow
+         * control.
+	 */
+
+	sc->sc_lcr = value;
+	umct_request(sc, UMCT_SET_LCR, UMCT_SET_LCR_SIZE, value);
+
+	return (0);
+}
+
+static int
+umct_open(void *addr, int portno)
+{
+	struct umct_softc *sc;
+	int err;
+
+	sc = addr;
+	if (sc->sc_ucom.sc_dying) {
+		return (ENXIO);
+	}
+
+	if (sc->sc_intr_number != -1 && sc->sc_intr_pipe == NULL) {
+		sc->sc_intr_buf = malloc(sc->sc_isize, M_USBDEV, M_WAITOK);
+		err = usbd_open_pipe_intr(sc->sc_intr_iface, sc->sc_intr_number,
+		    USBD_SHORT_XFER_OK, &sc->sc_intr_pipe, sc, sc->sc_intr_buf,
+		    sc->sc_isize, umct_intr, UMCT_INTR_INTERVAL);
+		if (err) {
+			printf("%s: cannot open interrupt pipe (addr %d)\n",
+			    device_get_nameunit(sc->sc_ucom.sc_dev),
+			    sc->sc_intr_number);
+			free(sc->sc_intr_buf, M_USBDEV);
+			return (EIO);
+		}
+	}
+
+	return (0);
+}
+
+static void
+umct_close(void *addr, int portno)
+{
+	struct umct_softc *sc;
+	int err;
+
+	sc = addr;
+	if (sc->sc_ucom.sc_dying)
+		return;
+
+	if (sc->sc_intr_pipe != NULL) {
+		err = usbd_abort_pipe(sc->sc_intr_pipe);
+		if (err)
+			printf("%s: abort interrupt pipe failed: %s\n",
+			    device_get_nameunit(sc->sc_ucom.sc_dev), usbd_errstr(err));
+		err = usbd_close_pipe(sc->sc_intr_pipe);
+		if (err)
+			printf("%s: close interrupt pipe failed: %s\n",
+			    device_get_nameunit(sc->sc_ucom.sc_dev), usbd_errstr(err));
+		free(sc->sc_intr_buf, M_USBDEV);
+		sc->sc_intr_pipe = NULL;
+	}
 }

@@ -1,7 +1,4 @@
-/*	$OpenBSD: uio.h,v 1.13 2005/12/13 00:35:23 millert Exp $	*/
-/*	$NetBSD: uio.h,v 1.12 1996/02/09 18:25:45 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,62 +27,89 @@
  * SUCH DAMAGE.
  *
  *	@(#)uio.h	8.5 (Berkeley) 2/22/94
+ * $FreeBSD: src/sys/sys/uio.h,v 1.40 2006/11/29 19:08:45 alfred Exp $
  */
 
 #ifndef _SYS_UIO_H_
 #define	_SYS_UIO_H_
 
-struct iovec {
-	void	*iov_base;	/* Base address. */
-	size_t	 iov_len;	/* Length. */
-};
+#include <sys/cdefs.h>
+#include <sys/_types.h>
+#include <sys/_iovec.h>
 
+#ifndef _SSIZE_T_DECLARED
+typedef	__ssize_t	ssize_t;
+#define	_SSIZE_T_DECLARED
+#endif
+
+#ifndef _OFF_T_DECLARED
+typedef	__off_t	off_t;
+#define	_OFF_T_DECLARED
+#endif
+
+#if __BSD_VISIBLE
 enum	uio_rw { UIO_READ, UIO_WRITE };
 
 /* Segment flag values. */
 enum uio_seg {
 	UIO_USERSPACE,		/* from user data space */
-	UIO_SYSSPACE		/* from system space */
+	UIO_SYSSPACE,		/* from system space */
+	UIO_NOCOPY		/* don't copy, already in object */
 };
+#endif
 
 #ifdef _KERNEL
+
 struct uio {
-	struct	iovec *uio_iov;	/* pointer to array of iovecs */
-	int	uio_iovcnt;	/* number of iovecs in array */
-	off_t	uio_offset;	/* offset into file this uio corresponds to */
-	size_t	uio_resid;	/* residual i/o count */
-	enum	uio_seg uio_segflg; /* see above */
-	enum	uio_rw uio_rw;	/* see above */
-	struct	proc *uio_procp;/* associated process or NULL */
+	struct	iovec *uio_iov;		/* scatter/gather list */
+	int	uio_iovcnt;		/* length of scatter/gather list */
+	off_t	uio_offset;		/* offset in target object */
+	int	uio_resid;		/* remaining bytes to process */
+	enum	uio_seg uio_segflg;	/* address space */
+	enum	uio_rw uio_rw;		/* operation */
+	struct	thread *uio_td;		/* owner */
 };
 
 /*
  * Limits
+ *
+ * N.B.: UIO_MAXIOV must be no less than IOV_MAX from <sys/syslimits.h>
+ * which in turn must be no less than _XOPEN_IOV_MAX from <limits.h>.  If
+ * we ever make this tunable (probably pointless), then IOV_MAX should be
+ * removed from <sys/syslimits.h> and applications would be expected to use
+ * sysconf(3) to find out the correct value, or else assume the worst
+ * (_XOPEN_IOV_MAX).  Perhaps UIO_MAXIOV should be simply defined as
+ * IOV_MAX.
  */
-#define UIO_SMALLIOV	8		/* 8 on stack, else malloc */
-#endif /* _KERNEL */
+#define UIO_MAXIOV	1024		/* max 1K of iov's */
 
-#define UIO_MAXIOV	1024		/* Deprecated, use IOV_MAX instead */
+struct vm_object;
+struct vm_page;
 
-#ifndef	_KERNEL
-#include <sys/cdefs.h>
+struct uio *cloneuio(struct uio *uiop);
+int	copyinfrom(const void * __restrict src, void * __restrict dst,
+	    size_t len, int seg);
+int	copyiniov(struct iovec *iovp, u_int iovcnt, struct iovec **iov,
+	    int error);
+int	copyinstrfrom(const void * __restrict src, void * __restrict dst,
+	    size_t len, size_t * __restrict copied, int seg);
+int	copyinuio(struct iovec *iovp, u_int iovcnt, struct uio **uiop);
+void	uio_yield(void);
+int	uiomove(void *cp, int n, struct uio *uio);
+int	uiomove_frombuf(void *buf, int buflen, struct uio *uio);
+int	uiomove_fromphys(struct vm_page *ma[], vm_offset_t offset, int n,
+	    struct uio *uio);
+int	uiomoveco(void *cp, int n, struct uio *uio, int disposable);
+
+#else /* !_KERNEL */
 
 __BEGIN_DECLS
-#if __BSD_VISIBLE
-ssize_t preadv(int, const struct iovec *, int, off_t);
-ssize_t pwritev(int, const struct iovec *, int, off_t);
-#endif /* __BSD_VISIBLE */
 ssize_t	readv(int, const struct iovec *, int);
 ssize_t	writev(int, const struct iovec *, int);
+ssize_t	preadv(int, const struct iovec *, int, off_t);
+ssize_t	pwritev(int, const struct iovec *, int, off_t);
 __END_DECLS
-#else
-int	ureadc(int c, struct uio *);
 
-int	dofilereadv(struct proc *, int, struct file *,
-	    const struct iovec *, int, off_t *, register_t *);
-int	dofilewritev(struct proc *, int, struct file *,
-	    const struct iovec *, int, off_t *, register_t *);
-
-#endif /* !_KERNEL */
+#endif /* _KERNEL */
 
 #endif /* !_SYS_UIO_H_ */

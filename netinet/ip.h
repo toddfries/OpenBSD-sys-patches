@@ -1,9 +1,7 @@
-/*	$OpenBSD: ip.h,v 1.12 2006/04/27 02:19:32 tedu Exp $	*/
-/*	$NetBSD: ip.h,v 1.9 1995/05/15 01:22:44 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
- *	The Regents of the University of California.  All rights reserved.
+ *	The Regents of the University of California.
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,14 +27,18 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ip.h	8.1 (Berkeley) 6/10/93
+ *	@(#)ip.h	8.2 (Berkeley) 6/1/94
+ * $FreeBSD: src/sys/netinet/ip.h,v 1.32 2007/10/19 12:46:15 rpaulo Exp $
  */
 
 #ifndef _NETINET_IP_H_
-#define _NETINET_IP_H_
+#define	_NETINET_IP_H_
+
+#include <sys/cdefs.h>
 
 /*
  * Definitions for internet protocol version 4.
+ *
  * Per RFC 791, September 1981.
  */
 #define	IPVERSION	4
@@ -45,45 +47,44 @@
  * Structure of an internet header, naked of options.
  */
 struct ip {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-	u_int     ip_hl:4,		/* header length */
-		  ip_v:4;		/* version */
+#if BYTE_ORDER == LITTLE_ENDIAN
+	u_int	ip_hl:4,		/* header length */
+		ip_v:4;			/* version */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
-	u_int     ip_v:4,		/* version */
-		  ip_hl:4;		/* header length */
+#if BYTE_ORDER == BIG_ENDIAN
+	u_int	ip_v:4,			/* version */
+		ip_hl:4;		/* header length */
 #endif
-	u_int8_t  ip_tos;		/* type of service */
-	u_int16_t ip_len;		/* total length */
-	u_int16_t ip_id;		/* identification */
-	u_int16_t ip_off;		/* fragment offset field */
+	u_char	ip_tos;			/* type of service */
+	u_short	ip_len;			/* total length */
+	u_short	ip_id;			/* identification */
+	u_short	ip_off;			/* fragment offset field */
 #define	IP_RF 0x8000			/* reserved fragment flag */
 #define	IP_DF 0x4000			/* dont fragment flag */
 #define	IP_MF 0x2000			/* more fragments flag */
 #define	IP_OFFMASK 0x1fff		/* mask for fragmenting bits */
-	u_int8_t  ip_ttl;		/* time to live */
-	u_int8_t  ip_p;			/* protocol */
-	u_int16_t ip_sum;		/* checksum */
-	struct	  in_addr ip_src, ip_dst; /* source and dest address */
-};
+	u_char	ip_ttl;			/* time to live */
+	u_char	ip_p;			/* protocol */
+	u_short	ip_sum;			/* checksum */
+	struct	in_addr ip_src,ip_dst;	/* source and dest address */
+} __packed __aligned(4);
+
+#ifdef CTASSERT
+CTASSERT(sizeof (struct ip) == 20);
+#endif
 
 #define	IP_MAXPACKET	65535		/* maximum packet size */
 
 /*
- * Definitions for IP type of service (ip_tos)
+ * Definitions for IP type of service (ip_tos).
  */
 #define	IPTOS_LOWDELAY		0x10
 #define	IPTOS_THROUGHPUT	0x08
 #define	IPTOS_RELIABILITY	0x04
-/*	IPTOS_LOWCOST		0x02 XXX */
-#if 1
-/* ECN RFC3168 obsoletes RFC2481, and these will be deprecated soon. */
-#define IPTOS_CE		0x01	/* congestion experienced */
-#define IPTOS_ECT		0x02	/* ECN-capable transport */
-#endif
+#define	IPTOS_MINCOST		0x02
 
 /*
- * Definitions for IP precedence (also in ip_tos) (hopefully unused)
+ * Definitions for IP precedence (also in ip_tos) (hopefully unused).
  */
 #define	IPTOS_PREC_NETCONTROL		0xe0
 #define	IPTOS_PREC_INTERNETCONTROL	0xc0
@@ -95,8 +96,8 @@ struct ip {
 #define	IPTOS_PREC_ROUTINE		0x00
 
 /*
- * ECN (Explicit Congestion Notification) codepoints in RFC3168
- * mapped to the lower 2 bits of the TOS field.
+ * ECN (Explicit Congestion Notification) codepoints in RFC3168 mapped to the
+ * lower 2 bits of the TOS field.
  */
 #define	IPTOS_ECN_NOTECT	0x00	/* not-ECT */
 #define	IPTOS_ECN_ECT1		0x01	/* ECN-capable transport (1) */
@@ -123,8 +124,11 @@ struct ip {
 #define	IPOPT_TS		68		/* timestamp */
 #define	IPOPT_SECURITY		130		/* provide s,c,h,tcc */
 #define	IPOPT_LSRR		131		/* loose source route */
+#define	IPOPT_ESO		133		/* extended security */
+#define	IPOPT_CIPSO		134		/* commerical security */
 #define	IPOPT_SATID		136		/* satnet id */
 #define	IPOPT_SSRR		137		/* strict source route */
+#define	IPOPT_RA		148		/* router alert */
 
 /*
  * Offsets to fields in options other than EOL and NOP.
@@ -138,32 +142,32 @@ struct ip {
  * Time stamp option structure.
  */
 struct	ip_timestamp {
-	u_int8_t ipt_code;		/* IPOPT_TS */
-	u_int8_t ipt_len;		/* size of structure (variable) */
-	u_int8_t ipt_ptr;		/* index of current entry */
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-	u_int    ipt_flg:4,		/* flags, see below */
-		 ipt_oflw:4;		/* overflow counter */
+	u_char	ipt_code;		/* IPOPT_TS */
+	u_char	ipt_len;		/* size of structure (variable) */
+	u_char	ipt_ptr;		/* index of current entry */
+#if BYTE_ORDER == LITTLE_ENDIAN
+	u_int	ipt_flg:4,		/* flags, see below */
+		ipt_oflw:4;		/* overflow counter */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
-	u_int    ipt_oflw:4,		/* overflow counter */
-		 ipt_flg:4;		/* flags, see below */
+#if BYTE_ORDER == BIG_ENDIAN
+	u_int	ipt_oflw:4,		/* overflow counter */
+		ipt_flg:4;		/* flags, see below */
 #endif
 	union ipt_timestamp {
-		 n_time	ipt_time[1];
-		 struct	ipt_ta {
+		n_long	ipt_time[1];
+		struct	ipt_ta {
 			struct in_addr ipt_addr;
-			n_time ipt_time;
-		 } ipt_ta[1];
+			n_long ipt_time;
+		} ipt_ta[1];
 	} ipt_timestamp;
 };
 
-/* flag bits for ipt_flg */
+/* Flag bits for ipt_flg. */
 #define	IPOPT_TS_TSONLY		0		/* timestamps only */
 #define	IPOPT_TS_TSANDADDR	1		/* timestamps and addresses */
 #define	IPOPT_TS_PRESPEC	3		/* specified modules only */
 
-/* bits for security (not byte swapped) */
+/* Bits for security (not byte swapped). */
 #define	IPOPT_SECUR_UNCLASS	0x0000
 #define	IPOPT_SECUR_CONFID	0xf135
 #define	IPOPT_SECUR_EFTO	0x789a
@@ -179,7 +183,6 @@ struct	ip_timestamp {
 #define	IPDEFTTL	64		/* default ttl, from RFC 1340 */
 #define	IPFRAGTTL	60		/* time to live for frags, slowhz */
 #define	IPTTLDEC	1		/* subtracted when forwarding */
-
 #define	IP_MSS		576		/* default maximum segment size */
 
 /*
@@ -188,10 +191,10 @@ struct	ip_timestamp {
  * For stronger checksums, the real thing must be used.
  */
 struct ippseudo {
-	struct    in_addr ippseudo_src;	/* source internet address */
-	struct    in_addr ippseudo_dst;	/* destination internet address */
-	u_int8_t  ippseudo_pad;		/* pad, must be zero */
-	u_int8_t  ippseudo_p;		/* protocol */
-	u_int16_t ippseudo_len;		/* protocol length */
+	struct	in_addr	ippseudo_src;	/* source internet address */
+	struct	in_addr	ippseudo_dst;	/* destination internet address */
+	u_char		ippseudo_pad;	/* pad, must be zero */
+	u_char		ippseudo_p;	/* protocol */
+	u_short		ippseudo_len;	/* protocol length */
 };
-#endif /* _NETINET_IP_H_ */
+#endif

@@ -1,7 +1,4 @@
-/*	$OpenBSD: icmp_var.h,v 1.13 2007/12/13 20:00:53 reyk Exp $	*/
-/*	$NetBSD: icmp_var.h,v 1.8 1995/03/26 20:32:19 jtc Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,10 +27,12 @@
  * SUCH DAMAGE.
  *
  *	@(#)icmp_var.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/icmp_var.h,v 1.26 2007/07/19 22:34:24 rwatson Exp $
  */
 
 #ifndef _NETINET_ICMP_VAR_H_
 #define _NETINET_ICMP_VAR_H_
+
 
 /*
  * Variables related to this implementation
@@ -42,8 +41,8 @@
 struct	icmpstat {
 /* statistics related to icmp packets generated */
 	u_long	icps_error;		/* # of calls to icmp_error */
-	u_long	icps_oldshort;		/* no error because old ip too short */
-	u_long	icps_oldicmp;		/* no error because old was icmp */
+	u_long	icps_oldshort;		/* no error 'cuz old ip too short */
+	u_long	icps_oldicmp;		/* no error 'cuz old was icmp */
 	u_long	icps_outhist[ICMP_MAXTYPE + 1];
 /* statistics related to input messages processed */
 	u_long	icps_badcode;		/* icmp_code out of range */
@@ -51,45 +50,40 @@ struct	icmpstat {
 	u_long	icps_checksum;		/* bad checksum */
 	u_long	icps_badlen;		/* calculated bound mismatch */
 	u_long	icps_reflect;		/* number of responses */
-	u_long	icps_bmcastecho;	/* rejected broadcast icmps */
 	u_long	icps_inhist[ICMP_MAXTYPE + 1];
+	u_long	icps_bmcastecho;	/* b/mcast echo requests dropped */
+	u_long	icps_bmcasttstamp;	/* b/mcast tstamp requests dropped */
+	u_long	icps_badaddr;		/* bad return address */
+	u_long	icps_noroute;		/* no route back */
 };
 
 /*
  * Names for ICMP sysctl objects
  */
 #define	ICMPCTL_MASKREPL	1	/* allow replies to netmask requests */
-#define ICMPCTL_BMCASTECHO	2	/* reply to icmps to broadcast/mcast */
-#define ICMPCTL_ERRPPSLIMIT	3	/* ICMP error pps limitation */
-#define	ICMPCTL_REDIRACCEPT	4	/* Accept redirects from routers */
-#define	ICMPCTL_REDIRTIMEOUT	5	/* Remove routes added via redirects */
-#define	ICMPCTL_TSTAMPREPL	6	/* allow replies to timestamp requests */
-#define ICMPCTL_STATS		7	/* ICMP statistics */
-#define ICMPCTL_MAXID		8
+#define	ICMPCTL_STATS		2	/* statistics (read-only) */
+#define ICMPCTL_ICMPLIM		3
+#define ICMPCTL_MAXID		4
 
 #define ICMPCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "maskrepl", CTLTYPE_INT }, \
-	{ "bmcastecho", CTLTYPE_INT }, \
-	{ "errppslimit", CTLTYPE_INT }, \
-	{ "rediraccept", CTLTYPE_INT }, \
-	{ "redirtimeout", CTLTYPE_INT }, \
-	{ "tstamprepl", CTLTYPE_INT }, \
-	{ "stats", CTLTYPE_STRUCT } \
-}
-
-#define ICMPCTL_VARS { \
-	NULL, \
-	&icmpmaskrepl, \
-	&icmpbmcastecho, \
-	&icmperrppslim, \
-	&icmp_rediraccept, \
-	NULL, \
-	&icmptstamprepl, \
-	NULL \
+	{ "stats", CTLTYPE_STRUCT }, \
+	{ "icmplim", CTLTYPE_INT }, \
 }
 
 #ifdef _KERNEL
-extern struct	icmpstat icmpstat;
-#endif /* _KERNEL */
-#endif /* _NETINET_ICMP_VAR_H_ */
+SYSCTL_DECL(_net_inet_icmp);
+extern struct icmpstat icmpstat;	/* icmp statistics */
+extern int badport_bandlim(int);
+#define BANDLIM_UNLIMITED -1
+#define BANDLIM_ICMP_UNREACH 0
+#define BANDLIM_ICMP_ECHO 1
+#define BANDLIM_ICMP_TSTAMP 2
+#define BANDLIM_RST_CLOSEDPORT 3 /* No connection, and no listeners */
+#define BANDLIM_RST_OPENPORT 4   /* No connection, listener */
+#define BANDLIM_ICMP6_UNREACH 5
+#define BANDLIM_MAX 5
+#endif
+
+#endif

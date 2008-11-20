@@ -1,8 +1,7 @@
-/*	$OpenBSD: uhcivar.h,v 1.19 2007/06/15 11:41:48 mbalmer Exp $ */
-/*	$NetBSD: uhcivar.h,v 1.36 2002/12/31 00:39:11 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/uhcivar.h,v 1.14 1999/11/17 22:33:42 n_hibma Exp $	*/
+/*	$NetBSD: uhcivar.h,v 1.33 2002/02/11 11:41:30 augustss Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/uhcivar.h,v 1.45 2007/06/14 16:23:31 imp Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -86,7 +85,11 @@ struct uhci_xfer {
 	uhci_intr_info_t iinfo;
 	struct usb_task	abort_task;
 	int curframe;
+	u_int32_t uhci_xfer_flags;
 };
+
+#define UHCI_XFER_ABORTING	0x0001	/* xfer is aborting. */
+#define UHCI_XFER_ABORTWAIT	0x0002	/* abort completion is being awaited. */
 
 #define UXFER(xfer) ((struct uhci_xfer *)(xfer))
 
@@ -97,6 +100,9 @@ struct uhci_soft_td {
 	uhci_td_t td;			/* The real TD, must be first */
 	uhci_soft_td_qh_t link; 	/* soft version of the td_link field */
 	uhci_physaddr_t physaddr;	/* TD's physical address. */
+	usb_dma_t aux_dma;		/* Auxillary storage if needed. */
+	void *aux_data;			/* Original aux data virtual address. */
+	int aux_len;			/* Auxillary storage size. */
 };
 /*
  * Make the size such that it is a multiple of UHCI_TD_ALIGN.  This way
@@ -105,7 +111,7 @@ struct uhci_soft_td {
  * NOTE: Minimum size is 32 bytes.
  */
 #define UHCI_STD_SIZE ((sizeof (struct uhci_soft_td) + UHCI_TD_ALIGN - 1) / UHCI_TD_ALIGN * UHCI_TD_ALIGN)
-#define UHCI_STD_CHUNK 128 /*(PAGE_SIZE / UHCI_TD_SIZE)*/
+#define UHCI_STD_CHUNK (PAGE_SIZE / UHCI_STD_SIZE)
 
 /*
  * Extra information that we need for a QH.
@@ -119,7 +125,7 @@ struct uhci_soft_qh {
 };
 /* See comment about UHCI_STD_SIZE. */
 #define UHCI_SQH_SIZE ((sizeof (struct uhci_soft_qh) + UHCI_QH_ALIGN - 1) / UHCI_QH_ALIGN * UHCI_QH_ALIGN)
-#define UHCI_SQH_CHUNK 128 /*(PAGE_SIZE / UHCI_QH_SIZE)*/
+#define UHCI_SQH_CHUNK (PAGE_SIZE / UHCI_SQH_SIZE)
 
 /*
  * Information about an entry in the virtual frame list.
@@ -132,12 +138,18 @@ struct uhci_vframe {
 	u_int bandwidth;		/* max bandwidth used by this frame */
 };
 
+#define UHCI_SCFLG_DONEINIT	0x0001	/* uhci_init() done */
+
 typedef struct uhci_softc {
 	struct usbd_bus sc_bus;		/* base device */
+	int sc_flags;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	bus_size_t sc_size;
+	void *ih;
 
+	struct resource *io_res;
+	struct resource *irq_res;
 	uhci_physaddr_t *sc_pframes;
 	usb_dma_t sc_dma;
 	struct uhci_vframe sc_vframes[UHCI_VFRAMELIST_COUNT];
@@ -154,7 +166,7 @@ typedef struct uhci_softc {
 	uhci_soft_td_t *sc_freetds;	/* TD free list */
 	uhci_soft_qh_t *sc_freeqhs;	/* QH free list */
 
-	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
+	STAILQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
 	u_int8_t sc_addr;		/* device address */
 	u_int8_t sc_conf;		/* device configuration */
@@ -162,9 +174,9 @@ typedef struct uhci_softc {
 	u_int8_t sc_saved_sof;
 	u_int16_t sc_saved_frnum;
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef USB_USE_SOFTINTR
 	char sc_softwake;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
+#endif /* USB_USE_SOFTINTR */
 
 	char sc_isreset;
 	char sc_suspend;
@@ -172,22 +184,23 @@ typedef struct uhci_softc {
 
 	LIST_HEAD(, uhci_intr_info) sc_intrhead;
 
-	/* Info for the root hub interrupt "pipe". */
+	/* Info for the root hub interrupt channel. */
 	int sc_ival;			/* time between root hub intrs */
 	usbd_xfer_handle sc_intr_xfer;	/* root hub interrupt transfer */
-	struct timeout sc_poll_handle;
+	struct callout sc_poll_handle;
 
-	char sc_vendor[32];		/* vendor string for root hub */
+	char sc_vendor[16];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
+#if defined(__NetBSD__)
 	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
-
-	struct device *sc_child;		/* /dev/usb# device */
+#endif
 } uhci_softc_t;
 
 usbd_status	uhci_init(uhci_softc_t *);
-usbd_status	uhci_run(uhci_softc_t *, int run);
 int		uhci_intr(void *);
 int		uhci_detach(uhci_softc_t *, int);
-int		uhci_activate(struct device *, enum devact);
+void		uhci_shutdown(void *v);
+void		uhci_power(int state, void *priv);
+

@@ -1,5 +1,3 @@
-/*	$OpenBSD: event.h,v 1.11 2007/05/30 00:23:48 tedu Exp $	*/
-
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
  * All rights reserved.
@@ -25,11 +23,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/sys/event.h,v 1.11 2001/02/24 01:41:31 jlemon Exp $
+ * $FreeBSD: src/sys/sys/event.h,v 1.37 2006/09/24 04:47:47 jmg Exp $
  */
 
 #ifndef _SYS_EVENT_H_
 #define _SYS_EVENT_H_
+
+#include <sys/queue.h> 
 
 #define EVFILT_READ		(-1)
 #define EVFILT_WRITE		(-2)
@@ -38,10 +38,13 @@
 #define EVFILT_PROC		(-5)	/* attached to struct proc */
 #define EVFILT_SIGNAL		(-6)	/* attached to struct proc */
 #define EVFILT_TIMER		(-7)	/* timers */
+#define EVFILT_NETDEV		(-8)	/* network devices */
+#define EVFILT_FS		(-9)	/* filesystem events */
+#define EVFILT_LIO		(-10)	/* attached to lio requests */
+#define EVFILT_SYSCOUNT		10
 
-#define EVFILT_SYSCOUNT		7
-
-#define EV_SET(kevp, a, b, c, d, e, f) do {	\
+#define EV_SET(kevp_, a, b, c, d, e, f) do {	\
+	struct kevent *kevp = (kevp_);		\
 	(kevp)->ident = (a);			\
 	(kevp)->filter = (b);			\
 	(kevp)->flags = (c);			\
@@ -51,11 +54,11 @@
 } while(0)
 
 struct kevent {
-	u_int		ident;		/* identifier for this event */
+	uintptr_t	ident;		/* identifier for this event */
 	short		filter;		/* filter for event */
 	u_short		flags;
 	u_int		fflags;
-	int		data;
+	intptr_t	data;
 	void		*udata;		/* opaque user data identifier */
 };
 
@@ -80,7 +83,6 @@ struct kevent {
  * data/hint flags for EVFILT_{READ|WRITE}, shared with userspace
  */
 #define NOTE_LOWAT	0x0001			/* low water mark */
-#define NOTE_EOF	0x0002			/* return on EOF */
 
 /*
  * data/hint flags for EVFILT_VNODE, shared with userspace
@@ -92,7 +94,6 @@ struct kevent {
 #define	NOTE_LINK	0x0010			/* link count changed */
 #define	NOTE_RENAME	0x0020			/* vnode was renamed */
 #define	NOTE_REVOKE	0x0040			/* vnode access was revoked */
-#define	NOTE_TRUNCATE   0x0080			/* vnode was truncated */
 
 /*
  * data/hint flags for EVFILT_PROC, shared with userspace
@@ -109,16 +110,36 @@ struct kevent {
 #define	NOTE_CHILD	0x00000004		/* am a child process */
 
 /*
- * This is currently visible to userland to work around broken
- * programs which pull in <sys/proc.h> or <sys/selinfo.h>.
+ * data/hint flags for EVFILT_NETDEV, shared with userspace
  */
-#include <sys/queue.h>
+#define NOTE_LINKUP	0x0001			/* link is up */
+#define NOTE_LINKDOWN	0x0002			/* link is down */
+#define NOTE_LINKINV	0x0004			/* link state is invalid */
+
 struct knote;
 SLIST_HEAD(klist, knote);
+struct kqueue;
+SLIST_HEAD(kqlist, kqueue);
+struct knlist {
+	struct	klist	kl_list;
+	void    (*kl_lock)(void *);	/* lock function */
+	void    (*kl_unlock)(void *);
+	int    (*kl_locked)(void *);
+	void *kl_lockarg;		/* argument passed to kl_lockf() */
+};
+
 
 #ifdef _KERNEL
 
-#define KNOTE(list, hint)	if ((list) != NULL) knote(list, hint)
+#ifdef MALLOC_DECLARE
+MALLOC_DECLARE(M_KQUEUE);
+#endif
+
+#define KNOTE(list, hist, lock)		knote(list, hist, lock)
+#define KNOTE_LOCKED(list, hint)	knote(list, hint, 1)
+#define KNOTE_UNLOCKED(list, hint)	knote(list, hint, 0)
+
+#define	KNLIST_EMPTY(list)		SLIST_EMPTY(&(list)->kl_list)
 
 /*
  * Flag indicating hint is a signal.  Used by EVFILT_SIGNAL, and also
@@ -133,25 +154,36 @@ struct filterops {
 	int	(*f_event)(struct knote *kn, long hint);
 };
 
+/*
+ * Setting the KN_INFLUX flag enables you to unlock the kq that this knote
+ * is on, and modify kn_status as if you had the KQ lock.
+ *
+ * kn_sfflags, kn_sdata, and kn_kevent are protected by the knlist lock.
+ */
 struct knote {
-	SLIST_ENTRY(knote)	kn_link;	/* for fd */
+	SLIST_ENTRY(knote)	kn_link;	/* for kq */
 	SLIST_ENTRY(knote)	kn_selnext;	/* for struct selinfo */
+	struct			knlist *kn_knlist;	/* f_attach populated */
 	TAILQ_ENTRY(knote)	kn_tqe;
 	struct			kqueue *kn_kq;	/* which queue we are on */
-	struct			kevent kn_kevent;
-	int			kn_status;
-	int			kn_sfflags;	/* saved filter flags */
-	int			kn_sdata;	/* saved data field */
-	union {
-		struct		file *p_fp;	/* file data pointer */
-		struct		proc *p_proc;	/* proc pointer */
-	} kn_ptr;
-	const struct		filterops *kn_fop;
-	void			*kn_hook;
+	struct 			kevent kn_kevent;
+	int			kn_status;	/* protected by kq lock */
 #define KN_ACTIVE	0x01			/* event has been triggered */
 #define KN_QUEUED	0x02			/* event is on queue */
 #define KN_DISABLED	0x04			/* event is disabled */
 #define KN_DETACHED	0x08			/* knote is detached */
+#define KN_INFLUX	0x10			/* knote is in flux */
+#define KN_MARKER	0x20			/* ignore this knote */
+#define KN_KQUEUE	0x40			/* this knote belongs to a kq */
+#define KN_HASKQLOCK	0x80			/* for _inevent */
+	int			kn_sfflags;	/* saved filter flags */
+	intptr_t		kn_sdata;	/* saved data field */
+	union {
+		struct		file *p_fp;	/* file data pointer */
+		struct		proc *p_proc;	/* proc pointer */
+	} kn_ptr;
+	struct			filterops *kn_fop;
+	void			*kn_hook;
 
 #define kn_id		kn_kevent.ident
 #define kn_filter	kn_kevent.filter
@@ -160,27 +192,47 @@ struct knote {
 #define kn_data		kn_kevent.data
 #define kn_fp		kn_ptr.p_fp
 };
+struct kevent_copyops {
+	void	*arg;
+	int	(*k_copyout)(void *arg, struct kevent *kevp, int count);
+	int	(*k_copyin)(void *arg, struct kevent *kevp, int count);
+};
 
+struct thread;
 struct proc;
+struct knlist;
 
-extern void	knote(struct klist *list, long hint);
-extern void	knote_remove(struct proc *p, struct klist *list);
-extern void	knote_fdclose(struct proc *p, int fd);
-extern int	kqueue_register(struct kqueue *kq,
-		    struct kevent *kev, struct proc *p);
-extern int	filt_seltrue(struct knote *kn, long hint);
-extern void	klist_invalidate(struct klist *);
+extern void	knote(struct knlist *list, long hint, int islocked);
+extern void	knlist_add(struct knlist *knl, struct knote *kn, int islocked);
+extern void	knlist_remove(struct knlist *knl, struct knote *kn, int islocked);
+extern void	knlist_remove_inevent(struct knlist *knl, struct knote *kn);
+extern int	knlist_empty(struct knlist *knl);
+extern void	knlist_init(struct knlist *knl, void *lock,
+    void (*kl_lock)(void *), void (*kl_unlock)(void *),
+    int (*kl_locked)(void *));
+extern void	knlist_destroy(struct knlist *knl);
+extern void	knlist_cleardel(struct knlist *knl, struct thread *td,
+	int islocked, int killkn);
+#define knlist_clear(knl, islocked)				\
+		knlist_cleardel((knl), NULL, (islocked), 0)
+#define knlist_delete(knl, td, islocked)			\
+		knlist_cleardel((knl), (td), (islocked), 1)
+extern void	knote_fdclose(struct thread *p, int fd);
+extern int 	kqfd_register(int fd, struct kevent *kev, struct thread *p,
+		    int waitok);
+extern int	kqueue_add_filteropts(int filt, struct filterops *filtops);
+extern int	kqueue_del_filteropts(int filt);
 
-#else	/* !_KERNEL */
+#else 	/* !_KERNEL */
 
 #include <sys/cdefs.h>
 struct timespec;
 
 __BEGIN_DECLS
-int	kqueue(void);
-int	kevent(int kq, const struct kevent *changelist, int nchanges,
-		    struct kevent *eventlist, int nevents,
-		    const struct timespec *timeout);
+int     kqueue(void);
+int     kevent(int kq, const struct kevent *changelist, int nchanges,
+	    struct kevent *eventlist, int nevents,
+	    const struct timespec *timeout);
 __END_DECLS
 
 #endif /* !_KERNEL */

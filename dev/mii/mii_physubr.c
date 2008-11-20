@@ -1,8 +1,7 @@
-/*	$OpenBSD: mii_physubr.c,v 1.34 2008/05/13 01:40:39 brad Exp $	*/
-/*	$NetBSD: mii_physubr.c,v 1.20 2001/04/13 23:30:09 thorpej Exp $	*/
+/*	$NetBSD: mii_physubr.c,v 1.5 1999/08/03 19:41:49 drochner Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -38,17 +37,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/mii_physubr.c,v 1.29 2007/01/13 00:14:45 marius Exp $");
+
 /*
  * Subroutines common to all PHYs.
  */
 
 #include <sys/param.h>
-#include <sys/device.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
+#include <sys/module.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -56,31 +58,51 @@
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
+#include "miibus_if.h"
+
 /*
  * Media to register setting conversion table.  Order matters.
- * XXX 802.3 doesn't specify ANAR or ANLPAR bits for 1000base.
  */
-const struct mii_media mii_media_table[] = {
+const struct mii_media mii_media_table[MII_NMEDIA] = {
 	/* None */
-	{ BMCR_ISO,		ANAR_CSMA,		0 },
+	{ BMCR_ISO,		ANAR_CSMA,
+	  0, },
+
 	/* 10baseT */
-	{ BMCR_S10,		ANAR_CSMA|ANAR_10,	0 },
+	{ BMCR_S10,		ANAR_CSMA|ANAR_10,
+	  0, },
+
 	/* 10baseT-FDX */
-	{ BMCR_S10|BMCR_FDX,	ANAR_CSMA|ANAR_10_FD,	0 },
+	{ BMCR_S10|BMCR_FDX,	ANAR_CSMA|ANAR_10_FD,
+	  0, },
+
 	/* 100baseT4 */
-	{ BMCR_S100,		ANAR_CSMA|ANAR_T4,	0 },
+	{ BMCR_S100,		ANAR_CSMA|ANAR_T4,
+	  0, },
+
 	/* 100baseTX */
-	{ BMCR_S100,		ANAR_CSMA|ANAR_TX,	0 },
+	{ BMCR_S100,		ANAR_CSMA|ANAR_TX,
+	  0, },
+
 	/* 100baseTX-FDX */
-	{ BMCR_S100|BMCR_FDX,	ANAR_CSMA|ANAR_TX_FD,	0 },
+	{ BMCR_S100|BMCR_FDX,	ANAR_CSMA|ANAR_TX_FD,
+	  0, },
+
 	/* 1000baseX */
-	{ BMCR_S1000,		ANAR_CSMA,		0 },
+	{ BMCR_S1000,		ANAR_CSMA,
+	  0, },
+
 	/* 1000baseX-FDX */
-	{ BMCR_S1000|BMCR_FDX,	ANAR_CSMA,		0 },
+	{ BMCR_S1000|BMCR_FDX,	ANAR_CSMA,
+	  0, },
+
 	/* 1000baseT */
-	{ BMCR_S1000,		ANAR_CSMA,		GTCR_ADV_1000THDX },
+	{ BMCR_S1000,		ANAR_CSMA,
+	  GTCR_ADV_1000THDX },
+
 	/* 1000baseT-FDX */
-	{ BMCR_S1000|BMCR_FDX,	ANAR_CSMA,		GTCR_ADV_1000TFDX },
+	{ BMCR_S1000,		ANAR_CSMA,
+	  GTCR_ADV_1000TFDX },
 };
 
 void
@@ -93,17 +115,17 @@ mii_phy_setmedia(struct mii_softc *sc)
 	if (IFM_SUBTYPE(ife->ifm_media) == IFM_AUTO) {
 		if ((PHY_READ(sc, MII_BMCR) & BMCR_AUTOEN) == 0 ||
 		    (sc->mii_flags & MIIF_FORCEANEG))
-			(void) mii_phy_auto(sc, 1);
+			(void) mii_phy_auto(sc);
 		return;
 	}
 
 	/*
 	 * Table index is stored in the media entry.
 	 */
-#ifdef DIAGNOSTIC
-	if (ife->ifm_data < 0 || ife->ifm_data >= MII_NMEDIA)
-		panic("mii_phy_setmedia");
-#endif
+
+	KASSERT(ife->ifm_data >=0 && ife->ifm_data < MII_NMEDIA,
+	    ("invalid ife->ifm_data (0x%x) in mii_phy_setmedia",
+	    ife->ifm_data));
 
 	anar = mii_media_table[ife->ifm_data].mm_anar;
 	bmcr = mii_media_table[ife->ifm_data].mm_bmcr;
@@ -130,119 +152,59 @@ mii_phy_setmedia(struct mii_softc *sc)
 }
 
 int
-mii_phy_auto(struct mii_softc *sc, int waitfor)
+mii_phy_auto(struct mii_softc *sc)
 {
-	int bmsr, i;
-
-	if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
-		/*
-		 * Check for 1000BASE-X.  Autonegotiation is a bit
-		 * different on such devices.
-		 */
-		if (sc->mii_flags & MIIF_IS_1000X) {
-			uint16_t anar = 0;
-
-			if (sc->mii_extcapabilities & EXTSR_1000XFDX)
-				anar |= ANAR_X_FD;
-			if (sc->mii_extcapabilities & EXTSR_1000XHDX)
-				anar |= ANAR_X_HD;
-
-			if (sc->mii_flags & MIIF_DOPAUSE &&
-			    sc->mii_extcapabilities & EXTSR_1000XFDX)
-				anar |= ANAR_X_PAUSE_TOWARDS;
-
-			PHY_WRITE(sc, MII_ANAR, anar);
-		} else {
-			uint16_t anar;
-
-			anar = BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) |
-			    ANAR_CSMA;
-			/* 
-			 * Most 100baseTX PHY's only support symmetric
-			 * PAUSE, so we don't advertise asymmetric
-			 * PAUSE unless we also have 1000baseT capability.
-			 */
-			if (sc->mii_flags & MIIF_DOPAUSE) {
-				if (sc->mii_capabilities & BMSR_100TXFDX)
-					anar |= ANAR_FC;
-				if (sc->mii_extcapabilities & EXTSR_1000TFDX)
-					anar |= ANAR_PAUSE_TOWARDS;
-			}
-			PHY_WRITE(sc, MII_ANAR, anar);
-			if (sc->mii_flags & MIIF_HAVE_GTCR) {
-				uint16_t gtcr = 0;
-
-				if (sc->mii_extcapabilities & EXTSR_1000TFDX)
-					gtcr |= GTCR_ADV_1000TFDX;
-				if (sc->mii_extcapabilities & EXTSR_1000THDX)
-					gtcr |= GTCR_ADV_1000THDX;
-
-				PHY_WRITE(sc, MII_100T2CR, gtcr);
-			}
-		}
-		PHY_WRITE(sc, MII_BMCR, BMCR_AUTOEN | BMCR_STARTNEG);
-	}
-
-	if (waitfor) {
-		/* Wait 500ms for it to complete. */
-		for (i = 0; i < 500; i++) {
-			if ((bmsr = PHY_READ(sc, MII_BMSR)) & BMSR_ACOMP)
-				return (0);
-			delay(1000);
-		}
-
-		/*
-		 * Don't need to worry about clearing MIIF_DOINGAUTO.
-		 * If that's set, a timeout is pending, and it will
-		 * clear the flag.
-		 */
-		return (EIO);
-	}
 
 	/*
-	 * Just let it finish asynchronously.  This is for the benefit of
-	 * the tick handler driving autonegotiation.  Don't want 500ms
-	 * delays all the time while the system is running!
+	 * Check for 1000BASE-X.  Autonegotiation is a bit
+	 * different on such devices.
 	 */
-	if (sc->mii_flags & MIIF_AUTOTSLEEP) {
-		sc->mii_flags |= MIIF_DOINGAUTO;
-		tsleep(&sc->mii_flags, PZERO, "miiaut", hz >> 1);
-		mii_phy_auto_timeout(sc);
-	} else if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
-		sc->mii_flags |= MIIF_DOINGAUTO;
-		timeout_set(&sc->mii_phy_timo, mii_phy_auto_timeout, sc);
-		timeout_add(&sc->mii_phy_timo, hz / 2);
+	if (sc->mii_flags & MIIF_IS_1000X) {
+		uint16_t anar = 0;
+
+		if (sc->mii_extcapabilities & EXTSR_1000XFDX)
+			anar |= ANAR_X_FD;
+		if (sc->mii_extcapabilities & EXTSR_1000XHDX)
+			anar |= ANAR_X_HD;
+
+		if (sc->mii_flags & MIIF_DOPAUSE) {
+			/* XXX Asymmetric vs. symmetric? */
+			anar |= ANLPAR_X_PAUSE_TOWARDS;
+		}
+
+		PHY_WRITE(sc, MII_ANAR, anar);
+	} else {
+		uint16_t anar;
+
+		anar = BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) |
+		    ANAR_CSMA;
+		if (sc->mii_flags & MIIF_DOPAUSE)
+			anar |= ANAR_FC;
+		PHY_WRITE(sc, MII_ANAR, anar);
+		if (sc->mii_flags & MIIF_HAVE_GTCR) {
+			uint16_t gtcr = 0;
+
+			if (sc->mii_extcapabilities & EXTSR_1000TFDX)
+				gtcr |= GTCR_ADV_1000TFDX;
+			if (sc->mii_extcapabilities & EXTSR_1000THDX)
+				gtcr |= GTCR_ADV_1000THDX;
+
+			PHY_WRITE(sc, MII_100T2CR, gtcr);
+		}
 	}
+	PHY_WRITE(sc, MII_BMCR, BMCR_AUTOEN | BMCR_STARTNEG);
 	return (EJUSTRETURN);
-}
-
-void
-mii_phy_auto_timeout(void *arg)
-{
-	struct mii_softc *sc = arg;
-	int s, bmsr;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return;
-
-	s = splnet();
-	sc->mii_flags &= ~MIIF_DOINGAUTO;
-	bmsr = PHY_READ(sc, MII_BMSR);
-
-	/* Update the media status. */
-	(void) PHY_SERVICE(sc, sc->mii_pdata, MII_POLLSTAT);
-	splx(s);
 }
 
 int
 mii_phy_tick(struct mii_softc *sc)
 {
-	struct mii_data *mii = sc->mii_pdata;
-	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
+	struct ifmedia_entry *ife = sc->mii_pdata->mii_media.ifm_cur;
+	struct ifnet *ifp = sc->mii_pdata->mii_ifp;
 	int reg;
 
 	/* Just bail now if the interface is down. */
-	if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
+	if ((ifp->if_flags & IFF_UP) == 0)
 		return (EJUSTRETURN);
 
 	/*
@@ -251,43 +213,41 @@ mii_phy_tick(struct mii_softc *sc)
 	 * status so we can generate an announcement if the status
 	 * changes.
 	 */
-	if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
+	if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO) {
+		sc->mii_ticks = 0;	/* reset autonegotiation timer. */
 		return (0);
+	}
 
 	/* Read the status register twice; BMSR_LINK is latch-low. */
 	reg = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
 	if (reg & BMSR_LINK) {
-		/*
-		 * See above.
-		 */
+		sc->mii_ticks = 0;	/* reset autonegotiation timer. */
+		/* See above. */
 		return (0);
 	}
 
-	/*
-	 * Only retry autonegotiation every mii_anegticks seconds.
-	 */
-	if (!sc->mii_anegticks)
-		sc->mii_anegticks = MII_ANEGTICKS;
+	/* Announce link loss right after it happens */
+	if (sc->mii_ticks++ == 0)
+		return (0);
 
-	if (++sc->mii_ticks <= sc->mii_anegticks)
+	/* XXX: use default value if phy driver did not set mii_anegticks */
+	if (sc->mii_anegticks == 0)
+		sc->mii_anegticks = MII_ANEGTICKS_GIGE;
+
+	/* Only retry autonegotiation every mii_anegticks ticks. */
+	if (sc->mii_ticks <= sc->mii_anegticks)
 		return (EJUSTRETURN);
 
 	sc->mii_ticks = 0;
-	PHY_RESET(sc);
-
-	if (mii_phy_auto(sc, 0) == EJUSTRETURN)
-		return (EJUSTRETURN);
-
-	/*
-	 * Might need to generate a status message if autonegotiation
-	 * failed.
-	 */
+	mii_phy_reset(sc);
+	mii_phy_auto(sc);
 	return (0);
 }
 
 void
 mii_phy_reset(struct mii_softc *sc)
 {
+	struct ifmedia_entry *ife = sc->mii_pdata->mii_media.ifm_cur;
 	int reg, i;
 
 	if (sc->mii_flags & MIIF_NOISOLATE)
@@ -296,291 +256,41 @@ mii_phy_reset(struct mii_softc *sc)
 		reg = BMCR_RESET | BMCR_ISO;
 	PHY_WRITE(sc, MII_BMCR, reg);
 
-	/*
-	 * It is best to allow a little time for the reset to settle
-	 * in before we start polling the BMCR again.  Notably, the
-	 * DP83840A manual states that there should be a 500us delay
-	 * between asserting software reset and attempting MII serial
-	 * operations.  Also, a DP83815 can get into a bad state on
-	 * cable removal and reinsertion if we do not delay here.
-	 */
-	delay(500);
-
-	/* Wait another 100ms for it to complete. */
+	/* Wait 100ms for it to complete. */
 	for (i = 0; i < 100; i++) {
 		reg = PHY_READ(sc, MII_BMCR);
 		if ((reg & BMCR_RESET) == 0)
 			break;
-		delay(1000);
+		DELAY(1000);
 	}
 
-	if (sc->mii_inst != 0 && ((sc->mii_flags & MIIF_NOISOLATE) == 0))
-		PHY_WRITE(sc, MII_BMCR, reg | BMCR_ISO);
+	if ((sc->mii_flags & MIIF_NOISOLATE) == 0) {
+		if ((ife == NULL && sc->mii_inst != 0) ||
+		    (ife != NULL && IFM_INST(ife->ifm_media) != sc->mii_inst))
+			PHY_WRITE(sc, MII_BMCR, reg | BMCR_ISO);
+	}
 }
 
 void
 mii_phy_down(struct mii_softc *sc)
 {
-	if (sc->mii_flags & MIIF_DOINGAUTO) {
-		sc->mii_flags &= ~MIIF_DOINGAUTO;
-		timeout_del(&sc->mii_phy_timo);
-	}
-}
 
-
-void
-mii_phy_status(struct mii_softc *sc)
-{
-	PHY_STATUS(sc);
 }
 
 void
 mii_phy_update(struct mii_softc *sc, int cmd)
 {
 	struct mii_data *mii = sc->mii_pdata;
-	struct ifnet *ifp = mii->mii_ifp;
-	int announce, s;
 
 	if (sc->mii_media_active != mii->mii_media_active ||
-	    sc->mii_media_status != mii->mii_media_status ||
 	    cmd == MII_MEDIACHG) {
-		announce = mii_phy_statusmsg(sc);
-		(*mii->mii_statchg)(sc->mii_dev.dv_parent);
+		MIIBUS_STATCHG(sc->mii_dev);
 		sc->mii_media_active = mii->mii_media_active;
+	}
+	if (sc->mii_media_status != mii->mii_media_status) {
+		MIIBUS_LINKCHG(sc->mii_dev);
 		sc->mii_media_status = mii->mii_media_status;
-
-		if (announce) {
-			s = splnet();
-			if_link_state_change(ifp);
-			splx(s);
-		}
 	}
-}
-
-int
-mii_phy_statusmsg(struct mii_softc *sc)
-{
-	struct mii_data *mii = sc->mii_pdata;
-	struct ifnet *ifp = mii->mii_ifp;
-	u_int64_t baudrate;
-	int link_state, announce = 0;
-
-	if (mii->mii_media_status & IFM_AVALID) {
-		if (mii->mii_media_status & IFM_ACTIVE) {
-			if (mii->mii_media_active & IFM_FDX)
-				link_state = LINK_STATE_FULL_DUPLEX;
-			else
-				link_state = LINK_STATE_HALF_DUPLEX;
-		} else
-			link_state = LINK_STATE_DOWN;
-	} else
-		link_state = LINK_STATE_UNKNOWN;
-
-	baudrate = ifmedia_baudrate(mii->mii_media_active);
-
-	if (link_state != ifp->if_link_state) {
-		ifp->if_link_state = link_state;
-		/*
-		 * XXX Right here we'd like to notify protocols
-		 * XXX that the link status has changed, so that
-		 * XXX e.g. Duplicate Address Detection can restart.
-		 */
-		announce = 1;
-	}
-
-	if (baudrate != ifp->if_baudrate) {
-		ifp->if_baudrate = baudrate;
-		announce = 1;
-	}
-
-	return (announce);
-}
-
-/*
- * Initialize generic PHY media based on BMSR, called when a PHY is
- * attached.  We expect to be set up to print a comma-separated list
- * of media names.  Does not print a newline.
- */
-void
-mii_phy_add_media(struct mii_softc *sc)
-{
-	struct mii_data *mii = sc->mii_pdata;
-
-#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
-
-	if ((sc->mii_flags & MIIF_NOISOLATE) == 0)
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
-		    MII_MEDIA_NONE);
-
-	if (sc->mii_capabilities & BMSR_10THDX) {
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, 0, sc->mii_inst),
-		    MII_MEDIA_10_T);
-	}
-	if (sc->mii_capabilities & BMSR_10TFDX) {
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, IFM_FDX, sc->mii_inst),
-		    MII_MEDIA_10_T_FDX);
-	}
-	if (sc->mii_capabilities & BMSR_100TXHDX) {
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, 0, sc->mii_inst),
-		    MII_MEDIA_100_TX);
-	}
-	if (sc->mii_capabilities & BMSR_100TXFDX) {
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_FDX, sc->mii_inst),
-		    MII_MEDIA_100_TX_FDX);
-	}
-	if (sc->mii_capabilities & BMSR_100T4) {
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_T4, 0, sc->mii_inst),
-		    MII_MEDIA_100_T4);
-	}
-	if (sc->mii_extcapabilities & EXTSR_MEDIAMASK) {
-		/*
-		 * XXX Right now only handle 1000SX and 1000TX.  Need
-		 * XXX to handle 1000LX and 1000CX some how.
-		 */
-		if (sc->mii_extcapabilities & EXTSR_1000XHDX) {
-			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
-			sc->mii_flags |= MIIF_IS_1000X;
-			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, 0,
-			    sc->mii_inst), MII_MEDIA_1000_X);
-		}
-		if (sc->mii_extcapabilities & EXTSR_1000XFDX) {
-			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
-			sc->mii_flags |= MIIF_IS_1000X;
-			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, IFM_FDX,
-			    sc->mii_inst), MII_MEDIA_1000_X_FDX);
-		}
-
-		/*
-		 * 1000baseT media needs to be able to manipulate
-		 * master/slave mode.  We set IFM_ETH_MASTER in
-		 * the "don't care mask" and filter it out when
-		 * the media is set.
-		 *
-		 * All 1000baseT PHYs have a 1000baseT control register.
-		 */
-		if (sc->mii_extcapabilities & EXTSR_1000THDX) {
-			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
-			sc->mii_flags |= MIIF_HAVE_GTCR;
-			mii->mii_media.ifm_mask |= IFM_ETH_MASTER;
-			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_T, 0,
-			    sc->mii_inst), MII_MEDIA_1000_T);
-		}
-		if (sc->mii_extcapabilities & EXTSR_1000TFDX) {
-			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
-			sc->mii_flags |= MIIF_HAVE_GTCR;
-			mii->mii_media.ifm_mask |= IFM_ETH_MASTER;
-			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_T, IFM_FDX,
-			    sc->mii_inst), MII_MEDIA_1000_T_FDX);
-		}
-	}
-
-	if (sc->mii_capabilities & BMSR_ANEG) {
-		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_AUTO, 0, sc->mii_inst),
-		    MII_NMEDIA);	/* intentionally invalid index */
-	}
-#undef ADD
-}
-
-void
-mii_phy_delete_media(struct mii_softc *sc)
-{
-	struct mii_data *mii = sc->mii_pdata;
-
-	ifmedia_delete_instance(&mii->mii_media, sc->mii_inst);
-}
-
-int
-mii_phy_activate(struct device *self, enum devact act)
-{
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
-		break;
-
-	case DVACT_DEACTIVATE:
-		/* Nothing special to do. */
-		break;
-	}
-
-	return (rv);
-}
-
-int
-mii_phy_detach(struct device *self, int flags)
-{
-	struct mii_softc *sc = (void *) self;
-
-	if (sc->mii_flags & MIIF_DOINGAUTO)
-		timeout_del(&sc->mii_phy_timo);
-
-	mii_phy_delete_media(sc);
-
-	return (0);
-}
-
-const struct mii_phydesc *
-mii_phy_match(const struct mii_attach_args *ma, const struct mii_phydesc *mpd)
-{
-
-	for (; mpd->mpd_name != NULL; mpd++) {
-		if (MII_OUI(ma->mii_id1, ma->mii_id2) == mpd->mpd_oui &&
-		    MII_MODEL(ma->mii_id2) == mpd->mpd_model)
-			return (mpd);
-	}
-	return (NULL);
-}
-
-/*
- * Return the flow control status flag from MII_ANAR & MII_ANLPAR.
- */
-int
-mii_phy_flowstatus(struct mii_softc *sc)
-{
-	int anar, anlpar;
-
-	if ((sc->mii_flags & MIIF_DOPAUSE) == 0)
-		return (0);
-
-	anar = PHY_READ(sc, MII_ANAR);
-	anlpar = PHY_READ(sc, MII_ANLPAR);
-
-	/* For 1000baseX, the bits are in a different location. */
-	if (sc->mii_flags & MIIF_IS_1000X) {
-		anar <<= 3;
-		anlpar <<= 3;
-	}
-
-	if ((anar & ANAR_PAUSE_SYM) & (anlpar & ANLPAR_PAUSE_SYM))
-		return (IFM_FLOW|IFM_ETH_TXPAUSE|IFM_ETH_RXPAUSE);
-
-	if ((anar & ANAR_PAUSE_SYM) == 0) {
-		if ((anar & ANAR_PAUSE_ASYM) &&
-		    ((anlpar & ANLPAR_PAUSE_TOWARDS) == ANLPAR_PAUSE_TOWARDS))
-			return (IFM_FLOW|IFM_ETH_TXPAUSE);
-		else
-			return (0);
-	}
-
-	if ((anar & ANAR_PAUSE_ASYM) == 0) {
-		if (anlpar & ANLPAR_PAUSE_SYM)
-			return (IFM_FLOW|IFM_ETH_TXPAUSE|IFM_ETH_RXPAUSE);
-		else
-			return (0);
-	}
-
-	switch ((anlpar & ANLPAR_PAUSE_TOWARDS)) {
-	case ANLPAR_PAUSE_NONE:
-		return (0);
-
-	case ANLPAR_PAUSE_ASYM:
-		return (IFM_FLOW|IFM_ETH_RXPAUSE);
-
-	default:
-		return (IFM_FLOW|IFM_ETH_RXPAUSE|IFM_ETH_TXPAUSE);
-	}
-	/* NOTREACHED */
 }
 
 /*
@@ -613,4 +323,236 @@ mii_anar(int media)
 	}
 
 	return (rv);
+}
+
+/*
+ * Initialize generic PHY media based on BMSR, called when a PHY is
+ * attached.  We expect to be set up to print a comma-separated list
+ * of media names.  Does not print a newline.
+ */
+void
+mii_add_media(struct mii_softc *sc)
+{
+	const char *sep = "";
+	struct mii_data *mii;
+
+	mii = device_get_softc(sc->mii_dev);
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0) {
+		printf("no media present");
+		return;
+	}
+
+#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
+#define	PRINT(s)	printf("%s%s", sep, s); sep = ", "
+
+	if (sc->mii_capabilities & BMSR_10THDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, 0, sc->mii_inst), 0);
+		PRINT("10baseT");
+	}
+	if (sc->mii_capabilities & BMSR_10TFDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, IFM_FDX, sc->mii_inst),
+		    BMCR_FDX);
+		PRINT("10baseT-FDX");
+	}
+	if (sc->mii_capabilities & BMSR_100TXHDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, 0, sc->mii_inst),
+		    BMCR_S100);
+		PRINT("100baseTX");
+	}
+	if (sc->mii_capabilities & BMSR_100TXFDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_FDX, sc->mii_inst),
+		    BMCR_S100|BMCR_FDX);
+		PRINT("100baseTX-FDX");
+	}
+	if (sc->mii_capabilities & BMSR_100T4) {
+		/*
+		 * XXX How do you enable 100baseT4?  I assume we set
+		 * XXX BMCR_S100 and then assume the PHYs will take
+		 * XXX watever action is necessary to switch themselves
+		 * XXX into T4 mode.
+		 */
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_T4, 0, sc->mii_inst),
+		    BMCR_S100);
+		PRINT("100baseT4");
+	}
+	if (sc->mii_capabilities & BMSR_ANEG) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_AUTO, 0, sc->mii_inst),
+		    BMCR_AUTOEN);
+		PRINT("auto");
+	}
+
+
+
+#undef ADD
+#undef PRINT
+}
+
+/*
+ * Initialize generic PHY media based on BMSR, called when a PHY is
+ * attached.  We expect to be set up to print a comma-separated list
+ * of media names.  Does not print a newline.
+ */
+void
+mii_phy_add_media(struct mii_softc *sc)
+{
+	struct mii_data *mii = sc->mii_pdata;
+	const char *sep = "";
+
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0 &&
+	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK) == 0) {
+		printf("no media present");
+		return;
+	}
+
+	/* Set aneg timer for 10/100 media. Gigabit media handled below. */
+	sc->mii_anegticks = MII_ANEGTICKS;
+
+#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
+#define	PRINT(s)	printf("%s%s", sep, s); sep = ", "
+
+	if ((sc->mii_flags & MIIF_NOISOLATE) == 0)
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
+		    MII_MEDIA_NONE);
+
+	/*
+	 * There are different interpretations for the bits in
+	 * HomePNA PHYs.  And there is really only one media type
+	 * that is supported.
+	 */
+	if (sc->mii_flags & MIIF_IS_HPNA) {
+		if (sc->mii_capabilities & BMSR_10THDX) {
+			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_HPNA_1, 0,
+					 sc->mii_inst),
+			    MII_MEDIA_10_T);
+			PRINT("HomePNA1");
+		}
+		return;
+	}
+
+	if (sc->mii_capabilities & BMSR_10THDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, 0, sc->mii_inst),
+		    MII_MEDIA_10_T);
+		PRINT("10baseT");
+	}
+	if (sc->mii_capabilities & BMSR_10TFDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_10_T, IFM_FDX, sc->mii_inst),
+		    MII_MEDIA_10_T_FDX);
+		PRINT("10baseT-FDX");
+	}
+	if (sc->mii_capabilities & BMSR_100TXHDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, 0, sc->mii_inst),
+		    MII_MEDIA_100_TX);
+		PRINT("100baseTX");
+	}
+	if (sc->mii_capabilities & BMSR_100TXFDX) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_FDX, sc->mii_inst),
+		    MII_MEDIA_100_TX_FDX);
+		PRINT("100baseTX-FDX");
+	}
+	if (sc->mii_capabilities & BMSR_100T4) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_T4, 0, sc->mii_inst),
+		    MII_MEDIA_100_T4);
+		PRINT("100baseT4");
+	}
+
+	if (sc->mii_extcapabilities & EXTSR_MEDIAMASK) {
+		/*
+		 * XXX Right now only handle 1000SX and 1000TX.  Need
+		 * XXX to handle 1000LX and 1000CX some how.
+		 */
+		if (sc->mii_extcapabilities & EXTSR_1000XHDX) {
+			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
+			sc->mii_flags |= MIIF_IS_1000X;
+			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, 0,
+			    sc->mii_inst), MII_MEDIA_1000_X);
+			PRINT("1000baseSX");
+		}
+		if (sc->mii_extcapabilities & EXTSR_1000XFDX) {
+			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
+			sc->mii_flags |= MIIF_IS_1000X;
+			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, IFM_FDX,
+			    sc->mii_inst), MII_MEDIA_1000_X_FDX);
+			PRINT("1000baseSX-FDX");
+		}
+
+		/*
+		 * 1000baseT media needs to be able to manipulate
+		 * master/slave mode.  We set IFM_ETH_MASTER in
+		 * the "don't care mask" and filter it out when
+		 * the media is set.
+		 *
+		 * All 1000baseT PHYs have a 1000baseT control register.
+		 */
+		if (sc->mii_extcapabilities & EXTSR_1000THDX) {
+			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
+			sc->mii_flags |= MIIF_HAVE_GTCR;
+			mii->mii_media.ifm_mask |= IFM_ETH_MASTER;
+			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_T, 0,
+			    sc->mii_inst), MII_MEDIA_1000_T);
+			PRINT("1000baseT");
+		}
+		if (sc->mii_extcapabilities & EXTSR_1000TFDX) {
+			sc->mii_anegticks = MII_ANEGTICKS_GIGE;
+			sc->mii_flags |= MIIF_HAVE_GTCR;
+			mii->mii_media.ifm_mask |= IFM_ETH_MASTER;
+			ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_T, IFM_FDX,
+			    sc->mii_inst), MII_MEDIA_1000_T_FDX);
+			PRINT("1000baseT-FDX");
+		}
+	}
+
+	if (sc->mii_capabilities & BMSR_ANEG) {
+		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_AUTO, 0, sc->mii_inst),
+		    MII_NMEDIA);	/* intentionally invalid index */
+		PRINT("auto");
+	}
+#undef ADD
+#undef PRINT
+}
+
+int
+mii_phy_detach(device_t dev)
+{
+	struct mii_softc *sc;
+
+	sc = device_get_softc(dev);
+	mii_phy_down(sc);
+	sc->mii_dev = NULL;
+	LIST_REMOVE(sc, mii_list);
+
+	return(0);
+}
+
+const struct mii_phydesc *
+mii_phy_match_gen(const struct mii_attach_args *ma,
+  const struct mii_phydesc *mpd, size_t len)
+{
+
+	for (; mpd->mpd_name != NULL;
+	     mpd = (const struct mii_phydesc *) ((const char *) mpd + len)) {
+		if (MII_OUI(ma->mii_id1, ma->mii_id2) == mpd->mpd_oui &&
+		    MII_MODEL(ma->mii_id2) == mpd->mpd_model)
+			return (mpd);
+	}
+	return (NULL);
+}
+
+const struct mii_phydesc *
+mii_phy_match(const struct mii_attach_args *ma, const struct mii_phydesc *mpd)
+{
+
+	return (mii_phy_match_gen(ma, mpd, sizeof(struct mii_phydesc)));
+}
+
+int
+mii_phy_dev_probe(device_t dev, const struct mii_phydesc *mpd, int mrv)
+{
+
+	mpd = mii_phy_match(device_get_ivars(dev), mpd);
+	if (mpd != NULL) {
+		device_set_desc(dev, mpd->mpd_name);
+		return (mrv);
+	}
+
+	return (ENXIO);
 }

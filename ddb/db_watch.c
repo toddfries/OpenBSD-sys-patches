@@ -1,66 +1,75 @@
-/*	$OpenBSD: db_watch.c,v 1.9 2006/03/13 06:23:20 jsg Exp $ */
-/*	$NetBSD: db_watch.c,v 1.9 1996/03/30 22:30:12 christos Exp $	*/
-
-/* 
+/*-
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
  *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
+ */
+/*
  * 	Author: Richard P. Draves, Carnegie Mellon University
  *	Date:	10/90
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ddb/db_watch.c,v 1.28 2006/11/17 16:41:56 jhb Exp $");
+
 #include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/proc.h>
 
-#include <machine/db_machdep.h>
+#include <vm/vm.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
 
-#include <ddb/db_break.h>
+#include <ddb/ddb.h>
 #include <ddb/db_watch.h>
-#include <ddb/db_lex.h>
-#include <ddb/db_access.h>
-#include <ddb/db_run.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_output.h>
-#include <ddb/db_command.h>
-#include <ddb/db_extern.h>
 
 /*
  * Watchpoints.
  */
 
-boolean_t	db_watchpoints_inserted = TRUE;
+static boolean_t	db_watchpoints_inserted = TRUE;
 
 #define	NWATCHPOINTS	100
-struct db_watchpoint	db_watch_table[NWATCHPOINTS];
-db_watchpoint_t		db_next_free_watchpoint = &db_watch_table[0];
-db_watchpoint_t		db_free_watchpoints = 0;
-db_watchpoint_t		db_watchpoint_list = 0;
+static struct db_watchpoint	db_watch_table[NWATCHPOINTS];
+static db_watchpoint_t	db_next_free_watchpoint = &db_watch_table[0];
+static db_watchpoint_t	db_free_watchpoints = 0;
+static db_watchpoint_t	db_watchpoint_list = 0;
 
-db_watchpoint_t
-db_watchpoint_alloc(void)
+static db_watchpoint_t	db_watchpoint_alloc(void);
+static void		db_watchpoint_free(db_watchpoint_t watch);
+static void		db_delete_watchpoint(vm_map_t map, db_addr_t addr);
+#ifdef notused
+static boolean_t	db_find_watchpoint(vm_map_t map, db_addr_t addr,
+					db_regs_t *regs);
+#endif
+static void		db_list_watchpoints(void);
+static void		db_set_watchpoint(vm_map_t map, db_addr_t addr,
+				       vm_size_t size);
+
+static db_watchpoint_t
+db_watchpoint_alloc()
 {
-	db_watchpoint_t	watch;
+	register db_watchpoint_t	watch;
 
 	if ((watch = db_free_watchpoints) != 0) {
 	    db_free_watchpoints = watch->link;
@@ -76,17 +85,21 @@ db_watchpoint_alloc(void)
 	return (watch);
 }
 
-void
-db_watchpoint_free(db_watchpoint_t watch)
+static void
+db_watchpoint_free(watch)
+	register db_watchpoint_t	watch;
 {
 	watch->link = db_free_watchpoints;
 	db_free_watchpoints = watch;
 }
 
-void
-db_set_watchpoint(struct vm_map *map, db_addr_t addr, vsize_t size)
+static void
+db_set_watchpoint(map, addr, size)
+	vm_map_t	map;
+	db_addr_t	addr;
+	vm_size_t	size;
 {
-	db_watchpoint_t	watch;
+	register db_watchpoint_t	watch;
 
 	if (map == NULL) {
 	    db_printf("No map.\n");
@@ -123,11 +136,13 @@ db_set_watchpoint(struct vm_map *map, db_addr_t addr, vsize_t size)
 	db_watchpoints_inserted = FALSE;
 }
 
-void
-db_delete_watchpoint(struct vm_map *map, db_addr_t addr)
+static void
+db_delete_watchpoint(map, addr)
+	vm_map_t	map;
+	db_addr_t	addr;
 {
-	db_watchpoint_t	watch;
-	db_watchpoint_t	*prev;
+	register db_watchpoint_t	watch;
+	register db_watchpoint_t	*prev;
 
 	for (prev = &db_watchpoint_list;
 	     (watch = *prev) != 0;
@@ -143,30 +158,42 @@ db_delete_watchpoint(struct vm_map *map, db_addr_t addr)
 	db_printf("Not set.\n");
 }
 
-void
-db_list_watchpoints(void)
+static void
+db_list_watchpoints()
 {
-	db_watchpoint_t	watch;
+	register db_watchpoint_t	watch;
 
 	if (db_watchpoint_list == 0) {
 	    db_printf("No watchpoints set\n");
 	    return;
 	}
 
+#ifdef __LP64__
+	db_printf(" Map                Address          Size\n");
+#else
 	db_printf(" Map        Address  Size\n");
+#endif
 	for (watch = db_watchpoint_list;
 	     watch != 0;
 	     watch = watch->link)
-	    db_printf("%s%p  %8lx  %lx\n",
+#ifdef __LP64__
+	    db_printf("%s%16p  %16lx  %lx\n",
+#else
+	    db_printf("%s%8p  %8lx  %lx\n",
+#endif
 		      db_map_current(watch->map) ? "*" : " ",
-		      watch->map, watch->loaddr,
-		      watch->hiaddr - watch->loaddr);
+		      (void *)watch->map, (long)watch->loaddr,
+		      (long)watch->hiaddr - (long)watch->loaddr);
 }
 
 /* Delete watchpoint */
 /*ARGSUSED*/
 void
-db_deletewatch_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_deletewatch_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	boolean_t	have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
 	db_delete_watchpoint(db_map_addr(addr), addr);
 }
@@ -174,13 +201,17 @@ db_deletewatch_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 /* Set watchpoint */
 /*ARGSUSED*/
 void
-db_watchpoint_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_watchpoint_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	boolean_t	have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
-	vsize_t 	size;
+	vm_size_t	size;
 	db_expr_t	value;
 
 	if (db_expression(&value))
-	    size = (vsize_t) value;
+	    size = (vm_size_t) value;
 	else
 	    size = 4;
 	db_skip_to_eol();
@@ -188,20 +219,22 @@ db_watchpoint_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	db_set_watchpoint(db_map_addr(addr), addr, size);
 }
 
-/* list watchpoints */
-/*ARGSUSED*/
-void
-db_listwatch_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+/*
+ * At least one non-optional show-command must be implemented using
+ * DB_SHOW_COMMAND() so that db_show_cmd_set gets created.  Here is one.
+ */
+DB_SHOW_COMMAND(watches, db_listwatch_cmd)
 {
 	db_list_watchpoints();
+	db_md_list_watchpoints();
 }
 
 void
-db_set_watchpoints(void)
+db_set_watchpoints()
 {
-	db_watchpoint_t	watch;
+	register db_watchpoint_t	watch;
 
-	if (!db_watchpoints_inserted && db_watchpoint_list != NULL) {
+	if (!db_watchpoints_inserted) {
 	    for (watch = db_watchpoint_list;
 	         watch != 0;
 	         watch = watch->link)
@@ -209,21 +242,25 @@ db_set_watchpoints(void)
 			     trunc_page(watch->loaddr),
 			     round_page(watch->hiaddr),
 			     VM_PROT_READ);
-	    pmap_update(watch->map->pmap);
+
 	    db_watchpoints_inserted = TRUE;
 	}
 }
 
 void
-db_clear_watchpoints(void)
+db_clear_watchpoints()
 {
 	db_watchpoints_inserted = FALSE;
 }
 
-boolean_t
-db_find_watchpoint(struct vm_map *map, db_addr_t addr, db_regs_t *regs)
+#ifdef notused
+static boolean_t
+db_find_watchpoint(map, addr, regs)
+	vm_map_t	map;
+	db_addr_t	addr;
+	db_regs_t	*regs;
 {
-	db_watchpoint_t watch;
+	register db_watchpoint_t watch;
 	db_watchpoint_t found = 0;
 
 	for (watch = db_watchpoint_list;
@@ -250,4 +287,45 @@ db_find_watchpoint(struct vm_map *map, db_addr_t addr, db_regs_t *regs)
 	}
 
 	return (FALSE);
+}
+#endif
+
+
+
+/* Delete hardware watchpoint */
+/*ARGSUSED*/
+void
+db_deletehwatch_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	boolean_t	have_addr;
+	db_expr_t	count;
+	char *		modif;
+{
+	int rc;
+
+        if (count < 0)
+                count = 4;
+
+	rc = db_md_clr_watchpoint(addr, count);
+	if (rc < 0)
+		db_printf("hardware watchpoint could not be deleted\n");
+}
+
+/* Set hardware watchpoint */
+/*ARGSUSED*/
+void
+db_hwatchpoint_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	boolean_t	have_addr;
+	db_expr_t	count;
+	char *		modif;
+{
+	int rc;
+
+        if (count < 0)
+                count = 4;
+
+	rc = db_md_set_watchpoint(addr, count);
+	if (rc < 0)
+		db_printf("hardware watchpoint could not be set\n");
 }

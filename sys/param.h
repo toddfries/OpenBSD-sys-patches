@@ -1,6 +1,3 @@
-/*	$OpenBSD: param.h,v 1.74 2008/03/10 17:15:33 deraadt Exp $	*/
-/*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,27 +31,36 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)param.h	8.2 (Berkeley) 1/21/94
+ *	@(#)param.h	8.3 (Berkeley) 4/4/95
+ * $FreeBSD: src/sys/sys/param.h,v 1.313 2007/10/25 17:39:19 erwin Exp $
  */
 
-#define	BSD	199306		/* System version (year & month). */
+#ifndef _SYS_PARAM_H_
+#define _SYS_PARAM_H_
+
+#include <sys/_null.h>
+
+#define	BSD	199506		/* System version (year & month). */
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200805		/* OpenBSD version (year & month). */
-#define OpenBSD4_3 1		/* OpenBSD 4.3 */
+/* 
+ * __FreeBSD_version numbers are documented in the Porter's Handbook.
+ * If you bump the version for any reason, you should update the documentation
+ * there.
+ * Currently this lives here:
+ *
+ *	doc/en_US.ISO8859-1/books/porters-handbook/book.sgml
+ *
+ * scheme is:  <major><two digit minor>Rxx
+ *		'R' is 0 if release branch or x.0-CURRENT before RELENG_*_0
+ *		is created, otherwise 1.
+ */
+#undef __FreeBSD_version
+#define __FreeBSD_version 800003	/* Master, propagated to newvers */
 
-#ifndef NULL
-#ifdef 	__GNUG__
-#define	NULL	__null
-#else
-#define	NULL	0L
-#endif
-#endif
-
-#ifndef _LOCORE
+#ifndef LOCORE
 #include <sys/types.h>
-#include <sys/simplelock.h>
 #endif
 
 /*
@@ -62,99 +68,162 @@
  * Redefined constants are from POSIX 1003.1 limits file.
  *
  * MAXCOMLEN should be >= sizeof(ac_comm) (see <acct.h>)
- * MAXLOGNAME should be >= UT_NAMESIZE (see <utmp.h>)
+ * MAXLOGNAME should be == UT_NAMESIZE+1 (see <utmp.h>)
  */
 #include <sys/syslimits.h>
 
-#define	MAXCOMLEN	16		/* max command name remembered */
-#define	MAXINTERP	64		/* max interpreter file name length */
-#define	MAXLOGNAME	LOGIN_NAME_MAX	/* max login name length w/ NUL */
+#define	MAXCOMLEN	19		/* max command name remembered */
+#define	MAXINTERP	32		/* max interpreter file name length */
+#define	MAXLOGNAME	17		/* max login name length (incl. NUL) */
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
 #define	NGROUPS		NGROUPS_MAX	/* max number groups */
-#define	NOFILE		OPEN_MAX	/* max open files per process (soft) */
-#define	NOFILE_MAX	1024		/* max open files per process (hard) */
+#define	NOFILE		OPEN_MAX	/* max open files per process */
 #define	NOGROUP		65535		/* marker for empty group set member */
 #define MAXHOSTNAMELEN	256		/* max hostname size */
+#define SPECNAMELEN	63		/* max length of devicename */
 
 /* More types and definitions used throughout the kernel. */
 #ifdef _KERNEL
 #include <sys/cdefs.h>
 #include <sys/errno.h>
+#ifndef LOCORE
 #include <sys/time.h>
-#include <sys/resource.h>
-#include <sys/ucred.h>
-#include <sys/uio.h>
+#include <sys/priority.h>
 #endif
 
+#define	FALSE	0
+#define	TRUE	1
+#endif
+
+#ifndef _KERNEL
 /* Signals. */
 #include <sys/signal.h>
+#endif
 
 /* Machine type dependent parameters. */
-#include <sys/limits.h>
 #include <machine/param.h>
+#ifndef _KERNEL
+#include <sys/limits.h>
+#endif
+
+#ifndef _NO_NAMESPACE_POLLUTION
+
+#ifndef DEV_BSHIFT
+#define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
+#endif
+#define	DEV_BSIZE	(1<<DEV_BSHIFT)
+
+#ifndef BLKDEV_IOSIZE
+#define BLKDEV_IOSIZE  PAGE_SIZE	/* default block device I/O size */
+#endif
+#ifndef DFLTPHYS
+#define DFLTPHYS	(64 * 1024)	/* default max raw I/O transfer size */
+#endif
+#ifndef MAXPHYS
+#define MAXPHYS		(128 * 1024)	/* max raw I/O transfer size */
+#endif
+#ifndef MAXDUMPPGS
+#define MAXDUMPPGS	(DFLTPHYS/PAGE_SIZE)
+#endif
 
 /*
- * Priorities.  Note that with 32 run queues, differences less than 4 are
- * insignificant.
+ * Constants related to network buffer management.
+ * MCLBYTES must be no larger than PAGE_SIZE.
  */
-#define	PSWP	0
-#define	PVM	4
-#define	PINOD	8
-#define	PRIBIO	16
-#define	PVFS	20
-#define	PZERO	22		/* No longer magic, shouldn't be here.  XXX */
-#define	PSOCK	24
-#define	PWAIT	32
-#define	PLOCK	36
-#define	PPAUSE	40
-#define	PUSER	50
-#define	MAXPRI	127		/* Priorities range from 0 through MAXPRI. */
+#ifndef	MSIZE
+#define MSIZE		256		/* size of an mbuf */
+#endif	/* MSIZE */
 
-#define	PRIMASK		0x0ff
-#define	PCATCH		0x100	/* OR'd with pri for tsleep to check signals */
-#define PNORELOCK	0x200	/* OR'd with pri for msleep to not reaquire
-				   the mutex */
+#ifndef	MCLSHIFT
+#define MCLSHIFT	11		/* convert bytes to mbuf clusters */
+#endif	/* MCLSHIFT */
 
+#define MCLBYTES	(1 << MCLSHIFT)	/* size of an mbuf cluster */
+
+#define	MJUMPAGESIZE	PAGE_SIZE	/* jumbo cluster 4k */
+#define	MJUM9BYTES	(9 * 1024)	/* jumbo cluster 9k */
+#define	MJUM16BYTES	(16 * 1024)	/* jumbo cluster 16k */
+
+/*
+ * Some macros for units conversion
+ */
+
+/* clicks to bytes */
+#ifndef ctob
+#define ctob(x)	((x)<<PAGE_SHIFT)
+#endif
+
+/* bytes to clicks */
+#ifndef btoc
+#define btoc(x)	(((vm_offset_t)(x)+PAGE_MASK)>>PAGE_SHIFT)
+#endif
+
+/*
+ * btodb() is messy and perhaps slow because `bytes' may be an off_t.  We
+ * want to shift an unsigned type to avoid sign extension and we don't
+ * want to widen `bytes' unnecessarily.  Assume that the result fits in
+ * a daddr_t.
+ */
+#ifndef btodb
+#define btodb(bytes)	 		/* calculates (bytes / DEV_BSIZE) */ \
+	(sizeof (bytes) > sizeof(long) \
+	 ? (daddr_t)((unsigned long long)(bytes) >> DEV_BSHIFT) \
+	 : (daddr_t)((unsigned long)(bytes) >> DEV_BSHIFT))
+#endif
+
+#ifndef dbtob
+#define dbtob(db)			/* calculates (db * DEV_BSIZE) */ \
+	((off_t)(db) << DEV_BSHIFT)
+#endif
+
+#endif /* _NO_NAMESPACE_POLLUTION */
+
+#define	PRIMASK	0x0ff
+#define	PCATCH	0x100		/* OR'd with pri for tsleep to check signals */
+#define	PDROP	0x200	/* OR'd with pri to stop re-entry of interlock mutex */
+
+#define	NZERO	0		/* default "nice" */
+
+#define	NBBY	8		/* number of bits in a byte */
 #define	NBPW	sizeof(int)	/* number of bytes per word (integer) */
 
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
+
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
-#define NETDEV	(dev_t)(-2)	/* network device (for nfs swap) */
-	
-#define	CBLOCK	64		/* Clist block size, must be a power of 2. */
+
+#define	CBLOCK	128		/* Clist block size, must be a power of 2. */
 #define CBQSIZE	(CBLOCK/NBBY)	/* Quote bytes/cblock - can do better. */
 				/* Data chars/clist. */
 #define	CBSIZE	(CBLOCK - sizeof(struct cblock *) - CBQSIZE)
 #define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
- * Constants related to network buffer management.
- * MCLBYTES must be no larger than NBPG (the software page size), and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
- */
-#define	MSIZE		256		/* size of an mbuf */
-#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
-					/* 2K cluster can hold Ether frame */
-#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
-#define	MCLOFSET	(MCLBYTES - 1)
-
-
-/*
  * File system parameters and macros.
  *
- * The file system is made out of blocks of at most MAXBSIZE units, with
- * smaller units (fragments) only in the last direct block.  MAXBSIZE
- * primarily determines the size of buffers in the buffer pool.  It may be
- * made larger without any effect on existing file systems; however making
- * it smaller makes some file systems unmountable.
+ * MAXBSIZE -	Filesystems are made out of blocks of at most MAXBSIZE bytes
+ *		per block.  MAXBSIZE may be made larger without effecting
+ *		any existing filesystems as long as it does not exceed MAXPHYS,
+ *		and may be made smaller at the risk of not being able to use
+ *		filesystems which require a block size exceeding MAXBSIZE.
+ *
+ * BKVASIZE -	Nominal buffer space per buffer, in bytes.  BKVASIZE is the
+ *		minimum KVM memory reservation the kernel is willing to make.
+ *		Filesystems can of course request smaller chunks.  Actual 
+ *		backing memory uses a chunk size of a page (PAGE_SIZE).
+ *
+ *		If you make BKVASIZE too small you risk seriously fragmenting
+ *		the buffer KVM map which may slow things down a bit.  If you
+ *		make it too big the kernel will not be able to optimally use 
+ *		the KVM memory reserved for the buffer cache and will wind 
+ *		up with too-few buffers.
+ *
+ *		The default is 16384, roughly 2x the block size used by a
+ *		normal UFS filesystem.
  */
-#ifndef MAXBSIZE	/* XXX temp until sun3 DMA chaining */
-#define	MAXBSIZE	MAXPHYS
-#endif
-#define MAXFRAG 	8
+#define MAXBSIZE	65536	/* must be power of 2 */
+#define BKVASIZE	16384	/* must be power of 2 */
+#define BKVAMASK	(BKVASIZE-1)
 
 /*
  * MAXPATHLEN defines the longest permissible path length after expanding
@@ -166,54 +235,53 @@
  * infinite loops reasonably quickly.
  */
 #define	MAXPATHLEN	PATH_MAX
-#define MAXSYMLINKS	SYMLOOP_MAX
-
-/* Macros to set/clear/test flags. */
-#ifdef _KERNEL
-#define SET(t, f)	((t) |= (f))
-#define CLR(t, f)	((t) &= ~(f))
-#define ISSET(t, f)	((t) & (f))
-#endif
+#define MAXSYMLINKS	32
 
 /* Bit map related macros. */
-#define	setbit(a,i)	((a)[(i)>>3] |= 1<<((i)&(NBBY-1)))
-#define	clrbit(a,i)	((a)[(i)>>3] &= ~(1<<((i)&(NBBY-1))))
-#define	isset(a,i)	((a)[(i)>>3] & (1<<((i)&(NBBY-1))))
-#define	isclr(a,i)	(((a)[(i)>>3] & (1<<((i)&(NBBY-1)))) == 0)
+#define	setbit(a,i)	((a)[(i)/NBBY] |= 1<<((i)%NBBY))
+#define	clrbit(a,i)	((a)[(i)/NBBY] &= ~(1<<((i)%NBBY)))
+#define	isset(a,i)	((a)[(i)/NBBY] & (1<<((i)%NBBY)))
+#define	isclr(a,i)	(((a)[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
 
 /* Macros for counting and rounding. */
 #ifndef howmany
 #define	howmany(x, y)	(((x)+((y)-1))/(y))
 #endif
-#define	roundup(x, y)	((((x)+((y)-1))/(y))*(y))
+#define	rounddown(x, y)	(((x)/(y))*(y))
+#define	roundup(x, y)	((((x)+((y)-1))/(y))*(y))  /* to any y */
+#define	roundup2(x, y)	(((x)+((y)-1))&(~((y)-1))) /* if y is powers of two */
 #define powerof2(x)	((((x)-1)&(x))==0)
 
 /* Macros for min/max. */
 #define	MIN(a,b) (((a)<(b))?(a):(b))
 #define	MAX(a,b) (((a)>(b))?(a):(b))
 
-/* Macros for calculating the offset of a field */
-#if !defined(offsetof) && defined(_KERNEL)
-#define offsetof(s, e) ((size_t)&((s *)0)->e)
+#ifdef _KERNEL
+/*
+ * Basic byte order function prototypes for non-inline functions.
+ */
+#ifndef LOCORE
+#ifndef _BYTEORDER_PROTOTYPED
+#define	_BYTEORDER_PROTOTYPED
+__BEGIN_DECLS
+__uint32_t	 htonl(__uint32_t);
+__uint16_t	 htons(__uint16_t);
+__uint32_t	 ntohl(__uint32_t);
+__uint16_t	 ntohs(__uint16_t);
+__END_DECLS
+#endif
 #endif
 
-/*
- * Constants for setting the parameters of the kernel memory allocator.
- *
- * 2 ** MINBUCKET is the smallest unit of memory that will be
- * allocated. It must be at least large enough to hold a pointer.
- *
- * Units of memory less or equal to MAXALLOCSAVE will permanently
- * allocate physical memory; requests for these size pieces of
- * memory are quite fast. Allocations greater than MAXALLOCSAVE must
- * always allocate and free physical memory; requests for these
- * size allocations should be done infrequently as they will be slow.
- *
- * Constraints: PAGE_SIZE <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
- * MAXALLOCSIZE must be a power of two.
- */
-#define MINBUCKET	4		/* 4 => min allocation of 16 bytes */
-#define MAXALLOCSAVE	(2 * PAGE_SIZE)
+#ifndef lint
+#ifndef _BYTEORDER_FUNC_DEFINED
+#define	_BYTEORDER_FUNC_DEFINED
+#define	htonl(x)	__htonl(x)
+#define	htons(x)	__htons(x)
+#define	ntohl(x)	__ntohl(x)
+#define	ntohs(x)	__ntohs(x)
+#endif /* !_BYTEORDER_FUNC_DEFINED */
+#endif /* lint */
+#endif /* _KERNEL */
 
 /*
  * Scale factor for scaled integers used to count %cpu time and load avgs.
@@ -229,30 +297,26 @@
 #define	FSHIFT	11		/* bits to right of fixed binary point */
 #define FSCALE	(1<<FSHIFT)
 
-/*
- * The time for a process to be blocked before being very swappable.
- * This is a number of seconds which the system takes as being a non-trivial
- * amount of real time.  You probably shouldn't change this;
- * it is used in subtle ways (fractions and multiples of it are, that is, like
- * half of a ``long time'', almost a long time, etc.)
- * It is related to human patience and other factors which don't really
- * change over time.
- */
-#define	MAXSLP	20
+#define dbtoc(db)			/* calculates devblks to pages */ \
+	((db + (ctodb(1) - 1)) >> (PAGE_SHIFT - DEV_BSHIFT))
+ 
+#define ctodb(db)			/* calculates pages to devblks */ \
+	((db) << (PAGE_SHIFT - DEV_BSHIFT))
 
 /*
- * rfork() options.
- *
- * XXX currently, operations without RFPROC set are not supported.
+ * Solaris compatibility definitions.
  */
-#define RFNAMEG		(1<<0)	/* UNIMPL new plan9 `name space' */
-#define RFENVG		(1<<1)	/* UNIMPL copy plan9 `env space' */
-#define RFFDG		(1<<2)	/* copy fd table */
-#define RFNOTEG		(1<<3)	/* UNIMPL create new plan9 `note group' */
-#define RFPROC		(1<<4)	/* change child (else changes curproc) */
-#define RFMEM		(1<<5)	/* share `address space' */
-#define RFNOWAIT	(1<<6)	/* parent need not wait() on child */ 
-#define RFCNAMEG	(1<<10) /* UNIMPL zero plan9 `name space' */
-#define RFCENVG		(1<<11) /* UNIMPL zero plan9 `env space' */
-#define RFCFDG		(1<<12)	/* zero fd table */
-#define RFTHREAD	(1<<13)	/* create a thread, not a process */
+#ifdef _SOLARIS_C_SOURCE
+#define	PAGESIZE	PAGE_SIZE
+
+/*
+ * The OpenSolaris version is set according to the version last imported
+ * from http://dlc.sun.com/osol/on/downloads/current/. In FreeBSD header
+ * files it can be used to determine the level of compatibility that the
+ * FreeBSD headers provide to OpenSolaris code. Perhaps one day there
+ * will be a really, really Single Unix Specification.
+ */
+#define __OpenSolaris_version 20060731
+#endif
+
+#endif	/* _SYS_PARAM_H_ */

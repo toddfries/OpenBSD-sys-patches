@@ -1,4 +1,6 @@
-/*	$OpenBSD: if_zydreg.h,v 1.22 2007/11/27 20:30:14 damien Exp $	*/
+/*	$OpenBSD: if_zydreg.h,v 1.19 2006/11/30 19:28:07 damien Exp $	*/
+/*	$NetBSD: if_zydreg.h,v 1.2 2007/06/16 11:18:45 kiyohara Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_zydreg.h,v 1.4 2008/04/20 20:35:38 sam Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -993,8 +995,8 @@ struct zyd_plcphdr {
 } __packed;
 
 struct zyd_rx_stat {
-	uint8_t	rssi;
 	uint8_t	signal_cck;
+	uint8_t	rssi;
 	uint8_t signal_ofdm;
 	uint8_t cipher;
 #define ZYD_RX_CIPHER_WEP64	1
@@ -1075,16 +1077,17 @@ struct zyd_notif_retry {
 #define ZYD_TX_TIMEOUT		10000
 
 #define ZYD_MAX_TXBUFSZ	\
-	(sizeof (struct zyd_tx_desc) + IEEE80211_MAX_LEN)
+	(sizeof(struct zyd_tx_desc) + MCLBYTES)
 
 #define ZYD_MIN_FRAGSZ							\
-	(sizeof (struct zyd_plcphdr) + IEEE80211_MIN_LEN + 		\
-	 sizeof (struct zyd_rx_stat))
+	(sizeof(struct zyd_plcphdr) + IEEE80211_MIN_LEN + 		\
+	 sizeof(struct zyd_rx_stat))
 #define ZYD_MIN_RXBUFSZ	ZYD_MIN_FRAGSZ
 #define ZYX_MAX_RXBUFSZ							\
 	((sizeof (struct zyd_plcphdr) + IEEE80211_MAX_LEN +		\
 	  sizeof (struct zyd_rx_stat)) * ZYD_MAX_RXFRAMECNT + 		\
 	 sizeof (struct zyd_rx_desc))
+ 
 
 #define ZYD_CMD_FLAG_READ	(1 << 0)
 
@@ -1106,6 +1109,7 @@ struct zyd_tx_data {
 	usbd_xfer_handle	xfer;
 	uint8_t			*buf;
 	struct ieee80211_node	*ni;
+	struct mbuf		*m;
 };
 
 struct zyd_rx_data {
@@ -1118,6 +1122,7 @@ struct zyd_node {
 	struct ieee80211_node		ni;	/* must be the first */
 	struct ieee80211_amrr_node	amn;
 };
+#define	ZYD_NODE(ni)	((struct zyd_node *)(ni))
 
 struct zyd_rx_radiotap_header {
 	struct ieee80211_radiotap_header wr_ihdr;
@@ -1125,14 +1130,16 @@ struct zyd_rx_radiotap_header {
 	uint8_t		wr_rate;
 	uint16_t	wr_chan_freq;
 	uint16_t	wr_chan_flags;
-	uint8_t		wr_rssi;
+	int8_t		wr_antsignal;
+	int8_t		wr_antnoise;
 } __packed;
 
 #define ZYD_RX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_RATE) |				\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_RSSI))
+	 (1 << IEEE80211_RADIOTAP_DBM_ANTSIGNAL) |			\
+	 (1 << IEEE80211_RADIOTAP_DBM_ANTNOISE) |			\
+	 (1 << IEEE80211_RADIOTAP_CHANNEL))
 
 struct zyd_tx_radiotap_header {
 	struct ieee80211_radiotap_header wt_ihdr;
@@ -1160,29 +1167,48 @@ struct zyd_rf {
 	int	width;
 };
 
+struct rq {
+	const uint16_t *idata;
+	struct zyd_pair *odata;
+	int len;
+	STAILQ_ENTRY(rq) rq;
+};
+
+struct zyd_vap {
+	struct ieee80211vap	vap;
+	int			(*newstate)(struct ieee80211vap *,
+				    enum ieee80211_state, int);
+	struct callout		amrr_ch;
+	struct ieee80211_amrr	amrr;
+};
+#define	ZYD_VAP(vap)	((struct zyd_vap *)(vap))
+
 struct zyd_softc {
-	struct device			sc_dev;
-	struct ieee80211com		sc_ic;
-	int				(*sc_newstate)(struct ieee80211com *,
-					    enum ieee80211_state, int);
+	device_t			sc_dev;
+	struct ifnet			*sc_ifp;
 	struct zyd_rf			sc_rf;
 
 	struct usb_task			sc_task;
+	struct usb_task			sc_scantask;
+	int				sc_scan_action;
+#define ZYD_SCAN_START	0
+#define ZYD_SCAN_END	1
+#define ZYD_SET_CHANNEL	2
+	struct usb_task			sc_mcasttask;
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
+	int				sc_flags;
+	int				sc_if_flags;
+#define ZD1211_FWLOADED (1 << 0)
+	uint8_t				sc_bssid[IEEE80211_ADDR_LEN];
 
 	enum ieee80211_state		sc_state;
 	int				sc_arg;
-	int				sc_if_flags;
-	int				attached;
 
-	struct timeout			scan_to;
-	struct timeout			amrr_to;
+	struct mtx			sc_mtx;
+	struct callout			sc_watchdog_ch;
 
-	struct ieee80211_amrr		amrr;
-
-	void				*odata;
-	int				olen;
+	STAILQ_HEAD(rqh, rq) sc_rqh;
 
 	uint16_t			fwbase;
 	uint8_t				regdomain;
@@ -1212,21 +1238,18 @@ struct zyd_softc {
 
 	int				tx_timer;
 
-#if NBPFILTER > 0
-	caddr_t				sc_drvbpf;
-
-	union {
-		struct zyd_rx_radiotap_header th;
-		uint8_t pad[64];
-	}				sc_rxtapu;
-#define sc_rxtap	sc_rxtapu.th
+	struct zyd_rx_radiotap_header	sc_rxtap;
 	int				sc_rxtap_len;
 
-	union {
-		struct zyd_tx_radiotap_header th;
-		uint8_t pad[64];
-	}				sc_txtapu;
-#define sc_txtap	sc_txtapu.th
+	struct zyd_tx_radiotap_header	sc_txtap;
 	int				sc_txtap_len;
-#endif
 };
+
+#if 0
+#define ZYD_LOCK(sc)    mtx_lock(&(sc)->sc_mtx)
+#define ZYD_UNLOCK(sc)  mtx_unlock(&(sc)->sc_mtx)
+#else
+#define ZYD_LOCK(sc)    do { ((sc) = (sc)); mtx_lock(&Giant); } while (0)
+#define ZYD_UNLOCK(sc)  mtx_unlock(&Giant)
+#endif
+

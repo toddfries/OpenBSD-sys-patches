@@ -1,6 +1,3 @@
-/*	$OpenBSD: fcntl.h,v 1.11 2007/11/24 12:59:28 jmc Exp $	*/
-/*	$NetBSD: fcntl.h,v 1.8 1995/03/26 20:24:12 jtc Exp $	*/
-
 /*-
  * Copyright (c) 1983, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,6 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fcntl.h	8.3 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/sys/fcntl.h,v 1.16 2004/04/07 04:19:49 imp Exp $
  */
 
 #ifndef _SYS_FCNTL_H_
@@ -47,8 +45,21 @@
  */
 
 #include <sys/cdefs.h>
-#ifndef _KERNEL
-#include <sys/types.h>
+#include <sys/_types.h>
+
+#ifndef _MODE_T_DECLARED
+typedef	__mode_t	mode_t;
+#define	_MODE_T_DECLARED
+#endif
+
+#ifndef _OFF_T_DECLARED
+typedef	__off_t		off_t;
+#define	_OFF_T_DECLARED
+#endif
+
+#ifndef _PID_T_DECLARED
+typedef	__pid_t		pid_t;
+#define	_PID_T_DECLARED
 #endif
 
 /*
@@ -82,58 +93,70 @@
 #define	O_SHLOCK	0x0010		/* open with shared file lock */
 #define	O_EXLOCK	0x0020		/* open with exclusive file lock */
 #define	O_ASYNC		0x0040		/* signal pgrp when data ready */
-#define	O_FSYNC		0x0080		/* backwards compatibility */
-#define	O_NOFOLLOW	0x0100		/* if path is a symlink, don't follow */
+#define	O_FSYNC		0x0080		/* synchronous writes */
 #endif
-#if __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 420
-#define	O_SYNC		0x0080		/* synchronous writes */
+#define	O_SYNC		0x0080		/* POSIX synonym for O_FSYNC */
+#if __BSD_VISIBLE
+#define	O_NOFOLLOW	0x0100		/* don't follow symlinks */
 #endif
 #define	O_CREAT		0x0200		/* create if nonexistent */
 #define	O_TRUNC		0x0400		/* truncate to zero length */
 #define	O_EXCL		0x0800		/* error if already exists */
 #ifdef _KERNEL
-#define	FMARK		0x1000		/* mark during gc() */
-#define	FDEFER		0x2000		/* defer for next gc pass */
 #define	FHASLOCK	0x4000		/* descriptor holds advisory lock */
 #endif
 
-/*
- * POSIX 1003.1 specifies a higher granularity for synchronous operations
- * than we support.  Since synchronicity is all or nothing in OpenBSD
- * we just define these to be the same as O_SYNC.
- */
-#define	O_DSYNC		O_SYNC		/* synchronous data writes */
-#define	O_RSYNC		O_SYNC		/* synchronous reads */
-
-/* defined by POSIX 1003.1; BSD default, this bit is not required */
+/* Defined by POSIX 1003.1; BSD default, but must be distinct from O_RDONLY. */
 #define	O_NOCTTY	0x8000		/* don't assign controlling terminal */
 
-#ifdef _KERNEL
+#if __BSD_VISIBLE
+/* Attempt to bypass buffer cache */
+#define O_DIRECT	0x00010000
+#endif
+
 /*
- * convert from open() flags to/from fflags; convert O_RD/WR to FREAD/FWRITE.
- * For out-of-range values for the flags, be slightly careful (but lossy).
+ * XXX missing O_DSYNC, O_RSYNC.
  */
-#define	FFLAGS(oflags)	(((oflags) & ~O_ACCMODE) | (((oflags) + 1) & O_ACCMODE))
-#define	OFLAGS(fflags)	(((fflags) & ~O_ACCMODE) | (((fflags) - 1) & O_ACCMODE))
+
+#ifdef _KERNEL
+/* convert from open() flags to/from fflags; convert O_RD/WR to FREAD/FWRITE */
+#define	FFLAGS(oflags)	((oflags) + 1)
+#define	OFLAGS(fflags)	((fflags) - 1)
 
 /* bits to save after open */
-#define	FMASK		(FREAD|FWRITE|FAPPEND|FASYNC|FFSYNC|FNONBLOCK)
+#define	FMASK		(FREAD|FWRITE|FAPPEND|FASYNC|FFSYNC|FNONBLOCK|O_DIRECT)
 /* bits settable by fcntl(F_SETFL, ...) */
-#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK)
+#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|FPOSIXSHM|O_DIRECT)
 #endif
 
 /*
  * The O_* flags used to have only F* names, which were used in the kernel
- * and by fcntl.  We retain the F* names for the kernel f_flags field
- * and for backward compatibility for fcntl.
+ * and by fcntl.  We retain the F* names for the kernel f_flag field
+ * and for backward compatibility for fcntl.  These flags are deprecated.
  */
 #if __BSD_VISIBLE
 #define	FAPPEND		O_APPEND	/* kernel/compat */
 #define	FASYNC		O_ASYNC		/* kernel/compat */
-#define	FFSYNC		O_SYNC		/* kernel */
+#define	FFSYNC		O_FSYNC		/* kernel */
 #define	FNONBLOCK	O_NONBLOCK	/* kernel */
 #define	FNDELAY		O_NONBLOCK	/* compat */
 #define	O_NDELAY	O_NONBLOCK	/* compat */
+#endif
+
+/*
+ * We are out of bits in f_flag (which is a short).  However,
+ * the flag bits not set in FMASK are only meaningful in the
+ * initial open syscall.  Those bits can thus be given a
+ * different meaning for fcntl(2).
+ */
+#if __BSD_VISIBLE
+
+/*
+ * Set by shm_open(3) to get automatic MAP_ASYNC behavior
+ * for POSIX shared memory objects (which are otherwise
+ * implemented as plain files).
+ */
+#define	FPOSIXSHM	O_NOFOLLOW
 #endif
 
 /*
@@ -146,7 +169,7 @@
 #define	F_SETFD		2		/* set file descriptor flags */
 #define	F_GETFL		3		/* get file status flags */
 #define	F_SETFL		4		/* set file status flags */
-#if __POSIX_VISIBLE >= 200112 || __XPG_VISIBLE >= 500
+#if __BSD_VISIBLE || __XSI_VISIBLE || __POSIX_VISIBLE >= 200112
 #define	F_GETOWN	5		/* get SIGIO/SIGURG proc/pgrp */
 #define F_SETOWN	6		/* set SIGIO/SIGURG proc/pgrp */
 #endif
@@ -188,6 +211,9 @@ struct flock {
 #define	LOCK_UN		0x08		/* unlock file */
 #endif
 
+/*
+ * XXX missing posix_fadvise() and posix_fallocate(), and POSIX_FADV_* macros.
+ */
 
 #ifndef _KERNEL
 __BEGIN_DECLS

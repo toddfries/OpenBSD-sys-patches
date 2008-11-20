@@ -1,8 +1,6 @@
-/*	$OpenBSD: uhub.c,v 1.48 2007/10/11 18:33:15 deraadt Exp $ */
-/*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
+/*	$NetBSD: uhub.c,v 1.68 2004/06/29 06:30:05 mycroft Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -39,6 +37,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/usb/uhub.c,v 1.82 2007/06/30 20:18:44 imp Exp $");
+
 /*
  * USB spec: http://www.usb.org/developers/docs/usbspec.zip
  */
@@ -47,8 +48,11 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/module.h>
+#include <sys/bus.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/sysctl.h>
 
 #include <machine/bus.h>
 
@@ -59,28 +63,35 @@
 
 #define UHUB_INTR_INTERVAL 255	/* ms */
 
-#ifdef UHUB_DEBUG
-#define DPRINTF(x)	do { if (uhubdebug) printf x; } while (0)
-#define DPRINTFN(n,x)	do { if (uhubdebug>(n)) printf x; } while (0)
+#ifdef USB_DEBUG
+#define DPRINTF(x)	if (uhubdebug) printf x
+#define DPRINTFN(n,x)	if (uhubdebug > (n)) printf x
+#define DEVPRINTF(x)	if (uhubdebug) device_printf x
+#define DEVPRINTFN(n, x)if (uhubdebug > (n)) device_printf x
 int	uhubdebug = 0;
+SYSCTL_NODE(_hw_usb, OID_AUTO, uhub, CTLFLAG_RW, 0, "USB uhub");
+SYSCTL_INT(_hw_usb_uhub, OID_AUTO, debug, CTLFLAG_RW,
+	   &uhubdebug, 0, "uhub debug level");
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
+#define DEVPRINTF(x)
+#define DEVPRINTFN(n,x)
 #endif
 
 struct uhub_softc {
-	struct device		sc_dev;		/* base device */
+	device_t		sc_dev;		/* base device */
 	usbd_device_handle	sc_hub;		/* USB device */
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
-	u_int8_t		sc_status[1];	/* XXX more ports */
+	u_int8_t		sc_status[32];	/* max 255 ports */
 	u_char			sc_running;
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
 #define UHUB_IS_HIGH_SPEED(sc) (UHUB_PROTO(sc) != UDPROTO_FSHUB)
 #define UHUB_IS_SINGLE_TT(sc) (UHUB_PROTO(sc) == UDPROTO_HSHUBSTT)
 
-usbd_status uhub_explore(usbd_device_handle hub);
-void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
+static usbd_status uhub_explore(usbd_device_handle hub);
+static void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
 
 /*
  * We need two attachment points:
@@ -88,32 +99,65 @@ void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
  * Every other driver only connects to hubs
  */
 
-int uhub_match(struct device *, void *, void *); 
-void uhub_attach(struct device *, struct device *, void *); 
-int uhub_detach(struct device *, int); 
-int uhub_activate(struct device *, enum devact); 
+static device_probe_t uhub_match;
+static device_attach_t uhub_attach;
+static device_detach_t uhub_detach;
+static bus_child_location_str_t uhub_child_location_str;
+static bus_child_pnpinfo_str_t uhub_child_pnpinfo_str;
 
-struct cfdriver uhub_cd = { 
-	NULL, "uhub", DV_DULL 
-}; 
+static device_method_t uhub_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		uhub_match),
+	DEVMETHOD(device_attach,	uhub_attach),
+	DEVMETHOD(device_detach,	uhub_detach),
+	DEVMETHOD(device_suspend,	bus_generic_suspend),
+	DEVMETHOD(device_resume,	bus_generic_resume),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
 
-const struct cfattach uhub_ca = { 
-	sizeof(struct uhub_softc), 
-	uhub_match, 
-	uhub_attach, 
-	uhub_detach, 
-	uhub_activate, 
+	DEVMETHOD(bus_child_pnpinfo_str, uhub_child_pnpinfo_str),
+	DEVMETHOD(bus_child_location_str, uhub_child_location_str),
+	/* XXX driver_added needs special care */
+	DEVMETHOD(bus_driver_added,	bus_generic_driver_added),
+	{ 0, 0 }
 };
 
-struct cfattach uhub_uhub_ca = {
-	sizeof(struct uhub_softc), uhub_match, uhub_attach,
-	uhub_detach, uhub_activate
+static driver_t uhub_driver = {
+	"uhub",
+	uhub_methods,
+	sizeof(struct uhub_softc)
 };
 
-int
-uhub_match(struct device *parent, void *match, void *aux)
+static devclass_t uhub_devclass;
+
+/* Create the driver instance for the hub connected to usb case. */
+devclass_t uhubroot_devclass;
+
+static device_method_t uhubroot_methods[] = {
+	DEVMETHOD(device_probe,		uhub_match),
+	DEVMETHOD(device_attach,	uhub_attach),
+	DEVMETHOD(device_detach,	uhub_detach),
+	DEVMETHOD(device_suspend,	bus_generic_suspend),
+	DEVMETHOD(device_resume,	bus_generic_resume),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+
+	DEVMETHOD(bus_child_location_str, uhub_child_location_str),
+	DEVMETHOD(bus_child_pnpinfo_str, uhub_child_pnpinfo_str),
+	/* XXX driver_added needs special care */
+	DEVMETHOD(bus_driver_added,	bus_generic_driver_added),
+
+	{0,0}
+};
+
+static	driver_t uhubroot_driver = {
+	"uhub",
+	uhubroot_methods,
+	sizeof(struct uhub_softc)
+};
+
+static int
+uhub_match(device_t self)
 {
-	struct usb_attach_arg *uaa = aux;
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 	usb_device_descriptor_t *dd = usbd_get_device_descriptor(uaa->device);
 
 	DPRINTFN(5,("uhub_match, dd=%p\n", dd));
@@ -126,11 +170,11 @@ uhub_match(struct device *parent, void *match, void *aux)
 	return (UMATCH_NONE);
 }
 
-void
-uhub_attach(struct device *parent, struct device *self, void *aux)
+int
+uhub_attach(device_t self)
 {
-	struct uhub_softc *sc = (struct uhub_softc *)self;
-	struct usb_attach_arg *uaa = aux;
+	struct uhub_softc *sc = device_get_softc(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 	usbd_device_handle dev = uaa->device;
 	usbd_status err;
 	struct usbd_hub *hub = NULL;
@@ -143,24 +187,30 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(1,("uhub_attach\n"));
 	sc->sc_hub = dev;
+	sc->sc_dev = self;
 
+	if (dev->depth > 0 && UHUB_IS_HIGH_SPEED(sc)) {
+		device_printf(sc->sc_dev, "%s transaction translator%s\n",
+		    UHUB_IS_SINGLE_TT(sc) ? "single" : "multiple",
+		    UHUB_IS_SINGLE_TT(sc) ? "" : "s");
+	}
 	err = usbd_set_config_index(dev, 0, 1);
 	if (err) {
-		DPRINTF(("%s: configuration failed, error=%s\n",
-			 sc->sc_dev.dv_xname, usbd_errstr(err)));
-		return;
+		DEVPRINTF((sc->sc_dev, "configuration failed, error=%s\n",
+		    usbd_errstr(err)));
+		return (ENXIO);
 	}
 
 	if (dev->depth > USB_HUB_MAX_DEPTH) {
-		printf("%s: hub depth (%d) exceeded, hub ignored\n",
-		       sc->sc_dev.dv_xname, USB_HUB_MAX_DEPTH);
-		return;
+		device_printf(sc->sc_dev, "hub depth (%d) exceeded, hub ignored\n",
+		    USB_HUB_MAX_DEPTH);
+		return (ENXIO);
 	}
 
 	/* Get hub descriptor. */
 	req.bmRequestType = UT_READ_CLASS_DEVICE;
 	req.bRequest = UR_GET_DESCRIPTOR;
-	USETW2(req.wValue, UDESC_HUB, 0);
+	USETW2(req.wValue, (dev->address > 1 ? UDESC_HUB : 0), 0);
 	USETW(req.wIndex, 0);
 	USETW(req.wLength, USB_HUB_DESCRIPTOR_SIZE);
 	DPRINTFN(1,("usb_init_hub: getting hub descriptor\n"));
@@ -171,37 +221,28 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		err = usbd_do_request(dev, &req, &hubdesc);
 	}
 	if (err) {
-		DPRINTF(("%s: getting hub descriptor failed, error=%s\n",
-			 sc->sc_dev.dv_xname, usbd_errstr(err)));
-		return;
+		DEVPRINTF((sc->sc_dev, "getting hub descriptor failed: %s\n",
+		    usbd_errstr(err)));
+		return (ENXIO);
 	}
 
 	for (nremov = 0, port = 1; port <= nports; port++)
 		if (!UHD_NOT_REMOV(&hubdesc, port))
 			nremov++;
-
-#ifdef UHUB_DEBUG
-	printf("%s: %d port%s with %d removable, %s powered",
-	       sc->sc_dev.dv_xname, nports, nports != 1 ? "s" : "",
-	       nremov, dev->self_powered ? "self" : "bus");
-
-	if (dev->depth > 0 && UHUB_IS_HIGH_SPEED(sc)) {
-		printf(", %s transaction translator%s",
-		    UHUB_IS_SINGLE_TT(sc) ? "single" : "multiple",
-		    UHUB_IS_SINGLE_TT(sc) ? "" : "s");
-	}
-	printf("\n");
-#endif
+	device_printf(sc->sc_dev, "%d port%s with %d removable, %s powered\n",
+	    nports, nports != 1 ? "s" : "", nremov,
+	    dev->self_powered ? "self" : "bus");
 
 	if (nports == 0) {
-		printf("%s: no ports, hub ignored\n", sc->sc_dev.dv_xname);
+		device_printf(sc->sc_dev, "no ports, hub ignored\n");
 		goto bad;
 	}
 
 	hub = malloc(sizeof(*hub) + (nports-1) * sizeof(struct usbd_port),
 		     M_USBDEV, M_NOWAIT);
-	if (hub == NULL)
-		return;
+	if (hub == NULL) {
+		return (ENXIO);
+	}
 	dev->hub = hub;
 	dev->hub->hubsoftc = sc;
 	hub->explore = uhub_explore;
@@ -215,40 +256,39 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 
 	if (!dev->self_powered && dev->powersrc->parent != NULL &&
 	    !dev->powersrc->parent->self_powered) {
-		printf("%s: bus powered hub connected to bus powered hub, "
-		       "ignored\n", sc->sc_dev.dv_xname);
+		device_printf(sc->sc_dev, "bus powered hub connected to bus "
+		    "powered hub, ignored\n");
 		goto bad;
 	}
 
 	/* Set up interrupt pipe. */
 	err = usbd_device2interface_handle(dev, 0, &iface);
 	if (err) {
-		printf("%s: no interface handle\n", sc->sc_dev.dv_xname);
+		device_printf(sc->sc_dev, "no interface handle\n");
 		goto bad;
 	}
 	ed = usbd_interface2endpoint_descriptor(iface, 0);
 	if (ed == NULL) {
-		printf("%s: no endpoint descriptor\n", sc->sc_dev.dv_xname);
+		device_printf(sc->sc_dev, "no endpoint descriptor\n");
 		goto bad;
 	}
 	if ((ed->bmAttributes & UE_XFERTYPE) != UE_INTERRUPT) {
-		printf("%s: bad interrupt endpoint\n", sc->sc_dev.dv_xname);
+		device_printf(sc->sc_dev, "bad interrupt endpoint\n");
 		goto bad;
 	}
 
 	err = usbd_open_pipe_intr(iface, ed->bEndpointAddress,
 		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_status,
-		  sizeof(sc->sc_status), uhub_intr, UHUB_INTR_INTERVAL);
+	          (nports + 1 + 7) / 8, uhub_intr, UHUB_INTR_INTERVAL);
 	if (err) {
-		printf("%s: cannot open interrupt pipe\n",
-		       sc->sc_dev.dv_xname);
+		device_printf(sc->sc_dev, "cannot open interrupt pipe\n");
 		goto bad;
 	}
 
 	/* Wait with power off for a while. */
 	usbd_delay_ms(dev, USB_POWER_DOWN_TIME);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, &sc->sc_dev);
+	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, sc->sc_dev);
 
 	/*
 	 * To have the best chance of success we do things in the exact same
@@ -281,6 +321,7 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		if (!tts)
 			goto bad;
 	}
+
 	/* Set up data structures */
 	for (p = 0; p < nports; p++) {
 		struct usbd_port *up = &hub->ports[p];
@@ -293,7 +334,6 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		else
 			up->power = USB_MIN_POWER;
 		up->restartcnt = 0;
-		up->reattach = 0;
 		if (UHUB_IS_HIGH_SPEED(sc)) {
 			up->tt = &tts[UHUB_IS_SINGLE_TT(sc) ? 0 : p];
 			up->tt->hub = hub;
@@ -310,26 +350,23 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		/* Turn the power on. */
 		err = usbd_set_port_feature(dev, port, UHF_PORT_POWER);
 		if (err)
-			printf("%s: port %d power on failed, %s\n",
-			       sc->sc_dev.dv_xname, port,
-			       usbd_errstr(err));
+			device_printf(sc->sc_dev,
+			    "port %d power on failed, %s\n", port,
+			    usbd_errstr(err));
 		DPRINTF(("usb_init_port: turn on port %d power\n", port));
-	}
-
-	/* Wait for stable power.  Root hubs delay in their event thread. */
-        if (dev->powersrc->parent != NULL)
+		/* Wait for stable power. */
 		usbd_delay_ms(dev, pwrdly);
+	}
 
 	/* The usual exploration will finish the setup. */
 
 	sc->sc_running = 1;
-
-	return;
-
+	return (0);
  bad:
 	if (hub)
 		free(hub, M_USBDEV);
 	dev->hub = NULL;
+	return (ENXIO);
 }
 
 usbd_status
@@ -341,7 +378,7 @@ uhub_explore(usbd_device_handle dev)
 	usbd_status err;
 	int speed;
 	int port;
-	int change, status, reconnect;
+	int change, status;
 
 	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
 
@@ -362,35 +399,34 @@ uhub_explore(usbd_device_handle dev)
 		}
 		status = UGETW(up->status.wPortStatus);
 		change = UGETW(up->status.wPortChange);
-		reconnect = up->reattach;
-		up->reattach = 0;
-		DPRINTFN(3,("uhub_explore: %s port %d status 0x%04x 0x%04x\n",
-			    sc->sc_dev.dv_xname, port, status, change));
+		DEVPRINTFN(3,(sc->sc_dev,
+		    "uhub_explore: port %d status 0x%04x 0x%04x\n", port,
+		    status, change));
 		if (change & UPS_C_PORT_ENABLED) {
-			DPRINTF(("uhub_explore: C_PORT_ENABLED\n"));
+			DPRINTF(("uhub_explore: C_PORT_ENABLED 0x%x\n", change));
 			usbd_clear_port_feature(dev, port, UHF_C_PORT_ENABLE);
 			if (change & UPS_C_CONNECT_STATUS) {
 				/* Ignore the port error if the device
 				   vanished. */
 			} else if (status & UPS_PORT_ENABLED) {
-				printf("%s: illegal enable change, port %d\n",
-				       sc->sc_dev.dv_xname, port);
+				device_printf(sc->sc_dev,
+				    "illegal enable change, port %d\n", port);
 			} else {
 				/* Port error condition. */
 				if (up->restartcnt) /* no message first time */
-					printf("%s: port error, restarting "
-					       "port %d\n",
-					       sc->sc_dev.dv_xname, port);
+					device_printf(sc->sc_dev,
+					    "port error, restarting port %d\n",
+					    port);
 
 				if (up->restartcnt++ < USBD_RESTART_MAX)
 					goto disco;
 				else
-					printf("%s: port error, giving up "
-					       "port %d\n",
-					       sc->sc_dev.dv_xname, port);
+					device_printf(sc->sc_dev,
+					    "port error, giving up port %d\n",
+					    port);
 			}
 		}
-		if (!reconnect && !(change & UPS_C_CONNECT_STATUS)) {
+		if (!(change & UPS_C_CONNECT_STATUS)) {
 			DPRINTFN(3,("uhub_explore: port=%d !C_CONNECT_"
 				    "STATUS\n", port));
 			/* No status change, just do recursive explore. */
@@ -399,8 +435,8 @@ uhub_explore(usbd_device_handle dev)
 #if 0 && defined(DIAGNOSTIC)
 			if (up->device == NULL &&
 			    (status & UPS_CURRENT_CONNECT_STATUS))
-				printf("%s: connected, no device\n",
-				       sc->sc_dev.dv_xname);
+				deivce_printf(sc->sc_dev,
+				    "connected, no device\n");
 #endif
 			continue;
 		}
@@ -423,7 +459,7 @@ uhub_explore(usbd_device_handle dev)
 			/* Disconnected */
 			DPRINTF(("uhub_explore: device addr=%d disappeared "
 				 "on port %d\n", up->device->address, port));
-			usb_disconnect_port(up, &sc->sc_dev);
+			usb_disconnect_port(up, sc->sc_dev);
 			usbd_clear_port_feature(dev, port,
 						UHF_C_PORT_CONNECTION);
 		}
@@ -437,16 +473,16 @@ uhub_explore(usbd_device_handle dev)
 		/* Connected */
 
 		if (!(status & UPS_PORT_POWER))
-			printf("%s: strange, connected port %d has no power\n",
-			       sc->sc_dev.dv_xname, port);
+			device_printf(sc->sc_dev,
+			    "strange, connected port %d has no power\n", port);
 
 		/* Wait for maximum device power up time. */
 		usbd_delay_ms(dev, USB_PORT_POWERUP_DELAY);
 
 		/* Reset port, which implies enabling it. */
 		if (usbd_reset_port(dev, port, &up->status)) {
-			printf("%s: port %d reset failed\n",
-			       sc->sc_dev.dv_xname, port);
+			device_printf(sc->sc_dev, "port %d reset failed\n",
+			    port);
 			continue;
 		}
 		/* Get port status again, it might have changed during reset */
@@ -460,12 +496,21 @@ uhub_explore(usbd_device_handle dev)
 		change = UGETW(up->status.wPortChange);
 		if (!(status & UPS_CURRENT_CONNECT_STATUS)) {
 			/* Nothing connected, just ignore it. */
-#ifdef UHUB_DEBUG
-			printf("%s: port %d, device disappeared after reset\n",
-			       sc->sc_dev.dv_xname, port);
+#ifdef DIAGNOSTIC
+			device_printf(sc->sc_dev,
+			    "port %d, device disappeared after reset\n", port);
 #endif
 			continue;
 		}
+
+#if 0
+		if (UHUB_IS_HIGH_SPEED(sc) && !(status & UPS_HIGH_SPEED)) {
+			device_printf(sc->sc_dev,
+			    "port %d, transaction translation not implemented,"
+			    " low/full speed device ignored\n", port);
+			continue;
+		}
+#endif
 
 		/* Figure out device speed */
 		if (status & UPS_HIGH_SPEED)
@@ -475,11 +520,11 @@ uhub_explore(usbd_device_handle dev)
 		else
 			speed = USB_SPEED_FULL;
 		/* Get device info and set its address. */
-		err = usbd_new_device(&sc->sc_dev, dev->bus,
-			  dev->depth + 1, speed, port, up);
+		err = usbd_new_device(sc->sc_dev, dev->bus,
+		    dev->depth + 1, speed, port, up);
 		/* XXX retry a few times? */
 		if (err) {
-			DPRINTFN(-1,("uhub_explore: usbd_new_device failed, "
+			DPRINTFN(-1,("uhub_explore: usb_new_device failed, "
 				     "error=%s\n", usbd_errstr(err)));
 			/* Avoid addressing problems by disabling. */
 			/* usbd_reset_port(dev, port, &up->status); */
@@ -489,8 +534,9 @@ uhub_explore(usbd_device_handle dev)
 			 * some other serious problem.  Since we cannot leave
 			 * at 0 we have to disable the port instead.
 			 */
-			printf("%s: device problem, disabling port %d\n",
-			       sc->sc_dev.dv_xname, port);
+			device_printf(sc->sc_dev,
+			    "device problem (%s), disabling port %d\n",
+			    usbd_errstr(err), port);
 			usbd_clear_port_feature(dev, port, UHF_PORT_ENABLE);
 		} else {
 			/* The port set up succeeded, reset error count. */
@@ -503,48 +549,19 @@ uhub_explore(usbd_device_handle dev)
 	return (USBD_NORMAL_COMPLETION);
 }
 
-int
-uhub_activate(struct device *self, enum devact act)
-{
-	struct uhub_softc *sc = (struct uhub_softc *)self;
-	struct usbd_hub *hub = sc->sc_hub->hub;
-	usbd_device_handle dev;
-	int nports, port, i;
-
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		if (hub == NULL) /* malfunctioning hub */
-			break;
-		nports = hub->hubdesc.bNbrPorts;
-		for(port = 0; port < nports; port++) {
-			dev = hub->ports[port].device;
-			if (dev != NULL && dev->subdevs != NULL) {
-				for (i = 0; dev->subdevs[i] != NULL; i++)
-					config_deactivate(dev->subdevs[i]);
-			}
-		}
-		break;
-	}
-	return (0);
-}
-
 /*
  * Called from process context when the hub is gone.
  * Detach all devices on active ports.
  */
-int
-uhub_detach(struct device *self, int flags)
+static int
+uhub_detach(device_t self)
 {
-	struct uhub_softc *sc = (struct uhub_softc *)self;
+	struct uhub_softc *sc = device_get_softc(self);
 	struct usbd_hub *hub = sc->sc_hub->hub;
 	struct usbd_port *rup;
 	int port, nports;
 
-	DPRINTF(("uhub_detach: sc=%p flags=%d\n", sc, flags));
-
+	DPRINTF(("uhub_detach: sc=%port\n", sc));
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
@@ -558,14 +575,108 @@ uhub_detach(struct device *self, int flags)
 			usb_disconnect_port(rup, self);
 	}
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_hub,
-			   &sc->sc_dev);
+	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_hub, sc->sc_dev);
 
 	if (hub->ports[0].tt)
 		free(hub->ports[0].tt, M_USBDEV);
 	free(hub, M_USBDEV);
 	sc->sc_hub->hub = NULL;
 
+	return (0);
+}
+
+int
+uhub_child_location_str(device_t cbdev, device_t child, char *buf,
+    size_t buflen)
+{
+	struct uhub_softc *sc = device_get_softc(cbdev);
+	usbd_device_handle devhub = sc->sc_hub;
+	usbd_device_handle dev;
+	int nports;
+	int port;
+	int i;
+
+	mtx_lock(&Giant);
+	nports = devhub->hub->hubdesc.bNbrPorts;
+	for (port = 0; port < nports; port++) {
+		dev = devhub->hub->ports[port].device;
+		if (dev && dev->subdevs) {
+			for (i = 0; dev->subdevs[i]; i++) {
+				if (dev->subdevs[i] == child) {
+					if (dev->ifacenums == NULL) {
+						snprintf(buf, buflen,
+						    "port=%i", port);
+					} else {
+						snprintf(buf, buflen,
+						    "port=%i interface=%i",
+						    port, dev->ifacenums[i]);
+					}
+					goto found_dev;
+				}
+			}
+		}
+	}
+	DPRINTFN(0,("uhub_child_location_str: device not on hub\n"));
+	buf[0] = '\0';
+found_dev:
+	mtx_unlock(&Giant);
+	return (0);
+}
+
+int
+uhub_child_pnpinfo_str(device_t cbdev, device_t child, char *buf,
+    size_t buflen)
+{
+	struct uhub_softc *sc = device_get_softc(cbdev);
+	usbd_device_handle devhub = sc->sc_hub;
+	usbd_device_handle dev;
+	struct usbd_interface *iface;
+	char serial[128];
+	int nports;
+	int port;
+	int i;
+
+	mtx_lock(&Giant);
+	nports = devhub->hub->hubdesc.bNbrPorts;
+	for (port = 0; port < nports; port++) {
+		dev = devhub->hub->ports[port].device;
+		if (dev && dev->subdevs) {
+			for (i = 0; dev->subdevs[i]; i++) {
+				if (dev->subdevs[i] == child) {
+					goto found_dev;
+				}
+			}
+		}
+	}
+	DPRINTFN(0,("uhub_child_pnpinfo_str: device not on hub\n"));
+	buf[0] = '\0';
+	mtx_unlock(&Giant);
+	return (0);
+
+found_dev:
+	/* XXX can sleep */
+	(void)usbd_get_string(dev, dev->ddesc.iSerialNumber, serial,
+	    sizeof(serial));
+	if (dev->ifacenums == NULL) {
+		snprintf(buf, buflen, "vendor=0x%04x product=0x%04x "
+		    "devclass=0x%02x devsubclass=0x%02x "
+		    "release=0x%04x sernum=\"%s\"",
+		    UGETW(dev->ddesc.idVendor), UGETW(dev->ddesc.idProduct),
+		    dev->ddesc.bDeviceClass, dev->ddesc.bDeviceSubClass,
+		    UGETW(dev->ddesc.bcdDevice), serial);
+	} else {
+		iface = &dev->ifaces[dev->ifacenums[i]];
+		snprintf(buf, buflen, "vendor=0x%04x product=0x%04x "
+		    "devclass=0x%02x devsubclass=0x%02x "
+		    "release=0x%04x sernum=\"%s\" "
+		    "intclass=0x%02x intsubclass=0x%02x",
+		    UGETW(dev->ddesc.idVendor), UGETW(dev->ddesc.idProduct),
+		    dev->ddesc.bDeviceClass, dev->ddesc.bDeviceSubClass,
+		    UGETW(dev->ddesc.bcdDevice), serial,
+		    iface->idesc->bInterfaceClass,
+		    iface->idesc->bInterfaceSubClass);
+	}
+	mtx_unlock(&Giant);
 	return (0);
 }
 
@@ -586,3 +697,7 @@ uhub_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	else if (status == USBD_NORMAL_COMPLETION)
 		usb_needs_explore(sc->sc_hub);
 }
+
+MODULE_DEPEND(uhub, usb, 1, 1, 1);
+DRIVER_MODULE(uhub, usb, uhubroot_driver, uhubroot_devclass, 0, 0);
+DRIVER_MODULE(uhub, uhub, uhub_driver, uhub_devclass, usbd_driver_load, 0);

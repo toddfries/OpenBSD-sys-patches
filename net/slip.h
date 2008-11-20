@@ -1,6 +1,3 @@
-/*	$OpenBSD: slip.h,v 1.4 2003/06/02 23:28:12 millert Exp $	*/
-/*	$NetBSD: slip.h,v 1.6 1994/06/29 06:36:53 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,13 +27,19 @@
  * SUCH DAMAGE.
  *
  *	@(#)slip.h	8.1 (Berkeley) 2/12/94
+ * $FreeBSD: src/sys/net/slip.h,v 1.10 2004/04/07 20:46:12 imp Exp $
  */
 
 #ifndef _NET_SLIP_H_
-#define _NET_SLIP_H_
+#define	_NET_SLIP_H_
 
 /* Ioctls operating on SLIP ttys. */
 #define	SLIOCGUNIT	_IOR('t', 88, int)	/* get slip unit number */
+#define	SLIOCSKEEPAL	_IOW('t', 84, int)	/* set keepalive */
+#define	SLIOCSOUTFILL	_IOW('t', 83, int)	/* set out fill time */
+#define	SLIOCGKEEPAL	_IOR('t', 82, int)	/* get keepalive time */
+#define	SLIOCGOUTFILL	_IOR('t', 81, int)	/* get out fill time */
+#define	SLIOCSUNIT	_IOW('t', 80, int)	/* set slip unit number */
 
 /*
  * Definitions of the pseudo-link-level header attached to slip
@@ -51,4 +54,5 @@
 
 #define	SLIPDIR_IN	0		/* incoming */
 #define	SLIPDIR_OUT	1		/* outgoing */
-#endif /* _NET_SLIP_H_ */
+
+#endif /* !_NET_SLIP_H */

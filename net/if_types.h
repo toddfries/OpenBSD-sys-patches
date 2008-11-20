@@ -1,7 +1,4 @@
-/*	$OpenBSD: if_types.h,v 1.18 2005/01/14 12:04:02 grange Exp $	*/
-/*	$NetBSD: if_types.h,v 1.17 2000/10/26 06:51:31 onoe Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1989, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,8 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_types.h	8.3 (Berkeley) 4/28/95
+ * $FreeBSD: src/sys/net/if_types.h,v 1.23 2007/06/13 14:01:43 rwatson Exp $
+ * $NetBSD: if_types.h,v 1.16 2000/04/19 06:30:53 itojun Exp $
  */
 
 #ifndef _NET_IF_TYPES_H_
@@ -40,63 +39,63 @@
  * This list is derived from the SNMP list of ifTypes, originally
  * documented in RFC1573, now maintained as:
  *
- * <URL:http://www.iana.org/assignments/ianaiftype-mib>
+ * 	http://www.iana.org/assignments/smi-numbers
  */
 
-#define	IFT_OTHER		   0x01 /* none of the following */
-#define	IFT_1822		   0x02 /* old-style arpanet imp */
-#define	IFT_HDH1822		   0x03 /* HDH arpanet imp */
-#define	IFT_X25DDN		   0x04 /* x25 to imp */
-#define	IFT_X25			   0x05 /* PDN X25 interface (RFC877) */
-#define	IFT_ETHER		   0x06 /* Ethernet CSMA/CD */
-#define	IFT_ISO88023		   0x07 /* CSMA/CD */
-#define	IFT_ISO88024		   0x08 /* Token Bus */
-#define	IFT_ISO88025		   0x09 /* Token Ring */
-#define	IFT_ISO88026		   0x0a /* MAN */
-#define	IFT_STARLAN		   0x0b
-#define	IFT_P10			   0x0c /* Proteon 10MBit ring */
-#define	IFT_P80			   0x0d /* Proteon 80MBit ring */
-#define	IFT_HY			   0x0e /* Hyperchannel */
-#define	IFT_FDDI		   0x0f
-#define	IFT_LAPB		   0x10
-#define	IFT_SDLC		   0x11
-#define	IFT_T1			   0x12
-#define	IFT_CEPT		   0x13 /* E1 - european T1 */
-#define	IFT_ISDNBASIC		   0x14
-#define	IFT_ISDNPRIMARY		   0x15
-#define	IFT_PTPSERIAL		   0x16 /* Proprietary PTP serial */
-#define	IFT_PPP			   0x17 /* RFC 1331 */
-#define	IFT_LOOP		   0x18 /* loopback */
-#define	IFT_EON			   0x19 /* ISO over IP */
-#define	IFT_XETHER		   0x1a /* obsolete 3MB experimental ethernet */
-#define	IFT_NSIP		   0x1b /* XNS over IP */
-#define	IFT_SLIP		   0x1c /* IP over generic TTY */
-#define	IFT_ULTRA		   0x1d /* Ultra Technologies */
-#define	IFT_DS3			   0x1e /* Generic T3 */
-#define	IFT_SIP			   0x1f /* SMDS */
-#define	IFT_FRELAY		   0x20 /* Frame Relay DTE only */
-#define	IFT_RS232		   0x21
-#define	IFT_PARA		   0x22 /* parallel-port */
-#define	IFT_ARCNET		   0x23
-#define	IFT_ARCNETPLUS		   0x24
-#define	IFT_ATM			   0x25 /* ATM cells */
-#define	IFT_MIOX25		   0x26
-#define	IFT_SONET		   0x27 /* SONET or SDH */
-#define	IFT_X25PLE		   0x28
-#define	IFT_ISO88022LLC		   0x29
-#define	IFT_LOCALTALK		   0x2a
-#define	IFT_SMDSDXI		   0x2b
-#define	IFT_FRELAYDCE		   0x2c /* Frame Relay DCE */
-#define	IFT_V35			   0x2d
-#define	IFT_HSSI		   0x2e
-#define	IFT_HIPPI		   0x2f
-#define	IFT_MODEM		   0x30 /* Generic Modem */
-#define	IFT_AAL5		   0x31 /* AAL5 over ATM */
-#define	IFT_SONETPATH		   0x32
-#define	IFT_SONETVT		   0x33
-#define	IFT_SMDSICIP		   0x34 /* SMDS InterCarrier Interface */
-#define	IFT_PROPVIRTUAL		   0x35 /* Proprietary Virtual/internal */
-#define	IFT_PROPMUX		   0x36 /* Proprietary Multiplexing */
+#define	IFT_OTHER	0x1		/* none of the following */
+#define	IFT_1822	0x2		/* old-style arpanet imp */
+#define	IFT_HDH1822	0x3		/* HDH arpanet imp */
+#define	IFT_X25DDN	0x4		/* x25 to imp */
+#define	IFT_X25		0x5		/* PDN X25 interface (RFC877) */
+#define	IFT_ETHER	0x6		/* Ethernet CSMA/CD */
+#define	IFT_ISO88023	0x7		/* CMSA/CD */
+#define	IFT_ISO88024	0x8		/* Token Bus */
+#define	IFT_ISO88025	0x9		/* Token Ring */
+#define	IFT_ISO88026	0xa		/* MAN */
+#define	IFT_STARLAN	0xb
+#define	IFT_P10		0xc		/* Proteon 10MBit ring */
+#define	IFT_P80		0xd		/* Proteon 80MBit ring */
+#define	IFT_HY		0xe		/* Hyperchannel */
+#define	IFT_FDDI	0xf
+#define	IFT_LAPB	0x10
+#define	IFT_SDLC	0x11
+#define	IFT_T1		0x12
+#define	IFT_CEPT	0x13		/* E1 - european T1 */
+#define	IFT_ISDNBASIC	0x14
+#define	IFT_ISDNPRIMARY	0x15
+#define	IFT_PTPSERIAL	0x16		/* Proprietary PTP serial */
+#define	IFT_PPP		0x17		/* RFC 1331 */
+#define	IFT_LOOP	0x18		/* loopback */
+#define	IFT_EON		0x19		/* ISO over IP */
+#define	IFT_XETHER	0x1a		/* obsolete 3MB experimental ethernet */
+#define	IFT_NSIP	0x1b		/* XNS over IP */
+#define	IFT_SLIP	0x1c		/* IP over generic TTY */
+#define	IFT_ULTRA	0x1d		/* Ultra Technologies */
+#define	IFT_DS3		0x1e		/* Generic T3 */
+#define	IFT_SIP		0x1f		/* SMDS */
+#define	IFT_FRELAY	0x20		/* Frame Relay DTE only */
+#define	IFT_RS232	0x21
+#define	IFT_PARA	0x22		/* parallel-port */
+#define	IFT_ARCNET	0x23
+#define	IFT_ARCNETPLUS	0x24
+#define	IFT_ATM		0x25		/* ATM cells */
+#define	IFT_MIOX25	0x26
+#define	IFT_SONET	0x27		/* SONET or SDH */
+#define	IFT_X25PLE	0x28
+#define	IFT_ISO88022LLC	0x29
+#define	IFT_LOCALTALK	0x2a
+#define	IFT_SMDSDXI	0x2b
+#define	IFT_FRELAYDCE	0x2c		/* Frame Relay DCE */
+#define	IFT_V35		0x2d
+#define	IFT_HSSI	0x2e
+#define	IFT_HIPPI	0x2f
+#define	IFT_MODEM	0x30		/* Generic Modem */
+#define	IFT_AAL5	0x31		/* AAL5 over ATM */
+#define	IFT_SONETPATH	0x32
+#define	IFT_SONETVT	0x33
+#define	IFT_SMDSICIP	0x34		/* SMDS InterCarrier Interface */
+#define	IFT_PROPVIRTUAL	0x35		/* Proprietary Virtual/internal */
+#define	IFT_PROPMUX	0x36		/* Proprietary Multiplexing */
 #define	IFT_IEEE80212		   0x37 /* 100BaseVG */
 #define	IFT_FIBRECHANNEL	   0x38 /* Fibre Channel */
 #define	IFT_HIPPIINTERFACE	   0x39 /* HIPPI interfaces	 */
@@ -239,33 +238,17 @@
 #define	IFT_ATMVCIENDPT		   0xc2 /* ATM VCI End Point */
 #define	IFT_OPTICALCHANNEL	   0xc3 /* Optical Channel */
 #define	IFT_OPTICALTRANSPORT	   0xc4 /* Optical Transport */
-#define	IFT_PROPATM		   0xc5 /* Proprietary ATM */
-#define	IFT_VOICEOVERCABLE	   0xc6 /* Voice Over Cable Interface */
-#define	IFT_INFINIBAND		   0xc7 /* Infiniband */
-#define	IFT_TELINK		   0xc8 /* TE Link */
-#define	IFT_Q2931		   0xc9 /* Q.2931 */
-#define	IFT_VIRTUALTG		   0xca /* Virtual Trunk Group */
-#define	IFT_SIPTG		   0xcb /* SIP Trunk Group */
-#define	IFT_SIPSIG		   0xcc /* SIP Signaling */
-#define	IFT_DOCSCABLEUPSTREAMCHANNEL 0xcd /* CATV Upstream Channel */
-#define	IFT_ECONET		   0xce /* Acorn Econet */
-#define	IFT_PON155		   0xcf /* FSAN 155Mb Symetrical PON interface */
-#define	IFT_PON622		   0xd0 /* FSAN 622Mb Symetrical PON interface */
 #define	IFT_BRIDGE		   0xd1 /* Transparent bridge interface */
-#define	IFT_LINEGROUP		   0xd2 /* Interface common to multiple lines */
-#define	IFT_VOICEEMFGD		   0xd3 /* voice E&M Feature Group D */
-#define	IFT_VOICEFGDEANA	   0xd4 /* voice FGD Exchange Access North American */
-#define	IFT_VOICEDID		   0xd5 /* voice Direct Inward Dialing */
 
-/* private usage... how should we define these? */
+#define	IFT_STF			   0xd7	/* 6to4 interface */
+
+/* not based on IANA assignments */
 #define	IFT_GIF		0xf0
-#define	IFT_DUMMY	0xf1
-#define	IFT_PVC		0xf2
-#define	IFT_FAITH	0xf3
-#define	IFT_ENC		0xf4		/* Encapsulation */
-#define	IFT_PFLOG	0xf5		/* Packet filter logging */
-#define	IFT_PFSYNC	0xf6		/* Packet filter state syncing */
-#define	IFT_CARP	0xf7		/* Common Address Redundancy Protocol */
-#define IFT_BLUETOOTH	0xf8		/* Bluetooth */
-
-#endif /* _NET_IF_TYPES_H_ */
+#define	IFT_PVC		0xf1
+#define	IFT_FAITH	0xf2
+#define	IFT_ENC		0xf4
+#define	IFT_PFLOG	0xf6
+#define	IFT_PFSYNC	0xf7
+#define	IFT_CARP	0xf8	/* Common Address Redundancy Protocol */
+#define IFT_IPXIP	0xf9	/* IPX over IP tunneling; no longer used. */
+#endif /* !_NET_IF_TYPES_H_ */

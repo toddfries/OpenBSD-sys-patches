@@ -1,6 +1,3 @@
-/*	$OpenBSD: ttydev.h,v 1.4 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: ttydev.h,v 1.7 1994/06/29 06:45:58 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ttydev.h	8.2 (Berkeley) 1/4/94
+ * $FreeBSD: src/sys/sys/ttydev.h,v 1.12 2006/01/10 09:19:10 phk Exp $
  */
 
 /* COMPATIBILITY HEADER FILE */
@@ -48,14 +46,17 @@
 #define B300	7
 #define B600	8
 #define B1200	9
-#define	B1800	10
+#define B1800	10
 #define B2400	11
 #define B4800	12
 #define B9600	13
 #define EXTA	14
 #define EXTB	15
-#define	B57600	16
-#define	B115200	17
+#define B57600	16
+#define B115200	17
+#define B230400	18
+#define B460800	19
+#define B921600	20
 #endif /* USE_OLD_TTY */
 
 #endif /* !_SYS_TTYDEV_H_ */

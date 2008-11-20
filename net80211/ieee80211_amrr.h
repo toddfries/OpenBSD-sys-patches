@@ -1,4 +1,5 @@
-/*	$OpenBSD: ieee80211_amrr.h,v 1.4 2007/06/16 13:17:05 damien Exp $	*/
+/* $FreeBSD: src/sys/net80211/ieee80211_amrr.h,v 1.1 2006/11/26 19:55:26 sam Exp $ */
+/*	$OpenBSD: ieee80211_amrr.h,v 1.3 2006/06/17 19:34:31 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -31,9 +32,12 @@
 /*
  * Rate control settings.
  */
+struct ieee80211com;
+
 struct ieee80211_amrr {
 	u_int	amrr_min_success_threshold;
 	u_int	amrr_max_success_threshold;
+	struct ieee80211com *amrr_ic;
 };
 
 #define IEEE80211_AMRR_MIN_SUCCESS_THRESHOLD	 1
@@ -50,7 +54,9 @@ struct ieee80211_amrr_node {
 	u_int	amn_retrycnt;
 };
 
-void	ieee80211_amrr_node_init(const struct ieee80211_amrr *,
+void	ieee80211_amrr_init(struct ieee80211_amrr *,
+	    struct ieee80211com *ic, int, int);
+void	ieee80211_amrr_node_init(struct ieee80211_amrr *,
 	    struct ieee80211_amrr_node *);
 void	ieee80211_amrr_choose(struct ieee80211_amrr *, struct ieee80211_node *,
 	    struct ieee80211_amrr_node *);

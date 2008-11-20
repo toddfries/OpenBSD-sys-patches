@@ -1,7 +1,5 @@
-/*	$OpenBSD: tty_conf.c,v 1.12 2008/01/05 17:33:28 mbalmer Exp $	*/
-/*	$NetBSD: tty_conf.c,v 1.18 1996/05/19 17:17:55 jonathan Exp $	*/
-
 /*-
+ * Copyright (c) 2004 Poul-Henning Kamp.  All rights reserved.
  * Copyright (c) 1982, 1986, 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -18,7 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,141 +35,171 @@
  *	@(#)tty_conf.c	8.4 (Berkeley) 1/21/94
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/kern/tty_conf.c,v 1.24 2004/07/15 20:47:40 phk Exp $");
+
+#include "opt_compat.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/tty.h>
 #include <sys/conf.h>
 
-#define	ttynodisc ((int (*)(dev_t, struct tty *))enodev)
-#define	ttyerrclose ((int (*)(struct tty *, int flags))enodev)
-#define	ttyerrio ((int (*)(struct tty *, struct uio *, int))enodev)
-#define	ttyerrinput ((int (*)(int c, struct tty *))enodev)
-#define	ttyerrstart ((int (*)(struct tty *))enodev)
-
-int	nullioctl(struct tty *, u_long, caddr_t, int, struct proc *);
-
-#include "sl.h"
-#if NSL > 0
-int	slopen(dev_t dev, struct tty *tp);
-int	slclose(struct tty *tp, int flags);
-int	sltioctl(struct tty *tp, u_long cmd, caddr_t data,
-			int flag, struct proc *p);
-int	slinput(int c, struct tty *tp);
-int	slstart(struct tty *tp);
+#ifndef MAXLDISC
+#define MAXLDISC 9
 #endif
 
-#include "ppp.h"
-#if NPPP > 0
-int	pppopen(dev_t dev, struct tty *tp);
-int	pppclose(struct tty *tp, int flags);
-int	ppptioctl(struct tty *tp, u_long cmd, caddr_t data,
-			int flag, struct proc *p);
-int	pppinput(int c, struct tty *tp);
-int	pppstart(struct tty *tp);
-int	pppread(struct tty *tp, struct uio *uio, int flag);
-int	pppwrite(struct tty *tp, struct uio *uio, int flag);
-#endif
+static l_open_t		l_noopen;
+static l_close_t	l_noclose;
+static l_rint_t		l_norint;
+static l_start_t	l_nostart;
 
-#include "strip.h"
-#if NSTRIP > 0
-int	stripopen(dev_t dev, struct tty *tp);
-int	stripclose(struct tty *tp, int flags);
-int	striptioctl(struct tty *tp, u_long cmd, caddr_t data,
-			int flag, struct proc *p);
-int	stripinput(int c, struct tty *tp);
-int	stripstart(struct tty *tp);
-#endif
+/*
+ * XXX it probably doesn't matter what the entries other than the l_open
+ * entry are here.  The l_nullioctl and ttymodem entries still look fishy.
+ * Reconsider the removal of nullmodem anyway.  It was too much like
+ * ttymodem, but a completely null version might be useful.
+ */
 
-#include "nmea.h"
-#if NNMEA > 0
-int	nmeaopen(dev_t, struct tty *);
-int	nmeaclose(struct tty *, int);
-int	nmeainput(int, struct tty *);
-#endif
+static struct linesw nodisc = {
+	.l_open = 	l_noopen,
+	.l_close =	l_noclose,
+	.l_read = 	l_noread,
+	.l_write = 	l_nowrite, 
+	.l_ioctl = 	l_nullioctl, 
+	.l_rint = 	l_norint, 
+	.l_start = 	l_nostart, 
+	.l_modem = 	ttymodem
+};
 
-#include "msts.h"
-#if NMSTS > 0
-int	mstsopen(dev_t, struct tty *);
-int	mstsclose(struct tty *, int);
-int	mstsinput(int, struct tty *);
-#endif
+static struct linesw termios_disc = {
+	.l_open = 	tty_open,
+	.l_close =	ttylclose,
+	.l_read = 	ttread,
+	.l_write = 	ttwrite, 
+	.l_ioctl = 	l_nullioctl, 
+	.l_rint = 	ttyinput, 
+	.l_start = 	ttstart, 
+	.l_modem = 	ttymodem
+};
 
-struct	linesw linesw[] =
-{
-	{ ttyopen, ttylclose, ttread, ttwrite, nullioctl,
-	  ttyinput, ttstart, ttymodem },		/* 0- termios */
-
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },	/* 1- defunct */
-
-#if defined(COMPAT_43) || defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS)
-	{ ttyopen, ttylclose, ttread, ttwrite, nullioctl,
-	  ttyinput, ttstart, ttymodem },		/* 2- old NTTYDISC */
+#ifdef COMPAT_43
+#  define ntty_disc		termios_disc
 #else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },	/* 2- defunct */
+#  define ntty_disc		nodisc
 #endif
 
-	/* 3- TABLDISC (defunct) */
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },
-
-#if NSL > 0
-	{ slopen, slclose, ttyerrio, ttyerrio, sltioctl,
-	  slinput, slstart, nullmodem },		/* 4- SLIPDISC */
-#else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
-
-#if NPPP > 0
-	{ pppopen, pppclose, pppread, pppwrite, ppptioctl,
-	  pppinput, pppstart, ttymodem },		/* 5- PPPDISC */
-#else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
-
-#if NSTRIP > 0
-	{ stripopen, stripclose, ttyerrio, ttyerrio, striptioctl,
-	  stripinput, stripstart, nullmodem },		/* 6- STRIPDISC */
-#else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
-
-#if NNMEA > 0
-	{ nmeaopen, nmeaclose, ttread, ttwrite, nullioctl,
-	  nmeainput, ttstart, ttymodem },		/* 7- NMEADISC */
-#else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
-
-#if NMSTS > 0
-	{ mstsopen, mstsclose, ttread, ttwrite, nullioctl,
-	  mstsinput, ttstart, ttymodem },		/* 8- MSTSDISC */
-#else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
+struct linesw *linesw[MAXLDISC] = {
+	&termios_disc,		/* 0 - termios */
+	&nodisc,		/* 1 - defunct */
+	&ntty_disc,		/* 2 - NTTYDISC */
+	&nodisc,		/* 3 - loadable */
+	&nodisc,		/* 4 - SLIPDISC */
+	&nodisc,		/* 5 - PPPDISC */
+	&nodisc,		/* 6 - NETGRAPHDISC */
+	&nodisc,		/* 7 - loadable */
+	&nodisc,		/* 8 - loadable */
 };
 
 int	nlinesw = sizeof (linesw) / sizeof (linesw[0]);
 
+#define LOADABLE_LDISC 7
+
 /*
- * Do nothing specific version of line
- * discipline specific ioctl command.
+ * ldisc_register: Register a line discipline.
+ *
+ * discipline: Index for discipline to load, or LDISC_LOAD for us to choose.
+ * linesw_p:   Pointer to linesw_p.
+ *
+ * Returns: Index used or -1 on failure.
  */
-/*ARGSUSED*/
+
 int
-nullioctl(struct tty *tp, u_long cmd, char *data, int flags, struct proc *p)
+ldisc_register(int discipline, struct linesw *linesw_p)
+{
+	int slot = -1;
+
+	if (discipline == LDISC_LOAD) {
+		int i;
+		for (i = LOADABLE_LDISC; i < MAXLDISC; i++)
+			if (linesw[i] == &nodisc) {
+				slot = i;
+				break;
+			}
+	} else if (discipline >= 0 && discipline < MAXLDISC) {
+		slot = discipline;
+	}
+
+	if (slot != -1 && linesw_p)
+		linesw[slot] = linesw_p;
+
+	return slot;
+}
+
+/*
+ * ldisc_deregister: Deregister a line discipline obtained with
+ * ldisc_register.
+ *
+ * discipline: Index for discipline to unload.
+ */
+
+void
+ldisc_deregister(int discipline)
 {
 
-#ifdef lint
-	tp = tp; data = data; flags = flags; p = p;
-#endif
-	return (-1);
+	if (discipline < MAXLDISC)
+		linesw[discipline] = &nodisc;
+}
+
+/*
+ * "no" and "null" versions of line discipline functions
+ */
+
+static int
+l_noopen(struct cdev *dev, struct tty *tp)
+{
+
+	return (ENODEV);
+}
+
+static int
+l_noclose(struct tty *tp, int flag)
+{
+
+	return (ENODEV);
+}
+
+int
+l_noread(struct tty *tp, struct uio *uio, int flag)
+{
+
+	return (ENODEV);
+}
+
+int
+l_nowrite(struct tty *tp, struct uio *uio, int flag)
+{
+
+	return (ENODEV);
+}
+
+static int
+l_norint(int c, struct tty *tp)
+{
+
+	return (ENODEV);
+}
+
+static int
+l_nostart(struct tty *tp)
+{
+
+	return (ENODEV);
+}
+
+int
+l_nullioctl(struct tty *tp, u_long cmd, char *data, int flags, struct thread *td)
+{
+
+	return (ENOIOCTL);
 }

@@ -1,7 +1,6 @@
-/*	$OpenBSD: openfirm.h,v 1.10 2007/10/14 17:26:59 kettenis Exp $	*/
-/*	$NetBSD: openfirm.h,v 1.1 1996/09/30 16:35:10 ws Exp $	*/
+/*	$NetBSD: openfirm.h,v 1.1 1998/05/15 10:16:00 tsubai Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
  * Copyright (C) 1995, 1996 TooLs GmbH.
  * All rights reserved.
@@ -32,72 +31,107 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /*
- * Prototypes for OpenFirmware Interface Routines
+ * Copyright (C) 2000 Benno Rice.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY Benno Rice ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL TOOLS GMBH BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/ofw/openfirm.h,v 1.13 2007/06/16 22:30:38 marius Exp $
  */
 
-#include <sys/param.h>
-#include <sys/device.h>
-
-int openfirmware(void *);
-
-extern char OF_buf[];
-
-int OF_peer(int phandle);
-int OF_child(int phandle);
-int OF_parent(int phandle);
-int OF_instance_to_package(int ihandle);
-int OF_getproplen(int handle, char *prop);
-int OF_getprop(int handle, char *prop, void *buf, int buflen);
-int OF_setprop(int, char *, const void *, int);
-int OF_nextprop(int, char *, void *);
-int OF_finddevice(char *name);
-int OF_instance_to_path(int ihandle, char *buf, int buflen);
-int OF_package_to_path(int phandle, char *buf, int buflen);
-int OF_call_method_1(char *method, int ihandle, int nargs, ...);
-int OF_call_method(char *method, int ihandle, int nargs, int nreturns, ...);
-int OF_open(char *dname);
-void OF_close(int handle);
-int OF_read(int handle, void *addr, int len);
-int OF_write(int handle, void *addr, int len);
-int OF_seek(int handle, u_quad_t pos);
-void OF_boot(char *bootspec);
-void OF_enter(void);
-void OF_exit(void) __attribute__((__noreturn__));
-int OF_interpret(char *cmd, int nreturns, ...);
-#if 0
-void (*OF_set_callback(void (*newfunc)(void *))) ();
-#endif
-int OF_getnodebyname(int, const char *);
+#ifndef _OPENFIRM_H_
+#define _OPENFIRM_H_
 
 /*
- * Some generic routines for OpenFirmware handling.
+ * Prototypes for Open Firmware Interface Routines
  */
-int ofnmmatch(char *cp1, char *cp2);
-void ofw_intr_establish(void);
+
+typedef unsigned long cell_t;
+
+typedef	unsigned int	ihandle_t;
+typedef unsigned int	phandle_t;
+
+#ifdef _KERNEL
+#include <sys/cdefs.h>
+#include <sys/types.h>
+#include <sys/malloc.h>
+
+MALLOC_DECLARE(M_OFWPROP);
 
 /*
- * Generic OpenFirmware probe argument.
- * This is how all probe structures must start
- * in order to support generic OpenFirmware device drivers.
+ * Stuff that is used by the Open Firmware code.
  */
-struct ofprobe {
-	int phandle;
-	/*
-	 * Special unit field for disk devices.
-	 * This is a KLUDGE to work around the fact that OpenFirmware
-	 * doesn't probe the scsi bus completely.
-	 * YES, I THINK THIS IS A BUG IN THE OPENFIRMWARE DEFINITION!!!	XXX
-	 * See also ofdisk.c.
-	 */
-	int unit;
-};
+void	set_openfirm_callback(int (*)(void *));
+int	openfirmware(void *);
 
 /*
- * The softc structure for devices we might be booted from (i.e. we might
- * want to set root/swap to) needs to start with these fields:		XXX
+ * This isn't actually an Open Firmware function, but it seemed like the right
+ * place for it to go.
  */
-struct ofb_softc {
-	struct device sc_dev;
-	int sc_phandle;
-	int sc_unit;		/* Might be missing for non-disk devices */
-};
+void		OF_init(int (*openfirm)(void *));
+
+/* Generic functions */
+int		OF_test(char *);
+void		OF_printf(const char *, ...);
+
+/* Device tree functions */
+phandle_t	OF_peer(phandle_t);
+phandle_t	OF_child(phandle_t);
+phandle_t	OF_parent(phandle_t);
+phandle_t	OF_instance_to_package(ihandle_t);
+int		OF_getproplen(phandle_t, char *);
+int		OF_getprop(phandle_t, char *, void *, int);
+int		OF_getprop_alloc(phandle_t package, char *propname, int elsz,
+    void **buf);
+int		OF_nextprop(phandle_t, char *, char *);
+int		OF_setprop(phandle_t, char *, void *, int);
+int		OF_canon(const char *, char *, int);
+phandle_t	OF_finddevice(const char *);
+int		OF_instance_to_path(ihandle_t, char *, int);
+int		OF_package_to_path(phandle_t, char *, int);
+int		OF_call_method(char *, ihandle_t, int, int, ...);
+
+/* Device I/O functions */
+ihandle_t	OF_open(char *);
+void		OF_close(ihandle_t);
+int		OF_read(ihandle_t, void *, int);
+int		OF_write(ihandle_t, void *, int);
+int		OF_seek(ihandle_t, u_quad_t);
+
+/* Memory functions */
+void 		*OF_claim(void *, u_int, u_int);
+void		OF_release(void *, u_int);
+
+/* Control transfer functions */
+void		OF_boot(char *);
+void		OF_enter(void);
+void		OF_exit(void) __attribute__((noreturn));
+void		OF_chain(void *, u_int,
+    void (*)(void *, u_int, void *, void *, u_int), void *, u_int);
+
+/* User interface functions */
+int		OF_interpret(char *, int, ...);
+
+/* Time function */
+int		OF_milliseconds(void);
+
+#endif /* _KERNEL */
+#endif /* _OPENFIRM_H_ */

@@ -1,7 +1,7 @@
-/*      $OpenBSD: ip_gre.h,v 1.7 2005/12/23 13:01:23 claudio Exp $ */
-/*	$NetBSD: ip_gre.h,v 1.3 1998/10/07 23:33:02 thorpej Exp $ */
+/*	$NetBSD: ip_gre.h,v 1.5 2002/06/09 16:33:40 itojun Exp $ */
+/*	 $FreeBSD: src/sys/netinet/ip_gre.h,v 1.4 2006/01/21 10:44:34 bz Exp $ */
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -37,45 +37,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _NETINET_IP_GRE_H_
-#define _NETINET_IP_GRE_H_
-
-/* Protocol number for Cisco's WCCP
- * The Internet Draft is:
- *   draft-forster-wrec-wccp-v1-00.txt
- */
-#define GREPROTO_WCCP	0x883e
-
-/*
- * Names for GRE sysctl objects
- */
-#define GRECTL_ALLOW    1		/* accept incoming GRE packets */
-#define GRECTL_WCCP     2		/* accept WCCPv1-style GRE packets */
-#define GRECTL_MAXID    3
-
-#define GRECTL_NAMES { \
-        { 0, 0 }, \
-        { "allow", CTLTYPE_INT }, \
-        { "wccp", CTLTYPE_INT }, \
-}
-
-/*
- * Names for MobileIP sysctl objects
- */
-#define MOBILEIPCTL_ALLOW    1		/* accept incoming MobileIP packets */
-#define MOBILEIPCTL_MAXID    2
-
-#define MOBILEIPCTL_NAMES { \
-        { 0, 0 }, \
-        { "allow", CTLTYPE_INT }, \
-}
-
 #ifdef _KERNEL
-void gre_input(struct mbuf *, ...);
-void gre_mobile_input(struct mbuf *, ...);
-
-int     ipmobile_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-int     gre_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-
+void gre_input(struct mbuf *, int);
+void gre_mobile_input(struct mbuf *, int);
 #endif /* _KERNEL */
-#endif /* _NETINET_IP_GRE_H_ */

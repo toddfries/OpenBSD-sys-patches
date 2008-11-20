@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_sockio.c,v 1.10 2006/03/05 21:48:56 miod Exp $	 */
-/*	$NetBSD: svr4_sockio.c,v 1.10 1996/05/03 17:09:15 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1995 Christos Zoulas
  * All rights reserved.
  *
@@ -28,26 +26,21 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.18 2006/08/04 21:15:09 brooks Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/ioctl.h>
-#include <sys/termios.h>
-#include <sys/tty.h>
+#include <sys/sockio.h>
 #include <sys/socket.h>
-#include <sys/mount.h>
 #include <net/if.h>
-#include <sys/malloc.h>
 
-#include <sys/syscallargs.h>
 
-#include <compat/svr4/svr4_types.h>
+#include <compat/svr4/svr4.h>
 #include <compat/svr4/svr4_util.h>
-#include <compat/svr4/svr4_signal.h>
-#include <compat/svr4/svr4_syscallargs.h>
-#include <compat/svr4/svr4_stropts.h>
 #include <compat/svr4/svr4_ioctl.h>
 #include <compat/svr4/svr4_sockio.h>
 
@@ -66,8 +59,11 @@ bsd_to_svr4_flags(bf)
 	bsd_to_svr4_flag(FF_DEBUG);
 	bsd_to_svr4_flag(FF_LOOPBACK);
 	bsd_to_svr4_flag(FF_POINTOPOINT);
+#if defined(IFF_NOTRAILERS)
 	bsd_to_svr4_flag(FF_NOTRAILERS);
-	bsd_to_svr4_flag(FF_RUNNING);
+#endif
+	if (bf & IFF_DRV_RUNNING)
+		sf |= SVR4_IFF_RUNNING;
 	bsd_to_svr4_flag(FF_NOARP);
 	bsd_to_svr4_flag(FF_PROMISC);
 	bsd_to_svr4_flag(FF_ALLMULTI);
@@ -76,17 +72,15 @@ bsd_to_svr4_flags(bf)
 }
 
 int
-svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
+svr4_sock_ioctl(fp, td, retval, fd, cmd, data)
 	struct file *fp;
-	struct proc *p;
+	struct thread *td;
 	register_t *retval;
 	int fd;
 	u_long cmd;
 	caddr_t data;
 {
 	int error;
-	int (*ctl)(struct file *, u_long,  caddr_t, struct proc *) =
-			fp->f_ops->fo_ioctl;
 
 	*retval = 0;
 
@@ -108,16 +102,15 @@ svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
 			 * fix is to make SVR4_SIOCGIFCONF return only one
 			 * entry per physical interface?
 			 */
-
-			TAILQ_FOREACH(ifp, &ifnet, if_list)
-				if (TAILQ_EMPTY(&ifp->if_addrlist))
+			IFNET_RLOCK();
+			TAILQ_FOREACH(ifp, &ifnet, if_link)
+				if (TAILQ_EMPTY(&ifp->if_addrhead))
 					ifnum++;
 				else
-					TAILQ_FOREACH(ifa, &ifp->if_addrlist,
-					    ifa_list)
+					TAILQ_FOREACH(ifa, &ifp->if_addrhead,
+					    ifa_link)
 						ifnum++;
-
-
+			IFNET_RUNLOCK();
 			DPRINTF(("SIOCGIFNUM %d\n", ifnum));
 			return copyout(&ifnum, data, sizeof(ifnum));
 		}
@@ -132,11 +125,11 @@ svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
 
 			(void) strlcpy(br.ifr_name, sr.svr4_ifr_name,
 			    sizeof(br.ifr_name));
-
-			if ((error = (*ctl)(fp, SIOCGIFFLAGS, 
-					    (caddr_t) &br, p)) != 0) {
-				DPRINTF(("SIOCGIFFLAGS %s: error %d\n", 
-					 sr.svr4_ifr_name, error));
+			if ((error = fo_ioctl(fp, SIOCGIFFLAGS, 
+					    (caddr_t) &br, td->td_ucred,
+					    td)) != 0) {
+				DPRINTF(("SIOCGIFFLAGS (%s) %s: error %d\n", 
+					 br.ifr_name, sr.svr4_ifr_name, error));
 				return error;
 			}
 
@@ -157,8 +150,9 @@ svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
 				sizeof(struct ifreq), sizeof(struct svr4_ifreq),
 				sc.svr4_ifc_len));
 
-			if ((error = (*ctl)(fp, OSIOCGIFCONF,
-					    (caddr_t) &sc, p)) != 0)
+			if ((error = fo_ioctl(fp, OSIOCGIFCONF,
+					    (caddr_t) &sc, td->td_ucred,
+					    td)) != 0)
 				return error;
 
 			DPRINTF(("SIOCGIFCONF\n"));

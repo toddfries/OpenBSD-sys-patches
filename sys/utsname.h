@@ -1,6 +1,3 @@
-/*	$OpenBSD: utsname.h,v 1.5 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: utsname.h,v 1.6 1994/06/29 06:46:11 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -16,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,12 +30,19 @@
  * SUCH DAMAGE.
  *
  *	@(#)utsname.h	8.1 (Berkeley) 1/4/94
+ * $FreeBSD: src/sys/sys/utsname.h,v 1.11 2004/04/07 04:19:50 imp Exp $
  */
 
 #ifndef	_SYS_UTSNAME_H
 #define	_SYS_UTSNAME_H
 
-#define SYS_NMLN	256
+#ifdef _KERNEL
+#define	SYS_NMLN	32		/* uname(2) for the FreeBSD 1.1 ABI. */
+#endif
+
+#ifndef SYS_NMLN
+#define	SYS_NMLN	256		/* User can override. */
+#endif
 
 struct utsname {
 	char	sysname[SYS_NMLN];	/* Name of this OS. */
@@ -50,8 +54,16 @@ struct utsname {
 
 #include <sys/cdefs.h>
 
+#ifndef _KERNEL
 __BEGIN_DECLS
-int	uname(struct utsname *);
+int	__xuname(int, void *);		/* Variable record size. */
 __END_DECLS
+
+static __inline int
+uname(struct utsname *name)
+{
+	return __xuname(SYS_NMLN, (void *)name);
+}
+#endif	/* _KERNEL */
 
 #endif	/* !_SYS_UTSNAME_H */

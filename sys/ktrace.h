@@ -1,7 +1,4 @@
-/*	$OpenBSD: ktrace.h,v 1.9 2006/05/17 02:11:25 tedu Exp $	*/
-/*	$NetBSD: ktrace.h,v 1.12 1996/02/04 02:12:29 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,7 +27,11 @@
  * SUCH DAMAGE.
  *
  *	@(#)ktrace.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/ktrace.h,v 1.33 2005/12/26 22:09:09 cognet Exp $
  */
+
+#ifndef _SYS_KTRACE_H_
+#define _SYS_KTRACE_H_
 
 /*
  * operations to ktrace system call  (KTROP(op))
@@ -48,19 +49,34 @@
  * ktrace record header
  */
 struct ktr_header {
-	size_t	ktr_len;		/* length of buf */
+	int	ktr_len;		/* length of buf */
+	short	ktr_type;		/* trace record type */
 	pid_t	ktr_pid;		/* process id */
 	char	ktr_comm[MAXCOMLEN+1];	/* command name */
-	short	ktr_type;		/* trace record type */
 	struct	timeval ktr_time;	/* timestamp */
-	caddr_t	ktr_buf;
+	intptr_t	ktr_tid;	/* was ktr_buffer */
 };
 
 /*
- * Test for kernel trace point
+ * Test for kernel trace point (MP SAFE).
+ *
+ * KTRCHECK() just checks that the type is enabled and is only for
+ * internal use in the ktrace subsystem.  KTRPOINT() checks against
+ * ktrace recursion as well as checking that the type is enabled and
+ * is the public interface.
  */
-#define KTRPOINT(p, type)	\
-	(((p)->p_traceflag & ((1<<(type))|KTRFAC_ACTIVE)) == (1<<(type)))
+#define	KTRCHECK(td, type)	((td)->td_proc->p_traceflag & (1 << type))
+#define KTRPOINT(td, type)						\
+	(KTRCHECK((td), (type)) && !((td)->td_pflags & TDP_INKTRACE))
+#define	KTRCHECKDRAIN(td)	(!(STAILQ_EMPTY(&(td)->td_proc->p_ktr)))
+#define	KTRUSERRET(td) do {						\
+	if (KTRCHECKDRAIN(td))						\
+		ktruserret(td);						\
+} while (0)
+#define	KTRPROCEXIT(td) do {						\
+	if (KTRCHECKDRAIN(td))						\
+		ktrprocexit(td);					\
+} while (0)
 
 /*
  * ktrace record types
@@ -71,11 +87,12 @@ struct ktr_header {
  */
 #define KTR_SYSCALL	1
 struct ktr_syscall {
-	int	ktr_code;		/* syscall number */
-	int	ktr_argsize;		/* size of arguments */
+	short	ktr_code;		/* syscall number */
+	short	ktr_narg;		/* number of arguments */
 	/*
-	 * followed by ktr_argsize/sizeof(register_t) "register_t"s
+	 * followed by ktr_narg register_t
 	 */
+	register_t	ktr_args[1];
 };
 
 /*
@@ -86,7 +103,7 @@ struct ktr_sysret {
 	short	ktr_code;
 	short	ktr_eosys;
 	int	ktr_error;
-	int	ktr_retval;
+	register_t	ktr_retval;
 };
 
 /*
@@ -114,9 +131,8 @@ struct ktr_genio {
 struct ktr_psig {
 	int	signo;
 	sig_t	action;
-	int	mask;
 	int	code;
-	siginfo_t si;
+	sigset_t mask;
 };
 
 /*
@@ -129,11 +145,16 @@ struct ktr_csw {
 };
 
 /*
- * KTR_EMUL - emulation change
+ * KTR_USER - data coming from userland
  */
-#define KTR_EMUL	7
-	/* record contains emulation name */
+#define KTR_USER_MAXLEN	2048	/* maximum length of passed data */
+#define KTR_USER	7
 
+/*
+ * KTR_DROP - If this bit is set in ktr_type, then at least one event
+ * between the previous record and this record was dropped.
+ */
+#define	KTR_DROP	0x8000
 
 /*
  * kernel trace points (in p_traceflag)
@@ -145,32 +166,35 @@ struct ktr_csw {
 #define KTRFAC_GENIO	(1<<KTR_GENIO)
 #define	KTRFAC_PSIG	(1<<KTR_PSIG)
 #define KTRFAC_CSW	(1<<KTR_CSW)
-#define KTRFAC_EMUL	(1<<KTR_EMUL)
+#define KTRFAC_USER	(1<<KTR_USER)
 /*
  * trace flags (also in p_traceflags)
  */
 #define KTRFAC_ROOT	0x80000000	/* root set this trace */
 #define KTRFAC_INHERIT	0x40000000	/* pass trace flags to children */
-#define KTRFAC_ACTIVE	0x20000000	/* ktrace logging in progress, ignore */
+#define	KTRFAC_DROP	0x20000000	/* last event was dropped */
 
-#ifndef	_KERNEL
+#ifdef	_KERNEL
+extern struct mtx ktrace_mtx;
+
+void	ktrnamei(char *);
+void	ktrcsw(int, int);
+void	ktrpsig(int, sig_t, sigset_t *, int);
+void	ktrgenio(int, enum uio_rw, struct uio *, int);
+void	ktrsyscall(int, int narg, register_t args[]);
+void	ktrsysret(int, int, register_t);
+void	ktrprocexit(struct thread *);
+void	ktruserret(struct thread *);
+
+#else
 
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
 int	ktrace(const char *, int, int, pid_t);
+int	utrace(const void *, size_t);
 __END_DECLS
 
-#else
+#endif
 
-void ktrcsw(struct proc *, int, int);
-void ktremul(struct proc *, char *);
-void ktrgenio(struct proc *, int, enum uio_rw, struct iovec *, int, int);
-void ktrnamei(struct proc *, char *);
-void ktrpsig(struct proc *, int, sig_t, int, int, siginfo_t *);
-void ktrsyscall(struct proc *, register_t, size_t, register_t []);
-void ktrsysret(struct proc *, register_t, int, register_t);
-
-void ktrsettracevnode(struct proc *, struct vnode *);
-
-#endif	/* !_KERNEL */
+#endif

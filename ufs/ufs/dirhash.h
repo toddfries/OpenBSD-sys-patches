@@ -1,5 +1,4 @@
-/* $OpenBSD: dirhash.h,v 1.4 2006/04/29 23:09:45 tedu Exp $	*/
-/*
+/*-
  * Copyright (c) 2001 Ian Dowse.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,13 +22,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ufs/ufs/dirhash.h,v 1.4 2003/01/01 18:48:59 schweikh Exp $
+ * $FreeBSD: src/sys/ufs/ufs/dirhash.h,v 1.5 2005/01/07 02:29:26 imp Exp $
  */
 
 #ifndef _UFS_UFS_DIRHASH_H_
 #define _UFS_UFS_DIRHASH_H_
-
-#include <sys/rwlock.h>
 
 /*
  * For fast operations on large directories, we maintain a hash
@@ -67,7 +64,7 @@
  * candidates is much larger than the configured memry limit). In this
  * case it limits the number of hash builds to 1/DH_SCOREINIT of the
  * number of accesses.
- */
+ */ 
 #define DH_SCOREINIT	8	/* initial dh_score when dirhash built */
 #define DH_SCOREMAX	64	/* max dh_score value */
 
@@ -83,6 +80,8 @@
     ((dh)->dh_hash[(slot) >> DH_BLKOFFSHIFT][(slot) & DH_BLKOFFMASK])
 
 struct dirhash {
+	struct mtx dh_mtx;	/* protects all fields except dh_list */
+
 	doff_t	**dh_hash;	/* the hash array (2-level) */
 	int	dh_narrays;	/* number of entries in dh_hash */
 	int	dh_hlen;	/* total slots in the 2-level hash array */
@@ -105,9 +104,6 @@ struct dirhash {
 	TAILQ_ENTRY(dirhash) dh_list;	/* chain of all dirhashes */
 };
 
-extern	int ufs_mindirhashsize;
-extern	int ufs_dirhashmaxmem;
-extern	int ufs_dirhashmem;
 
 /*
  * Dirhash functions.

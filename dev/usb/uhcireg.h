@@ -1,8 +1,7 @@
-/*	$OpenBSD: uhcireg.h,v 1.13 2003/07/08 13:19:09 nate Exp $ */
-/*	$NetBSD: uhcireg.h,v 1.16 2002/07/11 21:14:29 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/uhcireg.h,v 1.12 1999/11/17 22:33:42 n_hibma Exp $ */
+/*	$NetBSD: uhcireg.h,v 1.15 2002/02/11 11:41:30 augustss Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/uhcireg.h,v 1.22 2005/01/06 01:43:28 imp Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -86,7 +85,6 @@
 
 #define UHCI_FRNUM		0x06
 #define  UHCI_FRNUM_MASK	0x03ff
-
 
 #define UHCI_FLBASEADDR		0x08
 

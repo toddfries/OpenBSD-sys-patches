@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_siginfo.h,v 1.3 1997/01/27 01:16:52 deraadt Exp $	 */
-/*	$NetBSD: svr4_siginfo.h,v 1.2 1995/07/04 19:47:05 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_siginfo.h,v 1.5 2005/10/19 09:33:15 davidxu Exp $
  */
 
 #ifndef	_SVR4_SIGINFO_H_

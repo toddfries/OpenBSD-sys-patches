@@ -1,86 +1,169 @@
-/*	$OpenBSD: db_command.c,v 1.49 2008/03/23 12:31:57 miod Exp $	*/
-/*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
-
-/* 
+/*-
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
+ *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
  */
-
+/*
+ *	Author: David B. Golub, Carnegie Mellon University
+ *	Date:	7/90
+ */
 /*
  * Command dispatcher.
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ddb/db_command.c,v 1.73 2007/01/17 15:05:51 delphij Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
+#include <sys/linker_set.h>
+#include <sys/lock.h>
+#include <sys/kdb.h>
+#include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
-#include <sys/extent.h>
-#include <sys/pool.h>
-#include <sys/msgbuf.h>
-#include <sys/malloc.h>
-#include <sys/mount.h>
+#include <sys/signalvar.h>
+#include <sys/systm.h>
+#include <sys/cons.h>
+#include <sys/watchdog.h>
 
-#include <uvm/uvm_extern.h>
-#include <machine/db_machdep.h>		/* type definitions */
-
+#include <ddb/ddb.h>
+#include <ddb/db_command.h>
 #include <ddb/db_lex.h>
 #include <ddb/db_output.h>
-#include <ddb/db_command.h>
-#include <ddb/db_break.h>
-#include <ddb/db_watch.h>
-#include <ddb/db_run.h>
-#include <ddb/db_variables.h>
-#include <ddb/db_interface.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_extern.h>
 
-#include <uvm/uvm_ddb.h>
+#include <machine/cpu.h>
+#include <machine/setjmp.h>
 
 /*
  * Exported global variables
  */
-int		db_cmd_loop_done;
-label_t		*db_recover;
+boolean_t	db_cmd_loop_done;
+db_addr_t	db_dot;
+db_addr_t	db_last_addr;
+db_addr_t	db_prev;
+db_addr_t	db_next;
+
+SET_DECLARE(db_cmd_set, struct command);
+SET_DECLARE(db_show_cmd_set, struct command);
+
+static db_cmdfcn_t	db_fncall;
+static db_cmdfcn_t	db_gdb;
+static db_cmdfcn_t	db_halt;
+static db_cmdfcn_t	db_kill;
+static db_cmdfcn_t	db_reset;
+static db_cmdfcn_t	db_stack_trace;
+static db_cmdfcn_t	db_stack_trace_all;
+static db_cmdfcn_t	db_watchdog;
+
+/*
+ * 'show' commands
+ */
+
+static struct command db_show_all_cmds[] = {
+	{ "procs",	db_ps,			0,	0 },
+	{ (char *)0 }
+};
+
+static struct command_table db_show_all_table = {
+	db_show_all_cmds
+};
+
+static struct command db_show_cmds[] = {
+	{ "all",	0,			0,	&db_show_all_table },
+	{ "registers",	db_show_regs,		0,	0 },
+	{ "breaks",	db_listbreak_cmd, 	0,	0 },
+	{ "threads",	db_show_threads,	0,	0 },
+	{ (char *)0, }
+};
+
+static struct command_table db_show_table = {
+	db_show_cmds,
+	SET_BEGIN(db_show_cmd_set),
+	SET_LIMIT(db_show_cmd_set)
+};
+	
+static struct command db_commands[] = {
+	{ "print",	db_print_cmd,		0,	0 },
+	{ "p",		db_print_cmd,		0,	0 },
+	{ "examine",	db_examine_cmd,		CS_SET_DOT, 0 },
+	{ "x",		db_examine_cmd,		CS_SET_DOT, 0 },
+	{ "search",	db_search_cmd,		CS_OWN|CS_SET_DOT, 0 },
+	{ "set",	db_set_cmd,		CS_OWN,	0 },
+	{ "write",	db_write_cmd,		CS_MORE|CS_SET_DOT, 0 },
+	{ "w",		db_write_cmd,		CS_MORE|CS_SET_DOT, 0 },
+	{ "delete",	db_delete_cmd,		0,	0 },
+	{ "d",		db_delete_cmd,		0,	0 },
+	{ "break",	db_breakpoint_cmd,	0,	0 },
+	{ "b",		db_breakpoint_cmd,	0,	0 },
+	{ "dwatch",	db_deletewatch_cmd,	0,	0 },
+	{ "watch",	db_watchpoint_cmd,	CS_MORE,0 },
+	{ "dhwatch",	db_deletehwatch_cmd,	0,      0 },
+	{ "hwatch",	db_hwatchpoint_cmd,	0,      0 },
+	{ "step",	db_single_step_cmd,	0,	0 },
+	{ "s",		db_single_step_cmd,	0,	0 },
+	{ "continue",	db_continue_cmd,	0,	0 },
+	{ "c",		db_continue_cmd,	0,	0 },
+	{ "until",	db_trace_until_call_cmd,0,	0 },
+	{ "next",	db_trace_until_matching_cmd,0,	0 },
+	{ "match",	db_trace_until_matching_cmd,0,	0 },
+	{ "trace",	db_stack_trace,		CS_OWN,	0 },
+	{ "t",		db_stack_trace,		CS_OWN,	0 },
+	{ "alltrace",	db_stack_trace_all,	0,	0 },
+	{ "where",	db_stack_trace,		CS_OWN,	0 },
+	{ "bt",		db_stack_trace,		CS_OWN,	0 },
+	{ "call",	db_fncall,		CS_OWN,	0 },
+	{ "show",	0,			0,	&db_show_table },
+	{ "ps",		db_ps,			0,	0 },
+	{ "gdb",	db_gdb,			0,	0 },
+	{ "halt",	db_halt,		0,	0 },
+	{ "reboot",	db_reset,		0,	0 },
+	{ "reset",	db_reset,		0,	0 },
+	{ "kill",	db_kill,		CS_OWN,	0 },
+	{ "watchdog",	db_watchdog,		0,	0 },
+	{ "thread",	db_set_thread,		CS_OWN,	0 },
+	{ (char *)0, }
+};
+
+static struct command_table db_command_table = {
+	db_commands,
+	SET_BEGIN(db_cmd_set),
+	SET_LIMIT(db_cmd_set)
+};
+
+static struct command	*db_last_command = 0;
 
 /*
  * if 'ed' style: 'dot' is set at start of last item printed,
  * and '+' points to next line.
  * Otherwise: 'dot' points to next item, '..' points to last.
  */
-boolean_t	db_ed_style = TRUE;
-
-db_addr_t	db_dot;		/* current location */
-db_addr_t	db_last_addr;	/* last explicit address typed */
-db_addr_t	db_prev;	/* last address examined
-				   or written */
-db_addr_t	db_next;	/* next address to be examined
-				   or written */
+static boolean_t	db_ed_style = TRUE;
 
 /*
  * Utility routine - discard tokens through end-of-line.
  */
 void
-db_skip_to_eol(void)
+db_skip_to_eol()
 {
 	int	t;
 	do {
@@ -95,64 +178,116 @@ db_skip_to_eol(void)
 #define	CMD_FOUND	1
 #define	CMD_NONE	2
 #define	CMD_AMBIGUOUS	3
+#define	CMD_HELP	4
+
+static void	db_cmd_match(char *name, struct command *cmd,
+		    struct command **cmdp, int *resultp);
+static void	db_cmd_list(struct command_table *table);
+static int	db_cmd_search(char *name, struct command_table *table,
+		    struct command **cmdp);
+static void	db_command(struct command **last_cmdp,
+		    struct command_table *cmd_table);
+
+/*
+ * Helper function to match a single command.
+ */
+static void
+db_cmd_match(name, cmd, cmdp, resultp)
+	char *		name;
+	struct command	*cmd;
+	struct command	**cmdp;	/* out */
+	int *		resultp;
+{
+	char *lp, *rp;
+	int c;
+
+	lp = name;
+	rp = cmd->name;
+	while ((c = *lp) == *rp) {
+		if (c == 0) {
+			/* complete match */
+			*cmdp = cmd;
+			*resultp = CMD_UNIQUE;
+			return;
+		}
+		lp++;
+		rp++;
+	}
+	if (c == 0) {
+		/* end of name, not end of command -
+		   partial match */
+		if (*resultp == CMD_FOUND) {
+			*resultp = CMD_AMBIGUOUS;
+			/* but keep looking for a full match -
+			   this lets us match single letters */
+		} else {
+			*cmdp = cmd;
+			*resultp = CMD_FOUND;
+		}
+	}
+}
 
 /*
  * Search for command prefix.
  */
-int
-db_cmd_search(char *name, struct db_command *table, struct db_command **cmdp)
+static int
+db_cmd_search(name, table, cmdp)
+	char *		name;
+	struct command_table *table;
+	struct command	**cmdp;	/* out */
 {
-	struct db_command	*cmd;
-	int			result = CMD_NONE;
+	struct command	*cmd;
+	struct command	**aux_cmdp;
+	int		result = CMD_NONE;
 
-	for (cmd = table; cmd->name != 0; cmd++) {
-	    char *lp;
-	    char *rp;
-	    int  c;
-
-	    lp = name;
-	    rp = cmd->name;
-	    while ((c = *lp) == *rp) {
-		if (c == 0) {
-		    /* complete match */
-		    *cmdp = cmd;
-		    return (CMD_UNIQUE);
+	for (cmd = table->table; cmd->name != 0; cmd++) {
+		db_cmd_match(name, cmd, cmdp, &result);
+		if (result == CMD_UNIQUE)
+			return (CMD_UNIQUE);
+	}
+	if (table->aux_tablep != NULL)
+		for (aux_cmdp = table->aux_tablep;
+		     aux_cmdp < table->aux_tablep_end;
+		     aux_cmdp++) {
+			db_cmd_match(name, *aux_cmdp, cmdp, &result);
+			if (result == CMD_UNIQUE)
+				return (CMD_UNIQUE);
 		}
-		lp++;
-		rp++;
-	    }
-	    if (c == 0) {
-		/* end of name, not end of command -
-		   partial match */
-		if (result == CMD_FOUND) {
-		    result = CMD_AMBIGUOUS;
-		    /* but keep looking for a full match -
-		       this lets us match single letters */
-		}
-		else {
-		    *cmdp = cmd;
-		    result = CMD_FOUND;
-		}
-	    }
+	if (result == CMD_NONE) {
+		/* check for 'help' */
+		if (name[0] == 'h' && name[1] == 'e'
+		    && name[2] == 'l' && name[3] == 'p')
+			result = CMD_HELP;
 	}
 	return (result);
 }
 
-void
-db_cmd_list(struct db_command *table)
+static void
+db_cmd_list(table)
+	struct command_table *table;
 {
-	struct db_command *cmd;
+	register struct command *cmd;
+	register struct command **aux_cmdp;
 
-	for (cmd = table; cmd->name != 0; cmd++) {
+	for (cmd = table->table; cmd->name != 0; cmd++) {
 	    db_printf("%-12s", cmd->name);
+	    db_end_line(12);
+	}
+	if (table->aux_tablep == NULL)
+	    return;
+	for (aux_cmdp = table->aux_tablep; aux_cmdp < table->aux_tablep_end;
+	     aux_cmdp++) {
+	    db_printf("%-12s", (*aux_cmdp)->name);
 	    db_end_line(12);
 	}
 }
 
-void
-db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
+static void
+db_command(last_cmdp, cmd_table)
+	struct command	**last_cmdp;	/* IN_OUT */
+	struct command_table *cmd_table;
 {
-	struct db_command	*cmd;
+	struct command	*cmd;
 	int		t;
 	char		modif[TOK_STRING_SIZE];
 	db_expr_t	addr, count;
@@ -169,7 +304,7 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 	    modif[0] = '\0';
 	}
 	else if (t == tEXCL) {
-	    db_fncall(0, 0, 0, NULL);
+	    db_fncall((db_expr_t)0, (boolean_t)0, (db_expr_t)0, (char *)0);
 	    return;
 	}
 	else if (t != tIDENT) {
@@ -194,10 +329,14 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 			db_printf("Ambiguous\n");
 			db_flush_lex();
 			return;
+		    case CMD_HELP:
+			db_cmd_list(cmd_table);
+			db_flush_lex();
+			return;
 		    default:
 			break;
 		}
-		if ((cmd_table = cmd->more) != 0) {
+		if ((cmd_table = cmd->more) != NULL) {
 		    t = db_read_token();
 		    if (t != tIDENT) {
 			db_cmd_list(cmd_table);
@@ -220,7 +359,7 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 			db_flush_lex();
 			return;
 		    }
-		    db_strlcpy(modif, db_tok_string, sizeof(modif));
+		    db_strcpy(modif, db_tok_string);
 		}
 		else {
 		    db_unread_token(t);
@@ -258,7 +397,9 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 	    /*
 	     * Execute the command.
 	     */
+	    db_enable_pager();
 	    (*cmd->fcn)(addr, have_addr, count, modif);
+	    db_disable_pager();
 
 	    if (cmd->flag & CS_SET_DOT) {
 		/*
@@ -282,253 +423,19 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 	}
 }
 
-/*ARGSUSED*/
-void
-db_buf_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-				   
-	vfs_buf_print((struct buf *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_map_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-        boolean_t full = FALSE;
-        
-        if (modif[0] == 'f')
-                full = TRUE;
-
-        uvm_map_printit((struct vm_map *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_malloc_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-#if defined(MALLOC_DEBUG)
-	extern void debug_malloc_printit(int (*)(const char *, ...), vaddr_t);
-
-	if (!have_addr)
-		addr = 0;
-
-	debug_malloc_printit(db_printf, (vaddr_t)addr);
-#else
-	malloc_printit(db_printf);
-#endif
-}
-
-/*ARGSUSED*/
-void
-db_mount_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-
-	vfs_mount_print((struct mount *) addr, full, db_printf);
-}
-
-void
-db_show_all_mounts(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-	struct mount *mp;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-
-	CIRCLEQ_FOREACH(mp, &mountlist, mnt_list)
-		vfs_mount_print(mp, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_object_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-        boolean_t full = FALSE;
-        
-        if (modif[0] == 'f')
-                full = TRUE;
-
-	uvm_object_printit((struct uvm_object *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_page_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-        boolean_t full = FALSE;
-        
-        if (modif[0] == 'f')
-                full = TRUE;
-
-	uvm_page_printit((struct vm_page *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void     
-db_vnode_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-
-	vfs_vnode_print((struct vnode *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_show_panic_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	if (panicstr)
-		db_printf("%s\n", panicstr);
-	else
-		db_printf("the kernel did not panic\n");	/* yet */
-}
-
-/*ARGSUSED*/
-void
-db_extent_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	extent_print_all();
-}
-
-/*ARGSUSED*/
-void
-db_pool_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	pool_printit((struct pool *)addr, modif, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_proc_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	if (!have_addr)
-		addr = (db_expr_t)curproc;
-
-	proc_printit((struct proc *)addr, modif, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_uvmexp_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	uvmexp_print(db_printf);
-}
-
 /*
- * 'show' commands
+ * At least one non-optional command must be implemented using
+ * DB_COMMAND() so that db_cmd_set gets created.  Here is one.
  */
-
-struct db_command db_show_all_cmds[] = {
-	{ "procs",	db_show_all_procs,	0, NULL },
-	{ "callout",	db_show_callout,	0, NULL },
-	{ "pools",	db_show_all_pools,	0, NULL },
-	{ "mounts",	db_show_all_mounts,	0, NULL },
-	{ NULL, 	NULL, 			0, NULL }
-};
-
-struct db_command db_show_cmds[] = {
-	{ "all",	NULL,			0,	db_show_all_cmds },
-	{ "breaks",	db_listbreak_cmd, 	0,	NULL },
-	{ "buf",	db_buf_print_cmd,	0,	NULL },
-	{ "extents",	db_extent_print_cmd,	0,	NULL },
-	{ "malloc",	db_malloc_print_cmd,	0,	NULL },
-	{ "map",	db_map_print_cmd,	0,	NULL },
-	{ "mount",	db_mount_print_cmd,	0,	NULL },
-	{ "object",	db_object_print_cmd,	0,	NULL },
-	{ "page",	db_page_print_cmd,	0,	NULL },
-	{ "panic",	db_show_panic_cmd,	0,	NULL },
-	{ "pool",	db_pool_print_cmd,	0,	NULL },
-	{ "proc",	db_proc_print_cmd,	0,	NULL },
-	{ "registers",	db_show_regs,		0,	NULL },
-	{ "uvmexp",	db_uvmexp_print_cmd,	0,	NULL },
-	{ "vnode",	db_vnode_print_cmd,	0,	NULL },
-	{ "watches",	db_listwatch_cmd, 	0,	NULL },
-	{ NULL,		NULL,			0,	NULL }
-};
-
-struct db_command db_boot_cmds[] = {
-	{ "sync",	db_boot_sync_cmd,	0,	0 },
-	{ "crash",	db_boot_crash_cmd,	0,	0 },
-	{ "dump",	db_boot_dump_cmd,	0,	0 },
-	{ "halt",	db_boot_halt_cmd,	0,	0 },
-	{ "reboot",	db_boot_reboot_cmd,	0,	0 },
-	{ "poweroff",	db_boot_poweroff_cmd,	0,	0 },
-	{ NULL, }
-};
-
-struct db_command db_command_table[] = {
-#ifdef DB_MACHINE_COMMANDS
-  /* this must be the first entry, if it exists */
-	{ "machine",    NULL,                   0,     		NULL},
-#endif
-	{ "print",	db_print_cmd,		0,		NULL },
-	{ "examine",	db_examine_cmd,		CS_SET_DOT, 	NULL },
-	{ "x",		db_examine_cmd,		CS_SET_DOT, 	NULL },
-	{ "search",	db_search_cmd,		CS_OWN|CS_SET_DOT, NULL },
-	{ "set",	db_set_cmd,		CS_OWN,		NULL },
-	{ "write",	db_write_cmd,		CS_MORE|CS_SET_DOT, NULL },
-	{ "w",		db_write_cmd,		CS_MORE|CS_SET_DOT, NULL },
-	{ "delete",	db_delete_cmd,		0,		NULL },
-	{ "d",		db_delete_cmd,		0,		NULL },
-	{ "break",	db_breakpoint_cmd,	0,		NULL },
-	{ "dwatch",	db_deletewatch_cmd,	0,		NULL },
-	{ "watch",	db_watchpoint_cmd,	CS_MORE,	NULL },
-	{ "step",	db_single_step_cmd,	0,		NULL },
-	{ "s",		db_single_step_cmd,	0,		NULL },
-	{ "continue",	db_continue_cmd,	0,		NULL },
-	{ "c",		db_continue_cmd,	0,		NULL },
-	{ "until",	db_trace_until_call_cmd,0,		NULL },
-	{ "next",	db_trace_until_matching_cmd,0,		NULL },
-	{ "match",	db_trace_until_matching_cmd,0,		NULL },
-	{ "trace",	db_stack_trace_cmd,	0,		NULL },
-	{ "call",	db_fncall,		CS_OWN,		NULL },
-	{ "ps",		db_show_all_procs,	0,		NULL },
-	{ "callout",	db_show_callout,	0,		NULL },
-	{ "show",	NULL,			0,		db_show_cmds },
-	{ "boot",	NULL,			0,		db_boot_cmds },
-	{ "help",	db_help_cmd,		0,		NULL },
-	{ "hangman",	db_hangman,		0,		NULL },
-	{ "dmesg",	db_dmesg_cmd,		0,		NULL },
-	{ NULL, 	NULL,			0,		NULL }
-};
-
-#ifdef DB_MACHINE_COMMANDS
-
-/* this function should be called to install the machine dependent
-   commands. It should be called before the debugger is enabled  */
-void db_machine_commands_install(struct db_command *ptr)
+DB_COMMAND(panic, db_panic)
 {
-  db_command_table[0].more = ptr;
-  return;
-}
-
-#endif
-
-struct db_command	*db_last_command = 0;
-
-void
-db_help_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	db_cmd_list(db_command_table);
+	db_disable_pager();
+	panic("from debugger");
 }
 
 void
-db_command_loop(void)
+db_command_loop()
 {
-	label_t		db_jmpbuf;
-	label_t		*savejmp;
-	extern int	db_output_line;
-
 	/*
 	 * Initialize 'prev' and 'next' to dot.
 	 */
@@ -536,37 +443,25 @@ db_command_loop(void)
 	db_next = db_dot;
 
 	db_cmd_loop_done = 0;
-
-	savejmp = db_recover;
-	db_recover = &db_jmpbuf;
-	(void) setjmp(&db_jmpbuf);
-
 	while (!db_cmd_loop_done) {
+	    if (db_print_position() != 0)
+		db_printf("\n");
 
-		if (db_print_position() != 0)
-			db_printf("\n");
-		db_output_line = 0;
+	    db_printf("db> ");
+	    (void) db_read_line();
 
-#ifdef MULTIPROCESSOR
-		db_printf("ddb{%d}> ", CPU_INFO_UNIT(curcpu()));
-#else
-		db_printf("ddb> ");
-#endif
-		(void) db_read_line();
-
-		db_command(&db_last_command, db_command_table);
+	    db_command(&db_last_command, &db_command_table);
 	}
-
-	db_recover = savejmp;
 }
 
 void
-db_error(char *s)
+db_error(s)
+	const char *s;
 {
 	if (s)
-		db_printf("%s", s);
+	    db_printf("%s", s);
 	db_flush_lex();
-	longjmp(db_recover);
+	kdb_reenter();
 }
 
 
@@ -574,33 +469,51 @@ db_error(char *s)
  * Call random function:
  * !expr(arg,arg,arg)
  */
-/*ARGSUSED*/
-void
-db_fncall(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+
+/* The generic implementation supports a maximum of 10 arguments. */
+typedef db_expr_t __db_f(db_expr_t, db_expr_t, db_expr_t, db_expr_t,
+    db_expr_t, db_expr_t, db_expr_t, db_expr_t, db_expr_t, db_expr_t);
+
+static __inline int
+db_fncall_generic(db_expr_t addr, db_expr_t *rv, int nargs, db_expr_t args[])
+{
+	__db_f *f = (__db_f *)addr;
+
+	if (nargs > 10) {
+		db_printf("Too many arguments (max 10)\n");
+		return (0);
+	}
+	*rv = (*f)(args[0], args[1], args[2], args[3], args[4], args[5],
+	    args[6], args[7], args[8], args[9]);
+	return (1);
+}
+
+static void
+db_fncall(dummy1, dummy2, dummy3, dummy4)
+	db_expr_t	dummy1;
+	boolean_t	dummy2;
+	db_expr_t	dummy3;
+	char *		dummy4;
 {
 	db_expr_t	fn_addr;
-#define	MAXARGS		11
-	db_expr_t	args[MAXARGS];
+	db_expr_t	args[DB_MAXARGS];
 	int		nargs = 0;
 	db_expr_t	retval;
-	db_expr_t	(*func)(db_expr_t, ...);
 	int		t;
-	char		tmpfmt[28];
 
 	if (!db_expression(&fn_addr)) {
 	    db_printf("Bad function\n");
 	    db_flush_lex();
 	    return;
 	}
-	func = (db_expr_t (*)(db_expr_t, ...)) fn_addr;
 
 	t = db_read_token();
 	if (t == tLPAREN) {
 	    if (db_expression(&args[0])) {
 		nargs++;
 		while ((t = db_read_token()) == tCOMMA) {
-		    if (nargs == MAXARGS) {
-			db_printf("Too many arguments\n");
+		    if (nargs == DB_MAXARGS) {
+			db_printf("Too many arguments (max %d)\n", DB_MAXARGS);
 			db_flush_lex();
 			return;
 		    }
@@ -620,77 +533,179 @@ db_fncall(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	    }
 	}
 	db_skip_to_eol();
+	db_disable_pager();
 
-	while (nargs < MAXARGS) {
-	    args[nargs++] = 0;
+	if (DB_CALL(fn_addr, &retval, nargs, args))
+		db_printf("= %#lr\n", (long)retval);
+}
+
+static void
+db_halt(db_expr_t dummy, boolean_t dummy2, db_expr_t dummy3, char *dummy4)
+{
+
+	cpu_halt();
+}
+
+static void
+db_kill(dummy1, dummy2, dummy3, dummy4)
+	db_expr_t	dummy1;
+	boolean_t	dummy2;
+	db_expr_t	dummy3;
+	char *		dummy4;
+{
+	db_expr_t old_radix, pid, sig;
+	struct proc *p;
+
+#define DB_ERROR(f)	do { db_printf f; db_flush_lex(); goto out; } while (0)
+
+	/*
+	 * PIDs and signal numbers are typically represented in base
+	 * 10, so make that the default here.  It can, of course, be
+	 * overridden by specifying a prefix.
+	 */
+	old_radix = db_radix;
+	db_radix = 10;
+	/* Retrieve arguments. */
+	if (!db_expression(&sig))
+		DB_ERROR(("Missing signal number\n"));
+	if (!db_expression(&pid))
+		DB_ERROR(("Missing process ID\n"));
+	db_skip_to_eol();
+	if (sig < 0 || sig > _SIG_MAXSIG)
+		DB_ERROR(("Signal number out of range\n"));
+
+	/*
+	 * Find the process in question.  allproc_lock is not needed
+	 * since we're in DDB.
+	 */
+	/* sx_slock(&allproc_lock); */
+	FOREACH_PROC_IN_SYSTEM(p)
+	    if (p->p_pid == pid)
+		    break;
+	/* sx_sunlock(&allproc_lock); */
+	if (p == NULL)
+		DB_ERROR(("Can't find process with pid %ld\n", (long) pid));
+
+	/* If it's already locked, bail; otherwise, do the deed. */
+	if (PROC_TRYLOCK(p) == 0)
+		DB_ERROR(("Can't lock process with pid %ld\n", (long) pid));
+	else {
+		psignal(p, sig);
+		PROC_UNLOCK(p);
 	}
 
-	retval = (*func)(args[0], args[1], args[2], args[3], args[4],
-			 args[5], args[6], args[7], args[8], args[9]);
-	db_printf("%s\n", db_format(tmpfmt, sizeof tmpfmt, retval,
-	    DB_FORMAT_N, 1, 0));
+out:
+	db_radix = old_radix;
+#undef DB_ERROR
 }
 
-void
-db_boot_sync_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+static void
+db_reset(dummy1, dummy2, dummy3, dummy4)
+	db_expr_t	dummy1;
+	boolean_t	dummy2;
+	db_expr_t	dummy3;
+	char *		dummy4;
 {
-	boot(RB_AUTOBOOT | RB_TIMEBAD | RB_USERREQ);
+
+	cpu_reset();
 }
 
-void
-db_boot_crash_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+static void
+db_watchdog(dummy1, dummy2, dummy3, dummy4)
+	db_expr_t	dummy1;
+	boolean_t	dummy2;
+	db_expr_t	dummy3;
+	char *		dummy4;
 {
-	boot(RB_NOSYNC | RB_DUMP | RB_TIMEBAD | RB_USERREQ);
+	int i;
+
+	/*
+	 * XXX: It might make sense to be able to set the watchdog to a
+	 * XXX: timeout here so that failure or hang as a result of subsequent
+	 * XXX: ddb commands could be recovered by a reset.
+	 */
+
+	EVENTHANDLER_INVOKE(watchdog_list, 0, &i);
 }
 
-void
-db_boot_dump_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+static void
+db_gdb(db_expr_t dummy1, boolean_t dummy2, db_expr_t dummy3, char *dummy4)
 {
-	boot(RB_DUMP | RB_TIMEBAD | RB_USERREQ);
+
+	if (kdb_dbbe_select("gdb") != 0)
+		db_printf("The remote GDB backend could not be selected.\n");
+	else
+		db_printf("Step to enter the remote GDB backend.\n");
 }
 
-void
-db_boot_halt_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+static void
+db_stack_trace(db_expr_t tid, boolean_t hastid, db_expr_t count, char *modif)
 {
-	boot(RB_NOSYNC | RB_HALT | RB_TIMEBAD | RB_USERREQ);
-}
+	struct thread *td;
+	db_expr_t radix;
+	pid_t pid;
+	int t;
 
-void
-db_boot_reboot_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	boot(RB_AUTOBOOT | RB_NOSYNC | RB_TIMEBAD | RB_USERREQ);
-}
-
-void
-db_boot_poweroff_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	boot(RB_NOSYNC | RB_HALT | RB_POWERDOWN | RB_TIMEBAD | RB_USERREQ);
-}
-
-void
-db_dmesg_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	int i, off;
-	char *p;
-
-	if (!msgbufp || msgbufp->msg_magic != MSG_MAGIC)
-		return;
-	off = msgbufp->msg_bufx;
-	if (off > msgbufp->msg_bufs)
-		off = 0;
-	for (i = 0, p = msgbufp->msg_bufc + off;
-	    i < msgbufp->msg_bufs; i++, p++) {
-		if (p >= msgbufp->msg_bufc + msgbufp->msg_bufs)
-			p = msgbufp->msg_bufc;
-		if (*p != '\0')
-			db_putchar(*p);
+	/*
+	 * We parse our own arguments. We don't like the default radix.
+	 */
+	radix = db_radix;
+	db_radix = 10;
+	hastid = db_expression(&tid);
+	t = db_read_token();
+	if (t == tCOMMA) {
+		if (!db_expression(&count)) {
+			db_printf("Count missing\n");
+			db_flush_lex();
+			return;
+		}
+	} else {
+		db_unread_token(t);
+		count = -1;
 	}
-	db_putchar('\n');
+	db_skip_to_eol();
+	db_radix = radix;
+
+	if (hastid) {
+		td = kdb_thr_lookup((lwpid_t)tid);
+		if (td == NULL)
+			td = kdb_thr_from_pid((pid_t)tid);
+		if (td == NULL) {
+			db_printf("Thread %d not found\n", (int)tid);
+			return;
+		}
+	} else
+		td = kdb_thread;
+	if (td->td_proc != NULL)
+		pid = td->td_proc->p_pid;
+	else
+		pid = -1;
+	db_printf("Tracing pid %d tid %ld td %p\n", pid, (long)td->td_tid, td);
+	db_trace_thread(td, count);
 }
 
-void
-db_stack_trace_cmd(db_expr_t addr, boolean_t have_addr, db_expr_t count,
-    char *modif)
+static void
+db_stack_trace_all(db_expr_t dummy, boolean_t dummy2, db_expr_t dummy3,
+    char *dummy4)
 {
-	db_stack_trace_print(addr, have_addr, count, modif, db_printf);
+	struct proc *p;
+	struct thread *td;
+	jmp_buf jb;
+	void *prev_jb;
+
+	FOREACH_PROC_IN_SYSTEM(p) {
+		prev_jb = kdb_jmpbuf(jb);
+		if (setjmp(jb) == 0) {
+			FOREACH_THREAD_IN_PROC(p, td) {
+				db_printf("\nTracing command %s pid %d tid %ld td %p\n",
+					  p->p_comm, p->p_pid, (long)td->td_tid, td);
+				db_trace_thread(td, -1);
+				if (db_pager_quit) {
+					kdb_jmpbuf(prev_jb);
+					return;
+				}
+			}
+		}
+		kdb_jmpbuf(prev_jb);
+	}
 }

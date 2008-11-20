@@ -1,7 +1,7 @@
-/*	$OpenBSD: in6_cksum.c,v 1.14 2006/11/17 01:11:23 itojun Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/in6_cksum.c,v 1.16 2007/07/05 16:23:47 delphij Exp $	*/
 /*	$KAME: in6_cksum.c,v 1.10 2000/12/03 00:53:59 itojun Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-/*
+/*-
  * Copyright (c) 1988, 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -42,7 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -66,6 +66,7 @@
 #include <sys/systm.h>
 #include <netinet/in.h>
 #include <netinet/ip6.h>
+#include <netinet6/scope6_var.h>
 
 /*
  * Checksum routine for Internet Protocol family headers (Portable Version).
@@ -79,29 +80,26 @@
 
 /*
  * m MUST contain a continuous IP6 header.
- * off is a offset where TCP/UDP/ICMP6 header starts.
+ * off is an offset where TCP/UDP/ICMP6 header starts.
  * len is a total length of a transport segment.
  * (e.g. TCP header + TCP payload)
  */
-
 int
-in6_cksum(m, nxt, off, len)
-	struct mbuf *m;
-	u_int8_t nxt;
-	u_int32_t off, len;
+in6_cksum(struct mbuf *m, u_int8_t nxt, u_int32_t off, u_int32_t len)
 {
 	u_int16_t *w;
 	int sum = 0;
 	int mlen = 0;
 	int byte_swapped = 0;
-	struct ip6_hdr *ip6;	
+	struct ip6_hdr *ip6;
+	struct in6_addr in6;
 	union {
 		u_int16_t phs[4];
 		struct {
 			u_int32_t	ph_len;
 			u_int8_t	ph_zero[3];
 			u_int8_t	ph_nxt;
-		} ph __packed;
+		} __packed ph;
 	} uph;
 	union {
 		u_int8_t	c[2];
@@ -124,22 +122,27 @@ in6_cksum(m, nxt, off, len)
 	 * First create IP6 pseudo header and calculate a summary.
 	 */
 	ip6 = mtod(m, struct ip6_hdr *);
-	w = (u_int16_t *)&ip6->ip6_src;
 	uph.ph.ph_len = htonl(len);
 	uph.ph.ph_nxt = nxt;
 
-	/* IPv6 source address */
-	sum += w[0];
-	if (!IN6_IS_SCOPE_EMBED(&ip6->ip6_src))
-		sum += w[1];
-	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
-	sum += w[6]; sum += w[7];
+	/*
+	 * IPv6 source address.
+	 * XXX: we'd like to avoid copying the address, but we can't due to
+	 * the possibly embedded scope zone ID.
+	 */
+	in6 = ip6->ip6_src;
+	in6_clearscope(&in6);
+	w = (u_int16_t *)&in6;
+	sum += w[0]; sum += w[1]; sum += w[2]; sum += w[3];
+	sum += w[4]; sum += w[5]; sum += w[6]; sum += w[7];
+
 	/* IPv6 destination address */
-	sum += w[8];
-	if (!IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
-		sum += w[9];
-	sum += w[10]; sum += w[11]; sum += w[12]; sum += w[13];
-	sum += w[14]; sum += w[15];
+	in6 = ip6->ip6_dst;
+	in6_clearscope(&in6);
+	w = (u_int16_t *)&in6;
+	sum += w[0]; sum += w[1]; sum += w[2]; sum += w[3];
+	sum += w[4]; sum += w[5]; sum += w[6]; sum += w[7];
+
 	/* Payload length and upper layer identifier */
 	sum += uph.phs[0];  sum += uph.phs[1];
 	sum += uph.phs[2];  sum += uph.phs[3];
@@ -147,7 +150,7 @@ in6_cksum(m, nxt, off, len)
 	/*
 	 * Secondly calculate a summary of the first mbuf excluding offset.
 	 */
-	while (m != NULL && off > 0) {
+	while (off > 0) {
 		if (m->m_len <= off)
 			off -= m->m_len;
 		else
@@ -211,7 +214,7 @@ in6_cksum(m, nxt, off, len)
 	/*
 	 * Lastly calculate a summary of the rest of mbufs.
 	 */
-	
+
 	for (;m && len; m = m->m_next) {
 		if (m->m_len == 0)
 			continue;

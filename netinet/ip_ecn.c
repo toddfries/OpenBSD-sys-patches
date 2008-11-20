@@ -1,7 +1,6 @@
-/*	$OpenBSD: ip_ecn.c,v 1.4 2002/05/16 14:10:51 kjc Exp $	*/
-/*	$KAME: ip_ecn.c,v 1.9 2000/10/01 12:44:48 itojun Exp $	*/
+/*	$KAME: ip_ecn.c,v 1.12 2002/01/07 11:34:47 kjc Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1999 WIDE Project.
  * All rights reserved.
  *
@@ -35,24 +34,28 @@
  * http://www.aciri.org/floyd/papers/draft-ipsec-ecn-00.txt
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netinet/ip_ecn.c,v 1.9 2007/10/07 20:44:22 silby Exp $");
+
+#include "opt_inet.h"
+#include "opt_inet6.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
+#include <sys/errno.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
-#endif
-
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #include <netinet/ip6.h>
 #endif
 
 #include <netinet/ip_ecn.h>
+#ifdef INET6
+#include <netinet6/ip6_ecn.h>
+#endif
 
 /*
  * ECN and TOS (or TCLASS) processing rules at tunnel encapsulation and
@@ -87,14 +90,11 @@
 
 /*
  * modify outer ECN (TOS) field on ingress operation (tunnel encapsulation).
- * call it after you've done the default initialization/copy for the outer.
  */
 void
-ip_ecn_ingress(mode, outer, inner)
-	int mode;
-	u_int8_t *outer;
-	u_int8_t *inner;
+ip_ecn_ingress(int mode, u_int8_t *outer, const u_int8_t *inner)
 {
+
 	if (!outer || !inner)
 		panic("NULL pointer passed to ip_ecn_ingress");
 
@@ -121,15 +121,12 @@ ip_ecn_ingress(mode, outer, inner)
 
 /*
  * modify inner ECN (TOS) field on egress operation (tunnel decapsulation).
- * call it after you've done the default initialization/copy for the inner.
  * the caller should drop the packet if the return value is 0.
  */
 int
-ip_ecn_egress(mode, outer, inner)
-	int mode;
-	u_int8_t *outer;
-	u_int8_t *inner;
+ip_ecn_egress(int mode, const u_int8_t *outer, u_int8_t *inner)
 {
+
 	if (!outer || !inner)
 		panic("NULL pointer passed to ip_ecn_egress");
 
@@ -161,10 +158,7 @@ ip_ecn_egress(mode, outer, inner)
 
 #ifdef INET6
 void
-ip6_ecn_ingress(mode, outer, inner)
-	int mode;
-	u_int32_t *outer;
-	u_int32_t *inner;
+ip6_ecn_ingress(int mode, u_int32_t *outer, const u_int32_t *inner)
 {
 	u_int8_t outer8, inner8;
 
@@ -178,10 +172,7 @@ ip6_ecn_ingress(mode, outer, inner)
 }
 
 int
-ip6_ecn_egress(mode, outer, inner)
-	int mode;
-	u_int32_t *outer;
-	u_int32_t *inner;
+ip6_ecn_egress(int mode, const u_int32_t *outer, u_int32_t *inner)
 {
 	u_int8_t outer8, inner8, oinner8;
 

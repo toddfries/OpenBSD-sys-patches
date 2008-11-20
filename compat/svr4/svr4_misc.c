@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_misc.c,v 1.49 2007/10/01 12:10:55 martin Exp $	 */
-/*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -27,7 +25,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 /*
  * SVR4 compatibility module.
  *
@@ -35,67 +32,84 @@
  * handled here.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_misc.c,v 1.98 2007/10/24 19:03:52 rwatson Exp $");
+
+#include "opt_mac.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/exec.h>
-#include <sys/exec_olf.h>
-#include <sys/namei.h>
 #include <sys/dirent.h>
-#include <sys/proc.h>
-#include <sys/sched.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/time.h>
+#include <sys/fcntl.h>
 #include <sys/filedesc.h>
-#include <sys/ioctl.h>
+#include <sys/imgact.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
-#include <sys/mbuf.h>
-#include <sys/ktrace.h>
+#include <sys/file.h>		/* Must come after sys/malloc.h */
 #include <sys/mman.h>
 #include <sys/mount.h>
-#include <sys/pool.h>
+#include <sys/msg.h>
+#include <sys/mutex.h>
+#include <sys/namei.h>
+#include <sys/priv.h>
+#include <sys/proc.h>
+#include <sys/ptrace.h>
 #include <sys/resource.h>
 #include <sys/resourcevar.h>
-#include <sys/socket.h>
-#include <sys/vnode.h>
-#include <sys/uio.h>
-#include <sys/wait.h>
-#include <sys/utsname.h>
-#include <sys/unistd.h>
-#include <sys/times.h>
 #include <sys/sem.h>
-#include <sys/msg.h>
-#include <sys/ptrace.h>
 #include <sys/signalvar.h>
+#include <sys/stat.h>
+#include <sys/sx.h>
+#include <sys/syscallsubr.h>
+#include <sys/sysproto.h>
+#include <sys/time.h>
+#include <sys/times.h>
+#include <sys/uio.h>
+#include <sys/vnode.h>
+#include <sys/wait.h>
 
-#include <netinet/in.h>
-#include <sys/syscallargs.h>
-
-#include <miscfs/specfs/specdev.h>
-
+#include <compat/svr4/svr4.h>
 #include <compat/svr4/svr4_types.h>
 #include <compat/svr4/svr4_signal.h>
-#include <compat/svr4/svr4_syscallargs.h>
+#include <compat/svr4/svr4_proto.h>
 #include <compat/svr4/svr4_util.h>
-#include <compat/svr4/svr4_time.h>
-#include <compat/svr4/svr4_dirent.h>
-#include <compat/svr4/svr4_ulimit.h>
-#include <compat/svr4/svr4_hrt.h>
-#include <compat/svr4/svr4_wait.h>
-#include <compat/svr4/svr4_statvfs.h>
 #include <compat/svr4/svr4_sysconfig.h>
+#include <compat/svr4/svr4_dirent.h>
 #include <compat/svr4/svr4_acl.h>
+#include <compat/svr4/svr4_ulimit.h>
+#include <compat/svr4/svr4_statvfs.h>
+#include <compat/svr4/svr4_hrt.h>
+#include <compat/svr4/svr4_mman.h>
+#include <compat/svr4/svr4_wait.h>
 
-#include <compat/common/compat_dir.h>
+#include <security/mac/mac_framework.h>
 
-#include <uvm/uvm_extern.h>
+#include <machine/vmparam.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/vm_map.h>
+#if defined(__FreeBSD__)
+#include <vm/uma.h>
+#include <vm/vm_extern.h>
+#endif
+
+#if defined(NetBSD)
+# if defined(UVM)
+#  include <uvm/uvm_extern.h>
+# endif
+#endif
+
+#define	BSD_DIRENT(cp)		((struct dirent *)(cp))
+
+static int svr4_mknod(struct thread *, register_t *, char *,
+    svr4_mode_t, svr4_dev_t);
 
 static __inline clock_t timeval_to_clock_t(struct timeval *);
-static int svr4_setinfo(struct proc *, int, svr4_siginfo_t *);
+static int svr4_setinfo	(pid_t , struct rusage *, int, svr4_siginfo_t *);
 
 struct svr4_hrtcntl_args;
-static int svr4_hrtcntl(struct proc *, struct svr4_hrtcntl_args *,
+static int svr4_hrtcntl	(struct thread *, struct svr4_hrtcntl_args *,
     register_t *);
 static void bsd_statfs_to_svr4_statvfs(const struct statfs *,
     struct svr4_statvfs *);
@@ -103,108 +117,102 @@ static void bsd_statfs_to_svr4_statvfs64(const struct statfs *,
     struct svr4_statvfs64 *);
 static struct proc *svr4_pfind(pid_t pid);
 
-static int svr4_mknod(struct proc *, register_t *, char *,
-			   svr4_mode_t, svr4_dev_t);
+/* BOGUS noop */
+#if defined(BOGUS)
+int
+svr4_sys_setitimer(td, uap)
+        register struct thread *td;
+	struct svr4_sys_setitimer_args *uap;
+{
+        td->td_retval[0] = 0;
+	return 0;
+}
+#endif
 
 int
-svr4_sys_wait(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_wait(td, uap)
+	struct thread *td;
+	struct svr4_sys_wait_args *uap;
 {
-	struct svr4_sys_wait_args *uap = v;
-	struct sys_wait4_args w4;
-	int error;
-	size_t sz = sizeof(*SCARG(&w4, status));
+	int error, st, sig;
 
-	SCARG(&w4, rusage) = NULL;
-	SCARG(&w4, options) = 0;
-
-	if (SCARG(uap, status) == NULL) {
-		caddr_t sg = stackgap_init(p->p_emul);
-		SCARG(&w4, status) = stackgap_alloc(&sg, sz);
+	error = kern_wait(td, WAIT_ANY, &st, 0, NULL);
+	if (error)
+		return (error);
+      
+	if (WIFSIGNALED(st)) {
+		sig = WTERMSIG(st);
+		if (sig >= 0 && sig < NSIG)
+			st = (st & ~0177) | SVR4_BSD2SVR4_SIG(sig);
+	} else if (WIFSTOPPED(st)) {
+		sig = WSTOPSIG(st);
+		if (sig >= 0 && sig < NSIG)
+			st = (st & ~0xff00) | (SVR4_BSD2SVR4_SIG(sig) << 8);
 	}
-	else
-		SCARG(&w4, status) = SCARG(uap, status);
-
-	SCARG(&w4, pid) = WAIT_ANY;
-
-	if ((error = sys_wait4(p, &w4, retval)) != 0)
-		return error;
 
 	/*
 	 * It looks like wait(2) on svr4/solaris/2.4 returns
 	 * the status in retval[1], and the pid on retval[0].
-	 * NB: this can break if register_t stops being an int.
 	 */
-	return copyin(SCARG(&w4, status), &retval[1], sz);
+	td->td_retval[1] = st;
+
+	if (uap->status)
+		error = copyout(&st, uap->status, sizeof(st));
+
+	return (error);
 }
 
-
 int
-svr4_sys_execv(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_execv(td, uap)
+	struct thread *td;
+	struct svr4_sys_execv_args *uap;
 {
-	struct svr4_sys_execv_args /* {
-		syscallarg(char *) path;
-		syscallarg(char **) argv;
-	} */ *uap = v;
-	struct sys_execve_args ap;
-	caddr_t sg;
+	struct image_args eargs;
+	char *path;
+	int error;
 
-	sg = stackgap_init(p->p_emul);
-	SVR4_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	CHECKALTEXIST(td, uap->path, &path);
 
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = NULL;
-
-	return sys_execve(p, &ap, retval);
+	error = exec_copyin_args(&eargs, path, UIO_SYSSPACE, uap->argp, NULL);
+	free(path, M_TEMP);
+	if (error == 0)
+		error = kern_execve(td, &eargs, NULL);
+	return (error);
 }
 
-
 int
-svr4_sys_execve(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_execve(td, uap)
+	struct thread *td;
+	struct svr4_sys_execve_args *uap;
 {
-	struct svr4_sys_execve_args /* {
-		syscallarg(char *) path;
-		syscallarg(char **) argv;
-		syscallarg(char **) envp;
-        } */ *uap = v;
-	struct sys_execve_args ap;
-	caddr_t sg;
+	struct image_args eargs;
+	char *path;
+	int error;
 
-	sg = stackgap_init(p->p_emul);
-	SVR4_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	CHECKALTEXIST(td, uap->path, &path);
 
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = SCARG(uap, envp);
-
-	return sys_execve(p, &ap, retval);
+	error = exec_copyin_args(&eargs, path, UIO_SYSSPACE, uap->argp,
+	    uap->envp);
+	free(path, M_TEMP);
+	if (error == 0)
+		error = kern_execve(td, &eargs, NULL);
+	return (error);
 }
 
-
 int
-svr4_sys_time(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_time(td, v)
+	struct thread *td;
+	struct svr4_sys_time_args *v;
 {
 	struct svr4_sys_time_args *uap = v;
 	int error = 0;
 	struct timeval tv;
 
 	microtime(&tv);
-	if (SCARG(uap, t))
-		error = copyout(&tv.tv_sec, SCARG(uap, t),
-				sizeof(*(SCARG(uap, t))));
-	*retval = (int) tv.tv_sec;
+	if (uap->t)
+		error = copyout(&tv.tv_sec, uap->t,
+				sizeof(*(uap->t)));
+	td->td_retval[0] = (int) tv.tv_sec;
 
 	return error;
 }
@@ -212,315 +220,492 @@ svr4_sys_time(p, v, retval)
 
 /*
  * Read SVR4-style directory entries.  We suck them into kernel space so
- * that they can be massaged before being copied out to user code.  Like
- * SunOS, we squish out `empty' entries.
+ * that they can be massaged before being copied out to user code.  
  *
- * This is quite ugly, but what do you expect from compatibility code?
+ * This code is ported from the Linux emulator:  Changes to the VFS interface
+ * between FreeBSD and NetBSD have made it simpler to port it from there than
+ * to adapt the NetBSD version.
  */
+int
+svr4_sys_getdents64(td, uap)
+	struct thread *td;
+	struct svr4_sys_getdents64_args *uap;
+{
+	register struct dirent *bdp;
+	struct vnode *vp;
+	caddr_t inp, buf;		/* BSD-format */
+	int len, reclen;		/* BSD-format */
+	caddr_t outp;			/* SVR4-format */
+	int resid, svr4reclen=0;	/* SVR4-format */
+	struct file *fp;
+	struct uio auio;
+	struct iovec aiov;
+	off_t off;
+	struct svr4_dirent64 svr4_dirent;
+	int buflen, error, eofflag, nbytes, justone, vfslocked;
+	u_long *cookies = NULL, *cookiep;
+	int ncookies;
 
-int svr4_readdir_callback(void *, struct dirent *, off_t);
-int svr4_readdir64_callback(void *, struct dirent *, off_t);
+	DPRINTF(("svr4_sys_getdents64(%d, *, %d)\n",
+		uap->fd, uap->nbytes));
+	if ((error = getvnode(td->td_proc->p_fd, uap->fd, &fp)) != 0) {
+		return (error);
+	}
 
-struct svr4_readdir_callback_args {
-	caddr_t outp;
-	int     resid;
-};
+	if ((fp->f_flag & FREAD) == 0) {
+		fdrop(fp, td);
+		return (EBADF);
+	}
+
+	vp = fp->f_vnode;
+	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
+	if (vp->v_type != VDIR) {
+		VFS_UNLOCK_GIANT(vfslocked);
+		fdrop(fp, td);
+		return (EINVAL);
+	}
+
+	nbytes = uap->nbytes;
+	if (nbytes == 1) {
+		nbytes = sizeof (struct svr4_dirent64);
+		justone = 1;
+	}
+	else
+		justone = 0;
+
+	off = fp->f_offset;
+#define	DIRBLKSIZ	512		/* XXX we used to use ufs's DIRBLKSIZ */
+	buflen = max(DIRBLKSIZ, nbytes);
+	buflen = min(buflen, MAXBSIZE);
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_SYSSPACE;
+	auio.uio_td = td;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
+
+	if (cookies) {
+		free(cookies, M_TEMP);
+		cookies = NULL;
+	}
+
+#ifdef MAC
+	error = mac_vnode_check_readdir(td->td_ucred, vp);
+	if (error)
+		goto out;
+#endif
+
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag,
+						&ncookies, &cookies);
+	if (error) {
+		goto out;
+	}
+
+	inp = buf;
+	outp = (caddr_t) uap->dp;
+	resid = nbytes;
+	if ((len = buflen - auio.uio_resid) <= 0) {
+		goto eof;
+	}
+
+	cookiep = cookies;
+
+	if (cookies) {
+		/*
+		 * When using cookies, the vfs has the option of reading from
+		 * a different offset than that supplied (UFS truncates the
+		 * offset to a block boundary to make sure that it never reads
+		 * partway through a directory entry, even if the directory
+		 * has been compacted).
+		 */
+		while (len > 0 && ncookies > 0 && *cookiep <= off) {
+			bdp = (struct dirent *) inp;
+			len -= bdp->d_reclen;
+			inp += bdp->d_reclen;
+			cookiep++;
+			ncookies--;
+		}
+	}
+
+	while (len > 0) {
+		if (cookiep && ncookies == 0)
+			break;
+		bdp = (struct dirent *) inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3) {
+			DPRINTF(("svr4_readdir: reclen=%d\n", reclen));
+			error = EFAULT;
+			goto out;
+		}
+  
+		if (bdp->d_fileno == 0) {
+	    		inp += reclen;
+			if (cookiep) {
+				off = *cookiep++;
+				ncookies--;
+			} else
+				off += reclen;
+			len -= reclen;
+			continue;
+		}
+		svr4reclen = SVR4_RECLEN(&svr4_dirent, bdp->d_namlen);
+		if (reclen > len || resid < svr4reclen) {
+			outp++;
+			break;
+		}
+		svr4_dirent.d_ino = (long) bdp->d_fileno;
+		if (justone) {
+			/*
+			 * old svr4-style readdir usage.
+			 */
+			svr4_dirent.d_off = (svr4_off_t) svr4reclen;
+			svr4_dirent.d_reclen = (u_short) bdp->d_namlen;
+		} else {
+			svr4_dirent.d_off = (svr4_off_t)(off + reclen);
+			svr4_dirent.d_reclen = (u_short) svr4reclen;
+		}
+		strcpy(svr4_dirent.d_name, bdp->d_name);
+		if ((error = copyout((caddr_t)&svr4_dirent, outp, svr4reclen)))
+			goto out;
+		inp += reclen;
+		if (cookiep) {
+			off = *cookiep++;
+			ncookies--;
+		} else
+			off += reclen;
+		outp += svr4reclen;
+		resid -= svr4reclen;
+		len -= reclen;
+		if (justone)
+			break;
+    	}
+
+	if (outp == (caddr_t) uap->dp)
+		goto again;
+	fp->f_offset = off;
+
+	if (justone)
+		nbytes = resid + svr4reclen;
+
+eof:
+	td->td_retval[0] = nbytes - resid;
+out:
+	VOP_UNLOCK(vp, 0, td);
+	VFS_UNLOCK_GIANT(vfslocked);
+	fdrop(fp, td);
+	if (cookies)
+		free(cookies, M_TEMP);
+	free(buf, M_TEMP);
+	return error;
+}
+
 
 int
-svr4_readdir_callback(arg, bdp, cookie)
-	void *arg;
-	struct dirent *bdp;
-	off_t cookie;
+svr4_sys_getdents(td, uap)
+	struct thread *td;
+	struct svr4_sys_getdents_args *uap;
 {
+	struct dirent *bdp;
+	struct vnode *vp;
+	caddr_t inp, buf;	/* BSD-format */
+	int len, reclen;	/* BSD-format */
+	caddr_t outp;		/* SVR4-format */
+	int resid, svr4_reclen;	/* SVR4-format */
+	struct file *fp;
+	struct uio auio;
+	struct iovec aiov;
 	struct svr4_dirent idb;
-	struct svr4_readdir_callback_args *cb = arg; 
-	int svr4_reclen;
-	int error;
+	off_t off;		/* true file offset */
+	int buflen, error, eofflag, vfslocked;
+	u_long *cookiebuf = NULL, *cookie;
+	int ncookies = 0, *retval = td->td_retval;
 
-	svr4_reclen = SVR4_RECLEN(&idb, bdp->d_namlen);
-	if (cb->resid < svr4_reclen)
-		return (ENOMEM);
+	if (uap->nbytes < 0)
+		return (EINVAL);
 
-	idb.d_ino = (svr4_ino_t)bdp->d_fileno;
-	idb.d_off = (svr4_off_t)cookie;
-	idb.d_reclen = (u_short)svr4_reclen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-	if ((error = copyout((caddr_t)&idb, cb->outp, svr4_reclen)))
+	if ((error = getvnode(td->td_proc->p_fd, uap->fd, &fp)) != 0)
 		return (error);
 
-	cb->outp += svr4_reclen;
-	cb->resid -= svr4_reclen;
+	if ((fp->f_flag & FREAD) == 0) {
+		fdrop(fp, td);
+		return (EBADF);
+	}
 
-	return (0);
-}
+	vp = fp->f_vnode;
+	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
+	if (vp->v_type != VDIR) {
+		VFS_UNLOCK_GIANT(vfslocked);
+		fdrop(fp, td);
+		return (EINVAL);
+	}
 
-int
-svr4_readdir64_callback(arg, bdp, cookie)
-	void *arg;
-	struct dirent *bdp;
-	off_t cookie;
-{
-	struct svr4_dirent64 idb;
-	struct svr4_readdir_callback_args *cb = arg; 
-	int svr4_reclen;
-	int error;
+	buflen = min(MAXBSIZE, uap->nbytes);
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	off = fp->f_offset;
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_SYSSPACE;
+	auio.uio_td = td;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
 
-	svr4_reclen = SVR4_RECLEN(&idb, bdp->d_namlen);
-	if (cb->resid < svr4_reclen)
-		return (ENOMEM);
+#ifdef MAC
+	error = mac_vnode_check_readdir(td->td_ucred, vp);
+	if (error)
+		goto out;
+#endif
 
 	/*
-	 * Massage in place to make a SVR4-shaped dirent (otherwise
-	 * we have to worry about touching user memory outside of
-	 * the copyout() call).
-	 */
-	idb.d_ino = (svr4_ino64_t)bdp->d_fileno;
-	idb.d_off = (svr4_off64_t)cookie;
-	idb.d_reclen = (u_short)svr4_reclen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-	if ((error = copyout((caddr_t)&idb, cb->outp, svr4_reclen)))
-		return (error);
+         * First we read into the malloc'ed buffer, then
+         * we massage it into user space, one record at a time.
+         */
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, &ncookies,
+	    &cookiebuf);
+	if (error) {
+		goto out;
+	}
 
-	cb->outp += svr4_reclen;
-	cb->resid -= svr4_reclen;
+	inp = buf;
+	outp = uap->buf;
+	resid = uap->nbytes;
+	if ((len = buflen - auio.uio_resid) == 0)
+		goto eof;
 
-	return (0);
+	for (cookie = cookiebuf; len > 0; len -= reclen) {
+		bdp = (struct dirent *)inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3)
+			panic("svr4_sys_getdents64: bad reclen");
+		off = *cookie++;	/* each entry points to the next */
+		if ((off >> 32) != 0) {
+			uprintf("svr4_sys_getdents64: dir offset too large for emulated program");
+			error = EINVAL;
+			goto out;
+		}
+		if (bdp->d_fileno == 0) {
+			inp += reclen;	/* it is a hole; squish it out */
+			continue;
+		}
+		svr4_reclen = SVR4_RECLEN(&idb, bdp->d_namlen);
+		if (reclen > len || resid < svr4_reclen) {
+			/* entry too big for buffer, so just stop */
+			outp++;
+			break;
+		}
+		/*
+		 * Massage in place to make a SVR4-shaped dirent (otherwise
+		 * we have to worry about touching user memory outside of
+		 * the copyout() call).
+		 */
+		idb.d_ino = (svr4_ino_t)bdp->d_fileno;
+		idb.d_off = (svr4_off_t)off;
+		idb.d_reclen = (u_short)svr4_reclen;
+		strcpy(idb.d_name, bdp->d_name);
+		if ((error = copyout((caddr_t)&idb, outp, svr4_reclen)))
+			goto out;
+		/* advance past this real entry */
+		inp += reclen;
+		/* advance output past SVR4-shaped entry */
+		outp += svr4_reclen;
+		resid -= svr4_reclen;
+	}
+
+	/* if we squished out the whole block, try again */
+	if (outp == uap->buf)
+		goto again;
+	fp->f_offset = off;	/* update the vnode offset */
+
+eof:
+	*retval = uap->nbytes - resid;
+out:
+	VOP_UNLOCK(vp, 0, td);
+	VFS_UNLOCK_GIANT(vfslocked);
+	fdrop(fp, td);
+	if (cookiebuf)
+		free(cookiebuf, M_TEMP);
+	free(buf, M_TEMP);
+	return error;
 }
 
 
 int
-svr4_sys_getdents(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_mmap(td, uap)
+	struct thread *td;
+	struct svr4_sys_mmap_args *uap;
 {
-	struct svr4_sys_getdents_args *uap = v;
-	struct svr4_readdir_callback_args args;
-	struct file *fp;
-	int error;
+	struct mmap_args	 mm;
+	int             *retval;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
-		return (error);
-
-	args.resid = SCARG(uap, nbytes);
-	args.outp = (caddr_t)SCARG(uap, buf);
-
-	error = readdir_with_callback(fp, &fp->f_offset, SCARG(uap, nbytes),
-	    svr4_readdir_callback, &args);
-	FRELE(fp);
-	if (error)
-		return (error);
-
-	*retval = SCARG(uap, nbytes) - args.resid;
-
-	return (0);
-}
-
-int
-svr4_sys_getdents64(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct svr4_sys_getdents64_args *uap = v;
-	struct svr4_readdir_callback_args args;
-	struct file *fp;
-	int error;
-
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
-		return (error);
-
-	args.resid = SCARG(uap, nbytes);
-	args.outp = (caddr_t)SCARG(uap, dp);
-
-	error = readdir_with_callback(fp, &fp->f_offset, SCARG(uap, nbytes),
-	    svr4_readdir64_callback, &args);
-	FRELE(fp);
-	if (error)
-		return (error);
-
-	*retval = SCARG(uap, nbytes) - args.resid;
-
-	return (0);
-}
-
-int
-svr4_sys_mmap(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct svr4_sys_mmap_args	*uap = v;
-	struct sys_mmap_args	 mm;
-	void			*rp;
+	retval = td->td_retval;
 #define _MAP_NEW	0x80000000
 	/*
          * Verify the arguments.
          */
-	if (SCARG(uap, prot) & ~(PROT_READ | PROT_WRITE | PROT_EXEC))
+	if (uap->prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC))
 		return EINVAL;	/* XXX still needed? */
 
-	if (SCARG(uap, len) == 0)
+	if (uap->len == 0)
 		return EINVAL;
 
-	SCARG(&mm, prot) = SCARG(uap, prot);
-	SCARG(&mm, len) = SCARG(uap, len);
-	SCARG(&mm, flags) = SCARG(uap, flags) & ~_MAP_NEW;
-	SCARG(&mm, fd) = SCARG(uap, fd);
-	SCARG(&mm, addr) = SCARG(uap, addr);
-	SCARG(&mm, pos) = SCARG(uap, pos);
+	mm.prot = uap->prot;
+	mm.len = uap->len;
+	mm.flags = uap->flags & ~_MAP_NEW;
+	mm.fd = uap->fd;
+	mm.addr = uap->addr;
+	mm.pos = uap->pos;
 
-	rp = (void *) round_page((vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ);
-	if ((SCARG(&mm, flags) & MAP_FIXED) == 0 &&
-	    SCARG(&mm, addr) != 0 && SCARG(&mm, addr) < rp)
-		SCARG(&mm, addr) = rp;
-
-	return sys_mmap(p, &mm, retval);
+	return mmap(td, &mm);
 }
 
 int
-svr4_sys_mmap64(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_mmap64(td, uap)
+	struct thread *td;
+	struct svr4_sys_mmap64_args *uap;
 {
-	struct svr4_sys_mmap64_args	*uap = v;
-	struct sys_mmap_args	 mm;
-	void			*rp;
+	struct mmap_args	 mm;
+	void		*rp;
+
 #define _MAP_NEW	0x80000000
 	/*
          * Verify the arguments.
          */
-	if (SCARG(uap, prot) & ~(PROT_READ | PROT_WRITE | PROT_EXEC))
+	if (uap->prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC))
 		return EINVAL;	/* XXX still needed? */
 
-	if (SCARG(uap, len) == 0)
+	if (uap->len == 0)
 		return EINVAL;
 
-	SCARG(&mm, prot) = SCARG(uap, prot);
-	SCARG(&mm, len) = SCARG(uap, len);
-	SCARG(&mm, flags) = SCARG(uap, flags) & ~_MAP_NEW;
-	SCARG(&mm, fd) = SCARG(uap, fd);
-	SCARG(&mm, addr) = SCARG(uap, addr);
-	SCARG(&mm, pos) = SCARG(uap, pos);
+	mm.prot = uap->prot;
+	mm.len = uap->len;
+	mm.flags = uap->flags & ~_MAP_NEW;
+	mm.fd = uap->fd;
+	mm.addr = uap->addr;
+	mm.pos = uap->pos;
 
-	rp = (void *) round_page((vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ);
-	if ((SCARG(&mm, flags) & MAP_FIXED) == 0 &&
-	    SCARG(&mm, addr) != 0 && SCARG(&mm, addr) < rp)
-		SCARG(&mm, addr) = rp;
+	rp = (void *) round_page((vm_offset_t)(td->td_proc->p_vmspace->vm_daddr + maxdsiz));
+	if ((mm.flags & MAP_FIXED) == 0 &&
+	    mm.addr != 0 && (void *)mm.addr < rp)
+		mm.addr = rp;
 
-	return sys_mmap(p, &mm, retval);
+	return mmap(td, &mm);
 }
 
+
 int
-svr4_sys_fchroot(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_fchroot(td, uap)
+	struct thread *td;
+	struct svr4_sys_fchroot_args *uap;
 {
-	struct svr4_sys_fchroot_args *uap = v;
-	struct filedesc	*fdp = p->p_fd;
+	struct filedesc	*fdp = td->td_proc->p_fd;
 	struct vnode	*vp;
 	struct file	*fp;
-	int		 error;
+	int		 error, vfslocked;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = priv_check(td, PRIV_VFS_FCHROOT)) != 0)
 		return error;
-	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(fdp, uap->fd, &fp)) != 0)
 		return error;
-
-	vp = (struct vnode *) fp->f_data;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	if (vp->v_type != VDIR)
-		error = ENOTDIR;
-	else
-		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
-	VOP_UNLOCK(vp, 0, p);
-	if (error) {
-		FRELE(fp);
-		return error;
-	}
+	vp = fp->f_vnode;
 	VREF(vp);
-	if (fdp->fd_rdir != NULL)
-		vrele(fdp->fd_rdir);
-	fdp->fd_rdir = vp;
-	FRELE(fp);
-	return 0;
+	fdrop(fp, td);
+	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	error = change_dir(vp, td);
+	if (error)
+		goto fail;
+#ifdef MAC
+	error = mac_vnode_check_chroot(td->td_ucred, vp);
+	if (error)
+		goto fail;
+#endif
+	VOP_UNLOCK(vp, 0, td);
+	error = change_root(vp, td);
+	vrele(vp);
+	VFS_UNLOCK_GIANT(vfslocked);
+	return (error);
+fail:
+	vput(vp);
+	VFS_UNLOCK_GIANT(vfslocked);
+	return (error);
 }
 
+
 static int
-svr4_mknod(p, retval, path, mode, dev)
-	struct proc *p;
+svr4_mknod(td, retval, path, mode, dev)
+	struct thread *td;
 	register_t *retval;
 	char *path;
 	svr4_mode_t mode;
 	svr4_dev_t dev;
 {
-	caddr_t sg = stackgap_init(p->p_emul);
+	char *newpath;
+	int error;
 
-	SVR4_CHECK_ALT_EXIST(p, &sg, path);
+	CHECKALTEXIST(td, path, &newpath);
 
-	if (S_ISFIFO(mode)) {
-		struct sys_mkfifo_args ap;
-		SCARG(&ap, path) = path;
-		SCARG(&ap, mode) = mode;
-		return sys_mkfifo(p, &ap, retval);
-	} else {
-		struct sys_mknod_args ap;
-		SCARG(&ap, path) = path;
-		SCARG(&ap, mode) = mode;
-		SCARG(&ap, dev) = dev;
-		return sys_mknod(p, &ap, retval);
-	}
+	if (S_ISFIFO(mode))
+		error = kern_mkfifo(td, newpath, UIO_SYSSPACE, mode);
+	else
+		error = kern_mknod(td, newpath, UIO_SYSSPACE, mode, dev);
+	free(newpath, M_TEMP);
+	return (error);
 }
 
 
 int
-svr4_sys_mknod(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_mknod(td, uap)
+	register struct thread *td;
+	struct svr4_sys_mknod_args *uap;
 {
-	struct svr4_sys_mknod_args *uap = v;
-	return svr4_mknod(p, retval,
-			  SCARG(uap, path), SCARG(uap, mode),
-			  svr4_to_bsd_odev_t(SCARG(uap, dev)));
+        int *retval = td->td_retval;
+	return svr4_mknod(td, retval,
+			  uap->path, uap->mode,
+			  (svr4_dev_t)svr4_to_bsd_odev_t(uap->dev));
 }
 
 
 int
-svr4_sys_xmknod(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_xmknod(td, uap)
+	struct thread *td;
+	struct svr4_sys_xmknod_args *uap;
 {
-	struct svr4_sys_xmknod_args *uap = v;
-	return svr4_mknod(p, retval,
-			  SCARG(uap, path), SCARG(uap, mode),
-			  svr4_to_bsd_dev_t(SCARG(uap, dev)));
+        int *retval = td->td_retval;
+	return svr4_mknod(td, retval,
+			  uap->path, uap->mode,
+			  (svr4_dev_t)svr4_to_bsd_dev_t(uap->dev));
 }
 
 
 int
-svr4_sys_vhangup(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_vhangup(td, uap)
+	struct thread *td;
+	struct svr4_sys_vhangup_args *uap;
 {
 	return 0;
 }
 
 
 int
-svr4_sys_sysconfig(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_sysconfig(td, uap)
+	struct thread *td;
+	struct svr4_sys_sysconfig_args *uap;
 {
-	struct svr4_sys_sysconfig_args *uap = v;
-	extern int	maxfiles;
+	int *retval;
 
-	switch (SCARG(uap, name)) {
+	retval = &(td->td_retval[0]);
+
+	switch (uap->name) {
 	case SVR4_CONFIG_UNUSED:
 		*retval = 0;
 		break;
@@ -537,7 +722,7 @@ svr4_sys_sysconfig(p, v, retval)
 		*retval = 198808;
 		break;
 	case SVR4_CONFIG_PAGESIZE:
-		*retval = NBPG;
+		*retval = PAGE_SIZE;
 		break;
 	case SVR4_CONFIG_CLK_TCK:
 		*retval = 60;	/* should this be `hz', ie. 100? */
@@ -562,25 +747,21 @@ svr4_sys_sysconfig(p, v, retval)
 	case SVR4_CONFIG_DELAYTIMER_MAX:
 		*retval = 0;	/* No delaytimer support */
 		break;
-#ifdef SYSVMSG
 	case SVR4_CONFIG_MQ_OPEN_MAX:
 		*retval = msginfo.msgmni;
 		break;
-#endif
 	case SVR4_CONFIG_MQ_PRIO_MAX:
 		*retval = 0;	/* XXX: Don't know */
 		break;
 	case SVR4_CONFIG_RTSIG_MAX:
 		*retval = 0;
 		break;
-#ifdef SYSVSEM
 	case SVR4_CONFIG_SEM_NSEMS_MAX:
 		*retval = seminfo.semmni;
 		break;
 	case SVR4_CONFIG_SEM_VALUE_MAX:
 		*retval = seminfo.semvmx;
 		break;
-#endif
 	case SVR4_CONFIG_SIGQUEUE_MAX:
 		*retval = 0;	/* XXX: Don't know */
 		break;
@@ -591,115 +772,39 @@ svr4_sys_sysconfig(p, v, retval)
 	case SVR4_CONFIG_TIMER_MAX:
 		*retval = 3;	/* XXX: real, virtual, profiling */
 		break;
+#if defined(NOTYET)
 	case SVR4_CONFIG_PHYS_PAGES:
-		*retval = uvmexp.npages;
+#if defined(UVM)
+		*retval = uvmexp.free;	/* XXX: free instead of total */
+#else
+		*retval = cnt.v_free_count;	/* XXX: free instead of total */
+#endif
 		break;
 	case SVR4_CONFIG_AVPHYS_PAGES:
+#if defined(UVM)
 		*retval = uvmexp.active;	/* XXX: active instead of avg */
+#else
+		*retval = cnt.v_active_count;	/* XXX: active instead of avg */
+#endif
 		break;
+#endif /* NOTYET */
+
 	default:
 		return EINVAL;
 	}
 	return 0;
 }
 
-#define SVR4_RLIMIT_NOFILE	5	/* Other RLIMIT_* are the same */
-#define SVR4_RLIMIT_VMEM	6	/* Other RLIMIT_* are the same */
-#define SVR4_RLIM_NLIMITS	7
-
-int
-svr4_sys_getrlimit(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct svr4_sys_getrlimit_args *uap = v;
-	struct compat_43_sys_getrlimit_args ap;
-
-	if (SCARG(uap, which) >= SVR4_RLIM_NLIMITS)
-		return EINVAL;
-
-	if (SCARG(uap, which) == SVR4_RLIMIT_NOFILE)
-		SCARG(uap, which) = RLIMIT_NOFILE;
-	if (SCARG(uap, which) == SVR4_RLIMIT_VMEM)
-		SCARG(uap, which) = RLIMIT_RSS;
-
-	SCARG(&ap, which) = SCARG(uap, which);
-	SCARG(&ap, rlp) = SCARG(uap, rlp);
-
-	return compat_43_sys_getrlimit(p, &ap, retval);
-}
-
-int
-svr4_sys_setrlimit(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct svr4_sys_setrlimit_args *uap = v;
-	struct compat_43_sys_setrlimit_args ap;
-
-	if (SCARG(uap, which) >= SVR4_RLIM_NLIMITS)
-		return EINVAL;
-
-	if (SCARG(uap, which) == SVR4_RLIMIT_NOFILE)
-		SCARG(uap, which) = RLIMIT_NOFILE;
-	if (SCARG(uap, which) == SVR4_RLIMIT_VMEM)
-		SCARG(uap, which) = RLIMIT_RSS;
-
-	SCARG(&ap, which) = SCARG(uap, which);
-	SCARG(&ap, rlp) = SCARG(uap, rlp);
-
-	return compat_43_sys_setrlimit(p, uap, retval);
-}
-
-
 /* ARGSUSED */
 int
-svr4_sys_break(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_break(td, uap)
+	struct thread *td;
+	struct svr4_sys_break_args *uap;
 {
-	struct svr4_sys_break_args *uap = v;
-	register struct vmspace *vm = p->p_vmspace;
-	vaddr_t		new, old;
-	int             error;
-	register int    diff;
+	struct obreak_args ap;
 
-	old = (vaddr_t) vm->vm_daddr;
-	new = round_page((vaddr_t)SCARG(uap, nsize));
-	diff = new - old;
-
-	DPRINTF(("break(1): old %lx new %lx diff %x\n", old, new, diff));
-
-	if (diff > p->p_rlimit[RLIMIT_DATA].rlim_cur)
-		return ENOMEM;
-
-	old = round_page(old + ptoa(vm->vm_dsize));
-	DPRINTF(("break(2): dsize = %x ptoa %x\n",
-		 vm->vm_dsize, ptoa(vm->vm_dsize)));
-
-	diff = new - old;
-	DPRINTF(("break(3): old %lx new %lx diff %x\n", old, new, diff));
-
-	if (diff > 0) {
-		error = uvm_map(&vm->vm_map, &old, diff, NULL, UVM_UNKNOWN_OFFSET,
-			0, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_COPY,
-				    UVM_ADV_NORMAL,
-				    UVM_FLAG_AMAPPAD|UVM_FLAG_FIXED|
-				    UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
-		if (error) {
-			uprintf("sbrk: grow failed, return = %d\n", error);
-			return error;
-		}
-		vm->vm_dsize += atop(diff);
-	} else if (diff < 0) {
-		diff = -diff;
-		uvm_deallocate(&vm->vm_map, new, diff);
-		vm->vm_dsize -= atop(diff);
-	}
-	return 0;
+	ap.nsize = uap->nsize;
+	return (obreak(td, &ap));
 }
 
 static __inline clock_t
@@ -709,111 +814,111 @@ timeval_to_clock_t(tv)
 	return tv->tv_sec * hz + tv->tv_usec / (1000000 / hz);
 }
 
+
 int
-svr4_sys_times(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_times(td, uap)
+	struct thread *td;
+	struct svr4_sys_times_args *uap;
 {
-	struct svr4_sys_times_args *uap = v;
-	int			 error;
-	struct tms		 tms;
-	struct timeval		 t;
-	struct rusage		*ru;
-	struct rusage		 r;
-	struct sys_getrusage_args 	 ga;
+	struct timeval tv, utime, stime, cutime, cstime;
+	struct tms tms;
+	struct proc *p;
+	int error;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	ru = stackgap_alloc(&sg, sizeof(struct rusage));
+	p = td->td_proc;
+	PROC_LOCK(p);
+	PROC_SLOCK(p);
+	calcru(p, &utime, &stime);
+	PROC_SUNLOCK(p);
+	calccru(p, &cutime, &cstime);
+	PROC_UNLOCK(p);
 
-	SCARG(&ga, who) = RUSAGE_SELF;
-	SCARG(&ga, rusage) = ru;
+	tms.tms_utime = timeval_to_clock_t(&utime);
+	tms.tms_stime = timeval_to_clock_t(&stime);
 
-	error = sys_getrusage(p, &ga, retval);
+	tms.tms_cutime = timeval_to_clock_t(&cutime);
+	tms.tms_cstime = timeval_to_clock_t(&cstime);
+
+	error = copyout(&tms, uap->tp, sizeof(tms));
 	if (error)
-		return error;
+		return (error);
 
-	if ((error = copyin(ru, &r, sizeof r)) != 0)
-		return error;
-
-	tms.tms_utime = timeval_to_clock_t(&r.ru_utime);
-	tms.tms_stime = timeval_to_clock_t(&r.ru_stime);
-
-	SCARG(&ga, who) = RUSAGE_CHILDREN;
-	error = sys_getrusage(p, &ga, retval);
-	if (error)
-		return error;
-
-	if ((error = copyin(ru, &r, sizeof r)) != 0)
-		return error;
-
-	tms.tms_cutime = timeval_to_clock_t(&r.ru_utime);
-	tms.tms_cstime = timeval_to_clock_t(&r.ru_stime);
-
-	microtime(&t);
-	*retval = timeval_to_clock_t(&t);
-
-	return copyout(&tms, SCARG(uap, tp), sizeof(tms));
+	microtime(&tv);
+	td->td_retval[0] = (int)timeval_to_clock_t(&tv);
+	return (0);
 }
 
 
 int
-svr4_sys_ulimit(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_ulimit(td, uap)
+	struct thread *td;
+	struct svr4_sys_ulimit_args *uap;
 {
-	struct svr4_sys_ulimit_args *uap = v;
+        int *retval = td->td_retval;
+	int error;
 
-	switch (SCARG(uap, cmd)) {
+	switch (uap->cmd) {
 	case SVR4_GFILLIM:
-		*retval = p->p_rlimit[RLIMIT_FSIZE].rlim_cur / 512;
+		PROC_LOCK(td->td_proc);
+		*retval = lim_cur(td->td_proc, RLIMIT_FSIZE) / 512;
+		PROC_UNLOCK(td->td_proc);
+		if (*retval == -1)
+			*retval = 0x7fffffff;
 		return 0;
 
 	case SVR4_SFILLIM:
 		{
-			int error;
-			struct sys_setrlimit_args srl;
 			struct rlimit krl;
-			caddr_t sg = stackgap_init(p->p_emul);
-			struct rlimit *url = (struct rlimit *) 
-				stackgap_alloc(&sg, sizeof *url);
 
-			krl.rlim_cur = SCARG(uap, newlimit) * 512;
-			krl.rlim_max = p->p_rlimit[RLIMIT_FSIZE].rlim_max;
+			krl.rlim_cur = uap->newlimit * 512;
+			PROC_LOCK(td->td_proc);
+			krl.rlim_max = lim_max(td->td_proc, RLIMIT_FSIZE);
+			PROC_UNLOCK(td->td_proc);
 
-			error = copyout(&krl, url, sizeof(*url));
+			error = kern_setrlimit(td, RLIMIT_FSIZE, &krl);
 			if (error)
 				return error;
 
-			SCARG(&srl, which) = RLIMIT_FSIZE;
-			SCARG(&srl, rlp) = url;
-
-			error = sys_setrlimit(p, &srl, retval);
-			if (error)
-				return error;
-
-			*retval = p->p_rlimit[RLIMIT_FSIZE].rlim_cur;
+			PROC_LOCK(td->td_proc);
+			*retval = lim_cur(td->td_proc, RLIMIT_FSIZE);
+			PROC_UNLOCK(td->td_proc);
+			if (*retval == -1)
+				*retval = 0x7fffffff;
 			return 0;
 		}
 
 	case SVR4_GMEMLIM:
 		{
-			struct vmspace *vm = p->p_vmspace;
-			*retval = (long) vm->vm_daddr +
-				  p->p_rlimit[RLIMIT_DATA].rlim_cur;
+			struct vmspace *vm = td->td_proc->p_vmspace;
+			register_t r;
+
+			PROC_LOCK(td->td_proc);
+			r = lim_cur(td->td_proc, RLIMIT_DATA);
+			PROC_UNLOCK(td->td_proc);
+
+			if (r == -1)
+				r = 0x7fffffff;
+			mtx_lock(&Giant);	/* XXX */
+			r += (long) vm->vm_daddr;
+			mtx_unlock(&Giant);
+			if (r < 0)
+				r = 0x7fffffff;
+			*retval = r;
 			return 0;
 		}
 
 	case SVR4_GDESLIM:
-		*retval = p->p_rlimit[RLIMIT_NOFILE].rlim_cur;
+		PROC_LOCK(td->td_proc);
+		*retval = lim_cur(td->td_proc, RLIMIT_NOFILE);
+		PROC_UNLOCK(td->td_proc);
+		if (*retval == -1)
+			*retval = 0x7fffffff;
 		return 0;
 
 	default:
 		return EINVAL;
 	}
 }
-
 
 static struct proc *
 svr4_pfind(pid)
@@ -822,74 +927,74 @@ svr4_pfind(pid)
 	struct proc *p;
 
 	/* look in the live processes */
-	if ((p = pfind(pid)) != NULL)
-		return p;
+	if ((p = pfind(pid)) == NULL)
+		/* look in the zombies */
+		p = zpfind(pid);
 
-	/* look in the zombies */
-	LIST_FOREACH(p, &zombproc, p_list)
-		if (p->p_pid == pid)
-			return p;
-
-	return NULL;
+	return p;
 }
 
 
 int
-svr4_sys_pgrpsys(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_pgrpsys(td, uap)
+	struct thread *td;
+	struct svr4_sys_pgrpsys_args *uap;
 {
-	struct svr4_sys_pgrpsys_args *uap = v;
-	int error;
+        int *retval = td->td_retval;
+	struct proc *p = td->td_proc;
 
-	switch (SCARG(uap, cmd)) {
+	switch (uap->cmd) {
+	case 1:			/* setpgrp() */
+		/*
+		 * SVR4 setpgrp() (which takes no arguments) has the
+		 * semantics that the session ID is also created anew, so
+		 * in almost every sense, setpgrp() is identical to
+		 * setsid() for SVR4.  (Under BSD, the difference is that
+		 * a setpgid(0,0) will not create a new session.)
+		 */
+		setsid(td, NULL);
+		/*FALLTHROUGH*/
+
 	case 0:			/* getpgrp() */
+		PROC_LOCK(p);
 		*retval = p->p_pgrp->pg_id;
+		PROC_UNLOCK(p);
 		return 0;
 
-	case 1:			/* setpgrp() */
-		{
-			struct sys_setpgid_args sa;
-
-			SCARG(&sa, pid) = 0;
-			SCARG(&sa, pgid) = 0;
-			if ((error = sys_setpgid(p, &sa, retval)) != 0)
-				return error;
-			*retval = p->p_pgrp->pg_id;
-			return 0;
-		}
-
 	case 2:			/* getsid(pid) */
-		if (SCARG(uap, pid) != 0 &&
-		    (p = svr4_pfind(SCARG(uap, pid))) == NULL)
+		if (uap->pid == 0)
+			PROC_LOCK(p);
+		else if ((p = svr4_pfind(uap->pid)) == NULL)
 			return ESRCH;
-		/* 
-		 * we return the pid of the session leader for this
-		 * process
+		/*
+		 * This has already been initialized to the pid of
+		 * the session leader.
 		 */
-		*retval = (register_t) p->p_session->s_leader->p_pid;
+		*retval = (register_t) p->p_session->s_sid;
+		PROC_UNLOCK(p);
 		return 0;
 
 	case 3:			/* setsid() */
-		return sys_setsid(p, NULL, retval);
+		return setsid(td, NULL);
 
 	case 4:			/* getpgid(pid) */
 
-		if (SCARG(uap, pid) != 0 &&
-		    (p = svr4_pfind(SCARG(uap, pid))) == NULL)
+		if (uap->pid == 0)
+			PROC_LOCK(p);
+		else if ((p = svr4_pfind(uap->pid)) == NULL)
 			return ESRCH;
 
 		*retval = (int) p->p_pgrp->pg_id;
+		PROC_UNLOCK(p);
 		return 0;
 
 	case 5:			/* setpgid(pid, pgid); */
 		{
-			struct sys_setpgid_args sa;
+			struct setpgid_args sa;
 
-			SCARG(&sa, pid) = SCARG(uap, pid);
-			SCARG(&sa, pgid) = SCARG(uap, pgid);
-			return sys_setpgid(p, &sa, retval);
+			sa.pid = uap->pid;
+			sa.pgid = uap->pgid;
+			return setpgid(td, &sa);
 		}
 
 	default:
@@ -898,20 +1003,21 @@ svr4_sys_pgrpsys(p, v, retval)
 }
 
 struct svr4_hrtcntl_args {
-	syscallarg(int) 			cmd;
-	syscallarg(int) 			fun;
-	syscallarg(int) 			clk;
-	syscallarg(svr4_hrt_interval_t *)	iv;
-	syscallarg(svr4_hrt_time_t *)		ti;
+	int 			cmd;
+	int 			fun;
+	int 			clk;
+	svr4_hrt_interval_t *	iv;
+	svr4_hrt_time_t *	ti;
 };
 
+
 static int
-svr4_hrtcntl(p, uap, retval)
-	register struct proc *p;
-	register struct svr4_hrtcntl_args *uap;
+svr4_hrtcntl(td, uap, retval)
+	struct thread *td;
+	struct svr4_hrtcntl_args *uap;
 	register_t *retval;
 {
-	switch (SCARG(uap, fun)) {
+	switch (uap->fun) {
 	case SVR4_HRT_CNTL_RES:
 		DPRINTF(("htrcntl(RES)\n"));
 		*retval = SVR4_HRT_USEC;
@@ -922,11 +1028,11 @@ svr4_hrtcntl(p, uap, retval)
 		{
 			struct timeval tv;
 			svr4_hrt_time_t t;
-			if (SCARG(uap, clk) != SVR4_HRT_CLK_STD) {
-				DPRINTF(("clk == %d\n", SCARG(uap, clk)));
+			if (uap->clk != SVR4_HRT_CLK_STD) {
+				DPRINTF(("clk == %d\n", uap->clk));
 				return EINVAL;
 			}
-			if (SCARG(uap, ti) == NULL) {
+			if (uap->ti == NULL) {
 				DPRINTF(("ti NULL\n"));
 				return EINVAL;
 			}
@@ -934,7 +1040,7 @@ svr4_hrtcntl(p, uap, retval)
 			t.h_sec = tv.tv_sec;
 			t.h_rem = tv.tv_usec;
 			t.h_res = SVR4_HRT_USEC;
-			return copyout(&t, SCARG(uap, ti), sizeof(t));
+			return copyout(&t, uap->ti, sizeof(t));
 		}
 
 	case SVR4_HRT_CNTL_START:
@@ -945,22 +1051,22 @@ svr4_hrtcntl(p, uap, retval)
 		DPRINTF(("htrcntl(GET)\n"));
 		return ENOSYS;
 	default:
-		DPRINTF(("Bad htrcntl command %d\n", SCARG(uap, fun)));
+		DPRINTF(("Bad htrcntl command %d\n", uap->fun));
 		return ENOSYS;
 	}
 }
 
-int
-svr4_sys_hrtsys(p, v, retval) 
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct svr4_sys_hrtsys_args *uap = v;
 
-	switch (SCARG(uap, cmd)) {
+int
+svr4_sys_hrtsys(td, uap) 
+	struct thread *td;
+	struct svr4_sys_hrtsys_args *uap;
+{
+        int *retval = td->td_retval;
+
+	switch (uap->cmd) {
 	case SVR4_HRT_CNTL:
-		return svr4_hrtcntl(p, (struct svr4_hrtcntl_args *) uap,
+		return svr4_hrtcntl(td, (struct svr4_hrtcntl_args *) uap,
 				    retval);
 
 	case SVR4_HRT_ALRM:
@@ -976,48 +1082,49 @@ svr4_sys_hrtsys(p, v, retval)
 		return ENOSYS;
 
 	default:
-		DPRINTF(("Bad hrtsys command %d\n", SCARG(uap, cmd)));
+		DPRINTF(("Bad hrtsys command %d\n", uap->cmd));
 		return EINVAL;
 	}
 }
 
+
 static int
-svr4_setinfo(p, st, s)
-	struct proc *p;
+svr4_setinfo(pid, ru, st, s)
+	pid_t pid;
+	struct rusage *ru;
 	int st;
 	svr4_siginfo_t *s;
 {
 	svr4_siginfo_t i;
+	int sig;
 
-	bzero(&i, sizeof(i));
+	memset(&i, 0, sizeof(i));
 
 	i.svr4_si_signo = SVR4_SIGCHLD;
 	i.svr4_si_errno = 0;	/* XXX? */
 
-	if (p) {
-		i.svr4_si_pid = p->p_pid;
-		if (p->p_stat == SZOMB) {
-			i.svr4_si_stime = p->p_ru->ru_stime.tv_sec;
-			i.svr4_si_utime = p->p_ru->ru_utime.tv_sec;
-		} else {
-			i.svr4_si_stime = p->p_stats->p_ru.ru_stime.tv_sec;
-			i.svr4_si_utime = p->p_stats->p_ru.ru_utime.tv_sec;
-		}
+	i.svr4_si_pid = pid;
+	if (ru) {
+		i.svr4_si_stime = ru->ru_stime.tv_sec;
+		i.svr4_si_utime = ru->ru_utime.tv_sec;
 	}
 
 	if (WIFEXITED(st)) {
 		i.svr4_si_status = WEXITSTATUS(st);
 		i.svr4_si_code = SVR4_CLD_EXITED;
-	}
-	else if (WIFSTOPPED(st)) {
-		i.svr4_si_status = bsd_to_svr4_sig[WSTOPSIG(st)];
+	} else if (WIFSTOPPED(st)) {
+		sig = WSTOPSIG(st);
+		if (sig >= 0 && sig < NSIG)
+			i.svr4_si_status = SVR4_BSD2SVR4_SIG(sig);
 
 		if (i.svr4_si_status == SVR4_SIGCONT)
 			i.svr4_si_code = SVR4_CLD_CONTINUED;
 		else
 			i.svr4_si_code = SVR4_CLD_STOPPED;
 	} else {
-		i.svr4_si_status = bsd_to_svr4_sig[WTERMSIG(st)];
+		sig = WTERMSIG(st);
+		if (sig >= 0 && sig < NSIG)
+			i.svr4_si_status = SVR4_BSD2SVR4_SIG(sig);
 
 		if (WCOREDUMP(st))
 			i.svr4_si_code = SVR4_CLD_DUMPED;
@@ -1026,112 +1133,208 @@ svr4_setinfo(p, st, s)
 	}
 
 	DPRINTF(("siginfo [pid %ld signo %d code %d errno %d status %d]\n",
-		 i.svr4_si_pid, i.svr4_si_signo, i.svr4_si_code,
-		 i.svr4_si_errno, i.svr4_si_status));
+		 i.svr4_si_pid, i.svr4_si_signo, i.svr4_si_code, i.svr4_si_errno,
+		 i.svr4_si_status));
 
 	return copyout(&i, s, sizeof(i));
 }
 
 
 int
-svr4_sys_waitsys(q, v, retval) 
-	struct proc *q;
-	void *v;
-	register_t *retval;
+svr4_sys_waitsys(td, uap)
+	struct thread *td;
+	struct svr4_sys_waitsys_args *uap;
 {
-	struct svr4_sys_waitsys_args *uap = v;
-	int nfound;
-	int error;
-	struct proc *p, *t;
+	struct rusage ru;
+	pid_t pid;
+	int nfound, status;
+	int error, *retval = td->td_retval;
+	struct proc *p, *q;
 
-	switch (SCARG(uap, grp)) {
-	case SVR4_P_PID:	
+	DPRINTF(("waitsys(%d, %d, %p, %x)\n", 
+	         uap->grp, uap->id,
+		 uap->info, uap->options));
+
+	q = td->td_proc;
+	switch (uap->grp) {
+	case SVR4_P_PID:
+		pid = uap->id;
 		break;
 
 	case SVR4_P_PGID:
-		SCARG(uap, id) = -q->p_pgid;
+		PROC_LOCK(q);
+		pid = -q->p_pgid;
+		PROC_UNLOCK(q);
 		break;
 
 	case SVR4_P_ALL:
-		SCARG(uap, id) = WAIT_ANY;
+		pid = WAIT_ANY;
 		break;
 
 	default:
-		return (EINVAL);
+		return EINVAL;
 	}
 
-	DPRINTF(("waitsys(%d, %d, %p, %x)\n", SCARG(uap, grp), SCARG(uap, id),
-	    SCARG(uap, info), SCARG(uap, options)));
+	/* Hand off the easy cases to kern_wait(). */
+	if (!(uap->options & (SVR4_WNOWAIT)) &&
+	    (uap->options & (SVR4_WEXITED | SVR4_WTRAPPED))) {
+		int options;
 
+		options = 0;
+		if (uap->options & SVR4_WSTOPPED)
+			options |= WUNTRACED;
+		if (uap->options & SVR4_WCONTINUED)
+			options |= WCONTINUED;
+		if (uap->options & SVR4_WNOHANG)
+			options |= WNOHANG;
+
+		error = kern_wait(td, pid, &status, options, &ru);
+		if (error)
+			return (error);
+		if (uap->options & SVR4_WNOHANG && *retval == 0)
+			error = svr4_setinfo(*retval, NULL, 0, uap->info);
+		else
+			error = svr4_setinfo(*retval, &ru, status, uap->info);
+		*retval = 0;
+		return (error);
+	}
+
+	/*
+	 * Ok, handle the weird cases.  Either WNOWAIT is set (meaning we
+	 * just want to see if there is a process to harvest, we dont'
+	 * want to actually harvest it), or WEXIT and WTRAPPED are clear
+	 * meaning we want to ignore zombies.  Either way, we don't have
+	 * to handle harvesting zombies here.  We do have to duplicate the
+	 * other portions of kern_wait() though, especially for the
+	 * WCONTINUED and WSTOPPED.
+	 */
 loop:
 	nfound = 0;
+	sx_slock(&proctree_lock);
 	LIST_FOREACH(p, &q->p_children, p_sibling) {
-		if (SCARG(uap, id) != WAIT_ANY &&
-		    p->p_pid != SCARG(uap, id) &&
-		    p->p_pgid != -SCARG(uap, id)) {
+		PROC_LOCK(p);
+		if (pid != WAIT_ANY &&
+		    p->p_pid != pid && p->p_pgid != -pid) {
+			PROC_UNLOCK(p);
 			DPRINTF(("pid %d pgid %d != %d\n", p->p_pid,
-				 p->p_pgid, SCARG(uap, id)));
+				 p->p_pgid, pid));
 			continue;
 		}
+		if (p_canwait(td, p)) {
+			PROC_UNLOCK(p);
+			continue;
+		}
+
 		nfound++;
-		if (p->p_stat == SZOMB && 
-		    ((SCARG(uap, options) & (SVR4_WEXITED|SVR4_WTRAPPED)))) {
-			*retval = 0;
-			DPRINTF(("found %d\n", p->p_pid));
-			error = svr4_setinfo(p, p->p_xstat, SCARG(uap, info));
-			if (error)
-				return (error);
 
-			if ((SCARG(uap, options) & SVR4_WNOWAIT)) {
-				DPRINTF(("Don't wait\n"));
-				return (0);
+		PROC_SLOCK(p);
+		/*
+		 * See if we have a zombie.  If so, WNOWAIT should be set,
+		 * as otherwise we should have called kern_wait() up above.
+		 */
+		if ((p->p_state == PRS_ZOMBIE) && 
+		    ((uap->options & (SVR4_WEXITED|SVR4_WTRAPPED)))) {
+			PROC_SUNLOCK(p);
+			KASSERT(uap->options & SVR4_WNOWAIT,
+			    ("WNOWAIT is clear"));
+
+			/* Found a zombie, so cache info in local variables. */
+			pid = p->p_pid;
+			status = p->p_xstat;
+			ru = p->p_ru;
+			PROC_SLOCK(p);
+			calcru(p, &ru.ru_utime, &ru.ru_stime);
+			PROC_SUNLOCK(p);
+			PROC_UNLOCK(p);
+			sx_sunlock(&proctree_lock);
+
+			/* Copy the info out to userland. */
+			*retval = 0;
+			DPRINTF(("found %d\n", pid));
+			return (svr4_setinfo(pid, &ru, status, uap->info));
+		}
+
+		/*
+		 * See if we have a stopped or continued process.
+		 * XXX: This duplicates the same code in kern_wait().
+		 */
+		if ((p->p_flag & P_STOPPED_SIG) &&
+		    (p->p_suspcount == p->p_numthreads) &&
+		    (p->p_flag & P_WAITED) == 0 &&
+		    (p->p_flag & P_TRACED || uap->options & SVR4_WSTOPPED)) {
+			PROC_SUNLOCK(p);
+		        if (((uap->options & SVR4_WNOWAIT)) == 0)
+				p->p_flag |= P_WAITED;
+			sx_sunlock(&proctree_lock);
+			pid = p->p_pid;
+			status = W_STOPCODE(p->p_xstat);
+			ru = p->p_ru;
+			PROC_SLOCK(p);
+			calcru(p, &ru.ru_utime, &ru.ru_stime);
+			PROC_SUNLOCK(p);
+			PROC_UNLOCK(p);
+
+		        if (((uap->options & SVR4_WNOWAIT)) == 0) {
+				PROC_LOCK(q);
+				sigqueue_take(p->p_ksi);
+				PROC_UNLOCK(q);
 			}
 
-			/*
-			 * If we got the child via a ptrace 'attach',
-			 * we need to give it back to the old parent.
-			 */
-			if (p->p_oppid && (t = pfind(p->p_oppid))) {
-				p->p_oppid = 0;
-				proc_reparent(p, t);
-				psignal(t, SIGCHLD);
-				wakeup((caddr_t)t);
-				return (0);
+			*retval = 0;
+			DPRINTF(("jobcontrol %d\n", pid));
+			return (svr4_setinfo(pid, &ru, status, uap->info));
+		}
+		PROC_SUNLOCK(p);
+		if (uap->options & SVR4_WCONTINUED &&
+		    (p->p_flag & P_CONTINUED)) {
+			sx_sunlock(&proctree_lock);
+		        if (((uap->options & SVR4_WNOWAIT)) == 0)
+				p->p_flag &= ~P_CONTINUED;
+			pid = p->p_pid;
+			ru = p->p_ru;
+			status = SIGCONT;
+			PROC_SLOCK(p);
+			calcru(p, &ru.ru_utime, &ru.ru_stime);
+			PROC_SUNLOCK(p);
+			PROC_UNLOCK(p);
+
+		        if (((uap->options & SVR4_WNOWAIT)) == 0) {
+				PROC_LOCK(q);
+				sigqueue_take(p->p_ksi);
+				PROC_UNLOCK(q);
 			}
 
-			scheduler_wait_hook(q, p);
-			p->p_xstat = 0;
-			ruadd(&q->p_stats->p_cru, p->p_ru);
-
-			proc_zap(p);
-			return (0);
-		}
-		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
-		    (p->p_flag & P_TRACED ||
-		    (SCARG(uap, options) & (SVR4_WSTOPPED|SVR4_WCONTINUED)))) {
-			DPRINTF(("jobcontrol %d\n", p->p_pid));
-			if (((SCARG(uap, options) & SVR4_WNOWAIT)) == 0)
-				atomic_setbits_int(&p->p_flag, P_WAITED);
 			*retval = 0;
-			return (svr4_setinfo(p, W_STOPCODE(p->p_xstat),
-			   SCARG(uap, info)));
+			DPRINTF(("jobcontrol %d\n", pid));
+			return (svr4_setinfo(pid, &ru, status, uap->info));
 		}
+		PROC_UNLOCK(p);
 	}
 
-	if (nfound == 0)
+	if (nfound == 0) {
+		sx_sunlock(&proctree_lock);
 		return (ECHILD);
-
-	if (SCARG(uap, options) & SVR4_WNOHANG) {
-		*retval = 0;
-		if ((error = svr4_setinfo(NULL, 0, SCARG(uap, info))) != 0)
-			return (error);
-		return (0);
 	}
 
-	if ((error = tsleep((caddr_t)q, PWAIT | PCATCH, "svr4_wait", 0)) != 0)
-		return (error);
+	if (uap->options & SVR4_WNOHANG) {
+		sx_sunlock(&proctree_lock);
+		*retval = 0;
+		return (svr4_setinfo(0, NULL, 0, uap->info));
+	}
+
+	PROC_LOCK(q);
+	sx_sunlock(&proctree_lock);
+	if (q->p_flag & P_STATCHILD) {
+		q->p_flag &= ~P_STATCHILD;
+		error = 0;
+	} else
+		error = msleep(q, &q->p_mtx, PWAIT | PCATCH, "svr4_wait", 0);
+	PROC_UNLOCK(q);
+	if (error)
+		return error;
 	goto loop;
 }
+
 
 static void
 bsd_statfs_to_svr4_statvfs(bfs, sfs)
@@ -1147,22 +1350,22 @@ bsd_statfs_to_svr4_statvfs(bfs, sfs)
 	sfs->f_ffree = bfs->f_ffree;
 	sfs->f_favail = bfs->f_ffree;
 	sfs->f_fsid = bfs->f_fsid.val[0];
-	bcopy(bfs->f_fstypename, sfs->f_basetype, sizeof(sfs->f_basetype));
+	memcpy(sfs->f_basetype, bfs->f_fstypename, sizeof(sfs->f_basetype));
 	sfs->f_flag = 0;
 	if (bfs->f_flags & MNT_RDONLY)
 		sfs->f_flag |= SVR4_ST_RDONLY;
 	if (bfs->f_flags & MNT_NOSUID)
 		sfs->f_flag |= SVR4_ST_NOSUID;
 	sfs->f_namemax = MAXNAMLEN;
-	bcopy(bfs->f_fstypename, sfs->f_fstr, sizeof(sfs->f_fstr)); /* XXX */
-	bzero(sfs->f_filler, sizeof(sfs->f_filler));
+	memcpy(sfs->f_fstr, bfs->f_fstypename, sizeof(sfs->f_fstr)); /* XXX */
+	memset(sfs->f_filler, 0, sizeof(sfs->f_filler));
 }
 
 
 static void
 bsd_statfs_to_svr4_statvfs64(bfs, sfs)
 	const struct statfs *bfs;
-	struct svr4_statvfs64 *sfs; 
+	struct svr4_statvfs64 *sfs;
 {
 	sfs->f_bsize = bfs->f_iosize; /* XXX */
 	sfs->f_frsize = bfs->f_bsize;
@@ -1170,186 +1373,149 @@ bsd_statfs_to_svr4_statvfs64(bfs, sfs)
 	sfs->f_bfree = bfs->f_bfree;
 	sfs->f_bavail = bfs->f_bavail;
 	sfs->f_files = bfs->f_files;
-	sfs->f_ffree = bfs->f_ffree;  
+	sfs->f_ffree = bfs->f_ffree;
 	sfs->f_favail = bfs->f_ffree;
 	sfs->f_fsid = bfs->f_fsid.val[0];
-	bcopy(bfs->f_fstypename, sfs->f_basetype, sizeof(sfs->f_basetype));
+	memcpy(sfs->f_basetype, bfs->f_fstypename, sizeof(sfs->f_basetype));
 	sfs->f_flag = 0;
 	if (bfs->f_flags & MNT_RDONLY)
 		sfs->f_flag |= SVR4_ST_RDONLY;
 	if (bfs->f_flags & MNT_NOSUID)
 		sfs->f_flag |= SVR4_ST_NOSUID;
-	sfs->f_namemax = MAXNAMLEN;   
-	bcopy(bfs->f_fstypename, sfs->f_fstr, sizeof(sfs->f_fstr)); /* XXX */
-	bzero(sfs->f_filler, sizeof(sfs->f_filler));
+	sfs->f_namemax = MAXNAMLEN;
+	memcpy(sfs->f_fstr, bfs->f_fstypename, sizeof(sfs->f_fstr)); /* XXX */
+	memset(sfs->f_filler, 0, sizeof(sfs->f_filler));
 }
 
 
 int
-svr4_sys_statvfs(p, v, retval) 
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_statvfs(td, uap)
+	struct thread *td;
+	struct svr4_sys_statvfs_args *uap;
 {
-	struct svr4_sys_statvfs_args *uap = v;
-	struct sys_statfs_args	fs_args;
-	caddr_t sg = stackgap_init(p->p_emul);
-	struct statfs *fs = stackgap_alloc(&sg, sizeof(struct statfs));
-	struct statfs bfs;
 	struct svr4_statvfs sfs;
+	struct statfs bfs;
+	char *path;
 	int error;
 
-	SVR4_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-	SCARG(&fs_args, path) = SCARG(uap, path);
-	SCARG(&fs_args, buf) = fs;
+	CHECKALTEXIST(td, uap->path, &path);
 
-	if ((error = sys_statfs(p, &fs_args, retval)) != 0)
-		return error;
-
-	if ((error = copyin(fs, &bfs, sizeof(bfs))) != 0)
-		return error;
-
+	error = kern_statfs(td, path, UIO_SYSSPACE, &bfs);
+	free(path, M_TEMP);
+	if (error)
+		return (error);
 	bsd_statfs_to_svr4_statvfs(&bfs, &sfs);
-
-	return copyout(&sfs, SCARG(uap, fs), sizeof(sfs));
+	return copyout(&sfs, uap->fs, sizeof(sfs));
 }
 
 
 int
-svr4_sys_fstatvfs(p, v, retval) 
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_fstatvfs(td, uap)
+	struct thread *td;
+	struct svr4_sys_fstatvfs_args *uap;
 {
-	struct svr4_sys_fstatvfs_args *uap = v;
-	struct sys_fstatfs_args	fs_args;
-	caddr_t sg = stackgap_init(p->p_emul);
-	struct statfs *fs = stackgap_alloc(&sg, sizeof(struct statfs));
-	struct statfs bfs;
 	struct svr4_statvfs sfs;
+	struct statfs bfs;
 	int error;
 
-	SCARG(&fs_args, fd) = SCARG(uap, fd);
-	SCARG(&fs_args, buf) = fs;
-
-	if ((error = sys_fstatfs(p, &fs_args, retval)) != 0)
-		return error;
-
-	if ((error = copyin(fs, &bfs, sizeof(bfs))) != 0)
-		return error;
-
+	error = kern_fstatfs(td, uap->fd, &bfs);
+	if (error)
+		return (error);
 	bsd_statfs_to_svr4_statvfs(&bfs, &sfs);
-
-	return copyout(&sfs, SCARG(uap, fs), sizeof(sfs));
+	return copyout(&sfs, uap->fs, sizeof(sfs));
 }
 
 
 int
-svr4_sys_fstatvfs64(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_statvfs64(td, uap)
+	struct thread *td;
+	struct svr4_sys_statvfs64_args *uap;
 {
-	struct svr4_sys_fstatvfs64_args *uap = v;
-	struct sys_fstatfs_args fs_args;
-	caddr_t sg = stackgap_init(p->p_emul);
-	struct statfs *fs = stackgap_alloc(&sg, sizeof(struct statfs));
-	struct statfs bfs;
 	struct svr4_statvfs64 sfs;
+	struct statfs bfs;
+	char *path;
 	int error;
 
-	SCARG(&fs_args, fd) = SCARG(uap, fd);
-	SCARG(&fs_args, buf) = fs;
+	CHECKALTEXIST(td, uap->path, &path);
 
-	if ((error = sys_fstatfs(p, &fs_args, retval)) != 0)
-		return error;
-
-	if ((error = copyin(fs, &bfs, sizeof(bfs))) != 0)
-		return error;
-
+	error = kern_statfs(td, path, UIO_SYSSPACE, &bfs);
+	free(path, M_TEMP);
+	if (error)
+		return (error);
 	bsd_statfs_to_svr4_statvfs64(&bfs, &sfs);
-
-	return copyout(&sfs, SCARG(uap, fs), sizeof(sfs));
+	return copyout(&sfs, uap->fs, sizeof(sfs));
 }
 
 
 int
-svr4_sys_alarm(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_fstatvfs64(td, uap) 
+	struct thread *td;
+	struct svr4_sys_fstatvfs64_args *uap;
 {
-	struct svr4_sys_alarm_args *uap = v;
+	struct svr4_statvfs64 sfs;
+	struct statfs bfs;
 	int error;
-        struct itimerval *ntp, *otp, tp;
-	struct sys_setitimer_args sa;
-	caddr_t sg = stackgap_init(p->p_emul);
 
-        ntp = stackgap_alloc(&sg, sizeof(struct itimerval));
-        otp = stackgap_alloc(&sg, sizeof(struct itimerval));
-
-        timerclear(&tp.it_interval);
-        tp.it_value.tv_sec = SCARG(uap, sec);
-        tp.it_value.tv_usec = 0;
-
-	if ((error = copyout(&tp, ntp, sizeof(tp))) != 0)
-		return error;
-
-	SCARG(&sa, which) = ITIMER_REAL;
-	SCARG(&sa, itv) = ntp;
-	SCARG(&sa, oitv) = otp;
-
-        if ((error = sys_setitimer(p, &sa, retval)) != 0)
-		return error;
-
-	if ((error = copyin(otp, &tp, sizeof(tp))) != 0)
-		return error;
-
-        if (tp.it_value.tv_usec)
-                tp.it_value.tv_sec++;
-
-        *retval = (register_t) tp.it_value.tv_sec;
-
-        return 0;
+	error = kern_fstatfs(td, uap->fd, &bfs);
+	if (error)
+		return (error);
+	bsd_statfs_to_svr4_statvfs64(&bfs, &sfs);
+	return copyout(&sfs, uap->fs, sizeof(sfs));
 }
 
+int
+svr4_sys_alarm(td, uap)
+	struct thread *td;
+	struct svr4_sys_alarm_args *uap;
+{
+        struct itimerval itv, oitv;
+	int error;
+
+	timevalclear(&itv.it_interval);
+	itv.it_value.tv_sec = uap->sec;
+	itv.it_value.tv_usec = 0;
+	error = kern_setitimer(td, ITIMER_REAL, &itv, &oitv);
+	if (error)
+		return (error);
+	if (oitv.it_value.tv_usec != 0)
+		oitv.it_value.tv_sec++;
+	td->td_retval[0] = oitv.it_value.tv_sec;
+	return (0);
+}
 
 int
-svr4_sys_gettimeofday(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_gettimeofday(td, uap)
+	struct thread *td;
+	struct svr4_sys_gettimeofday_args *uap;
 {
-	struct svr4_sys_gettimeofday_args *uap = v;
-
-	if (SCARG(uap, tp)) {
+	if (uap->tp) {
 		struct timeval atv;
 
 		microtime(&atv);
-		return copyout(&atv, SCARG(uap, tp), sizeof (atv));
+		return copyout(&atv, uap->tp, sizeof (atv));
 	}
 
 	return 0;
 }
 
 int
-svr4_sys_facl(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_facl(td, uap)
+	struct thread *td;
+	struct svr4_sys_facl_args *uap;
 {
-	struct svr4_sys_facl_args *uap = v;
+	int *retval;
 
+	retval = td->td_retval;
 	*retval = 0;
 
-	switch (SCARG(uap, cmd)) {
+	switch (uap->cmd) {
 	case SVR4_SYS_SETACL:
 		/* We don't support acls on any filesystem */
 		return ENOSYS;
 
 	case SVR4_SYS_GETACL:
-		return copyout(retval, &SCARG(uap, num),
-		    sizeof(SCARG(uap, num)));
+		return copyout(retval, &uap->num,
+		    sizeof(uap->num));
 
 	case SVR4_SYS_GETACLCNT:
 		return 0;
@@ -1359,20 +1525,20 @@ svr4_sys_facl(p, v, retval)
 	}
 }
 
+
 int
-svr4_sys_acl(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_acl(td, uap)
+	struct thread *td;
+	struct svr4_sys_acl_args *uap;
 {
-	return svr4_sys_facl(p, v, retval);	/* XXX: for now the same */
+	/* XXX: for now the same */
+	return svr4_sys_facl(td, (struct svr4_sys_facl_args *)uap);
 }
 
 int
-svr4_sys_auditsys(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_auditsys(td, uap)
+	struct thread *td;
+	struct svr4_sys_auditsys_args *uap;
 {
 	/*
 	 * XXX: Big brother is *not* watching.
@@ -1381,91 +1547,89 @@ svr4_sys_auditsys(p, v, retval)
 }
 
 int
-svr4_sys_memcntl(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_memcntl(td, uap)
+	struct thread *td;
+	struct svr4_sys_memcntl_args *uap;
 {
-	struct svr4_sys_memcntl_args *uap = v;
-	struct sys_mprotect_args ap;
+	switch (uap->cmd) {
+	case SVR4_MC_SYNC:
+		{
+			struct msync_args msa;
 
-	SCARG(&ap, addr) = SCARG(uap, addr);
-	SCARG(&ap, len) = SCARG(uap, len);
-	SCARG(&ap, prot) = SCARG(uap, attr);
+			msa.addr = uap->addr;
+			msa.len = uap->len;
+			msa.flags = (int)uap->arg;
 
-	/* XXX: no locking, invalidating, or syncing supported */
-	return sys_mprotect(p, &ap, retval);
+			return msync(td, &msa);
+		}
+	case SVR4_MC_ADVISE:
+		{
+			struct madvise_args maa;
+
+			maa.addr = uap->addr;
+			maa.len = uap->len;
+			maa.behav = (int)uap->arg;
+
+			return madvise(td, &maa);
+		}
+	case SVR4_MC_LOCK:
+	case SVR4_MC_UNLOCK:
+	case SVR4_MC_LOCKAS:
+	case SVR4_MC_UNLOCKAS:
+		return EOPNOTSUPP;
+	default:
+		return ENOSYS;
+	}
 }
 
+
 int
-svr4_sys_nice(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_nice(td, uap)
+	struct thread *td;
+	struct svr4_sys_nice_args *uap;
 {
-	struct svr4_sys_nice_args *uap = v;
-	struct sys_setpriority_args ap;
+	struct setpriority_args ap;
 	int error;
 
-	SCARG(&ap, which) = PRIO_PROCESS;
-	SCARG(&ap, who) = 0;
-	SCARG(&ap, prio) = SCARG(uap, prio);
+	ap.which = PRIO_PROCESS;
+	ap.who = 0;
+	ap.prio = uap->prio;
 
-	if ((error = sys_setpriority(p, &ap, retval)) != 0)
+	if ((error = setpriority(td, &ap)) != 0)
 		return error;
 
-	if ((error = sys_getpriority(p, &ap, retval)) != 0)
+	/* the cast is stupid, but the structures are the same */
+	if ((error = getpriority(td, (struct getpriority_args *)&ap)) != 0)
 		return error;
 
 	return 0;
 }
 
-/* ARGSUSED */
 int
-svr4_sys_setegid(p, v, retval)
-        struct proc *p;
-        void *v;
-        register_t *retval;
+svr4_sys_resolvepath(td, uap)
+	struct thread *td;
+	struct svr4_sys_resolvepath_args *uap;
 {
-        struct sys_setegid_args /* {
-		syscallarg(gid_t) egid;
-        } */ *uap = v;
+	struct nameidata nd;
+	int error, *retval = td->td_retval;
+	unsigned int ncopy;
+	int vfslocked;
 
-#if defined(COMPAT_LINUX) && defined(i386)
-	if (SCARG(uap, egid) > 60000) {
-		/*
-		 * One great fuckup deserves another.  The Linux people
-		 * made this their personality system call.  But we can't
-		 * tell if a binary is SVR4 or Linux until they do that
-		 * system call, in some cases.  So when we get it, and the
-		 * value is out of some magical range, switch to Linux
-		 * emulation and pray.
-		 */
-		extern struct emul emul_linux_elf;
+	NDINIT(&nd, LOOKUP, NOFOLLOW | SAVENAME | MPSAFE, UIO_USERSPACE,
+	    uap->path, td);
 
-		p->p_emul = &emul_linux_elf;
-		p->p_os = OOS_LINUX;
-#ifdef KTRACE
-		if (KTRPOINT(p, KTR_EMUL))
-			ktremul(p, p->p_emul->e_name);
-#endif
-		return (0);
-	}
-#else
-	(void)uap;
-#endif
-        return (sys_setegid(p, v, retval));
-}
+	if ((error = namei(&nd)) != 0)
+		return error;
+	vfslocked = NDHASGIANT(&nd);
 
-int
-svr4_sys_rdebug(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-#ifdef COMPAT_SVR4_NCR
-	return (ENXIO);
-#else
-	return (p->p_os == OOS_NCR ? ENXIO : sys_nosys(p, v, retval));
-#endif
+	ncopy = min(uap->bufsiz, strlen(nd.ni_cnd.cn_pnbuf) + 1);
+	if ((error = copyout(nd.ni_cnd.cn_pnbuf, uap->buf, ncopy)) != 0)
+		goto bad;
+
+	*retval = ncopy;
+bad:
+	NDFREE(&nd, NDF_ONLY_PNBUF);
+	vput(nd.ni_vp);
+	VFS_UNLOCK_GIANT(vfslocked);
+	return error;
 }

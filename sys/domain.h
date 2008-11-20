@@ -1,7 +1,4 @@
-/*	$OpenBSD: domain.h,v 1.8 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: domain.h,v 1.10 1996/02/09 18:25:07 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,7 +27,11 @@
  * SUCH DAMAGE.
  *
  *	@(#)domain.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/domain.h,v 1.22 2006/08/07 12:02:43 rwatson Exp $
  */
+
+#ifndef _SYS_DOMAIN_H_
+#define _SYS_DOMAIN_H_
 
 /*
  * Structure per communications domain.
@@ -42,18 +43,19 @@
 struct	mbuf;
 struct	ifnet;
 
-struct	domain {
+struct domain {
 	int	dom_family;		/* AF_xxx */
 	char	*dom_name;
-	void	(*dom_init)(void);	/* initialize domain data structures */
-					/* externalize access rights */
-	int	(*dom_externalize)(struct mbuf *);
-					/* dispose of internalized rights */
-	void	(*dom_dispose)(struct mbuf *);
+	void	(*dom_init)		/* initialize domain data structures */
+		(void);
+	int	(*dom_externalize)	/* externalize access rights */
+		(struct mbuf *, struct mbuf **);
+	void	(*dom_dispose)		/* dispose of internalized rights */
+		(struct mbuf *);
 	struct	protosw *dom_protosw, *dom_protoswNPROTOSW;
 	struct	domain *dom_next;
-					/* initialize routing table */
-	int	(*dom_rtattach)(void **, int);
+	int	(*dom_rtattach)		/* initialize routing table */
+		(void **, int);
 	int	dom_rtoffset;		/* an arg to rtattach, in bits */
 	int	dom_maxrtkey;		/* for routing layer */
 	void	*(*dom_ifattach)(struct ifnet *);
@@ -62,6 +64,13 @@ struct	domain {
 };
 
 #ifdef _KERNEL
+extern int	domain_init_status;
 extern struct	domain *domains;
-void domaininit(void);
+extern void	net_add_domain(void *);
+
+#define DOMAIN_SET(name) \
+	SYSINIT(domain_ ## name, SI_SUB_PROTO_DOMAIN, SI_ORDER_SECOND, net_add_domain, & name ## domain)
+
+#endif
+
 #endif

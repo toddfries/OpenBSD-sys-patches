@@ -1,7 +1,4 @@
-/*	$OpenBSD: reboot.h,v 1.13 2004/03/10 23:02:53 tom Exp $	*/
-/*	$NetBSD: reboot.h,v 1.9 1996/04/22 01:23:25 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1988, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,74 +26,41 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)reboot.h	8.2 (Berkeley) 7/10/94
+ *	@(#)reboot.h	8.3 (Berkeley) 12/13/94
+ * $FreeBSD: src/sys/sys/reboot.h,v 1.26 2005/01/07 02:29:23 imp Exp $
  */
 
+#ifndef _SYS_REBOOT_H_
+#define	_SYS_REBOOT_H_
+
 /*
- * Arguments to reboot system call.  These are passed to the boot program,
- * and then on to init.
+ * Arguments to reboot system call.  These are passed to
+ * the boot program and on to init.
  */
 #define	RB_AUTOBOOT	0	/* flags for system auto-booting itself */
 
-#define	RB_ASKNAME	0x0001	/* ask for file name to reboot from */
-#define	RB_SINGLE	0x0002	/* reboot to single user only */
-#define	RB_NOSYNC	0x0004	/* dont sync before reboot */
-#define	RB_HALT		0x0008	/* don't reboot, just halt */
-#define	RB_INITNAME	0x0010	/* name given for /etc/init (unused) */
-#define	RB_DFLTROOT	0x0020	/* use compiled-in rootdev */
-#define	RB_KDB		0x0040	/* give control to kernel debugger */
-#define	RB_RDONLY	0x0080	/* mount root fs read-only */
-#define	RB_DUMP		0x0100	/* dump kernel memory before reboot */
-#define	RB_MINIROOT	0x0200	/* mini-root present in memory at boot time */
-#define	RB_CONFIG	0x0400	/* change configured devices */
-#define	RB_TIMEBAD	0x0800	/* don't call resettodr() in boot() */
-#define	RB_POWERDOWN	0x1000	/* attempt to power down machine */
-#define	RB_SERCONS	0x2000	/* use serial console if available */
-#define	RB_USERREQ	0x4000	/* boot() called at user request (e.g. ddb) */
+#define	RB_ASKNAME	0x001	/* ask for file name to reboot from */
+#define	RB_SINGLE	0x002	/* reboot to single user only */
+#define	RB_NOSYNC	0x004	/* dont sync before reboot */
+#define	RB_HALT		0x008	/* don't reboot, just halt */
+#define	RB_INITNAME	0x010	/* name given for /etc/init (unused) */
+#define	RB_DFLTROOT	0x020	/* use compiled-in rootdev */
+#define	RB_KDB		0x040	/* give control to kernel debugger */
+#define	RB_RDONLY	0x080	/* mount root fs read-only */
+#define	RB_DUMP		0x100	/* dump kernel memory before reboot */
+#define	RB_MINIROOT	0x200	/* mini-root present in memory at boot time */
+#define	RB_VERBOSE	0x800	/* print all potentially useful info */
+#define	RB_SERIAL	0x1000	/* use serial port as console */
+#define	RB_CDROM	0x2000	/* use cdrom as root */
+#define	RB_POWEROFF	0x4000	/* turn the power off if possible */
+#define	RB_GDB		0x8000	/* use GDB remote debugger instead of DDB */
+#define	RB_MUTE		0x10000	/* start up with the console muted */
+#define	RB_SELFTEST	0x20000	/* don't complete the boot; do selftest */
+#define	RB_RESERVED1	0x40000	/* reserved for internal use of boot blocks */
+#define	RB_RESERVED2	0x80000	/* reserved for internal use of boot blocks */
+#define	RB_PAUSE	0x100000 /* pause after each output line during probe */
+#define	RB_MULTIPLE	0x20000000	/* use multiple consoles */
 
-/*
- * Constants for converting boot-style device number to type,
- * adaptor (uba, mba, etc), unit number and partition number.
- * Type (== major device number) is in the low byte
- * for backward compatibility.  Except for that of the "magic
- * number", each mask applies to the shifted value.
- * Format:
- *	 (4) (4) (4) (4)  (8)     (8)
- *	--------------------------------
- *	|MA | AD| CT| UN| PART  | TYPE |
- *	--------------------------------
- */
-#define	B_ADAPTORSHIFT		24
-#define	B_ADAPTORMASK		0x0f
-#define	B_ADAPTOR(val)		(((val) >> B_ADAPTORSHIFT) & B_ADAPTORMASK)
-#define B_CONTROLLERSHIFT	20
-#define B_CONTROLLERMASK	0xf
-#define	B_CONTROLLER(val)	(((val)>>B_CONTROLLERSHIFT) & B_CONTROLLERMASK)
-#define B_UNITSHIFT		16
-#define B_UNITMASK		0xf
-#define	B_UNIT(val)		(((val) >> B_UNITSHIFT) & B_UNITMASK)
-#define B_PARTITIONSHIFT	8
-#define B_PARTITIONMASK		0xff
-#define	B_PARTITION(val)	(((val) >> B_PARTITIONSHIFT) & B_PARTITIONMASK)
-#define	B_TYPESHIFT		0
-#define	B_TYPEMASK		0xff
-#define	B_TYPE(val)		(((val) >> B_TYPESHIFT) & B_TYPEMASK)
+#define	RB_BOOTINFO	0x80000000	/* have `struct bootinfo *' arg */
 
-#define	B_MAGICMASK	0xf0000000
-#define	B_DEVMAGIC	0xa0000000
-
-#define MAKEBOOTDEV(type, adaptor, controller, unit, partition) \
-	(((type) << B_TYPESHIFT) | ((adaptor) << B_ADAPTORSHIFT) | \
-	((controller) << B_CONTROLLERSHIFT) | ((unit) << B_UNITSHIFT) | \
-	((partition) << B_PARTITIONSHIFT) | B_DEVMAGIC)
-
-#if	defined(_KERNEL) && !defined(_STANDALONE) && !defined(_LOCORE)
-
-__BEGIN_DECLS
-
-void	boot(int)
-    __attribute__((__noreturn__));
-
-__END_DECLS
-
-#endif /* _KERNEL */
+#endif

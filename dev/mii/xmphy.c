@@ -1,6 +1,4 @@
-/*	$OpenBSD: xmphy.c,v 1.17 2006/12/31 15:04:33 krw Exp $	*/
-
-/*
+/*-
  * Copyright (c) 2000
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
  *
@@ -30,9 +28,10 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/dev/mii/xmphy.c,v 1.1 2000/04/22 01:58:18 wpaul Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/xmphy.c,v 1.21 2006/12/02 19:36:25 marius Exp $");
 
 /*
  * driver for the XaQti XMAC II's internal PHY. This is sort of
@@ -43,104 +42,116 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
+#include <sys/module.h>
 #include <sys/socket.h>
-#include <sys/errno.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/mii/miidevs.h>
+#include "miidevs.h"
 
 #include <dev/mii/xmphyreg.h>
 
-int xmphy_probe(struct device *, void *, void *);
-void xmphy_attach(struct device *, struct device *, void *);
+#include "miibus_if.h"
 
-struct cfattach xmphy_ca = {
-	sizeof(struct mii_softc), xmphy_probe, xmphy_attach, mii_phy_detach,
-	    mii_phy_activate
+static int xmphy_probe(device_t);
+static int xmphy_attach(device_t);
+
+static device_method_t xmphy_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		xmphy_probe),
+	DEVMETHOD(device_attach,	xmphy_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{ 0, 0 }
 };
 
-struct cfdriver xmphy_cd = {
-	NULL, "xmphy", DV_DULL
+static devclass_t xmphy_devclass;
+
+static driver_t xmphy_driver = {
+	"xmphy",
+	xmphy_methods,
+	sizeof(struct mii_softc)
 };
 
-int	xmphy_service(struct mii_softc *, struct mii_data *, int);
-void	xmphy_status(struct mii_softc *);
+DRIVER_MODULE(xmphy, miibus, xmphy_driver, xmphy_devclass, 0, 0);
 
-int	xmphy_mii_phy_auto(struct mii_softc *);
-
-const struct mii_phy_funcs xmphy_funcs = {
-	xmphy_service, xmphy_status, mii_phy_reset,
-};
+static int	xmphy_service(struct mii_softc *, struct mii_data *, int);
+static void	xmphy_status(struct mii_softc *);
+static int	xmphy_mii_phy_auto(struct mii_softc *);
 
 static const struct mii_phydesc xmphys[] = {
-	{ MII_OUI_xxXAQTI,	MII_MODEL_XAQTI_XMACII,
-	  MII_STR_XAQTI_XMACII },
-
-	{ MII_OUI_JATO,		MII_MODEL_JATO_BASEX,
-	  MII_STR_JATO_BASEX },
-
-	{ 0,			0,
-	  NULL },
+	{ MII_OUI_xxXAQTI, MII_MODEL_XAQTI_XMACII, MII_STR_XAQTI_XMACII },
+	MII_PHY_DESC(JATO, BASEX),
+	MII_PHY_END
 };
 
-int xmphy_probe(struct device *parent, void *match, void *aux)
+static int
+xmphy_probe(device_t dev)
 {
-	struct mii_attach_args *ma = aux;
 
-	if (mii_phy_match(ma, xmphys) != NULL)
-		return (10);
-
-	return (0);
+	return (mii_phy_dev_probe(dev, xmphys, BUS_PROBE_DEFAULT));
 }
 
-void
-xmphy_attach(struct device *parent, struct device *self, void *aux)
+static int
+xmphy_attach(device_t dev)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
-	const struct mii_phydesc *mpd;
+	struct mii_softc *sc;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
+	const char *sep = "";
 
-	mpd = mii_phy_match(ma, xmphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	sc->mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->mii_dev);
+	LIST_INSERT_HEAD(&mii->mii_phys, sc, mii_list);
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &xmphy_funcs;
+	sc->mii_service = xmphy_service;
 	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = MII_ANEGTICKS;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
+	mii->mii_instance++;
 
 #define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
+#define PRINT(s)	printf("%s%s", sep, s); sep = ", "
 
 	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
 	    BMCR_ISO);
+#if 0
+	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_LOOP, sc->mii_inst),
+	    BMCR_LOOP|BMCR_S100);
+#endif
 
-	PHY_RESET(sc);
+	mii_phy_reset(sc);
 
+	device_printf(dev, " ");
 	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, 0, sc->mii_inst),
 	    XMPHY_BMCR_FDX);
+	PRINT("1000baseSX");
 	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, IFM_FDX, sc->mii_inst), 0);
+	PRINT("1000baseSX-FDX");
 	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_AUTO, 0, sc->mii_inst), 0);
+	PRINT("auto");
 
+	printf("\n");
 #undef ADD
+#undef PRINT
+
+	MIIBUS_MEDIAINIT(sc->mii_dev);
+	return (0);
 }
 
-int
+static int
 xmphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -170,10 +181,17 @@ xmphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
+#ifdef foo
+			/*
+			 * If we're already in auto mode, just return.
+			 */
+			if (PHY_READ(sc, XMPHY_MII_BMCR) & XMPHY_BMCR_AUTOEN)
+				return (0);
+#endif
 			(void) xmphy_mii_phy_auto(sc);
 			break;
 		case IFM_1000_SX:
-			PHY_RESET(sc);
+			mii_phy_reset(sc);
 			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX) {
 				PHY_WRITE(sc, XMPHY_MII_ANAR, XMPHY_ANAR_FDX);
 				PHY_WRITE(sc, XMPHY_MII_BMCR, XMPHY_BMCR_FDX);
@@ -209,37 +227,37 @@ xmphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
 			break;
 
-                /*
-                 * Check to see if we have link.  If we do, we don't
-                 * need to restart the autonegotiation process.  Read
-                 * the BMSR twice in case it's latched.
-                 */
+		/*
+		 * Check to see if we have link.  If we do, we don't
+		 * need to restart the autonegotiation process.  Read
+		 * the BMSR twice in case it's latched.
+		 */
 		reg = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
 		if (reg & BMSR_LINK)
 			break;
 
 		/*
-		 * Only retry autonegotiation every mii_anegticks seconds.
+		 * Only retry autonegotiation every 5 seconds.
 		 */
-		if (++sc->mii_ticks <= sc->mii_anegticks)
+		if (++sc->mii_ticks <= MII_ANEGTICKS)
 			break;
 
 		sc->mii_ticks = 0;
-		PHY_RESET(sc);
 
+		mii_phy_reset(sc);
 		xmphy_mii_phy_auto(sc);
-		break;
+		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	xmphy_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);
 	return (0);
 }
 
-void
+static void
 xmphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -288,21 +306,18 @@ xmphy_status(struct mii_softc *sc)
 		mii->mii_media_active |= IFM_FDX;
 	else
 		mii->mii_media_active |= IFM_HDX;
-
-	return;
 }
 
-
-int
-xmphy_mii_phy_auto(struct mii_softc *sc)
+static int
+xmphy_mii_phy_auto(struct mii_softc *mii)
 {
 	int anar = 0;
 
-	anar = PHY_READ(sc, XMPHY_MII_ANAR);
+	anar = PHY_READ(mii, XMPHY_MII_ANAR);
 	anar |= XMPHY_ANAR_FDX|XMPHY_ANAR_HDX;
-	PHY_WRITE(sc, XMPHY_MII_ANAR, anar);
+	PHY_WRITE(mii, XMPHY_MII_ANAR, anar);
 	DELAY(1000);
-	PHY_WRITE(sc, XMPHY_MII_BMCR,
+	PHY_WRITE(mii, XMPHY_MII_BMCR,
 	    XMPHY_BMCR_AUTOEN | XMPHY_BMCR_STARTNEG);
 
 	return (EJUSTRETURN);

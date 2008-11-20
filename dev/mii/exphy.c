@@ -1,5 +1,4 @@
-/*	$OpenBSD: exphy.c,v 1.18 2005/02/04 23:23:56 brad Exp $	*/
-/*	$NetBSD: exphy.c,v 1.23 2000/02/02 23:34:56 thorpej Exp $	*/
+/*	$NetBSD: exphy.c,v 1.16 1999/04/23 04:24:32 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
@@ -38,7 +37,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
+/*-
  * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -67,6 +66,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/exphy.c,v 1.23 2007/01/12 23:17:43 marius Exp $");
+
 /*
  * driver for 3Com internal PHYs
  */
@@ -74,97 +76,119 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
 #include <sys/socket.h>
+#include <sys/module.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/mii/miidevs.h>
+#include "miidevs.h"
 
-int	exphymatch(struct device *, void *, void *);
-void	exphyattach(struct device *, struct device *, void *);
+#include "miibus_if.h"
 
-struct cfattach exphy_ca = {
-	sizeof(struct mii_softc), exphymatch, exphyattach, mii_phy_detach,
-	    mii_phy_activate
+static int exphy_probe(device_t);
+static int exphy_attach(device_t);
+
+static device_method_t exphy_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		exphy_probe),
+	DEVMETHOD(device_attach,	exphy_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{ 0, 0 }
 };
 
-struct cfdriver exphy_cd = {
-	NULL, "exphy", DV_DULL
+static devclass_t exphy_devclass;
+
+static driver_t exphy_driver = {
+	"xlphy",
+	exphy_methods,
+	sizeof(struct mii_softc)
 };
 
-int	exphy_service(struct mii_softc *, struct mii_data *, int);
-void	exphy_reset(struct mii_softc *);
+DRIVER_MODULE(xlphy, miibus, exphy_driver, exphy_devclass, 0, 0);
 
-const struct mii_phy_funcs exphy_funcs = {
-	exphy_service, ukphy_status, exphy_reset,
+static int	exphy_service(struct mii_softc *, struct mii_data *, int);
+static void	exphy_reset(struct mii_softc *);
+
+/*
+ * Some 3Com internal PHYs report zero for OUI and model, others use
+ * actual values.
+ * Note that the 3Com internal PHYs having OUI 0x105a and model 0 are
+ * handled fine by ukphy(4); they can be isolated and don't require
+ * special treatment after reset.
+ */
+static const struct mii_phydesc exphys[] = {
+	{ 0, 0, "3Com internal media interface" },
+	MII_PHY_DESC(BROADCOM, 3C905C),
+	MII_PHY_END
 };
-
-int
-exphymatch(struct device *parent, void *match, void *aux)
+	
+static int
+exphy_probe(device_t dev)
 {
-	struct mii_attach_args *ma = aux;
 
-	/*
-	 * Since 3com's PHY for some xl adapters is braindead and doesn't
-	 * report the proper OUI/MODEL information, we have this stupid
-	 * match function.
-	 */
-	if ((strcmp(parent->dv_cfdata->cf_driver->cd_name, "xl") == 0) &&
-	    ((MII_OUI(ma->mii_id1, ma->mii_id2) == 0 &&
-	      MII_MODEL(ma->mii_id2) == 0) ||
-	     (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_3COM &&
-	      MII_MODEL(ma->mii_id2) == 0)))
-		return (10);
-
-	return (0);
+	if (strcmp(device_get_name(device_get_parent(device_get_parent(dev))),
+	    "xl") == 0)
+		return (mii_phy_dev_probe(dev, exphys, BUS_PROBE_DEFAULT));
+	return (ENXIO);
 }
 
-void
-exphyattach(struct device *parent, struct device *self, void *aux)
+static int
+exphy_attach(device_t dev)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
+	struct mii_softc *sc;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
 
-	printf(": 3Com internal media interface\n");
-
-	sc->mii_inst = mii->mii_instance;
-	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &exphy_funcs;
-	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
-
-	sc->mii_flags |= MIIF_NOISOLATE;
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	sc->mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->mii_dev);
 
 	/*
 	 * The 3Com PHY can never be isolated, so never allow non-zero
 	 * instances!
 	 */
 	if (mii->mii_instance != 0) {
-		printf("%s: ignoring this PHY, non-zero instance\n",
-		    sc->mii_dev.dv_xname);
-		return;
+		device_printf(dev, "ignoring this PHY, non-zero instance\n");
+		return (ENXIO);
 	}
 
-	PHY_RESET(sc);
+	LIST_INSERT_HEAD(&mii->mii_phys, sc, mii_list);
+
+	sc->mii_inst = mii->mii_instance;
+	sc->mii_phy = ma->mii_phyno;
+	sc->mii_service = exphy_service;
+	sc->mii_pdata = mii;
+	mii->mii_instance++;
+
+	sc->mii_flags |= MIIF_NOISOLATE;
+
+#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
+
+	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_LOOP, sc->mii_inst),
+	    MII_MEDIA_100_TX);
+
+	exphy_reset(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
-		mii_phy_add_media(sc);
+	device_printf(dev, " ");
+	mii_phy_add_media(sc);
+	printf("\n");
+#undef ADD
+	MIIBUS_MEDIAINIT(sc->mii_dev);
+	return (0);
 }
 
-int
+static int
 exphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	/*
 	 * We can't isolate the 3Com PHY, so it has to be the only one!
@@ -187,25 +211,28 @@ exphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		break;
 
 	case MII_TICK:
-		if (mii_phy_tick(sc) == EJUSTRETURN)
+		/*
+		 * Is the interface even up?
+		 */
+		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
 
+		/*
+		 * The 3Com PHY's autonegotiation doesn't need to be
+		 * kicked; it continues in the background.
+		 */
 		break;
-
-	case MII_DOWN:
-		mii_phy_down(sc);
-		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	ukphy_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);
 	return (0);
 }
 
-void
+static void
 exphy_reset(struct mii_softc *sc)
 {
 

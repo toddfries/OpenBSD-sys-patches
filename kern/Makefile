@@ -1,19 +1,25 @@
-#	$OpenBSD: Makefile,v 1.18 2008/04/23 10:55:14 norby Exp $
+#	@(#)Makefile	8.2 (Berkeley) 3/21/94
+# $FreeBSD: src/sys/kern/Makefile,v 1.14 2007/06/25 05:06:56 rafan Exp $
 
 # Makefile for kernel tags files, init_sysent, etc.
 
-ARCH=	alpha aviion hp300 hppa i386 m68k mac68k mvme68k mvme88k \
-	mvmeppc powerpc sparc sparc64 vax
+ARCH=	i386 # luna68k news3400 pmax sparc tahoe vax
 
-all:	init_sysent.c vnode_if.c
+all:
+	@echo "make tags, make links or make sysent only"
 
-SYSCALLSRC = makesyscalls.sh syscalls.conf syscalls.master
-init_sysent.c syscalls.c ../sys/syscall.h ../sys/syscallargs.h: ${SYSCALLSRC}
-	sh makesyscalls.sh syscalls.conf syscalls.master
+sysent:  init_sysent.c syscalls.c ../sys/syscall.h ../sys/syscall.mk \
+../sys/sysproto.h
 
-VNODEIFSRC = vnode_if.sh vnode_if.src
-vnode_if.c ../sys/vnode_if.h: ${VNODEIFSRC}
-	sh vnode_if.sh vnode_if.src
+init_sysent.c syscalls.c systrace_args.c ../sys/syscall.h \
+../sys/syscall.mk ../sys/sysproto.h: makesyscalls.sh syscalls.master
+	-mv -f init_sysent.c init_sysent.c.bak
+	-mv -f syscalls.c syscalls.c.bak
+	-mv -f systrace_args.c systrace_args.c.bak
+	-mv -f ../sys/syscall.h ../sys/syscall.h.bak
+	-mv -f ../sys/syscall.mk ../sys/syscall.mk.bak
+	-mv -f ../sys/sysproto.h ../sys/sysproto.h.bak
+	sh makesyscalls.sh syscalls.master
 
 # Kernel tags:
 # Tags files are built in the top-level directory for each architecture,
@@ -22,40 +28,31 @@ vnode_if.c ../sys/vnode_if.h: ${VNODEIFSRC}
 # are placed in each source directory.  We need to have links to tags files
 # from the generic directories that are relative to the machine type, even
 # via remote mounts; therefore we use symlinks to $SYSTAGS, which points at
-# ${SYSDIR}/${MACHINE}/tags.
+# ${SYSDIR}/${MACHINE_ARCH}/tags.
 
 SYSTAGS=/var/db/sys_tags
 SYSDIR=/sys
 
 # Directories in which to place tags links (other than machine-dependent)
-DGEN=	compat compat/common compat/freebsd compat/hpux compat/ibcs2 \
-	compat/linux compat/osf1 compat/sunos compat/svr4 compat/ultrix \
-	conf \
-	ddb \
-	dev dev/eisa dev/ic dev/isa dev/pci dev/pcmcia dev/cardbus dev/rcons \
-	dev/sun dev/tc \
-	gnu \
-	isofs isofs/cd9660 \
-	kern \
-	lib libkern \
-	miscfs miscfs/deadfs miscfs/fifofs \
-	miscfs/portal miscfs/procfs miscfs/specfs \
-	msdosfs \
-	net netinet netmpls \
-	nfs \
-	scsi \
-	sys \
-	ufs ufs/ffs ufs/lfs ufs/mfs ufs/ufs \
+DGEN=	conf \
+	dev dev/scsi \
+	fs fs/deadfs fs/fdescfs fs/fifofs \
+	fs/lofs fs/nullfs fs/portalfs fs/procfs \
+	fs/specfs fs/unionfs \
+	hp hp/dev hp/hpux \
+	kern libkern \
+	net netinet nfs scripts sys \
+	ufs ufs/ffs ufs/lfs ufs/ufs \
 	vm
 
 tags::
 	-for i in ${ARCH}; do \
-	    (cd ../arch/$$i && make ${MFLAGS} tags); done
+	    (cd ../$$i && make ${MFLAGS} tags); done
 
 links::
 	rm -f ${SYSTAGS}
-	ln -s ${SYSDIR}/arch/${MACHINE}/tags ${SYSTAGS}
+	ln -s ${SYSDIR}/${MACHINE_ARCH}/tags ${SYSTAGS}
 	-for i in ${DGEN}; do \
 	    (cd ../$$i && { rm -f tags; ln -s ${SYSTAGS} tags; }) done
 	-for i in ${ARCH}; do \
-	    (cd ../arch/$$i && make ${MFLAGS} SYSTAGS=${SYSTAGS} links); done
+	    (cd ../$$i && make ${MFLAGS} SYSTAGS=${SYSTAGS} links); done

@@ -1,7 +1,6 @@
-/*	$OpenBSD: mii.h,v 1.11 2007/02/10 22:36:18 kettenis Exp $	*/
-/*	$NetBSD: mii.h,v 1.8 2001/05/31 03:06:46 thorpej Exp $	*/
-
-/*
+/*	$NetBSD: mii.h,v 1.9 2001/05/31 03:07:14 thorpej Exp $	*/
+ 
+/*-
  * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
  *
  * Modification to match BSD/OS 3.0 MII interface by Jason R. Thorpe,
@@ -31,6 +30,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/mii/mii.h,v 1.5 2005/01/06 01:42:56 imp Exp $
  */
 
 #ifndef _DEV_MII_MII_H_
@@ -75,10 +76,10 @@
 #define	BMSR_100TXHDX	0x2000	/* 100 base Tx half duplex capable */
 #define	BMSR_10TFDX	0x1000	/* 10 base T full duplex capable */
 #define	BMSR_10THDX	0x0800	/* 10 base T half duplex capable */
-#define	BMSR_MFPS	0x0040	/* MII Frame Preamble Suppression */
 #define	BMSR_100T2FDX	0x0400	/* 100 base T2 full duplex capable */
 #define	BMSR_100T2HDX	0x0200	/* 100 base T2 half duplex capable */
 #define	BMSR_EXTSTAT	0x0100	/* Extended status in register 15 */
+#define	BMSR_MFPS	0x0040	/* MII Frame Preamble Suppression */
 #define	BMSR_ACOMP	0x0020	/* Autonegotiation complete */
 #define	BMSR_RFAULT	0x0010	/* Link partner fault */
 #define	BMSR_ANEG	0x0008	/* Autonegotiation capable */
@@ -89,11 +90,17 @@
 /*
  * Note that the EXTSTAT bit indicates that there is extended status
  * info available in register 15, but 802.3 section 22.2.4.3 also
- * states that all 1000 Mb/s capable PHYs will set this bit to 1.
+ * states that that all 1000 Mb/s capable PHYs will set this bit to 1.
  */
+#if 0
+#define	BMSR_MEDIAMASK	(BMSR_100T4|BMSR_100TXFDX|BMSR_100TXHDX|BMSR_10TFDX| \
+			 BMSR_10THDX|BMSR_ANEG)
 
+#else
+/* NetBSD uses: */
 #define	BMSR_MEDIAMASK	(BMSR_100T4|BMSR_100TXFDX|BMSR_100TXHDX| \
 			 BMSR_10TFDX|BMSR_10THDX|BMSR_100T2FDX|BMSR_100T2HDX)
+#endif
 
 /*
  * Convert BMSR media capabilities to ANAR bits for autonegotiation.
@@ -108,6 +115,10 @@
 #define	IDR2_MODEL	0x03f0	/* vendor model */
 #define	IDR2_REV	0x000f	/* vendor revision */
 
+#define	MII_OUI(id1, id2)	(((id1) << 6) | ((id2) >> 10))
+#define	MII_MODEL(id2)		(((id2) & IDR2_MODEL) >> 4)
+#define	MII_REV(id2)		((id2) & IDR2_REV)
+
 #define	MII_ANAR	0x04	/* Autonegotiation advertisement (rw) */
 		/* section 28.2.4.1 and 37.2.6.1 */
 #define ANAR_NP		0x8000	/* Next page (ro) */
@@ -120,10 +131,6 @@
 #define ANAR_10_FD	0x0040	/* local device supports 10bT FD */
 #define ANAR_10		0x0020	/* local device supports 10bT */
 #define	ANAR_CSMA	0x0001	/* protocol selector CSMA/CD */
-#define	ANAR_PAUSE_NONE		(0 << 10)
-#define	ANAR_PAUSE_SYM		(1 << 10)
-#define	ANAR_PAUSE_ASYM		(2 << 10)
-#define	ANAR_PAUSE_TOWARDS	(3 << 10)
 
 #define	ANAR_X_FD	0x0020	/* local device supports 1000BASE-X FD */
 #define	ANAR_X_HD	0x0040	/* local device supports 1000BASE-X HD */
@@ -144,11 +151,6 @@
 #define ANLPAR_10_FD	0x0040	/* link partner supports 10bT FD */
 #define ANLPAR_10	0x0020	/* link partner supports 10bT */
 #define	ANLPAR_CSMA	0x0001	/* protocol selector CSMA/CD */
-#define	ANLPAR_PAUSE_MASK	(3 << 10)
-#define	ANLPAR_PAUSE_NONE	(0 << 10)
-#define	ANLPAR_PAUSE_SYM	(1 << 10)
-#define	ANLPAR_PAUSE_ASYM	(2 << 10)
-#define	ANLPAR_PAUSE_TOWARDS	(3 << 10)
 
 #define	ANLPAR_X_FD	0x0020	/* local device supports 1000BASE-X FD */
 #define	ANLPAR_X_HD	0x0040	/* local device supports 1000BASE-X HD */

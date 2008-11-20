@@ -1,52 +1,51 @@
-/*	$OpenBSD: db_output.c,v 1.25 2006/07/06 18:14:14 miod Exp $	*/
-/*	$NetBSD: db_output.c,v 1.13 1996/04/01 17:27:14 christos Exp $	*/
-
-/* 
+/*-
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
+ *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
+ */
+/*
+ * 	Author: David B. Golub, Carnegie Mellon University
+ *	Date:	7/90
  */
 
 /*
  * Printf and character output for debugger.
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ddb/db_output.c,v 1.37 2006/10/10 06:36:01 bde Exp $");
+
 #include <sys/param.h>
-#include <sys/proc.h>
-#include <sys/stdarg.h>
 #include <sys/systm.h>
+#include <sys/cons.h>
+#include <sys/kdb.h>
+#include <sys/kernel.h>
+#include <sys/sysctl.h>
 
-#include <dev/cons.h>
+#include <machine/stdarg.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <machine/db_machdep.h>
-
-#include <ddb/db_command.h>
+#include <ddb/ddb.h>
 #include <ddb/db_output.h>
-#include <ddb/db_interface.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_var.h>
-#include <ddb/db_extern.h>
 
 /*
  *	Character output - tracks position in line.
@@ -60,35 +59,30 @@
  *	don't print trailing spaces.  This avoids most
  *	of the wraparounds.
  */
-
-#ifndef	DB_MAX_LINE
-#define	DB_MAX_LINE		24	/* maximum line */
-#define DB_MAX_WIDTH		80	/* maximum width */
-#endif	/* DB_MAX_LINE */
-
-#define DB_MIN_MAX_WIDTH	20	/* minimum max width */
-#define DB_MIN_MAX_LINE		3	/* minimum max line */
-#define CTRL(c)			((c) & 0xff)
-
-int	db_output_position = 0;		/* output column */
-int	db_output_line = 0;		/* output line number */
-int	db_last_non_space = 0;		/* last non-space character */
-int	db_tab_stop_width = 8;		/* how wide are tab stops? */
+static int	db_output_position = 0;		/* output column */
+static int	db_last_non_space = 0;		/* last non-space character */
+db_expr_t	db_tab_stop_width = 8;		/* how wide are tab stops? */
 #define	NEXT_TAB(i) \
 	((((i) + db_tab_stop_width) / db_tab_stop_width) * db_tab_stop_width)
-int	db_max_line = DB_MAX_LINE;	/* output max lines */
-int	db_max_width = DB_MAX_WIDTH;	/* output line width */
-int	db_radix = 16;			/* output numbers radix */
+db_expr_t	db_max_width = 79;		/* output line width */
+db_expr_t	db_lines_per_page = 20;		/* lines per page */
+volatile int	db_pager_quit;			/* user requested quit */
+static int	db_newlines;			/* # lines this page */
+static int	db_maxlines;			/* max lines/page when paging */
+static int	ddb_use_printf = 0;
+SYSCTL_INT(_debug, OID_AUTO, ddb_use_printf, CTLFLAG_RW, &ddb_use_printf, 0,
+    "use printf for all ddb output");
 
-static void db_more(void);
+static void	db_putchar(int c, void *arg);
+static void	db_pager(void);
 
 /*
  * Force pending whitespace.
  */
 void
-db_force_whitespace(void)
+db_force_whitespace()
 {
-	int last_print, next_tab;
+	register int last_print, next_tab;
 
 	last_print = db_last_non_space;
 	while (last_print < db_output_position) {
@@ -107,45 +101,34 @@ db_force_whitespace(void)
 	db_last_non_space = db_output_position;
 }
 
-static void
-db_more(void)
-{
-	char *p;
-	int quit_output = 0;
-
-	for (p = "--db_more--"; *p; p++)
-	    cnputc(*p);
-	switch(cngetc()) {
-	case ' ':
-	    db_output_line = 0;
-	    break;
-	case 'q':
-	case CTRL('c'):
-	    db_output_line = 0;
-	    quit_output = 1;
-	    break;
-	default:
-	    db_output_line--;
-	    break;
-	}
-	p = "\b\b\b\b\b\b\b\b\b\b\b           \b\b\b\b\b\b\b\b\b\b\b";
-	while (*p)
-	    cnputc(*p++);
-	if (quit_output) {
-	    db_error(0);
-	    /* NOTREACHED */
-	}
-}
-
 /*
  * Output character.  Buffer whitespace.
  */
-void
-db_putchar(int c)
+static void
+db_putchar(c, arg)
+	int	c;		/* character to output */
+	void *	arg;
 {
-	if (db_max_line >= DB_MIN_MAX_LINE && db_output_line >= db_max_line-1)
-	    db_more();
 
+	/*
+	 * If not in the debugger or the user requests it, output data to
+	 * both the console and the message buffer.
+	 */
+	if (!kdb_active || ddb_use_printf) {
+		printf("%c", c);
+		if (!kdb_active)
+			return;
+		if (c == '\r' || c == '\n')
+			db_check_interrupt();
+		if (c == '\n' && db_maxlines > 0) {
+			db_newlines++;
+			if (db_newlines >= db_maxlines)
+				db_pager();
+		}
+		return;
+	}
+
+	/* Otherwise, output data directly to the console. */
 	if (c > ' ' && c <= '~') {
 	    /*
 	     * Printing character.
@@ -155,22 +138,26 @@ db_putchar(int c)
 	    db_force_whitespace();
 	    cnputc(c);
 	    db_output_position++;
-	    if (db_max_width >= DB_MIN_MAX_WIDTH
-		&& db_output_position >= db_max_width-1) {
-		/* auto new line */
-		cnputc('\n');
-		db_output_position = 0;
-		db_last_non_space = 0;
-		db_output_line++;
-	    }
 	    db_last_non_space = db_output_position;
 	}
 	else if (c == '\n') {
+	    /* Newline */
+	    cnputc(c);
+	    db_output_position = 0;
+	    db_last_non_space = 0;
+	    db_check_interrupt();
+	    if (db_maxlines > 0) {
+		    db_newlines++;
+		    if (db_newlines >= db_maxlines)
+			    db_pager();
+	    }
+	}
+	else if (c == '\r') {
 	    /* Return */
 	    cnputc(c);
 	    db_output_position = 0;
 	    db_last_non_space = 0;
-	    db_output_line++;
+	    db_check_interrupt();
 	}
 	else if (c == '\t') {
 	    /* assume tabs every 8 positions */
@@ -188,61 +175,137 @@ db_putchar(int c)
 }
 
 /*
+ * Turn on the pager.
+ */
+void
+db_enable_pager(void)
+{
+	if (db_maxlines == 0) {
+		db_maxlines = db_lines_per_page;
+		db_newlines = 0;
+		db_pager_quit = 0;
+	}
+}
+
+/*
+ * Turn off the pager.
+ */
+void
+db_disable_pager(void)
+{
+	db_maxlines = 0;
+}
+
+/*
+ * A simple paging callout function.  It supports several simple more(1)-like
+ * commands as well as a quit command that sets db_pager_quit which db
+ * commands can poll to see if they should terminate early.
+ */
+void
+db_pager(void)
+{
+	int c, done;
+
+	db_printf("--More--\r");
+	done = 0;
+	while (!done) {
+		c = cngetc();
+		switch (c) {
+		case 'e':
+		case 'j':
+		case '\n':
+			/* Just one more line. */
+			db_maxlines = 1;
+			done++;
+			break;
+		case 'd':
+			/* Half a page. */
+			db_maxlines = db_lines_per_page / 2;
+			done++;
+			break;
+		case 'f':
+		case ' ':
+			/* Another page. */
+			db_maxlines = db_lines_per_page;
+			done++;
+			break;
+		case 'q':
+		case 'Q':
+		case 'x':
+		case 'X':
+			/* Quit */
+			db_maxlines = 0;
+			db_pager_quit = 1;
+			done++;
+			break;
+#if 0
+			/* FALLTHROUGH */
+		default:
+			cnputc('\007');
+#endif
+		}
+	}
+	db_printf("        ");
+	db_force_whitespace();
+	db_printf("\r");
+	db_newlines = 0;
+}
+
+/*
  * Return output position
  */
 int
-db_print_position(void)
+db_print_position()
 {
 	return (db_output_position);
+}
+
+/*
+ * Printing
+ */
+void
+#if __STDC__
+db_printf(const char *fmt, ...)
+#else
+db_printf(fmt)
+	const char *fmt;
+#endif
+{
+	va_list	listp;
+
+	va_start(listp, fmt);
+	kvprintf (fmt, db_putchar, NULL, db_radix, listp);
+	va_end(listp);
+}
+
+int db_indent;
+
+void
+#if __STDC__
+db_iprintf(const char *fmt,...)
+#else
+db_iprintf(fmt)
+	const char *fmt;
+#endif
+{
+	register int i;
+	va_list listp;
+
+	for (i = db_indent; i >= 8; i -= 8)
+		db_printf("\t");
+	while (--i >= 0)
+		db_printf(" ");
+	va_start(listp, fmt);
+	kvprintf (fmt, db_putchar, NULL, db_radix, listp);
+	va_end(listp);
 }
 
 /*
  * End line if too long.
  */
 void
-db_end_line(int space)
+db_end_line(int field_width)
 {
-	if (db_output_position >= db_max_width - space)
+	if (db_output_position + field_width > db_max_width)
 	    db_printf("\n");
-}
-
-char *
-db_format(char *buf, size_t bufsize, long val, int format, int alt, int width)
-{
-	const char *fmt;
-
-	if (format == DB_FORMAT_Z || db_radix == 16)
-		fmt = alt ? "-%#*lx" : "-%*lx";
-	else if (db_radix == 8)
-		fmt = alt ? "-%#*lo" : "-%*lo";
-	else
-		fmt = alt ? "-%#*lu" : "-%*lu";
-
-	/* The leading '-' is a nasty (and beautiful) idea from NetBSD */
-	if (val < 0 && format != DB_FORMAT_N)
-		val = -val;
-	else
-		fmt++;
-
-	snprintf(buf, bufsize, fmt, width, val);
-
-	return (buf);
-}
-
-void
-db_stack_dump(void)
-{
-	static int intrace;
-
-	if (intrace) {
-		printf("Faulted in traceback, aborting...\n");
-		return;
-	}
-
-	intrace = 1;
-	printf("Starting stack trace...\n");
-	db_stack_trace_print((db_expr_t)__builtin_frame_address(0), TRUE,
-	    256 /* low limit */, "", printf);
-	printf("End of stack trace.\n");
-	intrace = 0;
 }

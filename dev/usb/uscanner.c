@@ -1,7 +1,13 @@
-/*	$OpenBSD: uscanner.c,v 1.39 2008/02/26 18:34:18 deraadt Exp $ */
-/*	$NetBSD: uscanner.c,v 1.40 2003/01/27 00:32:44 wiz Exp $	*/
+/*	$NetBSD: uscanner.c,v 1.30 2002/07/11 21:14:36 augustss Exp$	*/
 
-/*
+/* Also already merged from NetBSD:
+ *	$NetBSD: uscanner.c,v 1.33 2002/09/23 05:51:24 simonb Exp $
+ */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/usb/uscanner.c,v 1.91 2008/04/29 00:51:20 imp Exp $");
+
+/*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -44,25 +50,33 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/device.h>
+#include <sys/module.h>
+#include <sys/bus.h>
+#include <sys/conf.h>
+#include <sys/fcntl.h>
+#include <sys/filio.h>
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
 #include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/poll.h>
 #include <sys/conf.h>
+#include <sys/sysctl.h>
+#include <sys/uio.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
 
-#include <dev/usb/usbdevs.h>
+#include "usbdevs.h"
 
-#ifdef USCANNER_DEBUG
-#define DPRINTF(x)	do { if (uscannerdebug) printf x; } while (0)
-#define DPRINTFN(n,x)	do { if (uscannerdebug>(n)) printf x; } while (0)
+#ifdef USB_DEBUG
+#define DPRINTF(x)	if (uscannerdebug) printf x
+#define DPRINTFN(n,x)	if (uscannerdebug>(n)) printf x
 int	uscannerdebug = 0;
+SYSCTL_NODE(_hw_usb, OID_AUTO, uscanner, CTLFLAG_RW, 0, "USB uscanner");
+SYSCTL_INT(_hw_usb_uscanner, OID_AUTO, debug, CTLFLAG_RW,
+	   &uscannerdebug, 0, "uscanner debug level");
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
@@ -78,8 +92,11 @@ struct uscan_info {
 static const struct uscan_info uscanner_devs[] = {
   /* Acer Peripherals */
  {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_320U }, 0 },
+ {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_4300U }, 0 },
  {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_640U }, 0 },
+ {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_640BT }, 0 },
  {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_620U }, 0 },
+ {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_1240U }, 0 },
  {{ USB_VENDOR_ACERP, USB_PRODUCT_ACERP_ACERSCAN_C310U }, 0 },
 
   /* AGFA */
@@ -99,9 +116,11 @@ static const struct uscan_info uscanner_devs[] = {
 
   /* Canon */
  {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_N656U }, 0 },
- {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_N670U }, 0 },
+ {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_N676U }, 0 },
  {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_N1220U }, 0 },
+ {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_D660U }, 0 },
  {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_N1240U }, 0 },
+ {{ USB_VENDOR_CANON, USB_PRODUCT_CANON_LIDE25 }, 0 },
 
   /* Kye */
  {{ USB_VENDOR_KYE, USB_PRODUCT_KYE_VIVIDPRO }, 0 },
@@ -113,17 +132,15 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_4100C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_4200C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_4300C }, 0 },
+ {{ USB_VENDOR_HP, USB_PRODUCT_HP_4670V }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_S20 }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_5200C }, 0 },
-#if 0
-  /* Handled by usscanner */
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_5300C }, 0 },
-#endif
+ {{ USB_VENDOR_HP, USB_PRODUCT_HP_5400C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_6200C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_6300C }, 0 },
+ {{ USB_VENDOR_HP, USB_PRODUCT_HP_82x0C }, 0 },
 
-#if 0
-  /* XXX Should be handled by usscanner */
   /* Microtek */
  {{ USB_VENDOR_SCANLOGIC, USB_PRODUCT_SCANLOGIC_336CX }, 0 },
  {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_X6U }, 0 },
@@ -133,11 +150,14 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL }, 0 },
  {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL2 }, 0 },
  {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6UL }, 0 },
-#endif
+
+ /* Minolta */
+ {{ USB_VENDOR_MINOLTA, USB_PRODUCT_MINOLTA_5400 }, 0 },
 
   /* Mustek */
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_1200CU }, 0 },
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_BEARPAW1200F }, 0 },
+ {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_BEARPAW1200TA }, 0 },
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_600USB }, 0 },
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_600CU }, 0 },
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_1200USB }, 0 },
@@ -148,6 +168,9 @@ static const struct uscan_info uscanner_devs[] = {
   /* National */
  {{ USB_VENDOR_NATIONAL, USB_PRODUCT_NATIONAL_BEARPAW1200 }, 0 },
  {{ USB_VENDOR_NATIONAL, USB_PRODUCT_NATIONAL_BEARPAW2400 }, 0 },
+
+  /* Nikon */
+ {{ USB_VENDOR_NIKON, USB_PRODUCT_NIKON_LS40 }, 0 },
 
   /* Primax */
  {{ USB_VENDOR_PRIMAX, USB_PRODUCT_PRIMAX_G2X300 }, 0 },
@@ -169,24 +192,34 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_610 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1200 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1240 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1260 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1250 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1600 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1640 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1660 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_640U }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1650 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_2400 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX3800 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX4000 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX5000 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX6000 }, 0 },
- {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_CX5400 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1660 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1670 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1260 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1270 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_RX425 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_3200 }, USC_KEEP_OPEN },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_GT9700F }, USC_KEEP_OPEN },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_GT9300UF }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_2480 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_3500 }, USC_KEEP_OPEN },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_3590 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_4200 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_4990 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_5000 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_6000 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_CX5400 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX8400 }, 0 },
 
   /* UMAX */
  {{ USB_VENDOR_UMAX, USB_PRODUCT_UMAX_ASTRA1220U }, 0 },
  {{ USB_VENDOR_UMAX, USB_PRODUCT_UMAX_ASTRA1236U }, 0 },
  {{ USB_VENDOR_UMAX, USB_PRODUCT_UMAX_ASTRA2000U }, 0 },
+ {{ USB_VENDOR_UMAX, USB_PRODUCT_UMAX_ASTRA2100U }, 0 },
  {{ USB_VENDOR_UMAX, USB_PRODUCT_UMAX_ASTRA2200U }, 0 },
  {{ USB_VENDOR_UMAX, USB_PRODUCT_UMAX_ASTRA3400 }, 0 },
 
@@ -208,9 +241,10 @@ static const struct uscan_info uscanner_devs[] = {
 #define	USCANNER_BUFFERSIZE	1024
 
 struct uscanner_softc {
-	struct device		sc_dev;		/* base device */
+	device_t		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;
 	usbd_interface_handle	sc_iface;
+	struct cdev *dev;
 
 	u_int			sc_dev_flags;
 
@@ -228,8 +262,6 @@ struct uscanner_softc {
 	int			sc_bulkout_bufferlen;
 	int			sc_bulkout_datalen;
 
-	struct selinfo		sc_selq;
-
 	u_char			sc_state;
 #define USCANNER_OPEN		0x01	/* opened */
 
@@ -237,82 +269,120 @@ struct uscanner_softc {
 	u_char			sc_dying;
 };
 
-int uscanner_do_read(struct uscanner_softc *, struct uio *, int);
-int uscanner_do_write(struct uscanner_softc *, struct uio *, int);
-void uscanner_do_close(struct uscanner_softc *);
+d_open_t  uscanneropen;
+d_close_t uscannerclose;
+d_read_t  uscannerread;
+d_write_t uscannerwrite;
+d_poll_t  uscannerpoll;
+
+
+static struct cdevsw uscanner_cdevsw = {
+	.d_version =	D_VERSION,
+	.d_flags =	D_NEEDGIANT,
+	.d_open =	uscanneropen,
+	.d_close =	uscannerclose,
+	.d_read =	uscannerread,
+	.d_write =	uscannerwrite,
+	.d_poll =	uscannerpoll,
+	.d_name =	"uscanner",
+};
+
+static int uscanner_do_read(struct uscanner_softc *, struct uio *, int);
+static int uscanner_do_write(struct uscanner_softc *, struct uio *, int);
+static void uscanner_do_close(struct uscanner_softc *);
 
 #define USCANNERUNIT(n) (minor(n))
 
-int uscanner_match(struct device *, void *, void *); 
-void uscanner_attach(struct device *, struct device *, void *); 
-int uscanner_detach(struct device *, int); 
-int uscanner_activate(struct device *, enum devact); 
+static device_probe_t uscanner_match;
+static device_attach_t uscanner_attach;
+static device_detach_t uscanner_detach;
 
-struct cfdriver uscanner_cd = { 
-	NULL, "uscanner", DV_DULL 
-}; 
+static device_method_t uscanner_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		uscanner_match),
+	DEVMETHOD(device_attach,	uscanner_attach),
+	DEVMETHOD(device_detach,	uscanner_detach),
 
-const struct cfattach uscanner_ca = { 
-	sizeof(struct uscanner_softc), 
-	uscanner_match, 
-	uscanner_attach, 
-	uscanner_detach, 
-	uscanner_activate, 
+	{ 0, 0 }
 };
 
-int
-uscanner_match(struct device *parent, void *match, void *aux)
+static driver_t uscanner_driver = {
+	"uscanner",
+	uscanner_methods,
+	sizeof(struct uscanner_softc)
+};
+
+static devclass_t uscanner_devclass;
+
+static int
+uscanner_match(device_t self)
 {
-	struct usb_attach_arg *uaa = aux;
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 	usb_interface_descriptor_t *id;
 
 	if (uaa->iface == NULL)
-		return UMATCH_NONE; /* do not grab the entire device */
+		return UMATCH_NONE;	/* do not grab the entire device */
 
 	if (uscanner_lookup(uaa->vendor, uaa->product) == NULL)
-		return UMATCH_NONE; /* not in the list of known devices */
+		return UMATCH_NONE;	/* not in the list of known devices */
 	id = usbd_get_interface_descriptor(uaa->iface);
 	if (id == NULL)
 		return UMATCH_NONE;
 
 	/*
-	* There isn't a specific UICLASS for scanners, many vendors use
-	* UICLASS_VENDOR, so detecting the right interface is not so easy.
-	* But certainly we can exclude PRINTER and MASS - which some
-	* multifunction devices implement.
-	*/
+	 * There isn't a specific UICLASS for scanners, many vendors use
+	 * UICLASS_VENDOR, so detecting the right interface is not so easy.
+	 * But certainly we can exclude PRINTER and MASS - which some
+	 * multifunction devices implement.
+	 */
 	if (id->bInterfaceClass == UICLASS_PRINTER ||
 	    id->bInterfaceClass == UICLASS_MASS)
 		return UMATCH_NONE;
 
-	return UMATCH_VENDOR_PRODUCT;
+	return UMATCH_VENDOR_PRODUCT;	/* ok we found it */
 }
 
-void
-uscanner_attach(struct device *parent, struct device *self, void *aux)
+static int
+uscanner_attach(device_t self)
 {
-	struct uscanner_softc *sc = (struct uscanner_softc *)self;
-	struct usb_attach_arg *uaa = aux;
+	struct uscanner_softc *sc = device_get_softc(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 	usb_interface_descriptor_t *id = 0;
 	usb_endpoint_descriptor_t *ed, *ed_bulkin = NULL, *ed_bulkout = NULL;
 	int i;
 	usbd_status err;
 	int ifnum;
 
+	sc->sc_dev = self;
 	sc->sc_dev_flags = uscanner_lookup(uaa->vendor, uaa->product)->flags;
-
 	sc->sc_udev = uaa->device;
 
 	id = usbd_get_interface_descriptor(uaa->iface);
 	ifnum = id->bInterfaceNumber;
-
+#if 0
+	/*
+	 * This was in the original driver, but we cannot change the
+	 * configuration of the whole device while attaching only to
+	 * one of its interfaces. This can kill other already-attached
+	 * driver, and/or possibly prevent this driver from attaching
+	 * if an error occurs in set_config_no.
+	 * If a device need setting the configuration, this must be done
+	 * before attaching drivers to the various interfaces.
+	 */
+	err = usbd_set_config_no(uaa->device, 1, 1); /* XXX */
+	if (err) {
+		printf("%s: setting config no failed\n",
+		    device_get_nameunit(sc->sc_dev));
+		return ENXIO;
+	}
+#endif
 	err = usbd_device2interface_handle(sc->sc_udev, ifnum, &sc->sc_iface);
 	if (!err && sc->sc_iface)
 	    id = usbd_get_interface_descriptor(sc->sc_iface);
 	if (err || id == 0) {
 		printf("%s: could not get interface descriptor, err=%d,id=%p\n",
-		       sc->sc_dev.dv_xname, err, id);
-		return;
+		       device_get_nameunit(sc->sc_dev), err, id);
+		return ENXIO;
 	}
 
 	/* Find the two first bulk endpoints */
@@ -320,8 +390,8 @@ uscanner_attach(struct device *parent, struct device *self, void *aux)
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == 0) {
 			printf("%s: could not read endpoint descriptor\n",
-			       sc->sc_dev.dv_xname);
-			return;
+			       device_get_nameunit(sc->sc_dev));
+			return ENXIO;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN
@@ -339,27 +409,29 @@ uscanner_attach(struct device *parent, struct device *self, void *aux)
 	/* Verify that we goething sensible */
 	if (ed_bulkin == NULL || ed_bulkout == NULL) {
 		printf("%s: bulk-in and/or bulk-out endpoint not found\n",
-			sc->sc_dev.dv_xname);
-		return;
+			device_get_nameunit(sc->sc_dev));
+		return ENXIO;
 	}
 
 	sc->sc_bulkin = ed_bulkin->bEndpointAddress;
 	sc->sc_bulkout = ed_bulkout->bEndpointAddress;
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   &sc->sc_dev);
+	/* the main device, ctrl endpoint */
+	sc->dev = make_dev(&uscanner_cdevsw, device_get_unit(sc->sc_dev),
+		UID_ROOT, GID_OPERATOR, 0644, "%s", device_get_nameunit(sc->sc_dev));
+	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,sc->sc_dev);
+
+	return 0;
 }
 
 int
-uscanneropen(dev_t dev, int flag, int mode, struct proc *p)
+uscanneropen(struct cdev *dev, int flag, int mode, struct thread *p)
 {
 	struct uscanner_softc *sc;
 	int unit = USCANNERUNIT(dev);
 	usbd_status err;
 
-	if (unit >= uscanner_cd.cd_ndevs)
-		return (ENXIO);
-	sc = uscanner_cd.cd_devs[unit];
+	sc = devclass_get_softc(uscanner_devclass, unit);
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -387,7 +459,7 @@ uscanneropen(dev_t dev, int flag, int mode, struct proc *p)
 				     USBD_EXCLUSIVE_USE, &sc->sc_bulkin_pipe);
 		if (err) {
 			printf("%s: cannot open bulk-in pipe (addr %d)\n",
-			       sc->sc_dev.dv_xname, sc->sc_bulkin);
+			       device_get_nameunit(sc->sc_dev), sc->sc_bulkin);
 			uscanner_do_close(sc);
 			return (EIO);
 		}
@@ -397,7 +469,7 @@ uscanneropen(dev_t dev, int flag, int mode, struct proc *p)
 				     USBD_EXCLUSIVE_USE, &sc->sc_bulkout_pipe);
 		if (err) {
 			printf("%s: cannot open bulk-out pipe (addr %d)\n",
-			       sc->sc_dev.dv_xname, sc->sc_bulkout);
+			       device_get_nameunit(sc->sc_dev), sc->sc_bulkout);
 			uscanner_do_close(sc);
 			return (EIO);
 		}
@@ -418,12 +490,11 @@ uscanneropen(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-uscannerclose(dev_t dev, int flag, int mode, struct proc *p)
+uscannerclose(struct cdev *dev, int flag, int mode, struct thread *p)
 {
 	struct uscanner_softc *sc;
 
-	sc = uscanner_cd.cd_devs[USCANNERUNIT(dev)];
-
+	sc = devclass_get_softc(uscanner_devclass, USCANNERUNIT(dev));
 	DPRINTFN(5, ("uscannerclose: flag=%d, mode=%d, unit=%d\n",
 		     flag, mode, USCANNERUNIT(dev)));
 
@@ -476,14 +547,14 @@ uscanner_do_close(struct uscanner_softc *sc)
 	sc->sc_state &= ~USCANNER_OPEN;
 }
 
-int
+static int
 uscanner_do_read(struct uscanner_softc *sc, struct uio *uio, int flag)
 {
 	u_int32_t n, tn;
 	usbd_status err;
 	int error = 0;
 
-	DPRINTFN(5, ("%s: uscannerread\n", sc->sc_dev.dv_xname));
+	DPRINTFN(5, ("%s: uscannerread\n", device_get_nameunit(sc->sc_dev)));
 
 	if (sc->sc_dying)
 		return (EIO);
@@ -516,29 +587,28 @@ uscanner_do_read(struct uscanner_softc *sc, struct uio *uio, int flag)
 }
 
 int
-uscannerread(dev_t dev, struct uio *uio, int flag)
+uscannerread(struct cdev *dev, struct uio *uio, int flag)
 {
 	struct uscanner_softc *sc;
 	int error;
 
-	sc = uscanner_cd.cd_devs[USCANNERUNIT(dev)];
-
+	sc = devclass_get_softc(uscanner_devclass, USCANNERUNIT(dev));
 	sc->sc_refcnt++;
 	error = uscanner_do_read(sc, uio, flag);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(sc->sc_dev);
 
 	return (error);
 }
 
-int
+static int
 uscanner_do_write(struct uscanner_softc *sc, struct uio *uio, int flag)
 {
 	u_int32_t n;
 	int error = 0;
 	usbd_status err;
 
-	DPRINTFN(5, ("%s: uscanner_do_write\n", sc->sc_dev.dv_xname));
+	DPRINTFN(5, ("%s: uscanner_do_write\n", device_get_nameunit(sc->sc_dev)));
 
 	if (sc->sc_dying)
 		return (EIO);
@@ -566,44 +636,26 @@ uscanner_do_write(struct uscanner_softc *sc, struct uio *uio, int flag)
 }
 
 int
-uscannerwrite(dev_t dev, struct uio *uio, int flag)
+uscannerwrite(struct cdev *dev, struct uio *uio, int flag)
 {
 	struct uscanner_softc *sc;
 	int error;
 
-	sc = uscanner_cd.cd_devs[USCANNERUNIT(dev)];
-
+	sc = devclass_get_softc(uscanner_devclass, USCANNERUNIT(dev));
 	sc->sc_refcnt++;
 	error = uscanner_do_write(sc, uio, flag);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(sc->sc_dev);
 	return (error);
 }
 
-int
-uscanner_activate(struct device *self, enum devact act)
+static int
+uscanner_detach(device_t self)
 {
-	struct uscanner_softc *sc = (struct uscanner_softc *)self;
-
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
-		break;
-	}
-	return (0);
-}
-
-int
-uscanner_detach(struct device *self, int flags)
-{
-	struct uscanner_softc *sc = (struct uscanner_softc *)self;
+	struct uscanner_softc *sc = device_get_softc(self);
 	int s;
-	int maj, mn;
 
-	DPRINTF(("uscanner_detach: sc=%p flags=%d\n", sc, flags));
+	DPRINTF(("uscanner_detach: sc=%p\n", sc));
 
 	sc->sc_dying = 1;
 	sc->sc_dev_flags = 0;	/* make close really close device */
@@ -617,34 +669,26 @@ uscanner_detach(struct device *self, int flags)
 	s = splusb();
 	if (--sc->sc_refcnt >= 0) {
 		/* Wait for processes to go away. */
-		usb_detach_wait(&sc->sc_dev);
+		usb_detach_wait(sc->sc_dev);
 	}
 	splx(s);
 
-	/* locate the major number */
-	for (maj = 0; maj < nchrdev; maj++)
-		if (cdevsw[maj].d_open == uscanneropen)
-			break;
-
-	/* Nuke the vnodes for any open instances (calls close). */
-	mn = self->dv_unit * USB_MAX_ENDPOINTS;
-	vdevgone(maj, mn, mn + USB_MAX_ENDPOINTS - 1, VCHR);
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
+	/* destroy the device for the control endpoint */
+	destroy_dev(sc->dev);
+	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev, sc->sc_dev);
 
 	return (0);
 }
 
 int
-uscannerpoll(dev_t dev, int events, struct proc *p)
+uscannerpoll(struct cdev *dev, int events, struct thread *p)
 {
 	struct uscanner_softc *sc;
 	int revents = 0;
 
-	sc = uscanner_cd.cd_devs[USCANNERUNIT(dev)];
-
+	sc = devclass_get_softc(uscanner_devclass, USCANNERUNIT(dev));
 	if (sc->sc_dying)
-		return (POLLERR);
+		return (EIO);
 
 	/*
 	 * We have no easy way of determining if a read will
@@ -657,56 +701,5 @@ uscannerpoll(dev_t dev, int events, struct proc *p)
 	return (revents);
 }
 
-int
-uscannerioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
-{
-	return (EINVAL);
-}
-
-void filt_uscannerdetach(struct knote *);
-int uscannerkqfilter(dev_t, struct knote *);
-
-void
-filt_uscannerdetach(struct knote *kn)
-{
-	struct uscanner_softc *sc = (void *)kn->kn_hook;
-
-	SLIST_REMOVE(&sc->sc_selq.si_note, kn, knote, kn_selnext);
-}
-
-struct filterops uscanner_seltrue_filtops =
-	{ 1, NULL, filt_uscannerdetach, filt_seltrue };
-
-int
-uscannerkqfilter(dev_t dev, struct knote *kn)
-{
-	struct uscanner_softc *sc;
-	struct klist *klist;
-
-	sc = uscanner_cd.cd_devs[USCANNERUNIT(dev)];
-
-	if (sc->sc_dying)
-		return (1);
-
-	switch (kn->kn_filter) {
-	case EVFILT_READ:
-	case EVFILT_WRITE:
-		/* 
-		 * We have no easy way of determining if a read will
-		 * yield any data or a write will happen.
-		 * Pretend they will.
-		 */
-		klist = &sc->sc_selq.si_note;
-		kn->kn_fop = &uscanner_seltrue_filtops;
-		break;
-
-	default:
-		return (1);
-	}
-
-	kn->kn_hook = (void *)sc;
-
-	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
-
-	return (0);
-}
+MODULE_DEPEND(uscanner, usb, 1, 1, 1);
+DRIVER_MODULE(uscanner, uhub, uscanner_driver, uscanner_devclass, usbd_driver_load, 0);

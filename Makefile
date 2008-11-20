@@ -1,11 +1,39 @@
-#	$OpenBSD: Makefile,v 1.31 2008/05/15 20:19:11 kettenis Exp $
-#	$NetBSD: Makefile,v 1.5 1995/09/15 21:05:21 pk Exp $
+# $FreeBSD: src/sys/Makefile,v 1.45 2007/07/12 21:04:55 rwatson Exp $
 
-SUBDIR=	dev/microcode \
-	arch/alpha arch/amd64 arch/armish arch/aviion arch/hp300 \
-	arch/hppa arch/hppa64 arch/i386 arch/landisk arch/luna88k \
-	arch/m68k arch/mac68k arch/macppc arch/mvme68k \
-	arch/mvme88k arch/mvmeppc arch/sgi arch/socppc \
-	arch/solbourne arch/sparc arch/sparc64 arch/vax arch/zaurus
+.include <bsd.own.mk>
+
+# The boot loader
+.if ${MK_BOOT} != "no"
+SUBDIR=	boot
+.endif
+
+# Directories to include in cscope name file and TAGS.
+CSCOPEDIRS=	bsm cam compat conf contrib crypto ddb dev fs geom gnu \
+		i4b isa kern libkern modules net net80211 netatalk netatm \
+		netgraph netinet netinet6 netipsec netipx netnatm netncp \
+		netsmb nfs nfsclient nfs4client rpc pccard pci security sys \
+		ufs vm ${ARCHDIR}
+
+ARCHDIR	?=	${MACHINE}
+
+# Loadable kernel modules
+
+.if defined(MODULES_WITH_WORLD)
+SUBDIR+=modules
+.endif
+
+HTAGSFLAGS+= -at `awk -F= '/^RELEASE *=/{release=$2}; END {print "FreeBSD", release, "kernel"}' < conf/newvers.sh`
+
+# You need the devel/cscope port for this.
+cscope:	${.CURDIR}/cscopenamefile
+	cd ${.CURDIR}; cscope -k -p4 -i cscopenamefile
+
+${.CURDIR}/cscopenamefile: 
+	cd ${.CURDIR}; find ${CSCOPEDIRS} -name "*.[csh]" > ${.TARGET}
+
+# You need the devel/global and one of editor/emacs* ports for that.
+TAGS ${.CURDIR}/TAGS:	${.CURDIR}/cscopenamefile
+	rm -f ${.CURDIR}/TAGS
+	cd ${.CURDIR}; xargs etags -a < ${.CURDIR}/cscopenamefile
 
 .include <bsd.subdir.mk>

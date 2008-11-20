@@ -1,7 +1,4 @@
-/*	$OpenBSD: mtio.h,v 1.9 2007/06/01 18:44:48 krw Exp $	*/
-/*	$NetBSD: mtio.h,v 1.14 1997/04/15 06:50:19 lukem Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,10 +27,16 @@
  * SUCH DAMAGE.
  *
  *	@(#)mtio.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/mtio.h,v 1.29 2005/01/07 02:29:23 imp Exp $
  */
 
-#ifndef _SYS_MTIO_H_
-#define _SYS_MTIO_H_
+#ifndef	_SYS_MTIO_H_
+#define	_SYS_MTIO_H_
+
+#ifndef _KERNEL
+#include <sys/types.h>
+#endif
+#include <sys/ioccom.h>
 
 /*
  * Structures and definitions for mag tape io control commands
@@ -42,7 +45,7 @@
 /* structure for MTIOCTOP - mag tape op command */
 struct mtop {
 	short	mt_op;		/* operations defined below */
-	int	mt_count;	/* how many of them */
+	int32_t	mt_count;	/* how many of them */
 };
 
 /* operations */
@@ -54,14 +57,53 @@ struct mtop {
 #define MTREW		5	/* rewind */
 #define MTOFFL		6	/* rewind and put the drive offline */
 #define MTNOP		7	/* no operation, sets status only */
-#define MTRETEN		8	/* retension */
-#define MTERASE		9	/* erase entire tape */
-#define MTEOM		10	/* forward to end of media */
-#define MTNBSF		11	/* backward space to beginning of file */
-#define MTCACHE		12	/* enable controller cache */
-#define MTNOCACHE	13	/* disable controller cache */
-#define MTSETBSIZ	14	/* set block size; 0 for variable */
-#define MTSETDNSTY	15	/* set density code for current mode */
+#define MTCACHE		8	/* enable controller cache */
+#define MTNOCACHE	9	/* disable controller cache */
+
+#if defined(__FreeBSD__)
+/* Set block size for device. If device is a variable size dev		*/
+/* a non zero parameter will change the device to a fixed block size	*/
+/* device with block size set to that of the parameter passed in.	*/
+/* Resetting the block size to 0 will restore the device to a variable	*/
+/* block size device. */
+
+#define MTSETBSIZ	10
+
+/* Set density values for device. Sets the value for the opened mode only. */
+
+#define MTSETDNSTY	11
+
+#define MTERASE		12	/* erase to EOM */
+#define MTEOD		13	/* Space to EOM */
+#define MTCOMP		14	/* select compression mode 0=off, 1=def */
+#define MTRETENS	15	/* re-tension tape */
+#define MTWSS		16	/* write setmark(s) */
+#define MTFSS		17	/* forward space setmark */
+#define MTBSS		18	/* backward space setmark */
+
+#define MT_COMP_ENABLE		0xffffffff
+#define MT_COMP_DISABLED	0xfffffffe
+#define MT_COMP_UNSUPP		0xfffffffd
+
+/*
+ * Values in mt_dsreg that say what the device is doing
+ */
+#define	MTIO_DSREG_NIL	0	/* Unknown */
+#define	MTIO_DSREG_REST	1	/* Doing Nothing */
+#define	MTIO_DSREG_RBSY	2	/* Communicating with tape (but no motion) */
+#define	MTIO_DSREG_WR	20	/* Writing */
+#define	MTIO_DSREG_FMK	21	/* Writing Filemarks */
+#define	MTIO_DSREG_ZER	22	/* Erasing */
+#define	MTIO_DSREG_RD	30	/* Reading */
+#define	MTIO_DSREG_FWD	40	/* Spacing Forward */
+#define	MTIO_DSREG_REV	41	/* Spacing Reverse */
+#define	MTIO_DSREG_POS	42	/* Hardware Positioning (direction unknown) */
+#define	MTIO_DSREG_REW	43	/* Rewinding */
+#define	MTIO_DSREG_TEN	44	/* Retensioning */
+#define	MTIO_DSREG_UNL	45	/* Unloading */
+#define	MTIO_DSREG_LD	46	/* Loading */
+
+#endif	/* __FreeBSD__ */
 
 /* structure for MTIOCGET - mag tape get status command */
 
@@ -71,13 +113,67 @@ struct mtget {
 	short	mt_dsreg;	/* ``drive status'' register */
 	short	mt_erreg;	/* ``error'' register */
 /* end device-dependent registers */
+	/*
+	 * Note that the residual count, while maintained, may be
+	 * be nonsense because the size of the residual may (greatly)
+	 * exceed 32 K-bytes. Use the MTIOCERRSTAT ioctl to get a
+	 * more accurate count.
+	 */
 	short	mt_resid;	/* residual count */
-	int	mt_fileno;	/* current file number relative to BOT. */ 
-	int	mt_blkno;	/* current block number relative to BOF. */
-	int	mt_blksiz;	/* current block size */
-	int	mt_density;	/* current density code */
-	int	mt_mblksiz;	/* default block size */
-	int	mt_mdensity;	/* default density code */
+#if defined (__FreeBSD__)
+	int32_t mt_blksiz;	/* presently operating blocksize */
+	int32_t mt_density;	/* presently operating density */
+	u_int32_t mt_comp;	/* presently operating compression */
+	int32_t mt_blksiz0;	/* blocksize for mode 0 */
+	int32_t mt_blksiz1;	/* blocksize for mode 1 */
+	int32_t mt_blksiz2;	/* blocksize for mode 2 */
+	int32_t mt_blksiz3;	/* blocksize for mode 3 */
+	int32_t mt_density0;	/* density for mode 0 */
+	int32_t mt_density1;	/* density for mode 1 */
+	int32_t mt_density2;	/* density for mode 2 */
+	int32_t mt_density3;	/* density for mode 3 */
+/* the following are not yet implemented */
+	u_int32_t mt_comp0;	/* compression type for mode 0 */
+	u_int32_t mt_comp1;	/* compression type for mode 1 */
+	u_int32_t mt_comp2;	/* compression type for mode 2 */
+	u_int32_t mt_comp3;	/* compression type for mode 3 */
+/* end not yet implemented */
+#endif
+	int32_t	mt_fileno;	/* relative file number of current position */
+	int32_t	mt_blkno;	/* relative block number of current position */
+};
+
+/* structure for MTIOCERRSTAT - tape get error status command */
+/* really only supported for SCSI tapes right now */
+struct scsi_tape_errors {
+	/*
+	 * These are latched from the last command that had a SCSI
+	 * Check Condition noted for these operations. The act
+	 * of issuing an MTIOCERRSTAT unlatches and clears them.
+	 */
+	u_int8_t io_sense[32];	/* Last Sense Data For Data I/O */
+	int32_t io_resid;	/* residual count from last Data I/O */
+	u_int8_t io_cdb[16];	/* Command that Caused the Last Data Sense */
+	u_int8_t ctl_sense[32];	/* Last Sense Data For Control I/O */
+	int32_t ctl_resid;	/* residual count from last Control I/O */
+	u_int8_t ctl_cdb[16];	/* Command that Caused the Last Control Sense */
+	/*
+	 * These are the read and write cumulative error counters.
+	 * (how to reset cumulative error counters is not yet defined).
+	 * (not implemented as yet but space is being reserved for them)
+	 */
+	struct {
+		u_int32_t retries;	/* total # retries performed */
+		u_int32_t corrected;	/* total # corrections performed */
+		u_int32_t processed;	/* total # corrections successful */
+		u_int32_t failures;	/* total # corrections/retries failed */
+		u_int64_t nbytes;	/* total # bytes processed */
+	} wterr, rderr;
+};
+	
+union mterrstat {
+	struct scsi_tape_errors scsi_errstat;
+	char _reserved_padding[256];
 };
 
 /*
@@ -101,47 +197,37 @@ struct mtget {
 #define MT_ISVIPER1	0x0e		/* Archive Viper-150 */
 #define MT_ISPYTHON	0x0f		/* Archive Python (DAT) */
 #define MT_ISHPDAT	0x10		/* HP 35450A DAT drive */
-#define MT_ISWANGTEK	0x11		/* WANGTEK 5150ES */
-#define MT_ISCALIPER	0x12		/* Caliper CP150 */
-#define MT_ISWTEK5099	0x13		/* WANGTEK 5099ES */
-#define MT_ISVIPER2525	0x14		/* Archive Viper 2525 */
 #define MT_ISMFOUR	0x11		/* M4 Data 1/2 9track drive */
 #define MT_ISTK50	0x12		/* DEC SCSI TK50 */
 #define MT_ISMT02	0x13		/* Emulex MT02 SCSI tape controller */
 
-/* bits defined for the mt_dsreg field */
-#define MT_DS_RDONLY	0x10		/* tape mounted readonly */
-#define MT_DS_MOUNTED	0x03		/* tape mounted (for control opens) */
-
 /* mag tape io control commands */
 #define	MTIOCTOP	_IOW('m', 1, struct mtop)	/* do a mag tape op */
 #define	MTIOCGET	_IOR('m', 2, struct mtget)	/* get tape status */
+/* these two do not appear to be used anywhere */
 #define MTIOCIEOT	_IO('m', 3)			/* ignore EOT error */
 #define MTIOCEEOT	_IO('m', 4)			/* enable EOT error */
-
 /*
  * When more SCSI-3 SSC (streaming device) devices are out there
  * that support the full 32 byte type 2 structure, we'll have to
  * rethink these ioctls to support all the entities they haul into
  * the picture (64 bit blocks, logical file record numbers, etc..).
  */
-#define MTIOCRDSPOS	_IOR('m', 5, u_int32_t)	/* get logical blk addr */
-#define MTIOCRDHPOS	_IOR('m', 6, u_int32_t)	/* get hardware blk addr */
-#define MTIOCSLOCATE	_IOW('m', 5, u_int32_t)	/* seek to logical blk addr */
-#define MTIOCHLOCATE	_IOW('m', 6, u_int32_t)	/* seek to hardware blk addr */
-
-#ifdef	_KERNEL
+#define	MTIOCRDSPOS	_IOR('m', 5, u_int32_t)	/* get logical blk addr */
+#define	MTIOCRDHPOS	_IOR('m', 6, u_int32_t)	/* get hardware blk addr */
+#define	MTIOCSLOCATE	_IOW('m', 5, u_int32_t)	/* seek to logical blk addr */
+#define	MTIOCHLOCATE	_IOW('m', 6, u_int32_t)	/* seek to hardware blk addr */
+#define	MTIOCERRSTAT	_IOR('m', 7, union mterrstat)	/* get tape errors */
 /*
- * minor device number
+ * Set EOT model- argument is number of filemarks to end a tape with.
+ * Note that not all possible values will be accepted.
  */
+#define	MTIOCSETEOTMODEL	_IOW('m', 8, u_int32_t)
+/* Get current EOT model */
+#define	MTIOCGETEOTMODEL	_IOR('m', 8, u_int32_t)
 
-#define	T_UNIT		003		/* unit selection */
-#define	T_NOREWIND	004		/* no rewind on close */
-#define	T_DENSEL	030		/* density select */
-#define	T_800BPI	000		/* select  800 bpi */
-#define	T_1600BPI	010		/* select 1600 bpi */
-#define	T_6250BPI	020		/* select 6250 bpi */
-#define	T_BADBPI	030		/* undefined selection */
-#endif /* _KERNEL */
+#ifndef _KERNEL
+#define	DEFTAPE	"/dev/nsa0"
+#endif
 
 #endif /* !_SYS_MTIO_H_ */

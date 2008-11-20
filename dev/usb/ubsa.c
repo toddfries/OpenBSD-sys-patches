@@ -1,5 +1,3 @@
-/*	$OpenBSD: ubsa.c,v 1.33 2008/04/02 08:54:08 fkr Exp $ 	*/
-/*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
  * All rights reserved.
@@ -25,7 +23,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-/*
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/usb/ubsa.c,v 1.35 2008/04/09 22:20:28 flz Exp $");
+/*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -61,21 +62,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/device.h>
+#include <sys/module.h>
+#include <sys/bus.h>
 #include <sys/ioccom.h>
 #include <sys/fcntl.h>
+#include <sys/taskqueue.h>
 #include <sys/conf.h>
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
 #include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/poll.h>
 #include <sys/sysctl.h>
 
@@ -84,19 +84,21 @@
 
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
-#include <dev/usb/usbdevs.h>
+#include "usbdevs.h"
 #include <dev/usb/usb_quirks.h>
 
 #include <dev/usb/ucomvar.h>
 
 #ifdef USB_DEBUG
-#define UBSA_DEBUG
-#endif
+static int	ubsadebug = 0;
+SYSCTL_NODE(_hw_usb, OID_AUTO, ubsa, CTLFLAG_RW, 0, "USB ubsa");
+SYSCTL_INT(_hw_usb_ubsa, OID_AUTO, debug, CTLFLAG_RW,
+	   &ubsadebug, 0, "ubsa debug level");
 
-#ifdef UBSA_DEBUG
-int	ubsadebug = 0;
-
-#define	DPRINTFN(n, x)	do { if (ubsadebug > (n)) printf x; } while (0)
+#define	DPRINTFN(n, x)	do { \
+				if (ubsadebug > (n)) \
+					printf x; \
+			} while (0)
 #else
 #define	DPRINTFN(n, x)
 #endif
@@ -157,48 +159,43 @@ int	ubsadebug = 0;
 #define	UBSA_MSR_DCTS		0x01	/* CTS has changed state */
 
 struct	ubsa_softc {
-	struct device		 sc_dev;	/* base device */
-	usbd_device_handle	 sc_udev;	/* USB device */
-	usbd_interface_handle	 sc_iface;	/* interface */
+	struct ucom_softc	sc_ucom;
 
-	int			 sc_iface_number;	/* interface number */
+	int			sc_iface_number;	/* interface number */
 
-	int			 sc_intr_number;	/* interrupt number */
-	usbd_pipe_handle	 sc_intr_pipe;	/* interrupt pipe */
+	usbd_interface_handle	sc_intr_iface;	/* interrupt interface */
+	int			sc_intr_number;	/* interrupt number */
+	usbd_pipe_handle	sc_intr_pipe;	/* interrupt pipe */
 	u_char			*sc_intr_buf;	/* interrupt buffer */
-	int			 sc_isize;
+	int			sc_isize;
 
-	u_char			 sc_dtr;	/* current DTR state */
-	u_char			 sc_rts;	/* current RTS state */
+	u_char			sc_dtr;		/* current DTR state */
+	u_char			sc_rts;		/* current RTS state */
 
-	u_char			 sc_lsr;	/* Local status register */
-	u_char			 sc_msr;	/* ubsa status register */
-
-	struct device		*sc_subdev;	/* ucom device */
-
-	u_char			 sc_dying;	/* disconnecting */
-
+	u_char			sc_lsr;		/* Local status register */
+	u_char			sc_msr;		/* ubsa status register */
+	struct task		sc_task;
 };
 
-void ubsa_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+static	void ubsa_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+static	void ubsa_notify(void *, int count);
 
-void ubsa_get_status(void *, int, u_char *, u_char *);
-void ubsa_set(void *, int, int, int);
-int  ubsa_param(void *, int, struct termios *);
-int  ubsa_open(void *, int);
-void ubsa_close(void *, int);
+static	void ubsa_get_status(void *, int, u_char *, u_char *);
+static	void ubsa_set(void *, int, int, int);
+static	int  ubsa_param(void *, int, struct termios *);
+static	int  ubsa_open(void *, int);
+static	void ubsa_close(void *, int);
 
-void ubsa_break(struct ubsa_softc *sc, int onoff);
-int  ubsa_request(struct ubsa_softc *, u_int8_t, u_int16_t);
-void ubsa_dtr(struct ubsa_softc *, int);
-void ubsa_rts(struct ubsa_softc *, int);
-void ubsa_baudrate(struct ubsa_softc *, speed_t);
-void ubsa_parity(struct ubsa_softc *, tcflag_t);
-void ubsa_databits(struct ubsa_softc *, tcflag_t);
-void ubsa_stopbits(struct ubsa_softc *, tcflag_t);
-void ubsa_flow(struct ubsa_softc *, tcflag_t, tcflag_t);
+static	int  ubsa_request(struct ubsa_softc *, u_int8_t, u_int16_t);
+static	void ubsa_dtr(struct ubsa_softc *, int);
+static	void ubsa_rts(struct ubsa_softc *, int);
+static	void ubsa_baudrate(struct ubsa_softc *, speed_t);
+static	void ubsa_parity(struct ubsa_softc *, tcflag_t);
+static	void ubsa_databits(struct ubsa_softc *, tcflag_t);
+static	void ubsa_stopbits(struct ubsa_softc *, tcflag_t);
+static	void ubsa_flow(struct ubsa_softc *, tcflag_t, tcflag_t);
 
-struct	ucom_methods ubsa_methods = {
+struct ucom_callback ubsa_callback = {
 	ubsa_get_status,
 	ubsa_set,
 	ubsa_param,
@@ -209,82 +206,99 @@ struct	ucom_methods ubsa_methods = {
 	NULL
 };
 
-const struct usb_devno ubsa_devs[] = {
-	/* AnyDATA ADU-E100H */
-	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100H },
+static const struct ubsa_product {
+	uint16_t	vendor;
+	uint16_t	product;
+} ubsa_products [] = {
+	/* AnyData ADU-E100A/H */
+	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100X },
 	/* Axesstel MV100H */
 	{ USB_VENDOR_AXESSTEL, USB_PRODUCT_AXESSTEL_DATAMODEM },
 	/* BELKIN F5U103 */
 	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U103 },
 	/* BELKIN F5U120 */
 	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U120 },
-	/* GoHubs GO-COM232 , Belkin F5U003 */
+	/* GoHubs GO-COM232 */
 	{ USB_VENDOR_ETEK, USB_PRODUCT_ETEK_1COM },
 	/* GoHubs GO-COM232 */
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
-	/* HUAWEI Mobile */
-	{ USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_E618 },
-	/* Novatel Wireless U740 */
-	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
-	/* Option Vodafone Mobile Connect 3G */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
-	/* Option GlobeTrotter 3G FUSION */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION },
-	/* Option GlobeTrotter 3G QUAD */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
-	/* Option GlobeTrotter 3G QUAD PLUS */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
-	/* Qualcomm Inc. ZTE CMDMA MSM modem */
-	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_CDMA_MSM },
-};
-#define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
-
-int ubsa_match(struct device *, void *, void *); 
-void ubsa_attach(struct device *, struct device *, void *); 
-int ubsa_detach(struct device *, int); 
-int ubsa_activate(struct device *, enum devact); 
-
-struct cfdriver ubsa_cd = { 
-	NULL, "ubsa", DV_DULL 
-}; 
-
-const struct cfattach ubsa_ca = { 
-	sizeof(struct ubsa_softc), 
-	ubsa_match, 
-	ubsa_attach, 
-	ubsa_detach, 
-	ubsa_activate, 
+	/* Novatel Wireless Merlin cards */
+	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U740 },
+	/* Novatel Wireless Merlin v740 */
+	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_V740 },
+	/* Option Vodafone MC3G */
+	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
+	/* Option GlobeTrotter 3G */
+	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3G },
+	/* Option GlobeTrotter 3G QUAD */
+	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
+	/* Option GlobeTrotter 3G+ */
+	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GPLUS },
+	/* Huawei Mobile */
+	{ USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_MOBILE },
+	/* Qualcomm, Inc. ZTE CDMA */
+	{ USB_VENDOR_QUALCOMMINC, USB_PRODUCT_QUALCOMMINC_CDMA_MSM },
+	{ 0, 0 }
 };
 
-int
-ubsa_match(struct device *parent, void *match, void *aux)
+static device_probe_t ubsa_match;
+static device_attach_t ubsa_attach;
+static device_detach_t ubsa_detach;
+
+static device_method_t ubsa_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe, ubsa_match),
+	DEVMETHOD(device_attach, ubsa_attach),
+	DEVMETHOD(device_detach, ubsa_detach),
+	{ 0, 0 }
+};
+
+static driver_t ubsa_driver = {
+	"ucom",
+	ubsa_methods,
+	sizeof (struct ubsa_softc)
+};
+
+DRIVER_MODULE(ubsa, uhub, ubsa_driver, ucom_devclass, usbd_driver_load, 0);
+MODULE_DEPEND(ubsa, usb, 1, 1, 1);
+MODULE_DEPEND(ubsa, ucom, UCOM_MINVER, UCOM_PREFVER, UCOM_MAXVER);
+MODULE_VERSION(ubsa, UBSA_MODVER);
+
+static int
+ubsa_match(device_t self)
 {
-	struct usb_attach_arg *uaa = aux;
+	struct usb_attach_arg *uaa = device_get_ivars(self);
+	int i;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
 
-	return (ubsa_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+	for (i = 0; ubsa_products[i].vendor != 0; i++) {
+		if (ubsa_products[i].vendor == uaa->vendor &&
+		    ubsa_products[i].product == uaa->product) {
+			return (UMATCH_VENDOR_PRODUCT);
+		}
+	}
+	return (UMATCH_NONE);
 }
 
-void
-ubsa_attach(struct device *parent, struct device *self, void *aux)
+static int
+ubsa_attach(device_t self)
 {
-	struct ubsa_softc *sc = (struct ubsa_softc *)self;
-	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
+	struct ubsa_softc *sc = device_get_softc(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
+	usbd_device_handle dev;
+	struct ucom_softc *ucom;
 	usb_config_descriptor_t *cdesc;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	const char *devname = sc->sc_dev.dv_xname;
 	usbd_status err;
-	struct ucom_attach_args uca;
 	int i;
 
-	sc->sc_udev = dev;
+	dev = uaa->device;
+	ucom = &sc->sc_ucom;
 
 	/*
 	 * initialize rts, dtr variables to something
@@ -293,53 +307,57 @@ ubsa_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dtr = -1;
 	sc->sc_rts = -1;
 
+	ucom->sc_dev = self;
+	ucom->sc_udev = dev;
+	ucom->sc_iface = uaa->iface;
+
 	DPRINTF(("ubsa attach: sc = %p\n", sc));
 
 	/* initialize endpoints */
-	uca.bulkin = uca.bulkout = -1;
+	ucom->sc_bulkin_no = ucom->sc_bulkout_no = -1;
 	sc->sc_intr_number = -1;
 	sc->sc_intr_pipe = NULL;
 
 	/* Move the device into the configured state. */
 	err = usbd_set_config_index(dev, UBSA_CONFIG_INDEX, 1);
 	if (err) {
-		printf("%s: failed to set configuration: %s\n",
-		    devname, usbd_errstr(err));
-		sc->sc_dying = 1;
+		device_printf(ucom->sc_dev, "failed to set configuration: %s\n",
+		    usbd_errstr(err));
+		ucom->sc_dying = 1;
 		goto error;
 	}
 
 	/* get the config descriptor */
-	cdesc = usbd_get_config_descriptor(sc->sc_udev);
+	cdesc = usbd_get_config_descriptor(ucom->sc_udev);
 
 	if (cdesc == NULL) {
-		printf("%s: failed to get configuration descriptor\n",
-		    devname);
-		sc->sc_dying = 1;
+		device_printf(ucom->sc_dev,
+		    "failed to get configuration descriptor\n");
+		ucom->sc_dying = 1;
 		goto error;
 	}
 
 	/* get the first interface */
 	err = usbd_device2interface_handle(dev, UBSA_IFACE_INDEX,
-	    &sc->sc_iface);
+	    &ucom->sc_iface);
 	if (err) {
-		printf("%s: failed to get interface: %s\n",
-			devname, usbd_errstr(err));
-		sc->sc_dying = 1;
+		device_printf(ucom->sc_dev, "failed to get interface: %s\n",
+		    usbd_errstr(err));
+		ucom->sc_dying = 1;
 		goto error;
 	}
 
 	/* Find the endpoints */
 
-	id = usbd_get_interface_descriptor(sc->sc_iface);
+	id = usbd_get_interface_descriptor(ucom->sc_iface);
 	sc->sc_iface_number = id->bInterfaceNumber;
 
 	for (i = 0; i < id->bNumEndpoints; i++) {
-		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
+		ed = usbd_interface2endpoint_descriptor(ucom->sc_iface, i);
 		if (ed == NULL) {
-			printf("%s: no endpoint descriptor for %d\n",
-			    sc->sc_dev.dv_xname, i);
-			sc->sc_dying = 1;
+			device_printf(ucom->sc_dev,
+			    "no endpoint descriptor for %d\n", i);
+			ucom->sc_dying = 1;
 			goto error;
 		}
 
@@ -349,61 +367,59 @@ ubsa_attach(struct device *parent, struct device *self, void *aux)
 			sc->sc_isize = UGETW(ed->wMaxPacketSize);
 		} else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK) {
-			uca.bulkin = ed->bEndpointAddress;
-			uca.ibufsize = UGETW(ed->wMaxPacketSize);
+			ucom->sc_bulkin_no = ed->bEndpointAddress;
+			ucom->sc_ibufsize = UGETW(ed->wMaxPacketSize);
 		} else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_OUT &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK) {
-			uca.bulkout = ed->bEndpointAddress;
-			uca.obufsize = UGETW(ed->wMaxPacketSize);
+			ucom->sc_bulkout_no = ed->bEndpointAddress;
+			ucom->sc_obufsize = UGETW(ed->wMaxPacketSize);
 		}
 	}
 
 	if (sc->sc_intr_number == -1) {
-		printf("%s: Could not find interrupt in\n", devname);
-		sc->sc_dying = 1;
+		device_printf(ucom->sc_dev, "Could not find interrupt in\n");
+		ucom->sc_dying = 1;
 		goto error;
 	}
 
-	if (uca.bulkin == -1) {
-		printf("%s: Could not find data bulk in\n", devname);
-		sc->sc_dying = 1;
+	/* keep interface for interrupt */
+	sc->sc_intr_iface = ucom->sc_iface;
+
+	if (ucom->sc_bulkin_no == -1) {
+		device_printf(ucom->sc_dev, "Could not find data bulk in\n");
+		ucom->sc_dying = 1;
 		goto error;
 	}
 
-	if (uca.bulkout == -1) {
-		printf("%s: Could not find data bulk out\n", devname);
-		sc->sc_dying = 1;
+	if (ucom->sc_bulkout_no == -1) {
+		device_printf(ucom->sc_dev, "Could not find data bulk out\n");
+		ucom->sc_dying = 1;
 		goto error;
 	}
 
-	uca.portno = UCOM_UNK_PORTNO;
+	ucom->sc_parent = sc;
+	ucom->sc_portno = UCOM_UNK_PORTNO;
 	/* bulkin, bulkout set above */
-	uca.ibufsizepad = uca.ibufsize;
-	uca.opkthdrlen = 0;
-	uca.device = dev;
-	uca.iface = sc->sc_iface;
-	uca.methods = &ubsa_methods;
-	uca.arg = sc;
-	uca.info = NULL;
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   &sc->sc_dev);
+	ucom->sc_ibufsizepad = ucom->sc_ibufsize;
+	ucom->sc_opkthdrlen = 0;
+	ucom->sc_callback = &ubsa_callback;
 
 	DPRINTF(("ubsa: in = 0x%x, out = 0x%x, intr = 0x%x\n",
-	    uca.bulkin, uca.bulkout, sc->sc_intr_number));
+	    ucom->sc_bulkin_no, ucom->sc_bulkout_no, sc->sc_intr_number));
 
-	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
+	TASK_INIT(&sc->sc_task, 0, ubsa_notify, sc); 
+	ucom_attach(ucom);
+	return 0;
 
 error:
-	return;
+	return ENXIO;
 }
 
-int
-ubsa_detach(struct device *self, int flags)
+static int
+ubsa_detach(device_t self)
 {
-	struct ubsa_softc *sc = (struct ubsa_softc *)self;
-	int rv = 0;
-
+	struct ubsa_softc *sc = device_get_softc(self);
+	int rv;
 
 	DPRINTF(("ubsa_detach: sc = %p\n", sc));
 
@@ -414,38 +430,16 @@ ubsa_detach(struct device *self, int flags)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
-	if (sc->sc_subdev != NULL) {
-		rv = config_detach(sc->sc_subdev, flags);
-		sc->sc_subdev = NULL;
-	}
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
+	sc->sc_ucom.sc_dying = 1;
+#if 0
+	taskqueue_drain(taskqueue_swi_giant);
+#endif
+	rv = ucom_detach(&sc->sc_ucom);
 
 	return (rv);
 }
 
-int
-ubsa_activate(struct device *self, enum devact act)
-{
-	struct ubsa_softc *sc = (struct ubsa_softc *)self;
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
-		break;
-	}
-	return (rv);
-}
-
-int
+static int
 ubsa_request(struct ubsa_softc *sc, u_int8_t request, u_int16_t value)
 {
 	usb_device_request_t req;
@@ -457,14 +451,14 @@ ubsa_request(struct ubsa_softc *sc, u_int8_t request, u_int16_t value)
 	USETW(req.wIndex, sc->sc_iface_number);
 	USETW(req.wLength, 0);
 
-	err = usbd_do_request(sc->sc_udev, &req, 0);
-	if (err && err != USBD_STALLED)
-		printf("%s: ubsa_request: %s\n",
-		    sc->sc_dev.dv_xname, usbd_errstr(err));
+	err = usbd_do_request(sc->sc_ucom.sc_udev, &req, 0);
+	if (err)
+		device_printf(sc->sc_ucom.sc_dev, "ubsa_request: %s\n",
+		    usbd_errstr(err));
 	return (err);
 }
 
-void
+static void
 ubsa_dtr(struct ubsa_softc *sc, int onoff)
 {
 
@@ -477,7 +471,7 @@ ubsa_dtr(struct ubsa_softc *sc, int onoff)
 	ubsa_request(sc, UBSA_SET_DTR, onoff ? 1 : 0);
 }
 
-void
+static void
 ubsa_rts(struct ubsa_softc *sc, int onoff)
 {
 
@@ -490,7 +484,7 @@ ubsa_rts(struct ubsa_softc *sc, int onoff)
 	ubsa_request(sc, UBSA_SET_RTS, onoff ? 1 : 0);
 }
 
-void
+static void
 ubsa_break(struct ubsa_softc *sc, int onoff)
 {
 
@@ -499,7 +493,7 @@ ubsa_break(struct ubsa_softc *sc, int onoff)
 	ubsa_request(sc, UBSA_SET_BREAK, onoff ? 1 : 0);
 }
 
-void
+static void
 ubsa_set(void *addr, int portno, int reg, int onoff)
 {
 	struct ubsa_softc *sc;
@@ -520,7 +514,7 @@ ubsa_set(void *addr, int portno, int reg, int onoff)
 	}
 }
 
-void
+static void
 ubsa_baudrate(struct ubsa_softc *sc, speed_t speed)
 {
 	u_int16_t value = 0;
@@ -544,9 +538,8 @@ ubsa_baudrate(struct ubsa_softc *sc, speed_t speed)
 		value = B230400 / speed;
 		break;
 	default:
-		DPRINTF(("%s: ubsa_param: unsupported baudrate, "
-		    "forcing default of 9600\n",
-		    sc->sc_dev.dv_xname));
+		device_printf(sc->sc_ucom.sc_dev,
+		    "ubsa_param: unsupported baud, forcing default of 9600\n");
 		value = B230400 / B9600;
 		break;
 	};
@@ -559,7 +552,7 @@ ubsa_baudrate(struct ubsa_softc *sc, speed_t speed)
 		ubsa_request(sc, UBSA_SET_BAUDRATE, value);
 }
 
-void
+static void
 ubsa_parity(struct ubsa_softc *sc, tcflag_t cflag)
 {
 	int value;
@@ -574,7 +567,7 @@ ubsa_parity(struct ubsa_softc *sc, tcflag_t cflag)
 	ubsa_request(sc, UBSA_SET_PARITY, value);
 }
 
-void
+static void
 ubsa_databits(struct ubsa_softc *sc, tcflag_t cflag)
 {
 	int value;
@@ -587,16 +580,16 @@ ubsa_databits(struct ubsa_softc *sc, tcflag_t cflag)
 	case CS7: value = 2; break;
 	case CS8: value = 3; break;
 	default:
-		DPRINTF(("%s: ubsa_param: unsupported databits requested, "
-		    "forcing default of 8\n",
-		    sc->sc_dev.dv_xname));
+		device_printf(sc->sc_ucom.sc_dev,
+		    "ubsa_param: unsupported databits requested, "
+		    "forcing default of 8\n");
 		value = 3;
 	}
 
 	ubsa_request(sc, UBSA_SET_DATA_BITS, value);
 }
 
-void
+static void
 ubsa_stopbits(struct ubsa_softc *sc, tcflag_t cflag)
 {
 	int value;
@@ -608,7 +601,7 @@ ubsa_stopbits(struct ubsa_softc *sc, tcflag_t cflag)
 	ubsa_request(sc, UBSA_SET_STOP_BITS, value);
 }
 
-void
+static void
 ubsa_flow(struct ubsa_softc *sc, tcflag_t cflag, tcflag_t iflag)
 {
 	int value;
@@ -624,10 +617,12 @@ ubsa_flow(struct ubsa_softc *sc, tcflag_t cflag, tcflag_t iflag)
 	ubsa_request(sc, UBSA_SET_FLOW_CTRL, value);
 }
 
-int
+static int
 ubsa_param(void *addr, int portno, struct termios *ti)
 {
-	struct ubsa_softc *sc = addr;
+	struct ubsa_softc *sc;
+
+	sc = addr;
 
 	DPRINTF(("ubsa_param: sc = %p\n", sc));
 
@@ -640,20 +635,21 @@ ubsa_param(void *addr, int portno, struct termios *ti)
 	return (0);
 }
 
-int
+static int
 ubsa_open(void *addr, int portno)
 {
-	struct ubsa_softc *sc = addr;
+	struct ubsa_softc *sc;
 	int err;
 
-	if (sc->sc_dying)
+	sc = addr;
+	if (sc->sc_ucom.sc_dying)
 		return (ENXIO);
 
 	DPRINTF(("ubsa_open: sc = %p\n", sc));
 
 	if (sc->sc_intr_number != -1 && sc->sc_intr_pipe == NULL) {
 		sc->sc_intr_buf = malloc(sc->sc_isize, M_USBDEV, M_WAITOK);
-		err = usbd_open_pipe_intr(sc->sc_iface,
+		err = usbd_open_pipe_intr(sc->sc_intr_iface,
 		    sc->sc_intr_number,
 		    USBD_SHORT_XFER_OK,
 		    &sc->sc_intr_pipe,
@@ -663,8 +659,8 @@ ubsa_open(void *addr, int portno)
 		    ubsa_intr,
 		    UBSA_INTR_INTERVAL);
 		if (err) {
-			printf("%s: cannot open interrupt pipe (addr %d)\n",
-			    sc->sc_dev.dv_xname,
+			device_printf(sc->sc_ucom.sc_dev,
+			    "cannot open interrupt pipe (addr %d)\n",
 			    sc->sc_intr_number);
 			return (EIO);
 		}
@@ -673,13 +669,14 @@ ubsa_open(void *addr, int portno)
 	return (0);
 }
 
-void
+static void
 ubsa_close(void *addr, int portno)
 {
-	struct ubsa_softc *sc = addr;
+	struct ubsa_softc *sc;
 	int err;
 
-	if (sc->sc_dying)
+	sc = addr;
+	if (sc->sc_ucom.sc_dying)
 		return;
 
 	DPRINTF(("ubsa_close: close\n"));
@@ -687,27 +684,28 @@ ubsa_close(void *addr, int portno)
 	if (sc->sc_intr_pipe != NULL) {
 		err = usbd_abort_pipe(sc->sc_intr_pipe);
 		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-			    sc->sc_dev.dv_xname,
+			device_printf(sc->sc_ucom.sc_dev,
+			    "abort interrupt pipe failed: %s\n",
 			    usbd_errstr(err));
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
-			printf("%s: close interrupt pipe failed: %s\n",
-			    sc->sc_dev.dv_xname,
+			device_printf(sc->sc_ucom.sc_dev,
+			    "close interrupt pipe failed: %s\n",
 			    usbd_errstr(err));
 		free(sc->sc_intr_buf, M_USBDEV);
 		sc->sc_intr_pipe = NULL;
 	}
 }
 
-void
+static void
 ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
-	struct ubsa_softc *sc = priv;
+	struct ubsa_softc *sc;
 	u_char *buf;
 
+	sc = priv;
 	buf = sc->sc_intr_buf;
-	if (sc->sc_dying)
+	if (sc->sc_ucom.sc_dying)
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -715,7 +713,8 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			return;
 
 		DPRINTF(("%s: ubsa_intr: abnormal status: %s\n",
-		    sc->sc_dev.dv_xname, usbd_errstr(status)));
+		    device_get_nameunit(sc->sc_ucom.sc_dev),
+		    usbd_errstr(status)));
 		usbd_clear_endpoint_stall_async(sc->sc_intr_pipe);
 		return;
 	}
@@ -725,18 +724,29 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	sc->sc_msr = buf[3];
 
 	DPRINTF(("%s: ubsa lsr = 0x%02x, msr = 0x%02x\n",
-	    sc->sc_dev.dv_xname, sc->sc_lsr, sc->sc_msr));
+	    device_get_nameunit(sc->sc_ucom.sc_dev), sc->sc_lsr, sc->sc_msr));
 
-	ucom_status_change((struct ucom_softc *)sc->sc_subdev);
+	taskqueue_enqueue(taskqueue_swi_giant, &sc->sc_task);
 }
 
-void
+/* Handle delayed events. */
+static void
+ubsa_notify(void *arg, int count)
+{
+	struct ubsa_softc *sc;
+
+	sc = arg;
+	ucom_status_change(&sc->sc_ucom);
+}
+
+static void
 ubsa_get_status(void *addr, int portno, u_char *lsr, u_char *msr)
 {
-	struct ubsa_softc *sc = addr;
+	struct ubsa_softc *sc;
 
 	DPRINTF(("ubsa_get_status\n"));
 
+	sc = addr;
 	if (lsr != NULL)
 		*lsr = sc->sc_lsr;
 	if (msr != NULL)

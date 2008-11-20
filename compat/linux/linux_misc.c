@@ -1,1174 +1,511 @@
-/*	$OpenBSD: linux_misc.c,v 1.61 2007/09/01 15:14:44 martin Exp $	*/
-/*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
-
 /*-
- * Copyright (c) 1995, 1998, 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 2002 Doug Rabson
+ * Copyright (c) 1994-1995 Søren Schmidt
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Frank van der Linden and Eric Haszlakiewicz; by Jason R. Thorpe
- * of the Numerical Aerospace Simulation Facility, NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *    notice, this list of conditions and the following disclaimer
+ *    in this position and unchanged.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * Linux compatibility module. Try to deal with various Linux system calls.
- */
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.215 2007/10/24 19:03:52 rwatson Exp $");
+
+#include "opt_compat.h"
+#include "opt_mac.h"
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/namei.h>
-#include <sys/proc.h>
-#include <sys/dirent.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/filedesc.h>
-#include <sys/ioctl.h>
+#include <sys/blist.h>
+#include <sys/fcntl.h>
+#if defined(__i386__)
+#include <sys/imgact_aout.h>
+#endif
+#include <sys/jail.h>
 #include <sys/kernel.h>
+#include <sys/limits.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
-#include <sys/mbuf.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
-#include <sys/ptrace.h>
-#include <sys/resource.h>
+#include <sys/mutex.h>
+#include <sys/namei.h>
+#include <sys/priv.h>
+#include <sys/proc.h>
+#include <sys/reboot.h>
 #include <sys/resourcevar.h>
-#include <sys/signal.h>
+#include <sys/sched.h>
 #include <sys/signalvar.h>
-#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscallsubr.h>
+#include <sys/sysctl.h>
+#include <sys/sysproto.h>
+#include <sys/systm.h>
 #include <sys/time.h>
-#include <sys/times.h>
+#include <sys/vmmeter.h>
 #include <sys/vnode.h>
-#include <sys/uio.h>
 #include <sys/wait.h>
-#include <sys/utsname.h>
-#include <sys/unistd.h>
 
-#include <sys/syscallargs.h>
+#include <security/mac/mac_framework.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/pmap.h>
+#include <vm/vm_kern.h>
+#include <vm/vm_map.h>
+#include <vm/vm_extern.h>
+#include <vm/vm_object.h>
+#include <vm/swap_pager.h>
 
-#include <compat/linux/linux_types.h>
-#include <compat/linux/linux_fcntl.h>
+#include <compat/linux/linux_sysproto.h>
+#include <compat/linux/linux_emul.h>
 #include <compat/linux/linux_misc.h>
-#include <compat/linux/linux_mmap.h>
-#include <compat/linux/linux_sched.h>
-#include <compat/linux/linux_signal.h>
-#include <compat/linux/linux_syscallargs.h>
-#include <compat/linux/linux_util.h>
-#include <compat/linux/linux_dirent.h>
-#include <compat/linux/linux_emuldata.h>
 
-#include <compat/common/compat_dir.h>
-
-/* linux_misc.c */
-static void bsd_to_linux_statfs(struct statfs *, struct linux_statfs *);
-int	linux_select1(struct proc *, register_t *, int, fd_set *,
-     fd_set *, fd_set *, struct timeval *);
-static int getdents_common(struct proc *, void *, register_t *, int);
-static void linux_to_bsd_mmap_args(struct sys_mmap_args *,
-    const struct linux_sys_mmap2_args *);
-
-/*
- * The information on a terminated (or stopped) process needs
- * to be converted in order for Linux binaries to get a valid signal
- * number out of it.
- */
-void
-bsd_to_linux_wstat(status)
-	int *status;
-{
-
-	if (WIFSIGNALED(*status))
-		*status = (*status & ~0177) |
-		    bsd_to_linux_sig[WTERMSIG(*status)];
-	else if (WIFSTOPPED(*status))
-		*status = (*status & ~0xff00) |
-		    (bsd_to_linux_sig[WSTOPSIG(*status)] << 8);
-}
-
-/*
- * waitpid(2). Just forward on to linux_sys_wait4 with a NULL rusage.
- */
-int
-linux_sys_waitpid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_waitpid_args /* {
-		syscallarg(int) pid;
-		syscallarg(int *) status;
-		syscallarg(int) options;
-	} */ *uap = v;
-	struct sys_wait4_args linux_w4a;
-
-	SCARG(&linux_w4a, pid) = SCARG(uap, pid);
-	SCARG(&linux_w4a, status) = SCARG(uap, status);
-	SCARG(&linux_w4a, options) = SCARG(uap, options);
-	SCARG(&linux_w4a, rusage) = NULL;
-
-	return (linux_sys_wait4(p, &linux_w4a, retval));
-}
-
-/*
- * wait4(2). Passed on to the OpenBSD call, surrounded by code to reserve
- * some space for an OpenBSD-style wait status, and converting it to what
- * Linux wants.
- */
-int
-linux_sys_wait4(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_wait4_args /* {
-		syscallarg(int) pid;
-		syscallarg(int *) status;
-		syscallarg(int) options;
-		syscallarg(struct rusage *) rusage;
-	} */ *uap = v;
-	struct sys_wait4_args w4a;
-	int error, *status, tstat, linux_options, options;
-	caddr_t sg;
-
-	if (SCARG(uap, status) != NULL) {
-		sg = stackgap_init(p->p_emul);
-		status = (int *) stackgap_alloc(&sg, sizeof status);
-	} else
-		status = NULL;
-
-	linux_options = SCARG(uap, options);
-	options = 0;
-	if (linux_options &
-	    ~(LINUX_WAIT4_WNOHANG|LINUX_WAIT4_WUNTRACED|LINUX_WAIT4_WCLONE))
-		return (EINVAL);
-
-	if (linux_options & LINUX_WAIT4_WNOHANG)
-		options |= WNOHANG;
-	if (linux_options & LINUX_WAIT4_WUNTRACED)
-		options |= WUNTRACED;
-	if (linux_options & LINUX_WAIT4_WCLONE)
-		options |= WALTSIG;
-
-	SCARG(&w4a, pid) = SCARG(uap, pid);
-	SCARG(&w4a, status) = status;
-	SCARG(&w4a, options) = options;
-	SCARG(&w4a, rusage) = SCARG(uap, rusage);
-
-	if ((error = sys_wait4(p, &w4a, retval)))
-		return error;
-
-	atomic_clearbits_int(&p->p_siglist, sigmask(SIGCHLD));
-
-	if (status != NULL) {
-		if ((error = copyin(status, &tstat, sizeof tstat)))
-			return error;
-
-		bsd_to_linux_wstat(&tstat);
-		return copyout(&tstat, SCARG(uap, status), sizeof tstat);
-	}
-
-	return 0;
-}
-
-int
-linux_sys_setresgid16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_setresgid16_args /* {
-		syscallarg(u_int16_t) rgid;
-		syscallarg(u_int16_t) egid;
-		syscallarg(u_int16_t) sgid;
-	} */ *uap = v;
-	struct sys_setresgid_args nuap;
-	u_int16_t rgid, egid, sgid;
-
-	rgid = SCARG(uap, rgid);
-	SCARG(&nuap, rgid) = (rgid == (u_int16_t)-1) ? (gid_t)-1 : rgid;
-	egid = SCARG(uap, egid);
-	SCARG(&nuap, egid) = (egid == (u_int16_t)-1) ? (gid_t)-1 : egid;
-	sgid = SCARG(uap, sgid);
-	SCARG(&nuap, sgid) = (sgid == (u_int16_t)-1) ? (gid_t)-1 : sgid;
-
-	return sys_setresgid(p, &nuap, retval);
-}
-
-int
-linux_sys_getresgid16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_getresgid16_args /* {
-		syscallarg(u_int16_t *) rgid;
-		syscallarg(u_int16_t *) egid;
-		syscallarg(u_int16_t *) sgid;
-	} */ *uap = v;
-	struct sys_getresgid_args nuap;
-
-	SCARG(&nuap, rgid) = (gid_t *)SCARG(uap, rgid);
-	SCARG(&nuap, egid) = (gid_t *)SCARG(uap, egid);
-	SCARG(&nuap, sgid) = (gid_t *)SCARG(uap, sgid);
-
-	return sys_getresgid(p, &nuap, retval);
-}
-
-int
-linux_sys_setresuid16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_setresuid16_args /* {
-		syscallarg(u_int16_t) ruid;
-		syscallarg(u_int16_t) euid;
-		syscallarg(u_int16_t) suid;
-	} */ *uap = v;
-	struct sys_setresuid_args nuap;
-	u_int16_t ruid, euid, suid;
-
-	ruid = SCARG(uap, ruid);
-	SCARG(&nuap, ruid) = (ruid == (u_int16_t)-1) ? (uid_t)-1 : ruid;
-	euid = SCARG(uap, euid);
-	SCARG(&nuap, euid) = (euid == (u_int16_t)-1) ? (uid_t)-1 : euid;
-	suid = SCARG(uap, suid);
-	SCARG(&nuap, suid) = (suid == (u_int16_t)-1) ? (uid_t)-1 : suid;
-
-	return sys_setresuid(p, &nuap, retval);
-}
-
-int
-linux_sys_getresuid16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_getresuid16_args /* {
-		syscallarg(u_int16_t *) ruid;
-		syscallarg(u_int16_t *) euid;
-		syscallarg(u_int16_t *) suid;
-	} */ *uap = v;
-	struct sys_getresuid_args nuap;
-
-	SCARG(&nuap, ruid) = (uid_t *)SCARG(uap, ruid);
-	SCARG(&nuap, euid) = (uid_t *)SCARG(uap, euid);
-	SCARG(&nuap, suid) = (uid_t *)SCARG(uap, suid);
-
-	return sys_getresuid(p, &nuap, retval);
-}
-
-/*
- * This is the old brk(2) call. I don't think anything in the Linux
- * world uses this anymore
- */
-int
-linux_sys_break(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-#if 0
-	struct linux_sys_brk_args /* {
-		syscallarg(char *) nsize;
-	} */ *uap = v;
+#ifdef COMPAT_LINUX32
+#include <machine/../linux32/linux.h>
+#include <machine/../linux32/linux32_proto.h>
+#else
+#include <machine/../linux/linux.h>
+#include <machine/../linux/linux_proto.h>
 #endif
 
-	return ENOSYS;
-}
+#include <compat/linux/linux_mib.h>
+#include <compat/linux/linux_signal.h>
+#include <compat/linux/linux_util.h>
 
-/*
- * Linux brk(2). The check if the new address is >= the old one is
- * done in the kernel in Linux. OpenBSD does it in the library.
- */
-int
-linux_sys_brk(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_brk_args /* {
-		syscallarg(char *) nsize;
-	} */ *uap = v;
-	char *nbrk = SCARG(uap, nsize);
-	struct sys_obreak_args oba;
-	struct vmspace *vm = p->p_vmspace;
-	struct linux_emuldata *ed = (struct linux_emuldata*)p->p_emuldata;
-
-	SCARG(&oba, nsize) = nbrk;
-
-	if ((caddr_t) nbrk > vm->vm_daddr && sys_obreak(p, &oba, retval) == 0)
-		ed->p_break = (char*)nbrk;
-	else
-		nbrk = ed->p_break;
-
-	retval[0] = (register_t)nbrk;
-
-	return 0;
-}
-
-/*
- * I wonder why Linux has gettimeofday() _and_ time().. Still, we
- * need to deal with it.
- */
-int
-linux_sys_time(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_time_args /* {
-		linux_time_t *t;
-	} */ *uap = v;
-	struct timeval atv;
-	linux_time_t tt;
-	int error;
-
-	microtime(&atv);
-
-	tt = atv.tv_sec;
-	if (SCARG(uap, t) && (error = copyout(&tt, SCARG(uap, t), sizeof tt)))
-		return error;
-
-	retval[0] = tt;
-	return 0;
-}
-
-/*
- * Convert BSD statfs structure to Linux statfs structure.
- * The Linux structure has less fields, and it also wants
- * the length of a name in a dir entry in a field, which
- * we fake (probably the wrong way).
- */
-static void
-bsd_to_linux_statfs(bsp, lsp)
-	struct statfs *bsp;
-	struct linux_statfs *lsp;
-{
-
-	/*
-	 * Convert BSD filesystem names to Linux filesystem type numbers
-	 * where possible.  Linux statfs uses a value of -1 to indicate
-	 * an unsupported field.
-	 */
-	if (!strcmp(bsp->f_fstypename, MOUNT_FFS) ||
-	    !strcmp(bsp->f_fstypename, MOUNT_MFS))
-		lsp->l_ftype = 0x11954;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_NFS))
-		lsp->l_ftype = 0x6969;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_MSDOS))
-		lsp->l_ftype = 0x4d44;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_PROCFS))
-		lsp->l_ftype = 0x9fa0;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_EXT2FS))
-		lsp->l_ftype = 0xef53;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_CD9660))
-		lsp->l_ftype = 0x9660;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_NCPFS))
-		lsp->l_ftype = 0x6969;
-	else
-		lsp->l_ftype = -1;
-
-	lsp->l_fbsize = bsp->f_bsize;
-	lsp->l_fblocks = bsp->f_blocks;
-	lsp->l_fbfree = bsp->f_bfree;
-	lsp->l_fbavail = bsp->f_bavail;
-	lsp->l_ffiles = bsp->f_files;
-	lsp->l_fffree = bsp->f_ffree;
-	lsp->l_ffsid.val[0] = bsp->f_fsid.val[0];
-	lsp->l_ffsid.val[1] = bsp->f_fsid.val[1];
-	lsp->l_fnamelen = MAXNAMLEN;	/* XXX */
-}
-
-/*
- * Implement the fs stat functions. Straightforward.
- */
-int
-linux_sys_statfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_statfs_args /* {
-		syscallarg(char *) path;
-		syscallarg(struct linux_statfs *) sp;
-	} */ *uap = v;
-	struct statfs btmp, *bsp;
-	struct linux_statfs ltmp;
-	struct sys_statfs_args bsa;
-	caddr_t sg;
-	int error;
-
-	sg = stackgap_init(p->p_emul);
-	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
-
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	SCARG(&bsa, path) = SCARG(uap, path);
-	SCARG(&bsa, buf) = bsp;
-
-	if ((error = sys_statfs(p, &bsa, retval)))
-		return error;
-
-	if ((error = copyin((caddr_t) bsp, (caddr_t) &btmp, sizeof btmp)))
-		return error;
-
-	bsd_to_linux_statfs(&btmp, &ltmp);
-
-	return copyout((caddr_t) &ltmp, (caddr_t) SCARG(uap, sp), sizeof ltmp);
-}
-
-int
-linux_sys_fstatfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_fstatfs_args /* {
-		syscallarg(int) fd;
-		syscallarg(struct linux_statfs *) sp;
-	} */ *uap = v;
-	struct statfs btmp, *bsp;
-	struct linux_statfs ltmp;
-	struct sys_fstatfs_args bsa;
-	caddr_t sg;
-	int error;
-
-	sg = stackgap_init(p->p_emul);
-	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
-
-	SCARG(&bsa, fd) = SCARG(uap, fd);
-	SCARG(&bsa, buf) = bsp;
-
-	if ((error = sys_fstatfs(p, &bsa, retval)))
-		return error;
-
-	if ((error = copyin((caddr_t) bsp, (caddr_t) &btmp, sizeof btmp)))
-		return error;
-
-	bsd_to_linux_statfs(&btmp, &ltmp);
-
-	return copyout((caddr_t) &ltmp, (caddr_t) SCARG(uap, sp), sizeof ltmp);
-}
-
-/*
- * uname(). Just copy the info from the various strings stored in the
- * kernel, and put it in the Linux utsname structure. That structure
- * is almost the same as the OpenBSD one, only it has fields 65 characters
- * long, and an extra domainname field.
- */
-int
-linux_sys_uname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_uname_args /* {
-		syscallarg(struct linux_utsname *) up;
-	} */ *uap = v;
-	extern char hostname[], machine[], domainname[];
-	struct linux_utsname luts;
-	int len;
-	char *cp;
-
-	strlcpy(luts.l_sysname, ostype, sizeof(luts.l_sysname));
-	strlcpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
-	strlcpy(luts.l_release, osrelease, sizeof(luts.l_release));
-	strlcpy(luts.l_version, version, sizeof(luts.l_version));
-	strlcpy(luts.l_machine, machine, sizeof(luts.l_machine));
-	strlcpy(luts.l_domainname, domainname, sizeof(luts.l_domainname));
-
-	/* This part taken from the uname() in libc */
-	len = sizeof(luts.l_version);
-	for (cp = luts.l_version; len--; ++cp)
-		if (*cp == '\n' || *cp == '\t')
-			*cp = (len > 1) ? ' ' : '\0';
-
-	return copyout(&luts, SCARG(uap, up), sizeof(luts));
-}
-
-int
-linux_sys_olduname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_uname_args /* {
-		syscallarg(struct linux_oldutsname *) up;
-	} */ *uap = v;
-	extern char hostname[], machine[];
-	struct linux_oldutsname luts;
-	int len;
-	char *cp;
-
-	strlcpy(luts.l_sysname, ostype, sizeof(luts.l_sysname));
-	strlcpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
-	strlcpy(luts.l_release, osrelease, sizeof(luts.l_release));
-	strlcpy(luts.l_version, version, sizeof(luts.l_version));
-	strlcpy(luts.l_machine, machine, sizeof(luts.l_machine));
-
-	/* This part taken from the uname() in libc */
-	len = sizeof(luts.l_version);
-	for (cp = luts.l_version; len--; ++cp)
-		if (*cp == '\n' || *cp == '\t')
-			*cp = (len > 1) ? ' ' : '\0';
-
-	return copyout(&luts, SCARG(uap, up), sizeof(luts));
-}
-
-int
-linux_sys_oldolduname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_uname_args /* {
-		syscallarg(struct linux_oldoldutsname *) up;
-	} */ *uap = v;
-	extern char hostname[], machine[];
-	struct linux_oldoldutsname luts;
-	int len;
-	char *cp;
-
-	strlcpy(luts.l_sysname, ostype, sizeof(luts.l_sysname));
-	strlcpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
-	strlcpy(luts.l_release, osrelease, sizeof(luts.l_release));
-	strlcpy(luts.l_version, version, sizeof(luts.l_version));
-	strlcpy(luts.l_machine, machine, sizeof(luts.l_machine));
-
-	/* This part taken from the uname() in libc */
-	len = sizeof(luts.l_version);
-	for (cp = luts.l_version; len--; ++cp)
-		if (*cp == '\n' || *cp == '\t')
-			*cp = (len > 1) ? ' ' : '\0';
-
-	return copyout(&luts, SCARG(uap, up), sizeof(luts));
-}
-
-/*
- * Linux wants to pass everything to a syscall in registers. However,
- * mmap() has 6 of them. Oops: out of register error. They just pass
- * everything in a structure.
- */
-int
-linux_sys_mmap(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_mmap_args /* {
-		syscallarg(struct linux_mmap *) lmp;
-	} */ *uap = v;
-	struct linux_mmap lmap;
-	struct linux_sys_mmap2_args nlmap;
-	struct sys_mmap_args cma;
-	int error;
-
-	if ((error = copyin(SCARG(uap, lmp), &lmap, sizeof lmap)))
-		return error;
-
-	if (lmap.lm_pos & PAGE_MASK)
-		return EINVAL;
-
-	/* repackage into something sane */
-	SCARG(&nlmap,addr) = (unsigned long)lmap.lm_addr;
-	SCARG(&nlmap,len) = lmap.lm_len;
-	SCARG(&nlmap,prot) = lmap.lm_prot;
-	SCARG(&nlmap,flags) = lmap.lm_flags;
-	SCARG(&nlmap,fd) = lmap.lm_fd;
-	SCARG(&nlmap,offset) = (unsigned)lmap.lm_pos;
-
-	linux_to_bsd_mmap_args(&cma, &nlmap);
-	SCARG(&cma, pos) = (off_t)SCARG(&nlmap, offset);
-
-	return sys_mmap(p, &cma, retval);
-}
-
-/*
- * Guts of most architectures' mmap64() implementations.  This shares
- * its list of arguments with linux_sys_mmap().
- *
- * The difference in linux_sys_mmap2() is that "offset" is actually
- * (offset / pagesize), not an absolute byte count.  This translation
- * to pagesize offsets is done inside glibc between the mmap64() call
- * point, and the actual syscall.
- */
-int
-linux_sys_mmap2(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_mmap2_args /* {
-		syscallarg(unsigned long) addr;
-		syscallarg(size_t) len;
-		syscallarg(int) prot;
-		syscallarg(int) flags;
-		syscallarg(int) fd;
-		syscallarg(linux_off_t) offset;
-	} */ *uap = v;
-	struct sys_mmap_args cma;
-
-	linux_to_bsd_mmap_args(&cma, uap);
-	SCARG(&cma, pos) = ((off_t)SCARG(uap, offset)) << PAGE_SHIFT;
-
-	return sys_mmap(p, &cma, retval);
-}
-
-static void
-linux_to_bsd_mmap_args(cma, uap)
-	struct sys_mmap_args *cma;
-	const struct linux_sys_mmap2_args *uap;
-{
-	int flags = MAP_TRYFIXED, fl = SCARG(uap, flags);
-	
-	flags |= cvtto_bsd_mask(fl, LINUX_MAP_SHARED, MAP_SHARED);
-	flags |= cvtto_bsd_mask(fl, LINUX_MAP_PRIVATE, MAP_PRIVATE);
-	flags |= cvtto_bsd_mask(fl, LINUX_MAP_FIXED, MAP_FIXED);
-	flags |= cvtto_bsd_mask(fl, LINUX_MAP_ANON, MAP_ANON);
-	/* XXX XAX ERH: Any other flags here?  There are more defined... */
-
-	SCARG(cma, addr) = (void *)SCARG(uap, addr);
-	SCARG(cma, len) = SCARG(uap, len);
-	SCARG(cma, prot) = SCARG(uap, prot);
-	if (SCARG(cma, prot) & VM_PROT_WRITE) /* XXX */
-		SCARG(cma, prot) |= VM_PROT_READ;
-	SCARG(cma, flags) = flags;
-	SCARG(cma, fd) = flags & MAP_ANON ? -1 : SCARG(uap, fd);
-	SCARG(cma, pad) = 0;
-}
-
-int
-linux_sys_mremap(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-
-	struct linux_sys_mremap_args /* {
-		syscallarg(void *) old_address;
-		syscallarg(size_t) old_size;
-		syscallarg(size_t) new_size;
-		syscallarg(u_long) flags;
-	} */ *uap = v;
-	struct sys_munmap_args mua;
-	size_t old_size, new_size;
-	int error;
- 
-	old_size = round_page(SCARG(uap, old_size));
-	new_size = round_page(SCARG(uap, new_size));
- 
-	/*
-	 * Growing mapped region.
-	 */
-	if (new_size > old_size) {
-		/*
-		 * XXX Implement me.  What we probably want to do is
-		 * XXX dig out the guts of the old mapping, mmap that
-		 * XXX object again with the new size, then munmap
-		 * XXX the old mapping.
-		 */
-		*retval = 0;
-		return (ENOMEM);
-	}
-	/*
-	 * Shrinking mapped region.
-	 */
-	if (new_size < old_size) {
-		SCARG(&mua, addr) = (caddr_t)SCARG(uap, old_address) + new_size;
-		SCARG(&mua, len) = old_size - new_size;
-		error = sys_munmap(p, &mua, retval);
-		*retval = error ? 0 : (register_t)SCARG(uap, old_address);
-		return (error);
-	}
- 
-	/*
-	 * No change.
-	 */
-	*retval = (register_t)SCARG(uap, old_address);
-	return (0);
-
-}
-
-/*
- * This code is partly stolen from src/lib/libc/gen/times.c
- * XXX - CLK_TCK isn't declared in /sys, just in <time.h>, done here
- */
-
-#define CLK_TCK 100
-#define	CONVTCK(r)	(r.tv_sec * CLK_TCK + r.tv_usec / (1000000 / CLK_TCK))
-
-int
-linux_sys_times(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_times_args /* {
-		syscallarg(struct times *) tms;
-	} */ *uap = v;
-	struct timeval t;
-	struct linux_tms ltms;
-	struct rusage ru;
-	int error;
-
-	calcru(p, &ru.ru_utime, &ru.ru_stime, NULL);
-	ltms.ltms_utime = CONVTCK(ru.ru_utime);
-	ltms.ltms_stime = CONVTCK(ru.ru_stime);
-
-	ltms.ltms_cutime = CONVTCK(p->p_stats->p_cru.ru_utime);
-	ltms.ltms_cstime = CONVTCK(p->p_stats->p_cru.ru_stime);
-
-	if ((error = copyout(&ltms, SCARG(uap, tms), sizeof ltms)))
-		return error;
-
-	microuptime(&t);
-
-	retval[0] = ((linux_clock_t)(CONVTCK(t)));
-	return 0;
-}
-
-/*
- * OpenBSD passes fd[0] in retval[0], and fd[1] in retval[1].
- * Linux directly passes the pointer.
- */
-int
-linux_sys_pipe(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_pipe_args /* {
-		syscallarg(int *) pfds;
-	} */ *uap = v;
-	int error;
-	int pfds[2];
 #ifdef __i386__
-	int reg_edx = retval[1];
-#endif /* __i386__ */
+#include <machine/cputypes.h>
+#endif
 
-	if ((error = sys_opipe(p, 0, retval))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		return error;
-	}
+#define BSD_TO_LINUX_SIGNAL(sig)	\
+	(((sig) <= LINUX_SIGTBLSZ) ? bsd_to_linux_signal[_SIG_IDX(sig)] : sig)
 
-	/* Assumes register_t is an int */
-
-	pfds[0] = retval[0];
-	pfds[1] = retval[1];
-	if ((error = copyout(pfds, SCARG(uap, pfds), 2 * sizeof (int)))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		fdrelease(p, retval[0]);
-		fdrelease(p, retval[1]);
-		return error;
-	}
-
-	retval[0] = 0;
-#ifdef __i386__
-	retval[1] = reg_edx;
-#endif /* __i386__ */
-	return 0;
-}
-
-/*
- * Alarm. This is a libc call which uses setitimer(2) in OpenBSD.
- * Fiddle with the timers to make it work.
- */
-int
-linux_sys_alarm(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_alarm_args /* {
-		syscallarg(unsigned int) secs;
-	} */ *uap = v;
-	int s;
-	struct itimerval *itp, it;
-	struct timeval tv;
-	int timo;
-
-	itp = &p->p_realtimer;
-	s = splclock();
-	/*
-	 * Clear any pending timer alarms.
-	 */
-	getmicrouptime(&tv);
-	timeout_del(&p->p_realit_to);
-	timerclear(&itp->it_interval);
-	if (timerisset(&itp->it_value) &&
-	    timercmp(&itp->it_value, &tv, >))
-		timersub(&itp->it_value, &tv, &itp->it_value);
-	/*
-	 * Return how many seconds were left (rounded up)
-	 */
-	retval[0] = itp->it_value.tv_sec;
-	if (itp->it_value.tv_usec)
-		retval[0]++;
-
-	/*
-	 * alarm(0) just resets the timer.
-	 */
-	if (SCARG(uap, secs) == 0) {
-		timerclear(&itp->it_value);
-		splx(s);
-		return 0;
-	}
-
-	/*
-	 * Check the new alarm time for sanity, and set it.
-	 */
-	timerclear(&it.it_interval);
-	it.it_value.tv_sec = SCARG(uap, secs);
-	it.it_value.tv_usec = 0;
-	if (itimerfix(&it.it_value) || itimerfix(&it.it_interval)) {
-		splx(s);
-		return (EINVAL);
-	}
-
-	if (timerisset(&it.it_value)) {
-		timo = tvtohz(&it.it_value);
-		timeradd(&it.it_value, &tv, &it.it_value);
-		timeout_add(&p->p_realit_to, timo);
-	}
-	p->p_realtimer = it;
-	splx(s);
-
-	return 0;
-}
-
-/*
- * utime(). Do conversion to things that utimes() understands, 
- * and pass it on.
- */
-int
-linux_sys_utime(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_utime_args /* {
-		syscallarg(char *) path;
-		syscallarg(struct linux_utimbuf *)times;
-	} */ *uap = v;
-	caddr_t sg;
-	int error;
-	struct sys_utimes_args ua;
-	struct timeval tv[2], *tvp;
-	struct linux_utimbuf lut;
-
-	sg = stackgap_init(p->p_emul);
-	tvp = (struct timeval *) stackgap_alloc(&sg, sizeof(tv));
-	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	SCARG(&ua, path) = SCARG(uap, path);
-
-	if (SCARG(uap, times) != NULL) {
-		if ((error = copyin(SCARG(uap, times), &lut, sizeof lut)))
-			return error;
-		tv[0].tv_usec = tv[1].tv_usec = 0;
-		tv[0].tv_sec = lut.l_actime;
-		tv[1].tv_sec = lut.l_modtime;
-		if ((error = copyout(tv, tvp, sizeof tv)))
-			return error;
-		SCARG(&ua, tptr) = tvp;
-	}
-	else
-		SCARG(&ua, tptr) = NULL;
-
-	return sys_utimes(p, &ua, retval);
-}
-
-/*
- * The old Linux readdir was only able to read one entry at a time,
- * even though it had a 'count' argument. In fact, the emulation
- * of the old call was better than the original, because it did handle
- * the count arg properly. Don't bother with it anymore now, and use
- * it to distinguish between old and new. The difference is that the
- * newer one actually does multiple entries, and the reclen field
- * really is the reclen, not the namelength.
- */
-int
-linux_sys_readdir(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_readdir_args /* {
-		syscallarg(int) fd;
-		syscallarg(struct linux_dirent *) dent;
-		syscallarg(unsigned int) count;
-	} */ *uap = v;
-
-	SCARG(uap, count) = 1;
-
-	return linux_sys_getdents(p, uap, retval);
-}
-
-/*
- * Linux 'readdir' call. This code is mostly taken from the
- * SunOS getdents call (see compat/sunos/sunos_misc.c), though
- * an attempt has been made to keep it a little cleaner (failing
- * miserably, because of the cruft needed if count 1 is passed).
- *
- * The d_off field should contain the offset of the next valid entry,
- * but in Linux it has the offset of the entry itself. We emulate
- * that bug here.
- *
- * Read in BSD-style entries, convert them, and copy them out.
- *
- * Note that this doesn't handle union-mounted filesystems.
- */
-int linux_readdir_callback(void *, struct dirent *, off_t);
-
-struct linux_readdir_callback_args {
-	caddr_t outp;
-	int     resid;
-	int     oldcall;
-	int	is64bit;
+static unsigned int linux_to_bsd_resource[LINUX_RLIM_NLIMITS] = {
+	RLIMIT_CPU, RLIMIT_FSIZE, RLIMIT_DATA, RLIMIT_STACK,
+	RLIMIT_CORE, RLIMIT_RSS, RLIMIT_NPROC, RLIMIT_NOFILE,
+	RLIMIT_MEMLOCK, RLIMIT_AS 
 };
 
+struct l_sysinfo {
+	l_long		uptime;		/* Seconds since boot */
+	l_ulong		loads[3];	/* 1, 5, and 15 minute load averages */
+#define LINUX_SYSINFO_LOADS_SCALE 65536
+	l_ulong		totalram;	/* Total usable main memory size */
+	l_ulong		freeram;	/* Available memory size */
+	l_ulong		sharedram;	/* Amount of shared memory */
+	l_ulong		bufferram;	/* Memory used by buffers */
+	l_ulong		totalswap;	/* Total swap space size */
+	l_ulong		freeswap;	/* swap space still available */
+	l_ushort	procs;		/* Number of current processes */
+	l_ushort	pads;
+	l_ulong		totalbig;
+	l_ulong		freebig;
+	l_uint		mem_unit;
+	char		_f[20-2*sizeof(l_long)-sizeof(l_int)];	/* padding */
+};
 int
-linux_readdir_callback(arg, bdp, cookie)
-	void *arg;
-	struct dirent *bdp;
-	off_t cookie;
+linux_sysinfo(struct thread *td, struct linux_sysinfo_args *args)
 {
-	struct linux_dirent64 idb64;
-	struct linux_dirent idb;
-	struct linux_readdir_callback_args *cb = arg;
-	int linux_reclen;
+	struct l_sysinfo sysinfo;
+	vm_object_t object;
+	int i, j;
+	struct timespec ts;
+
+	getnanouptime(&ts);
+	if (ts.tv_nsec != 0)
+		ts.tv_sec++;
+	sysinfo.uptime = ts.tv_sec;
+
+	/* Use the information from the mib to get our load averages */
+	for (i = 0; i < 3; i++)
+		sysinfo.loads[i] = averunnable.ldavg[i] *
+		    LINUX_SYSINFO_LOADS_SCALE / averunnable.fscale;
+
+	sysinfo.totalram = physmem * PAGE_SIZE;
+	sysinfo.freeram = sysinfo.totalram - cnt.v_wire_count * PAGE_SIZE;
+
+	sysinfo.sharedram = 0;
+	mtx_lock(&vm_object_list_mtx);
+	TAILQ_FOREACH(object, &vm_object_list, object_list)
+		if (object->shadow_count > 1)
+			sysinfo.sharedram += object->resident_page_count;
+	mtx_unlock(&vm_object_list_mtx);
+
+	sysinfo.sharedram *= PAGE_SIZE;
+	sysinfo.bufferram = 0;
+
+	swap_pager_status(&i, &j);
+	sysinfo.totalswap = i * PAGE_SIZE;
+	sysinfo.freeswap = (i - j) * PAGE_SIZE;
+
+	sysinfo.procs = nprocs;
+
+	/* The following are only present in newer Linux kernels. */
+	sysinfo.totalbig = 0;
+	sysinfo.freebig = 0;
+	sysinfo.mem_unit = 1;
+
+	return copyout(&sysinfo, args->info, sizeof(sysinfo));
+}
+
+int
+linux_alarm(struct thread *td, struct linux_alarm_args *args)
+{
+	struct itimerval it, old_it;
 	int error;
 
-	if (cb->oldcall == 2) 
-		return (ENOMEM);
+#ifdef DEBUG
+	if (ldebug(alarm))
+		printf(ARGS(alarm, "%u"), args->secs);
+#endif
 
-	linux_reclen = (cb->is64bit) ?
-	     LINUX_RECLEN(&idb64, bdp->d_namlen) :
-	     LINUX_RECLEN(&idb, bdp->d_namlen);
+	if (args->secs > 100000000)
+		return (EINVAL);
 
-	if (cb->resid < linux_reclen)
-		return (ENOMEM);
-
-	if (cb->is64bit) {
-		idb64.d_ino = (linux_ino64_t)bdp->d_fileno;
-		idb64.d_off = (linux_off64_t)cookie;
-		idb64.d_reclen = (u_short)linux_reclen;
-		idb64.d_type = bdp->d_type;
-		strlcpy(idb64.d_name, bdp->d_name, sizeof(idb64.d_name));
-		error = copyout((caddr_t)&idb64, cb->outp, linux_reclen);
-	} else {
-		idb.d_ino = (linux_ino_t)bdp->d_fileno;
-		if (cb->oldcall) {
-			/*
-			 * The old readdir() call misuses the offset
-			 * and reclen fields.
-			 */
-			idb.d_off = (linux_off_t)linux_reclen;
-			idb.d_reclen = (u_short)bdp->d_namlen;
-		} else {
-			idb.d_off = (linux_off_t)cookie;
-			idb.d_reclen = (u_short)linux_reclen;
-		}
-		strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-		error = copyout((caddr_t)&idb, cb->outp, linux_reclen);
-	}
+	it.it_value.tv_sec = (long)args->secs;
+	it.it_value.tv_usec = 0;
+	it.it_interval.tv_sec = 0;
+	it.it_interval.tv_usec = 0;
+	error = kern_setitimer(td, ITIMER_REAL, &it, &old_it);
 	if (error)
 		return (error);
-
-	/* advance output past Linux-shaped entry */
-	cb->outp += linux_reclen;
-	cb->resid -= linux_reclen;
-
-	if (cb->oldcall == 1)
-		++cb->oldcall;
-	
+	if (timevalisset(&old_it.it_value)) {
+		if (old_it.it_value.tv_usec != 0)
+			old_it.it_value.tv_sec++;
+		td->td_retval[0] = old_it.it_value.tv_sec;
+	}
 	return (0);
 }
 
 int
-linux_sys_getdents64(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_brk(struct thread *td, struct linux_brk_args *args)
 {
-	return getdents_common(p, v, retval, 1);
+	struct vmspace *vm = td->td_proc->p_vmspace;
+	vm_offset_t new, old;
+	struct obreak_args /* {
+		char * nsize;
+	} */ tmp;
+
+#ifdef DEBUG
+	if (ldebug(brk))
+		printf(ARGS(brk, "%p"), (void *)(uintptr_t)args->dsend);
+#endif
+	old = (vm_offset_t)vm->vm_daddr + ctob(vm->vm_dsize);
+	new = (vm_offset_t)args->dsend;
+	tmp.nsize = (char *)new;
+	if (((caddr_t)new > vm->vm_daddr) && !obreak(td, &tmp))
+		td->td_retval[0] = (long)new;
+	else
+		td->td_retval[0] = (long)old;
+
+	return 0;
 }
+
+#if defined(__i386__)
+/* XXX: what about amd64/linux32? */
 
 int
-linux_sys_getdents(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_uselib(struct thread *td, struct linux_uselib_args *args)
 {
-	return getdents_common(p, v, retval, 0);
-}
-
-static int
-getdents_common(p, v, retval, is64bit)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-	int is64bit;
-{
-	struct linux_sys_getdents_args /* {
-		syscallarg(int) fd;
-		syscallarg(void *) dirent;
-		syscallarg(unsigned) count;
-	} */ *uap = v;
-	struct linux_readdir_callback_args args;
-	struct file *fp;
+	struct nameidata ni;
+	struct vnode *vp;
+	struct exec *a_out;
+	struct vattr attr;
+	vm_offset_t vmaddr;
+	unsigned long file_offset;
+	vm_offset_t buffer;
+	unsigned long bss_size;
+	char *library;
 	int error;
-	int nbytes = SCARG(uap, count);
+	int locked, vfslocked;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
-		return (error);
+	LCONVPATHEXIST(td, args->library, &library);
 
-	if (nbytes == 1) {	/* emulating old, broken behaviour */
-		/* readdir(2) case. Always struct dirent. */
-		if (is64bit) {
-			FRELE(fp);
-			return (EINVAL);
-		}
-		nbytes = sizeof(struct linux_dirent);
-		args.oldcall = 1;
-	} else {
-		args.oldcall = 0;
+#ifdef DEBUG
+	if (ldebug(uselib))
+		printf(ARGS(uselib, "%s"), library);
+#endif
+
+	a_out = NULL;
+	vfslocked = 0;
+	locked = 0;
+	vp = NULL;
+
+	NDINIT(&ni, LOOKUP, ISOPEN | FOLLOW | LOCKLEAF | MPSAFE | AUDITVNODE1,
+	    UIO_SYSSPACE, library, td);
+	error = namei(&ni);
+	LFREEPATH(library);
+	if (error)
+		goto cleanup;
+
+	vp = ni.ni_vp;
+	vfslocked = NDHASGIANT(&ni);
+	NDFREE(&ni, NDF_ONLY_PNBUF);
+
+	/*
+	 * From here on down, we have a locked vnode that must be unlocked.
+	 * XXX: The code below largely duplicates exec_check_permissions().
+	 */
+	locked = 1;
+
+	/* Writable? */
+	if (vp->v_writecount) {
+		error = ETXTBSY;
+		goto cleanup;
 	}
 
-	args.resid = nbytes;
-	args.outp = (caddr_t)SCARG(uap, dirent);
-	args.is64bit = is64bit;
+	/* Executable? */
+	error = VOP_GETATTR(vp, &attr, td->td_ucred, td);
+	if (error)
+		goto cleanup;
 
-	if ((error = readdir_with_callback(fp, &fp->f_offset, nbytes,
-	    linux_readdir_callback, &args)) != 0)
-		goto exit;
+	if ((vp->v_mount->mnt_flag & MNT_NOEXEC) ||
+	    ((attr.va_mode & 0111) == 0) || (attr.va_type != VREG)) {
+		/* EACCESS is what exec(2) returns. */
+		error = ENOEXEC;
+		goto cleanup;
+	}
 
-	*retval = nbytes - args.resid;
+	/* Sensible size? */
+	if (attr.va_size == 0) {
+		error = ENOEXEC;
+		goto cleanup;
+	}
 
- exit:
-	FRELE(fp);
-	return (error);
+	/* Can we access it? */
+	error = VOP_ACCESS(vp, VEXEC, td->td_ucred, td);
+	if (error)
+		goto cleanup;
+
+	/*
+	 * XXX: This should use vn_open() so that it is properly authorized,
+	 * and to reduce code redundancy all over the place here.
+	 * XXX: Not really, it duplicates far more of exec_check_permissions()
+	 * than vn_open().
+	 */
+#ifdef MAC
+	error = mac_vnode_check_open(td->td_ucred, vp, FREAD);
+	if (error)
+		goto cleanup;
+#endif
+	error = VOP_OPEN(vp, FREAD, td->td_ucred, td, NULL);
+	if (error)
+		goto cleanup;
+
+	/* Pull in executable header into kernel_map */
+	error = vm_mmap(kernel_map, (vm_offset_t *)&a_out, PAGE_SIZE,
+	    VM_PROT_READ, VM_PROT_READ, 0, OBJT_VNODE, vp, 0);
+	if (error)
+		goto cleanup;
+
+	/* Is it a Linux binary ? */
+	if (((a_out->a_magic >> 16) & 0xff) != 0x64) {
+		error = ENOEXEC;
+		goto cleanup;
+	}
+
+	/*
+	 * While we are here, we should REALLY do some more checks
+	 */
+
+	/* Set file/virtual offset based on a.out variant. */
+	switch ((int)(a_out->a_magic & 0xffff)) {
+	case 0413:			/* ZMAGIC */
+		file_offset = 1024;
+		break;
+	case 0314:			/* QMAGIC */
+		file_offset = 0;
+		break;
+	default:
+		error = ENOEXEC;
+		goto cleanup;
+	}
+
+	bss_size = round_page(a_out->a_bss);
+
+	/* Check various fields in header for validity/bounds. */
+	if (a_out->a_text & PAGE_MASK || a_out->a_data & PAGE_MASK) {
+		error = ENOEXEC;
+		goto cleanup;
+	}
+
+	/* text + data can't exceed file size */
+	if (a_out->a_data + a_out->a_text > attr.va_size) {
+		error = EFAULT;
+		goto cleanup;
+	}
+
+	/*
+	 * text/data/bss must not exceed limits
+	 * XXX - this is not complete. it should check current usage PLUS
+	 * the resources needed by this library.
+	 */
+	PROC_LOCK(td->td_proc);
+	if (a_out->a_text > maxtsiz ||
+	    a_out->a_data + bss_size > lim_cur(td->td_proc, RLIMIT_DATA)) {
+		PROC_UNLOCK(td->td_proc);
+		error = ENOMEM;
+		goto cleanup;
+	}
+	PROC_UNLOCK(td->td_proc);
+
+	/*
+	 * Prevent more writers.
+	 * XXX: Note that if any of the VM operations fail below we don't
+	 * clear this flag.
+	 */
+	vp->v_vflag |= VV_TEXT;
+
+	/*
+	 * Lock no longer needed
+	 */
+	locked = 0;
+	VOP_UNLOCK(vp, 0, td);
+	VFS_UNLOCK_GIANT(vfslocked);
+
+	/*
+	 * Check if file_offset page aligned. Currently we cannot handle
+	 * misalinged file offsets, and so we read in the entire image
+	 * (what a waste).
+	 */
+	if (file_offset & PAGE_MASK) {
+#ifdef DEBUG
+		printf("uselib: Non page aligned binary %lu\n", file_offset);
+#endif
+		/* Map text+data read/write/execute */
+
+		/* a_entry is the load address and is page aligned */
+		vmaddr = trunc_page(a_out->a_entry);
+
+		/* get anon user mapping, read+write+execute */
+		error = vm_map_find(&td->td_proc->p_vmspace->vm_map, NULL, 0,
+		    &vmaddr, a_out->a_text + a_out->a_data, FALSE, VM_PROT_ALL,
+		    VM_PROT_ALL, 0);
+		if (error)
+			goto cleanup;
+
+		/* map file into kernel_map */
+		error = vm_mmap(kernel_map, &buffer,
+		    round_page(a_out->a_text + a_out->a_data + file_offset),
+		    VM_PROT_READ, VM_PROT_READ, 0, OBJT_VNODE, vp,
+		    trunc_page(file_offset));
+		if (error)
+			goto cleanup;
+
+		/* copy from kernel VM space to user space */
+		error = copyout(PTRIN(buffer + file_offset),
+		    (void *)vmaddr, a_out->a_text + a_out->a_data);
+
+		/* release temporary kernel space */
+		vm_map_remove(kernel_map, buffer, buffer +
+		    round_page(a_out->a_text + a_out->a_data + file_offset));
+
+		if (error)
+			goto cleanup;
+	} else {
+#ifdef DEBUG
+		printf("uselib: Page aligned binary %lu\n", file_offset);
+#endif
+		/*
+		 * for QMAGIC, a_entry is 20 bytes beyond the load address
+		 * to skip the executable header
+		 */
+		vmaddr = trunc_page(a_out->a_entry);
+
+		/*
+		 * Map it all into the process's space as a single
+		 * copy-on-write "data" segment.
+		 */
+		error = vm_mmap(&td->td_proc->p_vmspace->vm_map, &vmaddr,
+		    a_out->a_text + a_out->a_data, VM_PROT_ALL, VM_PROT_ALL,
+		    MAP_PRIVATE | MAP_FIXED, OBJT_VNODE, vp, file_offset);
+		if (error)
+			goto cleanup;
+	}
+#ifdef DEBUG
+	printf("mem=%08lx = %08lx %08lx\n", (long)vmaddr, ((long *)vmaddr)[0],
+	    ((long *)vmaddr)[1]);
+#endif
+	if (bss_size != 0) {
+		/* Calculate BSS start address */
+		vmaddr = trunc_page(a_out->a_entry) + a_out->a_text +
+		    a_out->a_data;
+
+		/* allocate some 'anon' space */
+		error = vm_map_find(&td->td_proc->p_vmspace->vm_map, NULL, 0,
+		    &vmaddr, bss_size, FALSE, VM_PROT_ALL, VM_PROT_ALL, 0);
+		if (error)
+			goto cleanup;
+	}
+
+cleanup:
+	/* Unlock vnode if needed */
+	if (locked) {
+		VOP_UNLOCK(vp, 0, td);
+		VFS_UNLOCK_GIANT(vfslocked);
+	}
+
+	/* Release the kernel mapping. */
+	if (a_out)
+		vm_map_remove(kernel_map, (vm_offset_t)a_out,
+		    (vm_offset_t)a_out + PAGE_SIZE);
+
+	return error;
 }
 
-/*
- * Not sure why the arguments to this older version of select() were put
- * into a structure, because there are 5, and that can all be handled
- * in registers on the i386 like Linux wants to.
- */
+#endif	/* __i386__ */
+
 int
-linux_sys_oldselect(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_select(struct thread *td, struct linux_select_args *args)
 {
-	struct linux_sys_oldselect_args /* {
-		syscallarg(struct linux_select *) lsp;
-	} */ *uap = v;
-	struct linux_select ls;
-	int error;
-
-	if ((error = copyin(SCARG(uap, lsp), &ls, sizeof(ls))))
-		return error;
-
-	return linux_select1(p, retval, ls.nfds, ls.readfds, ls.writefds,
-	    ls.exceptfds, ls.timeout);
-}
-
-/*
- * Even when just using registers to pass arguments to syscalls you can
- * have 5 of them on the i386. So this newer version of select() does
- * this.
- */
-int
-linux_sys_select(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_select_args /* {
-		syscallarg(int) nfds;
-		syscallarg(fd_set *) readfds;
-		syscallarg(fd_set *) writefds;
-		syscallarg(fd_set *) exceptfds;
-		syscallarg(struct timeval *) timeout;
-	} */ *uap = v;
-
-	return linux_select1(p, retval, SCARG(uap, nfds), SCARG(uap, readfds),
-	    SCARG(uap, writefds), SCARG(uap, exceptfds), SCARG(uap, timeout));
-}
-
-/*
- * Common code for the old and new versions of select(). A couple of
- * things are important:
- * 1) return the amount of time left in the 'timeout' parameter
- * 2) select never returns ERESTART on Linux, always return EINTR
- */
-int
-linux_select1(p, retval, nfds, readfds, writefds, exceptfds, timeout)
-	struct proc *p;
-	register_t *retval;
-	int nfds;
-	fd_set *readfds, *writefds, *exceptfds;
-	struct timeval *timeout;
-{
-	struct sys_select_args bsa;
+	l_timeval ltv;
 	struct timeval tv0, tv1, utv, *tvp;
-	caddr_t sg;
 	int error;
 
-	SCARG(&bsa, nd) = nfds;
-	SCARG(&bsa, in) = readfds;
-	SCARG(&bsa, ou) = writefds;
-	SCARG(&bsa, ex) = exceptfds;
-	SCARG(&bsa, tv) = timeout;
+#ifdef DEBUG
+	if (ldebug(select))
+		printf(ARGS(select, "%d, %p, %p, %p, %p"), args->nfds,
+		    (void *)args->readfds, (void *)args->writefds,
+		    (void *)args->exceptfds, (void *)args->timeout);
+#endif
 
 	/*
 	 * Store current time for computation of the amount of
 	 * time left.
 	 */
-	if (timeout) {
-		if ((error = copyin(timeout, &utv, sizeof(utv))))
-			return error;
+	if (args->timeout) {
+		if ((error = copyin(args->timeout, &ltv, sizeof(ltv))))
+			goto select_out;
+		utv.tv_sec = ltv.tv_sec;
+		utv.tv_usec = ltv.tv_usec;
+#ifdef DEBUG
+		if (ldebug(select))
+			printf(LMSG("incoming timeout (%jd/%ld)"),
+			    (intmax_t)utv.tv_sec, utv.tv_usec);
+#endif
+
 		if (itimerfix(&utv)) {
 			/*
 			 * The timeval was invalid.  Convert it to something
 			 * valid that will act as it does under Linux.
 			 */
-			sg = stackgap_init(p->p_emul);
-			tvp = stackgap_alloc(&sg, sizeof(utv));
 			utv.tv_sec += utv.tv_usec / 1000000;
 			utv.tv_usec %= 1000000;
 			if (utv.tv_usec < 0) {
@@ -1176,15 +513,20 @@ linux_select1(p, retval, nfds, readfds, writefds, exceptfds, timeout)
 				utv.tv_usec += 1000000;
 			}
 			if (utv.tv_sec < 0)
-				timerclear(&utv);
-			if ((error = copyout(&utv, tvp, sizeof(utv))))
-				return error;
-			SCARG(&bsa, tv) = tvp;
+				timevalclear(&utv);
 		}
 		microtime(&tv0);
-	}
+		tvp = &utv;
+	} else
+		tvp = NULL;
 
-	error = sys_select(p, &bsa, retval);
+	error = kern_select(td, args->nfds, args->readfds, args->writefds,
+	    args->exceptfds, tvp);
+
+#ifdef DEBUG
+	if (ldebug(select))
+		printf(LMSG("real select returns %d"), error);
+#endif
 	if (error) {
 		/*
 		 * See fs/select.c in the Linux kernel.  Without this,
@@ -1192,11 +534,11 @@ linux_select1(p, retval, nfds, readfds, writefds, exceptfds, timeout)
 		 */
 		if (error == ERESTART)
 			error = EINTR;
-		return error;
+		goto select_out;
 	}
 
-	if (timeout) {
-		if (*retval) {
+	if (args->timeout) {
+		if (td->td_retval[0]) {
 			/*
 			 * Compute how much time was left of the timeout,
 			 * by subtracting the current time and the time
@@ -1204,307 +546,1191 @@ linux_select1(p, retval, nfds, readfds, writefds, exceptfds, timeout)
 			 * that result from the user-supplied value.
 			 */
 			microtime(&tv1);
-			timersub(&tv1, &tv0, &tv1);
-			timersub(&utv, &tv1, &utv);
+			timevalsub(&tv1, &tv0);
+			timevalsub(&utv, &tv1);
 			if (utv.tv_sec < 0)
-				timerclear(&utv);
+				timevalclear(&utv);
 		} else
-			timerclear(&utv);
-		if ((error = copyout(&utv, timeout, sizeof(utv))))
+			timevalclear(&utv);
+#ifdef DEBUG
+		if (ldebug(select))
+			printf(LMSG("outgoing timeout (%jd/%ld)"),
+			    (intmax_t)utv.tv_sec, utv.tv_usec);
+#endif
+		ltv.tv_sec = utv.tv_sec;
+		ltv.tv_usec = utv.tv_usec;
+		if ((error = copyout(&ltv, args->timeout, sizeof(ltv))))
+			goto select_out;
+	}
+
+select_out:
+#ifdef DEBUG
+	if (ldebug(select))
+		printf(LMSG("select_out -> %d"), error);
+#endif
+	return error;
+}
+
+int
+linux_mremap(struct thread *td, struct linux_mremap_args *args)
+{
+	struct munmap_args /* {
+		void *addr;
+		size_t len;
+	} */ bsd_args;
+	int error = 0;
+
+#ifdef DEBUG
+	if (ldebug(mremap))
+		printf(ARGS(mremap, "%p, %08lx, %08lx, %08lx"),
+		    (void *)(uintptr_t)args->addr,
+		    (unsigned long)args->old_len,
+		    (unsigned long)args->new_len,
+		    (unsigned long)args->flags);
+#endif
+	args->new_len = round_page(args->new_len);
+	args->old_len = round_page(args->old_len);
+
+	if (args->new_len > args->old_len) {
+		td->td_retval[0] = 0;
+		return ENOMEM;
+	}
+
+	if (args->new_len < args->old_len) {
+		bsd_args.addr =
+		    (caddr_t)((uintptr_t)args->addr + args->new_len);
+		bsd_args.len = args->old_len - args->new_len;
+		error = munmap(td, &bsd_args);
+	}
+
+	td->td_retval[0] = error ? 0 : (uintptr_t)args->addr;
+	return error;
+}
+
+#define LINUX_MS_ASYNC       0x0001
+#define LINUX_MS_INVALIDATE  0x0002
+#define LINUX_MS_SYNC        0x0004
+
+int
+linux_msync(struct thread *td, struct linux_msync_args *args)
+{
+	struct msync_args bsd_args;
+
+	bsd_args.addr = (caddr_t)(uintptr_t)args->addr;
+	bsd_args.len = (uintptr_t)args->len;
+	bsd_args.flags = args->fl & ~LINUX_MS_SYNC;
+
+	return msync(td, &bsd_args);
+}
+
+int
+linux_time(struct thread *td, struct linux_time_args *args)
+{
+	struct timeval tv;
+	l_time_t tm;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(time))
+		printf(ARGS(time, "*"));
+#endif
+
+	microtime(&tv);
+	tm = tv.tv_sec;
+	if (args->tm && (error = copyout(&tm, args->tm, sizeof(tm))))
+		return error;
+	td->td_retval[0] = tm;
+	return 0;
+}
+
+struct l_times_argv {
+	l_long	tms_utime;
+	l_long	tms_stime;
+	l_long	tms_cutime;
+	l_long	tms_cstime;
+};
+
+#define CLK_TCK 100			/* Linux uses 100 */
+
+#define CONVTCK(r)	(r.tv_sec * CLK_TCK + r.tv_usec / (1000000 / CLK_TCK))
+
+int
+linux_times(struct thread *td, struct linux_times_args *args)
+{
+	struct timeval tv, utime, stime, cutime, cstime;
+	struct l_times_argv tms;
+	struct proc *p;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(times))
+		printf(ARGS(times, "*"));
+#endif
+
+	if (args->buf != NULL) {
+		p = td->td_proc;
+		PROC_LOCK(p);
+		PROC_SLOCK(p);
+		calcru(p, &utime, &stime);
+		PROC_SUNLOCK(p);
+		calccru(p, &cutime, &cstime);
+		PROC_UNLOCK(p);
+
+		tms.tms_utime = CONVTCK(utime);
+		tms.tms_stime = CONVTCK(stime);
+
+		tms.tms_cutime = CONVTCK(cutime);
+		tms.tms_cstime = CONVTCK(cstime);
+
+		if ((error = copyout(&tms, args->buf, sizeof(tms))))
 			return error;
 	}
 
+	microuptime(&tv);
+	td->td_retval[0] = (int)CONVTCK(tv);
 	return 0;
 }
 
-/*
- * Get the process group of a certain process. Look it up
- * and return the value.
- */
 int
-linux_sys_getpgid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_newuname(struct thread *td, struct linux_newuname_args *args)
 {
-	struct linux_sys_getpgid_args /* {
-		syscallarg(int) pid;
-	} */ *uap = v;
-	struct proc *targp;
+	struct l_new_utsname utsname;
+	char osname[LINUX_MAX_UTSNAME];
+	char osrelease[LINUX_MAX_UTSNAME];
+	char *p;
 
-	if (SCARG(uap, pid) != 0 && SCARG(uap, pid) != p->p_pid) {
-		if ((targp = pfind(SCARG(uap, pid))) == 0)
-			return ESRCH;
+#ifdef DEBUG
+	if (ldebug(newuname))
+		printf(ARGS(newuname, "*"));
+#endif
+
+	linux_get_osname(td, osname);
+	linux_get_osrelease(td, osrelease);
+
+	bzero(&utsname, sizeof(utsname));
+	strlcpy(utsname.sysname, osname, LINUX_MAX_UTSNAME);
+	getcredhostname(td->td_ucred, utsname.nodename, LINUX_MAX_UTSNAME);
+	strlcpy(utsname.release, osrelease, LINUX_MAX_UTSNAME);
+	strlcpy(utsname.version, version, LINUX_MAX_UTSNAME);
+	for (p = utsname.version; *p != '\0'; ++p)
+		if (*p == '\n') {
+			*p = '\0';
+			break;
+		}
+#ifdef __i386__
+	{
+		const char *class;
+
+		switch (cpu_class) {
+		case CPUCLASS_686:
+			class = "i686";
+			break;
+		case CPUCLASS_586:
+			class = "i586";
+			break;
+		case CPUCLASS_486:
+			class = "i486";
+			break;
+		default:
+			class = "i386";
+		}
+		strlcpy(utsname.machine, class, LINUX_MAX_UTSNAME);
 	}
-	else
-		targp = p;
+#elif defined(__amd64__)	/* XXX: Linux can change 'personality'. */
+#ifdef COMPAT_LINUX32
+	strlcpy(utsname.machine, "i686", LINUX_MAX_UTSNAME);
+#else
+	strlcpy(utsname.machine, "x86_64", LINUX_MAX_UTSNAME);
+#endif /* COMPAT_LINUX32 */
+#else /* something other than i386 or amd64 - assume we and Linux agree */
+	strlcpy(utsname.machine, machine, LINUX_MAX_UTSNAME);
+#endif /* __i386__ */
+	strlcpy(utsname.domainname, domainname, LINUX_MAX_UTSNAME);
 
-	retval[0] = targp->p_pgid;
-	return 0;
+	return (copyout(&utsname, args->buf, sizeof(utsname)));
 }
 
-/*
- * Set the 'personality' (emulation mode) for the current process. Only
- * accept the Linux personality here (0). This call is needed because
- * the Linux ELF crt0 issues it in an ugly kludge to make sure that
- * ELF binaries run in Linux mode, not SVR4 mode.
- */
-int
-linux_sys_personality(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_personality_args /* {
-		syscallarg(int) per;
-	} */ *uap = v;
-
-	if (SCARG(uap, per) != 0)
-		return EINVAL;
-	retval[0] = 0;
-	return 0;
-}
-
-/*
- * The calls are here because of type conversions.
- */
-int
-linux_sys_setreuid16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_setreuid16_args /* {
-		syscallarg(int) ruid;
-		syscallarg(int) euid;
-	} */ *uap = v;
-	struct sys_setreuid_args bsa;
-	
-	SCARG(&bsa, ruid) = ((linux_uid_t)SCARG(uap, ruid) == (linux_uid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, ruid);
-	SCARG(&bsa, euid) = ((linux_uid_t)SCARG(uap, euid) == (linux_uid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, euid);
-
-	return sys_setreuid(p, &bsa, retval);
-}
+#if defined(__i386__) || (defined(__amd64__) && defined(COMPAT_LINUX32))
+struct l_utimbuf {
+	l_time_t l_actime;
+	l_time_t l_modtime;
+};
 
 int
-linux_sys_setregid16(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_utime(struct thread *td, struct linux_utime_args *args)
 {
-	struct linux_sys_setregid16_args /* {
-		syscallarg(int) rgid;
-		syscallarg(int) egid;
-	} */ *uap = v;
-	struct sys_setregid_args bsa;
-	
-	SCARG(&bsa, rgid) = ((linux_gid_t)SCARG(uap, rgid) == (linux_gid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, rgid);
-	SCARG(&bsa, egid) = ((linux_gid_t)SCARG(uap, egid) == (linux_gid_t)-1) ?
-		(uid_t)-1 : SCARG(uap, egid);
-
-	return sys_setregid(p, &bsa, retval);
-}
-
-int
-linux_sys_getsid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_getsid_args /* {
-		syscallarg(int) pid;
-	} */ *uap = v;
-	struct proc *p1;
-	pid_t pid;
-
-	pid = (pid_t)SCARG(uap, pid);
-
-	if (pid == 0) {
-		retval[0] = (int)p->p_session;	/* XXX Oh well */
-		return 0;
-	}
-
-	p1 = pfind((int)pid);
-	if (p1 == NULL)
-		return ESRCH;
-
-	retval[0] = (int)p1->p_session;
-	return 0;
-}
-
-int
-linux_sys___sysctl(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys___sysctl_args /* {
-		syscallarg(struct linux___sysctl *) lsp;
-	} */ *uap = v;
-	struct linux___sysctl ls;
-	struct sys___sysctl_args bsa;
+	struct timeval tv[2], *tvp;
+	struct l_utimbuf lut;
+	char *fname;
 	int error;
 
-	if ((error = copyin(SCARG(uap, lsp), &ls, sizeof ls)))
+	LCONVPATHEXIST(td, args->fname, &fname);
+
+#ifdef DEBUG
+	if (ldebug(utime))
+		printf(ARGS(utime, "%s, *"), fname);
+#endif
+
+	if (args->times) {
+		if ((error = copyin(args->times, &lut, sizeof lut))) {
+			LFREEPATH(fname);
+			return error;
+		}
+		tv[0].tv_sec = lut.l_actime;
+		tv[0].tv_usec = 0;
+		tv[1].tv_sec = lut.l_modtime;
+		tv[1].tv_usec = 0;
+		tvp = tv;
+	} else
+		tvp = NULL;
+
+	error = kern_utimes(td, fname, UIO_SYSSPACE, tvp, UIO_SYSSPACE);
+	LFREEPATH(fname);
+	return (error);
+}
+
+int
+linux_utimes(struct thread *td, struct linux_utimes_args *args)
+{
+	l_timeval ltv[2];
+	struct timeval tv[2], *tvp = NULL;
+	char *fname;
+	int error;
+
+	LCONVPATHEXIST(td, args->fname, &fname);
+
+#ifdef DEBUG
+	if (ldebug(utimes))
+		printf(ARGS(utimes, "%s, *"), fname);
+#endif
+
+	if (args->tptr != NULL) {
+		if ((error = copyin(args->tptr, ltv, sizeof ltv))) {
+			LFREEPATH(fname);
+			return (error);
+		}
+		tv[0].tv_sec = ltv[0].tv_sec;
+		tv[0].tv_usec = ltv[0].tv_usec;
+		tv[1].tv_sec = ltv[1].tv_sec;
+		tv[1].tv_usec = ltv[1].tv_usec;
+		tvp = tv;
+	}
+
+	error = kern_utimes(td, fname, UIO_SYSSPACE, tvp, UIO_SYSSPACE);
+	LFREEPATH(fname);
+	return (error);
+}
+#endif /* __i386__ || (__amd64__ && COMPAT_LINUX32) */
+
+#define __WCLONE 0x80000000
+
+int
+linux_waitpid(struct thread *td, struct linux_waitpid_args *args)
+{
+	int error, options, tmpstat;
+
+#ifdef DEBUG
+	if (ldebug(waitpid))
+		printf(ARGS(waitpid, "%d, %p, %d"),
+		    args->pid, (void *)args->status, args->options);
+#endif
+	/*
+	 * this is necessary because the test in kern_wait doesn't work
+	 * because we mess with the options here
+	 */
+	if (args->options & ~(WUNTRACED | WNOHANG | WCONTINUED | __WCLONE))
+		return (EINVAL);
+
+	options = (args->options & (WNOHANG | WUNTRACED));
+	/* WLINUXCLONE should be equal to __WCLONE, but we make sure */
+	if (args->options & __WCLONE)
+		options |= WLINUXCLONE;
+
+	error = kern_wait(td, args->pid, &tmpstat, options, NULL);
+	if (error)
 		return error;
-	SCARG(&bsa, name) = ls.name;
-	SCARG(&bsa, namelen) = ls.namelen;
-	SCARG(&bsa, old) = ls.old;
-	SCARG(&bsa, oldlenp) = ls.oldlenp;
-	SCARG(&bsa, new) = ls.new;
-	SCARG(&bsa, newlen) = ls.newlen;
 
-	return sys___sysctl(p, &bsa, retval);
+	if (args->status) {
+		tmpstat &= 0xffff;
+		if (WIFSIGNALED(tmpstat))
+			tmpstat = (tmpstat & 0xffffff80) |
+			    BSD_TO_LINUX_SIGNAL(WTERMSIG(tmpstat));
+		else if (WIFSTOPPED(tmpstat))
+			tmpstat = (tmpstat & 0xffff00ff) |
+			    (BSD_TO_LINUX_SIGNAL(WSTOPSIG(tmpstat)) << 8);
+		return copyout(&tmpstat, args->status, sizeof(int));
+	}
+
+	return 0;
 }
 
-/*
- * We have nonexistent fsuid equal to uid.
- * If modification is requested, refuse.
- */
 int
-linux_sys_setfsuid(p, v, retval)
-	 struct proc *p;
-	 void *v;
-	 register_t *retval;
+linux_wait4(struct thread *td, struct linux_wait4_args *args)
 {
-	 struct linux_sys_setfsuid_args /* {
-		 syscallarg(uid_t) uid;
-	 } */ *uap = v;
-	 uid_t uid;
-
-	 uid = SCARG(uap, uid);
-	 if (p->p_cred->p_ruid != uid)
-		 return sys_nosys(p, v, retval);
-	 else
-		 return (0);
-}
-
-int
-linux_sys_getfsuid(p, v, retval)
+	int error, options, tmpstat;
+	struct rusage ru, *rup;
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	return sys_getuid(p, v, retval);
-}
 
+#ifdef DEBUG
+	if (ldebug(wait4))
+		printf(ARGS(wait4, "%d, %p, %d, %p"),
+		    args->pid, (void *)args->status, args->options,
+		    (void *)args->rusage);
+#endif
 
-int
-linux_sys_nice(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_nice_args /* {
-		syscallarg(int) incr;
-	} */ *uap = v;
-	struct sys_setpriority_args bsa;
+	options = (args->options & (WNOHANG | WUNTRACED));
+	/* WLINUXCLONE should be equal to __WCLONE, but we make sure */
+	if (args->options & __WCLONE)
+		options |= WLINUXCLONE;
 
-	SCARG(&bsa, which) = PRIO_PROCESS;
-	SCARG(&bsa, who) = 0;
-	SCARG(&bsa, prio) = SCARG(uap, incr);
-	return sys_setpriority(p, &bsa, retval);
-}
+	if (args->rusage != NULL)
+		rup = &ru;
+	else
+		rup = NULL;
+	error = kern_wait(td, args->pid, &tmpstat, options, rup);
+	if (error)
+		return error;
 
-int
-linux_sys_stime(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_time_args /* {
-		linux_time_t *t;
-	} */ *uap = v;
-	struct timespec ats;
-	linux_time_t tt;
-	int error;
+	p = td->td_proc;
+	PROC_LOCK(p);
+	sigqueue_delete(&p->p_sigqueue, SIGCHLD);
+	PROC_UNLOCK(p);
 
-	if ((error = suser(p, 0)) != 0)
-		return (error);
-
-	if ((error = copyin(SCARG(uap, t), &tt, sizeof(tt))) != 0)
-		return (error);
-
-	ats.tv_sec = tt;
-	ats.tv_nsec = 0;
-
-	error = settime(&ats);
+	if (args->status) {
+		tmpstat &= 0xffff;
+		if (WIFSIGNALED(tmpstat))
+			tmpstat = (tmpstat & 0xffffff80) |
+			    BSD_TO_LINUX_SIGNAL(WTERMSIG(tmpstat));
+		else if (WIFSTOPPED(tmpstat))
+			tmpstat = (tmpstat & 0xffff00ff) |
+			    (BSD_TO_LINUX_SIGNAL(WSTOPSIG(tmpstat)) << 8);
+		error = copyout(&tmpstat, args->status, sizeof(int));
+	}
+	if (args->rusage != NULL && error == 0)
+		error = copyout(&ru, args->rusage, sizeof(ru));
 
 	return (error);
 }
 
 int
-linux_sys_getpid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_mknod(struct thread *td, struct linux_mknod_args *args)
 {
+	char *path;
+	int error;
 
-	*retval = p->p_pid;
+	LCONVPATHCREAT(td, args->path, &path);
+
+#ifdef DEBUG
+	if (ldebug(mknod))
+		printf(ARGS(mknod, "%s, %d, %d"), path, args->mode, args->dev);
+#endif
+
+	switch (args->mode & S_IFMT) {
+	case S_IFIFO:
+	case S_IFSOCK:
+		error = kern_mkfifo(td, path, UIO_SYSSPACE, args->mode);
+		break;
+
+	case S_IFCHR:
+	case S_IFBLK:
+		error = kern_mknod(td, path, UIO_SYSSPACE, args->mode,
+		    args->dev);
+		break;
+
+	case S_IFDIR:
+		error = EPERM;
+		break;
+
+	case 0:
+		args->mode |= S_IFREG;
+		/* FALLTHROUGH */
+	case S_IFREG:
+		error = kern_open(td, path, UIO_SYSSPACE,
+		    O_WRONLY | O_CREAT | O_TRUNC, args->mode);
+		break;
+
+	default:
+		error = EINVAL;
+		break;
+	}
+	LFREEPATH(path);
+	return (error);
+}
+
+/*
+ * UGH! This is just about the dumbest idea I've ever heard!!
+ */
+int
+linux_personality(struct thread *td, struct linux_personality_args *args)
+{
+#ifdef DEBUG
+	if (ldebug(personality))
+		printf(ARGS(personality, "%lu"), (unsigned long)args->per);
+#endif
+	if (args->per != 0)
+		return EINVAL;
+
+	/* Yes Jim, it's still a Linux... */
+	td->td_retval[0] = 0;
+	return 0;
+}
+
+struct l_itimerval {
+	l_timeval it_interval;
+	l_timeval it_value;
+};
+
+#define	B2L_ITIMERVAL(bip, lip) 					\
+	(bip)->it_interval.tv_sec = (lip)->it_interval.tv_sec;		\
+	(bip)->it_interval.tv_usec = (lip)->it_interval.tv_usec;	\
+	(bip)->it_value.tv_sec = (lip)->it_value.tv_sec;		\
+	(bip)->it_value.tv_usec = (lip)->it_value.tv_usec;
+
+int
+linux_setitimer(struct thread *td, struct linux_setitimer_args *uap)
+{
+	int error;
+	struct l_itimerval ls;
+	struct itimerval aitv, oitv;
+
+#ifdef DEBUG
+	if (ldebug(setitimer))
+		printf(ARGS(setitimer, "%p, %p"),
+		    (void *)uap->itv, (void *)uap->oitv);
+#endif
+
+	if (uap->itv == NULL) {
+		uap->itv = uap->oitv;
+		return (linux_getitimer(td, (struct linux_getitimer_args *)uap));
+	}
+
+	error = copyin(uap->itv, &ls, sizeof(ls));
+	if (error != 0)
+		return (error);
+	B2L_ITIMERVAL(&aitv, &ls);
+#ifdef DEBUG
+	if (ldebug(setitimer)) {
+		printf("setitimer: value: sec: %jd, usec: %ld\n",
+		    (intmax_t)aitv.it_value.tv_sec, aitv.it_value.tv_usec);
+		printf("setitimer: interval: sec: %jd, usec: %ld\n",
+		    (intmax_t)aitv.it_interval.tv_sec, aitv.it_interval.tv_usec);
+	}
+#endif
+	error = kern_setitimer(td, uap->which, &aitv, &oitv);
+	if (error != 0 || uap->oitv == NULL)
+		return (error);
+	B2L_ITIMERVAL(&ls, &oitv);
+
+	return (copyout(&ls, uap->oitv, sizeof(ls)));
+}
+
+int
+linux_getitimer(struct thread *td, struct linux_getitimer_args *uap)
+{
+	int error;
+	struct l_itimerval ls;
+	struct itimerval aitv;
+
+#ifdef DEBUG
+	if (ldebug(getitimer))
+		printf(ARGS(getitimer, "%p"), (void *)uap->itv);
+#endif
+	error = kern_getitimer(td, uap->which, &aitv);
+	if (error != 0)
+		return (error);
+	B2L_ITIMERVAL(&ls, &aitv);
+	return (copyout(&ls, uap->itv, sizeof(ls)));
+}
+
+int
+linux_nice(struct thread *td, struct linux_nice_args *args)
+{
+	struct setpriority_args bsd_args;
+
+	bsd_args.which = PRIO_PROCESS;
+	bsd_args.who = 0;		/* current process */
+	bsd_args.prio = args->inc;
+	return setpriority(td, &bsd_args);
+}
+
+int
+linux_setgroups(struct thread *td, struct linux_setgroups_args *args)
+{
+	struct ucred *newcred, *oldcred;
+	l_gid_t linux_gidset[NGROUPS];
+	gid_t *bsd_gidset;
+	int ngrp, error;
+	struct proc *p;
+
+	ngrp = args->gidsetsize;
+	if (ngrp < 0 || ngrp >= NGROUPS)
+		return (EINVAL);
+	error = copyin(args->grouplist, linux_gidset, ngrp * sizeof(l_gid_t));
+	if (error)
+		return (error);
+	newcred = crget();
+	p = td->td_proc;
+	PROC_LOCK(p);
+	oldcred = p->p_ucred;
+
+	/*
+	 * cr_groups[0] holds egid. Setting the whole set from
+	 * the supplied set will cause egid to be changed too.
+	 * Keep cr_groups[0] unchanged to prevent that.
+	 */
+
+	if ((error = priv_check_cred(oldcred, PRIV_CRED_SETGROUPS, 0)) != 0) {
+		PROC_UNLOCK(p);
+		crfree(newcred);
+		return (error);
+	}
+
+	crcopy(newcred, oldcred);
+	if (ngrp > 0) {
+		newcred->cr_ngroups = ngrp + 1;
+
+		bsd_gidset = newcred->cr_groups;
+		ngrp--;
+		while (ngrp >= 0) {
+			bsd_gidset[ngrp + 1] = linux_gidset[ngrp];
+			ngrp--;
+		}
+	} else
+		newcred->cr_ngroups = 1;
+
+	setsugid(p);
+	p->p_ucred = newcred;
+	PROC_UNLOCK(p);
+	crfree(oldcred);
 	return (0);
 }
 
 int
-linux_sys_getuid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_getgroups(struct thread *td, struct linux_getgroups_args *args)
 {
+	struct ucred *cred;
+	l_gid_t linux_gidset[NGROUPS];
+	gid_t *bsd_gidset;
+	int bsd_gidsetsz, ngrp, error;
 
-	*retval = p->p_cred->p_ruid;
+	cred = td->td_ucred;
+	bsd_gidset = cred->cr_groups;
+	bsd_gidsetsz = cred->cr_ngroups - 1;
+
+	/*
+	 * cr_groups[0] holds egid. Returning the whole set
+	 * here will cause a duplicate. Exclude cr_groups[0]
+	 * to prevent that.
+	 */
+
+	if ((ngrp = args->gidsetsize) == 0) {
+		td->td_retval[0] = bsd_gidsetsz;
+		return (0);
+	}
+
+	if (ngrp < bsd_gidsetsz)
+		return (EINVAL);
+
+	ngrp = 0;
+	while (ngrp < bsd_gidsetsz) {
+		linux_gidset[ngrp] = bsd_gidset[ngrp + 1];
+		ngrp++;
+	}
+
+	if ((error = copyout(linux_gidset, args->grouplist,
+	    ngrp * sizeof(l_gid_t))))
+		return (error);
+
+	td->td_retval[0] = ngrp;
 	return (0);
 }
 
 int
-linux_sys_getgid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_setrlimit(struct thread *td, struct linux_setrlimit_args *args)
 {
+	struct rlimit bsd_rlim;
+	struct l_rlimit rlim;
+	u_int which;
+	int error;
 
-	*retval = p->p_cred->p_rgid;
-	return (0);
+#ifdef DEBUG
+	if (ldebug(setrlimit))
+		printf(ARGS(setrlimit, "%d, %p"),
+		    args->resource, (void *)args->rlim);
+#endif
+
+	if (args->resource >= LINUX_RLIM_NLIMITS)
+		return (EINVAL);
+
+	which = linux_to_bsd_resource[args->resource];
+	if (which == -1)
+		return (EINVAL);
+
+	error = copyin(args->rlim, &rlim, sizeof(rlim));
+	if (error)
+		return (error);
+
+	bsd_rlim.rlim_cur = (rlim_t)rlim.rlim_cur;
+	bsd_rlim.rlim_max = (rlim_t)rlim.rlim_max;
+	return (kern_setrlimit(td, which, &bsd_rlim));
+}
+
+int
+linux_old_getrlimit(struct thread *td, struct linux_old_getrlimit_args *args)
+{
+	struct l_rlimit rlim;
+	struct proc *p = td->td_proc;
+	struct rlimit bsd_rlim;
+	u_int which;
+
+#ifdef DEBUG
+	if (ldebug(old_getrlimit))
+		printf(ARGS(old_getrlimit, "%d, %p"),
+		    args->resource, (void *)args->rlim);
+#endif
+
+	if (args->resource >= LINUX_RLIM_NLIMITS)
+		return (EINVAL);
+
+	which = linux_to_bsd_resource[args->resource];
+	if (which == -1)
+		return (EINVAL);
+
+	PROC_LOCK(p);
+	lim_rlimit(p, which, &bsd_rlim);
+	PROC_UNLOCK(p);
+
+#ifdef COMPAT_LINUX32
+	rlim.rlim_cur = (unsigned int)bsd_rlim.rlim_cur;
+	if (rlim.rlim_cur == UINT_MAX)
+		rlim.rlim_cur = INT_MAX;
+	rlim.rlim_max = (unsigned int)bsd_rlim.rlim_max;
+	if (rlim.rlim_max == UINT_MAX)
+		rlim.rlim_max = INT_MAX;
+#else
+	rlim.rlim_cur = (unsigned long)bsd_rlim.rlim_cur;
+	if (rlim.rlim_cur == ULONG_MAX)
+		rlim.rlim_cur = LONG_MAX;
+	rlim.rlim_max = (unsigned long)bsd_rlim.rlim_max;
+	if (rlim.rlim_max == ULONG_MAX)
+		rlim.rlim_max = LONG_MAX;
+#endif
+	return (copyout(&rlim, args->rlim, sizeof(rlim)));
+}
+
+int
+linux_getrlimit(struct thread *td, struct linux_getrlimit_args *args)
+{
+	struct l_rlimit rlim;
+	struct proc *p = td->td_proc;
+	struct rlimit bsd_rlim;
+	u_int which;
+
+#ifdef DEBUG
+	if (ldebug(getrlimit))
+		printf(ARGS(getrlimit, "%d, %p"),
+		    args->resource, (void *)args->rlim);
+#endif
+
+	if (args->resource >= LINUX_RLIM_NLIMITS)
+		return (EINVAL);
+
+	which = linux_to_bsd_resource[args->resource];
+	if (which == -1)
+		return (EINVAL);
+
+	PROC_LOCK(p);
+	lim_rlimit(p, which, &bsd_rlim);
+	PROC_UNLOCK(p);
+
+	rlim.rlim_cur = (l_ulong)bsd_rlim.rlim_cur;
+	rlim.rlim_max = (l_ulong)bsd_rlim.rlim_max;
+	return (copyout(&rlim, args->rlim, sizeof(rlim)));
+}
+
+int
+linux_sched_setscheduler(struct thread *td,
+    struct linux_sched_setscheduler_args *args)
+{
+	struct sched_setscheduler_args bsd;
+
+#ifdef DEBUG
+	if (ldebug(sched_setscheduler))
+		printf(ARGS(sched_setscheduler, "%d, %d, %p"),
+		    args->pid, args->policy, (const void *)args->param);
+#endif
+
+	switch (args->policy) {
+	case LINUX_SCHED_OTHER:
+		bsd.policy = SCHED_OTHER;
+		break;
+	case LINUX_SCHED_FIFO:
+		bsd.policy = SCHED_FIFO;
+		break;
+	case LINUX_SCHED_RR:
+		bsd.policy = SCHED_RR;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	bsd.pid = args->pid;
+	bsd.param = (struct sched_param *)args->param;
+	return sched_setscheduler(td, &bsd);
+}
+
+int
+linux_sched_getscheduler(struct thread *td,
+    struct linux_sched_getscheduler_args *args)
+{
+	struct sched_getscheduler_args bsd;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(sched_getscheduler))
+		printf(ARGS(sched_getscheduler, "%d"), args->pid);
+#endif
+
+	bsd.pid = args->pid;
+	error = sched_getscheduler(td, &bsd);
+
+	switch (td->td_retval[0]) {
+	case SCHED_OTHER:
+		td->td_retval[0] = LINUX_SCHED_OTHER;
+		break;
+	case SCHED_FIFO:
+		td->td_retval[0] = LINUX_SCHED_FIFO;
+		break;
+	case SCHED_RR:
+		td->td_retval[0] = LINUX_SCHED_RR;
+		break;
+	}
+
+	return error;
+}
+
+int
+linux_sched_get_priority_max(struct thread *td,
+    struct linux_sched_get_priority_max_args *args)
+{
+	struct sched_get_priority_max_args bsd;
+
+#ifdef DEBUG
+	if (ldebug(sched_get_priority_max))
+		printf(ARGS(sched_get_priority_max, "%d"), args->policy);
+#endif
+
+	switch (args->policy) {
+	case LINUX_SCHED_OTHER:
+		bsd.policy = SCHED_OTHER;
+		break;
+	case LINUX_SCHED_FIFO:
+		bsd.policy = SCHED_FIFO;
+		break;
+	case LINUX_SCHED_RR:
+		bsd.policy = SCHED_RR;
+		break;
+	default:
+		return EINVAL;
+	}
+	return sched_get_priority_max(td, &bsd);
+}
+
+int
+linux_sched_get_priority_min(struct thread *td,
+    struct linux_sched_get_priority_min_args *args)
+{
+	struct sched_get_priority_min_args bsd;
+
+#ifdef DEBUG
+	if (ldebug(sched_get_priority_min))
+		printf(ARGS(sched_get_priority_min, "%d"), args->policy);
+#endif
+
+	switch (args->policy) {
+	case LINUX_SCHED_OTHER:
+		bsd.policy = SCHED_OTHER;
+		break;
+	case LINUX_SCHED_FIFO:
+		bsd.policy = SCHED_FIFO;
+		break;
+	case LINUX_SCHED_RR:
+		bsd.policy = SCHED_RR;
+		break;
+	default:
+		return EINVAL;
+	}
+	return sched_get_priority_min(td, &bsd);
+}
+
+#define REBOOT_CAD_ON	0x89abcdef
+#define REBOOT_CAD_OFF	0
+#define REBOOT_HALT	0xcdef0123
+#define REBOOT_RESTART	0x01234567
+#define REBOOT_RESTART2	0xA1B2C3D4
+#define REBOOT_POWEROFF	0x4321FEDC
+#define REBOOT_MAGIC1	0xfee1dead
+#define REBOOT_MAGIC2	0x28121969
+#define REBOOT_MAGIC2A	0x05121996
+#define REBOOT_MAGIC2B	0x16041998
+
+int
+linux_reboot(struct thread *td, struct linux_reboot_args *args)
+{
+	struct reboot_args bsd_args;
+
+#ifdef DEBUG
+	if (ldebug(reboot))
+		printf(ARGS(reboot, "0x%x"), args->cmd);
+#endif
+
+	if (args->magic1 != REBOOT_MAGIC1)
+		return EINVAL;
+
+	switch (args->magic2) {
+	case REBOOT_MAGIC2:
+	case REBOOT_MAGIC2A:
+	case REBOOT_MAGIC2B:
+		break;
+	default:
+		return EINVAL;
+	}
+
+	switch (args->cmd) {
+	case REBOOT_CAD_ON:
+	case REBOOT_CAD_OFF:
+		return (priv_check(td, PRIV_REBOOT));
+	case REBOOT_HALT:
+		bsd_args.opt = RB_HALT;
+		break;
+	case REBOOT_RESTART:
+	case REBOOT_RESTART2:
+		bsd_args.opt = 0;
+		break;
+	case REBOOT_POWEROFF:
+		bsd_args.opt = RB_POWEROFF;
+		break;
+	default:
+		return EINVAL;
+	}
+	return reboot(td, &bsd_args);
 }
 
 
 /*
- * sysinfo()
+ * The FreeBSD native getpid(2), getgid(2) and getuid(2) also modify
+ * td->td_retval[1] when COMPAT_43 is defined. This clobbers registers that
+ * are assumed to be preserved. The following lightweight syscalls fixes
+ * this. See also linux_getgid16() and linux_getuid16() in linux_uid16.c
+ *
+ * linux_getpid() - MP SAFE
+ * linux_getgid() - MP SAFE
+ * linux_getuid() - MP SAFE
  */
-/* ARGSUSED */
+
 int
-linux_sys_sysinfo(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_getpid(struct thread *td, struct linux_getpid_args *args)
 {
-	struct linux_sys_sysinfo_args /* {
-		syscallarg(struct linux_sysinfo *) sysinfo;
-	} */ *uap = v;
-	struct linux_sysinfo si;
-	struct loadavg *la;
-	extern int bufpages;
-	struct timeval tv;
+	struct linux_emuldata *em;
 
-	getmicrouptime(&tv);
-	si.uptime = tv.tv_sec;
-	la = &averunnable;
-	si.loads[0] = la->ldavg[0] * LINUX_SYSINFO_LOADS_SCALE / la->fscale;
-	si.loads[1] = la->ldavg[1] * LINUX_SYSINFO_LOADS_SCALE / la->fscale;
-	si.loads[2] = la->ldavg[2] * LINUX_SYSINFO_LOADS_SCALE / la->fscale;
-	si.totalram = ptoa(physmem);
-	si.freeram = uvmexp.free * uvmexp.pagesize;
-	si.sharedram = 0;/* XXX */
-	si.bufferram = bufpages * PAGE_SIZE;
-	si.totalswap = uvmexp.swpages * PAGE_SIZE;
-	si.freeswap = (uvmexp.swpages - uvmexp.swpginuse) * PAGE_SIZE;
-	si.procs = nprocs;
-	/* The following are only present in newer Linux kernels. */
-	si.totalbig = 0;
-	si.freebig = 0;
-	si.mem_unit = 1;
+#ifdef DEBUG
+	if (ldebug(getpid))
+		printf(ARGS(getpid, ""));
+#endif
 
-	return (copyout(&si, SCARG(uap, sysinfo), sizeof(si)));
+	if (linux_use26(td)) {
+		em = em_find(td->td_proc, EMUL_DONTLOCK);
+		KASSERT(em != NULL, ("getpid: emuldata not found.\n"));
+		td->td_retval[0] = em->shared->group_pid;
+	} else {
+		td->td_retval[0] = td->td_proc->p_pid;
+	}
+
+	return (0);
+}
+
+int
+linux_gettid(struct thread *td, struct linux_gettid_args *args)
+{
+
+#ifdef DEBUG
+	if (ldebug(gettid))
+		printf(ARGS(gettid, ""));
+#endif
+
+	td->td_retval[0] = td->td_proc->p_pid;
+	return (0);
+}
+
+
+int
+linux_getppid(struct thread *td, struct linux_getppid_args *args)
+{
+	struct linux_emuldata *em;
+	struct proc *p, *pp;
+
+#ifdef DEBUG
+	if (ldebug(getppid))
+		printf(ARGS(getppid, ""));
+#endif
+
+	if (!linux_use26(td)) {
+		PROC_LOCK(td->td_proc);
+		td->td_retval[0] = td->td_proc->p_pptr->p_pid;
+		PROC_UNLOCK(td->td_proc);
+		return (0);
+	}
+
+	em = em_find(td->td_proc, EMUL_DONTLOCK);
+
+	KASSERT(em != NULL, ("getppid: process emuldata not found.\n"));
+
+	/* find the group leader */
+	p = pfind(em->shared->group_pid);
+
+	if (p == NULL) {
+#ifdef DEBUG
+	   	printf(LMSG("parent process not found.\n"));
+#endif
+		return (0);
+	}
+
+	pp = p->p_pptr;		/* switch to parent */
+	PROC_LOCK(pp);
+	PROC_UNLOCK(p);
+
+	/* if its also linux process */
+	if (pp->p_sysent == &elf_linux_sysvec) {
+		em = em_find(pp, EMUL_DONTLOCK);
+		KASSERT(em != NULL, ("getppid: parent emuldata not found.\n"));
+
+		td->td_retval[0] = em->shared->group_pid;
+	} else
+		td->td_retval[0] = pp->p_pid;
+
+	PROC_UNLOCK(pp);
+
+	return (0);
+}
+
+int
+linux_getgid(struct thread *td, struct linux_getgid_args *args)
+{
+
+#ifdef DEBUG
+	if (ldebug(getgid))
+		printf(ARGS(getgid, ""));
+#endif
+
+	td->td_retval[0] = td->td_ucred->cr_rgid;
+	return (0);
+}
+
+int
+linux_getuid(struct thread *td, struct linux_getuid_args *args)
+{
+
+#ifdef DEBUG
+	if (ldebug(getuid))
+		printf(ARGS(getuid, ""));
+#endif
+
+	td->td_retval[0] = td->td_ucred->cr_ruid;
+	return (0);
+}
+
+
+int
+linux_getsid(struct thread *td, struct linux_getsid_args *args)
+{
+	struct getsid_args bsd;
+
+#ifdef DEBUG
+	if (ldebug(getsid))
+		printf(ARGS(getsid, "%i"), args->pid);
+#endif
+
+	bsd.pid = args->pid;
+	return getsid(td, &bsd);
+}
+
+int
+linux_nosys(struct thread *td, struct nosys_args *ignore)
+{
+
+	return (ENOSYS);
+}
+
+int
+linux_getpriority(struct thread *td, struct linux_getpriority_args *args)
+{
+	struct getpriority_args bsd_args;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(getpriority))
+		printf(ARGS(getpriority, "%i, %i"), args->which, args->who);
+#endif
+
+	bsd_args.which = args->which;
+	bsd_args.who = args->who;
+	error = getpriority(td, &bsd_args);
+	td->td_retval[0] = 20 - td->td_retval[0];
+	return error;
+}
+
+int
+linux_sethostname(struct thread *td, struct linux_sethostname_args *args)
+{
+	int name[2];
+
+#ifdef DEBUG
+	if (ldebug(sethostname))
+		printf(ARGS(sethostname, "*, %i"), args->len);
+#endif
+
+	name[0] = CTL_KERN;
+	name[1] = KERN_HOSTNAME;
+	return (userland_sysctl(td, name, 2, 0, 0, 0, args->hostname,
+	    args->len, 0, 0));
+}
+
+int
+linux_exit_group(struct thread *td, struct linux_exit_group_args *args)
+{
+	struct linux_emuldata *em, *td_em, *tmp_em;
+	struct proc *sp;
+
+#ifdef DEBUG
+	if (ldebug(exit_group))
+		printf(ARGS(exit_group, "%i"), args->error_code);
+#endif
+
+	if (linux_use26(td)) {
+		td_em = em_find(td->td_proc, EMUL_DONTLOCK);
+
+		KASSERT(td_em != NULL, ("exit_group: emuldata not found.\n"));
+
+		EMUL_SHARED_RLOCK(&emul_shared_lock);
+		LIST_FOREACH_SAFE(em, &td_em->shared->threads, threads, tmp_em) {
+			if (em->pid == td_em->pid)
+				continue;
+
+			sp = pfind(em->pid);
+			psignal(sp, SIGKILL);
+			PROC_UNLOCK(sp);
+#ifdef DEBUG
+			printf(LMSG("linux_sys_exit_group: kill PID %d\n"), em->pid);
+#endif
+		}
+
+		EMUL_SHARED_RUNLOCK(&emul_shared_lock);
+	}
+	/*
+	 * XXX: we should send a signal to the parent if
+	 * SIGNAL_EXIT_GROUP is set. We ignore that (temporarily?)
+	 * as it doesnt occur often.
+	 */
+	exit1(td, W_EXITCODE(args->error_code, 0));
+
+	return (0);
+}
+
+int
+linux_prctl(struct thread *td, struct linux_prctl_args *args)
+{
+	int error = 0, max_size;
+	struct proc *p = td->td_proc;
+	char comm[LINUX_MAX_COMM_LEN];
+	struct linux_emuldata *em;
+	int pdeath_signal;
+
+#ifdef DEBUG
+	if (ldebug(prctl))
+		printf(ARGS(prctl, "%d, %d, %d, %d, %d"), args->option,
+		    args->arg2, args->arg3, args->arg4, args->arg5);
+#endif
+
+	switch (args->option) {
+	case LINUX_PR_SET_PDEATHSIG:
+		if (!LINUX_SIG_VALID(args->arg2))
+			return (EINVAL);
+		em = em_find(p, EMUL_DOLOCK);
+		KASSERT(em != NULL, ("prctl: emuldata not found.\n"));
+		em->pdeath_signal = args->arg2;
+		EMUL_UNLOCK(&emul_lock);
+		break;
+	case LINUX_PR_GET_PDEATHSIG:
+		em = em_find(p, EMUL_DOLOCK);
+		KASSERT(em != NULL, ("prctl: emuldata not found.\n"));
+		pdeath_signal = em->pdeath_signal;
+		EMUL_UNLOCK(&emul_lock);
+		error = copyout(&pdeath_signal,
+		    (void *)(register_t)args->arg2,
+		    sizeof(pdeath_signal));
+		break;
+	case LINUX_PR_SET_NAME:
+		/*
+		 * To be on the safe side we need to make sure to not
+		 * overflow the size a linux program expects. We already
+		 * do this here in the copyin, so that we don't need to
+		 * check on copyout.
+		 */
+		max_size = MIN(sizeof(comm), sizeof(p->p_comm));
+		error = copyinstr((void *)(register_t)args->arg2, comm,
+		    max_size, NULL);
+
+		/* Linux silently truncates the name if it is too long. */
+		if (error == ENAMETOOLONG) {
+			/*
+			 * XXX: copyinstr() isn't documented to populate the
+			 * array completely, so do a copyin() to be on the
+			 * safe side. This should be changed in case
+			 * copyinstr() is changed to guarantee this.
+			 */
+			error = copyin((void *)(register_t)args->arg2, comm,
+			    max_size - 1);
+			comm[max_size - 1] = '\0';
+		}
+		if (error)
+			return (error);
+
+		PROC_LOCK(p);
+		strlcpy(p->p_comm, comm, sizeof(p->p_comm));
+		PROC_UNLOCK(p);
+		break;
+	case LINUX_PR_GET_NAME:
+		PROC_LOCK(p);
+		strlcpy(comm, p->p_comm, sizeof(comm));
+		PROC_UNLOCK(p);
+		error = copyout(comm, (void *)(register_t)args->arg2,
+		    strlen(comm) + 1);
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+
+	return (error);
+}
+
+/*
+ * XXX: fake one.. waiting for real implementation of affinity mask.
+ */
+int
+linux_sched_getaffinity(struct thread *td,
+    struct linux_sched_getaffinity_args *args)
+{
+	int error;
+	cpumask_t i = ~0;
+
+	if (args->len < sizeof(cpumask_t))
+		return (EINVAL);
+
+	error = copyout(&i, args->user_mask_ptr, sizeof(cpumask_t));
+	if (error)
+		return (EFAULT);
+
+	td->td_retval[0] = sizeof(cpumask_t);
+	return (0);
 }

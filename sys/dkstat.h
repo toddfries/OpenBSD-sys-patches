@@ -1,6 +1,3 @@
-/*	$OpenBSD: dkstat.h,v 1.7 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: dkstat.h,v 1.8 1995/12/28 19:16:31 thorpej Exp $	*/
-
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,18 +32,12 @@
  * SUCH DAMAGE.
  *
  *	@(#)dkstat.h	8.2 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/sys/dkstat.h,v 1.18 2004/04/07 04:19:49 imp Exp $
  */
 
-#define	CP_USER		0
-#define	CP_NICE		1
-#define	CP_SYS		2
-#define	CP_INTR		3
-#define	CP_IDLE		4
-#define	CPUSTATES	5
+#ifndef _SYS_DKSTAT_H_
+#define _SYS_DKSTAT_H_ 1
 
-#define	DK_NDRIVE	8
-#ifdef _KERNEL
-extern long cp_time[CPUSTATES];
+#include <sys/resource.h>
 
-extern int64_t tk_cancc, tk_nin, tk_nout, tk_rawcc;
-#endif
+#endif /* _SYS_DKSTAT_H_ */

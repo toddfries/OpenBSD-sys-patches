@@ -1,7 +1,4 @@
-/*	$OpenBSD: pim.h,v 1.2 2006/04/27 02:19:32 tedu Exp $	*/
-/*	$NetBSD: pim.h,v 1.1 2004/09/04 23:32:29 manu Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1996-2000
  * University of Southern California/Information Sciences Institute.
  * All rights reserved.
@@ -30,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: /repoman/r/ncvs/src/sys/netinet/pim.h,v 1.2 2004/03/08 07:45:32 hsu Exp $
+ * $FreeBSD: src/sys/netinet/pim.h,v 1.3 2005/01/07 01:45:44 imp Exp $
  */
 
 #ifndef _NETINET_PIM_H_
@@ -48,11 +45,11 @@
 #include <sys/types.h>
 
 #ifndef _PIM_VT
-#ifndef _BYTE_ORDER
-# error _BYTE_ORDER is not defined!
+#ifndef BYTE_ORDER
+# error BYTE_ORDER is not defined!
 #endif
-#if (_BYTE_ORDER != _BIG_ENDIAN) && (_BYTE_ORDER != _LITTLE_ENDIAN)
-# error _BYTE_ORDER must be defined to either _BIG_ENDIAN or _LITTLE_ENDIAN
+#if (BYTE_ORDER != BIG_ENDIAN) && (BYTE_ORDER != LITTLE_ENDIAN)
+# error BYTE_ORDER must be defined to either BIG_ENDIAN or LITTLE_ENDIAN
 #endif
 #endif /* ! _PIM_VT */
 
@@ -63,11 +60,11 @@ struct pim {
 #ifdef _PIM_VT
 	uint8_t		pim_vt;		/* PIM version and message type	*/
 #else /* ! _PIM_VT   */
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 	u_int		pim_vers:4,	/* PIM protocol version		*/
 			pim_type:4;	/* PIM message type		*/
 #endif
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 	u_int		pim_type:4,	/* PIM message type		*/
 			pim_vers:4;	/* PIM protocol version		*/
 #endif

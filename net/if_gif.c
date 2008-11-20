@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_gif.c,v 1.49 2008/05/07 13:45:35 dlg Exp $	*/
-/*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
+/*	$FreeBSD: src/sys/net/if_gif.c,v 1.67 2007/10/24 19:03:57 rwatson Exp $	*/
+/*	$KAME: if_gif.c,v 1.87 2001/10/19 08:50:27 itojun Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -30,238 +30,320 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_inet.h"
+#include "opt_inet6.h"
+#include "opt_mac.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/module.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
+#include <sys/errno.h>
+#include <sys/time.h>
+#include <sys/sysctl.h>
 #include <sys/syslog.h>
+#include <sys/protosw.h>
+#include <sys/conf.h>
+#include <machine/cpu.h>
 
 #include <net/if.h>
+#include <net/if_clone.h>
 #include <net/if_types.h>
+#include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
 
-#ifdef	INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
+#include <netinet/ip.h>
+#ifdef	INET
 #include <netinet/in_var.h>
 #include <netinet/in_gif.h>
-#include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #endif	/* INET */
 
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
+#include <netinet6/ip6_var.h>
+#include <netinet6/scope6_var.h>
 #include <netinet6/in6_gif.h>
+#include <netinet6/ip6protosw.h>
 #endif /* INET6 */
 
+#include <netinet/ip_encap.h>
+#include <net/ethernet.h>
+#include <net/if_bridgevar.h>
 #include <net/if_gif.h>
 
-#include "bpfilter.h"
-#include "bridge.h"
+#include <security/mac/mac_framework.h>
 
-void	gifattach(int);
-int	gif_clone_create(struct if_clone *, int);
-int	gif_clone_destroy(struct ifnet *);
+#define GIFNAME		"gif"
 
 /*
- * gif global variable definitions
+ * gif_mtx protects the global gif_softc_list.
  */
-struct gif_softc_head gif_softc_list;
-struct if_clone gif_cloner =
-    IF_CLONE_INITIALIZER("gif", gif_clone_create, gif_clone_destroy);
+static struct mtx gif_mtx;
+static MALLOC_DEFINE(M_GIF, "gif", "Generic Tunnel Interface");
+static LIST_HEAD(, gif_softc) gif_softc_list;
 
-/* ARGSUSED */
-void
-gifattach(count)
-	int count;
-{
-	LIST_INIT(&gif_softc_list);
-	if_clone_attach(&gif_cloner);
-}
+void	(*ng_gif_input_p)(struct ifnet *ifp, struct mbuf **mp, int af);
+void	(*ng_gif_input_orphan_p)(struct ifnet *ifp, struct mbuf *m, int af);
+void	(*ng_gif_attach_p)(struct ifnet *ifp);
+void	(*ng_gif_detach_p)(struct ifnet *ifp);
 
-int
-gif_clone_create(ifc, unit)
+static void	gif_start(struct ifnet *);
+static int	gif_clone_create(struct if_clone *, int, caddr_t);
+static void	gif_clone_destroy(struct ifnet *);
+
+IFC_SIMPLE_DECLARE(gif, 0);
+
+static int gifmodevent(module_t, int, void *);
+
+SYSCTL_DECL(_net_link);
+SYSCTL_NODE(_net_link, IFT_GIF, gif, CTLFLAG_RW, 0,
+    "Generic Tunnel Interface");
+#ifndef MAX_GIF_NEST
+/*
+ * This macro controls the default upper limitation on nesting of gif tunnels.
+ * Since, setting a large value to this macro with a careless configuration
+ * may introduce system crash, we don't allow any nestings by default.
+ * If you need to configure nested gif tunnels, you can define this macro
+ * in your kernel configuration file.  However, if you do so, please be
+ * careful to configure the tunnels so that it won't make a loop.
+ */
+#define MAX_GIF_NEST 1
+#endif
+static int max_gif_nesting = MAX_GIF_NEST;
+SYSCTL_INT(_net_link_gif, OID_AUTO, max_nesting, CTLFLAG_RW,
+    &max_gif_nesting, 0, "Max nested tunnels");
+
+/*
+ * By default, we disallow creation of multiple tunnels between the same
+ * pair of addresses.  Some applications require this functionality so
+ * we allow control over this check here.
+ */
+#ifdef XBONEHACK
+static int parallel_tunnels = 1;
+#else
+static int parallel_tunnels = 0;
+#endif
+SYSCTL_INT(_net_link_gif, OID_AUTO, parallel_tunnels, CTLFLAG_RW,
+    &parallel_tunnels, 0, "Allow parallel tunnels?");
+
+static int
+gif_clone_create(ifc, unit, params)
 	struct if_clone *ifc;
 	int unit;
+	caddr_t params;
 {
 	struct gif_softc *sc;
-	int s;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!sc)
-		return (ENOMEM);
+	sc = malloc(sizeof(struct gif_softc), M_GIF, M_WAITOK | M_ZERO);
+	GIF2IFP(sc) = if_alloc(IFT_GIF);
+	if (GIF2IFP(sc) == NULL) {
+		free(sc, M_GIF);
+		return (ENOSPC);
+	}
 
-	snprintf(sc->gif_if.if_xname, sizeof sc->gif_if.if_xname,
-	     "%s%d", ifc->ifc_name, unit);
-	sc->gif_if.if_mtu    = GIF_MTU;
-	sc->gif_if.if_flags  = IFF_POINTOPOINT | IFF_MULTICAST;
-	sc->gif_if.if_ioctl  = gif_ioctl;
-	sc->gif_if.if_start  = gif_start;
-	sc->gif_if.if_output = gif_output;
-	sc->gif_if.if_type   = IFT_GIF;
-	IFQ_SET_MAXLEN(&sc->gif_if.if_snd, ifqmaxlen);
-	IFQ_SET_READY(&sc->gif_if.if_snd);
-	sc->gif_if.if_softc = sc;
-	if_attach(&sc->gif_if);
-	if_alloc_sadl(&sc->gif_if);
+	GIF_LOCK_INIT(sc);
 
-#if NBPFILTER > 0
-	bpfattach(&sc->gif_if.if_bpf, &sc->gif_if, DLT_NULL,
-	    sizeof(u_int));
+	GIF2IFP(sc)->if_softc = sc;
+	if_initname(GIF2IFP(sc), ifc->ifc_name, unit);
+
+	sc->encap_cookie4 = sc->encap_cookie6 = NULL;
+
+	GIF2IFP(sc)->if_addrlen = 0;
+	GIF2IFP(sc)->if_mtu    = GIF_MTU;
+	GIF2IFP(sc)->if_flags  = IFF_POINTOPOINT | IFF_MULTICAST;
+#if 0
+	/* turn off ingress filter */
+	GIF2IFP(sc)->if_flags  |= IFF_LINK2;
 #endif
-	s = splnet();
+	GIF2IFP(sc)->if_ioctl  = gif_ioctl;
+	GIF2IFP(sc)->if_start  = gif_start;
+	GIF2IFP(sc)->if_output = gif_output;
+	GIF2IFP(sc)->if_snd.ifq_maxlen = IFQ_MAXLEN;
+	if_attach(GIF2IFP(sc));
+	bpfattach(GIF2IFP(sc), DLT_NULL, sizeof(u_int32_t));
+	if (ng_gif_attach_p != NULL)
+		(*ng_gif_attach_p)(GIF2IFP(sc));
+
+	mtx_lock(&gif_mtx);
 	LIST_INSERT_HEAD(&gif_softc_list, sc, gif_list);
-	splx(s);
+	mtx_unlock(&gif_mtx);
 
 	return (0);
 }
 
-int
+static void
 gif_clone_destroy(ifp)
 	struct ifnet *ifp;
 {
+	int err;
 	struct gif_softc *sc = ifp->if_softc;
-	int s;
 
-	s = splnet();
+	mtx_lock(&gif_mtx);
 	LIST_REMOVE(sc, gif_list);
-	splx(s);
+	mtx_unlock(&gif_mtx);
 
+	gif_delete_tunnel(ifp);
+#ifdef INET6
+	if (sc->encap_cookie6 != NULL) {
+		err = encap_detach(sc->encap_cookie6);
+		KASSERT(err == 0, ("Unexpected error detaching encap_cookie6"));
+	}
+#endif
+#ifdef INET
+	if (sc->encap_cookie4 != NULL) {
+		err = encap_detach(sc->encap_cookie4);
+		KASSERT(err == 0, ("Unexpected error detaching encap_cookie4"));
+	}
+#endif
+
+	if (ng_gif_detach_p != NULL)
+		(*ng_gif_detach_p)(ifp);
+	bpfdetach(ifp);
 	if_detach(ifp);
+	if_free(ifp);
 
-	if (sc->gif_psrc)
-		free((caddr_t)sc->gif_psrc, M_IFADDR);
-	sc->gif_psrc = NULL;
-	if (sc->gif_pdst)
-		free((caddr_t)sc->gif_pdst, M_IFADDR);
-	sc->gif_pdst = NULL;
-	free(sc, M_DEVBUF);
-	return (0);
+	GIF_LOCK_DESTROY(sc);
+
+	free(sc, M_GIF);
 }
 
-void
-gif_start(ifp)
-	struct ifnet *ifp;
+static int
+gifmodevent(mod, type, data)
+	module_t mod;
+	int type;
+	void *data;
 {
-	struct gif_softc *sc = (struct gif_softc*)ifp;
-	struct mbuf *m;
-	struct m_tag *mtag;
-	int family;
-	int s;
-	u_int8_t tp;
 
-	/* is interface up and running? */
-	if ((ifp->if_flags & (IFF_OACTIVE | IFF_UP)) != IFF_UP ||
-	    sc->gif_psrc == NULL || sc->gif_pdst == NULL)
-		return;
+	switch (type) {
+	case MOD_LOAD:
+		mtx_init(&gif_mtx, "gif_mtx", NULL, MTX_DEF);
+		LIST_INIT(&gif_softc_list);
+		if_clone_attach(&gif_cloner);
 
-	/* are the tunnel endpoints valid? */
+#ifdef INET6
+		ip6_gif_hlim = GIF_HLIM;
+#endif
+
+		break;
+	case MOD_UNLOAD:
+		if_clone_detach(&gif_cloner);
+		mtx_destroy(&gif_mtx);
+#ifdef INET6
+		ip6_gif_hlim = 0;
+#endif
+		break;
+	default:
+		return EOPNOTSUPP;
+	}
+	return 0;
+}
+
+static moduledata_t gif_mod = {
+	"if_gif",
+	gifmodevent,
+	0
+};
+
+DECLARE_MODULE(if_gif, gif_mod, SI_SUB_PSEUDO, SI_ORDER_ANY);
+MODULE_VERSION(if_gif, 1);
+
+int
+gif_encapcheck(m, off, proto, arg)
+	const struct mbuf *m;
+	int off;
+	int proto;
+	void *arg;
+{
+	struct ip ip;
+	struct gif_softc *sc;
+
+	sc = (struct gif_softc *)arg;
+	if (sc == NULL)
+		return 0;
+
+	if ((GIF2IFP(sc)->if_flags & IFF_UP) == 0)
+		return 0;
+
+	/* no physical address */
+	if (!sc->gif_psrc || !sc->gif_pdst)
+		return 0;
+
+	switch (proto) {
 #ifdef INET
-	if (sc->gif_psrc->sa_family != AF_INET)
+	case IPPROTO_IPV4:
+		break;
 #endif
 #ifdef INET6
-		if (sc->gif_psrc->sa_family != AF_INET6)
+	case IPPROTO_IPV6:
+		break;
 #endif
-			return;
+	case IPPROTO_ETHERIP:
+		break;
 
-	s = splnet();
-	ifp->if_flags |= IFF_OACTIVE;
-	splx(s);
-
-	while (1) {
-		s = splnet();
-		IFQ_DEQUEUE(&ifp->if_snd, m);
-		splx(s);
-
-		if (m == NULL)
-			break;
-
-		/*
-		 * gif may cause infinite recursion calls when misconfigured.
-		 * We'll prevent this by detecting loops.
-		 */
-		for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
-		    mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
-			if (!bcmp((caddr_t)(mtag + 1), &ifp,
-			    sizeof(struct ifnet *))) {
-				IF_DROP(&ifp->if_snd);
-				log(LOG_NOTICE, "gif_output: "
-				    "recursively called too many times\n");
-				m_freem(m);
-				break;
-			}
-		}
-		if (mtag)
-			continue;
-
-		mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
-		if (mtag == NULL) {
-			m_freem(m);
-			break;
-		}
-		bcopy(&ifp, mtag + 1, sizeof(caddr_t));
-		m_tag_prepend(m, mtag);
-
-		/*
-		 * Remove multicast and broadcast flags or encapsulated packet
-		 * ends up as multicast or broadcast packet.
-		 */
-		m->m_flags &= ~(M_BCAST|M_MCAST);
-
-		/* extract address family */
-		family = AF_UNSPEC;
-		tp = *mtod(m, u_int8_t *);
-		tp = (tp >> 4) & 0xff;  /* Get the IP version number. */
-#ifdef INET
-		if (tp == IPVERSION)
-			family = AF_INET;
-#endif
-#ifdef INET6
-		if (tp == (IPV6_VERSION >> 4))
-			family = AF_INET6;
-#endif
-
-#if NBRIDGE > 0
-		/*
-		 * Check if the packet is comming via bridge and needs
-		 * etherip encapsulation or not.
-		 */
-		if (ifp->if_bridge && (m->m_flags & M_PROTO1)) {
-			m->m_flags &= ~M_PROTO1;
-			family = AF_LINK;
-		}
-#endif
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_af(ifp->if_bpf, family, m, BPF_DIRECTION_OUT);
-#endif
-		ifp->if_opackets++;
-		ifp->if_obytes += m->m_pkthdr.len;
-
-		switch (sc->gif_psrc->sa_family) {
-#ifdef INET
-		case AF_INET:
-			in_gif_output(ifp, family, m);
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			in6_gif_output(ifp, family, m);
-			break;
-#endif
-		default:
-			m_freem(m);
-			break;
-		}
+	default:
+		return 0;
 	}
 
-	ifp->if_flags &= ~IFF_OACTIVE;
+	/* Bail on short packets */
+	if (m->m_pkthdr.len < sizeof(ip))
+		return 0;
+
+	m_copydata(m, 0, sizeof(ip), (caddr_t)&ip);
+
+	switch (ip.ip_v) {
+#ifdef INET
+	case 4:
+		if (sc->gif_psrc->sa_family != AF_INET ||
+		    sc->gif_pdst->sa_family != AF_INET)
+			return 0;
+		return gif_encapcheck4(m, off, proto, arg);
+#endif
+#ifdef INET6
+	case 6:
+		if (m->m_pkthdr.len < sizeof(struct ip6_hdr))
+			return 0;
+		if (sc->gif_psrc->sa_family != AF_INET6 ||
+		    sc->gif_pdst->sa_family != AF_INET6)
+			return 0;
+		return gif_encapcheck6(m, off, proto, arg);
+#endif
+	default:
+		return 0;
+	}
+}
+
+static void
+gif_start(struct ifnet *ifp)
+{
+	struct gif_softc *sc;
+	struct mbuf *m;
+
+	sc = ifp->if_softc;
+
+	ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+	for (;;) {
+		IFQ_DEQUEUE(&ifp->if_snd, m);
+		if (m == 0)
+			break;
+
+		gif_output(ifp, m, sc->gif_pdst, NULL);
+
+	}
+	ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+
+	return;
 }
 
 int
@@ -271,92 +353,252 @@ gif_output(ifp, m, dst, rt)
 	struct sockaddr *dst;
 	struct rtentry *rt;	/* added in net2 */
 {
-	struct gif_softc *sc = (struct gif_softc*)ifp;
+	struct gif_softc *sc = ifp->if_softc;
+	struct m_tag *mtag;
 	int error = 0;
-	int s;
+	int gif_called;
+	u_int32_t af;
+
+#ifdef MAC
+	error = mac_ifnet_check_transmit(ifp, m);
+	if (error) {
+		m_freem(m);
+		goto end;
+	}
+#endif
+
+	/*
+	 * gif may cause infinite recursion calls when misconfigured.
+	 * We'll prevent this by detecting loops.
+	 *
+	 * High nesting level may cause stack exhaustion.
+	 * We'll prevent this by introducing upper limit.
+	 */
+	gif_called = 1;
+	mtag = m_tag_locate(m, MTAG_GIF, MTAG_GIF_CALLED, NULL);
+	while (mtag != NULL) {
+		if (*(struct ifnet **)(mtag + 1) == ifp) {
+			log(LOG_NOTICE,
+			    "gif_output: loop detected on %s\n",
+			    (*(struct ifnet **)(mtag + 1))->if_xname);
+			m_freem(m);
+			error = EIO;	/* is there better errno? */
+			goto end;
+		}
+		mtag = m_tag_locate(m, MTAG_GIF, MTAG_GIF_CALLED, mtag);
+		gif_called++;
+	}
+	if (gif_called > max_gif_nesting) {
+		log(LOG_NOTICE,
+		    "gif_output: recursively called too many times(%d)\n",
+		    gif_called);
+		m_freem(m);
+		error = EIO;	/* is there better errno? */
+		goto end;
+	}
+	mtag = m_tag_alloc(MTAG_GIF, MTAG_GIF_CALLED, sizeof(struct ifnet *),
+	    M_NOWAIT);
+	if (mtag == NULL) {
+		m_freem(m);
+		error = ENOMEM;
+		goto end;
+	}
+	*(struct ifnet **)(mtag + 1) = ifp;
+	m_tag_prepend(m, mtag);
+
+	m->m_flags &= ~(M_BCAST|M_MCAST);
+
+	GIF_LOCK(sc);
 
 	if (!(ifp->if_flags & IFF_UP) ||
 	    sc->gif_psrc == NULL || sc->gif_pdst == NULL) {
+		GIF_UNLOCK(sc);
 		m_freem(m);
 		error = ENETDOWN;
 		goto end;
 	}
 
+	/* BPF writes need to be handled specially. */
+	if (dst->sa_family == AF_UNSPEC) {
+		bcopy(dst->sa_data, &af, sizeof(af));
+		dst->sa_family = af;
+	}
+
+	af = dst->sa_family;
+	BPF_MTAP2(ifp, &af, sizeof(af), m);
+	ifp->if_opackets++;	
+	ifp->if_obytes += m->m_pkthdr.len;
+
+	/* override to IPPROTO_ETHERIP for bridged traffic */
+	if (ifp->if_bridge)
+		af = AF_LINK;
+
+	/* inner AF-specific encapsulation */
+
+	/* XXX should we check if our outer source is legal? */
+
+	/* dispatch to output logic based on outer AF */
 	switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 	case AF_INET:
+		error = in_gif_output(ifp, af, m);
 		break;
 #endif
 #ifdef INET6
 	case AF_INET6:
+		error = in6_gif_output(ifp, af, m);
 		break;
 #endif
 	default:
-		m_freem(m);
+		m_freem(m);		
 		error = ENETDOWN;
-		goto end;
 	}
 
-	s = splnet();
-	/*
-	 * Queue message on interface, and start output if interface
-	 * not yet active.
-	 */
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error) {
-		/* mbuf is already freed */
-		splx(s);
-		return (error);
-	}
-	if_start(ifp);
-	splx(s);
-	return (error);
-
-end:
+	GIF_UNLOCK(sc);
+  end:
 	if (error)
 		ifp->if_oerrors++;
 	return (error);
 }
 
+void
+gif_input(m, af, ifp)
+	struct mbuf *m;
+	int af;
+	struct ifnet *ifp;
+{
+	int isr, n;
+	struct etherip_header *eip;
+
+	if (ifp == NULL) {
+		/* just in case */
+		m_freem(m);
+		return;
+	}
+
+	m->m_pkthdr.rcvif = ifp;
+
+#ifdef MAC
+	mac_ifnet_create_mbuf(ifp, m);
+#endif
+
+	if (bpf_peers_present(ifp->if_bpf)) {
+		u_int32_t af1 = af;
+		bpf_mtap2(ifp->if_bpf, &af1, sizeof(af1), m);
+	}
+
+	if (ng_gif_input_p != NULL) {
+		(*ng_gif_input_p)(ifp, &m, af);
+		if (m == NULL)
+			return;
+	}
+
+	/*
+	 * Put the packet to the network layer input queue according to the
+	 * specified address family.
+	 * Note: older versions of gif_input directly called network layer
+	 * input functions, e.g. ip6_input, here.  We changed the policy to
+	 * prevent too many recursive calls of such input functions, which
+	 * might cause kernel panic.  But the change may introduce another
+	 * problem; if the input queue is full, packets are discarded.
+	 * The kernel stack overflow really happened, and we believed
+	 * queue-full rarely occurs, so we changed the policy.
+	 */
+	switch (af) {
+#ifdef INET
+	case AF_INET:
+		isr = NETISR_IP;
+		break;
+#endif
+#ifdef INET6
+	case AF_INET6:
+		isr = NETISR_IPV6;
+		break;
+#endif
+	case AF_LINK:
+		n = sizeof(struct etherip_header) + sizeof(struct ether_header);
+		if (n > m->m_len) {
+			m = m_pullup(m, n);
+			if (m == NULL) {
+				ifp->if_ierrors++;
+				return;
+			}
+		}
+
+		eip = mtod(m, struct etherip_header *);
+ 		if (eip->eip_ver !=
+		    (ETHERIP_VERSION & ETHERIP_VER_VERS_MASK)) {
+			/* discard unknown versions */
+			m_freem(m);
+			return;
+		}
+		m_adj(m, sizeof(struct etherip_header));
+
+		m->m_flags &= ~(M_BCAST|M_MCAST);
+		m->m_pkthdr.rcvif = ifp;
+
+		if (ifp->if_bridge)
+			BRIDGE_INPUT(ifp, m);
+		
+		if (m != NULL)
+			m_freem(m);
+		return;
+
+	default:
+		if (ng_gif_input_orphan_p != NULL)
+			(*ng_gif_input_orphan_p)(ifp, m, af);
+		else
+			m_freem(m);
+		return;
+	}
+
+	ifp->if_ipackets++;
+	ifp->if_ibytes += m->m_pkthdr.len;
+	netisr_dispatch(isr, m);
+}
+
+/* XXX how should we handle IPv6 scope on SIOC[GS]IFPHYADDR? */
 int
 gif_ioctl(ifp, cmd, data)
 	struct ifnet *ifp;
 	u_long cmd;
 	caddr_t data;
 {
-	struct gif_softc *sc  = (struct gif_softc*)ifp;
+	struct gif_softc *sc  = ifp->if_softc;
 	struct ifreq     *ifr = (struct ifreq*)data;
 	int error = 0, size;
 	struct sockaddr *dst, *src;
-	struct sockaddr *sa;
-	int s;
-	struct gif_softc *sc2;
+#ifdef	SIOCSIFMTU /* xxx */
+	u_long mtu;
+#endif
 
 	switch (cmd) {
 	case SIOCSIFADDR:
+		ifp->if_flags |= IFF_UP;
 		break;
-
+		
 	case SIOCSIFDSTADDR:
 		break;
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		switch (ifr->ifr_addr.sa_family) {
-#ifdef INET
-		case AF_INET:	/* IP supports Multicast */
-			break;
-#endif /* INET */
-#ifdef INET6
-		case AF_INET6:	/* IP6 supports Multicast */
-			break;
-#endif /* INET6 */
-		default:  /* Other protocols doesn't support Multicast */
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
+#ifdef	SIOCSIFMTU /* xxx */
+	case SIOCGIFMTU:
+		break;
+
+	case SIOCSIFMTU:
+		mtu = ifr->ifr_mtu;
+		if (mtu < GIF_MTU_MIN || mtu > GIF_MTU_MAX)
+			return (EINVAL);
+		ifp->if_mtu = mtu;
+		break;
+#endif /* SIOCSIFMTU */
+
+#ifdef INET
 	case SIOCSIFPHYADDR:
+#endif
 #ifdef INET6
 	case SIOCSIFPHYADDR_IN6:
 #endif /* INET6 */
@@ -385,45 +627,45 @@ gif_ioctl(ifp, cmd, data)
 				&(((struct if_laddrreq *)data)->dstaddr);
 			break;
 		default:
-			return (EINVAL);
+			return EINVAL;
 		}
 
 		/* sa_family must be equal */
 		if (src->sa_family != dst->sa_family)
-			return (EINVAL);
+			return EINVAL;
 
 		/* validate sa_len */
 		switch (src->sa_family) {
 #ifdef INET
 		case AF_INET:
 			if (src->sa_len != sizeof(struct sockaddr_in))
-				return (EINVAL);
+				return EINVAL;
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
 			if (src->sa_len != sizeof(struct sockaddr_in6))
-				return (EINVAL);
+				return EINVAL;
 			break;
 #endif
 		default:
-			return (EAFNOSUPPORT);
+			return EAFNOSUPPORT;
 		}
 		switch (dst->sa_family) {
 #ifdef INET
 		case AF_INET:
 			if (dst->sa_len != sizeof(struct sockaddr_in))
-				return (EINVAL);
+				return EINVAL;
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
 			if (dst->sa_len != sizeof(struct sockaddr_in6))
-				return (EINVAL);
+				return EINVAL;
 			break;
 #endif
 		default:
-			return (EAFNOSUPPORT);
+			return EAFNOSUPPORT;
 		}
 
 		/* check sa_family looks sane for the cmd */
@@ -431,90 +673,27 @@ gif_ioctl(ifp, cmd, data)
 		case SIOCSIFPHYADDR:
 			if (src->sa_family == AF_INET)
 				break;
-			return (EAFNOSUPPORT);
+			return EAFNOSUPPORT;
 #ifdef INET6
 		case SIOCSIFPHYADDR_IN6:
 			if (src->sa_family == AF_INET6)
 				break;
-			return (EAFNOSUPPORT);
+			return EAFNOSUPPORT;
 #endif /* INET6 */
 		case SIOCSLIFPHYADDR:
 			/* checks done in the above */
 			break;
 		}
 
-		LIST_FOREACH(sc2, &gif_softc_list, gif_list) {
-			if (sc2 == sc)
-				continue;
-			if (!sc2->gif_pdst || !sc2->gif_psrc)
-				continue;
-			if (sc2->gif_pdst->sa_family != dst->sa_family ||
-			    sc2->gif_pdst->sa_len != dst->sa_len ||
-			    sc2->gif_psrc->sa_family != src->sa_family ||
-			    sc2->gif_psrc->sa_len != src->sa_len)
-				continue;
-			/* can't configure same pair of address onto two gifs */
-			if (bcmp(sc2->gif_pdst, dst, dst->sa_len) == 0 &&
-			    bcmp(sc2->gif_psrc, src, src->sa_len) == 0) {
-				error = EADDRNOTAVAIL;
-				goto bad;
-			}
-
-			/* can't configure multiple multi-dest interfaces */
-#define multidest(x) \
-	(((struct sockaddr_in *)(x))->sin_addr.s_addr == INADDR_ANY)
-#ifdef INET6
-#define multidest6(x) \
-	(IN6_IS_ADDR_UNSPECIFIED(&((struct sockaddr_in6 *)(x))->sin6_addr))
-#endif
-			if (dst->sa_family == AF_INET &&
-			    multidest(dst) && multidest(sc2->gif_pdst)) {
-				error = EADDRNOTAVAIL;
-				goto bad;
-			}
-#ifdef INET6
-			if (dst->sa_family == AF_INET6 &&
-			    multidest6(dst) && multidest6(sc2->gif_pdst)) {
-				error = EADDRNOTAVAIL;
-				goto bad;
-			}
-#endif
-		}
-
-		if (sc->gif_psrc)
-			free((caddr_t)sc->gif_psrc, M_IFADDR);
-		sa = malloc(src->sa_len, M_IFADDR, M_WAITOK);
-		bcopy((caddr_t)src, (caddr_t)sa, src->sa_len);
-		sc->gif_psrc = sa;
-
-		if (sc->gif_pdst)
-			free((caddr_t)sc->gif_pdst, M_IFADDR);
-		sa = malloc(dst->sa_len, M_IFADDR, M_WAITOK);
-		bcopy((caddr_t)dst, (caddr_t)sa, dst->sa_len);
-		sc->gif_pdst = sa;
-
-		s = splnet();
-		ifp->if_flags |= IFF_RUNNING;
-		if_up(ifp);		/* send up RTM_IFINFO */
-		splx(s);
-
-		error = 0;
+		error = gif_set_tunnel(GIF2IFP(sc), src, dst);
 		break;
 
 #ifdef SIOCDIFPHYADDR
 	case SIOCDIFPHYADDR:
-		if (sc->gif_psrc) {
-			free((caddr_t)sc->gif_psrc, M_IFADDR);
-			sc->gif_psrc = NULL;
-		}
-		if (sc->gif_pdst) {
-			free((caddr_t)sc->gif_pdst, M_IFADDR);
-			sc->gif_pdst = NULL;
-		}
-		/* change the IFF_{UP, RUNNING} flag as well? */
+		gif_delete_tunnel(GIF2IFP(sc));
 		break;
 #endif
-
+			
 	case SIOCGIFPSRCADDR:
 #ifdef INET6
 	case SIOCGIFPSRCADDR_IN6:
@@ -543,10 +722,17 @@ gif_ioctl(ifp, cmd, data)
 			goto bad;
 		}
 		if (src->sa_len > size)
-			return (EINVAL);
+			return EINVAL;
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
+#ifdef INET6
+		if (dst->sa_family == AF_INET6) {
+			error = sa6_recoverscope((struct sockaddr_in6 *)dst);
+			if (error != 0)
+				return (error);
+		}
+#endif
 		break;
-
+			
 	case SIOCGIFPDSTADDR:
 #ifdef INET6
 	case SIOCGIFPDSTADDR_IN6:
@@ -575,8 +761,15 @@ gif_ioctl(ifp, cmd, data)
 			goto bad;
 		}
 		if (src->sa_len > size)
-			return (EINVAL);
+			return EINVAL;
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
+#ifdef INET6
+		if (dst->sa_family == AF_INET6) {
+			error = sa6_recoverscope((struct sockaddr_in6 *)dst);
+			if (error != 0)
+				return (error);
+		}
+#endif
 		break;
 
 	case SIOCGLIFPHYADDR:
@@ -591,7 +784,7 @@ gif_ioctl(ifp, cmd, data)
 			&(((struct if_laddrreq *)data)->addr);
 		size = sizeof(((struct if_laddrreq *)data)->addr);
 		if (src->sa_len > size)
-			return (EINVAL);
+			return EINVAL;
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 
 		/* copy dst */
@@ -600,7 +793,7 @@ gif_ioctl(ifp, cmd, data)
 			&(((struct if_laddrreq *)data)->dstaddr);
 		size = sizeof(((struct if_laddrreq *)data)->dstaddr);
 		if (src->sa_len > size)
-			return (EINVAL);
+			return EINVAL;
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 		break;
 
@@ -608,17 +801,150 @@ gif_ioctl(ifp, cmd, data)
 		/* if_ioctl() takes care of it */
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < GIF_MTU_MIN || ifr->ifr_mtu > GIF_MTU_MAX)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	default:
-		error = ENOTTY;
+		error = EINVAL;
 		break;
 	}
  bad:
-	return (error);
+	return error;
+}
+
+/*
+ * XXXRW: There's a general event-ordering issue here: the code to check
+ * if a given tunnel is already present happens before we perform a
+ * potentially blocking setup of the tunnel.  This code needs to be
+ * re-ordered so that the check and replacement can be atomic using
+ * a mutex.
+ */
+int
+gif_set_tunnel(ifp, src, dst)
+	struct ifnet *ifp;
+	struct sockaddr *src;
+	struct sockaddr *dst;
+{
+	struct gif_softc *sc = ifp->if_softc;
+	struct gif_softc *sc2;
+	struct sockaddr *osrc, *odst, *sa;
+	int error = 0; 
+
+	mtx_lock(&gif_mtx);
+	LIST_FOREACH(sc2, &gif_softc_list, gif_list) {
+		if (sc2 == sc)
+			continue;
+		if (!sc2->gif_pdst || !sc2->gif_psrc)
+			continue;
+		if (sc2->gif_pdst->sa_family != dst->sa_family ||
+		    sc2->gif_pdst->sa_len != dst->sa_len ||
+		    sc2->gif_psrc->sa_family != src->sa_family ||
+		    sc2->gif_psrc->sa_len != src->sa_len)
+			continue;
+
+		/*
+		 * Disallow parallel tunnels unless instructed
+		 * otherwise.
+		 */
+		if (!parallel_tunnels &&
+		    bcmp(sc2->gif_pdst, dst, dst->sa_len) == 0 &&
+		    bcmp(sc2->gif_psrc, src, src->sa_len) == 0) {
+			error = EADDRNOTAVAIL;
+			mtx_unlock(&gif_mtx);
+			goto bad;
+		}
+
+		/* XXX both end must be valid? (I mean, not 0.0.0.0) */
+	}
+	mtx_unlock(&gif_mtx);
+
+	/* XXX we can detach from both, but be polite just in case */
+	if (sc->gif_psrc)
+		switch (sc->gif_psrc->sa_family) {
+#ifdef INET
+		case AF_INET:
+			(void)in_gif_detach(sc);
+			break;
+#endif
+#ifdef INET6
+		case AF_INET6:
+			(void)in6_gif_detach(sc);
+			break;
+#endif
+		}
+
+	osrc = sc->gif_psrc;
+	sa = (struct sockaddr *)malloc(src->sa_len, M_IFADDR, M_WAITOK);
+	bcopy((caddr_t)src, (caddr_t)sa, src->sa_len);
+	sc->gif_psrc = sa;
+
+	odst = sc->gif_pdst;
+	sa = (struct sockaddr *)malloc(dst->sa_len, M_IFADDR, M_WAITOK);
+	bcopy((caddr_t)dst, (caddr_t)sa, dst->sa_len);
+	sc->gif_pdst = sa;
+
+	switch (sc->gif_psrc->sa_family) {
+#ifdef INET
+	case AF_INET:
+		error = in_gif_attach(sc);
+		break;
+#endif
+#ifdef INET6
+	case AF_INET6:
+		/*
+		 * Check validity of the scope zone ID of the addresses, and
+		 * convert it into the kernel internal form if necessary.
+		 */
+		error = sa6_embedscope((struct sockaddr_in6 *)sc->gif_psrc, 0);
+		if (error != 0)
+			break;
+		error = sa6_embedscope((struct sockaddr_in6 *)sc->gif_pdst, 0);
+		if (error != 0)
+			break;
+		error = in6_gif_attach(sc);
+		break;
+#endif
+	}
+	if (error) {
+		/* rollback */
+		free((caddr_t)sc->gif_psrc, M_IFADDR);
+		free((caddr_t)sc->gif_pdst, M_IFADDR);
+		sc->gif_psrc = osrc;
+		sc->gif_pdst = odst;
+		goto bad;
+	}
+
+	if (osrc)
+		free((caddr_t)osrc, M_IFADDR);
+	if (odst)
+		free((caddr_t)odst, M_IFADDR);
+
+ bad:
+	if (sc->gif_psrc && sc->gif_pdst)
+		ifp->if_drv_flags |= IFF_DRV_RUNNING;
+	else
+		ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+
+	return error;
+}
+
+void
+gif_delete_tunnel(ifp)
+	struct ifnet *ifp;
+{
+	struct gif_softc *sc = ifp->if_softc;
+
+	if (sc->gif_psrc) {
+		free((caddr_t)sc->gif_psrc, M_IFADDR);
+		sc->gif_psrc = NULL;
+	}
+	if (sc->gif_pdst) {
+		free((caddr_t)sc->gif_pdst, M_IFADDR);
+		sc->gif_pdst = NULL;
+	}
+	/* it is safe to detach from both */
+#ifdef INET
+	(void)in_gif_detach(sc);
+#endif
+#ifdef INET6
+	(void)in6_gif_detach(sc);
+#endif
+	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
 }

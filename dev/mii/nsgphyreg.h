@@ -1,5 +1,4 @@
-/*	$OpenBSD: nsgphyreg.h,v 1.5 2005/05/27 09:24:01 brad Exp $	*/
-/*
+/*-
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001
  *	Bill Paul <wpaul@bsdi.com>.  All rights reserved.
@@ -31,7 +30,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: /usr/local/www/cvsroot/FreeBSD/src/sys/dev/mii/nsgphyreg.h,v 1.3 2002/04/29 11:57:28 phk Exp $
+ * $FreeBSD: src/sys/dev/mii/nsgphyreg.h,v 1.4 2005/01/06 01:42:56 imp Exp $
  */
 
 #ifndef _DEV_MII_NSGPHYREG_H_
@@ -52,11 +51,11 @@
 #define NSGPHY_STRAPOPT_100_ADV	0x0004	/* Advertise 100 full/half-duplex */
 #define NSGPHY_STRAPOPT_SPEED1	0x0002	/* speed selection */
 #define NSGPHY_STRAPOPT_SPEED0	0x0001	/* speed selection */
-#define NSGPHY_STRAPOPT_SPDSEL	(NSGPHY_STRAPOPT_SPEED1|NSGPHY_STRAPOPT_SPEED0)
+#define NSGPHY_STRAPOPT_SPDSEL  (NSGPHY_STRAPOPT_SPEED1|NSGPHY_STRAPOPT_SPEED0)
 
 #define NSGPHY_MII_PHYSUP	0x11	/* PHY support/current status */
-#define PHY_SUP_SPEED1		0x0010	/* speed bit 1 */
-#define PHY_SUP_SPEED0		0x0008	/* speed bit 1 */
+#define PHY_SUP_SPEED1		0x0010  /* speed bit 1 */
+#define PHY_SUP_SPEED0		0x0008  /* speed bit 1 */
 #define NSGPHY_PHYSUP_SPEED1	0x0010	/* speed status */
 #define NSGPHY_PHYSUP_SPEED0	0x0008	/* speed status */
 #define NSGPHY_PHYSUP_SPDSTS	(NSGPHY_PHYSUP_SPEED1|NSGPHY_PHYSUP_SPEED0)

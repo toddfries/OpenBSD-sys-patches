@@ -1,6 +1,3 @@
-/*	$OpenBSD: mman.h,v 1.18 2003/07/21 22:52:19 tedu Exp $	*/
-/*	$NetBSD: mman.h,v 1.11 1995/03/26 20:24:23 jtc Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,8 +26,24 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)mman.h	8.1 (Berkeley) 6/2/93
+ *	@(#)mman.h	8.2 (Berkeley) 1/9/95
+ * $FreeBSD: src/sys/sys/mman.h,v 1.40 2005/04/02 12:33:31 das Exp $
  */
+
+#ifndef _SYS_MMAN_H_
+#define _SYS_MMAN_H_
+
+#include <sys/cdefs.h>
+#include <sys/_types.h>
+
+#if __BSD_VISIBLE
+/*
+ * Inheritance for minherit()
+ */
+#define INHERIT_SHARE	0
+#define INHERIT_COPY	1
+#define INHERIT_NONE	2
+#endif
 
 /*
  * Protections are chosen from these bits, or-ed together
@@ -44,20 +57,45 @@
  * Flags contain sharing type and options.
  * Sharing types; choose one.
  */
-#define	MAP_SHARED	0x0001	/* share changes */
-#define	MAP_PRIVATE	0x0002	/* changes are private */
-#define	MAP_COPY	0x0004	/* "copy" region at mmap time */
+#define	MAP_SHARED	0x0001		/* share changes */
+#define	MAP_PRIVATE	0x0002		/* changes are private */
+#if __BSD_VISIBLE
+#define	MAP_COPY	MAP_PRIVATE	/* Obsolete */
+#endif
 
 /*
  * Other flags
  */
 #define	MAP_FIXED	 0x0010	/* map addr must be exactly as requested */
+
+#if __BSD_VISIBLE
 #define	MAP_RENAME	 0x0020	/* Sun: rename private pages to file */
 #define	MAP_NORESERVE	 0x0040	/* Sun: don't reserve needed swap area */
-#define	MAP_INHERIT	 0x0080	/* region is retained after exec */
-#define	MAP_NOEXTEND	 0x0100	/* for MAP_FILE, don't change file size */
+#define	MAP_RESERVED0080 0x0080	/* previously misimplemented MAP_INHERIT */
+#define	MAP_RESERVED0100 0x0100	/* previously unimplemented MAP_NOEXTEND */
 #define	MAP_HASSEMAPHORE 0x0200	/* region may contain semaphores */
-#define	MAP_TRYFIXED	 0x0400 /* attempt hint address, even within heap */
+#define	MAP_STACK	 0x0400	/* region grows down, like a stack */
+#define	MAP_NOSYNC	 0x0800 /* page to but do not sync underlying file */
+
+/*
+ * Mapping type
+ */
+#define	MAP_FILE	 0x0000	/* map from file (default) */
+#define	MAP_ANON	 0x1000	/* allocated from memory, swap space */
+
+/*
+ * Extended flags
+ */
+#define	MAP_NOCORE	 0x00020000 /* dont include these pages in a coredump */
+#endif /* __BSD_VISIBLE */
+
+#if __POSIX_VISIBLE >= 199309
+/*
+ * Process memory locking
+ */
+#define MCL_CURRENT	0x0001	/* Lock only current memory */
+#define MCL_FUTURE	0x0002	/* Lock all future memory as well */
+#endif
 
 /*
  * Error return from mmap()
@@ -65,63 +103,103 @@
 #define MAP_FAILED	((void *)-1)
 
 /*
- * Mapping type
+ * msync() flags
  */
-#define	MAP_FILE	0x0000	/* map from file (default) */
-#define	MAP_ANON	0x1000	/* allocated from memory, swap space */
-#define	MAP_FLAGMASK	0x17f7
+#define	MS_SYNC		0x0000	/* msync synchronously */
+#define MS_ASYNC	0x0001	/* return immediately */
+#define MS_INVALIDATE	0x0002	/* invalidate all cached data */
 
 /*
  * Advice to madvise
  */
-#define	MADV_NORMAL	0	/* no further special treatment */
-#define	MADV_RANDOM	1	/* expect random page references */
-#define	MADV_SEQUENTIAL	2	/* expect sequential page references */
-#define	MADV_WILLNEED	3	/* will need these pages */
-#define	MADV_DONTNEED	4	/* dont need these pages */
-#define	MADV_SPACEAVAIL	5	/* insure that resources are reserved */
-#define	MADV_FREE	6	/* pages are empty, free them */
+#define	_MADV_NORMAL	0	/* no further special treatment */
+#define	_MADV_RANDOM	1	/* expect random page references */
+#define	_MADV_SEQUENTIAL 2	/* expect sequential page references */
+#define	_MADV_WILLNEED	3	/* will need these pages */
+#define	_MADV_DONTNEED	4	/* dont need these pages */
+
+#if __BSD_VISIBLE
+#define	MADV_NORMAL	_MADV_NORMAL
+#define	MADV_RANDOM	_MADV_RANDOM
+#define	MADV_SEQUENTIAL _MADV_SEQUENTIAL
+#define	MADV_WILLNEED	_MADV_WILLNEED
+#define	MADV_DONTNEED	_MADV_DONTNEED
+#define	MADV_FREE	5	/* dont need these pages, and junk contents */
+#define	MADV_NOSYNC	6	/* try to avoid flushes to physical media */
+#define	MADV_AUTOSYNC	7	/* revert to default flushing strategy */
+#define	MADV_NOCORE	8	/* do not include these pages in a core file */
+#define	MADV_CORE	9	/* revert to including pages in a core file */
+#define	MADV_PROTECT	10	/* protect process from pageout kill */
 
 /*
- * Flags to minherit
+ * Return bits from mincore
  */
-#define MAP_INHERIT_SHARE	0	/* share with child */
-#define MAP_INHERIT_COPY	1	/* copy into child */
-#define MAP_INHERIT_NONE	2	/* absent from child */
-#define MAP_INHERIT_DONATE_COPY	3	/* copy and delete -- not
-					   implemented in UVM */
+#define	MINCORE_INCORE	 	 0x1 /* Page is incore */
+#define	MINCORE_REFERENCED	 0x2 /* Page has been referenced by us */
+#define	MINCORE_MODIFIED	 0x4 /* Page has been modified by us */
+#define	MINCORE_REFERENCED_OTHER 0x8 /* Page has been referenced */
+#define	MINCORE_MODIFIED_OTHER	0x10 /* Page has been modified */
+#endif /* __BSD_VISIBLE */
 
 /*
- * Flags to msync
+ * XXX missing POSIX_TYPED_MEM_* macros and
+ * posix_typed_mem_info structure.
  */
-#define	MS_ASYNC	0x01	/* perform asynchronous writes */
-#define	MS_SYNC		0x02	/* perform synchronous writes */
-#define	MS_INVALIDATE	0x04	/* invalidate cached data */
+#if __POSIX_VISIBLE >= 200112
+#define	POSIX_MADV_NORMAL	_MADV_NORMAL
+#define	POSIX_MADV_RANDOM	_MADV_RANDOM
+#define	POSIX_MADV_SEQUENTIAL	_MADV_SEQUENTIAL
+#define	POSIX_MADV_WILLNEED	_MADV_WILLNEED
+#define	POSIX_MADV_DONTNEED	_MADV_DONTNEED
+#endif
 
-/*
- * Flags to mlockall
- */
-#define	MCL_CURRENT	0x01	/* lock all pages currently mapped */
-#define	MCL_FUTURE	0x02	/* lock all pages mapped in the future */
+#ifndef _MODE_T_DECLARED
+typedef	__mode_t	mode_t;
+#define	_MODE_T_DECLARED
+#endif
+
+#ifndef _OFF_T_DECLARED
+typedef	__off_t		off_t;
+#define	_OFF_T_DECLARED
+#endif
+
+#ifndef _SIZE_T_DECLARED
+typedef	__size_t	size_t;
+#define	_SIZE_T_DECLARED
+#endif
 
 #ifndef _KERNEL
 
-#include <sys/cdefs.h>
-
 __BEGIN_DECLS
-/* Some of these int's should probably be size_t's */
-void *	mmap(void *, size_t, int, int, int, off_t);
-int	mprotect(void *, size_t, int);
-int	munmap(void *, size_t);
-int	msync(void *, size_t, int);
+/*
+ * XXX not yet implemented: posix_mem_offset(), posix_typed_mem_get_info(),
+ * posix_typed_mem_open().
+ */
+#if __BSD_VISIBLE
+int	madvise(void *, size_t, int);
+int	mincore(const void *, size_t, char *);
+int	minherit(void *, size_t, int);
+#endif
 int	mlock(const void *, size_t);
+#ifndef _MMAP_DECLARED
+#define	_MMAP_DECLARED
+void *	mmap(void *, size_t, int, int, int, off_t);
+#endif
+int	mprotect(const void *, size_t, int);
+int	msync(void *, size_t, int);
 int	munlock(const void *, size_t);
+int	munmap(void *, size_t);
+#if __POSIX_VISIBLE >= 200112
+int	posix_madvise(void *, size_t, int);
+#endif
+#if __POSIX_VISIBLE >= 199309
 int	mlockall(int);
 int	munlockall(void);
-int	madvise(void *, size_t, int);
-int	mincore(void *, size_t, char *);
-int	minherit(void *, size_t, int);
-void *	mquery(void *, size_t, int, int, int, off_t);
+int	shm_open(const char *, int, mode_t);
+int	shm_unlink(const char *);
+#endif
 __END_DECLS
 
 #endif /* !_KERNEL */
+
+#endif /* !_SYS_MMAN_H_ */

@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_sockmod.h,v 1.4 1997/08/29 19:56:38 kstailey Exp $	 */
-/*	$NetBSD: svr4_sockmod.h,v 1.5 1997/07/21 23:02:38 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_sockmod.h,v 1.4 2005/01/05 22:34:36 imp Exp $
  */
 
 #ifndef	_SVR4_SOCKMOD_H_

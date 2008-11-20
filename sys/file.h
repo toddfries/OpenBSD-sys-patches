@@ -1,7 +1,4 @@
-/*	$OpenBSD: file.h,v 1.24 2006/03/26 17:47:10 mickey Exp $	*/
-/*	$NetBSD: file.h,v 1.11 1995/03/26 20:24:13 jtc Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,90 +26,286 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)file.h	8.2 (Berkeley) 8/20/94
+ *	@(#)file.h	8.3 (Berkeley) 1/9/95
+ * $FreeBSD: src/sys/sys/file.h,v 1.73 2007/01/05 19:59:46 jhb Exp $
  */
 
+#ifndef _SYS_FILE_H_
+#define	_SYS_FILE_H_
+
+#ifndef _KERNEL
+#include <sys/types.h> /* XXX */
 #include <sys/fcntl.h>
 #include <sys/unistd.h>
-
-#ifdef _KERNEL
+#else
 #include <sys/queue.h>
+#include <sys/_lock.h>
+#include <sys/_mutex.h>
 
-struct proc;
+struct stat;
+struct thread;
 struct uio;
 struct knote;
-struct stat;
-struct file;
+struct vnode;
+struct socket;
 
-struct	fileops {
-	int	(*fo_read)(struct file *, off_t *, struct uio *,
-		    struct ucred *);
-	int	(*fo_write)(struct file *, off_t *, struct uio *,
-		    struct ucred *);
-	int	(*fo_ioctl)(struct file *, u_long, caddr_t,
-		    struct proc *);
-	int	(*fo_poll)(struct file *, int, struct proc *);
-	int	(*fo_kqfilter)(struct file *, struct knote *);
-	int	(*fo_stat)(struct file *, struct stat *, struct proc *);
-	int	(*fo_close)(struct file *, struct proc *);
+
+#endif /* _KERNEL */
+
+#define	DTYPE_VNODE	1	/* file */
+#define	DTYPE_SOCKET	2	/* communications endpoint */
+#define	DTYPE_PIPE	3	/* pipe */
+#define	DTYPE_FIFO	4	/* fifo (named pipe) */
+#define	DTYPE_KQUEUE	5	/* event queue */
+#define	DTYPE_CRYPTO	6	/* crypto */
+#define	DTYPE_MQUEUE	7	/* posix message queue */
+
+#ifdef _KERNEL
+
+struct file;
+struct ucred;
+
+typedef int fo_rdwr_t(struct file *fp, struct uio *uio,
+		    struct ucred *active_cred, int flags,
+		    struct thread *td);
+#define	FOF_OFFSET	1	/* Use the offset in uio argument */
+typedef	int fo_ioctl_t(struct file *fp, u_long com, void *data,
+		    struct ucred *active_cred, struct thread *td);
+typedef	int fo_poll_t(struct file *fp, int events,
+		    struct ucred *active_cred, struct thread *td);
+typedef	int fo_kqfilter_t(struct file *fp, struct knote *kn);
+typedef	int fo_stat_t(struct file *fp, struct stat *sb,
+		    struct ucred *active_cred, struct thread *td);
+typedef	int fo_close_t(struct file *fp, struct thread *td);
+typedef	int fo_flags_t;
+
+struct fileops {
+	fo_rdwr_t	*fo_read;
+	fo_rdwr_t	*fo_write;
+	fo_ioctl_t	*fo_ioctl;
+	fo_poll_t	*fo_poll;
+	fo_kqfilter_t	*fo_kqfilter;
+	fo_stat_t	*fo_stat;
+	fo_close_t	*fo_close;
+	fo_flags_t	fo_flags;	/* DFLAG_* below */
 };
+
+#define DFLAG_PASSABLE	0x01	/* may be passed via unix sockets. */
+#define DFLAG_SEEKABLE	0x02	/* seekable / nonsequential */
 
 /*
  * Kernel descriptor table.
  * One entry for each open kernel vnode and socket.
+ *
+ * Below is the list of locks that protects members in struct file.
+ *
+ * (fl)	filelist_lock
+ * (f)	f_mtx in struct file
+ * none	not locked
  */
+
 struct file {
-	LIST_ENTRY(file) f_list;/* list of active files */
-	short	f_flag;		/* see fcntl.h */
-#define	DTYPE_VNODE	1	/* file */
-#define	DTYPE_SOCKET	2	/* communications endpoint */
-#define	DTYPE_PIPE	3	/* pipe */
-#define	DTYPE_KQUEUE	4	/* event queue */
-#define	DTYPE_CRYPTO	5	/* crypto */
-#define	DTYPE_SYSTRACE	6	/* system call tracing */
+	LIST_ENTRY(file) f_list;/* (fl) list of active files */
 	short	f_type;		/* descriptor type */
-	long	f_count;	/* reference count */
-	long	f_msgcount;	/* references from message queue */
+	void	*f_data;	/* file descriptor specific data */
+	u_int	f_flag;		/* see fcntl.h */
+	struct mtx	*f_mtxp;	/* mutex to protect data */
+	struct fileops *f_ops;	/* File operations */
 	struct	ucred *f_cred;	/* credentials associated with descriptor */
-	struct	fileops *f_ops;
+	int	f_count;	/* (f) reference count */
+	struct vnode *f_vnode;	/* NULL or applicable vnode */
+
+	/* DFLAG_SEEKABLE specific fields */
 	off_t	f_offset;
-	void 	*f_data;	/* private data */
-	int	f_iflags;	/* internal flags */
-	int	f_usecount;	/* number of users (temporary references). */
-	u_int64_t f_rxfer;	/* total number of read transfers */
-	u_int64_t f_wxfer;	/* total number of write transfers */
-	u_int64_t f_seek;	/* total independent seek operations */
-	u_int64_t f_rbytes;	/* total bytes read */
-	u_int64_t f_wbytes;	/* total bytes written */
+	short     f_vnread_flags; /* 
+				   * (f) home grown sleep lock for f_offset
+				   * Used only for shared vnode locking in
+				   * vnread()
+				   */
+#define  FOFFSET_LOCKED       0x1
+#define  FOFFSET_LOCK_WAITING 0x2		 
+	/* DTYPE_SOCKET specific fields */
+	short	f_gcflag;	/* used by thread doing fd garbage collection */
+#define	FMARK		0x1	/* mark during gc() */
+#define	FDEFER		0x2	/* defer for next gc pass */
+#define	FWAIT		0x4	/* gc is scanning message buffers */
+	int	f_msgcount;	/* (f) references from message queue */
+
+	/* DTYPE_VNODE specific fields */
+	int	f_seqcount;	/*
+				 * count of sequential accesses -- cleared
+				 * by most seek operations.
+				 */
+	off_t	f_nextoff;	/*
+				 * offset of next expected read or write
+				 */
+	void	*f_label;	/* Place-holder for struct label pointer. */
 };
 
-#define FIF_WANTCLOSE		0x01	/* a close is waiting for usecount */
-#define FIF_LARVAL		0x02	/* not fully constructed, don't use */
+#endif /* _KERNEL */
 
-#define FILE_IS_USABLE(fp) \
-	(((fp)->f_iflags & (FIF_WANTCLOSE|FIF_LARVAL)) == 0)
+/*
+ * Userland version of struct file, for sysctl
+ */
+struct xfile {
+	size_t	xf_size;	/* size of struct xfile */
+	pid_t	xf_pid;		/* owning process */
+	uid_t	xf_uid;		/* effective uid of owning process */
+	int	xf_fd;		/* descriptor number */
+	void	*xf_file;	/* address of struct file */
+	short	xf_type;	/* descriptor type */
+	int	xf_count;	/* reference count */
+	int	xf_msgcount;	/* references from message queue */
+	off_t	xf_offset;	/* file offset */
+	void	*xf_data;	/* file descriptor specific data */
+	void	*xf_vnode;	/* vnode pointer */
+	u_int	xf_flag;	/* flags (see fcntl.h) */
+};
 
-#define FREF(fp) do { (fp)->f_usecount++; } while (0)
-#define FRELE(fp) do {					\
-	--(fp)->f_usecount;					\
-	if (((fp)->f_iflags & FIF_WANTCLOSE) != 0)		\
-		wakeup(&(fp)->f_usecount);			\
-} while (0)
+#ifdef _KERNEL
 
-#define FILE_SET_MATURE(fp) do {				\
-	(fp)->f_iflags &= ~FIF_LARVAL;				\
-	FRELE(fp);						\
-} while (0)
+#ifdef MALLOC_DECLARE
+MALLOC_DECLARE(M_FILE);
+#endif
 
 LIST_HEAD(filelist, file);
-extern struct filelist filehead;	/* head of list of open files */
-extern int maxfiles;			/* kernel limit on number of open files */
-extern int nfiles;			/* actual number of open files */
-extern struct fileops vnops;		/* vnode operations for files */
+extern struct filelist filehead; /* (fl) head of list of open files */
+extern struct fileops vnops;
+extern struct fileops badfileops;
+extern struct fileops socketops;
+extern int maxfiles;		/* kernel limit on number of open files */
+extern int maxfilesperproc;	/* per process limit on number of open files */
+extern int openfiles;		/* (fl) actual number of open files */
+extern struct sx filelist_lock; /* sx to protect filelist and openfiles */
 
-int     dofileread(struct proc *, int, struct file *, void *, size_t,
-            off_t *, register_t *);
-int     dofilewrite(struct proc *, int, struct file *, const void *,
-            size_t, off_t *, register_t *);
+int fget(struct thread *td, int fd, struct file **fpp);
+int fget_read(struct thread *td, int fd, struct file **fpp);
+int fget_write(struct thread *td, int fd, struct file **fpp);
+int fdrop(struct file *fp, struct thread *td);
+
+/*
+ * The socket operations are used a couple of places.
+ * XXX: This is wrong, they should go through the operations vector for
+ * XXX: sockets instead of going directly for the individual functions. /phk
+ */
+fo_rdwr_t	soo_read;
+fo_rdwr_t	soo_write;
+fo_ioctl_t	soo_ioctl;
+fo_poll_t	soo_poll;
+fo_kqfilter_t	soo_kqfilter;
+fo_stat_t	soo_stat;
+fo_close_t	soo_close;
+
+/* Lock a file. */
+#define	FILE_LOCK(f)	mtx_lock((f)->f_mtxp)
+#define	FILE_UNLOCK(f)	mtx_unlock((f)->f_mtxp)
+#define	FILE_LOCKED(f)	mtx_owned((f)->f_mtxp)
+#define	FILE_LOCK_ASSERT(f, type) mtx_assert((f)->f_mtxp, (type))
+
+int fgetvp(struct thread *td, int fd, struct vnode **vpp);
+int fgetvp_read(struct thread *td, int fd, struct vnode **vpp);
+int fgetvp_write(struct thread *td, int fd, struct vnode **vpp);
+
+int fgetsock(struct thread *td, int fd, struct socket **spp, u_int *fflagp);
+void fputsock(struct socket *sp);
+
+#define	fhold_locked(fp)						\
+	do {								\
+		FILE_LOCK_ASSERT(fp, MA_OWNED);				\
+		(fp)->f_count++;					\
+	} while (0)
+
+#define	fhold(fp)							\
+	do {								\
+		FILE_LOCK(fp);						\
+		(fp)->f_count++;					\
+		FILE_UNLOCK(fp);					\
+	} while (0)
+
+static __inline fo_rdwr_t	fo_read;
+static __inline fo_rdwr_t	fo_write;
+static __inline fo_ioctl_t	fo_ioctl;
+static __inline fo_poll_t	fo_poll;
+static __inline fo_kqfilter_t	fo_kqfilter;
+static __inline fo_stat_t	fo_stat;
+static __inline fo_close_t	fo_close;
+
+static __inline int
+fo_read(fp, uio, active_cred, flags, td)
+	struct file *fp;
+	struct uio *uio;
+	struct ucred *active_cred;
+	int flags;
+	struct thread *td;
+{
+
+	return ((*fp->f_ops->fo_read)(fp, uio, active_cred, flags, td));
+}
+
+static __inline int
+fo_write(fp, uio, active_cred, flags, td)
+	struct file *fp;
+	struct uio *uio;
+	struct ucred *active_cred;
+	int flags;
+	struct thread *td;
+{
+
+	return ((*fp->f_ops->fo_write)(fp, uio, active_cred, flags, td));
+}
+
+static __inline int
+fo_ioctl(fp, com, data, active_cred, td)
+	struct file *fp;
+	u_long com;
+	void *data;
+	struct ucred *active_cred;
+	struct thread *td;
+{
+
+	return ((*fp->f_ops->fo_ioctl)(fp, com, data, active_cred, td));
+}
+
+static __inline int
+fo_poll(fp, events, active_cred, td)
+	struct file *fp;
+	int events;
+	struct ucred *active_cred;
+	struct thread *td;
+{
+
+	return ((*fp->f_ops->fo_poll)(fp, events, active_cred, td));
+}
+
+static __inline int
+fo_stat(fp, sb, active_cred, td)
+	struct file *fp;
+	struct stat *sb;
+	struct ucred *active_cred;
+	struct thread *td;
+{
+
+	return ((*fp->f_ops->fo_stat)(fp, sb, active_cred, td));
+}
+
+static __inline int
+fo_close(fp, td)
+	struct file *fp;
+	struct thread *td;
+{
+
+	return ((*fp->f_ops->fo_close)(fp, td));
+}
+
+static __inline int
+fo_kqfilter(fp, kn)
+	struct file *fp;
+	struct knote *kn;
+{
+
+	return ((*fp->f_ops->fo_kqfilter)(fp, kn));
+}
 
 #endif /* _KERNEL */
+
+#endif /* !SYS_FILE_H */

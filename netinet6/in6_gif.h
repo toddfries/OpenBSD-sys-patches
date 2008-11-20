@@ -1,7 +1,7 @@
-/*	$OpenBSD: in6_gif.h,v 1.5 2007/02/10 15:34:22 claudio Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/in6_gif.h,v 1.7 2005/01/07 02:30:34 imp Exp $	*/
 /*	$KAME: in6_gif.h,v 1.5 2000/04/14 08:36:03 itojun Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -33,7 +33,13 @@
 #ifndef _NETINET6_IN6_GIF_H_
 #define _NETINET6_IN6_GIF_H_
 
-int in6_gif_input(struct mbuf **, int *, int);
-int in6_gif_output(struct ifnet *, int, struct mbuf *);
+#define GIF_HLIM	30
 
-#endif /*_NETINET6_IN6_GIF_H_*/
+struct gif_softc;
+int in6_gif_input __P((struct mbuf **, int *, int));
+int in6_gif_output __P((struct ifnet *, int, struct mbuf *));
+int gif_encapcheck6 __P((const struct mbuf *, int, int, void *));
+int in6_gif_attach __P((struct gif_softc *));
+int in6_gif_detach __P((struct gif_softc *));
+
+#endif /* _NETINET6_IN6_GIF_H_ */

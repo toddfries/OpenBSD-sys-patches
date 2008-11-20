@@ -1,103 +1,53 @@
 #! /bin/sh -
-#	$OpenBSD: makesyscalls.sh,v 1.11 2007/11/27 18:04:01 art Exp $
-#	$NetBSD: makesyscalls.sh,v 1.26 1998/01/09 06:17:51 thorpej Exp $
-#
-# Copyright (c) 1994,1996 Christopher G. Demetriou
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#      This product includes software developed for the NetBSD Project
-#      by Christopher G. Demetriou.
-# 4. The name of the author may not be used to endorse or promote products
-#    derived from this software without specific prior written permission
-#
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 #	@(#)makesyscalls.sh	8.1 (Berkeley) 6/10/93
+# $FreeBSD: src/sys/kern/makesyscalls.sh,v 1.68 2007/07/04 22:38:28 peter Exp $
 
 set -e
 
+# name of compat options:
+compat=COMPAT_43
+compat4=COMPAT_FREEBSD4
+compat6=COMPAT_FREEBSD6
+
+# output files:
+sysnames="syscalls.c"
+sysproto="../sys/sysproto.h"
+sysproto_h=_SYS_SYSPROTO_H_
+syshdr="../sys/syscall.h"
+sysmk="../sys/syscall.mk"
+syssw="init_sysent.c"
+syscallprefix="SYS_"
+switchname="sysent"
+namesname="syscallnames"
+systrace="systrace_args.c"
+
+# tmp files:
+sysaue="sysent.aue.$$"
+sysdcl="sysent.dcl.$$"
+syscompat="sysent.compat.$$"
+syscompatdcl="sysent.compatdcl.$$"
+syscompat4="sysent.compat4.$$"
+syscompat4dcl="sysent.compat4dcl.$$"
+syscompat6="sysent.compat6.$$"
+syscompat6dcl="sysent.compat6dcl.$$"
+sysent="sysent.switch.$$"
+sysinc="sysinc.switch.$$"
+sysarg="sysarg.switch.$$"
+sysprotoend="sysprotoend.$$"
+
+trap "rm $sysaue $sysdcl $syscompat $syscompatdcl $syscompat4 $syscompat4dcl $syscompat6 $syscompat6dcl $sysent $sysinc $sysarg $sysprotoend" 0
+
+touch $sysaue $sysdcl $syscompat $syscompatdcl $syscompat4 $syscompat4dcl $syscompat6 $syscompat6dcl $sysent $sysinc $sysarg $sysprotoend
+
 case $# in
-    2)	;;
-    *)	echo "Usage: $0 config-file input-file" 1>&2
+    0)	echo "usage: $0 input-file <config-file>" 1>&2
 	exit 1
 	;;
 esac
 
-# source the config file.
-case $1 in
-    /*)	. $1
-	;;
-    *)	. ./$1
-	;;
-esac
-
-# the config file sets the following variables:
-#	sysnames	the syscall names file
-#	sysnumhdr	the syscall numbers file
-#	syssw		the syscall switch file
-#	sysarghdr	the syscall argument struct definitions
-#	compatopts	those syscall types that are for 'compat' syscalls
-#	switchname	the name for the 'struct sysent' we define
-#	namesname	the name for the 'char *[]' we define
-#	constprefix	the prefix for the system call constants
-#
-# NOTE THAT THIS makesyscalls.sh DOES NOT SUPPORT 'LIBCOMPAT'.
-
-# tmp files:
-sysdcl="sysent.dcl"
-sysprotos="sys.protos"
-syscompat_pref="sysent."
-sysent="sysent.switch"
-
-trap "rm $sysdcl $sysprotos $sysent" 0
-
-# Awk program (must support nawk extensions)
-# Use "awk" at Berkeley, "nawk" or "gawk" elsewhere.
-awk=${AWK:-awk}
-
-# Does this awk have a "toupper" function? (i.e. is it GNU awk)
-isgawk=`$awk 'BEGIN { print toupper("true"); exit; }' 2>/dev/null`
-
-# If this awk does not define "toupper" then define our own.
-if [ "$isgawk" = TRUE ] ; then
-	# GNU awk provides it.
-	toupper=
-else
-	# Provide our own toupper()
-	toupper='
-function toupper(str) {
-	_toupper_cmd = "echo "str" |tr a-z A-Z"
-	_toupper_cmd | getline _toupper_str;
-	close(_toupper_cmd);
-	return _toupper_str;
-}'
+if [ -n "$2" -a -f "$2" ]; then
+	. $2
 fi
-
-# before handing it off to awk, make a few adjustments:
-#	(1) insert spaces around {, }, (, ), *, and commas.
-#	(2) get rid of any and all dollar signs (so that rcs id use safe)
-#
-# The awk script will deal with blank lines and lines that
-# start with the comment character (';').
 
 sed -e '
 s/\$//g
@@ -111,383 +61,480 @@ s/\$//g
 2,${
 	/^#/!s/\([{}()*,]\)/ \1 /g
 }
-' < $2 | $awk "
-$toupper
-BEGIN {
-	# to allow nested #if/#else/#endif sets
-	savedepth = 0
+' < $1 | awk "
+	BEGIN {
+		sysaue = \"$sysaue\"
+		sysdcl = \"$sysdcl\"
+		sysproto = \"$sysproto\"
+		sysprotoend = \"$sysprotoend\"
+		sysproto_h = \"$sysproto_h\"
+		syscompat = \"$syscompat\"
+		syscompatdcl = \"$syscompatdcl\"
+		syscompat4 = \"$syscompat4\"
+		syscompat4dcl = \"$syscompat4dcl\"
+		syscompat6 = \"$syscompat6\"
+		syscompat6dcl = \"$syscompat6dcl\"
+		sysent = \"$sysent\"
+		syssw = \"$syssw\"
+		sysinc = \"$sysinc\"
+		sysarg = \"$sysarg\"
+		sysnames = \"$sysnames\"
+		syshdr = \"$syshdr\"
+		sysmk = \"$sysmk\"
+		systrace = \"$systrace\"
+		compat = \"$compat\"
+		compat4 = \"$compat4\"
+		compat6 = \"$compat6\"
+		syscallprefix = \"$syscallprefix\"
+		switchname = \"$switchname\"
+		namesname = \"$namesname\"
+		infile = \"$1\"
+		"'
 
-	sysnames = \"$sysnames\"
-	sysprotos = \"$sysprotos\"
-	sysnumhdr = \"$sysnumhdr\"
-	sysarghdr = \"$sysarghdr\"
-	switchname = \"$switchname\"
-	namesname = \"$namesname\"
-	constprefix = \"$constprefix\"
+		printf "/*\n * System call switch table.\n *\n" > syssw
+		printf " * DO NOT EDIT-- this file is automatically generated.\n" > syssw
+		printf " * $%s$\n", "FreeBSD" > syssw
 
-	sysdcl = \"$sysdcl\"
-	syscompat_pref = \"$syscompat_pref\"
-	sysent = \"$sysent\"
-	infile = \"$2\"
+		printf "/*\n * System call prototypes.\n *\n" > sysarg
+		printf " * DO NOT EDIT-- this file is automatically generated.\n" > sysarg
+		printf " * $%s$\n", "FreeBSD" > sysarg
 
-	compatopts = \"$compatopts\"
-	"'
+		printf "\n#ifdef %s\n\n", compat > syscompat
+		printf "\n#ifdef %s\n\n", compat4 > syscompat4
+		printf "\n#ifdef %s\n\n", compat6 > syscompat6
 
-	printf "/*\t\$OpenBSD\$\t*/\n\n" > sysdcl
-	printf "/*\n * System call switch table.\n *\n" > sysdcl
-	printf " * DO NOT EDIT-- this file is automatically generated.\n" > sysdcl
+		printf "/*\n * System call names.\n *\n" > sysnames
+		printf " * DO NOT EDIT-- this file is automatically generated.\n" > sysnames
+		printf " * $%s$\n", "FreeBSD" > sysnames
 
-	ncompat = split(compatopts,compat)
-	for (i = 1; i <= ncompat; i++) {
-		compat_upper[i] = toupper(compat[i])
+		printf "/*\n * System call numbers.\n *\n" > syshdr
+		printf " * DO NOT EDIT-- this file is automatically generated.\n" > syshdr
+		printf " * $%s$\n", "FreeBSD" > syshdr
+		printf "# FreeBSD system call names.\n" > sysmk
+		printf "# DO NOT EDIT-- this file is automatically generated.\n" > sysmk
+		printf "# $%s$\n", "FreeBSD" > sysmk
 
-		printf "\n#ifdef %s\n", compat_upper[i] > sysent
-		printf "#define %s(func) __CONCAT(%s_,func)\n", compat[i], \
-		    compat[i] > sysent
-		printf "#else\n" > sysent
-		printf "#define %s(func) sys_nosys\n", compat[i] > sysent
-		printf "#endif\n" > sysent
+		printf "/*\n * System call argument to DTrace register array converstion.\n *\n" > systrace
+		printf " * DO NOT EDIT-- this file is automatically generated.\n" > systrace
+		printf " * $%s$\n", "FreeBSD" > systrace
 	}
+	NR == 1 {
+		gsub("[$]FreeBSD: ", "", $0)
+		gsub(" [$]", "", $0)
 
-	printf "\n#define\ts(type)\tsizeof(type)\n\n" > sysent
-	printf "struct sysent %s[] = {\n",switchname > sysent
+		printf " * created from%s\n */\n\n", $0 > syssw
 
-	printf "/*\t\$OpenBSD\$\t*/\n\n" > sysnames
-	printf "/*\n * System call names.\n *\n" > sysnames
-	printf " * DO NOT EDIT-- this file is automatically generated.\n" > sysnames
+		printf "\n/* The casts are bogus but will do for now. */\n" > sysent
+		printf "struct sysent %s[] = {\n",switchname > sysent
 
-	printf "\n/*\n * System call prototypes.\n */\n\n" > sysprotos
+		printf " * created from%s\n */\n\n", $0 > sysarg
+		printf "#ifndef %s\n", sysproto_h > sysarg
+		printf "#define\t%s\n\n", sysproto_h > sysarg
+		printf "#include <sys/signal.h>\n" > sysarg
+		printf "#include <sys/acl.h>\n" > sysarg
+		printf "#include <sys/_semaphore.h>\n" > sysarg
+		printf "#include <sys/ucontext.h>\n\n" > sysarg
+		printf "#include <bsm/audit_kevents.h>\n\n" > sysarg
+		printf "struct proc;\n\n" > sysarg
+		printf "struct thread;\n\n" > sysarg
+		printf "#define\tPAD_(t)\t(sizeof(register_t) <= sizeof(t) ? \\\n" > sysarg
+		printf "\t\t0 : sizeof(register_t) - sizeof(t))\n\n" > sysarg
+		printf "#if BYTE_ORDER == LITTLE_ENDIAN\n"> sysarg
+		printf "#define\tPADL_(t)\t0\n" > sysarg
+		printf "#define\tPADR_(t)\tPAD_(t)\n" > sysarg
+		printf "#else\n" > sysarg
+		printf "#define\tPADL_(t)\tPAD_(t)\n" > sysarg
+		printf "#define\tPADR_(t)\t0\n" > sysarg
+		printf "#endif\n\n" > sysarg
 
-	printf "/*\t\$OpenBSD\$\t*/\n\n" > sysnumhdr
-	printf "/*\n * System call numbers.\n *\n" > sysnumhdr
-	printf " * DO NOT EDIT-- this file is automatically generated.\n" > sysnumhdr
+		printf " * created from%s\n */\n\n", $0 > sysnames
+		printf "const char *%s[] = {\n", namesname > sysnames
 
-	printf "/*\t\$OpenBSD\$\t*/\n\n" > sysarghdr
-	printf "/*\n * System call argument lists.\n *\n" > sysarghdr
-	printf " * DO NOT EDIT-- this file is automatically generated.\n" > sysarghdr
-}
-NR == 1 {
-	printf " * created from%s\n */\n\n", $0 > sysdcl
+		printf " * created from%s\n */\n\n", $0 > syshdr
 
-	printf " * created from%s\n */\n\n", $0 > sysnames
-	printf "char *%s[] = {\n",namesname > sysnames
+		printf "# created from%s\nMIASM = ", $0 > sysmk
 
-	printf " * created from%s\n */\n\n", $0 > sysnumhdr
+		printf " * This file is part of the DTrace syscall provider.\n */\n\n" > systrace
+		printf "static void\nsystrace_args(int sysnum, void *params, u_int64_t *uarg, int *n_args)\n{\n" > systrace
+		printf "\tint64_t *iarg  = (int64_t *) uarg;\n" > systrace
+		printf "\tswitch (sysnum) {\n" > systrace
 
-	printf " * created from%s\n */\n\n", $0 > sysarghdr
-	printf "#ifdef\tsyscallarg\n" > sysarghdr
-	printf "#undef\tsyscallarg\n" > sysarghdr
-	printf "#endif\n\n" > sysarghdr
-	printf "#define\tsyscallarg(x)\t\t\t\t\t\t\t\\\n" > sysarghdr
-	printf "\tunion {\t\t\t\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t\tregister_t pad;\t\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t\tstruct { x datum; } le;\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t\tstruct {\t\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t\t\tint8_t pad[ (sizeof (register_t) < sizeof (x))\t\\\n" \
-		> sysarghdr
-	printf "\t\t\t\t? 0\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t\t\t\t: sizeof (register_t) - sizeof (x)];\t\\\n" \
-		> sysarghdr
-	printf "\t\t\tx datum;\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t\t} be;\t\t\t\t\t\t\t\\\n" > sysarghdr
-	printf "\t}\n" > sysarghdr
-	next
-}
-NF == 0 || $1 ~ /^;/ {
-	next
-}
-$1 ~ /^#[ 	]*include/ {
-	print > sysdcl
-	next
-}
-$1 ~ /^#[ 	]*if/ {
-	print > sysent
-	print > sysprotos
-	print > sysnames
-	savesyscall[++savedepth] = syscall
-	next
-}
-$1 ~ /^#[ 	]*else/ {
-	print > sysent
-	print > sysprotos
-	print > sysnames
-	if (savedepth <= 0) {
-		printf "%s: line %d: unbalenced #else\n", \
-		    infile, NR
+		next
+	}
+	NF == 0 || $1 ~ /^;/ {
+		next
+	}
+	$1 ~ /^#[ 	]*include/ {
+		print > sysinc
+		next
+	}
+	$1 ~ /^#[ 	]*if/ {
+		print > sysent
+		print > sysdcl
+		print > sysarg
+		print > syscompat
+		print > syscompat4
+		print > syscompat6
+		print > sysnames
+		savesyscall = syscall
+		next
+	}
+	$1 ~ /^#[ 	]*else/ {
+		print > sysent
+		print > sysdcl
+		print > sysarg
+		print > syscompat
+		print > syscompat4
+		print > syscompat6
+		print > sysnames
+		syscall = savesyscall
+		next
+	}
+	$1 ~ /^#/ {
+		print > sysent
+		print > sysdcl
+		print > sysarg
+		print > syscompat
+		print > syscompat4
+		print > syscompat6
+		print > sysnames
+		next
+	}
+	syscall != $1 {
+		printf "%s: line %d: syscall number out of sync at %d\n",
+		    infile, NR, syscall
+		printf "line is:\n"
+		print
 		exit 1
 	}
-	syscall = savesyscall[savedepth]
-	next
-}
-$1 ~ /^#/ {
-	if ($1 ~ /^#[       ]*endif/) {
-		if (savedepth <= 0) {
-			printf "%s: line %d: unbalenced #endif\n", \
-			    infile, NR
-			exit 1
-		}
-		savedepth--;
-	}
-	print > sysent
-	print > sysprotos
-	print > sysnames
-	next
-}
-syscall != $1 {
-	printf "%s: line %d: syscall number out of sync at %d\n", \
-	   infile, NR, syscall
-	printf "line is:\n"
-	print
-	exit 1
-}
-function parserr(was, wanted) {
-	printf "%s: line %d: unexpected %s (expected %s)\n", \
-	    infile, NR, was, wanted
-	exit 1
-}
-function parseline() {
-	f=3			# toss number and type
-	sycall_flags="0"
-	if ($NF != "}") {
-		funcalias=$NF
-		end=NF-1
-	} else {
-		funcalias=""
-		end=NF
-	}
-	if ($f == "MPSAFE") {		# allow MP-safe syscalls
-		sycall_flags = sprintf("SY_MPSAFE | %s", sycall_flags)
-		f++
-	}
-	if ($f == "NOLOCK") {		# syscall does not need locks
-		sycall_flags = sprintf("SY_NOLOCK | %s", sycall_flags)
-		f++
-	}
-	if ($f ~ /^[a-z0-9_]*$/) {      # allow syscall alias
-		funcalias=$f
-		f++
-	}	
-	if ($f != "{")
-		parserr($f, "{")
-	f++
-	if ($end != "}")
-		parserr($end, "}")
-	end--
-	if ($end != ";")
-		parserr($end, ";")
-	end--
-	if ($end != ")")
-		parserr($end, ")")
-	end--
-
-	returntype = oldf = "";
-	do {
-		if (returntype != "" && oldf != "*")
-			returntype = returntype" ";
-		returntype = returntype$f;
-		oldf = $f;
-		f++
-	} while (f < (end - 1) && $(f+1) != "(");
-	if (f == (end - 1)) {
-		parserr($f, "function argument definition (maybe \"(\"?)");
-	}
-
-	funcname=$f
-	if (funcalias == "") {
-		funcalias=funcname
-		sub(/^([^_]+_)*sys_/, "", funcalias)
-	}
-	f++
-
-	if ($f != "(")
-		parserr($f, ")")
-	f++
-
-	argc=0;
-	if (f == end) {
-		if ($f != "void")
-			parserr($f, "argument definition")
-		isvarargs = 0;
-		varargc = 0;
-		return
-	}
-
-	# some system calls (open() and fcntl()) can accept a variable
-	# number of arguments.  If syscalls accept a variable number of
-	# arguments, they must still have arguments specified for
-	# the remaining argument "positions," because of the way the
-	# kernel system call argument handling works.
-	#
-	# Indirect system calls, e.g. syscall(), are exceptions to this
-	# rule, since they are handled entirely by machine-dependent code
-	# and do not need argument structures built.
-
-	isvarargs = 0;
-	while (f <= end) {
-		if ($f == "...") {
-			f++;
-			isvarargs = 1;
-			varargc = argc;
-			continue;
-		}
-		argc++
-		argtype[argc]=""
-		oldf=""
-		while (f < end && $(f+1) != ",") {
-			if (argtype[argc] != "" && oldf != "*")
-				argtype[argc] = argtype[argc]" ";
-			argtype[argc] = argtype[argc]$f;
-			oldf = $f;
-			f++
-		}
-		if (argtype[argc] == "")
-			parserr($f, "argument definition")
-		argname[argc]=$f;
-		f += 2;			# skip name, and any comma
-	}
-	# must see another argument after varargs notice.
-	if (isvarargs) {
-		if (argc == varargc && $2 != "INDIR")
-			parserr($f, "argument definition")
-	} else
-		varargc = argc;
-}
-function putent(nodefs, compatwrap) {
-	# output syscall declaration for switch table.  INDIR functions
-	# get none, since they always have sys_nosys() for their table
-	# entries.
-	if (nodefs != "INDIR") {
-		prototype = "(struct proc *, void *, register_t *)"
-		if (compatwrap == "")
-			printf("int\t%s%s;\n", funcname,
-			    prototype) > sysprotos
-		else
-			printf("int\t%s_%s%s;\n", compatwrap, funcname,
-			    prototype) > sysprotos
-	}
-
-	# output syscall switch entry
-	if (nodefs == "INDIR") {
-		printf("\t{ 0, 0, %s,\n\t    sys_nosys },\t\t\t/* %d = %s (indir) */\n", \
-		    sycall_flags, syscall, funcalias) > sysent
-	} else {
-#		printf("\t{ { %d", argc) > sysent
-#		for (i = 1; i <= argc; i++) {
-#			if (i == 5) 		# wrap the line
-#				printf(",\n\t    ") > sysent
-#			else
-#				printf(", ") > sysent
-#			printf("s(%s)", argtypenospc[i]) > sysent
-#		}
-		printf("\t{ %d, ", argc) > sysent
-		if (argc == 0)
-			printf("0") > sysent
-		else if (compatwrap == "")
-			printf("s(struct %s_args)", funcname) > sysent
-		else
-			printf("s(struct %s_%s_args)", compatwrap,
-			    funcname) > sysent
-		if (compatwrap == "")
-			wfn = sprintf("%s", funcname);
-		else
-			wfn = sprintf("%s(%s)", compatwrap, funcname);
-		printf(", %s,\n\t    %s },", sycall_flags, wfn) > sysent
-		for (i = 0; i < (33 - length(wfn)) / 8; i++)
+	function align_sysent_comment(column) {
+		printf("\t") > sysent
+		column = column + 8 - column % 8
+		while (column < 56) {
 			printf("\t") > sysent
-		if (compatwrap == "")
-			printf("/* %d = %s */\n", syscall, funcalias) > sysent
-		else
-			printf("/* %d = %s %s */\n", syscall, compatwrap,
-			    funcalias) > sysent
-	}
-
-	# output syscall name for names table
-	if (compatwrap == "")
-		printf("\t\"%s\",\t\t\t/* %d = %s */\n", funcalias, syscall,
-		    funcalias) > sysnames
-	else
-		printf("\t\"%s_%s\",\t/* %d = %s %s */\n", compatwrap,
-		    funcalias, syscall, compatwrap, funcalias) > sysnames
-
-	# output syscall number of header, if appropriate
-	if (nodefs == "" || nodefs == "NOARGS" || nodefs == "INDIR") {
-		# output a prototype, to be used to generate lint stubs in
-		# libc.
-		printf("/* syscall: \"%s\" ret: \"%s\" args:", funcalias,
-		    returntype) > sysnumhdr
-		for (i = 1; i <= varargc; i++)
-			printf(" \"%s\"", argtype[i]) > sysnumhdr
-		if (isvarargs)
-			printf(" \"...\"") > sysnumhdr
-		printf(" */\n") > sysnumhdr
-
-		printf("#define\t%s%s\t%d\n\n", constprefix, funcalias,
-		    syscall) > sysnumhdr
-	} else if (nodefs != "NODEF")
-		printf("\t\t\t\t/* %d is %s %s */\n\n", syscall,
-		    compatwrap, funcalias) > sysnumhdr
-
-	# output syscall argument structure, if it has arguments
-	if (argc != 0 && nodefs != "NOARGS" && nodefs != "INDIR") {
-		if (compatwrap == "")
-			printf("\nstruct %s_args {\n", funcname) > sysarghdr
-		else
-			printf("\nstruct %s_%s_args {\n", compatwrap,
-			    funcname) > sysarghdr
-		for (i = 1; i <= argc; i++)
-			printf("\tsyscallarg(%s) %s;\n", argtype[i],
-			    argname[i]) > sysarghdr
-		printf("};\n") > sysarghdr
-	}
-}
-$2 == "STD" {
-	parseline()
-	putent("", "");
-	syscall++
-	next
-}
-$2 == "NODEF" || $2 == "NOARGS" || $2 == "INDIR" {
-	parseline()
-	putent($2, "")
-	syscall++
-	next
-}
-$2 == "OBSOL" || $2 == "UNIMPL" {
-	if ($2 == "OBSOL")
-		comment="obsolete"
-	else
-		comment="unimplemented"
-	for (i = 3; i <= NF; i++)
-		comment=comment " " $i
-
-	printf("\t{ 0, 0, 0,\n\t    sys_nosys },\t\t\t/* %d = %s */\n", \
-	    syscall, comment) > sysent
-	printf("\t\"#%d (%s)\",\t\t/* %d = %s */\n", \
-	    syscall, comment, syscall, comment) > sysnames
-	if ($2 != "UNIMPL")
-		printf("\t\t\t\t/* %d is %s */\n", syscall, comment) > sysnumhdr
-	syscall++
-	next
-}
-{
-	for (i = 1; i <= ncompat; i++) {
-		if ($2 == compat_upper[i]) {
-			parseline();
-			putent("COMMENT", compat[i])
-			syscall++
-			next
+			column = column + 8
 		}
 	}
-	printf "%s: line %d: unrecognized keyword %s\n", infile, NR, $2
-	exit 1
-}
-END {
-	printf("};\n\n") > sysent
-	printf("};\n") > sysnames
-	printf("#define\t%sMAXSYSCALL\t%d\n", constprefix, syscall) > sysnumhdr
-} '
+	function parserr(was, wanted) {
+		printf "%s: line %d: unexpected %s (expected %s)\n",
+		    infile, NR, was, wanted
+		exit 1
+	}
+	function parseline() {
+		f=4			# toss number, type, audit event
+		argc= 0;
+		argssize = "0"
+		if ($NF != "}") {
+			funcalias=$(NF-2)
+			argalias=$(NF-1)
+			rettype=$NF
+			end=NF-3
+		} else {
+			funcalias=""
+			argalias=""
+			rettype="int"
+			end=NF
+		}
+		if ($3 == "NODEF") {
+			auditev="AUE_NULL"
+			funcname=$4
+			argssize = "AS(" $6 ")"
+			return
+		}
+		if ($f != "{")
+			parserr($f, "{")
+		f++
+		if ($end != "}")
+			parserr($end, "}")
+		end--
+		if ($end != ";")
+			parserr($end, ";")
+		end--
+		if ($end != ")")
+			parserr($end, ")")
+		end--
 
-cat $sysprotos >> $sysarghdr
-cat $sysdcl $sysent > $syssw
+		f++	#function return type
 
-#chmod 444 $sysnames $sysnumhdr $syssw
+		funcname=$f
+		if (funcalias == "")
+			funcalias = funcname
+		if (argalias == "") {
+			argalias = funcname "_args"
+			if ($3 == "COMPAT")
+				argalias = "o" argalias
+			if ($3 == "COMPAT4")
+				argalias = "freebsd4_" argalias
+			if ($3 == "COMPAT6")
+				argalias = "freebsd6_" argalias
+		}
+		f++
+
+		if ($f != "(")
+			parserr($f, ")")
+		f++
+
+		if (f == end) {
+			if ($f != "void")
+				parserr($f, "argument definition")
+			return
+		}
+
+		while (f <= end) {
+			argc++
+			argtype[argc]=""
+			oldf=""
+			while (f < end && $(f+1) != ",") {
+				if (argtype[argc] != "" && oldf != "*")
+					argtype[argc] = argtype[argc]" ";
+				argtype[argc] = argtype[argc]$f;
+				oldf = $f;
+				f++
+			}
+			if (argtype[argc] == "")
+				parserr($f, "argument definition")
+			argname[argc]=$f;
+			f += 2;			# skip name, and any comma
+		}
+		if (argc != 0)
+			argssize = "AS(" argalias ")"
+	}
+	{	comment = $4
+		if (NF < 7)
+			for (i = 5; i <= NF; i++)
+				comment = comment " " $i
+	}
+
+	#
+	# The AUE_ audit event identifier.
+	#
+	{
+		auditev = $2;
+	}
+
+	$3 == "STD" || $3 == "NODEF" || $3 == "NOARGS"  || $3 == "NOPROTO" \
+	    || $3 == "NOIMPL" || $3 == "NOSTD" {
+		parseline()
+		printf("\t/* %s */\n\tcase %d: {\n", funcname, syscall) > systrace
+		if (argc > 0) {
+			printf("\t\tstruct %s *p = params;\n", argalias) > systrace
+			for (i = 1; i <= argc; i++) {
+				if (index(argtype[i], "*") > 0 || argtype[i] == "caddr_t")
+					printf("\t\tuarg[%d] = (intptr_t) p->%s; /* %s */\n", \
+					     i - 1, \
+					     argname[i], argtype[i]) > systrace
+				else if (substr(argtype[i], 1, 1) == "u" || argtype[i] == "size_t")
+					printf("\t\tuarg[%d] = p->%s; /* %s */\n", \
+					     i - 1, \
+					     argname[i], argtype[i]) > systrace
+				else
+					printf("\t\tiarg[%d] = p->%s; /* %s */\n", \
+					     i - 1, \
+					     argname[i], argtype[i]) > systrace
+			}
+		}
+		printf("\t\t*n_args = %d;\n\t\tbreak;\n\t}\n", argc) > systrace
+		if ((!nosys || funcname != "nosys") && \
+		    (funcname != "lkmnosys") && (funcname != "lkmressys")) {
+			if (argc != 0 && $3 != "NOARGS" && $3 != "NOPROTO") {
+				printf("struct %s {\n", argalias) > sysarg
+				for (i = 1; i <= argc; i++)
+					printf("\tchar %s_l_[PADL_(%s)]; " \
+					    "%s %s; char %s_r_[PADR_(%s)];\n",
+					    argname[i], argtype[i],
+					    argtype[i], argname[i],
+					    argname[i], argtype[i]) > sysarg
+				printf("};\n") > sysarg
+			}
+			else if ($3 != "NOARGS" && $3 != "NOPROTO" && \
+			    $3 != "NODEF")
+				printf("struct %s {\n\tregister_t dummy;\n};\n",
+				    argalias) > sysarg
+		}
+		if (($3 != "NOPROTO" && $3 != "NODEF" && \
+		    (funcname != "nosys" || !nosys)) || \
+		    (funcname == "lkmnosys" && !lkmnosys) || \
+		    funcname == "lkmressys") {
+			printf("%s\t%s(struct thread *, struct %s *)",
+			    rettype, funcname, argalias) > sysdcl
+			printf(";\n") > sysdcl
+			printf("#define\t%sAUE_%s\t%s\n", syscallprefix,
+			    funcalias, auditev) > sysaue
+		}
+		if (funcname == "nosys")
+			nosys = 1
+		if (funcname == "lkmnosys")
+			lkmnosys = 1
+		printf("\t{ %s, (sy_call_t *)", argssize) > sysent
+		column = 8 + 2 + length(argssize) + 15
+		if ($3 == "NOIMPL") {
+			printf("%s },", "nosys, AUE_NULL, NULL, 0, 0") > sysent
+			column = column + length("nosys") + 3
+		} else if ($3 == "NOSTD") {
+			printf("%s },", "lkmressys, AUE_NULL, NULL, 0, 0") > sysent
+			column = column + length("lkmressys") + 3
+		} else {
+			printf("%s, %s, NULL, 0, 0 },", funcname, auditev) > sysent
+			column = column + length(funcname) + length(auditev) + 3
+		} 
+		align_sysent_comment(column)
+		printf("/* %d = %s */\n", syscall, funcalias) > sysent
+		printf("\t\"%s\",\t\t\t/* %d = %s */\n",
+		    funcalias, syscall, funcalias) > sysnames
+		if ($3 != "NODEF") {
+			printf("#define\t%s%s\t%d\n", syscallprefix,
+		    	    funcalias, syscall) > syshdr
+			printf(" \\\n\t%s.o", funcalias) > sysmk
+		}
+		syscall++
+		next
+	}
+	$3 == "COMPAT" || $3 == "COMPAT4" || $3 == "COMPAT6" || $3 == "CPT_NOA" {
+		if ($3 == "COMPAT" || $3 == "CPT_NOA") {
+			ncompat++
+			out = syscompat
+			outdcl = syscompatdcl
+			wrap = "compat"
+			prefix = "o"
+		} else if ($3 == "COMPAT4") {
+			ncompat4++
+			out = syscompat4
+			outdcl = syscompat4dcl
+			wrap = "compat4"
+			prefix = "freebsd4_"
+		} else if ($3 == "COMPAT6") {
+			ncompat6++
+			out = syscompat6
+			outdcl = syscompat6dcl
+			wrap = "compat6"
+			prefix = "freebsd6_"
+		}
+		parseline()
+		if (argc != 0 && $3 != "CPT_NOA") {
+			printf("struct %s {\n", argalias) > out
+			for (i = 1; i <= argc; i++)
+				printf("\tchar %s_l_[PADL_(%s)]; %s %s; " \
+				    "char %s_r_[PADR_(%s)];\n",
+				    argname[i], argtype[i],
+				    argtype[i], argname[i],
+				    argname[i], argtype[i]) > out
+			printf("};\n") > out
+		}
+		else if($3 != "CPT_NOA")
+			printf("struct %s {\n\tregister_t dummy;\n};\n",
+			    argalias) > sysarg
+		printf("%s\t%s%s(struct thread *, struct %s *);\n",
+		    rettype, prefix, funcname, argalias) > outdcl
+		printf("\t{ %s(%s,%s), %s, NULL, 0, 0 },",
+		    wrap, argssize, funcname, auditev) > sysent
+		align_sysent_comment(8 + 9 + \
+		    length(argssize) + 1 + length(funcname) + length(auditev) + 4)
+		printf("/* %d = old %s */\n", syscall, funcalias) > sysent
+		printf("\t\"%s.%s\",\t\t/* %d = old %s */\n",
+		    wrap, funcalias, syscall, funcalias) > sysnames
+		if ($3 == "COMPAT" || $3 == "CPT_NOA") {
+			printf("\t\t\t\t/* %d is old %s */\n",
+			    syscall, funcalias) > syshdr
+		} else {
+			printf("#define\t%s%s%s\t%d\n", syscallprefix,
+			    prefix, funcalias, syscall) > syshdr
+			printf(" \\\n\t%s%s.o", prefix, funcalias) > sysmk
+		}
+		syscall++
+		next
+	}
+	$3 == "LIBCOMPAT" {
+		ncompat++
+		parseline()
+		printf("%s\to%s();\n", rettype, funcname) > syscompatdcl
+		printf("\t{ compat(%s,%s), %s, NULL, 0, 0 },",
+		    argssize, funcname, auditev) > sysent
+		align_sysent_comment(8 + 9 + \
+		    length(argssize) + 1 + length(funcname) + length(auditev) + 4)
+		printf("/* %d = old %s */\n", syscall, funcalias) > sysent
+		printf("\t\"old.%s\",\t\t/* %d = old %s */\n",
+		    funcalias, syscall, funcalias) > sysnames
+		printf("#define\t%s%s\t%d\t/* compatibility; still used by libc */\n",
+		    syscallprefix, funcalias, syscall) > syshdr
+		printf(" \\\n\t%s.o", funcalias) > sysmk
+		syscall++
+		next
+	}
+	$3 == "OBSOL" {
+		printf("\t{ 0, (sy_call_t *)nosys, AUE_NULL, NULL, 0, 0 },") > sysent
+		align_sysent_comment(34)
+		printf("/* %d = obsolete %s */\n", syscall, comment) > sysent
+		printf("\t\"obs_%s\",\t\t\t/* %d = obsolete %s */\n",
+		    $4, syscall, comment) > sysnames
+		printf("\t\t\t\t/* %d is obsolete %s */\n",
+		    syscall, comment) > syshdr
+		syscall++
+		next
+	}
+	$3 == "UNIMPL" {
+		printf("\t{ 0, (sy_call_t *)nosys, AUE_NULL, NULL, 0, 0 },\t\t\t/* %d = %s */\n",
+		    syscall, comment) > sysent
+		printf("\t\"#%d\",\t\t\t/* %d = %s */\n",
+		    syscall, syscall, comment) > sysnames
+		syscall++
+		next
+	}
+	{
+		printf "%s: line %d: unrecognized keyword %s\n", infile, NR, $3
+		exit 1
+	}
+	END {
+		printf "\n#define AS(name) (sizeof(struct name) / sizeof(register_t))\n" > sysinc
+
+		if (ncompat != 0 || ncompat4 != 0 || ncompat6 != 0)
+			printf "#include \"opt_compat.h\"\n\n" > syssw
+		printf "#include \<bsm/audit_kevents.h\>\n" > syssw
+
+		if (ncompat != 0) {
+			printf "\n#ifdef %s\n", compat > sysinc
+			printf "#define compat(n, name) n, (sy_call_t *)__CONCAT(o,name)\n" > sysinc
+			printf "#else\n" > sysinc
+			printf "#define compat(n, name) 0, (sy_call_t *)nosys\n" > sysinc
+			printf "#endif\n" > sysinc
+		}
+
+		if (ncompat4 != 0) {
+			printf "\n#ifdef %s\n", compat4 > sysinc
+			printf "#define compat4(n, name) n, (sy_call_t *)__CONCAT(freebsd4_,name)\n" > sysinc
+			printf "#else\n" > sysinc
+			printf "#define compat4(n, name) 0, (sy_call_t *)nosys\n" > sysinc
+			printf "#endif\n" > sysinc
+		}
+
+		if (ncompat6 != 0) {
+			printf "\n#ifdef %s\n", compat6 > sysinc
+			printf "#define compat6(n, name) n, (sy_call_t *)__CONCAT(freebsd6_,name)\n" > sysinc
+			printf "#else\n" > sysinc
+			printf "#define compat6(n, name) 0, (sy_call_t *)nosys\n" > sysinc
+			printf "#endif\n" > sysinc
+		}
+
+		printf("\n#endif /* %s */\n\n", compat) > syscompatdcl
+		printf("\n#endif /* %s */\n\n", compat4) > syscompat4dcl
+		printf("\n#endif /* %s */\n\n", compat6) > syscompat6dcl
+
+		printf("\n#undef PAD_\n") > sysprotoend
+		printf("#undef PADL_\n") > sysprotoend
+		printf("#undef PADR_\n") > sysprotoend
+		printf("\n#endif /* !%s */\n", sysproto_h) > sysprotoend
+
+		printf("\n") > sysmk
+		printf("};\n") > sysent
+		printf("};\n") > sysnames
+		printf("#define\t%sMAXSYSCALL\t%d\n", syscallprefix, syscall) \
+		    > syshdr
+		printf "\tdefault:\n\t\t*n_args = 0;\n\t\tbreak;\n\t};\n}\n" > systrace
+	} '
+
+cat $sysinc $sysent >> $syssw
+cat $sysarg $sysdcl \
+	$syscompat $syscompatdcl \
+	$syscompat4 $syscompat4dcl \
+	$syscompat6 $syscompat6dcl \
+	$sysaue $sysprotoend > $sysproto
+

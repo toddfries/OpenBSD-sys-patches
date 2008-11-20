@@ -1,7 +1,4 @@
-/*	$OpenBSD: rpcv2.h,v 1.6 2003/06/02 23:28:20 millert Exp $	*/
-/*	$NetBSD: rpcv2.h,v 1.8 1996/02/18 11:54:11 fvdl Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -16,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,6 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)rpcv2.h	8.2 (Berkeley) 3/30/95
+ * $FreeBSD: src/sys/nfs/rpcv2.h,v 1.14 2005/01/07 01:45:50 imp Exp $
  */
 
 
@@ -51,8 +49,7 @@
 #define	RPCAUTH_NULL	0
 #define	RPCAUTH_UNIX	1
 #define	RPCAUTH_SHORT	2
-#define RPCAUTH_KERB4	4
-#define	RPCAUTH_NQNFS	300000
+#define	RPCAUTH_KERB4	4
 #define	RPCAUTH_MAXSIZ	400
 #define	RPCVERF_MAXSIZ	12	/* For Kerb, can actually be 400 */
 #define	RPCAUTH_UNIXGIDS 16
@@ -63,19 +60,28 @@
 #define RPCAKN_FULLNAME	0
 #define RPCAKN_NICKNAME	1
 
-/* Rpc Constants */
+/* msg type */
 #define	RPC_CALL	0
 #define	RPC_REPLY	1
+
+/* reply status */
 #define	RPC_MSGACCEPTED	0
 #define	RPC_MSGDENIED	1
+
+/* accepted status */
+#define	RPC_SUCCESS	0
 #define	RPC_PROGUNAVAIL	1
 #define	RPC_PROGMISMATCH	2
 #define	RPC_PROCUNAVAIL	3
 #define	RPC_GARBAGE	4		/* I like this one */
+#define	RPC_SYSTEMERR	5
+
+/* rejected status */
 #define	RPC_MISMATCH	0
 #define	RPC_AUTHERR	1
 
 /* Authentication failures */
+#define	AUTH_OK		0
 #define	AUTH_BADCRED	1
 #define	AUTH_REJECTCRED	2
 #define	AUTH_BADVERF	3
@@ -89,7 +95,7 @@
 /* RPC Prog definitions */
 #define	RPCPROG_MNT	100005
 #define	RPCMNT_VER1	1
-#define	RPCMNT_VER3	3
+#define RPCMNT_VER3	3
 #define	RPCMNT_MOUNT	1
 #define	RPCMNT_DUMP	2
 #define	RPCMNT_UMOUNT	3
@@ -98,45 +104,5 @@
 #define	RPCMNT_NAMELEN	255
 #define	RPCMNT_PATHLEN	1024
 #define	RPCPROG_NFS	100003
- 
-/* Structs for common parts of the rpc's */
-struct rpcv2_time {
-	u_int32_t rpc_sec;
-	u_int32_t rpc_usec;
-};
 
-/*
- * Structures used for RPCAUTH_KERB4.
- */
-struct nfsrpc_fullverf {
-	u_int32_t t1;
-	u_int32_t t2;
-	u_int32_t w2;
-};
-
-struct nfsrpc_fullblock {
-	u_int32_t t1;
-	u_int32_t t2;
-	u_int32_t w1;
-	u_int32_t w2;
-};
-
-struct nfsrpc_nickverf {
-	u_int32_t kind;
-	struct nfsrpc_fullverf	verf;
-};
-
-/*
- * and their sizes in bytes.. If sizeof (struct nfsrpc_xx) != these
- * constants, well then things will break in mount_nfs and nfsd.
- */
-#define RPCX_FULLVERF	12
-#define RPCX_FULLBLOCK	16
-#define RPCX_NICKVERF	16
-
-typedef u_char			NFSKERBKEY_T[2];
-typedef u_char			NFSKERBKEYSCHED_T[2];
-#define NFS_KERBTTL	(30 * 60)	/* Credential ttl (sec) */
-#define NFS_KERBCLOCKSKEW (5 * 60)	/* Clock skew (sec) */
-#define NFS_KERBW1(t)	(*((u_long *)(&((t).dat[((t).length + 3) & ~0x3]))))
 #endif

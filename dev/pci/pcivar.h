@@ -1,23 +1,16 @@
-/*	$OpenBSD: pcivar.h,v 1.57 2007/12/31 19:13:36 kettenis Exp $	*/
-/*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
-
-/*
- * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
- * Copyright (c) 1994 Charles Hannum.  All rights reserved.
+/*-
+ * Copyright (c) 1997, Stefan Esser <se@freebsd.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *    notice unmodified, this list of conditions, and the following
+ *    disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Charles Hannum.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,222 +22,459 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-#ifndef _DEV_PCI_PCIVAR_H_
-#define	_DEV_PCI_PCIVAR_H_
-
-/*
- * Definitions for PCI autoconfiguration.
  *
- * This file describes types and functions which are used for PCI
- * configuration.  Some of this information is machine-specific, and is
- * provided by pci_machdep.h.
+ * $FreeBSD: src/sys/dev/pci/pcivar.h,v 1.81 2008/04/12 20:26:07 phk Exp $
+ *
  */
 
-#include <sys/device.h>
-#include <machine/bus.h>
-#include <dev/pci/pcireg.h>
+#ifndef _PCIVAR_H_
+#define	_PCIVAR_H_
 
-/*
- * Structures and definitions needed by the machine-dependent header.
- */
-typedef u_int32_t pcireg_t;		/* configuration space register XXX */
+#include <sys/queue.h>
 
-/*
- * Power Management (PCI 2.2)
- */
-#define PCI_PWR_D0	0
-#define PCI_PWR_D1	1
-#define PCI_PWR_D2	2
-#define PCI_PWR_D3	3
+/* some PCI bus constants */
 
-#ifdef _KERNEL
+#define	PCI_DOMAINMAX	65535	/* highest supported domain number */
+#define	PCI_BUSMAX	255	/* highest supported bus number */
+#define	PCI_SLOTMAX	31	/* highest supported slot number */
+#define	PCI_FUNCMAX	7	/* highest supported function number */
+#define	PCI_REGMAX	255	/* highest supported config register addr. */
 
-struct pcibus_attach_args;
-struct pci_softc;
+#define	PCI_MAXMAPS_0	6	/* max. no. of memory/port maps */
+#define	PCI_MAXMAPS_1	2	/* max. no. of maps for PCI to PCI bridge */
+#define	PCI_MAXMAPS_2	1	/* max. no. of maps for CardBus bridge */
 
-/*
- * Machine-dependent definitions.
- */
-#if defined(__alpha__)
-#include <alpha/pci/pci_machdep.h>
-#elif defined(__i386__)
-#include <i386/pci/pci_machdep.h>
-#elif defined(__powerpc__)
-#include <powerpc/pci/pci_machdep.h>
-#elif defined(__sgi__)
-#include <sgi/pci/pci_machdep.h>
-#else
-#include <machine/pci_machdep.h>
+typedef uint64_t pci_addr_t;
+
+/* Interesting values for PCI power management */
+struct pcicfg_pp {
+    uint16_t	pp_cap;		/* PCI power management capabilities */
+    uint8_t	pp_status;	/* config space address of PCI power status reg */
+    uint8_t	pp_pmcsr;	/* config space address of PMCSR reg */
+    uint8_t	pp_data;	/* config space address of PCI power data reg */
+};
+ 
+struct vpd_readonly {
+    char	keyword[2];
+    char	*value;
+};
+
+struct vpd_write {
+    char	keyword[2];
+    char	*value;
+    int 	start;
+    int 	len;
+};
+
+struct pcicfg_vpd {
+    uint8_t	vpd_reg;	/* base register, + 2 for addr, + 4 data */
+    char	vpd_cached;
+    char	*vpd_ident;	/* string identifier */
+    int 	vpd_rocnt;
+    struct vpd_readonly *vpd_ros;
+    int 	vpd_wcnt;
+    struct vpd_write *vpd_w;
+};
+
+/* Interesting values for PCI MSI */
+struct pcicfg_msi {
+    uint16_t	msi_ctrl;	/* Message Control */
+    uint8_t	msi_location;	/* Offset of MSI capability registers. */
+    uint8_t	msi_msgnum;	/* Number of messages */
+    int		msi_alloc;	/* Number of allocated messages. */
+    uint64_t	msi_addr;	/* Contents of address register. */
+    uint16_t	msi_data;	/* Contents of data register. */
+    u_int	msi_handlers;
+};
+
+/* Interesting values for PCI MSI-X */
+struct msix_vector {
+    uint64_t	mv_address;	/* Contents of address register. */
+    uint32_t	mv_data;	/* Contents of data register. */
+    int		mv_irq;
+};
+
+struct msix_table_entry {
+    u_int	mte_vector;	/* 1-based index into msix_vectors array. */
+    u_int	mte_handlers;
+};
+
+struct pcicfg_msix {
+    uint16_t	msix_ctrl;	/* Message Control */
+    uint16_t	msix_msgnum;	/* Number of messages */
+    uint8_t	msix_location;	/* Offset of MSI-X capability registers. */
+    uint8_t	msix_table_bar;	/* BAR containing vector table. */
+    uint8_t	msix_pba_bar;	/* BAR containing PBA. */
+    uint32_t	msix_table_offset;
+    uint32_t	msix_pba_offset;
+    int		msix_alloc;	/* Number of allocated vectors. */
+    int		msix_table_len;	/* Length of virtual table. */
+    struct msix_table_entry *msix_table; /* Virtual table. */
+    struct msix_vector *msix_vectors;	/* Array of allocated vectors. */
+    struct resource *msix_table_res;	/* Resource containing vector table. */
+    struct resource *msix_pba_res;	/* Resource containing PBA. */
+};
+
+/* config header information common to all header types */
+typedef struct pcicfg {
+    struct device *dev;		/* device which owns this */
+
+    uint32_t	bar[PCI_MAXMAPS_0]; /* BARs */
+    uint32_t	bios;		/* BIOS mapping */
+
+    uint16_t	subvendor;	/* card vendor ID */
+    uint16_t	subdevice;	/* card device ID, assigned by card vendor */
+    uint16_t	vendor;		/* chip vendor ID */
+    uint16_t	device;		/* chip device ID, assigned by chip vendor */
+
+    uint16_t	cmdreg;		/* disable/enable chip and PCI options */
+    uint16_t	statreg;	/* supported PCI features and error state */
+
+    uint8_t	baseclass;	/* chip PCI class */
+    uint8_t	subclass;	/* chip PCI subclass */
+    uint8_t	progif;		/* chip PCI programming interface */
+    uint8_t	revid;		/* chip revision ID */
+
+    uint8_t	hdrtype;	/* chip config header type */
+    uint8_t	cachelnsz;	/* cache line size in 4byte units */
+    uint8_t	intpin;		/* PCI interrupt pin */
+    uint8_t	intline;	/* interrupt line (IRQ for PC arch) */
+
+    uint8_t	mingnt;		/* min. useful bus grant time in 250ns units */
+    uint8_t	maxlat;		/* max. tolerated bus grant latency in 250ns */
+    uint8_t	lattimer;	/* latency timer in units of 30ns bus cycles */
+
+    uint8_t	mfdev;		/* multi-function device (from hdrtype reg) */
+    uint8_t	nummaps;	/* actual number of PCI maps used */
+
+    uint32_t	domain;		/* PCI domain */
+    uint8_t	bus;		/* config space bus address */
+    uint8_t	slot;		/* config space slot address */
+    uint8_t	func;		/* config space function number */
+
+    struct pcicfg_pp pp;	/* pci power management */
+    struct pcicfg_vpd vpd;	/* pci vital product data */
+    struct pcicfg_msi msi;	/* pci msi */
+    struct pcicfg_msix msix;	/* pci msi-x */
+} pcicfgregs;
+
+/* additional type 1 device config header information (PCI to PCI bridge) */
+
+#define	PCI_PPBMEMBASE(h,l)  ((((pci_addr_t)(h) << 32) + ((l)<<16)) & ~0xfffff)
+#define	PCI_PPBMEMLIMIT(h,l) ((((pci_addr_t)(h) << 32) + ((l)<<16)) | 0xfffff)
+#define	PCI_PPBIOBASE(h,l)   ((((h)<<16) + ((l)<<8)) & ~0xfff)
+#define	PCI_PPBIOLIMIT(h,l)  ((((h)<<16) + ((l)<<8)) | 0xfff)
+
+typedef struct {
+    pci_addr_t	pmembase;	/* base address of prefetchable memory */
+    pci_addr_t	pmemlimit;	/* topmost address of prefetchable memory */
+    uint32_t	membase;	/* base address of memory window */
+    uint32_t	memlimit;	/* topmost address of memory window */
+    uint32_t	iobase;		/* base address of port window */
+    uint32_t	iolimit;	/* topmost address of port window */
+    uint16_t	secstat;	/* secondary bus status register */
+    uint16_t	bridgectl;	/* bridge control register */
+    uint8_t	seclat;		/* CardBus latency timer */
+} pcih1cfgregs;
+
+/* additional type 2 device config header information (CardBus bridge) */
+
+typedef struct {
+    uint32_t	membase0;	/* base address of memory window */
+    uint32_t	memlimit0;	/* topmost address of memory window */
+    uint32_t	membase1;	/* base address of memory window */
+    uint32_t	memlimit1;	/* topmost address of memory window */
+    uint32_t	iobase0;	/* base address of port window */
+    uint32_t	iolimit0;	/* topmost address of port window */
+    uint32_t	iobase1;	/* base address of port window */
+    uint32_t	iolimit1;	/* topmost address of port window */
+    uint32_t	pccardif;	/* PC Card 16bit IF legacy more base addr. */
+    uint16_t	secstat;	/* secondary bus status register */
+    uint16_t	bridgectl;	/* bridge control register */
+    uint8_t	seclat;		/* CardBus latency timer */
+} pcih2cfgregs;
+
+extern uint32_t pci_numdevs;
+
+/* Only if the prerequisites are present */
+#if defined(_SYS_BUS_H_) && defined(_SYS_PCIIO_H_)
+struct pci_devinfo {
+        STAILQ_ENTRY(pci_devinfo) pci_links;
+	struct resource_list resources;
+	pcicfgregs		cfg;
+	struct pci_conf		conf;
+};
 #endif
 
+#ifdef _SYS_BUS_H_
+
+#include "pci_if.h"
+
 /*
- * PCI bus attach arguments.
+ * Define pci-specific resource flags for accessing memory via dense
+ * or bwx memory spaces. These flags are ignored on i386.
  */
-struct pcibus_attach_args {
-	char	*pba_busname;		/* XXX should be common */
-	bus_space_tag_t pba_iot;	/* pci i/o space tag */
-	bus_space_tag_t pba_memt;	/* pci mem space tag */
-	bus_dma_tag_t pba_dmat;		/* DMA tag */
-	pci_chipset_tag_t pba_pc;
+#define	PCI_RF_DENSE	0x10000
+#define	PCI_RF_BWX	0x20000
 
-	int		pba_domain;	/* PCI domain */
-	int		pba_bus;	/* PCI bus number */
-
-	/*
-	 * Pointer to the pcitag of our parent bridge.  If there is no
-	 * parent bridge, then we assume we are a root bus.
-	 */
-	pcitag_t	*pba_bridgetag;
-	pci_intr_handle_t *pba_bridgeih;
-
-	/*
-	 * Interrupt swizzling information.  These fields
-	 * are only used by secondary busses.
-	 */
-	u_int		pba_intrswiz;	/* how to swizzle pins */
-	pcitag_t	pba_intrtag;	/* intr. appears to come from here */
+enum pci_device_ivars {
+    PCI_IVAR_SUBVENDOR,
+    PCI_IVAR_SUBDEVICE,
+    PCI_IVAR_VENDOR,
+    PCI_IVAR_DEVICE,
+    PCI_IVAR_DEVID,
+    PCI_IVAR_CLASS,
+    PCI_IVAR_SUBCLASS,
+    PCI_IVAR_PROGIF,
+    PCI_IVAR_REVID,
+    PCI_IVAR_INTPIN,
+    PCI_IVAR_IRQ,
+    PCI_IVAR_DOMAIN,
+    PCI_IVAR_BUS,
+    PCI_IVAR_SLOT,
+    PCI_IVAR_FUNCTION,
+    PCI_IVAR_ETHADDR,
+    PCI_IVAR_CMDREG,
+    PCI_IVAR_CACHELNSZ,
+    PCI_IVAR_MINGNT,
+    PCI_IVAR_MAXLAT,
+    PCI_IVAR_LATTIMER
 };
 
 /*
- * PCI device attach arguments.
+ * Simplified accessors for pci devices
  */
-struct pci_attach_args {
-	bus_space_tag_t pa_iot;		/* pci i/o space tag */
-	bus_space_tag_t pa_memt;	/* pci mem space tag */
-	bus_dma_tag_t pa_dmat;		/* DMA tag */
-	pci_chipset_tag_t pa_pc;
-	int		pa_flags;	/* flags; see below */
+#define	PCI_ACCESSOR(var, ivar, type)					\
+	__BUS_ACCESSOR(pci, var, PCI, ivar, type)
 
-	u_int           pa_domain;
-	u_int           pa_bus;
-	u_int		pa_device;
-	u_int		pa_function;
-	pcitag_t	pa_tag;
-	pcireg_t	pa_id, pa_class;
+PCI_ACCESSOR(subvendor,		SUBVENDOR,	uint16_t)
+PCI_ACCESSOR(subdevice,		SUBDEVICE,	uint16_t)
+PCI_ACCESSOR(vendor,		VENDOR,		uint16_t)
+PCI_ACCESSOR(device,		DEVICE,		uint16_t)
+PCI_ACCESSOR(devid,		DEVID,		uint32_t)
+PCI_ACCESSOR(class,		CLASS,		uint8_t)
+PCI_ACCESSOR(subclass,		SUBCLASS,	uint8_t)
+PCI_ACCESSOR(progif,		PROGIF,		uint8_t)
+PCI_ACCESSOR(revid,		REVID,		uint8_t)
+PCI_ACCESSOR(intpin,		INTPIN,		uint8_t)
+PCI_ACCESSOR(irq,		IRQ,		uint8_t)
+PCI_ACCESSOR(domain,		DOMAIN,		uint32_t)
+PCI_ACCESSOR(bus,		BUS,		uint8_t)
+PCI_ACCESSOR(slot,		SLOT,		uint8_t)
+PCI_ACCESSOR(function,		FUNCTION,	uint8_t)
+PCI_ACCESSOR(ether,		ETHADDR,	uint8_t *)
+PCI_ACCESSOR(cmdreg,		CMDREG,		uint8_t)
+PCI_ACCESSOR(cachelnsz,		CACHELNSZ,	uint8_t)
+PCI_ACCESSOR(mingnt,		MINGNT,		uint8_t)
+PCI_ACCESSOR(maxlat,		MAXLAT,		uint8_t)
+PCI_ACCESSOR(lattimer,		LATTIMER,	uint8_t)
 
-	pcitag_t	*pa_bridgetag;
-	pci_intr_handle_t *pa_bridgeih;
-
-	/*
-	 * Interrupt information.
-	 *
-	 * "Intrline" is used on systems whose firmware puts
-	 * the right routing data into the line register in
-	 * configuration space.  The rest are used on systems
-	 * that do not.
-	 */
-	u_int		pa_intrswiz;	/* how to swizzle pins if ppb */
-	pcitag_t	pa_intrtag;	/* intr. appears to come from here */
-	pci_intr_pin_t	pa_intrpin;	/* intr. appears on this pin */
-	pci_intr_line_t	pa_intrline;	/* intr. routing information */
-	pci_intr_pin_t	pa_rawintrpin;	/* unswizzled pin */
-};
+#undef PCI_ACCESSOR
 
 /*
- * Flags given in the bus and device attachment args.
+ * Operations on configuration space.
+ */
+static __inline uint32_t
+pci_read_config(device_t dev, int reg, int width)
+{
+    return PCI_READ_CONFIG(device_get_parent(dev), dev, reg, width);
+}
+
+static __inline void
+pci_write_config(device_t dev, int reg, uint32_t val, int width)
+{
+    PCI_WRITE_CONFIG(device_get_parent(dev), dev, reg, val, width);
+}
+
+/*
+ * Ivars for pci bridges.
+ */
+
+/*typedef enum pci_device_ivars pcib_device_ivars;*/
+enum pcib_device_ivars {
+	PCIB_IVAR_DOMAIN,
+	PCIB_IVAR_BUS
+};
+
+#define	PCIB_ACCESSOR(var, ivar, type)					 \
+    __BUS_ACCESSOR(pcib, var, PCIB, ivar, type)
+
+PCIB_ACCESSOR(domain,		DOMAIN,		uint32_t)
+PCIB_ACCESSOR(bus,		BUS,		uint32_t)
+
+#undef PCIB_ACCESSOR
+
+/*
+ * PCI interrupt validation.  Invalid interrupt values such as 0 or 128
+ * on i386 or other platforms should be mapped out in the MD pcireadconf
+ * code and not here, since the only MI invalid IRQ is 255.
+ */
+#define	PCI_INVALID_IRQ		255
+#define	PCI_INTERRUPT_VALID(x)	((x) != PCI_INVALID_IRQ)
+
+/*
+ * Convenience functions.
  *
- * OpenBSD doesn't actually use them yet -- csapuntz@cvs.openbsd.org
+ * These should be used in preference to manually manipulating
+ * configuration space.
  */
-#define	PCI_FLAGS_IO_ENABLED	0x01		/* I/O space is enabled */
-#define	PCI_FLAGS_MEM_ENABLED	0x02		/* memory space is enabled */
-#define	PCI_FLAGS_MRL_OKAY	0x04		/* Memory Read Line okay */
-#define	PCI_FLAGS_MRM_OKAY	0x08		/* Memory Read Multiple okay */
-#define	PCI_FLAGS_MWI_OKAY	0x10		/* Memory Write and Invalidate
-						   okay */
+static __inline int
+pci_enable_busmaster(device_t dev)
+{
+    return(PCI_ENABLE_BUSMASTER(device_get_parent(dev), dev));
+}
+
+static __inline int
+pci_disable_busmaster(device_t dev)
+{
+    return(PCI_DISABLE_BUSMASTER(device_get_parent(dev), dev));
+}
+
+static __inline int
+pci_enable_io(device_t dev, int space)
+{
+    return(PCI_ENABLE_IO(device_get_parent(dev), dev, space));
+}
+
+static __inline int
+pci_disable_io(device_t dev, int space)
+{
+    return(PCI_DISABLE_IO(device_get_parent(dev), dev, space));
+}
+
+static __inline int
+pci_get_vpd_ident(device_t dev, const char **identptr)
+{
+    return(PCI_GET_VPD_IDENT(device_get_parent(dev), dev, identptr));
+}
+
+static __inline int
+pci_get_vpd_readonly(device_t dev, const char *kw, const char **identptr)
+{
+    return(PCI_GET_VPD_READONLY(device_get_parent(dev), dev, kw, identptr));
+}
 
 /*
+ * Check if the address range falls within the VGA defined address range(s)
+ */
+static __inline int
+pci_is_vga_ioport_range(u_long start, u_long end)
+{
+ 
+	return (((start >= 0x3b0 && end <= 0x3bb) ||
+	    (start >= 0x3c0 && end <= 0x3df)) ? 1 : 0);
+}
+
+static __inline int
+pci_is_vga_memory_range(u_long start, u_long end)
+{
+
+	return ((start >= 0xa0000 && end <= 0xbffff) ? 1 : 0);
+}
+
+/*
+ * PCI power states are as defined by ACPI:
  *
+ * D0	State in which device is on and running.  It is receiving full
+ *	power from the system and delivering full functionality to the user.
+ * D1	Class-specific low-power state in which device context may or may not
+ *	be lost.  Buses in D1 cannot do anything to the bus that would force
+ *	devices on that bus to lose context.
+ * D2	Class-specific low-power state in which device context may or may
+ *	not be lost.  Attains greater power savings than D1.  Buses in D2
+ *	can cause devices on that bus to lose some context.  Devices in D2
+ *	must be prepared for the bus to be in D2 or higher.
+ * D3	State in which the device is off and not running.  Device context is
+ *	lost.  Power can be removed from the device.
  */
-struct pci_quirkdata {
-	pci_vendor_id_t		vendor;		/* Vendor ID */
-	pci_product_id_t	product;	/* Product ID */
-	int			quirks;		/* quirks; see below */
-};
-#define	PCI_QUIRK_MULTIFUNCTION		1
-#define	PCI_QUIRK_MONOFUNCTION		2
+#define	PCI_POWERSTATE_D0	0
+#define	PCI_POWERSTATE_D1	1
+#define	PCI_POWERSTATE_D2	2
+#define	PCI_POWERSTATE_D3	3
+#define	PCI_POWERSTATE_UNKNOWN	-1
 
-struct pci_softc {
-	struct device sc_dev;
-	bus_space_tag_t sc_iot, sc_memt;
-	bus_dma_tag_t sc_dmat;
-	pci_chipset_tag_t sc_pc;
-	void *sc_powerhook;
-	LIST_HEAD(, pci_dev) sc_devs;
-	int sc_domain, sc_bus, sc_maxndevs;
-	pcitag_t *sc_bridgetag;
-	pci_intr_handle_t *sc_bridgeih;
-	u_int sc_intrswiz;
-	pcitag_t sc_intrtag;
-};
+static __inline int
+pci_set_powerstate(device_t dev, int state)
+{
+    return PCI_SET_POWERSTATE(device_get_parent(dev), dev, state);
+}
 
-extern int pci_ndomains;
+static __inline int
+pci_get_powerstate(device_t dev)
+{
+    return PCI_GET_POWERSTATE(device_get_parent(dev), dev);
+}
+
+static __inline int
+pci_find_extcap(device_t dev, int capability, int *capreg)
+{
+    return PCI_FIND_EXTCAP(device_get_parent(dev), dev, capability, capreg);
+}
+
+static __inline int
+pci_alloc_msi(device_t dev, int *count)
+{
+    return (PCI_ALLOC_MSI(device_get_parent(dev), dev, count));
+}
+
+static __inline int
+pci_alloc_msix(device_t dev, int *count)
+{
+    return (PCI_ALLOC_MSIX(device_get_parent(dev), dev, count));
+}
+
+static __inline int
+pci_remap_msix(device_t dev, int count, const u_int *vectors)
+{
+    return (PCI_REMAP_MSIX(device_get_parent(dev), dev, count, vectors));
+}
+
+static __inline int
+pci_release_msi(device_t dev)
+{
+    return (PCI_RELEASE_MSI(device_get_parent(dev), dev));
+}
+
+static __inline int
+pci_msi_count(device_t dev)
+{
+    return (PCI_MSI_COUNT(device_get_parent(dev), dev));
+}
+
+static __inline int
+pci_msix_count(device_t dev)
+{
+    return (PCI_MSIX_COUNT(device_get_parent(dev), dev));
+}
+
+device_t pci_find_bsf(uint8_t, uint8_t, uint8_t);
+device_t pci_find_dbsf(uint32_t, uint8_t, uint8_t, uint8_t);
+device_t pci_find_device(uint16_t, uint16_t);
 
 /*
- * Locators devices that attach to 'pcibus', as specified to config.
+ * Can be used by MD code to request the PCI bus to re-map an MSI or
+ * MSI-X message.
  */
-#define	pcibuscf_bus		cf_loc[0]
-#define	PCIBUS_UNK_BUS		-1		/* wildcarded 'bus' */
+int	pci_remap_msi_irq(device_t dev, u_int irq);
+
+/* Can be used by drivers to manage the MSI-X table. */
+int	pci_pending_msix(device_t dev, u_int index);
+
+int	pci_msi_device_blacklisted(device_t dev);
+
+#endif	/* _SYS_BUS_H_ */
 
 /*
- * Locators for PCI devices, as specified to config.
+ * cdev switch for control device, initialised in generic PCI code
  */
-#define	pcicf_dev		cf_loc[0]
-#define	PCI_UNK_DEV		-1		/* wildcarded 'dev' */
-
-#define	pcicf_function		cf_loc[1]
-#define	PCI_UNK_FUNCTION	-1		/* wildcarded 'function' */
+extern struct cdevsw pcicdev;
 
 /*
- * Configuration space access and utility functions.  (Note that most,
- * e.g. make_tag, conf_read, conf_write are declared by pci_machdep.h.)
+ * List of all PCI devices, generation count for the list.
  */
-int	pci_mapreg_probe(pci_chipset_tag_t, pcitag_t, int, pcireg_t *);
-pcireg_t pci_mapreg_type(pci_chipset_tag_t, pcitag_t, int);
-int	pci_mapreg_info(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
-	    bus_addr_t *, bus_size_t *, int *);
-int	pci_mapreg_map(struct pci_attach_args *, int, pcireg_t, int,
-	    bus_space_tag_t *, bus_space_handle_t *, bus_addr_t *,
-	    bus_size_t *, bus_size_t);
+STAILQ_HEAD(devlist, pci_devinfo);
 
+extern struct devlist	pci_devq;
+extern uint32_t	pci_generation;
 
-int	pci_io_find(pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
-	    bus_size_t *);
-int	pci_mem_find(pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
-	    bus_size_t *, int *);
-
-int pci_get_capability(pci_chipset_tag_t, pcitag_t, int,
-			    int *, pcireg_t *);
-
-struct pci_matchid {
-	pci_vendor_id_t		pm_vid;
-	pci_product_id_t	pm_pid;
-};
-
-int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
-int pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int);
-
-/*
- * Vital Product Data (PCI 2.2)
- */
-int pci_vpd_read(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
-int pci_vpd_write(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
-
-/*
- * Helper functions for autoconfiguration.
- */
-const char *pci_findvendor(pcireg_t);
-const char *pci_findproduct(pcireg_t);
-int	pci_find_device(struct pci_attach_args *pa,
-			int (*match)(struct pci_attach_args *));
-int	pci_probe_device(struct pci_softc *, pcitag_t tag,
-	    int (*)(struct pci_attach_args *), struct pci_attach_args *);
-int	pci_detach_devices(struct pci_softc *, int);
-void	pci_devinfo(pcireg_t, pcireg_t, int, char *, size_t);
-const struct pci_quirkdata *
-	pci_lookup_quirkdata(pci_vendor_id_t, pci_product_id_t);
-void	pciagp_set_pchb(struct pci_attach_args *);
-
-#endif /* _KERNEL */
-#endif /* _DEV_PCI_PCIVAR_H_ */
+#endif /* _PCIVAR_H_ */

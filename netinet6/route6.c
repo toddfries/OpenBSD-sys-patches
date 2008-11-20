@@ -1,7 +1,7 @@
-/*	$OpenBSD: route6.c,v 1.16 2007/05/31 23:17:38 mcbride Exp $	*/
-/*	$KAME: route6.c,v 1.22 2000/12/03 00:54:00 itojun Exp $	*/
+/*	$FreeBSD: src/sys/netinet6/route6.c,v 1.14 2007/07/05 16:23:48 delphij Exp $	*/
+/*	$KAME: route6.c,v 1.24 2001/03/14 03:07:05 itojun Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -30,10 +30,14 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_inet.h"
+#include "opt_inet6.h"
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
+#include <sys/queue.h>
 
 #include <net/if.h>
 
@@ -41,51 +45,64 @@
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/scope6_var.h>
 
 #include <netinet/icmp6.h>
 
 #if 0
-static int ip6_rthdr0(struct mbuf *, struct ip6_hdr *, struct ip6_rthdr0 *);
-#endif
+static int ip6_rthdr0 __P((struct mbuf *, struct ip6_hdr *,
+    struct ip6_rthdr0 *));
+
+#endif /* Disable route header processing. */
+
+/*
+ * proto - is unused
+ */
 
 int
-route6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;	/* proto is unused */
+route6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct ip6_hdr *ip6;
 	struct mbuf *m = *mp;
 	struct ip6_rthdr *rh;
 	int off = *offp, rhlen;
+	struct ip6aux *ip6a;
 
+	ip6a = ip6_findaux(m);
+	if (ip6a) {
+		/* XXX reject home-address option before rthdr */
+		if (ip6a->ip6a_flags & IP6A_SWAP) {
+			ip6stat.ip6s_badoptions++;
+			m_freem(m);
+			return IPPROTO_DONE;
+		}
+	}
+
+#ifndef PULLDOWN_TEST
+	IP6_EXTHDR_CHECK(m, off, sizeof(*rh), IPPROTO_DONE);
+	ip6 = mtod(m, struct ip6_hdr *);
+	rh = (struct ip6_rthdr *)((caddr_t)ip6 + off);
+#else
 	ip6 = mtod(m, struct ip6_hdr *);
 	IP6_EXTHDR_GET(rh, struct ip6_rthdr *, m, off, sizeof(*rh));
 	if (rh == NULL) {
 		ip6stat.ip6s_tooshort++;
 		return IPPROTO_DONE;
 	}
+#endif
 
 	switch (rh->ip6r_type) {
 #if 0
-	/*
-	 * See http://www.secdev.org/conf/IPv6_RH_security-csw07.pdf
-	 * for why IPV6_RTHDR_TYPE_0 is banned here.
-	 *
-	 * We return ICMPv6 parameter problem so that innocent people
-	 * (not an attacker) would notice about the use of IPV6_RTHDR_TYPE_0.
-	 * Since there's no amplification, and ICMPv6 error will be rate-
-	 * controlled, it shouldn't cause any problem.
-	 * If you are concerned about this, you may want to use the following
-	 * code fragment:
-	 *
-	 * case IPV6_RTHDR_TYPE_0:
-	 *	m_freem(m);
-	 *	return (IPPROTO_DONE);
-	 */
 	case IPV6_RTHDR_TYPE_0:
 		rhlen = (rh->ip6r_len + 1) << 3;
-		if (rh->ip6r_segleft == 0)
-			break;	/* Final dst. Just ignore the header. */
+#ifndef PULLDOWN_TEST
+		/*
+		 * note on option length:
+		 * due to IP6_EXTHDR_CHECK assumption, we cannot handle
+		 * very big routing header (max rhlen == 2048).
+		 */
+		IP6_EXTHDR_CHECK(m, off, rhlen, IPPROTO_DONE);
+#else
 		/*
 		 * note on option length:
 		 * maximum rhlen: 2048
@@ -99,10 +116,11 @@ route6_input(mp, offp, proto)
 			ip6stat.ip6s_tooshort++;
 			return IPPROTO_DONE;
 		}
+#endif
 		if (ip6_rthdr0(m, ip6, (struct ip6_rthdr0 *)rh))
 			return (IPPROTO_DONE);
 		break;
-#endif
+#endif /* Disable route header 0 */
 	default:
 		/* unknown routing type */
 		if (rh->ip6r_segleft == 0) {
@@ -119,29 +137,31 @@ route6_input(mp, offp, proto)
 	return (rh->ip6r_nxt);
 }
 
-#if 0
 /*
  * Type0 routing header processing
  *
  * RFC2292 backward compatibility warning: no support for strict/loose bitmap,
  * as it was dropped between RFC1883 and RFC2460.
  */
+#if 0
 static int
-ip6_rthdr0(m, ip6, rh0)
-	struct mbuf *m;
-	struct ip6_hdr *ip6;
-	struct ip6_rthdr0 *rh0;
+ip6_rthdr0(struct mbuf *m, struct ip6_hdr *ip6, struct ip6_rthdr0 *rh0)
 {
 	int addrs, index;
 	struct in6_addr *nextaddr, tmpaddr;
+	struct in6_ifaddr *ifa;
 
 	if (rh0->ip6r0_segleft == 0)
 		return (0);
 
-	if (rh0->ip6r0_len % 2) {
+	if (rh0->ip6r0_len % 2
+#ifdef COMPAT_RFC1883
+	    || rh0->ip6r0_len > 46
+#endif
+		) {
 		/*
 		 * Type 0 routing header can't contain more than 23 addresses.
-		 * RFC 2460: this limitation was removed since strict/loose
+		 * RFC 2462: this limitation was removed since strict/loose
 		 * bitmap field was deleted.
 		 */
 		ip6stat.ip6s_badoptions++;
@@ -171,13 +191,27 @@ ip6_rthdr0(m, ip6, rh0)
 	    IN6_IS_ADDR_V4MAPPED(nextaddr) ||
 	    IN6_IS_ADDR_V4COMPAT(nextaddr)) {
 		ip6stat.ip6s_badoptions++;
-		goto bad;
+		m_freem(m);
+		return (-1);
 	}
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst) ||
 	    IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_dst) ||
 	    IN6_IS_ADDR_V4MAPPED(&ip6->ip6_dst) ||
 	    IN6_IS_ADDR_V4COMPAT(&ip6->ip6_dst)) {
 		ip6stat.ip6s_badoptions++;
+		m_freem(m);
+		return (-1);
+	}
+
+	/*
+	 * Determine the scope zone of the next hop, based on the interface
+	 * of the current hop. [RFC4007, Section 9]
+	 * Then disambiguate the scope zone for the next hop (if necessary).
+	 */
+	if ((ifa = ip6_getdstifaddr(m)) == NULL)
+		goto bad;
+	if (in6_setscope(nextaddr, ifa->ia_ifp, NULL) != 0) {
+		ip6stat.ip6s_badscope++;
 		goto bad;
 	}
 
@@ -186,13 +220,17 @@ ip6_rthdr0(m, ip6, rh0)
 	 */
 	tmpaddr = *nextaddr;
 	*nextaddr = ip6->ip6_dst;
-	if (IN6_IS_ADDR_LINKLOCAL(nextaddr))
-		nextaddr->s6_addr16[1] = 0;
+	in6_clearscope(nextaddr); /* XXX */
 	ip6->ip6_dst = tmpaddr;
-	if (IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_dst))
-		ip6->ip6_dst.s6_addr16[1] = htons(m->m_pkthdr.rcvif->if_index);
 
+#ifdef COMPAT_RFC1883
+	if (rh0->ip6r0_slmap[index / 8] & (1 << (7 - (index % 8))))
+		ip6_forward(m, IPV6_SRCRT_NEIGHBOR);
+	else
+		ip6_forward(m, IPV6_SRCRT_NOTNEIGHBOR);
+#else
 	ip6_forward(m, 1);
+#endif
 
 	return (-1);			/* m would be freed in ip6_forward() */
 

@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_exec.h,v 1.6 2002/03/14 01:26:51 millert Exp $	 */
-/*	$NetBSD: svr4_exec.h,v 1.7 1995/07/02 06:16:06 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_exec.h,v 1.7 2005/01/05 22:34:36 imp Exp $
  */
 
 #ifndef	_SVR4_EXEC_H_
@@ -37,6 +37,8 @@
 # define SVR4_AUX_ARGSIZ (sizeof(AuxInfo) * 8 / sizeof(char *))
 #endif
 
+#if 0
+/* Don't think we need all this NetBSD stuff */
 /*
  * The following is horrible; there must be a better way. I need to
  * play with brk(2) a bit more.
@@ -50,7 +52,7 @@
 #define SVR4_INTERP_ADDR	0x01000000
 #endif
 
-#ifdef __sparc__
+#ifdef sparc
 /*
  * Here programs load at 0x00010000, so I load the interpreter far after
  * the end of the data segment.
@@ -61,8 +63,8 @@
 #ifndef SVR4_INTERP_ADDR
 # define SVR4_INTERP_ADDR	0
 #endif
+#endif
 
-int svr4_elf_probe(struct proc *, struct exec_package *, char *, u_long *,
-    u_int8_t *);
+/*void svr4_setregs(struct thread *, struct exec_package *, u_long);*/
 
 #endif /* !_SVR4_EXEC_H_ */

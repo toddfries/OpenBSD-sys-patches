@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_udavreg.h,v 1.10 2007/11/25 16:40:03 jmc Exp $ */
 /*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
-/*
+/*	$FreeBSD: src/sys/dev/usb/if_udavreg.h,v 1.7 2006/09/07 00:06:41 imp Exp $	*/
+/*-
  * Copyright (c) 2003
  *     Shingo WATANABE <nabe@nabechan.org>.  All rights reserved.
  *
@@ -34,12 +34,14 @@
 #define	UDAV_IFACE_INDEX	0
 #define	UDAV_CONFIG_NO		1
 
-#define	UDAV_TX_LIST_CNT	1
-#define	UDAV_RX_LIST_CNT	1
-
 #define	UDAV_TX_TIMEOUT		1000
 #define	UDAV_TIMEOUT		10000
 
+#define	ETHER_ALIGN		2
+
+
+/* Packet length */
+#define	UDAV_MIN_FRAME_LEN	60
 
 /* Request */
 #define	UDAV_REQ_REG_READ	0x00 /* Read from register(s) */
@@ -135,32 +137,34 @@
 #define	 UDAV_GPR_GEPIO1	(1<<1) /* General purpose 1 */
 #define	 UDAV_GPR_GEPIO0	(1<<0) /* General purpose 0 */
 
-#define GET_IFP(sc)             (&(sc)->sc_ac.ac_if)
-#define	GET_MII(sc)		(&(sc)->sc_mii)
-
-struct udav_chain {
-	struct udav_softc	*udav_sc;
-	usbd_xfer_handle	udav_xfer;
-	char			*udav_buf;
-	struct mbuf		*udav_mbuf;
-	int			udav_idx;
-};
-
-struct udav_cdata {
-	struct udav_chain	udav_tx_chain[UDAV_TX_LIST_CNT];
-	struct udav_chain	udav_rx_chain[UDAV_TX_LIST_CNT];
-#if 0
-	/* XXX: Interrupt Endpoint is not yet supported! */
-	struct udav_intrpkg	udav_ibuf;
+#if defined(__FreeBSD__)
+#define	GET_IFP(sc)		((sc)->sc_ifp)
+#elif defined(__OpenBSD__)
+#define	GET_IFP(sc)		(&(sc)->sc_ac.ac_if)
+#elif defined(__NetBSD__)
+#define	GET_IFP(sc)		(&(sc)->sc_ec.ec_if)
 #endif
-	int			udav_tx_prod;
-	int			udav_tx_cons;
-	int			udav_tx_cnt;
-	int			udav_rx_prod;
-};
+#if defined(__FreeBSD__)
+#define GET_MII(sc)	(device_get_softc((sc)->sc_miibus))
+#else
+#define	GET_MII(sc)		(&(sc)->sc_mii)
+#endif
+
+#if defined(__FreeBSD__)
+#if 0
+#define UDAV_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
+#define UDAV_UNLOCK(_sc)	mtx_unlock(&(_sc)->sc_mtx)
+#else
+#define UDAV_LOCK(_sc)
+#define UDAV_UNLOCK(_sc)
+#endif
+#endif
 
 struct udav_softc {
-	struct device		sc_dev;	/* base device */
+#if defined(__FreeBSD__)
+	struct ifnet		*sc_ifp;
+#endif
+	device_t		sc_dev;	/* base device */
 	usbd_device_handle	sc_udev;
 
 	/* USB */
@@ -172,18 +176,28 @@ struct udav_softc {
 	usbd_pipe_handle	sc_pipe_rx;
 	usbd_pipe_handle	sc_pipe_tx;
 	usbd_pipe_handle	sc_pipe_intr;
-	struct timeout		sc_stat_ch;
+	usb_callout_t		sc_stat_ch;
 	u_int			sc_rx_errs;
 	/* u_int		sc_intr_errs; */
 	struct timeval		sc_rx_notice;
 
 	/* Ethernet */
-        struct arpcom           sc_ac; /* ethernet common */
+
+#if defined(__FreeBSD__)
+	device_t		sc_miibus ;
+	struct mtx		sc_mtx ;
+	struct usb_qdat		sc_qdat;
+#elif defined(__NetBSD__)
+	struct ethercom		sc_ec; /* ethernet common */
 	struct mii_data		sc_mii;
-	struct rwlock		sc_mii_lock;
+#endif
+	struct lock		sc_mii_lock;
 	int			sc_link;
 #define	sc_media udav_mii.mii_media
-	struct udav_cdata	sc_cdata;
+#if defined(NRND) && NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
+	struct ue_cdata		sc_cdata;
 
 	int                     sc_attached;
 	int			sc_dying;
@@ -194,14 +208,3 @@ struct udav_softc {
 
 	u_int16_t		sc_flags;
 };
-
-struct udav_rx_hdr {
-	uByte			pktstat;
-	uWord			length;
-} __packed;
-#define UDAV_RX_HDRLEN		sizeof(struct udav_rx_hdr)
-
-/* Packet length */
-#define	UDAV_MAX_MTU		1536 /* XXX: max frame size is unknown */
-#define	UDAV_MIN_FRAME_LEN	60
-#define	UDAV_BUFSZ		UDAV_MAX_MTU + UDAV_RX_HDRLEN

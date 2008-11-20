@@ -1,6 +1,3 @@
-/*	$OpenBSD: ioctl.h,v 1.8 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: ioctl.h,v 1.20 1996/01/30 18:21:47 thorpej Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,17 +32,27 @@
  * SUCH DAMAGE.
  *
  *	@(#)ioctl.h	8.6 (Berkeley) 3/28/94
+ * $FreeBSD: src/sys/sys/ioctl.h,v 1.15 2006/01/10 09:19:10 phk Exp $
  */
 
 #ifndef	_SYS_IOCTL_H_
 #define	_SYS_IOCTL_H_
+
+#ifdef _KERNEL
+#ifndef _SYS_CDEFS_H_
+#error this file needs sys/cdefs.h as a prerequisite
+#endif
+#ifdef __CC_SUPPORTS_WARNING
+#warning "Don't #include ioctl.h in the kernel.  Include xxxio.h instead."
+#endif
+#endif /* _KERNEL */
 
 #include <sys/ttycom.h>
 
 /*
  * Pun for SunOS prior to 3.2.  SunOS 3.2 and later support TIOCGWINSZ
  * and TIOCSWINSZ (yes, even 3.2-3.5, the fact that it wasn't documented
- * nonwithstanding).
+ * notwithstanding).
  */
 struct ttysize {
 	unsigned short	ts_lines;
@@ -58,18 +65,9 @@ struct ttysize {
 
 #include <sys/ioccom.h>
 
-#include <sys/dkio.h>
 #include <sys/filio.h>
 #include <sys/sockio.h>
 
-#ifndef _KERNEL
-
-#include <sys/cdefs.h>
-
-__BEGIN_DECLS
-int	ioctl(int, unsigned long, ...);
-__END_DECLS
-#endif /* !_KERNEL */
 #endif /* !_SYS_IOCTL_H_ */
 
 /*
@@ -77,10 +75,8 @@ __END_DECLS
  * Compatibility with old terminal driver
  *
  * Source level -> #define USE_OLD_TTY
- * Kernel level -> options COMPAT_43 or COMPAT_SUNOS or ...
+ * Kernel level -> options COMPAT_43TTY
  */
-#if defined(USE_OLD_TTY) || defined(COMPAT_43) || defined(COMPAT_SUNOS) || \
-    defined(COMPAT_SVR4) || defined(COMPAT_FREEBSD) || defined(COMPAT_OSF1) || \
-    defined(COMPAT_LINUX)
+#if defined(USE_OLD_TTY) || defined(COMPAT_43TTY)
 #include <sys/ioctl_compat.h>
 #endif

@@ -1,7 +1,4 @@
-/*	$OpenBSD: unpcb.h,v 1.7 2006/11/17 08:33:20 claudio Exp $	*/
-/*	$NetBSD: unpcb.h,v 1.6 1994/06/29 06:46:08 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,14 +27,21 @@
  * SUCH DAMAGE.
  *
  *	@(#)unpcb.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/unpcb.h,v 1.22 2007/02/26 20:47:51 rwatson Exp $
  */
+
+#ifndef _SYS_UNPCB_H_
+#define _SYS_UNPCB_H_
+
+#include <sys/queue.h>
+#include <sys/ucred.h>
 
 /*
  * Protocol control block for an active
  * instance of a UNIX internal protocol.
  *
- * A socket may be associated with an vnode in the
- * file system.  If so, the unp_vnode pointer holds
+ * A socket may be associated with a vnode in the
+ * filesystem.  If so, the unp_vnode pointer holds
  * a reference count to this vnode, which should be irele'd
  * when the socket goes away.
  *
@@ -57,30 +61,81 @@
  * so that changes in the sockbuf may be computed to modify
  * back pressure on the sender accordingly.
  */
-struct	unpcbid {
-	uid_t unp_euid;
-	gid_t unp_egid;
-};
+typedef	u_quad_t	unp_gen_t;
+LIST_HEAD(unp_head, unpcb);
 
-struct	unpcb {
+struct unpcb {
+	LIST_ENTRY(unpcb) unp_link; 	/* glue on list of all PCBs */
 	struct	socket *unp_socket;	/* pointer back to socket */
 	struct	vnode *unp_vnode;	/* if associated with file */
 	ino_t	unp_ino;		/* fake inode number */
 	struct	unpcb *unp_conn;	/* control block of connected socket */
-	struct	unpcb *unp_refs;	/* referencing socket linked list */
-	struct 	unpcb *unp_nextref;	/* link in unp_refs list */
-	struct	mbuf *unp_addr;		/* bound address of socket */
-	int	unp_flags;		/* this unpcb contains peer eids */
-	struct	unpcbid unp_connid;	/* id of peer process */
+	struct	unp_head unp_refs;	/* referencing socket linked list */
+	LIST_ENTRY(unpcb) unp_reflink;	/* link in unp_refs list */
+	struct	sockaddr_un *unp_addr;	/* bound address of socket */
 	int	unp_cc;			/* copy of rcv.sb_cc */
 	int	unp_mbcnt;		/* copy of rcv.sb_mbcnt */
-	struct	timespec unp_ctime;	/* holds creation time */
+	unp_gen_t unp_gencnt;		/* generation count of this instance */
+	int	unp_flags;		/* flags */
+	struct	xucred unp_peercred;	/* peer credentials, if applicable */
+	u_int	unp_refcount;
+	struct	mtx unp_mtx;		/* mutex */
 };
 
 /*
- * flag bits in unp_flags
+ * Flags in unp_flags.
+ *
+ * UNP_HAVEPC - indicates that the unp_peercred member is filled in
+ * and is really the credentials of the connected peer.  This is used
+ * to determine whether the contents should be sent to the user or
+ * not.
+ *
+ * UNP_HAVEPCCACHED - indicates that the unp_peercred member is filled
+ * in, but does *not* contain the credentials of the connected peer
+ * (there may not even be a peer).  This is set in unp_listen() when
+ * it fills in unp_peercred for later consumption by unp_connect().
  */
-#define UNP_FEIDS	1		/* unp_connid contains information */
-#define UNP_FEIDSBIND	2		/* unp_connid was set by a bind */
+#define UNP_HAVEPC			0x001
+#define UNP_HAVEPCCACHED		0x002
+#define	UNP_WANTCRED			0x004	/* credentials wanted */
+#define	UNP_CONNWAIT			0x008	/* connect blocks until accepted */
+
+/*
+ * These flags are used to handle non-atomicity in connect() and bind()
+ * operations on a socket: in particular, to avoid races between multiple
+ * threads or processes operating simultaneously on the same socket.
+ */
+#define	UNP_CONNECTING			0x010	/* Currently connecting. */
+#define	UNP_BINDING			0x020	/* Currently binding. */
 
 #define	sotounpcb(so)	((struct unpcb *)((so)->so_pcb))
+
+/* Hack alert -- this structure depends on <sys/socketvar.h>. */
+#ifdef	_SYS_SOCKETVAR_H_
+struct xunpcb {
+	size_t	xu_len;			/* length of this structure */
+	struct	unpcb *xu_unpp;		/* to help netstat, fstat */
+	struct	unpcb xu_unp;		/* our information */
+	union {
+		struct	sockaddr_un xuu_addr;	/* our bound address */
+		char	xu_dummy1[256];
+	} xu_au;
+#define	xu_addr	xu_au.xuu_addr
+	union {
+		struct	sockaddr_un xuu_caddr; /* their bound address */
+		char	xu_dummy2[256];
+	} xu_cau;
+#define	xu_caddr xu_cau.xuu_caddr
+	struct	xsocket	xu_socket;
+	u_quad_t	xu_alignment_hack;
+};
+
+struct xunpgen {
+	size_t	xug_len;
+	u_int	xug_count;
+	unp_gen_t xug_gen;
+	so_gen_t xug_sogen;
+};
+#endif /* _SYS_SOCKETVAR_H_ */
+
+#endif /* _SYS_UNPCB_H_ */

@@ -1,7 +1,4 @@
-/*	$OpenBSD: subr_log.c,v 1.15 2007/09/03 17:51:03 thib Exp $	*/
-/*	$NetBSD: subr_log.c,v 1.11 1996/03/30 22:24:44 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,136 +33,107 @@
  * Error log buffer for kernel printf's.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/kern/subr_log.c,v 1.64 2005/02/27 22:01:09 phk Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
-#include <sys/ioctl.h>
+#include <sys/filio.h>
+#include <sys/ttycom.h>
 #include <sys/msgbuf.h>
-#include <sys/file.h>
 #include <sys/signalvar.h>
-#include <sys/syslog.h>
-#include <sys/conf.h>
+#include <sys/kernel.h>
 #include <sys/poll.h>
+#include <sys/filedesc.h>
+#include <sys/sysctl.h>
 
 #define LOG_RDPRI	(PZERO + 1)
 
 #define LOG_ASYNC	0x04
 #define LOG_RDWAIT	0x08
 
-struct logsoftc {
+static	d_open_t	logopen;
+static	d_close_t	logclose;
+static	d_read_t	logread;
+static	d_ioctl_t	logioctl;
+static	d_poll_t	logpoll;
+
+static	void logtimeout(void *arg);
+
+static struct cdevsw log_cdevsw = {
+	.d_version =	D_VERSION,
+	.d_flags =	D_NEEDGIANT,
+	.d_open =	logopen,
+	.d_close =	logclose,
+	.d_read =	logread,
+	.d_ioctl =	logioctl,
+	.d_poll =	logpoll,
+	.d_name =	"log",
+};
+
+static struct logsoftc {
 	int	sc_state;		/* see above for possibilities */
 	struct	selinfo sc_selp;	/* process waiting on select call */
-	int	sc_pgid;		/* process/group for async I/O */
-	uid_t	sc_siguid;		/* uid for process that set sc_pgid */
-	uid_t	sc_sigeuid;		/* euid for process that set sc_pgid */
+	struct  sigio *sc_sigio;	/* information for async I/O */
+	struct	callout sc_callout;	/* callout to wakeup syslog  */
 } logsoftc;
 
 int	log_open;			/* also used in log() */
-int	msgbufmapped;			/* is the message buffer mapped */
-int	msgbufenabled;			/* is logging to the buffer enabled */
-struct	msgbuf *msgbufp;		/* the mapped buffer, itself. */
 
-void filt_logrdetach(struct knote *kn);
-int filt_logread(struct knote *kn, long hint);
-   
-struct filterops logread_filtops =
-	{ 1, NULL, filt_logrdetach, filt_logread};
-
-void
-initmsgbuf(caddr_t buf, size_t bufsize)
-{
-	struct msgbuf *mbp;
-	long new_bufs;
-
-	/* Sanity-check the given size. */
-	if (bufsize < sizeof(struct msgbuf))
-		return;
-
-	mbp = msgbufp = (struct msgbuf *)buf;
-
-	new_bufs = bufsize - offsetof(struct msgbuf, msg_bufc);
-	if ((mbp->msg_magic != MSG_MAGIC) || (mbp->msg_bufs != new_bufs) ||
-	    (mbp->msg_bufr < 0) || (mbp->msg_bufr >= mbp->msg_bufs) ||
-	    (mbp->msg_bufx < 0) || (mbp->msg_bufx >= mbp->msg_bufs)) {
-		/*
-		 * If the buffer magic number is wrong, has changed
-		 * size (which shouldn't happen often), or is
-		 * internally inconsistent, initialize it.
-		 */
-
-		bzero(buf, bufsize);
-		mbp->msg_magic = MSG_MAGIC;
-		mbp->msg_bufs = new_bufs;
-	}
-	
-	/* Always start new buffer data on a new line. */
-	if (mbp->msg_bufx > 0 && mbp->msg_bufc[mbp->msg_bufx - 1] != '\n')
-		msgbuf_putchar('\n');
-
-	/* mark it as ready for use. */
-	msgbufmapped = msgbufenabled = 1;
-}
-
-void
-msgbuf_putchar(const char c) 
-{
-	struct msgbuf *mbp = msgbufp;
-
-	if (mbp->msg_magic != MSG_MAGIC)
-		/* Nothing we can do */
-		return;
-
-	mbp->msg_bufc[mbp->msg_bufx++] = c;
-	mbp->msg_bufl = min(mbp->msg_bufl+1, mbp->msg_bufs);
-	if (mbp->msg_bufx < 0 || mbp->msg_bufx >= mbp->msg_bufs)
-		mbp->msg_bufx = 0;
-	/* If the buffer is full, keep the most recent data. */
-	if (mbp->msg_bufr == mbp->msg_bufx) {
-		if (++mbp->msg_bufr >= mbp->msg_bufs)
-			mbp->msg_bufr = 0;
-	}
-}
+/* Times per second to check for a pending syslog wakeup. */
+static int	log_wakeups_per_second = 5;
+SYSCTL_INT(_kern, OID_AUTO, log_wakeups_per_second, CTLFLAG_RW,
+    &log_wakeups_per_second, 0, "");
 
 /*ARGSUSED*/
-int
-logopen(dev_t dev, int flags, int mode, struct proc *p)
+static	int
+logopen(struct cdev *dev, int flags, int mode, struct thread *td)
 {
 	if (log_open)
 		return (EBUSY);
 	log_open = 1;
+	callout_init(&logsoftc.sc_callout, 0);
+	fsetown(td->td_proc->p_pid, &logsoftc.sc_sigio);	/* signal process only */
+	if (log_wakeups_per_second < 1) {
+		printf("syslog wakeup is less than one.  Adjusting to 1.\n");
+		log_wakeups_per_second = 1;
+	}
+	callout_reset(&logsoftc.sc_callout, hz / log_wakeups_per_second,
+	    logtimeout, NULL);
 	return (0);
 }
 
 /*ARGSUSED*/
-int
-logclose(dev_t dev, int flag, int mode, struct proc *p)
+static	int
+logclose(struct cdev *dev, int flag, int mode, struct thread *td)
 {
 
 	log_open = 0;
+	callout_stop(&logsoftc.sc_callout);
 	logsoftc.sc_state = 0;
+	funsetown(&logsoftc.sc_sigio);
 	return (0);
 }
 
 /*ARGSUSED*/
-int
-logread(dev_t dev, struct uio *uio, int flag)
+static	int
+logread(struct cdev *dev, struct uio *uio, int flag)
 {
+	char buf[128];
 	struct msgbuf *mbp = msgbufp;
-	long l;
-	int s;
-	int error = 0;
+	int error = 0, l, s;
 
 	s = splhigh();
-	while (mbp->msg_bufr == mbp->msg_bufx) {
+	while (msgbuf_getcount(mbp) == 0) {
 		if (flag & IO_NDELAY) {
 			splx(s);
 			return (EWOULDBLOCK);
 		}
 		logsoftc.sc_state |= LOG_RDWAIT;
-		error = tsleep(mbp, LOG_RDPRI | PCATCH,
-			       "klog", 0);
-		if (error) {
+		if ((error = tsleep(mbp, LOG_RDPRI | PCATCH, "klog", 0))) {
 			splx(s);
 			return (error);
 		}
@@ -174,115 +142,73 @@ logread(dev_t dev, struct uio *uio, int flag)
 	logsoftc.sc_state &= ~LOG_RDWAIT;
 
 	while (uio->uio_resid > 0) {
-		l = mbp->msg_bufx - mbp->msg_bufr;
-		if (l < 0)
-			l = mbp->msg_bufs - mbp->msg_bufr;
-		l = min(l, uio->uio_resid);
+		l = imin(sizeof(buf), uio->uio_resid);
+		l = msgbuf_getbytes(mbp, buf, l);
 		if (l == 0)
 			break;
-		error = uiomove(&mbp->msg_bufc[mbp->msg_bufr], (int)l, uio);
+		error = uiomove(buf, l, uio);
 		if (error)
 			break;
-		mbp->msg_bufr += l;
-		if (mbp->msg_bufr < 0 || mbp->msg_bufr >= mbp->msg_bufs)
-			mbp->msg_bufr = 0;
 	}
 	return (error);
 }
 
 /*ARGSUSED*/
-int
-logpoll(dev_t dev, int events, struct proc *p)
+static	int
+logpoll(struct cdev *dev, int events, struct thread *td)
 {
+	int s;
 	int revents = 0;
-	int s = splhigh();
+
+	s = splhigh();
 
 	if (events & (POLLIN | POLLRDNORM)) {
-		if (msgbufp->msg_bufr != msgbufp->msg_bufx)
+		if (msgbuf_getcount(msgbufp) > 0)
 			revents |= events & (POLLIN | POLLRDNORM);
 		else
-			selrecord(p, &logsoftc.sc_selp);
+			selrecord(td, &logsoftc.sc_selp);
 	}
 	splx(s);
 	return (revents);
 }
 
-int
-logkqfilter(dev_t dev, struct knote *kn)
+static void
+logtimeout(void *arg)
 {
-	struct klist *klist;
-	int s;
 
-	switch (kn->kn_filter) {
-	case EVFILT_READ:
-		klist = &logsoftc.sc_selp.si_note;
-		kn->kn_fop = &logread_filtops;
-		break;
-	default:
-		return (1);
-	}
-
-	kn->kn_hook = (void *)msgbufp;
-
-	s = splhigh();
-	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
-	splx(s);
-
-	return (0);
-}
-
-void
-filt_logrdetach(struct knote *kn)
-{
-	int s = splhigh();
-
-	SLIST_REMOVE(&logsoftc.sc_selp.si_note, kn, knote, kn_selnext);
-	splx(s);
-}
-
-int
-filt_logread(struct knote *kn, long hint)
-{
-	struct  msgbuf *p = (struct  msgbuf *)kn->kn_hook;
-
-	kn->kn_data = (int)(p->msg_bufx - p->msg_bufr);
-
-	return (p->msg_bufx != p->msg_bufr);
-}
-
-void
-logwakeup(void)
-{
 	if (!log_open)
 		return;
-	selwakeup(&logsoftc.sc_selp);
-	if (logsoftc.sc_state & LOG_ASYNC)
-		csignal(logsoftc.sc_pgid, SIGIO,
-		    logsoftc.sc_siguid, logsoftc.sc_sigeuid);
+	if (log_wakeups_per_second < 1) {
+		printf("syslog wakeup is less than one.  Adjusting to 1.\n");
+		log_wakeups_per_second = 1;
+	}
+	if (msgbuftrigger == 0) {
+		callout_reset(&logsoftc.sc_callout,
+		    hz / log_wakeups_per_second, logtimeout, NULL);
+		return;
+	}
+	msgbuftrigger = 0;
+	selwakeuppri(&logsoftc.sc_selp, LOG_RDPRI);
+	if ((logsoftc.sc_state & LOG_ASYNC) && logsoftc.sc_sigio != NULL)
+		pgsigio(&logsoftc.sc_sigio, SIGIO, 0);
 	if (logsoftc.sc_state & LOG_RDWAIT) {
 		wakeup(msgbufp);
 		logsoftc.sc_state &= ~LOG_RDWAIT;
 	}
-	KNOTE(&logsoftc.sc_selp.si_note, 0);
+	callout_reset(&logsoftc.sc_callout, hz / log_wakeups_per_second,
+	    logtimeout, NULL);
 }
 
 /*ARGSUSED*/
-int
-logioctl(dev_t dev, u_long com, caddr_t data, int flag, struct proc *p)
+static	int
+logioctl(struct cdev *dev, u_long com, caddr_t data, int flag, struct thread *td)
 {
-	long l;
-	int s;
 
 	switch (com) {
 
 	/* return number of characters immediately available */
 	case FIONREAD:
-		s = splhigh();
-		l = msgbufp->msg_bufx - msgbufp->msg_bufr;
-		splx(s);
-		if (l < 0)
-			l += msgbufp->msg_bufs;
-		*(int *)data = l;
+		*(int *)data = msgbuf_getcount(msgbufp);
 		break;
 
 	case FIONBIO:
@@ -295,14 +221,20 @@ logioctl(dev_t dev, u_long com, caddr_t data, int flag, struct proc *p)
 			logsoftc.sc_state &= ~LOG_ASYNC;
 		break;
 
-	case TIOCSPGRP:
-		logsoftc.sc_pgid = *(int *)data;
-		logsoftc.sc_siguid = p->p_cred->p_ruid;
-		logsoftc.sc_sigeuid = p->p_ucred->cr_uid;
+	case FIOSETOWN:
+		return (fsetown(*(int *)data, &logsoftc.sc_sigio));
+
+	case FIOGETOWN:
+		*(int *)data = fgetown(&logsoftc.sc_sigio);
 		break;
 
+	/* This is deprecated, FIOSETOWN should be used instead. */
+	case TIOCSPGRP:
+		return (fsetown(-(*(int *)data), &logsoftc.sc_sigio));
+
+	/* This is deprecated, FIOGETOWN should be used instead */
 	case TIOCGPGRP:
-		*(int *)data = logsoftc.sc_pgid;
+		*(int *)data = -fgetown(&logsoftc.sc_sigio);
 		break;
 
 	default:
@@ -310,3 +242,12 @@ logioctl(dev_t dev, u_long com, caddr_t data, int flag, struct proc *p)
 	}
 	return (0);
 }
+
+static void
+log_drvinit(void *unused)
+{
+
+	make_dev(&log_cdevsw, 0, UID_ROOT, GID_WHEEL, 0600, "klog");
+}
+
+SYSINIT(logdev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE,log_drvinit,NULL)

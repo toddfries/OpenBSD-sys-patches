@@ -1,36 +1,4 @@
-/*	$OpenBSD: in_proto.c,v 1.48 2008/05/06 08:47:35 markus Exp $	*/
-/*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
-
-/*
- * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the project nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -42,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -58,270 +26,362 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
- *
- * NRL grants permission for redistribution and use in source and binary
- * forms, with or without modification, of the software and documentation
- * created at NRL provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
- * 4. Neither the name of the NRL nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
- * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL NRL OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation
- * are those of the authors and should not be interpreted as representing
- * official policies, either expressed or implied, of the US Naval
- * Research Laboratory (NRL).
+ *	@(#)in_proto.c	8.2 (Berkeley) 2/9/95
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.87 2007/10/07 20:44:22 silby Exp $");
+
+#include "opt_ipx.h"
+#include "opt_mrouting.h"
+#include "opt_ipsec.h"
+#include "opt_inet6.h"
+#include "opt_pf.h"
+#include "opt_carp.h"
+#include "opt_sctp.h"
+
 #include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
 #include <sys/socket.h>
-#include <sys/protosw.h>
 #include <sys/domain.h>
-#include <sys/mbuf.h>
+#include <sys/protosw.h>
+#include <sys/queue.h>
+#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/route.h>
-#include <net/radix.h>
-#ifndef SMALL_KERNEL
-#include <net/radix_mpath.h>
-#endif
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
-#include <netinet/in_pcb.h>
-
-#ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
-#include <netinet/ip6.h>
-#endif
-
 #include <netinet/igmp_var.h>
-#ifdef PIM
-#include <netinet/pim_var.h>
-#endif
 #include <netinet/tcp.h>
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+#include <netinet/ip_encap.h>
 
 /*
  * TCP/IP protocol family: IP, ICMP, UDP, TCP.
  */
 
-#include "gif.h"
-#if NGIF > 0
-#include <netinet/in_gif.h>
-#endif
-
-#ifdef INET6
-#include <netinet6/ip6_var.h>
-#endif /* INET6 */
+static struct pr_usrreqs nousrreqs;
 
 #ifdef IPSEC
-#include <netinet/ip_ipsp.h>
-#include <netinet/ip_ether.h>
-#endif
+#include <netipsec/ipsec.h>
+#endif /* IPSEC */
 
-#include <netinet/ip_ipip.h>
+#ifdef SCTP
+#include <netinet/in_pcb.h>
+#include <netinet/sctp_pcb.h>
+#include <netinet/sctp.h>
+#include <netinet/sctp_var.h>
+#endif /* SCTP */
 
-#include "gre.h"
-#if NGRE > 0
-#include <netinet/ip_gre.h>
-#include <net/if_gre.h>
-#endif
-
-#include "carp.h"
-#if NCARP > 0
-#include <netinet/ip_carp.h>
-#endif
-
-#include "pfsync.h"
-#if NPFSYNC > 0
+#ifdef DEV_PFSYNC
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
 #endif
 
+#ifdef DEV_CARP
+#include <netinet/ip_carp.h>
+#endif
+
 extern	struct domain inetdomain;
 
+/* Spacer for loadable protocols. */
+#define IPPROTOSPACER   			\
+{						\
+	.pr_domain =		&inetdomain,	\
+	.pr_protocol =		PROTO_SPACER,	\
+	.pr_usrreqs =		&nousrreqs	\
+}
+
 struct protosw inetsw[] = {
-{ 0,		&inetdomain,	0,		0,
-  0,		ip_output,	0,		0,
-  0,
-  ip_init,	0,		ip_slowtimo,	ip_drain,	ip_sysctl
+{
+	.pr_type =		0,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_IP,
+	.pr_init =		ip_init,
+	.pr_slowtimo =		ip_slowtimo,
+	.pr_drain =		ip_drain,
+	.pr_usrreqs =		&nousrreqs
 },
-{ SOCK_DGRAM,	&inetdomain,	IPPROTO_UDP,	PR_ATOMIC|PR_ADDR,
-  udp_input,	0,		udp_ctlinput,	ip_ctloutput,
-  udp_usrreq,
-  udp_init,	0,		0,		0,		udp_sysctl
+{
+	.pr_type =		SOCK_DGRAM,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_UDP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		udp_input,
+	.pr_ctlinput =		udp_ctlinput,
+	.pr_ctloutput =		ip_ctloutput,
+	.pr_init =		udp_init,
+	.pr_usrreqs =		&udp_usrreqs
 },
-{ SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS,
-  tcp_input,	0,		tcp_ctlinput,	tcp_ctloutput,
-  tcp_usrreq,
-  tcp_init,	0,		tcp_slowtimo,	0,		tcp_sysctl
+{
+	.pr_type =		SOCK_STREAM,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_TCP,
+	.pr_flags =		PR_CONNREQUIRED|PR_IMPLOPCL|PR_WANTRCVD,
+	.pr_input =		tcp_input,
+	.pr_ctlinput =		tcp_ctlinput,
+	.pr_ctloutput =		tcp_ctloutput,
+	.pr_init =		tcp_init,
+	.pr_slowtimo =		tcp_slowtimo,
+	.pr_drain =		tcp_drain,
+	.pr_usrreqs =		&tcp_usrreqs
 },
-{ SOCK_RAW,	&inetdomain,	IPPROTO_RAW,	PR_ATOMIC|PR_ADDR,
-  rip_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  0,		0,		0,		0,
+#ifdef SCTP
+{ 
+	.pr_type = 	SOCK_DGRAM,
+	.pr_domain =  	&inetdomain,
+        .pr_protocol = 	IPPROTO_SCTP,
+        .pr_flags = 	PR_WANTRCVD,
+        .pr_input = 	sctp_input,
+        .pr_ctlinput =  sctp_ctlinput,	
+        .pr_ctloutput = sctp_ctloutput,
+        .pr_init = 	sctp_init,	
+        .pr_drain = 	sctp_drain,
+        .pr_usrreqs = 	&sctp_usrreqs
 },
-{ SOCK_RAW,	&inetdomain,	IPPROTO_ICMP,	PR_ATOMIC|PR_ADDR,
-  icmp_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  icmp_init,	0,		0,		0,		icmp_sysctl
+{
+	.pr_type = 	SOCK_SEQPACKET,
+	.pr_domain =  	&inetdomain,
+        .pr_protocol = 	IPPROTO_SCTP,
+        .pr_flags = 	PR_WANTRCVD,
+        .pr_input = 	sctp_input,
+        .pr_ctlinput =  sctp_ctlinput,	
+        .pr_ctloutput = sctp_ctloutput,
+        .pr_drain = 	sctp_drain,
+        .pr_usrreqs = 	&sctp_usrreqs
 },
-#if NGIF > 0
-{ SOCK_RAW,	&inetdomain,	IPPROTO_IPV4,	PR_ATOMIC|PR_ADDR,
-  in_gif_input,	rip_output, 	0,		rip_ctloutput,
-  rip_usrreq,
-  0,		0,		0,		0,		ipip_sysctl
+
+{ 
+	.pr_type = 	SOCK_STREAM,
+	.pr_domain =  	&inetdomain,
+        .pr_protocol = 	IPPROTO_SCTP,
+        .pr_flags = 	PR_WANTRCVD,
+        .pr_input = 	sctp_input,
+        .pr_ctlinput =  sctp_ctlinput,	
+        .pr_ctloutput = sctp_ctloutput,
+        .pr_drain = 	sctp_drain,
+        .pr_usrreqs = 	&sctp_usrreqs
 },
-#ifdef INET6
-{ SOCK_RAW,	&inetdomain,	IPPROTO_IPV6,	PR_ATOMIC|PR_ADDR,
-  in_gif_input,	rip_output,	 0,		0,
-  rip_usrreq,	/*XXX*/
-  0,		0,		0,		0,
+#endif /* SCTP */
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_RAW,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		rip_input,
+	.pr_ctlinput =		rip_ctlinput,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#endif /* INET6 */
-#else /* NGIF */
-{ SOCK_RAW,	&inetdomain,	IPPROTO_IPIP,	PR_ATOMIC|PR_ADDR,
-  ip4_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  0,		0,		0,		0,		ipip_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_ICMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		icmp_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#ifdef INET6
-{ SOCK_RAW,	&inetdomain,	IPPROTO_IPV6,	PR_ATOMIC|PR_ADDR,
-  ip4_input,	rip_output, 	0,		rip_ctloutput,
-  rip_usrreq,	/*XXX*/
-  0,		0,		0,		0,
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_IGMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		igmp_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		igmp_init,
+	.pr_fasttimo =		igmp_fasttimo,
+	.pr_slowtimo =		igmp_slowtimo,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#endif /* INET6 */
-#endif /*NGIF*/
-{ SOCK_RAW,	&inetdomain,	IPPROTO_IGMP,	PR_ATOMIC|PR_ADDR,
-  igmp_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  igmp_init,	igmp_fasttimo,	igmp_slowtimo,	0,		igmp_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_RSVP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		rsvp_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#ifdef PIM
-{ SOCK_RAW,	&inetdomain,	IPPROTO_PIM,	PR_ATOMIC|PR_ADDR,
-  pim_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  0,		0,		0,		0,		pim_sysctl
-},
-#endif /* PIM */
 #ifdef IPSEC
-{ SOCK_RAW,   &inetdomain,    IPPROTO_AH,     PR_ATOMIC|PR_ADDR,
-  ah4_input,   rip_output,    ah4_ctlinput,   rip_ctloutput,
-  rip_usrreq,
-  0,          0,              0,              0,		ah_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_AH,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		ah4_input,
+	.pr_ctlinput =		ah4_ctlinput,
+	.pr_usrreqs =		&nousrreqs
 },
-{ SOCK_RAW,   &inetdomain,    IPPROTO_ESP,    PR_ATOMIC|PR_ADDR,
-  esp4_input,  rip_output,    esp4_ctlinput,  rip_ctloutput,
-  rip_usrreq,
-  0,          0,              0,              0,		esp_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_ESP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		esp4_input,
+	.pr_ctlinput =		esp4_ctlinput,
+	.pr_usrreqs =		&nousrreqs
 },
-{ SOCK_RAW,   &inetdomain,    IPPROTO_ETHERIP, PR_ATOMIC|PR_ADDR,
-  etherip_input,  rip_output, 0,              rip_ctloutput,
-  rip_usrreq,
-  0,          0,              0,              0,		etherip_sysctl
-},
-{ SOCK_RAW,   &inetdomain,    IPPROTO_IPCOMP, PR_ATOMIC|PR_ADDR,
-  ipcomp4_input,  rip_output, 0,              rip_ctloutput,
-  rip_usrreq,
-  0,          0,              0,              0,                ipcomp_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_IPCOMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		ipcomp4_input,
+	.pr_usrreqs =		&nousrreqs
 },
 #endif /* IPSEC */
-#if NGRE > 0
-{ SOCK_RAW,     &inetdomain,    IPPROTO_GRE,    PR_ATOMIC|PR_ADDR,
-  gre_input,    rip_output,     0,              rip_ctloutput,
-  rip_usrreq,
-  0,            0,              0,             0,		gre_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_IPV4,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap_init,
+	.pr_usrreqs =		&rip_usrreqs
 },
-{ SOCK_RAW,     &inetdomain,    IPPROTO_MOBILE, PR_ATOMIC|PR_ADDR,
-  gre_mobile_input,     rip_output,     0,              rip_ctloutput,
-  rip_usrreq,
-  0,            0,              0,              0,		ipmobile_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_MOBILE,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap_init,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#endif /* NGRE > 0 */
-#if NCARP > 0
-{ SOCK_RAW,	&inetdomain,	IPPROTO_CARP,	PR_ATOMIC|PR_ADDR,
-  carp_proto_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  0,		0,		0,		0,		carp_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_ETHERIP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap_init,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#endif /* NCARP > 0 */
-#if NPFSYNC > 0
-{ SOCK_RAW,	&inetdomain,	IPPROTO_PFSYNC,	PR_ATOMIC|PR_ADDR,
-  pfsync_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  0,		0,		0,		0,		pfsync_sysctl
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_GRE,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap_init,
+	.pr_usrreqs =		&rip_usrreqs
 },
-#endif /* NPFSYNC > 0 */
+# ifdef INET6
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_IPV6,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap_init,
+	.pr_usrreqs =		&rip_usrreqs
+},
+#endif
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_PIM,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&rip_usrreqs
+},
+#ifdef DEV_PFSYNC
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_PFSYNC,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		pfsync_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&rip_usrreqs
+},
+#endif	/* DEV_PFSYNC */
+#ifdef DEV_CARP
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_CARP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		carp_input,
+	.pr_output =		(pr_output_t*)rip_output,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&rip_usrreqs
+},
+#endif /* DEV_CARP */
+/* Spacer n-times for loadable protocols. */
+IPPROTOSPACER,
+IPPROTOSPACER,
+IPPROTOSPACER,
+IPPROTOSPACER,
+IPPROTOSPACER,
+IPPROTOSPACER,
+IPPROTOSPACER,
+IPPROTOSPACER,
 /* raw wildcard */
-{ SOCK_RAW,	&inetdomain,	0,		PR_ATOMIC|PR_ADDR,
-  rip_input,	rip_output,	0,		rip_ctloutput,
-  rip_usrreq,
-  rip_init,	0,		0,		0,
+{
+	.pr_type =		SOCK_RAW,
+	.pr_domain =		&inetdomain,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		rip_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		rip_init,
+	.pr_usrreqs =		&rip_usrreqs
 },
 };
 
-struct domain inetdomain =
-    { AF_INET, "internet", 0, 0, 0,
-      inetsw, &inetsw[sizeof(inetsw)/sizeof(inetsw[0])], 0,
-#ifndef SMALL_KERNEL
-      rn_mpath_inithead,
-#else
-      rn_inithead,
-#endif
-      32, sizeof(struct sockaddr_in) };
+extern int in_inithead(void **, int);
 
-#ifdef notyet /* XXXX */
-#include "hy.h"
-#if NHY > 0
-/*
- * HYPERchannel protocol family: raw interface.
- */
-int	rhy_output();
-extern	struct domain hydomain;
-
-struct protosw hysw[] = {
-{ SOCK_RAW,	&hydomain,	0,		PR_ATOMIC|PR_ADDR,
-  0,		rhy_output,	0,		0,
-  rip_usrreq,
-  0,		0,		0,		0,
-},
+struct domain inetdomain = {
+	.dom_family =		AF_INET,
+	.dom_name =		"internet",
+	.dom_protosw =		inetsw,
+	.dom_protoswNPROTOSW =	&inetsw[sizeof(inetsw)/sizeof(inetsw[0])],
+	.dom_rtattach =		in_inithead,
+	.dom_rtoffset =		32,
+	.dom_maxrtkey =		sizeof(struct sockaddr_in)
 };
 
-struct domain hydomain =
-    { AF_HYLINK, "hy", 0, 0, 0, hysw, &hysw[sizeof (hysw)/sizeof(hysw[0])] };
+DOMAIN_SET(inet);
+
+SYSCTL_NODE(_net,      PF_INET,		inet,	CTLFLAG_RW, 0,
+	"Internet Family");
+
+SYSCTL_NODE(_net_inet, IPPROTO_IP,	ip,	CTLFLAG_RW, 0,	"IP");
+SYSCTL_NODE(_net_inet, IPPROTO_ICMP,	icmp,	CTLFLAG_RW, 0,	"ICMP");
+SYSCTL_NODE(_net_inet, IPPROTO_UDP,	udp,	CTLFLAG_RW, 0,	"UDP");
+SYSCTL_NODE(_net_inet, IPPROTO_TCP,	tcp,	CTLFLAG_RW, 0,	"TCP");
+#ifdef SCTP
+SYSCTL_NODE(_net_inet, IPPROTO_SCTP,	sctp,	CTLFLAG_RW, 0,	"SCTP");
 #endif
+SYSCTL_NODE(_net_inet, IPPROTO_IGMP,	igmp,	CTLFLAG_RW, 0,	"IGMP");
+#ifdef IPSEC
+/* XXX no protocol # to use, pick something "reserved" */
+SYSCTL_NODE(_net_inet, 253,		ipsec,	CTLFLAG_RW, 0,	"IPSEC");
+SYSCTL_NODE(_net_inet, IPPROTO_AH,	ah,	CTLFLAG_RW, 0,	"AH");
+SYSCTL_NODE(_net_inet, IPPROTO_ESP,	esp,	CTLFLAG_RW, 0,	"ESP");
+SYSCTL_NODE(_net_inet, IPPROTO_IPCOMP,	ipcomp,	CTLFLAG_RW, 0,	"IPCOMP");
+SYSCTL_NODE(_net_inet, IPPROTO_IPIP,	ipip,	CTLFLAG_RW, 0,	"IPIP");
+#endif /* IPSEC */
+SYSCTL_NODE(_net_inet, IPPROTO_RAW,	raw,	CTLFLAG_RW, 0,	"RAW");
+#ifdef DEV_PFSYNC
+SYSCTL_NODE(_net_inet, IPPROTO_PFSYNC,	pfsync,	CTLFLAG_RW, 0,	"PFSYNC");
+#endif
+#ifdef DEV_CARP
+SYSCTL_NODE(_net_inet, IPPROTO_CARP,	carp,	CTLFLAG_RW, 0,	"CARP");
 #endif

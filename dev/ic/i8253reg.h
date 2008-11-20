@@ -1,6 +1,3 @@
-/*	$OpenBSD: i8253reg.h,v 1.3 2003/06/02 23:28:02 millert Exp $	*/
-/*	$NetBSD: i8253reg.h,v 1.5 1998/01/19 11:38:00 drochner Exp $	*/
-
 /*-
  * Copyright (c) 1993 The Regents of the University of California.
  * All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -28,6 +25,9 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	from: Header: timerreg.h,v 1.2 93/02/28 15:08:58 mccanne Exp
+ * $FreeBSD: src/sys/dev/ic/i8253reg.h,v 1.2 2005/05/14 10:26:31 nyan Exp $
  */
 
 /*
@@ -41,7 +41,7 @@
  * register.  (Why are hardware interfaces always so braindead?).
  *
  * To write a value into the countdown register, the mode register
- * is first programmed with a command indicating which byte of
+ * is first programmed with a command indicating the which byte of
  * the two byte register is to be modified.  The three possibilities
  * are load msb (TMR_MR_MSB), load lsb (TMR_MR_LSB), or load lsb then
  * msb (TMR_MR_BOTH).
@@ -53,33 +53,15 @@
  * after doing this, a write operation to the I/O port would result
  * in undefined behavior (but hopefully not fry the chip).
  * Reading in this manner has no side effects.
- *
- * The outputs of the three timers are connected as follows:
- *
- *	 timer 0 -> irq 0
- *	 timer 1 -> dma chan 0 (for dram refresh)
- * 	 timer 2 -> speaker (via keyboard controller)
- *
- * Timer 0 is used to call hardclock.
- * Timer 2 is used to generate console beeps.
  */
-
-/*
- * Frequency of all three count-down timers; (TIMER_FREQ/freq) is the
- * appropriate count to generate a frequency of freq hz.
- */
-#ifndef TIMER_FREQ
-#define	TIMER_FREQ	1193182
-#endif
-#define TIMER_DIV(x) ((TIMER_FREQ+(x)/2)/(x))
 
 /*
  * Macros for specifying values to be written into a mode register.
  */
-#define	TIMER_CNTR0	0	/* timer 0 counter port */
-#define	TIMER_CNTR1	1	/* timer 1 counter port */
-#define	TIMER_CNTR2	2	/* timer 2 counter port */
-#define	TIMER_MODE	3	/* timer mode port */
+#define	TIMER_REG_CNTR0	0	/* timer 0 counter port */
+#define	TIMER_REG_CNTR1	1	/* timer 1 counter port */
+#define	TIMER_REG_CNTR2	2	/* timer 2 counter port */
+#define	TIMER_REG_MODE	3	/* timer mode port */
 #define		TIMER_SEL0	0x00	/* select counter 0 */
 #define		TIMER_SEL1	0x40	/* select counter 1 */
 #define		TIMER_SEL2	0x80	/* select counter 2 */
@@ -94,4 +76,3 @@
 #define		TIMER_MSB	0x20	/* r/w counter MSB */
 #define		TIMER_16BIT	0x30	/* r/w counter 16 bits, LSB first */
 #define		TIMER_BCD	0x01	/* count in BCD */
-

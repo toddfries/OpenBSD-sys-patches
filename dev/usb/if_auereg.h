@@ -1,8 +1,9 @@
-/*	$OpenBSD: if_auereg.h,v 1.13 2007/06/10 10:15:35 mbalmer Exp $ */
-/*	$NetBSD: if_auereg.h,v 1.16 2001/10/10 02:14:17 augustss Exp $	*/
-/*
+/*-
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
+ *
+ * Copyright (c) 2006
+ *      Alfred Perlstein <alfred@freebsd.org>. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +32,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/if_auereg.h,v 1.2 2000/01/08 06:52:36 wpaul Exp $
+ * $FreeBSD: src/sys/dev/usb/if_auereg.h,v 1.27 2007/01/08 23:24:21 alfred Exp $
  */
 
 /*
@@ -47,6 +48,9 @@
  * transfer is denoted by having a length less that 64 bytes. For
  * the RX case, the data includes an optional RX status word.
  */
+
+#ifndef AUEREG_H
+#define AUEREG_H
 
 #define AUE_UR_READREG		0xF0
 #define AUE_UR_WRITEREG		0xF1
@@ -69,6 +73,8 @@
 #define AUE_ENDPT_TX		0x1
 #define AUE_ENDPT_INTR		0x2
 #define AUE_ENDPT_MAX		0x3
+
+#define AUE_INTR_PKTLEN		0x8
 
 #define AUE_CTL0		0x00
 #define AUE_CTL1		0x01
@@ -182,13 +188,11 @@ struct aue_intrpkt {
 	u_int8_t		aue_rxlostpkt1;
 	u_int8_t		aue_wakeupstat;
 	u_int8_t		aue_rsvd;
-	u_int8_t		_pad;
 };
-#define AUE_INTR_PKTLEN 8
 
 struct aue_rxpkt {
-	uWord			aue_pktlen;
-	uByte			aue_rxstat;
+	u_int16_t		aue_pktlen;
+	u_int8_t		aue_rxstat;
 };
 
 #define AUE_RXSTAT_MCAST	0x01
@@ -198,71 +202,93 @@ struct aue_rxpkt {
 #define AUE_RXSTAT_DRIBBLE	0x10
 #define AUE_RXSTAT_MASK		0x1E
 
-
-/*************** The rest belongs in if_auevar.h *************/
-
-#define AUE_TX_LIST_CNT		1
-#define AUE_RX_LIST_CNT		1
-
-struct aue_softc;
-
-struct aue_chain {
-	struct aue_softc	*aue_sc;
-	usbd_xfer_handle	aue_xfer;
-	char			*aue_buf;
-	struct mbuf		*aue_mbuf;
-	int			aue_idx;
-};
-
-struct aue_cdata {
-	struct aue_chain	aue_tx_chain[AUE_TX_LIST_CNT];
-	struct aue_chain	aue_rx_chain[AUE_RX_LIST_CNT];
-	struct aue_intrpkt	aue_ibuf;
-	int			aue_tx_prod;
-	int			aue_tx_cons;
-	int			aue_tx_cnt;
-	int			aue_rx_prod;
-};
+#define AUE_INC(x, y)		(x) = (x + 1) % y
 
 struct aue_softc {
-	struct device		aue_dev;
-
-	struct arpcom		arpcom;
-	struct mii_data		aue_mii;
-#define GET_IFP(sc) (&(sc)->arpcom.ac_if)
+#if defined(__FreeBSD__)
+#define GET_MII(sc) (device_get_softc((sc)->aue_miibus))
+#elif defined(__NetBSD__)
 #define GET_MII(sc) (&(sc)->aue_mii)
-
-	struct timeout		aue_stat_ch;
-
+#elif defined(__OpenBSD__)
+#define GET_MII(sc) (&(sc)->aue_mii)
+#endif
+	struct ifnet		*aue_ifp;
+	device_t		aue_dev;
+	device_t		aue_miibus;
 	usbd_device_handle	aue_udev;
 	usbd_interface_handle	aue_iface;
 	u_int16_t		aue_vendor;
 	u_int16_t		aue_product;
 	int			aue_ed[AUE_ENDPT_MAX];
 	usbd_pipe_handle	aue_ep[AUE_ENDPT_MAX];
+	int			aue_unit;
 	u_int8_t		aue_link;
+	int			aue_timer;
 	int			aue_if_flags;
-	struct aue_cdata	aue_cdata;
-
+	struct ue_cdata		aue_cdata;
+	struct callout		aue_tick_callout;
+	struct usb_taskqueue	aue_taskqueue;
+	struct task		aue_task;
+	struct mtx		aue_mtx;
+	struct sx		aue_sx;
 	u_int16_t		aue_flags;
-
-	int			aue_refcnt;
 	char			aue_dying;
-	char			aue_attached;
-	u_int			aue_rx_errs;
-	u_int			aue_intr_errs;
 	struct timeval		aue_rx_notice;
-
-	struct usb_task		aue_tick_task;
-	struct usb_task		aue_stop_task;
-
-	struct rwlock		aue_mii_lock;
-
-	void			*sc_sdhook;
+	struct usb_qdat		aue_qdat;
+	int			aue_deferedtasks;
 };
 
+#if 0
+/*
+ * Some debug code to make sure we don't take a blocking lock in
+ * interrupt context.
+ */
+#include <sys/types.h>
+#include <sys/proc.h>
+#include <sys/kdb.h>
+
+#define AUE_DUMPSTATE(tag)	aue_dumpstate(__func__, tag)
+
+static inline void
+aue_dumpstate(const char *func, const char *tag)
+{
+	if ((curthread->td_pflags & TDP_NOSLEEPING) ||
+	    (curthread->td_pflags & TDP_ITHREAD)) {
+		kdb_backtrace();
+		printf("%s: %s sleep: %sok ithread: %s\n", func, tag,
+			curthread->td_pflags & TDP_NOSLEEPING ? "not" : "",
+			curthread->td_pflags & TDP_ITHREAD ?  "yes" : "no");
+	}
+}
+#else
+#define AUE_DUMPSTATE(tag)
+#endif
+
+#define AUE_LOCK(_sc)			mtx_lock(&(_sc)->aue_mtx)
+#define AUE_UNLOCK(_sc)			mtx_unlock(&(_sc)->aue_mtx)
+#define AUE_SXLOCK(_sc)	\
+    do { AUE_DUMPSTATE("sxlock"); sx_xlock(&(_sc)->aue_sx); } while(0)
+#define AUE_SXUNLOCK(_sc)		sx_xunlock(&(_sc)->aue_sx)
+#define AUE_SXASSERTLOCKED(_sc)		sx_assert(&(_sc)->aue_sx, SX_XLOCKED)
+#define AUE_SXASSERTUNLOCKED(_sc)	sx_assert(&(_sc)->aue_sx, SX_UNLOCKED)
+
 #define AUE_TIMEOUT		1000
-#define AUE_BUFSZ		1536
 #define AUE_MIN_FRAMELEN	60
-#define AUE_TX_TIMEOUT		10000 /* ms */
 #define AUE_INTR_INTERVAL	100 /* ms */
+
+/*
+ * These bits are used to notify the task about pending events.
+ * The names correspond to the interrupt context routines that would
+ * be normally called.  (example: AUE_TASK_WATCHDOG -> aue_watchdog())
+ */
+#define AUE_TASK_WATCHDOG	0x0001
+#define AUE_TASK_TICK		0x0002
+#define AUE_TASK_START		0x0004
+#define AUE_TASK_RXSTART	0x0008
+#define AUE_TASK_RXEOF		0x0010
+#define AUE_TASK_TXEOF		0x0020
+
+#define AUE_GIANTLOCK()		mtx_lock(&Giant);
+#define AUE_GIANTUNLOCK()	mtx_unlock(&Giant);
+
+#endif /* !AUEREG_H */

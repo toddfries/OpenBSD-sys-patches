@@ -1,7 +1,4 @@
-/*	$OpenBSD: syslog.h,v 1.12 2006/01/06 18:53:06 millert Exp $	*/
-/*	$NetBSD: syslog.h,v 1.14 1996/04/03 20:46:44 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,12 +27,15 @@
  * SUCH DAMAGE.
  *
  *	@(#)syslog.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/syslog.h,v 1.26 2005/01/07 02:29:24 imp Exp $
  */
 
 #ifndef _SYS_SYSLOG_H_
 #define _SYS_SYSLOG_H_
 
-#define	_PATH_LOG	"/dev/log"
+#define	_PATH_LOG	"/var/run/log"
+#define	_PATH_LOG_PRIV	"/var/run/logpriv"
+#define	_PATH_OLDLOG	"/dev/log"	/* backward compatibility */
 
 /*
  * priorities/facilities are encoded into a single 32-bit quantity, where the
@@ -58,31 +58,31 @@
 #define	LOG_PRIMASK	0x07	/* mask to extract priority part (internal) */
 				/* extract priority */
 #define	LOG_PRI(p)	((p) & LOG_PRIMASK)
-#define	LOG_MAKEPRI(fac, pri)	(((fac) << 3) | (pri))
+#define	LOG_MAKEPRI(fac, pri)	((fac) | (pri))
 
 #ifdef SYSLOG_NAMES
 #define	INTERNAL_NOPRI	0x10	/* the "no priority" priority */
 				/* mark "facility" */
-#define	INTERNAL_MARK	LOG_MAKEPRI(LOG_NFACILITIES, 0)
+#define	INTERNAL_MARK	LOG_MAKEPRI((LOG_NFACILITIES<<3), 0)
 typedef struct _code {
-	char	*c_name;
-	int	c_val;
+	const char	*c_name;
+	int		c_val;
 } CODE;
 
 CODE prioritynames[] = {
-	{ "alert",	LOG_ALERT },
-	{ "crit",	LOG_CRIT },
-	{ "debug",	LOG_DEBUG },
-	{ "emerg",	LOG_EMERG },
-	{ "err",	LOG_ERR },
-	{ "error",	LOG_ERR },		/* DEPRECATED */
-	{ "info",	LOG_INFO },
-	{ "none",	INTERNAL_NOPRI },	/* INTERNAL */
-	{ "notice",	LOG_NOTICE },
-	{ "panic", 	LOG_EMERG },		/* DEPRECATED */
-	{ "warn",	LOG_WARNING },		/* DEPRECATED */
-	{ "warning",	LOG_WARNING },
-	{ NULL,		-1 },
+	{ "alert",	LOG_ALERT,	},
+	{ "crit",	LOG_CRIT,	},
+	{ "debug",	LOG_DEBUG,	},
+	{ "emerg",	LOG_EMERG,	},
+	{ "err",	LOG_ERR,	},
+	{ "error",	LOG_ERR,	},	/* DEPRECATED */
+	{ "info",	LOG_INFO,	},
+	{ "none",	INTERNAL_NOPRI,	},	/* INTERNAL */
+	{ "notice",	LOG_NOTICE,	},
+	{ "panic", 	LOG_EMERG,	},	/* DEPRECATED */
+	{ "warn",	LOG_WARNING,	},	/* DEPRECATED */
+	{ "warning",	LOG_WARNING,	},
+	{ NULL,		-1,		}
 };
 #endif
 
@@ -91,14 +91,20 @@ CODE prioritynames[] = {
 #define	LOG_USER	(1<<3)	/* random user-level messages */
 #define	LOG_MAIL	(2<<3)	/* mail system */
 #define	LOG_DAEMON	(3<<3)	/* system daemons */
-#define	LOG_AUTH	(4<<3)	/* security/authorization messages */
+#define	LOG_AUTH	(4<<3)	/* authorization messages */
 #define	LOG_SYSLOG	(5<<3)	/* messages generated internally by syslogd */
 #define	LOG_LPR		(6<<3)	/* line printer subsystem */
 #define	LOG_NEWS	(7<<3)	/* network news subsystem */
 #define	LOG_UUCP	(8<<3)	/* UUCP subsystem */
 #define	LOG_CRON	(9<<3)	/* clock daemon */
-#define	LOG_AUTHPRIV	(10<<3)	/* security/authorization messages (private) */
+#define	LOG_AUTHPRIV	(10<<3)	/* authorization messages (private) */
+				/* Facility #10 clashes in DEC UNIX, where */
+				/* it's defined as LOG_MEGASAFE for AdvFS  */
+				/* event logging.                          */
 #define	LOG_FTP		(11<<3)	/* ftp daemon */
+#define	LOG_NTP		(12<<3)	/* NTP subsystem */
+#define	LOG_SECURITY	(13<<3) /* security subsystems (firewalling, etc.) */
+#define	LOG_CONSOLE	(14<<3) /* /dev/console output */
 
 	/* other codes through 15 reserved for system use */
 #define	LOG_LOCAL0	(16<<3)	/* reserved for local use */
@@ -117,45 +123,33 @@ CODE prioritynames[] = {
 
 #ifdef SYSLOG_NAMES
 CODE facilitynames[] = {
-	{ "auth",	LOG_AUTH },
-	{ "authpriv",	LOG_AUTHPRIV },
-	{ "cron", 	LOG_CRON },
-	{ "daemon",	LOG_DAEMON },
-	{ "ftp",	LOG_FTP },
-	{ "kern",	LOG_KERN },
-	{ "lpr",	LOG_LPR },
-	{ "mail",	LOG_MAIL },
-	{ "mark", 	INTERNAL_MARK },	/* INTERNAL */
-	{ "news",	LOG_NEWS },
-	{ "security",	LOG_AUTH },		/* DEPRECATED */
-	{ "syslog",	LOG_SYSLOG },
-	{ "user",	LOG_USER },
-	{ "uucp",	LOG_UUCP },
-	{ "local0",	LOG_LOCAL0 },
-	{ "local1",	LOG_LOCAL1 },
-	{ "local2",	LOG_LOCAL2 },
-	{ "local3",	LOG_LOCAL3 },
-	{ "local4",	LOG_LOCAL4 },
-	{ "local5",	LOG_LOCAL5 },
-	{ "local6",	LOG_LOCAL6 },
-	{ "local7",	LOG_LOCAL7 },
-	{ NULL,		-1 },
+	{ "auth",	LOG_AUTH,	},
+	{ "authpriv",	LOG_AUTHPRIV,	},
+	{ "console", 	LOG_CONSOLE,	},
+	{ "cron", 	LOG_CRON,	},
+	{ "daemon",	LOG_DAEMON,	},
+	{ "ftp",	LOG_FTP,	},
+	{ "kern",	LOG_KERN,	},
+	{ "lpr",	LOG_LPR,	},
+	{ "mail",	LOG_MAIL,	},
+	{ "mark", 	INTERNAL_MARK,	},	/* INTERNAL */
+	{ "news",	LOG_NEWS,	},
+	{ "ntp",	LOG_NTP,	},
+	{ "security",	LOG_SECURITY,	},
+	{ "syslog",	LOG_SYSLOG,	},
+	{ "user",	LOG_USER,	},
+	{ "uucp",	LOG_UUCP,	},
+	{ "local0",	LOG_LOCAL0,	},
+	{ "local1",	LOG_LOCAL1,	},
+	{ "local2",	LOG_LOCAL2,	},
+	{ "local3",	LOG_LOCAL3,	},
+	{ "local4",	LOG_LOCAL4,	},
+	{ "local5",	LOG_LOCAL5,	},
+	{ "local6",	LOG_LOCAL6,	},
+	{ "local7",	LOG_LOCAL7,	},
+	{ NULL,		-1,		}
 };
 #endif
-
-/* Used by reentrant functions */
-
-struct syslog_data {
-	int	log_file;
-	int	connected;
-	int	opened;
-	int	log_stat;
-	const char 	*log_tag;
-	int 	log_fac;
-	int 	log_mask;
-};
-
-#define SYSLOG_DATA_INIT {-1, 0, 0, 0, (const char *)0, LOG_USER, 0xff}
 
 #ifdef _KERNEL
 #define	LOG_PRINTF	-1	/* pseudo-priority to indicate use of printf */
@@ -180,42 +174,28 @@ struct syslog_data {
 #define	LOG_NOWAIT	0x10	/* don't wait for console forks: DEPRECATED */
 #define	LOG_PERROR	0x20	/* log to stderr as well */
 
-#ifndef _KERNEL
+#ifdef _KERNEL
+
+#else /* not _KERNEL */
 
 /*
  * Don't use va_list in the vsyslog() prototype.   Va_list is typedef'd in two
  * places (<machine/varargs.h> and <machine/stdarg.h>), so if we include one
  * of them here we may collide with the utility's includes.  It's unreasonable
  * for utilities to have to include one of them to include syslog.h, so we get
- * __va_list from <machine/_types.h> and use it.
+ * __va_list from <sys/_types.h> and use it.
  */
 #include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <sys/_types.h>
 
 __BEGIN_DECLS
 void	closelog(void);
 void	openlog(const char *, int, int);
 int	setlogmask(int);
-void	syslog(int, const char *, ...)
-    __attribute__((__format__(__syslog__,2,3)));
-void	vsyslog(int, const char *, __va_list);
-void	closelog_r(struct syslog_data *);
-void	openlog_r(const char *, int, int, struct syslog_data *);
-int	setlogmask_r(int, struct syslog_data *);
-void	syslog_r(int, struct syslog_data *, const char *, ...)
-     __attribute__((__format__(__syslog__,3,4)));
-void	vsyslog_r(int, struct syslog_data *, const char *, __va_list);
+void	syslog(int, const char *, ...) __printflike(2, 3);
+void	vsyslog(int, const char *, __va_list) __printflike(2, 0);
 __END_DECLS
 
-#else /* !_KERNEL */
-
-void	logpri(int);
-void	log(int, const char *, ...)
-    __attribute__((__format__(__kprintf__,2,3)));
-int	addlog(const char *, ...)
-    __attribute__((__format__(__kprintf__,1,2)));
-void	logwakeup(void);
-
 #endif /* !_KERNEL */
-#endif /* !_SYS_SYSLOG_H_ */
 
+#endif

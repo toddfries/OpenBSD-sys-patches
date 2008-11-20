@@ -1,6 +1,3 @@
-/*	$OpenBSD: dirent.h,v 1.8 2006/08/17 12:40:11 jmc Exp $	*/
-/*	$NetBSD: dirent.h,v 1.12 1996/04/09 20:55:25 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,12 +27,14 @@
  * SUCH DAMAGE.
  *
  *	@(#)dirent.h	8.3 (Berkeley) 8/10/94
+ * $FreeBSD: src/sys/sys/dirent.h,v 1.15 2006/08/16 09:34:56 maxim Exp $
  */
 
-#ifndef _SYS_DIRENT_H_
-#define _SYS_DIRENT_H_
+#ifndef	_SYS_DIRENT_H_
+#define	_SYS_DIRENT_H_
 
 #include <sys/cdefs.h>
+#include <sys/_types.h>
 
 /*
  * The dirent structure defines the format of directory entries returned by
@@ -49,10 +48,10 @@
  */
 
 struct dirent {
-	u_int32_t d_fileno;		/* file number of entry */
-	u_int16_t d_reclen;		/* length of this record */
-	u_int8_t  d_type; 		/* file type, see below */
-	u_int8_t  d_namlen;		/* length of string in d_name */
+	__uint32_t d_fileno;		/* file number of entry */
+	__uint16_t d_reclen;		/* length of this record */
+	__uint8_t  d_type; 		/* file type, see below */
+	__uint8_t  d_namlen;		/* length of string in d_name */
 #if __BSD_VISIBLE
 #define	MAXNAMLEN	255
 	char	d_name[MAXNAMLEN + 1];	/* name must be no longer than this */
@@ -73,6 +72,7 @@ struct dirent {
 #define	DT_REG		 8
 #define	DT_LNK		10
 #define	DT_SOCK		12
+#define	DT_WHT		14
 
 /*
  * Convert between stat structure types and directory types.
@@ -81,14 +81,20 @@ struct dirent {
 #define	DTTOIF(dirtype)	((dirtype) << 12)
 
 /*
- * The DIRENT_SIZE macro gives the minimum record length which will hold
- * the directory entry.  This returns the amount of space in struct dirent
+ * The _GENERIC_DIRSIZ macro gives the minimum record length which will hold
+ * the directory entry.  This returns the amount of space in struct direct
  * without the d_name field, plus enough space for the name with a terminating
  * null byte (dp->d_namlen+1), rounded up to a 4 byte boundary.
+ *
+ * XXX although this macro is in the implementation namespace, it requires
+ * a manifest constant that is not.
  */
-#define	DIRENT_SIZE(dp) \
+#define	_GENERIC_DIRSIZ(dp) \
     ((sizeof (struct dirent) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3))
-
 #endif /* __BSD_VISIBLE */
 
-#endif /* _SYS_DIRENT_H_ */
+#ifdef _KERNEL
+#define	GENERIC_DIRSIZ(dp)	_GENERIC_DIRSIZ(dp)
+#endif
+
+#endif /* !_SYS_DIRENT_H_ */

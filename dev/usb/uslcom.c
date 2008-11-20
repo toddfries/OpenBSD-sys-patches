@@ -1,4 +1,5 @@
-/*	$OpenBSD: uslcom.c,v 1.19 2008/03/22 02:50:02 jsg Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/uslcom.c,v 1.2 2008/03/05 14:18:29 rink Exp $ */
+/*	$OpenBSD: uslcom.c,v 1.17 2007/11/24 10:52:12 jsg Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -19,21 +20,24 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/module.h>
 #include <sys/conf.h>
+#include <sys/bus.h>
 #include <sys/tty.h>
-#include <sys/device.h>
+
+#include <dev/usb/usb.h>
+#include <dev/usb/usbcdc.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
-#include <dev/usb/usbdevs.h>
 
-#include <dev/usb/usbdevs.h>
+#include "usbdevs.h"
 #include <dev/usb/ucomvar.h>
 
 #ifdef USLCOM_DEBUG
 #define DPRINTFN(n, x)  do { if (uslcomdebug > (n)) printf x; } while (0)
-int	uslcomdebug = 0;
+int	uslcomdebug = 1;
 #else
 #define DPRINTFN(n, x)
 #endif
@@ -80,10 +84,9 @@ int	uslcomdebug = 0;
 
 
 struct uslcom_softc {
-	struct device		 sc_dev;
+	struct ucom_softc	 sc_ucom;
+	device_t		 sc_dev;
 	usbd_device_handle	 sc_udev;
-	usbd_interface_handle	 sc_iface;
-	struct device		*sc_subdev;
 
 	u_char			 sc_msr;
 	u_char			 sc_lsr;
@@ -98,7 +101,7 @@ int	uslcom_open(void *sc, int portno);
 void	uslcom_close(void *, int);
 void	uslcom_break(void *sc, int portno, int onoff);
 
-struct ucom_methods uslcom_methods = {
+struct ucom_callback uslcom_callback = {
 	uslcom_get_status,
 	uslcom_set,
 	uslcom_param,
@@ -111,61 +114,52 @@ struct ucom_methods uslcom_methods = {
 
 static const struct usb_devno uslcom_devs[] = {
 	{ USB_VENDOR_BALTECH,		USB_PRODUCT_BALTECH_CARDREADER },
-	{ USB_VENDOR_CLIPSAL,		USB_PRODUCT_CLIPSAL_5500PCU },
 	{ USB_VENDOR_DYNASTREAM,	USB_PRODUCT_DYNASTREAM_ANTDEVBOARD },
-	{ USB_VENDOR_DYNASTREAM,	USB_PRODUCT_DYNASTREAM_ANT2USB },
-	{ USB_VENDOR_GEMPLUS,		USB_PRODUCT_GEMPLUS_PROXPU },
 	{ USB_VENDOR_JABLOTRON,		USB_PRODUCT_JABLOTRON_PC60B },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_ARGUSISP },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_AEROCOMM },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_BSM7DUSB },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_1 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_2 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CRUMB128 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_DEGREECONT },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_DESKTOPMOBILE },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_EDG1228 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_IPLINK1220 },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_DEGREE },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_BURNSIDE },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_HELICOM },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_LIPOWSKY_HARP },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_LIPOWSKY_JTAG },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_LIPOWSKY_LIN },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_MC35PU },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_POLOLU },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_RIGBLASTER },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_RIGTALK },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_SUNNTO },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_TRACIENT },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP2102 },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_2 },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_SUUNTO },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_TRAQMATE },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_USBCOUNT50 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_USBPULSE100 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_USBSCOPE50 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_USBWAVE12 },
 	{ USB_VENDOR_SILABS2,		USB_PRODUCT_SILABS2_DCU11CLONE },
-	{ USB_VENDOR_SILABS3,		USB_PRODUCT_SILABS3_GPRS_MODEM },
 	{ USB_VENDOR_USI,		USB_PRODUCT_USI_MC60 }
 };
 
-int uslcom_match(struct device *, void *, void *); 
-void uslcom_attach(struct device *, struct device *, void *); 
-int uslcom_detach(struct device *, int); 
-int uslcom_activate(struct device *, enum devact); 
+static device_probe_t uslcom_match;
+static device_attach_t uslcom_attach;
+static device_detach_t uslcom_detach;
 
-struct cfdriver uslcom_cd = { 
-	NULL, "uslcom", DV_DULL 
-}; 
-
-const struct cfattach uslcom_ca = { 
-	sizeof(struct uslcom_softc), 
-	uslcom_match, 
-	uslcom_attach, 
-	uslcom_detach, 
-	uslcom_activate, 
+static device_method_t uslcom_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe, uslcom_match),
+	DEVMETHOD(device_attach, uslcom_attach),
+	DEVMETHOD(device_detach, uslcom_detach),
+	{ 0, 0 }
 };
 
-int
-uslcom_match(struct device *parent, void *match, void *aux)
+static driver_t uslcom_driver = {
+	"ucom",
+	uslcom_methods,
+	sizeof (struct uslcom_softc)
+};
+
+DRIVER_MODULE(uslcom, uhub, uslcom_driver, ucom_devclass, usbd_driver_load, 0);
+MODULE_DEPEND(uslcom, usb, 1, 1, 1);
+MODULE_DEPEND(uslcom, ucom, UCOM_MINVER, UCOM_PREFVER, UCOM_MAXVER);
+MODULE_VERSION(uslcom, 1);
+
+static int
+uslcom_match(device_t self)
 {
-	struct usb_attach_arg *uaa = aux;
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -174,114 +168,90 @@ uslcom_match(struct device *parent, void *match, void *aux)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-void
-uslcom_attach(struct device *parent, struct device *self, void *aux)
+static int
+uslcom_attach(device_t self)
 {
-	struct uslcom_softc *sc = (struct uslcom_softc *)self;
-	struct usb_attach_arg *uaa = aux;
-	struct ucom_attach_args uca;
+	struct uslcom_softc *sc = device_get_softc(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
+	usbd_device_handle dev = uaa->device;
+	struct ucom_softc* ucom;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	usbd_status error;
 	int i;
 
-	bzero(&uca, sizeof(uca));
+	ucom = &sc->sc_ucom;
+	ucom->sc_dev = self;
+	ucom->sc_udev = dev;
+	ucom->sc_iface = uaa->iface;
+	
+	sc->sc_dev = self;
 	sc->sc_udev = uaa->device;
 
 	if (usbd_set_config_index(sc->sc_udev, USLCOM_CONFIG_NO, 1) != 0) {
-		printf("%s: could not set configuration no\n",
-		    sc->sc_dev.dv_xname);
+		device_printf(self, "could not set configuration no\n");
 		sc->sc_dying = 1;
-		return;
+		return ENXIO;
 	}
 
 	/* get the first interface handle */
 	error = usbd_device2interface_handle(sc->sc_udev, USLCOM_IFACE_NO,
-	    &sc->sc_iface);
+	    &ucom->sc_iface);
 	if (error != 0) {
-		printf("%s: could not get interface handle\n",
-		    sc->sc_dev.dv_xname);
+		device_printf(self, "could not get interface handle\n");
 		sc->sc_dying = 1;
-		return;
+		return ENXIO;
 	}
 
-	id = usbd_get_interface_descriptor(sc->sc_iface);
+	id = usbd_get_interface_descriptor(ucom->sc_iface);
 
-	uca.bulkin = uca.bulkout = -1;
+	ucom->sc_bulkin_no = ucom->sc_bulkout_no = -1;
 	for (i = 0; i < id->bNumEndpoints; i++) {
-		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
+		ed = usbd_interface2endpoint_descriptor(ucom->sc_iface, i);
 		if (ed == NULL) {
-			printf("%s: no endpoint descriptor found for %d\n",
-			    sc->sc_dev.dv_xname, i);
+			device_printf(self, "no endpoint descriptor found for %d\n",
+			    i);
 			sc->sc_dying = 1;
-			return;
+			return ENXIO;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK)
-			uca.bulkin = ed->bEndpointAddress;
+			ucom->sc_bulkin_no = ed->bEndpointAddress;
 		else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_OUT &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK)
-			uca.bulkout = ed->bEndpointAddress;
+			ucom->sc_bulkout_no = ed->bEndpointAddress;
 	}
 
-	if (uca.bulkin == -1 || uca.bulkout == -1) {
-		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
+	if (ucom->sc_bulkin_no == -1 || ucom->sc_bulkout_no == -1) {
+		device_printf(self, "missing endpoint\n");
 		sc->sc_dying = 1;
-		return;
+		return ENXIO;
 	}
 
-	uca.ibufsize = USLCOMBUFSZ;
-	uca.obufsize = USLCOMBUFSZ;
-	uca.ibufsizepad = USLCOMBUFSZ;
-	uca.opkthdrlen = 0;
-	uca.device = sc->sc_udev;
-	uca.iface = sc->sc_iface;
-	uca.methods = &uslcom_methods;
-	uca.arg = sc;
-	uca.info = NULL;
+	ucom->sc_parent = sc;
+	ucom->sc_portno = UCOM_UNK_PORTNO;
+	/* bulkin, bulkout set above */
+	ucom->sc_ibufsize = USLCOMBUFSZ;
+	ucom->sc_obufsize = USLCOMBUFSZ;
+	ucom->sc_ibufsizepad = USLCOMBUFSZ;
+	ucom->sc_opkthdrlen = 0;
+	ucom->sc_callback = &uslcom_callback;
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    &sc->sc_dev);
-	
-	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
+        DPRINTF(("uslcom: in = 0x%x, out = 0x%x\n",
+                 ucom->sc_bulkin_no, ucom->sc_bulkout_no));
+
+        ucom_attach(&sc->sc_ucom);
+        return 0;
 }
 
-int
-uslcom_detach(struct device *self, int flags)
+static int
+uslcom_detach(device_t self)
 {
-	struct uslcom_softc *sc = (struct uslcom_softc *)self;
-	int rv = 0;
+	struct uslcom_softc *sc = device_get_softc(self);
 
 	sc->sc_dying = 1;
-	if (sc->sc_subdev != NULL) {
-		rv = config_detach(sc->sc_subdev, flags);
-		sc->sc_subdev = NULL;
-	}
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
-
-	return (rv);
-}
-
-int
-uslcom_activate(struct device *self, enum devact act)
-{
-	struct uslcom_softc *sc = (struct uslcom_softc *)self;
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
-		break;
-	}
-	return (rv);
+	return ucom_detach(&sc->sc_ucom);
 }
 
 int

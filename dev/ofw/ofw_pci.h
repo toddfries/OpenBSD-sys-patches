@@ -1,6 +1,3 @@
-/*	$OpenBSD: ofw_pci.h,v 1.3 2004/10/01 04:08:45 jsg Exp $	*/
-/*	$NetBSD: ofw_pci.h,v 1.4 2001/02/17 16:28:37 mrg Exp $	*/
-
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -36,6 +33,10 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	from: NetBSD: ofw_pci.h,v 1.5 2003/10/22 09:04:39 mjl Exp
+ *
+ * $FreeBSD: src/sys/dev/ofw/ofw_pci.h,v 1.2 2005/02/12 19:12:17 marius Exp $
  */
 
 #ifndef _DEV_OFW_OFW_PCI_H_

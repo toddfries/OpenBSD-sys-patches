@@ -1,7 +1,4 @@
-/*	$OpenBSD: lockf.h,v 1.7 2005/03/10 17:26:10 tedu Exp $	*/
-/*	$NetBSD: lockf.h,v 1.5 1994/06/29 06:44:33 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -16,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,7 +30,15 @@
  * SUCH DAMAGE.
  *
  *	@(#)lockf.h	8.1 (Berkeley) 6/11/93
+ * $FreeBSD: src/sys/sys/lockf.h,v 1.20 2007/05/17 16:03:14 csjp Exp $
  */
+
+#ifndef _SYS_LOCKF_H_
+#define	_SYS_LOCKF_H_
+
+#include <sys/queue.h>
+
+struct vop_advlock_args;
 
 /*
  * The lockf structure is a kernel structure which contains the information
@@ -44,41 +49,21 @@
 TAILQ_HEAD(locklist, lockf);
 
 struct lockf {
-	short	lf_flags;	 /* Lock semantics: F_POSIX, F_FLOCK, F_WAIT */
-	short	lf_type;	 /* Lock type: F_RDLCK, F_WRLCK */
-	off_t	lf_start;	 /* The byte # of the start of the lock */
-	off_t	lf_end;		 /* The byte # of the end of the lock (-1=EOF)*/
-	caddr_t	lf_id;		 /* The id of the resource holding the lock */
-	struct	lockf **lf_head; /* Back pointer to the head of lockf list */
-	struct	lockf *lf_next;	 /* A pointer to the next lock on this inode */
-	struct	locklist lf_blkhd;	/* The list of blocked locks */
-	TAILQ_ENTRY(lockf) lf_block; /* A request waiting for a lock */
-	uid_t	lf_uid;		/* User ID responsible */
+	short	lf_flags;	    /* Semantics: F_POSIX, F_FLOCK, F_WAIT */
+	short	lf_type;	    /* Lock type: F_RDLCK, F_WRLCK */
+	off_t	lf_start;	    /* Byte # of the start of the lock */
+	off_t	lf_end;		    /* Byte # of the end of the lock (-1=EOF) */
+	caddr_t	lf_id;		    /* Id of the resource holding the lock */
+	struct	lockf **lf_head;    /* Back pointer to the head of the lockf list */
+	struct	inode *lf_inode;    /* Back pointer to the inode */
+	struct	lockf *lf_next;	    /* Pointer to the next lock on this inode */
+	struct	locklist lf_blkhd;  /* List of requests blocked on this lock */
+	TAILQ_ENTRY(lockf) lf_block;/* A request waiting for a lock */
 };
 
 /* Maximum length of sleep chains to traverse to try and detect deadlock. */
 #define MAXDEPTH 50
 
-__BEGIN_DECLS
-void	 lf_init(void);
-int	 lf_advlock(struct lockf **,
-	    off_t, caddr_t, int, struct flock *, int);
-int	 lf_clearlock(struct lockf *);
-int	 lf_findoverlap(struct lockf *,
-	    struct lockf *, int, struct lockf ***, struct lockf **);
-struct lockf *
-	 lf_getblock(struct lockf *);
-int	 lf_getlock(struct lockf *, struct flock *);
-int	 lf_setlock(struct lockf *);
-void	 lf_split(struct lockf *, struct lockf *);
-void	 lf_wakelock(struct lockf *);
-__END_DECLS
+int	 lf_advlock(struct vop_advlock_args *, struct lockf **, u_quad_t);
 
-#ifdef LOCKF_DEBUG
-extern int lockf_debug;
-
-__BEGIN_DECLS
-void	lf_print(char *, struct lockf *);
-void	lf_printlist(char *, struct lockf *);
-__END_DECLS
-#endif
+#endif /* !_SYS_LOCKF_H_ */

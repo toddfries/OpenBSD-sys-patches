@@ -1,8 +1,13 @@
-/*	$OpenBSD: usb_port.h,v 1.96 2007/06/17 07:53:11 mbalmer Exp $ */
-/*	$NetBSD: usb_port.h,v 1.62 2003/02/15 18:33:30 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
+/*	$OpenBSD: usb_port.h,v 1.18 2000/09/06 22:42:10 rahnds Exp $ */
+/*	$NetBSD: usb_port.h,v 1.54 2002/03/28 21:49:19 ichiro Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.99 2007/10/20 23:23:18 julian Exp $       */
 
-/*
+/* Also already merged from NetBSD:
+ *	$NetBSD: usb_port.h,v 1.57 2002/09/27 20:42:01 thorpej Exp $
+ *	$NetBSD: usb_port.h,v 1.58 2002/10/01 01:25:26 thorpej Exp $
+ */
+
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -43,146 +48,153 @@
 #define _USB_PORT_H
 
 /*
- * Macros to ease the import of USB drivers from other operating systems, e.g.
- * NetBSD or FreeBSD.
+ * Macro's to cope with the differences between operating systems.
  */
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+/*
+ * FreeBSD
+ */
+
+/* We don't use the soft interrupt code in FreeBSD. */
+#if 0
 #define USB_USE_SOFTINTR
-#else
-#undef USB_USE_SOFTINTR
 #endif
 
-#define Static
+#define Static static
 
-#define UMASS_ATAPISTR		"atapiscsi"
-
-/* periph_quirks */
-#define	PQUIRK_NOSENSE		ADEV_NOSENSE	/* can't REQUEST SENSE */
-#define PQUIRK_ONLYBIG		SDEV_ONLYBIG
-
-#define sel_klist si_note
-
-typedef struct proc *usb_proc_ptr;
-
-#define UCOMBUSCF_PORTNO		0
-#define UCOMBUSCF_PORTNO_DEFAULT	-1
-#define UHIDBUSCF_REPORTID		0
-#define UHIDBUSCF_REPORTID_DEFAULT	-1
-
-#define mstohz(ms) ((ms) * hz / 1000)
-
-#define sel_klist si_note
-
-typedef int usb_malloc_type;
-
-#define if_deactivate(x)
-#define IF_INPUT(ifp, m) ether_input_mbuf((ifp), (m))
-
-#define swap_bytes_change_sign16_le swap_bytes_change_sign16
-#define change_sign16_swap_bytes_le change_sign16_swap_bytes
-#define change_sign16_le change_sign16
-
-#define ulinear8_to_slinear16_le ulinear8_to_linear16_le
-#define ulinear8_to_slinear16_be ulinear8_to_linear16_be
-#define slinear16_to_ulinear8_le linear16_to_ulinear8_le
-#define slinear16_to_ulinear8_be linear16_to_ulinear8_be
-
-typedef struct device *device_ptr_t;
-#define USBBASEDEVICE struct device
-#define USBDEV(bdev) (&(bdev))
-#define USBDEVNAME(bdev) ((bdev).dv_xname)
-#define USBDEVUNIT(bdev) ((bdev).dv_unit)
-#define USBDEVPTRNAME(bdevptr) ((bdevptr)->dv_xname)
-#define USBGETSOFTC(d) ((void *)(d))
+#define device_ptr_t device_t
+#define USBBASEDEVICE device_t
+#define USBDEV(bdev) (bdev)
+#define USBDEVNAME(bdev) device_get_nameunit(bdev)
+#define USBDEVPTRNAME(bdev) device_get_nameunit(bdev)
+#define USBDEVUNIT(bdev) device_get_unit(bdev)
+#define USBGETSOFTC(bdev) (device_get_softc(bdev))
 
 #define DECLARE_USB_DMA_T \
 	struct usb_dma_block; \
 	typedef struct { \
 		struct usb_dma_block *block; \
 		u_int offs; \
+		u_int len; \
 	} usb_dma_t
 
-typedef struct timeout usb_callout_t;
-#define usb_callout_init(h)	timeout_set(&(h), NULL, NULL)
-#define usb_callout(h, t, f, d) \
-	do { \
-		timeout_del(&(h)); \
-		timeout_set(&(h), (f), (d)); \
-		timeout_add(&(h), (t)); \
-	} while (0)
-#define usb_callout_pending(h)	timeout_pending(&(h))
-#define usb_uncallout(h, f, d) timeout_del(&(h))
+typedef struct thread *usb_proc_ptr;
 
-#define USB_DECLARE_DRIVER_CLASS(dname, devclass)  \
-int __CONCAT(dname,_match)(struct device *, void *, void *); \
-void __CONCAT(dname,_attach)(struct device *, struct device *, void *); \
-int __CONCAT(dname,_detach)(struct device *, int); \
-int __CONCAT(dname,_activate)(struct device *, enum devact); \
+#define uio_procp uio_td
+
+#define usb_kthread_create1(f, s, p, a0, a1) \
+		kproc_create((f), (s), (p), RFHIGHPID, 0, (a0), (a1))
+#define usb_kthread_create2(f, s, p, a0) \
+		kproc_create((f), (s), (p), RFHIGHPID, 0, (a0))
+#define usb_kthread_create	kproc_create
+
+#define	config_pending_incr()
+#define	config_pending_decr()
+
+typedef struct callout usb_callout_t;
+#define usb_callout_init(h)     callout_init(&(h), 0)
+#define usb_callout(h, t, f, d) callout_reset(&(h), (t), (f), (d))
+#define usb_uncallout(h, f, d)  callout_stop(&(h))
+#define usb_uncallout_drain(h, f, d)  callout_drain(&(h))
+
+#define clalloc(p, s, x) (clist_alloc_cblocks((p), (s), (s)), 0)
+#define clfree(p) clist_free_cblocks((p))
+
+#define config_detach(dev, flag) \
+	do { \
+		device_detach(dev); \
+		free(device_get_ivars(dev), M_USB); \
+		device_delete_child(device_get_parent(dev), dev); \
+	} while (0);
+
+typedef struct malloc_type *usb_malloc_type;
+
+#define USB_DECLARE_DRIVER_INIT(dname, init...) \
+static device_probe_t __CONCAT(dname,_match); \
+static device_attach_t __CONCAT(dname,_attach); \
+static device_detach_t __CONCAT(dname,_detach); \
 \
-struct cfdriver __CONCAT(dname,_cd) = { \
-	NULL, #dname, devclass \
+static devclass_t __CONCAT(dname,_devclass); \
+\
+static device_method_t __CONCAT(dname,_methods)[] = { \
+        DEVMETHOD(device_probe, __CONCAT(dname,_match)), \
+        DEVMETHOD(device_attach, __CONCAT(dname,_attach)), \
+        DEVMETHOD(device_detach, __CONCAT(dname,_detach)), \
+	init, \
+        {0,0} \
 }; \
 \
-const struct cfattach __CONCAT(dname,_ca) = { \
-	sizeof(struct __CONCAT(dname,_softc)), \
-	__CONCAT(dname,_match), \
-	__CONCAT(dname,_attach), \
-	__CONCAT(dname,_detach), \
-	__CONCAT(dname,_activate), \
-}
+static driver_t __CONCAT(dname,_driver) = { \
+        #dname, \
+        __CONCAT(dname,_methods), \
+        sizeof(struct __CONCAT(dname,_softc)) \
+}; \
+MODULE_DEPEND(dname, usb, 1, 1, 1)
 
-#define USB_DECLARE_DRIVER(dname) USB_DECLARE_DRIVER_CLASS(dname, DV_DULL)
+
+#define METHODS_NONE			{0,0}
+#define USB_DECLARE_DRIVER(dname)	USB_DECLARE_DRIVER_INIT(dname, METHODS_NONE)
 
 #define USB_MATCH(dname) \
-int \
-__CONCAT(dname,_match)(parent, match, aux) \
-	struct device *parent; \
-	void *match; \
-	void *aux;
+static int \
+__CONCAT(dname,_match)(device_t self)
 
 #define USB_MATCH_START(dname, uaa) \
-	struct usb_attach_arg *uaa = aux
+        struct usb_attach_arg *uaa = device_get_ivars(self)
+
+#define USB_MATCH_SETUP \
+	sc->sc_dev = self
 
 #define USB_ATTACH(dname) \
-void \
-__CONCAT(dname,_attach)(parent, self, aux) \
-	struct device *parent; \
-	struct device *self; \
-	void *aux;
+static int \
+__CONCAT(dname,_attach)(device_t self)
 
 #define USB_ATTACH_START(dname, sc, uaa) \
-	struct __CONCAT(dname,_softc) *sc = \
-		(struct __CONCAT(dname,_softc) *)self; \
-	struct usb_attach_arg *uaa = aux
+        struct __CONCAT(dname,_softc) *sc = device_get_softc(self); \
+        struct usb_attach_arg *uaa = device_get_ivars(self)
 
 /* Returns from attach */
-#define USB_ATTACH_ERROR_RETURN	return
-#define USB_ATTACH_SUCCESS_RETURN	return
+#define USB_ATTACH_ERROR_RETURN	return ENXIO
+#define USB_ATTACH_SUCCESS_RETURN	return 0
 
-#define USB_ATTACH_SETUP printf("\n")
+#define USB_ATTACH_SETUP \
+	sc->sc_dev = self; \
 
 #define USB_DETACH(dname) \
-int \
-__CONCAT(dname,_detach)(self, flags) \
-	struct device *self; \
-	int flags;
+static int \
+__CONCAT(dname,_detach)(device_t self)
 
 #define USB_DETACH_START(dname, sc) \
-	struct __CONCAT(dname,_softc) *sc = \
-		(struct __CONCAT(dname,_softc) *)self
+	struct __CONCAT(dname,_softc) *sc = device_get_softc(self)
 
 #define USB_GET_SC_OPEN(dname, unit, sc) \
-	if (unit >= __CONCAT(dname,_cd).cd_ndevs) \
-		return (ENXIO); \
-	sc = __CONCAT(dname,_cd).cd_devs[unit]; \
+	sc = devclass_get_softc(__CONCAT(dname,_devclass), unit); \
 	if (sc == NULL) \
 		return (ENXIO)
 
 #define USB_GET_SC(dname, unit, sc) \
-	sc = __CONCAT(dname,_cd).cd_devs[unit]
+	sc = devclass_get_softc(__CONCAT(dname,_devclass), unit)
 
 #define USB_DO_ATTACH(dev, bdev, parent, args, print, sub) \
-	(config_found_sm(parent, args, print, sub))
+	(device_probe_and_attach((bdev)) == 0 ? (bdev) : 0)
+
+/* conversion from one type of queue to the other */
+#define SIMPLEQ_REMOVE_HEAD	STAILQ_REMOVE_HEAD
+#define SIMPLEQ_INSERT_HEAD	STAILQ_INSERT_HEAD
+#define SIMPLEQ_INSERT_TAIL	STAILQ_INSERT_TAIL
+#define SIMPLEQ_NEXT		STAILQ_NEXT
+#define SIMPLEQ_FIRST		STAILQ_FIRST
+#define SIMPLEQ_HEAD		STAILQ_HEAD
+#define SIMPLEQ_EMPTY		STAILQ_EMPTY
+#define SIMPLEQ_FOREACH		STAILQ_FOREACH
+#define SIMPLEQ_INIT		STAILQ_INIT
+#define SIMPLEQ_HEAD_INITIALIZER	STAILQ_HEAD_INITIALIZER
+#define SIMPLEQ_ENTRY		STAILQ_ENTRY
+
+#include <sys/syslog.h>
+/*
+#define logprintf(args...)	log(LOG_DEBUG, args)
+*/
+#define logprintf		printf
 
 #endif /* _USB_PORT_H */

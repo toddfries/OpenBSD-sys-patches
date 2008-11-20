@@ -1,6 +1,3 @@
-/*	$OpenBSD: gmon.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: gmon.h,v 1.5 1996/04/09 20:55:30 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)gmon.h	8.2 (Berkeley) 1/4/94
+ * $FreeBSD: src/sys/sys/gmon.h,v 1.20 2006/03/29 18:17:03 jhb Exp $
  */
 
 #ifndef _SYS_GMON_H_
@@ -46,19 +44,29 @@ struct gmonhdr {
 	int	ncnt;		/* size of sample buffer (plus this header) */
 	int	version;	/* version number */
 	int	profrate;	/* profiling clock rate */
-	int	spare[3];	/* reserved */
+	int	histcounter_type; /* size (in bits) and sign of HISTCOUNTER */
+	int	spare[2];	/* reserved */
 };
 #define GMONVERSION	0x00051879
 
 /*
- * histogram counters are unsigned shorts (according to the kernel).
+ * Type of histogram counters used in the kernel.
  */
+#ifdef GPROF4
+#define	HISTCOUNTER	int64_t
+#else
 #define	HISTCOUNTER	unsigned short
+#endif
 
 /*
- * fraction of text space to allocate for histogram counters here, 1/2
+ * Fraction of text space to allocate for histogram counters.
+ * We allocate counters at the same or higher density as function
+ * addresses, so that each counter belongs to a unique function.
+ * A lower density of counters would give less resolution but a
+ * higher density would be wasted.
  */
-#define	HISTFRACTION	2
+#define	HISTFRACTION	(FUNCTION_ALIGNMENT / sizeof(HISTCOUNTER) == 0 \
+			 ? 1 : FUNCTION_ALIGNMENT / sizeof(HISTCOUNTER))
 
 /*
  * Fraction of text space to allocate for from hash buckets.
@@ -88,14 +96,35 @@ struct gmonhdr {
  * profiling data structures without (in practice) sacrificing
  * any granularity.
  */
-#define	HASHFRACTION	2
+/*
+ * XXX I think the above analysis completely misses the point.  I think
+ * the point is that addresses in different functions must hash to
+ * different values.  Since the hash is essentially division by
+ * sizeof(unsigned short), the correct formula is:
+ *
+ * 	HASHFRACTION = MIN_FUNCTION_ALIGNMENT / sizeof(unsigned short)
+ *
+ * Note that he unsigned short here has nothing to do with the one for
+ * HISTFRACTION.
+ *
+ * Hash collisions from a two call sequence don't matter.  They get
+ * handled like collisions for calls to different addresses from the
+ * same address through a function pointer.
+ */
+#define	HASHFRACTION	(FUNCTION_ALIGNMENT / sizeof(unsigned short) == 0 \
+			 ? 1 : FUNCTION_ALIGNMENT / sizeof(unsigned short))
 
 /*
  * percent of text space to allocate for tostructs with a minimum.
  */
 #define ARCDENSITY	2
 #define MINARCS		50
-#define MAXARCS		((1 << (8 * sizeof(HISTCOUNTER))) - 2)
+
+/*
+ * Limit on the number of arcs to so that arc numbers can be stored in
+ * `*froms' and stored and incremented without overflow in links.
+ */
+#define MAXARCS		(((u_long)1 << (8 * sizeof(u_short))) - 2)
 
 struct tostruct {
 	u_long	selfpc;
@@ -117,25 +146,37 @@ struct rawarc {
 /*
  * general rounding functions.
  */
-#define ROUNDDOWN(x,y)	(((x)/(y))*(y))
-#define ROUNDUP(x,y)	((((x)+(y)-1)/(y))*(y))
+#define ROUNDDOWN(x,y)	rounddown(x,y)
+#define ROUNDUP(x,y)	roundup(x,y)
 
 /*
  * The profiling data structures are housed in this structure.
  */
 struct gmonparam {
 	int		state;
-	u_short		*kcount;
+	HISTCOUNTER	*kcount;
 	u_long		kcountsize;
 	u_short		*froms;
 	u_long		fromssize;
 	struct tostruct	*tos;
 	u_long		tossize;
 	long		tolimit;
-	u_long		lowpc;
-	u_long		highpc;
+	uintfptr_t	lowpc;
+	uintfptr_t	highpc;
 	u_long		textsize;
 	u_long		hashfraction;
+	int		profrate;	/* XXX wrong type to match gmonhdr */
+	HISTCOUNTER	*cputime_count;
+	int		cputime_overhead;
+	HISTCOUNTER	*mcount_count;
+	int		mcount_overhead;
+	int		mcount_post_overhead;
+	int		mcount_pre_overhead;
+	HISTCOUNTER	*mexitcount_count;
+	int		mexitcount_overhead;
+	int		mexitcount_post_overhead;
+	int		mexitcount_pre_overhead;
+	int		histcounter_type;
 };
 extern struct gmonparam _gmonparam;
 
@@ -146,6 +187,7 @@ extern struct gmonparam _gmonparam;
 #define	GMON_PROF_BUSY	1
 #define	GMON_PROF_ERROR	2
 #define	GMON_PROF_OFF	3
+#define	GMON_PROF_HIRES	4
 
 /*
  * Sysctl definitions for extracting profiling information from the kernel.
@@ -155,4 +197,47 @@ extern struct gmonparam _gmonparam;
 #define	GPROF_FROMS	2	/* struct: from location hash bucket */
 #define	GPROF_TOS	3	/* struct: destination/count structure */
 #define	GPROF_GMONPARAM	4	/* struct: profiling parameters (see above) */
+
+#ifdef _KERNEL
+
+#define	KCOUNT(p,index) \
+	((p)->kcount[(index) / (HISTFRACTION * sizeof(HISTCOUNTER))])
+#define	PC_TO_I(p, pc)	((uintfptr_t)(pc) - (uintfptr_t)(p)->lowpc)
+
+#ifdef GUPROF
+
+#define	CALIB_SCALE	1000
+
+extern int	cputime_bias;
+
+int	cputime(void);
+void	nullfunc_loop_profiled(void);
+void	nullfunc_profiled(void);
+void	startguprof(struct gmonparam *p);
+void	stopguprof(struct gmonparam *p);
+
+#else /* !GUPROF */
+
+#define	startguprof(p)
+#define	stopguprof(p)
+
+#endif /* GUPROF */
+
+void	empty_loop(void);
+void	kmupetext(uintfptr_t nhighpc);
+void	mexitcount(uintfptr_t selfpc);
+void	nullfunc(void);
+void	nullfunc_loop(void);
+
+#else /* !_KERNEL */
+
+#include <sys/cdefs.h>
+
+__BEGIN_DECLS
+void	moncontrol(int);
+void	monstartup(u_long, u_long);
+__END_DECLS
+
+#endif /* _KERNEL */
+
 #endif /* !_SYS_GMON_H_ */

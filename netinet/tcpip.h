@@ -1,7 +1,4 @@
-/*	$OpenBSD: tcpip.h,v 1.6 2003/06/02 23:28:15 millert Exp $	*/
-/*	$NetBSD: tcpip.h,v 1.6 1995/11/21 01:07:44 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)tcpip.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/tcpip.h,v 1.12 2005/01/07 01:45:45 imp Exp $
  */
 
 #ifndef _NETINET_TCPIP_H_
@@ -58,4 +56,4 @@ struct tcpiphdr {
 #define	ti_sum		ti_t.th_sum
 #define	ti_urp		ti_t.th_urp
 
-#endif /* _NETINET_TCPIP_H_ */
+#endif

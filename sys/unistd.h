@@ -1,7 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.14 2008/03/16 19:56:27 kettenis Exp $	*/
-/*	$NetBSD: unistd.h,v 1.10 1994/06/29 06:46:06 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)unistd.h	8.2 (Berkeley) 1/7/94
+ * $FreeBSD: src/sys/sys/unistd.h,v 1.49 2007/04/07 18:31:40 pjd Exp $
  */
 
 #ifndef _SYS_UNISTD_H_
@@ -37,23 +35,66 @@
 
 #include <sys/cdefs.h>
 
-/* compile-time symbolic constants */
-#define	_POSIX_JOB_CONTROL	/* implementation supports job control */
+/*
+ * POSIX options and option groups we unconditionally do or don't
+ * implement.  Those options which are implemented (or not) entirely
+ * in user mode are defined in <unistd.h>.  Please keep this list in
+ * alphabetical order.
+ *
+ * Anything which is defined as zero below **must** have an
+ * implementation for the corresponding sysconf() which is able to
+ * determine conclusively whether or not the feature is supported.
+ * Anything which is defined as other than -1 below **must** have
+ * complete headers, types, and function declarations as specified by
+ * the POSIX standard; however, if the relevant sysconf() function
+ * returns -1, the functions may be stubbed out.
+ */
+#define	_POSIX_ADVISORY_INFO		-1
+#define	_POSIX_ASYNCHRONOUS_IO		0
+#define	_POSIX_CHOWN_RESTRICTED		1
+#define	_POSIX_CLOCK_SELECTION		-1
+#define	_POSIX_CPUTIME			-1
+#define	_POSIX_FSYNC			200112L
+#define	_POSIX_IPV6			0
+#define	_POSIX_JOB_CONTROL		1
+#define	_POSIX_MAPPED_FILES		200112L
+#define	_POSIX_MEMLOCK			-1
+#define	_POSIX_MEMLOCK_RANGE		200112L
+#define	_POSIX_MEMORY_PROTECTION	200112L
+#define	_POSIX_MESSAGE_PASSING		200112L
+#define	_POSIX_MONOTONIC_CLOCK		200112L
+#define	_POSIX_NO_TRUNC			1
+#define	_POSIX_PRIORITIZED_IO		-1
+#define	_POSIX_PRIORITY_SCHEDULING	200112L
+#define	_POSIX_RAW_SOCKETS		200112L
+#define	_POSIX_REALTIME_SIGNALS		200112L
+#define	_POSIX_SEMAPHORES		-1
+#define	_POSIX_SHARED_MEMORY_OBJECTS	200112L
+#define	_POSIX_SPORADIC_SERVER		-1
+#define	_POSIX_SYNCHRONIZED_IO		-1
+#define	_POSIX_TIMEOUTS			200112L
+#define	_POSIX_TIMERS			200112L
+#define	_POSIX_TYPED_MEMORY_OBJECTS	-1
+#define	_POSIX_VDISABLE			0xff
 
-#define	_POSIX_SAVED_IDS	/* saved set-user-ID and set-group-ID */
+#if __XSI_VISIBLE
+#define	_XOPEN_SHM			1
+#define	_XOPEN_STREAMS			-1
+#endif
 
-#define	_POSIX_VERSION		199009L
-#define	_POSIX2_VERSION		199212L
+/*
+ * Although we have saved user/group IDs, we do not use them in setuid
+ * as described in POSIX 1003.1, because the feature does not work for
+ * root.  We use the saved IDs in seteuid/setegid, which are not currently
+ * part of the POSIX 1003.1 specification.  XXX revisit for 1003.1-2001
+ * as this is now mandatory.
+ */
+#ifdef	_NOT_AVAILABLE
+#define	_POSIX_SAVED_IDS	1 /* saved set-user-ID and set-group-ID */
+#endif
 
-/* execution-time symbolic constants */
-				/* chown requires appropriate privileges */
-#define	_POSIX_CHOWN_RESTRICTED	1
-				/* too-long path components generate errors */
-#define	_POSIX_NO_TRUNC		1
-				/* may disable terminal special characters */
-#define	_POSIX_VDISABLE		(0377)
-				/* file synchronization is available */
-#define	_POSIX_FSYNC		1
+/* Define the POSIX.1 version we target for compliance. */
+#define	_POSIX_VERSION		200112L
 
 /* access function */
 #define	F_OK		0	/* test for existence of file */
@@ -62,12 +103,18 @@
 #define	R_OK		0x04	/* test for read permission */
 
 /* whence values for lseek(2) */
+#ifndef SEEK_SET
 #define	SEEK_SET	0	/* set file offset to offset */
 #define	SEEK_CUR	1	/* set file offset to current plus offset */
 #define	SEEK_END	2	/* set file offset to EOF plus offset */
-
+#endif
 #if __BSD_VISIBLE
-/* old BSD whence values for lseek(2); renamed by POSIX 1003.1 */
+#define	SEEK_DATA	3	/* set file offset to next data past offset */
+#define	SEEK_HOLE	4	/* set file offset to next hole past offset */
+#endif
+
+#ifndef _POSIX_SOURCE
+/* whence values for lseek(2); renamed by POSIX 1003.1 */
 #define	L_SET		SEEK_SET
 #define	L_INCR		SEEK_CUR
 #define	L_XTND		SEEK_END
@@ -84,65 +131,57 @@
 #define	_PC_NO_TRUNC		 8
 #define	_PC_VDISABLE		 9
 
-/* configurable system variables */
-#define	_SC_ARG_MAX		 1
-#define	_SC_CHILD_MAX		 2
-#define	_SC_CLK_TCK		 3
-#define	_SC_NGROUPS_MAX		 4
-#define	_SC_OPEN_MAX		 5
-#define	_SC_JOB_CONTROL		 6
-#define	_SC_SAVED_IDS		 7
-#define	_SC_VERSION		 8
-#define	_SC_BC_BASE_MAX		 9
-#define	_SC_BC_DIM_MAX		10
-#define	_SC_BC_SCALE_MAX	11
-#define	_SC_BC_STRING_MAX	12
-#define	_SC_COLL_WEIGHTS_MAX	13
-#define	_SC_EXPR_NEST_MAX	14
-#define	_SC_LINE_MAX		15
-#define	_SC_RE_DUP_MAX		16
-#define	_SC_2_VERSION		17
-#define	_SC_2_C_BIND		18
-#define	_SC_2_C_DEV		19
-#define	_SC_2_CHAR_TERM		20
-#define	_SC_2_FORT_DEV		21
-#define	_SC_2_FORT_RUN		22
-#define	_SC_2_LOCALEDEF		23
-#define	_SC_2_SW_DEV		24
-#define	_SC_2_UPE		25
-#define	_SC_STREAM_MAX		26
-#define	_SC_TZNAME_MAX		27
-#define	_SC_PAGESIZE		28
-#define	_SC_PAGE_SIZE		_SC_PAGESIZE	/* 1170 compatibility */
-#define	_SC_FSYNC		29
-#define	_SC_XOPEN_SHM		30
-#define	_SC_SEM_NSEMS_MAX	31
-#define	_SC_SEM_VALUE_MAX	32
-
-#ifdef notyet
-/* P1003.1c */
-#define _SC_GETGR_R_SIZE_MAX
-#define _SC_GETPW_R_SIZE_MAX
-#define _SC_LOGIN_NAME_MAX
-#define _SC_THREAD_DESTRUCTOR_ITERATIONS
-#define _SC_THREAD_KEYS_MAX
-#define _SC_THREAD_STACK_MIN
-#define _SC_THREAD_THREADS_MAX
-#define _SC_TTY_NAME_MAX
-#define _SC_THREADS
-#define _SC_THREAD_ATTR_STACKADDR
-#define _SC_THREAD_ATTR_STACKSIZE
-#define _SC_THREAD_PRIORITY_SCHEDULING
-#define _SC_THREAD_PRIO_INHERIT
-#define _SC_THREAD_PRIO_PROTECT
-#define _SC_THREAD_PROCESS_SHARED
-#define _SC_THREAD_SAFE_FUNCTIONS
+#if __POSIX_VISIBLE >= 199309
+#define	_PC_ASYNC_IO		53
+#define	_PC_PRIO_IO		54
+#define	_PC_SYNC_IO		55
 #endif
 
-#define	_SC_PHYS_PAGES		500
-#define	_SC_AVPHYS_PAGES	501
+#if __POSIX_VISIBLE >= 200112
+#define	_PC_ALLOC_SIZE_MIN	10
+#define	_PC_FILESIZEBITS	12
+#define	_PC_REC_INCR_XFER_SIZE	14
+#define	_PC_REC_MAX_XFER_SIZE	15
+#define	_PC_REC_MIN_XFER_SIZE	16
+#define	_PC_REC_XFER_ALIGN	17
+#define	_PC_SYMLINK_MAX		18
+#endif
 
-/* configurable system strings */
-#define	_CS_PATH		 1
+#if __BSD_VISIBLE
+#define	_PC_ACL_EXTENDED	59
+#define	_PC_ACL_PATH_MAX	60
+#define	_PC_CAP_PRESENT		61
+#define	_PC_INF_PRESENT		62
+#define	_PC_MAC_PRESENT		63
+#endif
+
+/* From OpenSolaris, used by SEEK_DATA/SEEK_HOLE. */
+#define	_PC_MIN_HOLE_SIZE	21
+
+#if __BSD_VISIBLE
+/*
+ * rfork() options.
+ *
+ * XXX currently, some operations without RFPROC set are not supported.
+ */
+#define	RFNAMEG		(1<<0)	/* UNIMPL new plan9 `name space' */
+#define	RFENVG		(1<<1)	/* UNIMPL copy plan9 `env space' */
+#define	RFFDG		(1<<2)	/* copy fd table */
+#define	RFNOTEG		(1<<3)	/* UNIMPL create new plan9 `note group' */
+#define	RFPROC		(1<<4)	/* change child (else changes curproc) */
+#define	RFMEM		(1<<5)	/* share `address space' */
+#define	RFNOWAIT	(1<<6)	/* give child to init */
+#define	RFCNAMEG	(1<<10)	/* UNIMPL zero plan9 `name space' */
+#define	RFCENVG		(1<<11)	/* UNIMPL zero plan9 `env space' */
+#define	RFCFDG		(1<<12)	/* close all fds, zero fd table */
+#define	RFTHREAD	(1<<13)	/* enable kernel thread support */
+#define	RFSIGSHARE	(1<<14)	/* share signal handlers */
+#define	RFLINUXTHPN	(1<<16)	/* do linux clone exit parent notification */
+#define	RFSTOPPED	(1<<17)	/* leave child in a stopped state */
+#define	RFHIGHPID	(1<<18)	/* use a pid higher then 10 (idleproc) */
+#define	RFPPWAIT	(1<<31)	/* parent sleeps until child exits (vfork) */
+#define	RFKERNELONLY	(RFSTOPPED | RFHIGHPID | RFPPWAIT)
+
+#endif /* __BSD_VISIBLE */
 
 #endif /* !_SYS_UNISTD_H_ */

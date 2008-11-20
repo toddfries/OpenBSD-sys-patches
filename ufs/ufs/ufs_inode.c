@@ -1,8 +1,5 @@
-/*	$OpenBSD: ufs_inode.c,v 1.37 2007/06/01 23:47:57 deraadt Exp $	*/
-/*	$NetBSD: ufs_inode.c,v 1.7 1996/05/11 18:27:52 mycroft Exp $	*/
-
-/*
- * Copyright (c) 1991, 1993
+/*-
+ * Copyright (c) 1991, 1993, 1995
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
  * All or some portions of this file are derived from material licensed
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,18 +31,24 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ufs_inode.c	8.7 (Berkeley) 7/22/94
+ *	@(#)ufs_inode.c	8.9 (Berkeley) 5/14/95
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_inode.c,v 1.69 2007/06/22 13:22:37 kib Exp $");
+
+#include "opt_quota.h"
+#include "opt_ufs.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/mount.h>
-#include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/namei.h>
+#include <sys/mutex.h>
 
+#include <ufs/ufs/extattr.h>
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
@@ -54,74 +57,117 @@
 #include <ufs/ufs/dir.h>
 #include <ufs/ufs/dirhash.h>
 #endif
+#ifdef UFS_GJOURNAL
+#include <ufs/ufs/gjournal.h>
+#endif
 
 /*
  * Last reference to an inode.  If necessary, write or delete it.
  */
 int
-ufs_inactive(void *v)
+ufs_inactive(ap)
+	struct vop_inactive_args /* {
+		struct vnode *a_vp;
+		struct thread *a_td;
+	} */ *ap;
 {
-	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
-	struct proc *p = ap->a_p;
+	struct thread *td = ap->a_td;
 	mode_t mode;
 	int error = 0;
-#ifdef DIAGNOSTIC
-	extern int prtactive;
+	struct mount *mp;
 
+	mp = NULL;
 	if (prtactive && vp->v_usecount != 0)
-		vprint("ffs_inactive: pushing active", vp);
-#endif
-
+		vprint("ufs_inactive: pushing active", vp);
 	/*
 	 * Ignore inodes related to stale file handles.
 	 */
-	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
+	if (ip->i_mode == 0)
 		goto out;
-
-	if (DIP(ip, nlink) <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
-		if (getinoquota(ip) == 0)
-			(void)ufs_quota_free_inode(ip, NOCRED);
-
-		error = UFS_TRUNCATE(ip, (off_t)0, 0, NOCRED);
-
-		DIP_ASSIGN(ip, rdev, 0);
-		mode = DIP(ip, mode);
-		DIP_ASSIGN(ip, mode, 0);
-		ip->i_flag |= IN_CHANGE | IN_UPDATE;
-
-		/*
-		 * Setting the mode to zero needs to wait for the inode to be
-		 * written just as does a change to the link count. So, rather
-		 * than creating a new entry point to do the same thing, we
-		 * just use softdep_change_linkcnt(). Also, we can't let
-		 * softdep co-opt us to help on its worklist, as we may end up
-		 * trying to recycle vnodes and getting to this same point a
-		 * couple of times, blowing the kernel stack. However, this
-		 * could be optimized by checking if we are coming from
-		 * vrele(), vput() or vclean() (by checking for VXLOCK) and
-		 * just avoiding the co-opt to happen in the last case.
-		 */
-		if (DOINGSOFTDEP(vp))
-			softdep_change_linkcnt(ip, 1);
-
-		UFS_INODE_FREE(ip, ip->i_number, mode);
+#ifdef UFS_GJOURNAL
+	ufs_gjournal_close(vp);
+#endif
+	if ((ip->i_effnlink == 0 && DOINGSOFTDEP(vp)) ||
+	    (ip->i_nlink <= 0 &&
+	     (vp->v_mount->mnt_flag & MNT_RDONLY) == 0)) {
+	loop:
+		if (vn_start_secondary_write(vp, &mp, V_NOWAIT) != 0) {
+			/* Cannot delete file while file system is suspended */
+			if ((vp->v_iflag & VI_DOOMED) != 0) {
+				/* Cannot return before file is deleted */
+				(void) vn_start_secondary_write(vp, &mp,
+								V_WAIT);
+			} else {
+				MNT_ILOCK(mp);
+				if ((mp->mnt_kern_flag &
+				     (MNTK_SUSPEND2 | MNTK_SUSPENDED)) == 0) {
+					MNT_IUNLOCK(mp);
+					goto loop;
+				}
+				/*
+				 * Fail to inactivate vnode now and
+				 * let ffs_snapshot() clean up after
+				 * it has resumed the file system.
+				 */
+				VI_LOCK(vp);
+				vp->v_iflag |= VI_OWEINACT;
+				VI_UNLOCK(vp);
+				MNT_IUNLOCK(mp);
+				return (0);
+			}
+		}
 	}
-
+	if (ip->i_effnlink == 0 && DOINGSOFTDEP(vp))
+		softdep_releasefile(ip);
+	if (ip->i_nlink <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
+#ifdef QUOTA
+		if (!getinoquota(ip))
+			(void)chkiq(ip, -1, NOCRED, FORCE);
+#endif
+#ifdef UFS_EXTATTR
+		ufs_extattr_vnode_inactive(vp, td);
+#endif
+		error = UFS_TRUNCATE(vp, (off_t)0, IO_EXT | IO_NORMAL,
+		    NOCRED, td);
+		/*
+		 * Setting the mode to zero needs to wait for the inode
+		 * to be written just as does a change to the link count.
+		 * So, rather than creating a new entry point to do the
+		 * same thing, we just use softdep_change_linkcnt().
+		 */
+		DIP_SET(ip, i_rdev, 0);
+		mode = ip->i_mode;
+		ip->i_mode = 0;
+		DIP_SET(ip, i_mode, 0);
+		ip->i_flag |= IN_CHANGE | IN_UPDATE;
+		if (DOINGSOFTDEP(vp))
+			softdep_change_linkcnt(ip);
+		UFS_VFREE(vp, ip->i_number, mode);
+	}
 	if (ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE)) {
-		UFS_UPDATE(ip, 0);
+		if ((ip->i_flag & (IN_CHANGE | IN_UPDATE | IN_MODIFIED)) == 0 &&
+		    mp == NULL &&
+		    vn_start_secondary_write(vp, &mp, V_NOWAIT)) {
+			mp = NULL;
+			ip->i_flag &= ~IN_ACCESS;
+		} else {
+			if (mp == NULL)
+				(void) vn_start_secondary_write(vp, &mp,
+								V_WAIT);
+			UFS_UPDATE(vp, 0);
+		}
 	}
 out:
-	VOP_UNLOCK(vp, 0, p);
-
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
-		vrecycle(vp, p);
-
+	if (ip->i_mode == 0)
+		vrecycle(vp, td);
+	if (mp != NULL)
+		vn_finished_secondary_write(mp);
 	return (error);
 }
 
@@ -129,33 +175,54 @@ out:
  * Reclaim an inode so that it can be used for other purposes.
  */
 int
-ufs_reclaim(struct vnode *vp, struct proc *p)
+ufs_reclaim(ap)
+	struct vop_reclaim_args /* {
+		struct vnode *a_vp;
+		struct thread *a_td;
+	} */ *ap;
 {
-	struct inode *ip;
-#ifdef DIAGNOSTIC
-	extern int prtactive;
+	struct vnode *vp = ap->a_vp;
+	struct inode *ip = VTOI(vp);
+	struct ufsmount *ump = ip->i_ump;
+#ifdef QUOTA
+	int i;
+#endif
 
 	if (prtactive && vp->v_usecount != 0)
 		vprint("ufs_reclaim: pushing active", vp);
-#endif
-
+	/*
+	 * Destroy the vm object and flush associated pages.
+	 */
+	vnode_destroy_vobject(vp);
+	if (ip->i_flag & IN_LAZYMOD)
+		ip->i_flag |= IN_MODIFIED;
+	UFS_UPDATE(vp, 0);
 	/*
 	 * Remove the inode from its hash chain.
 	 */
-	ip = VTOI(vp);
-	ufs_ihashrem(ip);
+	vfs_hash_remove(vp);
 	/*
 	 * Purge old data structures associated with the inode.
 	 */
-	cache_purge(vp);
-
-	if (ip->i_devvp) {
-		vrele(ip->i_devvp);
+#ifdef QUOTA
+	for (i = 0; i < MAXQUOTAS; i++) {
+		if (ip->i_dquot[i] != NODQUOT) {
+			dqrele(vp, ip->i_dquot[i]);
+			ip->i_dquot[i] = NODQUOT;
+		}
 	}
+#endif
 #ifdef UFS_DIRHASH
 	if (ip->i_dirhash != NULL)
 		ufsdirhash_free(ip);
 #endif
-	ufs_quota_delete(ip);
+	/*
+	 * Lock the clearing of v_data so ffs_lock() can inspect it
+	 * prior to obtaining the lock.
+	 */
+	VI_LOCK(vp);
+	vp->v_data = 0;
+	VI_UNLOCK(vp);
+	UFS_IFREE(ump, ip);
 	return (0);
 }

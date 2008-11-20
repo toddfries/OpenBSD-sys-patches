@@ -1,7 +1,4 @@
-/*	$OpenBSD: resource.h,v 1.7 2003/12/11 23:02:30 millert Exp $	*/
-/*	$NetBSD: resource.h,v 1.14 1996/02/09 18:25:27 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,11 +26,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)resource.h	8.2 (Berkeley) 1/4/94
+ *	@(#)resource.h	8.4 (Berkeley) 1/9/95
+ * $FreeBSD: src/sys/sys/resource.h,v 1.31 2007/06/01 01:12:45 jeff Exp $
  */
 
 #ifndef _SYS_RESOURCE_H_
 #define	_SYS_RESOURCE_H_
+
+#include <sys/cdefs.h>
+#include <sys/_timeval.h>
+#include <sys/_types.h>
 
 /*
  * Process priority specifications to get/setpriority.
@@ -47,17 +49,20 @@
 
 /*
  * Resource utilization information.
+ *
+ * All fields are only modified by curthread and
+ * no locks are required to read.
  */
 
 #define	RUSAGE_SELF	0
 #define	RUSAGE_CHILDREN	-1
 
-struct	rusage {
+struct rusage {
 	struct timeval ru_utime;	/* user time used */
 	struct timeval ru_stime;	/* system time used */
 	long	ru_maxrss;		/* max resident set size */
 #define	ru_first	ru_ixrss
-	long	ru_ixrss;		/* integral shared text memory size */
+	long	ru_ixrss;		/* integral shared memory size */
 	long	ru_idrss;		/* integral unshared data " */
 	long	ru_isrss;		/* integral unshared stack " */
 	long	ru_minflt;		/* page reclaims */
@@ -76,7 +81,7 @@ struct	rusage {
 /*
  * Resource limits
  */
-#define	RLIMIT_CPU	0		/* cpu time in milliseconds */
+#define	RLIMIT_CPU	0		/* maximum cpu time in seconds */
 #define	RLIMIT_FSIZE	1		/* maximum file size */
 #define	RLIMIT_DATA	2		/* data size */
 #define	RLIMIT_STACK	3		/* stack size */
@@ -85,42 +90,80 @@ struct	rusage {
 #define	RLIMIT_MEMLOCK	6		/* locked-in-memory address space */
 #define	RLIMIT_NPROC	7		/* number of processes */
 #define	RLIMIT_NOFILE	8		/* number of open files */
+#define	RLIMIT_SBSIZE	9		/* maximum size of all socket buffers */
+#define RLIMIT_VMEM	10		/* virtual process size (inclusive of mmap) */
+#define	RLIMIT_AS	RLIMIT_VMEM	/* standard name for RLIMIT_VMEM */
 
-#define	RLIM_NLIMITS	9		/* number of resource limits */
+#define	RLIM_NLIMITS	11		/* number of resource limits */
 
-#define	RLIM_INFINITY	(((rlim_t)1 << 63) - 1)
-#define	RLIM_SAVED_MAX	RLIM_INFINITY
-#define	RLIM_SAVED_CUR	RLIM_INFINITY
+#define	RLIM_INFINITY	((rlim_t)(((uint64_t)1 << 63) - 1))
+/* XXX Missing: RLIM_SAVED_MAX, RLIM_SAVED_CUR */
 
-struct orlimit {
-	int32_t	rlim_cur;		/* current (soft) limit */
-	int32_t	rlim_max;		/* maximum value for rlim_cur */
+
+/*
+ * Resource limit string identifiers
+ */
+
+#ifdef _RLIMIT_IDENT
+static char *rlimit_ident[] = {
+	"cpu",
+	"fsize",
+	"data",
+	"stack",
+	"core",
+	"rss",
+	"memlock",
+	"nproc",
+	"nofile",
+	"sbsize",
+	"vmem",
 };
+#endif
+
+#ifndef _RLIM_T_DECLARED
+typedef	__rlim_t	rlim_t;
+#define	_RLIM_T_DECLARED
+#endif
 
 struct rlimit {
 	rlim_t	rlim_cur;		/* current (soft) limit */
 	rlim_t	rlim_max;		/* maximum value for rlim_cur */
 };
 
-/* Load average structure. */
-struct loadavg {
-	fixpt_t	ldavg[3];
-	long	fscale;
+#if __BSD_VISIBLE
+
+struct orlimit {
+	__int32_t	rlim_cur;	/* current (soft) limit */
+	__int32_t	rlim_max;	/* maximum value for rlim_cur */
 };
 
+struct loadavg {
+	__fixpt_t	ldavg[3];
+	long		fscale;
+};
+
+#define	CP_USER		0
+#define	CP_NICE		1
+#define	CP_SYS		2
+#define	CP_INTR		3
+#define	CP_IDLE		4
+#define	CPUSTATES	5
+
+#endif	/* __BSD_VISIBLE */
+
 #ifdef _KERNEL
+
 extern struct loadavg averunnable;
-int	dosetrlimit(struct proc *, u_int, struct rlimit *);
-int	donice(struct proc *, struct proc *, int);
+extern long cp_time[CPUSTATES];
 
 #else
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int	getpriority(int, id_t);
+/* XXX 2nd arg to [gs]etpriority() should be an id_t */
+int	getpriority(int, int);
 int	getrlimit(int, struct rlimit *);
 int	getrusage(int, struct rusage *);
-int	setpriority(int, id_t, int);
+int	setpriority(int, int, int);
 int	setrlimit(int, const struct rlimit *);
 __END_DECLS
 

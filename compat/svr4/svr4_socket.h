@@ -1,8 +1,7 @@
-/*	$OpenBSD: svr4_socket.h,v 1.2 2002/03/14 01:26:51 millert Exp $	*/
-/*	$NetBSD: svr4_socket.h,v 1.1 1996/04/11 12:43:31 christos Exp $	*/
-
-/*
- * Copyright (c) 1996 Christos Zoulas.  All rights reserved.
+/*-
+ * Copyright (c) 1998 Mark Newton
+ * Copyright (c) 1996 Christos Zoulas. 
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,18 +27,32 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_socket.h,v 1.10 2006/07/21 20:40:13 jhb Exp $
  */
 
 #ifndef _SVR4_SOCKET_H_
 #define _SVR4_SOCKET_H_
 
+#include <netinet/in.h>
+
 struct sockaddr_un;
 struct proc;
+struct thread;
 struct file;
 
-struct sockaddr_un *svr4_find_socket(struct proc *, struct file *,
-    dev_t, ino_t);
-void svr4_delete_socket(struct proc *, struct file *);
-int svr4_add_socket(struct proc *, const char *, struct stat *);
+struct svr4_sockaddr_in {
+        u_char         sin_family;
+        u_short        sin_port;
+        struct in_addr sin_addr;
+        u_char         sin_zero[8];
+};
+
+int	svr4_add_socket(struct thread *, const char *, struct stat *);
+void	svr4_delete_socket(struct proc *, struct file *);
+int	svr4_find_socket(struct thread *, struct file *, dev_t, ino_t,
+    struct sockaddr_un *);
+void	svr4_sockcache_init(void);
+void	svr4_sockcache_destroy(void);
 
 #endif /* _SVR4_SOCKET_H_ */

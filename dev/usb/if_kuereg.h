@@ -1,6 +1,4 @@
-/*	$OpenBSD: if_kuereg.h,v 1.9 2007/06/26 06:33:17 jsg Exp $ */
-/*	$NetBSD: if_kuereg.h,v 1.11 2001/01/21 02:35:31 augustss Exp $	*/
-/*
+/*-
  * Copyright (c) 1997, 1998, 1999, 2000
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
  *
@@ -31,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/if_kuereg.h,v 1.2 2000/01/06 07:39:07 wpaul Exp $
+ * $FreeBSD: src/sys/dev/usb/if_kuereg.h,v 1.20 2007/06/11 05:50:47 imp Exp $
  */
 
 /*
@@ -41,9 +39,6 @@
  * microcontroller. The one exception is the 'send scan data' command,
  * which is used to load the firmware.
  */
-
-#define KUE_CONFIG_NO		1
-#define KUE_IFACE_IDX		0
 
 #define KUE_CMD_GET_ETHER_DESCRIPTOR		0x00
 #define KUE_CMD_SET_MCAST_FILTERS		0x01
@@ -67,18 +62,14 @@ struct kue_ether_desc {
 	u_int8_t		kue_maxseg[2];
 	u_int8_t		kue_mcastfilt[2];
 	u_int8_t		kue_rsvd2;
-} __packed;
+};
 
 #define KUE_ETHERSTATS(x)	\
-	(((x)->kue_desc.kue_etherstats[3] << 24) | \
-	 ((x)->kue_desc.kue_etherstats[2] << 16) | \
-	 ((x)->kue_desc.kue_etherstats[1] << 8) | \
-	  (x)->kue_desc.kue_etherstats[0])
+	(*(u_int32_t *)&(x)->kue_desc.kue_etherstats)
 #define KUE_MAXSEG(x)		\
-	(((x)->kue_desc.kue_maxseg[1] << 8) | (x)->kue_desc.kue_maxseg[0])
+	(*(u_int16_t *)&(x)->kue_desc.kue_maxseg)
 #define KUE_MCFILTCNT(x)	\
-	((((x)->kue_desc.kue_mcastfilt[1] << 8) | \
-	   (x)->kue_desc.kue_mcastfilt[0]) & 0x7FFF)
+	((*(u_int16_t *)&(x)->kue_desc.kue_mcastfilt) & 0x7FFF)
 #define KUE_MCFILT(x, y)	\
 	(char *)&(sc->kue_mcfilters[y * ETHER_ADDR_LEN])
 
@@ -119,16 +110,13 @@ struct kue_ether_desc {
 #define KUE_RXFILT_MULTICAST		0x0010
 
 #define KUE_TIMEOUT		1000
-#define KUE_BUFSZ		1536
 #define KUE_MIN_FRAMELEN	60
-
-#define KUE_RX_LIST_CNT		1
-#define KUE_TX_LIST_CNT		1
 
 #define KUE_CTL_READ		0x01
 #define KUE_CTL_WRITE		0x02
 
-#define KUE_WARM_REV		0x0202
+#define KUE_CONFIG_NO		1
+#define KUE_IFACE_IDX		0
 
 /*
  * The interrupt endpoint is currently unused
@@ -144,45 +132,30 @@ struct kue_type {
 	u_int16_t		kue_did;
 };
 
-struct kue_softc;
-
-struct kue_chain {
-	struct kue_softc	*kue_sc;
-	usbd_xfer_handle	kue_xfer;
-	char			*kue_buf;
-	struct mbuf		*kue_mbuf;
-	int			kue_idx;
-};
-
-struct kue_cdata {
-	struct kue_chain	kue_tx_chain[KUE_TX_LIST_CNT];
-	struct kue_chain	kue_rx_chain[KUE_RX_LIST_CNT];
-	int			kue_tx_prod;
-	int			kue_tx_cons;
-	int			kue_tx_cnt;
-	int			kue_rx_prod;
-};
+#define KUE_INC(x, y)		(x) = (x + 1) % y
 
 struct kue_softc {
-	struct device		kue_dev;
-
-	struct arpcom		arpcom;
-#define GET_IFP(sc) (&(sc)->arpcom.ac_if)
-
+	struct ifnet		*kue_ifp;
+	device_t		kue_dev;
 	usbd_device_handle	kue_udev;
 	usbd_interface_handle	kue_iface;
-	u_int16_t		kue_vendor;
-	u_int16_t		kue_product;
 	struct kue_ether_desc	kue_desc;
 	int			kue_ed[KUE_ENDPT_MAX];
 	usbd_pipe_handle	kue_ep[KUE_ENDPT_MAX];
 	int			kue_if_flags;
 	u_int16_t		kue_rxfilt;
 	u_int8_t		*kue_mcfilters;
-	struct kue_cdata	kue_cdata;
-
+	struct ue_cdata		kue_cdata;
+	struct mtx		kue_mtx;
 	char			kue_dying;
-	char			kue_attached;
-	u_int			kue_rx_errs;
 	struct timeval		kue_rx_notice;
+	struct usb_qdat		kue_qdat;
 };
+
+#if 0
+#define	KUE_LOCK(_sc)		mtx_lock(&(_sc)->kue_mtx)
+#define	KUE_UNLOCK(_sc)		mtx_unlock(&(_sc)->kue_mtx)
+#else
+#define	KUE_LOCK(_sc)
+#define	KUE_UNLOCK(_sc)
+#endif

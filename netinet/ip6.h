@@ -1,7 +1,7 @@
-/*	$OpenBSD: ip6.h,v 1.18 2006/12/09 01:12:28 itojun Exp $	*/
-/*	$KAME: ip6.h,v 1.45 2003/06/05 04:46:38 keiichi Exp $	*/
+/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.15 2005/07/20 10:30:52 ume Exp $	*/
+/*	$KAME: ip6.h,v 1.18 2001/03/29 05:34:30 itojun Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
  *
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -42,7 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -93,14 +93,14 @@ struct ip6_hdr {
 #define IPV6_VERSION		0x60
 #define IPV6_VERSION_MASK	0xf0
 
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 #define IPV6_FLOWINFO_MASK	0x0fffffff	/* flow info (28 bits) */
 #define IPV6_FLOWLABEL_MASK	0x000fffff	/* flow label (20 bits) */
 #else
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 #define IPV6_FLOWINFO_MASK	0xffffff0f	/* flow info (28 bits) */
 #define IPV6_FLOWLABEL_MASK	0xffff0f00	/* flow label (20 bits) */
-#endif /* _LITTLE_ENDIAN */
+#endif /* LITTLE_ENDIAN */
 #endif
 #if 1
 /* ECN bits proposed by Sally Floyd */
@@ -108,23 +108,10 @@ struct ip6_hdr {
 #define IP6TOS_ECT		0x02	/* ECN-capable transport */
 #endif
 
-#ifdef _KERNEL
-/*
- * for IPv6 pseudo header checksum
- * XXX nonstandard
- */
-struct ip6_hdr_pseudo {
-	struct in6_addr ip6ph_src;
-	struct in6_addr ip6ph_dst;
-	u_int32_t	ip6ph_len;
-	u_int8_t	ip6ph_zero[3];
-	u_int8_t	ip6ph_nxt;
-} __packed;
-#endif
-
 /*
  * Extension Headers
  */
+
 struct	ip6_ext {
 	u_int8_t ip6e_nxt;
 	u_int8_t ip6e_len;
@@ -152,6 +139,9 @@ struct ip6_dest {
 #define IP6OPT_JUMBO		0xC2	/* 11 0 00010 = 194 */
 #define IP6OPT_NSAP_ADDR	0xC3	/* 11 0 00011 */
 #define IP6OPT_TUNNEL_LIMIT	0x04	/* 00 0 00100 */
+#ifndef _KERNEL
+#define IP6OPT_RTALERT		0x05	/* 00 0 00101 (KAME definition) */
+#endif
 #define IP6OPT_ROUTER_ALERT	0x05	/* 00 0 00101 (RFC3542, recommended) */
 
 #define IP6OPT_RTALERT_LEN	4
@@ -159,6 +149,8 @@ struct ip6_dest {
 #define IP6OPT_RTALERT_RSVP	1	/* Datagram contains an RSVP message */
 #define IP6OPT_RTALERT_ACTNET	2 	/* contains an Active Networks msg */
 #define IP6OPT_MINLEN		2
+
+#define IP6OPT_EID		0x8a	/* 10 0 01010 */
 
 #define IP6OPT_TYPE(o)		((o) & 0xC0)
 #define IP6OPT_TYPE_SKIP	0x00
@@ -180,7 +172,7 @@ struct ip6_opt_jumbo {
 	u_int8_t ip6oj_len;
 	u_int8_t ip6oj_jumbo_len[4];
 } __packed;
-#define IP6OPT_JUMBO_LEN 6
+#define IP6OPT_JUMBO_LEN	6
 
 /* NSAP Address Option */
 struct ip6_opt_nsap {
@@ -206,16 +198,16 @@ struct ip6_opt_router {
 	u_int8_t ip6or_value[2];
 } __packed;
 /* Router alert values (in network byte order) */
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 #define IP6_ALERT_MLD	0x0000
 #define IP6_ALERT_RSVP	0x0001
 #define IP6_ALERT_AN	0x0002
 #else
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 #define IP6_ALERT_MLD	0x0000
 #define IP6_ALERT_RSVP	0x0100
 #define IP6_ALERT_AN	0x0200
-#endif /* _LITTLE_ENDIAN */
+#endif /* LITTLE_ENDIAN */
 #endif
 
 /* Routing header */
@@ -233,7 +225,8 @@ struct ip6_rthdr0 {
 	u_int8_t  ip6r0_len;		/* length in units of 8 octets */
 	u_int8_t  ip6r0_type;		/* always zero */
 	u_int8_t  ip6r0_segleft;	/* segments left */
-	u_int32_t ip6r0_reserved;	/* reserved field */
+	u_int32_t  ip6r0_reserved;	/* reserved field */
+	/* followed by up to 127 struct in6_addr */
 } __packed;
 
 /* Fragment header */
@@ -244,15 +237,15 @@ struct ip6_frag {
 	u_int32_t ip6f_ident;		/* identification */
 } __packed;
 
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 #define IP6F_OFF_MASK		0xfff8	/* mask out offset from _offlg */
 #define IP6F_RESERVED_MASK	0x0006	/* reserved bits in ip6f_offlg */
 #define IP6F_MORE_FRAG		0x0001	/* more-fragments flag */
-#else /* _BYTE_ORDER == _LITTLE_ENDIAN */
+#else /* BYTE_ORDER == LITTLE_ENDIAN */
 #define IP6F_OFF_MASK		0xf8ff	/* mask out offset from _offlg */
 #define IP6F_RESERVED_MASK	0x0600	/* reserved bits in ip6f_offlg */
 #define IP6F_MORE_FRAG		0x0100	/* more-fragments flag */
-#endif /* _BYTE_ORDER == _LITTLE_ENDIAN */
+#endif /* BYTE_ORDER == LITTLE_ENDIAN */
 
 /*
  * Internet implementation parameters.
@@ -264,8 +257,49 @@ struct ip6_frag {
 
 #define IPV6_MMTU	1280	/* minimal MTU and reassembly. 1024 + 256 */
 #define IPV6_MAXPACKET	65535	/* ip6 max packet size without Jumbo payload*/
+#define IPV6_MAXOPTHDR	2048	/* max option header size, 256 64-bit words */
 
 #ifdef _KERNEL
+/*
+ * IP6_EXTHDR_CHECK ensures that region between the IP6 header and the
+ * target header (including IPv6 itself, extension headers and
+ * TCP/UDP/ICMP6 headers) are continuous. KAME requires drivers
+ * to store incoming data into one internal mbuf or one or more external
+ * mbufs(never into two or more internal mbufs). Thus, the third case is
+ * supposed to never be matched but is prepared just in case.
+ */
+
+#define IP6_EXTHDR_CHECK(m, off, hlen, ret)				\
+do {									\
+    if ((m)->m_next != NULL) {						\
+	if (((m)->m_flags & M_LOOP) &&					\
+	    ((m)->m_len < (off) + (hlen)) &&				\
+	    (((m) = m_pullup((m), (off) + (hlen))) == NULL)) {		\
+		ip6stat.ip6s_exthdrtoolong++;				\
+		return ret;						\
+	} else if ((m)->m_flags & M_EXT) {				\
+		if ((m)->m_len < (off) + (hlen)) {			\
+			ip6stat.ip6s_exthdrtoolong++;			\
+			m_freem(m);					\
+			return ret;					\
+		}							\
+	} else {							\
+		if ((m)->m_len < (off) + (hlen)) {			\
+			ip6stat.ip6s_exthdrtoolong++;			\
+			m_freem(m);					\
+			return ret;					\
+		}							\
+	}								\
+    } else {								\
+	if ((m)->m_len < (off) + (hlen)) {				\
+		ip6stat.ip6s_tooshort++;				\
+		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_truncated);	\
+		m_freem(m);						\
+		return ret;						\
+	}								\
+    }									\
+} while (/*CONSTCOND*/ 0)
+
 /*
  * IP6_EXTHDR_GET ensures that intermediate protocol header (from "off" to
  * "len") is located in single mbuf, on contiguous memory region.
@@ -273,6 +307,8 @@ struct ip6_frag {
  * with type "typ".
  * IP6_EXTHDR_GET0 does the same, except that it aligns the structure at the
  * very top of mbuf.  GET0 is likely to make memory copy than GET.
+ *
+ * XXX we're now testing this, needs m_pulldown()
  */
 #define IP6_EXTHDR_GET(val, typ, m, off, len) \
 do {									\
@@ -291,13 +327,13 @@ do {									\
 			(m) = NULL;					\
 		}							\
 	}								\
-} while (0)
+} while (/*CONSTCOND*/ 0)
 
 #define IP6_EXTHDR_GET0(val, typ, m, off, len) \
 do {									\
 	struct mbuf *t;							\
-	if ((off) == 0 && (m)->m_len >= len)				\
-		(val) = (typ)mtod((m), caddr_t);			\
+	if ((off) == 0)							\
+		(val) = (typ)mtod(m, caddr_t);				\
 	else {								\
 		t = m_pulldown((m), (off), (len), NULL);		\
 		if (t) {						\
@@ -309,6 +345,7 @@ do {									\
 			(m) = NULL;					\
 		}							\
 	}								\
-} while (0)
-#endif /* _KERNEL */
-#endif /* _NETINET_IP6_H_ */
+} while (/*CONSTCOND*/ 0)
+#endif /*_KERNEL*/
+
+#endif /* not _NETINET_IP6_H_ */

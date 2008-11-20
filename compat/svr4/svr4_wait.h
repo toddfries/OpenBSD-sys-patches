@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_wait.h,v 1.2 1996/08/02 20:35:49 niklas Exp $	 */
-/*	$NetBSD: svr4_wait.h,v 1.5 1995/03/31 03:06:50 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,6 +24,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_wait.h,v 1.4 2005/01/05 22:34:37 imp Exp $
  */
 
 #ifndef	_SVR4_WAIT_H_

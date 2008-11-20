@@ -1,7 +1,4 @@
-/*	$OpenBSD: in_systm.h,v 1.5 2003/06/02 23:28:14 millert Exp $	*/
-/*	$NetBSD: in_systm.h,v 1.8 1995/04/13 06:29:22 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in_systm.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/in_systm.h,v 1.12 2005/01/07 01:45:44 imp Exp $
  */
 
 #ifndef _NETINET_IN_SYSTM_H_
@@ -51,10 +49,10 @@
 typedef u_int16_t n_short;		/* short as received from the net */
 typedef u_int32_t n_long;		/* long as received from the net */
 
-typedef u_int32_t n_time;		/* ms since 00:00 GMT, byte rev */
+typedef	u_int32_t n_time;		/* ms since 00:00 GMT, byte rev */
 
 #ifdef _KERNEL
 n_time	 iptime(void);
-#endif /* _KERNEL */
-#endif /* _NETINET_IN_SYSTM_H_ */
+#endif
 
+#endif

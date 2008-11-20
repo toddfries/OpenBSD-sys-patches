@@ -1,9 +1,7 @@
-/*	$OpenBSD: udp.h,v 1.5 2003/06/02 23:28:15 millert Exp $	*/
-/*	$NetBSD: udp.h,v 1.6 1995/04/13 06:37:10 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
- *	The Regents of the University of California.  All rights reserved.
+ *	The Regents of the University of California.
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,20 +28,21 @@
  * SUCH DAMAGE.
  *
  *	@(#)udp.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/udp.h,v 1.10 2007/02/20 10:13:11 rwatson Exp $
  */
 
 #ifndef _NETINET_UDP_H_
-#define _NETINET_UDP_H_
+#define	_NETINET_UDP_H_
 
 /*
- * Udp protocol header.
+ * UDP protocol header.
  * Per RFC 768, September, 1981.
  */
 struct udphdr {
-	u_int16_t uh_sport;		/* source port */
-	u_int16_t uh_dport;		/* destination port */
-	u_int16_t uh_ulen;		/* udp length */
-	u_int16_t uh_sum;		/* udp checksum */
+	u_short	uh_sport;		/* source port */
+	u_short	uh_dport;		/* destination port */
+	u_short	uh_ulen;		/* udp length */
+	u_short	uh_sum;			/* udp checksum */
 };
 
-#endif /* _NETINET_UDP_H_ */
+#endif

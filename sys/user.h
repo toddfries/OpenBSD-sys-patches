@@ -1,7 +1,4 @@
-/*	$OpenBSD: user.h,v 1.6 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: user.h,v 1.10 1996/04/09 20:55:49 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,55 +27,205 @@
  * SUCH DAMAGE.
  *
  *	@(#)user.h	8.2 (Berkeley) 9/23/93
+ * $FreeBSD: src/sys/sys/user.h,v 1.70 2007/09/17 05:27:21 jeff Exp $
  */
+
+#ifndef _SYS_USER_H_
+#define _SYS_USER_H_
 
 #include <machine/pcb.h>
 #ifndef _KERNEL
 /* stuff that *used* to be included by user.h, or is now needed */
-#include <errno.h>
+#include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/ucred.h>
 #include <sys/uio.h>
-#endif
+#include <sys/queue.h>
+#include <sys/_lock.h>
+#include <sys/_mutex.h>
+#include <sys/proc.h>
+#include <vm/vm.h>		/* XXX */
+#include <vm/vm_param.h>	/* XXX */
+#include <vm/pmap.h>		/* XXX */
+#include <vm/vm_map.h>		/* XXX */
+#endif /* !_KERNEL */
+#ifndef _SYS_RESOURCEVAR_H_
 #include <sys/resourcevar.h>
-#include <uvm/uvm_extern.h>		/* XXX */
-#include <sys/sysctl.h>
-
+#endif
+#ifndef _SYS_SIGNALVAR_H_
+#include <sys/signalvar.h>
+#endif
 
 /*
- * Per process structure containing data that isn't needed in core
- * when the process isn't running (esp. when swapped out).
- * This structure may or may not be at the same kernel address
- * in all processes.
+ * KERN_PROC subtype ops return arrays of selected proc structure entries:
+ *
+ * This struct includes several arrays of spare space, with different arrays
+ * for different standard C-types.  When adding new variables to this struct,
+ * the space for byte-aligned data should be taken from the ki_sparestring,
+ * pointers from ki_spareptrs, word-aligned data from ki_spareints, and
+ * doubleword-aligned data from ki_sparelongs.  Make sure the space for new
+ * variables come from the array which matches the size and alignment of
+ * those variables on ALL hardware platforms, and then adjust the appropriate
+ * KI_NSPARE_* value(s) to match.
+ *
+ * Always verify that sizeof(struct kinfo_proc) == KINFO_PROC_SIZE on all
+ * platforms after you have added new variables.  Note that if you change
+ * the value of KINFO_PROC_SIZE, then many userland programs will stop
+ * working until they are recompiled!
+ *
+ * Once you have added the new field, you will need to add code to initialize
+ * it in two places: function fill_kinfo_proc in sys/kern/kern_proc.c and
+ * function kvm_proclist in lib/libkvm/kvm_proc.c .
  */
+#define	KI_NSPARE_INT	10
+#define	KI_NSPARE_LONG	12
+#define	KI_NSPARE_PTR	7
 
-struct	user {
-	struct	pcb u_pcb;
+#ifdef __amd64__
+#define	KINFO_PROC_SIZE	1088
+#endif
+#ifdef __arm__
+#define	KINFO_PROC_SIZE	792
+#endif
+#ifdef __ia64__
+#define	KINFO_PROC_SIZE 1088
+#endif
+#ifdef __i386__
+#define	KINFO_PROC_SIZE	768
+#endif
+#ifdef __powerpc__
+#define	KINFO_PROC_SIZE	768
+#endif
+#ifdef __sparc64__
+#define	KINFO_PROC_SIZE 1088
+#endif
+#ifndef KINFO_PROC_SIZE
+#error "Unknown architecture"
+#endif
 
-	struct	pstats u_stats;		/* p_stats points here (use it!) */
+#define	WMESGLEN	8		/* size of returned wchan message */
+#define	LOCKNAMELEN	8		/* size of returned lock name */
+#define	OCOMMLEN	16		/* size of returned thread name */
+#define	COMMLEN		19		/* size of returned ki_comm name */
+#define	KI_EMULNAMELEN	16		/* size of returned ki_emul */
+#define	KI_NGROUPS	16		/* number of groups in ki_groups */
+#define	LOGNAMELEN	17		/* size of returned ki_login */
 
+struct kinfo_proc {
+	int	ki_structsize;		/* size of this structure */
+	int	ki_layout;		/* reserved: layout identifier */
+	struct	pargs *ki_args;		/* address of command arguments */
+	struct	proc *ki_paddr;		/* address of proc */
+	struct	user *ki_addr;		/* kernel virtual addr of u-area */
+	struct	vnode *ki_tracep;	/* pointer to trace file */
+	struct	vnode *ki_textvp;	/* pointer to executable file */
+	struct	filedesc *ki_fd;	/* pointer to open file info */
+	struct	vmspace *ki_vmspace;	/* pointer to kernel vmspace struct */
+	void	*ki_wchan;		/* sleep address */
+	pid_t	ki_pid;			/* Process identifier */
+	pid_t	ki_ppid;		/* parent process id */
+	pid_t	ki_pgid;		/* process group id */
+	pid_t	ki_tpgid;		/* tty process group id */
+	pid_t	ki_sid;			/* Process session ID */
+	pid_t	ki_tsid;		/* Terminal session ID */
+	short	ki_jobc;		/* job control counter */
+	short	ki_spare_short1;	/* unused (just here for alignment) */
+	dev_t	ki_tdev;		/* controlling tty dev */
+	sigset_t ki_siglist;		/* Signals arrived but not delivered */
+	sigset_t ki_sigmask;		/* Current signal mask */
+	sigset_t ki_sigignore;		/* Signals being ignored */
+	sigset_t ki_sigcatch;		/* Signals being caught by user */
+	uid_t	ki_uid;			/* effective user id */
+	uid_t	ki_ruid;		/* Real user id */
+	uid_t	ki_svuid;		/* Saved effective user id */
+	gid_t	ki_rgid;		/* Real group id */
+	gid_t	ki_svgid;		/* Saved effective group id */
+	short	ki_ngroups;		/* number of groups */
+	short	ki_spare_short2;	/* unused (just here for alignment) */
+	gid_t	ki_groups[KI_NGROUPS];	/* groups */
+	vm_size_t ki_size;		/* virtual size */
+	segsz_t ki_rssize;		/* current resident set size in pages */
+	segsz_t ki_swrss;		/* resident set size before last swap */
+	segsz_t ki_tsize;		/* text size (pages) XXX */
+	segsz_t ki_dsize;		/* data size (pages) XXX */
+	segsz_t ki_ssize;		/* stack size (pages) */
+	u_short	ki_xstat;		/* Exit status for wait & stop signal */
+	u_short	ki_acflag;		/* Accounting flags */
+	fixpt_t	ki_pctcpu;	 	/* %cpu for process during ki_swtime */
+	u_int	ki_estcpu;	 	/* Time averaged value of ki_cpticks */
+	u_int	ki_slptime;	 	/* Time since last blocked */
+	u_int	ki_swtime;	 	/* Time swapped in or out */
+	int	ki_spareint1;	 	/* unused (just here for alignment) */
+	u_int64_t ki_runtime;		/* Real time in microsec */
+	struct	timeval ki_start;	/* starting time */
+	struct	timeval ki_childtime;	/* time used by process children */
+	long	ki_flag;		/* P_* flags */
+	long	ki_kiflag;		/* KI_* flags (below) */
+	int	ki_traceflag;		/* Kernel trace points */
+	char	ki_stat;		/* S* process status */
+	signed char ki_nice;		/* Process "nice" value */
+	char	ki_lock;		/* Process lock (prevent swap) count */
+	char	ki_rqindex;		/* Run queue index */
+	u_char	ki_oncpu;		/* Which cpu we are on */
+	u_char	ki_lastcpu;		/* Last cpu we were on */
+	char	ki_ocomm[OCOMMLEN+1];	/* thread name */
+	char	ki_wmesg[WMESGLEN+1];	/* wchan message */
+	char	ki_login[LOGNAMELEN+1];	/* setlogin name */
+	char	ki_lockname[LOCKNAMELEN+1]; /* lock name */
+	char	ki_comm[COMMLEN+1];	/* command name */
+	char	ki_emul[KI_EMULNAMELEN+1];  /* emulation name */
 	/*
-	 * Remaining fields only for core dump and/or ptrace--
-	 * not valid at other times!
+	 * When adding new variables, take space for char-strings from the
+	 * front of ki_sparestrings, and ints from the end of ki_spareints.
+	 * That way the spare room from both arrays will remain contiguous.
 	 */
-	struct	kinfo_proc u_kproc;	/* proc + eproc */
-	struct	md_coredump u_md;	/* machine dependent glop */
+	char	ki_sparestrings[68];	/* spare string space */
+	int	ki_spareints[KI_NSPARE_INT];	/* spare room for growth */
+	int	ki_jid;			/* Process jail ID */
+	int	ki_numthreads;		/* XXXKSE number of threads in total */
+	lwpid_t	ki_tid;			/* XXXKSE thread id */
+	struct	priority ki_pri;	/* process priority */
+	struct	rusage ki_rusage;	/* process rusage statistics */
+	/* XXX - most fields in ki_rusage_ch are not (yet) filled in */
+	struct	rusage ki_rusage_ch;	/* rusage of children processes */
+	struct	pcb *ki_pcb;		/* kernel virtual addr of pcb */
+	void	*ki_kstack;		/* kernel virtual addr of stack */
+	void	*ki_udata;		/* User convenience pointer */
+	/*
+	 * When adding new variables, take space for pointers from the
+	 * front of ki_spareptrs, and longs from the end of ki_sparelongs.
+	 * That way the spare room from both arrays will remain contiguous.
+	 */
+	void	*ki_spareptrs[KI_NSPARE_PTR];	/* spare room for growth */
+	long	ki_sparelongs[KI_NSPARE_LONG];	/* spare room for growth */
+	long	ki_sflag;		/* PS_* flags */
+	long	ki_tdflags;		/* XXXKSE kthread flag */
+};
+void fill_kinfo_proc(struct proc *, struct kinfo_proc *);
+/* XXX - the following two defines are temporary */
+#define	ki_childstime	ki_rusage_ch.ru_stime
+#define	ki_childutime	ki_rusage_ch.ru_utime
+
+/*
+ *  Legacy PS_ flag.  This moved to p_flag but is maintained for
+ *  compatibility.
+ */
+#define	PS_INMEM	0x00001		/* Loaded into memory. */
+
+/* ki_sessflag values */
+#define	KI_CTTY		0x00000001	/* controlling tty vnode active */
+#define	KI_SLEADER	0x00000002	/* session leader */
+#define	KI_LOCKBLOCK	0x00000004	/* proc blocked on lock ki_lockname */
+
+/*
+ * This used to be the per-process structure containing data that
+ * isn't needed in core when the process is swapped out, but now it
+ * remains only for the benefit of a.out core dumps.
+ */
+struct user {
+	struct	pstats u_stats;		/* *p_stats */
+	struct	kinfo_proc u_kproc;	/* eproc */
 };
 
-/*
- * Redefinitions to make the debuggers happy for now...  This subterfuge
- * brought to you by coredump() and trace_req().  These fields are *only*
- * valid at those times!
- */
-#define	U_ar0	u_kproc.kp_proc.p_md.md_regs /* copy of curproc->p_md.md_regs */
-#define	U_tsize	u_kproc.kp_eproc.e_vm.vm_tsize
-#define	U_dsize	u_kproc.kp_eproc.e_vm.vm_dsize
-#define	U_ssize	u_kproc.kp_eproc.e_vm.vm_ssize
-
-#ifndef _KERNEL
-#define	u_ar0	U_ar0
-#define	u_tsize	U_tsize
-#define	u_dsize	U_dsize
-#define	u_ssize	U_ssize
-#endif /* _KERNEL */
+#endif

@@ -1,7 +1,4 @@
-/*	$OpenBSD: filedesc.h,v 1.19 2004/07/22 06:11:10 tedu Exp $	*/
-/*	$NetBSD: filedesc.h,v 1.14 1996/04/09 20:55:28 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,70 +27,62 @@
  * SUCH DAMAGE.
  *
  *	@(#)filedesc.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/filedesc.h,v 1.78 2007/05/31 11:51:52 kib Exp $
  */
 
-#include <sys/rwlock.h>
+#ifndef _SYS_FILEDESC_H_
+#define	_SYS_FILEDESC_H_
+
+#include <sys/queue.h>
+#include <sys/event.h>
+#include <sys/lock.h>
+#include <sys/priority.h>
+#include <sys/sx.h>
+
+#include <machine/_limits.h>
+
 /*
  * This structure is used for the management of descriptors.  It may be
  * shared by multiple processes.
- *
- * A process is initially started out with NDFILE descriptors stored within
- * this structure, selected to be enough for typical applications based on
- * the historical limit of 20 open files (and the usage of descriptors by
- * shells).  If these descriptors are exhausted, a larger descriptor table
- * may be allocated, up to a process' resource limit; the internal arrays
- * are then unused.  The initial expansion is set to NDEXTENT; each time
- * it runs out, it is doubled until the resource limit is reached. NDEXTENT
- * should be selected to be the biggest multiple of OFILESIZE (see below)
- * that will fit in a power-of-two sized piece of memory.
  */
-#define NDFILE		20
-#define NDEXTENT	50		/* 250 bytes in 256-byte alloc. */
-#define NDENTRIES	32		/* 32 fds per entry */
-#define NDENTRYMASK	(NDENTRIES - 1)
-#define NDENTRYSHIFT	5		/* bits per entry */
-#define NDREDUCE(x)	(((x) + NDENTRIES - 1) >> NDENTRYSHIFT)
-#define NDHISLOTS(x)	(NDREDUCE(NDREDUCE(x)))
-#define NDLOSLOTS(x)	(NDHISLOTS(x) << NDENTRYSHIFT)
+#define NDSLOTTYPE	u_long
 
 struct filedesc {
 	struct	file **fd_ofiles;	/* file structures for open files */
 	char	*fd_ofileflags;		/* per-process open file flags */
 	struct	vnode *fd_cdir;		/* current directory */
 	struct	vnode *fd_rdir;		/* root directory */
+	struct	vnode *fd_jdir;		/* jail root directory */
 	int	fd_nfiles;		/* number of open files allocated */
-	u_int	*fd_himap;		/* each bit points to 32 fds */
-	u_int	*fd_lomap;		/* bitmap of free fds */
+	NDSLOTTYPE *fd_map;		/* bitmap of free fds */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
 	int	fd_freefile;		/* approx. next free file */
 	u_short	fd_cmask;		/* mask for file creation */
-	u_short	fd_refcnt;		/* reference count */
-	struct rwlock fd_lock;		/* lock for the file descs */
-
-	int	fd_knlistsize;		/* size of knlist */
-	struct	klist *fd_knlist;	/* list of attached knotes */
-	u_long	fd_knhashmask;		/* size of knhash */
-	struct	klist *fd_knhash;	/* hash table for attached knotes */
+	u_short	fd_refcnt;		/* thread reference count */
+	u_short	fd_holdcnt;		/* hold count on structure + mutex */
+	struct	sx fd_sx;		/* protects members of this struct */
+	struct	kqlist fd_kqlist;	/* list of kqueues on this filedesc */
+	int	fd_holdleaderscount;	/* block fdfree() for shared close() */
+	int	fd_holdleaderswakeup;	/* fdfree() needs wakeup */
 };
 
 /*
- * Basic allocation of descriptors:
- * one of the above, plus arrays for NDFILE descriptors.
+ * Structure to keep track of (process leader, struct fildedesc) tuples.
+ * Each process has a pointer to such a structure when detailed tracking
+ * is needed, e.g., when rfork(RFPROC | RFMEM) causes a file descriptor
+ * table to be shared by processes having different "p_leader" pointers
+ * and thus distinct POSIX style locks.
+ *
+ * fdl_refcount and fdl_holdcount are protected by struct filedesc mtx.
  */
-struct filedesc0 {
-	struct	filedesc fd_fd;
-	/*
-	 * These arrays are used when the number of open files is
-	 * <= NDFILE, and are then pointed to by the pointers above.
-	 */
-	struct	file *fd_dfiles[NDFILE];
-	char	fd_dfileflags[NDFILE];
-	/*
-	 * There arrays are used when the number of open files is
-	 * <= 1024, and are then pointed to by the pointers above.
-	 */
-	u_int   fd_dhimap[NDENTRIES >> NDENTRYSHIFT];
-	u_int   fd_dlomap[NDENTRIES];
+struct filedesc_to_leader {
+	int		fdl_refcount;	/* references from struct proc */
+	int		fdl_holdcount;	/* temporary hold during closef */
+	int		fdl_wakeup;	/* fdfree() waits on closef() */
+	struct proc	*fdl_leader;	/* owner of POSIX locks */
+	/* Circular list: */
+	struct filedesc_to_leader *fdl_prev;
+	struct filedesc_to_leader *fdl_next;
 };
 
 /*
@@ -101,33 +90,52 @@ struct filedesc0 {
  */
 #define	UF_EXCLOSE 	0x01		/* auto-close on exec */
 
-/*
- * Storage required per open file descriptor.
- */
-#define OFILESIZE (sizeof(struct file *) + sizeof(char))
-
 #ifdef _KERNEL
-/*
- * Kernel global variables and routines.
- */
-void	filedesc_init(void);
-int	dupfdopen(struct filedesc *fdp, int indx, int dfd, int mode,
-	    int error);
-int	fdalloc(struct proc *p, int want, int *result);
-void	fdexpand(struct proc *);
-int	falloc(struct proc *p, struct file **resultfp, int *resultfd);
-struct	filedesc *fdinit(struct proc *p);
-struct	filedesc *fdshare(struct proc *p);
-struct	filedesc *fdcopy(struct proc *p);
-void	fdfree(struct proc *p);
-int	fdrelease(struct proc *p, int);
-void	fdremove(struct filedesc *, int);
-void	fdcloseexec(struct proc *);
-struct file *fd_getfile(struct filedesc *, int fd);
 
-int	closef(struct file *, struct proc *);
-int	getsock(struct filedesc *, int, struct file **);
+/* Lock a file descriptor table. */
+#define	FILEDESC_LOCK_INIT(fdp)	sx_init(&(fdp)->fd_sx, "filedesc structure")
+#define	FILEDESC_LOCK_DESTROY(fdp)	sx_destroy(&(fdp)->fd_sx)
+#define	FILEDESC_LOCK(fdp)	(&(fdp)->fd_sx)
+#define	FILEDESC_XLOCK(fdp)	sx_xlock(&(fdp)->fd_sx)
+#define	FILEDESC_XUNLOCK(fdp)	sx_xunlock(&(fdp)->fd_sx)
+#define	FILEDESC_SLOCK(fdp)	sx_slock(&(fdp)->fd_sx)
+#define	FILEDESC_SUNLOCK(fdp)	sx_sunlock(&(fdp)->fd_sx)
 
-#define	fdplock(fdp)	rw_enter_write(&(fdp)->fd_lock)
-#define	fdpunlock(fdp)	rw_exit_write(&(fdp)->fd_lock)
-#endif
+#define	FILEDESC_LOCK_ASSERT(fdp)	sx_assert(&(fdp)->fd_sx, SX_LOCKED | \
+					    SX_NOTRECURSED)
+#define	FILEDESC_XLOCK_ASSERT(fdp)	sx_assert(&(fdp)->fd_sx, SX_XLOCKED | \
+					    SX_NOTRECURSED)
+
+struct thread;
+
+int	closef(struct file *fp, struct thread *td);
+int	dupfdopen(struct thread *td, struct filedesc *fdp, int indx, int dfd,
+	    int mode, int error);
+int	falloc(struct thread *td, struct file **resultfp, int *resultfd);
+int	fdalloc(struct thread *td, int minfd, int *result);
+int	fdavail(struct thread *td, int n);
+int	fdcheckstd(struct thread *td);
+void	fdclose(struct filedesc *fdp, struct file *fp, int idx, struct thread *td);
+void	fdcloseexec(struct thread *td);
+struct	filedesc *fdcopy(struct filedesc *fdp);
+void	fdunshare(struct proc *p, struct thread *td);
+void	fdfree(struct thread *td);
+struct	filedesc *fdinit(struct filedesc *fdp);
+struct	filedesc *fdshare(struct filedesc *fdp);
+struct filedesc_to_leader *
+	filedesc_to_leader_alloc(struct filedesc_to_leader *old,
+	    struct filedesc *fdp, struct proc *leader);
+int	getvnode(struct filedesc *fdp, int fd, struct file **fpp);
+void	mountcheckdirs(struct vnode *olddp, struct vnode *newdp);
+void	setugidsafety(struct thread *td);
+
+static __inline struct file *
+fget_locked(struct filedesc *fdp, int fd)
+{
+
+	return (fd < 0 || fd >= fdp->fd_nfiles ? NULL : fdp->fd_ofiles[fd]);
+}
+
+#endif /* _KERNEL */
+
+#endif /* !_SYS_FILEDESC_H_ */

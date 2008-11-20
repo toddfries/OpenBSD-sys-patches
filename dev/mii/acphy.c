@@ -1,11 +1,10 @@
-/*	$OpenBSD: acphy.c,v 1.6 2006/12/27 19:11:08 kettenis Exp $	*/
-/*	$NetBSD: acphy.c,v 1.13 2003/04/29 01:49:33 thorpej Exp $	*/
-
-/*
- * Copyright 2001 Wasabi Systems, Inc.
+/*-
+ * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
- * Written by Jason R. Thorpe for Wasabi Systems, Inc.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
+ * NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -17,16 +16,16 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed for the NetBSD Project by
- *	Wasabi Systems, Inc.
- * 4. The name of Wasabi Systems, Inc. may not be used to endorse
- *    or promote products derived from this software without specific prior
- *    written permission.
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
  * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -36,180 +35,218 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*-
+ * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/acphy.c,v 1.21 2007/01/12 22:59:38 marius Exp $");
+
 /*
- * Driver for the Altima AC101 PHY.
+ * Driver for Altima AC101 10/100 PHY
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <sys/module.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/mii/miidevs.h>
+#include "miidevs.h"
 
 #include <dev/mii/acphyreg.h>
 
-int	acphymatch(struct device *, void *, void *);
-void	acphyattach(struct device *, struct device *, void *);
+#include "miibus_if.h"
 
-struct cfattach acphy_ca = {
-	sizeof(struct mii_softc), acphymatch, acphyattach, mii_phy_detach,
-	    mii_phy_activate
+static int acphy_probe(device_t);
+static int acphy_attach(device_t);
+
+static device_method_t acphy_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		acphy_probe),
+	DEVMETHOD(device_attach,	acphy_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{ 0, 0 }
 };
 
-struct cfdriver acphy_cd = {
-	NULL, "acphy", DV_DULL
+static devclass_t acphy_devclass;
+
+static driver_t acphy_driver = {
+	"acphy",
+	acphy_methods,
+	sizeof(struct mii_softc)
 };
 
-int	acphy_service(struct mii_softc *, struct mii_data *, int);
-void	acphy_status(struct mii_softc *);
+DRIVER_MODULE(acphy, miibus, acphy_driver, acphy_devclass, 0, 0);
 
-const struct mii_phy_funcs acphy_funcs = {
-	acphy_service, acphy_status, mii_phy_reset,
-};
+static int	acphy_service(struct mii_softc *, struct mii_data *, int);
+static void	acphy_reset(struct mii_softc *);
+static void	acphy_status(struct mii_softc *);
 
 static const struct mii_phydesc acphys[] = {
-	{ MII_OUI_xxALTIMA,		MII_MODEL_xxALTIMA_AC101,
-	  MII_STR_xxALTIMA_AC101 },
-	{ MII_OUI_xxALTIMA,		MII_MODEL_xxALTIMA_AC101L,
-	  MII_STR_xxALTIMA_AC101L },
-	{ MII_OUI_xxALTIMA,		MII_MODEL_xxALTIMA_AC_UNKNOWN,
-	  MII_STR_xxALTIMA_AC_UNKNOWN },
-
-	{ 0,				0,
-	  NULL },
+	MII_PHY_DESC(xxALTIMA, AC101),
+	MII_PHY_DESC(xxALTIMA, AC101L),
+	/* XXX This is reported to work, but it's not from any data sheet. */
+	MII_PHY_DESC(xxALTIMA, ACXXX),
+	MII_PHY_END
 };
 
-int
-acphymatch(struct device *parent, void *match, void *aux)
+static int
+acphy_probe(device_t dev)
 {
-	struct mii_attach_args *ma = aux;
 
-	if (mii_phy_match(ma, acphys) != NULL)
-		return (10);
-
-	return (0);
+	return (mii_phy_dev_probe(dev, acphys, BUS_PROBE_DEFAULT));
 }
 
-void
-acphyattach(struct device *parent, struct device *self, void *aux)
+static int
+acphy_attach(device_t dev)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
-	const struct mii_phydesc *mpd;
+	struct mii_softc *sc;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
 
-	mpd = mii_phy_match(ma, acphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	sc->mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->mii_dev);
+	LIST_INSERT_HEAD(&mii->mii_phys, sc, mii_list);
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &acphy_funcs;
+	sc->mii_service = acphy_service;
 	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = MII_ANEGTICKS;
 
-	PHY_RESET(sc);
+	mii->mii_instance++;
 
-	/*
-	 * XXX Check MCR_FX_SEL to set MIIF_HAVE_FIBER?
-	 */
+	acphy_reset(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
+	device_printf(dev, " ");
 
 #define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
-	if (sc->mii_flags & MIIF_HAVEFIBER) {
+	if ((PHY_READ(sc, MII_ACPHY_MCTL) & AC_MCTL_FX_SEL) != 0) {
+		sc->mii_flags |= MIIF_HAVEFIBER;
 		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_FX, 0, sc->mii_inst),
 		    MII_MEDIA_100_TX);
+		printf("100baseFX, ");
 		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_FX, IFM_FDX, sc->mii_inst),
-		    MII_MEDIA_100_TX);
+		    MII_MEDIA_100_TX_FDX);
+		printf("100baseFX-FDX, ");
 	}
 #undef ADD
 
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
-		mii_phy_add_media(sc);
+	mii_phy_add_media(sc);
+	printf("\n");
+
+	MIIBUS_MEDIAINIT(sc->mii_dev);
+	return (0);
 }
 
-int
+static int
 acphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
 
+	/*
+	 * If we're not selected, then do nothing, just isolate and power
+	 * down, if changing media.
+	 */
+	if (IFM_INST(ife->ifm_media) != sc->mii_inst) {
+		if (cmd == MII_MEDIACHG) {
+			reg = PHY_READ(sc, MII_BMCR);
+			PHY_WRITE(sc, MII_BMCR, reg | BMCR_ISO | BMCR_PDOWN);
+		}
+
+		return (0);
+	}
+
 	switch (cmd) {
 	case MII_POLLSTAT:
-		/*
-		 * If we're not polling our PHY instance, just return.
-		 */
-		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
-			return (0);
 		break;
 
 	case MII_MEDIACHG:
-		/*
-		 * If the media indicates a different PHY instance,
-		 * isolate ourselves.
-		 */
-		if (IFM_INST(ife->ifm_media) != sc->mii_inst) {
-			reg = PHY_READ(sc, MII_BMCR);
-			PHY_WRITE(sc, MII_BMCR, reg | BMCR_ISO);
-			return (0);
-		}
-
 		/*
 		 * If the interface is not up, don't do anything.
 		 */
 		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			break;
 
+		/* Wake & deisolate up if necessary */
+		reg = PHY_READ(sc, MII_BMCR);
+		if (reg & (BMCR_ISO | BMCR_PDOWN))
+			PHY_WRITE(sc, MII_BMCR, reg & ~(BMCR_ISO | BMCR_PDOWN));
+
 		mii_phy_setmedia(sc);
 		break;
 
 	case MII_TICK:
 		/*
-		 * If we're not currently selected, just return.
+		 * Is the interface even up?
 		 */
-		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
+		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
 
-		if (mii_phy_tick(sc) == EJUSTRETURN)
-			return (0);
+		/*
+		 * This PHY's autonegotiation doesn't need to be kicked.
+		 */
 		break;
-
-	case MII_DOWN:
-		mii_phy_down(sc);
-		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	acphy_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);
 	return (0);
 }
 
-void
+static void
 acphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
-	int bmsr, bmcr, dr;
+	int bmsr, bmcr, diag;
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
 
-	bmsr = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
-	dr = PHY_READ(sc, MII_ACPHY_DR);
-
+	bmsr = PHY_READ(sc, MII_BMSR) |
+	    PHY_READ(sc, MII_BMSR);
 	if (bmsr & BMSR_LINK)
 		mii->mii_media_status |= IFM_ACTIVE;
 
@@ -224,25 +261,27 @@ acphy_status(struct mii_softc *sc)
 		mii->mii_media_active |= IFM_LOOP;
 
 	if (bmcr & BMCR_AUTOEN) {
-		/*
-		 * The media status bits are only valid if autonegotiation
-		 * has completed (or it's disabled).
-		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {
 			/* Erg, still trying, I guess... */
 			mii->mii_media_active |= IFM_NONE;
 			return;
 		}
-
-		if (dr & DR_SPEED)
+		diag = PHY_READ(sc, MII_ACPHY_DIAG);
+		if (diag & AC_DIAG_SPEED)
 			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
 
-		if (dr & DR_DPLX)
+		if (diag & AC_DIAG_DUPLEX)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
+}
+
+static void
+acphy_reset(struct mii_softc *sc)
+{
+
+	mii_phy_reset(sc);
+	PHY_WRITE(sc, MII_ACPHY_INT, 0);
 }

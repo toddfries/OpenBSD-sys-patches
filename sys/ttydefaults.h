@@ -1,6 +1,3 @@
-/*	$OpenBSD: ttydefaults.h,v 1.6 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: ttydefaults.h,v 1.8 1996/04/09 20:55:45 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,6 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ttydefaults.h	8.4 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/sys/ttydefaults.h,v 1.19 2004/11/03 19:16:55 phk Exp $
  */
 
 /*
@@ -46,21 +44,25 @@
 /*
  * Defaults on "first" open.
  */
-#define	TTYDEF_IFLAG	(BRKINT | ICRNL | IMAXBEL | IXON | IXANY)
-#define TTYDEF_OFLAG	(OPOST | ONLCR | OXTABS)
-#define TTYDEF_LFLAG	(ECHO | ICANON | ISIG | IEXTEN | ECHOE|ECHOKE|ECHOCTL)
-#define TTYDEF_CFLAG	(CREAD | CS8 | HUPCL)
-#define TTYDEF_SPEED	(B9600)
+#define	TTYDEF_IFLAG	(BRKINT	| ICRNL	| IMAXBEL | IXON | IXANY)
+#define	TTYDEF_OFLAG	(OPOST | ONLCR)
+#define	TTYDEF_LFLAG_NOECHO (ICANON | ISIG | IEXTEN)
+#define	TTYDEF_LFLAG_ECHO (TTYDEF_LFLAG_NOECHO \
+	| ECHO | ECHOE | ECHOKE | ECHOCTL)
+#define	TTYDEF_LFLAG TTYDEF_LFLAG_ECHO
+#define	TTYDEF_CFLAG	(CREAD | CS8 | HUPCL)
+#define	TTYDEF_SPEED	(B9600)
 
 /*
  * Control Character Defaults
  */
-#define CTRL(x)	(x&037)
+#define	CTRL(x)	(x&037)
 #define	CEOF		CTRL('d')
-#define	CEOL		((unsigned char)'\377')	/* XXX avoid _POSIX_VDISABLE */
+#define	CEOL		0xff		/* XXX avoid _POSIX_VDISABLE */
 #define	CERASE		0177
+#define	CERASE2		CTRL('h')
 #define	CINTR		CTRL('c')
-#define	CSTATUS		((unsigned char)'\377')	/* XXX avoid _POSIX_VDISABLE */
+#define	CSTATUS		CTRL('t')
 #define	CKILL		CTRL('u')
 #define	CMIN		1
 #define	CQUIT		034		/* FS, ^\ */
@@ -76,7 +78,7 @@
 #define	CEOT		CEOF
 /* compat */
 #define	CBRK		CEOL
-#define CRPRNT		CREPRINT
+#define	CRPRNT		CREPRINT
 #define	CFLUSH		CDISCARD
 
 /* PROTECTED INCLUSION ENDS HERE */
@@ -86,9 +88,9 @@
  * #define TTYDEFCHARS to include an array of default control characters.
  */
 #ifdef TTYDEFCHARS
-cc_t	ttydefchars[NCCS] = {
+static cc_t	ttydefchars[NCCS] = {
 	CEOF,	CEOL,	CEOL,	CERASE, CWERASE, CKILL, CREPRINT,
-	_POSIX_VDISABLE, CINTR,	CQUIT,	CSUSP,	CDSUSP,	CSTART,	CSTOP,	CLNEXT,
+	CERASE2, CINTR,	CQUIT,	CSUSP,	CDSUSP,	CSTART,	CSTOP,	CLNEXT,
 	CDISCARD, CMIN,	CTIME,  CSTATUS, _POSIX_VDISABLE
 };
 #undef TTYDEFCHARS

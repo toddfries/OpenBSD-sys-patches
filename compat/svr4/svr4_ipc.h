@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_ipc.h,v 1.2 1996/08/02 20:35:40 niklas Exp $	*/
-/*	$NetBSD: svr4_ipc.h,v 1.1 1995/10/14 20:24:32 christos Exp $	*/
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1995 Christos Zoulas.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +26,8 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_ipc.h,v 1.4 2005/01/05 22:34:36 imp Exp $
  */
 
 #ifndef _SVR4_IPC_H_

@@ -1,8 +1,7 @@
-/*	$OpenBSD: ohcivar.h,v 1.25 2007/06/15 11:41:48 mbalmer Exp $ */
-/*	$NetBSD: ohcivar.h,v 1.32 2003/02/22 05:24:17 tsutsui Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/ohcivar.h,v 1.13 1999/11/17 22:33:41 n_hibma Exp $	*/
+/*	$NetBSD: ohcivar.h,v 1.30 2001/12/31 12:20:35 augustss Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/ohcivar.h,v 1.47 2007/06/14 16:23:31 imp Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -45,8 +44,7 @@ typedef struct ohci_soft_ed {
 	ohci_physaddr_t physaddr;
 } ohci_soft_ed_t;
 #define OHCI_SED_SIZE ((sizeof (struct ohci_soft_ed) + OHCI_ED_ALIGN - 1) / OHCI_ED_ALIGN * OHCI_ED_ALIGN)
-#define OHCI_SED_CHUNK 128
-
+#define OHCI_SED_CHUNK	(PAGE_SIZE / OHCI_SED_SIZE)
 
 typedef struct ohci_soft_td {
 	ohci_td_t td;
@@ -61,8 +59,7 @@ typedef struct ohci_soft_td {
 #define OHCI_ADD_LEN	0x0002
 } ohci_soft_td_t;
 #define OHCI_STD_SIZE ((sizeof (struct ohci_soft_td) + OHCI_TD_ALIGN - 1) / OHCI_TD_ALIGN * OHCI_TD_ALIGN)
-#define OHCI_STD_CHUNK 128
-
+#define OHCI_STD_CHUNK (PAGE_SIZE / OHCI_STD_SIZE)
 
 typedef struct ohci_soft_itd {
 	ohci_itd_t itd;
@@ -72,30 +69,40 @@ typedef struct ohci_soft_itd {
 	LIST_ENTRY(ohci_soft_itd) hnext;
 	usbd_xfer_handle xfer;
 	u_int16_t flags;
+#define	OHCI_ITD_ACTIVE	0x0010		/* Hardware op in progress */
+#define	OHCI_ITD_INTFIN	0x0020		/* Hw completion interrupt seen.*/
 #ifdef DIAGNOSTIC
 	char isdone;
 #endif
 } ohci_soft_itd_t;
 #define OHCI_SITD_SIZE ((sizeof (struct ohci_soft_itd) + OHCI_ITD_ALIGN - 1) / OHCI_ITD_ALIGN * OHCI_ITD_ALIGN)
-#define OHCI_SITD_CHUNK 64
-
+#define OHCI_SITD_CHUNK (PAGE_SIZE / OHCI_SITD_SIZE)
 
 #define OHCI_NO_EDS (2*OHCI_NO_INTRS-1)
 
 #define OHCI_HASH_SIZE 128
 
+#define OHCI_SCFLG_DONEINIT	0x0001	/* ohci_init() done. */
+
 typedef struct ohci_softc {
 	struct usbd_bus sc_bus;		/* base device */
+	int sc_flags;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	bus_size_t sc_size;
+
+	void *ih;
+
+	struct resource *io_res;
+	struct resource *irq_res;
 
 	usb_dma_t sc_hccadma;
 	struct ohci_hcca *sc_hcca;
 	ohci_soft_ed_t *sc_eds[OHCI_NO_EDS];
 	u_int sc_bws[OHCI_NO_INTRS];
 
-	u_int32_t sc_eintrs;
+	u_int32_t sc_eintrs;		/* enabled interrupts */
+
 	ohci_soft_ed_t *sc_isoc_head;
 	ohci_soft_ed_t *sc_ctrl_head;
 	ohci_soft_ed_t *sc_bulk_head;
@@ -107,15 +114,15 @@ typedef struct ohci_softc {
 	u_int8_t sc_addr;		/* device address */
 	u_int8_t sc_conf;		/* device configuration */
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef USB_USE_SOFTINTR
 	char sc_softwake;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
+#endif /* USB_USE_SOFTINTR */
 
 	ohci_soft_ed_t *sc_freeeds;
 	ohci_soft_td_t *sc_freetds;
 	ohci_soft_itd_t *sc_freeitds;
 
-	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
+	STAILQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
 	usbd_xfer_handle sc_intrxfer;
 
@@ -125,32 +132,33 @@ typedef struct ohci_softc {
 	char sc_vendor[16];
 	int sc_id_vendor;
 
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
-
+#endif
 	u_int32_t sc_control;		/* Preserved during suspend/standby */
 	u_int32_t sc_intre;
-	u_int32_t sc_ival;
 
 	u_int sc_overrun_cnt;
 	struct timeval sc_overrun_ntc;
 
-	struct timeout sc_tmo_rhsc;
-
-	struct device *sc_child;
-
+	struct callout sc_tmo_rhsc;
 	char sc_dying;
 } ohci_softc_t;
 
 struct ohci_xfer {
 	struct usbd_xfer xfer;
 	struct usb_task	abort_task;
+	u_int32_t ohci_xfer_flags;
 };
+#define OHCI_XFER_ABORTING	0x01	/* xfer is aborting. */
+#define OHCI_XFER_ABORTWAIT	0x02	/* abort completion is being awaited. */
 
-usbd_status	ohci_checkrev(ohci_softc_t *);
-usbd_status	ohci_handover(ohci_softc_t *);
+#define OXFER(xfer) ((struct ohci_xfer *)(xfer))
+#define MS_TO_TICKS(ms) ((ms) * hz / 1000)
+
 usbd_status	ohci_init(ohci_softc_t *);
-int		ohci_intr(void *);
-int		ohci_detach(ohci_softc_t *, int);
-int		ohci_activate(struct device *, enum devact);
-void		ohci_power(int, void *);
+void		ohci_intr(void *);
+int	 	ohci_detach(ohci_softc_t *, int);
+void		ohci_shutdown(void *v);
+void		ohci_power(int state, void *priv);

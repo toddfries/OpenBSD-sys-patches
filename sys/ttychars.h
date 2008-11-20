@@ -1,6 +1,3 @@
-/*	$OpenBSD: ttychars.h,v 1.3 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: ttychars.h,v 1.6 1994/06/29 06:45:54 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,15 +27,17 @@
  * SUCH DAMAGE.
  *
  *	@(#)ttychars.h	8.2 (Berkeley) 1/4/94
+ * $FreeBSD: src/sys/sys/ttychars.h,v 1.10 2006/01/10 09:19:10 phk Exp $
  */
+
+#ifndef _SYS_TTYCHARS_H_
+#define _SYS_TTYCHARS_H_
 
 /*
  * 4.3 COMPATIBILITY FILE
  *
  * User visible structures and constants related to terminal handling.
  */
-#ifndef _SYS_TTYCHARS_H_
-#define	_SYS_TTYCHARS_H_
 
 struct ttychars {
 	char	tc_erase;	/* erase last character */
@@ -59,4 +58,5 @@ struct ttychars {
 #ifdef USE_OLD_TTY
 #include <sys/ttydefaults.h>	/* to pick up character defaults */
 #endif
+
 #endif /* !_SYS_TTYCHARS_H_ */

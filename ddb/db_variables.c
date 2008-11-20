@@ -1,80 +1,78 @@
-/*	$OpenBSD: db_variables.c,v 1.12 2006/07/06 19:05:58 miod Exp $	*/
-/*	$NetBSD: db_variables.c,v 1.8 1996/02/05 01:57:19 christos Exp $	*/
-
-/* 
+/*-
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
+ *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
+ */
+/*
+ * 	Author: David B. Golub, Carnegie Mellon University
+ *	Date:	7/90
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ddb/db_variables.c,v 1.23 2005/01/06 01:34:41 imp Exp $");
+
 #include <sys/param.h>
-#include <sys/proc.h>
+#include <sys/systm.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <machine/db_machdep.h>
-
+#include <ddb/ddb.h>
 #include <ddb/db_lex.h>
 #include <ddb/db_variables.h>
-#include <ddb/db_command.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_extern.h>
-#include <ddb/db_var.h>
 
-struct db_variable db_vars[] = {
-	{ "radix",	(long *)&db_radix, db_var_rw_int },
-	{ "maxoff",	(long *)&db_maxoff, db_var_rw_int },
-	{ "maxwidth",	(long *)&db_max_width, db_var_rw_int },
-	{ "tabstops",	(long *)&db_tab_stop_width, db_var_rw_int },
-	{ "lines",	(long *)&db_max_line, db_var_rw_int },
-	{ "log",	(long *)&db_log, db_var_rw_int }
+static int	db_find_variable(struct db_variable **varp);
+
+static struct db_variable db_vars[] = {
+	{ "radix",	&db_radix, FCN_NULL },
+	{ "maxoff",	&db_maxoff, FCN_NULL },
+	{ "maxwidth",	&db_max_width, FCN_NULL },
+	{ "tabstops",	&db_tab_stop_width, FCN_NULL },
+	{ "lines",	&db_lines_per_page, FCN_NULL },
 };
-struct db_variable *db_evars = db_vars + sizeof(db_vars)/sizeof(db_vars[0]);
+static struct db_variable *db_evars =
+	db_vars + sizeof(db_vars)/sizeof(db_vars[0]);
 
-int
+static int
 db_find_variable(struct db_variable **varp)
 {
-	int	t;
 	struct db_variable *vp;
+	int t;
 
 	t = db_read_token();
 	if (t == tIDENT) {
-	    for (vp = db_vars; vp < db_evars; vp++) {
-		if (!strcmp(db_tok_string, vp->name)) {
-		    *varp = vp;
-		    return (1);
+		for (vp = db_vars; vp < db_evars; vp++) {
+			if (!strcmp(db_tok_string, vp->name)) {
+				*varp = vp;
+				return (1);
+			}
 		}
-	    }
-	    for (vp = db_regs; vp < db_eregs; vp++) {
-		if (!strcmp(db_tok_string, vp->name)) {
-		    *varp = vp;
-		    return (1);
+		for (vp = db_regs; vp < db_eregs; vp++) {
+			if (!strcmp(db_tok_string, vp->name)) {
+				*varp = vp;
+				return (1);
+			}
 		}
-	    }
 	}
 	db_error("Unknown variable\n");
-	/*NOTREACHED*/
-	return 0;
+	return (0);
 }
 
 int
@@ -83,11 +81,9 @@ db_get_variable(db_expr_t *valuep)
 	struct db_variable *vp;
 
 	if (!db_find_variable(&vp))
-	    return (0);
+		return (0);
 
-	db_read_variable(vp, valuep);
-
-	return (1);
+	return (db_read_variable(vp, valuep));
 }
 
 int
@@ -96,78 +92,62 @@ db_set_variable(db_expr_t value)
 	struct db_variable *vp;
 
 	if (!db_find_variable(&vp))
-	    return (0);
+		return (0);
 
-	db_write_variable(vp, &value);
-
-	return (1);
+	return (db_write_variable(vp, value));
 }
 
-
-void
+int
 db_read_variable(struct db_variable *vp, db_expr_t *valuep)
 {
-	int	(*func)(struct db_variable *, db_expr_t *, int) = vp->fcn;
+	db_varfcn_t *func = vp->fcn;
 
-	if (func == FCN_NULL)
-	    *valuep = *(vp->valuep);
-	else
-	    (*func)(vp, valuep, DB_VAR_GET);
+	if (func == FCN_NULL) {
+		*valuep = *(vp->valuep);
+		return (1);
+	}
+	return ((*func)(vp, valuep, DB_VAR_GET));
+}
+
+int
+db_write_variable(struct db_variable *vp, db_expr_t value)
+{
+	db_varfcn_t *func = vp->fcn;
+
+	if (func == FCN_NULL) {
+		*(vp->valuep) = value;
+		return (1);
+	}
+	return ((*func)(vp, &value, DB_VAR_SET));
 }
 
 void
-db_write_variable(struct db_variable *vp, db_expr_t *valuep)
+db_set_cmd(db_expr_t dummy1, boolean_t dummy2, db_expr_t dummy3, char *dummy4)
 {
-	int	(*func)(struct db_variable *, db_expr_t *, int) = vp->fcn;
-
-	if (func == FCN_NULL)
-	    *(vp->valuep) = *valuep;
-	else
-	    (*func)(vp, valuep, DB_VAR_SET);
-}
-
-/*ARGSUSED*/
-void
-db_set_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	db_expr_t	value;
 	struct db_variable *vp;
-	int	t;
+	db_expr_t value;
+	int t;
 
 	t = db_read_token();
 	if (t != tDOLLAR) {
-	    db_error("Unknown variable\n");
-	    /*NOTREACHED*/
+		db_error("Unknown variable\n");
+		return;
 	}
 	if (!db_find_variable(&vp)) {
-	    db_error("Unknown variable\n");
-	    /*NOTREACHED*/
+		db_error("Unknown variable\n");
+		return;
 	}
 
 	t = db_read_token();
 	if (t != tEQ)
-	    db_unread_token(t);
+		db_unread_token(t);
 
 	if (!db_expression(&value)) {
-	    db_error("No value\n");
-	    /*NOTREACHED*/
+		db_error("No value\n");
+		return;
 	}
-	if (db_read_token() != tEOL) {
-	    db_error("?\n");
-	    /*NOTREACHED*/
-	}
+	if (db_read_token() != tEOL)
+		db_error("?\n");
 
-	db_write_variable(vp, &value);
+	db_write_variable(vp, value);
 }
-
-int
-db_var_rw_int(struct db_variable *var, db_expr_t *expr, int mode)
-{
-
-	if (mode == DB_VAR_SET)
-		*var->valuep = *(int *)expr;
-	else
-		*expr = *(int *)var->valuep;
-	return (0);
-}
-

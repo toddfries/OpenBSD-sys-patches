@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_ucontext.h,v 1.2 1996/08/02 20:35:47 niklas Exp $	 */
-/*	$NetBSD: svr4_ucontext.h,v 1.3 1995/08/14 01:13:29 mycroft Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,14 +24,12 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/compat/svr4/svr4_ucontext.h,v 1.4 2005/01/05 22:34:37 imp Exp $
  */
 
 #ifndef	_SVR4_UCONTEXT_H_
 #define	_SVR4_UCONTEXT_H_
-
-#include <compat/svr4/svr4_types.h>
-#include <compat/svr4/svr4_signal.h>
-#include <machine/svr4_machdep.h>
 
 /*
  * Machine context
@@ -52,7 +48,8 @@
 
 typedef struct svr4_ucontext {
 	u_long			 uc_flags;
-	struct svr4_ucontext	*uc_link;
+  /*	struct svr4_ucontext	*uc_link;*/
+        void                    *uc_link;
 	svr4_sigset_t		 uc_sigmask;
 	struct svr4_sigaltstack	 uc_stack;
 	svr4_mcontext_t		 uc_mcontext;

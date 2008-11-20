@@ -1,568 +1,468 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.3 2008/04/26 19:59:24 damien Exp $	*/
-
 /*-
- * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2002-2007 Sam Leffler, Errno Consulting
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_tkip.c,v 1.13 2007/06/11 03:36:54 sam Exp $");
+
+/*
+ * IEEE 802.11i TKIP crypto support.
+ *
+ * Part of this module is derived from similar code in the Host
+ * AP driver. The code is used with the consent of the author and
+ * it's license is included below.
+ */
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/mbuf.h>
+#include <sys/systm.h> 
+#include <sys/mbuf.h>   
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/socket.h>
-#include <sys/sockio.h>
+#include <sys/module.h>
 #include <sys/endian.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/sysctl.h>
-#include <sys/syslog.h>
+
+#include <sys/socket.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_arp.h>
-#include <net/if_llc.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
+#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_crypto.h>
 
-#include <crypto/arc4.h>
-#include <crypto/michael.h>
+static	void *tkip_attach(struct ieee80211com *, struct ieee80211_key *);
+static	void tkip_detach(struct ieee80211_key *);
+static	int tkip_setkey(struct ieee80211_key *);
+static	int tkip_encap(struct ieee80211_key *, struct mbuf *m, uint8_t keyid);
+static	int tkip_enmic(struct ieee80211_key *, struct mbuf *, int);
+static	int tkip_decap(struct ieee80211_key *, struct mbuf *, int);
+static	int tkip_demic(struct ieee80211_key *, struct mbuf *, int);
 
-typedef u_int8_t  byte;	/* 8-bit byte (octet) */
-typedef u_int16_t u16b;	/* 16-bit unsigned word */
-typedef u_int32_t u32b;	/* 32-bit unsigned word */
-
-static void	Phase1(u16b *, const byte *, const byte *, u32b);
-static void	Phase2(byte *, const byte *, const u16b *, u16b);
-
-/* TKIP software crypto context */
-struct ieee80211_tkip_ctx {
-	struct rc4_ctx	rc4;
-	const u_int8_t	*txmic;
-	const u_int8_t	*rxmic;
-	u_int16_t	TTAK1[5];
-	u_int16_t	TTAK2[5];
+static const struct ieee80211_cipher tkip  = {
+	.ic_name	= "TKIP",
+	.ic_cipher	= IEEE80211_CIPHER_TKIP,
+	.ic_header	= IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN +
+			  IEEE80211_WEP_EXTIVLEN,
+	.ic_trailer	= IEEE80211_WEP_CRCLEN,
+	.ic_miclen	= IEEE80211_WEP_MICLEN,
+	.ic_attach	= tkip_attach,
+	.ic_detach	= tkip_detach,
+	.ic_setkey	= tkip_setkey,
+	.ic_encap	= tkip_encap,
+	.ic_decap	= tkip_decap,
+	.ic_enmic	= tkip_enmic,
+	.ic_demic	= tkip_demic,
 };
 
-/*
- * Initialize software crypto context.  This function can be overridden
- * by drivers doing hardware crypto.
- */
-int
-ieee80211_tkip_set_key(struct ieee80211com *ic, struct ieee80211_key *k)
+typedef	uint8_t u8;
+typedef	uint16_t u16;
+typedef	uint32_t __u32;
+typedef	uint32_t u32;
+#define	memmove(dst, src, n)	ovbcopy(src, dst, n)
+
+struct tkip_ctx {
+	struct ieee80211com *tc_ic;	/* for diagnostics */
+
+	u16	tx_ttak[5];
+	int	tx_phase1_done;
+	u8	tx_rc4key[16];		/* XXX for test module; make locals? */
+
+	u16	rx_ttak[5];
+	int	rx_phase1_done;
+	u8	rx_rc4key[16];		/* XXX for test module; make locals? */
+	uint64_t rx_rsc;		/* held until MIC verified */
+};
+
+static	void michael_mic(struct tkip_ctx *, const u8 *key,
+		struct mbuf *m, u_int off, size_t data_len,
+		u8 mic[IEEE80211_WEP_MICLEN]);
+static	int tkip_encrypt(struct tkip_ctx *, struct ieee80211_key *,
+		struct mbuf *, int hdr_len);
+static	int tkip_decrypt(struct tkip_ctx *, struct ieee80211_key *,
+		struct mbuf *, int hdr_len);
+
+/* number of references from net80211 layer */
+static	int nrefs = 0;
+
+static void *
+tkip_attach(struct ieee80211com *ic, struct ieee80211_key *k)
 {
-	struct ieee80211_tkip_ctx *ctx;
+	struct tkip_ctx *ctx;
 
-	ctx = malloc(sizeof(*ctx), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (ctx == NULL)
-		return ENOMEM;
-	/*
-	 * Use bits 128-191 as the Michael key for AA->SPA and bits
-	 * 192-255 as the Michael key for SPA->AA.
-	 */
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
-		ctx->txmic = &k->k_key[16];
-		ctx->rxmic = &k->k_key[24];
-	} else {
-		ctx->rxmic = &k->k_key[16];
-		ctx->txmic = &k->k_key[24];
-	}
-	k->k_priv = ctx;
-	return 0;
-}
-
-void
-ieee80211_tkip_delete_key(struct ieee80211com *ic, struct ieee80211_key *k)
-{
-	if (k->k_priv != NULL)
-		free(k->k_priv, M_DEVBUF);
-	k->k_priv = NULL;
-}
-
-/* pseudo-header used for TKIP MIC computation */
-struct ieee80211_tkip_frame {
-	u_int8_t	i_da[IEEE80211_ADDR_LEN];
-	u_int8_t	i_sa[IEEE80211_ADDR_LEN];
-	u_int8_t	i_pri;
-	u_int8_t	i_pad[3];
-} __packed;
-
-/*
- * Compute TKIP MIC over an mbuf chain starting "off" bytes from the
- * beginning.  This function should be kept independant from the software
- * TKIP crypto code so that drivers doing hardware crypto but not MIC can
- * call it without a software crypto context.
- */
-void
-ieee80211_tkip_mic(struct mbuf *m0, int off, const u_int8_t *key,
-    u_int8_t mic[IEEE80211_TKIP_MICLEN])
-{
-	const struct ieee80211_frame *wh;
-	struct ieee80211_tkip_frame wht;
-	MICHAEL_CTX ctx;	/* small enough */
-	struct mbuf *m;
-	caddr_t pos;
-	int len;
-
-	/* assumes 802.11 header is contiguous */
-	wh = mtod(m0, struct ieee80211_frame *);
-
-	/* construct pseudo-header for TKIP MIC computation */
-	switch (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) {
-	case IEEE80211_FC1_DIR_NODS:
-		IEEE80211_ADDR_COPY(wht.i_da, wh->i_addr1);
-		IEEE80211_ADDR_COPY(wht.i_sa, wh->i_addr2);
-		break;
-	case IEEE80211_FC1_DIR_TODS:
-		IEEE80211_ADDR_COPY(wht.i_da, wh->i_addr3);
-		IEEE80211_ADDR_COPY(wht.i_sa, wh->i_addr2);
-		break;
-	case IEEE80211_FC1_DIR_FROMDS:
-		IEEE80211_ADDR_COPY(wht.i_da, wh->i_addr1);
-		IEEE80211_ADDR_COPY(wht.i_sa, wh->i_addr3);
-		break;
-	case IEEE80211_FC1_DIR_DSTODS:
-		/* not yet supported */
-		break;
-	}
-	if ((wh->i_fc[0] &
-	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
-	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
-		const struct ieee80211_qosframe *qwh =
-		    (const struct ieee80211_qosframe *)wh;
-		wht.i_pri = qwh->i_qos[0] & 0xf;
-	}  else
-		wht.i_pri = 0;
-	wht.i_pad[0] = wht.i_pad[1] = wht.i_pad[2] = 0;
-
-	michael_init(&ctx);
-	michael_key(key, &ctx);
-
-	michael_update(&ctx, (caddr_t)&wht, sizeof(wht));
-
-	m = m0;
-	/* assumes the first "off" bytes are contiguous */
-	pos = mtod(m, caddr_t) + off;
-	len = m->m_len - off;
-	for (;;) {
-		michael_update(&ctx, pos, len);
-		if ((m = m->m_next) == NULL)
-			break;
-		pos = mtod(m, caddr_t);
-		len = m->m_len;
-	}
-
-	michael_final(mic, &ctx);
-}
-
-/* shortcuts */
-#define IEEE80211_TKIP_TAILLEN	\
-	(IEEE80211_TKIP_MICLEN + IEEE80211_WEP_CRCLEN)
-#define IEEE80211_TKIP_OVHD	\
-	(IEEE80211_TKIP_HDRLEN + IEEE80211_TKIP_TAILLEN)
-
-struct mbuf *
-ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
-    struct ieee80211_key *k)
-{
-	struct ieee80211_tkip_ctx *ctx = k->k_priv;
-	u_int16_t wepseed[8];	/* needs to be 16-bit aligned for Phase2 */
-	const struct ieee80211_frame *wh;
-	u_int8_t *ivp, *mic, *icvp;
-	struct mbuf *n0, *m, *n;
-	u_int32_t crc;
-	int left, moff, noff, len, hdrlen;
-
-	MGET(n0, M_DONTWAIT, m0->m_type);
-	if (n0 == NULL)
-		goto nospace;
-	M_DUP_PKTHDR(n0, m0);
-	n0->m_pkthdr.len += IEEE80211_TKIP_HDRLEN;
-	n0->m_len = MHLEN;
-	if (n0->m_pkthdr.len >= MINCLSIZE - IEEE80211_TKIP_TAILLEN) {
-		MCLGET(n0, M_DONTWAIT);
-		if (n0->m_flags & M_EXT)
-			n0->m_len = n0->m_ext.ext_size;
-	}
-	if (n0->m_len > n0->m_pkthdr.len)
-		n0->m_len = n0->m_pkthdr.len;
-
-	/* copy 802.11 header */
-	wh = mtod(m0, struct ieee80211_frame *);
-	hdrlen = ieee80211_get_hdrlen(wh);
-	memcpy(mtod(n0, caddr_t), wh, hdrlen);
-
-	/* construct TKIP header */
-	ivp = mtod(n0, u_int8_t *) + hdrlen;
-	ivp[0] = k->k_tsc >> 8;		/* TSC1 */
-	/* WEP Seed = (TSC1 | 0x20) & 0x7f (see 8.3.2.2) */
-	ivp[1] = (ivp[0] | 0x20) & 0x7f;
-	ivp[2] = k->k_tsc;		/* TSC0 */
-	ivp[3] = k->k_id << 6 | IEEE80211_WEP_EXTIV;	/* KeyID | ExtIV */
-	ivp[4] = k->k_tsc >> 16;	/* TSC2 */
-	ivp[5] = k->k_tsc >> 24;	/* TSC3 */
-	ivp[6] = k->k_tsc >> 32;	/* TSC4 */
-	ivp[7] = k->k_tsc >> 40;	/* TSC5 */
-
-	/* compute WEP seed */
-#ifdef notyet
-	if ((k->k_tsc & 0xffff) == 0)
-#endif
-		Phase1(ctx->TTAK1, k->k_key, wh->i_addr2, k->k_tsc >> 16);
-	Phase2((u_int8_t *)wepseed, k->k_key, ctx->TTAK1, k->k_tsc & 0xffff);
-	rc4_keysetup(&ctx->rc4, (u_int8_t *)wepseed, 16);
-
-	/* encrypt frame body and compute WEP ICV */
-	m = m0;
-	n = n0;
-	moff = hdrlen;
-	noff = hdrlen + IEEE80211_TKIP_HDRLEN;
-	left = m0->m_pkthdr.len - moff;
-	crc = ~0;
-	while (left > 0) {
-		if (moff == m->m_len) {
-			/* nothing left to copy from m */
-			m = m->m_next;
-			moff = 0;
-		}
-		if (noff == n->m_len) {
-			/* n is full and there's more data to copy */
-			MGET(n->m_next, M_DONTWAIT, n->m_type);
-			if (n->m_next == NULL)
-				goto nospace;
-			n = n->m_next;
-			n->m_len = MLEN;
-			if (left > MLEN - IEEE80211_TKIP_TAILLEN) {
-				MCLGET(n, M_DONTWAIT);
-				if (n->m_flags & M_EXT)
-					n->m_len = n->m_ext.ext_size;
-			}
-			if (n->m_len > left)
-				n->m_len = left;
-			noff = 0;
-		}
-		len = min(m->m_len - moff, n->m_len - noff);
-
-		crc = ether_crc32_le_update(crc, mtod(m, caddr_t) + moff, len);
-		rc4_crypt(&ctx->rc4, mtod(m, caddr_t) + moff,
-		    mtod(n, caddr_t) + noff, len);
-
-		moff += len;
-		noff += len;
-		left -= len;
-	}
-
-	/* reserve trailing space for TKIP MIC and WEP ICV */
-	if (M_TRAILINGSPACE(n) < IEEE80211_TKIP_TAILLEN) {
-		MGET(n->m_next, M_DONTWAIT, n->m_type);
-		if (n->m_next == NULL)
-			goto nospace;
-		n = n->m_next;
-		n->m_len = 0;
-	}
-
-	/* compute TKIP MIC over clear text */
-	mic = mtod(n, caddr_t) + n->m_len;
-	ieee80211_tkip_mic(m0, hdrlen, ctx->txmic, mic);
-	crc = ether_crc32_le_update(crc, mic, IEEE80211_TKIP_MICLEN);
-	rc4_crypt(&ctx->rc4, mic, mic, IEEE80211_TKIP_MICLEN);
-	n->m_len += IEEE80211_TKIP_MICLEN;
-
-	/* finalize WEP ICV */
-	icvp = mtod(n, caddr_t) + n->m_len;
-	crc = ~crc;
-	icvp[0] = crc;
-	icvp[1] = crc >> 8;
-	icvp[2] = crc >> 16;
-	icvp[3] = crc >> 24;
-	rc4_crypt(&ctx->rc4, icvp, icvp, IEEE80211_WEP_CRCLEN);
-	n->m_len += IEEE80211_WEP_CRCLEN;
-
-	n0->m_pkthdr.len += IEEE80211_TKIP_TAILLEN;
-
-	k->k_tsc++;	/* increment the 48-bit TSC */
-
-	m_freem(m0);
-	return n0;
- nospace:
-	ic->ic_stats.is_tx_nombuf++;
-	m_freem(m0);
-	if (n0 != NULL)
-		m_freem(n0);
-	return NULL;
-}
-
-struct mbuf *
-ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
-    struct ieee80211_key *k)
-{
-	struct ieee80211_tkip_ctx *ctx = k->k_priv;
-	struct ieee80211_frame *wh;
-	u_int16_t wepseed[8];	/* needs to be 16-bit aligned for Phase2 */
-	u_int8_t buf[IEEE80211_TKIP_MICLEN + IEEE80211_WEP_CRCLEN];
-	u_int8_t mic[IEEE80211_TKIP_MICLEN];
-	u_int64_t tsc;
-	u_int32_t crc, crc0;
-	u_int8_t *ivp, *mic0;
-	struct mbuf *n0, *m, *n;
-	int hdrlen, left, moff, noff, len;
-
-	wh = mtod(m0, struct ieee80211_frame *);
-	hdrlen = ieee80211_get_hdrlen(wh);
-
-	if (m0->m_pkthdr.len < hdrlen + IEEE80211_TKIP_OVHD) {
-		m_freem(m0);
+	MALLOC(ctx, struct tkip_ctx *, sizeof(struct tkip_ctx),
+		M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (ctx == NULL) {
+		ic->ic_stats.is_crypto_nomem++;
 		return NULL;
 	}
 
-	ivp = (u_int8_t *)wh + hdrlen;
-	/* check that ExtIV bit is be set */
-	if (!(ivp[3] & IEEE80211_WEP_EXTIV)) {
-		m_freem(m0);
-		return NULL;
-	}
-	/* extract the 48-bit TSC from the TKIP header */
-	tsc = (u_int64_t)ivp[2]       |
-	      (u_int64_t)ivp[0] <<  8 |
-	      (u_int64_t)ivp[4] << 16 |
-	      (u_int64_t)ivp[5] << 24 |
-	      (u_int64_t)ivp[6] << 32 |
-	      (u_int64_t)ivp[7] << 40;
-	/* NB: the keys are refreshed, we'll never overflow the 48 bits */
-	if (tsc <= k->k_rsc[0]) {
-		/* replayed frame, discard */
-		m_freem(m0);
-		return NULL;
-	}
-
-	MGET(n0, M_DONTWAIT, m0->m_type);
-	if (n0 == NULL)
-		goto nospace;
-	M_DUP_PKTHDR(n0, m0);
-	n0->m_pkthdr.len -= IEEE80211_TKIP_OVHD;
-	n0->m_len = MHLEN;
-	if (n0->m_pkthdr.len >= MINCLSIZE) {
-		MCLGET(n0, M_DONTWAIT);
-		if (n0->m_flags & M_EXT)
-			n0->m_len = n0->m_ext.ext_size;
-	}
-	if (n0->m_len > n0->m_pkthdr.len)
-		n0->m_len = n0->m_pkthdr.len;
-
-	/* copy 802.11 header and clear protected bit */
-	memcpy(mtod(n0, caddr_t), wh, hdrlen);
-	wh = mtod(n0, struct ieee80211_frame *);
-	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
-
-	/* compute WEP seed */
-#ifdef notyet
-	if (k->k_rsc[0] == 0 || ((tsc >> 16) != (k->k_rsc[0] >> 16)))
-#endif
-		Phase1(ctx->TTAK2, k->k_key, wh->i_addr2, tsc >> 16);
-	Phase2((u_int8_t *)wepseed, k->k_key, ctx->TTAK2, tsc & 0xffff);
-	rc4_keysetup(&ctx->rc4, (u_int8_t *)wepseed, 16);
-
-	/* decrypt frame body and compute WEP ICV */
-	m = m0;
-	n = n0;
-	moff = hdrlen + IEEE80211_TKIP_HDRLEN;
-	noff = hdrlen;
-	left = n0->m_pkthdr.len - noff;
-	crc = ~0;
-	while (left > 0) {
-		if (moff == m->m_len) {
-			/* nothing left to copy from m */
-			m = m->m_next;
-			moff = 0;
-		}
-		if (noff == n->m_len) {
-			/* n is full and there's more data to copy */
-			MGET(n->m_next, M_DONTWAIT, n->m_type);
-			if (n->m_next == NULL)
-				goto nospace;
-			n = n->m_next;
-			n->m_len = MLEN;
-			if (left > MLEN) {
-				MCLGET(n, M_DONTWAIT);
-				if (n->m_flags & M_EXT)
-					n->m_len = n->m_ext.ext_size;
-			}
-			if (n->m_len > left)
-				n->m_len = left;
-			noff = 0;
-		}
-		len = min(m->m_len - moff, n->m_len - noff);
-
-		rc4_crypt(&ctx->rc4, mtod(m, caddr_t) + moff,
-		    mtod(n, caddr_t) + noff, len);
-		crc = ether_crc32_le_update(crc, mtod(n, caddr_t) + noff, len);
-
-		moff += len;
-		noff += len;
-		left -= len;
-	}
-
-	/* extract and decrypt TKIP MIC and WEP ICV from m0's tail */
-	m_copydata(m, moff, IEEE80211_TKIP_TAILLEN, buf);
-	rc4_crypt(&ctx->rc4, buf, buf, IEEE80211_TKIP_TAILLEN);
-
-	/* include TKIP MIC in WEP ICV */
-	mic0 = buf;
-	crc = ether_crc32_le_update(crc, mic0, IEEE80211_TKIP_MICLEN);
-	crc = ~crc;
-
-	/* decrypt ICV and compare it with calculated ICV */
-	crc0 = *(u_int32_t *)(buf + IEEE80211_TKIP_MICLEN);
-	if (crc != letoh32(crc0)) {
-		ic->ic_stats.is_rx_decryptcrc++;
-		m_freem(m0);
-		m_freem(n0);
-		return NULL;
-	}
-
-	/* compute TKIP MIC over decrypted message */
-	ieee80211_tkip_mic(n0, hdrlen, ctx->rxmic, mic);
-	/* check that it matches the MIC in received frame */
-	if (memcmp(mic0, mic, IEEE80211_TKIP_MICLEN) != 0) {
-		m_freem(m0);
-		m_freem(n0);
-		ic->ic_stats.is_rx_locmicfail++;
-		ieee80211_michael_mic_failure(ic, tsc);
-		return NULL;
-	}
-
-	/*
-	 * Update last seen packet number (note that it must be done
-	 * after MIC is validated.)
-	 */
-	k->k_rsc[0] = tsc;
-
-	m_freem(m0);
-	return n0;
- nospace:
-	ic->ic_stats.is_rx_nombuf++;
-	m_freem(m0);
-	if (n0 != NULL)
-		m_freem(n0);
-	return NULL;
+	ctx->tc_ic = ic;
+	nrefs++;			/* NB: we assume caller locking */
+	return ctx;
 }
 
-/*
- * This function is called in HostAP mode to deauthenticate all STAs using
- * TKIP as their pairwise or group cipher (as part of TKIP countermeasures).
- */
 static void
-ieee80211_tkip_deauth(void *arg, struct ieee80211_node *ni)
+tkip_detach(struct ieee80211_key *k)
 {
-	struct ieee80211com *ic = arg;
+	struct tkip_ctx *ctx = k->wk_private;
 
-	if (ni->ni_state == IEEE80211_STA_ASSOC &&
-	    (ic->ic_bss->ni_rsngroupcipher == IEEE80211_CIPHER_TKIP ||
-	     ni->ni_rsncipher == IEEE80211_CIPHER_TKIP)) {
-		/* deauthenticate STA */
-		IEEE80211_SEND_MGMT(ic, ni, IEEE80211_FC0_SUBTYPE_DEAUTH,
-		    IEEE80211_REASON_MIC_FAILURE);
-		ieee80211_node_leave(ic, ni);
+	FREE(ctx, M_DEVBUF);
+	KASSERT(nrefs > 0, ("imbalanced attach/detach"));
+	nrefs--;			/* NB: we assume caller locking */
+}
+
+static int
+tkip_setkey(struct ieee80211_key *k)
+{
+	struct tkip_ctx *ctx = k->wk_private;
+
+	if (k->wk_keylen != (128/NBBY)) {
+		(void) ctx;		/* XXX */
+		IEEE80211_DPRINTF(ctx->tc_ic, IEEE80211_MSG_CRYPTO,
+			"%s: Invalid key length %u, expecting %u\n",
+			__func__, k->wk_keylen, 128/NBBY);
+		return 0;
 	}
+	k->wk_keytsc = 1;		/* TSC starts at 1 */
+	return 1;
 }
 
 /*
- * This function can be called by the software TKIP crypto code or by the
- * drivers when their hardware crypto engines detect a Michael MIC failure.
+ * Add privacy headers and do any s/w encryption required.
  */
-void
-ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
+static int
+tkip_encap(struct ieee80211_key *k, struct mbuf *m, uint8_t keyid)
 {
-	extern int ticks;
+	struct tkip_ctx *ctx = k->wk_private;
+	struct ieee80211com *ic = ctx->tc_ic;
+	uint8_t *ivp;
+	int hdrlen;
 
-	if (ic->ic_flags & IEEE80211_F_COUNTERM)
-		return;	/* countermeasures already active */
-
-	log(LOG_WARNING, "%s: Michael MIC failure", ic->ic_if.if_xname);
-
-	if (ic->ic_opmode == IEEE80211_M_STA) {
-		/* send a Michael MIC Failure Report frame to the AP */
-		(void)ieee80211_send_eapol_key_req(ic, ic->ic_bss,
-		    EAPOL_KEY_KEYMIC | EAPOL_KEY_ERROR | EAPOL_KEY_SECURE,
-		    tsc);
-	}
 	/*
-	 * Activate TKIP countermeasures (see 8.3.2.4) if less than 60
-	 * seconds have passed since the most recent previous MIC failure.
+	 * Handle TKIP counter measures requirement.
 	 */
-	if (ic->ic_tkip_micfail == 0 ||
-	    ticks >= ic->ic_tkip_micfail + 60 * hz) {
-		ic->ic_tkip_micfail = ticks;
-		return;
+	if (ic->ic_flags & IEEE80211_F_COUNTERM) {
+#ifdef IEEE80211_DEBUG
+		struct ieee80211_frame *wh = mtod(m, struct ieee80211_frame *);
+#endif
+
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			"[%s] Discard frame due to countermeasures (%s)\n",
+			ether_sprintf(wh->i_addr2), __func__);
+		ic->ic_stats.is_crypto_tkipcm++;
+		return 0;
 	}
-	ic->ic_tkip_micfail = ticks;
+	hdrlen = ieee80211_hdrspace(ic, mtod(m, void *));
 
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
-		/* refuse new TKIP associations for the next 60 seconds */
-		ic->ic_flags |= IEEE80211_F_COUNTERM;
+	/*
+	 * Copy down 802.11 header and add the IV, KeyID, and ExtIV.
+	 */
+	M_PREPEND(m, tkip.ic_header, M_NOWAIT);
+	if (m == NULL)
+		return 0;
+	ivp = mtod(m, uint8_t *);
+	memmove(ivp, ivp + tkip.ic_header, hdrlen);
+	ivp += hdrlen;
 
-		/* deauthenticate all currently associated STAs using TKIP */
-		ieee80211_iterate_nodes(ic, ieee80211_tkip_deauth, ic);
+	ivp[0] = k->wk_keytsc >> 8;		/* TSC1 */
+	ivp[1] = (ivp[0] | 0x20) & 0x7f;	/* WEP seed */
+	ivp[2] = k->wk_keytsc >> 0;		/* TSC0 */
+	ivp[3] = keyid | IEEE80211_WEP_EXTIV;	/* KeyID | ExtID */
+	ivp[4] = k->wk_keytsc >> 16;		/* TSC2 */
+	ivp[5] = k->wk_keytsc >> 24;		/* TSC3 */
+	ivp[6] = k->wk_keytsc >> 32;		/* TSC4 */
+	ivp[7] = k->wk_keytsc >> 40;		/* TSC5 */
 
-	} else if (ic->ic_opmode == IEEE80211_M_STA) {
-		/* deauthenticate from the AP.. */
-		IEEE80211_SEND_MGMT(ic, ic->ic_bss,
-		    IEEE80211_FC0_SUBTYPE_DEAUTH,
-		    IEEE80211_REASON_MIC_FAILURE);
-		/* ..and find another one */
-		(void)ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
-	}
+	/*
+	 * Finally, do software encrypt if neeed.
+	 */
+	if (k->wk_flags & IEEE80211_KEY_SWCRYPT) {
+		if (!tkip_encrypt(ctx, k, m, hdrlen))
+			return 0;
+		/* NB: tkip_encrypt handles wk_keytsc */
+	} else
+		k->wk_keytsc++;
+
+	return 1;
 }
 
-/***********************************************************************
-   Contents:    Generate IEEE 802.11 per-frame RC4 key hash test vectors
-   Date:        April 19, 2002
-   Notes:
-   This code is written for pedagogical purposes, NOT for performance.
-************************************************************************/
-
-/* macros for extraction/creation of byte/u16b values */
-#define RotR1(v16)	((((v16) >> 1) & 0x7FFF) ^ (((v16) & 1) << 15))
-#define   Lo8(v16)	((byte)( (v16)       & 0x00FF))
-#define   Hi8(v16)	((byte)(((v16) >> 8) & 0x00FF))
-#define Lo16(v32)	((u16b)( (v32)       & 0xFFFF))
-#define Hi16(v32)	((u16b)(((v32) >>16) & 0xFFFF))
-#define Mk16(hi,lo)	((lo) ^ (((u16b)(hi)) << 8))
-
-/* select the Nth 16-bit word of the Temporal Key byte array TK[] */
-#define TK16(N)		Mk16(TK[2 * (N) + 1], TK[2 * (N)])
-
-/* S-box lookup: 16 bits --> 16 bits */
-#define _S_(v16)	(Sbox[Lo8(v16)] ^ swap16(Sbox[Hi8(v16)]))
-
-/* fixed algorithm "parameters" */
-#define PHASE1_LOOP_CNT	 8	/* this needs to be "big enough"     */
-#define TA_SIZE		 6	/* 48-bit transmitter address        */
-#define TK_SIZE		16	/* 128-bit Temporal Key              */
-#define P1K_SIZE	10	/* 80-bit Phase1 key                 */
-#define RC4_KEY_SIZE	16	/* 128-bit RC4KEY (104 bits unknown) */
-
-/* 2-byte by 2-byte subset of the full AES S-box table */
-static const u16b Sbox[256]=	/* Sbox for hash */
+/*
+ * Add MIC to the frame as needed.
+ */
+static int
+tkip_enmic(struct ieee80211_key *k, struct mbuf *m, int force)
 {
+	struct tkip_ctx *ctx = k->wk_private;
+
+	if (force || (k->wk_flags & IEEE80211_KEY_SWMIC)) {
+		struct ieee80211_frame *wh = mtod(m, struct ieee80211_frame *);
+		struct ieee80211com *ic = ctx->tc_ic;
+		int hdrlen;
+		uint8_t mic[IEEE80211_WEP_MICLEN];
+
+		ic->ic_stats.is_crypto_tkipenmic++;
+
+		hdrlen = ieee80211_hdrspace(ic, wh);
+
+		michael_mic(ctx, k->wk_txmic,
+			m, hdrlen, m->m_pkthdr.len - hdrlen, mic);
+		return m_append(m, tkip.ic_miclen, mic);
+	}
+	return 1;
+}
+
+static __inline uint64_t
+READ_6(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint8_t b5)
+{
+	uint32_t iv32 = (b0 << 0) | (b1 << 8) | (b2 << 16) | (b3 << 24);
+	uint16_t iv16 = (b4 << 0) | (b5 << 8);
+	return (((uint64_t)iv16) << 32) | iv32;
+}
+
+/*
+ * Validate and strip privacy headers (and trailer) for a
+ * received frame.  If necessary, decrypt the frame using
+ * the specified key.
+ */
+static int
+tkip_decap(struct ieee80211_key *k, struct mbuf *m, int hdrlen)
+{
+	struct tkip_ctx *ctx = k->wk_private;
+	struct ieee80211com *ic = ctx->tc_ic;
+	struct ieee80211_frame *wh;
+	uint8_t *ivp;
+
+	/*
+	 * Header should have extended IV and sequence number;
+	 * verify the former and validate the latter.
+	 */
+	wh = mtod(m, struct ieee80211_frame *);
+	ivp = mtod(m, uint8_t *) + hdrlen;
+	if ((ivp[IEEE80211_WEP_IVLEN] & IEEE80211_WEP_EXTIV) == 0) {
+		/*
+		 * No extended IV; discard frame.
+		 */
+		IEEE80211_DPRINTF(ctx->tc_ic, IEEE80211_MSG_CRYPTO,
+			"[%s] missing ExtIV for TKIP cipher\n",
+			ether_sprintf(wh->i_addr2));
+		ctx->tc_ic->ic_stats.is_rx_tkipformat++;
+		return 0;
+	}
+	/*
+	 * Handle TKIP counter measures requirement.
+	 */
+	if (ic->ic_flags & IEEE80211_F_COUNTERM) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			"[%s] discard frame due to countermeasures (%s)\n",
+			ether_sprintf(wh->i_addr2), __func__);
+		ic->ic_stats.is_crypto_tkipcm++;
+		return 0;
+	}
+
+	ctx->rx_rsc = READ_6(ivp[2], ivp[0], ivp[4], ivp[5], ivp[6], ivp[7]);
+	if (ctx->rx_rsc <= k->wk_keyrsc) {
+		/*
+		 * Replay violation; notify upper layer.
+		 */
+		ieee80211_notify_replay_failure(ctx->tc_ic, wh, k, ctx->rx_rsc);
+		ctx->tc_ic->ic_stats.is_rx_tkipreplay++;
+		return 0;
+	}
+	/*
+	 * NB: We can't update the rsc in the key until MIC is verified.
+	 *
+	 * We assume we are not preempted between doing the check above
+	 * and updating wk_keyrsc when stripping the MIC in tkip_demic.
+	 * Otherwise we might process another packet and discard it as
+	 * a replay.
+	 */
+
+	/*
+	 * Check if the device handled the decrypt in hardware.
+	 * If so we just strip the header; otherwise we need to
+	 * handle the decrypt in software.
+	 */
+	if ((k->wk_flags & IEEE80211_KEY_SWCRYPT) &&
+	    !tkip_decrypt(ctx, k, m, hdrlen))
+		return 0;
+
+	/*
+	 * Copy up 802.11 header and strip crypto bits.
+	 */
+	memmove(mtod(m, uint8_t *) + tkip.ic_header, mtod(m, void *), hdrlen);
+	m_adj(m, tkip.ic_header);
+	m_adj(m, -tkip.ic_trailer);
+
+	return 1;
+}
+
+/*
+ * Verify and strip MIC from the frame.
+ */
+static int
+tkip_demic(struct ieee80211_key *k, struct mbuf *m, int force)
+{
+	struct tkip_ctx *ctx = k->wk_private;
+
+	if (force || (k->wk_flags & IEEE80211_KEY_SWMIC)) {
+		struct ieee80211_frame *wh = mtod(m, struct ieee80211_frame *);
+		struct ieee80211com *ic = ctx->tc_ic;
+		int hdrlen = ieee80211_hdrspace(ic, wh);
+		u8 mic[IEEE80211_WEP_MICLEN];
+		u8 mic0[IEEE80211_WEP_MICLEN];
+
+		ic->ic_stats.is_crypto_tkipdemic++;
+
+		michael_mic(ctx, k->wk_rxmic, 
+			m, hdrlen, m->m_pkthdr.len - (hdrlen + tkip.ic_miclen),
+			mic);
+		m_copydata(m, m->m_pkthdr.len - tkip.ic_miclen,
+			tkip.ic_miclen, mic0);
+		if (memcmp(mic, mic0, tkip.ic_miclen)) {
+			/* NB: 802.11 layer handles statistic and debug msg */
+			ieee80211_notify_michael_failure(ic, wh,
+				k->wk_rxkeyix != IEEE80211_KEYIX_NONE ?
+					k->wk_rxkeyix : k->wk_keyix);
+			return 0;
+		}
+	}
+	/*
+	 * Strip MIC from the tail.
+	 */
+	m_adj(m, -tkip.ic_miclen);
+
+	/*
+	 * Ok to update rsc now that MIC has been verified.
+	 */
+	k->wk_keyrsc = ctx->rx_rsc;
+
+	return 1;
+}
+
+/*
+ * Host AP crypt: host-based TKIP encryption implementation for Host AP driver
+ *
+ * Copyright (c) 2003-2004, Jouni Malinen <jkmaline@cc.hut.fi>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation. See README and COPYING for
+ * more details.
+ *
+ * Alternatively, this software may be distributed under the terms of BSD
+ * license.
+ */
+
+static const __u32 crc32_table[256] = {
+	0x00000000L, 0x77073096L, 0xee0e612cL, 0x990951baL, 0x076dc419L,
+	0x706af48fL, 0xe963a535L, 0x9e6495a3L, 0x0edb8832L, 0x79dcb8a4L,
+	0xe0d5e91eL, 0x97d2d988L, 0x09b64c2bL, 0x7eb17cbdL, 0xe7b82d07L,
+	0x90bf1d91L, 0x1db71064L, 0x6ab020f2L, 0xf3b97148L, 0x84be41deL,
+	0x1adad47dL, 0x6ddde4ebL, 0xf4d4b551L, 0x83d385c7L, 0x136c9856L,
+	0x646ba8c0L, 0xfd62f97aL, 0x8a65c9ecL, 0x14015c4fL, 0x63066cd9L,
+	0xfa0f3d63L, 0x8d080df5L, 0x3b6e20c8L, 0x4c69105eL, 0xd56041e4L,
+	0xa2677172L, 0x3c03e4d1L, 0x4b04d447L, 0xd20d85fdL, 0xa50ab56bL,
+	0x35b5a8faL, 0x42b2986cL, 0xdbbbc9d6L, 0xacbcf940L, 0x32d86ce3L,
+	0x45df5c75L, 0xdcd60dcfL, 0xabd13d59L, 0x26d930acL, 0x51de003aL,
+	0xc8d75180L, 0xbfd06116L, 0x21b4f4b5L, 0x56b3c423L, 0xcfba9599L,
+	0xb8bda50fL, 0x2802b89eL, 0x5f058808L, 0xc60cd9b2L, 0xb10be924L,
+	0x2f6f7c87L, 0x58684c11L, 0xc1611dabL, 0xb6662d3dL, 0x76dc4190L,
+	0x01db7106L, 0x98d220bcL, 0xefd5102aL, 0x71b18589L, 0x06b6b51fL,
+	0x9fbfe4a5L, 0xe8b8d433L, 0x7807c9a2L, 0x0f00f934L, 0x9609a88eL,
+	0xe10e9818L, 0x7f6a0dbbL, 0x086d3d2dL, 0x91646c97L, 0xe6635c01L,
+	0x6b6b51f4L, 0x1c6c6162L, 0x856530d8L, 0xf262004eL, 0x6c0695edL,
+	0x1b01a57bL, 0x8208f4c1L, 0xf50fc457L, 0x65b0d9c6L, 0x12b7e950L,
+	0x8bbeb8eaL, 0xfcb9887cL, 0x62dd1ddfL, 0x15da2d49L, 0x8cd37cf3L,
+	0xfbd44c65L, 0x4db26158L, 0x3ab551ceL, 0xa3bc0074L, 0xd4bb30e2L,
+	0x4adfa541L, 0x3dd895d7L, 0xa4d1c46dL, 0xd3d6f4fbL, 0x4369e96aL,
+	0x346ed9fcL, 0xad678846L, 0xda60b8d0L, 0x44042d73L, 0x33031de5L,
+	0xaa0a4c5fL, 0xdd0d7cc9L, 0x5005713cL, 0x270241aaL, 0xbe0b1010L,
+	0xc90c2086L, 0x5768b525L, 0x206f85b3L, 0xb966d409L, 0xce61e49fL,
+	0x5edef90eL, 0x29d9c998L, 0xb0d09822L, 0xc7d7a8b4L, 0x59b33d17L,
+	0x2eb40d81L, 0xb7bd5c3bL, 0xc0ba6cadL, 0xedb88320L, 0x9abfb3b6L,
+	0x03b6e20cL, 0x74b1d29aL, 0xead54739L, 0x9dd277afL, 0x04db2615L,
+	0x73dc1683L, 0xe3630b12L, 0x94643b84L, 0x0d6d6a3eL, 0x7a6a5aa8L,
+	0xe40ecf0bL, 0x9309ff9dL, 0x0a00ae27L, 0x7d079eb1L, 0xf00f9344L,
+	0x8708a3d2L, 0x1e01f268L, 0x6906c2feL, 0xf762575dL, 0x806567cbL,
+	0x196c3671L, 0x6e6b06e7L, 0xfed41b76L, 0x89d32be0L, 0x10da7a5aL,
+	0x67dd4accL, 0xf9b9df6fL, 0x8ebeeff9L, 0x17b7be43L, 0x60b08ed5L,
+	0xd6d6a3e8L, 0xa1d1937eL, 0x38d8c2c4L, 0x4fdff252L, 0xd1bb67f1L,
+	0xa6bc5767L, 0x3fb506ddL, 0x48b2364bL, 0xd80d2bdaL, 0xaf0a1b4cL,
+	0x36034af6L, 0x41047a60L, 0xdf60efc3L, 0xa867df55L, 0x316e8eefL,
+	0x4669be79L, 0xcb61b38cL, 0xbc66831aL, 0x256fd2a0L, 0x5268e236L,
+	0xcc0c7795L, 0xbb0b4703L, 0x220216b9L, 0x5505262fL, 0xc5ba3bbeL,
+	0xb2bd0b28L, 0x2bb45a92L, 0x5cb36a04L, 0xc2d7ffa7L, 0xb5d0cf31L,
+	0x2cd99e8bL, 0x5bdeae1dL, 0x9b64c2b0L, 0xec63f226L, 0x756aa39cL,
+	0x026d930aL, 0x9c0906a9L, 0xeb0e363fL, 0x72076785L, 0x05005713L,
+	0x95bf4a82L, 0xe2b87a14L, 0x7bb12baeL, 0x0cb61b38L, 0x92d28e9bL,
+	0xe5d5be0dL, 0x7cdcefb7L, 0x0bdbdf21L, 0x86d3d2d4L, 0xf1d4e242L,
+	0x68ddb3f8L, 0x1fda836eL, 0x81be16cdL, 0xf6b9265bL, 0x6fb077e1L,
+	0x18b74777L, 0x88085ae6L, 0xff0f6a70L, 0x66063bcaL, 0x11010b5cL,
+	0x8f659effL, 0xf862ae69L, 0x616bffd3L, 0x166ccf45L, 0xa00ae278L,
+	0xd70dd2eeL, 0x4e048354L, 0x3903b3c2L, 0xa7672661L, 0xd06016f7L,
+	0x4969474dL, 0x3e6e77dbL, 0xaed16a4aL, 0xd9d65adcL, 0x40df0b66L,
+	0x37d83bf0L, 0xa9bcae53L, 0xdebb9ec5L, 0x47b2cf7fL, 0x30b5ffe9L,
+	0xbdbdf21cL, 0xcabac28aL, 0x53b39330L, 0x24b4a3a6L, 0xbad03605L,
+	0xcdd70693L, 0x54de5729L, 0x23d967bfL, 0xb3667a2eL, 0xc4614ab8L,
+	0x5d681b02L, 0x2a6f2b94L, 0xb40bbe37L, 0xc30c8ea1L, 0x5a05df1bL,
+	0x2d02ef8dL
+};
+
+static __inline u16 RotR1(u16 val)
+{
+	return (val >> 1) | (val << 15);
+}
+
+static __inline u8 Lo8(u16 val)
+{
+	return val & 0xff;
+}
+
+static __inline u8 Hi8(u16 val)
+{
+	return val >> 8;
+}
+
+static __inline u16 Lo16(u32 val)
+{
+	return val & 0xffff;
+}
+
+static __inline u16 Hi16(u32 val)
+{
+	return val >> 16;
+}
+
+static __inline u16 Mk16(u8 hi, u8 lo)
+{
+	return lo | (((u16) hi) << 8);
+}
+
+static __inline u16 Mk16_le(const u16 *v)
+{
+	return le16toh(*v);
+}
+
+static const u16 Sbox[256] = {
 	0xC6A5, 0xF884, 0xEE99, 0xF68D, 0xFF0D, 0xD6BD, 0xDEB1, 0x9154,
 	0x6050, 0x0203, 0xCEA9, 0x567D, 0xE719, 0xB562, 0x4DE6, 0xEC9A,
 	0x8F45, 0x1F9D, 0x8940, 0xFA87, 0xEF15, 0xB2EB, 0x8EC9, 0xFB0B,
@@ -594,117 +494,480 @@ static const u16b Sbox[256]=	/* Sbox for hash */
 	0xD938, 0xEB13, 0x2BB3, 0x2233, 0xD2BB, 0xA970, 0x0789, 0x33A7,
 	0x2DB6, 0x3C22, 0x1592, 0xC920, 0x8749, 0xAAFF, 0x5078, 0xA57A,
 	0x038F, 0x59F8, 0x0980, 0x1A17, 0x65DA, 0xD731, 0x84C6, 0xD0B8,
-	0x82C3, 0x29B0, 0x5A77, 0x1E11, 0x7BCB, 0xA8FC, 0x6DD6, 0x2C3A
+	0x82C3, 0x29B0, 0x5A77, 0x1E11, 0x7BCB, 0xA8FC, 0x6DD6, 0x2C3A,
 };
 
-/*
- **********************************************************************
- * Routine: Phase 1 -- generate P1K, given TA, TK, IV32
- *
- * Inputs:
- *     TK[]      = Temporal Key                         [128 bits]
- *     TA[]      = transmitter's MAC address            [ 48 bits]
- *     IV32      = upper 32 bits of IV                  [ 32 bits]
- * Output:
- *     P1K[]     = Phase 1 key                          [ 80 bits]
- *
- * Note:
- *     This function only needs to be called every 2**16 frames,
- *     although in theory it could be called every frame.
- *
- **********************************************************************
- */
-static void
-Phase1(u16b *P1K, const byte *TK, const byte *TA, u32b IV32)
+static __inline u16 _S_(u16 v)
 {
-	int i;
+	u16 t = Sbox[Hi8(v)];
+	return Sbox[Lo8(v)] ^ ((t << 8) | (t >> 8));
+}
 
-	/* Initialize the 80 bits of P1K[] from IV32 and TA[0..5] */
-	P1K[0] = Lo16(IV32);
-	P1K[1] = Hi16(IV32);
-	P1K[2] = Mk16(TA[1], TA[0]);	/* use TA[] as little-endian */
-	P1K[3] = Mk16(TA[3], TA[2]);
-	P1K[4] = Mk16(TA[5], TA[4]);
+#define PHASE1_LOOP_COUNT 8
 
-	/* Now compute an unbalanced Feistel cipher with 80-bit block */
-	/* size on the 80-bit block P1K[], using the 128-bit key TK[] */
-	for (i = 0; i < PHASE1_LOOP_CNT; i++) {
-		/* Each add operation here is mod 2**16 */
-		P1K[0] += _S_(P1K[4] ^ TK16((i & 1) + 0));
-		P1K[1] += _S_(P1K[0] ^ TK16((i & 1) + 2));
-		P1K[2] += _S_(P1K[1] ^ TK16((i & 1) + 4));
-		P1K[3] += _S_(P1K[2] ^ TK16((i & 1) + 6));
-		P1K[4] += _S_(P1K[3] ^ TK16((i & 1) + 0));
-		P1K[4] += i;	/* avoid "slide attacks" */
+static void tkip_mixing_phase1(u16 *TTAK, const u8 *TK, const u8 *TA, u32 IV32)
+{
+	int i, j;
+
+	/* Initialize the 80-bit TTAK from TSC (IV32) and TA[0..5] */
+	TTAK[0] = Lo16(IV32);
+	TTAK[1] = Hi16(IV32);
+	TTAK[2] = Mk16(TA[1], TA[0]);
+	TTAK[3] = Mk16(TA[3], TA[2]);
+	TTAK[4] = Mk16(TA[5], TA[4]);
+
+	for (i = 0; i < PHASE1_LOOP_COUNT; i++) {
+		j = 2 * (i & 1);
+		TTAK[0] += _S_(TTAK[4] ^ Mk16(TK[1 + j], TK[0 + j]));
+		TTAK[1] += _S_(TTAK[0] ^ Mk16(TK[5 + j], TK[4 + j]));
+		TTAK[2] += _S_(TTAK[1] ^ Mk16(TK[9 + j], TK[8 + j]));
+		TTAK[3] += _S_(TTAK[2] ^ Mk16(TK[13 + j], TK[12 + j]));
+		TTAK[4] += _S_(TTAK[3] ^ Mk16(TK[1 + j], TK[0 + j])) + i;
 	}
 }
 
-/*
- **********************************************************************
- * Routine: Phase 2 -- generate RC4KEY, given TK, P1K, IV16
- *
- * Inputs:
- *     TK[]      = Temporal Key                         [128 bits]
- *     P1K[]     = Phase 1 output key                   [ 80 bits]
- *     IV16      = low 16 bits of IV counter            [ 16 bits]
- * Output:
- *     RC4KEY[] = the key used to encrypt the frame     [128 bits]
- *
- * Note:
- *     The value {TA,IV32,IV16} for Phase1/Phase2 must be unique
- *     across all frames using the same key TK value. Then, for a
- *     given value of TK[], this TKIP48 construction guarantees that
- *     the final RC4KEY value is unique across all frames.
- *
- **********************************************************************
- */
-static void
-Phase2(byte *RC4KEY, const byte *TK, const u16b *P1K, u16b IV16)
+#ifndef _BYTE_ORDER
+#error "Don't know native byte order"
+#endif
+
+static void tkip_mixing_phase2(u8 *WEPSeed, const u8 *TK, const u16 *TTAK,
+			       u16 IV16)
 {
-	u16b *PPK;	/* temporary key for mixing */
-	int i;
+	/* Make temporary area overlap WEP seed so that the final copy can be
+	 * avoided on little endian hosts. */
+	u16 *PPK = (u16 *) &WEPSeed[4];
 
-	/*
-	 * Suggested implementation optimization: if PPK[] is "overlaid"
-	 * appropriately on RC4KEY[], there is no need for the final for
-	 * loop that copies the PPK[] result into RC4KEY[].
-	 */
-	PPK = (u16b *)&RC4KEY[4];
+	/* Step 1 - make copy of TTAK and bring in TSC */
+	PPK[0] = TTAK[0];
+	PPK[1] = TTAK[1];
+	PPK[2] = TTAK[2];
+	PPK[3] = TTAK[3];
+	PPK[4] = TTAK[4];
+	PPK[5] = TTAK[4] + IV16;
 
-	/* all adds in the PPK[] equations below are mod 2**16 */
-	for (i = 0; i < 5; i++)
-		PPK[i] = P1K[i];	/* first, copy P1K to PPK */
-	PPK[5] = P1K[4] + IV16;		/* next, add in IV16 */
+	/* Step 2 - 96-bit bijective mixing using S-box */
+	PPK[0] += _S_(PPK[5] ^ Mk16_le((const u16 *) &TK[0]));
+	PPK[1] += _S_(PPK[0] ^ Mk16_le((const u16 *) &TK[2]));
+	PPK[2] += _S_(PPK[1] ^ Mk16_le((const u16 *) &TK[4]));
+	PPK[3] += _S_(PPK[2] ^ Mk16_le((const u16 *) &TK[6]));
+	PPK[4] += _S_(PPK[3] ^ Mk16_le((const u16 *) &TK[8]));
+	PPK[5] += _S_(PPK[4] ^ Mk16_le((const u16 *) &TK[10]));
 
-	/* Bijective non-linear mixing of the 96 bits of PPK[0..5] */
-	PPK[0] += _S_(PPK[5] ^ TK16(0)); /* Mix key in each "round" */
-	PPK[1] += _S_(PPK[0] ^ TK16(1));
-	PPK[2] += _S_(PPK[1] ^ TK16(2));
-	PPK[3] += _S_(PPK[2] ^ TK16(3));
-	PPK[4] += _S_(PPK[3] ^ TK16(4));
-	PPK[5] += _S_(PPK[4] ^ TK16(5)); /* Total # S-box lookups == 6 */
-
-	/* Final sweep: bijective, linear. Rotates kill LSB correlations */
-	PPK[0] += RotR1(PPK[5] ^ TK16(6));
-	PPK[1] += RotR1(PPK[0] ^ TK16(7)); /* Use all of TK[] in Phase2 */
+	PPK[0] += RotR1(PPK[5] ^ Mk16_le((const u16 *) &TK[12]));
+	PPK[1] += RotR1(PPK[0] ^ Mk16_le((const u16 *) &TK[14]));
 	PPK[2] += RotR1(PPK[1]);
 	PPK[3] += RotR1(PPK[2]);
 	PPK[4] += RotR1(PPK[3]);
 	PPK[5] += RotR1(PPK[4]);
 
-	/* At this point, for a given key TK[0..15], the 96-bit output */
-	/* value PPK[0..5] is guaranteed to be unique, as a function */
-	/* of the 96-bit "input" value   {TA,IV32,IV16}. That is, P1K */
-	/* is now a keyed permutation of {TA,IV32,IV16}. */
-	/* Set RC4KEY[0..3], which includes cleartext portion of RC4 key  */
-	RC4KEY[0] = Hi8(IV16);	/* RC4KEY[0..2] is the WEP IV */
-	RC4KEY[1] =(Hi8(IV16) | 0x20) & 0x7F; /* Help avoid FMS weak keys */
-	RC4KEY[2] = Lo8(IV16);
-	RC4KEY[3] = Lo8((PPK[5] ^ TK16(0)) >> 1);
+	/* Step 3 - bring in last of TK bits, assign 24-bit WEP IV value
+	 * WEPSeed[0..2] is transmitted as WEP IV */
+	WEPSeed[0] = Hi8(IV16);
+	WEPSeed[1] = (Hi8(IV16) | 0x20) & 0x7F;
+	WEPSeed[2] = Lo8(IV16);
+	WEPSeed[3] = Lo8((PPK[5] ^ Mk16_le((const u16 *) &TK[0])) >> 1);
 
-#if BYTE_ORDER == BIG_ENDIAN
-	/* Copy 96 bits of PPK[0..5] to RC4KEY[4..15] (little-endian) */
-	for (i = 0; i < 6; i++)
-		PPK[i] = swap16(PPK[i]);
+#if _BYTE_ORDER == _BIG_ENDIAN
+	{
+		int i;
+		for (i = 0; i < 6; i++)
+			PPK[i] = (PPK[i] << 8) | (PPK[i] >> 8);
+	}
 #endif
 }
+
+static void
+wep_encrypt(u8 *key, struct mbuf *m0, u_int off, size_t data_len,
+	uint8_t icv[IEEE80211_WEP_CRCLEN])
+{
+	u32 i, j, k, crc;
+	size_t buflen;
+	u8 S[256];
+	u8 *pos;
+	struct mbuf *m;
+#define S_SWAP(a,b) do { u8 t = S[a]; S[a] = S[b]; S[b] = t; } while(0)
+
+	/* Setup RC4 state */
+	for (i = 0; i < 256; i++)
+		S[i] = i;
+	j = 0;
+	for (i = 0; i < 256; i++) {
+		j = (j + S[i] + key[i & 0x0f]) & 0xff;
+		S_SWAP(i, j);
+	}
+
+	/* Compute CRC32 over unencrypted data and apply RC4 to data */
+	crc = ~0;
+	i = j = 0;
+	m = m0;
+	pos = mtod(m, uint8_t *) + off;
+	buflen = m->m_len - off;
+	for (;;) {
+		if (buflen > data_len)
+			buflen = data_len;
+		data_len -= buflen;
+		for (k = 0; k < buflen; k++) {
+			crc = crc32_table[(crc ^ *pos) & 0xff] ^ (crc >> 8);
+			i = (i + 1) & 0xff;
+			j = (j + S[i]) & 0xff;
+			S_SWAP(i, j);
+			*pos++ ^= S[(S[i] + S[j]) & 0xff];
+		}
+		m = m->m_next;
+		if (m == NULL) {
+			KASSERT(data_len == 0,
+			    ("out of buffers with data_len %zu\n", data_len));
+			break;
+		}
+		pos = mtod(m, uint8_t *);
+		buflen = m->m_len;
+	}
+	crc = ~crc;
+
+	/* Append little-endian CRC32 and encrypt it to produce ICV */
+	icv[0] = crc;
+	icv[1] = crc >> 8;
+	icv[2] = crc >> 16;
+	icv[3] = crc >> 24;
+	for (k = 0; k < IEEE80211_WEP_CRCLEN; k++) {
+		i = (i + 1) & 0xff;
+		j = (j + S[i]) & 0xff;
+		S_SWAP(i, j);
+		icv[k] ^= S[(S[i] + S[j]) & 0xff];
+	}
+}
+
+static int
+wep_decrypt(u8 *key, struct mbuf *m, u_int off, size_t data_len)
+{
+	u32 i, j, k, crc;
+	u8 S[256];
+	u8 *pos, icv[4];
+	size_t buflen;
+
+	/* Setup RC4 state */
+	for (i = 0; i < 256; i++)
+		S[i] = i;
+	j = 0;
+	for (i = 0; i < 256; i++) {
+		j = (j + S[i] + key[i & 0x0f]) & 0xff;
+		S_SWAP(i, j);
+	}
+
+	/* Apply RC4 to data and compute CRC32 over decrypted data */
+	crc = ~0;
+	i = j = 0;
+	pos = mtod(m, uint8_t *) + off;
+	buflen = m->m_len - off;
+	for (;;) {
+		if (buflen > data_len)
+			buflen = data_len;
+		data_len -= buflen;
+		for (k = 0; k < buflen; k++) {
+			i = (i + 1) & 0xff;
+			j = (j + S[i]) & 0xff;
+			S_SWAP(i, j);
+			*pos ^= S[(S[i] + S[j]) & 0xff];
+			crc = crc32_table[(crc ^ *pos) & 0xff] ^ (crc >> 8);
+			pos++;
+		}
+		m = m->m_next;
+		if (m == NULL) {
+			KASSERT(data_len == 0,
+			    ("out of buffers with data_len %zu\n", data_len));
+			break;
+		}
+		pos = mtod(m, uint8_t *);
+		buflen = m->m_len;
+	}
+	crc = ~crc;
+
+	/* Encrypt little-endian CRC32 and verify that it matches with the
+	 * received ICV */
+	icv[0] = crc;
+	icv[1] = crc >> 8;
+	icv[2] = crc >> 16;
+	icv[3] = crc >> 24;
+	for (k = 0; k < 4; k++) {
+		i = (i + 1) & 0xff;
+		j = (j + S[i]) & 0xff;
+		S_SWAP(i, j);
+		if ((icv[k] ^ S[(S[i] + S[j]) & 0xff]) != *pos++) {
+			/* ICV mismatch - drop frame */
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+
+static __inline u32 rotl(u32 val, int bits)
+{
+	return (val << bits) | (val >> (32 - bits));
+}
+
+
+static __inline u32 rotr(u32 val, int bits)
+{
+	return (val >> bits) | (val << (32 - bits));
+}
+
+
+static __inline u32 xswap(u32 val)
+{
+	return ((val & 0x00ff00ff) << 8) | ((val & 0xff00ff00) >> 8);
+}
+
+
+#define michael_block(l, r)	\
+do {				\
+	r ^= rotl(l, 17);	\
+	l += r;			\
+	r ^= xswap(l);		\
+	l += r;			\
+	r ^= rotl(l, 3);	\
+	l += r;			\
+	r ^= rotr(l, 2);	\
+	l += r;			\
+} while (0)
+
+
+static __inline u32 get_le32_split(u8 b0, u8 b1, u8 b2, u8 b3)
+{
+	return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+}
+
+static __inline u32 get_le32(const u8 *p)
+{
+	return get_le32_split(p[0], p[1], p[2], p[3]);
+}
+
+
+static __inline void put_le32(u8 *p, u32 v)
+{
+	p[0] = v;
+	p[1] = v >> 8;
+	p[2] = v >> 16;
+	p[3] = v >> 24;
+}
+
+/*
+ * Craft pseudo header used to calculate the MIC.
+ */
+static void
+michael_mic_hdr(const struct ieee80211_frame *wh0, uint8_t hdr[16])
+{
+	const struct ieee80211_frame_addr4 *wh =
+		(const struct ieee80211_frame_addr4 *) wh0;
+
+	switch (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) {
+	case IEEE80211_FC1_DIR_NODS:
+		IEEE80211_ADDR_COPY(hdr, wh->i_addr1); /* DA */
+		IEEE80211_ADDR_COPY(hdr + IEEE80211_ADDR_LEN, wh->i_addr2);
+		break;
+	case IEEE80211_FC1_DIR_TODS:
+		IEEE80211_ADDR_COPY(hdr, wh->i_addr3); /* DA */
+		IEEE80211_ADDR_COPY(hdr + IEEE80211_ADDR_LEN, wh->i_addr2);
+		break;
+	case IEEE80211_FC1_DIR_FROMDS:
+		IEEE80211_ADDR_COPY(hdr, wh->i_addr1); /* DA */
+		IEEE80211_ADDR_COPY(hdr + IEEE80211_ADDR_LEN, wh->i_addr3);
+		break;
+	case IEEE80211_FC1_DIR_DSTODS:
+		IEEE80211_ADDR_COPY(hdr, wh->i_addr3); /* DA */
+		IEEE80211_ADDR_COPY(hdr + IEEE80211_ADDR_LEN, wh->i_addr4);
+		break;
+	}
+
+	if (wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_QOS) {
+		const struct ieee80211_qosframe *qwh =
+			(const struct ieee80211_qosframe *) wh;
+		hdr[12] = qwh->i_qos[0] & IEEE80211_QOS_TID;
+	} else
+		hdr[12] = 0;
+	hdr[13] = hdr[14] = hdr[15] = 0; /* reserved */
+}
+
+static void
+michael_mic(struct tkip_ctx *ctx, const u8 *key,
+	struct mbuf *m, u_int off, size_t data_len,
+	u8 mic[IEEE80211_WEP_MICLEN])
+{
+	uint8_t hdr[16];
+	u32 l, r;
+	const uint8_t *data;
+	u_int space;
+
+	michael_mic_hdr(mtod(m, struct ieee80211_frame *), hdr);
+
+	l = get_le32(key);
+	r = get_le32(key + 4);
+
+	/* Michael MIC pseudo header: DA, SA, 3 x 0, Priority */
+	l ^= get_le32(hdr);
+	michael_block(l, r);
+	l ^= get_le32(&hdr[4]);
+	michael_block(l, r);
+	l ^= get_le32(&hdr[8]);
+	michael_block(l, r);
+	l ^= get_le32(&hdr[12]);
+	michael_block(l, r);
+
+	/* first buffer has special handling */
+	data = mtod(m, const uint8_t *) + off;
+	space = m->m_len - off;
+	for (;;) {
+		if (space > data_len)
+			space = data_len;
+		/* collect 32-bit blocks from current buffer */
+		while (space >= sizeof(uint32_t)) {
+			l ^= get_le32(data);
+			michael_block(l, r);
+			data += sizeof(uint32_t), space -= sizeof(uint32_t);
+			data_len -= sizeof(uint32_t);
+		}
+		if (data_len < sizeof(uint32_t))
+			break;
+		m = m->m_next;
+		if (m == NULL) {
+			KASSERT(0, ("out of data, data_len %zu\n", data_len));
+			break;
+		}
+		if (space != 0) {
+			const uint8_t *data_next;
+			/*
+			 * Block straddles buffers, split references.
+			 */
+			data_next = mtod(m, const uint8_t *);
+			KASSERT(m->m_len >= sizeof(uint32_t) - space,
+				("not enough data in following buffer, "
+				"m_len %u need %zu\n", m->m_len,
+				sizeof(uint32_t) - space));
+			switch (space) {
+			case 1:
+				l ^= get_le32_split(data[0], data_next[0],
+					data_next[1], data_next[2]);
+				data = data_next + 3;
+				space = m->m_len - 3;
+				break;
+			case 2:
+				l ^= get_le32_split(data[0], data[1],
+					data_next[0], data_next[1]);
+				data = data_next + 2;
+				space = m->m_len - 2;
+				break;
+			case 3:
+				l ^= get_le32_split(data[0], data[1],
+					data[2], data_next[0]);
+				data = data_next + 1;
+				space = m->m_len - 1;
+				break;
+			}
+			michael_block(l, r);
+			data_len -= sizeof(uint32_t);
+		} else {
+			/*
+			 * Setup for next buffer.
+			 */
+			data = mtod(m, const uint8_t *);
+			space = m->m_len;
+		}
+	}
+	/* Last block and padding (0x5a, 4..7 x 0) */
+	switch (data_len) {
+	case 0:
+		l ^= get_le32_split(0x5a, 0, 0, 0);
+		break;
+	case 1:
+		l ^= get_le32_split(data[0], 0x5a, 0, 0);
+		break;
+	case 2:
+		l ^= get_le32_split(data[0], data[1], 0x5a, 0);
+		break;
+	case 3:
+		l ^= get_le32_split(data[0], data[1], data[2], 0x5a);
+		break;
+	}
+	michael_block(l, r);
+	/* l ^= 0; */
+	michael_block(l, r);
+
+	put_le32(mic, l);
+	put_le32(mic + 4, r);
+}
+
+static int
+tkip_encrypt(struct tkip_ctx *ctx, struct ieee80211_key *key,
+	struct mbuf *m, int hdrlen)
+{
+	struct ieee80211_frame *wh;
+	uint8_t icv[IEEE80211_WEP_CRCLEN];
+
+	ctx->tc_ic->ic_stats.is_crypto_tkip++;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	if (!ctx->tx_phase1_done) {
+		tkip_mixing_phase1(ctx->tx_ttak, key->wk_key, wh->i_addr2,
+				   (u32)(key->wk_keytsc >> 16));
+		ctx->tx_phase1_done = 1;
+	}
+	tkip_mixing_phase2(ctx->tx_rc4key, key->wk_key, ctx->tx_ttak,
+		(u16) key->wk_keytsc);
+
+	wep_encrypt(ctx->tx_rc4key,
+		m, hdrlen + tkip.ic_header,
+		m->m_pkthdr.len - (hdrlen + tkip.ic_header),
+		icv);
+	(void) m_append(m, IEEE80211_WEP_CRCLEN, icv);	/* XXX check return */
+
+	key->wk_keytsc++;
+	if ((u16)(key->wk_keytsc) == 0)
+		ctx->tx_phase1_done = 0;
+	return 1;
+}
+
+static int
+tkip_decrypt(struct tkip_ctx *ctx, struct ieee80211_key *key,
+	struct mbuf *m, int hdrlen)
+{
+	struct ieee80211_frame *wh;
+	u32 iv32;
+	u16 iv16;
+
+	ctx->tc_ic->ic_stats.is_crypto_tkip++;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	/* NB: tkip_decap already verified header and left seq in rx_rsc */
+	iv16 = (u16) ctx->rx_rsc;
+	iv32 = (u32) (ctx->rx_rsc >> 16);
+
+	if (iv32 != (u32)(key->wk_keyrsc >> 16) || !ctx->rx_phase1_done) {
+		tkip_mixing_phase1(ctx->rx_ttak, key->wk_key,
+			wh->i_addr2, iv32);
+		ctx->rx_phase1_done = 1;
+	}
+	tkip_mixing_phase2(ctx->rx_rc4key, key->wk_key, ctx->rx_ttak, iv16);
+
+	/* NB: m is unstripped; deduct headers + ICV to get payload */
+	if (wep_decrypt(ctx->rx_rc4key,
+		m, hdrlen + tkip.ic_header,
+	        m->m_pkthdr.len - (hdrlen + tkip.ic_header + tkip.ic_trailer))) {
+		if (iv32 != (u32)(key->wk_keyrsc >> 16)) {
+			/* Previously cached Phase1 result was already lost, so
+			 * it needs to be recalculated for the next packet. */
+			ctx->rx_phase1_done = 0;
+		}
+		IEEE80211_DPRINTF(ctx->tc_ic, IEEE80211_MSG_CRYPTO,
+		    "[%s] TKIP ICV mismatch on decrypt\n",
+		    ether_sprintf(wh->i_addr2));
+		ctx->tc_ic->ic_stats.is_rx_tkipicv++;
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * Module glue.
+ */
+IEEE80211_CRYPTO_MODULE(tkip, 1);

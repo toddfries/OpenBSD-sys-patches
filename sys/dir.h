@@ -1,7 +1,4 @@
-/*	$OpenBSD: dir.h,v 1.5 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: dir.h,v 1.9 1996/10/27 19:27:54 gwr Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,19 +27,17 @@
  * SUCH DAMAGE.
  *
  *	@(#)dir.h	8.2 (Berkeley) 1/4/94
- */
-
-/*
- * The information in this file should be obtained from <dirent.h>
- * and is provided solely (and temporarily) for backward compatibility.
+ * $FreeBSD: src/sys/sys/dir.h,v 1.10 2005/03/02 21:33:29 joerg Exp $
  */
 
 #ifndef _SYS_DIR_H_
 #define	_SYS_DIR_H_
 
-#ifdef	_KERNEL
-/* This file should only be used by old user-level code. */
-#error "Please use <sys/dirent.h> instead"
+#include <sys/cdefs.h>
+
+#ifdef __CC_SUPPORTS_WARNING
+#warning "The information in this file should be obtained from <dirent.h>"
+#warning "and is provided solely (and temporarily) for backward compatibility."
 #endif
 
 #include <dirent.h>
@@ -50,16 +45,7 @@
 /*
  * Backwards compatibility.
  */
-#define direct dirent
-
-/*
- * The DIRSIZ macro gives the minimum record length which will hold
- * the directory entry.  This requires the amount of space in struct direct
- * without the d_name field, plus enough space for the name with a terminating
- * null byte (dp->d_namlen+1), rounded up to a 4 byte boundary.
- */
-#undef DIRSIZ
-#define DIRSIZ(dp) \
-    ((sizeof (struct direct) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3))
+#define	direct		dirent
+#define	DIRSIZ(dp)	_GENERIC_DIRSIZ(dp)
 
 #endif /* !_SYS_DIR_H_ */

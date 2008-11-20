@@ -1,5 +1,4 @@
-/*	$OpenBSD: ukphy.c,v 1.18 2006/03/05 01:11:37 brad Exp $	*/
-/*	$NetBSD: ukphy.c,v 1.9 2000/02/02 23:34:57 thorpej Exp $	*/
+/*	$NetBSD: ukphy.c,v 1.2 1999/04/23 04:24:32 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
@@ -38,7 +37,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
+/*-
  * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -67,6 +66,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/ukphy.c,v 1.20 2007/01/20 00:52:29 marius Exp $");
+
 /*
  * driver for generic unknown PHYs
  */
@@ -74,9 +76,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <sys/module.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -84,78 +87,89 @@
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
-int	ukphymatch(struct device *, void *, void *);
-void	ukphyattach(struct device *, struct device *, void *);
+#include "miibus_if.h"
 
-struct cfattach ukphy_ca = {
-	sizeof(struct mii_softc), ukphymatch, ukphyattach, mii_phy_detach,
-	    mii_phy_activate
+static int ukphy_probe(device_t);
+static int ukphy_attach(device_t);
+
+static device_method_t ukphy_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		ukphy_probe),
+	DEVMETHOD(device_attach,	ukphy_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{ 0, 0 }
 };
 
-struct cfdriver ukphy_cd = {
-	NULL, "ukphy", DV_DULL
+static devclass_t ukphy_devclass;
+
+static driver_t ukphy_driver = {
+	"ukphy",
+	ukphy_methods,
+	sizeof(struct mii_softc)
 };
 
-int	ukphy_service(struct mii_softc *, struct mii_data *, int);
+DRIVER_MODULE(ukphy, miibus, ukphy_driver, ukphy_devclass, 0, 0);
 
-const struct mii_phy_funcs ukphy_funcs = {
-	ukphy_service, ukphy_status, mii_phy_reset,
-};
+static int	ukphy_service(struct mii_softc *, struct mii_data *, int);
 
-int
-ukphymatch(struct device *parent, void *match, void *aux)
+static int
+ukphy_probe(device_t dev)
 {
 
 	/*
 	 * We know something is here, so always match at a low priority.
 	 */
-	return (1);
+	device_set_desc(dev, "Generic IEEE 802.3u media interface");
+	return (BUS_PROBE_GENERIC);
 }
 
-void
-ukphyattach(struct device *parent, struct device *self, void *aux)
+static int
+ukphy_attach(device_t dev)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
+	struct mii_softc *sc;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
 
-	printf(": Generic IEEE 802.3u media interface, rev. %d:",
-	    MII_REV(ma->mii_id2));
-	printf(" OUI 0x%06x, model 0x%04x\n",
-	    MII_OUI(ma->mii_id1, ma->mii_id2), MII_MODEL(ma->mii_id2));
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	sc->mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->mii_dev);
+	LIST_INSERT_HEAD(&mii->mii_phys, sc, mii_list);
+
+	if (bootverbose)
+		device_printf(dev, "OUI 0x%06x, model 0x%04x, rev. %d\n",
+		    MII_OUI(ma->mii_id1, ma->mii_id2),
+		    MII_MODEL(ma->mii_id2), MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &ukphy_funcs;
+	sc->mii_service = ukphy_service;
 	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
 
-	/*
-	 * Don't do loopback on unknown PHYs.  It might confuse some of them.
-	 */
-	sc->mii_flags |= MIIF_NOLOOP;
+	mii->mii_instance++;
 
-	PHY_RESET(sc);
+	mii_phy_reset(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0 &&
-	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK) == 0)
-		printf("%s: no media present\n", sc->mii_dev.dv_xname);
-	else
-		mii_phy_add_media(sc);
+	device_printf(dev, " ");
+	mii_phy_add_media(sc);
+	printf("\n");
+
+	MIIBUS_MEDIAINIT(sc->mii_dev);
+	mii_phy_setmedia(sc);
+
+	return (0);
 }
 
-int
+static int
 ukphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -192,18 +206,13 @@ ukphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		 */
 		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
-
 		if (mii_phy_tick(sc) == EJUSTRETURN)
 			return (0);
 		break;
-
-	case MII_DOWN:
-		mii_phy_down(sc);
-		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	ukphy_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);

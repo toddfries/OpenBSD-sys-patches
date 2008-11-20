@@ -1,7 +1,4 @@
-/*	$OpenBSD: ucred.h,v 1.6 2003/08/15 20:32:20 tedu Exp $	*/
-/*	$NetBSD: ucred.h,v 1.12 1995/06/01 22:44:50 jtc Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,37 +26,76 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ucred.h	8.2 (Berkeley) 1/4/94
+ *	@(#)ucred.h	8.4 (Berkeley) 1/9/95
+ * $FreeBSD: src/sys/sys/ucred.h,v 1.55 2007/06/07 22:27:15 rwatson Exp $
  */
 
 #ifndef _SYS_UCRED_H_
 #define	_SYS_UCRED_H_
 
+#include <bsm/audit.h>
+
 /*
  * Credentials.
+ *
+ * Please do not inspect cr_uid directly to determine superuserness.  The
+ * priv(9) interface should be used to check for privilege.
  */
+#if defined(_KERNEL) || defined(_WANT_UCRED)
 struct ucred {
 	u_int	cr_ref;			/* reference count */
+#define	cr_startcopy cr_uid
 	uid_t	cr_uid;			/* effective user id */
-	gid_t	cr_gid;			/* effective group id */
+	uid_t	cr_ruid;		/* real user id */
+	uid_t	cr_svuid;		/* saved user id */
 	short	cr_ngroups;		/* number of groups */
 	gid_t	cr_groups[NGROUPS];	/* groups */
+	gid_t	cr_rgid;		/* real group id */
+	gid_t	cr_svgid;		/* saved group id */
+	struct uidinfo	*cr_uidinfo;	/* per euid resource consumption */
+	struct uidinfo	*cr_ruidinfo;	/* per ruid resource consumption */
+	struct prison	*cr_prison;	/* jail(2) */
+#define	cr_endcopy	cr_label
+	struct label	*cr_label;	/* MAC label */
+	struct auditinfo_addr	cr_audit;	/* Audit properties. */
 };
-#define NOCRED ((struct ucred *)-1)	/* no credential available */
-#define FSCRED ((struct ucred *)-2)	/* filesystem credential */
+#define	NOCRED	((struct ucred *)0)	/* no credential available */
+#define	FSCRED	((struct ucred *)-1)	/* filesystem credential */
+#endif /* _KERNEL || _WANT_UCRED */
+
+/*
+ * This is the external representation of struct ucred.
+ */
+struct xucred {
+	u_int	cr_version;		/* structure layout version */
+	uid_t	cr_uid;			/* effective user id */
+	short	cr_ngroups;		/* number of groups */
+	gid_t	cr_groups[NGROUPS];	/* groups */
+	void	*_cr_unused1;		/* compatibility with old ucred */
+};
+#define	XUCRED_VERSION	0
+
+/* This can be used for both ucred and xucred structures. */
+#define	cr_gid cr_groups[0]
 
 #ifdef _KERNEL
-#define	crhold(cr)	(cr)->cr_ref++
+struct thread;
 
-#define SUSER_NOACCT	0x1	/* don't mark accounting flags */
-
-struct ucred	*crcopy(struct ucred *cr);
+void	change_egid(struct ucred *newcred, gid_t egid);
+void	change_euid(struct ucred *newcred, struct uidinfo *euip);
+void	change_rgid(struct ucred *newcred, gid_t rgid);
+void	change_ruid(struct ucred *newcred, struct uidinfo *ruip);
+void	change_svgid(struct ucred *newcred, gid_t svgid);
+void	change_svuid(struct ucred *newcred, uid_t svuid);
+void	crcopy(struct ucred *dest, struct ucred *src);
 struct ucred	*crdup(struct ucred *cr);
-void		crfree(struct ucred *cr);
+void	cred_update_thread(struct thread *td);
+void	crfree(struct ucred *cr);
 struct ucred	*crget(void);
-int		suser(struct proc *p, u_int flags);
-int		suser_ucred(struct ucred *cred);
-
+struct ucred	*crhold(struct ucred *cr);
+int	crshared(struct ucred *cr);
+void	cru2x(struct ucred *cr, struct xucred *xcr);
+int	groupmember(gid_t gid, struct ucred *cred);
 #endif /* _KERNEL */
 
 #endif /* !_SYS_UCRED_H_ */

@@ -1,7 +1,4 @@
-/*	$OpenBSD: igmp.h,v 1.6 2003/06/02 23:28:13 millert Exp $	*/
-/*	$NetBSD: igmp.h,v 1.6 1995/05/31 06:08:21 mycroft Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1988 Stephen Deering.
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -17,7 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,6 +31,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)igmp.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/igmp.h,v 1.15 2007/06/15 18:59:10 bms Exp $
  */
 
 #ifndef _NETINET_IGMP_H_
@@ -42,56 +40,92 @@
 /*
  * Internet Group Management Protocol (IGMP) definitions.
  *
- * MULTICAST 1.3
+ * Written by Steve Deering, Stanford, May 1988.
+ *
+ * MULTICAST Revision: 3.5.1.2
  */
 
 /*
  * IGMP packet format.
  */
 struct igmp {
-	u_int8_t	igmp_type;	/* version & type of IGMP message  */
-	u_int8_t	igmp_code;	/* code for routing sub-messages   */
-	u_int16_t	igmp_cksum;	/* IP-style checksum               */
+	u_char		igmp_type;	/* version & type of IGMP message  */
+	u_char		igmp_code;	/* subtype for routing msgs        */
+	u_short		igmp_cksum;	/* IP-style checksum               */
 	struct in_addr	igmp_group;	/* group address being reported    */
 };					/*  (zero for queries)             */
 
-#define	IGMP_MINLEN		     8
+struct igmpv3 {
+	u_char		igmp_type;	/* version & type of IGMP message  */
+	u_char		igmp_code;	/* subtype for routing msgs        */
+	u_short		igmp_cksum;	/* IP-style checksum               */
+	struct in_addr	igmp_group;	/* group address being reported    */
+					/*  (zero for queries)             */
+	u_char		igmp_misc;	/* reserved/suppress/robustness    */
+	u_char		igmp_qqi;	/* querier's query interval        */
+	u_short		igmp_numsrc;	/* number of sources               */
+	/*struct in_addr	igmp_sources[1];*/ /* source addresses */
+};
 
-#define	IGMP_HOST_MEMBERSHIP_QUERY	0x11  /* membership query      */
-#define	IGMP_v1_HOST_MEMBERSHIP_REPORT	0x12  /* v1 membership report  */
-#define	IGMP_DVMRP			0x13  /* DVMRP routing message */
-#define	IGMP_PIM			0x14  /* PIM routing message   */
-#define	IGMP_v2_HOST_MEMBERSHIP_REPORT	0x16  /* v2 membership report  */
-#define	IGMP_HOST_LEAVE_MESSAGE		0x17  /* leave-group message   */
-#define	IGMP_MTRACE_REPLY		0x1e  /* traceroute reply      */
-#define	IGMP_MTRACE_QUERY		0x1f  /* traceroute query      */
+struct igmp_grouprec {
+	u_char		ig_type;	/* record type */
+	u_char		ig_datalen;	/* length of auxiliary data */
+	u_short		ig_numsrc;	/* number of sources */
+	struct in_addr	ig_group;	/* group address being reported */
+	/*struct in_addr	ig_sources[1];*/ /* source addresses */
+};
 
-#define	IGMP_MAX_HOST_REPORT_DELAY	10    /* max delay for response to */
-					      /*  query (in seconds)       */
+struct igmp_report {
+	u_char		ir_type;	/* record type */
+	u_char		ir_rsv1;	/* reserved */
+	u_short		ir_cksum;	/* checksum */
+	u_short		ir_rsv2;	/* reserved */
+	u_short		ir_numgrps;	/* number of group records */
+	struct		igmp_grouprec ir_groups[1];	/* group records */
+};
 
-#define	IGMP_TIMER_SCALE		10    /* denominator for igmp_timer */
+#define IGMP_MINLEN			8
+#define IGMP_HDRLEN			8
+#define IGMP_GRPREC_HDRLEN		8
+#define IGMP_PREPEND			0
+
+#if 0
+#define IGMP_QRV(pigmp)			((pigmp)->igmp_misc & (0x07)) /* XXX */
+#define IGMP_MAXSOURCES(len)		(((len) - 12) >> 2) /* XXX */
+#endif
 
 /*
- * States for the IGMP v2 state table.
+ * Message types, including version number.
  */
-#define	IGMP_DELAYING_MEMBER	1
-#define	IGMP_IDLE_MEMBER	2
-#define	IGMP_LAZY_MEMBER	3
-#define	IGMP_SLEEPING_MEMBER	4
-#define	IGMP_AWAKENING_MEMBER	5
+#define IGMP_MEMBERSHIP_QUERY		0x11	/* membership query         */
+#define IGMP_V1_MEMBERSHIP_REPORT	0x12	/* Ver. 1 membership report */
+#define IGMP_V2_MEMBERSHIP_REPORT	0x16	/* Ver. 2 membership report */
+#define IGMP_V2_LEAVE_GROUP		0x17	/* Leave-group message	    */
+
+#define IGMP_DVMRP			0x13	/* DVMRP routing message    */
+#define IGMP_PIM			0x14	/* PIM routing message	    */
+
+#define IGMP_MTRACE_RESP		0x1e  /* traceroute resp.(to sender)*/
+#define IGMP_MTRACE			0x1f  /* mcast traceroute messages  */
+
+#define IGMP_V3_MEMBERSHIP_REPORT	0x22	/* Ver. 3 membership report */
+
+#define IGMP_MAX_HOST_REPORT_DELAY   10    /* max delay for response to     */
+					   /*  query (in seconds) according */
+					   /*  to RFC1112                   */
+
+
+#define IGMP_TIMER_SCALE     10		/* denotes that the igmp code field */
+					/* specifies time in 10th of seconds*/
 
 /*
- * States for IGMP router version cache.
+ * The following four defininitions are for backwards compatibility.
+ * They should be removed as soon as all applications are updated to
+ * use the new constant names.
  */
-#define	IGMP_v1_ROUTER		1
-#define	IGMP_v2_ROUTER		2
+#define IGMP_HOST_MEMBERSHIP_QUERY	IGMP_MEMBERSHIP_QUERY
+#define IGMP_HOST_MEMBERSHIP_REPORT	IGMP_V1_MEMBERSHIP_REPORT
+#define IGMP_HOST_NEW_MEMBERSHIP_REPORT	IGMP_V2_MEMBERSHIP_REPORT
+#define IGMP_HOST_LEAVE_MESSAGE		IGMP_V2_LEAVE_GROUP
 
-/*
- * Revert to v2 if we haven't heard from the router in this amount of time.
- */
-#define	IGMP_AGE_THRESHOLD	540
-
-#ifdef _KERNEL
-void	rti_delete(struct ifnet *);
-#endif /* _KERNEL */
 #endif /* _NETINET_IGMP_H_ */

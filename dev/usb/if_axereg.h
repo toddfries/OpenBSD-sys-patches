@@ -1,6 +1,4 @@
-/*	$OpenBSD: if_axereg.h,v 1.18 2007/06/10 10:15:35 mbalmer Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1997, 1998, 1999, 2000-2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
  *
@@ -31,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/if_axereg.h,v 1.2 2003/06/15 21:45:43 wpaul Exp $
+ * $FreeBSD: src/sys/dev/usb/if_axereg.h,v 1.17 2007/11/10 16:23:38 sam Exp $
  */
 
 /*
@@ -51,9 +49,9 @@
  * CC is the command byte, as specified in the manual.
  */
 
-#define AXE_CMD_LEN(x)	(((x) & 0xF000) >> 12)
 #define AXE_CMD_DIR(x)	(((x) & 0x0F00) >> 8)
-#define AXE_CMD_CMD(x)	 ((x) & 0x00FF)
+#define AXE_CMD_LEN(x)	(((x) & 0xF000) >> 12)
+#define AXE_CMD_CMD(x)	((x) & 0x00FF)
 
 #define AXE_172_CMD_READ_RXTX_SRAM		0x2002
 #define AXE_182_CMD_READ_RXTX_SRAM		0x8002
@@ -109,8 +107,9 @@
 #define AXE_178_MEDIA_GMII			0x0001
 #define AXE_MEDIA_FULL_DUPLEX			0x0002
 #define AXE_172_MEDIA_TX_ABORT_ALLOW		0x0004
-/* AX88178 documentation says to always write 1 to reserved bit... */
+/* AX88178/88772 documentation says to always write 1 to bit 2 */
 #define AXE_178_MEDIA_MAGIC			0x0004
+/* AX88772 documentation says to always write 0 to bit 3 */
 #define AXE_178_MEDIA_ENCK			0x0008
 #define AXE_172_MEDIA_FLOW_CONTROL_EN		0x0010
 #define AXE_178_MEDIA_RXFLOW_CONTROL_EN		0x0010
@@ -128,8 +127,12 @@
 #define AXE_178_RXCMD_KEEP_INVALID_CRC		0x0004
 #define AXE_RXCMD_BROADCAST			0x0008
 #define AXE_RXCMD_MULTICAST			0x0010
+#define AXE_178_RXCMD_AP			0x0020
 #define AXE_RXCMD_ENABLE			0x0080
-#define AXE_178_RXCMD_MFB			0x0300
+#define AXE_178_RXCMD_MFB_2048			0x0000	/* 2K max frame burst */
+#define AXE_178_RXCMD_MFB_4096			0x0100	/* 4K max frame burst */
+#define AXE_178_RXCMD_MFB_8192			0x0200	/* 8K max frame burst */
+#define AXE_178_RXCMD_MFB_16384			0x0300	/* 16K max frame burst*/
 
 #define AXE_NOPHY				0xE0
 #define AXE_INTPHY				0x10
@@ -137,34 +140,26 @@
 #define AXE_TIMEOUT		1000
 #define AXE_172_BUFSZ		1536
 #define AXE_178_MIN_BUFSZ	2048
+#define AXE_MIN_FRAMELEN	60
+#define AXE_RX_FRAMES		1
+#define AXE_TX_FRAMES		1
+
+#if AXE_178_MAX_FRAME_BURST == 0
+#define AXE_178_RXCMD_MFB	AXE_178_RXCMD_MFB_2048
+#define AXE_178_MAX_BUFSZ	2048
+#elif AXE_178_MAX_FRAME_BURST == 1
+#define AXE_178_RXCMD_MFB	AXE_178_RXCMD_MFB_4096
+#define AXE_178_MAX_BUFSZ	4096
+#elif AXE_178_MAX_FRAME_BURST == 2
+#define AXE_178_RXCMD_MFB	AXE_178_RXCMD_MFB_8192
+#define AXE_178_MAX_BUFSZ	8192
+#else
+#define AXE_178_RXCMD_MFB	AXE_178_RXCMD_MFB_16384
 #define AXE_178_MAX_BUFSZ	16384
+#endif
 
 #define AXE_RX_LIST_CNT		1
 #define AXE_TX_LIST_CNT		1
-
-#define AXE_CTL_READ		0x01
-#define AXE_CTL_WRITE		0x02
-
-#define AXE_CONFIG_NO		1
-#define AXE_IFACE_IDX		0
-
-/*
- * The interrupt endpoint is currently unused
- * by the ASIX part.
- */
-#define AXE_ENDPT_RX		0x0
-#define AXE_ENDPT_TX		0x1
-#define AXE_ENDPT_INTR		0x2
-#define AXE_ENDPT_MAX		0x3
-
-struct axe_type {
-	struct usb_devno	axe_dev;
-	u_int16_t		axe_flags;
-#define AX178	0x0001		/* AX88178 */
-#define AX772	0x0002		/* AX88772 */
-};
-
-struct axe_softc;
 
 struct axe_chain {
 	struct axe_softc	*axe_sc;
@@ -184,44 +179,76 @@ struct axe_cdata {
 	int			axe_rx_prod;
 };
 
+#define AXE_CTL_READ		0x01
+#define AXE_CTL_WRITE		0x02
+
+#define AXE_CONFIG_NO		1
+#define AXE_IFACE_IDX		0
+
+/*
+ * The interrupt endpoint is currently unused
+ * by the ASIX part.
+ */
+#define AXE_ENDPT_RX		0x0
+#define AXE_ENDPT_TX		0x1
+#define AXE_ENDPT_INTR		0x2
+#define AXE_ENDPT_MAX		0x3
+
 struct axe_sframe_hdr {
-	u_int16_t		len;
-	u_int16_t		ilen;
+	uint16_t	len;
+	uint16_t	ilen;
 } __packed;
 
+struct axe_type {
+	struct usb_devno        axe_dev;
+	uint32_t                axe_flags;
+#define	AX172	0x0000		/* AX88172 */
+#define	AX178	0x0001		/* AX88178 */
+#define	AX772	0x0002		/* AX88772 */
+};
+
+#define AXE_INC(x, y)		(x) = (x + 1) % y
+
 struct axe_softc {
-	struct device		axe_dev;
+#if defined(__FreeBSD__)
+#define GET_MII(sc) (device_get_softc((sc)->axe_miibus))
+#elif defined(__NetBSD__)
 #define GET_MII(sc) (&(sc)->axe_mii)
-	struct arpcom		arpcom;
-#define GET_IFP(sc) (&(sc)->arpcom.ac_if)
-	struct mii_data		axe_mii;
+#elif defined(__OpenBSD__)
+#define GET_MII(sc) (&(sc)->axe_mii)
+#endif
+	struct ifnet		*axe_ifp;
+	device_t		axe_miibus;
+	device_t		axe_dev;
 	usbd_device_handle	axe_udev;
 	usbd_interface_handle	axe_iface;
-
 	u_int16_t		axe_vendor;
 	u_int16_t		axe_product;
-
 	u_int16_t		axe_flags;
-
 	int			axe_ed[AXE_ENDPT_MAX];
 	usbd_pipe_handle	axe_ep[AXE_ENDPT_MAX];
-	int			axe_unit;
 	int			axe_if_flags;
 	struct axe_cdata	axe_cdata;
-	struct timeout		axe_stat_ch;
-
-	int			axe_refcnt;
+	struct callout_handle	axe_stat_ch;
+	struct mtx		axe_mtx;
+	struct sx		axe_sleeplock;
 	char			axe_dying;
-	char			axe_attached;
-
-	struct usb_task		axe_tick_task;
-	struct usb_task		axe_stop_task;
-
-	struct rwlock		axe_mii_lock;
-
 	int			axe_link;
 	unsigned char		axe_ipgs[3];
 	unsigned char 		axe_phyaddrs[2];
 	struct timeval		axe_rx_notice;
-	u_int			axe_bufsz;
+	struct usb_task		axe_tick_task;
+	int			axe_bufsz;
+	int			axe_boundary;
 };
+
+#if 0
+#define	AXE_LOCK(_sc)		mtx_lock(&(_sc)->axe_mtx)
+#define	AXE_UNLOCK(_sc)		mtx_unlock(&(_sc)->axe_mtx)
+#else
+#define	AXE_LOCK(_sc)
+#define	AXE_UNLOCK(_sc)
+#endif
+#define	AXE_SLEEPLOCK(_sc)	sx_xlock(&(_sc)->axe_sleeplock)
+#define	AXE_SLEEPUNLOCK(_sc)	sx_xunlock(&(_sc)->axe_sleeplock)
+#define	AXE_SLEEPLOCKASSERT(_sc) sx_assert(&(_sc)->axe_sleeplock, SX_XLOCKED)

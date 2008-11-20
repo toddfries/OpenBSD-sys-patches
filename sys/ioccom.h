@@ -1,6 +1,3 @@
-/*	$OpenBSD: ioccom.h,v 1.4 2006/05/18 21:27:25 miod Exp $	*/
-/*	$NetBSD: ioccom.h,v 1.4 1994/10/30 21:49:56 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ioccom.h	8.2 (Berkeley) 3/28/94
+ * $FreeBSD: src/sys/sys/ioccom.h,v 1.16 2006/09/27 19:57:02 ru Exp $
  */
 
 #ifndef	_SYS_IOCCOM_H_
@@ -45,24 +43,37 @@
 #define	IOCBASECMD(x)	((x) & ~(IOCPARM_MASK << 16))
 #define	IOCGROUP(x)	(((x) >> 8) & 0xff)
 
-#define	IOCPARM_MAX	NBPG	/* max size of ioctl args, mult. of NBPG */
-				/* no parameters */
-#define	IOC_VOID	(unsigned long)0x20000000
-				/* copy parameters out */
-#define	IOC_OUT		(unsigned long)0x40000000
-				/* copy parameters in */
-#define	IOC_IN		(unsigned long)0x80000000
-				/* copy parameters in and out */
+#define	IOCPARM_MAX	PAGE_SIZE		/* max size of ioctl, mult. of PAGE_SIZE */
+#define	IOC_VOID	0x20000000	/* no parameters */
+#define	IOC_OUT		0x40000000	/* copy out parameters */
+#define	IOC_IN		0x80000000	/* copy in parameters */
 #define	IOC_INOUT	(IOC_IN|IOC_OUT)
-				/* mask for IN/OUT/VOID */
-#define	IOC_DIRMASK	(unsigned long)0xe0000000
+#define	IOC_DIRMASK	(IOC_VOID|IOC_OUT|IOC_IN)
 
 #define	_IOC(inout,group,num,len) \
-	(inout | ((len & IOCPARM_MASK) << 16) | ((group) << 8) | (num))
+	((unsigned long)(inout | ((len & IOCPARM_MASK) << 16) | ((group) << 8) | (num)))
 #define	_IO(g,n)	_IOC(IOC_VOID,	(g), (n), 0)
+#define	_IOWINT(g,n)	_IOC(IOC_VOID,	(g), (n), sizeof(int))
 #define	_IOR(g,n,t)	_IOC(IOC_OUT,	(g), (n), sizeof(t))
 #define	_IOW(g,n,t)	_IOC(IOC_IN,	(g), (n), sizeof(t))
 /* this should be _IORW, but stdio got there first */
 #define	_IOWR(g,n,t)	_IOC(IOC_INOUT,	(g), (n), sizeof(t))
+
+#ifdef _KERNEL
+
+#if defined(COMPAT_FREEBSD6) || defined(COMPAT_FREEBSD5) || \
+    defined(COMPAT_FREEBSD4) || defined(COMPAT_43)
+#define	IOCPARM_IVAL(x)	((int)(intptr_t)(void *)*(caddr_t *)(void *)(x))
+#endif
+
+#else
+
+#include <sys/cdefs.h>
+
+__BEGIN_DECLS
+int	ioctl(int, unsigned long, ...);
+__END_DECLS
+
+#endif
 
 #endif /* !_SYS_IOCCOM_H_ */

@@ -1,7 +1,4 @@
-/*	$OpenBSD: syslimits.h,v 1.11 2008/02/02 15:31:31 kettenis Exp $	*/
-/*	$NetBSD: syslimits.h,v 1.12 1995/10/05 05:26:19 thorpej Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,47 +27,48 @@
  * SUCH DAMAGE.
  *
  *	@(#)syslimits.h	8.1 (Berkeley) 6/2/93
+ * $FreeBSD: src/sys/sys/syslimits.h,v 1.23 2007/05/29 15:14:46 cognet Exp $
  */
 
-#include <sys/cdefs.h>
+#ifndef _SYS_SYSLIMITS_H_
+#define _SYS_SYSLIMITS_H_
 
-#if __POSIX_VISIBLE || __XPG_VISIBLE || __BSD_VISIBLE
-#define	ARG_MAX		 (256 * 1024)	/* max bytes for an exec function */
-#define	CHILD_MAX		   80	/* max simultaneous processes */
+#if !defined(_KERNEL) && !defined(_LIMITS_H_) && !defined(_SYS_PARAM_H_)
+#ifndef _SYS_CDEFS_H_
+#error this file needs sys/cdefs.h as a prerequisite
+#endif
+#ifdef __CC_SUPPORTS_WARNING
+#warning "No user-serviceable parts inside."
+#endif
+#endif
+
+/*
+ * Do not add any new variables here.  (See the comment at the end of
+ * the file for why.)
+ */
+#define	ARG_MAX			262144	/* max bytes for an exec function */
+#ifndef CHILD_MAX
+#define	CHILD_MAX		   40	/* max simultaneous processes */
+#endif
 #define	LINK_MAX		32767	/* max file link count */
 #define	MAX_CANON		  255	/* max bytes in term canon input line */
 #define	MAX_INPUT		  255	/* max bytes in terminal input */
 #define	NAME_MAX		  255	/* max bytes in a file name */
 #define	NGROUPS_MAX		   16	/* max supplemental group id's */
+#ifndef OPEN_MAX
 #define	OPEN_MAX		   64	/* max open files per process */
+#endif
 #define	PATH_MAX		 1024	/* max bytes in pathname */
 #define	PIPE_BUF		  512	/* max bytes for atomic pipe writes */
-#define	SYMLINK_MAX	     PATH_MAX	/* max bytes in a symbolic link */
-#define	SYMLOOP_MAX		   32	/* max symlinks per path (for loops) */
+#define	IOV_MAX			 1024	/* max elements in i/o vector */
 
-#define	BC_BASE_MAX	      INT_MAX	/* max ibase/obase values in bc(1) */
-#define	BC_DIM_MAX		65535	/* max array elements in bc(1) */
-#define	BC_SCALE_MAX	      INT_MAX	/* max scale value in bc(1) */
-#define	BC_STRING_MAX	      INT_MAX	/* max const string length in bc(1) */
-#define	COLL_WEIGHTS_MAX	    2	/* max weights for order keyword */
-#define	EXPR_NEST_MAX		   32	/* max expressions nested in expr(1) */
-#define	LINE_MAX		 2048	/* max bytes in an input line */
-#ifndef RE_DUP_MAX
-#define	RE_DUP_MAX		  255	/* max RE's in interval notation */
-#endif
-
-#if __XPG_VISIBLE
-#define	IOV_MAX			 1024	/* max # of iov's (readv,sendmsg,etc) */
-#define	NZERO			   20	/* default "nice" */
-#endif /* __XPG_VISIBLE */
-
-#endif /* __POSIX_VISIBLE || __XPG_VISIBLE || __BSD_VISIBLE */
-
-#if __XPG_VISIBLE >= 500 || __POSIX_VISIBLE >= 199506 || __BSD_VISIBLE
-#define TTY_NAME_MAX		260	/* max tty device name length w/ NUL */
-#define LOGIN_NAME_MAX          32	/* max login name length w/ NUL */
-#endif /* __XPG_VISIBLE >= 500 || __POSIX_VISIBLE >= 199506 || __BSD_VISIBLE */
-
-#if __POSIX_VISIBLE >= 200112
-#define HOST_NAME_MAX		255
+/*
+ * We leave the following values undefined to force applications to either
+ * assume conservative values or call sysconf() to get the current value.
+ *
+ * HOST_NAME_MAX
+ *
+ * (We should do this for most of the values currently defined here,
+ * but many programs are not prepared to deal with this yet.)
+ */
 #endif

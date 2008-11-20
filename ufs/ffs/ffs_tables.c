@@ -1,7 +1,4 @@
-/*	$OpenBSD: ffs_tables.c,v 1.5 2003/08/26 16:10:57 mickey Exp $	*/
-/*	$NetBSD: ffs_tables.c,v 1.2 1994/06/29 06:46:35 cgd Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,17 +29,21 @@
  *	@(#)ffs_tables.c	8.1 (Berkeley) 6/11/93
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_tables.c,v 1.12 2005/01/07 02:29:26 imp Exp $");
+
 #include <sys/param.h>
+#include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
 
 /*
  * Bit patterns for identifying fragments in the block map
  * used as ((map & around) == inside)
  */
-const int around[9] = {
+int around[9] = {
 	0x3, 0x7, 0xf, 0x1f, 0x3f, 0x7f, 0xff, 0x1ff, 0x3ff
 };
-const int inside[9] = {
+int inside[9] = {
 	0x0, 0x2, 0x6, 0xe, 0x1e, 0x3e, 0x7e, 0xfe, 0x1fe
 };
 
@@ -58,7 +59,7 @@ const int inside[9] = {
  * These tables are used by the scanc instruction on the VAX to
  * quickly find an appropriate fragment.
  */
-const u_char fragtbl124[256] = {
+static u_char fragtbl124[256] = {
 	0x00, 0x16, 0x16, 0x2a, 0x16, 0x16, 0x26, 0x4e,
 	0x16, 0x16, 0x16, 0x3e, 0x2a, 0x3e, 0x4e, 0x8a,
 	0x16, 0x16, 0x16, 0x3e, 0x16, 0x16, 0x36, 0x5e,
@@ -93,7 +94,7 @@ const u_char fragtbl124[256] = {
 	0x9e, 0x9e, 0x9e, 0xbe, 0xaa, 0xbe, 0xce, 0x8a,
 };
 
-const u_char fragtbl8[256] = {
+static u_char fragtbl8[256] = {
 	0x00, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02, 0x04,
 	0x01, 0x01, 0x01, 0x03, 0x02, 0x03, 0x04, 0x08,
 	0x01, 0x01, 0x01, 0x03, 0x01, 0x01, 0x03, 0x05,
@@ -131,6 +132,6 @@ const u_char fragtbl8[256] = {
 /*
  * The actual fragtbl array.
  */
-const u_char *fragtbl[MAXFRAG + 1] = {
+u_char *fragtbl[MAXFRAG + 1] = {
 	0, fragtbl124, fragtbl124, 0, fragtbl124, 0, 0, 0, fragtbl8,
 };

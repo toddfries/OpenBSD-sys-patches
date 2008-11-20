@@ -1,168 +1,101 @@
-/*	$OpenBSD: disk.h,v 1.18 2007/12/23 01:59:58 dlg Exp $	*/
-/*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
-
-/*
- * Copyright (c) 1995 Jason R. Thorpe.  All rights reserved.
- * Copyright (c) 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
+/*-
+ * ----------------------------------------------------------------------------
+ * "THE BEER-WARE LICENSE" (Revision 42):
+ * <phk@FreeBSD.ORG> wrote this file.  As long as you retain this notice you
+ * can do whatever you want with this stuff. If we meet some day, and you think
+ * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
+ * ----------------------------------------------------------------------------
  *
- * This software was developed by the Computer Systems Engineering group
- * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
- * contributed to Berkeley.
+ * $FreeBSD: src/sys/sys/disk.h,v 1.42 2007/05/05 17:02:19 pjd Exp $
  *
- * All advertising materials mentioning features or use of this software
- * must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Lawrence Berkeley Laboratory.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * from: Header: disk.h,v 1.5 92/11/19 04:33:03 torek Exp  (LBL)
- *
- *	@(#)disk.h	8.1 (Berkeley) 6/2/93
  */
 
-/*
- * Disk device structures.
- */
+#ifndef _SYS_DISK_H_
+#define	_SYS_DISK_H_
 
-#include <sys/time.h>
-#include <sys/queue.h>
-#include <sys/rwlock.h>
-#include <sys/mutex.h>
-
-struct buf;
-struct disklabel;
-
-#define DS_DISKNAMELEN	16
-
-struct diskstats {
-	char		ds_name[DS_DISKNAMELEN];
-	int		ds_busy;	/* busy counter */
-	u_int64_t	ds_rxfer;	/* total number of read transfers */
-	u_int64_t	ds_wxfer;	/* total number of write transfers */
-	u_int64_t	ds_seek;	/* total independent seek operations */
-	u_int64_t	ds_rbytes;	/* total bytes read */
-	u_int64_t	ds_wbytes;	/* total bytes written */
-	struct timeval	ds_attachtime;	/* time disk was attached */
-	struct timeval	ds_timestamp;	/* timestamp of last unbusy */
-	struct timeval	ds_time;	/* total time spent busy */
-};
-
-struct disk {
-	TAILQ_ENTRY(disk) dk_link;	/* link in global disklist */
-	struct rwlock	dk_lock;	/* disk lock */
-	struct mutex	dk_mtx;		/* busy/unbusy mtx */
-	char		*dk_name;	/* disk name */
-	int		dk_flags;	/* disk flags */
-#define DKF_CONSTRUCTED  0x0001
-
-	/*
-	 * Metrics data; note that some metrics may have no meaning
-	 * on certain types of disks.
-	 */
-	int		dk_busy;	/* busy counter */
-	u_int64_t	dk_rxfer;	/* total number of read transfers */
-	u_int64_t	dk_wxfer;	/* total number of write transfers */
-	u_int64_t	dk_seek;	/* total independent seek operations */
-	u_int64_t	dk_rbytes;	/* total bytes read */
-	u_int64_t	dk_wbytes;	/* total bytes written */
-	struct timeval	dk_attachtime;	/* time disk was attached */
-	struct timeval	dk_timestamp;	/* timestamp of last unbusy */
-	struct timeval	dk_time;	/* total time spent busy */
-
-	int		dk_bopenmask;	/* block devices open */
-	int		dk_copenmask;	/* character devices open */
-	int		dk_openmask;	/* composite (bopen|copen) */
-	int		dk_state;	/* label state   ### */
-	int		dk_blkshift;	/* shift to convert DEV_BSIZE to blks*/
-	int		dk_byteshift;	/* shift to convert bytes to blks */
-
-	struct	dkdriver *dk_driver;	/* pointer to driver */
-
-	/*
-	 * Disk label information.  Storage for the in-core disk label
-	 * must be dynamically allocated, otherwise the size of this
-	 * structure becomes machine-dependent.
-	 */
-	daddr64_t	dk_labelsector;		/* sector containing label */
-	struct disklabel *dk_label;	/* label */
-};
-
-struct dkdriver {
-	void	(*d_strategy)(struct buf *);
-#ifdef notyet
-	int	(*d_open)(dev_t dev, int ifmt, int, struct proc *);
-	int	(*d_close)(dev_t dev, int, int ifmt, struct proc *);
-	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data, int fflag,
-				struct proc *);
-	int	(*d_dump)(dev_t);
-	void	(*d_start)(struct buf *, daddr64_t);
-	int	(*d_mklabel)(struct disk *);
-#endif
-};
-
-/* states */
-#define	DK_CLOSED	0		/* drive is closed */
-#define	DK_WANTOPEN	1		/* drive being opened */
-#define	DK_WANTOPENRAW	2		/* drive being opened */
-#define	DK_RDLABEL	3		/* label being read */
-#define	DK_OPEN		4		/* label read, drive open */
-#define	DK_OPENRAW	5		/* open without label */
-
-#ifdef DISKSORT_STATS
-/*
- * Stats from disksort().
- */
-struct disksort_stats {
-	long	ds_newhead;		/* # new queue heads created */
-	long	ds_newtail;		/* # new queue tails created */
-	long	ds_midfirst;		/* # insertions into sort list */
-	long	ds_endfirst;		/* # insertions at end of sort list */
-	long	ds_newsecond;		/* # inversions (2nd lists) created */
-	long	ds_midsecond;		/* # insertions into 2nd list */
-	long	ds_endsecond;		/* # insertions at end of 2nd list */
-};
-#endif
-
-/*
- * disklist_head is defined here so that user-land has access to it.
- */
-TAILQ_HEAD(disklist_head, disk);	/* the disklist is a TAILQ */
+#include <sys/ioccom.h>
 
 #ifdef _KERNEL
-extern	int disk_count;			/* number of disks in global disklist */
-extern	int disk_change;		/* disk attached/detached */
 
-void	disk_init(void);
-int	disk_construct(struct disk *, char *);
-void	disk_attach(struct disk *);
-void	disk_detach(struct disk *);
-void	disk_busy(struct disk *);
-void	disk_unbusy(struct disk *, long, int);
-
-int	disk_lock(struct disk *);
-void    disk_unlock(struct disk *);
+#ifndef _SYS_CONF_H_
+#include <sys/conf.h>	/* XXX: temporary to avoid breakage */
 #endif
+
+void disk_err(struct bio *bp, const char *what, int blkdone, int nl);
+
+#endif
+
+#define DIOCGSECTORSIZE	_IOR('d', 128, u_int)
+	/*-
+	 * Get the sectorsize of the device in bytes.  The sectorsize is the
+	 * smallest unit of data which can be transfered from this device.
+	 * Usually this is a power of two but it may not be. (ie: CDROM audio)
+	 */
+
+#define DIOCGMEDIASIZE	_IOR('d', 129, off_t)	/* Get media size in bytes */
+	/*-
+	 * Get the size of the entire device in bytes.  This should be a
+	 * multiple of the sectorsize.
+	 */
+
+#define DIOCGFWSECTORS	_IOR('d', 130, u_int)	/* Get firmware sectorcount */
+	/*-
+	 * Get the firmwares notion of number of sectors per track.  This
+	 * value is mostly used for compatibility with various ill designed
+	 * disk label formats.  Don't use it unless you have to.
+	 */
+
+#define DIOCGFWHEADS	_IOR('d', 131, u_int)	/* Get firmware headcount */
+	/*-
+	 * Get the firmwares notion of number of heads per cylinder.  This
+	 * value is mostly used for compatibility with various ill designed
+	 * disk label formats.  Don't use it unless you have to.
+	 */
+
+#define DIOCSKERNELDUMP _IOW('d', 133, u_int)	/* Set/Clear kernel dumps */
+	/*-
+	 * Enable/Disable (the argument is boolean) the device for kernel
+	 * core dumps.
+	 */
+	
+#define DIOCGFRONTSTUFF _IOR('d', 134, off_t)
+	/*-
+	 * Many disk formats have some amount of space reserved at the
+	 * start of the disk to hold bootblocks, various disklabels and
+	 * similar stuff.  This ioctl returns the number of such bytes
+	 * which may apply to the device.
+	 */
+
+#define	DIOCGFLUSH _IO('d', 135)		/* Flush write cache */
+	/*-
+	 * Flush write cache of the device.
+	 */
+
+#define	DIOCGDELETE _IOW('d', 136, off_t[2])	/* Delete data */
+	/*-
+	 * Mark data on the device as unused.
+	 */
+
+#define	DISK_IDENT_SIZE	256
+#define	DIOCGIDENT _IOR('d', 137, char[DISK_IDENT_SIZE])
+	/*-
+	 * Get the ident of the given provider. Ident is (most of the time)
+	 * a uniqe and fixed provider's identifier. Ident's properties are as
+	 * follow:
+	 * - ident value is preserved between reboots,
+	 * - provider can be detached/attached and ident is preserved,
+	 * - provider's name can change - ident can't,
+	 * - ident value should not be based on on-disk metadata; in other
+	 *   words copying whole data from one disk to another should not
+	 *   yield the same ident for the other disk,
+	 * - there could be more than one provider with the same ident, but
+	 *   only if they point at exactly the same physical storage, this is
+	 *   the case for multipathing for example,
+	 * - GEOM classes that consumes single providers and provide single
+	 *   providers, like geli, gbde, should just attach class name to the
+	 *   ident of the underlying provider,
+	 * - ident is an ASCII string (is printable),
+	 * - ident is optional and applications can't relay on its presence.
+	 */
+
+#endif /* _SYS_DISK_H_ */

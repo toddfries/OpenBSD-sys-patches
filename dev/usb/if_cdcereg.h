@@ -1,9 +1,5 @@
-/*	$OpenBSD: if_cdcereg.h,v 1.3 2007/07/23 16:41:15 mbalmer Exp $ */
-
 /*
- * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
- * Copyright (c) 2003 Craig Boston
- * Copyright (c) 2004 Daniel Hartmeier
+ * Copyright (c) 2003-2005 Craig Boston
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -16,7 +12,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by Bill Paul.
+ *      This product includes software developed by Bill Paul.
  * 4. Neither the name of the author nor the names of any co-contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -32,58 +28,52 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/usb/if_cdcereg.h,v 1.8 2007/06/10 07:33:48 imp Exp $
  */
 
-#define CDCE_RX_LIST_CNT	1
-#define CDCE_TX_LIST_CNT	1
-#define CDCE_BUFSZ		1542
+#ifndef _USB_IF_CDCEREG_H_
+#define _USB_IF_CDCEREG_H_
 
 struct cdce_type {
 	struct usb_devno	 cdce_dev;
 	u_int16_t		 cdce_flags;
 #define CDCE_ZAURUS	1
-#define CDCE_SWAPUNION	2
-};
-
-struct cdce_softc;
-
-struct cdce_chain {
-	struct cdce_softc	*cdce_sc;
-	usbd_xfer_handle	 cdce_xfer;
-	char			*cdce_buf;
-	struct mbuf		*cdce_mbuf;
-	int			 cdce_accum;
-	int			 cdce_idx;
-};
-
-struct cdce_cdata {
-	struct cdce_chain	 cdce_rx_chain[CDCE_RX_LIST_CNT];
-	struct cdce_chain	 cdce_tx_chain[CDCE_TX_LIST_CNT];
-	int			 cdce_tx_prod;
-	int			 cdce_tx_cons;
-	int			 cdce_tx_cnt;
-	int			 cdce_rx_prod;
+#define CDCE_NO_UNION	2
 };
 
 struct cdce_softc {
-	struct device		 cdce_dev;
-	struct arpcom		 cdce_arpcom;
-#define GET_IFP(sc) (&(sc)->cdce_arpcom.ac_if)
+	struct ifnet		 *cdce_ifp;
+#define GET_IFP(sc) ((sc)->cdce_ifp)
+	struct ifmedia		 cdce_ifmedia;
+
 	usbd_device_handle	 cdce_udev;
-	usbd_interface_handle	 cdce_ctl_iface;
-	int			 cdce_intr_no;
-	usbd_pipe_handle	 cdce_intr_pipe;
-	usb_cdc_notification_t	 cdce_intr_buf;
-	int			 cdce_intr_size;
 	usbd_interface_handle	 cdce_data_iface;
 	int			 cdce_bulkin_no;
 	usbd_pipe_handle	 cdce_bulkin_pipe;
 	int			 cdce_bulkout_no;
 	usbd_pipe_handle	 cdce_bulkout_pipe;
 	char			 cdce_dying;
-	int			 cdce_unit;
-	struct cdce_cdata	 cdce_cdata;
+	device_t		 cdce_dev;
+
+	struct ue_cdata		 cdce_cdata;
+	struct timeval		 cdce_rx_notice;
 	int			 cdce_rxeof_errors;
+
 	u_int16_t		 cdce_flags;
-	char			 cdce_attached;
+
+	struct mtx		 cdce_mtx;
+
+	struct usb_qdat		 q;
 };
+
+/* We are still under Giant */
+#if 0
+#define CDCE_LOCK(_sc)           mtx_lock(&(_sc)->cdce_mtx)
+#define CDCE_UNLOCK(_sc)         mtx_unlock(&(_sc)->cdce_mtx)
+#else
+#define CDCE_LOCK(_sc)
+#define CDCE_UNLOCK(_sc)
+#endif
+
+#endif /* _USB_IF_CDCEREG_H_ */

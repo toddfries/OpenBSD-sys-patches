@@ -1,8 +1,7 @@
-/*	$OpenBSD: mii.c,v 1.18 2005/07/23 01:42:16 brad Exp $	*/
-/*	$NetBSD: mii.c,v 1.19 2000/02/02 17:09:44 thorpej Exp $	*/
+/*	$NetBSD: mii.c,v 1.12 1999/08/03 19:41:49 drochner Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -38,6 +37,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/mii.c,v 1.29 2007/05/01 18:21:24 marcel Exp $");
+
 /*
  * MII bus layer, glues MII-capable network interface drivers to sharable
  * PHY drivers.  This exports an interface compatible with BSD/OS 3.0's,
@@ -45,201 +47,315 @@
  */
 
 #include <sys/param.h>
-#include <sys/device.h>
 #include <sys/systm.h>
 #include <sys/socket.h>
+#include <sys/malloc.h>
+#include <sys/module.h>
+#include <sys/bus.h> 
 
 #include <net/if.h>
 #include <net/if_media.h>
+#include <net/route.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
-int	mii_print(void *, const char *);
-int	mii_submatch(struct device *, void *, void *);
+MODULE_VERSION(miibus, 1);
 
-#define MIICF_PHY		0	/* cf_loc index */
-#define MIICF_PHY_DEFAULT	(-1)	/* default phy device */
+#include "miibus_if.h"
+
+static int miibus_print_child(device_t dev, device_t child);
+static int miibus_child_location_str(device_t bus, device_t child, char *buf,
+    size_t buflen);
+static int miibus_child_pnpinfo_str(device_t bus, device_t child, char *buf,
+    size_t buflen);
+static int miibus_readreg(device_t, int, int);
+static int miibus_writereg(device_t, int, int, int);
+static void miibus_statchg(device_t);
+static void miibus_linkchg(device_t);
+static void miibus_mediainit(device_t);
+
+static device_method_t miibus_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		miibus_probe),
+	DEVMETHOD(device_attach,	miibus_attach),
+	DEVMETHOD(device_detach,	miibus_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+
+	/* bus interface */
+	DEVMETHOD(bus_print_child,	miibus_print_child),
+	DEVMETHOD(bus_driver_added,	bus_generic_driver_added),
+	DEVMETHOD(bus_child_pnpinfo_str, miibus_child_pnpinfo_str),
+	DEVMETHOD(bus_child_location_str, miibus_child_location_str),
+
+	/* MII interface */
+	DEVMETHOD(miibus_readreg,	miibus_readreg),
+	DEVMETHOD(miibus_writereg,	miibus_writereg),
+	DEVMETHOD(miibus_statchg,	miibus_statchg),    
+	DEVMETHOD(miibus_linkchg,	miibus_linkchg),    
+	DEVMETHOD(miibus_mediainit,	miibus_mediainit),    
+
+	{ 0, 0 }
+};
+
+devclass_t miibus_devclass;
+
+driver_t miibus_driver = {
+	"miibus",
+	miibus_methods,
+	sizeof(struct mii_data)
+};
+
+struct miibus_ivars {
+	ifm_change_cb_t	ifmedia_upd;
+	ifm_stat_cb_t	ifmedia_sts;
+};
 
 /*
  * Helper function used by network interface drivers, attaches PHYs
  * to the network interface driver parent.
  */
-void
-mii_attach(struct device *parent, struct mii_data *mii, int capmask,
-    int phyloc, int offloc, int flags)
+int
+miibus_probe(device_t dev)
 {
-	struct mii_attach_args ma;
-	struct mii_softc *child;
-	int bmsr, offset = 0;
-	int phymin, phymax;
+	struct mii_attach_args	ma, *args;
+	struct mii_data		*mii;
+	device_t		child = NULL, parent;
+	int			bmsr, capmask = 0xFFFFFFFF;
 
-	if (phyloc != MII_PHY_ANY && offloc != MII_OFFSET_ANY)
-		panic("mii_attach: phyloc and offloc specified");
+	mii = device_get_softc(dev);
+	parent = device_get_parent(dev);
+	LIST_INIT(&mii->mii_phys);
 
-	if (phyloc == MII_PHY_ANY) {
-		phymin = 0;
-		phymax = MII_NPHY - 1;
-	} else
-		phymin = phymax = phyloc;
-
-	if ((mii->mii_flags & MIIF_INITDONE) == 0) {
-		LIST_INIT(&mii->mii_phys);
-		mii->mii_flags |= MIIF_INITDONE;
-	}
-
-	for (ma.mii_phyno = phymin; ma.mii_phyno <= phymax; ma.mii_phyno++) {
-		/*
-		 * Make sure we haven't already configured a PHY at this
-		 * address.  This allows mii_attach() to be called
-		 * multiple times.
-		 */
-		for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
-		     child = LIST_NEXT(child, mii_list)) {
-			if (child->mii_phy == ma.mii_phyno) {
-				/*
-				 * Yes, there is already something
-				 * configured at this address.
-				 */
-				offset++;
-				continue;
-			}
-		}
-
+	for (ma.mii_phyno = 0; ma.mii_phyno < MII_NPHY; ma.mii_phyno++) {
 		/*
 		 * Check to see if there is a PHY at this address.  Note,
 		 * many braindead PHYs report 0/0 in their ID registers,
 		 * so we test for media in the BMSR.
-		 */
-		bmsr = (*mii->mii_readreg)(parent, ma.mii_phyno, MII_BMSR);
+	 	 */
+		bmsr = MIIBUS_READREG(parent, ma.mii_phyno, MII_BMSR);
 		if (bmsr == 0 || bmsr == 0xffff ||
-		    (bmsr & (BMSR_MEDIAMASK|BMSR_EXTSTAT)) == 0) {
+		    (bmsr & (BMSR_EXTSTAT|BMSR_MEDIAMASK)) == 0) {
 			/* Assume no PHY at this address. */
 			continue;
 		}
 
 		/*
-		 * There is a PHY at this address.  If we were given an
-		 * `offset' locator, skip this PHY if it doesn't match.
-		 */
-		if (offloc != MII_OFFSET_ANY && offloc != offset) {
-			offset++;
-			continue;
-		}
-
-		/*
-		 * Extract the IDs.  Braindead PHYs will be handled by
+		 * Extract the IDs. Braindead PHYs will be handled by
 		 * the `ukphy' driver, as we have no ID information to
 		 * match on.
-		 */
-		ma.mii_id1 = (*mii->mii_readreg)(parent, ma.mii_phyno,
+	 	 */
+		ma.mii_id1 = MIIBUS_READREG(parent, ma.mii_phyno,
 		    MII_PHYIDR1);
-		ma.mii_id2 = (*mii->mii_readreg)(parent, ma.mii_phyno,
+		ma.mii_id2 = MIIBUS_READREG(parent, ma.mii_phyno,
 		    MII_PHYIDR2);
 
 		ma.mii_data = mii;
 		ma.mii_capmask = capmask;
-		ma.mii_flags = flags | (mii->mii_flags & MIIF_INHERIT_MASK);
 
-		if ((child = (struct mii_softc *)config_found_sm(parent, &ma,
-		    mii_print, mii_submatch)) != NULL) {
-			/*
-			 * Link it up in the parent's MII data.
-			 */
-			LIST_INSERT_HEAD(&mii->mii_phys, child, mii_list);
-			child->mii_offset = offset;
-			mii->mii_instance++;
-		}
-		offset++;
+		args = malloc(sizeof(struct mii_attach_args),
+		    M_DEVBUF, M_NOWAIT);
+		bcopy((char *)&ma, (char *)args, sizeof(ma));
+		child = device_add_child(dev, NULL, -1);
+		device_set_ivars(child, args);
 	}
+
+	if (child == NULL)
+		return(ENXIO);
+
+	device_set_desc(dev, "MII bus");
+
+	return(0);
 }
 
-void
-mii_activate(struct mii_data *mii, enum devact act, int phyloc, int offloc)
+int
+miibus_attach(device_t dev)
 {
-	struct mii_softc *child;
+	struct miibus_ivars	*ivars;
+	struct mii_data		*mii;
 
-	if (phyloc != MII_PHY_ANY && offloc != MII_OFFSET_ANY)
-		panic("mii_activate: phyloc and offloc specified");
+	mii = device_get_softc(dev);
+	/*
+	 * Note that each NIC's softc must start with an ifnet pointer.
+	 * XXX: EVIL HACK!
+	 */
+	mii->mii_ifp = *(struct ifnet**)device_get_softc(device_get_parent(dev));
+	ivars = device_get_ivars(dev);
+	ifmedia_init(&mii->mii_media, IFM_IMASK, ivars->ifmedia_upd,
+	    ivars->ifmedia_sts);
+	bus_generic_attach(dev);
 
-	if ((mii->mii_flags & MIIF_INITDONE) == 0)
-		return;
+	return(0);
+}
 
-	for (child = LIST_FIRST(&mii->mii_phys);
-	     child != NULL; child = LIST_NEXT(child, mii_list)) {
-		if (phyloc != MII_PHY_ANY || offloc != MII_OFFSET_ANY) {
-			if (phyloc != MII_PHY_ANY &&
-			    phyloc != child->mii_phy)
-				continue;
-			if (offloc != MII_OFFSET_ANY &&
-			    offloc != child->mii_offset)
-				continue;
-		}
-		switch (act) {
-		case DVACT_ACTIVATE:
-			panic("mii_activate: DVACT_ACTIVATE");
+int
+miibus_detach(device_t dev)
+{
+	struct mii_data		*mii;
+
+	bus_generic_detach(dev);
+	mii = device_get_softc(dev);
+	ifmedia_removeall(&mii->mii_media);
+	mii->mii_ifp = NULL;
+
+	return(0);
+}
+
+static int
+miibus_print_child(device_t dev, device_t child)
+{
+	struct mii_attach_args *ma;
+	int retval;
+
+	ma = device_get_ivars(child);
+	retval = bus_print_child_header(dev, child);
+	retval += printf(" PHY %d", ma->mii_phyno);
+	retval += bus_print_child_footer(dev, child);
+
+	return (retval);
+}
+
+static int
+miibus_child_pnpinfo_str(device_t bus, device_t child, char *buf,
+    size_t buflen)
+{
+	struct mii_attach_args *maa = device_get_ivars(child);
+	snprintf(buf, buflen, "oui=0x%x model=0x%x rev=0x%x",
+	    MII_OUI(maa->mii_id1, maa->mii_id2),
+	    MII_MODEL(maa->mii_id2), MII_REV(maa->mii_id2));
+	return (0);
+}
+
+static int
+miibus_child_location_str(device_t bus, device_t child, char *buf,
+    size_t buflen)
+{
+	struct mii_attach_args *maa = device_get_ivars(child);
+	snprintf(buf, buflen, "phyno=%d", maa->mii_phyno);
+	return (0);
+}
+
+static int
+miibus_readreg(device_t dev, int phy, int reg)
+{
+	device_t		parent;
+
+	parent = device_get_parent(dev);
+	return(MIIBUS_READREG(parent, phy, reg));
+}
+
+static int
+miibus_writereg(device_t dev, int phy, int reg, int data)
+{
+	device_t		parent;
+
+	parent = device_get_parent(dev);
+	return(MIIBUS_WRITEREG(parent, phy, reg, data));
+}
+
+static void
+miibus_statchg(device_t dev)
+{
+	device_t		parent;
+	struct mii_data		*mii;
+	struct ifnet		*ifp;
+
+	parent = device_get_parent(dev);
+	MIIBUS_STATCHG(parent);
+
+	mii = device_get_softc(dev);
+
+	/*
+	 * Note that each NIC's softc must start with an ifnet pointer.
+	 * XXX: EVIL HACK!
+	 */
+	ifp = *(struct ifnet **)device_get_softc(parent);
+	ifp->if_baudrate = ifmedia_baudrate(mii->mii_media_active);
+	return;
+}
+
+static void
+miibus_linkchg(device_t dev)
+{
+	struct mii_data		*mii;
+	device_t		parent;
+	int			link_state;
+
+	parent = device_get_parent(dev);
+	MIIBUS_LINKCHG(parent);
+
+	mii = device_get_softc(dev);
+	
+	if (mii->mii_media_status & IFM_AVALID) {
+		if (mii->mii_media_status & IFM_ACTIVE)
+			link_state = LINK_STATE_UP;
+		else
+			link_state = LINK_STATE_DOWN;
+	} else
+		link_state = LINK_STATE_UNKNOWN;
+	/*
+	 * Note that each NIC's softc must start with an ifnet pointer.
+	 * XXX: EVIL HACK!
+	 */
+	if_link_state_change(*(struct ifnet**)device_get_softc(parent), link_state);
+}
+
+static void
+miibus_mediainit(device_t dev)
+{
+	struct mii_data		*mii;
+	struct ifmedia_entry	*m;
+	int			media = 0;
+
+	/* Poke the parent in case it has any media of its own to add. */
+	MIIBUS_MEDIAINIT(device_get_parent(dev));
+
+	mii = device_get_softc(dev);
+	LIST_FOREACH(m, &mii->mii_media.ifm_list, ifm_list) {
+		media = m->ifm_media;
+		if (media == (IFM_ETHER|IFM_AUTO))
 			break;
-
-		case DVACT_DEACTIVATE:
-			if (config_deactivate(&child->mii_dev) != 0)
-				panic("%s: config_activate(%d) failed",
-				    child->mii_dev.dv_xname, act);
-		}
 	}
-}
 
-void
-mii_detach(struct mii_data *mii, int phyloc, int offloc)
-{
-	struct mii_softc *child, *nchild;
+	ifmedia_set(&mii->mii_media, media);
 
-	if (phyloc != MII_PHY_ANY && offloc != MII_PHY_ANY)
-		panic("mii_detach: phyloc and offloc specified");
-
-	if ((mii->mii_flags & MIIF_INITDONE) == 0)
-		return;
-
-	for (child = LIST_FIRST(&mii->mii_phys);
-	     child != NULL; child = nchild) {
-		nchild = LIST_NEXT(child, mii_list);
-		if (phyloc != MII_PHY_ANY || offloc != MII_OFFSET_ANY) {
-			if (phyloc != MII_PHY_ANY &&
-			    phyloc != child->mii_phy)
-				continue;
-			if (offloc != MII_OFFSET_ANY &&
-			    offloc != child->mii_offset)
-				continue;
-		}
-		LIST_REMOVE(child, mii_list);
-		(void) config_detach(&child->mii_dev, DETACH_FORCE);
-	}
+	return;
 }
 
 int
-mii_print(void *aux, const char *pnp)
+mii_phy_probe(device_t dev, device_t *child, ifm_change_cb_t ifmedia_upd,
+    ifm_stat_cb_t ifmedia_sts)
 {
-	struct mii_attach_args *ma = aux;
+	struct miibus_ivars	*ivars;
+	int			bmsr, i;
 
-	if (pnp != NULL)
-		printf("OUI 0x%06x model 0x%04x rev %d at %s",
-		    MII_OUI(ma->mii_id1, ma->mii_id2), MII_MODEL(ma->mii_id2),
-		    MII_REV(ma->mii_id2), pnp);
+	ivars = malloc(sizeof(*ivars), M_DEVBUF, M_NOWAIT);
+	if (ivars == NULL)
+		return (ENOMEM);
+	ivars->ifmedia_upd = ifmedia_upd;
+	ivars->ifmedia_sts = ifmedia_sts;
+	*child = device_add_child(dev, "miibus", -1);
+	device_set_ivars(*child, ivars);
 
-	printf(" phy %d", ma->mii_phyno);
-	return (UNCONF);
-}
+	for (i = 0; i < MII_NPHY; i++) {
+		bmsr = MIIBUS_READREG(dev, i, MII_BMSR);
+                if (bmsr == 0 || bmsr == 0xffff ||
+                    (bmsr & (BMSR_EXTSTAT|BMSR_MEDIAMASK)) == 0) {
+                        /* Assume no PHY at this address. */
+                        continue;
+                } else
+			break;
+	}
 
-int
-mii_submatch(struct device *parent, void *match, void *aux)
-{
-	struct cfdata *cf = match;
-	struct mii_attach_args *ma = aux;
+	if (i == MII_NPHY) {
+		device_delete_child(dev, *child);
+		*child = NULL;
+		return(ENXIO);
+	}
 
-	if (ma->mii_phyno != cf->cf_loc[MIICF_PHY] &&
-	    cf->cf_loc[MIICF_PHY] != MIICF_PHY_DEFAULT)
-		return (0);
+	bus_generic_attach(dev);
 
-	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
+	return(0);
 }
 
 /*
@@ -254,9 +370,8 @@ mii_mediachg(struct mii_data *mii)
 	mii->mii_media_status = 0;
 	mii->mii_media_active = IFM_NONE;
 
-	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
-	     child = LIST_NEXT(child, mii_list)) {
-		rv = PHY_SERVICE(child, mii, MII_MEDIACHG);
+	LIST_FOREACH(child, &mii->mii_phys, mii_list) {
+		rv = (*child->mii_service)(child, mii, MII_MEDIACHG);
 		if (rv)
 			return (rv);
 	}
@@ -271,9 +386,8 @@ mii_tick(struct mii_data *mii)
 {
 	struct mii_softc *child;
 
-	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
-	     child = LIST_NEXT(child, mii_list))
-		(void) PHY_SERVICE(child, mii, MII_TICK);
+	LIST_FOREACH(child, &mii->mii_phys, mii_list)
+		(void) (*child->mii_service)(child, mii, MII_TICK);
 }
 
 /*
@@ -287,9 +401,8 @@ mii_pollstat(struct mii_data *mii)
 	mii->mii_media_status = 0;
 	mii->mii_media_active = IFM_NONE;
 
-	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
-	     child = LIST_NEXT(child, mii_list))
-		(void) PHY_SERVICE(child, mii, MII_POLLSTAT);
+	LIST_FOREACH(child, &mii->mii_phys, mii_list)
+		(void) (*child->mii_service)(child, mii, MII_POLLSTAT);
 }
 
 /*
@@ -300,7 +413,6 @@ mii_down(struct mii_data *mii)
 {
 	struct mii_softc *child;
 
-	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
-	     child = LIST_NEXT(child, mii_list))
-		(void) PHY_SERVICE(child, mii, MII_DOWN);
+	LIST_FOREACH(child, &mii->mii_phys, mii_list)
+		mii_phy_down(child);
 }

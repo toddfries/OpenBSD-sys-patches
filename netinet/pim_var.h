@@ -1,7 +1,4 @@
-/*	$OpenBSD: pim_var.h,v 1.3 2007/12/14 18:33:41 deraadt Exp $	*/
-/*	$NetBSD: pim_var.h,v 1.1 2004/09/04 23:32:29 manu Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1998-2000
  * University of Southern California/Information Sciences Institute.
  * All rights reserved.
@@ -30,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: /repoman/r/ncvs/src/sys/netinet/pim_var.h,v 1.1 2003/08/07 18:17:43 hsu Exp $
+ * $FreeBSD: src/sys/netinet/pim_var.h,v 1.3 2005/08/10 07:10:02 obrien Exp $
  */
 
 #ifndef _NETINET_PIM_VAR_H_
@@ -49,17 +46,17 @@
  * PIM statistics kept in the kernel
  */
 struct pimstat {
-	u_int64_t pims_rcv_total_msgs;	   /* total PIM messages received    */
-	u_int64_t pims_rcv_total_bytes;	   /* total PIM bytes received	     */
-	u_int64_t pims_rcv_tooshort;	   /* rcvd with too few bytes	     */
-	u_int64_t pims_rcv_badsum;	   /* rcvd with bad checksum	     */
-	u_int64_t pims_rcv_badversion;	   /* rcvd bad PIM version	     */
-	u_int64_t pims_rcv_registers_msgs;  /* rcvd regs. msgs (data only)    */
-	u_int64_t pims_rcv_registers_bytes; /* rcvd regs. bytes (data only)   */
-	u_int64_t pims_rcv_registers_wrongiif; /* rcvd regs. on wrong iif     */
-	u_int64_t pims_rcv_badregisters;    /* rcvd invalid registers	     */
-	u_int64_t pims_snd_registers_msgs;  /* sent regs. msgs (data only)    */
-	u_int64_t pims_snd_registers_bytes; /* sent regs. bytes (data only)   */
+	u_quad_t pims_rcv_total_msgs;	   /* total PIM messages received    */
+	u_quad_t pims_rcv_total_bytes;	   /* total PIM bytes received	     */
+	u_quad_t pims_rcv_tooshort;	   /* rcvd with too few bytes	     */
+	u_quad_t pims_rcv_badsum;	   /* rcvd with bad checksum	     */
+	u_quad_t pims_rcv_badversion;	   /* rcvd bad PIM version	     */
+	u_quad_t pims_rcv_registers_msgs;  /* rcvd regs. msgs (data only)    */
+	u_quad_t pims_rcv_registers_bytes; /* rcvd regs. bytes (data only)   */
+	u_quad_t pims_rcv_registers_wrongiif; /* rcvd regs. on wrong iif     */
+	u_quad_t pims_rcv_badregisters;	   /* rcvd invalid registers	     */
+	u_quad_t pims_snd_registers_msgs;  /* sent regs. msgs (data only)    */
+	u_quad_t pims_snd_registers_bytes; /* sent regs. bytes (data only)   */
 };
 
 /*
@@ -74,10 +71,9 @@ struct pimstat {
 }
 
 #ifdef _KERNEL
-extern struct pimstat pimstat;
 
-void	pim_input(struct mbuf *, ...);
-int	pim_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+void pim_input(struct mbuf *, int);
+SYSCTL_DECL(_net_inet_pim);
 #endif
 
 #endif /* _NETINET_PIM_VAR_H_ */

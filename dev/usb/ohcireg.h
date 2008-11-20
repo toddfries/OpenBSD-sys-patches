@@ -1,9 +1,8 @@
-/*	$OpenBSD: ohcireg.h,v 1.12 2006/05/29 03:50:21 pascoe Exp $ */
-/*	$NetBSD: ohcireg.h,v 1.19 2002/07/11 21:14:27 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/ohcireg.h,v 1.8 1999/11/17 22:33:40 n_hibma Exp $	*/
+/*	$NetBSD: ohcireg.h,v 1.17 2000/04/01 09:27:35 augustss Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/ohcireg.h,v 1.23 2006/05/28 05:27:08 iedowse Exp $	*/
 
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -128,7 +127,7 @@
 #define OHCI_LES (OHCI_PLE | OHCI_IE | OHCI_CLE | OHCI_BLE)
 #define OHCI_ALL_INTRS (OHCI_SO | OHCI_WDH | OHCI_SF | OHCI_RD | OHCI_UE | \
                         OHCI_FNO | OHCI_RHSC | OHCI_OC)
-#define OHCI_NORMAL_INTRS (OHCI_SO | OHCI_WDH | OHCI_RD | OHCI_UE | OHCI_RHSC)
+#define OHCI_NORMAL_INTRS (OHCI_WDH | OHCI_RD | OHCI_UE | OHCI_RHSC)
 
 #define OHCI_FSMPS(i) (((i-210)*6/7) << 16)
 #define OHCI_PERIODIC(i) ((i)*9/10)
@@ -148,6 +147,7 @@ struct ohci_hcca {
 #define OHCI_PAGE_SIZE 0x1000
 #define OHCI_PAGE(x) ((x) &~ 0xfff)
 #define OHCI_PAGE_OFFSET(x) ((x) & 0xfff)
+#define OHCI_PAGE_MASK(x) ((x) & 0xfff)
 
 typedef struct {
 	u_int32_t	ed_flags;
@@ -220,7 +220,8 @@ typedef struct {
 	u_int16_t	itd_offset[OHCI_ITD_NOFFSET];	/* Buffer offsets */
 #define itd_pswn itd_offset				/* Packet Status Word*/
 #define OHCI_ITD_PAGE_SELECT	0x00001000
-#define OHCI_ITD_MK_OFFS(len)	(0xe000 | ((len) & 0x1fff))
+#define OHCI_ITD_MK_OFFS(page, off) \
+     (0xe000 | ((page) ? OHCI_ITD_PAGE_SELECT : 0) | ((off) & 0xfff))
 #define OHCI_ITD_PSW_LENGTH(x)	((x) & 0xfff)		/* Transfer length */
 #define OHCI_ITD_PSW_GET_CC(x)	((x) >> 12)		/* Condition Code */
 } ohci_itd_t;
@@ -240,8 +241,7 @@ typedef struct {
 #define OHCI_CC_DATA_UNDERRUN		9
 #define OHCI_CC_BUFFER_OVERRUN		12
 #define OHCI_CC_BUFFER_UNDERRUN		13
-#define OHCI_CC_NOT_ACCESSED		14
-#define OHCI_CC_NOT_ACCESSED_MASK	14
+#define OHCI_CC_NOT_ACCESSED		15
 
 /* Some delay needed when changing certain registers. */
 #define OHCI_ENABLE_POWER_DELAY	5

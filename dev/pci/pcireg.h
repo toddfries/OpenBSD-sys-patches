@@ -1,23 +1,16 @@
-/*	$OpenBSD: pcireg.h,v 1.34 2007/11/26 13:20:28 jsg Exp $	*/
-/*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
-
-/*
- * Copyright (c) 1995, 1996 Christopher G. Demetriou.  All rights reserved.
- * Copyright (c) 1994, 1996 Charles Hannum.  All rights reserved.
+/*-
+ * Copyright (c) 1997, Stefan Esser <se@freebsd.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *    notice unmodified, this list of conditions, and the following
+ *    disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Charles Hannum.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,612 +22,586 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-#ifndef _DEV_PCI_PCIREG_H_
-#define	_DEV_PCI_PCIREG_H_
-
-/*
- * Standardized PCI configuration information
  *
- * XXX This is not complete.
+ * $FreeBSD: src/sys/dev/pci/pcireg.h,v 1.64 2007/09/19 13:05:58 sepotvin Exp $
+ *
  */
 
 /*
- * Device identification register; contains a vendor ID and a device ID.
+ * PCIM_xxx: mask to locate subfield in register
+ * PCIR_xxx: config register offset
+ * PCIC_xxx: device class
+ * PCIS_xxx: device subclass
+ * PCIP_xxx: device programming interface
+ * PCIV_xxx: PCI vendor ID (only required to fixup ancient devices)
+ * PCID_xxx: device ID
+ * PCIY_xxx: capability identification number
  */
-#define	PCI_ID_REG			0x00
 
-typedef u_int16_t pci_vendor_id_t;
-typedef u_int16_t pci_product_id_t;
+/* some PCI bus constants */
 
-#define	PCI_VENDOR_SHIFT			0
-#define	PCI_VENDOR_MASK				0xffff
-#define	PCI_VENDOR(id) \
-	    (((id) >> PCI_VENDOR_SHIFT) & PCI_VENDOR_MASK)
+#define	PCI_BUSMAX	255
+#define	PCI_SLOTMAX	31
+#define	PCI_FUNCMAX	7
+#define	PCI_REGMAX	255
+#define	PCI_MAXHDRTYPE	2
 
-#define	PCI_PRODUCT_SHIFT			16
-#define	PCI_PRODUCT_MASK			0xffff
-#define	PCI_PRODUCT(id) \
-	    (((id) >> PCI_PRODUCT_SHIFT) & PCI_PRODUCT_MASK)
+/* PCI config header registers for all devices */
 
-#define PCI_ID_CODE(vid,pid) \
-	((((vid) & PCI_VENDOR_MASK) << PCI_VENDOR_SHIFT) | \
-	 (((pid) & PCI_PRODUCT_MASK) << PCI_PRODUCT_SHIFT))
+#define	PCIR_DEVVENDOR	0x00
+#define	PCIR_VENDOR	0x00
+#define	PCIR_DEVICE	0x02
+#define	PCIR_COMMAND	0x04
+#define	PCIM_CMD_PORTEN		0x0001
+#define	PCIM_CMD_MEMEN		0x0002
+#define	PCIM_CMD_BUSMASTEREN	0x0004
+#define	PCIM_CMD_SPECIALEN	0x0008
+#define	PCIM_CMD_MWRICEN	0x0010
+#define	PCIM_CMD_PERRESPEN	0x0040
+#define	PCIM_CMD_SERRESPEN	0x0100
+#define	PCIM_CMD_BACKTOBACK	0x0200
+#define	PCIR_STATUS	0x06
+#define	PCIM_STATUS_CAPPRESENT	0x0010
+#define	PCIM_STATUS_66CAPABLE	0x0020
+#define	PCIM_STATUS_BACKTOBACK	0x0080
+#define	PCIM_STATUS_PERRREPORT	0x0100
+#define	PCIM_STATUS_SEL_FAST	0x0000
+#define	PCIM_STATUS_SEL_MEDIMUM	0x0200
+#define	PCIM_STATUS_SEL_SLOW	0x0400
+#define	PCIM_STATUS_SEL_MASK	0x0600
+#define	PCIM_STATUS_STABORT	0x0800
+#define	PCIM_STATUS_RTABORT	0x1000
+#define	PCIM_STATUS_RMABORT	0x2000
+#define	PCIM_STATUS_SERR	0x4000
+#define	PCIM_STATUS_PERR	0x8000
+#define	PCIR_REVID	0x08
+#define	PCIR_PROGIF	0x09
+#define	PCIR_SUBCLASS	0x0a
+#define	PCIR_CLASS	0x0b
+#define	PCIR_CACHELNSZ	0x0c
+#define	PCIR_LATTIMER	0x0d
+#define	PCIR_HDRTYPE	0x0e
+#define	PCIM_HDRTYPE		0x7f
+#define	PCIM_HDRTYPE_NORMAL	0x00
+#define	PCIM_HDRTYPE_BRIDGE	0x01
+#define	PCIM_HDRTYPE_CARDBUS	0x02
+#define	PCIM_MFDEV		0x80
+#define	PCIR_BIST	0x0f
 
-/*
- * Command and status register.
- */
-#define	PCI_COMMAND_STATUS_REG			0x04
+/* Capability Register Offsets */
 
-#define	PCI_COMMAND_IO_ENABLE			0x00000001
-#define	PCI_COMMAND_MEM_ENABLE			0x00000002
-#define	PCI_COMMAND_MASTER_ENABLE		0x00000004
-#define	PCI_COMMAND_SPECIAL_ENABLE		0x00000008
-#define	PCI_COMMAND_INVALIDATE_ENABLE		0x00000010
-#define	PCI_COMMAND_PALETTE_ENABLE		0x00000020
-#define	PCI_COMMAND_PARITY_ENABLE		0x00000040
-#define	PCI_COMMAND_STEPPING_ENABLE		0x00000080
-#define	PCI_COMMAND_SERR_ENABLE			0x00000100
-#define	PCI_COMMAND_BACKTOBACK_ENABLE		0x00000200
+#define	PCICAP_ID	0x0
+#define	PCICAP_NEXTPTR	0x1
 
-#define	PCI_STATUS_CAPLIST_SUPPORT		0x00100000
-#define	PCI_STATUS_66MHZ_SUPPORT		0x00200000
-#define	PCI_STATUS_UDF_SUPPORT			0x00400000
-#define	PCI_STATUS_BACKTOBACK_SUPPORT		0x00800000
-#define	PCI_STATUS_PARITY_ERROR			0x01000000
-#define	PCI_STATUS_DEVSEL_FAST			0x00000000
-#define	PCI_STATUS_DEVSEL_MEDIUM		0x02000000
-#define	PCI_STATUS_DEVSEL_SLOW			0x04000000
-#define	PCI_STATUS_DEVSEL_MASK			0x06000000
-#define	PCI_STATUS_TARGET_TARGET_ABORT		0x08000000
-#define	PCI_STATUS_MASTER_TARGET_ABORT		0x10000000
-#define	PCI_STATUS_MASTER_ABORT			0x20000000
-#define	PCI_STATUS_SPECIAL_ERROR		0x40000000
-#define	PCI_STATUS_PARITY_DETECT		0x80000000
+/* Capability Identification Numbers */
 
-#define	PCI_COMMAND_STATUS_BITS \
-    ("\020\01IO\02MEM\03MASTER\04SPECIAL\05INVALIDATE\06PALETTE\07PARITY"\
-     "\010STEPPING\011SERR\012BACKTOBACK\025CAPLIST\026CLK66\027UDF"\
-     "\030BACK2BACK_STAT\031PARITY_STAT\032DEVSEL_MEDIUM\033DEVSEL_SLOW"\
-     "\034TARGET_TARGET_ABORT\035MASTER_TARGET_ABORT\036MASTER_ABORT"\
-     "\037SPECIAL_ERROR\040PARITY_DETECT")
-/*
- * PCI Class and Revision Register; defines type and revision of device.
- */
-#define	PCI_CLASS_REG			0x08
-
-typedef u_int8_t pci_class_t;
-typedef u_int8_t pci_subclass_t;
-typedef u_int8_t pci_interface_t;
-typedef u_int8_t pci_revision_t;
-
-#define	PCI_CLASS_SHIFT				24
-#define	PCI_CLASS_MASK				0xff
-#define	PCI_CLASS(cr) \
-	    (((cr) >> PCI_CLASS_SHIFT) & PCI_CLASS_MASK)
-
-#define	PCI_SUBCLASS_SHIFT			16
-#define	PCI_SUBCLASS_MASK			0xff
-#define	PCI_SUBCLASS(cr) \
-	    (((cr) >> PCI_SUBCLASS_SHIFT) & PCI_SUBCLASS_MASK)
-
-#define	PCI_INTERFACE_SHIFT			8
-#define	PCI_INTERFACE_MASK			0xff
-#define	PCI_INTERFACE(cr) \
-	    (((cr) >> PCI_INTERFACE_SHIFT) & PCI_INTERFACE_MASK)
-
-#define	PCI_REVISION_SHIFT			0
-#define	PCI_REVISION_MASK			0xff
-#define	PCI_REVISION(cr) \
-	    (((cr) >> PCI_REVISION_SHIFT) & PCI_REVISION_MASK)
-
-/* base classes */
-#define	PCI_CLASS_PREHISTORIC			0x00
-#define	PCI_CLASS_MASS_STORAGE			0x01
-#define	PCI_CLASS_NETWORK			0x02
-#define	PCI_CLASS_DISPLAY			0x03
-#define	PCI_CLASS_MULTIMEDIA			0x04
-#define	PCI_CLASS_MEMORY			0x05
-#define	PCI_CLASS_BRIDGE			0x06
-#define	PCI_CLASS_COMMUNICATIONS		0x07
-#define	PCI_CLASS_SYSTEM			0x08
-#define	PCI_CLASS_INPUT				0x09
-#define	PCI_CLASS_DOCK				0x0a
-#define	PCI_CLASS_PROCESSOR			0x0b
-#define	PCI_CLASS_SERIALBUS			0x0c
-#define	PCI_CLASS_WIRELESS			0x0d
-#define	PCI_CLASS_I2O				0x0e
-#define	PCI_CLASS_SATCOM			0x0f
-#define	PCI_CLASS_CRYPTO			0x10
-#define	PCI_CLASS_DASP				0x11
-#define	PCI_CLASS_UNDEFINED			0xff
-
-/* 0x00 prehistoric subclasses */
-#define	PCI_SUBCLASS_PREHISTORIC_MISC		0x00
-#define	PCI_SUBCLASS_PREHISTORIC_VGA		0x01
-
-/* 0x01 mass storage subclasses */
-#define	PCI_SUBCLASS_MASS_STORAGE_SCSI		0x00
-#define	PCI_SUBCLASS_MASS_STORAGE_IDE		0x01
-#define	PCI_SUBCLASS_MASS_STORAGE_FLOPPY	0x02
-#define	PCI_SUBCLASS_MASS_STORAGE_IPI		0x03
-#define	PCI_SUBCLASS_MASS_STORAGE_RAID		0x04
-#define	PCI_SUBCLASS_MASS_STORAGE_ATA		0x05
-#define	PCI_SUBCLASS_MASS_STORAGE_SATA		0x06
-#define	PCI_SUBCLASS_MASS_STORAGE_SAS		0x07
-#define	PCI_SUBCLASS_MASS_STORAGE_MISC		0x80
-
-/* 0x02 network subclasses */
-#define	PCI_SUBCLASS_NETWORK_ETHERNET		0x00
-#define	PCI_SUBCLASS_NETWORK_TOKENRING		0x01
-#define	PCI_SUBCLASS_NETWORK_FDDI		0x02
-#define	PCI_SUBCLASS_NETWORK_ATM		0x03
-#define	PCI_SUBCLASS_NETWORK_ISDN		0x04
-#define	PCI_SUBCLASS_NETWORK_WORLDFIP		0x05
-#define	PCI_SUBCLASS_NETWORK_PCIMGMULTICOMP	0x06
-#define	PCI_SUBCLASS_NETWORK_MISC		0x80
-
-/* 0x03 display subclasses */
-#define	PCI_SUBCLASS_DISPLAY_VGA		0x00
-#define	PCI_SUBCLASS_DISPLAY_XGA		0x01
-#define	PCI_SUBCLASS_DISPLAY_3D			0x02
-#define	PCI_SUBCLASS_DISPLAY_MISC		0x80
-
-/* 0x04 multimedia subclasses */
-#define	PCI_SUBCLASS_MULTIMEDIA_VIDEO		0x00
-#define	PCI_SUBCLASS_MULTIMEDIA_AUDIO		0x01
-#define	PCI_SUBCLASS_MULTIMEDIA_TELEPHONY	0x02
-#define	PCI_SUBCLASS_MULTIMEDIA_HDAUDIO		0x03
-#define	PCI_SUBCLASS_MULTIMEDIA_MISC		0x80
-
-/* 0x05 memory subclasses */
-#define	PCI_SUBCLASS_MEMORY_RAM			0x00
-#define	PCI_SUBCLASS_MEMORY_FLASH		0x01
-#define	PCI_SUBCLASS_MEMORY_MISC		0x80
-
-/* 0x06 bridge subclasses */
-#define	PCI_SUBCLASS_BRIDGE_HOST		0x00
-#define	PCI_SUBCLASS_BRIDGE_ISA			0x01
-#define	PCI_SUBCLASS_BRIDGE_EISA		0x02
-#define	PCI_SUBCLASS_BRIDGE_MC			0x03
-#define	PCI_SUBCLASS_BRIDGE_PCI			0x04
-#define	PCI_SUBCLASS_BRIDGE_PCMCIA		0x05
-#define	PCI_SUBCLASS_BRIDGE_NUBUS		0x06
-#define	PCI_SUBCLASS_BRIDGE_CARDBUS		0x07
-#define	PCI_SUBCLASS_BRIDGE_RACEWAY		0x08
-#define	PCI_SUBCLASS_BRIDGE_STPCI		0x09
-#define	PCI_SUBCLASS_BRIDGE_INFINIBAND		0x0a
-#define	PCI_SUBCLASS_BRIDGE_MISC		0x80
-
-/* 0x07 communications subclasses */
-#define	PCI_SUBCLASS_COMMUNICATIONS_SERIAL	0x00
-#define	PCI_SUBCLASS_COMMUNICATIONS_PARALLEL	0x01
-#define	PCI_SUBCLASS_COMMUNICATIONS_MPSERIAL	0x02
-#define	PCI_SUBCLASS_COMMUNICATIONS_MODEM	0x03
-#define	PCI_SUBCLASS_COMMUNICATIONS_GPIB	0x04
-#define	PCI_SUBCLASS_COMMUNICATIONS_SMARTCARD	0x05
-#define	PCI_SUBCLASS_COMMUNICATIONS_MISC	0x80
-
-/* 0x08 system subclasses */
-#define	PCI_SUBCLASS_SYSTEM_PIC			0x00
-#define	PCI_SUBCLASS_SYSTEM_DMA			0x01
-#define	PCI_SUBCLASS_SYSTEM_TIMER		0x02
-#define	PCI_SUBCLASS_SYSTEM_RTC			0x03
-#define	PCI_SUBCLASS_SYSTEM_PCIHOTPLUG		0x04
-#define	PCI_SUBCLASS_SYSTEM_SDHC		0x05
-#define	PCI_SUBCLASS_SYSTEM_MISC		0x80
-
-/* 0x09 input subclasses */
-#define	PCI_SUBCLASS_INPUT_KEYBOARD		0x00
-#define	PCI_SUBCLASS_INPUT_DIGITIZER		0x01
-#define	PCI_SUBCLASS_INPUT_MOUSE		0x02
-#define	PCI_SUBCLASS_INPUT_SCANNER		0x03
-#define	PCI_SUBCLASS_INPUT_GAMEPORT		0x04
-#define	PCI_SUBCLASS_INPUT_MISC			0x80
-
-/* 0x0a dock subclasses */
-#define	PCI_SUBCLASS_DOCK_GENERIC		0x00
-#define	PCI_SUBCLASS_DOCK_MISC			0x80
-
-/* 0x0b processor subclasses */
-#define	PCI_SUBCLASS_PROCESSOR_386		0x00
-#define	PCI_SUBCLASS_PROCESSOR_486		0x01
-#define	PCI_SUBCLASS_PROCESSOR_PENTIUM		0x02
-#define	PCI_SUBCLASS_PROCESSOR_ALPHA		0x10
-#define	PCI_SUBCLASS_PROCESSOR_POWERPC		0x20
-#define	PCI_SUBCLASS_PROCESSOR_MIPS		0x30
-#define	PCI_SUBCLASS_PROCESSOR_COPROC		0x40
-
-/* 0x0c serial bus subclasses */
-#define	PCI_SUBCLASS_SERIALBUS_FIREWIRE		0x00
-#define	PCI_SUBCLASS_SERIALBUS_ACCESS		0x01
-#define	PCI_SUBCLASS_SERIALBUS_SSA		0x02
-#define	PCI_SUBCLASS_SERIALBUS_USB		0x03
-#define	PCI_SUBCLASS_SERIALBUS_FIBER		0x04
-#define	PCI_SUBCLASS_SERIALBUS_SMBUS		0x05
-#define	PCI_SUBCLASS_SERIALBUS_INFINIBAND	0x06
-#define	PCI_SUBCLASS_SERIALBUS_IPMI		0x07
-#define	PCI_SUBCLASS_SERIALBUS_SERCOS		0x08
-#define	PCI_SUBCLASS_SERIALBUS_CANBUS		0x09
-
-/* 0x0d wireless subclasses */
-#define	PCI_SUBCLASS_WIRELESS_IRDA		0x00
-#define	PCI_SUBCLASS_WIRELESS_CONSUMERIR	0x01
-#define	PCI_SUBCLASS_WIRELESS_RF		0x10
-#define	PCI_SUBCLASS_WIRELESS_BLUETOOTH		0x11
-#define	PCI_SUBCLASS_WIRELESS_BROADBAND		0x12
-#define	PCI_SUBCLASS_WIRELESS_802_11A		0x20
-#define	PCI_SUBCLASS_WIRELESS_802_11B		0x21
-#define	PCI_SUBCLASS_WIRELESS_MISC		0x80
-
-/* 0x0e I2O (Intelligent I/O) subclasses */
-#define	PCI_SUBCLASS_I2O_STANDARD		0x00
-
-/* 0x0f satellite communication subclasses */
-/*	PCI_SUBCLASS_SATCOM_???			0x00    / * XXX ??? */
-#define	PCI_SUBCLASS_SATCOM_TV			0x01
-#define	PCI_SUBCLASS_SATCOM_AUDIO		0x02
-#define	PCI_SUBCLASS_SATCOM_VOICE		0x03
-#define	PCI_SUBCLASS_SATCOM_DATA		0x04
-
-/* 0x10 encryption/decryption subclasses */
-#define	PCI_SUBCLASS_CRYPTO_NETCOMP		0x00
-#define	PCI_SUBCLASS_CRYPTO_ENTERTAINMENT	0x10
-#define	PCI_SUBCLASS_CRYPTO_MISC		0x80
-
-/* 0x11 data acquisition and signal processing subclasses */
-#define	PCI_SUBCLASS_DASP_DPIO			0x00
-#define	PCI_SUBCLASS_DASP_TIMEFREQ		0x01
-#define	PCI_SUBCLASS_DASP_SYNC			0x10
-#define	PCI_SUBCLASS_DASP_MGMT			0x20
-#define	PCI_SUBCLASS_DASP_MISC			0x80
-
-/*
- * PCI BIST/Header Type/Latency Timer/Cache Line Size Register.
- */
-#define	PCI_BHLC_REG			0x0c
-
-#define	PCI_BIST_SHIFT				24
-#define	PCI_BIST_MASK				0xff
-#define	PCI_BIST(bhlcr) \
-	    (((bhlcr) >> PCI_BIST_SHIFT) & PCI_BIST_MASK)
-
-#define	PCI_HDRTYPE_SHIFT			16
-#define	PCI_HDRTYPE_MASK			0xff
-#define	PCI_HDRTYPE(bhlcr) \
-	    (((bhlcr) >> PCI_HDRTYPE_SHIFT) & PCI_HDRTYPE_MASK)
-
-#define PCI_HDRTYPE_TYPE(bhlcr) \
-	    (PCI_HDRTYPE(bhlcr) & 0x7f)
-#define	PCI_HDRTYPE_MULTIFN(bhlcr) \
-	    ((PCI_HDRTYPE(bhlcr) & 0x80) != 0)
-
-#define	PCI_LATTIMER_SHIFT			8
-#define	PCI_LATTIMER_MASK			0xff
-#define	PCI_LATTIMER(bhlcr) \
-	    (((bhlcr) >> PCI_LATTIMER_SHIFT) & PCI_LATTIMER_MASK)
-
-#define	PCI_CACHELINE_SHIFT			0
-#define	PCI_CACHELINE_MASK			0xff
-#define	PCI_CACHELINE(bhlcr) \
-	    (((bhlcr) >> PCI_CACHELINE_SHIFT) & PCI_CACHELINE_MASK)
+#define	PCIY_PMG	0x01	/* PCI Power Management */
+#define	PCIY_AGP	0x02	/* AGP */
+#define	PCIY_VPD	0x03	/* Vital Product Data */
+#define	PCIY_SLOTID	0x04	/* Slot Identification */
+#define	PCIY_MSI	0x05	/* Message Signaled Interrupts */
+#define	PCIY_CHSWP	0x06	/* CompactPCI Hot Swap */
+#define	PCIY_PCIX	0x07	/* PCI-X */
+#define	PCIY_HT		0x08	/* HyperTransport */
+#define	PCIY_VENDOR	0x09	/* Vendor Unique */
+#define	PCIY_DEBUG	0x0a	/* Debug port */
+#define	PCIY_CRES	0x0b	/* CompactPCI central resource control */
+#define	PCIY_HOTPLUG	0x0c	/* PCI Hot-Plug */
+#define	PCIY_SUBVENDOR	0x0d	/* PCI-PCI bridge subvendor ID */
+#define	PCIY_AGP8X	0x0e	/* AGP 8x */
+#define	PCIY_SECDEV	0x0f	/* Secure Device */
+#define	PCIY_EXPRESS	0x10	/* PCI Express */
+#define	PCIY_MSIX	0x11	/* MSI-X */
 
 /* config registers for header type 0 devices */
 
-#define PCI_MAPS	0x10
-#define PCI_CARDBUSCIS	0x28
-#define PCI_SUBVEND_0	0x2c
-#define PCI_SUBDEV_0	0x2e
-#define PCI_INTLINE	0x3c
-#define PCI_INTPIN	0x3d
-#define PCI_MINGNT	0x3e
-#define PCI_MAXLAT	0x3f
+#define	PCIR_BARS	0x10
+#define	PCIR_BAR(x)		(PCIR_BARS + (x) * 4)
+#define	PCI_MAX_BAR_0		5	/* Number of standard bars */
+#define	PCI_RID2BAR(rid)	(((rid) - PCIR_BARS) / 4)
+#define	PCI_BAR_IO(x)		(((x) & PCIM_BAR_SPACE) == PCIM_BAR_IO_SPACE)
+#define	PCI_BAR_MEM(x)		(((x) & PCIM_BAR_SPACE) == PCIM_BAR_MEM_SPACE)
+#define	PCIM_BAR_SPACE		0x00000001
+#define	PCIM_BAR_MEM_SPACE	0
+#define	PCIM_BAR_IO_SPACE	1
+#define	PCIM_BAR_MEM_TYPE	0x00000006
+#define	PCIM_BAR_MEM_32		0
+#define	PCIM_BAR_MEM_1MB	2	/* Locate below 1MB in PCI <= 2.1 */
+#define	PCIM_BAR_MEM_64		4
+#define	PCIM_BAR_MEM_PREFETCH	0x00000008
+#define	PCIM_BAR_MEM_BASE	0xfffffff0
+#define	PCIM_BAR_IO_RESERVED	0x00000002
+#define	PCIM_BAR_IO_BASE	0xfffffffc
+#define	PCIR_CIS	0x28
+#define	PCIM_CIS_ASI_MASK	0x7
+#define	PCIM_CIS_ASI_CONFIG	0
+#define	PCIM_CIS_ASI_BAR0	1
+#define	PCIM_CIS_ASI_BAR1	2
+#define	PCIM_CIS_ASI_BAR2	3
+#define	PCIM_CIS_ASI_BAR3	4
+#define	PCIM_CIS_ASI_BAR4	5
+#define	PCIM_CIS_ASI_BAR5	6
+#define	PCIM_CIS_ASI_ROM	7
+#define	PCIM_CIS_ADDR_MASK	0x0ffffff8
+#define	PCIM_CIS_ROM_MASK	0xf0000000
+#define PCIM_CIS_CONFIG_MASK	0xff
+#define	PCIR_SUBVEND_0	0x2c
+#define	PCIR_SUBDEV_0	0x2e
+#define	PCIR_BIOS	0x30
+#define	PCIM_BIOS_ENABLE	0x01
+#define	PCIM_BIOS_ADDR_MASK	0xfffff800
+#define	PCIR_CAP_PTR	0x34
+#define	PCIR_INTLINE	0x3c
+#define	PCIR_INTPIN	0x3d
+#define	PCIR_MINGNT	0x3e
+#define	PCIR_MAXLAT	0x3f
 
-/* config registers for header type 1 devices */
+/* config registers for header type 1 (PCI-to-PCI bridge) devices */
 
-#define PCI_SECSTAT_1	0 /**/
+#define	PCIR_SECSTAT_1	0x1e
 
-#define PCI_PRIBUS_1	0x18
-#define PCI_SECBUS_1	0x19
-#define PCI_SUBBUS_1	0x1a
-#define PCI_SECLAT_1	0x1b
+#define	PCIR_PRIBUS_1	0x18
+#define	PCIR_SECBUS_1	0x19
+#define	PCIR_SUBBUS_1	0x1a
+#define	PCIR_SECLAT_1	0x1b
 
-#define PCI_IOBASEL_1	0x1c
-#define PCI_IOLIMITL_1	0x1d
-#define PCI_IOBASEH_1	0 /**/
-#define PCI_IOLIMITH_1	0 /**/
+#define	PCIR_IOBASEL_1	0x1c
+#define	PCIR_IOLIMITL_1	0x1d
+#define	PCIR_IOBASEH_1	0x30
+#define	PCIR_IOLIMITH_1	0x32
+#define	PCIM_BRIO_16		0x0
+#define	PCIM_BRIO_32		0x1
+#define	PCIM_BRIO_MASK		0xf
 
-#define PCI_MEMBASE_1	0x20
-#define PCI_MEMLIMIT_1	0x22
+#define	PCIR_MEMBASE_1	0x20
+#define	PCIR_MEMLIMIT_1	0x22
 
-#define PCI_PMBASEL_1	0x24
-#define PCI_PMLIMITL_1	0x26
-#define PCI_PMBASEH_1	0 /**/
-#define PCI_PMLIMITH_1	0 /**/
+#define	PCIR_PMBASEL_1	0x24
+#define	PCIR_PMLIMITL_1	0x26
+#define	PCIR_PMBASEH_1	0x28
+#define	PCIR_PMLIMITH_1	0x2c
 
-#define PCI_BRIDGECTL_1 0 /**/
+#define	PCIR_BRIDGECTL_1 0x3e
 
-#define PCI_SUBVEND_1	0x34
-#define PCI_SUBDEV_1	0x36
+/* config registers for header type 2 (CardBus) devices */
 
-/* config registers for header type 2 devices */
+#define	PCIR_CAP_PTR_2	0x14
+#define	PCIR_SECSTAT_2	0x16
 
-#define PCI_SECSTAT_2	0x16
+#define	PCIR_PRIBUS_2	0x18
+#define	PCIR_SECBUS_2	0x19
+#define	PCIR_SUBBUS_2	0x1a
+#define	PCIR_SECLAT_2	0x1b
 
-#define PCI_PRIBUS_2	0x18
-#define PCI_SECBUS_2	0x19
-#define PCI_SUBBUS_2	0x1a
-#define PCI_SECLAT_2	0x1b
+#define	PCIR_MEMBASE0_2	0x1c
+#define	PCIR_MEMLIMIT0_2 0x20
+#define	PCIR_MEMBASE1_2	0x24
+#define	PCIR_MEMLIMIT1_2 0x28
+#define	PCIR_IOBASE0_2	0x2c
+#define	PCIR_IOLIMIT0_2	0x30
+#define	PCIR_IOBASE1_2	0x34
+#define	PCIR_IOLIMIT1_2	0x38
 
-#define PCI_MEMBASE0_2	0x1c
-#define PCI_MEMLIMIT0_2 0x20
-#define PCI_MEMBASE1_2	0x24
-#define PCI_MEMLIMIT1_2 0x28
-#define PCI_IOBASE0_2	0x2c
-#define PCI_IOLIMIT0_2	0x30
-#define PCI_IOBASE1_2	0x34
-#define PCI_IOLIMIT1_2	0x38
+#define	PCIR_BRIDGECTL_2 0x3e
 
-#define PCI_BRIDGECTL_2 0x3e
+#define	PCIR_SUBVEND_2	0x40
+#define	PCIR_SUBDEV_2	0x42
 
-#define PCI_SUBVEND_2	0x40
-#define PCI_SUBDEV_2	0x42
+#define	PCIR_PCCARDIF_2	0x44
 
-#define PCI_PCCARDIF_2	0x44
+/* PCI device class, subclass and programming interface definitions */
 
-/*
- * Mapping registers
- */
-#define	PCI_MAPREG_START		0x10
-#define	PCI_MAPREG_END			0x28
-#define	PCI_MAPREG_PPB_END		0x18
-#define	PCI_MAPREG_PCB_END		0x14
+#define	PCIC_OLD	0x00
+#define	PCIS_OLD_NONVGA		0x00
+#define	PCIS_OLD_VGA		0x01
 
-#define	PCI_MAPREG_TYPE(mr)						\
-	    ((mr) & PCI_MAPREG_TYPE_MASK)
-#define	PCI_MAPREG_TYPE_MASK			0x00000001
+#define	PCIC_STORAGE	0x01
+#define	PCIS_STORAGE_SCSI	0x00
+#define	PCIS_STORAGE_IDE	0x01
+#define	PCIP_STORAGE_IDE_MODEPRIM	0x01
+#define	PCIP_STORAGE_IDE_PROGINDPRIM	0x02
+#define	PCIP_STORAGE_IDE_MODESEC	0x04
+#define	PCIP_STORAGE_IDE_PROGINDSEC	0x08
+#define	PCIP_STORAGE_IDE_MASTERDEV	0x80
+#define	PCIS_STORAGE_FLOPPY	0x02
+#define	PCIS_STORAGE_IPI	0x03
+#define	PCIS_STORAGE_RAID	0x04
+#define	PCIS_STORAGE_ATA_ADMA	0x05
+#define	PCIS_STORAGE_SATA	0x06
+#define	PCIP_STORAGE_SATA_AHCI_1_0	0x01
+#define	PCIS_STORAGE_SAS	0x07
+#define	PCIS_STORAGE_OTHER	0x80
 
-#define	PCI_MAPREG_TYPE_MEM			0x00000000
-#define	PCI_MAPREG_TYPE_IO			0x00000001
+#define	PCIC_NETWORK	0x02
+#define	PCIS_NETWORK_ETHERNET	0x00
+#define	PCIS_NETWORK_TOKENRING	0x01
+#define	PCIS_NETWORK_FDDI	0x02
+#define	PCIS_NETWORK_ATM	0x03
+#define	PCIS_NETWORK_ISDN	0x04
+#define	PCIS_NETWORK_WORLDFIP	0x05
+#define	PCIS_NETWORK_PICMG	0x06
+#define	PCIS_NETWORK_OTHER	0x80
 
-#define	PCI_MAPREG_MEM_TYPE(mr)						\
-	    ((mr) & PCI_MAPREG_MEM_TYPE_MASK)
-#define	PCI_MAPREG_MEM_TYPE_MASK		0x00000006
+#define	PCIC_DISPLAY	0x03
+#define	PCIS_DISPLAY_VGA	0x00
+#define	PCIS_DISPLAY_XGA	0x01
+#define	PCIS_DISPLAY_3D		0x02
+#define	PCIS_DISPLAY_OTHER	0x80
 
-#define	PCI_MAPREG_MEM_TYPE_32BIT		0x00000000
-#define	PCI_MAPREG_MEM_TYPE_32BIT_1M		0x00000002
-#define	PCI_MAPREG_MEM_TYPE_64BIT		0x00000004
+#define	PCIC_MULTIMEDIA	0x04
+#define	PCIS_MULTIMEDIA_VIDEO	0x00
+#define	PCIS_MULTIMEDIA_AUDIO	0x01
+#define	PCIS_MULTIMEDIA_TELE	0x02
+#define	PCIS_MULTIMEDIA_OTHER	0x80
 
-#define _PCI_MAPREG_TYPEBITS(reg) \
-	(PCI_MAPREG_TYPE(reg) == PCI_MAPREG_TYPE_IO ? \
-	reg & PCI_MAPREG_TYPE_MASK : \
-	reg & (PCI_MAPREG_TYPE_MASK|PCI_MAPREG_MEM_TYPE_MASK))
+#define	PCIC_MEMORY	0x05
+#define	PCIS_MEMORY_RAM		0x00
+#define	PCIS_MEMORY_FLASH	0x01
+#define	PCIS_MEMORY_OTHER	0x80
 
-#define	PCI_MAPREG_MEM_PREFETCHABLE(mr)					\
-	    (((mr) & PCI_MAPREG_MEM_PREFETCHABLE_MASK) != 0)
-#define	PCI_MAPREG_MEM_PREFETCHABLE_MASK	0x00000008
+#define	PCIC_BRIDGE	0x06
+#define	PCIS_BRIDGE_HOST	0x00
+#define	PCIS_BRIDGE_ISA		0x01
+#define	PCIS_BRIDGE_EISA	0x02
+#define	PCIS_BRIDGE_MCA		0x03
+#define	PCIS_BRIDGE_PCI		0x04
+#define	PCIP_BRIDGE_PCI_SUBTRACTIVE	0x01
+#define	PCIS_BRIDGE_PCMCIA	0x05
+#define	PCIS_BRIDGE_NUBUS	0x06
+#define	PCIS_BRIDGE_CARDBUS	0x07
+#define	PCIS_BRIDGE_RACEWAY	0x08
+#define	PCIS_BRIDGE_PCI_TRANSPARENT 0x09
+#define	PCIS_BRIDGE_INFINIBAND	0x0a
+#define	PCIS_BRIDGE_OTHER	0x80
 
-#define	PCI_MAPREG_MEM_ADDR(mr)						\
-	    ((mr) & PCI_MAPREG_MEM_ADDR_MASK)
-#define	PCI_MAPREG_MEM_SIZE(mr)						\
-	    (PCI_MAPREG_MEM_ADDR(mr) & -PCI_MAPREG_MEM_ADDR(mr))
-#define	PCI_MAPREG_MEM_ADDR_MASK		0xfffffff0
+#define	PCIC_SIMPLECOMM	0x07
+#define	PCIS_SIMPLECOMM_UART	0x00
+#define	PCIP_SIMPLECOMM_UART_8250	0x00
+#define	PCIP_SIMPLECOMM_UART_16450A	0x01
+#define	PCIP_SIMPLECOMM_UART_16550A	0x02
+#define	PCIP_SIMPLECOMM_UART_16650A	0x03
+#define	PCIP_SIMPLECOMM_UART_16750A	0x04
+#define	PCIP_SIMPLECOMM_UART_16850A	0x05
+#define	PCIP_SIMPLECOMM_UART_16950A	0x06
+#define	PCIS_SIMPLECOMM_PAR	0x01
+#define	PCIS_SIMPLECOMM_MULSER	0x02
+#define	PCIS_SIMPLECOMM_MODEM	0x03
+#define	PCIS_SIMPLECOMM_GPIB	0x04
+#define	PCIS_SIMPLECOMM_SMART_CARD 0x05
+#define	PCIS_SIMPLECOMM_OTHER	0x80
 
-#define	PCI_MAPREG_MEM64_ADDR(mr)					\
-	    ((mr) & PCI_MAPREG_MEM64_ADDR_MASK)
-#define	PCI_MAPREG_MEM64_SIZE(mr)					\
-	    (PCI_MAPREG_MEM64_ADDR(mr) & -PCI_MAPREG_MEM64_ADDR(mr))
-#define	PCI_MAPREG_MEM64_ADDR_MASK		0xfffffffffffffff0ULL
+#define	PCIC_BASEPERIPH	0x08
+#define	PCIS_BASEPERIPH_PIC	0x00
+#define	PCIP_BASEPERIPH_PIC_8259A	0x00
+#define	PCIP_BASEPERIPH_PIC_ISA		0x01
+#define	PCIP_BASEPERIPH_PIC_EISA	0x02
+#define	PCIP_BASEPERIPH_PIC_IO_APIC	0x10
+#define	PCIP_BASEPERIPH_PIC_IOX_APIC	0x20
+#define	PCIS_BASEPERIPH_DMA	0x01
+#define	PCIS_BASEPERIPH_TIMER	0x02
+#define	PCIS_BASEPERIPH_RTC	0x03
+#define	PCIS_BASEPERIPH_PCIHOT	0x04
+#define	PCIS_BASEPERIPH_SDHC	0x05
+#define	PCIS_BASEPERIPH_OTHER	0x80
 
-#define	PCI_MAPREG_IO_ADDR(mr)						\
-	    ((mr) & PCI_MAPREG_IO_ADDR_MASK)
-#define	PCI_MAPREG_IO_SIZE(mr)						\
-	    (PCI_MAPREG_IO_ADDR(mr) & -PCI_MAPREG_IO_ADDR(mr))
-#define	PCI_MAPREG_IO_ADDR_MASK			0xfffffffe
+#define	PCIC_INPUTDEV	0x09
+#define	PCIS_INPUTDEV_KEYBOARD	0x00
+#define	PCIS_INPUTDEV_DIGITIZER	0x01
+#define	PCIS_INPUTDEV_MOUSE	0x02
+#define	PCIS_INPUTDEV_SCANNER	0x03
+#define	PCIS_INPUTDEV_GAMEPORT	0x04
+#define	PCIS_INPUTDEV_OTHER	0x80
 
-/*
- * Cardbus CIS pointer (PCI rev. 2.1)
- */
-#define PCI_CARDBUS_CIS_REG 0x28
+#define	PCIC_DOCKING	0x0a
+#define	PCIS_DOCKING_GENERIC	0x00
+#define	PCIS_DOCKING_OTHER	0x80
 
-/*
- * Subsystem identification register; contains a vendor ID and a device ID.
- * Types/macros for PCI_ID_REG apply.
- * (PCI rev. 2.1)
- */
-#define PCI_SUBSYS_ID_REG 0x2c
+#define	PCIC_PROCESSOR	0x0b
+#define	PCIS_PROCESSOR_386	0x00
+#define	PCIS_PROCESSOR_486	0x01
+#define	PCIS_PROCESSOR_PENTIUM	0x02
+#define	PCIS_PROCESSOR_ALPHA	0x10
+#define	PCIS_PROCESSOR_POWERPC	0x20
+#define	PCIS_PROCESSOR_MIPS	0x30
+#define	PCIS_PROCESSOR_COPROC	0x40
 
-/*
- * Expansion ROM Base Address register
- * (PCI rev. 2.0)
- */
-#define PCI_ROM_REG 0x30
+#define	PCIC_SERIALBUS	0x0c
+#define	PCIS_SERIALBUS_FW	0x00
+#define	PCIS_SERIALBUS_ACCESS	0x01
+#define	PCIS_SERIALBUS_SSA	0x02
+#define	PCIS_SERIALBUS_USB	0x03
+#define	PCIP_SERIALBUS_USB_UHCI		0x00
+#define	PCIP_SERIALBUS_USB_OHCI		0x10
+#define	PCIP_SERIALBUS_USB_EHCI		0x20
+#define	PCIP_SERIALBUS_USB_DEVICE	0xfe
+#define	PCIS_SERIALBUS_FC	0x04
+#define	PCIS_SERIALBUS_SMBUS	0x05
+#define	PCIS_SERIALBUS_INFINIBAND 0x06
+#define	PCIS_SERIALBUS_IPMI	0x07
+#define	PCIP_SERIALBUS_IPMI_SMIC	0x00
+#define	PCIP_SERIALBUS_IPMI_KCS		0x01
+#define	PCIP_SERIALBUS_IPMI_BT		0x02
+#define	PCIS_SERIALBUS_SERCOS	0x08
+#define	PCIS_SERIALBUS_CANBUS	0x09
 
-#define PCI_ROM_ENABLE			0x00000001
-#define PCI_ROM_ADDR_MASK		0xfffff800
-#define PCI_ROM_ADDR(mr)						\
-	    ((mr) & PCI_ROM_ADDR_MASK)
-#define PCI_ROM_SIZE(mr)						\
-	    (PCI_ROM_ADDR(mr) & -PCI_ROM_ADDR(mr))
+#define	PCIC_WIRELESS	0x0d
+#define	PCIS_WIRELESS_IRDA	0x00
+#define	PCIS_WIRELESS_IR	0x01
+#define	PCIS_WIRELESS_RF	0x10
+#define	PCIS_WIRELESS_BLUETOOTH	0x11
+#define	PCIS_WIRELESS_BROADBAND	0x12
+#define	PCIS_WIRELESS_80211A	0x20
+#define	PCIS_WIRELESS_80211B	0x21
+#define	PCIS_WIRELESS_OTHER	0x80
 
-/*
- * capabilities link list (PCI rev. 2.2)
- */
-#define PCI_CAPLISTPTR_REG		0x34	/* header type 0 */
-#define PCI_CARDBUS_CAPLISTPTR_REG	0x14	/* header type 2 */
-#define PCI_CAPLIST_PTR(cpr) ((cpr) & 0xff)
-#define PCI_CAPLIST_NEXT(cr) (((cr) >> 8) & 0xff)
-#define PCI_CAPLIST_CAP(cr) ((cr) & 0xff)
+#define	PCIC_INTELLIIO	0x0e
+#define	PCIS_INTELLIIO_I2O	0x00
 
-#define PCI_CAP_RESERVED	0x00
-#define PCI_CAP_PWRMGMT		0x01
-#define PCI_CAP_AGP		0x02
-#define PCI_CAP_VPD		0x03
-#define PCI_CAP_SLOTID		0x04
-#define PCI_CAP_MSI		0x05
-#define PCI_CAP_CPCI_HOTSWAP	0x06
-#define PCI_CAP_PCIX		0x07
-#define PCI_CAP_LDT		0x08
-#define PCI_CAP_VENDSPEC	0x09
-#define PCI_CAP_DEBUGPORT	0x0a
-#define PCI_CAP_CPCI_RSRCCTL	0x0b
-#define PCI_CAP_HOTPLUG		0x0c
-#define PCI_CAP_AGP8		0x0e
-#define PCI_CAP_SECURE		0x0f
-#define PCI_CAP_PCIEXPRESS     	0x10
-#define PCI_CAP_MSIX		0x11
+#define	PCIC_SATCOM	0x0f
+#define	PCIS_SATCOM_TV		0x01
+#define	PCIS_SATCOM_AUDIO	0x02
+#define	PCIS_SATCOM_VOICE	0x03
+#define	PCIS_SATCOM_DATA	0x04
 
-/*
- * Vital Product Data; access via capability pointer (PCI rev 2.2).
- */
-#define	PCI_VPD_ADDRESS_MASK	0x7fff
-#define	PCI_VPD_ADDRESS_SHIFT	16
-#define	PCI_VPD_ADDRESS(ofs)	\
-	(((ofs) & PCI_VPD_ADDRESS_MASK) << PCI_VPD_ADDRESS_SHIFT)
-#define	PCI_VPD_DATAREG(ofs)	((ofs) + 4)
-#define	PCI_VPD_OPFLAG		0x80000000
+#define	PCIC_CRYPTO	0x10
+#define	PCIS_CRYPTO_NETCOMP	0x00
+#define	PCIS_CRYPTO_ENTERTAIN	0x10
+#define	PCIS_CRYPTO_OTHER	0x80
 
-/*
- * Power Management Control Status Register; access via capability pointer.
- */
-#define PCI_PMCSR		0x04
-#define PCI_PMCSR_STATE_MASK	0x03
-#define PCI_PMCSR_STATE_D0	0x00
-#define PCI_PMCSR_STATE_D1	0x01
-#define PCI_PMCSR_STATE_D2	0x02
-#define PCI_PMCSR_STATE_D3	0x03
+#define	PCIC_DASP	0x11
+#define	PCIS_DASP_DPIO		0x00
+#define	PCIS_DASP_PERFCNTRS	0x01
+#define	PCIS_DASP_COMM_SYNC	0x10
+#define	PCIS_DASP_MGMT_CARD	0x20
+#define	PCIS_DASP_OTHER		0x80
 
-/*
- * PCI Express; access via capability pointer.
- */
-#define PCI_PCIE_XCAP		0x00
-#define PCI_PCIE_XCAP_SI	0x01000000
-#define PCI_PCIE_DCAP		0x04
-#define PCI_PCIE_DCSR		0x08
-#define PCI_PCIE_LCAP		0x0c
-#define PCI_PCIE_LCSR		0x10
-#define PCI_PCIE_SLCAP		0x14
-#define PCI_PCIE_SLCAP_ABP	0x00000001
-#define PCI_PCIE_SLCAP_PCP	0x00000002
-#define PCI_PCIE_SLCAP_MSP	0x00000004
-#define PCI_PCIE_SLCAP_AIP	0x00000008
-#define PCI_PCIE_SLCAP_PIP	0x00000010
-#define PCI_PCIE_SLCAP_HPS	0x00000020
-#define PCI_PCIE_SLCAP_HPC	0x00000040
-#define PCI_PCIE_SLCSR		0x18
-#define PCI_PCIE_SLCSR_ABE	0x00000001
-#define PCI_PCIE_SLCSR_PFE	0x00000002
-#define PCI_PCIE_SLCSR_MSE	0x00000004
-#define PCI_PCIE_SLCSR_PDE	0x00000008
-#define PCI_PCIE_SLCSR_CCE	0x00000010
-#define PCI_PCIE_SLCSR_HPE	0x00000020
-#define PCI_PCIE_SLCSR_ABP	0x00010000
-#define PCI_PCIE_SLCSR_PFD	0x00020000
-#define PCI_PCIE_SLCSR_MSC	0x00040000
-#define PCI_PCIE_SLCSR_PDC	0x00080000
-#define PCI_PCIE_SLCSR_CC	0x00100000
-#define PCI_PCIE_SLCSR_MS	0x00200000
-#define PCI_PCIE_SLCSR_PDS	0x00400000
-#define PCI_PCIE_SLCSR_LACS	0x01000000
-#define PCI_PCIE_RCSR		0x1c
+#define	PCIC_OTHER	0xff
 
-/*
- * Interrupt Configuration Register; contains interrupt pin and line.
- */
-#define	PCI_INTERRUPT_REG		0x3c
+/* Bridge Control Values. */
+#define	PCIB_BCR_PERR_ENABLE		0x0001
+#define	PCIB_BCR_SERR_ENABLE		0x0002
+#define	PCIB_BCR_ISA_ENABLE		0x0004
+#define	PCIB_BCR_VGA_ENABLE		0x0008
+#define	PCIB_BCR_MASTER_ABORT_MODE	0x0020
+#define	PCIB_BCR_SECBUS_RESET		0x0040
+#define	PCIB_BCR_SECBUS_BACKTOBACK	0x0080
+#define	PCIB_BCR_PRI_DISCARD_TIMEOUT	0x0100
+#define	PCIB_BCR_SEC_DISCARD_TIMEOUT	0x0200
+#define	PCIB_BCR_DISCARD_TIMER_STATUS	0x0400
+#define	PCIB_BCR_DISCARD_TIMER_SERREN	0x0800
 
-typedef u_int8_t pci_intr_pin_t;
-typedef u_int8_t pci_intr_line_t;
+/* PCI power manangement */
+#define	PCIR_POWER_CAP		0x2
+#define	PCIM_PCAP_SPEC			0x0007
+#define	PCIM_PCAP_PMEREQCLK		0x0008
+#define	PCIM_PCAP_PMEREQPWR		0x0010
+#define	PCIM_PCAP_DEVSPECINIT		0x0020
+#define	PCIM_PCAP_DYNCLOCK		0x0040
+#define	PCIM_PCAP_SECCLOCK		0x00c0
+#define	PCIM_PCAP_CLOCKMASK		0x00c0
+#define	PCIM_PCAP_REQFULLCLOCK		0x0100
+#define	PCIM_PCAP_D1SUPP		0x0200
+#define	PCIM_PCAP_D2SUPP		0x0400
+#define	PCIM_PCAP_D0PME			0x0800
+#define	PCIM_PCAP_D1PME			0x1000
+#define	PCIM_PCAP_D2PME			0x2000
+#define	PCIM_PCAP_D3PME_HOT		0x4000
+#define	PCIM_PCAP_D3PME_COLD		0x8000
 
-#define	PCI_INTERRUPT_PIN_SHIFT			8
-#define	PCI_INTERRUPT_PIN_MASK			0xff
-#define	PCI_INTERRUPT_PIN(icr) \
-	    (((icr) >> PCI_INTERRUPT_PIN_SHIFT) & PCI_INTERRUPT_PIN_MASK)
+#define	PCIR_POWER_STATUS	0x4
+#define	PCIM_PSTAT_D0			0x0000
+#define	PCIM_PSTAT_D1			0x0001
+#define	PCIM_PSTAT_D2			0x0002
+#define	PCIM_PSTAT_D3			0x0003
+#define	PCIM_PSTAT_DMASK		0x0003
+#define	PCIM_PSTAT_REPENABLE		0x0010
+#define	PCIM_PSTAT_PMEENABLE		0x0100
+#define	PCIM_PSTAT_D0POWER		0x0000
+#define	PCIM_PSTAT_D1POWER		0x0200
+#define	PCIM_PSTAT_D2POWER		0x0400
+#define	PCIM_PSTAT_D3POWER		0x0600
+#define	PCIM_PSTAT_D0HEAT		0x0800
+#define	PCIM_PSTAT_D1HEAT		0x1000
+#define	PCIM_PSTAT_D2HEAT		0x1200
+#define	PCIM_PSTAT_D3HEAT		0x1400
+#define	PCIM_PSTAT_DATAUNKN		0x0000
+#define	PCIM_PSTAT_DATADIV10		0x2000
+#define	PCIM_PSTAT_DATADIV100		0x4000
+#define	PCIM_PSTAT_DATADIV1000		0x6000
+#define	PCIM_PSTAT_DATADIVMASK		0x6000
+#define	PCIM_PSTAT_PME			0x8000
 
-#define	PCI_INTERRUPT_LINE_SHIFT		0
-#define	PCI_INTERRUPT_LINE_MASK			0xff
-#define	PCI_INTERRUPT_LINE(icr) \
-	    (((icr) >> PCI_INTERRUPT_LINE_SHIFT) & PCI_INTERRUPT_LINE_MASK)
+#define	PCIR_POWER_PMCSR	0x6
+#define	PCIM_PMCSR_DCLOCK		0x10
+#define	PCIM_PMCSR_B2SUPP		0x20
+#define	PCIM_BMCSR_B3SUPP		0x40
+#define	PCIM_BMCSR_BPCE			0x80
 
-#define	PCI_MIN_GNT_SHIFT			16
-#define	PCI_MIN_GNT_MASK			0xff
-#define	PCI_MIN_GNT(icr) \
-	    (((icr) >> PCI_MIN_GNT_SHIFT) & PCI_MIN_GNT_MASK)
+#define	PCIR_POWER_DATA		0x7
 
-#define	PCI_MAX_LAT_SHIFT			24
-#define	PCI_MAX_LAT_MASK			0xff
-#define	PCI_MAX_LAT(icr) \
-	    (((icr) >> PCI_MAX_LAT_SHIFT) & PCI_MAX_LAT_MASK)
+/* VPD capability registers */
+#define	PCIR_VPD_ADDR		0x2
+#define	PCIR_VPD_DATA		0x4
 
-#define	PCI_INTERRUPT_PIN_NONE			0x00
-#define	PCI_INTERRUPT_PIN_A			0x01
-#define	PCI_INTERRUPT_PIN_B			0x02
-#define	PCI_INTERRUPT_PIN_C			0x03
-#define	PCI_INTERRUPT_PIN_D			0x04
-#define	PCI_INTERRUPT_PIN_MAX			0x04
+/* PCI Message Signalled Interrupts (MSI) */
+#define	PCIR_MSI_CTRL		0x2
+#define	PCIM_MSICTRL_VECTOR		0x0100
+#define	PCIM_MSICTRL_64BIT		0x0080
+#define	PCIM_MSICTRL_MME_MASK		0x0070
+#define	PCIM_MSICTRL_MME_1		0x0000
+#define	PCIM_MSICTRL_MME_2		0x0010
+#define	PCIM_MSICTRL_MME_4		0x0020
+#define	PCIM_MSICTRL_MME_8		0x0030
+#define	PCIM_MSICTRL_MME_16		0x0040
+#define	PCIM_MSICTRL_MME_32		0x0050
+#define	PCIM_MSICTRL_MMC_MASK		0x000E
+#define	PCIM_MSICTRL_MMC_1		0x0000
+#define	PCIM_MSICTRL_MMC_2		0x0002
+#define	PCIM_MSICTRL_MMC_4		0x0004
+#define	PCIM_MSICTRL_MMC_8		0x0006
+#define	PCIM_MSICTRL_MMC_16		0x0008
+#define	PCIM_MSICTRL_MMC_32		0x000A
+#define	PCIM_MSICTRL_MSI_ENABLE		0x0001
+#define	PCIR_MSI_ADDR		0x4
+#define	PCIR_MSI_ADDR_HIGH	0x8
+#define	PCIR_MSI_DATA		0x8
+#define	PCIR_MSI_DATA_64BIT	0xc
+#define	PCIR_MSI_MASK		0x10
+#define	PCIR_MSI_PENDING	0x14
 
-/*
- * Vital Product Data resource tags.
- */
-struct pci_vpd_smallres {
-	uint8_t		vpdres_byte0;		/* length of data + tag */
-	/* Actual data. */
-} __packed;
+/* PCI-X definitions */
 
-struct pci_vpd_largeres {
-	uint8_t		vpdres_byte0;
-	uint8_t		vpdres_len_lsb;		/* length of data only */
-	uint8_t		vpdres_len_msb;
-	/* Actual data. */
-} __packed;
+/* For header type 0 devices */
+#define	PCIXR_COMMAND		0x2
+#define	PCIXM_COMMAND_DPERR_E		0x0001	/* Data Parity Error Recovery */
+#define	PCIXM_COMMAND_ERO		0x0002	/* Enable Relaxed Ordering */
+#define	PCIXM_COMMAND_MAX_READ		0x000c	/* Maximum Burst Read Count */
+#define	PCIXM_COMMAND_MAX_READ_512	0x0000
+#define	PCIXM_COMMAND_MAX_READ_1024	0x0004
+#define	PCIXM_COMMAND_MAX_READ_2048	0x0008
+#define	PCIXM_COMMAND_MAX_READ_4096	0x000c
+#define	PCIXM_COMMAND_MAX_SPLITS 	0x0070	/* Maximum Split Transactions */
+#define	PCIXM_COMMAND_MAX_SPLITS_1	0x0000
+#define	PCIXM_COMMAND_MAX_SPLITS_2	0x0010
+#define	PCIXM_COMMAND_MAX_SPLITS_3	0x0020
+#define	PCIXM_COMMAND_MAX_SPLITS_4	0x0030
+#define	PCIXM_COMMAND_MAX_SPLITS_8	0x0040
+#define	PCIXM_COMMAND_MAX_SPLITS_12	0x0050
+#define	PCIXM_COMMAND_MAX_SPLITS_16	0x0060
+#define	PCIXM_COMMAND_MAX_SPLITS_32	0x0070
+#define	PCIXM_COMMAND_VERSION		0x3000
+#define	PCIXR_STATUS		0x4
+#define	PCIXM_STATUS_DEVFN		0x000000FF
+#define	PCIXM_STATUS_BUS		0x0000FF00
+#define	PCIXM_STATUS_64BIT		0x00010000
+#define	PCIXM_STATUS_133CAP		0x00020000
+#define	PCIXM_STATUS_SC_DISCARDED	0x00040000
+#define	PCIXM_STATUS_UNEXP_SC		0x00080000
+#define	PCIXM_STATUS_COMPLEX_DEV	0x00100000
+#define	PCIXM_STATUS_MAX_READ		0x00600000
+#define	PCIXM_STATUS_MAX_READ_512	0x00000000
+#define	PCIXM_STATUS_MAX_READ_1024	0x00200000
+#define	PCIXM_STATUS_MAX_READ_2048	0x00400000
+#define	PCIXM_STATUS_MAX_READ_4096	0x00600000
+#define	PCIXM_STATUS_MAX_SPLITS		0x03800000
+#define	PCIXM_STATUS_MAX_SPLITS_1	0x00000000
+#define	PCIXM_STATUS_MAX_SPLITS_2	0x00800000
+#define	PCIXM_STATUS_MAX_SPLITS_3	0x01000000
+#define	PCIXM_STATUS_MAX_SPLITS_4	0x01800000
+#define	PCIXM_STATUS_MAX_SPLITS_8	0x02000000
+#define	PCIXM_STATUS_MAX_SPLITS_12	0x02800000
+#define	PCIXM_STATUS_MAX_SPLITS_16	0x03000000
+#define	PCIXM_STATUS_MAX_SPLITS_32	0x03800000
+#define	PCIXM_STATUS_MAX_CUM_READ	0x1C000000
+#define	PCIXM_STATUS_RCVD_SC_ERR	0x20000000
+#define	PCIXM_STATUS_266CAP		0x40000000
+#define	PCIXM_STATUS_533CAP		0x80000000
 
-#define	PCI_VPDRES_ISLARGE(x)			((x) & 0x80)
+/* For header type 1 devices (PCI-X bridges) */
+#define	PCIXR_SEC_STATUS	0x2
+#define	PCIXM_SEC_STATUS_64BIT		0x0001
+#define	PCIXM_SEC_STATUS_133CAP		0x0002
+#define	PCIXM_SEC_STATUS_SC_DISC	0x0004
+#define	PCIXM_SEC_STATUS_UNEXP_SC	0x0008
+#define	PCIXM_SEC_STATUS_SC_OVERRUN	0x0010
+#define	PCIXM_SEC_STATUS_SR_DELAYED	0x0020
+#define	PCIXM_SEC_STATUS_BUS_MODE	0x03c0
+#define	PCIXM_SEC_STATUS_VERSION	0x3000
+#define	PCIXM_SEC_STATUS_266CAP		0x4000
+#define	PCIXM_SEC_STATUS_533CAP		0x8000
+#define	PCIXR_BRIDGE_STATUS	0x4
+#define	PCIXM_BRIDGE_STATUS_DEVFN	0x000000FF
+#define	PCIXM_BRIDGE_STATUS_BUS		0x0000FF00
+#define	PCIXM_BRIDGE_STATUS_64BIT	0x00010000
+#define	PCIXM_BRIDGE_STATUS_133CAP	0x00020000
+#define	PCIXM_BRIDGE_STATUS_SC_DISCARDED 0x00040000
+#define	PCIXM_BRIDGE_STATUS_UNEXP_SC	0x00080000
+#define	PCIXM_BRIDGE_STATUS_SC_OVERRUN	0x00100000
+#define	PCIXM_BRIDGE_STATUS_SR_DELAYED	0x00200000
+#define	PCIXM_BRIDGE_STATUS_DEVID_MSGCAP 0x20000000
+#define	PCIXM_BRIDGE_STATUS_266CAP	0x40000000
+#define	PCIXM_BRIDGE_STATUS_533CAP	0x80000000
 
-#define	PCI_VPDRES_SMALL_LENGTH(x)		((x) & 0x7)
-#define	PCI_VPDRES_SMALL_NAME(x)		(((x) >> 3) & 0xf)
+/* HT (HyperTransport) Capability definitions */
+#define	PCIR_HT_COMMAND		0x2
+#define	PCIM_HTCMD_CAP_MASK		0xf800	/* Capability type. */
+#define	PCIM_HTCAP_SLAVE		0x0000	/* 000xx */
+#define	PCIM_HTCAP_HOST			0x2000	/* 001xx */
+#define	PCIM_HTCAP_SWITCH		0x4000	/* 01000 */
+#define	PCIM_HTCAP_INTERRUPT		0x8000	/* 10000 */
+#define	PCIM_HTCAP_REVISION_ID		0x8800	/* 10001 */
+#define	PCIM_HTCAP_UNITID_CLUMPING	0x9000	/* 10010 */
+#define	PCIM_HTCAP_EXT_CONFIG_SPACE	0x9800	/* 10011 */
+#define	PCIM_HTCAP_ADDRESS_MAPPING	0xa000	/* 10100 */
+#define	PCIM_HTCAP_MSI_MAPPING		0xa800	/* 10101 */
+#define	PCIM_HTCAP_DIRECT_ROUTE		0xb000	/* 10110 */
+#define	PCIM_HTCAP_VCSET		0xb800	/* 10111 */
+#define	PCIM_HTCAP_RETRY_MODE		0xc000	/* 11000 */
+#define	PCIM_HTCAP_X86_ENCODING		0xc800	/* 11001 */
 
-#define	PCI_VPDRES_LARGE_NAME(x)		((x) & 0x7f)
+/* HT MSI Mapping Capability definitions. */
+#define	PCIM_HTCMD_MSI_ENABLE		0x0001
+#define	PCIM_HTCMD_MSI_FIXED		0x0002
+#define	PCIR_HTMSI_ADDRESS_LO	0x4
+#define	PCIR_HTMSI_ADDRESS_HI	0x8
 
-#define	PCI_VPDRES_TYPE_COMPATIBLE_DEVICE_ID	0x3	/* small */
-#define	PCI_VPDRES_TYPE_VENDOR_DEFINED		0xe	/* small */
-#define	PCI_VPDRES_TYPE_END_TAG			0xf	/* small */
+/* PCI Vendor capability definitions */
+#define	PCIR_VENDOR_LENGTH	0x2
+#define	PCIR_VENDOR_DATA	0x3
 
-#define	PCI_VPDRES_TYPE_IDENTIFIER_STRING	0x02	/* large */
-#define	PCI_VPDRES_TYPE_VPD			0x10	/* large */
+/* PCI EHCI Debug Port definitions */
+#define	PCIR_DEBUG_PORT		0x2
+#define	PCIM_DEBUG_PORT_OFFSET		0x1FFF
+#define	PCIM_DEBUG_PORT_BAR		0xe000
 
-struct pci_vpd {
-	uint8_t		vpd_key0;
-	uint8_t		vpd_key1;
-	uint8_t		vpd_len;		/* length of data only */
-	/* Actual data. */
-} __packed;
+/* PCI-PCI Bridge Subvendor definitions */
+#define	PCIR_SUBVENDCAP_ID	0x4
 
-/*
- * Recommended VPD fields:
- *
- *	PN		Part number of assembly
- *	FN		FRU part number
- *	EC		EC level of assembly
- *	MN		Manufacture ID
- *	SN		Serial Number
- *
- * Conditionally recommended VPD fields:
- *
- *	LI		Load ID
- *	RL		ROM Level
- *	RM		Alterable ROM Level
- *	NA		Network Address
- *	DD		Device Driver Level
- *	DG		Diagnostic Level
- *	LL		Loadable Microcode Level
- *	VI		Vendor ID/Device ID
- *	FU		Function Number
- *	SI		Subsystem Vendor ID/Subsystem ID
- *
- * Additional VPD fields:
- *
- *	Z0-ZZ		User/Product Specific
- */
+/* PCI Express definitions */
+#define	PCIR_EXPRESS_FLAGS	0x2
+#define	PCIM_EXP_FLAGS_VERSION		0x000F
+#define	PCIM_EXP_FLAGS_TYPE		0x00F0
+#define	PCIM_EXP_TYPE_ENDPOINT		0x0000
+#define	PCIM_EXP_TYPE_LEGACY_ENDPOINT	0x0010
+#define	PCIM_EXP_TYPE_ROOT_PORT		0x0040
+#define	PCIM_EXP_TYPE_UPSTREAM_PORT	0x0050
+#define	PCIM_EXP_TYPE_DOWNSTREAM_PORT	0x0060
+#define	PCIM_EXP_TYPE_PCI_BRIDGE	0x0070
+#define	PCIM_EXP_FLAGS_SLOT		0x0100
+#define	PCIM_EXP_FLAGS_IRQ		0x3e00
 
-#endif /* _DEV_PCI_PCIREG_H_ */
+/* MSI-X definitions */
+#define	PCIR_MSIX_CTRL		0x2
+#define	PCIM_MSIXCTRL_MSIX_ENABLE	0x8000
+#define	PCIM_MSIXCTRL_FUNCTION_MASK	0x4000
+#define	PCIM_MSIXCTRL_TABLE_SIZE	0x07FF
+#define	PCIR_MSIX_TABLE		0x4
+#define	PCIR_MSIX_PBA		0x8
+#define	PCIM_MSIX_BIR_MASK		0x7
+#define	PCIM_MSIX_BIR_BAR_10		0
+#define	PCIM_MSIX_BIR_BAR_14		1
+#define	PCIM_MSIX_BIR_BAR_18		2
+#define	PCIM_MSIX_BIR_BAR_1C		3
+#define	PCIM_MSIX_BIR_BAR_20		4
+#define	PCIM_MSIX_BIR_BAR_24		5
+#define	PCIM_MSIX_VCTRL_MASK		0x1

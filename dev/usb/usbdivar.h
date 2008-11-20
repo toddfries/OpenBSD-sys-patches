@@ -1,8 +1,7 @@
-/*	$OpenBSD: usbdivar.h,v 1.32 2007/06/15 11:41:48 mbalmer Exp $ */
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.51 2008/03/20 03:09:59 sam Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -42,8 +41,9 @@
 /* From usb_mem.h */
 struct usb_dma_block;
 typedef struct {
-	struct usb_dma_block	*block;
-	u_int			 offs;
+	struct usb_dma_block *block;
+	u_int offs;
+	u_int len;
 } usb_dma_t;
 
 struct usbd_xfer;
@@ -76,7 +76,7 @@ struct usbd_pipe_methods {
 };
 
 struct usbd_tt {
-	struct usbd_hub	       *hub;
+	struct usbd_hub		*hub;
 };
 
 struct usbd_port {
@@ -85,7 +85,6 @@ struct usbd_port {
 	u_int8_t		portno;
 	u_int8_t		restartcnt;
 #define USBD_RESTART_MAX 5
-	u_int8_t		reattach;
 	struct usbd_device     *device;	/* Connected device */
 	struct usbd_device     *parent;	/* The ports hub */
 	struct usbd_tt	       *tt; /* Transaction translator (if any) */
@@ -104,7 +103,7 @@ struct usb_softc;
 
 struct usbd_bus {
 	/* Filled by HC driver */
-	struct device		bdev; /* base device, host adapter */
+	device_t		bdev; /* base device, host adapter */
 	struct usbd_bus_methods	*methods;
 	u_int32_t		pipe_size; /* size of a pipe struct */
 	/* Filled by usb driver */
@@ -124,16 +123,22 @@ struct usbd_bus {
 #define USBREV_2_0	4
 #define USBREV_STR { "unknown", "pre 1.0", "1.0", "1.1", "2.0" }
 
+#ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void		       *soft; /* soft interrupt cookie */
+#else
+	struct callout		softi;
 #endif
-	bus_dma_tag_t		dmatag;	/* DMA tag */
+#endif
+
+	bus_dma_tag_t		parent_dmatag;	/* Base DMA tag */
+	bus_dma_tag_t		buffer_dmatag;	/* Tag for transfer buffers */
 };
 
 struct usbd_device {
 	struct usbd_bus	       *bus;           /* our controller */
 	struct usbd_pipe       *default_pipe;  /* pipe 0 */
-	u_int8_t		address;       /* device address */
+	u_int8_t		address;       /* device addess */
 	u_int8_t		config;	       /* current configuration # */
 	u_int8_t		depth;         /* distance from root hub */
 	u_int8_t		speed;         /* low/full/high speed */
@@ -143,7 +148,7 @@ struct usbd_device {
 #define USBD_NOLANG (-1)
 	usb_event_cookie_t	cookie;	       /* unique connection id */
 	struct usbd_port       *powersrc;      /* upstream hub port, or 0 */
-	struct usbd_device     *myhub; 	       /* upstream hub */
+	struct usbd_device     *myhub;	       /* upstream hub */
 	struct usbd_port       *myhsport;      /* closest high speed port */
 	struct usbd_endpoint	def_ep;	       /* for pipe 0 */
 	usb_endpoint_descriptor_t def_ep_desc; /* for pipe 0 */
@@ -152,7 +157,8 @@ struct usbd_device {
 	usb_config_descriptor_t *cdesc;	       /* full config descr */
 	const struct usbd_quirks     *quirks;  /* device quirks, always set */
 	struct usbd_hub	       *hub;           /* only if this is a hub */
-	struct device         **subdevs;       /* sub-devices, 0 terminated */
+	device_t	       *subdevs;       /* sub-devices, 0 terminated */
+	uint8_t		       *ifacenums;     /* sub-device interfacenumbers */
 };
 
 struct usbd_interface {
@@ -172,7 +178,7 @@ struct usbd_pipe {
 	int			refcnt;
 	char			running;
 	char			aborting;
-	SIMPLEQ_HEAD(, usbd_xfer) queue;
+	STAILQ_HEAD(, usbd_xfer) queue;
 	LIST_ENTRY(usbd_pipe)	next;
 
 	usbd_xfer_handle	intrxfer; /* used for repeating requests */
@@ -181,6 +187,15 @@ struct usbd_pipe {
 
 	/* Filled by HC driver. */
 	struct usbd_pipe_methods *methods;
+};
+
+#define USB_DMA_NSEG (btoc(MAXPHYS) + 1)
+
+/* DMA-capable memory buffer. */
+struct usb_dma_mapping {
+	bus_dma_segment_t segs[USB_DMA_NSEG];	/* The physical segments. */
+	int nsegs;				/* Number of segments. */
+	bus_dmamap_t map;			/* DMA mapping. */
 };
 
 struct usbd_xfer {
@@ -210,19 +225,22 @@ struct usbd_xfer {
 
 	/* For memory allocation */
 	struct usbd_device     *device;
-	usb_dma_t		dmabuf;
+	struct usb_dma_mapping	dmamap;
+	void			*allocbuf;
 
 	int			rqflags;
 #define URQ_REQUEST	0x01
 #define URQ_AUTO_DMABUF	0x10
 #define URQ_DEV_DMABUF	0x20
 
-	SIMPLEQ_ENTRY(usbd_xfer) next;
+	STAILQ_ENTRY(usbd_xfer) next;
 
 	void		       *hcpriv; /* private use by the HC driver */
 
-	struct timeout		timeout_handle;
+	struct callout		timeout_handle;
 };
+
+#define	URQ_BITS "\20\1REQUEST\5AUTO_DMABUF\6DEV_DMABUF"
 
 void usbd_init(void);
 void usbd_finish(void);
@@ -239,24 +257,26 @@ void usbd_dump_pipe(usbd_pipe_handle pipe);
 int		usbctlprint(void *, const char *);
 void		usb_delay_ms(usbd_bus_handle, u_int);
 usbd_status	usbd_reset_port(usbd_device_handle dev,
-		    int port, usb_port_status_t *ps);
+				int port, usb_port_status_t *ps);
 usbd_status	usbd_setup_pipe(usbd_device_handle dev,
-		    usbd_interface_handle iface, struct usbd_endpoint *, int,
-		    usbd_pipe_handle *pipe);
-usbd_status	usbd_new_device(struct device *parent, usbd_bus_handle bus,
-		    int depth, int lowspeed, int port, struct usbd_port *);
+				usbd_interface_handle iface,
+				struct usbd_endpoint *, int,
+				usbd_pipe_handle *pipe);
+usbd_status	usbd_new_device(device_t parent,
+				usbd_bus_handle bus, int depth,
+				int lowspeed, int port,
+				struct usbd_port *);
 void		usbd_remove_device(usbd_device_handle, struct usbd_port *);
-int		usbd_printBCD(char *cp, size_t len, int bcd);
+int		usbd_printBCD(char *cp, int bcd);
 usbd_status	usbd_fill_iface_data(usbd_device_handle dev, int i, int a);
 void		usb_free_device(usbd_device_handle);
 
 usbd_status	usb_insert_transfer(usbd_xfer_handle xfer);
 void		usb_transfer_complete(usbd_xfer_handle xfer);
-void		usb_disconnect_port(struct usbd_port *up, struct device *);
+void		usb_disconnect_port(struct usbd_port *up, device_t);
 
 /* Routines from usb.c */
 void		usb_needs_explore(usbd_device_handle);
-void		usb_needs_reattach(usbd_device_handle);
 void		usb_schedsoftintr(struct usbd_bus *);
 
 /*
@@ -287,13 +307,6 @@ void		usb_schedsoftintr(struct usbd_bus *);
 #define UHUBCF_PRODUCT_DEFAULT -1
 #define UHUBCF_RELEASE_DEFAULT -1
 
-#define	UHUBCF_PORT		0
-#define	UHUBCF_CONFIGURATION	1
-#define	UHUBCF_INTERFACE	2
-#define	UHUBCF_VENDOR		3
-#define	UHUBCF_PRODUCT		4
-#define	UHUBCF_RELEASE		5
-
 #define	uhubcf_port		cf_loc[UHUBCF_PORT]
 #define	uhubcf_configuration	cf_loc[UHUBCF_CONFIGURATION]
 #define	uhubcf_interface	cf_loc[UHUBCF_INTERFACE]
@@ -306,3 +319,4 @@ void		usb_schedsoftintr(struct usbd_bus *);
 #define	UHUB_UNK_VENDOR		UHUBCF_VENDOR_DEFAULT /* wildcarded 'vendor' */
 #define	UHUB_UNK_PRODUCT	UHUBCF_PRODUCT_DEFAULT /* wildcarded 'product' */
 #define	UHUB_UNK_RELEASE	UHUBCF_RELEASE_DEFAULT /* wildcarded 'release' */
+

@@ -1,9 +1,8 @@
-/*	$OpenBSD: conf.h,v 1.89 2008/06/03 17:21:22 oga Exp $	*/
-/*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
-
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 2000
+ *	Poul-Henning Kamp.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
  * All or some portions of this file are derived from material licensed
  * to the University of California by American Telephone and Telegraph
@@ -18,7 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,647 +33,289 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)conf.h	8.3 (Berkeley) 1/21/94
+ *	@(#)conf.h	8.5 (Berkeley) 1/9/95
+ * $FreeBSD: src/sys/sys/conf.h,v 1.233 2007/07/03 17:42:37 kib Exp $
  */
 
-
 #ifndef _SYS_CONF_H_
-#define _SYS_CONF_H_
+#define	_SYS_CONF_H_
+
+#ifdef _KERNEL
+#include <sys/eventhandler.h>
+#else
+#include <sys/queue.h>
+#endif
+
+struct tty;
+struct snapdata;
+struct devfs_dirent;
+struct cdevsw;
+struct file;
+
+struct cdev {
+	struct cdev_priv	*si_priv;
+	u_int		si_flags;
+#define SI_ALIAS	0x0002	/* carrier of alias name */
+#define SI_NAMED	0x0004	/* make_dev{_alias} has been called */
+#define SI_CHEAPCLONE	0x0008	/* can be removed_dev'ed when vnode reclaims */
+#define SI_CHILD	0x0010	/* child of another struct cdev **/
+#define SI_DEVOPEN	0x0020	/* opened by device */
+#define SI_CONSOPEN	0x0040	/* opened by console */
+#define SI_DUMPDEV	0x0080	/* is kernel dumpdev */
+#define SI_CANDELETE	0x0100	/* can do BIO_DELETE */
+#define SI_CLONELIST	0x0200	/* on a clone list */
+	struct timespec	si_atime;
+	struct timespec	si_ctime;
+	struct timespec	si_mtime;
+	uid_t		si_uid;
+	gid_t		si_gid;
+	mode_t		si_mode;
+	struct ucred	*si_cred;	/* cached clone-time credential */
+	u_int		si_drv0;
+	int		si_refcount;
+	LIST_ENTRY(cdev)	si_list;
+	LIST_ENTRY(cdev)	si_clone;
+	LIST_HEAD(, cdev)	si_children;
+	LIST_ENTRY(cdev)	si_siblings;
+	struct cdev *si_parent;
+	char		*si_name;
+	void		*si_drv1, *si_drv2;
+	struct cdevsw	*si_devsw;
+	int		si_iosize_max;	/* maximum I/O size (for physio &al) */
+	u_long		si_usecount;
+	u_long		si_threadcount;
+	union {
+		struct tty *__sit_tty;
+		struct snapdata *__sid_snapdata;
+	} __si_u;
+	char		__si_namebuf[SPECNAMELEN + 1];
+};
+
+#define si_tty		__si_u.__sit_tty
+#define si_snapdata	__si_u.__sid_snapdata
+
+#ifdef _KERNEL
 
 /*
  * Definitions of device driver entry switches
  */
 
+struct bio;
 struct buf;
-struct proc;
-struct tty;
+struct thread;
 struct uio;
-struct vnode;
 struct knote;
+struct clonedevs;
+struct vnode;
 
 /*
- * Types for d_type
+ * Note: d_thread_t is provided as a transition aid for those drivers
+ * that treat struct proc/struct thread as an opaque data type and
+ * exist in substantially the same form in both 4.x and 5.x.  Writers
+ * of drivers that dips into the d_thread_t structure should use
+ * struct thread or struct proc as appropriate for the version of the
+ * OS they are using.  It is provided in lieu of each device driver
+ * inventing its own way of doing this.  While it does violate style(9)
+ * in a number of ways, this violation is deemed to be less
+ * important than the benefits that a uniform API between releases
+ * gives.
+ *
+ * Users of struct thread/struct proc that aren't device drivers should
+ * not use d_thread_t.
  */
-#define	D_TAPE	1
-#define	D_DISK	2
-#define	D_TTY	3
 
-/*
- * Flags for d_flags
- */
-#define D_KQFILTER	0x0001		/* has kqfilter entry */
-#define D_CLONE		0x0002		/* clone upon open */
+typedef struct thread d_thread_t;
 
-#ifdef _KERNEL
+typedef int d_open_t(struct cdev *dev, int oflags, int devtype, struct thread *td);
+typedef int d_fdopen_t(struct cdev *dev, int oflags, struct thread *td, struct file *fp);
+typedef int d_close_t(struct cdev *dev, int fflag, int devtype, struct thread *td);
+typedef void d_strategy_t(struct bio *bp);
+typedef int d_ioctl_t(struct cdev *dev, u_long cmd, caddr_t data,
+		      int fflag, struct thread *td);
 
-#define	dev_type_open(n)	int n(dev_t, int, int, struct proc *)
-#define	dev_type_close(n)	int n(dev_t, int, int, struct proc *)
-#define	dev_type_strategy(n)	void n(struct buf *)
-#define	dev_type_ioctl(n) \
-	int n(dev_t, u_long, caddr_t, int, struct proc *)
+typedef int d_read_t(struct cdev *dev, struct uio *uio, int ioflag);
+typedef int d_write_t(struct cdev *dev, struct uio *uio, int ioflag);
+typedef int d_poll_t(struct cdev *dev, int events, struct thread *td);
+typedef int d_kqfilter_t(struct cdev *dev, struct knote *kn);
+typedef int d_mmap_t(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr,
+   		     int nprot);
+typedef void d_purge_t(struct cdev *dev);
 
-#define	dev_decl(n,t)	__CONCAT(dev_type_,t)(__CONCAT(n,t))
-#define	dev_init(c,n,t) \
-	((c) > 0 ? __CONCAT(n,t) : (__CONCAT(dev_type_,t)((*))) enxio)
+typedef int d_spare2_t(struct cdev *dev);
+
+typedef int dumper_t(
+	void *priv,		/* Private to the driver. */
+	void *virtual,		/* Virtual (mapped) address. */
+	vm_offset_t physical,	/* Physical address of virtual. */
+	off_t offset,		/* Byte-offset to write at. */
+	size_t length);		/* Number of bytes to dump. */
 
 #endif /* _KERNEL */
 
 /*
- * Block device switch table
+ * Types for d_flags.
  */
-struct bdevsw {
-	int	(*d_open)(dev_t dev, int oflags, int devtype,
-				     struct proc *p);
-	int	(*d_close)(dev_t dev, int fflag, int devtype,
-				     struct proc *p);
-	void	(*d_strategy)(struct buf *bp);
-	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data,
-				     int fflag, struct proc *p);
-	int	(*d_dump)(dev_t dev, daddr64_t blkno, caddr_t va,
-				    size_t size);
-	daddr64_t (*d_psize)(dev_t dev);
-	u_int	d_type;
-	/* u_int	d_flags; */
-};
+#define	D_TAPE	0x0001
+#define	D_DISK	0x0002
+#define	D_TTY	0x0004
+#define	D_MEM	0x0008
 
-#ifdef _KERNEL
+#ifdef _KERNEL 
 
-extern struct bdevsw bdevsw[];
+#define	D_TYPEMASK	0xffff
 
-/* bdevsw-specific types */
-#define	dev_type_dump(n)	int n(dev_t, daddr64_t, caddr_t, size_t)
-#define	dev_type_size(n)	daddr64_t n(dev_t)
+/*
+ * Flags for d_flags which the drivers can set.
+ */
+#define	D_TRACKCLOSE	0x00080000	/* track all closes */
+#define D_MMAP_ANON	0x00100000	/* special treatment in vm_mmap.c */
+#define D_PSEUDO	0x00200000	/* make_dev() can return NULL */
+#define D_NEEDGIANT	0x00400000	/* driver want Giant */
 
-/* bdevsw-specific initializations */
-#define	dev_size_init(c,n)	(c > 0 ? __CONCAT(n,size) : 0)
+/*
+ * Version numbers.
+ */
+#define D_VERSION_00	0x20011966
+#define D_VERSION_01	0x17032005	/* Add d_uid,gid,mode & kind */
+#define D_VERSION	D_VERSION_01
 
-#define	bdev_decl(n) \
-	dev_decl(n,open); dev_decl(n,close); dev_decl(n,strategy); \
-	dev_decl(n,ioctl); dev_decl(n,dump); dev_decl(n,size)
-
-#define	bdev_disk_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), \
-	dev_init(c,n,strategy), dev_init(c,n,ioctl), \
-	dev_init(c,n,dump), dev_size_init(c,n), D_DISK }
-
-#define	bdev_tape_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), \
-	dev_init(c,n,strategy), dev_init(c,n,ioctl), \
-	dev_init(c,n,dump), 0, D_TAPE }
-
-#define	bdev_swap_init(c,n) { \
-	(dev_type_open((*))) enodev, (dev_type_close((*))) enodev, \
-	dev_init(c,n,strategy), (dev_type_ioctl((*))) enodev, \
-	(dev_type_dump((*))) enodev, 0 }
-
-#define	bdev_lkm_dummy() { \
-	(dev_type_open((*))) lkmenodev, (dev_type_close((*))) enodev, \
-	(dev_type_strategy((*))) enodev, (dev_type_ioctl((*))) enodev, \
-	(dev_type_dump((*))) enodev, 0 }
-
-#define	bdev_notdef() { \
-	(dev_type_open((*))) enodev, (dev_type_close((*))) enodev, \
-	(dev_type_strategy((*))) enodev, (dev_type_ioctl((*))) enodev, \
-	(dev_type_dump((*))) enodev, 0 }
-
-#endif
+/*
+ * Flags used for internal housekeeping
+ */
+#define D_INIT		0x80000000	/* cdevsw initialized */
 
 /*
  * Character device switch table
  */
 struct cdevsw {
-	int	(*d_open)(dev_t dev, int oflags, int devtype,
-				     struct proc *p);
-	int	(*d_close)(dev_t dev, int fflag, int devtype,
-				     struct proc *);
-	int	(*d_read)(dev_t dev, struct uio *uio, int ioflag);
-	int	(*d_write)(dev_t dev, struct uio *uio, int ioflag);
-	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data,
-				     int fflag, struct proc *p);
-	int	(*d_stop)(struct tty *tp, int rw);
-	struct tty *
-		(*d_tty)(dev_t dev);
-	int	(*d_poll)(dev_t dev, int events, struct proc *p);
-	paddr_t	(*d_mmap)(dev_t, off_t, int);
-	u_int	d_type;
-	u_int	d_flags;
-	int	(*d_kqfilter)(dev_t dev, struct knote *kn);
+	int			d_version;
+	u_int			d_flags;
+	const char		*d_name;
+	d_open_t		*d_open;
+	d_fdopen_t		*d_fdopen;
+	d_close_t		*d_close;
+	d_read_t		*d_read;
+	d_write_t		*d_write;
+	d_ioctl_t		*d_ioctl;
+	d_poll_t		*d_poll;
+	d_mmap_t		*d_mmap;
+	d_strategy_t		*d_strategy;
+	dumper_t		*d_dump;
+	d_kqfilter_t		*d_kqfilter;
+	d_purge_t		*d_purge;
+	d_spare2_t		*d_spare2;
+	uid_t			d_uid;
+	gid_t			d_gid;
+	mode_t			d_mode;
+	const char		*d_kind;
+
+	/* These fields should not be messed with by drivers */
+	LIST_ENTRY(cdevsw)	d_list;
+	LIST_HEAD(, cdev)	d_devs;
+	int			d_spare3;
+	struct cdevsw		*d_gianttrick;
 };
 
-#ifdef _KERNEL
+#define NUMCDEVSW 256
 
-extern struct cdevsw cdevsw[];
+#define MAXMINOR	0xffff00ffU
 
-/* cdevsw-specific types */
-#define	dev_type_read(n)	int n(dev_t, struct uio *, int)
-#define	dev_type_write(n)	int n(dev_t, struct uio *, int)
-#define	dev_type_stop(n)	int n(struct tty *, int)
-#define	dev_type_tty(n)		struct tty *n(dev_t)
-#define	dev_type_poll(n)	int n(dev_t, int, struct proc *)
-#define	dev_type_mmap(n)	paddr_t n(dev_t, off_t, int)
-#define dev_type_kqfilter(n)	int n(dev_t, struct knote *)
+struct module;
 
-#define	cdev_decl(n) \
-	dev_decl(n,open); dev_decl(n,close); dev_decl(n,read); \
-	dev_decl(n,write); dev_decl(n,ioctl); dev_decl(n,stop); \
-	dev_decl(n,tty); dev_decl(n,poll); dev_decl(n,mmap); \
-	dev_decl(n,kqfilter)
-
-/* open, close, read, write, ioctl */
-#define	cdev_disk_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev, D_DISK, 0 }
-
-/* open, close, read, write, ioctl */
-#define	cdev_tape_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev, D_TAPE }
-
-/* open, close, read, ioctl */
-#define cdev_scanner_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) nullop, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, stop, tty */
-#define	cdev_tty_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), dev_init(c,n,stop), \
-	dev_init(c,n,tty), ttpoll, (dev_type_mmap((*))) enodev, \
-	D_TTY, D_KQFILTER, ttkqfilter }
-
-/* open, close, read, ioctl, poll, nokqfilter */
-#define	cdev_mouse_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, poll, nokqfilter */
-#define	cdev_mousewr_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
-#define	cdev_lkm_dummy() { \
-	(dev_type_open((*))) lkmenodev, (dev_type_close((*))) enodev, \
-	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
-	(dev_type_ioctl((*))) enodev, (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
-#define	cdev_notdef() { \
-	(dev_type_open((*))) enodev, (dev_type_close((*))) enodev, \
-	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
-	(dev_type_ioctl((*))) enodev, (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, poll, kqfilter -- XXX should be a tty */
-#define	cdev_cn_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), dev_init(c,n,stop), \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
-	D_TTY, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, read, write, ioctl, poll, kqfilter -- XXX should be a tty */
-#define cdev_ctty_init(c,n) { \
-	dev_init(c,n,open), (dev_type_close((*))) nullop, dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) nullop, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
-	D_TTY, D_KQFILTER, ttkqfilter }
-
-/* open, close, read, write, ioctl, mmap */
-#define cdev_mm_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, seltrue, dev_init(c,n,mmap) }
-
-/* open, close, read, write, ioctl, mmap */
-#define cdev_crypto_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl */
-#define cdev_systrace_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
-
-/* read, write */
-#define cdev_swap_init(c,n) { \
-	(dev_type_open((*))) nullop, (dev_type_close((*))) nullop, \
-	dev_init(c,n,read), dev_init(c,n,write), (dev_type_ioctl((*))) enodev, \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, tty, poll, kqfilter */
-#define cdev_ptc_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) nullop, \
-	dev_init(c,n,tty), dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
-	D_TTY, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, close, read, write, ioctl, mmap */
-#define cdev_ptm_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, ioctl, poll, kqfilter XXX should be a generic device */
-#define cdev_log_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open */
-#define cdev_fd_init(c,n) { \
-	dev_init(c,n,open), (dev_type_close((*))) enodev, \
-	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
-	(dev_type_ioctl((*))) enodev, (dev_type_stop((*))) enodev, \
-	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, poll, kqfilter -- XXX should be generic device */
-#define cdev_tun_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
-	0, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, close, read, write, ioctl, poll, kqfilter, cloning -- XXX should be generic device */
-#define cdev_bpf_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
-	0, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, close, ioctl */
-#define	cdev_lkm_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl */
-#define	cdev_ch_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl */
-#define       cdev_uk_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, read, ioctl */
-#define cdev_ss_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, seltrue, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl, mmap */
-#define	cdev_fb_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	dev_init(c,n,mmap) }
-
-/* open, close, read, write, ioctl, poll, kqfilter */
-#define cdev_audio_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	dev_init(c,n,mmap), 0, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, close, read, write, ioctl, poll, nokqfilter */
-#define cdev_midi_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
-#define	cdev_svr4_net_init(c,n) { \
-	dev_init(c,n,open), (dev_type_close((*))) enodev, \
-	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
-	(dev_type_ioctl((*))) enodev, (dev_type_stop((*))) nullop, \
-	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, poll, nokqfilter */
-#define cdev_xfs_init(c, n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, read */
-#define cdev_ksyms_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, (dev_type_ioctl((*))) enodev, \
-	(dev_type_stop((*))) enodev, 0, seltrue, \
-	(dev_type_mmap((*))) enodev, 0 }
-
-/* open, close, read, write, ioctl, stop, tty, poll, mmap, kqfilter */
-#define	cdev_wsdisplay_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), dev_init(c,n,stop), \
-	dev_init(c,n,tty), ttpoll, dev_init(c,n,mmap), \
-	0, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, close, read, write, ioctl, poll, kqfilter */
-#define	cdev_random_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
-	0, D_KQFILTER, dev_init(c,n,kqfilter) }
-void	randomattach(void);
-
-/* open, close, ioctl, poll, nokqfilter */
-#define	cdev_usb_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, write, ioctl */
-#define cdev_ulpt_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl */
-#define cdev_pf_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, poll, nokqfilter */
-#define	cdev_urio_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev }
-
-/* open, close, read, write, ioctl, poll, kqfilter */
-#define	cdev_usbdev_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, 0, D_KQFILTER, \
-	dev_init(c,n,kqfilter) }
-
-/* open, close, init */
-#define cdev_pci_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, init */
-#define cdev_iop_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl */
-#define cdev_radio_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl, read, mmap */
-#define cdev_video_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	dev_init(c,n,mmap) }
-
-/* open, close, write, ioctl */
-#define cdev_spkr_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
-/* open, close, write, ioctl */
-#define cdev_lpt_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
-/* open, close, read, ioctl, mmap */
-#define cdev_bktr_init(c, n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, seltrue, \
-	dev_init(c,n,mmap) }
-
-/* open, close, read, ioctl, poll, kqfilter */
-#define cdev_hotplug_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
-
-/* open, close, ioctl */
-#define cdev_gpio_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl */
-#define       cdev_bio_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl */
-#define       cdev_bthub_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, ioctl, mmap */
-#define       cdev_agp_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	dev_init(c,n,mmap) }
-
-/* open, close, read, ioctl, poll, mmap, nokqfilter */
-#define      cdev_drm_init(c,n)        { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	dev_init(c,n,mmap), 0, D_CLONE }
-
-#endif
-
-/*
- * Line discipline switch table
- */
-struct linesw {
-	int	(*l_open)(dev_t dev, struct tty *tp);
-	int	(*l_close)(struct tty *tp, int flags);
-	int	(*l_read)(struct tty *tp, struct uio *uio,
-				     int flag);
-	int	(*l_write)(struct tty *tp, struct uio *uio,
-				     int flag);
-	int	(*l_ioctl)(struct tty *tp, u_long cmd, caddr_t data,
-				     int flag, struct proc *p);
-	int	(*l_rint)(int c, struct tty *tp);
-	int	(*l_start)(struct tty *tp);
-	int	(*l_modem)(struct tty *tp, int flag);
+struct devsw_module_data {
+	int	(*chainevh)(struct module *, int, void *); /* next handler */
+	void	*chainarg;	/* arg for next event handler */
+	/* Do not initialize fields hereafter */
 };
 
-#ifdef _KERNEL
-extern struct linesw linesw[];
-#endif
+#define DEV_MODULE(name, evh, arg)					\
+static moduledata_t name##_mod = {					\
+    #name,								\
+    evh,								\
+    arg									\
+};									\
+DECLARE_MODULE(name, name##_mod, SI_SUB_DRIVERS, SI_ORDER_MIDDLE)
 
-/*
- * Swap device table
- */
-struct swdevt {
-	dev_t	sw_dev;
-	int	sw_flags;
-	struct	vnode *sw_vp;
+
+void clone_setup(struct clonedevs **cdp);
+void clone_cleanup(struct clonedevs **);
+#define CLONE_UNITMASK 0xfffff
+#define CLONE_FLAG0 (CLONE_UNITMASK + 1)
+int clone_create(struct clonedevs **, struct cdevsw *, int *unit, struct cdev **dev, int extra);
+
+int	count_dev(struct cdev *_dev);
+void	destroy_dev(struct cdev *_dev);
+int	destroy_dev_sched(struct cdev *dev);
+int	destroy_dev_sched_cb(struct cdev *dev, void (*cb)(void *), void *arg);
+void	destroy_dev_drain(struct cdevsw *csw);
+void	drain_dev_clone_events(void);
+struct cdevsw *dev_refthread(struct cdev *_dev);
+struct cdevsw *devvn_refthread(struct vnode *vp, struct cdev **devp);
+void	dev_relthread(struct cdev *_dev);
+void	dev_depends(struct cdev *_pdev, struct cdev *_cdev);
+void	dev_ref(struct cdev *dev);
+void	dev_refl(struct cdev *dev);
+void	dev_rel(struct cdev *dev);
+void	dev_strategy(struct cdev *dev, struct buf *bp);
+struct cdev *make_dev(struct cdevsw *_devsw, int _minor, uid_t _uid, gid_t _gid,
+		int _perms, const char *_fmt, ...) __printflike(6, 7);
+struct cdev *make_dev_cred(struct cdevsw *_devsw, int _minor,
+		struct ucred *_cr, uid_t _uid, gid_t _gid, int _perms,
+		const char *_fmt, ...) __printflike(7, 8);
+#define MAKEDEV_REF     0x1
+#define MAKEDEV_WHTOUT	0x2
+struct cdev *make_dev_credf(int _flags,
+		struct cdevsw *_devsw, int _minornr,
+		struct ucred *_cr, uid_t _uid, gid_t _gid, int _mode,
+		const char *_fmt, ...) __printflike(8, 9);
+struct cdev *make_dev_alias(struct cdev *_pdev, const char *_fmt, ...) __printflike(2, 3);
+int	dev2unit(struct cdev *_dev);
+void	dev_lock(void);
+void	dev_unlock(void);
+int	unit2minor(int _unit);
+u_int	minor2unit(u_int _minor);
+void	setconf(void);
+
+#define		UID_ROOT	0
+#define		UID_BIN		3
+#define		UID_UUCP	66
+
+#define		GID_WHEEL	0
+#define		GID_KMEM	2
+#define		GID_OPERATOR	5
+#define		GID_BIN		7
+#define		GID_GAMES	13
+#define		GID_DIALER	68
+
+typedef void (*dev_clone_fn)(void *arg, struct ucred *cred, char *name,
+	    int namelen, struct cdev **result);
+
+int dev_stdclone(char *_name, char **_namep, const char *_stem, int *_unit);
+EVENTHANDLER_DECLARE(dev_clone, dev_clone_fn);
+
+/* Stuff relating to kernel-dump */
+
+struct dumperinfo {
+	dumper_t *dumper;	/* Dumping function. */
+	void    *priv;		/* Private parts. */
+	u_int   blocksize;	/* Size of block in bytes. */
+	off_t   mediaoffset;	/* Initial offset in bytes. */
+	off_t   mediasize;	/* Space available in bytes. */
 };
-#define	SW_FREED	0x01
-#define	SW_SEQUENTIAL	0x02
-#define	sw_freed	sw_flags	/* XXX compat */
 
-#ifdef _KERNEL
-extern struct swdevt swdevt[];
-extern int chrtoblktbl[];
-extern int nchrtoblktbl;
+int set_dumper(struct dumperinfo *);
+void dumpsys(struct dumperinfo *);
+extern int dumping;		/* system is dumping */
 
-struct bdevsw *bdevsw_lookup(dev_t);
-struct cdevsw *cdevsw_lookup(dev_t);
-int	chrtoblk(dev_t);
-int	blktochr(dev_t);
-int	iskmemdev(dev_t);
-int	iszerodev(dev_t);
-dev_t	getnulldev(void);
+/* D_TTY related functions */
+d_close_t	 ttyclose;
+d_ioctl_t	 ttyioctl;
+d_kqfilter_t	 ttykqfilter;
+d_open_t	 ttyopen;
+d_poll_t	 ttypoll;
+d_read_t	 ttyread;
+d_write_t	 ttywrite;
 
-cdev_decl(filedesc);
+#endif /* _KERNEL */
 
-cdev_decl(log);
-
-#ifndef LKM
-# define	NLKM	0
-# define	lkmenodev	enodev
-#else
-# define	NLKM	1
-#endif
-cdev_decl(lkm);
-
-#define	ptstty		ptytty
-#define	ptsioctl	ptyioctl
-cdev_decl(pts);
-
-#define	ptctty		ptytty
-#define	ptcioctl	ptyioctl
-cdev_decl(ptc);
-
-cdev_decl(ptm);
-
-cdev_decl(ctty);
-
-cdev_decl(audio);
-cdev_decl(midi);
-cdev_decl(sequencer);
-cdev_decl(radio);
-cdev_decl(video);
-cdev_decl(cn);
-
-bdev_decl(sw);
-cdev_decl(sw);
-
-bdev_decl(vnd);
-cdev_decl(vnd);
-
-bdev_decl(ccd);
-cdev_decl(ccd);
-
-bdev_decl(raid);
-cdev_decl(raid);
-
-cdev_decl(iop);
-
-cdev_decl(ch);
-
-cdev_decl(ss);
-
-bdev_decl(sd);
-cdev_decl(sd);
-
-cdev_decl(ses);
-
-bdev_decl(st);
-cdev_decl(st);
-
-bdev_decl(cd);
-cdev_decl(cd);
-
-bdev_decl(rd);
-cdev_decl(rd);
-
-bdev_decl(uk);
-cdev_decl(uk);
-
-cdev_decl(bpf);
-
-cdev_decl(pf);
-
-cdev_decl(tun);
-
-cdev_decl(random);
-
-cdev_decl(wsdisplay);
-cdev_decl(wskbd);
-cdev_decl(wsmouse);
-cdev_decl(wsmux);
-
-#ifdef COMPAT_SVR4
-# define NSVR4_NET	1
-#else
-# define NSVR4_NET	0
-#endif
-cdev_decl(svr4_net);
-
-cdev_decl(ksyms);
-
-cdev_decl(crypto);
-
-cdev_decl(systrace);
-
-cdev_decl(bio);
-cdev_decl(bthub);
-
-cdev_decl(gpr);
-cdev_decl(bktr);
-
-cdev_decl(usb);
-cdev_decl(ugen);
-cdev_decl(uhid);
-cdev_decl(ucom);
-cdev_decl(ulpt);
-cdev_decl(uscanner);
-cdev_decl(urio);
-
-cdev_decl(hotplug);
-cdev_decl(gpio);
-
-#endif
-
-#endif /* _SYS_CONF_H_ */
+#endif /* !_SYS_CONF_H_ */

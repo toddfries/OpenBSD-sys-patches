@@ -1,7 +1,7 @@
-/*	$OpenBSD: shm.h,v 1.21 2007/05/29 10:44:28 sturm Exp $	*/
-/*	$NetBSD: shm.h,v 1.20 1996/04/09 20:55:35 cgd Exp $	*/
+/* $FreeBSD: src/sys/sys/shm.h,v 1.24 2005/08/06 07:20:17 csjp Exp $ */
+/*	$NetBSD: shm.h,v 1.15 1994/06/29 06:45:17 cgd Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1994 Adam Glass
  * All rights reserved.
  *
@@ -40,149 +40,108 @@
 #define _SYS_SHM_H_
 
 #include <sys/cdefs.h>
-#ifndef _SYS_IPC_H_
 #include <sys/ipc.h>
+#include <sys/_types.h>
+
+#define SHM_RDONLY  010000  /* Attach read-only (else read-write) */
+#define SHM_RND     020000  /* Round attach address to SHMLBA */
+#define SHMLBA      PAGE_SIZE /* Segment low boundary address multiple */
+
+/* "official" access mode definitions; somewhat braindead since you have
+   to specify (SHM_* >> 3) for group and (SHM_* >> 6) for world permissions */
+#define SHM_R       (IPC_R)
+#define SHM_W       (IPC_W)
+
+/* predefine tbd *LOCK shmctl commands */
+#define	SHM_LOCK	11
+#define	SHM_UNLOCK	12
+
+/* ipcs shmctl commands */
+#define	SHM_STAT	13
+#define	SHM_INFO	14
+
+#ifndef _PID_T_DECLARED
+typedef	__pid_t		pid_t;
+#define	_PID_T_DECLARED
 #endif
 
-#if __BSD_VISIBLE
-
-/* shm-specific sysctl variables corresponding to members of struct shminfo */
-#define KERN_SHMINFO_SHMMAX	1	/* int: max shm segment size (bytes) */
-#define KERN_SHMINFO_SHMMIN	2	/* int: min shm segment size (bytes) */
-#define KERN_SHMINFO_SHMMNI	3	/* int: max number of shm identifiers */
-#define KERN_SHMINFO_SHMSEG	4	/* int: max shm segments per process */
-#define KERN_SHMINFO_SHMALL	5	/* int: max amount of shm (pages) */
-#define KERN_SHMINFO_MAXID	6	/* number of valid shared memory ids */
-
-#define CTL_KERN_SHMINFO_NAMES { \
-	{ 0, 0 }, \
-	{ "shmmax", CTLTYPE_INT }, \
-	{ "shmmin", CTLTYPE_INT }, \
-	{ "shmmni", CTLTYPE_INT }, \
-	{ "shmseg", CTLTYPE_INT }, \
-	{ "shmall", CTLTYPE_INT }, \
-}
-
-/*
- * Old (deprecated) access mode definitions--do not use.
- * Provided for compatibility with old code only.
- */
-#define SHM_R		IPC_R
-#define SHM_W		IPC_W
-
-#endif /* __BSD_VISIBLE */
-
-/*
- * Shared memory operation flags for shmat(2).
- */
-#define	SHM_RDONLY	010000	/* Attach read-only (else read-write) */
-#define	SHM_RND		020000	/* Round attach address to SHMLBA */
-#ifdef _KERNEL
-#define	_SHM_RMLINGER	040000	/* Attach even if segment removed */
+#ifndef _TIME_T_DECLARED
+typedef	__time_t	time_t;
+#define	_TIME_T_DECLARED
 #endif
 
-/*
- * Shared memory specific control commands for shmctl().
- * We accept but ignore these (XXX).
- */
-#define	SHM_LOCK	3	/* Lock segment in memory. */
-#define	SHM_UNLOCK	4	/* Unlock a segment locked by SHM_LOCK. */
-
-/*
- * Segment low boundry address multiple
- * Use PAGE_SIZE for kernel but for userland query the kernel for the value.
- */
-#if defined(_KERNEL) || defined(_STANDALONE) || defined(_LKM)
-#define	SHMLBA		PAGE_SIZE
-#else
-#define	SHMLBA		(getpagesize())
-#endif /* _KERNEL || _STANDALONE || _LKM */
-
-typedef short		shmatt_t;
+#ifndef _SIZE_T_DECLARED
+typedef	__size_t	size_t;
+#define	_SIZE_T_DECLARED
+#endif
 
 struct shmid_ds {
-	struct ipc_perm	shm_perm;	/* operation permission structure */
-	int		shm_segsz;	/* size of segment in bytes */
-	pid_t		shm_lpid;	/* process ID of last shm op */
-	pid_t		shm_cpid;	/* process ID of creator */
-	shmatt_t	shm_nattch;	/* number of current attaches */
-	time_t		shm_atime;	/* time of last shmat() */
-	time_t		shm_dtime;	/* time of last shmdt() */
-	time_t		shm_ctime;	/* time of last change by shmctl() */
-	void		*shm_internal;	/* implementation specific data */
+	struct ipc_perm shm_perm;	/* operation permission structure */
+	int             shm_segsz;	/* size of segment in bytes */
+	pid_t           shm_lpid;   /* process ID of last shared memory op */
+	pid_t           shm_cpid;	/* process ID of creator */
+	short		shm_nattch;	/* number of current attaches */
+	time_t          shm_atime;	/* time of last shmat() */
+	time_t          shm_dtime;	/* time of last shmdt() */
+	time_t          shm_ctime;	/* time of last change by shmctl() */
+	void           *shm_internal;   /* sysv stupidity */
 };
 
 #ifdef _KERNEL
-struct shmid_ds23 {
-	struct ipc_perm23 shm_perm;	/* operation permission structure */
-	int		shm_segsz;	/* size of segment in bytes */
-	pid_t		shm_lpid;	/* process ID of last shm op */
-	pid_t		shm_cpid;	/* process ID of creator */
-	shmatt_t	shm_nattch;	/* number of current attaches */
-	time_t		shm_atime;	/* time of last shmat() */
-	time_t		shm_dtime;	/* time of last shmdt() */
-	time_t		shm_ctime;	/* time of last change by shmctl() */
-	void		*shm_internal;	/* implementation specific data */
-};
 
-struct shmid_ds35 {
-	struct ipc_perm35 shm_perm;	/* operation permission structure */
-	int		  shm_segsz;	/* size of segment in bytes */
-	pid_t		  shm_lpid;	/* process ID of last shm op */
-	pid_t		  shm_cpid;	/* process ID of creator */
-	shmatt_t	  shm_nattch;	/* number of current attaches */
-	time_t		  shm_atime;	/* time of last shmat() */
-	time_t		  shm_dtime;	/* time of last shmdt() */
-	time_t		  shm_ctime;	/* time of last change by shmctl() */
-	void		  *shm_internal;/* implementation specific data */
-};
-#endif
-
-#if __BSD_VISIBLE
 /*
- * System V style catch-all structure for shared memory constants that
+ * System 5 style catch-all structure for shared memory constants that
  * might be of interest to user programs.  Do we really want/need this?
  */
 struct shminfo {
-	int	shmmax;		/* max shared memory segment size (bytes) */
-	int	shmmin;		/* min shared memory segment size (bytes) */
-	int	shmmni;		/* max number of shared memory identifiers */
-	int	shmseg;		/* max shared memory segments per process */
-	int	shmall;		/* max amount of shared memory (pages) */
+	u_long	shmmax;		/* max shared memory segment size (bytes) */
+	u_long	shmmin;		/* max shared memory segment size (bytes) */
+	u_long	shmmni;		/* max number of shared memory identifiers */
+	u_long	shmseg;		/* max shared memory segments per process */
+	u_long	shmall;		/* max amount of shared memory (pages) */
 };
 
-struct shm_sysctl_info {
-	struct	shminfo shminfo;
-	struct	shmid_ds shmids[1];
+/* 
+ * Add a kernel wrapper to the shmid_ds struct so that private info (like the
+ * MAC label) can be added to it, without changing the user interface.
+ */
+struct shmid_kernel {
+	struct shmid_ds u;
+	struct label *label;	/* MAC label */
 };
-#endif /* __BSD_VISIBLE */
 
-#ifdef _KERNEL
-extern struct shminfo shminfo;
-extern struct shmid_ds **shmsegs;
+extern struct shminfo	shminfo;
 
-/* initial values for machdep.c */
-extern int shmseg;
-extern int shmmaxpgs;
+struct shm_info {
+	int used_ids;
+	unsigned long shm_tot;
+	unsigned long shm_rss;
+	unsigned long shm_swp;
+	unsigned long swap_attempts;
+	unsigned long swap_successes;
+};
 
+struct thread;
 struct proc;
 struct vmspace;
 
-void	shminit(void);
-void	shmfork(struct vmspace *, struct vmspace *);
 void	shmexit(struct vmspace *);
-int	sysctl_sysvshm(int *, u_int, void *, size_t *, void *, size_t);
-int	shmctl1(struct proc *, int, int, caddr_t,
-	    int (*)(const void *, void *, size_t),
-	    int (*)(const void *, void *, size_t));
-
+void	shmfork(struct proc *, struct proc *);
 #else /* !_KERNEL */
 
+#include <sys/cdefs.h>
+
+#ifndef _SIZE_T_DECLARED
+typedef __size_t        size_t;
+#define _SIZE_T_DECLARED
+#endif
+
 __BEGIN_DECLS
+int shmsys(int, ...);
 void *shmat(int, const void *, int);
+int shmget(key_t, size_t, int);
 int shmctl(int, int, struct shmid_ds *);
 int shmdt(const void *);
-int shmget(key_t, size_t, int);
 __END_DECLS
 
 #endif /* !_KERNEL */

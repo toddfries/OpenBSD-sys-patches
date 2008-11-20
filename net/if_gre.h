@@ -1,7 +1,7 @@
-/*      $OpenBSD: if_gre.h,v 1.10 2005/05/14 19:24:23 brad Exp $ */
-/*	$NetBSD: if_gre.h,v 1.5 1999/11/19 20:41:19 thorpej Exp $ */
+/*	$NetBSD: if_gre.h,v 1.13 2003/11/10 08:51:52 wiz Exp $ */
+/*	 $FreeBSD: src/sys/net/if_gre.h,v 1.13 2005/06/10 16:49:18 brooks Exp $ */
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved
  *
@@ -23,7 +23,7 @@
  * 4. Neither the name of The NetBSD Foundation nor the names of its
  *    contributors may be used to endorse or promote products derived
  *    from this software without specific prior written permission.
- *    
+ *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
@@ -40,43 +40,63 @@
 #ifndef _NET_IF_GRE_H
 #define _NET_IF_GRE_H
 
+#include <sys/ioccom.h>
+#ifdef _KERNEL
+#include <sys/queue.h>
+
+/*
+ * Version of the WCCP, need to be configured manually since
+ * header for version 2 is the same but IP payload is prepended
+ * with additional 4-bytes field.
+ */
+typedef enum {
+	WCCP_V1 = 0,
+	WCCP_V2
+} wccp_ver_t;
+
 struct gre_softc {
-	struct ifnet sc_if;
+	struct ifnet *sc_ifp;
 	LIST_ENTRY(gre_softc) sc_list;
 	int gre_unit;
 	int gre_flags;
-	struct    in_addr g_src;  /* source address of gre packets */
-	struct    in_addr g_dst;  /* destination address of gre packets */
+	struct in_addr g_src;	/* source address of gre packets */
+	struct in_addr g_dst;	/* destination address of gre packets */
 	struct route route;	/* routing entry that determines, where a
-                                   encapsulated packet should go */
+				   encapsulated packet should go */
 	u_char g_proto;		/* protocol of encapsulator */
-};	
+
+	const struct encaptab *encap;	/* encapsulation cookie */
+
+	int called;		/* infinite recursion preventer */
+
+	wccp_ver_t wccp_ver;	/* version of the WCCP */
+};
+#define	GRE2IFP(sc)	((sc)->sc_ifp)
 
 
 struct gre_h {
 	u_int16_t flags;	/* GRE flags */
-	u_int16_t ptype;	/* protocol type of payload typically 
-                               Ether protocol type*/
-/* 
- *  from here on: fields are optional, presence indicated by flags 
+	u_int16_t ptype;	/* protocol type of payload typically
+				   Ether protocol type*/
+/*
+ *  from here on: fields are optional, presence indicated by flags
  *
-	u_int_16 checksum	 checksum (one-complements of GRE header
-                             and payload
-                             Present if (ck_pres | rt_pres == 1).
-                             Valid if (ck_pres == 1).
-	u_int_16 offset			 offset from start of routing filed to
-                             first octet of active SRE (see below).
-                             Present if (ck_pres | rt_pres == 1).
-                             Valid if (rt_pres == 1).
-	u_int_32 key         inserted by encapsulator e.g. for
-                             authentication
-                             Present if (key_pres ==1 ).
-	u_int_32 seq_num     Sequence number to allow for packet order
-                             Present if (seq_pres ==1 ).
-
-    struct gre_sre[] routing Routing fileds (see below)
-                             Present if (rt_pres == 1)
-*/
+	u_int_16 checksum	checksum (one-complements of GRE header
+				and payload
+				Present if (ck_pres | rt_pres == 1).
+				Valid if (ck_pres == 1).
+	u_int_16 offset		offset from start of routing filed to
+				first octet of active SRE (see below).
+				Present if (ck_pres | rt_pres == 1).
+				Valid if (rt_pres == 1).
+	u_int_32 key		inserted by encapsulator e.g. for
+				authentication
+				Present if (key_pres ==1 ).
+	u_int_32 seq_num	Sequence number to allow for packet order
+				Present if (seq_pres ==1 ).
+	struct gre_sre[] routing Routing fileds (see below)
+				Present if (rt_pres == 1)
+ */
 } __packed;
 
 struct greip {
@@ -84,34 +104,41 @@ struct greip {
 	struct gre_h  gi_g;
 } __packed;
 
-#define gi_pr           gi_i.ip_p
-#define gi_len          gi_i.ip_len
-#define gi_src          gi_i.ip_src
-#define gi_dst          gi_i.ip_dst
+#define gi_pr		gi_i.ip_p
+#define gi_len		gi_i.ip_len
+#define gi_src		gi_i.ip_src
+#define gi_dst		gi_i.ip_dst
 #define gi_ptype	gi_g.ptype
 #define gi_flags	gi_g.flags
 
-#define GRE_CP          0x8000  /* Checksum Present */
-#define GRE_RP          0x4000  /* Routing Present */
-#define GRE_KP          0x2000  /* Key Present */
-#define GRE_SP          0x1000  /* Sequence Present */
+#define GRE_CP		0x8000  /* Checksum Present */
+#define GRE_RP		0x4000  /* Routing Present */
+#define GRE_KP		0x2000  /* Key Present */
+#define GRE_SP		0x1000  /* Sequence Present */
 #define GRE_SS		0x0800	/* Strict Source Route */
 
-/* gre_sre defines a Source route Entry. These are needed if packets
- *  should be routed over more than one tunnel hop by hop
+/*
+ * CISCO uses special type for GRE tunnel created as part of WCCP
+ * connection, while in fact those packets are just IPv4 encapsulated
+ * into GRE.
  */
+#define WCCP_PROTOCOL_TYPE	0x883E
 
+/*
+ * gre_sre defines a Source route Entry. These are needed if packets
+ * should be routed over more than one tunnel hop by hop
+ */
 struct gre_sre {
 	u_int16_t sre_family;	/* address family */
-	u_char  sre_offset;	/* offset to first octet of active entry */
-	u_char  sre_length;	/* number of octets in the SRE. 
-                               sre_lengthl==0 -> last entry. */
-	u_char  *sre_rtinfo;	/* the routing information */
+	u_char	sre_offset;	/* offset to first octet of active entry */
+	u_char	sre_length;	/* number of octets in the SRE.
+				   sre_lengthl==0 -> last entry. */
+	u_char	*sre_rtinfo;	/* the routing information */
 };
 
 struct greioctl {
 	int unit;
-	struct    in_addr addr;
+	struct in_addr addr;
 };
 
 /* for mobile encaps */
@@ -124,8 +151,8 @@ struct mobile_h {
 } __packed;
 
 struct mobip_h {
-	struct ip       mi;
-	struct mobile_h mh;
+	struct ip	mi;
+	struct mobile_h	mh;
 } __packed;
 
 
@@ -133,21 +160,27 @@ struct mobip_h {
 #define MOB_H_SIZ_L		(sizeof(struct mobile_h))
 #define MOB_H_SBIT	0x0080
 
+#define	GRE_TTL	30
 
-/* 
- * ioctls needed to manipulate the interface 
+#endif /* _KERNEL */
+
+/*
+ * ioctls needed to manipulate the interface
  */
 
-#ifdef _KERNEL
-extern  LIST_HEAD(gre_softc_head, gre_softc) gre_softc_list;
-extern  int gre_allow;   
-extern  int gre_wccp;
-extern  int ip_mobile_allow;
+#define GRESADDRS	_IOW('i', 101, struct ifreq)
+#define GRESADDRD	_IOW('i', 102, struct ifreq)
+#define GREGADDRS	_IOWR('i', 103, struct ifreq)
+#define GREGADDRD	_IOWR('i', 104, struct ifreq)
+#define GRESPROTO	_IOW('i' , 105, struct ifreq)
+#define GREGPROTO	_IOWR('i', 106, struct ifreq)
 
-void	greattach(int);
-int     gre_ioctl(struct ifnet *, u_long, caddr_t);
-int     gre_output(struct ifnet *, struct mbuf *, struct sockaddr *,
-	    struct rtentry *);
-u_int16_t gre_in_cksum(u_int16_t *, u_int);
+#ifdef _KERNEL
+LIST_HEAD(gre_softc_head, gre_softc);
+extern struct mtx gre_mtx;
+extern struct gre_softc_head gre_softc_list;
+
+u_int16_t	gre_in_cksum(u_int16_t *, u_int);
 #endif /* _KERNEL */
-#endif /* _NET_IF_GRE_H_ */
+
+#endif

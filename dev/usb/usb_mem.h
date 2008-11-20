@@ -1,8 +1,7 @@
-/*	$OpenBSD: usb_mem.h,v 1.11 2005/06/10 04:11:48 martin Exp $ */
-/*	$NetBSD: usb_mem.h,v 1.20 2003/05/03 18:11:42 wiz Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usb_mem.h,v 1.9 1999/11/17 22:33:47 n_hibma Exp $	*/
+/*	$NetBSD: usb_mem.h,v 1.18 2002/05/28 17:45:17 augustss Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/usb_mem.h,v 1.22 2007/06/13 05:45:48 imp Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -42,7 +41,7 @@
 typedef struct usb_dma_block {
 	bus_dma_tag_t tag;
 	bus_dmamap_t map;
-        caddr_t kaddr;
+	void *kaddr;
         bus_dma_segment_t segs[1];
         int nsegs;
         size_t size;
@@ -51,9 +50,9 @@ typedef struct usb_dma_block {
 	LIST_ENTRY(usb_dma_block) next;
 } usb_dma_block_t;
 
-#define DMAADDR(dma, o) ((dma)->block->map->dm_segs[0].ds_addr + (dma)->offs + (o))
+#define DMAADDR(dma, o) ((dma)->block->segs[0].ds_addr + (dma)->offs + (o))
 #define KERNADDR(dma, o) \
-	((void *)((char *)((dma)->block->kaddr + (dma)->offs) + (o)))
+	((void *)((char *)((dma)->block->kaddr) + (dma)->offs + (o)))
 
 usbd_status	usb_allocmem(usbd_bus_handle,size_t,size_t, usb_dma_t *);
 void		usb_freemem(usbd_bus_handle, usb_dma_t *);

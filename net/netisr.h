@@ -1,7 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.33 2008/05/09 12:54:52 dlg Exp $	*/
-/*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1980, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,20 +27,19 @@
  * SUCH DAMAGE.
  *
  *	@(#)netisr.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/net/netisr.h,v 1.33 2005/01/07 01:45:35 imp Exp $
  */
 
 #ifndef _NET_NETISR_H_
 #define _NET_NETISR_H_
+
 /*
  * The networking code runs off software interrupts.
  *
- * You can switch into the network by doing splsoftnet() and return by splx().
+ * You can switch into the network by doing splnet() and return by splx().
  * The software interrupt level for the network is higher than the software
  * level for the clock (so you can enter the network in routines called
  * at timeout time).
- *
- * The routine to request a network software interrupt, setsoftnet(),
- * is defined in the machine-specific include files.
  */
 
 /*
@@ -52,44 +48,51 @@
  * interrupt used for scheduling the network code to calls
  * on the lowest level routine of each protocol.
  */
-#define	NETISR_RND_DONE	1
+#define	NETISR_POLL	0		/* polling callback, must be first */
 #define	NETISR_IP	2		/* same as AF_INET */
-#define	NETISR_TX	3		/* for if_snd processing */
-#define	NETISR_MPLS	4		/* AF_MPLS would overflow */
-#define	NETISR_ATALK	16		/* same as AF_APPLETALK */
+#define	NETISR_ROUTE	14		/* routing socket */
+#define	NETISR_AARP	15		/* Appletalk ARP */
+#define	NETISR_ATALK2	16		/* Appletalk phase 2 */
+#define	NETISR_ATALK1	17		/* Appletalk phase 1 */
 #define	NETISR_ARP	18		/* same as AF_LINK */
-#define	NETISR_IPV6	24		/* same as AF_INET6 */
-#define	NETISR_ISDN	26		/* same as AF_E164 */
-#define	NETISR_NATM	27		/* same as AF_ATM */
-#define	NETISR_PPP	28		/* for PPP processing */
-#define	NETISR_BRIDGE	29		/* for bridge processing */
-#define	NETISR_PPPOE	30		/* for pppoe processing */
-#define	NETISR_BT	31		/* same as AF_BLUETOOTH */
+#define	NETISR_IPX	23		/* same as AF_IPX */
+#define	NETISR_USB	25		/* USB soft interrupt */
+#define	NETISR_PPP	26		/* PPP soft interrupt */
+#define	NETISR_IPV6	27
+#define	NETISR_NATM	28
+#define	NETISR_ATM	29
+#define	NETISR_NETGRAPH	30
+#define	NETISR_POLLMORE	31		/* polling callback, must be last */
 
-#ifndef _LOCORE
+
+#ifndef LOCORE
 #ifdef _KERNEL
-extern int	netisr;			/* scheduling bits for network */
 
-void	nettxintr(void);
-void	arpintr(void);
-void	ipintr(void);
-void	ip6intr(void);
-void	atintr(void);
-void	clnlintr(void);
-void	natmintr(void);
-void	pppintr(void);
-void	bridgeintr(void);
-void	pppoeintr(void);
-void	btintr(void);
-void	mplsintr(void);
+void legacy_setsoftnet(void);
 
-#include <machine/atomic.h>
-#define	schednetisr(anisr)						\
-do {									\
-	atomic_setbits_int(&netisr, (1 << (anisr)));			\
-	setsoftnet();							\
+extern volatile unsigned int	netisr;	/* scheduling bits for network */
+#define	schednetisr(anisr) do {						\
+	atomic_set_rel_int(&netisr, 1 << (anisr));			\
+	legacy_setsoftnet();						\
 } while (0)
+/* used to atomically schedule multiple netisrs */
+#define	schednetisrbits(isrbits) do {					\
+	atomic_set_rel_int(&netisr, isrbits);				\
+	legacy_setsoftnet();						\
+} while (0)
+
+struct ifqueue;
+struct mbuf;
+
+typedef void netisr_t (struct mbuf *);
+  
+void	netisr_dispatch(int, struct mbuf *);
+int	netisr_queue(int, struct mbuf *);
+#define	NETISR_MPSAFE	0x0001		/* ISR does not need Giant */
+void	netisr_register(int, netisr_t *, struct ifqueue *, int);
+void	netisr_unregister(int);
+
 #endif
 #endif
 
-#endif /* _NET_NETISR_H_ */
+#endif

@@ -1,8 +1,17 @@
-#	$OpenBSD: Makefile,v 1.3 2001/08/26 03:23:44 deraadt Exp $
-#	$NetBSD: Makefile,v 1.1 1995/10/14 20:24:14 christos Exp $
+# Makefile for syscall tables
+#
+# $FreeBSD: src/sys/compat/svr4/Makefile,v 1.8 2006/07/01 10:51:54 markm Exp $
 
-DEP=	syscalls.conf syscalls.master ../../kern/makesyscalls.sh
-OBJS=	svr4_sysent.c svr4_syscalls.c svr4_syscall.h svr4_syscallargs.h
+all:
+	@echo "make sysent only"
 
-${OBJS}: ${DEP}
-	sh ../../kern/makesyscalls.sh syscalls.conf syscalls.master
+sysent:  svr4_sysent.c svr4_syscall.h svr4_proto.h
+
+svr4_syscallnames.c svr4_sysent.c svr4_syscall.h svr4_proto.h: \
+		../../kern/makesyscalls.sh syscalls.master syscalls.conf
+	-mv -f svr4_syscallnames.c svr4_syscallnames.c.bak
+	-mv -f svr4_sysent.c svr4_sysent.c.bak
+	-mv -f svr4_syscall.h svr4_syscall.h.bak
+	-mv -f svr4_proto.h svr4_proto.h.bak
+	sh ../../kern/makesyscalls.sh syscalls.master syscalls.conf
+

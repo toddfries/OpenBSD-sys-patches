@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_util.h,v 1.3 2000/08/23 19:31:34 fgsch Exp $	*/
-/*	$NetBSD: svr4_util.h,v 1.8 1996/04/11 12:41:25 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,12 +24,22 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_util.h,v 1.12 2006/07/10 21:38:17 jhb Exp $
  */
 
 #ifndef	_SVR4_UTIL_H_
 #define	_SVR4_UTIL_H_
 
-#include <compat/common/compat_util.h>
+/*#include <compat/common/compat_util.h>*/
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/pmap.h>
+#include <machine/vmparam.h>
+#include <sys/exec.h>
+#include <sys/sysent.h>
+#include <sys/cdefs.h>
+#include <sys/uio.h>
 
 #ifdef DEBUG_SVR4
 #define DPRINTF(a)	uprintf a;
@@ -39,12 +47,18 @@
 #define DPRINTF(a)
 #endif
 
-extern const char svr4_emul_path[];
+int	svr4_emul_find(struct thread *, char *, enum uio_seg, char **, int);
 
-#define SVR4_CHECK_ALT_EXIST(p, sgp, path) \
-    CHECK_ALT_EXIST(p, sgp, svr4_emul_path, path)
+#define CHECKALT(td, upath, pathp, i)					\
+	do {								\
+		int _error;						\
+									\
+		_error = svr4_emul_find(td, upath, UIO_USERSPACE, pathp, i); \
+		if (*(pathp) == NULL)					\
+			return (_error);				\
+	} while (0)
 
-#define SVR4_CHECK_ALT_CREAT(p, sgp, path) \
-    CHECK_ALT_CREAT(p, sgp, svr4_emul_path, path)
+#define CHECKALTEXIST(td, upath, pathp) CHECKALT(td, upath, pathp, 0)
+#define CHECKALTCREAT(td, upath, pathp) CHECKALT(td, upath, pathp, 1)
 
 #endif /* !_SVR4_UTIL_H_ */

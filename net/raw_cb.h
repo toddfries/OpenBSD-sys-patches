@@ -1,7 +1,4 @@
-/*	$OpenBSD: raw_cb.h,v 1.7 2008/05/23 15:51:12 thib Exp $	*/
-/*	$NetBSD: raw_cb.h,v 1.9 1996/02/13 22:00:41 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1980, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,17 +27,20 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_cb.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/net/raw_cb.h,v 1.19 2005/01/07 01:45:35 imp Exp $
  */
 
 #ifndef _NET_RAW_CB_H_
 #define _NET_RAW_CB_H_
+
+#include <sys/queue.h>
 
 /*
  * Raw protocol interface control block.  Used
  * to tie a socket to the generic raw interface.
  */
 struct rawcb {
-	LIST_ENTRY(rawcb) rcb_list;	/* doubly linked list */
+	LIST_ENTRY(rawcb) list;
 	struct	socket *rcb_socket;	/* back pointer to socket */
 	struct	sockaddr *rcb_faddr;	/* destination address */
 	struct	sockaddr *rcb_laddr;	/* socket's address */
@@ -56,16 +56,26 @@ struct rawcb {
 #define	RAWRCVQ		8192
 
 #ifdef _KERNEL
-extern LIST_HEAD(rawcbhead, rawcb) rawcb;		/* head of list */
+extern LIST_HEAD(rawcb_list_head, rawcb) rawcb_list;
+extern struct mtx rawcb_mtx;
 
+/* protosw entries */
+pr_ctlinput_t	raw_ctlinput;
+pr_init_t	raw_init;
+
+/* usrreq entries */
 int	 raw_attach(struct socket *, int);
-void	 *raw_ctlinput(int, struct sockaddr *, void *);
 void	 raw_detach(struct rawcb *);
 void	 raw_disconnect(struct rawcb *);
-void	 raw_init(void);
-void	 raw_input(struct mbuf *, ...);
-int	 raw_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 
-#endif /* _KERNEL */
-#endif /* _NET_RAW_CB_H_ */
+#if 0 /* what the ??? */
+pr_input_t	raw_input;
+#else
+void	 raw_input(struct mbuf *,
+	    struct sockproto *, struct sockaddr *, struct sockaddr *);
+#endif
+
+extern	struct pr_usrreqs raw_usrreqs;
+#endif
+
+#endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rumvar.h,v 1.8 2007/06/06 19:25:49 mk Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_rumvar.h,v 1.3 2008/04/20 20:35:38 sam Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 Damien Bergamini <damien.bergamini@free.fr>
@@ -28,7 +28,7 @@ struct rum_rx_radiotap_header {
 	uint16_t	wr_chan_flags;
 	uint8_t		wr_antenna;
 	uint8_t		wr_antsignal;
-} __packed;
+};
 
 #define RT2573_RX_RADIOTAP_PRESENT					\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
@@ -44,9 +44,9 @@ struct rum_tx_radiotap_header {
 	uint16_t	wt_chan_freq;
 	uint16_t	wt_chan_flags;
 	uint8_t		wt_antenna;
-} __packed;
+};
 
-#define RT2573_TX_RADIOTAP_PRESENT						\
+#define RT2573_TX_RADIOTAP_PRESENT					\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_RATE) |				\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
@@ -58,6 +58,7 @@ struct rum_tx_data {
 	struct rum_softc	*sc;
 	usbd_xfer_handle	xfer;
 	uint8_t			*buf;
+	struct mbuf		*m;
 	struct ieee80211_node	*ni;
 };
 
@@ -68,21 +69,34 @@ struct rum_rx_data {
 	struct mbuf		*m;
 };
 
-struct rum_softc {
-	struct device			sc_dev;
-	struct ieee80211com		sc_ic;
-	int				(*sc_newstate)(struct ieee80211com *,
-					    enum ieee80211_state, int);
+struct rum_node {
+	struct ieee80211_node	ni;
+	struct ieee80211_amrr_node amn;
+};
+#define	RUM_NODE(ni)	((struct rum_node *)(ni))
 
+struct rum_vap {
+	struct ieee80211vap		vap;
+	struct ieee80211_beacon_offsets	bo;
+	struct ieee80211_amrr		amrr;
+	struct callout			amrr_ch;
+
+	int				(*newstate)(struct ieee80211vap *,
+					    enum ieee80211_state, int);
+};
+#define	RUM_VAP(vap)	((struct rum_vap *)(vap))
+
+struct rum_softc {
+	struct ifnet			*sc_ifp;
+	const struct ieee80211_rate_table *sc_rates;
+
+	device_t			sc_dev;
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
-
-	struct ieee80211_channel	*sc_curchan;
 
 	int				sc_rx_no;
 	int				sc_tx_no;
 
-	uint16_t			macbbp_rev;
 	uint8_t				rf_rev;
 	uint8_t				rffreq;
 
@@ -95,16 +109,20 @@ struct rum_softc {
 	int				sc_arg;
 	struct usb_task			sc_task;
 
-	struct ieee80211_amrr		amrr;
-	struct ieee80211_amrr_node	amn;
+	struct usb_task			sc_scantask;
+	int				sc_scan_action;
+#define RUM_SCAN_START	0
+#define RUM_SCAN_END	1
+#define RUM_SET_CHANNEL	2
 
 	struct rum_rx_data		rx_data[RUM_RX_LIST_COUNT];
 	struct rum_tx_data		tx_data[RUM_TX_LIST_COUNT];
 	int				tx_queued;
 	int				tx_cur;
 
-	struct timeout			scan_to;
-	struct timeout			amrr_to;
+	struct mtx			sc_mtx;
+
+	struct callout			watchdog_ch;
 
 	int				sc_tx_timer;
 
@@ -125,24 +143,19 @@ struct rum_softc {
 	int				ext_5ghz_lna;
 	int				rssi_2ghz_corr;
 	int				rssi_5ghz_corr;
-	int				sifs;
 	uint8_t				bbp17;
 
-#if NBPFILTER > 0
-	caddr_t				sc_drvbpf;
-
-	union {
-		struct rum_rx_radiotap_header th;
-		uint8_t	pad[64];
-	}				sc_rxtapu;
-#define sc_rxtap	sc_rxtapu.th
+	struct rum_rx_radiotap_header	sc_rxtap;
 	int				sc_rxtap_len;
 
-	union {
-		struct rum_tx_radiotap_header th;
-		uint8_t	pad[64];
-	}				sc_txtapu;
-#define sc_txtap	sc_txtapu.th
+	struct rum_tx_radiotap_header	sc_txtap;
 	int				sc_txtap_len;
-#endif
 };
+
+#if 0
+#define RUM_LOCK(sc)    mtx_lock(&(sc)->sc_mtx)
+#define RUM_UNLOCK(sc)  mtx_unlock(&(sc)->sc_mtx)
+#else
+#define RUM_LOCK(sc)	do { ((sc) = (sc)); mtx_lock(&Giant); } while (0)
+#define RUM_UNLOCK(sc)	mtx_unlock(&Giant)
+#endif

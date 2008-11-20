@@ -1,6 +1,6 @@
-/* $OpenBSD: limits.h,v 1.7 2007/05/07 15:29:44 millert Exp $ */
-/*
- * Copyright (c) 2002 Marc Espie.
+/*-
+ * Copyright (c) 1988, 1993
+ *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -10,119 +10,91 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
- * PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/sys/limits.h,v 1.10 2005/12/02 07:45:28 davidxu Exp $
  */
+
 #ifndef _SYS_LIMITS_H_
-#define _SYS_LIMITS_H_
+#define	_SYS_LIMITS_H_
 
 #include <sys/cdefs.h>
+#include <machine/_limits.h>
 
-/* Common definitions for limits.h. */
+#define	CHAR_BIT	__CHAR_BIT	/* number of bits in a char */
 
-/*
- * <machine/internal_types.h> is meant to describe a specific architecture,
- * but to be a safe include, that doesn't ever define anything that is
- * user-visible (only typedefs and #define names that stays in the __xxx
- * namespace).
- *
- *   __machine_has_unsigned_chars	(default is signed chars)
- *   __FLT_xxx/__DBL_xxx		non standard values for floating
- *   					points limits.
- */
-#include <machine/internal_types.h>
+#define	SCHAR_MAX	__SCHAR_MAX	/* max value for a signed char */
+#define	SCHAR_MIN	__SCHAR_MIN	/* min value for a signed char */
 
-/* Legacy */
-#include <machine/limits.h>
+#define	UCHAR_MAX	__UCHAR_MAX	/* max value for an unsigned char */
 
-#define	CHAR_BIT	8		/* number of bits in a char */
-
-#define	SCHAR_MAX	0x7f		/* max value for a signed char */
-#define SCHAR_MIN	(-0x7f-1)	/* min value for a signed char */
-
-#define	UCHAR_MAX	0xff		/* max value for an unsigned char */
-#ifdef __machine_has_unsigned_chars
-# define CHAR_MIN	0		/* min value for a char */
-# define CHAR_MAX	0xff		/* max value for a char */
+#ifdef __CHAR_UNSIGNED__
+#define	CHAR_MAX	UCHAR_MAX	/* max value for a char */
+#define	CHAR_MIN	0		/* min value for a char */
 #else
-# define CHAR_MAX	0x7f
-# define CHAR_MIN	(-0x7f-1)
+#define	CHAR_MAX	SCHAR_MAX
+#define	CHAR_MIN	SCHAR_MIN
 #endif
 
-#define	USHRT_MAX	0xffff		/* max value for an unsigned short */
-#define	SHRT_MAX	0x7fff		/* max value for a short */
-#define SHRT_MIN        (-0x7fff-1)     /* min value for a short */
+#define	USHRT_MAX	__USHRT_MAX	/* max value for an unsigned short */
+#define	SHRT_MAX	__SHRT_MAX	/* max value for a short */
+#define	SHRT_MIN	__SHRT_MIN	/* min value for a short */
 
-#define	UINT_MAX	0xffffffffU	/* max value for an unsigned int */
-#define	INT_MAX		0x7fffffff	/* max value for an int */
-#define	INT_MIN		(-0x7fffffff-1)	/* min value for an int */
+#define	UINT_MAX	__UINT_MAX	/* max value for an unsigned int */
+#define	INT_MAX		__INT_MAX	/* max value for an int */
+#define	INT_MIN		__INT_MIN	/* min value for an int */
 
-#ifdef __LP64__
-# define ULONG_MAX	0xffffffffffffffffUL
-					/* max value for unsigned long */
-# define LONG_MAX	0x7fffffffffffffffL	
-					/* max value for a signed long */
-# define LONG_MIN	(-0x7fffffffffffffffL-1)	
-					/* min value for a signed long */
-#else
-# define ULONG_MAX	0xffffffffUL	/* max value for an unsigned long */
-# define LONG_MAX	0x7fffffffL	/* max value for a long */
-# define LONG_MIN	(-0x7fffffffL-1)/* min value for a long */
+#define	ULONG_MAX	__ULONG_MAX	/* max for an unsigned long */
+#define	LONG_MAX	__LONG_MAX	/* max for a long */
+#define	LONG_MIN	__LONG_MIN	/* min for a long */
+
+#ifdef __LONG_LONG_SUPPORTED
+#define	ULLONG_MAX	__ULLONG_MAX	/* max for an unsigned long long */
+#define	LLONG_MAX	__LLONG_MAX	/* max for a long long */
+#define	LLONG_MIN	__LLONG_MIN	/* min for a long long */
 #endif
 
-#if __BSD_VISIBLE || __ISO_C_VISIBLE >= 1999
-# define ULLONG_MAX	0xffffffffffffffffULL	
-					/* max value for unsigned long long */
-# define LLONG_MAX	0x7fffffffffffffffLL	
-					/* max value for a signed long long */
-# define LLONG_MIN	(-0x7fffffffffffffffLL-1)	
-					/* min value for a signed long long */
+#if __POSIX_VISIBLE || __XSI_VISIBLE
+#define	SSIZE_MAX	__SSIZE_MAX	/* max value for an ssize_t */
+#endif
+
+#if __POSIX_VISIBLE >= 200112 || __XSI_VISIBLE
+#define	SIZE_T_MAX	__SIZE_T_MAX	/* max value for a size_t */
+
+#define	OFF_MAX		__OFF_MAX	/* max value for an off_t */
+#define	OFF_MIN		__OFF_MIN	/* min value for an off_t */
 #endif
 
 #if __BSD_VISIBLE
-# define UID_MAX	UINT_MAX	/* max value for a uid_t */
-# define GID_MAX	UINT_MAX	/* max value for a gid_t */
+#define	GID_MAX		UINT_MAX	/* max value for a gid_t */
+#define	UID_MAX		UINT_MAX	/* max value for a uid_t */
+
+#define	UQUAD_MAX	(__UQUAD_MAX)	/* max value for a uquad_t */
+#define	QUAD_MAX	(__QUAD_MAX)	/* max value for a quad_t */
+#define	QUAD_MIN	(__QUAD_MIN)	/* min value for a quad_t */
 #endif
 
-
-#if __XPG_VISIBLE
-# ifdef __LP64__
-#  define LONG_BIT	64
-# else
-#  define LONG_BIT	32
-# endif
-# define WORD_BIT	32
-
-/* float.h defines these as well */
-# if !defined(DBL_DIG)
-#  if defined(__DBL_DIG)
-#   define DBL_DIG	__DBL_DIG
-#   define DBL_MAX	__DBL_MAX
-#   define DBL_MIN	__DBL_MIN
-
-#   define FLT_DIG	__FLT_DIG
-#   define FLT_MAX	__FLT_MAX
-#   define FLT_MIN	__FLT_MIN
-#  else
-#   define DBL_DIG	15
-#   define DBL_MAX	1.7976931348623157E+308
-#   define DBL_MIN	2.2250738585072014E-308
- 
-#   define FLT_DIG	6
-#   define FLT_MAX	3.40282347E+38F
-#   define FLT_MIN	1.17549435E-38F
-#  endif
-# endif
+#if __XSI_VISIBLE
+#define	LONG_BIT	__LONG_BIT
+#define	WORD_BIT	__WORD_BIT
 #endif
 
+#if __POSIX_VISIBLE
+#define	MQ_PRIO_MAX	64
 #endif
+
+#endif /* !_SYS_LIMITS_H_ */

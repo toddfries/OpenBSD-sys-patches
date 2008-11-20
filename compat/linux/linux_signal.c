@@ -1,23 +1,17 @@
-/*	$OpenBSD: linux_signal.c,v 1.13 2008/05/01 11:53:26 miod Exp $	*/
-/*	$NetBSD: linux_signal.c,v 1.10 1996/04/04 23:51:36 christos Exp $	*/
-
-/*
- * Copyright (c) 1995 Frank van der Linden
+/*-
+ * Copyright (c) 1994-1995 Søren Schmidt
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *    notice, this list of conditions and the following disclaimer 
+ *    in this position and unchanged.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed for the NetBSD Project
- *      by Frank van der Linden
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -30,891 +24,565 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * heavily from: svr4_signal.c,v 1.7 1995/01/09 01:04:21 christos Exp
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_signal.c,v 1.65 2007/01/07 19:14:06 netchild Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/namei.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/sx.h>
 #include <sys/proc.h>
-#include <sys/filedesc.h>
-#include <sys/ioctl.h>
-#include <sys/mount.h>
-#include <sys/kernel.h>
-#include <sys/signal.h>
 #include <sys/signalvar.h>
-#include <sys/malloc.h>
+#include <sys/syscallsubr.h>
+#include <sys/sysproto.h>
 
-#include <sys/syscallargs.h>
+#include "opt_compat.h"
 
-#include <compat/linux/linux_types.h>
+#ifdef COMPAT_LINUX32
+#include <machine/../linux32/linux.h>
+#include <machine/../linux32/linux32_proto.h>
+#else
+#include <machine/../linux/linux.h>
+#include <machine/../linux/linux_proto.h>
+#endif
 #include <compat/linux/linux_signal.h>
-#include <compat/linux/linux_syscallargs.h>
 #include <compat/linux/linux_util.h>
-
-#define	sigemptyset(s)		bzero((s), sizeof(*(s)))
-#define	sigismember(s, n)	(*(s) & sigmask(n))
-#define	sigaddset(s, n)		(*(s) |= sigmask(n))
- 
-/* Locally used defines (in bsd<->linux conversion functions): */
-#define	linux_sigmask(n)	(1 << ((n) - 1))
-#define	linux_sigemptyset(s)	bzero((s), sizeof(*(s)))
-#define	linux_sigismember(s, n)	((s)->sig[((n) - 1) / LINUX__NSIG_BPW]	\
-					& (1 << ((n) - 1) % LINUX__NSIG_BPW))
-#define	linux_sigaddset(s, n)	((s)->sig[((n) - 1) / LINUX__NSIG_BPW]	\
-					|= (1 << ((n) - 1) % LINUX__NSIG_BPW))
-
-int bsd_to_linux_sig[NSIG] = {
-	0,
-	LINUX_SIGHUP,
-	LINUX_SIGINT,
-	LINUX_SIGQUIT,
-	LINUX_SIGILL,
-	LINUX_SIGTRAP,
-	LINUX_SIGABRT,
-	LINUX_NSIG,		/* XXX Kludge to get RT signal #32 to work */
-	LINUX_SIGFPE,
-	LINUX_SIGKILL,
-	LINUX_SIGBUS,
-	LINUX_SIGSEGV,
-	LINUX_NSIG + 1,			/* XXX Kludge to get RT signal #32 to work */
-	LINUX_SIGPIPE,
-	LINUX_SIGALRM,
-	LINUX_SIGTERM,
-	LINUX_SIGURG,
-	LINUX_SIGSTOP,
-	LINUX_SIGTSTP,
-	LINUX_SIGCONT,
-	LINUX_SIGCHLD,
-	LINUX_SIGTTIN,
-	LINUX_SIGTTOU,
-	LINUX_SIGIO,
-	LINUX_SIGXCPU,
-	LINUX_SIGXFSZ,
-	LINUX_SIGVTALRM,
-	LINUX_SIGPROF,
-	LINUX_SIGWINCH,
-	0,			/* SIGINFO */
-	LINUX_SIGUSR1,
-	LINUX_SIGUSR2,
-};
-
-int linux_to_bsd_sig[LINUX__NSIG] = {
-	0,
-	SIGHUP,
-	SIGINT,
-	SIGQUIT,
-	SIGILL,
-	SIGTRAP,
-	SIGABRT,
-	SIGBUS,
-	SIGFPE,
-	SIGKILL,
-	SIGUSR1,
-	SIGSEGV,
-	SIGUSR2,
-	SIGPIPE,
-	SIGALRM,
-	SIGTERM,
-	0,			/* SIGSTKFLT */
-	SIGCHLD,
-	SIGCONT,
-	SIGSTOP,
-	SIGTSTP,
-	SIGTTIN,
-	SIGTTOU,
-	SIGURG,
-	SIGXCPU,
-	SIGXFSZ,
-	SIGVTALRM,
-	SIGPROF,
-	SIGWINCH,
-	SIGIO,
-	0,			/* SIGUNUSED */
-	0,
-	SIGEMT,			/* XXX Gruesome hack for linuxthreads:       */
-	SIGSYS,			/* Map 1st 2 RT signals onto ones we handle. */
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-};
-
-/*
- * Convert between Linux and BSD signal sets.
- */
-void
-linux_old_to_bsd_sigset(lss, bss)
-	const linux_old_sigset_t *lss;
-	sigset_t *bss;
-{
-	linux_old_extra_to_bsd_sigset(lss, (const unsigned long *) 0, bss);    
-}
+#include <compat/linux/linux_emul.h>
 
 void
-bsd_to_linux_old_sigset(bss, lss)
-	const sigset_t *bss;
-	linux_old_sigset_t *lss;
+linux_to_bsd_sigset(l_sigset_t *lss, sigset_t *bss)
 {
-	bsd_to_linux_old_extra_sigset(bss, lss, (unsigned long *) 0); 
-}
+	int b, l;
 
-void
-linux_old_extra_to_bsd_sigset(lss, extra, bss)
-	const linux_old_sigset_t *lss;
-	const unsigned long *extra;
-	sigset_t *bss;
-{
-	linux_sigset_t lsnew;
-
-	/* convert old sigset to new sigset */
-	linux_sigemptyset(&lsnew);
-	lsnew.sig[0] = *lss;
-	if (extra)
-		bcopy(extra, &lsnew.sig[1],
-			sizeof(linux_sigset_t) - sizeof(linux_old_sigset_t));
-
-	linux_to_bsd_sigset(&lsnew, bss);
-}
-
-void
-bsd_to_linux_old_extra_sigset(bss, lss, extra)
-	const sigset_t *bss;
-	linux_old_sigset_t *lss;
-	unsigned long *extra;
-{
-	linux_sigset_t lsnew;
-
-	bsd_to_linux_sigset(bss, &lsnew);
-
-	/* convert new sigset to old sigset */
-	*lss = lsnew.sig[0];
-	if (extra)
-		bcopy(&lsnew.sig[1], extra,
-			sizeof(linux_sigset_t) - sizeof(linux_old_sigset_t));
-}
-
-void
-linux_to_bsd_sigset(lss, bss)
-	const linux_sigset_t *lss;
-	sigset_t *bss;
-{
-	int i, newsig;
-
-	sigemptyset(bss);
-	for (i = 1; i < LINUX__NSIG; i++) {
-		if (linux_sigismember(lss, i)) {
-			newsig = linux_to_bsd_sig[i];
-			if (newsig)
-				sigaddset(bss, newsig);
+	SIGEMPTYSET(*bss);
+	bss->__bits[0] = lss->__bits[0] & ~((1U << LINUX_SIGTBLSZ) - 1);
+	bss->__bits[1] = lss->__bits[1];
+	for (l = 1; l <= LINUX_SIGTBLSZ; l++) {
+		if (LINUX_SIGISMEMBER(*lss, l)) {
+			b = linux_to_bsd_signal[_SIG_IDX(l)];
+			if (b)
+				SIGADDSET(*bss, b);
 		}
 	}
 }
 
 void
-bsd_to_linux_sigset(bss, lss)
-	const sigset_t *bss;
-	linux_sigset_t *lss;
+bsd_to_linux_sigset(sigset_t *bss, l_sigset_t *lss)
 {
-	int i, newsig;
+	int b, l;
 
-	linux_sigemptyset(lss);
-	for (i = 1; i < NSIG; i++) {
-		if (sigismember(bss, i)) {
-			newsig = bsd_to_linux_sig[i];
-			if (newsig)
-				linux_sigaddset(lss, newsig);
+	LINUX_SIGEMPTYSET(*lss);
+	lss->__bits[0] = bss->__bits[0] & ~((1U << LINUX_SIGTBLSZ) - 1);
+	lss->__bits[1] = bss->__bits[1];
+	for (b = 1; b <= LINUX_SIGTBLSZ; b++) {
+		if (SIGISMEMBER(*bss, b)) {
+			l = bsd_to_linux_signal[_SIG_IDX(b)];
+			if (l)
+				LINUX_SIGADDSET(*lss, l);
 		}
 	}
 }
 
-/*
- * Convert between Linux and BSD sigaction structures. Linux has
- * one extra field (sa_restorer) which we don't support.
- */
-void
-linux_old_to_bsd_sigaction(lsa, bsa)
-	struct linux_old_sigaction *lsa;
-	struct sigaction *bsa;
+static void
+linux_to_bsd_sigaction(l_sigaction_t *lsa, struct sigaction *bsa)
 {
 
-	bsa->sa_handler = lsa->sa__handler;
-	linux_old_to_bsd_sigset(&lsa->sa_mask, &bsa->sa_mask);
+	linux_to_bsd_sigset(&lsa->lsa_mask, &bsa->sa_mask);
+	bsa->sa_handler = PTRIN(lsa->lsa_handler);
 	bsa->sa_flags = 0;
-	if ((lsa->sa_flags & LINUX_SA_ONSTACK) != 0)
-		bsa->sa_flags |= SA_ONSTACK;
-	if ((lsa->sa_flags & LINUX_SA_RESTART) != 0)
-		bsa->sa_flags |= SA_RESTART;
-	if ((lsa->sa_flags & LINUX_SA_ONESHOT) != 0)
-		bsa->sa_flags |= SA_RESETHAND;
-	if ((lsa->sa_flags & LINUX_SA_NOCLDSTOP) != 0)
+	if (lsa->lsa_flags & LINUX_SA_NOCLDSTOP)
 		bsa->sa_flags |= SA_NOCLDSTOP;
-	if ((lsa->sa_flags & LINUX_SA_NOMASK) != 0)
-		bsa->sa_flags |= SA_NODEFER;
-}
-
-void
-bsd_to_linux_old_sigaction(bsa, lsa)
-	struct sigaction *bsa;
-	struct linux_old_sigaction *lsa;
-{
-
-	lsa->sa__handler = bsa->sa_handler;
-	bsd_to_linux_old_sigset(&bsa->sa_mask, &lsa->sa_mask);
-	lsa->sa_flags = 0;
-	if ((bsa->sa_flags & SA_NOCLDSTOP) != 0)
-		lsa->sa_flags |= LINUX_SA_NOCLDSTOP;
-	if ((bsa->sa_flags & SA_ONSTACK) != 0)
-		lsa->sa_flags |= LINUX_SA_ONSTACK;
-	if ((bsa->sa_flags & SA_RESTART) != 0)
-		lsa->sa_flags |= LINUX_SA_RESTART;
-	if ((bsa->sa_flags & SA_NODEFER) != 0)
-		lsa->sa_flags |= LINUX_SA_NOMASK;
-	if ((bsa->sa_flags & SA_RESETHAND) != 0)
-		lsa->sa_flags |= LINUX_SA_ONESHOT;
-	lsa->sa_restorer = NULL;
-}
-
-void
-linux_to_bsd_sigaction(lsa, bsa)
-	struct linux_sigaction *lsa;
-	struct sigaction *bsa;
-{
-
-	bsa->sa_handler = lsa->sa__handler;
-	linux_to_bsd_sigset(&lsa->sa_mask, &bsa->sa_mask);
-	bsa->sa_flags = 0;
-	if ((lsa->sa_flags & LINUX_SA_NOCLDSTOP) != 0)
-		bsa->sa_flags |= SA_NOCLDSTOP;
-	if ((lsa->sa_flags & LINUX_SA_ONSTACK) != 0)
-		bsa->sa_flags |= SA_ONSTACK;
-	if ((lsa->sa_flags & LINUX_SA_RESTART) != 0)
-		bsa->sa_flags |= SA_RESTART;
-	if ((lsa->sa_flags & LINUX_SA_ONESHOT) != 0)
-		bsa->sa_flags |= SA_RESETHAND;
-	if ((lsa->sa_flags & LINUX_SA_NOMASK) != 0)
-		bsa->sa_flags |= SA_NODEFER;
-	if ((lsa->sa_flags & LINUX_SA_SIGINFO) != 0)
+	if (lsa->lsa_flags & LINUX_SA_NOCLDWAIT)
+		bsa->sa_flags |= SA_NOCLDWAIT;
+	if (lsa->lsa_flags & LINUX_SA_SIGINFO)
 		bsa->sa_flags |= SA_SIGINFO;
+	if (lsa->lsa_flags & LINUX_SA_ONSTACK)
+		bsa->sa_flags |= SA_ONSTACK;
+	if (lsa->lsa_flags & LINUX_SA_RESTART)
+		bsa->sa_flags |= SA_RESTART;
+	if (lsa->lsa_flags & LINUX_SA_ONESHOT)
+		bsa->sa_flags |= SA_RESETHAND;
+	if (lsa->lsa_flags & LINUX_SA_NOMASK)
+		bsa->sa_flags |= SA_NODEFER;
 }
 
-void
-bsd_to_linux_sigaction(bsa, lsa)
-	struct sigaction *bsa;
-	struct linux_sigaction *lsa;
+static void
+bsd_to_linux_sigaction(struct sigaction *bsa, l_sigaction_t *lsa)
 {
 
-	/* Clear sa_flags and sa_restorer (if it exists) */
-	bzero(lsa, sizeof(struct linux_sigaction));
-
-	/* ...and fill in the mask and flags */
-	bsd_to_linux_sigset(&bsa->sa_mask, &lsa->sa_mask);
-	if ((bsa->sa_flags & SA_NOCLDSTOP) != 0)
-		lsa->sa_flags |= LINUX_SA_NOCLDSTOP;
-	if ((bsa->sa_flags & SA_ONSTACK) != 0)
-		lsa->sa_flags |= LINUX_SA_ONSTACK;
-	if ((bsa->sa_flags & SA_RESTART) != 0)
-		lsa->sa_flags |= LINUX_SA_RESTART;
-	if ((bsa->sa_flags & SA_NODEFER) != 0)
-		lsa->sa_flags |= LINUX_SA_NOMASK;
-	if ((bsa->sa_flags & SA_RESETHAND) != 0)
-		lsa->sa_flags |= LINUX_SA_ONESHOT;
-	if ((bsa->sa_flags & SA_SIGINFO) != 0)
-		lsa->sa_flags |= LINUX_SA_SIGINFO;
-	lsa->sa__handler = bsa->sa_handler;
+	bsd_to_linux_sigset(&bsa->sa_mask, &lsa->lsa_mask);
+#ifdef COMPAT_LINUX32
+	lsa->lsa_handler = (uintptr_t)bsa->sa_handler;
+#else
+	lsa->lsa_handler = bsa->sa_handler;
+#endif
+	lsa->lsa_restorer = 0;		/* unsupported */
+	lsa->lsa_flags = 0;
+	if (bsa->sa_flags & SA_NOCLDSTOP)
+		lsa->lsa_flags |= LINUX_SA_NOCLDSTOP;
+	if (bsa->sa_flags & SA_NOCLDWAIT)
+		lsa->lsa_flags |= LINUX_SA_NOCLDWAIT;
+	if (bsa->sa_flags & SA_SIGINFO)
+		lsa->lsa_flags |= LINUX_SA_SIGINFO;
+	if (bsa->sa_flags & SA_ONSTACK)
+		lsa->lsa_flags |= LINUX_SA_ONSTACK;
+	if (bsa->sa_flags & SA_RESTART)
+		lsa->lsa_flags |= LINUX_SA_RESTART;
+	if (bsa->sa_flags & SA_RESETHAND)
+		lsa->lsa_flags |= LINUX_SA_ONESHOT;
+	if (bsa->sa_flags & SA_NODEFER)
+		lsa->lsa_flags |= LINUX_SA_NOMASK;
 }
 
 int
-linux_to_bsd_signal(int linuxsig, int *bsdsig)
+linux_do_sigaction(struct thread *td, int linux_sig, l_sigaction_t *linux_nsa,
+		   l_sigaction_t *linux_osa)
 {
-	if (linuxsig < 0 || linuxsig >= LINUX__NSIG)
+	struct sigaction act, oact, *nsa, *osa;
+	int error, sig;
+
+	if (!LINUX_SIG_VALID(linux_sig))
 		return (EINVAL);
 
-	*bsdsig = linux_to_bsd_sig[linuxsig];
-	return (0);
-}
-
-int
-bsd_to_linux_signal(int bsdsig, int *linuxsig)
-{
-	if (bsdsig < 0 || bsdsig >= NSIG)
-		return (EINVAL);
-
-	*linuxsig = bsd_to_linux_sig[bsdsig];
-	return (0);
-}
-
-/*
- * The Linux sigaction() system call. Do the usual conversions,
- * and just call sigaction(). Some flags and values are silently
- * ignored (see above).
- */
-int
-linux_sys_sigaction(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_sigaction_args /* {
-		syscallarg(int) signum;
-		syscallarg(struct linux_old_sigaction *) nsa;
-		syscallarg(struct linux_old_sigaction *) osa;
-	} */ *uap = v;
-	struct linux_old_sigaction *nlsa, *olsa, tmplsa;
-	struct sigaction *nbsa, *obsa, tmpbsa;
-	struct sys_sigaction_args sa;
-	caddr_t sg;
-	int error;
-
-	if (SCARG(uap, signum) < 0 || SCARG(uap, signum) >= LINUX__NSIG)
-		return (EINVAL);
-
-	sg = stackgap_init(p->p_emul);
-	nlsa = SCARG(uap, nsa);
-	olsa = SCARG(uap, osa);
-
-	if (olsa != NULL)
-		obsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-	else
-		obsa = NULL;
-
-	if (nlsa != NULL) {
-		nbsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-		if ((error = copyin(nlsa, &tmplsa, sizeof(tmplsa))) != 0)
-			return (error);
-		linux_old_to_bsd_sigaction(&tmplsa, &tmpbsa);
-		if ((error = copyout(&tmpbsa, nbsa, sizeof(tmpbsa))) != 0)
-			return (error);
+	osa = (linux_osa != NULL) ? &oact : NULL;
+	if (linux_nsa != NULL) {
+		nsa = &act;
+		linux_to_bsd_sigaction(linux_nsa, nsa);
 	} else
-		nbsa = NULL;
+		nsa = NULL;
 
-	SCARG(&sa, signum) = linux_to_bsd_sig[SCARG(uap, signum)];
-	SCARG(&sa, nsa) = nbsa;
-	SCARG(&sa, osa) = obsa;
-
-	/* Silently ignore unknown signals */
-	if (SCARG(&sa, signum) == 0) {
-		if (obsa != NULL) {
-			obsa->sa_handler = SIG_IGN;
-			sigemptyset(&obsa->sa_mask);
-			obsa->sa_flags = 0;
-		}
-	}
-	else {
-		if ((error = sys_sigaction(p, &sa, retval)) != 0)
-			return (error);
-	}
-
-	if (olsa != NULL) {
-		if ((error = copyin(obsa, &tmpbsa, sizeof(tmpbsa))) != 0)
-			return (error);
-		bsd_to_linux_old_sigaction(&tmpbsa, &tmplsa);
-		if ((error = copyout(&tmplsa, olsa, sizeof(tmplsa))) != 0)
-			return (error);
-	}
-
-	return (0);
-}
-
-int
-linux_sys_rt_sigaction(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_rt_sigaction_args /* {
-		syscallarg(int) signum;
-		syscallarg(struct linux_sigaction *) nsa;
-		syscallarg(struct linux_sigaction *) osa;
-		syscallarg(size_t) sigsetsize;
-	} */ *uap = v;
-	struct linux_sigaction *nlsa, *olsa, tmplsa;
-	struct sigaction *nbsa, *obsa, tmpbsa;
-	struct sys_sigaction_args sa;
-	caddr_t sg;
-	int error;
-
-	if (SCARG(uap, sigsetsize) != sizeof(linux_sigset_t))
-		return (EINVAL);
-
-	if (SCARG(uap, signum) < 0 || SCARG(uap, signum) >= LINUX__NSIG)
-		return (EINVAL);
-
-	sg = stackgap_init(p->p_emul);
-	nlsa = SCARG(uap, nsa);
-	olsa = SCARG(uap, osa);
-
-	if (olsa != NULL) 
-		obsa = stackgap_alloc(&sg, sizeof(struct sigaction));
+	if (linux_sig <= LINUX_SIGTBLSZ)
+		sig = linux_to_bsd_signal[_SIG_IDX(linux_sig)];
 	else
-		obsa = NULL;
+		sig = linux_sig;
 
-	if (nlsa != NULL) {
-		nbsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-		if ((error = copyin(nlsa, &tmplsa, sizeof(tmplsa))) != 0)
-			return (error);
-		linux_to_bsd_sigaction(&tmplsa, &tmpbsa);
-		if ((error = copyout(&tmpbsa, nbsa, sizeof(tmpbsa))) != 0)
-			return (error);
-	}
-	else
-		nbsa = NULL;
-
-	SCARG(&sa, signum) = linux_to_bsd_sig[SCARG(uap, signum)];
-	SCARG(&sa, nsa) = nbsa;
-	SCARG(&sa, osa) = obsa;
-
-	/* Silently ignore unknown signals */
-	if (SCARG(&sa, signum) == 0) {
-		if (obsa != NULL) {
-			obsa->sa_handler = SIG_IGN;
-			sigemptyset(&obsa->sa_mask);
-			obsa->sa_flags = 0;
-		}
-	}
-	else {
-		if ((error = sys_sigaction(p, &sa, retval)) != 0)
-			return (error);
-	}
-
-	if (olsa != NULL) {
-		if ((error = copyin(obsa, &tmpbsa, sizeof(tmpbsa))) != 0)
-			return (error);
-		bsd_to_linux_sigaction(&tmpbsa, &tmplsa);
-		if ((error = copyout(&tmplsa, olsa, sizeof(tmplsa))) != 0)
-			return (error);
-	}
-
-	return (0);
-}
-
-/*
- * The Linux signal() system call. I think that the signal() in the C
- * library actually calls sigaction, so I doubt this one is ever used.
- * But hey, it can't hurt having it here. The same restrictions as for
- * sigaction() apply.
- */
-int
-linux_sys_signal(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_signal_args /* {
-		syscallarg(int) sig;
-		syscallarg(linux_handler_t) handler;
-	} */ *uap = v;
-	caddr_t sg;
-	struct sys_sigaction_args sa_args;
-	struct sigaction *osa, *nsa, tmpsa;
-	int error;
-
-	if (SCARG(uap, sig) < 0 || SCARG(uap, sig) >= LINUX__NSIG)
-		return (EINVAL);
-
-	sg = stackgap_init(p->p_emul);
-	nsa = stackgap_alloc(&sg, sizeof *nsa);
-	osa = stackgap_alloc(&sg, sizeof *osa);
-
-	tmpsa.sa_handler = SCARG(uap, handler);
-	tmpsa.sa_mask = (sigset_t) 0;
-	tmpsa.sa_flags = SA_RESETHAND | SA_NODEFER;
-	if ((error = copyout(&tmpsa, nsa, sizeof tmpsa)))
-		return (error);
-
-	SCARG(&sa_args, signum) = linux_to_bsd_sig[SCARG(uap, sig)];
-	SCARG(&sa_args, osa) = osa;
-	SCARG(&sa_args, nsa) = nsa;
-
-	/* Silently ignore unknown signals */
-	if (SCARG(&sa_args, signum) != 0) {
-		if ((error = sys_sigaction(p, &sa_args, retval)))
-			return (error);
-	}
-
-	if ((error = copyin(osa, &tmpsa, sizeof *osa)))
-		return (error);
-	retval[0] = (register_t) tmpsa.sa_handler;
-
-	return (0);
-}
-
-/*
- * This is just a copy of the svr4 compat one. I feel so creative now.
- */
-int
-linux_sys_sigprocmask(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_sigprocmask_args /* {
-		syscallarg(int) how;
-		syscallarg(linux_old_sigset_t *) set;
-		syscallarg(linux_old_sigset_t *) oset;
-	} */ *uap = v;
-	linux_old_sigset_t ss;
-	sigset_t bs;
-	int error = 0;
-	int s;
-
-	*retval = 0;
-
-	if (SCARG(uap, oset) != NULL) {
-		/* Fix the return value first if needed */
-		bsd_to_linux_old_sigset(&p->p_sigmask, &ss);
-		if ((error = copyout(&ss, SCARG(uap, oset), sizeof(ss))) != 0)
-			return (error);
-	}
-
-	if (SCARG(uap, set) == NULL)
-		/* Just examine */
-		return (0);
-
-	if ((error = copyin(SCARG(uap, set), &ss, sizeof(ss))) != 0)
-		return (error);
-
-	linux_old_to_bsd_sigset(&ss, &bs);
-
-	s = splhigh();
-
-	switch (SCARG(uap, how)) {
-	case LINUX_SIG_BLOCK:
-		p->p_sigmask |= bs & ~sigcantmask;
-		break;
-
-	case LINUX_SIG_UNBLOCK:
-		p->p_sigmask &= ~bs;
-		break;
-
-	case LINUX_SIG_SETMASK:
-		p->p_sigmask = bs & ~sigcantmask;
-		break;
-
-	default:
-		error = EINVAL;
-		break;
-	}
-
-	splx(s);
-
-	return (error);
-}
-
-int
-linux_sys_rt_sigprocmask(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_rt_sigprocmask_args /* {
-		syscallarg(int) how;
-		syscallarg(const linux_sigset_t *) set;
-		syscallarg(linux_sigset_t *) oset;
-		syscallarg(size_t) sigsetsize;
-	} */ *uap = v;
-	linux_sigset_t ls;
-	sigset_t bs;
-	int error = 0;
-	int s;
-
-	if (SCARG(uap, sigsetsize) != sizeof(linux_sigset_t))
-		return (EINVAL);
-
-	*retval = 0;
-
-	if (SCARG(uap, oset) != NULL) {
-		/* Fix the return value first if needed */
-		bsd_to_linux_sigset(&p->p_sigmask, &ls);
-		if ((error = copyout(&ls, SCARG(uap, oset), sizeof(ls))) != 0)
-			return (error);
-	}
-
-	if (SCARG(uap, set) == NULL)
-		/* Just examine */
-		return (0);
-
-	if ((error = copyin(SCARG(uap, set), &ls, sizeof(ls))) != 0)
-		return (error);
-
-	linux_to_bsd_sigset(&ls, &bs);
-
-	s = splhigh();
-
-	switch (SCARG(uap, how)) {
-	case LINUX_SIG_BLOCK:
-		p->p_sigmask |= bs & ~sigcantmask;
-		break;
-
-	case LINUX_SIG_UNBLOCK:
-		p->p_sigmask &= ~bs;
-		break;
-
-	case LINUX_SIG_SETMASK:
-		p->p_sigmask = bs & ~sigcantmask;
-		break;
-
-	default:
-		error = EINVAL;
-		break;
-	}
-
-	splx(s);
-
-	return (error);
-}
-
-/*
- * The functions below really make no distinction between an int
- * and [linux_]sigset_t. This is ok for now, but it might break
- * sometime. Then again, sigset_t is trusted to be an int everywhere
- * else in the kernel too.
- */
-/* ARGSUSED */
-int
-linux_sys_siggetmask(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-
-	bsd_to_linux_old_sigset(&p->p_sigmask, (linux_old_sigset_t *)retval);
-	return (0);
-}
-
-/*
- * The following three functions fiddle with a process' signal mask.
- * Convert the signal masks because of the different signal
- * values for Linux. The need for this is the reason why
- * they are here, and have not been mapped directly.
- */
-int
-linux_sys_sigsetmask(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_sigsetmask_args /* {
-		syscallarg(linux_old_sigset_t) mask;
-	} */ *uap = v;
-	linux_old_sigset_t mask;
-	sigset_t bsdsig;
-	int s;
-
-	bsd_to_linux_old_sigset(&p->p_sigmask, (linux_old_sigset_t *)retval);
-
-	mask = SCARG(uap, mask);
-	bsd_to_linux_old_sigset(&bsdsig, &mask);
-
-	s = splhigh();
-	p->p_sigmask = bsdsig & ~sigcantmask;
-	splx(s);
-
-	return (0);
-}
-
-int
-linux_sys_sigpending(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_sigpending_args /* {
-		syscallarg(linux_old_sigset_t *) mask;
-	} */ *uap = v;
-	sigset_t bs;
-	linux_old_sigset_t ls;
-
-	bs = p->p_siglist & p->p_sigmask;
-	bsd_to_linux_old_sigset(&bs, &ls);
-
-	return (copyout(&ls, SCARG(uap, mask), sizeof ls));
-}
-
-int
-linux_sys_rt_sigpending(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_rt_sigpending_args /* {
-		syscallarg(linux_sigset_t *) set;
-		syscallarg(size_t) sigsetsize;
-	} */ *uap = v;
-	sigset_t bs;
-	linux_sigset_t ls;
-
-	if (SCARG(uap, sigsetsize) != sizeof(linux_sigset_t))
-		return (EINVAL);
-
-	bs = p->p_siglist & p->p_sigmask;
-	bsd_to_linux_sigset(&bs, &ls);
-
-	return (copyout(&ls, SCARG(uap, set), sizeof ls));
-}
-
-int
-linux_sys_sigsuspend(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_sigsuspend_args /* {
-		syscallarg(caddr_t) restart;
-		syscallarg(int) oldmask;
-		syscallarg(int) mask;
-	} */ *uap = v;
-	struct sys_sigsuspend_args sa;
-	linux_old_sigset_t mask = SCARG(uap, mask);
-
-	linux_old_to_bsd_sigset(&mask, &SCARG(&sa, mask));
-	return (sys_sigsuspend(p, &sa, retval));
-}
-
-int
-linux_sys_rt_sigsuspend(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_rt_sigsuspend_args /* {
-		syscallarg(sigset_t *) unewset;
-		syscallarg(size_t) sigsetsize;
-	} */ *uap = v;
-	struct sys_sigsuspend_args sa;
-	linux_sigset_t mask;
-	int error;
-
-	if (SCARG(uap, sigsetsize) != sizeof(linux_sigset_t))
-		return (EINVAL);
-	
-	error = copyin(SCARG(uap, unewset), &mask, sizeof mask);
+	error = kern_sigaction(td, sig, nsa, osa, 0);
 	if (error)
 		return (error);
-	
-	linux_to_bsd_sigset(&mask, &SCARG(&sa, mask));
-	return (sys_sigsuspend(p, &sa, retval));
+
+	if (linux_osa != NULL)
+		bsd_to_linux_sigaction(osa, linux_osa);
+
+	return (0);
 }
 
-/*
- * Linux' sigaltstack structure is just of a different order than BSD's
- * so just shuffle the fields around and call our version.
- */
+
 int
-linux_sys_sigaltstack(p, v, retval)
-	register struct proc *p;
-	void *v;	
-	register_t *retval;
-{	
-	struct linux_sys_sigaltstack_args /* {
-		syscallarg(const struct linux_sigaltstack *) nss;
-		syscallarg(struct linux_sigaltstack *) oss;
-	} */ *uap = v;
-	struct linux_sigaltstack linux_ss;
-	struct sigaltstack *bsd_nss, *bsd_oss;
-	struct sys_sigaltstack_args sa;
+linux_signal(struct thread *td, struct linux_signal_args *args)
+{
+	l_sigaction_t nsa, osa;
 	int error;
-	caddr_t sg;
 
-	sg = stackgap_init(p->p_emul);
+#ifdef DEBUG
+	if (ldebug(signal))
+		printf(ARGS(signal, "%d, %p"),
+		    args->sig, (void *)(uintptr_t)args->handler);
+#endif
 
-	if (SCARG(uap, nss) != NULL) {
-		bsd_nss = stackgap_alloc(&sg, sizeof *bsd_nss);
+	nsa.lsa_handler = args->handler;
+	nsa.lsa_flags = LINUX_SA_ONESHOT | LINUX_SA_NOMASK;
+	LINUX_SIGEMPTYSET(nsa.lsa_mask);
 
-		error = copyin(SCARG(uap, nss), &linux_ss, sizeof linux_ss);
+	error = linux_do_sigaction(td, args->sig, &nsa, &osa);
+	td->td_retval[0] = (int)(intptr_t)osa.lsa_handler;
+
+	return (error);
+}
+
+int
+linux_rt_sigaction(struct thread *td, struct linux_rt_sigaction_args *args)
+{
+	l_sigaction_t nsa, osa;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(rt_sigaction))
+		printf(ARGS(rt_sigaction, "%ld, %p, %p, %ld"),
+		    (long)args->sig, (void *)args->act,
+		    (void *)args->oact, (long)args->sigsetsize);
+#endif
+
+	if (args->sigsetsize != sizeof(l_sigset_t))
+		return (EINVAL);
+
+	if (args->act != NULL) {
+		error = copyin(args->act, &nsa, sizeof(l_sigaction_t));
 		if (error)
 			return (error);
-
-		bsd_nss->ss_sp = linux_ss.ss_sp;
-		bsd_nss->ss_size = linux_ss.ss_size;
-		bsd_nss->ss_flags = (linux_ss.ss_flags & LINUX_SS_DISABLE) ?
-		    SS_DISABLE : 0;
-
-		SCARG(&sa, nss) = bsd_nss;
-	} else
-		SCARG(&sa, nss) = NULL;
-
-	if (SCARG(uap, oss) == NULL) {
-		SCARG(&sa, oss) = NULL;
-		return (sys_sigaltstack(p, &sa, retval));
 	}
-	SCARG(&sa, oss) = bsd_oss = stackgap_alloc(&sg, sizeof *bsd_oss);
 
-	error = sys_sigaltstack(p, &sa, retval);
+	error = linux_do_sigaction(td, args->sig,
+				   args->act ? &nsa : NULL,
+				   args->oact ? &osa : NULL);
+
+	if (args->oact != NULL && !error) {
+		error = copyout(&osa, args->oact, sizeof(l_sigaction_t));
+	}
+
+	return (error);
+}
+
+static int
+linux_do_sigprocmask(struct thread *td, int how, l_sigset_t *new,
+		     l_sigset_t *old)
+{
+	sigset_t omask, nmask;
+	sigset_t *nmaskp;
+	int error;
+
+	td->td_retval[0] = 0;
+
+	switch (how) {
+	case LINUX_SIG_BLOCK:
+		how = SIG_BLOCK;
+		break;
+	case LINUX_SIG_UNBLOCK:
+		how = SIG_UNBLOCK;
+		break;
+	case LINUX_SIG_SETMASK:
+		how = SIG_SETMASK;
+		break;
+	default:
+		return (EINVAL);
+	}
+	if (new != NULL) {
+		linux_to_bsd_sigset(new, &nmask);
+		nmaskp = &nmask;
+	} else
+		nmaskp = NULL;
+	error = kern_sigprocmask(td, how, nmaskp, &omask, 0);
+	if (error == 0 && old != NULL)
+		bsd_to_linux_sigset(&omask, old);
+
+	return (error);
+}
+
+int
+linux_sigprocmask(struct thread *td, struct linux_sigprocmask_args *args)
+{
+	l_osigset_t mask;
+	l_sigset_t set, oset;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(sigprocmask))
+		printf(ARGS(sigprocmask, "%d, *, *"), args->how);
+#endif
+
+	if (args->mask != NULL) {
+		error = copyin(args->mask, &mask, sizeof(l_osigset_t));
+		if (error)
+			return (error);
+		LINUX_SIGEMPTYSET(set);
+		set.__bits[0] = mask;
+	}
+
+	error = linux_do_sigprocmask(td, args->how,
+				     args->mask ? &set : NULL,
+				     args->omask ? &oset : NULL);
+
+	if (args->omask != NULL && !error) {
+		mask = oset.__bits[0];
+		error = copyout(&mask, args->omask, sizeof(l_osigset_t));
+	}
+
+	return (error);
+}
+
+int
+linux_rt_sigprocmask(struct thread *td, struct linux_rt_sigprocmask_args *args)
+{
+	l_sigset_t set, oset;
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(rt_sigprocmask))
+		printf(ARGS(rt_sigprocmask, "%d, %p, %p, %ld"),
+		    args->how, (void *)args->mask,
+		    (void *)args->omask, (long)args->sigsetsize);
+#endif
+
+	if (args->sigsetsize != sizeof(l_sigset_t))
+		return EINVAL;
+
+	if (args->mask != NULL) {
+		error = copyin(args->mask, &set, sizeof(l_sigset_t));
+		if (error)
+			return (error);
+	}
+
+	error = linux_do_sigprocmask(td, args->how,
+				     args->mask ? &set : NULL,
+				     args->omask ? &oset : NULL);
+
+	if (args->omask != NULL && !error) {
+		error = copyout(&oset, args->omask, sizeof(l_sigset_t));
+	}
+
+	return (error);
+}
+
+int
+linux_sgetmask(struct thread *td, struct linux_sgetmask_args *args)
+{
+	struct proc *p = td->td_proc;
+	l_sigset_t mask;
+
+#ifdef DEBUG
+	if (ldebug(sgetmask))
+		printf(ARGS(sgetmask, ""));
+#endif
+
+	PROC_LOCK(p);
+	bsd_to_linux_sigset(&td->td_sigmask, &mask);
+	PROC_UNLOCK(p);
+	td->td_retval[0] = mask.__bits[0];
+	return (0);
+}
+
+int
+linux_ssetmask(struct thread *td, struct linux_ssetmask_args *args)
+{
+	struct proc *p = td->td_proc;
+	l_sigset_t lset;
+	sigset_t bset;
+
+#ifdef DEBUG
+	if (ldebug(ssetmask))
+		printf(ARGS(ssetmask, "%08lx"), (unsigned long)args->mask);
+#endif
+
+	PROC_LOCK(p);
+	bsd_to_linux_sigset(&td->td_sigmask, &lset);
+	td->td_retval[0] = lset.__bits[0];
+	LINUX_SIGEMPTYSET(lset);
+	lset.__bits[0] = args->mask;
+	linux_to_bsd_sigset(&lset, &bset);
+	td->td_sigmask = bset;
+	SIG_CANTMASK(td->td_sigmask);
+	signotify(td);
+	PROC_UNLOCK(p);
+	return (0);
+}
+
+/*
+ * MPSAFE
+ */
+int
+linux_sigpending(struct thread *td, struct linux_sigpending_args *args)
+{
+	struct proc *p = td->td_proc;
+	sigset_t bset;
+	l_sigset_t lset;
+	l_osigset_t mask;
+
+#ifdef DEBUG
+	if (ldebug(sigpending))
+		printf(ARGS(sigpending, "*"));
+#endif
+
+	PROC_LOCK(p);
+	bset = p->p_siglist;
+	SIGSETOR(bset, td->td_siglist);
+	SIGSETAND(bset, td->td_sigmask);
+	PROC_UNLOCK(p);
+	bsd_to_linux_sigset(&bset, &lset);
+	mask = lset.__bits[0];
+	return (copyout(&mask, args->mask, sizeof(mask)));
+}
+
+/*
+ * MPSAFE
+ */
+int
+linux_rt_sigpending(struct thread *td, struct linux_rt_sigpending_args *args)
+{
+	struct proc *p = td->td_proc;
+	sigset_t bset;
+	l_sigset_t lset;
+
+	if (args->sigsetsize > sizeof(lset))
+		return EINVAL;
+		/* NOT REACHED */
+
+#ifdef DEBUG
+	if (ldebug(rt_sigpending))
+		printf(ARGS(rt_sigpending, "*"));
+#endif
+
+	PROC_LOCK(p);
+	bset = p->p_siglist;
+	SIGSETOR(bset, td->td_siglist);
+	SIGSETAND(bset, td->td_sigmask);
+	PROC_UNLOCK(p);
+	bsd_to_linux_sigset(&bset, &lset);
+	return (copyout(&lset, args->set, args->sigsetsize));
+}
+
+/*
+ * MPSAFE
+ */
+int
+linux_rt_sigtimedwait(struct thread *td,
+	struct linux_rt_sigtimedwait_args *args)
+{
+	int error;
+	l_timeval ltv;
+	struct timeval tv;
+	struct timespec ts, *tsa;
+	l_sigset_t lset;
+	sigset_t bset;
+	l_siginfo_t linfo;
+	ksiginfo_t info;
+
+#ifdef DEBUG
+	if (ldebug(rt_sigtimedwait))
+		printf(ARGS(rt_sigtimedwait, "*"));
+#endif
+	if (args->sigsetsize != sizeof(l_sigset_t))
+		return (EINVAL);
+
+	if ((error = copyin(args->mask, &lset, sizeof(lset))))
+		return (error);
+	linux_to_bsd_sigset(&lset, &bset);
+
+	tsa = NULL;
+	if (args->timeout) {
+		if ((error = copyin(args->timeout, &ltv, sizeof(ltv))))
+			return (error);
+#ifdef DEBUG
+		if (ldebug(rt_sigtimedwait))
+			printf(LMSG("linux_rt_sigtimedwait: incoming timeout (%d/%d)\n"),
+				ltv.tv_sec, ltv.tv_usec);
+#endif
+		tv.tv_sec = (long)ltv.tv_sec;
+		tv.tv_usec = (suseconds_t)ltv.tv_usec;
+		if (itimerfix(&tv)) {
+			/* 
+			 * The timeout was invalid. Convert it to something
+			 * valid that will act as it does under Linux.
+			 */
+			tv.tv_sec += tv.tv_usec / 1000000;
+			tv.tv_usec %= 1000000;
+			if (tv.tv_usec < 0) {
+				tv.tv_sec -= 1;
+				tv.tv_usec += 1000000;
+			}
+			if (tv.tv_sec < 0)
+				timevalclear(&tv);
+#ifdef DEBUG
+			if (ldebug(rt_sigtimedwait))
+				printf(LMSG("linux_rt_sigtimedwait: converted timeout (%jd/%ld)\n"),
+					(intmax_t)tv.tv_sec, tv.tv_usec);
+#endif
+		}
+		TIMEVAL_TO_TIMESPEC(&tv, &ts);
+		tsa = &ts;
+	}
+	error = kern_sigtimedwait(td, bset, &info, tsa);
+#ifdef DEBUG
+	if (ldebug(rt_sigtimedwait))
+		printf(LMSG("linux_rt_sigtimedwait: sigtimedwait returning (%d)\n"), error);
+#endif
 	if (error)
 		return (error);
 
-	linux_ss.ss_sp = bsd_oss->ss_sp;
-	linux_ss.ss_size = bsd_oss->ss_size;
-	linux_ss.ss_flags = 0;
-	if (bsd_oss->ss_flags & SS_ONSTACK)
-		linux_ss.ss_flags |= LINUX_SS_ONSTACK;
-	if (bsd_oss->ss_flags & SS_DISABLE)
-		linux_ss.ss_flags |= LINUX_SS_DISABLE;
-	return (copyout(&linux_ss, SCARG(uap, oss), sizeof linux_ss));
+	if (args->ptr) {
+		memset(&linfo, 0, sizeof(linfo));
+		linfo.lsi_signo = info.ksi_signo;
+		error = copyout(&linfo, args->ptr, sizeof(linfo));
+	}
+
+	/* Repost if we got an error. */
+	if (error && info.ksi_signo) {
+		PROC_LOCK(td->td_proc);
+		tdsignal(td->td_proc, td, info.ksi_signo, &info);
+		PROC_UNLOCK(td->td_proc);
+	} else
+		td->td_retval[0] = info.ksi_signo; 
+
+	return (error);
 }
 
-/*
- * The deprecated pause(2), which is really just an instance
- * of sigsuspend(2).
- */
 int
-linux_sys_pause(p, v, retval)
-	register struct proc *p;
-	void *v;	
-	register_t *retval;
-{	
-	struct sys_sigsuspend_args bsa;
-
-	SCARG(&bsa, mask) = p->p_sigmask;
-	return (sys_sigsuspend(p, &bsa, retval));
-}
-
-/*
- * Once more: only a signal conversion is needed.
- */
-int
-linux_sys_kill(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+linux_kill(struct thread *td, struct linux_kill_args *args)
 {
-	struct linux_sys_kill_args /* {
-		syscallarg(int) pid;
-		syscallarg(int) signum;
-	} */ *uap = v;
-	struct sys_kill_args ka;
+	struct kill_args /* {
+	    int pid;
+	    int signum;
+	} */ tmp;
 
-	SCARG(&ka, pid) = SCARG(uap, pid);
-	if (SCARG(uap, signum) < 0 || SCARG(uap, signum) >= LINUX__NSIG)
-		return (EINVAL);
-	SCARG(&ka, signum) = linux_to_bsd_sig[SCARG(uap, signum)];
-	return (sys_kill(p, &ka, retval));
+#ifdef DEBUG
+	if (ldebug(kill))
+		printf(ARGS(kill, "%d, %d"), args->pid, args->signum);
+#endif
+
+	/*
+	 * Allow signal 0 as a means to check for privileges
+	 */
+	if (!LINUX_SIG_VALID(args->signum) && args->signum != 0)
+		return EINVAL;
+
+	if (args->signum > 0 && args->signum <= LINUX_SIGTBLSZ)
+		tmp.signum = linux_to_bsd_signal[_SIG_IDX(args->signum)];
+	else
+		tmp.signum = args->signum;
+
+	tmp.pid = args->pid;
+	return (kill(td, &tmp));
+}
+
+int
+linux_tgkill(struct thread *td, struct linux_tgkill_args *args)
+{
+   	struct linux_emuldata *em;
+	struct linux_kill_args ka;
+	struct proc *p;
+
+#ifdef DEBUG
+	if (ldebug(tgkill))
+		printf(ARGS(tgkill, "%d, %d, %d"), args->tgid, args->pid, args->sig);
+#endif
+
+	ka.pid = args->pid;
+	ka.signum = args->sig;
+
+	if (args->tgid == -1)
+	   	return linux_kill(td, &ka);
+
+	if ((p = pfind(args->pid)) == NULL)
+	      	return ESRCH;
+
+	if (p->p_sysent != &elf_linux_sysvec)
+		return ESRCH;
+
+	PROC_UNLOCK(p);
+
+	em = em_find(p, EMUL_DONTLOCK);
+
+	if (em == NULL) {
+#ifdef DEBUG
+		printf("emuldata not found in tgkill.\n");
+#endif
+		return ESRCH;
+	}
+
+	if (em->shared->group_pid != args->tgid)
+	   	return ESRCH;
+
+	return linux_kill(td, &ka);
+}
+
+int
+linux_tkill(struct thread *td, struct linux_tkill_args *args)
+{
+#ifdef DEBUG
+	if (ldebug(tkill))
+		printf(ARGS(tkill, "%i, %i"), args->tid, args->sig);
+#endif
+
+	return (linux_kill(td, (struct linux_kill_args *) args));
 }

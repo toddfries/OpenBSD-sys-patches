@@ -1,8 +1,5 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.89 2008/03/08 00:00:17 deraadt Exp $
-#	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
-#
 # Copyright (c) 1984, 1986, 1990, 1993
 #	The Regents of the University of California.  All rights reserved.
 #
@@ -14,7 +11,7 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of the University nor the names of its contributors
+# 4. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
@@ -31,55 +28,76 @@
 # SUCH DAMAGE.
 #
 #	@(#)newvers.sh	8.1 (Berkeley) 4/20/94
+# $FreeBSD: src/sys/conf/newvers.sh,v 1.73 2007/10/11 04:28:07 kensmith Exp $
 
-if [ ! -r version -o ! -s version ]
+TYPE="FreeBSD"
+REVISION="8.0"
+BRANCH="CURRENT"
+if [ "X${BRANCH_OVERRIDE}" != "X" ]; then
+	BRANCH=${BRANCH_OVERRIDE}
+fi
+RELEASE="${REVISION}-${BRANCH}"
+VERSION="${TYPE} ${RELEASE}"
+
+if [ "X${PARAMFILE}" != "X" ]; then
+	RELDATE=$(awk '/__FreeBSD_version.*propagated to newvers/ {print $3}' \
+		${PARAMFILE})
+else
+	RELDATE=$(awk '/__FreeBSD_version.*propagated to newvers/ {print $3}' \
+		$(dirname $0)/../sys/param.h)
+fi
+
+
+b=share/examples/etc/bsd-style-copyright
+year=`date '+%Y'`
+# look for copyright template
+for bsd_copyright in ../$b ../../$b ../../../$b /usr/src/$b /usr/$b
+do
+	if [ -r "$bsd_copyright" ]; then
+		COPYRIGHT=`sed \
+		    -e "s/\[year\]/1992-$year/" \
+		    -e 's/\[your name here\]\.* /The FreeBSD Project./' \
+		    -e 's/\[your name\]\.*/The FreeBSD Project./' \
+		    -e '/\[id for your version control system, if any\]/d' \
+		    $bsd_copyright` 
+		break
+	fi
+done
+
+# no copyright found, use a dummy
+if [ X"$COPYRIGHT" = X ]; then
+	COPYRIGHT="/*-
+ * Copyright (c) 1992-$year The FreeBSD Project.
+ * All rights reserved.
+ *
+ */"
+fi
+
+# add newline
+COPYRIGHT="$COPYRIGHT
+"
+
+LC_ALL=C; export LC_ALL
+if [ ! -r version ]
 then
 	echo 0 > version
 fi
 
 touch version
-v=`cat version` u=${USER-root} d=`pwd` h=`hostname` t=`date`
-id=`basename ${d}`
+v=`cat version` u=${USER:-root} d=`pwd` h=${HOSTNAME:-`hostname`} t=`date`
+i=`${MAKE:-make} -V KERN_IDENT`
+cat << EOF > vers.c
+$COPYRIGHT
+#define SCCSSTR "@(#)${VERSION} #${v}: ${t}"
+#define VERSTR "${VERSION} #${v}: ${t}\\n    ${u}@${h}:${d}\\n"
+#define RELSTR "${RELEASE}"
 
-# additional things which need version number upgrades:
-#	sys/sys/param.h:
-#		OpenBSD symbol
-#		OpenBSD_X_X symbol
-#	share/tmac/mdoc/doc-common
-#		change	.       ds oS OpenBSD X.X
-#		add	.	if "\\$2"X.X"  .as oS \0X.X
-#	share/mk/sys.mk
-#		OSMAJOR
-#		OSMINOR
-#	distrib/miniroot/install.sub
-#		VERSION
-#	etc/root/root.mail
-#		VERSION and other bits
-#	sys/arch/macppc/stand/tbxidata/bsd.tbxi
-#		change	/X.X/macppc/bsd.rd
-#
-# -current and -beta tagging:
-#	For release, select STATUS ""
-#	Right after release unlock, select STATUS "-current"
-#	A month or so before release, select STATUS "-beta"
+char sccs[sizeof(SCCSSTR) > 128 ? sizeof(SCCSSTR) : 128] = SCCSSTR;
+char version[sizeof(VERSTR) > 256 ? sizeof(VERSTR) : 256] = VERSTR;
+char ostype[] = "${TYPE}";
+char osrelease[sizeof(RELSTR) > 32 ? sizeof(RELSTR) : 32] = RELSTR;
+int osreldate = ${RELDATE};
+char kern_ident[] = "${i}";
+EOF
 
-ost="OpenBSD"
-osr="4.3"
-
-cat >vers.c <<eof
-#define STATUS "-current"		/* just after a release */
-#if 0
-#define STATUS "-beta"			/* just before a release */
-#define STATUS ""			/* release */
-#endif
-
-const char ostype[] = "${ost}";
-const char osrelease[] = "${osr}";
-const char osversion[] = "${id}#${v}";
-const char sccs[] =
-    "    @(#)${ost} ${osr}" STATUS " (${id}) #${v}: ${t}\n";
-const char version[] =
-    "${ost} ${osr}" STATUS " (${id}) #${v}: ${t}\n    ${u}@${h}:${d}\n";
-eof
-
-expr ${v} + 1 > version
+echo `expr ${v} + 1` > version

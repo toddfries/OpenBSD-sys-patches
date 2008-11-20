@@ -1,6 +1,3 @@
-/*	$OpenBSD: ttycom.h,v 1.10 2008/05/08 01:17:54 fgsch Exp $	*/
-/*	$NetBSD: ttycom.h,v 1.4 1996/05/19 17:17:53 jonathan Exp $	*/
-
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,6 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ttycom.h	8.1 (Berkeley) 3/28/94
+ * $FreeBSD: src/sys/sys/ttycom.h,v 1.25 2006/09/27 19:57:02 ru Exp $
  */
 
 #ifndef	_SYS_TTYCOM_H_
@@ -58,34 +56,24 @@ struct winsize {
 	unsigned short	ws_ypixel;	/* vertical size, pixels */
 };
 
-struct tstamps {
-	int	ts_set;		/* TIOCM_CAR and/or TIOCM_CTS */
-	int	ts_clr;
-};
-
-#define		TIOCM_LE	0001		/* line enable */
-#define		TIOCM_DTR	0002		/* data terminal ready */
-#define		TIOCM_RTS	0004		/* request to send */
-#define		TIOCM_ST	0010		/* secondary transmit */
-#define		TIOCM_SR	0020		/* secondary receive */
-#define		TIOCM_CTS	0040		/* clear to send */
-#define		TIOCM_CAR	0100		/* carrier detect */
-#define		TIOCM_CD	TIOCM_CAR
-#define		TIOCM_RNG	0200		/* ring */
-#define		TIOCM_RI	TIOCM_RNG
-#define		TIOCM_DSR	0400		/* data set ready */
+						/* 0-2 compat */
+						/* 3-4 obsolete */
+						/* 5-7 obsolete or unused */
 						/* 8-10 compat */
+						/* 11-12 obsolete or unused */
 #define	TIOCEXCL	 _IO('t', 13)		/* set exclusive use of tty */
 #define	TIOCNXCL	 _IO('t', 14)		/* reset exclusive use of tty */
-						/* 15 unused */
+#define	TIOCGPTN	_IOR('t', 15, int)	/* Get pts number. */
 #define	TIOCFLUSH	_IOW('t', 16, int)	/* flush buffers */
 						/* 17-18 compat */
 #define	TIOCGETA	_IOR('t', 19, struct termios) /* get termios struct */
 #define	TIOCSETA	_IOW('t', 20, struct termios) /* set termios struct */
 #define	TIOCSETAW	_IOW('t', 21, struct termios) /* drain output, set */
 #define	TIOCSETAF	_IOW('t', 22, struct termios) /* drn out, fls in, set */
+						/* 23-25 obsolete or unused */
 #define	TIOCGETD	_IOR('t', 26, int)	/* get line discipline */
 #define	TIOCSETD	_IOW('t', 27, int)	/* set line discipline */
+						/* 28-69 free */
 						/* 127-124 compat */
 #define	TIOCSBRK	 _IO('t', 123)		/* set break bit */
 #define	TIOCCBRK	 _IO('t', 122)		/* clear break bit */
@@ -112,37 +100,46 @@ struct tstamps {
 #define	TIOCMBIS	_IOW('t', 108, int)	/* bis modem bits */
 #define	TIOCMBIC	_IOW('t', 107, int)	/* bic modem bits */
 #define	TIOCMGET	_IOR('t', 106, int)	/* get all modem bits */
-#define	TIOCREMOTE	_IOW('t', 105, int)	/* remote input editing */
+#define		TIOCM_LE	0001		/* line enable */
+#define		TIOCM_DTR	0002		/* data terminal ready */
+#define		TIOCM_RTS	0004		/* request to send */
+#define		TIOCM_ST	0010		/* secondary transmit */
+#define		TIOCM_SR	0020		/* secondary receive */
+#define		TIOCM_CTS	0040		/* clear to send */
+#define		TIOCM_DCD	0100		/* data carrier detect */
+#define		TIOCM_RI 	0200		/* ring indicate */
+#define		TIOCM_DSR	0400		/* data set ready */
+#define		TIOCM_CD	TIOCM_DCD
+#define		TIOCM_CAR	TIOCM_DCD
+#define		TIOCM_RNG	TIOCM_RI
 #define	TIOCGWINSZ	_IOR('t', 104, struct winsize)	/* get window size */
 #define	TIOCSWINSZ	_IOW('t', 103, struct winsize)	/* set window size */
 #define	TIOCUCNTL	_IOW('t', 102, int)	/* pty: set/clr usr cntl mode */
-#define	TIOCSTAT	_IOW('t', 101, int)	/* generate status message */
+#define	TIOCSTAT	 _IO('t', 101)		/* simulate ^T status message */
 #define		UIOCCMD(n)	_IO('u', n)	/* usr cntl op "n" */
+						/* 100 see consio.h */
+						/* 99 obsolete or unused */
 #define	TIOCCONS	_IOW('t', 98, int)	/* become virtual console */
 #define	TIOCSCTTY	 _IO('t', 97)		/* become controlling tty */
+						/* 97-90 tun; some conflicts */
 #define	TIOCEXT		_IOW('t', 96, int)	/* pty: external processing */
-#define	TIOCSIG		_IOW('t', 95, int)	/* pty: generate signal */
+#define	TIOCSIG		_IOWINT('t', 95)	/* pty: generate signal */
 #define	TIOCDRAIN	 _IO('t', 94)		/* wait till output drained */
-#define	TIOCGFLAGS	_IOR('t', 93, int)	/* get device flags */
-#define	TIOCSFLAGS	_IOW('t', 92, int)	/* set device flags */
-#define		TIOCFLAG_SOFTCAR	0x01	/* ignore hardware carrier */
-#define		TIOCFLAG_CLOCAL		0x02	/* set clocal on open */
-#define		TIOCFLAG_CRTSCTS	0x04	/* set crtscts on open */
-#define		TIOCFLAG_MDMBUF		0x08	/* set mdmbuf on open */
-#define		TIOCFLAG_PPS		0x10	/* call hardpps on carrier up */
-#define	TIOCGTSTAMP	_IOR('t', 91, struct timeval)	/* get timestamp */
-#define	TIOCSTSTAMP	_IOW('t', 90, struct tstamps)	/* timestamp reasons */
-
-/* Backwards compatibility */
-#define	TIOCMODG	TIOCMGET
-#define	TIOCMODS	TIOCMSET
+						/* 92-90 tap; some conflicts */
+#define	TIOCMSDTRWAIT	_IOW('t', 91, int)	/* modem: set wait on close */
+#define	TIOCMGDTRWAIT	_IOR('t', 90, int)	/* modem: get wait on close */
+						/* 90-70 ppp; many conflicts */
+#define	TIOCTIMESTAMP	_IOR('t', 89, struct timeval)	/* enable/get timestamp
+						 * of last input event */
+						/* 88 slip, ppp; conflicts */
+#define	TIOCSDRAINWAIT	_IOW('t', 87, int)	/* set ttywait timeout */
+#define	TIOCGDRAINWAIT	_IOR('t', 86, int)	/* get ttywait timeout */
+						/* 84-80 slip */
 
 #define	TTYDISC		0		/* termios tty line discipline */
-#define	TABLDISC	3		/* tablet discipline */
 #define	SLIPDISC	4		/* serial IP discipline */
-#define	PPPDISC		5		/* ppp discipline */
-#define	STRIPDISC	6		/* metricom wireless IP discipline */
-#define	NMEADISC	7		/* NMEA0183 discipline */
-#define	MSTSDISC	8		/* Meinberg time string discipline */
+#define	PPPDISC		5		/* PPP discipline */
+#define	NETGRAPHDISC	6		/* Netgraph tty node discipline */
+#define	H4DISC		7		/* Netgraph Bluetooth H4 discipline */
 
 #endif /* !_SYS_TTYCOM_H_ */

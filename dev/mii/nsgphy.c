@@ -1,8 +1,13 @@
-/*	$OpenBSD: nsgphy.c,v 1.20 2008/05/30 05:08:29 brad Exp $	*/
-/*
+/*-
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001
  *	Bill Paul <wpaul@bsdi.com>.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
+ * NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +35,10 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/dev/mii/nsgphy.c,v 1.24 2006/12/02 15:32:33 marius Exp $");
 
 /*
  * Driver for the National Semiconductor DP83891 and DP83861
@@ -45,119 +52,104 @@
  * 83861 can. (I think it wasn't originally designed to do this, but
  * it can now thanks to firmware updates.) The 83861 also allows
  * access to its internal RAM via indirect register access.
- *
- * The DP83865 is a low power version of the DP83861.
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/device.h>
+#include <sys/module.h>
 #include <sys/socket.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/mii/miidevs.h>
+#include "miidevs.h"
 
 #include <dev/mii/nsgphyreg.h>
 
-int	nsgphymatch(struct device*, void *, void *);
-void	nsgphyattach(struct device *, struct device *, void *);
+#include "miibus_if.h"
 
-struct cfattach nsgphy_ca = {
-	sizeof(struct mii_softc), nsgphymatch, nsgphyattach, mii_phy_detach,
-	mii_phy_activate
+static int nsgphy_probe(device_t);
+static int nsgphy_attach(device_t);
+
+static device_method_t nsgphy_methods[] = {
+	/* device interface */
+	DEVMETHOD(device_probe,		nsgphy_probe),
+	DEVMETHOD(device_attach,	nsgphy_attach),
+	DEVMETHOD(device_detach,	mii_phy_detach),
+	DEVMETHOD(device_shutdown,	bus_generic_shutdown),
+	{ 0, 0 }
 };
 
-struct cfdriver nsgphy_cd = {
-	NULL, "nsgphy", DV_DULL
+static devclass_t nsgphy_devclass;
+
+static driver_t nsgphy_driver = {
+	"nsgphy",
+	nsgphy_methods,
+	sizeof(struct mii_softc)
 };
 
-int	nsgphy_service(struct mii_softc *, struct mii_data *, int);
-void	nsgphy_status(struct mii_softc *);
+DRIVER_MODULE(nsgphy, miibus, nsgphy_driver, nsgphy_devclass, 0, 0);
 
-const struct mii_phy_funcs nsgphy_funcs = {
-	nsgphy_service, nsgphy_status, mii_phy_reset,
-};
+static int	nsgphy_service(struct mii_softc *, struct mii_data *,int);
+static void	nsgphy_status(struct mii_softc *);
 
 static const struct mii_phydesc nsgphys[] = {
-	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83861,
-	  MII_STR_NATSEMI_DP83861 },
-	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83865,
-	  MII_STR_NATSEMI_DP83865 },
-	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83891,
-	  MII_STR_NATSEMI_DP83891 },
-
-	{ 0,			0,
-	  NULL },
+	MII_PHY_DESC(NATSEMI, DP83861),
+	MII_PHY_DESC(NATSEMI, DP83891),
+	MII_PHY_END
 };
 
-int
-nsgphymatch(struct device *parent, void *match, void *aux)
+static int
+nsgphy_probe(device_t dev)
 {
-	struct mii_attach_args *ma = aux;
 
-	if (mii_phy_match(ma, nsgphys) != NULL)
-		return (10);
-
-	return (0);
+	return (mii_phy_dev_probe(dev, nsgphys, BUS_PROBE_DEFAULT));
 }
 
-void
-nsgphyattach(struct device *parent, struct device *self, void *aux)
+static int
+nsgphy_attach(device_t dev)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
-	struct mii_attach_args *ma = aux;
-	struct mii_data *mii = ma->mii_data;
-	const struct mii_phydesc *mpd;
-	int anar;
+	struct mii_softc *sc;
+	struct mii_attach_args *ma;
+	struct mii_data *mii;
 
-	mpd = mii_phy_match(ma, nsgphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	sc = device_get_softc(dev);
+	ma = device_get_ivars(dev);
+	if (bootverbose)
+		device_printf(dev, "<rev. %d>\n", MII_REV(ma->mii_id2));
+	device_printf(dev, " ");
+	sc->mii_dev = device_get_parent(dev);
+	mii = device_get_softc(sc->mii_dev);
+	LIST_INSERT_HEAD(&mii->mii_phys, sc, mii_list);
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &nsgphy_funcs;
+	sc->mii_service = nsgphy_service;
 	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = MII_ANEGTICKS;
 
-	PHY_RESET(sc);
+	mii->mii_instance++;
 
-	sc->mii_capabilities =
-		PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
+	sc->mii_capabilities = (PHY_READ(sc, MII_BMSR) |
+	    (BMSR_10TFDX|BMSR_10THDX)) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
 
-	/*
-	 * The PHY seems to have the 10baseT BMSR bits
-	 * hard-wired to 0, even though the device supports
-	 * 10baseT.  What we do instead is read the post-reset
-	 * ANAR, who's 10baseT-related bits are set by strapping
-	 * pin 180, and fake the BMSR bits.
-	 */
-	anar = PHY_READ(sc, MII_ANAR);
-	if (anar & ANAR_10)
-		sc->mii_capabilities |= (BMSR_10THDX & ma->mii_capmask);
-	if (anar & ANAR_10_FD)
-		sc->mii_capabilities |= (BMSR_10TFDX & ma->mii_capmask);
+	mii_phy_add_media(sc);
+	printf("\n");
 
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
-	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK))
-		mii_phy_add_media(sc);
+	MIIBUS_MEDIAINIT(sc->mii_dev);
+	return (0);
 }
 
-int
+static int
 nsgphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -198,20 +190,17 @@ nsgphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		if (mii_phy_tick(sc) == EJUSTRETURN)
 			return (0);
 		break;
-	case MII_DOWN:
-		mii_phy_down(sc);
-		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	nsgphy_status(sc);
 
 	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);
 	return (0);
 }
 
-void
+static void
 nsgphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -239,6 +228,10 @@ nsgphy_status(struct mii_softc *sc)
 		mii->mii_media_active |= IFM_LOOP;
 
 	if (bmcr & BMCR_AUTOEN) {
+		/*
+		 * The media status bits are only valid if autonegotiation
+		 * has completed (or it's disabled).
+		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {
 			/* Erg, still trying, I guess... */
 			mii->mii_media_active |= IFM_NONE;
@@ -264,13 +257,9 @@ nsgphy_status(struct mii_softc *sc)
 		default:
 			mii->mii_media_active |= IFM_NONE;
 			mii->mii_media_status = 0;
-			return;
 		}
-
 		if (physup & PHY_SUP_DUPLEX)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

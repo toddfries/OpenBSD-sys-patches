@@ -1,7 +1,5 @@
-/*	$OpenBSD: svr4_signal.h,v 1.5 2002/03/14 01:26:51 millert Exp $	 */
-/*	$NetBSD: svr4_signal.h,v 1.14 1995/10/14 20:24:41 christos Exp $	 */
-
-/*
+/*-
+ * Copyright (c) 1998 Mark Newton
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
  *
@@ -26,11 +24,14 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 
+ * $FreeBSD: src/sys/compat/svr4/svr4_signal.h,v 1.12 2005/10/14 12:43:44 davidxu Exp $
  */
 
 #ifndef	_SVR4_SIGNAL_H_
 #define	_SVR4_SIGNAL_H_
 
+#include <i386/svr4/svr4_machdep.h>
 #include <compat/svr4/svr4_siginfo.h>
 
 #define	SVR4_SIGHUP	 1
@@ -90,15 +91,23 @@ typedef void (*svr4_sig_t)(int, svr4_siginfo_t *, void *);
 #define SVR4_SIG_UNBLOCK	2
 #define SVR4_SIG_SETMASK	3
 
+extern int bsd_to_svr4_sig[SVR4_NSIG];
+extern int svr4_to_bsd_sig[SVR4_NSIG];
+
+#define SVR4_BSD2SVR4_SIG(sig)	\
+	(((sig) < SVR4_NSIG) ? bsd_to_svr4_sig[sig] : sig)
+#define SVR4_SVR42BSD_SIG(sig)	\
+	(((sig) < SVR4_NSIG) ? svr4_to_bsd_sig[sig] : sig)
+
 typedef struct {
         u_long bits[4];
 } svr4_sigset_t;
 
 struct svr4_sigaction {
-	int		sa_flags;
-	svr4_sig_t	sa__handler;
-	svr4_sigset_t	sa_mask;
-	int 		sa_reserved[2];
+	int		ssa_flags;
+	svr4_sig_t	ssa_handler;
+	svr4_sigset_t	ssa_mask;
+	int 		ssa_reserved[2];
 };
 
 struct svr4_sigaltstack {
@@ -115,15 +124,21 @@ struct svr4_sigaltstack {
 #define SVR4_SA_NODEFER		0x00000010
 #define SVR4_SA_NOCLDWAIT	0x00010000	/* No zombies 	*/
 #define SVR4_SA_NOCLDSTOP	0x00020000	/* No jcl	*/
+#define	SVR4_SA_ALLBITS		0x0003001f
 
 /* ss_flags */
 #define SVR4_SS_ONSTACK		0x00000001
 #define SVR4_SS_DISABLE		0x00000002
+#define	SVR4_SS_ALLBITS		0x00000003
 
-extern int bsd_to_svr4_sig[];
+#define	SVR4_MINSIGSTKSZ	8192
+
+struct ksiginfo;
+
 void bsd_to_svr4_sigaltstack(const struct sigaltstack *, struct svr4_sigaltstack *);
 void bsd_to_svr4_sigset(const sigset_t *, svr4_sigset_t *);
 void svr4_to_bsd_sigaltstack(const struct svr4_sigaltstack *, struct sigaltstack *);
 void svr4_to_bsd_sigset(const svr4_sigset_t *, sigset_t *);
+void svr4_sendsig(sig_t, struct ksiginfo *, sigset_t  *);
 
 #endif /* !_SVR4_SIGNAL_H_ */

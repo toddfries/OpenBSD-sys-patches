@@ -1,7 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.6 2003/12/10 07:22:43 itojun Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.11 1996/04/08 19:55:37 jonathan Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1988, 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,10 +29,11 @@
  *	@(#)in_cksum.c	8.1 (Berkeley) 6/10/93
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netinet/in_cksum.c,v 1.10 2007/10/07 20:44:22 silby Exp $");
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
-#include <sys/systm.h>
-#include <netinet/in.h>
 
 /*
  * Checksum routine for Internet Protocol family headers (Portable Version).
@@ -48,28 +46,26 @@
 #define REDUCE {l_util.l = sum; sum = l_util.s[0] + l_util.s[1]; ADDCARRY(sum);}
 
 int
-in_cksum(m, len)
-	struct mbuf *m;
-	int len;
+in_cksum(struct mbuf *m, int len)
 {
-	u_int16_t *w;
-	int sum = 0;
-	int mlen = 0;
+	register u_short *w;
+	register int sum = 0;
+	register int mlen = 0;
 	int byte_swapped = 0;
 
 	union {
-		u_int8_t  c[2];
-		u_int16_t s;
+		char	c[2];
+		u_short	s;
 	} s_util;
 	union {
-		u_int16_t s[2];
-		u_int32_t l;
+		u_short s[2];
+		long	l;
 	} l_util;
 
 	for (;m && len; m = m->m_next) {
 		if (m->m_len == 0)
 			continue;
-		w = mtod(m, u_int16_t *);
+		w = mtod(m, u_short *);
 		if (mlen == -1) {
 			/*
 			 * The first byte of this mbuf is the continuation
@@ -79,9 +75,9 @@ in_cksum(m, len)
 			 * s_util.c[0] is already saved when scanning previous
 			 * mbuf.
 			 */
-			s_util.c[1] = *(u_int8_t *)w;
+			s_util.c[1] = *(char *)w;
 			sum += s_util.s;
-			w = (u_int16_t *)((u_int8_t *)w + 1);
+			w = (u_short *)((char *)w + 1);
 			mlen = m->m_len - 1;
 			len--;
 		} else
@@ -92,11 +88,11 @@ in_cksum(m, len)
 		/*
 		 * Force to even boundary.
 		 */
-		if ((1 & (long) w) && (mlen > 0)) {
+		if ((1 & (int) w) && (mlen > 0)) {
 			REDUCE;
 			sum <<= 8;
-			s_util.c[0] = *(u_int8_t *)w;
-			w = (u_int16_t *)((int8_t *)w + 1);
+			s_util.c[0] = *(u_char *)w;
+			w = (u_short *)((char *)w + 1);
 			mlen--;
 			byte_swapped = 1;
 		}
@@ -128,13 +124,13 @@ in_cksum(m, len)
 			sum <<= 8;
 			byte_swapped = 0;
 			if (mlen == -1) {
-				s_util.c[1] = *(u_int8_t *)w;
+				s_util.c[1] = *(char *)w;
 				sum += s_util.s;
 				mlen = 0;
 			} else
 				mlen = -1;
 		} else if (mlen == -1)
-			s_util.c[0] = *(u_int8_t *)w;
+			s_util.c[0] = *(char *)w;
 	}
 	if (len)
 		printf("cksum: out of data\n");

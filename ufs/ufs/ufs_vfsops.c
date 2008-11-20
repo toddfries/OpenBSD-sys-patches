@@ -1,7 +1,4 @@
-/*	$OpenBSD: ufs_vfsops.c,v 1.15 2006/04/04 11:21:40 pedro Exp $	*/
-/*	$NetBSD: ufs_vfsops.c,v 1.4 1996/02/09 22:36:12 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1991, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,19 +31,26 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ufs_vfsops.c	8.4 (Berkeley) 4/16/94
+ *	@(#)ufs_vfsops.c	8.8 (Berkeley) 5/20/95
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_vfsops.c,v 1.48 2007/02/01 02:13:53 mpp Exp $");
+
+#include "opt_quota.h"
+#include "opt_ufs.h"
+
 #include <sys/param.h>
-#include <sys/mbuf.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
-#include <sys/buf.h>
+#include <sys/socket.h>
 #include <sys/vnode.h>
-#include <sys/malloc.h>
 
-#include <miscfs/specfs/specdev.h>
-
+#include <ufs/ufs/extattr.h>
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
@@ -56,96 +60,164 @@
 #include <ufs/ufs/dirhash.h>
 #endif
 
-/*
- * Make a filesystem operational.
- * Nothing to do at the moment.
- */
-/* ARGSUSED */
-int
-ufs_start(struct mount *mp, int flags, struct proc *p)
-{
-	return (0);
-}
+MALLOC_DEFINE(M_UFSMNT, "ufs_mount", "UFS mount structure");
 
 /*
  * Return the root of a filesystem.
  */
 int
-ufs_root(struct mount *mp, struct vnode **vpp)
+ufs_root(mp, flags, vpp, td)
+	struct mount *mp;
+	int flags;
+	struct vnode **vpp;
+	struct thread *td;
 {
 	struct vnode *nvp;
 	int error;
 
-	if ((error = VFS_VGET(mp, (ino_t)ROOTINO, &nvp)) != 0)
+	error = VFS_VGET(mp, (ino_t)ROOTINO, flags, &nvp);
+	if (error)
 		return (error);
 	*vpp = nvp;
 	return (0);
 }
 
 /*
- * Verify a remote client has export rights and return these rights via.
- * exflagsp and credanonp.
+ * Do operations associated with quotas
  */
 int
-ufs_check_export(struct mount *mp, struct mbuf *nam, int *exflagsp,
-    struct ucred **credanonp) 
+ufs_quotactl(mp, cmds, id, arg, td)
+	struct mount *mp;
+	int cmds;
+	uid_t id;
+	void *arg;
+	struct thread *td;
 {
-	struct netcred *np;
-	struct ufsmount *ump = VFSTOUFS(mp);
+#ifndef QUOTA
+	return (EOPNOTSUPP);
+#else
+	int cmd, type, error;
 
-	/*
-	 * Get the export permission structure for this <mp, client> tuple.
-	 */
-	np = vfs_export_lookup(mp, &ump->um_export, nam);
-	if (np == NULL)
-		return (EACCES);
+	cmd = cmds >> SUBCMDSHIFT;
+	type = cmds & SUBCMDMASK;
+	if (id == -1) {
+		switch (type) {
 
-	*exflagsp = np->netc_exflags;
-	*credanonp = &np->netc_anon;
+		case USRQUOTA:
+			id = td->td_ucred->cr_ruid;
+			break;
+
+		case GRPQUOTA:
+			id = td->td_ucred->cr_rgid;
+			break;
+
+		default:
+			return (EINVAL);
+		}
+	}
+	if ((u_int)type >= MAXQUOTAS)
+		return (EINVAL);
+
+	if (vfs_busy(mp, LK_NOWAIT, 0, td))
+		return (0);
+
+	switch (cmd) {
+	case Q_QUOTAON:
+		error = quotaon(td, mp, type, arg);
+		break;
+
+	case Q_QUOTAOFF:
+		error = quotaoff(td, mp, type);
+		break;
+
+	case Q_SETQUOTA:
+		error = setquota(td, mp, id, type, arg);
+		break;
+
+	case Q_SETUSE:
+		error = setuse(td, mp, id, type, arg);
+		break;
+
+	case Q_GETQUOTA:
+		error = getquota(td, mp, id, type, arg);
+		break;
+
+	case Q_SYNC:
+		error = qsync(mp);
+		break;
+
+	default:
+		error = EINVAL;
+		break;
+	}
+	vfs_unbusy(mp, td);
+	return (error);
+#endif
+}
+
+/*
+ * Initial UFS filesystems, done only once.
+ */
+int
+ufs_init(vfsp)
+	struct vfsconf *vfsp;
+{
+
+#ifdef QUOTA
+	dqinit();
+#endif
+#ifdef UFS_DIRHASH
+	ufsdirhash_init();
+#endif
 	return (0);
 }
 
 /*
- * Initialize UFS file systems, done only once.
+ * Uninitialise UFS filesystems, done before module unload.
  */
 int
-ufs_init(struct vfsconf *vfsp)
+ufs_uninit(vfsp)
+	struct vfsconf *vfsp;
 {
-	static int done;
 
-	if (done)
-		return (0);
-	done = 1;
-	ufs_ihashinit();
-	ufs_quota_init();
-#ifdef UFS_DIRHASH
-	ufsdirhash_init();
+#ifdef QUOTA
+	dquninit();
 #endif
-
+#ifdef UFS_DIRHASH
+	ufsdirhash_uninit();
+#endif
 	return (0);
 }
 
 /*
  * This is the generic part of fhtovp called after the underlying
  * filesystem has validated the file handle.
+ *
+ * Call the VFS_CHECKEXP beforehand to verify access.
  */
 int
-ufs_fhtovp(struct mount *mp, struct ufid *ufhp, struct vnode **vpp)
+ufs_fhtovp(mp, ufhp, vpp)
+	struct mount *mp;
+	struct ufid *ufhp;
+	struct vnode **vpp;
 {
 	struct inode *ip;
 	struct vnode *nvp;
 	int error;
 
-	if ((error = VFS_VGET(mp, ufhp->ufid_ino, &nvp)) != 0) {
+	error = VFS_VGET(mp, ufhp->ufid_ino, LK_EXCLUSIVE, &nvp);
+	if (error) {
 		*vpp = NULLVP;
 		return (error);
 	}
 	ip = VTOI(nvp);
-	if (DIP(ip, mode) == 0 || DIP(ip, gen) != ufhp->ufid_gen) {
+	if (ip->i_mode == 0 || ip->i_gen != ufhp->ufid_gen ||
+	    ip->i_effnlink <= 0) {
 		vput(nvp);
 		*vpp = NULLVP;
 		return (ESTALE);
 	}
 	*vpp = nvp;
+	vnode_create_vobject(*vpp, DIP(ip, i_size), curthread);
 	return (0);
 }

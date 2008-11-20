@@ -1,6 +1,4 @@
-/*	$OpenBSD: amphyreg.h,v 1.2 2003/10/22 09:39:29 jmc Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
  *
@@ -31,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/mii/amphyreg.h,v 1.1 1999/09/06 05:27:55 wpaul Exp $
+ * $FreeBSD: src/sys/dev/mii/amphyreg.h,v 1.2 2005/01/06 01:42:55 imp Exp $
  */
 
 #ifndef _DEV_MII_AMTPHYREG_H_
@@ -54,7 +52,7 @@
 #define DSCR_LINKLEDCTL		0x0020	/* Link LED control */
 #define DSCR_FDXLEDCTL		0x0010	/* FDX LED control */
 #define DSCR_SMRTS		0x0008	/* Reset state machine */
-#define DSCR_MFPSC		0x0004	/* Preamble suppression control */
+#define DSCR_MFPSC		0x0004	/* Preamble surpression control */
 #define DSCR_SLEEP		0x0002	/* Sleep mode */
 #define DSCR_RLOUT		0x0001	/* Remote loopout control */
 

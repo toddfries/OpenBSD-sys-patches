@@ -1,8 +1,5 @@
-/*	$OpenBSD: tcp_seq.h,v 1.6 2007/06/15 18:23:06 markus Exp $	*/
-/*	$NetBSD: tcp_seq.h,v 1.6 1995/03/26 20:32:35 jtc Exp $	*/
-
-/*
- * Copyright (c) 1982, 1986, 1993
+/*-
+ * Copyright (c) 1982, 1986, 1993, 1995
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,12 +26,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)tcp_seq.h	8.1 (Berkeley) 6/10/93
+ *	@(#)tcp_seq.h	8.3 (Berkeley) 6/21/95
+ * $FreeBSD: src/sys/netinet/tcp_seq.h,v 1.26 2006/06/18 14:24:12 andre Exp $
  */
 
 #ifndef _NETINET_TCP_SEQ_H_
 #define _NETINET_TCP_SEQ_H_
-
 /*
  * TCP sequence numbers are 32 bit integers operated
  * on with modular arithmetic.  These macros can be
@@ -44,6 +41,14 @@
 #define	SEQ_LEQ(a,b)	((int)((a)-(b)) <= 0)
 #define	SEQ_GT(a,b)	((int)((a)-(b)) > 0)
 #define	SEQ_GEQ(a,b)	((int)((a)-(b)) >= 0)
+
+#define	SEQ_MIN(a, b)	((SEQ_LT(a, b)) ? (a) : (b))
+#define	SEQ_MAX(a, b)	((SEQ_GT(a, b)) ? (a) : (b))
+
+/* for modulo comparisons of timestamps */
+#define TSTMP_LT(a,b)	((int)((a)-(b)) < 0)
+#define TSTMP_GT(a,b)	((int)((a)-(b)) > 0)
+#define TSTMP_GEQ(a,b)	((int)((a)-(b)) >= 0)
 
 /*
  * Macros to initialize tcp sequence numbers for
@@ -55,12 +60,9 @@
 
 #define	tcp_sendseqinit(tp) \
 	(tp)->snd_una = (tp)->snd_nxt = (tp)->snd_max = (tp)->snd_up = \
-	    (tp)->iss
+	    (tp)->snd_recover = (tp)->iss
 
-#define	TCP_ISSINCR	(125*1024)	/* increment for tcp_iss each second */
-#define	TCP_ISSINCR2	(1*1024*1024)	/* increment for tcp_iss each second */
+#define TCP_PAWS_IDLE	(24 * 24 * 60 * 60 * hz)
+					/* timestamp wrap-around time */
 
-#ifdef _KERNEL
-extern tcp_seq	tcp_iss;		/* tcp initial send seq # */
-#endif /* _KERNEL */
 #endif /* _NETINET_TCP_SEQ_H_ */

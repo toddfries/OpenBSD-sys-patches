@@ -1,7 +1,4 @@
-/*	$OpenBSD: ioctl_compat.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: ioctl_compat.h,v 1.10 1995/03/31 03:10:15 christos Exp $	*/
-
-/*
+/*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -18,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,6 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ioctl_compat.h	8.4 (Berkeley) 1/21/94
+ * $FreeBSD: src/sys/sys/ioctl_compat.h,v 1.10 2007/04/27 11:19:05 benjsc Exp $
  */
 
 #ifndef _SYS_IOCTL_COMPAT_H_
@@ -42,6 +40,10 @@
 
 #include <sys/ttychars.h>
 #include <sys/ttydev.h>
+
+#ifdef USE_OLD_TTY
+#warning "Old BSD tty API used and depends on COMPAT_43TTY. Use termios.h instead"
+#endif
 
 struct tchars {
 	char	t_intrc;	/* interrupt */
@@ -162,24 +164,5 @@ struct sgttyb {
 #define	OTTYDISC	0
 #define	NETLDISC	1
 #define	NTTYDISC	2
-
-#define TIOCGSID	_IOR('t', 99, int)	/* For svr4 -- get session id */
-
-/*
- * Passthrough ioctl commands. These are passed through to devices
- * as they are, it is expected that the device (an LKM, for example),
- * will know how to deal with them. One for each emulation, so that
- * no namespace clashes will occur between them, for devices that
- * may be dealing with specific ioctls for multiple emulations.
- *
- * XXX: Currently only implemented for Linux.
- */
-
-struct ioctl_pt {
-	unsigned long com;
-	void *data;
-};
-
-#define PTIOCLINUX  _IOW('Z', 3, struct ioctl_pt)
 
 #endif /* !_SYS_IOCTL_COMPAT_H_ */
