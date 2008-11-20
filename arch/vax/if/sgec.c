@@ -625,7 +625,6 @@ zeioctl(ifp, cmd, data)
 	caddr_t data;
 {
 	struct ze_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
@@ -646,8 +645,7 @@ zeioctl(ifp, cmd, data)
 
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
-		error = ifmedia_ioctl(ifp, (struct ifreq *)data,
-		    &sc->sc_ifmedia, cmd);
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, cmd);
 		break;
 
 	case SIOCSIFFLAGS:
@@ -676,28 +674,14 @@ zeioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/*
-		 * Update our multicast list.
-		 */
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ac):
-			ether_delmulti(ifr, &sc->sc_ac);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ze_setup(sc);
-			error = 0;
-		}
-		break;
-
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ze_setup(sc);
+		error = 0;
 	}
 
 	splx(s);

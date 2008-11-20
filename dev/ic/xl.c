@@ -2282,13 +2282,6 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #endif /* INET */
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		XL_SEL_WIN(5);
 		if (ifp->if_flags & IFF_UP) {
@@ -2307,26 +2300,6 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->xl_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING) {
-				if (sc->xl_type == XL_TYPE_905B)
-					xl_setmulti_hash(sc);
-				else
-					xl_setmulti(sc);
-			}
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		if (sc->xl_hasmii != 0)
@@ -2340,6 +2313,16 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			if (sc->xl_type == XL_TYPE_905B)
+				xl_setmulti_hash(sc);
+			else
+				xl_setmulti(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);

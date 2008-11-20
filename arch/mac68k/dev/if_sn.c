@@ -251,16 +251,14 @@ snsetup(struct sn_softc *sc, u_int8_t *lladdr)
 static int
 snioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
-	struct ifaddr *ifa;
-	struct ifreq *ifr;
 	struct sn_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	int s, err = 0;
 
 	s = splnet();
 
 	switch (cmd) {
 	case SIOCSIFADDR:
-		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
@@ -301,26 +299,14 @@ snioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		ifr = (struct ifreq *) data;
-		if (cmd == SIOCADDMULTI)
-			err = ether_addmulti(ifr, &sc->sc_arpcom);
-		else
-			err = ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (err == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly. But remember UP flag!
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				snreset(sc);
-			err = 0;
-		}
-		break;
 	default:
 		err = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (err == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			snreset(sc);
+		err = 0;
 	}
 
 	splx(s);

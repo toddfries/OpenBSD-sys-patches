@@ -377,21 +377,16 @@ efioctl(ifp, cmd, data)
 		efsetmulti(sc);
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				efreset(sc);
-			error = 0;
-		}
-		efsetmulti(sc);
-		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			efreset(sc);
+			efsetmulti(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);
