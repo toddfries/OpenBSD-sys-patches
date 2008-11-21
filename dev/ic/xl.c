@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.82 2008/10/02 20:21:13 brad Exp $	*/
+/*	$OpenBSD: xl.c,v 1.84 2008/11/19 08:20:01 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1321,9 +1321,6 @@ xl_txeof(struct xl_softc *sc)
 
 	ifp = &sc->sc_arpcom.ac_if;
 
-	/* Clear the timeout timer. */
-	ifp->if_timer = 0;
-
 	/*
 	 * Go through our tx list and free mbufs for those
 	 * frames that have been uploaded. Note: the 3c905B
@@ -1363,6 +1360,8 @@ xl_txeof(struct xl_softc *sc)
 
 	if (sc->xl_cdata.xl_tx_head == NULL) {
 		ifp->if_flags &= ~IFF_OACTIVE;
+		/* Clear the timeout timer. */
+		ifp->if_timer = 0;
 		sc->xl_cdata.xl_tx_tail = NULL;
 	} else {
 		if (CSR_READ_4(sc, XL_DMACTL) & XL_DMACTL_DOWN_STALLED ||
@@ -1409,13 +1408,14 @@ xl_txeof_90xB(struct xl_softc *sc)
 
 		sc->xl_cdata.xl_tx_cnt--;
 		XL_INC(idx, XL_TX_LIST_CNT);
-		ifp->if_timer = 0;
 	}
 
 	sc->xl_cdata.xl_tx_cons = idx;
 
 	if (cur_tx != NULL)
 		ifp->if_flags &= ~IFF_OACTIVE;
+	if (sc->xl_cdata.xl_tx_cnt == 0)
+		ifp->if_timer = 0;
 }
 
 /*
@@ -1998,7 +1998,6 @@ xl_init(void *xsc)
 	CSR_WRITE_1(sc, XL_TX_FREETHRESH, XL_PACKET_SIZE >> 8);
 
 	/* Set the TX start threshold for best performance. */
-	sc->xl_tx_thresh = XL_MIN_FRAMELEN;
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_SET_START|sc->xl_tx_thresh);
 
 	/*
@@ -2552,6 +2551,9 @@ xl_attach(struct xl_softc *sc)
 		sc->xl_type = XL_TYPE_905B;
 	else
 		sc->xl_type = XL_TYPE_90X;
+
+	/* Set the TX start threshold for best performance. */
+	sc->xl_tx_thresh = XL_MIN_FRAMELEN;
 
 	timeout_set(&sc->xl_stsup_tmo, xl_stats_update, sc);
 
