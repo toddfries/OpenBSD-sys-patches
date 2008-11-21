@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgec.c,v 1.16 2008/08/22 17:09:06 deraadt Exp $	*/
+/*	$OpenBSD: sgec.c,v 1.18 2008/10/09 00:17:54 brad Exp $	*/
 /*      $NetBSD: sgec.c,v 1.5 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -627,10 +627,11 @@ zeioctl(ifp, cmd, data)
 	struct ze_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s = splnet(), error = 0;
+	int s, error = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -696,9 +697,9 @@ zeioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }

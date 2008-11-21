@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pppoe.c,v 1.26 2008/08/28 13:19:38 brad Exp $ */
+/* $OpenBSD: if_pppoe.c,v 1.29 2008/10/16 12:20:27 canacar Exp $ */
 /* $NetBSD: if_pppoe.c,v 1.51 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -171,7 +171,7 @@ static void pppoe_start(struct ifnet *);
 /* internal timeout handling */
 static void pppoe_timeout(void *);
 
-/* sending actual protocol controll packets */
+/* sending actual protocol control packets */
 static int pppoe_send_padi(struct pppoe_softc *);
 static int pppoe_send_padr(struct pppoe_softc *);
 #ifdef PPPOE_SERVER
@@ -213,14 +213,13 @@ pppoeattach(int count)
 int
 pppoe_clone_create(struct if_clone *ifc, int unit)
 {
-	struct pppoe_softc *sc;
+	struct pppoe_softc *sc, *tmpsc;
+	u_int32_t unique;
 	int s;
 
-        sc = malloc(sizeof(*sc), M_DEVBUF, M_WAITOK|M_ZERO);
+        sc = malloc(sizeof(*sc), M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
         if (sc == NULL)
                 return (ENOMEM);
-
-	sc->sc_unique = arc4random();
 
 	snprintf(sc->sc_sppp.pp_if.if_xname, 
 		 sizeof(sc->sc_sppp.pp_if.if_xname), 
@@ -254,6 +253,12 @@ pppoe_clone_create(struct if_clone *ifc, int unit)
 #endif
 	
 	s = splnet();
+retry:
+	unique = arc4random();
+	LIST_FOREACH(tmpsc, &pppoe_softc_list, sc_list)
+		if (tmpsc->sc_unique == unique)
+			goto retry;
+	sc->sc_unique = unique;
 	LIST_INSERT_HEAD(&pppoe_softc_list, sc, sc_list);
 	splx(s);
 
@@ -305,11 +310,9 @@ pppoe_find_softc_by_session(u_int session, struct ifnet *rcvif)
 
 	LIST_FOREACH(sc, &pppoe_softc_list, sc_list) {
 		if (sc->sc_state == PPPOE_STATE_SESSION
-		    && sc->sc_session == session) {
-			if (sc->sc_eth_if == rcvif)
-				return (sc);
-			else
-				return (NULL);
+		    && sc->sc_session == session
+		    && sc->sc_eth_if == rcvif) {
+			return (sc);
 		}
 	}
 	return (NULL);
@@ -678,7 +681,6 @@ breakbreak:
 		}
 		
 		memcpy(&sc->sc_dest, eh->ether_shost, sizeof(sc->sc_dest));
-		timeout_del(&sc->sc_timeout);
 		sc->sc_padr_retried = 0;
 		sc->sc_state = PPPOE_STATE_PADR_SENT;
 		if ((err = pppoe_send_padr(sc)) != 0) {
@@ -920,7 +922,7 @@ pppoe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 
 		len = strlen(parms->ac_name);
 		if (len > 0 && len < sizeof(parms->ac_name)) {
-			char *p = malloc(len + 1, M_DEVBUF, M_WAITOK);
+			char *p = malloc(len + 1, M_DEVBUF, M_WAITOK|M_CANFAIL);
 			if (p == NULL)
 				return (ENOMEM);
 			strlcpy(p, parms->ac_name, len + 1);
@@ -933,7 +935,7 @@ pppoe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 
 		len = strlen(parms->service_name);
 		if (len > 0 && len < sizeof(parms->service_name)) {
-			char *p = malloc(len + 1, M_DEVBUF, M_WAITOK);
+			char *p = malloc(len + 1, M_DEVBUF, M_WAITOK|M_CANFAIL);
 			if (p == NULL)
 				return (ENOMEM);
 			strlcpy(p, parms->service_name, len + 1);
@@ -1054,7 +1056,7 @@ pppoe_send_padi(struct pppoe_softc *sc)
 		panic("pppoe_send_padi in state %d", sc->sc_state);
 
 	/* calculate length of frame (excluding ethernet header + pppoe header) */
-	len = 2 + 2 + 2 + 2 + sizeof(sc->sc_unique); /* service name tag is required, host unique is send too */
+	len = 2 + 2 + 2 + 2 + sizeof(sc->sc_unique); /* service name tag is required, host unique is sent too */
 	if (sc->sc_service_name != NULL) {
 		l1 = strlen(sc->sc_service_name);
 		len += l1;

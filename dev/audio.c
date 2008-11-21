@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.97 2008/08/10 12:03:53 krw Exp $	*/
+/*	$OpenBSD: audio.c,v 1.100 2008/10/30 03:46:56 jakemsr Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -1711,10 +1711,10 @@ audio_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		s = splaudio();
 		/* figure out where next DMA will start */
 		ao = (struct audio_offset *)addr;
-		ao->samples = sc->sc_rr.stamp;
+		ao->samples = sc->sc_rr.stamp / sc->sc_rparams.factor;
 		ao->deltablks = (sc->sc_rr.stamp - sc->sc_rr.stamp_last) / sc->sc_rr.blksize;
 		sc->sc_rr.stamp_last = sc->sc_rr.stamp;
-		ao->offset = sc->sc_rr.inp - sc->sc_rr.start;
+		ao->offset = (sc->sc_rr.inp - sc->sc_rr.start) / sc->sc_rparams.factor;
 		splx(s);
 		break;
 
@@ -1725,10 +1725,10 @@ audio_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		offs = sc->sc_pr.outp - sc->sc_pr.start + sc->sc_pr.blksize;
 		if (sc->sc_pr.start + offs >= sc->sc_pr.end)
 			offs = 0;
-		ao->samples = sc->sc_pr.stamp;
+		ao->samples = sc->sc_pr.stamp / sc->sc_pparams.factor;
 		ao->deltablks = (sc->sc_pr.stamp - sc->sc_pr.stamp_last) / sc->sc_pr.blksize;
 		sc->sc_pr.stamp_last = sc->sc_pr.stamp;
-		ao->offset = offs;
+		ao->offset = offs / sc->sc_pparams.factor;
 		splx(s);
 		break;
 
@@ -2257,6 +2257,12 @@ audio_rint(void *v)
 int
 audio_check_params(struct audio_params *p)
 {
+	if (p->channels < 1 || p->channels > 12)
+		return (EINVAL);
+
+	if (p->precision < 8 || p->precision > 32)
+		return (EINVAL);
+
 	if (p->encoding == AUDIO_ENCODING_PCM16) {
 		if (p->precision == 8)
 			p->encoding = AUDIO_ENCODING_ULINEAR;
@@ -2287,15 +2293,13 @@ audio_check_params(struct audio_params *p)
 	case AUDIO_ENCODING_ALAW:
 	case AUDIO_ENCODING_ADPCM:
 		if (p->precision != 8)
-			return (EINVAL);
+			p->precision = 8;
 		break;
 	case AUDIO_ENCODING_SLINEAR_LE:
 	case AUDIO_ENCODING_SLINEAR_BE:
 	case AUDIO_ENCODING_ULINEAR_LE:
 	case AUDIO_ENCODING_ULINEAR_BE:
-		if (p->precision != 8 && p->precision != 16 && 
-		    p->precision != 32)
-			return (EINVAL);
+		p->precision = (p->precision + 7) & ~7;
 		break;
 	case AUDIO_ENCODING_MPEG_L1_STREAM:
 	case AUDIO_ENCODING_MPEG_L1_PACKETS:
@@ -2307,10 +2311,6 @@ audio_check_params(struct audio_params *p)
 	default:
 		return (EINVAL);
 	}
-
-	/* sanity check # of channels */
-	if (p->channels < 1 || p->channels > 12)
-		return (EINVAL);
 
 	return (0);
 }
@@ -2738,7 +2738,7 @@ audiosetinfo(struct audio_softc *sc, struct audio_info *ai)
 		if (!indep) {
 			if (setmode == AUMODE_RECORD)
 				pp = rp;
-			else if (setmode == AUMODE_PLAY)
+			else
 				rp = pp;
 		}
 		error = hw->set_params(sc->hw_hdl, setmode,

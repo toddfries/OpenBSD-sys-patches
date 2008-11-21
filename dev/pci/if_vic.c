@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.54 2008/09/10 14:01:23 blambert Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.56 2008/10/29 01:14:47 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -561,14 +561,14 @@ vic_alloc_data(struct vic_softc *sc)
 	int				i;
 
 	sc->sc_rxbuf = malloc(sizeof(struct vic_rxbuf) * sc->sc_nrxbuf,
-	    M_NOWAIT, M_DEVBUF);
+	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_rxbuf == NULL) {
 		printf(": unable to allocate rxbuf\n");
 		goto err;
 	}
 
 	sc->sc_txbuf = malloc(sizeof(struct vic_txbuf) * sc->sc_ntxbuf,
-	    M_NOWAIT, M_DEVBUF);
+	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_txbuf == NULL) {
 		printf(": unable to allocate txbuf\n");
 		goto freerx;
@@ -1181,11 +1181,6 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
@@ -1234,8 +1229,7 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -1246,7 +1240,6 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	splx(s);
-
 	return (error);
 }
 

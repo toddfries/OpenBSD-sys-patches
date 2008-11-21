@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.77 2008/09/03 19:53:37 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.79 2008/09/27 15:16:09 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -69,7 +69,6 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
 
-enum	ieee80211_edca_ac ieee80211_up_to_ac(struct ieee80211com *, int);
 int	ieee80211_classify(struct ieee80211com *, struct mbuf *);
 int	ieee80211_mgmt_output(struct ifnet *, struct ieee80211_node *,
 	    struct mbuf *, int);
@@ -920,12 +919,12 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 		*frm++ = 2;
 		count++;
 	}
-	if (ni->ni_rsnakms & IEEE80211_AKM_SHA256_8021X) {
+	if (!wpa && (ni->ni_rsnakms & IEEE80211_AKM_SHA256_8021X)) {
 		memcpy(frm, oui, 3); frm += 3;
 		*frm++ = 5;
 		count++;
 	}
-	if (ni->ni_rsnakms & IEEE80211_AKM_SHA256_PSK) {
+	if (!wpa && (ni->ni_rsnakms & IEEE80211_AKM_SHA256_PSK)) {
 		memcpy(frm, oui, 3); frm += 3;
 		*frm++ = 6;
 		count++;
@@ -939,11 +938,19 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 	/* write RSN Capabilities field */
 	LE_WRITE_2(frm, ni->ni_rsncaps); frm += 2;
 
+	if (ni->ni_flags & IEEE80211_NODE_PMKID) {
+		/* write PMKID Count field */
+		LE_WRITE_2(frm, 1); frm += 2;
+		/* write PMKID List (only 1) */
+		memcpy(frm, ni->ni_pmkid, IEEE80211_PMKID_LEN);
+		frm += IEEE80211_PMKID_LEN;
+	} else {
+		/* no PMKID (PMKID Count=0) */
+		LE_WRITE_2(frm, 0); frm += 2;
+	}
+
 	if (!(ic->ic_caps & IEEE80211_C_MFP))
 		return frm;
-
-	/* no PMKID List for now */
-	LE_WRITE_2(frm, 0); frm += 2;
 
 	/* write Group Integrity Cipher Suite field */
 	memcpy(frm, oui, 3); frm += 3;

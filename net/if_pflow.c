@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflow.c,v 1.5 2008/09/17 22:18:00 gollo Exp $	*/
+/*	$OpenBSD: if_pflow.c,v 1.7 2008/10/28 15:51:27 gollo Exp $	*/
 
 /*
  * Copyright (c) 2008 Henning Brauer <henning@openbsd.org>
@@ -61,7 +61,7 @@
 #define DPRINTF(x)
 #endif
 
-struct pflow_softc	*pflowif = NULL;
+SLIST_HEAD(, pflow_softc) pflowif_list;
 struct pflowstats	 pflowstats;
 
 void	pflowattach(int);
@@ -79,8 +79,9 @@ int	pflow_sendout_mbuf(struct pflow_softc *, struct mbuf *);
 void	pflow_timeout(void *);
 void	copy_flow_data(struct pflow_flow *, struct pflow_flow *,
 	struct pf_state *, int, int);
-int	pflow_pack_flow(struct pf_state *);
+int	pflow_pack_flow(struct pf_state *, struct pflow_softc *);
 int	pflow_get_dynport(void);
+int	export_pflow_if(struct pf_state*, struct pflow_softc *);
 
 struct if_clone	pflow_cloner =
     IF_CLONE_INITIALIZER("pflow", pflow_clone_create,
@@ -93,16 +94,15 @@ extern int ipport_hilastauto;
 void
 pflowattach(int npflow)
 {
+	SLIST_INIT(&pflowif_list);
 	if_clone_attach(&pflow_cloner);
 }
 
 int
 pflow_clone_create(struct if_clone *ifc, int unit)
 {
-	struct ifnet	*ifp;
-
-	if (unit != 0)
-		return (EINVAL);
+	struct ifnet		*ifp;
+	struct pflow_softc	*pflowif;
 
 	if ((pflowif = malloc(sizeof(*pflowif),
 	    M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
@@ -135,23 +135,31 @@ pflow_clone_create(struct if_clone *ifc, int unit)
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
 
+#if NBPFILTER > 0
+	bpfattach(&pflowif->sc_if.if_bpf, ifp, DLT_RAW, 0);
+#endif
+
+	/* Insert into list of pflows */
+	SLIST_INSERT_HEAD(&pflowif_list, pflowif, sc_next);
 	return (0);
 }
 
 int
 pflow_clone_destroy(struct ifnet *ifp)
 {
-	struct pflow_softc *sc = ifp->if_softc;
+	struct pflow_softc	*sc = ifp->if_softc;
+	int			 s;
 
-	timeout_del(&sc->sc_tmo);
-
+	s = splnet();
+	pflow_sendout(sc);
 #if NBPFILTER > 0
 	bpfdetach(ifp);
 #endif
 	if_detach(ifp);
-	free(pflowif->sc_imo.imo_membership, M_IPMOPTS);
-	free(pflowif, M_DEVBUF);
-	pflowif = NULL;
+	SLIST_REMOVE(&pflowif_list, sc, pflow_softc, sc_next);
+	free(sc->sc_imo.imo_membership, M_IPMOPTS);
+	free(sc, M_DEVBUF);
+	splx(s);
 	return (0);
 }
 
@@ -237,12 +245,9 @@ pflowioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    sizeof(pflowr))))
 			return (error);
 
-		if ((ifp->if_flags & IFF_UP) && sc->sc_receiver_ip.s_addr != 0
-		    && sc->sc_receiver_port != 0) {
-			s = splnet();
-			pflow_sendout(sc);
-			splx(s);
-		}
+		s = splnet();
+		pflow_sendout(sc);
+		splx(s);
 
 		if (pflowr.addrmask & PFLOW_MASK_DSTIP)
 			sc->sc_receiver_ip = pflowr.receiver_ip;
@@ -382,22 +387,30 @@ copy_flow_data(struct pflow_flow *flow1, struct pflow_flow *flow2,
 int
 export_pflow(struct pf_state *st)
 {
+	struct pflow_softc	*sc = NULL;
+
+	SLIST_FOREACH(sc, &pflowif_list, sc_next) {
+		export_pflow_if(st, sc);
+	}
+
+	return (0);
+}
+
+int
+export_pflow_if(struct pf_state *st, struct pflow_softc *sc)
+{
 	struct pf_state		 pfs_copy;
-	struct pflow_softc	*sc = pflowif;
 	struct ifnet		*ifp = NULL;
 	u_int64_t		 bytes[2];
 	int			 ret = 0;
 
-	if (sc == NULL)
-		return (0);
-
 	ifp = &sc->sc_if;
-	if (!(ifp->if_flags & IFF_UP))
+	if (!(ifp->if_flags & IFF_RUNNING))
 		return (0);
 
 	if ((st->bytes[0] < (u_int64_t)PFLOW_MAXBYTES)
 	    && (st->bytes[1] < (u_int64_t)PFLOW_MAXBYTES))
-		return pflow_pack_flow(st);
+		return (pflow_pack_flow(st, sc));
 
 	/* flow > PFLOW_MAXBYTES need special handling */
 	bcopy(st, &pfs_copy, sizeof(pfs_copy));
@@ -408,7 +421,7 @@ export_pflow(struct pf_state *st)
 		pfs_copy.bytes[0] = PFLOW_MAXBYTES;
 		pfs_copy.bytes[1] = 0;
 
-		if ((ret = pflow_pack_flow(&pfs_copy)) != 0)
+		if ((ret = pflow_pack_flow(&pfs_copy, sc)) != 0)
 			return (ret);
 		if ((bytes[0] - PFLOW_MAXBYTES) > 0)
 			bytes[0] -= PFLOW_MAXBYTES;
@@ -418,7 +431,7 @@ export_pflow(struct pf_state *st)
 		pfs_copy.bytes[1] = PFLOW_MAXBYTES;
 		pfs_copy.bytes[0] = 0;
 
-		if ((ret = pflow_pack_flow(&pfs_copy)) != 0)
+		if ((ret = pflow_pack_flow(&pfs_copy, sc)) != 0)
 			return (ret);
 		if ((bytes[1] - PFLOW_MAXBYTES) > 0)
 			bytes[1] -= PFLOW_MAXBYTES;
@@ -427,13 +440,12 @@ export_pflow(struct pf_state *st)
 	pfs_copy.bytes[0] = bytes[0];
 	pfs_copy.bytes[1] = bytes[1];
 
-	return (pflow_pack_flow(&pfs_copy));
+	return (pflow_pack_flow(&pfs_copy, sc));
 }
 
 int
-pflow_pack_flow(struct pf_state *st)
+pflow_pack_flow(struct pf_state *st, struct pflow_softc *sc)
 {
-	struct pflow_softc	*sc = pflowif;
 	struct pflow_flow	*flow1 = NULL;
 	struct pflow_flow	 flow2;
 	struct pf_state_key	*sk = st->key[PF_SK_WIRE];
@@ -519,9 +531,7 @@ pflow_sendout(struct pflow_softc *sc)
 {
 	struct mbuf		*m = sc->sc_mbuf;
 	struct pflow_header	*h;
-#if NBPFILTER > 0
 	struct ifnet		*ifp = &sc->sc_if;
-#endif
 
 	timeout_del(&sc->sc_tmo);
 
@@ -544,11 +554,6 @@ pflow_sendout(struct pflow_softc *sc)
 	h->time_sec = htonl(time_second);
 	h->time_nanosec = htonl(ticks);
 
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
-#endif
-
 	return (pflow_sendout_mbuf(sc, m));
 }
 
@@ -556,7 +561,9 @@ int
 pflow_sendout_mbuf(struct pflow_softc *sc, struct mbuf *m)
 {
 	struct udpiphdr	*ui;
-	int		 len = m->m_pkthdr.len;
+	u_int16_t	 len = m->m_pkthdr.len;
+	struct ifnet	*ifp = &sc->sc_if;
+	struct ip	*ip;
 
 	/* UDP Header*/
 	M_PREPEND(m, sizeof(struct udpiphdr), M_DONTWAIT);
@@ -567,20 +574,20 @@ pflow_sendout_mbuf(struct pflow_softc *sc, struct mbuf *m)
 
 	ui = mtod(m, struct udpiphdr *);
 	ui->ui_pr = IPPROTO_UDP;
-	ui->ui_len = htons((u_int16_t) len + sizeof (struct udphdr));
 	ui->ui_src = sc->sc_sender_ip;
 	ui->ui_sport = sc->sc_sender_port;
 	ui->ui_dst = sc->sc_receiver_ip;
 	ui->ui_dport = sc->sc_receiver_port;
-	ui->ui_ulen = ui->ui_len;
+	ui->ui_ulen = htons(sizeof (struct udphdr) + len);
 
-	((struct ip *)ui)->ip_v = IPVERSION;
-	((struct ip *)ui)->ip_hl = sizeof(struct ip) >> 2;
-	((struct ip *)ui)->ip_id = htons(ip_randomid());
-	((struct ip *)ui)->ip_off = htons(IP_DF);
-	((struct ip *)ui)->ip_tos = IPTOS_LOWDELAY;
-	((struct ip *)ui)->ip_ttl = IPDEFTTL;
-	((struct ip *)ui)->ip_len = htons(sizeof (struct udpiphdr) + len);
+	ip = (struct ip *)ui;
+	ip->ip_v = IPVERSION;
+	ip->ip_hl = sizeof(struct ip) >> 2;
+	ip->ip_id = htons(ip_randomid());
+	ip->ip_off = htons(IP_DF);
+	ip->ip_tos = IPTOS_LOWDELAY;
+	ip->ip_ttl = IPDEFTTL;
+	ip->ip_len = htons(sizeof (struct udpiphdr) + len);
 
 	/*
 	 * Compute the pseudo-header checksum; defer further checksumming
@@ -588,8 +595,15 @@ pflow_sendout_mbuf(struct pflow_softc *sc, struct mbuf *m)
 	 */
 	m->m_pkthdr.csum_flags |= M_UDPV4_CSUM_OUT;
 	ui->ui_sum = in_cksum_phdr(ui->ui_src.s_addr,
-	    ui->ui_dst.s_addr, htons((u_int16_t)len +
-	    sizeof(struct udphdr) + IPPROTO_UDP));
+	    ui->ui_dst.s_addr, htons(len + sizeof(struct udphdr) +
+	    IPPROTO_UDP));
+
+#if NBPFILTER > 0
+	if (ifp->if_bpf) {
+		ip->ip_sum = in_cksum(m, ip->ip_hl << 2);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+	}
+#endif
 
 	if (ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL))
 		pflowstats.pflow_oerrors++;

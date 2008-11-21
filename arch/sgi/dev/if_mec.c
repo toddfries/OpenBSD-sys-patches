@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mec.c,v 1.15 2008/02/20 18:46:20 miod Exp $ */
+/*	$OpenBSD: if_mec.c,v 1.17 2008/10/15 19:12:19 blambert Exp $ */
 /*	$NetBSD: if_mec_mace.c,v 1.5 2004/08/01 06:36:36 tsutsui Exp $ */
 
 /*
@@ -679,7 +679,7 @@ mec_init(struct ifnet *ifp)
 	    MEC_DMA_TX_DMA_ENABLE | /* MEC_DMA_TX_INT_ENABLE | */
 	    MEC_DMA_RX_DMA_ENABLE | MEC_DMA_RX_INT_ENABLE);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1040,14 +1040,9 @@ mec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct mec_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1108,8 +1103,7 @@ mec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENXIO;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	splx(s);
@@ -1137,7 +1131,7 @@ mec_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }
 
 void

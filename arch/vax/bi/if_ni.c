@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ni.c,v 1.10 2007/05/11 10:06:55 pedro Exp $ */
+/*	$OpenBSD: if_ni.c,v 1.12 2008/10/08 23:53:08 brad Exp $ */
 /*	$NetBSD: if_ni.c,v 1.15 2002/05/22 16:03:14 wiz Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -697,10 +697,11 @@ niioctl(ifp, cmd, data)
 	struct ni_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s = splnet(), error = 0;
+	int s, error = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -759,9 +760,9 @@ niioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }

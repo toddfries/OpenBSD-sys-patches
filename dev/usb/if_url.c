@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.51 2008/09/10 14:01:23 blambert Exp $ */
+/*	$OpenBSD: if_url.c,v 1.53 2008/11/06 02:32:29 brad Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -281,6 +281,8 @@ url_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_watchdog = url_watchdog;
 
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	/*
 	 * Do ifmedia setup.
@@ -1157,12 +1159,10 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

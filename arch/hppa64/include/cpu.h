@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.12 2008/07/18 23:43:31 art Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.14 2008/10/10 08:36:28 art Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -143,6 +143,8 @@ struct cpu_info *curcpu(void);
 #define	CPU_INFO_FOREACH(cii,ci) \
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = ci->ci_next)
 #define	CPU_INFO_UNIT(ci)	((ci)->ci_number)
+#define MAXCPUS	1
+#define cpu_unidle(ci)
 
 #ifdef DIAGNOSTIC   
 void splassert_fail(int, int, const char *);

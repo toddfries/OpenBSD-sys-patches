@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.103 2008/09/12 05:44:52 brad Exp $	*/
+/*	$OpenBSD: dc.c,v 1.106 2008/10/15 19:12:19 blambert Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -2183,15 +2183,14 @@ dc_rxeof(struct dc_softc *sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m->m_pkthdr.rcvif = ifp;
-		m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-		    total_len + ETHER_ALIGN, 0, ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
+		    ifp, NULL);
 		dc_newbuf(sc, i, m);
 		DC_INC(i, DC_RX_LIST_CNT);
 		if (m0 == NULL) {
 			ifp->if_ierrors++;
 			continue;
 		}
-		m_adj(m0, ETHER_ALIGN);
 		m = m0;
 
 		ifp->if_ipackets++;
@@ -2898,7 +2897,7 @@ dc_init(void *xsc)
 		if (sc->dc_flags & DC_21143_NWAY)
 			timeout_add(&sc->dc_tick_tmo, hz / 10);
 		else
-			timeout_add(&sc->dc_tick_tmo, hz);
+			timeout_add_sec(&sc->dc_tick_tmo, 1);
 	}
 
 #ifdef SRM_MEDIA
@@ -2973,11 +2972,6 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -3039,12 +3033,10 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #endif
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

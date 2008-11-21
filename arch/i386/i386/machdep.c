@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.435 2008/07/11 03:03:07 dlg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.438 2008/11/14 20:43:54 weingart Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -2655,11 +2655,10 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	    SDT_MEMERA, SEL_UPL, 1, 1);
 
 	/*
-	 * And update the GDT and LDT since we return to the user process
+	 * And update the GDT since we return to the user process
 	 * by leaving the syscall (we don't do another pmap_activate()).
 	 */
-	curcpu()->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-	    pmap->pm_codeseg;
+	curcpu()->ci_gdt[GUCODE_SEL].sd = pmap->pm_codeseg;
 
 	/*
 	 * And reset the hiexec marker in the pmap.
@@ -2673,17 +2672,17 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	} else
 		pcb->pcb_savefpu.sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 
-	tf->tf_fs = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_gs = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_es = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_ds = LSEL(LUDATA_SEL, SEL_UPL);
+	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ebp = 0;
 	tf->tf_ebx = (int)PS_STRINGS;
 	tf->tf_eip = pack->ep_entry;
-	tf->tf_cs = LSEL(LUCODE_SEL, SEL_UPL);
+	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags = PSL_USERSET;
 	tf->tf_esp = stack;
-	tf->tf_ss = LSEL(LUDATA_SEL, SEL_UPL);
+	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 
 	retval[1] = 0;
 }
@@ -2875,8 +2874,6 @@ init386(paddr_t first_avail)
 	/* make ldt gates and memory segments */
 	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
 	    SEL_UPL, GCODE_SEL);
-	ldt[LUCODE_SEL] = gdt[GUCODE_SEL];
-	ldt[LUDATA_SEL] = gdt[GUDATA_SEL];
 	ldt[LBSDICALLS_SEL] = ldt[LSYS5CALLS_SEL];
 
 	/* exceptions */
@@ -3005,8 +3002,8 @@ init386(paddr_t first_avail)
 			if (a < 8 * NBPG)
 				a = 8 * NBPG;
 
-			/* skip regions which are zero or negative in size */
-			if (a >= e) {
+			/* skip shorter than page regions */
+			if (a >= e || (e - a) < NBPG) {
 #ifdef DEBUG
 				printf("-S");
 #endif
@@ -3014,12 +3011,15 @@ init386(paddr_t first_avail)
 			}
 
 			/*
-			 * XXX - This is a hack to work around BIOS bugs and
-			 * a bug in the  msgbuf allocation.  We skip regions
-			 * smaller than the message buffer or 16-bit segment
-			 * limit in size.
+			 * XXX Some buggy ACPI BIOSes use memory that
+			 * they declare as free.  Typically the
+			 * affected memory areas are small blocks
+			 * between areas reserved for ACPI and other
+			 * BIOS goo.  So skip areas smaller than 1 MB
+			 * above the 16 MB boundary (to avoid
+			 * affecting legacy stuff).
 			 */
-			if ((e - a) < max((MSGBUFSIZE / NBPG), (64 * 1024))) {
+			if (a > 16*1024*1024 && (e - a) < 1*1024*1024) {
 #ifdef DEBUG
 				printf("-X");
 #endif
@@ -3255,7 +3255,6 @@ need_resched(struct cpu_info *ci)
 		aston(p);
 }
 
-#ifdef MULTIPROCESSOR
 /* Allocate an IDT vector slot within the given range.
  * XXX needs locking to avoid MP allocation races.
  */
@@ -3282,7 +3281,6 @@ idt_vec_free(int vec)
 {
 	unsetgate(&idt[vec]);
 }
-#endif	/* MULTIPROCESSOR */
 
 /*
  * machine dependent system variables.

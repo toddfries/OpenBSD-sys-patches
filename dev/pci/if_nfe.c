@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.81 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.86 2008/11/09 15:08:26 naddy Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -327,6 +327,7 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_flags & NFE_HW_VLAN)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
+
 	if (sc->sc_flags & NFE_HW_CSUM) {
 		ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
 		    IFCAP_CSUM_UDPv4;
@@ -527,11 +528,6 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -586,11 +582,10 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);
-
 	return error;
 }
 
@@ -678,6 +673,9 @@ nfe_rxeof(struct nfe_softc *sc)
 	struct nfe_jbuf *jbuf;
 	struct mbuf *m, *mnew;
 	bus_addr_t physaddr;
+#if NVLAN > 0
+	uint32_t vtag;
+#endif
 	uint16_t flags;
 	int error, len;
 
@@ -690,6 +688,9 @@ nfe_rxeof(struct nfe_softc *sc)
 
 			flags = letoh16(desc64->flags);
 			len = letoh16(desc64->length) & 0x3fff;
+#if NVLAN > 0
+			vtag = letoh32(desc64->physaddr[1]);
+#endif
 		} else {
 			desc32 = &sc->rxq.desc32[sc->rxq.cur];
 			nfe_rxdesc32_sync(sc, desc32, BUS_DMASYNC_POSTREAD);
@@ -803,9 +804,16 @@ nfe_rxeof(struct nfe_softc *sc)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
 		}
 
+#if NVLAN > 0
+		if ((vtag & NFE_RX_VTAG) && (sc->sc_flags & NFE_HW_VLAN)) {
+			m->m_pkthdr.ether_vtag = vtag & 0xffff;
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ifp->if_ipackets++;
 		ether_input_mbuf(ifp, m);
@@ -918,9 +926,7 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 	struct nfe_tx_data *data;
 	bus_dmamap_t map;
 	uint16_t flags = 0;
-#if NVLAN > 0
 	uint32_t vtag = 0;
-#endif
 	int error, i, first = sc->txq.cur;
 
 	map = sc->txq.data[first].map;
@@ -939,11 +945,8 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 
 #if NVLAN > 0
 	/* setup h/w VLAN tagging */
-	if ((m0->m_flags & (M_PROTO1 | M_PKTHDR)) == (M_PROTO1 | M_PKTHDR) &&
-	    m0->m_pkthdr.rcvif != NULL) {
-		struct ifvlan *ifv = m0->m_pkthdr.rcvif->if_softc;
-		vtag = NFE_TX_VTAG | htons(ifv->ifv_tag);
-	}
+	if (m0->m_flags & M_VLANTAG)
+		vtag = NFE_TX_VTAG | m0->m_pkthdr.ether_vtag;
 #endif
 	if (m0->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 		flags |= NFE_TX_IP_CSUM;
@@ -963,9 +966,7 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 			    htole32(map->dm_segs[i].ds_addr & 0xffffffff);
 			desc64->length = htole16(map->dm_segs[i].ds_len - 1);
 			desc64->flags = htole16(flags);
-#if NVLAN > 0
 			desc64->vtag = htole32(vtag);
-#endif
 		} else {
 			desc32 = &sc->txq.desc32[sc->txq.cur];
 
@@ -980,9 +981,8 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 			 * only.
 			 */
 			flags &= ~(NFE_TX_IP_CSUM | NFE_TX_TCP_UDP_CSUM);
-#if NVLAN > 0
 			vtag = 0;
-#endif
+
 			/*
 			 * Setting of the valid bit in the first descriptor is
 			 * deferred until the whole chain is fully setup.
@@ -1048,7 +1048,7 @@ nfe_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (sc->txq.cur == old)	/* nothing sent */
@@ -1096,25 +1096,20 @@ nfe_init(struct ifnet *ifp)
 		sc->rxtxctl |= NFE_RXTX_V3MAGIC;
 	else if (sc->sc_flags & NFE_JUMBO_SUP)
 		sc->rxtxctl |= NFE_RXTX_V2MAGIC;
+
 	if (sc->sc_flags & NFE_HW_CSUM)
 		sc->rxtxctl |= NFE_RXTX_RXCSUM;
-#if NVLAN > 0
-	/*
-	 * Although the adapter is capable of stripping VLAN tags from received
-	 * frames (NFE_RXTX_VTAG_STRIP), we do not enable this functionality on
-	 * purpose.  This will be done in software by our network stack.
-	 */
-	if (sc->sc_flags & NFE_HW_VLAN)
-		sc->rxtxctl |= NFE_RXTX_VTAG_INSERT;
-#endif
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		sc->rxtxctl |= NFE_RXTX_VTAG_INSERT | NFE_RXTX_VTAG_STRIP;
+
 	NFE_WRITE(sc, NFE_RXTX_CTL, NFE_RXTX_RESET | sc->rxtxctl);
 	DELAY(10);
 	NFE_WRITE(sc, NFE_RXTX_CTL, sc->rxtxctl);
 
-#if NVLAN
-	if (sc->sc_flags & NFE_HW_VLAN)
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		NFE_WRITE(sc, NFE_VTAG_CTL, NFE_VTAG_ENABLE);
-#endif
+	else
+		NFE_WRITE(sc, NFE_VTAG_CTL, 0);
 
 	NFE_WRITE(sc, NFE_SETUP_R6, 0);
 

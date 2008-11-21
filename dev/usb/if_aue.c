@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.72 2008/09/10 14:01:23 blambert Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.74 2008/11/06 02:32:28 brad Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -811,6 +811,8 @@ aue_attach(struct device *parent, struct device *self, void *aux)
 
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* Initialize MII/media info. */
 	mii = &sc->aue_mii;
 	mii->mii_ifp = ifp;
@@ -1579,12 +1581,10 @@ aue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

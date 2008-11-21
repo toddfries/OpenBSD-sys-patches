@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.40 2006/05/27 23:59:07 jason Exp $	*/
+/*	$OpenBSD: be.c,v 1.42 2008/10/15 19:12:19 blambert Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -557,7 +557,7 @@ betick(vsc)
 	br->lt_ctr = 0;
 	bestart(ifp);
 	splx(s);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 int
@@ -636,13 +636,9 @@ beioctl(ifp, cmd, data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, cmd);
 		break;
 	default:
-		if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-			splx(s);
-			return error;
-		}
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
 	splx(s);
 	return error;
 }
@@ -753,7 +749,7 @@ beinit(sc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 	splx(s);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 	bestart(ifp);
 }
 

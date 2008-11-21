@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mc.c,v 1.10 2007/04/22 22:31:14 deraadt Exp $	*/
+/*	$OpenBSD: if_mc.c,v 1.12 2008/10/08 23:53:08 brad Exp $	*/
 /*	$NetBSD: if_mc.c,v 1.9.16.1 2006/06/21 14:53:13 yamt Exp $	*/
 
 /*-
@@ -497,11 +497,11 @@ mc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct mc_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr;
+	int s, err = 0;
 
-	int s = splnet(), err = 0;
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
@@ -555,8 +555,9 @@ mc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 	default:
-		err = EINVAL;
+		err = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
 	splx(s);
 	return (err);
 }

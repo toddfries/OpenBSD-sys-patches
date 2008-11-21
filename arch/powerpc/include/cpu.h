@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.39 2008/09/16 04:20:42 drahn Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.41 2008/10/15 23:23:49 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -80,7 +80,7 @@ struct cpu_info {
 #define	CI_DDB_ENTERDDB		3
 #define	CI_DDB_INDDB		4
 
-	u_long ci_randseed;
+	u_int32_t ci_randseed;
 };
 
 static __inline struct cpu_info *
@@ -129,6 +129,8 @@ void	cpu_boot_secondary_processors(void);
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
 
 #endif
+
+#define MAXCPUS	PPC_MAXPROCS
 
 extern struct cpu_info cpu_info[PPC_MAXPROCS];
 
