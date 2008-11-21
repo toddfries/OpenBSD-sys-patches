@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.15 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.21 2008/11/19 03:44:14 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -312,9 +312,18 @@
 #define		CORB_AGM_OUTPUT		0x8000
 #define CORB_GET_CONVERTER_FORMAT	0xa00
 #define CORB_SET_CONVERTER_FORMAT	0x200
-#define CORB_GET_DIGITAL_CONVERTER_CONTROL	0xf0d
-#define CORB_SET_DIGITAL_CONVERTER_CONTROL_L	0x70d
-#define CORB_SET_DIGITAL_CONVERTER_CONTROL_H	0x70e
+#define CORB_GET_DIGITAL_CONTROL	0xf0d
+#define CORB_SET_DIGITAL_CONTROL_L	0x70d
+#define CORB_SET_DIGITAL_CONTROL_H	0x70e
+#define		CORB_DCC_DIGEN		0x01
+#define		CORB_DCC_V		0x02
+#define		CORB_DCC_VCFG		0x04
+#define		CORB_DCC_PRE		0x08
+#define		CORB_DCC_COPY		0x10
+#define		CORB_DCC_NAUDIO		0x20
+#define		CORB_DCC_PRO		0x40
+#define		CORB_DCC_L		0x80
+#define		CORB_DCC_CC(x)		((x >> 8) & 0x7f)
 #define CORB_GET_POWER_STATE		0xf05
 #define CORB_SET_POWER_STATE		0x705
 #define		CORB_PS_D0		0x0
@@ -465,6 +474,7 @@
 
 #define CORB_NID_ROOT		0
 #define HDA_MAX_CHANNELS	16
+#define AZ_MAX_SENSE_PINS	8
 
 /* memory-mapped types */
 typedef struct {
@@ -498,8 +508,6 @@ typedef struct {
 # define DPRINTF(x)	do {} while (0/*CONSTCOND*/)
 #endif
 #define PTR_UPPER32(x)	((uint64_t)(x) >> 32)
-#define FLAGBUFLEN	256
-#define MAX_VOLUME_255	1
 
 typedef int nid_t;
 
@@ -546,12 +554,24 @@ typedef struct {
 #define MI_TARGET_DAC		0x104
 #define MI_TARGET_ADC		0x105
 #define MI_TARGET_VOLUME	0x106
-#define MI_TARGET_EAPD		0x107
+#define MI_TARGET_SPDIF		0x107
+#define MI_TARGET_SPDIF_CC	0x108
+#define MI_TARGET_EAPD		0x109
+#define AZ_TARGET_PINSENSE	0xf00
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
 					 (nid >= (codec)->wstart &&   \
 					  nid < (codec)->wend))
+
+#define PIN_STATUS(wid, conn)						\
+	do {								\
+		if ((wid)->type != COP_AWTYPE_PIN_COMPLEX)		\
+			(conn) = 0;					\
+		else							\
+			(conn) =					\
+			    ((wid)->d.pin.config & CORB_CD_PORT_MASK) >> 30; \
+	} while (0)
 
 typedef struct {
 	int nconv;
@@ -595,7 +615,11 @@ typedef struct codec_t {
 
 	struct audio_format* formats;
 	int nformats;
-	struct audio_encoding_set *encodings;
+	struct audio_encoding* encs;
+	int nencs;
+
+	nid_t sense_pins[AZ_MAX_SENSE_PINS];
+	int nsense_pins;
 
 	uint32_t *extra;
 	u_int rate;

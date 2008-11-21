@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jmereg.h,v 1.1 2008/09/26 10:35:15 jsg Exp $	*/
+/*	$OpenBSD: if_jmereg.h,v 1.3 2008/11/07 22:41:17 brad Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -555,8 +555,10 @@
 #define	GPREG0_PHY_ADDR_SHIFT	0
 #define	GPREG0_PHY_ADDR		1
 
-/* General purpose register 1. reserved for future use. */
+/* General purpose register 1. */
 #define	JME_GPREG1		0x080C
+#define GPREG1_HALF_PATCH	0x00000020 /* 250A2 only, for 10/100 mode */
+#define GPREG1_RSS_PATCH	0x00000040 /* 250A2 only, for 10/100 mode */
 
 /* MSIX entry number of interrupt source. */
 #define	JME_MSINUM_BASE		0x0810
@@ -689,7 +691,7 @@
 #define	PCCRX_COAL_TO_MAX	65535
 
 #define	PCCRX_COAL_PKT_MIN	1
-#define	PCCRX_COAL_PKT_DEFAULT	2
+#define	PCCRX_COAL_PKT_DEFAULT	64
 #define	PCCRX_COAL_PKT_MAX	255
 
 /* Packet completion coalescing control of Tx queue. */
@@ -708,11 +710,11 @@
 #define	PCCTX_COAL_TXQ0		0x00000001
 
 #define	PCCTX_COAL_TO_MIN	1
-#define	PCCTX_COAL_TO_DEFAULT	100
+#define	PCCTX_COAL_TO_DEFAULT	65535
 #define	PCCTX_COAL_TO_MAX	65535
 
 #define	PCCTX_COAL_PKT_MIN	1
-#define	PCCTX_COAL_PKT_DEFAULT	8
+#define	PCCTX_COAL_PKT_DEFAULT	64
 #define	PCCTX_COAL_PKT_MAX	255
 
 /* Chip mode and FPGA version. */

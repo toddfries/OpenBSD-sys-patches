@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.79 2008/10/02 20:21:13 brad Exp $	*/
+/*	$OpenBSD: gem.c,v 1.82 2008/11/07 18:03:52 brad Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -772,9 +772,9 @@ gem_init(struct ifnet *ifp)
 
 	/* Enable DMA */
 	v = gem_ringsize(GEM_NTXDESC /*XXX*/);
-	bus_space_write_4(t, h, GEM_TX_CONFIG,
-		v|GEM_TX_CONFIG_TXDMA_EN|
-		((0x4ff<<10)&GEM_TX_CONFIG_TXFIFO_TH));
+	v |= ((sc->sc_variant == GEM_SUN_ERI ? 0x100 : 0x04ff) << 10) &
+	    GEM_TX_CONFIG_TXFIFO_TH;
+	bus_space_write_4(t, h, GEM_TX_CONFIG, v | GEM_TX_CONFIG_TXDMA_EN);
 	bus_space_write_4(t, h, GEM_TX_KICK, 0);
 
 	/* step 10. ERX Configuration */
@@ -891,6 +891,22 @@ gem_init_regs(struct gem_softc *sc)
 	bus_space_write_4(t, h, GEM_MAC_SEND_PAUSE_CMD, 0);
 
 	/*
+	 * Set the internal arbitration to "infinite" bursts of the
+	 * maximum length of 31 * 64 bytes so DMA transfers aren't
+	 * split up in cache line size chunks. This greatly improves
+	 * especially RX performance.
+	 * Enable silicon bug workarounds for the Apple variants.
+	 */
+	v = GEM_CONFIG_TXDMA_LIMIT | GEM_CONFIG_RXDMA_LIMIT;
+	if (sc->sc_pci)
+		v |= GEM_CONFIG_BURST_INF;
+	else
+		v |= GEM_CONFIG_BURST_64;
+	if (sc->sc_variant != GEM_SUN_GEM && sc->sc_variant != GEM_SUN_ERI)
+		v |= GEM_CONFIG_RONPAULBIT | GEM_CONFIG_BUG2FIX;
+	bus_space_write_4(t, h, GEM_CONFIG, v);
+
+	/*
 	 * Set the station address.
 	 */
 	bus_space_write_4(t, h, GEM_MAC_ADDR0, 
@@ -910,7 +926,6 @@ gem_rint(struct gem_softc *sc)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t h = sc->sc_h1;
-	struct ether_header *eh;
 	struct gem_rxsoft *rxs;
 	struct mbuf *m;
 	u_int64_t rxstat;
@@ -971,7 +986,6 @@ gem_rint(struct gem_softc *sc)
 		m->m_data += 2; /* We're already off by two */
 
 		ifp->if_ipackets++;
-		eh = mtod(m, struct ether_header *);
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
@@ -1436,20 +1450,14 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->sc_if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0)
+			if (ifp->if_flags & IFF_RUNNING)
 				gem_setladrf(sc);
-			else {
-				if ((ifp->if_flags & IFF_RUNNING) == 0)
-					gem_init(ifp);
-			}
+			else
+				gem_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				gem_stop(ifp, 1);
 		}
-		sc->sc_if_flags = ifp->if_flags;
-
 #ifdef GEM_DEBUG
 		sc->sc_debug = (ifp->if_flags & IFF_DEBUG) != 0 ? 1 : 0;
 #endif

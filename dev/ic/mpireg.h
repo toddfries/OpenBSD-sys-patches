@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpireg.h,v 1.33 2008/09/30 23:32:34 dlg Exp $ */
+/*	$OpenBSD: mpireg.h,v 1.35 2008/10/28 11:00:40 marco Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -1189,7 +1189,7 @@ struct mpi_cfg_ioc_pg2 {
 	u_int8_t		active_physdisks;
 	u_int8_t		max_physdisks;
 
-	/* followed by a list of mpi_cf_raid_vol structs */
+	/* followed by a list of mpi_cfg_raid_vol structs */
 } __packed;
 
 struct mpi_cfg_raid_vol {
@@ -1202,6 +1202,10 @@ struct mpi_cfg_raid_vol {
 #define MPI_CFG_RAID_TYPE_RAID_IS			(0x00)
 #define MPI_CFG_RAID_TYPE_RAID_IME			(0x01)
 #define MPI_CFG_RAID_TYPE_RAID_IM			(0x02)
+#define MPI_CFG_RAID_TYPE_RAID_5			(0x03)
+#define MPI_CFG_RAID_TYPE_RAID_6			(0x04)
+#define MPI_CFG_RAID_TYPE_RAID_10			(0x05)
+#define MPI_CFG_RAID_TYPE_RAID_50			(0x06)
 	u_int8_t		flags;
 #define MPI_CFG_RAID_VOL_INACTIVE	(1<<3)
 	u_int16_t		reserved;
@@ -1213,7 +1217,7 @@ struct mpi_cfg_ioc_pg3 {
 	u_int8_t		no_phys_disks;
 	u_int8_t		reserved[3];
 
-	/* followed by a list of mpi_cf_raid_physdisk structs */
+	/* followed by a list of mpi_cfg_raid_physdisk structs */
 } __packed;
 
 struct mpi_cfg_raid_physdisk {
@@ -1317,10 +1321,12 @@ struct mpi_cfg_raid_vol_pg0 {
 #define MPI_CFG_RAID_VOL_0_STATUS_QUIESCED		(1<<1)
 #define MPI_CFG_RAID_VOL_0_STATUS_RESYNCING		(1<<2)
 #define MPI_CFG_RAID_VOL_0_STATUS_ACTIVE		(1<<3)
+#define MPI_CFG_RAID_VOL_0_STATUS_BADBLOCK_FULL		(1<<4)
 	u_int8_t		volume_state;
 #define MPI_CFG_RAID_VOL_0_STATE_OPTIMAL		(0x00)
 #define MPI_CFG_RAID_VOL_0_STATE_DEGRADED		(0x01)
 #define MPI_CFG_RAID_VOL_0_STATE_FAILED			(0x02)
+#define MPI_CFG_RAID_VOL_0_STATE_MISSING		(0x03)
 	u_int16_t		reserved1;
 
 	u_int16_t		volume_settings;

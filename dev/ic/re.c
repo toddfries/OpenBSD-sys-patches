@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.94 2008/10/11 23:49:05 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.101 2008/11/17 01:25:31 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -1059,16 +1059,16 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		goto fail_7;
 	}
 
-        /* Create DMA maps for RX buffers */
-        for (i = 0; i < RL_RX_DESC_CNT; i++) {
-                error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
-                    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
-                if (error) {
-                        printf("%s: can't create DMA map for RX\n",
-                            sc->sc_dev.dv_xname);
+	/* Create DMA maps for RX buffers */
+	for (i = 0; i < RL_RX_DESC_CNT; i++) {
+		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
+		    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
+		if (error) {
+			printf("%s: can't create DMA map for RX\n",
+			    sc->sc_dev.dv_xname);
 			goto fail_8;
-                }
-        }
+		}
+	}
 
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
@@ -1461,10 +1461,17 @@ re_rxeof(struct rl_softc *sc)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
 				    M_UDP_CSUM_IN_OK;
 		}
+#if NVLAN > 0
+		if (rxvlan & RL_RDESC_VLANCTL_TAG) {
+			m->m_pkthdr.ether_vtag =
+			    ntohs((rxvlan & RL_RDESC_VLANCTL_DATA));
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 	}
@@ -1620,12 +1627,30 @@ re_intr(void *arg)
 
 	if (sc->rl_imtype == RL_IMTYPE_SIM) {
 		if ((sc->rl_flags & RL_FLAG_TIMERINTR)) {
-			if ((tx | rx) == 0)
+			if ((tx | rx) == 0) {
+				/*
+				 * Nothing needs to be processed, fallback
+				 * to use TX/RX interrupts.
+				 */
 				re_setup_intr(sc, 1, RL_IMTYPE_NONE);
-			else
+
+				/*
+				 * Recollect, mainly to avoid the possible
+				 * race introduced by changing interrupt
+				 * masks.
+				 */
+				re_rxeof(sc);
+				tx = re_txeof(sc);
+			} else
 				CSR_WRITE_4(sc, RL_TIMERCNT, 1); /* reload */
-		} else if (tx | rx)
+		} else if (tx | rx) {
+			/*
+			 * Assume that using simulated interrupt moderation
+			 * (hardware timer based) could reduce the interrupt
+			 * rate.
+			 */
 			re_setup_intr(sc, 1, RL_IMTYPE_SIM);
+		}
 	}
 
 	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1642,13 +1667,6 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	struct rl_desc	*d;
 	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
 	struct rl_txq	*txq;
-#if NVLAN > 0
-	struct ifvlan	*ifv = NULL;
-
-	if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m->m_pkthdr.rcvif != NULL)
-		ifv = m->m_pkthdr.rcvif->if_softc;
-#endif
 
 	if (sc->rl_ldata.rl_tx_free <= RL_NTXDESC_RSVD)
 		return (EFBIG);
@@ -1721,8 +1739,9 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 * transmission attempt.
 	 */
 #if NVLAN > 0
-	if (ifv != NULL)
-		vlanctl |= swap16(ifv->ifv_tag) | RL_TDESC_VLANCTL_TAG;
+	if (m->m_flags & M_VLANTAG)
+		vlanctl |= swap16(m->m_pkthdr.ether_vtag) |
+		    RL_TDESC_VLANCTL_TAG;
 #endif
 
 	/*
@@ -1874,7 +1893,7 @@ re_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -1917,6 +1936,8 @@ re_init(struct ifnet *ifp)
 	cfg = RL_CPLUSCMD_PCI_MRW;
 	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
 		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		cfg |= RL_CPLUSCMD_VLANSTRIP;
 	if (sc->rl_flags & RL_FLAG_MACSTAT) {
 		cfg |= RL_CPLUSCMD_MACSTAT_DIS;
 		/* XXX magic. */

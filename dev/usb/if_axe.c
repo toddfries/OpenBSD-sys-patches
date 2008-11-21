@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.88 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.90 2008/11/06 02:32:28 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -708,6 +708,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* Initialize MII/media info. */
 	mii = &sc->axe_mii;
 	mii->mii_ifp = ifp;
@@ -754,8 +756,6 @@ axe_detach(struct device *self, int flags)
 	timeout_del(&sc->axe_stat_ch);
 
 	sc->axe_dying = 1;
-
-	ether_ifdetach(ifp);
 
 	if (sc->axe_ep[AXE_ENDPT_TX] != NULL)
 		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);

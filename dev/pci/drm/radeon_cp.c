@@ -358,6 +358,7 @@ static void radeon_cp_load_microcode(drm_radeon_private_t * dev_priv)
 				     R300_cp_microcode[i][0]);
 		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) ||
+		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R423) ||	
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV410)) {
 		DRM_INFO("Loading R400 Microcode\n");
 		for (i = 0; i < 256; i++) {
@@ -628,9 +629,6 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 		     dev_priv->ring.size_l2qw);
 #endif
 
-	/* Start with assuming that writeback doesn't work */
-	dev_priv->writeback_works = 0;
-
 	/* Initialize the scratch register pointer.  This will cause
 	 * the scratch register values to be written out to memory
 	 * whenever they are updated.
@@ -648,8 +646,35 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 	RADEON_WRITE(RADEON_SCRATCH_UMSK, 0x7);
 
 	/* Turn on bus mastering */
-	tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RADEON_BUS_MASTER_DIS;
-	RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
+	case CHIP_RS690:
+		/* rs600/rs690 */
+		tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RS600_BUS_MASTER_DIS;
+		RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+		break;
+	case CHIP_R100:
+	case CHIP_RV100:
+	case CHIP_RS100:
+	case CHIP_RV200:
+	case CHIP_RS200:
+	case CHIP_R200:
+	case CHIP_RV250:
+	case CHIP_RS300:
+	case CHIP_RV280:
+	case CHIP_R300:
+	case CHIP_R350:
+	case CHIP_RV350:
+	case CHIP_R420:
+	case CHIP_RS400:
+	case CHIP_RS480:
+		/* r1xx, r2xx, r300, r(v)350, r420/r481, rs400/rs480 */
+		tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RADEON_BUS_MASTER_DIS;
+		RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+		break;
+	default:
+		/* PCIE cards appear not to need this */
+		break;
+	}
 
 	dev_priv->sarea_priv->last_frame = dev_priv->scratch[0] = 0;
 	RADEON_WRITE(RADEON_LAST_FRAME_REG, dev_priv->sarea_priv->last_frame);
@@ -987,7 +1012,6 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		radeon_do_cleanup_cp(dev);
 		return EINVAL;
 	}
-	dev->agp_buffer_token = init->buffers_offset;
 	dev->agp_buffer_map = drm_core_findmap(dev, init->buffers_offset);
 	if (!dev->agp_buffer_map) {
 		DRM_ERROR("could not find dma buffer region!\n");
@@ -1186,6 +1210,9 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		/* Turn on PCI GART */
 		radeon_set_pcigart(dev_priv, 1);
 	}
+
+	/* Start with assuming that writeback doesn't work */
+	dev_priv->writeback_works = 0;
 
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv);
@@ -1706,6 +1733,7 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	case CHIP_R300:
 	case CHIP_R350:
 	case CHIP_R420:
+	case CHIP_R423:
 	case CHIP_RV410:
 	case CHIP_RV515:
 	case CHIP_R520:

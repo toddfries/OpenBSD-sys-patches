@@ -44,8 +44,6 @@ static drm_pci_id_list_t tdfx_pciidlist[] = {
 static const struct drm_driver_info tdfx_driver = {
 	.buf_priv_size	= 1, /* No dev_priv */
 
-	.max_ioctl	= 0,
-
 	.name		= DRIVER_NAME,
 	.desc		= DRIVER_DESC,
 	.date		= DRIVER_DATE,
@@ -53,7 +51,7 @@ static const struct drm_driver_info tdfx_driver = {
 	.minor		= DRIVER_MINOR,
 	.patchlevel	= DRIVER_PATCHLEVEL,
 
-	.use_mtrr	= 1,
+	.flags		= DRIVER_MTRR,
 };
 
 int	tdfxdrm_probe(struct device *, void *, void *);
