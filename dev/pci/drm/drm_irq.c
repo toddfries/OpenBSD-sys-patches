@@ -36,7 +36,6 @@
 #include "drm.h"
 
 irqreturn_t	drm_irq_handler_wrap(DRM_IRQ_ARGS);
-void		drm_locked_task(void *, void *);
 void		drm_update_vblank_count(struct drm_device *, int);
 void		vblank_disable(void *);
 
@@ -66,7 +65,7 @@ drm_irq_handler_wrap(DRM_IRQ_ARGS)
 	struct drm_device *dev = (struct drm_device *)arg;
 
 	DRM_SPINLOCK(&dev->irq_lock);
-	ret = dev->driver.irq_handler(arg);
+	ret = dev->driver->irq_handler(arg);
 	DRM_SPINUNLOCK(&dev->irq_lock);
 
 	return ret;
@@ -95,7 +94,7 @@ drm_irq_install(struct drm_device *dev)
 	mtx_init(&dev->irq_lock, IPL_BIO);
 
 	/* Before installing handler */
-	dev->driver.irq_preinstall(dev);
+	dev->driver->irq_preinstall(dev);
 
 	/* Install handler */
 	if (pci_intr_map(&dev->pa, &ih) != 0) {
@@ -112,7 +111,7 @@ drm_irq_install(struct drm_device *dev)
 	DRM_DEBUG("%s: interrupting at %s\n", dev->device.dv_xname, istr);
 
 	/* After installing handler */
-	dev->driver.irq_postinstall(dev);
+	dev->driver->irq_postinstall(dev);
 
 	return 0;
 err:
@@ -138,7 +137,7 @@ drm_irq_uninstall(struct drm_device *dev)
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
-	dev->driver.irq_uninstall(dev);
+	dev->driver->irq_uninstall(dev);
 
 	pci_intr_disestablish(dev->pa.pa_pc, dev->irqh);
 
@@ -154,7 +153,7 @@ drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	struct drm_control	*ctl = data;
 
 	/* Handle drivers who used to require IRQ setup no longer does. */
-	if (!dev->driver.use_irq)
+	if (!(dev->driver->flags & DRIVER_IRQ))
 		return (0);
 
 	switch (ctl->func) {
@@ -184,8 +183,8 @@ vblank_disable(void *arg)
 		if (atomic_read(&dev->vblank[i].vbl_refcount) == 0 &&
 		    dev->vblank[i].vbl_enabled) {
 			dev->vblank[i].last_vblank =
-			    dev->driver.get_vblank_counter(dev, i);
-			dev->driver.disable_vblank(dev, i);
+			    dev->driver->get_vblank_counter(dev, i);
+			dev->driver->disable_vblank(dev, i);
 			dev->vblank[i].vbl_enabled = 0;
 		}
 	}
@@ -247,7 +246,7 @@ drm_update_vblank_count(struct drm_device *dev, int crtc)
 	 * note that we may have lost a full dev->max_vblank_count events if
 	 * the register is small or the interrupts were off for a long time.
 	 */
-	cur_vblank = dev->driver.get_vblank_counter(dev, crtc);
+	cur_vblank = dev->driver->get_vblank_counter(dev, crtc);
 	diff = cur_vblank - dev->vblank[crtc].last_vblank;
 	if (cur_vblank < dev->vblank[crtc].last_vblank)
 		diff += dev->max_vblank_count;
@@ -265,7 +264,7 @@ drm_vblank_get(struct drm_device *dev, int crtc)
 	atomic_add(1, &dev->vblank[crtc].vbl_refcount);
 	if (dev->vblank[crtc].vbl_refcount == 1 &&
 	    dev->vblank[crtc].vbl_enabled == 0) {
-		ret = dev->driver.enable_vblank(dev, crtc);
+		ret = dev->driver->enable_vblank(dev, crtc);
 		if (ret) {
 			atomic_dec(&dev->vblank[crtc].vbl_refcount);
 		} else {
@@ -374,10 +373,8 @@ drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		DRM_SPINLOCK(&dev->vbl_lock);
 		while (ret == 0) {
 			if ((drm_vblank_count(dev, crtc)
-			    - vblwait->request.sequence) <= (1 << 23)) {
-				DRM_SPINUNLOCK(&dev->vbl_lock);
+			    - vblwait->request.sequence) <= (1 << 23))
 				break;
-			}
 			ret = msleep(&dev->vblank[crtc],
 			    &dev->vbl_lock, PZERO | PCATCH,
 			    "drmvblq", 3 * DRM_HZ);
@@ -403,47 +400,4 @@ drm_handle_vblank(struct drm_device *dev, int crtc)
 {
 	atomic_inc(&dev->vblank[crtc].vbl_count);
 	wakeup(&dev->vblank[crtc]);
-}
-
-void
-drm_locked_task(void *context, void *pending)
-{
-	struct drm_device *dev = context;
-	void		  (*func)(struct drm_device *);
-
-	DRM_SPINLOCK(&dev->tsk_lock);
-	mtx_enter(&dev->lock.spinlock);
-	func = dev->locked_task_call;
-	if (func == NULL ||
-	    drm_lock_take(&dev->lock, DRM_KERNEL_CONTEXT) == 0) {
-		mtx_leave(&dev->lock.spinlock);
-		DRM_SPINUNLOCK(&dev->tsk_lock);
-		return;
-	}
-
-	dev->lock.file_priv = NULL; /* kernel owned */
-	dev->lock.lock_time = jiffies;
-	mtx_leave(&dev->lock.spinlock);
-	dev->locked_task_call = NULL;
-	DRM_SPINUNLOCK(&dev->tsk_lock);
-
-	(*func)(dev);
-
-	drm_lock_free(&dev->lock, DRM_KERNEL_CONTEXT);
-}
-
-void
-drm_locked_tasklet(struct drm_device *dev, void (*tasklet)(struct drm_device *))
-{
-	DRM_SPINLOCK(&dev->tsk_lock);
-	if (dev->locked_task_call != NULL) {
-		DRM_SPINUNLOCK(&dev->tsk_lock);
-		return;
-	}
-
-	dev->locked_task_call = tasklet;
-	DRM_SPINUNLOCK(&dev->tsk_lock);
-
-	if (workq_add_task(NULL, 0, drm_locked_task, dev, NULL) == ENOMEM)
-		DRM_ERROR("error adding task to workq\n");
 }

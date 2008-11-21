@@ -35,7 +35,9 @@
 #include "radeon_drv.h"
 #include "drm_pciids.h"
 
-void	radeon_configure(struct drm_device *);
+int	radeondrm_probe(struct device *, void *, void *);
+void	radeondrm_attach(struct device *, struct device *, void *);
+int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int radeon_no_wb;
 
@@ -44,96 +46,38 @@ static drm_pci_id_list_t radeon_pciidlist[] = {
 	radeon_PCI_IDS
 };
 
-void
-radeon_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= sizeof(drm_radeon_buf_priv_t);
-	dev->driver.load		= radeon_driver_load;
-	dev->driver.unload		= radeon_driver_unload;
-	dev->driver.firstopen		= radeon_driver_firstopen;
-	dev->driver.open		= radeon_driver_open;
-	dev->driver.preclose		= radeon_driver_preclose;
-	dev->driver.postclose		= radeon_driver_postclose;
-	dev->driver.lastclose		= radeon_driver_lastclose;
-	dev->driver.get_vblank_counter	= radeon_get_vblank_counter;
-	dev->driver.enable_vblank	= radeon_enable_vblank;
-	dev->driver.disable_vblank	= radeon_disable_vblank;
-	dev->driver.irq_preinstall	= radeon_driver_irq_preinstall;
-	dev->driver.irq_postinstall	= radeon_driver_irq_postinstall;
-	dev->driver.irq_uninstall	= radeon_driver_irq_uninstall;
-	dev->driver.irq_handler		= radeon_driver_irq_handler;
-	dev->driver.dma_ioctl		= radeon_cp_buffers;
+static const struct drm_driver_info radeon_driver = {
+	.buf_priv_size		= sizeof(drm_radeon_buf_priv_t),
+	.load			= radeon_driver_load,
+	.unload			= radeon_driver_unload,
+	.firstopen		= radeon_driver_firstopen,
+	.open			= radeon_driver_open,
+	.ioctl			= radeondrm_ioctl,
+	.preclose		= radeon_driver_preclose,
+	.postclose		= radeon_driver_postclose,
+	.lastclose		= radeon_driver_lastclose,
+	.get_vblank_counter	= radeon_get_vblank_counter,
+	.enable_vblank		= radeon_enable_vblank,
+	.disable_vblank		= radeon_disable_vblank,
+	.irq_preinstall		= radeon_driver_irq_preinstall,
+	.irq_postinstall	= radeon_driver_irq_postinstall,
+	.irq_uninstall		= radeon_driver_irq_uninstall,
+	.irq_handler		= radeon_driver_irq_handler,
+	.dma_ioctl		= radeon_cp_buffers,
 
-	dev->driver.ioctls		= radeon_ioctls;
-	dev->driver.max_ioctl		= radeon_max_ioctl;
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
 
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-	dev->driver.use_pci_dma		= 1;
-	dev->driver.use_sg		= 1;
-	dev->driver.use_dma		= 1;
-	dev->driver.use_irq		= 1;
-	dev->driver.use_vbl_irq		= 1;
-}
-
-#ifdef __FreeBSD__
-static int
-radeon_probe(device_t dev)
-{
-	return drm_probe(dev, radeon_pciidlist);
-}
-
-static int
-radeon_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	radeon_configure(dev);
-	return drm_attach(nbdev, radeon_pciidlist);
-}
-
-static device_method_t radeon_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		radeon_probe),
-	DEVMETHOD(device_attach,	radeon_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
+	.flags			= DRIVER_AGP | DRIVER_MTRR | DRIVER_SG |
+				    DRIVER_DMA | DRIVER_IRQ,
 };
-
-static driver_t radeon_driver = {
-	"drm",
-	radeon_methods,
-	sizeof(struct drm_device)
-};
-
-extern devclass_t drm_devclass;
-#if __FreeBSD_version >= 700010
-DRIVER_MODULE(radeon, vgapci, radeon_driver, drm_devclass, 0, 0);
-#else
-DRIVER_MODULE(radeon, pci, radeon_driver, drm_devclass, 0, 0);
-#endif
-MODULE_DEPEND(radeon, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-int	radeondrm_probe(struct device *, void *, void *);
-void	radeondrm_attach(struct device *, struct device *, void *);
 
 int
-#if defined(__OpenBSD__)
 radeondrm_probe(struct device *parent, void *match, void *aux)
-#else
-radeondrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
 	return drm_probe((struct pci_attach_args *)aux, radeon_pciidlist);
 }
@@ -144,11 +88,10 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	struct drm_device *dev = (struct drm_device *)self;
 
-	radeon_configure(dev);
+	dev->driver = &radeon_driver;
 	return drm_attach(parent, self, pa, radeon_pciidlist);
 }
 
-#if defined(__OpenBSD__)
 struct cfattach radeondrm_ca = {
         sizeof (struct drm_device), radeondrm_probe, radeondrm_attach, 
 	drm_detach, drm_activate
@@ -157,13 +100,73 @@ struct cfattach radeondrm_ca = {
 struct cfdriver radeondrm_cd = {
 	NULL, "radeondrm", DV_DULL
 }; 
-#else
-#ifdef _LKM
-CFDRIVER_DECL(radeondrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(radeondrm, sizeof(struct drm_device), radeondrm_probe,
-    radeondrm_attach, drm_detach, drm_activate);
-#endif
-#endif
 
-#endif
+int
+radeondrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_RADEON_CP_IDLE:
+			return (radeon_cp_idle(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_CP_RESUME:
+			return (radeon_cp_resume(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_RESET:
+			return (radeon_engine_reset(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_FULLSCREEN:
+			return (radeon_fullscreen(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_SWAP:
+			return (radeon_cp_swap(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_CLEAR:
+			return (radeon_cp_clear(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_VERTEX:
+			return (radeon_cp_vertex(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_INDICES:
+			return (radeon_cp_indices(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_TEXTURE:
+			return (radeon_cp_texture(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_STIPPLE:
+			return (radeon_cp_stipple(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_VERTEX2:
+			return (radeon_cp_vertex2(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_CMDBUF:
+			return (radeon_cp_cmdbuf(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_GETPARAM:
+			return (radeon_cp_getparam(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_FLIP:
+			return (radeon_cp_flip(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_ALLOC:
+			return (radeon_mem_alloc(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_FREE:
+			return (radeon_mem_free(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_IRQ_EMIT:
+			return (radeon_irq_emit(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_IRQ_WAIT:
+			return (radeon_irq_wait(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_SETPARAM:
+			return (radeon_cp_setparam(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_SURF_ALLOC:
+			return (radeon_surface_alloc(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_SURF_FREE:
+			return (radeon_surface_free(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_RADEON_CP_INIT:
+			return (radeon_cp_init(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_CP_START:
+			return (radeon_cp_start(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_CP_STOP:
+			return (radeon_cp_stop(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_CP_RESET:
+			return (radeon_cp_reset(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_INDIRECT:
+			return (radeon_cp_indirect(dev, data, file_priv));
+		case DRM_IOCTL_RADEON_INIT_HEAP:
+			return (radeon_mem_init_heap(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+}

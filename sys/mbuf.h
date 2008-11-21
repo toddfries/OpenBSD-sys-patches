@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.104 2008/09/18 15:16:30 naddy Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.107 2008/11/07 17:31:24 deraadt Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -152,22 +152,20 @@ struct mbuf {
 #define	M_PROTO1	0x0010	/* protocol-specific */
 
 /* mbuf pkthdr flags, also in m_flags */
-#define	M_BCAST		0x0100	/* send/received as link-level broadcast */
-#define	M_MCAST		0x0200	/* send/received as link-level multicast */
-#define M_CONF		0x0400  /* payload was encrypted (ESP-transport) */
-#define M_AUTH		0x0800  /* payload was authenticated (AH or ESP auth) */
-#define M_AUTH_AH	0x2000  /* header was authenticated (AH) */
-#define M_TUNNEL	0x1000  /* IP-in-IP added by tunnel mode IPsec */
-#define M_ANYCAST6	0x4000	/* received as IPv6 anycast */
-#define M_LINK0		0x8000	/* link layer specific flag */
 #define M_VLANTAG	0x0020	/* ether_vtag is valid */
 #define M_LOOP		0x0040	/* for Mbuf statistics */
 #define M_FILDROP	0x0080	/* dropped by bpf filter */
+#define M_BCAST		0x0100	/* send/received as link-level broadcast */
+#define M_MCAST		0x0200	/* send/received as link-level multicast */
+#define M_CONF		0x0400  /* payload was encrypted (ESP-transport) */
+#define M_AUTH		0x0800  /* payload was authenticated (AH or ESP auth) */
+#define M_TUNNEL	0x1000  /* IP-in-IP added by tunnel mode IPsec */
+#define M_AUTH_AH	0x2000  /* header was authenticated (AH) */
+#define M_LINK0		0x8000	/* link layer specific flag */
 
 /* flags copied when copying m_pkthdr */
 #define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_BCAST|M_MCAST|M_CONF|\
-			 M_AUTH|M_ANYCAST6|M_LOOP|M_TUNNEL|M_LINK0|M_VLANTAG|\
-			 M_FILDROP)
+			 M_AUTH|M_LOOP|M_TUNNEL|M_LINK0|M_VLANTAG|M_FILDROP)
 
 /* Checksumming flags */
 #define	M_IPV4_CSUM_OUT		0x0001	/* IPv4 checksum needed */
@@ -205,7 +203,7 @@ struct mbuf {
 	int ms = splvm();						\
 	{ code }							\
 	splx(ms);							\
-} while(/* CONSTCOND */ 0)
+} while (/* CONSTCOND */ 0)
 
 /*
  * mbuf allocation/deallocation macros:
@@ -303,8 +301,7 @@ struct mbuf {
 /*
  * Reset the data pointer on an mbuf.
  */
-#define	MRESETDATA(m)							\
-do {									\
+#define	MRESETDATA(m) do {						\
 	if ((m)->m_flags & M_EXT)					\
 		(m)->m_data = (m)->m_ext.ext_buf;			\
 	else if ((m)->m_flags & M_PKTHDR)				\
@@ -324,53 +321,53 @@ do {									\
  * Move just m_pkthdr from from to to,
  * remove M_PKTHDR and clean the tag for from.
  */
-#define M_MOVE_HDR(to, from) {						\
+#define M_MOVE_HDR(to, from) do {					\
 	(to)->m_pkthdr = (from)->m_pkthdr;				\
 	(from)->m_flags &= ~M_PKTHDR;					\
 	SLIST_INIT(&(from)->m_pkthdr.tags);				\
-}
+} while (/* CONSTCOND */ 0)
 
 /*
  * Duplicate just m_pkthdr from from to to.
  */
-#define M_DUP_HDR(to, from) {						\
+#define M_DUP_HDR(to, from) do {					\
 	(to)->m_pkthdr = (from)->m_pkthdr;				\
 	SLIST_INIT(&(to)->m_pkthdr.tags);				\
 	m_tag_copy_chain((to), (from));					\
-}
+} while (/* CONSTCOND */ 0)
 
 /*
  * Duplicate mbuf pkthdr from from to to.
  * from must have M_PKTHDR set, and to must be empty.
  */
-#define M_DUP_PKTHDR(to, from) {					\
+#define M_DUP_PKTHDR(to, from) do {					\
 	(to)->m_flags = (from)->m_flags & M_COPYFLAGS;			\
 	M_DUP_HDR((to), (from));					\
 	(to)->m_data = (to)->m_pktdat;					\
-}
+} while (/* CONSTCOND */ 0)
 
 /*
  * MOVE mbuf pkthdr from from to to.
  * from must have M_PKTHDR set, and to must be empty.
  */
-#define	M_MOVE_PKTHDR(to, from) {					\
+#define	M_MOVE_PKTHDR(to, from) do {					\
 	(to)->m_flags = (from)->m_flags & M_COPYFLAGS;			\
 	M_MOVE_HDR((to), (from));					\
 	(to)->m_data = (to)->m_pktdat;					\
-}
+} while (/* CONSTCOND */ 0)
 
 /*
  * Set the m_data pointer of a newly-allocated mbuf (m_get/MGET) to place
  * an object of the specified size at the end of the mbuf, longword aligned.
  */
 #define	M_ALIGN(m, len) \
-	{ (m)->m_data += (MLEN - (len)) &~ (sizeof(long) - 1); }
+	(m)->m_data += (MLEN - (len)) &~ (sizeof(long) - 1)
 /*
  * As above, for mbufs allocated with m_gethdr/MGETHDR
  * or initialized by M_MOVE_PKTHDR.
  */
 #define	MH_ALIGN(m, len) \
-	{ (m)->m_data += (MHLEN - (len)) &~ (sizeof(long) - 1); }
+	(m)->m_data += (MHLEN - (len)) &~ (sizeof(long) - 1)
 
 /*
  * Determine if an mbuf's data area is read-only. This is true for
@@ -399,7 +396,7 @@ do {									\
  * If how is M_DONTWAIT and allocation fails, the original mbuf chain
  * is freed and m is set to NULL.
  */
-#define	M_PREPEND(m, plen, how) {					\
+#define	M_PREPEND(m, plen, how) do {					\
 	if (M_LEADINGSPACE(m) >= (plen)) {				\
 		(m)->m_data -= (plen);					\
 		(m)->m_len += (plen);					\
@@ -407,16 +404,16 @@ do {									\
 		(m) = m_prepend((m), (plen), (how));			\
 	if ((m) && (m)->m_flags & M_PKTHDR)				\
 		(m)->m_pkthdr.len += (plen);				\
-}
+} while (/* CONSTCOND */ 0)
 
 /* change mbuf to new type */
-#define MCHTYPE(m, t) {							\
+#define MCHTYPE(m, t) do {						\
 	MBUFLOCK(							\
 		mbstat.m_mtypes[(m)->m_type]--;				\
 		mbstat.m_mtypes[t]++;					\
 	);								\
 	(m)->m_type = t;						\
-}
+} while (/* CONSTCOND */ 0)
 
 /* length to m_copy to copy all */
 #define	M_COPYALL	1000000000

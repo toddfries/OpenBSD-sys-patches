@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.35 2008/07/18 23:43:31 art Exp $ */
+/*	$OpenBSD: cpu.h,v 1.38 2008/10/15 23:23:48 deraadt Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -110,6 +110,7 @@ struct cpu_info {
 #define	CI_DDB_PAUSE	3
 
 	int	ci_softintr;			/* pending soft interrupts */
+	u_int32_t ci_randseed;
 
 #ifdef MULTIPROCESSOR
 
@@ -136,6 +137,8 @@ extern struct cpu_info m88k_cpus[MAX_CPUS];
 	for ((cii) = 0; (cii) < MAX_CPUS; (cii)++) \
 		if (((ci) = &m88k_cpus[cii])->ci_flags & CIF_ALIVE)
 #define	CPU_INFO_UNIT(ci)	((ci)->ci_cpuid)
+#define MAXCPUS	MAX_CPUS
+#define cpu_unidle(ci)
 
 #if defined(MULTIPROCESSOR)
 

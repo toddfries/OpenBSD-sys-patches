@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.4 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.13 2008/11/09 15:08:26 naddy Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -65,8 +65,6 @@
 #include <net/bpf.h>
 #endif
 
-#include <dev/rndvar.h>
-
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/jmphyreg.h>
@@ -80,8 +78,6 @@
 
 /* Define the following to disable printing Rx errors. */
 #undef	JME_SHOW_ERRORS
-
-//#define	JME_CSUM_FEATURES	(CSUM_IP | CSUM_TCP | CSUM_UDP)
 
 int	jme_match(struct device *, void *, void *);
 void	jme_attach(struct device *, struct device *, void *);
@@ -439,11 +435,8 @@ jme_eeprom_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 	do {
 		if (jme_eeprom_read_byte(sc, offset, &fup) != 0)
 			break;
-		/* Check for the end of EEPROM descriptor. */
-		if ((fup & JME_EEPROM_DESC_END) == JME_EEPROM_DESC_END)
-			break;
-		if ((uint8_t)JME_EEPROM_MKDESC(JME_EEPROM_FUNC0,
-		    JME_EEPROM_PAGE_BAR1) == fup) {
+		if (JME_EEPROM_MKDESC(JME_EEPROM_FUNC0, JME_EEPROM_PAGE_BAR1) ==
+		    (fup & (JME_EEPROM_FUNC_MASK | JME_EEPROM_PAGE_MASK))) {
 			if (jme_eeprom_read_byte(sc, offset + 1, &reg) != 0)
 				break;
 			if (reg >= JME_PAR0 &&
@@ -455,6 +448,9 @@ jme_eeprom_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 				match++;
 			}
 		}
+		/* Check for the end of EEPROM descriptor. */
+		if ((fup & JME_EEPROM_DESC_END) == JME_EEPROM_DESC_END)
+			break;
 		/* Try next eeprom descriptor. */
 		offset += JME_EEPROM_DESC_BYTES;
 	} while (match != ETHER_ADDR_LEN && offset < JME_EEPROM_END);
@@ -474,25 +470,13 @@ jme_reg_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 	par0 = CSR_READ_4(sc, JME_PAR0);
 	par1 = CSR_READ_4(sc, JME_PAR1);
 	par1 &= 0xFFFF;
-	if ((par0 == 0 && par1 == 0) || (par0 & 0x1)) {
-		printf("%s: generating fake ethernet address.\n",
-		    sc->sc_dev.dv_xname);
-		par0 = arc4random();
-		/* Set OUI to JMicron. */
-		eaddr[0] = 0x00;
-		eaddr[1] = 0x1B;
-		eaddr[2] = 0x8C;
-		eaddr[3] = (par0 >> 16) & 0xff;
-		eaddr[4] = (par0 >> 8) & 0xff;
-		eaddr[5] = par0 & 0xff;
-	} else {
-		eaddr[0] = (par0 >> 0) & 0xFF;
-		eaddr[1] = (par0 >> 8) & 0xFF;
-		eaddr[2] = (par0 >> 16) & 0xFF;
-		eaddr[3] = (par0 >> 24) & 0xFF;
-		eaddr[4] = (par1 >> 0) & 0xFF;
-		eaddr[5] = (par1 >> 8) & 0xFF;
-	}
+
+	eaddr[0] = (par0 >> 0) & 0xFF;
+	eaddr[1] = (par0 >> 8) & 0xFF;
+	eaddr[2] = (par0 >> 16) & 0xFF;
+	eaddr[3] = (par0 >> 24) & 0xFF;
+	eaddr[4] = (par1 >> 0) & 0xFF;
+	eaddr[5] = (par1 >> 8) & 0xFF;
 }
 
 void
@@ -507,9 +491,7 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 
 	struct ifnet *ifp;
 	uint32_t reg;
-//	uint8_t pcie_ptr;
 	int error = 0;
-//	uint8_t eaddr[ETHER_ADDR_LEN];
 
 	/*
 	 * Allocate IO memory
@@ -567,6 +549,10 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 			    CHIPMODE_FPGA_REV_SHIFT);
 		}
 	}
+
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_JMICRON_JMC250 &&
+	    PCI_REVISION(pa->pa_class) == JME_REV_JMC250_A2)
+		sc->jme_workaround |= JME_WA_CRCERRORS | JME_WA_PACKETLOSS;
 
 	/* Reset the ethernet controller. */
 	jme_reset(sc);
@@ -627,15 +613,16 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_READY(&ifp->if_snd);
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
-	/* JMC250 supports Tx/Rx checksum offload and hardware vlan tagging. */
-#if 0
-	ifp->if_capabilities = IFCAP_HWCSUM |
-			       IFCAP_VLAN_MTU |
-			       IFCAP_VLAN_HWTAGGING;
-	ifp->if_hwassist = JME_CSUM_FEATURES;
-	ifp->if_capenable = ifp->if_capabilities;
-#endif
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifdef JME_CHECKSUM
+	ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
+				IFCAP_CSUM_UDPv4;
+#endif
+
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 	/* Set up MII bus. */
 	sc->sc_miibus.mii_ifp = ifp;
@@ -1146,18 +1133,18 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	m = *m_head;
 	cflags = 0;
 
-#if 0
 	/* Configure checksum offload. */
-	if (m->m_pkthdr.csum_flags & CSUM_IP)
+	if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 		cflags |= JME_TD_IPCSUM;
-	if (m->m_pkthdr.csum_flags & CSUM_TCP)
+	if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
 		cflags |= JME_TD_TCPCSUM;
-	if (m->m_pkthdr.csum_flags & CSUM_UDP)
+	if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
 		cflags |= JME_TD_UDPCSUM;
 
+#if NVLAN > 0
 	/* Configure VLAN. */
 	if (m->m_flags & M_VLANTAG) {
-		cflags |= (m->m_pkthdr.ether_vlantag & JME_TD_VLAN_MASK);
+		cflags |= (m->m_pkthdr.ether_vtag & JME_TD_VLAN_MASK);
 		cflags |= JME_TD_VLAN_TAG;
 	}
 #endif
@@ -1234,11 +1221,6 @@ jme_start(struct ifnet *ifp)
 		if (m_head == NULL)
 			break;
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
-#endif
-
 		/*
 		 * Pack the data into the transmit ring. If we
 		 * don't have room, set the OACTIVE flag and wait
@@ -1249,19 +1231,18 @@ jme_start(struct ifnet *ifp)
 				ifp->if_oerrors++;
 				break;
 			}
-//			ifq_prepend(&ifp->if_snd, m_head);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
 		enq++;
 
+#if NBPFILTER > 0
 		/*
 		 * If there's a BPF listener, bounce a copy of this frame
 		 * to him.
 		 */
-#if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -1314,8 +1295,8 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct jme_softc *sc = ifp->if_softc;
 	struct mii_data *mii = &sc->sc_miibus;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifreq *ifr = (struct ifreq *)data;
 	int error = 0, s;
 
 	s = splnet();
@@ -1330,52 +1311,17 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif
 		break;
-	case SIOCSIFMTU:
-#if 0
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > JME_JUMBO_MTU ||
-		    (!(sc->jme_caps & JME_CAP_JUMBO) &&
-		     ifr->ifr_mtu > JME_MAX_MTU)) {
-			error = EINVAL;
-			break;
-		}
-
-		if (ifp->if_mtu != ifr->ifr_mtu) {
-			/*
-			 * No special configuration is required when interface
-			 * MTU is changed but availability of Tx checksum
-			 * offload should be chcked against new MTU size as
-			 * FIFO size is just 2K.
-			 */
-			if (ifr->ifr_mtu >= JME_TX_FIFO_SIZE) {
-				ifp->if_capenable &= ~IFCAP_TXCSUM;
-				ifp->if_hwassist &= ~JME_CSUM_FEATURES;
-			}
-			ifp->if_mtu = ifr->ifr_mtu;
-			if (ifp->if_flags & IFF_RUNNING)
-				jme_init(ifp);
-		}
-#endif
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING) {
-				if ((ifp->if_flags ^ sc->jme_if_flags) &
-				    (IFF_PROMISC | IFF_ALLMULTI))
-					jme_set_filter(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					jme_init(ifp);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				jme_set_filter(sc);
+			else
+				jme_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				jme_stop(sc);
 		}
-		sc->jme_if_flags = ifp->if_flags;
 		break;
 
 	case SIOCADDMULTI:
@@ -1395,8 +1341,15 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			jme_set_filter(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1407,8 +1360,8 @@ void
 jme_mac_config(struct jme_softc *sc)
 {
 	struct mii_data *mii;
-	uint32_t ghc, rxmac, txmac, txpause;
-	int phyconf = JMPHY_CONF_DEFFIFO;
+	uint32_t ghc, rxmac, txmac, txpause, gp1;
+	int phyconf = JMPHY_CONF_DEFFIFO, hdx = 0;
 
 	mii = &sc->sc_miibus;
 
@@ -1445,14 +1398,26 @@ jme_mac_config(struct jme_softc *sc)
 		    TXTRHD_RT_PERIOD_ENB | TXTRHD_RT_LIMIT_ENB);
 	}
 
-	/* Reprogram Tx/Rx MACs with resolved speed/duplex. */
+	/*
+	 * Reprogram Tx/Rx MACs with resolved speed/duplex.
+	 */
+	gp1 = CSR_READ_4(sc, JME_GPREG1);
+	gp1 &= ~GPREG1_HALF_PATCH;
+
+	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) == 0)
+		hdx = 1;
+
 	switch (IFM_SUBTYPE(mii->mii_media_active)) {
 	case IFM_10_T:
 		ghc |= GHC_SPEED_10;
+		if (hdx)
+			gp1 |= GPREG1_HALF_PATCH;
 		break;
 
 	case IFM_100_TX:
 		ghc |= GHC_SPEED_100;
+		if (hdx)
+			gp1 |= GPREG1_HALF_PATCH;
 
 		/*
 		 * Use extended FIFO depth to workaround CRC errors
@@ -1466,7 +1431,7 @@ jme_mac_config(struct jme_softc *sc)
 			break;
 
 		ghc |= GHC_SPEED_1000;
-		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) == 0)
+		if (hdx)
 			txmac |= TXMAC_CARRIER_EXT | TXMAC_FRAME_BURST;
 		break;
 
@@ -1478,10 +1443,12 @@ jme_mac_config(struct jme_softc *sc)
 	CSR_WRITE_4(sc, JME_TXMAC, txmac);
 	CSR_WRITE_4(sc, JME_TXPFC, txpause);
 
-	if (sc->jme_caps & JME_CAP_EXTFIFO) {
+	if (sc->jme_workaround & JME_WA_CRCERRORS) {
 		jme_miibus_writereg(&sc->sc_dev, sc->jme_phyaddr,
 				    JMPHY_CONF, phyconf);
 	}
+	if (sc->jme_workaround & JME_WA_PACKETLOSS)
+		CSR_WRITE_4(sc, JME_GPREG1, gp1);
 }
 
 int
@@ -1724,36 +1691,32 @@ jme_rxpkt(struct jme_softc *sc)
 			 */
 			m->m_data += JME_RX_PAD_BYTES;
 
-#if 0
 			/* Set checksum information. */
-			if ((ifp->if_capenable & IFCAP_RXCSUM) &&
-			    (flags & JME_RD_IPV4)) {
-				m->m_pkthdr.csum_flags |= CSUM_IP_CHECKED;
+			if (flags & JME_RD_IPV4) {
 				if (flags & JME_RD_IPCSUM)
-					m->m_pkthdr.csum_flags |= CSUM_IP_VALID;
+					m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 				if ((flags & JME_RD_MORE_FRAG) == 0 &&
 				    ((flags & (JME_RD_TCP | JME_RD_TCPCSUM)) ==
 				     (JME_RD_TCP | JME_RD_TCPCSUM) ||
 				     (flags & (JME_RD_UDP | JME_RD_UDPCSUM)) ==
 				     (JME_RD_UDP | JME_RD_UDPCSUM))) {
 					m->m_pkthdr.csum_flags |=
-					    CSUM_DATA_VALID | CSUM_PSEUDO_HDR;
-					m->m_pkthdr.csum_data = 0xffff;
+					    M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 				}
 			}
 
+#if NVLAN > 0
 			/* Check for VLAN tagged packets. */
-			if ((ifp->if_capenable & IFCAP_VLAN_HWTAGGING) &&
-			    (flags & JME_RD_VLAN_TAG)) {
-				m->m_pkthdr.ether_vlantag =
-				    flags & JME_RD_VLAN_MASK;
+			if (flags & JME_RD_VLAN_TAG) {
+				m->m_pkthdr.ether_vtag = flags & JME_RD_VLAN_MASK;
 				m->m_flags |= M_VLANTAG;
 			}
 #endif
 
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 
 			ifp->if_ipackets++;
@@ -1932,7 +1895,7 @@ jme_init(struct ifnet *ifp)
 	 * For best performance of standard MTU sized frames use
 	 * maximum allowable FIFO threshold, 128QW.
 	 */
-	if ((ifp->if_mtu + ETHER_HDR_LEN + EVL_ENCAPLEN + ETHER_CRC_LEN) >
+	if ((ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN + ETHER_VLAN_ENCAP_LEN) >
 	    JME_RX_FIFO_SIZE)
 		sc->jme_rxcsr |= RXCSR_FIFO_THRESH_16QW;
 	else
@@ -1973,11 +1936,7 @@ jme_init(struct ifnet *ifp)
 	 */
 	reg = CSR_READ_4(sc, JME_RXMAC);
 	reg |= RXMAC_PAD_10BYTES;
-
-#if 0
-	if (ifp->if_capenable & IFCAP_RXCSUM)
-		reg |= RXMAC_CSUM_ENB;
-#endif
+	reg |= RXMAC_CSUM_ENB;
 	CSR_WRITE_4(sc, JME_RXMAC, reg);
 
 	/* Configure general purpose reg0 */
@@ -2308,15 +2267,13 @@ jme_newbuf(struct jme_softc *sc, struct jme_rxdesc *rxd, int init)
 void
 jme_set_vlan(struct jme_softc *sc)
 {
-//	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	uint32_t reg;
 
 	reg = CSR_READ_4(sc, JME_RXMAC);
 	reg &= ~RXMAC_VLAN_ENB;
-#if 0
-	if (ifp->if_capenable & IFCAP_VLAN_HWTAGGING)
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		reg |= RXMAC_VLAN_ENB;
-#endif
 	CSR_WRITE_4(sc, JME_RXMAC, reg);
 }
 

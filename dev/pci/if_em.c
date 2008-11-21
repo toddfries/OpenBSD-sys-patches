@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.191 2008/10/05 11:57:48 kettenis Exp $ */
+/* $OpenBSD: if_em.c,v 1.195 2008/11/09 15:08:26 naddy Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -178,6 +178,7 @@ void em_print_hw_stats(struct em_softc *);
 #endif
 void em_update_link_status(struct em_softc *);
 int  em_get_buf(struct em_softc *, int);
+void em_enable_hw_vlans(struct em_softc *);
 int  em_encap(struct em_softc *, struct mbuf *);
 void em_smartspeed(struct em_softc *);
 int  em_82547_fifo_workaround(struct em_softc *, int);
@@ -492,7 +493,7 @@ em_start(struct ifnet *ifp)
 #if NBPFILTER > 0
 		/* Send a copy of the frame to the BPF listener */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		/* Set timeout in case hardware has problems transmitting */
@@ -739,6 +740,10 @@ em_init(void *arg)
 	}
 	em_update_link_status(sc);
 
+	E1000_WRITE_REG(&sc->hw, VET, ETHERTYPE_VLAN);
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		em_enable_hw_vlans(sc);
+
 	/* Prepare transmit descriptors and buffers */
 	if (em_setup_transmit_structures(sc)) {
 		printf("%s: Could not setup transmit structures\n", 
@@ -768,7 +773,7 @@ em_init(void *arg)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 	em_clear_hw_cntrs(&sc->hw);
 	em_enable_intr(sc);
 
@@ -813,7 +818,7 @@ em_intr(void *arg)
 			sc->hw.get_link_status = 1;
 			em_check_for_link(&sc->hw);
 			em_update_link_status(sc);
-			timeout_add(&sc->timer_handle, hz); 
+			timeout_add_sec(&sc->timer_handle, 1); 
 		}
 
 		if (reg_icr & E1000_ICR_RXO)
@@ -1103,6 +1108,18 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	else
 		sc->num_tx_desc_avail -= map->dm_nsegs;
 
+#if NVLAN > 0
+	/* Find out if we are in VLAN mode */
+	if (m_head->m_flags & M_VLANTAG) {
+		/* Set the VLAN id */
+		current_tx_desc->upper.fields.special =
+			htole16(m_head->m_pkthdr.ether_vtag);
+
+		/* Tell hardware to add tag */
+		current_tx_desc->lower.data |= htole32(E1000_TXD_CMD_VLE);
+	}
+#endif
+
 	tx_buffer->m_head = m_head;
 	tx_buffer_mapped->map = tx_buffer->map;
 	tx_buffer->map = map;
@@ -1379,7 +1396,7 @@ em_local_timer(void *arg)
 #endif
 	em_smartspeed(sc);
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 
 	splx(s);
 }
@@ -1717,6 +1734,10 @@ em_setup_interface(struct em_softc *sc)
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 #ifdef EM_CSUM_OFFLOAD
 	if (sc->hw.mac_type >= em_82543)
@@ -2697,8 +2718,17 @@ em_rxeof(struct em_softc *sc, int count)
 			if (eop) {
 				sc->fmp->m_pkthdr.rcvif = ifp;
 				ifp->if_ipackets++;
-				em_receive_checksum(sc, current_desc,
-					    sc->fmp);
+				em_receive_checksum(sc, current_desc, sc->fmp);
+
+#if NVLAN > 0
+				if (current_desc->status & E1000_RXD_STAT_VP) {
+					sc->fmp->m_pkthdr.ether_vtag =
+					    (current_desc->special &
+					     E1000_RXD_SPC_VLAN_MASK);
+					sc->fmp->m_flags |= M_VLANTAG;
+				}
+#endif
+
 				m = sc->fmp;
 				sc->fmp = NULL;
 				sc->lmp = NULL;
@@ -2739,7 +2769,8 @@ discard:
 			 * user see the packet.
 			 */
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 
 			ether_input_mbuf(ifp, m);
@@ -2791,6 +2822,20 @@ em_receive_checksum(struct em_softc *sc, struct em_rx_desc *rx_desc,
 			mp->m_pkthdr.csum_flags |=
 				M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 	}
+}
+
+/*
+ * This turns on the hardware offload of the VLAN
+ * tag insertion and strip
+ */
+void 
+em_enable_hw_vlans(struct em_softc *sc)
+{
+	uint32_t ctrl;
+
+	ctrl = E1000_READ_REG(&sc->hw, CTRL);
+	ctrl |= E1000_CTRL_VME;
+	E1000_WRITE_REG(&sc->hw, CTRL, ctrl);
 }
 
 void

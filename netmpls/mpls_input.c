@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_input.c,v 1.13 2008/05/23 16:06:29 thib Exp $	*/
+/*	$OpenBSD: mpls_input.c,v 1.15 2008/11/01 16:37:55 michele Exp $	*/
 
 /*
  * Copyright (c) 2008 Claudio Jeker <claudio@openbsd.org>
@@ -71,9 +71,9 @@ mpls_input(struct mbuf *m)
 	struct ifnet *ifp = m->m_pkthdr.rcvif;
 	struct sockaddr_mpls *smpls;
 	struct sockaddr_mpls sa_mpls;
-	struct shim_hdr *shim;
+	struct shim_hdr	*shim;
 	struct rtentry *rt = NULL;
-	u_int32_t ttl;
+	u_int8_t ttl;
 	int i, hasbos;
 
 	if (!mpls_enable) {
@@ -111,7 +111,7 @@ mpls_input(struct mbuf *m)
 		m_freem(m);
 		return;
 	}
-	ttl = htonl(ttl - 1);
+	ttl--;
 
 	for (i = 0; i < mpls_inkloop; i++) {
 		bzero(&sa_mpls, sizeof(sa_mpls));
@@ -128,7 +128,32 @@ mpls_input(struct mbuf *m)
 		    smpls->smpls_in_ifindex);
 #endif
 
-		rt = rtalloc1(smplstosa(smpls),1, 0);
+		if (ntohl(smpls->smpls_in_label) < MPLS_LABEL_RESERVED_MAX) {
+
+			hasbos = MPLS_BOS_ISSET(shim->shim_label);
+			m = mpls_shim_pop(m);
+			shim = mtod(m, struct shim_hdr *);
+
+			switch (ntohl(smpls->smpls_in_label)) { 
+
+			case MPLS_LABEL_IPV4NULL:
+				if (hasbos) {
+					mpe_input(m, NULL, smpls, ttl);
+					goto done;
+				} else
+					continue;
+
+			case MPLS_LABEL_IPV6NULL:
+				if (hasbos) {
+					mpe_input6(m, NULL, smpls, ttl);
+					goto done;
+				} else
+					continue;
+			}
+			/* Other cases are not handled for now */
+		}
+
+		rt = rtalloc1(smplstosa(smpls), 1, 0);
 
 		if (rt == NULL) {
 			/* no entry for this label */
@@ -194,7 +219,7 @@ mpls_input(struct mbuf *m)
 	}
 
 	/* write back TTL */
-	shim->shim_label = (shim->shim_label & ~MPLS_TTL_MASK) | ttl;
+	shim->shim_label = (shim->shim_label & ~MPLS_TTL_MASK) | htonl(ttl);
 
 #ifdef MPLS_DEBUG
 	printf("MPLS: sending on %s outlabel %x dst af %d in %d out %d\n",

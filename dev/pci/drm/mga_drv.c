@@ -37,8 +37,10 @@
 #include "mga_drv.h"
 #include "drm_pciids.h"
 
+int	mgadrm_probe(struct device *, void *, void *);
+void	mgadrm_attach(struct device *, struct device *, void *);
 int	mga_driver_device_is_agp(struct drm_device * );
-void	mga_configure(struct drm_device *);
+int	mgadrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mga_pciidlist[] = {
@@ -91,94 +93,36 @@ mga_driver_device_is_agp(struct drm_device * dev)
 
 }
 
-void
-mga_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= sizeof(drm_mga_buf_priv_t);
-	dev->driver.load		= mga_driver_load;
-	dev->driver.unload		= mga_driver_unload;
-	dev->driver.lastclose		= mga_driver_lastclose;
-	dev->driver.enable_vblank	= mga_enable_vblank;
-	dev->driver.disable_vblank	= mga_disable_vblank;
-	dev->driver.get_vblank_counter	= mga_get_vblank_counter;
-	dev->driver.irq_preinstall	= mga_driver_irq_preinstall;
-	dev->driver.irq_postinstall	= mga_driver_irq_postinstall;
-	dev->driver.irq_uninstall	= mga_driver_irq_uninstall;
-	dev->driver.irq_handler		= mga_driver_irq_handler;
-	dev->driver.dma_ioctl		= mga_dma_buffers;
-	dev->driver.dma_quiescent	= mga_driver_dma_quiescent;
-	dev->driver.device_is_agp	= mga_driver_device_is_agp;
+static const struct drm_driver_info mga_driver = {
+	.buf_priv_size		= sizeof(drm_mga_buf_priv_t),
+	.load			= mga_driver_load,
+	.unload			= mga_driver_unload,
+	.ioctl			= mgadrm_ioctl,
+	.lastclose		= mga_driver_lastclose,
+	.enable_vblank		= mga_enable_vblank,
+	.disable_vblank		= mga_disable_vblank,
+	.get_vblank_counter	= mga_get_vblank_counter,
+	.irq_preinstall		= mga_driver_irq_preinstall,
+	.irq_postinstall	= mga_driver_irq_postinstall,
+	.irq_uninstall		= mga_driver_irq_uninstall,
+	.irq_handler		= mga_driver_irq_handler,
+	.dma_ioctl		= mga_dma_buffers,
+	.dma_quiescent		= mga_driver_dma_quiescent,
+	.device_is_agp		= mga_driver_device_is_agp,
 
-	dev->driver.ioctls		= mga_ioctls;
-	dev->driver.max_ioctl		= mga_max_ioctl;
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
 
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.require_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-	dev->driver.use_dma		= 1;
-	dev->driver.use_irq		= 1;
-	dev->driver.use_vbl_irq		= 1;
-}
-
-
-
-#ifdef __FreeBSD__
-static int
-mga_probe(device_t dev)
-{
-	return drm_probe(dev, mga_pciidlist);
-}
-
-static int
-mga_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	mga_configure(dev);
-	return drm_attach(nbdev, mga_pciidlist);
-}
-
-static device_method_t mga_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		mga_probe),
-	DEVMETHOD(device_attach,	mga_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
+	.flags			= DRIVER_AGP | DRIVER_AGP_REQUIRE |
+				    DRIVER_MTRR | DRIVER_DMA | DRIVER_IRQ,
 };
 
-static driver_t mga_driver = {
-	"drm",
-	mga_methods,
-	sizeof(struct drm_device)
-};
-
-extern devclass_t drm_devclass;
-#if __FreeBSD_version >= 700010
-DRIVER_MODULE(mga, vgapci, mga_driver, drm_devclass, 0, 0);
-#else
-DRIVER_MODULE(mga, pci, mga_driver, drm_devclass, 0, 0);
-#endif
-MODULE_DEPEND(mga, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-int	mgadrm_probe(struct device *, void *, void *);
-void	mgadrm_attach(struct device *, struct device *, void *);
 int
-#if defined(__OpenBSD__)
 mgadrm_probe(struct device *parent, void *match, void *aux)
-#else
-mgadrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
 	return drm_probe((struct pci_attach_args *)aux, mga_pciidlist);
 }
@@ -189,11 +133,10 @@ mgadrm_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	struct drm_device *dev = (struct drm_device *)self;
 
-	mga_configure(dev);
+	dev->driver = &mga_driver;
 	return drm_attach(parent, self, pa, mga_pciidlist);
 }
 
-#if defined(__OpenBSD__)
 struct cfattach mgadrm_ca = {
 	sizeof(struct drm_device), mgadrm_probe, mgadrm_attach,
 	drm_detach, drm_activate
@@ -202,13 +145,46 @@ struct cfattach mgadrm_ca = {
 struct cfdriver mgadrm_cd = {
 	0, "mgadrm", DV_DULL
 };
-#else
-#ifdef _LKM
-CFDRIVER_DECL(mgadrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(mgadrm, sizeof(struct drm_device), mgadrm_probe, mgadrm_attach,
-    drm_detach, drm_activate);
-#endif
-#endif
 
-#endif
+int
+mgadrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_MGA_FLUSH:
+			return (mga_dma_flush(dev, data, file_priv));
+		case DRM_IOCTL_MGA_RESET:
+			return (mga_dma_reset(dev, data, file_priv));
+		case DRM_IOCTL_MGA_SWAP:
+			return (mga_dma_swap(dev, data, file_priv));
+		case DRM_IOCTL_MGA_CLEAR:
+			return (mga_dma_clear(dev, data, file_priv));
+		case DRM_IOCTL_MGA_VERTEX:
+			return (mga_dma_vertex(dev, data, file_priv));
+		case DRM_IOCTL_MGA_INDICES:
+			return (mga_dma_indices(dev, data, file_priv));
+		case DRM_IOCTL_MGA_ILOAD:
+			return (mga_dma_iload(dev, data, file_priv));
+		case DRM_IOCTL_MGA_BLIT:
+			return (mga_dma_blit(dev, data, file_priv));
+		case DRM_IOCTL_MGA_GETPARAM:
+			return (mga_getparam(dev, data, file_priv));
+		case DRM_IOCTL_MGA_SET_FENCE:
+			return (mga_set_fence(dev, data, file_priv));
+		case DRM_IOCTL_MGA_WAIT_FENCE:
+			return (mga_wait_fence(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_MGA_INIT:
+			return (mga_dma_init(dev, data, file_priv));
+		case DRM_IOCTL_MGA_DMA_BOOTSTRAP:
+			return (mga_dma_bootstrap(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+
+}

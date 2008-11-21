@@ -118,9 +118,6 @@ drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	    lock->context, DRM_CURRENTPID, dev->lock.hw_lock->lock,
 	    lock->flags);
 
-        if (dev->driver.use_dma_queue && lock->context < 0)
-                return EINVAL;
-
 	mtx_enter(&dev->lock.spinlock);
 	for (;;) {
 		if (drm_lock_take(&dev->lock, lock->context)) {
@@ -143,9 +140,9 @@ drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	/* XXX: Add signal blocking here */
 
-	if (dev->driver.dma_quiescent != NULL &&
+	if (dev->driver->dma_quiescent != NULL &&
 	    (lock->flags & _DRM_LOCK_QUIESCENT))
-		dev->driver.dma_quiescent(dev);
+		dev->driver->dma_quiescent(dev);
 
 	return 0;
 }
@@ -166,13 +163,6 @@ drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (!_DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock) ||
 	    _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock) != lock->context)
 		return EINVAL;
-
-	DRM_SPINLOCK(&dev->tsk_lock);
-	if (dev->locked_task_call != NULL) {
-		dev->locked_task_call(dev);
-		dev->locked_task_call = NULL;
-	}
-	DRM_SPINUNLOCK(&dev->tsk_lock);
 
 	if (drm_lock_free(&dev->lock, lock->context)) {
 		DRM_ERROR("\n");
