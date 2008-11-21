@@ -1,5 +1,4 @@
-/*	$OpenBSD: rasops32.c,v 1.4 2002/07/27 22:17:49 miod Exp $	*/
-/*	$NetBSD: rasops32.c,v 1.7 2000/04/12 14:22:29 pk Exp $	*/
+/*	 $NetBSD: rasops32.c,v 1.16 2008/04/28 20:23:56 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rasops32.c,v 1.16 2008/04/28 20:23:56 martin Exp $");
+
+#include "opt_rasops.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/time.h>
@@ -45,7 +42,7 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/rasops/rasops.h>
 
-void 	rasops32_putchar(void *, int, int, u_int, long);
+static void 	rasops32_putchar(void *, int, int, u_int, long attr);
 
 /*
  * Initialize a 'rasops_info' descriptor for this depth.
@@ -70,7 +67,7 @@ rasops32_init(ri)
 /*
  * Paint a single character.
  */
-void
+static void
 rasops32_putchar(cookie, row, col, uc, attr)
 	void *cookie;
 	int row, col;
@@ -79,10 +76,11 @@ rasops32_putchar(cookie, row, col, uc, attr)
 {
 	int width, height, cnt, fs, fb, clr[2];
 	struct rasops_info *ri;
-	int32_t *dp, *rp;
+	int32_t *dp, *rp, *hp, *hrp;
 	u_char *fr;
 
 	ri = (struct rasops_info *)cookie;
+	hp = hrp = NULL;
 
 #ifdef RASOPS_CLIPPING
 	/* Catches 'row < 0' case too */
@@ -93,7 +91,15 @@ rasops32_putchar(cookie, row, col, uc, attr)
 		return;
 #endif
 
+	/* check if character fits into font limits */
+	if (uc < ri->ri_font->firstchar ||
+	    (uc - ri->ri_font->firstchar) >= ri->ri_font->numchars)
+	    return;
+
 	rp = (int32_t *)(ri->ri_bits + row*ri->ri_yscale + col*ri->ri_xscale);
+	if (ri->ri_hwbits)
+		hrp = (int32_t *)(ri->ri_hwbits + row*ri->ri_yscale +
+		    col*ri->ri_xscale);
 
 	height = ri->ri_font->fontheight;
 	width = ri->ri_font->fontwidth;
@@ -105,9 +111,16 @@ rasops32_putchar(cookie, row, col, uc, attr)
 		while (height--) {
 			dp = rp;
 			DELTA(rp, ri->ri_stride, int32_t *);
+			if (ri->ri_hwbits) {
+				hp = hrp;
+				DELTA(hrp, ri->ri_stride, int32_t *);
+			}
 
-			for (cnt = width; cnt; cnt--)
+			for (cnt = width; cnt; cnt--) {
 				*dp++ = clr[0];
+				if (ri->ri_hwbits)
+					*hp++ = clr[0];
+			}
 		}
 	} else {
 		uc -= ri->ri_font->firstchar;
@@ -120,9 +133,15 @@ rasops32_putchar(cookie, row, col, uc, attr)
 			    (fr[0] << 24);
 			fr += fs;
 			DELTA(rp, ri->ri_stride, int32_t *);
+			if (ri->ri_hwbits) {
+				hp = hrp;
+				DELTA(hrp, ri->ri_stride, int32_t *);
+			}
 
 			for (cnt = width; cnt; cnt--) {
 				*dp++ = clr[(fb >> 31) & 1];
+				if (ri->ri_hwbits)
+					*hp++ = clr[(fb >> 31) & 1];
 				fb <<= 1;
 			}
 		}
@@ -131,8 +150,13 @@ rasops32_putchar(cookie, row, col, uc, attr)
 	/* Do underline */
 	if ((attr & 1) != 0) {
 		DELTA(rp, -(ri->ri_stride << 1), int32_t *);
+		if (ri->ri_hwbits)
+			DELTA(hrp, -(ri->ri_stride << 1), int32_t *);
 
-		while (width--)
+		while (width--) {
 			*rp++ = clr[1];
+			if (ri->ri_hwbits)
+				*hrp++ = clr[1];
+		}
 	}
 }

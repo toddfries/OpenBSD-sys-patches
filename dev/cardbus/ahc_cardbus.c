@@ -1,4 +1,4 @@
-/*	$NetBSD: ahc_cardbus.c,v 1.22 2007/10/19 11:59:37 ad Exp $	*/
+/*	$NetBSD: ahc_cardbus.c,v 1.25 2008/06/24 19:44:52 drochner Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2005 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ahc_cardbus.c,v 1.22 2007/10/19 11:59:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ahc_cardbus.c,v 1.25 2008/06/24 19:44:52 drochner Exp $");
 
 #include "opt_ahc_cardbus.h"
 
@@ -84,7 +77,7 @@ struct ahc_cardbus_softc {
 
 	/* CardBus-specific goo. */
 	cardbus_devfunc_t sc_ct;	/* our CardBus devfuncs */
-	int	sc_intrline;		/* our interrupt line */
+	cardbus_intr_line_t sc_intrline; /* our interrupt line */
 	cardbustag_t sc_tag;
 
 	int	sc_cbenable;		/* what CardBus access type to enable */
@@ -176,7 +169,7 @@ ahc_cardbus_attach(struct device *parent, struct device *self,
 		cardbus_conf_write(cc, cf, ca->ca_tag, PCI_BHLC_REG, reg);
 	}
 
-	ahc_set_name(ahc, ahc->sc_dev.dv_xname);
+	ahc_set_name(ahc, device_xname(&ahc->sc_dev));
 
 	ahc->parent_dmat = ca->ca_dmat;
 	ahc->tag = bst;
@@ -211,11 +204,10 @@ ahc_cardbus_attach(struct device *parent, struct device *self,
 	ahc->ih = cardbus_intr_establish(cc, cf, ca->ca_intrline, IPL_BIO,
 	    ahc_intr, ahc);
 	if (ahc->ih == NULL) {
-		printf("%s: unable to establish interrupt at %d\n",
-		    ahc_name(ahc), ca->ca_intrline);
+		printf("%s: unable to establish interrupt\n",
+		    ahc_name(ahc));
 		return;
 	}
-	printf("%s: interrupting at %d\n", ahc_name(ahc), ca->ca_intrline);
 
 	ahc->seep_config = malloc(sizeof(*ahc->seep_config),
 				  M_DEVBUF, M_NOWAIT);

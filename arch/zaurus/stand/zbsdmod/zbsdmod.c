@@ -1,3 +1,4 @@
+/*	$NetBSD: zbsdmod.c,v 1.3 2008/11/12 12:36:09 ad Exp $	*/
 /*	$OpenBSD: zbsdmod.c,v 1.7 2005/05/02 02:45:29 uwe Exp $	*/
 
 /*
@@ -14,14 +15,17 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- *
- * Zaurus OpenBSD bootstrap loader.
+ */
+
+/*
+ * Zaurus NetBSD bootstrap loader.
  */
 
 #include "compat_linux.h"
 
+#include <machine/bootinfo.h>
+
 #define BOOTARGS_BUFSIZ	256
-#define BOOTARGS_MAGIC	0x4f425344
 
 #define ZBOOTDEV_MAJOR	99
 #define ZBOOTDEV_MODE	0222
@@ -29,15 +33,16 @@
 #define ZBOOTMOD_NAME	"zbsdmod"
 
 /* Prototypes */
-void	elf32bsdboot(void);
 int	init_module(void);
 void	cleanup_module(void);
 
-ssize_t	zbsdmod_write(struct file *, const char *, size_t, loff_t *);
-int	zbsdmod_open(struct inode *, struct file *);
-int	zbsdmod_close(struct inode *, struct file *);
+static ssize_t	zbsdmod_write(struct file *, const char *, size_t, loff_t *);
+static int	zbsdmod_open(struct inode *, struct file *);
+static int	zbsdmod_close(struct inode *, struct file *);
 
-static	struct file_operations fops = {
+static void	elf32bsdboot(void);
+
+static struct file_operations fops = {
 	0,			/* struct module *owner */
 	0,			/* lseek */
 	0,			/* read */
@@ -56,30 +61,30 @@ static	struct file_operations fops = {
 	0,			/* lock */
 };
 
-static	int isopen;
-static	loff_t position;
+static int isopen;
+static loff_t position;
 
 /* Outcast local variables to avoid stack usage in elf32bsdboot(). */
-static	int cpsr;
-static	unsigned int sz;
-static	int i;
-static	vaddr_t minv, maxv, posv;
-static	vaddr_t elfv, shpv;
-static	int *addr;
-static	vaddr_t *esymp;
-static	Elf_Shdr *shp;
-static	Elf_Off off;
-static	int havesyms;
+static int cpsr;
+static unsigned int sz;
+static int i;
+static vaddr_t minv, maxv, posv;
+static vaddr_t elfv, shpv;
+static int *addr;
+static vaddr_t *esymp;
+static Elf_Shdr *shp;
+static Elf_Off off;
+static int havesyms;
 
-/* The maximum size of a kernel image is restricted to 5MB. */
-static	int bsdimage[1310720];	/* XXX use kmalloc() */
-static	char bootargs[BOOTARGS_BUFSIZ];
+/* The maximum size of a kernel image is restricted to 10MB. */
+static u_int bsdimage[10485760/sizeof(u_int)];	/* XXX use kmalloc() */
+static char bootargs[BOOTARGS_BUFSIZ];
 
 /*
  * Boot the loaded BSD kernel image, or return if an error is found.
  * Part of this routine is borrowed from sys/lib/libsa/loadfile.c.
  */
-void
+static void
 elf32bsdboot(void)
 {
 
@@ -131,9 +136,9 @@ elf32bsdboot(void)
 			esymp = (vaddr_t *)phdr[i].p_vaddr;
 	}
 
-	__asm__ volatile ("mrs %0, cpsr_all" : "=r" (cpsr));
+	__asm volatile ("mrs %0, cpsr_all" : "=r" (cpsr));
 	cpsr |= 0xc0;  /* set FI */
-	__asm__ volatile ("msr cpsr_all, %0" :: "r" (cpsr));
+	__asm volatile ("msr cpsr_all, %0" :: "r" (cpsr));
 
 	/*
 	 * Copy the boot arguments.
@@ -229,7 +234,6 @@ elf32bsdboot(void)
 	 * Load text and data.
 	 */
 	for (i = 0; i < elf->e_phnum; i++) {
-
 		if (phdr[i].p_type != PT_LOAD ||
 		    (phdr[i].p_flags & (PF_W|PF_R|PF_X)) == 0)
 			continue;
@@ -245,20 +249,25 @@ elf32bsdboot(void)
 	}
 
 	addr = (int *)(elf->e_entry);
-	__asm__ volatile (
-		"mov  r0, %0;"
-		"mov  r2, #0;"
-		"mov  r1, #(0x00000010 | 0x00000020);"
-		"mcr  15, 0, r1, c1, c0, 0;"
-		"mcr  15, 0, r2, c8, c7, 0    /* nail I+D TLB on ARMv4 and greater */;"
-		"mov  pc, r0" :: "r"(addr) : "r0","r1","r2");
+	__asm volatile (
+		"mov	r0, %0;"
+		"mov	r2, #0;"
+		"mcr	p15, 0, r2, c7, c7, 0;"
+		"mov	r2, r2;"
+		"sub	pc, pc, #4;"
+		"mov	r1, #(0x00000010 | 0x00000020);"
+		"mcr	p15, 0, r1, c1, c0, 0;"
+		"mcr	p15, 0, r2, c8, c7, 0;"
+		"mov	r2, r2;"
+		"sub	pc, pc, #4;"
+		"mov	pc, r0" :: "r"(addr) : "r0","r1","r2");
 }
 
 /*
- * Initialize the LKM.
+ * Initialize the module.
  */
 int
-init_module()
+init_module(void)
 {
 	struct proc_dir_entry *entry;
 	int rc;
@@ -277,7 +286,7 @@ init_module()
 		return 1;
 	}
 
-	printk("%s: OpenBSD/" MACHINE " bootstrap device is %d,0\n",
+	printk("%s: NetBSD/" MACHINE " bootstrap device is %d,0\n",
 	    ZBOOTMOD_NAME, ZBOOTDEV_MAJOR);
 
 	return 0;
@@ -287,18 +296,17 @@ init_module()
  * Cleanup - undo whatever init_module did.
  */
 void
-cleanup_module()
+cleanup_module(void)
 {
 
 	(void)unregister_chrdev(ZBOOTDEV_MAJOR, ZBOOTDEV_NAME);
 	remove_proc_entry(ZBOOTDEV_NAME, &proc_root);
 
-	printk("%s: OpenBSD/" MACHINE " bootstrap device unloaded\n",
+	printk("%s: NetBSD/" MACHINE " bootstrap device unloaded\n",
 	    ZBOOTMOD_NAME);
 }
 
-
-ssize_t
+static ssize_t
 zbsdmod_write(struct file *f, const char *buf, size_t len, loff_t *offp)
 {
 
@@ -317,7 +325,7 @@ zbsdmod_write(struct file *f, const char *buf, size_t len, loff_t *offp)
 	return len;
 }
 
-int
+static int
 zbsdmod_open(struct inode *ino, struct file *f)
 {
 
@@ -332,32 +340,28 @@ zbsdmod_open(struct inode *ino, struct file *f)
 	return 0;
 }
 
-int
+static int
 zbsdmod_close(struct inode *ino, struct file *f)
 {
 
-	if (isopen) {
-		if (position > 0) {
-			printk("%s: loaded %d bytes\n", ZBOOTDEV_NAME,
+	if (!isopen)
+		return -EBUSY;
+
+	if (position > 0) {
+		printk("%s: loaded %d bytes\n", ZBOOTDEV_NAME,
+		    position);
+
+		if (position < BOOTARGS_BUFSIZ) {
+			*(u_int *)bootargs = BOOTARGS_MAGIC;
+			bootargs[position + sizeof(u_int)] = '\0';
+			memcpy(bootargs + sizeof(u_int), bsdimage,
 			    position);
-
-			if (position < BOOTARGS_BUFSIZ) {
-				*(int *)bootargs = BOOTARGS_MAGIC;
-				bootargs[position + sizeof(int)] = '\0';
-				memcpy(bootargs + sizeof(int), bsdimage,
-				    position);
-			} else {
-#ifndef _TEST
-				elf32bsdboot();
-				printk("%s: boot failed\n", ZBOOTDEV_NAME);       
-#else
-				printk("/* boot() */\n");
-#endif
-			}
+		} else {
+			elf32bsdboot();
+			printk("%s: boot failed\n", ZBOOTDEV_NAME);       
 		}
-		isopen = 0;
-		return 0;
 	}
+	isopen = 0;
 
-	return -EBUSY;
+	return 0;
 }

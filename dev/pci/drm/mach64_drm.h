@@ -1,7 +1,7 @@
 /* mach64_drm.h -- Public header for the mach64 driver -*- linux-c -*-
  * Created: Thu Nov 30 20:04:32 2000 by gareth@valinux.com
  */
-/*
+/*-
  * Copyright 2000 Gareth Hughes
  * Copyright 2002 Frank C. Earl
  * Copyright 2002-2003 Leif Delgass
@@ -30,6 +30,11 @@
  *    Frank C. Earl <fearl@airmail.net>
  *    Leif Delgass <ldelgass@retinalburn.net>
  */
+
+#include <sys/cdefs.h>
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drm.h,v 1.3 2006/09/07 23:04:47 anholt Exp $");
+*/
 
 #ifndef __MACH64_DRM_H__
 #define __MACH64_DRM_H__
@@ -130,7 +135,7 @@ typedef struct drm_mach64_sarea {
 
 	/* The current cliprects, or a subset thereof.
 	 */
-	struct drm_clip_rect boxes[MACH64_NR_SAREA_CLIPRECTS];
+	drm_clip_rect_t boxes[MACH64_NR_SAREA_CLIPRECTS];
 	unsigned int nbox;
 
 	/* Counters for client-side throttling of rendering clients.
@@ -139,7 +144,7 @@ typedef struct drm_mach64_sarea {
 
 	/* Texture memory LRU.
 	 */
-	struct drm_tex_region tex_list[MACH64_NR_TEX_HEAPS][MACH64_NR_TEX_REGIONS +
+	drm_tex_region_t tex_list[MACH64_NR_TEX_HEAPS][MACH64_NR_TEX_REGIONS +
 						       1];
 	unsigned int tex_age[MACH64_NR_TEX_HEAPS];
 	int ctx_owner;
@@ -237,7 +242,7 @@ typedef struct drm_mach64_vertex {
 } drm_mach64_vertex_t;
 
 typedef struct drm_mach64_blit {
-	void *buf;
+	int idx;
 	int pitch;
 	int offset;
 	int format;

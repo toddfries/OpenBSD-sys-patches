@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.33 2007/05/28 21:02:49 thib Exp $ */
-/*      $NetBSD: param.h,v 1.39 1999/10/22 21:14:34 ragge Exp $    */
+/*      $NetBSD: param.h,v 1.56 2008/07/02 17:28:57 ad Exp $    */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -65,11 +64,7 @@
 
 #define	PGSHIFT		12			/* LOG2(NBPG) */
 #define	NBPG		(1 << PGSHIFT)		/* (1 << PGSHIFT) bytes/page */
-#define	PGOFSET		(NBPG - 1)               /* byte offset into page */
-
-#define	PAGE_SHIFT	12
-#define	PAGE_SIZE	(1 << PAGE_SHIFT)
-#define	PAGE_MASK	(PAGE_SIZE - 1)
+#define	PGOFSET		(NBPG - 1)		/* byte offset into page */
 
 #define	VAX_PGSHIFT	9
 #define	VAX_NBPG	(1 << VAX_PGSHIFT)
@@ -87,17 +82,47 @@
 
 #define	UPAGES		2		/* pages of u-area */
 #define USPACE		(NBPG*UPAGES)
-#define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
 #define	REDZONEADDR	(VAX_NBPG*3)	/* Must be > sizeof(struct user) */
 
 #ifndef MSGBUFSIZE
-#define MSGBUFSIZE	8192		/* default message buffer size */
+#define MSGBUFSIZE	NBPG		/* default message buffer size */
+#endif
+
+/*
+ * KVA is very tight on vax, reduce the amount of KVA used by pipe
+ * "direct" write code to reasonably low value.
+ */
+#ifndef PIPE_DIRECT_CHUNK
+#define PIPE_DIRECT_CHUNK	65536
 #endif
 
 /*
  * Constants related to network buffer management.
+ * MCLBYTES must be no larger than NBPG (the software page size), and,
+ * on machines that exchange pages of input or output buffers with mbuf
+ * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
+ * of the hardware page size.
  */
-#define	NMBCLUSTERS	768		/* map size, max cluster allocation */
+#define	MSIZE		256		/* size of an mbuf */
+
+#ifndef	MCLSHIFT
+#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
+					/* 2K cluster can hold Ether frame */
+#endif	/* MCLSHIFT */
+
+#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
+
+#ifndef NMBCLUSTERS
+#if defined(_KERNEL_OPT)
+#include "opt_gateway.h"
+#endif
+
+#ifdef GATEWAY
+#define	NMBCLUSTERS	512		/* map size, max cluster allocation */
+#else
+#define	NMBCLUSTERS	256		/* map size, max cluster allocation */
+#endif
+#endif
 
 /*
  * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
@@ -110,38 +135,24 @@
  * Some macros for units conversion
  */
 
-/* pages ("clicks") to disk blocks */
-#define	ctod(x)		((x) << (PGSHIFT - DEV_BSHIFT))
-#define	dtoc(x)		((x) >> (PGSHIFT - DEV_BSHIFT))
-
-/* clicks to bytes */
-#define	ctob(x)		((x) << PGSHIFT)
-#define	btoc(x)		(((unsigned)(x) + PGOFSET) >> PGSHIFT)
-
-/* bytes to disk blocks */
-#define	btodb(x)	((x) >> DEV_BSHIFT)
-#define	dbtob(x)	((x) << DEV_BSHIFT)
+#define	btop(x)		((x) >> PGSHIFT)
 
 /* MD conversion macros */
 #define	vax_btoc(x)	(((unsigned)(x) + VAX_PGOFSET) >> VAX_PGSHIFT)
 #define	vax_btop(x)	(((unsigned)(x)) >> VAX_PGSHIFT)
 
-#define       ovbcopy(x,y,z)  bcopy(x, y, z)
-
 #ifdef _KERNEL
-
 #include <machine/intr.h>
 
 /* Prototype needed for delay() */
 #ifndef	_LOCORE
-#include <machine/cpu.h>
-
 void	delay(int);
 /* inline macros used inside kernel */
 #include <machine/macros.h>
 #endif
 
 #define	DELAY(x) delay(x)
+#define	MAXEXEC	1
 #endif /* _KERNEL */
 
 #endif /* _VAX_PARAM_H_ */

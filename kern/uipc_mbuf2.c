@@ -1,11 +1,10 @@
-/*	$OpenBSD: uipc_mbuf2.c,v 1.28 2007/03/17 09:26:35 art Exp $	*/
+/*	$NetBSD: uipc_mbuf2.c,v 1.26 2007/03/04 06:03:11 christos Exp $	*/
 /*	$KAME: uipc_mbuf2.c,v 1.29 2001/02/14 13:42:10 itojun Exp $	*/
-/*	$NetBSD: uipc_mbuf.c,v 1.40 1999/04/01 00:23:25 thorpej Exp $	*/
 
 /*
  * Copyright (C) 1999 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -17,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -62,17 +61,19 @@
  *	@(#)uipc_mbuf.c	8.4 (Berkeley) 2/14/95
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uipc_mbuf2.c,v 1.26 2007/03/04 06:03:11 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 
-/* can't call it m_dup(), as freebsd[34] uses m_dup() with different arg */
-static struct mbuf *m_dup1(struct mbuf *, int, int, int);
+MALLOC_DEFINE(M_PACKET_TAGS, "packet tags", "Packet-attached information");
 
 /*
- * ensure that [off, off + len] is contiguous on the mbuf chain "m".
+ * ensure that [off, off + len) is contiguous on the mbuf chain "m".
  * packet chain before "off" is kept untouched.
  * if offp == NULL, the target will start at <retval, 0> on resulting chain.
  * if offp != NULL, the target will start at <retval, *offp> on resulting chain.
@@ -93,7 +94,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 		panic("m == NULL in m_pulldown()");
 	if (len > MCLBYTES) {
 		m_freem(m);
-		return (NULL);	/* impossible */
+		return NULL;	/* impossible */
 	}
 
 	n = m;
@@ -108,7 +109,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 		n = n->m_next;
 	if (!n) {
 		m_freem(m);
-		return (NULL);	/* mbuf chain too short */
+		return NULL;	/* mbuf chain too short */
 	}
 
 	sharedcluster = M_READONLY(n);
@@ -129,11 +130,12 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 	if (len <= n->m_len - off) {
 		struct mbuf *mlast;
 
-		o = m_dup1(n, off, n->m_len - off, M_DONTWAIT);
+		o = m_dup(n, off, n->m_len - off, M_DONTWAIT);
 		if (o == NULL) {
 			m_freem(m);
-			return (NULL);	/* ENOBUFS */
+			return NULL;	/* ENOBUFS */
 		}
+		KASSERT(o->m_len >= len);
 		for (mlast = o; mlast->m_next != NULL; mlast = mlast->m_next)
 			;
 		n->m_len = off;
@@ -161,7 +163,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 		olen += o->m_len;
 	if (hlen + olen < len) {
 		m_freem(m);
-		return (NULL);	/* mbuf chain too short */
+		return NULL;	/* mbuf chain too short */
 	}
 
 	/*
@@ -170,7 +172,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 	 */
 	if ((off == 0 || offp) && M_TRAILINGSPACE(n) >= tlen &&
 	    !sharedcluster) {
-		m_copydata(n->m_next, 0, tlen, mtod(n, caddr_t) + n->m_len);
+		m_copydata(n->m_next, 0, tlen, mtod(n, char *) + n->m_len);
 		n->m_len += tlen;
 		m_adj(n->m_next, tlen);
 		goto ok;
@@ -179,7 +181,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 	    !sharedcluster && n->m_next->m_len >= tlen) {
 		n->m_next->m_data -= hlen;
 		n->m_next->m_len += hlen;
-		bcopy(mtod(n, caddr_t) + off, mtod(n->m_next, caddr_t), hlen);
+		memcpy(mtod(n->m_next, void *), mtod(n, char *) + off, hlen);
 		n->m_len -= hlen;
 		n = n->m_next;
 		off = 0;
@@ -188,7 +190,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 
 	/*
 	 * now, we need to do the hard way.  don't m_copy as there's no room
-	 * on both ends.
+	 * on both end.
 	 */
 	MGET(o, M_DONTWAIT, m->m_type);
 	if (o && len > MLEN) {
@@ -200,14 +202,14 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 	}
 	if (!o) {
 		m_freem(m);
-		return (NULL);	/* ENOBUFS */
+		return NULL;	/* ENOBUFS */
 	}
 	/* get hlen from <n, off> into <o, 0> */
 	o->m_len = hlen;
-	bcopy(mtod(n, caddr_t) + off, mtod(o, caddr_t), hlen);
+	memcpy(mtod(o, void *), mtod(n, char *) + off, hlen);
 	n->m_len -= hlen;
 	/* get tlen from <n->m_next, 0> into <o, hlen> */
-	m_copydata(n->m_next, 0, tlen, mtod(o, caddr_t) + o->m_len);
+	m_copydata(n->m_next, 0, tlen, mtod(o, char *) + o->m_len);
 	o->m_len += tlen;
 	m_adj(n->m_next, tlen);
 	o->m_next = n->m_next;
@@ -218,41 +220,36 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 ok:
 	if (offp)
 		*offp = off;
-	return (n);
+	return n;
 }
 
-static struct mbuf *
-m_dup1(struct mbuf *m, int off, int len, int wait)
+/*
+ * FreeBSD 4.6 introduced m_getcl(), which performs `fast' allocation
+ * mbuf clusters from a cache of recently-freed clusters. (If the cache
+ * is empty, new clusters are allocated en-masse).
+ * On NetBSD, for now, implement the `cache' as a function
+ * using normal NetBSD mbuf/cluster allocation macros. Replace this
+ * with fast-cache code, if and when NetBSD implements one.
+ */
+struct mbuf *
+m_getcl(int how, int type, int flags)
 {
-	struct mbuf *n;
-	int l;
+	struct mbuf *mp;
 
-	if (len > MCLBYTES)
-		return (NULL);
-	if (off == 0 && (m->m_flags & M_PKTHDR) != 0) {
-		MGETHDR(n, wait, m->m_type);
-		if (n == NULL)
-			return (NULL);
-		M_DUP_PKTHDR(n, m);
-		l = MHLEN;
-	} else {
-		MGET(n, wait, m->m_type);
-		l = MLEN;
-	}
-	if (n && len > l) {
-		MCLGET(n, wait);
-		if ((n->m_flags & M_EXT) == 0) {
-			m_free(n);
-			n = NULL;
-		}
-	}
-	if (!n)
-		return (NULL);
+	if ((flags & M_PKTHDR) != 0)
+		MGETHDR(mp, how, type);
+	else
+		MGET(mp, how, type);
 
-	m_copydata(m, off, len, mtod(n, caddr_t));
-	n->m_len = len;
+	if (mp == NULL)
+		return NULL;
 
-	return (n);
+	MCLGET(mp, how);
+	if ((mp->m_flags & M_EXT) != 0)
+		return mp;
+
+	m_free(mp);
+	return NULL;
 }
 
 /* Get a packet tag structure along with specified data following. */
@@ -271,32 +268,70 @@ m_tag_get(int type, int len, int wait)
 	return (t);
 }
 
+/* Free a packet tag. */
+void
+m_tag_free(struct m_tag *t)
+{
+
+	free(t, M_PACKET_TAGS);
+}
+
 /* Prepend a packet tag. */
 void
 m_tag_prepend(struct mbuf *m, struct m_tag *t)
 {
+
 	SLIST_INSERT_HEAD(&m->m_pkthdr.tags, t, m_tag_link);
+}
+
+/* Unlink a packet tag. */
+void
+m_tag_unlink(struct mbuf *m, struct m_tag *t)
+{
+
+	SLIST_REMOVE(&m->m_pkthdr.tags, t, m_tag, m_tag_link);
 }
 
 /* Unlink and free a packet tag. */
 void
 m_tag_delete(struct mbuf *m, struct m_tag *t)
 {
-	SLIST_REMOVE(&m->m_pkthdr.tags, t, m_tag, m_tag_link);
-	free(t, M_PACKET_TAGS);
+
+	m_tag_unlink(m, t);
+	m_tag_free(t);
 }
 
-/* Unlink and free a packet tag chain. */
+/* Unlink and free a packet tag chain, starting from given tag. */
 void
-m_tag_delete_chain(struct mbuf *m)
+m_tag_delete_chain(struct mbuf *m, struct m_tag *t)
 {
-	struct m_tag *p;
+	struct m_tag *p, *q;
 
-	while ((p = SLIST_FIRST(&m->m_pkthdr.tags)) != NULL) {
-		SLIST_REMOVE_HEAD(&m->m_pkthdr.tags, m_tag_link);
-		free(p, M_PACKET_TAGS);
-	}
+	if (t != NULL)
+		p = t;
+	else
+		p = SLIST_FIRST(&m->m_pkthdr.tags);
+	if (p == NULL)
+		return;
+	while ((q = SLIST_NEXT(p, m_tag_link)) != NULL)
+		m_tag_delete(m, q);
+	m_tag_delete(m, p);
 }
+
+/*
+ * Strip off all tags that would normally vanish when
+ * passing through a network interface.  Only persistent
+ * tags will exist after this; these are expected to remain
+ * so long as the mbuf chain exists, regardless of the
+ * path the mbufs take.
+ */
+void
+m_tag_delete_nonpersistent(struct mbuf *m)
+{
+	/* NetBSD has no persistent tags yet, so just delete all tags. */
+	m_tag_delete_chain(m, NULL);
+}
+
 
 /* Find a tag, starting from a given position. */
 struct m_tag *
@@ -340,11 +375,11 @@ m_tag_copy_chain(struct mbuf *to, struct mbuf *from)
 {
 	struct m_tag *p, *t, *tprev = NULL;
 
-	m_tag_delete_chain(to);
+	m_tag_delete_chain(to, NULL);
 	SLIST_FOREACH(p, &from->m_pkthdr.tags, m_tag_link) {
 		t = m_tag_copy(p);
 		if (t == NULL) {
-			m_tag_delete_chain(to);
+			m_tag_delete_chain(to, NULL);
 			return (0);
 		}
 		if (tprev == NULL)
@@ -360,6 +395,7 @@ m_tag_copy_chain(struct mbuf *to, struct mbuf *from)
 void
 m_tag_init(struct mbuf *m)
 {
+
 	SLIST_INIT(&m->m_pkthdr.tags);
 }
 
@@ -367,6 +403,7 @@ m_tag_init(struct mbuf *m)
 struct m_tag *
 m_tag_first(struct mbuf *m)
 {
+
 	return (SLIST_FIRST(&m->m_pkthdr.tags));
 }
 
@@ -374,5 +411,6 @@ m_tag_first(struct mbuf *m)
 struct m_tag *
 m_tag_next(struct mbuf *m, struct m_tag *t)
 {
+
 	return (SLIST_NEXT(t, m_tag_link));
 }

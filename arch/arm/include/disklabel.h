@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.13 2007/06/20 18:15:45 deraadt Exp $	*/
+/*	$NetBSD: disklabel.h,v 1.7 2005/12/11 12:16:46 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Mark Brinicombe.
@@ -33,6 +33,14 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ * RiscBSD kernel project
+ *
+ * disklabel.h
+ *
+ * machine specific disk label info
+ *
+ * Created      : 04/10/94
  */
 
 #ifndef _ARM_DISKLABEL_H_
@@ -40,6 +48,35 @@
 
 #define LABELSECTOR	1		/* sector containing label */
 #define LABELOFFSET	0		/* offset of label in sector */
-#define MAXPARTITIONS	16		/* number of partitions */
+#define MAXPARTITIONS	8		/* number of partitions */
+#define RAW_PART	2		/* raw partition: XX?c */
+
+#if HAVE_NBTOOL_CONFIG_H
+#include <nbinclude/sys/dkbad.h>
+#include <nbinclude/sys/disklabel_acorn.h>
+#include <nbinclude/sys/bootblock.h>
+#else
+#include <sys/dkbad.h>
+#include <sys/disklabel_acorn.h>
+#include <sys/bootblock.h>
+#endif /* HAVE_NBTOOL_CONFIG_H */
+
+struct cpu_disklabel {
+	struct mbr_partition mbrparts[MBR_PART_COUNT];
+	struct dkbad bad;
+};
+
+#ifdef _KERNEL
+struct buf;
+struct disklabel;
+
+/* for readdisklabel.  rv != 0 -> matches, msg == NULL -> success */
+int	mbr_label_read __P((dev_t, void (*)(struct buf *), struct disklabel *,
+	    struct cpu_disklabel *, const char **, int *, int *));
+
+/* for writedisklabel.  rv == 0 -> dosen't match, rv > 0 -> success */
+int	mbr_label_locate __P((dev_t, void (*)(struct buf *),
+	    struct disklabel *, struct cpu_disklabel *, int *, int *));
+#endif /* _KERNEL */
 
 #endif /* _ARM_DISKLABEL_H_ */

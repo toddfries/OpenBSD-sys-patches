@@ -1,7 +1,7 @@
-/*	$NetBSD: vfs_syscalls_30.c,v 1.18 2006/11/16 01:32:41 christos Exp $	*/
+/*	$NetBSD: vfs_syscalls_30.c,v 1.28 2008/06/24 11:18:15 ad Exp $	*/
 
 /*-
- * Copyright (c) 2005 The NetBSD Foundation, Inc.
+ * Copyright (c) 2005, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,7 +29,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_syscalls_30.c,v 1.18 2006/11/16 01:32:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_syscalls_30.c,v 1.28 2008/06/24 11:18:15 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,8 +46,8 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_syscalls_30.c,v 1.18 2006/11/16 01:32:41 christo
 #include <sys/dirent.h>
 #include <sys/malloc.h>
 #include <sys/kauth.h>
+#include <sys/vfs_syscalls.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/common/compat_util.h>
@@ -94,23 +87,17 @@ cvtstat(struct stat13 *ost, const struct stat *st)
  */
 /* ARGSUSED */
 int
-compat_30_sys___stat13(struct lwp *l, void *v, register_t *retval)
+compat_30_sys___stat13(struct lwp *l, const struct compat_30_sys___stat13_args *uap, register_t *retval)
 {
-	struct compat_30_sys___stat13_args /* {
+	/* {
 		syscallarg(const char *) path;
 		syscallarg(struct stat13 *) ub;
-	} */ *uap = v;
+	} */
 	struct stat sb;
 	struct stat13 osb;
 	int error;
-	struct nameidata nd;
 
-	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
-	    SCARG(uap, path), l);
-	if ((error = namei(&nd)) != 0)
-		return error;
-	error = vn_stat(nd.ni_vp, &sb, l);
-	vput(nd.ni_vp);
+	error = do_sys_stat(SCARG(uap, path), FOLLOW, &sb);
 	if (error)
 		return error;
 	cvtstat(&osb, &sb);
@@ -124,23 +111,17 @@ compat_30_sys___stat13(struct lwp *l, void *v, register_t *retval)
  */
 /* ARGSUSED */
 int
-compat_30_sys___lstat13(struct lwp *l, void *v, register_t *retval)
+compat_30_sys___lstat13(struct lwp *l, const struct compat_30_sys___lstat13_args *uap, register_t *retval)
 {
-	struct compat_30_sys___lstat13_args /* {
+	/* {
 		syscallarg(const char *) path;
 		syscallarg(struct stat13 *) ub;
-	} */ *uap = v;
+	} */
 	struct stat sb;
 	struct stat13 osb;
 	int error;
-	struct nameidata nd;
 
-	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, UIO_USERSPACE,
-	    SCARG(uap, path), l);
-	if ((error = namei(&nd)) != 0)
-		return error;
-	error = vn_stat(nd.ni_vp, &sb, l);
-	vput(nd.ni_vp);
+	error = do_sys_stat(SCARG(uap, path), NOFOLLOW, &sb);
 	if (error)
 		return error;
 	cvtstat(&osb, &sb);
@@ -150,12 +131,12 @@ compat_30_sys___lstat13(struct lwp *l, void *v, register_t *retval)
 
 /* ARGSUSED */
 int
-compat_30_sys_fhstat(struct lwp *l, void *v, register_t *retval)
+compat_30_sys_fhstat(struct lwp *l, const struct compat_30_sys_fhstat_args *uap, register_t *retval)
 {
-	struct compat_30_sys_fhstat_args /* {
+	/* {
 		syscallarg(const struct compat_30_fhandle *) fhp;
 		syscallarg(struct stat13 *) sb;
-	} */ *uap = v;
+	} */
 	struct stat sb;
 	struct stat13 osb;
 	int error;
@@ -179,7 +160,7 @@ compat_30_sys_fhstat(struct lwp *l, void *v, register_t *retval)
 		return EOPNOTSUPP;
 	if ((error = VFS_FHTOVP(mp, (struct fid*)&fh.fh_fid, &vp)))
 		return (error);
-	error = vn_stat(vp, &sb, l);
+	error = vn_stat(vp, &sb);
 	vput(vp);
 	if (error)
 		return (error);
@@ -193,27 +174,22 @@ compat_30_sys_fhstat(struct lwp *l, void *v, register_t *retval)
  */
 /* ARGSUSED */
 int
-compat_30_sys___fstat13(struct lwp *l, void *v, register_t *retval)
+compat_30_sys___fstat13(struct lwp *l, const struct compat_30_sys___fstat13_args *uap, register_t *retval)
 {
-	struct compat_30_sys___fstat13_args /* {
+	/* {
 		syscallarg(int) fd;
 		syscallarg(struct stat13 *) sb;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
+	} */
 	int fd = SCARG(uap, fd);
-	struct filedesc *fdp = p->p_fd;
 	struct file *fp;
 	struct stat sb;
 	struct stat13 osb;
 	int error;
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
+	if ((fp = fd_getfile(fd)) == NULL)
 		return EBADF;
-
-	FILE_USE(fp);
-	error = (*fp->f_ops->fo_stat)(fp, &sb, l);
-	FILE_UNUSE(fp, l);
-
+	error = (*fp->f_ops->fo_stat)(fp, &sb);
+	fd_putfile(fd);
 	if (error)
 		return error;
 	cvtstat(&osb, &sb);
@@ -225,19 +201,18 @@ compat_30_sys___fstat13(struct lwp *l, void *v, register_t *retval)
  * Read a block of directory entries in a file system independent format.
  */
 int
-compat_30_sys_getdents(struct lwp *l, void *v, register_t *retval)
+compat_30_sys_getdents(struct lwp *l, const struct compat_30_sys_getdents_args *uap, register_t *retval)
 {
-	struct compat_30_sys_getdents_args /* {
+	/* {
 		syscallarg(int) fd;
 		syscallarg(char *) buf;
 		syscallarg(size_t) count;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
+	} */
 	struct dirent *bdp;
 	struct vnode *vp;
-	caddr_t inp, tbuf;	/* BSD-format */
+	char *inp, *tbuf;	/* BSD-format */
 	int len, reclen;	/* BSD-format */
-	caddr_t outp;		/* NetBSD-3.0-format */
+	char *outp;		/* NetBSD-3.0-format */
 	int resid;	
 	struct file *fp;
 	struct uio auio;
@@ -248,8 +223,8 @@ compat_30_sys_getdents(struct lwp *l, void *v, register_t *retval)
 	off_t *cookiebuf = NULL, *cookie;
 	int ncookies;
 
-	/* getvnode() will use the descriptor for us */
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	/* fd_getvnode() will use the descriptor for us */
+	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
 		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -257,7 +232,7 @@ compat_30_sys_getdents(struct lwp *l, void *v, register_t *retval)
 		goto out1;
 	}
 
-	vp = (struct vnode *)fp->f_data;
+	vp = fp->f_data;
 	if (vp->v_type != VDIR) {
 		error = EINVAL;
 		goto out1;
@@ -347,7 +322,7 @@ out:
 		free(cookiebuf, M_TEMP);
 	free(tbuf, M_TEMP);
 out1:
-	FILE_UNUSE(fp, l);
+	fd_putfile(SCARG(uap, fd));
 	return error;
 }
 
@@ -355,12 +330,12 @@ out1:
  * Get file handle system call
  */
 int
-compat_30_sys_getfh(struct lwp *l, void *v, register_t *retval)
+compat_30_sys_getfh(struct lwp *l, const struct compat_30_sys_getfh_args *uap, register_t *retval)
 {
-	struct compat_30_sys_getfh_args /* {
+	/* {
 		syscallarg(char *) fname;
 		syscallarg(struct compat_30_fhandle *) fhp;
-	} */ *uap = v;
+	} */
 	struct vnode *vp;
 	struct compat_30_fhandle fh;
 	int error;
@@ -374,8 +349,8 @@ compat_30_sys_getfh(struct lwp *l, void *v, register_t *retval)
 	    0, NULL, NULL, NULL);
 	if (error)
 		return (error);
-	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
-	    SCARG(uap, fname), l);
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | TRYEMULROOT, UIO_USERSPACE,
+	    SCARG(uap, fname));
 	error = namei(&nd);
 	if (error)
 		return (error);
@@ -399,12 +374,12 @@ compat_30_sys_getfh(struct lwp *l, void *v, register_t *retval)
  * and call the device open routine if any.
  */
 int
-compat_30_sys_fhopen(struct lwp *l, void *v, register_t *retval)
+compat_30_sys_fhopen(struct lwp *l, const struct compat_30_sys_fhopen_args *uap, register_t *retval)
 {
-	struct compat_30_sys_fhopen_args /* {
+	/* {
 		syscallarg(const fhandle_t *) fhp;
 		syscallarg(int) flags;
-	} */ *uap = v;
+	} */
 
 	return dofhopen(l, SCARG(uap, fhp), FHANDLE_SIZE_COMPAT,
 	    SCARG(uap, flags), retval);
@@ -412,27 +387,36 @@ compat_30_sys_fhopen(struct lwp *l, void *v, register_t *retval)
 
 /* ARGSUSED */
 int
-compat_30_sys___fhstat30(struct lwp *l, void *v, register_t *retval)
+compat_30_sys___fhstat30(struct lwp *l, const struct compat_30_sys___fhstat30_args *uap_30, register_t *retval)
 {
-	struct compat_30_sys___fhstat30_args /* {
+	/* {
 		syscallarg(const fhandle_t *) fhp;
 		syscallarg(struct stat *) sb;
-	} */ *uap = v;
+	} */
+	struct sys___fhstat40_args uap;
 
-	return dofhstat(l, SCARG(uap, fhp), FHANDLE_SIZE_COMPAT,
-	    SCARG(uap, sb), retval);
+	SCARG(&uap, fhp) = SCARG(uap_30, fhp);
+	SCARG(&uap, fh_size) = FHANDLE_SIZE_COMPAT;
+	SCARG(&uap, sb) = SCARG(uap_30, sb);
+
+	return sys___fhstat40(l, &uap, retval);
 }
 
 /* ARGSUSED */
 int
-compat_30_sys_fhstatvfs1(struct lwp *l, void *v, register_t *retval)
+compat_30_sys_fhstatvfs1(struct lwp *l, const struct compat_30_sys_fhstatvfs1_args *uap_30, register_t *retval)
 {
-	struct compat_30_sys_fhstatvfs1_args /* {
+	/* {
 		syscallarg(const fhandle_t *) fhp;
 		syscallarg(struct statvfs *) buf;
 		syscallarg(int)	flags;
-	} */ *uap = v;
+	} */
+	struct sys___fhstatvfs140_args uap;
 
-	return dofhstatvfs(l, SCARG(uap, fhp), FHANDLE_SIZE_COMPAT,
-	    SCARG(uap, buf), SCARG(uap, flags), retval);
+	SCARG(&uap, fhp) = SCARG(uap_30, fhp);
+	SCARG(&uap, fh_size) = FHANDLE_SIZE_COMPAT;
+	SCARG(&uap, buf) = SCARG(uap_30, buf);
+	SCARG(&uap, flags) = SCARG(uap_30, flags);
+
+	return sys___fhstatvfs140(l, &uap, retval);
 }

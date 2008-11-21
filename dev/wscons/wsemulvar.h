@@ -1,5 +1,4 @@
-/* $OpenBSD: wsemulvar.h,v 1.10 2007/11/27 16:37:27 miod Exp $ */
-/* $NetBSD: wsemulvar.h,v 1.6 1999/01/17 15:46:15 drochner Exp $ */
+/* $NetBSD: wsemulvar.h,v 1.14 2008/03/25 00:49:20 cube Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -31,38 +30,48 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-struct device;
 struct wsdisplay_emulops;
 
 enum wsemul_resetops {
 	WSEMUL_RESET,
 	WSEMUL_SYNCFONT,
-	WSEMUL_CLEARSCREEN,
-	WSEMUL_CLEARCURSOR
+	WSEMUL_CLEARSCREEN
 };
 
 struct wsemul_ops {
-	char name[WSEMUL_NAME_SIZE];
+	const char *name;
 
 	void	*(*cnattach)(const struct wsscreen_descr *, void *,
 				  int, int, long);
 	void	*(*attach)(int console, const struct wsscreen_descr *, void *,
 				int, int, void *, long);
-	void	(*output)(void *cookie, const u_char *data, u_int count,
-			       int);
+	void	(*output)(void *, const u_char *, u_int, int);
 	int	(*translate)(void *, keysym_t, const char **);
-	void	(*detach)(void *cookie, u_int *crow, u_int *ccol);
+	void	(*detach)(void *, u_int *, u_int *);
 	void    (*reset)(void *, enum wsemul_resetops);
+	void	(*getmsgattrs)(void *, struct wsdisplay_msgattrs *);
+	void	(*setmsgattrs)(void *, const struct wsscreen_descr *,
+		               const struct wsdisplay_msgattrs *);
 };
 
+#if defined(_KERNEL_OPT)
+#include "opt_wsemul.h"
+#endif
+
+#ifndef WSEMUL_NO_DUMB
 extern const struct wsemul_ops wsemul_dumb_ops;
+#endif
+#ifdef WSEMUL_SUN
 extern const struct wsemul_ops wsemul_sun_ops;
+#endif
+#ifdef WSEMUL_VT100
 extern const struct wsemul_ops wsemul_vt100_ops;
+#endif
 
 const struct wsemul_ops *wsemul_pick(const char *);
 
 /*
  * Callbacks from the emulation code to the display interface driver.
  */
-void	wsdisplay_emulbell(void *v);
-void	wsdisplay_emulinput(void *v, const u_char *, u_int);
+void	wsdisplay_emulbell(void *);
+void	wsdisplay_emulinput(void *, const u_char *, u_int);

@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_exec_aout.c,v 1.60 2006/11/16 01:32:42 christos Exp $	*/
+/*	$NetBSD: linux_exec_aout.c,v 1.65 2008/04/28 20:23:43 martin Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_exec_aout.c,v 1.60 2006/11/16 01:32:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_exec_aout.c,v 1.65 2008/04/28 20:23:43 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,10 +48,9 @@ __KERNEL_RCSID(0, "$NetBSD: linux_exec_aout.c,v 1.60 2006/11/16 01:32:42 christo
 #include <sys/exec_elf.h>
 
 #include <sys/mman.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/reg.h>
 
 #include <compat/linux/common/linux_types.h>
@@ -70,17 +62,17 @@ __KERNEL_RCSID(0, "$NetBSD: linux_exec_aout.c,v 1.60 2006/11/16 01:32:42 christo
 #include <compat/linux/linux_syscallargs.h>
 #include <compat/linux/linux_syscall.h>
 
-int linux_aout_copyargs __P((struct lwp *, struct exec_package *,
-    struct ps_strings *, char **, void *));
+int linux_aout_copyargs(struct lwp *, struct exec_package *,
+    struct ps_strings *, char **, void *);
 
-static int exec_linux_aout_prep_zmagic __P((struct lwp *,
-    struct exec_package *));
-static int exec_linux_aout_prep_nmagic __P((struct lwp *,
-    struct exec_package *));
-static int exec_linux_aout_prep_omagic __P((struct lwp *,
-    struct exec_package *));
-static int exec_linux_aout_prep_qmagic __P((struct lwp *,
-    struct exec_package *));
+static int exec_linux_aout_prep_zmagic(struct lwp *,
+    struct exec_package *);
+static int exec_linux_aout_prep_nmagic(struct lwp *,
+    struct exec_package *);
+static int exec_linux_aout_prep_omagic(struct lwp *,
+    struct exec_package *);
+static int exec_linux_aout_prep_qmagic(struct lwp *,
+    struct exec_package *);
 
 int
 linux_aout_copyargs(struct lwp *l, struct exec_package *pack,
@@ -135,9 +127,7 @@ linux_aout_copyargs(struct lwp *l, struct exec_package *pack,
 }
 
 int
-exec_linux_aout_makecmds(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_linux_aout_makecmds(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *linux_ep = epp->ep_hdr;
 	int machtype, magic;
@@ -174,9 +164,7 @@ exec_linux_aout_makecmds(l, epp)
  */
 
 static int
-exec_linux_aout_prep_zmagic(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_linux_aout_prep_zmagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
 
@@ -211,9 +199,7 @@ exec_linux_aout_prep_zmagic(l, epp)
  */
 
 static int
-exec_linux_aout_prep_nmagic(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_linux_aout_prep_nmagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
 	long bsize, baddr;
@@ -250,9 +236,7 @@ exec_linux_aout_prep_nmagic(l, epp)
  */
 
 static int
-exec_linux_aout_prep_omagic(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_linux_aout_prep_omagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
 	long dsize, bsize, baddr;
@@ -290,9 +274,7 @@ exec_linux_aout_prep_omagic(l, epp)
 }
 
 static int
-exec_linux_aout_prep_qmagic(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_linux_aout_prep_qmagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
 	int error;

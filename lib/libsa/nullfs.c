@@ -1,5 +1,4 @@
-/*	$OpenBSD: nullfs.c,v 1.7 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: open.c,v 1.9 1995/09/19 09:16:52 thorpej Exp $	*/
+/*	$NetBSD: nullfs.c,v 1.9 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -66,47 +65,51 @@
 /*
  * Null filesystem
  */
+
 int
-null_open(char *path, struct open_file *f)
+null_open(const char *path, struct open_file *f)
 {
+
 	return EIO;
 }
 
+#ifndef LIBSA_NO_FS_CLOSE
 int
 null_close(struct open_file *f)
 {
+
 	return 0;
 }
+#endif
 
-ssize_t
+int
 null_read(struct open_file *f, void *buf, size_t size, size_t *resid)
 {
+
 	return EIO;
 }
 
-ssize_t
+#ifndef LIBSA_NO_FS_WRITE
+int
 null_write(struct open_file *f, void *buf, size_t size, size_t *resid)
 {
+
 	return EIO;
 }
+#endif
 
+#ifndef LIBSA_NO_FS_SEEK
 off_t
 null_seek(struct open_file *f, off_t offset, int where)
 {
-	errno = EIO;
-	return -1;
+
+	return (off_t)-1;
 }
+#endif
 
 int
 null_stat(struct open_file *f, struct stat *sb)
 {
-	return EIO;
-}
 
-#ifndef NO_READDIR
-int
-null_readdir(struct open_file *f, char *name)
-{
 	return EIO;
 }
-#endif

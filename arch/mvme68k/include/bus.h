@@ -1,1 +1,6 @@
-/*	$OpenBSD: bus.h,v 1.1 2007/06/03 10:05:41 miod Exp $	*/
+/*	$NetBSD: bus.h,v 1.3 2000/03/18 22:33:05 scw Exp $ */
+
+#include <machine/bus_space.h>
+#include <machine/bus_dma.h>
+
+#define generic_btop(x) m68k_btop(x)

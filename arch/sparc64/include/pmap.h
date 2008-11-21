@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.16 2001/04/22 23:19:30 thorpej Exp $	*/
+/*	$NetBSD: pmap.h,v 1.40 2008/03/14 15:40:02 nakayama Exp $	*/
 
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -37,6 +37,7 @@
 #ifndef _LOCORE
 #include <machine/pte.h>
 #include <sys/queue.h>
+#include <uvm/uvm_object.h>
 #endif
 
 /*
@@ -51,7 +52,7 @@
  * total:						32 bits
  *
  * In 64-bit mode the Spitfire and Blackbird CPUs support only
- * 44-bit virtual addresses.  All addresses between 
+ * 44-bit virtual addresses.  All addresses between
  * 0x0000 07ff ffff ffff and 0xffff f800 0000 0000 are in the
  * "VA hole" and trap, so we don't have to track them.  However,
  * we do need to keep them in mind during PT walking.  If they
@@ -72,9 +73,9 @@
 
 #define HOLESHIFT	(43)
 
-#define PTSZ	(NBPG/8)
-#define PDSZ	(PTSZ)
-#define STSZ	(PTSZ)
+#define PTSZ	(PAGE_SIZE/8)			/* page table entry */
+#define PDSZ	(PTSZ)				/* page directory */
+#define STSZ	(PTSZ)				/* psegs */
 
 #define PTSHIFT		(13)
 #define	PDSHIFT		(10+PTSHIFT)
@@ -91,10 +92,10 @@
  * page bits.
  */
 struct page_size_map {
-	u_int64_t mask;
-	u_int64_t code;
+	uint64_t mask;
+	uint64_t code;
 #ifdef DEBUG
-	u_int64_t use;
+	uint64_t use;
 #endif
 };
 extern struct page_size_map page_size_map[];
@@ -107,84 +108,128 @@ extern struct page_size_map page_size_map[];
 #define va_to_dir(v)	(int)((((paddr_t)(v))>>PDSHIFT)&PDMASK)
 #define va_to_pte(v)	(int)((((paddr_t)(v))>>PTSHIFT)&PTMASK)
 
-#ifdef	_KERNEL
-
 struct pmap {
-	int pm_ctx;		/* Current context */
-	int pm_refs;		/* ref count */
-	/* 
-	 * This contains 64-bit pointers to pages that contain 
+	struct uvm_object pm_obj;
+#define pm_lock pm_obj.vmobjlock
+#define pm_refs pm_obj.uo_refs
+#ifdef MULTIPROCESSOR
+	LIST_ENTRY(pmap) pm_list[CPUSET_MAXNUMCPU];	/* per cpu ctx used list */
+#else
+	LIST_ENTRY(pmap) pm_list;	/* single ctx used list */
+#endif
+
+	struct pmap_statistics pm_stats;
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * We record the context used on any cpu here. If the context
+	 * is actually present in the TLB, it will be the plain context
+	 * number. If the context is allocated, but has been flushed
+	 * from the tlb, the number will be negative.
+	 * If this pmap has no context allocated on that cpu, the entry
+	 * will be 0.
+	 */
+	int pm_ctx[CPUSET_MAXNUMCPU];	/* Current context per cpu */
+#else
+	int pm_ctx;			/* Current context */
+#endif
+
+	/*
+	 * This contains 64-bit pointers to pages that contain
 	 * 1024 64-bit pointers to page tables.  All addresses
-	 * are physical.  
+	 * are physical.
 	 *
 	 * !!! Only touch this through pseg_get() and pseg_set() !!!
 	 */
 	paddr_t pm_physaddr;	/* physical address of pm_segs */
 	int64_t *pm_segs;
-	struct simplelock pm_lock;
 };
 
 /*
  * This comes from the PROM and is used to map prom entries.
  */
 struct prom_map {
-	u_int64_t	vstart;
-	u_int64_t	vsize;
-	u_int64_t	tte;
+	uint64_t	vstart;
+	uint64_t	vsize;
+	uint64_t	tte;
 };
 
 #define PMAP_NC		0x001	/* Set the E bit in the page */
 #define PMAP_NVC	0x002	/* Don't enable the virtual cache */
 #define PMAP_LITTLE	0x004	/* Map in little endian mode */
-/* Large page size hints -- we really should use another param to pmap_enter() */
+/* Large page size hints --
+   we really should use another param to pmap_enter() */
 #define PMAP_8K		0x000
 #define PMAP_64K	0x008	/* Use 64K page */
 #define PMAP_512K	0x010
 #define PMAP_4M		0x018
 #define PMAP_SZ_TO_TTE(x)	(((x)&0x018)<<58)
-/* If these bits are different in va's to the same PA then there is an aliasing in the d$ */
-#define VA_ALIAS_MASK   (1<<13)	
+/* If these bits are different in va's to the same PA
+   then there is an aliasing in the d$ */
+#define VA_ALIAS_MASK   (1 << 13)
 
 typedef	struct pmap *pmap_t;
 
-/* 
- * Encode IO space for pmap_enter() 
- *
- * Since sun4u machines don't have separate IO spaces, this is a noop.
- */
-#define PMAP_IOENC(io)	0
-
+#ifdef	_KERNEL
 extern struct pmap kernel_pmap_;
 #define	pmap_kernel()	(&kernel_pmap_)
 
-int pmap_count_res(pmap_t pmap);
-/* int pmap_change_wiring(pmap_t pm, vaddr_t va, boolean_t wired); */
+#ifdef PMAP_COUNT_DEBUG
+/* diagnostic versions if PMAP_COUNT_DEBUG option is used */
+int pmap_count_res(struct pmap *);
+int pmap_count_wired(struct pmap *);
 #define	pmap_resident_count(pm)		pmap_count_res((pm))
+#define	pmap_wired_count(pm)		pmap_count_wired((pm))
+#else
+#define	pmap_resident_count(pm)		((pm)->pm_stats.resident_count)
+#define	pmap_wired_count(pm)		((pm)->pm_stats.wired_count)
+#endif
+
 #define	pmap_phys_address(x)		(x)
-#define	pmap_update(pm)			/* nothing (yet) */
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
-#define pmap_proc_iflush(p,va,len)	/* nothing */
-
-void pmap_bootstrap(u_long, u_long, u_int, u_int);
+void pmap_activate_pmap(struct pmap *);
+void pmap_update(struct pmap *);
+void pmap_bootstrap(u_long, u_long);
 /* make sure all page mappings are modulo 16K to prevent d$ aliasing */
-#define PMAP_PREFER(pa, va)	(*(va) += (((*(va)) ^ (pa)) & VA_ALIAS_MASK))
+#define	PMAP_PREFER(pa, va, sz, td)	(*(va)+=(((*(va))^(pa))&(1<<(PGSHIFT))))
 
-#define PMAP_GROWKERNEL         /* turn on pmap_growkernel interface */
+#define	PMAP_GROWKERNEL         /* turn on pmap_growkernel interface */
+#define PMAP_NEED_PROCWR
+
+void pmap_procwr(struct proc *, vaddr_t, size_t);
 
 /* SPARC specific? */
-void		pmap_redzone(void);
 int             pmap_dumpsize(void);
-int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t);
+int             pmap_dumpmmu(int (*)(dev_t, daddr_t, void *, size_t),
+                                 daddr_t);
 int		pmap_pa_exists(paddr_t);
-struct proc;
-void		switchexit(struct proc *);
+void		switchexit(struct lwp *, int);
+void		pmap_kprotect(vaddr_t, vm_prot_t);
 
 /* SPARC64 specific */
-int	ctx_alloc(struct pmap*);
-void	ctx_free(struct pmap*);
+/* Assembly routines to flush TLB mappings */
+void sp_tlb_flush_pte(vaddr_t, int);
+void sp_tlb_flush_ctx(int);
+void sp_tlb_flush_all(void);
 
+#ifdef MULTIPROCESSOR
+void smp_tlb_flush_pte(vaddr_t, pmap_t);
+void smp_tlb_flush_ctx(pmap_t);
+void smp_tlb_flush_all(void);
+#define	tlb_flush_pte(va,pm)	smp_tlb_flush_pte(va, pm)
+#define	tlb_flush_ctx(pm)	smp_tlb_flush_ctx(pm)
+#define	tlb_flush_all()		smp_tlb_flush_all()
+#else
+#define	tlb_flush_pte(va,pm)	sp_tlb_flush_pte(va, (pm)->pm_ctx)
+#define	tlb_flush_ctx(pm)	sp_tlb_flush_ctx((pm)->pm_ctx)
+#define	tlb_flush_all()		sp_tlb_flush_all()
+#endif
+
+/* Installed physical memory, as discovered during bootstrap. */
+extern int phys_installed_size;
+extern struct mem_region *phys_installed;
 
 #endif	/* _KERNEL */
+
 #endif	/* _LOCORE */
 #endif	/* _MACHINE_PMAP_H_ */

@@ -1,5 +1,4 @@
-/* $OpenBSD: bwx.h,v 1.4 2002/05/10 10:13:27 art Exp $ */
-/* $NetBSD: bwx.h,v 1.3 2000/06/08 02:55:37 thorpej Exp $ */
+/* $NetBSD: bwx.h,v 1.6 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,17 +41,12 @@
  * See "Alpha Architecture Handbook, Version 3", DEC order number EC-QD2KB-TE.
  */
 
-#define BWX_EV56_INT8	(0L << 37)
-#define BWX_EV56_INT4	(1L << 37)
-#define BWX_EV56_INT2	(2L << 37)
-#define BWX_EV56_INT1	(3L << 37)
-
 static __inline u_int8_t
-alpha_ldbu(__volatile u_int8_t *a0)
+alpha_ldbu(volatile u_int8_t *a0)
 {
 	u_int8_t v0;
 
-	__asm __volatile("ldbu %0, %1"
+	__asm volatile("ldbu %0, %1"
 		: "=r" (v0)
 		: "m" (*a0));
 
@@ -67,51 +54,33 @@ alpha_ldbu(__volatile u_int8_t *a0)
 }
 
 static __inline u_int16_t
-alpha_ldwu(__volatile u_int16_t *a0)
+alpha_ldwu(volatile u_int16_t *a0)
 {
 	u_int16_t v0;
 
-	__asm __volatile("ldwu %0, %1"
+	__asm volatile("ldwu %0, %1"
 		: "=r" (v0)
 		: "m" (*a0));
 
 	return (v0);
 }
 
-static __inline u_int32_t
-alpha_ldlu(__volatile u_int32_t *a0)
+static __inline void
+alpha_stb(volatile u_int8_t *a0, u_int8_t a1)
 {
-	return (*a0);
+
+	__asm volatile("stb %1, %0"
+		: "=m" (*a0)
+		: "r" (a1));
 }
 
 static __inline void
-alpha_stb(__volatile u_int8_t *a0, u_int8_t a1)
+alpha_stw(volatile u_int16_t *a0, u_int16_t a1)
 {
 
-	__asm __volatile("stb %1, %0"
+	__asm volatile("stw %1, %0"
 		: "=m" (*a0)
-		: "r" (a1)
-		: "memory");
-}
-
-static __inline void
-alpha_stw(__volatile u_int16_t *a0, u_int16_t a1)
-{
-
-	__asm __volatile("stw %1, %0"
-		: "=m" (*a0)
-		: "r" (a1)
-		: "memory");
-}
-
-static __inline void
-alpha_stl(__volatile u_int32_t *a0, u_int32_t a1)
-{
-
-	__asm __volatile("stl %1, %0"
-		: "=m" (*a0)
-		: "r" (a1)
-		: "memory");
+		: "r" (a1));
 }
 
 static __inline u_int8_t
@@ -119,10 +88,9 @@ alpha_sextb(u_int8_t a0)
 {
 	u_int8_t v0;
 
-	__asm __volatile("sextb %1, %0"
+	__asm volatile("sextb %1, %0"
 		: "=r" (v0)
-		: "r" (a0)
-		: "memory");
+		: "r" (a0));
 
 	return (v0);
 }
@@ -132,10 +100,9 @@ alpha_sextw(u_int16_t a0)
 {
 	u_int16_t v0;
 
-	__asm __volatile("sextw %1, %0"
+	__asm volatile("sextw %1, %0"
 		: "=r" (v0)
-		: "r" (a0)
-		: "memory");
+		: "r" (a0));
 
 	return (v0);
 }

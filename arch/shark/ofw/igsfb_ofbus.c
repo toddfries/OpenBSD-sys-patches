@@ -1,4 +1,4 @@
-/*	$NetBSD: igsfb_ofbus.c,v 1.1 2006/12/07 03:10:14 macallan Exp $ */
+/*	$NetBSD: igsfb_ofbus.c,v 1.8 2008/05/08 02:10:52 macallan Exp $ */
 
 /*
  * Copyright (c) 2006 Michael Lorenz
@@ -12,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -33,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: igsfb_ofbus.c,v 1.1 2006/12/07 03:10:14 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: igsfb_ofbus.c,v 1.8 2008/05/08 02:10:52 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,8 +44,6 @@ __KERNEL_RCSID(0, "$NetBSD: igsfb_ofbus.c,v 1.1 2006/12/07 03:10:14 macallan Exp
 #include <machine/intr.h>
 #include <machine/ofw.h>
 
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcidevs.h>
 #include <dev/isa/isavar.h>
 
 #include <dev/wscons/wsdisplayvar.h>
@@ -58,7 +54,7 @@ __KERNEL_RCSID(0, "$NetBSD: igsfb_ofbus.c,v 1.1 2006/12/07 03:10:14 macallan Exp
 
 #include <dev/ic/igsfbreg.h>
 #include <dev/ic/igsfbvar.h>
-#include "igsfb_ofbusvar.h"
+#include <shark/ofw/igsfb_ofbusvar.h>
 
 static int	igsfb_ofbus_is_console(int);
 
@@ -74,11 +70,15 @@ static int	igsfb_setup_dc(struct igsfb_devconfig *);
 CFATTACH_DECL(igsfb_ofbus, sizeof(struct igsfb_softc),
     igsfb_ofbus_match, igsfb_ofbus_attach, NULL, NULL);
     
-static const char *compat_strings[] = { "igs,cyperpro2010", 0 };
+static const char const *compat_strings[] = { "igs,cyperpro2010", NULL };
 
 vaddr_t igsfb_mem_vaddr = 0, igsfb_mmio_vaddr = 0;
 paddr_t igsfb_mem_paddr;
 struct bus_space igsfb_memt, igsfb_iot;
+
+#if (NIGSFB_OFBUS > 0) || (NVGA_OFBUS > 0)
+extern int console_ihandle;
+#endif
 
 int
 igsfb_ofbus_cnattach(bus_space_tag_t iot, bus_space_tag_t memt)
@@ -92,10 +92,12 @@ igsfb_ofbus_cnattach(bus_space_tag_t iot, bus_space_tag_t memt)
 	stdout_phandle = 0;
 
 	/* first find out if there's a CyberPro at all in this machine */
-	if ((igs_node = OF_finddevice("/vlbus/display")) == -1)
+	igs_node = OF_finddevice("/vlbus/display");
+	if (igs_node == -1)
 		return ENXIO;
 	if (of_compatible(igs_node, compat_strings) < 0) 
 		return ENXIO;
+
 	/*
 	 * now we know there's a CyberPro in this machine so map it into
 	 * kernel space, even if it's not the console
@@ -123,7 +125,7 @@ igsfb_ofbus_cnattach(bus_space_tag_t iot, bus_space_tag_t memt)
 	    sizeof(stdout_ihandle)) != sizeof(stdout_ihandle)) {
 		return ENXIO;
 	}
-	stdout_ihandle = of_decode_int((unsigned char *)&stdout_ihandle);
+	stdout_ihandle = of_decode_int((void *)&stdout_ihandle);
 	stdout_phandle = OF_instance_to_package(stdout_ihandle);
 
 	if (stdout_phandle != igs_node)
@@ -141,6 +143,9 @@ igsfb_ofbus_cnattach(bus_space_tag_t iot, bus_space_tag_t memt)
 
 	igsfb_ofbus_console = 1;
 	igsfb_ofbus_phandle = stdout_phandle;
+#if (NIGSFB_OFBUS > 0) || (NVGA_OFBUS > 0)
+	console_ihandle = stdout_ihandle;
+#endif
 	return 0;
 }
 
@@ -149,11 +154,11 @@ igsfb_setup_dc(struct igsfb_devconfig *dc)
 {
 	int ret;
 
-	dc->dc_id = PCI_PRODUCT_INTEGRAPHICS_CYBERPRO2010;
+	dc->dc_id = 0x2010;
 	dc->dc_memt = &igsfb_memt;
 	dc->dc_memaddr = 0;
 	dc->dc_memsz= 0x00400000;
-	dc->dc_memflags = PCI_MAPREG_TYPE_MEM;
+	dc->dc_memflags = 0;
 
 	dc->dc_iot = &igsfb_iot;
 	dc->dc_iobase = 0;
@@ -186,8 +191,9 @@ igsfb_ofbus_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct ofbus_attach_args *oba = aux;
 
-	if (of_compatible(oba->oba_phandle, compat_strings) == -1)
-		return (0);
+	if (of_compatible(oba->oba_phandle, compat_strings) < 0)
+		return 0;
+
 	return 10;	/* beat vga etc. */
 }
 
@@ -200,18 +206,19 @@ igsfb_ofbus_attach(struct device *parent, struct device *self, void *aux)
 	uint32_t regs[16];
 	int isconsole, ret;
 
-	OF_getprop(oba->oba_phandle, "reg", regs, sizeof(regs));
-	isconsole = 0;
 	if (igsfb_ofbus_is_console(oba->oba_phandle)) {
-		sc->sc_dc = &igsfb_console_dc;
 		isconsole = 1;
+		sc->sc_dc = &igsfb_console_dc;
 	} else {
+		isconsole = 0;
 		sc->sc_dc = malloc(sizeof(struct igsfb_devconfig),
 				   M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (sc->sc_dc == NULL)
 			panic("unable to allocate igsfb_devconfig");
-		if (OF_getprop(oba->oba_phandle, "reg", regs, sizeof(regs)) <= 0) {
-			printf("Can't read 'reg' property\n");
+		if (OF_getprop(oba->oba_phandle, "reg",
+			       regs, sizeof(regs)) <= 0)
+		{
+			printf(": unable to read 'reg' property\n");
 			return;
 		}
 		ret = igsfb_setup_dc(sc->sc_dc);

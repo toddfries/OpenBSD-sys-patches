@@ -1,6 +1,6 @@
-/*	$OpenBSD: ciphy.c,v 1.19 2008/05/29 06:20:02 brad Exp $	*/
-/*	$FreeBSD: ciphy.c,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
-/*
+/* $NetBSD: ciphy.c,v 1.16 2008/11/17 03:04:27 dyoung Exp $ */
+
+/*-
  * Copyright (c) 2004
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
  *
@@ -30,7 +30,12 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * FreeBSD: src/sys/dev/mii/ciphy.c,v 1.2 2005/01/06 01:42:55 imp Exp
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ciphy.c,v 1.16 2008/11/17 03:04:27 dyoung Exp $");
 
 /*
  * Driver for the Cicada CS8201 10/100/1000 copper PHY.
@@ -38,20 +43,14 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
 #include <sys/device.h>
+#include <sys/kernel.h>
 #include <sys/socket.h>
-#include <sys/errno.h>
+#include <sys/bus.h>
 
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <net/if_media.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
-
-#include <dev/pci/pcivar.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -59,50 +58,47 @@
 
 #include <dev/mii/ciphyreg.h>
 
-#include <machine/bus.h>
+static int ciphymatch(device_t, cfdata_t, void *);
+static void ciphyattach(device_t, device_t, void *);
 
-int	ciphymatch(struct device *, void *, void *);
-void	ciphyattach(struct device *, struct device *, void *);
+CFATTACH_DECL_NEW(ciphy, sizeof(struct mii_softc),
+    ciphymatch, ciphyattach, mii_phy_detach, mii_phy_activate);
 
-struct cfattach ciphy_ca = {
-	sizeof(struct mii_softc),
-	ciphymatch,
-	ciphyattach,
-	mii_phy_detach,
-	mii_phy_activate
-};
+static int	ciphy_service(struct mii_softc *, struct mii_data *, int);
+static void	ciphy_status(struct mii_softc *);
+static void	ciphy_reset(struct mii_softc *);
+static void	ciphy_fixup(struct mii_softc *);
 
-struct cfdriver ciphy_cd = {
-	NULL, "ciphy", DV_DULL
-};
-
-int	ciphy_service(struct mii_softc *, struct mii_data *, int);
-void	ciphy_status(struct mii_softc *);
-void	ciphy_reset(struct mii_softc *);
-void	ciphy_fixup(struct mii_softc *);
-
-const struct mii_phy_funcs ciphy_funcs = {
-	ciphy_service, ciphy_status, ciphy_reset,
+static const struct mii_phy_funcs ciphy_funcs = {
+	ciphy_service, ciphy_status, mii_phy_reset,
 };
 
 static const struct mii_phydesc ciphys[] = {
 	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8201,
 	  MII_STR_CICADA_CS8201 },
+
 	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8201A,
 	  MII_STR_CICADA_CS8201A },
+
 	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8201B,
 	  MII_STR_CICADA_CS8201B },
-	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8204,
-	  MII_STR_CICADA_CS8204 },
+
+	{ MII_OUI_xxCICADA,		MII_MODEL_CICADA_CS8201,
+	  MII_STR_CICADA_CS8201 },
+
+	{ MII_OUI_xxCICADA,		MII_MODEL_CICADA_CS8201A,
+	  MII_STR_CICADA_CS8201A },
+
 	{ MII_OUI_xxCICADA,		MII_MODEL_xxCICADA_CS8201B,
 	  MII_STR_xxCICADA_CS8201B },
 
-	{ 0,			0,
+	{ 0,				0,
 	  NULL },
 };
 
-int
-ciphymatch(struct device *parent, void *match, void *aux)
+static int
+ciphymatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -112,17 +108,19 @@ ciphymatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-void
+static void
 ciphyattach(struct device *parent, struct device *self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
 	mpd = mii_phy_match(ma, ciphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	aprint_naive(": Media interface\n");
+	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &ciphy_funcs;
@@ -132,19 +130,25 @@ ciphyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
-	PHY_RESET(sc);
+	ciphy_reset(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
-	    (sc->mii_capabilities & EXTSR_MEDIAMASK))
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
-ciphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
+static int
+ciphy_service(sc, mii, cmd)
+	struct mii_softc *sc;
+	struct mii_data *mii;
+	int cmd;
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg, speed, gig;
@@ -179,8 +183,14 @@ ciphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
-			if (mii_phy_auto(sc, 0) == EJUSTRETURN)
+#ifdef foo
+			/*
+			 * If we're already in auto mode, just return.
+			 */
+			if (PHY_READ(sc, CIPHY_MII_BMCR) & CIPHY_BMCR_AUTOEN)
 				return (0);
+#endif
+			(void) mii_phy_auto(sc, 0);
 			break;
 		case IFM_1000_T:
 			speed = CIPHY_S1000;
@@ -202,16 +212,28 @@ setit:
 			PHY_WRITE(sc, CIPHY_MII_BMCR, speed);
 			PHY_WRITE(sc, CIPHY_MII_ANAR, CIPHY_SEL_TYPE);
 
-			if (IFM_SUBTYPE(ife->ifm_media) != IFM_1000_T) 
+			if (IFM_SUBTYPE(ife->ifm_media) != IFM_1000_T)
 				break;
 
 			PHY_WRITE(sc, CIPHY_MII_1000CTL, gig);
 			PHY_WRITE(sc, CIPHY_MII_BMCR,
 			    speed|CIPHY_BMCR_AUTOEN|CIPHY_BMCR_STARTNEG);
 
-			if (mii->mii_media.ifm_media & IFM_ETH_MASTER)
-				gig |= CIPHY_1000CTL_MSE|CIPHY_1000CTL_MSC;
-			PHY_WRITE(sc, CIPHY_MII_1000CTL, gig);
+			/*
+			 * When setting the link manually, one side must
+			 * be the master and the other the slave. However
+			 * ifmedia doesn't give us a good way to specify
+			 * this, so we fake it by using one of the LINK
+			 * flags. If LINK0 is set, we program the PHY to
+			 * be a master, otherwise it's a slave.
+			 */
+			if ((mii->mii_ifp->if_flags & IFF_LINK0)) {
+				PHY_WRITE(sc, CIPHY_MII_1000CTL,
+				    gig|CIPHY_1000CTL_MSE|CIPHY_1000CTL_MSC);
+			} else {
+				PHY_WRITE(sc, CIPHY_MII_1000CTL,
+				    gig|CIPHY_1000CTL_MSE);
+			}
 			break;
 		case IFM_NONE:
 			PHY_WRITE(sc, MII_BMCR, BMCR_ISO|BMCR_PDOWN);
@@ -229,19 +251,46 @@ setit:
 		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
 
-		if (mii_phy_tick(sc) == EJUSTRETURN)
+		/*
+		 * Is the interface even up?
+		 */
+		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
-		break;
+
+		/*
+		 * Only used for autonegotiation.
+		 */
+		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
+			break;
+
+		/*
+		 * Check to see if we have link.  If we do, we don't
+		 * need to restart the autonegotiation process.  Read
+		 * the BMSR twice in case it's latched.
+		 */
+		reg = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
+		if (reg & BMSR_LINK)
+			break;
+
+		/*
+		 * Only retry autonegotiation every 5 seconds.
+		 */
+		if (++sc->mii_ticks <= MII_ANEGTICKS)
+			break;
+
+		sc->mii_ticks = 0;
+		mii_phy_auto(sc, 0);
+		return (0);
 	}
 
 	/* Update the media status. */
-	mii_phy_status(sc);
+	ciphy_status(sc);
 
 	/*
 	 * Callback if something changed. Note that we need to poke
 	 * apply fixups for certain PHY revs.
 	 */
-	if (sc->mii_media_active != mii->mii_media_active || 
+	if (sc->mii_media_active != mii->mii_media_active ||
 	    sc->mii_media_status != mii->mii_media_status ||
 	    cmd == MII_MEDIACHG) {
 		ciphy_fixup(sc);
@@ -250,11 +299,12 @@ setit:
 	return (0);
 }
 
-void
-ciphy_status(struct mii_softc *sc)
+static void
+ciphy_status(sc)
+	struct mii_softc *sc;
 {
 	struct mii_data *mii = sc->mii_pdata;
-	int bmsr, bmcr, gsr;
+	int bmsr, bmcr;
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
@@ -289,27 +339,24 @@ ciphy_status(struct mii_softc *sc)
 		mii->mii_media_active |= IFM_1000_T;
 		break;
 	default:
-		printf("%s: unknown PHY speed %x\n",
-		    sc->mii_dev.dv_xname, bmsr & CIPHY_AUXCSR_SPEED);
+		aprint_error_dev(sc->mii_dev, "unknown PHY speed %x\n",
+		    bmsr & CIPHY_AUXCSR_SPEED);
 		break;
 	}
 
 	if (bmsr & CIPHY_AUXCSR_FDX)
 		mii->mii_media_active |= IFM_FDX;
-	else
-		mii->mii_media_active |= IFM_HDX;
 
-	gsr = PHY_READ(sc, CIPHY_MII_1000STS);
-	if ((IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) &&
-	    gsr & CIPHY_1000STS_MSR)
-		mii->mii_media_active |= IFM_ETH_MASTER;
+	return;
 }
 
-void
+static void
 ciphy_reset(struct mii_softc *sc)
 {
 	mii_phy_reset(sc);
 	DELAY(1000);
+
+	return;
 }
 
 #define PHY_SETBIT(x, y, z) \
@@ -317,7 +364,7 @@ ciphy_reset(struct mii_softc *sc)
 #define PHY_CLRBIT(x, y, z) \
 	PHY_WRITE(x, y, (PHY_READ(x, y) & ~(z)))
 
-void
+static void
 ciphy_fixup(struct mii_softc *sc)
 {
 	uint16_t		model;
@@ -327,7 +374,7 @@ ciphy_fixup(struct mii_softc *sc)
 	status = PHY_READ(sc, CIPHY_MII_AUXCSR);
 	speed = status & CIPHY_AUXCSR_SPEED;
 
-	if (strcmp(sc->mii_dev.dv_parent->dv_cfdata->cf_driver->cd_name, "nfe") == 0) {
+	if (device_is_a(device_parent(sc->mii_dev), "nfe")) {
 		/* need to set for 2.5V RGMII for NVIDIA adapters */
 		PHY_SETBIT(sc, CIPHY_MII_ECTL1, CIPHY_INTSEL_RGMII);
 		PHY_SETBIT(sc, CIPHY_MII_ECTL1, CIPHY_IOVOL_2500MV);
@@ -335,7 +382,6 @@ ciphy_fixup(struct mii_softc *sc)
 
 	switch (model) {
 	case MII_MODEL_CICADA_CS8201:
-	case MII_MODEL_CICADA_CS8204:
 
 		/* Turn off "aux mode" (whatever that means) */
 		PHY_SETBIT(sc, CIPHY_MII_AUXCSR, CIPHY_AUXCSR_MDPPS);
@@ -372,8 +418,10 @@ ciphy_fixup(struct mii_softc *sc)
 
 		break;
 	default:
-		printf("%s: unknown CICADA PHY model %x\n",
-		    sc->mii_dev.dv_xname, model);
+		aprint_error_dev(sc->mii_dev, "unknown CICADA PHY model %x\n",
+		    model);
 		break;
 	}
+
+	return;
 }

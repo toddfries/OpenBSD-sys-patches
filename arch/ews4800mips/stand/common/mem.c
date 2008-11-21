@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.2 2006/01/25 18:28:26 christos Exp $	*/
+/*	$NetBSD: mem.c,v 1.5 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -53,7 +46,7 @@
 
 void mem_write(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 void mem_read(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-boolean_t __ga_rom;
+bool __ga_rom;
 
 int
 cmd_mem(int argc, char *argp[], int interactive)
@@ -74,10 +67,10 @@ cmd_mem(int argc, char *argp[], int interactive)
 
 	if (c == 'g') {
 		size = a[3];	/* GA-ROM special */
-		__ga_rom = TRUE;
+		__ga_rom = true;
 	} else {
 		size = a[1] * a[3];
-		__ga_rom = FALSE;
+		__ga_rom = false;
 	}
 
 	p = 0;

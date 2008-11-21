@@ -1,5 +1,4 @@
-/*	$OpenBSD: portal.h,v 1.5 2003/08/14 07:46:39 mickey Exp $	*/
-/*	$NetBSD: portal.h,v 1.7 1996/02/09 22:40:40 christos Exp $	*/
+/*	$NetBSD: portal.h,v 1.14 2008/06/28 01:34:06 rumble Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -43,10 +42,10 @@ struct portal_args {
 
 struct portal_cred {
 	int		pcr_flag;		/* File open mode */
-	uid_t		pcr_uid;		/* From ucred */
-	gid_t		pcr_gid;		/* From ucred */
-	short		pcr_ngroups;		/* From ucred */
-	gid_t		pcr_groups[NGROUPS];	/* From ucred */
+	uid_t		pcr_uid;		/* From cred */
+	gid_t		pcr_gid;		/* From cred */
+	uint16_t	pcr_ngroups;		/* From cred */
+	gid_t		pcr_groups[NGROUPS];	/* From cred */
 };
 
 #ifdef _KERNEL
@@ -67,5 +66,6 @@ struct portalnode {
 #define PORTAL_ROOTFILEID	2
 
 extern int (**portal_vnodeop_p)(void *);
-extern const struct vfsops portal_vfsops;
+extern struct vfsops portal_vfsops;
+
 #endif /* _KERNEL */

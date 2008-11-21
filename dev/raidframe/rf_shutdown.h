@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_shutdown.h,v 1.4 2002/12/16 07:01:05 tdeval Exp $	*/
-/*	$NetBSD: rf_shutdown.h,v 1.2 1999/02/05 00:06:17 oster Exp $	*/
-
+/*	$NetBSD: rf_shutdown.h,v 1.7 2005/12/11 12:23:37 christos Exp $	*/
 /*
  * rf_shutdown.h
  */
@@ -35,14 +33,15 @@
  * thread startup and shutdown.
  */
 
-#ifndef	_RF__RF_SHUTDOWN_H_
-#define	_RF__RF_SHUTDOWN_H_
+#ifndef _RF__RF_SHUTDOWN_H_
+#define _RF__RF_SHUTDOWN_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+
 #include "rf_threadstuff.h"
 
 /*
- * Important note: The shutdown list is run like a stack, new
+ * Important note: the shutdown list is run like a stack, new
  * entries pushed on top. Therefore, the most recently added
  * entry (last started) is the first removed (stopped). This
  * should handle system-dependencies pretty nicely- if a system
@@ -52,18 +51,25 @@
  */
 
 struct RF_ShutdownList_s {
-	void		 (*cleanup) (void *arg);
-	void		  *arg;
-	char		  *file;
-	int		   line;
+	void    (*cleanup) (void *arg);
+	void   *arg;
+#if RF_DEBUG_SHUTDOWN
+	char   *file;
+	int     line;
+#endif
 	RF_ShutdownList_t *next;
 };
-#define	rf_ShutdownCreate(_listp_,_func_,_arg_)				\
-	_rf_ShutdownCreate(_listp_, _func_, _arg_, __FILE__, __LINE__)
+#if RF_DEBUG_SHUTDOWN
+#define rf_ShutdownCreate(_listp_,_func_,_arg_) \
+  _rf_ShutdownCreate(_listp_,_func_,_arg_,__FILE__,__LINE__)
+void _rf_ShutdownCreate(RF_ShutdownList_t **, void (*cleanup) (void *),
+			void *, char *, int);
+#else
+#define rf_ShutdownCreate(_listp_,_func_,_arg_) \
+  _rf_ShutdownCreate(_listp_,_func_,_arg_)
+void _rf_ShutdownCreate(RF_ShutdownList_t **, void (*cleanup) (void *),
+			void *);
+#endif
+void rf_ShutdownList(RF_ShutdownList_t **);
 
-int  _rf_ShutdownCreate(RF_ShutdownList_t **, void (*) (void *arg), void *,
-	char *, int);
-int  rf_ShutdownList(RF_ShutdownList_t **);
-void rf_shutdown_hook(RF_ThreadArg_t);
-
-#endif	/* !_RF__RF_SHUTDOWN_H_ */
+#endif				/* !_RF__RF_SHUTDOWN_H_ */

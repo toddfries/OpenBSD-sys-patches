@@ -1,5 +1,4 @@
-/*	$OpenBSD: hmevar.h,v 1.9 2006/12/21 22:13:36 jason Exp $	*/
-/*	$NetBSD: hmevar.h,v 1.6 2000/09/28 10:56:57 tsutsui Exp $	*/
+/*	$NetBSD: hmevar.h,v 1.17 2008/04/28 20:23:50 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,36 +29,38 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/timeout.h>
+#include "rnd.h"
 
-#define	HME_TX_RING_SIZE	64
-#define	HME_RX_RING_SIZE	64
-#define	HME_RX_RING_MAX		256
-#define	HME_TX_RING_MAX		256
-#define	HME_RX_PKTSIZE		1600
+#include <sys/callout.h>
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
 
-struct hme_sxd {
-	struct mbuf *sd_mbuf;		/* descriptor mbuf */
-	bus_dmamap_t sd_map;		/* descriptor dmamap */
-	int sd_loaded;			/* descriptor dmamap loaded? */
-};
 
 struct hme_ring {
 	/* Ring Descriptors */
-	caddr_t		rb_membase;	/* Packet buffer: CPU address */
+	void *		rb_membase;	/* Packet buffer: CPU address */
 	bus_addr_t	rb_dmabase;	/* Packet buffer: DMA address */
-	caddr_t		rb_txd;		/* Transmit descriptors */
+	void *		rb_txd;		/* Transmit descriptors */
 	bus_addr_t	rb_txddma;	/* DMA address of same */
-	caddr_t		rb_rxd;		/* Receive descriptors */
+	void *		rb_rxd;		/* Receive descriptors */
 	bus_addr_t	rb_rxddma;	/* DMA address of same */
+	void *		rb_txbuf;	/* Transmit buffers */
+	void *		rb_rxbuf;	/* Receive buffers */
+	int		rb_ntbuf;	/* # of transmit buffers */
+	int		rb_nrbuf;	/* # of receive buffers */
+
+	/* Ring Descriptor state */
+	int	rb_tdhead, rb_tdtail;
+	int	rb_rdtail;
+	int	rb_td_nbusy;
 };
 
 struct hme_softc {
 	struct device	sc_dev;		/* boilerplate device view */
-	struct arpcom	sc_arpcom;	/* Ethernet common part */
+	struct ethercom	sc_ethercom;	/* Ethernet common part */
 	struct mii_data	sc_mii;		/* MII media control */
-#define sc_media	sc_mii.mii_media/* shorthand */
-	struct timeout	sc_tick_ch;	/* tick callout */
+	struct callout	sc_tick_ch;	/* tick callout */
 
 	/* The following bus handles are to be provided by the bus front-end */
 	bus_space_tag_t	sc_bustag;	/* bus tag */
@@ -84,20 +78,26 @@ struct hme_softc {
 
 	/* Ring descriptor */
 	struct hme_ring		sc_rb;
+#if notused
+	void		(*sc_copytobuf)(struct hme_softc *,
+					     void *, void *, size_t);
+	void		(*sc_copyfrombuf)(struct hme_softc *,
+					      void *, void *, size_t);
+#endif
 
 	int			sc_debug;
 	void			*sc_sh;		/* shutdownhook cookie */
+	int			sc_ec_capenable;
 	short			sc_if_flags;
+	u_int8_t		sc_enaddr[ETHER_ADDR_LEN]; /* MAC address */
 
 	/* Special hardware hooks */
 	void	(*sc_hwreset)(struct hme_softc *);
 	void	(*sc_hwinit)(struct hme_softc *);
 
-	struct hme_sxd sc_txd[HME_TX_RING_MAX], sc_rxd[HME_RX_RING_MAX];
-	bus_dmamap_t	sc_rxmap_spare;
-	int	sc_tx_cnt, sc_tx_prod, sc_tx_cons;
-	int	sc_last_rd;
-	u_int32_t sc_tcvr;
+#if NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
 };
 
 

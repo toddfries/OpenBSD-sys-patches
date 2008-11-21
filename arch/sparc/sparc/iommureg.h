@@ -1,5 +1,4 @@
-/*	$OpenBSD: iommureg.h,v 1.6 1998/05/10 21:11:53 art Exp $	*/
-/*	$NetBSD: iommureg.h,v 1.5 1998/05/04 23:16:59 pk Exp $	*/
+/*	$NetBSD: iommureg.h,v 1.9 2005/11/16 22:10:58 uwe Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -37,22 +36,25 @@
  *
  */
 
+/* IOMMU registers */
 struct iommureg {
-	u_int32_t	io_cr;		/* IOMMU control register */
-	u_int32_t	io_bar;		/* IOMMU PTE base register */
-	u_int32_t	io_fill1[3];
-	u_int32_t	io_flashclear;	/* Flush all TLB entries */
-	u_int32_t	io_flushpage;	/* Flush page from TLB */
+	uint32_t	io_cr;		/* IOMMU control register */
+	uint32_t	io_bar;		/* IOMMU PTE base register */
+	uint32_t	io_fill1[3];
+	uint32_t	io_flashclear;	/* Flush all TLB entries */
+	uint32_t	io_flushpage;	/* Flush page from TLB */
 };
 
-#define IOMMU_CTL_IMPL		0xf0000000
-#define IOMMU_CTL_VER		0x0f000000
-#define IOMMU_CTL_RSVD1		0x00ffffe0
-#define IOMMU_CTL_RANGE		0x0000001c
-#define IOMMU_CTL_RANGESHFT	2
-#define IOMMU_CTL_RSVD2		0x00000002
-#define IOMMU_CTL_ME		0x00000001
+/* Control register bits */
+#define IOMMU_CTL_IMPL		0xf0000000	/* Hardware implementation */
+#define IOMMU_CTL_VER		0x0f000000	/* Hardware version */
+#define IOMMU_CTL_RSVD1		0x00ffffe0	/* Reserved bits */
+#define IOMMU_CTL_RANGE		0x0000001c	/* Available DVMA range */
+#define IOMMU_CTL_RANGESHFT	2		/*  == log2(range/16MB) */
+#define IOMMU_CTL_DE		0x00000002	/* Diagnostic access enable */
+#define IOMMU_CTL_ME		0x00000001	/* Enable translations */
 
+/* Base register bits */
 #define IOMMU_BAR_IBA		0xfffffc00
 #define IOMMU_BAR_IBASHFT	10
 
@@ -67,19 +69,19 @@ struct iommureg {
  */
 #define IOMMU_FLUSHPAGE(sc, va)	do {				\
 	(sc)->sc_reg->io_flushpage = (va) & IOMMU_FLUSH_MASK;	\
-	__asm("nop;nop;nop;");					\
+	__asm("nop;nop;nop;nop;nop;nop;");			\
 } while (0);
 #define IOMMU_FLUSHALL(sc)	do {				\
 	(sc)->sc_reg->io_flashclear = 0;			\
-	__asm("nop;nop;nop;");					\
+	__asm("nop;nop;nop;nop;nop;nop;");			\
 } while (0)
 
-/* to pte.h ? */
-typedef u_int32_t iopte_t;
+typedef uint32_t iopte_t;
 
+/* IOMMU PTE bits */
 #define IOPTE_PPN	0xffffff00	/* PA<35:12> */
 #define IOPTE_C		0x00000080 	/* cacheable */
-#define IOPTE_W		0x00000004	/* writeable */
+#define IOPTE_W		0x00000004	/* writable */
 #define IOPTE_V		0x00000002	/* valid */
 #define IOPTE_WAZ	0x00000001	/* must write as zero */
 

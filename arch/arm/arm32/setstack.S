@@ -1,4 +1,4 @@
-/*	$NetBSD: setstack.S,v 1.2 2002/08/15 01:37:02 briggs Exp $	*/
+/*	$NetBSD: setstack.S,v 1.4 2008/04/27 18:58:44 matt Exp $	*/
 
 /*
  * Copyright (c) 1994 Mark Brinicombe.
@@ -50,6 +50,8 @@
 #include <machine/cpu.h>
 #include <machine/asm.h>
 
+	RCSID("$NetBSD: setstack.S,v 1.4 2008/04/27 18:58:44 matt Exp $")
+
 /* To set the stack pointer for a particular mode we must switch
  * to that mode update the banked r13 and then switch back.
  * This routine provides an easy way of doing this for any mode
@@ -62,11 +64,11 @@ ENTRY(set_stackptr)
         mrs	r3, cpsr		/* Switch to the appropriate mode */
 	bic	r2, r3, #(PSR_MODE)
 	orr	r2, r2, r0
-        msr	cpsr_all, r2
+        msr	cpsr_c, r2
 
 	mov	sp, r1			/* Set the stack pointer */
 
-        msr	cpsr_all, r3		/* Restore the old mode */
+        msr	cpsr_c, r3		/* Restore the old mode */
 
 	mov	pc, lr			/* Exit */
 
@@ -81,11 +83,11 @@ ENTRY(get_stackptr)
         mrs	r3, cpsr		/* Switch to the appropriate mode */
 	bic	r2, r3, #(PSR_MODE)
 	orr	r2, r2, r0
-        msr	cpsr_all, r2
+        msr	cpsr_c, r2
 
 	mov	r0, sp			/* Set the stack pointer */
 
-        msr	cpsr_all, r3		/* Restore the old mode */
+        msr	cpsr_c, r3		/* Restore the old mode */
 
 	mov	pc, lr			/* Exit */
 

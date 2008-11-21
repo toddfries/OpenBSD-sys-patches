@@ -1,3 +1,5 @@
+/*	$NetBSD: via_ds.c,v 1.3 2008/07/08 06:50:23 mrg Exp $	*/
+
 /*
  * Copyright 1998-2003 VIA Technologies, Inc. All Rights Reserved.
  * Copyright 2001-2003 S3 Graphics, Inc. All Rights Reserved.
@@ -23,9 +25,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include "drmP.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via_ds.c,v 1.3 2008/07/08 06:50:23 mrg Exp $");
 
+#include "drmP.h"
 #include "via_ds.h"
+
 extern unsigned int VIA_DEBUG;
 
 set_t *via_setInit(void)
@@ -46,16 +51,16 @@ set_t *via_setInit(void)
 
 int via_setAdd(set_t * set, ITEM_TYPE item)
 {
-	int free = set->free;
-	if (free != -1) {
-		set->list[free].val = item;
-		set->free = set->list[free].free_next;
+	int vfree = set->free;
+	if (vfree != -1) {
+		set->list[vfree].val = item;
+		set->free = set->list[vfree].free_next;
 	} else {
 		return 0;
 	}
-	set->list[free].alloc_next = set->alloc;
-	set->alloc = free;
-	set->list[free].free_next = -1;
+	set->list[vfree].alloc_next = set->alloc;
+	set->alloc = vfree;
+	set->list[vfree].free_next = -1;
 	return 1;
 }
 

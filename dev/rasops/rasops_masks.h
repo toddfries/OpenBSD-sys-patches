@@ -1,5 +1,4 @@
-/*	$OpenBSD: rasops_masks.h,v 1.3 2006/08/04 06:28:10 miod Exp $ */
-/* 	$NetBSD: rasops_masks.h,v 1.5 2000/06/13 13:37:01 ad Exp $	*/
+/* 	$NetBSD: rasops_masks.h,v 1.7 2008/04/28 20:23:57 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,23 +44,20 @@
  * MBR: move bits right
  * MBE: make big-endian
  */
+#if BYTE_ORDER == BIG_ENDIAN
 
 #define MBL(x,y)	((y) > 31 ? 0 : (x) >> (y))
 #define MBR(x,y)    	((y) > 31 ? 0 : (x) << (y))
-
-#if BYTE_ORDER == BIG_ENDIAN
 #define MBE(x)		(x)
+
 #else
-#define MBE(x) \
-({ \
-	u_int32_t tmp = (x); \
-	tmp = ((tmp >>  1) & 0x55555555) | ((tmp <<  1) & 0xaaaaaaaa); \
-	tmp = ((tmp >>  2) & 0x33333333) | ((tmp <<  2) & 0xcccccccc); \
-	tmp = ((tmp >>  4) & 0x0f0f0f0f) | ((tmp <<  4) & 0xf0f0f0f0); \
-	tmp = ((tmp >>  8) & 0x00ff00ff) | ((tmp <<  8) & 0xff00ff00); \
-	tmp = ((tmp >> 16) & 0x0000ffff) | ((tmp << 16) & 0xffff0000); \
-	tmp; \
-})
+
+#define MBL(x,y)    	((y) > 31 ? 0 : MBE(MBE(x) << (y)))
+#define MBR(x,y)    	((y) > 31 ? 0 : MBE(MBE(x) >> (y)))
+#define MBE(x)		( (((x) & 0x000000FFU) << 24) \
+                        | (((x) & 0x0000FF00U) <<  8) \
+                        | (((x) & 0x00FF0000U) >>  8) \
+                        | (((x) & 0xFF000000U) >> 24) )
 #endif
 
 /*
@@ -99,16 +88,8 @@
 } while(0);
 
 /* rasops_masks.c */
-#if BYTE_ORDER == BIG_ENDIAN
 extern const int32_t	rasops_lmask[32+1];
 extern const int32_t	rasops_rmask[32+1];
 extern const int32_t	rasops_pmask[32][32];
-#define	rasops_masks_init()	do { } while (0)
-#else
-extern int32_t	rasops_lmask[32+1];
-extern int32_t	rasops_rmask[32+1];
-extern int32_t	rasops_pmask[32][32];
-void	rasops_masks_init(void);
-#endif
 
 #endif /* _RASOPS_MASKS_H_ */

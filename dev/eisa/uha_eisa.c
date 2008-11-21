@@ -1,8 +1,11 @@
-/*	$OpenBSD: uha_eisa.c,v 1.7 2007/11/05 17:54:27 krw Exp $	*/
-/*	$NetBSD: uha_eisa.c,v 1.5 1996/10/21 22:31:07 thorpej Exp $	*/
+/*	$NetBSD: uha_eisa.c,v 1.29 2008/04/28 20:23:48 martin Exp $	*/
 
-/*
- * Copyright (c) 1994, 1996 Charles M. Hannum.  All rights reserved.
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,25 +15,25 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Charles M. Hannum.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uha_eisa.c,v 1.29 2008/04/28 20:23:48 martin Exp $");
+
+#include "opt_ddb.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -38,11 +41,12 @@
 #include <sys/proc.h>
 #include <sys/user.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include <dev/eisa/eisavar.h>
 #include <dev/eisa/eisadevs.h>
@@ -53,34 +57,31 @@
 #define	UHA_EISA_SLOT_OFFSET	0xc80
 #define	UHA_EISA_IOSIZE		0x020
 
-#ifndef DDB
-#define	Debugger() panic("should call debugger here (uha_eisa.c)")
-#endif
+static int	uha_eisa_match(struct device *, struct cfdata *, void *);
+static void	uha_eisa_attach(struct device *, struct device *, void *);
 
-int	uha_eisa_match(struct device *, void *, void *);
-void	uha_eisa_attach(struct device *, struct device *, void *);
+CFATTACH_DECL(uha_eisa, sizeof(struct uha_softc),
+    uha_eisa_match, uha_eisa_attach, NULL, NULL);
 
-struct cfattach uha_eisa_ca = {
-	sizeof(struct uha_softc), uha_eisa_match, uha_eisa_attach
-};
+#ifndef	DDB
+#define Debugger() panic("should call debugger here (uha_eisa.c)")
+#endif /* ! DDB */
 
-#define KVTOPHYS(x)	vtophys((vaddr_t)(x))
-
-int u24_find(bus_space_tag_t, bus_space_handle_t, struct uha_softc *);
-void u24_start_mbox(struct uha_softc *, struct uha_mscp *);
-int u24_poll(struct uha_softc *, struct scsi_xfer *, int);
-int u24_intr(void *);
-void u24_init(struct uha_softc *);
+static int	u24_find(bus_space_tag_t, bus_space_handle_t,
+		    struct uha_probe_data *);
+static void	u24_start_mbox(struct uha_softc *, struct uha_mscp *);
+static int	u24_poll(struct uha_softc *, struct scsipi_xfer *, int);
+static int	u24_intr(void *);
+static void	u24_init(struct uha_softc *);
 
 /*
  * Check the slots looking for a board we recognise
- * If we find one, note its address (slot) and call
+ * If we find one, note it's address (slot) and call
  * the actual probe routine to check it out.
  */
-int
-uha_eisa_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+uha_eisa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct eisa_attach_args *ea = aux;
 	bus_space_tag_t iot = ea->ea_iot;
@@ -105,15 +106,15 @@ uha_eisa_match(parent, match, aux)
 /*
  * Attach all the sub-devices we can find
  */
-void
-uha_eisa_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+uha_eisa_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct eisa_attach_args *ea = aux;
-	struct uha_softc *sc = (void *)self;
+	struct uha_softc *sc = device_private(self);
 	bus_space_tag_t iot = ea->ea_iot;
+	bus_dma_tag_t dmat = ea->ea_dmat;
 	bus_space_handle_t ioh;
+	struct uha_probe_data upd;
 	eisa_chipset_tag_t ec = ea->ea_ec;
 	eisa_intr_handle_t ih;
 	const char *model, *intrstr;
@@ -126,44 +127,43 @@ uha_eisa_attach(parent, self, aux)
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
 	    UHA_EISA_SLOT_OFFSET, UHA_EISA_IOSIZE, 0, &ioh))
-		panic("uha_attach: could not map I/O addresses");
+		panic("uha_eisa_attach: could not map I/O addresses");
 
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
-	if (!u24_find(iot, ioh, sc))
-		panic("uha_attach: u24_find failed!");
+	sc->sc_dmat = dmat;
+	if (!u24_find(iot, ioh, &upd))
+		panic("uha_eisa_attach: u24_find failed!");
 
-	if (eisa_intr_map(ec, sc->sc_irq, &ih)) {
-		printf("%s: couldn't map interrupt (%d)\n",
-		    sc->sc_dev.dv_xname, sc->sc_irq);
+	sc->sc_dmaflags = 0;
+
+	if (eisa_intr_map(ec, upd.sc_irq, &ih)) {
+		aprint_error_dev(&sc->sc_dev, "couldn't map interrupt (%d)\n",
+		    upd.sc_irq);
 		return;
 	}
 	intrstr = eisa_intr_string(ec, ih);
 	sc->sc_ih = eisa_intr_establish(ec, ih, IST_LEVEL, IPL_BIO,
-	    u24_intr, sc, sc->sc_dev.dv_xname);
+	    u24_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "couldn't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		return;
 	}
-	printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname, intrstr);
+	printf("%s: interrupting at %s\n", device_xname(&sc->sc_dev), intrstr);
 
 	/* Save function pointers for later use. */
 	sc->start_mbox = u24_start_mbox;
 	sc->poll = u24_poll;
 	sc->init = u24_init;
 
-	uha_attach(sc);
+	uha_attach(sc, &upd);
 }
 
-int
-u24_find(iot, ioh, sc)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	struct uha_softc *sc;
+static int
+u24_find(bus_space_tag_t iot, bus_space_handle_t ioh, struct uha_probe_data *sc)
 {
 	u_int8_t config0, config1, config2;
 	int irq, drq;
@@ -210,7 +210,7 @@ u24_find(iot, ioh, sc)
 	}
 
 	/* if we want to fill in softc, do so now */
-	if (sc != NULL) {
+	if (sc) {
 		sc->sc_irq = irq;
 		sc->sc_drq = drq;
 		sc->sc_scsi_dev = config2 & U24_HOSTID_MASK;
@@ -219,10 +219,8 @@ u24_find(iot, ioh, sc)
 	return (1);
 }
 
-void
-u24_start_mbox(sc, mscp)
-	struct uha_softc *sc;
-	struct uha_mscp *mscp;
+static void
+u24_start_mbox(struct uha_softc *sc, struct uha_mscp *mscp)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -234,43 +232,37 @@ u24_start_mbox(sc, mscp)
 		delay(100);
 	}
 	if (!spincount) {
-		printf("%s: uha_start_mbox, board not responding\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "uha_start_mbox, board not responding\n");
 		Debugger();
 	}
 
-	bus_space_write_4(iot, ioh, U24_OGMPTR, KVTOPHYS(mscp));
+	bus_space_write_4(iot, ioh, U24_OGMPTR,
+	    sc->sc_dmamap_mscp->dm_segs[0].ds_addr + UHA_MSCP_OFF(mscp));
 	if (mscp->flags & MSCP_ABORT)
 		bus_space_write_1(iot, ioh, U24_OGMCMD, 0x80);
 	else
 		bus_space_write_1(iot, ioh, U24_OGMCMD, 0x01);
 	bus_space_write_1(iot, ioh, U24_LINT, U24_OGMFULL);
 
-	if ((mscp->xs->flags & SCSI_POLL) == 0)
-		timeout_add(&mscp->xs->stimeout, (mscp->timeout * hz) / 1000);
+	if ((mscp->xs->xs_control & XS_CTL_POLL) == 0)
+		callout_reset(&mscp->xs->xs_callout,
+		    mstohz(mscp->timeout), uha_timeout, mscp);
 }
 
-int
-u24_poll(sc, xs, count)
-	struct uha_softc *sc;
-	struct scsi_xfer *xs;
-	int count;
+static int
+u24_poll(struct uha_softc *sc, struct scsipi_xfer *xs, int count)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	int s;
 
 	while (count) {
 		/*
 		 * If we had interrupts enabled, would we
 		 * have got an interrupt?
 		 */
-		if (bus_space_read_1(iot, ioh, U24_SINT) & U24_SDIP) {
-			s = splbio();
+		if (bus_space_read_1(iot, ioh, U24_SINT) & U24_SDIP)
 			u24_intr(sc);
-			splx(s);
-		}
-		if (xs->flags & ITSDONE)
+		if (xs->xs_status & XS_STS_DONE)
 			return (0);
 		delay(1000);
 		count--;
@@ -278,9 +270,8 @@ u24_poll(sc, xs, count)
 	return (1);
 }
 
-int
-u24_intr(arg)
-	void *arg;
+static int
+u24_intr(void *arg)
 {
 	struct uha_softc *sc = arg;
 	bus_space_tag_t iot = sc->sc_iot;
@@ -290,7 +281,7 @@ u24_intr(arg)
 	u_long mboxval;
 
 #ifdef	UHADEBUG
-	printf("%s: uhaintr ", sc->sc_dev.dv_xname);
+	printf("%s: uhaintr ", device_xname(&sc->sc_dev));
 #endif /*UHADEBUG */
 
 	if ((bus_space_read_1(iot, ioh, U24_SINT) & U24_SDIP) == 0)
@@ -316,10 +307,10 @@ u24_intr(arg)
 		mscp = uha_mscp_phys_kv(sc, mboxval);
 		if (!mscp) {
 			printf("%s: BAD MSCP RETURNED!\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(&sc->sc_dev));
 			continue;	/* whatever it was, it'll timeout */
 		}
-		timeout_del(&mscp->xs->stimeout);
+		callout_stop(&mscp->xs->xs_callout);
 		uha_done(sc, mscp);
 
 		if ((bus_space_read_1(iot, ioh, U24_SINT) & U24_SDIP) == 0)
@@ -327,9 +318,8 @@ u24_intr(arg)
 	}
 }
 
-void
-u24_init(sc)
-	struct uha_softc *sc;
+static void
+u24_init(struct uha_softc *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;

@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_emit.c,v 1.25 2006/09/07 02:40:33 dogcow Exp $	*/
+/*	$NetBSD: tp_emit.c,v 1.27 2008/04/23 09:57:59 plunky Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -72,7 +72,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tp_emit.c,v 1.25 2006/09/07 02:40:33 dogcow Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tp_emit.c,v 1.27 2008/04/23 09:57:59 plunky Exp $");
 
 #include "opt_iso.h"
 
@@ -207,7 +207,7 @@ tp_emit(
 	m->m_nextpkt = NULL;
 
 	hdr = mtod(m, struct tpdu *);
-	bzero((caddr_t) hdr, sizeof(struct tpdu));
+	bzero((void *) hdr, sizeof(struct tpdu));
 
 	{
 		hdr->tpdu_type = dutype;
@@ -256,13 +256,6 @@ tp_emit(
 					tpcb->tp_sent_lcdt = tpcb->tp_lcredit;
 					hdr->tpdu_cdt = tpcb->tp_lcredit;
 				} else {
-#ifdef TPCONS
-					if (tpcb->tp_netservice == ISO_CONS) {
-						struct isopcb  *isop = (struct isopcb *) tpcb->tp_npcb;
-						struct pklcd   *lcp = (struct pklcd *) (isop->isop_chan);
-						lcp->lcd_flags &= ~X25_DG_CIRCUIT;
-					}
-#endif
 					hdr->tpdu_cdt = 0;
 				}
 				hdr->tpdu_CCclass = tp_mask_to_num(tpcb->tp_class);
@@ -650,9 +643,9 @@ tp_emit(
 				subseq = htons(tpcb->tp_r_subseq);
 				fcredit = htons(tpcb->tp_fcredit);
 
-				bcopy((caddr_t) & lwe, (caddr_t) & bogus[0], sizeof(SeqNum));
-				bcopy((caddr_t) & subseq, (caddr_t) & bogus[2], sizeof(u_short));
-				bcopy((caddr_t) & fcredit, (caddr_t) & bogus[3], sizeof(u_short));
+				bcopy((void *) & lwe, (void *) & bogus[0], sizeof(SeqNum));
+				bcopy((void *) & subseq, (void *) & bogus[2], sizeof(u_short));
+				bcopy((void *) & fcredit, (void *) & bogus[3], sizeof(u_short));
 
 #ifdef TPPT
 				if (tp_traceflags[D_ACKSEND]) {
@@ -759,7 +752,7 @@ tp_emit(
 	if (argo_debug[D_EMIT]) {
 		printf("tp_emit before tpxxx_output tpcb %p, dutype 0x%x, datalen 0x%x\n",
 		       tpcb, dutype, datalen);
-		dump_buf(mtod(m, caddr_t), datalen);
+		dump_buf(mtod(m, void *), datalen);
 	}
 #endif
 
@@ -856,7 +849,7 @@ tp_error_emit(
 	struct mbuf    *erdata,
 	int             erlen,
 	struct tp_pcb  *tpcb,
-	caddr_t         cons_channel,
+	void *        cons_channel,
         int 	      (*dgout_routine)(struct mbuf *, ...))
 {
 	int             dutype;
@@ -962,7 +955,7 @@ tp_error_emit(
 
 	if (dutype == ER_TPDU_type) {
 		/* copy the errant tpdu into another 'variable part' */
-		caddr_t P;
+		void *P;
 
 #ifdef TPPT
 		if (tp_traceflags[D_ERROR_EMIT]) {
@@ -981,7 +974,7 @@ tp_error_emit(
 			erlen = TP_MAX_HEADER_LEN - hdr->tpdu_li - 2;
 
 		/* add the "invalid tpdu" parameter : required in class 0 */
-		P = (caddr_t) hdr + (int) (hdr->tpdu_li);
+		P = (char *) hdr + (int) (hdr->tpdu_li);
 		vbptr(P)->tpv_code = TPP_invalid_tpdu;	/* parameter code */
 		vbptr(P)->tpv_len = erlen;	/* parameter length */
 		m->m_len = hdr->tpdu_li + 2;	/* 1 for code, 1 for length */
@@ -1044,31 +1037,8 @@ tp_error_emit(
 #endif
 	}
 	if (cons_channel) {
-#ifdef TPCONS
-		struct pklcd   *lcp = (struct pklcd *) cons_channel;
-#ifdef notdef
-		struct isopcb  *isop = (struct isopcb *) lcp->lcd_upnext;
-#endif
-		tpcons_output_dg(m, datalen, cons_channel);
-#ifdef notdef
-		if (tpcb == 0) iso_pcbdetach(isop);
-#endif
-		/*
-		 * but other side may want to try again over same VC, so,
-		 * we'll depend on him closing it, but in case it gets
-		 * forgotten we'll mark it for garbage collection
-		 */
-		lcp->lcd_flags |= X25_DG_CIRCUIT;
-#ifdef ARGO_DEBUG
-		if (argo_debug[D_ERROR_EMIT]) {
-			printf("OUTPUT: dutype %#x channel %p\n",
-			       dutype, cons_channel);
-		}
-#endif
-#else
 		printf("TP panic! cons channel %p but not cons configured\n",
 		       cons_channel);
-#endif
 		return 0;
 	} else if (tpcb) {
 
@@ -1083,7 +1053,7 @@ tp_error_emit(
 		return (*tpcb->tp_nlproto->nlp_dgoutput) (m, datalen,
 							 &laddr->siso_addr,
 							 &faddr->siso_addr,
-		        /* no route */ (caddr_t) 0, !tpcb->tp_use_checksum);
+		        /* no route */ (void *) 0, !tpcb->tp_use_checksum);
 	} else if (dgout_routine) {
 #ifdef ARGO_DEBUG
 		if (argo_debug[D_ERROR_EMIT]) {
@@ -1094,7 +1064,7 @@ tp_error_emit(
 		}
 #endif
 		return (*dgout_routine) (m, datalen, &laddr->siso_addr, &faddr->siso_addr,
-				        (caddr_t) 0, /* nochecksum==false */ 0);
+				        (void *) 0, /* nochecksum==false */ 0);
 	} else {
 #ifdef ARGO_DEBUG
 		if (argo_debug[D_ERROR_EMIT]) {

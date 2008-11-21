@@ -1,3 +1,3 @@
-/*	$OpenBSD: pio.h,v 1.1 2001/09/01 15:49:06 drahn Exp $	*/
+/*	$NetBSD: pio.h,v 1.2 2001/02/05 19:33:54 briggs Exp $ */
 
 #include <powerpc/pio.h>

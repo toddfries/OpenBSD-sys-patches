@@ -1,4 +1,4 @@
-/*	$NetBSD: bootinfo.h,v 1.11 2006/02/03 11:08:24 jmmv Exp $	*/
+/*	$NetBSD: bootinfo.h,v 1.14 2008/09/09 12:09:31 tron Exp $	*/
 
 /*
  * Copyright (c) 1997
@@ -26,13 +26,6 @@
  *
  */
 
-#ifndef _LOCORE
-
-struct btinfo_common {
-	int len;
-	int type;
-};
-
 #define BTINFO_BOOTPATH		0
 #define BTINFO_ROOTDEVICE	1
 #define BTINFO_BOOTDISK		3
@@ -42,6 +35,14 @@ struct btinfo_common {
 #define BTINFO_SYMTAB		8
 #define BTINFO_MEMMAP		9
 #define	BTINFO_BOOTWEDGE	10
+#define BTINFO_MODULELIST	11
+
+#ifndef _LOCORE
+
+struct btinfo_common {
+	int len;
+	int type;
+};
 
 struct btinfo_bootpath {
 	struct btinfo_common common;
@@ -72,7 +73,7 @@ struct btinfo_bootwedge {
 	daddr_t matchblk;
 	uint64_t matchnblks;
 	uint8_t matchhash[16];	/* MD5 hash */
-} __attribute__((packed));
+} __packed;
 
 struct btinfo_netif {
 	struct btinfo_common common;
@@ -104,7 +105,7 @@ struct bi_memmap_entry {
 	uint64_t addr;		/* beginning of block */	/* 8 */
 	uint64_t size;		/* size of block */		/* 8 */
 	uint32_t type;		/* type of block */		/* 4 */
-} __attribute__((packed));				/*	== 20 */
+} __packed;				/*	== 20 */
 
 #define	BIM_Memory	1	/* available RAM usable by OS */
 #define	BIM_Reserved	2	/* in use or reserved by the system */
@@ -155,12 +156,28 @@ struct bi_biosgeom_entry {
 	int		res0, res1, res2, res3;	/* future expansion; 0 now */
 #endif
 	struct mbr_partition dosparts[MBR_PART_COUNT]; /* MBR itself */
-} __attribute__((packed));
+} __packed;
 
 struct btinfo_biosgeom {
 	struct btinfo_common common;
 	int num;
 	struct bi_biosgeom_entry disk[1]; /* var len */
+};
+
+struct bi_modulelist_entry {
+	char path[80];
+	int type;
+	int len;
+	uint32_t base;
+};
+#define	BI_MODULE_NONE		0x00
+#define	BI_MODULE_ELF		0x01
+
+struct btinfo_modulelist {
+	struct btinfo_common common;
+	int num;
+	uint32_t endpa;
+	/* bi_modulelist_entry list follows */
 };
 
 #endif /* _LOCORE */
@@ -183,6 +200,8 @@ struct bootinfo {
 	 * offset as specified by the previous entry. */
 	uint8_t		bi_data[BOOTINFO_MAXSIZE - sizeof(uint32_t)];
 };
+
+extern struct bootinfo bootinfo;
 
 void *lookup_bootinfo(int);
 #endif /* _LOCORE */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: milieu.h,v 1.2 2007/12/29 16:59:16 miod Exp $	*/
-/*	$NetBSD: milieu.h,v 1.1 2001/04/26 03:10:47 ross Exp $	*/
+/* $NetBSD: milieu.h,v 1.3 2008/04/28 20:24:06 martin Exp $ */
 
 /* This is a derivative work. */
 
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,15 +41,11 @@ IEC/IEEE Standard for Floating-Point.
 Written by John R. Hauser.  More information is available through the Web
 page `http://HTTP.CS.Berkeley.EDU/~jhauser/arithmetic/TestFloat.html'.
 
-THIS SOFTWARE IS DISTRIBUTED AS IS, FOR FREE.  Although reasonable
-effort has been made to avoid it, THIS SOFTWARE MAY CONTAIN FAULTS THAT
-WILL AT TIMES RESULT IN INCORRECT BEHAVIOR.  USE OF THIS SOFTWARE IS
-RESTRICTED TO PERSONS AND ORGANIZATIONS WHO CAN AND WILL TAKE FULL
-RESPONSIBILITY FOR ALL LOSSES, COSTS, OR OTHER PROBLEMS ARISING FROM
-THEIR OWN USE OF THE SOFTWARE, AND WHO ALSO EFFECTIVELY INDEMNIFY
-(possibly via similar legal warning) JOHN HAUSER AND THE INTERNATIONAL
-COMPUTER SCIENCE INSTITUTE AGAINST ALL LOSSES, COSTS, OR OTHER PROBLEMS
-ARISING FROM THE USE OF THE SOFTWARE BY THEIR CUSTOMERS AND CLIENTS.
+THIS SOFTWARE IS DISTRIBUTED AS IS, FOR FREE.  Although reasonable effort
+has been made to avoid it, THIS SOFTWARE MAY CONTAIN FAULTS THAT WILL AT
+TIMES RESULT IN INCORRECT BEHAVIOR.  USE OF THIS SOFTWARE IS RESTRICTED TO
+PERSONS AND ORGANIZATIONS WHO CAN AND WILL TAKE FULL RESPONSIBILITY FOR ANY
+AND ALL LOSSES, COSTS, OR OTHER PROBLEMS ARISING FROM ITS USE.
 
 Derivative works are acceptable, even for commercial purposes, so long as
 (1) they include prominent notice that the work is derivative, and (2) they
@@ -70,14 +58,13 @@ this code that are retained.
 #ifndef MILIEU_H
 #define MILIEU_H
 
-#include <sys/types.h>
+#if !defined(_KERNEL) && !defined(_STANDALONE)
+#include <inttypes.h>
+#else
+#include <sys/inttypes.h>
+#endif
+
 #include <sys/endian.h>
-
-enum {
-    FALSE = 0,
-    TRUE  = 1
-};
-
 
 /*
 -------------------------------------------------------------------------------

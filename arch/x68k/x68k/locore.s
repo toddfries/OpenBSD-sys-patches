@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.s,v 1.76 2005/12/11 12:19:45 christos Exp $	*/
+/*	$NetBSD: locore.s,v 1.84 2008/06/23 08:33:38 isaki Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -149,7 +149,7 @@ Lberr:
 	movc	%d1,%cacr
 	movl	%d0,%d1
 	andl	#0x7ffd,%d1		| check other faults
-	jeq	_ASM_LABEL(faultstkadjnotrap)
+	jeq	_ASM_LABEL(faultstkadjnotrap2)
 Lnobpe:
 | XXX this is not needed.
 |	movl	%d0,%sp@		| code is FSLW now.
@@ -543,8 +543,8 @@ Lbrkpt3:
  * specially, to improve performance
  */
 
-#define INTERRUPT_SAVEREG	moveml	#0xC0C0,%sp@-
-#define INTERRUPT_RESTOREREG	moveml	%sp@+,#0x0303
+#define INTERRUPT_SAVEREG	moveml	#0xC0C0,%sp@- ; addql #1,_C_LABEL(idepth)
+#define INTERRUPT_RESTOREREG	subql #1,_C_LABEL(idepth) ; moveml	%sp@+,#0x0303
 
 ENTRY_NOPROFILE(spurintr)	/* level 0 */
 	addql	#1,_C_LABEL(intrcnt)+0
@@ -560,7 +560,7 @@ ENTRY_NOPROFILE(powtrap)
 	jbsr	_C_LABEL(powintr)
 	INTERRUPT_RESTOREREG
 #endif
-	addql	#1,_C_LABEL(intrcnt)+48
+	addql	#1,_C_LABEL(intrcnt)+36
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	rei
 
@@ -573,7 +573,7 @@ ENTRY_NOPROFILE(com0trap)
 	addql	#4,%sp
 	INTERRUPT_RESTOREREG
 #endif
-	addql	#1,_C_LABEL(intrcnt)+52
+	addql	#1,_C_LABEL(intrcnt)+40
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	rei
 
@@ -585,7 +585,7 @@ ENTRY_NOPROFILE(com1trap)
 	addql	#4,%sp
 	INTERRUPT_RESTOREREG
 #endif
-	addql	#1,_C_LABEL(intrcnt)+52
+	addql	#1,_C_LABEL(intrcnt)+40
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	rei
 
@@ -623,7 +623,7 @@ Lnotdma:
 
 ENTRY_NOPROFILE(timertrap)
 	moveml	#0xC0C0,%sp@-		| save scratch registers
-	addql	#1,_C_LABEL(intrcnt)+36	| count hardclock interrupts
+	addql	#1,_C_LABEL(intrcnt)+32	| count hardclock interrupts
 	lea	%sp@(16),%a1		| a1 = &clockframe
 	movl	%a1,%sp@-
 	jbsr	_C_LABEL(hardclock)	| hardclock(&frame)
@@ -665,7 +665,6 @@ ENTRY_NOPROFILE(fdeject)
  * This code is complicated by the fact that sendsig may have been called
  * necessitating a stack cleanup.
  */
-BSS(ssir,1)
 ASENTRY_NOPROFILE(rei)
 	tstl	_C_LABEL(astpending)	| AST pending?
 	jeq	Lchksir			| no, go check for SIR
@@ -681,8 +680,9 @@ Lrei2:
 	clrl	%sp@-			| VA == none
 	clrl	%sp@-			| code == none
 	movl	#T_ASTFLT,%sp@-		| type == async system trap
+	pea	%sp@(12)		| fp = trap frame address
 	jbsr	_C_LABEL(trap)		| go handle it
-	lea	%sp@(12),%sp		| pop value args
+	lea	%sp@(16),%sp		| pop value args
 	movl	%sp@(FR_SP),%a0		| restore user SP
 	movl	%a0,%usp		|   from save area
 	movw	%sp@(FR_ADJ),%d0	| need to adjust stack?
@@ -721,8 +721,9 @@ Lsir1:
 	clrl	%sp@-			| VA == none
 	clrl	%sp@-			| code == none
 	movl	#T_SSIR,%sp@-		| type == software interrupt
+	pea	%sp@(12)		| fp = trap frame address
 	jbsr	_C_LABEL(trap)		| go handle it
-	lea	%sp@(12),%sp		| pop value args
+	lea	%sp@(16),%sp		| pop value args
 	movl	%sp@(FR_SP),%a0		| restore
 	movl	%a0,%usp		|   user SP
 	moveml	%sp@+,#0x7FFF		| and all remaining registers
@@ -960,7 +961,8 @@ Lenab1:
 /* set kernel stack, user SP, and initial pcb */
 	movl	_C_LABEL(proc0paddr),%a1 | get lwp0 pcb addr
 	lea	%a1@(USPACE-4),%sp	| set kernel stack to end of area
-	lea	_C_LABEL(lwp0),%a2	| initialize lwp0.l_addr so that
+	lea	_C_LABEL(lwp0),%a2	| initialize lwp0.l_addr
+	movl	%a2,_C_LABEL(curlwp)	|   and curlwp so that
 	movl	%a1,%a2@(L_ADDR)	|   we don't deref NULL in trap()
 	movl	#USRSTACK-4,%a2
 	movl	%a2,%usp		| init user SP
@@ -1025,11 +1027,6 @@ Lenab3:
  * Use common m68k support routines.
  */
 #include <m68k/m68k/support.s>
-
-/*
- * Use common m68k process manipulation routines.
- */
-#include <m68k/m68k/proc_subr.s>
 
 /*
  * Use common m68k process/lwp switch and context save subroutines.
@@ -1288,9 +1285,6 @@ GLOBAL(fputype)
 GLOBAL(protorp)
 	.long	0,0		| prototype root pointer
 
-GLOBAL(want_resched)
-	.long	0
-
 GLOBAL(proc0paddr)
 	.long	0		| KVA of lwp0 u-area
 
@@ -1318,17 +1312,12 @@ GLOBAL(intrnames)
 	.asciz	"lev5"
 	.asciz	"lev6"
 	.asciz	"nmi"
-	.asciz	"audioerr"
 	.asciz	"clock"
-	.asciz	"scsi"
-	.asciz	"audio"
 	.asciz	"pow"
 	.asciz	"com"
-	.space	200
 GLOBAL(eintrnames)
 	.even
 
 GLOBAL(intrcnt)
-	.long	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-	.space	50
+	.long	0,0,0,0,0,0,0,0,0,0,0
 GLOBAL(eintrcnt)

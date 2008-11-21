@@ -1,4 +1,4 @@
-/*	$NetBSD: if_eco.h,v 1.6 2005/12/10 23:21:38 elad Exp $	*/
+/*	$NetBSD: if_eco.h,v 1.8 2008/02/20 17:05:52 matt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Ben Harris
@@ -52,11 +52,11 @@
 #define ECO_MTU		ECO_IPMTU
 
 struct eco_header {
-	u_int8_t	eco_dhost[ECO_ADDR_LEN];
-	u_int8_t	eco_shost[ECO_ADDR_LEN];
-	u_int8_t	eco_control;
-	u_int8_t	eco_port;
-} __attribute__((__packed__));
+	uint8_t	eco_dhost[ECO_ADDR_LEN];
+	uint8_t	eco_shost[ECO_ADDR_LEN];
+	uint8_t	eco_control;
+	uint8_t	eco_port;
+} __packed;
 
 #define ECO_PORT_IMMEDIATE	0x00
 #define ECO_PORT_DSTAPE		0x54 /* DigitalServicesTapeStore */
@@ -106,8 +106,8 @@ struct eco_header {
 #define ECO_CTL_ARP_REPLY	0xA2
 
 struct eco_arp {
-	u_int8_t ecar_spa[4];
-	u_int8_t ecar_tpa[4];
+	uint8_t ecar_spa[4];
+	uint8_t ecar_tpa[4];
 };
 
 enum eco_state {
@@ -144,12 +144,12 @@ struct ecocom {
 };
 
 #ifdef _KERNEL
-void	eco_ifattach(struct ifnet *, const u_int8_t *);
+void	eco_ifattach(struct ifnet *, const uint8_t *);
 void	eco_ifdetach(struct ifnet *);
 int	eco_init(struct ifnet *);
 void	eco_stop(struct ifnet *, int);
 
-char	*eco_sprintf(const u_int8_t *);
+char	*eco_sprintf(const uint8_t *);
 
 struct mbuf *	eco_inputframe(struct ifnet *, struct mbuf *);
 void	eco_inputidle(struct ifnet *);

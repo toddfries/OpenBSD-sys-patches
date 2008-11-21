@@ -1,2029 +1,1504 @@
-/*	$OpenBSD: acpi.c,v 1.122 2008/06/07 17:00:38 marco Exp $	*/
-/*
- * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
- * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
+/*	$NetBSD: acpi.c,v 1.120 2008/09/19 11:19:33 jmcneill Exp $	*/
+
+/*-
+ * Copyright (c) 2003, 2007 The NetBSD Foundation, Inc.
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum of By Noon Software, Inc.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+/*
+ * Copyright 2001, 2003 Wasabi Systems, Inc.
+ * All rights reserved.
+ *
+ * Written by Jason R. Thorpe for Wasabi Systems, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed for the NetBSD Project by
+ *	Wasabi Systems, Inc.
+ * 4. The name of Wasabi Systems, Inc. may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * Autoconfiguration support for the Intel ACPI Component Architecture
+ * ACPI reference implementation.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: acpi.c,v 1.120 2008/09/19 11:19:33 jmcneill Exp $");
+
+#include "opt_acpi.h"
+#include "opt_pcifixup.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/fcntl.h>
-#include <sys/ioccom.h>
-#include <sys/event.h>
-#include <sys/signalvar.h>
+#include <sys/mutex.h>
+#include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/kthread.h>
+#include <sys/sysctl.h>
 
-#include <machine/conf.h>
-#include <machine/cpufunc.h>
-#include <machine/bus.h>
-
-#include <dev/pci/pcivar.h>
+#include <dev/acpi/acpica.h>
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
-#include <dev/acpi/amltypes.h>
-#include <dev/acpi/acpidev.h>
-#include <dev/acpi/dsdt.h>
-
-#include <machine/apmvar.h>
-#define APMUNIT(dev)	(minor(dev)&0xf0)
-#define APMDEV(dev)	(minor(dev)&0x0f)
-#define APMDEV_NORMAL	0
-#define APMDEV_CTL	8
-
-#ifdef ACPI_DEBUG
-int acpi_debug = 16;
+#include <dev/acpi/acpi_osd.h>
+#include <dev/acpi/acpi_timer.h>
+#ifdef ACPIVERBOSE
+#include <dev/acpi/acpidevs_data.h>
 #endif
-int acpi_enabled;
-int acpi_poll_enabled;
-int acpi_hasprocfvs;
 
-#define ACPIEN_RETRIES 15
+#if defined(ACPI_PCI_FIXUP)
+#error The option ACPI_PCI_FIXUP has been obsoleted by PCI_INTR_FIXUP_DISABLED.  Please adjust your kernel configuration file.
+#endif
 
-void	acpi_isr_thread(void *);
-void	acpi_create_thread(void *);
+#ifdef PCI_INTR_FIXUP_DISABLED
+#include <dev/pci/pcidevs.h>
+#endif
 
-int	acpi_match(struct device *, void *, void *);
-void	acpi_attach(struct device *, struct device *, void *);
-int	acpi_submatch(struct device *, void *, void *);
-int	acpi_print(void *, const char *);
+MALLOC_DECLARE(M_ACPI);
 
-void	acpi_map_pmregs(struct acpi_softc *);
+#include <machine/acpi_machdep.h>
 
-int	acpi_founddock(struct aml_node *, void *);
-int	acpi_foundpss(struct aml_node *, void *);
-int	acpi_foundhid(struct aml_node *, void *);
-int	acpi_foundec(struct aml_node *, void *);
-int	acpi_foundtmp(struct aml_node *, void *);
-int	acpi_foundprt(struct aml_node *, void *);
-int	acpi_foundprw(struct aml_node *, void *);
-int	acpi_inidev(struct aml_node *, void *);
+#ifdef ACPI_DEBUGGER
+#define	ACPI_DBGR_INIT		0x01
+#define	ACPI_DBGR_TABLES	0x02
+#define	ACPI_DBGR_ENABLE	0x04
+#define	ACPI_DBGR_PROBE		0x08
+#define	ACPI_DBGR_RUNNING	0x10
 
-int	acpi_loadtables(struct acpi_softc *, struct acpi_rsdp *);
-void	acpi_load_table(paddr_t, size_t, acpi_qhead_t *);
-void	acpi_load_dsdt(paddr_t, struct acpi_q **);
+static int acpi_dbgr = 0x00;
+#endif
 
-void	acpi_init_states(struct acpi_softc *);
-void	acpi_init_gpes(struct acpi_softc *);
-void	acpi_init_pm(struct acpi_softc *);
+static ACPI_TABLE_DESC	acpi_initial_tables[128];
 
-#ifndef SMALL_KERNEL
-int acpi_add_device(struct aml_node *node, void *arg);
-#endif /* SMALL_KERNEL */
+static int	acpi_match(device_t, struct cfdata *, void *);
+static void	acpi_attach(device_t, device_t, void *);
+static void	acpi_childdet(device_t, device_t);
 
-void	acpi_enable_onegpe(struct acpi_softc *, int, int);
-int	acpi_gpe_level(struct acpi_softc *, int, void *);
-int	acpi_gpe_edge(struct acpi_softc *, int, void *);
+static int	acpi_print(void *aux, const char *);
 
-struct gpe_block *acpi_find_gpe(struct acpi_softc *, int);
+static int	sysctl_hw_acpi_sleepstate(SYSCTLFN_ARGS);
 
-#define	ACPI_LOCK(sc)
-#define	ACPI_UNLOCK(sc)
+extern struct cfdriver acpi_cd;
 
-/* XXX move this into dsdt softc at some point */
-extern struct aml_node aml_root;
+CFATTACH_DECL2_NEW(acpi, sizeof(struct acpi_softc),
+    acpi_match, acpi_attach, NULL, NULL, NULL, acpi_childdet);
 
-/* XXX do we need this? */
-void	acpi_filtdetach(struct knote *);
-int	acpi_filtread(struct knote *, long);
+/*
+ * This is a flag we set when the ACPI subsystem is active.  Machine
+ * dependent code may wish to skip other steps (such as attaching
+ * subsystems that ACPI supercedes) when ACPI is active.
+ */
+int	acpi_active;
+int	acpi_force_load;
 
-struct filterops acpiread_filtops = {
-	1, NULL, acpi_filtdetach, acpi_filtread
-};
-
-struct cfattach acpi_ca = {
-	sizeof(struct acpi_softc), acpi_match, acpi_attach
-};
-
-struct cfdriver acpi_cd = {
-	NULL, "acpi", DV_DULL
-};
-
+/*
+ * Pointer to the ACPI subsystem's state.  There can be only
+ * one ACPI instance.
+ */
 struct acpi_softc *acpi_softc;
-int acpi_evindex;
 
-#define acpi_bus_space_map	_bus_space_map
-#define acpi_bus_space_unmap	_bus_space_unmap
+/*
+ * Locking stuff.
+ */
+static kmutex_t acpi_slock;
+static int acpi_locked;
+extern kmutex_t acpi_interrupt_list_mtx;
 
-#define pch(x) (((x)>=' ' && (x)<='z') ? (x) : ' ')
+/*
+ * Ignored HIDs
+ */
+static const char * const acpi_ignored_ids[] = {
+#if defined(i386) || defined(x86_64)
+	"PNP0000",	/* AT interrupt controller is handled internally */
+	"PNP0200",	/* AT DMA controller is handled internally */
+	"PNP0A??",	/* Busses aren't enumerated with ACPI yet */
+	"PNP0B00",	/* AT RTC is handled internally */
+	"PNP0C01",	/* No "System Board" driver */
+	"PNP0C02",	/* No "PnP motherboard register resources" driver */
+	"PNP0C0F",	/* ACPI PCI link devices are handled internally */
+#endif
+#if defined(x86_64)
+	"PNP0C04",	/* FPU is handled internally */
+#endif
+	NULL
+};
 
-#if 0
-void
-acpi_delay(struct acpi_softc *sc, int64_t uSecs)
+/*
+ * sysctl-related information
+ */
+
+static uint64_t acpi_root_pointer;	/* found as hw.acpi.root */
+static int acpi_sleepstate = ACPI_STATE_S0;
+static char acpi_supported_states[3 * 6 + 1] = "";;
+
+/*
+ * Prototypes.
+ */
+static void		acpi_build_tree(struct acpi_softc *);
+static ACPI_STATUS	acpi_make_devnode(ACPI_HANDLE, UINT32, void *, void **);
+
+static void		acpi_enable_fixed_events(struct acpi_softc *);
+
+static ACPI_TABLE_HEADER *acpi_map_rsdt(void);
+static void		acpi_unmap_rsdt(ACPI_TABLE_HEADER *);
+static int		is_available_state(struct acpi_softc *, int);
+
+/*
+ * acpi_probe:
+ *
+ *	Probe for ACPI support.  This is called by the
+ *	machine-dependent ACPI front-end.  All of the
+ *	actual work is done by ACPICA.
+ *
+ *	NOTE: This is not an autoconfiguration interface function.
+ */
+int
+acpi_probe(void)
 {
-	/* XXX this needs to become a tsleep later */
-	delay(uSecs);
-}
+	static int beenhere;
+	ACPI_TABLE_HEADER *rsdt;
+	ACPI_STATUS rv;
+
+	if (beenhere != 0)
+		panic("acpi_probe: ACPI has already been probed");
+	beenhere = 1;
+
+	mutex_init(&acpi_slock, MUTEX_DEFAULT, IPL_NONE);
+	mutex_init(&acpi_interrupt_list_mtx, MUTEX_DEFAULT, IPL_NONE);
+	acpi_locked = 0;
+
+	/*
+	 * Start up ACPICA.
+	 */
+#ifdef ACPI_DEBUGGER
+	if (acpi_dbgr & ACPI_DBGR_INIT)
+		acpi_osd_debugger();
 #endif
 
-int
-acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
-    int access_size, int len, void *buffer)
-{
-	u_int8_t *pb;
-	bus_space_handle_t ioh;
-	struct acpi_mem_map mh;
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	bus_addr_t ioaddr;
-	int reg, idx, ival, sval;
+	AcpiGbl_AllMethodsSerialized = FALSE;
+	AcpiGbl_EnableInterpreterSlack = TRUE;
 
-	dnprintf(50, "gasio: %.2x 0x%.8llx %s\n",
-	    iospace, address, (iodir == ACPI_IOWRITE) ? "write" : "read");
+	rv = AcpiInitializeSubsystem();
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to initialize ACPICA: %s\n",
+		    AcpiFormatException(rv));
+		return 0;
+	}
 
-	pb = (u_int8_t *)buffer;
-	switch (iospace) {
-	case GAS_SYSTEM_MEMORY:
-		/* copy to/from system memory */
-		acpi_map(address, len, &mh);
-		if (iodir == ACPI_IOREAD)
-			memcpy(buffer, mh.va, len);
-		else
-			memcpy(mh.va, buffer, len);
-		acpi_unmap(&mh);
-		break;
+	rv = AcpiInitializeTables(acpi_initial_tables, 128, 0);
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to initialize ACPI tables: %s\n",
+		    AcpiFormatException(rv));
+		return 0;
+	}
 
-	case GAS_SYSTEM_IOSPACE:
-		/* read/write from I/O registers */
-		ioaddr = address;
-		if (acpi_bus_space_map(sc->sc_iot, ioaddr, len, 0, &ioh) != 0) {
-			printf("unable to map iospace\n");
-			return (-1);
-		}
-		for (reg = 0; reg < len; reg += access_size) {
-			if (iodir == ACPI_IOREAD) {
-				switch (access_size) {
-				case 1:
-					*(uint8_t *)(pb+reg) = bus_space_read_1(
-					    sc->sc_iot, ioh, reg);
-					dnprintf(80, "os_in8(%llx) = %x\n",
-					    reg+address, *(uint8_t *)(pb+reg));
-					break;
-				case 2:
-					*(uint16_t *)(pb+reg) = bus_space_read_2(
-					    sc->sc_iot, ioh, reg);
-					dnprintf(80, "os_in16(%llx) = %x\n",
-					    reg+address, *(uint16_t *)(pb+reg));
-					break;
-				case 4:
-					*(uint32_t *)(pb+reg) = bus_space_read_4(
-					    sc->sc_iot, ioh, reg);
-					break;
-				default:
-					printf("rdio: invalid size %d\n", access_size);
-					break;
-				}
-			} else {
-				switch (access_size) {
-				case 1:
-					bus_space_write_1(sc->sc_iot, ioh, reg,
-					    *(uint8_t *)(pb+reg));
-					dnprintf(80, "os_out8(%llx,%x)\n",
-					    reg+address, *(uint8_t *)(pb+reg));
-					break;
-				case 2:
-					bus_space_write_2(sc->sc_iot, ioh, reg,
-					    *(uint16_t *)(pb+reg));
-					dnprintf(80, "os_out16(%llx,%x)\n",
-					    reg+address, *(uint16_t *)(pb+reg));
-					break;
-				case 4:
-					bus_space_write_4(sc->sc_iot, ioh, reg,
-					    *(uint32_t *)(pb+reg));
-					break;
-				default:
-					printf("wrio: invalid size %d\n", access_size);
-					break;
-				}
-			}
+	rv = AcpiReallocateRootTable();
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to reallocate root table: %s\n",
+		    AcpiFormatException(rv));
+		return 0;
+	}
 
-			/* During autoconf some devices are still gathering
-			 * information.  Delay here to give them an opportunity
-			 * to finish.  During runtime we simply need to ignore
-			 * transient values.
-			 */
-			if (cold)
-				delay(10000);
-		}
-		acpi_bus_space_unmap(sc->sc_iot, ioh, len, &ioaddr);
-		break;
-
-	case GAS_PCI_CFG_SPACE:
-		/* format of address:
-		 *    bits 00..15 = register
-		 *    bits 16..31 = function
-		 *    bits 32..47 = device
-		 *    bits 48..63 = bus
-		 */
-		pc = NULL;
-		tag = pci_make_tag(pc,
-		    ACPI_PCI_BUS(address), ACPI_PCI_DEV(address),
-		    ACPI_PCI_FN(address));
-
-		/* XXX: This is ugly. read-modify-write does a byte at a time */
-		reg = ACPI_PCI_REG(address);
-		for (idx = reg; idx < reg+len; idx++) {
-			ival = pci_conf_read(pc, tag, idx & ~0x3);
-			if (iodir == ACPI_IOREAD) {
-				*pb = ival >> (8 * (idx & 0x3));
-			} else {
-				sval = *pb;
-				ival &= ~(0xFF << (8* (idx & 0x3)));
-				ival |= sval << (8* (idx & 0x3));
-				pci_conf_write(pc, tag, idx & ~0x3, ival);
-			}
-			pb++;
-		}
-		break;
-	case GAS_EMBEDDED:
-		if (sc->sc_ec == NULL)
-			break;
-#ifndef SMALL_KERNEL
-		if (iodir == ACPI_IOREAD)
-			acpiec_read(sc->sc_ec, (u_int8_t)address, len, buffer);
-		else
-			acpiec_write(sc->sc_ec, (u_int8_t)address, len, buffer);
+#ifdef ACPI_DEBUGGER
+	if (acpi_dbgr & ACPI_DBGR_TABLES)
+		acpi_osd_debugger();
 #endif
-		break;
-	}
-	return (0);
-}
 
-int
-acpi_inidev(struct aml_node *node, void *arg)
-{
-	struct acpi_softc	*sc = (struct acpi_softc *)arg;
-	struct aml_value	res;
-	int st = 0;
-
-	/* Default value */
-	st = STA_PRESENT|STA_ENABLED;
-	st |= STA_SHOW_UI|STA_DEV_OK;
-	st |= STA_BATTERY;
-
-	/*
-	 * Per the ACPI spec 6.5.1, only run _INI when device is there or
-	 * when there is no _STA.  We terminate the tree walk (with return 1)
-	 * early if necessary.
-	 */
-
-	/* Evaluate _STA to decide _INI fate and walk fate */
-	if (!aml_evalname(sc, node->parent, "_STA", 0, NULL, &res))
-		st = (int)aml_val2int(&res);
-	aml_freevalue(&res);
-
-	/* Evaluate _INI if we are present */
-	if (st & STA_PRESENT)
-		aml_evalnode(sc, node, 0, NULL, NULL);
-
-	/* If we are functioning, we walk/search our children */
-	if(st & STA_DEV_OK)
+	rv = AcpiLoadTables();
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to load tables: %s\n",
+		    AcpiFormatException(rv));
 		return 0;
-
-	/* If we are not enabled, or not present, terminate search */
-	if (!(st & (STA_PRESENT|STA_ENABLED)))
-		return 1;
-
-	/* Default just continue search */
-	return 0;
-}
-
-int
-acpi_foundprt(struct aml_node *node, void *arg)
-{
-	struct acpi_softc	*sc = (struct acpi_softc *)arg;
-	struct device		*self = (struct device *)arg;
-	const char		*dev;
-	struct acpi_attach_args	aaa;
-	struct aml_value	res;
-	int st = 0;
-
-	dnprintf(10, "found prt entry: %s\n", node->parent->name);
-
-	/* Default value */
-	st = STA_PRESENT|STA_ENABLED;
-	st |= STA_SHOW_UI|STA_DEV_OK;
-	st |= STA_BATTERY;
-
-	/* Evaluate _STA to decide _PRT fate and walk fate */
-	if (!aml_evalname(sc, node->parent, "_STA", 0, NULL, &res))
-		st = (int)aml_val2int(&res);
-	aml_freevalue(&res);
-
-	if (st & STA_PRESENT) {
-		memset(&aaa, 0, sizeof(aaa));
-		aaa.aaa_iot = sc->sc_iot;
-		aaa.aaa_memt = sc->sc_memt;
-		aaa.aaa_node = node;
-		aaa.aaa_dev = dev;
-		aaa.aaa_name = "acpiprt";
-
-		config_found(self, &aaa, acpi_print);
 	}
 
-	/* If we are functioning, we walk/search our children */
-	if(st & STA_DEV_OK)
+	rsdt = acpi_map_rsdt();
+	if (rsdt == NULL) {
+		printf("ACPI: unable to map RSDT\n");
 		return 0;
+	}
 
-	/* If we are not enabled, or not present, terminate search */
-	if (!(st & (STA_PRESENT|STA_ENABLED)))
-		return 1;
+	if (!acpi_force_load && (acpi_find_quirks() & ACPI_QUIRK_BROKEN)) {
+		printf("ACPI: BIOS implementation in listed as broken:\n");
+		printf("ACPI: X/RSDT: OemId <%6.6s,%8.8s,%08x>, "
+		       "AslId <%4.4s,%08x>\n",
+			rsdt->OemId, rsdt->OemTableId,
+		        rsdt->OemRevision,
+			rsdt->AslCompilerId,
+		        rsdt->AslCompilerRevision);
+		printf("ACPI: not used. set acpi_force_load to use anyway.\n");
+		acpi_unmap_rsdt(rsdt);
+		return 0;
+	}
 
-	/* Default just continue search */
-	return 0;
+	acpi_unmap_rsdt(rsdt);
+
+#if notyet
+	/* Install the default address space handlers. */
+	rv = AcpiInstallAddressSpaceHandler(ACPI_ROOT_OBJECT,
+	    ACPI_ADR_SPACE_SYSTEM_MEMORY, ACPI_DEFAULT_HANDLER, NULL, NULL);
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to initialise SystemMemory handler: %s\n",
+		    AcpiFormatException(rv));
+		return 0;
+	}
+	rv = AcpiInstallAddressSpaceHandler(ACPI_ROOT_OBJECT,
+	    ACPI_ADR_SPACE_SYSTEM_IO, ACPI_DEFAULT_HANDLER, NULL, NULL);
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to initialise SystemIO handler: %s\n",
+		     AcpiFormatException(rv));
+		return 0;
+	}
+	rv = AcpiInstallAddressSpaceHandler(ACPI_ROOT_OBJECT,
+	    ACPI_ADR_SPACE_PCI_CONFIG, ACPI_DEFAULT_HANDLER, NULL, NULL);
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unabled to initialise PciConfig handler: %s\n",
+		    AcpiFormatException(rv));
+		return 0;
+	}
+#endif
+
+	rv = AcpiEnableSubsystem(~(ACPI_NO_HARDWARE_INIT|ACPI_NO_ACPI_ENABLE));
+	if (ACPI_FAILURE(rv)) {
+		printf("ACPI: unable to enable: %s\n", AcpiFormatException(rv));
+		return 0;
+	}
+
+	/*
+	 * Looks like we have ACPI!
+	 */
+
+	return 1;
+}
+
+static int
+acpi_submatch(device_t parent, cfdata_t cf, const int *locs, void *aux)
+{
+	struct cfattach *ca;
+
+	ca = config_cfattach_lookup(cf->cf_name, cf->cf_atname);
+	return (ca == &acpi_ca);
 }
 
 int
-acpi_match(struct device *parent, void *match, void *aux)
+acpi_check(device_t parent, const char *ifattr)
 {
-	struct bios_attach_args	*ba = aux;
-	struct cfdata		*cf = match;
-
-	/* sanity */
-	if (strcmp(ba->ba_name, cf->cf_driver->cd_name))
-		return (0);
-
-	if (!acpi_probe(parent, cf, ba))
-		return (0);
-
-	return (1);
+	return (config_search_ia(acpi_submatch, parent, ifattr, NULL) != NULL);
 }
 
-void
-acpi_attach(struct device *parent, struct device *self, void *aux)
+ACPI_PHYSICAL_ADDRESS
+acpi_OsGetRootPointer(void)
 {
-	struct bios_attach_args *ba = aux;
-	struct acpi_softc *sc = (struct acpi_softc *)self;
-	struct acpi_mem_map handle;
-	struct acpi_rsdp *rsdp;
-	struct acpi_q *entry;
-	struct acpi_dsdt *p_dsdt;
-	int idx;
-#ifndef SMALL_KERNEL
-	struct acpi_wakeq *wentry;
-	struct device *dev;
-	struct acpi_ac *ac;
-	struct acpi_bat *bat;
-#endif /* SMALL_KERNEL */
-	paddr_t facspa;
-
-	sc->sc_iot = ba->ba_iot;
-	sc->sc_memt = ba->ba_memt;
-
-	if (acpi_map(ba->ba_acpipbase, sizeof(struct acpi_rsdp), &handle)) {
-		printf(": can't map memory\n");
-		return;
-	}
-
-	rsdp = (struct acpi_rsdp *)handle.va;
-	sc->sc_revision = (int)rsdp->rsdp_revision;
-	printf(": rev %d", sc->sc_revision);
-
-	SIMPLEQ_INIT(&sc->sc_tables);
-	SIMPLEQ_INIT(&sc->sc_wakedevs);
-
-#ifndef SMALL_KERNEL
-	sc->sc_note = malloc(sizeof(struct klist), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sc->sc_note == NULL) {
-		printf(", can't allocate memory\n");
-		acpi_unmap(&handle);
-		return;
-	}
-#endif /* SMALL_KERNEL */
-
-	if (acpi_loadtables(sc, rsdp)) {
-		printf(", can't load tables\n");
-		acpi_unmap(&handle);
-		return;
-	}
-
-	acpi_unmap(&handle);
+	ACPI_PHYSICAL_ADDRESS PhysicalAddress;
 
 	/*
-	 * Find the FADT
-	 */
-	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
-		if (memcmp(entry->q_table, FADT_SIG,
-		    sizeof(FADT_SIG) - 1) == 0) {
-			sc->sc_fadt = entry->q_table;
-			break;
-		}
-	}
-	if (sc->sc_fadt == NULL) {
-		printf(", no FADT\n");
-		return;
-	}
-
-	/*
-	 * Check if we are able to enable ACPI control
-	 */
-	if (!sc->sc_fadt->smi_cmd ||
-	    (!sc->sc_fadt->acpi_enable && !sc->sc_fadt->acpi_disable)) {
-		printf(", ACPI control unavailable\n");
-		return;
-	}
-
-	/*
-	 * Set up a pointer to the firmware control structure
-	 */
-	if (sc->sc_fadt->hdr_revision < 3 || sc->sc_fadt->x_firmware_ctl == 0)
-		facspa = sc->sc_fadt->firmware_ctl;
-	else
-		facspa = sc->sc_fadt->x_firmware_ctl;
-
-	if (acpi_map(facspa, sizeof(struct acpi_facs), &handle))
-		printf(" !FACS");
-	else
-		sc->sc_facs = (struct acpi_facs *)handle.va;
-
-	acpi_enabled = 1;
-
-	/* Create opcode hashtable */
-	aml_hashopcodes();
-
-	/* Create Default AML objects */
-	aml_create_defaultobjects();
-
-	/*
-	 * Load the DSDT from the FADT pointer -- use the
-	 * extended (64-bit) pointer if it exists
-	 */
-	if (sc->sc_fadt->hdr_revision < 3 || sc->sc_fadt->x_dsdt == 0)
-		acpi_load_dsdt(sc->sc_fadt->dsdt, &entry);
-	else
-		acpi_load_dsdt(sc->sc_fadt->x_dsdt, &entry);
-
-	if (entry == NULL)
-		printf(" !DSDT");
-	SIMPLEQ_INSERT_HEAD(&sc->sc_tables, entry, q_next);
-
-	p_dsdt = entry->q_table;
-	acpi_parse_aml(sc, p_dsdt->aml, p_dsdt->hdr_length -
-	    sizeof(p_dsdt->hdr));
-
-	/* Load SSDT's */
-	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
-		if (memcmp(entry->q_table, SSDT_SIG,
-		    sizeof(SSDT_SIG) - 1) == 0) {
-			p_dsdt = entry->q_table;
-			acpi_parse_aml(sc, p_dsdt->aml, p_dsdt->hdr_length -
-			    sizeof(p_dsdt->hdr));
-		}
-	}
-
-	/* Perform post-parsing fixups */
-	aml_postparse();
-
-#ifndef SMALL_KERNEL
-	/* Find available sleeping states */
-	acpi_init_states(sc);
-
-	/* Find available sleep/resume related methods. */
-	acpi_init_pm(sc);
-#endif /* SMALL_KERNEL */
-
-	/* Map Power Management registers */
-	acpi_map_pmregs(sc);
-
-#ifndef SMALL_KERNEL
-	/* Initialize GPE handlers */
-	acpi_init_gpes(sc);
-
-	/* some devices require periodic polling */
-	timeout_set(&sc->sc_dev_timeout, acpi_poll, sc);
-#endif /* SMALL_KERNEL */
-
-	/*
-	 * Take over ACPI control.  Note that once we do this, we
-	 * effectively tell the system that we have ownership of
-	 * the ACPI hardware registers, and that SMI should leave
-	 * them alone
+	 * IA-32: Use AcpiFindRootPointer() to locate the RSDP.
 	 *
-	 * This may prevent thermal control on some systems where
-	 * that actually does work
+	 * IA-64: Use the EFI.
+	 *
+	 * We let MD code handle this since there are multiple
+	 * ways to do it.
 	 */
-	acpi_write_pmreg(sc, ACPIREG_SMICMD, 0, sc->sc_fadt->acpi_enable);
-	idx = 0;
-	do {
-		if (idx++ > ACPIEN_RETRIES) {
-			printf(", can't enable ACPI\n");
-			return;
+
+	PhysicalAddress = acpi_md_OsGetRootPointer();
+
+	if (acpi_root_pointer == 0)
+		acpi_root_pointer = PhysicalAddress;
+
+	return PhysicalAddress;
+}
+
+/*
+ * acpi_match:
+ *
+ *	Autoconfiguration `match' routine.
+ */
+static int
+acpi_match(device_t parent, struct cfdata *match, void *aux)
+{
+	/*
+	 * XXX Check other locators?  Hard to know -- machine
+	 * dependent code has already checked for the presence
+	 * of ACPI by calling acpi_probe(), so I suppose we
+	 * don't really have to do anything else.
+	 */
+	return 1;
+}
+
+/* Remove references to child devices.
+ *
+ * XXX Need to reclaim any resources?
+ */
+static void
+acpi_childdet(device_t self, device_t child)
+{
+	struct acpi_softc *sc = device_private(self);
+	struct acpi_scope *as;
+	struct acpi_devnode *ad;
+
+	TAILQ_FOREACH(as, &sc->sc_scopes, as_list) {
+		TAILQ_FOREACH(ad, &as->as_devnodes, ad_list) {
+			if (ad->ad_device == child)
+				ad->ad_device = NULL;
 		}
-	} while (!(acpi_read_pmreg(sc, ACPIREG_PM1_CNT, 0) & ACPI_PM1_SCI_EN));
-
-	printf("\n%s: tables", DEVNAME(sc));
-	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
-		printf(" %.4s", entry->q_table);
 	}
-	printf("\n");
+}
 
-#ifndef SMALL_KERNEL
-	/* Display wakeup devices and lowest S-state */
-	printf("%s: wakeup devices", DEVNAME(sc));
-	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
-		printf(" %.4s(S%d)", wentry->q_node->name,
-		    wentry->q_state);
-	}
-	printf("\n");
+/*
+ * acpi_attach:
+ *
+ *	Autoconfiguration `attach' routine.  Finish initializing
+ *	ACPICA (some initialization was done in acpi_probe(),
+ *	which was required to check for the presence of ACPI),
+ *	and enable the ACPI subsystem.
+ */
+static void
+acpi_attach(device_t parent, device_t self, void *aux)
+{
+	struct acpi_softc *sc = device_private(self);
+	struct acpibus_attach_args *aa = aux;
+	ACPI_STATUS rv;
+	ACPI_TABLE_HEADER *rsdt;
 
+	aprint_naive("\n");
+	aprint_normal(": Intel ACPICA %08x\n", ACPI_CA_VERSION);
 
-	/*
-	 * ACPI is enabled now -- attach timer
-	 */
-	{
-		struct acpi_attach_args aaa;
+	if (acpi_softc != NULL)
+		panic("acpi_attach: ACPI has already been attached");
 
-		memset(&aaa, 0, sizeof(aaa));
-		aaa.aaa_name = "acpitimer";
-		aaa.aaa_iot = sc->sc_iot;
-		aaa.aaa_memt = sc->sc_memt;
-#if 0
-		aaa.aaa_pcit = sc->sc_pcit;
-		aaa.aaa_smbust = sc->sc_smbust;
-#endif
-		config_found(self, &aaa, acpi_print);
-	}
-#endif /* SMALL_KERNEL */
+	sysmon_power_settype("acpi");
 
-	/*
-	 * Attach table-defined devices
-	 */
-	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
-		struct acpi_attach_args aaa;
+	rsdt = acpi_map_rsdt();
+	if (rsdt) {
+		aprint_verbose_dev(
+		    self,
+		    "X/RSDT: OemId <%6.6s,%8.8s,%08x>, AslId <%4.4s,%08x>\n",
+		    rsdt->OemId, rsdt->OemTableId,
+		    rsdt->OemRevision,
+		    rsdt->AslCompilerId, rsdt->AslCompilerRevision);
+	} else
+		aprint_error_dev(self, "X/RSDT: Not found\n");
+	acpi_unmap_rsdt(rsdt);
 
-		memset(&aaa, 0, sizeof(aaa));
-		aaa.aaa_iot = sc->sc_iot;
-		aaa.aaa_memt = sc->sc_memt;
-	#if 0
-		aaa.aaa_pcit = sc->sc_pcit;
-		aaa.aaa_smbust = sc->sc_smbust;
-	#endif
-		aaa.aaa_table = entry->q_table;
-		config_found_sm(self, &aaa, acpi_print, acpi_submatch);
-	}
+	sc->sc_dev = self;
+	sc->sc_quirks = acpi_find_quirks();
+
+	sc->sc_iot = aa->aa_iot;
+	sc->sc_memt = aa->aa_memt;
+	sc->sc_pc = aa->aa_pc;
+	sc->sc_pciflags = aa->aa_pciflags;
+	sc->sc_ic = aa->aa_ic;
 
 	acpi_softc = sc;
 
-	/* initialize runtime environment */
-	aml_find_node(&aml_root, "_INI", acpi_inidev, sc);
+	/*
+	 * Register null power management handler
+	 */
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 
-	/* attach pci interrupt routing tables */
-	aml_find_node(&aml_root, "_PRT", acpi_foundprt, sc);
+	/*
+	 * Bring ACPI on-line.
+	 */
+#ifdef ACPI_DEBUGGER
+	if (acpi_dbgr & ACPI_DBGR_ENABLE)
+		acpi_osd_debugger();
+#endif
 
-#ifndef SMALL_KERNEL
-	 /* XXX EC needs to be attached first on some systems */
-	aml_find_node(&aml_root, "_HID", acpi_foundec, sc);
+#define ACPI_ENABLE_PHASE1 \
+    (ACPI_NO_HANDLER_INIT | ACPI_NO_EVENT_INIT)
+#define ACPI_ENABLE_PHASE2 \
+    (ACPI_NO_HARDWARE_INIT | ACPI_NO_ACPI_ENABLE | \
+     ACPI_NO_ADDRESS_SPACE_INIT)
 
-	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_add_device, sc);
-
-	/* attach battery, power supply and button devices */
-	aml_find_node(&aml_root, "_HID", acpi_foundhid, sc);
-
-	/* attach docks */
-	aml_find_node(&aml_root, "_DCK", acpi_founddock, sc);
-
-	/* create list of devices we want to query when APM come in */
-	SLIST_INIT(&sc->sc_ac);
-	SLIST_INIT(&sc->sc_bat);
-	TAILQ_FOREACH(dev, &alldevs, dv_list) {
-		if (!strncmp(dev->dv_xname, "acpiac", strlen("acpiac"))) {
-			ac = malloc(sizeof(*ac), M_DEVBUF, M_WAITOK | M_ZERO);
-			ac->aac_softc = (struct acpiac_softc *)dev;
-			SLIST_INSERT_HEAD(&sc->sc_ac, ac, aac_link);
-		}
-		if (!strncmp(dev->dv_xname, "acpibat", strlen("acpibat"))) {
-			bat = malloc(sizeof(*bat), M_DEVBUF, M_WAITOK | M_ZERO);
-			bat->aba_softc = (struct acpibat_softc *)dev;
-			SLIST_INSERT_HEAD(&sc->sc_bat, bat, aba_link);
-		}
+	rv = AcpiEnableSubsystem(ACPI_ENABLE_PHASE1);
+	if (ACPI_FAILURE(rv)) {
+		aprint_error_dev(self, "unable to enable ACPI: %s\n",
+		    AcpiFormatException(rv));
+		return;
 	}
 
-	/* Setup threads */
-	sc->sc_thread = malloc(sizeof(struct acpi_thread), M_DEVBUF, M_WAITOK);
-	sc->sc_thread->sc = sc;
-	sc->sc_thread->running = 1;
+	acpi_md_callback();
 
-	acpi_attach_machdep(sc);
+	rv = AcpiEnableSubsystem(ACPI_ENABLE_PHASE2);
+	if (ACPI_FAILURE(rv)) {
+		aprint_error_dev(self, "unable to enable ACPI: %s\n",
+		    AcpiFormatException(rv));
+		return;
+	}
 
-	kthread_create_deferred(acpi_create_thread, sc);
-#endif /* SMALL_KERNEL */
+	/* early EC handler initialization if ECDT table is available */
+	config_found_ia(self, "acpiecdtbus", NULL, NULL);
+
+	rv = AcpiInitializeObjects(ACPI_FULL_INITIALIZATION);
+	if (ACPI_FAILURE(rv)) {
+		aprint_error_dev(self,
+		    "unable to initialize ACPI objects: %s\n",
+		    AcpiFormatException(rv));
+		return;
+	}
+	acpi_active = 1;
+
+	/* Our current state is "awake". */
+	sc->sc_sleepstate = ACPI_STATE_S0;
+
+	/* Show SCI interrupt. */
+	aprint_verbose_dev(self, "SCI interrupting at int %d\n",
+	    AcpiGbl_FADT.SciInterrupt);
+
+	/*
+	 * Check for fixed-hardware features.
+	 */
+	acpi_enable_fixed_events(sc);
+	acpitimer_init();
+
+	/*
+	 * Scan the namespace and build our device tree.
+	 */
+#ifdef ACPI_DEBUGGER
+	if (acpi_dbgr & ACPI_DBGR_PROBE)
+		acpi_osd_debugger();
+#endif
+	acpi_build_tree(sc);
+
+	sprintf(acpi_supported_states, "%s%s%s%s%s%s",
+	    is_available_state(sc, ACPI_STATE_S0) ? "S0 " : "",
+	    is_available_state(sc, ACPI_STATE_S1) ? "S1 " : "",
+	    is_available_state(sc, ACPI_STATE_S2) ? "S2 " : "",
+	    is_available_state(sc, ACPI_STATE_S3) ? "S3 " : "",
+	    is_available_state(sc, ACPI_STATE_S4) ? "S4 " : "",
+	    is_available_state(sc, ACPI_STATE_S5) ? "S5 " : "");
+
+#ifdef ACPI_DEBUGGER
+	if (acpi_dbgr & ACPI_DBGR_RUNNING)
+		acpi_osd_debugger();
+#endif
 }
 
-int
-acpi_submatch(struct device *parent, void *match, void *aux)
+#if 0
+/*
+ * acpi_disable:
+ *
+ *	Disable ACPI.
+ */
+static ACPI_STATUS
+acpi_disable(struct acpi_softc *sc)
 {
-	struct acpi_attach_args *aaa = (struct acpi_attach_args *)aux;
-	struct cfdata *cf = match;
+	ACPI_STATUS rv = AE_OK;
 
-	if (aaa->aaa_table == NULL)
-		return (0);
-	return ((*cf->cf_attach->ca_match)(parent, match, aux));
+	if (acpi_active) {
+		rv = AcpiDisable();
+		if (ACPI_SUCCESS(rv))
+			acpi_active = 0;
+	}
+	return rv;
+}
+#endif
+
+struct acpi_make_devnode_state {
+	struct acpi_softc *softc;
+	struct acpi_scope *scope;
+};
+
+/*
+ * acpi_build_tree:
+ *
+ *	Scan relevant portions of the ACPI namespace and attach
+ *	child devices.
+ */
+static void
+acpi_build_tree(struct acpi_softc *sc)
+{
+	static const char *scopes[] = {
+		"\\_PR_",	/* ACPI 1.0 processor namespace */
+		"\\_SB_",	/* system bus namespace */
+		"\\_SI_",	/* system indicator namespace */
+		"\\_TZ_",	/* ACPI 1.0 thermal zone namespace */
+		NULL,
+	};
+	struct acpi_attach_args aa;
+	struct acpi_make_devnode_state state;
+	struct acpi_scope *as;
+	struct acpi_devnode *ad;
+	ACPI_HANDLE parent;
+	ACPI_STATUS rv;
+	int i;
+
+	TAILQ_INIT(&sc->sc_scopes);
+
+	state.softc = sc;
+
+	/*
+	 * Scan the namespace and build our tree.
+	 */
+	for (i = 0; scopes[i] != NULL; i++) {
+		as = malloc(sizeof(*as), M_ACPI, M_WAITOK);
+		as->as_name = scopes[i];
+		TAILQ_INIT(&as->as_devnodes);
+
+		TAILQ_INSERT_TAIL(&sc->sc_scopes, as, as_list);
+
+		state.scope = as;
+
+		rv = AcpiGetHandle(ACPI_ROOT_OBJECT, scopes[i],
+		    &parent);
+		if (ACPI_SUCCESS(rv)) {
+			AcpiWalkNamespace(ACPI_TYPE_ANY, parent, 100,
+			    acpi_make_devnode, &state, NULL);
+		}
+
+		/* Now, for this namespace, try and attach the devices. */
+		TAILQ_FOREACH(ad, &as->as_devnodes, ad_list) {
+			aa.aa_node = ad;
+			aa.aa_iot = sc->sc_iot;
+			aa.aa_memt = sc->sc_memt;
+			aa.aa_pc = sc->sc_pc;
+			aa.aa_pciflags = sc->sc_pciflags;
+			aa.aa_ic = sc->sc_ic;
+
+			if (ad->ad_devinfo->Type == ACPI_TYPE_DEVICE) {
+				/*
+				 * XXX We only attach devices which are:
+				 *
+				 *	- present
+				 *	- enabled
+				 *	- functioning properly
+				 *
+				 * However, if enabled, it's decoding resources,
+				 * so we should claim them, if possible.
+				 * Requires changes to bus_space(9).
+				 */
+				if ((ad->ad_devinfo->Valid & ACPI_VALID_STA) ==
+				    ACPI_VALID_STA &&
+				    (ad->ad_devinfo->CurrentStatus &
+				     (ACPI_STA_DEV_PRESENT|ACPI_STA_DEV_ENABLED|
+				      ACPI_STA_DEV_OK)) !=
+				    (ACPI_STA_DEV_PRESENT|ACPI_STA_DEV_ENABLED|
+				     ACPI_STA_DEV_OK))
+					continue;
+			}
+
+			/*
+			 * XXX Same problem as above...
+			 *
+			 * Do this check only for devices, as e.g.
+			 * a Thermal Zone doesn't have a HID.
+			 */
+			if (ad->ad_devinfo->Type == ACPI_TYPE_DEVICE &&
+			    (ad->ad_devinfo->Valid & ACPI_VALID_HID) == 0)
+				continue;
+
+			/*
+			 * Handled internally
+			 */
+			if (ad->ad_devinfo->Type == ACPI_TYPE_PROCESSOR ||
+			    ad->ad_devinfo->Type == ACPI_TYPE_POWER)
+				continue;
+
+			/*
+			 * Skip ignored HIDs
+			 */
+			if (acpi_match_hid(ad->ad_devinfo, acpi_ignored_ids))
+				continue;
+
+			ad->ad_device = config_found_ia(sc->sc_dev,
+			    "acpinodebus", &aa, acpi_print);
+		}
+	}
+	config_found_ia(sc->sc_dev, "acpiapmbus", NULL, NULL);
 }
 
-int
+#ifdef ACPI_ACTIVATE_DEV
+static void
+acpi_activate_device(ACPI_HANDLE handle, ACPI_DEVICE_INFO **di)
+{
+	ACPI_STATUS rv;
+	ACPI_BUFFER buf;
+
+	buf.Pointer = NULL;
+	buf.Length = ACPI_ALLOCATE_BUFFER;
+
+#ifdef ACPI_DEBUG
+	aprint_normal("acpi_activate_device: %s, old status=%x\n",
+	       (*di)->HardwareId.Value, (*di)->CurrentStatus);
+#endif
+
+	rv = acpi_allocate_resources(handle);
+	if (ACPI_FAILURE(rv)) {
+		aprint_error("acpi: activate failed for %s\n",
+		       (*di)->HardwareId.Value);
+	} else {
+		aprint_verbose("acpi: activated %s\n",
+		    (*di)->HardwareId.Value);
+	}
+
+	(void)AcpiGetObjectInfo(handle, &buf);
+	AcpiOsFree(*di);
+	*di = buf.Pointer;
+
+#ifdef ACPI_DEBUG
+	aprint_normal("acpi_activate_device: %s, new status=%x\n",
+	       (*di)->HardwareId.Value, (*di)->CurrentStatus);
+#endif
+}
+#endif /* ACPI_ACTIVATE_DEV */
+
+/*
+ * acpi_make_devnode:
+ *
+ *	Make an ACPI devnode.
+ */
+static ACPI_STATUS
+acpi_make_devnode(ACPI_HANDLE handle, UINT32 level, void *context,
+    void **status)
+{
+	struct acpi_make_devnode_state *state = context;
+#if defined(ACPI_DEBUG) || defined(ACPI_EXTRA_DEBUG)
+	struct acpi_softc *sc = state->softc;
+#endif
+	struct acpi_scope *as = state->scope;
+	struct acpi_devnode *ad;
+	ACPI_OBJECT_TYPE type;
+	ACPI_BUFFER buf;
+	ACPI_DEVICE_INFO *devinfo;
+	ACPI_STATUS rv;
+	ACPI_NAME_UNION *anu;
+	int i, clear = 0;
+
+	rv = AcpiGetType(handle, &type);
+	if (ACPI_SUCCESS(rv)) {
+		buf.Pointer = NULL;
+		buf.Length = ACPI_ALLOCATE_BUFFER;
+		rv = AcpiGetObjectInfo(handle, &buf);
+		if (ACPI_FAILURE(rv)) {
+#ifdef ACPI_DEBUG
+			aprint_normal_dev(sc->sc_dev,
+			    "AcpiGetObjectInfo failed: %s\n",
+			    AcpiFormatException(rv));
+#endif
+			goto out; /* XXX why return OK */
+		}
+
+		devinfo = buf.Pointer;
+
+		switch (type) {
+		case ACPI_TYPE_DEVICE:
+#ifdef ACPI_ACTIVATE_DEV
+			if ((devinfo->Valid & (ACPI_VALID_STA|ACPI_VALID_HID)) ==
+			    (ACPI_VALID_STA|ACPI_VALID_HID) &&
+			    (devinfo->CurrentStatus &
+			     (ACPI_STA_DEV_PRESENT|ACPI_STA_DEV_ENABLED)) ==
+			    ACPI_STA_DEV_PRESENT)
+				acpi_activate_device(handle, &devinfo);
+
+			/* FALLTHROUGH */
+#endif
+
+		case ACPI_TYPE_PROCESSOR:
+		case ACPI_TYPE_THERMAL:
+		case ACPI_TYPE_POWER:
+			ad = malloc(sizeof(*ad), M_ACPI, M_NOWAIT|M_ZERO);
+			if (ad == NULL)
+				return AE_NO_MEMORY;
+
+			ad->ad_devinfo = devinfo;
+			ad->ad_handle = handle;
+			ad->ad_level = level;
+			ad->ad_scope = as;
+			ad->ad_type = type;
+
+			anu = (ACPI_NAME_UNION *)&devinfo->Name;
+			ad->ad_name[4] = '\0';
+			for (i = 3, clear = 0; i >= 0; i--) {
+				if (!clear && anu->Ascii[i] == '_')
+					ad->ad_name[i] = '\0';
+				else {
+					ad->ad_name[i] = anu->Ascii[i];
+					clear = 1;
+				}
+			}
+			if (ad->ad_name[0] == '\0')
+				ad->ad_name[0] = '_';
+
+			TAILQ_INSERT_TAIL(&as->as_devnodes, ad, ad_list);
+
+			if (type == ACPI_TYPE_DEVICE &&
+			    (ad->ad_devinfo->Valid & ACPI_VALID_HID) == 0)
+				goto out;
+
+#ifdef ACPI_EXTRA_DEBUG
+			aprint_normal_dev(sc->sc_dev,
+			    "HID %s found in scope %s level %d\n",
+			    ad->ad_devinfo->HardwareId.Value,
+			    as->as_name, ad->ad_level);
+			if (ad->ad_devinfo->Valid & ACPI_VALID_UID)
+				aprint_normal("       UID %s\n",
+				    ad->ad_devinfo->UniqueId.Value);
+			if (ad->ad_devinfo->Valid & ACPI_VALID_ADR)
+				aprint_normal("       ADR 0x%016" PRIx64 "\n",
+				    ad->ad_devinfo->Address);
+			if (ad->ad_devinfo->Valid & ACPI_VALID_STA)
+				aprint_normal("       STA 0x%08x\n",
+				    ad->ad_devinfo->CurrentStatus);
+#endif
+		}
+	}
+ out:
+	return AE_OK;
+}
+
+/*
+ * acpi_print:
+ *
+ *	Autoconfiguration print routine for ACPI node bus.
+ */
+static int
 acpi_print(void *aux, const char *pnp)
 {
 	struct acpi_attach_args *aa = aux;
+	ACPI_STATUS rv;
 
 	if (pnp) {
-		if (aa->aaa_name)
-			printf("%s at %s", aa->aaa_name, pnp);
-		else
-			return (QUIET);
-	}
+		if (aa->aa_node->ad_devinfo->Valid & ACPI_VALID_HID) {
+			char *pnpstr =
+			    aa->aa_node->ad_devinfo->HardwareId.Value;
+			char *str;
 
-	return (UNCONF);
-}
-
-int
-acpi_loadtables(struct acpi_softc *sc, struct acpi_rsdp *rsdp)
-{
-	struct acpi_mem_map hrsdt, handle;
-	struct acpi_table_header *hdr;
-	int i, ntables;
-	size_t len;
-
-	if (rsdp->rsdp_revision == 2) {
-		struct acpi_xsdt *xsdt;
-
-		if (acpi_map(rsdp->rsdp_xsdt, sizeof(*hdr), &handle)) {
-			printf("couldn't map rsdt\n");
-			return (ENOMEM);
-		}
-
-		hdr = (struct acpi_table_header *)handle.va;
-		len = hdr->length;
-		acpi_unmap(&handle);
-		hdr = NULL;
-
-		acpi_map(rsdp->rsdp_xsdt, len, &hrsdt);
-		xsdt = (struct acpi_xsdt *)hrsdt.va;
-
-		ntables = (len - sizeof(struct acpi_table_header)) /
-		    sizeof(xsdt->table_offsets[0]);
-
-		for (i = 0; i < ntables; i++) {
-			acpi_map(xsdt->table_offsets[i], sizeof(*hdr), &handle);
-			hdr = (struct acpi_table_header *)handle.va;
-			acpi_load_table(xsdt->table_offsets[i], hdr->length,
-			    &sc->sc_tables);
-			acpi_unmap(&handle);
-		}
-		acpi_unmap(&hrsdt);
-	} else {
-		struct acpi_rsdt *rsdt;
-
-		if (acpi_map(rsdp->rsdp_rsdt, sizeof(*hdr), &handle)) {
-			printf("couldn't map rsdt\n");
-			return (ENOMEM);
-		}
-
-		hdr = (struct acpi_table_header *)handle.va;
-		len = hdr->length;
-		acpi_unmap(&handle);
-		hdr = NULL;
-
-		acpi_map(rsdp->rsdp_rsdt, len, &hrsdt);
-		rsdt = (struct acpi_rsdt *)hrsdt.va;
-
-		ntables = (len - sizeof(struct acpi_table_header)) /
-		    sizeof(rsdt->table_offsets[0]);
-
-		for (i = 0; i < ntables; i++) {
-			acpi_map(rsdt->table_offsets[i], sizeof(*hdr), &handle);
-			hdr = (struct acpi_table_header *)handle.va;
-			acpi_load_table(rsdt->table_offsets[i], hdr->length,
-			    &sc->sc_tables);
-			acpi_unmap(&handle);
-		}
-		acpi_unmap(&hrsdt);
-	}
-
-	return (0);
-}
-
-void
-acpi_load_table(paddr_t pa, size_t len, acpi_qhead_t *queue)
-{
-	struct acpi_mem_map handle;
-	struct acpi_q *entry;
-
-	entry = malloc(len + sizeof(struct acpi_q), M_DEVBUF, M_NOWAIT);
-
-	if (entry != NULL) {
-		if (acpi_map(pa, len, &handle)) {
-			free(entry, M_DEVBUF);
-			return;
-		}
-		memcpy(entry->q_data, handle.va, len);
-		entry->q_table = entry->q_data;
-		acpi_unmap(&handle);
-		SIMPLEQ_INSERT_TAIL(queue, entry, q_next);
-	}
-}
-
-void
-acpi_load_dsdt(paddr_t pa, struct acpi_q **dsdt)
-{
-	struct acpi_mem_map handle;
-	struct acpi_table_header *hdr;
-	size_t len;
-
-	if (acpi_map(pa, sizeof(*hdr), &handle))
-		return;
-	hdr = (struct acpi_table_header *)handle.va;
-	len = hdr->length;
-	acpi_unmap(&handle);
-
-	*dsdt = malloc(len + sizeof(struct acpi_q), M_DEVBUF, M_NOWAIT);
-
-	if (*dsdt != NULL) {
-		if (acpi_map(pa, len, &handle)) {
-			free(*dsdt, M_DEVBUF);
-			*dsdt = NULL;
-			return;
-		}
-		memcpy((*dsdt)->q_data, handle.va, len);
-		(*dsdt)->q_table = (*dsdt)->q_data;
-		acpi_unmap(&handle);
-	}
-}
-
-int
-acpiopen(dev_t dev, int flag, int mode, struct proc *p)
-{
-	int error = 0;
-#ifndef SMALL_KERNEL
-	struct acpi_softc *sc;
-
-	if (!acpi_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = acpi_cd.cd_devs[APMUNIT(dev)]))
-		return (ENXIO);
-
-	switch (APMDEV(dev)) {
-	case APMDEV_CTL:
-		if (!(flag & FWRITE)) {
-			error = EINVAL;
-			break;
-		}
-		break;
-	case APMDEV_NORMAL:
-		if (!(flag & FREAD) || (flag & FWRITE)) {
-			error = EINVAL;
-			break;
-		}
-		break;
-	default:
-		error = ENXIO;
-		break;
-	}
-#else
-	error = ENXIO;
-#endif
-	return (error);
-}
-
-int
-acpiclose(dev_t dev, int flag, int mode, struct proc *p)
-{
-	int error = 0;
-#ifndef SMALL_KERNEL
-	struct acpi_softc *sc;
-
-	if (!acpi_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = acpi_cd.cd_devs[APMUNIT(dev)]))
-		return (ENXIO);
-	switch (APMDEV(dev)) {
-	case APMDEV_CTL:
-	case APMDEV_NORMAL:
-		break;
-	default:
-		error = ENXIO;
-		break;
-	}
-#else
-	error = ENXIO;
-#endif
-	return (error);
-}
-
-int
-acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
-{
-	int error = 0;
-#ifndef SMALL_KERNEL
-	struct acpi_softc *sc;
-	struct acpi_ac *ac;
-	struct acpi_bat *bat;
-	struct apm_power_info *pi = (struct apm_power_info *)data;
-	int bats;
-	unsigned int remaining, rem, minutes, rate;
-
-	if (!acpi_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = acpi_cd.cd_devs[APMUNIT(dev)]))
-		return (ENXIO);
-
-	ACPI_LOCK(sc);
-	/* fake APM */
-	switch (cmd) {
-	case APM_IOC_GETPOWER:
-		/* A/C */
-		pi->ac_state = APM_AC_UNKNOWN;
-		SLIST_FOREACH(ac, &sc->sc_ac, aac_link) {
-			if (ac->aac_softc->sc_ac_stat == PSR_ONLINE)
-				pi->ac_state = APM_AC_ON;
-			else if (ac->aac_softc->sc_ac_stat == PSR_OFFLINE)
-				if (pi->ac_state == APM_AC_UNKNOWN)
-					pi->ac_state = APM_AC_OFF;
-		}
-
-		/* battery */
-		pi->battery_state = APM_BATT_UNKNOWN;
-		pi->battery_life = 0;
-		pi->minutes_left = 0;
-		bats = 0;
-		remaining = rem = 0;
-		minutes = 0;
-		rate = 0;
-		SLIST_FOREACH(bat, &sc->sc_bat, aba_link) {
-			if (bat->aba_softc->sc_bat_present == 0)
-				continue;
-
-			if (bat->aba_softc->sc_bif.bif_last_capacity == 0)
-				continue;
-
-			bats++;
-			rem = (bat->aba_softc->sc_bst.bst_capacity * 100) /
-			    bat->aba_softc->sc_bif.bif_last_capacity;
-			if (rem > 100)
-				rem = 100;
-			remaining += rem;
-
-			if (bat->aba_softc->sc_bst.bst_rate == BST_UNKNOWN)
-				continue;
-			else if (bat->aba_softc->sc_bst.bst_rate > 1)
-				rate = bat->aba_softc->sc_bst.bst_rate;
-
-			minutes += bat->aba_softc->sc_bst.bst_capacity;
-		}
-
-		if (bats == 0) {
-			pi->battery_state = APM_BATTERY_ABSENT;
-			pi->battery_life = 0;
-			pi->minutes_left = (unsigned int)-1;
-			break;
-		}
-
-		if (pi->ac_state == APM_AC_ON || rate == 0)
-			pi->minutes_left = (unsigned int)-1;
-		else
-			pi->minutes_left = 100 * minutes / rate;
-
-		/* running on battery */
-		pi->battery_life = remaining / bats;
-		if (pi->battery_life > 50)
-			pi->battery_state = APM_BATT_HIGH;
-		else if (pi->battery_life > 25)
-			pi->battery_state = APM_BATT_LOW;
-		else
-			pi->battery_state = APM_BATT_CRITICAL;
-
-		break;
-
-	default:
-		error = ENOTTY;
-	}
-
-	ACPI_UNLOCK(sc);
-#else
-	error = ENXIO;
-#endif /* SMALL_KERNEL */
-	return (error);
-}
-
-void
-acpi_filtdetach(struct knote *kn)
-{
-#ifndef SMALL_KERNEL
-	struct acpi_softc *sc = kn->kn_hook;
-
-	ACPI_LOCK(sc);
-	SLIST_REMOVE(sc->sc_note, kn, knote, kn_selnext);
-	ACPI_UNLOCK(sc);
-#endif
-}
-
-int
-acpi_filtread(struct knote *kn, long hint)
-{
-#ifndef SMALL_KERNEL
-	/* XXX weird kqueue_scan() semantics */
-	if (hint & !kn->kn_data)
-		kn->kn_data = hint;
-#endif
-	return (1);
-}
-
-int
-acpikqfilter(dev_t dev, struct knote *kn)
-{
-#ifndef SMALL_KERNEL
-	struct acpi_softc *sc;
-
-	if (!acpi_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = acpi_cd.cd_devs[APMUNIT(dev)]))
-		return (ENXIO);
-
-	switch (kn->kn_filter) {
-	case EVFILT_READ:
-		kn->kn_fop = &acpiread_filtops;
-		break;
-	default:
-		return (1);
-	}
-
-	kn->kn_hook = sc;
-
-	ACPI_LOCK(sc);
-	SLIST_INSERT_HEAD(sc->sc_note, kn, kn_selnext);
-	ACPI_UNLOCK(sc);
-
-	return (0);
-#else
-	return (1);
-#endif
-}
-
-/* Read from power management register */
-int
-acpi_read_pmreg(struct acpi_softc *sc, int reg, int offset)
-{
-	bus_space_handle_t ioh;
-	bus_size_t size, __size;
-	int regval;
-
-	__size = 0;
-	/* Special cases: 1A/1B blocks can be OR'ed together */
-	switch (reg) {
-	case ACPIREG_PM1_EN:
-		return (acpi_read_pmreg(sc, ACPIREG_PM1A_EN, offset) |
-		    acpi_read_pmreg(sc, ACPIREG_PM1B_EN, offset));
-	case ACPIREG_PM1_STS:
-		return (acpi_read_pmreg(sc, ACPIREG_PM1A_STS, offset) |
-		    acpi_read_pmreg(sc, ACPIREG_PM1B_STS, offset));
-	case ACPIREG_PM1_CNT:
-		return (acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, offset) |
-		    acpi_read_pmreg(sc, ACPIREG_PM1B_CNT, offset));
-	case ACPIREG_GPE_STS:
-		__size = 1;
-		dnprintf(50, "read GPE_STS  offset: %.2x %.2x %.2x\n", offset,
-		    sc->sc_fadt->gpe0_blk_len>>1, sc->sc_fadt->gpe1_blk_len>>1);
-		if (offset < (sc->sc_fadt->gpe0_blk_len >> 1)) {
-			reg = ACPIREG_GPE0_STS;
-		}
-		break;
-	case ACPIREG_GPE_EN:
-		__size = 1;
-		dnprintf(50, "read GPE_EN   offset: %.2x %.2x %.2x\n",
-		    offset, sc->sc_fadt->gpe0_blk_len>>1,
-		    sc->sc_fadt->gpe1_blk_len>>1);
-		if (offset < (sc->sc_fadt->gpe0_blk_len >> 1)) {
-			reg = ACPIREG_GPE0_EN;
-		}
-		break;
-	}
-
-	if (reg >= ACPIREG_MAXREG || sc->sc_pmregs[reg].size == 0)
-		return (0);
-
-	regval = 0;
-	ioh = sc->sc_pmregs[reg].ioh;
-	size = sc->sc_pmregs[reg].size;
-	if (__size)
-		size = __size;
-	if (size > 4)
-		size = 4;
-
-	switch (size) {
-	case 1:
-		regval = bus_space_read_1(sc->sc_iot, ioh, offset);
-		break;
-	case 2:
-		regval = bus_space_read_2(sc->sc_iot, ioh, offset);
-		break;
-	case 4:
-		regval = bus_space_read_4(sc->sc_iot, ioh, offset);
-		break;
-	}
-
-	dnprintf(30, "acpi_readpm: %s = %.4x:%.4x %x\n",
-	    sc->sc_pmregs[reg].name,
-	    sc->sc_pmregs[reg].addr, offset, regval);
-	return (regval);
-}
-
-/* Write to power management register */
-void
-acpi_write_pmreg(struct acpi_softc *sc, int reg, int offset, int regval)
-{
-	bus_space_handle_t ioh;
-	bus_size_t size, __size;
-
-	__size = 0;
-	/* Special cases: 1A/1B blocks can be written with same value */
-	switch (reg) {
-	case ACPIREG_PM1_EN:
-		acpi_write_pmreg(sc, ACPIREG_PM1A_EN, offset, regval);
-		acpi_write_pmreg(sc, ACPIREG_PM1B_EN, offset, regval);
-		break;
-	case ACPIREG_PM1_STS:
-		acpi_write_pmreg(sc, ACPIREG_PM1A_STS, offset, regval);
-		acpi_write_pmreg(sc, ACPIREG_PM1B_STS, offset, regval);
-		break;
-	case ACPIREG_PM1_CNT:
-		acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, offset, regval);
-		acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, offset, regval);
-		break;
-	case ACPIREG_GPE_STS:
-		__size = 1;
-		dnprintf(50, "write GPE_STS offset: %.2x %.2x %.2x %.2x\n",
-		    offset, sc->sc_fadt->gpe0_blk_len>>1,
-		    sc->sc_fadt->gpe1_blk_len>>1, regval);
-		if (offset < (sc->sc_fadt->gpe0_blk_len >> 1)) {
-			reg = ACPIREG_GPE0_STS;
-		}
-		break;
-	case ACPIREG_GPE_EN:
-		__size = 1;
-		dnprintf(50, "write GPE_EN  offset: %.2x %.2x %.2x %.2x\n",
-		    offset, sc->sc_fadt->gpe0_blk_len>>1,
-		    sc->sc_fadt->gpe1_blk_len>>1, regval);
-		if (offset < (sc->sc_fadt->gpe0_blk_len >> 1)) {
-			reg = ACPIREG_GPE0_EN;
-		}
-		break;
-	}
-
-	/* All special case return here */
-	if (reg >= ACPIREG_MAXREG)
-		return;
-
-	ioh = sc->sc_pmregs[reg].ioh;
-	size = sc->sc_pmregs[reg].size;
-	if (__size)
-		size = __size;
-	if (size > 4)
-		size = 4;
-	switch (size) {
-	case 1:
-		bus_space_write_1(sc->sc_iot, ioh, offset, regval);
-		break;
-	case 2:
-		bus_space_write_2(sc->sc_iot, ioh, offset, regval);
-		break;
-	case 4:
-		bus_space_write_4(sc->sc_iot, ioh, offset, regval);
-		break;
-	}
-
-	dnprintf(30, "acpi_writepm: %s = %.4x:%.4x %x\n",
-	    sc->sc_pmregs[reg].name, sc->sc_pmregs[reg].addr, offset, regval);
-}
-
-/* Map Power Management registers */
-void
-acpi_map_pmregs(struct acpi_softc *sc)
-{
-	bus_addr_t addr;
-	bus_size_t size;
-	const char *name;
-	int reg;
-
-	for (reg = 0; reg < ACPIREG_MAXREG; reg++) {
-		size = 0;
-		switch (reg) {
-		case ACPIREG_SMICMD:
-			name = "smi";
-			size = 1;
-			addr = sc->sc_fadt->smi_cmd;
-			break;
-		case ACPIREG_PM1A_STS:
-		case ACPIREG_PM1A_EN:
-			name = "pm1a_sts";
-			size = sc->sc_fadt->pm1_evt_len >> 1;
-			addr = sc->sc_fadt->pm1a_evt_blk;
-			if (reg == ACPIREG_PM1A_EN && addr) {
-				addr += size;
-				name = "pm1a_en";
+			aprint_normal("%s (%s) ", aa->aa_node->ad_name,
+			    pnpstr);
+			rv = acpi_eval_string(aa->aa_node->ad_handle,
+			    "_STR", &str);
+			if (ACPI_SUCCESS(rv)) {
+				aprint_normal("[%s] ", str);
+				AcpiOsFree(str);
 			}
-			break;
-		case ACPIREG_PM1A_CNT:
-			name = "pm1a_cnt";
-			size = sc->sc_fadt->pm1_cnt_len;
-			addr = sc->sc_fadt->pm1a_cnt_blk;
-			break;
-		case ACPIREG_PM1B_STS:
-		case ACPIREG_PM1B_EN:
-			name = "pm1b_sts";
-			size = sc->sc_fadt->pm1_evt_len >> 1;
-			addr = sc->sc_fadt->pm1b_evt_blk;
-			if (reg == ACPIREG_PM1B_EN && addr) {
-				addr += size;
-				name = "pm1b_en";
-			}
-			break;
-		case ACPIREG_PM1B_CNT:
-			name = "pm1b_cnt";
-			size = sc->sc_fadt->pm1_cnt_len;
-			addr = sc->sc_fadt->pm1b_cnt_blk;
-			break;
-		case ACPIREG_PM2_CNT:
-			name = "pm2_cnt";
-			size = sc->sc_fadt->pm2_cnt_len;
-			addr = sc->sc_fadt->pm2_cnt_blk;
-			break;
-#if 0
-		case ACPIREG_PM_TMR:
-			/* Allocated in acpitimer */
-			name = "pm_tmr";
-			size = sc->sc_fadt->pm_tmr_len;
-			addr = sc->sc_fadt->pm_tmr_blk;
-			break;
-#endif
-		case ACPIREG_GPE0_STS:
-		case ACPIREG_GPE0_EN:
-			name = "gpe0_sts";
-			size = sc->sc_fadt->gpe0_blk_len >> 1;
-			addr = sc->sc_fadt->gpe0_blk;
+#ifdef ACPIVERBOSE
+			else {
+				int i;
 
-			dnprintf(20, "gpe0 block len : %x\n",
-			    sc->sc_fadt->gpe0_blk_len >> 1);
-			dnprintf(20, "gpe0 block addr: %x\n",
-			    sc->sc_fadt->gpe0_blk);
-			if (reg == ACPIREG_GPE0_EN && addr) {
-				addr += size;
-				name = "gpe0_en";
-			}
-			break;
-		case ACPIREG_GPE1_STS:
-		case ACPIREG_GPE1_EN:
-			name = "gpe1_sts";
-			size = sc->sc_fadt->gpe1_blk_len >> 1;
-			addr = sc->sc_fadt->gpe1_blk;
-
-			dnprintf(20, "gpe1 block len : %x\n",
-			    sc->sc_fadt->gpe1_blk_len >> 1);
-			dnprintf(20, "gpe1 block addr: %x\n",
-			    sc->sc_fadt->gpe1_blk);
-			if (reg == ACPIREG_GPE1_EN && addr) {
-				addr += size;
-				name = "gpe1_en";
-			}
-			break;
-		}
-		if (size && addr) {
-			dnprintf(50, "mapping: %.4x %.4x %s\n",
-			    addr, size, name);
-
-			/* Size and address exist; map register space */
-			bus_space_map(sc->sc_iot, addr, size, 0,
-			    &sc->sc_pmregs[reg].ioh);
-
-			sc->sc_pmregs[reg].name = name;
-			sc->sc_pmregs[reg].size = size;
-			sc->sc_pmregs[reg].addr = addr;
-		}
-	}
-}
-
-/* move all stuff that doesn't go on the boot media in here */
-#ifndef SMALL_KERNEL
-void
-acpi_reset(void)
-{
-	struct acpi_fadt	*fadt;
-	u_int32_t		 reset_as, reset_len;
-	u_int32_t		 value;
-
-	fadt = acpi_softc->sc_fadt;
-
-	/*
-	 * RESET_REG_SUP is not properly set in some implementations,
-	 * but not testing against it breaks more machines than it fixes
-	 */
-	if (acpi_softc->sc_revision <= 1 ||
-	    !(fadt->flags & FADT_RESET_REG_SUP) || fadt->reset_reg.address == 0)
-		return;
-
-	value = fadt->reset_value;
-
-	reset_as = fadt->reset_reg.register_bit_width / 8;
-	if (reset_as == 0)
-		reset_as = 1;
-
-	reset_len = fadt->reset_reg.access_size;
-	if (reset_len == 0)
-		reset_len = reset_as;
-
-	acpi_gasio(acpi_softc, ACPI_IOWRITE,
-	    fadt->reset_reg.address_space_id,
-	    fadt->reset_reg.address, reset_as, reset_len, &value);
-
-	delay(100000);
-}
-
-int
-acpi_interrupt(void *arg)
-{
-	struct acpi_softc *sc = (struct acpi_softc *)arg;
-	u_int32_t processed, sts, en, idx, jdx;
-
-	processed = 0;
-
-#if 0
-	acpi_add_gpeblock(sc, sc->sc_fadt->gpe0_blk, sc->sc_fadt->gpe0_blk_len>>1, 0);
-	acpi_add_gpeblock(sc, sc->sc_fadt->gpe1_blk, sc->sc_fadt->gpe1_blk_len>>1, 
-	    sc->sc_fadt->gpe1_base);
-#endif
-
-	dnprintf(40, "ACPI Interrupt\n");
-	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
-		sts = acpi_read_pmreg(sc, ACPIREG_GPE_STS, idx>>3);
-		en  = acpi_read_pmreg(sc, ACPIREG_GPE_EN,  idx>>3);
-		if (en & sts) {
-			dnprintf(10, "GPE block: %.2x %.2x %.2x\n", idx, sts,
-			    en);
-			acpi_write_pmreg(sc, ACPIREG_GPE_EN, idx>>3, en & ~sts);
-			for (jdx = 0; jdx < 8; jdx++) {
-				if (en & sts & (1L << jdx)) {
-					/* Signal this GPE */
-					sc->gpe_table[idx+jdx].active = 1;
-					processed = 1;
+				for (i = 0; i < sizeof(acpi_knowndevs) /
+				    sizeof(acpi_knowndevs[0]); i++) {
+					if (strcmp(acpi_knowndevs[i].pnp,
+					    pnpstr) == 0) {
+						aprint_normal("[%s] ",
+						    acpi_knowndevs[i].str);
+					}
 				}
 			}
-		}
-	}
 
-	sts = acpi_read_pmreg(sc, ACPIREG_PM1_STS, 0);
-	en  = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
-	if (sts & en) {
-		dnprintf(10,"GEN interrupt: %.4x\n", sts & en);
-		acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, en & ~sts);
-		acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, en);
-		acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, en);
-		if (sts & ACPI_PM1_PWRBTN_STS)
-			sc->sc_powerbtn = 1;
-		if (sts & ACPI_PM1_SLPBTN_STS)
-			sc->sc_sleepbtn = 1;
-		processed = 1;
-	}
-
-	if (processed) {
-		sc->sc_wakeup = 0;
-		wakeup(sc);
-	}
-
-	return (processed);
-}
-
-int
-acpi_add_device(struct aml_node *node, void *arg)
-{
-	static int nacpicpus = 0;
-	struct device *self = arg;
-	struct acpi_softc *sc = arg;
-	struct acpi_attach_args aaa;
-#ifdef MULTIPROCESSOR
-	struct aml_value res;
-	int proc_id = -1;
 #endif
-
-	memset(&aaa, 0, sizeof(aaa));
-	aaa.aaa_node = node;
-	aaa.aaa_dev = "";
-	aaa.aaa_iot = sc->sc_iot;
-	aaa.aaa_memt = sc->sc_memt;
-	if (node == NULL || node->value == NULL)
-		return 0;
-
-	switch (node->value->type) {
-	case AML_OBJTYPE_PROCESSOR:
-		if (nacpicpus >= ncpus)
+			aprint_normal("at %s", pnp);
+		} else if (aa->aa_node->ad_devinfo->Type != ACPI_TYPE_DEVICE) {
+			aprint_normal("%s (ACPI Object Type '%s' "
+			    "[0x%02x]) ", aa->aa_node->ad_name,
+			     AcpiUtGetTypeName(aa->aa_node->ad_devinfo->Type),
+			     aa->aa_node->ad_devinfo->Type);
+			aprint_normal("at %s", pnp);
+		} else
 			return 0;
-#ifdef MULTIPROCESSOR
-		if (aml_evalnode(sc, aaa.aaa_node, 0, NULL, &res) == 0) {
-			if (res.type == AML_OBJTYPE_PROCESSOR)
-				proc_id = res.v_processor.proc_id;
-			aml_freevalue(&res);
+	} else {
+		aprint_normal(" (%s", aa->aa_node->ad_name);
+		if (aa->aa_node->ad_devinfo->Valid & ACPI_VALID_HID) {
+			aprint_normal(", %s", aa->aa_node->ad_devinfo->HardwareId.Value);
+			if (aa->aa_node->ad_devinfo->Valid & ACPI_VALID_UID) {
+				const char *uid;
+
+				uid = aa->aa_node->ad_devinfo->UniqueId.Value;
+				if (uid[0] == '\0')
+					uid = "<null>";
+				aprint_normal("-%s", uid);
+			}
 		}
-		if (proc_id < -1 || proc_id >= LAPIC_MAP_SIZE ||
-		    (acpi_lapic_flags[proc_id] & ACPI_PROC_ENABLE) == 0)
-			return 0;
-#endif
-		nacpicpus++;
-
-		aaa.aaa_name = "acpicpu";
-		break;
-	case AML_OBJTYPE_THERMZONE:
-		aaa.aaa_name = "acpitz";
-		break;
-	default:
-		return 0;
+		aprint_normal(")");
 	}
-	config_found(self, &aaa, acpi_print);
-	return 0;
+
+	return UNCONF;
 }
 
-void
-acpi_enable_onegpe(struct acpi_softc *sc, int gpe, int enable)
-{
-	uint8_t mask = (1L << (gpe & 7));
-	uint8_t en;
+/*****************************************************************************
+ * ACPI fixed-hardware feature handlers
+ *****************************************************************************/
 
-	/* Read enabled register */
-	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN, gpe>>3);
-	dnprintf(50, "%sabling GPE %.2x (current: %sabled) %.2x\n",
-	    enable ? "en" : "dis", gpe, (en & mask) ? "en" : "dis", en);
-	if (enable)
-		en |= mask;
-	else
-		en &= ~mask;
-	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en);
-}
+static UINT32	acpi_fixed_button_handler(void *);
+static void	acpi_fixed_button_pressed(void *);
 
-int
-acpi_set_gpehandler(struct acpi_softc *sc, int gpe, int (*handler)
-    (struct acpi_softc *, int, void *), void *arg, const char *label)
-{
-	struct gpe_block *ptbl;
-
-	ptbl = acpi_find_gpe(sc, gpe);
-	if (ptbl == NULL || handler == NULL)
-		return -EINVAL;
-	if (ptbl->handler != NULL) {
-		dnprintf(10, "error: GPE %.2x already enabled\n", gpe);
-		return -EBUSY;
-	}
-	dnprintf(50, "Adding GPE handler %.2x (%s)\n", gpe, label);
-	ptbl->handler = handler;
-	ptbl->arg = arg;
-
-	return (0);
-}
-
-int
-acpi_gpe_level(struct acpi_softc *sc, int gpe, void *arg)
-{
-	struct aml_node *node = arg;
-	uint8_t mask;
-
-	dnprintf(10, "handling Level-sensitive GPE %.2x\n", gpe);
-	mask = (1L << (gpe & 7));
-
-	aml_evalnode(sc, node, 0, NULL, NULL);
-	acpi_write_pmreg(sc, ACPIREG_GPE_STS, gpe>>3, mask);
-	acpi_write_pmreg(sc, ACPIREG_GPE_EN,  gpe>>3, mask);
-
-	return (0);
-}
-
-int
-acpi_gpe_edge(struct acpi_softc *sc, int gpe, void *arg)
-{
-
-	struct aml_node *node = arg;
-	uint8_t mask;
-
-	dnprintf(10, "handling Edge-sensitive GPE %.2x\n", gpe);
-	mask = (1L << (gpe & 7));
-
-	aml_evalnode(sc, node, 0, NULL, NULL);
-	acpi_write_pmreg(sc, ACPIREG_GPE_STS, gpe>>3, mask);
-	acpi_write_pmreg(sc, ACPIREG_GPE_EN,  gpe>>3, mask);
-
-	return (0);
-}
-
-/* Discover Devices that can wakeup the system
- * _PRW returns a package
- *  pkg[0] = integer (FADT gpe bit) or package (gpe block,gpe bit)
- *  pkg[1] = lowest sleep state
- *  pkg[2+] = power resource devices (optional)
+/*
+ * acpi_enable_fixed_events:
  *
- * To enable wakeup devices:
- *    Evaluate _ON method in each power resource device
- *    Evaluate _PSW method
+ *	Enable any fixed-hardware feature handlers.
  */
-int
-acpi_foundprw(struct aml_node *node, void *arg)
+static void
+acpi_enable_fixed_events(struct acpi_softc *sc)
 {
-	struct acpi_softc *sc = arg;
-	struct acpi_wakeq *wq;
+	static int beenhere;
+	ACPI_STATUS rv;
 
-	wq = (struct acpi_wakeq *)malloc(sizeof(struct acpi_wakeq), M_DEVBUF, M_NOWAIT);
-	if (wq == NULL) {
-		return 0;
-	}
-	memset(wq, 0, sizeof(struct acpi_wakeq));
-
-	wq->q_wakepkg = (struct aml_value *)malloc(sizeof(struct aml_value),
-	    M_DEVBUF, M_NOWAIT);
-	if (wq->q_wakepkg == NULL) {
-		free(wq, M_DEVBUF);
-		return 0;
-	}
-	memset(wq->q_wakepkg, 0, sizeof(struct aml_value));
-	dnprintf(10, "Found _PRW (%s)\n", node->parent->name);
-	aml_evalnode(sc, node, 0, NULL, wq->q_wakepkg);
-	wq->q_node = node->parent;
-	wq->q_gpe = -1;
-
-	/* Get GPE of wakeup device, and lowest sleep level */
-	if (wq->q_wakepkg->type == AML_OBJTYPE_PACKAGE && wq->q_wakepkg->length >= 2) {
-	  if (wq->q_wakepkg->v_package[0]->type == AML_OBJTYPE_INTEGER) {
-	    wq->q_gpe = wq->q_wakepkg->v_package[0]->v_integer;
-	  }
-	  if (wq->q_wakepkg->v_package[1]->type == AML_OBJTYPE_INTEGER) {
-	    wq->q_state = wq->q_wakepkg->v_package[1]->v_integer;
-	  }
-	}
-	SIMPLEQ_INSERT_TAIL(&sc->sc_wakedevs, wq, q_next);
-	return 0;
-}
-
-struct gpe_block *
-acpi_find_gpe(struct acpi_softc *sc, int gpe)
-{
-#if 1
-	if (gpe >= sc->sc_lastgpe)
-		return NULL;
-	return &sc->gpe_table[gpe];
-#else
-	SIMPLEQ_FOREACH(pgpe, &sc->sc_gpes, gpe_link) {
-		if (gpe >= pgpe->start && gpe <= (pgpe->start+7))
-			return &pgpe->table[gpe & 7];
-	}
-	return NULL;
-#endif
-}
-
-#if 0
-/* New GPE handling code: Create GPE block */
-void
-acpi_init_gpeblock(struct acpi_softc *sc, int reg, int len, int base)
-{
-	int i, j;
-
-	if (!reg || !len)
-		return;
-	for (i=0; i<len; i++) {
-		pgpe = acpi_os_malloc(sizeof(gpeblock));
-		if (pgpe == NULL)
-			return;
-
-		/* Allocate GPE Handler Block */
-		pgpe->start = base + i;
-		acpi_bus_space_map(sc->sc_iot, reg+i,     1, 0, &pgpe->sts_ioh);
-		acpi_bus_space_map(sc->sc_iot, reg+i+len, 1, 0, &pgpe->en_ioh);
-		SIMPLEQ_INSERT_TAIL(&sc->sc_gpes, gpe, gpe_link);
-
-		/* Clear pending GPEs */
-		bus_space_write_1(sc->sc_iot, pgpe->sts_ioh, 0, 0xFF);
-		bus_space_write_1(sc->sc_iot, pgpe->en_ioh,  0, 0x00);
-	}
-
-	/* Search for GPE handlers */
-	for (i=0; i<len*8; i++) {
-		char gpestr[32];
-		struct aml_node *h;
-
-		snprintf(gpestr, sizeof(gpestr), "\\_GPE._L%.2X", base+i);
-		h = aml_searchnode(&aml_root, gpestr);
-		if (acpi_set_gpehandler(sc, base+i, acpi_gpe_level, h, "level") != 0) {
-			snprintf(gpestr, sizeof(gpestr), "\\_GPE._E%.2X", base+i);
-			h = aml_searchnode(&aml_root, gpestr);
-			acpi_set_gpehandler(sc, base+i, acpi_gpe_edge, h, "edge");
-		}
-	}
-}
-
-/* Process GPE interrupts */
-int
-acpi_handle_gpes(struct acpi_softc *sc)
-{
-	uint8_t en, sts;
-	int processed, i;
-
-	processed=0;
-	SIMPLEQ_FOREACH(pgpe, &sc->sc_gpes, gpe_link) {
-		sts = bus_space_read_1(sc->sc_iot, pgpe->sts_ioh, 0);
-		en = bus_space_read_1(sc->sc_iot, pgpe->en_ioh, 0);
-		for (i=0; i<8; i++) {
-			if (en & sts & (1L << i)) {
-				pgpe->table[i].active = 1;
-				processed=1;
-			}
-		}
-	}
-	return processed;
-}
-#endif
-
-#if 0
-void
-acpi_add_gpeblock(struct acpi_softc *sc, int reg, int len, int gpe)
-{
-	int idx, jdx;
-	u_int8_t en, sts;
-
-	if (!reg || !len)
-		return;
-	for (idx=0; idx<len; idx++) {
-		sts = inb(reg + idx);
-		en  = inb(reg + len + idx);
-		printf("-- gpe %.2x-%.2x : en:%.2x sts:%.2x  %.2x\n",
-		    gpe+idx*8, gpe+idx*8+7, en, sts, en&sts);
-		for (jdx=0; jdx<8; jdx++) {
-			char gpestr[32];
-			struct aml_node *l, *e;
-
-			if (en & sts & (1L << jdx)) {
-				snprintf(gpestr,sizeof(gpestr), "\\_GPE._L%.2X", gpe+idx*8+jdx);
-				l = aml_searchname(&aml_root, gpestr);
-				snprintf(gpestr,sizeof(gpestr), "\\_GPE._E%.2X", gpe+idx*8+jdx);
-				e = aml_searchname(&aml_root, gpestr);
-				printf("  GPE %.2x active L%x E%x\n", gpe+idx*8+jdx, l, e);
-			}
-		}
-	}
-}
-#endif
-
-void
-acpi_init_gpes(struct acpi_softc *sc)
-{
-	struct aml_node *gpe;
-	char name[12];
-	int  idx, ngpe;
-
-#if 0
-	acpi_add_gpeblock(sc, sc->sc_fadt->gpe0_blk, sc->sc_fadt->gpe0_blk_len>>1, 0);
-	acpi_add_gpeblock(sc, sc->sc_fadt->gpe1_blk, sc->sc_fadt->gpe1_blk_len>>1, 
-	    sc->sc_fadt->gpe1_base);
-#endif
-
-	sc->sc_lastgpe = sc->sc_fadt->gpe0_blk_len << 2;
-	if (sc->sc_fadt->gpe1_blk_len) {
-	}
-	dnprintf(50, "Last GPE: %.2x\n", sc->sc_lastgpe);
-
-	/* Allocate GPE table */
-	sc->gpe_table = malloc(sc->sc_lastgpe * sizeof(struct gpe_block),
-	    M_DEVBUF, M_WAITOK | M_ZERO);
-
-	ngpe = 0;
-
-	/* Clear GPE status */
-	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
-		acpi_write_pmreg(sc, ACPIREG_GPE_EN,  idx>>3, 0);
-		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx>>3, -1);
-	}
-	for (idx = 0; idx < sc->sc_lastgpe; idx++) {
-		/* Search Level-sensitive GPES */
-		snprintf(name, sizeof(name), "\\_GPE._L%.2X", idx);
-		gpe = aml_searchname(&aml_root, name);
-		if (gpe != NULL)
-			acpi_set_gpehandler(sc, idx, acpi_gpe_level, gpe,
-			    "level");
-		if (gpe == NULL) {
-			/* Search Edge-sensitive GPES */
-			snprintf(name, sizeof(name), "\\_GPE._E%.2X", idx);
-			gpe = aml_searchname(&aml_root, name);
-			if (gpe != NULL)
-				acpi_set_gpehandler(sc, idx, acpi_gpe_edge, gpe,
-				    "edge");
-		}
-	}
-	aml_find_node(&aml_root, "_PRW", acpi_foundprw, sc);
-	sc->sc_maxgpe = ngpe;
-}
-
-void
-acpi_init_states(struct acpi_softc *sc)
-{
-	struct aml_value res;
-	char name[8];
-	int i;
-
-	for (i = ACPI_STATE_S0; i <= ACPI_STATE_S5; i++) {
-		snprintf(name, sizeof(name), "_S%d_", i);
-		sc->sc_sleeptype[i].slp_typa = -1;
-		sc->sc_sleeptype[i].slp_typb = -1;
-		if (aml_evalname(sc, &aml_root, name, 0, NULL, &res) == 0) {
-			if (res.type == AML_OBJTYPE_PACKAGE) {
-				sc->sc_sleeptype[i].slp_typa = aml_val2int(res.v_package[0]);
-				sc->sc_sleeptype[i].slp_typb = aml_val2int(res.v_package[1]);
-			}
-			aml_freevalue(&res);
-		}
-	}
-}
-
-void
-acpi_init_pm(struct acpi_softc *sc)
-{
-	sc->sc_tts = aml_searchname(&aml_root, "_TTS");
-	sc->sc_pts = aml_searchname(&aml_root, "_PTS");
-	sc->sc_wak = aml_searchname(&aml_root, "_WAK");
-	sc->sc_bfs = aml_searchname(&aml_root, "_BFS");
-	sc->sc_gts = aml_searchname(&aml_root, "_GTS");
-}
-
-void
-acpi_enter_sleep_state(struct acpi_softc *sc, int state)
-{
-	struct aml_value env;
-	u_int16_t rega, regb;
-	int retries;
-
-	if (state == ACPI_STATE_S0)
-		return;
-	if (sc->sc_sleeptype[state].slp_typa == -1 ||
-	    sc->sc_sleeptype[state].slp_typb == -1) {
-		printf("%s: state S%d unavailable\n",
-		    sc->sc_dev.dv_xname, state);
-		return;
-	}
-
-	memset(&env, 0, sizeof(env));
-	env.type = AML_OBJTYPE_INTEGER;
-	env.v_integer = state;
-	/* _TTS(state) */
-	if (sc->sc_tts) {
-		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _TTS failed.\n",
-			    DEVNAME(sc));
-			return;
-		}
-	}
-	switch (state) {
-	case ACPI_STATE_S1:
-	case ACPI_STATE_S2:
-		resettodr();
-		dopowerhooks(PWR_SUSPEND);
-		break;
-	case ACPI_STATE_S3:
-		resettodr();
-		dopowerhooks(PWR_STANDBY);
-		break;
-	}
-	/* _PTS(state) */
-	if (sc->sc_pts) {
-		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _PTS failed.\n",
-			    DEVNAME(sc));
-			return;
-		}
-	}
-	sc->sc_state = state;
-	/* _GTS(state) */
-	if (sc->sc_gts) {
-		if (aml_evalnode(sc, sc->sc_gts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _GTS failed.\n",
-			    DEVNAME(sc));
-			return;
-		}
-	}
-	disable_intr();
-
-	/* Clear WAK_STS bit */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_WAK_STS);
-
-	/* Write SLP_TYPx values */
-	rega = acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, 0);
-	regb = acpi_read_pmreg(sc, ACPIREG_PM1B_CNT, 0);
-	rega &= ~(ACPI_PM1_SLP_TYPX_MASK | ACPI_PM1_SLP_EN);
-	regb &= ~(ACPI_PM1_SLP_TYPX_MASK | ACPI_PM1_SLP_EN);
-	rega |= ACPI_PM1_SLP_TYPX(sc->sc_sleeptype[state].slp_typa);
-	regb |= ACPI_PM1_SLP_TYPX(sc->sc_sleeptype[state].slp_typb);
-	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
-	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
-
-	/* Set SLP_EN bit */
-	rega |= ACPI_PM1_SLP_EN;
-	regb |= ACPI_PM1_SLP_EN;
-	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
-	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
-
-	/* Loop on WAK_STS */
-	for (retries = 1000; retries > 0; retries--) {
-		rega = acpi_read_pmreg(sc, ACPIREG_PM1A_STS, 0);
-		regb = acpi_read_pmreg(sc, ACPIREG_PM1B_STS, 0);
-		if (rega & ACPI_PM1_WAK_STS ||
-		    regb & ACPI_PM1_WAK_STS)
-			break;
-		DELAY(10);
-	}
-
-	enable_intr();
-}
-
-#if 0
-void
-acpi_resume(struct acpi_softc *sc)
-{
-	struct aml_value env;
-
-	memset(&env, 0, sizeof(env));
-	env.type = AML_OBJTYPE_INTEGER;
-	env.v_integer = sc->sc_state;
-
-	if (sc->sc_bfs) {
-		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _BFS failed.\n",
-			    DEVNAME(sc));
-		}
-	}
-	dopowerhooks(PWR_RESUME);
-	inittodr(0);
-	if (sc->sc_wak) {
-		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _WAK failed.\n",
-			    DEVNAME(sc));
-		}
-	}
-	sc->sc_state = ACPI_STATE_S0;
-	if (sc->sc_tts) {
-		env.v_integer = sc->sc_state;
-		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _TTS failed.\n",
-			    DEVNAME(sc));
-		}
-	}
-}
-#endif
-
-void
-acpi_powerdown(void)
-{
-	acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
-}
-
-extern int aml_busy;
-
-void
-acpi_isr_thread(void *arg)
-{
-	struct acpi_thread *thread = arg;
-	struct acpi_softc  *sc = thread->sc;
-	u_int32_t gpe;
+	KASSERT(beenhere == 0);
+	beenhere = 1;
 
 	/*
-	 * If we have an interrupt handler, we can get notification
-	 * when certain status bits changes in the ACPI registers,
-	 * so let us enable some events we can forward to userland
+	 * Check for fixed-hardware buttons.
 	 */
-	if (sc->sc_interrupt) {
-		int16_t flag;
 
-		dnprintf(1,"slpbtn:%c  pwrbtn:%c\n",
-		    sc->sc_fadt->flags & FADT_SLP_BUTTON ? 'n' : 'y',
-		    sc->sc_fadt->flags & FADT_PWR_BUTTON ? 'n' : 'y');
-		dnprintf(10, "Enabling acpi interrupts...\n");
-		sc->sc_wakeup = 1;
-
-		/* Enable Sleep/Power buttons if they exist */
-		flag = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
-		if (!(sc->sc_fadt->flags & FADT_PWR_BUTTON)) {
-			flag |= ACPI_PM1_PWRBTN_EN;
-		}
-		if (!(sc->sc_fadt->flags & FADT_SLP_BUTTON)) {
-			flag |= ACPI_PM1_SLPBTN_EN;
-		}
-		acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, flag);
-
-		/* Enable handled GPEs here */
-		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
-			if (sc->gpe_table[gpe].handler)
-				acpi_enable_onegpe(sc, gpe, 1);
-		}
-	}
-
-	while (thread->running) {
-		dnprintf(10, "sleep... %d\n", sc->sc_wakeup);
-		while (sc->sc_wakeup)
-			tsleep(sc, PWAIT, "acpi_idle", 0);
-		sc->sc_wakeup = 1;
-		dnprintf(10, "wakeup..\n");
-		if (aml_busy)
-			continue;
-
-		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
-			struct gpe_block *pgpe = &sc->gpe_table[gpe];
-
-			if (pgpe->active) {
-				pgpe->active = 0;
-				dnprintf(50, "softgpe: %.2x\n", gpe);
-				if (pgpe->handler)
-					pgpe->handler(sc, gpe, pgpe->arg);
+	if ((AcpiGbl_FADT.Flags & ACPI_FADT_POWER_BUTTON) == 0) {
+		aprint_verbose_dev(sc->sc_dev,
+		    "fixed-feature power button present\n");
+		sc->sc_smpsw_power.smpsw_name = device_xname(sc->sc_dev);
+		sc->sc_smpsw_power.smpsw_type = PSWITCH_TYPE_POWER;
+		if (sysmon_pswitch_register(&sc->sc_smpsw_power) != 0) {
+			aprint_error_dev(sc->sc_dev,
+			    "unable to register fixed power "
+			    "button with sysmon\n");
+		} else {
+			rv = AcpiInstallFixedEventHandler(
+			    ACPI_EVENT_POWER_BUTTON,
+			    acpi_fixed_button_handler, &sc->sc_smpsw_power);
+			if (ACPI_FAILURE(rv)) {
+				aprint_error_dev(sc->sc_dev,
+				    "unable to install handler "
+				    "for fixed power button: %s\n",
+				    AcpiFormatException(rv));
 			}
 		}
-		if (sc->sc_powerbtn) {
-			sc->sc_powerbtn = 0;
+	}
 
-			aml_notify_dev(ACPI_DEV_PBD, 0x80);
-
-			acpi_evindex++;
-			dnprintf(1,"power button pressed\n");
-			KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_PWRBTN,
-			    acpi_evindex));
-		}
-		if (sc->sc_sleepbtn) {
-			sc->sc_sleepbtn = 0;
-
-			aml_notify_dev(ACPI_DEV_SBD, 0x80);
-
-			acpi_evindex++;
-			dnprintf(1,"sleep button pressed\n");
-			KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_SLPBTN,
-			    acpi_evindex));
-		}
-
-		/* handle polling here to keep code non-concurrent*/
-		if (sc->sc_poll) {
-			sc->sc_poll = 0;
-			acpi_poll_notify();
+	if ((AcpiGbl_FADT.Flags & ACPI_FADT_SLEEP_BUTTON) == 0) {
+		aprint_verbose_dev(sc->sc_dev,
+		    "fixed-feature sleep button present\n");
+		sc->sc_smpsw_sleep.smpsw_name = device_xname(sc->sc_dev);
+		sc->sc_smpsw_sleep.smpsw_type = PSWITCH_TYPE_SLEEP;
+		if (sysmon_pswitch_register(&sc->sc_smpsw_power) != 0) {
+			aprint_error_dev(sc->sc_dev,
+			    "unable to register fixed sleep "
+			    "button with sysmon\n");
+		} else {
+			rv = AcpiInstallFixedEventHandler(
+			    ACPI_EVENT_SLEEP_BUTTON,
+			    acpi_fixed_button_handler, &sc->sc_smpsw_sleep);
+			if (ACPI_FAILURE(rv)) {
+				aprint_error_dev(sc->sc_dev,
+				    "unable to install handler "
+				    "for fixed sleep button: %s\n",
+				    AcpiFormatException(rv));
+			}
 		}
 	}
-	free(thread, M_DEVBUF);
-
-	kthread_exit(0);
 }
 
+/*
+ * acpi_fixed_button_handler:
+ *
+ *	Event handler for the fixed buttons.
+ */
+static UINT32
+acpi_fixed_button_handler(void *context)
+{
+	struct sysmon_pswitch *smpsw = context;
+	int rv;
+
+#ifdef ACPI_BUT_DEBUG
+	printf("%s: fixed button handler\n", smpsw->smpsw_name);
+#endif
+
+	rv = AcpiOsExecute(OSL_NOTIFY_HANDLER,
+	    acpi_fixed_button_pressed, smpsw);
+	if (ACPI_FAILURE(rv))
+		printf("%s: WARNING: unable to queue fixed button pressed "
+		    "callback: %s\n", smpsw->smpsw_name,
+		    AcpiFormatException(rv));
+
+	return ACPI_INTERRUPT_HANDLED;
+}
+
+/*
+ * acpi_fixed_button_pressed:
+ *
+ *	Deal with a fixed button being pressed.
+ */
+static void
+acpi_fixed_button_pressed(void *context)
+{
+	struct sysmon_pswitch *smpsw = context;
+
+#ifdef ACPI_BUT_DEBUG
+	printf("%s: fixed button pressed, calling sysmon\n",
+	    smpsw->smpsw_name);
+#endif
+
+	sysmon_pswitch_event(smpsw, PSWITCH_EVENT_PRESSED);
+}
+
+/*****************************************************************************
+ * ACPI utility routines.
+ *****************************************************************************/
+
+/*
+ * acpi_eval_integer:
+ *
+ *	Evaluate an integer object.
+ */
+ACPI_STATUS
+acpi_eval_integer(ACPI_HANDLE handle, const char *path, ACPI_INTEGER *valp)
+{
+	ACPI_STATUS rv;
+	ACPI_BUFFER buf;
+	ACPI_OBJECT param;
+
+	if (handle == NULL)
+		handle = ACPI_ROOT_OBJECT;
+
+	buf.Pointer = &param;
+	buf.Length = sizeof(param);
+
+	rv = AcpiEvaluateObjectTyped(handle, path, NULL, &buf, ACPI_TYPE_INTEGER);
+	if (ACPI_SUCCESS(rv))
+		*valp = param.Integer.Value;
+
+	return rv;
+}
+
+/*
+ * acpi_eval_string:
+ *
+ *	Evaluate a (Unicode) string object.
+ */
+ACPI_STATUS
+acpi_eval_string(ACPI_HANDLE handle, const char *path, char **stringp)
+{
+	ACPI_STATUS rv;
+	ACPI_BUFFER buf;
+
+	if (handle == NULL)
+		handle = ACPI_ROOT_OBJECT;
+
+	buf.Pointer = NULL;
+	buf.Length = ACPI_ALLOCATE_BUFFER;
+
+	rv = AcpiEvaluateObjectTyped(handle, path, NULL, &buf, ACPI_TYPE_STRING);
+	if (ACPI_SUCCESS(rv)) {
+		ACPI_OBJECT *param = buf.Pointer;
+		const char *ptr = param->String.Pointer;
+		size_t len = param->String.Length;
+		if ((*stringp = AcpiOsAllocate(len)) == NULL)
+			rv = AE_NO_MEMORY;
+		else
+			(void)memcpy(*stringp, ptr, len);
+		AcpiOsFree(param);
+	}
+
+	return rv;
+}
+
+
+/*
+ * acpi_eval_struct:
+ *
+ *	Evaluate a more complex structure.
+ *	Caller must free buf.Pointer by AcpiOsFree().
+ */
+ACPI_STATUS
+acpi_eval_struct(ACPI_HANDLE handle, const char *path, ACPI_BUFFER *bufp)
+{
+	ACPI_STATUS rv;
+
+	if (handle == NULL)
+		handle = ACPI_ROOT_OBJECT;
+
+	bufp->Pointer = NULL;
+	bufp->Length = ACPI_ALLOCATE_BUFFER;
+
+	rv = AcpiEvaluateObject(handle, path, NULL, bufp);
+
+	return rv;
+}
+
+/*
+ * acpi_foreach_package_object:
+ *
+ *	Iterate over all objects in a in a packages and pass then all
+ *	to a function. If the called function returns non AE_OK, the
+ *	iteration is stopped and that value is returned.
+ */
+
+ACPI_STATUS
+acpi_foreach_package_object(ACPI_OBJECT *pkg,
+    ACPI_STATUS (*func)(ACPI_OBJECT *, void *),
+    void *arg)
+{
+	ACPI_STATUS rv = AE_OK;
+	int i;
+
+	if (pkg == NULL || pkg->Type != ACPI_TYPE_PACKAGE)
+		return AE_BAD_PARAMETER;
+
+	for (i = 0; i < pkg->Package.Count; i++) {
+		rv = (*func)(&pkg->Package.Elements[i], arg);
+		if (ACPI_FAILURE(rv))
+			break;
+	}
+
+	return rv;
+}
+
+const char *
+acpi_name(ACPI_HANDLE handle)
+{
+	static char buffer[80];
+	ACPI_BUFFER buf;
+	ACPI_STATUS rv;
+
+	buf.Length = sizeof(buffer);
+	buf.Pointer = buffer;
+
+	rv = AcpiGetName(handle, ACPI_FULL_PATHNAME, &buf);
+	if (ACPI_FAILURE(rv))
+		return "(unknown acpi path)";
+	return buffer;
+}
+
+/*
+ * acpi_get:
+ *
+ *	Fetch data info the specified (empty) ACPI buffer.
+ *	Caller must free buf.Pointer by AcpiOsFree().
+ */
+ACPI_STATUS
+acpi_get(ACPI_HANDLE handle, ACPI_BUFFER *buf,
+    ACPI_STATUS (*getit)(ACPI_HANDLE, ACPI_BUFFER *))
+{
+	buf->Pointer = NULL;
+	buf->Length = ACPI_ALLOCATE_BUFFER;
+
+	return (*getit)(handle, buf);
+}
+
+
+/*
+ * acpi_match_hid
+ *
+ *	Match given ids against _HID and _CIDs
+ */
+int
+acpi_match_hid(ACPI_DEVICE_INFO *ad, const char * const *ids)
+{
+	int i;
+
+	while (*ids) {
+		if (ad->Valid & ACPI_VALID_HID) {
+			if (pmatch(ad->HardwareId.Value, *ids, NULL) == 2)
+				return 1;
+		}
+
+		if (ad->Valid & ACPI_VALID_CID) {
+			for (i = 0; i < ad->CompatibilityId.Count; i++) {
+				if (pmatch(ad->CompatibilityId.Id[i].Value, *ids, NULL) == 2)
+					return 1;
+			}
+		}
+		ids++;
+	}
+
+	return 0;
+}
+
+/*
+ * acpi_wake_gpe_helper
+ *
+ *	Set/unset GPE as both Runtime and Wake
+ */
+static void
+acpi_wake_gpe_helper(ACPI_HANDLE handle, bool enable)
+{
+	ACPI_BUFFER buf;
+	ACPI_STATUS rv;
+	ACPI_OBJECT *p, *elt;
+
+	rv = acpi_eval_struct(handle, METHOD_NAME__PRW, &buf);
+	if (ACPI_FAILURE(rv))
+		return;			/* just ignore */
+
+	p = buf.Pointer;
+	if (p->Type != ACPI_TYPE_PACKAGE || p->Package.Count < 2)
+		goto out;		/* just ignore */
+
+	elt = p->Package.Elements;
+
+	/* TBD: package support */
+	if (enable) {
+		AcpiSetGpeType(NULL, elt[0].Integer.Value,
+		    ACPI_GPE_TYPE_WAKE_RUN);
+		AcpiEnableGpe(NULL, elt[0].Integer.Value, ACPI_NOT_ISR);
+	} else
+		AcpiDisableGpe(NULL, elt[0].Integer.Value, ACPI_NOT_ISR);
+
+ out:
+	AcpiOsFree(buf.Pointer);
+}
+
+/*
+ * acpi_clear_wake_gpe
+ *
+ *	Clear GPE as both Runtime and Wake
+ */
 void
-acpi_create_thread(void *arg)
+acpi_clear_wake_gpe(ACPI_HANDLE handle)
 {
-	struct acpi_softc *sc = arg;
+	acpi_wake_gpe_helper(handle, false);
+}
 
-	if (kthread_create(acpi_isr_thread, sc->sc_thread, NULL, DEVNAME(sc))
-	    != 0) {
-		printf("%s: unable to create isr thread, GPEs disabled\n",
-		    DEVNAME(sc));
+/*
+ * acpi_set_wake_gpe
+ *
+ *	Set GPE as both Runtime and Wake
+ */
+void
+acpi_set_wake_gpe(ACPI_HANDLE handle)
+{
+	acpi_wake_gpe_helper(handle, true);
+}
+
+
+/*****************************************************************************
+ * ACPI sleep support.
+ *****************************************************************************/
+
+static int
+is_available_state(struct acpi_softc *sc, int state)
+{
+	UINT8 type_a, type_b;
+
+	return ACPI_SUCCESS(AcpiGetSleepTypeData((UINT8)state,
+				&type_a, &type_b));
+}
+
+/*
+ * acpi_enter_sleep_state:
+ *
+ *	enter to the specified sleep state.
+ */
+
+ACPI_STATUS
+acpi_enter_sleep_state(struct acpi_softc *sc, int state)
+{
+	int err;
+	ACPI_STATUS ret = AE_OK;
+
+	if (state == acpi_sleepstate)
+		return AE_OK;
+
+	aprint_normal_dev(sc->sc_dev, "entering state %d\n", state);
+
+	switch (state) {
+	case ACPI_STATE_S0:
+		break;
+	case ACPI_STATE_S1:
+	case ACPI_STATE_S2:
+	case ACPI_STATE_S3:
+	case ACPI_STATE_S4:
+		if (!is_available_state(sc, state)) {
+			aprint_error_dev(sc->sc_dev,
+			    "ACPI S%d not available on this platform\n", state);
+			break;
+		}
+
+		if (state != ACPI_STATE_S1 && !pmf_system_suspend(PMF_F_NONE)) {
+			aprint_error_dev(sc->sc_dev, "aborting suspend\n");
+			break;
+		}
+
+		ret = AcpiEnterSleepStatePrep(state);
+		if (ACPI_FAILURE(ret)) {
+			aprint_error_dev(sc->sc_dev,
+			    "failed preparing to sleep (%s)\n",
+			    AcpiFormatException(ret));
+			break;
+		}
+
+		acpi_sleepstate = state;
+		if (state == ACPI_STATE_S1) {
+			/* just enter the state */
+			acpi_md_OsDisableInterrupt();
+			ret = AcpiEnterSleepState((UINT8)state);
+			if (ACPI_FAILURE(ret))
+				aprint_error_dev(sc->sc_dev,
+				    "failed to enter sleep state S1: %s\n",
+				    AcpiFormatException(ret));
+			AcpiLeaveSleepState((UINT8)state);
+		} else {
+			err = acpi_md_sleep(state);
+			if (state == ACPI_STATE_S4)
+				AcpiEnable();
+			pmf_system_bus_resume(PMF_F_NONE);
+			AcpiLeaveSleepState((UINT8)state);
+			pmf_system_resume(PMF_F_NONE);
+		}
+
+		break;
+	case ACPI_STATE_S5:
+		ret = AcpiEnterSleepStatePrep(ACPI_STATE_S5);
+		if (ACPI_FAILURE(ret)) {
+			aprint_error_dev(sc->sc_dev,
+			    "failed preparing to sleep (%s)\n",
+			    AcpiFormatException(ret));
+			break;
+		}
+		DELAY(1000000);
+		acpi_sleepstate = state;
+		acpi_md_OsDisableInterrupt();
+		AcpiEnterSleepState(ACPI_STATE_S5);
+		aprint_error_dev(sc->sc_dev, "WARNING powerdown failed!\n");
+		break;
+	}
+
+	acpi_sleepstate = ACPI_STATE_S0;
+	return ret;
+}
+
+#if defined(ACPI_ACTIVATE_DEV)
+/* XXX This very incomplete */
+ACPI_STATUS
+acpi_allocate_resources(ACPI_HANDLE handle)
+{
+	ACPI_BUFFER bufp, bufc, bufn;
+	ACPI_RESOURCE *resp, *resc, *resn;
+	ACPI_RESOURCE_IRQ *irq;
+	ACPI_RESOURCE_EXTENDED_IRQ *xirq;
+	ACPI_STATUS rv;
+	uint delta;
+
+	rv = acpi_get(handle, &bufp, AcpiGetPossibleResources);
+	if (ACPI_FAILURE(rv))
+		goto out;
+	rv = acpi_get(handle, &bufc, AcpiGetCurrentResources);
+	if (ACPI_FAILURE(rv)) {
+		goto out1;
+	}
+
+	bufn.Length = 1000;
+	bufn.Pointer = resn = malloc(bufn.Length, M_ACPI, M_WAITOK);
+	resp = bufp.Pointer;
+	resc = bufc.Pointer;
+	while (resc->Type != ACPI_RESOURCE_TYPE_END_TAG &&
+	       resp->Type != ACPI_RESOURCE_TYPE_END_TAG) {
+		while (resc->Type != resp->Type && resp->Type != ACPI_RESOURCE_TYPE_END_TAG)
+			resp = ACPI_NEXT_RESOURCE(resp);
+		if (resp->Type == ACPI_RESOURCE_TYPE_END_TAG)
+			break;
+		/* Found identical Id */
+		resn->Type = resc->Type;
+		switch (resc->Type) {
+		case ACPI_RESOURCE_TYPE_IRQ:
+			memcpy(&resn->Data, &resp->Data,
+			       sizeof(ACPI_RESOURCE_IRQ));
+			irq = (ACPI_RESOURCE_IRQ *)&resn->Data;
+			irq->Interrupts[0] =
+			    ((ACPI_RESOURCE_IRQ *)&resp->Data)->
+			        Interrupts[irq->InterruptCount-1];
+			irq->InterruptCount = 1;
+			resn->Length = ACPI_RS_SIZE(ACPI_RESOURCE_IRQ);
+			break;
+		case ACPI_RESOURCE_TYPE_EXTENDED_IRQ:
+			memcpy(&resn->Data, &resp->Data,
+			       sizeof(ACPI_RESOURCE_EXTENDED_IRQ));
+			xirq = (ACPI_RESOURCE_EXTENDED_IRQ *)&resn->Data;
+#if 0
+			/*
+			 * XXX not duplicating the interrupt logic above
+			 * because its not clear what it accomplishes.
+			 */
+			xirq->Interrupts[0] =
+			    ((ACPI_RESOURCE_EXT_IRQ *)&resp->Data)->
+			    Interrupts[irq->NumberOfInterrupts-1];
+			xirq->NumberOfInterrupts = 1;
+#endif
+			resn->Length = ACPI_RS_SIZE(ACPI_RESOURCE_EXTENDED_IRQ);
+			break;
+		case ACPI_RESOURCE_TYPE_IO:
+			memcpy(&resn->Data, &resp->Data,
+			       sizeof(ACPI_RESOURCE_IO));
+			resn->Length = resp->Length;
+			break;
+		default:
+			printf("acpi_allocate_resources: res=%d\n", resc->Type);
+			rv = AE_BAD_DATA;
+			goto out2;
+		}
+		resc = ACPI_NEXT_RESOURCE(resc);
+		resn = ACPI_NEXT_RESOURCE(resn);
+		resp = ACPI_NEXT_RESOURCE(resp);
+		delta = (UINT8 *)resn - (UINT8 *)bufn.Pointer;
+		if (delta >=
+		    bufn.Length-ACPI_RS_SIZE(ACPI_RESOURCE_DATA)) {
+			bufn.Length *= 2;
+			bufn.Pointer = realloc(bufn.Pointer, bufn.Length,
+					       M_ACPI, M_WAITOK);
+			resn = (ACPI_RESOURCE *)((UINT8 *)bufn.Pointer + delta);
+		}
+	}
+	if (resc->Type != ACPI_RESOURCE_TYPE_END_TAG) {
+		printf("acpi_allocate_resources: resc not exhausted\n");
+		rv = AE_BAD_DATA;
+		goto out3;
+	}
+
+	resn->Type = ACPI_RESOURCE_TYPE_END_TAG;
+	rv = AcpiSetCurrentResources(handle, &bufn);
+	if (ACPI_FAILURE(rv)) {
+		printf("acpi_allocate_resources: AcpiSetCurrentResources %s\n",
+		       AcpiFormatException(rv));
+	}
+
+out3:
+	free(bufn.Pointer, M_ACPI);
+out2:
+	AcpiOsFree(bufc.Pointer);
+out1:
+	AcpiOsFree(bufp.Pointer);
+out:
+	return rv;
+}
+#endif /* ACPI_ACTIVATE_DEV */
+
+SYSCTL_SETUP(sysctl_acpi_setup, "sysctl hw.acpi subtree setup")
+{
+	const struct sysctlnode *node;
+	const struct sysctlnode *ssnode;
+
+	if (sysctl_createv(clog, 0, NULL, NULL,
+	    CTLFLAG_PERMANENT,
+	    CTLTYPE_NODE, "hw", NULL,
+	    NULL, 0, NULL, 0,
+	    CTL_HW, CTL_EOL) != 0)
 		return;
-	}
+
+	if (sysctl_createv(clog, 0, NULL, &node,
+	    CTLFLAG_PERMANENT,
+	    CTLTYPE_NODE, "acpi", NULL,
+	    NULL, 0, NULL, 0,
+	    CTL_HW, CTL_CREATE, CTL_EOL) != 0)
+		return;
+
+	sysctl_createv(NULL, 0, NULL, NULL, CTLFLAG_READONLY,
+	    CTLTYPE_QUAD, "root",
+	    SYSCTL_DESCR("ACPI root pointer"),
+	    NULL, 0, &acpi_root_pointer, sizeof(acpi_root_pointer),
+	    CTL_HW, node->sysctl_num, CTL_CREATE, CTL_EOL);
+	sysctl_createv(NULL, 0, NULL, NULL, CTLFLAG_READONLY,
+	    CTLTYPE_STRING, "supported_states",
+	    SYSCTL_DESCR("Supported ACPI system states"),
+	    NULL, 0, acpi_supported_states, 0,
+	    CTL_HW, node->sysctl_num, CTL_CREATE, CTL_EOL);
+
+	/* ACPI sleepstate sysctl */
+	if (sysctl_createv(NULL, 0, NULL, &node,
+	    CTLFLAG_PERMANENT,
+	    CTLTYPE_NODE, "machdep", NULL,
+	    NULL, 0, NULL, 0, CTL_MACHDEP, CTL_EOL) != 0)
+		return;
+	if (sysctl_createv(NULL, 0, &node, &ssnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "sleep_state",
+	    NULL, sysctl_hw_acpi_sleepstate, 0, NULL, 0, CTL_CREATE,
+	    CTL_EOL) != 0)
+		return;
 }
 
-int
-acpi_map_address(struct acpi_softc *sc, struct acpi_gas *gas, bus_addr_t base,
-    bus_size_t size, bus_space_handle_t *pioh, bus_space_tag_t *piot)
+static int
+sysctl_hw_acpi_sleepstate(SYSCTLFN_ARGS)
 {
-	int iospace = GAS_SYSTEM_IOSPACE;
+	int error, t;
+	struct sysctlnode node;
 
-	/* No GAS structure, default to I/O space */
-	if (gas != NULL) {
-		base += gas->address;
-		iospace = gas->address_space_id;
-	}
-	switch (iospace) {
-	case GAS_SYSTEM_MEMORY:
-		*piot = sc->sc_memt;
-		break;
-	case GAS_SYSTEM_IOSPACE:
-		*piot = sc->sc_iot;
-		break;
-	default:
-		return -1;
-	}
-	if (bus_space_map(*piot, base, size, 0, pioh))
-		return -1;
+	node = *rnode;
+	t = acpi_sleepstate;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return error;
+
+	if (acpi_softc == NULL)
+		return ENOSYS;
+
+	acpi_enter_sleep_state(acpi_softc, t);
 
 	return 0;
 }
 
-int
-acpi_foundec(struct aml_node *node, void *arg)
+static ACPI_TABLE_HEADER *
+acpi_map_rsdt(void)
 {
-	struct acpi_softc	*sc = (struct acpi_softc *)arg;
-	struct device		*self = (struct device *)arg;
-	const char		*dev;
-	struct aml_value	 res;
-	struct acpi_attach_args	aaa;
+	ACPI_PHYSICAL_ADDRESS paddr;
+	ACPI_TABLE_RSDP *rsdp;
 
-	if (aml_evalnode(sc, node, 0, NULL, &res) != 0)
-		return 0;
-
-	switch (res.type) {
-	case AML_OBJTYPE_STRING:
-		dev = res.v_string;
-		break;
-	case AML_OBJTYPE_INTEGER:
-		dev = aml_eisaid(aml_val2int(&res));
-		break;
-	default:
-		dev = "unknown";
-		break;
+	paddr = AcpiOsGetRootPointer();
+	if (paddr == 0) {
+		printf("ACPI: couldn't get root pointer\n");
+		return NULL;
 	}
-
-	if (strcmp(dev, ACPI_DEV_ECD))
-		return 0;
-
-	memset(&aaa, 0, sizeof(aaa));
-	aaa.aaa_iot = sc->sc_iot;
-	aaa.aaa_memt = sc->sc_memt;
-	aaa.aaa_node = node->parent;
-	aaa.aaa_dev = dev;
-	aaa.aaa_name = "acpiec";
-	config_found(self, &aaa, acpi_print);
-	aml_freevalue(&res);
-
-	return 0;
-}
-
-int
-acpi_foundhid(struct aml_node *node, void *arg)
-{
-	struct acpi_softc	*sc = (struct acpi_softc *)arg;
-	struct device		*self = (struct device *)arg;
-	const char		*dev;
-	struct aml_value	 res;
-	struct acpi_attach_args	aaa;
-
-	dnprintf(10, "found hid device: %s ", node->parent->name);
-	if (aml_evalnode(sc, node, 0, NULL, &res) != 0)
-		return 0;
-
-	switch (res.type) {
-	case AML_OBJTYPE_STRING:
-		dev = res.v_string;
-		break;
-	case AML_OBJTYPE_INTEGER:
-		dev = aml_eisaid(aml_val2int(&res));
-		break;
-	default:
-		dev = "unknown";
-		break;
+	rsdp = AcpiOsMapMemory(paddr, sizeof(ACPI_TABLE_RSDP));
+	if (rsdp == NULL) {
+		printf("ACPI: couldn't map RSDP\n");
+		return NULL;
 	}
-	dnprintf(10, "	device: %s\n", dev);
+	if (rsdp->Revision > 1 && rsdp->XsdtPhysicalAddress)
+		paddr = (ACPI_PHYSICAL_ADDRESS)rsdp->XsdtPhysicalAddress;
+	else
+		paddr = (ACPI_PHYSICAL_ADDRESS)rsdp->RsdtPhysicalAddress;
+	AcpiOsUnmapMemory(rsdp, sizeof(ACPI_TABLE_RSDP));
 
-	memset(&aaa, 0, sizeof(aaa));
-	aaa.aaa_iot = sc->sc_iot;
-	aaa.aaa_memt = sc->sc_memt;
-	aaa.aaa_node = node->parent;
-	aaa.aaa_dev = dev;
-
-	if (!strcmp(dev, ACPI_DEV_AC))
-		aaa.aaa_name = "acpiac";
-	else if (!strcmp(dev, ACPI_DEV_CMB))
-		aaa.aaa_name = "acpibat";
-	else if (!strcmp(dev, ACPI_DEV_LD) ||
-	    !strcmp(dev, ACPI_DEV_PBD) ||
-	    !strcmp(dev, ACPI_DEV_SBD))
-		aaa.aaa_name = "acpibtn";
-	else if (!strcmp(dev, ACPI_DEV_ASUS))
-		aaa.aaa_name = "acpiasus";
-	else if (!strcmp(dev, ACPI_DEV_THINKPAD))
-		aaa.aaa_name = "acpithinkpad";
-
-	if (aaa.aaa_name)
-		config_found(self, &aaa, acpi_print);
-
-	aml_freevalue(&res);
-
-	return 0;
+	return AcpiOsMapMemory(paddr, sizeof(ACPI_TABLE_HEADER));
 }
 
-int
-acpi_founddock(struct aml_node *node, void *arg)
+static void
+acpi_unmap_rsdt(ACPI_TABLE_HEADER *rsdt)
 {
-	struct acpi_softc	*sc = (struct acpi_softc *)arg;
-	struct device		*self = (struct device *)arg;
-	const char		*dev;
-	struct acpi_attach_args	aaa;
+	if (rsdt == NULL)
+		return;
 
-	dnprintf(10, "found dock entry: %s\n", node->parent->name);
-
-	memset(&aaa, 0, sizeof(aaa));
-	aaa.aaa_iot = sc->sc_iot;
-	aaa.aaa_memt = sc->sc_memt;
-	aaa.aaa_node = node->parent;
-	aaa.aaa_dev = dev;
-	aaa.aaa_name = "acpidock";
-
-	config_found(self, &aaa, acpi_print);
-
-	return 0;
+	AcpiOsUnmapMemory(rsdt, sizeof(ACPI_TABLE_HEADER));
 }
-#endif /* SMALL_KERNEL */

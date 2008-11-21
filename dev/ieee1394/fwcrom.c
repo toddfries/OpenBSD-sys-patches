@@ -1,4 +1,4 @@
-/*	$NetBSD: fwcrom.c,v 1.5 2007/04/21 15:27:43 kiyohara Exp $	*/
+/*	$NetBSD: fwcrom.c,v 1.7 2008/05/02 19:50:04 xtraeme Exp $	*/
 /*-
  * Copyright (c) 2002-2003
  * 	Hidetoshi Shimokawa. All rights reserved.
@@ -33,8 +33,9 @@
  * SUCH DAMAGE.
  */
 
-#ifdef __FreeBSD__
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fwcrom.c,v 1.7 2008/05/02 19:50:04 xtraeme Exp $");
+#ifdef __FreeBSD__
 __FBSDID("$FreeBSD: /repoman/r/ncvs/src/sys/dev/firewire/fwcrom.c,v 1.14 2006/02/04 21:37:39 imp Exp $");
 #endif
 
@@ -263,7 +264,7 @@ crom_crc(uint32_t *ptr, int len)
 static void
 crom_desc_specver(uint32_t spec, uint32_t ver, char *buf, int len)
 {
-	char *s = NULL;
+	const char *s = NULL;
 
 	if (spec == CSRVAL_ANSIT10 || spec == 0) {
 		switch (ver) {
@@ -313,12 +314,12 @@ crom_desc_specver(uint32_t spec, uint32_t ver, char *buf, int len)
 		snprintf(buf, len, "%s", s);
 }
 
-char *
+const char *
 crom_desc(struct crom_context *cc, char *buf, int len)
 {
 	struct csrreg *reg;
 	struct csrdirectory *dir;
-	char *desc;
+	const char *desc;
 	uint16_t crc;
 
 	reg = crom_get(cc);

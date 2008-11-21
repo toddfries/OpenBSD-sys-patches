@@ -1,4 +1,4 @@
-/*	$NetBSD: setnetimage.c,v 1.4 2002/07/20 08:36:19 grant Exp $	*/
+/*	$NetBSD: setnetimage.c,v 1.6 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -120,7 +113,7 @@ main(argc, argv)
 		errx(1, "%s too big to map", bootfile);
 
 	if ((mappedbfile = mmap(NULL, osb.st_size, PROT_READ | PROT_WRITE,
-	    MAP_FILE | MAP_SHARED, ofd, 0)) == (caddr_t)-1)
+	    MAP_FILE | MAP_SHARED, ofd, 0)) == (void *)-1)
 		err(1, "mmap %s", bootfile);
 	printf("mapped %s\n", bootfile);
 

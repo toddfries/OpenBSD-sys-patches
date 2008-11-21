@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipkdb.h,v 1.6 2002/09/15 09:01:59 deraadt Exp $	*/
+/*	$NetBSD: ipkdb.h,v 1.4 2006/02/16 20:17:14 perry Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -30,17 +30,23 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* register array */
-#define	FIX	0
-#define	LR	32
-#define	CR	33
-#define	CTR	34
-#define	XER	35
-#define	PC	36
-#define	MSR	37
-#define	NREG	38
 
-#ifndef _LOCORE
+/*
+ * Register array.
+ * This is an initial part of the struct trapframe.
+ */
+#define	FIX	0
+#define	NFIX	32
+#define	FLOAT	32
+#define	NFLOAT	64	/* Floating regs are double the size of fix regs */
+#define	PC	96
+#define	PS	97
+#define	CR	98
+#define	LR	99
+#define	CTR	100
+#define	XER	101
+#define	NREG	105	/* XXX tm-rs6000.h reserves extra space in reg file */
+
 extern int ipkdbregs[NREG];
 
 /* Doesn't handle overlapping regions */
@@ -77,4 +83,3 @@ ipkdbcmp(s,d,n)
 			return *--dp - *--sp;
 	return 0;
 }
-#endif /* _LOCORE */

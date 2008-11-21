@@ -1,6 +1,5 @@
 %{
-/*	$OpenBSD: aicasm_gram.y,v 1.16 2007/07/07 23:59:36 krw Exp $	*/
-/*	$NetBSD: aicasm_gram.y,v 1.3 2003/04/19 19:26:11 fvdl Exp $	*/
+/*	$NetBSD: aicasm_gram.y,v 1.6 2006/11/25 16:48:32 christos Exp $	*/
 
 /*
  * Parser for the Aic7xxx SCSI Host adapter sequencer assembler.
@@ -307,13 +306,13 @@ reg_definition:
 				stop("Register multiply defined", EX_DATAERR);
 				/* NOTREACHED */
 			}
-			cur_symbol = $1; 
+			cur_symbol = $1;
 			cur_symbol->type = cur_symtype;
 			initialize_symbol(cur_symbol);
 		}
 		reg_attribute_list
 	'}'
-		{                    
+		{
 			/*
 			 * Default to allowing everything in for registers
 			 * with no bit or mask definitions.
@@ -343,7 +342,7 @@ reg_attribute_list:
 |	reg_attribute_list reg_attribute
 ;
 
-reg_attribute:		
+reg_attribute:
 	reg_address
 |	size
 |	access_mode
@@ -708,7 +707,7 @@ expression:
 ;
 
 constant:
-	T_CONST T_SYMBOL expression 
+	T_CONST T_SYMBOL expression
 	{
 		if ($2->type != UNINITIALIZED) {
 			stop("Re-definition of symbol as a constant",
@@ -1513,7 +1512,7 @@ initialize_symbol(symbol_t *symbol)
 		       sizeof(struct cond_info));
 		break;
 	case MACRO:
-		symbol->info.macroinfo = 
+		symbol->info.macroinfo =
 		    (struct macro_info *)malloc(sizeof(struct macro_info));
 		if (symbol->info.macroinfo == NULL) {
 			stop("Can't create macro info", EX_SOFTWARE);
@@ -1521,7 +1520,7 @@ initialize_symbol(symbol_t *symbol)
 		}
 		memset(symbol->info.macroinfo, 0,
 		       sizeof(struct macro_info));
-		TAILQ_INIT(&symbol->info.macroinfo->args);
+		STAILQ_INIT(&symbol->info.macroinfo->args);
 		break;
 	default:
 		stop("Call to initialize_symbol with invalid symbol type",
@@ -1537,7 +1536,7 @@ add_macro_arg(const char *argtext, int argnum)
 	struct macro_arg *marg;
 	int i;
 	int retval;
-		
+
 
 	if (cur_symbol == NULL || cur_symbol->type != MACRO) {
 		stop("Invalid current symbol for adding macro arg",
@@ -1554,7 +1553,7 @@ add_macro_arg(const char *argtext, int argnum)
 	retval = snprintf(regex_pattern, sizeof(regex_pattern),
 			  "[^-/A-Za-z0-9_](%s)([^-/A-Za-z0-9_]|$)",
 			  argtext);
-	if (retval == -1 || retval >= sizeof(regex_pattern)) {
+	if (retval >= sizeof(regex_pattern)) {
 		stop("Regex text buffer too small for arg",
 		     EX_SOFTWARE);
 		/* NOTREACHED */
@@ -1564,7 +1563,7 @@ add_macro_arg(const char *argtext, int argnum)
 		stop("Regex compilation failed", EX_SOFTWARE);
 		/* NOTREACHED */
 	}
-	TAILQ_INSERT_TAIL(&cur_symbol->info.macroinfo->args, marg, links);
+	STAILQ_INSERT_TAIL(&cur_symbol->info.macroinfo->args, marg, links);
 }
 
 static void
@@ -1782,7 +1781,7 @@ format_3_instr(int opcode, symbol_ref_t *src,
 static void
 test_readable_symbol(symbol_t *symbol)
 {
-	
+
 	if ((symbol->info.rinfo->modes & (0x1 << src_mode)) == 0) {
 		snprintf(errbuf, sizeof(errbuf),
 			"Register %s unavailable in source reg mode %d",
@@ -1800,7 +1799,7 @@ test_readable_symbol(symbol_t *symbol)
 static void
 test_writable_symbol(symbol_t *symbol)
 {
-	
+
 	if ((symbol->info.rinfo->modes & (0x1 << dst_mode)) == 0) {
 		snprintf(errbuf, sizeof(errbuf),
 			"Register %s unavailable in destination reg mode %d",
@@ -1845,7 +1844,9 @@ type_check(symbol_t *symbol, expression_t *expression, int opcode)
 	 * expression are defined for this register.
 	 */
 	if (symbol->info.rinfo->typecheck_masks != FALSE) {
-		SLIST_FOREACH(node, &expression->referenced_syms, links) {
+		for(node = expression->referenced_syms.slh_first;
+		    node != NULL;
+		    node = node->links.sle_next) {
 			if ((node->symbol->type == MASK
 			  || node->symbol->type == FIELD
 			  || node->symbol->type == ENUM
@@ -1910,8 +1911,7 @@ add_conditional(symbol_t *symbol)
 static void
 add_version(const char *verstring)
 {
-	const char *q, prefix[] = " * ";
-	char *p;
+	const char prefix[] = " * ";
 	int newlen;
 	int oldlen;
 
@@ -1923,13 +1923,9 @@ add_version(const char *verstring)
 	if (versions == NULL)
 		stop("Can't allocate version string", EX_SOFTWARE);
 	strcpy(&versions[oldlen], prefix);
-	for (p = &versions[oldlen + strlen(prefix)], q = verstring; *q; q++) {
-		if (*q == '$')
-			continue;
-		*p++ = *q;
-	}
-	*p++ = '\n';
-	*p = '\0';
+	strcpy(&versions[oldlen + strlen(prefix)], verstring);
+	versions[newlen + oldlen] = '\n';
+	versions[newlen + oldlen + 1] = '\0';
 }
 
 void
@@ -1941,8 +1937,8 @@ yyerror(const char *string)
 static int
 is_download_const(expression_t *immed)
 {
-	if ((!SLIST_EMPTY(&immed->referenced_syms))
-	 && (SLIST_FIRST(&immed->referenced_syms)->symbol->type == DOWNLOAD_CONST))
+	if ((immed->referenced_syms.slh_first != NULL)
+	 && (immed->referenced_syms.slh_first->symbol->type == DOWNLOAD_CONST))
 		return (TRUE);
 
 	return (FALSE);

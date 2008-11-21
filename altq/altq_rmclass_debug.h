@@ -1,5 +1,5 @@
-/*	$OpenBSD: altq_rmclass_debug.h,v 1.3 2006/03/04 22:40:15 brad Exp $	*/
-/*	$KAME: altq_rmclass_debug.h,v 1.2 2000/02/22 14:00:35 itojun Exp $	*/
+/*	$NetBSD: altq_rmclass_debug.h,v 1.7 2006/10/12 19:59:08 peter Exp $	*/
+/*	$KAME: altq_rmclass_debug.h,v 1.3 2002/11/29 04:36:24 kjc Exp $	*/
 
 /*
  * Copyright (c) Sun Microsystems, Inc. 1998 All rights reserved.
@@ -77,7 +77,7 @@ extern int cbqtrace_count;
 		cbqtrace_ptr = cbqtrace_buffer; \
 	else { \
 		cbqtrace_ptr = cbqtrace_buffer; \
-		bzero((void *)cbqtrace_ptr, sizeof(cbqtrace_buffer)); \
+		(void)memset(cbqtrace_ptr, 0, sizeof(cbqtrace_buffer)); \
 		cbqtrace_count = 0; \
 	} \
 }

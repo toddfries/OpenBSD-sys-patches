@@ -1,4 +1,4 @@
-/*	$NetBSD: rump_private.h,v 1.8 2008/01/24 22:41:08 pooka Exp $	*/
+/*	$NetBSD: rump_private.h,v 1.15 2008/11/19 14:10:49 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -35,13 +35,14 @@
 
 #include <sys/disklabel.h>
 #include <sys/mount.h>
+#include <sys/proc.h>
 #include <sys/vnode.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_object.h>
 #include <uvm/uvm_page.h>
 
-#include "rump.h"
+#include <rump/rump.h>
 
 #if 0
 #define DPRINTF(x) printf x
@@ -67,22 +68,30 @@ struct rump_specpriv {
 };
 
 #define RUMP_UBC_MAGIC_WINDOW (void *)0x37
+#define RUMP_LMUTEX_MAGIC ((kmutex_t *)0x101)
+
+extern int rump_threads;
 
 void abort(void) __dead;
-
-void	rump_putnode(struct vnode *);
-int	rump_recyclenode(struct vnode *);
 
 struct ubc_window;
 int	rump_ubc_magic_uiomove(void *, size_t, struct uio *, int *,
 			       struct ubc_window *);
 
 void		rumpvm_init(void);
-void		rumpvfs_init(void);
 void		rump_sleepers_init(void);
 struct vm_page	*rumpvm_makepage(struct uvm_object *, voff_t);
 
 void		rumpvm_enterva(vaddr_t addr, struct vm_page *);
 void		rumpvm_flushva(void);
+
+lwpid_t		rump_nextlid(void);
+
+void		rump_biodone(void *, size_t, int);
+
+typedef void	(*rump_proc_vfs_init_fn)(struct proc *);
+typedef void	(*rump_proc_vfs_release_fn)(struct proc *);
+rump_proc_vfs_init_fn rump_proc_vfs_init;
+rump_proc_vfs_release_fn rump_proc_vfs_release;
 
 #endif /* _SYS_RUMP_PRIVATE_H_ */

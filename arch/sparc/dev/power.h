@@ -1,5 +1,4 @@
-/*	$OpenBSD: power.h,v 1.5 2005/03/23 17:12:24 miod Exp $ */
-/*	$NetBSD: power.h,v 1.2 1996/05/16 15:56:57 abrown Exp $ */
+/*	$NetBSD: power.h,v 1.5 2005/11/16 00:49:03 uwe Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -38,8 +37,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *
  */
 
 /*
@@ -49,12 +46,12 @@
 
 #define POWER_OFF	0x1	/* remove power */
 
-#define	POWER_REG	((volatile u_char *)(power_reg))
+#define	POWER_REG	((volatile uint8_t *)(power_reg))
 
 #define	POWER_BITS	"\20\1POWEROFF"
 
 #ifndef _LOCORE
-extern volatile u_char *power_reg;
+volatile uint8_t *power_reg;
 #endif
 
-void auxio_powerdown(void);		/* power off function */
+extern void powerdown(void);	/* power off function */

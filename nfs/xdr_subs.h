@@ -1,5 +1,4 @@
-/*	$OpenBSD: xdr_subs.h,v 1.8 2003/06/02 23:28:20 millert Exp $	*/
-/*	$NetBSD: xdr_subs.h,v 1.11 1996/02/18 11:54:12 fvdl Exp $	*/
+/*	$NetBSD: xdr_subs.h,v 1.15 2005/12/11 12:25:17 christos Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -52,6 +51,23 @@
 
 #define	fxdr_unsigned(t, v)	((t)ntohl((int32_t)(v)))
 #define	txdr_unsigned(v)	(htonl((int32_t)(v)))
+
+/*
+ * Directory cookies shouldn't really be XDR-ed, these functions
+ * are just here to attempt to keep information within 32 bits. And
+ * make things look better. See nfs_cookieheuristic.
+ */
+#define fxdr_cookie3(v) (((off_t)((v)[0]) << 32) | ((off_t) (v)[1]))
+#define fxdr_swapcookie3(v) (((off_t)((v)[1]) << 32) | ((off_t) (v)[0]))
+
+#define txdr_cookie3(f, v) { \
+	(v)[1] = (u_int32_t)((f) & 0xffffffffLL); \
+	(v)[0] = (u_int32_t)((f) >> 32); \
+}
+#define txdr_swapcookie3(f, v) { \
+	(v)[0] = (u_int32_t)((f) & 0xffffffffLL); \
+	(v)[1] = (u_int32_t)((f) >> 32); \
+}
 
 #define	fxdr_nfsv2time(f, t) { \
 	(t)->tv_sec = ntohl(((struct nfsv2_time *)(f))->nfsv2_sec); \

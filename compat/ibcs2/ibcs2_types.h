@@ -1,4 +1,3 @@
-/*	$OpenBSD: ibcs2_types.h,v 1.3 2007/06/06 17:15:13 deraadt Exp $	*/
 /*	$NetBSD: ibcs2_types.h,v 1.5 1995/08/14 01:11:54 mycroft Exp $	*/
 
 /*
@@ -38,7 +37,7 @@ typedef unsigned char	ibcs2_uchar_t;
 typedef unsigned long	ibcs2_ulong_t;
 
 typedef char *		ibcs2_caddr_t;
-typedef int32_t		ibcs2_daddr_t;
+typedef long		ibcs2_daddr_t;
 typedef long		ibcs2_off_t;
 typedef long		ibcs2_key_t;
 typedef unsigned short	ibcs2_uid_t;

@@ -1,4 +1,4 @@
-/*	$NetBSD: tr2a_intr.c,v 1.4 2006/09/08 17:04:17 tsutsui Exp $	*/
+/*	$NetBSD: tr2a_intr.c,v 1.12 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,13 +30,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tr2a_intr.c,v 1.4 2006/09/08 17:04:17 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tr2a_intr.c,v 1.12 2008/04/28 20:23:18 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/evcnt.h>
+#include <sys/intr.h>
 
-#include <machine/intr.h>
 #include <machine/locore.h>	/* mips3_cp0* */
 #include <machine/sbdvar.h>
 #define	_SBD_TR2A_PRIVATE
@@ -52,46 +46,26 @@ __KERNEL_RCSID(0, "$NetBSD: tr2a_intr.c,v 1.4 2006/09/08 17:04:17 tsutsui Exp $"
 SBD_DECL(tr2a);
 
 const uint32_t tr2a_sr_bits[_IPL_N] = {
-	0,				/* IPL_NONE */
-
-	MIPS_SOFT_INT_MASK_0,		/* IPL_SOFT */
-
-	MIPS_SOFT_INT_MASK_0,		/* IPL_SOFTCLOCK */
-
-	MIPS_SOFT_INT_MASK_0|
-	MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTNET */
-
-	MIPS_SOFT_INT_MASK_0|
-	MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTSERIAL */
-
-	MIPS_SOFT_INT_MASK_0|
-	MIPS_SOFT_INT_MASK_1|
-	MIPS_INT_MASK_0|
-	MIPS_INT_MASK_1|
-	MIPS_INT_MASK_2,		/* IPL_BIO */
-
-	MIPS_SOFT_INT_MASK_0|
-	MIPS_SOFT_INT_MASK_1|
-	MIPS_INT_MASK_0|
-	MIPS_INT_MASK_1|
-	MIPS_INT_MASK_2,		/* IPL_NET */
-
-	MIPS_SOFT_INT_MASK_0|
-	MIPS_SOFT_INT_MASK_1|
-	MIPS_INT_MASK_0|
-	MIPS_INT_MASK_1|
-	MIPS_INT_MASK_2|
-	MIPS_INT_MASK_3|
-	MIPS_INT_MASK_4,		/* IPL_{TTY,SERIAL} */
-
-	MIPS_SOFT_INT_MASK_0|
-	MIPS_SOFT_INT_MASK_1|
-	MIPS_INT_MASK_0|
-	MIPS_INT_MASK_1|
-	MIPS_INT_MASK_2|
-	MIPS_INT_MASK_3|
-	MIPS_INT_MASK_4|
-	MIPS_INT_MASK_5,		/* IPL_{CLOCK,HIGH} */
+	[IPL_NONE] = 0,
+	[IPL_SOFTCLOCK] =
+	    MIPS_SOFT_INT_MASK_0,
+	[IPL_SOFTNET] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1,
+	[IPL_VM] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3 |
+	    MIPS_INT_MASK_4,
+	[IPL_SCHED] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3 |
+	    MIPS_INT_MASK_4 |
+	    MIPS_INT_MASK_5,
 };
 
 #define	NIRQ		16
@@ -208,8 +182,9 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 {
 	struct tr2a_intr_handler *ih;
 	struct clockframe cf;
-	uint32_t r, intc_cause;
+	uint32_t r, intc_cause, handled;
 
+	handled = 0;
 	intc_cause = *INTC_STATUS_REG & *INTC_MASK_REG;
 
 	if ((ipending & MIPS_INT_MASK_5) && (intc_cause & INTC_INT5)) {
@@ -218,32 +193,12 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 		tr2a_wbflush();
 		*INTC_CLEAR_REG = 0x7c;
 		*INTC_STATUS_REG;
-		if ((status & MIPS_INT_MASK) == MIPS_INT_MASK) {
-			if ((ipending & MIPS_INT_MASK & ~MIPS_INT_MASK_5) ==
-			    0) {
-				/*
-				 * If all interrupts were enabled and
-				 * there is no pending interrupts,
-				 * set MIPS_SR_INT_IE so that
-				 * spllowerclock() in hardclock()
-				 * works properly.
-				 */
-				_splset(MIPS_SR_INT_IE);
-			} else {
-				/*
-				 * If there are any pending interrputs,
-				 * clear MIPS_SR_INT_IE in cf.sr so that
-				 * spllowerclock() in hardclock() will
-				 * not happen.
-				 */
-				cf.sr &= ~MIPS_SR_INT_IE;
-			}
-		}
+
 		hardclock(&cf);
 		timer_tr2a_ev.ev_count++;
-		cause &= ~MIPS_INT_MASK_5;
+		handled |= MIPS_INT_MASK_5;
 	}
-	_splset((status & MIPS_INT_MASK_5) | MIPS_SR_INT_IE);
+	_splset((status & handled) | MIPS_SR_INT_IE);
 
 
 	if ((ipending & MIPS_INT_MASK_4) && (intc_cause & INTC_INT4)) {
@@ -268,7 +223,7 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 			printf("INT4 (2)\n");
 		} else if (r & 0x00400000) {
 			printf("INT4 (3)\n");
-		} else {
+		} else if (r != 0) {
 			printf("not for INT4 %x\n", r);
 		}
 
@@ -276,9 +231,9 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 		*INTC_CLEAR_REG = 0x68;
 		*INTC_STATUS_REG;
 
-		cause &= ~MIPS_INT_MASK_4;
+		handled |= MIPS_INT_MASK_4;
 	}
-	_splset(((status & ~cause) & MIPS_HARD_INT_MASK) | MIPS_SR_INT_IE);
+	_splset((status & handled) | MIPS_SR_INT_IE);
 
 	if ((ipending & MIPS_INT_MASK_3) && (intc_cause & INTC_INT3)) {
 		/* APbus HI */
@@ -286,9 +241,8 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 		tr2a_wbflush();
 		*INTC_CLEAR_REG = 0x54;
 		*INTC_STATUS_REG;
-		cause &= ~MIPS_INT_MASK_3;
+		handled |= MIPS_INT_MASK_3;
 	}
-	_splset(((status & ~cause) & MIPS_HARD_INT_MASK) | MIPS_SR_INT_IE);
 
 	if ((ipending & MIPS_INT_MASK_2) && (intc_cause & INTC_INT2)) {
 		/* SCSI, ETHER */
@@ -311,7 +265,7 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 				ih->func(ih->arg);
 				ih->evcnt.ev_count++;
 			}
-		} else {
+		} else if (r != 0) {
 			printf("not for INT2 %x %x\n", r,
 			    *ASO_DMAINT_STATUS_REG);
 		}
@@ -319,9 +273,9 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 		tr2a_wbflush();
 		*INTC_CLEAR_REG = 0x40;
 		*INTC_STATUS_REG;
-		cause &= ~MIPS_INT_MASK_2;
+		handled |= MIPS_INT_MASK_2;
 	}
-	_splset(((status & ~cause) & MIPS_HARD_INT_MASK) | MIPS_SR_INT_IE);
+	_splset((status & handled) | MIPS_SR_INT_IE);
 
 	if ((ipending & MIPS_INT_MASK_1) && (intc_cause & INTC_INT1)) {
 		/* APbus LO */
@@ -329,9 +283,8 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 		tr2a_wbflush();
 		*INTC_CLEAR_REG = 0x2c;
 		*INTC_STATUS_REG;
-		cause &= ~MIPS_INT_MASK_1;
+		handled |= MIPS_INT_MASK_1;
 	}
-	_splset(((status & ~cause) & MIPS_HARD_INT_MASK) | MIPS_SR_INT_IE);
 
 	if ((ipending & MIPS_INT_MASK_0) && (intc_cause & INTC_INT0)) {
 		/* NMI etc. */
@@ -343,14 +296,15 @@ tr2a_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 			printf("INT0(2)\n");
 		} else if (r & 0x4) {
 			printf("INT0(3)\n");
-		} else {
+		} else if (r != 0) {
 			printf("not for INT0 %x\n", r);
 		}
 		tr2a_wbflush();
 		*INTC_CLEAR_REG = 0x14;
 		*INTC_STATUS_REG;
-		cause &= ~MIPS_INT_MASK_0;
+		handled |= MIPS_INT_MASK_0;
 	}
+	cause &= ~handled;
 	_splset(((status & ~cause) & MIPS_HARD_INT_MASK) | MIPS_SR_INT_IE);
 }
 

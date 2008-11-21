@@ -1,4 +1,4 @@
-/*	$NetBSD: db_xxx.c,v 1.40 2006/11/16 01:32:44 christos Exp $	*/
+/*	$NetBSD: db_xxx.c,v 1.53 2008/11/14 23:37:50 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
@@ -36,10 +36,11 @@
  * data structures and functions used by the kernel (proc, callout).
  */
 
-#include "opt_kgdb.h"
-
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_xxx.c,v 1.40 2006/11/16 01:32:44 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_xxx.c,v 1.53 2008/11/14 23:37:50 ad Exp $");
+
+#include "opt_kgdb.h"
+#include "opt_aio.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,10 +49,15 @@ __KERNEL_RCSID(0, "$NetBSD: db_xxx.c,v 1.40 2006/11/16 01:32:44 christos Exp $")
 #include <sys/msgbuf.h>
 
 #include <sys/callout.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
+#include <sys/lockdebug.h>
 #include <sys/signalvar.h>
 #include <sys/resourcevar.h>
 #include <sys/pool.h>
 #include <sys/kauth.h>
+#include <sys/mqueue.h>
+#include <sys/vnode.h>
 
 #include <machine/db_machdep.h>
 
@@ -67,7 +73,7 @@ __KERNEL_RCSID(0, "$NetBSD: db_xxx.c,v 1.40 2006/11/16 01:32:44 christos Exp $")
 #endif
 
 void
-db_kill_proc(db_expr_t addr, int haddr,
+db_kill_proc(db_expr_t addr, bool haddr,
     db_expr_t count, const char *modif)
 {
 	struct proc *p;
@@ -105,7 +111,7 @@ db_kill_proc(db_expr_t addr, int haddr,
 
 #ifdef KGDB
 void
-db_kgdb_cmd(db_expr_t addr, int haddr,
+db_kgdb_cmd(db_expr_t addr, bool haddr,
     db_expr_t count, const char *modif)
 {
 	kgdb_active++;
@@ -115,16 +121,71 @@ db_kgdb_cmd(db_expr_t addr, int haddr,
 #endif
 
 void
-db_show_all_procs(db_expr_t addr, int haddr,
+db_show_files_cmd(db_expr_t addr, bool haddr,
+	      db_expr_t count, const char *modif)
+{
+	struct proc *p;
+	int i;
+	filedesc_t *fdp;
+	fdfile_t *ff;
+	file_t *fp;
+	struct vnode *vn;
+	bool full = false;
+
+	if (modif[0] == 'f')
+		full = true;
+
+	p = (struct proc *) (uintptr_t) addr;
+
+	fdp = p->p_fd;
+	for (i = 0; i < fdp->fd_nfiles; i++) {
+		if ((ff = fdp->fd_ofiles[i]) == NULL)
+			continue;
+
+		fp = ff->ff_file;
+
+		/* Only look at vnodes... */
+		if ((fp != NULL) && (fp->f_type == DTYPE_VNODE)) {
+			if (fp->f_data != NULL) {
+				vn = (struct vnode *) fp->f_data;
+				vfs_vnode_print(vn, full, db_printf);
+
+#ifdef LOCKDEBUG
+				db_printf("\nv_uobj.vmobjlock lock details:\n");
+				lockdebug_lock_print(&(vn->v_uobj.vmobjlock),
+					     db_printf);
+				db_printf("\n");
+#endif
+			}
+		}
+	}
+}
+
+#ifdef AIO
+void
+db_show_aio_jobs(db_expr_t addr, bool haddr,
     db_expr_t count, const char *modif)
 {
-	int i;
+	aio_print_jobs(db_printf);
+}
+#endif
 
+void
+db_show_mqueue_cmd(db_expr_t addr, bool haddr,
+    db_expr_t count, const char *modif)
+{
+	mqueue_print_list(db_printf);
+}
+
+void
+db_show_all_procs(db_expr_t addr, bool haddr,
+    db_expr_t count, const char *modif)
+{
 	const char *mode;
 	struct proc *p, *pp, *cp;
 	struct lwp *l, *cl;
-	struct timeval tv[2];
 	const struct proclist_desc *pd;
+	char db_nbuf[MAXCOMLEN + 1];
 
 	if (modif[0] == 0)
 		mode = "n";			/* default == normal mode */
@@ -146,17 +207,17 @@ db_show_all_procs(db_expr_t addr, int haddr,
 		    "COMMAND", "STRUCT PROC *", "UAREA *", "VMSPACE/VM_MAP");
 		break;
 	case 'l':
-		db_printf(" PID        %4s S %9s %18s %18s %-12s\n",
-		    "LID", "FLAGS", "STRUCT LWP *", "UAREA *", "WAIT");
+		db_printf(" PID        %4s S %9s %18s %18s %-8s\n",
+		    "LID", "FLAGS", "STRUCT LWP *", "NAME", "WAIT");
 		break;
 	case 'n':
 		db_printf(" PID       %8s %8s %10s S %7s %4s %16s %7s\n",
 		    "PPID", "PGRP", "UID", "FLAGS", "LWPS", "COMMAND", "WAIT");
 		break;
 	case 'w':
-		db_printf(" PID       %10s %8s %4s %5s %5s %-12s%s\n",
-		    "COMMAND", "EMUL", "PRI", "UTIME", "STIME",
-		    "WAIT-MSG", "WAIT-CHANNEL");
+		db_printf(" PID       %4s %16s %8s %4s %-12s%s\n",
+		    "LID", "COMMAND", "EMUL", "PRI", "WAIT-MSG",
+		    "WAIT-CHANNEL");
 		break;
 	}
 
@@ -176,17 +237,25 @@ db_show_all_procs(db_expr_t addr, int haddr,
 			switch (*mode) {
 
 			case 'a':
-				db_printf("%10.10s %18p %18p %18p\n",
-				    p->p_comm, p,
-				    l != NULL ? l->l_addr : 0,
-				    p->p_vmspace);
+				db_printf("%10.10s %18lx %18lx %18lx\n",
+				    p->p_comm, (long)p,
+				    (long)(l != NULL ? l->l_addr : 0),
+				    (long)p->p_vmspace);
 				break;
 			case 'l':
 				 while (l != NULL) {
-					db_printf("%c%4d %d %#9x %18p %18p %s\n",
+				 	if (l->l_name != NULL) {
+				 		snprintf(db_nbuf,
+							 sizeof(db_nbuf),
+				 		    "%s", l->l_name);
+					} else
+				 		snprintf(db_nbuf,
+						    sizeof(db_nbuf),
+				 		    "%s", p->p_comm);
+					db_printf("%c%4d %d %9x %18lx %18s %-8s\n",
 					    (cl == l ? '>' : ' '), l->l_lid,
-					    l->l_stat, l->l_flag, l,
-					    l->l_addr,
+					    l->l_stat, l->l_flag, (long)l,
+						  db_nbuf,
 					    (l->l_wchan && l->l_wmesg) ?
 					    l->l_wmesg : "");
 
@@ -206,34 +275,27 @@ db_show_all_procs(db_expr_t addr, int haddr,
 				break;
 
 			case 'w':
-				db_printf("%10s %8s %4d", p->p_comm,
-				    p->p_emul->e_name,
-				    (l != NULL) ? l->l_priority : -1);
-				calcru(p, &tv[0], &tv[1], NULL);
-				for (i = 0; i < 2; ++i) {
-					db_printf("%4ld.%1ld",
-					    (long)tv[i].tv_sec,
-					    (long)tv[i].tv_usec/100000);
+				 while (l != NULL) {
+					db_printf(
+					    "%4d %16s %8s %4d %-12s %-18lx\n",
+					    l->l_lid, p->p_comm,
+					    p->p_emul->e_name, l->l_priority,
+					    (l->l_wchan && l->l_wmesg) ?
+					    l->l_wmesg : "", (long)l->l_wchan);
+					l = LIST_NEXT(l, l_sibling);
+					if (l != NULL) {
+						db_printf("%c%-10d", (cp == p ?
+						    '>' : ' '), p->p_pid);
+					}
 				}
-				if (p->p_nlwps == 1) {
-				if (l->l_wchan && l->l_wmesg) {
-					db_printf(" %-12s", l->l_wmesg);
-					db_printsym(
-					    (db_expr_t)(intptr_t)l->l_wchan,
-					    DB_STGY_XTRN, db_printf);
-				} } else {
-					db_printf(" * ");
-				}
-				db_printf("\n");
 				break;
-
 			}
 		}
 	}
 }
 
 void
-db_show_all_pools(db_expr_t addr, int haddr,
+db_show_all_pools(db_expr_t addr, bool haddr,
     db_expr_t count, const char *modif)
 {
 
@@ -241,7 +303,7 @@ db_show_all_pools(db_expr_t addr, int haddr,
 }
 
 void
-db_dmesg(db_expr_t addr, int haddr, db_expr_t count,
+db_dmesg(db_expr_t addr, bool haddr, db_expr_t count,
     const char *modif)
 {
 	struct kern_msgbuf *mbp;
@@ -288,35 +350,10 @@ db_dmesg(db_expr_t addr, int haddr, db_expr_t count,
 		db_printf("\n");
 }
 
-#ifdef __HAVE_BIGENDIAN_BITOPS
-#define	RQMASK(n) (0x80000000 >> (n))
-#else
-#define	RQMASK(n) (0x00000001 << (n))
-#endif
-
 void
-db_show_sched_qs(db_expr_t addr, int haddr,
+db_show_sched_qs(db_expr_t addr, bool haddr,
     db_expr_t count, const char *modif)
 {
-	struct prochd *ph;
-	struct lwp *l;
-	int i, first;
 
-	for (i = 0; i < RUNQUE_NQS; i++)
-	{
-		first = 1;
-		ph = &sched_qs[i];
-		for (l = ph->ph_link; l != (void *)ph; l = l->l_forw) {
-			if (first) {
-				db_printf("%c%d",
-				    (sched_whichqs & RQMASK(i))
-				    ? ' ' : '!', i);
-				first = 0;
-			}
-			db_printf("\t%d.%d (%s) pri=%d usrpri=%d\n",
-			    l->l_proc->p_pid,
-			    l->l_lid, l->l_proc->p_comm,
-			    (int)l->l_priority, (int)l->l_usrpri);
-		}
-	}
+	sched_print_runqueue(db_printf);
 }

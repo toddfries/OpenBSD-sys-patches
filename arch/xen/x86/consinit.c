@@ -1,4 +1,4 @@
-/*	$NetBSD: consinit.c,v 1.7 2006/12/09 10:37:52 bouyer Exp $	*/
+/*	$NetBSD: consinit.c,v 1.11 2008/10/21 15:46:32 cegger Exp $	*/
 /*	NetBSD: consinit.c,v 1.4 2004/03/13 17:31:34 bjh21 Exp 	*/
 
 /*
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.7 2006/12/09 10:37:52 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.11 2008/10/21 15:46:32 cegger Exp $");
 
 #include "opt_kgdb.h"
 
@@ -70,18 +70,11 @@ __KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.7 2006/12/09 10:37:52 bouyer Exp $");
 #include <dev/usb/ukbdvar.h>
 #endif
 
-#ifndef __x86_64__
-#include "pc.h"
-#endif
-#if (NPC > 0)
-#include <machine/pccons.h>
-#endif
-
 #include "opt_xen.h"
 #if (XEN > 0)
-#include <machine/xen.h>
+#include <xen/xen.h>
 #include <dev/pckbport/pckbportvar.h>
-#include <machine/hypervisor.h>
+#include <xen/hypervisor.h>
 #endif
 
 #include "com.h"
@@ -89,11 +82,6 @@ __KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.7 2006/12/09 10:37:52 bouyer Exp $");
 #include <sys/termios.h>
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
-#endif
-
-#include "ukbd.h"
-#if (NUKBD > 0)
-#include <dev/usb/ukbdvar.h>
 #endif
 
 #ifndef CONSDEVNAME
@@ -165,7 +153,7 @@ consinit()
 	xen_parse_cmdline(XEN_PARSE_CONSOLE, &xcp);
 	
 #if (NVGA > 0)
-	if (xen_start_info.flags & SIF_PRIVILEGED) {
+	if (xendomain_is_privileged()) {
 #ifdef CONS_OVERRIDE
 		if (strcmp(default_consinfo.devname, "tty0") == 0 ||
 		    strcmp(default_consinfo.devname, "pc") == 0) {
@@ -198,24 +186,6 @@ consinit()
 #endif /* NXENCONS */
 	panic("consinit: no console");
 }
-
-#if (NPCKBC > 0) && (NPCKBD == 0)
-/*
- * glue code to support old console code with the
- * mi keyboard controller driver
- */
-int
-pckbport_machdep_cnattach(kbctag, kbcslot)
-	pckbport_tag_t kbctag;
-	pckbport_slot_t kbcslot;
-{
-#if (NPC > 0) && (NPCCONSKBD > 0)
-	return (pcconskbd_cnattach(kbctag, kbcslot));
-#else
-	return (ENXIO);
-#endif
-}
-#endif
 
 #ifdef KGDB
 void

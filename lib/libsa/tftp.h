@@ -1,5 +1,4 @@
-/*	$OpenBSD: tftp.h,v 1.2 2004/04/02 04:39:51 deraadt Exp $	*/
-/*	$NetBSD: tftp.h,v 1.3 2003/08/07 16:32:30 agc Exp $	*/
+/*	$NetBSD: tftp.h,v 1.6 2005/12/11 12:24:46 christos Exp $	*/
 
 /*
  * Copyright (c) 1996
@@ -100,15 +99,6 @@ struct	tftphdr {
 #define	EEXISTS		6		/* file already exists */
 #define	ENOUSER		7		/* no such user */
 
-/* FS_DEF(tftp); */
-
-int	tftp_open(char *, struct open_file *);
-int	tftp_close(struct open_file *);
-int	tftp_read(struct open_file *, void *, size_t, size_t *);
-int	tftp_write(struct open_file *, void *, size_t, size_t *);
-off_t	tftp_seek(struct open_file *, off_t, int);
-int	tftp_stat(struct open_file *, struct stat *);
-int	tftp_mount(int, struct in_addr, char *);
-int	tftp_readdir(struct open_file *, char *);
+FS_DEF(tftp);
 
 #define IPPORT_TFTP 69

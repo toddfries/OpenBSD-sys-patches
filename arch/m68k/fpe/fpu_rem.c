@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_rem.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_rem.c,v 1.5 2003/07/15 02:43:10 lukem Exp $	*/
+/*	$NetBSD: fpu_rem.c,v 1.6 2005/12/11 12:17:52 christos Exp $	*/
 
 /*
  * Copyright (c) 1995  Ken Nakata
@@ -32,11 +31,14 @@
  *	@(#)fpu_rem.c	10/24/95
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_rem.c,v 1.6 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 #include <sys/signal.h>
 #include <machine/frame.h>
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
 /*
  *       ALGORITHM
@@ -83,9 +85,9 @@
  *                R := 0. Return signQ, last 7 bits of Q, and R.
  */                
 
-struct fpn *__fpu_modrem(struct fpemu *fe, int modrem);
+static struct fpn * __fpu_modrem __P((struct fpemu *fe, int modrem));
 
-struct fpn *
+static struct fpn *
 __fpu_modrem(fe, modrem)
      struct fpemu *fe;
      int modrem;

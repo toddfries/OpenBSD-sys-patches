@@ -1,4 +1,4 @@
-/* $NetBSD: pckbd.c,v 1.16 2007/10/19 12:01:03 ad Exp $ */
+/* $NetBSD: pckbd.c,v 1.25 2008/06/11 17:35:02 drochner Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -75,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pckbd.c,v 1.16 2007/10/19 12:01:03 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pckbd.c,v 1.25 2008/06/11 17:35:02 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -115,28 +108,25 @@ struct pckbd_internal {
 };
 
 struct pckbd_softc {
-        struct  device sc_dev;
+        device_t sc_dev;
 
 	struct pckbd_internal *id;
 	int sc_enabled;
 
 	int sc_ledstate;
 
-	struct device *sc_wskbddev;
+	device_t sc_wskbddev;
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	int rawkbd;
 #endif
-
-	void *sc_powerhook;
 };
 
 static int pckbd_is_console(pckbport_tag_t, pckbport_slot_t);
-static void pckbd_powerhook(int, void *);
 
-int pckbdprobe(struct device *, struct cfdata *, void *);
-void pckbdattach(struct device *, struct device *, void *);
+int pckbdprobe(device_t, cfdata_t, void *);
+void pckbdattach(device_t, device_t, void *);
 
-CFATTACH_DECL(pckbd, sizeof(struct pckbd_softc),
+CFATTACH_DECL_NEW(pckbd, sizeof(struct pckbd_softc),
     pckbdprobe, pckbdattach, NULL, NULL);
 
 int	pckbd_enable(void *, int);
@@ -249,62 +239,62 @@ pckbd_is_console(pckbport_tag_t tag, pckbport_slot_t slot)
 	    tag == pckbd_consdata.t_kbctag && slot == pckbd_consdata.t_kbcslot;
 }
 
-static void
-pckbd_powerhook(int why, void *opaque)
+static bool
+pckbd_suspend(device_t dv PMF_FN_ARGS)
 {
-	struct pckbd_softc *sc;
+	struct pckbd_softc *sc = device_private(dv);
+	u_char cmd[1];
 	int res;
+
+	/* XXX duped from pckbd_enable, but we want to disable
+	 *     it even if it's the console kbd
+	 */
+	cmd[0] = KBC_DISABLE;
+	res = pckbport_enqueue_cmd(sc->id->t_kbctag,
+	    sc->id->t_kbcslot, cmd, 1, 0, 1, 0);
+	if (res)
+		return false;
+
+	pckbport_slot_enable(sc->id->t_kbctag,
+	    sc->id->t_kbcslot, 0);
+
+	sc->sc_enabled = 0;
+	return true;
+}
+
+static bool
+pckbd_resume(device_t dv PMF_FN_ARGS)
+{
+	struct pckbd_softc *sc = device_private(dv);
 	u_char cmd[1], resp[1];
+	int res;
 
-	sc = (struct pckbd_softc *)opaque;
+	/* XXX jmcneill reset the keyboard */
+	pckbport_flush(sc->id->t_kbctag, sc->id->t_kbcslot);
 
-	switch (why) {
-	case PWR_STANDBY:
-	case PWR_SUSPEND:
-		printf("%s: suspending...\n", sc->sc_dev.dv_xname);
-		/* XXX duped from pckbd_enable, but we want to disable it
-		 *     even if it's the console kbd
-		 */
-		cmd[0] = KBC_DISABLE;
-		res = pckbport_enqueue_cmd(sc->id->t_kbctag, sc->id->t_kbcslot,
-					cmd, 1, 0, 1, 0);
-		if (res)
-			printf("pckbd_disable: command error\n");
-
-		pckbport_slot_enable(sc->id->t_kbctag, sc->id->t_kbcslot, 0);
-
-		sc->sc_enabled = 0;
-		break;
-	case PWR_RESUME:
-		printf("%s: resuming...\n", sc->sc_dev.dv_xname);
-
-		/* XXX jmcneill reset the keyboard */
-		cmd[0] = KBC_RESET;
-		res = pckbport_poll_cmd(sc->id->t_kbctag, sc->id->t_kbcslot,
-		    cmd, 1, 1, resp, 1);
+	cmd[0] = KBC_RESET;
+	res = pckbport_poll_cmd(sc->id->t_kbctag,
+	    sc->id->t_kbcslot, cmd, 1, 1, resp, 1);
 #ifdef DEBUG
-		if (res)
-			printf("pckbdprobe: reset error %d\n", res);
+	if (res)
+		printf("pckbdprobe: reset error %d\n", res);
 #endif
-		if (resp[0] != KBR_RSTDONE)
-			printf("pckbdprobe: reset response 0x%x\n", resp[0]);
+	if (resp[0] != KBR_RSTDONE)
+		printf("pckbdprobe: reset response 0x%x\n",
+		    resp[0]);
 
-		pckbport_flush(sc->id->t_kbctag, sc->id->t_kbcslot);
+	pckbport_flush(sc->id->t_kbctag, sc->id->t_kbcslot);
 
-		pckbd_set_xtscancode(sc->id->t_kbctag, sc->id->t_kbcslot);
+	pckbd_enable(sc, 1);
 
-		pckbd_enable(sc, 1);
-		break;
-	}
-
-	return;
+	return true;
 }
 
 /*
  * these are both bad jokes
  */
 int
-pckbdprobe(struct device *parent, struct cfdata *cf, void *aux)
+pckbdprobe(device_t parent, cfdata_t cf, void *aux)
 {
 	struct pckbport_attach_args *pa = aux;
 	int res;
@@ -356,7 +346,7 @@ pckbdprobe(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 void
-pckbdattach(struct device *parent, struct device *self, void *aux)
+pckbdattach(device_t parent, device_t self, void *aux)
 {
 	struct pckbd_softc *sc = device_private(self);
 	struct pckbport_attach_args *pa = aux;
@@ -364,8 +354,10 @@ pckbdattach(struct device *parent, struct device *self, void *aux)
 	int isconsole;
 	u_char cmd[1];
 
-	printf("\n");
+	aprint_naive("\n");
+	aprint_normal("\n");
 
+	sc->sc_dev = self;
 	isconsole = pckbd_is_console(pa->pa_tag, pa->pa_slot);
 
 	if (isconsole) {
@@ -394,7 +386,7 @@ pckbdattach(struct device *parent, struct device *self, void *aux)
 	sc->id->t_sc = sc;
 
 	pckbport_set_inputhandler(sc->id->t_kbctag, sc->id->t_kbcslot,
-			       pckbd_input, sc, sc->sc_dev.dv_xname);
+			       pckbd_input, sc, device_xname(sc->sc_dev));
 
 	a.console = isconsole;
 
@@ -403,17 +395,14 @@ pckbdattach(struct device *parent, struct device *self, void *aux)
 	a.accessops = &pckbd_accessops;
 	a.accesscookie = sc;
 
-	sc->sc_powerhook = powerhook_establish(sc->sc_dev.dv_xname,
-	    pckbd_powerhook, sc);
-	if (sc->sc_powerhook == NULL)
-		aprint_error("%s: unable to install powerhook\n",
-		    sc->sc_dev.dv_xname);
+	if (!pmf_device_register(self, pckbd_suspend, pckbd_resume))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 
 	/*
 	 * Attach the wskbd, saving a handle to it.
 	 * XXX XXX XXX
 	 */
-	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
+	sc->sc_wskbddev = config_found_ia(self, "wskbddev", &a, wskbddevprint);
 }
 
 int
@@ -645,6 +634,15 @@ pckbd_bell(u_int pitch, u_int period, u_int volume, int poll)
 	if (pckbd_bell_fn != NULL)
 		(*pckbd_bell_fn)(pckbd_bell_fn_arg, pitch, period,
 		    volume, poll);
+}
+
+void
+pckbd_unhook_bell(void (*fn)(void *, u_int, u_int, u_int, int), void *arg)
+{
+	if (pckbd_bell_fn != fn && pckbd_bell_fn_arg != arg)
+		return;
+	pckbd_bell_fn = NULL;
+	pckbd_bell_fn_arg = NULL;
 }
 
 void

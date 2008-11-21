@@ -1,5 +1,4 @@
-/* $OpenBSD: tsc.c,v 1.13 2006/12/14 17:36:12 kettenis Exp $ */
-/* $NetBSD: tsc.c,v 1.3 2000/06/25 19:17:40 thorpej Exp $ */
+/* $NetBSD: tsc.c,v 1.13 2005/12/11 12:16:17 christos Exp $ */
 
 /*-
  * Copyright (c) 1999 by Ross Harvey.  All rights reserved.
@@ -32,6 +31,12 @@
  *
  */
 
+#include "opt_dec_6600.h"
+
+#include <sys/cdefs.h>
+
+__KERNEL_RCSID(0, "$NetBSD: tsc.c,v 1.13 2005/12/11 12:16:17 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -39,6 +44,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/rpb.h>
+#include <machine/sysarch.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -53,39 +59,28 @@
 
 #define tsc() { Generate ctags(1) key. }
 
-int	tscmatch(struct device *, void *, void *);
-void	tscattach(struct device *, struct device *, void *);
+int	tscmatch __P((struct device *, struct cfdata *, void *));
+void	tscattach __P((struct device *, struct device *, void *));
 
-struct cfattach tsc_ca = {
-	sizeof(struct device), tscmatch, tscattach,
-};
+CFATTACH_DECL(tsc, sizeof(struct tsc_softc),
+    tscmatch, tscattach, NULL, NULL);
 
-struct cfdriver tsc_cd = {
-        NULL, "tsc", DV_DULL,
-};
+extern struct cfdriver tsc_cd;
 
 struct tsp_config tsp_configuration[2];
 
-static int tscprint(void *, const char *pnp);
+static int tscprint __P((void *, const char *pnp));
 
-int	tspmatch(struct device *, void *, void *);
-void	tspattach(struct device *, struct device *, void *);
+int	tspmatch __P((struct device *, struct cfdata *, void *));
+void	tspattach __P((struct device *, struct device *, void *));
 
-struct cfattach tsp_ca = {
-	sizeof(struct tsp_softc), tspmatch, tspattach,
-};
+CFATTACH_DECL(tsp, sizeof(struct tsp_softc),
+    tspmatch, tspattach, NULL, NULL);
 
-struct cfdriver tsp_cd = {
-        NULL, "tsp", DV_DULL,
-};
+extern struct cfdriver tsp_cd;
 
-
-static int tspprint(void *, const char *pnp);
-
-#if	0
-static int tsp_bus_get_window(int, int,
-	struct alpha_bus_space_translation *);
-#endif
+static int tsp_bus_get_window __P((int, int,
+	struct alpha_bus_space_translation *));
 
 /* There can be only one */
 static int tscfound;
@@ -96,7 +91,7 @@ int tsp_console_hose;
 int
 tscmatch(parent, match, aux)
 	struct device *parent;
-	void *match;
+	struct cfdata *match;
 	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
@@ -121,7 +116,7 @@ void tscattach(parent, self, aux)
 	csc = LDQP(TS_C_CSC);
 
 	nbus = 1 + (CSC_BC(csc) >= 2);
-	printf(": 21272 Chipset, Cchip rev %d\n"
+	printf(": 21272 Core Logic Chipset, Cchip rev %d\n"
 		"%s%d: %c Dchips, %d memory bus%s of %d bytes\n",
 		(int)MISC_REV(LDQP(TS_C_MISC)),
 		ma->ma_name, ma->ma_slot, "2448"[CSC_BC(csc)],
@@ -134,7 +129,7 @@ void tscattach(parent, self, aux)
 	}
 	printf(", Dchip 0 rev %d\n", (int)LDQP(TS_D_DREV) & 0xf);
 
-	bzero(&tsp, sizeof tsp);
+	memset(&tsp, 0, sizeof tsp);
 	tsp.tsp_name = "tsp";
 	config_found(self, &tsp, NULL);
 
@@ -152,7 +147,7 @@ tscprint(aux, p)
 	register struct tsp_attach_args *tsp = aux;
 
 	if(p)
-		printf("%s%d at %s", tsp->tsp_name, tsp->tsp_slot, p);
+		aprint_normal("%s%d at %s", tsp->tsp_name, tsp->tsp_slot, p);
 	return UNCONF;
 }
 
@@ -161,7 +156,7 @@ tscprint(aux, p)
 int
 tspmatch(parent, match, aux)
 	struct device *parent;
-	void *match;
+	struct cfdata *match;
 	void *aux;
 {
 	struct tsp_attach_args *t = aux;
@@ -189,24 +184,21 @@ tspattach(parent, self, aux)
 	 * malloc is safe.  On the Tsunami, we need to do this after
 	 * DMA is initialized, as well.
 	 */
-	tsp_bus_mem_init2(pcp);
+	tsp_bus_mem_init2(&pcp->pc_memt, pcp);
 
 	pci_6600_pickintr(pcp);
 
-	pba.pba_busname = "pci";
 	pba.pba_iot = &pcp->pc_iot;
 	pba.pba_memt = &pcp->pc_memt;
 	pba.pba_dmat =
 	    alphabus_dma_get_tag(&pcp->pc_dmat_direct, ALPHA_BUS_PCI);
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &pcp->pc_pc;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
-#ifdef	notyet
 	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED |
 	    PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY | PCI_FLAGS_MWI_OKAY;
-#endif
-	config_found(self, &pba, tspprint);
+	config_found_ia(self, "pcibus", &pba, pcibusprint);
 }
 
 struct tsp_config *
@@ -221,48 +213,21 @@ tsp_init(mallocsafe, n)
 	pcp->pc_pslot = n;
 	pcp->pc_iobase = TS_Pn(n, 0);
 	pcp->pc_csr = S_PAGE(TS_Pn(n, P_CSRBASE));
-	snprintf(pcp->pc_io_ex_name, sizeof pcp->pc_io_ex_name,
-	    "tsp%d_bus_io", n);
-	snprintf(pcp->pc_mem_ex_name, sizeof pcp->pc_mem_ex_name,
-	    "tsp%d_bus_mem", n);
-	    
 	if (!pcp->pc_initted) {
 		tsp_bus_io_init(&pcp->pc_iot, pcp);
 		tsp_bus_mem_init(&pcp->pc_memt, pcp);
-#if 0
+
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 1;
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 1;
 
 		alpha_bus_get_window = tsp_bus_get_window;
-#endif 
 	}
 	pcp->pc_mallocsafe = mallocsafe;
 	tsp_pci_init(&pcp->pc_pc, pcp);
-	alpha_pci_chipset = &pcp->pc_pc;
-	alpha_pci_chipset->pc_name = "tsunami";
-	alpha_pci_chipset->pc_mem = P_PCI_MEM;
-	alpha_pci_chipset->pc_ports = P_PCI_IO;
-	alpha_pci_chipset->pc_hae_mask = 0;
-	alpha_pci_chipset->pc_dense = TS_P0(0);
-	alpha_pci_chipset->pc_bwx = 1;
 	pcp->pc_initted = 1;
 	return pcp;
 }
 
-static int
-tspprint(aux, p)
-	void *aux;
-	const char *p;
-{
-	register struct pcibus_attach_args *pci = aux;
-
-	if(p)
-		printf("%s at %s", pci->pba_busname, p);
-	printf(" bus %d", pci->pba_bus);
-	return UNCONF;
-}
-
-#if 0
 static int
 tsp_bus_get_window(type, window, abst)
 	int type, window;
@@ -294,4 +259,3 @@ tsp_bus_get_window(type, window, abst)
 
 	return (0);
 }
-#endif

@@ -1,5 +1,4 @@
-/*	$OpenBSD: setnetbootinfo.c,v 1.2 2003/05/11 19:41:09 deraadt Exp $	*/
-/*	$NetBSD: setnetbootinfo.c,v 1.5 1997/04/06 08:41:37 cgd Exp $	*/
+/* $NetBSD: setnetbootinfo.c,v 1.12 2002/09/22 05:38:30 mycroft Exp $ */
 
 /*
  * Copyright (c) 1997 Christopher G. Demetriou
@@ -32,19 +31,21 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/fcntl.h>
+#include <sys/stat.h>
+#include <sys/socket.h>						/* XXX */
+#include <net/if.h>						/* XXX */
+#include <net/if_ether.h>
 #include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/fcntl.h>
-#include <sys/stat.h>
-#include <sys/socket.h>						/* XXX */
-#include <net/if.h>						/* XXX */
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
 
-#include "bbinfo.h"
+#include "stand/common/bbinfo.h"
+
+static void usage(void);
+int main(int argc, char *argv[]);
 
 int	verbose, force, unset;
 char	*netboot, *outfile, *addr, *host;
@@ -54,13 +55,13 @@ char	*outfilename;
 struct ether_addr *ether_addr, _ether_addr;
 
 static void
-usage()
+usage(void)
 {
 
-	(void)fprintf(stderr, "usage:\n");
-	(void)fprintf(stderr, "\tsetnetboot [-v] [-f] [-o outfile] \\\n");
-	(void)fprintf(stderr, "\t    [-a ether-address | -h ether-host] infile\n");
-	(void)fprintf(stderr, "\tsetnetboot [-v] -u -o outfile infile\n");
+	fprintf(stderr, "usage:\n");
+	fprintf(stderr, "\tsetnetboot [-v] [-f] [-o outfile] \\\n");
+	fprintf(stderr, "\t    [-a ether-address | -h ether-host] infile\n");
+	fprintf(stderr, "\tsetnetboot [-v] -u -o outfile infile\n");
 	exit(1);
 }
 
@@ -140,13 +141,10 @@ main(argc, argv)
 		outfilename = outfile;
 	else {
 		/* name + 12 for enet addr + '.' before enet addr + NUL */
-		size_t len = strlen(netboot) + 14;
-
-		outfilename = malloc(len);
+		outfilename = malloc(strlen(netboot) + 14);
 		if (outfilename == NULL)
 			err(1, "malloc of output file name failed");
-		snprintf(outfilename, len,
-		    "%s.%02x%02x%02x%02x%02x%02x", netboot,
+		sprintf(outfilename, "%s.%02x%02x%02x%02x%02x%02x", netboot,
 		    ether_addr->ether_addr_octet[0],
 		    ether_addr->ether_addr_octet[1],
 		    ether_addr->ether_addr_octet[2],
@@ -194,8 +192,8 @@ main(argc, argv)
 	netbbinfop = NULL;
 	for (qp = (u_int64_t *)netbb; qp < (u_int64_t *)(netbb + sb.st_size);
 	    qp++) {
-		if (((struct netbbinfo *)qp)->magic1 == 0xfeedbabedeadbeef &&
-		    ((struct netbbinfo *)qp)->magic2 == 0xfeedbeefdeadbabe) {
+		if (((struct netbbinfo *)qp)->magic1 == 0xfeedbabedeadbeefLL &&
+		    ((struct netbbinfo *)qp)->magic2 == 0xfeedbeefdeadbabeLL) {
 			netbbinfop = (struct netbbinfo *)qp;
 			break;
 		}
@@ -209,9 +207,9 @@ main(argc, argv)
 
 	if (verbose)
 		printf("setting netbbinfo structure...\n");
-	bzero(netbbinfop, sizeof *netbbinfop);
-	netbbinfop->magic1 = 0xfeedbabedeadbeef;
-	netbbinfop->magic2 = 0xfeedbeefdeadbabe;
+	memset(netbbinfop, 0, sizeof *netbbinfop);
+	netbbinfop->magic1 = 0xfeedbabedeadbeefLL;
+	netbbinfop->magic2 = 0xfeedbeefdeadbabeLL;
 	netbbinfop->set = unset ? 0 : 1;
 	if (netbbinfop->set) {
 		for (i = 0; i < 6; i++)

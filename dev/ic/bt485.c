@@ -1,5 +1,4 @@
-/* $OpenBSD: bt485.c,v 1.13 2007/11/26 09:28:33 martynas Exp $ */
-/* $NetBSD: bt485.c,v 1.2 2000/04/02 18:55:01 nathanw Exp $ */
+/* $NetBSD: bt485.c,v 1.13 2005/12/11 12:21:26 christos Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -29,8 +28,11 @@
  */
 
  /* This code was derived from and originally located in sys/dev/pci/
-  *	 NetBSD: tga_bt485.c,v 1.4 1999/03/24 05:51:21 mrg Exp 
+  *	 NetBSD: tga_bt485.c,v 1.4 1999/03/24 05:51:21 mrg Exp
   */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bt485.c,v 1.13 2005/12/11 12:21:26 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,27 +49,18 @@
 #include <dev/ic/ramdac.h>
 
 #include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplayvar.h>
-#include <dev/rasops/rasops.h>
 
 /*
  * Functions exported via the RAMDAC configuration table.
  */
 void	bt485_init(struct ramdac_cookie *);
-int	bt485_set_cmap(struct ramdac_cookie *,
-	    struct wsdisplay_cmap *);
-int	bt485_get_cmap(struct ramdac_cookie *,
-	    struct wsdisplay_cmap *);
-int	bt485_set_cursor(struct ramdac_cookie *,
-	    struct wsdisplay_cursor *);
-int	bt485_get_cursor(struct ramdac_cookie *,
-	    struct wsdisplay_cursor *);
-int	bt485_set_curpos(struct ramdac_cookie *,
-	    struct wsdisplay_curpos *);
-int	bt485_get_curpos(struct ramdac_cookie *,
-	    struct wsdisplay_curpos *);
-int	bt485_get_curmax(struct ramdac_cookie *,
-	    struct wsdisplay_curpos *);
+int	bt485_set_cmap(struct ramdac_cookie *, struct wsdisplay_cmap *);
+int	bt485_get_cmap(struct ramdac_cookie *, struct wsdisplay_cmap *);
+int	bt485_set_cursor(struct ramdac_cookie *, struct wsdisplay_cursor *);
+int	bt485_get_cursor(struct ramdac_cookie *, struct wsdisplay_cursor *);
+int	bt485_set_curpos(struct ramdac_cookie *, struct wsdisplay_curpos *);
+int	bt485_get_curpos(struct ramdac_cookie *, struct wsdisplay_curpos *);
+int	bt485_get_curmax(struct ramdac_cookie *, struct wsdisplay_curpos *);
 
 /* XXX const */
 struct ramdac_funcs bt485_funcsstruct = {
@@ -95,7 +88,7 @@ struct bt485data {
 					 * around, and is probably
 					 * struct tga_devconfig *
 					 */
-	
+
 	int             (*ramdac_sched_update)(void *, void (*)(void *));
 	void            (*ramdac_wr)(void *, u_int, u_int8_t);
 	u_int8_t        (*ramdac_rd)(void *, u_int);
@@ -126,7 +119,7 @@ struct bt485data {
 /*
  * Internal functions.
  */
-inline void	bt485_wr_i(struct bt485data *, u_int8_t, u_int8_t);
+inline void	bt485_wr_i (struct bt485data *, u_int8_t, u_int8_t);
 inline u_int8_t bt485_rd_i(struct bt485data *, u_int8_t);
 void	bt485_update(void *);
 void	bt485_update_curpos(struct bt485data *);
@@ -251,11 +244,8 @@ bt485_init(rc)
 
 	/* Initial colormap: 0 is black, everything else is white */
 	data->cmap_r[0] = data->cmap_g[0] = data->cmap_b[0] = 0;
-	for (i = 0; i < 256; i++) {
-		data->cmap_r[i] = rasops_cmap[3*i + 0];
-		data->cmap_g[i] = rasops_cmap[3*i + 1];
-		data->cmap_b[i] = rasops_cmap[3*i + 2];
-	}
+	for (i = 1; i < 256; i++)
+		data->cmap_r[i] = data->cmap_g[i] = data->cmap_b[i] = 255;
 
 	bt485_update((void *)data);
 }
@@ -267,43 +257,30 @@ bt485_set_cmap(rc, cmapp)
 {
 	struct bt485data *data = (struct bt485data *)rc;
 	u_int count, index;
+	uint8_t r[256], g[256], b[256];
 	int s, error;
 
-#ifdef DIAGNOSTIC
-	if (rc == NULL)
-		panic("bt485_set_cmap: rc");
-	if (cmapp == NULL)
-		panic("bt485_set_cmap: cmapp");
-#endif
-	index = cmapp->index;
-	count = cmapp->count;
-
-	if (index >= 256 || count > 256 - index)
+	if (cmapp->index >= 256 || cmapp->count > 256 - cmapp->index)
 		return (EINVAL);
 
+	index = cmapp->index;
+	count = cmapp->count;
+	error = copyin(cmapp->red, &r[index], count);
+	if (error)
+		return error;
+	error = copyin(cmapp->green, &g[index], count);
+	if (error)
+		return error;
+	error = copyin(cmapp->blue, &b[index], count);
+	if (error)
+		return error;
 	s = spltty();
-
-	if ((error = copyin(cmapp->red, &data->cmap_r[index], count)) != 0) {
-		splx(s);
-		return (error);
-	}
-	if ((error = copyin(cmapp->green, &data->cmap_g[index], count)) != 0) {
-		splx(s);
-		return (error);
-	}
-	if ((error = copyin(cmapp->blue, &data->cmap_b[index], count)) != 0) {
-		splx(s);
-		return (error);
-	}
-
+	memcpy(&data->cmap_r[index], &r[index], count);
+	memcpy(&data->cmap_g[index], &g[index], count);
+	memcpy(&data->cmap_b[index], &b[index], count);
 	data->changed |= DATA_CMAP_CHANGED;
-
 	data->ramdac_sched_update(data->cookie, bt485_update);
-#ifdef __alpha__
-	alpha_mb();
-#endif
 	splx(s);
-
 	return (0);
 }
 
@@ -316,12 +293,11 @@ bt485_get_cmap(rc, cmapp)
 	u_int count, index;
 	int error;
 
-	if (cmapp->index >= 256 || cmapp->count > 256 - cmapp->index)
+	if (cmapp->index >= 256 || cmapp->count > 256 - cmapp->index )
 		return (EINVAL);
 
 	count = cmapp->count;
 	index = cmapp->index;
-
 	error = copyout(&data->cmap_r[index], cmapp->red, count);
 	if (error)
 		return (error);
@@ -338,26 +314,43 @@ bt485_set_cursor(rc, cursorp)
 	struct wsdisplay_cursor *cursorp;
 {
 	struct bt485data *data = (struct bt485data *)rc;
-	u_int count, index;
-	int error;
-	int v, s;
+	u_int count = 0, icount = 0, index = 0, v;
+	char r[2], g[2], b[2], image[512], mask[512];
+	int s, error;
 
 	v = cursorp->which;
 
 	/*
-	 * For DOCMAP and DOSHAPE, verify that parameters are OK
+	 * For DOCMAP and DOSHAPE, copy in the new data
 	 * before we do anything that we can't recover from.
 	 */
 	if (v & WSDISPLAY_CURSOR_DOCMAP) {
-		index = cursorp->cmap.index;
-		count = cursorp->cmap.count;
-		if (index >= 2 || count > 2 - index)
+		if (cursorp->cmap.index > 2 ||
+		    (cursorp->cmap.index + cursorp->cmap.count) > 2)
 			return (EINVAL);
+		count = cursorp->cmap.count;
+		index = cursorp->cmap.index;
+		error = copyin(cursorp->cmap.red, &r[index], count);
+		if (error)
+			return error;
+		error = copyin(cursorp->cmap.green, &g[index], count);
+		if (error)
+			return error;
+		error = copyin(cursorp->cmap.blue, &b[index], count);
+		if (error)
+			return error;
 	}
 	if (v & WSDISPLAY_CURSOR_DOSHAPE) {
-		if ((u_int)cursorp->size.x > CURSOR_MAX_SIZE ||
-		    (u_int)cursorp->size.y > CURSOR_MAX_SIZE)
+		if (cursorp->size.x > CURSOR_MAX_SIZE ||
+		    cursorp->size.y > CURSOR_MAX_SIZE)
 			return (EINVAL);
+		icount = (CURSOR_MAX_SIZE / NBBY) * data->cursize.y;
+		error = copyin(cursorp->image, image, icount);
+		if (error)
+			return error;
+		error = copyin(cursorp->mask, mask, icount);
+		if (error)
+			return error;
 	}
 
 	if (v & (WSDISPLAY_CURSOR_DOPOS | WSDISPLAY_CURSOR_DOCUR)) {
@@ -370,46 +363,24 @@ bt485_set_cursor(rc, cursorp)
 
 	s = spltty();
 
-	/* Parameters are OK; perform the requested operations. */
+	/* Data is all available; perform the requested operations. */
 	if (v & WSDISPLAY_CURSOR_DOCUR) {
 		data->curenb = cursorp->enable;
 		data->changed |= DATA_ENB_CHANGED;
 	}
 	if (v & WSDISPLAY_CURSOR_DOCMAP) {
-		index = cursorp->cmap.index;
-		count = cursorp->cmap.count;
-		if ((error = copyin(cursorp->cmap.red,
-		    &data->curcmap_r[index], count)) != 0) {
-			splx(s);
-			return (error);
-		}
-		if ((error = copyin(cursorp->cmap.green,
-		    &data->curcmap_g[index], count)) != 0) {
-			splx(s);
-			return (error);
-		}
-		if ((error = copyin(cursorp->cmap.blue,
-		    &data->curcmap_b[index], count)) != 0) {
-			splx(s);
-			return (error);
-		}
+		memcpy(&data->curcmap_r[index], &r[index], count);
+		memcpy(&data->curcmap_g[index], &g[index], count);
+		memcpy(&data->curcmap_b[index], &b[index], count);
 		data->changed |= DATA_CURCMAP_CHANGED;
 	}
 	if (v & WSDISPLAY_CURSOR_DOSHAPE) {
 		data->cursize = cursorp->size;
 		count = (CURSOR_MAX_SIZE / NBBY) * data->cursize.y;
-		bzero(data->curimage, sizeof data->curimage);
-		bzero(data->curmask, sizeof data->curmask);
-		if ((error = copyin(cursorp->image, data->curimage,
-		    count)) != 0) {
-			splx(s);
-			return (error);
-		}
-		if ((error = copyin(cursorp->mask, data->curmask,
-		    count)) != 0) {
-			splx(s);
-			return (error);
-		}
+		memset(data->curimage, 0, sizeof data->curimage);
+		memset(data->curmask, 0, sizeof data->curmask);
+		memcpy(data->curimage, image, icount);
+		memcpy(data->curmask, mask, icount);
 		data->changed |= DATA_CURSHAPE_CHANGED;
 	}
 
@@ -578,7 +549,7 @@ bt485_update(vp)
 		for (i = 0; i < count; i++)
 			data->ramdac_wr(data->cookie, BT485_REG_CURSOR_RAM,
 			    data->curimage[i]);
-		
+
 		/*
 		 * Write the cursor mask data:
 		 *	set addr[9:8] to 2,

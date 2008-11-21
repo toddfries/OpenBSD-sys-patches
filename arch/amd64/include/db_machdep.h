@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.8 2008/02/11 20:44:09 miod Exp $	*/
-/*	$NetBSD: db_machdep.h,v 1.2 2003/04/29 17:06:04 scw Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.7 2008/10/26 00:08:15 mrg Exp $	*/
 
 /* 
  * Mach Operating System
@@ -27,33 +26,38 @@
  * the rights to redistribute these changes.
  */
 
-#ifndef	_I386_DB_MACHDEP_H_
-#define	_I386_DB_MACHDEP_H_
+#ifndef	_X86_64_DB_MACHDEP_H_
+#define	_X86_64_DB_MACHDEP_H_
 
 /*
  * Machine-dependent defines for new kernel debugger.
  */
 
+#include "opt_multiprocessor.h"
 #include <sys/param.h>
 #include <uvm/uvm_extern.h>
 #include <machine/trap.h>
-#include <sys/mutex.h>
 
 typedef	vaddr_t		db_addr_t;	/* address - unsigned */
 typedef	long		db_expr_t;	/* expression - signed */
 
 typedef struct trapframe db_regs_t;
-
+#ifndef MULTIPROCESSOR
 extern db_regs_t ddb_regs;	/* register state */
 #define	DDB_REGS	(&ddb_regs)
+#else
+extern db_regs_t *ddb_regp;
+#define DDB_REGS	(ddb_regp)
+#define ddb_regs	(*ddb_regp)
+#endif
 
-#define	PC_REGS(regs)	((db_addr_t)(regs)->tf_rip)
-#define	SET_PC_REGS(regs, value) (regs)->tf_rip = (int64_t)(value)
+#define	PC_REGS(regs)	((regs)->tf_rip)
+#define PC_ADVANCE(r)  ((r)->tf_rip += BKPT_SIZE)
 
 #define	BKPT_ADDR(addr)	(addr)		/* breakpoint address */
 #define	BKPT_INST	0xcc		/* breakpoint instruction */
 #define	BKPT_SIZE	(1)		/* size of breakpoint inst */
-#define	BKPT_SET(inst)	(BKPT_INST)
+#define	BKPT_SET(inst, addr)	(BKPT_INST)
 
 #define	FIXUP_PC_AFTER_BREAK(regs)	((regs)->tf_rip -= BKPT_SIZE)
 
@@ -76,6 +80,25 @@ extern db_regs_t ddb_regs;	/* register state */
 #define inst_load(ins)		0
 #define inst_store(ins)		0
 
+/* access capability and access macros */
+
+#define DB_ACCESS_LEVEL		2	/* access any space */
+#define DB_CHECK_ACCESS(addr,size,task)				\
+	db_check_access(addr,size,task)
+#define DB_PHYS_EQ(task1,addr1,task2,addr2)			\
+	db_phys_eq(task1,addr1,task2,addr2)
+#define DB_VALID_KERN_ADDR(addr)				\
+	((addr) >= VM_MIN_KERNEL_ADDRESS && 			\
+	 (addr) < VM_MAX_KERNEL_ADDRESS)
+#define DB_VALID_ADDRESS(addr,user)				\
+	((!(user) && DB_VALID_KERN_ADDR(addr)) ||		\
+	 ((user) && (addr) < VM_MAX_ADDRESS))
+
+#if 0
+bool	 	db_check_access __P((vaddr_t, int, task_t));
+bool		db_phys_eq __P((task_t, vaddr_t, task_t, vaddr_t));
+#endif
+
 /* macros for printing OS server dependent task name */
 
 #define DB_TASK_NAME(task)	db_task_name(task)
@@ -87,10 +110,8 @@ extern db_regs_t ddb_regs;	/* register state */
  * Constants for KGDB.
  */
 typedef	long		kgdb_reg_t;
-#define	KGDB_NUMREGS	20
+#define	KGDB_NUMREGS	16
 #define	KGDB_BUFLEN	512
-
-#define KGDB_ENTER	breakpoint()
 
 #if 0
 void		db_task_name(/* task_t */);
@@ -98,19 +119,9 @@ void		db_task_name(/* task_t */);
 
 /* macro for checking if a thread has used floating-point */
 
-int kdb_trap(int, int, db_regs_t *);
+#define db_thread_fp_used(thread)	((thread)->pcb->ims.ifps != 0)
 
-void db_machine_init(void);
-int db_enter_ddb(void);
-void db_startcpu(int);
-void db_stopcpu(int);
-void x86_ipi_db(struct cpu_info *);
-
-extern struct mutex ddb_mp_mutex;
-
-#define DDB_STATE_NOT_RUNNING	0
-#define DDB_STATE_RUNNING	1
-#define DDB_STATE_EXITING	2
+int kdb_trap __P((int, int, db_regs_t *));
 
 /*
  * We define some of our own commands
@@ -120,8 +131,8 @@ extern struct mutex ddb_mp_mutex;
 #define	DB_ELF_SYMBOLS
 #define	DB_ELFSIZE	64
 
-extern void db_machine_init(void);
+extern void db_machine_init __P((void));
 
-extern void cpu_debug_dump(void);
+extern void cpu_debug_dump __P((void));
 
-#endif	/* _I386_DB_MACHDEP_H_ */
+#endif	/* _X86_64_DB_MACHDEP_H_ */

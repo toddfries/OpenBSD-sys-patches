@@ -1,4 +1,4 @@
-# $NetBSD: gen_template.sh,v 1.2 2001/03/04 16:51:05 uch Exp $
+# $NetBSD: gen_template.sh,v 1.4 2008/04/30 13:10:59 martin Exp $
 #
 # Copyright (c) 2001 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -14,13 +14,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -58,8 +51,8 @@ case $vc_ver in
 "vc6")
     echo "Generate template for Visual C++ 6 Windows CE ToolKit"
     ;;
-"evc3")
-    echo "Generate template for Embeded Visual C++ 3"
+"evc3"|"evc4")
+    echo "Generate template for Embeded Visual C++ 3/4"
     ;;
 *)
     echo "Unsupported Visual C++ version."
@@ -251,6 +244,10 @@ done
 if [ -f asm_build.ARM.0 ]; then
     sed 's/%%% ASM %%%/armasm.exe/' asm_build.ARM.0 > asm_build.ARM
     rm -f asm_build.ARM.0
+fi
+if [ -f asm_build.ARMV4.0 ]; then
+    sed 's/%%% ASM %%%/armasm.exe/' asm_build.ARMV4.0 > asm_build.ARMV4
+    rm -f asm_build.ARMV4.0
 fi
 if [ -f asm_build.SH.0 ]; then
     sed 's/%%% ASM %%%/asmsh.exe/' asm_build.SH.0 > asm_build.SH

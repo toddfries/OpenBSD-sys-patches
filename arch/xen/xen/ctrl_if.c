@@ -1,4 +1,4 @@
-/*	$NetBSD: ctrl_if.c,v 1.13 2006/03/17 06:04:24 jld Exp $	*/
+/*	$NetBSD: ctrl_if.c,v 1.19 2008/10/21 15:46:32 cegger Exp $	*/
 
 /******************************************************************************
  * ctrl_if.c
@@ -9,18 +9,19 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ctrl_if.c,v 1.13 2006/03/17 06:04:24 jld Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ctrl_if.c,v 1.19 2008/10/21 15:46:32 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
 #include <sys/malloc.h>
+#include <sys/simplelock.h>
 
-#include <machine/xen.h>
-#include <machine/hypervisor.h>
-#include <machine/ctrl_if.h>
-#include <machine/evtchn.h>
+#include <xen/xen.h>
+#include <xen/hypervisor.h>
+#include <xen/ctrl_if.h>
+#include <xen/evtchn.h>
 
 #if 0
 #define DPRINTK(_f, _a...) printk("(file=%s, line=%d) " _f, \
@@ -60,7 +61,6 @@ static struct {
 
 /* For received messages that must be deferred to process context. */
 static void __ctrl_if_rxmsg_deferred(void *unused);
-static void ctrl_if_kthread_create(void *);
 
 static int ctrl_if_tx_wait;
 static void __ctrl_if_tx_tasklet(unsigned long data);
@@ -294,7 +294,7 @@ ctrl_if_send_message_block(
 #if 1
 		HYPERVISOR_yield();
 #else
-		rc = tsleep((caddr_t) &ctrl_if_tx_wait, PUSER | PCATCH,
+		rc = tsleep((void *) &ctrl_if_tx_wait, PUSER | PCATCH,
 		    "ctrl_if", 0);
 		if (rc)
 			break;
@@ -343,7 +343,7 @@ ctrl_if_send_message_and_get_response(
     {
 	    if ( wait.done )
 		    break;
-	    tsleep((caddr_t)&wait, PUSER | PCATCH, "ctrl_if", 0);
+	    tsleep((void *)&wait, PUSER | PCATCH, "ctrl_if", 0);
     }
 
     return 0;
@@ -478,8 +478,8 @@ void ctrl_if_resume(void)
 {
     control_if_t *ctrl_if = get_ctrl_if();
 
-    if ( xen_start_info.flags & SIF_INITDOMAIN )
-    {
+    if (xendomain_is_dom0()) {
+
         /*
          * The initial domain must create its own domain-controller link.
          * The controller is probably not running at this point, but will
@@ -520,7 +520,7 @@ void ctrl_if_early_init(void)
 
 void ctrl_if_init(void)
 {
-	int i;
+	int i, error;
 
 	for ( i = 0; i < 256; i++ )
 		ctrl_if_rxmsg_handler[i] = ctrl_if_rxmsg_default_handler;
@@ -528,23 +528,15 @@ void ctrl_if_init(void)
 	if (ctrl_if_evtchn == -1)
 		ctrl_if_early_init();
 
-	kthread_create(ctrl_if_kthread_create, NULL);
-
-	ctrl_if_resume();
-}
-
-static void
-ctrl_if_kthread_create(void *arg)
-{
-	int error;
-	static struct proc *ctrl_if_proc;
-	if ((error = kthread_create1(__ctrl_if_rxmsg_deferred, NULL,
-	    &ctrl_if_proc, "ctrlif")) != 0) {
+	error = kthread_create(PRI_NONE, 0, NULL, __ctrl_if_rxmsg_deferred,
+	    NULL, NULL, "ctrlif");
+	if (error != 0) {
 		aprint_error("ctrlif: unable to create kernel thread: "
 		    "error %d\n", error);
 	}
-}
 
+	ctrl_if_resume();
+}
 
 /*
  * !! The following are DANGEROUS FUNCTIONS !!

@@ -1,5 +1,4 @@
-/*	$OpenBSD: gencons.h,v 1.5 2002/03/14 01:26:48 millert Exp $ */
-/*	$NetBSD: gencons.h,v 1.9 2000/01/20 00:07:49 matt Exp $ */
+/*	$NetBSD: gencons.h,v 1.10 2001/06/03 15:07:20 ragge Exp $ */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -70,3 +69,4 @@
 
 /* Prototypes */
 void	gencnputc(dev_t, int);
+void	gencnstarttx(void);

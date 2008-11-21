@@ -1,8 +1,7 @@
-/*	$OpenBSD: ctlreg.h,v 1.17 2008/04/15 22:39:26 kettenis Exp $	*/
-/*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
+/*	$NetBSD: ctlreg.h,v 1.44 2007/03/31 13:04:21 hannken Exp $ */
 
 /*
- * Copyright (c) 1996-2001 Eduardo Horvath
+ * Copyright (c) 1996-2002 Eduardo Horvath
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,57 +22,14 @@
  * SUCH DAMAGE.
  *
  */
-/*
- * Copyright (c) 2001 Jake Burkholder.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 
-#ifndef _SPARC64_CTLREG_
-#define _SPARC64_CTLREG_
+#ifndef _SPARC_CTLREG_H_
+#define _SPARC_CTLREG_H_
 
 /*
  * Sun 4u control registers. (includes address space definitions
  * and some registers in control space).
  */
-
-/*
- * membar operand macros for use in other macros when # is a special
- * character.  Keep these in sync with what the hardware expects.
- */
-#define C_Lookaside     (0)
-#define C_MemIssue      (1)
-#define C_Sync          (2)
-#define M_LoadLoad      (0)
-#define M_StoreLoad     (1)
-#define M_LoadStore     (2)
-#define M_StoreStore    (3)
-
-#define CMASK_SHIFT     (4)
-#define MMASK_SHIFT     (0)
-
-#define CMASK_GEN(bit)  ((1 << (bit)) << CMASK_SHIFT)
-#define MMASK_GEN(bit)  ((1 << (bit)) << MMASK_SHIFT)
 
 /*
  * The Alternate address spaces. 
@@ -94,26 +50,18 @@
 #define	ASI_PHYS_NON_CACHED		0x15	/* [4u] MMU bypass to I/O location */
 
 #define	ASI_AS_IF_USER_PRIMARY_LITTLE	0x18	/* [4u] primary user address space, little endian  */
-#define	ASI_AS_IF_USER_SECONDARY_LITTIE	0x19	/* [4u] secondary user address space, little endian  */
+#define	ASI_AS_IF_USER_SECONDARY_LITTLE	0x19	/* [4u] secondary user address space, little endian  */
 
 #define	ASI_PHYS_CACHED_LITTLE		0x1c	/* [4u] MMU bypass to main memory, little endian */
 #define	ASI_PHYS_NON_CACHED_LITTLE	0x1d	/* [4u] MMU bypass to I/O location, little endian */
 
-#define	ASI_SCRATCHPAD			0x20	/* [4v] scratchpad registers */
-#define	ASI_MMU_CONTEXTID		0x21	/* [4v] MMU context */
-
 #define	ASI_NUCLEUS_QUAD_LDD		0x24	/* [4u] use w/LDDA to load 128-bit item */
-#define	ASI_QUEUE			0x25	/* [4v] interrupt queue registers */
 #define	ASI_NUCLEUS_QUAD_LDD_LITTLE	0x2c	/* [4u] use w/LDDA to load 128-bit item, little endian */
 
 #define	ASI_FLUSH_D_PAGE_PRIMARY	0x38	/* [4u] flush D-cache page using primary context */
 #define	ASI_FLUSH_D_PAGE_SECONDARY	0x39	/* [4u] flush D-cache page using secondary context */
 #define	ASI_FLUSH_D_CTX_PRIMARY		0x3a	/* [4u] flush D-cache context using primary context */
 #define	ASI_FLUSH_D_CTX_SECONDARY	0x3b	/* [4u] flush D-cache context using secondary context */
-
-#define ASI_DCACHE_INVALIDATE		0x42	/* [III] invalidate D-cache */
-#define ASI_DCACHE_UTAG			0x43	/* [III] diagnostic access to D-cache micro tag */
-#define ASI_DCACHE_SNOOP_TAG		0x44	/* [III] diagnostic access to D-cache snoop tag RAM */
 
 #define	ASI_LSU_CONTROL_REGISTER	0x45	/* [4u] load/store unit control register */
 
@@ -236,20 +184,28 @@
 #define	PHYS_ASI(x)	(((x) | 0x09) == 0x1d)
 #define	LITTLE_ASI(x)	((x) & ASI_LITTLE)
 
-/*
- * %tick: cpu cycle counter
- */
-#define	TICK_NPT	0x8000000000000000	/* trap on non priv access */
-#define	TICK_TICKS	0x7fffffffffffffff	/* counter bits */
-
 /* 
  * The following are 4u control registers
  */
 
-
 /* Get the CPU's UPAID */
-#define	UPA_CR_MID(x)	(((x)>>17)&0x1f)	
+#define	UPA_CR_MID_SHIFT	(17)
+#define	UPA_CR_MID_SIZE		(5)
+#define	UPA_CR_MID_MASK \
+	(((1 << UPA_CR_MID_SIZE) - 1) << UPA_CR_MID_SHIFT)
+
+#define	UPA_CR_MID(x)	(((x)>>UPA_CR_MID_SHIFT)&((1 << UPA_CR_MID_SIZE) - 1))	
+
+#ifdef _LOCORE
+
+#define	UPA_GET_MID(r1) \
+	ldxa	[%g0] ASI_MID_REG, r1 ; \
+	srlx	r1, UPA_CR_MID_SHIFT, r1 ; \
+	and	r1, (1 << UPA_CR_MID_SIZE) - 1, r1
+
+#else
 #define	CPU_UPAID	UPA_CR_MID(ldxa(0, ASI_MID_REG))
+#endif
 
 /*
  * [4u] MMU and Cache Control Register (MCCR)
@@ -288,7 +244,6 @@
 /* 
  * The following are the control registers 
  * They work on both MMUs unless noted.
- * III = cheetah only
  *
  * Register contents are defined later on individual registers.
  */
@@ -302,9 +257,6 @@
 #define	TLB_TAG_ACCESS		0x30
 #define	VIRTUAL_WATCHPOINT	0x38
 #define	PHYSICAL_WATCHPOINT	0x40
-#define TSB_PEXT		0x48	/* III primary ext */
-#define TSB_SEXT		0x50	/* III 2ndary ext -- DMMU only */
-#define TSB_NEXT		0x58	/* III nucleus ext */
 
 /* Tag Target bits */
 #define	TAG_TARGET_VA_MASK	0x03ffffffffffffffffLL
@@ -313,28 +265,30 @@
 #define	TAG_TARGET(c,v)		((((uint64_t)c)<<48)|(((uint64_t)v)&TAG_TARGET_VA_MASK))
 
 /* SFSR bits for both D_SFSR and I_SFSR */
-#define	SFSR_NF			0x1000000	/* Non-faulting load */
 #define	SFSR_ASI(x)		((x)>>16)
-#define	SFSR_TM			0x0008000	/* TLB miss  */
-#define	SFSR_FT_VA_OOR_2	0x0002000	/* IMMU: jumpl or return to unsupportd VA */
-#define	SFSR_FT_VA_OOR_1	0x0001000	/* fault at unsupported VA */
-#define	SFSR_FT_NFO		0x0000800	/* DMMU: Access to page marked NFO */
-#define	SFSR_ILL_ASI		0x0000400	/* DMMU: Illegal (unsupported) ASI */
-#define	SFSR_FT_IO_ATOMIC	0x0000200	/* DMMU: Atomic access to noncacheable page */
-#define	SFSR_FT_ILL_NF		0x0000100	/* DMMU: NF load or flush to page marked E (has side effects) */
-#define	SFSR_FT_PRIV		0x0000080	/* Privilege violation */
-#define	SFSR_FT_E		0x0000040	/* DMUU: value of E bit associated address */
+#define	SFSR_FT_VA_OOR_2	0x02000 /* IMMU: jumpl or return to unsupportd VA */
+#define	SFSR_FT_VA_OOR_1	0x01000 /* fault at unsupported VA */
+#define	SFSR_FT_NFO		0x00800	/* DMMU: Access to page marked NFO */
+#define	SFSR_ILL_ASI		0x00400	/* DMMU: Illegal (unsupported) ASI */
+#define	SFSR_FT_IO_ATOMIC	0x00200	/* DMMU: Atomic access to noncacheable page */
+#define	SFSR_FT_ILL_NF		0x00100	/* DMMU: NF load or flush to page marked E (has side effects) */
+#define	SFSR_FT_PRIV		0x00080	/* Privilege violation */
+#define	SFSR_FT_E		0x00040	/* DMUU: value of E bit associated address */
 #define	SFSR_CTXT(x)		(((x)>>4)&0x3)
 #define	SFSR_CTXT_IS_PRIM(x)	(SFSR_CTXT(x)==0x00)
 #define	SFSR_CTXT_IS_SECOND(x)	(SFSR_CTXT(x)==0x01)
 #define	SFSR_CTXT_IS_NUCLEUS(x)	(SFSR_CTXT(x)==0x02)
-#define	SFSR_PRIV		0x0000008	/* value of PSTATE.PRIV for faulting access */
-#define	SFSR_W			0x0000004 	/* DMMU: attempted write */
-#define	SFSR_OW			0x0000002 	/* Overwrite; prev fault was still valid */
-#define	SFSR_FV			0x0000001	/* Fault is valid */
-#define	SFSR_FT	(SFSR_FT_VA_OOR_2|SFSR_FT_VA_OOR_1|SFSR_FT_NFO|SFSR_ILL_ASI|SFSR_FT_IO_ATOMIC|SFSR_FT_ILL_NF|SFSR_FT_PRIV)
+#define	SFSR_PRIV		0x00008	/* value of PSTATE.PRIV for faulting access */
+#define	SFSR_W			0x00004 /* DMMU: attempted write */
+#define	SFSR_OW			0x00002 /* Overwrite; prev vault was still valid */
+#define	SFSR_FV			0x00001	/* Fault is valid */
+#define	SFSR_FT	(SFSR_FT_VA_OOR_2|SFSR_FT_VA_OOR_1|SFSR_FT_NFO| \
+		SFSR_ILL_ASI|SFSR_FT_IO_ATOMIC|SFSR_FT_ILL_NF|SFSR_FT_PRIV)
 
-#define	SFSR_BITS "\20\31NF\20TM\16VAT\15VAD\14NFO\13ASI\12A\11NF\10PRIV\7E\6NUCLEUS\5SECONDCTX\4PRIV\3W\2OW\1FV"
+#define	SFSR_BITS "\177\20" \
+	"f\20\30ASI\0" "b\16VAT\0" "b\15VAD\0" "b\14NFO\0" "b\13ASI\0" "b\12A\0" \
+	"b\11NF\0" "b\10PRIV\0" "b\7E\0" "b\6NUCLEUS\0" "b\5SECONDCTX\0" "b\4PRIV\0" \
+	"b\3W\0" "b\2OW\0" "b\1FV\0"
 
 /* ASFR bits */
 #define	ASFR_ME			0x100000000LL
@@ -353,9 +307,11 @@
 #define	ASFR_ETS		0x0000f0000LL
 #define	ASFT_P_SYND		0x00000ffffLL
 
-#define	AFSR_BITS "\20" \
-    "\20ME\37PRIV\36ISAP\35ETP\34IVUE\33TO\32BERR\31LDP\30CP\27WP\26EDP" \
-    "\25UE\24CE"
+#define	AFSR_BITS "\177\20" \
+        "b\40ME\0"      "b\37PRIV\0"    "b\36ISAP\0"    "b\35ETP\0" \
+        "b\34IVUE\0"    "b\33TO\0"      "b\32BERR\0"    "b\31LDP\0" \
+        "b\30CP\0"      "b\27WP\0"      "b\26EDP\0"     "b\25UE\0" \
+        "b\24CE\0"      "f\20\4ETS\0"   "f\0\20P_SYND\0"
 
 /*  
  * Here's the spitfire TSB control register bits.
@@ -442,7 +398,6 @@
 #define	SOFTINT13	(0x1<<13)
 #define	SOFTINT14	(0x1<<14)
 #define	SOFTINT15	(0x1<<15)
-#define	STICK_INT	(0x1<<16)
 
 /* Interrupt Dispatch -- usually reserved for cross-calls */
 #define	ASR_IDSR	0x48 /* Interrupt dispatch status reg */
@@ -453,7 +408,7 @@
 #define	ASI_INTERRUPT_DISPATCH		0x77	/* [4u] spitfire interrupt dispatch regs */
 
 /* Interrupt delivery initiation */
-#define	IDCR(x)		((((u_int64_t)(x)) << 14) | 0x70)
+#define	IDCR(x)		((((uint64_t)(x)) << 14) | 0x70)
 
 #define	IDDR_0H		0x40	/* Store data to send in these regs */
 #define	IDDR_0L		0x48	/* unimplemented */
@@ -461,8 +416,8 @@
 #define	IDDR_1L		0x58	/* unimplemented */
 #define	IDDR_2H		0x60
 #define	IDDR_2L		0x68	/* unimplemented */
-#define	IDDR_3H		0x80	/* unimplemented */
-#define	IDDR_3L		0x88	/* unimplemented */
+#define	IDDR_3H		0x70	/* unimplemented */
+#define	IDDR_3L		0x78	/* unimplemented */
 
 /*
  * Error registers 
@@ -513,212 +468,715 @@
  * D$ so we need to flush the D$ to make sure we don't get data pollution.
  */
 
-#define sparc_membar(mask) do {                                         \
-        if (mask)                                                       \
-                __asm __volatile("membar %0" : : "n" (mask) : "memory");\
-        else                                                            \
-                __asm __volatile("" : : : "memory");                    \
-} while(0)
+#ifdef __arch64__
+static __inline u_char 
+lduba(paddr_t loc, int asi) 
+{
+	register unsigned int _lduba_v;
 
-#define membar sparc_membar
-#define Lookaside       CMASK_GEN(C_Lookaside)
-#define MemIssue        CMASK_GEN(C_MemIssue)
-#define Sync            CMASK_GEN(C_Sync)
-#define LoadLoad        MMASK_GEN(M_LoadLoad)
-#define StoreLoad       MMASK_GEN(M_StoreLoad)
-#define LoadStore       MMASK_GEN(M_LoadStore)
-#define StoreStore      MMASK_GEN(M_StoreStore)
-
-#define sparc_wr(name, val, xor)					\
-do {									\
-	if (__builtin_constant_p(xor))					\
-		__asm __volatile("wr %%g0, %0, %%" #name		\
-		    : : "rI" ((val) ^ (xor)) : "%g0");			\
-	else								\
-		__asm __volatile("wr %0, %1, %%" #name			\
-		    : : "r" (val), "rI" (xor) : "%g0");			\
-} while(0)
-
-#define sparc_wrpr(name, val, xor)					\
-do {									\
-	if (__builtin_constant_p(xor))					\
-		__asm __volatile("wrpr %%g0, %0, %%" #name		\
-		    : : "rI" ((val) ^ (xor)) : "%g0");			\
-	else								\
-		__asm __volatile("wrpr %0, %1, %%" #name		\
-		    : : "r" (val), "rI" (xor) : "%g0");			\
-	__asm __volatile("" : : : "memory");				\
-} while(0)
-
-
-#define sparc_rd(name) sparc_rd_ ## name()
-#define GEN_RD(name)							\
-extern __inline u_int64_t sparc_rd_ ## name(void);			\
-extern __inline u_int64_t						\
-sparc_rd_ ## name()							\
-{									\
-	u_int64_t r;							\
-	__asm __volatile("rd %%" #name ", %0" :				\
-	    "=r" (r) : : "%g0");					\
-	return (r);							\
+	__asm volatile(
+		"wr %2, %%g0, %%asi;	"
+		"lduba [%1]%%asi, %0	"
+		: "=r" (_lduba_v) 
+		: "r" ((unsigned long)(loc)), "r" (asi));
+	return (_lduba_v);
 }
+#else
+static __inline u_char 
+lduba(paddr_t loc, int asi) 
+{
+	register unsigned int _lduba_v, _loc_hi, _pstate;
 
-#define sparc_rdpr(name) sparc_rdpr_ ## name()
-#define GEN_RDPR(name)							\
-extern __inline u_int64_t sparc_rdpr_ ## name(void);			\
-extern __inline u_int64_t						\
-sparc_rdpr_ ## name()							\
-{									\
-	u_int64_t r;							\
-	__asm __volatile("rdpr %%" #name ", %0" :			\
-	    "=r" (r) : : "%g0");					\
-	return (r);							\
-}
-
-GEN_RD(asi);
-GEN_RD(asr22);
-GEN_RDPR(cwp);
-GEN_RDPR(tick);
-GEN_RDPR(pstate);
-GEN_RDPR(pil);
-GEN_RDPR(ver);
-/*
- * Before adding GEN_RDPRs for other registers, see Errata 50 (E.g,. in
- * the US-IIi manual) regarding tstate, pc and npc reads.
- */
-
-/* Generate ld*a/st*a functions for non-constant ASI's. */
-#define LDNC_GEN(tp, o)							\
-	extern __inline tp o ## _asi(paddr_t);				\
-	extern __inline tp						\
-	o ## _asi(paddr_t va)						\
-	{								\
-		tp r;							\
-		__asm __volatile(					\
-		    #o " [%1] %%asi, %0"				\
-		    : "=r" (r)						\
-		    : "r" ((volatile tp *)va)				\
-		    : "%g0");						\
-		return (r);						\
-	}								\
-	extern __inline tp o ## _nc(paddr_t, int);			\
-	extern __inline tp						\
-	o ## _nc(paddr_t va, int asi)					\
-	{								\
-		sparc_wr(asi, asi, 0);					\
-		return (o ## _asi(va));					\
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0;		"
+			"rdpr %%pstate,%1;	"
+			"or %0,%2,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"membar #Sync;		"
+			"lduba [%0]%%asi,%0;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lduba_v),  "=&r" (_pstate)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %3,%%g0,%%asi;	"
+			"sllx %2,32,%0;		"
+			"or %0,%1,%0;		"
+			"lduba [%0]%%asi,%0;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lduba_v)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
 	}
+	return (_lduba_v);
+}
+#endif
 
-LDNC_GEN(u_char, lduba);
-LDNC_GEN(u_short, lduha);
-LDNC_GEN(u_int, lduwa);
-LDNC_GEN(u_int64_t, ldxa);
+#ifdef __arch64__
+/* load half-word from alternate address space */
+static __inline u_short 
+lduha(paddr_t loc, int asi) 
+{
+	register unsigned int _lduha_v;
 
-LDNC_GEN(int, lda);
+	__asm volatile(
+		"wr %2, %%g0, %%asi;	"
+		"lduha [%1]%%asi, %0	"
+		: "=r" (_lduha_v)
+		: "r" ((unsigned long)(loc)), "r" (asi));
+	return (_lduha_v);
+}
+#else
+/* load half-word from alternate address space */
+static __inline u_short 
+lduha(paddr_t loc, int asi) {
+	register unsigned int _lduha_v, _loc_hi, _pstate;
 
-#define LDC_GEN(va, asi, op, opa, type) ({				\
-	type __r ## op ## type;						\
-	if(asi == ASI_PRIMARY  || 					\
-	    (sizeof(type) == 1 && asi == ASI_PRIMARY_LITTLE))		\
-		__r ## op ## type = *((volatile type *)va);		\
-	else								\
-		__asm __volatile(#opa " [%1] " #asi ", %0"		\
-		    : "=r" (__r ## op ## type)				\
-		    : "r" ((volatile type *)va)				\
-		    : "%g0");						\
-	__r ## op ## type;						\
+	_loc_hi = (((uint64_t)loc)>>32);
+
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0; 	"
+			"rdpr %%pstate,%1; 	"
+			"wrpr %1,8,%%pstate; 	"
+			"or %0,%2,%0;		"
+			"membar #Sync;		"
+			"lduha [%0]%%asi,%0;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lduha_v), "=&r" (_pstate)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %3,%%g0,%%asi;	"
+			"sllx %2,32,%0;		"
+			"or %0,%1,%0;		"
+			"lduha [%0]%%asi,%0;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lduha_v)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	}
+	return (_lduha_v);
+}
+#endif
+
+
+#ifdef __arch64__
+/* load unsigned int from alternate address space */
+static __inline u_int 
+lda(paddr_t loc, int asi)
+{
+	register unsigned int _lda_v;
+
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"lda [%1]%%asi,%0	"
+		: "=r" (_lda_v)
+		: "r" ((unsigned long)(loc)), "r" (asi));
+	return (_lda_v);
+}
+
+/* load signed int from alternate address space */
+static __inline int 
+ldswa(paddr_t loc, int asi)
+{
+	register int _lda_v;
+
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"ldswa [%1]%%asi,%0;	"
+		: "=r" (_lda_v)
+		: "r" ((unsigned long)(loc)), "r" (asi));
+	return (_lda_v);
+}
+#else	/* __arch64__ */
+/* load unsigned int from alternate address space */
+static __inline u_int 
+lda(paddr_t loc, int asi)
+{
+	register unsigned int _lda_v, _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"rdpr %%pstate,%1;	"
+			"sllx %3,32,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"or %0,%2,%0; 		"
+			"membar #Sync;		"
+			"lda [%0]%%asi,%0;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lda_v), "=&r" (_pstate)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %3,%%g0,%%asi;	"
+			"sllx %2,32,%0;		"
+			"or %0,%1,%0;		"
+			"lda [%0]%%asi,%0;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lda_v)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	}
+	return (_lda_v);
+}
+
+/* load signed int from alternate address space */
+static __inline int
+ldswa(paddr_t loc, int asi)
+{
+	register int _lda_v, _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"rdpr %%pstate,%1;	"
+			"wrpr %1,8,%%pstate;	"
+			"sllx %3,32,%0;		"
+			" or %0,%2,%0;		"
+			"membar #Sync;		"
+			"ldswa [%0]%%asi,%0;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lda_v), "=&r" (_pstate)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %3,%%g0,%%asi;	"
+			"sllx %2,32,%0;		"
+			"or %0,%1,%0;		"
+			"ldswa [%0]%%asi,%0;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lda_v)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	}
+	return (_lda_v);
+}
+#endif /* __arch64__ */
+
+#ifdef	__arch64__
+/* load 64-bit int from alternate address space -- these should never be used */
+static __inline uint64_t
+ldda(paddr_t loc, int asi)
+{
+	register long long _lda_v;
+
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"ldda [%1]%%asi,%0	"
+		: "=r" (_lda_v)
+		: "r" ((unsigned long)(loc)), "r" (asi));
+	return (_lda_v);
+}
+#else
+/* load 64-bit int from alternate address space */
+static __inline uint64_t
+ldda(paddr_t loc, int asi)
+{
+	register long long _lda_v, _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"rdpr %%pstate,%1;	"
+			"wrpr %1,8,%%pstate;	"
+			"sllx %3,32,%0;		"
+			"or %0,%2,%0;		"
+			"membar #Sync;		"
+			"ldda [%0]%%asi,%0;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lda_v), "=&r" (_pstate)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %3,%%g0,%%asi;	"
+			"sllx %2,32,%0;		"
+			" or %0,%1,%0;		"
+			"ldda [%0]%%asi,%0;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_lda_v)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	}
+	return (_lda_v);
+}
+#endif
+
+
+#ifdef __arch64__
+/* native load 64-bit int from alternate address space w/64-bit compiler*/
+static __inline uint64_t
+ldxa(paddr_t loc, int asi)
+{
+	register unsigned long _lda_v;
+
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"ldxa [%1]%%asi,%0	"
+		: "=r" (_lda_v)
+		: "r" ((unsigned long)(loc)), "r" (asi));
+	return (_lda_v);
+}
+#else
+/* native load 64-bit int from alternate address space w/32-bit compiler*/
+static __inline uint64_t
+ldxa(paddr_t loc, int asi)
+{
+	register unsigned long _ldxa_lo, _ldxa_hi, _loc_hi;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"rdpr %%pstate,%1;	"
+			"sllx %3,32,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"or %0, %2, %0;		"
+			"membar #Sync;		"
+			"ldxa [%0]%%asi,%0;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"srlx %0, 32, %1;	"
+			"srl %0, 0, %0;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_ldxa_lo), "=&r" (_ldxa_hi)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0;		"
+			"or %0,%2,%0;		"
+			"ldxa [%0]%%asi,%0;	"
+			"srlx %0,32,%1;		"
+			"srl %0, 0, %0;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_ldxa_lo), "=&r" (_ldxa_hi)
+			: "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	}
+	return ((((int64_t)_ldxa_hi)<<32)|_ldxa_lo);
+}
+#endif
+
+/* store byte to alternate address space */
+#ifdef __arch64__
+static __inline void 
+stba(paddr_t loc, int asi, u_char value)
+{
+	__asm volatile(
+		"wr %2, %%g0, %%asi;	"
+		"stba %0, [%1]%%asi	"
+		: : "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (asi));
+}
+#else
+static __inline void 
+stba(paddr_t loc, int asi, u_char value)
+{
+	register int _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %5,%%g0,%%asi;	"
+			"sllx %4,32,%0;		"
+			"rdpr %%pstate,%1;	"
+			"or %3,%0,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"stba %2,[%0]%%asi;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "=&r" (_pstate)
+			: "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	} else {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0;		"
+			"or %2,%0,%0;		"
+			"stba %1,[%0]%%asi;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi)
+			: "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi));
+	}
+}
+#endif
+
+/* store half-word to alternate address space */
+#ifdef __arch64__
+static __inline void
+stha(paddr_t loc, int asi, u_short value)
+{
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"stha %0,[%1]%%asi	"
+		: : "r" ((int)(value)), "r" ((unsigned long)(loc)),
+		"r" (asi) : "memory");
+}
+#else
+static __inline void
+stha(paddr_t loc, int asi, u_short value)
+{
+	register int _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %5,%%g0,%%asi;	"
+			"sllx %4,32,%0;		"
+			"rdpr %%pstate,%1;	"
+			"or %3,%0,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"stha %2,[%0]%%asi; 	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "=&r" (_pstate)
+			: "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi)
+			: "memory");
+	} else {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0;		"
+			"or %2,%0,%0;		"
+			"stha %1,[%0]%%asi;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi)
+			: "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi)
+			: "memory");
+	}
+}
+#endif
+
+
+/* store int to alternate address space */
+#ifdef __arch64__
+static __inline void
+sta(paddr_t loc, int asi, u_int value)
+{
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"sta %0,[%1]%%asi	"
+		: : "r" ((int)(value)), "r" ((unsigned long)(loc)),
+		"r" (asi) : "memory");
+}
+#else
+static __inline void
+sta(paddr_t loc, int asi, u_int value)
+{
+	register int _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %5,%%g0,%%asi;	"
+			"sllx %4,32,%0;		"
+			"rdpr %%pstate,%1;	"
+			"or %3,%0,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"sta %2,[%0]%%asi;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "=&r" (_pstate)
+			: "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi)
+			: "memory");
+	} else {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0;		"
+			"or %2,%0,%0;		"
+			"sta %1,[%0]%%asi;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi)
+			: "r" ((int)(value)), "r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi)
+			: "memory");
+	}
+}
+#endif
+
+/* store 64-bit int to alternate address space */
+#ifdef __arch64__
+static __inline void
+stda(paddr_t loc, int asi, uint64_t value)
+{
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"stda %0,[%1]%%asi	"
+		: : "r" ((long long)(value)), "r" ((unsigned long)(loc)), "r" (asi)
+		: "memory");
+}
+#else
+static __inline void
+stda(paddr_t loc, int asi, uint64_t value)
+{
+	register int _loc_hi, _pstate;
+
+	_loc_hi = (((uint64_t)loc)>>32);
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %5,%%g0,%%asi;	"
+			"sllx %4,32,%0;		"
+			"rdpr %%pstate,%1;	"
+			"or %3,%0,%0;		"
+			"wrpr %1,8,%%pstate;	"
+			"stda %2,[%0]%%asi;	"
+			"wrpr %1,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "=&r" (_pstate)
+			: "r" ((long long)(value)), "r" ((unsigned long)(loc)),
+			"r" (_loc_hi), "r" (asi)
+			: "memory");
+	} else {
+		__asm volatile(
+			"wr %4,%%g0,%%asi;	"
+			"sllx %3,32,%0;		"
+			"or %2,%0,%0;		"
+			"stda %1,[%0]%%asi;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi)
+			: "r" ((long long)(value)), "r" ((unsigned long)(loc)),
+			"r" (_loc_hi), "r" (asi)
+			: "memory");
+	}
+}
+#endif
+
+/* set dmmu secondary context */
+static __inline void
+dmmu_set_secondary_context(uint ctx)
+{
+	__asm volatile(
+		"stxa %0,[%1]%2;	"
+		"membar #Sync		"
+		: : "r" (ctx),
+		"r" (CTX_SECONDARY), "n" (ASI_DMMU)
+		: "memory");
+}
+
+#ifdef __arch64__
+/* native store 64-bit int to alternate address space w/64-bit compiler*/
+static __inline void
+stxa(paddr_t loc, int asi, uint64_t value)
+{
+	__asm volatile(
+		"wr %2,%%g0,%%asi;	"
+		"stxa %0,[%1]%%asi	"
+		: : "r" ((unsigned long)(value)),
+		"r" ((unsigned long)(loc)), "r" (asi)
+		: "memory");
+}
+#else
+/* native store 64-bit int to alternate address space w/32-bit compiler*/
+static __inline void
+stxa(paddr_t loc, int asi, uint64_t value)
+{
+	int _stxa_lo, _stxa_hi, _loc_hi;
+
+	_stxa_lo = value; 
+	_stxa_hi = ((uint64_t)value)>>32;
+	_loc_hi = (((uint64_t)loc)>>32);
+
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %7,%%g0,%%asi;	"
+			"sllx %4,32,%1;		"
+			"sllx %6,32,%0; 	"
+			"or %1,%3,%1;		"
+			"rdpr %%pstate,%2;	"
+			"or %0,%5,%0;		"
+			"wrpr %2,8,%%pstate;	"
+			"stxa %1,[%0]%%asi;	"
+			"wrpr %2,0,%%pstate;	"
+			"membar #Sync;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "=&r" (_stxa_hi), "=&r" ((int)(_stxa_lo))
+			: "r" ((int)(_stxa_lo)), "r" ((int)(_stxa_hi)), 
+			"r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi)
+			: "memory");
+	} else {
+		__asm volatile(
+			"wr %6,%%g0,%%asi;	"
+			"sllx %3,32,%1;		"
+			"sllx %5,32,%0;		"
+			"or %1,%2,%1;		"
+			"or %0,%4,%0;		"
+			"stxa %1,[%0]%%asi;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "=&r" (_stxa_hi)
+			: "r" ((int)(_stxa_lo)), "r" ((int)(_stxa_hi)),
+			"r" ((unsigned long)(loc)), "r" (_loc_hi), "r" (asi)
+			: "memory");
+	}
+}
+#endif
+
+#ifdef __arch64__
+/* native store 32-bit int to alternate address space w/64-bit compiler*/
+static __inline uint32_t
+casa(paddr_t loc, int asi, uint32_t value, uint32_t oldvalue)
+{
+	__asm volatile(
+		"wr %3,%%g0,%%asi;	"
+		"casa [%1]%%asi,%2,%0	"
+		: "+r" (value)
+		: "r" ((unsigned long)(loc)), "r" (oldvalue), "r" (asi)
+		: "memory");
+	return (value);
+}
+/* native store 64-bit int to alternate address space w/64-bit compiler*/
+static __inline uint64_t
+casxa(paddr_t loc, int asi, uint64_t value, uint64_t oldvalue)
+{
+	__asm volatile(
+		"wr %3,%%g0,%%asi;	"
+		"casxa [%1]%%asi,%2,%0	"
+		: "+r" (value)
+		: "r" ((unsigned long)(loc)), "r" (oldvalue), "r" (asi)
+		: "memory");
+	return (value);
+}
+#else
+#if 0
+/* native store 64-bit int to alternate address space w/32-bit compiler*/
+static __inline uint64_t
+casxa(paddr_t loc, int asi, uint64_t value, uint64_t oldvalue)
+{
+	int _casxa_lo, _casxa_hi, _loc_hi, _oval_hi;
+
+	_casxa_lo = value; 
+	_casxa_hi = ((uint64_t)value)>>32;
+	_oval_hi = ((uint64_t)oldvalue)>>32;
+	_loc_hi = (((uint64_t)loc)>>32);
+
+#ifdef __notyet
+/*
+ * gcc cannot handle this since it thinks it has >10 asm operands.
+ */
+	if (PHYS_ASI(asi)) {
+		__asm volatile(
+			"wr %6,%%g0,%%asi;	"
+			"sllx %1,32,%1;		"
+			"rdpr %%pstate,%2;	"
+			"sllx %0,32,%0;		"
+			"or %1,%2,%1;		"
+			"sllx %3,32,%3;		"
+			"or %0,%4,%0;		"
+			"or %3,%5,%3;		"
+			"wrpr %2,8,%%pstate;	"
+			"casxa [%0]%%asi,%3,%1; "
+			"wrpr %2,0,%%pstate;	" 
+			"andn %0,0x1f,%3;      	"
+			"membar #Sync;		"
+			"sll %1,0,%2;		"
+			"srax %1,32,%1;		"
+			"wr %%g0, 0x82, %%asi	"
+			: "+r" (_loc_hi), "+r" (_casxa_hi), "+r" (_casxa_lo), "+r" (_oval_hi)
+			: "r" ((unsigned long)(loc)), "r" ((unsigned int)(oldvalue)),
+			"r" (asi)
+			: "memory");
+	} else {
+		__asm volatile(
+			"wr %7,%%g0,%%asi;	"
+			"sllx %1,32,%1;		"
+			"sllx %5,32,%0;		"
+			"or %1,%2,%1;		"
+			"sllx %3,32,%2;		"
+			"or %0,%4,%0;		"
+			"or %2,%4,%2;		"
+			"casxa [%0]%%asi,%2,%1; "
+			"sll %1,0,%2;		"
+			"srax %o1,32,%o1;	"
+			"wr %%g0, 0x82, %%asi	"
+			: "=&r" (_loc_hi), "+r" (_casxa_hi), "+r" (_casxa_lo)
+			: "r" ((int)(_oval_hi)), "r" ((int)(oldvalue)),
+			"r" ((unsigned long)(loc)), "r" (_loc_hi),
+			"r" (asi)
+			: "memory");
+	}
+#endif
+	return (((uint64_t)_casxa_hi<<32)|(uint64_t)_casxa_lo);
+}
+#endif
+#endif
+
+/* flush address from data cache */
+#define	flush(loc) ({ \
+	__asm volatile("flush %0" : : \
+	     "r" ((unsigned long)(loc))); \
 })
 
-#ifdef __OPTIMIZE__
-#define LD_GENERIC(va, asi, op, type) (__builtin_constant_p(asi) ?	\
-	LDC_GEN((va), asi, op, op ## a, type) : op ## a_nc((va), asi))
-#else /* __OPTIMIZE */
-#define LD_GENERIC(va, asi, op, type) (op ## a_nc((va), asi))
-#endif /* __OPTIMIZE__ */
+/* Flush a D$ line */
+#if 0
+#define	flushline(loc) ({ \
+	stxa(((paddr_t)loc)&(~0x1f), (ASI_DCACHE_TAG), 0); \
+        membar_sync(); \
+})
+#endif
 
-#define lduba(va, asi)	LD_GENERIC(va, asi, ldub, u_int8_t)
-#define lduha(va, asi)	LD_GENERIC(va, asi, lduh, u_int16_t)
-#define lduwa(va, asi)	LD_GENERIC(va, asi, lduw, u_int32_t)
-#define ldxa(va, asi)	LD_GENERIC(va, asi, ldx, u_int64_t)
+/* The following two enable or disable the dcache in the LSU control register */
+#define	dcenable() ({ \
+	int res; \
+	__asm volatile("ldxa [%%g0] %1,%0; or %0,%2,%0; stxa %0,[%%g0] %1; membar #Sync" \
+		: "r" (res) : "n" (ASI_MCCR), "n" (MCCR_DCACHE_EN)); \
+})
+#define	dcdisable() ({ \
+	int res; \
+	__asm volatile("ldxa [%%g0] %1,%0; andn %0,%2,%0; stxa %0,[%%g0] %1; membar #Sync" \
+		: "r" (res) : "n" (ASI_MCCR), "n" (MCCR_DCACHE_EN)); \
+})
 
-#define STNC_GEN(tp, o)							\
-	extern __inline void o ## _asi(paddr_t, tp);			\
-	extern __inline void						\
-	o ## _asi(paddr_t va, tp val)					\
-	{								\
-		__asm __volatile(					\
-		    #o " %0, [%1] %%asi"				\
-		    :							\
-		    : "r" (val), "r" ((volatile tp *)va)		\
-		    : "memory");					\
-	}								\
-	extern __inline void o ## _nc(paddr_t, int, tp);		\
-	extern __inline void						\
-	o ## _nc(paddr_t va, int asi, tp val)				\
-	{								\
-		sparc_wr(asi, asi, 0);					\
-		o ## _asi(va, val);					\
-	}
+/*
+ * SPARC V9 memory barrier instructions.
+ */
+/* Make all stores complete before next store */
+#define	membar_storestore() __asm volatile("membar #StoreStore" : :)
+/* Make all loads complete before next store */ 
+#define	membar_loadstore() __asm volatile("membar #LoadStore" : :)
+/* Make all stores complete before next load */ 
+#define	membar_storeload() __asm volatile("membar #StoreLoad" : :)
+/* Make all loads complete before next load */
+#define	membar_loadload() __asm volatile("membar #LoadLoad" : :)
+/* Complete all outstanding memory operations and exceptions */
+#define	membar_sync() __asm volatile("membar #Sync" : :)
+/* Complete all outstanding memory operations */
+#define	membar_memissue() __asm volatile("membar #MemIssue" : :)
+/* Complete all outstanding stores before any new loads */
+#define	membar_lookaside() __asm volatile("membar #Lookaside" : :)
 
-STNC_GEN(u_int8_t, stba);
-STNC_GEN(u_int16_t, stha);
-STNC_GEN(u_int32_t, stwa);
-STNC_GEN(u_int64_t, stxa);
+#define membar_load() __asm volatile("membar #LoadLoad | #LoadStore" : :)
+#define membar_store() __asm volatile("membar #LoadStore | #StoreStore" : :)
 
-STNC_GEN(u_int, sta);
-
-#define STC_GEN(va, asi, val, op, opa, type) ({				\
-	if(asi == ASI_PRIMARY ||					\
-	    (sizeof(type) == 1 && asi == ASI_PRIMARY_LITTLE))		\
-		*((volatile type *)va) = val;				\
-	else								\
-		__asm __volatile(#opa " %0, [%1] " #asi			\
-		    : : "r" (val), "r" ((volatile type *)va)		\
-		    : "memory");					\
-	})
-
-#ifdef __OPTIMIZE__
-#define ST_GENERIC(va, asi, val, op, type) (__builtin_constant_p(asi) ?	\
-	STC_GEN((va), (asi), (val), op, op ## a, type) :		\
-	op ## a_nc((va), asi, (val)))
-#else /* __OPTIMIZE__ */
-#define ST_GENERIC(va, asi, val, op, type) (op ## a_nc((va), asi, (val)))
-#endif /* __OPTIMIZE__ */
-
-#define stba(va, asi, val)	ST_GENERIC(va, asi, val, stb, u_int8_t)
-#define stha(va, asi, val)	ST_GENERIC(va, asi, val, sth, u_int16_t)
-#define stwa(va, asi, val)	ST_GENERIC(va, asi, val, stw, u_int32_t)
-#define stxa(va, asi, val)	ST_GENERIC(va, asi, val, stx, u_int64_t)
-
-
-extern __inline void asi_set(int);
-extern __inline
-void asi_set(int asi)
-{
-	sparc_wr(asi, asi, 0);
-}
-
-extern __inline u_int8_t asi_get(void);
-extern __inline
-u_int8_t asi_get()
-{
-	return sparc_rd(asi);
-}
-
-/* flush address from instruction cache */
-extern __inline void flush(void *);
-extern __inline
-void flush(void *p)
-{
-	__asm __volatile("flush %0"
-	    : : "r" (p)
-	    : "memory");
-}
-
+#ifdef __arch64__
 /* read 64-bit %tick register */
-#define tick() (sparc_rdpr(tick) & TICK_TICKS)
+#define	tick() ({ \
+	register u_long _tick_tmp; \
+	__asm volatile("rdpr %%tick, %0" : "=r" (_tick_tmp) :); \
+	_tick_tmp; \
+})
+#else
+/* read 64-bit %tick register on 32-bit system */
+#define	tick() ({ \
+	register u_int _tick_hi = 0, _tick_lo = 0; \
+	__asm volatile("rdpr %%tick, %0; srl %0,0,%1; srlx %0,32,%0 " \
+		: "=r" (_tick_hi), "=r" (_tick_lo) : ); \
+	(((uint64_t)_tick_hi)<<32)|((uint64_t)_tick_lo); \
+})
+#endif
 
-extern void tickcmpr_set(u_int64_t);
+extern void next_tick(long);
+#endif
 
-#endif /* _LOCORE */
-#endif /* _SPARC64_CTLREG_ */
+#endif /* _SPARC_CTLREG_H_ */

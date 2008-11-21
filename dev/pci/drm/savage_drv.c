@@ -1,3 +1,5 @@
+/*	$NetBSD: savage_drv.c,v 1.5 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* savage_drv.c -- Savage DRI driver
  */
 /*-
@@ -26,21 +28,24 @@
  *    Eric Anholt <anholt@FreeBSD.org>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: savage_drv.c,v 1.5 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/savage_drv.c,v 1.3 2005/12/20 22:44:36 jhb Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "savage_drm.h"
 #include "savage_drv.h"
 #include "drm_pciids.h"
 
-void	savage_configure(drm_device_t *);
-
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t savage_pciidlist[] = {
 	savage_PCI_IDS
 };
 
-void
-savage_configure(drm_device_t *dev)
+static void savage_configure(drm_device_t *dev)
 {
 	dev->driver.buf_priv_size	= sizeof(drm_savage_buf_priv_t);
 	dev->driver.load		= savage_driver_load;
@@ -108,45 +113,24 @@ MODULE_DEPEND(savage, drm, 1, 1, 1);
 
 #elif defined(__NetBSD__) || defined(__OpenBSD__)
 
-int	savagedrm_probe(struct device *, void *, void *);
-void	savagedrm_attach(struct device *, struct device *, void *);
-
-int
-#if defined(__OpenBSD__)
-savagedrm_probe(struct device *parent, void *match, void *aux)
-#else
+static int
 savagedrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
-	return drm_probe((struct pci_attach_args *)aux, savage_pciidlist);
+	struct pci_attach_args *pa = aux;
+	return drm_probe(pa, savage_pciidlist);
 }
 
-void
+static void
 savagedrm_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	drm_device_t *dev = (drm_device_t *)self;
+	drm_device_t *dev = device_private(self);
 
 	savage_configure(dev);
-	return drm_attach(parent, self, pa, savage_pciidlist);
+	return drm_attach(self, pa, savage_pciidlist);
 }
 
-#if defined(__OpenBSD__)
-struct cfattach savagedrm_ca = {
-	sizeof(drm_device_t), savagedrm_probe, savagedrm_attach,
-	drm_detach, drm_activate
-};
-
-struct cfdriver savagedrm_cd = {
-	0, "savagedrm", DV_DULL
-};
-#else
-#ifdef _LKM
-CFDRIVER_DECL(savagedrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(savagedrm, sizeof(drm_device_t), savagedrm_probe, savagedrm_attach,
+CFATTACH_DECL_NEW(savagedrm, sizeof(drm_device_t), savagedrm_probe, savagedrm_attach,
 	drm_detach, drm_activate);
-#endif
-#endif
 
 #endif

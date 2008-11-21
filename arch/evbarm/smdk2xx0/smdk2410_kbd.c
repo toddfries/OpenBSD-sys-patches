@@ -1,4 +1,4 @@
-/* $NetBSD: smdk2410_kbd.c,v 1.3 2006/03/26 04:27:57 thorpej Exp $ */
+/* $NetBSD: smdk2410_kbd.c,v 1.5 2008/01/06 01:37:58 matt Exp $ */
 
 /*
  * Copyright (c) 2004  Genetec Corporation.  All rights reserved.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smdk2410_kbd.c,v 1.3 2006/03/26 04:27:57 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smdk2410_kbd.c,v 1.5 2008/01/06 01:37:58 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -230,7 +230,7 @@ CFATTACH_DECL(sskbd, sizeof(struct sskbd_softc),
 
 static  int	sskbd_enable(void *, int);
 static  void	sskbd_set_leds(void *, int);
-static  int	sskbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+static  int	sskbd_ioctl(void *, u_long, void *, int, struct lwp *);
 static	int	sskbd_atn_intr(void *);
 static	int	sskbd_spi_intr(void *);
 static	void	sskbd_soft_intr(void *);
@@ -320,8 +320,7 @@ sskbd_attach(struct device *parent, struct device *self, void *aux)
 	sc->spi_ih = s3c24x0_intr_establish(spia->spia_intr, IPL_SERIAL,
 	    0, sskbd_spi_intr, sc);
 
-	sc->soft_ih = softintr_establish(IPL_SOFTSERIAL, sskbd_soft_intr,
-	    sc);
+	sc->soft_ih = softint_establish(SOFTINT_SERIAL, sskbd_soft_intr, sc);
 
 	if (sc->atn_ih == NULL || sc->spi_ih == NULL)
 		aprint_error("%s: can't establish interrupt handler\n",
@@ -361,7 +360,7 @@ sskbd_atn_intr(void *arg)
 
 	if (advance_ring_ptr(sc->inptr) == sc->outptr) {
 		/* ring buffer is full. ignore this nATN signale */
-		softintr_schedule(sc->soft_ih);
+		softint_schedule(sc->soft_ih);
 		return 1;
 	}
 
@@ -406,7 +405,7 @@ sskbd_spi_intr(void *arg)
 		sc->ring[sc->inptr] = data;
 		sc->inptr = advance_ring_ptr(sc->inptr);
 
-		softintr_schedule(sc->soft_ih);
+		softint_schedule(sc->soft_ih);
 	}
 #ifdef KBD_DEBUG
 	else {
@@ -468,7 +467,7 @@ sskbd_set_leds(void *v, int leds)
 }
 
 static int
-sskbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
+sskbd_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	/*struct sskbd_softc *sc = v;*/
 

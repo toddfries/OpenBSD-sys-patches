@@ -1,4 +1,4 @@
-/* $NetBSD: cgd.c,v 1.47 2007/10/08 16:41:10 ad Exp $ */
+/* $NetBSD: cgd.c,v 1.53 2008/09/12 16:51:55 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.47 2007/10/08 16:41:10 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.53 2008/09/12 16:51:55 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -54,7 +47,6 @@ __KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.47 2007/10/08 16:41:10 ad Exp $");
 #include <sys/disklabel.h>
 #include <sys/fcntl.h>
 #include <sys/vnode.h>
-#include <sys/lock.h>
 #include <sys/conf.h>
 
 #include <dev/dkvar.h>
@@ -295,6 +287,7 @@ cgdstart(struct dk_softc *dksc, struct buf *bp)
 	void *	addr;
 	void *	newaddr;
 	daddr_t	bn;
+	struct	vnode *vp;
 
 	DPRINTF_FOLLOW(("cgdstart(%p, %p)\n", dksc, bp));
 	disk_busy(&dksc->sc_dkdev); /* XXX: put in dksubr.c */
@@ -306,7 +299,7 @@ cgdstart(struct dk_softc *dksc, struct buf *bp)
 	 * we can fail quickly if they are unavailable.
 	 */
 
-	nbp = getiobuf_nowait();
+	nbp = getiobuf(cs->sc_tvn, false);
 	if (nbp == NULL) {
 		disk_unbusy(&dksc->sc_dkdev, 0, (bp->b_flags & B_READ));
 		return -1;
@@ -330,18 +323,22 @@ cgdstart(struct dk_softc *dksc, struct buf *bp)
 	}
 
 	nbp->b_data = newaddr;
-	nbp->b_flags = bp->b_flags | B_CALL;
+	nbp->b_flags = bp->b_flags;
+	nbp->b_oflags = bp->b_oflags;
+	nbp->b_cflags = bp->b_cflags;
 	nbp->b_iodone = cgdiodone;
 	nbp->b_proc = bp->b_proc;
 	nbp->b_blkno = bn;
-	nbp->b_vp = cs->sc_tvn;
 	nbp->b_bcount = bp->b_bcount;
 	nbp->b_private = bp;
 
 	BIO_COPYPRIO(nbp, bp);
 
 	if ((nbp->b_flags & B_READ) == 0) {
-		V_INCR_NUMOUTPUT(nbp->b_vp);
+		vp = nbp->b_vp;
+		mutex_enter(&vp->v_interlock);
+		vp->v_numoutput++;
+		mutex_exit(&vp->v_interlock);
 	}
 	VOP_STRATEGY(cs->sc_tvn, nbp);
 	return 0;
@@ -489,6 +486,16 @@ cgddump(dev_t dev, daddr_t blkno, void *va, size_t size)
  */
 #define MAX_KEYSIZE	1024
 
+static const struct {
+	const char *n;
+	int v;
+	int d;
+} encblkno[] = {
+	{ "encblkno",  CGD_CIPHER_CBC_ENCBLKNO8, 1 },
+	{ "encblkno8", CGD_CIPHER_CBC_ENCBLKNO8, 1 },
+	{ "encblkno1", CGD_CIPHER_CBC_ENCBLKNO1, 8 },
+};
+
 /* ARGSUSED */
 static int
 cgd_ioctl_set(struct cgd_softc *cs, void *data, struct lwp *l)
@@ -496,6 +503,7 @@ cgd_ioctl_set(struct cgd_softc *cs, void *data, struct lwp *l)
 	struct	 cgd_ioctl *ci = data;
 	struct	 vnode *vp;
 	int	 ret;
+	size_t	 i;
 	size_t	 keybytes;			/* key length in bytes */
 	const char *cp;
 	char	 *inbuf;
@@ -519,12 +527,16 @@ cgd_ioctl_set(struct cgd_softc *cs, void *data, struct lwp *l)
 		goto bail;
 	}
 
-	/* right now we only support encblkno, so hard-code it */
 	(void)memset(inbuf, 0, MAX_KEYSIZE);
 	ret = copyinstr(ci->ci_ivmethod, inbuf, MAX_KEYSIZE, NULL);
 	if (ret)
 		goto bail;
-	if (strcmp("encblkno", inbuf)) {
+
+	for (i = 0; i < __arraycount(encblkno); i++)
+		if (strcmp(encblkno[i].n, inbuf) == 0)
+			break;
+
+	if (i == __arraycount(encblkno)) {
 		ret = EINVAL;
 		goto bail;
 	}
@@ -534,15 +546,22 @@ cgd_ioctl_set(struct cgd_softc *cs, void *data, struct lwp *l)
 		ret = EINVAL;
 		goto bail;
 	}
+
 	(void)memset(inbuf, 0, MAX_KEYSIZE);
 	ret = copyin(ci->ci_key, inbuf, keybytes);
 	if (ret)
 		goto bail;
 
 	cs->sc_cdata.cf_blocksize = ci->ci_blocksize;
-	cs->sc_cdata.cf_mode = CGD_CIPHER_CBC_ENCBLKNO;
+	cs->sc_cdata.cf_mode = encblkno[i].v;
 	cs->sc_cdata.cf_priv = cs->sc_cfuncs->cf_init(ci->ci_keylen, inbuf,
 	    &cs->sc_cdata.cf_blocksize);
+	/*
+	 * The blocksize is supposed to be in bytes. Unfortunately originally
+	 * it was expressed in bits. For compatibility we maintain encblkno
+	 * and encblkno8.
+	 */
+	cs->sc_cdata.cf_blocksize /= encblkno[i].d;
 	(void)memset(inbuf, 0, MAX_KEYSIZE);
 	if (!cs->sc_cdata.cf_priv) {
 		printf("cgd: unable to initialize cipher\n");
@@ -571,7 +590,7 @@ cgd_ioctl_set(struct cgd_softc *cs, void *data, struct lwp *l)
 
 bail:
 	free(inbuf, M_TEMP);
-	(void)vn_close(vp, FREAD|FWRITE, l->l_cred, l);
+	(void)vn_close(vp, FREAD|FWRITE, l->l_cred);
 	return ret;
 }
 
@@ -590,7 +609,7 @@ cgd_ioctl_clr(struct cgd_softc *cs, void *data, struct lwp *l)
 	splx(s);
 	bufq_free(cs->sc_dksc.sc_bufq);
 
-	(void)vn_close(cs->sc_tvn, FREAD|FWRITE, l->l_cred, l);
+	(void)vn_close(cs->sc_tvn, FREAD|FWRITE, l->l_cred);
 	cs->sc_cfuncs->cf_destroy(cs->sc_cdata.cf_priv);
 	free(cs->sc_tpath, M_DEVBUF);
 	free(cs->sc_data, M_DEVBUF);
@@ -624,12 +643,12 @@ cgdinit(struct cgd_softc *cs, const char *cpath, struct vnode *vp,
 	cs->sc_tpath = malloc(cs->sc_tpathlen, M_DEVBUF, M_WAITOK);
 	memcpy(cs->sc_tpath, tmppath, cs->sc_tpathlen);
 
-	if ((ret = VOP_GETATTR(vp, &va, l->l_cred, l)) != 0)
+	if ((ret = VOP_GETATTR(vp, &va, l->l_cred)) != 0)
 		goto bail;
 
 	cs->sc_tdev = va.va_rdev;
 
-	ret = VOP_IOCTL(vp, DIOCGPART, &dpart, FREAD, l->l_cred, l);
+	ret = VOP_IOCTL(vp, DIOCGPART, &dpart, FREAD, l->l_cred);
 	if (ret)
 		goto bail;
 

@@ -1,4 +1,4 @@
-/* $NetBSD: ofwoea_machdep.c,v 1.13 2008/04/08 02:33:03 garbled Exp $ */
+/* $NetBSD: ofwoea_machdep.c,v 1.15 2008/11/12 12:36:05 ad Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofwoea_machdep.c,v 1.13 2008/04/08 02:33:03 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofwoea_machdep.c,v 1.15 2008/11/12 12:36:05 ad Exp $");
 
 #include "opt_ppcarch.h"
 #include "opt_compat_netbsd.h"
@@ -117,7 +110,7 @@ struct pmap ofw_pmap;
 struct ofw_translations ofmap[32];
 char bootpath[256];
 char model_name[64];
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 void *startsym, *endsym;
 #endif
 #ifdef TIMEBASE_FREQ
@@ -154,7 +147,7 @@ ofwoea_initppc(u_int startkernel, u_int endkernel, char *args)
 	if ((oeacpufeat & OEACPU_NOBAT) == 0)
 		ofwoea_batinit();
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	/* get info of kernel symbol table from bootloader */
 	memcpy(&startsym, args + strlen(args) + 1, sizeof(startsym));
 	memcpy(&endsym, args + strlen(args) + 1 + sizeof(startsym),
@@ -245,7 +238,7 @@ ofwoea_initppc(u_int startkernel, u_int endkernel, char *args)
 
 	restore_ofmap(ofmap, ofmaplen);
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init((int)((u_int)endsym - (u_int)startsym), startsym, endsym);
 #endif
 

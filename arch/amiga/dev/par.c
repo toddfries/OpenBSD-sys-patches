@@ -1,4 +1,4 @@
-/*	$NetBSD: par.c,v 1.32 2006/03/26 04:35:37 thorpej Exp $ */
+/*	$NetBSD: par.c,v 1.36 2007/10/17 19:53:17 garbled Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: par.c,v 1.32 2006/03/26 04:35:37 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: par.c,v 1.36 2007/10/17 19:53:17 garbled Exp $");
 
 /*
  * parallel port interface
@@ -142,8 +142,8 @@ parattach(struct device *pdp, struct device *dp, void *auxp)
 		par_softcp->sc_flags = PARF_ALIVE;
 	printf("\n");
 
-	callout_init(&par_softcp->sc_timo_ch);
-	callout_init(&par_softcp->sc_start_ch);
+	callout_init(&par_softcp->sc_timo_ch, 0);
+	callout_init(&par_softcp->sc_start_ch, 0);
 }
 
 int
@@ -294,7 +294,6 @@ parrw(dev_t dev, register struct uio *uio)
 	    break;
 	}
 again:
-      s = splbio();
 #if 0
       if ((sc->sc_flags & PARF_UIO) && hpibreq(&sc->sc_dq) == 0)
 	sleep(sc, PRIBIO+1);
@@ -302,7 +301,7 @@ again:
       /*
        * Check if we timed out during sleep or uiomove
        */
-      (void) spllowersoftclock();
+      s = splsoftclock();
       if ((sc->sc_flags & PARF_UIO) == 0)
 	{
 #ifdef DEBUG
@@ -432,7 +431,7 @@ again:
 }
 
 int
-parioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+parioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
   struct par_softc *sc = getparsp(UNIT(dev));
   struct parparam *pp, *upp;

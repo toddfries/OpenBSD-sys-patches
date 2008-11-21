@@ -1,3 +1,4 @@
+/* $NetBSD: onewire_bitbang.c,v 1.1 2006/04/07 18:55:22 riz Exp $ */
 /*	$OpenBSD: onewire_bitbang.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
 
 /*
@@ -16,6 +17,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: onewire_bitbang.c,v 1.1 2006/04/07 18:55:22 riz Exp $");
+
 /*
  * 1-Wire bus bit-banging routines.
  */
@@ -29,7 +33,7 @@
 int
 onewire_bb_reset(const struct onewire_bbops *ops, void *arg)
 {
-	int s, rv, i;
+	int s, rv = 0, i;
 
 	s = splhigh();
 	ops->bb_tx(arg);
@@ -52,7 +56,7 @@ onewire_bb_reset(const struct onewire_bbops *ops, void *arg)
 int
 onewire_bb_bit(const struct onewire_bbops *ops, void *arg, int value)
 {
-	int s, rv, i;
+	int s, rv = 0, i;
 
 	s = splhigh();
 	ops->bb_tx(arg);

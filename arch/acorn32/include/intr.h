@@ -1,4 +1,4 @@
-/* 	$NetBSD: intr.h,v 1.5 2006/12/21 15:55:21 yamt Exp $	*/
+/* 	$NetBSD: intr.h,v 1.8 2008/04/27 18:58:43 matt Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -33,27 +33,33 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _ARM32_INTR_H_
-#define _ARM32_INTR_H_
+#ifndef _ACORN32_INTR_H_
+#define _ACORN32_INTR_H_
 
 /* Define the various Interrupt Priority Levels */
 
 /* Hardware Interrupt Priority Levels are not mutually exclusive. */
 
-#define IPL_BIO		0	/* block I/O */
-#define IPL_NET		1	/* network */
-#define IPL_TTY		2	/* terminal */
-#define IPL_VM		3	/* memory allocation */
-#define IPL_AUDIO	4	/* audio */
-#define IPL_CLOCK	5	/* clock */
-#define	IPL_STATCLOCK	6
-#define IPL_HIGH	7	/*  */
-#define	IPL_SCHED	IPL_HIGH
-#define	IPL_LOCK	IPL_HIGH
-#define IPL_SERIAL	8	/* serial */
-#define IPL_NONE	9
-
-#define IPL_LEVELS	10
+#define	IPL_NONE	0
+#ifdef __HAVE_FAST_SOFTINTS
+#define	IPL_SOFTCLOCK	1
+#define	IPL_SOFTBIO	2
+#define	IPL_SOFTNET	3
+#define	IPL_SOFTSERIAL	4
+#define IPL_VM		5
+#define	IPL_SCHED	6
+#define IPL_HIGH	7
+#define NIPL		8
+#else
+#define IPL_VM		1
+#define	IPL_SCHED	2
+#define IPL_HIGH	3
+#define	IPL_SOFTSERIAL	IPL_NONE
+#define	IPL_SOFTNET	IPL_NONE
+#define	IPL_SOFTBIO	IPL_NONE
+#define	IPL_SOFTCLOCK	IPL_NONE
+#define NIPL		4
+#endif
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
 #define	IST_NONE	0	/* none (dummy) */
@@ -61,15 +67,7 @@
 #define	IST_EDGE	2	/* edge-triggered */
 #define	IST_LEVEL	3	/* level-triggered */
 
-/* Software interrupt priority levels */
-
-#define SOFTIRQ_CLOCK	0
-#define SOFTIRQ_NET	1
-#define SOFTIRQ_SERIAL	2
-
-#define SOFTIRQ_BIT(x)	(1 << x)
-
 #include <machine/irqhandler.h>
 #include <arm/arm32/psl.h>
 
-#endif	/* _ARM32_INTR_H */
+#endif	/* _ACORN32_INTR_H */

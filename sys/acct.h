@@ -1,5 +1,4 @@
-/*	$OpenBSD: acct.h,v 1.4 2003/06/02 23:28:20 millert Exp $	*/
-/*	$NetBSD: acct.h,v 1.16 1995/03/26 20:23:52 jtc Exp $	*/
+/*	$NetBSD: acct.h,v 1.26 2005/12/26 18:41:36 perry Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -37,12 +36,15 @@
  *	@(#)acct.h	8.3 (Berkeley) 7/10/94
  */
 
+#ifndef _SYS_ACCT_H_
+#define _SYS_ACCT_H_
+
 /*
  * Accounting structures; these use a comp_t type which is a 3 bits base 8
  * exponent, 13 bit fraction ``floating point'' number.  Units are 1/AHZ
  * seconds.
  */
-typedef u_int16_t comp_t;
+typedef uint16_t comp_t;
 
 struct acct {
 	char	  ac_comm[10];	/* command name */
@@ -52,7 +54,7 @@ struct acct {
 	time_t	  ac_btime;	/* starting time */
 	uid_t	  ac_uid;	/* user id */
 	gid_t	  ac_gid;	/* group id */
-	u_int16_t ac_mem;	/* average memory usage */
+	uint16_t  ac_mem;	/* average memory usage */
 	comp_t	  ac_io;	/* count of IO blocks */
 	dev_t	  ac_tty;	/* controlling tty */
 
@@ -61,7 +63,7 @@ struct acct {
 #define	ACOMPAT	0x04		/* used compatibility mode */
 #define	ACORE	0x08		/* dumped core */
 #define	AXSIG	0x10		/* killed by a signal */
-	u_int8_t  ac_flag;	/* accounting flags */
+	uint8_t   ac_flag;	/* accounting flags */
 };
 
 /*
@@ -71,5 +73,8 @@ struct acct {
 #define	AHZ	64
 
 #ifdef _KERNEL
-int	acct_process(struct proc *p);
+void	acct_init(void);
+int	acct_process(struct lwp *);
 #endif
+
+#endif /* !_SYS_ACCT_H_ */

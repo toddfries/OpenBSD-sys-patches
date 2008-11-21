@@ -1,26 +1,52 @@
-/*	$OpenBSD: ieee80211_crypto.c,v 1.41 2008/04/26 20:03:34 damien Exp $	*/
-
+/*	$NetBSD: ieee80211_crypto.c,v 1.14 2006/11/16 01:33:40 christos Exp $	*/
 /*-
- * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2001 Atsushi Onoe
+ * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Alternatively, this software may be distributed under the terms of the
+ * GNU General Public License ("GPL") version 2 as published by the Free
+ * Software Foundation.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+#ifdef __FreeBSD__
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto.c,v 1.12 2005/08/08 18:46:35 sam Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto.c,v 1.14 2006/11/16 01:33:40 christos Exp $");
+#endif
+
+#include "opt_inet.h"
+
+/*
+ * IEEE 802.11 generic crypto support.
+ */
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/mbuf.h>
-#include <sys/malloc.h>
-#include <sys/kernel.h>
+#include <sys/mbuf.h>   
+
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/endian.h>
@@ -29,639 +55,569 @@
 #include <sys/sysctl.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
+#include <net/if_ether.h>
 #include <net/if_llc.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
-
+#include <net80211/ieee80211_netbsd.h>
 #include <net80211/ieee80211_var.h>
 
-#include <dev/rndvar.h>
-#include <crypto/arc4.h>
-#include <crypto/md5.h>
-#include <crypto/sha1.h>
-#include <crypto/rijndael.h>
+/*
+ * Table of registered cipher modules.
+ */
+static	const struct ieee80211_cipher *ciphers[IEEE80211_CIPHER_MAX];
 
-/* similar to iovec except that it accepts const pointers */
-struct vector {
-	const void	*base;
-	size_t		len;
+#ifdef INET
+#include <netinet/in.h> 
+#include <net/if_ether.h>
+#endif
+
+#include <crypto/arc4/arc4.h>	/* XXX unneeded? */
+static	int _ieee80211_crypto_delkey(struct ieee80211com *,
+		struct ieee80211_key *);
+
+/*
+ * Default "null" key management routines.
+ */
+static int
+null_key_alloc(struct ieee80211com *ic, const struct ieee80211_key *k,
+	ieee80211_keyix *keyix, ieee80211_keyix *rxkeyix)
+{
+	if (!(&ic->ic_nw_keys[0] <= k &&
+	     k < &ic->ic_nw_keys[IEEE80211_WEP_NKID])) {
+		/*
+		 * Not in the global key table, the driver should handle this
+		 * by allocating a slot in the h/w key table/cache.  In
+		 * lieu of that return key slot 0 for any unicast key
+		 * request.  We disallow the request if this is a group key.
+		 * This default policy does the right thing for legacy hardware
+		 * with a 4 key table.  It also handles devices that pass
+		 * packets through untouched when marked with the WEP bit
+		 * and key index 0.
+		 */
+		if (k->wk_flags & IEEE80211_KEY_GROUP)
+			return 0;
+		*keyix = 0;	/* NB: use key index 0 for ucast key */
+	} else {
+		*keyix = k - ic->ic_nw_keys;
+	}
+	*rxkeyix = IEEE80211_KEYIX_NONE;	/* XXX maybe *keyix? */
+	return 1;
+}
+static int
+null_key_delete(struct ieee80211com *ic,
+    const struct ieee80211_key *k)
+{
+	return 1;
+}
+static 	int
+null_key_set(struct ieee80211com *ic,
+    const struct ieee80211_key *k,
+    const u_int8_t mac[IEEE80211_ADDR_LEN])
+{
+	return 1;
+}
+static void null_key_update(struct ieee80211com *ic) {}
+
+/*
+ * Write-arounds for common operations.
+ */
+static __inline void
+cipher_detach(struct ieee80211_key *key)
+{
+	key->wk_cipher->ic_detach(key);
+}
+
+static __inline void *
+cipher_attach(struct ieee80211com *ic, struct ieee80211_key *key)
+{
+	return key->wk_cipher->ic_attach(ic, key);
+}
+
+/* 
+ * Wrappers for driver key management methods.
+ */
+static __inline int
+dev_key_alloc(struct ieee80211com *ic,
+	const struct ieee80211_key *key,
+	ieee80211_keyix *keyix, ieee80211_keyix *rxkeyix)
+{
+	return ic->ic_crypto.cs_key_alloc(ic, key, keyix, rxkeyix);
+}
+
+static __inline int
+dev_key_delete(struct ieee80211com *ic,
+	const struct ieee80211_key *key)
+{
+	return ic->ic_crypto.cs_key_delete(ic, key);
+}
+
+static __inline int
+dev_key_set(struct ieee80211com *ic, const struct ieee80211_key *key,
+	const u_int8_t mac[IEEE80211_ADDR_LEN])
+{
+	return ic->ic_crypto.cs_key_set(ic, key, mac);
+}
+
+/*
+ * Setup crypto support.
+ */
+void
+ieee80211_crypto_attach(struct ieee80211com *ic)
+{
+	struct ieee80211_crypto_state *cs = &ic->ic_crypto;
+	int i;
+
+	/* NB: we assume everything is pre-zero'd */
+	cs->cs_def_txkey = IEEE80211_KEYIX_NONE;
+	cs->cs_max_keyix = IEEE80211_WEP_NKID;
+	ciphers[IEEE80211_CIPHER_NONE] = &ieee80211_cipher_none;
+	for (i = 0; i < IEEE80211_WEP_NKID; i++)
+		ieee80211_crypto_resetkey(ic, &cs->cs_nw_keys[i],
+			IEEE80211_KEYIX_NONE);
+	/*
+	 * Initialize the driver key support routines to noop entries.
+	 * This is useful especially for the cipher test modules.
+	 */
+	cs->cs_key_alloc = null_key_alloc;
+	cs->cs_key_set = null_key_set;
+	cs->cs_key_delete = null_key_delete;
+	cs->cs_key_update_begin = null_key_update;
+	cs->cs_key_update_end = null_key_update;
+}
+
+/*
+ * Teardown crypto support.
+ */
+void
+ieee80211_crypto_detach(struct ieee80211com *ic)
+{
+	ieee80211_crypto_delglobalkeys(ic);
+}
+
+/*
+ * Register a crypto cipher module.
+ */
+void
+ieee80211_crypto_register(const struct ieee80211_cipher *cip)
+{
+	if (cip->ic_cipher >= IEEE80211_CIPHER_MAX) {
+		printf("%s: cipher %s has an invalid cipher index %u\n",
+			__func__, cip->ic_name, cip->ic_cipher);
+		return;
+	}
+	if (ciphers[cip->ic_cipher] != NULL && ciphers[cip->ic_cipher] != cip) {
+		printf("%s: cipher %s registered with a different template\n",
+			__func__, cip->ic_name);
+		return;
+	}
+	ciphers[cip->ic_cipher] = cip;
+}
+
+/*
+ * Unregister a crypto cipher module.
+ */
+void
+ieee80211_crypto_unregister(const struct ieee80211_cipher *cip)
+{
+	if (cip->ic_cipher >= IEEE80211_CIPHER_MAX) {
+		printf("%s: cipher %s has an invalid cipher index %u\n",
+			__func__, cip->ic_name, cip->ic_cipher);
+		return;
+	}
+	if (ciphers[cip->ic_cipher] != NULL && ciphers[cip->ic_cipher] != cip) {
+		printf("%s: cipher %s registered with a different template\n",
+			__func__, cip->ic_name);
+		return;
+	}
+	/* NB: don't complain about not being registered */
+	/* XXX disallow if references */
+	ciphers[cip->ic_cipher] = NULL;
+}
+
+int
+ieee80211_crypto_available(u_int cipher)
+{
+	return cipher < IEEE80211_CIPHER_MAX && ciphers[cipher] != NULL;
+}
+
+/* XXX well-known names! */
+static const char *cipher_modnames[] = {
+	"wlan_wep",	/* IEEE80211_CIPHER_WEP */
+	"wlan_tkip",	/* IEEE80211_CIPHER_TKIP */
+	"wlan_aes_ocb",	/* IEEE80211_CIPHER_AES_OCB */
+	"wlan_ccmp",	/* IEEE80211_CIPHER_AES_CCM */
+	"wlan_ckip",	/* IEEE80211_CIPHER_CKIP */
 };
 
-void	ieee80211_prf(const u_int8_t *, size_t, struct vector *, int,
-	    u_int8_t *, size_t);
-void	ieee80211_derive_pmkid(const u_int8_t *, size_t, const u_int8_t *,
-	    const u_int8_t *, u_int8_t *);
-
-void
-ieee80211_crypto_attach(struct ifnet *ifp)
-{
-	struct ieee80211com *ic = (void *)ifp;
-
-	if (ic->ic_caps & IEEE80211_C_RSN) {
-		ic->ic_rsnprotos = IEEE80211_PROTO_WPA | IEEE80211_PROTO_RSN;
-		ic->ic_rsnakms = IEEE80211_AKM_PSK | IEEE80211_AKM_IEEE8021X;
-		ic->ic_rsnciphers = IEEE80211_CIPHER_TKIP |
-		    IEEE80211_CIPHER_CCMP;
-		ic->ic_rsngroupcipher = IEEE80211_CIPHER_TKIP;
-	}
-	ic->ic_set_key = ieee80211_set_key;
-	ic->ic_delete_key = ieee80211_delete_key;
-}
-
-void
-ieee80211_crypto_detach(struct ifnet *ifp)
-{
-	struct ieee80211com *ic = (void *)ifp;
-	int i;
-
-	/* clear all keys from memory */
-	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		if (ic->ic_nw_keys[i].k_cipher != IEEE80211_CIPHER_NONE)
-			(*ic->ic_delete_key)(ic, NULL, &ic->ic_nw_keys[i]);
-		memset(&ic->ic_nw_keys[i], 0, sizeof(struct ieee80211_key));
-	}
-	memset(ic->ic_psk, 0, IEEE80211_PMK_LEN);
-}
-
+/*
+ * Establish a relationship between the specified key and cipher
+ * and, if necessary, allocate a hardware index from the driver.
+ * Note that when a fixed key index is required it must be specified
+ * and we blindly assign it w/o consulting the driver (XXX).
+ *
+ * This must be the first call applied to a key; all the other key
+ * routines assume wk_cipher is setup.
+ *
+ * Locking must be handled by the caller using:
+ *	ieee80211_key_update_begin(ic);
+ *	ieee80211_key_update_end(ic);
+ */
 int
-ieee80211_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
-    struct ieee80211_key *k)
+ieee80211_crypto_newkey(struct ieee80211com *ic,
+	int cipher, int flags, struct ieee80211_key *key)
 {
-	int error;
+#define	N(a)	(sizeof(a) / sizeof(a[0]))
+	const struct ieee80211_cipher *cip;
+	ieee80211_keyix keyix, rxkeyix;
+	void *keyctx;
+	int oflags;
 
-	switch (k->k_cipher) {
-	case IEEE80211_CIPHER_WEP40:
-	case IEEE80211_CIPHER_WEP104:
-		error = ieee80211_wep_set_key(ic, k);
-		break;
-	case IEEE80211_CIPHER_TKIP:
-		error = ieee80211_tkip_set_key(ic, k);
-		break;
-	case IEEE80211_CIPHER_CCMP:
-		error = ieee80211_ccmp_set_key(ic, k);
-		break;
-	default:
-		/* should not get there */
-		error = EINVAL;
+	/*
+	 * Validate cipher and set reference to cipher routines.
+	 */
+	if (cipher >= IEEE80211_CIPHER_MAX) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			"%s: invalid cipher %u\n", __func__, cipher);
+		ic->ic_stats.is_crypto_badcipher++;
+		return 0;
 	}
-	return error;
-}
-
-void
-ieee80211_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
-    struct ieee80211_key *k)
-{
-	switch (k->k_cipher) {
-	case IEEE80211_CIPHER_WEP40:
-	case IEEE80211_CIPHER_WEP104:
-		ieee80211_wep_delete_key(ic, k);
-		break;
-	case IEEE80211_CIPHER_TKIP:
-		ieee80211_tkip_delete_key(ic, k);
-		break;
-	case IEEE80211_CIPHER_CCMP:
-		ieee80211_ccmp_delete_key(ic, k);
-		break;
-	default:
-		/* should not get there */
-		break;
-	}
-	memset(k, 0, sizeof(*k));	/* XXX */
-}
-
-/*
- * Retrieve the pairwise master key configured for a given node.
- * When PSK AKMP is in use, the pairwise master key is the pre-shared key
- * and the node is not used.
- */
-const u_int8_t *
-ieee80211_get_pmk(struct ieee80211com *ic, struct ieee80211_node *ni,
-    const u_int8_t *pmkid)
-{
-	if (ni->ni_rsnakms == IEEE80211_AKM_PSK)
-		return ic->ic_psk;	/* the PMK is the PSK */
-
-	/* XXX find the PMK in the PMKSA cache using the PMKID */
-
-	return NULL;	/* not yet supported */
-}
-
-struct ieee80211_key *
-ieee80211_get_txkey(struct ieee80211com *ic, const struct ieee80211_frame *wh,
-    struct ieee80211_node *ni)
-{
-	if (!(ic->ic_flags & IEEE80211_F_RSNON) ||
-	    IEEE80211_IS_MULTICAST(wh->i_addr1) ||
-	    ni->ni_rsncipher == IEEE80211_CIPHER_USEGROUP)
-		return &ic->ic_nw_keys[ic->ic_wep_txkey];
-	return &ni->ni_pairwise_key;
-}
-
-struct mbuf *
-ieee80211_encrypt(struct ieee80211com *ic, struct mbuf *m0,
-    struct ieee80211_key *k)
-{
-	switch (k->k_cipher) {
-	case IEEE80211_CIPHER_WEP40:
-	case IEEE80211_CIPHER_WEP104:
-		m0 = ieee80211_wep_encrypt(ic, m0, k);
-		break;
-	case IEEE80211_CIPHER_TKIP:
-		m0 = ieee80211_tkip_encrypt(ic, m0, k);
-		break;
-	case IEEE80211_CIPHER_CCMP:
-		m0 = ieee80211_ccmp_encrypt(ic, m0, k);
-		break;
-	default:
-		/* should not get there */
-		m_freem(m0);
-		m0 = NULL;
-	}
-	return m0;
-}
-
-struct mbuf *
-ieee80211_decrypt(struct ieee80211com *ic, struct mbuf *m0,
-    struct ieee80211_node *ni)
-{
-	struct ieee80211_frame *wh;
-	struct ieee80211_key *k;
-
-	/* select the key for decryption */
-	wh = mtod(m0, struct ieee80211_frame *);
-	if (!(ic->ic_flags & IEEE80211_F_RSNON) ||
-	    IEEE80211_IS_MULTICAST(wh->i_addr1) ||
-	    ni->ni_rsncipher == IEEE80211_CIPHER_USEGROUP) {
-		/* XXX check length! */
-		int hdrlen = ieee80211_get_hdrlen(wh);
-		const u_int8_t *ivp = (u_int8_t *)wh + hdrlen;
-		/* key identifier is always located at the same index */
-		int kid = ivp[IEEE80211_WEP_IVLEN] >> 6;
-		k = &ic->ic_nw_keys[kid];
-	} else
-		k = &ni->ni_pairwise_key;
-
-	switch (k->k_cipher) {
-	case IEEE80211_CIPHER_WEP40:
-	case IEEE80211_CIPHER_WEP104:
-		m0 = ieee80211_wep_decrypt(ic, m0, k);
-		break;
-	case IEEE80211_CIPHER_TKIP:
-		m0 = ieee80211_tkip_decrypt(ic, m0, k);
-		break;
-	case IEEE80211_CIPHER_CCMP:
-		m0 = ieee80211_ccmp_decrypt(ic, m0, k);
-		break;
-	default:
-		/* key not defined */
-		m_freem(m0);
-		m0 = NULL;
-	}
-	return m0;
-}
-
-/*
- * AES Key Wrap (see RFC 3394).
- */
-static const u_int8_t aes_key_wrap_iv[8] =
-	{ 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6 };
-
-static void
-aes_key_wrap(const u_int8_t *kek, size_t kek_len, const u_int8_t *pt,
-    size_t len, u_int8_t *ct)
-{
-	rijndael_ctx ctx;
-	u_int8_t *a, *r, ar[16];
-	u_int64_t t, b[2];
-	size_t i;
-	int j;
-
-	/* allow ciphertext and plaintext to overlap (ct == pt) */
-	ovbcopy(pt, ct + 8, len * 8);
-	a = ct;
-	memcpy(a, aes_key_wrap_iv, 8);	/* default IV */
-
-	rijndael_set_key_enc_only(&ctx, (u_int8_t *)kek, kek_len * 8);
-
-	for (j = 0, t = 1; j < 6; j++) {
-		r = ct + 8;
-		for (i = 0; i < len; i++, t++) {
-			memcpy(ar, a, 8);
-			memcpy(ar + 8, r, 8);
-			rijndael_encrypt(&ctx, ar, (u_int8_t *)b);
-			b[0] ^= htobe64(t);
-			memcpy(a, &b[0], 8);
-			memcpy(r, &b[1], 8);
-
-			r += 8;
+	cip = ciphers[cipher];
+	if (cip == NULL) {
+		/*
+		 * Auto-load cipher module if we have a well-known name
+		 * for it.  It might be better to use string names rather
+		 * than numbers and craft a module name based on the cipher
+		 * name; e.g. wlan_cipher_<cipher-name>.
+		 */
+		if (cipher < N(cipher_modnames)) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+				"%s: unregistered cipher %u, load module %s\n",
+				__func__, cipher, cipher_modnames[cipher]);
+			ieee80211_load_module(cipher_modnames[cipher]);
+			/*
+			 * If cipher module loaded it should immediately
+			 * call ieee80211_crypto_register which will fill
+			 * in the entry in the ciphers array.
+			 */
+			cip = ciphers[cipher];
+		}
+		if (cip == NULL) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+				"%s: unable to load cipher %u, module %s\n",
+				__func__, cipher,
+				cipher < N(cipher_modnames) ?
+					cipher_modnames[cipher] : "<unknown>");
+			ic->ic_stats.is_crypto_nocipher++;
+			return 0;
 		}
 	}
+
+	oflags = key->wk_flags;
+	flags &= IEEE80211_KEY_COMMON;
+	/*
+	 * If the hardware does not support the cipher then
+	 * fallback to a host-based implementation.
+	 */
+	if ((ic->ic_caps & (1<<cipher)) == 0) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+		    "%s: no h/w support for cipher %s, falling back to s/w\n",
+		    __func__, cip->ic_name);
+		flags |= IEEE80211_KEY_SWCRYPT;
+	}
+	/*
+	 * Hardware TKIP with software MIC is an important
+	 * combination; we handle it by flagging each key,
+	 * the cipher modules honor it.
+	 */
+	if (cipher == IEEE80211_CIPHER_TKIP &&
+	    (ic->ic_caps & IEEE80211_C_TKIPMIC) == 0) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+		    "%s: no h/w support for TKIP MIC, falling back to s/w\n",
+		    __func__);
+		flags |= IEEE80211_KEY_SWMIC;
+	}
+
+	/*
+	 * Bind cipher to key instance.  Note we do this
+	 * after checking the device capabilities so the
+	 * cipher module can optimize space usage based on
+	 * whether or not it needs to do the cipher work.
+	 */
+	if (key->wk_cipher != cip || key->wk_flags != flags) {
+again:
+		/*
+		 * Fillin the flags so cipher modules can see s/w
+		 * crypto requirements and potentially allocate
+		 * different state and/or attach different method
+		 * pointers.
+		 *
+		 * XXX this is not right when s/w crypto fallback
+		 *     fails and we try to restore previous state.
+		 */
+		key->wk_flags = flags;
+		keyctx = cip->ic_attach(ic, key);
+		if (keyctx == NULL) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+				"%s: unable to attach cipher %s\n",
+				__func__, cip->ic_name);
+			key->wk_flags = oflags;	/* restore old flags */
+			ic->ic_stats.is_crypto_attachfail++;
+			return 0;
+		}
+		cipher_detach(key);
+		key->wk_cipher = cip;		/* XXX refcnt? */
+		key->wk_private = keyctx;
+	}
+	/*
+	 * Commit to requested usage so driver can see the flags.
+	 */
+	key->wk_flags = flags;
+
+	/*
+	 * Ask the driver for a key index if we don't have one.
+	 * Note that entries in the global key table always have
+	 * an index; this means it's safe to call this routine
+	 * for these entries just to setup the reference to the
+	 * cipher template.  Note also that when using software
+	 * crypto we also call the driver to give us a key index.
+	 */
+	if (key->wk_keyix == IEEE80211_KEYIX_NONE) {
+		if (!dev_key_alloc(ic, key, &keyix, &rxkeyix)) {
+			/*
+			 * Driver has no room; fallback to doing crypto
+			 * in the host.  We change the flags and start the
+			 * procedure over.  If we get back here then there's
+			 * no hope and we bail.  Note that this can leave
+			 * the key in a inconsistent state if the caller
+			 * continues to use it.
+			 */
+			if ((key->wk_flags & IEEE80211_KEY_SWCRYPT) == 0) {
+				ic->ic_stats.is_crypto_swfallback++;
+				IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+				    "%s: no h/w resources for cipher %s, "
+				    "falling back to s/w\n", __func__,
+				    cip->ic_name);
+				oflags = key->wk_flags;
+				flags |= IEEE80211_KEY_SWCRYPT;
+				if (cipher == IEEE80211_CIPHER_TKIP)
+					flags |= IEEE80211_KEY_SWMIC;
+				goto again;
+			}
+			ic->ic_stats.is_crypto_keyfail++;
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			    "%s: unable to setup cipher %s\n",
+			    __func__, cip->ic_name);
+			return 0;
+		}
+		key->wk_keyix = keyix;
+		key->wk_rxkeyix = rxkeyix;
+	}
+	return 1;
+#undef N
 }
 
+/*
+ * Remove the key (no locking, for internal use).
+ */
 static int
-aes_key_unwrap(const u_int8_t *kek, size_t kek_len, const u_int8_t *ct,
-    u_int8_t *pt, size_t len)
+_ieee80211_crypto_delkey(struct ieee80211com *ic, struct ieee80211_key *key)
 {
-	rijndael_ctx ctx;
-	u_int8_t a[8], *r, b[16];
-	u_int64_t t, ar[2];
-	size_t i;
-	int j;
+	ieee80211_keyix keyix;
 
-	memcpy(a, ct, 8);
-	/* allow ciphertext and plaintext to overlap (ct == pt) */
-	ovbcopy(ct + 8, pt, len * 8);
+	IASSERT(key->wk_cipher != NULL, ("No cipher!"));
 
-	rijndael_set_key(&ctx, (u_int8_t *)kek, kek_len * 8);
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+	    "%s: %s keyix %u flags 0x%x rsc %ju tsc %ju len %u\n",
+	    __func__, key->wk_cipher->ic_name,
+	    key->wk_keyix, key->wk_flags,
+	    key->wk_keyrsc, key->wk_keytsc, key->wk_keylen);
 
-	for (j = 0, t = 6 * len; j < 6; j++) {
-		r = pt + (len - 1) * 8;
-		for (i = 0; i < len; i++, t--) {
-			memcpy(&ar[0], a, 8);
-			ar[0] ^= htobe64(t);
-			memcpy(&ar[1], r, 8);
-			rijndael_decrypt(&ctx, (u_int8_t *)ar, b);
-			memcpy(a, b, 8);
-			memcpy(r, b + 8, 8);
-
-			r -= 8;
+	keyix = key->wk_keyix;
+	if (keyix != IEEE80211_KEYIX_NONE) {
+		/*
+		 * Remove hardware entry.
+		 */
+		/* XXX key cache */
+		if (!dev_key_delete(ic, key)) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			    "%s: driver did not delete key index %u\n",
+			    __func__, keyix);
+			ic->ic_stats.is_crypto_delkey++;
+			/* XXX recovery? */
 		}
 	}
-	return memcmp(a, aes_key_wrap_iv, 8) != 0;
+	cipher_detach(key);
+	memset(key, 0, sizeof(*key));
+	ieee80211_crypto_resetkey(ic, key, IEEE80211_KEYIX_NONE);
+	return 1;
 }
 
 /*
- * HMAC-MD5 (see RFC 2104).
- */
-static void
-hmac_md5(const struct vector *vec, int vcnt, const u_int8_t *key,
-    size_t key_len, u_int8_t digest[MD5_DIGEST_LENGTH])
-{
-	MD5_CTX ctx;
-	u_int8_t k_pad[MD5_BLOCK_LENGTH];
-	u_int8_t tk[MD5_DIGEST_LENGTH];
-	int i;
-
-	if (key_len > MD5_BLOCK_LENGTH) {
-		MD5Init(&ctx);
-		MD5Update(&ctx, key, key_len);
-		MD5Final(tk, &ctx);
-
-		key = tk;
-		key_len = MD5_DIGEST_LENGTH;
-	}
-
-	bzero(k_pad, sizeof k_pad);
-	bcopy(key, k_pad, key_len);
-	for (i = 0; i < MD5_BLOCK_LENGTH; i++)
-		k_pad[i] ^= 0x36;
-
-	MD5Init(&ctx);
-	MD5Update(&ctx, k_pad, MD5_BLOCK_LENGTH);
-	for (i = 0; i < vcnt; i++)
-		MD5Update(&ctx, vec[i].base, vec[i].len);
-	MD5Final(digest, &ctx);
-
-	bzero(k_pad, sizeof k_pad);
-	bcopy(key, k_pad, key_len);
-	for (i = 0; i < MD5_BLOCK_LENGTH; i++)
-		k_pad[i] ^= 0x5c;
-
-	MD5Init(&ctx);
-	MD5Update(&ctx, k_pad, MD5_BLOCK_LENGTH);
-	MD5Update(&ctx, digest, MD5_DIGEST_LENGTH);
-	MD5Final(digest, &ctx);
-}
-
-/*
- * HMAC-SHA1 (see RFC 2104).
- */
-static void
-hmac_sha1(const struct vector *vec, int vcnt, const u_int8_t *key,
-    size_t key_len, u_int8_t digest[SHA1_DIGEST_LENGTH])
-{
-	SHA1_CTX ctx;
-	u_int8_t k_pad[SHA1_BLOCK_LENGTH];
-	u_int8_t tk[SHA1_DIGEST_LENGTH];
-	int i;
-
-	if (key_len > SHA1_BLOCK_LENGTH) {
-		SHA1Init(&ctx);
-		SHA1Update(&ctx, key, key_len);
-		SHA1Final(tk, &ctx);
-
-		key = tk;
-		key_len = SHA1_DIGEST_LENGTH;
-	}
-
-	bzero(k_pad, sizeof k_pad);
-	bcopy(key, k_pad, key_len);
-	for (i = 0; i < SHA1_BLOCK_LENGTH; i++)
-		k_pad[i] ^= 0x36;
-
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, k_pad, SHA1_BLOCK_LENGTH);
-	for (i = 0; i < vcnt; i++)
-		SHA1Update(&ctx, vec[i].base, vec[i].len);
-	SHA1Final(digest, &ctx);
-
-	bzero(k_pad, sizeof k_pad);
-	bcopy(key, k_pad, key_len);
-	for (i = 0; i < SHA1_BLOCK_LENGTH; i++)
-		k_pad[i] ^= 0x5c;
-
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, k_pad, SHA1_BLOCK_LENGTH);
-	SHA1Update(&ctx, digest, SHA1_DIGEST_LENGTH);
-	SHA1Final(digest, &ctx);
-}
-
-/*
- * SHA1-based Pseudo-Random Function (see 8.5.1.1).
- */
-void
-ieee80211_prf(const u_int8_t *key, size_t key_len, struct vector *vec,
-    int vcnt, u_int8_t *output, size_t len)
-{
-	u_int8_t hash[SHA1_DIGEST_LENGTH];
-	u_int8_t count = 0;
-
-	/* single octet count, starts at 0 */
-	vec[vcnt].base = &count;
-	vec[vcnt].len  = 1;
-	vcnt++;
-
-	while (len >= SHA1_DIGEST_LENGTH) {
-		hmac_sha1(vec, vcnt, key, key_len, output);
-		count++;
-
-		output += SHA1_DIGEST_LENGTH;
-		len -= SHA1_DIGEST_LENGTH;
-	}
-	if (len > 0) {
-		hmac_sha1(vec, vcnt, key, key_len, hash);
-		/* truncate HMAC-SHA1 to len bytes */
-		memcpy(output, hash, len);
-	}
-}
-
-/*
- * Derive Pairwise Transient Key (PTK) (see 8.5.1.2).
- */
-void
-ieee80211_derive_ptk(const u_int8_t *pmk, size_t pmk_len, const u_int8_t *aa,
-    const u_int8_t *spa, const u_int8_t *anonce, const u_int8_t *snonce,
-    u_int8_t *ptk, size_t ptk_len)
-{
-	struct vector vec[6];	/* +1 for PRF */
-	int ret;
-
-	vec[0].base = "Pairwise key expansion";
-	vec[0].len  = 23;	/* include trailing '\0' */
-
-	ret = memcmp(aa, spa, IEEE80211_ADDR_LEN) < 0;
-	/* Min(AA,SPA) */
-	vec[1].base = ret ? aa : spa;
-	vec[1].len  = IEEE80211_ADDR_LEN;
-	/* Max(AA,SPA) */
-	vec[2].base = ret ? spa : aa;
-	vec[2].len  = IEEE80211_ADDR_LEN;
-
-	ret = memcmp(anonce, snonce, EAPOL_KEY_NONCE_LEN) < 0;
-	/* Min(ANonce,SNonce) */
-	vec[3].base = ret ? anonce : snonce;
-	vec[3].len  = EAPOL_KEY_NONCE_LEN;
-	/* Max(ANonce,SNonce) */
-	vec[4].base = ret ? snonce : anonce;
-	vec[4].len  = EAPOL_KEY_NONCE_LEN;
-
-	ieee80211_prf(pmk, pmk_len, vec, 5, ptk, ptk_len);
-}
-
-/*
- * Derive Pairwise Master Key Identifier (PMKID) (see 8.5.1.2).
- */
-void
-ieee80211_derive_pmkid(const u_int8_t *pmk, size_t pmk_len, const u_int8_t *aa,
-    const u_int8_t *spa, u_int8_t *pmkid)
-{
-	struct vector vec[3];
-	u_int8_t hash[SHA1_DIGEST_LENGTH];
-
-	vec[0].base = "PMK Name";
-	vec[0].len  = 8;	/* does *not* include trailing '\0' */
-	vec[1].base = aa;
-	vec[1].len  = IEEE80211_ADDR_LEN;
-	vec[2].base = spa;
-	vec[2].len  = IEEE80211_ADDR_LEN;
-
-	hmac_sha1(vec, 3, pmk, pmk_len, hash);
-	/* use the first 128 bits of the HMAC-SHA1 */
-	memcpy(pmkid, hash, IEEE80211_PMKID_LEN);
-}
-
-/* unaligned big endian access */
-#define BE_READ_2(p)				\
-	((u_int16_t)				\
-         ((((const u_int8_t *)(p))[0] << 8) |	\
-          (((const u_int8_t *)(p))[1])))
-
-#define BE_WRITE_2(p, v) do {			\
-	((u_int8_t *)(p))[0] = (v) >> 8;	\
-	((u_int8_t *)(p))[1] = (v) & 0xff;	\
-} while (0)
-
-/*
- * Compute the Key MIC field of an EAPOL-Key frame using the specified Key
- * Confirmation Key (KCK).  The hash function can be either HMAC-MD5 or
- * HMAC-SHA1 depending on the EAPOL-Key Key Descriptor Version.
- */
-void
-ieee80211_eapol_key_mic(struct ieee80211_eapol_key *key, const u_int8_t *kck)
-{
-	u_int8_t hash[SHA1_DIGEST_LENGTH];
-	struct vector vec;
-
-	vec.base = key;
-	vec.len  = BE_READ_2(key->len) + 4;
-
-	switch (BE_READ_2(key->info) & EAPOL_KEY_VERSION_MASK) {
-	case EAPOL_KEY_DESC_V1:
-		hmac_md5(&vec, 1, kck, 16, key->mic);
-		break;
-	case EAPOL_KEY_DESC_V2:
-		hmac_sha1(&vec, 1, kck, 16, hash);
-		/* truncate HMAC-SHA1 to its 128 MSBs */
-		memcpy(key->mic, hash, EAPOL_KEY_MIC_LEN);
-		break;
-	}
-}
-
-/*
- * Check the MIC of a received EAPOL-Key frame using the specified Key
- * Confirmation Key (KCK).
+ * Remove the specified key.
  */
 int
-ieee80211_eapol_key_check_mic(struct ieee80211_eapol_key *key,
-    const u_int8_t *kck)
+ieee80211_crypto_delkey(struct ieee80211com *ic, struct ieee80211_key *key)
 {
-	u_int8_t mic[EAPOL_KEY_MIC_LEN];
+	int status;
 
-	memcpy(mic, key->mic, EAPOL_KEY_MIC_LEN);
-	memset(key->mic, 0, EAPOL_KEY_MIC_LEN);
-	ieee80211_eapol_key_mic(key, kck);
-
-	return memcmp(key->mic, mic, EAPOL_KEY_MIC_LEN) != 0;
+	ieee80211_key_update_begin(ic);
+	status = _ieee80211_crypto_delkey(ic, key);
+	ieee80211_key_update_end(ic);
+	return status;
 }
 
 /*
- * Encrypt the Key Data field of an EAPOL-Key frame using the specified Key
- * Encryption Key (KEK).  The encryption algorithm can be either ARC4 or
- * AES Key Wrap depending on the EAPOL-Key Key Descriptor Version.
+ * Clear the global key table.
  */
 void
-ieee80211_eapol_key_encrypt(struct ieee80211com *ic,
-    struct ieee80211_eapol_key *key, const u_int8_t *kek)
+ieee80211_crypto_delglobalkeys(struct ieee80211com *ic)
 {
-	struct rc4_ctx ctx;
-	u_int8_t keybuf[EAPOL_KEY_IV_LEN + 16];
-	u_int16_t len, info;
-	u_int8_t *data;
-	int n;
+	int i;
 
-	len  = BE_READ_2(key->paylen);
-	info = BE_READ_2(key->info);
-	data = (u_int8_t *)(key + 1);
+	ieee80211_key_update_begin(ic);
+	for (i = 0; i < IEEE80211_WEP_NKID; i++)
+		(void) _ieee80211_crypto_delkey(ic, &ic->ic_nw_keys[i]);
+	ieee80211_key_update_end(ic);
+}
 
-	switch (info & EAPOL_KEY_VERSION_MASK) {
-	case EAPOL_KEY_DESC_V1:
-		/* set IV to the lower 16 octets of our global key counter */
-		memcpy(key->iv, ic->ic_globalcnt + 16, 16);
-		/* increment our global key counter (256-bit, big-endian) */
-		for (n = 31; n >= 0 && ++ic->ic_globalcnt[n] == 0; n--);
+/*
+ * Set the contents of the specified key.
+ *
+ * Locking must be handled by the caller using:
+ *	ieee80211_key_update_begin(ic);
+ *	ieee80211_key_update_end(ic);
+ */
+int
+ieee80211_crypto_setkey(struct ieee80211com *ic, struct ieee80211_key *key,
+		const u_int8_t macaddr[IEEE80211_ADDR_LEN])
+{
+	const struct ieee80211_cipher *cip = key->wk_cipher;
 
-		/* concatenate the EAPOL-Key IV field and the KEK */
-		memcpy(keybuf, key->iv, EAPOL_KEY_IV_LEN);
-		memcpy(keybuf + EAPOL_KEY_IV_LEN, kek, 16);
+	IASSERT(cip != NULL, ("No cipher!"));
 
-		rc4_keysetup(&ctx, keybuf, sizeof keybuf);
-		/* discard the first 256 octets of the ARC4 key stream */
-		rc4_skip(&ctx, RC4STATE);
-		rc4_crypt(&ctx, data, data, len);
-		break;
-	case EAPOL_KEY_DESC_V2:
-		if (len < 16 || (len & 7) != 0) {
-			/* insert padding */
-			n = (len < 16) ? 16 - len : 8 - (len & 7);
-			data[len++] = IEEE80211_ELEMID_VENDOR;
-			memset(&data[len], 0, n - 1);
-			len += n - 1;
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+	    "%s: %s keyix %u flags 0x%x mac %s rsc %ju tsc %ju len %u\n",
+	    __func__, cip->ic_name, key->wk_keyix,
+	    key->wk_flags, ether_sprintf(macaddr),
+	    key->wk_keyrsc, key->wk_keytsc, key->wk_keylen);
+
+	/*
+	 * Give cipher a chance to validate key contents.
+	 * XXX should happen before modifying state.
+	 */
+	if (!cip->ic_setkey(key)) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+		    "%s: cipher %s rejected key index %u len %u flags 0x%x\n",
+		    __func__, cip->ic_name, key->wk_keyix,
+		    key->wk_keylen, key->wk_flags);
+		ic->ic_stats.is_crypto_setkey_cipher++;
+		return 0;
+	}
+	if (key->wk_keyix == IEEE80211_KEYIX_NONE) {
+		/* XXX nothing allocated, should not happen */
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+		    "%s: no key index; should not happen!\n", __func__);
+		ic->ic_stats.is_crypto_setkey_nokey++;
+		return 0;
+	}
+	return dev_key_set(ic, key, macaddr);
+}
+
+/*
+ * Add privacy headers appropriate for the specified key.
+ */
+struct ieee80211_key *
+ieee80211_crypto_encap(struct ieee80211com *ic,
+	struct ieee80211_node *ni, struct mbuf *m)
+{
+	struct ieee80211_key *k;
+	struct ieee80211_frame *wh;
+	const struct ieee80211_cipher *cip;
+	u_int8_t keyid;
+
+	/*
+	 * Multicast traffic always uses the multicast key.
+	 * Otherwise if a unicast key is set we use that and
+	 * it is always key index 0.  When no unicast key is
+	 * set we fall back to the default transmit key.
+	 */
+	wh = mtod(m, struct ieee80211_frame *);
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
+	    ni->ni_ucastkey.wk_cipher == &ieee80211_cipher_none) {
+		if (ic->ic_def_txkey == IEEE80211_KEYIX_NONE) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			    "[%s] no default transmit key (%s) deftxkey %u\n",
+			    ether_sprintf(wh->i_addr1), __func__,
+			    ic->ic_def_txkey);
+			ic->ic_stats.is_tx_nodefkey++;
+			return NULL;
 		}
-		aes_key_wrap(kek, 16, data, len / 8, data);
-		len += 8;	/* AES Key Wrap adds 8 bytes */
-		/* update key data length */
-		BE_WRITE_2(key->paylen, len);
-		/* update packet body length */
-		BE_WRITE_2(key->len, sizeof(*key) + len - 4);
-		break;
+		keyid = ic->ic_def_txkey;
+		k = &ic->ic_nw_keys[ic->ic_def_txkey];
+	} else {
+		keyid = 0;
+		k = &ni->ni_ucastkey;
 	}
+	cip = k->wk_cipher;
+	return (cip->ic_encap(k, m, keyid<<6) ? k : NULL);
 }
 
 /*
- * Decrypt the Key Data field of an EAPOL-Key frame using the specified Key
- * Encryption Key (KEK).  The encryption algorithm can be either ARC4 or
- * AES Key Wrap depending on the EAPOL-Key Key Descriptor Version.
+ * Validate and strip privacy headers (and trailer) for a
+ * received frame that has the WEP/Privacy bit set.
  */
-int
-ieee80211_eapol_key_decrypt(struct ieee80211_eapol_key *key,
-    const u_int8_t *kek)
+struct ieee80211_key *
+ieee80211_crypto_decap(struct ieee80211com *ic,
+	struct ieee80211_node *ni, struct mbuf *m, int hdrlen)
 {
-	struct rc4_ctx ctx;
-	u_int8_t keybuf[EAPOL_KEY_IV_LEN + 16];
-	u_int16_t len, info;
-	u_int8_t *data;
+#define	IEEE80211_WEP_HDRLEN	(IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN)
+#define	IEEE80211_WEP_MINLEN \
+	(sizeof(struct ieee80211_frame) + \
+	IEEE80211_WEP_HDRLEN + IEEE80211_WEP_CRCLEN)
+	struct ieee80211_key *k;
+	struct ieee80211_frame *wh;
+	const struct ieee80211_cipher *cip;
+	u_int8_t keyid;
 
-	len  = BE_READ_2(key->paylen);
-	info = BE_READ_2(key->info);
-	data = (u_int8_t *)(key + 1);
-
-	switch (info & EAPOL_KEY_VERSION_MASK) {
-	case EAPOL_KEY_DESC_V1:
-		/* concatenate the EAPOL-Key IV field and the KEK */
-		memcpy(keybuf, key->iv, EAPOL_KEY_IV_LEN);
-		memcpy(keybuf + EAPOL_KEY_IV_LEN, kek, 16);
-
-		rc4_keysetup(&ctx, keybuf, sizeof keybuf);
-		/* discard the first 256 octets of the ARC4 key stream */
-		rc4_skip(&ctx, RC4STATE);
-		rc4_crypt(&ctx, data, data, len);
-		return 0;
-	case EAPOL_KEY_DESC_V2:
-		/* Key Data Length must be a multiple of 8 */
-		if (len < 16 + 8 || (len & 7) != 0)
-			return 1;
-		len -= 8;	/* AES Key Wrap adds 8 bytes */
-		return aes_key_unwrap(kek, 16, data, data, len / 8);
+	/* NB: this minimum size data frame could be bigger */
+	if (m->m_pkthdr.len < IEEE80211_WEP_MINLEN) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_ANY,
+			"%s: WEP data frame too short, len %u\n",
+			__func__, m->m_pkthdr.len);
+		ic->ic_stats.is_rx_tooshort++;	/* XXX need unique stat? */
+		return NULL;
 	}
 
-	return 1;	/* unknown Key Descriptor Version */
-}
+	/*
+	 * Locate the key. If unicast and there is no unicast
+	 * key then we fall back to the key id in the header.
+	 * This assumes unicast keys are only configured when
+	 * the key id in the header is meaningless (typically 0).
+	 */
+	wh = mtod(m, struct ieee80211_frame *);
+	m_copydata(m, hdrlen + IEEE80211_WEP_IVLEN, sizeof(keyid), &keyid);
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
+	    ni->ni_ucastkey.wk_cipher == &ieee80211_cipher_none)
+		k = &ic->ic_nw_keys[keyid >> 6];
+	else
+		k = &ni->ni_ucastkey;
 
-/*
- * Return the length in bytes of a cipher suite key (see Table 60).
- */
-int
-ieee80211_cipher_keylen(enum ieee80211_cipher cipher)
-{
-	switch (cipher) {
-	case IEEE80211_CIPHER_WEP40:
-		return 5;
-	case IEEE80211_CIPHER_TKIP:
-		return 32;
-	case IEEE80211_CIPHER_CCMP:
-		return 16;
-	case IEEE80211_CIPHER_WEP104:
-		return 13;
-	default:	/* unknown cipher */
-		return 0;
+	/*
+	 * Insure crypto header is contiguous for all decap work.
+	 */
+	cip = k->wk_cipher;
+	if (m->m_len < hdrlen + cip->ic_header &&
+	    (m = m_pullup(m, hdrlen + cip->ic_header)) == NULL) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+		    "[%s] unable to pullup %s header\n",
+		    ether_sprintf(wh->i_addr2), cip->ic_name);
+		ic->ic_stats.is_rx_wepfail++;	/* XXX */
+		return NULL;
 	}
-}
 
-/*
- * Map PTK to IEEE 802.11 key (see 8.6).
- */
-void
-ieee80211_map_ptk(const struct ieee80211_ptk *ptk,
-    enum ieee80211_cipher cipher, u_int64_t rsc, struct ieee80211_key *k)
-{
-	memset(k, 0, sizeof(*k));
-	k->k_cipher = cipher;
-	k->k_flags = IEEE80211_KEY_TX;
-	k->k_len = ieee80211_cipher_keylen(cipher);
-	k->k_rsc[0] = rsc;
-	memcpy(k->k_key, ptk->tk, k->k_len);
-}
-
-/*
- * Map GTK to IEEE 802.11 key (see 8.6).
- */
-void
-ieee80211_map_gtk(const u_int8_t *gtk, enum ieee80211_cipher cipher, int kid,
-    int txflag, u_int64_t rsc, struct ieee80211_key *k)
-{
-	memset(k, 0, sizeof(*k));
-	k->k_id = kid;
-	k->k_cipher = cipher;
-	k->k_flags = IEEE80211_KEY_GROUP;
-	if (txflag)
-		k->k_flags |= IEEE80211_KEY_TX;
-	k->k_len = ieee80211_cipher_keylen(cipher);
-	k->k_rsc[0] = rsc;
-	memcpy(k->k_key, gtk, k->k_len);
+	return (cip->ic_decap(k, m, hdrlen) ? k : NULL);
+#undef IEEE80211_WEP_MINLEN
+#undef IEEE80211_WEP_HDRLEN
 }

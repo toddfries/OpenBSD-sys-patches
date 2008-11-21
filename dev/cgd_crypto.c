@@ -1,4 +1,4 @@
-/* $NetBSD: cgd_crypto.c,v 1.7 2007/01/21 23:00:08 cbiere Exp $ */
+/* $NetBSD: cgd_crypto.c,v 1.9 2008/04/28 20:23:46 martin Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgd_crypto.c,v 1.7 2007/01/21 23:00:08 cbiere Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgd_crypto.c,v 1.9 2008/04/28 20:23:46 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -246,7 +239,7 @@ cgd_cipher_aes_cbc(void *privdata, struct uio *dstuio,
 		cgd_cipher_uio_cbc(&encd, aes_cbc_dec_int, dstuio, srcuio);
 		break;
 	default:
-		DIAGPANIC(("%s: unrecognised direction %d", __FUNCTION__, dir));
+		DIAGPANIC(("%s: unrecognised direction %d", __func__, dir));
 	}
 }
 
@@ -358,7 +351,7 @@ cgd_cipher_3des_cbc(void *privdata, struct uio *dstuio,
 		cgd_cipher_uio_cbc(&ce, c3des_cbc_dec_int, dstuio, srcuio);
 		break;
 	default:
-		DIAGPANIC(("%s: unrecognised direction %d", __FUNCTION__, dir));
+		DIAGPANIC(("%s: unrecognised direction %d", __func__, dir));
 	}
 }
 
@@ -454,7 +447,7 @@ cgd_cipher_bf_cbc(void *privdata, struct uio *dstuio,
 		cgd_cipher_uio_cbc(&be, bf_cbc_dec_int, dstuio, srcuio);
 		break;
 	default:
-		DIAGPANIC(("%s: unrecognised direction %d", __FUNCTION__, dir));
+		DIAGPANIC(("%s: unrecognised direction %d", __func__, dir));
 	}
 
 }

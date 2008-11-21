@@ -1,5 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
-/*	$NetBSD: ptrace.h,v 1.2 2001/10/19 00:18:20 bjh21 Exp $	*/
+/*	$NetBSD: ptrace.h,v 1.5 2008/01/25 11:59:20 skrll Exp $	*/
 
 /*
  * Copyright (c) 1995 Frank Lancaster
@@ -16,7 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Christopher G. Demetriou.
+ *      This product includes software developed by TooLs GmbH.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -42,3 +41,10 @@
 #define	PT_SETREGS	(PT_FIRSTMACH + 2)
 #define	PT_GETFPREGS	(PT_FIRSTMACH + 3)
 #define	PT_SETFPREGS	(PT_FIRSTMACH + 4)
+
+#define PT_MACHDEP_STRINGS \
+	"(unused)", \
+	"PT_GETREGS", \
+	"PT_SETREGS", \
+	"PT_GETFPREGS", \
+	"PT_SETFPREGS",

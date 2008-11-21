@@ -1,5 +1,4 @@
-/*	$OpenBSD: obio.c,v 1.5 2006/11/10 19:23:15 miod Exp $	*/
-/*	$NetBSD: obio.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
+/*	$NetBSD: obio.c,v 1.6 2008/04/28 20:23:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,16 +29,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.6 2008/04/28 20:23:26 martin Exp $");
+
+#include "btn_obio.h"
+#include "pwrsw_obio.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <sh/devreg.h>
-#include <sh/mmu.h>
-#include <sh/pmap.h>
-#include <sh/pte.h>
+#include <sh3/devreg.h>
+#include <sh3/mmu.h>
+#include <sh3/pmap.h>
+#include <sh3/pte.h>
 
 #include <machine/bus.h>
 #include <machine/cpu.h>
@@ -54,86 +52,104 @@
 
 #include <landisk/dev/obiovar.h>
 
-int	obio_match(struct device *, void *, void *);
-void	obio_attach(struct device *, struct device *, void *);
-int	obio_print(void *, const char *);
-int	obio_search(struct device *, void *, void *);
+#if (NPWRSW_OBIO > 0) || (NBTN_OBIO > 0)
+#include <dev/sysmon/sysmonvar.h>
+#include <dev/sysmon/sysmon_taskq.h>
+#endif
 
-struct cfattach obio_ca = {
-	sizeof(struct obio_softc), obio_match, obio_attach
+#include "locators.h"
+
+
+struct obio_softc {
+	device_t sc_dev;
+
+	bus_space_tag_t sc_iot;		/* io space tag */
+	bus_space_tag_t sc_memt;	/* mem space tag */
 };
 
-struct cfdriver obio_cd = {
-	0, "obio", DV_DULL
-};
+static int	obio_match(device_t, cfdata_t, void *);
+static void	obio_attach(device_t, device_t, void *);
+static int	obio_print(void *, const char *);
+static int	obio_search(device_t, cfdata_t, const int *, void *);
 
-int
-obio_match(struct device *parent, void *vcf, void *aux)
+CFATTACH_DECL_NEW(obio, sizeof(struct obio_softc),
+    obio_match, obio_attach, NULL, NULL);
+
+static int
+obio_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct obiobus_attach_args *oba = aux;
 
-	if (strcmp(oba->oba_busname, obio_cd.cd_name) != 0)
+	if (strcmp(oba->oba_busname, cf->cf_name))
 		return (0);
 
 	return (1);
 }
 
-void
-obio_attach(struct device *parent, struct device *self, void *aux)
+static void
+obio_attach(device_t parent, device_t self, void *aux)
 {
-	struct obio_softc *sc = (struct obio_softc *)self;
+	struct obio_softc *sc = device_private(self);
 	struct obiobus_attach_args *oba = aux;
 
-	printf("\n");
+	aprint_naive("\n");
+	aprint_normal("\n");
+
+	sc->sc_dev = self;
 
 	sc->sc_iot = oba->oba_iot;
 	sc->sc_memt = oba->oba_memt;
 
-	config_search(obio_search, self, NULL);
+#if (NPWRSW_OBIO > 0) || (NBTN_OBIO > 0)
+	sysmon_power_settype("landisk");
+	sysmon_task_queue_init();
+#endif
+
+	config_search_ia(obio_search, self, "obio", NULL);
 }
 
-int
-obio_search(struct device *parent, void *vcf, void *aux)
+static int
+obio_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
 {
-	struct obio_softc *sc = (struct obio_softc *)parent;
-	struct cfdata *cf = vcf;
-	struct obio_attach_args oa;
 	struct obio_io res_io[1];
 	struct obio_iomem res_mem[1];
 	struct obio_irq res_irq[1];
+	struct obio_softc *sc = device_private(parent);
+	struct obio_attach_args oa;
+	int tryagain;
 
-	oa.oa_iot = sc->sc_iot;
-	oa.oa_memt = sc->sc_memt;
-	oa.oa_nio = oa.oa_niomem = oa.oa_nirq = 0;
+	do {
+		oa.oa_iot = sc->sc_iot;
+		oa.oa_memt = sc->sc_memt;
 
-	if (cf->cf_iobase != IOBASEUNK) {
 		res_io[0].or_addr = cf->cf_iobase;
 		res_io[0].or_size = cf->cf_iosize;
-		oa.oa_io = res_io;
-		oa.oa_nio = 1;
-	}
 
-	if (cf->cf_maddr != MADDRUNK) {
 		res_mem[0].or_addr = cf->cf_maddr;
 		res_mem[0].or_size = cf->cf_msize;
+
+		res_irq[0].or_irq = cf->cf_irq;
+
+		oa.oa_io = res_io;
+		oa.oa_nio = 1;
+
 		oa.oa_iomem = res_mem;
 		oa.oa_niomem = 1;
-	}
 
-	if (cf->cf_irq != IRQUNK) {
-		res_irq[0].or_irq = cf->cf_irq;
 		oa.oa_irq = res_irq;
 		oa.oa_nirq = 1;
-	}
 
-	if ((*cf->cf_attach->ca_match)(parent, cf, &oa) == 0)
-		return (0);
+		tryagain = 0;
+		if (config_match(parent, cf, &oa) > 0) {
+			config_attach(parent, cf, &oa, obio_print);
+			tryagain = (cf->cf_fstate == FSTATE_STAR);
+		}
+	} while (tryagain);
 
-	config_attach(parent, cf, &oa, obio_print);
-	return (1);
+	return (0);
 }
 
-int
+static int
 obio_print(void *args, const char *name)
 {
 	struct obio_attach_args *oa = args;
@@ -142,13 +158,13 @@ obio_print(void *args, const char *name)
 
 	if (oa->oa_nio) {
 		sep = "";
-		printf(" port ");
+		aprint_normal(" port ");
 		for (i = 0; i < oa->oa_nio; i++) {
 			if (oa->oa_io[i].or_size == 0)
 				continue;
-			printf("%s0x%x", sep, oa->oa_io[i].or_addr);
+			aprint_normal("%s0x%x", sep, oa->oa_io[i].or_addr);
 			if (oa->oa_io[i].or_size > 1)
-				printf("-0x%x", oa->oa_io[i].or_addr +
+				aprint_normal("-0x%x", oa->oa_io[i].or_addr +
 				    oa->oa_io[i].or_size - 1);
 			sep = ",";
 		}
@@ -156,13 +172,13 @@ obio_print(void *args, const char *name)
 
 	if (oa->oa_niomem) {
 		sep = "";
-		printf(" iomem ");
+		aprint_normal(" iomem ");
 		for (i = 0; i < oa->oa_niomem; i++) {
 			if (oa->oa_iomem[i].or_size == 0)
 				continue;
-			printf("%s0x%x", sep, oa->oa_iomem[i].or_addr);
+			aprint_normal("%s0x%x", sep, oa->oa_iomem[i].or_addr);
 			if (oa->oa_iomem[i].or_size > 1)
-				printf("-0x%x", oa->oa_iomem[i].or_addr +
+				aprint_normal("-0x%x", oa->oa_iomem[i].or_addr +
 				    oa->oa_iomem[i].or_size - 1);
 			sep = ",";
 		}
@@ -170,11 +186,11 @@ obio_print(void *args, const char *name)
 
 	if (oa->oa_nirq) {
 		sep = "";
-		printf(" irq ");
+		aprint_normal(" irq ");
 		for (i = 0; i < oa->oa_nirq; i++) {
 			if (oa->oa_irq[i].or_irq == IRQUNK)
 				continue;
-			printf("%s%d", sep, oa->oa_irq[i].or_irq);
+			aprint_normal("%s%d", sep, oa->oa_irq[i].or_irq);
 			sep = ",";
 		}
 	}
@@ -186,10 +202,10 @@ obio_print(void *args, const char *name)
  * Set up an interrupt handler to start being called.
  */
 void *
-obio_intr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
-    const char *ih_name)
+obio_intr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg)
 {
-	return extintr_establish(irq, level, ih_fun, ih_arg, ih_name);
+
+	return extintr_establish(irq, level, ih_fun, ih_arg);
 }
 
 /*
@@ -198,6 +214,7 @@ obio_intr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
 void
 obio_intr_disestablish(void *arg)
 {
+
 	extintr_disestablish(arg);
 }
 
@@ -227,10 +244,10 @@ int obio_iomem_alloc(void *v, bus_addr_t rstart, bus_addr_t rend,
     bus_addr_t *bpap, bus_space_handle_t *bshp);
 void obio_iomem_free(void *v, bus_space_handle_t bsh, bus_size_t size);
 
-int obio_iomem_add_mapping(bus_addr_t, bus_size_t, int,
+static int obio_iomem_add_mapping(bus_addr_t, bus_size_t, int,
     bus_space_handle_t *);
 
-int
+static int
 obio_iomem_add_mapping(bus_addr_t bpa, bus_size_t size, int type,
     bus_space_handle_t *bshp)
 {
@@ -240,17 +257,19 @@ obio_iomem_add_mapping(bus_addr_t bpa, bus_size_t size, int type,
 	unsigned int m = 0;
 	int io_type = type & ~OBIO_IOMEM_PCMCIA_8BIT;
 
-	pa = trunc_page(bpa);
-	endpa = round_page(bpa + size);
+	pa = sh3_trunc_page(bpa);
+	endpa = sh3_round_page(bpa + size);
 
 #ifdef DIAGNOSTIC
 	if (endpa <= pa)
 		panic("obio_iomem_add_mapping: overflow");
 #endif
 
-	va = uvm_km_valloc(kernel_map, endpa - pa);
-	if (va == 0)
+	va = uvm_km_alloc(kernel_map, endpa - pa, 0, UVM_KMF_VAONLY);
+	if (va == 0){
+		printf("obio_iomem_add_mapping: nomem\n");
 		return (ENOMEM);
+	}
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
@@ -318,8 +337,8 @@ obio_iomem_unmap(void *v, bus_space_handle_t bsh, bus_size_t size)
 	}
 
 	/* CS5,6 */
-	va = trunc_page(bsh);
-	endva = round_page(bsh + size);
+	va = sh3_trunc_page(bsh);
+	endva = sh3_round_page(bsh + size);
 
 #ifdef DIAGNOSTIC
 	if (endva <= va)
@@ -334,13 +353,14 @@ obio_iomem_unmap(void *v, bus_space_handle_t bsh, bus_size_t size)
 	/*
 	 * Free the kernel virtual mapping.
 	 */
-	uvm_km_free(kernel_map, va, endva - va);
+	uvm_km_free(kernel_map, va, endva - va, UVM_KMF_VAONLY);
 }
 
 int
 obio_iomem_subregion(void *v, bus_space_handle_t bsh,
     bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
+
 	*nbshp = bsh + offset;
 
 	return (0);
@@ -351,6 +371,7 @@ obio_iomem_alloc(void *v, bus_addr_t rstart, bus_addr_t rend,
     bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *bpap, bus_space_handle_t *bshp)
 {
+
 	*bshp = *bpap = rstart;
 
 	return (0);
@@ -359,6 +380,7 @@ obio_iomem_alloc(void *v, bus_addr_t rstart, bus_addr_t rend,
 void
 obio_iomem_free(void *v, bus_space_handle_t bsh, bus_size_t size)
 {
+
 	obio_iomem_unmap(v, bsh, size);
 }
 
@@ -374,20 +396,12 @@ void obio_iomem_read_multi_2(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint16_t *addr, bus_size_t count);
 void obio_iomem_read_multi_4(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint32_t *addr, bus_size_t count);
-void obio_iomem_read_raw_multi_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count);
-void obio_iomem_read_raw_multi_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count);
 void obio_iomem_read_region_1(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint8_t *addr, bus_size_t count);
 void obio_iomem_read_region_2(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint16_t *addr, bus_size_t count);
 void obio_iomem_read_region_4(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint32_t *addr, bus_size_t count);
-void obio_iomem_read_raw_region_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count);
-void obio_iomem_read_raw_region_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count);
 void obio_iomem_write_1(void *v, bus_space_handle_t bsh, bus_size_t offset,
     uint8_t value);
 void obio_iomem_write_2(void *v, bus_space_handle_t bsh, bus_size_t offset,
@@ -400,20 +414,12 @@ void obio_iomem_write_multi_2(void *v, bus_space_handle_t bsh,
     bus_size_t offset, const uint16_t *addr, bus_size_t count);
 void obio_iomem_write_multi_4(void *v, bus_space_handle_t bsh,
     bus_size_t offset, const uint32_t *addr, bus_size_t count);
-void obio_iomem_write_raw_multi_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count);
-void obio_iomem_write_raw_multi_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count);
 void obio_iomem_write_region_1(void *v, bus_space_handle_t bsh,
     bus_size_t offset, const uint8_t *addr, bus_size_t count);
 void obio_iomem_write_region_2(void *v, bus_space_handle_t bsh,
     bus_size_t offset, const uint16_t *addr, bus_size_t count);
 void obio_iomem_write_region_4(void *v, bus_space_handle_t bsh,
     bus_size_t offset, const uint32_t *addr, bus_size_t count);
-void obio_iomem_write_raw_region_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count);
-void obio_iomem_write_raw_region_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count);
 void obio_iomem_set_multi_1(void *v, bus_space_handle_t bsh, bus_size_t offset,
     uint8_t val, bus_size_t count);
 void obio_iomem_set_multi_2(void *v, bus_space_handle_t bsh, bus_size_t offset,
@@ -452,15 +458,9 @@ struct _bus_space obio_bus_io =
 	.bs_rm_2 = obio_iomem_read_multi_2,
 	.bs_rm_4 = obio_iomem_read_multi_4,
 
-	.bs_rrm_2 = obio_iomem_read_raw_multi_2,
-	.bs_rrm_4 = obio_iomem_read_raw_multi_4,
-
 	.bs_rr_1 = obio_iomem_read_region_1,
 	.bs_rr_2 = obio_iomem_read_region_2,
 	.bs_rr_4 = obio_iomem_read_region_4,
-
-	.bs_rrr_2 = obio_iomem_read_raw_region_2,
-	.bs_rrr_4 = obio_iomem_read_raw_region_4,
 
 	.bs_w_1 = obio_iomem_write_1,
 	.bs_w_2 = obio_iomem_write_2,
@@ -470,15 +470,9 @@ struct _bus_space obio_bus_io =
 	.bs_wm_2 = obio_iomem_write_multi_2,
 	.bs_wm_4 = obio_iomem_write_multi_4,
 
-	.bs_wrm_2 = obio_iomem_write_raw_multi_2,
-	.bs_wrm_4 = obio_iomem_write_raw_multi_4,
-
 	.bs_wr_1 = obio_iomem_write_region_1,
 	.bs_wr_2 = obio_iomem_write_region_2,
 	.bs_wr_4 = obio_iomem_write_region_4,
-
-	.bs_wrr_2 = obio_iomem_write_raw_region_2,
-	.bs_wrr_4 = obio_iomem_write_raw_region_4,
 
 	.bs_sm_1 = obio_iomem_set_multi_1,
 	.bs_sm_2 = obio_iomem_set_multi_2,
@@ -512,15 +506,9 @@ struct _bus_space obio_bus_mem =
 	.bs_rm_2 = obio_iomem_read_multi_2,
 	.bs_rm_4 = obio_iomem_read_multi_4,
 
-	.bs_rrm_2 = obio_iomem_read_raw_multi_2,
-	.bs_rrm_4 = obio_iomem_read_raw_multi_4,
-
 	.bs_rr_1 = obio_iomem_read_region_1,
 	.bs_rr_2 = obio_iomem_read_region_2,
 	.bs_rr_4 = obio_iomem_read_region_4,
-
-	.bs_rrr_2 = obio_iomem_read_raw_region_2,
-	.bs_rrr_4 = obio_iomem_read_raw_region_4,
 
 	.bs_w_1 = obio_iomem_write_1,
 	.bs_w_2 = obio_iomem_write_2,
@@ -530,15 +518,9 @@ struct _bus_space obio_bus_mem =
 	.bs_wm_2 = obio_iomem_write_multi_2,
 	.bs_wm_4 = obio_iomem_write_multi_4,
 
-	.bs_wrm_2 = obio_iomem_write_raw_multi_2,
-	.bs_wrm_4 = obio_iomem_write_raw_multi_4,
-
 	.bs_wr_1 = obio_iomem_write_region_1,
 	.bs_wr_2 = obio_iomem_write_region_2,
 	.bs_wr_4 = obio_iomem_write_region_4,
-
-	.bs_wrr_2 = obio_iomem_write_raw_region_2,
-	.bs_wrr_4 = obio_iomem_write_raw_region_4,
 
 	.bs_sm_1 = obio_iomem_set_multi_1,
 	.bs_sm_2 = obio_iomem_set_multi_2,
@@ -557,18 +539,21 @@ struct _bus_space obio_bus_mem =
 uint8_t
 obio_iomem_read_1(void *v, bus_space_handle_t bsh, bus_size_t offset)
 {
+
 	return *(volatile uint8_t *)(bsh + offset);
 }
 
 uint16_t
 obio_iomem_read_2(void *v, bus_space_handle_t bsh, bus_size_t offset)
 {
+
 	return *(volatile uint16_t *)(bsh + offset);
 }
 
 uint32_t
 obio_iomem_read_4(void *v, bus_space_handle_t bsh, bus_size_t offset)
 {
+
 	return *(volatile uint32_t *)(bsh + offset);
 }
 
@@ -606,32 +591,6 @@ obio_iomem_read_multi_4(void *v, bus_space_handle_t bsh,
 }
 
 void
-obio_iomem_read_raw_multi_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count)
-{
-	volatile uint16_t *p = (void *)(bsh + offset);
-
-	count >>= 1;
-	while (count--) {
-		*(uint16_t *)addr = *p;
-		addr += 2;
-	}
-}
-
-void
-obio_iomem_read_raw_multi_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count)
-{
-	volatile uint32_t *p = (void *)(bsh + offset);
-
-	count >>= 2;
-	while (count--) {
-		*(uint32_t *)addr = *p;
-		addr += 4;
-	}
-}
-
-void
 obio_iomem_read_region_1(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint8_t *addr, bus_size_t count)
 {
@@ -664,37 +623,12 @@ obio_iomem_read_region_4(void *v, bus_space_handle_t bsh,
 	}
 }
 
-void
-obio_iomem_read_raw_region_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count)
-{
-	volatile uint16_t *p = (void *)(bsh + offset);
-
-	count >>= 1;
-	while (count--) {
-		*(uint16_t *)addr = *p++;
-		addr += 2;
-	}
-}
-
-void
-obio_iomem_read_raw_region_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, uint8_t *addr, bus_size_t count)
-{
-	volatile uint32_t *p = (void *)(bsh + offset);
-
-	count >>= 2;
-	while (count--) {
-		*(uint32_t *)addr = *p++;
-		addr += 4;
-	}
-}
-
 /* write */
 void
 obio_iomem_write_1(void *v, bus_space_handle_t bsh, bus_size_t offset,
     uint8_t value)
 {
+
 	*(volatile uint8_t *)(bsh + offset) = value;
 }
 
@@ -702,6 +636,7 @@ void
 obio_iomem_write_2(void *v, bus_space_handle_t bsh, bus_size_t offset,
     uint16_t value)
 {
+
 	*(volatile uint16_t *)(bsh + offset) = value;
 }
 
@@ -709,6 +644,7 @@ void
 obio_iomem_write_4(void *v, bus_space_handle_t bsh, bus_size_t offset,
     uint32_t value)
 {
+
 	*(volatile uint32_t *)(bsh + offset) = value;
 }
 
@@ -746,32 +682,6 @@ obio_iomem_write_multi_4(void *v, bus_space_handle_t bsh,
 }
 
 void
-obio_iomem_write_raw_multi_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count)
-{
-	volatile uint16_t *p = (void *)(bsh + offset);
-
-	count >>= 1;
-	while (count--) {
-		*p = *(uint16_t *)addr;
-		addr += 2;
-	}
-}
-
-void
-obio_iomem_write_raw_multi_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count)
-{
-	volatile uint32_t *p = (void *)(bsh + offset);
-
-	count >>= 2;
-	while (count--) {
-		*p = *(uint32_t *)addr;
-		addr += 4;
-	}
-}
-
-void
 obio_iomem_write_region_1(void *v, bus_space_handle_t bsh,
     bus_size_t offset, const uint8_t *addr, bus_size_t count)
 {
@@ -801,32 +711,6 @@ obio_iomem_write_region_4(void *v, bus_space_handle_t bsh,
 
 	while (count--) {
 		*p++ = *addr++;
-	}
-}
-
-void
-obio_iomem_write_raw_region_2(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count)
-{
-	volatile uint16_t *p = (void *)(bsh + offset);
-
-	count >>= 1;
-	while (count--) {
-		*p++ = *(uint16_t *)addr;
-		addr += 2;
-	}
-}
-
-void
-obio_iomem_write_raw_region_4(void *v, bus_space_handle_t bsh,
-    bus_size_t offset, const uint8_t *addr, bus_size_t count)
-{
-	volatile uint32_t *p = (void *)(bsh + offset);
-
-	count >>= 2;
-	while (count--) {
-		*p++ = *(uint32_t *)addr;
-		addr += 4;
 	}
 }
 

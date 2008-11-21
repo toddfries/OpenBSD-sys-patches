@@ -1,5 +1,4 @@
-/*	$OpenBSD: iopi2c.c,v 1.2 2006/07/10 15:39:56 drahn Exp $	*/
-/*	$NetBSD: iopi2c.c,v 1.3 2005/12/11 12:16:51 christos Exp $	*/
+/*	$NetBSD: iopi2c.c,v 1.5 2007/12/06 17:00:32 ad Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -39,8 +38,12 @@
 /*
  * Intel i80321 I/O Processor I2C Controller Unit support.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: iopi2c.c,v 1.5 2007/12/06 17:00:32 ad Exp $");
+
 #include <sys/param.h>
-#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
@@ -62,16 +65,11 @@ static int iopiic_initiate_xfer(void *, uint16_t, int);
 static int iopiic_read_byte(void *, uint8_t *, int);
 static int iopiic_write_byte(void *, uint8_t, int);
 
-struct cfdriver iopiic_cd = {
-	NULL, "iopiic", DV_DULL
-};
-
 void
 iopiic_attach(struct iopiic_softc *sc)
 {
 	struct i2cbus_attach_args iba;
 
-	sc->sc_i2c.ic_exec = NULL;
 	sc->sc_i2c.ic_cookie = sc;
 	sc->sc_i2c.ic_acquire_bus = iopiic_acquire_bus;
 	sc->sc_i2c.ic_release_bus = iopiic_release_bus;
@@ -81,10 +79,8 @@ iopiic_attach(struct iopiic_softc *sc)
 	sc->sc_i2c.ic_read_byte = iopiic_read_byte;
 	sc->sc_i2c.ic_write_byte = iopiic_write_byte;
 
-	bzero(&iba, sizeof iba);
-	iba.iba_name = "iic";
 	iba.iba_tag = &sc->sc_i2c;
-	(void) config_found(&sc->sc_dev, &iba, iicbus_print);
+	(void) config_found_ia(&sc->sc_dev, "i2cbus", &iba, iicbus_print);
 }
 
 static int
@@ -96,7 +92,8 @@ iopiic_acquire_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&sc->sc_buslock, LK_EXCLUSIVE, NULL));
+	mutex_enter(&sc->sc_buslock);
+	return (0);
 }
 
 static void
@@ -108,7 +105,7 @@ iopiic_release_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return;
 
-	(void) lockmgr(&sc->sc_buslock, LK_RELEASE, NULL);
+	mutex_exit(&sc->sc_buslock);
 }
 
 #define	IOPIIC_TIMEOUT		100	/* protocol timeout, in uSecs */
@@ -135,7 +132,7 @@ iopiic_wait(struct iopiic_softc *sc, int bit, int flags)
 	 * matter.
 	 * Note that delay(100) doesn't quite work on the npwr w/ m41t00.
 	 */
-	delay(200);
+	delay(110);
 	for (timeout = IOPIIC_TIMEOUT; timeout != 0; timeout--) {
 		isr = bus_space_read_4(sc->sc_st, sc->sc_sh, IIC_ISR);
 		if (isr & (bit | IIC_ISR_BED))
@@ -150,11 +147,9 @@ iopiic_wait(struct iopiic_softc *sc, int bit, int flags)
 	else
 		error = ETIMEDOUT;
 
-#if 0
 	if (error)
 		printf("%s: iopiic_wait, (%08x) error %d: ISR = 0x%08x\n",
 		    sc->sc_dev.dv_xname, bit, error, isr);
-#endif
 
 	/*
 	 * The IIC_ISR is Read/Clear apart from the bottom 4 bits, which are

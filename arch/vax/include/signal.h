@@ -1,5 +1,4 @@
-/*      $OpenBSD: signal.h,v 1.5 2006/01/08 14:20:17 millert Exp $   */
-/*      $NetBSD: signal.h,v 1.4 1995/01/10 19:01:52 jtc Exp $   */
+/*      $NetBSD: signal.h,v 1.14 2008/11/19 18:36:01 ad Exp $   */
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991 Regents of the University of California.
@@ -37,11 +36,11 @@
 #ifndef _VAX_SIGNAL_H_
 #define _VAX_SIGNAL_H_
 
-#include <sys/cdefs.h>
+#include <sys/featuretest.h>
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
+#if defined(_NETBSD_SOURCE)
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -49,14 +48,32 @@ typedef int sig_atomic_t;
  * to the handler to allow it to restore state properly if
  * a non-standard exit is performed.
  */
-struct	sigcontext {
+#if defined(__LIBC12_SOURCE__) || defined(_KERNEL)
+struct sigcontext13 {
 	int	sc_onstack;		/* sigstack state to restore */
-	int	sc_mask;		/* signal mask to restore */
+	int	sc_mask;		/* signal mask to restore (old style) */
 	int	sc_sp;			/* sp to restore */
 	int	sc_fp;			/* fp to restore */
 	int	sc_ap;			/* ap to restore */
 	int	sc_pc;			/* pc to restore */
 	int	sc_ps;			/* psl to restore */
 };
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#endif /* __LIBC12_SOURCE__ || _KERNEL */
+
+struct sigcontext {
+	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_mask13;		/* signal mask to restore (old style) */
+	int	sc_sp;			/* sp to restore */
+	int	sc_fp;			/* fp to restore */
+	int	sc_ap;			/* ap to restore */
+	int	sc_pc;			/* pc to restore */
+	int	sc_ps;			/* psl to restore */
+	sigset_t sc_mask;		/* signal mask to restore (new style) */
+};
+
+#ifdef _KERNEL
+void sendsig_context(int, const sigset_t *, u_long);
+#endif	/* _KERNEL */
+
+#endif	/* _NETBSD_SOURCE */
 #endif	/* !_VAX_SIGNAL_H_ */

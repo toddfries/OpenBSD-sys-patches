@@ -1,10 +1,9 @@
-/*	$OpenBSD: adv.h,v 1.5 2002/03/14 01:26:53 millert Exp $	*/
-/*      $NetBSD: adv.h,v 1.3 1998/09/26 16:02:56 dante Exp $        */
+/*      $NetBSD: adv.h,v 1.13 2005/12/11 12:21:25 christos Exp $        */
 
 /*
  * Generic driver definitions and exported functions for the Advanced
  * Systems Inc. Narrow SCSI controllers
- * 
+ *
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -42,9 +41,10 @@
 #ifndef _ADVANSYS_NARROW_H_
 #define _ADVANSYS_NARROW_H_
 
-#include <dev/ic/advlib.h>
-
 /******************************************************************************/
+
+/* second level interrupt callback type definition */
+typedef int (* ASC_ISR_CALLBACK) (ASC_SOFTC *, ASC_QDONE_INFO *);
 
 struct adv_ccb
 {
@@ -53,8 +53,12 @@ struct adv_ccb
 
 	struct scsi_sense_data scsi_sense;
 
+	struct callout ccb_watchdog;
+
 	TAILQ_ENTRY(adv_ccb) chain;
-	struct scsi_xfer	*xs;	/* the scsi_xfer for this cmd */
+	struct adv_ccb		*nexthash;
+	u_long			hashkey;
+	struct scsipi_xfer	*xs;	/* the scsipi_xfer for this cmd */
 	int			flags;	/* see below */
 
 	int			timeout;
@@ -77,6 +81,7 @@ typedef struct adv_ccb ADV_CCB;
 struct adv_control
 {
 	ADV_CCB	ccbs[ADV_MAX_CCB];	/* all our control blocks */
+	u_int8_t overrun_buf[ASC_OVERRUN_BSIZE];
 };
 
 /*
@@ -87,9 +92,11 @@ struct adv_control
 
 /******************************************************************************/
 
-int adv_init(ASC_SOFTC *sc);
-void adv_attach(ASC_SOFTC *sc);
-int adv_intr(void *arg);
+int adv_init(ASC_SOFTC *);
+void adv_attach(ASC_SOFTC *);
+int adv_detach(ASC_SOFTC *, int);
+int adv_intr(void *);
+ADV_CCB *adv_ccb_phys_kv(ASC_SOFTC *, u_long);
 
 /******************************************************************************/
 

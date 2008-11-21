@@ -1,4 +1,6 @@
-/*	$OpenBSD: if_faith.c,v 1.25 2008/05/07 02:11:34 claudio Exp $	*/
+/*	$NetBSD: if_faith.c,v 1.45 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	$KAME: if_faith.c,v 1.21 2001/02/20 07:59:26 itojun Exp $	*/
+
 /*
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -28,33 +30,44 @@
  * SUCH DAMAGE.
  */
 /*
- * derived from 
+ * derived from
  *	@(#)if_loop.c	8.1 (Berkeley) 6/10/93
  * Id: if_loop.c,v 1.22 1996/06/19 16:24:10 wollman Exp
  */
 
 /*
- * Loopback interface driver for protocol testing and timing.
+ * IPv6-to-IPv4 TCP relay capturing interface
  */
-#include "faith.h"
 
-#if NFAITH > 0
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_faith.c,v 1.45 2008/11/07 00:20:13 dyoung Exp $");
+
+#include "opt_inet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
+#include <sys/queue.h>
+
+#include <sys/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
+#include <net/if_faith.h>
 
 #ifdef	INET
 #include <netinet/in.h>
+#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
+#include <netinet/ip.h>
 #endif
 
 #ifdef INET6
@@ -62,43 +75,47 @@
 #include <netinet/in.h>
 #endif
 #include <netinet6/in6_var.h>
+#include <netinet/ip6.h>
+#include <netinet6/ip6_var.h>
 #endif
 
 #include "bpfilter.h"
 
-static int faithioctl(struct ifnet *, u_long, caddr_t);
-int faithoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
-	struct rtentry *);
+#include <net/net_osdep.h>
+
+static int	faithioctl(struct ifnet *, u_long, void *);
+static int	faithoutput(struct ifnet *, struct mbuf *,
+		            const struct sockaddr *, struct rtentry *);
+static void	faithrtrequest(int, struct rtentry *,
+		               const struct rt_addrinfo *);
 
 void	faithattach(int);
-int	faith_clone_create(struct if_clone *, int);
-int	faith_clone_destroy(struct ifnet *ifp);
 
-struct if_clone faith_cloner =
+static int	faith_clone_create(struct if_clone *, int);
+static int	faith_clone_destroy(struct ifnet *);
+
+static struct if_clone faith_cloner =
     IF_CLONE_INITIALIZER("faith", faith_clone_create, faith_clone_destroy);
 
 #define	FAITHMTU	1500
 
 /* ARGSUSED */
 void
-faithattach(faith)
-	int faith;
+faithattach(int count)
 {
+
 	if_clone_attach(&faith_cloner);
 }
 
-int
-faith_clone_create(ifc, unit)
-	struct if_clone *ifc;
-	int unit;
+static int
+faith_clone_create(struct if_clone *ifc, int unit)
 {
 	struct ifnet *ifp;
 
-	ifp = malloc(sizeof(*ifp), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!ifp)
-		return (ENOMEM);
-	snprintf(ifp->if_xname, sizeof ifp->if_xname, "%s%d", ifc->ifc_name, 
-	    unit);
+	ifp = if_alloc(IFT_FAITH);
+
+	if_initname(ifp, ifc->ifc_name, unit);
+
 	ifp->if_mtu = FAITHMTU;
 	/* Change to BROADCAST experimentaly to announce its prefix. */
 	ifp->if_flags = /* IFF_LOOPBACK */ IFF_BROADCAST | IFF_MULTICAST;
@@ -107,47 +124,48 @@ faith_clone_create(ifc, unit)
 	ifp->if_type = IFT_FAITH;
 	ifp->if_hdrlen = 0;
 	ifp->if_addrlen = 0;
+	ifp->if_dlt = DLT_NULL;
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
 #if NBPFILTER > 0
-	bpfattach(&ifp->if_bpf, ifp, DLT_NULL, sizeof(u_int));
+	bpfattach(ifp, DLT_NULL, sizeof(u_int));
 #endif
 	return (0);
 }
 
 int
-faith_clone_destroy(ifp)
-	struct ifnet *ifp;
+faith_clone_destroy(struct ifnet *ifp)
 {
-	if_detach(ifp);
 
+#if NBPFILTER > 0
+	bpfdetach(ifp);
+#endif
+	if_detach(ifp);
 	free(ifp, M_DEVBUF);
+
 	return (0);
 }
 
-int
-faithoutput(ifp, m, dst, rt)
-	struct ifnet *ifp;
-	struct mbuf *m;
-	struct sockaddr *dst;
-	struct rtentry *rt;
+static int
+faithoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
+    struct rtentry *rt)
 {
 	int s, isr;
+	uint32_t af;
 	struct ifqueue *ifq = 0;
 
 	if ((m->m_flags & M_PKTHDR) == 0)
 		panic("faithoutput no HDR");
+	af = dst->sa_family;
 #if NBPFILTER > 0
 	/* BPF write needs to be handled specially */
-	if (dst->sa_family == AF_UNSPEC) {
-		dst->sa_family = *(mtod(m, int *));
-		m->m_len -= sizeof(int);
-		m->m_pkthdr.len -= sizeof(int);
-		m->m_data += sizeof(int);
+	if (af == AF_UNSPEC) {
+		af = *(mtod(m, int *));
+		m_adj(m, sizeof(int));
 	}
 
 	if (ifp->if_bpf)
-		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
+		bpf_mtap_af(ifp->if_bpf, af, m);
 #endif
 
 	if (rt && rt->rt_flags & (RTF_REJECT|RTF_BLACKHOLE)) {
@@ -157,7 +175,7 @@ faithoutput(ifp, m, dst, rt)
 	}
 	ifp->if_opackets++;
 	ifp->if_obytes += m->m_pkthdr.len;
-	switch (dst->sa_family) {
+	switch (af) {
 #ifdef INET
 	case AF_INET:
 		ifq = &ipintrq;
@@ -193,15 +211,21 @@ faithoutput(ifp, m, dst, rt)
 	return (0);
 }
 
+/* ARGSUSED */
+static void
+faithrtrequest(int cmd, struct rtentry *rt,
+    const struct rt_addrinfo *info)
+{
+	if (rt)
+		rt->rt_rmx.rmx_mtu = rt->rt_ifp->if_mtu; /* for ISO */
+}
+
 /*
  * Process an ioctl request.
  */
 /* ARGSUSED */
 static int
-faithioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+faithioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct ifaddr *ifa;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -209,9 +233,10 @@ faithioctl(ifp, cmd, data)
 
 	switch (cmd) {
 
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP | IFF_RUNNING;
 		ifa = (struct ifaddr *)data;
+		ifa->ifa_rtrequest = faithrtrequest;
 		/*
 		 * Everything else is done at a higher level.
 		 */
@@ -239,12 +264,41 @@ faithioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCSIFFLAGS:
-		break;
-
 	default:
-		error = ENOTTY;
+		if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET)
+			error = 0;
+		break;
 	}
 	return (error);
 }
-#endif /* NFAITH > 0 */
+
+#ifdef INET6
+/*
+ * XXX could be slow
+ * XXX could be layer violation to call sys/net from sys/netinet6
+ */
+int
+faithprefix(struct in6_addr *in6)
+{
+	struct rtentry *rt;
+	struct sockaddr_in6 sin6;
+	int ret;
+
+	if (ip6_keepfaith == 0)
+		return 0;
+
+	memset(&sin6, 0, sizeof(sin6));
+	sin6.sin6_family = AF_INET6;
+	sin6.sin6_len = sizeof(struct sockaddr_in6);
+	sin6.sin6_addr = *in6;
+	rt = rtalloc1((struct sockaddr *)&sin6, 0);
+	if (rt && rt->rt_ifp && rt->rt_ifp->if_type == IFT_FAITH &&
+	    (rt->rt_ifp->if_flags & IFF_UP) != 0)
+		ret = 1;
+	else
+		ret = 0;
+	if (rt)
+		RTFREE(rt);
+	return ret;
+}
+#endif

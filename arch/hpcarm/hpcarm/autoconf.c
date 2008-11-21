@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.15 2006/03/26 13:50:13 peter Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.17 2008/06/13 13:24:10 rafal Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.15 2006/03/26 13:50:13 peter Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.17 2008/06/13 13:24:10 rafal Exp $");
 
 #include "opt_md.h"
 
@@ -52,6 +52,7 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.15 2006/03/26 13:50:13 peter Exp $");
 #include <machine/bootconfig.h>
 #include <machine/config_hook.h>
 #include <machine/intr.h>
+#include <arm/arm32/machdep.h>
 
 #include "sacom.h"
 
@@ -71,9 +72,9 @@ static void
 get_device(const char *name)
 {
 	int unit, part;
-	char devname[16], buf[32];
+	char devname[16];
 	const char *cp;
-	struct device *dv;
+	device_t dv;
 
 	if (strncmp(name, "/dev/", 5) == 0)
 		name += 5;
@@ -94,13 +95,9 @@ get_device(const char *name)
 		part = *cp - 'a';
 	else if (*cp != '\0' && *cp != ' ')
 		return;
-	sprintf(buf, "%s%d", devname, unit);
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (strcmp(buf, dv->dv_xname) == 0) {
-			booted_device = dv;
-			booted_partition = part;
-			return;
-		}
+	if ((dv = device_find_by_driver_unit(devname, unit)) != NULL) {
+		booted_device = dv;
+		booted_partition = part;
 	}
 }
 
@@ -166,13 +163,8 @@ cpu_configure(void)
 		panic("configure: mainbus not configured");
 
 	/* Debugging information */
-#ifdef DEBUG
-	printf("ipl_bio=%08x ipl_net=%08x ipl_tty=%08x ipl_vm=%08x\n",
-	    imask[IPL_BIO], imask[IPL_NET], imask[IPL_TTY],
-	    imask[IPL_VM]);
-	printf("ipl_audio=%08x ipl_imp=%08x ipl_high=%08x ipl_serial=%08x\n",
-	    imask[IPL_AUDIO], imask[IPL_CLOCK], imask[IPL_HIGH],
-	    imask[IPL_SERIAL]);
+#ifdef 	DIAGNOSTIC
+	dump_spl_masks();
 #endif
 
 	/* Time to start taking interrupts so lets open the flood gates .... */

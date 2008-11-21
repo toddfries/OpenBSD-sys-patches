@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_oldmmap.c,v 1.65 2006/02/09 19:18:56 manu Exp $	*/
+/*	$NetBSD: linux_oldmmap.c,v 1.70 2008/06/18 12:24:17 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,13 +30,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_oldmmap.c,v 1.65 2006/02/09 19:18:56 manu Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_oldmmap.c,v 1.70 2008/06/18 12:24:17 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mount.h>
 
-#include <sys/sa.h>
+#include <sys/sched.h>
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_param.h>
@@ -79,14 +72,11 @@ __KERNEL_RCSID(0, "$NetBSD: linux_oldmmap.c,v 1.65 2006/02/09 19:18:56 manu Exp 
  * They just pass everything in a structure.
  */
 int
-linux_sys_old_mmap(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_old_mmap(struct lwp *l, const struct linux_sys_old_mmap_args *uap, register_t *retval)
 {
-	struct linux_sys_old_mmap_args /* {
+	/* {
 		syscallarg(struct linux_oldmmap *) lmp;
-	} */ *uap = v;
+	} */
 	struct linux_oldmmap lmap;
 	struct linux_sys_mmap_args nlmap;
 	int error;

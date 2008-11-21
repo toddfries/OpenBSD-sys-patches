@@ -1,50 +1,74 @@
-/*	$OpenBSD: divu.S,v 1.10 2005/01/23 18:01:30 mickey Exp $	*/
+/*	$NetBSD: divu.S,v 1.3 2005/12/11 12:17:40 christos Exp $	*/
+
+/*	$OpenBSD: divu.S,v 1.5 2001/03/29 03:58:18 mickey Exp $	*/
+
 /*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)divu.s: Revision: 1.11.88.1 Date: 93/12/07 15:06:01 */
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
 
 #include <machine/asm.h>
-#define _LOCORE
-#include <machine/frame.h>
 
-;************************************************************************
-; Implement an integer divide routine for 32-bit operands and 32-bit quotient
-; and remainder with operand values of zero (divisor only) treated specially.
-;
-;****************************************************************************
-; Definitions
-;****************************************************************************
-;
-;	General registers
-;
-gr0	.reg		%r0		; General register zero
-rem	.reg		%r3		; remainder and upper part of dividend
-quo	.reg		%r4		; quotient and lower part of dividend
-dvr	.reg		%r5		; divisor
-tp	.reg		%r6		; temp. reg.
+/**************************************************************************
+ * Implement an integer divide routine for 32-bit operands and 32-bit quotient
+ * and remainder with operand values of zero (divisor only) treated specially.
+ *
+ ***************************************************************************/
+/*
+ *	General registers
+ */
+gr0:	.reg		%r0	/* General register zero */
+rem:	.reg		%r3	/* remainder and upper part of dividend */
+quo:	.reg		%r4	/* quotient and lower part of dividend */
+dvr:	.reg		%r5	/* divisor */
+tp:	.reg		%r6	/* temp. reg. */
 
-;******************************************************************************
 	.text
-LEAF_ENTRY(divu)
-	stws,ma		rem,4(sp)		; save registers on stack
-	stws,ma		quo,4(sp)		; save registers on stack
-	stws,ma		dvr,4(sp)		; save registers on stack
-	stws,ma		tp,4(sp)		; save registers on stack
 
-	addi		0,arg2,dvr		; get divisor
-	addi		0,arg1,quo		; get lower dividend
-	addi		0,arg0,rem		; get upper dividend
+/*****************************************************************************/
+ENTRY(divu,16)
+	stws,ma		rem,4(%sp)		; save registers on stack
+	stws,ma		quo,4(%sp)		; save registers on stack
+	stws,ma		dvr,4(%sp)		; save registers on stack
+	stws,ma		tp,4(%sp)		; save registers on stack
+
+	addi		0,%arg2,dvr		; get divisor
+	addi		0,%arg1,quo		; get lower dividend
+	addi		0,%arg0,rem		; get upper dividend
 
 	comib,>,n	0,dvr,hibit		; check for dvr >= 2**31
 	addi		-1,gr0,tp		; set V-bit to 1
@@ -122,30 +146,30 @@ LEAF_ENTRY(divu)
 ;
 ;	end of divide routine
 ;
-finish	stws		rem,0(arg3)		; save remainder in high part
+finish:	stws		rem,0(%arg3)		; save remainder in high part
 						;   of result
-	stws		quo,4(arg3)		; save quotient in low part
+	stws		quo,4(%arg3)		; save quotient in low part
 						;   of result
-	ldws,mb		-4(sp),tp		; restore registers
-	ldws,mb		-4(sp),dvr		; restore registers
-	ldws,mb		-4(sp),quo		; restore registers
-	bv		0(rp)			; return
-	ldws,mb		-4(sp),rem		; restore registers
+	ldws,mb		-4(%sp),tp		; restore registers
+	ldws,mb		-4(%sp),dvr		; restore registers
+	ldws,mb		-4(%sp),quo		; restore registers
+	bv		0(%rp)			; return
+	ldws,mb		-4(%sp),rem		; restore registers
 ;
-hibit	ldo		32(0),tp		; initialize loop counter
+hibit:	ldo		32(0),tp		; initialize loop counter
 	add		quo,quo,quo		; shift high bit into carry
-loop	addc		rem,rem,rem		; shift in high bit of dvdl
+loop:	addc		rem,rem,rem		; shift in high bit of dvdl
 	addc,<>		0,0,0			; if bit shifted out of dvdu,
 						;   want to do subtract
 	comb,<<,n	rem,dvr,nosub		; if upper dividend > dvr,
 	sub		rem,dvr,rem		;   subtract and
 	add,tr		dvr,dvr,0		;   set carry
-nosub	addi		0,0,0			; otherwise clear carry
+nosub:	addi		0,0,0			; otherwise clear carry
 	addib,>		-1,tp,loop		; inc. counter; finished?
 	addc		quo,quo,quo		; shift bit of result into dvdl
 	b		finish+4		; finish up
-	stws		rem,0(arg3)		; save remainder in high part
+	stws		rem,0(%arg3)		; save remainder in high part
 						;   of result
-EXIT(divu)
 
+EXIT(divu)
 	.end

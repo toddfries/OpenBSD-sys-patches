@@ -1,4 +1,4 @@
-/* $NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $ */
+/* $NetBSD: hypervisor.c,v 1.42 2008/10/24 21:09:24 jym Exp $ */
 
 /*
  * Copyright (c) 2005 Manuel Bouyer.
@@ -63,7 +63,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.42 2008/10/24 21:09:24 jym Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,7 +78,11 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $")
 #include "xencons.h"
 #include "xennet_hypervisor.h"
 #include "xbd_hypervisor.h"
+#ifndef __x86_64__
 #include "npx.h"
+#else
+#define NNPX 0
+#endif /* __x86_64__ */
 #include "isa.h"
 #include "pci.h"
 #include "acpi.h"
@@ -86,11 +90,14 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $")
 #include "opt_xen.h"
 #include "opt_mpbios.h"
 
-#include <machine/xen.h>
-#include <machine/hypervisor.h>
-#include <machine/evtchn.h>
+#include <xen/xen.h>
+#include <xen/hypervisor.h>
+#include <xen/evtchn.h>
 #ifndef XEN3
-#include <machine/ctrl_if.h>
+#include <xen/ctrl_if.h>
+#endif
+#ifdef XEN3
+#include <xen/xen3-public/version.h>
 #endif
 
 #if defined(DOM0OPS) || defined(XEN3)
@@ -100,12 +107,12 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $")
 #include <sys/vnode.h>
 #include <miscfs/specfs/specdev.h>
 #include <miscfs/kernfs/kernfs.h>
-#include <machine/kernfs_machdep.h>
+#include <xen/kernfs_machdep.h>
 #include <dev/isa/isavar.h>
 #endif /* DOM0OPS || XEN3 */
 #ifdef XEN3
-#include <machine/granttables.h>
-#include <machine/cpuvar.h>
+#include <xen/granttables.h>
+#include <xen/vcpuvar.h>
 #endif
 #if NPCI > 0
 #include <dev/pci/pcivar.h>
@@ -113,7 +120,7 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $")
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpi_madt.h>       
 #include <machine/mpconfig.h>
-#include <machine/mpacpi.h>       
+#include <xen/mpacpi.h>       
 #endif
 #ifdef MPBIOS
 #include <machine/mpbiosvar.h>       
@@ -127,20 +134,14 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $")
 #endif /* NPCI */
 
 #if NXENBUS > 0
-#include <machine/xenbus.h>
-#endif
-#ifdef XEN3
-#include <machine/granttables.h>
-#endif
-#if NXENBUS > 0
-#include <machine/xenbus.h>
+#include <xen/xenbus.h>
 #endif
 
 #if NXENNET_HYPERVISOR > 0
 #include <net/if.h>
 #include <net/if_ether.h>
 #include <net/if_media.h>
-#include <machine/if_xennetvar.h>
+#include <xen/if_xennetvar.h>
 #endif
 
 #if NXBD_HYPERVISOR > 0
@@ -148,13 +149,13 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.28 2006/10/15 13:31:18 yamt Exp $")
 #include <sys/disk.h>
 #include <sys/bufq.h>
 #include <dev/dkvar.h>
-#include <machine/xbdvar.h>
+#include <xen/xbdvar.h>
 #endif
 
-int	hypervisor_match(struct device *, struct cfdata *, void *);
-void	hypervisor_attach(struct device *, struct device *, void *);
+int	hypervisor_match(device_t, cfdata_t, void *);
+void	hypervisor_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(hypervisor, sizeof(struct device),
+CFATTACH_DECL_NEW(hypervisor, 0,
     hypervisor_match, hypervisor_attach, NULL, NULL);
 
 static int hypervisor_print(void *, const char *);
@@ -186,7 +187,7 @@ union hypervisor_attach_cookie {
 #endif
 #endif /* NPCI */
 #ifdef XEN3
-	struct cpu_attach_args hac_caa;
+	struct vcpu_attach_args hac_vcaa;
 #endif
 };
 
@@ -218,10 +219,7 @@ static struct sysmon_pswitch hysw_reboot = {
  * Probe for the hypervisor; always succeeds.
  */
 int
-hypervisor_match(parent, match, aux)
-	struct device *parent;
-	struct cfdata *match;
-	void *aux;
+hypervisor_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct hypervisor_attach_args *haa = aux;
 
@@ -234,10 +232,11 @@ hypervisor_match(parent, match, aux)
  * Attach the hypervisor.
  */
 void
-hypervisor_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+hypervisor_attach(device_t parent, device_t self, void *aux)
 {
+#ifdef XEN3
+	int xen_version;
+#endif
 #if NPCI >0
 #ifndef XEN3
 	physdev_op_t physdev_op;
@@ -250,19 +249,24 @@ hypervisor_attach(parent, self, aux)
 #endif /* NPCI */
 	union hypervisor_attach_cookie hac;
 
-	printf("\n");
-
 #ifdef XEN3
+	xen_version = HYPERVISOR_xen_version(XENVER_version, NULL);
+	aprint_normal(": Xen version %d.%d\n", (xen_version & 0xffff0000) >> 16,
+	       xen_version & 0x0000ffff);
+
 	xengnt_init();
 
-	memset(&hac.hac_caa, 0, sizeof(hac.hac_caa));
-	hac.hac_caa.caa_name = "vcpu";
-	hac.hac_caa.cpu_number = 0;
-	hac.hac_caa.cpu_role = CPU_ROLE_SP;
-	hac.hac_caa.cpu_func = 0;
-	config_found_ia(self, "xendevbus", &hac.hac_caa, hypervisor_print);
+	memset(&hac.hac_vcaa, 0, sizeof(hac.hac_vcaa));
+	hac.hac_vcaa.vcaa_name = "vcpu";
+	hac.hac_vcaa.vcaa_caa.cpu_number = 0;
+	hac.hac_vcaa.vcaa_caa.cpu_role = CPU_ROLE_SP;
+	hac.hac_vcaa.vcaa_caa.cpu_func = 0;
+	config_found_ia(self, "xendevbus", &hac.hac_vcaa, hypervisor_print);
+#else
+	aprint_normal("\n");
 #endif
-	init_events();
+
+	events_init();
 
 #if NXENBUS > 0
 	hac.hac_xenbus.xa_device = "xenbus";
@@ -302,7 +306,11 @@ hypervisor_attach(parent, self, aux)
 	hac.hac_pba.pba_iot = X86_BUS_SPACE_IO;
 	hac.hac_pba.pba_memt = X86_BUS_SPACE_MEM;
 	hac.hac_pba.pba_dmat = &pci_bus_dma_tag;
-	hac.hac_pba.pba_dmat64 = 0;
+#ifdef _LP64
+	hac.hac_pba.pba_dmat64 = &pci_bus_dma64_tag;
+#else
+	hac.hac_pba.pba_dmat64 = NULL;
+#endif /* _LP64 */
 	hac.hac_pba.pba_flags = PCI_FLAGS_MEM_ENABLED | PCI_FLAGS_IO_ENABLED;
 	hac.hac_pba.pba_bridgetag = NULL;
 	hac.hac_pba.pba_bus = 0;
@@ -332,9 +340,9 @@ hypervisor_attach(parent, self, aux)
 			printf("0x%x ", physdev_op.u.pci_probe_root_buses.busmask[i]);
 		printf("\n");
 #endif
-		memset(pci_bus_attached, 0, sizeof(u_int32_t) * 256 / 32);
+		memset(pci_bus_attached, 0, sizeof(uint32_t) * 256 / 32);
 		for (i = 0, busnum = 0; i < 256/32; i++) {
-			u_int32_t mask = 
+			uint32_t mask = 
 			    physdev_op.u.pci_probe_root_buses.busmask[i];
 			for (j = 0; j < 32; j++, busnum++) {
 				if ((mask & (1 << j)) == 0)
@@ -371,7 +379,7 @@ hypervisor_attach(parent, self, aux)
 #endif /* NPCI */
 
 #ifdef DOM0OPS
-	if (xen_start_info.flags & SIF_PRIVILEGED) {
+	if (xendomain_is_privileged()) {
 		xenkernfs_init();
 		xenprivcmd_init();
 		xen_shm_init();
@@ -384,18 +392,17 @@ hypervisor_attach(parent, self, aux)
 #ifndef XEN3
 	if (sysmon_pswitch_register(&hysw_reboot) != 0 ||
 	    sysmon_pswitch_register(&hysw_shutdown) != 0)
-		printf("%s: unable to register with sysmon\n",
-		    self->dv_xname);
+		aprint_error_dev(self, "unable to register with sysmon\n");
 	else
 		ctrl_if_register_receiver(CMSG_SHUTDOWN,
 		    hypervisor_shutdown_handler, CALLBACK_IN_BLOCKING_CONTEXT);
 #endif
+
+	hypervisor_machdep_attach();
 }
 
 static int
-hypervisor_print(aux, parent)
-	void *aux;
-	const char *parent;
+hypervisor_print(void *aux, const char *parent)
 {
 	union hypervisor_attach_cookie *hac = aux;
 
@@ -411,7 +418,7 @@ hypervisor_print(aux, parent)
 kernfs_parentdir_t *kernxen_pkt;
 
 void
-xenkernfs_init()
+xenkernfs_init(void)
 {
 	kernfs_entry_t *dkt;
 

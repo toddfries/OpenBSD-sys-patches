@@ -1,4 +1,3 @@
-/*	$OpenBSD: sony8x16.h,v 1.3 2006/08/06 16:00:46 miod Exp $	*/
 /*	$NetBSD: sony8x16.h,v 1.8 2005/12/11 12:24:12 christos Exp $	*/
 /*
  * Copyright (c) 1992, 1993
@@ -42,7 +41,6 @@ static u_char sony8x16_data[];
 
 struct wsdisplay_font sony8x16 = {
 	"sony8x16",			/* typeface name */
-	0,				/* index */
 	' ',				/* firstchar */
 	0xff - ' ' + 1,			/* numchars */
 	WSDISPLAY_FONTENC_ISO,		/* encoding */
@@ -51,7 +49,6 @@ struct wsdisplay_font sony8x16 = {
 	1,				/* stride */
 	WSDISPLAY_FONTORDER_L2R,	/* bit order */
 	WSDISPLAY_FONTORDER_L2R,	/* byte order */
-	NULL,				/* cookie */
 	sony8x16_data			/* data */
 };
 

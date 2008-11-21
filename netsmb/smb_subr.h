@@ -1,4 +1,4 @@
-/*	$NetBSD: smb_subr.h,v 1.16 2006/08/17 17:11:29 christos Exp $	*/
+/*	$NetBSD: smb_subr.h,v 1.18 2008/06/24 10:37:19 gmcgarry Exp $	*/
 
 /*
  * Copyright (c) 2000-2001, Boris Popov
@@ -42,19 +42,19 @@
 
 MALLOC_DECLARE(M_SMBTEMP);
 
-#define SMBERROR(format, args...) printf("%s: "format, __func__ ,## args)
-#define SMBPANIC(format, args...) printf("%s: "format, __func__ ,## args)
+#define SMBERROR(x)	aprint_error x
+#define SMBPANIC(x)	aprint_error x
 
 #ifdef SMB_SOCKET_DEBUG
-#define SMBSDEBUG(format, args...) printf("%s: "format, __func__ ,## args)
+#define SMBSDEBUG(x)	aprint_debug x
 #else
-#define SMBSDEBUG(format, args...)
+#define SMBSDEBUG(x)	/* nothing */
 #endif
 
 #ifdef SMB_IOD_DEBUG
-#define SMBIODEBUG(format, args...) printf("%s: "format, __func__ ,## args)
+#define SMBIODEBUG(x)	aprint_debug x
 #else
-#define SMBIODEBUG(format, args...)
+#define SMBIODEBUG(x)	/* nothing */
 #endif
 
 #ifdef SMB_SOCKETDATA_DEBUG
@@ -79,11 +79,11 @@ void m_dumpm(struct mbuf *m);
  * Compatibility wrappers for simple locks
  */
 
-#define	smb_slock			simplelock
-#define	smb_sl_init(mtx, desc)		simple_lock_init(mtx)
-#define	smb_sl_destroy(mtx)		/*simple_lock_destroy(mtx)*/
-#define	smb_sl_lock(mtx)		simple_lock(mtx)
-#define	smb_sl_unlock(mtx)		simple_unlock(mtx)
+#define	smb_slock			kmutex
+#define	smb_sl_init(mtx, desc)		mutex_init((mtx), MUTEX_DEFAULT, IPL_NONE)
+#define	smb_sl_destroy(mtx)		mutex_destroy(mtx)
+#define	smb_sl_lock(mtx)		mutex_enter(mtx)
+#define	smb_sl_unlock(mtx)		mutex_exit(mtx)
 
 #define SMB_STRFREE(p)	do { if (p) smb_strfree(p); } while(0)
 

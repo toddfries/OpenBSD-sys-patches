@@ -1,4 +1,4 @@
-/*	$NetBSD: isr.c,v 1.12 2005/12/11 12:18:23 christos Exp $	*/
+/*	$NetBSD: isr.c,v 1.19 2008/06/22 17:33:41 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,22 +39,21 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isr.c,v 1.12 2005/12/11 12:18:23 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isr.c,v 1.19 2008/06/22 17:33:41 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <net/netisr.h>
-
-#include <machine/cpu.h>
 
 #include <news68k/news68k/isr.h>
 
 isr_autovec_list_t isr_autovec[NISRAUTOVEC];
 struct	isr_vectored isr_vectored[NISRVECTORED];
+int idepth;
 
 void set_vector_entry(int, void *);
 void *get_vector_entry(int);
@@ -123,7 +115,7 @@ isrlink_autovec(int (*func)(void *), void *arg, int ipl, int priority)
 	 * at the head of the list.
 	 */
 	list = &isr_autovec[ipl];
-	if (list->lh_first == NULL) {
+	if (LIST_EMPTY(list)) {
 		LIST_INSERT_HEAD(list, newisr, isr_link);
 		return;
 	}
@@ -133,8 +125,8 @@ isrlink_autovec(int (*func)(void *), void *arg, int ipl, int priority)
 	 * and place ourselves after any ISRs with our current (or
 	 * higher) priority.
 	 */
-	for (curisr = list->lh_first; curisr->isr_link.le_next != NULL;
-	    curisr = curisr->isr_link.le_next) {
+	for (curisr = LIST_FIRST(list); LIST_NEXT(curisr, isr_link) != NULL;
+	    curisr = LIST_NEXT(curisr, isr_link)) {
 		if (newisr->isr_priority > curisr->isr_priority) {
 			LIST_INSERT_BEFORE(curisr, newisr, isr_link);
 			return;
@@ -206,6 +198,8 @@ isrdispatch_autovec(int evec)
 	int handled = 0, ipl, vec;
 	static int straycount, unexpected;
 
+	idepth++;
+
 	vec = (evec & 0xfff) >> 2;
 	if ((vec < ISRAUTOVEC) || (vec >= (ISRAUTOVEC + NISRAUTOVEC)))
 		panic("isrdispatch_autovec: bad vec 0x%x", vec);
@@ -215,15 +209,17 @@ isrdispatch_autovec(int evec)
 	uvmexp.intrs++;
 
 	list = &isr_autovec[ipl];
-	if (list->lh_first == NULL) {
+	if (LIST_EMPTY(list)) {
 		printf("isrdispatch_autovec: ipl %d unexpected\n", ipl);
 		if (++unexpected > 10)
 			panic("too many unexpected interrupts");
+		idepth--;
 		return;
 	}
 
 	/* Give all the handlers a chance. */
-	for (isr = list->lh_first ; isr != NULL; isr = isr->isr_link.le_next)
+	for (isr = LIST_FIRST(list); isr != NULL;
+	    isr = LIST_NEXT(isr, isr_link))
 		handled |= (*isr->isr_func)(isr->isr_arg);
 
 	if (handled)
@@ -232,6 +228,8 @@ isrdispatch_autovec(int evec)
 		panic("isr_dispatch_autovec: too many stray interrupts");
 	else
 		printf("isrdispatch_autovec: stray level %d interrupt\n", ipl);
+
+	idepth--;
 }
 
 /*
@@ -243,6 +241,8 @@ isrdispatch_vectored(int pc, int evec, void *frame)
 {
 	struct isr_vectored *isr;
 	int ipl, vec;
+
+	idepth++;
 
 	vec = (evec & 0xfff) >> 2;
 	ipl = (getsr() >> 8) & 7;
@@ -257,6 +257,7 @@ isrdispatch_vectored(int pc, int evec, void *frame)
 	if (isr->isr_func == NULL) {
 		printf("isrdispatch_vectored: no handler for vec 0x%x\n", vec);
 		vectab[vec] = badtrap;
+		idepth--;
 		return;
 	}
 
@@ -265,6 +266,7 @@ isrdispatch_vectored(int pc, int evec, void *frame)
 	 */
 	if ((*isr->isr_func)(isr->isr_arg ? isr->isr_arg : frame) == 0)
 		printf("isrdispatch_vectored: vec 0x%x not claimed\n", vec);
+	idepth--;
 }
 
 void
@@ -295,24 +297,13 @@ get_vector_entry(int entry)
 	return (void *)vectab[entry];
 }
 
-void
-netintr(void)
-{
-	int s, isr;
-
-	s = splnet();
-	isr = netisr;
-	netisr = 0;
-	splx(s);
-
-#define DONETISR(bit, fn) do {		\
-	if (isr & (1 << bit)) {		\
-		fn();			\
-	}				\
-} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-
-}
+const uint16_t ipl2psl_table[NIPL] = {
+	[IPL_NONE]       = PSL_S | PSL_IPL0,
+	[IPL_SOFTCLOCK]  = PSL_S | PSL_IPL2,
+	[IPL_SOFTBIO]    = PSL_S | PSL_IPL2,
+	[IPL_SOFTNET]    = PSL_S | PSL_IPL2,
+	[IPL_SOFTSERIAL] = PSL_S | PSL_IPL2,
+	[IPL_VM]         = PSL_S | PSL_IPL5,
+	[IPL_SCHED]      = PSL_S | PSL_IPL7,
+	[IPL_HIGH]       = PSL_S | PSL_IPL7,
+};

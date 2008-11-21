@@ -1,13 +1,12 @@
-/*	$OpenBSD: kern_kthread.c,v 1.29 2008/05/02 14:07:15 blambert Exp $	*/
-/*	$NetBSD: kern_kthread.c,v 1.3 1998/12/22 21:21:36 kleink Exp $	*/
+/*	$NetBSD: kern_kthread.c,v 1.24 2008/04/28 20:24:03 martin Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
  * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
- * NASA Ames Research Center.
+ * NASA Ames Research Center, and by Andrew Doran.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,61 +30,110 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kern_kthread.c,v 1.24 2008/04/28 20:24:03 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
 #include <sys/proc.h>
-#include <sys/wait.h>
-#include <sys/malloc.h>
-#include <sys/queue.h>
+#include <sys/sched.h>
+#include <sys/kmem.h>
 
-#include <machine/cpu.h>
+#include <uvm/uvm_extern.h>
 
 /*
  * note that stdarg.h and the ansi style va_start macro is used for both
- * ansi and traditional c compilers.
+ * ansi and traditional c complers.
  * XXX: this requires that stdarg.h define: va_alist and va_dcl
  */
-#include <sys/stdarg.h>
-
-int	kthread_create_now;
+#include <machine/stdarg.h>
 
 /*
  * Fork a kernel thread.  Any process can request this to be done.
- * The VM space and limits, etc. will be shared with proc0.
  */
 int
-kthread_create(void (*func)(void *), void *arg,
-    struct proc **newpp, const char *fmt, ...)
+kthread_create(pri_t pri, int flag, struct cpu_info *ci,
+	       void (*func)(void *), void *arg,
+	       lwp_t **lp, const char *fmt, ...)
 {
-	struct proc *p2;
+	lwp_t *l;
+	vaddr_t uaddr;
+	bool inmem;
 	int error;
 	va_list ap;
 
-	/*
-	 * First, create the new process.  Share the memory, file
-	 * descriptors and don't leave the exit status around for the
-	 * parent to wait for.
-	 */
-	error = fork1(&proc0, 0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
-	    FORK_SIGHAND, NULL, 0, func, arg, NULL, &p2);
-	if (error)
-		return (error);
+	inmem = uvm_uarea_alloc(&uaddr);
+	if (uaddr == 0)
+		return ENOMEM;
+	error = lwp_create(&lwp0, &proc0, uaddr, inmem, LWP_DETACHED, NULL,
+	    0, func, arg, &l, SCHED_FIFO);
+	if (error) {
+		uvm_uarea_free(uaddr, curcpu());
+		return error;
+	}
+	uvm_lwp_hold(l);
+	if (fmt != NULL) {
+		l->l_name = kmem_alloc(MAXCOMLEN, KM_SLEEP);
+		if (l->l_name == NULL) {
+			lwp_exit(l);
+			return ENOMEM;
+		}
+		va_start(ap, fmt);
+		vsnprintf(l->l_name, MAXCOMLEN, fmt, ap);
+		va_end(ap);
+	}
 
 	/*
-	 * Mark it as a system process.
+	 * Set parameters.
 	 */
-	atomic_setbits_int(&p2->p_flag, P_SYSTEM);
+	if ((flag & KTHREAD_INTR) != 0) {
+		KASSERT((flag & KTHREAD_MPSAFE) != 0);
+	}
 
-	/* Name it as specified. */
-	va_start(ap, fmt);
-	vsnprintf(p2->p_comm, sizeof p2->p_comm, fmt, ap);
-	va_end(ap);
+	if (pri == PRI_NONE) {
+		/* Minimum kernel priority level. */
+		pri = PRI_KTHREAD;
+	}
+	mutex_enter(proc0.p_lock);
+	lwp_lock(l);
+	l->l_priority = pri;
+	if (ci != NULL) {
+		if (ci != l->l_cpu) {
+			lwp_unlock_to(l, ci->ci_schedstate.spc_mutex);
+			lwp_lock(l);
+		}
+		l->l_pflag |= LP_BOUND;
+		l->l_cpu = ci;
+	}
+	if ((flag & KTHREAD_INTR) != 0)
+		l->l_pflag |= LP_INTR;
+	if ((flag & KTHREAD_MPSAFE) == 0)
+		l->l_pflag &= ~LP_MPSAFE;
+
+	/*
+	 * Set the new LWP running, unless the caller has requested
+	 * otherwise.
+	 */
+	if ((flag & KTHREAD_IDLE) == 0) {
+		l->l_stat = LSRUN;
+		sched_enqueue(l, false);
+		lwp_unlock(l);
+	} else
+		lwp_unlock_to(l, ci->ci_schedstate.spc_lwplock);
+
+	/*
+	 * The LWP is not created suspended or stopped and cannot be set
+	 * into those states later, so must be considered runnable.
+	 */
+	proc0.p_nrlwps++;
+	mutex_exit(proc0.p_lock);
 
 	/* All done! */
-	if (newpp != NULL)
-		*newpp = p2;
+	if (lp != NULL)
+		*lp = l;
+
 	return (0);
 }
 
@@ -103,69 +144,37 @@ kthread_create(void (*func)(void *), void *arg,
 void
 kthread_exit(int ecode)
 {
+	const char *name;
+	lwp_t *l = curlwp;
+
+	/* We can't do much with the exit code, so just report it. */
+	if (ecode != 0) {
+		if ((name = l->l_name) == NULL)
+			name = "unnamed";
+		printf("WARNING: kthread `%s' (%d) exits with status %d\n",
+		    name, l->l_lid, ecode);
+	}
+
+	/* And exit.. */
+	lwp_exit(l);
 
 	/*
-	 * XXX What do we do with the exit code?  Should we even bother
-	 * XXX with it?  The parent (proc0) isn't going to do much with
-	 * XXX it.
-	 */
-	if (ecode != 0)
-		printf("WARNING: thread `%s' (%d) exits with status %d\n",
-		    curproc->p_comm, curproc->p_pid, ecode);
-
-	exit1(curproc, W_EXITCODE(ecode, 0), EXIT_NORMAL);
-
-	/*
-	 * XXX Fool the compiler.  Making exit1() __dead is a can
+	 * XXX Fool the compiler.  Making exit1() __noreturn__ is a can
 	 * XXX of worms right now.
 	 */
-	for (;;);
+	for (;;)
+		;
 }
-
-struct kthread_q {
-	SIMPLEQ_ENTRY(kthread_q) kq_q;
-	void (*kq_func)(void *);
-	void *kq_arg;
-};
-
-SIMPLEQ_HEAD(, kthread_q) kthread_q = SIMPLEQ_HEAD_INITIALIZER(kthread_q);
 
 /*
- * Defer the creation of a kernel thread.  Once the standard kernel threads
- * and processes have been created, this queue will be run to callback to
- * the caller to create threads for e.g. file systems and device drivers.
+ * Destroy an inactive kthread.  The kthread must be in the LSIDL state.
  */
 void
-kthread_create_deferred(void (*func)(void *), void *arg)
+kthread_destroy(lwp_t *l)
 {
-	struct kthread_q *kq;
 
-	if (kthread_create_now) {
-		(*func)(arg);
-		return;
-	}
+	KASSERT((l->l_flag & LW_SYSTEM) != 0);
+	KASSERT(l->l_stat == LSIDL);
 
-	kq = malloc(sizeof *kq, M_TEMP, M_NOWAIT|M_ZERO);
-	if (kq == NULL)
-		panic("unable to allocate kthread_q");
-
-	kq->kq_func = func;
-	kq->kq_arg = arg;
-
-	SIMPLEQ_INSERT_TAIL(&kthread_q, kq, kq_q);
-}
-
-void
-kthread_run_deferred_queue(void)
-{
-	struct kthread_q *kq;
-
-	/* No longer need to defer kthread creation. */
-	kthread_create_now = 1;
-
-	while ((kq = SIMPLEQ_FIRST(&kthread_q)) != NULL) {
-		SIMPLEQ_REMOVE_HEAD(&kthread_q, kq_q);
-		(*kq->kq_func)(kq->kq_arg);
-		free(kq, M_TEMP);
-	}
+	lwp_exit(l);
 }

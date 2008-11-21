@@ -1,5 +1,4 @@
-/*      $OpenBSD: profile.h,v 1.7 2003/06/02 23:27:57 millert Exp $ */
-/*      $NetBSD: profile.h,v 1.5 1995/12/31 12:15:58 ragge Exp $ */
+/*      $NetBSD: profile.h,v 1.12 2008/08/29 18:25:02 matt Exp $ */
 /*
  * Copyright (c) 1992 The Regents of the University of California.
  * All rights reserved.
@@ -43,7 +42,7 @@
  * to __mcount, so that our return address won't get popped from stack.
  */
 #define MCOUNT \
-__asm__(".text; .globl mcount; mcount: pushl 16(fp); calls $1,__mcount; rsb");
+__asm(".text; .globl __mcount; __mcount: pushl 16(%fp); calls $1,_mcount; rsb");
 
 #ifdef _KERNEL
 /*

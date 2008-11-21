@@ -1,5 +1,4 @@
-/*	$OpenBSD: bootconfig.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: bootconfig.h,v 1.2 2001/06/21 22:08:28 chris Exp $	*/
+/*	$NetBSD: bootconfig.h,v 1.1 2006/12/16 05:43:15 ober Exp $	*/
 
 /*
  * Copyright (c) 1994 Mark Brinicombe.
@@ -48,9 +47,9 @@ typedef struct _PhysMem {
 	u_int pages;
 } PhysMem;
 
-#if defined(_KERNEL)
+#ifdef _KERNEL
 
-#define	DRAM_BLOCKS	1
+#define DRAM_BLOCKS	1
 
 typedef struct _BootConfig {
 	PhysMem dram[DRAM_BLOCKS];
@@ -58,7 +57,7 @@ typedef struct _BootConfig {
 } BootConfig;
 
 extern BootConfig bootconfig;
-#define MAX_BOOT_STRING 255
+#define	MAX_BOOT_STRING			255
 
 #define BOOTOPT_TYPE_BOOLEAN		0
 #define BOOTOPT_TYPE_STRING		1
@@ -67,7 +66,7 @@ extern BootConfig bootconfig;
 #define BOOTOPT_TYPE_HEXINT		4
 #define BOOTOPT_TYPE_MASK		7
 
-int get_bootconf_option (char *string, char *option, int type, void *result);
+int get_bootconf_option(char *, const char *, int, void *);
 
 extern char *boot_args;
 extern char *boot_file;

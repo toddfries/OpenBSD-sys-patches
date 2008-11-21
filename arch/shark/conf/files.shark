@@ -1,4 +1,4 @@
-#	$NetBSD: files.shark,v 1.12 2006/12/07 03:10:14 macallan Exp $
+#	$NetBSD: files.shark,v 1.17 2008/02/20 21:43:35 drochner Exp $
 #
 # First try for arm-specific configuration info
 #
@@ -12,9 +12,6 @@ defflag	COMPAT_OLD_OFW
 # Maintain Interrupt statistics
 defflag	IRQSTATS
 
-# X server support in console drivers
-defflag	XSERVER
-
 # Bootloader options (COMPAT... to be dropped ASAP)
 defflag	COMPAT_OLD_BOOTLOADER
 
@@ -24,11 +21,6 @@ define todservice {}
 # ISA and mixed ISA+EISA or ISA+PCI drivers
 #
 include "dev/isa/files.isa"
-
-# Include WSCONS stuff
-include "dev/wscons/files.wscons"
-include "dev/rasops/files.rasops"
-include "dev/wsfont/files.wsfont"
 
 # Include pckbport stuff
 include "dev/pckbport/files.pckbport"
@@ -125,11 +117,6 @@ file	arch/shark/shark/i8042.c		i8042
 
 defpseudo profiler: disk
 file	arch/shark/shark/profile.c		profiler needs-flag
-
-# SHARK pc console
-device	pc: tty, spckbd, i8042
-attach	pc at ofisapc
-file	arch/shark/shark/pccons.c		pc needs-flag
 
 # ofbus VGA
 attach	vga at ofbus with vga_ofbus

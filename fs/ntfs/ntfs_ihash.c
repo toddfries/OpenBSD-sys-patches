@@ -1,4 +1,4 @@
-/*	$NetBSD: ntfs_ihash.c,v 1.3 2005/12/11 12:24:29 christos Exp $	*/
+/*	$NetBSD: ntfs_ihash.c,v 1.7 2008/05/05 17:11:16 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993, 1995
@@ -33,14 +33,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ntfs_ihash.c,v 1.3 2005/12/11 12:24:29 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ntfs_ihash.c,v 1.7 2008/05/05 17:11:16 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/vnode.h>
-#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
 
@@ -48,18 +47,14 @@ __KERNEL_RCSID(0, "$NetBSD: ntfs_ihash.c,v 1.3 2005/12/11 12:24:29 christos Exp 
 #include <fs/ntfs/ntfs_inode.h>
 #include <fs/ntfs/ntfs_ihash.h>
 
-MALLOC_DEFINE(M_NTFSNTHASH, "NTFS nthash", "NTFS ntnode hash tables");
-
 /*
  * Structures associated with inode cacheing.
  */
 static LIST_HEAD(nthashhead, ntnode) *ntfs_nthashtbl;
 static u_long	ntfs_nthash;		/* size of hash table - 1 */
 #define	NTNOHASH(device, inum)	((minor(device) + (inum)) & ntfs_nthash)
-#ifndef NULL_SIMPLELOCKS
-static struct simplelock ntfs_nthash_slock;
-#endif
-struct lock ntfs_hashlock;
+static kmutex_t ntfs_nthash_lock;
+kmutex_t ntfs_hashlock;
 
 /*
  * Initialize inode hash table.
@@ -67,13 +62,11 @@ struct lock ntfs_hashlock;
 void
 ntfs_nthashinit()
 {
-	lockinit(&ntfs_hashlock, PINOD, "ntfs_nthashlock", 0, 0);
-	ntfs_nthashtbl = HASHINIT(desiredvnodes, M_NTFSNTHASH, M_WAITOK,
-	    &ntfs_nthash);
-	simple_lock_init(&ntfs_nthash_slock);
+	mutex_init(&ntfs_hashlock, MUTEX_DEFAULT, IPL_NONE);
+	mutex_init(&ntfs_nthash_lock, MUTEX_DEFAULT, IPL_NONE);
+	ntfs_nthashtbl = hashinit(desiredvnodes, HASH_LIST, true, &ntfs_nthash);
 }
 
-#ifdef __NetBSD__
 /*
  * Reinitialize inode hash table.
  */
@@ -86,9 +79,9 @@ ntfs_nthashreinit()
 	u_long oldmask, mask, val;
 	int i;
 
-	hash = HASHINIT(desiredvnodes, M_NTFSNTHASH, M_WAITOK, &mask);
+	hash = hashinit(desiredvnodes, HASH_LIST, true, &mask);
 
-	simple_lock(&ntfs_nthash_slock);
+	mutex_enter(&ntfs_nthash_lock);
 	oldhash = ntfs_nthashtbl;
 	oldmask = ntfs_nthash;
 	ntfs_nthashtbl = hash;
@@ -100,8 +93,8 @@ ntfs_nthashreinit()
 			LIST_INSERT_HEAD(&hash[val], ip, i_hash);
 		}
 	}
-	simple_unlock(&ntfs_nthash_slock);
-	hashdone(oldhash, M_NTFSNTHASH);
+	mutex_exit(&ntfs_nthash_lock);
+	hashdone(oldhash, HASH_LIST, oldmask);
 }
 
 /*
@@ -111,9 +104,10 @@ ntfs_nthashreinit()
 void
 ntfs_nthashdone()
 {
-	hashdone(ntfs_nthashtbl, M_NTFSNTHASH);
+	hashdone(ntfs_nthashtbl, HASH_LIST, ntfs_nthash);
+	mutex_destroy(&ntfs_hashlock);
+	mutex_destroy(&ntfs_nthash_lock);
 }
-#endif
 
 /*
  * Use the device/inum pair to find the incore inode, and return a pointer
@@ -127,13 +121,13 @@ ntfs_nthashlookup(dev, inum)
 	struct ntnode *ip;
 	struct nthashhead *ipp;
 
-	simple_lock(&ntfs_nthash_slock);
+	mutex_enter(&ntfs_nthash_lock);
 	ipp = &ntfs_nthashtbl[NTNOHASH(dev, inum)];
 	LIST_FOREACH(ip, ipp, i_hash) {
 		if (inum == ip->i_number && dev == ip->i_dev)
 			break;
 	}
-	simple_unlock(&ntfs_nthash_slock);
+	mutex_exit(&ntfs_nthash_lock);
 
 	return (ip);
 }
@@ -147,11 +141,11 @@ ntfs_nthashins(ip)
 {
 	struct nthashhead *ipp;
 
-	simple_lock(&ntfs_nthash_slock);
+	mutex_enter(&ntfs_nthash_lock);
 	ipp = &ntfs_nthashtbl[NTNOHASH(ip->i_dev, ip->i_number)];
 	LIST_INSERT_HEAD(ipp, ip, i_hash);
 	ip->i_flag |= IN_HASHED;
-	simple_unlock(&ntfs_nthash_slock);
+	mutex_exit(&ntfs_nthash_lock);
 }
 
 /*
@@ -161,10 +155,10 @@ void
 ntfs_nthashrem(ip)
 	struct ntnode *ip;
 {
-	simple_lock(&ntfs_nthash_slock);
+	mutex_enter(&ntfs_nthash_lock);
 	if (ip->i_flag & IN_HASHED) {
 		ip->i_flag &= ~IN_HASHED;
 		LIST_REMOVE(ip, i_hash);
 	}
-	simple_unlock(&ntfs_nthash_slock);
+	mutex_exit(&ntfs_nthash_lock);
 }

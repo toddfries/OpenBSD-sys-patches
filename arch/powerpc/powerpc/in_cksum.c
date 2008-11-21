@@ -1,5 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.8 2008/05/15 22:17:08 brad Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.7 2003/07/15 02:54:48 lukem Exp $	*/
+/*	$NetBSD: in_cksum.c,v 1.10 2005/12/24 23:24:01 perry Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -36,12 +35,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.10 2005/12/24 23:24:01 perry Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/socketvar.h>
-#include <netinet/in.h>
+#include <sys/systm.h>
 #include <netinet/in_systm.h>
+#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 
@@ -58,7 +59,7 @@
 /* Two REDUCE1s is faster than REDUCE1; if (sum > 65535) sum -= 65536; */
 #define	REDUCE		{ REDUCE1; REDUCE1; }
 
-static __inline__ int
+static inline int
 in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 {
 	uint8_t *w;
@@ -118,7 +119,7 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 				 * Since the `sum' may contain full 32 bit
 				 * value, we can't simply add any value.
 				 */
-				__asm __volatile(
+				__asm volatile(
 				    "lhz 7,0(%1);"	/* load current data
 							   half word */
 				    "addc %0,%0,7;"	/* add to sum */
@@ -133,7 +134,7 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 
 		if (mlen >= 64) {
 			n = mlen >> 6;
-			__asm __volatile(
+			__asm volatile(
 			    "addic 0,0,0;"		/* clear carry */
 			    "mtctr %1;"			/* load loop count */
 			    "1:"
@@ -182,7 +183,7 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 
 		if (mlen >= 8) {
 			n = mlen >> 3;
-			__asm __volatile(
+			__asm volatile(
 			    "addic 0,0,0;"		/* clear carry */
 			    "mtctr %1;"			/* load loop count */
 			    "1:"

@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu_counter.h,v 1.4 2006/02/16 20:17:14 perry Exp $	*/
+/*	$NetBSD: cpu_counter.h,v 1.6 2008/02/05 22:31:49 garbled Exp $	*/
 
 /*-
  * Copyright (c) 2000 Tsubai Masanari.  All rights reserved.
@@ -46,6 +46,7 @@ cpu_counter32(void)
 	uint32_t rv, rtcu, scratch;
 
 	__asm volatile (
+#ifdef PPC_OEA601
 	    "mfpvr	%0		\n"
 	    "srwi	%0,%0,16	\n"
 	    "cmpwi	%0,%3		\n"
@@ -59,6 +60,7 @@ cpu_counter32(void)
 	    "add	%1,%2,%0	\n"
 	    "b		2f		\n"
 	    "1:				\n"
+#endif /* PPC_OEA601 */
 #ifdef PPC_IBM403
 	    "mftblo	%1		\n"
 #else
@@ -71,12 +73,15 @@ cpu_counter32(void)
 	return rv;
 }
 
-#if 0	/* XXX MI microtime() needs frequency of CPU counter. */
+extern uint32_t ticks_per_sec;
+
 static __inline uint64_t
 cpu_frequency(struct cpu_info *ci)
 {
+	/* XXX this probably only works on 603 and newer */
+	return ticks_per_sec;
 }
-#endif
+
 #endif /* _KERNEL */
 
 #endif /* _POWERPC_CPU_COUNTER_H_ */

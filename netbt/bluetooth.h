@@ -1,5 +1,4 @@
-/*	$OpenBSD: bluetooth.h,v 1.5 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: bluetooth.h,v 1.6 2007/09/17 01:23:17 rillig Exp $	*/
+/*	$NetBSD: bluetooth.h,v 1.8 2008/09/08 23:36:55 gmcgarry Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -53,7 +52,7 @@
  */
 typedef struct {
 	uint8_t	b[BLUETOOTH_BDADDR_SIZE];
-} __attribute__ ((packed)) bdaddr_t;
+} __packed bdaddr_t;
 
 /*
  * bdaddr utility functions
@@ -104,6 +103,8 @@ struct sockaddr_bt {
 
 #ifdef _KERNEL
 
+MALLOC_DECLARE(M_BLUETOOTH);
+
 /*
  * Bluetooth Protocol API callback methods
  */
@@ -121,8 +122,8 @@ struct btproto {
 /*
  * Debugging stuff
  */
+#include "opt_bluetooth.h"
 
-#define BLUETOOTH_DEBUG
 #ifdef BLUETOOTH_DEBUG
 extern int bluetooth_debug;
 # define DPRINTF(fmt, args...)	do {			\
@@ -142,6 +143,8 @@ extern int bluetooth_debug;
 # define DPRINTFN(...) ((void)0)
 # define UNKNOWN(x) ((void)0)
 #endif	/* BLUETOOTH_DEBUG */
+
+extern kmutex_t *bt_lock;
 
 #endif	/* _KERNEL */
 

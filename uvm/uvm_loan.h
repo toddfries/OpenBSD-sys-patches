@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_loan.h,v 1.7 2002/03/14 01:27:18 millert Exp $	*/
-/*	$NetBSD: uvm_loan.h,v 1.7 1999/06/21 17:25:11 thorpej Exp $	*/
+/*	$NetBSD: uvm_loan.h,v 1.14 2005/12/11 12:25:29 christos Exp $	*/
 
 /*
  *
@@ -41,7 +40,7 @@
 #ifdef _KERNEL
 
 /*
- * flags for uvm_loan
+ * flags for uvm_loan()
  */
 
 #define UVM_LOAN_TOANON		0x1		/* loan to anon */
@@ -51,9 +50,12 @@
  * loan prototypes
  */
 
-int uvm_loan(struct vm_map *, vaddr_t, vsize_t, void **, int);
-void uvm_unloananon(struct vm_anon **, int);
-void uvm_unloanpage(struct vm_page **, int);
+void uvm_loan_init(void);
+int uvm_loan(struct vm_map *, vaddr_t, vsize_t, void *, int);
+void uvm_unloan(void *, int, int);
+int uvm_loanuobjpages(struct uvm_object *, voff_t, int,
+    struct vm_page **);
+struct vm_page *uvm_loanbreak(struct vm_page *);
 
 #endif /* _KERNEL */
 

@@ -1,65 +1,35 @@
-#	$OpenBSD: Makefile,v 1.9 2007/11/25 19:12:59 martin Exp $
-#	$NetBSD: Makefile,v 1.11 1997/04/17 07:27:50 thorpej Exp $
-
-S=	${.CURDIR}/../../../..
-
-.PATH: ${.CURDIR}/.. ${.CURDIR}/../boot
+# $NetBSD: Makefile,v 1.25 2003/01/03 15:34:42 lukem Exp $
 
 PROG = netboot
 
 SRCS = start.S boot.c prom.c prom_disp.S OSFpal.c prom_swpal.S
 SRCS+= rpcc.S
 SRCS+= dev_net.c conf.c devopen.c
-SRCS+= if_prom.c loadfile.c getsecs.c
-NOMAN=
-INSTALL_STRIP=
-BINMODE= 444
+SRCS+= if_prom.c getsecs.c booted_dev.c
 
-BOOT_RELOC = ${PRIMARY_LOAD_ADDRESS}
-HEADERSIZE_PROG = headersize
+BOOT_RELOC = ${UNIFIED_LOAD_ADDRESS}
 
-CLEANFILES+= vers.c vers.o ${PROG}.sym ${PROG}.nosym ${HEADERSIZE_PROG}
+CLEANFILES+= ${PROG}.sym
 
-.PATH:  ${S}/lib/libkern/arch/alpha ${S}/lib/libkern
-SRCS+=  bzero.c __divqu.S strlen.c __remqu.S
+CPPFLAGS += ${UNIFIED_CPPFLAGS} -DSUPPORT_DHCP \
+		-DBOOT_TYPE_NAME='"Network"'
 
-DEFNS= -DPRIMARY_BOOTBLOCK -DALPHA_BOOT_ELF -DSUN_BOOTPARAMS
+${PROG}: ${PROG}.sym
+	@echo creating ${PROG} from ${PROG}.sym...
+	@${OBJCOPY} --output-target=binary ${PROG}.sym ${PROG}
+	@chmod 644 ${PROG}
+	@ls -l ${PROG}
+	@${CHECKSIZE_CMD} ${PROG}.sym ${PROG} ${UNIFIED_MAX_LOAD} \
+	    ${UNIFIED_MAX_TOTAL} || (rm -f ${PROG} ; false)
 
-AFLAGS += -DASSEMBLER ${DEFNS}
-CPPFLAGS += -I${.CURDIR}/../.. -I${S} ${DEFNS}
-CFLAGS = -Werror -mno-fp-regs
+SAMISCMAKEFLAGS= SA_INCLUDE_NET=yes SA_USE_CREAD=yes
+.include "../Makefile.bootprogs"
 
-${PROG}.nosym: ${PROG}.sym
-	cp ${PROG}.sym ${PROG}.nosym
-	strip ${PROG}.nosym
-
-${PROG}: ${PROG}.nosym #${HEADERSIZE_PROG}
-	objcopy --output-target=binary ${PROG}.nosym ${PROG}
-#	dd if=${PROG}.nosym of=${PROG} \
-#	    bs=`./${HEADERSIZE_PROG} ${BOOT_RELOC} ${PROG}.nosym` skip=1
-
-# no lint here (yet?)
-lint:
-
-.include <bsd.prog.mk>
-
-### find out what to use for libz
-Z_AS=		library
-ZDST=		${.CURDIR}/../libz/${__objdir}
-.include "${.CURDIR}/../libz/Makefile.inc"
-LIBZ=		${ZLIB}
-
-### find out what to use for libsa
-SA_AS=		library
-SADST=		${.CURDIR}/../libsa/${__objdir}
-SAREL=
-SA_ZLIB=	yes
-.include "${.CURDIR}/../libsa/Makefile.inc"
-LIBSA=		${SALIB}
-
-${PROG}.sym: ${OBJS} ${LIBSA} ${LIBZ}
-	sh ${.CURDIR}/newvers.sh ${.CURDIR}/version
-	${COMPILE.c} vers.c
+${PROG}.sym: ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN}
 	${LD} -Ttext ${BOOT_RELOC} -N -e start -o ${PROG}.sym \
-	    ${OBJS} vers.o ${LIBSA} ${LIBZ} ${LIBSA}
-	size ${PROG}.sym
+	    ${OBJS} ${LIBSA} ${LIBZ} ${LIBSA} ${LIBKERN}
+	${SIZE} ${PROG}.sym
+
+release: check_RELEASEDIR .WAIT ${PROG}
+	${HOST_INSTALL_FILE} -m ${NONBINMODE} ${PROG} \
+	    ${RELEASEDIR}/${MACHINE}/installation/netboot

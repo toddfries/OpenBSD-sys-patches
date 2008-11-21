@@ -1,5 +1,4 @@
-/*	$OpenBSD: ecoff_machdep.h,v 1.4 2007/10/16 15:55:33 deraadt Exp $	*/
-/*	$NetBSD: ecoff_machdep.h,v 1.3 1996/05/09 23:47:25 cgd Exp $	*/
+/* $NetBSD: ecoff_machdep.h,v 1.5 1999/04/27 02:32:33 cgd Exp $ */
 
 /*
  * Copyright (c) 1994 Adam Glass
@@ -43,19 +42,19 @@
         u_long	gp_value
 
 #define ECOFF_MAGIC_ALPHA		0603
-#define ECOFF_MAGIC_NATIVE_ALPHA	0605
+#define ECOFF_MAGIC_NETBSD_ALPHA	0605
 #define ECOFF_BADMAG(ep)						\
 	((ep)->f.f_magic != ECOFF_MAGIC_ALPHA &&			\
-	    (ep)->f.f_magic != ECOFF_MAGIC_NATIVE_ALPHA)
+	    (ep)->f.f_magic != ECOFF_MAGIC_NETBSD_ALPHA)
 
 #define ECOFF_FLAG_EXEC			0002
 #define ECOFF_SEGMENT_ALIGNMENT(ep) \
     (((ep)->f.f_flags & ECOFF_FLAG_EXEC) == 0 ? 8 : 16)
 
 #define	ECOFF_FLAG_OBJECT_TYPE_MASK	0x3000
-#define	ECOFF_OBJECT_TYPE_NO_SHARED	0x1000
-#define	ECOFF_OBJECT_TYPE_SHARABLE	0x2000
-#define	ECOFF_OBJECT_TYPE_CALL_SHARED	0x3000
+#define		ECOFF_OBJECT_TYPE_NO_SHARED	0x1000
+#define		ECOFF_OBJECT_TYPE_SHARABLE	0x2000
+#define		ECOFF_OBJECT_TYPE_CALL_SHARED	0x3000
 
 struct ecoff_symhdr {
 	int16_t		magic;
@@ -88,17 +87,13 @@ struct ecoff_symhdr {
 struct ecoff_extsym {
 	long		es_value;
 	int		es_strindex;
-	unsigned int	es_type:6;
-	unsigned int	es_class:5;
-	unsigned int	:1;
-	unsigned int	es_symauxindex:20;
-	unsigned int	es_jmptbl:1;
-	unsigned int	es_cmain:1;
-	unsigned int	es_weakext:1;
-	unsigned int	:29;
+	unsigned	es_type:6;
+	unsigned	es_class:5;
+	unsigned	:1;
+	unsigned	es_symauxindex:20;
+	unsigned	es_jmptbl:1;
+	unsigned	es_cmain:1;
+	unsigned	es_weakext:1;
+	unsigned	:29;
 	int		es_indexfld;
 };
-
-#ifdef _KERNEL
-void cpu_exec_ecoff_setregs(struct proc *, struct exec_package *, u_long, register_t *);
-#endif

@@ -1,5 +1,4 @@
-/*	$OpenBSD: tqphyreg.h,v 1.2 2002/05/04 11:30:06 fgsch Exp $	*/
-/*	$NetBSD: tqphyreg.h,v 1.2 1999/09/16 05:58:18 soren Exp $	*/
+/*	$NetBSD: tqphyreg.h,v 1.4 2005/12/11 12:22:42 christos Exp $	*/
 
 /*
  * Copyright (c) 1999 Soren S. Jorvang.

@@ -1,4 +1,6 @@
-/* i915_drv.c -- Intel i915 driver -*- linux-c -*-
+/*	$NetBSD: i915_drv.c,v 1.8 2008/07/08 06:50:22 mrg Exp $	*/
+
+/* i915_drv.c -- ATI Radeon driver -*- linux-c -*-
  * Created: Wed Feb 14 17:10:04 2001 by gareth@valinux.com
  */
 /*-
@@ -29,21 +31,28 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i915_drv.c,v 1.8 2008/07/08 06:50:22 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/i915_drv.c,v 1.5 2006/05/17 06:36:28 anholt Exp $");
+*/
+
+#ifdef _MODULE
+#include <sys/module.h>
+#endif
+
 #include "drmP.h"
 #include "drm.h"
 #include "i915_drm.h"
 #include "i915_drv.h"
 #include "drm_pciids.h"
 
-void	i915_configure(drm_device_t *);
-
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t i915_pciidlist[] = {
 	i915_PCI_IDS
 };
 
-void
-i915_configure(drm_device_t *dev)
+static void i915_configure(drm_device_t *dev)
 {
 	dev->driver.buf_priv_size	= 1;	/* No dev_priv */
 	dev->driver.load		= i915_driver_load;
@@ -119,47 +128,86 @@ MODULE_DEPEND(i915, drm, 1, 1, 1);
 
 #elif defined(__NetBSD__) || defined(__OpenBSD__)
 
-int	i915drm_probe(struct device *, void *, void *);
-void	i915drm_attach(struct device *, struct device *, void *);
-
-int
-#if defined(__OpenBSD__)
-i915drm_probe(struct device *parent, void *match, void *aux)
-#else
+static int
 i915drm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
-	return drm_probe((struct pci_attach_args *)aux, i915_pciidlist);
+	struct pci_attach_args *pa = aux;
+	return drm_probe(pa, i915_pciidlist);
 }
 
-void
+static void
 i915drm_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	drm_device_t *dev = (drm_device_t *)self;
+	drm_device_t *dev = device_private(self);
 
 	i915_configure(dev);
 
-	drm_attach(parent, self, pa, i915_pciidlist);
+	pmf_device_register(self, NULL, NULL);
+
+	drm_attach(self, pa, i915_pciidlist);
 }
 
-#if defined(__OpenBSD__)
-struct cfattach inteldrm_ca = {
-	sizeof(drm_device_t), i915drm_probe, i915drm_attach,
-	drm_detach, drm_activate
-};
-
-struct cfdriver inteldrm_cd = {
-	0, "inteldrm", DV_DULL
-};
-
-#else
-#ifdef _LKM
-CFDRIVER_DECL(i915drm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(i915drm, sizeof(drm_device_t), i915drm_probe, i915drm_attach,
+CFATTACH_DECL_NEW(i915drm, sizeof(drm_device_t), i915drm_probe, i915drm_attach,
 	drm_detach, drm_activate);
-#endif
+
+#ifdef _MODULE
+
+MODULE(MODULE_CLASS_DRIVER, i915drm, "drm");
+
+CFDRIVER_DECL(i915drm, DV_DULL, NULL);
+extern struct cfattach i915drm_ca;
+static int drmloc[] = { -1 };
+static struct cfparent drmparent = {
+	"drm", "vga", DVUNIT_ANY
+};
+static struct cfdata i915drm_cfdata[] = {
+	{
+		.cf_name = "i915drm",
+		.cf_atname = "i915drm",
+		.cf_unit = 0,
+		.cf_fstate = FSTATE_STAR,
+		.cf_loc = drmloc,
+		.cf_flags = 0,
+		.cf_pspec = &drmparent,
+	},
+	{ NULL }
+};
+
+static int
+i915drm_modcmd(modcmd_t cmd, void *arg)
+{
+	int err;
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		err = config_cfdriver_attach(&i915drm_cd);
+		if (err)
+			return err;
+		err = config_cfattach_attach("i915drm", &i915drm_ca);
+		if (err) {
+			config_cfdriver_detach(&i915drm_cd);
+			return err;
+		}
+		err = config_cfdata_attach(i915drm_cfdata, 1);
+		if (err) {
+			config_cfattach_detach("i915drm", &i915drm_ca);
+			config_cfdriver_detach(&i915drm_cd);
+			return err;
+		}
+		return 0;
+	case MODULE_CMD_FINI:
+		err = config_cfdata_detach(i915drm_cfdata);
+		if (err)
+			return err;
+		config_cfattach_detach("i915drm", &i915drm_ca);
+		config_cfdriver_detach(&i915drm_cd);
+		return 0;
+	default:
+		return ENOTTY;
+	}
+}
+
 #endif
 
 #endif

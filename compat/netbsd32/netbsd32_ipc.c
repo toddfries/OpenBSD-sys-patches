@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_ipc.c,v 1.9 2006/07/23 22:06:09 ad Exp $	*/
+/*	$NetBSD: netbsd32_ipc.c,v 1.15 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -12,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_ipc.c,v 1.9 2006/07/23 22:06:09 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_ipc.c,v 1.15 2008/05/29 14:51:26 mrg Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_sysv.h"
@@ -44,7 +42,6 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_ipc.c,v 1.9 2006/07/23 22:06:09 ad Exp $");
 #include <sys/mount.h>
 #include <sys/dirent.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/proc.h>
 
@@ -53,18 +50,22 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_ipc.c,v 1.9 2006/07/23 22:06:09 ad Exp $");
 #include <compat/netbsd32/netbsd32_conv.h>
 
 #if defined(SYSVSEM)
+
 int
-netbsd32___semctl14(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32___semctl14(struct lwp *l, const struct netbsd32___semctl14_args *uap, register_t *retval)
 {
-	struct netbsd32___semctl14_args /* {
+	return do_netbsd32___semctl14(l, uap, retval, NULL);
+}
+
+int
+do_netbsd32___semctl14(struct lwp *l, const struct netbsd32___semctl14_args *uap, register_t *retval, void *vkarg)
+{
+	/* {
 		syscallarg(int) semid;
 		syscallarg(int) semnum;
 		syscallarg(int) cmd;
 		syscallarg(netbsd32_semunp_t) arg;
-	} */ *uap = v;
+	} */
 	struct semid_ds sembuf;
 	struct netbsd32_semid_ds sembuf32;
 	int cmd, error;
@@ -91,10 +92,14 @@ netbsd32___semctl14(l, v, retval)
 	}
 
 	if (pass_arg) {
-		error = copyin(NETBSD32PTR64(SCARG(uap, arg)), &karg32,
-		    sizeof(karg32));
-		if (error)
-			return error;
+		if (vkarg != NULL)
+			karg32 = *(union netbsd32_semun *)vkarg;
+		else {
+			error = copyin(SCARG_P32(uap, arg), &karg32,
+					sizeof(karg32));
+			if (error)
+				return error;
+		}
 		if (pass_arg == &karg) {
 			switch (cmd) {
 			case GETALL:
@@ -128,16 +133,13 @@ netbsd32___semctl14(l, v, retval)
 }
 
 int
-netbsd32_semget(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_semget(struct lwp *l, const struct netbsd32_semget_args *uap, register_t *retval)
 {
-	struct netbsd32_semget_args /* {
+	/* {
 		syscallarg(netbsd32_key_t) key;
 		syscallarg(int) nsems;
 		syscallarg(int) semflg;
-	} */ *uap = v;
+	} */
 	struct sys_semget_args ua;
 
 	NETBSD32TOX_UAP(key, key_t);
@@ -147,16 +149,13 @@ netbsd32_semget(l, v, retval)
 }
 
 int
-netbsd32_semop(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_semop(struct lwp *l, const struct netbsd32_semop_args *uap, register_t *retval)
 {
-	struct netbsd32_semop_args /* {
+	/* {
 		syscallarg(int) semid;
 		syscallarg(netbsd32_sembufp_t) sops;
 		syscallarg(netbsd32_size_t) nsops;
-	} */ *uap = v;
+	} */
 	struct sys_semop_args ua;
 
 	NETBSD32TO64_UAP(semid);
@@ -166,14 +165,11 @@ netbsd32_semop(l, v, retval)
 }
 
 int
-netbsd32_semconfig(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_semconfig(struct lwp *l, const struct netbsd32_semconfig_args *uap, register_t *retval)
 {
-	struct netbsd32_semconfig_args /* {
+	/* {
 		syscallarg(int) flag;
-	} */ *uap = v;
+	} */
 	struct sys_semconfig_args ua;
 
 	NETBSD32TO64_UAP(flag);
@@ -184,24 +180,20 @@ netbsd32_semconfig(l, v, retval)
 #if defined(SYSVMSG)
 
 int
-netbsd32___msgctl13(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32___msgctl13(struct lwp *l, const struct netbsd32___msgctl13_args *uap, register_t *retval)
 {
-	struct netbsd32___msgctl13_args /* {
+	/* {
 		syscallarg(int) msqid;
 		syscallarg(int) cmd;
 		syscallarg(netbsd32_msqid_dsp_t) buf;
-	} */ *uap = v;
+	} */
 	struct msqid_ds ds;
 	struct netbsd32_msqid_ds ds32;
 	int error, cmd;
 
 	cmd = SCARG(uap, cmd);
 	if (cmd == IPC_SET) {
-		error = copyin(NETBSD32PTR64(SCARG(uap, buf)), &ds32,
-		    sizeof(ds32));
+		error = copyin(SCARG_P32(uap, buf), &ds32, sizeof(ds32));
 		if (error)
 			return error;
 		netbsd32_to_msqid_ds(&ds32, &ds);
@@ -212,23 +204,19 @@ netbsd32___msgctl13(l, v, retval)
 
 	if (error == 0 && cmd == IPC_STAT) {
 		netbsd32_from_msqid_ds(&ds, &ds32);
-		error = copyout(&ds32, NETBSD32PTR64(SCARG(uap, buf)),
-		    sizeof(ds32));
+		error = copyout(&ds32, SCARG_P32(uap, buf), sizeof(ds32));
 	}
 
 	return error;
 }
 
 int
-netbsd32_msgget(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_msgget(struct lwp *l, const struct netbsd32_msgget_args *uap, register_t *retval)
 {
-	struct netbsd32_msgget_args /* {
+	/* {
 		syscallarg(netbsd32_key_t) key;
 		syscallarg(int) msgflg;
-	} */ *uap = v;
+	} */
 	struct sys_msgget_args ua;
 
 	NETBSD32TOX_UAP(key, key_t);
@@ -252,20 +240,17 @@ netbsd32_msgsnd_fetch_type(const void *src, void *dst, size_t size)
 }
 
 int
-netbsd32_msgsnd(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_msgsnd(struct lwp *l, const struct netbsd32_msgsnd_args *uap, register_t *retval)
 {
-	struct netbsd32_msgsnd_args /* {
+	/* {
 		syscallarg(int) msqid;
 		syscallarg(const netbsd32_voidp) msgp;
 		syscallarg(netbsd32_size_t) msgsz;
 		syscallarg(int) msgflg;
-	} */ *uap = v;
+	} */
 
 	return msgsnd1(l, SCARG(uap, msqid),
-	    NETBSD32PTR64(SCARG(uap, msgp)), SCARG(uap, msgsz),
+	    SCARG_P32(uap, msgp), SCARG(uap, msgsz),
 	    SCARG(uap, msgflg), sizeof(netbsd32_long),
 	    netbsd32_msgsnd_fetch_type);
 }
@@ -283,21 +268,18 @@ netbsd32_msgrcv_put_type(const void *src, void *dst, size_t size)
 }
 
 int
-netbsd32_msgrcv(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_msgrcv(struct lwp *l, const struct netbsd32_msgrcv_args *uap, register_t *retval)
 {
-	struct netbsd32_msgrcv_args /* {
+	/* {
 		syscallarg(int) msqid;
 		syscallarg(netbsd32_voidp) msgp;
 		syscallarg(netbsd32_size_t) msgsz;
 		syscallarg(netbsd32_long) msgtyp;
 		syscallarg(int) msgflg;
-	} */ *uap = v;
+	} */
 
 	return msgrcv1(l, SCARG(uap, msqid),
-	    NETBSD32PTR64(SCARG(uap, msgp)), SCARG(uap, msgsz),
+	    SCARG_P32(uap, msgp), SCARG(uap, msgsz),
 	    SCARG(uap, msgtyp), SCARG(uap, msgflg), sizeof(netbsd32_long),
 	    netbsd32_msgrcv_put_type, retval);
 }
@@ -306,16 +288,13 @@ netbsd32_msgrcv(l, v, retval)
 #if defined(SYSVSHM)
 
 int
-netbsd32_shmat(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_shmat(struct lwp *l, const struct netbsd32_shmat_args *uap, register_t *retval)
 {
-	struct netbsd32_shmat_args /* {
+	/* {
 		syscallarg(int) shmid;
 		syscallarg(const netbsd32_voidp) shmaddr;
 		syscallarg(int) shmflg;
-	} */ *uap = v;
+	} */
 	struct sys_shmat_args ua;
 
 	NETBSD32TO64_UAP(shmid);
@@ -325,24 +304,20 @@ netbsd32_shmat(l, v, retval)
 }
 
 int
-netbsd32___shmctl13(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32___shmctl13(struct lwp *l, const struct netbsd32___shmctl13_args *uap, register_t *retval)
 {
-	struct netbsd32___shmctl13_args /* {
+	/* {
 		syscallarg(int) shmid;
 		syscallarg(int) cmd;
 		syscallarg(netbsd32_shmid_dsp_t) buf;
-	} */ *uap = v;
+	} */
 	struct shmid_ds ds;
 	struct netbsd32_shmid_ds ds32;
 	int error, cmd;
 
 	cmd = SCARG(uap, cmd);
 	if (cmd == IPC_SET) {
-		error = copyin(NETBSD32PTR64(SCARG(uap, buf)), &ds32,
-		    sizeof(ds32));
+		error = copyin(SCARG_P32(uap, buf), &ds32, sizeof(ds32));
 		if (error)
 			return error;
 		netbsd32_to_shmid_ds(&ds32, &ds);
@@ -353,22 +328,18 @@ netbsd32___shmctl13(l, v, retval)
 
 	if (error == 0 && cmd == IPC_STAT) {
 		netbsd32_from_shmid_ds(&ds, &ds32);
-		error = copyout(&ds32, NETBSD32PTR64(SCARG(uap, buf)),
-		    sizeof(ds32));
+		error = copyout(&ds32, SCARG_P32(uap, buf), sizeof(ds32));
 	}
 
 	return error;
 }
 
 int
-netbsd32_shmdt(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_shmdt(struct lwp *l, const struct netbsd32_shmdt_args *uap, register_t *retval)
 {
-	struct netbsd32_shmdt_args /* {
+	/* {
 		syscallarg(const netbsd32_voidp) shmaddr;
-	} */ *uap = v;
+	} */
 	struct sys_shmdt_args ua;
 
 	NETBSD32TOP_UAP(shmaddr, const char);
@@ -376,16 +347,13 @@ netbsd32_shmdt(l, v, retval)
 }
 
 int
-netbsd32_shmget(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+netbsd32_shmget(struct lwp *l, const struct netbsd32_shmget_args *uap, register_t *retval)
 {
-	struct netbsd32_shmget_args /* {
+	/* {
 		syscallarg(netbsd32_key_t) key;
 		syscallarg(netbsd32_size_t) size;
 		syscallarg(int) shmflg;
-	} */ *uap = v;
+	} */
 	struct sys_shmget_args ua;
 
 	NETBSD32TOX_UAP(key, key_t)

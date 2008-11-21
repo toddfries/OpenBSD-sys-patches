@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.16 2006/11/29 19:56:46 freza Exp $	*/
+/*	$NetBSD: machdep.c,v 1.25 2008/11/12 12:36:00 ad Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,12 +30,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.16 2006/11/29 19:56:46 freza Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.25 2008/11/12 12:36:00 ad Exp $");
 
 #include "opt_explora.h"
 #include "ksyms.h"
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/msgbuf.h>
 #include <sys/kernel.h>
@@ -51,12 +45,11 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.16 2006/11/29 19:56:46 freza Exp $");
 #include <sys/user.h>
 #include <sys/reboot.h>
 #include <sys/ksyms.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <prop/proplib.h>
-
-#include <net/netisr.h>
 
 #include <machine/explora.h>
 #include <machine/bus.h>
@@ -67,7 +60,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.16 2006/11/29 19:56:46 freza Exp $");
 #include <powerpc/spr.h>
 #include <powerpc/ibm4xx/dcr403cgx.h>
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #endif
@@ -86,7 +79,6 @@ extern struct user *proc0paddr;
 prop_dictionary_t board_properties;
 struct vm_map *phys_map = NULL;
 struct vm_map *mb_map = NULL;
-struct vm_map *exec_map = NULL;
 char msgbuf[MSGBUFSIZE];
 paddr_t msgbuf_paddr;
 
@@ -272,7 +264,7 @@ bootstrap(u_int startkernel, u_int endkernel)
 	 */
 	pmap_bootstrap(startkernel, endkernel);
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init(0, NULL, NULL);
 #endif
 
@@ -315,7 +307,7 @@ cpu_startup(void)
 	/*
 	 * Initialize error message buffer (before start of kernel)
 	 */
-	initmsgbuf((caddr_t)msgbuf, round_page(MSGBUFSIZE));
+	initmsgbuf((void *)msgbuf, round_page(MSGBUFSIZE));
 
 	printf("%s%s", copyright, version);
 	printf("NCD Explora451\n");
@@ -325,17 +317,10 @@ cpu_startup(void)
 
 	minaddr = 0;
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, 0, FALSE, NULL);
+				 VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -354,16 +339,18 @@ cpu_startup(void)
 
 	pn = prop_number_create_integer(ctob(physmem));
 	KASSERT(pn != NULL);
-	if (prop_dictionary_set(board_properties, "mem-size", pn) == FALSE)
+	if (prop_dictionary_set(board_properties, "mem-size", pn) == false)
 		panic("setting mem-size");
 	prop_object_release(pn);
 
 	pn = prop_number_create_integer(cpuspeed);
 	KASSERT(pn != NULL);
 	if (prop_dictionary_set(board_properties, "processor-frequency",
-				pn) == FALSE)
+				pn) == false)
 		panic("setting processor-frequency");
 	prop_object_release(pn);
+
+	intr_init();
 }
 
 int
@@ -390,6 +377,8 @@ cpu_reboot(int howto, char *what)
 		/*XXX dumpsys()*/;
 
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if (howto & RB_HALT) {
 		printf("halted\n\n");

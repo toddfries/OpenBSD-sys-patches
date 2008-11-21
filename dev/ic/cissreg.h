@@ -1,7 +1,8 @@
-/*	$OpenBSD: cissreg.h,v 1.9 2007/11/26 19:13:22 dlg Exp $	*/
+/*	$NetBSD: cissreg.h,v 1.3 2008/10/18 18:53:20 bouyer Exp $	*/
+/*	$OpenBSD: cissreg.h,v 1.4 2005/12/13 15:55:59 brad Exp $	*/
 
 /*
- * Copyright (c) 2005,2006 Michael Shalayeff
+ * Copyright (c) 2005 Michael Shalayeff
  * All rights reserved.
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -61,7 +62,7 @@ struct ciss_softc;
 
 struct ciss_config {
 	u_int32_t	signature;
-#define	CISS_SIGNATURE	(*(u_int32_t *)"CISS")
+#define	CISS_SIGNATURE	(*(const u_int32_t *)"CISS")
 	u_int32_t	version;
 	u_int32_t	methods;
 #define	CISS_METH_READY	0x0001
@@ -182,7 +183,7 @@ struct ciss_ldstat {
 	u_int8_t	res0[416];
 	u_int8_t	prog[4];	/* blocks left to rebuild/expand */
 	u_int8_t	rebuild;	/* drive that is rebuilding */
-	u_int16_t	remapcnt[32];	/* count of re3mapped blocks for pds */
+	u_int16_t	remapcnt[32];	/* count of remapped blocks for pds */
 	u_int8_t	replaced[4];	/* replaced drives map */
 	u_int8_t	spare[4];	/* used spares map */
 	u_int8_t	sparestat;	/* spare status */
@@ -425,7 +426,7 @@ struct ciss_cmd {
 #define	CISS_CDB_OUT	0x40
 	u_int16_t	tmo;	/* 16: timeout in seconds */
 #define	CISS_MAX_CDB	16
-	u_int8_t	cdb[CISS_MAX_CDB]; /* 18 */
+	u_int8_t	cdb[16];/* 18 */
 
 	u_int64_t	err_pa;	/* 28: pa(struct ciss_error *) */
 	u_int32_t	err_len;/* 30 */
@@ -476,7 +477,7 @@ struct ciss_ccb {
 #define	CISS_CCB_BITS	"\020\01FREE\02READY\03ONQ\04PREQ\05POLL\010FAIL"
 	} ccb_state;
 
-	struct scsi_xfer	*ccb_xs;
+	struct scsipi_xfer	*ccb_xs;
 	size_t			ccb_len;
 	void			*ccb_data;
 	bus_dmamap_t		ccb_dmamap;

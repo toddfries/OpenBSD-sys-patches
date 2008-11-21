@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_proto.c,v 1.4 2002/03/14 01:27:12 millert Exp $	*/
+/*	$NetBSD: natm_proto.c,v 1.13 2008/04/24 11:38:39 ad Exp $	*/
 
 /*
  *
@@ -36,6 +36,9 @@
  * protocol layer for access to native mode ATM
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: natm_proto.c,v 1.13 2008/04/24 11:38:39 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -53,44 +56,72 @@
 
 #include <netnatm/natm.h>
 
-extern	struct domain natmdomain;
+DOMAIN_DEFINE(natmdomain);
 
-static	void natm_init(void);
+static void natm_init(void);
 
-struct protosw natmsw[] = {
-{ SOCK_STREAM,	&natmdomain,	PROTO_NATMAAL5, PR_CONNREQUIRED,
-  0,	0,	0,	0,
-  natm_usrreq,
-  0,	0,	0,	0,	
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-	natm5_sysctl
-#endif
+struct npcblist natm_pcbs = LIST_HEAD_INITIALIZER(natm_pcbs);
+struct	ifqueue natmintrq;       	/* natm packet input queue */
+int	natmqmaxlen = IFQ_MAXLEN;	/* max # of packets on queue */
+
+PR_WRAP_USRREQ(natm_usrreq)
+
+#define	natm_usrreq	natm_usrreq_wrapper
+
+const struct protosw natmsw[] = {
+{ .pr_type = SOCK_STREAM,
+  .pr_domain = &natmdomain,
+  .pr_protocol = PROTO_NATMAAL5,
+  .pr_flags = PR_CONNREQUIRED,
+  .pr_input = 0,
+  .pr_output = 0,
+  .pr_ctlinput = 0,
+  .pr_ctloutput = 0,
+  .pr_usrreq = natm_usrreq,
+  .pr_init = 0,
+  .pr_fasttimo = 0,
+  .pr_slowtimo = 0,
+  .pr_drain = 0
 },
-{ SOCK_DGRAM,	&natmdomain,	PROTO_NATMAAL5,	PR_CONNREQUIRED | PR_ATOMIC,
-  0,	0,	0,	0,
-  natm_usrreq,
-  0,	0,	0,	0,	
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-	natm5_sysctl
-#endif
+{ .pr_type = SOCK_DGRAM,
+  .pr_domain = &natmdomain,
+  .pr_protocol = PROTO_NATMAAL5,
+  .pr_flags = PR_CONNREQUIRED | PR_ATOMIC,
+  .pr_input = 0,
+  .pr_output = 0,
+  .pr_ctlinput = 0,
+  .pr_ctloutput = 0,
+  .pr_usrreq = natm_usrreq,
+  .pr_init = 0,
+  .pr_fasttimo = 0,
+  .pr_slowtimo = 0,
+  .pr_drain = 0
 },
-{ SOCK_STREAM,	&natmdomain,	PROTO_NATMAAL0, PR_CONNREQUIRED,
-  0,	0,	0,	0,
-  natm_usrreq,
-  0,	0,	0,	0,	
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-	natm0_sysctl
-#endif
+{ .pr_type = SOCK_STREAM,
+  .pr_domain = &natmdomain,
+  .pr_protocol = PROTO_NATMAAL0,
+  .pr_flags = PR_CONNREQUIRED,
+  .pr_input = 0,
+  .pr_output = 0,
+  .pr_ctlinput = 0,
+  .pr_ctloutput = 0,
+  .pr_usrreq = natm_usrreq,
+  .pr_init = 0,
+  .pr_fasttimo = 0,
+  .pr_slowtimo = 0,
+  .pr_drain = 0
 },
 };
 
-struct domain natmdomain =
-    { AF_NATM, "natm", natm_init, 0, 0, 
-      natmsw, &natmsw[sizeof(natmsw)/sizeof(natmsw[0])], 0,
-      0, 0, 0};
-
-struct	ifqueue natmintrq;       	/* natm packet input queue */
-int	natmqmaxlen = IFQ_MAXLEN;	/* max # of packets on queue */
+struct domain natmdomain = {
+	.dom_family = PF_NATM,
+	.dom_name = "natm",
+	.dom_init = natm_init,
+	.dom_protosw = natmsw,
+	.dom_protoswNPROTOSW = &natmsw[sizeof(natmsw)/sizeof(natmsw[0])],
+	.dom_ifqueues = { &natmintrq, NULL },
+	.dom_rtcache = LIST_HEAD_INITIALIZER(natmdomain.dom_rtcache)
+};
 #ifdef NATM_STAT
 u_int natm_sodropcnt = 0;		/* # mbufs dropped due to full sb */
 u_int natm_sodropbytes = 0;		/* # of bytes dropped */
@@ -98,16 +129,7 @@ u_int natm_sookcnt = 0;			/* # mbufs ok */
 u_int natm_sookbytes = 0;		/* # of bytes ok */
 #endif
 
-
-
-void natm_init()
-
+void natm_init(void)
 {
-  LIST_INIT(&natm_pcbs);
-  bzero(&natmintrq, sizeof(natmintrq));
-  natmintrq.ifq_maxlen = natmqmaxlen;
+	natmintrq.ifq_maxlen = natmqmaxlen;
 }
-
-#if defined(__FreeBSD__)
-DOMAIN_SET(natm);
-#endif

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ext2fs_bswap.c,v 1.4 2007/06/17 20:15:25 jasper Exp $	*/
-/*	$NetBSD: ext2fs_bswap.c,v 1.6 2000/07/24 00:23:10 mycroft Exp $	*/
+/*	$NetBSD: ext2fs_bswap.c,v 1.13 2007/11/17 08:34:38 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1997 Manuel Bouyer.
@@ -14,11 +13,9 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -33,14 +30,16 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_bswap.c,v 1.13 2007/11/17 08:34:38 tsutsui Exp $");
+
 #include <sys/types.h>
-#if defined(_KERNEL)
-#include <sys/systm.h>
-#endif
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_dinode.h>
 
-#if !defined(_KERNEL)
+#if defined(_KERNEL)
+#include <sys/systm.h>
+#else
 #include <string.h>
 #endif
 
@@ -49,77 +48,77 @@
 void
 e2fs_sb_bswap(struct ext2fs *old, struct ext2fs *new)
 {
+
 	/* preserve unused fields */
 	memcpy(new, old, sizeof(struct ext2fs));
-	new->e2fs_icount	=	swap32(old->e2fs_icount);
-	new->e2fs_bcount	=	swap32(old->e2fs_bcount);
-	new->e2fs_rbcount	=	swap32(old->e2fs_rbcount);
-	new->e2fs_fbcount	=	swap32(old->e2fs_fbcount);
-	new->e2fs_ficount	=	swap32(old->e2fs_ficount);
-	new->e2fs_first_dblock	=	swap32(old->e2fs_first_dblock);
-	new->e2fs_log_bsize	=	swap32(old->e2fs_log_bsize);
-	new->e2fs_fsize		=	swap32(old->e2fs_fsize);
-	new->e2fs_bpg		=	swap32(old->e2fs_bpg);
-	new->e2fs_fpg		=	swap32(old->e2fs_fpg);
-	new->e2fs_ipg		=	swap32(old->e2fs_ipg);
-	new->e2fs_mtime		=	swap32(old->e2fs_mtime);
-	new->e2fs_wtime		=	swap32(old->e2fs_wtime);
-	new->e2fs_mnt_count	=	swap16(old->e2fs_mnt_count);
-	new->e2fs_max_mnt_count	=	swap16(old->e2fs_max_mnt_count);
-	new->e2fs_magic		=	swap16(old->e2fs_magic);
-	new->e2fs_state		=	swap16(old->e2fs_state);
-	new->e2fs_beh		=	swap16(old->e2fs_beh);
-	new->e2fs_minrev	=	swap16(old->e2fs_minrev);
-	new->e2fs_lastfsck	=	swap32(old->e2fs_lastfsck);
-	new->e2fs_fsckintv	=	swap32(old->e2fs_fsckintv);
-	new->e2fs_creator	=	swap32(old->e2fs_creator);
-	new->e2fs_rev		=	swap32(old->e2fs_rev);
-	new->e2fs_ruid		=	swap16(old->e2fs_ruid);
-	new->e2fs_rgid		=	swap16(old->e2fs_rgid);
-	new->e2fs_first_ino	=	swap32(old->e2fs_first_ino);
-	new->e2fs_inode_size	=	swap16(old->e2fs_inode_size);
-	new->e2fs_block_group_nr =	swap16(old->e2fs_block_group_nr);
-	new->e2fs_features_compat =	swap32(old->e2fs_features_compat);
-	new->e2fs_features_incompat =	swap32(old->e2fs_features_incompat);
-	new->e2fs_features_rocompat =	swap32(old->e2fs_features_rocompat);
-	new->e2fs_algo		=	swap32(old->e2fs_algo);
+	new->e2fs_icount	=	bswap32(old->e2fs_icount);
+	new->e2fs_bcount	=	bswap32(old->e2fs_bcount);
+	new->e2fs_rbcount	=	bswap32(old->e2fs_rbcount);
+	new->e2fs_fbcount	=	bswap32(old->e2fs_fbcount);
+	new->e2fs_ficount	=	bswap32(old->e2fs_ficount);
+	new->e2fs_first_dblock	=	bswap32(old->e2fs_first_dblock);
+	new->e2fs_log_bsize	=	bswap32(old->e2fs_log_bsize);
+	new->e2fs_fsize		=	bswap32(old->e2fs_fsize);
+	new->e2fs_bpg		=	bswap32(old->e2fs_bpg);
+	new->e2fs_fpg		=	bswap32(old->e2fs_fpg);
+	new->e2fs_ipg		=	bswap32(old->e2fs_ipg);
+	new->e2fs_mtime		=	bswap32(old->e2fs_mtime);
+	new->e2fs_wtime		=	bswap32(old->e2fs_wtime);
+	new->e2fs_mnt_count	=	bswap16(old->e2fs_mnt_count);
+	new->e2fs_max_mnt_count	=	bswap16(old->e2fs_max_mnt_count);
+	new->e2fs_magic		=	bswap16(old->e2fs_magic);
+	new->e2fs_state		=	bswap16(old->e2fs_state);
+	new->e2fs_beh		=	bswap16(old->e2fs_beh);
+	new->e2fs_minrev	=	bswap16(old->e2fs_minrev);
+	new->e2fs_lastfsck	=	bswap32(old->e2fs_lastfsck);
+	new->e2fs_fsckintv	=	bswap32(old->e2fs_fsckintv);
+	new->e2fs_creator	=	bswap32(old->e2fs_creator);
+	new->e2fs_rev		=	bswap32(old->e2fs_rev);
+	new->e2fs_ruid		=	bswap16(old->e2fs_ruid);
+	new->e2fs_rgid		=	bswap16(old->e2fs_rgid);
+	new->e2fs_first_ino	=	bswap32(old->e2fs_first_ino);
+	new->e2fs_inode_size	=	bswap16(old->e2fs_inode_size);
+	new->e2fs_block_group_nr =	bswap16(old->e2fs_block_group_nr);
+	new->e2fs_features_compat =	bswap32(old->e2fs_features_compat);
+	new->e2fs_features_incompat =	bswap32(old->e2fs_features_incompat);
+	new->e2fs_features_rocompat =	bswap32(old->e2fs_features_rocompat);
+	new->e2fs_algo		=	bswap32(old->e2fs_algo);
+	new->e2fs_reserved_ngdb	=	bswap16(old->e2fs_reserved_ngdb);
 }
 
-void
-e2fs_cg_bswap(struct ext2_gd *old, struct ext2_gd *new, int size)
+void e2fs_cg_bswap(struct ext2_gd *old, struct ext2_gd *new, int size)
 {
 	int i;
-	for (i=0; i < (size / sizeof(struct  ext2_gd)); i++) {
-		new[i].ext2bgd_b_bitmap	= swap32(old[i].ext2bgd_b_bitmap);
-		new[i].ext2bgd_i_bitmap	= swap32(old[i].ext2bgd_i_bitmap);
-		new[i].ext2bgd_i_tables	= swap32(old[i].ext2bgd_i_tables);
-		new[i].ext2bgd_nbfree	= swap16(old[i].ext2bgd_nbfree);
-		new[i].ext2bgd_nifree	= swap16(old[i].ext2bgd_nifree);
-		new[i].ext2bgd_ndirs	= swap16(old[i].ext2bgd_ndirs);
+
+	for (i = 0; i < (size / sizeof(struct  ext2_gd)); i++) {
+		new[i].ext2bgd_b_bitmap	= bswap32(old[i].ext2bgd_b_bitmap);
+		new[i].ext2bgd_i_bitmap	= bswap32(old[i].ext2bgd_i_bitmap);
+		new[i].ext2bgd_i_tables	= bswap32(old[i].ext2bgd_i_tables);
+		new[i].ext2bgd_nbfree	= bswap16(old[i].ext2bgd_nbfree);
+		new[i].ext2bgd_nifree	= bswap16(old[i].ext2bgd_nifree);
+		new[i].ext2bgd_ndirs	= bswap16(old[i].ext2bgd_ndirs);
 	}
 }
 
-void
-e2fs_i_bswap(struct ext2fs_dinode *old, struct ext2fs_dinode *new)
+void e2fs_i_bswap(struct ext2fs_dinode *old, struct ext2fs_dinode *new)
 {
-	new->e2di_mode		=	swap16(old->e2di_mode);
-	new->e2di_uid_low	=	swap16(old->e2di_uid_low);
-	new->e2di_gid_low	=	swap16(old->e2di_gid_low);
-	new->e2di_uid_high	=	swap16(old->e2di_uid_high);
-	new->e2di_gid_high	=	swap16(old->e2di_gid_high);
-	new->e2di_nlink		=	swap16(old->e2di_nlink);
-	new->e2di_size		=	swap32(old->e2di_size);
-	new->e2di_atime		=	swap32(old->e2di_atime);
-	new->e2di_ctime		=	swap32(old->e2di_ctime);
-	new->e2di_mtime		=	swap32(old->e2di_mtime);
-	new->e2di_dtime		=	swap32(old->e2di_dtime);
-	new->e2di_nblock	=	swap32(old->e2di_nblock);
-	new->e2di_flags		=	swap32(old->e2di_flags);
-	new->e2di_gen		=	swap32(old->e2di_gen);
-	new->e2di_facl		=	swap32(old->e2di_facl);
-	new->e2di_dacl		=	swap32(old->e2di_dacl);
-	new->e2di_faddr		=	swap32(old->e2di_faddr);
+
+	new->e2di_mode		=	bswap16(old->e2di_mode);
+	new->e2di_uid		=	bswap16(old->e2di_uid);
+	new->e2di_gid		=	bswap16(old->e2di_gid);
+	new->e2di_nlink		=	bswap16(old->e2di_nlink);
+	new->e2di_size		=	bswap32(old->e2di_size);
+	new->e2di_atime		=	bswap32(old->e2di_atime);
+	new->e2di_ctime		=	bswap32(old->e2di_ctime);
+	new->e2di_mtime		=	bswap32(old->e2di_mtime);
+	new->e2di_dtime		=	bswap32(old->e2di_dtime);
+	new->e2di_nblock	=	bswap32(old->e2di_nblock);
+	new->e2di_flags		=	bswap32(old->e2di_flags);
+	new->e2di_gen		=	bswap32(old->e2di_gen);
+	new->e2di_facl		=	bswap32(old->e2di_facl);
+	new->e2di_dacl		=	bswap32(old->e2di_dacl);
+	new->e2di_faddr		=	bswap32(old->e2di_faddr);
 	memcpy(&new->e2di_blocks[0], &old->e2di_blocks[0],
-		(NDADDR+NIADDR) * sizeof(int));
+	    (NDADDR + NIADDR) * sizeof(uint32_t));
 }
 #endif

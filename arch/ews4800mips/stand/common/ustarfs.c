@@ -1,4 +1,4 @@
-/*	$NetBSD: ustarfs.c,v 1.3 2006/08/26 14:13:40 tsutsui Exp $	*/
+/*	$NetBSD: ustarfs.c,v 1.7 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,9 +39,9 @@
 #include "local.h"
 #include "common.h"
 
-boolean_t __ustarfs_file(int, char *, size_t *);
-boolean_t __block_read(uint8_t *, int);
-boolean_t __block_read_n(uint8_t *, int, int);
+bool __ustarfs_file(int, char *, size_t *);
+bool __block_read(uint8_t *, int);
+bool __block_read_n(uint8_t *, int, int);
 void __change_volume(int);
 
 enum { USTAR_BLOCK_SIZE = 8192 };/* Check src/distrib/common/buildfloppies.sh */
@@ -58,7 +51,7 @@ struct volume {
 	int block_offset;
 } __volume;
 
-boolean_t
+bool
 ustarfs_load(const char *file, void **addrp, size_t *sizep)
 {
 	char fname[16];
@@ -76,7 +69,7 @@ ustarfs_load(const char *file, void **addrp, size_t *sizep)
 		maxblk = (77 + 76) * 13;
 	else {
 		printf("not supported device.\n");
-		return FALSE;
+		return false;
 	}
 
 	/* Truncate to ustar block boundary */
@@ -88,7 +81,7 @@ ustarfs_load(const char *file, void **addrp, size_t *sizep)
 	/* Find file */
 	while (/*CONSTCOND*/1) {
 		if (!__ustarfs_file(block, fname, &sz))
-			return FALSE;
+			return false;
 
 		if (strcmp(file, fname) == 0)
 			break;
@@ -100,51 +93,51 @@ ustarfs_load(const char *file, void **addrp, size_t *sizep)
 	/* Load file */
 	sz = ROUND_SECTOR(sz);
 	if ((*addrp = alloc(sz)) == 0) {
-		printf("%s: can't allocate memory.\n", __FUNCTION__);
-		return FALSE;
+		printf("%s: can't allocate memory.\n", __func__);
+		return false;
 	}
 
 	if (!__block_read_n(*addrp, block, sz >> DEV_BSHIFT)) {
-		printf("%s: can't load file.\n", __FUNCTION__);
+		printf("%s: can't load file.\n", __func__);
 		dealloc(*addrp, sz);
-		return FALSE;
+		return false;
 	}
 
-	return TRUE;
+	return true;
 }
 
-boolean_t
+bool
 __ustarfs_file(int start_block, char *file, size_t *size)
 {
 	uint8_t buf[512];
 
 	if (!__block_read(buf, start_block)) {
 		printf("can't read tar header.\n");
-		return FALSE;
+		return false;
 	}
 	if (((*(uint32_t *)(buf + 256)) & 0xffffff) != 0x757374) {
 		printf("bad tar magic.\n");
-		return FALSE;
+		return false;
 	}
 	*size = strtoul((char *)buf + 124, 0, 0);
 	strncpy(file, (char *)buf, 16);
 
-	return TRUE;
+	return true;
 }
 
-boolean_t
+bool
 __block_read_n(uint8_t *buf, int blk, int count)
 {
 	int i;
 
 	for (i = 0; i < count; i++, buf += DEV_BSIZE)
 		if (!__block_read(buf, blk + i))
-			return FALSE;
+			return false;
 
-	return TRUE;
+	return true;
 }
 
-boolean_t
+bool
 __block_read(uint8_t *buf, int blk)
 {
 	int vol;

@@ -1,4 +1,4 @@
-/* $NetBSD: au1500.c,v 1.6 2006/07/13 22:56:01 gdamore Exp $ */
+/* $NetBSD: au1500.c,v 1.8 2007/02/28 04:21:52 thorpej Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -97,7 +97,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: au1500.c,v 1.6 2006/07/13 22:56:01 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: au1500.c,v 1.8 2007/02/28 04:21:52 thorpej Exp $");
 
 #include <sys/param.h>
 #include <machine/bus.h>
@@ -198,13 +198,13 @@ static struct au_chipdep au1500_chipdep = {
 	au1500_irqnames,
 };
 
-boolean_t
+bool
 au1500_match(struct au_chipdep **cpp)
 {
 
 	if (MIPS_PRID_COPTS(cpu_id) == MIPS_AU1500) {
 		*cpp = &au1500_chipdep;
-		return TRUE;
+		return true;
 	}
-	return FALSE;
+	return false;
 }

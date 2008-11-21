@@ -1,4 +1,3 @@
-/* $OpenBSD: mcbusreg.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcbusreg.h,v 1.3 1999/11/16 18:36:27 mjacob Exp $ */
 
 /*
@@ -37,7 +36,7 @@
  */
 
 /*
- * Information gathered from:
+ * Information gathered from:"
  *
  * "Rawhide System Programmer's Manual, revision 1.4".
  */
@@ -77,15 +76,7 @@
 /*
  * This is something of a layering violation, but it makes probing cleaner.
  */
-#define	MCPCIA_PER_MCBUS	4
-
-/*
- * defaults for locators
- */
-#define MCBUSCF_NLOCS 1
-#define MCBUSCF_MID 0
-#define MCBUSCF_MID_DEFAULT -1  
-
+#define	MCPCIA_PER_MCBUS		4
 /* the MCPCIA bridge CSR addresses, offset zero, is a good thing to probe for */
 #define	MCPCIA_BRIDGE_ADDR(gid, mid)	\
 	(MCBUS_IOSPACE | 0x1E0000000LL	|		\

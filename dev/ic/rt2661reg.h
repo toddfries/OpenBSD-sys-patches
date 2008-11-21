@@ -1,4 +1,5 @@
-/*	$OpenBSD: rt2661reg.h,v 1.9 2006/08/09 07:46:37 damien Exp $	*/
+/*	$Id: rt2661reg.h,v 1.3 2008/04/29 22:21:45 scw Exp $	*/
+/*	$OpenBSD: rt2661reg.h,v 1.5 2006/01/14 12:43:27 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -135,6 +136,9 @@
 #define RT2661_MCU_CMD_DONE		0xff
 #define RT2661_MCU_WAKEUP		(1 << 8)
 #define RT2661_MCU_BEACON_EXPIRE	(1 << 9)
+#define	RT2661_MCU_INT_ALL		(RT2661_MCU_CMD_DONE | \
+					 RT2661_MCU_WAKEUP | \
+					 RT2661_MCU_BEACON_EXPIRE)
 
 /* possible flags for register H2M_MAILBOX_CSR */
 #define RT2661_H2M_BUSY		(1 << 24)
@@ -201,6 +205,10 @@
 #define RT2661_TX2_DMA_DONE	(1 << 18)
 #define RT2661_TX3_DMA_DONE	(1 << 19)
 #define RT2661_MGT_DONE		(1 << 20)
+#define	RT2661_INT_CSR_ALL	(RT2661_TX_DONE | RT2661_RX_DONE | \
+				 RT2661_TX0_DMA_DONE | RT2661_TX1_DMA_DONE | \
+				 RT2661_TX2_DMA_DONE | RT2661_TX3_DMA_DONE | \
+				 RT2661_MGT_DONE | RT2661_MGT_DONE)
 
 /* possible flags for register E2PROM_CSR */
 #define RT2661_C	(1 << 1)
@@ -342,7 +350,6 @@ struct rt2661_rx_desc {
 	RAL_WRITE((sc), RT2661_E2PROM_CSR, (val));			\
 	DELAY(RT2661_EEPROM_DELAY);					\
 } while (/* CONSTCOND */0)
-
 
 /*
  * Default values for MAC registers; values taken from the reference driver.

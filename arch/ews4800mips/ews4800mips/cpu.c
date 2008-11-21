@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
+/*	$NetBSD: cpu.c,v 1.3 2008/04/04 16:33:05 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2000 Soren S. Jorvang.  All rights reserved.
@@ -26,25 +26,26 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.3 2008/04/04 16:33:05 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/device.h>
 
 #include <machine/autoconf.h>
 
 #include "ioconf.h"
 
-int cpumatch(struct device *, struct cfdata *, void *);
-void cpuattach(struct device *, struct device *, void *);
+int cpumatch(device_t, cfdata_t, void *);
+void cpuattach(device_t, device_t, void *);
 
-CFATTACH_DECL(cpu, sizeof (struct device),
+CFATTACH_DECL_NEW(cpu, 0,
     cpumatch, cpuattach, NULL, NULL);
 
 static int cpu_attached;
 
 int
-cpumatch(struct device *parent, struct cfdata *cf, void *aux)
+cpumatch(device_t parent, cfdata_t cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -56,10 +57,10 @@ cpumatch(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 void
-cpuattach(struct device *parent, struct device *dev, void *aux)
+cpuattach(device_t parent, device_t self, void *aux)
 {
 
-	printf(": ");
+	aprint_normal(": ");
 	cpu_attached = 1;
 
 	cpu_identify();

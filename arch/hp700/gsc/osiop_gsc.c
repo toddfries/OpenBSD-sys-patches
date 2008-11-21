@@ -1,8 +1,7 @@
-/*	$NetBSD: osiop_gsc.c,v 1.10 2005/12/11 12:17:24 christos Exp $	*/
+/*	$NetBSD: osiop_gsc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2001 Matt Fredette.  All rights reserved.
- * Copyright (c) 2001,2002 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -14,6 +13,30 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*-
+ * Copyright (c) 2001, 2002 Izumi Tsutsui.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -60,7 +83,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osiop_gsc.c,v 1.10 2005/12/11 12:17:24 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osiop_gsc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,15 +111,15 @@ __KERNEL_RCSID(0, "$NetBSD: osiop_gsc.c,v 1.10 2005/12/11 12:17:24 christos Exp 
 #define OSIOP_GSC_RESET         0x0000
 #define	OSIOP_GSC_OFFSET	0x0100
 
-int osiop_gsc_match(struct device *, struct cfdata *, void *);
-void osiop_gsc_attach(struct device *, struct device *, void *);
+int osiop_gsc_match(device_t, cfdata_t, void *);
+void osiop_gsc_attach(device_t, device_t, void *);
 int osiop_gsc_intr(void *);
 
-CFATTACH_DECL(osiop_gsc, sizeof(struct osiop_softc),
+CFATTACH_DECL_NEW(osiop_gsc, sizeof(struct osiop_softc),
     osiop_gsc_match, osiop_gsc_attach, NULL, NULL);
 
 int
-osiop_gsc_match(struct device *parent, struct cfdata *match, void *aux)
+osiop_gsc_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct gsc_attach_args *ga = aux;
 	bus_space_handle_t ioh;
@@ -116,20 +139,21 @@ osiop_gsc_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 void
-osiop_gsc_attach(struct device *parent, struct device *self, void *aux)
+osiop_gsc_attach(device_t parent, device_t self, void *aux)
 {
-	struct osiop_softc *sc = (void *)self;
+	struct osiop_softc *sc = device_private(self);
 	struct gsc_attach_args *ga = aux;
 	bus_space_handle_t ioh;
 
+	sc->sc_dev = self;
 	sc->sc_bst = ga->ga_iot;
 	sc->sc_dmat = ga->ga_dmatag;
 	if (bus_space_map(sc->sc_bst, ga->ga_hpa,
 	    OSIOP_GSC_OFFSET + OSIOP_NREGS, 0, &ioh))
-		panic("osiop_gsc_attach: couldn't map I/O ports");
+		panic("%s: couldn't map I/O ports", __func__);
 	if (bus_space_subregion(sc->sc_bst, ioh, 
 	    OSIOP_GSC_OFFSET, OSIOP_NREGS, &sc->sc_reg))
-		panic("osiop_gsc_attach: couldn't get chip ports");
+		panic("%s: couldn't get chip ports", __func__);
 
 	sc->sc_clock_freq = ga->ga_ca.ca_pdc_iodc_read->filler2[14] / 1000000;
 	if (!sc->sc_clock_freq)
@@ -158,7 +182,7 @@ osiop_gsc_attach(struct device *parent, struct device *self, void *aux)
 #endif /* OSIOP_DEBUG */
 	osiop_attach(sc);
 
-	(void)hp700_intr_establish(&sc->sc_dev, IPL_BIO,
+	(void)hp700_intr_establish(self, IPL_BIO,
 	    osiop_gsc_intr, sc, ga->ga_int_reg, ga->ga_irq);
 }
 

@@ -1,4 +1,4 @@
-/* $NetBSD: disksubr.c,v 1.20 2006/11/25 11:59:56 scw Exp $ */
+/* $NetBSD: disksubr.c,v 1.23 2007/10/17 19:55:04 garbled Exp $ */
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -103,7 +103,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.20 2006/11/25 11:59:56 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.23 2007/10/17 19:55:04 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -210,7 +210,7 @@ readdisklabel(dev, strat, lp, clp)
 		/* Save the whole block in case it has info we need. */
 		bcopy(bp->b_data, clp->cd_block, sizeof(clp->cd_block));
 	}
-	brelse(bp);
+	brelse(bp, 0);
 	if (error)
 		return ("disk label read error");
 
@@ -316,7 +316,7 @@ writedisklabel(dev, strat, lp, clp)
 	bp->b_flags |= B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
-	brelse(bp);
+	brelse(bp, 0);
 
 	return (error);
 }
@@ -369,7 +369,7 @@ disklabel_om_to_bsd(cp, lp)
 	if (cksum != 0)
 		return ("UniOS disk label, bad checksum");
 
-	memset((caddr_t)lp, 0, sizeof(struct disklabel));
+	memset((void *)lp, 0, sizeof(struct disklabel));
 	/* Format conversion. */
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;

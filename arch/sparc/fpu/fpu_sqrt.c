@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_sqrt.c,v 1.3 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: fpu_sqrt.c,v 1.2 1994/11/20 20:52:46 deraadt Exp $ */
+/*	$NetBSD: fpu_sqrt.c,v 1.5 2005/11/16 23:24:44 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -44,6 +43,9 @@
 /*
  * Perform an FPU square root (return sqrt(x)).
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_sqrt.c,v 1.5 2005/11/16 23:24:44 uwe Exp $");
 
 #include <sys/types.h>
 
@@ -184,8 +186,7 @@
  * this, so we have some justification in assuming it.
  */
 struct fpn *
-fpu_sqrt(fe)
-	struct fpemu *fe;
+fpu_sqrt(struct fpemu *fe)
 {
 	register struct fpn *x = &fe->fe_f1;
 	register u_int bit, q, tt;

@@ -1,5 +1,4 @@
-/*	$OpenBSD: intreg.h,v 1.8 2006/05/29 20:40:01 miod Exp $	*/
-/*	$NetBSD: intreg.h,v 1.6 1997/07/22 20:19:10 pk Exp $ */
+/*	$NetBSD: intreg.h,v 1.13 2005/11/16 22:10:58 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -60,14 +59,6 @@
  * be cleared in software.  This is done in locore.s.  The ALLIE bit must
  * be cleared to clear asynchronous memory error (level 15) interrupts.
  */
-#ifdef solbourne
-#define	IE_L14		14
-#define	IE_L10		10
-#define	IE_L8		8
-#define	IE_L6		6
-#define	IE_L4		4
-#define	IE_L1		1
-#else
 #define	IE_L14		0x80	/* enable level 14 (counter 1) interrupts */
 #define	IE_L10		0x20	/* enable level 10 (counter 0) interrupts */
 #define	IE_L8		0x10	/* enable level 8 interrupts */
@@ -75,14 +66,12 @@
 #define	IE_L4		0x04	/* request software level 4 interrupt */
 #define	IE_L1		0x02	/* request software level 1 interrupt */
 #define	IE_ALLIE	0x01	/* enable interrupts */
-#endif
 
 #ifndef _LOCORE
-void	ienab_bis(int bis);	/* set given bits */
-void	ienab_bic(int bic);	/* clear given bits */
+void	ienab_bis(int);		/* set given bits */
+void	ienab_bic(int);		/* clear given bits */
 #endif
 
-#if defined(SUN4M)
 #ifdef notyet
 #define IENAB_SYS	((_MAXNBPG * _MAXNCPU) + 0xc)
 #define IENAB_P0	0x0008
@@ -90,12 +79,9 @@ void	ienab_bic(int bic);	/* clear given bits */
 #define IENAB_P2	0x2008
 #define IENAB_P3	0x3008
 #endif /* notyet */
-#endif
 
-#if defined(SUN4M)
 /*
- * Interrupt Control Registers, located in IO space.
- * (mapped to `locore' for now..)
+ * sun4m Interrupt Control Registers, located in IO space.
  * There are two sets of interrupt registers called `Processor Interrupts'
  * and `System Interrupts'. The `Processor' set corresponds to the 15
  * interrupt levels as seen by the CPU. The `System' set corresponds to
@@ -105,9 +91,23 @@ void	ienab_bic(int bic);	/* clear given bits */
  * system-wide interrupts, and the ICR_ITR selects the processor to get
  * the system's interrupts.
  */
-#define ICR_PI_PEND		(PI_INTR_VA + 0x0)
-#define ICR_PI_CLR		(PI_INTR_VA + 0x4)
-#define ICR_PI_SET		(PI_INTR_VA + 0x8)
+#ifndef _LOCORE
+struct icr_pi {
+	uint32_t	pi_pend;	/* Pending interrupts (read-only) */
+	uint32_t	pi_clr;		/* Clear interrupts (write-only) */
+	uint32_t	pi_set;		/* Raise interrupts (write-only) */
+};
+#endif
+#define ICR_PI_PEND_OFFSET	0
+#define ICR_PI_CLR_OFFSET	4
+#define ICR_PI_SET_OFFSET	8
+
+#define ICR_PI_PEND		(PI_INTR_VA + ICR_PI_PEND_OFFSET)
+#define ICR_PI_CLR		(PI_INTR_VA + ICR_PI_CLR_OFFSET)
+#define ICR_PI_SET		(PI_INTR_VA + ICR_PI_SET_OFFSET)
+
+
+/* The system interrupt register */
 #define ICR_SI_PEND		(SI_INTR_VA)
 #define ICR_SI_MASK		(SI_INTR_VA + 0x4)
 #define ICR_SI_CLR		(SI_INTR_VA + 0x8)
@@ -142,12 +142,18 @@ void	ienab_bic(int bic);	/* clear given bits */
 #define SINTR_SBUS(n)		(1 << (7+(n)-1))
 #define SINTR_VMEMASK		0x0000007f	/* VME */
 #define SINTR_VME(n)		(1 << ((n)-1))
-#define SINTR_BITS		"\020" \
-				"\01VME0\02VME1\03VME2\04VME3\05VME4\06VME5" \
-				"\07VME6\010SBUS0\011SBUS1\012SBUS2\013SBUS3" \
-				"\014SBUS4\015SBUS5\016SBUS6\017K\020S\021E" \
-				"\022A\023SC\024T\025VI\065MI\027F" \
-				"\034V\035M\036I\037ME\040MA"
+#define SINTR_BITS		"\177\020"				      \
+				"f\0\7VME\0f\7\7SBUS\0b\16K\0b\17S\0b\20E\0"  \
+				"b\21A\0b\22SC\0b\23T\0b\24VI\0b\25MI\0"      \
+				"b\26F\0b\33V\0b\34M\0b\35I\0b\36ME\0b\37MA\0"
 
+/*
+ * Set & clear bits in the system interrupt register
+ */
+#define	icr_si_bis(bis) do {			\
+	*((uint32_t *)ICR_SI_SET) = (bis);	\
+} while (0)
 
-#endif
+#define	icr_si_bic(bic) do {			\
+	*((uint32_t *)ICR_SI_CLR) = (bic);	\
+} while (0)

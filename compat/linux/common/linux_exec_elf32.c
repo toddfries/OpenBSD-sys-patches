@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_exec_elf32.c,v 1.76 2006/11/16 01:32:42 christos Exp $	*/
+/*	$NetBSD: linux_exec_elf32.c,v 1.82 2008/11/20 09:26:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_exec_elf32.c,v 1.76 2006/11/16 01:32:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_exec_elf32.c,v 1.82 2008/11/20 09:26:06 ad Exp $");
 
 #ifndef ELFSIZE
 /* XXX should die */
@@ -63,10 +56,9 @@ __KERNEL_RCSID(0, "$NetBSD: linux_exec_elf32.c,v 1.76 2006/11/16 01:32:42 christ
 #include <sys/kauth.h>
 
 #include <sys/mman.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/reg.h>
 
 #include <compat/linux/common/linux_types.h>
@@ -74,6 +66,8 @@ __KERNEL_RCSID(0, "$NetBSD: linux_exec_elf32.c,v 1.76 2006/11/16 01:32:42 christ
 #include <compat/linux/common/linux_util.h>
 #include <compat/linux/common/linux_exec.h>
 #include <compat/linux/common/linux_machdep.h>
+#include <compat/linux/common/linux_ipc.h>
+#include <compat/linux/common/linux_sem.h>
 
 #include <compat/linux/linux_syscallargs.h>
 #include <compat/linux/linux_syscall.h>
@@ -333,12 +327,12 @@ ELFNAME2(linux,signature)(l, epp, eh, itp)
 		if (np->n_type != ELF_NOTE_TYPE_ABI_TAG ||
 		    np->n_namesz != ELF_NOTE_ABI_NAMESZ ||
 		    np->n_descsz != ELF_NOTE_ABI_DESCSZ ||
-		    memcmp((caddr_t)(np + 1), ELF_NOTE_ABI_NAME,
+		    memcmp((void *)(np + 1), ELF_NOTE_ABI_NAME,
 		    ELF_NOTE_ABI_NAMESZ))
 			goto next;
 
 		/* Make sure the OS is Linux. */
-		abi = (u_int32_t *)((caddr_t)np + sizeof(Elf_Nhdr) +
+		abi = (u_int32_t *)((char *)np + sizeof(Elf_Nhdr) +
 		    np->n_namesz);
 		if (abi[0] == ELF_NOTE_ABI_OS_LINUX)
 			error = 0;
@@ -393,8 +387,7 @@ ELFNAME2(linux,probe)(struct lwp *l, struct exec_package *epp, void *eh,
 	}
 
 	if (itp) {
-		if ((error = emul_find_interp(l, epp->ep_esch->es_emul->e_path,
-		    itp)))
+		if ((error = emul_find_interp(l, epp, itp)))
 			return (error);
 	}
 	DPRINTF(("linux_probe: returning 0\n"));

@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.80 2008/05/26 22:49:57 deraadt Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.93 2008/11/11 14:40:18 ad Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,60 +37,63 @@
 /*
  * Setup the system to run on the current machine.
  *
- * cpu_configure() is called at boot time and initializes the vba
+ * Configure() is called at boot time and initializes the vba
  * device tables and the memory controller monitoring.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
+ *
+ * Lots of this is now in x86/x86/x86_autoconf.c
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.93 2008/11/11 14:40:18 ad Exp $");
+
+#include "opt_compat_oldboot.h"
+#include "opt_multiprocessor.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/user.h>
 #include <sys/buf.h>
-#include <sys/dkstat.h>
-#include <sys/disklabel.h>
-#include <sys/conf.h>
-#include <sys/reboot.h>
-#include <sys/device.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
-
-#include <net/if.h>
-#include <net/if_types.h>
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-
-#include <uvm/uvm_extern.h>
+#include <sys/proc.h>
+#include <sys/user.h>
 
 #include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/gdt.h>
-#include <machine/biosvar.h>
-#include <machine/kvm86.h>
-
-#include <dev/cons.h>
+#include <machine/pcb.h>
+#include <machine/cpufunc.h>
 
 #include "ioapic.h"
+#include "lapic.h"
 
 #if NIOAPIC > 0
 #include <machine/i82093var.h>
 #endif
 
-/*
- * The following several variables are related to
- * the configuration process, and are used in initializing
- * the machine.
- */
-extern dev_t bootdev;
-
-/* Support for VIA C3 RNG */
-extern struct timeout viac3_rnd_tmo;
-extern int	viac3_rnd_present;
-void		viac3_rnd(void *);
-
-#ifdef CRYPTO
-void		viac3_crypto_setup(void);
-extern int	i386_has_xcrypt;
+#if NLAPIC > 0
+#include <machine/i82489var.h>
 #endif
+
+#include "bios32.h"
+#if NBIOS32 > 0
+#include <machine/bios32.h>
+/* XXX */
+extern void platform_init(void);
+#endif
+
+#include "opt_pcibios.h"
+#ifdef PCIBIOS
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
+#include <i386/pci/pcibios.h>
+#endif
+
+#include "opt_kvm86.h"
+#ifdef KVM86
+#include <machine/kvm86.h>
+#endif
+
+#include "opt_viapadlock.h"
 
 /*
  * Determine i/o configuration for a machine.
@@ -99,134 +101,44 @@ extern int	i386_has_xcrypt;
 void
 cpu_configure(void)
 {
-	/*
-	 * Note, on i386, configure is not running under splhigh unlike other
-	 * architectures.  This fact is used by the pcmcia irq line probing.
-	 */
 
 	startrtclock();
 
-	gdt_init();		/* XXX - pcibios uses gdt stuff */
-
-	/* Set up proc0's TSS and LDT */
-	i386_proc0_tss_ldt_init();
+#if NBIOS32 > 0
+	bios32_init();
+	platform_init();
+#endif
+#ifdef PCIBIOS
+	pcibios_init();
+#endif
 
 #ifdef KVM86
 	kvm86_init();
 #endif
 
 	if (config_rootfound("mainbus", NULL) == NULL)
-		panic("cpu_configure: mainbus not configured");
+		panic("configure: mainbus not configured");
 
-#if NIOAPIC > 0
-	if (nioapics > 0)
-		goto nomasks;
+#ifdef INTRDEBUG
+	intr_printconfig();
 #endif
-	printf("biomask %x netmask %x ttymask %x\n", (u_short)IMASK(IPL_BIO),
-	    (u_short)IMASK(IPL_NET), (u_short)IMASK(IPL_TTY));
 
 #if NIOAPIC > 0
- nomasks:
 	ioapic_enable();
 #endif
-
-	proc0.p_addr->u_pcb.pcb_cr0 = rcr0();
-
+	/* resync cr0 after FPU configuration */
+	lwp0.l_addr->u_pcb.pcb_cr0 = rcr0() & ~CR0_TS;
 #ifdef MULTIPROCESSOR
-	/* propagate TSS and LDT configuration to the idle pcb's. */
-	cpu_init_idle_pcbs();
+	/* propagate this to the idle pcb's. */
+	cpu_init_idle_lwps();
 #endif
+
 	spl0();
+#if NLAPIC > 0
+	lapic_tpr = 0;
+#endif
 
-	/*
-	 * We can not know which is our root disk, defer
-	 * until we can checksum blocks to figure it out.
-	 */
-	cold = 0;
-
-	/*
-	 * At this point the RNG is running, and if FSXR is set we can
-	 * use it.  Here we setup a periodic timeout to collect the data.
-	 */
-	if (viac3_rnd_present) {
-		timeout_set(&viac3_rnd_tmo, viac3_rnd, &viac3_rnd_tmo);
-		viac3_rnd(&viac3_rnd_tmo);
-	}
-#ifdef CRYPTO
-	/*
-	 * Also, if the chip has crypto available, enable it.
-	 */
-	if (i386_has_xcrypt)
-		viac3_crypto_setup();
+#if defined(VIA_PADLOCK)
+	via_padlock_attach();
 #endif
 }
-
-void
-device_register(struct device *dev, void *aux)
-{
-}
-
-/*
- * Now that we are fully operational, we can checksum the
- * disks, and using some heuristics, hopefully are able to
- * always determine the correct root disk.
- */
-void
-diskconf(void)
-{
-	int majdev, unit, part = 0;
-	struct device *bootdv = NULL;
-	dev_t tmpdev;
-	char buf[128];
-	extern bios_bootmac_t *bios_bootmac;
-
-	dkcsumattach();
-
-	if ((bootdev & B_MAGICMASK) == (u_int)B_DEVMAGIC) {
-		majdev = B_TYPE(bootdev);
-		unit = B_UNIT(bootdev);
-		part = B_PARTITION(bootdev);
-		snprintf(buf, sizeof buf, "%s%d%c", findblkname(majdev),
-		    unit, part + 'a');
-		bootdv = parsedisk(buf, strlen(buf), part, &tmpdev);
-	}
-
-	if (bios_bootmac) {
-		struct ifnet *ifp;
-
-		for (ifp = TAILQ_FIRST(&ifnet); ifp != NULL;
-		    ifp = TAILQ_NEXT(ifp, if_list)) {
-			if ((ifp->if_type == IFT_ETHER ||
-			    ifp->if_type == IFT_FDDI) &&
-			    bcmp(bios_bootmac->mac,
-			    ((struct arpcom *)ifp)->ac_enaddr,
-			    ETHER_ADDR_LEN) == 0)
-				break;
-		}
-		if (ifp) {
-#if defined(NFSCLIENT)
-			printf("PXE boot MAC address %s, interface %s\n",
-			    ether_sprintf(bios_bootmac->mac), ifp->if_xname);
-			bootdv = parsedisk(ifp->if_xname, strlen(ifp->if_xname),
-			    0, &tmpdev);
-			part = 0;
-#endif
-		} else
-			printf("PXE boot MAC address %s, interface %s\n",
-			    ether_sprintf(bios_bootmac->mac), "unknown");
-	}
-
-	setroot(bootdv, part, RB_USERREQ);
-	dumpconf();
-}
-
-struct nam2blk nam2blk[] = {
-	{ "wd",		0 },
-	{ "fd",		2 },
-	{ "sd",		4 },
-	{ "cd",		6 },
-	{ "mcd",	7 },
-	{ "rd",		17 },
-	{ "raid",	19 },
-	{ NULL,		-1 }
-};

@@ -1,5 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.10 2006/04/09 03:07:52 deraadt Exp $	*/
-/*	$NetBSD: stdarg.h,v 1.4 1996/10/09 21:13:05 cgd Exp $	*/
+/* $NetBSD: stdarg.h,v 1.18 2005/12/11 12:16:16 christos Exp $ */
 
 /*-
  * Copyright (c) 1991, 1993
@@ -35,35 +34,48 @@
 #ifndef _ALPHA_STDARG_H_
 #define	_ALPHA_STDARG_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
+#include <sys/featuretest.h>
 
-typedef __va_list	va_list;
+typedef _BSD_VA_LIST_	va_list;
 
+#ifdef __lint__
+#define	va_start(a, l)		((a).__base = (void *)&(l), (a).__offset = 0)
+#define	va_arg(a, t)		((t)((a).__base ? 0 : 0))
+#define	va_end(a)		/* nothing */
+#else /* !__lint__ */
+#if __GNUC_PREREQ__(2, 96)
+#define	va_start(ap, last)	__builtin_stdarg_start((ap), (last))
+#define	va_arg			__builtin_va_arg
+#define	va_end			__builtin_va_end
+#define	__va_copy(dest, src)	__builtin_va_copy((dest), (src))
+#else
 #define	__va_size(type) \
 	(((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
 
-#ifdef lint
-#define	va_start(ap,lastarg)	((ap) = (ap))
-#else
 #define	va_start(ap, last) \
-	(__builtin_next_arg(last), (ap) = *(va_list *)__builtin_saveregs(), (ap).pad = 0)
-#endif /* lint */
+	(__builtin_next_arg(last), (ap) = *(va_list *)__builtin_saveregs(), (ap).__pad = 0)
 
 #define	__REAL_TYPE_CLASS	8
 #define	__va_arg_offset(ap, type)					\
 	((__builtin_classify_type(*(type *)0) == __REAL_TYPE_CLASS &&	\
-	    (ap).offset <= (6 * 8) ? -(6 * 8) : 0) - __va_size(type))
+	    (ap).__offset <= (6 * 8) ? -(6 * 8) : 0) - __va_size(type))
 
 #define	va_arg(ap, type)						\
-	(*(type *)((ap).offset += __va_size(type),			\
-		   (ap).base + (ap).offset + __va_arg_offset(ap, type)))
-
-#if __ISO_C_VISIBLE >= 1999
-#define va_copy(dest, src) \
-	((dest) = (src))
-#endif
+	(*(type *)((ap).__offset += __va_size(type),			\
+		   (ap).__base + (ap).__offset + __va_arg_offset(ap, type)))
 
 #define	va_end(ap)	
+
+#define	__va_copy(dest, src)						\
+	((dest) = (src))
+#endif
+#endif /* __lint__ */
+
+#if !defined(_ANSI_SOURCE) &&						\
+    (defined(_ISOC99_SOURCE) || (__STDC_VERSION__ - 0) >= 199901L ||	\
+     defined(_NETBSD_SOURCE))
+#define	va_copy(dest, src)	__va_copy((dest), (src))
+#endif
 
 #endif /* !_ALPHA_STDARG_H_ */

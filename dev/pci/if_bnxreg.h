@@ -1,4 +1,5 @@
-/*	$OpenBSD: if_bnxreg.h,v 1.24 2008/05/29 05:36:49 brad Exp $	*/
+/*	$NetBSD: if_bnxreg.h,v 1.7 2008/06/24 10:17:45 gmcgarry Exp $	*/
+/*	$OpenBSD: if_bnxreg.h,v 1.17 2006/11/20 21:26:27 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -31,12 +32,15 @@
  * $FreeBSD: src/sys/dev/bce/if_bcereg.h,v 1.4 2006/05/04 00:34:07 mjacob Exp $
  */
 
+#undef BNX_DEBUG
+
 #ifndef	_BNX_H_DEFINED
 #define _BNX_H_DEFINED
 
-#ifdef _KERNEL
+#ifdef _KERNEL_OPT
 #include "bpfilter.h"
-#include "vlan.h"
+#include "opt_inet.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,24 +50,22 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
-#include <sys/timeout.h>
+#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
+#include <net/if_ether.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#include <netinet/if_ether.h>
+#include <netinet/if_inarp.h>
 #endif
 
-#if NVLAN > 0
-#include <net/if_types.h>
-#include <net/if_vlan_var.h>
-#endif
+#include <net/if_vlanvar.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -77,6 +79,8 @@
 #include <dev/mii/miivar.h>
 #include <dev/mii/miidevs.h>
 #include <dev/mii/brgphyreg.h>
+
+#define ETHER_ALIGN	2
 
 /****************************************************************************/
 /* Debugging macros and definitions.                                        */
@@ -144,7 +148,7 @@
 /* Print a message based on the logging level and code path. */
 #define DBPRINT(sc, level, format, args...)				\
 	if (BNX_LOG_MSG(level)) {					\
-		printf("%s: " format, sc->bnx_dev.dv_xname, ## args);	\
+		aprint_debug_dev(sc->bnx_dev, format, ## args);		\
 	}
 
 /* Runs a particular command based on the logging level and code path. */
@@ -187,11 +191,11 @@
 
 #else
 
-#define DBPRINT(level, format, args...)
-#define DBRUN(m, args...)
-#define DBRUNLV(level, args...)
-#define DBRUNCP(cp, args...)
-#define DBRUNIF(cond, args...)
+#define DBPRINT(level, format, ...)
+#define DBRUN(m, ...)
+#define DBRUNLV(level, ...)
+#define DBRUNCP(cp, ...)
+#define DBRUNIF(cond, ...)
 #define DB_RANDOMFALSE(defects)
 #define DB_OR_RANDOMFALSE(percent)
 #define DB_AND_RANDOMFALSE(percent)
@@ -233,11 +237,9 @@
 #define BNX_CHIP_ID_5706_A0			0x57060000
 #define BNX_CHIP_ID_5706_A1			0x57060010
 #define BNX_CHIP_ID_5706_A2			0x57060020
-#define BNX_CHIP_ID_5706_A3			0x57060030
 #define BNX_CHIP_ID_5708_A0			0x57080000
 #define BNX_CHIP_ID_5708_B0			0x57081000
 #define BNX_CHIP_ID_5708_B1			0x57081010
-#define BNX_CHIP_ID_5708_B2			0x57081020
 
 #define BNX_CHIP_BOND_ID(sc)		(((sc)->bnx_chipid) & 0xf)
 
@@ -267,6 +269,7 @@ struct bnx_type {
 /****************************************************************************/
 /* Byte order conversions.                                                  */
 /****************************************************************************/
+#define betoh32(x) be32toh(x)
 #define bnx_htobe16(x) htobe16(x)
 #define bnx_htobe32(x) htobe32(x)
 #define bnx_htobe64(x) htobe64(x)
@@ -332,7 +335,7 @@ struct flash_spec {
 	u_int32_t page_size;
 	u_int32_t addr_mask;
 	u_int32_t total_size;
-	u_int8_t  *name;
+	const u_int8_t  *name;
 };
 
 
@@ -660,7 +663,7 @@ struct flash_spec {
 /****************************************************************************/
 /* Convenience definitions.                                                 */
 /****************************************************************************/
-#define	BNX_PRINTF(sc, fmt, args...)	printf("%s: " fmt, sc->bnx_dev.dv_xname, ##args)
+#define	BNX_PRINTF(sc, fmt, ...)	aprint_error_dev(sc->bnx_dev, fmt, __VA_ARGS__)
 
 #define REG_WR(sc, reg, val)		bus_space_write_4(sc->bnx_btag, sc->bnx_bhandle, reg, val)
 #define REG_WR16(sc, reg, val)		bus_space_write_2(sc->bnx_btag, sc->bnx_bhandle, reg, val)
@@ -4574,8 +4577,7 @@ struct fw_info {
 #define BNX_MAX_JUMBO_ETHER_MTU			9018
 #define BNX_MAX_JUMBO_ETHER_MTU_VLAN 	9022
 
-#define BNX_MAX_MRU				MCLBYTES
-#define BNX_MAX_JUMBO_MRU			9216
+#define BNX_MAX_MRU				9216
 
 /****************************************************************************/
 /* BNX Device State Data Structure                                          */
@@ -4588,11 +4590,11 @@ struct fw_info {
 
 struct bnx_softc
 {
-	struct device			bnx_dev;			/* Parent device handle */
-	struct arpcom			arpcom;
-
+	device_t bnx_dev;
+	struct ethercom			bnx_ec;
 	struct pci_attach_args		bnx_pa;
-	pci_intr_handle_t		bnx_ih;
+
+	struct ifmedia		bnx_ifmedia;		/* TBI media info */
 
 	bus_space_tag_t		bnx_btag;			/* Device bus tag */
 	bus_space_handle_t	bnx_bhandle;		/* Device bus handle */
@@ -4614,7 +4616,6 @@ struct bnx_softc
 #define BNX_USING_DAC_FLAG		0x10
 #define BNX_USING_MSI_FLAG 		0x20
 #define BNX_MFW_ENABLE_FLAG		0x40
-#define BNX_ACTIVE_FLAG			0x80
 
 	/* PHY specific flags. */
 	u_int32_t					bnx_phy_flags;
@@ -4625,10 +4626,6 @@ struct bnx_softc
 #define BNX_PHY_INT_MODE_MASK_FLAG			0x300
 #define BNX_PHY_INT_MODE_AUTO_POLLING_FLAG	0x100
 #define BNX_PHY_INT_MODE_LINK_READY_FLAG	0x200
-
-	/* Values that need to be shared with the PHY driver. */
-	u_int32_t					bnx_shared_hw_cfg;
-	u_int32_t					bnx_port_hw_cfg;
 
 	int					bnx_if_flags;
 
@@ -4690,8 +4687,7 @@ struct bnx_softc
 	u_int16_t					tx_cons;
 	u_int32_t					tx_prod_bseq;	/* Counts the bytes used.  */
 
-	int					bnx_link;
-	struct timeout				bnx_timeout;
+	struct callout				bnx_timeout;
 
 	/* Frame size and mbuf allocation size for RX frames. */
 	u_int32_t					max_frame_size;
@@ -4829,91 +4825,6 @@ struct bnx_softc
 	u_int32_t unexpected_attentions;
 	u_int32_t	lost_status_block_updates;
 #endif
-};
-
-#endif /* _KERNEL */
-
-struct bnx_firmware_header {
-	int		bnx_COM_b06FwReleaseMajor;
-	int		bnx_COM_b06FwReleaseMinor;
-	int		bnx_COM_b06FwReleaseFix;
-	u_int32_t	bnx_COM_b06FwStartAddr;
-	u_int32_t	bnx_COM_b06FwTextAddr;
-	int		bnx_COM_b06FwTextLen;
-	u_int32_t	bnx_COM_b06FwDataAddr;
-	int		bnx_COM_b06FwDataLen;
-	u_int32_t	bnx_COM_b06FwRodataAddr;
-	int		bnx_COM_b06FwRodataLen;
-	u_int32_t	bnx_COM_b06FwBssAddr;
-	int		bnx_COM_b06FwBssLen;
-	u_int32_t	bnx_COM_b06FwSbssAddr;
-	int		bnx_COM_b06FwSbssLen;
-
-	int		bnx_RXP_b06FwReleaseMajor;
-	int		bnx_RXP_b06FwReleaseMinor;
-	int		bnx_RXP_b06FwReleaseFix;
-	u_int32_t	bnx_RXP_b06FwStartAddr;
-	u_int32_t	bnx_RXP_b06FwTextAddr;
-	int		bnx_RXP_b06FwTextLen;
-	u_int32_t	bnx_RXP_b06FwDataAddr;
-	int		bnx_RXP_b06FwDataLen;
-	u_int32_t	bnx_RXP_b06FwRodataAddr;
-	int		bnx_RXP_b06FwRodataLen;
-	u_int32_t	bnx_RXP_b06FwBssAddr;
-	int		bnx_RXP_b06FwBssLen;
-	u_int32_t	bnx_RXP_b06FwSbssAddr;
-	int		bnx_RXP_b06FwSbssLen;
-	
-	int		bnx_TPAT_b06FwReleaseMajor;
-	int		bnx_TPAT_b06FwReleaseMinor;
-	int		bnx_TPAT_b06FwReleaseFix;
-	u_int32_t	bnx_TPAT_b06FwStartAddr;
-	u_int32_t	bnx_TPAT_b06FwTextAddr;
-	int		bnx_TPAT_b06FwTextLen;
-	u_int32_t	bnx_TPAT_b06FwDataAddr;
-	int		bnx_TPAT_b06FwDataLen;
-	u_int32_t	bnx_TPAT_b06FwRodataAddr;
-	int		bnx_TPAT_b06FwRodataLen;
-	u_int32_t	bnx_TPAT_b06FwBssAddr;
-	int		bnx_TPAT_b06FwBssLen;
-	u_int32_t	bnx_TPAT_b06FwSbssAddr;
-	int		bnx_TPAT_b06FwSbssLen;
-
-	int		bnx_TXP_b06FwReleaseMajor;
-	int		bnx_TXP_b06FwReleaseMinor;
-	int		bnx_TXP_b06FwReleaseFix;
-	u_int32_t	bnx_TXP_b06FwStartAddr;
-	u_int32_t	bnx_TXP_b06FwTextAddr;
-	int		bnx_TXP_b06FwTextLen;
-	u_int32_t	bnx_TXP_b06FwDataAddr;
-	int		bnx_TXP_b06FwDataLen;
-	u_int32_t	bnx_TXP_b06FwRodataAddr;
-	int		bnx_TXP_b06FwRodataLen;
-	u_int32_t	bnx_TXP_b06FwBssAddr;
-	int		bnx_TXP_b06FwBssLen;
-	u_int32_t	bnx_TXP_b06FwSbssAddr;
-	int		bnx_TXP_b06FwSbssLen;
-
-	int		bnx_rv2p_proc1len;
-	int		bnx_rv2p_proc2len;
-
-	/* Followed by blocks of data, each sized according to
-	 * the (rather obvious) block length stated above.
-	 *
-	 * bnx_COM_b06FwText, bnx_COM_b06FwData, bnx_COM_b06FwRodata,
-	 * bnx_COM_b06FwBss, bnx_COM_b06FwSbss,
-	 * 
-	 * bnx_RXP_b06FwText, bnx_RXP_b06FwData, bnx_RXP_b06FwRodata,
-	 * bnx_RXP_b06FwBss, bnx_RXP_b06FwSbss,
-	 * 
-	 * bnx_TPAT_b06FwText, bnx_TPAT_b06FwData, bnx_TPAT_b06FwRodata,
-	 * bnx_TPAT_b06FwBss, bnx_TPAT_b06FwSbss,
-	 * 
-	 * bnx_TXP_b06FwText, bnx_TXP_b06FwData, bnx_TXP_b06FwRodata,
-	 * bnx_TXP_b06FwBss, bnx_TXP_b06FwSbss,
-	 * 
-	 * bnx_rv2p_proc1, bnx_rv2p_proc2
-	 */
 };
 
 #endif /* #ifndef _BNX_H_DEFINED */

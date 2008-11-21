@@ -1,5 +1,5 @@
-/*	$OpenBSD: udp6_output.c,v 1.14 2007/06/01 00:52:39 henning Exp $	*/
-/*	$KAME: udp6_output.c,v 1.21 2001/02/07 11:51:54 itojun Exp $	*/
+/*	$NetBSD: udp6_output.c,v 1.37 2008/10/24 22:30:32 dyoung Exp $	*/
+/*	$KAME: udp6_output.c,v 1.43 2001/10/15 09:19:52 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -61,6 +61,11 @@
  *	@(#)udp_var.h	8.1 (Berkeley) 6/10/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: udp6_output.c,v 1.37 2008/10/24 22:30:32 dyoung Exp $");
+
+#include "opt_inet.h"
+
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -72,6 +77,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/syslog.h>
+#include <sys/kauth.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -85,55 +91,85 @@
 #include <netinet/in_pcb.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+#include <netinet/udp_private.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/in6_pcb.h>
+#include <netinet6/udp6_var.h>
+#include <netinet6/udp6_private.h>
 #include <netinet/icmp6.h>
 #include <netinet6/ip6protosw.h>
+#include <netinet6/scope6_var.h>
 
 #include "faith.h"
+
+#include <net/net_osdep.h>
 
 /*
  * UDP protocol inplementation.
  * Per RFC 768, August, 1980.
  */
 
-#define in6pcb		inpcb
-#define in6p_outputopts	inp_outputopts6
-#define in6p_socket	inp_socket
-#define in6p_faddr	inp_faddr6
-#define in6p_laddr	inp_laddr6
-#define in6p_fport	inp_fport
-#define in6p_lport	inp_lport
-#define in6p_flags	inp_flags
-#define in6p_moptions	inp_moptions6
-#define in6p_route	inp_route6
-#define in6p_flowinfo	inp_flowinfo
-#define udp6stat	udpstat
-#define udp6s_opackets	udps_opackets
-
 int
-udp6_output(in6p, m, addr6, control)
-	struct in6pcb *in6p;
-	struct mbuf *m;
-	struct mbuf *addr6, *control;
+udp6_output(struct in6pcb *in6p, struct mbuf *m, struct mbuf *addr6, 
+	struct mbuf *control, struct lwp *l)
 {
+	struct rtentry *rt;
 	u_int32_t ulen = m->m_pkthdr.len;
 	u_int32_t plen = sizeof(struct udphdr) + ulen;
 	struct ip6_hdr *ip6;
 	struct udphdr *udp6;
-	struct	in6_addr *laddr, *faddr;
-	u_short fport;
+	struct in6_addr *laddr, *faddr;
+	struct in6_addr laddr_mapped; /* XXX ugly */
+	struct sockaddr_in6 *sin6 = NULL;
+	struct ifnet *oifp = NULL;
+	int scope_ambiguous = 0;
+	u_int16_t fport;
 	int error = 0;
 	struct ip6_pktopts *optp, opt;
 	int priv;
-	int af, hlen;
-	int flags;
+	int af = AF_INET6, hlen = sizeof(struct ip6_hdr);
+#ifdef INET
+	struct ip *ip;
+	struct udpiphdr *ui;
+	int flags = 0;
+#endif
 	struct sockaddr_in6 tmp;
-	struct proc *p = curproc;	/* XXX */
 
 	priv = 0;
-	if ((in6p->in6p_socket->so_state & SS_PRIV) != 0)
+	if (l && !kauth_authorize_generic(l->l_cred, KAUTH_GENERIC_ISSUSER,
+	    NULL))
 		priv = 1;
+
+	if (addr6) {
+		if (addr6->m_len != sizeof(*sin6)) {
+			error = EINVAL;
+			goto release;
+		}
+		sin6 = mtod(addr6, struct sockaddr_in6 *);
+		if (sin6->sin6_family != AF_INET6) {
+			error = EAFNOSUPPORT;
+			goto release;
+		}
+
+		/* protect *sin6 from overwrites */
+		tmp = *sin6;
+		sin6 = &tmp;
+
+		/*
+		 * Application should provide a proper zone ID or the use of
+		 * default zone IDs should be enabled.  Unfortunately, some
+		 * applications do not behave as it should, so we need a
+		 * workaround.  Even if an appropriate ID is not determined,
+		 * we'll see if we can determine the outgoing interface.  If we
+		 * can, determine the zone ID based on the interface below.
+		 */
+		if (sin6->sin6_scope_id == 0 && !ip6_use_defzone)
+			scope_ambiguous = 1;
+		if ((error = sa6_embedscope(sin6, ip6_use_defzone)) != 0)
+			return (error);
+	}
+
 	if (control) {
 		if ((error = ip6_setpktopts(control, &opt,
 		    in6p->in6p_outputopts, priv, IPPROTO_UDP)) != 0)
@@ -142,7 +178,10 @@ udp6_output(in6p, m, addr6, control)
 	} else
 		optp = in6p->in6p_outputopts;
 
-	if (addr6) {
+
+	if (sin6) {
+		faddr = &sin6->sin6_addr;
+
 		/*
 		 * IPv4 version of udp_output calls in_pcbconnect in this case,
 		 * which needs splnet and affects performance.
@@ -151,73 +190,131 @@ udp6_output(in6p, m, addr6, control)
 		 * and in6_pcbsetport in order to fill in the local address
 		 * and the local port.
 		 */
-		struct sockaddr_in6 *sin6 = mtod(addr6, struct sockaddr_in6 *);
-
-		if (addr6->m_len != sizeof(*sin6)) {
-			error = EINVAL;
-			goto release;
-		}
-		if (sin6->sin6_family != AF_INET6) {
-			error = EAFNOSUPPORT;
-			goto release;
-		}
 		if (sin6->sin6_port == 0) {
 			error = EADDRNOTAVAIL;
 			goto release;
 		}
 
 		if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
+			/* how about ::ffff:0.0.0.0 case? */
 			error = EISCONN;
 			goto release;
 		}
 
-		/* protect *sin6 from overwrites */
-		tmp = *sin6;
-		sin6 = &tmp;
 
 		faddr = &sin6->sin6_addr;
 		fport = sin6->sin6_port; /* allow 0 port */
 
-		/* KAME hack: embed scopeid */
-		if (in6_embedscope(&sin6->sin6_addr, sin6, in6p, NULL) != 0) {
-			error = EINVAL;
-			goto release;
+		if (IN6_IS_ADDR_V4MAPPED(faddr)) {
+			if ((in6p->in6p_flags & IN6P_IPV6_V6ONLY))
+			{
+				/*
+				 * I believe we should explicitly discard the
+				 * packet when mapped addresses are disabled,
+				 * rather than send the packet as an IPv6 one.
+				 * If we chose the latter approach, the packet
+				 * might be sent out on the wire based on the
+				 * default route, the situation which we'd
+				 * probably want to avoid.
+				 * (20010421 jinmei@kame.net)
+				 */
+				error = EINVAL;
+				goto release;
+			}
+			if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_laddr)
+			    && !IN6_IS_ADDR_V4MAPPED(&in6p->in6p_laddr)) {
+				/*
+				 * when remote addr is an IPv4-mapped address,
+				 * local addr should not be an IPv6 address,
+				 * since you cannot determine how to map IPv6
+				 * source address to IPv4.
+				 */
+				error = EINVAL;
+				goto release;
+			}
+
+			af = AF_INET;
 		}
 
-		if (1)	/* we don't support IPv4 mapped address */
-		{
+		if (!IN6_IS_ADDR_V4MAPPED(faddr)) {
 			laddr = in6_selectsrc(sin6, optp,
-					      in6p->in6p_moptions,
-					      &in6p->in6p_route,
-					      &in6p->in6p_laddr, &error);
-		} else
-			laddr = &in6p->in6p_laddr;	/*XXX*/
+			    in6p->in6p_moptions,
+			    &in6p->in6p_route,
+			    &in6p->in6p_laddr, &oifp, &error);
+			if (oifp && scope_ambiguous &&
+			    (error = in6_setscope(&sin6->sin6_addr,
+			    oifp, NULL))) {
+				goto release;
+			}
+		} else {
+			/*
+			 * XXX: freebsd[34] does not have in_selectsrc, but
+			 * we can omit the whole part because freebsd4 calls
+			 * udp_output() directly in this case, and thus we'll
+			 * never see this path.
+			 */
+			if (IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_laddr)) {
+				struct sockaddr_in *sinp, sin_dst;
+				struct in_addr ina;
+
+				memcpy(&ina, &faddr->s6_addr[12], sizeof(ina));
+				sockaddr_in_init(&sin_dst, &ina, 0);
+				sinp = in_selectsrc(&sin_dst, &in6p->in6p_route,
+				    in6p->in6p_socket->so_options, NULL,
+				    &error);
+				if (sinp == NULL) {
+					if (error == 0)
+						error = EADDRNOTAVAIL;
+					goto release;
+				}
+				memset(&laddr_mapped, 0, sizeof(laddr_mapped));
+				laddr_mapped.s6_addr16[5] = 0xffff; /* ugly */
+				memcpy(&laddr_mapped.s6_addr[12],
+				      &sinp->sin_addr,
+				      sizeof(sinp->sin_addr));
+				laddr = &laddr_mapped;
+			} else
+			{
+				laddr = &in6p->in6p_laddr;	/* XXX */
+			}
+		}
 		if (laddr == NULL) {
 			if (error == 0)
 				error = EADDRNOTAVAIL;
 			goto release;
 		}
 		if (in6p->in6p_lport == 0 &&
-		    (error = in6_pcbsetport(laddr, in6p, p)) != 0)
+		    (error = in6_pcbsetport(laddr, in6p, l)) != 0)
 			goto release;
 	} else {
 		if (IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
 			error = ENOTCONN;
 			goto release;
 		}
+		if (IN6_IS_ADDR_V4MAPPED(&in6p->in6p_faddr)) {
+			if ((in6p->in6p_flags & IN6P_IPV6_V6ONLY))
+			{
+				/*
+				 * XXX: this case would happen when the
+				 * application sets the V6ONLY flag after
+				 * connecting the foreign address.
+				 * Such applications should be fixed,
+				 * so we bark here.
+				 */
+				log(LOG_INFO, "udp6_output: IPV6_V6ONLY "
+				    "option was set for a connected socket\n");
+				error = EINVAL;
+				goto release;
+			} else
+				af = AF_INET;
+		}
 		laddr = &in6p->in6p_laddr;
 		faddr = &in6p->in6p_faddr;
 		fport = in6p->in6p_fport;
 	}
 
-	if (1)	/* we don't support IPv4 mapped address */
-	{
-		af = AF_INET6;
-		hlen = sizeof(struct ip6_hdr);
-	} else {
-		af = AF_INET;
+	if (af == AF_INET)
 		hlen = sizeof(struct ip);
-	}
 
 	/*
 	 * Calculate data length and get a mbuf
@@ -232,11 +329,11 @@ udp6_output(in6p, m, addr6, control)
 	/*
 	 * Stuff checksum and output datagram.
 	 */
-	udp6 = (struct udphdr *)(mtod(m, caddr_t) + hlen);
+	udp6 = (struct udphdr *)(mtod(m, char *) + hlen);
 	udp6->uh_sport = in6p->in6p_lport; /* lport is always set in the PCB */
 	udp6->uh_dport = fport;
 	if (plen <= 0xffff)
-		udp6->uh_ulen = htons((u_short)plen);
+		udp6->uh_ulen = htons((u_int16_t)plen);
 	else
 		udp6->uh_ulen = 0;
 	udp6->uh_sum = 0;
@@ -248,31 +345,61 @@ udp6_output(in6p, m, addr6, control)
 		ip6->ip6_vfc 	&= ~IPV6_VERSION_MASK;
 		ip6->ip6_vfc 	|= IPV6_VERSION;
 #if 0				/* ip6_plen will be filled in ip6_output. */
-		ip6->ip6_plen	= htons((u_short)plen);
+		ip6->ip6_plen	= htons((u_int16_t)plen);
 #endif
 		ip6->ip6_nxt	= IPPROTO_UDP;
 		ip6->ip6_hlim	= in6_selecthlim(in6p,
-						 in6p->in6p_route.ro_rt ?
-						 in6p->in6p_route.ro_rt->rt_ifp : NULL);
+		    (rt = rtcache_validate(&in6p->in6p_route)) != NULL
+		        ? rt->rt_ifp : NULL);
 		ip6->ip6_src	= *laddr;
 		ip6->ip6_dst	= *faddr;
 
-		if ((udp6->uh_sum = in6_cksum(m, IPPROTO_UDP,
-				sizeof(struct ip6_hdr), plen)) == 0) {
-			udp6->uh_sum = 0xffff;
-		}
+		udp6->uh_sum = in6_cksum_phdr(laddr, faddr,
+		    htonl(plen), htonl(IPPROTO_UDP));
+		m->m_pkthdr.csum_flags = M_CSUM_UDPv6;
+		m->m_pkthdr.csum_data = offsetof(struct udphdr, uh_sum);
 
-		flags = 0;
-		if (in6p->in6p_flags & IN6P_MINMTU)
-			flags |= IPV6_MINMTU;
-
-		udp6stat.udp6s_opackets++;
-		error = ip6_output(m, optp, &in6p->in6p_route,
-			    flags, in6p->in6p_moptions, NULL, in6p);
+		UDP6_STATINC(UDP6_STAT_OPACKETS);
+		error = ip6_output(m, optp, &in6p->in6p_route, 0,
+		    in6p->in6p_moptions, in6p->in6p_socket, NULL);
 		break;
 	case AF_INET:
+#ifdef INET
+		/* can't transmit jumbogram over IPv4 */
+		if (plen > 0xffff) {
+			error = EMSGSIZE;
+			goto release;
+		}
+
+		ip = mtod(m, struct ip *);
+		ui = (struct udpiphdr *)ip;
+		memset(ui->ui_x1, 0, sizeof(ui->ui_x1));
+		ui->ui_pr = IPPROTO_UDP;
+		ui->ui_len = htons(plen);
+		memcpy(&ui->ui_src, &laddr->s6_addr[12], sizeof(ui->ui_src));
+		ui->ui_ulen = ui->ui_len;
+
+		flags = (in6p->in6p_socket->so_options &
+			 (SO_DONTROUTE | SO_BROADCAST));
+		memcpy(&ui->ui_dst, &faddr->s6_addr[12], sizeof(ui->ui_dst));
+
+		udp6->uh_sum = in_cksum(m, hlen + plen);
+		if (udp6->uh_sum == 0)
+			udp6->uh_sum = 0xffff;
+
+		ip->ip_len = htons(hlen + plen);
+		ip->ip_ttl = in6_selecthlim(in6p, NULL); /* XXX */
+		ip->ip_tos = 0;	/* XXX */
+
+		UDP_STATINC(UDP_STAT_OPACKETS);
+		error = ip_output(m, NULL, &in6p->in6p_route, flags /* XXX */,
+		    (struct ip_moptions *)NULL,
+		    (struct socket *)in6p->in6p_socket);
+		break;
+#else
 		error = EAFNOSUPPORT;
 		goto release;
+#endif
 	}
 	goto releaseopt;
 

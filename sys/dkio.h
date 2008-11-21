@@ -1,5 +1,4 @@
-/*	$OpenBSD: dkio.h,v 1.6 2007/04/03 04:51:07 dlg Exp $	*/
-/*	$NetBSD: dkio.h,v 1.1 1996/01/30 18:21:48 thorpej Exp $	*/
+/*	$NetBSD: dkio.h,v 1.14 2007/08/17 11:05:03 pavel Exp $	*/
 
 /*
  * Copyright (c) 1987, 1988, 1993
@@ -34,6 +33,7 @@
 #define _SYS_DKIO_H_
 
 #include <sys/ioccom.h>
+#include <prop/plistref.h>
 
 /*
  * Disk-specific ioctls.
@@ -44,28 +44,62 @@
 #define DIOCWDINFO	_IOW('d', 103, struct disklabel)/* set, update disk */
 #define DIOCGPART	_IOW('d', 104, struct partinfo)	/* get partition */
 
+#if defined(__HAVE_OLD_DISKLABEL) && defined(_KERNEL)
+#define ODIOCGDINFO	_IOR('d', 101, struct olddisklabel)/* get */
+#define ODIOCSDINFO	_IOW('d', 102, struct olddisklabel)/* set */
+#define ODIOCWDINFO	_IOW('d', 103, struct olddisklabel)/* set, update dk */
+#endif
+
 /* do format operation, read or write */
 #define DIOCRFORMAT	_IOWR('d', 105, struct format_op)
 #define DIOCWFORMAT	_IOWR('d', 106, struct format_op)
 
 #define DIOCSSTEP	_IOW('d', 107, int)	/* set step rate */
 #define DIOCSRETRIES	_IOW('d', 108, int)	/* set # of retries */
+#define DIOCKLABEL	_IOW('d', 119, int)	/* keep/drop label on close? */
 #define DIOCWLABEL	_IOW('d', 109, int)	/* write en/disable label */
 
 #define DIOCSBAD	_IOW('d', 110, struct dkbad)	/* set kernel dkbad */
-#define DIOCEJECT	_IO('d', 112)		/* eject removable disk */
+#define DIOCEJECT	_IOW('d', 112, int)	/* eject removable disk */
+#define ODIOCEJECT	_IO('d', 112)		/* eject removable disk */
 #define DIOCLOCK	_IOW('d', 113, int)	/* lock/unlock pack */
 
-#define DIOCGPDINFO	_IOR('d', 114, struct disklabel)/* get physical */
-#define DIOCRLDINFO	_IO('d', 115)			/* reload disklabel */
+		/* get default label, clear label */
+#define	DIOCGDEFLABEL	_IOR('d', 114, struct disklabel)
+#define	DIOCCLRLABEL	_IO('d', 115)
 
-struct dk_inquiry {
-	char		vendor[64];
-	char		product[128];
-	char		revision[64];
-	char		serial[64];
-};
+#if defined(__HAVE_OLD_DISKLABEL) && defined(_KERNEL)
+#define	ODIOCGDEFLABEL	_IOR('d', 114, struct olddisklabel)
+#endif
 
-#define DIOCINQ		_IOR('d', 116, struct dk_inquiry)
+		/* disk cache enable/disable */
+#define	DIOCGCACHE	_IOR('d', 116, int)	/* get cache enables */
+#define	DIOCSCACHE	_IOW('d', 117, int)	/* set cache enables */
+
+#define	DKCACHE_READ	0x000001 /* read cache enabled */
+#define	DKCACHE_WRITE	0x000002 /* write(back) cache enabled */
+#define	DKCACHE_RCHANGE	0x000100 /* read enable is changeable */
+#define	DKCACHE_WCHANGE	0x000200 /* write enable is changeable */
+#define	DKCACHE_SAVE	0x010000 /* cache parameters are savable/save them */
+
+		/* sync disk cache */
+#define	DIOCCACHESYNC	_IOW('d', 118, int)	/* sync cache (force?) */
+
+		/* bad sector list */
+#define	DIOCBSLIST	_IOWR('d', 119, struct disk_badsecinfo)	/* get list */
+#define	DIOCBSFLUSH	_IO('d', 120)			/* flush list */
+
+		/* wedges */
+#define	DIOCAWEDGE	_IOWR('d', 121, struct dkwedge_info) /* add wedge */
+#define	DIOCGWEDGEINFO	_IOR('d', 122, struct dkwedge_info)  /* get wedge inf */
+#define	DIOCDWEDGE	_IOW('d', 123, struct dkwedge_info)  /* del wedge */
+#define	DIOCLWEDGES	_IOWR('d', 124, struct dkwedge_list) /* list wedges */
+
+		/* disk buffer queue strategy */
+#define	DIOCGSTRATEGY	_IOR('d', 125, struct disk_strategy)
+#define	DIOCSSTRATEGY	_IOW('d', 126, struct disk_strategy)
+
+		/* get disk-info dictionary */
+#define	DIOCGDISKINFO	_IOR('d', 127, struct plistref)
 
 #endif /* _SYS_DKIO_H_ */

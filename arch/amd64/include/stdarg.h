@@ -1,5 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.5 2006/04/09 03:07:52 deraadt Exp $	*/
-/*	$NetBSD: stdarg.h,v 1.2 2003/04/28 23:16:17 bjh21 Exp $	*/
+/*	$NetBSD: stdarg.h,v 1.6 2008/10/26 00:08:15 mrg Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -35,33 +34,36 @@
 #ifndef _AMD64_STDARG_H_
 #define	_AMD64_STDARG_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>		/* for __va_list */
+#ifdef __x86_64__
 
-/*
- * NOTE: this file is only used by lint and non-GNU compilers
- */
+#include <machine/ansi.h>
+#include <sys/featuretest.h>
 
-typedef __va_list	va_list;
+typedef _BSD_VA_LIST_	va_list;
 
-#define	__va_size(type) \
-	(((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
-
-#ifdef lint
-#define	va_start(ap,lastarg)	((ap) = (ap))
-#else
-#define	va_start(ap, last) \
-	((ap) = (va_list)&(last) + __va_size(last))
-#endif /* lint */
-
-#define	va_arg(ap, type) \
-	(*(type *)((ap) += __va_size(type), (ap) - __va_size(type)))
-
-#if __ISO_C_VISIBLE >= 1999
-#define va_copy(dest, src) \
-	((dest) = (src))
+#ifdef __lint__
+#define __builtin_next_arg(t)		((t) ? 0 : 0)
+#define	__builtin_stdarg_start(a, l)	((a) = (va_list)(void *)&(l))
+#define	__builtin_va_arg(a, t)		((a) ? (t) 0 : (t) 0)
+#define	__builtin_va_end(a)		/* nothing */
+#define	__builtin_va_copy(d, s)		((d) = (s))
 #endif
 
-#define	va_end(ap)	
+#define	va_start(ap, last)	__builtin_stdarg_start((ap), (last))
+#define	va_arg			__builtin_va_arg
+#define	va_end(ap)		__builtin_va_end(ap)
+#define	__va_copy(dest, src)	__builtin_va_copy((dest), (src))
+
+#if !defined(_ANSI_SOURCE) && \
+    (defined(_ISOC99_SOURCE) || (__STDC_VERSION__ - 0) >= 199901L || \
+     defined(_NETBSD_SOURCE))
+#define	va_copy(dest, src)	__va_copy((dest), (src))
+#endif
+
+#else	/*	__x86_64__	*/
+
+#include <i386/stdarg.h>
+
+#endif	/*	__x86_64__	*/
 
 #endif /* !_AMD64_STDARG_H_ */

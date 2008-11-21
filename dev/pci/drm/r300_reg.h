@@ -1,3 +1,4 @@
+/* NetBSD */
 /**************************************************************************
 
 Copyright (C) 2004-2005 Nicolai Haehnle et al.
@@ -22,6 +23,11 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 **************************************************************************/
+
+#include <sys/cdefs.h>
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/r300_reg.h,v 1.3 2006/04/09 20:45:45 anholt Exp $");
+*/
 
 /* *INDENT-OFF* */
 
@@ -55,7 +61,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * as by extrapolating some known registers and constants from the R200.
  * I am fairly certain that they are correct unless stated otherwise
  * in comments.
- */
+*/
 
 #define R300_SE_VPORT_XSCALE                0x1D98
 #define R300_SE_VPORT_XOFFSET               0x1D9C
@@ -75,44 +81,44 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * in many 3d CP_PACKET3's
  */
 #define R300_VAP_VF_CNTL	0x2084
-#	define	R300_VAP_VF_CNTL__PRIM_TYPE__SHIFT              0
-#	define  R300_VAP_VF_CNTL__PRIM_NONE                     (0<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_POINTS                   (1<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_LINES                    (2<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_LINE_STRIP               (3<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_TRIANGLES                (4<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_TRIANGLE_FAN             (5<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_TRIANGLE_STRIP           (6<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_LINE_LOOP                (12<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_QUADS                    (13<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_QUAD_STRIP               (14<<0)
-#	define  R300_VAP_VF_CNTL__PRIM_POLYGON                  (15<<0)
+#	define	R300_VAP_VF_CNTL__PRIM_TYPE__SHIFT                       0
+#	define  R300_VAP_VF_CNTL__PRIM_NONE				 (0<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_POINTS				 (1<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_LINES				 (2<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_LINE_STRIP			 (3<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_TRIANGLES			 (4<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_TRIANGLE_FAN			 (5<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_TRIANGLE_STRIP			 (6<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_LINE_LOOP			 (12<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_QUADS			 	 (13<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_QUAD_STRIP			 (14<<0)
+#	define  R300_VAP_VF_CNTL__PRIM_POLYGON			 	 (15<<0)
 
-#	define	R300_VAP_VF_CNTL__PRIM_WALK__SHIFT              4
+#	define	R300_VAP_VF_CNTL__PRIM_WALK__SHIFT                       4
 	/* State based - direct writes to registers trigger vertex
            generation */
-#	define	R300_VAP_VF_CNTL__PRIM_WALK_STATE_BASED         (0<<4)
-#	define	R300_VAP_VF_CNTL__PRIM_WALK_INDICES             (1<<4)
-#	define	R300_VAP_VF_CNTL__PRIM_WALK_VERTEX_LIST         (2<<4)
-#	define	R300_VAP_VF_CNTL__PRIM_WALK_VERTEX_EMBEDDED     (3<<4)
+#	define	R300_VAP_VF_CNTL__PRIM_WALK_STATE_BASED                      (0<<4)
+#	define	R300_VAP_VF_CNTL__PRIM_WALK_INDICES                          (1<<4)
+#	define	R300_VAP_VF_CNTL__PRIM_WALK_VERTEX_LIST                      (2<<4)
+#	define	R300_VAP_VF_CNTL__PRIM_WALK_VERTEX_EMBEDDED                  (3<<4)
 
-	/* I don't think I saw these three used.. */
-#	define	R300_VAP_VF_CNTL__COLOR_ORDER__SHIFT            6
-#	define	R300_VAP_VF_CNTL__TCL_OUTPUT_CTL_ENA__SHIFT     9
-#	define	R300_VAP_VF_CNTL__PROG_STREAM_ENA__SHIFT        10
+		/* I don't think I saw these three used.. */
+#	define	R300_VAP_VF_CNTL__COLOR_ORDER__SHIFT                     6
+#	define	R300_VAP_VF_CNTL__TCL_OUTPUT_CTL_ENA__SHIFT              9
+#	define	R300_VAP_VF_CNTL__PROG_STREAM_ENA__SHIFT                 10
 
-	/* index size - when not set the indices are assumed to be 16 bit */
-#	define	R300_VAP_VF_CNTL__INDEX_SIZE_32bit              (1<<11)
-	/* number of vertices */
-#	define	R300_VAP_VF_CNTL__NUM_VERTICES__SHIFT           16
+		/* index size - when not set the indices are assumed to be 16 bit */
+#	define	R300_VAP_VF_CNTL__INDEX_SIZE_32bit                      (1<<11)
+                /* number of vertices */
+#	define	R300_VAP_VF_CNTL__NUM_VERTICES__SHIFT                    16
 
 /* BEGIN: Wild guesses */
 #define R300_VAP_OUTPUT_VTX_FMT_0           0x2090
 #       define R300_VAP_OUTPUT_VTX_FMT_0__POS_PRESENT     (1<<0)
 #       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_PRESENT   (1<<1)
-#       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_1_PRESENT (1<<2)  /* GUESS */
-#       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_2_PRESENT (1<<3)  /* GUESS */
-#       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_3_PRESENT (1<<4)  /* GUESS */
+#       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_1_PRESENT (1<<2) /* GUESS */
+#       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_2_PRESENT (1<<3) /* GUESS */
+#       define R300_VAP_OUTPUT_VTX_FMT_0__COLOR_3_PRESENT (1<<4) /* GUESS */
 #       define R300_VAP_OUTPUT_VTX_FMT_0__PT_SIZE_PRESENT (1<<16) /* GUESS */
 
 #define R300_VAP_OUTPUT_VTX_FMT_1           0x2094
@@ -237,11 +243,11 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #       define R300_INPUT_ROUTE_SELECT_ZERO 4
 #       define R300_INPUT_ROUTE_SELECT_ONE  5
 #       define R300_INPUT_ROUTE_SELECT_MASK 7
-#       define R300_INPUT_ROUTE_X_SHIFT     0
-#       define R300_INPUT_ROUTE_Y_SHIFT     3
-#       define R300_INPUT_ROUTE_Z_SHIFT     6
-#       define R300_INPUT_ROUTE_W_SHIFT     9
-#       define R300_INPUT_ROUTE_ENABLE      (15 << 12)
+#       define R300_INPUT_ROUTE_X_SHIFT          0
+#       define R300_INPUT_ROUTE_Y_SHIFT          3
+#       define R300_INPUT_ROUTE_Z_SHIFT          6
+#       define R300_INPUT_ROUTE_W_SHIFT          9
+#       define R300_INPUT_ROUTE_ENABLE           (15 << 12)
 #define R300_VAP_INPUT_ROUTE_1_1            0x21E4
 #define R300_VAP_INPUT_ROUTE_1_2            0x21E8
 #define R300_VAP_INPUT_ROUTE_1_3            0x21EC
@@ -345,7 +351,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * where group of verts arent visible. For some reason this "section"
  * is sometimes accepted other instruction that have no relationship with
  * position calculations.
- */
+*/
 #define R300_VAP_PVS_CNTL_1                 0x22D0
 #       define R300_PVS_CNTL_1_PROGRAM_START_SHIFT   0
 #       define R300_PVS_CNTL_1_POS_END_SHIFT         10
@@ -554,7 +560,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * HO: horizontal
  * VE: vertical or horizontal
  * HO & VE: no classification
- */
+*/
 #define R300_RE_LINE_CNT                      0x4234
 #       define R300_LINESIZE_SHIFT            0
 #       define R300_LINESIZE_MASK             (0xFFFF << 0) /* GUESS */
@@ -586,7 +592,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define R300_RE_FOG_SCALE                     0x4294
 #define R300_RE_FOG_START                     0x4298
 
-/* Not sure why there are duplicate of factor and constant values.
+/* Not sure why there are duplicate of factor and constant values. 
  * My best guess so far is that there are seperate zbiases for test and write.
  * Ordering might be wrong.
  * Some of the tests indicate that fgl has a fallback implementation of zbias
@@ -606,7 +612,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * (FILL, LINE, POINT).
  *  One to enable depth test and one for depth write.
  * Yet this doesnt explain why depth writes work ...
- */
+    */
 #define R300_RE_OCCLUSION_CNTL		    0x42B4
 #	define R300_OCCLUSION_ON		(1<<1)
 
@@ -801,7 +807,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #	define R300_TX_MIN_FILTER_ANISO_LINEAR              (0 << 13)
 #	define R300_TX_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST (1 << 13)
 #	define R300_TX_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR  (2 << 13)
-#       define R300_TX_MIN_FILTER_MASK   ( (15 << 11) | (3 << 13) )
+#       define R300_TX_MIN_FILTER_MASK           ( (15 << 11) | (3 << 13) )
 #	define R300_TX_MAX_ANISO_1_TO_1  (0 << 21)
 #	define R300_TX_MAX_ANISO_2_TO_1  (2 << 21)
 #	define R300_TX_MAX_ANISO_4_TO_1  (4 << 21)
@@ -834,8 +840,8 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #       define R300_TX_UNK23                     (1 << 23)
 #       define R300_TX_MAX_MIP_LEVEL_SHIFT       26
 #       define R300_TX_MAX_MIP_LEVEL_MASK        (0xf << 26)
-#       define R300_TX_SIZE_PROJECTED            (1<<30)
-#       define R300_TX_SIZE_TXPITCH_EN           (1<<31)
+#       define R300_TX_SIZE_PROJECTED                     (1<<30)
+#       define R300_TX_SIZE_TXPITCH_EN                     (1<<31)
 #define R300_TX_FORMAT_0                    0x44C0
 	/* The interpretation of the format word by Wladimir van der Laan */
 	/* The X, Y, Z and W refer to the layout of the components.
@@ -856,33 +862,33 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #	define R300_TX_FORMAT_W8Z8Y8X8		    0xC
 #	define R300_TX_FORMAT_W2Z10Y10X10	    0xD
 #	define R300_TX_FORMAT_W16Z16Y16X16	    0xE
-#	define R300_TX_FORMAT_DXT1		    0xF
-#	define R300_TX_FORMAT_DXT3		    0x10
-#	define R300_TX_FORMAT_DXT5		    0x11
+#	define R300_TX_FORMAT_DXT1	    	    0xF
+#	define R300_TX_FORMAT_DXT3	    	    0x10
+#	define R300_TX_FORMAT_DXT5	    	    0x11
 #	define R300_TX_FORMAT_D3DMFT_CxV8U8	    0x12     /* no swizzle */
-#	define R300_TX_FORMAT_A8R8G8B8		    0x13     /* no swizzle */
-#	define R300_TX_FORMAT_B8G8_B8G8		    0x14     /* no swizzle */
-#	define R300_TX_FORMAT_G8R8_G8B8		    0x15     /* no swizzle */
-	/* 0x16 - some 16 bit green format.. ?? */
+#	define R300_TX_FORMAT_A8R8G8B8	    	    0x13     /* no swizzle */
+#	define R300_TX_FORMAT_B8G8_B8G8	    	    0x14     /* no swizzle */
+#	define R300_TX_FORMAT_G8R8_G8B8	    	    0x15     /* no swizzle */
+						  /* 0x16 - some 16 bit green format.. ?? */
 #	define R300_TX_FORMAT_UNK25		   (1 << 25) /* no swizzle */
 #	define R300_TX_FORMAT_CUBIC_MAP		   (1 << 26)
 
 	/* gap */
 	/* Floating point formats */
 	/* Note - hardware supports both 16 and 32 bit floating point */
-#	define R300_TX_FORMAT_FL_I16		    0x18
-#	define R300_TX_FORMAT_FL_I16A16		    0x19
+#	define R300_TX_FORMAT_FL_I16	    	    0x18
+#	define R300_TX_FORMAT_FL_I16A16	    	    0x19
 #	define R300_TX_FORMAT_FL_R16G16B16A16	    0x1A
-#	define R300_TX_FORMAT_FL_I32		    0x1B
-#	define R300_TX_FORMAT_FL_I32A32		    0x1C
+#	define R300_TX_FORMAT_FL_I32	    	    0x1B
+#	define R300_TX_FORMAT_FL_I32A32	    	    0x1C
 #	define R300_TX_FORMAT_FL_R32G32B32A32	    0x1D
 	/* alpha modes, convenience mostly */
 	/* if you have alpha, pick constant appropriate to the
 	   number of channels (1 for I8, 2 for I8A8, 4 for R8G8B8A8, etc */
-#	define R300_TX_FORMAT_ALPHA_1CH		    0x000
-#	define R300_TX_FORMAT_ALPHA_2CH		    0x200
-#	define R300_TX_FORMAT_ALPHA_4CH		    0x600
-#	define R300_TX_FORMAT_ALPHA_NONE	    0xA00
+# 	define R300_TX_FORMAT_ALPHA_1CH		    0x000
+# 	define R300_TX_FORMAT_ALPHA_2CH		    0x200
+# 	define R300_TX_FORMAT_ALPHA_4CH		    0x600
+# 	define R300_TX_FORMAT_ALPHA_NONE	    0xA00
 	/* Swizzling */
 	/* constants */
 #	define R300_TX_FORMAT_X		0
@@ -901,13 +907,13 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #	define R300_TX_FORMAT_R_SHIFT	12
 #	define R300_TX_FORMAT_A_SHIFT	9
 	/* Convenience macro to take care of layout and swizzling */
-#	define R300_EASY_TX_FORMAT(B, G, R, A, FMT)	(		\
-		((R300_TX_FORMAT_##B)<<R300_TX_FORMAT_B_SHIFT)		\
-		| ((R300_TX_FORMAT_##G)<<R300_TX_FORMAT_G_SHIFT)	\
-		| ((R300_TX_FORMAT_##R)<<R300_TX_FORMAT_R_SHIFT)	\
-		| ((R300_TX_FORMAT_##A)<<R300_TX_FORMAT_A_SHIFT)	\
-		| (R300_TX_FORMAT_##FMT)				\
-		)
+#	define R300_EASY_TX_FORMAT(B, G, R, A, FMT)	(\
+	  ((R300_TX_FORMAT_##B)<<R300_TX_FORMAT_B_SHIFT) \
+	| ((R300_TX_FORMAT_##G)<<R300_TX_FORMAT_G_SHIFT) \
+	| ((R300_TX_FORMAT_##R)<<R300_TX_FORMAT_R_SHIFT) \
+	| ((R300_TX_FORMAT_##A)<<R300_TX_FORMAT_A_SHIFT) \
+	| (R300_TX_FORMAT_##FMT) \
+	  )
 	/* These can be ORed with result of R300_EASY_TX_FORMAT()
 	   We don't really know what they do. Take values from a
            constant color ? */
@@ -920,7 +926,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define R300_TX_PITCH_0			    0x4500 /* obvious missing in gap */
 #define R300_TX_OFFSET_0                    0x4540
-	/* BEGIN: Guess from R200 */
+/* BEGIN: Guess from R200 */
 #       define R300_TXO_ENDIAN_NO_SWAP           (0 << 0)
 #       define R300_TXO_ENDIAN_BYTE_SWAP         (1 << 0)
 #       define R300_TXO_ENDIAN_WORD_SWAP         (2 << 0)
@@ -1005,23 +1011,23 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * even if it's just MAD o0, r0, 1, 0
  */
 #define R300_PFS_TEXI_0                     0x4620
-#	define R300_FPITX_SRC_SHIFT              0
-#	define R300_FPITX_SRC_MASK               (31 << 0)
+#       define R300_FPITX_SRC_SHIFT              0
+#       define R300_FPITX_SRC_MASK               (31 << 0)
 	/* GUESS */
 #	define R300_FPITX_SRC_CONST              (1 << 5)
-#	define R300_FPITX_DST_SHIFT              6
-#	define R300_FPITX_DST_MASK               (31 << 6)
-#	define R300_FPITX_IMAGE_SHIFT            11
+#       define R300_FPITX_DST_SHIFT              6
+#       define R300_FPITX_DST_MASK               (31 << 6)
+#       define R300_FPITX_IMAGE_SHIFT            11
 	/* GUESS based on layout and native limits */
 #       define R300_FPITX_IMAGE_MASK             (15 << 11)
 /* Unsure if these are opcodes, or some kind of bitfield, but this is how
  * they were set when I checked
  */
-#	define R300_FPITX_OPCODE_SHIFT		15
-#		define R300_FPITX_OP_TEX	1
-#		define R300_FPITX_OP_KIL	2
-#		define R300_FPITX_OP_TXP	3
-#		define R300_FPITX_OP_TXB	4
+#		define R300_FPITX_OPCODE_SHIFT			15
+#			define R300_FPITX_OP_TEX			1
+#			define R300_FPITX_OP_KIL			2
+#			define R300_FPITX_OP_TXP			3
+#			define R300_FPITX_OP_TXB			4
 #	define R300_FPITX_OPCODE_MASK           (7 << 15)
 
 /* ALU
@@ -1278,11 +1284,11 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #define R300_RB3D_CBLEND                    0x4E04
 #define R300_RB3D_ABLEND                    0x4E08
-/* the following only appear in CBLEND */
+ /* the following only appear in CBLEND */
 #       define R300_BLEND_ENABLE                     (1 << 0)
 #       define R300_BLEND_UNKNOWN                    (3 << 1)
 #       define R300_BLEND_NO_SEPARATE                (1 << 3)
-/* the following are shared between CBLEND and ABLEND */
+ /* the following are shared between CBLEND and ABLEND */
 #       define R300_FCN_MASK                         (3  << 12)
 #       define R300_COMB_FCN_ADD_CLAMP               (0  << 12)
 #       define R300_COMB_FCN_ADD_NOCLAMP             (1  << 12)
@@ -1363,15 +1369,15 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #       define R300_RB3D_Z_DISABLED_2            0x00000014
 #       define R300_RB3D_Z_TEST                  0x00000012
 #       define R300_RB3D_Z_TEST_AND_WRITE        0x00000016
-#       define R300_RB3D_Z_WRITE_ONLY		 0x00000006
+#       define R300_RB3D_Z_WRITE_ONLY        	 0x00000006
 
 #       define R300_RB3D_Z_TEST                  0x00000012
 #       define R300_RB3D_Z_TEST_AND_WRITE        0x00000016
-#       define R300_RB3D_Z_WRITE_ONLY		 0x00000006
+#       define R300_RB3D_Z_WRITE_ONLY        	 0x00000006
 #	define R300_RB3D_STENCIL_ENABLE		 0x00000001
 
 #define R300_RB3D_ZSTENCIL_CNTL_1                   0x4F04
-	/* functions */
+		/* functions */
 #	define R300_ZS_NEVER			0
 #	define R300_ZS_LESS			1
 #	define R300_ZS_LEQUAL			2
@@ -1381,7 +1387,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #	define R300_ZS_NOTEQUAL			6
 #	define R300_ZS_ALWAYS			7
 #       define R300_ZS_MASK                     7
-	/* operations */
+		/* operations */
 #	define R300_ZS_KEEP			0
 #	define R300_ZS_ZERO			1
 #	define R300_ZS_REPLACE			2
@@ -1390,8 +1396,8 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #	define R300_ZS_INVERT			5
 #	define R300_ZS_INCR_WRAP		6
 #	define R300_ZS_DECR_WRAP		7
-	/* front and back refer to operations done for front
-	   and back faces, i.e. separate stencil function support */
+       /* front and back refer to operations done for front
+          and back faces, i.e. separate stencil function support */
 #	define R300_RB3D_ZS1_DEPTH_FUNC_SHIFT		0
 #	define R300_RB3D_ZS1_FRONT_FUNC_SHIFT		3
 #	define R300_RB3D_ZS1_FRONT_FAIL_OP_SHIFT	6
@@ -1625,6 +1631,12 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * CP type-3 packets
  */
 #define R300_CP_CMD_BITBLT_MULTI	0xC0009B00
+
+#define R500_GA_US_VECTOR_INDEX         0x4250
+#define R500_GA_US_VECTOR_DATA          0x4254
+
+#define R500_RS_IP_0                    0x4074
+#define R500_RS_INST_0                  0x4320
 
 #endif /* _R300_REG_H */
 

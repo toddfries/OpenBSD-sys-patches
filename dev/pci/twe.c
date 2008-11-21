@@ -1,4 +1,4 @@
-/*	$NetBSD: twe.c,v 1.85 2008/04/10 19:13:38 cegger Exp $	*/
+/*	$NetBSD: twe.c,v 1.87 2008/06/08 12:43:52 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2001, 2002, 2003, 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: twe.c,v 1.85 2008/04/10 19:13:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: twe.c,v 1.87 2008/06/08 12:43:52 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1701,7 +1694,7 @@ tweopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct twe_softc *twe;
 
-	if ((twe = device_lookup(&twe_cd, minor(dev))) == NULL)
+	if ((twe = device_lookup_private(&twe_cd, minor(dev))) == NULL)
 		return (ENXIO);
 	if ((twe->sc_flags & TWEF_OPEN) != 0)
 		return (EBUSY);
@@ -1719,7 +1712,7 @@ tweclose(dev_t dev, int flag, int mode,
 {
 	struct twe_softc *twe;
 
-	twe = device_lookup(&twe_cd, minor(dev));
+	twe = device_lookup_private(&twe_cd, minor(dev));
 	twe->sc_flags &= ~TWEF_OPEN;
 	return (0);
 }
@@ -1749,7 +1742,7 @@ tweioctl(dev_t dev, u_long cmd, void *data, int flag,
 	int s, error = 0;
 	u_int8_t cmdid;
 
-	twe = device_lookup(&twe_cd, minor(dev));
+	twe = device_lookup_private(&twe_cd, minor(dev));
 	tu = (struct twe_usercommand *)data;
 	tp = (struct twe_paramcommand *)data;
 	td = (struct twe_drivecommand *)data;

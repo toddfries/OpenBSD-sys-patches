@@ -1,4 +1,4 @@
-/* 	$NetBSD: linux_signal.h,v 1.5 2005/12/11 12:20:16 christos Exp $	*/
+/* 	$NetBSD: linux_signal.h,v 1.7 2008/04/28 20:23:42 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -110,7 +103,7 @@
 
 #define	LINUX_MINSIGSTKSZ	2048
 
-typedef void	(*linux_handler_t) __P((int));
+typedef void	(*linux_handler_t)(int);
 
 typedef u_long	linux_old_sigset_t;
 typedef struct {
@@ -121,14 +114,14 @@ struct linux_old_sigaction {
 	linux_handler_t		linux_sa_handler;
 	linux_old_sigset_t	linux_sa_mask;
 	u_long			linux_sa_flags;
-	void			(*linux_sa_restorer) __P((void));
+	void			(*linux_sa_restorer)(void);
 };
 
 /* Used in rt_* calls */
 struct linux_sigaction {
 	linux_handler_t		linux_sa_handler;
 	u_long			linux_sa_flags;
-	void			(*linux_sa_restorer) __P((void));
+	void			(*linux_sa_restorer)(void);
 	linux_sigset_t		linux_sa_mask;
 };
 

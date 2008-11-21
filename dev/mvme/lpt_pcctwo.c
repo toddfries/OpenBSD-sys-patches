@@ -1,4 +1,4 @@
-/*	$NetBSD: lpt_pcctwo.c,v 1.9 2007/10/19 12:00:37 ad Exp $	*/
+/*	$NetBSD: lpt_pcctwo.c,v 1.11 2008/04/28 20:23:54 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lpt_pcctwo.c,v 1.9 2007/10/19 12:00:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lpt_pcctwo.c,v 1.11 2008/04/28 20:23:54 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -59,10 +52,10 @@ __KERNEL_RCSID(0, "$NetBSD: lpt_pcctwo.c,v 1.9 2007/10/19 12:00:37 ad Exp $");
 /*
  * Autoconfig stuff
  */
-int lpt_pcctwo_match(struct device *, struct cfdata *, void *);
-void lpt_pcctwo_attach(struct device *, struct device *, void *);
+int lpt_pcctwo_match(device_t, cfdata_t , void *);
+void lpt_pcctwo_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(lpt_pcctwo, sizeof(struct lpt_softc),
+CFATTACH_DECL_NEW(lpt_pcctwo, sizeof(struct lpt_softc),
     lpt_pcctwo_match, lpt_pcctwo_attach, NULL, NULL);
 
 extern struct cfdriver lpt_cd;
@@ -88,8 +81,8 @@ struct lpt_funcs lpt_pcctwo_funcs = {
 /* ARGSUSED */
 int
 lpt_pcctwo_match(parent, cf, args)
-	struct device *parent;
-	struct cfdata *cf;
+	device_t parent;
+	cfdata_t cf;
 	void *args;
 {
 	struct pcctwo_attach_args *pa;
@@ -117,8 +110,8 @@ lpt_pcctwo_match(parent, cf, args)
 /* ARGSUSED */
 void
 lpt_pcctwo_attach(parent, self, args)
-	struct device *parent;
-	struct device *self;
+	device_t parent;
+	device_t self;
 	void *args;
 {
 	struct pcctwo_attach_args *pa;
@@ -126,6 +119,7 @@ lpt_pcctwo_attach(parent, self, args)
 
 	pa = (struct pcctwo_attach_args *) args;
 	sc = device_private(self);
+	sc->sc_dev = self;
 
 	/* The printer registers are part of the PCCChip2's own registers. */
 	sc->sc_bust = pa->pa_bust;
@@ -136,7 +130,7 @@ lpt_pcctwo_attach(parent, self, args)
 	sc->sc_laststatus = 0;
 	sc->sc_funcs = &lpt_pcctwo_funcs;
 
-	printf(": PCCchip2 Parallel Printer\n");
+	aprint_normal(": PCCchip2 Parallel Printer\n");
 
 	/*
 	 * Disable interrupts until device is opened
@@ -155,7 +149,7 @@ lpt_pcctwo_attach(parent, self, args)
 
 	/* Register the event counter */
 	evcnt_attach_dynamic(&sc->sc_evcnt, EVCNT_TYPE_INTR,
-	    pcctwointr_evcnt(sc->sc_ipl), "printer", sc->sc_dev.dv_xname);
+	    pcctwointr_evcnt(sc->sc_ipl), "printer", device_xname(sc->sc_dev));
 
 	/*
 	 * Hook into the printer interrupt
@@ -274,13 +268,13 @@ lpt_pcctwo_notrdy(sc, err)
 
 		if (new & PCCTWO_PRT_IN_SR_SEL)
 			log(LOG_NOTICE, "%s: offline\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(sc->sc_dev));
 		else if (new & PCCTWO_PRT_IN_SR_PE)
 			log(LOG_NOTICE, "%s: out of paper\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(sc->sc_dev));
 		else if (new & PCCTWO_PRT_IN_SR_FLT)
 			log(LOG_NOTICE, "%s: output error\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(sc->sc_dev));
 	}
 
 	return (status);

@@ -1,4 +1,4 @@
-/*	$NetBSD: frame.h,v 1.14 2006/09/27 21:42:05 manu Exp $	*/
+/*	$NetBSD: frame.h,v 1.21 2008/11/19 06:22:15 matt Exp $	*/
 
 /*
  * Copyright (c) 1994-1997 Mark Brinicombe.
@@ -81,7 +81,9 @@ struct clockframe {
 };
 
 /*
- * Switch frame
+ * Switch frame.
+ *
+ * Should be a multiple of 8 bytes for dumpsys.
  */
 
 struct switchframe {
@@ -89,6 +91,7 @@ struct switchframe {
 	u_int	sf_r5;
 	u_int	sf_r6;
 	u_int	sf_r7;
+	u_int	sf_sp;
 	u_int	sf_pc;
 };
  
@@ -103,7 +106,7 @@ struct frame {
 };
 
 #ifdef _KERNEL
-void validate_trapframe __P((trapframe_t *, int));
+void validate_trapframe(trapframe_t *, int);
 #endif /* _KERNEL */
 
 #else /* _LOCORE */
@@ -111,63 +114,72 @@ void validate_trapframe __P((trapframe_t *, int));
 #include "opt_compat_netbsd.h"
 #include "opt_execfmt.h"
 #include "opt_multiprocessor.h"
+#include "opt_cpuoptions.h"
+#include "opt_arm_debug.h"
+
+#include <machine/cpu.h>
+
+/*
+ * This macro is used by DO_AST_AND_RESTORE_ALIGNMENT_FAULTS to process
+ * any pending softints.
+ */
+#ifdef __HAVE_FAST_SOFTINTS
+#define	DO_PENDING_SOFTINTS						\
+	ldr	r0, [r4, #CI_INTR_DEPTH]/* Get current intr depth */	;\
+	teq	r0, #0			/* Test for 0. */		;\
+	bne	10f			/*   skip softints if != 0 */	;\
+	ldr	r0, [r4, #CI_CPL]	/* Get current priority level */;\
+	ldr	r1, [r4, #CI_SOFTINTS]	/* Get pending softint mask */	;\
+	movs	r0, r1, lsr r0		/* shift mask by cpl */		;\
+	blne	_C_LABEL(dosoftints)	/* dosoftints(void) */		;\
+10:
+#else
+#define	DO_PENDING_SOFTINTS		/* nothing */
+#endif
 
 /*
  * AST_ALIGNMENT_FAULT_LOCALS and ENABLE_ALIGNMENT_FAULTS
  * These are used in order to support dynamic enabling/disabling of
  * alignment faults when executing old a.out ARM binaries.
+ *
+ * Note that when ENABLE_ALIGNMENTS_FAULTS finishes r4 will contain
+ * pointer to the cpu's cpu_info.  DO_AST_AND_RESTORE_ALIGNMENT_FAULTS
+ * relies on r4 being preserved.
  */
 #ifdef EXEC_AOUT
-#ifndef MULTIPROCESSOR
+#if defined(PROCESS_ID_IS_CURLWP) || defined(PROCESS_ID_IS_CURCPU)
+
+#define	AST_ALIGNMENT_FAULT_LOCALS					\
+.Laflt_cpufuncs:							;\
+	.word	_C_LABEL(cpufuncs)
+
+#elif !defined(MULTIPROCESSOR)
 
 /*
  * Local variables needed by the AST/Alignment Fault macroes
  */
 #define	AST_ALIGNMENT_FAULT_LOCALS					\
-.Laflt_astpending:							;\
-	.word	_C_LABEL(astpending)					;\
 .Laflt_cpufuncs:							;\
 	.word	_C_LABEL(cpufuncs)					;\
-.Laflt_curpcb:								;\
-	.word	_C_LABEL(curpcb)					;\
 .Laflt_cpu_info_store:							;\
 	.word	_C_LABEL(cpu_info_store)
 
-#define	GET_CURPCB_ENTER						\
-	ldr	r1, .Laflt_curpcb					;\
-	ldr	r1, [r1]
-
-#define	GET_CPUINFO_ENTER						\
-	ldr	r0, .Laflt_cpu_info_store
-
-#define	GET_CURPCB_EXIT							\
-	ldr	r1, .Laflt_curpcb					;\
-	ldr	r2, .Laflt_cpu_info_store				;\
-	ldr	r1, [r1]
+#define	GET_CURCPU(rX)							\
+	ldr	rX, .Laflt_cpu_info_store
 
 #else /* !MULTIPROCESSOR */
 
 #define	AST_ALIGNMENT_FAULT_LOCALS					\
-.Laflt_astpending:							;\
-	.word	_C_LABEL(astpending)					;\
 .Laflt_cpufuncs:							;\
 	.word	_C_LABEL(cpufuncs)					;\
 .Laflt_cpu_info:							;\
 	.word	_C_LABEL(cpu_info)
 
-#define	GET_CURPCB_ENTER						\
-	ldr	r4, .Laflt_cpu_info					;\
+#define	GET_CURCPU(rX)							\
+	ldr	rX, .Laflt_cpu_info					;\
 	bl	_C_LABEL(cpu_number)					;\
-	ldr	r0, [r4, r0, lsl #2]					;\
-	ldr	r1, [r0, #CI_CURPCB]
+	ldr	r0, [rX, r0, lsl #2]
 
-#define	GET_CPUINFO_ENTER	/* nothing to do */
-
-#define	GET_CURPCB_EXIT							\
-	ldr	r7, .Laflt_cpu_info					;\
-	bl	_C_LABEL(cpu_number)					;\
-	ldr	r2, [r7, r0, lsl #2]					;\
-	ldr	r1, [r2, #CI_CURPCB]
 #endif /* MULTIPROCESSOR */
 
 /*
@@ -181,15 +193,14 @@ void validate_trapframe __P((trapframe_t *, int));
 #define	ENABLE_ALIGNMENT_FAULTS						\
 	and	r0, r0, #(PSR_MODE)	/* Test for USR32 mode */	;\
 	teq	r0, #(PSR_USR32_MODE)					;\
+	GET_CURCPU(r4)			/* r4 = cpuinfo */		;\
 	bne	1f			/* Not USR mode skip AFLT */	;\
-	GET_CURPCB_ENTER		/* r1 = curpcb */		;\
-	cmp	r1, #0x00		/* curpcb NULL? */		;\
-	ldrne	r1, [r1, #PCB_FLAGS]	/* Fetch curpcb->pcb_flags */	;\
-	tstne	r1, #PCB_NOALIGNFLT					;\
+	ldr	r1, [r4, #CI_CURPCB]	/* get curpcb from cpu_info */	;\
+	ldr	r1, [r1, #PCB_FLAGS]	/* Fetch curpcb->pcb_flags */	;\
+	tst	r1, #PCB_NOALIGNFLT					;\
 	beq	1f			/* AFLTs already enabled */	;\
-	GET_CPUINFO_ENTER		/* r0 = cpuinfo */		;\
 	ldr	r2, .Laflt_cpufuncs					;\
-	ldr	r1, [r0, #CI_CTRL]	/* Fetch control register */	;\
+	ldr	r1, [r4, #CI_CTRL]	/* Fetch control register */	;\
 	mov	r0, #-1							;\
 	mov	lr, pc							;\
 	ldr	pc, [r2, #CF_CONTROL]	/* Enable alignment faults */	;\
@@ -197,75 +208,143 @@ void validate_trapframe __P((trapframe_t *, int));
 
 /*
  * This macro must be invoked just before PULLFRAMEFROMSVCANDEXIT or
- * PULLFRAME at the end of interrupt/exception handlers.
+ * PULLFRAME at the end of interrupt/exception handlers.  We know that
+ * r4 points to cpu_info since that is what ENABLE_ALIGNMENT_FAULTS did
+ * for use.
  */
 #define	DO_AST_AND_RESTORE_ALIGNMENT_FAULTS				\
+	DO_PENDING_SOFTINTS						;\
 	ldr	r0, [sp]		/* Get the SPSR from stack */	;\
-	mrs	r4, cpsr		/* save CPSR */			;\
-	orr	r1, r4, #(I32_bit)					;\
+	mrs	r5, cpsr		/* save CPSR */			;\
+	orr	r1, r5, #(IF32_bits)					;\
 	msr	cpsr_c, r1		/* Disable interrupts */	;\
 	and	r0, r0, #(PSR_MODE)	/* Returning to USR mode? */	;\
 	teq	r0, #(PSR_USR32_MODE)					;\
-	ldreq	r5, .Laflt_astpending					;\
 	bne	3f			/* Nope, get out now */		;\
-	bic	r4, r4, #(I32_bit)					;\
-1:	ldr	r1, [r5]		/* Pending AST? */		;\
+1:	ldr	r1, [r4, #CI_ASTPENDING] /* Pending AST? */		;\
 	teq	r1, #0x00000000						;\
 	bne	2f			/* Yup. Go deal with it */	;\
-	GET_CURPCB_EXIT			/* r1 = curpcb, r2 = cpuinfo */	;\
-	cmp	r1, #0x00		/* curpcb NULL? */		;\
-	ldrne	r1, [r1, #PCB_FLAGS]	/* Fetch curpcb->pcb_flags */	;\
-	tstne	r1, #PCB_NOALIGNFLT					;\
+	ldr	r1, [r4, #CI_CURPCB]	/* Get current PCB */		;\
+	ldr	r0, [r1, #PCB_FLAGS]	/* Fetch curpcb->pcb_flags */	;\
+	tst	r0, #PCB_NOALIGNFLT					;\
 	beq	3f			/* Keep AFLTs enabled */	;\
-	ldr	r1, [r2, #CI_CTRL]	/* Fetch control register */	;\
+	ldr	r1, [r4, #CI_CTRL]	/* Fetch control register */	;\
 	ldr	r2, .Laflt_cpufuncs					;\
 	mov	r0, #-1							;\
 	bic	r1, r1, #CPU_CONTROL_AFLT_ENABLE  /* Disable AFLTs */	;\
 	adr	lr, 3f							;\
 	ldr	pc, [r2, #CF_CONTROL]	/* Set new CTRL reg value */	;\
+	/* NOTREACHED */						\
 2:	mov	r1, #0x00000000						;\
-	str	r1, [r5]		/* Clear astpending */		;\
-	msr	cpsr_c, r4		/* Restore interrupts */	;\
+	str	r1, [r4, #CI_ASTPENDING] /* Clear astpending */		;\
+	bic	r5, r5, #(IF32_bits)				;\
+	msr	cpsr_c, r5		/* Restore interrupts */	;\
 	mov	r0, sp							;\
 	bl	_C_LABEL(ast)		/* ast(frame) */		;\
-	orr	r0, r4, #(I32_bit)	/* Disable IRQs */		;\
+	orr	r0, r5, #(IF32_bits)	/* Disable IRQs */		;\
 	msr	cpsr_c, r0						;\
 	b	1b			/* Back around again */		;\
 3:
 
 #else	/* !EXEC_AOUT */
 
-#define	AST_ALIGNMENT_FAULT_LOCALS					;\
-.Laflt_astpending:							;\
-	.word	_C_LABEL(astpending)
+#if defined(PROCESS_ID_IS_CURLWP) || defined(PROCESS_ID_IS_CURCPU)
+#define	AST_ALIGNMENT_FAULT_LOCALS
 
-#define	ENABLE_ALIGNMENT_FAULTS		/* nothing */
+#elif !defined(MULTIPROCESSOR)
+#define	AST_ALIGNMENT_FAULT_LOCALS					\
+.Laflt_cpu_info_store:							;\
+	.word	_C_LABEL(cpu_info_store)
+
+#define	GET_CURCPU(rX)							\
+	ldr	rX, .Laflt_cpu_info_store
+
+#else
+#define	AST_ALIGNMENT_FAULT_LOCALS					\
+.Laflt_cpu_info:							;\
+	.word	_C_LABEL(cpu_info)
+
+#define	GET_CURCPU(rX)							\
+	bl	_C_LABEL(cpu_number)					;\
+	ldr	r1, .Laflt_cpu_info					;\
+	ldr	rX, [r1, r0, lsl #2]
+
+#endif
+
+#define	ENABLE_ALIGNMENT_FAULTS		GET_CURCPU(r4)
 
 #define	DO_AST_AND_RESTORE_ALIGNMENT_FAULTS				\
+	DO_PENDING_SOFTINTS						;\
 	ldr	r0, [sp]		/* Get the SPSR from stack */	;\
-	mrs	r4, cpsr		/* save CPSR */			;\
-	orr	r1, r4, #(I32_bit)					;\
+	mrs	r5, cpsr		/* save CPSR */			;\
+	orr	r1, r5, #(IF32_bits)					;\
 	msr	cpsr_c, r1		/* Disable interrupts */	;\
 	and	r0, r0, #(PSR_MODE)	/* Returning to USR mode? */	;\
 	teq	r0, #(PSR_USR32_MODE)					;\
-	ldreq	r5, .Laflt_astpending					;\
 	bne	2f			/* Nope, get out now */		;\
-	bic	r4, r4, #(I32_bit)					;\
-	ldr	r1, [r5]		/* Pending AST? */		;\
+1:	ldr	r1, [r4, #CI_ASTPENDING] /* Pending AST? */		;\
 	teq	r1, #0x00000000						;\
 	beq	2f			/* Nope. Just bail */		;\
-1:	mov	r1, #0x00000000						;\
-	str	r1, [r5]		/* Clear astpending */		;\
-	msr	cpsr_c, r4		/* Restore interrupts */	;\
+	mov	r1, #0x00000000						;\
+	str	r1, [r4, #CI_ASTPENDING] /* Clear astpending */		;\
+	bic	r5, r5, #(IF32_bits)					;\
+	msr	cpsr_c, r5		/* Restore interrupts */	;\
 	mov	r0, sp							;\
 	bl	_C_LABEL(ast)		/* ast(frame) */		;\
-	orr	r0, r4, #(I32_bit)	/* Disable IRQs */		;\
+	orr	r0, r5, #(IF32_bits)	/* Disable IRQs */		;\
 	msr	cpsr_c, r0						;\
-	ldr	r1, [r5]		/* Another pending AST? */	;\
-	teq	r1, #0x00000000						;\
-	bne	1b			/* Yup. Back around again */	;\
+	b	1b							;\
 2:
 #endif /* EXEC_AOUT */
+
+#ifdef ARM_LOCK_CAS_DEBUG
+#define	LOCK_CAS_DEBUG_LOCALS						 \
+.L_lock_cas_restart:							;\
+	.word	_C_LABEL(_lock_cas_restart)
+
+#if defined(__ARMEB__)
+#define	LOCK_CAS_DEBUG_COUNT_RESTART					 \
+	ble	99f							;\
+	ldr	r0, .L_lock_cas_restart					;\
+	ldmia	r0, {r1-r2}		/* load ev_count */		;\
+	adds	r2, r2, #1		/* 64-bit incr (lo) */		;\
+	adc	r1, r1, #0		/* 64-bit incr (hi) */		;\
+	stmia	r0, {r1-r2}		/* store ev_count */
+#else /* __ARMEB__ */
+#define	LOCK_CAS_DEBUG_COUNT_RESTART					 \
+	ble	99f							;\
+	ldr	r0, .L_lock_cas_restart					;\
+	ldmia	r0, {r1-r2}		/* load ev_count */		;\
+	adds	r1, r1, #1		/* 64-bit incr (lo) */		;\
+	adc	r2, r2, #0		/* 64-bit incr (hi) */		;\
+	stmia	r0, {r1-r2}		/* store ev_count */
+#endif /* __ARMEB__ */
+#else /* ARM_LOCK_CAS_DEBUG */
+#define	LOCK_CAS_DEBUG_LOCALS		/* nothing */
+#define	LOCK_CAS_DEBUG_COUNT_RESTART	/* nothing */
+#endif /* ARM_LOCK_CAS_DEBUG */
+
+#define	LOCK_CAS_CHECK_LOCALS						 \
+.L_lock_cas:								;\
+	.word	_C_LABEL(_lock_cas)					;\
+.L_lock_cas_end:							;\
+	.word	_C_LABEL(_lock_cas_end)					;\
+LOCK_CAS_DEBUG_LOCALS
+
+#define	LOCK_CAS_CHECK							 \
+	ldr	r0, [sp]		/* get saved PSR */		;\
+	and	r0, r0, #(PSR_MODE)	/* check for SVC32 mode */	;\
+	teq	r0, #(PSR_SVC32_MODE)					;\
+	bne	99f			/* nope, get out now */		;\
+	ldr	r0, [sp, #(IF_PC)]					;\
+	ldr	r1, .L_lock_cas_end					;\
+	cmp	r0, r1							;\
+	bge	99f							;\
+	ldr	r1, .L_lock_cas						;\
+	cmp	r0, r1							;\
+	strgt	r1, [sp, #(IF_PC)]					;\
+	LOCK_CAS_DEBUG_COUNT_RESTART					;\
+99:
 
 /*
  * ASM macros for pushing and pulling trapframes from the stack
@@ -357,5 +436,3 @@ void validate_trapframe __P((trapframe_t *, int));
 #endif /* _LOCORE */
 
 #endif /* _ARM32_FRAME_H_ */
-  
-/* End of frame.h */

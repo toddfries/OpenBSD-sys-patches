@@ -1,5 +1,4 @@
-/*	$OpenBSD: psychovar.h,v 1.7 2008/05/24 23:31:37 kettenis Exp $	*/
-/*	$NetBSD: psychovar.h,v 1.6 2001/07/20 00:07:13 eeh Exp $	*/
+/*	$NetBSD: psychovar.h,v 1.15 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Matthew R. Green
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,6 +28,8 @@
 
 #ifndef _SPARC64_DEV_PSYCHOVAR_H_
 #define _SPARC64_DEV_PSYCHOVAR_H_
+
+#include <dev/sysmon/sysmonvar.h>
 
 /* per real PCI bus info */
 struct psycho_softc;
@@ -52,6 +51,10 @@ struct psycho_pbm {
 	int				pp_nrange;
 	int				pp_nintmap;
 
+	/* extents for free bus space */
+	struct extent			*pp_exmem;
+	struct extent			*pp_exio;
+
 	/* PCI Bus Module A or PCI Bus Module B */
 	int				pp_id;
 #define PSYCHO_PBM_UNKNOWN	0
@@ -66,6 +69,12 @@ struct psycho_pbm {
 	bus_space_tag_t			pp_iot;
 	bus_dma_tag_t			pp_dmat;
 	int				pp_bus;
+	int				pp_busmax;
+	struct pp_busnode {
+		int	node;
+		int	(*valid)(void *);
+		void	*arg;
+	}				(*pp_busnode)[256];
 	int				pp_flags;
 
 	/* and pointers into the psycho regs for our bits */
@@ -95,8 +104,7 @@ struct psycho_softc {
 	 * PSYCHO register.  we record the base physical address of these 
 	 * also as it is the base of the entire PSYCHO
 	 */
-	bus_space_handle_t		sc_regsh;
-	bus_space_handle_t		sc_pcictl;
+	struct psychoreg		*sc_regs;
 	paddr_t				sc_basepaddr;
 
 	/* Interrupt Group Number for this device */
@@ -104,7 +112,9 @@ struct psycho_softc {
 
 	/* our tags (from parent) */
 	bus_space_tag_t			sc_bustag;
-	bus_dma_tag_t			sc_dmatag;	
+	bus_dma_tag_t			sc_dmatag;
+
+	bus_space_handle_t		sc_bh;
 
 	/* config space */
 	bus_space_tag_t			sc_configtag;
@@ -115,42 +125,22 @@ struct psycho_softc {
 	int				sc_mode;	/* (whatareya?) */
 #define	PSYCHO_MODE_SABRE	1	/* i'm a sabre (yob) */
 #define	PSYCHO_MODE_PSYCHO	2	/* i'm a psycho (w*nker) */
-#define	PSYCHO_MODE_CMU_CH	3	/* i'm a CMU-CH (castrate) */
 
 	struct iommu_state		*sc_is;
+
+	struct sysmon_pswitch		*sc_smcontext;	/* power switch definition */
+	int				sc_powerpressed;/* already signaled */
 };
 
-/* config space is per-psycho.  mem/io/dma are per-pci bus */
+/* get a PCI offset address from bus_space_handle_t */
+bus_addr_t psycho_bus_offset(bus_space_tag_t, bus_space_handle_t *);
+
+/* config space is per-psycho.  mem/io/DMA are per-pci bus */
 bus_dma_tag_t psycho_alloc_dma_tag(struct psycho_pbm *);
+bus_space_tag_t psycho_alloc_bus_tag(struct psycho_pbm *, int);
 
-bus_space_tag_t psycho_alloc_mem_tag(struct psycho_pbm *);
-bus_space_tag_t psycho_alloc_io_tag(struct psycho_pbm *);
-bus_space_tag_t psycho_alloc_config_tag(struct psycho_pbm *);
-
-/* uperf attachment to psycho's */
-struct uperf_psycho_attach_args {
-	char *upaa_name;
-	struct perfmon *upaa_regs;
-};
-
-#define psycho_psychoreg_read(sc, reg)				\
-	bus_space_read_8((sc)->sc_bustag, (sc)->sc_regsh,	\
-	    offsetof(struct psychoreg, reg))
-
-#define psycho_psychoreg_write(sc, reg, v)			\
-	bus_space_write_8((sc)->sc_bustag, (sc)->sc_regsh,	\
-	    offsetof(struct psychoreg, reg), (v))
-
-#define psycho_psychoreg_vaddr(sc, reg)				\
-        (bus_space_vaddr((sc)->sc_bustag, (sc)->sc_regsh) +	\
-                offsetof(struct psychoreg, reg))
-
-#define psycho_pcictl_read(sc, reg)				\
-	bus_space_read_8((sc)->sc_bustag, (sc)->sc_pcictl,	\
-	     offsetof(struct pci_ctl, reg))
-
-#define psycho_pcictl_write(sc, reg, v)	\
-	bus_space_write_8((sc)->sc_bustag, (sc)->sc_pcictl,	\
-	    offsetof(struct pci_ctl, reg), (v))
+#define psycho_alloc_config_tag(pp) psycho_alloc_bus_tag((pp), PCI_CONFIG_BUS_SPACE)
+#define psycho_alloc_mem_tag(pp) psycho_alloc_bus_tag((pp), PCI_MEMORY_BUS_SPACE)
+#define psycho_alloc_io_tag(pp) psycho_alloc_bus_tag((pp), PCI_IO_BUS_SPACE)
 
 #endif /* _SPARC64_DEV_PSYCHOVAR_H_ */

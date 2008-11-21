@@ -1,5 +1,4 @@
-/*	$OpenBSD: bootconfig.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: bootconfig.c,v 1.2 2002/03/10 19:56:39 lukem Exp $	*/
+/*	$NetBSD: bootconfig.c,v 1.5 2006/10/24 20:25:52 bjh21 Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -39,22 +38,18 @@
 
 #include <sys/param.h>
 
+__KERNEL_RCSID(0, "$NetBSD: bootconfig.c,v 1.5 2006/10/24 20:25:52 bjh21 Exp $");
+
 #include <sys/systm.h>
 
 #include <machine/bootconfig.h>
-
-#include "rd.h"
 
 /* 
  * Function to identify and process different types of boot argument
  */
 
 int
-get_bootconf_option(opts, opt, type, result)
-	char *opts;
-	char *opt;
-	int type;
-	void *result;
+get_bootconf_option(char *opts, const char *opt, int type, void *result)
 {
 	char *ptr;
 	char *optstart;
@@ -73,7 +68,8 @@ get_bootconf_option(opts, opt, type, result)
 		not = 0;
 
 		/* Is it a negate option */
-		if ((type & BOOTOPT_TYPE_MASK) == BOOTOPT_TYPE_BOOLEAN && *ptr == '!') {
+		if ((type & BOOTOPT_TYPE_MASK) == BOOTOPT_TYPE_BOOLEAN &&
+		    *ptr == '!') {
 			not = 1;
 			++ptr;
 		}
@@ -83,8 +79,9 @@ get_bootconf_option(opts, opt, type, result)
 		while (*ptr != 0 && *ptr != ' ' && *ptr != '\t' && *ptr != '=')
 			++ptr;
 
-		if ((*ptr == '=')
-		    || (*ptr != '=' && ((type & BOOTOPT_TYPE_MASK) == BOOTOPT_TYPE_BOOLEAN))) {
+		if (*ptr == '=' ||
+		    (*ptr != '=' &&
+		     ((type & BOOTOPT_TYPE_MASK) == BOOTOPT_TYPE_BOOLEAN))) {
 			/* compare the option */
 			if (strncmp(optstart, opt, (ptr - optstart)) == 0) {
 				/* found */
@@ -92,12 +89,12 @@ get_bootconf_option(opts, opt, type, result)
 				if (*ptr == '=')
 					++ptr;
 
-#if 0
-/* BELCH */
-				switch(type & BOOTOPT_TYPE_MASK) {
+				switch (type & BOOTOPT_TYPE_MASK) {
 				case BOOTOPT_TYPE_BOOLEAN :
 					if (*(ptr - 1) == '=')
-						*((int *)result) = ((u_int)strtoul(ptr, NULL, 10) != 0);
+						*((int *)result) =
+						    ((u_int)strtoul(ptr, NULL,
+						    10) != 0);
 					else
 						*((int *)result) = !not;
 					break;
@@ -105,24 +102,26 @@ get_bootconf_option(opts, opt, type, result)
 					*((char **)result) = ptr;
 					break;			
 				case BOOTOPT_TYPE_INT :
-					*((int *)result) = (u_int)strtoul(ptr, NULL, 10);
+					*((int *)result) =
+					    (u_int)strtoul(ptr, NULL, 10);
 					break;
 				case BOOTOPT_TYPE_BININT :
-					*((int *)result) = (u_int)strtoul(ptr, NULL, 2);
+					*((int *)result) =
+					    (u_int)strtoul(ptr, NULL, 2);
 					break;
 				case BOOTOPT_TYPE_HEXINT :
-					*((int *)result) = (u_int)strtoul(ptr, NULL, 16);
+					*((int *)result) =
+					    (u_int)strtoul(ptr, NULL, 16);
 					break;
 				default:
-					return(0);
+					return 0;
 				}
-#endif
-				return(1);
+				return 1;
 			}
 		}
 		/* skip to next option */
 		while (*ptr != ' ' && *ptr != '\t' && *ptr != 0)
 			++ptr;
 	}
-	return(0);
+	return 0;
 }

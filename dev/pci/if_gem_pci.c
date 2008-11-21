@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_gem_pci.c,v 1.28 2007/04/19 19:00:01 kettenis Exp $	*/
-/*	$NetBSD: if_gem_pci.c,v 1.1 2001/09/16 00:11:42 eeh Exp $ */
+/*	$NetBSD: if_gem_pci.c,v 1.30 2008/05/25 16:00:11 chs Exp $ */
 
 /*
  *
@@ -31,8 +30,11 @@
  */
 
 /*
- * PCI bindings for Sun GEM ethernet controllers.
+ * PCI bindings for Apple GMAC, Sun ERI and Sun GEM Ethernet controllers
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_gem_pci.c,v 1.30 2008/05/25 16:00:11 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,25 +46,19 @@
 
 #include <machine/endian.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
+#include <net/if_ether.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
 
-#include <machine/bus.h>
-#include <machine/intr.h>
-
-#ifdef __sparc64__
-#include <dev/ofw/openfirm.h>
-#endif
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -75,233 +71,337 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
+/* XXX Should use Properties when that's fleshed out. */
+#ifdef macppc
+#include <dev/ofw/openfirm.h>
+#endif /* macppc */
+#ifdef __sparc__
+#include <machine/promlib.h>
+#endif
+
+#ifndef GEM_USE_LOCAL_MAC_ADDRESS
+#if defined (macppc) || defined (__sparc__)
+#define GEM_USE_LOCAL_MAC_ADDRESS	0	/* use system-wide address */
+#else
+#define GEM_USE_LOCAL_MAC_ADDRESS	1
+#endif
+#endif
+
+
 struct gem_pci_softc {
 	struct	gem_softc	gsc_gem;	/* GEM device */
-	bus_space_tag_t		gsc_memt;
-	bus_space_handle_t	gsc_memh;
 	void			*gsc_ih;
 };
 
-int	gem_match_pci(struct device *, void *, void *);
+int	gem_match_pci(struct device *, struct cfdata *, void *);
 void	gem_attach_pci(struct device *, struct device *, void *);
-int	gem_pci_enaddr(struct gem_softc *, struct pci_attach_args *);
 
-struct cfattach gem_pci_ca = {
-	sizeof(struct gem_pci_softc), gem_match_pci, gem_attach_pci
-};
+CFATTACH_DECL(gem_pci, sizeof(struct gem_pci_softc),
+    gem_match_pci, gem_attach_pci, NULL, NULL);
 
 /*
  * Attach routines need to be split out to different bus-specific files.
  */
 
-const struct pci_matchid gem_pci_devices[] = {
-	{ PCI_VENDOR_SUN, PCI_PRODUCT_SUN_ERINETWORK },
-	{ PCI_VENDOR_SUN, PCI_PRODUCT_SUN_GEMNETWORK },
-	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_INTREPID2_GMAC },
-	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_K2_GMAC },
-	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_PANGEA_GMAC },
-	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_SHASTA_GMAC },
-	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_UNINORTHGMAC },
-	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_UNINORTH2GMAC },
-};
-
 int
-gem_match_pci(struct device *parent, void *cf, void *aux)
+gem_match_pci(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, gem_pci_devices,
-	    sizeof(gem_pci_devices)/sizeof(gem_pci_devices[0])));
+	struct pci_attach_args *pa = aux;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SUN &&
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_ERINETWORK ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_GEMNETWORK))
+		return (1);
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_APPLE &&
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_GMAC ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_GMAC2 ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_GMAC3 ||
+ 	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_SHASTA_GMAC ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_K2_GMAC ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_SHASTA_GMAC ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_INTREPID2_GMAC))
+		return (1);
+
+
+	return (0);
 }
 
-#define	PROMHDR_PTR_DATA	0x18
-#define	PROMDATA_PTR_VPD	0x08
-#define	PROMDATA_DATA2		0x0a
-
-static const u_int8_t gem_promhdr[] = { 0x55, 0xaa };
-static const u_int8_t gem_promdat[] = {
-	'P', 'C', 'I', 'R',
-	PCI_VENDOR_SUN & 0xff, PCI_VENDOR_SUN >> 8,
-	PCI_PRODUCT_SUN_GEMNETWORK & 0xff, PCI_PRODUCT_SUN_GEMNETWORK >> 8
-};
-
-static const u_int8_t gem_promdat2[] = {
-	0x18, 0x00,			/* structure length */
-	0x00,				/* structure revision */
-	0x00,				/* interface revision */
-	PCI_SUBCLASS_NETWORK_ETHERNET,	/* subclass code */
-	PCI_CLASS_NETWORK		/* class code */
-};
-
-int
-gem_pci_enaddr(struct gem_softc *sc, struct pci_attach_args *pa)
+#if GEM_USE_LOCAL_MAC_ADDRESS
+static inline int
+gempromvalid(u_int8_t* buf)
 {
-	struct pci_vpd *vpd;
-	bus_space_handle_t romh;
-	bus_space_tag_t romt;
-	bus_size_t romsize;
-	u_int8_t buf[32];
-	pcireg_t address, mask;
-	int dataoff, vpdoff;
-	int rv = -1;
+	return buf[0] == 0x18 && buf[1] == 0x00 &&	/* structure length */
+	    buf[2] == 0x00 &&				/* revision */
+	    (buf[3] == 0x00 ||				/* hme */
+	     buf[3] == 0x80) &&				/* qfe */
+	    buf[4] == PCI_SUBCLASS_NETWORK_ETHERNET &&	/* subclass code */
+	    buf[5] == PCI_CLASS_NETWORK;		/* class code */
+}
 
-	address = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, 0xfffffffe);
-	mask = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
-	address |= PCI_ROM_ENABLE;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, address);
+static inline int
+isshared_pins(u_int8_t* buf)
+{
+	return buf[0] == 's' && buf[1] == 'h' && buf[2] == 'a' &&
+	    buf[3] == 'r' && buf[4] == 'e' && buf[5] == 'd' &&
+	    buf[6] == '-' && buf[7] == 'p' && buf[8] == 'i' &&
+	    buf[9] == 'n' && buf[10] == 's';
+}
+#endif
 
-	romt = pa->pa_memt;
-	romsize = PCI_ROM_SIZE(mask);
-	if (bus_space_map(romt, PCI_ROM_ADDR(address), romsize, 0, &romh)) {
-		romsize = 0;
-		goto fail;
-	}
-
-	bus_space_read_region_1(romt, romh, 0, buf, sizeof(buf));
-	if (bcmp(buf, gem_promhdr, sizeof(gem_promhdr)))
-		goto fail;
-
-	dataoff = buf[PROMHDR_PTR_DATA] | (buf[PROMHDR_PTR_DATA + 1] << 8);
-	if (dataoff < 0x1c)
-		goto fail;
-
-	bus_space_read_region_1(romt, romh, dataoff, buf, sizeof(buf));
-	if (bcmp(buf, gem_promdat, sizeof(gem_promdat)) ||
-	    bcmp(buf + PROMDATA_DATA2, gem_promdat2, sizeof(gem_promdat2)))
-		goto fail;
-
-	vpdoff = buf[PROMDATA_PTR_VPD] | (buf[PROMDATA_PTR_VPD + 1] << 8);
-	if (vpdoff < 0x1c)
-		goto fail;
-
-	bus_space_read_region_1(romt, romh, vpdoff, buf, sizeof(buf));
-
-	/*
-	 * The VPD of gem is not in PCI 2.2 standard format.  The length
-	 * in the resource header is in big endian.
-	 */
-	vpd = (struct pci_vpd *)(buf + 3);
-	if (!PCI_VPDRES_ISLARGE(buf[0]) ||
-	    PCI_VPDRES_LARGE_NAME(buf[0]) != PCI_VPDRES_TYPE_VPD)
-		goto fail;
-	if (vpd->vpd_key0 != 'N' || vpd->vpd_key1 != 'A')
-		goto fail;
-
-	bcopy(buf + 6, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
-	rv = 0;
-
- fail:
-	if (romsize != 0)
-		bus_space_unmap(romt, romh, romsize);
-
-	address = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
-	address &= ~PCI_ROM_ENABLE;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, address);
-
-	return (rv);
+static inline int
+isserdes(u_int8_t* buf)
+{
+	return buf[0] == 's' && buf[1] == 'e' && buf[2] == 'r' &&
+	    buf[3] == 'd' && buf[4] == 'e' && buf[5] == 's';
 }
 
 void
-gem_attach_pci(struct device *parent, struct device *self, void *aux)
+gem_attach_pci(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct pci_attach_args *pa = aux;
 	struct gem_pci_softc *gsc = (void *)self;
 	struct gem_softc *sc = &gsc->gsc_gem;
 	pci_intr_handle_t ih;
-#ifdef __sparc64__
-	/* XXX the following declarations should be elsewhere */
-	extern void myetheraddr(u_char *);
+	const char *intrstr;
+	char devinfo[256];
+	uint8_t enaddr[ETHER_ADDR_LEN];
+#if GEM_USE_LOCAL_MAC_ADDRESS
+	u_int8_t		*enp;
+	bus_space_handle_t	romh;
+	u_int8_t		buf[0x0800];
+	int			dataoff, vpdoff, serdes;
+#if GEM_USE_LOCAL_MAC_ADDRESS || defined(GEM_DEBUG)
+	int i;
 #endif
-	const char *intrstr = NULL;
-	bus_size_t size;
-	int type, gotenaddr = 0;
+#ifdef GEM_DEBUG
+	int j;
+#endif
+	struct pci_vpd		*vpd;
+	static const u_int8_t promhdr[] = { 0x55, 0xaa };
+#define PROMHDR_PTR_DATA	0x18
+	static const u_int8_t promdat[] = {
+		0x50, 0x43, 0x49, 0x52,		/* "PCIR" */
+		PCI_VENDOR_SUN & 0xff, PCI_VENDOR_SUN >> 8,
+		PCI_PRODUCT_SUN_GEMNETWORK & 0xff,
+		PCI_PRODUCT_SUN_GEMNETWORK >> 8
+	};
+#define PROMDATA_PTR_VPD	0x08
+#define PROMDATA_DATA2		0x0a
+#endif  /* GEM_USE_LOCAL_MAC_ADDRESS */
 
-	if (pa->pa_memt) {
-		type = PCI_MAPREG_TYPE_MEM;
-		sc->sc_bustag = pa->pa_memt;
-	} else {
-		type = PCI_MAPREG_TYPE_IO;
-		sc->sc_bustag = pa->pa_iot;
-	}
+	aprint_naive(": Ethernet controller\n");
+
+	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
+	sc->sc_chiprev = PCI_REVISION(pa->pa_class);
+	aprint_normal(": %s (rev. 0x%02x)\n", devinfo, sc->sc_chiprev);
+
+	/*
+	 * Some Sun GEMs/ERIs do have their intpin register bogusly set to 0,
+	 * although it should be 1. correct that.
+	 */
+	if (pa->pa_intrpin == 0)
+		pa->pa_intrpin = 1;
+
+	sc->sc_variant = GEM_UNKNOWN;
 
 	sc->sc_dmatag = pa->pa_dmat;
 
-	sc->sc_pci = 1; /* XXXXX should all be done in bus_dma. */
+	sc->sc_flags |= GEM_PCI;
 
-	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_GEMNETWORK)
-		sc->sc_variant = GEM_SUN_GEM;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_ERINETWORK)
-		sc->sc_variant = GEM_SUN_ERI;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_INTREPID2_GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_PANGEA_GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_SHASTA_GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_UNINORTHGMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_UNINORTH2GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_K2_GMAC)
-		sc->sc_variant = GEM_APPLE_K2_GMAC;
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SUN) {
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_GEMNETWORK)
+			sc->sc_variant = GEM_SUN_GEM;
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_ERINETWORK)
+			sc->sc_variant = GEM_SUN_ERI;
+	} else if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_APPLE) {
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_GMAC ||
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_GMAC2 ||
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_GMAC3 ||
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_SHASTA_GMAC ||
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_INTREPID2_GMAC)
+			sc->sc_variant = GEM_APPLE_GMAC;
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_K2_GMAC)
+			sc->sc_variant = GEM_APPLE_K2_GMAC;
+	}
 
-#define PCI_GEM_BASEADDR	0x10
-	if (pci_mapreg_map(pa, PCI_GEM_BASEADDR, type, 0,
-	    &gsc->gsc_memt, &gsc->gsc_memh, NULL, &size, 0) != 0) {
-		printf(": could not map registers\n");
+	if (sc->sc_variant == GEM_UNKNOWN) {
+		aprint_error_dev(&sc->sc_dev, "unknown adaptor\n");
 		return;
 	}
 
-	sc->sc_bustag = gsc->gsc_memt;
-	sc->sc_h1 = gsc->gsc_memh;
+#define PCI_GEM_BASEADDR	(PCI_MAPREG_START + 0x00)
 
+	/* XXX Need to check for a 64-bit mem BAR? */
+	if (pci_mapreg_map(pa, PCI_GEM_BASEADDR,
+	    PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT, 0,
+	    &sc->sc_bustag, &sc->sc_h1, NULL, NULL) != 0)
+	{
+		aprint_error_dev(&sc->sc_dev, "unable to map device registers\n");
+		return;
+	}
 	if (bus_space_subregion(sc->sc_bustag, sc->sc_h1,
 	    GEM_PCI_BANK2_OFFSET, GEM_PCI_BANK2_SIZE, &sc->sc_h2)) {
-		printf(": unable to create bank 2 subregion\n");
-		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, size);
+		aprint_error_dev(&sc->sc_dev, "unable to create bank 2 subregion\n");
 		return;
 	}
 
-	if (gem_pci_enaddr(sc, pa) == 0)
-		gotenaddr = 1;
+#if GEM_USE_LOCAL_MAC_ADDRESS
+	/*
+	 * Dig out VPD (vital product data) and acquire Ethernet address.
+	 * The VPD of gem resides in the PCI PROM (PCI FCode).
+	 */
+	/*
+	 * ``Writing FCode 3.x Programs'' (newer ones, dated 1997 and later)
+	 * chapter 2 describes the data structure.
+	 */
 
-#ifdef __sparc64__
-	if (!gotenaddr) {
-		if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
-		    sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN) <= 0)
-			myetheraddr(sc->sc_arpcom.ac_enaddr);
-		gotenaddr = 1;
-	}
-#endif
-#ifdef __powerpc__
-	if (!gotenaddr) {
-		pci_ether_hw_addr(pa->pa_pc, sc->sc_arpcom.ac_enaddr);
-		gotenaddr = 1;
-	}
+	enp = NULL;
+
+	if (sc->sc_variant == GEM_SUN_GEM &&
+	    (bus_space_subregion(sc->sc_bustag, sc->sc_h1,
+	    GEM_PCI_ROM_OFFSET, GEM_PCI_ROM_SIZE, &romh)) == 0) {
+
+		/* read PCI Expansion PROM Header */
+		bus_space_read_region_1(sc->sc_bustag,
+		    romh, 0, buf, sizeof buf);
+
+		/* Check for "shared-pins = serdes" in FCode. */
+		i = 0;
+		serdes = 0;
+		while (i < (sizeof buf) - sizeof "serdes") {
+			if (!serdes) {
+				if (isserdes(&buf[i]))
+					serdes = 1;
+			} else {
+				if (isshared_pins(&buf[i]))
+					serdes = 2;
+			}
+			if (serdes == 2) {
+				sc->sc_flags |= GEM_SERDES;
+				break;
+			}
+			i++;
+		}
+#ifdef GEM_DEBUG
+		/* PROM dump */
+		printf("%s: PROM dump (0x0000 to %04lx)\n", device_xname(&sc->sc_dev),
+		    (sizeof buf) - 1);
+		i = 0;
+		j = 0;
+		printf("  %04x  ", i);
+		while (i < sizeof buf) {
+			printf("%02x ", buf[i]);
+			if (i && !(i % 8))
+				printf(" ");
+			if (i && !(i % 16)) {
+				printf(" ");
+				while (j < i) {
+					if (buf[j] > 31 && buf[j] < 128)
+						printf("%c", buf[j]);
+					else
+						printf(".");
+					j++;
+				}
+				j = i;
+				printf("\n  %04x  ", i);
+				}
+			i++;
+		}
+		printf("\n");
 #endif
 
-	sc->sc_burst = 16;	/* XXX */
+		if (memcmp(buf, promhdr, sizeof promhdr) == 0 &&
+		    (dataoff = (buf[PROMHDR_PTR_DATA] |
+			(buf[PROMHDR_PTR_DATA + 1] << 8))) >= 0x1c) {
+
+			/* read PCI Expansion PROM Data */
+			bus_space_read_region_1(sc->sc_bustag, romh, dataoff,
+			    buf, 64);
+			if (memcmp(buf, promdat, sizeof promdat) == 0 &&
+			    gempromvalid(buf + PROMDATA_DATA2) &&
+			    (vpdoff = (buf[PROMDATA_PTR_VPD] |
+				(buf[PROMDATA_PTR_VPD + 1] << 8))) >= 0x1c) {
+	
+				/*
+				 * The VPD of gem is not in PCI 2.2 standard
+				 * format.  The length in the resource header
+				 * is in big endian, and resources are not
+				 * properly terminated (only one resource
+				 * and no end tag).
+				 */
+				/* read PCI VPD */
+				bus_space_read_region_1(sc->sc_bustag, romh,
+				    vpdoff, buf, 64);
+				vpd = (void *)(buf + 3);
+				if (PCI_VPDRES_ISLARGE(buf[0]) &&
+				    PCI_VPDRES_LARGE_NAME(buf[0])
+					== PCI_VPDRES_TYPE_VPD &&
+				    vpd->vpd_key0 == 0x4e /* N */ &&
+				    vpd->vpd_key1 == 0x41 /* A */ &&
+				    vpd->vpd_len == ETHER_ADDR_LEN) {
+					/*
+					 * Ethernet address found
+					 */
+					enp = buf + 6;
+				}
+			}
+		}
+	}
+
+	if (enp)
+		memcpy(enaddr, enp, ETHER_ADDR_LEN);
+	else
+#endif  /* GEM_USE_LOCAL_MAC_ADDRESS */
+#ifdef __sparc__
+	{
+		if (strcmp(prom_getpropstring(PCITAG_NODE(pa->pa_tag),
+		    "shared-pins"), "serdes") == 0)
+			sc->sc_flags |= GEM_SERDES;
+		prom_getether(PCITAG_NODE(pa->pa_tag), enaddr);
+	}
+#else
+#ifdef macppc
+	{
+		int node;
+		char sp[6];	/* "serdes" */
+
+		node = pcidev_to_ofdev(pa->pa_pc, pa->pa_tag);
+		if (node == 0) {
+			aprint_error_dev(&sc->sc_dev, "unable to locate OpenFirmware node\n");
+			return;
+		}
+
+		OF_getprop(node, "shared-pins", sp, sizeof(sp));
+		if (isserdes(sp))
+			sc->sc_flags |= GEM_SERDES;
+		OF_getprop(node, "local-mac-address", enaddr, sizeof(enaddr));
+	}
+#else
+		printf("%s: no Ethernet address found\n", device_xname(&sc->sc_dev));
+#endif /* macppc */
+#endif /* __sparc__ */
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": couldn't map interrupt\n");
-		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, size);
+		aprint_error_dev(&sc->sc_dev, "unable to map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	gsc->gsc_ih = pci_intr_establish(pa->pa_pc,
-	    ih, IPL_NET, gem_intr, sc, self->dv_xname);
+	gsc->gsc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET, gem_intr, sc);
 	if (gsc->gsc_ih == NULL) {
-		printf(": couldn't establish interrupt");
+		aprint_error_dev(&sc->sc_dev, "unable to establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, size);
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		return;
 	}
+	aprint_normal_dev(&sc->sc_dev, "interrupting at %s\n", intrstr);
 
-	printf(": %s", intrstr);
-
-	/*
-	 * call the main configure
-	 */
-	gem_config(sc);
+	/* Finish off the attach. */
+	gem_attach(sc, enaddr);
 }

@@ -1,6 +1,3 @@
-/*	$OpenBSD: ahc_pci.c,v 1.53 2008/05/13 02:24:08 brad Exp $	*/
-/*	$NetBSD: ahc_pci.c,v 1.43 2003/08/18 09:16:22 taca Exp $	*/
-
 /*
  * Product specific probe and attach routines for:
  *      3940, 2940, aic7895, aic7890, aic7880,
@@ -42,7 +39,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: ahc_pci.c,v 1.53 2008/05/13 02:24:08 brad Exp $
+ * $Id: ahc_pci.c,v 1.63 2008/02/22 23:24:07 dyoung Exp $
  *
  * //depot/aic7xxx/aic7xxx/aic7xxx_pci.c#57 $
  *
@@ -52,6 +49,9 @@
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ahc_pci.c,v 1.63 2008/02/22 23:24:07 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -60,25 +60,28 @@
 #include <sys/device.h>
 #include <sys/reboot.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
-#define AHC_PCI_IOADDR	PCI_MAPREG_START	/* I/O Address */
-#define AHC_PCI_MEMADDR	(PCI_MAPREG_START + 4)	/* Mem I/O Address */
 
-#include <dev/ic/aic7xxx_openbsd.h>
-#include <dev/ic/aic7xxx_inline.h>
-
-#include <dev/ic/smc93cx6var.h>
-
+/* XXXX some i386 on-board chips act weird when memory-mapped */
 #ifndef __i386__
 #define AHC_ALLOW_MEMIO
 #endif
 
-static __inline uint64_t
+#define AHC_PCI_IOADDR	PCI_MAPREG_START	/* I/O Address */
+#define AHC_PCI_MEMADDR	(PCI_MAPREG_START + 4)	/* Mem I/O Address */
+
+#include <dev/ic/aic7xxx_osm.h>
+#include <dev/ic/aic7xxx_inline.h>
+
+#include <dev/ic/smc93cx6var.h>
+
+
+static inline uint64_t
 ahc_compose_id(u_int device, u_int vendor, u_int subdevice, u_int subvendor)
 {
 	uint64_t id;
@@ -263,95 +266,112 @@ static ahc_device_setup_t ahc_aha394XX_setup;
 static ahc_device_setup_t ahc_aha494XX_setup;
 static ahc_device_setup_t ahc_aha398XX_setup;
 
-struct ahc_pci_identity ahc_pci_ident_table [] =
+static struct ahc_pci_identity ahc_pci_ident_table [] =
 {
 	/* aic7850 based controllers */
 	{
 		ID_AHA_2902_04_10_15_20_30C,
 		ID_ALL_MASK,
+		"Adaptec 2902/04/10/15/20/30C SCSI adapter",
 		ahc_aic785X_setup
 	},
 	/* aic7860 based controllers */
 	{
 		ID_AHA_2930CU,
 		ID_ALL_MASK,
+		"Adaptec 2930CU SCSI adapter",
 		ahc_aic7860_setup
 	},
 	{
 		ID_AHA_1480A & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 1480A Ultra SCSI adapter",
 		ahc_apa1480_setup
 	},
 	{
 		ID_AHA_2940AU_0 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2940A Ultra SCSI adapter",
 		ahc_aic7860_setup
 	},
 	{
 		ID_AHA_2940AU_CN & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2940A/CN Ultra SCSI adapter",
 		ahc_aic7860_setup
 	},
 	{
 		ID_AHA_2930C_VAR & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2930C Ultra SCSI adapter (VAR)",
 		ahc_aic7860_setup
 	},
 	/* aic7870 based controllers */
 	{
 		ID_AHA_2940,
 		ID_ALL_MASK,
+		"Adaptec 2940 SCSI adapter",
 		ahc_aic7870_setup
 	},
 	{
 		ID_AHA_3940,
 		ID_ALL_MASK,
+		"Adaptec 3940 SCSI adapter",
 		ahc_aha394X_setup
 	},
 	{
 		ID_AHA_398X,
 		ID_ALL_MASK,
+		"Adaptec 398X SCSI RAID adapter",
 		ahc_aha398X_setup
 	},
 	{
 		ID_AHA_2944,
 		ID_ALL_MASK,
+		"Adaptec 2944 SCSI adapter",
 		ahc_aic7870_setup
 	},
 	{
 		ID_AHA_3944,
 		ID_ALL_MASK,
+		"Adaptec 3944 SCSI adapter",
 		ahc_aha394X_setup
 	},
 	{
 		ID_AHA_4944,
 		ID_ALL_MASK,
+		"Adaptec 4944 SCSI adapter",
 		ahc_aha494X_setup
 	},
 	/* aic7880 based controllers */
 	{
 		ID_AHA_2940U & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2940 Ultra SCSI adapter",
 		ahc_aic7880_setup
 	},
 	{
 		ID_AHA_3940U & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 3940 Ultra SCSI adapter",
 		ahc_aha394XU_setup
 	},
 	{
 		ID_AHA_2944U & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2944 Ultra SCSI adapter",
 		ahc_aic7880_setup
 	},
 	{
 		ID_AHA_3944U & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 3944 Ultra SCSI adapter",
 		ahc_aha394XU_setup
 	},
 	{
 		ID_AHA_398XU & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 398X Ultra SCSI RAID adapter",
 		ahc_aha398XU_setup
 	},
 	{
@@ -361,236 +381,283 @@ struct ahc_pci_identity ahc_pci_ident_table [] =
 		 */
 		ID_AHA_4944U & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 4944 Ultra SCSI adapter",
 		ahc_aic7880_setup
 	},
 	{
 		ID_AHA_2930U & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2930 Ultra SCSI adapter",
 		ahc_aic7880_setup
 	},
 	{
 		ID_AHA_2940U_PRO & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2940 Pro Ultra SCSI adapter",
 		ahc_aha2940Pro_setup
 	},
 	{
 		ID_AHA_2940U_CN & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec 2940/CN Ultra SCSI adapter",
 		ahc_aic7880_setup
 	},
 	/* Ignore all SISL (AAC on MB) based controllers. */
 	{
 		ID_9005_SISL_ID,
 		ID_9005_SISL_MASK,
+		NULL,
 		NULL
 	},
 	/* aic7890 based controllers */
 	{
 		ID_AHA_2930U2,
 		ID_ALL_MASK,
+		"Adaptec 2930 Ultra2 SCSI adapter",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AHA_2940U2B,
 		ID_ALL_MASK,
+		"Adaptec 2940B Ultra2 SCSI adapter",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AHA_2940U2_OEM,
 		ID_ALL_MASK,
+		"Adaptec 2940 Ultra2 SCSI adapter (OEM)",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AHA_2940U2,
 		ID_ALL_MASK,
+		"Adaptec 2940 Ultra2 SCSI adapter",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AHA_2950U2B,
 		ID_ALL_MASK,
+		"Adaptec 2950 Ultra2 SCSI adapter",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AIC7890_ARO,
 		ID_ALL_MASK,
+		"Adaptec aic7890/91 Ultra2 SCSI adapter (ARO)",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AAA_131U2,
 		ID_ALL_MASK,
+		"Adaptec AAA-131 Ultra2 RAID adapter",
 		ahc_aic7890_setup
 	},
 	/* aic7892 based controllers */
 	{
 		ID_AHA_29160,
 		ID_ALL_MASK,
+		"Adaptec 29160 Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AHA_29160_CPQ,
 		ID_ALL_MASK,
+		"Adaptec (Compaq OEM) 29160 Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AHA_29160N,
 		ID_ALL_MASK,
+		"Adaptec 29160N Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AHA_29160C,
 		ID_ALL_MASK,
+		"Adaptec 29160C Ultra160 SCSI adapter",
 		ahc_aha29160C_setup
 	},
 	{
 		ID_AHA_29160B,
 		ID_ALL_MASK,
+		"Adaptec 29160B Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AHA_19160B,
 		ID_ALL_MASK,
+		"Adaptec 19160B Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AIC7892_ARO,
 		ID_ALL_MASK,
+		"Adaptec aic7892 Ultra160 SCSI adapter (ARO)",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AHA_2915LP,
 		ID_ALL_MASK,
+		"Adaptec 2915LP Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
-	/* aic7895 based controllers */	
+	/* aic7895 based controllers */
 	{
 		ID_AHA_2940U_DUAL,
 		ID_ALL_MASK,
+		"Adaptec 2940/DUAL Ultra SCSI adapter",
 		ahc_aic7895_setup
 	},
 	{
 		ID_AHA_3940AU,
 		ID_ALL_MASK,
+		"Adaptec 3940A Ultra SCSI adapter",
 		ahc_aic7895_setup
 	},
 	{
 		ID_AHA_3944AU,
 		ID_ALL_MASK,
+		"Adaptec 3944A Ultra SCSI adapter",
 		ahc_aic7895_setup
 	},
 	{
 		ID_AIC7895_ARO,
 		ID_AIC7895_ARO_MASK,
+		"Adaptec aic7895 Ultra SCSI adapter (ARO)",
 		ahc_aic7895_setup
 	},
-	/* aic7896/97 based controllers */	
+	/* aic7896/97 based controllers */
 	{
 		ID_AHA_3950U2B_0,
 		ID_ALL_MASK,
+		"Adaptec 3950B Ultra2 SCSI adapter",
 		ahc_aic7896_setup
 	},
 	{
 		ID_AHA_3950U2B_1,
 		ID_ALL_MASK,
+		"Adaptec 3950B Ultra2 SCSI adapter",
 		ahc_aic7896_setup
 	},
 	{
 		ID_AHA_3950U2D_0,
 		ID_ALL_MASK,
+		"Adaptec 3950D Ultra2 SCSI adapter",
 		ahc_aic7896_setup
 	},
 	{
 		ID_AHA_3950U2D_1,
 		ID_ALL_MASK,
+		"Adaptec 3950D Ultra2 SCSI adapter",
 		ahc_aic7896_setup
 	},
 	{
 		ID_AIC7896_ARO,
 		ID_ALL_MASK,
+		"Adaptec aic7896/97 Ultra2 SCSI adapter (ARO)",
 		ahc_aic7896_setup
 	},
-	/* aic7899 based controllers */	
+	/* aic7899 based controllers */
 	{
 		ID_AHA_3960D,
 		ID_ALL_MASK,
+		"Adaptec 3960D Ultra160 SCSI adapter",
 		ahc_aic7899_setup
 	},
 	{
 		ID_AHA_3960D_CPQ,
 		ID_ALL_MASK,
+		"Adaptec (Compaq OEM) 3960D Ultra160 SCSI adapter",
 		ahc_aic7899_setup
 	},
 	{
 		ID_AIC7899_ARO,
 		ID_ALL_MASK,
+		"Adaptec aic7899 Ultra160 SCSI adapter (ARO)",
 		ahc_aic7899_setup
 	},
 	/* Generic chip probes for devices we don't know 'exactly' */
 	{
 		ID_AIC7850 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7850 SCSI adapter",
 		ahc_aic785X_setup
 	},
 	{
 		ID_AIC7855 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7855 SCSI adapter",
 		ahc_aic785X_setup
 	},
 	{
 		ID_AIC7859 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7859 SCSI adapter",
 		ahc_aic7860_setup
 	},
 	{
 		ID_AIC7860 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7860 Ultra SCSI adapter",
 		ahc_aic7860_setup
 	},
 	{
 		ID_AIC7870 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7870 SCSI adapter",
 		ahc_aic7870_setup
 	},
 	{
 		ID_AIC7880 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7880 Ultra SCSI adapter",
 		ahc_aic7880_setup
 	},
 	{
 		ID_AIC7890 & ID_9005_GENERIC_MASK,
 		ID_9005_GENERIC_MASK,
+		"Adaptec aic7890/91 Ultra2 SCSI adapter",
 		ahc_aic7890_setup
 	},
 	{
 		ID_AIC7892 & ID_9005_GENERIC_MASK,
 		ID_9005_GENERIC_MASK,
+		"Adaptec aic7892 Ultra160 SCSI adapter",
 		ahc_aic7892_setup
 	},
 	{
 		ID_AIC7895 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7895 Ultra SCSI adapter",
 		ahc_aic7895_setup
 	},
 	{
 		ID_AIC7896 & ID_9005_GENERIC_MASK,
 		ID_9005_GENERIC_MASK,
+		"Adaptec aic7896/97 Ultra2 SCSI adapter",
 		ahc_aic7896_setup
 	},
 	{
 		ID_AIC7899 & ID_9005_GENERIC_MASK,
 		ID_9005_GENERIC_MASK,
+		"Adaptec aic7899 Ultra160 SCSI adapter",
 		ahc_aic7899_setup
 	},
 	{
 		ID_AIC7810 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7810 RAID memory controller",
 		ahc_raid_setup
 	},
 	{
 		ID_AIC7815 & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec aic7815 RAID memory controller",
 		ahc_raid_setup
 	}
 };
+
+static const u_int ahc_num_pci_devs = NUM_ELEMENTS(ahc_pci_ident_table);
 
 #define AHC_394X_SLOT_CHANNEL_A	4
 #define AHC_394X_SLOT_CHANNEL_B	5
@@ -639,20 +706,14 @@ static int ahc_ext_scbram_present(struct ahc_softc *ahc);
 static void ahc_scbram_config(struct ahc_softc *ahc, int enable,
 				  int pcheck, int fast, int large);
 static void ahc_probe_ext_scbram(struct ahc_softc *ahc);
-static int  ahc_pci_chip_init(struct ahc_softc *ahc);
 
-int ahc_pci_probe(struct device *, void *, void *);
-void ahc_pci_attach(struct device *, struct device *, void *);
+static void ahc_pci_intr(struct ahc_softc *);
 
+static bool ahc_pci_suspend(device_t PMF_FN_PROTO);
+static bool ahc_pci_resume(device_t PMF_FN_PROTO);
 
-struct cfattach ahc_pci_ca = {
-	sizeof(struct ahc_softc), ahc_pci_probe, ahc_pci_attach
-};
-
-const struct ahc_pci_identity *
-ahc_find_pci_device(id, subid, func)
-	pcireg_t id, subid;
-	u_int func;
+static const struct ahc_pci_identity *
+ahc_find_pci_device(pcireg_t id, pcireg_t subid, u_int func)
 {
 	u_int64_t  full_id;
 	const struct	   ahc_pci_identity *entry;
@@ -669,12 +730,12 @@ ahc_find_pci_device(id, subid, func)
 	 * ID as valid.
 	 */
 	if (func > 0
-	    && ahc_9005_subdevinfo_valid(PCI_VENDOR(id), PCI_PRODUCT(id), 
+	    && ahc_9005_subdevinfo_valid(PCI_VENDOR(id), PCI_PRODUCT(id),
 					 PCI_VENDOR(subid), PCI_PRODUCT(subid))
 	    && SUBID_9005_MFUNCENB(PCI_PRODUCT(subid)) == 0)
 		return (NULL);
 
-	for (i = 0; i < NUM_ELEMENTS(ahc_pci_ident_table); i++) {
+	for (i = 0; i < ahc_num_pci_devs; i++) {
 		entry = &ahc_pci_ident_table[i];
 		if (entry->full_id == (full_id & entry->id_mask))
 			return (entry);
@@ -682,10 +743,8 @@ ahc_find_pci_device(id, subid, func)
 	return (NULL);
 }
 
-int
-ahc_pci_probe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+ahc_pci_probe(device_t parent, struct cfdata *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	const struct	   ahc_pci_identity *entry;
@@ -696,14 +755,12 @@ ahc_pci_probe(parent, match, aux)
 	return (entry != NULL && entry->setup != NULL) ? 1 : 0;
 }
 
-void
-ahc_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+ahc_pci_attach(device_t parent, device_t self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	const struct	   ahc_pci_identity *entry;
-	struct		   ahc_softc *ahc = (void *)self;
+	struct		   ahc_softc *ahc = device_private(self);
 	pcireg_t	   command;
 	u_int		   our_id = 0;
 	u_int		   sxfrctl1;
@@ -725,42 +782,26 @@ ahc_pci_attach(parent, self, aux)
 	pci_intr_handle_t  ih;
 	const char        *intrstr;
 	struct ahc_pci_busdata *bd;
-	int i;
+	bool               override_ultra;
 
-	/*
-	 * Instead of ahc_alloc() as in FreeBSD, do the few relevant
-	 * initializations manually.
-	 */
-	LIST_INIT(&ahc->pending_scbs);
-	ahc->channel = 'A';
-	ahc->seqctl = FASTMODE;
-	for (i = 0; i < AHC_NUM_TARGETS; i++)
-		TAILQ_INIT(&ahc->untagged_queues[i]);
-
-	/*
-	 * SCSI_IS_SCSIBUS_B() must returns false until sc_channel_b
-	 * has been properly initialized. XXX Breaks if >254 scsi buses.
-	 */
-	ahc->sc_channel_b.scsibus = 0xff;
-
-	ahc->dev_softc = pa;
-
-	ahc_set_name(ahc, ahc->sc_dev.dv_xname);
+	ahc_set_name(ahc, device_xname(&ahc->sc_dev));
 	ahc->parent_dmat = pa->pa_dmat;
 
+	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	entry = ahc_find_pci_device(pa->pa_id, subid, pa->pa_function);
 	if (entry == NULL)
 		return;
+	printf(": %s\n", entry->name);
 
 	/* Keep information about the PCI bus */
-	bd = malloc(sizeof (struct ahc_pci_busdata), M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
+	bd = malloc(sizeof (struct ahc_pci_busdata), M_DEVBUF, M_NOWAIT);
 	if (bd == NULL) {
 		printf("%s: unable to allocate bus-specific data\n",
 		    ahc_name(ahc));
 		return;
 	}
+	memset(bd, 0, sizeof(struct ahc_pci_busdata));
 
 	bd->pc = pa->pa_pc;
 	bd->tag = pa->pa_tag;
@@ -769,6 +810,8 @@ ahc_pci_attach(parent, self, aux)
 	bd->class = pa->pa_class;
 
 	ahc->bd = bd;
+
+	ahc->description = entry->name;
 
 	error = entry->setup(ahc);
 	if (error != 0)
@@ -783,18 +826,19 @@ ahc_pci_attach(parent, self, aux)
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
 		memh_valid = (pci_mapreg_map(pa, AHC_PCI_MEMADDR,
-					     memtype, 0, &memt, &memh, NULL, NULL, 0) == 0);
+					     memtype, 0, &memt, &memh, NULL, NULL) == 0);
 		break;
 	default:
 		memh_valid = 0;
 	}
-	if (memh_valid == 0)
 #endif
-		ioh_valid = (pci_mapreg_map(pa, AHC_PCI_IOADDR,
-		    PCI_MAPREG_TYPE_IO, 0, &iot, &ioh, NULL, NULL, 0) == 0);
+	ioh_valid = (pci_mapreg_map(pa, AHC_PCI_IOADDR,
+				    PCI_MAPREG_TYPE_IO, 0, &iot,
+				    &ioh, NULL, NULL) == 0);
 #if 0
-	printf("%s: mem mapping: memt 0x%x, memh 0x%x, iot 0x%x, ioh 0x%lx\n",
-	       ahc_name(ahc), memt, (u_int32_t)memh, (u_int32_t)iot, ioh);
+	printf("%s: bus info: memt 0x%lx, memh 0x%lx, iot 0x%lx, ioh 0x%lx\n",
+	    ahc_name(ahc), (u_long)memt, (u_long)memh, (u_long)iot,
+	    (u_long)ioh);
 #endif
 
 	if (ioh_valid) {
@@ -842,11 +886,15 @@ ahc_pci_attach(parent, self, aux)
 			       ahc_name(ahc));
 		devconfig |= DACEN;
 	}
-	
+
 	/* Ensure that pci error generation, a test feature, is disabled. */
 	devconfig |= PCIERRGENDIS;
 
 	pci_conf_write(pa->pa_pc, pa->pa_tag, DEVCONFIG, devconfig);
+
+	/* Ensure busmastering is enabled */
+	command |= PCI_COMMAND_MASTER_ENABLE;;
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 
 	/*
 	 * Disable PCI parity error reporting.  Users typically
@@ -854,12 +902,9 @@ ahc_pci_attach(parent, self, aux)
 	 * the parity timing wrong and thus generate lots of spurious
 	 * errors.
 	 */
-	if ((ahc->flags & AHC_DISABLE_PCI_PERR) != 0) {
-		command = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    PCI_COMMAND_STATUS_REG);
-		pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-		    command & ~PCI_COMMAND_PARITY_ENABLE);
-	}
+	if ((ahc->flags & AHC_DISABLE_PCI_PERR) != 0)
+	  command &= ~PCI_COMMAND_PARITY_ENABLE;
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 
 	/* On all PCI adapters, we allow SCB paging */
 	ahc->flags |= AHC_PAGESCBS;
@@ -868,7 +913,6 @@ ahc_pci_attach(parent, self, aux)
 		goto error_out;
 
 	ahc->bus_intr = ahc_pci_intr;
-	ahc->bus_chip_init = ahc_pci_chip_init;
 
 	/* Remember how the card was setup in case there is no SEEPROM */
 	if ((ahc_inb(ahc, HCNTRL) & POWRDN) == 0) {
@@ -885,7 +929,7 @@ ahc_pci_attach(parent, self, aux)
 		scsiseq = 0;
 	}
 
-	error = ahc_reset(ahc, /*reinit*/FALSE);
+	error = ahc_reset(ahc);
 	if (error != 0)
 		goto error_out;
 
@@ -910,17 +954,18 @@ ahc_pci_attach(parent, self, aux)
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	ahc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
-	    ahc_platform_intr, ahc, ahc->sc_dev.dv_xname);
+	ahc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO, ahc_intr, ahc);
 	if (ahc->ih == NULL) {
-		printf(": couldn't establish interrupt");
+		aprint_error_dev(&ahc->sc_dev,
+		    "couldn't establish interrupt\n");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		ahc_free(ahc);
 		return;
-	} else
-		printf(": %s\n", intrstr ? intrstr : "?");
+	}
+	if (intrstr != NULL)
+		printf("%s: interrupting at %s\n", ahc_name(ahc), intrstr);
 
 	dscommand0 = ahc_inb(ahc, DSCOMMAND0);
 	dscommand0 |= MPARCKEN|CACHETHEN;
@@ -958,20 +1003,28 @@ ahc_pci_attach(parent, self, aux)
 	/*
 	 * We cannot perform ULTRA speeds without the presence
 	 * of the external precision resistor.
+	 * Allow override for the SGI O2 though, which has two onboard ahc
+	 * that fail here but are perfectly capable of ultra speeds.
 	 */
-	if ((ahc->features & AHC_ULTRA) != 0) {
-		uint32_t devconfig;
+	override_ultra = FALSE;
+	prop_dictionary_get_bool(device_properties(self),
+	    "aic7xxx-override-ultra", &override_ultra);
 
-		devconfig = pci_conf_read(pa->pa_pc, pa->pa_tag, DEVCONFIG);
-		if ((devconfig & REXTVALID) == 0)
+	if (((ahc->features & AHC_ULTRA) != 0) && (!override_ultra)) {
+		uint32_t dvconfig;
+
+		dvconfig = pci_conf_read(pa->pa_pc, pa->pa_tag, DEVCONFIG);
+		if ((dvconfig & REXTVALID) == 0)
 			ahc->features &= ~AHC_ULTRA;
 	}
 
-	ahc->seep_config = malloc(sizeof(*ahc->seep_config), M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
+	ahc->seep_config = malloc(sizeof(*ahc->seep_config),
+				  M_DEVBUF, M_NOWAIT);
 	if (ahc->seep_config == NULL)
 		goto error_out;
-	
+
+	memset(ahc->seep_config, 0, sizeof(*ahc->seep_config));
+
 	/* See if we have a SEEPROM and perform auto-term */
 	ahc_check_extport(ahc, &sxfrctl1);
 
@@ -996,9 +1049,27 @@ ahc_pci_attach(parent, self, aux)
 		/* See if someone else set us up already */
 		if ((ahc->flags & AHC_NO_BIOS_INIT) == 0
 		 && scsiseq != 0) {
+			prop_bool_t usetd;
+
 			printf("%s: Using left over BIOS settings\n",
 				ahc_name(ahc));
 			ahc->flags &= ~AHC_USEDEFAULTS;
+			/*
+			 * Ignore target device settings and use default
+			 * if BIOS initializes chip's SRAM with some
+			 * conservative settings (async, no tagged
+			 * queuing etc.) and machine dependent device
+			 * property is set.
+			 */ 
+			usetd = prop_dictionary_get(
+					device_properties(&ahc->sc_dev),
+					"aic7xxx-use-target-defaults");
+			if (usetd != NULL) {
+				KASSERT(prop_object_type(usetd) ==
+					PROP_TYPE_BOOL);
+				if (prop_bool_true(usetd))
+					ahc->flags |= AHC_USETARGETDEFAULTS;
+			}
 			ahc->flags |= AHC_BIOS_ENABLED;
 		} else {
 			/*
@@ -1027,39 +1098,10 @@ ahc_pci_attach(parent, self, aux)
 	if ((sxfrctl1 & STPWEN) != 0)
 		ahc->flags |= AHC_TERM_ENB_A;
 
-	/*
-	 * Save chip register configuration data for chip resets
-	 * that occur during runtime and resume events.
-	 */
-	ahc->bus_softc.pci_softc.devconfig =
-	    pci_conf_read(pa->pa_pc, pa->pa_tag, DEVCONFIG);
-	ahc->bus_softc.pci_softc.command =
-	    pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	ahc->bus_softc.pci_softc.csize_lattime =
-	    pci_conf_read(pa->pa_pc, pa->pa_tag, CSIZE_LATTIME);
-	ahc->bus_softc.pci_softc.dscommand0 = ahc_inb(ahc, DSCOMMAND0);
-	ahc->bus_softc.pci_softc.dspcistatus = ahc_inb(ahc, DSPCISTATUS);
-	if ((ahc->features & AHC_DT) != 0) {
-		u_int sfunct;
-
-		sfunct = ahc_inb(ahc, SFUNCT) & ~ALT_MODE;
-		ahc_outb(ahc, SFUNCT, sfunct | ALT_MODE);
-		ahc->bus_softc.pci_softc.optionmode = ahc_inb(ahc, OPTIONMODE);
-		ahc->bus_softc.pci_softc.targcrccnt = ahc_inw(ahc, TARGCRCCNT);
-		ahc_outb(ahc, SFUNCT, sfunct);
-		ahc->bus_softc.pci_softc.crccontrol1 =
-		    ahc_inb(ahc, CRCCONTROL1);
-	}
-	if ((ahc->features & AHC_MULTI_FUNC) != 0)
-		ahc->bus_softc.pci_softc.scbbaddr = ahc_inb(ahc, SCBBADDR);
-
-	if ((ahc->features & AHC_ULTRA2) != 0)
-		ahc->bus_softc.pci_softc.dff_thrsh = ahc_inb(ahc, DFF_THRSH);
-
-	/* Core initialization */
 	if (ahc_init(ahc))
 		goto error_out;
 
+	pmf_device_register(self, ahc_pci_suspend, ahc_pci_resume);
 	ahc_attach(ahc);
 
 	return;
@@ -1068,6 +1110,38 @@ ahc_pci_attach(parent, self, aux)
 	ahc_free(ahc);
 	return;
 }
+
+/*
+ * XXX we should call the real suspend and resume functions here
+ * but for some reason ahc_suspend() panics on shutdown
+ */
+
+static bool
+ahc_pci_suspend(device_t dev PMF_FN_ARGS)
+{
+	struct ahc_softc *sc = device_private(dev);
+#if 0
+	return (ahc_suspend(sc) == 0);
+#else
+	ahc_shutdown(sc);
+	return true;
+#endif
+}
+
+static bool
+ahc_pci_resume(device_t dev PMF_FN_ARGS)
+{
+#if 0
+	struct ahc_softc *sc = device_private(dev);
+
+	return (ahc_resume(sc) == 0);
+#else
+	return true;
+#endif
+}
+
+CFATTACH_DECL(ahc_pci, sizeof(struct ahc_softc),
+    ahc_pci_probe, ahc_pci_attach, NULL, NULL);
 
 static int
 ahc_9005_subdevinfo_valid(uint16_t device, uint16_t vendor,
@@ -1216,7 +1290,7 @@ ahc_probe_ext_scbram(struct ahc_softc *ahc)
 	fast = FALSE;
 	large = FALSE;
 	num_scbs = 0;
-	
+
 	if (ahc_ext_scbram_present(ahc) == 0)
 		goto done;
 
@@ -1291,7 +1365,7 @@ done:
 	ahc_outb(ahc, CLRINT, CLRBRKADRINT);
 	if (1/*bootverbose*/ && enable) {
 		printf("%s: External SRAM, %s access%s, %dbytes/SCB\n",
-		       ahc_name(ahc), fast ? "fast" : "slow", 
+		       ahc_name(ahc), fast ? "fast" : "slow",
 		       pcheck ? ", parity checking enabled" : "",
 		       large ? 64 : 32);
 	}
@@ -1303,7 +1377,7 @@ done:
  * Perform some simple tests that should catch situations where
  * our registers are invalidly mapped.
  */
-int
+static int
 ahc_pci_test_register_access(struct ahc_softc *ahc)
 {
 	int	 error;
@@ -1358,7 +1432,8 @@ ahc_pci_test_register_access(struct ahc_softc *ahc)
 
 fail:
 	/* Silently clear any latched errors. */
-	status1 = pci_conf_read(ahc->bd->pc, ahc->bd->tag, PCI_COMMAND_STATUS_REG + 1);
+	status1 = pci_conf_read(ahc->bd->pc, ahc->bd->tag,
+	    PCI_COMMAND_STATUS_REG + 1);
 	ahc_pci_write_config(ahc->dev_softc, PCIR_STATUS + 1,
 			     status1, /*bytes*/1);
 	ahc_outb(ahc, CLRINT, CLRPARERR);
@@ -1368,7 +1443,7 @@ fail:
 }
 #endif
 
-void
+static void
 ahc_pci_intr(struct ahc_softc *ahc)
 {
 	u_int error;
@@ -1378,7 +1453,8 @@ ahc_pci_intr(struct ahc_softc *ahc)
 	if ((error & PCIERRSTAT) == 0)
 		return;
 
-	status1 = pci_conf_read(ahc->bd->pc, ahc->bd->tag, PCI_COMMAND_STATUS_REG);
+	status1 = pci_conf_read(ahc->bd->pc, ahc->bd->tag,
+	    PCI_COMMAND_STATUS_REG);
 
 	printf("%s: PCI error Interrupt at seqaddr = 0x%x\n",
 	      ahc_name(ahc),
@@ -1406,41 +1482,17 @@ ahc_pci_intr(struct ahc_softc *ahc)
 	}
 
 	/* Clear latched errors. */
-	pci_conf_write(ahc->bd->pc, ahc->bd->tag,  PCI_COMMAND_STATUS_REG, status1);
+	pci_conf_write(ahc->bd->pc, ahc->bd->tag,  PCI_COMMAND_STATUS_REG,
+	    status1);
 
 	if ((status1 & (DPE|SSE|RMA|RTA|STA|DPR)) == 0) {
 		printf("%s: Latched PCIERR interrupt with "
-		       "no status bits set\n", ahc_name(ahc)); 
+		       "no status bits set\n", ahc_name(ahc));
 	} else {
 		ahc_outb(ahc, CLRINT, CLRPARERR);
 	}
 
 	ahc_unpause(ahc);
-}
-
-static int
-ahc_pci_chip_init(struct ahc_softc *ahc)
-{
-	ahc_outb(ahc, DSCOMMAND0, ahc->bus_softc.pci_softc.dscommand0);
-	ahc_outb(ahc, DSPCISTATUS, ahc->bus_softc.pci_softc.dspcistatus);
-	if ((ahc->features & AHC_DT) != 0) {
-		u_int sfunct;
-
-		sfunct = ahc_inb(ahc, SFUNCT) & ~ALT_MODE;
-		ahc_outb(ahc, SFUNCT, sfunct | ALT_MODE);
-		ahc_outb(ahc, OPTIONMODE, ahc->bus_softc.pci_softc.optionmode);
-		ahc_outw(ahc, TARGCRCCNT, ahc->bus_softc.pci_softc.targcrccnt);
-		ahc_outb(ahc, SFUNCT, sfunct);
-		ahc_outb(ahc, CRCCONTROL1,
-			 ahc->bus_softc.pci_softc.crccontrol1);
-	}
-	if ((ahc->features & AHC_MULTI_FUNC) != 0)
-		ahc_outb(ahc, SCBBADDR, ahc->bus_softc.pci_softc.scbbaddr);
-
-	if ((ahc->features & AHC_ULTRA2) != 0)
-		ahc_outb(ahc, DFF_THRSH, ahc->bus_softc.pci_softc.dff_thrsh);
-
-	return (ahc_chip_init(ahc));
 }
 
 static int
@@ -1455,7 +1507,6 @@ ahc_aic785X_setup(struct ahc_softc *ahc)
 	rev = PCI_REVISION(ahc->bd->class);
 	if (rev >= 1)
 		ahc->bugs |= AHC_PCI_2_1_RETRY_BUG;
-	ahc->instruction_ram_size = 512;
 	return (0);
 }
 
@@ -1471,7 +1522,6 @@ ahc_aic7860_setup(struct ahc_softc *ahc)
 	rev = PCI_REVISION(ahc->bd->class);
 	if (rev >= 1)
 		ahc->bugs |= AHC_PCI_2_1_RETRY_BUG;
-	ahc->instruction_ram_size = 512;
 	return (0);
 }
 
@@ -1495,7 +1545,6 @@ ahc_aic7870_setup(struct ahc_softc *ahc)
 	ahc->chip = AHC_AIC7870;
 	ahc->features = AHC_AIC7870_FE;
 	ahc->bugs |= AHC_TMODE_WIDEODD_BUG|AHC_CACHETHEN_BUG|AHC_PCI_MWI_BUG;
-	ahc->instruction_ram_size = 512;
 	return (0);
 }
 
@@ -1547,7 +1596,6 @@ ahc_aic7880_setup(struct ahc_softc *ahc)
 	} else {
 		ahc->bugs |= AHC_CACHETHEN_BUG|AHC_PCI_MWI_BUG;
 	}
-	ahc->instruction_ram_size = 512;
 	return (0);
 }
 
@@ -1593,7 +1641,6 @@ ahc_aic7890_setup(struct ahc_softc *ahc)
 	rev = PCI_REVISION(ahc->bd->class);
 	if (rev == 0)
 		ahc->bugs |= AHC_AUTOFLUSH_BUG|AHC_CACHETHEN_BUG;
-	ahc->instruction_ram_size = 768;
 	return (0);
 }
 
@@ -1606,7 +1653,6 @@ ahc_aic7892_setup(struct ahc_softc *ahc)
 	ahc->features = AHC_AIC7892_FE;
 	ahc->flags |= AHC_NEWEEPROM_FMT;
 	ahc->bugs |= AHC_SCBCHAN_UPLOAD_BUG;
-	ahc->instruction_ram_size = 1024;
 	return (0);
 }
 
@@ -1635,9 +1681,11 @@ ahc_aic7895_setup(struct ahc_softc *ahc)
 		 * we have.  Disabling MWI reduces performance, so
 		 * turn it on again.
 		 */
-		command = pci_conf_read(ahc->bd->pc, ahc->bd->tag, PCI_COMMAND_STATUS_REG);
+		command = pci_conf_read(ahc->bd->pc, ahc->bd->tag,
+		    PCI_COMMAND_STATUS_REG);
 		command |=  PCI_COMMAND_INVALIDATE_ENABLE;
-		pci_conf_write(ahc->bd->pc, ahc->bd->tag, PCI_COMMAND_STATUS_REG, command);
+		pci_conf_write(ahc->bd->pc, ahc->bd->tag,
+		    PCI_COMMAND_STATUS_REG, command);
 		ahc->bugs |= AHC_PCI_MWI_BUG;
 	}
 	/*
@@ -1660,7 +1708,6 @@ ahc_aic7895_setup(struct ahc_softc *ahc)
 	pci_conf_write(ahc->bd->pc, ahc->bd->tag, DEVCONFIG, devconfig);
 #endif
 	ahc->flags |= AHC_NEWEEPROM_FMT;
-	ahc->instruction_ram_size = 512;
 	return (0);
 }
 
@@ -1672,7 +1719,6 @@ ahc_aic7896_setup(struct ahc_softc *ahc)
 	ahc->features = AHC_AIC7896_FE;
 	ahc->flags |= AHC_NEWEEPROM_FMT;
 	ahc->bugs |= AHC_CACHETHEN_DIS_BUG;
-	ahc->instruction_ram_size = 768;
 	return (0);
 }
 
@@ -1684,7 +1730,6 @@ ahc_aic7899_setup(struct ahc_softc *ahc)
 	ahc->features = AHC_AIC7899_FE;
 	ahc->flags |= AHC_NEWEEPROM_FMT;
 	ahc->bugs |= AHC_SCBCHAN_UPLOAD_BUG;
-	ahc->instruction_ram_size = 1024;
 	return (0);
 }
 
@@ -1703,7 +1748,7 @@ ahc_aha29160C_setup(struct ahc_softc *ahc)
 static int
 ahc_raid_setup(struct ahc_softc *ahc)
 {
-	printf("RAID functionality unsupported\n");
+	aprint_normal_dev(&ahc->sc_dev, "RAID functionality unsupported\n");
 	return (ENXIO);
 }
 

@@ -1,4 +1,5 @@
-/*	$OpenBSD: if_iwnvar.h,v 1.2 2007/11/19 19:34:25 damien Exp $	*/
+/*	$NetBSD: if_iwnvar.h,v 1.4 2008/08/18 21:19:22 cube Exp $	*/
+/*	OpenBSD: if_iwnvar.h,v 1.2 2007/11/19 19:34:25 damien Exp	*/
 
 /*-
  * Copyright (c) 2007
@@ -30,11 +31,11 @@ struct iwn_rx_radiotap_header {
 
 #define IWN_RX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_TSFT) |				\
-	 (1 << IEEE80211_RADIOTAP_FLAGS) |				\
-	 (1 << IEEE80211_RADIOTAP_RATE) |				\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_DBM_ANTSIGNAL) |			\
-	 (1 << IEEE80211_RADIOTAP_DBM_ANTNOISE))
+	    (1 << IEEE80211_RADIOTAP_FLAGS) |				\
+	    (1 << IEEE80211_RADIOTAP_RATE) |				\
+	    (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
+	    (1 << IEEE80211_RADIOTAP_DBM_ANTSIGNAL) |			\
+	    (1 << IEEE80211_RADIOTAP_DBM_ANTNOISE))
 
 struct iwn_tx_radiotap_header {
 	struct ieee80211_radiotap_header wt_ihdr;
@@ -47,16 +48,15 @@ struct iwn_tx_radiotap_header {
 
 #define IWN_TX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
-	 (1 << IEEE80211_RADIOTAP_RATE) |				\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_HWQUEUE))
+	    (1 << IEEE80211_RADIOTAP_RATE) |				\
+	    (1 << IEEE80211_RADIOTAP_CHANNEL))
 
 struct iwn_dma_info {
 	bus_dma_tag_t		tag;
 	bus_dmamap_t		map;
 	bus_dma_segment_t	seg;
 	bus_addr_t		paddr;
-	caddr_t			vaddr;
+	void *			vaddr;
 	bus_size_t		size;
 };
 
@@ -71,9 +71,10 @@ struct iwn_tx_ring {
 	struct iwn_dma_info	cmd_dma;
 	struct iwn_tx_desc	*desc;
 	struct iwn_tx_cmd	*cmd;
-	struct iwn_tx_data	data[IWN_TX_RING_COUNT];
+	struct iwn_tx_data	*data;
 	int			qid;
 	int			queued;
+	int			count;
 	int			cur;
 };
 
@@ -83,7 +84,7 @@ struct iwn_softc;
 
 struct iwn_rbuf {
 	struct iwn_softc	*sc;
-	caddr_t			vaddr;
+	void *			vaddr;
 	bus_addr_t		paddr;
 	SLIST_ENTRY(iwn_rbuf)	next;
 };
@@ -99,6 +100,8 @@ struct iwn_rx_ring {
 	struct iwn_rx_data	data[IWN_RX_RING_COUNT];
 	struct iwn_rbuf		rbuf[IWN_RBUF_COUNT];
 	SLIST_HEAD(, iwn_rbuf)	freelist;
+	kmutex_t		freelist_mtx;
+	int			nb_free_entries;
 	int			cur;
 };
 
@@ -141,11 +144,11 @@ struct iwn_calib_state {
 };
 
 struct iwn_softc {
-	struct device		sc_dev;
-
+	device_t			sc_dev;
+	struct ethercom	 	sc_ec;
 	struct ieee80211com	sc_ic;
 	int			(*sc_newstate)(struct ieee80211com *,
-				    enum ieee80211_state, int);
+	    enum ieee80211_state, int);
 
 	struct ieee80211_amrr	amrr;
 
@@ -172,9 +175,7 @@ struct iwn_softc {
 	pcitag_t		sc_pcitag;
 	bus_size_t		sc_sz;
 
-	struct ksensordev	sensordev;
-	struct ksensor		sensor;
-	struct timeout		calib_to;
+	struct callout calib_to;
 	int			calib_cnt;
 	struct iwn_calib_state	calib;
 
@@ -194,10 +195,9 @@ struct iwn_softc {
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
 
 	int			sc_tx_timer;
-	void			*powerhook;
 
 #if NBPFILTER > 0
-	caddr_t			sc_drvbpf;
+	void *			sc_drvbpf;
 
 	union {
 		struct iwn_rx_radiotap_header th;
@@ -213,4 +213,6 @@ struct iwn_softc {
 #define sc_txtap	sc_txtapu.th
 	int			sc_txtap_len;
 #endif
+
+	bool		is_scanning;
 };

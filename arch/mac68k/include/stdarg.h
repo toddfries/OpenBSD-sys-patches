@@ -1,9 +1,3 @@
-/*	$OpenBSD: stdarg.h,v 1.3 1997/11/30 06:10:35 gene Exp $	*/
-/*	$NetBSD: stdarg.h,v 1.5 1994/10/26 08:46:48 cgd Exp $	*/
-
-#ifndef _MAC68K_STDARG_H_
-#define _MAC68K_STDARG_H_
+/*	$NetBSD: stdarg.h,v 1.6 1999/01/22 14:12:07 mycroft Exp $	*/
 
 #include <m68k/stdarg.h>
-
-#endif

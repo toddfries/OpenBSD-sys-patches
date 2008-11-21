@@ -1,4 +1,4 @@
-/* $NetBSD: xenbus_probe.c,v 1.14 2006/09/29 14:36:30 christos Exp $ */
+/* $NetBSD: xenbus_probe.c,v 1.26 2008/10/29 13:53:15 cegger Exp $ */
 /******************************************************************************
  * Talks to Xen Store to figure out what devices we have.
  *
@@ -29,11 +29,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xenbus_probe.c,v 1.14 2006/09/29 14:36:30 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xenbus_probe.c,v 1.26 2008/10/29 13:53:15 cegger Exp $");
 
 #if 0
 #define DPRINTK(fmt, args...) \
-    printf("xenbus_probe (%s:%d) " fmt ".\n", __FUNCTION__, __LINE__, ##args)
+    printf("xenbus_probe (%s:%d) " fmt ".\n", __func__, __LINE__, ##args)
 #else
 #define DPRINTK(fmt, args...) ((void)0)
 #endif
@@ -49,10 +49,11 @@ __KERNEL_RCSID(0, "$NetBSD: xenbus_probe.c,v 1.14 2006/09/29 14:36:30 christos E
 
 #include <machine/stdarg.h>
 
-#include <machine/hypervisor.h>
-#include <machine/xenbus.h>
-#include <machine/evtchn.h>
-#include <machine/shutdown_xenbus.h>
+#include <xen/xen.h>	/* for xendomain_is_dom0() */
+#include <xen/hypervisor.h>
+#include <xen/xenbus.h>
+#include <xen/evtchn.h>
+#include <xen/shutdown_xenbus.h>
 
 #include "xenbus_comms.h"
 
@@ -60,26 +61,25 @@ extern struct semaphore xenwatch_mutex;
 
 #define streq(a, b) (strcmp((a), (b)) == 0)
 
-static int  xenbus_match(struct device *, struct cfdata *, void *);
-static void xenbus_attach(struct device *, struct device *, void *);
+static int  xenbus_match(device_t, cfdata_t, void *);
+static void xenbus_attach(device_t, device_t, void *);
 static int  xenbus_print(void *, const char *);
 
-static void xenbus_kthread_create(void *);
 static void xenbus_probe_init(void *);
 
 static struct xenbus_device *xenbus_lookup_device_path(const char *);
 
-CFATTACH_DECL(xenbus, sizeof(struct device), xenbus_match, xenbus_attach,
+CFATTACH_DECL_NEW(xenbus, 0, xenbus_match, xenbus_attach,
     NULL, NULL);
 
-struct device *xenbus_sc;
+device_t xenbus_dev;
 
 SLIST_HEAD(, xenbus_device) xenbus_device_list;
 SLIST_HEAD(, xenbus_backend_driver) xenbus_backend_driver_list =
 	SLIST_HEAD_INITIALIZER(xenbus_backend_driver);
 
 int
-xenbus_match(struct device *parent, struct cfdata *match, void *aux)
+xenbus_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct xenbus_attach_args *xa = (struct xenbus_attach_args *)aux;
 
@@ -89,28 +89,25 @@ xenbus_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 static void
-xenbus_attach(struct device *parent, struct device *self, void *aux)
+xenbus_attach(device_t parent, device_t self, void *aux)
 {
+	int err;
+
 	aprint_normal(": Xen Virtual Bus Interface\n");
-	xenbus_sc = self;
+	xenbus_dev = self;
 	config_pending_incr();
-	kthread_create(xenbus_kthread_create, NULL);
+
+	err = kthread_create(PRI_NONE, 0, NULL, xenbus_probe_init, NULL,
+	    NULL, "xenbus_probe");
+	if (err)
+		aprint_error_dev(xenbus_dev,
+				"kthread_create(xenbus_probe): %d\n", err);
 }
 
 void
 xenbus_backend_register(struct xenbus_backend_driver *xbakd)
 {
 	SLIST_INSERT_HEAD(&xenbus_backend_driver_list, xbakd, xbakd_entries);
-}
-
-void
-xenbus_kthread_create(void *unused)
-{
-	struct proc *p;
-	int err;
-	err = kthread_create1(xenbus_probe_init, NULL, &p, "xenbus_probe");
-	if (err)
-		printf("kthread_create1(xenbus_probe): %d\n", err);
 }
 
 static int
@@ -233,7 +230,7 @@ otherend_changed(struct xenbus_watch *watch,
 			    DETACH_FORCE);
 			if (error) {
 				printf("could not detach %s: %d\n",
-				    xdev->xbusd_u.f.f_dev->dv_xname, error);
+				    device_xname(xdev->xbusd_u.f.f_dev), error);
 				return;
 			}
 		}
@@ -350,7 +347,7 @@ xenbus_probe_device_type(const char *path, const char *type,
 				    "for %s (%d)\n", xbusd->xbusd_path, err);
 				break;
 			}
-			xbusd->xbusd_u.f.f_dev = config_found_ia(xenbus_sc,
+			xbusd->xbusd_u.f.f_dev = config_found_ia(xenbus_dev,
 			    "xenbus", &xa, xenbus_print);
 			if (xbusd->xbusd_u.f.f_dev == NULL) {
 				free(xbusd, M_DEVBUF);
@@ -516,7 +513,9 @@ xenbus_probe(void *unused)
 static void
 xenbus_probe_init(void *unused)
 {
-	int err = 0, dom0;
+	int err = 0;
+	bool dom0;
+	vaddr_t page = 0;
 
 	DPRINTK("");
 
@@ -525,13 +524,11 @@ xenbus_probe_init(void *unused)
 	/*
 	** Domain0 doesn't have a store_evtchn or store_mfn yet.
 	*/
-	dom0 = (xen_start_info.store_evtchn == 0);
+	dom0 = xendomain_is_dom0();
 	if (dom0) {
 #if defined(DOM0OPS)
-		vaddr_t page;
 		paddr_t ma;
-		evtchn_op_t op = { 0 };
-		int ret;
+		evtchn_op_t op = { .cmd = 0 };
 
 		/* Allocate page. */
 		page = uvm_km_alloc(kernel_map, PAGE_SIZE, 0,
@@ -548,26 +545,33 @@ xenbus_probe_init(void *unused)
 		op.u.alloc_unbound.dom        = DOMID_SELF;
 		op.u.alloc_unbound.remote_dom = 0; 
 
-		ret = HYPERVISOR_event_channel_op(&op);
-		if (ret)
-			panic("can't register xenstore event");
+		err = HYPERVISOR_event_channel_op(&op);
+		if (err) {
+			aprint_error_dev(xenbus_dev,
+				"can't register xenstore event\n");
+			goto err0;
+		}
+		
 		xen_start_info.store_evtchn = op.u.alloc_unbound.port;
 
 		/* And finally publish the above info in /kern/xen */
 		xenbus_kernfs_init();
+
+		DELAY(1000);
 #else /* DOM0OPS */
-		return ; /* can't get a working xenstore in this case */
+		kthread_exit(0); /* can't get a working xenstore in this case */
 #endif /* DOM0OPS */
 	}
 
 	/* register event handler */
-	xb_init_comms((struct device *)xenbus_sc);
+	xb_init_comms(xenbus_dev);
 
 	/* Initialize the interface to xenstore. */
-	err = xs_init(); 
+	err = xs_init(xenbus_dev); 
 	if (err) {
-		printf("XENBUS: Error initializing xenstore comms: %i\n", err);
-		kthread_exit(err);
+		aprint_error_dev(xenbus_dev,
+				"Error initializing xenstore comms: %i\n", err);
+		goto err0;
 	}
 
 	if (!dom0) {
@@ -589,6 +593,12 @@ xenbus_probe_init(void *unused)
 	}
 #endif
 	kthread_exit(0);
+
+err0:
+	if (page)
+		uvm_km_free(kernel_map, page, PAGE_SIZE,
+				UVM_KMF_ZERO | UVM_KMF_WIRED);
+	kthread_exit(err);
 }
 
 /*

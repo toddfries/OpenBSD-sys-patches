@@ -1,5 +1,5 @@
 /*	$OpenBSD: auxiovar.h,v 1.7 2005/03/09 18:41:48 miod Exp $	*/
-/*	$NetBSD: auxiovar.h,v 1.4 2000/04/15 03:08:13 mrg Exp $	*/
+/*	$NetBSD: auxiovar.h,v 1.7 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 2000 Matthew R. Green
@@ -13,8 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,31 +26,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-/*
- * on sun4u, auxio exists with one register (LED) on the sbus, and 5
- * registers on the ebus2 (pci) (LED, PCIMODE, FREQUENCY, SCSI
- * OSCILLATOR, and TEMP SENSE.
- *
- * clients of the auxio registers (eg, blinken lights, or the sbus
- * floppy) should search in auxio_cd for their matching auxio register
- * (to deal with multiple auxio's that may appear.)
- */
-
-struct auxio_softc {
-	struct device		sc_dev;
-	bus_space_tag_t		sc_tag;
-	bus_space_handle_t	sc_led;
-	bus_space_handle_t	sc_pci;
-	bus_space_handle_t	sc_scsi;
-	bus_space_handle_t	sc_freq;
-	bus_space_handle_t	sc_temp;
-	int			sc_flags;
-#define	AUXIO_LEDONLY		0x1
-#define	AUXIO_EBUS		0x2
-#define	AUXIO_SBUS		0x4
-	struct blink_led	sc_blink;
-};
 
 #ifndef _LOCORE
 int auxio_fd_control(u_int32_t);

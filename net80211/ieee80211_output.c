@@ -1,10 +1,7 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.59 2008/04/16 18:32:15 damien Exp $	*/
-/*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
-
+/*	$NetBSD: ieee80211_output.c,v 1.48 2008/06/19 23:13:10 dyoung Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
- * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
- * Copyright (c) 2007, 2008 Damien Bergamini
+ * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -18,6 +15,10 @@
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
+ * Alternatively, this software may be distributed under the terms of the
+ * GNU General Public License ("GPL") version 2 as published by the Free
+ * Software Foundation.
+ *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
@@ -30,130 +31,127 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+#ifdef __FreeBSD__
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_output.c,v 1.34 2005/08/10 16:22:29 sam Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_output.c,v 1.48 2008/06/19 23:13:10 dyoung Exp $");
+#endif
+
+#include "opt_inet.h"
+
+#ifdef __NetBSD__
 #include "bpfilter.h"
-#include "vlan.h"
+#endif /* __NetBSD__ */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/mbuf.h>
+#include <sys/systm.h> 
+#include <sys/mbuf.h>   
 #include <sys/kernel.h>
-#include <sys/socket.h>
-#include <sys/sockio.h>
 #include <sys/endian.h>
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
+#include <net/if_llc.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
+#include <net/if_ether.h>
 #include <net/if_llc.h>
+#include <net/if_vlanvar.h>
+
+#include <net80211/ieee80211_netbsd.h>
+#include <net80211/ieee80211_var.h>
+
+#if NBPFILTER > 0
 #include <net/bpf.h>
+#endif
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
+#include <netinet/in_var.h>
 #include <netinet/ip.h>
+#include <net/if_ether.h>
 #endif
 
-#if NVLAN > 0
-#include <net/if_types.h>
-#include <net/if_vlan_var.h>
+static int ieee80211_fragment(struct ieee80211com *, struct mbuf *,
+	u_int hdrsize, u_int ciphdrsize, u_int mtu);
+
+#ifdef IEEE80211_DEBUG
+/*
+ * Decide if an outbound management frame should be
+ * printed when debugging is enabled.  This filters some
+ * of the less interesting frames that come frequently
+ * (e.g. beacons).
+ */
+static __inline int
+doprint(struct ieee80211com *ic, int subtype)
+{
+	switch (subtype) {
+	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
+		return (ic->ic_opmode == IEEE80211_M_IBSS);
+	}
+	return 1;
+}
 #endif
-
-#include <net80211/ieee80211_var.h>
-
-enum	ieee80211_edca_ac ieee80211_up_to_ac(struct ieee80211com *, int);
-int	ieee80211_classify(struct ieee80211com *, struct mbuf *);
-int	ieee80211_mgmt_output(struct ifnet *, struct ieee80211_node *,
-	    struct mbuf *, int);
-u_int8_t *ieee80211_add_rsn_body(u_int8_t *, struct ieee80211com *,
-	    const struct ieee80211_node *, int);
-struct	mbuf *ieee80211_getmgmt(int, int, u_int);
-struct	mbuf *ieee80211_get_probe_req(struct ieee80211com *,
-	    struct ieee80211_node *);
-struct	mbuf *ieee80211_get_probe_resp(struct ieee80211com *,
-	    struct ieee80211_node *);
-struct	mbuf *ieee80211_get_auth(struct ieee80211com *,
-	    struct ieee80211_node *, u_int16_t, u_int16_t);
-struct	mbuf *ieee80211_get_deauth(struct ieee80211com *,
-	    struct ieee80211_node *, u_int16_t);
-struct	mbuf *ieee80211_get_assoc_req(struct ieee80211com *,
-	    struct ieee80211_node *, int);
-struct	mbuf *ieee80211_get_assoc_resp(struct ieee80211com *,
-	    struct ieee80211_node *, u_int16_t);
-struct	mbuf *ieee80211_get_disassoc(struct ieee80211com *,
-	    struct ieee80211_node *, u_int16_t);
-int	ieee80211_send_eapol_key(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *, const struct ieee80211_ptk *);
-u_int8_t *ieee80211_add_gtk_kde(u_int8_t *, struct ieee80211_node *,
-	    const struct ieee80211_key *);
-u_int8_t *ieee80211_add_pmkid_kde(u_int8_t *, const u_int8_t *);
-struct	mbuf *ieee80211_get_eapol_key(int, int, u_int);
-
 
 /*
- * IEEE 802.11 output routine. Normally this will directly call the
- * Ethernet output routine because 802.11 encapsulation is called
- * later by the driver. This function can be used to send raw frames
- * if the mbuf has been tagged with a 802.11 data link type.
+ * Set the direction field and address fields of an outgoing
+ * non-QoS frame.  Note this should be called early on in
+ * constructing a frame as it sets i_fc[1]; other bits can
+ * then be or'd in.
  */
-int
-ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
-    struct rtentry *rt)
+static void
+ieee80211_send_setup(struct ieee80211com *ic,
+	struct ieee80211_node *ni,
+	struct ieee80211_frame *wh,
+	int type,
+	const u_int8_t sa[IEEE80211_ADDR_LEN],
+	const u_int8_t da[IEEE80211_ADDR_LEN],
+	const u_int8_t bssid[IEEE80211_ADDR_LEN])
 {
-	u_int dlt = 0;
-	int s, error = 0;
-	struct m_tag *mtag;
+#define	WH4(wh)	((struct ieee80211_frame_addr4 *)wh)
 
-	/* Interface has to be up and running */
-	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
-	    (IFF_UP | IFF_RUNNING)) {
-		error = ENETDOWN;
-		goto bad;
-	}
-
-	/* Try to get the DLT from a mbuf tag */
-	if ((mtag = m_tag_find(m, PACKET_TAG_DLT, NULL)) != NULL) {
-		dlt = *(u_int *)(mtag + 1);
-
-		/* Fallback to ethernet for non-802.11 linktypes */
-		if (!(dlt == DLT_IEEE802_11 || dlt == DLT_IEEE802_11_RADIO))
-			goto fallback;
-
-		/*
-		 * Queue message on interface without adding any
-		 * further headers, and start output if interface not
-		 * yet active.
-		 */
-		s = splnet();
-		IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-		if (error) {
-			/* mbuf is already freed */
-			splx(s);
-			printf("%s: failed to queue raw tx frame\n",
-			    ifp->if_xname);
-			return (error);
+	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | type;
+	if ((type & IEEE80211_FC0_TYPE_MASK) == IEEE80211_FC0_TYPE_DATA) {
+		switch (ic->ic_opmode) {
+		case IEEE80211_M_STA:
+			wh->i_fc[1] = IEEE80211_FC1_DIR_TODS;
+			IEEE80211_ADDR_COPY(wh->i_addr1, bssid);
+			IEEE80211_ADDR_COPY(wh->i_addr2, sa);
+			IEEE80211_ADDR_COPY(wh->i_addr3, da);
+			break;
+		case IEEE80211_M_IBSS:
+		case IEEE80211_M_AHDEMO:
+			wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+			IEEE80211_ADDR_COPY(wh->i_addr1, da);
+			IEEE80211_ADDR_COPY(wh->i_addr2, sa);
+			IEEE80211_ADDR_COPY(wh->i_addr3, bssid);
+			break;
+		case IEEE80211_M_HOSTAP:
+			wh->i_fc[1] = IEEE80211_FC1_DIR_FROMDS;
+			IEEE80211_ADDR_COPY(wh->i_addr1, da);
+			IEEE80211_ADDR_COPY(wh->i_addr2, bssid);
+			IEEE80211_ADDR_COPY(wh->i_addr3, sa);
+			break;
+		case IEEE80211_M_MONITOR:	/* NB: to quiet compiler */
+			break;
 		}
-		ifp->if_obytes += m->m_pkthdr.len;
-		if (m->m_flags & M_MCAST)
-			ifp->if_omcasts++;
-		if ((ifp->if_flags & IFF_OACTIVE) == 0)
-			(*ifp->if_start)(ifp);
-		splx(s);
-
-		return (error);
+	} else {
+		wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+		IEEE80211_ADDR_COPY(wh->i_addr1, da);
+		IEEE80211_ADDR_COPY(wh->i_addr2, sa);
+		IEEE80211_ADDR_COPY(wh->i_addr3, bssid);
 	}
-
- fallback:
-	return (ether_output(ifp, m, dst, rt));
-
- bad:
-	if (m)
-		m_freem(m);
-	return (error);
+	*(u_int16_t *)&wh->i_dur[0] = 0;
+	/* NB: use non-QoS tid */
+	*(u_int16_t *)&wh->i_seq[0] =
+	    htole16(ni->ni_txseqs[0] << IEEE80211_SEQ_SEQ_SHIFT);
+	ni->ni_txseqs[0]++;
+#undef WH4
 }
 
 /*
@@ -163,375 +161,425 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
  * dispatched to the driver, then it is responsible for freeing the
  * reference (and potentially free'ing up any associated storage).
  */
-int
-ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
-    struct mbuf *m, int type)
+static int
+ieee80211_mgmt_output(struct ieee80211com *ic, struct ieee80211_node *ni,
+    struct mbuf *m, int type, int timer)
 {
-	struct ieee80211com *ic = (void *)ifp;
+	struct ifnet *ifp = ic->ic_ifp;
 	struct ieee80211_frame *wh;
 
-	if (ni == NULL)
-		panic("null node");
-	ni->ni_inact = 0;
+	IASSERT(ni != NULL, ("null node"));
 
 	/*
 	 * Yech, hack alert!  We want to pass the node down to the
-	 * driver's start routine.  We could stick this in an m_tag
-	 * and tack that on to the mbuf.  However that's rather
-	 * expensive to do for every frame so instead we stuff it in
-	 * the rcvif field since outbound frames do not (presently)
-	 * use this.
+	 * driver's start routine.  If we don't do so then the start
+	 * routine must immediately look it up again and that can
+	 * cause a lock order reversal if, for example, this frame
+	 * is being sent because the station is being timedout and
+	 * the frame being sent is a DEAUTH message.  We could stick
+	 * this in an m_tag and tack that on to the mbuf.  However
+	 * that's rather expensive to do for every frame so instead
+	 * we stuff it in the rcvif field since outbound frames do
+	 * not (presently) use this.
 	 */
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_DONTWAIT);
 	if (m == NULL)
 		return ENOMEM;
+#ifdef __FreeBSD__
+	KASSERT(m->m_pkthdr.rcvif == NULL, ("rcvif not null"));
+#endif
 	m->m_pkthdr.rcvif = (void *)ni;
 
 	wh = mtod(m, struct ieee80211_frame *);
-	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT | type;
-	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
-	*(u_int16_t *)&wh->i_dur[0] = 0;
-	*(u_int16_t *)&wh->i_seq[0] =
-	    htole16(ni->ni_txseq << IEEE80211_SEQ_SEQ_SHIFT);
-	ni->ni_txseq++;
-	IEEE80211_ADDR_COPY(wh->i_addr1, ni->ni_macaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
-
-	if (ifp->if_flags & IFF_DEBUG) {
-		/* avoid to print too many frames */
-		if (ic->ic_opmode == IEEE80211_M_IBSS ||
-#ifdef IEEE80211_DEBUG
-		    ieee80211_debug > 1 ||
-#endif
-		    (type & IEEE80211_FC0_SUBTYPE_MASK) !=
-		    IEEE80211_FC0_SUBTYPE_PROBE_RESP)
-			printf("%s: sending %s to %s on channel %u mode %s\n",
-			    ifp->if_xname,
-			    ieee80211_mgt_subtype_name[
-			    (type & IEEE80211_FC0_SUBTYPE_MASK)
-			    >> IEEE80211_FC0_SUBTYPE_SHIFT],
-			    ether_sprintf(ni->ni_macaddr),
-			    ieee80211_chan2ieee(ic, ni->ni_chan),
-			    ieee80211_phymode_name[
-			    ieee80211_chan2mode(ic, ni->ni_chan)]);
+	ieee80211_send_setup(ic, ni, wh, 
+		IEEE80211_FC0_TYPE_MGT | type,
+		ic->ic_myaddr, ni->ni_macaddr, ni->ni_bssid);
+	if ((m->m_flags & M_LINK0) != 0 && ni->ni_challenge != NULL) {
+		m->m_flags &= ~M_LINK0;
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_AUTH,
+			"[%s] encrypting frame (%s)\n",
+			ether_sprintf(wh->i_addr1), __func__);
+		wh->i_fc[1] |= IEEE80211_FC1_WEP;
 	}
-
+#ifdef IEEE80211_DEBUG
+	/* avoid printing too many frames */
+	if ((ieee80211_msg_debug(ic) && doprint(ic, type)) ||
+	    ieee80211_msg_dumppkts(ic)) {
+		printf("[%s] send %s on channel %u\n",
+		    ether_sprintf(wh->i_addr1),
+		    ieee80211_mgt_subtype_name[
+			(type & IEEE80211_FC0_SUBTYPE_MASK) >>
+				IEEE80211_FC0_SUBTYPE_SHIFT],
+		    ieee80211_chan2ieee(ic, ic->ic_curchan));
+	}
+#endif
+	IEEE80211_NODE_STAT(ni, tx_mgmt);
 	IF_ENQUEUE(&ic->ic_mgtq, m);
-	ifp->if_timer = 1;
+	if (timer) {
+		/*
+		 * Set the mgt frame timeout.
+		 */
+		ic->ic_mgt_timer = timer;
+		ifp->if_timer = 1;
+	}
 	(*ifp->if_start)(ifp);
 	return 0;
 }
 
-/*-
- * EDCA tables are computed using the following formulas:
- *
- * 1) EDCATable (non-AP QSTA)
- *
- * AC     CWmin 	   CWmax	   AIFSN  TXOP limit(ms)
- * -------------------------------------------------------------
- * AC_BK  aCWmin	   aCWmax	   7	  0
- * AC_BE  aCWmin	   aCWmax	   3	  0
- * AC_VI  (aCWmin+1)/2-1   aCWmin	   2	  agn=3.008 b=6.016 others=0
- * AC_VO  (aCWmin+1)/4-1   (aCWmin+1)/2-1  2	  agn=1.504 b=3.264 others=0
- *
- * 2) QAPEDCATable (QAP)
- *
- * AC     CWmin 	   CWmax	   AIFSN  TXOP limit(ms)
- * -------------------------------------------------------------
- * AC_BK  aCWmin	   aCWmax	   7	  0
- * AC_BE  aCWmin	   4*(aCWmin+1)-1  3	  0
- * AC_VI  (aCWmin+1)/2-1   aCWmin	   1	  agn=3.008 b=6.016 others=0
- * AC_VO  (aCWmin+1)/4-1   (aCWmin+1)/2-1  1	  agn=1.504 b=3.264 others=0
- *
- * and the following aCWmin/aCWmax values:
- *
- * PHY		aCWmin	aCWmax
- * ---------------------------
- * 11A		15	1023
- * 11B  	31	1023
- * 11G		15*	1023	(*) aCWmin(1)
- * FH		15	1023
- * Turbo A/G	7	1023	(Atheros proprietary mode)
- */
-static const struct ieee80211_edca_ac_params
-    ieee80211_edca_table[IEEE80211_MODE_MAX][EDCA_NUM_AC] = {
-	[IEEE80211_MODE_FH] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4, 10, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 2,   0 },
-		[EDCA_AC_VO] = { 2,  3, 2,   0 }
-	},
-	[IEEE80211_MODE_11B] = {
-		[EDCA_AC_BK] = { 5, 10, 7,   0 },
-		[EDCA_AC_BE] = { 5, 10, 3,   0 },
-		[EDCA_AC_VI] = { 4,  5, 2, 188 },
-		[EDCA_AC_VO] = { 3,  4, 2, 102 }
-	},
-	[IEEE80211_MODE_11A] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4, 10, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 2,  94 },
-		[EDCA_AC_VO] = { 2,  3, 2,  47 }
-	},
-	[IEEE80211_MODE_11G] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4, 10, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 2,  94 },
-		[EDCA_AC_VO] = { 2,  3, 2,  47 }
-	},
-	[IEEE80211_MODE_TURBO] = {
-		[EDCA_AC_BK] = { 3, 10, 7,   0 },
-		[EDCA_AC_BE] = { 3, 10, 2,   0 },
-		[EDCA_AC_VI] = { 2,  3, 2,  94 },
-		[EDCA_AC_VO] = { 2,  2, 1,  47 }
-	}
-};
-
-static const struct ieee80211_edca_ac_params
-    ieee80211_qap_edca_table[IEEE80211_MODE_MAX][EDCA_NUM_AC] = {
-	[IEEE80211_MODE_FH] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4,  6, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 1,   0 },
-		[EDCA_AC_VO] = { 2,  3, 1,   0 }
-	},
-	[IEEE80211_MODE_11B] = {
-		[EDCA_AC_BK] = { 5, 10, 7,   0 },
-		[EDCA_AC_BE] = { 5,  7, 3,   0 },
-		[EDCA_AC_VI] = { 4,  5, 1, 188 },
-		[EDCA_AC_VO] = { 3,  4, 1, 102 }
-	},
-	[IEEE80211_MODE_11A] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4,  6, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 1,  94 },
-		[EDCA_AC_VO] = { 2,  3, 1,  47 }
-	},
-	[IEEE80211_MODE_11G] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4,  6, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 1,  94 },
-		[EDCA_AC_VO] = { 2,  3, 1,  47 }
-	},
-	[IEEE80211_MODE_TURBO] = {
-		[EDCA_AC_BK] = { 3, 10, 7,   0 },
-		[EDCA_AC_BE] = { 3,  5, 2,   0 },
-		[EDCA_AC_VI] = { 2,  3, 1,  94 },
-		[EDCA_AC_VO] = { 2,  2, 1,  47 }
-	}
-};
-
 /*
- * Return the EDCA Access Category to be used for transmitting a frame with
- * user-priority `up'.
+ * Send a null data frame to the specified node.
+ *
+ * NB: the caller is assumed to have setup a node reference
+ *     for use; this is necessary to deal with a race condition
+ *     when probing for inactive stations.
  */
-enum ieee80211_edca_ac
-ieee80211_up_to_ac(struct ieee80211com *ic, int up)
+int
+ieee80211_send_nulldata(struct ieee80211_node *ni)
 {
-	/* IEEE Std 802.11e-2005, table 20i */
-	static const enum ieee80211_edca_ac up_to_ac[] = {
-		EDCA_AC_BE,	/* BE */
-		EDCA_AC_BK,	/* BK */
-		EDCA_AC_BK,	/* -- */
-		EDCA_AC_BE,	/* EE */
-		EDCA_AC_VI,	/* CL */
-		EDCA_AC_VI,	/* VI */
-		EDCA_AC_VO,	/* VO */
-		EDCA_AC_VO	/* NC */
-	};
-	enum ieee80211_edca_ac ac;
+	struct ieee80211com *ic = ni->ni_ic;
+	struct ifnet *ifp = ic->ic_ifp;
+	struct mbuf *m;
+	struct ieee80211_frame *wh;
 
-	ac = (up <= 7) ? up_to_ac[up] : EDCA_AC_BE;
+	MGETHDR(m, M_NOWAIT, MT_HEADER);
+	if (m == NULL) {
+		/* XXX debug msg */
+		ic->ic_stats.is_tx_nobuf++;
+		ieee80211_unref_node(&ni);
+		return ENOMEM;
+	}
+	m->m_pkthdr.rcvif = (void *) ni;
 
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP)
-		return ac;
+	wh = mtod(m, struct ieee80211_frame *);
+	ieee80211_send_setup(ic, ni, wh,
+		IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_NODATA,
+		ic->ic_myaddr, ni->ni_macaddr, ni->ni_bssid);
+	/* NB: power management bit is never sent by an AP */
+	if ((ni->ni_flags & IEEE80211_NODE_PWR_MGT) &&
+	    ic->ic_opmode != IEEE80211_M_HOSTAP)
+		wh->i_fc[1] |= IEEE80211_FC1_PWR_MGT;
+	m->m_len = m->m_pkthdr.len = sizeof(struct ieee80211_frame);
 
-	/*
-	 * We do not support the admission control procedure defined in
-	 * IEEE Std 802.11e-2005 section 9.9.3.1.2.  The spec says that
-	 * non-AP QSTAs that don't support this procedure shall use EDCA
-	 * parameters of a lower priority AC that does not require
-	 * admission control.
+	IEEE80211_NODE_STAT(ni, tx_data);
+
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_DEBUG | IEEE80211_MSG_DUMPPKTS,
+	    "[%s] send null data frame on channel %u, pwr mgt %s\n",
+	    ether_sprintf(ni->ni_macaddr),
+	    ieee80211_chan2ieee(ic, ic->ic_curchan),
+	    wh->i_fc[1] & IEEE80211_FC1_PWR_MGT ? "ena" : "dis");
+
+	IF_ENQUEUE(&ic->ic_mgtq, m);		/* cheat */
+	(*ifp->if_start)(ifp);
+
+	return 0;
+}
+
+/* 
+ * Assign priority to a frame based on any vlan tag assigned
+ * to the station and/or any Diffserv setting in an IP header.
+ * Finally, if an ACM policy is setup (in station mode) it's
+ * applied.
+ */
+int
+ieee80211_classify(struct ieee80211com *ic, struct mbuf *m, struct ieee80211_node *ni)
+{
+	int v_wme_ac, d_wme_ac, ac;
+#ifdef INET
+	struct ether_header *eh;
+#endif
+
+	if ((ni->ni_flags & IEEE80211_NODE_QOS) == 0) {
+		ac = WME_AC_BE;
+		goto done;
+	}
+
+	/* 
+	 * If node has a vlan tag then all traffic
+	 * to it must have a matching tag.
 	 */
-	while (ac != EDCA_AC_BK && ic->ic_edca_ac[ac].ac_acm) {
-		switch (ac) {
-		case EDCA_AC_BK:
-			/* can't get there */
+	v_wme_ac = 0;
+	if (ni->ni_vlan != 0) {
+		/* XXX used to check ec_nvlans. */
+		struct m_tag *mtag = m_tag_find(m, PACKET_TAG_VLAN, NULL);
+		if (mtag == NULL) {
+			IEEE80211_NODE_STAT(ni, tx_novlantag);
+			return 1;
+		}
+		if (EVL_VLANOFTAG(VLAN_TAG_VALUE(mtag)) !=
+		    EVL_VLANOFTAG(ni->ni_vlan)) {
+			IEEE80211_NODE_STAT(ni, tx_vlanmismatch);
+			return 1;
+		}
+		/* map vlan priority to AC */
+		switch (EVL_PRIOFTAG(ni->ni_vlan)) {
+		case 1:
+		case 2:
+			v_wme_ac = WME_AC_BK;
 			break;
-		case EDCA_AC_BE:
-			/* BE shouldn't require admission control */
-			ac = EDCA_AC_BK;
+		case 0:
+		case 3:
+			v_wme_ac = WME_AC_BE;
 			break;
-		case EDCA_AC_VI:
-			ac = EDCA_AC_BE;
+		case 4:
+		case 5:
+			v_wme_ac = WME_AC_VI;
 			break;
-		case EDCA_AC_VO:
-			ac = EDCA_AC_VI;
+		case 6:
+		case 7:
+			v_wme_ac = WME_AC_VO;
 			break;
 		}
 	}
-	return ac;
-}
 
-/*
- * Get mbuf's user-priority: if mbuf is not VLAN tagged, select user-priority
- * based on the DSCP (Differentiated Services Codepoint) field.
- */
-int
-ieee80211_classify(struct ieee80211com *ic, struct mbuf *m)
-{
-#ifdef INET
-	const struct ether_header *eh;
-#endif
-#if NVLAN > 0
-	if ((m->m_flags & M_PROTO1) == M_PROTO1 && m->m_pkthdr.rcvif != NULL) {
-		const struct ifvlan *ifv = m->m_pkthdr.rcvif->if_softc;
-
-		/* use VLAN 802.1D user-priority */
-		if (ifv->ifv_prio <= 7)
-			return ifv->ifv_prio;
-	}
-#endif
 #ifdef INET
 	eh = mtod(m, struct ether_header *);
 	if (eh->ether_type == htons(ETHERTYPE_IP)) {
-		const struct ip *ip = (const struct ip *)(eh + 1);
+		const struct ip *ip = (struct ip *)
+			(mtod(m, u_int8_t *) + sizeof (*eh));
 		/*
-		 * Map Differentiated Services Codepoint field (see RFC2474).
-		 * Preserves backward compatibility with IP Precedence field.
+		 * IP frame, map the TOS field.
 		 */
-		switch (ip->ip_tos & 0xfc) {
-		case IPTOS_PREC_PRIORITY:
-			return 2;
-		case IPTOS_PREC_IMMEDIATE:
-			return 1;
-		case IPTOS_PREC_FLASH:
-			return 3;
-		case IPTOS_PREC_FLASHOVERRIDE:
-			return 4;
-		case IPTOS_PREC_CRITIC_ECP:
-			return 5;
-		case IPTOS_PREC_INTERNETCONTROL:
-			return 6;
-		case IPTOS_PREC_NETCONTROL:
-			return 7;
+		switch (ip->ip_tos) {
+		case 0x08:
+		case 0x20:
+			d_wme_ac = WME_AC_BK;	/* background */
+			break;
+		case 0x28:
+		case 0xa0:
+			d_wme_ac = WME_AC_VI;	/* video */
+			break;
+		case 0x30:			/* voice */
+		case 0xe0:
+		case 0x88:			/* XXX UPSD */
+		case 0xb8:
+			d_wme_ac = WME_AC_VO;
+			break;
+		default:
+			d_wme_ac = WME_AC_BE;
+			break;
 		}
+	} else {
+#endif /* INET */
+		d_wme_ac = WME_AC_BE;
+#ifdef INET
 	}
 #endif
-	return 0;	/* default to Best-Effort */
+	/*
+	 * Use highest priority AC.
+	 */
+	if (v_wme_ac > d_wme_ac)
+		ac = v_wme_ac;
+	else
+		ac = d_wme_ac;
+
+	/*
+	 * Apply ACM policy.
+	 */
+	if (ic->ic_opmode == IEEE80211_M_STA) {
+		static const int acmap[4] = {
+			WME_AC_BK,	/* WME_AC_BE */
+			WME_AC_BK,	/* WME_AC_BK */
+			WME_AC_BE,	/* WME_AC_VI */
+			WME_AC_VI,	/* WME_AC_VO */
+		};
+		while (ac != WME_AC_BK &&
+		    ic->ic_wme.wme_wmeBssChanParams.cap_wmeParams[ac].wmep_acm)
+			ac = acmap[ac];
+	}
+done:
+	M_WME_SETAC(m, ac);
+	return 0;
 }
 
 /*
- * Encapsulate an outbound data frame.  The mbuf chain is updated and
- * a reference to the destination node is returned.  If an error is
- * encountered NULL is returned and the node reference will also be NULL.
- *
- * NB: The caller is responsible for free'ing a returned node reference.
- *     The convention is ic_bss is not reference counted; the caller must
- *     maintain that.
+ * Insure there is sufficient contiguous space to encapsulate the
+ * 802.11 data frame.  If room isn't already there, arrange for it.
+ * Drivers and cipher modules assume we have done the necessary work
+ * and fail rudely if they don't find the space they need.
+ */
+static struct mbuf *
+ieee80211_mbuf_adjust(struct ieee80211com *ic, int hdrsize,
+	struct ieee80211_key *key, struct mbuf *m)
+{
+#define	TO_BE_RECLAIMED	(sizeof(struct ether_header) - sizeof(struct llc))
+	int needed_space = hdrsize;
+	int wlen = 0;
+
+	if (key != NULL) {
+		/* XXX belongs in crypto code? */
+		needed_space += key->wk_cipher->ic_header;
+		/* XXX frags */
+	}
+	/*
+	 * We know we are called just before stripping an Ethernet
+	 * header and prepending an LLC header.  This means we know
+	 * there will be
+	 *	sizeof(struct ether_header) - sizeof(struct llc)
+	 * bytes recovered to which we need additional space for the
+	 * 802.11 header and any crypto header.
+	 */
+	/* XXX check trailing space and copy instead? */
+	if (M_LEADINGSPACE(m) < needed_space - TO_BE_RECLAIMED) {
+		struct mbuf *n = m_gethdr(M_NOWAIT, m->m_type);
+		if (n == NULL) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_OUTPUT,
+			    "%s: cannot expand storage\n", __func__);
+			ic->ic_stats.is_tx_nobuf++;
+			m_freem(m);
+			return NULL;
+		}
+		IASSERT(needed_space <= MHLEN,
+		    ("not enough room, need %u got %zu\n", needed_space, MHLEN));
+		/*
+		 * Setup new mbuf to have leading space to prepend the
+		 * 802.11 header and any crypto header bits that are
+		 * required (the latter are added when the driver calls
+		 * back to ieee80211_crypto_encap to do crypto encapsulation).
+		 */
+		/* NB: must be first 'cuz it clobbers m_data */
+		M_MOVE_PKTHDR(n, m);
+		n->m_len = 0;			/* NB: m_gethdr does not set */
+		n->m_data += needed_space;
+		/*
+		 * Pull up Ethernet header to create the expected layout.
+		 * We could use m_pullup but that's overkill (i.e. we don't
+		 * need the actual data) and it cannot fail so do it inline
+		 * for speed.
+		 */
+		/* NB: struct ether_header is known to be contiguous */
+		n->m_len += sizeof(struct ether_header);
+		m->m_len -= sizeof(struct ether_header);
+		m->m_data += sizeof(struct ether_header);
+		/*
+		 * Replace the head of the chain.
+		 */
+		n->m_next = m;
+		m = n;
+	} else {
+                /* We will overwrite the ethernet header in the
+                 * 802.11 encapsulation stage.  Make sure that it
+                 * is writable.
+		 */
+		wlen = sizeof(struct ether_header);
+	}
+
+	/*
+	 * If we're going to s/w encrypt the mbuf chain make sure it is
+	 * writable.
+	 */
+	if (key != NULL && (key->wk_flags & IEEE80211_KEY_SWCRYPT) != 0)
+		wlen = M_COPYALL;
+
+	if (wlen != 0 && m_makewritable(&m, 0, wlen, M_DONTWAIT) != 0) {
+		m_freem(m);
+		return NULL;
+	}
+	return m;
+#undef TO_BE_RECLAIMED
+}
+
+/*
+ * Return the transmit key to use in sending a unicast frame.
+ * If a unicast key is set we use that.  When no unicast key is set
+ * we fall back to the default transmit key.
+ */ 
+static __inline struct ieee80211_key *
+ieee80211_crypto_getucastkey(struct ieee80211com *ic, struct ieee80211_node *ni)
+{
+	if (IEEE80211_KEY_UNDEFINED(ni->ni_ucastkey)) {
+		if (ic->ic_def_txkey == IEEE80211_KEYIX_NONE ||
+		    IEEE80211_KEY_UNDEFINED(ic->ic_nw_keys[ic->ic_def_txkey]))
+			return NULL;
+		return &ic->ic_nw_keys[ic->ic_def_txkey];
+	} else {
+		return &ni->ni_ucastkey;
+	}
+}
+
+/*
+ * Return the transmit key to use in sending a multicast frame.
+ * Multicast traffic always uses the group key which is installed as
+ * the default tx key.
+ */ 
+static __inline struct ieee80211_key *
+ieee80211_crypto_getmcastkey(struct ieee80211com *ic,
+    struct ieee80211_node *ni)
+{
+	if (ic->ic_def_txkey == IEEE80211_KEYIX_NONE ||
+	    IEEE80211_KEY_UNDEFINED(ic->ic_nw_keys[ic->ic_def_txkey]))
+		return NULL;
+	return &ic->ic_nw_keys[ic->ic_def_txkey];
+}
+
+/*
+ * Encapsulate an outbound data frame.  The mbuf chain is updated.
+ * If an error is encountered NULL is returned.  The caller is required
+ * to provide a node reference and pullup the ethernet header in the
+ * first mbuf.
  */
 struct mbuf *
-ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
+ieee80211_encap(struct ieee80211com *ic, struct mbuf *m,
+	struct ieee80211_node *ni)
 {
-	struct ieee80211com *ic = (void *)ifp;
 	struct ether_header eh;
 	struct ieee80211_frame *wh;
-	struct ieee80211_node *ni = NULL;
+	struct ieee80211_key *key;
 	struct llc *llc;
-	struct m_tag *mtag;
-	u_int8_t *addr;
-	u_int dlt, hdrlen;
-	int addqos, tid;
+	int hdrsize, datalen, addqos, txfrag;
 
-	/* Handle raw frames if mbuf is tagged as 802.11 */
-	if ((mtag = m_tag_find(m, PACKET_TAG_DLT, NULL)) != NULL) {
-		dlt = *(u_int *)(mtag + 1);
+	IASSERT(m->m_len >= sizeof(eh), ("no ethernet header!"));
+	memcpy(&eh, mtod(m, void *), sizeof(struct ether_header));
 
-		if (!(dlt == DLT_IEEE802_11 || dlt == DLT_IEEE802_11_RADIO))
-			goto fallback;
-
-		wh = mtod(m, struct ieee80211_frame *);
-
-		if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min))
-			goto bad;
-
-		if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
-		    IEEE80211_FC0_VERSION_0)
-			goto bad;
-
-		switch (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) {
-		case IEEE80211_FC1_DIR_NODS:
-		case IEEE80211_FC1_DIR_FROMDS:
-			addr = wh->i_addr1;
-			break;
-		case IEEE80211_FC1_DIR_DSTODS:
-		case IEEE80211_FC1_DIR_TODS:
-			addr = wh->i_addr3;
-			break;
-		default:
-			goto bad;
+	/*
+	 * Insure space for additional headers.  First identify
+	 * transmit key to use in calculating any buffer adjustments
+	 * required.  This is also used below to do privacy
+	 * encapsulation work.  Then calculate the 802.11 header
+	 * size and any padding required by the driver.
+	 *
+	 * Note key may be NULL if we fall back to the default
+	 * transmit key and that is not set.  In that case the
+	 * buffer may not be expanded as needed by the cipher
+	 * routines, but they will/should discard it.
+	 */
+	if (ic->ic_flags & IEEE80211_F_PRIVACY) {
+		if (ic->ic_opmode == IEEE80211_M_STA ||
+		    !IEEE80211_IS_MULTICAST(eh.ether_dhost))
+			key = ieee80211_crypto_getucastkey(ic, ni);
+		else
+			key = ieee80211_crypto_getmcastkey(ic, ni);
+		if (key == NULL && eh.ether_type != htons(ETHERTYPE_PAE)) {
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_CRYPTO,
+			    "[%s] no default transmit key (%s) deftxkey %u\n",
+			    ether_sprintf(eh.ether_dhost), __func__,
+			    ic->ic_def_txkey);
+			ic->ic_stats.is_tx_nodefkey++;
 		}
-
-		ni = ieee80211_find_txnode(ic, addr);
-		if (ni == NULL)
-			ni = ieee80211_ref_node(ic->ic_bss);
-		if (ni == NULL) {
-			printf("%s: no node for dst %s, "
-			    "discard raw tx frame\n", ifp->if_xname,
-			    ether_sprintf(addr));
-			ic->ic_stats.is_tx_nonode++;
-			goto bad;
-		}
-		ni->ni_inact = 0;
-
-		*pni = ni;
-		return (m);
-	}
-
- fallback:
-	if (m->m_len < sizeof(struct ether_header)) {
-		m = m_pullup(m, sizeof(struct ether_header));
-		if (m == NULL) {
-			ic->ic_stats.is_tx_nombuf++;
-			goto bad;
-		}
-	}
-	memcpy(&eh, mtod(m, caddr_t), sizeof(struct ether_header));
-
-	ni = ieee80211_find_txnode(ic, eh.ether_dhost);
-	if (ni == NULL) {
-		IEEE80211_DPRINTF(("%s: no node for dst %s, discard frame\n",
-		    __func__, ether_sprintf(eh.ether_dhost)));
-		ic->ic_stats.is_tx_nonode++;
+	} else
+		key = NULL;
+	/* XXX 4-address format */
+	/*
+	 * XXX Some ap's don't handle QoS-encapsulated EAPOL
+	 * frames so suppress use.  This may be an issue if other
+	 * ap's require all data frames to be QoS-encapsulated
+	 * once negotiated in which case we'll need to make this
+	 * configurable.
+	 */
+	addqos = (ni->ni_flags & IEEE80211_NODE_QOS) &&
+		 eh.ether_type != htons(ETHERTYPE_PAE);
+	if (addqos)
+		hdrsize = sizeof(struct ieee80211_qosframe);
+	else
+		hdrsize = sizeof(struct ieee80211_frame);
+	if (ic->ic_flags & IEEE80211_F_DATAPAD)
+		hdrsize = roundup(hdrsize, sizeof(u_int32_t));
+	m = ieee80211_mbuf_adjust(ic, hdrsize, key, m);
+	if (m == NULL) {
+		/* NB: ieee80211_mbuf_adjust handles msgs+statistics */
 		goto bad;
 	}
 
-	if ((ic->ic_flags & IEEE80211_F_RSNON) && !ni->ni_port_valid &&
-	    eh.ether_type != htons(ETHERTYPE_PAE)) {
-		IEEE80211_DPRINTF(("%s: port not valid: %s\n",
-		    __func__, ether_sprintf(eh.ether_dhost)));
-		ic->ic_stats.is_tx_noauth++;
-		goto bad;
-	}
-
-	if ((ic->ic_flags & IEEE80211_F_COUNTERM) &&
-	    ni->ni_rsncipher == IEEE80211_CIPHER_TKIP)
-		/* XXX TKIP countermeasures! */;
-
-	ni->ni_inact = 0;
-
-	if ((ic->ic_flags & IEEE80211_F_QOS) &&
-	    (ni->ni_flags & IEEE80211_NODE_QOS) &&
-	    /* do not QoS-encapsulate EAPOL frames */
-	    eh.ether_type != htons(ETHERTYPE_PAE)) {
-		tid = ieee80211_classify(ic, m);
-		hdrlen = sizeof(struct ieee80211_qosframe);
-		addqos = 1;
-	} else {
-		hdrlen = sizeof(struct ieee80211_frame);
-		addqos = 0;
-	}
+	/* NB: this could be optimized because of ieee80211_mbuf_adjust */
 	m_adj(m, sizeof(struct ether_header) - sizeof(struct llc));
 	llc = mtod(m, struct llc *);
 	llc->llc_dsap = llc->llc_ssap = LLC_SNAP_LSAP;
@@ -540,28 +588,16 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 	llc->llc_snap.org_code[1] = 0;
 	llc->llc_snap.org_code[2] = 0;
 	llc->llc_snap.ether_type = eh.ether_type;
-	M_PREPEND(m, hdrlen, M_DONTWAIT);
+	datalen = m->m_pkthdr.len;		/* NB: w/o 802.11 header */
+
+	M_PREPEND(m, hdrsize, M_DONTWAIT);
 	if (m == NULL) {
-		ic->ic_stats.is_tx_nombuf++;
+		ic->ic_stats.is_tx_nobuf++;
 		goto bad;
 	}
 	wh = mtod(m, struct ieee80211_frame *);
 	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_DATA;
-	*(u_int16_t *)&wh->i_dur[0] = 0;
-	if (addqos) {
-		struct ieee80211_qosframe *qwh =
-		    (struct ieee80211_qosframe *)wh;
-		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS;
-		qwh->i_qos[0] = tid & IEEE80211_QOS_TID;
-		qwh->i_qos[1] = 0;	/* no TXOP requested */
-		*(u_int16_t *)&qwh->i_seq[0] =
-		    htole16(ni->ni_qos_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
-		ni->ni_qos_txseqs[tid]++;
-	} else {
-		*(u_int16_t *)&wh->i_seq[0] =
-		    htole16(ni->ni_txseq << IEEE80211_SEQ_SEQ_SHIFT);
-		ni->ni_txseq++;
-	}
+	*(u_int16_t *)wh->i_dur = 0;
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_STA:
 		wh->i_fc[1] = IEEE80211_FC1_DIR_TODS;
@@ -574,71 +610,400 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 		IEEE80211_ADDR_COPY(wh->i_addr1, eh.ether_dhost);
 		IEEE80211_ADDR_COPY(wh->i_addr2, eh.ether_shost);
+		/*
+		 * NB: always use the bssid from ic_bss as the
+		 *     neighbor's may be stale after an ibss merge
+		 */
 		IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_bss->ni_bssid);
 		break;
 	case IEEE80211_M_HOSTAP:
+#ifndef IEEE80211_NO_HOSTAP
 		wh->i_fc[1] = IEEE80211_FC1_DIR_FROMDS;
 		IEEE80211_ADDR_COPY(wh->i_addr1, eh.ether_dhost);
 		IEEE80211_ADDR_COPY(wh->i_addr2, ni->ni_bssid);
 		IEEE80211_ADDR_COPY(wh->i_addr3, eh.ether_shost);
+#endif /* !IEEE80211_NO_HOSTAP */
 		break;
 	case IEEE80211_M_MONITOR:
 		goto bad;
 	}
+	if (m->m_flags & M_MORE_DATA)
+		wh->i_fc[1] |= IEEE80211_FC1_MORE_DATA;
+	if (addqos) {
+		struct ieee80211_qosframe *qwh =
+			(struct ieee80211_qosframe *) wh;
+		int ac, tid;
 
-	if ((ic->ic_flags & IEEE80211_F_WEPON) ||
-	    ((ic->ic_flags & IEEE80211_F_RSNON) && ni->ni_port_valid))
-		wh->i_fc[1] |= IEEE80211_FC1_PROTECTED;
+		ac = M_WME_GETAC(m);
+		/* map from access class/queue to 11e header priorty value */
+		tid = WME_AC_TO_TID(ac);
+		qwh->i_qos[0] = tid & IEEE80211_QOS_TID;
+		if (ic->ic_wme.wme_wmeChanParams.cap_wmeParams[ac].wmep_noackPolicy)
+			qwh->i_qos[0] |= 1 << IEEE80211_QOS_ACKPOLICY_S;
+		qwh->i_qos[1] = 0;
+		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS;
 
-	*pni = ni;
+		*(u_int16_t *)wh->i_seq =
+		    htole16(ni->ni_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
+		ni->ni_txseqs[tid]++;
+	} else {
+		*(u_int16_t *)wh->i_seq =
+		    htole16(ni->ni_txseqs[0] << IEEE80211_SEQ_SEQ_SHIFT);
+		ni->ni_txseqs[0]++;
+	}
+	/* check if xmit fragmentation is required */
+	txfrag = (m->m_pkthdr.len > ic->ic_fragthreshold &&
+	    !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
+	    (m->m_flags & M_FF) == 0);          /* NB: don't fragment ff's */
+	if (key != NULL) {
+		/*
+		 * IEEE 802.1X: send EAPOL frames always in the clear.
+		 * WPA/WPA2: encrypt EAPOL keys when pairwise keys are set.
+		 */
+		if (eh.ether_type != htons(ETHERTYPE_PAE) ||
+		    ((ic->ic_flags & IEEE80211_F_WPA) &&
+		     (ic->ic_opmode == IEEE80211_M_STA ?
+		      !IEEE80211_KEY_UNDEFINED(*key) :
+		      !IEEE80211_KEY_UNDEFINED(ni->ni_ucastkey)))) {
+			wh->i_fc[1] |= IEEE80211_FC1_WEP;
+			if (!ieee80211_crypto_enmic(ic, key, m, txfrag)) {
+				IEEE80211_DPRINTF(ic, IEEE80211_MSG_OUTPUT,
+				    "[%s] enmic failed, discard frame\n",
+				    ether_sprintf(eh.ether_dhost));
+				ic->ic_stats.is_crypto_enmicfail++;
+				goto bad;
+			}
+		}
+	}
+	if (txfrag && !ieee80211_fragment(ic, m, hdrsize,
+	    key != NULL ? key->wk_cipher->ic_header : 0, ic->ic_fragthreshold))
+		goto bad;
+
+	IEEE80211_NODE_STAT(ni, tx_data);
+	IEEE80211_NODE_STAT_ADD(ni, tx_bytes, datalen);
+
 	return m;
 bad:
 	if (m != NULL)
 		m_freem(m);
-	if (ni != NULL)
-		ieee80211_release_node(ic, ni);
-	*pni = NULL;
 	return NULL;
 }
 
-/* unaligned little endian access */
-#define LE_WRITE_2(p, v) do {			\
-	((u_int8_t *)(p))[0] = (v) & 0xff;	\
-	((u_int8_t *)(p))[1] = (v) >> 8;	\
-} while (0)
-
 /*
- * Add a Capability Information field to a frame (see 7.3.1.4).
+ * Arguments in:
+ *
+ * paylen:  payload length (no FCS, no WEP header)
+ *
+ * hdrlen:  header length
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * flags:   IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d:       802.11 Duration field for RTS,
+ *          802.11 Duration field for data frame,
+ *          PLCP Length for data frame,
+ *          residual octets at end of data slot
  */
-u_int8_t *
-ieee80211_add_capinfo(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
+static int
+ieee80211_compute_duration1(int len, int use_ack, uint32_t icflags, int rate,
+    struct ieee80211_duration *d)
 {
-	u_int16_t capinfo;
+	int pre, ctsrate;
+	int ack, bitlen, data_dur, remainder;
 
-	if (ic->ic_opmode == IEEE80211_M_IBSS)
-		capinfo = IEEE80211_CAPINFO_IBSS;
-	else if (ic->ic_opmode == IEEE80211_M_HOSTAP)
-		capinfo = IEEE80211_CAPINFO_ESS;
+	/* RTS reserves medium for SIFS | CTS | SIFS | (DATA) | SIFS | ACK
+	 * DATA reserves medium for SIFS | ACK,
+	 *
+	 * (XXX or SIFS | ACK | SIFS | DATA | SIFS | ACK, if more fragments)
+	 *
+	 * XXXMYC: no ACK on multicast/broadcast or control packets
+	 */
+
+	bitlen = len * 8;
+
+	pre = IEEE80211_DUR_DS_SIFS;
+	if ((icflags & IEEE80211_F_SHPREAMBLE) != 0)
+		pre += IEEE80211_DUR_DS_SHORT_PREAMBLE + IEEE80211_DUR_DS_FAST_PLCPHDR;
 	else
-		capinfo = 0;
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
-	    (ic->ic_flags & (IEEE80211_F_WEPON | IEEE80211_F_RSNON)))
-		capinfo |= IEEE80211_CAPINFO_PRIVACY;
-	/* NB: some 11a AP's reject the request when short preamble is set */
-	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
-	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
-		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
-	if (ic->ic_flags & IEEE80211_F_SHSLOT)
-		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
-	LE_WRITE_2(frm, capinfo);
-	return frm + 2;
+		pre += IEEE80211_DUR_DS_LONG_PREAMBLE + IEEE80211_DUR_DS_SLOW_PLCPHDR;
+
+	d->d_residue = 0;
+	data_dur = (bitlen * 2) / rate;
+	remainder = (bitlen * 2) % rate;
+	if (remainder != 0) {
+		d->d_residue = (rate - remainder) / 16;
+		data_dur++;
+	}
+
+	switch (rate) {
+	case 2:		/* 1 Mb/s */
+	case 4:		/* 2 Mb/s */
+		/* 1 - 2 Mb/s WLAN: send ACK/CTS at 1 Mb/s */
+		ctsrate = 2;
+		break;
+	case 11:	/* 5.5 Mb/s */
+	case 22:	/* 11  Mb/s */
+	case 44:	/* 22  Mb/s */
+		/* 5.5 - 11 Mb/s WLAN: send ACK/CTS at 2 Mb/s */
+		ctsrate = 4;
+		break;
+	default:
+		/* TBD */
+		return -1;
+	}
+
+	d->d_plcp_len = data_dur;
+
+	ack = (use_ack) ? pre + (IEEE80211_DUR_DS_SLOW_ACK * 2) / ctsrate : 0;
+
+	d->d_rts_dur =
+	    pre + (IEEE80211_DUR_DS_SLOW_CTS * 2) / ctsrate +
+	    pre + data_dur +
+	    ack;
+
+	d->d_data_dur = ack;
+
+	return 0;
 }
 
 /*
- * Add an SSID element to a frame (see 7.3.2.1).
+ * Arguments in:
+ *
+ * wh:      802.11 header
+ *
+ * paylen:  payload length (no FCS, no WEP header)
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * fraglen: fragment length, set to maximum (or higher) for no
+ *          fragmentation
+ *
+ * flags:   IEEE80211_F_PRIVACY (hardware adds WEP),
+ *          IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d0: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ *
+ * dn: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of last fragment
+ *
+ * ieee80211_compute_duration assumes crypto-encapsulation, if any,
+ * has already taken place.
  */
-u_int8_t *
+int
+ieee80211_compute_duration(const struct ieee80211_frame_min *wh,
+    const struct ieee80211_key *wk, int len,
+    uint32_t icflags, int fraglen, int rate, struct ieee80211_duration *d0,
+    struct ieee80211_duration *dn, int *npktp, int debug)
+{
+	int ack, rc;
+	int cryptolen,	/* crypto overhead: header+trailer */
+	    firstlen,	/* first fragment's payload + overhead length */
+	    hdrlen,	/* header length w/o driver padding */
+	    lastlen,	/* last fragment's payload length w/ overhead */
+	    lastlen0,	/* last fragment's payload length w/o overhead */
+	    npkt,	/* number of fragments */
+	    overlen,	/* non-802.11 header overhead per fragment */
+	    paylen;	/* payload length w/o overhead */
+
+	hdrlen = ieee80211_anyhdrsize((const void *)wh);
+
+        /* Account for padding required by the driver. */
+	if (icflags & IEEE80211_F_DATAPAD)
+		paylen = len - roundup(hdrlen, sizeof(u_int32_t));
+	else
+		paylen = len - hdrlen;
+
+	overlen = IEEE80211_CRC_LEN;
+
+	if (wk != NULL) {
+		cryptolen = wk->wk_cipher->ic_header +
+		            wk->wk_cipher->ic_trailer;
+		paylen -= cryptolen;
+		overlen += cryptolen;
+	}
+
+	npkt = paylen / fraglen;
+	lastlen0 = paylen % fraglen;
+
+	if (npkt == 0)			/* no fragments */
+		lastlen = paylen + overlen;
+	else if (lastlen0 != 0) {	/* a short "tail" fragment */
+		lastlen = lastlen0 + overlen;
+		npkt++;
+	} else				/* full-length "tail" fragment */
+		lastlen = fraglen + overlen;
+
+	if (npktp != NULL)
+		*npktp = npkt;
+
+	if (npkt > 1)
+		firstlen = fraglen + overlen;
+	else
+		firstlen = paylen + overlen;
+
+	if (debug) {
+		printf("%s: npkt %d firstlen %d lastlen0 %d lastlen %d "
+		    "fraglen %d overlen %d len %d rate %d icflags %08x\n",
+		    __func__, npkt, firstlen, lastlen0, lastlen, fraglen,
+		    overlen, len, rate, icflags);
+	}
+
+	ack = !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
+	    (wh->i_fc[1] & IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL;
+
+	rc = ieee80211_compute_duration1(firstlen + hdrlen,
+	    ack, icflags, rate, d0);
+	if (rc == -1)
+		return rc;
+
+	if (npkt <= 1) {
+		*dn = *d0;
+		return 0;
+	}
+	return ieee80211_compute_duration1(lastlen + hdrlen, ack, icflags, rate,
+	    dn);
+}
+
+/*
+ * Fragment the frame according to the specified mtu.
+ * The size of the 802.11 header (w/o padding) is provided
+ * so we don't need to recalculate it.  We create a new
+ * mbuf for each fragment and chain it through m_nextpkt;
+ * we might be able to optimize this by reusing the original
+ * packet's mbufs but that is significantly more complicated.
+ */
+static int
+ieee80211_fragment(struct ieee80211com *ic, struct mbuf *m0,
+	u_int hdrsize, u_int ciphdrsize, u_int mtu)
+{
+	struct ieee80211_frame *wh, *whf;
+	struct mbuf *m, *prev, *next;
+	u_int totalhdrsize, fragno, fragsize, off, remainder, payload;
+
+	IASSERT(m0->m_nextpkt == NULL, ("mbuf already chained?"));
+	IASSERT(m0->m_pkthdr.len > mtu,
+		("pktlen %u mtu %u", m0->m_pkthdr.len, mtu));
+
+	wh = mtod(m0, struct ieee80211_frame *);
+	/* NB: mark the first frag; it will be propagated below */
+	wh->i_fc[1] |= IEEE80211_FC1_MORE_FRAG;
+	totalhdrsize = hdrsize + ciphdrsize;
+	fragno = 1;
+	off = mtu - ciphdrsize;
+	remainder = m0->m_pkthdr.len - off;
+	prev = m0;
+	do {
+		fragsize = totalhdrsize + remainder;
+		if (fragsize > mtu)
+			fragsize = mtu;
+		IASSERT(fragsize < MCLBYTES,
+			("fragment size %u too big!", fragsize));
+		if (fragsize > MHLEN)
+			m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
+		else
+			m = m_gethdr(M_DONTWAIT, MT_DATA);
+		if (m == NULL)
+			goto bad;
+		/* leave room to prepend any cipher header */
+		m_align(m, fragsize - ciphdrsize);
+
+		/*
+		 * Form the header in the fragment.  Note that since
+		 * we mark the first fragment with the MORE_FRAG bit
+		 * it automatically is propagated to each fragment; we
+		 * need only clear it on the last fragment (done below).
+		 */
+		whf = mtod(m, struct ieee80211_frame *);
+		memcpy(whf, wh, hdrsize);
+		*(u_int16_t *)&whf->i_seq[0] |= htole16(
+			(fragno & IEEE80211_SEQ_FRAG_MASK) <<
+				IEEE80211_SEQ_FRAG_SHIFT);
+		fragno++;
+
+		payload = fragsize - totalhdrsize;
+		/* NB: destination is known to be contiguous */
+		m_copydata(m0, off, payload, mtod(m, u_int8_t *) + hdrsize);
+		m->m_len = hdrsize + payload;
+		m->m_pkthdr.len = hdrsize + payload;
+		m->m_flags |= M_FRAG;
+
+		/* chain up the fragment */
+		prev->m_nextpkt = m;
+		prev = m;
+
+		/* deduct fragment just formed */
+		remainder -= payload;
+		off += payload;
+	} while (remainder != 0);
+	whf->i_fc[1] &= ~IEEE80211_FC1_MORE_FRAG;
+
+	/* strip first mbuf now that everything has been copied */
+	m_adj(m0, -(m0->m_pkthdr.len - (mtu - ciphdrsize)));
+	m0->m_flags |= M_FIRSTFRAG | M_FRAG;
+
+	ic->ic_stats.is_tx_fragframes++;
+	ic->ic_stats.is_tx_frags += fragno-1;
+
+	return 1;
+bad:
+	/* reclaim fragments but leave original frame for caller to free */
+	for (m = m0->m_nextpkt; m != NULL; m = next) {
+		next = m->m_nextpkt;
+		m->m_nextpkt = NULL;            /* XXX paranoid */
+		m_freem(m);
+	}
+	m0->m_nextpkt = NULL;
+	return 0;
+}
+
+/*
+ * Add a supported rates element id to a frame.
+ */
+static u_int8_t *
+ieee80211_add_rates(u_int8_t *frm, const struct ieee80211_rateset *rs)
+{
+	int nrates;
+
+	*frm++ = IEEE80211_ELEMID_RATES;
+	nrates = rs->rs_nrates;
+	if (nrates > IEEE80211_RATE_SIZE)
+		nrates = IEEE80211_RATE_SIZE;
+	*frm++ = nrates;
+	memcpy(frm, rs->rs_rates, nrates);
+	return frm + nrates;
+}
+
+/*
+ * Add an extended supported rates element id to a frame.
+ */
+static u_int8_t *
+ieee80211_add_xrates(u_int8_t *frm, const struct ieee80211_rateset *rs)
+{
+	/*
+	 * Add an extended supported rates element if operating in 11g mode.
+	 */
+	if (rs->rs_nrates > IEEE80211_RATE_SIZE) {
+		int nrates = rs->rs_nrates - IEEE80211_RATE_SIZE;
+		*frm++ = IEEE80211_ELEMID_XRATES;
+		*frm++ = nrates;
+		memcpy(frm, rs->rs_rates + IEEE80211_RATE_SIZE, nrates);
+		frm += nrates;
+	}
+	return frm;
+}
+
+/* 
+ * Add an ssid elemet to a frame.
+ */
+static u_int8_t *
 ieee80211_add_ssid(u_int8_t *frm, const u_int8_t *ssid, u_int len)
 {
 	*frm++ = IEEE80211_ELEMID_SSID;
@@ -648,132 +1013,9 @@ ieee80211_add_ssid(u_int8_t *frm, const u_int8_t *ssid, u_int len)
 }
 
 /*
- * Add a supported rates element to a frame (see 7.3.2.2).
+ * Add an erp element to a frame.
  */
-u_int8_t *
-ieee80211_add_rates(u_int8_t *frm, const struct ieee80211_rateset *rs)
-{
-	int nrates;
-
-	*frm++ = IEEE80211_ELEMID_RATES;
-	nrates = min(rs->rs_nrates, IEEE80211_RATE_SIZE);
-	*frm++ = nrates;
-	memcpy(frm, rs->rs_rates, nrates);
-	return frm + nrates;
-}
-
-/*
- * Add a FH Parameter Set element to a frame (see 7.3.2.3).
- */
-u_int8_t *
-ieee80211_add_fh_params(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
-{
-	u_int chan = ieee80211_chan2ieee(ic, ni->ni_chan);
-
-	*frm++ = IEEE80211_ELEMID_FHPARMS;
-	*frm++ = 5;
-	LE_WRITE_2(frm, ni->ni_fhdwell); frm += 2;
-	*frm++ = IEEE80211_FH_CHANSET(chan);
-	*frm++ = IEEE80211_FH_CHANPAT(chan);
-	*frm++ = ni->ni_fhindex;
-	return frm;
-}
-
-/*
- * Add a DS Parameter Set element to a frame (see 7.3.2.4).
- */
-u_int8_t *
-ieee80211_add_ds_params(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
-{
-	*frm++ = IEEE80211_ELEMID_DSPARMS;
-	*frm++ = 1;
-	*frm++ = ieee80211_chan2ieee(ic, ni->ni_chan);
-	return frm;
-}
-
-/*
- * Add a TIM element to a frame (see 7.3.2.6 and Annex L).
- */
-u_int8_t *
-ieee80211_add_tim(u_int8_t *frm, struct ieee80211com *ic)
-{
-	u_int i, offset = 0, len;
-
-	/* find first non-zero octet in the virtual bit map */
-	for (i = 0; i < ic->ic_tim_len && ic->ic_tim_bitmap[i] == 0; i++);
-
-	/* clear the lsb as it is reserved for the broadcast indication bit */
-	if (i < ic->ic_tim_len)
-		offset = i & ~1;
-
-	/* find last non-zero octet in the virtual bit map */
-	for (i = ic->ic_tim_len - 1; i > 0 && ic->ic_tim_bitmap[i] == 0; i--);
-
-	len = i - offset + 1;
-
-	*frm++ = IEEE80211_ELEMID_TIM;
-	*frm++ = len + 3;		/* length */
-	*frm++ = ic->ic_dtim_count;	/* DTIM count */
-	*frm++ = ic->ic_dtim_period;	/* DTIM period */
-
-	/* Bitmap Control */
-	*frm = offset;
-	/* set broadcast/multicast indication bit if necessary */
-	if (ic->ic_dtim_count == 0 && ic->ic_tim_mcast)
-		*frm |= 0x01;
-	frm++;
-
-	/* Partial Virtual Bitmap */
-	memcpy(frm, &ic->ic_tim_bitmap[offset], len);
-	return frm + len;
-}
-
-/*
- * Add an IBSS Parameter Set element to a frame (see 7.3.2.7).
- */
-u_int8_t *
-ieee80211_add_ibss_params(u_int8_t *frm, const struct ieee80211_node *ni)
-{
-	*frm++ = IEEE80211_ELEMID_IBSSPARMS;
-	*frm++ = 2;
-	LE_WRITE_2(frm, 0);	/* TODO: ATIM window */
-	return frm + 2;
-}
-
-/*
- * Add an EDCA Parameter Set element to a frame (see 7.3.2.29).
- */
-u_int8_t *
-ieee80211_add_edca_params(u_int8_t *frm, struct ieee80211com *ic)
-{
-	const struct ieee80211_edca_ac_params *edca;
-	int aci;
-
-	*frm++ = IEEE80211_ELEMID_EDCAPARMS;
-	*frm++ = 18;	/* length */
-	*frm++ = 0;	/* QoS Info */
-	*frm++ = 0;	/* reserved */
-
-	/* setup AC Parameter Records */
-	edca = ieee80211_qap_edca_table[ic->ic_curmode];
-	for (aci = 0; aci < EDCA_NUM_AC; aci++) {
-		const struct ieee80211_edca_ac_params *ac = &edca[aci];
-
-		*frm++ = (aci << 5) | ((ac->ac_acm & 0x1) << 4) |
-			 (ac->ac_aifsn & 0xf);
-		*frm++ = (ac->ac_ecwmax << 4) |
-			 (ac->ac_ecwmin & 0xf);
-		LE_WRITE_2(frm, ac->ac_txoplimit); frm += 2;
-	}
-	return frm;
-}
-
-/*
- * Add an ERP element to a frame (see 7.3.2.13).
- */
-u_int8_t *
+static u_int8_t *
 ieee80211_add_erp(u_int8_t *frm, struct ieee80211com *ic)
 {
 	u_int8_t erp;
@@ -781,483 +1023,348 @@ ieee80211_add_erp(u_int8_t *frm, struct ieee80211com *ic)
 	*frm++ = IEEE80211_ELEMID_ERP;
 	*frm++ = 1;
 	erp = 0;
-	/*
-	 * The NonERP_Present bit shall be set to 1 when a NonERP STA
-	 * is associated with the BSS.
-	 */
 	if (ic->ic_nonerpsta != 0)
 		erp |= IEEE80211_ERP_NON_ERP_PRESENT;
-	/*
-	 * If one or more NonERP STAs are associated in the BSS, the
-	 * Use_Protection bit shall be set to 1 in transmitted ERP
-	 * Information Elements.
-	 */
 	if (ic->ic_flags & IEEE80211_F_USEPROT)
 		erp |= IEEE80211_ERP_USE_PROTECTION;
-	/*
-	 * The Barker_Preamble_Mode bit shall be set to 1 by the ERP
-	 * Information Element sender if one or more associated NonERP
-	 * STAs are not short preamble capable.
-	 */
-	if (!(ic->ic_flags & IEEE80211_F_SHPREAMBLE))
-		erp |= IEEE80211_ERP_BARKER_MODE;
+	if (ic->ic_flags & IEEE80211_F_USEBARKER)
+		erp |= IEEE80211_ERP_LONG_PREAMBLE;
 	*frm++ = erp;
 	return frm;
 }
 
-/*
- * Add a QoS Capability element to a frame (see 7.3.2.35).
- */
-u_int8_t *
-ieee80211_add_qos_capability(u_int8_t *frm, struct ieee80211com *ic)
+static u_int8_t *
+ieee80211_setup_wpa_ie(struct ieee80211com *ic, u_int8_t *ie)
 {
-	*frm++ = IEEE80211_ELEMID_QOS_CAP;
-	*frm++ = 1;
-	*frm++ = 0;	/* QoS Info */
-	return frm;
-}
-
-/*
- * Add an RSN element to a frame (see 7.3.2.25).
- */
-u_int8_t *
-ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni, int wpa)
-{
-	const u_int8_t *oui = wpa ? MICROSOFT_OUI : IEEE80211_OUI;
-	u_int8_t *pcount;
-	u_int16_t count;
-
-	/* write Version field */
-	LE_WRITE_2(frm, 1); frm += 2;
-
-	/* write Group Cipher Suite field (see Table 20da) */
-	memcpy(frm, oui, 3); frm += 3;
-	switch (ni->ni_rsngroupcipher) {
-	case IEEE80211_CIPHER_WEP40:
-		*frm++ = 1;
-		break;
-	case IEEE80211_CIPHER_TKIP:
-		*frm++ = 2;
-		break;
-	case IEEE80211_CIPHER_CCMP:
-		*frm++ = 4;
-		break;
-	case IEEE80211_CIPHER_WEP104:
-		*frm++ = 5;
-		break;
-	default:
-		/* can't get there */
-		panic("invalid group cipher!");
-	}
-
-	pcount = frm; frm += 2;
-	count = 0;
-	/* write Pairwise Cipher Suite List */
-	if (ni->ni_rsnciphers & IEEE80211_CIPHER_USEGROUP) {
-		memcpy(frm, oui, 3); frm += 3;
-		*frm++ = 0;
-		count++;
-	}
-	if (ni->ni_rsnciphers & IEEE80211_CIPHER_TKIP) {
-		memcpy(frm, oui, 3); frm += 3;
-		*frm++ = 2;
-		count++;
-	}
-	if (ni->ni_rsnciphers & IEEE80211_CIPHER_CCMP) {
-		memcpy(frm, oui, 3); frm += 3;
-		*frm++ = 4;
-		count++;
-	}
-	/* write Pairwise Cipher Suite Count field */
-	LE_WRITE_2(pcount, count);
-
-	pcount = frm; frm += 2;
-	count = 0;
-	/* write AKM Suite List (see Table 20dc) */
-	if (ni->ni_rsnakms & IEEE80211_AKM_IEEE8021X) {
-		memcpy(frm, oui, 3); frm += 3;
-		*frm++ = 1;
-		count++;
-	}
-	if (ni->ni_rsnakms & IEEE80211_AKM_PSK) {
-		memcpy(frm, oui, 3); frm += 3;
-		*frm++ = 2;
-		count++;
-	}
-	/* write AKM Suite List Count field */
-	LE_WRITE_2(pcount, count);
-
-	if (!wpa) {
-		/* write RSN Capabilities field */
-		LE_WRITE_2(frm, ni->ni_rsncaps); frm += 2;
-
-		/* no PMKID List for now */
-	}
-	return frm;
-}
-
-u_int8_t *
-ieee80211_add_rsn(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
-{
-	u_int8_t *plen;
-
-	*frm++ = IEEE80211_ELEMID_RSN;
-	plen = frm++;	/* length filled in later */
-	frm = ieee80211_add_rsn_body(frm, ic, ni, 0);
-
-	/* write length field */
-	*plen = frm - plen - 1;
-	return frm;
-}
-
-/*
- * Add a vendor-specific WPA element to a frame.
- * This is required for compatibility with Wi-Fi Alliance WPA.
- */
-u_int8_t *
-ieee80211_add_wpa(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
-{
-	u_int8_t *plen;
+#define	WPA_OUI_BYTES		0x00, 0x50, 0xf2
+#define	ADDSHORT(frm, v) do {			\
+	frm[0] = (v) & 0xff;			\
+	frm[1] = (v) >> 8;			\
+	frm += 2;				\
+} while (0)
+#define	ADDSELECTOR(frm, sel) do {		\
+	memcpy(frm, sel, 4);			\
+	frm += 4;				\
+} while (0)
+	static const u_int8_t oui[4] = { WPA_OUI_BYTES, WPA_OUI_TYPE };
+	static const u_int8_t cipher_suite[][4] = {
+		{ WPA_OUI_BYTES, WPA_CSE_WEP40 },	/* NB: 40-bit */
+		{ WPA_OUI_BYTES, WPA_CSE_TKIP },
+		{ 0x00, 0x00, 0x00, 0x00 },		/* XXX WRAP */
+		{ WPA_OUI_BYTES, WPA_CSE_CCMP },
+		{ 0x00, 0x00, 0x00, 0x00 },		/* XXX CKIP */
+		{ WPA_OUI_BYTES, WPA_CSE_NULL },
+	};
+	static const u_int8_t wep104_suite[4] =
+		{ WPA_OUI_BYTES, WPA_CSE_WEP104 };
+	static const u_int8_t key_mgt_unspec[4] =
+		{ WPA_OUI_BYTES, WPA_ASE_8021X_UNSPEC };
+	static const u_int8_t key_mgt_psk[4] =
+		{ WPA_OUI_BYTES, WPA_ASE_8021X_PSK };
+	const struct ieee80211_rsnparms *rsn = &ic->ic_bss->ni_rsn;
+	u_int8_t *frm = ie;
+	u_int8_t *selcnt;
 
 	*frm++ = IEEE80211_ELEMID_VENDOR;
-	plen = frm++;	/* length filled in later */
-	memcpy(frm, MICROSOFT_OUI, 3); frm += 3;
-	*frm++ = 1;	/* WPA */
-	frm = ieee80211_add_rsn_body(frm, ic, ni, 1);
+	*frm++ = 0;				/* length filled in below */
+	memcpy(frm, oui, sizeof(oui));		/* WPA OUI */
+	frm += sizeof(oui);
+	ADDSHORT(frm, WPA_VERSION);
 
-	/* write length field */
-	*plen = frm - plen - 1;
+	/* XXX filter out CKIP */
+
+	/* multicast cipher */
+	if (rsn->rsn_mcastcipher == IEEE80211_CIPHER_WEP &&
+	    rsn->rsn_mcastkeylen >= 13)
+		ADDSELECTOR(frm, wep104_suite);
+	else
+		ADDSELECTOR(frm, cipher_suite[rsn->rsn_mcastcipher]);
+
+	/* unicast cipher list */
+	selcnt = frm;
+	ADDSHORT(frm, 0);			/* selector count */
+	if (rsn->rsn_ucastcipherset & (1<<IEEE80211_CIPHER_AES_CCM)) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, cipher_suite[IEEE80211_CIPHER_AES_CCM]);
+	}
+	if (rsn->rsn_ucastcipherset & (1<<IEEE80211_CIPHER_TKIP)) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, cipher_suite[IEEE80211_CIPHER_TKIP]);
+	}
+
+	/* authenticator selector list */
+	selcnt = frm;
+	ADDSHORT(frm, 0);			/* selector count */
+	if (rsn->rsn_keymgmtset & WPA_ASE_8021X_UNSPEC) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, key_mgt_unspec);
+	}
+	if (rsn->rsn_keymgmtset & WPA_ASE_8021X_PSK) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, key_mgt_psk);
+	}
+
+	/* optional capabilities */
+	if (rsn->rsn_caps != 0 && rsn->rsn_caps != RSN_CAP_PREAUTH)
+		ADDSHORT(frm, rsn->rsn_caps);
+
+	/* calculate element length */
+	ie[1] = frm - ie - 2;
+	IASSERT(ie[1]+2 <= sizeof(struct ieee80211_ie_wpa),
+		("WPA IE too big, %u > %zu",
+		ie[1]+2, sizeof(struct ieee80211_ie_wpa)));
 	return frm;
+#undef ADDSHORT
+#undef ADDSELECTOR
+#undef WPA_OUI_BYTES
+}
+
+static u_int8_t *
+ieee80211_setup_rsn_ie(struct ieee80211com *ic, u_int8_t *ie)
+{
+#define	RSN_OUI_BYTES		0x00, 0x0f, 0xac
+#define	ADDSHORT(frm, v) do {			\
+	frm[0] = (v) & 0xff;			\
+	frm[1] = (v) >> 8;			\
+	frm += 2;				\
+} while (0)
+#define	ADDSELECTOR(frm, sel) do {		\
+	memcpy(frm, sel, 4);			\
+	frm += 4;				\
+} while (0)
+	static const u_int8_t cipher_suite[][4] = {
+		{ RSN_OUI_BYTES, RSN_CSE_WEP40 },	/* NB: 40-bit */
+		{ RSN_OUI_BYTES, RSN_CSE_TKIP },
+		{ RSN_OUI_BYTES, RSN_CSE_WRAP },
+		{ RSN_OUI_BYTES, RSN_CSE_CCMP },
+		{ 0x00, 0x00, 0x00, 0x00 },		/* XXX CKIP */
+		{ RSN_OUI_BYTES, RSN_CSE_NULL },
+	};
+	static const u_int8_t wep104_suite[4] =
+		{ RSN_OUI_BYTES, RSN_CSE_WEP104 };
+	static const u_int8_t key_mgt_unspec[4] =
+		{ RSN_OUI_BYTES, RSN_ASE_8021X_UNSPEC };
+	static const u_int8_t key_mgt_psk[4] =
+		{ RSN_OUI_BYTES, RSN_ASE_8021X_PSK };
+	const struct ieee80211_rsnparms *rsn = &ic->ic_bss->ni_rsn;
+	u_int8_t *frm = ie;
+	u_int8_t *selcnt;
+
+	*frm++ = IEEE80211_ELEMID_RSN;
+	*frm++ = 0;				/* length filled in below */
+	ADDSHORT(frm, RSN_VERSION);
+
+	/* XXX filter out CKIP */
+
+	/* multicast cipher */
+	if (rsn->rsn_mcastcipher == IEEE80211_CIPHER_WEP &&
+	    rsn->rsn_mcastkeylen >= 13)
+		ADDSELECTOR(frm, wep104_suite);
+	else
+		ADDSELECTOR(frm, cipher_suite[rsn->rsn_mcastcipher]);
+
+	/* unicast cipher list */
+	selcnt = frm;
+	ADDSHORT(frm, 0);			/* selector count */
+	if (rsn->rsn_ucastcipherset & (1<<IEEE80211_CIPHER_AES_CCM)) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, cipher_suite[IEEE80211_CIPHER_AES_CCM]);
+	}
+	if (rsn->rsn_ucastcipherset & (1<<IEEE80211_CIPHER_TKIP)) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, cipher_suite[IEEE80211_CIPHER_TKIP]);
+	}
+
+	/* authenticator selector list */
+	selcnt = frm;
+	ADDSHORT(frm, 0);			/* selector count */
+	if (rsn->rsn_keymgmtset & WPA_ASE_8021X_UNSPEC) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, key_mgt_unspec);
+	}
+	if (rsn->rsn_keymgmtset & WPA_ASE_8021X_PSK) {
+		selcnt[0]++;
+		ADDSELECTOR(frm, key_mgt_psk);
+	}
+
+	/* optional capabilities */
+	ADDSHORT(frm, rsn->rsn_caps);
+	/* XXX PMKID */
+
+	/* calculate element length */
+	ie[1] = frm - ie - 2;
+	IASSERT(ie[1]+2 <= sizeof(struct ieee80211_ie_wpa),
+		("RSN IE too big, %u > %zu",
+		ie[1]+2, sizeof(struct ieee80211_ie_wpa)));
+	return frm;
+#undef ADDSELECTOR
+#undef ADDSHORT
+#undef RSN_OUI_BYTES
 }
 
 /*
- * Add an extended supported rates element to a frame (see 7.3.2.14).
+ * Add a WPA/RSN element to a frame.
  */
-u_int8_t *
-ieee80211_add_xrates(u_int8_t *frm, const struct ieee80211_rateset *rs)
+static u_int8_t *
+ieee80211_add_wpa(u_int8_t *frm, struct ieee80211com *ic)
 {
-	int nrates;
 
-	KASSERT(rs->rs_nrates > IEEE80211_RATE_SIZE);
-
-	*frm++ = IEEE80211_ELEMID_XRATES;
-	nrates = rs->rs_nrates - IEEE80211_RATE_SIZE;
-	*frm++ = nrates;
-	memcpy(frm, rs->rs_rates + IEEE80211_RATE_SIZE, nrates);
-	return frm + nrates;
+	IASSERT(ic->ic_flags & IEEE80211_F_WPA, ("no WPA/RSN!"));
+	if (ic->ic_flags & IEEE80211_F_WPA2)
+		frm = ieee80211_setup_rsn_ie(ic, frm);
+	if (ic->ic_flags & IEEE80211_F_WPA1)
+		frm = ieee80211_setup_wpa_ie(ic, frm);
+	return frm;
 }
 
-struct mbuf *
-ieee80211_getmgmt(int flags, int type, u_int pktlen)
+#define	WME_OUI_BYTES		0x00, 0x50, 0xf2
+/*
+ * Add a WME information element to a frame.
+ */
+static u_int8_t *
+ieee80211_add_wme_info(u_int8_t *frm, struct ieee80211_wme_state *wme)
 {
-	struct mbuf *m;
+	static const struct ieee80211_wme_info info = {
+		.wme_id		= IEEE80211_ELEMID_VENDOR,
+		.wme_len	= sizeof(struct ieee80211_wme_info) - 2,
+		.wme_oui	= { WME_OUI_BYTES },
+		.wme_type	= WME_OUI_TYPE,
+		.wme_subtype	= WME_INFO_OUI_SUBTYPE,
+		.wme_version	= WME_VERSION,
+		.wme_info	= 0,
+	};
+	memcpy(frm, &info, sizeof(info));
+	return frm + sizeof(info); 
+}
 
-	/* reserve space for 802.11 header */
-	pktlen += sizeof(struct ieee80211_frame);
+/*
+ * Add a WME parameters element to a frame.
+ */
+static u_int8_t *
+ieee80211_add_wme_param(u_int8_t *frm, struct ieee80211_wme_state *wme)
+{
+#define	SM(_v, _f)	(((_v) << _f##_S) & _f)
+#define	ADDSHORT(frm, v) do {			\
+	frm[0] = (v) & 0xff;			\
+	frm[1] = (v) >> 8;			\
+	frm += 2;				\
+} while (0)
+	/* NB: this works 'cuz a param has an info at the front */
+	static const struct ieee80211_wme_info param = {
+		.wme_id		= IEEE80211_ELEMID_VENDOR,
+		.wme_len	= sizeof(struct ieee80211_wme_param) - 2,
+		.wme_oui	= { WME_OUI_BYTES },
+		.wme_type	= WME_OUI_TYPE,
+		.wme_subtype	= WME_PARAM_OUI_SUBTYPE,
+		.wme_version	= WME_VERSION,
+	};
+	int i;
 
-	if (pktlen > MCLBYTES)
-		panic("management frame too large: %u", pktlen);
-	MGETHDR(m, flags, type);
-	if (m == NULL)
-		return NULL;
-	if (pktlen >= MINCLSIZE) {
-		MCLGET(m, flags);
-		if (!(m->m_flags & M_EXT))
-			return m_free(m);
+	memcpy(frm, &param, sizeof(param));
+	frm += __offsetof(struct ieee80211_wme_info, wme_info);
+	*frm++ = wme->wme_bssChanParams.cap_info;	/* AC info */
+	*frm++ = 0;					/* reserved field */
+	for (i = 0; i < WME_NUM_AC; i++) {
+		const struct wmeParams *ac =
+		       &wme->wme_bssChanParams.cap_wmeParams[i];
+		*frm++ = SM(i, WME_PARAM_ACI)
+		       | SM(ac->wmep_acm, WME_PARAM_ACM)
+		       | SM(ac->wmep_aifsn, WME_PARAM_AIFSN)
+		       ;
+		*frm++ = SM(ac->wmep_logcwmax, WME_PARAM_LOGCWMAX)
+		       | SM(ac->wmep_logcwmin, WME_PARAM_LOGCWMIN)
+		       ;
+		ADDSHORT(frm, ac->wmep_txopLimit);
 	}
-	m->m_data += sizeof(struct ieee80211_frame);
-	return m;
+	return frm;
+#undef SM
+#undef ADDSHORT
 }
+#undef WME_OUI_BYTES
 
-/*-
- * Probe request frame format:
- * [tlv] SSID
- * [tlv] Supported rates
- * [tlv] Extended Supported Rates (802.11g)
+/*
+ * Send a probe request frame with the specified ssid
+ * and any optional information element data.
  */
-struct mbuf *
-ieee80211_get_probe_req(struct ieee80211com *ic, struct ieee80211_node *ni)
+int
+ieee80211_send_probereq(struct ieee80211_node *ni,
+	const u_int8_t sa[IEEE80211_ADDR_LEN],
+	const u_int8_t da[IEEE80211_ADDR_LEN],
+	const u_int8_t bssid[IEEE80211_ADDR_LEN],
+	const u_int8_t *ssid, size_t ssidlen,
+	const void *optie, size_t optielen)
 {
-	const struct ieee80211_rateset *rs =
-	    &ic->ic_sup_rates[ieee80211_chan2mode(ic, ni->ni_chan)];
+	struct ieee80211com *ic = ni->ni_ic;
+	enum ieee80211_phymode mode;
+	struct ieee80211_frame *wh;
 	struct mbuf *m;
 	u_int8_t *frm;
 
-	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    2 + ic->ic_des_esslen +
-	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
-		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0));
-	if (m == NULL)
-		return NULL;
+	/*
+	 * Hold a reference on the node so it doesn't go away until after
+	 * the xmit is complete all the way in the driver.  On error we
+	 * will remove our reference.
+	 */
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_NODE,
+		"ieee80211_ref_node (%s:%u) %p<%s> refcnt %d\n",
+		__func__, __LINE__,
+		ni, ether_sprintf(ni->ni_macaddr),
+		ieee80211_node_refcnt(ni)+1);
+	ieee80211_ref_node(ni);
 
-	frm = mtod(m, u_int8_t *);
-	frm = ieee80211_add_ssid(frm, ic->ic_des_essid, ic->ic_des_esslen);
-	frm = ieee80211_add_rates(frm, rs);
-	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
-		frm = ieee80211_add_xrates(frm, rs);
-
-	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
-
-	return m;
-}
-
-/*-
- * Probe response frame format:
- * [8]    Timestamp
- * [2]    Beacon interval
- * [2]    Capability
- * [tlv]  Service Set Identifier (SSID)
- * [tlv]  Supported rates
- * [tlv*] Frequency-Hopping (FH) Parameter Set
- * [tlv*] DS Parameter Set (802.11g)
- * [tlv]  ERP Information (802.11g)
- * [tlv]  Extended Supported Rates (802.11g)
- * [tlv]  RSN (802.11i)
- * [tlv]  EDCA Parameter Set (802.11e)
- */
-struct mbuf *
-ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
-{
-	const struct ieee80211_rateset *rs = &ic->ic_bss->ni_rates;
-	struct mbuf *m;
-	u_int8_t *frm;
-
-	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    8 + 2 + 2 +
-	    2 + ni->ni_esslen +
-	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    2 + ((ic->ic_phytype == IEEE80211_T_FH) ? 5 : 1) +
-	    ((ic->ic_opmode == IEEE80211_M_IBSS) ? 2 + 2 : 0) +
-	    ((ic->ic_curmode == IEEE80211_MODE_11G) ? 2 + 1 : 0) +
-	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
-		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
-	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_RSN)) ? 2 + 44 : 0) +
-	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0) +
-	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_WPA)) ? 2 + 48 : 0));
-	if (m == NULL)
-		return NULL;
-
-	frm = mtod(m, u_int8_t *);
-	memset(frm, 0, 8); frm += 8;	/* timestamp is set by hardware */
-	LE_WRITE_2(frm, ic->ic_bss->ni_intval); frm += 2;
-	frm = ieee80211_add_capinfo(frm, ic, ni);
-	frm = ieee80211_add_ssid(frm, ic->ic_bss->ni_essid,
-	    ic->ic_bss->ni_esslen);
-	frm = ieee80211_add_rates(frm, rs);
-	if (ic->ic_phytype == IEEE80211_T_FH)
-		frm = ieee80211_add_fh_params(frm, ic, ni);
-	else
-		frm = ieee80211_add_ds_params(frm, ic, ni);
-	if (ic->ic_opmode == IEEE80211_M_IBSS)
-		frm = ieee80211_add_ibss_params(frm, ni);
-	if (ic->ic_curmode == IEEE80211_MODE_11G)
-		frm = ieee80211_add_erp(frm, ic);
-	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
-		frm = ieee80211_add_xrates(frm, rs);
-	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-	    (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_RSN))
-		frm = ieee80211_add_rsn(frm, ic, ic->ic_bss);
-	if (ic->ic_flags & IEEE80211_F_QOS)
-		frm = ieee80211_add_edca_params(frm, ic);
-	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-	    (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_WPA))
-		frm = ieee80211_add_wpa(frm, ic, ic->ic_bss);
-
-	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
-
-	return m;
-}
-
-/*-
- * Authentication frame format:
- * [2] Authentication algorithm number
- * [2] Authentication transaction sequence number
- * [2] Status code
- */
-struct mbuf *
-ieee80211_get_auth(struct ieee80211com *ic, struct ieee80211_node *ni,
-    u_int16_t status, u_int16_t seq)
-{
-	struct mbuf *m;
-	u_int8_t *frm;
-
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
-		return NULL;
-	MH_ALIGN(m, 2 * 3);
-	m->m_pkthdr.len = m->m_len = 2 * 3;
-
-	frm = mtod(m, u_int8_t *);
-	LE_WRITE_2(frm, IEEE80211_AUTH_ALG_OPEN); frm += 2;
-	LE_WRITE_2(frm, seq); frm += 2;
-	LE_WRITE_2(frm, status);
-
-	return m;
-}
-
-/*-
- * Deauthentication frame format:
- * [2] Reason code
- */
-struct mbuf *
-ieee80211_get_deauth(struct ieee80211com *ic, struct ieee80211_node *ni,
-    u_int16_t reason)
-{
-	struct mbuf *m;
-
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
-		return NULL;
-	MH_ALIGN(m, 2);
-
-	m->m_pkthdr.len = m->m_len = 2;
-	*mtod(m, u_int16_t *) = htole16(reason);
-
-	return m;
-}
-
-/*-
- * (Re)Association request frame format:
- * [2]   Capability information
- * [2]   Listen interval
- * [6*]  Current AP address (Reassociation only)
- * [tlv] SSID
- * [tlv] Supported rates
- * [tlv] Extended Supported Rates (802.11g)
- * [tlv] RSN (802.11i)
- * [tlv] QoS Capability (802.11e)
- */
-struct mbuf *
-ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
-    int reassoc)
-{
-	const struct ieee80211_rateset *rs = &ni->ni_rates;
-	struct mbuf *m;
-	u_int8_t *frm;
-	u_int16_t capinfo;
-
-	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    2 +	2 +
-	    ((reassoc == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) ?
-		IEEE80211_ADDR_LEN : 0) +
-	    2 + ni->ni_esslen +
-	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
-		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
-	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ? 2 + 44 : 0) +
-	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 1 : 0) +
-	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ni->ni_rsnprotos & IEEE80211_PROTO_WPA)) ? 2 + 48 : 0));
-	if (m == NULL)
-		return NULL;
-
-	frm = mtod(m, u_int8_t *);
-	capinfo = IEEE80211_CAPINFO_ESS;
-	if (ic->ic_flags & IEEE80211_F_WEPON)
-		capinfo |= IEEE80211_CAPINFO_PRIVACY;
-	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
-	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
-		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
-	if ((ni->ni_capinfo & IEEE80211_CAPINFO_SHORT_SLOTTIME) &&
-	    (ic->ic_flags & IEEE80211_F_SHSLOT))
-		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
-	LE_WRITE_2(frm, capinfo); frm += 2;
-	LE_WRITE_2(frm, ic->ic_lintval); frm += 2;
-	if (reassoc) {
-		IEEE80211_ADDR_COPY(frm, ic->ic_bss->ni_bssid);
-		frm += IEEE80211_ADDR_LEN;
+	/*
+	 * prreq frame format
+	 *	[tlv] ssid
+	 *	[tlv] supported rates
+	 *	[tlv] extended supported rates
+	 *	[tlv] user-specified ie's
+	 */
+	m = ieee80211_getmgtframe(&frm,
+		 2 + IEEE80211_NWID_LEN
+	       + 2 + IEEE80211_RATE_SIZE
+	       + 2 + (IEEE80211_RATE_MAXSIZE - IEEE80211_RATE_SIZE)
+	       + (optie != NULL ? optielen : 0)
+	);
+	if (m == NULL) {
+		ic->ic_stats.is_tx_nobuf++;
+		ieee80211_free_node(ni);
+		return ENOMEM;
 	}
-	frm = ieee80211_add_ssid(frm, ni->ni_essid, ni->ni_esslen);
-	frm = ieee80211_add_rates(frm, rs);
-	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
-		frm = ieee80211_add_xrates(frm, rs);
-	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-	    (ni->ni_rsnprotos & IEEE80211_PROTO_RSN))
-		frm = ieee80211_add_rsn(frm, ic, ni);
-	if ((ic->ic_flags & IEEE80211_F_QOS) &&
-	    (ni->ni_flags & IEEE80211_NODE_QOS))
-		frm = ieee80211_add_qos_capability(frm, ic);
-	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-	    (ni->ni_rsnprotos & IEEE80211_PROTO_WPA))
-		frm = ieee80211_add_wpa(frm, ic, ni);
 
+	frm = ieee80211_add_ssid(frm, ssid, ssidlen);
+	mode = ieee80211_chan2mode(ic, ic->ic_curchan);
+	frm = ieee80211_add_rates(frm, &ic->ic_sup_rates[mode]);
+	frm = ieee80211_add_xrates(frm, &ic->ic_sup_rates[mode]);
+
+	if (optie != NULL) {
+		memcpy(frm, optie, optielen);
+		frm += optielen;
+	}
 	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
 
-	return m;
-}
-
-/*-
- * (Re)Association response frame format:
- * [2]   Capability information
- * [2]   Status code
- * [2]   Association ID (AID)
- * [tlv] Supported rates
- * [tlv] Extended Supported Rates (802.11g)
- * [tlv] EDCA Parameter Set (802.11e)
- */
-struct mbuf *
-ieee80211_get_assoc_resp(struct ieee80211com *ic, struct ieee80211_node *ni,
-    u_int16_t status)
-{
-	const struct ieee80211_rateset *rs = &ni->ni_rates;
-	struct mbuf *m;
-	u_int8_t *frm;
-
-	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    2 +	2 + 2 +
-	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
-		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
-	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0));
+	M_PREPEND(m, sizeof(struct ieee80211_frame), M_DONTWAIT);
 	if (m == NULL)
-		return NULL;
+		return ENOMEM;
+	IASSERT(m->m_pkthdr.rcvif == NULL, ("rcvif not null"));
+	m->m_pkthdr.rcvif = (void *)ni;
 
-	frm = mtod(m, u_int8_t *);
-	frm = ieee80211_add_capinfo(frm, ic, ni);
-	LE_WRITE_2(frm, status); frm += 2;
-	if (status == IEEE80211_STATUS_SUCCESS)
-		LE_WRITE_2(frm, ni->ni_associd);
-	else
-		LE_WRITE_2(frm, 0);
-	frm += 2;
-	frm = ieee80211_add_rates(frm, rs);
-	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
-		frm = ieee80211_add_xrates(frm, rs);
-	if ((ic->ic_flags & IEEE80211_F_QOS) &&
-	    (ni->ni_flags & IEEE80211_NODE_QOS))
-		frm = ieee80211_add_edca_params(frm, ic);
+	wh = mtod(m, struct ieee80211_frame *);
+	ieee80211_send_setup(ic, ni, wh,
+		IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_REQ,
+		sa, da, bssid);
+	/* XXX power management? */
 
-	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
+	IEEE80211_NODE_STAT(ni, tx_probereq);
+	IEEE80211_NODE_STAT(ni, tx_mgmt);
 
-	return m;
-}
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_DEBUG | IEEE80211_MSG_DUMPPKTS,
+	    "[%s] send probe req on channel %u\n",
+	    ether_sprintf(wh->i_addr1),
+	    ieee80211_chan2ieee(ic, ic->ic_curchan));
 
-/*-
- * Disassociation frame format:
- * [2] Reason code
- */
-struct mbuf *
-ieee80211_get_disassoc(struct ieee80211com *ic, struct ieee80211_node *ni,
-    u_int16_t reason)
-{
-	struct mbuf *m;
-
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
-		return NULL;
-	MH_ALIGN(m, 2);
-
-	m->m_pkthdr.len = m->m_len = 2;
-	*mtod(m, u_int16_t *) = htole16(reason);
-
-	return m;
+	IF_ENQUEUE(&ic->ic_mgtq, m);
+	(*ic->ic_ifp->if_start)(ic->ic_ifp);
+	return 0;
 }
 
 /*
@@ -1267,821 +1374,657 @@ ieee80211_get_disassoc(struct ieee80211com *ic, struct ieee80211_node *ni,
  */
 int
 ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
-    int type, int arg)
+	int type, int arg)
 {
 #define	senderr(_x, _v)	do { ic->ic_stats._v++; ret = _x; goto bad; } while (0)
-	struct ifnet *ifp = &ic->ic_if;
 	struct mbuf *m;
-	int ret, timer;
+	u_int8_t *frm;
+	u_int16_t capinfo;
+	int has_challenge, is_shared_key, ret, timer, status;
 
-	if (ni == NULL)
-		panic("null node");
+	IASSERT(ni != NULL, ("null node"));
 
 	/*
 	 * Hold a reference on the node so it doesn't go away until after
 	 * the xmit is complete all the way in the driver.  On error we
 	 * will remove our reference.
 	 */
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_NODE,
+		"ieee80211_ref_node (%s:%u) %p<%s> refcnt %d\n",
+		__func__, __LINE__,
+		ni, ether_sprintf(ni->ni_macaddr),
+		ieee80211_node_refcnt(ni)+1);
 	ieee80211_ref_node(ni);
+
 	timer = 0;
 	switch (type) {
-	case IEEE80211_FC0_SUBTYPE_PROBE_REQ:
-		if ((m = ieee80211_get_probe_req(ic, ni)) == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
-
-		timer = IEEE80211_TRANS_WAIT;
-		break;
-
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
-		if ((m = ieee80211_get_probe_resp(ic, ni)) == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
+		/*
+		 * probe response frame format
+		 *	[8] time stamp
+		 *	[2] beacon interval
+		 *	[2] cabability information
+		 *	[tlv] ssid
+		 *	[tlv] supported rates
+		 *	[tlv] parameter set (FH/DS)
+		 *	[tlv] parameter set (IBSS)
+		 *	[tlv] extended rate phy (ERP)
+		 *	[tlv] extended supported rates
+		 *	[tlv] WPA
+		 *	[tlv] WME (optional)
+		 */
+		m = ieee80211_getmgtframe(&frm,
+			 8
+		       + sizeof(u_int16_t)
+		       + sizeof(u_int16_t)
+		       + 2 + IEEE80211_NWID_LEN
+		       + 2 + IEEE80211_RATE_SIZE
+		       + 7	/* max(7,3) */
+		       + 6
+		       + 3
+		       + 2 + (IEEE80211_RATE_MAXSIZE - IEEE80211_RATE_SIZE)
+		       /* XXX !WPA1+WPA2 fits w/o a cluster */
+		       + (ic->ic_flags & IEEE80211_F_WPA ?
+				2*sizeof(struct ieee80211_ie_wpa) : 0)
+		       + sizeof(struct ieee80211_wme_param)
+		);
+		if (m == NULL)
+			senderr(ENOMEM, is_tx_nobuf);
+
+		memset(frm, 0, 8);	/* timestamp should be filled later */
+		frm += 8;
+		*(u_int16_t *)frm = htole16(ic->ic_bss->ni_intval);
+		frm += 2;
+		if (ic->ic_opmode == IEEE80211_M_IBSS)
+			capinfo = IEEE80211_CAPINFO_IBSS;
+		else
+			capinfo = IEEE80211_CAPINFO_ESS;
+		if (ic->ic_flags & IEEE80211_F_PRIVACY)
+			capinfo |= IEEE80211_CAPINFO_PRIVACY;
+		if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
+		    IEEE80211_IS_CHAN_2GHZ(ic->ic_curchan))
+			capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
+		if (ic->ic_flags & IEEE80211_F_SHSLOT)
+			capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
+		*(u_int16_t *)frm = htole16(capinfo);
+		frm += 2;
+
+		frm = ieee80211_add_ssid(frm, ic->ic_bss->ni_essid,
+				ic->ic_bss->ni_esslen);
+		frm = ieee80211_add_rates(frm, &ni->ni_rates);
+
+		if (ic->ic_phytype == IEEE80211_T_FH) {
+                        *frm++ = IEEE80211_ELEMID_FHPARMS;
+                        *frm++ = 5;
+                        *frm++ = ni->ni_fhdwell & 0x00ff;
+                        *frm++ = (ni->ni_fhdwell >> 8) & 0x00ff;
+                        *frm++ = IEEE80211_FH_CHANSET(
+			    ieee80211_chan2ieee(ic, ic->ic_curchan));
+                        *frm++ = IEEE80211_FH_CHANPAT(
+			    ieee80211_chan2ieee(ic, ic->ic_curchan));
+                        *frm++ = ni->ni_fhindex;
+		} else {
+			*frm++ = IEEE80211_ELEMID_DSPARMS;
+			*frm++ = 1;
+			*frm++ = ieee80211_chan2ieee(ic, ic->ic_curchan);
+		}
+
+		if (ic->ic_opmode == IEEE80211_M_IBSS) {
+			*frm++ = IEEE80211_ELEMID_IBSSPARMS;
+			*frm++ = 2;
+			*frm++ = 0; *frm++ = 0;		/* TODO: ATIM window */
+		}
+		if (ic->ic_flags & IEEE80211_F_WPA)
+			frm = ieee80211_add_wpa(frm, ic);
+		if (ic->ic_curmode == IEEE80211_MODE_11G)
+			frm = ieee80211_add_erp(frm, ic);
+		frm = ieee80211_add_xrates(frm, &ni->ni_rates);
+		if (ic->ic_flags & IEEE80211_F_WME)
+			frm = ieee80211_add_wme_param(frm, &ic->ic_wme);
+		m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
 		break;
 
 	case IEEE80211_FC0_SUBTYPE_AUTH:
-		m = ieee80211_get_auth(ic, ni, arg >> 16, arg & 0xffff);
+		status = arg >> 16;
+		arg &= 0xffff;
+		has_challenge = ((arg == IEEE80211_AUTH_SHARED_CHALLENGE ||
+		    arg == IEEE80211_AUTH_SHARED_RESPONSE) &&
+		    ni->ni_challenge != NULL);
+
+		/*
+		 * Deduce whether we're doing open authentication or
+		 * shared key authentication.  We do the latter if
+		 * we're in the middle of a shared key authentication
+		 * handshake or if we're initiating an authentication
+		 * request and configured to use shared key.
+		 */
+		is_shared_key = has_challenge ||
+		     arg >= IEEE80211_AUTH_SHARED_RESPONSE ||
+		     (arg == IEEE80211_AUTH_SHARED_REQUEST &&
+		      ic->ic_bss->ni_authmode == IEEE80211_AUTH_SHARED);
+
+		m = ieee80211_getmgtframe(&frm,
+			  3 * sizeof(u_int16_t)
+			+ (has_challenge && status == IEEE80211_STATUS_SUCCESS ?
+				sizeof(u_int16_t)+IEEE80211_CHALLENGE_LEN : 0)
+		);
 		if (m == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
+			senderr(ENOMEM, is_tx_nobuf);
+
+		((u_int16_t *)frm)[0] =
+		    (is_shared_key) ? htole16(IEEE80211_AUTH_ALG_SHARED)
+		                    : htole16(IEEE80211_AUTH_ALG_OPEN);
+		((u_int16_t *)frm)[1] = htole16(arg);	/* sequence number */
+		((u_int16_t *)frm)[2] = htole16(status);/* status */
+
+		if (has_challenge && status == IEEE80211_STATUS_SUCCESS) {
+			((u_int16_t *)frm)[3] =
+			    htole16((IEEE80211_CHALLENGE_LEN << 8) |
+			    IEEE80211_ELEMID_CHALLENGE);
+			memcpy(&((u_int16_t *)frm)[4], ni->ni_challenge,
+			    IEEE80211_CHALLENGE_LEN);
+			m->m_pkthdr.len = m->m_len =
+				4 * sizeof(u_int16_t) + IEEE80211_CHALLENGE_LEN;
+			if (arg == IEEE80211_AUTH_SHARED_RESPONSE) {
+				IEEE80211_DPRINTF(ic, IEEE80211_MSG_AUTH,
+				    "[%s] request encrypt frame (%s)\n",
+				    ether_sprintf(ni->ni_macaddr), __func__);
+				m->m_flags |= M_LINK0; /* WEP-encrypt, please */
+			}
+		} else
+			m->m_pkthdr.len = m->m_len = 3 * sizeof(u_int16_t);
+
+		/* XXX not right for shared key */
+		if (status == IEEE80211_STATUS_SUCCESS)
+			IEEE80211_NODE_STAT(ni, tx_auth);
+		else
+			IEEE80211_NODE_STAT(ni, tx_auth_fail);
 
 		if (ic->ic_opmode == IEEE80211_M_STA)
 			timer = IEEE80211_TRANS_WAIT;
 		break;
 
 	case IEEE80211_FC0_SUBTYPE_DEAUTH:
-		if ((m = ieee80211_get_deauth(ic, ni, arg)) == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_AUTH,
+			"[%s] send station deauthenticate (reason %d)\n",
+			ether_sprintf(ni->ni_macaddr), arg);
+		m = ieee80211_getmgtframe(&frm, sizeof(u_int16_t));
+		if (m == NULL)
+			senderr(ENOMEM, is_tx_nobuf);
+		*(u_int16_t *)frm = htole16(arg);	/* reason */
+		m->m_pkthdr.len = m->m_len = sizeof(u_int16_t);
 
-		if (ifp->if_flags & IFF_DEBUG) {
-			printf("%s: station %s deauthenticate (reason %d)\n",
-			    ifp->if_xname, ether_sprintf(ni->ni_macaddr), arg);
-		}
+		IEEE80211_NODE_STAT(ni, tx_deauth);
+		IEEE80211_NODE_STAT_SET(ni, tx_deauth_code, arg);
+
+		ieee80211_node_unauthorize(ni);		/* port closed */
 		break;
 
 	case IEEE80211_FC0_SUBTYPE_ASSOC_REQ:
 	case IEEE80211_FC0_SUBTYPE_REASSOC_REQ:
-		if ((m = ieee80211_get_assoc_req(ic, ni, type)) == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
+		/*
+		 * asreq frame format
+		 *	[2] capability information
+		 *	[2] listen interval
+		 *	[6*] current AP address (reassoc only)
+		 *	[tlv] ssid
+		 *	[tlv] supported rates
+		 *	[tlv] extended supported rates
+		 *	[tlv] WME
+		 *	[tlv] user-specified ie's
+		 */
+		m = ieee80211_getmgtframe(&frm,
+			 sizeof(u_int16_t)
+		       + sizeof(u_int16_t)
+		       + IEEE80211_ADDR_LEN
+		       + 2 + IEEE80211_NWID_LEN
+		       + 2 + IEEE80211_RATE_SIZE
+		       + 2 + (IEEE80211_RATE_MAXSIZE - IEEE80211_RATE_SIZE)
+		       + sizeof(struct ieee80211_wme_info)
+		       + (ic->ic_opt_ie != NULL ? ic->ic_opt_ie_len : 0)
+		);
+		if (m == NULL)
+			senderr(ENOMEM, is_tx_nobuf);
+
+		capinfo = 0;
+		if (ic->ic_opmode == IEEE80211_M_IBSS)
+			capinfo |= IEEE80211_CAPINFO_IBSS;
+		else		/* IEEE80211_M_STA */
+			capinfo |= IEEE80211_CAPINFO_ESS;
+		if (ic->ic_flags & IEEE80211_F_PRIVACY)
+			capinfo |= IEEE80211_CAPINFO_PRIVACY;
+		/*
+		 * NB: Some 11a AP's reject the request when
+		 *     short premable is set.
+		 */
+		if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
+		    IEEE80211_IS_CHAN_2GHZ(ic->ic_curchan))
+			capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
+		if ((ni->ni_capinfo & IEEE80211_CAPINFO_SHORT_SLOTTIME) &&
+		    (ic->ic_caps & IEEE80211_C_SHSLOT))
+			capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
+		*(u_int16_t *)frm = htole16(capinfo);
+		frm += 2;
+
+		*(u_int16_t *)frm = htole16(ic->ic_lintval);
+		frm += 2;
+
+		if (type == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) {
+			IEEE80211_ADDR_COPY(frm, ic->ic_bss->ni_bssid);
+			frm += IEEE80211_ADDR_LEN;
+		}
+
+		frm = ieee80211_add_ssid(frm, ni->ni_essid, ni->ni_esslen);
+		frm = ieee80211_add_rates(frm, &ni->ni_rates);
+		frm = ieee80211_add_xrates(frm, &ni->ni_rates);
+		if ((ic->ic_flags & IEEE80211_F_WME) && ni->ni_wme_ie != NULL)
+			frm = ieee80211_add_wme_info(frm, &ic->ic_wme);
+		if (ic->ic_opt_ie != NULL) {
+			memcpy(frm, ic->ic_opt_ie, ic->ic_opt_ie_len);
+			frm += ic->ic_opt_ie_len;
+		}
+		m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
 
 		timer = IEEE80211_TRANS_WAIT;
 		break;
 
 	case IEEE80211_FC0_SUBTYPE_ASSOC_RESP:
 	case IEEE80211_FC0_SUBTYPE_REASSOC_RESP:
-		if ((m = ieee80211_get_assoc_resp(ic, ni, arg)) == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
+		/*
+		 * asreq frame format
+		 *	[2] capability information
+		 *	[2] status
+		 *	[2] association ID
+		 *	[tlv] supported rates
+		 *	[tlv] extended supported rates
+		 *	[tlv] WME (if enabled and STA enabled)
+		 */
+		m = ieee80211_getmgtframe(&frm,
+			 sizeof(u_int16_t)
+		       + sizeof(u_int16_t)
+		       + sizeof(u_int16_t)
+		       + 2 + IEEE80211_RATE_SIZE
+		       + 2 + (IEEE80211_RATE_MAXSIZE - IEEE80211_RATE_SIZE)
+		       + sizeof(struct ieee80211_wme_param)
+		);
+		if (m == NULL)
+			senderr(ENOMEM, is_tx_nobuf);
+
+		capinfo = IEEE80211_CAPINFO_ESS;
+		if (ic->ic_flags & IEEE80211_F_PRIVACY)
+			capinfo |= IEEE80211_CAPINFO_PRIVACY;
+		if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
+		    IEEE80211_IS_CHAN_2GHZ(ic->ic_curchan))
+			capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
+		if (ic->ic_flags & IEEE80211_F_SHSLOT)
+			capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
+		*(u_int16_t *)frm = htole16(capinfo);
+		frm += 2;
+
+		*(u_int16_t *)frm = htole16(arg);	/* status */
+		frm += 2;
+
+		if (arg == IEEE80211_STATUS_SUCCESS) {
+			*(u_int16_t *)frm = htole16(ni->ni_associd);
+			IEEE80211_NODE_STAT(ni, tx_assoc);
+		} else
+			IEEE80211_NODE_STAT(ni, tx_assoc_fail);
+		frm += 2;
+
+		frm = ieee80211_add_rates(frm, &ni->ni_rates);
+		frm = ieee80211_add_xrates(frm, &ni->ni_rates);
+		if ((ic->ic_flags & IEEE80211_F_WME) && ni->ni_wme_ie != NULL)
+			frm = ieee80211_add_wme_param(frm, &ic->ic_wme);
+		m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
 		break;
 
 	case IEEE80211_FC0_SUBTYPE_DISASSOC:
-		if ((m = ieee80211_get_disassoc(ic, ni, arg)) == NULL)
-			senderr(ENOMEM, is_tx_nombuf);
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_ASSOC,
+			"[%s] send station disassociate (reason %d)\n",
+			ether_sprintf(ni->ni_macaddr), arg);
+		m = ieee80211_getmgtframe(&frm, sizeof(u_int16_t));
+		if (m == NULL)
+			senderr(ENOMEM, is_tx_nobuf);
+		*(u_int16_t *)frm = htole16(arg);	/* reason */
+		m->m_pkthdr.len = m->m_len = sizeof(u_int16_t);
 
-		if (ifp->if_flags & IFF_DEBUG) {
-			printf("%s: station %s disassociate (reason %d)\n",
-			    ifp->if_xname, ether_sprintf(ni->ni_macaddr), arg);
-		}
+		IEEE80211_NODE_STAT(ni, tx_disassoc);
+		IEEE80211_NODE_STAT_SET(ni, tx_disassoc_code, arg);
 		break;
 
 	default:
-		IEEE80211_DPRINTF(("%s: invalid mgmt frame type %u\n",
-		    __func__, type));
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_ANY,
+			"[%s] invalid mgmt frame type %u\n",
+			ether_sprintf(ni->ni_macaddr), type);
 		senderr(EINVAL, is_tx_unknownmgt);
 		/* NOTREACHED */
 	}
-
-	ret = ieee80211_mgmt_output(ifp, ni, m, type);
-	if (ret == 0) {
-		if (timer)
-			ic->ic_mgt_timer = timer;
-	} else {
+	ret = ieee80211_mgmt_output(ic, ni, m, type, timer);
+	if (ret != 0) {
 bad:
-		ieee80211_release_node(ic, ni);
+		ieee80211_free_node(ni);
 	}
 	return ret;
 #undef senderr
 }
 
 /*
- * Build a RTS (Request To Send) control frame (see 7.2.1.1).
+ * Allocate a beacon frame and fillin the appropriate bits.
  */
 struct mbuf *
-ieee80211_get_rts(struct ieee80211com *ic, const struct ieee80211_frame *wh,
-    u_int16_t dur)
+ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni,
+	struct ieee80211_beacon_offsets *bo)
 {
-	struct ieee80211_frame_rts *rts;
-	struct mbuf *m;
-
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
-		return NULL;
-
-	m->m_pkthdr.len = m->m_len = sizeof(struct ieee80211_frame_rts);
-
-	rts = mtod(m, struct ieee80211_frame_rts *);
-	rts->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_CTL |
-	    IEEE80211_FC0_SUBTYPE_RTS;
-	rts->i_fc[1] = IEEE80211_FC1_DIR_NODS;
-	*(u_int16_t *)rts->i_dur = htole16(dur);
-	IEEE80211_ADDR_COPY(rts->i_ra, wh->i_addr1);
-	IEEE80211_ADDR_COPY(rts->i_ta, wh->i_addr2);
-
-	return m;
-}
-
-/*
- * Build a CTS-to-self (Clear To Send) control frame (see 7.2.1.2).
- */
-struct mbuf *
-ieee80211_get_cts_to_self(struct ieee80211com *ic, u_int16_t dur)
-{
-	struct ieee80211_frame_cts *cts;
-	struct mbuf *m;
-
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
-		return NULL;
-
-	m->m_pkthdr.len = m->m_len = sizeof(struct ieee80211_frame_cts);
-
-	cts = mtod(m, struct ieee80211_frame_cts *);
-	cts->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_CTL |
-	    IEEE80211_FC0_SUBTYPE_CTS;
-	cts->i_fc[1] = IEEE80211_FC1_DIR_NODS;
-	*(u_int16_t *)cts->i_dur = htole16(dur);
-	IEEE80211_ADDR_COPY(cts->i_ra, ic->ic_myaddr);
-
-	return m;
-}
-
-/*-
- * Beacon frame format:
- * [8]    Timestamp
- * [2]    Beacon interval
- * [2]    Capability
- * [tlv]  Service Set Identifier (SSID)
- * [tlv]  Supported rates
- * [tlv*] Frequency-Hopping (FH) Parameter Set
- * [tlv*] DS Parameter Set (802.11g)
- * [tlv*] IBSS Parameter Set
- * [tlv]  Traffic Indication Map (TIM)
- * [tlv]  ERP Information (802.11g)
- * [tlv]  Extended Supported Rates (802.11g)
- * [tlv]  RSN (802.11i)
- * [tlv]  EDCA Parameter Set (802.11e)
- */
-struct mbuf *
-ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
-{
-	const struct ieee80211_rateset *rs = &ni->ni_rates;
+	struct ifnet *ifp = ic->ic_ifp;
 	struct ieee80211_frame *wh;
 	struct mbuf *m;
-	u_int8_t *frm;
+	int pktlen;
+	u_int8_t *frm, *efrm;
+	u_int16_t capinfo;
+	struct ieee80211_rateset *rs;
 
-	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    8 +	2 + 2 +
-	    2 + ((ic->ic_flags & IEEE80211_F_HIDENWID) ? 0 : ni->ni_esslen) +
-	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    2 + ((ic->ic_phytype == IEEE80211_T_FH) ? 5 : 1) +
-	    2 + ((ic->ic_opmode == IEEE80211_M_IBSS) ? 2 : 254) +
-	    ((ic->ic_curmode == IEEE80211_MODE_11G) ? 2 + 1 : 0) +
-	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
-		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
-	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	     (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ? 2 + 44 : 0) +
-	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0) +
-	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ni->ni_rsnprotos & IEEE80211_PROTO_WPA)) ? 2 + 48 : 0));
-	if (m == NULL)
+	/*
+	 * beacon frame format
+	 *	[8] time stamp
+	 *	[2] beacon interval
+	 *	[2] cabability information
+	 *	[tlv] ssid
+	 *	[tlv] supported rates
+	 *	[3] parameter set (DS)
+	 *	[tlv] parameter set (IBSS/TIM)
+	 *	[tlv] extended rate phy (ERP)
+	 *	[tlv] extended supported rates
+	 *	[tlv] WME parameters
+	 *	[tlv] WPA/RSN parameters
+	 * XXX Vendor-specific OIDs (e.g. Atheros)
+	 * NB: we allocate the max space required for the TIM bitmap.
+	 */
+	rs = &ni->ni_rates;
+	pktlen =   8					/* time stamp */
+		 + sizeof(u_int16_t)			/* beacon interval */
+		 + sizeof(u_int16_t)			/* capabilities */
+		 + 2 + ni->ni_esslen			/* ssid */
+	         + 2 + IEEE80211_RATE_SIZE		/* supported rates */
+	         + 2 + 1				/* DS parameters */
+		 + 2 + 4 + ic->ic_tim_len		/* DTIM/IBSSPARMS */
+		 + 2 + 1				/* ERP */
+	         + 2 + (IEEE80211_RATE_MAXSIZE - IEEE80211_RATE_SIZE)
+		 + (ic->ic_caps & IEEE80211_C_WME ?	/* WME */
+			sizeof(struct ieee80211_wme_param) : 0)
+		 + (ic->ic_caps & IEEE80211_C_WPA ?	/* WPA 1+2 */
+			2*sizeof(struct ieee80211_ie_wpa) : 0)
+		 ;
+	m = ieee80211_getmgtframe(&frm, pktlen);
+	if (m == NULL) {
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_ANY,
+			"%s: cannot get buf; size %u\n", __func__, pktlen);
+		ic->ic_stats.is_tx_nobuf++;
 		return NULL;
+	}
+
+	memset(frm, 0, 8);	/* XXX timestamp is set by hardware/driver */
+	frm += 8;
+	*(u_int16_t *)frm = htole16(ni->ni_intval);
+	frm += 2;
+	if (ic->ic_opmode == IEEE80211_M_IBSS)
+		capinfo = IEEE80211_CAPINFO_IBSS;
+	else
+		capinfo = IEEE80211_CAPINFO_ESS;
+	if (ic->ic_flags & IEEE80211_F_PRIVACY)
+		capinfo |= IEEE80211_CAPINFO_PRIVACY;
+	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
+	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
+		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
+	if (ic->ic_flags & IEEE80211_F_SHSLOT)
+		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
+	bo->bo_caps = (u_int16_t *)frm;
+	*(u_int16_t *)frm = htole16(capinfo);
+	frm += 2;
+	*frm++ = IEEE80211_ELEMID_SSID;
+	if ((ic->ic_flags & IEEE80211_F_HIDESSID) == 0) {
+		*frm++ = ni->ni_esslen;
+		memcpy(frm, ni->ni_essid, ni->ni_esslen);
+		frm += ni->ni_esslen;
+	} else
+		*frm++ = 0;
+	frm = ieee80211_add_rates(frm, rs);
+	if (ic->ic_curmode != IEEE80211_MODE_FH) {
+		*frm++ = IEEE80211_ELEMID_DSPARMS;
+		*frm++ = 1;
+		*frm++ = ieee80211_chan2ieee(ic, ni->ni_chan);
+	}
+	bo->bo_tim = frm;
+	if (ic->ic_opmode == IEEE80211_M_IBSS) {
+		*frm++ = IEEE80211_ELEMID_IBSSPARMS;
+		*frm++ = 2;
+		*frm++ = 0; *frm++ = 0;		/* TODO: ATIM window */
+		bo->bo_tim_len = 0;
+	} else {
+		struct ieee80211_tim_ie *tie = (struct ieee80211_tim_ie *) frm;
+
+		tie->tim_ie = IEEE80211_ELEMID_TIM;
+		tie->tim_len = 4;	/* length */
+		tie->tim_count = 0;	/* DTIM count */ 
+		tie->tim_period = ic->ic_dtim_period;	/* DTIM period */
+		tie->tim_bitctl = 0;	/* bitmap control */
+		tie->tim_bitmap[0] = 0;	/* Partial Virtual Bitmap */
+		frm += sizeof(struct ieee80211_tim_ie);
+		bo->bo_tim_len = 1;
+	}
+	bo->bo_trailer = frm;
+	if (ic->ic_flags & IEEE80211_F_WME) {
+		bo->bo_wme = frm;
+		frm = ieee80211_add_wme_param(frm, &ic->ic_wme);
+		ic->ic_flags &= ~IEEE80211_F_WMEUPDATE;
+	}
+	if (ic->ic_flags & IEEE80211_F_WPA)
+		frm = ieee80211_add_wpa(frm, ic);
+	if (ic->ic_curmode == IEEE80211_MODE_11G)
+		frm = ieee80211_add_erp(frm, ic);
+	efrm = ieee80211_add_xrates(frm, rs);
+	bo->bo_trailer_len = efrm - bo->bo_trailer;
+	m->m_pkthdr.len = m->m_len = efrm - mtod(m, u_int8_t *);
 
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_DONTWAIT);
-	if (m == NULL)
-		return NULL;
+	IASSERT(m != NULL, ("no space for 802.11 header?"));
 	wh = mtod(m, struct ieee80211_frame *);
 	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
 	    IEEE80211_FC0_SUBTYPE_BEACON;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	*(u_int16_t *)wh->i_dur = 0;
-	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr1, ifp->if_broadcastaddr);
 	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
 	IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
 	*(u_int16_t *)wh->i_seq = 0;
 
-	frm = (u_int8_t *)&wh[1];
-	memset(frm, 0, 8); frm += 8;	/* timestamp is set by hardware */
-	LE_WRITE_2(frm, ni->ni_intval); frm += 2;
-	frm = ieee80211_add_capinfo(frm, ic, ni);
-	if (ic->ic_flags & IEEE80211_F_HIDENWID)
-		frm = ieee80211_add_ssid(frm, NULL, 0);
-	else
-		frm = ieee80211_add_ssid(frm, ni->ni_essid, ni->ni_esslen);
-	frm = ieee80211_add_rates(frm, rs);
-	if (ic->ic_phytype == IEEE80211_T_FH)
-		frm = ieee80211_add_fh_params(frm, ic, ni);
-	else
-		frm = ieee80211_add_ds_params(frm, ic, ni);
+	return m;
+}
+
+/*
+ * Update the dynamic parts of a beacon frame based on the current state.
+ */
+int
+ieee80211_beacon_update(struct ieee80211com *ic, struct ieee80211_node *ni,
+    struct ieee80211_beacon_offsets *bo, struct mbuf *m, int mcast)
+{
+	int len_changed = 0;
+	u_int16_t capinfo;
+
+	IEEE80211_BEACON_LOCK(ic);
+	/* XXX faster to recalculate entirely or just changes? */
 	if (ic->ic_opmode == IEEE80211_M_IBSS)
-		frm = ieee80211_add_ibss_params(frm, ni);
+		capinfo = IEEE80211_CAPINFO_IBSS;
 	else
-		frm = ieee80211_add_tim(frm, ic);
-	if (ic->ic_curmode == IEEE80211_MODE_11G)
-		frm = ieee80211_add_erp(frm, ic);
-	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
-		frm = ieee80211_add_xrates(frm, rs);
-	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-	    (ni->ni_rsnprotos & IEEE80211_PROTO_RSN))
-		frm = ieee80211_add_rsn(frm, ic, ni);
-	if (ic->ic_flags & IEEE80211_F_QOS)
-		frm = ieee80211_add_edca_params(frm, ic);
-	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-	    (ni->ni_rsnprotos & IEEE80211_PROTO_WPA))
-		frm = ieee80211_add_wpa(frm, ic, ni);
+		capinfo = IEEE80211_CAPINFO_ESS;
+	if (ic->ic_flags & IEEE80211_F_PRIVACY)
+		capinfo |= IEEE80211_CAPINFO_PRIVACY;
+	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
+	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
+		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
+	if (ic->ic_flags & IEEE80211_F_SHSLOT)
+		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
+	*bo->bo_caps = htole16(capinfo);
+
+	if (ic->ic_flags & IEEE80211_F_WME) {
+		struct ieee80211_wme_state *wme = &ic->ic_wme;
 
-	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
-	m->m_pkthdr.rcvif = (void *)ni;
-
-	return m;
-}
-
-/* unaligned big endian access */
-#define BE_READ_2(p)				\
-	((u_int16_t)(p)[0] << 8 | (u_int16_t)(p)[1])
-
-#define BE_WRITE_2(p, v) do {			\
-	(p)[0] = (v) >>  8; (p)[1] = (v);	\
-} while (0)
-
-#define BE_WRITE_8(p, v) do {			\
-	(p)[0] = (v) >> 56; (p)[1] = (v) >> 48;	\
-	(p)[2] = (v) >> 40; (p)[3] = (v) >> 32;	\
-	(p)[4] = (v) >> 24; (p)[5] = (v) >> 16;	\
-	(p)[6] = (v) >>  8; (p)[7] = (v);	\
-} while (0)
-
-/* unaligned little endian access */
-#define LE_WRITE_6(p, v) do {			\
-	(p)[5] = (v) >> 40; (p)[4] = (v) >> 32;	\
-	(p)[3] = (v) >> 24; (p)[2] = (v) >> 16;	\
-	(p)[1] = (v) >>  8; (p)[0] = (v);	\
-} while (0)
-
-/*
- * Handle EAPOL-Key timeouts (no answer from supplicant).
- */
-void
-ieee80211_eapol_timeout(void *arg)
-{
-	struct ieee80211_node *ni = arg;
-	struct ieee80211com *ic = ni->ni_ic;
-	int s;
-
-	IEEE80211_DPRINTF(("%s: no answer from station %s in state %d\n",
-	    __func__, ether_sprintf(ni->ni_macaddr), ni->ni_rsn_state));
-
-	s = splnet();
-
-	switch (ni->ni_rsn_state) {
-	case RSNA_PTKSTART:
-	case RSNA_PTKCALCNEGOTIATING:
-		(void)ieee80211_send_4way_msg1(ic, ni);
-		break;
-	case RSNA_PTKINITNEGOTIATING:
-		(void)ieee80211_send_4way_msg3(ic, ni);
-		break;
-	}
-
-	switch (ni->ni_rsn_gstate) {
-	case RSNA_REKEYNEGOTIATING:
-		(void)ieee80211_send_group_msg1(ic, ni);
-		break;
-	}
-
-	splx(s);
-}
-
-/*
- * Send an EAPOL-Key frame to node `ni'.  If MIC or encryption is required,
- * the PTK must be passed (otherwise it can be set to NULL.)
- */
-int
-ieee80211_send_eapol_key(struct ieee80211com *ic, struct mbuf *m,
-    struct ieee80211_node *ni, const struct ieee80211_ptk *ptk)
-{
-	struct ifnet *ifp = &ic->ic_if;
-	struct ether_header *eh;
-	struct ieee80211_eapol_key *key;
-	u_int16_t len, info;
-	int s, error;
-
-	M_PREPEND(m, sizeof(struct ether_header), M_DONTWAIT);
-	if (m == NULL)
-		return ENOMEM;
-	/* no need to m_pullup here (ok by construction) */
-	eh = mtod(m, struct ether_header *);
-	eh->ether_type = htons(ETHERTYPE_PAE);
-	IEEE80211_ADDR_COPY(eh->ether_shost, ic->ic_myaddr);
-	IEEE80211_ADDR_COPY(eh->ether_dhost, ni->ni_macaddr);
-
-	key = (struct ieee80211_eapol_key *)&eh[1];
-	key->version = EAPOL_VERSION;
-	key->type = EAPOL_KEY;
-	key->desc = (ni->ni_rsnprotos == IEEE80211_PROTO_RSN) ?
-	    EAPOL_KEY_DESC_IEEE80211 : EAPOL_KEY_DESC_WPA;
-
-	info = BE_READ_2(key->info);
-	/* use V2 descriptor if pairwise or group cipher is CCMP */
-	if (ni->ni_rsncipher == IEEE80211_CIPHER_CCMP ||
-	    ni->ni_rsngroupcipher == IEEE80211_CIPHER_CCMP)
-		info |= EAPOL_KEY_DESC_V2;
-	else
-		info |= EAPOL_KEY_DESC_V1;
-	BE_WRITE_2(key->info, info);
-
-	len = m->m_len - sizeof(struct ether_header);
-	BE_WRITE_2(key->paylen, len - sizeof(*key));
-	BE_WRITE_2(key->len, len - 4);
-
-	if (info & EAPOL_KEY_ENCRYPTED) {
-		if (ni->ni_rsnprotos == IEEE80211_PROTO_WPA) {
-			/* clear "Encrypted" bit for WPA */
-			info &= ~EAPOL_KEY_ENCRYPTED;
-			BE_WRITE_2(key->info, info);
-		}
-		ieee80211_eapol_key_encrypt(ic, key, ptk->kek);
-
-		if ((info & EAPOL_KEY_VERSION_MASK) == EAPOL_KEY_DESC_V2) {
-			/* AES Key Wrap adds 8 bytes + padding */
-			m->m_pkthdr.len = m->m_len =
-			    sizeof(*eh) + 4 + BE_READ_2(key->len);
-		}
-	}
-	if (info & EAPOL_KEY_KEYMIC)
-		ieee80211_eapol_key_mic(key, ptk->kck);
-
-	s = splnet();
-	/* start a 100ms timeout if an answer is expected from supplicant */
-	if (info & EAPOL_KEY_KEYACK)
-		timeout_add(&ni->ni_rsn_timeout, hz / 10);
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error == 0) {
-		ifp->if_obytes += m->m_pkthdr.len;
-		if ((ifp->if_flags & IFF_OACTIVE) == 0)
-			(*ifp->if_start)(ifp);
-	}
-	splx(s);
-
-	return error;
-}
-
-/*
- * Add a GTK KDE to an EAPOL-Key frame (see Figure 144).
- */
-u_int8_t *
-ieee80211_add_gtk_kde(u_int8_t *frm, struct ieee80211_node *ni,
-    const struct ieee80211_key *k)
-{
-	KASSERT(k->k_flags & IEEE80211_KEY_GROUP);
-
-	*frm++ = IEEE80211_ELEMID_VENDOR;
-	*frm++ = 6 + k->k_len;
-	memcpy(frm, IEEE80211_OUI, 3); frm += 3;
-	*frm++ = IEEE80211_KDE_GTK;
-	*frm = k->k_id & 3;
-	/*
-	 * The TxRx flag for sending a GTK is always the opposite of whether
-	 * the pairwise key is used for data encryption/integrity or not.
-	 */
-	if (ni->ni_rsncipher == IEEE80211_CIPHER_USEGROUP)
-		*frm |= 1 << 2;	/* set the Tx bit */
-	frm++;
-	*frm++ = 0;	/* reserved */
-	memcpy(frm, k->k_key, k->k_len);
-	return frm + k->k_len;
-}
-
-/*
- * Add a PMKID KDE to an EAPOL-Key frame (see Figure 146).
- */
-u_int8_t *
-ieee80211_add_pmkid_kde(u_int8_t *frm, const u_int8_t *pmkid)
-{
-	*frm++ = IEEE80211_ELEMID_VENDOR;
-	*frm++ = 20;
-	memcpy(frm, IEEE80211_OUI, 3); frm += 3;
-	*frm++ = IEEE80211_KDE_PMKID;
-	memcpy(frm, pmkid, IEEE80211_PMKID_LEN);
-	return frm + IEEE80211_PMKID_LEN;
-}
-
-struct mbuf *
-ieee80211_get_eapol_key(int flags, int type, u_int pktlen)
-{
-	struct mbuf *m;
-
-	/* reserve space for 802.11 encapsulation and EAPOL-Key header */
-	pktlen += sizeof(struct ieee80211_frame) + sizeof(struct llc) +
-	    sizeof(struct ieee80211_eapol_key);
-
-	if (pktlen > MCLBYTES)
-		panic("EAPOL-Key frame too large: %u", pktlen);
-	MGETHDR(m, flags, type);
-	if (m == NULL)
-		return NULL;
-	if (pktlen >= MINCLSIZE) {
-		MCLGET(m, flags);
-		if (!(m->m_flags & M_EXT))
-			return m_free(m);
-	}
-	m->m_data += sizeof(struct ieee80211_frame) + sizeof(struct llc);
-	return m;
-}
-
-/*
- * 4-Way Handshake Message 1 is sent by the authenticator to the supplicant
- * (see 8.5.3.1).
- */
-int
-ieee80211_send_4way_msg1(struct ieee80211com *ic, struct ieee80211_node *ni)
-{
-	struct ieee80211_eapol_key *key;
-	struct mbuf *m;
-	u_int16_t info, keylen;
-	u_int8_t *frm;
-
-	ni->ni_rsn_state = RSNA_PTKSTART;
-	if (++ni->ni_rsn_retries > 3) {
-		IEEE80211_SEND_MGMT(ic, ni, IEEE80211_FC0_SUBTYPE_DEAUTH,
-		    IEEE80211_REASON_4WAY_TIMEOUT);
-		ieee80211_node_leave(ic, ni);
-		return 0;
-	}
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA,
-	    (ni->ni_rsnprotos == IEEE80211_PROTO_RSN) ? 2 + 20 : 0);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info = EAPOL_KEY_PAIRWISE | EAPOL_KEY_KEYACK;
-	BE_WRITE_2(key->info, info);
-
-	/* copy the authenticator's nonce (ANonce) */
-	memcpy(key->nonce, ni->ni_nonce, EAPOL_KEY_NONCE_LEN);
-
-	keylen = ieee80211_cipher_keylen(ni->ni_rsncipher);
-	BE_WRITE_2(key->keylen, keylen);
-
-	frm = (u_int8_t *)&key[1];
-	/* WPA does not have PMKID KDE */
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_RSN &&
-	    ni->ni_rsnakms == IEEE80211_AKM_IEEE8021X) {
-		/* XXX retrieve PMKID from the PMKSA cache */
-		/* frm = ieee80211_add_pmkid_kde(frm, pmkid); */
-	}
-
-	m->m_pkthdr.len = m->m_len = frm - (u_int8_t *)key;
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending msg %d/%d of the %s handshake to %s\n",
-		    ic->ic_if.if_xname, 1, 4, "4-way",
-		    ether_sprintf(ni->ni_macaddr));
-
-	ni->ni_replaycnt++;
-	BE_WRITE_8(key->replaycnt, ni->ni_replaycnt);
-
-	return ieee80211_send_eapol_key(ic, m, ni, NULL);
-}
-
-/*
- * 4-Way Handshake Message 2 is sent by the supplicant to the authenticator
- * (see 8.5.3.2).
- */
-int
-ieee80211_send_4way_msg2(struct ieee80211com *ic, struct ieee80211_node *ni,
-    const u_int8_t *replaycnt, const struct ieee80211_ptk *tptk)
-{
-	struct ieee80211_eapol_key *key;
-	struct mbuf *m;
-	u_int16_t info;
-	u_int8_t *frm;
-
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA,
-	    2 + 48);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info = EAPOL_KEY_PAIRWISE | EAPOL_KEY_KEYMIC;
-	BE_WRITE_2(key->info, info);
-
-	/* copy key replay counter from Message 1/4 */
-	memcpy(key->replaycnt, replaycnt, 8);
-
-	/* copy the supplicant's nonce (SNonce) */
-	memcpy(key->nonce, ic->ic_nonce, EAPOL_KEY_NONCE_LEN);
-
-	frm = (u_int8_t *)&key[1];
-	/* add the WPA/RSN IE used in the (Re)Association Request */
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_WPA) {
-		u_int16_t keylen;
-		frm = ieee80211_add_wpa(frm, ic, ni);
-		/* WPA sets the key length field here */
-		keylen = ieee80211_cipher_keylen(ni->ni_rsncipher);
-		BE_WRITE_2(key->keylen, keylen);
-	} else	/* RSN */
-		frm = ieee80211_add_rsn(frm, ic, ni);
-
-	m->m_pkthdr.len = m->m_len = frm - (u_int8_t *)key;
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending msg %d/%d of the %s handshake to %s\n",
-		    ic->ic_if.if_xname, 2, 4, "4-way",
-		    ether_sprintf(ni->ni_macaddr));
-
-	return ieee80211_send_eapol_key(ic, m, ni, tptk);
-}
-
-/*
- * 4-Way Handshake Message 3 is sent by the authenticator to the supplicant
- * (see 8.5.3.3).
- */
-int
-ieee80211_send_4way_msg3(struct ieee80211com *ic, struct ieee80211_node *ni)
-{
-	struct ieee80211_eapol_key *key;
-	struct ieee80211_key *k;
-	struct mbuf *m;
-	u_int16_t info, keylen;
-	u_int8_t *frm;
-
-	ni->ni_rsn_state = RSNA_PTKINITNEGOTIATING;
-	if (++ni->ni_rsn_retries > 3) {
-		IEEE80211_SEND_MGMT(ic, ni, IEEE80211_FC0_SUBTYPE_DEAUTH,
-		    IEEE80211_REASON_4WAY_TIMEOUT);
-		ieee80211_node_leave(ic, ni);
-		return 0;
-	}
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_RSN)
-		k = &ic->ic_nw_keys[ic->ic_def_txkey];
-
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA,
-	    2 + 48 +
-	    ((ni->ni_rsnprotos == IEEE80211_PROTO_RSN) ?
-		2 + 6 + k->k_len : 0) +
-	    8);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info = EAPOL_KEY_PAIRWISE | EAPOL_KEY_KEYACK | EAPOL_KEY_KEYMIC;
-	if (ni->ni_rsncipher != IEEE80211_CIPHER_USEGROUP)
-		info |= EAPOL_KEY_INSTALL;
-
-	/* use same nonce as in Message 1 */
-	memcpy(key->nonce, ni->ni_nonce, EAPOL_KEY_NONCE_LEN);
-
-	ni->ni_replaycnt++;
-	BE_WRITE_8(key->replaycnt, ni->ni_replaycnt);
-
-	keylen = ieee80211_cipher_keylen(ni->ni_rsncipher);
-	BE_WRITE_2(key->keylen, keylen);
-
-	frm = (u_int8_t *)&key[1];
-	/* add the WPA/RSN IE included in Beacon/Probe Response */
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_RSN) {
-		frm = ieee80211_add_rsn(frm, ic, ic->ic_bss);
-		/* encapsulate the GTK and ask for encryption */
-		frm = ieee80211_add_gtk_kde(frm, ni, k);
-		LE_WRITE_6(key->rsc, k->k_tsc);
-		info |= EAPOL_KEY_ENCRYPTED | EAPOL_KEY_SECURE;
-	} else	/* WPA */
-		frm = ieee80211_add_wpa(frm, ic, ic->ic_bss);
-
-	/* write the key info field */
-	BE_WRITE_2(key->info, info);
-
-	m->m_pkthdr.len = m->m_len = frm - (u_int8_t *)key;
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending msg %d/%d of the %s handshake to %s\n",
-		    ic->ic_if.if_xname, 3, 4, "4-way",
-		    ether_sprintf(ni->ni_macaddr));
-
-	return ieee80211_send_eapol_key(ic, m, ni, &ni->ni_ptk);
-}
-
-/*
- * 4-Way Handshake Message 4 is sent by the supplicant to the authenticator
- * (see 8.5.3.4).
- */
-int
-ieee80211_send_4way_msg4(struct ieee80211com *ic, struct ieee80211_node *ni)
-{
-	struct ieee80211_eapol_key *key;
-	struct mbuf *m;
-	u_int16_t info;
-
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA, 0);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info = EAPOL_KEY_PAIRWISE | EAPOL_KEY_KEYMIC;
-
-	/* copy key replay counter from authenticator */
-	BE_WRITE_8(key->replaycnt, ni->ni_replaycnt);
-
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_WPA) {
-		u_int16_t keylen;
-		/* WPA sets the key length field here */
-		keylen = ieee80211_cipher_keylen(ni->ni_rsncipher);
-		BE_WRITE_2(key->keylen, keylen);
-	} else
-		info |= EAPOL_KEY_SECURE;
-
-	/* write the key info field */
-	BE_WRITE_2(key->info, info);
-
-	/* empty key data field */
-	m->m_pkthdr.len = m->m_len = sizeof(*key);
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending msg %d/%d of the %s handshake to %s\n",
-		    ic->ic_if.if_xname, 4, 4, "4-way",
-		    ether_sprintf(ni->ni_macaddr));
-
-	return ieee80211_send_eapol_key(ic, m, ni, &ni->ni_ptk);
-}
-
-/*
- * Group Key Handshake Message 1 is sent by the authenticator to the
- * supplicant (see 8.5.4.1).
- */
-int
-ieee80211_send_group_msg1(struct ieee80211com *ic, struct ieee80211_node *ni)
-{
-	struct ieee80211_eapol_key *key;
-	const struct ieee80211_key *k;
-	struct mbuf *m;
-	u_int16_t info;
-	u_int8_t *frm;
-
-	ni->ni_rsn_gstate = RSNA_REKEYNEGOTIATING;
-	if (++ni->ni_rsn_retries > 3) {
-		IEEE80211_SEND_MGMT(ic, ni, IEEE80211_FC0_SUBTYPE_DEAUTH,
-		    IEEE80211_REASON_GROUP_TIMEOUT);
-		ieee80211_node_leave(ic, ni);
-		return 0;
-	}
-	k = &ic->ic_nw_keys[ic->ic_def_txkey];
-
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA,
-	    ((ni->ni_rsnprotos == IEEE80211_PROTO_WPA) ?
-		k->k_len : 2 + 6 + k->k_len) +
-	    8);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info = EAPOL_KEY_KEYACK | EAPOL_KEY_KEYMIC | EAPOL_KEY_SECURE |
-	    EAPOL_KEY_ENCRYPTED;
-
-	ni->ni_replaycnt++;
-	BE_WRITE_8(key->replaycnt, ni->ni_replaycnt);
-
-	frm = (u_int8_t *)&key[1];
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_WPA) {
-		/* WPA does not have GTK KDE */
-		BE_WRITE_2(key->keylen, k->k_len);
-		memcpy(frm, k->k_key, k->k_len);
-		frm += k->k_len;
-		info |= (k->k_id & 0x3) << EAPOL_KEY_WPA_KID_SHIFT;
-		if (ni->ni_rsncipher == IEEE80211_CIPHER_USEGROUP)
-			info |= EAPOL_KEY_WPA_TX;
-	} else	/* RSN */
-		frm = ieee80211_add_gtk_kde(frm, ni, k);
-
-	/* RSC = last transmit sequence number for the GTK */
-	LE_WRITE_6(key->rsc, k->k_tsc);
-
-	/* write the key info field */
-	BE_WRITE_2(key->info, info);
-
-	m->m_pkthdr.len = m->m_len = frm - (u_int8_t *)key;
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending msg %d/%d of the %s handshake to %s\n",
-		    ic->ic_if.if_xname, 1, 2, "group key",
-		    ether_sprintf(ni->ni_macaddr));
-
-	return ieee80211_send_eapol_key(ic, m, ni, &ni->ni_ptk);
-}
-
-/*
- * Group Key Handshake Message 2 is sent by the supplicant to the
- * authenticator (see 8.5.4.2).
- */
-int
-ieee80211_send_group_msg2(struct ieee80211com *ic, struct ieee80211_node *ni,
-    const struct ieee80211_key *k)
-{
-	struct ieee80211_eapol_key *key;
-	u_int16_t info;
-	struct mbuf *m;
-
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA, 0);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info = EAPOL_KEY_KEYMIC | EAPOL_KEY_SECURE;
-
-	/* copy key replay counter from authenticator */
-	BE_WRITE_8(key->replaycnt, ni->ni_replaycnt);
-
-	if (ni->ni_rsnprotos == IEEE80211_PROTO_WPA) {
-		/* WPA sets the key length and key id fields here */
-		BE_WRITE_2(key->keylen, k->k_len);
-		info |= (k->k_id & 3) << EAPOL_KEY_WPA_KID_SHIFT;
-	}
-
-	/* write the key info field */
-	BE_WRITE_2(key->info, info);
-
-	/* empty key data field */
-	m->m_pkthdr.len = m->m_len = sizeof(*key);
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending msg %d/%d of the %s handshake to %s\n",
-		    ic->ic_if.if_xname, 2, 2, "group key",
-		    ether_sprintf(ni->ni_macaddr));
-
-	return ieee80211_send_eapol_key(ic, m, ni, &ni->ni_ptk);
-}
-
-/*
- * EAPOL-Key Request frames are sent by the supplicant to request that the
- * authenticator initiates either a 4-Way Handshake or Group Key Handshake,
- * or to report a MIC failure in a TKIP MSDU.
- */
-int
-ieee80211_send_eapol_key_req(struct ieee80211com *ic,
-    struct ieee80211_node *ni, u_int16_t info, u_int64_t tsc)
-{
-	struct ieee80211_eapol_key *key;
-	struct mbuf *m;
-
-	m = ieee80211_get_eapol_key(M_DONTWAIT, MT_DATA, 0);
-	if (m == NULL)
-		return ENOMEM;
-	key = mtod(m, struct ieee80211_eapol_key *);
-	memset(key, 0, sizeof(*key));
-
-	info |= EAPOL_KEY_REQUEST;
-	BE_WRITE_2(key->info, info);
-
-	/* in case of TKIP MIC failure, fill the RSC field */
-	if (info & EAPOL_KEY_ERROR)
-		LE_WRITE_6(key->rsc, tsc);
-
-	/* use our separate key replay counter for key requests */
-	BE_WRITE_8(key->replaycnt, ni->ni_reqreplaycnt);
-	ni->ni_reqreplaycnt++;
-
-	if (ic->ic_if.if_flags & IFF_DEBUG)
-		printf("%s: sending EAPOL-Key request to %s\n",
-		    ic->ic_if.if_xname, ether_sprintf(ni->ni_macaddr));
-
-	return ieee80211_send_eapol_key(ic, m, ni, &ni->ni_ptk);
-}
-
-void
-ieee80211_pwrsave(struct ieee80211com *ic, struct ieee80211_node *ni,
-    struct mbuf *m)
-{
-	/* store the new packet on our queue, changing the TIM if necessary */
-	if (IF_IS_EMPTY(&ni->ni_savedq))
-		(*ic->ic_set_tim)(ic, ni->ni_associd, 1);
-
-	if (ni->ni_savedq.ifq_len >= IEEE80211_PS_MAX_QUEUE) {
-		IF_DROP(&ni->ni_savedq);
-		m_freem(m);
-		if (ic->ic_if.if_flags & IFF_DEBUG)
-			printf("%s: station %s power save queue overflow"
-			    " of size %d drops %d\n",
-			    ic->ic_if.if_xname,
-			    ether_sprintf(ni->ni_macaddr),
-			    IEEE80211_PS_MAX_QUEUE,
-			    ni->ni_savedq.ifq_drops);
-	} else {
 		/*
-		 * Similar to ieee80211_mgmt_output, store the node in
-		 * the rcvif field.
+		 * Check for agressive mode change.  When there is
+		 * significant high priority traffic in the BSS
+		 * throttle back BE traffic by using conservative
+		 * parameters.  Otherwise BE uses agressive params
+		 * to optimize performance of legacy/non-QoS traffic.
 		 */
-		IF_ENQUEUE(&ni->ni_savedq, m);
-		m->m_pkthdr.rcvif = (void *)ni;
+		if (wme->wme_flags & WME_F_AGGRMODE) {
+			if (wme->wme_hipri_traffic >
+			    wme->wme_hipri_switch_thresh) {
+				IEEE80211_DPRINTF(ic, IEEE80211_MSG_WME,
+				    "%s: traffic %u, disable aggressive mode\n",
+				    __func__, wme->wme_hipri_traffic);
+				wme->wme_flags &= ~WME_F_AGGRMODE;
+				ieee80211_wme_updateparams_locked(ic);
+				wme->wme_hipri_traffic =
+					wme->wme_hipri_switch_hysteresis;
+			} else
+				wme->wme_hipri_traffic = 0;
+		} else {
+			if (wme->wme_hipri_traffic <=
+			    wme->wme_hipri_switch_thresh) {
+				IEEE80211_DPRINTF(ic, IEEE80211_MSG_WME,
+				    "%s: traffic %u, enable aggressive mode\n",
+				    __func__, wme->wme_hipri_traffic);
+				wme->wme_flags |= WME_F_AGGRMODE;
+				ieee80211_wme_updateparams_locked(ic);
+				wme->wme_hipri_traffic = 0;
+			} else
+				wme->wme_hipri_traffic =
+					wme->wme_hipri_switch_hysteresis;
+		}
+		if (ic->ic_flags & IEEE80211_F_WMEUPDATE) {
+			(void) ieee80211_add_wme_param(bo->bo_wme, wme);
+			ic->ic_flags &= ~IEEE80211_F_WMEUPDATE;
+		}
 	}
+
+#ifndef IEEE80211_NO_HOSTAP
+	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {	/* NB: no IBSS support*/
+		struct ieee80211_tim_ie *tie =
+			(struct ieee80211_tim_ie *) bo->bo_tim;
+		if (ic->ic_flags & IEEE80211_F_TIMUPDATE) {
+			u_int timlen, timoff, i;
+			/* 
+			 * ATIM/DTIM needs updating.  If it fits in the
+			 * current space allocated then just copy in the
+			 * new bits.  Otherwise we need to move any trailing
+			 * data to make room.  Note that we know there is
+			 * contiguous space because ieee80211_beacon_allocate
+			 * insures there is space in the mbuf to write a
+			 * maximal-size virtual bitmap (based on ic_max_aid).
+			 */
+			/*
+			 * Calculate the bitmap size and offset, copy any
+			 * trailer out of the way, and then copy in the
+			 * new bitmap and update the information element.
+			 * Note that the tim bitmap must contain at least
+			 * one byte and any offset must be even.
+			 */
+			if (ic->ic_ps_pending != 0) {
+				timoff = 128;		/* impossibly large */
+				for (i = 0; i < ic->ic_tim_len; i++)
+					if (ic->ic_tim_bitmap[i]) {
+						timoff = i &~ 1;
+						break;
+					}
+				IASSERT(timoff != 128, ("tim bitmap empty!"));
+				for (i = ic->ic_tim_len-1; i >= timoff; i--)
+					if (ic->ic_tim_bitmap[i])
+						break;
+				timlen = 1 + (i - timoff);
+			} else {
+				timoff = 0;
+				timlen = 1;
+			}
+			if (timlen != bo->bo_tim_len) {
+				/* copy up/down trailer */
+				ovbcopy(bo->bo_trailer, tie->tim_bitmap+timlen,
+					bo->bo_trailer_len);
+				bo->bo_trailer = tie->tim_bitmap+timlen;
+				bo->bo_wme = bo->bo_trailer;
+				bo->bo_tim_len = timlen;
+
+				/* update information element */
+				tie->tim_len = 3 + timlen;
+				tie->tim_bitctl = timoff;
+				len_changed = 1;
+			}
+			memcpy(tie->tim_bitmap, ic->ic_tim_bitmap + timoff,
+				bo->bo_tim_len);
+
+			ic->ic_flags &= ~IEEE80211_F_TIMUPDATE;
+
+			IEEE80211_DPRINTF(ic, IEEE80211_MSG_POWER,
+				"%s: TIM updated, pending %u, off %u, len %u\n",
+				__func__, ic->ic_ps_pending, timoff, timlen);
+		}
+		/* count down DTIM period */
+		if (tie->tim_count == 0)
+			tie->tim_count = tie->tim_period - 1;
+		else
+			tie->tim_count--;
+		/* update state for buffered multicast frames on DTIM */
+		if (mcast && (tie->tim_count == 1 || tie->tim_period == 1))
+			tie->tim_bitctl |= 1;
+		else
+			tie->tim_bitctl &= ~1;
+	}
+#endif /* !IEEE80211_NO_HOSTAP */
+	IEEE80211_BEACON_UNLOCK(ic);
+
+	return len_changed;
+}
+
+/*
+ * Save an outbound packet for a node in power-save sleep state.
+ * The new packet is placed on the node's saved queue, and the TIM
+ * is changed, if necessary.
+ */
+void
+ieee80211_pwrsave(struct ieee80211com *ic, struct ieee80211_node *ni, 
+		  struct mbuf *m)
+{
+	int qlen, age;
+
+	IEEE80211_NODE_SAVEQ_LOCK(ni);
+	if (IF_QFULL(&ni->ni_savedq)) {
+		IF_DROP(&ni->ni_savedq);
+		IEEE80211_NODE_SAVEQ_UNLOCK(ni);
+		IEEE80211_DPRINTF(ic, IEEE80211_MSG_ANY,
+			"[%s] pwr save q overflow, drops %d (size %d)\n",
+			ether_sprintf(ni->ni_macaddr), 
+			ni->ni_savedq.ifq_drops, IEEE80211_PS_MAX_QUEUE);
+#ifdef IEEE80211_DEBUG
+		if (ieee80211_msg_dumppkts(ic))
+			ieee80211_dump_pkt(mtod(m, void *), m->m_len, -1, -1);
+#endif
+		m_freem(m);
+		return;
+	}
+	/*
+	 * Tag the frame with it's expiry time and insert
+	 * it in the queue.  The aging interval is 4 times
+	 * the listen interval specified by the station. 
+	 * Frames that sit around too long are reclaimed
+	 * using this information.
+	 */
+	/* XXX handle overflow? */
+	age = ((ni->ni_intval * ic->ic_bintval) << 2) / 1024; /* TU -> secs */
+	_IEEE80211_NODE_SAVEQ_ENQUEUE(ni, m, qlen, age);
+	IEEE80211_NODE_SAVEQ_UNLOCK(ni);
+
+	IEEE80211_DPRINTF(ic, IEEE80211_MSG_POWER,
+		"[%s] save frame with age %d, %u now queued\n",
+		ether_sprintf(ni->ni_macaddr), age, qlen);
+
+	if (qlen == 1)
+		ic->ic_set_tim(ni, 1);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: db_trace.c,v 1.40 2006/10/30 17:52:12 garbled Exp $	*/
+/*	$NetBSD: db_trace.c,v 1.48 2008/07/02 19:49:58 rmind Exp $	*/
 /*	$OpenBSD: db_trace.c,v 1.3 1997/03/21 02:10:48 niklas Exp $	*/
 
 /* 
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.40 2006/10/30 17:52:12 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.48 2008/07/02 19:49:58 rmind Exp $");
 
 #include "opt_ppcarch.h"
 
@@ -100,7 +100,7 @@ const struct db_variable * const db_eregs = db_regs + sizeof (db_regs)/sizeof (d
  *	Frame tracing.
  */
 void
-db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
+db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
 	const char *modif, void (*pr)(const char *, ...))
 {
 	db_addr_t frame, lr, *args;
@@ -109,19 +109,24 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 	const char *symname;
 	const char *cp = modif;
 	char c;
-	boolean_t kernel_only = TRUE;
-	boolean_t trace_thread = FALSE;
+	bool kernel_only = true;
+	bool trace_thread = false;
+	bool lwpaddr = false;
 	extern int trapexit[], sctrapexit[];
-	boolean_t full = FALSE;
-	boolean_t in_kernel = 1;
+	bool full = false;
+	bool in_kernel = true;
 
 	while ((c = *cp++) != 0) {
+		if (c == 'a') {
+			lwpaddr = true;
+			trace_thread = true;
+		}
 		if (c == 't')
-			trace_thread = TRUE;
+			trace_thread = true;
 		if (c == 'u')
-			kernel_only = FALSE;
+			kernel_only = false;
 		if (c == 'f')
-			full = TRUE;
+			full = true;
 	}
 
 	if (have_addr) {
@@ -130,14 +135,22 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 			struct lwp *l;
 			struct user *u;
 
-			(*pr)("trace: pid %d ", (int)addr);
-			p = p_find(addr, PFIND_LOCKED);
-			if (p == NULL) {
-				(*pr)("not found\n");
-				return;
-			}	
-			l = proc_representative_lwp(p); /* XXX NJWLWP */
-			if ((l->l_flag & L_INMEM) == 0) {
+			if (lwpaddr) {
+				l = (struct lwp *)addr;
+				p = l->l_proc;
+				(*pr)("trace: pid %d ", p->p_pid);
+			} else {
+				(*pr)("trace: pid %d ", (int)addr);
+				p = p_find(addr, PFIND_LOCKED);
+				if (p == NULL) {
+					(*pr)("not found\n");
+					return;
+				}
+				l = LIST_FIRST(&p->p_lwps);
+				KASSERT(l != NULL);
+			}
+			(*pr)("lid %d ", l->l_lid);
+			if ((l->l_flag & LW_INMEM) == 0) {
 				(*pr)("swapped out\n");
 				return;
 			}
@@ -238,9 +251,11 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 #ifdef PPC_OEA
 			if (tf->exc == EXC_DSI)
 				(*pr)(" dsisr=%#x", tf->dsisr);
+#ifdef PPC_OEA601
 			if ((mfpvr() >> 16) == MPC601)
 				(*pr)(" mq=%#x", tf->tf_xtra[TF_MQ]);
-#endif
+#endif /* PPC_OEA601 */
+#endif /* PPC_OEA */
 #ifdef PPC_IBM4XX
 			if (tf->exc == EXC_DSI)
 				(*pr)(" dear=%#x", tf->dar);

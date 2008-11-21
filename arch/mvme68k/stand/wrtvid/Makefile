@@ -1,8 +1,11 @@
-#	$OpenBSD: Makefile,v 1.2 1996/04/28 10:49:47 deraadt Exp $
+#	$NetBSD: Makefile,v 1.11 2002/01/23 21:06:28 scw Exp $
 
-PROG=	wrtvid
+S=${.CURDIR}/../../../../
+
+HOSTPROG=	wrtvid
 NOMAN=
 
-install:
+# only needed during build
+proginstall::
 
-.include <bsd.prog.mk>
+.include <bsd.hostprog.mk>

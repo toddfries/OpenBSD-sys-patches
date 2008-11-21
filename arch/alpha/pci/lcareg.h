@@ -1,5 +1,4 @@
-/*	$OpenBSD: lcareg.h,v 1.7 2001/02/16 16:02:54 jason Exp $	*/
-/* $NetBSD: lcareg.h,v 1.7 1997/06/06 23:54:31 thorpej Exp $ */
+/* $NetBSD: lcareg.h,v 1.8 1997/09/05 02:14:31 thorpej Exp $ */
 
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.

@@ -1,5 +1,4 @@
-/*	$OpenBSD: findcpu.c,v 1.12 2006/08/27 16:55:41 miod Exp $	*/
-/*	$NetBSD: findcpu.c,v 1.5 1999/08/23 19:10:43 ragge Exp $	*/
+/*	$NetBSD: findcpu.c,v 1.18 2008/03/11 05:34:03 matt Exp $	*/
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -30,9 +29,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: findcpu.c,v 1.18 2008/03/11 05:34:03 matt Exp $");
 
 #include <sys/param.h>
+#ifdef _KERNEL
 #include <sys/device.h>
+#endif
 
 #include <machine/sid.h>
 #include <machine/nexus.h>
@@ -49,11 +52,9 @@ int vax_cputype;	/* highest byte of SID register */
 int vax_bustype;	/* holds/defines all busses on this machine */
 int vax_boardtype;	/* machine dependend, combination of SID and SIE */
  
-int vax_cpudata = 0;	/* contents of the SID register */
-int vax_siedata = 0;	/* contents of the SIE register */
+int vax_cpudata;	/* contents of the SID register */
+int vax_siedata;	/* contents of the SIE register */
 int vax_confdata;	/* machine dependend, configuration/setup data */
-
-void	findcpu(void);
 
 /*
  * Try to figure out which type of system this is.
@@ -66,6 +67,9 @@ findcpu(void)
 	vax_boardtype = vax_cputype << 24;
 
 	switch (vax_cputype) {
+	case VAX_TYP_730:
+		vax_bustype = VAX_UNIBUS;
+		break;
 	case VAX_TYP_780:
 		vax_bustype = VAX_SBIBUS;
 		break;
@@ -74,6 +78,10 @@ findcpu(void)
 		break;
 	case VAX_TYP_790:
 		vax_bustype = VAX_ABUS;
+		break;
+
+	case VAX_TYP_UV1:
+		vax_bustype = VAX_IBUS;
 		break;
 
 	case VAX_TYP_UV2:
@@ -91,17 +99,13 @@ findcpu(void)
 		case VAX_BTYP_43:
 		case VAX_BTYP_46:
 		case VAX_BTYP_48:
-		case VAX_BTYP_IS1:	
+		case VAX_BTYP_IS1:
 			vax_confdata = *(int *)(0x20020000);
 			vax_bustype = VAX_VSBUS;
 			break;
 		case VAX_BTYP_49:
 			vax_confdata = *(int *)(0x25800000);
 			vax_bustype = VAX_VSBUS;
-			break;
-		case VAX_BTYP_VXT:
-			vax_confdata = *(int *)(0x200c0000);
-			vax_bustype = VAX_VXTBUS;
 			break;
 
 		case VAX_BTYP_9CC:
@@ -111,14 +115,14 @@ findcpu(void)
 			vax_bustype = VAX_XMIBUS;
 			break;
 
+		case VAX_BTYP_670:
+		case VAX_BTYP_660:
 		case VAX_BTYP_60:
+		case VAX_BTYP_680:
+		case VAX_BTYP_681:
 		case VAX_BTYP_630:
 		case VAX_BTYP_650:
-		case VAX_BTYP_660:
-		case VAX_BTYP_670:
-		case VAX_BTYP_1301:
-		case VAX_BTYP_1303:
-		case VAX_BTYP_1305:
+		case VAX_BTYP_53:
 			vax_bustype = VAX_IBUS;
 			break;
 
@@ -131,13 +135,17 @@ findcpu(void)
 		break;
 
 	case VAX_TYP_8NN:
+		vax_boardtype = VAX_BTYP_8800; /* subversion later */
+		vax_bustype = VAX_NMIBUS;
+		break;
+
 	case VAX_TYP_8PS:
-		vax_boardtype = VAX_BTYP_8800;
-		vax_bustype = VAX_NBIBUS;
+		vax_boardtype = VAX_BTYP_8PS;
+		vax_bustype = VAX_NMIBUS;
 		break;
 
 	default:
 		/* CPU not supported, just give up */
-		asm("halt");
+		__asm("halt");
 	}
 }

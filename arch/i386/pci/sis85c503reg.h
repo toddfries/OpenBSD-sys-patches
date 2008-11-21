@@ -1,4 +1,3 @@
-/*	$OpenBSD: sis85c503reg.h,v 1.3 2000/03/28 03:38:00 mickey Exp $	*/
 /*	$NetBSD: sis85c503reg.h,v 1.1 1999/11/17 01:21:21 thorpej Exp $	*/
 
 /*

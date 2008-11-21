@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.6 2004/01/15 17:22:28 miod Exp $	*/
-/*	$NetBSD: db_disasm.c,v 1.9 2000/08/16 11:29:42 pk Exp $ */
+/*	$NetBSD: db_disasm.c,v 1.14 2007/02/21 22:59:53 thorpej Exp $ */
 
 /*
  * Copyright (c) 1994 David S. Miller, davem@nadzieja.rutgers.edu
@@ -31,6 +30,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.14 2007/02/21 22:59:53 thorpej Exp $");
 
 #include <sys/param.h>
 #include <machine/db_machdep.h>
@@ -114,18 +116,18 @@
 
 struct sparc_insn {
 	  unsigned int match;
-	  char *name;
-	  char *format;
+	  const char* name;
+	  const char* format;
 };
 
-char *regs[] = {
+const char* regs[] = {
 	"g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7",
 	"o0", "o1", "o2", "o3", "o4", "o5", "sp", "o7",
 	"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7",
 	"i0", "i1", "i2", "i3", "i4", "i5", "fp", "i7"
 };
 
-char *priv_regs[] = {
+const char* priv_regs[] = {
 	"tpc", "tnpc", "tstate", "tt", "tick", "tba", "pstate", "tl",
 	"pil", "cwp", "cansave", "canrestore", "cleanwin", "otherwin",
 	"wstate", "fq",
@@ -133,18 +135,18 @@ char *priv_regs[] = {
 	"", "", "", "", "", "", "", "ver"
 };
 
-char *state_regs[] = {
+const char* state_regs[] = {
 	"y", "", "ccr", "asi", "tick", "pc", "fprs", "asr",
 	"", "", "", "", "", "", "", "",
 	"pcr", "pic", "dcr", "gsr", "set_softint", "clr_softint", "softint", "tick_cmpr", "",
 	"", "", "", "", "", "", "", ""
 };
 
-char *ccodes[] = {
+const char* ccodes[] = {
 	"fcc0", "fcc1", "fcc2", "fcc3", "icc", "", "xcc", ""
 };
 
-char *prefetch[] = {
+const char* prefetch[] = {
 	"n_reads", "one_read", "n_writes", "one_write", "page"
 };
 
@@ -254,7 +256,7 @@ struct sparc_insn sparc_i[] = {
 
 	/* Branch on Integer Register with Prediction "BPr" */
 	{(FORMAT2(0, 3) | RCOND2(1)), "brz", "ap,1l"},
-	{(FORMAT2(0, 3) | RCOND2(2)), "brlez", "ap,1l"},
+	{(FORMAT2(0, 3) | A(1) | P(1) | RCOND2(2)), "brlex", "ap,1l"},
 	{(FORMAT2(0, 3) | RCOND2(3)), "brlz", "ap,1l"},
 	{(FORMAT2(0, 3) | RCOND2(5)), "brnz", "ap,1l"},
 	{(FORMAT2(0, 3) | RCOND2(6)), "brgz", "ap,1l"},
@@ -572,7 +574,7 @@ struct sparc_insn sparc_i[] = {
 	{FORMAT3(2, OP3_X(2,14), 1), "popc", "id"},
 
 	{FORMAT3(2, OP3_X(3,14), 0), "done", ""},
-	{FORMAT3(2, OP3_X(3,14), 0)|FCN(1), "retry", ""},
+	{FORMAT3(2, OP3_X(3,14)|FCN(1), 1), "retry", ""},
 
 	{FORMAT3(2, OP3_X(0,15), 0), "sdiv", "12d"},
 	{FORMAT3(2, OP3_X(0,15), 1), "sdiv", "1id"},
@@ -876,13 +878,13 @@ struct sparc_insn sparc_i[] = {
 db_addr_t
 db_disasm(loc, altfmt)
 	vaddr_t loc;
-	boolean_t altfmt;
+	bool altfmt;
 {
 	struct sparc_insn*	i_ptr = (struct sparc_insn *)&sparc_i;
 
 	unsigned int insn, you_lose, bitmask;
 	int matchp;
-	char *f_ptr, *cp;
+	const char *f_ptr, *cp;
 
 	you_lose = 0;
 	matchp = 0;
@@ -930,12 +932,6 @@ db_disasm(loc, altfmt)
 			   ((bitmask>>19) & 0x3f) == 0x35) /* XXX */ {
 			/* fmov */
 			you_lose &= (FORMAT3(0x3,0x3f,0x1) | COND2(1,0xf));
-		} else if (((bitmask>>30) & 0x3) == 0x2 &&
-			   ((bitmask>>13) & 0x1) == 0 &&
-			   ((((bitmask>>19) & 0x3f) == OP3_X(3,1)) ||
-			   (((bitmask>>19) & 0x3f) == OP3_X(3,14)))) /* XXX */ {
-			/* saved/done/retry/restored */
-			you_lose &= (FORMAT3(0x3,0x3f,0x1)) | FCN(0x1f);
 		} else {
 			you_lose &= (FORMAT3(0x3,0x3f,0x1));
 		}

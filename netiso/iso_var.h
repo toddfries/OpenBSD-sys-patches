@@ -1,4 +1,4 @@
-/*	$NetBSD: iso_var.h,v 1.23 2005/12/11 12:25:12 christos Exp $	*/
+/*	$NetBSD: iso_var.h,v 1.29 2008/10/24 17:07:33 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1991, 1993
@@ -144,12 +144,12 @@ extern struct callout esis_config_ch;
 int iso_addrmatch1 (const struct iso_addr *, const struct iso_addr *);
 int iso_addrmatch (const struct sockaddr_iso *, const struct sockaddr_iso *);
 int iso_netmatch (const struct sockaddr_iso *, const struct sockaddr_iso *);
-u_long iso_hashchar (caddr_t, int);
+u_long iso_hashchar (void *, int);
 int iso_hash (struct sockaddr_iso *, struct afhash *);
-int iso_netof (struct iso_addr *, caddr_t);
-int iso_control (struct socket *, u_long, caddr_t, struct ifnet *,
+int iso_netof (struct iso_addr *, void *);
+int iso_control (struct socket *, u_long, void *, struct ifnet *,
 		     struct lwp *);
-void iso_purgeaddr (struct ifaddr *, struct ifnet *);
+void iso_purgeaddr(struct ifaddr *);
 void iso_purgeif (struct ifnet *);
 void iso_ifscrub (struct ifnet *, struct iso_ifaddr *);
 int iso_ifinit (struct ifnet *, struct iso_ifaddr *, struct sockaddr_iso *,
@@ -157,9 +157,11 @@ int iso_ifinit (struct ifnet *, struct iso_ifaddr *, struct sockaddr_iso *,
 struct ifaddr *iso_ifwithidi (struct sockaddr *);
 int iso_ck_addr (struct iso_addr *);
 int iso_eqtype (struct iso_addr *, struct iso_addr *);
-struct iso_ifaddr *iso_localifa (struct sockaddr_iso *);
-int iso_nlctloutput (int, int, caddr_t, struct mbuf *);
-void dump_isoaddr (struct sockaddr_iso *);
+struct iso_ifaddr *iso_localifa (const struct sockaddr_iso *);
+int iso_nlctloutput (int, int, void *, struct mbuf *);
+void dump_isoaddr(const struct sockaddr_iso *);
+void iso_insque(void *, void *);
+void iso_remque(void *);
 
 /* iso_chksum.c */
 int iso_check_csum (struct mbuf *, int);
@@ -168,17 +170,17 @@ int m_datalen (struct mbuf *);
 int m_compress (struct mbuf *, struct mbuf **);
 
 /* iso_snpac.c */
-void llc_rtrequest (int, struct rtentry *, struct rt_addrinfo *);
+void llc_rtrequest (int, struct rtentry *, const struct rt_addrinfo *);
 void iso_setmcasts (struct ifnet *, int);
-int iso_snparesolve (struct ifnet *, struct sockaddr_iso *,
-			 caddr_t, int *);
+int iso_snparesolve(struct ifnet *, const struct sockaddr_iso *,
+			 void *, int *);
 void snpac_free (struct llinfo_llc *);
-int snpac_add (struct ifnet *, struct iso_addr *, caddr_t, int,
+int snpac_add (struct ifnet *, struct iso_addr *, void *, int,
 		   u_short, int);
-int snpac_ioctl (struct socket *, u_long, caddr_t, struct lwp *);
+int snpac_ioctl (struct socket *, u_long, void *, struct lwp *);
 void snpac_logdefis (struct rtentry *);
 void snpac_age (void *);
-int snpac_ownmulti (caddr_t, u_int);
+int snpac_ownmulti (void *, u_int);
 void snpac_flushifp (struct ifnet *);
 void snpac_rtrequest (int, struct iso_addr *, struct iso_addr *,
 			 struct iso_addr *, int, struct rtentry **);

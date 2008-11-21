@@ -1,4 +1,4 @@
-/* $NetBSD: cms.c,v 1.15 2007/10/19 12:00:15 ad Exp $ */
+/* $NetBSD: cms.c,v 1.18 2008/04/28 20:23:52 martin Exp $ */
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cms.c,v 1.15 2007/10/19 12:00:15 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cms.c,v 1.18 2008/04/28 20:23:52 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,10 +68,10 @@ struct cms_softc {
 	midisyn sc_midisyn;
 };
 
-int	cms_probe(struct device *, struct cfdata *, void *);
-void	cms_attach(struct device *, struct device *, void *);
+int	cms_probe(device_t, cfdata_t, void *);
+void	cms_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(cms, sizeof(struct cms_softc),
+CFATTACH_DECL_NEW(cms, sizeof(struct cms_softc),
     cms_probe, cms_attach, NULL, NULL);
 
 int	cms_open(midisyn *, int);
@@ -114,8 +107,7 @@ static char cms_note_table[] = {
 #define NOTE_TO_COUNT(note) cms_note_table[(((note)-CMS_FIRST_NOTE)%12)]
 
 int
-cms_probe(struct device *parent, struct cfdata *match,
-    void *aux)
+cms_probe(device_t parent, cfdata_t match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot;
@@ -164,23 +156,25 @@ out:
 
 
 void
-cms_attach(struct device *parent, struct device *self, void *aux)
+cms_attach(device_t parent, device_t self, void *aux)
 {
-	struct cms_softc *sc = (struct cms_softc *)self;
+	struct cms_softc *sc = device_private(self);
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	midisyn *ms;
 	struct audio_attach_args arg;
 
-	printf("\n");
+	sc->sc_mididev.dev = self;
+
+	aprint_normal("\n");
 
 	DPRINTF(("cms_attach():\n"));
 
 	iot = ia->ia_iot;
 
 	if (bus_space_map(iot, ia->ia_io[0].ir_addr, CMS_IOSIZE, 0, &ioh)) {
-		printf(": can't map i/o space\n");
+		aprint_error_dev(self, "can't map i/o space\n");
 		return;
 	}
 
@@ -203,7 +197,7 @@ cms_attach(struct device *parent, struct device *self, void *aux)
 	arg.type = AUDIODEV_TYPE_MIDI;
 	arg.hwif = sc->sc_mididev.hw_if;
 	arg.hdl = sc->sc_mididev.hw_hdl;
-	config_found((struct device *)&sc->sc_mididev, &arg, 0);
+	config_found(self, &arg, 0);
 }
 
 
@@ -218,8 +212,7 @@ cms_open(midisyn *ms, int flag)
 }
 
 void
-cms_close(ms)
-	midisyn *ms;
+cms_close(midisyn *ms)
 {
 	struct cms_softc *sc = (struct cms_softc *)ms->data;
 
@@ -296,8 +289,7 @@ cms_off(midisyn *ms, uint_fast16_t vidx, uint_fast8_t vel)
 }
 
 static void
-cms_reset(sc)
-	struct cms_softc *sc;
+cms_reset(struct cms_softc *sc)
 {
 	int i;
 

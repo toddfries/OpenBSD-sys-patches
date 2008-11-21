@@ -1,5 +1,4 @@
-/*	$OpenBSD: esovar.h,v 1.4 2007/11/11 01:32:52 jakemsr Exp $	*/
-/*	$NetBSD: esovar.h,v 1.5 2004/05/25 21:38:11 kleink Exp $	*/
+/*	$NetBSD: esovar.h,v 1.8 2007/01/12 00:47:51 kleink Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2004 Klaus J. Klein
@@ -89,7 +88,6 @@ struct eso_softc {
 	struct device		sc_dev;
 	pci_intr_handle_t *	sc_ih;
 	unsigned int		sc_revision;	/* PCI Revision ID */
-	void *			sc_powerhook;
 
 	/* Optionally deferred configuration of Audio 1 DMAC I/O space */
 	struct pci_attach_args	sc_pa;
@@ -97,7 +95,7 @@ struct eso_softc {
 
 	/* DMA */
 	bus_dma_tag_t		sc_dmat;
-	struct eso_dma *	sc_dmas;
+	SLIST_HEAD(, eso_dma)	sc_dmas;
 
 	/* I/O Base device */
 	bus_space_tag_t		sc_iot;
@@ -117,11 +115,9 @@ struct eso_softc {
 	bus_space_handle_t	sc_mpu_ioh;
 	struct device *		sc_mpudev;
 
-#if 0
 	/* Game device */
 	bus_space_tag_t		sc_game_iot;
 	bus_space_handle_t	sc_game_ioh;
-#endif
 
 	/* MI audio interface: play/record interrupt callbacks and arguments */
 	void			(*sc_pintr)(void *);
@@ -135,7 +131,7 @@ struct eso_softc {
 
 	/* Audio 2 state */
 	uint8_t			sc_a2c2;	/* Audio 2 Control 2 */
-	
+
 	/* Mixer state */
 	uint8_t			sc_gain[ESO_NGAINDEVS][2];
 #define	ESO_LEFT		0

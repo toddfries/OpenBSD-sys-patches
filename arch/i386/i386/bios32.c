@@ -1,4 +1,4 @@
-/*	$NetBSD: bios32.c,v 1.11 2006/10/01 18:37:54 bouyer Exp $	*/
+/*	$NetBSD: bios32.c,v 1.22 2008/04/28 20:23:24 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -93,7 +86,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bios32.c,v 1.11 2006/10/01 18:37:54 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bios32.c,v 1.22 2008/04/28 20:23:24 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,6 +103,7 @@ __KERNEL_RCSID(0, "$NetBSD: bios32.c,v 1.11 2006/10/01 18:37:54 bouyer Exp $");
 #include <uvm/uvm.h>
 
 #include "ipmi.h"
+#include "opt_xen.h"
 
 #define	BIOS32_START	0xe0000
 #define	BIOS32_SIZE	0x20000
@@ -125,12 +119,12 @@ void
 bios32_init()
 {
 	paddr_t entry = 0;
-	caddr_t p;
+	char *p;
 	unsigned char cksum;
 	int i;
 
-	for (p = (caddr_t)ISA_HOLE_VADDR(BIOS32_START);
-	     p < (caddr_t)ISA_HOLE_VADDR(BIOS32_END);
+	for (p = (char *)ISA_HOLE_VADDR(BIOS32_START);
+	     p < (char *)ISA_HOLE_VADDR(BIOS32_END);
 	     p += 16) {
 		if (*(int *)p != BIOS32_MAKESIG('_', '3', '2', '_'))
 			continue;
@@ -146,8 +140,8 @@ bios32_init()
 
 		entry = *(uint32_t *)(p + 4);
 
-		aprint_normal("BIOS32 rev. %d found at 0x%lx\n",
-		    *(p + 8), entry);
+		aprint_debug("BIOS32 rev. %d found at 0x%lx\n",
+		    *(p + 8), (u_long)entry);
 
 		if (entry < BIOS32_START ||
 		    entry >= BIOS32_END) {
@@ -159,15 +153,14 @@ bios32_init()
 	}
 
 	if (entry != 0) {
-		bios32_entry.offset = (caddr_t)ISA_HOLE_VADDR(entry);
+		bios32_entry.offset = (void *)ISA_HOLE_VADDR(entry);
 		bios32_entry.segment = GSEL(GCODE_SEL, SEL_KPL);
 	}
-#if NIPMI > 0
 	/* see if we have SMBIOS extentions */
 	for (p = ISA_HOLE_VADDR(SMBIOS_START);
-	    p < (caddr_t)ISA_HOLE_VADDR(SMBIOS_END); p+= 16) {
+	    p < (char *)ISA_HOLE_VADDR(SMBIOS_END); p+= 16) {
 		struct smbhdr * sh = (struct smbhdr *)p;
-		u_int8_t chksum;
+		uint8_t chksum;
 		vaddr_t eva;
 		paddr_t pa, end;
 
@@ -193,7 +186,7 @@ bios32_init()
 		if (eva == 0)
 			break;
 
-		smbios_entry.addr = (u_int8_t *)(eva +
+		smbios_entry.addr = (uint8_t *)(eva +
 		    (sh->addr & PGOFSET));
 		smbios_entry.len = sh->size;
 		smbios_entry.mjr = sh->majrev;
@@ -201,16 +194,19 @@ bios32_init()
 		smbios_entry.count = sh->count;
 
     		for (; pa < end; pa+= NBPG, eva+= NBPG)
+#ifdef XEN
+			pmap_kenter_ma(eva, pa, VM_PROT_READ);
+#else
 			pmap_kenter_pa(eva, pa, VM_PROT_READ);
+#endif
 
-		printf("SMBIOS rev. %d.%d @ 0x%lx (%d entries)\n",
-			    sh->majrev, sh->minrev, (u_long)sh->addr,
-			    sh->count);
+		aprint_debug("SMBIOS rev. %d.%d @ 0x%lx (%d entries)\n",
+		    sh->majrev, sh->minrev, (u_long)sh->addr,
+		    sh->count);
 
 		break;
 	}
-#endif
-
+	pmap_update(pmap_kernel());
 }
 
 /*
@@ -248,7 +244,7 @@ bios32_service(service, e, ei)
 		return (0);
 	}
 
-	e->offset = (caddr_t)ISA_HOLE_VADDR(entry);
+	e->offset = (void *)ISA_HOLE_VADDR(entry);
 	e->segment = GSEL(GCODE_SEL, SEL_KPL);
 
 	ei->bei_base = ebx;
@@ -258,7 +254,6 @@ bios32_service(service, e, ei)
 	return (1);
 }
 
-#if NIPMI > 0
 /*
  * smbios_find_table() takes a caller supplied smbios struct type and
  * a pointer to a handle (struct smbtable) returning one if the structure
@@ -269,9 +264,9 @@ bios32_service(service, e, ei)
  * smbios_find_table with the same arguments.
  */
 int
-smbios_find_table(u_int8_t type, struct smbtable *st)
+smbios_find_table(uint8_t type, struct smbtable *st)
 {
-	u_int8_t *va, *end;
+	uint8_t *va, *end;
 	struct smbtblhdr *hdr;
 	int ret = 0, tcount = 1;
 
@@ -286,10 +281,10 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 	 * preceding that referenced by the handle is encoded in bits 15:31.
 	 */
 	if ((st->cookie & 0xfff) == type && st->cookie >> 16) {
-		if ((u_int8_t *)st->hdr >= va && (u_int8_t *)st->hdr < end) {
+		if ((uint8_t *)st->hdr >= va && (uint8_t *)st->hdr < end) {
 			hdr = st->hdr;
 			if (hdr->type == type) {
-				va = (u_int8_t *)hdr + hdr->size;
+				va = (uint8_t *)hdr + hdr->size;
 				for (; va + 1 < end; va++)
 					if (*va == 0 && *(va + 1) == 0)
 						break;
@@ -321,13 +316,13 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 }
 
 char *
-smbios_get_string(struct smbtable *st, u_int8_t indx, char *dest, size_t len)
+smbios_get_string(struct smbtable *st, uint8_t indx, char *dest, size_t len)
 {
-	u_int8_t *va, *end;
+	uint8_t *va, *end;
 	char *ret = NULL;
 	int i;
 
-	va = (u_int8_t *)st->hdr + st->hdr->size;
+	va = (uint8_t *)st->hdr + st->hdr->size;
 	end = smbios_entry.addr + smbios_entry.len;
 	for (i = 1; va < end && i < indx && *va; i++)
 		while (*va++)
@@ -342,4 +337,3 @@ smbios_get_string(struct smbtable *st, u_int8_t indx, char *dest, size_t len)
 
 	return ret;
 }
-#endif

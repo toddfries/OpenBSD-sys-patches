@@ -1,5 +1,4 @@
-/*	$OpenBSD: fstat.c,v 1.4 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: stat.c,v 1.3 1994/10/26 05:45:07 cgd Exp $	*/
+/*	$NetBSD: fstat.c,v 1.7 2007/12/02 04:59:25 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -39,17 +38,21 @@ fstat(int fd, struct stat *sb)
 {
 	struct open_file *f = &files[fd];
 
-	if ((unsigned)fd >= SOPEN_MAX || f->f_flags == 0) {
+#if !defined(LIBSA_NO_FD_CHECKING)
+	if ((unsigned int)fd >= SOPEN_MAX || f->f_flags == 0) {
 		errno = EBADF;
-		return (-1);
+		return -1;
 	}
+#endif
 
+#if !defined(LIBSA_NO_RAW_ACCESS)
 	/* operation not defined on raw devices */
 	if (f->f_flags & F_RAW) {
 		errno = EOPNOTSUPP;
-		return (-1);
+		return -1;
 	}
+#endif
 
-	errno = (f->f_ops->stat)(f, sb);
-	return (0);
+	errno = FS_STAT(f->f_ops)(f, sb);	/* XXX no point setting errno */
+	return 0;
 }

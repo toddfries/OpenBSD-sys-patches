@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_add.c,v 1.4 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: fpu_add.c,v 1.3 1996/03/14 19:41:52 christos Exp $ */
+/*	$NetBSD: fpu_add.c,v 1.6 2005/11/16 23:24:44 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -47,6 +46,9 @@
  * To subtract, negate y and call add.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_add.c,v 1.6 2005/11/16 23:24:44 uwe Exp $");
+
 #include <sys/types.h>
 #ifdef DIAGNOSTIC
 #include <sys/systm.h>
@@ -60,8 +62,7 @@
 #include <sparc/fpu/fpu_extern.h>
 
 struct fpn *
-fpu_add(fe)
-	register struct fpemu *fe;
+fpu_add(struct fpemu *fe)
 {
 	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2, *r;
 	register u_int r0, r1, r2, r3;

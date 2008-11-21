@@ -1,4 +1,3 @@
-/*	$OpenBSD: endian.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: endian.h,v 1.3 2001/11/25 15:55:56 thorpej Exp $	*/
+/*	$NetBSD: endian.h,v 1.1 2006/12/16 05:44:34 ober Exp $	*/
 
-#include <arm/endian.h>
+#include <sys/endian.h>

@@ -1,12 +1,13 @@
-/*	$OpenBSD: umass_quirks.c,v 1.29 2007/06/13 10:33:52 mbalmer Exp $	*/
-/*	$NetBSD: umass_quirks.c,v 1.67 2004/06/28 07:49:16 mycroft Exp $	*/
+/*	$NetBSD: umass_quirks.c,v 1.76 2008/10/27 21:46:43 joerg Exp $	*/
 
 /*
- * Copyright (c) 2001 The NetBSD Foundation, Inc.
+ * Copyright (c) 2001, 2004 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
  * by MAEKAWA Masahide (gehenna@NetBSD.org).
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,13 +31,16 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: umass_quirks.c,v 1.76 2008/10/27 21:46:43 joerg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/buf.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsipi_all.h> /* for scsiconf.h below */
+#include <dev/scsipi/scsiconf.h> /* for quirks defines */
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -52,69 +49,29 @@
 #include <dev/usb/umassvar.h>
 #include <dev/usb/umass_quirks.h>
 
-usbd_status umass_init_insystem(struct umass_softc *);
-usbd_status umass_init_shuttle(struct umass_softc *);
+Static usbd_status umass_init_insystem(struct umass_softc *);
+Static usbd_status umass_init_shuttle(struct umass_softc *);
 
-void umass_fixup_sony(struct umass_softc *);
-void umass_fixup_yedata(struct umass_softc *);
+Static void umass_fixup_sony(struct umass_softc *);
 
-const struct umass_quirk umass_quirks[] = {
-	{ { USB_VENDOR_ATI, USB_PRODUCT_ATI2_205 },
-	  UMASS_WPROTO_BBB, UMASS_CPROTO_ISD_ATA,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_DMI, USB_PRODUCT_DMI_SA2_0 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_EASYDISK, USB_PRODUCT_EASYDISK_EASYDISK },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_FUJIPHOTO, USB_PRODUCT_FUJIPHOTO_MASS0100 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  ADEV_NOSENSE,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_GENESYS, USB_PRODUCT_GENESYS_GL641USB },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_HP, USB_PRODUCT_HP_CDWRITERPLUS },
-	  UMASS_WPROTO_CBI, UMASS_CPROTO_ATAPI,
-	  0,
-	  ADEV_NOSENSE,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_IMATION, USB_PRODUCT_IMATION_FLASHGO },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
+/*
+ * XXX
+ * PLEASE NOTE that if you want quirk entries added to this table, you MUST
+ * compile a kernel with USB_DEBUG, and submit a full log of the output from
+ * whatever operation is "failing" with ?hcidebug=20 or higher and
+ * umassdebug=0xffffff.  (It's usually helpful to also set MSGBUFSIZE to
+ * something "large" unless you're using a serial console.)  Without this
+ * information, the source of the problem cannot be properly analyzed, and
+ * the quirk entry WILL NOT be accepted.
+ * Also, when an entry is committed to this table, a concise but clear
+ * description of the problem MUST accompany it.
+ * - mycroft
+ */
+Static const struct umass_quirk umass_quirks[] = {
+	/*
+	 * The following 3 In-System Design adapters use a non-standard ATA
+	 * over BBB protocol.  Force this protocol by quirk entries.
+	 */
 	{ { USB_VENDOR_INSYSTEM, USB_PRODUCT_INSYSTEM_ADAPTERV2 },
 	  UMASS_WPROTO_BBB, UMASS_CPROTO_ISD_ATA,
 	  0,
@@ -137,14 +94,6 @@ const struct umass_quirk umass_quirks[] = {
 	  NULL, NULL
 	},
 
-	{ { USB_VENDOR_INSYSTEM, USB_PRODUCT_INSYSTEM_IDEUSB2 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
 	{ { USB_VENDOR_INSYSTEM, USB_PRODUCT_INSYSTEM_USBCABLE },
 	  UMASS_WPROTO_CBI, UMASS_CPROTO_ATAPI,
 	  0,
@@ -153,126 +102,18 @@ const struct umass_quirk umass_quirks[] = {
 	  umass_init_insystem, NULL
 	},
 
-	{ { USB_VENDOR_IODATA2, USB_PRODUCT_IODATA2_USB2SC },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
+	{ { USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSB },
+	  UMASS_WPROTO_CBI_I, UMASS_CPROTO_ATAPI,
 	  0,
 	  0,
 	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
+	  umass_init_shuttle, NULL
 	},
 
-	{ { USB_VENDOR_IOMEGA, USB_PRODUCT_IOMEGA_ZIP100 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_IOMEGA, USB_PRODUCT_IOMEGA_ZIP250 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_IOMEGA, USB_PRODUCT_IOMEGA_ZIP250_2 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_IRIVER, USB_PRODUCT_IRIVER_IFP_1XX },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  SDEV_ONLYBIG,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_IRIVER, USB_PRODUCT_IRIVER_IFP_3XX },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_DUBPXXG },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MICROTECH, USB_PRODUCT_MICROTECH_DPCM },
-	  UMASS_WPROTO_CBI, UMASS_CPROTO_ATAPI,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MINOLTA, USB_PRODUCT_MINOLTA_S304 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MINOLTA, USB_PRODUCT_MINOLTA_X },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MINOLTA, USB_PRODUCT_MINOLTA_DIMAGEA1 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY2 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_ATAPI,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_NEODIO, USB_PRODUCT_NEODIO_ND3050 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_NEODIO, USB_PRODUCT_NEODIO_ND5010 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
+	/*
+	 * These work around genuine device bugs -- returning the wrong info in
+	 * the CSW block.
+	 */
 	{ { USB_VENDOR_OLYMPUS, USB_PRODUCT_OLYMPUS_C1 },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
 	  UMASS_QUIRK_WRONG_CSWSIG,
@@ -280,189 +121,105 @@ const struct umass_quirk umass_quirks[] = {
 	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
 	  NULL, NULL
 	},
-
-	{ { USB_VENDOR_OLYMPUS, USB_PRODUCT_OLYMPUS_C700 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  SDEV_ONLYBIG | SDEV_NOSYNCCACHE,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_MD1II },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_MD2 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_OTI, USB_PRODUCT_OTI_SOLID },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_PEN, USB_PRODUCT_PEN_MOBILEDRIVE },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_PEN, USB_PRODUCT_PEN_USBDISK },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_PEN, USB_PRODUCT_PEN_USBREADER },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_PILOTECH, USB_PRODUCT_PILOTECH_CRW600 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_PQI, USB_PRODUCT_PQI_TRAVELFLASH },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
 	{ { USB_VENDOR_SCANLOGIC, USB_PRODUCT_SCANLOGIC_SL11R },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
 	  UMASS_QUIRK_WRONG_CSWTAG,
 	  0,
-	  UMATCH_VENDOR_PRODUCT,
+	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
 	  NULL, NULL
 	},
-
-	{ { USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSB },
-	  UMASS_WPROTO_CBI_I, UMASS_CPROTO_ATAPI,
-	  0,
-	  ADEV_NOSENSE,
-	  UMATCH_VENDOR_PRODUCT,
-	  umass_init_shuttle, NULL
-	},
-
-	{ { USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_ZIOMMC },
-	  UMASS_WPROTO_CBI_I, UMASS_CPROTO_ATAPI,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_SIIG, USB_PRODUCT_SIIG_MULTICARDREADER },
+	{ { USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_ORCA },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
+	  UMASS_QUIRK_WRONG_CSWTAG,
 	  0,
 	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL,NULL
-	},
-
-	{ { USB_VENDOR_SONY, USB_PRODUCT_SONY_DRIVEV2 },
-	  UMASS_WPROTO_BBB, UMASS_CPROTO_ISD_ATA,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
 	  NULL, NULL
 	},
 
+	/*
+	 * Some Sony cameras advertise a subclass code of 0xff, so we force it
+	 * to the correct value iff necessary.
+	 */
 	{ { USB_VENDOR_SONY, USB_PRODUCT_SONY_DSC },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
+	  UMASS_QUIRK_RBC_PAD_TO_12,
 	  0,
 	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
 	  NULL, umass_fixup_sony
 	},
 
-	{ { USB_VENDOR_SONY, USB_PRODUCT_SONY_MSC },
-	  UMASS_WPROTO_CBI, UMASS_CPROTO_UFI,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_TEAC, USB_PRODUCT_TEAC_FD05PUB },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_TREK, USB_PRODUCT_TREK_THUMBDRIVE_8MB },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_TRUMPION, USB_PRODUCT_TRUMPION_XXX1100 },
-	  UMASS_WPROTO_CBI, UMASS_CPROTO_ATAPI,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_YANO, USB_PRODUCT_YANO_U640MO },
-	  UMASS_WPROTO_CBI_I, UMASS_CPROTO_ATAPI,
-	  0,
-	  0,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-
-	{ { USB_VENDOR_YEDATA, USB_PRODUCT_YEDATA_FLASHBUSTERU },
+	/*
+	 * Stupid device reports itself as SFF-8070, but actually returns a UFI
+	 * interrupt descriptor.  - mycroft, 2004/06/28
+	 */
+	{ { USB_VENDOR_SONY, USB_PRODUCT_SONY_CLIE_40_MS },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UFI,
 	  0,
 	  0,
-	  UMATCH_VENDOR_PRODUCT_REV,
-	  NULL, umass_fixup_yedata
+	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
+	  NULL, NULL
 	},
 
-	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_DNSSF7X},
-	 UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	 0,
-	 SDEV_NOSYNCCACHE,
-	 UMATCH_VENDOR_PRODUCT,
-	 NULL, NULL
+	/*
+	 * The SONY Portable GPS strage device almost hangs up when request
+	 * UR_BBB_GET_MAX_LUN - disable the query logic.
+	 */
+	{ { USB_VENDOR_SONY, USB_PRODUCT_SONY_GPS_CS1 },
+	  UMASS_WPROTO_BBB, UMASS_CPROTO_UNSPEC,
+	  UMASS_QUIRK_NOGETMAXLUN,
+	  0,
+	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
+	  NULL, NULL
 	},
 
-	{ { USB_VENDOR_CREATIVE, USB_PRODUCT_CREATIVE_NOMAD},
-	 UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	 0,
-	 SDEV_NOSYNCCACHE,
-	 UMATCH_VENDOR_PRODUCT,
-	 NULL, NULL
+	/*
+	 * The DiskOnKey does not reject commands it doesn't recognize in a
+	 * sane way -- rather than STALLing the bulk pipe, it continually NAKs
+	 * until we time out.  To prevent being screwed by this, for now we
+	 * disable 10-byte MODE SENSE the klugy way.  - mycroft, 2003/10/16
+	 */
+	{ { USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY },
+	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
+	  0,
+	  PQUIRK_NOBIGMODESENSE,
+	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
+	  NULL, NULL
+	},
+	{ { USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY2 },
+	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
+	  0,
+	  PQUIRK_NOBIGMODESENSE,
+	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
+	  NULL, NULL
+	},
+	{ { USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY3 },
+	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
+	  0,
+	  PQUIRK_NOBIGMODESENSE,
+	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
+	  NULL, NULL
+	},
+	/* IBEAD devices don't like all SCSI commands */
+	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_MUSICSTICK },
+	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
+	  0,
+	  PQUIRK_NODOORLOCK | PQUIRK_NOSYNCCACHE,
+	  UMATCH_VENDOR_PRODUCT,
+	  NULL, NULL
+	},
+	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_I_BEAD100 },
+	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
+	  0, 
+	  PQUIRK_NODOORLOCK | PQUIRK_NOSYNCCACHE,
+	  UMATCH_VENDOR_PRODUCT,  
+	  NULL, NULL
+	},
+	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_I_BEAD150 },
+	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC, 
+	  0,
+	  PQUIRK_NODOORLOCK | PQUIRK_NOSYNCCACHE,
+	  UMATCH_VENDOR_PRODUCT,
+	  NULL, NULL
 	},
 };
 
@@ -473,7 +230,7 @@ umass_lookup(u_int16_t vendor, u_int16_t product)
 		usb_lookup(umass_quirks, vendor, product));
 }
 
-usbd_status
+Static usbd_status
 umass_init_insystem(struct umass_softc *sc)
 {
 	usbd_status err;
@@ -482,14 +239,14 @@ umass_init_insystem(struct umass_softc *sc)
 	if (err) {
 		DPRINTF(UDMASS_USB,
 			("%s: could not switch to Alt Interface 1\n",
-			sc->sc_dev.dv_xname));
+			USBDEVNAME(sc->sc_dev)));
 		return (err);
 	}
 
 	return (USBD_NORMAL_COMPLETION);
 }
 
-usbd_status
+Static usbd_status
 umass_init_shuttle(struct umass_softc *sc)
 {
 	usb_device_request_t req;
@@ -505,43 +262,12 @@ umass_init_shuttle(struct umass_softc *sc)
 	return (usbd_do_request(sc->sc_udev, &req, &status));
 }
 
-void
+Static void
 umass_fixup_sony(struct umass_softc *sc)
 {
 	usb_interface_descriptor_t *id;
-	usb_device_descriptor_t *dd;
 
 	id = usbd_get_interface_descriptor(sc->sc_iface);
-	if (id->bInterfaceSubClass == 0xff) {
-		dd = usbd_get_device_descriptor(sc->sc_udev);
-		/*
-		 * Many Sony DSC cameras share the same product ID, so the
-		 * revision number is used to distinguish between them.
-		 */
-		switch (UGETW(dd->bcdDevice)) {
-		case 0x611: /* Sony DSC-T10, rev 6.11 */
-		case 0x600: /* Sony DSC-W50, rev 6.00 */
-		case 0x500: /* Sony DSC-P41, rev 5.00 */
-			sc->sc_cmd = UMASS_CPROTO_UFI;
-			break;
-		default:
-			sc->sc_cmd = UMASS_CPROTO_SCSI;
-		}
-	}
-}
-
-void
-umass_fixup_yedata(struct umass_softc *sc)
-{
-	usb_device_descriptor_t *dd;
-
-	dd = usbd_get_device_descriptor(sc->sc_udev);
-
-	/*
-	 * Revisions < 1.28 do not handle the interrupt endpoint very well.
-	 */
-	if (UGETW(dd->bcdDevice) < 0x128)
-		sc->sc_wire = UMASS_WPROTO_CBI;
-	else
-		sc->sc_wire = UMASS_WPROTO_CBI_I;
+	if (id->bInterfaceSubClass == 0xff)
+		sc->sc_cmd = UMASS_CPROTO_RBC;
 }

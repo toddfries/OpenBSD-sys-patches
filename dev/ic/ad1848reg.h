@@ -1,5 +1,4 @@
-/*	$OpenBSD: ad1848reg.h,v 1.6 1999/03/08 22:54:33 jason Exp $	*/
-/*	$NetBSD: ad1848reg.h,v 1.4 1997/05/07 20:23:53 augustss Exp $	*/
+/*	$NetBSD: ad1848reg.h,v 1.10 2003/04/06 18:20:12 wiz Exp $	*/
 
 /*
  * Copyright (c) 1994 John Brezak
@@ -37,12 +36,6 @@
  */
 /*
  * Copyright (c) 1993 Analog Devices Inc. All rights reserved
- */
-
-/*
- * Further documentation can be found at:
- *	http://www.cirrus.com/products/overviews/cs4231.html
- *	(the CS4231A is an augmented ad1848, additional registers, etc).
  */
 
 /* parent driver is primarily responsible for checking this */
@@ -91,13 +84,13 @@
 #define ATTEN_21		0x0e
 #define ATTEN_22_5		0x0f
 
-/* AD1848 Sound Port bit defines */
+/* AD1848 Index register (R0) */
 #define SP_IN_INIT		0x80
 #define MODE_CHANGE_ENABLE	0x40
 #define TRANSFER_DISABLE	0x20
 #define ADDRESS_MASK		0xe0
 
-/* Status bits */
+/* Status bits - register R2 (read-only) */
 #define INTERRUPT_STATUS	0x01
 #define PLAYBACK_READY		0x02
 #define PLAYBACK_LEFT		0x04
@@ -111,7 +104,10 @@
 #define CAPTURE_UPPER		0x80
 /* cplower is not upper */
 
-/* Input & Output regs bits */
+#define AD_R2_BITS	"\20\1INT\2PRDY\3PL/R\4PU/L\5SER\6CRDY\7CL/R\10CU/L"
+
+
+/* ADC Input control - registers I0 (left) and I1 (right) */
 #define LINE_INPUT		0x00
 #define AUX_INPUT		0x40
 #define MIC_INPUT		0x80
@@ -119,14 +115,19 @@
 #define INPUT_GAIN_MASK		0xf0
 #define INPUT_MIC_GAIN_ENABLE	0x20
 #define INPUT_SOURCE_MASK	0x3f
+
+/* Aux input control - registers I2 (channel 1,left); I3 (channel 1,right)
+				 I4 (channel 2,left); I5 (channel 2,right) */
 #define AUX_INPUT_ATTEN_BITS	0x1f
 #define AUX_INPUT_ATTEN_MASK	0xe0
 #define AUX_INPUT_MUTE		0x80
+
+/* Output bits - registers I6,I7*/
 #define OUTPUT_MUTE		0x80
 #define OUTPUT_ATTEN_BITS	0x3f
-#define OUTPUT_ATTEN_MASK	0xc0
+#define OUTPUT_ATTEN_MASK	(~OUTPUT_ATTEN_BITS & 0xff)
 
-/* Clock and Data format reg bits (some also Capture Data format) */
+/* Clock and Data format reg bits (some also Capture Data format) - reg I8 */
 #define CLOCK_XTAL2		0x01
 #define CLOCK_XTAL1		0x00
 #define CLOCK_FREQ_MASK		0xf1
@@ -136,11 +137,11 @@
 #define FMT_PCM8		0x00	/* 8-bit unsigned */
 #define FMT_ULAW		0x20	/* 8-bit mu-law */
 #define FMT_TWOS_COMP		0x40	/* 16-bit signed */
-#define FMT_ALAW		0x60	/* 8-bit alaw */
+#define FMT_ALAW		0x60	/* 8-bit A-law */
 #define FMT_ADPCM		0xa0	/* IMA ADPCM */
 #define FMT_TWOS_COMP_BE	0xc0	/* 16-bit signed, big endian */
 
-/* Interface Configuration reg bits */
+/* Interface Configuration reg bits - register I9 */
 #define PLAYBACK_ENABLE		0x01
 #define CAPTURE_ENABLE		0x02
 #define DUAL_DMA		0x00
@@ -149,12 +150,12 @@
 #define PLAYBACK_PIO_ENABLE	0x40
 #define CAPTURE_PIO_ENABLE	0x80
 
-/* Pin control bits */
+/* Pin control bits - register I10 */
 #define INTERRUPT_ENABLE	0x02
 #define XCTL0_ENABLE		0x40
 #define XCTL1_ENABLE		0x80
 
-/* Test and init reg bits */
+/* Test and init reg bits - register I11 (read-only) */
 #define OVERRANGE_LEFT_MASK	0xfc
 #define OVERRANGE_RIGHT_MASK	0xf3
 #define DATA_REQUEST_STATUS	0x10
@@ -162,29 +163,31 @@
 #define PLAYBACK_UNDERRUN	0x40
 #define CAPTURE_OVERRUN		0x80
 
-/* Miscellaneous Control reg bits */
+/* Miscellaneous Control reg bits - register I12 */
 #define ID_MASK			0x70
 #define MODE2			0x40
+#define MODE3			0x60
 
-/* Digital Mix Control reg bits */
+/* Digital Mix Control reg bits - register I13 */
 #define DIGITAL_MIX1_ENABLE	0x01
-#define MIX_ATTEN_MASK		0xfc
+#define MIX_ATTEN_MASK		0x03
 
 /* AD1848 Sound Port reg defines */
-#define SP_LEFT_INPUT_CONTROL	0x00
-#define SP_RIGHT_INPUT_CONTROL	0x01
-#define SP_LEFT_AUX1_CONTROL	0x02
-#define SP_RIGHT_AUX1_CONTROL	0x03
-#define SP_LEFT_AUX2_CONTROL	0x04
-#define SP_RIGHT_AUX2_CONTROL	0x05
-#define SP_LEFT_OUTPUT_CONTROL	0x06
-#define SP_RIGHT_OUTPUT_CONTROL 0x07
-#define SP_CLOCK_DATA_FORMAT	0x08
-#define SP_INTERFACE_CONFIG	0x09
-#define SP_PIN_CONTROL		0x0A
-#define SP_TEST_AND_INIT	0x0B
-#define SP_MISC_INFO		0x0C
-#define SP_DIGITAL_MIX		0x0D
-#define SP_UPPER_BASE_COUNT	0x0E
-#define SP_LOWER_BASE_COUNT	0x0F
+#define SP_LEFT_INPUT_CONTROL	0
+#define SP_RIGHT_INPUT_CONTROL	1
+#define SP_LEFT_AUX1_CONTROL	2
+#define SP_RIGHT_AUX1_CONTROL	3
+#define SP_LEFT_AUX2_CONTROL	4
+#define SP_RIGHT_AUX2_CONTROL	5
+#define SP_LEFT_OUTPUT_CONTROL	6
+#define SP_RIGHT_OUTPUT_CONTROL 7
+#define SP_CLOCK_DATA_FORMAT	8
+#define SP_INTERFACE_CONFIG	9
+#define SP_PIN_CONTROL		10
+#define SP_TEST_AND_INIT	11
+#define SP_MISC_INFO		12
+#define SP_DIGITAL_MIX		13
+#define SP_UPPER_BASE_COUNT	14
+#define SP_LOWER_BASE_COUNT	15
 
+#define SP_IADDR_MASK		0xaf

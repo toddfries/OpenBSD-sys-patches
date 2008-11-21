@@ -1,4 +1,3 @@
-/*	$OpenBSD: consinit.c,v 1.1.1.1 2006/10/06 21:16:15 miod Exp $	*/
 /*	$NetBSD: consinit.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
@@ -29,6 +28,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>

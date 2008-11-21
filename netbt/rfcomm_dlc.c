@@ -1,5 +1,4 @@
-/*	$OpenBSD: rfcomm_dlc.c,v 1.2 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: rfcomm_dlc.c,v 1.4 2007/11/03 17:20:17 plunky Exp $	*/
+/*	$NetBSD: rfcomm_dlc.c,v 1.6 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,10 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_dlc.c,v 1.6 2008/08/06 15:01:24 plunky Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
+#include <sys/socketvar.h>
 #include <sys/systm.h>
 
 #include <netbt/bluetooth.h>
@@ -159,7 +162,7 @@ rfcomm_dlc_close(struct rfcomm_dlc *dlc, int err)
 		if (credit->rc_dlc == dlc)
 			credit->rc_dlc = NULL;
 
-	timeout_del(&dlc->rd_timeout);
+	callout_stop(&dlc->rd_timeout);
 
 	LIST_REMOVE(dlc, rd_next);
 	dlc->rd_session = NULL;
@@ -176,8 +179,8 @@ rfcomm_dlc_close(struct rfcomm_dlc *dlc, int err)
 		if (rs->rs_state == RFCOMM_SESSION_LISTEN)
 			rfcomm_session_free(rs);
 		else
-			timeout_add(&rs->rs_timeout,
-			    rfcomm_ack_timeout * hz);
+			callout_schedule(&rs->rs_timeout,
+					rfcomm_ack_timeout * hz);
 	}
 }
 
@@ -193,16 +196,18 @@ void
 rfcomm_dlc_timeout(void *arg)
 {
 	struct rfcomm_dlc *dlc = arg;
-	int s;
 
-	s = splsoftnet();
+	mutex_enter(bt_lock);
+	callout_ack(&dlc->rd_timeout);
 
 	if (dlc->rd_state != RFCOMM_DLC_CLOSED)
 		rfcomm_dlc_close(dlc, ETIMEDOUT);
-	else if (dlc->rd_flags & RFCOMM_DLC_DETACH)
+	else if (dlc->rd_flags & RFCOMM_DLC_DETACH) {
+		callout_destroy(&dlc->rd_timeout);
 		free(dlc, M_BLUETOOTH);
+	}
 
-	splx(s);
+	mutex_exit(bt_lock);
 }
 
 /*
@@ -215,7 +220,8 @@ rfcomm_dlc_timeout(void *arg)
 int
 rfcomm_dlc_setmode(struct rfcomm_dlc *dlc)
 {
-	int mode = 0;
+	struct sockopt sopt;
+	int mode = 0, err;
 
 	KASSERT(dlc->rd_session != NULL);
 	KASSERT(dlc->rd_session->rs_state == RFCOMM_SESSION_OPEN);
@@ -234,7 +240,12 @@ rfcomm_dlc_setmode(struct rfcomm_dlc *dlc)
 	if (dlc->rd_mode & RFCOMM_LM_SECURE)
 		mode |= L2CAP_LM_SECURE;
 
-	return l2cap_setopt(dlc->rd_session->rs_l2cap, SO_L2CAP_LM, &mode);
+	sockopt_init(&sopt, BTPROTO_L2CAP, SO_L2CAP_LM, 0);
+	sockopt_setint(&sopt, mode);
+	err = l2cap_setopt(dlc->rd_session->rs_l2cap, &sopt);
+	sockopt_destroy(&sopt);
+
+	return err;
 }
 
 /*
@@ -274,7 +285,7 @@ rfcomm_dlc_connect(struct rfcomm_dlc *dlc)
 		return err;
 
 	dlc->rd_state = RFCOMM_DLC_WAIT_CONNECT;
-	timeout_add(&dlc->rd_timeout, rfcomm_mcc_timeout * hz);
+	callout_schedule(&dlc->rd_timeout, rfcomm_mcc_timeout * hz);
 
 	return 0;
 }
@@ -303,7 +314,7 @@ rfcomm_dlc_open(struct rfcomm_dlc *dlc)
 	if (err)
 		return err;
 
-	timeout_add(&dlc->rd_timeout, rfcomm_mcc_timeout * hz);
+	callout_schedule(&dlc->rd_timeout, rfcomm_mcc_timeout * hz);
 
 	dlc->rd_state = RFCOMM_DLC_OPEN;
 	(*dlc->rd_proto->connected)(dlc->rd_upper);

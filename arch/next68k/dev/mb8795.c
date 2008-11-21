@@ -1,4 +1,4 @@
-/*	$NetBSD: mb8795.c,v 1.39 2006/09/07 02:40:31 dogcow Exp $	*/
+/*	$NetBSD: mb8795.c,v 1.43 2008/11/07 00:20:02 dyoung Exp $	*/
 /*
  * Copyright (c) 1998 Darrin B. Jewell
  * All rights reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mb8795.c,v 1.39 2006/09/07 02:40:31 dogcow Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mb8795.c,v 1.43 2008/11/07 00:20:02 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -583,7 +583,7 @@ mb8795_shutdown(void *arg)
 
 /****************************************************************/
 int
-mb8795_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+mb8795_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct mb8795_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -596,19 +596,18 @@ mb8795_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	switch (cmd) {
 
-	case SIOCSIFADDR:
-		DPRINTF(("%s: mb8795_ioctl() SIOCSIFADDR\n",sc->sc_dev.dv_xname));
+	case SIOCINITIFADDR:
+		DPRINTF(("%s: mb8795_ioctl() SIOCINITIFADDR\n",sc->sc_dev.dv_xname));
 		ifp->if_flags |= IFF_UP;
 
+		mb8795_init(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-			mb8795_init(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif
 		default:
-			mb8795_init(sc);
 			break;
 		}
 		break;
@@ -616,27 +615,31 @@ mb8795_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		DPRINTF(("%s: mb8795_ioctl() SIOCSIFFLAGS\n",sc->sc_dev.dv_xname));
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
+		case IFF_RUNNING:
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
 			 */
 /* 			ifp->if_flags &= ~IFF_RUNNING; */
 			mb8795_reset(sc);
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-		    	   (ifp->if_flags & IFF_RUNNING) == 0) {
+			break;
+		case IFF_UP:
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			mb8795_init(sc);
-		} else {
+			break;
+		default:
 			/*
 			 * Reset the interface to pick up changes in any other
 			 * flags that affect hardware registers.
 			 */
 			mb8795_init(sc);
+			break;
 		}
 #ifdef MB8795_DEBUG
 		if (ifp->if_flags & IFF_DEBUG)
@@ -648,12 +651,9 @@ mb8795_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		DPRINTF(("%s: mb8795_ioctl() SIOCADDMULTI\n",sc->sc_dev.dv_xname));
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ethercom) :
-		    ether_delmulti(ifr, &sc->sc_ethercom);
-
-		if (error == ENETRESET) {
+		DPRINTF(("%s: mb8795_ioctl() SIOCADDMULTI\n",
+		    sc->sc_dev.dv_xname));
+		if ((error = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
@@ -671,7 +671,7 @@ mb8795_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 

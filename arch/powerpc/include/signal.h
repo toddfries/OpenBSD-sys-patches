@@ -1,5 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.7 2006/01/08 14:20:17 millert Exp $	*/
-/*	$NetBSD: signal.h,v 1.1 1996/09/30 16:34:34 ws Exp $	*/
+/*	$NetBSD: signal.h,v 1.20 2008/11/19 22:59:56 cegger Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -34,39 +33,32 @@
 #ifndef	_POWERPC_SIGNAL_H_
 #define	_POWERPC_SIGNAL_H_
 
-#include <sys/cdefs.h>
+#ifndef _LOCORE
+#include <sys/featuretest.h>
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
-#include <machine/_types.h>
+#if defined(_NETBSD_SOURCE)
+#include <machine/frame.h>
+
+#if defined(__LIBC12_SOURCE__) || defined(_KERNEL)
+struct sigcontext13 {
+	int sc_onstack;			/* saved onstack flag */
+	int sc_mask;			/* saved signal mask (old style) */
+	struct utrapframe sc_frame;	/* saved registers */
+};
+#endif /* __LIBC12_SOURCE__ || _KERNEL */
 
 /*
- * We have to save all registers on every trap, because
- *	1. user could attach this process every time
- *	2. we must be able to restore all user registers in case of fork
- * Actually, we do not save the fp registers on trap, since
- * these are not used by the kernel. They are saved only when switching
- * between processes using the FPU.
- *
+ * struct sigcontext introduced in NetBSD 1.4
  */
-struct trapframe {
-	__register_t fixreg[32];
-	__register_t lr;
-	__register_t cr;
-	__register_t xer;
-	__register_t ctr;
-	int srr0;
-	int srr1;
-	int dar;			/* dar & dsisr are only filled on a DSI trap */
-	int dsisr;
-	__register_t exc;
-};
-
 struct sigcontext {
 	int sc_onstack;			/* saved onstack flag */
-	int sc_mask;			/* saved signal mask */
-	struct trapframe sc_frame;	/* saved registers */
+	int __sc_mask13;		/* saved signal mask (old style) */
+	struct utrapframe sc_frame;	/* saved registers */
+	sigset_t sc_mask;		/* saved signal mask (new style) */
 };
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
-#endif	/* _POWERPC_SIGNAL_H_ */
+
+#endif	/* _NETBSD_SOURCE */
+#endif	/* !_LOCORE */
+#endif	/* !_POWERPC_SIGNAL_H_ */

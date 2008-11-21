@@ -1,5 +1,4 @@
-/*	$OpenBSD: auxioreg.h,v 1.4 2005/03/09 18:41:48 miod Exp $	*/
-/*	$NetBSD: auxioreg.h,v 1.3 2000/04/15 03:08:13 mrg Exp $	*/
+/*	$NetBSD: auxioreg.h,v 1.7 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 2000 Matthew R. Green
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -32,7 +29,7 @@
 /*
  * The AUXIO registers; their offset in the Ebus2 address space, plus the
  * bits for each register.  Note that the fdthree (FD), SUNW,CS4231 (AUDIO)
- * and power (POWER) devices on the Ebus2 have their AUXIO registers mapped
+ * and power (POWER) devices on the Ebus2 have their AUXIO regsiters mapped
  * into their own "reg" properties, not the "auxio" device's "reg" properties.
  */
 #define	AUXIO_FD			0x00720000
@@ -46,14 +43,14 @@
 #define	AUXIO_POWER_SYSTEM_OFF		0x0
 #define	AUXIO_POWER_COURTESY_OFF	0x1
 
-#define	AUXIO_LED			0x00726000
+#define	AUXIO_LED                       0x00726000
 /* XXX: these may be useless on Ebus2 auxio! find out! */
-#define	AUXIO_LED_FHD		0x20	/* floppy: high density (unreliable?)*/
-#define	AUXIO_LED_LTE		0x08	/* link-test enable */
-#define	AUXIO_LED_MMUX		0x04	/* Monitor/Mouse MUX; what is it? */
-#define	AUXIO_LED_FTC		0x02	/* floppy: drives Terminal Count pin */
-#define	AUXIO_LED_LED		0x01	/* front panel LED */
-#define	AUXIO_LED_FLOPPY_MASK		(AUXIO_LED_FTC)
+#define	AUXIO_LED_LED           0x01    /* front panel LED */
+#define	AUXIO_LED_FTC           0x02    /* floppy: drives Terminal Count pin */
+#define	AUXIO_LED_MMUX          0x04    /* Monitor/Mouse MUX; what is it? */
+#define	AUXIO_LED_LTE           0x08    /* link-test enable */
+#define	AUXIO_LED_FHD           0x20    /* floppy: high density (unreliable?)*/
+#define	AUXIO_LED_FLOPPY_MASK           (AUXIO_LED_FTC)
 
 #define	AUXIO_PCI			0x00728000
 #define	AUXIO_PCI_SLOT0			0x0	/* two bits each */
@@ -77,3 +74,9 @@
 #define	AUXIO_TEMP_ENABLE		0x2
 #define	AUXIO_TEMP_DATAOUT		0x3
 #define	AUXIO_TEMP_DATAINT		0x4
+
+#define FTC_FLIP \
+	do { \
+		auxio_fd_control(AUXIO_LED_FTC); \
+		auxio_fd_control(0); \
+	} while (0)

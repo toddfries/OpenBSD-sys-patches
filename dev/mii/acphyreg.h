@@ -1,5 +1,4 @@
-/*	$OpenBSD: acphyreg.h,v 1.2 2004/10/01 04:08:45 jsg Exp $	*/
-/*	$NetBSD: acphyreg.h,v 1.1 2001/08/24 17:54:33 thorpej Exp $	*/
+/*	$NetBSD: acphyreg.h,v 1.2 2001/08/25 05:57:12 thorpej Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.

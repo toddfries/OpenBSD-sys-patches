@@ -1,5 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.2 2005/12/13 00:18:19 jsg Exp $	*/
-/*	$NetBSD: asm.h,v 1.2 2003/05/02 18:05:47 yamt Exp $	*/
+/*	$NetBSD: asm.h,v 1.13 2008/10/26 00:08:15 mrg Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,6 +37,8 @@
 #ifndef _AMD64_ASM_H_
 #define _AMD64_ASM_H_
 
+#ifdef __x86_64__
+
 #ifdef PIC
 #define PIC_PLT(x)	x@PLT
 #define PIC_GOT(x)	x@GOTPCREL(%rip)
@@ -61,20 +62,26 @@
 
 /* let kernels and others override entrypoint alignment */
 #ifndef _ALIGN_TEXT
-#define _ALIGN_TEXT .align 16, 0x90
+# ifdef _STANDALONE
+#  define _ALIGN_TEXT .align 4
+# else
+#  define _ALIGN_TEXT .align 16
+# endif
 #endif
 
 #define _ENTRY(x) \
 	.text; _ALIGN_TEXT; .globl x; .type x,@function; x:
+#define _LABEL(x) \
+	.globl x; x:
 
 #ifdef _KERNEL
 /* XXX Can't use __CONCAT() here, as it would be evaluated incorrectly. */
 #ifdef __STDC__
 #define	IDTVEC(name) \
-	.text; ALIGN_TEXT; .globl X ## name; .type X ## name,@function; X ## name:
+	ALIGN_TEXT; .globl X ## name; .type X ## name,@function; X ## name:
 #else 
 #define	IDTVEC(name) \
-	.text; ALIGN_TEXT; .globl X/**/name; .type X/**/name,@function; X/**/name:
+	ALIGN_TEXT; .globl X/**/name; .type X/**/name,@function; X/**/name:
 #endif /* __STDC__ */ 
 #endif /* _KERNEL */
 
@@ -95,13 +102,21 @@
 #define	ENTRY(y)	_ENTRY(_C_LABEL(y)); _PROF_PROLOGUE
 #define	NENTRY(y)	_ENTRY(_C_LABEL(y))
 #define	ASENTRY(y)	_ENTRY(_ASM_LABEL(y)); _PROF_PROLOGUE
+#define	LABEL(y)	_LABEL(_C_LABEL(y))
 
 #define	ASMSTR		.asciz
 
-#define RCSID(x)	.text; .asciz x
+#define RCSID(x)	.pushsection ".ident"; .asciz x; .popsection
 
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
+	alias = sym
+
+/*
+ * STRONG_ALIAS: create a strong alias.
+ */
+#define STRONG_ALIAS(alias,sym)						\
+	.globl alias;							\
 	alias = sym
 
 /* XXXfvdl do not use stabs here */
@@ -114,5 +129,11 @@
 	.stabs msg,30,0,0,0 ;						\
 	.stabs __STRING(sym),1,0,0,0
 #endif /* __STDC__ */
+
+#else	/*	__x86_64__	*/
+
+#include <i386/asm.h>
+
+#endif	/*	__x86_64__	*/
 
 #endif /* !_AMD64_ASM_H_ */

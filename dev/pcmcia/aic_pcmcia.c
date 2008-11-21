@@ -1,5 +1,4 @@
-/*	$OpenBSD: aic_pcmcia.c,v 1.15 2006/06/03 01:51:54 martin Exp $	*/
-/*	$NetBSD: aic_pcmcia.c,v 1.6 1998/07/19 17:28:15 christos Exp $	*/
+/*	$NetBSD: aic_pcmcia.c,v 1.37 2008/04/05 21:31:23 cegger Exp $	*/
 
 /*
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -30,17 +29,21 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: aic_pcmcia.c,v 1.37 2008/04/05 21:31:23 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/device.h>
 
-#include <machine/cpu.h>
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/cpu.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsipiconf.h>
+#include <dev/scsipi/scsi_all.h>
 
 #include <dev/ic/aic6360var.h>
 
@@ -48,129 +51,108 @@
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciadevs.h>
 
-int	aic_pcmcia_match(struct device *, void *, void *);
-void	aic_pcmcia_attach(struct device *, struct device *, void *);
-int	aic_pcmcia_detach(struct device *, int);
-
 struct aic_pcmcia_softc {
 	struct aic_softc sc_aic;		/* real "aic" softc */
 
 	/* PCMCIA-specific goo. */
-	struct pcmcia_io_handle sc_pcioh;	/* PCMCIA i/o space info */
-	int sc_io_window;			/* our i/o window */
 	struct pcmcia_function *sc_pf;		/* our PCMCIA function */
 	void *sc_ih;				/* interrupt handler */
+
+	int sc_state;
+#define	AIC_PCMCIA_ATTACHED	3
 };
 
-struct cfattach aic_pcmcia_ca = {
-	sizeof(struct aic_pcmcia_softc), aic_pcmcia_match, aic_pcmcia_attach,
-	aic_pcmcia_detach
+int	aic_pcmcia_match(struct device *, struct cfdata *, void *);
+int	aic_pcmcia_validate_config(struct pcmcia_config_entry *);
+void	aic_pcmcia_attach(struct device *, struct device *, void *);
+int	aic_pcmcia_detach(struct device *, int);
+int	aic_pcmcia_enable(struct device *, int);
+
+CFATTACH_DECL(aic_pcmcia, sizeof(struct aic_pcmcia_softc),
+    aic_pcmcia_match, aic_pcmcia_attach, aic_pcmcia_detach, aic_activate);
+
+const struct pcmcia_product aic_pcmcia_products[] = {
+	{ PCMCIA_VENDOR_ADAPTEC, PCMCIA_PRODUCT_ADAPTEC_APA1460,
+	  PCMCIA_CIS_INVALID },
+
+	{ PCMCIA_VENDOR_ADAPTEC, PCMCIA_PRODUCT_ADAPTEC_APA1460A,
+	  PCMCIA_CIS_INVALID },
+
+	{ PCMCIA_VENDOR_NEWMEDIA, PCMCIA_PRODUCT_NEWMEDIA_BUSTOASTER,
+	  PCMCIA_CIS_INVALID },
 };
-
-struct aic_pcmcia_product {
-	u_int16_t	app_vendor;		/* PCMCIA vendor ID */
-	u_int16_t	app_product;		/* PCMCIA product ID */
-	int		app_expfunc;		/* expected function number */
-} aic_pcmcia_prod[] = {
-	{ PCMCIA_VENDOR_ADAPTEC,	PCMCIA_PRODUCT_ADAPTEC_APA1460_1,
-	  0 },
-
-	{ PCMCIA_VENDOR_ADAPTEC,	PCMCIA_PRODUCT_ADAPTEC_APA1460_2,
-	  0 },
-
-	{ PCMCIA_VENDOR_NEWMEDIA,	PCMCIA_PRODUCT_NEWMEDIA_BUSTOASTER,
-	  0 }
-};
+const size_t aic_pcmcia_nproducts =
+    sizeof(aic_pcmcia_products) / sizeof(aic_pcmcia_products[0]);
 
 int
-aic_pcmcia_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+aic_pcmcia_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pcmcia_attach_args *pa = aux;
-	int i;
 
-	for (i = 0; i < sizeof(aic_pcmcia_prod)/sizeof(aic_pcmcia_prod[0]); i++)
-		if (pa->manufacturer == aic_pcmcia_prod[i].app_vendor &&
-		    pa->product == aic_pcmcia_prod[i].app_product &&
-		    pa->pf->number == aic_pcmcia_prod[i].app_expfunc)
-			return (1);
+	if (pcmcia_product_lookup(pa, aic_pcmcia_products, aic_pcmcia_nproducts,
+	    sizeof(aic_pcmcia_products[0]), NULL))
+		return (1);
+	return (0);
+}
+
+int
+aic_pcmcia_validate_config(cfe)
+	struct pcmcia_config_entry *cfe;
+{
+	if (cfe->iftype != PCMCIA_IFTYPE_IO ||
+	    cfe->num_memspace != 0 ||
+	    cfe->num_iospace != 1)
+		return (EINVAL);
 	return (0);
 }
 
 void
-aic_pcmcia_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+aic_pcmcia_attach(struct device *parent, struct device *self,
+    void *aux)
 {
 	struct aic_pcmcia_softc *psc = (void *)self;
 	struct aic_softc *sc = &psc->sc_aic;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
 	struct pcmcia_function *pf = pa->pf;
-	const char *intrstr;
+	int error;
 
 	psc->sc_pf = pf;
 
-	for (cfe = SIMPLEQ_FIRST(&pf->cfe_head); cfe != NULL;
-	    cfe = SIMPLEQ_NEXT(cfe, cfe_list)) {
-		if (cfe->num_memspace != 0 ||
-		    cfe->num_iospace != 1)
-			continue;
-
-		/* The bustoaster has a default config as first
-		 * entry, we don't want to use that. */
-
-		if (pa->manufacturer == PCMCIA_VENDOR_NEWMEDIA &&
-		    pa->product == PCMCIA_PRODUCT_NEWMEDIA_BUSTOASTER &&
-		    cfe->iospace[0].start == 0)
-			continue;
-
-		if (pcmcia_io_alloc(pa->pf, cfe->iospace[0].start,
-		    cfe->iospace[0].length, AIC_NPORTS, &psc->sc_pcioh) == 0)
-			break;
-	}
-
-	if (cfe == 0) {
-		printf(": can't alloc i/o space\n");
+	error = pcmcia_function_configure(pf, aic_pcmcia_validate_config);
+	if (error) {
+		aprint_error_dev(self, "configure failed, error=%d\n",
+		    error);
 		return;
 	}
 
-	sc->sc_iot = psc->sc_pcioh.iot;
-	sc->sc_ioh = psc->sc_pcioh.ioh;
+	cfe = pf->cfe;
+	sc->sc_iot = cfe->iospace[0].handle.iot;
+	sc->sc_ioh = cfe->iospace[0].handle.ioh;
 
-	/* Enable the card. */
-	pcmcia_function_init(pf, cfe);
-	if (pcmcia_function_enable(pf)) {
-		printf(": function enable failed\n");
-		return;
-	}
-
-	/* Map in the io space */
-	if (pcmcia_io_map(pa->pf, PCMCIA_WIDTH_AUTO, 0, psc->sc_pcioh.size,
-	    &psc->sc_pcioh, &psc->sc_io_window)) {
-		printf(": can't map i/o space\n");
-		return;
-	}
-
-	printf(" port 0x%lx/%lu", psc->sc_pcioh.addr,
-	    (u_long)psc->sc_pcioh.size);
+	error = aic_pcmcia_enable(self, 1);
+	if (error)
+		goto fail;
 
 	if (!aic_find(sc->sc_iot, sc->sc_ioh)) {
-		printf(": unable to detect chip!\n");
-		return;
+		aprint_error_dev(self, "unable to detect chip!\n");
+		goto fail2;
 	}
 
-	/* Establish the interrupt handler. */
-	psc->sc_ih = pcmcia_intr_establish(pa->pf, IPL_BIO,
-	    aicintr, sc, sc->sc_dev.dv_xname);
-	intrstr = pcmcia_intr_string(psc->sc_pf, psc->sc_ih);
-	printf("%s%s\n", *intrstr ? ", " : "", intrstr);
-	if (psc->sc_ih == NULL)
-		return;
+	/* We can enable and disable the controller. */
+	sc->sc_adapter.adapt_enable = aic_pcmcia_enable;
+	sc->sc_adapter.adapt_refcnt = 1;
 
 	aicattach(sc);
+	scsipi_adapter_delref(&sc->sc_adapter);
+	psc->sc_state = AIC_PCMCIA_ATTACHED;
+	return;
 
+fail2:
+	aic_pcmcia_enable(self, 0);
+fail:
+	pcmcia_function_unconfigure(pf);
 }
 
 int
@@ -178,16 +160,50 @@ aic_pcmcia_detach(self, flags)
 	struct device *self;
 	int flags;
 {
-	struct aic_pcmcia_softc *sc= (void *)self;
+	struct aic_pcmcia_softc *sc = (void *)self;
 	int error;
+
+	if (sc->sc_state != AIC_PCMCIA_ATTACHED)
+		return (0);
 
 	error = aic_detach(self, flags);
 	if (error)
 		return (error);
 
-	/* Unmap our i/o window and i/o space. */
-	pcmcia_io_unmap(sc->sc_pf, sc->sc_io_window);
-	pcmcia_io_free(sc->sc_pf, &sc->sc_pcioh);
+	pcmcia_function_unconfigure(sc->sc_pf);
+
+	return (0);
+}
+
+int
+aic_pcmcia_enable(self, onoff)
+	struct device *self;
+	int onoff;
+{
+	struct aic_pcmcia_softc *sc = (void *)self;
+	int error;
+
+	if (onoff) {
+		/* Establish the interrupt handler. */
+		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO,
+		    aicintr, &sc->sc_aic);
+		if (!sc->sc_ih)
+			return (EIO);
+
+		error = pcmcia_function_enable(sc->sc_pf);
+		if (error) {
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+			sc->sc_ih = 0;
+			return (error);
+		}
+
+		/* Initialize only chip.  */
+		aic_init(&sc->sc_aic, 0);
+	} else {
+		pcmcia_function_disable(sc->sc_pf);
+		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = 0;
+	}
 
 	return (0);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ufs_bmap.c,v 1.26 2008/01/05 19:49:26 otto Exp $	*/
-/*	$NetBSD: ufs_bmap.c,v 1.3 1996/02/09 22:36:00 christos Exp $	*/
+/*	$NetBSD: ufs_bmap.c,v 1.48 2008/03/27 19:06:52 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1991, 1993
@@ -34,8 +33,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ufs_bmap.c	8.6 (Berkeley) 1/21/94
+ *	@(#)ufs_bmap.c	8.8 (Berkeley) 8/11/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ufs_bmap.c,v 1.48 2008/03/27 19:06:52 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,23 +46,43 @@
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/resourcevar.h>
+#include <sys/trace.h>
+#include <sys/fstrans.h>
 
 #include <miscfs/specfs/specdev.h>
 
-#include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
+#include <ufs/ufs/ufs_bswap.h>
+
+static bool
+ufs_issequential(const struct ufsmount *ump, daddr_t daddr0, daddr_t daddr1)
+{
+
+	/* for ufs, blocks in a hole is not 'contiguous'. */
+	if (daddr0 == 0)
+		return false;
+
+	return (daddr0 + ump->um_seqinc == daddr1);
+}
 
 /*
- * Bmap converts a the logical block number of a file to its physical block
+ * Bmap converts the logical block number of a file to its physical block
  * number on the disk. The conversion is done by using the logical block
  * number to index into the array of block pointers described by the dinode.
  */
 int
 ufs_bmap(void *v)
 {
-	struct vop_bmap_args *ap = v;
+	struct vop_bmap_args /* {
+		struct vnode *a_vp;
+		daddr_t  a_bn;
+		struct vnode **a_vpp;
+		daddr_t *a_bnp;
+		int *a_runp;
+	} */ *ap = v;
+	int error;
 
 	/*
 	 * Check for underlying vnode requests and ensure that logical
@@ -71,8 +93,11 @@ ufs_bmap(void *v)
 	if (ap->a_bnp == NULL)
 		return (0);
 
-	return (ufs_bmaparray(ap->a_vp, ap->a_bn, ap->a_bnp, NULL, NULL,
-	    ap->a_runp));
+	fstrans_start(ap->a_vp->v_mount, FSTRANS_SHARED);
+	error = ufs_bmaparray(ap->a_vp, ap->a_bn, ap->a_bnp, NULL, NULL,
+	    ap->a_runp, ufs_issequential);
+	fstrans_done(ap->a_vp->v_mount);
+	return error;
 }
 
 /*
@@ -88,22 +113,23 @@ ufs_bmap(void *v)
  * Each entry contains the offset into that block that gets you to the
  * next block and the disk address of the block (if it is assigned).
  */
+
 int
-ufs_bmaparray(struct vnode *vp, daddr64_t bn, daddr64_t *bnp, struct indir *ap,
-    int *nump, int *runp)
+ufs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
+    int *nump, int *runp, ufs_issequential_callback_t is_sequential)
 {
 	struct inode *ip;
-	struct buf *bp;
+	struct buf *bp, *cbp;
 	struct ufsmount *ump;
 	struct mount *mp;
-	struct vnode *devvp;
-	struct indir a[NIADDR+1], *xap;
-	daddr64_t daddr, metalbn;
+	struct indir a[NIADDR + 1], *xap;
+	daddr_t daddr;
+	daddr_t metalbn;
 	int error, maxrun = 0, num;
 
 	ip = VTOI(vp);
 	mp = vp->v_mount;
-	ump = VFSTOUFS(mp);
+	ump = ip->i_ump;
 #ifdef DIAGNOSTIC
 	if ((ap != NULL && nump == NULL) || (ap == NULL && nump != NULL))
 		panic("ufs_bmaparray: invalid arguments");
@@ -117,7 +143,56 @@ ufs_bmaparray(struct vnode *vp, daddr64_t bn, daddr64_t *bnp, struct indir *ap,
 		 * don't create a block larger than the device can handle.
 		 */
 		*runp = 0;
-		maxrun = MAXBSIZE / mp->mnt_stat.f_iosize - 1;
+		maxrun = MAXPHYS / mp->mnt_stat.f_iosize - 1;
+	}
+
+	if (bn >= 0 && bn < NDADDR) {
+		if (nump != NULL)
+			*nump = 0;
+		if (ump->um_fstype == UFS1)
+			daddr = ufs_rw32(ip->i_ffs1_db[bn],
+			    UFS_MPNEEDSWAP(ump));
+		else
+			daddr = ufs_rw64(ip->i_ffs2_db[bn],
+			    UFS_MPNEEDSWAP(ump));
+		*bnp = blkptrtodb(ump, daddr);
+		/*
+		 * Since this is FFS independent code, we are out of
+		 * scope for the definitions of BLK_NOCOPY and
+		 * BLK_SNAP, but we do know that they will fall in
+		 * the range 1..um_seqinc, so we use that test and
+		 * return a request for a zeroed out buffer if attempts
+		 * are made to read a BLK_NOCOPY or BLK_SNAP block.
+		 */
+		if ((ip->i_flags & SF_SNAPSHOT) && daddr > 0 &&
+		    daddr < ump->um_seqinc) {
+			*bnp = -1;
+		} else if (*bnp == 0) {
+			if (ip->i_flags & SF_SNAPSHOT) {
+				*bnp = blkptrtodb(ump, bn * ump->um_seqinc);
+			} else {
+				*bnp = -1;
+			}
+		} else if (runp) {
+			if (ump->um_fstype == UFS1) {
+				for (++bn; bn < NDADDR && *runp < maxrun &&
+				    is_sequential(ump,
+				        ufs_rw32(ip->i_ffs1_db[bn - 1],
+				            UFS_MPNEEDSWAP(ump)),
+				        ufs_rw32(ip->i_ffs1_db[bn],
+				            UFS_MPNEEDSWAP(ump)));
+				    ++bn, ++*runp);
+			} else {
+				for (++bn; bn < NDADDR && *runp < maxrun &&
+				    is_sequential(ump,
+				        ufs_rw64(ip->i_ffs2_db[bn - 1],
+				            UFS_MPNEEDSWAP(ump)),
+				        ufs_rw64(ip->i_ffs2_db[bn],
+				            UFS_MPNEEDSWAP(ump)));
+				    ++bn, ++*runp);
+			}
+		}
+		return (0);
 	}
 
 	xap = ap == NULL ? a : ap;
@@ -127,90 +202,122 @@ ufs_bmaparray(struct vnode *vp, daddr64_t bn, daddr64_t *bnp, struct indir *ap,
 		return (error);
 
 	num = *nump;
-	if (num == 0) {
-		*bnp = blkptrtodb(ump, DIP(ip, db[bn]));
-		if (*bnp == 0)
-			*bnp = -1;
-		else if (runp)
-			for (++bn; bn < NDADDR && *runp < maxrun &&
-			    is_sequential(ump, DIP(ip, db[bn - 1]),
-			        DIP(ip, db[bn]));
-			    ++bn, ++*runp);
-		return (0);
-	}
-
 
 	/* Get disk address out of indirect block array */
-	daddr = DIP(ip, ib[xap->in_off]);
+	if (ump->um_fstype == UFS1)
+		daddr = ufs_rw32(ip->i_ffs1_ib[xap->in_off],
+		    UFS_MPNEEDSWAP(ump));
+	else
+		daddr = ufs_rw64(ip->i_ffs2_ib[xap->in_off],
+		    UFS_MPNEEDSWAP(ump));
 
-	devvp = VFSTOUFS(vp->v_mount)->um_devvp;
 	for (bp = NULL, ++xap; --num; ++xap) {
-		/* 
+		/*
 		 * Exit the loop if there is no disk address assigned yet and
 		 * the indirect block isn't in the cache, or if we were
 		 * looking for an indirect block and we've found it.
 		 */
 
 		metalbn = xap->in_lbn;
-		if ((daddr == 0 && !incore(vp, metalbn)) || metalbn == bn)
+		if (metalbn == bn)
 			break;
+		if (daddr == 0) {
+			mutex_enter(&bufcache_lock);
+			cbp = incore(vp, metalbn);
+			mutex_exit(&bufcache_lock);
+			if (cbp == NULL)
+				break;
+		}
+
 		/*
 		 * If we get here, we've either got the block in the cache
 		 * or we have a disk address for it, go fetch it.
 		 */
 		if (bp)
-			brelse(bp);
+			brelse(bp, 0);
 
 		xap->in_exists = 1;
 		bp = getblk(vp, metalbn, mp->mnt_stat.f_iosize, 0, 0);
-		if (bp->b_flags & (B_DONE | B_DELWRI)) {
-			;
+		if (bp == NULL) {
+
+			/*
+			 * getblk() above returns NULL only iff we are
+			 * pagedaemon.  See the implementation of getblk
+			 * for detail.
+			 */
+
+			return (ENOMEM);
+		}
+		if (bp->b_oflags & (BO_DONE | BO_DELWRI)) {
+			trace(TR_BREADHIT, pack(vp, size), metalbn);
 		}
 #ifdef DIAGNOSTIC
 		else if (!daddr)
 			panic("ufs_bmaparray: indirect block not in cache");
 #endif
 		else {
+			trace(TR_BREADMISS, pack(vp, size), metalbn);
 			bp->b_blkno = blkptrtodb(ump, daddr);
 			bp->b_flags |= B_READ;
-			VOP_STRATEGY(bp);
-			curproc->p_stats->p_ru.ru_inblock++;	/* XXX */
+			BIO_SETPRIO(bp, BPRIO_TIMECRITICAL);
+			VOP_STRATEGY(vp, bp);
+			curlwp->l_ru.ru_inblock++;	/* XXX */
 			if ((error = biowait(bp)) != 0) {
-				brelse(bp);
+				brelse(bp, 0);
 				return (error);
 			}
 		}
-
-#ifdef FFS2
-		if (ip->i_ump->um_fstype == UM_UFS2) {
-			daddr = ((int64_t *)bp->b_data)[xap->in_off];
-			if (num == 1 && daddr && runp)
+		if (ump->um_fstype == UFS1) {
+			daddr = ufs_rw32(((u_int32_t *)bp->b_data)[xap->in_off],
+			    UFS_MPNEEDSWAP(ump));
+			if (num == 1 && daddr && runp) {
 				for (bn = xap->in_off + 1;
 				    bn < MNINDIR(ump) && *runp < maxrun &&
 				    is_sequential(ump,
-					((int64_t *)bp->b_data)[bn - 1],
-					((int64_t *)bp->b_data)[bn]);
+				        ufs_rw32(((int32_t *)bp->b_data)[bn-1],
+				            UFS_MPNEEDSWAP(ump)),
+				        ufs_rw32(((int32_t *)bp->b_data)[bn],
+				            UFS_MPNEEDSWAP(ump)));
 				    ++bn, ++*runp);
-
-                        continue;
+			}
+		} else {
+			daddr = ufs_rw64(((u_int64_t *)bp->b_data)[xap->in_off],
+			    UFS_MPNEEDSWAP(ump));
+			if (num == 1 && daddr && runp) {
+				for (bn = xap->in_off + 1;
+				    bn < MNINDIR(ump) && *runp < maxrun &&
+				    is_sequential(ump,
+				        ufs_rw64(((int64_t *)bp->b_data)[bn-1],
+				            UFS_MPNEEDSWAP(ump)),
+				        ufs_rw64(((int64_t *)bp->b_data)[bn],
+				            UFS_MPNEEDSWAP(ump)));
+				    ++bn, ++*runp);
+			}
 		}
-
-#endif /* FFS2 */
-
-		daddr = ((int32_t *)bp->b_data)[xap->in_off];
-		if (num == 1 && daddr && runp)
-			for (bn = xap->in_off + 1;
-			    bn < MNINDIR(ump) && *runp < maxrun &&
-			    is_sequential(ump,
-				((int32_t *)bp->b_data)[bn - 1],
-				((int32_t *)bp->b_data)[bn]);
-			    ++bn, ++*runp);
 	}
 	if (bp)
-		brelse(bp);
+		brelse(bp, 0);
 
-	daddr = blkptrtodb(ump, daddr);
-	*bnp = daddr == 0 ? -1 : daddr;
+	/*
+	 * Since this is FFS independent code, we are out of scope for the
+	 * definitions of BLK_NOCOPY and BLK_SNAP, but we do know that they
+	 * will fall in the range 1..um_seqinc, so we use that test and
+	 * return a request for a zeroed out buffer if attempts are made
+	 * to read a BLK_NOCOPY or BLK_SNAP block.
+	 */
+	if ((ip->i_flags & SF_SNAPSHOT) && daddr > 0 &&
+	    daddr < ump->um_seqinc) {
+		*bnp = -1;
+		return (0);
+	}
+	*bnp = blkptrtodb(ump, daddr);
+	if (*bnp == 0) {
+		if (ip->i_flags & SF_SNAPSHOT) {
+			*bnp = blkptrtodb(ump, bn * ump->um_seqinc);
+		} else {
+			*bnp = -1;
+		}
+	}
 	return (0);
 }
 
@@ -220,15 +327,16 @@ ufs_bmaparray(struct vnode *vp, daddr64_t bn, daddr64_t *bnp, struct indir *ap,
  * contains the logical block number of the appropriate single, double or
  * triple indirect block and the offset into the inode indirect block array.
  * Note, the logical block number of the inode single/double/triple indirect
- * block appears twice in the array, once with the offset into the i_ffs_ib and
+ * block appears twice in the array, once with the offset into the i_ffs1_ib and
  * once with the offset into the page itself.
  */
 int
-ufs_getlbns(struct vnode *vp, daddr64_t bn, struct indir *ap, int *nump)
+ufs_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 {
-	daddr64_t metalbn, realbn;
+	daddr_t metalbn, realbn;
 	struct ufsmount *ump;
 	int64_t blockcnt;
+	int lbc;
 	int i, numlevels, off;
 
 	ump = VFSTOUFS(vp->v_mount);
@@ -238,39 +346,31 @@ ufs_getlbns(struct vnode *vp, daddr64_t bn, struct indir *ap, int *nump)
 	realbn = bn;
 	if (bn < 0)
 		bn = -bn;
+	KASSERT(bn >= NDADDR);
 
-#ifdef DIAGNOSTIC
-	if (realbn < 0 && realbn > -NDADDR) {
-		panic ("ufs_getlbns: Invalid indirect block %d specified",
-		    realbn);
-	}
-#endif
-
-	/* The first NDADDR blocks are direct blocks. */
-	if (bn < NDADDR)
-		return (0);
-
-	/* 
+	/*
 	 * Determine the number of levels of indirection.  After this loop
 	 * is done, blockcnt indicates the number of data blocks possible
 	 * at the given level of indirection, and NIADDR - i is the number
 	 * of levels of indirection needed to locate the requested block.
 	 */
-	for (blockcnt = 1, i = NIADDR, bn -= NDADDR;; i--, bn -= blockcnt) {
+
+	bn -= NDADDR;
+	for (lbc = 0, i = NIADDR;; i--, bn -= blockcnt) {
 		if (i == 0)
 			return (EFBIG);
-		blockcnt *= MNINDIR(ump);
+
+		lbc += ump->um_lognindir;
+		blockcnt = (int64_t)1 << lbc;
+
 		if (bn < blockcnt)
 			break;
 	}
 
 	/* Calculate the address of the first meta-block. */
-	if (realbn >= 0)
-		metalbn = -(realbn - bn + NIADDR - i);
-	else
-		metalbn = -(-realbn - bn + NIADDR - i);
+	metalbn = -((realbn >= 0 ? realbn : -realbn) - bn + NIADDR - i);
 
-	/* 
+	/*
 	 * At each iteration, off is the offset into the bap array which is
 	 * an array of disk addresses at the current level of indirection.
 	 * The logical block number and the offset in that block are stored
@@ -285,8 +385,8 @@ ufs_getlbns(struct vnode *vp, daddr64_t bn, struct indir *ap, int *nump)
 		if (metalbn == realbn)
 			break;
 
-		blockcnt /= MNINDIR(ump);
-		off = (bn / blockcnt) % MNINDIR(ump);
+		lbc -= ump->um_lognindir;
+		off = (bn >> lbc) & (MNINDIR(ump) - 1);
 
 		++numlevels;
 		ap->in_lbn = metalbn;
@@ -294,13 +394,8 @@ ufs_getlbns(struct vnode *vp, daddr64_t bn, struct indir *ap, int *nump)
 		ap->in_exists = 0;
 		++ap;
 
-		metalbn -= -1 + off * blockcnt;
+		metalbn -= -1 + ((int64_t)off << lbc);
 	}
-#ifdef DIAGNOSTIC
-	if (realbn < 0 && metalbn != realbn) {
-		panic("ufs_getlbns: indirect block %d not found", realbn);
-	}
-#endif
 	if (nump)
 		*nump = numlevels;
 	return (0);

@@ -1,5 +1,4 @@
-/*	$OpenBSD: siopreg.h,v 1.11 2007/08/05 19:05:09 kettenis Exp $ */
-/*	$NetBSD: siopreg.h,v 1.16 2005/02/27 00:27:02 perry Exp $	*/
+/*	$NetBSD: siopreg.h,v 1.20 2008/06/11 02:09:16 kiyohara Exp $	*/
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -81,8 +80,7 @@ struct scf_period {
 	int scf; /* scf value to use */
 };
 
-#ifdef SIOP_NEEDS_PERIOD_TABLES
-static const struct scf_period scf_period[] = {
+static const struct scf_period scf_period[] __unused = {
 	{250, 25, 1}, /* 10.0 MHz */
 	{250, 37, 2}, /* 6.67 MHz */
 	{250, 50, 3},  /* 5.00 MHz */
@@ -98,14 +96,13 @@ static const struct scf_period scf_period[] = {
 	{ 62, 25, 5},  /* 10.0 MHz */
 };
 
-static const struct scf_period dt_scf_period[] = {
+static const struct scf_period dt_scf_period[] __unused = {
 	{ 62,  9, 1},  /* 80.0 MHz */
 	{ 62, 10, 3},  /* 40.0 MHz */
 	{ 62, 12, 5},  /* 20.0 MHz */
 	{ 62, 18, 6},  /* 13.3 MHz */
 	{ 62, 25, 7},  /* 10.0 MHz */
 };
-#endif
 
 #define SIOP_SCID	0x04 /* SCSI chip ID R/W */
 #define SCID_RRE	0x40
@@ -349,6 +346,7 @@ static const struct scf_period dt_scf_period[] = {
 #define STEST1_DIGE	0x10	/* 1010 only */
 #define STEST1_DBLEN	0x08	/* 875-only */
 #define STEST1_DBLSEL	0x04	/* 875-only */
+#define STEST1_SCLK	0x80
 
 #define SIOP_STEST2	0x4E /* SCSI test 2, RO, R/W on 875 */
 #define STEST2_DIF	0x20	/* 875 only */
@@ -503,8 +501,7 @@ struct nvram_symbios {
 #define	SIOP_NVRAM_TEK_93c46_ADDRESS	0
 #define	SIOP_NVRAM_TEK_24c16_ADDRESS	0x40
 
-#if 0
-static const u_int8_t tekram_sync_table[16] __attribute__((__unused__)) = {
+static const u_int8_t tekram_sync_table[16] __unused = {
 	25, 31, 37,  43,
 	50, 62, 75, 125,
 	12, 15, 18,  21,
@@ -538,4 +535,3 @@ struct nvram_tekram {
 #define	NVRAM_TEK_F_F2_F6_ENABLED	0x0001
 	u_int16_t	spare[29];
 } __packed;
-#endif

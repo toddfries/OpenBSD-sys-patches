@@ -1,5 +1,4 @@
-/*	$OpenBSD: hci_socket.c,v 1.6 2008/05/27 19:41:14 thib Exp $	*/
-/*	$NetBSD: hci_socket.c,v 1.14 2008/02/10 17:40:54 plunky Exp $	*/
+/*	$NetBSD: hci_socket.c,v 1.17 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -31,6 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hci_socket.c,v 1.17 2008/08/06 15:01:24 plunky Exp $");
+
 /* load symbolic names */
 #ifdef BLUETOOTH_DEBUG
 #define PRUREQUESTS
@@ -39,6 +41,7 @@
 
 #include <sys/param.h>
 #include <sys/domain.h>
+#include <sys/kauth.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
@@ -380,7 +383,7 @@ hci_security_check_opcode(struct hci_unit *unit, uint16_t opcode)
 {
 	int i;
 
-	for (i = 0 ; i < sizeof(hci_cmds) / sizeof(hci_cmds[0]); i++) {
+	for (i = 0 ; i < __arraycount(hci_cmds) ; i++) {
 		if (opcode != hci_cmds[i].opcode)
 			continue;
 
@@ -437,14 +440,14 @@ hci_cmdwait_flush(struct socket *so)
 
 	DPRINTF("flushing %p\n", so);
 
-	TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
-		IF_POLL(&unit->hci_cmdwait, m);
+	SIMPLEQ_FOREACH(unit, &hci_unit_list, hci_next) {
+		m = MBUFQ_FIRST(&unit->hci_cmdwait);
 		while (m != NULL) {
 			ctx = M_GETCTX(m, struct socket *);
 			if (ctx == so)
 				M_SETCTX(m, NULL);
 
-			m = m->m_nextpkt;
+			m = MBUFQ_NEXT(m);
 		}
 	}
 }
@@ -469,8 +472,8 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 		err = EMSGSIZE;
 		goto bad;
 	}
-	m_copydata(m, 0, sizeof(hdr), (caddr_t)&hdr);
-	hdr.opcode = letoh16(hdr.opcode);
+	m_copydata(m, 0, sizeof(hdr), &hdr);
+	hdr.opcode = le16toh(hdr.opcode);
 
 	/* only allows CMD packets to be sent */
 	if (hdr.type != HCI_CMD_PKT) {
@@ -498,8 +501,8 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 		goto bad;
 	}
 
-	/* makes a copy for precious to keep */
-	m0 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+	/* makess a copy for precious to keep */
+	m0 = m_copypacket(m, M_DONTWAIT);
 	if (m0 == NULL) {
 		err = ENOMEM;
 		goto bad;
@@ -512,7 +515,7 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 
 	/* Sendss it */
 	if (unit->hci_num_cmd_pkts == 0)
-		IF_ENQUEUE(&unit->hci_cmdwait, m);
+		MBUFQ_ENQUEUE(&unit->hci_cmdwait, m);
 	else
 		hci_output_cmd(unit, m);
 
@@ -520,7 +523,7 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 
 bad:
 	DPRINTF("packet (%d bytes) not sent (error %d)\n",
-	    m->m_pkthdr.len, err);
+			m->m_pkthdr.len, err);
 	if (m) m_freem(m);
 	return err;
 }
@@ -543,36 +546,46 @@ bad:
  */
 int
 hci_usrreq(struct socket *up, int req, struct mbuf *m,
-    struct mbuf *nam, struct mbuf *ctl, struct proc *p)
+		struct mbuf *nam, struct mbuf *ctl, struct lwp *l)
 {
 	struct hci_pcb *pcb = (struct hci_pcb *)up->so_pcb;
 	struct sockaddr_bt *sa;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "%s\n", prurequests[req]);
-#endif
 
 	switch(req) {
 	case PRU_CONTROL:
-		return hci_ioctl((unsigned long)m, (void *)nam, curproc);
+		mutex_enter(bt_lock);
+		err = hci_ioctl((unsigned long)m, (void *)nam, l);
+		mutex_exit(bt_lock);
+		return err;
+
+	case PRU_PURGEIF:
+		return EOPNOTSUPP;
 
 	case PRU_ATTACH:
+		if (up->so_lock == NULL) {
+			mutex_obj_hold(bt_lock);
+			up->so_lock = bt_lock;
+			solock(up);
+		}
+		KASSERT(solocked(up));
 		if (pcb)
 			return EINVAL;
-
 		err = soreserve(up, hci_sendspace, hci_recvspace);
 		if (err)
 			return err;
 
-		pcb = malloc(sizeof *pcb, M_PCB, M_NOWAIT | M_ZERO);
+		pcb = malloc(sizeof(struct hci_pcb), M_PCB, M_NOWAIT | M_ZERO);
 		if (pcb == NULL)
 			return ENOMEM;
 
 		up->so_pcb = pcb;
 		pcb->hp_socket = up;
 
-		if (curproc == NULL || suser(curproc, 0) == 0)
+		if (l == NULL || kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL) == 0)
 			pcb->hp_flags |= HCI_PRIVILEGED;
 
 		/*
@@ -738,69 +751,66 @@ release:
  * get/set socket options
  */
 int
-hci_ctloutput(int req, struct socket *so, int level,
-		int optname, struct mbuf **opt)
+hci_ctloutput(int req, struct socket *so, struct sockopt *sopt)
 {
 	struct hci_pcb *pcb = (struct hci_pcb *)so->so_pcb;
-	struct mbuf *m;
-	int err = 0;
+	int optval, err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "req %s\n", prcorequests[req]);
-#endif
 
 	if (pcb == NULL)
 		return EINVAL;
 
-	if (level != BTPROTO_HCI)
+	if (sopt->sopt_level != BTPROTO_HCI)
 		return ENOPROTOOPT;
 
 	switch(req) {
 	case PRCO_GETOPT:
-		m = m_get(M_WAIT, MT_SOOPTS);
-		switch (optname) {
+		switch (sopt->sopt_name) {
 		case SO_HCI_EVT_FILTER:
-			m->m_len = sizeof(struct hci_filter);
-			memcpy(mtod(m, void *), &pcb->hp_efilter, m->m_len);
+			err = sockopt_set(sopt, &pcb->hp_efilter,
+			    sizeof(struct hci_filter));
+
 			break;
 
 		case SO_HCI_PKT_FILTER:
-			m->m_len = sizeof(struct hci_filter);
-			memcpy(mtod(m, void *), &pcb->hp_pfilter, m->m_len);
+			err = sockopt_set(sopt, &pcb->hp_pfilter,
+			    sizeof(struct hci_filter));
+
 			break;
 
 		case SO_HCI_DIRECTION:
-			m->m_len = sizeof(int);
-			if (pcb->hp_flags & HCI_DIRECTION)
-				*mtod(m, int *) = 1;
-			else
-				*mtod(m, int *) = 0;
+			err = sockopt_setint(sopt,
+			    (pcb->hp_flags & HCI_DIRECTION ? 1 : 0));
+
 			break;
 
 		default:
 			err = ENOPROTOOPT;
-			m_freem(m);
-			m = NULL;
 			break;
 		}
-		*opt = m;
 		break;
 
 	case PRCO_SETOPT:
-		m = *opt;
-		if (m) switch (optname) {
+		switch (sopt->sopt_name) {
 		case SO_HCI_EVT_FILTER:	/* set event filter */
-			m->m_len = min(m->m_len, sizeof(struct hci_filter));
-			memcpy(&pcb->hp_efilter, mtod(m, void *), m->m_len);
+			err = sockopt_get(sopt, &pcb->hp_efilter,
+			    sizeof(pcb->hp_efilter));
+
 			break;
 
 		case SO_HCI_PKT_FILTER:	/* set packet filter */
-			m->m_len = min(m->m_len, sizeof(struct hci_filter));
-			memcpy(&pcb->hp_pfilter, mtod(m, void *), m->m_len);
+			err = sockopt_get(sopt, &pcb->hp_pfilter,
+			    sizeof(pcb->hp_pfilter));
+
 			break;
 
 		case SO_HCI_DIRECTION:	/* request direction ctl messages */
-			if (*mtod(m, int *))
+			err = sockopt_getint(sopt, &optval);
+			if (err)
+				break;
+
+			if (optval)
 				pcb->hp_flags |= HCI_DIRECTION;
 			else
 				pcb->hp_flags &= ~HCI_DIRECTION;
@@ -810,7 +820,6 @@ hci_ctloutput(int req, struct socket *so, int level,
 			err = ENOPROTOOPT;
 			break;
 		}
-		m_freem(m);
 		break;
 
 	default:
@@ -880,7 +889,7 @@ hci_mtap(struct mbuf *m, struct hci_unit *unit)
 		case HCI_CMD_PKT:
 			KASSERT(m->m_len >= sizeof(hci_cmd_hdr_t));
 
-			opcode = letoh16(mtod(m, hci_cmd_hdr_t *)->opcode);
+			opcode = le16toh(mtod(m, hci_cmd_hdr_t *)->opcode);
 
 			if ((pcb->hp_flags & HCI_PRIVILEGED) == 0
 			    && hci_security_check_opcode(NULL, opcode) == -1)
@@ -904,7 +913,7 @@ hci_mtap(struct mbuf *m, struct hci_unit *unit)
 		if (pcb->hp_flags & HCI_DIRECTION) {
 			int dir = m->m_flags & M_LINK0 ? 1 : 0;
 
-			*ctl = sbcreatecontrol((void *)&dir, sizeof(dir),
+			*ctl = sbcreatecontrol(&dir, sizeof(dir),
 			    SCM_HCI_DIRECTION, BTPROTO_HCI);
 
 			if (*ctl != NULL)
@@ -914,7 +923,7 @@ hci_mtap(struct mbuf *m, struct hci_unit *unit)
 		/*
 		 * copy to socket
 		 */
-		m0 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+		m0 = m_copypacket(m, M_DONTWAIT);
 		if (m0 && sbappendaddr(&pcb->hp_socket->so_rcv,
 				(struct sockaddr *)&sa, m0, ctlmsg)) {
 			sorwakeup(pcb->hp_socket);

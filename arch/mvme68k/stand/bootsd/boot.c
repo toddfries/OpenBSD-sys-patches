@@ -1,5 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.11 2003/06/02 23:27:51 millert Exp $ */
-/*	$NetBSD: boot.c,v 1.2 1995/09/23 03:42:52 gwr Exp $ */
+/*	$NetBSD: boot.c,v 1.7 2008/01/12 09:54:30 tsutsui Exp $ */
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -37,45 +36,28 @@
 
 #include <machine/prom.h>
 
-#include "stand.h"
+#include <lib/libsa/stand.h>
 #include "libsa.h"
 
 int debug;
 int errno;
-extern char *version;
-char	line[80];
+extern char bootprog_name[], bootprog_rev[];
+
+int main(void);
 
 int
-main()
+main(void)
 {
-	char *cp, *file;
-	int	io, flag, ret;
-	int	ask = 0;
+	char *file;
+	int	flag, part;
 
-	printf(">> OpenBSD MVME%x bootsd [%s]\n", bugargs.cputyp, version);
+	printf(">> %s MVME%x bootsd [%s]\n",
+	    bootprog_name, bugargs.cputyp, bootprog_rev);
 
-	ret = parse_args(&file, &flag);
+	parse_args(&file, &flag, &part);
 
-	for (;;) {
-		if (ask) {
-			printf("boot: ");
-			gets(line);
-			if (line[0]) {
-				bugargs.arg_start = line;
-				cp = line;
-				while (cp < (line + sizeof(line) -1) && *cp)
-					cp++;
-				bugargs.arg_end = cp;
-				ret = parse_args(&file, &flag);
-			}
-		}
-		if (ret) {
-			printf("boot: -q returning to MVME-Bug\n");
-			break;
-		}
-		exec_mvme(file, flag);
-		printf("boot: %s: %s\n", file, strerror(errno));
-		ask = 1;
-	}
-	return(0);
+	exec_mvme(file, flag, part);
+
+	printf("boot: %s: %s\n", file, strerror(errno));
+	return 0;
 }

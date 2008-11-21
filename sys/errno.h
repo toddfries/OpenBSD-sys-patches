@@ -1,5 +1,4 @@
-/*	$OpenBSD: errno.h,v 1.20 2007/09/03 14:37:52 millert Exp $	*/
-/*	$NetBSD: errno.h,v 1.10 1996/01/20 01:33:53 jtc Exp $	*/
+/*	$NetBSD: errno.h,v 1.39 2006/10/31 00:38:07 cbiere Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -37,7 +36,8 @@
  *	@(#)errno.h	8.5 (Berkeley) 1/21/94
  */
 
-#include <sys/cdefs.h>
+#ifndef _SYS_ERRNO_H_
+#define _SYS_ERRNO_H_
 
 #define	EPERM		1		/* Operation not permitted */
 #define	ENOENT		2		/* No such file or directory */
@@ -54,9 +54,7 @@
 #define	ENOMEM		12		/* Cannot allocate memory */
 #define	EACCES		13		/* Permission denied */
 #define	EFAULT		14		/* Bad address */
-#if __BSD_VISIBLE
 #define	ENOTBLK		15		/* Block device required */
-#endif
 #define	EBUSY		16		/* Device busy */
 #define	EEXIST		17		/* File exists */
 #define	EXDEV		18		/* Cross-device link */
@@ -77,7 +75,7 @@
 
 /* math software */
 #define	EDOM		33		/* Numerical argument out of domain */
-#define	ERANGE		34		/* Result too large */
+#define	ERANGE		34		/* Result too large or too small */
 
 /* non-blocking and interrupt i/o */
 #define	EAGAIN		35		/* Resource temporarily unavailable */
@@ -90,15 +88,11 @@
 #define	EDESTADDRREQ	39		/* Destination address required */
 #define	EMSGSIZE	40		/* Message too long */
 #define	EPROTOTYPE	41		/* Protocol wrong type for socket */
-#define	ENOPROTOOPT	42		/* Protocol not available */
+#define	ENOPROTOOPT	42		/* Protocol option not available */
 #define	EPROTONOSUPPORT	43		/* Protocol not supported */
-#if __BSD_VISIBLE
 #define	ESOCKTNOSUPPORT	44		/* Socket type not supported */
-#endif
 #define	EOPNOTSUPP	45		/* Operation not supported */
-#if __BSD_VISIBLE
 #define	EPFNOSUPPORT	46		/* Protocol family not supported */
-#endif
 #define	EAFNOSUPPORT	47		/* Address family not supported by protocol family */
 #define	EADDRINUSE	48		/* Address already in use */
 #define	EADDRNOTAVAIL	49		/* Can't assign requested address */
@@ -112,10 +106,8 @@
 #define	ENOBUFS		55		/* No buffer space available */
 #define	EISCONN		56		/* Socket is already connected */
 #define	ENOTCONN	57		/* Socket is not connected */
-#if __BSD_VISIBLE
 #define	ESHUTDOWN	58		/* Can't send after socket shutdown */
 #define	ETOOMANYREFS	59		/* Too many references: can't splice */
-#endif /* __BSD_VISIBLE */
 #define	ETIMEDOUT	60		/* Operation timed out */
 #define	ECONNREFUSED	61		/* Connection refused */
 
@@ -123,55 +115,72 @@
 #define	ENAMETOOLONG	63		/* File name too long */
 
 /* should be rearranged */
-#if __BSD_VISIBLE
 #define	EHOSTDOWN	64		/* Host is down */
 #define	EHOSTUNREACH	65		/* No route to host */
-#endif /* __BSD_VISIBLE */
 #define	ENOTEMPTY	66		/* Directory not empty */
 
 /* quotas & mush */
-#if __BSD_VISIBLE
 #define	EPROCLIM	67		/* Too many processes */
 #define	EUSERS		68		/* Too many users */
-#endif /* __BSD_VISIBLE */
-#define	EDQUOT		69		/* Disk quota exceeded */
+#define	EDQUOT		69		/* Disc quota exceeded */
 
 /* Network File System */
 #define	ESTALE		70		/* Stale NFS file handle */
-#if __BSD_VISIBLE
 #define	EREMOTE		71		/* Too many levels of remote in path */
 #define	EBADRPC		72		/* RPC struct is bad */
 #define	ERPCMISMATCH	73		/* RPC version wrong */
 #define	EPROGUNAVAIL	74		/* RPC prog. not avail */
 #define	EPROGMISMATCH	75		/* Program version wrong */
 #define	EPROCUNAVAIL	76		/* Bad procedure for program */
-#endif /* __BSD_VISIBLE */
 
 #define	ENOLCK		77		/* No locks available */
 #define	ENOSYS		78		/* Function not implemented */
 
-#if __BSD_VISIBLE
 #define	EFTYPE		79		/* Inappropriate file type or format */
 #define	EAUTH		80		/* Authentication error */
 #define	ENEEDAUTH	81		/* Need authenticator */
-#define	EIPSEC		82		/* IPsec processing failure */
-#define	ENOATTR		83		/* Attribute not found */
-#endif /* __BSD_VISIBLE */
-#define	EILSEQ		84		/* Illegal byte sequence */
-#if __BSD_VISIBLE
-#define	ENOMEDIUM	85		/* No medium found */
-#define	EMEDIUMTYPE	86		/* Wrong Medium Type */
-#define	EOVERFLOW	87		/* Conversion overflow */
-#define	ECANCELED	88		/* Operation canceled */
-#endif /* __BSD_VISIBLE */
-#define	EIDRM		89		/* Identifier removed */
-#define	ENOMSG		90		/* No message of desired type */
-#if __BSD_VISIBLE
-#define	ELAST		90		/* Must be equal largest errno */
-#endif /* __BSD_VISIBLE */
+
+/* SystemV IPC */
+#define	EIDRM		82		/* Identifier removed */
+#define	ENOMSG		83		/* No message of desired type */
+#define	EOVERFLOW	84		/* Value too large to be stored in data type */
+
+/* Wide/multibyte-character handling, ISO/IEC 9899/AMD1:1995 */
+#define	EILSEQ		85		/* Illegal byte sequence */
+
+/* From IEEE Std 1003.1-2001 */
+/* Base, Realtime, Threads or Thread Priority Scheduling option errors */
+#define ENOTSUP		86		/* Not supported */
+
+/* Realtime option errors */
+#define ECANCELED	87		/* Operation canceled */
+
+/* Realtime, XSI STREAMS option errors */
+#define EBADMSG		88		/* Bad or Corrupt message */
+
+/* XSI STREAMS option errors  */
+#define ENODATA		89		/* No message available */
+#define ENOSR		90		/* No STREAM resources */
+#define ENOSTR		91		/* Not a STREAM */
+#define ETIME		92		/* STREAM ioctl timeout */
+
+/* File system extended attribute errors */
+#define	ENOATTR		93		/* Attribute not found */
+
+/* Realtime, XSI STREAMS option errors */
+#define	EMULTIHOP	94		/* Multihop attempted */ 
+#define	ENOLINK		95		/* Link has been severed */
+#define	EPROTO		96		/* Protocol error */
+
+#define	ELAST		96		/* Must equal largest errno */
 
 #ifdef _KERNEL
 /* pseudo-errors returned inside kernel to modify return to process */
-#define	ERESTART	-1		/* restart syscall */
 #define	EJUSTRETURN	-2		/* don't modify regs, just return */
+#define	ERESTART	-3		/* restart syscall */
+#define	EPASSTHROUGH	-4		/* ioctl not handled by this layer */
+#define	EDUPFD		-5		/* Dup given fd */
+#define	EMOVEFD		-6		/* Move given fd */
 #endif
+
+#endif /* !_SYS_ERRNO_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.19 2008/01/19 11:13:43 kettenis Exp $	*/
-/* $NetBSD: pci_machdep.h,v 1.7 2001/07/20 00:07:14 eeh Exp $ */
+/* $NetBSD: pci_machdep.h,v 1.19 2008/05/29 14:51:26 mrg Exp $ */
 
 /*
  * Copyright (c) 1999 Matthew R. Green
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -44,12 +41,17 @@ struct pci_attach_args;
 typedef struct sparc_pci_chipset *pci_chipset_tag_t;
 typedef u_int pci_intr_handle_t;
 
+struct sparc_pci_chipset {
+	void			*cookie;	/* psycho_pbm, but sssh! */
+	int			rootnode;	/* PCI controller */
+};
+
 /* 
  * The stuuuuuuupid allegedly MI PCI code expects pcitag_t to be a
  * scalar type.  But we really need to store both the OFW node and
  * the bus/device/function info in it.  (We'd like to store more, 
  * like all the ofw properties, but we don't need to.)  Luckily,
- * both are 32-bit values, so we can squeeze them into a u_int64_t
+ * both are 32-bit values, so we can squeeze them into a uint64_t
  * with a little help from some macros.
  */
 
@@ -58,20 +60,10 @@ typedef u_int pci_intr_handle_t;
 #define	PCITAG_BUS(t)		((PCITAG_OFFSET(t)>>16)&0xff)
 #define	PCITAG_DEV(t)		((PCITAG_OFFSET(t)>>11)&0x1f)
 #define	PCITAG_FUN(t)		((PCITAG_OFFSET(t)>>8)&0x7)
-#define	PCITAG_CREATE(n,b,d,f)	(((u_int64_t)(n)<<32)|((b)<<16)|((d)<<11)|((f)<<8))
+#define	PCITAG_CREATE(n,b,d,f)	(((uint64_t)(n)<<32)|((b)<<16)|((d)<<11)|((f)<<8))
 #define	PCITAG_SETNODE(t,n)	((t)&0xffffffff)|(((n)<<32)
-typedef u_int64_t pcitag_t; 
+typedef uint64_t pcitag_t; 
 
-struct sparc_pci_chipset {
-	void			*cookie;
-	bus_space_tag_t		bustag;
-	bus_space_handle_t	bushandle;
-	int			rootnode;	/* PCI controller */
-	int			busnode[256];
-	pcireg_t (*conf_read)(pci_chipset_tag_t, pcitag_t, int);
-	void (*conf_write)(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
-	int (*intr_map)(struct pci_attach_args *, pci_intr_handle_t *);
-};
 
 void		pci_attach_hook(struct device *, struct device *,
 				     struct pcibus_attach_args *);
@@ -83,19 +75,15 @@ pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 				    pcireg_t);
 int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
-int		pci_intr_line(pci_intr_handle_t);
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
+const struct evcnt *pci_intr_evcnt(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-				 int, int (*)(void *), void *, char *);
+					 int, int (*)(void *), void *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 
-int		sparc64_pci_enumerate_bus(struct pci_softc *,
-		    int (*match)(struct pci_attach_args *),
+int		sparc64_pci_enumerate_bus(struct pci_softc *, const int *,
+		    int (*)(struct pci_attach_args *),
 		    struct pci_attach_args *);
-
 #define PCI_MACHDEP_ENUMERATE_BUS sparc64_pci_enumerate_bus
-
-#define pciide_machdep_compat_intr_establish(a, b, c, d, e) (NULL)
-#define pciide_machdep_compat_intr_disestablish(a, b) do { } while (0)
 
 #endif /* _MACHINE_PCI_MACHDEP_H_ */

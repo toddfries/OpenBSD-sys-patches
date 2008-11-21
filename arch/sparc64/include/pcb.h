@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.8 2008/01/16 20:55:37 kettenis Exp $	*/
-/*	$NetBSD: pcb.h,v 1.7 2000/12/29 17:12:05 eeh Exp $ */
+/*	$NetBSD: pcb.h,v 1.15 2007/03/04 06:00:49 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,8 +40,35 @@
  *	@(#)pcb.h	8.1 (Berkeley) 6/11/93
  */
 
-#ifndef _SPARC64_PCB_H_
-#define _SPARC64_PCB_H_
+/*
+ * Copyright (c) 1996-2002 Eduardo Horvath.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the author nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)pcb.h	8.1 (Berkeley) 6/11/93
+ */
 
 #include <machine/reg.h>
 
@@ -125,22 +151,19 @@
  * change this as soon as the new scheme is debugged.
  */
 struct pcb {
-	u_int64_t	pcb_sp;		/* sp (%o6) when switch() was called */
-	u_int64_t	pcb_pc;		/* pc (%o7) when switch() was called */
-	caddr_t	pcb_onfault;	/* for copyin/out */
+	uint64_t	pcb_sp;		/* sp (%o6) when switch() was called */
+	uint64_t	pcb_pc;		/* pc (%o7) when switch() was called */
+	void *	pcb_onfault;	/* for copyin/out */
 	short	pcb_pstate;	/* %pstate when switch() was called -- may be useful if we support multiple memory models */
 	char	pcb_nsaved;	/* number of windows saved in pcb */
 
 	/* The rest is probably not needed except for pcb_rw */
 	char	pcb_cwp;	/* %cwp when switch() was called */
-	char	pcb_pil;	/* %pil when switch() was called -- probably not needed */
+	char	pcb_pil;	/* %pil when switch() was called -- prolly not needed */
 
 	const char *lastcall;	/* DEBUG -- name of last system call */
-	u_int64_t	pcb_wcookie;
-
 	/* the following MUST be aligned on a 64-bit boundary */
 	struct	rwindow64 pcb_rw[PCB_MAXWIN];	/* saved windows */
-	u_int64_t	pcb_rwsp[PCB_MAXWIN];
 };
 
 /*
@@ -149,10 +172,14 @@ struct pcb {
  * from the top of the kernel stack (included here so that the kernel
  * stack itself need not be dumped).
  */
+struct md_coredump32 {
+	struct	trapframe32 md_tf;
+	struct	fpstate32 md_fpstate;
+};
+
 struct md_coredump {
 	struct	trapframe64 md_tf;
 	struct	fpstate64 md_fpstate;
-	u_int64_t md_wcookie;
 };
 
 #ifndef _KERNEL
@@ -160,5 +187,3 @@ struct md_coredump {
 #define pcb_psr	pcb_pstate
 #define pcb_wim	pcb_cwp
 #endif /* _KERNEL */
-
-#endif /* _SPARC64_PCB_H_ */

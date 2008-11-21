@@ -1,4 +1,6 @@
-/*	$OpenBSD: exec.h,v 1.9 2003/11/07 16:41:01 mickey Exp $	*/
+/*	$NetBSD: exec.h,v 1.2 2002/12/10 17:14:10 thorpej Exp $	*/
+
+/*	$OpenBSD: exec.h,v 1.6 2001/01/22 14:51:03 art Exp $	*/
 
 /* 
  * Copyright (c) 1994, The University of Utah and
@@ -23,13 +25,13 @@
  * 	Utah $Hdr: exec.h 1.3 94/12/16$
  */
 
-#ifndef	_MACHINE_EXEC_H_
-#define	_MACHINE_EXEC_H_
+#ifndef	_HPPA_EXEC_H_
+#define	_HPPA_EXEC_H_
 
 #define cpu_exec_aout_makecmds(p, epp)  ENOEXEC
 
 /* Size of a page in an object file. */
-#define	__LDPGSZ	4096
+#define	AOUT_LDPGSZ	4096
 
 #define ARCH_ELFSIZE		32
 
@@ -37,14 +39,21 @@
 #define ELF_TARG_DATA           ELFDATA2MSB
 #define ELF_TARG_MACH           EM_PARISC   
 
+/* #define _NLIST_DO_AOUT */
+/* #define _NLIST_DO_ECOFF */
 #define _NLIST_DO_ELF
+#define _NLIST_DO_SOM
+
+/* #define	_KERN_DO_AOUT */
+/* #define	_KERN_DO_ECOFF */
 #define	_KERN_DO_ELF
+#define	_KERN_DO_SOM
 
 /*
  * the following MD ELF values defenitions are from the:
  * "Processor-Specific ELF Supplement for PA-RISC.
- *  Including HP and HP-UX Extensions. Version 1.43. October 6, 1997"
- *	http://devrsrc1.external.hp.com/STK/partner/elf-pa.pdf
+ *  Including HP and HP-UX Extensions. Version 1.43. October 6, 1998"
+ *	http://www.software.hp.com/STK/partner/elf-pa.pdf
  *
  */
 
@@ -109,4 +118,4 @@
 #define	PF_PARISC_SBP		0x08000000	/* segment contains code
 					compiled for static branch prediction */
 
-#endif	/* _MACHINE_EXEC_H_ */
+#endif	/* _HPPA_EXEC_H_ */

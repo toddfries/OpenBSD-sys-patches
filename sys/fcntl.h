@@ -1,5 +1,4 @@
-/*	$OpenBSD: fcntl.h,v 1.11 2007/11/24 12:59:28 jmc Exp $	*/
-/*	$NetBSD: fcntl.h,v 1.8 1995/03/26 20:24:12 jtc Exp $	*/
+/*	$NetBSD: fcntl.h,v 1.34 2006/10/05 14:48:33 chs Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1990, 1993
@@ -46,10 +45,13 @@
  * related kernel definitions.
  */
 
-#include <sys/cdefs.h>
 #ifndef _KERNEL
+#include <sys/featuretest.h>
 #include <sys/types.h>
-#endif
+#if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
+#include <sys/stat.h>
+#endif /* _XOPEN_SOURCE || _NETBSD_SOURCE */
+#endif /* !_KERNEL */
 
 /*
  * File status flags: these are used by open(2), fcntl(2).
@@ -59,10 +61,10 @@
  * Open/fcntl flags begin with O_; kernel-internal flags begin with F.
  */
 /* open-only flags */
-#define	O_RDONLY	0x0000		/* open for reading only */
-#define	O_WRONLY	0x0001		/* open for writing only */
-#define	O_RDWR		0x0002		/* open for reading and writing */
-#define	O_ACCMODE	0x0003		/* mask for above modes */
+#define	O_RDONLY	0x00000000	/* open for reading only */
+#define	O_WRONLY	0x00000001	/* open for writing only */
+#define	O_RDWR		0x00000002	/* open for reading and writing */
+#define	O_ACCMODE	0x00000003	/* mask for above modes */
 
 /*
  * Kernel encoding of open mode; separate read and write bits that are
@@ -72,68 +74,84 @@
  * FREAD and FWRITE are excluded from the #ifdef _KERNEL so that TIOCFLUSH,
  * which was documented to use FREAD/FWRITE, continues to work.
  */
-#if __BSD_VISIBLE
-#define	FREAD		0x0001
-#define	FWRITE		0x0002
+#if defined(_NETBSD_SOURCE)
+#define	FREAD		0x00000001
+#define	FWRITE		0x00000002
 #endif
-#define	O_NONBLOCK	0x0004		/* no delay */
-#define	O_APPEND	0x0008		/* set append mode */
-#if __BSD_VISIBLE
-#define	O_SHLOCK	0x0010		/* open with shared file lock */
-#define	O_EXLOCK	0x0020		/* open with exclusive file lock */
-#define	O_ASYNC		0x0040		/* signal pgrp when data ready */
-#define	O_FSYNC		0x0080		/* backwards compatibility */
-#define	O_NOFOLLOW	0x0100		/* if path is a symlink, don't follow */
+#define	O_NONBLOCK	0x00000004	/* no delay */
+#define	O_APPEND	0x00000008	/* set append mode */
+#if defined(_NETBSD_SOURCE)
+#define	O_SHLOCK	0x00000010	/* open with shared file lock */
+#define	O_EXLOCK	0x00000020	/* open with exclusive file lock */
+#define	O_ASYNC		0x00000040	/* signal pgrp when data ready */
 #endif
-#if __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 420
-#define	O_SYNC		0x0080		/* synchronous writes */
+#if (_POSIX_C_SOURCE - 0) >= 199309L || \
+    (defined(_XOPEN_SOURCE) && defined(_XOPEN_SOURCE_EXTENDED)) || \
+    (_XOPEN_SOURCE - 0) >= 500 || defined(_NETBSD_SOURCE)
+#define	O_SYNC		0x00000080	/* synchronous writes */
 #endif
-#define	O_CREAT		0x0200		/* create if nonexistent */
-#define	O_TRUNC		0x0400		/* truncate to zero length */
-#define	O_EXCL		0x0800		/* error if already exists */
+#if defined(_NETBSD_SOURCE)
+#define	O_NOFOLLOW	0x00000100	/* don't follow symlinks on the last */
+					/* path component */
+#endif
+#define	O_CREAT		0x00000200	/* create if nonexistent */
+#define	O_TRUNC		0x00000400	/* truncate to zero length */
+#define	O_EXCL		0x00000800	/* error if already exists */
+
+#if (_POSIX_C_SOURCE - 0) >= 199309L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
+#define	O_DSYNC		0x00010000	/* write: I/O data completion */
+#define	O_RSYNC		0x00020000	/* read: I/O completion as for write */
+#endif
+
+#if defined(_NETBSD_SOURCE)
+#define	O_ALT_IO	0x00040000	/* use alternate i/o semantics */
+#define	O_DIRECT	0x00080000	/* direct I/O hint */
+#endif
+
+/* defined by POSIX 1003.1; BSD default, but required to be bitwise distinct */
+#define	O_NOCTTY	0x00008000	/* don't assign controlling terminal */
+
 #ifdef _KERNEL
-#define	FMARK		0x1000		/* mark during gc() */
-#define	FDEFER		0x2000		/* defer for next gc pass */
-#define	FHASLOCK	0x4000		/* descriptor holds advisory lock */
-#endif
+/* convert from open() flags to/from fflags; convert O_RD/WR to FREAD/FWRITE */
+#define	FFLAGS(oflags)	((oflags) + 1)
+#define	OFLAGS(fflags)	((fflags) - 1)
 
-/*
- * POSIX 1003.1 specifies a higher granularity for synchronous operations
- * than we support.  Since synchronicity is all or nothing in OpenBSD
- * we just define these to be the same as O_SYNC.
- */
-#define	O_DSYNC		O_SYNC		/* synchronous data writes */
-#define	O_RSYNC		O_SYNC		/* synchronous reads */
+/* all bits settable during open(2) */
+#define	O_MASK		(O_ACCMODE|O_NONBLOCK|O_APPEND|O_SHLOCK|O_EXLOCK|\
+			 O_ASYNC|O_SYNC|O_CREAT|O_TRUNC|O_EXCL|O_DSYNC|\
+			 O_RSYNC|O_NOCTTY|O_ALT_IO|O_NOFOLLOW|O_DIRECT)
 
-/* defined by POSIX 1003.1; BSD default, this bit is not required */
-#define	O_NOCTTY	0x8000		/* don't assign controlling terminal */
-
-#ifdef _KERNEL
-/*
- * convert from open() flags to/from fflags; convert O_RD/WR to FREAD/FWRITE.
- * For out-of-range values for the flags, be slightly careful (but lossy).
- */
-#define	FFLAGS(oflags)	(((oflags) & ~O_ACCMODE) | (((oflags) + 1) & O_ACCMODE))
-#define	OFLAGS(fflags)	(((fflags) & ~O_ACCMODE) | (((fflags) - 1) & O_ACCMODE))
-
-/* bits to save after open */
-#define	FMASK		(FREAD|FWRITE|FAPPEND|FASYNC|FFSYNC|FNONBLOCK)
+#define	FMARK		0x00001000	/* mark during gc() */
+#define	FDEFER		0x00002000	/* defer for next gc pass */
+#define	FHASLOCK	0x00004000	/* descriptor holds advisory lock */
+#define	FKIOCTL		0x80000000	/* kernel originated ioctl */
 /* bits settable by fcntl(F_SETFL, ...) */
-#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK)
-#endif
+#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|FDSYNC|FRSYNC|FALTIO|\
+			 FDIRECT)
+/* bits to save after open(2) */
+#define	FMASK		(FREAD|FWRITE|FCNTLFLAGS)
+#endif /* _KERNEL */
 
 /*
  * The O_* flags used to have only F* names, which were used in the kernel
  * and by fcntl.  We retain the F* names for the kernel f_flags field
  * and for backward compatibility for fcntl.
  */
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
 #define	FAPPEND		O_APPEND	/* kernel/compat */
 #define	FASYNC		O_ASYNC		/* kernel/compat */
-#define	FFSYNC		O_SYNC		/* kernel */
-#define	FNONBLOCK	O_NONBLOCK	/* kernel */
+#define	O_FSYNC		O_SYNC		/* compat */
 #define	FNDELAY		O_NONBLOCK	/* compat */
 #define	O_NDELAY	O_NONBLOCK	/* compat */
+#endif
+#if defined(_KERNEL)
+#define	FNONBLOCK	O_NONBLOCK	/* kernel */
+#define	FFSYNC		O_SYNC		/* kernel */
+#define	FDSYNC		O_DSYNC		/* kernel */
+#define	FRSYNC		O_RSYNC		/* kernel */
+#define	FALTIO		O_ALT_IO	/* kernel */
+#define	FDIRECT		O_DIRECT	/* kernel */
 #endif
 
 /*
@@ -146,13 +164,18 @@
 #define	F_SETFD		2		/* set file descriptor flags */
 #define	F_GETFL		3		/* get file status flags */
 #define	F_SETFL		4		/* set file status flags */
-#if __POSIX_VISIBLE >= 200112 || __XPG_VISIBLE >= 500
+#if (_POSIX_C_SOURCE - 0) >= 200112L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
 #define	F_GETOWN	5		/* get SIGIO/SIGURG proc/pgrp */
-#define F_SETOWN	6		/* set SIGIO/SIGURG proc/pgrp */
+#define	F_SETOWN	6		/* set SIGIO/SIGURG proc/pgrp */
 #endif
 #define	F_GETLK		7		/* get record locking information */
 #define	F_SETLK		8		/* set record locking information */
 #define	F_SETLKW	9		/* F_SETLK; wait if blocked */
+#if defined(_NETBSD_SOURCE)
+#define	F_CLOSEM	10		/* close all fds >= to the one given */
+#define	F_MAXFD		11		/* return the max open fd */
+#endif
 
 /* file descriptor flags (F_GETFD, F_SETFD) */
 #define	FD_CLOEXEC	1		/* close-on-exec flag */
@@ -167,6 +190,43 @@
 #define	F_POSIX		0x040	 	/* Use POSIX semantics for lock */
 #endif
 
+/* Constants for fcntl's passed to the underlying fs - like ioctl's. */
+#if defined(_NETBSD_SOURCE)
+#define	F_PARAM_MASK	0xfff
+#define	F_PARAM_LEN(x)	(((x) >> 16) & F_PARAM_MASK)
+#define	F_PARAM_MAX	4095
+#define	F_FSCTL		(int)0x80000000	/* This fcntl goes to the fs */
+#define	F_FSVOID	(int)0x40000000	/* no parameters */
+#define	F_FSOUT		(int)0x20000000	/* copy out parameter */
+#define	F_FSIN		(int)0x10000000	/* copy in parameter */
+#define	F_FSINOUT	(F_FSIN | F_FSOUT)
+#define	F_FSDIRMASK	(int)0x70000000	/* mask for IN/OUT/VOID */
+#define	F_FSPRIV	(int)0x00008000	/* command is fs-specific */
+
+/*
+ * Define command macros for operations which, if implemented, must be
+ * the same for all fs's.
+ */
+#define	_FCN(inout, num, len) \
+		(F_FSCTL | inout | ((len & F_PARAM_MASK) << 16) | (num))
+#define	_FCNO(c)	_FCN(F_FSVOID,	(c), 0)
+#define	_FCNR(c, t)	_FCN(F_FSIN,	(c), (int)sizeof(t))
+#define	_FCNW(c, t)	_FCN(F_FSOUT,	(c), (int)sizeof(t))
+#define	_FCNRW(c, t)	_FCN(F_FSINOUT,	(c), (int)sizeof(t))
+
+/*
+ * Define command macros for fs-specific commands.
+ */
+#define	_FCN_FSPRIV(inout, fs, num, len) \
+	(F_FSCTL | F_FSPRIV | inout | ((len & F_PARAM_MASK) << 16) |	\
+	 (fs) << 8 | (num))
+#define	_FCNO_FSPRIV(f, c)	_FCN_FSPRIV(F_FSVOID,  (f), (c), 0)
+#define	_FCNR_FSPRIV(f, c, t)	_FCN_FSPRIV(F_FSIN,    (f), (c), (int)sizeof(t))
+#define	_FCNW_FSPRIV(f, c, t)	_FCN_FSPRIV(F_FSOUT,   (f), (c), (int)sizeof(t))
+#define	_FCNRW_FSPRIV(f, c, t)	_FCN_FSPRIV(F_FSINOUT, (f), (c), (int)sizeof(t))
+
+#endif /* _NETBSD_SOURCE */
+
 /*
  * Advisory file segment locking data type -
  * information passed to system by user
@@ -180,7 +240,7 @@ struct flock {
 };
 
 
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
 /* lock operations for flock(2) */
 #define	LOCK_SH		0x01		/* shared file lock */
 #define	LOCK_EX		0x02		/* exclusive file lock */
@@ -188,16 +248,40 @@ struct flock {
 #define	LOCK_UN		0x08		/* unlock file */
 #endif
 
+/* Always ensure that these are consistent with <stdio.h> and <unistd.h>! */
+#ifndef	SEEK_SET
+#define	SEEK_SET	0	/* set file offset to offset */
+#endif
+#ifndef	SEEK_CUR
+#define	SEEK_CUR	1	/* set file offset to current plus offset */
+#endif
+#ifndef	SEEK_END
+#define	SEEK_END	2	/* set file offset to EOF plus offset */
+#endif
+
+/*
+ * posix_advise advisories.
+ */
+
+#define	POSIX_FADV_NORMAL	0	/* default advice / no advice */
+#define	POSIX_FADV_RANDOM	1	/* random access */
+#define	POSIX_FADV_SEQUENTIAL	2	/* sequential access(lower to higher) */
+#define	POSIX_FADV_WILLNEED	3	/* be needed in near future */
+#define	POSIX_FADV_DONTNEED	4	/* not be needed in near future */
+#define	POSIX_FADV_NOREUSE	5	/* be accessed once */
 
 #ifndef _KERNEL
+#include <sys/cdefs.h>
+
 __BEGIN_DECLS
 int	open(const char *, int, ...);
 int	creat(const char *, mode_t);
 int	fcntl(int, int, ...);
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
 int	flock(int, int);
-#endif
+#endif /* _NETBSD_SOURCE */
+int	posix_fadvise(int, off_t, off_t, int);
 __END_DECLS
-#endif
+#endif /* !_KERNEL */
 
 #endif /* !_SYS_FCNTL_H_ */

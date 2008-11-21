@@ -1,4 +1,3 @@
-/* $OpenBSD: pciide_machdep.c,v 1.4 2002/03/14 01:26:27 millert Exp $ */
 /* $NetBSD: pciide_machdep.c,v 1.2 1998/04/18 01:09:20 thorpej Exp $ */
 
 /*
@@ -43,36 +42,29 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
+__KERNEL_RCSID(0, "$NetBSD: pciide_machdep.c,v 1.2 1998/04/18 01:09:20 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
-
-#include <dev/isa/isavar.h>
-
 #include <dev/pci/pciidereg.h>
 #include <dev/pci/pciidevar.h>
+
+#include <dev/isa/isavar.h>
 
 void *
 pciide_machdep_compat_intr_establish(dev, pa, chan, func, arg)
 	struct device *dev;
 	struct pci_attach_args *pa;
 	int chan;
-	int (*func)(void *);
+	int (*func) __P((void *));
 	void *arg;
 {
 	pci_chipset_tag_t pc = pa->pa_pc;
 
 	return (alpha_pciide_compat_intr_establish(pc, dev, pa, chan,
 	    func, arg));
-}
-
-void
-pciide_machdep_compat_intr_disestablish(pc, cookie)
-	pci_chipset_tag_t pc;
-	void *cookie;
-{
-	alpha_pciide_compat_intr_disestablish(pc, cookie);
 }

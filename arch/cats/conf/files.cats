@@ -1,4 +1,4 @@
-#	$NetBSD: files.cats,v 1.33 2006/09/19 10:05:32 he Exp $
+#	$NetBSD: files.cats,v 1.35 2008/02/20 21:43:33 drochner Exp $
 #
 # CATS-specific configuration info
 #
@@ -84,10 +84,6 @@ file	arch/cats/pci/pcib.c			pcib
 
 file	arch/cats/pci/pciide_machdep.c	pciide_common
 
-# Include WSCONS stuff
-include "dev/wscons/files.wscons"
-include "dev/rasops/files.rasops"
-include "dev/wsfont/files.wsfont"
 include "dev/pckbport/files.pckbport"
 
 # Include USB stuff

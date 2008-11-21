@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.h,v 1.1 2006/01/27 18:31:12 cdi Exp $	*/
+/*	$NetBSD: boot.h,v 1.5 2008/04/28 20:23:36 martin Exp $	*/
 
 /*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,12 +33,8 @@
 
 #if defined(_DEBUG)
 #define DPRINTF(x)	printf x;
-
-void pmap_print_tlb(char);
 #else
 #define DPRINTF(x)
-
-#define pmap_print_tlb(c)	((void)0)
 #endif
 
 /*
@@ -65,6 +54,7 @@ extern ssize_t	sparc64_read(int, void *, size_t);
 extern void*	sparc64_memcpy(void *, const void *, size_t);
 extern void*	sparc64_memset(void *, int, size_t);
 extern void	sparc64_bi_add(void);
+extern void	sparc64_finalize_tlb(u_long);
 
 /* srt0.s */
 extern u_int	get_cpuid(void);
@@ -74,5 +64,8 @@ extern u_int	get_cpuid(void);
 #define LOADFILE_OFW_ALLOCATOR		0x1
 #define LOADFILE_MMU_ALLOCATOR		0x2
 extern void	loadfile_set_allocator(int);
+
+/* ofdev.c */
+char *filename(char*, char*);
 
 #endif /* _BOOT_H_ */

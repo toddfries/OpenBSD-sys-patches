@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_filio.c,v 1.5 2002/03/14 01:26:51 millert Exp $	 */
-/*	$NetBSD: svr4_filio.c,v 1.5 1996/04/11 12:54:40 christos Exp $	 */
+/*	$NetBSD: svr4_filio.c,v 1.22 2008/07/02 16:45:20 matt Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,20 +15,22 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: svr4_filio.c,v 1.22 2008/07/02 16:45:20 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -46,6 +50,8 @@
 #include <compat/svr4/svr4_types.h>
 #include <compat/svr4/svr4_util.h>
 #include <compat/svr4/svr4_signal.h>
+#include <compat/svr4/svr4_lwp.h>
+#include <compat/svr4/svr4_ucontext.h>
 #include <compat/svr4/svr4_syscallargs.h>
 #include <compat/svr4/svr4_stropts.h>
 #include <compat/svr4/svr4_ioctl.h>
@@ -53,30 +59,30 @@
 
 
 int
-svr4_fil_ioctl(fp, p, retval, fd, cmd, data)
-	struct file *fp;
-	struct proc *p;
-	register_t *retval;
-	int fd;
-	u_long cmd;
-	caddr_t data;
+svr4_fil_ioctl(file_t *fp, struct lwp *l, register_t *retval, int fd, u_long cmd, void *data)
 {
+	struct proc *p = l->l_proc;
 	int error;
 	int num;
-	struct filedesc *fdp = p->p_fd;
-	int (*ctl)(struct file *, u_long,  caddr_t, struct proc *) =
-			fp->f_ops->fo_ioctl;
+	filedesc_t *fdp = p->p_fd;
+	fdfile_t *ff;
+	int (*ctl)(file_t *, u_long,  void *) = fp->f_ops->fo_ioctl;
 
 	*retval = 0;
+	error = 0;
 
+	if ((fp = fd_getfile(fd)) == NULL)
+                return EBADF;
+	ff = fdp->fd_ofiles[fd];
 	switch (cmd) {
 	case SVR4_FIOCLEX:
-		fdp->fd_ofileflags[fd] |= UF_EXCLOSE;
-		return 0;
+		ff->ff_exclose = true;
+		fdp->fd_exclose = true;
+		break;
 
 	case SVR4_FIONCLEX:
-		fdp->fd_ofileflags[fd] &= ~UF_EXCLOSE;
-		return 0;
+		ff->ff_exclose = false;
+		break;
 
 	case SVR4_FIOGETOWN:
 	case SVR4_FIOSETOWN:
@@ -84,7 +90,7 @@ svr4_fil_ioctl(fp, p, retval, fd, cmd, data)
 	case SVR4_FIONBIO:
 	case SVR4_FIONREAD:
 		if ((error = copyin(data, &num, sizeof(num))) != 0)
-			return error;
+			break;
 
 		switch (cmd) {
 		case SVR4_FIOGETOWN:	cmd = FIOGETOWN; break;
@@ -94,15 +100,15 @@ svr4_fil_ioctl(fp, p, retval, fd, cmd, data)
 		case SVR4_FIONREAD:	cmd = FIONREAD;  break;
 		}
 
-		error = (*ctl)(fp, cmd, (caddr_t) &num, p);
-
-		if (error)
-			return error;
-
-		return copyout(&num, data, sizeof(num));
+		error = (*ctl)(fp, cmd, &num);
+		if (error == 0)
+			error = copyout(&num, data, sizeof(num));
+		break;
 
 	default:
 		DPRINTF(("Unknown svr4 filio %lx\n", cmd));
-		return 0;	/* ENOSYS really */
+		break;
 	}
+	fd_putfile(fd);
+	return error;
 }

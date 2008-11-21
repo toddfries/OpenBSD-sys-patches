@@ -1,4 +1,4 @@
-# $NetBSD: BASIL,v 1.47 2006/09/27 21:42:04 manu Exp $
+# $NetBSD: BASIL,v 1.50 2008/11/12 12:35:55 ad Exp $
 #
 # basil.shagadelic.org -- thorpej's API UP1000
 
@@ -6,7 +6,7 @@ include	"arch/alpha/conf/std.alpha"
 
 #options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"BASIL-$Revision: 1.47 $"
+#ident 		"BASIL-$Revision: 1.50 $"
 
 maxusers 64
 
@@ -80,6 +80,7 @@ options 	COMPAT_15
 options 	COMPAT_16
 options 	COMPAT_20
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
+options 	COMPAT_40	# NetBSD 4.0 compatibility.
 
 # OSF/1 binary compatibility
 options 	COMPAT_OSF1
@@ -99,7 +100,6 @@ options 	SYSVSHM
 #options 	SHMMAXPGS=1024		# 1024 pages is the default
 
 # Loadable Kernel Modules
-options 	LKM
 
 # Disable kernel security.
 #options 	INSECURE
@@ -404,7 +404,7 @@ usb*	at ohci?
 
 # USB Hubs
 uhub*	at usb?
-uhub*	at uhub? port ? configuration ? interface ?
+uhub*	at uhub? port ?
 
 # USB HID device
 uhidev*	at uhub? port ? configuration ? interface ?

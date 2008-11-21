@@ -1,4 +1,4 @@
-/*	$NetBSD: ep93xx_intr.h,v 1.2 2005/12/11 12:16:45 christos Exp $	*/
+/*	$NetBSD: ep93xx_intr.h,v 1.4 2008/04/27 18:58:44 matt Exp $	*/
 
 /*
  * Copyright (c) 2004 Jesse Off
@@ -43,7 +43,6 @@
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
-void	_setsoftintr(int);
 
 #endif /* ! _LOCORE */
 

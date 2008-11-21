@@ -1,5 +1,4 @@
-/* $OpenBSD: rpb.h,v 1.10 2004/01/13 06:21:09 deraadt Exp $ */
-/* $NetBSD: rpb.h,v 1.38 2000/07/06 23:29:13 thorpej Exp $ */
+/* $NetBSD: rpb.h,v 1.41 2002/07/25 23:41:33 simonb Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -82,6 +81,7 @@ struct rpb {
 #define	ST_DEC_WILDFIRE		35		/* "Wildfire" */
 #define	ST_DEC_CUSCO		36		/* "CUSCO" */
 #define	ST_DEC_EIGER		37		/* "Eiger" */
+#define	ST_DEC_TITAN		38		/* "Titan" */
 
 	/* Alpha Processor, Inc. systypes */
 #define	ST_API_NAUTILUS		201		/* EV6-AMD 751 UP1000 */
@@ -262,11 +262,11 @@ struct pcs {
 			compatibility	: 16,	/* Compatibility revision */
 			proc_cnt	: 16;	/* Processor count */
 	} pcs_pal_rev;				/*  A8: */
-#define pcs_minorrev	pcs_pal_rev.minorrev	
-#define pcs_majorrev	pcs_pal_rev.majorrev	
-#define pcs_pal_type	pcs_pal_rev.pal_type
-#define pcs_compatibility	pcs_pal_rev.compatibility
-#define pcs_proc_cnt	pcs_pal_rev.proc_cnt
+#define	pcs_minorrev	pcs_pal_rev.minorrev	
+#define	pcs_majorrev	pcs_pal_rev.majorrev	
+#define	pcs_pal_type	pcs_pal_rev.pal_type
+#define	pcs_compatibility	pcs_pal_rev.compatibility
+#define	pcs_proc_cnt	pcs_pal_rev.proc_cnt
 
 	u_int64_t	pcs_proc_type;		/*  B0: processor type */
 

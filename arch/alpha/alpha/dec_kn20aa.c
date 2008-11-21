@@ -1,5 +1,4 @@
-/* $OpenBSD: dec_kn20aa.c,v 1.17 2006/11/28 16:56:50 dlg Exp $ */
-/* $NetBSD: dec_kn20aa.c,v 1.42 2000/05/22 20:13:32 thorpej Exp $ */
+/* $NetBSD: dec_kn20aa.c,v 1.59 2007/03/04 15:18:10 yamt Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997 Carnegie-Mellon University.
@@ -31,17 +30,25 @@
  * Additional Copyright (c) 1997 by Matthew Jacob for NASA/Ames Research Center
  */
 
+#include "opt_kgdb.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: dec_kn20aa.c,v 1.59 2007/03/04 15:18:10 yamt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/termios.h>
-#include <dev/cons.h>
 #include <sys/conf.h>
+#include <dev/cons.h>
 
 #include <machine/rpb.h>
 #include <machine/autoconf.h>
 #include <machine/cpuconf.h>
 #include <machine/bus.h>
+#include <machine/alpha.h>
+#include <machine/logout.h>
 
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
@@ -56,8 +63,9 @@
 #include <alpha/pci/ciareg.h>
 #include <alpha/pci/ciavar.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include "pckbd.h"
 
@@ -66,9 +74,24 @@
 #endif
 static int comcnrate = CONSPEED;
 
-void dec_kn20aa_init(void);
-static void dec_kn20aa_cons_init(void);
-static void dec_kn20aa_device_register(struct device *, void *);
+void dec_kn20aa_init __P((void));
+static void dec_kn20aa_cons_init __P((void));
+static void dec_kn20aa_device_register __P((struct device *, void *));
+
+static void dec_kn20aa_mcheck_handler
+	__P((unsigned long, struct trapframe *, unsigned long, unsigned long));
+
+static void dec_kn20aa_mcheck __P((unsigned long, unsigned long,
+				     unsigned long, struct trapframe *));
+
+#ifdef KGDB
+#include <machine/db_machdep.h>
+
+static const char *kgdb_devlist[] = {
+	"com",
+	NULL,
+};
+#endif /* KGDB */
 
 const struct alpha_variation_table dec_kn20aa_variations[] = {
 	{ 0, "AlphaStation 500 or 600 (KN20AA)" },
@@ -92,6 +115,7 @@ dec_kn20aa_init()
 	platform.iobus = "cia";
 	platform.cons_init = dec_kn20aa_cons_init;
 	platform.device_register = dec_kn20aa_device_register;
+	platform.mcheck_handler = dec_kn20aa_mcheck_handler;
 }
 
 static void
@@ -104,7 +128,7 @@ dec_kn20aa_cons_init()
 	ccp = &cia_configuration;
 	cia_init(ccp, 0);
 
-	ctb = (struct ctb *)(((caddr_t)hwrpb) + hwrpb->rpb_ctb_off);
+	ctb = (struct ctb *)(((char *)hwrpb) + hwrpb->rpb_ctb_off);
 
 	switch (ctb->ctb_term_type) {
 	case CTB_PRINTERPORT: 
@@ -119,7 +143,7 @@ dec_kn20aa_cons_init()
 			DELAY(160000000 / comcnrate);
 
 			if(comcnattach(&ccp->cc_iot, 0x3f8, comcnrate,
-			    COM_FREQ,
+			    COM_FREQ, COM_TYPE_NORMAL,
 			    (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8))
 				panic("can't init serial console");
 
@@ -152,6 +176,10 @@ dec_kn20aa_cons_init()
 		panic("consinit: unknown console type %ld",
 		    ctb->ctb_term_type);
 	}
+#ifdef KGDB
+	/* Attach the KGDB device. */
+	alpha_kgdb_init(kgdb_devlist, &ccp->cc_iot);
+#endif /* KGDB */
 }
 
 static void
@@ -162,17 +190,15 @@ dec_kn20aa_device_register(dev, aux)
 	static int found, initted, diskboot, netboot;
 	static struct device *pcidev, *ctrlrdev;
 	struct bootdev_data *b = bootdev_data;
-	struct device *parent = dev->dv_parent;
-	struct cfdata *cf = dev->dv_cfdata;
-	struct cfdriver *cd = cf->cf_driver;
+	struct device *parent = device_parent(dev);
 
 	if (found)
 		return;
 
 	if (!initted) {
-		diskboot = (strncasecmp(b->protocol, "SCSI", 4) == 0);
-		netboot = (strncasecmp(b->protocol, "BOOTP", 5) == 0) ||
-		    (strncasecmp(b->protocol, "MOP", 3) == 0);
+		diskboot = (strcasecmp(b->protocol, "SCSI") == 0);
+		netboot = (strcasecmp(b->protocol, "BOOTP") == 0) ||
+		    (strcasecmp(b->protocol, "MOP") == 0);
 #if 0
 		printf("diskboot = %d, netboot = %d\n", diskboot, netboot);
 #endif
@@ -180,7 +206,7 @@ dec_kn20aa_device_register(dev, aux)
 	}
 
 	if (pcidev == NULL) {
-		if (strcmp(cd->cd_name, "pci"))
+		if (!device_is_a(dev, "pci"))
 			return;
 		else {
 			struct pcibus_attach_args *pba = aux;
@@ -227,17 +253,20 @@ dec_kn20aa_device_register(dev, aux)
 	if (!diskboot)
 		return;
 
-	if (!strcmp(cd->cd_name, "sd") || !strcmp(cd->cd_name, "st") ||
-	    !strcmp(cd->cd_name, "cd")) {
-		struct scsi_attach_args *sa = aux;
-		struct scsi_link *periph = sa->sa_sc_link;
+	if (device_is_a(dev, "sd") ||
+	    device_is_a(dev, "st") ||
+	    device_is_a(dev, "cd")) {
+		struct scsipibus_attach_args *sa = aux;
+		struct scsipi_periph *periph = sa->sa_periph;
 		int unit;
 
-		if (parent->dv_parent != ctrlrdev)
+		if (device_parent(parent) != ctrlrdev)
 			return;
 
-		unit = periph->target * 100 + periph->lun;
+		unit = periph->periph_target * 100 + periph->periph_lun;
 		if (b->unit != unit)
+			return;
+		if (b->channel != periph->periph_channel->chan_channel)
 			return;
 
 		/* we've found it! */
@@ -246,5 +275,56 @@ dec_kn20aa_device_register(dev, aux)
 		printf("\nbooted_device = %s\n", dev->dv_xname);
 #endif
 		found = 1;
+	}
+}
+
+static void
+dec_kn20aa_mcheck(mces, type, logout, framep)
+	unsigned long mces;
+	unsigned long type;
+	unsigned long logout;
+	struct trapframe *framep;
+{
+	struct mchkinfo *mcp;
+	mc_hdr_ev5 *hdr;
+	mc_uc_ev5 *mptr;
+
+	/*
+	 * If we expected a machine check, just go handle it in common code.
+	 */
+	mcp = &curcpu()->ci_mcinfo;
+	if (mcp->mc_expected) {
+		machine_check(mces, framep, type, logout);
+		return;
+	}
+
+	hdr = (mc_hdr_ev5 *) logout;
+	mptr = (mc_uc_ev5 *) (logout + sizeof (*hdr));
+
+	/*
+	 * Now we can finally print some stuff...
+	 */
+	ev5_logout_print(hdr, mptr);
+
+	machine_check(mces, framep, type, logout);
+}
+
+static void
+dec_kn20aa_mcheck_handler(mces, framep, vector, param)
+	unsigned long mces;
+	struct trapframe *framep;
+	unsigned long vector;
+	unsigned long param;
+{
+
+	switch (vector) {
+	case ALPHA_SYS_MCHECK:
+	case ALPHA_PROC_MCHECK:
+		dec_kn20aa_mcheck(mces, vector, param, framep);
+		break;
+	default:
+		printf("KN20AA_MCHECK: unknown check vector 0x%lx\n", vector);
+		machine_check(mces, framep, vector, param);
+		break;
 	}
 }

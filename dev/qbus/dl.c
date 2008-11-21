@@ -1,4 +1,4 @@
-/*	$NetBSD: dl.c,v 1.38 2007/10/19 12:01:08 ad Exp $	*/
+/*	$NetBSD: dl.c,v 1.43 2008/06/11 17:32:30 drochner Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -111,7 +104,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dl.c,v 1.38 2007/10/19 12:01:08 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dl.c,v 1.43 2008/06/11 17:32:30 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -260,9 +253,9 @@ dl_attach (struct device *parent, struct device *self, void *aux)
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec - 4,
 		dlrint, sc, &sc->sc_rintrcnt);
 	evcnt_attach_dynamic(&sc->sc_rintrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-		sc->sc_dev.dv_xname, "rintr");
+		device_xname(&sc->sc_dev), "rintr");
 	evcnt_attach_dynamic(&sc->sc_tintrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-		sc->sc_dev.dv_xname, "tintr");
+		device_xname(&sc->sc_dev), "tintr");
 
 	printf("\n");
 }
@@ -283,7 +276,7 @@ dlrint(void *arg)
 		cc = c & 0xFF;
 
 		if (!(tp->t_state & TS_ISOPEN)) {
-			wakeup((void *)&tp->t_rawq);
+			cv_broadcast(&tp->t_rawcv);
 			return;
 		}
 
@@ -293,7 +286,7 @@ dlrint(void *arg)
 			 * else where we can afford the time.
 			 */
 			log(LOG_WARNING, "%s: rx overrun\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(&sc->sc_dev));
 		}
 		if (c & DL_RBUF_FRAMING_ERR)
 			cc |= TTY_FE;
@@ -304,7 +297,7 @@ dlrint(void *arg)
 #if defined(DIAGNOSTIC)
 	} else {
 		log(LOG_WARNING, "%s: stray rx interrupt\n",
-		    sc->sc_dev.dv_xname);
+		    device_xname(&sc->sc_dev));
 #endif
 	}
 }
@@ -332,9 +325,9 @@ dlopen(dev_t dev, int flag, int mode, struct lwp *l)
 
 	unit = minor(dev);
 
-	if (unit >= dl_cd.cd_ndevs || dl_cd.cd_devs[unit] == NULL)
+	sc = device_lookup_private(&dl_cd, unit);
+	if (!sc)
 		return ENXIO;
-	sc = dl_cd.cd_devs[unit];
 
 	tp = sc->sc_tty;
 	if (tp == NULL)
@@ -367,7 +360,7 @@ dlopen(dev_t dev, int flag, int mode, struct lwp *l)
 int
 dlclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(dev));
 	struct tty *tp = sc->sc_tty;
 
 	(*tp->t_linesw->l_close)(tp, flag);
@@ -381,7 +374,7 @@ dlclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 dlread(dev_t dev, struct uio *uio, int flag)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_read)(tp, uio, flag));
@@ -390,7 +383,7 @@ dlread(dev_t dev, struct uio *uio, int flag)
 int
 dlwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_write)(tp, uio, flag));
@@ -399,7 +392,7 @@ dlwrite(dev_t dev, struct uio *uio, int flag)
 int
 dlpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
@@ -408,7 +401,7 @@ dlpoll(dev_t dev, int events, struct lwp *l)
 int
 dlioctl(dev_t dev, unsigned long cmd, void *data, int flag, struct lwp *l)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(dev));
 	struct tty *tp = sc->sc_tty;
 	int error;
 
@@ -445,7 +438,7 @@ dlioctl(dev_t dev, unsigned long cmd, void *data, int flag, struct lwp *l)
 struct tty *
 dltty(dev_t dev)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(dev));
 
 	return sc->sc_tty;
 }
@@ -463,22 +456,13 @@ dlstop(struct tty *tp, int flag)
 static void
 dlstart(struct tty *tp)
 {
-	struct dl_softc *sc = dl_cd.cd_devs[minor(tp->t_dev)];
+	struct dl_softc *sc = device_lookup_private(&dl_cd, minor(tp->t_dev));
 	int s = spltty();
 
 	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((void *)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
-	if (tp->t_outq.c_cc == 0)
+	if (!ttypull(tp))
 		goto out;
-
-
 	if (DL_READ_WORD(DL_UBA_XCSR) & DL_XCSR_TX_READY) {
 		tp->t_state |= TS_BUSY;
 		DL_WRITE_BYTE(DL_UBA_XBUFL, getc(&tp->t_outq));

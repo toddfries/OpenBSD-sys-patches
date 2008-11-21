@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_copyback.h,v 1.3 2002/12/16 07:01:03 tdeval Exp $	*/
-/*	$NetBSD: rf_copyback.h,v 1.3 1999/02/05 00:06:06 oster Exp $	*/
-
+/*	$NetBSD: rf_copyback.h,v 1.6 2005/12/11 12:23:37 christos Exp $	*/
 /*
  * rf_copyback.h
  */
@@ -31,32 +29,30 @@
  * rights to redistribute these changes.
  */
 
-#ifndef	_RF__RF_COPYBACK_H_
-#define	_RF__RF_COPYBACK_H_
+#ifndef _RF__RF_COPYBACK_H_
+#define _RF__RF_COPYBACK_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
 
 typedef struct RF_CopybackDesc_s {
-	RF_Raid_t		*raidPtr;
-	RF_RowCol_t		 frow;
-	RF_RowCol_t		 fcol;
-	RF_RowCol_t		 spRow;
-	RF_RowCol_t		 spCol;
-	int			 status;
-	RF_StripeNum_t		 stripeAddr;
-	RF_SectorCount_t	 sectPerSU;
-	RF_SectorCount_t	 sectPerStripe;
-	char			*databuf;
-	RF_DiskQueueData_t	*readreq;
-	RF_DiskQueueData_t	*writereq;
-	struct timeval		 starttime;
-	RF_MCPair_t		*mcpair;
-} RF_CopybackDesc_t;
+	RF_Raid_t *raidPtr;
+	RF_RowCol_t fcol;
+	RF_RowCol_t spCol;
+	int     status;
+	RF_StripeNum_t stripeAddr;
+	RF_SectorCount_t sectPerSU;
+	RF_SectorCount_t sectPerStripe;
+	char   *databuf;
+	RF_DiskQueueData_t *readreq;
+	RF_DiskQueueData_t *writereq;
+	struct timeval starttime;
+	RF_MCPair_t *mcpair;
+}       RF_CopybackDesc_t;
 
 extern int rf_copyback_in_progress;
 
-int  rf_ConfigureCopyback(RF_ShutdownList_t **);
-void rf_CopybackReconstructedData(RF_Raid_t *);
-void rf_ContinueCopyback(RF_CopybackDesc_t *);
+int     rf_ConfigureCopyback(RF_ShutdownList_t ** listp);
+void    rf_CopybackReconstructedData(RF_Raid_t * raidPtr);
+void    rf_ContinueCopyback(RF_CopybackDesc_t * desc);
 
-#endif	/* !_RF__RF_COPYBACK_H_ */
+#endif				/* !_RF__RF_COPYBACK_H_ */

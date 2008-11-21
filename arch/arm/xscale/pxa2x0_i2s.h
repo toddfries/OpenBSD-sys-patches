@@ -1,3 +1,4 @@
+/*	$NetBSD: pxa2x0_i2s.h,v 1.1 2006/12/17 16:03:33 peter Exp $	*/
 /*	$OpenBSD: pxa2x0_i2s.h,v 1.3 2006/04/04 11:45:40 pascoe Exp $	*/
 
 /*
@@ -22,17 +23,33 @@
 #include <machine/bus.h>
 
 struct pxa2x0_i2s_dma;
+struct audio_params;
 
 struct pxa2x0_i2s_softc {
+	struct device sc_dev;
+
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 	bus_size_t sc_size;
 	bus_dma_tag_t sc_dmat;
 
 	int sc_open;
-	u_int32_t sc_sadiv;
+	uint32_t sc_sadiv;
 
 	struct pxa2x0_i2s_dma *sc_dmas;
+
+	/* Dummy DMA segment which points to the I2S SADR */
+	bus_dma_segment_t sc_dr;
+
+	/* PCM Output (Tx) state */
+	struct pxa2x0_i2s_dma *sc_txdma;
+	void (*sc_txfunc)(void *);
+	void *sc_txarg;
+
+	/* PCM Input (Rx) state */
+	struct pxa2x0_i2s_dma *sc_rxdma;
+	void (*sc_rxfunc)(void *);
+	void *sc_rxarg;
 };
 
 void	pxa2x0_i2s_init(struct pxa2x0_i2s_softc *sc);
@@ -42,17 +59,16 @@ void	pxa2x0_i2s_open(struct pxa2x0_i2s_softc *);
 void	pxa2x0_i2s_close(struct pxa2x0_i2s_softc *);
 void	pxa2x0_i2s_write(struct pxa2x0_i2s_softc *, u_int32_t);
 
-void	pxa2x0_i2s_setspeed(struct pxa2x0_i2s_softc *, u_long *);
+void	pxa2x0_i2s_setspeed(struct pxa2x0_i2s_softc *, u_int *);
 
-void *	pxa2x0_i2s_allocm(void *, int, size_t, int, int);
-void	pxa2x0_i2s_freem(void  *, void *, int);
+void *	pxa2x0_i2s_allocm(void *, int, size_t, struct malloc_type *, int);
+void	pxa2x0_i2s_freem(void  *, void *, struct malloc_type *);
 paddr_t	pxa2x0_i2s_mappage(void *, void *, off_t, int);
-int	pxa2x0_i2s_round_blocksize(void *, int);
+int	pxa2x0_i2s_round_blocksize(void *, int, int, const struct audio_params *);
 size_t	pxa2x0_i2s_round_buffersize(void *, int, size_t);
-
-int	pxa2x0_i2s_start_output(struct pxa2x0_i2s_softc *, void *, int,
-	    void (*)(void *), void *);
-int	pxa2x0_i2s_start_input(struct pxa2x0_i2s_softc *, void *, int,
-	    void (*)(void *), void *);
+int	pxa2x0_i2s_halt_output(void *);
+int	pxa2x0_i2s_halt_input(void *);
+int	pxa2x0_i2s_start_output(void *, void *, int, void (*)(void *), void *);
+int	pxa2x0_i2s_start_input(void *, void *, int, void (*)(void *), void *);
 
 #endif

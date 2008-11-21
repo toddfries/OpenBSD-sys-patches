@@ -1,5 +1,4 @@
-/*	$OpenBSD: arm_machdep.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: arm_machdep.c,v 1.7 2003/10/25 19:44:42 scw Exp $	*/
+/*	$NetBSD: arm_machdep.c,v 1.22 2008/11/15 11:15:22 ad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -72,26 +71,29 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_execfmt.h"
+#include "opt_cputypes.h"
+#include "opt_arm_debug.h"
+#include "opt_sa.h"
+
 #include <sys/param.h>
+
+__KERNEL_RCSID(0, "$NetBSD: arm_machdep.c,v 1.22 2008/11/15 11:15:22 ad Exp $");
 
 #include <sys/exec.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/user.h>
 #include <sys/pool.h>
+#include <sys/ucontext.h>
+#include <sys/evcnt.h>
+#include <sys/cpu.h>
+#include <sys/savar.h>
 
 #include <arm/cpufunc.h>
 
 #include <machine/pcb.h>
 #include <machine/vmparam.h>
-#include <machine/bus.h>
-
-static __inline struct trapframe *
-process_frame(struct proc *p)
-{
-
-	return (p->p_addr->u_pcb.pcb_tf);
-}
 
 /*
  * The ARM architecture places the vector page at address 0.
@@ -105,33 +107,63 @@ process_frame(struct proc *p)
  */
 vaddr_t	vector_page;
 
+#if defined(ARM_LOCK_CAS_DEBUG)
+/*
+ * Event counters for tracking activity of the RAS-based _lock_cas()
+ * routine.
+ */
+struct evcnt _lock_cas_restart =
+    EVCNT_INITIALIZER(EVCNT_TYPE_MISC, NULL, "_lock_cas", "restart");
+EVCNT_ATTACH_STATIC(_lock_cas_restart);
+
+struct evcnt _lock_cas_success =
+    EVCNT_INITIALIZER(EVCNT_TYPE_MISC, NULL, "_lock_cas", "success");
+EVCNT_ATTACH_STATIC(_lock_cas_success);
+
+struct evcnt _lock_cas_fail =
+    EVCNT_INITIALIZER(EVCNT_TYPE_MISC, NULL, "_lock_cas", "fail");
+EVCNT_ATTACH_STATIC(_lock_cas_fail);
+#endif /* ARM_LOCK_CAS_DEBUG */
+
 /*
  * Clear registers on exec
  */
 
 void
-setregs(struct proc *p, struct exec_package *pack, u_long stack,
-    register_t *retval)
+setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	struct trapframe *tf;
 
-	tf = p->p_addr->u_pcb.pcb_tf;
+	tf = l->l_addr->u_pcb.pcb_tf;
 
 	memset(tf, 0, sizeof(*tf));
-/*	tf->tf_r0 = (u_int)p->p_proc->p_psstr; */
+	tf->tf_r0 = (u_int)l->l_proc->p_psstr;
+	tf->tf_r12 = stack;			/* needed by pre 1.4 crt0.c */
 	tf->tf_usr_sp = stack;
 	tf->tf_usr_lr = pack->ep_entry;
 	tf->tf_svc_lr = 0x77777777;		/* Something we can see */
 	tf->tf_pc = pack->ep_entry;
 #ifdef __PROG32
 	tf->tf_spsr = PSR_USR32_MODE;
+#ifdef THUMB_CODE
+	if (pack->ep_entry & 1)
+		tf->tf_spsr |= PSR_T_bit;
+#endif
 #endif
 
-	p->p_addr->u_pcb.pcb_flags = 0;
-	retval[1] = 0;
+#ifdef EXEC_AOUT
+	if (pack->ep_esch->es_makecmds == exec_aout_makecmds)
+		l->l_addr->u_pcb.pcb_flags = PCB_NOALIGNFLT;
+	else
+#endif
+	l->l_addr->u_pcb.pcb_flags = 0;
+#ifdef FPU_VFP
+	l->l_md.md_flags &= ~MDP_VFPUSED;
+	if (l->l_addr->u_pcb.pcb_vfpcpu != NULL)
+		vfp_saveregs_lwp(l, 0);
+#endif
 }
 
-#if 0
 /*
  * startlwp:
  *
@@ -154,6 +186,7 @@ startlwp(void *arg)
 	userret(l);
 }
 
+#ifdef KERN_SA
 /*
  * XXX This is a terrible name.
  */
@@ -199,74 +232,14 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted, void *sas,
 	tf->tf_r2 = nevents;
 	tf->tf_r3 = ninterrupted;
 	tf->tf_pc = (int) upcall;
+#ifdef THUMB_CODE
+	if (((int) upcall) & 1)
+		tf->tf_spsr |= PSR_T_bit;
+	else
+		tf->tf_spsr &= ~PSR_T_bit;
+#endif
 	tf->tf_usr_sp = (int) sf;
 	tf->tf_usr_lr = 0;		/* no return */
 }
-#endif
 
-
-#define _CONCAT(A,B) A ## B
-#define __C(A,B)	_CONCAT(A,B)
-
-#define BUS_SPACE_COPY_N(BYTES,TYPE)					\
-void									\
-__C(bus_space_copy_,BYTES)(bus_space_tag_t bst, bus_space_handle_t h1,	\
-    bus_size_t o1, bus_space_handle_t h2, bus_size_t o2,		\
-    bus_size_t c)							\
-{									\
-	int i;								\
-									\
-	if (h1 == h2 && o2 > o1)					\
-		for (i = c-1; i >= 0; i--)				\
-			__C(bus_space_write_,BYTES)(bst, h2, o2+(BYTES*i),		\
-			    __C(bus_space_read_,BYTES)(bst, h1, o1+(BYTES*i)));	\
-	else								\
-		for (i = 0; i < c; i++)					\
-			__C(bus_space_write_,BYTES)(bst, h2, o2+(BYTES*i),		\
-			    __C(bus_space_read_,BYTES)(bst, h1, o1+(BYTES*i)));	\
-}
-BUS_SPACE_COPY_N(1,u_int8_t)
-BUS_SPACE_COPY_N(2,u_int16_t)
-BUS_SPACE_COPY_N(4,u_int32_t)
-
-
-
-#if 0
-#define BUS_SPACE_READ_RAW_MULTI_N(BYTES,SHIFT,TYPE)			\
-void									\
-__C(bus_space_read_raw_multi_,BYTES)(bus_space_tag_t bst,		\
-    bus_space_handle_t h, bus_addr_t o, u_int8_t *dst, bus_size_t size)	\
-{									\
-	TYPE *src;							\
-	TYPE *rdst = (TYPE *)dst;					\
-	int i;								\
-	int count = size >> SHIFT;					\
-									\
-	src = (TYPE *)(h+o);						\
-	for (i = 0; i < count; i++) {					\
-		rdst[i] = *src;						\
-	}								\
-}
-BUS_SPACE_READ_RAW_MULTI_N(2,1,u_int16_t)
-BUS_SPACE_READ_RAW_MULTI_N(4,2,u_int32_t)
-
-#define BUS_SPACE_WRITE_RAW_MULTI_N(BYTES,SHIFT,TYPE)			\
-void									\
-__C(bus_space_write_raw_multi_,BYTES)( bus_space_tag_t bst,		\
-    bus_space_handle_t h, bus_addr_t o, const u_int8_t *src,		\
-    bus_size_t size)							\
-{									\
-	int i;								\
-	TYPE *dst;							\
-	TYPE *rsrc = (TYPE *)src;					\
-	int count = size >> SHIFT;					\
-									\
-	dst = (TYPE *)(h+o);						\
-	for (i = 0; i < count; i++) {					\
-		*dst = rsrc[i];						\
-	}								\
-}
-
-BUS_SPACE_WRITE_RAW_MULTI_N(2,1,u_int16_t)
-BUS_SPACE_WRITE_RAW_MULTI_N(4,2,u_int32_t)
-#endif
+#endif /* KERN_SA */

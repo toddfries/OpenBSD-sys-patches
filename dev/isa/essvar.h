@@ -1,5 +1,4 @@
-/*	$OpenBSD: essvar.h,v 1.5 2002/03/14 03:16:05 millert Exp $	*/
-/*	$NetBSD: essvar.h,v 1.14 1999/03/18 06:03:31 mycroft Exp $	*/
+/*	$NetBSD: essvar.h,v 1.24 2005/12/11 12:22:02 christos Exp $	*/
 /*
  * Copyright 1997
  * Digital Equipment Corporation. All rights reserved.
@@ -34,7 +33,7 @@
  */
 
 /*
-** @(#) $RCSfile: essvar.h,v $ $Revision: 1.5 $ (SHARK) $Date: 2002/03/14 03:16:05 $
+** @(#) $RCSfile: essvar.h,v $ $Revision: 1.24 $ (SHARK) $Date: 2005/12/11 12:22:02 $
 **
 **++
 **
@@ -46,9 +45,9 @@
 **
 **  MODULE DESCRIPTION:
 **
-**	This module contains the structure definitions and function
-**	prototypes for the ESS Technologies 1887/888 sound chip
-**	driver.
+**      This module contains the structure definitions and function
+**      prototypes for the ESS Technologies 1887/888 sound chip
+**      driver.
 **
 **  AUTHORS:
 **
@@ -63,6 +62,9 @@
 **
 **--
 */
+
+#include <sys/callout.h>
+
 #define ESS_DAC_PLAY_VOL	0
 #define ESS_MIC_PLAY_VOL	1
 #define ESS_LINE_PLAY_VOL	2
@@ -98,12 +100,13 @@
 struct ess_audio_channel
 {
 	int	drq;			/* DMA channel */
+	bus_size_t maxsize;		/* max size for DMA channel */
 #define IS16BITDRQ(drq) ((drq) >= 4)
 	int	irq;			/* IRQ line for this DMA channel */
 	int	ist;
 	void	*ih;			/* interrupt vectoring */
 	u_long	nintr;			/* number of interrupts taken */
-	void	(*intr)(void *);	/* ISR for DMA complete */
+	void	(*intr)(void*);		/* ISR for DMA complete */
 	void	*arg;			/* arg for intr() */
 
 	/* Status information */
@@ -121,11 +124,12 @@ struct ess_audio_channel
 struct ess_softc
 {
 	struct	device sc_dev;		/* base device */
-	struct	device *sc_isa;
 	isa_chipset_tag_t sc_ic;
 	bus_space_tag_t sc_iot;		/* tag */
 	bus_space_handle_t sc_ioh;	/* handle */
-	struct timeout sc_tmo1, sc_tmo2;
+
+	struct callout sc_poll1_ch;	/* audio1 poll */
+	struct callout sc_poll2_ch;	/* audio2 poll */
 
 	int	sc_iobase;		/* I/O port base address */
 
@@ -147,18 +151,25 @@ struct ess_softc
 
 	u_int	sc_model;
 #define ESS_UNSUPPORTED 0
-#define ESS_1888	1
-#define ESS_1887	2
-#define ESS_888		3
-#define ESS_1788	4
+#define	ESS_688		1
+#define	ESS_1688	2
+#define ESS_1788	3
+#define ESS_1868	4
 #define ESS_1869	5
-#define ESS_1879	6
-#define ESS_1868	7
-#define ESS_1878	8
+#define ESS_1878	6
+#define ESS_1879	7
+#define ESS_888		8
+#define ESS_1887	9
+#define ESS_1888	10
 
 	u_int	sc_version;		/* Legacy ES688/ES1688 ID */
+
+	/* game port on es1888 */
+	bus_space_tag_t sc_joy_iot;
+	bus_space_handle_t sc_joy_ioh;
 };
 
 int	essmatch(struct ess_softc *);
-void	essattach(struct ess_softc *);
+void	essattach(struct ess_softc *, int);
+int	ess_config_addr(struct ess_softc *);
 

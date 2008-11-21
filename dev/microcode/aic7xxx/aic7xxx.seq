@@ -1,5 +1,4 @@
-/* $OpenBSD: aic7xxx.seq,v 1.22 2007/11/24 12:59:28 jmc Exp $ */
-/*-
+/*
  * Adaptec 274x/284x/294x device driver firmware for Linux and FreeBSD.
  *
  * Copyright (c) 1994-2001 Justin T. Gibbs.
@@ -38,15 +37,15 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/aic7xxx/aic7xxx.seq,v 1.128 2005/01/06 01:42:26 imp Exp $
+ * $FreeBSD: /repoman/r/ncvs/src/sys/dev/aic7xxx/aic7xxx.seq,v 1.123 2003/01/20 20:44:55 gibbs Exp $
  */
 
-VERSION = "$Id: aic7xxx.seq,v 1.22 2007/11/24 12:59:28 jmc Exp $"
+VERSION = "$NetBSD: aic7xxx.seq,v 1.18 2006/11/25 16:48:32 christos Exp $"
 PATCH_ARG_LIST = "struct ahc_softc *ahc"
 PREFIX = "ahc_"
 
 #include <dev/microcode/aic7xxx/aic7xxx.reg>
-#include <scsi/scsi_message.h>
+#include <dev/scsipi/scsi_message.h>
 
 /*
  * A few words on the waiting SCB list:
@@ -57,9 +56,9 @@ PREFIX = "ahc_"
  * on just in case the reselection wins so that we can retry the selection at
  * a later time.  This problem cannot be resolved by holding a single entry
  * in scratch ram since a reconnecting target can request sense and this will
- * create yet another SCB waiting for selection.  The solution used here is to 
+ * create yet another SCB waiting for selection.  The solution used here is to
  * use byte 27 of the SCB as a psuedo-next pointer and to thread a list
- * of SCBs that are awaiting selection.  Since 0-0xfe are valid SCB indexes, 
+ * of SCBs that are awaiting selection.  Since 0-0xfe are valid SCB indexes,
  * SCB_LIST_NULL is 0xff which is out of range.  An entry is also added to
  * this list everytime a request sense occurs or after completing a non-tagged
  * command for which a second SCB has been queued.  The sequencer will
@@ -84,9 +83,7 @@ poll_for_work:
 		xor	SBLKCTL,SELBUSB;	/* Toggle to the other bus */
 		test	SCSISEQ, ENSELO		jnz poll_for_selection;
 	}
-BEGIN_CRITICAL;
 	cmp	WAITING_SCBH,SCB_LIST_NULL jne start_waiting;
-END_CRITICAL;
 poll_for_work_loop:
 	if ((ahc->features & AHC_TWIN) != 0) {
 		xor	SBLKCTL,SELBUSB;	/* Toggle to the other bus */
@@ -104,7 +101,7 @@ BEGIN_CRITICAL;
 	mov	ARG_1, NEXT_QUEUED_SCB;
 
 	/*
-	 * We have at least one queued SCB now and we don't have any 
+	 * We have at least one queued SCB now and we don't have any
 	 * SCBs in the list of SCBs awaiting selection.  Allocate a
 	 * card SCB for the host's SCB and get to work on it.
 	 */
@@ -144,13 +141,13 @@ BEGIN_CRITICAL;
 		inc	QINPOS;
 	}
 	and	SEQ_FLAGS2, ~SCB_DMA;
+END_CRITICAL;
 start_waiting:
 	/*
 	 * Start the first entry on the waiting SCB list.
 	 */
 	mov	SCBPTR, WAITING_SCBH;
 	call	start_selection;
-END_CRITICAL;
 
 poll_for_selection:
 	/*
@@ -282,7 +279,7 @@ select_in:
 		} else {
 			mov	DFDAT, DINDEX;
 		}
-		
+
 		/*
 		 * If the initiator doesn't feel like providing a tag number,
 		 * we've got a failed selection and must transition to bus
@@ -322,7 +319,7 @@ ident_messages_done_msg_pending:
 
 		/*
 		 * Pushed message loop to allow the kernel to
-		 * run its own target mode message state engine.
+		 * run it's own target mode message state engine.
 		 */
 host_target_message_loop:
 		mvi	HOST_MSG_LOOP call set_seqint;
@@ -358,7 +355,6 @@ abort_qinscb:
 	call	add_scb_to_free_list;
 	jmp	poll_for_work_loop;
 
-BEGIN_CRITICAL;
 start_selection:
 	/*
 	 * If bus reset interrupts have been disabled (from a previous
@@ -392,7 +388,6 @@ initialize_scsiid:
 	} else {
 		mov	SCSISEQ, SCSISEQ_TEMPLATE ret;
 	}
-END_CRITICAL;
 
 /*
  * Initialize transfer settings with SCB provided settings.
@@ -401,7 +396,7 @@ set_transfer_settings:
 	if ((ahc->features & AHC_ULTRA) != 0) {
 		test	SCB_CONTROL, ULTRAENB jz . + 2;
 		or	SXFRCTL0, FAST20;
-	} 
+	}
 	/*
 	 * Initialize SCSIRATE with the appropriate value for this target.
 	 */
@@ -413,7 +408,7 @@ set_transfer_settings:
 
 if ((ahc->flags & AHC_TARGETROLE) != 0) {
 /*
- * We carefully toggle SPIOEN to allow us to return the 
+ * We carefully toggle SPIOEN to allow us to return the
  * message byte we receive so it can be checked prior to
  * driving REQ on the bus for the next byte.
  */
@@ -442,7 +437,7 @@ select_out:
 	mov	SCBPTR, WAITING_SCBH;
 	mov	WAITING_SCBH,SCB_NEXT;
 	mov	SAVED_SCSIID, SCB_SCSIID;
-	and	SAVED_LUN, LID, SCB_LUN;
+	mov	SAVED_LUN, SCB_LUN;
 	call	set_transfer_settings;
 	if ((ahc->flags & AHC_TARGETROLE) != 0) {
 		test	SSTAT0, TARGET	jz initiator_select;
@@ -466,7 +461,7 @@ select_out:
 		/*
 		 * Start out with a simple identify message.
 		 */
-		or	SAVED_LUN, MSG_IDENTIFYFLAG call target_outb;
+		or	SCB_LUN, MSG_IDENTIFYFLAG call target_outb;
 
 		/*
 		 * If we are the result of a tagged command, send
@@ -481,7 +476,7 @@ target_synccmd:
 		 * to go through.
 		 */
 		mov	SEQ_FLAGS, SCB_TARGET_PHASES;
-		
+
 		test	SCB_CONTROL, MK_MESSAGE	jz target_ITloop;
 		mvi	P_MESGIN|BSYO call change_phase;
 		jmp	host_target_message_loop;
@@ -499,7 +494,7 @@ target_ITloop:
 		 * No more work to do.  Either disconnect or not depending
 		 * on the state of NO_DISCONNECT.
 		 */
-		test	SEQ_FLAGS, NO_DISCONNECT jz target_disconnect; 
+		test	SEQ_FLAGS, NO_DISCONNECT jz target_disconnect;
 		mvi	TARG_IMMEDIATE_SCB, SCB_LIST_NULL;
 		call	complete_target_cmd;
 		if ((ahc->flags & AHC_PAGESCBS) != 0) {
@@ -520,7 +515,7 @@ target_mesgout_pending:
 		and	SEQ_FLAGS2, ~TARGET_MSG_PENDING;
 		/* Local Processing goes here... */
 		jmp	host_target_message_loop;
-		
+
 target_disconnect:
 		mvi	P_MESGIN|BSYO call change_phase;
 		test	SEQ_FLAGS, DPHASE	jz . + 2;
@@ -558,7 +553,7 @@ target_cmdphase:
 		jmp	target_busfree_wait;
 		mvi	STATUS_BUSY call target_outb;
 		jmp	target_busfree_wait;
-tqinfifo_has_space:	
+tqinfifo_has_space:
 		mvi	P_COMMAND|BSYO call change_phase;
 		call	target_inb;
 		mov	A, DINDEX;
@@ -620,7 +615,7 @@ target_sphase:
 		/* MSG_CMDCMPLT is 0, but we can't do an immediate of 0 */
 		mov	ALLZEROS call target_outb;
 		jmp	target_busfree_wait;
-	
+
 complete_target_cmd:
 		test	SEQ_FLAGS, TARG_CMD_PENDING	jnz . + 2;
 		mov	SCB_TAG jmp complete_post;
@@ -684,12 +679,11 @@ await_busfree:
 		clr	SCSIBUSL;	/* Prevent bit leakage durint SELTO */
 	}
 	and	SXFRCTL0, ~SPIOEN;
-	mvi	SEQ_FLAGS, NOT_IDENTIFIED|NO_CDB_SENT;
 	test	SSTAT1,REQINIT|BUSFREE	jz .;
 	test	SSTAT1, BUSFREE jnz poll_for_work;
 	mvi	MISSED_BUSFREE call set_seqint;
 }
-	
+
 clear_target_state:
 	/*
 	 * We assume that the kernel driver may reset us
@@ -757,7 +751,7 @@ idle_loop:
 
 	/*
 	 * We fetch a "cacheline aligned" and sized amount of data
-	 * so we don't end up referencing a non-existent page.
+	 * so we don't end up referencing a non-existant page.
 	 * Cacheline aligned is in quotes because the kernel will
 	 * set the prefetch amount to a reasonable level if the
 	 * cacheline size is unknown.
@@ -774,12 +768,16 @@ idle_sg_avail:
 		/* Does the hardware have space for another SG entry? */
 		test	DFSTATUS, PRELOAD_AVAIL jz return;
 		bmov 	HADDR, CCSGRAM, 7;
+		test	HCNT[0], 0x1 jz . + 2;
+		xor	DATA_COUNT_ODD, 0x1;
 		bmov	SCB_RESIDUAL_DATACNT[3], CCSGRAM, 1;
 		if ((ahc->flags & AHC_39BIT_ADDRESSING) != 0) {
 			mov	SCB_RESIDUAL_DATACNT[3] call set_hhaddr;
 		}
 		call	sg_advance;
 		mov	SINDEX, SCB_RESIDUAL_SGPTR[0];
+		test	DATA_COUNT_ODD, 0x1 jz . + 2;
+		or	SINDEX, ODD_SEG;
 		test	SCB_RESIDUAL_DATACNT[3], SG_LAST_SEG jz . + 2;
 		or	SINDEX, LAST_SEG;
 		mov	SG_CACHE_PRE, SINDEX;
@@ -792,7 +790,7 @@ idle_sg_avail:
 if ((ahc->bugs & AHC_PCI_MWI_BUG) != 0 && ahc->pci_cachesize != 0) {
 /*
  * Calculate the trailing portion of this S/G segment that cannot
- * be transferred using memory write and invalidate PCI transactions.  
+ * be transferred using memory write and invalidate PCI transactions.
  * XXX Can we optimize this for PCI writes only???
  */
 calc_mwi_residual:
@@ -877,6 +875,7 @@ data_phase_initialize:
 		call	calc_mwi_residual;
 	}
 	and	SCB_RESIDUAL_SGPTR[0], ~SG_FULL_RESID;
+	and	DATA_COUNT_ODD, 0x1, HCNT[0];
 
 	if ((ahc->features & AHC_ULTRA2) == 0) {
 		if ((ahc->features & AHC_CMD_CHAN) != 0) {
@@ -911,6 +910,8 @@ data_phase_inbounds:
 		mov	SINDEX, SCB_RESIDUAL_SGPTR[0];
 		test	SCB_RESIDUAL_DATACNT[3], SG_LAST_SEG jz . + 2;
 		or	SINDEX, LAST_SEG;
+		test	DATA_COUNT_ODD, 0x1 jz . + 2;
+		or	SINDEX, ODD_SEG;
 		mov	SG_CACHE_PRE, SINDEX;
 		mov	DFCNTRL, DMAPARAMS;
 ultra2_dma_loop:
@@ -1001,12 +1002,14 @@ sgptr_fixup:
 		test	SG_CACHE_SHADOW, 0x80 jz sgptr_fixup_done;
 		test	SCB_RESIDUAL_SGPTR[0], 0x80 jnz sgptr_fixup_done;
 		add	SCB_RESIDUAL_SGPTR[1], -1;
-		adc	SCB_RESIDUAL_SGPTR[2], -1; 
+		adc	SCB_RESIDUAL_SGPTR[2], -1;
 		adc	SCB_RESIDUAL_SGPTR[3], -1;
 sgptr_fixup_done:
 		and	SCB_RESIDUAL_SGPTR[0], SG_ADDR_MASK, SG_CACHE_SHADOW;
-		/* We are not the last seg */
-		and	SCB_RESIDUAL_DATACNT[3], ~SG_LAST_SEG;
+		clr	DATA_COUNT_ODD;
+		test	SG_CACHE_SHADOW, ODD_SEG jz . + 2;
+		or	DATA_COUNT_ODD, 0x1;
+		clr	SCB_RESIDUAL_DATACNT[3]; /* We are not the last seg */
 residuals_correct:
 		/*
 		 * Go ahead and shut down the DMA engine now.
@@ -1050,19 +1053,11 @@ ultra2_fifoflush:
 			 * LAST_SEG_DONE to come true on a completed transfer
 			 * and then test to see if the data FIFO is non-empty.
 			 */
-			test	SCB_RESIDUAL_SGPTR[0], SG_LIST_NULL
-				jz ultra2_wait_fifoemp;
+			test	SCB_RESIDUAL_SGPTR[0], SG_LIST_NULL jz . + 4;
 			test	SG_CACHE_SHADOW, LAST_SEG_DONE jz .;
-			/*
-			 * FIFOEMP can lag LAST_SEG_DONE.  Wait a few
-			 * clocks before calling this an overrun.
-			 */
-			test	DFSTATUS, FIFOEMP jnz ultra2_fifoempty;
-			test	DFSTATUS, FIFOEMP jnz ultra2_fifoempty;
 			test	DFSTATUS, FIFOEMP jnz ultra2_fifoempty;
 			/* Overrun */
 			jmp	data_phase_loop;
-ultra2_wait_fifoemp:
 			test	DFSTATUS, FIFOEMP jz .;
 		}
 ultra2_fifoempty:
@@ -1103,7 +1098,7 @@ ultra2_dmahalt:
 		test	SCB_RESIDUAL_DATACNT[3], SG_LAST_SEG jz dma_mid_sg;
 		if ((ahc->flags & AHC_TARGETROLE) != 0) {
 			test	SSTAT0, TARGET jz dma_last_sg;
-			if ((ahc->bugs & AHC_TMODE_WIDEODD_BUG) != 0) {
+			if ((ahc->flags & AHC_TMODE_WIDEODD_BUG) != 0) {
 				test	DMAPARAMS, DIRECTION jz dma_mid_sg;
 			}
 		}
@@ -1146,7 +1141,7 @@ dma_dmadone:
 dma_halt:
 		/*
 		 * Some revisions of the aic78XX have a problem where, if the
-		 * data fifo is full, but the PCI input latch is not empty, 
+		 * data fifo is full, but the PCI input latch is not empty,
 		 * HDMAEN cannot be cleared.  The fix used here is to drain
 		 * the prefetched but unused data from the data fifo until
 		 * there is space for the input latch to drain.
@@ -1162,7 +1157,7 @@ dma_halt:
 		test	STCNT[2], 0xff	jnz data_phase_finish;
 
 		/*
-		 * Advance the scatter-gather pointers if needed 
+		 * Advance the scatter-gather pointers if needed
 		 */
 		if ((ahc->bugs & AHC_PCI_MWI_BUG) != 0
 		  && ahc->pci_cachesize != 0) {
@@ -1251,6 +1246,9 @@ sg_load_done:
 		} else {
 			call	set_stcnt_from_hcnt;
 		}
+		/* Track odd'ness */
+		test	HCNT[0], 0x1 jz . + 2;
+		xor	DATA_COUNT_ODD, 0x1;
 
 		if ((ahc->flags & AHC_TARGETROLE) != 0) {
 			test	SSTAT0, TARGET jnz data_phase_loop;
@@ -1352,7 +1350,7 @@ residual_update_done:
 		 */
 		test	DFCNTRL, DIRECTION jz target_ITloop;
 		test	SSTAT1, REQINIT	jnz .;
-		test	SCB_LUN, SCB_XFERLEN_ODD jz target_ITloop;
+		test	DATA_COUNT_ODD, 0x1 jz target_ITloop;
 		test	SCSIRATE, WIDEXFER jz target_ITloop;
 		/*
 		 * Issue an Ignore Wide Residue Message.
@@ -1414,7 +1412,7 @@ p_command_embedded:
 	clr	HADDR[0];
 	if ((ahc->features & AHC_ULTRA2) != 0) {
 		mvi	DFCNTRL, (PRELOADEN|SCSIEN|DIRECTION);
-		bmov	DFDAT, SCB_CDB_STORE, 12; 
+		bmov	DFDAT, SCB_CDB_STORE, 12;
 	} else if ((ahc->features & AHC_CMD_CHAN) != 0) {
 		if ((ahc->flags & AHC_SCB_BTT) != 0) {
 			/*
@@ -1429,7 +1427,7 @@ p_command_embedded:
 		} else {
 			mvi	DFCNTRL, (SCSIEN|SDMAEN|DIRECTION|FIFORESET);
 		}
-		bmov	DFDAT, SCB_CDB_STORE, 12; 
+		bmov	DFDAT, SCB_CDB_STORE, 12;
 		if ((ahc->flags & AHC_SCB_BTT) != 0) {
 			mvi	DFCNTRL, (SCSIEN|SDMAEN|DIRECTION|FIFOFLUSH);
 		} else {
@@ -1447,7 +1445,7 @@ p_command_xfer:
 		test	SSTAT0, SDONE jnz . + 2;
 		test    SSTAT1, PHASEMIS jz . - 1;
 		/*
-		 * Wait for our ACK to go-away on its own
+		 * Wait for our ACK to go-away on it's own
 		 * instead of being killed by SCSIEN getting cleared.
 		 */
 		test	SCSISIGI, ACKI jnz .;
@@ -1478,19 +1476,19 @@ p_status_okay:
 
 /*
  * Message out phase.  If MSG_OUT is MSG_IDENTIFYFLAG, build a full
- * identify message sequence and send it to the target.  The host may
+ * indentify message sequence and send it to the target.  The host may
  * override this behavior by setting the MK_MESSAGE bit in the SCB
  * control byte.  This will cause us to interrupt the host and allow
  * it to handle the message phase completely on its own.  If the bit
  * associated with this target is set, we will also interrupt the host,
  * thereby allowing it to send a message on the next selection regardless
  * of the transaction being sent.
- * 
+ *
  * If MSG_OUT is == HOST_MSG, also interrupt the host and take a message.
  * This is done to allow the host to send messages outside of an identify
- * sequence while protecting the sequencer from testing the MK_MESSAGE bit
+ * sequence while protecting the seqencer from testing the MK_MESSAGE bit
  * on an SCB that might not be for the current nexus. (For example, a
- * BDR message in response to a bad reselection would leave us pointed to
+ * BDR message in responce to a bad reselection would leave us pointed to
  * an SCB that doesn't have anything to do with the current target).
  *
  * Otherwise, treat MSG_OUT as a 1 byte message to send (abort, abort tag,
@@ -1512,7 +1510,7 @@ p_mesgout:
 	cmp	SINDEX, MSG_IDENTIFYFLAG jne p_mesgout_from_host;
 	test	SCB_CONTROL,MK_MESSAGE	jnz host_message_loop;
 p_mesgout_identify:
-	or	SINDEX, MSG_IDENTIFYFLAG|DISCENB, SAVED_LUN;
+	or	SINDEX, MSG_IDENTIFYFLAG|DISCENB, SCB_LUN;
 	test	SCB_CONTROL, DISCENB jnz . + 2;
 	and	SINDEX, ~DISCENB;
 /*
@@ -1569,7 +1567,7 @@ p_mesgin:
 
 /*
  * Pushed message loop to allow the kernel to
- * run its own message state engine.  To avoid an
+ * run it's own message state engine.  To avoid an
  * extra nop instruction after signaling the kernel,
  * we perform the phase_lock before checking to see
  * if we should exit the loop and skip the phase_lock
@@ -1589,7 +1587,7 @@ if ((ahc->features & AHC_WIDE) != 0) {
 	mvi	ARG_1	call inb_next;
 	cmp	ARG_1, 0x01 jne mesgin_reject;
 	test	SCB_RESIDUAL_SGPTR[0], SG_LIST_NULL jz . + 2;
-	test	SCB_LUN, SCB_XFERLEN_ODD jnz mesgin_done;
+	test	DATA_COUNT_ODD, 0x1	jz mesgin_done;
 	mvi	IGN_WIDE_RES call set_seqint;
 	jmp	mesgin_done;
 }
@@ -1608,11 +1606,11 @@ mesgin_done:
  * and trigger a completion interrupt.  Before doing so, check to see if there
  * is a residual or the status byte is something other than STATUS_GOOD (0).
  * In either of these conditions, we upload the SCB back to the host so it can
- * process this information.  In the case of a non zero status byte, we 
+ * process this information.  In the case of a non zero status byte, we
  * additionally interrupt the kernel driver synchronously, allowing it to
  * decide if sense should be retrieved.  If the kernel driver wishes to request
  * sense, it will fill the kernel SCB with a request sense command, requeue
- * it to the QINFIFO and tell us not to post to the QOUTFIFO by setting 
+ * it to the QINFIFO and tell us not to post to the QOUTFIFO by setting
  * RETURN_1 to SEND_SENSE.
  */
 mesgin_complete:
@@ -1633,7 +1631,7 @@ mesgin_complete:
 	 * any status will do.  Optimize this fast path.
 	 */
 	test	SCB_CONTROL, STATUS_RCVD jz mesgin_proto_violation;
-	test	SEQ_FLAGS, NOT_IDENTIFIED|NO_CDB_SENT jz complete_accepted; 
+	test	SEQ_FLAGS, NOT_IDENTIFIED|NO_CDB_SENT jz complete_accepted;
 
 	/*
 	 * If the target never sent an identify message but instead went
@@ -1642,7 +1640,7 @@ mesgin_complete:
 	test	SEQ_FLAGS, NOT_IDENTIFIED jnz mesgin_proto_violation;
 
 	/*
-	 * If we received good status but never successfully sent the
+	 * If we recevied good status but never successfully sent the
 	 * cdb, abort the command.
 	 */
 	test	SCB_SCSI_STATUS,0xff	jnz complete_accepted;
@@ -1698,7 +1696,7 @@ if ((ahc->flags & AHC_INITIATORROLE) != 0) {
  * Is it a disconnect message?  Set a flag in the SCB to remind us
  * and await the bus going free.  If this is an untagged transaction
  * store the SCB id for it in our untagged target table for lookup on
- * a reselection.
+ * a reselction.
  */
 mesgin_disconnect:
 	/*
@@ -1718,7 +1716,7 @@ mesgin_disconnect:
 	}
 	test	SCB_CONTROL, TAG_ENB jnz await_busfree;
 	mov	ARG_1, SCB_TAG;
-	and	SAVED_LUN, LID, SCB_LUN;
+	mov	SAVED_LUN, SCB_LUN;
 	mov	SCB_SCSIID	call set_busy_target;
 	jmp	await_busfree;
 
@@ -1861,7 +1859,7 @@ mesgin_identify:
 		 * at a time.  So, if the lun doesn't match, look
 		 * for a tag message.
 		 */
-		and	A, LID, SCB_LUN;
+		mov	A, SCB_LUN;
 		cmp	SAVED_LUN, A	je setup_SCB_id_lun_okay;
 		if ((ahc->flags & AHC_PAGESCBS) != 0) {
 			/*
@@ -1919,7 +1917,7 @@ setup_SCB:
 		or	SEQ_FLAGS, 0x8;
 	}
 setup_SCB_id_okay:
-	and	A, LID, SCB_LUN;
+	mov	A, SCB_LUN;
 	cmp	SAVED_LUN, A	jne not_found_cleanup_scb;
 setup_SCB_id_lun_okay:
 	if ((ahc->flags & AHC_SEQUENCER_DEBUG) != 0) {
@@ -2037,7 +2035,7 @@ target_outb:
 	test	SSTAT0, SPIORDY	jz .;
 	and	SXFRCTL0, ~SPIOEN ret;
 }
-	
+
 /*
  * Locate a disconnected SCB by SCBID.  Upon return, SCBPTR and SINDEX will
  * be set to the position of the SCB.  If the SCB cannot be found locally,
@@ -2111,7 +2109,7 @@ post_byte:
 
 phase_lock_perr:
 	mvi	PERR_DETECTED call set_seqint;
-phase_lock:     
+phase_lock:
 	/*
 	 * If there is a parity error, wait for the kernel to
 	 * see the interrupt and prepare our message response

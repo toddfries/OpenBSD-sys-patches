@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.11 2006/08/12 11:38:11 uwe Exp $
+#	$NetBSD: Makefile,v 1.18 2008/05/28 14:04:07 tsutsui Exp $
 
 NOMAN= # defined
 
@@ -8,6 +8,7 @@ NOMAN= # defined
 S=	${.CURDIR}/../../../..
 MIPS=	${S}/arch/mips
 COBALT=	${S}/arch/cobalt
+LIBSADIR=	${S}/lib/libsa
 
 # .PATH:	${.CURDIR}/../common
 
@@ -43,21 +44,33 @@ realall: machine-links ${PROG}
 LOAD_ADDRESS?=0x80F00000
 
 COMPORT?=0x0
-COMBASE?=0xbc800000
 COMSPEED?=115200
 COMPROBE?=0xa020001c
+
+ZSCHAN?=0x01		# 0x01: ZS_CHAN_A, 0x00: ZS_CHAN_B
+ZSSPEED?=115200
+ZSPROBE?=0xa020001c
 
 AFLAGS+=	-D_LOCORE -D_KERNEL -DASSEMBLER -mno-abicalls
 
 # -I${.CURDIR}/../.. done by Makefile.inc
 CPPFLAGS+=	-nostdinc -D_STANDALONE -DNO_ABICALLS -D_NO_PROM_DEFINES
 # CPPFLAGS+=	-D_DEBUG
-CPPFLAGS+=	-I${.OBJDIR} -I${S} -I${S}/lib/libsa
-CPPFLAGS+=	-DCONS_SERIAL -DCOMBASE=${COMBASE} -DCOMPORT=${COMPORT}
+CPPFLAGS+=	-I${.OBJDIR} -I${S} -I${S}/arch -I${LIBSADIR}
+CPPFLAGS+=	-DCONS_SERIAL -DCOMPORT=${COMPORT}
 CPPFLAGS+=	-DCOMSPEED=${COMSPEED} -DCOMPROBE=${COMPROBE}
+CPPFLAGS+=	-DCONS_ZS -DZSCHAN=${ZSCHAN}
+CPPFLAGS+=	-DZSSPEED=${ZSSPEED} -DZSPROBE=${ZSPROBE}
+CPPFLAGS+=	-DSUPPORT_DHCP -DSUPPORT_BOOTP
+#CPPFLAGS+=	-DBOOTP_DEBUG -DNETIF_DEBUG -DETHER_DEBUG -DNFS_DEBUG
+#CPPFLAGS+=	-DRPC_DEBUG -DRARP_DEBUG -DNET_DEBUG -DDEBUG -DPARANOID
 
 # compiler flags for smallest code size
 CFLAGS=		-Os -mmemcpy -ffreestanding -mno-abicalls -msoft-float -G 128
+
+CFLAGS+=	-Wall -Werror
+CFLAGS+=	-Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith
+CFLAGS+=	-Wno-pointer-sign
 
 NETBSD_VERS!=	${HOST_SH} ${S}/conf/osrelease.sh
 CPPFLAGS+=	-DNETBSD_VERS='"${NETBSD_VERS}"'
@@ -68,6 +81,14 @@ PROG=		boot
 # common sources
 SRCS+=		start.S boot.c devopen.c conf.c clock.c bootinfo.c
 SRCS+=		prf.c com.c cons.c ns16550.c pciide.c tgets.c wdc.c wd.c
+SRCS+=		zs.c
+SRCS+=		cache.c pci.c nif_tlp.c tlp.c
+SRCS+=		lcd.c
+
+# XXX dev_net.c should really be in libsa, but it doesn't
+#     declare ip_convertaddr correctly.
+.PATH: ${LIBSADIR}
+SRCS+=		dev_net.c
 
 SRCS+=		vers.c
 CLEANFILES+=	vers.c

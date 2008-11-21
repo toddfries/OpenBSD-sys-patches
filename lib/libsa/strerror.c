@@ -1,5 +1,4 @@
-/*	$OpenBSD: strerror.c,v 1.8 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: strerror.c,v 1.11 1996/10/13 02:29:08 christos Exp $	*/
+/*	$NetBSD: strerror.c,v 1.20 2007/11/24 13:20:57 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -34,42 +33,40 @@
 #include "saerrno.h"
 #include "stand.h"
 
+static const struct mi {
+	int	errno;
+	const char *msg;
+} errlist[] = {
+	{ EADAPT,	"bad adaptor number" },
+	{ ECTLR,	"bad controller number" },
+	{ EUNIT,	"bad drive number" },
+	{ EPART,	"bad partition" },
+	{ ERDLAB,	"can't read disk label" },
+	{ EUNLAB,	"unlabeled" },
+	{ ENXIO,	"Device not configured" },
+	{ EPERM,	"Operation not permitted" },
+	{ ENOENT,	"No such file or directory" },
+	{ ESTALE,	"Stale NFS file handle" },
+	{ EFTYPE,	"Inappropriate file type or format" },
+	{ ENOEXEC,	"Exec format error" },
+	{ EIO,		"Input/output error" },
+	{ EINVAL,	"Invalid argument" },
+	{ ENOTDIR,	"Not a directory" },
+	{ EOFFSET,	"invalid file offset" },
+	{ EACCES,	"Permission denied" },
+	{ 0, 0 },
+};
+
 char *
 strerror(int err)
 {
-	static	char ebuf[64];
+	static	char ebuf[36];
+	const struct mi *mi;
 
-	switch (err) {
-	case EADAPT:
-		return "bad adaptor number";
-	case ECTLR:
-		return "bad controller number";
-	case EUNIT:
-		return "bad drive number";
-	case EPART:
-		return "bad partition";
-	case ERDLAB:
-		return "can't read disk label";
-	case EUNLAB:
-		return "unlabeled";
-	case ENXIO:
-		return "Device not configured";
-	case EPERM:
-		return "Operation not permitted";
-	case ENOENT:
-		return "No such file or directory";
-	case ESTALE:
-		return "Stale NFS file handle";
-	case EFTYPE:
-		return "Inappropriate file type or format";
-	case ENOEXEC:
-		return "Exec format error";
-	case EIO:
-		return "Input/output error";
-	case EINVAL:
-		return "Invalid argument";
-	default:
-		snprintf(ebuf, sizeof ebuf, "Unknown error: code %d", err);
-		return ebuf;
-	}
+	for (mi = errlist; mi->msg; mi++)
+		if (mi->errno == err)
+			return __UNCONST(mi->msg);
+
+	snprintf(ebuf, sizeof ebuf, "Unknown error: code %d", err);
+	return ebuf;
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_ni.c,v 1.1 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: if_ni.c,v 1.2 2000/07/10 10:40:38 ragge Exp $ */
+/*	$NetBSD: if_ni.c,v 1.4 2007/03/04 06:00:56 christos Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -41,10 +40,10 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/if_ether.h>
 
 #include <../include/sid.h>
 #include <../include/rpb.h>
@@ -59,7 +58,7 @@
 #include <lib/libsa/stand.h>
 #include <lib/libsa/net.h>
 
-#include <arch/vax/bi/bireg.h>
+#include <dev/bi/bireg.h>
 
 #include "vaxstand.h"
 
@@ -79,13 +78,13 @@
 #define TXADD		18	/*	""	transmit   ""	 */
 #define MSGADD		134	/*	""	message	   ""	 */
 
-#include <arch/vax/bi/if_nireg.h>
+#include <dev/bi/if_nireg.h>
 
 
 #define SPTSIZ	16384	/* 8MB */
 #define roundpg(x)	(((int)x + VAX_PGOFSET) & ~VAX_PGOFSET)
 #define ALLOC(x) \
-	allocbase;xbzero((caddr_t)allocbase,x);allocbase+=roundpg(x);
+	allocbase;xbzero((void *)allocbase,x);allocbase+=roundpg(x);
 #define nipqb	(&gvppqb->nc_pqb)
 #define gvp	gvppqb
 #define NI_WREG(csr, val) *(volatile long *)(niaddr + (csr)) = (val)
@@ -100,7 +99,7 @@ static int *syspte, allocbase, niaddr;
 static struct ni_gvppqb *gvppqb;
 static struct ni_fqb *fqb;
 static struct ni_bbd *bbd;
-static char enaddr[6];
+static u_char enaddr[6];
 static int beenhere = 0;
 
 struct netif_driver ni_driver = {
@@ -470,7 +469,7 @@ loop:	while ((data = REMQHI(&gvp->nc_forwr)) == 0 && (nsec > getsecs()))
 		len = data->bufs[0]._len;
 		if (len > maxlen)
 			len = maxlen;
-		bcopy((caddr_t)data->nd_cmdref, pkt, len);
+		bcopy((void *)data->nd_cmdref, pkt, len);
 		bd->nb_pte = (int)&syspte[data->nd_cmdref>>9];
 		data->bufs[0]._len = bd->nb_len = 2048;
 		data->bufs[0]._offset = 0;
@@ -511,7 +510,7 @@ ni_put(struct iodesc *desc, void *pkt, size_t len)
 	bdp = &bbd[(data->bufs[0]._index & 0x7fff)];
 	bdp->nb_status = NIBD_VALID;
 	bdp->nb_len = (len < 64 ? 64 : len);
-	bcopy(pkt, (caddr_t)data->nd_cmdref, len);
+	bcopy(pkt, (void *)data->nd_cmdref, len);
 	data->bufs[0]._offset = 0;
 	data->bufs[0]._len = bdp->nb_len;
 	data->nd_opcode = BVP_DGRAM;

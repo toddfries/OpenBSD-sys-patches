@@ -1,20 +1,19 @@
-/* $OpenBSD: ioasicreg.h,v 1.2 2003/06/02 23:28:04 millert Exp $ */
-/* $NetBSD: ioasicreg.h,v 1.6 2000/07/17 02:18:17 thorpej Exp $ */
+/* $NetBSD: ioasicreg.h,v 1.9 2005/12/11 12:24:00 christos Exp $ */
 
-/* 
+/*
  * Copyright (c) 1991,1990,1989,1994,1995 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU

@@ -1,4 +1,4 @@
-/* $NetBSD: vm_machdep.c,v 1.12 2006/10/14 17:51:37 bjh21 Exp $ */
+/* $NetBSD: vm_machdep.c,v 1.20 2008/10/25 22:12:33 he Exp $ */
 
 /*-
  * Copyright (c) 2000, 2001 Ben Harris
@@ -64,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vm_machdep.c,v 1.12 2006/10/14 17:51:37 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vm_machdep.c,v 1.20 2008/10/25 22:12:33 he Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -72,6 +72,8 @@ __KERNEL_RCSID(0, "$NetBSD: vm_machdep.c,v 1.12 2006/10/14 17:51:37 bjh21 Exp $"
 #include <sys/proc.h>
 #include <sys/syscallargs.h>
 #include <sys/user.h>
+#include <sys/sched.h>
+#include <sys/mutex.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -111,7 +113,7 @@ cpu_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	char *stacktop;
 
 #if 0
-	printf("cpu_fork: %p -> %p\n", p1, p2);
+	printf("cpu_lwp_fork: %p -> %p\n", p1, p2);
 #endif
 	pcb = &l2->l_addr->u_pcb;
 	/* Copy the pcb */
@@ -134,14 +136,8 @@ cpu_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	l2->l_addr->u_pcb.pcb_tf = tf;
 	/* Fabricate a new switchframe */
 	bzero(sf, sizeof(*sf));
-	sf->sf_r13 = (register_t)tf; /* Initial stack pointer */
-	sf->sf_r14 = (register_t)proc_trampoline | R15_MODE_SVC;
 
-	pcb->pcb_tf = tf;
-	pcb->pcb_sf = sf;
-	pcb->pcb_onfault = NULL;
-	sf->sf_r4 = (register_t)func;
-	sf->sf_r5 = (register_t)arg;
+	cpu_setfunc(l2, func, arg);
 }
 
 void
@@ -152,7 +148,7 @@ cpu_setfunc(struct lwp *l, void (*func)(void *), void *arg)
 	struct switchframe *sf = (struct switchframe *)tf - 1;
 
 	sf->sf_r13 = (register_t)tf; /* Initial stack pointer */
-	sf->sf_r14 = (register_t)proc_trampoline | R15_MODE_SVC;
+	sf->sf_pc  = (register_t)lwp_trampoline | R15_MODE_SVC;
 
 	pcb->pcb_tf = tf;
 	pcb->pcb_sf = sf;
@@ -169,22 +165,10 @@ cpu_lwp_free(struct lwp *l, int proc)
 }
 
 void
-cpu_exit(struct lwp *l)
+cpu_lwp_free2(struct lwp *l)
 {
-	int s;
 
-	/*
-	 * We're still running on l's stack here.  This is a little
-	 * dangerous, since we're about to free it, but no-one's going
-	 * to get a chance to reallocate it before we call
-	 * cpu_switch().  Well, I hope they're not anyway.
-	 *
-	 * A more conventional approach would be to run on lwp0's
-	 * stack or to have a special stack for this purpose.
-	 */
-	lwp_exit2(l);
-	SCHED_LOCK(s);		/* expected by cpu_switch */
-	cpu_switch(NULL, NULL);
+	/* Nothing to do here? */
 }
 
 void
@@ -223,13 +207,13 @@ vmapbuf(struct buf *bp, vsize_t len)
 	off = (vaddr_t)bp->b_data - faddr;
 	len = round_page(off + len);
 	taddr = uvm_km_alloc(phys_map, len, 0, UVM_KMF_VAONLY | UVM_KMF_WAITVA);
-	bp->b_data = (caddr_t)(taddr + off);
+	bp->b_data = (void *)(taddr + off);
 	len = atop(len);
 	prot = bp->b_flags & B_READ ? VM_PROT_READ | VM_PROT_WRITE :
 				      VM_PROT_READ;
 	while (len--) {
 		if (pmap_extract(vm_map_pmap(&p->p_vmspace->vm_map), faddr,
-		    &pa) == FALSE)
+		    &pa) == false)
 			panic("vmapbuf: null page frame");
 		pmap_enter(vm_map_pmap(phys_map), taddr, trunc_page(pa),
 		    prot, prot | PMAP_WIRED);

@@ -1,8 +1,5 @@
-/*	$NetBSD: types.h,v 1.2 2006/09/05 01:33:24 gdamore Exp $	*/
+/*	$NetBSD: types.h,v 1.5 2008/01/20 18:09:04 joerg Exp $	*/
 
 #include <mips/types.h>
 
 #define	__HAVE_DEVICE_REGISTER
-#define	__HAVE_GENERIC_SOFT_INTERRUPTS
-#define	__HAVE_TIMECOUNTER
-#define	__HAVE_GENERIC_TODR

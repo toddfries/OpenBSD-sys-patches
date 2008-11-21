@@ -1,10 +1,9 @@
-/*	$OpenBSD: pram.h,v 1.9 2007/04/10 17:14:42 miod Exp $	*/
-/*	$NetBSD: pram.h,v 1.3 1996/05/05 06:18:53 briggs Exp $	*/
+/*	$NetBSD: pram.h,v 1.7 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * RTC toolkit version 1.08b, copyright 1995, erik vogan
  *
- * All rights and privileges to this code hereby donated
+ * All rights and privledges to this code hereby donated
  * to the ALICE group for use in NetBSD.  see the copyright
  * below for more info...
  */
@@ -43,12 +42,42 @@
  */
 
 /*
+ * In the following functions, addr is a pointer to the data to read/write
+ * from/to PRAM (bytes) and loc is the PRAM address to read/write, and len
+ * is the number of consecutive bytes to read/write.
+ *
+ *	possible values for:		loc		len
+ *	read/writePram		     $00-$13 **	      $01-10 **
+ *	read/writeExtPram	     $00-$ff	      $00-ff
+ *
+ *	** - due to the way the PRAM is set up, $00-0f must be read with one
+ *	     command, and $10-$13 must be read with another.  Please, do not
+ *	     attempt to read across the $0f/$10 boundary!!  You have been
+ *	     warned!!
+ */
+
+void readPram(char *, int, int);
+void writePram(char *, int, int);
+void readExtPram(char *, int, int);
+void writeExtPram(char *, int, int);
+
+/*
  * The following routines are used to get/set the PRAM time
  * (which is stored as seconds since 1904).
  */
 
+unsigned long	getPramTime(void);
+void 		setPramTime(unsigned long);
+
 unsigned long	pram_readtime(void);
 void		pram_settime(unsigned long);
 
+#ifndef MRG_ADB	
+/*
+ * These functions only when we are not using
+ * the MRG method of accessing the ADB/PRAM/RTC.
+ */
 unsigned long	getPramTimeII(void);
 void		setPramTimeII(unsigned long);
+
+#endif /* !MRG_ADB */

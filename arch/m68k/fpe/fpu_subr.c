@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_subr.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_subr.c,v 1.6 2003/08/07 16:28:12 agc Exp $ */
+/*	$NetBSD: fpu_subr.c,v 1.8 2005/12/24 20:07:15 perry Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,13 +44,16 @@
  * FPU subroutines.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_subr.c,v 1.8 2005/12/24 20:07:15 perry Exp $");
+
 #include <sys/types.h>
 #include <sys/systm.h>
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_emulate.h>
-#include <m68k/fpe/fpu_arith.h>
+#include "fpu_emulate.h"
+#include "fpu_arith.h"
 
 /*
  * Shift the given number right rsh bits.  Any bits that `fall off' will get
@@ -60,10 +62,10 @@
  * sticky field is ignored anyway.
  */
 int
-fpu_shr(struct fpn *fp, int rsh)
+fpu_shr(register struct fpn *fp, register int rsh)
 {
-	u_int m0, m1, m2, s;
-	int lsh;
+	register u_int m0, m1, m2, s;
+	register int lsh;
 
 #ifdef DIAGNOSTIC
 	if (rsh < 0 || (fp->fp_class != FPC_NUM && !ISNAN(fp)))
@@ -127,10 +129,10 @@ fpu_shr(struct fpn *fp, int rsh)
  * a supernormal and it will fix it (provided fp->fp_mant[2] == 0).
  */
 void
-fpu_norm(struct fpn *fp)
+fpu_norm(register struct fpn *fp)
 {
-	u_int m0, m1, m2, sup, nrm;
-	int lsh, rsh, exp;
+	register u_int m0, m1, m2, sup, nrm;
+	register int lsh, rsh, exp;
 
 	exp = fp->fp_exp;
 	m0 = fp->fp_mant[0];
@@ -163,7 +165,7 @@ fpu_norm(struct fpn *fp)
 		 * We have a supernormal number.  We need to shift it right.
 		 * We may assume m2==0.
 		 */
-		__asm __volatile("bfffo %1{#0:#32},%0" : "=d"(rsh) : "g"(m0));
+		__asm volatile("bfffo %1{#0:#32},%0" : "=d"(rsh) : "g"(m0));
 		rsh = 31 - rsh - FP_LG;
 		exp += rsh;
 		lsh = 32 - rsh;
@@ -175,7 +177,7 @@ fpu_norm(struct fpn *fp)
 		 * We have a regular denorm (a subnormal number), and need
 		 * to shift it left.
 		 */
-		__asm __volatile("bfffo %1{#0:#32},%0" : "=d"(lsh) : "g"(m0));
+		__asm volatile("bfffo %1{#0:#32},%0" : "=d"(lsh) : "g"(m0));
 		lsh = FP_LG - 31 + lsh;
 		exp -= lsh;
 		rsh = 32 - lsh;
@@ -195,9 +197,9 @@ fpu_norm(struct fpn *fp)
  * As a side effect, we set OPERR for the current exceptions.
  */
 struct fpn *
-fpu_newnan(struct fpemu *fe)
+fpu_newnan(register struct fpemu *fe)
 {
-	struct fpn *fp;
+	register struct fpn *fp;
 
 	fe->fe_fpsr |= FPSR_OPERR;
 	fp = &fe->fe_f3;

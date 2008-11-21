@@ -1,21 +1,51 @@
-/*	$OpenBSD: sfsub.c,v 1.6 2002/11/29 09:27:34 deraadt Exp $	*/
-/*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)sfsub.c: Revision: 2.7.88.1 Date: 93/12/07 15:07:15 */
+/*	$NetBSD: sfsub.c,v 1.4 2007/02/22 05:46:31 thorpej Exp $	*/
 
-#include "float.h"
-#include "sgl_float.h"
+/*	$OpenBSD: sfsub.c,v 1.4 2001/03/29 03:58:19 mickey Exp $	*/
+
+/*
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sfsub.c,v 1.4 2007/02/22 05:46:31 thorpej Exp $");
+
+#include "../spmath/float.h"
+#include "../spmath/sgl_float.h"
 
 /*
  * Single_subtract: subtract two single precision values.
@@ -24,13 +54,13 @@ int
 sgl_fsub(leftptr, rightptr, dstptr, status)
     sgl_floating_point *leftptr, *rightptr, *dstptr;
     unsigned int *status;
-{
+    {
     register unsigned int left, right, result, extent;
     register unsigned int signless_upper_left, signless_upper_right, save;
 
     register int result_exponent, right_exponent, diff_exponent;
     register int sign_save, jumpsize;
-    register int inexact = FALSE, underflowtrap;
+    register int inexact = false, underflowtrap;
 
     /* Create local copies of the numbers */
     left = *leftptr;
@@ -181,7 +211,7 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
 		    Sgl_set_sign(left,/*using*/sign_save);
 		    Sgl_setwrapped_exponent(left,result_exponent,unfl);
 		    *dstptr = left;
-		    /* inexact = FALSE */
+		    /* inexact = false */
 		    return(UNDERFLOWEXCEPTION);
 		    }
 		}
@@ -231,7 +261,7 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
 		Sgl_set_sign(result,/*using*/sign_save);
 		Sgl_setwrapped_exponent(result,result_exponent,unfl);
 		*dstptr = result;
-		/* inexact = FALSE */
+		/* inexact = false */
 		return(UNDERFLOWEXCEPTION);
 		}
 	    *dstptr = result;
@@ -274,7 +304,7 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
 	if(Sgl_iszero_hidden(result))
 	    {
 	    /* Handle normalization */
-	    /* A straight forward algorithm would now shift the result
+	    /* A straight foward algorithm would now shift the result
 	     * and extension left until the hidden bit becomes one.  Not
 	     * all of the extension bits need participate in the shift.
 	     * Only the two most significant bits (round and guard) are
@@ -394,7 +424,7 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
 		Sgl_set_sign(result,sign_save);
 		Sgl_setwrapped_exponent(result,result_exponent,unfl);
 		*dstptr = result;
-		/* inexact = FALSE */
+		/* inexact = false */
 		return(UNDERFLOWEXCEPTION);
 		}
 	    /*
@@ -429,7 +459,7 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
   round:
     if(Ext_isnotzero(extent))
 	{
-	inexact = TRUE;
+	inexact = true;
 	switch(Rounding_mode())
 	    {
 	    case ROUNDNEAREST: /* The default. */
@@ -482,7 +512,7 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
 	else
 	    {
 	    Set_overflowflag();
-	    inexact = TRUE;
+	    inexact = true;
 	    Sgl_setoverflow(result);
 	    }
 	}
@@ -493,4 +523,4 @@ sgl_fsub(leftptr, rightptr, dstptr, status)
 	else Set_inexactflag();
     }
     return(NOEXCEPTION);
-}
+    }

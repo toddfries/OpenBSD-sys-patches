@@ -1,5 +1,4 @@
-/*	$OpenBSD: memreg.c,v 1.11 2003/05/13 22:25:33 miod Exp $	*/
-/*	$NetBSD: memreg.c,v 1.21 1997/07/29 09:42:08 fair Exp $ */
+/*	$NetBSD: memreg.c,v 1.41 2008/05/21 14:10:28 ad Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -47,8 +46,14 @@
  *	@(#)memreg.c	8.1 (Berkeley) 6/11/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: memreg.c,v 1.41 2008/05/21 14:10:28 ad Exp $");
+
+#include "opt_sparc_arch.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
@@ -59,61 +64,104 @@
 #include <sparc/sparc/asm.h>
 #include <sparc/sparc/cpuvar.h>
 
+#include <machine/pte.h>
 #include <machine/reg.h>	/* for trapframe */
 #include <machine/trap.h>	/* for trap types */
 
-int memregmatch(struct device *, void *, void *);
-void memregattach(struct device *, struct device *, void *);
+static int	memregmatch_mainbus(struct device *, struct cfdata *, void *);
+static int	memregmatch_obio(struct device *, struct cfdata *, void *);
+static void	memregattach_mainbus(struct device *, struct device *, void *);
+static void	memregattach_obio(struct device *, struct device *, void *);
 
-struct cfattach memreg_ca = {
-	sizeof(struct device), memregmatch, memregattach
-};
+CFATTACH_DECL(memreg_mainbus, sizeof(struct device),
+    memregmatch_mainbus, memregattach_mainbus, NULL, NULL);
 
-struct cfdriver memreg_cd = {
-	0, "memreg", DV_DULL
-};
+CFATTACH_DECL(memreg_obio, sizeof(struct device),
+    memregmatch_obio, memregattach_obio, NULL, NULL);
 
 #if defined(SUN4M)
-void hardmemerr4m(unsigned int, u_int, u_int, u_int, u_int);
+static void hardmemerr4m(unsigned, u_int, u_int, u_int, u_int);
 #endif
 
 /*
  * The OPENPROM calls this "memory-error".
  */
-int
-memregmatch(parent, vcf, aux)
-	struct device *parent;
-	void *vcf, *aux;
+static int
+memregmatch_mainbus(struct device *parent, struct cfdata *cf, void *aux)
 {
-	register struct cfdata *cf = vcf;
-	register struct confargs *ca = aux;
+	struct mainbus_attach_args *ma = aux;
 
-	if (CPU_ISSUN4) {
-		if (ca->ca_bustype == BUS_OBIO)
-			return (strcmp(cf->cf_driver->cd_name,
-			    ca->ca_ra.ra_name) == 0);
+	return (strcmp("memory-error", ma->ma_name) == 0);
+}
+
+static int
+memregmatch_obio(struct device *parent, struct cfdata *cf, void *aux)
+{
+	union obio_attach_args *uoba = aux;
+
+	if (uoba->uoba_isobio4 == 0)
+		return (strcmp("memory-error", uoba->uoba_sbus.sa_name) == 0);
+
+	if (!CPU_ISSUN4) {
+		printf("memregmatch_obio: attach args mixed up\n");
 		return (0);
 	}
-	return (strcmp("memory-error", ca->ca_ra.ra_name) == 0);
+
+	return (1);
 }
 
 /* ARGSUSED */
-void
-memregattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+memregattach_mainbus(struct device *parent, struct device *self, void *aux)
 {
-	register struct confargs *ca = aux;
-	register struct romaux *ra = &ca->ca_ra;
+	struct mainbus_attach_args *ma = aux;
+	bus_space_handle_t bh;
 
-	if (CPU_ISSUN4) {
-		if (par_err_reg == NULL)
-			panic("memregattach");
-		ra->ra_vaddr = (caddr_t)par_err_reg;
-	} else {
-		par_err_reg = ra->ra_vaddr ? (volatile u_int *)ra->ra_vaddr :
-		    (volatile u_int *)mapiodev(ra->ra_reg, 0, sizeof(int));
+	printf("\n");
+	if (ma->ma_promvaddr != 0) {
+		par_err_reg = (volatile int *)ma->ma_promvaddr;
+		return;
 	}
+
+	if (bus_space_map(ma->ma_bustag,
+			   ma->ma_paddr,
+			   sizeof(par_err_reg),
+			   BUS_SPACE_MAP_LINEAR,
+			   &bh) != 0) {
+		printf("memregattach_mainbus: can't map register\n");
+		return;
+	}
+	par_err_reg = (volatile int *)bh;
+}
+
+/* ARGSUSED */
+static void
+memregattach_obio(struct device *parent, struct device *self, void *aux)
+{
+	union obio_attach_args *uoba = aux;
+	bus_space_handle_t bh;
+
+	if (uoba->uoba_isobio4 == 0) {
+		struct sbus_attach_args *sa = &uoba->uoba_sbus;
+		if (sa->sa_promvaddr != 0) {
+			par_err_reg = (volatile int *)sa->sa_promvaddr;
+			return;
+		}
+
+		if (sbus_bus_map(sa->sa_bustag,
+				 sa->sa_slot, sa->sa_offset,
+				 sizeof(par_err_reg),
+				 BUS_SPACE_MAP_LINEAR, &bh) != 0) {
+			printf("memregattach_obio: can't map register\n");
+			return;
+		}
+		par_err_reg = (volatile int *)bh;
+	}
+
+	/* On sun4, `par_err_reg' has already been mapped in autoconf.c */
+	if (par_err_reg == NULL)
+		panic("memregattach");
+
 	printf("\n");
 }
 
@@ -124,36 +172,61 @@ memregattach(parent, self, aux)
  * and take the page out of the page pool, but for now...
  */
 
-volatile u_int	*par_err_reg;	/* virtual address; NULL if not yet mapped */
-
 void
-memerr4_4c(issync, ser, sva, aer, ava, tf)
-	unsigned int issync;
-	u_int ser, sva, aer, ava;
-	struct trapframe *tf;   /* XXX - unused/invalid */
+memerr4_4c(unsigned int issync,
+	   u_int ser, u_int sva, u_int aer, u_int ava,
+	   struct trapframe *tf) /* XXX - unused/invalid */
 {
-	printf("%ssync mem err: ser=%b sva=0x%x ",
-	       issync ? "" : "a", ser, SER_BITS, sva);
-	printf("aer=%b ava=0x%x\n", aer & 0xff, AER_BITS, ava);
+	char bits[64];
+	u_int pte;
+
+	printf("%ssync mem arr: ser=%s sva=0x%x ",
+		issync ? "" : "a",
+		bitmask_snprintf(ser, SER_BITS, bits, sizeof(bits)),
+		sva);
+	printf("aer=%s ava=0x%x\n", bitmask_snprintf(aer & 0xff,
+		AER_BITS, bits, sizeof(bits)), ava);
+
+	pte = getpte4(sva);
+	if ((pte & PG_V) != 0 && (pte & PG_TYPE) == PG_OBMEM) {
+		u_int pa = (pte & PG_PFNUM) << PGSHIFT;
+		printf(" spa=0x%x, module location: %s\n", pa,
+			prom_pa_location(pa, 0));
+	}
+
+	pte = getpte4(ava);
+	if ((pte & PG_V) != 0 && (pte & PG_TYPE) == PG_OBMEM) {
+		u_int pa = (pte & PG_PFNUM) << PGSHIFT;
+		printf(" apa=0x%x, module location: %s\n", pa,
+			prom_pa_location(pa, 0));
+	}
+
 	if (par_err_reg)
-		printf("parity error register = %b\n",
-		       *par_err_reg, PER_BITS);
+		printf("parity error register = %s\n",
+			bitmask_snprintf(*par_err_reg, PER_BITS,
+					 bits, sizeof(bits)));
 	panic("memory error");		/* XXX */
 }
+
 
 #if defined(SUN4M)
 /*
  * hardmemerr4m: called upon fatal memory error. Print a message and panic.
  */
-
-void
-hardmemerr4m(type, sfsr, sfva, afsr, afva)
-	unsigned int type;
-	u_int sfsr, sfva, afsr, afva;
+static void
+hardmemerr4m(unsigned type, u_int sfsr, u_int sfva, u_int afsr, u_int afva)
 {
-	printf("memory error:");
-	printf("sfsr=%b sfva=0x%x", sfsr, SFSR_BITS, sfva);
-	printf("afsr=%b afva=0x%x", afsr, AFSR_BITS, afva);
+	char *s, bits[64];
+
+	printf("memory fault: type %d", type);
+	s = bitmask_snprintf(sfsr, SFSR_BITS, bits, sizeof(bits));
+	printf("sfsr=%s sfva=0x%x\n", s, sfva);
+
+	if (afsr != 0) {
+		s = bitmask_snprintf(afsr, AFSR_BITS, bits, sizeof(bits));
+		printf("; afsr=%s afva=0x%x%x\n", s,
+			(afsr & AFSR_AFA) >> AFSR_AFA_RSHIFT, afva);
+	}
 
 	if ((sfsr & SFSR_FT) == SFSR_FT_NONE  && (afsr & AFSR_AFO) == 0)
 		return;
@@ -168,19 +241,19 @@ hardmemerr4m(type, sfsr, sfva, afsr, afva)
  * once, and then fail if we get called again.
  */
 
-static int addrold = (int)0xdeadbeef; /* We pick an unlikely address */
-static int addroldtop = (int)0xdeadbeef;
+/* XXXSMP */
+static int addrold = (int) 0xdeadbeef; /* We pick an unlikely address */
+static int addroldtop = (int) 0xdeadbeef;
 static int oldtype = -1;
+/* XXXSMP */
 
 void
-hypersparc_memerr(type, sfsr, sfva, tf)
-	unsigned int type;
-	u_int sfsr;
-	u_int sfva;
-	struct trapframe *tf;
+hypersparc_memerr(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 {
 	u_int afsr;
 	u_int afva;
+
+	KERNEL_LOCK(1, NULL);
 
 	(*cpuinfo.get_asyncflt)(&afsr, &afva);
 	if ((afsr & AFSR_AFO) != 0) {	/* HS async fault! */
@@ -194,25 +267,28 @@ hypersparc_memerr(type, sfsr, sfva, tf)
 		oldtype = -1;
 		addrold = afva;
 		addroldtop = afsr & AFSR_AFA;
-		return;
 	}
+out:
+	KERNEL_UNLOCK_ONE(NULL);
+	return;
+
 hard:
 	hardmemerr4m(type, sfsr, sfva, afsr, afva);
+	goto out;
 }
 
 void
-viking_memerr(type, sfsr, sfva, tf)
-	unsigned int type;
-	u_int sfsr;
-	u_int sfva;
-	struct trapframe *tf;
+viking_memerr(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 {
-	u_int afsr = 0;
-	u_int afva = 0;
+	u_int afsr=0;	/* No Async fault registers on the viking */
+	u_int afva=0;
+
+	KERNEL_LOCK(1, NULL);
 
 	if (type == T_STOREBUFFAULT) {
+
 		/*
-		 * On Supersparc, we try to reenable the store buffers
+		 * On Supersparc, we try to re-enable the store buffers
 		 * to force a retry.
 		 */
 		printf("store buffer copy-back failure at 0x%x. Retrying...\n",
@@ -224,7 +300,7 @@ viking_memerr(type, sfsr, sfva, tf)
 		oldtype = T_STOREBUFFAULT;
 		addrold = sfva;
 
-		/* reenable store buffer */
+		/* re-enable store buffer */
 		sta(SRMMU_PCR, ASI_SRMMU,
 		    lda(SRMMU_PCR, ASI_SRMMU) | VIKING_PCR_SB);
 
@@ -239,21 +315,24 @@ viking_memerr(type, sfsr, sfva, tf)
 		if (oldtype == T_DATAFAULT)
 			goto hard;
 		oldtype = T_DATAFAULT;
-		return;
 	}
+
+out:
+	KERNEL_UNLOCK_ONE(NULL);
+	return;
+
 hard:
 	hardmemerr4m(type, sfsr, sfva, afsr, afva);
+	goto out;
 }
 
 void
-memerr4m(type, sfsr, sfva, tf)
-	unsigned int type;
-	u_int sfsr;
-	u_int sfva;
-	struct trapframe *tf;
+memerr4m(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 {
 	u_int afsr;
 	u_int afva;
+
+	KERNEL_LOCK(1, NULL);
 
 	/*
 	 * No known special cases.
@@ -263,5 +342,6 @@ memerr4m(type, sfsr, sfva, tf)
 		afsr = afva = 0;
 
 	hardmemerr4m(type, sfsr, sfva, afsr, afva);
+	KERNEL_UNLOCK_ONE(NULL);
 }
-#endif /* 4m */
+#endif /* SUN4M */

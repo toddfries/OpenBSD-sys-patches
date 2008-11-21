@@ -1,5 +1,4 @@
-/*	$OpenBSD: ibcs2_socksys.h,v 1.4 2002/03/14 01:26:50 millert Exp $	*/
-/*	$NetBSD: ibcs2_socksys.h,v 1.2 1996/05/03 17:05:30 christos Exp $	*/
+/*	$NetBSD: ibcs2_socksys.h,v 1.8 2007/12/20 23:02:49 dsl Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -58,53 +57,53 @@
 #define SOCKSYS_GETITIMER	23
 #define SOCKSYS_SETITIMER	24
 
-#define IBCS2_SIOCSHIWAT	_IOW('S', 1, int)	
-#define IBCS2_SIOCGHIWAT	_IOR('S', 2, int)	
-#define IBCS2_SIOCSLOWAT	_IOW('S', 3, int)	
-#define IBCS2_SIOCGLOWAT	_IOR('S', 4, int)	
-#define IBCS2_SIOCATMARK	_IOR('S', 5, int)	
-#define IBCS2_SIOCSPGRP		_IOW('S', 6, int)	
-#define IBCS2_SIOCGPGRP		_IOR('S', 7, int)	
-#define IBCS2_FIONREAD		_IOR('S', 8, int)	
-#define IBCS2_FIONBIO		_IOW('S', 9, int)	
-#define IBCS2_FIOASYNC		_IOW('S', 10, int)	
-#define IBCS2_SIOCPROTO		_IOW('S', 11, struct socknewproto)	
-#define IBCS2_SIOCGETNAME	_IOR('S', 12, struct sockaddr)	
-#define IBCS2_SIOCGETPEER	_IOR('S', 13, struct sockaddr)	
-#define IBCS2_IF_UNITSEL	_IOW('S', 14, int)	
-#define IBCS2_SIOCXPROTO	_IO('S', 15)	
+#define IBCS2_SIOCSHIWAT	_IOW('S', 1, int)
+#define IBCS2_SIOCGHIWAT	_IOR('S', 2, int)
+#define IBCS2_SIOCSLOWAT	_IOW('S', 3, int)
+#define IBCS2_SIOCGLOWAT	_IOR('S', 4, int)
+#define IBCS2_SIOCATMARK	_IOR('S', 5, int)
+#define IBCS2_SIOCSPGRP		_IOW('S', 6, int)
+#define IBCS2_SIOCGPGRP		_IOR('S', 7, int)
+#define IBCS2_FIONREAD		_IOR('S', 8, int)
+#define IBCS2_FIONBIO		_IOW('S', 9, int)
+#define IBCS2_FIOASYNC		_IOW('S', 10, int)
+#define IBCS2_SIOCPROTO		_IOW('S', 11, struct socknewproto)
+#define IBCS2_SIOCGETNAME	_IOR('S', 12, struct sockaddr)
+#define IBCS2_SIOCGETPEER	_IOR('S', 13, struct sockaddr)
+#define IBCS2_IF_UNITSEL	_IOW('S', 14, int)
+#define IBCS2_SIOCXPROTO	_IO('S', 15)
 
-#define IBCS2_SIOCADDRT		_IOW('R', 9, struct rtentry)	
-#define IBCS2_SIOCDELRT		_IOW('R', 10, struct rtentry)	
+#define IBCS2_SIOCADDRT		_IOW('R', 9, struct rtentry)
+#define IBCS2_SIOCDELRT		_IOW('R', 10, struct rtentry)
 
-#define IBCS2_SIOCSIFADDR	_IOW('I', 11, struct ifreq)	
-#define IBCS2_SIOCGIFADDR	_IOWR('I', 12, struct ifreq)	
-#define IBCS2_SIOCSIFDSTADDR	_IOW('I', 13, struct ifreq)	
-#define IBCS2_SIOCGIFDSTADDR	_IOWR('I', 14, struct ifreq)	
-#define IBCS2_SIOCSIFFLAGS	_IOW('I', 15, struct ifreq)	
-#define IBCS2_SIOCGIFFLAGS	_IOWR('I', 16, struct ifreq)	
-#define IBCS2_SIOCGIFCONF	_IOWR('I', 17, struct ifconf)	
-#define IBCS2_SIOCSIFMTU	_IOW('I', 21, struct ifreq)	
-#define IBCS2_SIOCGIFMTU	_IOWR('I', 22, struct ifreq)	
-#define IBCS2_SIOCIFDETACH	_IOW('I', 26, struct ifreq)	
-#define IBCS2_SIOCGENPSTATS	_IOWR('I', 27, struct ifreq)	
-#define IBCS2_SIOCX25XMT	_IOWR('I', 29, struct ifreq)
-#define IBCS2_SIOCX25RCV	_IOWR('I', 30, struct ifreq)
-#define IBCS2_SIOCX25TBL	_IOWR('I', 31, struct ifreq)
-#define IBCS2_SIOCGIFBRDADDR	_IOWR('I', 32, struct ifreq)	
-#define IBCS2_SIOCSIFBRDADDR	_IOW('I', 33, struct ifreq)	
-#define IBCS2_SIOCGIFNETMASK	_IOWR('I', 34, struct ifreq)	
-#define IBCS2_SIOCSIFNETMASK	_IOW('I', 35, struct ifreq)	
-#define IBCS2_SIOCGIFMETRIC	_IOWR('I', 36, struct ifreq)	
-#define IBCS2_SIOCSIFMETRIC	_IOW('I', 37, struct ifreq)	
-#define IBCS2_SIOCSARP		_IOW('I', 38, struct arpreq)	
-#define IBCS2_SIOCGARP		_IOWR('I', 39, struct arpreq)	
-#define IBCS2_SIOCDARP		_IOW('I', 40, struct arpreq)	
-#define IBCS2_SIOCSIFNAME	_IOW('I', 41, struct ifreq)	
-#define IBCS2_SIOCGIFONEP	_IOWR('I', 42, struct ifreq)	
-#define IBCS2_SIOCSIFONEP	_IOW('I', 43, struct ifreq)	
-#define IBCS2_SIOCGENADDR	_IOWR('I', 65, struct ifreq)	
-#define IBCS2_SIOCSOCKSYS	_IOW('I', 66, struct socksysreq)	
+#define IBCS2_SIOCSIFADDR	_IOW('I', 11, struct oifreq)
+#define IBCS2_SIOCGIFADDR	_IOWR('I', 12, struct oifreq)
+#define IBCS2_SIOCSIFDSTADDR	_IOW('I', 13, struct oifreq)
+#define IBCS2_SIOCGIFDSTADDR	_IOWR('I', 14, struct oifreq)
+#define IBCS2_SIOCSIFFLAGS	_IOW('I', 15, struct oifreq)
+#define IBCS2_SIOCGIFFLAGS	_IOWR('I', 16, struct oifreq)
+#define IBCS2_SIOCGIFCONF	_IOWR('I', 17, struct ifconf)
+#define IBCS2_SIOCSIFMTU	_IOW('I', 21, struct oifreq)
+#define IBCS2_SIOCGIFMTU	_IOWR('I', 22, struct oifreq)
+#define IBCS2_SIOCIFDETACH	_IOW('I', 26, struct oifreq)
+#define IBCS2_SIOCGENPSTATS	_IOWR('I', 27, struct oifreq)
+#define IBCS2_SIOCX25XMT	_IOWR('I', 29, struct oifreq)
+#define IBCS2_SIOCX25RCV	_IOWR('I', 30, struct oifreq)
+#define IBCS2_SIOCX25TBL	_IOWR('I', 31, struct oifreq)
+#define IBCS2_SIOCGIFBRDADDR	_IOWR('I', 32, struct oifreq)
+#define IBCS2_SIOCSIFBRDADDR	_IOW('I', 33, struct oifreq)
+#define IBCS2_SIOCGIFNETMASK	_IOWR('I', 34, struct oifreq)
+#define IBCS2_SIOCSIFNETMASK	_IOW('I', 35, struct oifreq)
+#define IBCS2_SIOCGIFMETRIC	_IOWR('I', 36, struct oifreq)
+#define IBCS2_SIOCSIFMETRIC	_IOW('I', 37, struct oifreq)
+#define IBCS2_SIOCSARP		_IOW('I', 38, struct arpreq)
+#define IBCS2_SIOCGARP		_IOWR('I', 39, struct arpreq)
+#define IBCS2_SIOCDARP		_IOW('I', 40, struct arpreq)
+#define IBCS2_SIOCSIFNAME	_IOW('I', 41, struct oifreq)
+#define IBCS2_SIOCGIFONEP	_IOWR('I', 42, struct oifreq)
+#define IBCS2_SIOCSIFONEP	_IOW('I', 43, struct oifreq)
+#define IBCS2_SIOCGENADDR	_IOWR('I', 65, struct oifreq)
+#define IBCS2_SIOCSOCKSYS	_IOW('I', 66, struct socksysreq)
 
 struct socksysreq {
 	int realargs[7];
@@ -118,6 +117,12 @@ struct socknewproto {
 	int flags;
 };
 
-int ibcs2_socksys(struct proc *, void *, register_t *);
+struct ibcs2_socksys_args {
+	int     fd;
+	int     magic;
+	void *argsp;
+};
+
+int ibcs2_socksys(struct lwp *, const struct ibcs2_socksys_args *, register_t *);
 
 #endif /* _IBCS2_SOCKSYS_H */

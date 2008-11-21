@@ -1,7 +1,7 @@
-/*	$OpenBSD: db_trace.c,v 1.9 2007/08/15 20:10:08 kettenis Exp $	*/
-/*	$NetBSD: db_trace.c,v 1.23 2001/07/10 06:06:16 eeh Exp $ */
+/*	$NetBSD: db_trace.c,v 1.40 2008/07/02 19:49:58 rmind Exp $ */
 
 /*
+ * Copyright (c) 1996-2002 Eduardo Horvath.  All rights reserved.
  * Mach Operating System
  * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
@@ -27,6 +27,9 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.40 2008/07/02 19:49:58 rmind Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
@@ -39,12 +42,7 @@
 #include <ddb/db_interface.h>
 #include <ddb/db_output.h>
 
-void db_dump_fpstate(db_expr_t, int, db_expr_t, char *);
-void db_dump_window(db_expr_t, int, db_expr_t, char *);
-void db_dump_stack(db_expr_t, int, db_expr_t, char *);
-void db_dump_trap(db_expr_t, int, db_expr_t, char *);
-void db_dump_ts(db_expr_t, int, db_expr_t, char *);
-void db_print_window(u_int64_t);
+void db_print_window(uint64_t);
 
 #if 0
 #define INKERNEL(va)	(((vaddr_t)(va)) >= USRSTACK) /* Not really true, y'know */
@@ -58,17 +56,23 @@ void db_print_window(u_int64_t);
 void
 db_stack_trace_print(addr, have_addr, count, modif, pr)
 	db_expr_t       addr;
-	int             have_addr;
+	bool            have_addr;
 	db_expr_t       count;
-	char            *modif;
-	int		(*pr)(const char *, ...);
+	const char      *modif;
+ 	void		(*pr) (const char *, ...);
 {
 	vaddr_t		frame;
-	boolean_t	kernel_only = TRUE;
-	boolean_t	trace_thread = FALSE;
-	char		c, *cp = modif;
+	bool		kernel_only = TRUE;
+	bool		trace_thread = FALSE;
+	bool		lwpaddr = FALSE;
+	char		c;
+	const char	*cp = modif;
 
 	while ((c = *cp++) != 0) {
+		if (c == 'a') {
+			lwpaddr = TRUE;
+			trace_thread = TRUE;
+		}
 		if (c == 't')
 			trace_thread = TRUE;
 		if (c == 'u')
@@ -80,14 +84,28 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 	else {
 		if (trace_thread) {
 			struct proc *p;
+			struct lwp *l;
 			struct user *u;
-			(*pr)("trace: pid %d ", (int)addr);
-			p = pfind(addr);
-			if (p == NULL) {
-				(*pr)("not found\n");
-				return;
-			}	
-			u = p->p_addr;
+			if (lwpaddr) {
+				l = (struct lwp *)addr;
+				p = l->l_proc;
+				(*pr)("trace: pid %d ", p->p_pid);
+			} else {
+				(*pr)("trace: pid %d ", (int)addr);
+				p = p_find(addr, PFIND_LOCKED);
+				if (p == NULL) {
+					(*pr)("not found\n");
+					return;
+				}
+				l = LIST_FIRST(&p->p_lwps);
+				KASSERT(l != NULL);
+			}
+			(*pr)("lid %d ", l->l_lid);
+                        if ((l->l_flag & LW_INMEM) == 0) {
+                                (*pr)("swapped out\n");
+                                return;
+                        }
+                        u = l->l_addr;
 			frame = (vaddr_t)u->u_pcb.pcb_sp;
 			(*pr)("at %p\n", frame);
 		} else {
@@ -98,7 +116,7 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 	while (count--) {
 		int		i;
 		db_expr_t	offset;
-		char		*name;
+		const char	*name;
 		db_addr_t	pc;
 		struct frame64	*f64;
 		struct frame32  *f32;
@@ -121,7 +139,7 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 		if (kernel_only) {
 			if (pc < KERNBASE || pc >= KERNEND)
 				break;
-			if (frame < KERNBASE)
+			if (frame < KERNBASE || frame >= EINTSTACK)
 				break;
 		} else {
 			if (frame == 0 || frame == (vaddr_t)-1)
@@ -160,14 +178,10 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 
 
 void
-db_dump_window(addr, have_addr, count, modif)
-	db_expr_t addr;
-	int have_addr;
-	db_expr_t count;
-	char *modif;
+db_dump_window(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 {
 	int i;
-	u_int64_t frame = DDB_TF->tf_out[6];
+	uint64_t frame = DDB_TF->tf_out[6];
 
 	/* Addr is really window number */
 	if (!have_addr)
@@ -176,8 +190,8 @@ db_dump_window(addr, have_addr, count, modif)
 	/* Traverse window stack */
 	for (i=0; i<addr && frame; i++) {
 		if (frame & 1) 
-			frame = (u_int64_t)((struct frame64 *)(u_long)(frame + BIAS))->fr_fp;
-		else frame = (u_int64_t)((struct frame32 *)(u_long)frame)->fr_fp;
+			frame = (uint64_t)((struct frame64 *)(u_long)(frame + BIAS))->fr_fp;
+		else frame = (uint64_t)((struct frame32 *)(u_long)frame)->fr_fp;
 	}
 
 	db_printf("Window %lx ", addr);
@@ -185,8 +199,7 @@ db_dump_window(addr, have_addr, count, modif)
 }
 
 void 
-db_print_window(frame)
-u_int64_t frame;
+db_print_window(uint64_t frame)
 {
 	if (frame & 1) {
 		struct frame64* f = (struct frame64*)(u_long)(frame + BIAS);
@@ -270,16 +283,13 @@ u_int64_t frame;
 }
 
 void
-db_dump_stack(addr, have_addr, count, modif)
-	db_expr_t addr;
-	int have_addr;
-	db_expr_t count;
-	char *modif;
+db_dump_stack(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 {
 	int		i;
-	u_int64_t	frame, oldframe;
-	boolean_t	kernel_only = TRUE;
-	char		c, *cp = modif;
+	uint64_t	frame, oldframe;
+	bool		kernel_only = TRUE;
+	char		c;
+	const char	*cp = modif;
 
 	while ((c = *cp++) != 0)
 		if (c == 'u')
@@ -309,20 +319,20 @@ db_dump_stack(addr, have_addr, count, modif)
 			db_printf("Window %x ", i);
 			db_print_window(frame - BIAS);
 			if (!INKERNEL(((struct frame64 *)(u_long)(frame))))
-				copyin(((caddr_t)&((struct frame64 *)(u_long)frame)->fr_fp), &frame, sizeof(frame));
+				copyin(((void *)&((struct frame64 *)(u_long)frame)->fr_fp), &frame, sizeof(frame));
 			else
 				frame = ((struct frame64 *)(u_long)frame)->fr_fp;
 		} else {
-			u_int32_t tmp;
+			uint32_t tmp;
 			if (!INKERNEL(((struct frame32 *)(u_long)frame))
 			    && kernel_only) break;
 			db_printf("Window %x ", i);
 			db_print_window(frame);
 			if (!INKERNEL(((struct frame32 *)(u_long)frame))) {
 				copyin(&((struct frame32 *)(u_long)frame)->fr_fp, &tmp, sizeof(tmp));
-				frame = (u_int64_t)tmp;
+				frame = (uint64_t)tmp;
 			} else
-				frame = (u_int64_t)((struct frame32 *)(u_long)frame)->fr_fp;
+				frame = (uint64_t)((struct frame32 *)(u_long)frame)->fr_fp;
 		}
 	}
 
@@ -330,22 +340,19 @@ db_dump_stack(addr, have_addr, count, modif)
 
 
 void
-db_dump_trap(addr, have_addr, count, modif)
-	db_expr_t addr;
-	int have_addr;
-	db_expr_t count;
-	char *modif;
+db_dump_trap(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 {
 	struct trapframe64 *tf;
 
 	/* Use our last trapframe? */
-	tf = &ddb_regs.ddb_tf;
+	tf = DDB_TF;
 	{
 		/* Or the user trapframe? */
-		register char c, *cp = modif;
+		register char c;
+		register const char *cp = modif;
 		while ((c = *cp++) != 0)
 			if (c == 'u')
-				tf = curproc->p_md.md_tf;
+				tf = curlwp->l_md.md_tf;
 	}
 	/* Or an arbitrary trapframe */
 	if (have_addr)
@@ -355,10 +362,9 @@ db_dump_trap(addr, have_addr, count, modif)
 		  tf, (unsigned long long)tf->tf_tstate,
 		  (unsigned long long)tf->tf_pc,
 		  (unsigned long long)tf->tf_npc);
-	db_printf("y: %x\tpil: %d\toldpil: %d\tfault: %llx\tkstack: %llx\ttt: %x\nGlobals:\n", 
+	db_printf("y: %x\tpil: %d\toldpil: %d\tfault: %llx\ttt: %x\tGlobals:\n", 
 		  (int)tf->tf_y, (int)tf->tf_pil, (int)tf->tf_oldpil,
-		  (unsigned long long)tf->tf_fault,
-		  (unsigned long long)tf->tf_kstack, (int)tf->tf_tt);
+		  (unsigned long long)tf->tf_fault, (int)tf->tf_tt);
 	db_printf("%016llx %016llx %016llx %016llx\n",
 		  (unsigned long long)tf->tf_global[0],
 		  (unsigned long long)tf->tf_global[1],
@@ -374,12 +380,13 @@ db_dump_trap(addr, have_addr, count, modif)
 		  (unsigned long long)tf->tf_out[1],
 		  (unsigned long long)tf->tf_out[2],
 		  (unsigned long long)tf->tf_out[3]);
-	db_printf("%016llx %016llx %016llx %016llx\nlocals:\n",
+	db_printf("%016llx %016llx %016llx %016llx\n",
 		  (unsigned long long)tf->tf_out[4],
 		  (unsigned long long)tf->tf_out[5],
 		  (unsigned long long)tf->tf_out[6],
 		  (unsigned long long)tf->tf_out[7]);
-	db_printf("%016llx %016llx %016llx %016llx\n",
+#ifdef DEBUG
+	db_printf("locals:\n%016llx %016llx %016llx %016llx\n",
 		  (unsigned long long)tf->tf_local[0],
 		  (unsigned long long)tf->tf_local[1],
 		  (unsigned long long)tf->tf_local[2],
@@ -399,9 +406,10 @@ db_dump_trap(addr, have_addr, count, modif)
 		  (unsigned long long)tf->tf_in[5],
 		  (unsigned long long)tf->tf_in[6],
 		  (unsigned long long)tf->tf_in[7]);
+#endif
 #if 0
-	if (tf == curproc->p_md.md_tf) {
-		struct rwindow32 *kstack = (struct rwindow32 *)(((caddr_t)tf)+CCFSZ);
+	if (tf == curlwp->p_md.md_tf) {
+		struct rwindow32 *kstack = (struct rwindow32 *)(((void *)tf)+CCFSZ);
 		db_printf("ins (from stack):\n%016llx %016llx %016llx %016llx\n",
 			  (int64_t)kstack->rw_local[0], (int64_t)kstack->rw_local[1],
 			  (int64_t)kstack->rw_local[2], (int64_t)kstack->rw_local[3]);
@@ -413,16 +421,12 @@ db_dump_trap(addr, have_addr, count, modif)
 }
 
 void
-db_dump_fpstate(addr, have_addr, count, modif)
-	db_expr_t addr;
-	int have_addr;
-	db_expr_t count;
-	char *modif;
+db_dump_fpstate(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 {
 	struct fpstate64 *fpstate;
 
 	/* Use our last trapframe? */
-	fpstate = &ddb_regs.ddb_fpstate;
+	fpstate = DDB_FP;
 	/* Or an arbitrary trapframe */
 	if (have_addr)
 		fpstate = (struct fpstate64 *)addr;
@@ -505,24 +509,18 @@ db_dump_fpstate(addr, have_addr, count, modif)
 }
 
 void
-db_dump_ts(addr, have_addr, count, modif)
-	db_expr_t addr;
-	int have_addr;
-	db_expr_t count;
-	char *modif;
+db_dump_ts(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 {
 	struct trapstate	*ts;
 	int			i, tl;
 
 	/* Use our last trapframe? */
-	ts = &ddb_regs.ddb_ts[0];
-	tl = ddb_regs.ddb_tl;
+	ts = &DDB_REGS->db_ts[0];
+	tl = DDB_REGS->db_tl;
 	for (i=0; i<tl; i++) {
 		printf("%d tt=%lx tstate=%lx tpc=%p tnpc=%p\n",
 		       i+1, (long)ts[i].tt, (u_long)ts[i].tstate,
-		       (void *)(u_long)ts[i].tpc, (void *)(u_long)ts[i].tnpc);
+		       (void*)(u_long)ts[i].tpc, (void*)(u_long)ts[i].tnpc);
 	}
 
 }
-
-

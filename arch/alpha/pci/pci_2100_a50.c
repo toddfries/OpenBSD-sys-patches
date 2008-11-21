@@ -1,5 +1,4 @@
-/*	$OpenBSD: pci_2100_a50.c,v 1.20 2006/06/15 20:08:29 brad Exp $	*/
-/*	$NetBSD: pci_2100_a50.c,v 1.12 1996/11/13 21:13:29 cgd Exp $	*/
+/* $NetBSD: pci_2100_a50.c,v 1.32 2002/09/27 15:35:37 provos Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,12 +27,17 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: pci_2100_a50.c,v 1.32 2002/09/27 15:35:37 provos Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
+
 #include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
@@ -52,13 +56,12 @@
 
 #include "sio.h"
 
-int	dec_2100_a50_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
-const char *dec_2100_a50_intr_string(void *, pci_intr_handle_t);
-int	 dec_2100_a50_intr_line(void *, pci_intr_handle_t);
-void    *dec_2100_a50_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void    dec_2100_a50_intr_disestablish(void *, void *);
+int	dec_2100_a50_intr_map __P((struct pci_attach_args *, pci_intr_handle_t *));
+const char *dec_2100_a50_intr_string __P((void *, pci_intr_handle_t));
+const struct evcnt *dec_2100_a50_intr_evcnt __P((void *, pci_intr_handle_t));
+void    *dec_2100_a50_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *));
+void    dec_2100_a50_intr_disestablish __P((void *, void *));
 
 #define	APECS_SIO_DEVICE	7	/* XXX */
 
@@ -81,43 +84,45 @@ pci_2100_a50_pickintr(acp)
 	pc->pc_intr_v = acp;
 	pc->pc_intr_map = dec_2100_a50_intr_map;
 	pc->pc_intr_string = dec_2100_a50_intr_string;
-	pc->pc_intr_line = dec_2100_a50_intr_line;
+	pc->pc_intr_evcnt = dec_2100_a50_intr_evcnt;
 	pc->pc_intr_establish = dec_2100_a50_intr_establish;
 	pc->pc_intr_disestablish = dec_2100_a50_intr_disestablish;
 
 	/* Not supported on 2100 A50. */
 	pc->pc_pciide_compat_intr_establish = NULL;
-	pc->pc_pciide_compat_intr_disestablish = NULL;
 
 #if NSIO
-        sio_intr_setup(pc, iot);
+	sio_intr_setup(pc, iot);
 #else
 	panic("pci_2100_a50_pickintr: no I/O interrupt handler (no sio)");
 #endif
 }
 
 int
-dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
-	void *acv;
-        pcitag_t bustag;
-	int buspin, line;
+dec_2100_a50_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
 	pci_intr_handle_t *ihp;
 {
-	struct apecs_config *acp = acv;
-	pci_chipset_tag_t pc = &acp->ac_pc;
+        pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int device, pirq;
 	pcireg_t pirqreg;
 	u_int8_t pirqline;
 
-        if (buspin == 0) {
-                /* No IRQ used. */
-                return 1;
-        }
-        if (buspin > 4) {
-                printf("dec_2100_a50_intr_map: bad interrupt pin %d\n",
+#ifndef DIAGNOSTIC
+	pirq = 0;				/* XXX gcc -Wuninitialized */
+#endif
+
+	if (buspin == 0) {
+		/* No IRQ used. */
+		return 1;
+	}
+	if (buspin > 4) {
+		printf("dec_2100_a50_intr_map: bad interrupt pin %d\n",
 		    buspin);
-                return 1;
-        }
+		return 1;
+	}
 
 	pci_decompose_tag(pc, bustag, NULL, &device, NULL);
 
@@ -196,7 +201,7 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 	pirqreg = pci_conf_read(pc, pci_make_tag(pc, 0, APECS_SIO_DEVICE, 0),
 	    SIO_PCIREG_PIRQ_RTCTRL);
 #if 0
-	printf("pci_2100_a50_map_int: device %d pin %c: pirq %d, reg = %x\n",
+	printf("pci_2100_a50_intr_map: device %d pin %c: pirq %d, reg = %x\n",
 		device, '@' + buspin, pirq, pirqreg);
 #endif
 	pirqline = (pirqreg >> (pirq * 8)) & 0xff;
@@ -205,7 +210,7 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 	pirqline &= 0xf;
 
 #if 0
-	printf("pci_2100_a50_map_int: device %d pin %c: mapped to line %d\n",
+	printf("pci_2100_a50_intr_map: device %d pin %c: mapped to line %d\n",
 	    device, '@' + buspin, pirqline);
 #endif
 
@@ -218,32 +223,47 @@ dec_2100_a50_intr_string(acv, ih)
 	void *acv;
 	pci_intr_handle_t ih;
 {
+#if 0
+	struct apecs_config *acp = acv;
+#endif
+
 	return sio_intr_string(NULL /*XXX*/, ih);
 }
 
-int
-dec_2100_a50_intr_line(acv, ih)
+const struct evcnt *
+dec_2100_a50_intr_evcnt(acv, ih)
 	void *acv;
 	pci_intr_handle_t ih;
 {
-	return sio_intr_line(NULL /*XXX*/, ih);
+#if 0
+	struct apecs_config *acp = acv;
+#endif
+
+	return sio_intr_evcnt(NULL /*XXX*/, ih);
 }
 
 void *
-dec_2100_a50_intr_establish(acv, ih, level, func, arg, name)
+dec_2100_a50_intr_establish(acv, ih, level, func, arg)
 	void *acv, *arg;
 	pci_intr_handle_t ih;
 	int level;
-	int (*func)(void *);
-	char *name;
+	int (*func) __P((void *));
 {
+#if 0
+	struct apecs_config *acp = acv;
+#endif
+
 	return sio_intr_establish(NULL /*XXX*/, ih, IST_LEVEL, level, func,
-	    arg, name);
+	    arg);
 }
 
 void
 dec_2100_a50_intr_disestablish(acv, cookie)
 	void *acv, *cookie;
 {
+#if 0
+	struct apecs_config *acp = acv;
+#endif
+
 	sio_intr_disestablish(NULL /*XXX*/, cookie);
 }

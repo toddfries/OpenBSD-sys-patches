@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.30 2007/06/01 19:25:10 deraadt Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.38 1996/12/18 05:46:09 scottr Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.72 2008/06/13 10:01:32 cegger Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -44,10 +43,13 @@
 /*
  * Setup the system to run on the current machine.
  *
- * cpu_configure() is called at boot time.  Available
+ * Configure() is called at boot time.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.72 2008/06/13 10:01:32 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,73 +65,92 @@
 #include <machine/autoconf.h>
 #include <machine/viareg.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
-int target_to_unit(u_long, u_long, u_long);
-void	findbootdev(void);
+#include "scsibus.h"
 
-struct device	*booted_device;
-int		booted_partition;
-dev_t		bootdev;
+static void findbootdev(void);
+#if NSCSIBUS > 0
+static int target_to_unit(u_long, u_long, u_long);
+#endif /* NSCSIBUS > 0 */
+
+/*
+ * cpu_configure:
+ * called at boot time, configure all devices on the system
+ */
+void
+cpu_configure(void)
+{
+
+	mrg_init();		/* Init Mac ROM Glue */
+	startrtclock();		/* start before ADB attached */
+
+	if (config_rootfound("mainbus", NULL) == NULL)
+		panic("No mainbus found!");
+
+	(void)spl0();
+}
+
+void
+cpu_rootconf(void)
+{
+
+	findbootdev();
+
+	printf("boot device: %s\n",
+	    booted_device ? booted_device->dv_xname : "<unknown>");
+
+	setroot(booted_device, booted_partition);
+}
 
 /*
  * Yanked from i386/i386/autoconf.c (and tweaked a bit)
  */
-void
-findbootdev()
+
+u_long	bootdev;
+
+static void
+findbootdev(void)
 {
-	struct device *dv;
-	int major, unit;
+	device_t dv;
+	int major, unit, controller;
+	const char *name;
 
 	booted_device = NULL;
 	booted_partition = 0;	/* Assume root is on partition a */
 
 	major = B_TYPE(bootdev);
-	if (major < 0 || major >= nblkdev)
+	name = devsw_blk2name(major);
+	if (name == NULL)
 		return;
 
 	unit = B_UNIT(bootdev);
 
-	bootdev &= ~(B_UNITMASK << B_UNITSHIFT);
-	unit = target_to_unit(-1, unit, 0);
-	bootdev |= (unit << B_UNITSHIFT);
-
-	if (disk_count <= 0)
-		return;
-
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (dv->dv_class == DV_DISK && major == findblkmajor(dv) &&
-		    unit == dv->dv_unit) {
-			booted_device = dv;
-			return;
-		}
+	switch (major) {
+	case 4: /* SCSI drive */
+#if NSCSIBUS > 0
+		bootdev &= ~(B_UNITMASK << B_UNITSHIFT); /* XXX */
+		unit = target_to_unit(-1, unit, 0);
+		bootdev |= (unit << B_UNITSHIFT); /* XXX */
+#else /* NSCSIBUS > 0 */
+		panic("Boot device is on a SCSI drive but SCSI support "
+		    "is not present");
+#endif /* NSCSIBUS > 0 */
+		break;
+	case 22: /* IDE drive */
+		/*
+		 * controller(=channel=buses) uses only IDE drive.
+		 * Here, controller always is 0.
+		 */
+		controller = B_CONTROLLER(bootdev);
+		unit = unit + (controller<<1);
+		break;
 	}
-}
 
-void
-cpu_configure()
-{
-	startrtclock();
-
-	if (config_rootfound("mainbus", "mainbus") == NULL)
-		panic("No mainbus found!");
-	spl0();
-
-	findbootdev();
-	cold = 0;
-}
-
-void
-device_register(struct device *dev, void *aux)
-{
-}
-
-void
-diskconf(void)
-{
-	setroot(booted_device, booted_partition, RB_USERREQ);
-	dumpconf();
+	if ((dv = device_find_by_driver_unit(name, unit)) != NULL)
+		booted_device = dv;
 }
 
 /*
@@ -137,14 +158,13 @@ diskconf(void)
  * This could be tape, disk, CD.  The calling routine, though,
  * assumes DISK.  It would be nice to allow CD, too...
  */
-int
-target_to_unit(bus, target, lun)
-	u_long bus, target, lun;
+#if NSCSIBUS > 0
+static int
+target_to_unit(u_long bus, u_long target, u_long lun)
 {
 	struct scsibus_softc	*scsi;
-	struct scsi_link	*sc_link;
-	struct device		*sc_dev;
-	extern	struct cfdriver		scsibus_cd;
+	struct scsipi_periph	*periph;
+extern	struct cfdriver		scsibus_cd;
 
 	if (target < 0 || target > 7 || lun < 0 || lun > 7) {
 		printf("scsi target to unit, target (%ld) or lun (%ld)"
@@ -154,16 +174,14 @@ target_to_unit(bus, target, lun)
 
 	if (bus == -1) {
 		for (bus = 0 ; bus < scsibus_cd.cd_ndevs ; bus++) {
-			if (scsibus_cd.cd_devs[bus]) {
-				scsi = (struct scsibus_softc *)
-						scsibus_cd.cd_devs[bus];
-				if (scsi->sc_link[target][lun]) {
-					sc_link = scsi->sc_link[target][lun];
-					sc_dev = (struct device *)
-							sc_link->device_softc;
-					return sc_dev->dv_unit;
-				}
-			}
+			scsi = device_lookup_private(&scsibus_cd, bus);
+			if (!scsi)
+				continue;
+			periph = scsipi_lookup_periph(scsi->sc_channel,
+			    target, lun);
+			if (!periph)
+				continue;
+			return device_unit(periph->periph_dev);
 		}
 		return -1;
 	}
@@ -171,20 +189,14 @@ target_to_unit(bus, target, lun)
 		printf("scsi target to unit, bus (%ld) out of range.\n", bus);
 		return -1;
 	}
-	if (scsibus_cd.cd_devs[bus]) {
-		scsi = (struct scsibus_softc *) scsibus_cd.cd_devs[bus];
-		if (scsi->sc_link[target][lun]) {
-			sc_link = scsi->sc_link[target][lun];
-			sc_dev = (struct device *) sc_link->device_softc;
-			return sc_dev->dv_unit;
-		}
-	}
-	return -1;
-}
+	scsi = device_lookup_private(&scsibus_cd, bus);
+	if (!scsi)
+		return -1;
 
-struct nam2blk nam2blk[] = {
-	{ "sd",         4 },
-	{ "cd",         6 },
-	{ "rd",		13 },
-	{ NULL,		-1 }
-};
+	periph = scsipi_lookup_periph(scsi->sc_channel,
+	    target, lun);
+	if (!periph)
+		return -1;
+	return device_unit(periph->periph_dev);
+}
+#endif /* NSCSIBUS > 0 */

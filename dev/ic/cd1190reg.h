@@ -1,6 +1,6 @@
-/*	$OpenBSD: cd1190reg.h,v 1.3 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$NetBSD: cd1190reg.h,v 1.5 2008/07/02 10:16:20 plunky Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1998 Iain Hibbert.
  * All rights reserved.
  *
@@ -12,19 +12,17 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name Iain Hibbert may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
- * NO EVENT SHALL I BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -37,17 +35,17 @@
 /* Controller Command Register */
 #define CD1190_CCR		0x0b
 #define CD1190_CCR_CGC		(1<<7)	/* Change Global Config Command */
-#define CD1190_CCR_CGC_RESET	 (1<<0) /* CGC Reset Command */
+#define CD1190_CCR_CGC_RESET	(1<<0) /* CGC Reset Command */
 #define CD1190_CCR_PAR		(1<<6)	/* Parallel Command */
-#define CD1190_CCR_PAR_DISABLE	 (1<<2) /* PAR Parallel Disable */
-#define CD1190_CCR_PAR_FLUSH	 (1<<1) /* PAR Flush FIFO */
-#define CD1190_CCR_PAR_ENABLE	 (1<<0) /* PAR Parallel Enable */
+#define CD1190_CCR_PAR_DISABLE	(1<<2) /* PAR Parallel Disable */
+#define CD1190_CCR_PAR_FLUSH	(1<<1) /* PAR Flush FIFO */
+#define CD1190_CCR_PAR_ENABLE	(1<<0) /* PAR Parallel Enable */
 #define CD1190_CCR_SIG		(1<<5)	/* Signal Command */
-#define CD1190_CCR_SIG_SET_BUSY	 (1<<2) /* SIG Set Busy Output */
-#define CD1190_CCR_SIG_ACK	 (1<<1) /* SIG Pulse ACK Output */
-#define CD1190_CCR_SIG_CLR_BUSY	 (1<<0) /* SIG Clear Busy Output */
+#define CD1190_CCR_SIG_SET_BUSY	(1<<2) /* SIG Set Busy Output */
+#define CD1190_CCR_SIG_ACK	(1<<1) /* SIG Pulse ACK Output */
+#define CD1190_CCR_SIG_CLR_BUSY	(1<<0) /* SIG Clear Busy Output */
 #define CD1190_CCR_TIM		(1<<4)	/* Timer Command */
-#define CD1190_CCR_TIM_ENABLE	 (1<<3) /* Timer Enabled */
+#define CD1190_CCR_TIM_ENABLE	(1<<3) /* Timer Enabled */
 
 /* Data Time-0ut Register */
 #define CD1190_DTR		0x09

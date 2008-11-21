@@ -1,5 +1,4 @@
-/*	$OpenBSD: netif_sun.c,v 1.1 1997/09/17 10:46:18 downsj Exp $	*/
-/*	$NetBSD: netif_sun.c,v 1.2 1995/09/18 21:31:48 pk Exp $	*/
+/*	$NetBSD: netif_sun.c,v 1.9 2006/07/13 20:03:34 uwe Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -39,19 +38,19 @@
 
 #include <sys/param.h>
 #include <sys/socket.h>
-#include <string.h>
-#include <time.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
 
 #include <lib/libsa/stand.h>
 #include <lib/libsa/net.h>
 #include <lib/libsa/netif.h>
+#include <lib/libkern/libkern.h>
 
+#include <machine/promlib.h>
 #include <sparc/stand/common/promdev.h>
 
 static struct netif netif_prom;
@@ -63,9 +62,9 @@ int netif_debug;
 struct iodesc sockets[SOPEN_MAX];
 
 struct iodesc *
-socktodesc(sock)
-	int sock;
+socktodesc(int sock)
 {
+
 	if (sock != 0) {
 		return(NULL);
 	}
@@ -73,12 +72,11 @@ socktodesc(sock)
 }
 
 int
-netif_open(machdep_hint)
-	void *machdep_hint;
+netif_open(void *machdep_hint)
 {
 	struct promdata *pd = machdep_hint;
 	struct iodesc *io;
-	int fd, error;
+	int node;
 
 	/* find a free socket */
 	io = sockets;
@@ -95,14 +93,22 @@ netif_open(machdep_hint)
 	io->io_netif = &netif_prom;
 
 	/* Put our ethernet address in io->myea */
-	prom_getether(pd->fd, io->myea);
+	switch (prom_version()) {
+	case PROM_OBP_V2:
+	case PROM_OBP_V3:
+	case PROM_OPENFIRM:
+		node = prom_instance_to_package(pd->fd);
+		break;
+	default:
+		node = 0;
+	}
+	prom_getether(node, io->myea);
 
 	return(0);
 }
 
 int
-netif_close(fd)
-	int fd;
+netif_close(int fd)
 {
 	struct iodesc *io;
 	struct netif *ni;
@@ -126,16 +132,13 @@ netif_close(fd)
  * Return the length sent (or -1 on error).
  */
 ssize_t
-netif_put(desc, pkt, len)
-	struct iodesc *desc;
-	void *pkt;
-	size_t len;
+netif_put(struct iodesc *desc, void *pkt, size_t len)
 {
 	struct promdata *pd;
 	ssize_t rv;
 	size_t sendlen;
 
-	pd = (struct promdata *)desc->io_netif->nif_devdata;
+	pd = (struct promdata *)((struct netif *)desc->io_netif)->nif_devdata;
 
 #ifdef NETIF_DEBUG
 	if (netif_debug) {
@@ -173,17 +176,13 @@ netif_put(desc, pkt, len)
  * Return the total length received (or -1 on error).
  */
 ssize_t
-netif_get(desc, pkt, maxlen, timo)
-	struct iodesc *desc;
-	void *pkt;
-	size_t maxlen;
-	time_t timo;
+netif_get(struct iodesc *desc, void *pkt, size_t maxlen, time_t timo)
 {
 	struct promdata *pd;
-	int tick0, tmo_ticks;
+	int tick0;
 	ssize_t len;
 
-	pd = (struct promdata *)desc->io_netif->nif_devdata;
+	pd = (struct promdata *)((struct netif *)desc->io_netif)->nif_devdata;
 
 #ifdef NETIF_DEBUG
 	if (netif_debug)
@@ -191,12 +190,11 @@ netif_get(desc, pkt, maxlen, timo)
 			   pkt, maxlen, timo);
 #endif
 
-	tmo_ticks = timo * hz;
-	tick0 = getticks();
+	tick0 = getsecs();
 
 	do {
 		len = (*pd->recv)(pd, pkt, maxlen);
-	} while ((len == 0) && ((getticks() - tick0) < tmo_ticks));
+	} while ((len == 0) && ((getsecs() - tick0) < timo));
 
 #ifdef NETIF_DEBUG
 	if (netif_debug)

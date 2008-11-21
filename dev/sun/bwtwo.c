@@ -1,4 +1,4 @@
-/*	$NetBSD: bwtwo.c,v 1.15 2007/03/04 06:02:44 christos Exp $ */
+/*	$NetBSD: bwtwo.c,v 1.18 2008/06/11 21:25:31 drochner Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -86,7 +79,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bwtwo.c,v 1.15 2007/03/04 06:02:44 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bwtwo.c,v 1.18 2008/06/11 21:25:31 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -198,7 +191,7 @@ bwtwoattach(sc, name, isconsole)
 			ovnam = "unknown";
 			break;
 		}
-		printf("%s: %s overlay plane\n", sc->sc_dev.dv_xname, ovnam);
+		printf("%s: %s overlay plane\n", device_xname(&sc->sc_dev), ovnam);
 	}
 
 	/*
@@ -222,7 +215,7 @@ bwtwoopen(dev, flags, mode, l)
 {
 	int unit = minor(dev);
 
-	if (unit >= bwtwo_cd.cd_ndevs || bwtwo_cd.cd_devs[unit] == NULL)
+	if (device_lookup(&bwtwo_cd, unit) == NULL)
 		return (ENXIO);
 
 	return (0);
@@ -236,7 +229,7 @@ bwtwoioctl(dev, cmd, data, flags, l)
 	int flags;
 	struct lwp *l;
 {
-	struct bwtwo_softc *sc = bwtwo_cd.cd_devs[minor(dev)];
+	struct bwtwo_softc *sc = device_lookup_private(&bwtwo_cd, minor(dev));
 
 	switch (cmd) {
 
@@ -262,7 +255,7 @@ static void
 bwtwounblank(dev)
 	struct device *dev;
 {
-	struct bwtwo_softc *sc = (struct bwtwo_softc *)dev;
+	struct bwtwo_softc *sc = device_private(dev);
 
 	sc->sc_set_video(sc, 1);
 }
@@ -277,7 +270,7 @@ bwtwommap(dev, off, prot)
 	off_t off;
 	int prot;
 {
-	struct bwtwo_softc *sc = bwtwo_cd.cd_devs[minor(dev)];
+	struct bwtwo_softc *sc = device_lookup_private(&bwtwo_cd, minor(dev));
 
 	if (off & PGOFSET)
 		panic("bwtwommap");

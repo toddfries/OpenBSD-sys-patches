@@ -1,4 +1,4 @@
-/*	$NetBSD: eb7500atx_machdep.c,v 1.6 2006/10/24 21:03:13 bjh21 Exp $	*/
+/*	$NetBSD: eb7500atx_machdep.c,v 1.11 2008/11/12 12:35:55 ad Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Reinoud Zandijk.
@@ -54,7 +54,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.6 2006/10/24 21:03:13 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.11 2008/11/12 12:35:55 ad Exp $");
 
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -100,7 +100,6 @@ __KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.6 2006/10/24 21:03:13 bjh21 
 
 /* static i2c_tag_t acorn32_i2c_tag;*/
 
-#include "opt_ipkdb.h"
 #include "ksyms.h"
 
 /* Kernel text starts at the base of the kernel address space. */
@@ -127,11 +126,7 @@ u_int cpu_reset_address = 0x0; /* XXX 0x3800000 too for rev0 RiscPC 600 */
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 
 struct bootconfig bootconfig;	/* Boot config storage */
@@ -234,7 +229,6 @@ extern void dumpsys(void);
 
 /* NOTE: These variables will be removed, well some of them */
 
-extern u_int spl_mask;
 extern u_int current_mask;
 
 void
@@ -259,6 +253,7 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("Halted while still in the ICE age.\n");
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
@@ -299,6 +294,8 @@ cpu_reboot(int howto, char *bootstr)
 
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -959,14 +956,7 @@ initarm(void *cookie)
 	    bootconfig.vram[0].address,
 	    bootconfig.vram[0].pages * bootconfig.pagesize);
 
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif	/* NIPKDB */
-
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init(bootconfig.ksym_end - bootconfig.ksym_start,
 		(void *) bootconfig.ksym_start, (void *) bootconfig.ksym_end);
 #endif

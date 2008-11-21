@@ -1,5 +1,4 @@
-/*	$OpenBSD: freebsd_misc.c,v 1.11 2007/11/28 13:47:02 deraadt Exp $	*/
-/*	$NetBSD: freebsd_misc.c,v 1.2 1996/05/03 17:03:10 christos Exp $	*/
+/*	$NetBSD: freebsd_misc.c,v 1.32 2007/12/20 23:02:47 dsl Exp $	*/
 
 /*
  * Copyright (c) 1995 Frank van der Linden
@@ -36,189 +35,173 @@
  * FreeBSD compatibility module. Try to deal with various FreeBSD system calls.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: freebsd_misc.c,v 1.32 2007/12/20 23:02:47 dsl Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_ntp.h"
+#endif
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
-#include <sys/kernel.h>
-#include <sys/file.h>
-#include <sys/dirent.h>
-#include <sys/filedesc.h>
+#include <sys/signal.h>
+#include <sys/signalvar.h>
+#include <sys/malloc.h>
 #include <sys/mman.h>
-#include <sys/vnode.h>
+#include <sys/ktrace.h>
 
 #include <sys/syscallargs.h>
 
-#include <compat/freebsd/freebsd_signal.h>
 #include <compat/freebsd/freebsd_syscallargs.h>
-#include <compat/freebsd/freebsd_util.h>
+#include <compat/common/compat_util.h>
 #include <compat/freebsd/freebsd_rtprio.h>
-
-#include <compat/common/compat_dir.h>
-
-/* just a place holder */
+#include <compat/freebsd/freebsd_timex.h>
+#include <compat/freebsd/freebsd_signal.h>
+#include <compat/freebsd/freebsd_mman.h>
 
 int
-freebsd_sys_rtprio(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+freebsd_sys_msync(struct lwp *l, const struct freebsd_sys_msync_args *uap, register_t *retval)
 {
-#ifdef notyet
-	struct freebsd_sys_rtprio_args /* {
-		syscallarg(int) function;
-		syscallarg(pid_t) pid;
-		syscallarg(struct freebsd_rtprio *) rtp;
-	} */ *uap = v;
-#endif
+	/* {
+		syscallarg(void *) addr;
+		syscallarg(size_t) len;
+		syscallarg(int) flags;
+	} */
+	struct sys___msync13_args bma;
 
-	return ENOSYS;	/* XXX */
-}
-
-/*
- * Argh.
- * The syscalls.master mechanism cannot handle a system call that is in
- * two spots in the table.
- */
-int
-freebsd_sys_poll2(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	return (sys_poll(p, v, retval));
-}
-
-/*
- * Our madvise is currently dead (always returns EOPNOTSUPP).
- */
-int
-freebsd_sys_madvise(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	return (0);
-}
-
-
-int freebsd_readdir_callback(void *, struct dirent *, off_t);
-
-struct freebsd_readdir_callback_args {
-	caddr_t outp;
-	int	resid;
-};
-
-int 
-freebsd_readdir_callback(void *arg, struct dirent *bdp, off_t cookie)
-{
-	struct freebsd_readdir_callback_args *cb = arg;
-	struct dirent idb;
-	int error;
-
-	if (cb->resid < bdp->d_reclen)
-		return (ENOMEM);
-	idb.d_fileno = bdp->d_fileno;
-	idb.d_reclen = bdp->d_reclen;
-	idb.d_type = bdp->d_type;
-	idb.d_namlen = bdp->d_namlen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-	
-	if ((error = copyout((caddr_t)&idb, cb->outp, bdp->d_reclen)))
-		return (error);
-	cb->outp += bdp->d_reclen;
-	cb->resid -= bdp->d_reclen;
-
-	return (0);
+	/*
+	 * FreeBSD-2.0-RELEASE's msync(2) is compatible with NetBSD's.
+	 * FreeBSD-2.0.5-RELEASE's msync(2) has addtional argument `flags',
+	 * but syscall number is not changed. :-<
+	 */
+	SCARG(&bma, addr) = SCARG(uap, addr);
+	SCARG(&bma, len) = SCARG(uap, len);
+	SCARG(&bma, flags) = SCARG(uap, flags);
+	return sys___msync13(l, &bma, retval);
 }
 
 int
-freebsd_sys_getdents(struct proc *p, void *v, register_t *retval)
+freebsd_sys_mmap(struct lwp *l, const struct freebsd_sys_mmap_args *uap, register_t *retval)
 {
-	struct freebsd_sys_getdents_args /* {
-		syscallarg(int) fd;
-		syscallarg(void *) dirent;
-		syscallarg(unsigned) count;
-	} */ *uap = v;
-	struct vnode *vp;
-	struct file *fp;
-	int error;
-	struct freebsd_readdir_callback_args args;
-
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0) 
-		return (error);
-	
-	vp = (struct vnode *)fp->f_data;
-	
-	args.resid = SCARG(uap, count);
-	args.outp = (caddr_t)SCARG(uap, dirent);
-	
-	error = readdir_with_callback(fp, &fp->f_offset, args.resid,
-	    freebsd_readdir_callback, &args);
-	
-	FRELE(fp);
-	if (error) 
-		return (error);
-	
-	*retval = SCARG(uap, count) - args.resid;
-	return (0);
-}
-
-#define FBSD_MAP_NOCORE	0x20000
-int
-freebsd_sys_mmap(struct proc *p, void *v, register_t *retval)
-{
-	struct freebsd_sys_mmap_args /* {
-		syscallarg(caddr_t) addr;
+	/* {
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 		syscallarg(int) prot;
 		syscallarg(int) flags;
 		syscallarg(int) fd;
 		syscallarg(long) pad;
 		syscallarg(off_t) pos;
-	} */ *uap = v;
-	SCARG(uap, flags) &= ~FBSD_MAP_NOCORE;
-	return (sys_mmap(p, uap, retval));
+	} */
+	struct sys_mmap_args bma;
+	int flags, prot, fd;
+	off_t pos;
+
+	prot = SCARG(uap, prot);
+	flags = SCARG(uap, flags);
+	fd = SCARG(uap, fd);
+	pos = SCARG(uap, pos);
+
+	/*
+	 * If using MAP_STACK on FreeBSD:
+	 *
+	 * + fd has to be -1
+	 * + prot must have read and write
+	 * + MAP_STACK implies MAP_ANON
+	 * + MAP_STACK implies offset of 0
+	 */
+	if (flags & FREEBSD_MAP_STACK) {
+		if ((fd != -1)
+		    ||((prot & (PROT_READ|PROT_WRITE))!=(PROT_READ|PROT_WRITE)))
+			return (EINVAL);
+
+		flags |= (MAP_ANON | MAP_FIXED);
+		flags &= ~FREEBSD_MAP_STACK;
+
+		pos = 0;
+	}
+
+	SCARG(&bma, addr) = SCARG(uap, addr);
+	SCARG(&bma, len) = SCARG(uap, len);
+	SCARG(&bma, prot) = prot;
+	SCARG(&bma, flags) = flags;
+	SCARG(&bma, fd) = fd;
+	SCARG(&bma, pos) = pos;
+
+	return sys_mmap(l, &bma, retval);
 }
 
-struct outsname {
-	char	sysname[32];
-	char	nodename[32];
-	char	release[32];
-	char	version[32];
-	char	machine[32];
-};
+/* just a place holder */
 
-/* ARGSUSED */
 int
-compat_freebsd_sys_uname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+freebsd_sys_rtprio(struct lwp *l, const struct freebsd_sys_rtprio_args *uap, register_t *retval)
 {
-	struct compat_freebsd_sys_uname_args /* {
-		syscallarg(struct outsname *) name;
-	} */ *uap = v;
-	struct outsname outsname;
-	const char *cp;
-	char *dp, *ep;
+	/* {
+		syscallarg(int) function;
+		syscallarg(pid_t) pid;
+		syscallarg(struct freebsd_rtprio *) rtp;
+	} */
 
-	strlcpy(outsname.sysname, ostype, sizeof(outsname.sysname));
-	strlcpy(outsname.nodename, hostname, sizeof(outsname.nodename));
-	strlcpy(outsname.release, osrelease, sizeof(outsname.release));
-	dp = outsname.version;
-	ep = &outsname.version[sizeof(outsname.version) - 1];
-	for (cp = version; *cp && *cp != '('; cp++)
-		;
-	for (cp++; *cp && *cp != ')' && dp < ep; cp++)
-		*dp++ = *cp;
-	for (; *cp && *cp != '#'; cp++)
-		;
-	for (; *cp && *cp != ':' && dp < ep; cp++)
-		*dp++ = *cp;
-	*dp = '\0';
-	strlcpy(outsname.machine, MACHINE, sizeof(outsname.machine));
+	return ENOSYS;	/* XXX */
+}
 
-	return (copyout((caddr_t)&outsname, (caddr_t)SCARG(uap, name),
-			sizeof(struct outsname)));
+#ifdef NTP
+int
+freebsd_ntp_adjtime(struct lwp *l, const struct freebsd_ntp_adjtime_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(struct freebsd_timex *) tp;
+	} */
+
+	return ENOSYS;	/* XXX */
+}
+#endif
+
+int
+freebsd_sys_sigaction4(struct lwp *l, const struct freebsd_sys_sigaction4_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(int) signum;
+		syscallarg(const struct freebsd_sigaction4 *) nsa;
+		syscallarg(struct freebsd_sigaction4 *) osa;
+	} */
+	struct freebsd_sigaction4 nesa, oesa;
+	struct sigaction nbsa, obsa;
+	int error;
+
+	if (SCARG(uap, nsa)) {
+		error = copyin(SCARG(uap, nsa), &nesa, sizeof(nesa));
+		if (error)
+			return (error);
+		nbsa.sa_handler = nesa.freebsd_sa_handler;
+		nbsa.sa_mask    = nesa.freebsd_sa_mask;
+		nbsa.sa_flags   = nesa.freebsd_sa_flags;
+	}
+	error = sigaction1(l, SCARG(uap, signum),
+	    SCARG(uap, nsa) ? &nbsa : 0, SCARG(uap, osa) ? &obsa : 0,
+	    NULL, 0);
+	if (error)
+		return (error);
+	if (SCARG(uap, osa)) {
+		oesa.freebsd_sa_handler = obsa.sa_handler;
+		oesa.freebsd_sa_mask    = obsa.sa_mask;
+		oesa.freebsd_sa_flags   = obsa.sa_flags;
+		error = copyout(&oesa, SCARG(uap, osa), sizeof(oesa));
+		if (error)
+			return (error);
+	}
+	return (0);
+}
+
+int
+freebsd_sys_utrace(struct lwp *l, const struct freebsd_sys_utrace_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(void *) addr;
+		syscallarg(size_t) len;
+	} */
+
+	return ktruser("FreeBSD utrace", SCARG(uap, addr), SCARG(uap, len),
+	    0);
 }

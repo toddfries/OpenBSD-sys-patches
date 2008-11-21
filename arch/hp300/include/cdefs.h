@@ -1,8 +1,3 @@
-/*	$OpenBSD: cdefs.h,v 1.3 2005/11/24 20:46:44 deraadt Exp $	*/
-
-#ifndef _MACHINE_CDEFS_H_
-#define _MACHINE_CDEFS_H_
+/*	$NetBSD: cdefs.h,v 1.2 2005/12/06 17:02:53 tsutsui Exp $	*/
 
 #include <m68k/cdefs.h>
-
-#endif

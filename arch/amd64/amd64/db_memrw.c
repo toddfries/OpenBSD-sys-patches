@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_memrw.c,v 1.3 2005/10/21 18:55:00 martin Exp $	*/
-/*	$NetBSD: db_memrw.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
+/*	$NetBSD: db_memrw.c,v 1.6 2008/04/28 20:23:12 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,6 +49,11 @@
  *
  * Basic copy to amd64 by fvdl.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_memrw.c,v 1.6 2008/04/28 20:23:12 martin Exp $");
+
+#include "opt_xen.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -102,7 +99,7 @@ db_read_bytes(vaddr_t addr, size_t size, char *data)
  * pages writable temporarily.
  */
 static void
-db_write_text(vaddr_t addr, size_t size, char *data)
+db_write_text(vaddr_t addr, size_t size, const char *data)
 {
 	pt_entry_t *pte, oldpte, tmppte;
 	vaddr_t pgva;
@@ -132,7 +129,7 @@ db_write_text(vaddr_t addr, size_t size, char *data)
 		if (oldpte & PG_PS)
 			pgva = (vaddr_t)dst & PG_LGFRAME;
 		else
-			pgva = trunc_page((vaddr_t)dst);
+			pgva = x86_trunc_page(dst);
 
 		/*
 		 * Compute number of bytes that can be written
@@ -148,7 +145,11 @@ db_write_text(vaddr_t addr, size_t size, char *data)
 		size -= limit;
 
 		tmppte = (oldpte & ~PG_KR) | PG_KW;
+#ifdef XEN
+		xpmap_update(pte, tmppte);
+#else
 		*pte = tmppte;
+#endif
 		pmap_update_pg(pgva);
 
 		/*
@@ -161,7 +162,11 @@ db_write_text(vaddr_t addr, size_t size, char *data)
 		/*
 		 * Restore the old PTE.
 		 */
+#ifdef XEN
+		xpmap_update(pte, oldpte);
+#else
 		*pte = oldpte;
+#endif
 
 		pmap_update_pg(pgva);
 		
@@ -172,15 +177,15 @@ db_write_text(vaddr_t addr, size_t size, char *data)
  * Write bytes to kernel address space for debugger.
  */
 void
-db_write_bytes(vaddr_t addr, size_t size, char *data)
+db_write_bytes(vaddr_t addr, size_t size, const char *data)
 {
-	extern char etext;
+	extern char __data_start;
 	char *dst;
 
 	dst = (char *)addr;
 
 	/* If any part is in kernel text, use db_write_text() */
-	if (addr >= KERNBASE && addr < (vaddr_t)&etext) {
+	if (addr >= KERNBASE && addr < (vaddr_t)&__data_start) {
 		db_write_text(addr, size, data);
 		return;
 	}
@@ -188,17 +193,17 @@ db_write_bytes(vaddr_t addr, size_t size, char *data)
 	dst = (char *)addr;
 
 	if (size == 8) {
-		*((long *)dst) = *((long *)data);
+		*((long *)dst) = *((const long *)data);
 		return;
 	}
 
 	if (size == 4) {
-		*((int *)dst) = *((int *)data);
+		*((int *)dst) = *((const int *)data);
 		return;
 	}
 
 	if (size == 2) {
-		*((short *)dst) = *((short *)data);
+		*((short *)dst) = *((const short *)data);
 		return;
 	}
 

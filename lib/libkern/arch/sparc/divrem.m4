@@ -1,6 +1,3 @@
-/*	$OpenBSD: divrem.m4,v 1.7 2007/11/24 19:47:05 deraadt Exp $	*/
-/*	$NetBSD: divrem.m4,v 1.3 1995/04/22 09:37:39 pk Exp $	*/
-
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -33,7 +30,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * Header: divrem.m4,v 1.4 92/06/25 13:23:57 torek Exp
+ * from: Header: divrem.m4,v 1.4 92/06/25 13:23:57 torek Exp
+ * $NetBSD: divrem.m4,v 1.8 2005/12/11 12:24:44 christos Exp $
  */
 
 /*
@@ -41,12 +39,15 @@
  * Architecture Manual, with fixes from Gordon Irlam.
  */
 
+#if defined(LIBC_SCCS) && !defined(lint)
+	.asciz "@(#)divrem.m4	8.1 (Berkeley) 6/4/93"
+#endif /* LIBC_SCCS and not lint */
+
 /*
  * Input: dividend and divisor in %o0 and %o1 respectively.
  *
  * m4 parameters:
  *  NAME	name of function to generate
- *  NAME2	secondary name of function to generate
  *  OP		OP=div => %o0 / %o1; OP=rem => %o0 % %o1
  *  S		S=true => signed; S=false => unsigned
  *
@@ -123,12 +124,9 @@ L.$1.eval(TWOSUPN+$2):
 	', `	DEVELOP_QUOTIENT_BITS(incr($1), `eval(2*$2-1)')')
 	ifelse($1, 1, `9:')')
 
-#include "DEFS.h"
-#include <machine/trap.h>
 #include <machine/asm.h>
+#include <machine/trap.h>
 
-	.globl NAME2
-NAME2:
 FUNC(NAME)
 ifelse(S, `true',
 `	! compute sign of result; if neither is negative, no problem

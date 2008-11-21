@@ -1,4 +1,4 @@
-/*	$NetBSD: com_pioc.c,v 1.11 2006/07/13 22:56:00 gdamore Exp $	*/
+/*	$NetBSD: com_pioc.c,v 1.14 2008/04/28 20:23:09 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +62,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: com_pioc.c,v 1.11 2006/07/13 22:56:00 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_pioc.c,v 1.14 2008/04/28 20:23:09 martin Exp $");
 
 #include <sys/systm.h>
 #include <sys/tty.h>
@@ -99,12 +92,12 @@ struct com_pioc_softc {
 
 cons_decl(com);   
 
-static int  com_pioc_probe   __P((struct device *, struct cfdata *, void *));
-static void com_pioc_attach  __P((struct device *, struct device *, void *));
+static int  com_pioc_probe   (device_t, cfdata_t , void *);
+static void com_pioc_attach  (device_t, device_t, void *);
 
 /* device attach structure */
 
-CFATTACH_DECL(com_pioc, sizeof(struct com_pioc_softc),
+CFATTACH_DECL_NEW(com_pioc, sizeof(struct com_pioc_softc),
     com_pioc_probe, com_pioc_attach, NULL, NULL);
 
 extern bus_space_tag_t comconstag;	/* From pioc.c */
@@ -117,10 +110,7 @@ extern bus_space_tag_t comconstag;	/* From pioc.c */
  */
 
 static int
-com_pioc_probe(parent, cf, aux)
-	struct device *parent;
-	struct cfdata *cf;
-	void *aux;
+com_pioc_probe(device_t parent, cfdata_t cf, void *aux)
 {
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -157,11 +147,9 @@ com_pioc_probe(parent, cf, aux)
  */
 
 static void
-com_pioc_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+com_pioc_attach(device_t parent, device_t self, void *aux)
 {
-	struct com_pioc_softc *psc = (void *)self;
+	struct com_pioc_softc *psc = device_private(self);
 	struct com_softc *sc = &psc->sc_com;
 	u_int iobase;
 	bus_space_tag_t iot;
@@ -169,6 +157,7 @@ com_pioc_attach(parent, self, aux)
 	struct pioc_attach_args *pa = aux;
 	int count;
 
+	sc->sc_dev = self;
 	iot = pa->pa_iot;
 	iobase = pa->pa_iobase + pa->pa_offset;
 
@@ -189,13 +178,10 @@ com_pioc_attach(parent, self, aux)
 		    comintr, sc);
 	}
 
-	/*
-	 * Shutdown hook for buggy BIOSs that don't recognize the UART
-	 * without a disabled FIFO.
-	 */
-	if (shutdownhook_establish(com_cleanup, sc) == NULL)
-		panic("%s: could not establish shutdown hook",
-		    sc->sc_dev.dv_xname);
+	if (!pmf_device_register1(self, com_suspend, com_resume, com_cleanup)) {
+		aprint_error_dev(self,
+		    "could not establish shutdown hook");
+	}
 
 	/*
 	 * This is a patch for bugged revision 1-4 SMC FDC37C665
@@ -218,8 +204,7 @@ com_pioc_attach(parent, self, aux)
  */
 
 void
-comcnprobe(cp)
-	struct consdev *cp;
+comcnprobe(struct consdev *cp)
 {
 
 #ifdef  COMCONSOLE
@@ -230,8 +215,7 @@ comcnprobe(cp)
 }
 
 void
-comcninit(cp)
-	struct consdev *cp;
+comcninit(struct consdev *cp)
 {
 	int result;
 

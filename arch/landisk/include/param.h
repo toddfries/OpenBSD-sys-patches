@@ -1,4 +1,3 @@
-/*	$OpenBSD: param.h,v 1.1.1.1 2006/10/06 21:16:15 miod Exp $	*/
 /*	$NetBSD: param.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -42,17 +41,14 @@
 #ifndef _LANDISK_PARAM_H_
 #define _LANDISK_PARAM_H_
 
-#include <sh/param.h>
+#include <sh3/param.h>
+
+#define	_MACHINE_ARCH	sh3el
+#define	MACHINE_ARCH	"sh3el"
 
 #define	_MACHINE	landisk
 #define	MACHINE		"landisk"
 
-/*
- * Physical addresses of on-board ROM and RAM
- */
-#define IOM_ROM_BEGIN	0x00000000
-#define IOM_ROM_SIZE	0x00080000	/* 512KB */
-#define IOM_RAM_BEGIN	0x0c000000
-#define IOM_RAM_SIZE	0x04000000	/* 64MB */
+#define	MID_MACHINE	MID_SH3
 
 #endif /* _LANDISK_PARAM_H_ */

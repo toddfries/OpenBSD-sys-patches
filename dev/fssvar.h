@@ -1,4 +1,4 @@
-/*	$NetBSD: fssvar.h,v 1.17 2007/10/07 13:39:03 hannken Exp $	*/
+/*	$NetBSD: fssvar.h,v 1.23 2008/09/17 14:49:25 hannken Exp $	*/
 
 /*-
  * Copyright (c) 2003, 2007 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,6 +31,8 @@
 
 #ifndef _SYS_DEV_FSSVAR_H
 #define _SYS_DEV_FSSVAR_H
+
+#include <sys/simplelock.h>
 
 #define FSS_UNCONFIG_ON_CLOSE	0x01	/* Unconfigure on last close */
 
@@ -68,23 +63,6 @@ struct fss_get {
 #define FSS_CLUSTER_MAX	(1<<24)		/* Upper bound of clusters. The
 					   sc_copied map uses up to
 					   FSS_CLUSTER_MAX/NBBY bytes */
-
-#define FSS_LOCK(sc, s) \
-	do { \
-		(s) = splbio(); \
-		simple_lock(&(sc)->sc_slock); \
-	} while (/*CONSTCOND*/0)
-
-#define FSS_UNLOCK(sc, s) \
-	do { \
-		simple_unlock(&(sc)->sc_slock); \
-		splx((s)); \
-	} while (/*CONSTCOND*/0)
-
-/* Device to softc, NULL on error */
-#define FSS_DEV_TO_SOFTC(dev) \
-	(minor((dev)) < 0 || minor((dev)) >= NFSS ? NULL : \
-	    &fss_softc[minor((dev))])
 
 /* Check if still valid */
 #define FSS_ISVALID(sc) \
@@ -135,16 +113,17 @@ typedef enum {
 
 struct fss_cache {
 	fss_cache_type	fc_type;	/* Current state */
-	struct fss_softc *fc_softc;	/* Backlink to our softc */
-	volatile int	fc_xfercount;	/* Number of outstanding transfers */
 	u_int32_t	fc_cluster;	/* Cluster number of this entry */
+	kcondvar_t	fc_state_cv;	/* Signals state change from busy */
 	void *		fc_data;	/* Data */
 };
 
 struct fss_softc {
-	int		sc_unit;	/* Logical unit number */
-	struct simplelock sc_slock;	/* Protect this softc */
+	device_t	sc_dev;		/* Self */
+	kmutex_t	sc_slock;	/* Protect this softc */
 	kmutex_t	sc_lock;	/* Sleep lock for fss_ioctl */
+	kcondvar_t	sc_work_cv;	/* Signals work for the kernel thread */
+	kcondvar_t	sc_cache_cv;	/* Signals free cache slot */
 	volatile int	sc_flags;	/* Flags */
 #define FSS_ACTIVE	0x01		/* Snapshot is active */
 #define FSS_ERROR	0x02		/* I/O error occurred */
@@ -153,6 +132,7 @@ struct fss_softc {
 #define FSS_CDEV_OPEN	0x40		/* character device open */
 #define FSS_BDEV_OPEN	0x80		/* block device open */
 	int		sc_uflags;	/* User visible flags */
+	struct disk	*sc_dkdev;	/* Generic disk device info */
 	struct mount	*sc_mount;	/* Mount point */
 	char		sc_mntname[MNAMELEN]; /* Mount point */
 	struct timeval	sc_time;	/* Time this snapshot was taken */
@@ -177,8 +157,6 @@ struct fss_softc {
 	int		sc_indir_dirty;	/* Current indir cluster modified */
 	u_int32_t	*sc_indir_data;	/* Current indir cluster data */
 };
-
-int fss_umount_hook(struct mount *, int);
 
 #endif /* _KERNEL */
 

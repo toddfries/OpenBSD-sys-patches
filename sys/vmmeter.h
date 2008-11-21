@@ -1,5 +1,4 @@
-/*	$OpenBSD: vmmeter.h,v 1.12 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: vmmeter.h,v 1.9 1995/03/26 20:25:04 jtc Exp $	*/
+/*	$NetBSD: vmmeter.h,v 1.18 2005/12/11 12:25:21 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -32,68 +31,64 @@
  *	@(#)vmmeter.h	8.2 (Berkeley) 7/10/94
  */
 
-#ifndef	__VMMETER_H__
-#define	__VMMETER_H__
-
-/*
- * System wide statistics counters.  Look in <uvm/uvm_extern.h> for the
- * UVM equivalent.
- */
+#ifndef _SYS_VMMETER_H_
+#define _SYS_VMMETER_H_
 
 /* systemwide totals computed every five seconds */
 struct vmtotal
 {
-	u_int16_t t_rq;		/* length of the run queue */
-	u_int16_t t_dw;		/* jobs in ``disk wait'' (neg priority) */
-	u_int16_t t_pw;		/* jobs in page wait */
-	u_int16_t t_sl;		/* jobs sleeping in core */
-	u_int16_t t_sw;		/* swapped out runnable/short block jobs */
-	u_int32_t t_vm;		/* total virtual memory */
-	u_int32_t t_avm;	/* active virtual memory */
-	u_int32_t t_rm;		/* total real memory in use */
-	u_int32_t t_arm;	/* active real memory */
-	u_int32_t t_vmshr;	/* shared virtual memory */
-	u_int32_t t_avmshr;	/* active shared virtual memory */
-	u_int32_t t_rmshr;	/* shared real memory */
-	u_int32_t t_armshr;	/* active shared real memory */
-	u_int32_t t_free;	/* free memory pages */
+	int16_t	t_rq;		/* length of the run queue */
+	int16_t	t_dw;		/* jobs in ``disk wait'' (neg priority) */
+	int16_t	t_pw;		/* jobs in page wait */
+	int16_t	t_sl;		/* jobs sleeping in core */
+	int16_t	t_sw;		/* swapped out runnable/short block jobs */
+	int32_t	t_vm;		/* total virtual memory */
+	int32_t	t_avm;		/* active virtual memory */
+	int32_t	t_rm;		/* total real memory in use */
+	int32_t	t_arm;		/* active real memory */
+	int32_t	t_vmshr;	/* shared virtual memory */
+	int32_t	t_avmshr;	/* active shared virtual memory */
+	int32_t	t_rmshr;	/* shared real memory */
+	int32_t	t_armshr;	/* active shared real memory */
+	int32_t	t_free;		/* free memory pages */
 };
 
 /*
- * Fork/vfork/rfork accounting.
+ * Optional instrumentation.
  */
-struct  forkstat
-{
-	int	cntfork;	/* number of fork() calls */
-	int	cntvfork;	/* number of vfork() calls */
-	int	cntrfork;	/* number of rfork() calls */
-	int	cntkthread;	/* number of kernel threads created */
-	int	sizfork;	/* VM pages affected by fork() */
-	int	sizvfork;	/* VM pages affected by vfork() */
-	int	sizrfork;	/* VM pages affected by rfork() */
-	int	sizkthread;	/* VM pages affected by kernel threads */
-};
+#ifdef PGINPROF
 
-/* These sysctl names are only really used by sysctl(8) */
-#define KERN_FORKSTAT_FORK		1
-#define KERN_FORKSTAT_VFORK		2
-#define KERN_FORKSTAT_RFORK		3
-#define KERN_FORKSTAT_KTHREAD		4
-#define KERN_FORKSTAT_SIZFORK		5
-#define KERN_FORKSTAT_SIZVFORK		6
-#define KERN_FORKSTAT_SIZRFORK		7
-#define KERN_FORKSTAT_SIZKTHREAD	8
-#define KERN_FORKSTAT_MAXID		9
+#define	NDMON	128
+#define	NSMON	128
 
-#define CTL_KERN_FORKSTAT_NAMES { \
-	{ 0, 0 }, \
-	{ "forks", CTLTYPE_INT }, \
-	{ "vforks", CTLTYPE_INT }, \
-	{ "rforks", CTLTYPE_INT }, \
-	{ "kthreads", CTLTYPE_INT }, \
-	{ "fork_pages", CTLTYPE_INT }, \
-	{ "vfork_pages", CTLTYPE_INT }, \
-	{ "rfork_pages", CTLTYPE_INT }, \
-	{ "kthread_pages", CTLTYPE_INT }, \
-}
-#endif /* __VMMETER_H__ */
+#define	DRES	20
+#define	SRES	5
+
+#define	PMONMIN	20
+#define	PRES	50
+#define	NPMON	64
+
+#define	RMONMIN	130
+#define	RRES	5
+#define	NRMON	64
+
+/* data and stack size distribution counters */
+u_int	dmon[NDMON+1];
+u_int	smon[NSMON+1];
+
+/* page in time distribution counters */
+u_int	pmon[NPMON+2];
+
+/* reclaim time distribution counters */
+u_int	rmon[NRMON+2];
+
+int	pmonmin;
+int	pres;
+int	rmonmin;
+int	rres;
+
+u_int rectime;		/* accumulator for reclaim times */
+u_int pgintime;		/* accumulator for page in times */
+#endif /* PGINPROF */
+
+#endif /* !_SYS_VMMETER_H_ */

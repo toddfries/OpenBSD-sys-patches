@@ -1,5 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.9 2008/05/21 20:33:39 miod Exp $ */
-/*	$NetBSD: asm.h,v 1.9 1999/01/15 13:31:28 bouyer Exp $ */
+/*	$NetBSD: asm.h,v 1.21 2008/08/31 23:23:42 mrg Exp $ */
 /*
  * Copyright (c) 1982, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -31,8 +30,8 @@
  *	@(#)DEFS.h	8.1 (Berkeley) 6/4/93
  */
 
-#ifndef _MACHINE_ASM_H_
-#define _MACHINE_ASM_H_
+#ifndef _VAX_ASM_H_
+#define _VAX_ASM_H_
 
 #define R0	0x001
 #define R1	0x002
@@ -47,15 +46,7 @@
 #define R10	0x400
 #define R11	0x800
 
-#ifdef __ELF__
-# define _C_LABEL(x)	x
-#else
-# ifdef __STDC__
-#  define _C_LABEL(x)	_ ## x
-# else
-#  define _C_LABEL(x)	_/**/x
-# endif
-#endif
+#define _C_LABEL(x)	x
 
 #define	_ASM_LABEL(x)	x
 
@@ -69,26 +60,15 @@
 
 /* let kernels and others override entrypoint alignment */
 #ifndef _ALIGN_TEXT
-# ifdef __ELF__
-#  define _ALIGN_TEXT .align 4
-# else
-#  define _ALIGN_TEXT .align 2
-# endif
+# define _ALIGN_TEXT .align 4
 #endif
 
-#define _ALTENTRY(x) \
-	.globl x; .type x,@function; x:
 #define	_ENTRY(x, regs) \
-	.text; _ALIGN_TEXT; _ALTENTRY(x) .word regs
+	.text; _ALIGN_TEXT; .globl x; .type x@function; x: .word regs
 
-#if defined(PROF) || defined(GPROF)
-# ifdef __ELF__
-#  define _PROF_PROLOGUE	\
-	.data; 1:; .long 0; .text; moval 1b,r0; jsb _ASM_LABEL(__mcount)
-# else 
-#  define _PROF_PROLOGUE	\
-	.data; 1:; .long 0; .text; moval 1b,r0; jsb _ASM_LABEL(mcount)
-# endif
+#ifdef GPROF
+# define _PROF_PROLOGUE	\
+	.data; 1:; .long 0; .text; moval 1b,%r0; jsb _ASM_LABEL(__mcount)
 #else
 # define _PROF_PROLOGUE
 #endif
@@ -97,24 +77,20 @@
 #define NENTRY(x, regs)		_ENTRY(_C_LABEL(x), regs)
 #define ASENTRY(x, regs)	_ENTRY(_ASM_LABEL(x), regs); _PROF_PROLOGUE
 
-#define ALTENTRY(x)		_ALTENTRY(_C_LABEL(x))
-#define RCSID(x)		.text; .asciz x
+#define ALTENTRY(x)		.globl _C_LABEL(x); _C_LABEL(x):
+#define RCSID(name)		.pushsection ".ident"; .asciz name; .popsection
 
-#ifdef	__ELF__
+
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym
-#else
-#ifdef	__STDC__
-#define	WEAK_ALIAS(alias,sym)						\
-	.weak _##alias;							\
-	_##alias = _##sym
-#else
-#define	WEAK_ALIAS(alias,sym)						\
-	.weak _/**/alias;						\
-	_/**/alias = _/**/sym
-#endif
-#endif
+
+/*
+ * STRONG_ALIAS: create a strong alias.
+ */
+#define STRONG_ALIAS(alias,sym)						\
+	.globl alias;							\
+	alias = sym
 
 #ifdef __STDC__
 #define	WARN_REFERENCES(sym,msg)					\
@@ -126,4 +102,4 @@
 	.stabs __STRING(_C_LABEL(sym)),1,0,0,0
 #endif /* __STDC__ */
 
-#endif /* _MACHINE_ASM_H_ */
+#endif /* !_VAX_ASM_H_ */

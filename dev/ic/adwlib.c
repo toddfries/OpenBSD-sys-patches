@@ -1,5 +1,4 @@
-/*	$OpenBSD: adwlib.c,v 1.20 2004/06/24 09:07:39 itojun Exp $ */
-/* $NetBSD: adwlib.c,v 1.20 2000/07/04 04:17:03 itojun Exp $        */
+/* $NetBSD: adwlib.c,v 1.38 2007/10/19 11:59:45 ad Exp $        */
 
 /*
  * Low level routines for the Advanced Systems Inc. SCSI controllers chips
@@ -42,7 +41,7 @@
  */
 /*
  * advansys.c - Linux Host Driver for AdvanSys SCSI Adapters
- * 
+ *
  * Copyright (c) 1995-2000 Advanced System Products, Inc.
  * All Rights Reserved.
  *
@@ -52,7 +51,9 @@
  * modification.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: adwlib.c,v 1.38 2007/10/19 11:59:45 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -60,39 +61,41 @@
 #include <sys/queue.h>
 #include <sys/device.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include <dev/pci/pcidevs.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <dev/ic/adwlib.h>
-#include <dev/microcode/adw/adwmcode.h>
+#include <dev/ic/adwmcode.h>
 #include <dev/ic/adw.h>
 
 
+/* Static Functions */
+
 int AdwRamSelfTest(bus_space_tag_t, bus_space_handle_t, u_int8_t);
-int AdwLoadMCode(bus_space_tag_t, bus_space_handle_t, u_int16_t *,
-								u_int8_t);
+int AdwLoadMCode(bus_space_tag_t, bus_space_handle_t, u_int16_t *, u_int8_t);
 int AdwASC3550Cabling(bus_space_tag_t, bus_space_handle_t, ADW_DVC_CFG *);
-int AdwASC38C0800Cabling(bus_space_tag_t, bus_space_handle_t,
-								ADW_DVC_CFG *);
-int AdwASC38C1600Cabling(bus_space_tag_t, bus_space_handle_t,
-								ADW_DVC_CFG *);
+int AdwASC38C0800Cabling(bus_space_tag_t, bus_space_handle_t, ADW_DVC_CFG *);
+int AdwASC38C1600Cabling(bus_space_tag_t, bus_space_handle_t, ADW_DVC_CFG *);
 
-u_int16_t AdwGetEEPROMConfig(bus_space_tag_t, bus_space_handle_t,
+static u_int16_t AdwGetEEPROMConfig(bus_space_tag_t, bus_space_handle_t,
      							ADW_EEPROM *);
-void AdwSetEEPROMConfig(bus_space_tag_t, bus_space_handle_t,
+static void AdwSetEEPROMConfig(bus_space_tag_t, bus_space_handle_t,
 					                 ADW_EEPROM *);
-u_int16_t AdwReadEEPWord(bus_space_tag_t, bus_space_handle_t, int);
-void AdwWaitEEPCmd(bus_space_tag_t, bus_space_handle_t);
+static u_int16_t AdwReadEEPWord(bus_space_tag_t, bus_space_handle_t, int);
+static void AdwWaitEEPCmd(bus_space_tag_t, bus_space_handle_t);
 
-void AdwInquiryHandling(ADW_SOFTC *, ADW_SCSI_REQ_Q *);
+static void AdwInquiryHandling(ADW_SOFTC *, ADW_SCSI_REQ_Q *);
 
-void AdwSleepMilliSecond(u_int32_t);
-void AdwDelayMicroSecond(u_int32_t);
+static void AdwSleepMilliSecond(u_int32_t);
+static void AdwDelayMicroSecond(u_int32_t);
 
 
 /*
@@ -103,7 +106,7 @@ void AdwDelayMicroSecond(u_int32_t);
  * Additional structure information can be found in adwlib.h where
  * the structure is defined.
  */
-const static ADW_EEPROM adw_3550_Default_EEPROM = {
+static const ADW_EEPROM adw_3550_Default_EEPROM = {
 	ADW_EEPROM_BIOS_ENABLE,	/* 00 cfg_lsw */
 	0x0000,			/* 01 cfg_msw */
 	0xFFFF,			/* 02 disc_enable */
@@ -133,14 +136,23 @@ const static ADW_EEPROM adw_3550_Default_EEPROM = {
 	  0,0,0,0,0,0,0,0
 	},
 	0,			/* 30 dvc_err_code */
-	0,			/* 31 adw_err_code */
-	0,			/* 32 adw_err_addr */
+	0,			/* 31 adv_err_code */
+	0,			/* 32 adv_err_addr */
 	0,			/* 33 saved_dvc_err_code */
-	0,			/* 34 saved_adw_err_code */
-	0			/* 35 saved_adw_err_addr */
+	0,			/* 34 saved_adv_err_code */
+	0,			/* 35 saved_adv_err_addr */
+	{			/* 36-55 reserved1[16] */
+	  0,0,0,0,0,0,0,0,0,0,
+	  0,0,0,0,0,0,0,0,0,0
+	},
+	0,			/* 56 cisptr_lsw */
+	0,			/* 57 cisprt_msw */
+	0,			/* 58 subsysvid */
+	0,			/* 59 subsysid */
+	{ 0,0,0,0 }		/* 60-63 reserved2[4] */
 };
 
-const static ADW_EEPROM adw_38C0800_Default_EEPROM = {
+static const ADW_EEPROM adw_38C0800_Default_EEPROM = {
 	ADW_EEPROM_BIOS_ENABLE,	/* 00 cfg_lsw */
 	0x0000,			/* 01 cfg_msw */
 	0xFFFF,			/* 02 disc_enable */
@@ -170,11 +182,11 @@ const static ADW_EEPROM adw_38C0800_Default_EEPROM = {
 	  0,0,0,0,0,0,0,0
 	},
 	0,			/* 30 dvc_err_code */
-	0,			/* 31 adw_err_code */
-	0,			/* 32 adw_err_addr */
+	0,			/* 31 adv_err_code */
+	0,			/* 32 adv_err_addr */
 	0,			/* 33 saved_dvc_err_code */
-	0,			/* 34 saved_adw_err_code */
-	0,			/* 35 saved_adw_err_addr */
+	0,			/* 34 saved_adv_err_code */
+	0,			/* 35 saved_adv_err_addr */
 	{			/* 36-55 reserved1[16] */
 	  0,0,0,0,0,0,0,0,0,0,
 	  0,0,0,0,0,0,0,0,0,0
@@ -186,7 +198,7 @@ const static ADW_EEPROM adw_38C0800_Default_EEPROM = {
 	{ 0,0,0,0 }		/* 60-63 reserved2[4] */
 };
 
-const static ADW_EEPROM adw_38C1600_Default_EEPROM = {
+static const ADW_EEPROM adw_38C1600_Default_EEPROM = {
 	ADW_EEPROM_BIOS_ENABLE,	/* 00 cfg_lsw */
 	0x0000,			/* 01 cfg_msw */
 	0xFFFF,			/* 02 disc_enable */
@@ -216,11 +228,11 @@ const static ADW_EEPROM adw_38C1600_Default_EEPROM = {
 	  0,0,0,0,0,0,0,0
 	},
 	0,			/* 30 dvc_err_code */
-	0,			/* 31 adw_err_code */
-	0,			/* 32 adw_err_addr */
+	0,			/* 31 adv_err_code */
+	0,			/* 32 adv_err_addr */
 	0,			/* 33 saved_dvc_err_code */
-	0,			/* 34 saved_adw_err_code */
-	0,			/* 35 saved_adw_err_addr */
+	0,			/* 34 saved_adv_err_code */
+	0,			/* 35 saved_adv_err_addr */
 	{			/* 36-55 reserved1[16] */
 	  0,0,0,0,0,0,0,0,0,0,
 	  0,0,0,0,0,0,0,0,0,0
@@ -281,7 +293,9 @@ ADW_SOFTC      *sc;
 		case ADW_CHIP_ASC38C1600:
 			eep_config = adw_38C1600_Default_EEPROM;
 
-// XXX	  TODO!!!	if (ASC_PCI_ID2FUNC(sc->cfg.pci_slot_info) != 0) {
+#if 0
+XXX	  TODO!!!	if (ASC_PCI_ID2FUNC(sc->cfg.pci_slot_info) != 0) {
+#endif
 			if (sc->cfg.pci_slot_info != 0) {
 				u_int8_t lsw_msb;
 
@@ -338,7 +352,7 @@ ADW_SOFTC      *sc;
 		 */
 		for (i=2, j=1; i>=0; i--, j++) {
 		eep_config.serial_number[i] =
-			AdwReadEEPWord(iot, ioh, ADW_EEP_DVC_CFG_END - j);
+			AdwReadEEPWord(iot, ioh, ASC_EEP_DVC_CFG_END - j);
 		}
 
 		AdwSetEEPROMConfig(iot, ioh, &eep_config);
@@ -429,7 +443,7 @@ ADW_SOFTC      *sc;
 	}
 
 	/*
-	 * Set ADW_SOFTC 'max_host_qng' and 'max_dvc_qng'
+	 * Set ADV_DVC_VAR 'max_host_qng' and ADV_DVC_VAR 'max_dvc_qng'
 	 * values based on possibly adjusted EEPROM values.
 	 */
 	sc->max_host_qng = eep_config.max_host_qng;
@@ -438,10 +452,10 @@ ADW_SOFTC      *sc;
 
 	/*
 	 * If the EEPROM 'termination' field is set to automatic (0), then set
-	 * the ADW_SOFTC.cfg 'termination' field to automatic also.
+	 * the ADV_DVC_CFG 'termination' field to automatic also.
 	 *
 	 * If the termination is specified with a non-zero 'termination'
-	 * value check that a legal value is set and set the ADW_SOFTC.cfg
+	 * value check that a legal value is set and set the ADV_DVC_CFG
 	 * 'termination' field appropriately.
 	 */
 
@@ -707,7 +721,7 @@ ADW_SOFTC      *sc;
 
 	/*
 	 * Microcode operating variables for WDTR, SDTR, and command tag
-	 * queuing will be set in AdwInquiryHandling() based on what a
+	 * queuing will be set in AdvInquiryHandling() based on what a
 	 * device reports it is capable of in Inquiry byte 7.
 	 *
 	 * If SCSI Bus Resets have been disabled, then directly set
@@ -842,17 +856,17 @@ ADW_SOFTC      *sc;
 		return ADW_IERR_NO_CARRIER;
 	}
 	sc->carr_freelist = ADW_CARRIER_VADDR(sc,
-			ADW_GET_CARRP(sc->icq_sp->next_ba));
+			ASC_GET_CARRP(sc->icq_sp->next_ba));
 
 	/*
 	 * The first command issued will be placed in the stopper carrier.
 	 */
-	sc->icq_sp->next_ba = ADW_CQ_STOPPER;
+	sc->icq_sp->next_ba = htole32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC ICQ physical address start value.
 	 */
-	ADW_WRITE_DWORD_LRAM(iot, ioh, ADW_MC_ICQ, sc->icq_sp->carr_ba);
+	ADW_WRITE_DWORD_LRAM(iot, ioh, ADW_MC_ICQ, le32toh(sc->icq_sp->carr_ba));
 
 	/*
 	 * Initialize the COMMA register to the same value otherwise
@@ -860,7 +874,7 @@ ADW_SOFTC      *sc;
 	 */
 	if(sc->chip_type == ADW_CHIP_ASC38C1600) {
 		ADW_WRITE_DWORD_REGISTER(iot, ioh, IOPDW_COMMA,
-							sc->icq_sp->carr_ba);
+						le32toh(sc->icq_sp->carr_ba));
 	}
 
 	/*
@@ -870,21 +884,21 @@ ADW_SOFTC      *sc;
 		return ADW_IERR_NO_CARRIER;
 	}
 	sc->carr_freelist = ADW_CARRIER_VADDR(sc,
-			ADW_GET_CARRP(sc->irq_sp->next_ba));
+			ASC_GET_CARRP(sc->irq_sp->next_ba));
 
 	/*
 	 * The first command completed by the RISC will be placed in
 	 * the stopper.
 	 *
-	 * Note: Set 'next_ba' to ADW_CQ_STOPPER. When the request is
-	 * completed the RISC will set the ADW_RQ_DONE bit.
+	 * Note: Set 'next_ba' to ASC_CQ_STOPPER. When the request is
+	 * completed the RISC will set the ASC_RQ_DONE bit.
 	 */
-	sc->irq_sp->next_ba = ADW_CQ_STOPPER;
+	sc->irq_sp->next_ba = htole32(ASC_CQ_STOPPER);
 
 	/*
 	 * Set RISC IRQ physical address start value.
 	 */
-	ADW_WRITE_DWORD_LRAM(iot, ioh, ADW_MC_IRQ, sc->irq_sp->carr_ba);
+	ADW_WRITE_DWORD_LRAM(iot, ioh, ADW_MC_IRQ, le32toh(sc->irq_sp->carr_ba));
 	sc->carr_pending_cnt = 0;
 
 	ADW_WRITE_BYTE_REGISTER(iot, ioh, IOPB_INTR_ENABLES,
@@ -1030,7 +1044,7 @@ AdwLoadMCode(iot, ioh, bios_mem, chip_type)
 	u_int16_t *bios_mem;
 	u_int8_t chip_type;
 {
-	u_int8_t	*mcode_data;
+	const u_int8_t	*mcode_data;
 	u_int32_t	 mcode_chksum;
 	u_int16_t	 mcode_size;
 	u_int32_t	sum;
@@ -1045,25 +1059,28 @@ AdwLoadMCode(iot, ioh, bios_mem, chip_type)
 
 	switch(chip_type) {
 	case ADW_CHIP_ASC3550:
-		mcode_data = (u_int8_t *)adw_asc3550_mcode_data.mcode_data;
+		mcode_data = (const u_int8_t *)adw_asc3550_mcode_data.mcode_data;
 		mcode_chksum = (u_int32_t)adw_asc3550_mcode_data.mcode_chksum;
 		mcode_size = (u_int16_t)adw_asc3550_mcode_data.mcode_size;
 		adw_memsize = ADW_3550_MEMSIZE;
 		break;
 
 	case ADW_CHIP_ASC38C0800:
-		mcode_data = (u_int8_t *)adw_asc38C0800_mcode_data.mcode_data;
+		mcode_data = (const u_int8_t *)adw_asc38C0800_mcode_data.mcode_data;
 		mcode_chksum =(u_int32_t)adw_asc38C0800_mcode_data.mcode_chksum;
 		mcode_size = (u_int16_t)adw_asc38C0800_mcode_data.mcode_size;
 		adw_memsize = ADW_38C0800_MEMSIZE;
 		break;
 
 	case ADW_CHIP_ASC38C1600:
-		mcode_data = (u_int8_t *)adw_asc38C1600_mcode_data.mcode_data;
+		mcode_data = (const u_int8_t *)adw_asc38C1600_mcode_data.mcode_data;
 		mcode_chksum =(u_int32_t)adw_asc38C1600_mcode_data.mcode_chksum;
 		mcode_size = (u_int16_t)adw_asc38C1600_mcode_data.mcode_size;
 		adw_memsize = ADW_38C1600_MEMSIZE;
 		break;
+
+	default:
+		return (EINVAL);
 	}
 
 	/*
@@ -1492,15 +1509,17 @@ AdwASC38C1600Cabling(iot, ioh, cfg)
 				break;
 
 			case 0x0:
+#if 0
 	/* !!!!TODO!!!! */
-//				if (ASC_PCI_ID2FUNC(cfg->pci_slot_info) == 0) {
+				if (ASC_PCI_ID2FUNC(cfg->pci_slot_info) == 0) {
 				/* Function 0 - TERM_SE_HI: off, TERM_SE_LO: off */
-//				}
-//				else
-//				{
+				}
+				else
+#endif
+				{
 				/* Function 1 - TERM_SE_HI: on, TERM_SE_LO: off */
 					cfg->termination |= ADW_TERM_SE_HI;
-//				}
+				}
 				break;
 			}
 	}
@@ -1556,7 +1575,7 @@ AdwASC38C1600Cabling(iot, ioh, cfg)
  *
  * Return a checksum based on the EEPROM configuration read.
  */
-u_int16_t
+static u_int16_t
 AdwGetEEPROMConfig(iot, ioh, cfg_buf)
 	bus_space_tag_t		iot;
 	bus_space_handle_t	ioh;
@@ -1570,8 +1589,8 @@ AdwGetEEPROMConfig(iot, ioh, cfg_buf)
 	wbuf = (u_int16_t *) cfg_buf;
 	chksum = 0;
 
-	for (eep_addr = ADW_EEP_DVC_CFG_BEGIN;
-		eep_addr < ADW_EEP_DVC_CFG_END;
+	for (eep_addr = ASC_EEP_DVC_CFG_BEGIN;
+		eep_addr < ASC_EEP_DVC_CFG_END;
 		eep_addr++, wbuf++) {
 		wval = AdwReadEEPWord(iot, ioh, eep_addr);
 		chksum += wval;
@@ -1580,8 +1599,8 @@ AdwGetEEPROMConfig(iot, ioh, cfg_buf)
 
 	*wbuf = AdwReadEEPWord(iot, ioh, eep_addr);
 	wbuf++;
-	for (eep_addr = ADW_EEP_DVC_CTL_BEGIN;
-			eep_addr < ADW_EEP_MAX_WORD_ADDR;
+	for (eep_addr = ASC_EEP_DVC_CTL_BEGIN;
+			eep_addr < ASC_EEP_MAX_WORD_ADDR;
 			eep_addr++, wbuf++) {
 		*wbuf = AdwReadEEPWord(iot, ioh, eep_addr);
 	}
@@ -1593,14 +1612,14 @@ AdwGetEEPROMConfig(iot, ioh, cfg_buf)
 /*
  * Read the EEPROM from specified location
  */
-u_int16_t
+static u_int16_t
 AdwReadEEPWord(iot, ioh, eep_word_addr)
 	bus_space_tag_t		iot;
 	bus_space_handle_t	ioh;
 	int			eep_word_addr;
 {
 	ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD,
-		ADW_EEP_CMD_READ | eep_word_addr);
+		ASC_EEP_CMD_READ | eep_word_addr);
 	AdwWaitEEPCmd(iot, ioh);
 
 	return ADW_READ_WORD_REGISTER(iot, ioh, IOPW_EE_DATA);
@@ -1610,7 +1629,7 @@ AdwReadEEPWord(iot, ioh, eep_word_addr)
 /*
  * Wait for EEPROM command to complete
  */
-void
+static void
 AdwWaitEEPCmd(iot, ioh)
 	bus_space_tag_t		iot;
 	bus_space_handle_t	ioh;
@@ -1618,22 +1637,22 @@ AdwWaitEEPCmd(iot, ioh)
 	int eep_delay_ms;
 
 
-	for (eep_delay_ms = 0; eep_delay_ms < ADW_EEP_DELAY_MS; eep_delay_ms++){
+	for (eep_delay_ms = 0; eep_delay_ms < ASC_EEP_DELAY_MS; eep_delay_ms++){
 		if (ADW_READ_WORD_REGISTER(iot, ioh, IOPW_EE_CMD) &
-				ADW_EEP_CMD_DONE) {
+				ASC_EEP_CMD_DONE) {
 			break;
 		}
 		AdwSleepMilliSecond(1);
 	}
 
-	ADW_READ_WORD_REGISTER(iot, ioh, IOPW_EE_CMD);
+	(void)ADW_READ_WORD_REGISTER(iot, ioh, IOPW_EE_CMD);
 }
 
 
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void
+static void
 AdwSetEEPROMConfig(iot, ioh, cfg_buf)
 	bus_space_tag_t		iot;
 	bus_space_handle_t	ioh;
@@ -1646,20 +1665,20 @@ AdwSetEEPROMConfig(iot, ioh, cfg_buf)
 	wbuf = (u_int16_t *) cfg_buf;
 	chksum = 0;
 
-	ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD, ADW_EEP_CMD_WRITE_ABLE);
+	ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD, ASC_EEP_CMD_WRITE_ABLE);
 	AdwWaitEEPCmd(iot, ioh);
 
 	/*
 	 * Write EEPROM from word 0 to word 20
 	 */
-	for (addr = ADW_EEP_DVC_CFG_BEGIN;
-	     addr < ADW_EEP_DVC_CFG_END; addr++, wbuf++) {
+	for (addr = ASC_EEP_DVC_CFG_BEGIN;
+	     addr < ASC_EEP_DVC_CFG_END; addr++, wbuf++) {
 		chksum += *wbuf;
 		ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_DATA, *wbuf);
 		ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD,
-				ADW_EEP_CMD_WRITE | addr);
+				ASC_EEP_CMD_WRITE | addr);
 		AdwWaitEEPCmd(iot, ioh);
-		AdwSleepMilliSecond(ADW_EEP_DELAY_MS);
+		AdwSleepMilliSecond(ASC_EEP_DELAY_MS);
 	}
 
 	/*
@@ -1667,23 +1686,23 @@ AdwSetEEPROMConfig(iot, ioh, cfg_buf)
 	 */
 	ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_DATA, chksum);
 	ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD,
-			ADW_EEP_CMD_WRITE | addr);
+			ASC_EEP_CMD_WRITE | addr);
 	AdwWaitEEPCmd(iot, ioh);
 	wbuf++;        /* skip over check_sum */
 
 	/*
 	 * Write EEPROM OEM name at words 22 to 29
 	 */
-	for (addr = ADW_EEP_DVC_CTL_BEGIN;
-	     addr < ADW_EEP_MAX_WORD_ADDR; addr++, wbuf++) {
+	for (addr = ASC_EEP_DVC_CTL_BEGIN;
+	     addr < ASC_EEP_MAX_WORD_ADDR; addr++, wbuf++) {
 		ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_DATA, *wbuf);
 		ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD,
-				ADW_EEP_CMD_WRITE | addr);
+				ASC_EEP_CMD_WRITE | addr);
 		AdwWaitEEPCmd(iot, ioh);
 	}
 
 	ADW_WRITE_WORD_REGISTER(iot, ioh, IOPW_EE_CMD,
-			ADW_EEP_CMD_WRITE_DISABLE);
+			ASC_EEP_CMD_WRITE_DISABLE);
 	AdwWaitEEPCmd(iot, ioh);
 
 	return;
@@ -1715,7 +1734,6 @@ ADW_SCSI_REQ_Q	*scsiq;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	ADW_CCB		*ccb;
-	long		req_size;
 	u_int32_t	req_paddr;
 	ADW_CARRIER	*new_carrp;
 
@@ -1729,9 +1747,9 @@ ADW_SCSI_REQ_Q	*scsiq;
 	}
 
 	/*
-	 * Beginning of CRITICAL SECTION: ASSUME splbio() in effect
+	 * Begin of CRITICAL SECTION: Must be protected within splbio/splx pair
 	 */
-	
+
 	ccb = adw_ccb_phys_kv(sc, scsiq->ccb_ptr);
 
 	/*
@@ -1741,7 +1759,7 @@ ADW_SCSI_REQ_Q	*scsiq;
 		return ADW_BUSY;
 	}
 	sc->carr_freelist = ADW_CARRIER_VADDR(sc,
-			ADW_GET_CARRP(new_carrp->next_ba));
+			ASC_GET_CARRP(new_carrp->next_ba));
 	sc->carr_pending_cnt++;
 
 	/*
@@ -1749,17 +1767,16 @@ ADW_SCSI_REQ_Q	*scsiq;
 	 * to the stopper value. The current stopper will be changed
 	 * below to point to the new stopper.
 	 */
-	new_carrp->next_ba = ADW_CQ_STOPPER;
+	new_carrp->next_ba = htole32(ASC_CQ_STOPPER);
 
-	req_size = sizeof(ADW_SCSI_REQ_Q);
 	req_paddr = sc->sc_dmamap_control->dm_segs[0].ds_addr +
 		ADW_CCB_OFF(ccb) + offsetof(struct adw_ccb, scsiq);
 
 	/* Save physical address of ADW_SCSI_REQ_Q and Carrier. */
-	scsiq->scsiq_rptr = req_paddr;
+	scsiq->scsiq_rptr = htole32(req_paddr);
 
 	/*
-	 * Every ADW_SCSI_REQ_Q.carr_ba is byte swapped to little-endian
+	 * Every ADV_CARR_T.carr_ba is byte swapped to little-endian
 	 * order during initialization.
 	 */
 	scsiq->carr_ba = sc->icq_sp->carr_ba;
@@ -1770,7 +1787,7 @@ ADW_SCSI_REQ_Q	*scsiq;
 	 * the microcode. The newly allocated stopper will become the new
 	 * stopper.
 	 */
-	sc->icq_sp->areq_ba = req_paddr;
+	sc->icq_sp->areq_ba = htole32(req_paddr);
 
 	/*
 	 * Set the 'next_ba' pointer for the old stopper to be the
@@ -1813,13 +1830,13 @@ ADW_SCSI_REQ_Q	*scsiq;
 		 * address of the new carrier stopper to the COMMA register.
 		 */
 		ADW_WRITE_DWORD_REGISTER(iot, ioh, IOPDW_COMMA,
-				new_carrp->carr_ba);
+				le32toh(new_carrp->carr_ba));
 	}
 
 	/*
 	 * End of CRITICAL SECTION: Must be protected within splbio/splx pair
 	 */
-	
+
 	return ADW_SUCCESS;
 }
 
@@ -1871,7 +1888,7 @@ ADW_SOFTC	*sc;
 	 * The hold time delay is done on the host because the RISC has no
 	 * microsecond accurate timer.
 	 */
-	AdwDelayMicroSecond((u_int16_t) ADW_SCSI_RESET_HOLD_TIME_US);
+	AdwDelayMicroSecond((u_int16_t) ASC_SCSI_RESET_HOLD_TIME_US);
 
 	/*
 	 * Send the SCSI Bus Reset end idle command which de-asserts
@@ -1902,7 +1919,8 @@ ADW_SOFTC	*sc;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	int		status;
-	u_int16_t	wdtr_able, sdtr_able, ppr_able, tagqng_able;
+	u_int16_t	wdtr_able, sdtr_able, tagqng_able;
+	u_int16_t	ppr_able = 0; /* XXX: gcc */
 	u_int8_t	tid, max_cmd[ADW_MAX_TID + 1];
 	u_int16_t	bios_sig;
 
@@ -1941,7 +1959,7 @@ ADW_SOFTC	*sc;
 			ADW_CTRL_REG_CMD_WR_IO_REG);
 
 	/*
-	 * Reset Adw Library error code, if any, and try
+	 * Reset Adv Library error code, if any, and try
 	 * re-initializing the chip.
 	 * Then translate initialization return value to status value.
 	 */
@@ -1971,10 +1989,13 @@ ADW_SOFTC	*sc;
 
 
 /*
- * Adw Library Interrupt Service Routine
+ * Adv Library Interrupt Service Routine
  *
  *  This function is called by a driver's interrupt service routine.
  *  The function disables and re-enables interrupts.
+ *
+ *  When a microcode idle command is completed, the ADV_DVC_VAR
+ *  'idle_cmd_done' field is set to ADW_TRUE.
  *
  *  Note: AdwISR() can be called when interrupts are disabled or even
  *  when there is no hardware interrupt condition present. It will
@@ -1993,7 +2014,6 @@ ADW_SOFTC	*sc;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	u_int8_t	int_stat;
-	u_int16_t	target_bit;
 	ADW_CARRIER	*free_carrp/*, *ccb_carr*/;
 	u_int32_t	irq_next_pa;
 	ADW_SCSI_REQ_Q	*scsiq;
@@ -2014,7 +2034,7 @@ ADW_SOFTC	*sc;
 
 	/*
 	 * Notify the driver of an asynchronous microcode condition by
-	 * calling the ADW_SOFTC.async_callback function. The function
+	 * calling the ADV_DVC_VAR.async_callback function. The function
 	 * is passed the microcode ADW_MC_INTRB_CODE byte value.
 	 */
 	if (int_stat & ADW_INTR_STATUS_INTRB) {
@@ -2024,7 +2044,7 @@ ADW_SOFTC	*sc;
 
 		if (sc->chip_type == ADW_CHIP_ASC3550 ||
 	    	    sc->chip_type == ADW_CHIP_ASC38C0800) {
-			if (intrb_code == ADW_ASYNC_CARRIER_READY_FAILURE &&
+			if (intrb_code == ADV_ASYNC_CARRIER_READY_FAILURE &&
 				sc->carr_pending_cnt != 0) {
 				ADW_WRITE_BYTE_REGISTER(iot, ioh,
 					IOPB_TICKLE, ADW_TICKLE_A);
@@ -2043,7 +2063,7 @@ ADW_SOFTC	*sc;
 	/*
 	 * Check if the IRQ stopper carrier contains a completed request.
 	 */
-	while (((irq_next_pa = sc->irq_sp->next_ba) & ADW_RQ_DONE) != 0)
+	while (((le32toh(irq_next_pa = sc->irq_sp->next_ba)) & ASC_RQ_DONE) != 0)
 	{
 #if ADW_DEBUG
 		printf("irq 0x%x, 0x%x, 0x%x, 0x%x\n",
@@ -2057,10 +2077,10 @@ ADW_SOFTC	*sc;
 		 * structure.
 		 * The RISC will have set 'areq_ba' to a virtual address.
 		 *
-		 * The firmware will have copied the ADW_SCSI_REQ_Q.ccb_ptr
-		 * field to the carrier ADW_CARRIER.areq_ba field.
+		 * The firmware will have copied the ASC_SCSI_REQ_Q.ccb_ptr
+		 * field to the carrier ADV_CARR_T.areq_ba field.
 		 * The conversion below complements the conversion of
-		 * ADW_SCSI_REQ_Q.ccb_ptr' in AdwExeScsiQueue().
+		 * ASC_SCSI_REQ_Q.scsiq_ptr' in AdwExeScsiQueue().
 		 */
 		ccb = adw_ccb_phys_kv(sc, sc->irq_sp->areq_ba);
 		scsiq = &ccb->scsiq;
@@ -2071,7 +2091,7 @@ ADW_SOFTC	*sc;
 		 * DMAed to host memory by the firmware. Set all status fields
 		 * to indicate good status.
 		 */
-		if ((irq_next_pa & ADW_RQ_GOOD) != 0) {
+		if ((le32toh(irq_next_pa) & ASC_RQ_GOOD) != 0) {
 			scsiq->done_status = QD_NO_ERROR;
 			scsiq->host_status = scsiq->scsi_status = 0;
 			scsiq->data_cnt = 0L;
@@ -2083,14 +2103,12 @@ ADW_SOFTC	*sc;
 		 * stopper carrier.
 		 */
 		free_carrp = sc->irq_sp;
-		sc->irq_sp = ADW_CARRIER_VADDR(sc, ADW_GET_CARRP(irq_next_pa));
+		sc->irq_sp = ADW_CARRIER_VADDR(sc, ASC_GET_CARRP(irq_next_pa));
 
-		free_carrp->next_ba = (sc->carr_freelist == NULL) ? NULL
+		free_carrp->next_ba = (sc->carr_freelist == NULL) ? 0
 					: sc->carr_freelist->carr_ba;
 		sc->carr_freelist = free_carrp;
 		sc->carr_pending_cnt--;
-
-		target_bit = ADW_TID_TO_TIDMASK(scsiq->target_id);
 
 		/*
 		 * Clear request microcode control flag.
@@ -2213,7 +2231,7 @@ u_int32_t       idle_cmd_parameter;
  * microcode operating variables that affect WDTR, SDTR, and Tag
  * Queuing.
  */
-void
+static void
 AdwInquiryHandling(sc, scsiq)
 ADW_SOFTC	*sc;
 ADW_SCSI_REQ_Q *scsiq;
@@ -2222,7 +2240,7 @@ ADW_SCSI_REQ_Q *scsiq;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	u_int8_t		tid;
-	ADW_SCSI_INQUIRY	*inq;
+	struct scsipi_inquiry_data *inq;
 	u_int16_t		tidmask;
 	u_int16_t		cfg_word;
 
@@ -2243,13 +2261,13 @@ ADW_SCSI_REQ_Q *scsiq;
 
 	tid = scsiq->target_id;
 
-        inq = (ADW_SCSI_INQUIRY *) scsiq->vdata_addr;
+	inq = (struct scsipi_inquiry_data *) scsiq->vdata_addr;
 
 	/*
 	 * WDTR, SDTR, and Tag Queuing cannot be enabled for old devices.
 	 */
-	if ((inq->rsp_data_fmt < 2) /*SCSI-1 | CCS*/ &&
-	    (inq->ansi_apr_ver < 2)) {
+	if (((inq->response_format & SID_RespDataFmt) < 2) /*SCSI-1 | CCS*/ &&
+	    ((inq->version & SID_ANSII) < 2)) {
 		return;
 	} else {
 		/*
@@ -2274,7 +2292,7 @@ ADW_SCSI_REQ_Q *scsiq;
 #ifdef SCSI_ADW_WDTR_DISABLE
 	if(!(tidmask & SCSI_ADW_WDTR_DISABLE))
 #endif /* SCSI_ADW_WDTR_DISABLE */
-		if ((sc->wdtr_able & tidmask) && inq->WBus16) {
+		if ((sc->wdtr_able & tidmask) && (inq->flags3 & SID_WBus16)) {
 			ADW_READ_WORD_LRAM(iot, ioh, ADW_MC_WDTR_ABLE,
 					cfg_word);
 			if ((cfg_word & tidmask) == 0) {
@@ -2313,7 +2331,7 @@ ADW_SCSI_REQ_Q *scsiq;
 #ifdef SCSI_ADW_SDTR_DISABLE
 	if(!(tidmask & SCSI_ADW_SDTR_DISABLE))
 #endif /* SCSI_ADW_SDTR_DISABLE */
-		if ((sc->sdtr_able & tidmask) && inq->Sync) {
+		if ((sc->sdtr_able & tidmask) && (inq->flags3 & SID_Sync)) {
 			ADW_READ_WORD_LRAM(iot, ioh, ADW_MC_SDTR_ABLE,cfg_word);
 			if ((cfg_word & tidmask) == 0) {
 				cfg_word |= tidmask;
@@ -2348,7 +2366,7 @@ ADW_SCSI_REQ_Q *scsiq;
 			 * and WDTR messages to negotiate synchronous speed
 			 * and offset, transfer width, and protocol options.
 			 */
-                         if((inq->Clocking) & INQ_CLOCKING_DT_ONLY){
+			if((inq->flags4 & SID_Clocking) & SID_CLOCKING_DT_ONLY){
 				ADW_READ_WORD_LRAM(iot, ioh, ADW_MC_PPR_ABLE,
 						sc->ppr_able);
 				sc->ppr_able |= tidmask;
@@ -2361,7 +2379,7 @@ ADW_SCSI_REQ_Q *scsiq;
 		 * If the EEPROM enabled Tag Queuing for the device and the
 		 * device supports Tag Queueing, then turn on the device's
 		 * 'tagqng_enable' bit in the microcode and set the microcode
-		 * maximum command count to the ADW_SOFTC 'max_dvc_qng'
+		 * maximum command count to the ADV_DVC_VAR 'max_dvc_qng'
 		 * value.
 		 *
 		 * Tag Queuing is disabled for the BIOS which runs in polled
@@ -2372,7 +2390,7 @@ ADW_SCSI_REQ_Q *scsiq;
 #ifdef SCSI_ADW_TAGQ_DISABLE
 	if(!(tidmask & SCSI_ADW_TAGQ_DISABLE))
 #endif /* SCSI_ADW_TAGQ_DISABLE */
-		if ((sc->tagqng_able & tidmask) && inq->CmdQue) {
+		if ((sc->tagqng_able & tidmask) && (inq->flags3 & SID_CmdQue)) {
 			ADW_READ_WORD_LRAM(iot, ioh, ADW_MC_TAGQNG_ABLE,
 					cfg_word);
 			cfg_word |= tidmask;
@@ -2388,7 +2406,7 @@ ADW_SCSI_REQ_Q *scsiq;
 }
 
 
-void
+static void
 AdwSleepMilliSecond(n)
 u_int32_t	n;
 {
@@ -2397,7 +2415,7 @@ u_int32_t	n;
 }
 
 
-void
+static void
 AdwDelayMicroSecond(n)
 u_int32_t	n;
 {

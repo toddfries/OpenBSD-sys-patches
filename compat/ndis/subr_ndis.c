@@ -35,7 +35,7 @@
 __FBSDID("$FreeBSD: src/sys/compat/ndis/subr_ndis.c,v 1.67.2.7 2005/03/31 21:50:11 wpaul Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: subr_ndis.c,v 1.6 2006/11/16 01:32:44 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_ndis.c,v 1.14 2008/11/13 12:09:52 ad Exp $");
 #endif
 
 /*
@@ -63,9 +63,6 @@ __KERNEL_RCSID(0, "$NetBSD: subr_ndis.c,v 1.6 2006/11/16 01:32:44 christos Exp $
 #include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
-#ifdef __NetBSD__
-#include <sys/lkm.h>
-#endif
 #include <sys/malloc.h>
 #include <sys/lock.h>
 #ifdef __FreeBSD__
@@ -100,7 +97,7 @@ __KERNEL_RCSID(0, "$NetBSD: subr_ndis.c,v 1.6 2006/11/16 01:32:44 christos Exp $
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#include <machine/atomic.h>
+#include <sys/atomic.h>
 #ifdef __FreeBSD__
 #include <machine/bus_memio.h>
 #include <machine/bus_pio.h>
@@ -108,7 +105,7 @@ __KERNEL_RCSID(0, "$NetBSD: subr_ndis.c,v 1.6 2006/11/16 01:32:44 christos Exp $
 #include <sys/bus.h>
 #include <sys/rman.h>
 #endif
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <machine/stdarg.h>
 
@@ -296,7 +293,7 @@ __stdcall static void NdisGetFirstBufferFromPacket(ndis_packet *,
 __stdcall static void NdisGetFirstBufferFromPacketSafe(ndis_packet *,
 	ndis_buffer **, void **, uint32_t *, uint32_t *, uint32_t);
 #ifdef __FreeBSD__
-static int ndis_find_sym(linker_file_t, char *, char *, caddr_t *);
+static int ndis_find_sym(linker_file_t, char *, char *, void **);
 __stdcall static void NdisOpenFile(ndis_status *, ndis_handle *, uint32_t *,
 	ndis_unicode_string *, ndis_physaddr);
 __stdcall static void NdisMapFile(ndis_status *, void **, ndis_handle);
@@ -851,7 +848,7 @@ NdisReadConfiguration(status, parm, cfg, key, type)
 #else /* __NetBSD__ */
 	mib[0] = sc->ndis_sysctl_mib;
 	
-	sysctl_lock(curlwp, NULL, 0);
+	sysctl_lock(false);
 		error = sysctl_locate(curlwp, &mib[0], 1, &pnode, NULL);
 	
 		numcld  = pnode->sysctl_csize;
@@ -865,7 +862,7 @@ NdisReadConfiguration(status, parm, cfg, key, type)
 			}
 			ndiscld++;
 		}
-	sysctl_unlock(curlwp);
+	sysctl_unlock();
 	
 	if(i < numcld) {
 		/* Found it */
@@ -1665,7 +1662,7 @@ NdisReadNetworkAddress(status, addr, addrlen, adapter)
 #ifdef __FreeBSD__
 	if (bcmp(sc->arpcom.ac_enaddr, empty, ETHER_ADDR_LEN) == 0)
 #else
-	if (bcmp(LLADDR(sc->arpcom.ec_if.if_sadl), 
+	if (bcmp(CLLADDR(sc->arpcom.ec_if.if_sadl), 
 		 empty, ETHER_ADDR_LEN) == 0)
 #endif
 
@@ -1674,7 +1671,9 @@ NdisReadNetworkAddress(status, addr, addrlen, adapter)
 #ifdef __FreeBSD__
 		*addr = sc->arpcom.ac_enaddr;
 #else
-                *addr = LLADDR(sc->arpcom.ec_if.if_sadl);
+		memcpy(sc->ndis_mac, CLLADDR(sc->arpcom.ec_if.if_sadl),
+		    ETHER_ADDR_LEN);
+                *addr = sc->ndis_mac;
 #endif
 		*addrlen = ETHER_ADDR_LEN;
 		*status = NDIS_STATUS_SUCCESS;
@@ -1894,7 +1893,7 @@ NdisMAllocateSharedMemory(
 	}
 
 	error = bus_dmamem_map(sh->ndis_stag, &segs, nsegs, 
-				len, /*(caddr_t *)&vaddr*/ (caddr_t *)vaddr, BUS_DMA_NOWAIT);
+				len, /*(void **)&vaddr*/ (void **)vaddr, BUS_DMA_NOWAIT);
 
 	/* printf("*vaddr = %x\n", (unsigned int)*vaddr); */
 	
@@ -2594,7 +2593,7 @@ __stdcall static uint32_t
 NdisInterlockedIncrement(addend)
 	uint32_t		*addend;
 {
-	atomic_add_long((u_long *)addend, 1);
+	atomic_inc_32(addend);
 	return(*addend);
 }
 
@@ -2602,7 +2601,7 @@ __stdcall static uint32_t
 NdisInterlockedDecrement(addend)
 	uint32_t		*addend;
 {
-	atomic_subtract_long((u_long *)addend, 1);
+	atomic_dec_32(addend);
 	return(*addend);
 }
 
@@ -3194,7 +3193,7 @@ ndis_find_sym(lf, filename, suffix, sym)
 	linker_file_t		lf;
 	char			*filename;
 	char			*suffix;
-	caddr_t			*sym;
+	void *			*sym;
 {
 	char			*fullsym;
 	char			*suf;
@@ -3249,7 +3248,7 @@ NdisOpenFile(status, filehandle, filelength, filename, highestaddr)
 	ndis_fh			*fh;
 	char			*path;
 	linker_file_t		head, lf;
-	caddr_t			kldstart, kldend;
+	void			*kldstart, *kldend;
 
 	ndis_unicode_to_ascii(filename->us_buf,
 	    filename->us_len, &afilename);
@@ -3373,7 +3372,7 @@ NdisMapFile(status, mappedbuffer, filehandle)
 	ndis_fh			*fh;
 	struct thread		*td = curthread;
 	linker_file_t		lf;
-	caddr_t			kldstart;
+	void *			kldstart;
 	int			error, resid;
 
 	if (filehandle == NULL) {

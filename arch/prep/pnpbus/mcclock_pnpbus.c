@@ -1,4 +1,4 @@
-/* $NetBSD: mcclock_pnpbus.c,v 1.3 2006/07/12 21:28:33 garbled Exp $ */
+/* $NetBSD: mcclock_pnpbus.c,v 1.9 2008/04/28 20:23:33 martin Exp $ */
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mcclock_pnpbus.c,v 1.3 2006/07/12 21:28:33 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcclock_pnpbus.c,v 1.9 2008/04/28 20:23:33 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -71,12 +64,12 @@ __KERNEL_RCSID(0, "$NetBSD: mcclock_pnpbus.c,v 1.3 2006/07/12 21:28:33 garbled E
 
 #include <prep/pnpbus/pnpbusvar.h>
 
-static int	mcclock_pnpbus_probe(struct device *, struct cfdata *, void *);
-static void	mcclock_pnpbus_attach(struct device *, struct device *, void *);
+static int	mcclock_pnpbus_probe(device_t, cfdata_t, void *);
+static void	mcclock_pnpbus_attach(device_t, device_t, void *);
 
 extern struct cfdriver mcclock_cd;
 
-CFATTACH_DECL(mcclock_pnpbus, sizeof (struct mc146818_softc),
+CFATTACH_DECL_NEW(mcclock_pnpbus, sizeof(struct mc146818_softc),
     mcclock_pnpbus_probe, mcclock_pnpbus_attach, NULL, NULL);
 
 void	mcclock_pnpbus_write(struct mc146818_softc *, u_int, u_int);
@@ -87,7 +80,7 @@ int have_ds1585 = 0;
 #define MCCLOCK_STD_DEV		0
 
 static int
-mcclock_pnpbus_probe(struct device *parent, struct cfdata *match, void *aux)
+mcclock_pnpbus_probe(device_t parent, cfdata_t cf, void *aux)
 {
 	struct pnpbus_dev_attach_args *pna = aux;
 	int ret = 0;
@@ -105,16 +98,16 @@ mcclock_pnpbus_probe(struct device *parent, struct cfdata *match, void *aux)
 }
 
 static void
-mcclock_pnpbus_attach(struct device *parent, struct device *self, void *aux)
+mcclock_pnpbus_attach(device_t parent, device_t self, void *aux)
 {
-	struct mc146818_softc *sc = (void *)self;
+	struct mc146818_softc *sc = device_private(self);
 	struct pnpbus_dev_attach_args *pna = aux;
 
+	sc->sc_dev = self;
 	sc->sc_bst = pna->pna_iot;
 	if (pnpbus_io_map(&pna->pna_res, 0, &sc->sc_bst, &sc->sc_bsh)) {
 		/* XXX should we panic instead? */
-		aprint_error("%s: couldn't map clock I/O space",
-		    device_xname(self));
+		aprint_error(": couldn't map clock I/O space\n");
 		return;
 	}
 
@@ -129,17 +122,18 @@ mcclock_pnpbus_attach(struct device *parent, struct device *self, void *aux)
 	aprint_normal("\n");
 
 	(*sc->sc_mcwrite)(sc, MC_REGB, MC_REGB_24HR);
-	todr_attach(&sc->sc_handle);
 }
 
 void
 ds1585_reboot(void)
 {
-	struct mc146818_softc *sc = mcclock_cd.cd_devs[MCCLOCK_STD_DEV];
+	struct mc146818_softc *sc;
 	int i, j;
 
 	if (!have_ds1585)
 		return;
+
+	sc = device_lookup_private(&mcclock_cd, MCCLOCK_STD_DEV);
 
 	/* monitors b0: 05,03,01  b1: 49, WIE=1 */
 

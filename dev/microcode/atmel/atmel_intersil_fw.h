@@ -1,11 +1,11 @@
 /*
- * The following firmware has been taken (and reformatted slightly) from the
+ * The following firmware has been taken (and reformatted slighly) from the
  * Atmel (atmelwlandriver) driver source.
  *
  *   Target:  AT76C503 with Intersil 3861 radio
  *   Version: 0.90.0 #44
  *
- * Copyright 2004 Atmel Corporation. All Rights Reserved. Redistribution and use
+ * Copyright 2004 Atmel Corporation. All Rights Reserved. Redistribution and use
  * of the microcode software ("Firmware") is permitted provided that the following
  * conditions are met:
  *     1. Firmware is redistributed in object code only.
@@ -14,7 +14,7 @@
  * 	and/or other materials provided with the distribution; and
  *     3. The name of Atmel Corporation may not be used to endorse or promote products
  *         derived from this Firmware without specific prior written consent.
- * 
+ *
  * DISCLAIMER: ATMEL PROVIDES THIS FIRMWARE "AS IS'' WITH NO WARRANTIES
  * OR INDEMNITIES WHATSOEVER. ATMEL EXPRESSLY DISCLAIMS ANY
  * EXPRESS, STATUTORY OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -27,7 +27,7 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * FIRMWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * USER ACKNOWLEDGES AND AGREES THAT THE PURCHASE OR USE OF THE
  * FIRMWARE WILL NOT CREATE OR GIVE GROUNDS FOR A LICENSE BY
  * IMPLICATION, ESTOPPEL, OR OTHERWISE IN ANY INTELLECTUAL PROPERTY

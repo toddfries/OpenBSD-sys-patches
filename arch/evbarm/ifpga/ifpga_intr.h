@@ -1,4 +1,4 @@
-/*	$NetBSD: ifpga_intr.h,v 1.6 2006/05/16 21:38:14 mrg Exp $	*/
+/*	$NetBSD: ifpga_intr.h,v 1.8 2008/04/27 18:58:46 matt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -48,8 +48,6 @@
 #include <evbarm/ifpga/ifpgareg.h>
 #include <evbarm/ifpga/ifpgavar.h>
 
-void ifpga_do_pending(void);
-
 static inline void __attribute__((__unused__))
 ifpga_set_intrmask(void)
 {
@@ -63,22 +61,17 @@ ifpga_set_intrmask(void)
 	    IFPGA_INTR_ENABLESET, mask);
 }
 
-#define INT_SWMASK				\
-        (IFPGA_INTR_bit31 | IFPGA_INTR_bit30 |	\
-         IFPGA_INTR_bit29 | IFPGA_INTR_bit28)
-
 static inline void __attribute__((__unused__))
 ifpga_splx(int new)
 {
 	extern volatile uint32_t intr_enabled;
-	extern volatile int current_spl_level;
 	extern volatile int ifpga_ipending;
 	int oldirqstate, hwpend;
 
 	__insn_barrier();
 
 	oldirqstate = disable_interrupts(I32_bit);
-	current_spl_level = new;
+	set_curcpl(new);
 
 	hwpend = (ifpga_ipending & IFPGA_INTR_HWMASK) & ~new;
 	if (hwpend != 0) {
@@ -88,19 +81,17 @@ ifpga_splx(int new)
 
 	restore_interrupts(oldirqstate);
 
-	if ((ifpga_ipending & INT_SWMASK) & ~new)
-		ifpga_do_pending();
+#ifdef __HAVE_FAST_SOFTINTS
+	cpu_dosoftints();
+#endif
 }
 
 static inline int __attribute__((__unused__))
 ifpga_splraise(int ipl)
 {
-	extern volatile int current_spl_level;
 	extern int ifpga_imask[];
-	int	old;
-
-	old = current_spl_level;
-	current_spl_level = old | ifpga_imask[ipl];
+	const int old = curcpl();
+	set_curcpl(old | ifpga_imask[ipl]);
 
 	__insn_barrier();
 
@@ -110,9 +101,8 @@ ifpga_splraise(int ipl)
 static inline int __attribute__((__unused__))
 ifpga_spllower(int ipl)
 {
-	extern volatile int current_spl_level;
 	extern int ifpga_imask[];
-	int old = current_spl_level;
+	const int old = curcpl();
 
 	ifpga_splx(ifpga_imask[ipl]);
 	return(old);
@@ -123,14 +113,12 @@ ifpga_spllower(int ipl)
 #define splx(new)		ifpga_splx(new)
 #define	_spllower(ipl)		ifpga_spllower(ipl)
 #define	_splraise(ipl)		ifpga_splraise(ipl)
-void	_setsoftintr(int);
 
 #else
 
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
-void	_setsoftintr(int);
 
 #endif /* ! EVBARM_SPL_NOINLINE */
 

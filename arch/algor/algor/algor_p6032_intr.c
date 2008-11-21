@@ -1,4 +1,4 @@
-/*	$NetBSD: algor_p6032_intr.c,v 1.10 2006/12/21 15:55:21 yamt Exp $	*/
+/*	$NetBSD: algor_p6032_intr.c,v 1.16 2008/05/26 15:59:29 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: algor_p6032_intr.c,v 1.10 2006/12/21 15:55:21 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: algor_p6032_intr.c,v 1.16 2008/05/26 15:59:29 tsutsui Exp $");
 
 #include "opt_ddb.h"
 
@@ -54,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: algor_p6032_intr.c,v 1.10 2006/12/21 15:55:21 yamt E
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+#include <sys/cpu.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
@@ -165,18 +159,6 @@ struct p6032_intrhead {
 struct p6032_intrhead p6032_intrtab[NIRQMAPS];
 
 #define	NINTRS			2	/* MIPS INT0 - INT1 */
-
-/*
- * This is a mask of bits to clear in the SR when we go to a
- * given software interrupt priority level.
- * Hardware ipls are port/board specific.
- */
-const uint32_t mips_ipl_si_to_sr[SI_NQUEUES] = {
-	[SI_SOFT] = MIPS_SOFT_INT_MASK_0,
-	[SI_SOFTCLOCK] = MIPS_SOFT_INT_MASK_0,
-	[SI_SOFTNET] = MIPS_SOFT_INT_MASK_1,
-	[SI_SOFTSERIAL] = MIPS_SOFT_INT_MASK_1,
-};
 
 struct p6032_cpuintr {
 	LIST_HEAD(, algor_intrhand) cintr_list;
@@ -299,21 +281,24 @@ algor_p6032_cal_timer(bus_space_tag_t st, bus_space_handle_t sh)
 		ctrdiff[i] = endctr - startctr;
 	}
 
-	/* Compute the number of cycles per second. */
+	/* Update CPU frequency values */
 	cps = ((ctrdiff[2] + ctrdiff[3]) / 2) * 16;
-
-	/* Compute the number of ticks for hz. */
-	cycles_per_hz = cps / hz;
-
-	/* Compute the delay divisor. */
-	delay_divisor = (cps / 1000000) / 2;
+	/* XXX mips_cpu_flags isn't set here; assume CPU_MIPS_DOUBLE_COUNT */
+	curcpu()->ci_cpu_freq = cps * 2;
+	curcpu()->ci_cycles_per_hz = (curcpu()->ci_cpu_freq + hz / 2) / hz;
+	curcpu()->ci_divisor_delay =
+	    ((curcpu()->ci_cpu_freq + (1000000 / 2)) / 1000000);
+	/* XXX assume CPU_MIPS_DOUBLE_COUNT */
+	curcpu()->ci_cycles_per_hz /= 2;
+	curcpu()->ci_divisor_delay /= 2;
 
 	printf("Timer calibration: %lu cycles/sec [(%lu, %lu) * 16]\n",
 	    cps, ctrdiff[2], ctrdiff[3]);
 	printf("CPU clock speed = %lu.%02luMHz "
-	    "(hz cycles = %lu, delay divisor = %u)\n",
-	    cps / 1000000, (cps % 1000000) / 10000,
-	    cycles_per_hz, delay_divisor);
+	    "(hz cycles = %lu, delay divisor = %lu)\n",
+	    curcpu()->ci_cpu_freq / 1000000,
+	    (curcpu()->ci_cpu_freq % 1000000) / 10000,
+	    curcpu()->ci_cycles_per_hz, curcpu()->ci_divisor_delay);
 }
 
 void *

@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_rtw_pci.c,v 1.10 2007/10/22 23:00:45 fgsch Exp $	*/
-/*	$NetBSD: if_rtw_pci.c,v 1.1 2004/09/26 02:33:36 dyoung Exp $	*/
+/*	$NetBSD: if_rtw_pci.c,v 1.12 2008/04/28 20:23:55 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2002 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +31,7 @@
  */
 
 /*
- * PCI bus front-end for the Realtek RTL8180L 802.11 MAC/BBP chip.
+ * PCI bus front-end for the Realtek RTL8180 802.11 MAC/BBP chip.
  *
  * Derived from the ADMtek ADM8211 PCI bus front-end.
  *
@@ -47,9 +39,11 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_rtw_pci.c,v 1.12 2008/04/28 20:23:55 martin Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h> 
-#include <sys/mbuf.h>   
+#include <sys/systm.h>
+#include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -58,20 +52,18 @@
 #include <sys/device.h>
 
 #include <machine/endian.h>
- 
+
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
+#include <net/if_ether.h>
 
+#include <net80211/ieee80211_netbsd.h>
 #include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/ic/rtwreg.h>
 #include <dev/ic/sa2400reg.h>
@@ -81,17 +73,14 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-int rtw_pci_enable(struct rtw_softc *);
-void rtw_pci_disable(struct rtw_softc *);
-
 /*
- * PCI configuration space registers used by the RTL8180L.
+ * PCI configuration space registers used by the ADM8211.
  */
 #define	RTW_PCI_IOBA		0x10	/* i/o mapped base */
 #define	RTW_PCI_MMBA		0x14	/* memory mapped base */
 
 struct rtw_pci_softc {
-	struct rtw_softc	psc_rtw;	/* real RTL8180L softc */
+	struct rtw_softc	psc_rtw;	/* real ADM8211 softc */
 
 	pci_intr_handle_t	psc_ih;		/* interrupt handle */
 	void			*psc_intrcookie;
@@ -100,153 +89,194 @@ struct rtw_pci_softc {
 	pcitag_t		psc_pcitag;	/* our PCI tag */
 };
 
-int	rtw_pci_match(struct device *, void *, void *);
-void	rtw_pci_attach(struct device *, struct device *, void *);
+static int	rtw_pci_match(device_t, struct cfdata *, void *);
+static void	rtw_pci_attach(device_t, device_t, void *);
+static int	rtw_pci_detach(device_t, int);
 
-struct cfattach rtw_pci_ca = {
-	sizeof (struct rtw_pci_softc), rtw_pci_match, rtw_pci_attach
+CFATTACH_DECL_NEW(rtw_pci, sizeof(struct rtw_pci_softc),
+    rtw_pci_match, rtw_pci_attach, rtw_pci_detach, NULL);
+
+static const struct rtw_pci_product {
+	u_int32_t	app_vendor;	/* PCI vendor ID */
+	u_int32_t	app_product;	/* PCI product ID */
+	const char	*app_product_name;
+} rtw_pci_products[] = {
+	{ PCI_VENDOR_REALTEK,		PCI_PRODUCT_REALTEK_RT8180,
+	  "Realtek RTL8180 802.11 MAC/BBP" },
+	{ PCI_VENDOR_BELKIN,		PCI_PRODUCT_BELKIN_F5D6001,
+	  "Belkin F5D6001" },
+
+	{ 0,				0,				NULL },
 };
 
-const struct pci_matchid rtw_pci_products[] = {
-	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
-#ifdef RTW_DEBUG
-	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
-#endif
-	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6001 },
-	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 },
-};
-
-int
-rtw_pci_match(struct device *parent, void *match, void *aux)
+static const struct rtw_pci_product *
+rtw_pci_lookup(const struct pci_attach_args *pa)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, rtw_pci_products,
-	    sizeof(rtw_pci_products)/sizeof(rtw_pci_products[0])));
+	const struct rtw_pci_product *app;
+
+	for (app = rtw_pci_products;
+	     app->app_product_name != NULL;
+	     app++) {
+		if (PCI_VENDOR(pa->pa_id) == app->app_vendor &&
+		    PCI_PRODUCT(pa->pa_id) == app->app_product)
+			return (app);
+	}
+	return (NULL);
 }
 
-int
-rtw_pci_enable(struct rtw_softc *sc)
+static int
+rtw_pci_match(device_t parent, struct cfdata *match, void *aux)
 {
-	struct rtw_pci_softc *psc = (void *)sc;
+	struct pci_attach_args *pa = aux;
 
-	/* Establish the interrupt. */
-	psc->psc_intrcookie = pci_intr_establish(psc->psc_pc, psc->psc_ih,
-	    IPL_NET, rtw_intr, sc, sc->sc_dev.dv_xname);
-	if (psc->psc_intrcookie == NULL) {
-		printf("%s: unable to establish interrupt\n",
-		    sc->sc_dev.dv_xname);
+	if (rtw_pci_lookup(pa) != NULL)
 		return (1);
-	}
 
 	return (0);
 }
 
-void
-rtw_pci_disable(struct rtw_softc *sc)
+static bool
+rtw_pci_resume(device_t self PMF_FN_ARGS)
 {
-	struct rtw_pci_softc *psc = (void *)sc;
+	struct rtw_pci_softc *psc = device_private(self);
+	struct rtw_softc *sc = &psc->psc_rtw;
+
+	/* Establish the interrupt. */
+	psc->psc_intrcookie = pci_intr_establish(psc->psc_pc, psc->psc_ih,
+	    IPL_NET, rtw_intr, sc);
+	if (psc->psc_intrcookie == NULL) {
+		aprint_error_dev(sc->sc_dev, "unable to establish interrupt\n");
+		return false;
+	}
+
+	return rtw_resume(self, flags);
+}
+
+static bool
+rtw_pci_suspend(device_t self PMF_FN_ARGS)
+{
+	struct rtw_pci_softc *psc = device_private(self);
+
+	if (!rtw_suspend(self, flags))
+		return false;
 
 	/* Unhook the interrupt handler. */
 	pci_intr_disestablish(psc->psc_pc, psc->psc_intrcookie);
 	psc->psc_intrcookie = NULL;
+	return true;
 }
 
-void
-rtw_pci_attach(struct device *parent, struct device *self, void *aux)
+static void
+rtw_pci_attach(device_t parent, device_t self, void *aux)
 {
-	struct rtw_pci_softc *psc = (void *) self;
+	struct rtw_pci_softc *psc = device_private(self);
 	struct rtw_softc *sc = &psc->psc_rtw;
 	struct rtw_regs *regs = &sc->sc_regs;
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	const char *intrstr = NULL;
-	bus_space_tag_t iot, memt;
-	bus_space_handle_t ioh, memh;
-	int ioh_valid, memh_valid;
-	int state;
+	const struct rtw_pci_product *app;
+	int error;
 
+	sc->sc_dev = self;
 	psc->psc_pc = pa->pa_pc;
 	psc->psc_pcitag = pa->pa_tag;
 
-	/*
-	 * No power management hooks.
-	 * XXX Maybe we should add some!
-	 */
-	sc->sc_flags |= RTW_F_ENABLED;
+	app = rtw_pci_lookup(pa);
+	if (app == NULL) {
+		printf("\n");
+		panic("rtw_pci_attach: impossible");
+	}
 
 	/*
 	 * Get revision info, and set some chip-specific variables.
 	 */
 	sc->sc_rev = PCI_REVISION(pa->pa_class);
+	aprint_normal(": %s, revision %d.%d\n", app->app_product_name,
+	    (sc->sc_rev >> 4) & 0xf, sc->sc_rev & 0xf);
 
-	/*
-	 * Check to see if the device is in power-save mode, and
-	 * being it out if necessary.
-	 *
-	 * XXX This code comes almost verbatim from if_tlp_pci.c. I do
-	 * not understand it. Tulip clears the "sleep mode" bit in the
-	 * CFDA register, first.  There is an equivalent (?) register at the
-	 * same place in the ADM8211, but the docs do not assign its bits
-	 * any meanings. -dcy
-	 */
-	state = pci_set_powerstate(pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
-	if (state == PCI_PMCSR_STATE_D3) {
-		/*
-		 * The card has lost all configuration data in
-		 * this state, so punt.
-		 */
-		printf(": unable to wake up from power state D3, "
-		    "reboot required.\n");
+	/* power up chip */
+	if ((error = pci_activate(pa->pa_pc, pa->pa_tag, self, NULL)) != 0 &&
+	    error != EOPNOTSUPP) {
+		aprint_error_dev(self, "cannot activate %d\n", error);
 		return;
 	}
 
 	/*
 	 * Map the device.
 	 */
-	ioh_valid = (pci_mapreg_map(pa, RTW_PCI_IOBA,
-	    PCI_MAPREG_TYPE_IO, 0,
-	    &iot, &ioh, NULL, NULL, 0) == 0);
-	memh_valid = (pci_mapreg_map(pa, RTW_PCI_MMBA,
+	if (pci_mapreg_map(pa, RTW_PCI_MMBA,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &memt, &memh, NULL, NULL, 0) == 0);
-
-	if (memh_valid) {
-		regs->r_bt = memt;
-		regs->r_bh = memh;
-	} else if (ioh_valid) {
-		regs->r_bt = iot;
-		regs->r_bh = ioh;
-	} else {
-		printf(": unable to map device registers\n");
+	    &regs->r_bt, &regs->r_bh, NULL, &regs->r_sz) == 0)
+		;
+	else if (pci_mapreg_map(pa, RTW_PCI_IOBA, PCI_MAPREG_TYPE_IO, 0,
+	    &regs->r_bt, &regs->r_bh, NULL, &regs->r_sz) == 0)
+		;
+	else {
+		aprint_error_dev(self, "unable to map device registers\n");
 		return;
 	}
 
 	sc->sc_dmat = pa->pa_dmat;
 
 	/*
+	 * Make sure bus mastering is enabled.
+	 */
+	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+	    pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG) |
+	    PCI_COMMAND_MASTER_ENABLE);
+
+	/*
 	 * Map and establish our interrupt.
 	 */
 	if (pci_intr_map(pa, &psc->psc_ih)) {
-		printf(": unable to map interrupt\n");
+		aprint_error_dev(self, "unable to map interrupt\n");
 		return;
 	}
-	intrstr = pci_intr_string(pc, psc->psc_ih); 
+	intrstr = pci_intr_string(pc, psc->psc_ih);
 	psc->psc_intrcookie = pci_intr_establish(pc, psc->psc_ih, IPL_NET,
-	    rtw_intr, sc, sc->sc_dev.dv_xname);
+	    rtw_intr, sc);
 	if (psc->psc_intrcookie == NULL) {
-		printf(": unable to establish interrupt");
+		aprint_error_dev(self, "unable to establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_error(" at %s", intrstr);
+		aprint_error("\n");
 		return;
 	}
 
-	printf(": %s\n", intrstr);
-
-	sc->sc_enable = rtw_pci_enable;
-	sc->sc_disable = rtw_pci_disable;
+	aprint_normal_dev(self, "interrupting at %s\n", intrstr);
 
 	/*
 	 * Finish off the attach.
 	 */
 	rtw_attach(sc);
+
+	if (!pmf_device_register(sc->sc_dev, rtw_pci_suspend,
+	                         rtw_pci_resume)) {
+		aprint_error_dev(sc->sc_dev,
+		    "couldn't establish power handler\n");
+	} else {
+		pmf_class_network_register(self, &sc->sc_if);
+		/*
+		 * Power down the socket.
+		 */
+		pmf_device_suspend_self(self);
+	}
+}
+
+static int
+rtw_pci_detach(device_t self, int flags)
+{
+	struct rtw_pci_softc *psc = device_private(self);
+	struct rtw_softc *sc = &psc->psc_rtw;
+	struct rtw_regs *regs = &sc->sc_regs;
+	int rc;
+
+	if ((rc = rtw_detach(sc)) != 0)
+		return rc;
+	if (psc->psc_intrcookie != NULL)
+		pci_intr_disestablish(psc->psc_pc, psc->psc_intrcookie);
+	bus_space_unmap(regs->r_bt, regs->r_bh, regs->r_sz);
+
+	return 0;
 }

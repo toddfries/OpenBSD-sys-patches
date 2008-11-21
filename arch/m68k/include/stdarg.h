@@ -1,5 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.10 2006/04/09 03:07:52 deraadt Exp $	*/
-/*	$NetBSD: stdarg.h,v 1.14 1995/12/25 23:15:33 mycroft Exp $	*/
+/*	$NetBSD: stdarg.h,v 1.23 2005/12/11 12:17:53 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -35,32 +34,49 @@
 #ifndef _M68K_STDARG_H_
 #define	_M68K_STDARG_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
+#include <sys/featuretest.h>
 
-typedef __va_list	va_list;
+typedef _BSD_VA_LIST_	va_list;
+
+#ifdef __lint__
+
+#define va_start(ap, last)      ((ap) = *(va_list *)0)
+#define va_arg(ap, type)        (*(type *)(void *)&(ap))
+#define va_end(ap)
+#define __va_copy(dest, src)    ((dest) = (src))
+
+#elif __GNUC_PREREQ__(3,0)
+
+#define va_start(ap, last)	__builtin_va_start(ap, last)
+#define va_end(ap)		__builtin_va_end(ap)
+#define va_arg(ap, type)	__builtin_va_arg(ap, type)
+#define __va_copy(dest, src)	__builtin_va_copy(dest, src)
+
+#else
 
 #define	__va_size(type) \
 	(((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
 
-#ifdef lint
-#define	va_start(ap,lastarg)	((ap) = (ap))
-#else
-#define va_start(ap, last) \
+#define	va_start(ap, last) \
 	((ap) = (va_list)__builtin_next_arg(last))
-#endif /* lint */
 
 #define	va_arg(ap, type) \
-	(*(type *)((ap) += __va_size(type),			\
-		   (ap) - (sizeof(type) < sizeof(long) &&	\
-			   sizeof(type) != __va_size(type) ?	\
-			   sizeof(type) : __va_size(type))))
+	(*(type *)(void *)((ap) += __va_size(type),			\
+			   (ap) - (sizeof(type) < sizeof(long) &&	\
+				   sizeof(type) != __va_size(type) ?	\
+				   sizeof(type) : __va_size(type))))
 
-#if __ISO_C_VISIBLE >= 1999
-#define va_copy(dest, src) \
+#define	__va_copy(dest, src) \
 	((dest) = (src))
-#endif
 
 #define	va_end(ap)	
+#endif
+
+#if !defined(_ANSI_SOURCE) && \
+    (!defined(_POSIX_C_SOURCE) && !defined(_XOPEN_SOURCE) || \
+     defined(_ISOC99_SOURCE) || (__STDC_VERSION__ - 0) >= 199901L)
+#define	va_copy(dest, src)	__va_copy(dest, src)
+#endif
 
 #endif /* !_M68K_STDARG_H_ */

@@ -1,8 +1,7 @@
-/*	$OpenBSD: wsfont.h,v 1.4 2005/09/15 20:23:10 miod Exp $ */
-/* 	$NetBSD: wsfont.h,v 1.12 2000/06/13 13:37:07 ad Exp $	*/
+/* 	$NetBSD: wsfont.h,v 1.19 2008/04/28 20:24:02 martin Exp $	*/
 
 /*-
- * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1999, 2000, 2001, 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,23 +33,17 @@
 #define _WSFONT_H_ 1
 
 /*
- * wsfont_find() can be called with any of the parameters as 0, meaning we
- * don't care about that aspect of the font. It returns a cookie which
- * we can use with the other functions. When more flexibility is required,
- * wsfont_enum() should be used. The last two parameters to wsfont_lock()
- * are the bit order and byte order required (WSDISPLAY_FONTORDER_L2R or 
- * WSDISPLAY_FONTORDER_R2L).
- *
  * Example:
  *
  *	struct wsdisplay_font *font;
  *	int cookie;
  *
- *	if ((cookie = wsfont_find(NULL, 8, 16, 0, 0)) <= 0)
+ *	cookie = wsfont_find(NULL, 8, 16, 0, WSDISPLAY_FONTORDER_L2R,
+ *          WSDISPLAY_FONTORDER_R2L);
+ *      if (cookie <= 0)
  *		panic("unable to get 8x16 font");
  *
- *	if (wsfont_lock(cookie, &font, WSDISPLAY_FONTORDER_L2R,
- *	    WSDISPLAY_FONTORDER_R2L) <= 0)
+ *	if (wsfont_lock(cookie, &font))
  *		panic("unable to lock font");
  *
  *	... do stuff ...
@@ -67,20 +53,14 @@
 
 struct wsdisplay_font;
 
-/* For wsfont_add() */
-#define WSFONT_BUILTIN	(0x01)
-#define WSFONT_STATIC	(0x02)
-#define WSFONT_RDONLY	(0x04)
-
-/* wsfont.c */
 void	wsfont_init(void);
-int	wsfont_find(char *, int, int, int);
+int	wsfont_matches(struct wsdisplay_font *, const char *, int, int, int);
+int	wsfont_find(const char *, int, int, int, int, int);
 int	wsfont_add(struct wsdisplay_font *, int);
 int	wsfont_remove(int);
-void	wsfont_enum(void (*)(char *, int, int, int));
-int	wsfont_lock(int, struct wsdisplay_font **, int, int);
+void	wsfont_enum(void (*)(const char *, int, int, int));
+int	wsfont_lock(int, struct wsdisplay_font **);
 int	wsfont_unlock(int);
-int	wsfont_getflg(int, int *, int *);
 int	wsfont_map_unichar(struct wsdisplay_font *, int);
 int	wsfont_rotate(int);
 

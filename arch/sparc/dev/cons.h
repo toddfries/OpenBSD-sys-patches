@@ -1,18 +1,17 @@
-/*	$OpenBSD: cons.h,v 1.1 2002/08/12 10:44:04 miod Exp $	*/
+/*	$NetBSD: cons.h,v 1.5 2005/11/16 00:49:03 uwe Exp $	*/
 
-struct consdev;
-struct zs_chanstate;
 
-extern void *zs_conschan;
-
-extern void nullcnprobe(struct consdev *);
-
-extern int  zs_getc(void *arg);
-extern void zs_putc(void *arg, int c);
-
-struct zschan *zs_get_chan_addr(int zsc_unit, int channel);
+/*
+ * PROM I/O nodes and arguments are prepared by consinit().
+ * Drivers can examine these when looking for a console device match.
+ */
+extern int prom_stdin_node;
+extern int prom_stdout_node;
+extern char prom_stdin_args[];
+extern char prom_stdout_args[];
 
 #ifdef	KGDB
+struct zs_chanstate;
 void zs_kgdb_init(void);
 void zskgdb(struct zs_chanstate *);
 #endif

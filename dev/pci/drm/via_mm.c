@@ -1,3 +1,5 @@
+/*	$NetBSD: via_mm.c,v 1.3 2008/07/08 06:50:23 mrg Exp $	*/
+
 /*
  * Copyright 1998-2003 VIA Technologies, Inc. All Rights Reserved.
  * Copyright 2001-2003 S3 Graphics, Inc. All Rights Reserved.
@@ -21,6 +23,10 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via_mm.c,v 1.3 2008/07/08 06:50:23 mrg Exp $");
+
 #include "drmP.h"
 #include "via_drm.h"
 #include "via_drv.h"
@@ -72,14 +78,17 @@ static int del_alloc_set(int context, int type, unsigned long val)
 /* agp memory management */
 static memHeap_t *AgpHeap = NULL;
 
-int via_agp_init(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int via_agp_init(DRM_IOCTL_ARGS)
 {
-	drm_via_agp_t *agp = data;
+	drm_via_agp_t agp;
 
-	AgpHeap = via_mmInit(agp->offset, agp->size);
+	DRM_COPY_FROM_USER_IOCTL(agp, (drm_via_agp_t __user *) data,
+				 sizeof(agp));
 
-	DRM_DEBUG("offset = %lu, size = %lu", (unsigned long)agp->offset,
-		  (unsigned long)agp->size);
+	AgpHeap = via_mmInit(agp.offset, agp.size);
+
+	DRM_DEBUG("offset = %lu, size = %lu", (unsigned long)agp.offset,
+		  (unsigned long)agp.size);
 
 	return 0;
 }
@@ -87,9 +96,11 @@ int via_agp_init(struct drm_device *dev, void *data, struct drm_file *file_priv)
 /* fb memory management */
 static memHeap_t *FBHeap = NULL;
 
-int via_fb_init(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int via_fb_init(DRM_IOCTL_ARGS)
 {
-	drm_via_fb_t *fb = data;
+	drm_via_fb_t fb;
+
+	DRM_COPY_FROM_USER_IOCTL(fb, (drm_via_fb_t __user *) data, sizeof(fb));
 
 	FBHeap = via_mmInit(fb.offset, fb.size);
 
@@ -186,18 +197,25 @@ int via_final_context(struct drm_device *dev, int context)
 	return 1;
 }
 
-int via_mem_alloc(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int via_mem_alloc(DRM_IOCTL_ARGS)
 {
-	drm_via_mem_t *mem = data;
+	drm_via_mem_t mem;
+
+	DRM_COPY_FROM_USER_IOCTL(mem, (drm_via_mem_t __user *) data,
+				 sizeof(mem));
 
 	switch (mem.type) {
 	case VIA_MEM_VIDEO:
-		if (via_fb_alloc(mem) < 0)
+		if (via_fb_alloc(&mem) < 0)
 			return -EFAULT;
+		DRM_COPY_TO_USER_IOCTL((drm_via_mem_t __user *) data, mem,
+				       sizeof(mem));
 		return 0;
 	case VIA_MEM_AGP:
-		if (via_agp_alloc(mem) < 0)
+		if (via_agp_alloc(&mem) < 0)
 			return -EFAULT;
+		DRM_COPY_TO_USER_IOCTL((drm_via_mem_t __user *) data, mem,
+				       sizeof(mem));
 		return 0;
 	}
 
@@ -276,18 +294,21 @@ static int via_agp_alloc(drm_via_mem_t * mem)
 	return retval;
 }
 
-int via_mem_free(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int via_mem_free(DRM_IOCTL_ARGS)
 {
-	drm_via_mem_t *mem = data;
+	drm_via_mem_t mem;
 
-	switch (mem->type) {
+	DRM_COPY_FROM_USER_IOCTL(mem, (drm_via_mem_t __user *) data,
+				 sizeof(mem));
+
+	switch (mem.type) {
 
 	case VIA_MEM_VIDEO:
-		if (via_fb_free(mem) == 0)
+		if (via_fb_free(&mem) == 0)
 			return 0;
 		break;
 	case VIA_MEM_AGP:
-		if (via_agp_free(mem) == 0)
+		if (via_agp_free(&mem) == 0)
 			return 0;
 		break;
 	}
@@ -341,7 +362,7 @@ static int via_agp_free(drm_via_mem_t * mem)
 		retval = -1;
 	}
 
-	DRM_DEBUG("free agp, free = %ld\n", agp.nfree);
+	DRM_DEBUG("free agp, free = %ld\n", agp.free);
 
 	return retval;
 }

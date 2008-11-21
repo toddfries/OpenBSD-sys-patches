@@ -1,4 +1,4 @@
-/*	$NetBSD: satlink.c,v 1.34 2007/10/19 12:00:22 ad Exp $	*/
+/*	$NetBSD: satlink.c,v 1.39 2008/06/08 12:43:52 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: satlink.c,v 1.34 2007/10/19 12:00:22 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: satlink.c,v 1.39 2008/06/08 12:43:52 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -178,7 +171,7 @@ satlinkattach(struct device *parent, struct device *self, void *aux)
 
 	/* Map the card. */
 	if (bus_space_map(iot, ia->ia_io[0].ir_addr, SATLINK_IOSIZE, 0, &ioh)) {
-		printf("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "can't map i/o space\n");
 		return;
 	}
 
@@ -205,32 +198,32 @@ satlinkattach(struct device *parent, struct device *self, void *aux)
 	    (bus_space_read_1(iot, ioh, SATLINK_SER_H) << 24);
 
 	printf("%s: mfrid 0x%x, grpid 0x%x, userid 0x%x, serial %d\n",
-	    sc->sc_dev.dv_xname, sc->sc_id.sid_mfrid,
+	    device_xname(&sc->sc_dev), sc->sc_id.sid_mfrid,
 	    sc->sc_id.sid_grpid, sc->sc_id.sid_userid,
 	    sc->sc_id.sid_serial);
 
 	callout_init(&sc->sc_ch, 0);
+	selinit(&sc->sc_selq);
 
 	sc->sc_bufsize = isa_dmamaxsize(sc->sc_ic, sc->sc_drq);
 
 	/* Allocate and map the ring buffer. */
 	if (isa_dmamem_alloc(sc->sc_ic, sc->sc_drq, sc->sc_bufsize,
 	    &ringaddr, BUS_DMA_NOWAIT)) {
-		printf("%s: can't allocate ring buffer\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "can't allocate ring buffer\n");
 		return;
 	}
 	if (isa_dmamem_map(sc->sc_ic, sc->sc_drq, ringaddr, sc->sc_bufsize,
 	    &sc->sc_buf, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) {
-		printf("%s: can't map ring buffer\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "can't map ring buffer\n");
 		isa_dmamem_free(sc->sc_ic, sc->sc_drq, ringaddr,
 		    sc->sc_bufsize);
 		return;
 	}
 
 	if (isa_drq_alloc(sc->sc_ic, sc->sc_drq) != 0) {
-		printf("%s: can't reserve drq %d\n",
-		    sc->sc_dev.dv_xname, sc->sc_drq);
+		aprint_error_dev(&sc->sc_dev, "can't reserve drq %d\n",
+		    sc->sc_drq);
 		isa_dmamem_unmap(sc->sc_ic, sc->sc_drq, sc->sc_buf,
 		    sc->sc_bufsize);
 		isa_dmamem_free(sc->sc_ic, sc->sc_drq, ringaddr,
@@ -241,7 +234,7 @@ satlinkattach(struct device *parent, struct device *self, void *aux)
 	/* Create the DMA map. */
 	if (isa_dmamap_create(sc->sc_ic, sc->sc_drq, sc->sc_bufsize,
 	    BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW)) {
-		printf("%s: can't create DMA map\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "can't create DMA map\n");
 		isa_dmamem_unmap(sc->sc_ic, sc->sc_drq, sc->sc_buf,
 		    sc->sc_bufsize);
 		isa_dmamem_free(sc->sc_ic, sc->sc_drq, ringaddr,
@@ -257,7 +250,8 @@ satlinkopen(dev_t dev, int flags, int fmt,
 	struct satlink_softc *sc;
 	int error;
 
-	sc = device_lookup(&satlink_cd, minor(dev));
+	sc = device_lookup_private(&satlink_cd, minor(dev));
+
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -288,8 +282,10 @@ int
 satlinkclose(dev_t dev, int flags, int fmt,
     struct lwp *l)
 {
-	struct satlink_softc *sc = device_lookup(&satlink_cd, minor(dev));
+	struct satlink_softc *sc;
 	int s;
+
+	sc = device_lookup_private(&satlink_cd, minor(dev));
 
 	s = splsoftclock();
 	sc->sc_flags &= ~SATF_ISOPEN;
@@ -307,9 +303,11 @@ satlinkread(dev, uio, flags)
 	struct uio *uio;
 	int flags;
 {
-	struct satlink_softc *sc = device_lookup(&satlink_cd, minor(dev));
+	struct satlink_softc *sc;
 	int error, s, count, sptr;
 	int wrapcnt, oresid;
+
+	sc = device_lookup_private(&satlink_cd, minor(dev));
 
 	s = splsoftclock();
 
@@ -378,7 +376,9 @@ int
 satlinkioctl(dev_t dev, u_long cmd, void *data, int flags,
     struct lwp *l)
 {
-	struct satlink_softc *sc = device_lookup(&satlink_cd, minor(dev));
+	struct satlink_softc *sc;
+
+	sc = device_lookup_private(&satlink_cd, minor(dev));
 
 	switch (cmd) {
 	case SATIORESET:
@@ -405,8 +405,10 @@ satlinkpoll(dev, events, l)
 	int events;
 	struct lwp *l;
 {
-	struct satlink_softc *sc = device_lookup(&satlink_cd, minor(dev));
+	struct satlink_softc *sc;
 	int s, revents;
+
+	sc = device_lookup_private(&satlink_cd, minor(dev));
 
 	revents = events & (POLLOUT | POLLWRNORM);
 
@@ -461,9 +463,11 @@ static const struct filterops satlink_seltrue_filtops =
 int
 satlinkkqfilter(dev_t dev, struct knote *kn)
 {
-	struct satlink_softc *sc = device_lookup(&satlink_cd, minor(dev));
+	struct satlink_softc *sc;
 	struct klist *klist;
 	int s;
+
+	sc = device_lookup_private(&satlink_cd, minor(dev));
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
@@ -477,7 +481,7 @@ satlinkkqfilter(dev_t dev, struct knote *kn)
 		break;
 
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = sc;
@@ -521,7 +525,7 @@ satlinktimeout(arg)
 	}
 
 	/* Wake up anyone blocked in poll... */
-	selnotify(&sc->sc_selq, 0);
+	selnotify(&sc->sc_selq, 0, 0);
 
  out:
 	callout_reset(&sc->sc_ch, SATLINK_TIMEOUT, satlinktimeout, sc);

@@ -1,4 +1,4 @@
-	$NetBSD: syscalls.master,v 1.21 2006/09/01 20:58:18 matt Exp $
+	$NetBSD: syscalls.master,v 1.29 2008/11/12 12:36:09 ad Exp $
 
 ;	@(#)syscalls.master	8.2 (Berkeley) 1/13/94
 
@@ -50,7 +50,7 @@
 #include <sys/systm.h>
 #include <sys/signal.h>
 #include <sys/mount.h>
-#include <sys/sa.h>
+#include <sys/sched.h>
 #include <sys/syscallargs.h>
 #include <compat/aoutm68k/aoutm68k_syscallargs.h>
 
@@ -62,7 +62,8 @@
 ; redistributions should be placed in the reserved range at the end
 ; of the current calls.
 
-0	INDIR		{ int sys_syscall(int number, ...); }
+0	NOARGS INDIR	{ int sys_syscall(int code, \
+			    ... register32_t args[AOUTM68K_SYS_MAXSYSARGS]); }
 1	NOARGS		{ void sys_exit(int rval); }
 2	NOARGS		{ int sys_fork(void); }
 3	NOARGS		{ ssize_t sys_read(int fd, void *buf, size_t nbyte); }
@@ -102,14 +103,14 @@
 #else
 19	EXCL		compat_43_sys_lseek
 #endif
-20	NOARGS MPSAFE	{ pid_t sys_getpid(void); }
-21	NOARGS		{ int sys_mount(const char *type, \
+20	NOARGS 		{ pid_t sys_getpid(void); }
+21	NOARGS		{ int compat_40_sys_mount(const char *type, \
 			    const char *path, int flags, void *data); }
 22	NOARGS		{ int sys_unmount(const char *path, int flags); }
 23	NOARGS		{ int sys_setuid(uid_t uid); }
 24	NOARGS		{ uid_t sys_getuid(void); }
 25	NOARGS		{ uid_t sys_geteuid(void); }
-26	NOARGS		{ int sys_ptrace(int req, pid_t pid, caddr_t addr, \
+26	NOARGS		{ int sys_ptrace(int req, pid_t pid, void *addr, \
 			    int data); }
 27	NOARGS		{ ssize_t sys_recvmsg(int s, struct msghdr *msg, \
 			    int flags); }
@@ -145,7 +146,7 @@
 41	NOARGS		{ int sys_dup(int fd); }
 42	NOARGS		{ int sys_pipe(void); }
 43	NOARGS		{ gid_t sys_getegid(void); }
-44	NOARGS		{ int sys_profil(caddr_t samples, size_t size, \
+44	NOARGS		{ int sys_profil(void *samples, size_t size, \
 			    u_long offset, u_int scale); }
 #if defined(KTRACE) || !defined(_KERNEL)
 45	NOARGS		{ int sys_ktrace(const char *fname, int ops, \
@@ -206,7 +207,7 @@
 64	EXCL		compat_43_sys_getpagesize
 #endif
 #if defined(COMPAT_12) || !defined(_KERNEL)
-65	NOARGS		{ int compat_12_sys_msync(caddr_t addr, size_t len); }
+65	NOARGS		{ int compat_12_sys_msync(void *addr, size_t len); }
 #else
 65	EXCL		compat_12_sys_msync
 #endif
@@ -217,7 +218,7 @@
 69	NOARGS		{ int sys_sbrk(intptr_t incr); }
 70	NOARGS		{ int sys_sstk(int incr); }
 #if defined(COMPAT_43) || !defined(_KERNEL)
-71	NOARGS		{ int compat_43_sys_mmap(caddr_t addr, size_t len, \
+71	NOARGS		{ int compat_43_sys_mmap(void *addr, size_t len, \
 			    int prot, int flags, int fd, long pos); } ommap
 #else
 71	EXCL		compat_43_sys_mmap
@@ -230,7 +231,7 @@
 			    int behav); }
 76	OBSOL		vhangup
 77	OBSOL		vlimit
-78	NOARGS		{ int sys_mincore(caddr_t addr, size_t len, \
+78	NOARGS		{ int sys_mincore(void *addr, size_t len, \
 			    char *vec); }
 79	NOARGS		{ int sys_getgroups(int gidsetsize, \
 			    gid_t *gidset); }
@@ -277,16 +278,16 @@
 98	NOARGS		{ int sys_connect(int s, const struct sockaddr *name, \
 			    int namelen); }
 #if defined(COMPAT_43) || !defined(_KERNEL)
-99	NOARGS		{ int compat_43_sys_accept(int s, caddr_t name, \
+99	NOARGS		{ int compat_43_sys_accept(int s, void *name, \
 			    int *anamelen); } oaccept
 #else
 99	EXCL		compat_43_sys_accept
 #endif
 100	NOARGS		{ int sys_getpriority(int which, int who); }
 #if defined(COMPAT_43) || !defined(_KERNEL)
-101	NOARGS		{ int compat_43_sys_send(int s, caddr_t buf, int len, \
+101	NOARGS		{ int compat_43_sys_send(int s, void *buf, int len, \
 			    int flags); } osend
-102	NOARGS		{ int compat_43_sys_recv(int s, caddr_t buf, int len, \
+102	NOARGS		{ int compat_43_sys_recv(int s, void *buf, int len, \
 			    int flags); } orecv
 #else
 101	EXCL		compat_43_sys_send
@@ -324,7 +325,7 @@
 			    struct sigstack *oss); } osigstack
 113	NOARGS		{ int compat_43_sys_recvmsg(int s, \
 			    struct omsghdr *msg, int flags); } orecvmsg
-114	NOARGS		{ int compat_43_sys_sendmsg(int s, caddr_t msg, \
+114	NOARGS		{ int compat_43_sys_sendmsg(int s, void *msg, \
 			    int flags); } osendmsg
 #else
 112	EXCL		compat_43_sys_sigstack
@@ -347,8 +348,8 @@
 123	NOARGS		{ int sys_fchown(int fd, uid_t uid, gid_t gid); }
 124	NOARGS		{ int sys_fchmod(int fd, mode_t mode); }
 #if defined(COMPAT_43) || !defined(_KERNEL)
-125	NOARGS		{ int compat_43_sys_recvfrom(int s, caddr_t buf, \
-			    size_t len, int flags, caddr_t from, \
+125	NOARGS		{ int compat_43_sys_recvfrom(int s, void *buf, \
+			    size_t len, int flags, void *from, \
 			    int *fromlenaddr); } orecvfrom
 #else
 125	EXCL		compat_43_sys_recvfrom
@@ -381,7 +382,7 @@
 140	NOARGS		{ int sys_adjtime(const struct timeval *delta, \
 			    struct timeval *olddelta); }
 #if defined(COMPAT_43) || !defined(_KERNEL)
-141	NOARGS		{ int compat_43_sys_getpeername(int fdes, caddr_t asa, \
+141	NOARGS		{ int compat_43_sys_getpeername(int fdes, void *asa, \
 			    int *alen); } ogetpeername
 142	NOARGS		{ int32_t compat_43_sys_gethostid(void); } ogethostid
 143	NOARGS		{ int compat_43_sys_sethostid(int32_t hostid); } \
@@ -402,10 +403,10 @@
 #endif
 147	NOARGS		{ int sys_setsid(void); }
 148	NOARGS		{ int sys_quotactl(const char *path, \
-			    int cmd, int uid, caddr_t arg); }
+			    int cmd, int uid, void *arg); }
 #if defined(COMPAT_43) || !defined(_KERNEL)
 149	NOARGS		{ int compat_43_sys_quota(void); } oquota
-150	NOARGS		{ int compat_43_sys_getsockname(int fdec, caddr_t asa, \
+150	NOARGS		{ int compat_43_sys_getsockname(int fdec, void *asa, \
 			    int *alen); } ogetsockname
 #else
 149	EXCL		compat_43_sys_quota
@@ -545,7 +546,8 @@
 #endif
 197	NOARGS		{ void *sys_mmap(void *addr, size_t len, int prot, \
 			    int flags, int fd, long pad, off_t pos); }
-198	INDIR		{ quad_t sys___syscall(quad_t num, ...); }
+198	NOARGS INDIR	{ quad_t sys___syscall(quad_t code, \
+			    ... register32_t args[AOUTM68K_SYS_MAXSYSARGS]); }
 199	NOARGS		{ off_t sys_lseek(int fd, int pad, off_t offset, \
 			    int whence); }
 200	NOARGS		{ int sys_truncate(const char *path, int pad, \
@@ -563,32 +565,16 @@
 208	NOARGS		{ int sys_reboot(int opt, char *bootstr); }
 209	NOARGS		{ int sys_poll(struct pollfd *fds, u_int nfds, \
 			    int timeout); }
-;
-; Syscalls 210-219 are reserved for dynamically loaded syscalls
-;
-#if defined(LKM) || !defined(_KERNEL)
-210	NODEF		{ int sys_lkmnosys(void); }
-211	NODEF		{ int sys_lkmnosys(void); }
-212	NODEF		{ int sys_lkmnosys(void); }
-213	NODEF		{ int sys_lkmnosys(void); }
-214	NODEF		{ int sys_lkmnosys(void); }
-215	NODEF		{ int sys_lkmnosys(void); }
-216	NODEF		{ int sys_lkmnosys(void); }
-217	NODEF		{ int sys_lkmnosys(void); }
-218	NODEF		{ int sys_lkmnosys(void); }
-219	NODEF		{ int sys_lkmnosys(void); }
-#else	/* !LKM */
-210	EXCL		lkmnosys
-211	EXCL		lkmnosys
-212	EXCL		lkmnosys
-213	EXCL		lkmnosys
-214	EXCL		lkmnosys
-215	EXCL		lkmnosys
-216	EXCL		lkmnosys
-217	EXCL		lkmnosys
-218	EXCL		lkmnosys
-219	EXCL		lkmnosys
-#endif	/* !LKM */
+210	UNIMPL
+211	UNIMPL
+212	UNIMPL
+213	UNIMPL
+214	UNIMPL
+215	UNIMPL
+216	UNIMPL
+217	UNIMPL
+218	UNIMPL
+219	UNIMPL
 ; System calls 220-300 are reserved for use by NetBSD
 #if defined(SYSVSEM) || !defined(_KERNEL)
 #if defined(COMPAT_14) || !defined(_KERNEL)

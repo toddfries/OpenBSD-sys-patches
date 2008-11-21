@@ -1,9 +1,5 @@
-#	$OpenBSD: Makefile,v 1.6 2005/11/04 01:02:31 uwe Exp $
+#	$NetBSD: Makefile,v 1.1 2007/08/09 16:08:59 nonaka Exp $
 
-SUBDIR= zboot
-
-.if ${MACHINE} == "zaurus"
-SUBDIR+= zbsdmod
-.endif
+SUBDIR=	zbsdmod
 
 .include <bsd.subdir.mk>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pm_direct.h,v 1.11 2007/02/18 19:33:48 gwk Exp $	*/
-/*	$NetBSD: pm_direct.h,v 1.5 1999/07/12 15:54:55 tsubai Exp $	*/
+/*	$NetBSD: pm_direct.h,v 1.11 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * Copyright (C) 1997 Takashi Hamada
@@ -31,8 +30,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /* From: pm_direct.h 1.0 01/02/97 Takashi Hamada */
-#ifndef _PM_DIRECT_H_
-#define _PM_DIRECT_H_
 
 /*
  * Public declarations that other routines may need.
@@ -44,17 +41,17 @@ typedef	struct	{
 	short	num_data;	/* number of data			*/
 	char	*s_buf;		/* pointer to buffer for sending 	*/
 	char	*r_buf;		/* pointer to buffer for receiving	*/
-	char	data[32];	/* data buffer (is it too much?)	*/
+	char	data[128];	/* data buffer (is it too much?)	*/
+				/* null command seen w/ 120 data bytes  */
 }	PMData;
 
-int	pmgrop(PMData *);
-int	pm_adb_op(u_char *, void *, void *, int);
-void	pm_adb_restart(void);
-void	pm_adb_poweroff(void);
-void	pm_intr(void);
-void	pm_read_date_time(time_t *);
-void	pm_set_date_time(time_t);
-void	pm_setup_adb(void);
+int pmgrop __P((PMData *));
+int pm_intr __P((void *));
+void pm_init __P((void));
+void pm_adb_restart __P((void));
+void pm_adb_poweroff __P((void));
+void pm_read_date_time __P((u_long *));
+void pm_set_date_time __P((u_long));
 
 struct pmu_battery_info
 {
@@ -63,15 +60,19 @@ struct pmu_battery_info
 	unsigned int max_charge;
 	signed   int draw;
 	unsigned int voltage;
+	unsigned int secs_remaining;
 };
 
-int pm_battery_info(int, struct pmu_battery_info *);
+int pm_battery_info __P((int, struct pmu_battery_info *));
 
-void pm_eject_pcmcia(int);
-void pmu_fileserver_mode(int);
+int pm_read_nvram __P((int));
+void pm_write_nvram __P((int, int));
+int pm_read_brightness __P((void));
+void pm_set_brightness __P((int));
+void pm_init_brightness __P((void));
+void pm_eject_pcmcia __P((int));
 
 /* PMU commands */
-#define PMU_RESET_ADB		0x00	/* Reset ADB */
 #define PMU_POWER_OFF		0x7e	/* Turn Power off */
 #define PMU_RESET_CPU		0xd0	/* Reset CPU */
 
@@ -92,9 +93,20 @@ void pmu_fileserver_mode(int);
 #define PMU_POWER_EVENTS        0x8f    /* Send power-event commands to PMU */
 #define PMU_SYSTEM_READY        0xdf    /* tell PMU we are awake */
 
+#define PMU_BATTERY_STATE	0x6b	/* Read old battery state */
 #define PMU_SMART_BATTERY_STATE	0x6f	/* Read battery state */
 
-#define PMU_I2C			0x9a	/* I2C */
+#define PMU_ADB_CMD		0x20	/* Send ADB packet */
+#define PMU_ADB_POLL_OFF	0x21	/* Disable ADB auto-poll */
+#define PMU_SET_VOL		0x40	/* Set volume button position */
+#define PMU_GET_VOL		0x48	/* Get volume button position */
+#define PMU_SET_IMASK		0x70	/* Set interrupt mask */
+#define PMU_INT_ACK		0x78	/* Read interrupt bits */
+#define PMU_CPU_SPEED		0x7d	/* Control CPU speed on some models */
+#define PMU_SLEEP		0x7f	/* Put CPU to sleep */
+#define PMU_I2C_CMD		0x9a	/* i2c commands */
+#define PMU_GET_LID_STATE	0xdc	/* Report lid state */
+#define PMU_GET_VERSION		0xea	/* Identify thyself */
 
 /* Bits in PMU interrupt and interrupt mask bytes */
 #define PMU_INT_ADB_AUTO	0x04	/* ADB autopoll, when PMU_INT_ADB */
@@ -104,7 +116,6 @@ void pmu_fileserver_mode(int);
 #define PMU_INT_BATTERY		0x20
 #define PMU_INT_WAKEUP		0x40
 #define PMU_INT_TICK		0x80	/* 1-second tick interrupt */
-#define PMU_INT_ALL		0xff	/* Mask of all interrupts */
 
 /* Bits to use with the PMU_POWER_CTRL0 command */
 #define PMU_POW0_ON		0x80	/* OR this to power ON the device */
@@ -118,6 +129,9 @@ void pmu_fileserver_mode(int);
 #define PMU_POW_IRLED		0x04	/* IR led power (on wallstreet) */
 #define PMU_POW_MEDIABAY	0x08	/* media bay power (wallstreet/lombard ?) */
 
+/* Bits from PMU_GET_LID_STATE or PMU_INT_ENVIRONMENT on core99 */
+#define PMU_ENV_LID_CLOSED	0x01	/* The lid is closed */
+
 /* PMU PMU_POWER_EVENTS commands */
 enum {
 	PMU_PWR_GET_POWERUP_EVENTS      = 0x00,
@@ -128,22 +142,10 @@ enum {
 	PMU_PWR_CLR_WAKEUP_EVENTS       = 0x05,
 };
 
-/* PMU WAKE ON EVENTS */
-
-#define PMU_WAKE_KEYB		0x01
-#define PMU_WAKE_AC_LOSS	0x02
-#define PMU_WAKE_AC_CHG		0x04
-#define PMU_WAKE_LID		0x08
-#define PMU_WAKE_RING		0x10
-
 /* PMU Power Information */
 
 #define PMU_PWR_AC_PRESENT	(1 << 0)
+#define PMU_PWR_BATT_CHARGING	(1 << 1)
 #define PMU_PWR_BATT_PRESENT	(1 << 2)
+#define PMU_PWR_PCHARGE_RESET	(1 << 6)
 
-/* PMU I2C */
-#define PMU_I2C_SIMPLE		0x00
-#define PMU_I2C_NORMAL		0x01
-#define PMU_I2C_COMBINED	0x02
-
-#endif

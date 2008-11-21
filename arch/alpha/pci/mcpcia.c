@@ -1,5 +1,4 @@
-/* $OpenBSD: mcpcia.c,v 1.2 2007/10/08 04:15:15 krw Exp $ */
-/* $NetBSD: mcpcia.c,v 1.20 2007/03/04 05:59:11 christos Exp $ */
+/* $NetBSD: mcpcia.c,v 1.22 2008/06/12 12:09:23 dogcow Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,6 +66,9 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: mcpcia.c,v 1.22 2008/06/12 12:09:23 dogcow Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -89,7 +84,7 @@
 #include <alpha/pci/mcpciavar.h>
 #include <alpha/pci/pci_kn300.h>
 
-#define KV(_addr)	((caddr_t)ALPHA_PHYS_TO_K0SEG((_addr)))
+#define KV(_addr)	((void *)ALPHA_PHYS_TO_K0SEG((_addr)))
 #define	MCPCIA_SYSBASE(mc)	\
 	((((unsigned long) (mc)->cc_gid) << MCBUS_GID_SHIFT) | \
 	 (((unsigned long) (mc)->cc_mid) << MCBUS_MID_SHIFT) | \
@@ -101,19 +96,12 @@
 	 (MCBUS_IOSPACE) | MCPCIA_PCI_BRIDGE | _MCPCIA_PCI_REV)), \
 	sizeof(u_int32_t))
 
-int	mcpciamatch (struct device *, void *, void *);
-void	mcpciaattach (struct device *, struct device *, void *);
-void	mcpcia_config_cleanup (void);
+static int	mcpciamatch __P((struct device *, struct cfdata *, void *));
+static void	mcpciaattach __P((struct device *, struct device *, void *));
+CFATTACH_DECL(mcpcia, sizeof(struct mcpcia_softc),
+    mcpciamatch, mcpciaattach, NULL, NULL);
 
-int	mcpciaprint (void *, const char *);
-
-struct cfattach mcpcia_ca = {
-	sizeof(struct mcpcia_softc), mcpciamatch, mcpciaattach
-};
-
-struct cfdriver mcpcia_cd = {
-        NULL, "mcpcia", DV_DULL,
-};
+void	mcpcia_init0 __P((struct mcpcia_config *, int));
 
 /*
  * We have one statically-allocated mcpcia_config structure; this is
@@ -122,34 +110,22 @@ struct cfdriver mcpcia_cd = {
  */
 struct mcpcia_config mcpcia_console_configuration;
 
-int
-mcpciaprint(aux, pnp)
-       void *aux;
-       const char *pnp;
-{
-       register struct pcibus_attach_args *pba = aux;
-       /* only PCIs can attach to MCPCIA for now */
-       if (pnp)
-               printf("%s at %s", pba->pba_busname, pnp);
-       printf(" bus %d", pba->pba_bus);
-       return (UNCONF);
-}
+int	mcpcia_bus_get_window __P((int, int,
+	    struct alpha_bus_space_translation *abst));
 
-int
+static int
 mcpciamatch(parent, cf, aux)
 	struct device *parent;
-	void *cf;
+	struct cfdata *cf;
 	void *aux;
 {
 	struct mcbus_dev_attach_args *ma = aux;
-
 	if (ma->ma_type == MCBUS_TYPE_PCI)
 		return (1);
-
 	return (0);
 }
 
-void
+static void
 mcpciaattach(parent, self, aux)
 	struct device *parent;
 	struct device *self;
@@ -179,11 +155,13 @@ mcpciaattach(parent, self, aux)
 	    ma->ma_gid == mcpcia_console_configuration.cc_gid)
 		ccp = &mcpcia_console_configuration;
 	else {
-		ccp = malloc(sizeof(*ccp), M_DEVBUF, M_WAITOK | M_ZERO);
+		ccp = malloc(sizeof(struct mcpcia_config), M_DEVBUF, M_WAITOK);
+		memset(ccp, 0, sizeof(struct mcpcia_config));
 
 		ccp->cc_mid = ma->ma_mid;
 		ccp->cc_gid = ma->ma_gid;
 	}
+
 	mcp->mcpcia_cc = ccp;
 	ccp->cc_sc = mcp;
 
@@ -207,17 +185,17 @@ mcpciaattach(parent, self, aux)
 	/*
 	 * Attach PCI bus
 	 */
-	pba.pba_busname = "pci";
 	pba.pba_iot = &ccp->cc_iot;
 	pba.pba_memt = &ccp->cc_memt;
-	pba.pba_dmat =
+	pba.pba_dmat =	/* start with direct, may change... */
 	    alphabus_dma_get_tag(&ccp->cc_dmat_direct, ALPHA_BUS_PCI);
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &ccp->cc_pc;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
-
-	(void) config_found(self, &pba, mcpciaprint);
+	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED |
+	    PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY | PCI_FLAGS_MWI_OKAY;
+	(void) config_found_ia(self, "pcibus", &pba, pcibusprint);
 
 	/*
 	 * Clear any errors that may have occurred during the probe
@@ -239,6 +217,7 @@ mcpcia_init()
 	 * only one that can be used for the console.  Once we find
 	 * that one, initialize it.
 	 */
+
 	for (i = 0; i < MCPCIA_PER_MCBUS; i++) {
 		ccp->cc_mid = mcbus_mcpcia_probe_order[i];
 		/*
@@ -255,6 +234,11 @@ mcpcia_init()
 
 		if (EISA_PRESENT(REGVAL(MCPCIA_PCI_REV(ccp)))) {
 			mcpcia_init0(ccp, 0);
+
+			alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 2;
+			alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 3;
+
+			alpha_bus_get_window = mcpcia_bus_get_window;
 			return;
 		}
 	}
@@ -268,15 +252,8 @@ mcpcia_init0(ccp, mallocsafe)
 	int mallocsafe;
 {
 	u_int32_t ctl;
-	
-	snprintf(ccp->pc_io_ex_name, sizeof ccp->pc_io_ex_name,
-	    "mcpcia%d_bus_io", ccp->cc_mid);
-	snprintf(ccp->pc_mem_dex_name, sizeof ccp->pc_mem_dex_name,
-	    "mcpciad%d_bus_mem", ccp->cc_mid);
-	snprintf(ccp->pc_mem_dex_name, sizeof ccp->pc_mem_sex_name,
-	    "mcpcias%d_bus_mem", ccp->cc_mid);
 
-	if (!ccp->cc_initted) {
+	if (ccp->cc_initted == 0) {
 		/* don't do these twice since they set up extents */
 		mcpcia_bus_io_init(&ccp->cc_iot, ccp);
 		mcpcia_bus_mem_init(&ccp->cc_memt, ccp);
@@ -285,42 +262,49 @@ mcpcia_init0(ccp, mallocsafe)
 
 	mcpcia_pci_init(&ccp->cc_pc, ccp);
 
-        /*
-         * Establish a precalculated base for convenience's sake.
-         */
-        ccp->cc_sysbase = MCPCIA_SYSBASE(ccp);
+	/*
+	 * Establish a precalculated base for convenience's sake.
+	 */
+	ccp->cc_sysbase = MCPCIA_SYSBASE(ccp);
 
-        /*
-         * Disable interrupts and clear errors prior to probing
-         */
-        REGVAL(MCPCIA_INT_MASK0(ccp)) = 0;
-        REGVAL(MCPCIA_INT_MASK1(ccp)) = 0;
-        REGVAL(MCPCIA_CAP_ERR(ccp)) = 0xFFFFFFFF;
-        alpha_mb();
+	/*
+ 	 * Disable interrupts and clear errors prior to probing
+	 */
+	REGVAL(MCPCIA_INT_MASK0(ccp)) = 0;
+	REGVAL(MCPCIA_INT_MASK1(ccp)) = 0;
+	REGVAL(MCPCIA_CAP_ERR(ccp)) = 0xFFFFFFFF;
+	alpha_mb();
 
-        if (ccp == &mcpcia_console_configuration) {
-                /*
-                 * Use this opportunity to also find out the MID and CPU
-                 * type of the currently running CPU (that's us, billybob....)
-                 */
-                ctl = REGVAL(MCPCIA_WHOAMI(ccp));
-                mcbus_primary.mcbus_cpu_mid = MCBUS_CPU_MID(ctl);
-                if ((MCBUS_CPU_INFO(ctl) & CPU_Fill_Err) == 0 &&
-                    mcbus_primary.mcbus_valid == 0) {
-                        mcbus_primary.mcbus_bcache =
-                            MCBUS_CPU_INFO(ctl) & CPU_BCacheMask;
-                        mcbus_primary.mcbus_valid = 1;
-                }
-                alpha_mb();
-        }
+	if (ccp == &mcpcia_console_configuration) {
+		/*
+		 * Use this opportunity to also find out the MID and CPU
+		 * type of the currently running CPU (that's us, billybob....)
+		 */
+		ctl = REGVAL(MCPCIA_WHOAMI(ccp));
+		mcbus_primary.mcbus_cpu_mid = MCBUS_CPU_MID(ctl);
+		if ((MCBUS_CPU_INFO(ctl) & CPU_Fill_Err) == 0 &&
+		    mcbus_primary.mcbus_valid == 0) {
+			mcbus_primary.mcbus_bcache =
+			    MCBUS_CPU_INFO(ctl) & CPU_BCacheMask;
+			mcbus_primary.mcbus_valid = 1;
+		}
+		alpha_mb();
+	}
 
-	alpha_pci_chipset = &ccp->cc_pc;
-	alpha_pci_chipset->pc_name = "mcpcia";
-	alpha_pci_chipset->pc_hae_mask = 0;
-	alpha_pci_chipset->pc_dense = MCPCIA_PCI_DENSE;
-	
-        ccp->cc_initted = 1;
+	ccp->cc_initted = 1;
 }
+
+#ifdef TEST_PROBE_DEATH
+static void
+die_heathen_dog(arg)
+	void *arg;
+{
+	struct mcpcia_config *ccp = arg;
+
+	/* this causes a fatal machine check (0x670) */
+	REGVAL(MCPCIA_CAP_DIAG(ccp)) |= CAP_DIAG_MC_ADRPE;
+}
+#endif
 
 void
 mcpcia_config_cleanup()
@@ -335,7 +319,7 @@ mcpcia_config_cleanup()
 	 * Turn on Hard, Soft error interrupts. Maybe i2c too.
 	 */
 	for (i = 0; i < mcpcia_cd.cd_ndevs; i++) {
-		if ((mcp = mcpcia_cd.cd_devs[i]) == NULL)
+		if ((mcp = device_lookup_private(&mcpcia_cd, i)) == NULL)
 			continue;
 		
 		ccp = mcp->mcpcia_cc;
@@ -350,4 +334,32 @@ mcpcia_config_cleanup()
 		/* force stall while write completes */
 		ctl = REGVAL(MCPCIA_INT_MASK0(ccp));
 	}
+#ifdef TEST_PROBE_DEATH
+	(void) timeout (die_heathen_dog, &mcpcia_console_configuration,
+	    30 * hz);
+#endif
+}
+
+int
+mcpcia_bus_get_window(type, window, abst)
+	int type, window;
+	struct alpha_bus_space_translation *abst;
+{
+	struct mcpcia_config *ccp = &mcpcia_console_configuration;
+	bus_space_tag_t st;
+
+	switch (type) {
+	case ALPHA_BUS_TYPE_PCI_IO:
+		st = &ccp->cc_iot;
+		break;
+
+	case ALPHA_BUS_TYPE_PCI_MEM:
+		st = &ccp->cc_memt;
+		break;
+
+	default:
+		panic("mcpcia_bus_get_window");
+	}
+
+	return (alpha_bus_space_get_window(st, window, abst));
 }

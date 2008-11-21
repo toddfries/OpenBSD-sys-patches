@@ -1,4 +1,4 @@
-/* $NetBSD: xenbus_client.c,v 1.5 2006/06/25 16:46:59 bouyer Exp $ */
+/* $NetBSD: xenbus_client.c,v 1.9 2008/09/05 13:37:24 tron Exp $ */
 /******************************************************************************
  * Client-facing interface for the Xenbus driver.  In other words, the
  * interface between the Xenbus and the device-specific code, be it the
@@ -29,11 +29,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xenbus_client.c,v 1.5 2006/06/25 16:46:59 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xenbus_client.c,v 1.9 2008/09/05 13:37:24 tron Exp $");
 
 #if 0
 #define DPRINTK(fmt, args...) \
-    printk("xenbus_client (%s:%d) " fmt ".\n", __FUNCTION__, __LINE__, ##args)
+    printk("xenbus_client (%s:%d) " fmt ".\n", __func__, __LINE__, ##args)
 #else
 #define DPRINTK(fmt, args...) ((void)0)
 #endif
@@ -46,9 +46,11 @@ __KERNEL_RCSID(0, "$NetBSD: xenbus_client.c,v 1.5 2006/06/25 16:46:59 bouyer Exp
 
 #include <machine/stdarg.h>
 
-#include <machine/evtchn.h>
-#include <machine/xenbus.h>
-#include <machine/granttables.h>
+#include <xen/xen.h>
+#include <xen/hypervisor.h>
+#include <xen/evtchn.h>
+#include <xen/xenbus.h>
+#include <xen/granttables.h>
 
 
 int
@@ -239,8 +241,12 @@ xenbus_alloc_evtchn(struct xenbus_device *dev, int *port)
 {
 	evtchn_op_t op = {
 		.cmd = EVTCHNOP_alloc_unbound,
-		.u.alloc_unbound.dom = DOMID_SELF,
-		.u.alloc_unbound.remote_dom = dev->xbusd_otherend_id };
+		.u.alloc_unbound = {
+			.dom = DOMID_SELF,
+			.remote_dom = dev->xbusd_otherend_id,
+			.port = 0
+		}
+	};
 
 	int err = HYPERVISOR_event_channel_op(&op);
 	if (err)

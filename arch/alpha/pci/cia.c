@@ -1,5 +1,4 @@
-/* $OpenBSD: cia.c,v 1.23 2006/12/14 17:36:12 kettenis Exp $ */
-/* $NetBSD: cia.c,v 1.56 2000/06/29 08:58:45 mrg Exp $ */
+/* $NetBSD: cia.c,v 1.65 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,15 +57,28 @@
  * rights to redistribute these changes.
  */
 
+#include "opt_dec_eb164.h"
+#include "opt_dec_kn20aa.h"
+#include "opt_dec_550.h"
+#include "opt_dec_1000a.h"
+#include "opt_dec_1000.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: cia.c,v 1.65 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
+
 #include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/rpb.h>
+#include <machine/sysarch.h>
+#include <machine/alpha.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -99,18 +104,16 @@
 #include <alpha/pci/pci_1000.h>
 #endif
 
-int	ciamatch(struct device *, void *, void *);
-void	ciaattach(struct device *, struct device *, void *);
+int	ciamatch __P((struct device *, struct cfdata *, void *));
+void	ciaattach __P((struct device *, struct device *, void *));
 
-struct cfattach cia_ca = {
-	sizeof(struct device), ciamatch, ciaattach,
-};
+CFATTACH_DECL(cia, sizeof(struct cia_softc),
+    ciamatch, ciaattach, NULL, NULL);
 
-struct cfdriver cia_cd = {
-	NULL, "cia", DV_DULL,
-};
+extern struct cfdriver cia_cd;
 
-static int	ciaprint(void *, const char *pnp);
+int	cia_bus_get_window __P((int, int,
+	    struct alpha_bus_space_translation *));
 
 /* There can be only one. */
 int ciafound;
@@ -136,11 +139,11 @@ struct cia_config cia_configuration;
 #endif
 
 #ifndef	CIA_BUS_USE_BWX
-#define	CIA_BUS_USE_BWX	1
+#define	CIA_BUS_USE_BWX	0
 #endif
 
 #ifndef CIA_PYXIS_FORCE_BWX
-#define	CIA_PYXIS_FORCE_BWX 1
+#define	CIA_PYXIS_FORCE_BWX 0
 #endif
 
 int	cia_pci_use_bwx = CIA_PCI_USE_BWX;
@@ -150,7 +153,7 @@ int	cia_pyxis_force_bwx = CIA_PYXIS_FORCE_BWX;
 int
 ciamatch(parent, match, aux)
 	struct device *parent;
-	void *match;
+	struct cfdata *match;
 	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
@@ -204,11 +207,10 @@ cia_init(ccp, mallocsafe)
 	/*
 	 * Use BWX iff:
 	 *
-	 *	- It hasn't been disabled by the user,
+	 *	- It hasn't been disbled by the user,
 	 *	- it's enabled in CNFG,
 	 *	- we're implementation version ev5,
-	 *	- BWX is enabled in the CPU's capabilities mask (yes,
-	 *	  the bit is really cleared if the capability exists...)
+	 *	- BWX is enabled in the CPU's capabilities mask
 	 */
 	if ((pci_use_bwx || bus_use_bwx) &&
 	    (ccp->cc_cnfg & CNFG_BWEN) != 0 &&
@@ -238,27 +240,30 @@ cia_init(ccp, mallocsafe)
 		if (ccp->cc_flags & CCF_BUS_USE_BWX) {
 			cia_bwx_bus_io_init(&ccp->cc_iot, ccp);
 			cia_bwx_bus_mem_init(&ccp->cc_memt, ccp);
+
+			/*
+			 * We have one window for both PCI I/O and MEM
+			 * in BWX mode.
+			 */
+			alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 1;
+			alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 1;
 		} else {
-			cia_bus_io_init(&ccp->cc_iot, ccp);
-			cia_bus_mem_init(&ccp->cc_memt, ccp);
+			cia_swiz_bus_io_init(&ccp->cc_iot, ccp);
+			cia_swiz_bus_mem_init(&ccp->cc_memt, ccp);
+
+			/*
+			 * We have two I/O windows and 4 MEM windows in
+			 * SWIZ mode.
+			 */
+			alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 2;
+			alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 4;
 		}
+		alpha_bus_get_window = cia_bus_get_window;
 	}
 	ccp->cc_mallocsafe = mallocsafe;
 
 	cia_pci_init(&ccp->cc_pc, ccp);
 	alpha_pci_chipset = &ccp->cc_pc;
-	alpha_pci_chipset->pc_name = "cia";
-	alpha_pci_chipset->pc_dense = CIA_PCI_DENSE;
-	alpha_pci_chipset->pc_hae_mask = 7L << 29;
-	if (ccp->cc_flags & CCF_BUS_USE_BWX) {
-		alpha_pci_chipset->pc_mem = CIA_EV56_BWMEM;
-		alpha_pci_chipset->pc_ports = CIA_EV56_BWIO;
-		alpha_pci_chipset->pc_bwx = 1;
-	} else {
-		alpha_pci_chipset->pc_mem = CIA_PCI_SMEM1;
-		alpha_pci_chipset->pc_ports = CIA_PCI_SIO1;
-		alpha_pci_chipset->pc_bwx = 0;
-	}
 
 	ccp->cc_initted = 1;
 }
@@ -268,8 +273,10 @@ ciaattach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
+	struct cia_softc *sc = (struct cia_softc *)self;
 	struct cia_config *ccp;
 	struct pcibus_attach_args pba;
+	char bits[64];
 	const char *name;
 	int pass;
 
@@ -281,7 +288,7 @@ ciaattach(parent, self, aux)
 	 * (maybe), but we must do it here as well to take care of things
 	 * that need to use memory allocation.
 	 */
-	ccp = &cia_configuration;
+	ccp = sc->sc_ccp = &cia_configuration;
 	cia_init(ccp, 1);
 
 	if (ccp->cc_flags & CCF_ISPYXIS) {
@@ -294,10 +301,10 @@ ciaattach(parent, self, aux)
 
 	printf(": DECchip 2117x Core Logic Chipset (%s), pass %d\n",
 	    name, pass);
-
 	if (ccp->cc_cnfg)
-		printf("%s: extended capabilities: %b\n", self->dv_xname,
-		    ccp->cc_cnfg, CIA_CSR_CNFG_BITS);
+		printf("%s: extended capabilities: %s\n", self->dv_xname,
+		    bitmask_snprintf(ccp->cc_cnfg, CIA_CSR_CNFG_BITS,
+		    bits, sizeof(bits)));
 
 	switch (ccp->cc_flags & (CCF_PCI_USE_BWX|CCF_BUS_USE_BWX)) {
 	case CCF_PCI_USE_BWX|CCF_BUS_USE_BWX:
@@ -394,37 +401,43 @@ ciaattach(parent, self, aux)
 		panic("ciaattach: shouldn't be here, really...");
 	}
 
-	pba.pba_busname = "pci";
 	pba.pba_iot = &ccp->cc_iot;
 	pba.pba_memt = &ccp->cc_memt;
-	pba.pba_dmat = 
+	pba.pba_dmat =
 	    alphabus_dma_get_tag(&ccp->cc_dmat_direct, ALPHA_BUS_PCI);
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &ccp->cc_pc;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
-
-#ifdef notyet
 	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED;
 	if ((ccp->cc_flags & CCF_PYXISBUG) == 0)
 		pba.pba_flags |= PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY |
 		    PCI_FLAGS_MWI_OKAY;
-#endif
-	config_found(self, &pba, ciaprint);
+	config_found_ia(self, "pcibus", &pba, pcibusprint);
 }
 
-static int
-ciaprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+int
+cia_bus_get_window(type, window, abst)
+	int type, window;
+	struct alpha_bus_space_translation *abst;
 {
-	register struct pcibus_attach_args *pba = aux;
+	struct cia_config *ccp = &cia_configuration;
+	bus_space_tag_t st;
 
-	/* only PCIs can attach to CIAs; easy. */
-	if (pnp)
-		printf("%s at %s", pba->pba_busname, pnp);
-	printf(" bus %d", pba->pba_bus);
-	return (UNCONF);
+	switch (type) {
+	case ALPHA_BUS_TYPE_PCI_IO:
+		st = &ccp->cc_iot;
+		break;
+
+	case ALPHA_BUS_TYPE_PCI_MEM:
+		st = &ccp->cc_memt;
+		break;
+
+	default:
+		panic("cia_bus_get_window");
+	}
+
+	return (alpha_bus_space_get_window(st, window, abst));
 }
 
 void

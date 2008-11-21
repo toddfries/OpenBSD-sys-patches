@@ -1,5 +1,4 @@
-/* $OpenBSD: pte.h,v 1.8 2000/11/08 21:27:23 ericj Exp $ */
-/* $NetBSD: pte.h,v 1.26 1999/04/09 00:38:11 thorpej Exp $ */
+/* $NetBSD: pte.h,v 1.30 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -86,7 +78,6 @@
 
 typedef	alpha_pt_entry_t	pt_entry_t;
 
-#define	PT_ENTRY_NULL	((pt_entry_t *) 0)
 #define	PTESHIFT	3			/* pte size == 1 << PTESHIFT */
 
 #define	PG_V		ALPHA_PTE_VALID
@@ -100,12 +91,12 @@ typedef	alpha_pt_entry_t	pt_entry_t;
 #define	PG_URE		ALPHA_PTE_UR
 #define	PG_KWE		ALPHA_PTE_KW
 #define	PG_UWE		ALPHA_PTE_UW
-#define	PG_PROT		ALPHA_PTE_PROT
+#define	PG_PROT		(ALPHA_PTE_PROT | PG_EXEC | PG_FOE)
 #define	PG_RSVD		0x000000000000cc80	/* Reserved for hardware */
 #define	PG_WIRED	0x0000000000010000	/* Wired. [SOFTWARE] */
 #define	PG_PVLIST	0x0000000000020000	/* on pv list [SOFTWARE] */
 #define	PG_EXEC		0x0000000000040000	/* execute perms [SOFTWARE] */
-#define	PG_FRAME	ALPHA_PTE_RAME
+#define	PG_FRAME	ALPHA_PTE_PFN
 #define	PG_SHIFT	32
 #define	PG_PFNUM(x)	ALPHA_PTE_TO_PFN(x)
 

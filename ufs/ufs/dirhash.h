@@ -1,4 +1,5 @@
-/* $OpenBSD: dirhash.h,v 1.4 2006/04/29 23:09:45 tedu Exp $	*/
+/*	$NetBSD: dirhash.h,v 1.6 2008/06/04 11:33:19 ad Exp $	*/
+
 /*
  * Copyright (c) 2001 Ian Dowse.  All rights reserved.
  *
@@ -23,13 +24,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ufs/ufs/dirhash.h,v 1.4 2003/01/01 18:48:59 schweikh Exp $
+ * $FreeBSD: src/sys/ufs/ufs/dirhash.h,v 1.2.2.2 2004/12/08 11:54:13 dwmalone Exp $
  */
 
 #ifndef _UFS_UFS_DIRHASH_H_
 #define _UFS_UFS_DIRHASH_H_
-
-#include <sys/rwlock.h>
 
 /*
  * For fast operations on large directories, we maintain a hash
@@ -48,7 +47,7 @@
 #define DIRHASH_DEL	(-2)	/* deleted entry; may be part of chain */
 
 #define DIRALIGN	4
-#define DH_NFSTATS	(DIRECTSIZ(MAXNAMLEN + 1) / DIRALIGN)
+#define DH_NFSTATS	(DIRECTSIZ(FFS_MAXNAMLEN + 1) / DIRALIGN)
 				 /* max DIRALIGN words in a directory entry */
 
 /*
@@ -83,13 +82,16 @@
     ((dh)->dh_hash[(slot) >> DH_BLKOFFSHIFT][(slot) & DH_BLKOFFMASK])
 
 struct dirhash {
+	kmutex_t dh_lock;	/* protects all fields except dh_list */
+
 	doff_t	**dh_hash;	/* the hash array (2-level) */
+	size_t	dh_hashsz;
 	int	dh_narrays;	/* number of entries in dh_hash */
 	int	dh_hlen;	/* total slots in the 2-level hash array */
 	int	dh_hused;	/* entries in use */
 
-	/* Free space statistics. XXX assumes DIRBLKSIZ is 512. */
 	u_int8_t *dh_blkfree;	/* free DIRALIGN words in each dir block */
+	size_t	dh_blkfreesz;
 	int	dh_nblk;	/* size of dh_blkfree array */
 	int	dh_dirblks;	/* number of DIRBLKSIZ blocks in dir */
 	int	dh_firstfree[DH_NFSTATS + 1]; /* first blk with N words free */
@@ -101,31 +103,27 @@ struct dirhash {
 
 	int	dh_onlist;	/* true if on the ufsdirhash_list chain */
 
-	/* Protected by ufsdirhash_mtx. */
+	/* Protected by ufsdirhash_lock. */
 	TAILQ_ENTRY(dirhash) dh_list;	/* chain of all dirhashes */
 };
 
-extern	int ufs_mindirhashsize;
-extern	int ufs_dirhashmaxmem;
-extern	int ufs_dirhashmem;
 
 /*
  * Dirhash functions.
  */
-void	ufsdirhash_init(void);
-void	ufsdirhash_uninit(void);
 int	ufsdirhash_build(struct inode *);
 doff_t	ufsdirhash_findfree(struct inode *, int, int *);
 doff_t	ufsdirhash_enduseful(struct inode *);
-int	ufsdirhash_lookup(struct inode *, char *, int, doff_t *, struct buf **,
-	    doff_t *);
+int	ufsdirhash_lookup(struct inode *, const char *, int, doff_t *,
+	    struct buf **, doff_t *);
 void	ufsdirhash_newblk(struct inode *, doff_t);
 void	ufsdirhash_add(struct inode *, struct direct *, doff_t);
 void	ufsdirhash_remove(struct inode *, struct direct *, doff_t);
 void	ufsdirhash_move(struct inode *, struct direct *, doff_t, doff_t);
 void	ufsdirhash_dirtrunc(struct inode *, doff_t);
 void	ufsdirhash_free(struct inode *);
-
 void	ufsdirhash_checkblock(struct inode *, char *, doff_t);
+void	ufsdirhash_init(void);
+void	ufsdirhash_done(void);
 
 #endif /* !_UFS_UFS_DIRHASH_H_ */

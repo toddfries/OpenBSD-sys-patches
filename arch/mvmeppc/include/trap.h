@@ -1,3 +1,3 @@
-/*	$OpenBSD: trap.h,v 1.4 2001/09/02 19:40:25 miod Exp $	*/
+/*	$NetBSD: trap.h,v 1.1 2002/02/27 21:02:21 scw Exp $	*/
 
 #include <powerpc/trap.h>

@@ -1,11 +1,10 @@
-/*	$OpenBSD: adv_pci.c,v 1.9 2007/04/10 17:47:55 miod Exp $	*/
-/*	$NetBSD: adv_pci.c,v 1.5 1998/09/26 15:52:55 dante Exp $	*/
+/*	$NetBSD: adv_pci.c,v 1.23 2008/04/28 20:23:54 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc. All rights reserved.
- * 
+ *
  * Author: Baldassare Dante Profeta <dante@mclink.it>
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -14,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -51,6 +43,7 @@
  *      ABP940U - Bus-Master PCI Ultra (240 CDB)
  *      ABP970 - Bus-Master PCI MAC/PC (240 CDB)
  *      ABP970U - Bus-Master PCI MAC/PC Ultra (240 CDB)
+ *      ABP940UW - Bus-Master PCI Ultra-Wide (240 CDB)
  *
  *   Multi Channel Products:
  *      ABP950 - Dual Channel Bus-Master PCI (240 CDB Per Channel)
@@ -62,7 +55,9 @@
  *     2. This board has been sold by Iomega as a Jaz Jet PCI adapter.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: adv_pci.c,v 1.23 2008/04/28 20:23:54 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -70,71 +65,104 @@
 #include <sys/queue.h>
 #include <sys/device.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#include <dev/ic/adv.h>
 #include <dev/ic/advlib.h>
+#include <dev/ic/adv.h>
 
 /******************************************************************************/
 
-#define PCI_CBIO        0x10
-
-/******************************************************************************/
-
-int	adv_pci_match(struct device *, void *, void *);
-void	adv_pci_attach(struct device *, struct device *, void *);
-
-struct cfattach adv_pci_ca =
-{
-	sizeof(ASC_SOFTC), adv_pci_match, adv_pci_attach
-};
-
-const struct pci_matchid adv_pci_devices[] = {
-	{ PCI_VENDOR_ADVSYS, PCI_PRODUCT_ADVSYS_1200A },
-	{ PCI_VENDOR_ADVSYS, PCI_PRODUCT_ADVSYS_1200B },
-	{ PCI_VENDOR_ADVSYS, PCI_PRODUCT_ADVSYS_ULTRA },
-};
+#define PCI_BASEADR_IO        0x10
 
 /******************************************************************************/
 /*
  * Check the slots looking for a board we recognise
- * If we find one, note its address (slot) and call
+ * If we find one, note it's address (slot) and call
  * the actual probe routine to check it out.
  */
-int 
-adv_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+adv_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, adv_pci_devices,
-	    sizeof(adv_pci_devices)/sizeof(adv_pci_devices[0])));
+	struct pci_attach_args *pa = aux;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ADVSYS)
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_ADVSYS_1200A:
+		case PCI_PRODUCT_ADVSYS_1200B:
+		case PCI_PRODUCT_ADVSYS_ULTRA:
+			return (1);
+		}
+
+	return 0;
 }
 
-
-void 
-adv_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+adv_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	ASC_SOFTC      *sc = (void *) self;
+	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
-	bus_size_t advsize;
 	pci_intr_handle_t ih;
 	pci_chipset_tag_t pc = pa->pa_pc;
+	u_int32_t       command;
 	const char     *intrstr;
-	int retval;
+
+	aprint_naive(": SCSI controller\n");
 
 	sc->sc_flags = 0x0;
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ADVSYS)
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_ADVSYS_1200A:
+			aprint_normal(": AdvanSys ASC1200A SCSI adapter\n");
+			break;
 
+		case PCI_PRODUCT_ADVSYS_1200B:
+			aprint_normal(": AdvanSys ASC1200B SCSI adapter\n");
+			break;
+
+		case PCI_PRODUCT_ADVSYS_ULTRA:
+			switch (PCI_REVISION(pa->pa_class)) {
+			case ASC_PCI_REVISION_3050:
+				aprint_normal(
+				    ": AdvanSys ABP-9xxUA SCSI adapter\n");
+				break;
+
+			case ASC_PCI_REVISION_3150:
+				aprint_normal(
+				    ": AdvanSys ABP-9xxU SCSI adapter\n");
+				break;
+			}
+			break;
+
+		default:
+			aprint_error(": unknown model!\n");
+			return;
+		}
+
+
+	/*
+	 * Make sure IO/MEM/MASTER are enabled
+	 */
+	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	if ((command & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
+			PCI_COMMAND_MASTER_ENABLE)) !=
+	    (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
+	     PCI_COMMAND_MASTER_ENABLE)) {
+		pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+		 command | (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
+			    PCI_COMMAND_MASTER_ENABLE));
+	}
 	/*
 	 * Latency timer settings.
 	 */
@@ -148,8 +176,8 @@ adv_pci_attach(parent, self, aux)
 			bhlcr &= 0xFFFF00FFul;
 			pci_conf_write(pa->pa_pc, pa->pa_tag,
 					PCI_BHLC_REG, bhlcr);
-		} else if ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADVSYS_ULTRA) &&
-			   (PCI_LATTIMER(bhlcr) < 0x20)) {
+		} else if ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADVSYS_ULTRA)
+			    && (PCI_LATTIMER(bhlcr) < 0x20)) {
 			bhlcr &= 0xFFFF00FFul;
 			bhlcr |= 0x00002000ul;
 			pci_conf_write(pa->pa_pc, pa->pa_tag,
@@ -161,32 +189,33 @@ adv_pci_attach(parent, self, aux)
 	/*
 	 * Map Device Registers for I/O
 	 */
-	retval = pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0,
-	    &sc->sc_iot, &ioh, NULL, &advsize, 0);
-	if (retval) {
-		printf(": unable to map device registers\n");
+	if (pci_mapreg_map(pa, PCI_BASEADR_IO, PCI_MAPREG_TYPE_IO, 0,
+			&iot, &ioh, NULL, NULL)) {
+		aprint_error_dev(&sc->sc_dev, "unable to map device registers\n");
 		return;
 	}
+
+	ASC_SET_CHIP_CONTROL(iot, ioh, ASC_CC_HALT);
+	ASC_SET_CHIP_STATUS(iot, ioh, 0);
+
+	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
 	sc->sc_dmat = pa->pa_dmat;
 	sc->pci_device_id = pa->pa_id;
 	sc->bus_type = ASC_IS_PCI;
+	sc->chip_version = ASC_GET_CHIP_VER_NO(iot, ioh);
 
 	/*
 	 * Initialize the board
 	 */
-	if (adv_init(sc)) {
-		printf(": adv_init failed\n");
-		bus_space_unmap(sc->sc_iot, ioh, advsize);
-		return;
-	}
+	if (adv_init(sc))
+		panic("adv_pci_attach: adv_init failed");
 
 	/*
 	 * Map Interrupt line
 	 */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
-		bus_space_unmap(sc->sc_iot, ioh, advsize);
+		aprint_error_dev(&sc->sc_dev, "couldn't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
@@ -194,21 +223,21 @@ adv_pci_attach(parent, self, aux)
 	/*
 	 * Establish Interrupt handler
 	 */
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, adv_intr, sc,
-				       sc->sc_dev.dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, adv_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt");
+		aprint_error_dev(&sc->sc_dev, "couldn't establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		bus_space_unmap(sc->sc_iot, ioh, advsize);
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		return;
 	}
-	printf(": %s\n", intrstr);
+	aprint_normal_dev(&sc->sc_dev, "interrupting at %s\n", intrstr);
 
 	/*
 	 * Attach all the sub-devices we can find
 	 */
 	adv_attach(sc);
 }
-/******************************************************************************/
+
+CFATTACH_DECL(adv_pci, sizeof(ASC_SOFTC),
+    adv_pci_match, adv_pci_attach, NULL, NULL);

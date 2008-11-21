@@ -1,13 +1,12 @@
-#	$OpenBSD: files.bluetooth,v 1.5 2007/09/01 17:06:26 xsa Exp $
+#	$NetBSD: files.bluetooth,v 1.13 2008/06/10 12:49:16 drochner Exp $
 #
-# Config file and device description for machine-independent Bluetooth code.
-# Included by ports that support Bluetooth host controllers.
+# Config file for machine independent Bluetooth devices
 
-device bthub {}
+# Bluetooth Device Hub
+device bthub { }
 attach bthub at btbus
-file dev/bluetooth/bthub.c		bthub needs-flag
+file dev/bluetooth/bthub.c		bthub
 
-# HID
 # HID "bus"
 define bthidbus {[ reportid = -1 ]}
 
@@ -16,12 +15,27 @@ device bthidev: bluetooth, bthidbus, hid
 attach bthidev at bthub
 file dev/bluetooth/bthidev.c		bthidev
 
+# HID Keyboards
+defflag		opt_btkbd.h	BTKBD_REPEAT
+defparam	opt_btkbd.h	BTKBD_LAYOUT
+device btkbd: hid, wskbddev
+attach btkbd at bthidbus
+file dev/bluetooth/btkbd.c		btkbd
+
 # HID Mice
 device btms: hid, wsmousedev
 attach btms at bthidbus
 file dev/bluetooth/btms.c		btms
 
-# HID Keyboard
-device btkbd: hid, wskbddev
-attach btkbd at bthidbus
-file dev/bluetooth/btkbd.c		btkbd
+# SCO Audio
+device btsco: bluetooth, audiobus, auconv, mulaw, aurateconv
+attach btsco at bthub
+file dev/bluetooth/btsco.c		btsco
+
+# Bluetooth HCI UART (H4)
+defpseudodev btuart: btbus, bluetooth, firmload
+file dev/bluetooth/btuart.c		btuart
+
+# BlueCore Serial Protocol
+defpseudodev bcsp: btbus, bluetooth
+file dev/bluetooth/bcsp.c		bcsp

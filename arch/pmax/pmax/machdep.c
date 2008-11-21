@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.215 2006/12/21 15:55:24 yamt Exp $	*/
+/*	$NetBSD: machdep.c,v 1.225 2008/11/12 12:36:05 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.215 2006/12/21 15:55:24 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.225 2008/11/12 12:36:05 ad Exp $");
 
 #include "fs_mfs.h"
 #include "opt_ddb.h"
@@ -92,6 +92,8 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.215 2006/12/21 15:55:24 yamt Exp $");
 #include <sys/kcore.h>
 #include <sys/boot_flag.h>
 #include <sys/ksyms.h>
+#include <sys/proc.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -111,7 +113,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.215 2006/12/21 15:55:24 yamt Exp $");
 #define _PMAX_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 #include <sys/exec_aout.h>		/* XXX backwards compatilbity for DDB */
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
@@ -128,7 +130,6 @@ unsigned ssir;				/* simulated interrupt register */
 struct cpu_info cpu_info_store;
 
 /* maps for VM objects */
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -166,7 +167,7 @@ static void	unimpl_cons_init __P((void));
 static void	unimpl_iointr __P((unsigned, unsigned, unsigned, unsigned));
 static void	unimpl_intr_establish __P((struct device *, void *, int,
 		    int (*)(void *), void *));
-static int	unimpl_memsize __P((caddr_t));
+static int	unimpl_memsize __P((void *));
 static unsigned	nullwork __P((void));
 
 struct platform platform = {
@@ -179,7 +180,7 @@ struct platform platform = {
 	(void *)nullwork,
 };
 
-extern caddr_t esym;			/* XXX */
+extern void *esym;			/* XXX */
 extern struct user *proc0paddr;		/* XXX */
 extern struct consdev promcd;		/* XXX */
 
@@ -200,9 +201,9 @@ mach_init(argc, argv, code, cv, bim, bip)
 	const char *bootinfo_msg;
 	u_long first, last;
 	int i;
-	caddr_t kernend;
-#if NKSYMS || defined(DDB) || defined(LKM)
-	caddr_t ssym = 0;
+	char *kernend;
+#if NKSYMS || defined(DDB) || defined(MODULAR)
+	void *ssym = 0;
 	struct btinfo_symtab *bi_syms;
 	struct exec *aout;		/* XXX backwards compatilbity for DDB */
 #endif
@@ -224,15 +225,15 @@ mach_init(argc, argv, code, cv, bim, bip)
 		bootinfo_msg = "invalid bootinfo pointer (old bootblocks?)\n";
 
 	/* clear the BSS segment */
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	bi_syms = lookup_bootinfo(BTINFO_SYMTAB);
 	aout = (struct exec *)edata;
 
 	/* Was it a valid bootinfo symtab info? */
 	if (bi_syms != NULL) {
-		ssym = (caddr_t)bi_syms->ssym;
-		esym = (caddr_t)bi_syms->esym;
-		kernend = (caddr_t)mips_round_page(esym);
+		ssym = (void *)bi_syms->ssym;
+		esym = (void *)bi_syms->esym;
+		kernend = (void *)mips_round_page(esym);
 		memset(edata, 0, end - edata);
 	}
 	/* XXX: Backwards compatibility with old bootblocks - this should
@@ -244,13 +245,13 @@ mach_init(argc, argv, code, cv, bim, bip)
 		ssym = end;
 		i += (*(long *)(end + i + 4) + 3) & ~3;		/* strings */
 		esym = end + i + 4;
-		kernend = (caddr_t)mips_round_page(esym);
+		kernend = (void *)mips_round_page(esym);
 		memset(edata, 0, end - edata);
 	} else
 #endif
 #endif
 	{
-		kernend = (caddr_t)mips_round_page(end);
+		kernend = (void *)mips_round_page(end);
 		memset(edata, 0, kernend - edata);
 	}
 
@@ -329,10 +330,10 @@ mach_init(argc, argv, code, cv, bim, bip)
 		kernend += round_page(mfs_initminiroot(kernend));
 #endif
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	/* init symbols if present */
 	if (esym)
-		ksyms_init(esym - ssym, ssym, esym);
+		ksyms_init((char *)esym - (char *)ssym, ssym, esym);
 #endif
 #ifdef DDB
 	if (boothowto & RB_KDB)
@@ -345,8 +346,8 @@ mach_init(argc, argv, code, cv, bim, bip)
 	lwp0.l_addr = proc0paddr = (struct user *)kernend;
 	lwp0.l_md.md_regs = (struct frame *)(kernend + USPACE) - 1;
 	memset(lwp0.l_addr, 0, USPACE);
-	curpcb = &lwp0.l_addr->u_pcb;
-	curpcb->pcb_context[11] = MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
+	proc0paddr->u_pcb.pcb_context[11] =
+	    MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
 
 	kernend += USPACE;
 
@@ -449,18 +450,12 @@ cpu_startup()
 	printf("total memory = %s\n", pbuf);
 
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+				   VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -555,6 +550,8 @@ haltsys:
 	/* run any shutdown hooks */
 	doshutdownhooks();
 
+	pmf_system_shutdown(boothowto);
+
 	/* Finally, halt/reboot the system. */
 	printf("%s\n\n", ((howto & RB_HALT) != 0) ? "halted." : "rebooting...");
 	prom_halt(howto & RB_HALT, bootstr);
@@ -567,7 +564,7 @@ haltsys:
  */
 int
 memsize_scan(first)
-	caddr_t first;
+	void *first;
 {
 	int i, mem;
 	char *cp;
@@ -613,7 +610,7 @@ memsize_scan(first)
  */
 int
 memsize_bitmap(first)
-	caddr_t first;
+	void *first;
 {
 	memmap *prom_memmap = (memmap *)first;
 	int i, mapbytes;
@@ -690,7 +687,7 @@ unimpl_intr_establish(dev, cookie, level, handler, arg)
 
 static int
 unimpl_memsize(first)
-caddr_t first;
+void *first;
 {
 
 	panic("sysconf.init didn't set memsize");
@@ -701,38 +698,6 @@ nullwork()
 {
 
 	return (0);
-}
-
-/*
- * Return the best possible estimate of the time in the timeval to
- * which tvp points.  We guarantee that the time will be greater than
- * the value obtained by a previous call.  Some models of DECstations
- * provide a high resolution timer circuit.
- */
-void
-microtime(tvp)
-	struct timeval *tvp;
-{
-	int s = splclock();
-	static struct timeval lasttime;
-
-	*tvp = time;
-#if defined(DEC_3MIN) || defined(DEC_MAXINE) || defined(DEC_3MAXPLUS)
-	tvp->tv_usec += (*platform.clkread)();
-#endif
-	if (tvp->tv_usec >= 1000000) {
-		tvp->tv_usec -= 1000000;
-		tvp->tv_sec++;
-	}
-
-	if (tvp->tv_sec == lasttime.tv_sec &&
-	    tvp->tv_usec <= lasttime.tv_usec &&
-	    (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	lasttime = *tvp;
-	splx(s);
 }
 
 /*

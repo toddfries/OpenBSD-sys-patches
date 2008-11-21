@@ -1,33 +1,64 @@
-/*	$OpenBSD: fcnvff.c,v 1.7 2003/04/10 17:27:58 mickey Exp $	*/
-/*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)fcnvff.c: Revision: 2.8.88.1 Date: 93/12/07 15:06:09 */
+/*	$NetBSD: fcnvff.c,v 1.5 2007/02/22 05:46:30 thorpej Exp $	*/
 
-#include "float.h"
-#include "sgl_float.h"
-#include "dbl_float.h"
-#include "cnv_float.h"
+/*	$OpenBSD: fcnvff.c,v 1.5 2001/03/29 03:58:18 mickey Exp $	*/
+
+/*
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fcnvff.c,v 1.5 2007/02/22 05:46:30 thorpej Exp $");
+
+#include "../spmath/float.h"
+#include "../spmath/sgl_float.h"
+#include "../spmath/dbl_float.h"
+#include "../spmath/cnv_float.h"
 
 /*
  *  Single Floating-point to Double Floating-point
  */
 /*ARGSUSED*/
 int
-sgl_to_dbl_fcnvff(srcptr, null, dstptr, status)
-	sgl_floating_point *srcptr, *null;
-	dbl_floating_point *dstptr;
-	unsigned int *status;
+sgl_to_dbl_fcnvff(srcptr,dstptr,status)
+
+sgl_floating_point *srcptr;
+dbl_floating_point *dstptr;
+unsigned int *status;
 {
 	register unsigned int src, resultp1, resultp2;
 	register int src_exponent;
@@ -110,16 +141,17 @@ sgl_to_dbl_fcnvff(srcptr, null, dstptr, status)
  */
 /*ARGSUSED*/
 int
-dbl_to_sgl_fcnvff(srcptr, null, dstptr, status)
-	dbl_floating_point *srcptr, *null;
-	sgl_floating_point *dstptr;
-	unsigned int *status;
+dbl_to_sgl_fcnvff(srcptr,dstptr,status)
+
+dbl_floating_point *srcptr;
+sgl_floating_point *dstptr;
+unsigned int *status;
 {
 	register unsigned int srcp1, srcp2, result;
 	register int src_exponent, dest_exponent, dest_mantissa;
-	register int inexact = FALSE, guardbit = FALSE, stickybit = FALSE;
-	register int lsb_odd = FALSE;
-	int is_tiny;
+	register int inexact = false, guardbit = false, stickybit = false;
+	register int lsb_odd = false;
+	int is_tiny = false;
 
 	Dbl_copyfromptr(srcptr,srcp1,srcp2);
 	src_exponent = Dbl_exponent(srcp1);
@@ -238,7 +270,7 @@ dbl_to_sgl_fcnvff(srcptr, null, dstptr, status)
 			return(OVERFLOWEXCEPTION);
 		}
 		Set_overflowflag();
-		inexact = TRUE;
+		inexact = true;
 		/* set result to infinity or largest number */
 		Sgl_setoverflow(result);
 	}

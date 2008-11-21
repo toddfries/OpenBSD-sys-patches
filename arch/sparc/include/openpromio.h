@@ -1,5 +1,4 @@
-/*	$OpenBSD: openpromio.h,v 1.3 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: openpromio.h,v 1.2 1994/11/20 20:53:17 deraadt Exp $ */
+/*	$NetBSD: openpromio.h,v 1.6 2005/12/11 12:19:05 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,6 +40,9 @@
  *	@(#)openpromio.h	8.1 (Berkeley) 6/11/93
  */
 
+#ifndef _SPARC_OPENPROMIO_H_
+#define _SPARC_OPENPROMIO_H_
+
 struct opiocdesc {
 	int	op_nodeid;		/* passed or returned node id */
 	int	op_namelen;		/* length of op_name */
@@ -55,3 +57,6 @@ struct opiocdesc {
 #define	OPIOCGETOPTNODE	_IOR('O', 4, int)	/* get openprom field */
 #define	OPIOCGETNEXT	_IOWR('O', 5, int)	/* get next node of node */
 #define	OPIOCGETCHILD	_IOWR('O', 6, int)	/* get first child of node */
+#define	OPIOCFINDDEVICE	_IOWR('O', 7, struct opiocdesc) /* find a specific device */
+
+#endif /* _SPARC_OPENPROMIO_H_ */

@@ -1,16 +1,30 @@
-#	$OpenBSD: Makefile,v 1.5 2003/07/19 00:03:52 david Exp $
+#	$NetBSD: Makefile,v 1.16 2005/12/28 08:08:00 skrll Exp $
 
-MAN=	installboot.8
-MANSUBDIR=mvme68k
+NOMAN=	# defined
 
-.if ${MACHINE} == "mvme68k"
+.include <bsd.own.mk>
+
 PROG=	installboot
 BINDIR=/usr/mdec
-DPADD=${LIBUTIL}
-LDADD=-lutil
-LDSTATIC=-static
-.else
-NOPROG=
+LIBSA=${.CURDIR}/../../../../lib/libsa
+COPTS+= -Wall -Wstrict-prototypes -Wmissing-prototypes
+CPPFLAGS+= -I${LIBSA} -I. -D__daddr_t=int32_t
+# Need this to work in the miniroot
+LDSTATIC= -static
+
+.if !make(obj) && !make(clean) && !make(cleandir)
+.BEGIN: machine
+.NOPATH: machine
+
+machine::
+	-rm -f $@
+	ln -s ${.CURDIR}/../../include $@
 .endif
+
+CLEANFILES+= machine
+
+.PATH.c: ${LIBSA}
+
+SRCS=	installboot.c byteorder.c loadfile.c loadfile_aout.c loadfile_elf32.c
 
 .include <bsd.prog.mk>

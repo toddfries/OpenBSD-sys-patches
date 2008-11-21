@@ -1,5 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.31 2005/04/17 18:47:48 miod Exp $	*/
-/*	$NetBSD: vmparam.h,v 1.13 1997/07/12 16:20:03 perry Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.39 2008/01/02 11:48:29 ad Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,37 +44,58 @@
 #define _SPARC_VMPARAM_H_
 
 /*
- * Machine dependent constants for Sun-4c SPARC
+ * Machine dependent constants for SPARC
  */
 
+#include <machine/cpuconf.h>
+
 /*
- * USRTEXT is the start of the user text/data space, while USRSTACK
- * is the top (end) of the user stack.
+ * Sun4 systems have a 8K page size.  All other platforms have a
+ * 4K page size.  We need to define these upper and lower limits
+ * for machine-independent code.  We also try to make PAGE_SIZE,
+ * PAGE_SHIFT, and PAGE_MASK into compile-time constants, if we can.
+ *
+ * XXX Should garbage-collect the version of this from <machine/param.h>.
  */
-#define	USRTEXT		0x2000			/* Start of user text */
-#define	USRSTACK	VM_MIN_KERNEL_ADDRESS	/* Start of user stack */
+#define	PAGE_SHIFT_SUN4		13
+#define	PAGE_SHIFT_SUN4CM	12
+
+#define	MIN_PAGE_SIZE		(1 << PAGE_SHIFT_SUN4CM)
+#define	MAX_PAGE_SIZE		(1 << PAGE_SHIFT_SUN4)
+
+#if CPU_NTYPES != 0 && !defined(SUN4)
+#define	PAGE_SHIFT		PAGE_SHIFT_SUN4CM
+#define	PAGE_SIZE		(1 << PAGE_SHIFT)
+#define	PAGE_MASK		(PAGE_SIZE - 1)
+#elif CPU_NTYPES == 1 && defined(SUN4)
+#define	PAGE_SHIFT		PAGE_SHIFT_SUN4
+#define	PAGE_SIZE		(1 << PAGE_SHIFT)
+#define	PAGE_MASK		(PAGE_SIZE - 1)
+#endif
+
+/*
+ * USRSTACK is the top (end) of the user stack.
+ */
+#define	USRSTACK	KERNBASE		/* Start of user stack */
 
 /*
  * Virtual memory related constants, all in bytes
  */
 #ifndef MAXTSIZ
-#define	MAXTSIZ		(16*1024*1024)		/* max text size */
+#define	MAXTSIZ		(64*1024*1024)		/* max text size */
 #endif
 #ifndef DFLDSIZ
-#define	DFLDSIZ		(32*1024*1024)		/* initial data size limit */
+#define	DFLDSIZ		(64*1024*1024)		/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
-#define	MAXDSIZ		(128*1024*1024)		/* max data size */
+#define	MAXDSIZ		(512*1024*1024)		/* max data size */
 #endif
 #ifndef	DFLSSIZ
-#define	DFLSSIZ		(512*1024)		/* initial stack size limit */
+#define	DFLSSIZ		(8*1024*1024)		/* initial stack size limit */
 #endif
 #ifndef	MAXSSIZ
-#define	MAXSSIZ		MAXDSIZ			/* max stack size */
+#define	MAXSSIZ		(32*1024*1024)		/* max stack size */
 #endif
-
-#define STACKGAP_RANDOM	64*1024
-#define STACKGAP_RANDOM_SUN4M 256*1024
 
 /*
  * Size of shared memory map
@@ -85,56 +105,51 @@
 #endif
 
 /*
+ * Mach derived constants
+ */
+
+/*
  * User/kernel map constants.  Note that sparc/vaddrs.h defines the
  * IO space virtual base, which must be the same as VM_MAX_KERNEL_ADDRESS:
  * tread with care.
  */
 #define VM_MIN_ADDRESS		((vaddr_t)0)
-#define VM_MAX_ADDRESS		((vaddr_t)VM_MIN_KERNEL_ADDRESS)
-#define VM_MAXUSER_ADDRESS	((vaddr_t)VM_MIN_KERNEL_ADDRESS)
+#define VM_MAX_ADDRESS		((vaddr_t)KERNBASE)
+#define VM_MAXUSER_ADDRESS	((vaddr_t)KERNBASE)
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)KERNBASE)
-#define VM_MAX_KERNEL_ADDRESS	((vaddr_t)0xfe000000)
+#define VM_MAX_KERNEL_ADDRESS   ((vaddr_t)KERNEND)
 
-#define	IOSPACE_BASE		VM_MAX_KERNEL_ADDRESS
-#define	IOSPACE_LEN		0x01000000		/* 16 MB of iospace */
-
-#define VM_PHYSSEG_MAX		32	/* we only have one "hole" */
+#define VM_PHYSSEG_MAX		32       /* up to 32 segments */
 #define VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
 #define VM_PHYSSEG_NOADD		/* can't add RAM after vm_mem_init */
 
-/*
- * pmap specific data stored in the vm_physmem[] array
- */
-
-
-/* XXX - belongs in pmap.h, but put here because of ordering issues */
-struct pvlist {
-	struct		pvlist *pv_next;	/* next pvlist, if any */
-	struct		pmap *pv_pmap;		/* pmap of this va */
-	vaddr_t		pv_va;			/* virtual address */
-	int		pv_flags;		/* flags (below) */
-};
+#define	VM_NFREELIST		1
+#define	VM_FREELIST_DEFAULT	0
 
 #define __HAVE_VM_PAGE_MD
+
+/*
+ * For each managed physical page, there is a list of all currently
+ * valid virtual mappings of that page.  Since there is usually one
+ * (or zero) mapping per page, the table begins with an initial entry,
+ * rather than a pointer; this head entry is empty iff its pv_pmap
+ * field is NULL.
+ */
 struct vm_page_md {
-	struct pvlist pv_head;
+	struct pvlist {
+		struct	pvlist *pv_next;	/* next pvlist, if any */
+		struct	pmap *pv_pmap;		/* pmap of this va */
+		vaddr_t	pv_va;			/* virtual address */
+		int	pv_flags;		/* flags (below) */
+	} pvlisthead;
 };
+#define VM_MDPAGE_PVHEAD(pg)	(&(pg)->mdpage.pvlisthead)
 
-#define VM_MDPAGE_INIT(pg) do {			\
-	(pg)->mdpage.pv_head.pv_next = NULL;	\
-	(pg)->mdpage.pv_head.pv_pmap = NULL;	\
-	(pg)->mdpage.pv_head.pv_va = 0;		\
-	(pg)->mdpage.pv_head.pv_flags = 0;	\
-} while (0)
-
-#define VM_NFREELIST		1
-#define VM_FREELIST_DEFAULT	0
-
-#if defined (_KERNEL) && !defined(_LOCORE)
-struct vm_map;
-#define		dvma_mapin(map,va,len,canwait)	dvma_mapin_space(map,va,len,canwait,0)
-vaddr_t		dvma_mapin_space(struct vm_map *, vaddr_t, int, int, int);
-void		dvma_mapout(vaddr_t, vaddr_t, int);
-#endif
+#define VM_MDPAGE_INIT(pg) do {				\
+	(pg)->mdpage.pvlisthead.pv_next = NULL;		\
+	(pg)->mdpage.pvlisthead.pv_pmap = NULL;		\
+	(pg)->mdpage.pvlisthead.pv_va = 0;		\
+	(pg)->mdpage.pvlisthead.pv_flags = 0;		\
+} while(/*CONSTCOND*/0)
 
 #endif /* _SPARC_VMPARAM_H_ */

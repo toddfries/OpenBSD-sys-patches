@@ -1,51 +1,70 @@
-#	$OpenBSD: Makefile,v 1.6 2007/11/25 18:25:32 deraadt Exp $
+#	$NetBSD: Makefile,v 1.8 2008/10/25 22:27:37 apb Exp $
 
-.include "${.CURDIR}/../Makefile.inc"
+S=	${.CURDIR}/../../../..
 
-MAN=	cdboot.8
+NOMAN=		# defined
+STRIPFLAG=	# nothing
 
-.if ${MACHINE} == "i386"
+LIBCRT0=	# nothing
+LIBCRTBEGIN=	# nothing
+LIBCRTEND=	# nothing
+LIBC=		# nothing
+
+PRIMARY_LOAD_ADDRESS=0x600
+SECONDARY_LOAD_ADDRESS=0x10000
+
+PIE_CFLAGS=
+PIE_LDFLAGS=
+PIE_AFLAGS=
+
+.include <bsd.own.mk>
+
 PROG=	cdboot
-LD?=	ld
-SIZE?=	size
-LDFLAGS+=-nostdlib -Bstatic
-INSTALL_STRIP=
+SRCS?=	cdboot.S
 
-LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
-CLEANFILES+=	crt0.o
-SRCS=	srt0.S
+BINDIR=	/usr/mdec
+BINMODE=444
 
-SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c
-S	=${.CURDIR}/../../../..
-SADIR=	${.CURDIR}/..
+.PATH:	${.CURDIR}/..
 
-LDADD=	${LIBSA} ${LIBZ}
-DPADD=	${LIBSA} ${LIBZ}
+LDFLAGS+= -nostdlib -Wl,-e,start
+CPPFLAGS+= -I. -I${.CURDIR}/../lib -I${S}
+CPPFLAGS+= -DPRIMARY_LOAD_ADDRESS=${PRIMARY_LOAD_ADDRESS}
+CPPFLAGS+= -DSECONDARY_LOAD_ADDRESS=${SECONDARY_LOAD_ADDRESS}
+#CPPFLAGS+= -DDISABLE_KEYPRESS
 
-.PATH:	${S}/lib/libkern/arch/i386 ${S}/lib/libkern
-SRCS+=	strlcpy.c moddi3.c divdi3.c qdivrem.c
-
-.PATH:	${S}/stand/boot
-
-${PROG}: $(OBJS) $(DPADD)
-	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS) $(LDADD)
-	@$(SIZE) ${PROG}
-	if [ -x ${.OBJDIR}/${PROG} ]; then \
-		objcopy -O binary ${PROG} ${.OBJDIR}/.tmp;\
-		mv -f ${.OBJDIR}/.tmp ${.OBJDIR}/${PROG}; \
-		ls -l ${.OBJDIR}/${PROG}; \
-	fi
-
-.else
-NOPROG=
+.if ${MACHINE} == "amd64"
+LDFLAGS+=  -Wl,-m,elf_i386
+AFLAGS+=   -m32
 .endif
 
-.include <bsd.prog.mk>
+.if !make(obj) && !make(clean) && !make(cleandir)
+.BEGIN: machine x86
+.NOPATH: machine x86
+.endif
 
-CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS}
-CPPFLAGS+=-DLINKADDR=${LINKADDR}
-CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD
-CFLAGS+=-DOSREV=\"${OSREV}\" -DMACHINE=\"${MACHINE}\"
-CFLAGS+=-DKERNEL=\"/${OSREV}/${MACHINE}/bsd.rd\"
-#AFLAGS+=-Wa,-R
-# AFLAGS+=-Wa,-a
+realdepend realall: machine x86
+CLEANFILES+= machine x86
+
+machine::
+	-rm -f $@
+	ln -s $S/arch/i386/include $@
+
+x86::
+	-rm -f $@
+	ln -s $S/arch/x86/include $@
+
+${OBJS}: machine x86
+
+CLEANFILES+= ${PROG}.tmp
+
+${PROG}: ${OBJS}
+	${_MKTARGET_LINK}
+	${CC} -o ${PROG}.tmp ${LDFLAGS} -Wl,-Ttext,${PRIMARY_LOAD_ADDRESS} ${OBJS}
+	@ set -- $$( ${NM} -t d ${PROG}.tmp | grep '\<free_space\>' \
+		    | ${TOOL_SED} 's/^0*//'  ); \
+		echo "#### There are $$1 free bytes in ${PROG}"
+	${OBJCOPY} -O binary ${PROG}.tmp ${PROG}
+	rm -f ${PROG}.tmp
+
+.include <bsd.prog.mk>

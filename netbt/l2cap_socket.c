@@ -1,5 +1,4 @@
-/*	$OpenBSD: l2cap_socket.c,v 1.2 2008/05/27 19:41:14 thib Exp $	*/
-/*	$NetBSD: l2cap_socket.c,v 1.7 2007/04/21 06:15:23 plunky Exp $	*/
+/*	$NetBSD: l2cap_socket.c,v 1.9 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -32,6 +31,7 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: l2cap_socket.c,v 1.9 2008/08/06 15:01:24 plunky Exp $");
 
 /* load symbolic names */
 #ifdef BLUETOOTH_DEBUG
@@ -50,7 +50,6 @@
 #include <sys/systm.h>
 
 #include <netbt/bluetooth.h>
-#include <netbt/hci.h>		/* XXX for EPASSTHROUGH */
 #include <netbt/l2cap.h>
 
 /*
@@ -104,30 +103,31 @@ int l2cap_recvspace = 4096;
  */
 int
 l2cap_usrreq(struct socket *up, int req, struct mbuf *m,
-    struct mbuf *nam, struct mbuf *ctl, struct proc *p)
+    struct mbuf *nam, struct mbuf *ctl, struct lwp *l)
 {
 	struct l2cap_channel *pcb = up->so_pcb;
 	struct sockaddr_bt *sa;
 	struct mbuf *m0;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "%s\n", prurequests[req]);
-#endif
 
 	switch (req) {
 	case PRU_CONTROL:
 		return EPASSTHROUGH;
 
-#ifdef notyet			/* XXX */
 	case PRU_PURGEIF:
 		return EOPNOTSUPP;
-#endif
 
 	case PRU_ATTACH:
+		if (up->so_lock == NULL) {
+			mutex_obj_hold(bt_lock);
+			up->so_lock = bt_lock;
+			solock(up);
+		}
+		KASSERT(solocked(up));
 		if (pcb != NULL)
 			return EINVAL;
-
 		/*
 		 * For L2CAP socket PCB we just use an l2cap_channel structure
 		 * since we have nothing to add..
@@ -208,7 +208,7 @@ l2cap_usrreq(struct socket *up, int req, struct mbuf *m,
 			break;
 		}
 
-		m0 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+		m0 = m_copypacket(m, M_DONTWAIT);
 		if (m0 == NULL) {
 			err = ENOMEM;
 			break;
@@ -258,46 +258,32 @@ release:
 }
 
 /*
- * l2cap_ctloutput(request, socket, level, optname, opt)
+ * l2cap_ctloutput(req, socket, sockopt)
  *
  *	Apply configuration commands to channel. This corresponds to
  *	"Reconfigure Channel Request" in the L2CAP specification.
  */
 int
-l2cap_ctloutput(int req, struct socket *so, int level,
-		int optname, struct mbuf **opt)
+l2cap_ctloutput(int req, struct socket *so, struct sockopt *sopt)
 {
 	struct l2cap_channel *pcb = so->so_pcb;
-	struct mbuf *m;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "%s\n", prcorequests[req]);
-#endif
 
 	if (pcb == NULL)
 		return EINVAL;
 
-	if (level != BTPROTO_L2CAP)
+	if (sopt->sopt_level != BTPROTO_L2CAP)
 		return ENOPROTOOPT;
 
 	switch(req) {
 	case PRCO_GETOPT:
-		m = m_get(M_WAIT, MT_SOOPTS);
-		m->m_len = l2cap_getopt(pcb, optname, mtod(m, void *));
-		if (m->m_len == 0) {
-			m_freem(m);
-			m = NULL;
-			err = ENOPROTOOPT;
-		}
-		*opt = m;
+		err = l2cap_getopt(pcb, sopt);
 		break;
 
 	case PRCO_SETOPT:
-		m = *opt;
-		KASSERT(m != NULL);
-		err = l2cap_setopt(pcb, optname, mtod(m, void *));
-		m_freem(m);
+		err = l2cap_setopt(pcb, sopt);
 		break;
 
 	default:
@@ -374,6 +360,7 @@ static void
 l2cap_linkmode(void *arg, int new)
 {
 	struct socket *so = arg;
+	struct sockopt sopt;
 	int mode;
 
 	DPRINTF("auth %s, encrypt %s, secure %s\n",
@@ -381,7 +368,11 @@ l2cap_linkmode(void *arg, int new)
 		(new & L2CAP_LM_ENCRYPT ? "on" : "off"),
 		(new & L2CAP_LM_SECURE ? "on" : "off"));
 
-	(void)l2cap_getopt(so->so_pcb, SO_L2CAP_LM, &mode);
+	sockopt_init(&sopt, BTPROTO_L2CAP, SO_L2CAP_LM, 0);
+	(void)l2cap_getopt(so->so_pcb, &sopt);
+	(void)sockopt_getint(&sopt, &mode);
+	sockopt_destroy(&sopt);
+
 	if (((mode & L2CAP_LM_AUTH) && !(new & L2CAP_LM_AUTH))
 	    || ((mode & L2CAP_LM_ENCRYPT) && !(new & L2CAP_LM_ENCRYPT))
 	    || ((mode & L2CAP_LM_SECURE) && !(new & L2CAP_LM_SECURE)))

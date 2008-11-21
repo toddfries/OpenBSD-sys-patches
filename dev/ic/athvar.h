@@ -1,8 +1,7 @@
-/*      $OpenBSD: athvar.h,v 1.20 2007/06/06 21:41:32 reyk Exp $  */
-/*	$NetBSD: athvar.h,v 1.10 2004/08/10 01:03:53 dyoung Exp $	*/
+/*	$NetBSD: athvar.h,v 1.25 2008/07/09 19:47:24 joerg Exp $	*/
 
 /*-
- * Copyright (c) 2002-2004 Sam Leffler, Errno Consulting
+ * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -19,6 +18,10 @@
  *    of any contributors may be used to endorse or promote products derived
  *    from this software without specific prior written permission.
  *
+ * Alternatively, this software may be distributed under the terms of the
+ * GNU General Public License ("GPL") version 2 as published by the Free
+ * Software Foundation.
+ *
  * NO WARRANTY
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -32,524 +35,530 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/ath/if_athvar.h,v 1.14 2004/04/03 03:33:02 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/if_athvar.h,v 1.29 2005/08/08 18:46:36 sam Exp $
  */
 
 /*
- * Definitions for the Atheros Wireless LAN controller driver.
+ * Defintions for the Atheros Wireless LAN controller driver.
  */
 #ifndef _DEV_ATH_ATHVAR_H
 #define _DEV_ATH_ATHVAR_H
 
+#include <dev/ic/ath_netbsd.h>
+#include <contrib/dev/ath/ah.h>
 #include <net80211/ieee80211_radiotap.h>
-#include <dev/ic/ar5xxx.h>
-
-#ifdef notyet
-#include "gpio.h"
-#endif
+#include <dev/ic/athioctl.h>
+#include <dev/ic/athrate.h>
 
 #define	ATH_TIMEOUT		1000
 
+#ifndef ATH_RXBUF
 #define	ATH_RXBUF	40		/* number of RX buffers */
-#define	ATH_TXBUF	60		/* number of TX buffers */
-#define	ATH_TXDESC	8		/* number of descriptors per buffer */
-#define ATH_MAXGPIO	10		/* maximal number of gpio pins */
+#endif
+#ifndef ATH_TXBUF
+#define	ATH_TXBUF	100		/* number of TX buffers */
+#endif
+#define	ATH_TXDESC	10		/* number of descriptors per buffer */
+#define	ATH_TXMAXTRY	11		/* max number of transmit attempts */
+#define	ATH_TXMGTTRY	4		/* xmit attempts for mgt/ctl frames */
+#define	ATH_TXINTR_PERIOD 5		/* max number of batched tx descriptors */
 
-struct ath_recv_hist {
-	int		arh_ticks;	/* sample time by system clock */
-	u_int8_t	arh_rssi;	/* rssi */
-	u_int8_t	arh_antenna;	/* antenna */
-};
-#define	ATH_RHIST_SIZE		16	/* number of samples */
-#define	ATH_RHIST_NOTIME	(~0)
-
-/*
- * Ioctl-related definitions for the Atheros Wireless LAN controller driver.
- */
-struct ath_stats {
-	u_int32_t	ast_watchdog;	/* device reset by watchdog */
-	u_int32_t	ast_hardware;	/* fatal hardware error interrupts */
-	u_int32_t	ast_bmiss;	/* beacon miss interrupts */
-	u_int32_t	ast_mib;	/* MIB counter interrupts */
-	u_int32_t	ast_rxorn;	/* rx overrun interrupts */
-	u_int32_t	ast_rxeol;	/* rx eol interrupts */
-	u_int32_t	ast_txurn;	/* tx underrun interrupts */
-	u_int32_t	ast_intrcoal;	/* interrupts coalesced */
-	u_int32_t	ast_tx_mgmt;	/* management frames transmitted */
-	u_int32_t	ast_tx_discard;	/* frames discarded prior to assoc */
-	u_int32_t	ast_tx_qstop;	/* output stopped 'cuz no buffer */
-	u_int32_t	ast_tx_encap;	/* tx encapsulation failed */
-	u_int32_t	ast_tx_nonode;	/* tx failed 'cuz no node */
-	u_int32_t	ast_tx_nombuf;	/* tx failed 'cuz no mbuf */
-	u_int32_t	ast_tx_nomcl;	/* tx failed 'cuz no cluster */
-	u_int32_t	ast_tx_linear;	/* tx linearized to cluster */
-	u_int32_t	ast_tx_nodata;	/* tx discarded empty frame */
-	u_int32_t	ast_tx_busdma;	/* tx failed for dma resrcs */
-	u_int32_t	ast_tx_xretries;/* tx failed 'cuz too many retries */
-	u_int32_t	ast_tx_fifoerr;	/* tx failed 'cuz FIFO underrun */
-	u_int32_t	ast_tx_filtered;/* tx failed 'cuz xmit filtered */
-	u_int32_t	ast_tx_shortretry;/* tx on-chip retries (short) */
-	u_int32_t	ast_tx_longretry;/* tx on-chip retries (long) */
-	u_int32_t	ast_tx_badrate;	/* tx failed 'cuz bogus xmit rate */
-	u_int32_t	ast_tx_noack;	/* tx frames with no ack marked */
-	u_int32_t	ast_tx_rts;	/* tx frames with rts enabled */
-	u_int32_t	ast_tx_cts;	/* tx frames with cts enabled */
-	u_int32_t	ast_tx_shortpre;/* tx frames with short preamble */
-	u_int32_t	ast_tx_altrate;	/* tx frames with alternate rate */
-	u_int32_t	ast_tx_protect;	/* tx frames with protection */
-	u_int32_t	ast_rx_nombuf;	/* rx setup failed 'cuz no mbuf */
-	u_int32_t	ast_rx_busdma;	/* rx setup failed for dma resrcs */
-	u_int32_t	ast_rx_orn;	/* rx failed 'cuz of desc overrun */
-	u_int32_t	ast_rx_crcerr;	/* rx failed 'cuz of bad CRC */
-	u_int32_t	ast_rx_fifoerr;	/* rx failed 'cuz of FIFO overrun */
-	u_int32_t	ast_rx_badcrypt;/* rx failed 'cuz decryption */
-	u_int32_t	ast_rx_phyerr;	/* rx failed 'cuz of PHY err */
-	u_int32_t	ast_rx_phy[32];	/* rx PHY error per-code counts */
-	u_int32_t	ast_rx_tooshort;/* rx discarded 'cuz frame too short */
-	u_int32_t	ast_rx_toobig;	/* rx discarded 'cuz frame too large */
-	u_int32_t	ast_rx_ctl;	/* rx discarded 'cuz ctl frame */
-	u_int32_t	ast_be_nombuf;	/* beacon setup failed 'cuz no mbuf */
-	u_int32_t	ast_per_cal;	/* periodic calibration calls */
-	u_int32_t	ast_per_calfail;/* periodic calibration failed */
-	u_int32_t	ast_per_rfgain;	/* periodic calibration rfgain reset */
-	u_int32_t	ast_rate_calls;	/* rate control checks */
-	u_int32_t	ast_rate_raise;	/* rate control raised xmit rate */
-	u_int32_t	ast_rate_drop;	/* rate control dropped xmit rate */
-};
-
-#define	SIOCGATHSTATS	_IOWR('i', 137, struct ifreq)
+#define	ATH_BEACON_AIFS_DEFAULT	 0	/* default aifs for ap beacon q */
+#define	ATH_BEACON_CWMIN_DEFAULT 0	/* default cwmin for ap beacon q */
+#define	ATH_BEACON_CWMAX_DEFAULT 0	/* default cwmax for ap beacon q */
 
 /*
- * Radio capture format.
+ * The key cache is used for h/w cipher state and also for
+ * tracking station state such as the current tx antenna.
+ * We also setup a mapping table between key cache slot indices
+ * and station state to short-circuit node lookups on rx.
+ * Different parts have different size key caches.  We handle
+ * up to ATH_KEYMAX entries (could dynamically allocate state).
  */
-#define ATH_RX_RADIOTAP_PRESENT (		\
-	(1 << IEEE80211_RADIOTAP_FLAGS)		| \
-	(1 << IEEE80211_RADIOTAP_RATE)		| \
-	(1 << IEEE80211_RADIOTAP_CHANNEL)	| \
-	(1 << IEEE80211_RADIOTAP_ANTENNA)	| \
-	(1 << IEEE80211_RADIOTAP_RSSI)		| \
-	0)
+#define	ATH_KEYMAX	128		/* max key cache size we handle */
+#define	ATH_KEYBYTES	(ATH_KEYMAX/NBBY)	/* storage space in bytes */
 
-struct ath_rx_radiotap_header {
-	struct ieee80211_radiotap_header wr_ihdr;
-	u_int8_t	wr_flags;
-	u_int8_t	wr_rate;
-	u_int16_t	wr_chan_freq;
-	u_int16_t	wr_chan_flags;
-	u_int8_t	wr_antenna;
-	u_int8_t	wr_rssi;
-	u_int8_t	wr_max_rssi;
-} __packed;
-
-#define ATH_TX_RADIOTAP_PRESENT (		\
-	(1 << IEEE80211_RADIOTAP_FLAGS)		| \
-	(1 << IEEE80211_RADIOTAP_RATE)		| \
-	(1 << IEEE80211_RADIOTAP_CHANNEL)	| \
-	(1 << IEEE80211_RADIOTAP_DBM_TX_POWER)	| \
-	(1 << IEEE80211_RADIOTAP_ANTENNA)	| \
-	(1 << IEEE80211_RADIOTAP_HWQUEUE)	| \
-	0)
-
-struct ath_tx_radiotap_header {
-	struct ieee80211_radiotap_header wt_ihdr;
-	u_int8_t	wt_flags;
-	u_int8_t	wt_rate;
-	u_int16_t	wt_chan_freq;
-	u_int16_t	wt_chan_flags;
-	u_int8_t	wt_txpower;
-	u_int8_t	wt_antenna;
-	u_int8_t	wt_hwqueue;
-} __packed;
-
-/* 
- * driver-specific node 
- */
+/* driver-specific node state */
 struct ath_node {
-	struct ieee80211_node		an_node;	/* base class */
-	struct ieee80211_rssadapt	an_rssadapt;	/* rate adaption */
-	u_int				an_tx_antenna;	/* antenna for last good frame */
-	u_int				an_rx_antenna;	/* antenna for last rcvd frame */
-	struct ath_recv_hist		an_rx_hist[ATH_RHIST_SIZE];
-	u_int				an_rx_hist_next;/* index of next ``free entry'' */
+	struct ieee80211_node an_node;	/* base class */
+	u_int32_t	an_avgrssi;	/* average rssi over all rx frames */
+	/* variable-length rate control state follows */
 };
-#define	ATH_NODE(_n)	((struct ath_node *)(_n))
+#define	ATH_NODE(ni)	((struct ath_node *)(ni))
+#define	ATH_NODE_CONST(ni)	((const struct ath_node *)(ni))
+
+#define ATH_RSSI_LPF_LEN	10
+#define ATH_RSSI_DUMMY_MARKER	0x127
+#define ATH_EP_MUL(x, mul)	((x) * (mul))
+#define ATH_RSSI_IN(x)		(ATH_EP_MUL((x), HAL_RSSI_EP_MULTIPLIER))
+#define ATH_LPF_RSSI(x, y, len) \
+    ((x != ATH_RSSI_DUMMY_MARKER) ? (((x) * ((len) - 1) + (y)) / (len)) : (y))
+#define ATH_RSSI_LPF(x, y) do {						\
+    if ((y) >= -20)							\
+    	x = ATH_LPF_RSSI((x), ATH_RSSI_IN((y)), ATH_RSSI_LPF_LEN);	\
+} while (0)
 
 struct ath_buf {
-	TAILQ_ENTRY(ath_buf)		bf_list;
-	bus_dmamap_t			bf_dmamap;	/* DMA map of the buffer */
-#define bf_nseg				bf_dmamap->dm_nsegs
-#define bf_mapsize			bf_dmamap->dm_mapsize
-#define bf_segs				bf_dmamap->dm_segs
-	struct ath_desc			*bf_desc;	/* virtual addr of desc */
-	bus_addr_t			bf_daddr;	/* physical addr of desc */
-	struct mbuf			*bf_m;		/* mbuf for buf */
-	struct ieee80211_node		*bf_node;	/* pointer to the node */
-	struct ieee80211_rssdesc	bf_id;
-#define	ATH_MAX_SCATTER			64
+	STAILQ_ENTRY(ath_buf)	bf_list;
+#define bf_nseg		bf_dmamap->dm_nsegs
+	int			bf_flags;	/* tx descriptor flags */
+	struct ath_desc		*bf_desc;	/* virtual addr of desc */
+	bus_addr_t		bf_daddr;	/* physical addr of desc */
+	bus_dmamap_t		bf_dmamap;	/* DMA map for mbuf chain */
+	struct mbuf		*bf_m;		/* mbuf for buf */
+	struct ieee80211_node	*bf_node;	/* pointer to the node */
+#define bf_mapsize	bf_dmamap->dm_mapsize
+#define	ATH_MAX_SCATTER		ATH_TXDESC	/* max(tx,rx,beacon) desc's */
+#define bf_segs		bf_dmamap->dm_segs
+};
+typedef STAILQ_HEAD(, ath_buf) ath_bufhead;
+
+/*
+ * DMA state for tx/rx descriptors.
+ */
+struct ath_descdma {
+	const char*		dd_name;
+	struct ath_desc		*dd_desc;	/* descriptors */
+	bus_addr_t		dd_desc_paddr;	/* physical addr of dd_desc */
+	bus_addr_t		dd_desc_len;	/* size of dd_desc */
+	bus_dma_segment_t	dd_dseg;
+	int			dd_dnseg;	/* number of segments */
+	bus_dma_tag_t		dd_dmat;	/* bus DMA tag */
+	bus_dmamap_t		dd_dmamap;	/* DMA map for descriptors */
+	struct ath_buf		*dd_bufptr;	/* associated buffers */
 };
 
-typedef struct ath_task {
-	void	(*t_func)(void*, int);
-	void	*t_context;
-} ath_task_t;
+/*
+ * Data transmit queue state.  One of these exists for each
+ * hardware transmit queue.  Packets sent to us from above
+ * are assigned to queues based on their priority.  Not all
+ * devices support a complete set of hardware transmit queues.
+ * For those devices the array sc_ac2q will map multiple
+ * priorities to fewer hardware queues (typically all to one
+ * hardware queue).
+ */
+struct ath_txq {
+	u_int			axq_qnum;	/* hardware q number */
+	u_int			axq_depth;	/* queue depth (stat only) */
+	u_int			axq_intrcnt;	/* interrupt count */
+	u_int32_t		*axq_link;	/* link ptr in last TX desc */
+	STAILQ_HEAD(, ath_buf)	axq_q;		/* transmit queue */
+	ath_txq_lock_t		axq_lock;	/* lock on q and link */
+	/*
+	 * State for patching up CTS when bursting.
+	 */
+	struct	ath_buf		*axq_linkbuf;	/* va of last buffer */
+	u_int			axq_timer;	/* transmit timeout */
+};
+
+#define ATH_TXQ_INSERT_TAIL(_tq, _elm, _field) do { \
+	STAILQ_INSERT_TAIL(&(_tq)->axq_q, (_elm), _field); \
+	(_tq)->axq_depth++; \
+	(_tq)->axq_timer = 5; \
+} while (0)
+#define ATH_TXQ_REMOVE_HEAD(_tq, _field) do { \
+	STAILQ_REMOVE_HEAD(&(_tq)->axq_q, _field); \
+	if (--(_tq)->axq_depth == 0) \
+		(_tq)->axq_timer = 0; \
+} while (0)
+
+struct taskqueue;
+struct ath_tx99;
 
 struct ath_softc {
-#ifndef __FreeBSD__
-	struct device		sc_dev;
-#endif
+	device_t 		sc_dev;
+	struct ethercom		sc_ec;		/* interface common */
+	struct ath_stats	sc_stats;	/* interface statistics */
 	struct ieee80211com	sc_ic;		/* IEEE 802.11 common */
-#ifndef __FreeBSD__
-	int			(*sc_enable)(struct ath_softc *);
-	void			(*sc_disable)(struct ath_softc *);
 	void			(*sc_power)(struct ath_softc *, int);
-#endif
+	int			sc_regdomain;
+	int			sc_countrycode;
+	int			sc_debug;
+	struct sysctllog	*sc_sysctllog;
+	void			(*sc_recv_mgmt)(struct ieee80211com *,
+					struct mbuf *,
+					struct ieee80211_node *,
+					int, int, u_int32_t);
 	int			(*sc_newstate)(struct ieee80211com *,
 					enum ieee80211_state, int);
-	void			(*sc_node_free)(struct ieee80211com *,
-					struct ieee80211_node *);
-	void			(*sc_node_copy)(struct ieee80211com *,
-					struct ieee80211_node *,
-					const struct ieee80211_node *);
-	void			(*sc_recv_mgmt)(struct ieee80211com *,
-				    struct mbuf *, struct ieee80211_node *,
-				    int, int, u_int32_t);
-#ifdef __FreeBSD__
-	device_t		sc_dev;
-#endif
-	bus_space_tag_t		sc_st;		/* bus space tag */
-	bus_space_handle_t	sc_sh;		/* bus space handle */
+	void 			(*sc_node_free)(struct ieee80211_node *);
+	HAL_BUS_TAG		sc_st;		/* bus space tag */
+	HAL_BUS_HANDLE		sc_sh;		/* bus space handle */
 	bus_dma_tag_t		sc_dmat;	/* bus DMA tag */
-#ifdef __FreeBSD__
-	struct mtx		sc_mtx;		/* master lock (recursive) */
-#endif
+	ath_lock_t		sc_mtx;		/* master lock (recursive) */
 	struct ath_hal		*sc_ah;		/* Atheros HAL */
-	unsigned int		sc_invalid : 1,	/* disable hardware accesses */
-				sc_doani : 1,	/* dynamic noise immunity */
-				sc_veol : 1,	/* tx VEOL support */
-				sc_softled : 1,	/* GPIO software LED */
-				sc_probing : 1,	/* probing AP on beacon miss */
-				sc_64bit : 1;	/* indicates PCI Express */
-	u_int			sc_nchan;	/* number of valid channels */
+	struct ath_ratectrl	*sc_rc;		/* tx rate control support */
+	struct ath_tx99		*sc_tx99;	/* tx99 adjunct state */
+	void			(*sc_setdefantenna)(struct ath_softc *, u_int);
+	unsigned int		sc_mrretry : 1,	/* multi-rate retry support */
+				sc_softled : 1,	/* enable LED gpio status */
+				sc_splitmic: 1,	/* split TKIP MIC keys */
+				sc_needmib : 1,	/* enable MIB stats intr */
+				sc_diversity : 1,/* enable rx diversity */
+				sc_hasveol : 1,	/* tx VEOL support */
+				sc_ledstate: 1,	/* LED on/off state */
+				sc_blinking: 1,	/* LED blink operation active */
+				sc_mcastkey: 1,	/* mcast key cache search */
+				sc_syncbeacon:1,/* sync/resync beacon timers */
+				sc_hasclrkey:1;	/* CLR key supported */
+						/* rate tables */
 	const HAL_RATE_TABLE	*sc_rates[IEEE80211_MODE_MAX];
 	const HAL_RATE_TABLE	*sc_currates;	/* current rate table */
 	enum ieee80211_phymode	sc_curmode;	/* current phy mode */
+	u_int16_t		sc_curtxpow;	/* current tx power limit */
+	HAL_CHANNEL		sc_curchan;	/* current h/w channel */
 	u_int8_t		sc_rixmap[256];	/* IEEE to h/w rate table ix */
-	u_int8_t		sc_hwmap[32];	/* h/w rate ix to IEEE table */
+	struct {
+		u_int8_t	ieeerate;	/* IEEE rate */
+		u_int8_t	rxflags;	/* radiotap rx flags */
+		u_int8_t	txflags;	/* radiotap tx flags */
+		u_int16_t	ledon;		/* softled on time */
+		u_int16_t	ledoff;		/* softled off time */
+	} sc_hwmap[32];				/* h/w rate ix mappings */
+	u_int8_t		sc_minrateix;	/* min h/w rate index */
+	u_int8_t		sc_mcastrix;	/* mcast h/w rate index */
+	u_int8_t		sc_protrix;	/* protection rate index */
+	u_int			sc_mcastrate;	/* ieee rate for mcastrateix */
+	u_int			sc_txantenna;	/* tx antenna (fixed or auto) */
 	HAL_INT			sc_imask;	/* interrupt mask copy */
+	u_int			sc_keymax;	/* size of key cache */
+	u_int8_t		sc_keymap[ATH_KEYBYTES];/* key use bit map */
 
-#if NBPFILTER > 0
-	caddr_t			sc_drvbpf;
+	u_int			sc_ledpin;	/* GPIO pin for driving LED */
+	u_int			sc_ledon;	/* pin setting for LED on */
+	u_int			sc_ledidle;	/* idle polling interval */
+	int			sc_ledevent;	/* time of last LED event */
+	u_int8_t		sc_rxrate;	/* current rx rate for LED */
+	u_int8_t		sc_txrate;	/* current tx rate for LED */
+	u_int16_t		sc_ledoff;	/* off time for current blink */
+	struct callout		sc_ledtimer;	/* led off timer */
 
+	void *			sc_drvbpf;
 	union {
-		struct ath_rx_radiotap_header	th;
-		uint8_t				pad[IEEE80211_RADIOTAP_HDRLEN];
-	}			sc_rxtapu;
-#define sc_rxtap		sc_rxtapu.th
-	int			sc_rxtap_len;
-
+		struct ath_tx_radiotap_header th;
+		u_int8_t	pad[64];
+	} u_tx_rt;
+	int			sc_tx_th_len;
 	union {
-		struct ath_tx_radiotap_header	th;
-		uint8_t				pad[IEEE80211_RADIOTAP_HDRLEN];
-	}			sc_txtapu;
-#define sc_txtap		sc_txtapu.th
-	int			sc_txtap_len;
-#endif
-
-	struct ath_desc		*sc_desc;	/* TX/RX descriptors */
-	bus_dma_segment_t	sc_dseg;
-#ifndef __NetBSD__
-	int			sc_dnseg;	/* number of segments */
-#endif
-	bus_dmamap_t		sc_ddmamap;	/* DMA map for descriptors */
-	bus_addr_t		sc_desc_paddr;	/* physical addr of sc_desc */
-	bus_addr_t		sc_desc_len;	/* size of sc_desc */
+		struct ath_rx_radiotap_header th;
+		u_int8_t	pad[64];
+	} u_rx_rt;
+	int			sc_rx_th_len;
 
 	ath_task_t		sc_fataltask;	/* fatal int processing */
-	ath_task_t		sc_rxorntask;	/* rxorn int processing */
 
-	TAILQ_HEAD(, ath_buf)	sc_rxbuf;	/* receive buffer */
+	struct ath_descdma	sc_rxdma;	/* RX descriptos */
+	ath_bufhead		sc_rxbuf;	/* receive buffer */
 	u_int32_t		*sc_rxlink;	/* link ptr in last RX desc */
 	ath_task_t		sc_rxtask;	/* rx int processing */
+	ath_task_t		sc_rxorntask;	/* rxorn int processing */
+	ath_task_t		sc_radartask;	/* radar processing */
+	u_int8_t		sc_defant;	/* current default antenna */
+	u_int8_t		sc_rxotherant;	/* rx's on non-default antenna*/
+	u_int64_t		sc_lastrx;	/* tsf of last rx'd frame */
 
-	u_int			sc_txhalq[HAL_NUM_TX_QUEUES];	/* HAL q for outgoing frames */
-	u_int32_t		*sc_txlink;	/* link ptr in last TX desc */
-	int			sc_tx_timer;	/* transmit timeout */
-	TAILQ_HEAD(, ath_buf)	sc_txbuf;	/* transmit buffer */
-#ifdef __FreeBSD__
-	struct mtx		sc_txbuflock;	/* txbuf lock */
-#endif
-	TAILQ_HEAD(, ath_buf)	sc_txq;		/* transmitting queue */
-#ifdef __FreeBSD__
-	struct mtx		sc_txqlock;	/* lock on txq and txlink */
-#endif
+	struct ath_descdma	sc_txdma;	/* TX descriptors */
+	ath_bufhead		sc_txbuf;	/* transmit buffer */
+	ath_txbuf_lock_t	sc_txbuflock;	/* txbuf lock */
+	u_int			sc_txqsetup;	/* h/w queues setup */
+	u_int			sc_txintrperiod;/* tx interrupt batching */
+	struct ath_txq		sc_txq[HAL_NUM_TX_QUEUES];
+	struct ath_txq		*sc_ac2q[5];	/* WME AC -> h/w q map */
 	ath_task_t		sc_txtask;	/* tx int processing */
 
+	struct ath_descdma	sc_bdma;	/* beacon descriptors */
+	ath_bufhead		sc_bbuf;	/* beacon buffers */
 	u_int			sc_bhalq;	/* HAL q for outgoing beacons */
-	struct ath_buf		*sc_bcbuf;	/* beacon buffer */
-	struct ath_buf		*sc_bufptr;	/* allocated buffer ptr */
-	ath_task_t		sc_swbatask;	/* swba int processing */
+	u_int			sc_bmisscount;	/* missed beacon transmits */
+	u_int32_t		sc_ant_tx[8];	/* recent tx frames/antenna */
+	struct ath_txq		*sc_cabq;	/* tx q for cab frames */
+	struct ieee80211_beacon_offsets sc_boff;/* dynamic update state */
 	ath_task_t		sc_bmisstask;	/* bmiss int processing */
+	ath_task_t		sc_bstucktask;	/* stuck beacon processing */
+	enum {
+		OK,				/* no change needed */
+		UPDATE,				/* update pending */
+		COMMIT				/* beacon sent, commit change */
+	} sc_updateslot;			/* slot time update fsm */
 
-#ifdef __OpenBSD__
-	struct timeval		sc_last_ch;
-	struct timeout		sc_cal_to;
-	struct timeval		sc_last_beacon;
-	struct timeout		sc_scan_to;
-	struct timeout		sc_rssadapt_to;
-#else
 	struct callout		sc_cal_ch;	/* callout handle for cals */
+	int			sc_calinterval;	/* current polling interval */
+	int			sc_caltries;	/* cals at current interval */
+	HAL_NODE_STATS		sc_halstats;	/* station-mode rssi stats */
 	struct callout		sc_scan_ch;	/* callout handle for scan */
-#endif
-	struct ath_stats	sc_stats;	/* interface statistics */
-	HAL_MIB_STATS		sc_mib_stats;	/* MIB counter statistics */
-
-#ifndef __FreeBSD__
-	void			*sc_sdhook;	/* shutdown hook */
-	void			*sc_powerhook;	/* power management hook */
+	struct callout		sc_dfs_ch;	/* callout handle for dfs */
 	u_int			sc_flags;	/* misc flags */
-#endif
-
-	u_int8_t                sc_broadcast_addr[IEEE80211_ADDR_LEN];
-
-	struct gpio_chipset_tag sc_gpio_gc;	/* gpio(4) framework */
-	gpio_pin_t		sc_gpio_pins[ATH_MAXGPIO];
 };
-
-/* unaligned little endian access */     
-#define LE_READ_2(p)							\
-	((u_int16_t)							\
-	 ((((u_int8_t *)(p))[0]      ) | (((u_int8_t *)(p))[1] <<  8)))
-#define LE_READ_4(p)							\
-	((u_int32_t)							\
-	 ((((u_int8_t *)(p))[0]      ) | (((u_int8_t *)(p))[1] <<  8) |	\
-	 (((u_int8_t *)(p))[2] << 16) | (((u_int8_t *)(p))[3] << 24)))
-
-#ifdef AR_DEBUG
-enum {
-	ATH_DEBUG_XMIT		= 0x00000001,	/* basic xmit operation */
-	ATH_DEBUG_XMIT_DESC	= 0x00000002,	/* xmit descriptors */
-	ATH_DEBUG_RECV		= 0x00000004,	/* basic recv operation */
-	ATH_DEBUG_RECV_DESC	= 0x00000008,	/* recv descriptors */
-	ATH_DEBUG_RATE		= 0x00000010,	/* rate control */
-	ATH_DEBUG_RESET		= 0x00000020,	/* reset processing */
-	ATH_DEBUG_MODE		= 0x00000040,	/* mode init/setup */
-	ATH_DEBUG_BEACON	= 0x00000080,	/* beacon handling */
-	ATH_DEBUG_WATCHDOG	= 0x00000100,	/* watchdog timeout */
-	ATH_DEBUG_INTR		= 0x00001000,	/* ISR */
-	ATH_DEBUG_TX_PROC	= 0x00002000,	/* tx ISR proc */
-	ATH_DEBUG_RX_PROC	= 0x00004000,	/* rx ISR proc */
-	ATH_DEBUG_BEACON_PROC	= 0x00008000,	/* beacon ISR proc */
-	ATH_DEBUG_CALIBRATE	= 0x00010000,	/* periodic calibration */
-	ATH_DEBUG_ANY		= 0xffffffff
-};
-#define	IFF_DUMPPKTS(_ifp, _m) \
-	((ath_debug & _m) || \
-	    ((_ifp)->if_flags & (IFF_DEBUG|IFF_LINK2)) == (IFF_DEBUG|IFF_LINK2))
-#define	DPRINTF(_m,X)	if (ath_debug & (_m)) printf X
-#else
-#define	IFF_DUMPPKTS(_ifp, _m) \
-	(((_ifp)->if_flags & (IFF_DEBUG|IFF_LINK2)) == (IFF_DEBUG|IFF_LINK2))
-#define	DPRINTF(_m, X)
-#endif
-
-/*
- * Wrapper code
- */
-#ifndef __FreeBSD__
-#undef KASSERT
-#define KASSERT(cond, complaint) if (!(cond)) panic complaint
+#define	sc_if			sc_ec.ec_if
+#define	sc_tx_th		u_tx_rt.th
+#define	sc_rx_th		u_rx_rt.th
 
 #define	ATH_ATTACHED		0x0001		/* attach has succeeded */
-#define ATH_ENABLED		0x0002		/* chip is enabled */
-#define ATH_GPIO		0x0004		/* gpio device attached */
 
-#define	ATH_IS_ENABLED(sc)	((sc)->sc_flags & ATH_ENABLED)
-#endif
-
-#define	ATH_LOCK_INIT(_sc) \
-	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
-		 MTX_NETWORK_LOCK, MTX_DEF | MTX_RECURSE)
-#define	ATH_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
-#define	ATH_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
-#define	ATH_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
-#define	ATH_LOCK_ASSERT(_sc)	mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
-
-#define	ATH_TXBUF_LOCK_INIT(_sc) \
-	mtx_init(&(_sc)->sc_txbuflock, \
-		device_get_nameunit((_sc)->sc_dev), "xmit buf q", MTX_DEF)
-#define	ATH_TXBUF_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_txbuflock)
-#define	ATH_TXBUF_LOCK(_sc)		mtx_lock(&(_sc)->sc_txbuflock)
-#define	ATH_TXBUF_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_txbuflock)
-#define	ATH_TXBUF_LOCK_ASSERT(_sc) \
-	mtx_assert(&(_sc)->sc_txbuflock, MA_OWNED)
-
-#define	ATH_TXQ_LOCK_INIT(_sc) \
-	mtx_init(&(_sc)->sc_txqlock, \
-		device_get_nameunit((_sc)->sc_dev), "xmit q", MTX_DEF)
-#define	ATH_TXQ_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_txqlock)
-#define	ATH_TXQ_LOCK(_sc)		mtx_lock(&(_sc)->sc_txqlock)
-#define	ATH_TXQ_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_txqlock)
-#define	ATH_TXQ_LOCK_ASSERT(_sc)	mtx_assert(&(_sc)->sc_txqlock, MA_OWNED)
-
-#define ATH_TICKS() (tick)
-#define ATH_CALLOUT_INIT(chp) callout_init((chp))
-#define ATH_TASK_INIT(task, func, context)	\
-	do {					\
-		(task)->t_func = (func);	\
-		(task)->t_context = (context);	\
-	} while (0)
-#define ATH_TASK_RUN_OR_ENQUEUE(task) ((*(task)->t_func)((task)->t_context, 1))
-
-typedef unsigned long u_intptr_t;
+#define	ATH_TXQ_SETUP(sc, i)	((sc)->sc_txqsetup & (1<<i))
 
 int	ath_attach(u_int16_t, struct ath_softc *);
-int	ath_detach(struct ath_softc *, int);
-int	ath_enable(struct ath_softc *);
-void	ath_resume(struct ath_softc *, int);
-void	ath_suspend(struct ath_softc *, int);
-#ifdef __NetBSD__
+int	ath_detach(struct ath_softc *);
 int	ath_activate(struct device *, enum devact);
-void	ath_power(int, void *);
-#endif
-void	ath_shutdown(void *);
+bool	ath_resume(struct ath_softc *);
+void	ath_suspend(struct ath_softc *);
 int	ath_intr(void *);
-int	ath_enable(struct ath_softc *);
+int	ath_reset(struct ifnet *);
+void	ath_sysctlattach(struct ath_softc *);
+
+extern int ath_dwelltime;
+extern int ath_calinterval;
+extern int ath_outdoor;
+extern int ath_xchanmode;
+extern int ath_countrycode;
+extern int ath_regdomain;
+extern int ath_debug;
+extern int ath_rxbuf;
+extern int ath_txbuf;
 
 /*
  * HAL definitions to comply with local coding convention.
  */
+#define	ath_hal_detach(_ah) \
+	((*(_ah)->ah_detach)((_ah)))
 #define	ath_hal_reset(_ah, _opmode, _chan, _outdoor, _pstatus) \
 	((*(_ah)->ah_reset)((_ah), (_opmode), (_chan), (_outdoor), (_pstatus)))
-#define	ath_hal_get_rate_table(_ah, _mode) \
-	((*(_ah)->ah_get_rate_table)((_ah), (_mode)))
-#define	ath_hal_get_lladdr(_ah, _mac) \
-	((*(_ah)->ah_get_lladdr)((_ah), (_mac)))
-#define	ath_hal_set_lladdr(_ah, _mac) \
-	((*(_ah)->ah_set_lladdr)((_ah), (_mac)))
-#define	ath_hal_set_intr(_ah, _mask) \
-	((*(_ah)->ah_set_intr)((_ah), (_mask)))
-#define	ath_hal_get_intr(_ah) \
-	((*(_ah)->ah_get_intr)((_ah)))
-#define	ath_hal_is_intr_pending(_ah) \
-	((*(_ah)->ah_is_intr_pending)((_ah)))
-#define	ath_hal_get_isr(_ah, _pmask) \
-	((*(_ah)->ah_get_isr)((_ah), (_pmask)))
-#define	ath_hal_update_tx_triglevel(_ah, _inc) \
-	((*(_ah)->ah_update_tx_triglevel)((_ah), (_inc)))
-#define	ath_hal_set_power(_ah, _mode, _sleepduration) \
-	((*(_ah)->ah_set_power)((_ah), (_mode), AH_TRUE, (_sleepduration)))
-#define	ath_hal_reset_key(_ah, _ix) \
-	((*(_ah)->ah_reset_key)((_ah), (_ix)))
-#define	ath_hal_set_key(_ah, _ix, _pk) \
-	((*(_ah)->ah_set_key)((_ah), (_ix), (_pk), NULL, AH_FALSE))
-#define	ath_hal_is_key_valid(_ah, _ix) \
-	(((*(_ah)->ah_is_key_valid)((_ah), (_ix))))
-#define	ath_hal_set_key_lladdr(_ah, _ix, _mac) \
-	((*(_ah)->ah_set_key_lladdr)((_ah), (_ix), (_mac)))
-#define	ath_hal_get_rx_filter(_ah) \
-	((*(_ah)->ah_get_rx_filter)((_ah)))
-#define	ath_hal_set_rx_filter(_ah, _filter) \
-	((*(_ah)->ah_set_rx_filter)((_ah), (_filter)))
-#define	ath_hal_set_mcast_filter(_ah, _mfilt0, _mfilt1) \
-	((*(_ah)->ah_set_mcast_filter)((_ah), (_mfilt0), (_mfilt1)))
-#define	ath_hal_wait_for_beacon(_ah, _bf) \
-	((*(_ah)->ah_wait_for_beacon)((_ah), (_bf)->bf_daddr))
-#define	ath_hal_put_rx_buf(_ah, _bufaddr) \
-	((*(_ah)->ah_put_rx_buf)((_ah), (_bufaddr)))
-#define	ath_hal_get_tsf32(_ah) \
-	((*(_ah)->ah_get_tsf32)((_ah)))
-#define	ath_hal_get_tsf64(_ah) \
-	((*(_ah)->ah_get_tsf64)((_ah)))
-#define	ath_hal_reset_tsf(_ah) \
-	((*(_ah)->ah_reset_tsf)((_ah)))
-#define	ath_hal_start_rx(_ah) \
-	((*(_ah)->ah_start_rx)((_ah)))
-#define	ath_hal_put_tx_buf(_ah, _q, _bufaddr) \
-	((*(_ah)->ah_put_tx_buf)((_ah), (_q), (_bufaddr)))
-#define	ath_hal_get_tx_buf(_ah, _q) \
-	((*(_ah)->ah_get_tx_buf)((_ah), (_q)))
-#define	ath_hal_get_rx_buf(_ah) \
-	((*(_ah)->ah_get_rx_buf)((_ah)))
-#define	ath_hal_tx_start(_ah, _q) \
-	((*(_ah)->ah_tx_start)((_ah), (_q)))
+#define	ath_hal_getratetable(_ah, _mode) \
+	((*(_ah)->ah_getRateTable)((_ah), (_mode)))
+#define	ath_hal_getmac(_ah, _mac) \
+	((*(_ah)->ah_getMacAddress)((_ah), (_mac)))
+#define	ath_hal_setmac(_ah, _mac) \
+	((*(_ah)->ah_setMacAddress)((_ah), (_mac)))
+#define	ath_hal_intrset(_ah, _mask) \
+	((*(_ah)->ah_setInterrupts)((_ah), (_mask)))
+#define	ath_hal_intrget(_ah) \
+	((*(_ah)->ah_getInterrupts)((_ah)))
+#define	ath_hal_intrpend(_ah) \
+	((*(_ah)->ah_isInterruptPending)((_ah)))
+#define	ath_hal_getisr(_ah, _pmask) \
+	((*(_ah)->ah_getPendingInterrupts)((_ah), (_pmask)))
+#define	ath_hal_updatetxtriglevel(_ah, _inc) \
+	((*(_ah)->ah_updateTxTrigLevel)((_ah), (_inc)))
+#define	ath_hal_setpower(_ah, _mode) \
+	((*(_ah)->ah_setPowerMode)((_ah), (_mode), AH_TRUE))
+#define	ath_hal_keycachesize(_ah) \
+	((*(_ah)->ah_getKeyCacheSize)((_ah)))
+#define	ath_hal_keyreset(_ah, _ix) \
+	((*(_ah)->ah_resetKeyCacheEntry)((_ah), (_ix)))
+#define	ath_hal_keyset(_ah, _ix, _pk, _mac) \
+	((*(_ah)->ah_setKeyCacheEntry)((_ah), (_ix), (_pk), (_mac), AH_FALSE))
+#define	ath_hal_keyisvalid(_ah, _ix) \
+	(((*(_ah)->ah_isKeyCacheEntryValid)((_ah), (_ix))))
+#define	ath_hal_keysetmac(_ah, _ix, _mac) \
+	((*(_ah)->ah_setKeyCacheEntryMac)((_ah), (_ix), (_mac)))
+#define	ath_hal_getrxfilter(_ah) \
+	((*(_ah)->ah_getRxFilter)((_ah)))
+#define	ath_hal_setrxfilter(_ah, _filter) \
+	((*(_ah)->ah_setRxFilter)((_ah), (_filter)))
+#define	ath_hal_setmcastfilter(_ah, _mfilt0, _mfilt1) \
+	((*(_ah)->ah_setMulticastFilter)((_ah), (_mfilt0), (_mfilt1)))
+#define	ath_hal_waitforbeacon(_ah, _bf) \
+	((*(_ah)->ah_waitForBeaconDone)((_ah), (_bf)->bf_daddr))
+#define	ath_hal_putrxbuf(_ah, _bufaddr) \
+	((*(_ah)->ah_setRxDP)((_ah), (_bufaddr)))
+#define	ath_hal_gettsf32(_ah) \
+	((*(_ah)->ah_getTsf32)((_ah)))
+#define	ath_hal_gettsf64(_ah) \
+	((*(_ah)->ah_getTsf64)((_ah)))
+#define	ath_hal_resettsf(_ah) \
+	((*(_ah)->ah_resetTsf)((_ah)))
+#define	ath_hal_rxena(_ah) \
+	((*(_ah)->ah_enableReceive)((_ah)))
+#define	ath_hal_puttxbuf(_ah, _q, _bufaddr) \
+	((*(_ah)->ah_setTxDP)((_ah), (_q), (_bufaddr)))
+#define	ath_hal_gettxbuf(_ah, _q) \
+	((*(_ah)->ah_getTxDP)((_ah), (_q)))
+#define	ath_hal_numtxpending(_ah, _q) \
+	((*(_ah)->ah_numTxPending)((_ah), (_q)))
+#define	ath_hal_getrxbuf(_ah) \
+	((*(_ah)->ah_getRxDP)((_ah)))
+#define	ath_hal_txstart(_ah, _q) \
+	((*(_ah)->ah_startTxDma)((_ah), (_q)))
 #define	ath_hal_setchannel(_ah, _chan) \
-	((*(_ah)->ah_setchannel)((_ah), (_chan)))
-#define	ath_hal_calibrate(_ah, _chan) \
-	((*(_ah)->ah_calibrate)((_ah), (_chan)))
-#define	ath_hal_set_ledstate(_ah, _state) \
-	((*(_ah)->ah_set_ledstate)((_ah), (_state)))
-#define	ath_hal_init_beacon(_ah, _nextb, _bperiod) \
-	((*(_ah)->ah_init_beacon)((_ah), (_nextb), (_bperiod)))
-#define	ath_hal_reset_beacon(_ah) \
-	((*(_ah)->ah_reset_beacon)((_ah)))
-#define	ath_hal_set_beacon_timers(_ah, _bs, _tsf, _dc, _cc) \
-	((*(_ah)->ah_set_beacon_timers)((_ah), (_bs), (_tsf), \
-	 (_dc), (_cc)))
-#define	ath_hal_set_associd(_ah, _bss, _associd) \
-	((*(_ah)->ah_set_associd)((_ah), (_bss), (_associd), 0))
-#define	ath_hal_get_regdomain(_ah, _prd) \
-	(*(_prd) = (_ah)->ah_get_regdomain(_ah))
-#define	ath_hal_detach(_ah) \
-	((*(_ah)->ah_detach)(_ah))
-#define ath_hal_set_slot_time(_ah, _t) \
-	((*(_ah)->ah_set_slot_time)(_ah, _t))
-#define ath_hal_set_gpio_output(_ah, _gpio) \
-	((*(_ah)->ah_set_gpio_output)((_ah), (_gpio)))
-#define ath_hal_set_gpio_input(_ah, _gpio) \
-	((*(_ah)->ah_set_gpio_input)((_ah), (_gpio)))
-#define ath_hal_get_gpio(_ah, _gpio) \
-	((*(_ah)->ah_get_gpio)((_ah), (_gpio)))
-#define ath_hal_set_gpio(_ah, _gpio, _b) \
-	((*(_ah)->ah_set_gpio)((_ah), (_gpio), (_b)))
-#define ath_hal_set_gpio_intr(_ah, _gpio, _b) \
-	((*(_ah)->ah_set_gpio_intr)((_ah), (_gpio), (_b)))
+	((*(_ah)->ah_setChannel)((_ah), (_chan)))
+#define	ath_hal_calibrate(_ah, _chan, _iqcal) \
+	((*(_ah)->ah_perCalibration)((_ah), (_chan), (_iqcal)))
+#define	ath_hal_setledstate(_ah, _state) \
+	((*(_ah)->ah_setLedState)((_ah), (_state)))
+#define	ath_hal_beaconinit(_ah, _nextb, _bperiod) \
+	((*(_ah)->ah_beaconInit)((_ah), (_nextb), (_bperiod)))
+#define	ath_hal_beaconreset(_ah) \
+	((*(_ah)->ah_resetStationBeaconTimers)((_ah)))
+#define	ath_hal_beacontimers(_ah, _bs) \
+	((*(_ah)->ah_setStationBeaconTimers)((_ah), (_bs)))
+#define	ath_hal_setassocid(_ah, _bss, _associd) \
+	((*(_ah)->ah_writeAssocid)((_ah), (_bss), (_associd)))
+#define	ath_hal_phydisable(_ah) \
+	((*(_ah)->ah_phyDisable)((_ah)))
+#define	ath_hal_setopmode(_ah) \
+	((*(_ah)->ah_setPCUConfig)((_ah)))
+#define	ath_hal_stoptxdma(_ah, _qnum) \
+	((*(_ah)->ah_stopTxDma)((_ah), (_qnum)))
+#define	ath_hal_stoppcurecv(_ah) \
+	((*(_ah)->ah_stopPcuReceive)((_ah)))
+#define	ath_hal_startpcurecv(_ah) \
+	((*(_ah)->ah_startPcuReceive)((_ah)))
+#define	ath_hal_stopdmarecv(_ah) \
+	((*(_ah)->ah_stopDmaReceive)((_ah)))
+#define	ath_hal_getdiagstate(_ah, _id, _indata, _insize, _outdata, _outsize) \
+	((*(_ah)->ah_getDiagState)((_ah), (_id), \
+		(_indata), (_insize), (_outdata), (_outsize)))
+#define	ath_hal_setuptxqueue(_ah, _type, _irq) \
+	((*(_ah)->ah_setupTxQueue)((_ah), (_type), (_irq)))
+#define	ath_hal_resettxqueue(_ah, _q) \
+	((*(_ah)->ah_resetTxQueue)((_ah), (_q)))
+#define	ath_hal_releasetxqueue(_ah, _q) \
+	((*(_ah)->ah_releaseTxQueue)((_ah), (_q)))
+#define	ath_hal_gettxqueueprops(_ah, _q, _qi) \
+	((*(_ah)->ah_getTxQueueProps)((_ah), (_q), (_qi)))
+#define	ath_hal_settxqueueprops(_ah, _q, _qi) \
+	((*(_ah)->ah_setTxQueueProps)((_ah), (_q), (_qi)))
+#define	ath_hal_getrfgain(_ah) \
+	((*(_ah)->ah_getRfGain)((_ah)))
+#define	ath_hal_getdefantenna(_ah) \
+	((*(_ah)->ah_getDefAntenna)((_ah)))
+#define	ath_hal_setdefantenna(_ah, _ant) \
+	((*(_ah)->ah_setDefAntenna)((_ah), (_ant)))
+#define	ath_hal_rxmonitor(_ah, _arg, _chan) \
+	((*(_ah)->ah_rxMonitor)((_ah), (_arg), (_chan)))
+#define	ath_hal_mibevent(_ah, _stats) \
+	((*(_ah)->ah_procMibEvent)((_ah), (_stats)))
+#define	ath_hal_setslottime(_ah, _us) \
+	((*(_ah)->ah_setSlotTime)((_ah), (_us)))
+#define	ath_hal_getslottime(_ah) \
+	((*(_ah)->ah_getSlotTime)((_ah)))
+#define	ath_hal_setacktimeout(_ah, _us) \
+	((*(_ah)->ah_setAckTimeout)((_ah), (_us)))
+#define	ath_hal_getacktimeout(_ah) \
+	((*(_ah)->ah_getAckTimeout)((_ah)))
+#define	ath_hal_setctstimeout(_ah, _us) \
+	((*(_ah)->ah_setCTSTimeout)((_ah), (_us)))
+#define	ath_hal_getctstimeout(_ah) \
+	((*(_ah)->ah_getCTSTimeout)((_ah)))
+#define	ath_hal_getcapability(_ah, _cap, _param, _result) \
+	((*(_ah)->ah_getCapability)((_ah), (_cap), (_param), (_result)))
+#define	ath_hal_setcapability(_ah, _cap, _param, _v, _status) \
+	((*(_ah)->ah_setCapability)((_ah), (_cap), (_param), (_v), (_status)))
+#define	ath_hal_ciphersupported(_ah, _cipher) \
+	(ath_hal_getcapability(_ah, HAL_CAP_CIPHER, _cipher, NULL) == HAL_OK)
+#define	ath_hal_getregdomain(_ah, _prd) \
+	(ath_hal_getcapability(_ah, HAL_CAP_REG_DMN, 0, (_prd)) == HAL_OK)
+#define	ath_hal_setregdomain(_ah, _rd) \
+	((*(_ah)->ah_setRegulatoryDomain)((_ah), (_rd), NULL))
+#define	ath_hal_getcountrycode(_ah, _pcc) \
+	(*(_pcc) = (_ah)->ah_countryCode)
+#define	ath_hal_tkipsplit(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TKIP_SPLIT, 0, NULL) == HAL_OK)
+#define	ath_hal_hwphycounters(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_PHYCOUNTERS, 0, NULL) == HAL_OK)
+#define	ath_hal_hasdiversity(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_DIVERSITY, 0, NULL) == HAL_OK)
+#define	ath_hal_getdiversity(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_DIVERSITY, 1, NULL) == HAL_OK)
+#define	ath_hal_setdiversity(_ah, _v) \
+	ath_hal_setcapability(_ah, HAL_CAP_DIVERSITY, 1, _v, NULL)
+#define	ath_hal_getdiag(_ah, _pv) \
+	(ath_hal_getcapability(_ah, HAL_CAP_DIAG, 0, _pv) == HAL_OK)
+#define	ath_hal_setdiag(_ah, _v) \
+	ath_hal_setcapability(_ah, HAL_CAP_DIAG, 0, _v, NULL)
+#define	ath_hal_getnumtxqueues(_ah, _pv) \
+	(ath_hal_getcapability(_ah, HAL_CAP_NUM_TXQUEUES, 0, _pv) == HAL_OK)
+#define	ath_hal_hasveol(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_VEOL, 0, NULL) == HAL_OK)
+#define	ath_hal_hastxpowlimit(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TXPOW, 0, NULL) == HAL_OK)
+#define	ath_hal_settxpowlimit(_ah, _pow) \
+	((*(_ah)->ah_setTxPowerLimit)((_ah), (_pow)))
+#define	ath_hal_gettxpowlimit(_ah, _ppow) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TXPOW, 1, _ppow) == HAL_OK)
+#define	ath_hal_getmaxtxpow(_ah, _ppow) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TXPOW, 2, _ppow) == HAL_OK)
+#define	ath_hal_gettpscale(_ah, _scale) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TXPOW, 3, _scale) == HAL_OK)
+#define	ath_hal_settpscale(_ah, _v) \
+	ath_hal_setcapability(_ah, HAL_CAP_TXPOW, 3, _v, NULL)
+#define	ath_hal_hastpc(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TPC, 0, NULL) == HAL_OK)
+#define	ath_hal_gettpc(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TPC, 1, NULL) == HAL_OK)
+#define	ath_hal_settpc(_ah, _v) \
+	ath_hal_setcapability(_ah, HAL_CAP_TPC, 1, _v, NULL)
+#define	ath_hal_hasbursting(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_BURST, 0, NULL) == HAL_OK)
+#ifdef notyet
+#define	ath_hal_hasmcastkeysearch(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_MCAST_KEYSRCH, 0, NULL) == HAL_OK)
+#define	ath_hal_getmcastkeysearch(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_MCAST_KEYSRCH, 1, NULL) == HAL_OK)
+#else
+#define	ath_hal_getmcastkeysearch(_ah)	0
+#endif
+#define	ath_hal_hasrfsilent(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_RFSILENT, 0, NULL) == HAL_OK)
+#define	ath_hal_getrfkill(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_RFSILENT, 1, NULL) == HAL_OK)
+#define	ath_hal_setrfkill(_ah, _onoff) \
+	ath_hal_setcapability(_ah, HAL_CAP_RFSILENT, 1, _onoff, NULL)
+#define	ath_hal_getrfsilent(_ah, _prfsilent) \
+	(ath_hal_getcapability(_ah, HAL_CAP_RFSILENT, 2, _prfsilent) == HAL_OK)
+#define	ath_hal_setrfsilent(_ah, _rfsilent) \
+	ath_hal_setcapability(_ah, HAL_CAP_RFSILENT, 2, _rfsilent, NULL)
+#define	ath_hal_gettpack(_ah, _ptpack) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TPC_ACK, 0, _ptpack) == HAL_OK)
+#define	ath_hal_settpack(_ah, _tpack) \
+	ath_hal_setcapability(_ah, HAL_CAP_TPC_ACK, 0, _tpack, NULL)
+#define	ath_hal_gettpcts(_ah, _ptpcts) \
+	(ath_hal_getcapability(_ah, HAL_CAP_TPC_CTS, 0, _ptpcts) == HAL_OK)
+#define	ath_hal_settpcts(_ah, _tpcts) \
+	ath_hal_setcapability(_ah, HAL_CAP_TPC_CTS, 0, _tpcts, NULL)
+#if HAL_ABI_VERSION < 0x05120700
+#define	ath_hal_process_noisefloor(_ah)
+#define	ath_hal_getchannoise(_ah, _c)	(-96)
+#define	HAL_CAP_TPC_ACK	99
+#define	HAL_CAP_TPC_CTS	100
+#else
+#define	ath_hal_getchannoise(_ah, _c) \
+	((*(_ah)->ah_getChanNoise)((_ah), (_c)))
+#endif
 
-#define	ath_hal_set_opmode(_ah) \
-	((*(_ah)->ah_set_opmode)((_ah)))
-#define	ath_hal_stop_tx_dma(_ah, _qnum) \
-	((*(_ah)->ah_stop_tx_dma)((_ah), (_qnum)))
-#define	ath_hal_stop_pcu_recv(_ah) \
-	((*(_ah)->ah_stop_pcu_recv)((_ah)))
-#define	ath_hal_start_rx_pcu(_ah) \
-	((*(_ah)->ah_start_rx_pcu)((_ah)))
-#define	ath_hal_stop_rx_dma(_ah) \
-	((*(_ah)->ah_stop_rx_dma)((_ah)))
-#define	ath_hal_get_diag_state(_ah, _id, _indata, _insize, _outdata, _outsize) \
-	((*(_ah)->ah_get_diag_state)((_ah), (_id), \
-	 (_indata), (_insize), (_outdata), (_outsize)))
+#define	ath_hal_setuprxdesc(_ah, _ds, _size, _intreq) \
+	((*(_ah)->ah_setupRxDesc)((_ah), (_ds), (_size), (_intreq)))
+#define	ath_hal_rxprocdesc(_ah, _ds, _dspa, _dsnext) \
+	((*(_ah)->ah_procRxDesc)((_ah), (_ds), (_dspa), (_dsnext), 0))
+#define	ath_hal_setuptxdesc(_ah, _ds, _plen, _hlen, _atype, _txpow, \
+		_txr0, _txtr0, _keyix, _ant, _flags, \
+		_rtsrate, _rtsdura) \
+	((*(_ah)->ah_setupTxDesc)((_ah), (_ds), (_plen), (_hlen), (_atype), \
+		(_txpow), (_txr0), (_txtr0), (_keyix), (_ant), \
+		(_flags), (_rtsrate), (_rtsdura), 0, 0, 0))
+#define	ath_hal_setupxtxdesc(_ah, _ds, \
+		_txr1, _txtr1, _txr2, _txtr2, _txr3, _txtr3) \
+	((*(_ah)->ah_setupXTxDesc)((_ah), (_ds), \
+		(_txr1), (_txtr1), (_txr2), (_txtr2), (_txr3), (_txtr3)))
+#define	ath_hal_filltxdesc(_ah, _ds, _l, _first, _last, _ds0) \
+	((*(_ah)->ah_fillTxDesc)((_ah), (_ds), (_l), (_first), (_last), (_ds0)))
+#define	ath_hal_txprocdesc(_ah, _ds) \
+	((*(_ah)->ah_procTxDesc)((_ah), (_ds)))
+#define	ath_hal_gettxintrtxqs(_ah, _txqs) \
+	((*(_ah)->ah_getTxIntrQueue)((_ah), (_txqs)))
 
-#define	ath_hal_setup_tx_queue(_ah, _type, _qinfo) \
-	((*(_ah)->ah_setup_tx_queue)((_ah), (_type), (_qinfo)))
-#define	ath_hal_reset_tx_queue(_ah, _q) \
-	((*(_ah)->ah_reset_tx_queue)((_ah), (_q)))
-#define	ath_hal_release_tx_queue(_ah, _q) \
-	((*(_ah)->ah_release_tx_queue)((_ah), (_q)))
-#define	ath_hal_has_veol(_ah) \
-	((*(_ah)->ah_has_veol)((_ah)))
-#define ath_hal_update_mib_counters(_ah, _stats) \
-	((*(_ah)->ah_update_mib_counters)((_ah), (_stats)))
-#define	ath_hal_get_rf_gain(_ah) \
-	((*(_ah)->ah_get_rf_gain)((_ah)))
-#define	ath_hal_set_rx_signal(_ah) \
-	((*(_ah)->ah_set_rx_signal)((_ah)))
+#define ath_hal_gpioCfgOutput(_ah, _gpio) \
+        ((*(_ah)->ah_gpioCfgOutput)((_ah), (_gpio)))
+#define ath_hal_gpioset(_ah, _gpio, _b) \
+        ((*(_ah)->ah_gpioSet)((_ah), (_gpio), (_b)))
 
-#define	ath_hal_setup_rx_desc(_ah, _ds, _size, _intreq) \
-	((*(_ah)->ah_setup_rx_desc)((_ah), (_ds), (_size), (_intreq)))
-#define	ath_hal_proc_rx_desc(_ah, _ds, _dspa, _dsnext) \
-	((*(_ah)->ah_proc_rx_desc)((_ah), (_ds), (_dspa), (_dsnext)))
-#define	ath_hal_setup_tx_desc(_ah, _ds, _plen, _hlen, _atype, _txpow, \
-	    _txr0, _txtr0, _keyix, _ant, _flags, \
-	    _rtsrate, _rtsdura) \
-	((*(_ah)->ah_setup_tx_desc)((_ah), (_ds), (_plen), (_hlen), (_atype), \
-	    (_txpow), (_txr0), (_txtr0), (_keyix), (_ant), \
-	    (_flags), (_rtsrate), (_rtsdura)))
-#define	ath_hal_setup_xtx_desc(_ah, _ds, \
-	    _txr1, _txtr1, _txr2, _txtr2, _txr3, _txtr3) \
-	((*(_ah)->ah_setup_xtx_desc)((_ah), (_ds), \
-	    (_txr1), (_txtr1), (_txr2), (_txtr2), (_txr3), (_txtr3)))
-#define	ath_hal_fill_tx_desc(_ah, _ds, _l, _first, _last) \
-	((*(_ah)->ah_fill_tx_desc)((_ah), (_ds), (_l), (_first), (_last)))
-#define	ath_hal_proc_tx_desc(_ah, _ds) \
-	((*(_ah)->ah_proc_tx_desc)((_ah), (_ds)))
+#define ath_hal_radar_event(_ah) \
+	((*(_ah)->ah_radarHaveEvent)((_ah)))
+#define ath_hal_procdfs(_ah, _chan) \
+	((*(_ah)->ah_processDfs)((_ah), (_chan)))
+#define ath_hal_checknol(_ah, _chan, _nchans) \
+	((*(_ah)->ah_dfsNolCheck)((_ah), (_chan), (_nchans)))
+#define ath_hal_radar_wait(_ah, _chan) \
+	((*(_ah)->ah_radarWait)((_ah), (_chan)))
 
 #endif /* _DEV_ATH_ATHVAR_H */

@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.c,v 1.11 2005/12/11 12:16:54 christos Exp $	*/
+/*	$NetBSD: intr.c,v 1.15 2008/06/28 05:26:33 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.11 2005/12/11 12:16:54 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.15 2008/06/28 05:26:33 isaki Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,10 +39,9 @@ __KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.11 2005/12/11 12:16:54 christos Exp $");
 #include <sys/vmmeter.h>
 #include <sys/queue.h>
 #include <sys/device.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <machine/cpu.h>
 
 #include <atari/atari/intr.h>
 
@@ -63,6 +55,8 @@ __KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.11 2005/12/11 12:16:54 christos Exp $");
 typedef LIST_HEAD(, intrhand) ih_list_t;
 ih_list_t autovec_list[AVEC_MAX - AVEC_MIN + 1];
 ih_list_t uservec_list[UVEC_MAX - UVEC_MIN + 1];
+static int idepth;
+volatile int ssir;
 
 void
 intr_init()
@@ -293,6 +287,7 @@ struct clockframe	frame;
 	ih_list_t	*vec_list;
 	struct intrhand	*ih;
 
+	idepth++;
 	uvmexp.intrs++;
 	vector = (frame.cf_vo & 0xfff) >> 2;
 	if (vector < (AVEC_LOC+AVEC_MAX) && vector >= AVEC_LOC)
@@ -305,6 +300,7 @@ struct clockframe	frame;
 		printf("intr_dispatch: vector %d unexpected\n", vector);
 		if (++unexpected > 10)
 		  panic("intr_dispatch: too many unexpected interrupts");
+		idepth--;
 		return;
 	}
 	ih->ih_intrcnt[0]++;
@@ -320,4 +316,23 @@ struct clockframe	frame;
 	    panic("intr_dispatch: too many stray interrupts");
 	else
 	    printf("intr_dispatch: stray level %d interrupt\n", vector);
+	idepth--;
 }
+
+bool
+cpu_intr_p(void)
+{
+
+	return idepth != 0;
+}
+
+const uint16_t ipl2psl_table[NIPL] = {
+	[IPL_NONE]       = PSL_S | PSL_IPL0,
+	[IPL_SOFTCLOCK]  = PSL_S | PSL_IPL1,
+	[IPL_SOFTBIO]    = PSL_S | PSL_IPL1,
+	[IPL_SOFTNET]    = PSL_S | PSL_IPL1,
+	[IPL_SOFTSERIAL] = PSL_S | PSL_IPL1,
+	[IPL_VM]         = PSL_S | PSL_IPL4,
+	[IPL_SCHED]      = PSL_S | PSL_IPL6,
+	[IPL_HIGH]       = PSL_S | PSL_IPL7,
+};

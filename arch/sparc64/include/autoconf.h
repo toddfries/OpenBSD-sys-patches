@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.17 2008/03/08 16:30:36 kettenis Exp $	*/
-/*	$NetBSD: autoconf.h,v 1.10 2001/07/24 19:32:11 eeh Exp $ */
+/*	$NetBSD: autoconf.h,v 1.28 2008/04/28 20:23:36 martin Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,21 +74,25 @@
  */
 
 #include <machine/bus.h>
+#include <machine/promlib.h>
 #include <dev/sbus/sbusvar.h>
 
 /* This is used to map device classes to IPLs */
 struct intrmap {
-	char	*in_class;
+	const char *in_class;
 	int	in_lev;
 };
 extern struct intrmap intrmap[];
 
 /* The "mainbus" on ultra desktops is actually the UPA bus.  We need to
- * separate this from peripheral buses like SBus and PCI because each bus may
+ * separate this from peripheral buses like SBUS and PCI because each bus may
  * have different ways of encoding properties, such as "reg" and "interrupts".
+ *
+ * Eventually I'll create a real UPA bus module to allow servers with multiple
+ * peripheral buses and things like FHC bus systems.
  */
 
-/* Device register space description */
+/* Encoding for one "reg" properties item */
 struct upa_reg {
 	int64_t	ur_paddr;
 	int64_t	ur_len;
@@ -110,11 +106,11 @@ struct upa_reg {
 struct mainbus_attach_args {
 	bus_space_tag_t	ma_bustag;	/* parent bus tag */
 	bus_dma_tag_t	ma_dmatag;
-	char		*ma_name;	/* PROM node name */
+	const char	*ma_name;	/* PROM node name */
 	struct upa_reg	*ma_reg;	/* "reg" properties */
 	u_int		*ma_address;	/* "address" properties -- 32 bits */
 	u_int		*ma_interrupts;	/* "interrupts" properties */
-	int		ma_upaid;	/* UPA bus ID */
+	int		ma_upaid;	/* UPA port ID */
 	int		ma_node;	/* PROM handle */
 	int		ma_nreg;	/* Counts for those properties */
 	int		ma_naddress;
@@ -123,19 +119,14 @@ struct mainbus_attach_args {
 };
 
 /*
- * length; the others convert or make some other guarantee.
+ * The matchbyname function is useful in drivers that are matched
+ * by romaux name, i.e., all `mainbus attached' devices.  It expects
+ * its aux pointer to point to a pointer to the name (the address of
+ * a romaux structure suffices, for instance). (OBSOLETE)
  */
-long	getproplen(int node, char *name);
-int	getprop(int, char *, size_t, int *, void **);
-char	*getpropstring(int node, char *name);
-int	getpropint(int node, char *name, int deflt);
-int	getpropspeed(int node, char *name);
-
-/* Frequently used options node */
-extern int optionsnode;
-
-	/* new interfaces: */
-char	*getpropstringA(int, char *, char *);
+struct device;
+struct cfdata;
+int	matchbyname(struct device *, struct cfdata *cf, void *aux);
 
 /*
  * `clockfreq' produces a printable representation of a clock frequency
@@ -143,28 +134,7 @@ char	*getpropstringA(int, char *, char *);
  */
 char	*clockfreq(long freq);
 
-/* Openprom V2 style boot path */
-struct device;
-struct bootpath {
-	int	node;
-	char	name[16];	/* name of this node */
-	long	val[3];		/* up to three optional values */
-	struct device *dev;	/* device that recognised this component */
-};
-struct bootpath	*bootpath_store(int, struct bootpath *);
+/* Kernel initialization routine. */
+void	bootstrap(void *, void *, void *, void *, void *);
 
-/* Establish a mountroot_hook, for benefit of floppy drive, mostly. */
-void	mountroot_hook_establish(void (*)(struct device *), struct device *);
-
-void	bootstrap(int);
-int	firstchild(int);
-int	nextsibling(int);
-void	callrom(void);
-struct device *getdevunit(char *, int);
-void	*findzs(int);
 int	romgetcursoraddr(int **, int **);
-int	findroot(void);
-int	findnode(int, const char *);
-int	checkstatus(int);
-int	node_has_property(int, const char *);
-void	device_register(struct device *, void *);

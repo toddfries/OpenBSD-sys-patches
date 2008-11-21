@@ -1,5 +1,30 @@
-/*	$OpenBSD: tty.h,v 1.22 2006/08/17 06:27:05 miod Exp $	*/
-/*	$NetBSD: tty.h,v 1.30.4.1 1996/06/02 09:08:13 mrg Exp $	*/
+/*	$NetBSD: tty.h,v 1.84 2008/11/19 18:36:10 ad Exp $	*/
+
+/*-
+ * Copyright (c) 2008 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -34,62 +59,44 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)tty.h	8.6 (Berkeley) 1/21/94
+ *	@(#)tty.h	8.7 (Berkeley) 1/9/95
  */
 
+#ifndef _SYS_TTY_H_
+#define _SYS_TTY_H_
+
 #include <sys/termios.h>
+#include <sys/select.h>
+#include <sys/selinfo.h>	/* For struct selinfo. */
+#include <sys/mutex.h>
+#include <sys/condvar.h>
 #include <sys/queue.h>
-#include <sys/selinfo.h>		/* For struct selinfo. */
-#include <sys/timeout.h>
-
-#define KERN_TTY_TKNIN		1	/* quad: input chars */
-#define KERN_TTY_TKNOUT		2	/* quad: output chars */
-#define KERN_TTY_TKRAWCC	3	/* quad: input chars, raw mode */
-#define KERN_TTY_TKCANCC	4	/* quad: input char, cooked mode */
-#define KERN_TTY_INFO		5	/* struct: tty stats */
-#define KERN_TTY_MAXPTYS	6	/* int: max ptys */
-#define KERN_TTY_NPTYS		7	/* int: number of allocated ptys */
-#define KERN_TTY_MAXID		8
-
-#define CTL_KERN_TTY_NAMES { \
-	{ 0, 0 }, \
-	{ "tk_nin", CTLTYPE_QUAD }, \
-	{ "tk_nout", CTLTYPE_QUAD }, \
-	{ "tk_rawcc", CTLTYPE_QUAD }, \
-	{ "tk_cancc", CTLTYPE_QUAD }, \
-	{ "ttyinfo", CTLTYPE_STRUCT }, \
-	{ "maxptys", CTLTYPE_INT }, \
-	{ "nptys", CTLTYPE_INT }, \
-}
-
-/* ptmget, for /dev/ptm pty getting ioctl PTMGET */
-
-struct ptmget {
-	int	cfd;
-	int	sfd;
-	char	cn[16];
-	char	sn[16];
-};
-#define PTMGET _IOR('t', 1, struct ptmget) /* get ptys */
-#define PATH_PTMDEV	"/dev/ptm"
-#define TTY_GID		4	/* XXX evil hardcoding of tty gid */
+#include <sys/callout.h>
 
 /*
  * Clists are actually ring buffers. The c_cc, c_cf, c_cl fields have
  * exactly the same behaviour as in true clists.
  * if c_cq is NULL, the ring buffer has no TTY_QUOTE functionality
- * (but, saves memory and cpu time)
+ * (but, saves memory and CPU time)
  *
  * *DON'T* play with c_cs, c_ce, c_cq, or c_cl outside tty_subr.c!!!
  */
 struct clist {
-	int	c_cc;		/* count of characters in queue */
-	int	c_cn;		/* total ring buffer length */
 	u_char	*c_cf;		/* points to first character */
 	u_char	*c_cl;		/* points to next open character */
 	u_char	*c_cs;		/* start of ring buffer */
 	u_char	*c_ce;		/* c_ce + c_len */
 	u_char	*c_cq;		/* N bits/bytes long, see tty_subr.c */
+	int	c_cc;		/* count of characters in queue */
+	int	c_cn;		/* total ring buffer length */
+};
+
+/* tty signal types */
+enum ttysigtype {
+	TTYSIG_PG1,
+	TTYSIG_PG2,
+	TTYSIG_LEADER,
+	TTYSIG_COUNT
 };
 
 /*
@@ -103,13 +110,21 @@ struct tty {
 	TAILQ_ENTRY(tty) tty_link;	/* Link in global tty list. */
 	struct	clist t_rawq;		/* Device raw input queue. */
 	long	t_rawcc;		/* Raw input queue statistics. */
+	kcondvar_t t_rawcv;		/* notifier */
+	kcondvar_t t_rawcvf;		/* notifier */
 	struct	clist t_canq;		/* Device canonical queue. */
 	long	t_cancc;		/* Canonical queue statistics. */
+	kcondvar_t t_cancv;		/* notifier */
+	kcondvar_t t_cancvf;		/* notifier */
 	struct	clist t_outq;		/* Device output queue. */
 	long	t_outcc;		/* Output queue statistics. */
-	u_char	t_line;			/* Interface to device drivers. */
+	kcondvar_t t_outcv;		/* notifier */
+	kcondvar_t t_outcvf;		/* notifier */
+	callout_t t_rstrt_ch;		/* for delayed output start */
+	struct	linesw *t_linesw;	/* Interface to device drivers. */
 	dev_t	t_dev;			/* Device. */
 	int	t_state;		/* Device and driver (TS*) state. */
+	int	t_wopen;		/* Processes waiting for open. */
 	int	t_flags;		/* Tty flags. */
 	struct	pgrp *t_pgrp;		/* Foreground process group. */
 	struct	session *t_session;	/* Enclosing session. */
@@ -122,32 +137,16 @@ struct tty {
 					/* Set hardware state. */
 	int	(*t_param)(struct tty *, struct termios *);
 					/* Set hardware flow control. */
-	int	(*t_hwiflow)(struct tty *tp, int flag);
+	int	(*t_hwiflow)(struct tty *, int);
 	void	*t_sc;			/* XXX: net/if_sl.c:sl_softc. */
 	short	t_column;		/* Tty output column. */
 	short	t_rocount, t_rocol;	/* Tty. */
 	short	t_hiwat;		/* High water mark. */
 	short	t_lowat;		/* Low water mark. */
 	short	t_gen;			/* Generation number. */
-	struct timeout t_rstrt_to;	/* restart timeout */
-	struct timeval t_tv;		/* timestamp */
-};
-
-/*
- * Small version of struct tty exported via sysctl KERN_TTY_INFO
- */
-struct itty {
-	dev_t   t_dev;
-	int t_rawq_c_cc;
-	int t_canq_c_cc;
-	int t_outq_c_cc;
-	short t_hiwat;
-	short t_lowat;
-	short t_column;
-	int t_state;
-	struct session *t_session;
-	pid_t t_pgrp_pg_id;
-	u_char t_line;
+	sigset_t t_sigs[TTYSIG_COUNT];	/* Pending signals */
+	int	t_sigcount;		/* # pending signals */
+	TAILQ_ENTRY(tty) t_sigqueue;	/* entry on pending signal list */
 };
 
 #define	t_cc		t_termios.c_cc
@@ -155,16 +154,14 @@ struct itty {
 #define	t_iflag		t_termios.c_iflag
 #define	t_ispeed	t_termios.c_ispeed
 #define	t_lflag		t_termios.c_lflag
-#define	t_min		t_termios.c_min
 #define	t_oflag		t_termios.c_oflag
 #define	t_ospeed	t_termios.c_ospeed
-#define	t_time		t_termios.c_time
 
 #define	TTIPRI	25			/* Sleep priority for tty reads. */
 #define	TTOPRI	26			/* Sleep priority for tty writes. */
 
 #define	TTMASK	15
-#define	OBUFSIZ	512
+#define	OBUFSIZ	100
 #define	TTYHOG	1024
 
 #ifdef _KERNEL
@@ -172,19 +169,19 @@ struct itty {
 #define	TTMINHIWAT	roundup(100, CBSIZE)
 #define	TTMAXLOWAT	256
 #define	TTMINLOWAT	32
-#endif
+#endif /* _KERNEL */
 
 /* These flags are kept in t_state. */
-#define	TS_ASLEEP	0x00001		/* Process waiting for tty. */
+#define	TS_SIGINFO	0x00001		/* Ignore mask on dispatch SIGINFO */
 #define	TS_ASYNC	0x00002		/* Tty in async I/O mode. */
 #define	TS_BUSY		0x00004		/* Draining output. */
 #define	TS_CARR_ON	0x00008		/* Carrier is present. */
-#define	TS_FLUSH	0x00010		/* Outq has been flushed during DMA. */
-#define	TS_ISOPEN	0x00020		/* Open has completed. */
-#define	TS_TBLOCK	0x00040		/* Further input blocked. */
-#define	TS_TIMEOUT	0x00080		/* Wait for output char processing. */
-#define	TS_TTSTOP	0x00100		/* Output paused. */
-#define	TS_WOPEN	0x00200		/* Open in progress. */
+#define	TS_DIALOUT	0x00010		/* Tty used for dialout. */
+#define	TS_FLUSH	0x00020		/* Outq has been flushed during DMA. */
+#define	TS_ISOPEN	0x00040		/* Open has completed. */
+#define	TS_TBLOCK	0x00080		/* Further input blocked. */
+#define	TS_TIMEOUT	0x00100		/* Wait for output char processing. */
+#define	TS_TTSTOP	0x00200		/* Output paused. */
 #define	TS_XCLUDE	0x00400		/* Tty requires exclusivity. */
 
 /* State for intra-line fancy editing work. */
@@ -194,11 +191,6 @@ struct itty {
 #define	TS_LNCH		0x04000		/* Next character is literal. */
 #define	TS_TYPEN	0x08000		/* Retyping suspended input (PENDIN). */
 #define	TS_LOCAL	(TS_BKSL | TS_CNTTB | TS_ERASE | TS_LNCH | TS_TYPEN)
-
-#define TS_TSTAMPDCDSET	0x10000		/* update timestamp on DCD set */
-#define TS_TSTAMPDCDCLR	0x20000		/* update timestamp on DCD clr */
-#define TS_TSTAMPCTSSET	0x40000		/* update timestamp on CTS set */
-#define TS_TSTAMPCTSCLR	0x80000		/* update timestamp on CTS clr */
 
 /* Character type information. */
 #define	ORDINARY	0
@@ -229,7 +221,7 @@ struct speedtab {
 
 /* Is tp controlling terminal for p? */
 #define	isctty(p, tp)							\
-	((p)->p_session == (tp)->t_session && (p)->p_flag & P_CONTROLT)
+	((p)->p_session == (tp)->t_session && (p)->p_lflag & PL_CONTROLT)
 
 /* Is p in background of tp? */
 #define	isbackground(p, tp)						\
@@ -241,77 +233,74 @@ struct speedtab {
 TAILQ_HEAD(ttylist_head, tty);		/* the ttylist is a TAILQ */
 
 #ifdef _KERNEL
+#include <sys/mallocvar.h>
+
+extern kmutex_t	tty_lock;
+
+MALLOC_DECLARE(M_TTYS);
 
 extern	int tty_count;			/* number of ttys in global ttylist */
 extern	struct ttychars ttydefaults;
 
 /* Symbolic sleep message strings. */
-extern	 char ttyin[], ttyout[], ttopen[], ttclos[], ttybg[], ttybuf[];
+extern	 const char ttclos[];
 
-int	sysctl_tty(int *, u_int, void *, size_t *, void *, size_t);
-int	sysctl_pty(int *, u_int, void *, size_t *, void *, size_t);
-
-int	 b_to_q(u_char *cp, int cc, struct clist *q);
-void	 catq(struct clist *from, struct clist *to);
+int	 b_to_q(const u_char *, int, struct clist *);
+void	 catq(struct clist *, struct clist *);
 void	 clist_init(void);
-int	 getc(struct clist *q);
-void	 ndflush(struct clist *q, int cc);
-int	 ndqb(struct clist *q, int flag);
-u_char	*nextc(struct clist *q, u_char *cp, int *c);
-int	 putc(int c, struct clist *q);
-int	 q_to_b(struct clist *q, u_char *cp, int cc);
-int	 unputc(struct clist *q);
+int	 getc(struct clist *);
+void	 ndflush(struct clist *, int);
+int	 ndqb(struct clist *, int);
+u_char	*nextc(struct clist *, u_char *, int *);
+int	 putc(int, struct clist *);
+int	 q_to_b(struct clist *, u_char *, int);
+int	 unputc(struct clist *);
 
-int	 nullmodem(struct tty *tp, int flag);
-int	 tputchar(int c, struct tty *tp);
-int	 ttioctl(struct tty *tp, u_long com, caddr_t data, int flag,
-	    struct proc *p);
-int	 ttread(struct tty *tp, struct uio *uio, int flag);
-void	 ttrstrt(void *tp);
-int	 ttpoll(dev_t device, int events, struct proc *p);
-int	 ttkqfilter(dev_t dev, struct knote *kn);
-void	 ttsetwater(struct tty *tp);
-int	 ttspeedtab(int speed, const struct speedtab *table);
-int	 ttstart(struct tty *tp);
-void	 ttwakeup(struct tty *tp);
-int	 ttwrite(struct tty *tp, struct uio *uio, int flag);
-void	 ttychars(struct tty *tp);
-int	 ttycheckoutq(struct tty *tp, int wait);
-int	 ttyclose(struct tty *tp);
-void	 ttyflush(struct tty *tp, int rw);
-void	 ttyinfo(struct tty *tp);
-int	 ttyinput(int c, struct tty *tp);
-int	 ttylclose(struct tty *tp, int flag);
-int	 ttymodem(struct tty *tp, int flag);
-int	 ttyopen(dev_t device, struct tty *tp);
-int	 ttyoutput(int c, struct tty *tp);
-void	 ttypend(struct tty *tp);
-void	 ttyretype(struct tty *tp);
-void	 ttyrub(int c, struct tty *tp);
-int	 ttysleep(struct tty *tp,
-	    void *chan, int pri, char *wmesg, int timeout);
-int	 ttywait(struct tty *tp);
-int	 ttywflush(struct tty *tp);
-void	 ttytstamp(struct tty *tp, int octs, int ncts, int odcd, int ndcd);
-
-void	tty_init(void);
-struct tty *ttymalloc(void);
+int	 nullmodem(struct tty *, int);
+int	 tputchar(int, int, struct tty *);
+int	 ttioctl(struct tty *, u_long, void *, int, struct lwp *);
+int	 ttread(struct tty *, struct uio *, int);
+void	 ttrstrt(void *);
+int	 ttpoll(struct tty *, int, struct lwp *);
+void	 ttsetwater(struct tty *);
+int	 ttspeedtab(int, const struct speedtab *);
+int	 ttstart(struct tty *);
+void	 ttwakeup(struct tty *);
+int	 ttwrite(struct tty *, struct uio *, int);
+void	 ttychars(struct tty *);
+int	 ttycheckoutq(struct tty *, int);
+int	 ttyclose(struct tty *);
+void	 ttyflush(struct tty *, int);
+void	 ttygetinfo(struct tty *, int, char *, size_t);
+void	 ttyputinfo(struct tty *, char *);
+int	 ttyinput(int, struct tty *);
+int	 ttylclose(struct tty *, int);
+int	 ttylopen(dev_t, struct tty *);
+int	 ttykqfilter(dev_t, struct knote *);
+int	 ttymodem(struct tty *, int);
+int	 ttyopen(struct tty *, int, int);
+int	 ttyoutput(int, struct tty *);
+void	 ttypend(struct tty *);
+void	 ttyretype(struct tty *);
+void	 ttyrub(int, struct tty *);
+int	 ttysleep(struct tty *, kcondvar_t *, bool, int);
+int	 ttywait(struct tty *);
+int	 ttywflush(struct tty *);
+void	 ttysig(struct tty *, enum ttysigtype, int);
+void	 tty_attach(struct tty *);
+void	 tty_detach(struct tty *);
+void	 tty_init(void);
+struct tty
+	*ttymalloc(void);
 void	 ttyfree(struct tty *);
-u_char	*firstc(struct clist *clp, int *c);
-
-int	cttyopen(dev_t, int, int, struct proc *);
-int	cttyread(dev_t, struct uio *, int);
-int	cttywrite(dev_t, struct uio *, int);
-int	cttyioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	cttypoll(dev_t, int, struct proc *);
+u_char	*firstc(struct clist *, int *);
+bool	 ttypull(struct tty *);
 
 int	clalloc(struct clist *, int, int);
 void	clfree(struct clist *);
 
-#if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_SVR4) || \
-    defined(COMPAT_FREEBSD) || defined(COMPAT_OSF1)
-# define COMPAT_OLDTTY
-int 	ttcompat(struct tty *, u_long, caddr_t, int, struct proc *);
-#endif
+extern int (*ttcompatvec)(struct tty *, u_long, void *, int, struct lwp *);
 
-#endif
+#endif /* _KERNEL */
+
+#endif /* !_SYS_TTY_H_ */

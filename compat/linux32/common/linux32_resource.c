@@ -1,4 +1,4 @@
-/*	$NetBSD: linux32_resource.c,v 1.2 2006/06/25 16:15:40 manu Exp $ */
+/*	$NetBSD: linux32_resource.c,v 1.10 2008/11/19 18:36:04 ad Exp $ */
 
 /*-
  * Copyright (c) 2006 Emmanuel Dreyfus, all rights reserved.
@@ -33,7 +33,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: linux32_resource.c,v 1.2 2006/06/25 16:15:40 manu Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux32_resource.c,v 1.10 2008/11/19 18:36:04 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -43,8 +43,8 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_resource.c,v 1.2 2006/06/25 16:15:40 manu Ex
 #include <sys/kernel.h>
 #include <sys/fcntl.h>
 #include <sys/select.h>
-#include <sys/sa.h>
 #include <sys/proc.h>
+#include <sys/resourcevar.h>
 #include <sys/ucred.h>
 #include <sys/swap.h>
 
@@ -62,6 +62,8 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_resource.c,v 1.2 2006/06/25 16:15:40 manu Ex
 #include <compat/linux/common/linux_misc.h>
 #include <compat/linux/common/linux_limit.h>
 #include <compat/linux/common/linux_oldolduname.h>
+#include <compat/linux/common/linux_ipc.h>
+#include <compat/linux/common/linux_sem.h>
 #include <compat/linux/linux_syscallargs.h>
 
 #include <compat/linux32/common/linux32_types.h>
@@ -72,92 +74,61 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_resource.c,v 1.2 2006/06/25 16:15:40 manu Ex
 #include <compat/linux32/linux32_syscallargs.h>
 
 int
-linux32_sys_getrlimit(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_getrlimit(struct lwp *l, const struct linux32_sys_getrlimit_args *uap, register_t *retval)
 {
-	struct linux32_sys_getrlimit_args /* {
+	/* {
 		syscallarg(int) which;
 		syscallarg(netbsd32_orlimitp_t) rlp;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
-	caddr_t sg = stackgap_init(p, 0);
-	struct sys_getrlimit_args ap;
+	} */
 	struct orlimit orl;
-	struct rlimit rl;
-	int error;
+	int which;
 
-	SCARG(&ap, which) = linux_to_bsd_limit(SCARG(uap, which));
-	if ((error = SCARG(&ap, which)) < 0)
-		return -error;
+	which = linux_to_bsd_limit(SCARG(uap, which));
+	if (which < 0)
+		return -which;
 
-	SCARG(&ap, rlp) = stackgap_alloc(p, &sg, sizeof rl);
+	bsd_to_linux_rlimit(&orl, &l->l_proc->p_rlimit[which]);
 
-	if ((error = sys_getrlimit(l, &ap, retval)) != 0)
-		return error;
-
-	if ((error = copyin(SCARG(&ap, rlp), &rl, sizeof(rl))) != 0)
-		return error;
-
-	bsd_to_linux_rlimit(&orl, &rl);
-
-	return copyout(&orl, NETBSD32PTR64(SCARG(uap, rlp)), sizeof(orl));
+	return copyout(&orl, SCARG_P32(uap, rlp), sizeof(orl));
 }
 
 int
-linux32_sys_setrlimit(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_setrlimit(struct lwp *l, const struct linux32_sys_setrlimit_args *uap, register_t *retval)
 {
-	struct linux32_sys_setrlimit_args /* {
+	/* {
 		syscallarg(int) which;
 		syscallarg(netbsd32_orlimitp_t) rlp;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
-	caddr_t sg = stackgap_init(p, 0);
-	struct sys_getrlimit_args ap;
+	} */
 	struct rlimit rl;
 	struct orlimit orl;
 	int error;
+	int which;
 
-	SCARG(&ap, which) = linux_to_bsd_limit(SCARG(uap, which));
-	SCARG(&ap, rlp) = stackgap_alloc(p, &sg, sizeof rl);
-	if ((error = SCARG(&ap, which)) < 0)
-		return -error;
-
-	if ((error = copyin(NETBSD32PTR64(SCARG(uap, rlp)), 
-	    &orl, sizeof(orl))) != 0)
+	if ((error = copyin(SCARG_P32(uap, rlp), &orl, sizeof(orl))) != 0)
 		return error;
+
+	which = linux_to_bsd_limit(SCARG(uap, which));
+	if (which < 0)
+		return -which;
 
 	linux_to_bsd_rlimit(&rl, &orl);
 
-	if ((error = copyout(&rl, SCARG(&ap, rlp), sizeof(rl))) != 0)
-		return error;
-
-	return sys_setrlimit(l, &ap, retval);
+	return dosetrlimit(l, l->l_proc, which, &rl);
 }
 
 int
-linux32_sys_ugetrlimit(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_ugetrlimit(struct lwp *l, const struct linux32_sys_ugetrlimit_args *uap, register_t *retval)
 {
-	return linux32_sys_getrlimit(l, v, retval);
+	return linux32_sys_getrlimit(l, (const void *)uap, retval);
 }
 
 int
-linux32_sys_getpriority(l, v, retval) 
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_getpriority(struct lwp *l, const struct linux32_sys_getpriority_args *uap, register_t *retval)
 {
-	struct linux32_sys_getpriority_args /* {
+	/* {
 		syscallarg(int) which;
 		syscallarg(int) who;
-	} */ *uap = v;
+	} */
 	struct sys_getpriority_args bsa;
 	int error;
 		 
@@ -170,24 +141,4 @@ linux32_sys_getpriority(l, v, retval)
 	*retval = NZERO - *retval;
 	
 	return 0;
-} 
-
-int
-linux32_sys_setpriority(l, v, retval) 
-	struct lwp *l;
-	void *v;
-	register_t *retval;
-{
-	struct linux32_sys_setpriority_args /* {
-		syscallarg(int) which;
-		syscallarg(int) who;
-		syscallarg(int) prio;
-	} */ *uap = v;
-	struct sys_setpriority_args bsa;
-		 
-	SCARG(&bsa, which) = SCARG(uap, which);
-	SCARG(&bsa, who) = SCARG(uap, who);
-	SCARG(&bsa, prio) = SCARG(uap, prio);
-
-	return sys_setpriority(l, &bsa, retval);
 } 

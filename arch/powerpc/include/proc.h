@@ -1,5 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.5 2008/04/27 15:59:49 drahn Exp $	*/
-/*	$NetBSD: proc.h,v 1.1 1996/09/30 16:34:31 ws Exp $	*/
+/*	$NetBSD: proc.h,v 1.7 2007/11/16 07:36:11 skrll Exp $	*/
 
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -31,15 +30,22 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef	_POWERPC_PROC_H_
-#define	_POWERPC_PROC_H_
+#ifndef _POWERPC_PROC_H_
+#define _POWERPC_PROC_H_
 
 /*
- * Machine-dependent part of the proc structure
+ * Machine-dependent part of the lwp structure
  */
+struct mdlwp {
+	int md_flags;
+};
+#define MDP_USEDFP	0x0001	/* this process has used the FPU */
+#define	MDP_USEDVEC	0x0002	/* this process has used AltiVec */
+
+struct trapframe;
+
 struct mdproc {
-	__volatile int md_astpending;
+	void (*md_syscall)(struct trapframe *);
 };
 
-#endif	/* _POWERPC_PROC_H_ */
+#endif /* _POWERPC_PROC_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: locore2.c,v 1.15 2005/12/11 12:19:16 christos Exp $	*/
+/*	$NetBSD: locore2.c,v 1.19 2008/11/12 12:36:08 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: locore2.c,v 1.15 2005/12/11 12:19:16 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: locore2.c,v 1.19 2008/11/12 12:36:08 ad Exp $");
 
 #include "opt_ddb.h"
 
@@ -111,7 +104,7 @@ void _bootstrap(void);
 static void _verify_hardware(void);
 static void _vm_init(void);
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 static void _save_symtab(void);
 
 /*
@@ -179,7 +172,7 @@ _vm_init(void)
 	 * if DDB is not part of this kernel, ignore the symbols.
 	 */
 	esym = end + 4;
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	/* This will advance esym past the symbols. */
 	_save_symtab();
 #endif
@@ -198,7 +191,7 @@ _vm_init(void)
 	 */
 	proc0paddr = (struct user *) nextva;
 	nextva += USPACE;
-	memset((caddr_t)proc0paddr, 0, USPACE);
+	memset((void *)proc0paddr, 0, USPACE);
 	lwp0.l_addr = proc0paddr;
 
 	/*
@@ -237,14 +230,14 @@ _verify_hardware(void)
 		cpu_match++;
 		cpu_string = "{120,170}";
 		delay_divisor = 205;	/* 10 MHz */
-		cpu_has_multibus = TRUE;
+		cpu_has_multibus = true;
 		break;
 
 	case ID_SUN2_50 :
 		cpu_match++;
 		cpu_string = "50";
 		delay_divisor = 205;	/* 10 MHz */
-		cpu_has_vme = TRUE;
+		cpu_has_vme = true;
 		break;
 
 	default:

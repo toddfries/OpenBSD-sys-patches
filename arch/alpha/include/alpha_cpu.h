@@ -1,5 +1,4 @@
-/* $OpenBSD: alpha_cpu.h,v 1.8 2002/11/26 01:35:23 art Exp $ */
-/* $NetBSD: alpha_cpu.h,v 1.43 2001/12/18 04:18:22 thorpej Exp $ */
+/* $NetBSD: alpha_cpu.h,v 1.48 2006/02/16 20:17:13 perry Exp $ */
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -208,27 +207,27 @@ struct alpha_logout_area {
 #define ALPHA_K0SEG_TO_PHYS(x)	((x) & ~ALPHA_K0SEG_BASE)
 #define ALPHA_PHYS_TO_K0SEG(x)	((x) | ALPHA_K0SEG_BASE)
 
-#define	ALPHA_PTE_VALID			0x0001UL
+#define	ALPHA_PTE_VALID			0x0001
 
-#define	ALPHA_PTE_FAULT_ON_READ		0x0002UL
-#define	ALPHA_PTE_FAULT_ON_WRITE	0x0004UL
-#define	ALPHA_PTE_FAULT_ON_EXECUTE	0x0008UL
+#define	ALPHA_PTE_FAULT_ON_READ		0x0002
+#define	ALPHA_PTE_FAULT_ON_WRITE	0x0004
+#define	ALPHA_PTE_FAULT_ON_EXECUTE	0x0008
 
-#define	ALPHA_PTE_ASM			0x0010UL	/* addr. space match */
-#define	ALPHA_PTE_GRANULARITY		0x0060UL	/* granularity hint */
+#define	ALPHA_PTE_ASM			0x0010		/* addr. space match */
+#define	ALPHA_PTE_GRANULARITY		0x0060		/* granularity hint */
 
-#define	ALPHA_PTE_PROT			0xff00UL
-#define	ALPHA_PTE_KR			0x0100UL
-#define	ALPHA_PTE_UR			0x0200UL
-#define	ALPHA_PTE_KW			0x1000UL
-#define	ALPHA_PTE_UW			0x2000UL
+#define	ALPHA_PTE_PROT			0xff00
+#define	ALPHA_PTE_KR			0x0100
+#define	ALPHA_PTE_UR			0x0200
+#define	ALPHA_PTE_KW			0x1000
+#define	ALPHA_PTE_UW			0x2000
 
 #define	ALPHA_PTE_WRITE			(ALPHA_PTE_KW | ALPHA_PTE_UW)
 
-#define	ALPHA_PTE_SOFTWARE		0x00000000ffff0000UL
+#define	ALPHA_PTE_SOFTWARE		0x00000000ffff0000
 #define	ALPHA_PTE_PALCODE		(~ALPHA_PTE_SOFTWARE) /* shorthand */
 
-#define	ALPHA_PTE_PFN			0xffffffff00000000UL
+#define	ALPHA_PTE_PFN			0xffffffff00000000
 
 #define	ALPHA_PTE_TO_PFN(pte)		((pte) >> 32)
 #define	ALPHA_PTE_FROM_PFN(pfn)		((pfn) << 32)
@@ -289,13 +288,14 @@ typedef unsigned long alpha_pt_entry_t;
 #define	ALPHA_AMASK_CIX		0x0004		/* count extension */
 #define	ALPHA_AMASK_MVI		0x0100		/* multimedia extension */
 #define	ALPHA_AMASK_PAT		0x0200		/* precise arith. traps */
+#define	ALPHA_AMASK_PMI		0x1000		/* prefetch w/ modify intent */
 
 #define	ALPHA_AMASK_ALL		(ALPHA_AMASK_BWX|ALPHA_AMASK_FIX|	\
 				 ALPHA_AMASK_CIX|ALPHA_AMASK_MVI|	\
-				 ALPHA_AMASK_PAT)
+				 ALPHA_AMASK_PAT|ALPHA_AMASK_PMI)
 
 #define	ALPHA_AMASK_BITS						\
-    "\20\12PAT\11MVI\3CIX\2FIX\1BWX"
+    "\20\17PMI\12PAT\11MVI\3CIX\2FIX\1BWX"
 
 /*
  * Chip family IDs returned by implver instruction
@@ -304,6 +304,7 @@ typedef unsigned long alpha_pt_entry_t;
 #define	ALPHA_IMPLVER_EV4	0		/* LCA/EV4/EV45 */
 #define	ALPHA_IMPLVER_EV5	1		/* EV5/EV56/PCA56 */
 #define	ALPHA_IMPLVER_EV6	2		/* EV6 */
+#define	ALPHA_IMPLVER_EV7	3		/* EV7/EV79 */
 
 #ifdef _KERNEL
 
@@ -339,12 +340,12 @@ alpha_rpcc(void)
 {
 	unsigned long v0;
 
-	__asm __volatile("rpcc %0" : "=r" (v0));
+	__asm volatile("rpcc %0" : "=r" (v0));
 	return (v0);
 }
 
-#define	alpha_mb()	__asm __volatile("mb" : : : "memory")
-#define	alpha_wmb()	__asm __volatile("mb" : : : "memory")	/* XXX */
+#define	alpha_mb()	__asm volatile("mb" : : : "memory")
+#define	alpha_wmb()	__asm volatile("mb" : : : "memory")	/* XXX */
 
 #if defined(_KERNEL) || defined(_STANDALONE)
 
@@ -359,10 +360,10 @@ unsigned long	_alpha_pal_swpipl(unsigned long);	/* for profiling */
 void		alpha_pal_wrent(void *, unsigned long);
 void		alpha_pal_wrvptptr(unsigned long);
 
-#define	alpha_pal_draina() __asm __volatile("call_pal %0 # PAL_draina"	\
+#define	alpha_pal_draina() __asm volatile("call_pal %0 # PAL_draina"	\
 				: : "i" (PAL_draina) : "memory")
 
-#define	alpha_pal_imb()	__asm __volatile("call_pal %0 # PAL_imb"	\
+#define	alpha_pal_imb()	__asm volatile("call_pal %0 # PAL_imb"	\
 				: : "i" (PAL_imb) : "memory")
 
 static __inline unsigned long
@@ -370,7 +371,7 @@ alpha_pal_rdmces(void)
 {
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_rdmces"
+	__asm volatile("call_pal %1 # PAL_OSF1_rdmces"
 		: "=r" (v0)
 		: "i" (PAL_OSF1_rdmces)
 		/* clobbers t0, t8..t11 */
@@ -384,7 +385,7 @@ alpha_pal_rdps(void)
 {
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_rdps"
+	__asm volatile("call_pal %1 # PAL_OSF1_rdps"
 		: "=r" (v0)
 		: "i" (PAL_OSF1_rdps)
 		/* clobbers t0, t8..t11 */
@@ -394,11 +395,23 @@ alpha_pal_rdps(void)
 }
 
 static __inline unsigned long
+alpha_pal_rdunique(void)
+{
+	register unsigned long v0 __asm("$0");
+
+	__asm volatile("call_pal %1 # PAL_rdunique"
+		: "=r" (v0)
+		: "i" (PAL_rdunique));
+
+	return (v0);
+}
+
+static __inline unsigned long
 alpha_pal_rdusp(void)
 {
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_rdusp"
+	__asm volatile("call_pal %1 # PAL_OSF1_rdusp"
 		: "=r" (v0)
 		: "i" (PAL_OSF1_rdusp)
 		/* clobbers t0, t8..t11 */
@@ -412,7 +425,7 @@ alpha_pal_rdval(void)
 {
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_rdval"
+	__asm volatile("call_pal %1 # PAL_OSF1_rdval"
 		: "=r" (v0)
 		: "i" (PAL_OSF1_rdval)
 		/* clobbers t0, t8..t11 */
@@ -427,7 +440,7 @@ alpha_pal_swpctx(unsigned long ctx)
 	register unsigned long a0 __asm("$16") = ctx;
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %2 # PAL_OSF1_swpctx"
+	__asm volatile("call_pal %2 # PAL_OSF1_swpctx"
 		: "=r" (a0), "=r" (v0)
 		: "i" (PAL_OSF1_swpctx), "0" (a0)
 		/* clobbers t0, t8..t11, a0 (above) */
@@ -442,7 +455,7 @@ alpha_pal_swpipl(unsigned long ipl)
 	register unsigned long a0 __asm("$16") = ipl;
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %2 # PAL_OSF1_swpipl"
+	__asm volatile("call_pal %2 # PAL_OSF1_swpipl"
 		: "=r" (a0), "=r" (v0)
 		: "i" (PAL_OSF1_swpipl), "0" (a0)
 		/* clobbers t0, t8..t11, a0 (above) */
@@ -457,7 +470,7 @@ alpha_pal_tbi(unsigned long op, vaddr_t va)
 	register unsigned long a0 __asm("$16") = op;
 	register unsigned long a1 __asm("$17") = va;
 
-	__asm __volatile("call_pal %2 # PAL_OSF1_tbi"
+	__asm volatile("call_pal %2 # PAL_OSF1_tbi"
 		: "=r" (a0), "=r" (a1)
 		: "i" (PAL_OSF1_tbi), "0" (a0), "1" (a1)
 		/* clobbers t0, t8..t11, a0 (above), a1 (above) */
@@ -469,7 +482,7 @@ alpha_pal_whami(void)
 {
 	register unsigned long v0 __asm("$0");
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_whami"
+	__asm volatile("call_pal %1 # PAL_OSF1_whami"
 		: "=r" (v0)
 		: "i" (PAL_OSF1_whami)
 		/* clobbers t0, t8..t11 */
@@ -483,7 +496,7 @@ alpha_pal_wrfen(unsigned long onoff)
 {
 	register unsigned long a0 __asm("$16") = onoff;
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_wrfen"
+	__asm volatile("call_pal %1 # PAL_OSF1_wrfen"
 		: "=r" (a0)
 		: "i" (PAL_OSF1_wrfen), "0" (a0)
 		/* clobbers t0, t8..t11, a0 (above) */
@@ -495,7 +508,7 @@ alpha_pal_wripir(unsigned long cpu_id)
 {
 	register unsigned long a0 __asm("$16") = cpu_id;
 
-	__asm __volatile("call_pal %1 # PAL_ipir"
+	__asm volatile("call_pal %1 # PAL_ipir"
 		: "=r" (a0)
 		: "i" (PAL_ipir), "0" (a0)
 		/* clobbers t0, t8..t11, a0 (above) */
@@ -503,11 +516,21 @@ alpha_pal_wripir(unsigned long cpu_id)
 }
 
 static __inline void
+alpha_pal_wrunique(unsigned long unique)
+{
+	register unsigned long a0 __asm("$16") = unique;
+
+	__asm volatile("call_pal %1 # PAL_wrunique"
+		: "=r" (a0)
+		: "i" (PAL_wrunique), "0" (a0));
+}
+
+static __inline void
 alpha_pal_wrusp(unsigned long usp)
 {
 	register unsigned long a0 __asm("$16") = usp;
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_wrusp"
+	__asm volatile("call_pal %1 # PAL_OSF1_wrusp"
 		: "=r" (a0)
 		: "i" (PAL_OSF1_wrusp), "0" (a0)
 		/* clobbers t0, t8..t11, a0 (above) */
@@ -519,7 +542,7 @@ alpha_pal_wrmces(unsigned long mces)
 {
 	register unsigned long a0 __asm("$16") = mces;
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_wrmces"
+	__asm volatile("call_pal %1 # PAL_OSF1_wrmces"
 		: "=r" (a0)
 		: "i" (PAL_OSF1_wrmces), "0" (a0)
 		/* clobbers t0, t8..t11 */
@@ -531,7 +554,7 @@ alpha_pal_wrval(unsigned long val)
 {
 	register unsigned long a0 __asm("$16") = val;
 
-	__asm __volatile("call_pal %1 # PAL_OSF1_wrval"
+	__asm volatile("call_pal %1 # PAL_OSF1_wrval"
 		: "=r" (a0)
 		: "i" (PAL_OSF1_wrval), "0" (a0)
 		/* clobbers t0, t8..t11, a0 (above) */

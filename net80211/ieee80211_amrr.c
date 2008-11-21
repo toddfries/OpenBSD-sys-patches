@@ -1,4 +1,5 @@
-/*	$OpenBSD: ieee80211_amrr.c,v 1.3 2007/06/16 13:17:05 damien Exp $	*/
+/*	$NetBSD: ieee80211_amrr.c,v 1.2 2007/12/11 12:40:10 lukem Exp $	*/
+/*	$OpenBSD: ieee80211_amrr.c,v 1.1 2006/06/17 19:07:19 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -17,6 +18,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_amrr.c,v 1.2 2007/12/11 12:40:10 lukem Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -30,6 +34,7 @@
 #include <netinet/if_ether.h>
 #endif
 
+#include <net80211/ieee80211.h>
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
 
@@ -51,7 +56,7 @@
 	do { (amn)->amn_txcnt = (amn)->amn_retrycnt = 0; } while (0)
 
 void
-ieee80211_amrr_node_init(const struct ieee80211_amrr *amrr,
+ieee80211_amrr_node_init(struct ieee80211_amrr *amrr,
     struct ieee80211_amrr_node *amn)
 {
 	amn->amn_success = 0;
@@ -76,11 +81,11 @@ ieee80211_amrr_choose(struct ieee80211_amrr *amrr, struct ieee80211_node *ni,
 			amn->amn_recovery = 1;
 			amn->amn_success = 0;
 			increase_rate(ni);
-			IEEE80211_DPRINTF(("AMRR increasing rate %d (txcnt=%d "
-			    "retrycnt=%d)\n",
+			IEEE80211_DPRINTF(ni->ni_ic, IEEE80211_MSG_DEBUG,
+			    "AMRR increasing rate %d (txcnt=%d retrycnt=%d)\n",
 			    ni->ni_rates.rs_rates[ni->ni_txrate] &
 				IEEE80211_RATE_VAL,
-			    amn->amn_txcnt, amn->amn_retrycnt));
+			    amn->amn_txcnt, amn->amn_retrycnt);
 			need_change = 1;
 		} else {
 			amn->amn_recovery = 0;
@@ -99,11 +104,11 @@ ieee80211_amrr_choose(struct ieee80211_amrr *amrr, struct ieee80211_node *ni,
 				    amrr->amrr_min_success_threshold;
 			}
 			decrease_rate(ni);
-			IEEE80211_DPRINTF(("AMRR decreasing rate %d (txcnt=%d "
-			    "retrycnt=%d)\n",
+			IEEE80211_DPRINTF(ni->ni_ic, IEEE80211_MSG_DEBUG,
+			    "AMRR decreasing rate %d (txcnt=%d retrycnt=%d)\n",
 			    ni->ni_rates.rs_rates[ni->ni_txrate] &
 				IEEE80211_RATE_VAL,
-			    amn->amn_txcnt, amn->amn_retrycnt));
+			    amn->amn_txcnt, amn->amn_retrycnt);
 			need_change = 1;
 		}
 		amn->amn_recovery = 0;

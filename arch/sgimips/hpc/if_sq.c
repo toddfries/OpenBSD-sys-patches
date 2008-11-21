@@ -1,4 +1,4 @@
-/*	$NetBSD: if_sq.c,v 1.30 2006/12/22 08:17:14 rumble Exp $	*/
+/*	$NetBSD: if_sq.c,v 1.33 2007/03/04 06:00:39 christos Exp $	*/
 
 /*
  * Copyright (c) 2001 Rafal K. Boni
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_sq.c,v 1.30 2006/12/22 08:17:14 rumble Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_sq.c,v 1.33 2007/03/04 06:00:39 christos Exp $");
 
 #include "bpfilter.h"
 
@@ -64,6 +64,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_sq.c,v 1.30 2006/12/22 08:17:14 rumble Exp $");
 
 #include <machine/bus.h>
 #include <machine/intr.h>
+#include <machine/sysconf.h>
 
 #include <dev/ic/seeq8003reg.h>
 
@@ -107,7 +108,7 @@ static int	sq_init(struct ifnet *);
 static void	sq_start(struct ifnet *);
 static void	sq_stop(struct ifnet *, int);
 static void	sq_watchdog(struct ifnet *);
-static int	sq_ioctl(struct ifnet *, u_long, caddr_t);
+static int	sq_ioctl(struct ifnet *, u_long, void *);
 
 static void	sq_set_filter(struct sq_softc *);
 static int	sq_intr(void *);
@@ -149,8 +150,27 @@ sq_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hpc_attach_args *ha = aux;
 
-	if (strcmp(ha->ha_name, cf->cf_name) == 0)
-		return (1);
+	if (strcmp(ha->ha_name, cf->cf_name) == 0) {
+		uint32_t reset, txstat;
+
+		reset = MIPS_PHYS_TO_KSEG1(ha->ha_sh +
+		    ha->ha_dmaoff + ha->hpc_regs->enetr_reset);
+		txstat = MIPS_PHYS_TO_KSEG1(ha->ha_sh +
+		    ha->ha_devoff + (SEEQ_TXSTAT << 2));
+
+		if (platform.badaddr((void *)reset, sizeof(reset)))
+			return (0);
+
+		*(volatile uint32_t *)reset = 0x1;
+		delay(20);
+		*(volatile uint32_t *)reset = 0x0;
+
+		if (platform.badaddr((void *)txstat, sizeof(txstat)))
+			return (0);
+
+		if ((*(volatile uint32_t *)txstat & 0xff) == TXSTAT_OLDNEW)
+			return (1);
+	}
 
 	return (0);
 }
@@ -195,7 +215,7 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 
 	if ((err = bus_dmamem_map(sc->sc_dmat, &sc->sc_cdseg, sc->sc_ncdseg,
 				  sizeof(struct sq_control),
-				  (caddr_t *)&sc->sc_control,
+				  (void **)&sc->sc_control,
 				  BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
 		printf(": unable to map control data, error = %d\n", err);
 		goto fail_1;
@@ -341,7 +361,7 @@ fail_4:
 fail_3:
 	bus_dmamap_destroy(sc->sc_dmat, sc->sc_cdmap);
 fail_2:
-	bus_dmamem_unmap(sc->sc_dmat, (caddr_t) sc->sc_control,
+	bus_dmamem_unmap(sc->sc_dmat, (void *) sc->sc_control,
 				      sizeof(struct sq_control));
 fail_1:
 	bus_dmamem_free(sc->sc_dmat, &sc->sc_cdseg, sc->sc_ncdseg);
@@ -354,7 +374,6 @@ int
 sq_init(struct ifnet *ifp)
 {
 	int i;
-	u_int32_t reg;
 	struct sq_softc *sc = ifp->if_softc;
 
 	/* Cancel any in-progress I/O */
@@ -397,13 +416,30 @@ sq_init(struct ifnet *ifp)
 	/* Now write the receive command register. */
 	sq_seeq_write(sc, SEEQ_RXCMD, sc->sc_rxcmd);
 
-	/* Set up HPC ethernet DMA config */
+	/*
+	 * Set up HPC ethernet PIO and DMA configurations.
+	 *
+	 * The PROM appears to do most of this for the onboard HPC3, but
+	 * not for the Challenge S's IOPLUS chip. We copy how the onboard 
+	 * chip is configured and assume that it's correct for both.
+	 */
 	if (sc->hpc_regs->revision == 3) {
-		reg = sq_hpc_read(sc, HPC3_ENETR_DMACFG);	
-		sq_hpc_write(sc, HPC3_ENETR_DMACFG, reg |
-		    HPC3_ENETR_DMACFG_FIX_RXDC |
-		    HPC3_ENETR_DMACFG_FIX_INTR |
-		    HPC3_ENETR_DMACFG_FIX_EOP);
+		u_int32_t dmareg, pioreg;
+
+		pioreg = HPC3_ENETR_PIOCFG_P1(1) |
+			 HPC3_ENETR_PIOCFG_P2(6) |
+			 HPC3_ENETR_PIOCFG_P3(1);
+
+		dmareg = HPC3_ENETR_DMACFG_D1(6) |
+			 HPC3_ENETR_DMACFG_D2(2) |
+			 HPC3_ENETR_DMACFG_D3(0) |
+			 HPC3_ENETR_DMACFG_FIX_RXDC |
+			 HPC3_ENETR_DMACFG_FIX_INTR |
+			 HPC3_ENETR_DMACFG_FIX_EOP |
+			 HPC3_ENETR_DMACFG_TIMEOUT;
+
+		sq_hpc_write(sc, HPC3_ENETR_PIOCFG, pioreg);
+		sq_hpc_write(sc, HPC3_ENETR_DMACFG, dmareg);
 	}
 
 	/* Pass the start of the receive ring to the HPC */
@@ -467,7 +503,7 @@ sq_set_filter(struct sq_softc *sc)
 }
 
 int
-sq_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+sq_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	int s, error = 0;
 
@@ -557,7 +593,7 @@ sq_start(struct ifnet *ifp)
 				}
 			}
 
-			m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, caddr_t));
+			m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, void *));
 			if (m0->m_pkthdr.len < ETHER_PAD_LEN) {
 				memset(mtod(m, char *) + m0->m_pkthdr.len, 0,
 				    ETHER_PAD_LEN - m0->m_pkthdr.len);
@@ -861,7 +897,7 @@ sq_trace_dump(struct sq_softc *sc)
 }
 
 static int
-sq_intr(void * arg)
+sq_intr(void *arg)
 {
 	struct sq_softc *sc = arg;
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
@@ -1290,7 +1326,7 @@ void
 sq_dump_buffer(u_int32_t addr, u_int32_t len)
 {
 	u_int i;
-	u_char* physaddr = (char*) MIPS_PHYS_TO_KSEG1((caddr_t)addr);
+	u_char* physaddr = (char*) MIPS_PHYS_TO_KSEG1((void *)addr);
 
 	if (len == 0)
 		return;

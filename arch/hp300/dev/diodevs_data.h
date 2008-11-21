@@ -1,10 +1,11 @@
+/*	$NetBSD: diodevs_data.h,v 1.12 2008/04/28 20:23:19 martin Exp $	*/
+
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: diodevs,v 1.8 2008/05/01 14:29:01 miod Exp 
+ *	NetBSD: diodevs,v 1.7 2003/11/23 01:57:35 tsutsui Exp 
  */
-/* $NetBSD: diodevs,v 1.7 2003/11/23 01:57:35 tsutsui Exp $ */
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -21,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +36,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define DIO_NDEVICES	49
+#define DIO_NDEVICES	46
 
 struct dio_devdata dio_devdatas[] = {
 	{ 0x02,	0,	1 },
@@ -52,7 +46,6 @@ struct dio_devdata dio_devdatas[] = {
 	{ 0x05,	0,	1 },
 	{ 0x85,	0,	1 },
 	{ 0x15,	0,	1 },
-	{ 0x95,	0,	1 },
 	{ 0x08,	0,	1 },
 	{ 0x01,	0,	1 },
 	{ 0x00,	0,	1 },
@@ -71,10 +64,8 @@ struct dio_devdata dio_devdatas[] = {
 	{ 0x39,	0x09,	1 },
 	{ 0x39,	0x0e,	1 },
 	{ 0x39,	0x0b,	1 },
-	{ 0x39,	0x0c,	3 },
+	{ 0x39,	0x0c,	1 },
 	{ 0x39,	0x0d,	1 },
-	{ 0x39,	0x10,	4 },
-	{ 0x39,	0x11,	4 },
 	{ 0x03,	0,	1 },
 	{ 0x04,	0,	1 },
 	{ 0x06,	0,	1 },
@@ -105,7 +96,6 @@ struct dio_devdesc dio_devdescs[] = {
 	{ 0x05,	0,	DIO_DEVICE_DESC_DCM },
 	{ 0x85,	0,	DIO_DEVICE_DESC_DCMREM },
 	{ 0x15,	0,	DIO_DEVICE_DESC_LAN },
-	{ 0x95,	0,	DIO_DEVICE_DESC_LANREM },
 	{ 0x08,	0,	DIO_DEVICE_DESC_FHPIB },
 	{ 0x01,	0,	DIO_DEVICE_DESC_NHPIB },
 	{ 0x00,	0,	DIO_DEVICE_DESC_IHPIB },
@@ -116,7 +106,7 @@ struct dio_devdesc dio_devdescs[] = {
 	{ 0x39,	0,	DIO_DEVICE_DESC_FRAMEBUFFER },
 	{ 0x39,	0x01,	DIO_DEVICE_DESC_GATORBOX },
 	{ 0x39,	0x02,	DIO_DEVICE_DESC_TOPCAT },
-	{ 0x39,	0x04,	DIO_DEVICE_DESC_RENAISSANCE },
+	{ 0x39,	0x04,	DIO_DEVICE_DESC_RENASSIANCE },
 	{ 0x39,	0x05,	DIO_DEVICE_DESC_LRCATSEYE },
 	{ 0x39,	0x06,	DIO_DEVICE_DESC_HRCCATSEYE },
 	{ 0x39,	0x07,	DIO_DEVICE_DESC_HRMCATSEYE },
@@ -124,10 +114,8 @@ struct dio_devdesc dio_devdescs[] = {
 	{ 0x39,	0x09,	DIO_DEVICE_DESC_XXXCATSEYE },
 	{ 0x39,	0x0e,	DIO_DEVICE_DESC_HYPERION },
 	{ 0x39,	0x0b,	DIO_DEVICE_DESC_XGENESIS },
-	{ 0x39,	0x0c,	DIO_DEVICE_DESC_TIGERSHARK },
+	{ 0x39,	0x0c,	DIO_DEVICE_DESC_TIGER },
 	{ 0x39,	0x0d,	DIO_DEVICE_DESC_YGENESIS },
-	{ 0x39,	0x10,	DIO_DEVICE_DESC_FB3X2_A },
-	{ 0x39,	0x11,	DIO_DEVICE_DESC_FB3X2_B },
 	{ 0x03,	0,	DIO_DEVICE_DESC_MISC0 },
 	{ 0x04,	0,	DIO_DEVICE_DESC_MISC1 },
 	{ 0x06,	0,	DIO_DEVICE_DESC_PARALLEL },

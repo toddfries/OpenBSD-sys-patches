@@ -1,5 +1,4 @@
-/*	$OpenBSD: scb.c,v 1.5 2004/07/07 23:10:46 deraadt Exp $	*/
-/*	$NetBSD: scb.c,v 1.12 2000/06/04 06:16:59 matt Exp $ */
+/*	$NetBSD: scb.c,v 1.17 2006/03/12 17:14:41 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -34,6 +33,9 @@
  * Routines for dynamic allocation/release of SCB vectors.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: scb.c,v 1.17 2006/03/12 17:14:41 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -49,8 +51,8 @@
 struct scb *scb;
 struct ivec_dsp *scb_vec;
 
-static	void scb_stray(void *);
-static	volatile int vector, ipl, gotintr;
+void scb_stray(void *);
+static volatile int vector, ipl, gotintr;
 
 /*
  * Generates a new SCB.
@@ -70,7 +72,7 @@ scb_init(paddr_t avail_start)
 	/* Init the whole SCB with interrupt catchers */
 	for (i = 0; i < (scb_size * VAX_NBPG)/4; i++) {
 		ivec[i] = &scb_vec[i];
-		(int)ivec[i] |= 1; /* On istack, please */
+		*(uintptr_t *)&ivec[i] |= 1; /* On istack, please */
 		scb_vec[i] = idsptch;
 		scb_vec[i].hoppaddr = scb_stray;
 		scb_vec[i].pushlarg = (void *) (i * 4);
@@ -90,7 +92,7 @@ scb_init(paddr_t avail_start)
 
 	/* Return new avail_start. Also save space for the dispatchers. */
 	return avail_start + (1 + sizeof(struct ivec_dsp) / sizeof(void *))
-	    * scb_size * VAX_NBPG;
+		* scb_size * VAX_NBPG;
 };
 
 /*
@@ -104,9 +106,9 @@ scb_stray(void *arg)
 	vector = ((int) arg) & ~3;
 	ipl = mfpr(PR_IPL);
 
-	if (cold == 0)
-		printf("stray interrupt: vector %d, ipl %d\n", vector, ipl);
-	else {
+	if (cold == 0) {
+		printf("stray interrupt: vector 0x%x, ipl %d\n", vector, ipl);
+	} else if (dep_call->cpu_flags & CPU_RAISEIPL) {
 		struct icallsframe *icf = (void *) __builtin_frame_address(0);
 
 		icf->ica_psl = (icf->ica_psl & ~PSL_IPL) | ipl << 16;
@@ -120,8 +122,7 @@ scb_stray(void *arg)
  * (May I say DW780? :-)
  */
 void
-scb_fake(vec, br)
-	int vec, br;
+scb_fake(int vec, int br)
 {
 	vector = vec;
 	ipl = br;
@@ -132,8 +133,7 @@ scb_fake(vec, br)
  * Returns last vector/ipl referenced. Clears vector/ipl after reading.
  */
 int
-scb_vecref(rvec, ripl)
-	int *rvec, *ripl;
+scb_vecref(int *rvec, int *ripl)
 {
 	int save;
 
@@ -151,18 +151,13 @@ scb_vecref(rvec, ripl)
  * Sets a vector to the specified function.
  * Arg may not be greater than 63.
  */
-
 void
-scb_vecalloc(vecno, func, arg, stack, ev)
-	int vecno;
-	void (*func)(void *);
-	void *arg;
-	int stack;
-	struct evcount *ev;
+scb_vecalloc(int vecno, void (*func)(void *), void *arg,
+	int stack, struct evcnt *ev)
 {
 	struct ivec_dsp *dsp = &scb_vec[vecno / 4];
 	dsp->hoppaddr = func;
 	dsp->pushlarg = arg;
 	dsp->ev = ev;
-	((u_int *) scb)[vecno/4] = (u_int)(dsp) | stack;
+	((intptr_t *) scb)[vecno/4] = (intptr_t)(dsp) | stack;
 }

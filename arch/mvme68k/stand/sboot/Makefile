@@ -1,44 +1,34 @@
-#	$OpenBSD: Makefile,v 1.9 2005/08/03 00:16:02 millert Exp $
+#	$NetBSD: Makefile,v 1.13 2002/04/09 19:37:22 scw Exp $
 
-S=	${.CURDIR}/../../../..
-INCL?= -I${.CURDIR} -I${.CURDIR}/../libsa -I${S}/lib/libsa -I${S}
-COPTS+= ${DEFS} ${INCL}
+#
+# sboot would like a newer GNU ld because it can generate S-Records.
+# Until then, we convert.
+#
 
-.include "${S}/arch/mvme68k/stand/libbug/Makefile.inc"
-.include "${S}/arch/mvme68k/stand/libsa/Makefile.inc"
-.include "${S}/arch/mvme68k/stand/libz/Makefile.inc"
+COMPILE.s= $(CC) -x assembler-with-cpp -traditional-cpp \
+	$(ASFLAGS) $(CPPFLAGS) $(INCPATH) -c -o $*.o
 
-SRCS=   sboot.c clock.c etherfun.c if_le.c
+RELOC=		0x4000
+SRCS=		start.s clock.c console.c etherfun.c le_poll.c \
+		oc_cksum.s sboot.c
+SRTOBJ=
+PROG=		sboot
+LIBS=		${LIBSA}
+DPADD=		${LIBS}
+CLEANFILES+=	sboot.srec
 
-OBJS=	${SRCS:S/.c/.o/g}
-LIBS=	${LIBSA} ${LIBBUG} ${LIBZ}
-LDFLAGS= -N -s -static 
-CLEANFILES+=XBUG.o XSRT0.o oc_cksum.o sboot.tmp rboot.tmp srec sboot rboot
-MDEC_DIR?=/usr/mdec
+PROGDEPENDS=	${OBJS} ${LIBS}
+PROGLINKOBJS=	${OBJS} ${LIBS}
 
-all:	sboot rboot
+sboot.srec:	${PROG}
+	${OBJCOPY} -O srec ${.OBJDIR}/sboot ${.TARGET}
 
-sboot.tmp:	XSRT0.o oc_cksum.o ${OBJS} ${LIBS}
-	${LD} ${LDFLAGS} -T 0x4000 XSRT0.o ${OBJS} oc_cksum.o -o $@ \
-	    ${LIBS} `cc -print-libgcc-file-name`
+.include "../Makefile.booters"
 
-rboot.tmp:	XBUG.o XSRT0.o oc_cksum.o ${OBJS} ${LIBS}
-	${LD} ${LDFLAGS} -T 0xffa00000 -Tdata 0x4000 XBUG.o XSRT0.o \
-	    ${OBJS} oc_cksum.o -o $@ ${LIBS} `cc -print-libgcc-file-name`
+all realall:	sboot.srec
 
-srec:	srec.c
-	${HOSTCC} -o $@ ${.CURDIR}/srec.c 
-
-sboot: sboot.tmp srec
-	dd ibs=32 skip=1 if=sboot.tmp | ${.OBJDIR}/srec 4 0x4000 sboot > sboot
-
-rboot: rboot.tmp srec
-	dd ibs=32 skip=1 if=rboot.tmp | ${.OBJDIR}/srec 4 0x4000 rboot > rboot
-
-install:
-	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
-	    sboot ${DESTDIR}${MDEC_DIR}/sboot
-	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
-	    rboot ${DESTDIR}${MDEC_DIR}/rboot
+install:	sboot.srec
+	${INSTALL_FILE} ${STRIPFLAG} -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} \
+		${.OBJDIR}/sboot.srec ${DESTDIR}${MDEC_DIR}/sboot
 
 .include <bsd.prog.mk>

@@ -1,8 +1,40 @@
-/*	$OpenBSD: if_le.c,v 1.31 2006/01/11 07:21:58 miod Exp $ */
+/*	$NetBSD: if_le.c,v 1.35 2008/04/28 20:23:29 martin Exp $	*/
 
 /*-
- * Copyright (c) 1982, 1992, 1993
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*-
+ * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Ralph Campbell and Rick Macklem.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +60,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)if_le.c	8.2 (Berkeley) 10/30/93
+ *	@(#)if_le.c	8.2 (Berkeley) 11/16/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.35 2008/04/28 20:23:29 martin Exp $");
+
+#include "opt_inet.h"
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -39,374 +75,142 @@
 #include <sys/syslog.h>
 #include <sys/socket.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
+#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
+#include <netinet/if_inarp.h>
 #endif
-
-#include <net/if_media.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/bus.h>
 
+#include <mvme68k/dev/pccreg.h>
+#include <mvme68k/dev/pccvar.h>
+
+#include <dev/ic/lancereg.h>
+#include <dev/ic/lancevar.h>
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
 
 #include <mvme68k/dev/if_lereg.h>
 #include <mvme68k/dev/if_levar.h>
-#include <mvme68k/dev/vme.h>
 
-#include "pcc.h"
-#if NPCC > 0
-#include <mvme68k/dev/pccreg.h>
+#include "ioconf.h"
+
+int le_pcc_match(device_t, cfdata_t, void *);
+void le_pcc_attach(device_t, device_t, void *);
+
+CFATTACH_DECL_NEW(le_pcc, sizeof(struct le_softc),
+    le_pcc_match, le_pcc_attach, NULL, NULL);
+
+#if defined(_KERNEL_OPT)
+#include "opt_ddb.h"
 #endif
 
-/* autoconfiguration driver */
-void  leattach(struct device *, struct device *, void *);
-int   lematch(struct device *, void *, void *);
-
-struct cfattach le_ca = {
-	sizeof(struct le_softc), lematch, leattach
-};
-
-static int lebustype;
-
-void lewrcsr(struct am7990_softc *, u_int16_t, u_int16_t);
-u_int16_t lerdcsr(struct am7990_softc *, u_int16_t);
-void vlewrcsr(struct am7990_softc *, u_int16_t, u_int16_t);
-u_int16_t vlerdcsr(struct am7990_softc *, u_int16_t);
-void nvram_cmd(struct am7990_softc *, u_char, u_short);
-u_int16_t nvram_read(struct am7990_softc *, u_char);
-void vleetheraddr(struct am7990_softc *);
-void vleinit(struct am7990_softc *);
-void vlereset(struct am7990_softc *);
-int vle_intr(void *);
-void vle_copytobuf_contig(struct am7990_softc *, void *, int, int);
-void vle_zerobuf_contig(struct am7990_softc *, int, int);
-
-/* send command to the nvram controller */
-void
-nvram_cmd(sc, cmd, addr)
-	struct am7990_softc *sc;
-	u_char cmd;
-	u_short addr;
-{
-	int i;
-	struct vlereg1 *reg1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-
-	for (i=0;i<8;i++) {
-		reg1->ler1_ear=((cmd|(addr<<1))>>i); 
-		CDELAY; 
-	} 
-}
-
-/* read nvram one bit at a time */
-u_int16_t
-nvram_read(sc, nvram_addr)
-	struct am7990_softc *sc;
-	u_char nvram_addr;
-{
-	u_short val = 0, mask = 0x04000;
-	u_int16_t wbit;
-	/* these used by macros DO NOT CHANGE!*/
-	struct vlereg1 *reg1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-	((struct le_softc *)sc)->csr = 0x4f;
-	ENABLE_NVRAM;
-	nvram_cmd(sc, NVRAM_RCL, 0);
-	DISABLE_NVRAM;
-	CDELAY;
-	ENABLE_NVRAM;
-	nvram_cmd(sc, NVRAM_READ, nvram_addr);
-	for (wbit=0; wbit<15; wbit++) {
-		(reg1->ler1_ear & 0x01) ? (val = (val | mask)) : (val = (val & (~mask)));
-		mask = mask>>1;
-		CDELAY;
-	}
-	(reg1->ler1_ear & 0x01) ? (val = (val | 0x8000)) : (val = (val & 0x7FFF));
-	CDELAY;
-	DISABLE_NVRAM;
-	return (val);
-}
-
-void
-vleetheraddr(sc)
-	struct am7990_softc *sc;
-{
-	u_char * cp = sc->sc_arpcom.ac_enaddr;
-	u_int16_t ival[3];
-	u_char i;
-
-	for (i=0; i<3; i++) {
-		ival[i] = nvram_read(sc, i);
-	}
-	memcpy(cp, &ival[0], 6);
-}
-
-void
-lewrcsr(sc, port, val)
-	struct am7990_softc *sc;
-	u_int16_t port, val;
-{
-	register struct lereg1 *ler1 = (struct lereg1 *)((struct le_softc *)sc)->sc_r1;
-
-	ler1->ler1_rap = port;
-	ler1->ler1_rdp = val;
-}
-
-void
-vlewrcsr(sc, port, val)
-	struct am7990_softc *sc;
-	u_int16_t port, val;
-{
-	register struct vlereg1 *ler1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-
-	ler1->ler1_rap = port;
-	ler1->ler1_rdp = val;
-}
-
-u_int16_t
-lerdcsr(sc, port)
-	struct am7990_softc *sc;
-	u_int16_t port;
-{
-	register struct lereg1 *ler1 = (struct lereg1 *)((struct le_softc *)sc)->sc_r1;
-	u_int16_t val;
-
-	ler1->ler1_rap = port;
-	val = ler1->ler1_rdp;
-	return (val);
-}
-
-u_int16_t
-vlerdcsr(sc, port)
-	struct am7990_softc *sc;
-	u_int16_t port;
-{
-	register struct vlereg1 *ler1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-	u_int16_t val;
-
-	ler1->ler1_rap = port;
-	val = ler1->ler1_rdp;
-	return (val);
-}
-
-/* init MVME376, set ipl and vec */
-void
-vleinit(sc)
-	struct am7990_softc *sc;
-{
-	register struct vlereg1 *reg1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-	u_char vec = ((struct le_softc *)sc)->sc_vec;
-	u_char ipl = ((struct le_softc *)sc)->sc_ipl;
-	((struct le_softc *)sc)->csr = 0x4f;
-	WRITE_CSR_AND( ~ipl );
-	SET_VEC(vec);
-	return;
-}
-
-/* MVME376 hardware reset */
-void
-vlereset(sc)
-	struct am7990_softc *sc;
-{
-	register struct vlereg1 *reg1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-	RESET_HW;
-#ifdef LEDEBUG
-	if (sc->sc_debug) {
-		printf("\nle: hardware reset\n");
-	}
+#ifdef DDB
+#define hide
+#else
+#define hide	static
 #endif
-	SYSFAIL_CL;
-	return;
+
+hide void le_pcc_wrcsr(struct lance_softc *, uint16_t, uint16_t);
+hide uint16_t le_pcc_rdcsr(struct lance_softc *, uint16_t);
+
+hide void
+le_pcc_wrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+{
+	struct le_softc *lsc;
+
+	lsc = (struct le_softc *)sc;
+	bus_space_write_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RAP, port);
+	bus_space_write_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RDP, val);
 }
 
+hide uint16_t
+le_pcc_rdcsr(struct lance_softc *sc, uint16_t port)
+{
+	struct le_softc *lsc;
+
+	lsc = (struct le_softc *)sc;
+	bus_space_write_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RAP, port);
+	return bus_space_read_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RDP);
+}
+
+/* ARGSUSED */
 int
-vle_intr(sc)
-	void *sc;
+le_pcc_match(device_t parent, cfdata_t cf, void *aux)
 {
-	register struct vlereg1 *reg1 = (struct vlereg1 *)((struct le_softc *)sc)->sc_r1;
-	int rc;
-	rc = am7990_intr(sc);
-	ENABLE_INTR;
-	return (rc);
+	struct pcc_attach_args *pa = aux;
+
+	if (strcmp(pa->pa_name, le_cd.cd_name))
+		return 0;
+
+	pa->pa_ipl = cf->pcccf_ipl;
+	return 1;
 }
 
+/* ARGSUSED */
 void
-vle_copytobuf_contig(sc, from, boff, len)
-	struct am7990_softc *sc;
-	void *from;
-	int boff, len;
+le_pcc_attach(device_t parent, device_t self, void *aux)
 {
-	volatile caddr_t buf = sc->sc_mem;
+	struct le_softc *lsc;
+	struct lance_softc *sc;
+	struct pcc_attach_args *pa;
+	bus_dma_segment_t seg;
+	int rseg;
 
-	/* 
-	 * Do the cache stuff 
-	 */
-	dma_cachectl(buf + boff, len);
-	/*
-	 * Just call bcopy() to do the work.
-	 */
-	bcopy(from, buf + boff, len);
-}
+	lsc = device_private(self);
+	sc = &lsc->sc_am7990.lsc;
+	sc->sc_dev = self;
+	pa = aux;
 
-void
-vle_zerobuf_contig(sc, boff, len)
-	struct am7990_softc *sc;
-	int boff, len;
-{
-	volatile caddr_t buf = sc->sc_mem;
-	/* 
-	 * Do the cache stuff 
-	 */
-	dma_cachectl(buf + boff, len);
-	/*
-	 * Just let bzero() do the work
-	 */
-	bzero(buf + boff, len);
-}
+	/* Map control registers. */
+	lsc->sc_bust = pa->pa_bust;
+	bus_space_map(pa->pa_bust, pa->pa_offset, 4, 0, &lsc->sc_bush);
 
-int
-lematch(parent, vcf, args)
-	struct device *parent;
-	void *vcf, *args;
-{
-	struct confargs *ca = args;
-	/* check physical addr for bogus MVME162 addr @0xffffd200. weird XXX - smurph */
-	if (cputyp == CPU_162 && ca->ca_paddr == 0xffffd200)
-		return (0);
-
-	return (!badvaddr((vaddr_t)ca->ca_vaddr, 2));
-}
-
-/*
- * Interface exists: make available by filling in network interface
- * record.  System will initialize the interface when it is ready
- * to accept packets.
- */
-void
-leattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
-{
-	register struct le_softc *lesc = (struct le_softc *)self;
-	struct am7990_softc *sc = &lesc->sc_am7990;
-	struct confargs *ca = aux;
-	int pri = ca->ca_ipl;
-	extern void *etherbuf;
-	paddr_t addr;
-	int card;
-
-	/* XXX the following declarations should be elsewhere */
-	extern void myetheraddr(u_char *);
-
-	lebustype = ca->ca_bustype;
-
-	switch (lebustype) {
-	case BUS_VMES:
-		/* 
-		 * get the first available etherbuf.  MVME376 uses its own
-		 * dual-ported RAM for etherbuf.  It is set by dip switches
-		 * on board.  We support the six Motorola address locations,
-		 * however, the board can be set up at any other address.
-		 * XXX These physical addresses should be mapped in extio!!!
-		 */
-		switch (ca->ca_paddr) {
-		case 0xffff1200:
-			card = 0;
-			break;
-		case 0xffff1400:
-			card = 1;
-			break;
-		case 0xffff1600:
-			card = 2;
-			break;
-		case 0xffff5400:
-			card = 3;
-			break;
-		case 0xffff5600:
-			card = 4;
-			break;
-		case 0xffffa400:
-			card = 5;
-			break;
-		default:
-			printf(": unsupported address\n");
-			return;
-		}
-
-		addr = VLEMEMBASE - (card * VLEMEMSIZE);
-
-		sc->sc_mem = (void *)mapiodev(addr, VLEMEMSIZE);
-		if (sc->sc_mem == NULL) {
-			printf("\n%s: no more memory in external I/O map\n",
-			    sc->sc_dev.dv_xname);
-			return;
-		}
-		sc->sc_addr = addr & 0x00ffffff;
-
-		lesc->sc_r1 = (void *)ca->ca_vaddr;
-		lesc->sc_ipl = ca->ca_ipl;
-		lesc->sc_vec = ca->ca_vec;
-		sc->sc_memsize = VLEMEMSIZE;
-		sc->sc_conf3 = LE_C3_BSWP;
-		sc->sc_hwreset = vlereset;
-		sc->sc_rdcsr = vlerdcsr;
-		sc->sc_wrcsr = vlewrcsr;
-		sc->sc_hwinit = vleinit;
-		sc->sc_copytodesc = vle_copytobuf_contig;
-		sc->sc_copyfromdesc = am7990_copyfrombuf_contig;
-		sc->sc_copytobuf = vle_copytobuf_contig;
-		sc->sc_copyfrombuf = am7990_copyfrombuf_contig;
-		sc->sc_zerobuf = am7990_zerobuf_contig;
-		/* get ether address */
-		vleetheraddr(sc);
-		break;      
-	case BUS_PCC:
-		sc->sc_mem = etherbuf;
-		lesc->sc_r1 = (void *)ca->ca_vaddr;
-		sc->sc_conf3 = LE_C3_BSWP /*| LE_C3_ACON | LE_C3_BCON*/;
-		sc->sc_addr = kvtop((vaddr_t)sc->sc_mem);
-		sc->sc_memsize = LEMEMSIZE;
-		sc->sc_rdcsr = lerdcsr;
-		sc->sc_wrcsr = lewrcsr;
-		sc->sc_hwreset = NULL;
-		sc->sc_hwinit = NULL;
-		sc->sc_copytodesc = am7990_copytobuf_contig;
-		sc->sc_copyfromdesc = am7990_copyfrombuf_contig;
-		sc->sc_copytobuf = am7990_copytobuf_contig;
-		sc->sc_copyfrombuf = am7990_copyfrombuf_contig;
-		sc->sc_zerobuf = am7990_zerobuf_contig;
-		/* get ether address */
-		myetheraddr(sc->sc_arpcom.ac_enaddr);
-		break;
-	default:
-		printf(": unknown bus type\n");
+	/* Get contiguous DMA-able memory for the lance */
+	if (bus_dmamem_alloc(pa->pa_dmat, ether_data_buff_size, PAGE_SIZE, 0,
+	    &seg, 1, &rseg,
+	    BUS_DMA_NOWAIT | BUS_DMA_ONBOARD_RAM | BUS_DMA_24BIT)) {
+		aprint_error(": Failed to allocate ether buffer\n");
 		return;
 	}
-
-	am7990_config(sc);
-
-	/* connect the interrupt */
-	switch (lebustype) {
-	case BUS_VMES:
-		lesc->sc_ih.ih_fn = vle_intr;
-		lesc->sc_ih.ih_arg = sc;
-		lesc->sc_ih.ih_ipl = pri;
-		vmeintr_establish(ca->ca_vec + 0, &lesc->sc_ih, self->dv_xname);
-		break;
-#if NPCC > 0
-	case BUS_PCC:
-		lesc->sc_ih.ih_fn = am7990_intr;
-		lesc->sc_ih.ih_arg = sc;
-		lesc->sc_ih.ih_ipl = pri;
-		pccintr_establish(PCCV_LE, &lesc->sc_ih, self->dv_xname);
-		sys_pcc->pcc_leirq = pri | PCC_IRQ_IEN;
-		break;
-#endif
+	if (bus_dmamem_map(pa->pa_dmat, &seg, rseg, ether_data_buff_size,
+	    (void **)&sc->sc_mem, BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) {
+		aprint_error(": Failed to map ether buffer\n");
+		bus_dmamem_free(pa->pa_dmat, &seg, rseg);
+		return;
 	}
+	sc->sc_addr = seg.ds_addr;
+	sc->sc_memsize = ether_data_buff_size;
+	sc->sc_conf3 = LE_C3_BSWP;
+
+	memcpy(sc->sc_enaddr, mvme_ea, ETHER_ADDR_LEN);
+
+	sc->sc_copytodesc = lance_copytobuf_contig;
+	sc->sc_copyfromdesc = lance_copyfrombuf_contig;
+	sc->sc_copytobuf = lance_copytobuf_contig;
+	sc->sc_copyfrombuf = lance_copyfrombuf_contig;
+	sc->sc_zerobuf = lance_zerobuf_contig;
+
+	sc->sc_rdcsr = le_pcc_rdcsr;
+	sc->sc_wrcsr = le_pcc_wrcsr;
+	sc->sc_hwinit = NULL;
+
+	am7990_config(&lsc->sc_am7990);
+
+	evcnt_attach_dynamic(&lsc->sc_evcnt, EVCNT_TYPE_INTR,
+	    pccintr_evcnt(pa->pa_ipl), "ether", device_xname(self));
+
+	pccintr_establish(PCCV_LE, am7990_intr, pa->pa_ipl, sc, &lsc->sc_evcnt);
+
+	pcc_reg_write(sys_pcc, PCCREG_LANCE_INTR_CTRL,
+	    pa->pa_ipl | PCC_IENABLE);
 }

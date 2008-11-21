@@ -1,7 +1,6 @@
-/*	$OpenBSD: magmareg.h,v 1.8 2006/03/04 13:00:55 miod Exp $	*/
+/*	$NetBSD: magmareg.h,v 1.13 2008/07/02 10:16:20 plunky Exp $	*/
 
-/* magmareg.h
- *
+/*-
  *  Copyright (c) 1998 Iain Hibbert
  *  All rights reserved.
  *
@@ -13,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Iain Hibbert
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,7 +23,6 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
 #ifdef MAGMA_DEBUG
@@ -70,7 +63,7 @@
  * Supported Card Types
  */
 struct magma_board_info {
-	const char *mb_sbusname;	/* sbus name */
+	const char *mb_sbusname;	/* sbus_attach_args.sa_name */
 	const char *mb_name;		/* cardname to match against */
 	const char *mb_realname;	/* english card name */
 	int mb_nser;			/* number of serial ports */
@@ -88,8 +81,7 @@ struct magma_board_info {
  * cd1400 chip data
  */
 struct cd1400 {
-	bus_space_handle_t cd_regh;	/* chip register handle */
-	bus_space_tag_t cd_regt;	/* chip register tag */
+	volatile u_char *cd_reg;	/* chip registers */
 	int cd_chiprev;			/* chip revision */
 	int cd_clock;			/* clock speed in MHz */
 	int cd_parmode;			/* parallel mode operation */
@@ -99,39 +91,34 @@ struct cd1400 {
  * cd1190 chip data
  */
 struct cd1190 {
-	bus_space_handle_t cd_regh;	/* chip register handle */
-	bus_space_tag_t cd_regt;	/* chip register tag */
+	volatile u_char *cd_reg;	/* chip registers */
 	int cd_chiprev;			/* chip revision */
 };
 
 /* software state for each card */
 struct magma_softc {
-	struct device ms_dev;		/* required. must be first in softc */
-
-	bus_space_tag_t sc_bustag;	/* our bus tag */
-	bus_space_handle_t sc_iohandle;	/* whole card registers */
-	void *sc_ih;			/* interrupt vector */
-	void *sc_sih;			/* softintr vector */
+	struct device	ms_dev;		/* required. must be first in softc */
+	struct sbusdev	ms_sd;		/* sbus device */
+	struct evcnt	ms_intrcnt;	/* statistics */
 
 	/* cd1400 chip info */
-	int ms_ncd1400;
+	int	ms_ncd1400;
 	struct cd1400 ms_cd1400[MAGMA_MAX_CD1400];
-	bus_space_handle_t sc_svcackrh;	/* CD1400 service acknowledge receive */
-	bus_space_handle_t sc_svcackth;	/* CD1400 service acknowledge transmit */
-	bus_space_handle_t sc_svcackmh;	/* CD1400 service acknowledge modem */
-
+	volatile u_char *ms_svcackr;	/* CD1400 service acknowledge receive */
+	volatile u_char *ms_svcackt;	/* CD1400 service acknowledge transmit */
+	volatile u_char *ms_svcackm;	/* CD1400 service acknowledge modem */
 
 	/* cd1190 chip info */
 	int ms_ncd1190;
 	struct cd1190 ms_cd1190[MAGMA_MAX_CD1190];
 
-	const struct magma_board_info *ms_board;	/* what am I? */
+	struct magma_board_info *ms_board;	/* what am I? */
 
 	struct mtty_softc *ms_mtty;
 	struct mbpp_softc *ms_mbpp;
 
-	struct intrhand ms_hardint;	/* hard interrupt handler */
-	struct intrhand ms_softint;	/* soft interrupt handler */
+	/* softintr(9) cookie */
+	void	*ms_sicookie;
 };
 
 #define MTTY_RBUF_SIZE		(2 * 512)
@@ -175,18 +162,18 @@ struct mbpp_port {
 	struct cd1400 *mp_cd1400;	/* for LC2+1Sp card */
 	struct cd1190 *mp_cd1190;	/* all the others   */
 
-	int mp_flags;
+	struct callout mp_timeout_ch;
+	struct callout mp_start_ch;
 
-	struct bpp_param mp_param;
-#define mp_burst mp_param.bp_burst
-#define mp_timeout mp_param.bp_timeout
-#define mp_delay mp_param.bp_delay
+	int	mp_flags;
 
-	u_char *mp_ptr;			/* pointer to io data */
-	int mp_cnt;			/* count of io chars */
+	struct mbpp_param mp_param;
+#define mp_burst	mp_param.bp_burst
+#define mp_timeout	mp_param.bp_timeout
+#define mp_delay	mp_param.bp_delay
 
-	struct timeout mp_timeout_tmo;	/* for mbpp_timeout() */
-	struct timeout mp_start_tmo;	/* for mbpp_start() */
+	u_char	*mp_ptr;		/* pointer to I/O data */
+	int	mp_cnt;			/* count of I/O chars */
 };
 
 #define MBPPF_OPEN	(1<<0)
@@ -201,6 +188,13 @@ struct mbpp_softc {
 	struct mbpp_port ms_port[MAGMA_MAX_BPP];
 };
 
+/*
+ * useful macros
+ */
+#define SET(t, f)	((t) |= (f))
+#define CLR(t, f)	((t) &= ~(f))
+#define ISSET(t, f)	((t) & (f))
+
 /* internal function prototypes */
 
 int cd1400_compute_baud(speed_t, int, int *, int *);
@@ -209,26 +203,22 @@ __inline u_char cd1400_read_reg(struct cd1400 *, int);
 __inline void cd1400_write_reg(struct cd1400 *, int, u_char);
 void cd1400_enable_transmitter(struct cd1400 *, int);
 
-int magma_match(struct device *, void *, void *);
+int magma_match(struct device *, struct cfdata *, void *);
 void magma_attach(struct device *, struct device *, void *);
 int magma_hard(void *);
 void magma_soft(void *);
 
-int mtty_match(struct device *, void *, void *);
+int mtty_match(struct device *, struct cfdata *, void *);
 void mtty_attach(struct device *, struct device *, void *);
 int mtty_modem_control(struct mtty_port *, int, int);
 int mtty_param(struct tty *, struct termios *);
 void mtty_start(struct tty *);
 
-int mbpp_match(struct device *, void *, void *);
+int mbpp_match(struct device *, struct cfdata *, void *);
 void mbpp_attach(struct device *, struct device *, void *);
-int mbpp_rw(dev_t, struct uio *);
 void mbpp_timeout(void *);
 void mbpp_start(void *);
-int mbpp_send(struct mbpp_port *, caddr_t, int);
-int mbpp_recv(struct mbpp_port *, caddr_t, int);
+int mbpp_send(struct mbpp_port *, void *, int);
+int mbpp_recv(struct mbpp_port *, void *, int);
 int mbpp_hztoms(int);
 int mbpp_mstohz(int);
-
-#define	CD1400_REGMAPSIZE	0x80
-#define	CD1190_REGMAPSIZE	0x20

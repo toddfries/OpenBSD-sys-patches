@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.61 2008/04/17 19:52:27 kettenis Exp $	*/
-/*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
+/*	$NetBSD: cpu.h,v 1.84 2008/10/05 01:53:05 nakayama Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -47,37 +46,31 @@
 /*
  * CTL_MACHDEP definitions.
  */
-#define	CPU_LED_BLINK		2	/* int: blink leds? */
-#define	CPU_ALLOWAPERTURE	3	/* allow xf86 operations */
-#define	CPU_CPUTYPE		4	/* cpu type */
-#define	CPU_CECCERRORS		5	/* Correctable ECC errors */
-#define	CPU_CECCLAST		6	/* Correctable ECC last fault addr */
-#define	CPU_KBDRESET		7	/* soft reset via keyboard */
-#define	CPU_MAXID		8	/* number of valid machdep ids */
-
-#define	CTL_MACHDEP_NAMES {			\
-	{ 0, 0 },				\
-	{ 0, 0 },				\
-	{ "led_blink", CTLTYPE_INT },		\
-	{ "allowaperture", CTLTYPE_INT },	\
-	{ "cputype", CTLTYPE_INT },		\
-	{ "ceccerrs", CTLTYPE_INT },		\
-	{ "cecclast", CTLTYPE_QUAD },		\
-	{ "kbdreset", CTLTYPE_INT },		\
-}
+#define	CPU_BOOTED_KERNEL	1	/* string: booted kernel name */
+#define	CPU_BOOTED_DEVICE	2	/* string: device booted from */
+#define	CPU_BOOT_ARGS		3	/* string: args booted with */
+#define	CPU_ARCH		4	/* integer: cpu architecture version */
+#define	CPU_MAXID		5	/* number of valid machdep ids */
 
 #ifdef _KERNEL
 /*
  * Exported definitions unique to SPARC cpu support.
  */
 
-#include <machine/ctlreg.h>
+#if defined(_KERNEL_OPT)
+#include "opt_multiprocessor.h"
+#include "opt_lockdebug.h"
+#endif
+
 #include <machine/psl.h>
 #include <machine/reg.h>
+#include <machine/pte.h>
 #include <machine/intr.h>
+#include <machine/cpuset.h>
+#include <sparc64/sparc64/intreg.h>
 
-#include <sys/sched.h>
-
+#include <sys/cpu_data.h>
+#include <sys/evcnt.h>
 /*
  * The cpu_info structure is part of a 64KB structure mapped both the kernel
  * pmap and a single locked TTE a CPUINFO_VA for that particular processor.
@@ -95,6 +88,7 @@
  */
 
 struct cpu_info {
+
 	/*
 	 * SPARC cpu_info structures live at two VAs: one global
 	 * VA (so each CPU can access any other CPU's cpu_info)
@@ -107,219 +101,266 @@ struct cpu_info {
 	struct cpu_info * volatile ci_self;
 
 	/* Most important fields first */
-	struct proc		*ci_curproc;
-	struct pcb		*ci_cpcb;	/* also initial stack */
+	struct lwp		*ci_curlwp;
+	struct pcb		*ci_cpcb;
 	struct cpu_info		*ci_next;
 
-	struct proc		*ci_fpproc;
-	int			ci_number;
-	int			ci_flags;
-	int			ci_upaid;
-#ifdef MULTIPROCESSOR
-	int			ci_itid;
-#endif
-	int			ci_node;
-	struct schedstate_percpu ci_schedstate; /* scheduler state */
+	struct lwp		*ci_fplwp;
 
-	int			ci_want_resched;
-	int			ci_handled_intr_level;
-	void			*ci_intrpending[16][8];
-	u_int64_t		ci_tick;
+	void			*ci_eintstack;
 
-	/* DEBUG/DIAGNOSTIC stuff */
-	u_long			ci_spin_locks;	/* # of spin locks held */
-	u_long			ci_simple_locks;/* # of simple locks held */
+	int			ci_mtx_count;
+	int			ci_mtx_oldspl;
 
 	/* Spinning up the CPU */
-	void			(*ci_spinup)(void); /* spinup routine */
-	void			*ci_initstack;
-	paddr_t			ci_paddr;	/* Phys addr of this structure. */
+	void			(*ci_spinup)(void);
+	paddr_t			ci_paddr;
 
-#ifdef SUN4V
-	struct rwindow64	ci_rw;
-	u_int64_t		ci_rwsp;
+	int			ci_cpuid;
 
-	paddr_t			ci_mmfsa;
-	paddr_t			ci_cpumq;
-	paddr_t			ci_devmq;
+	/* CPU PROM information. */
+	u_int			ci_node;
 
-	paddr_t			ci_cpuset;
-	paddr_t			ci_mondo;
+	/* %tick and cpu frequency information */
+	u_long			ci_tick_increment;
+	uint64_t		ci_cpu_clockrate[2];
+
+	/* Interrupts */
+	struct intrhand		*ci_intrpending[16];
+	struct intrhand		*ci_tick_ih;
+
+	/* Event counters */
+	struct evcnt		ci_tick_evcnt;
+#ifdef MULTIPROCESSOR
+	struct evcnt		ci_ipi_evcnt[IPI_EVCNT_NUM];
 #endif
+
+	int			ci_flags;
+	int			ci_want_ast;
+	int			ci_want_resched;
+	int			ci_idepth;
+
+/*
+ * A context is simply a small number that differentiates multiple mappings
+ * of the same address.  Contexts on the spitfire are 13 bits, but could
+ * be as large as 17 bits.
+ *
+ * Each context is either free or attached to a pmap.
+ *
+ * The context table is an array of pointers to psegs.  Just dereference
+ * the right pointer and you get to the pmap segment tables.  These are
+ * physical addresses, of course.
+ *
+ */
+	int			ci_pmap_next_ctx;
+	int			ci_numctx;
+	paddr_t 		*ci_ctxbusy;
+	LIST_HEAD(, pmap) 	ci_pmap_ctxlist;
+
+	/*
+	 * The TSBs are per cpu too (since MMU context differs between
+	 * cpus). These are just caches for the TLBs.
+	 */
+	pte_t			*ci_tsb_dmmu;
+	pte_t			*ci_tsb_immu;
+
+	struct cpu_data		ci_data;	/* MI per-cpu data */
+
+	volatile void		*ci_ddb_regs;	/* DDB regs */
 };
 
-#define CPUF_RUNNING	0x0001		/* CPU is running */
+#define CPUF_PRIMARY	1
 
+/*
+ * CPU boot arguments. Used by secondary CPUs at the bootstrap time.
+ */
+struct cpu_bootargs {
+	u_int	cb_node;	/* PROM CPU node */
+	volatile int cb_flags;
+
+	vaddr_t cb_ktext;
+	paddr_t cb_ktextp;
+	vaddr_t cb_ektext;
+
+	vaddr_t cb_kdata;
+	paddr_t cb_kdatap;
+	vaddr_t cb_ekdata;
+
+	paddr_t	cb_cpuinfo;
+};
+
+extern struct cpu_bootargs *cpu_args;
+
+extern int sparc_ncpus;
 extern struct cpu_info *cpus;
+extern struct pool_cache *fpstate_cache;
 
+#define	curcpu()	(((struct cpu_info *)CPUINFO_VA)->ci_self)
+#define	cpu_number()	(curcpu()->ci_index)
+#define	CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
+
+#define CPU_INFO_ITERATOR		int
+#define CPU_INFO_FOREACH(cii, ci)	cii = 0, ci = cpus; ci != NULL; \
+					ci = ci->ci_next
+
+#define curlwp		curcpu()->ci_curlwp
+#define fplwp		curcpu()->ci_fplwp
 #define curpcb		curcpu()->ci_cpcb
-#define fpproc		curcpu()->ci_fpproc
 
-#ifdef MULTIPROCESSOR
-
-#define	cpu_number()	(curcpu()->ci_number)
-
-extern __inline struct cpu_info *curcpu(void);
-extern __inline struct cpu_info *
-curcpu(void)
-{
-	struct cpu_info *ci;
-
-	__asm __volatile("mov %%g7, %0" : "=r"(ci));
-	return (ci->ci_self);
-}
-
-#define CPU_IS_PRIMARY(ci)	((ci)->ci_number == 0)
-#define CPU_INFO_ITERATOR	int
-#define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = cpus; ci != NULL; ci = ci->ci_next)
-#define CPU_INFO_UNIT(ci)	((ci)->ci_number)
-
-void	cpu_boot_secondary_processors(void);
-
-void	sparc64_send_ipi(int, void (*)(void), u_int64_t, u_int64_t);
-void	sparc64_broadcast_ipi(void (*)(void), u_int64_t, u_int64_t);
-
-void	smp_signotify(struct proc *);
-
-#else
-
-#define cpu_number()	0
-#define	curcpu()	((struct cpu_info *)CPUINFO_VA)
-
-#define CPU_IS_PRIMARY(ci)	1
-#define CPU_INFO_ITERATOR	int
-#define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-
-#endif
+#define want_ast	curcpu()->ci_want_ast
+#define want_resched	curcpu()->ci_want_resched
 
 /*
  * definitions of cpu-dependent requirements
  * referenced in generic code
  */
+#define	cpu_swapin(p)	/* nothing */
+#define	cpu_swapout(p)	/* nothing */
 #define	cpu_wait(p)	/* nothing */
+void cpu_proc_fork(struct proc *, struct proc *);
+
+/* run on the cpu itself */
+void	cpu_pmap_init(struct cpu_info *);
+/* run upfront to prepare the cpu_info */
+void	cpu_pmap_prepare(struct cpu_info *, bool);
+
+#if defined(MULTIPROCESSOR)
+extern vaddr_t cpu_spinup_trampoline;
+
+extern  char   *mp_tramp_code;
+extern  u_long  mp_tramp_code_len;
+extern  u_long  mp_tramp_tlb_slots;
+extern  u_long  mp_tramp_func;
+extern  u_long  mp_tramp_ci;
+
+void	cpu_hatch(void);
+void	cpu_boot_secondary_processors(void);
+
+/*
+ * Call a function on other cpus:
+ *	multicast - send to everyone in the sparc64_cpuset_t
+ *	broadcast - send to to all cpus but ourselves
+ *	send - send to just this cpu
+ */
+typedef void (* ipifunc_t)(void *);
+
+void	sparc64_multicast_ipi(sparc64_cpuset_t, ipifunc_t, uint64_t, uint64_t);
+void	sparc64_broadcast_ipi(ipifunc_t, uint64_t, uint64_t);
+void	sparc64_send_ipi(int, ipifunc_t, uint64_t, uint64_t);
+#endif
 
 /*
  * Arguments to hardclock, softclock and gatherstats encapsulate the
  * previous machine state in an opaque clockframe.  The ipl is here
  * as well for strayintr (see locore.s:interrupt and intr.c:strayintr).
+ * Note that CLKF_INTR is valid only if CLKF_USERMODE is false.
  */
 struct clockframe {
 	struct trapframe64 t;
-	int saved_intr_level;
 };
 
 #define	CLKF_USERMODE(framep)	(((framep)->t.tf_tstate & TSTATE_PRIV) == 0)
 #define	CLKF_PC(framep)		((framep)->t.tf_pc)
-#define	CLKF_INTR(framep)	((framep)->saved_intr_level != 0)
-
-void setsoftnet(void);
-
-#define aston(p)	((p)->p_md.md_astpending = 1)
-
-/*
- * Preempt the current process if in interrupt from user mode,
- * or after the current trap/syscall if in system mode.
- */
-extern void need_resched(struct cpu_info *);
-
-/*
- * This is used during profiling to integrate system time.
- */
-#define	PROC_PC(p)	((p)->p_md.md_tf->tf_pc)
+/* Since some files in sys/kern do not know BIAS, I'm using 0x7ff here */
+#define	CLKF_INTR(framep)						\
+	((!CLKF_USERMODE(framep))&&					\
+		(((framep)->t.tf_out[6] & 1 ) ?				\
+			(((vaddr_t)(framep)->t.tf_out[6] <		\
+				(vaddr_t)EINTSTACK-0x7ff) &&		\
+			((vaddr_t)(framep)->t.tf_out[6] >		\
+				(vaddr_t)INTSTACK-0x7ff)) :		\
+			(((vaddr_t)(framep)->t.tf_out[6] <		\
+				(vaddr_t)EINTSTACK) &&			\
+			((vaddr_t)(framep)->t.tf_out[6] >		\
+				(vaddr_t)INTSTACK))))
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the sparc, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	aston(p)
+#define	cpu_need_proftick(l)	((l)->l_pflag |= LP_OWEUPC, want_ast = 1)
 
-void signotify(struct proc *);
+/*
+ * Notify an LWP that it has a signal pending, process as soon as possible.
+ */
+void cpu_signotify(struct lwp *);
 
-/* cpu.c */
-int	cpu_myid(void);
+/*
+ * Interrupt handler chains.  Interrupt handlers should return 0 for
+ * ``not me'' or 1 (``I took care of it'').  intr_establish() inserts a
+ * handler into the list.  The handler is called with its (single)
+ * argument, or with a pointer to a clockframe if ih_arg is NULL.
+ */
+struct intrhand {
+	int			(*ih_fun)(void *);
+	void			*ih_arg;
+	/* if we have to take the biglock, we interpose a wrapper
+	 * and need to save the original function and arg */
+	int			(*ih_realfun)(void *);
+	void			*ih_realarg;
+	short			ih_number;	/* interrupt number */
+						/* the H/W provides */
+	char			ih_pil;		/* interrupt priority */
+	struct intrhand		*ih_next;	/* global list */
+	struct intrhand		*ih_pending;	/* interrupt queued */
+	volatile uint64_t	*ih_map;	/* Interrupt map reg */
+	volatile uint64_t	*ih_clr;	/* clear interrupt reg */
+};
+extern struct intrhand *intrhand[];
+extern struct intrhand *intrlev[MAXINTNUM];
+
+void	intr_establish(int level, bool mpsafe, struct intrhand *);
+void	*sparc_softintr_establish(int, int (*)(void *), void *);
+void	sparc_softintr_schedule(void *);
+void	sparc_softintr_disestablish(void *);
+
+/* disksubr.c */
+struct dkbad;
+int isbad(struct dkbad *bt, int, int, int);
 /* machdep.c */
-int	ldcontrolb(caddr_t);
-void	dumpconf(void);
-caddr_t	reserve_dumppages(caddr_t);
+void *	reserve_dumppages(void *);
 /* clock.c */
 struct timeval;
-int	tickintr(void *); /* level 10 (tick) interrupt code */
-int	clockintr(void *);/* level 10 (clock) interrupt code */
+int	tickintr(void *);	/* level 10/14 (tick) interrupt code */
+int	clockintr(void *);	/* level 10 (clock) interrupt code */
 int	statintr(void *);	/* level 14 (statclock) interrupt code */
-void	tick_start(void);
+int	schedintr(void *);	/* level 10 (schedclock) interrupt code */
+void	tickintr_establish(int, int (*)(void *));
 /* locore.s */
 struct fpstate64;
 void	savefpstate(struct fpstate64 *);
 void	loadfpstate(struct fpstate64 *);
 void	clearfpstate(void);
-u_int64_t	probeget(paddr_t, int, int);
-#define	 write_all_windows() __asm __volatile("flushw" : : )
-#define	 write_user_windows() __asm __volatile("flushw" : : )
-void 	proc_trampoline(void);
+uint64_t	probeget(paddr_t, int, int);
+int	probeset(paddr_t, int, int, uint64_t);
+
+#define	 write_all_windows() __asm volatile("flushw" : : )
+#define	 write_user_windows() __asm volatile("flushw" : : )
+
+void 	lwp_trampoline(void);
 struct pcb;
 void	snapshot(struct pcb *);
 struct frame *getfp(void);
-int	xldcontrolb(caddr_t, struct pcb *);
-void	copywords(const void *, void *, size_t);
-void	qcopy(const void *, void *, size_t);
-void	qzero(void *, size_t);
 void	switchtoctx(int);
 /* trap.c */
-void	pmap_unuse_final(struct proc *);
-int	rwindow_save(struct proc *);
-/* vm_machdep.c */
-void	fpusave_cpu(struct cpu_info *, int);
-void	fpusave_proc(struct proc *, int);
+void	kill_user_windows(struct lwp *);
+int	rwindow_save(struct lwp *);
 /* cons.c */
 int	cnrom(void);
 /* zs.c */
 void zsconsole(struct tty *, int, int, void (**)(struct tty *, int));
 /* fb.c */
 void	fb_unblank(void);
-/* tda.c */
-void	tda_full_blast(void);
-/* emul.c */
-int	fixalign(struct proc *, struct trapframe64 *);
-int	emulinstr(vaddr_t, struct trapframe64 *);
-int	emul_qf(int32_t, struct proc *, union sigval, struct trapframe64 *);
-int	emul_popc(int32_t, struct proc *, union sigval, struct trapframe64 *);
-
-/*
- *
- * The SPARC has a Trap Base Register (TBR) which holds the upper 20 bits
- * of the trap vector table.  The next eight bits are supplied by the
- * hardware when the trap occurs, and the bottom four bits are always
- * zero (so that we can shove up to 16 bytes of executable code---exactly
- * four instructions---into each trap vector).
- *
- * The hardware allocates half the trap vectors to hardware and half to
- * software.
- *
- * Traps have priorities assigned (lower number => higher priority).
- */
-
-struct trapvec {
-	int	tv_instr[8];		/* the eight instructions */
-};
-extern struct trapvec *trapbase;	/* the 256 vectors */
-
-extern void wzero(void *, u_int);
-extern void wcopy(const void *, void *, u_int);
-
-struct blink_led {
-	void (*bl_func)(void *, int);
-	void *bl_arg;
-	SLIST_ENTRY(blink_led) bl_next;
-};
-
-extern void blink_led_register(struct blink_led *);
-
-#ifdef MULTIPROCESSOR
-#include <sys/mplock.h>
+/* kgdb_stub.c */
+#ifdef KGDB
+void kgdb_attach(int (*)(void *), void (*)(void *, int), void *);
+void kgdb_connect(int);
+void kgdb_panic(void);
 #endif
+/* emul.c */
+int	fixalign(struct lwp *, struct trapframe64 *);
+int	emulinstr(vaddr_t, struct trapframe64 *);
 
 #endif /* _KERNEL */
 #endif /* _CPU_H_ */

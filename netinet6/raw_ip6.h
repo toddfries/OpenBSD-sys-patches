@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.h,v 1.3 2007/12/14 18:33:42 deraadt Exp $	*/
+/*	$NetBSD: raw_ip6.h,v 1.4 2008/04/15 05:13:37 thorpej Exp $	*/
 /*	$KAME: raw_ip6.h,v 1.2 2001/05/27 13:28:35 itojun Exp $	*/
 
 /*
@@ -36,30 +36,29 @@
 /*
  * ICMPv6 stat is counted separately.  see netinet/icmp6.h
  */
-struct rip6stat {
-	u_int64_t rip6s_ipackets;	/* total input packets */
-	u_int64_t rip6s_isum;		/* input checksum computations */
-	u_int64_t rip6s_badsum;		/* of above, checksum error */
-	u_int64_t rip6s_nosock;		/* no matching socket */
-	u_int64_t rip6s_nosockmcast;	/* of above, arrived as multicast */
-	u_int64_t rip6s_fullsock;	/* not delivered, input socket full */
+#define	RIP6_STAT_IPACKETS	0	/* total input packets */
+#define	RIP6_STAT_ISUM		1	/* input checksum computations */
+#define	RIP6_STAT_BADSUM	2	/* of above, checksum error */
+#define	RIP6_STAT_NOSOCK	3	/* no matching socket */
+#define	RIP6_STAT_NOSOCKMCAST	4	/* of above, arrived as multicast */
+#define	RIP6_STAT_FULLSOCK	5	/* not delivered, input socket full */
+#define	RIP6_STAT_OPACKETS	6	/* total output packets */
 
-	u_int64_t rip6s_opackets;	/* total output packets */
-};
+#define	RIP6_NSTATS		7
 
 /*
- * Names for RIP6 sysctl objects
+ * Names for Raw IPv6 sysctl objects
  */
-#define RIPV6CTL_STATS		1	/* RIP6 stats */
-#define RIPV6CTL_MAXID		2
+#define RAW6CTL_STATS	1
+#define RAW6CTL_MAXID	2
 
-#define RIPM6CTL_NAMES { \
+#define RAW6CTL_NAMES { \
 	{ 0, 0 }, \
-	{ "stats", CTLTYPE_NODE }, \
+	{ "stats", CTLTYPE_STRUCT }, \
 }
 
 #ifdef _KERNEL
 extern struct rip6stat rip6stat;
 #endif
 
-#endif
+#endif /* !_NETINET6_RAW_IP6_H_ */

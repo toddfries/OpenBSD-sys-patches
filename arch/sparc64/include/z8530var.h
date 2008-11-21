@@ -1,5 +1,4 @@
-/*	$OpenBSD: z8530var.h,v 1.7 2005/12/28 22:39:52 miod Exp $	*/
-/*	$NetBSD: z8530var.h,v 1.4 2000/11/08 23:41:42 eeh Exp $	*/
+/*	$NetBSD: z8530var.h,v 1.12 2008/03/29 19:15:35 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -42,11 +41,25 @@
  */
 
 #include <machine/bus.h>
-#include <sparc64/dev/z8530sc.h>
+#include <dev/ic/z8530sc.h>
+
+#include "kbd.h"	/* NKBD */
+
+#if (NKBD > 0)
+/*
+ * Need to override cn_console_dev() for zstty and zskbd.
+ */
+#ifdef cn_isconsole
+#undef cn_isconsole
+#endif
+extern struct consdev *cn_hw;
+extern struct consdev *cn_tab;
+#define cn_isconsole(d)	((d) == cn_tab->cn_dev || (d) == cn_hw->cn_dev)
+#endif
 
 struct zsc_softc {
-	struct device		zsc_dev;	/* base device */
-	bus_space_tag_t		zsc_bustag;	/* bus space/dma tags */
+	device_t		zsc_dev;	/* base device */
+	bus_space_tag_t		zsc_bustag;	/* bus space/DMA tags */
 	bus_dma_tag_t		zsc_dmatag;
 	struct zs_chanstate	*zsc_cs[2];	/* channel A and B soft state */
 
@@ -54,6 +67,7 @@ struct zsc_softc {
 	void			*zsc_softintr;
 	int			zsc_promunit;	/* PROM's view of zs devices */
 	int			zsc_node;	/* PROM node, if any */
+	struct evcnt		zsc_intrcnt;	/* count interrupts */
 	struct zs_chanstate	zsc_cs_store[2];
 };
 
@@ -71,13 +85,13 @@ struct zsc_softc {
  * about the function call overhead where ZS_DELAY does nothing.
  */
 
-u_char zs_read_reg(struct zs_chanstate *cs, u_char reg);
-u_char zs_read_csr(struct zs_chanstate *cs);
-u_char zs_read_data(struct zs_chanstate *cs);
+uint8_t zs_read_reg(struct zs_chanstate *cs, uint8_t reg);
+uint8_t zs_read_csr(struct zs_chanstate *cs);
+uint8_t zs_read_data(struct zs_chanstate *cs);
 
-void  zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val);
-void  zs_write_csr(struct zs_chanstate *cs, u_char val);
-void  zs_write_data(struct zs_chanstate *cs, u_char val);
+void  zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val);
+void  zs_write_csr(struct zs_chanstate *cs, uint8_t val);
+void  zs_write_data(struct zs_chanstate *cs, uint8_t val);
 
 /* The sparc has splzs() in psl.h */
 
@@ -86,3 +100,8 @@ void  zs_write_data(struct zs_chanstate *cs, u_char val);
 #define ZSCCF_CHANNEL 0
 #define ZSCCF_CHANNEL_DEFAULT -1
 #endif
+
+#undef cn_trap
+#define cn_trap() zs_abort(NULL)
+
+#define	IPL_ZS	IPL_SERIAL

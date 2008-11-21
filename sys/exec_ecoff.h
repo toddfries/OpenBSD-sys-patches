@@ -1,5 +1,4 @@
-/*	$OpenBSD: exec_ecoff.h,v 1.7 2002/03/14 01:27:14 millert Exp $	*/
-/*	$NetBSD: exec_ecoff.h,v 1.9 1996/05/09 23:42:08 cgd Exp $	*/
+/*	$NetBSD: exec_ecoff.h,v 1.18 2005/12/11 12:25:20 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Adam Glass
@@ -85,29 +84,35 @@ struct ecoff_exechdr {
 #define ECOFF_ZMAGIC 0413
 
 #define ECOFF_ROUND(value, by) \
-	(((value) + (by) - 1) & ~((by) - 1))
+        (((value) + (by) - 1) & ~((by) - 1))
 
 #define ECOFF_BLOCK_ALIGN(ep, value) \
-	((ep)->a.magic == ECOFF_ZMAGIC ? ECOFF_ROUND((value), ECOFF_LDPGSZ) : \
-	    (value))
+        ((ep)->a.magic == ECOFF_ZMAGIC ? ECOFF_ROUND((value), ECOFF_LDPGSZ) : \
+	 (value))
 
 #define ECOFF_TXTOFF(ep) \
-	((ep)->a.magic == ECOFF_ZMAGIC ? 0 : \
-	    ECOFF_ROUND(ECOFF_HDR_SIZE + (ep)->f.f_nscns * \
-	    sizeof(struct ecoff_scnhdr), ECOFF_SEGMENT_ALIGNMENT(ep)))
+        ((ep)->a.magic == ECOFF_ZMAGIC ? 0 : \
+	 ECOFF_ROUND(ECOFF_HDR_SIZE + (ep)->f.f_nscns * \
+		     sizeof(struct ecoff_scnhdr), ECOFF_SEGMENT_ALIGNMENT(ep)))
 
 #define ECOFF_DATOFF(ep) \
-	(ECOFF_BLOCK_ALIGN((ep), ECOFF_TXTOFF(ep) + (ep)->a.tsize))
+        (ECOFF_BLOCK_ALIGN((ep), ECOFF_TXTOFF(ep) + (ep)->a.tsize))
 
 #define ECOFF_SEGMENT_ALIGN(ep, value) \
-	(ECOFF_ROUND((value), ((ep)->a.magic == ECOFF_ZMAGIC ? ECOFF_LDPGSZ : \
-	ECOFF_SEGMENT_ALIGNMENT(ep))))
+        (ECOFF_ROUND((value), ((ep)->a.magic == ECOFF_ZMAGIC ? ECOFF_LDPGSZ : \
+         ECOFF_SEGMENT_ALIGNMENT(ep))))
 
 #ifdef _KERNEL
-int	exec_ecoff_makecmds(struct proc *, struct exec_package *);
-int	cpu_exec_ecoff_hook(struct proc *, struct exec_package *);
-int	exec_ecoff_prep_omagic(struct proc *, struct exec_package *);
-int	exec_ecoff_prep_nmagic(struct proc *, struct exec_package *);
-int	exec_ecoff_prep_zmagic(struct proc *, struct exec_package *);
+int	exec_ecoff_makecmds(struct lwp *, struct exec_package *);
+int	cpu_exec_ecoff_probe(struct lwp *, struct exec_package *);
+void	cpu_exec_ecoff_setregs(struct lwp *, struct exec_package *, u_long);
+
+int	exec_ecoff_prep_omagic __P((struct lwp *, struct exec_package *,
+	    struct ecoff_exechdr *, struct vnode *));
+int	exec_ecoff_prep_nmagic __P((struct lwp *, struct exec_package *,
+	    struct ecoff_exechdr *, struct vnode *));
+int	exec_ecoff_prep_zmagic __P((struct lwp *, struct exec_package *,
+	    struct ecoff_exechdr *, struct vnode *));
+
 #endif /* _KERNEL */
 #endif /* !_SYS_EXEC_ECOFF_H_ */

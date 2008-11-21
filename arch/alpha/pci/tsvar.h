@@ -1,5 +1,4 @@
-/* $OpenBSD: tsvar.h,v 1.6 2006/03/16 22:32:44 miod Exp $ */
-/* $NetBSD: tsvar.h,v 1.1 1999/06/29 06:46:47 ross Exp $ */
+/* $NetBSD: tsvar.h,v 1.5 2005/12/11 12:16:17 christos Exp $ */
 
 /*-
  * Copyright (c) 1999 by Ross Harvey.  All rights reserved.
@@ -38,6 +37,10 @@
 
 #define	tsvar() { Generate ctags(1) key. }
 
+struct tsc_softc {
+	struct	device tsc_dev;
+};
+
 struct tsp_config {
 	int	pc_pslot;		/* Pchip 0 or 1 */
 	int	pc_initted;		/* Initialized */
@@ -56,9 +59,6 @@ struct tsp_config {
 	u_int32_t pc_hae_io;
 
 	struct	extent *pc_io_ex, *pc_mem_ex;
-	char	pc_io_ex_name[16], pc_mem_ex_name[16];
-	long	pc_io_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
-	long	pc_mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
 	int	pc_mallocsafe;
 };
 
@@ -68,17 +68,17 @@ struct tsp_softc {
 };
 
 struct tsp_attach_args {
-	char	*tsp_name;
+	const char *tsp_name;
 	int	tsp_slot;
 };
 
 extern int tsp_console_hose;
 
-struct	tsp_config *tsp_init(int, int);
-void	tsp_pci_init(pci_chipset_tag_t, void *);
-void	tsp_dma_init(struct tsp_config *);
+struct	tsp_config *tsp_init __P((int, int));
+void	tsp_pci_init __P((pci_chipset_tag_t, void *));
+void	tsp_dma_init __P((struct tsp_config *));
 
-void	tsp_bus_io_init(bus_space_tag_t, void *);
-void	tsp_bus_mem_init(bus_space_tag_t, void *);
+void	tsp_bus_io_init __P((bus_space_tag_t, void *));
+void	tsp_bus_mem_init __P((bus_space_tag_t, void *));
 
-void tsp_bus_mem_init2(void *);
+void	tsp_bus_mem_init2 __P((bus_space_tag_t, void *));

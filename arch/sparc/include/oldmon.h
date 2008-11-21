@@ -1,5 +1,4 @@
-/*	$OpenBSD: oldmon.h,v 1.9 2002/03/15 01:20:04 millert Exp $	*/
-/*	$NetBSD: oldmon.h,v 1.11 1996/03/31 22:21:38 pk Exp $ */
+/*	$NetBSD: oldmon.h,v 1.17 2007/03/04 06:00:44 christos Exp $ */
 
 /*
  * Copyright (C) 1985 Regents of the University of California
@@ -37,6 +36,10 @@
  */
 #ifndef _MACHINE_OLDMON_H
 #define _MACHINE_OLDMON_H
+
+#if defined(_KERNEL_OPT)
+#include "opt_sparc_arch.h"
+#endif
 
 /*
  *     Structures, constants and defines for access to the sun monitor.
@@ -119,9 +122,12 @@ struct om_boottable {
 	int	(*b_probe)(void);	/* probe() --> -1 or found controller
 					   number */
 	int	(*b_boot)(void);	/* boot(bp) --> -1 or start address */
-	int	(*b_open)(struct saioreq *);/* open(iobp) --> -1 or 0 */
-	int	(*b_close)(struct saioreq *);/* close(iobp) --> -1 or 0 */
-	int	(*b_strategy)(struct saioreq *, int);/* strategy(iobp,rw) --> -1 or 0 */
+	int	(*b_open)(struct saioreq *);
+					/* open(iobp) --> -1 or 0 */
+	int	(*b_close)(struct saioreq *);
+					/* close(iobp) --> -1 or 0 */
+	int	(*b_strategy)(struct saioreq *, int);
+					/* strategy(iobp,rw) --> -1 or 0 */
 	char	*b_desc;		/* Printable string describing dev */
 	struct devinfo *b_devinfo;      /* info to configure device. */
 };
@@ -151,11 +157,11 @@ struct om_bootparam {
  */
 struct om_vector {
 	char	*initSp;		/* Initial system stack ptr for hardware */
-	int	(*startMon)(void);/* Initial PC for hardware */
+	int	(*startMon)(void);	/* Initial PC for hardware */
 	int	*diagberr;		/* Bus err handler for diags */
 
 	/* Monitor and hardware revision and identification */
-	struct om_bootparam **bootParam;/* Info for bootstrapped pgm */
+	struct om_bootparam **bootParam;	/* Info for bootstrapped pgm */
  	u_long	*memorySize;		/* Usable memory in bytes */
 
 	/* Single-character input and output */
@@ -187,11 +193,12 @@ struct om_vector {
 	int	(*fbWriteChar)(void);	/* Write a character to FB */
 	int	*fbAddr;		/* Address of frame buffer */
 	char	**font;			/* Font table for FB */
-	void	(*fbWriteStr)(char *, int);
+	void	(*fbWriteStr)(const char *, int);
 					/* Quickly write string to FB */
 
 	/* Reboot interface routine -- resets and reboots system. */
-	void	(*reBoot)(char *);	/* e.g. reBoot("xy()vmunix") */
+	void	(*reBoot)(const char *)	/* e.g. reBoot("xy()vmunix") */
+				__attribute__((__noreturn__));
 
 	/* Line input and parsing */
 	u_char	*lineBuf;		/* The line input buffer */
@@ -222,7 +229,7 @@ struct om_vector {
 	/* Assorted other things */
 	u_long	romvecVersion;		/* Version # of Romvec */
 	struct globram *globRam;	/* monitor global variables */
-	caddr_t	kbdZscc;		/* Addr of keyboard in use */
+	void *	kbdZscc;		/* Addr of keyboard in use */
 
 	int	*keyrInit;		/* ms before kbd repeat */
 	u_char	*keyrTick; 		/* ms between repetitions */
@@ -231,12 +238,13 @@ struct om_vector {
 	long	*resetMap;		/* pgmap entry for resetaddr */
 					/* Really struct pgmapent *  */
 
-					/* Exit from user program */
-	void	(*exitToMon)(void) __attribute__((__noreturn__));
+	__dead void (*exitToMon)(void)	/* Exit from user program */
+				__attribute__((noreturn));
 	u_char	**memorybitmap;		/* V1: &{0 or &bits} */
-					/* Set seg in any context */
-	void	(*setcxsegmap)(int, caddr_t, int);
-	void	(**vector_cmd)(u_long, char *);/* V2: Handler for 'v' cmd */
+	void	(*setcxsegmap)		/* Set seg in any context */
+		    (int, void *, int);
+	void	(**vector_cmd)(u_long, char *);
+					/* V2: Handler for 'v' cmd */
   	u_long	*ExpectedTrapSig;
   	u_long	*TrapVectorTable;
 	int	dummy1z;
@@ -256,7 +264,6 @@ struct om_vector {
 
 #define mon_setcxsegmap(context, va, sme) \
     romVectorPtr->setcxsegmap(context, va, sme)
-#define romp (romVectorPtr)
 
 /*
  * OLDMON_STARTVADDR and OLDMON_ENDVADDR denote the range of the damn monitor.

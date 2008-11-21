@@ -1,4 +1,4 @@
-/*	$NetBSD: ixdp425_machdep.c,v 1.15 2006/05/17 04:22:46 mrg Exp $ */
+/*	$NetBSD: ixdp425_machdep.c,v 1.19 2008/11/12 12:35:59 ad Exp $ */
 /*
  * Copyright (c) 2003
  *	Ichiro FUKUHARA <ichiro@ichiro.org>.
@@ -70,7 +70,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ixdp425_machdep.c,v 1.15 2006/05/17 04:22:46 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ixdp425_machdep.c,v 1.19 2008/11/12 12:35:59 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -115,7 +115,6 @@ __KERNEL_RCSID(0, "$NetBSD: ixdp425_machdep.c,v 1.15 2006/05/17 04:22:46 mrg Exp
 #include <dev/ic/comvar.h>
 #endif
 
-#include "opt_ipkdb.h"
 #include "ksyms.h"
 
 /* Kernel text starts 2MB in from the bottom of the kernel address space. */
@@ -140,11 +139,7 @@ u_int cpu_reset_address = 0x00000000;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -159,7 +154,6 @@ vm_offset_t pagetables_start;
 int physmem = 0;
 
 /* Physical and virtual addresses for some global pages */
-pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -262,6 +256,7 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -290,6 +285,8 @@ cpu_reboot(int howto, char *bootstr)
 	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -416,7 +413,6 @@ initarm(void *arg)
 	u_int kerneldatasize;
 	u_int l1pagetable;
 	u_int freemempos;
-	pv_addr_t kernel_l1pt;
 
 	/*
 	 * Since we map v0xf0000000 == p0xc8000000, it's possible for
@@ -505,8 +501,6 @@ initarm(void *arg)
 #endif
 
 	loop1 = 0;
-	kernel_l1pt.pv_pa = 0;
-	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if (((physical_freeend - L1_TABLE_SIZE) & (L1_TABLE_SIZE - 1)) == 0
@@ -756,8 +750,7 @@ initarm(void *arg)
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
-	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 	/* Setup the IRQ system */
 #ifdef VERBOSE_INIT_ARM
@@ -772,14 +765,7 @@ initarm(void *arg)
 	boothowto = BOOTHOWTO;
 #endif
 
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif
-
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	/* Firmware doesn't load symbols. */
 	ksyms_init(0, NULL, NULL);
 #endif

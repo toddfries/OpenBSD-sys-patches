@@ -1,4 +1,4 @@
-/*	$NetBSD: ldvar.h,v 1.12 2007/02/09 21:55:26 ad Exp $	*/
+/*	$NetBSD: ldvar.h,v 1.15 2008/09/09 12:45:39 tron Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +35,7 @@
 #include <sys/mutex.h>
 
 struct ld_softc {
-	struct	device sc_dv;
+	struct	device *sc_dv;
 	struct	disk sc_dk;
 	struct	bufq_state *sc_bufq;
 	kmutex_t sc_mutex;
@@ -64,10 +57,11 @@ struct ld_softc {
 	int	sc_maxqueuecnt;		/* maximum h/w queue depth */
 
 	int	(*sc_dump)(struct ld_softc *, void *, int, int);
-	int	(*sc_flush)(struct ld_softc *);
+	int	(*sc_flush)(struct ld_softc *, int);
 	int	(*sc_start)(struct ld_softc *, struct buf *);
 };
 
+/* sc_flags */
 #define	LDF_ENABLED	0x001		/* device enabled */
 #define	LDF_WLABEL	0x008		/* label is writable */
 #define	LDF_LABELLING	0x010		/* writing label */
@@ -75,6 +69,9 @@ struct ld_softc {
 #define	LDF_DETACH	0x040		/* detach pending */
 #define	LDF_KLABEL	0x080		/* keep label on close */
 #define	LDF_VLABEL	0x100		/* label is valid */
+
+/* sc_flush() flags */
+#define	LDFL_POLL	0x001		/* poll for completion */
 
 int	ldadjqparam(struct ld_softc *, int);
 void	ldattach(struct ld_softc *);

@@ -1,5 +1,4 @@
-/*      $OpenBSD: lemacreg.h,v 1.2 2003/10/21 18:58:49 jmc Exp $ */
-/*      $NetBSD: lemacreg.h,v 1.2 2001/06/13 10:46:03 wiz Exp $ */
+/*      $NetBSD: lemacreg.h,v 1.5 2005/12/11 12:21:27 christos Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1997 Matt Thomas <matt@3am-software.com>
@@ -133,7 +132,7 @@
 
 /* Transmit Done Queue Status Definitions */
 
-#define	LEMAC_TDQ_COL		0x03	/* Collision Mask */ 
+#define	LEMAC_TDQ_COL		0x03	/* Collision Mask */
 #define	LEMAC_TDQ_NOCOL		0x00	/*   No Collisions */
 #define	LEMAC_TDQ_ONECOL	0x01	/*   One Collision */
 #define	LEMAC_TDQ_MULCOL	0x02	/*   Multiple Collisions */

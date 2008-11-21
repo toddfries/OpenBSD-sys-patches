@@ -1,3 +1,8 @@
-/*	$OpenBSD: kcore.h,v 1.1 1999/09/26 17:51:16 smurph Exp $	*/
+/*	$NetBSD: kcore.h,v 1.1 1997/04/25 01:45:31 thorpej Exp $	*/
 
-#include<m68k/kcore.h>
+#ifndef _MACHINE_KCORE_H_
+#define _MACHINE_KCORE_H_
+
+#include <m68k/kcore.h>
+
+#endif

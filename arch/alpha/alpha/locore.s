@@ -1,5 +1,4 @@
-/* $OpenBSD: locore.s,v 1.32 2008/01/13 20:59:52 kettenis Exp $ */
-/* $NetBSD: locore.s,v 1.94 2001/04/26 03:10:44 ross Exp $ */
+/* $NetBSD: locore.s,v 1.113 2008/04/28 20:23:10 martin Exp $ */
 
 /*-
  * Copyright (c) 1999, 2000 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,54 +57,21 @@
  * rights to redistribute these changes.
  */
 
-.file	1 __FILE__
+.stabs	__FILE__,100,0,0,kernel_text
+
+#include "opt_ddb.h"
+#include "opt_kgdb.h"
+#include "opt_multiprocessor.h"
+#include "opt_lockdebug.h"
+#include "opt_compat_netbsd.h"
 
 #include <machine/asm.h>
 
+__KERNEL_RCSID(0, "$NetBSD: locore.s,v 1.113 2008/04/28 20:23:10 martin Exp $");
+
 #include "assym.h"
 
-#if defined(MULTIPROCESSOR)
-
-/*
- * Get various per-cpu values.  A pointer to our cpu_info structure
- * is stored in SysValue.  These macros clobber v0, t0, t8..t11.
- *
- * All return values are in v0.
- */
-#define	GET_CPUINFO		call_pal PAL_OSF1_rdval
-
-#define	GET_CURPROC							\
-	call_pal PAL_OSF1_rdval					;	\
-	addq	v0, CPU_INFO_CURPROC, v0
-
-#define	GET_FPCURPROC							\
-	call_pal PAL_OSF1_rdval					;	\
-	addq	v0, CPU_INFO_FPCURPROC, v0
-
-#define	GET_CURPCB							\
-	call_pal PAL_OSF1_rdval					;	\
-	addq	v0, CPU_INFO_CURPCB, v0
-
-#define	GET_IDLE_PCB(reg)						\
-	call_pal PAL_OSF1_rdval					;	\
-	ldq	reg, CPU_INFO_IDLE_PCB_PADDR(v0)
-
-#else	/* if not MULTIPROCESSOR... */
-
-IMPORT(cpu_info_store, CPU_INFO_SIZEOF)
-
-#define	GET_CPUINFO		lda v0, cpu_info_store
-
-#define	GET_CURPROC		lda v0, cpu_info_store + CPU_INFO_CURPROC
-
-#define	GET_FPCURPROC		lda v0, cpu_info_store + CPU_INFO_FPCURPROC
-
-#define	GET_CURPCB		lda v0, cpu_info_store + CPU_INFO_CURPCB
-
-#define	GET_IDLE_PCB(reg)						\
-	lda	reg, cpu_info_store				;	\
-	ldq	reg, CPU_INFO_IDLE_PCB_PADDR(reg)
-#endif
+.stabs	__FILE__,132,0,0,kernel_text
 
 /*
  * Perform actions necessary to switch to a new context.  The
@@ -155,7 +114,9 @@ kernel_text:
 bootstack:
 
 /*
- * __start: Kernel start.
+ * locorestart: Kernel start. This is no longer the actual entry
+ * point, although jumping to here (the first kernel address) will
+ * in fact work just fine.
  *
  * Arguments:
  *	a0 is the first free page frame number (PFN)
@@ -165,23 +126,23 @@ bootstack:
  *
  * All arguments are passed to alpha_init().
  */
-NESTED_NOPROFILE(__start,1,0,ra,0,0)
-	br	pv,Lstart1
-Lstart1: LDGP(pv)
+NESTED_NOPROFILE(locorestart,1,0,ra,0,0)
+	br	pv,1f
+1:	LDGP(pv)
 
 	/* Switch to the boot stack. */
 	lda	sp,bootstack
 
 	/* Load KGP with current GP. */
-	or	a0,zero,s0		/* save pfn */
-	or	gp,zero,a0
+	mov	a0, s0			/* save pfn */
+	mov	gp, a0
 	call_pal PAL_OSF1_wrkgp		/* clobbers a0, t0, t8-t11 */
-	or	s0,zero,a0		/* restore pfn */
+	mov	s0, a0			/* restore pfn */
 
 	/*
 	 * Call alpha_init() to do pre-main initialization.
 	 * alpha_init() gets the arguments we were called with,
-	 * which are already in a0, a1, a2, a3 and a4.
+	 * which are already in a0, a1, a2, a3, and a4.
 	 */
 	CALL(alpha_init)
 
@@ -190,10 +151,10 @@ Lstart1: LDGP(pv)
 	call_pal PAL_OSF1_wrvptptr	/* clobbers a0, t0, t8-t11 */
 
 	/*
-	 * Switch to proc0's PCB.
+	 * Switch to lwp0's PCB.
 	 */
-	lda	a0, proc0
-	ldq	a0, P_MD_PCBPADDR(a0)		/* phys addr of PCB */
+	lda	a0, lwp0
+	ldq	a0, L_MD_PCBPADDR(a0)		/* phys addr of PCB */
 	SWITCH_CONTEXT
 
 	/*
@@ -211,7 +172,7 @@ Lstart1: LDGP(pv)
 
 	/* This should never happen. */
 	PANIC("main() returned",Lmain_returned_pmsg)
-	END(__start)
+	END(locorestart)
 
 /**************************************************************************/
 
@@ -235,7 +196,7 @@ Lstart1: LDGP(pv)
 
 #if defined(MULTIPROCESSOR)
 /*
- * Pull in the multiprocessor glue.
+ * Pull in the multiprocssor glue.
  */
 #include <alpha/alpha/multiproc.s>
 #endif /* MULTIPROCESSOR */
@@ -244,48 +205,41 @@ Lstart1: LDGP(pv)
 
 /**************************************************************************/
 
-#if defined(DDB)
+#if defined(DDB) || defined(KGDB)
 /*
  * Pull in debugger glue.
  */
 #include <alpha/alpha/debug.s>
-#endif /* DDB */
+#endif /* DDB || KGDB */
 
 /**************************************************************************/
 
 /**************************************************************************/
 
 	.text
+.stabs	__FILE__,132,0,0,backtolocore1	/* done with includes */
 .loc	1 __LINE__
 backtolocore1:
 /**************************************************************************/
 
+#ifdef COMPAT_16
 /*
- * Signal "trampoline" code. Invoked from RTE setup by sendsig().
+ * Signal "trampoline" code.
  *
- * On entry, stack & registers look like:
+ * The kernel arranges for the handler to be invoked directly.  This
+ * trampoline is used only to return from the signal.
  *
- *      a0	signal number
- *      a1	signal specific code
- *      a2	pointer to signal context frame (scp)
- *      a3	address of handler
- *      sp+0	saved hardware state
- *                      .
- *                      .
- *      scp+0	beginning of signal context frame
+ * The stack pointer points to the saved sigcontext.
  */
 
-NESTED(sigcode,0,0,ra,0,0)
-	lda	sp, -16(sp)		/* save the sigcontext pointer */
-	stq	a2, 0(sp)
-	jsr	ra, (t12)		/* call the signal handler (t12==pv) */
-	ldq	a0, 0(sp)		/* get the sigcontext pointer */
-	lda	sp, 16(sp)
-	CALLSYS_NOERROR(sigreturn)	/* and call sigreturn() with it. */
+NESTED_NOPROFILE(sigcode,0,0,ra,0,0)
+	mov	sp, a0			/* get pointer to sigcontext */
+	CALLSYS_NOERROR(compat_16___sigreturn14)	/* and call sigreturn() with it. */
 	mov	v0, a0			/* if that failed, get error code */
 	CALLSYS_NOERROR(exit)		/* and call exit() with it. */
 XNESTED(esigcode,0)
 	END(sigcode)
+#endif /* COMPAT_16 */
 
 /**************************************************************************/
 
@@ -293,25 +247,11 @@ XNESTED(esigcode,0)
  * exception_return: return from trap, exception, or syscall
  */
 
-BSS(ssir, 8)
+IMPORT(ssir, 8)
 
 LEAF(exception_return, 1)			/* XXX should be NESTED */
 	br	pv, 1f
 1:	LDGP(pv)
-
-#if defined(MULTIPROCESSOR)
-	/* XXX XXX XXX */
-	/*
-	 * Check the current processor ID.  If we're not the primary
-	 * CPU, then just restore registers and bail out.
-	 */
-	call_pal PAL_OSF1_whami
-	lda	t0, hwrpb
-	ldq	t0, 0(t0)
-	ldq	t1, RPB_PRIMARY_CPU_ID(t0)
-	cmpeq	t1, v0, t0
-	beq	t0, 4f				/* == 0: bail out now */
-#endif
 
 	ldq	s1, (FRAME_PS * 8)(sp)		/* get the saved PS */
 	and	s1, ALPHA_PSL_IPL_MASK, t0	/* look at the saved IPL */
@@ -329,17 +269,16 @@ LEAF(exception_return, 1)			/* XXX should be NESTED */
 
 	/* GET_CPUINFO clobbers v0, t0, t8...t11. */
 	GET_CPUINFO
-	ldq	t2, CPU_INFO_ASTPENDING(v0)	/* AST pending? */
-	bne	t2, 6f				/* yes */
+	ldq	t1, CPU_INFO_CURLWP(v0)
+	ldl	t3, L_MD_ASTPENDING(t1)		/* AST pending? */
+	bne	t3, 6f				/* yes */
 	/* no: return & deal with FP */
 
 	/*
 	 * We are going back to usermode.  Enable the FPU based on whether
-	 * the current proc is fpcurproc.  v0 already contains the cpu_info
-	 * pointer from above.
+	 * the current proc is fpcurlwp.
 	 */
-	ldq	t1, CPU_INFO_CURPROC(v0)
-	ldq	t2, CPU_INFO_FPCURPROC(v0)
+	ldq	t2, CPU_INFO_FPCURLWP(v0)
 	cmpeq	t1, t2, t1
 	mov	zero, a0
 	cmovne	t1, 1, a0
@@ -368,7 +307,9 @@ LEAF(exception_return, 1)			/* XXX should be NESTED */
 	br	2b
 
 	/* We've got an AST */
-6:	ldiq	a0, ALPHA_PSL_IPL_0		/* drop IPL to zero */
+6:	stl	zero, L_MD_ASTPENDING(t1)	/* no AST pending */
+
+	ldiq	a0, ALPHA_PSL_IPL_0		/* drop IPL to zero */
 	call_pal PAL_OSF1_swpipl
 	mov	v0, s2				/* remember old IPL */
 
@@ -529,9 +470,13 @@ LEAF(exception_restore_regs, 0)
 	stq	ra,(FRAME_RA*8)(sp)
 
 	/* syscall number, passed in v0, is first arg, frame pointer second */
-	mov	v0,a0
-	mov	sp,a1			; .loc 1 __LINE__
-	CALL(syscall)
+	mov	v0,a1
+	GET_CURLWP
+	ldq	a0,0(v0)
+	mov	sp,a2			; .loc 1 __LINE__
+	ldq	t11,L_PROC(a0)
+	ldq	t12,P_MD_SYSCALL(t11)
+	CALL((t12))
 
 	jmp	zero, exception_return
 	END(XentSys)
@@ -600,7 +545,9 @@ LEAF(savefpstate, 1)
 	stt	$f25, (25 * 8)(t1)
 	stt	$f26, (26 * 8)(t1)
 	stt	$f27, (27 * 8)(t1)
+	.set noat
 	stt	$f28, (28 * 8)(t1)
+	.set at
 	stt	$f29, (29 * 8)(t1)
 	stt	$f30, (30 * 8)(t1)
 
@@ -662,9 +609,7 @@ LEAF(restorefpstate, 1)
 	ldt	$f25, (25 * 8)(t1)
 	ldt	$f26, (26 * 8)(t1)
 	ldt	$f27, (27 * 8)(t1)
-	.set noat
 	ldt	$f28, (28 * 8)(t1)
-	.set at
 	ldt	$f29, (29 * 8)(t1)
 	ldt	$f30, (30 * 8)(t1)
 
@@ -676,9 +621,9 @@ LEAF(restorefpstate, 1)
 /*
  * savectx: save process context, i.e. callee-saved registers
  *
- * Note that savectx() only works for processes other than curproc,
- * since cpu_switch will copy over the info saved here.  (It _can_
- * sanely be used for curproc iff cpu_switch won't be called again, e.g.
+ * Note that savectx() only works for processes other than curlwp,
+ * since cpu_switchto will copy over the info saved here.  (It _can_
+ * sanely be used for curlwp iff cpu_switchto won't be called again, e.g.
  * if called from boot().)
  *
  * Arguments:
@@ -711,145 +656,81 @@ LEAF(savectx, 1)
 
 /**************************************************************************/
 
+
 /*
- * cpu_switchto(struct proc *old, struct proc *new)
- * Switch from "old" proc to "new".
+ * struct lwp *cpu_switchto(struct lwp *current, struct lwp *next)
+ * Switch to the specified next LWP
+ * Arguments:
+ *	a0	'struct lwp *' of the LWP to switch from
+ *	a1	'struct lwp *' of the LWP to switch to
  */
-LEAF(cpu_switchto, 2)
+LEAF(cpu_switchto, 0)
 	LDGP(pv)
 
-	/*
-	 * Don't bother saving the old context if oldproc is NULL.
-	 */
 	beq	a0, 1f
 
 	/*
 	 * do an inline savectx(), to save old context
 	 */
-	call_pal PAL_OSF1_rdps			/* NOTE: doesn't kill a0 */
-	ldq	t0, P_ADDR(a0)
+	ldq	a2, L_ADDR(a0)
 	/* NOTE: ksp is stored by the swpctx */
-	stq	s0, U_PCB_CONTEXT+(0 * 8)(t0)	/* store s0 - s6 */
-	stq	s1, U_PCB_CONTEXT+(1 * 8)(t0)
-	stq	s2, U_PCB_CONTEXT+(2 * 8)(t0)
-	stq	s3, U_PCB_CONTEXT+(3 * 8)(t0)
-	stq	s4, U_PCB_CONTEXT+(4 * 8)(t0)
-	stq	s5, U_PCB_CONTEXT+(5 * 8)(t0)
-	stq	s6, U_PCB_CONTEXT+(6 * 8)(t0)
-	stq	ra, U_PCB_CONTEXT+(7 * 8)(t0)	/* store ra */
-	stq	v0, U_PCB_CONTEXT+(8 * 8)(t0)	/* store ps, for ipl */
+	stq	s0, U_PCB_CONTEXT+(0 * 8)(a2)	/* store s0 - s6 */
+	stq	s1, U_PCB_CONTEXT+(1 * 8)(a2)
+	stq	s2, U_PCB_CONTEXT+(2 * 8)(a2)
+	stq	s3, U_PCB_CONTEXT+(3 * 8)(a2)
+	stq	s4, U_PCB_CONTEXT+(4 * 8)(a2)
+	stq	s5, U_PCB_CONTEXT+(5 * 8)(a2)
+	stq	s6, U_PCB_CONTEXT+(6 * 8)(a2)
+	stq	ra, U_PCB_CONTEXT+(7 * 8)(a2)	/* store ra */
 
 1:
-	mov	a0, s0				/* save old proc */
-	mov	a1, s2				/* save new proc */
-	ldq	s3, P_MD_PCBPADDR(s2)		/* save new pcbpaddr */
+	mov	a0, s4				/* save old curlwp */
+	mov	a1, s2				/* save new lwp */
+	ldq	a0, L_MD_PCBPADDR(s2)		/* save new pcbpaddr */
 
-	/*
-	 * Deactivate the old address space before activating the
-	 * new one.  We need to do this before activating the
-	 * new process's address space in the event that new
-	 * process is using the same vmspace as the old.  If we
-	 * do this after we activate, then we might end up
-	 * incorrectly marking the pmap inactive!
-	 *
-	 * We don't deactivate if we came here from sched_exit
-	 * (old pmap no longer exists; vmspace has been freed).
-	 * oldproc will be NULL in this case.  We have actually
-	 * taken care of calling pmap_deactivate() in cpu_exit(),
-	 * before the vmspace went away.
-	 */
-	beq	s0, 2f
-
-	mov	s0, a0				/* pmap_deactivate(oldproc) */
-	CALL(pmap_deactivate)
-
-2:	/*
-	 * Activate the new process's address space and perform
-	 * the actual context swap.
-	 */
-
-	mov	s2, a0				/* pmap_activate(p) */
-	CALL(pmap_activate)
-
-	mov	s3, a0				/* swap the context */
-	SWITCH_CONTEXT
-
-	/*
-	 * Now that the switch is done, update curproc and other
-	 * globals.  We must do this even if switching to ourselves
-	 * because we might have re-entered cpu_switch() from idle(),
-	 * in which case curproc would be NULL.
-	 *
-	 * Note: GET_CPUINFO clobbers v0, t0, t8...t11.
-	 */
-EXPORT(__bwx_switch0)
-	addq	s2, P_STAT, t3			/* p->p_stat = SONPROC */
-	ldq_u	t1, 0(t3)
-	ldiq	t0, SONPROC
-	insbl	t0, t3, t0
-	mskbl	t1, t3, t1
-	or	t0, t1, t0
-	stq_u	t0, 0(t3)
-EXPORT(__bwx_switch1)
+	SWITCH_CONTEXT				/* swap the context */
 
 	GET_CPUINFO
-	/* p->p_cpu initialized in fork1() for single-processor */
-#if defined(MULTIPROCESSOR)
-	stq	v0, P_CPU(s2)			/* p->p_cpu = curcpu() */
-#endif
-	stq	s2, CPU_INFO_CURPROC(v0)	/* curproc = p */
-	stq	zero, CPU_INFO_WANT_RESCHED(v0)	/* we've rescheduled */
+	stq	s2, CPU_INFO_CURLWP(v0)		/* curlwp = l */
 
 	/*
 	 * Now running on the new u struct.
-	 * Restore registers and return.
 	 */
-	ldq	t0, P_ADDR(s2)
+	ldq	s0, L_ADDR(s2)
 
-	/* NOTE: ksp is restored by the swpctx */
-	ldq	s0, U_PCB_CONTEXT+(0 * 8)(t0)		/* restore s0 - s6 */
-	ldq	s1, U_PCB_CONTEXT+(1 * 8)(t0)
-	ldq	s2, U_PCB_CONTEXT+(2 * 8)(t0)
-	ldq	s3, U_PCB_CONTEXT+(3 * 8)(t0)
-	ldq	s4, U_PCB_CONTEXT+(4 * 8)(t0)
-	ldq	s5, U_PCB_CONTEXT+(5 * 8)(t0)
-	ldq	s6, U_PCB_CONTEXT+(6 * 8)(t0)
-	ldq	ra, U_PCB_CONTEXT+(7 * 8)(t0)		/* restore ra */
-	ldq	a0, U_PCB_CONTEXT+(8 * 8)(t0)		/* restore ipl */
-	and	a0, ALPHA_PSL_IPL_MASK, a0
-	call_pal PAL_OSF1_swpipl
+	/*
+	 * Check for restartable atomic sequences (RAS).
+	 */
+	ldq	a0, L_PROC(s2)			/* first ras_lookup() arg */
+	ldq	t0, P_RASLIST(a0)		/* any RAS entries? */
+	beq	t0, 1f				/* no, skip */
+	ldq	s1, L_MD_TF(s2)			/* s1 = l->l_md.md_tf */
+	ldq	a1, (FRAME_PC*8)(s1)		/* second ras_lookup() arg */
+	CALL(ras_lookup)			/* ras_lookup(p, PC) */
+	addq	v0, 1, t0			/* -1 means "not in ras" */
+	beq	t0, 1f
+	stq	v0, (FRAME_PC*8)(s1)
 
-	ldiq	v0, 1				/* possible ret to savectx() */
+1:
+	mov	s4, v0				/* return the old lwp */
+	/*
+	 * Restore registers and return.
+	 * NOTE: ksp is restored by the swpctx.
+	 */
+	ldq	s1, U_PCB_CONTEXT+(1 * 8)(s0)		/* restore s1-s6 */
+	ldq	s2, U_PCB_CONTEXT+(2 * 8)(s0)
+	ldq	s3, U_PCB_CONTEXT+(3 * 8)(s0)
+	ldq	s4, U_PCB_CONTEXT+(4 * 8)(s0)
+	ldq	s5, U_PCB_CONTEXT+(5 * 8)(s0)
+	ldq	s6, U_PCB_CONTEXT+(6 * 8)(s0)
+	ldq	ra, U_PCB_CONTEXT+(7 * 8)(s0)		/* restore ra */
+	ldq	s0, U_PCB_CONTEXT+(0 * 8)(s0)		/* restore s0 */
+
 	RET
 	END(cpu_switchto)
 
-#ifndef SMALL_KERNEL
-	/*
-	 * BWX-enhanced version of the p->p_stat assignment, to be copied
-	 * over the __bwx_switch0 area.
-
-	 * Do not put anything between the end of cpu_switch and this!
-	 */
-EXPORT(__bwx_switch2)
-	ldiq	t0, SONPROC			/* p->p_stat = SONPROC */
-	stb	t0, P_STAT(s2)
-EXPORT(__bwx_switch3)
-#endif
-
-LEAF(cpu_idle_enter, 0)
-	RET
-	END(cpu_idle_enter)
-
-LEAF(cpu_idle_cycle, 0)
-	RET
-	END(cpu_idle_cycle)
-
-LEAF(cpu_idle_leave, 0)
-	RET
-	END(cpu_idle_leave)
-
 /*
- * switch_trampoline()
+ * lwp_trampoline()
  *
  * Arrange for a function to be invoked neatly, after a cpu_fork().
  *
@@ -857,15 +738,15 @@ LEAF(cpu_idle_leave, 0)
  * address specified by the s1 register and with one argument specified
  * by the s2 register.
  */
-LEAF(switch_trampoline, 0)
-#if defined(MULTIPROCESSOR)
-	CALL(proc_trampoline_mp)
-#endif
+LEAF_NOPROFILE(lwp_trampoline, 0)
+	mov	v0, a0
+	mov	s3, a1
+	CALL(lwp_startup)
 	mov	s0, pv
 	mov	s1, ra
 	mov	s2, a0
 	jmp	zero, (pv)
-	END(switch_trampoline)
+	END(lwp_trampoline)
 
 /**************************************************************************/
 
@@ -916,20 +797,20 @@ NESTED(copyinstr, 4, 16, ra, IM_RA|IM_S0, 0)
 	stq	s0, (16-16)(sp)			/* save s0		     */
 	ldiq	t0, VM_MAX_ADDRESS		/* make sure that src addr   */
 	cmpult	a0, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
-	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
-	GET_CURPROC
+	beq	t1, copyerr_efault		/* if it's not, error out.   */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
 	mov	v0, s0
 	lda	v0, copyerr			/* set up fault handler.     */
 	.set noat
 	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(at_reg)
 	stq	v0, U_PCB_ONFAULT(at_reg)
 	.set at
 	CALL(copystr)				/* do the copy.		     */
 	.set noat
 	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(at_reg)
 	stq	zero, U_PCB_ONFAULT(at_reg)
 	.set at
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
@@ -945,20 +826,20 @@ NESTED(copyoutstr, 4, 16, ra, IM_RA|IM_S0, 0)
 	stq	s0, (16-16)(sp)			/* save s0		     */
 	ldiq	t0, VM_MAX_ADDRESS		/* make sure that dest addr  */
 	cmpult	a1, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
-	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
-	GET_CURPROC
+	beq	t1, copyerr_efault		/* if it's not, error out.   */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
 	mov	v0, s0
 	lda	v0, copyerr			/* set up fault handler.     */
 	.set noat
 	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(at_reg)
 	stq	v0, U_PCB_ONFAULT(at_reg)
 	.set at
 	CALL(copystr)				/* do the copy.		     */
 	.set noat
 	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(at_reg)
 	stq	zero, U_PCB_ONFAULT(at_reg)
 	.set at
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
@@ -966,243 +847,6 @@ NESTED(copyoutstr, 4, 16, ra, IM_RA|IM_S0, 0)
 	lda	sp, 16(sp)			/* kill stack frame.	     */
 	RET					/* v0 left over from copystr */
 	END(copyoutstr)
-
-/*
- * Copy a bytes within the kernel's address space.
- *
- * Although bcopy() is not specified to handle overlapping regions,
- * this version does do so.
- *
- * void bcopy(char *from, char *to, size_t len);
- */
-LEAF(memcpy,3)
-	cmoveq  zero,a0,t5
-	cmoveq  zero,a1,a0
-	cmoveq  zero,t5,a1
-
-XLEAF(bcopy,3)
-XLEAF(ovbcopy,3)
-
-	/* Check for negative length */
-	ble	a2,bcopy_done
-
-	/* Check for overlap */
-	subq	a1,a0,t5
-	cmpult	t5,a2,t5
-	bne	t5,bcopy_overlap
-
-	/* a3 = end address */
-	addq	a0,a2,a3
-
-	/* Get the first word */
-	ldq_u	t2,0(a0)
-
-	/* Do they have the same alignment? */
-	xor	a0,a1,t0
-	and	t0,7,t0
-	and	a1,7,t1
-	bne	t0,bcopy_different_alignment
-
-	/* src & dst have same alignment */
-	beq	t1,bcopy_all_aligned
-
-	ldq_u	t3,0(a1)
-	addq	a2,t1,a2
-	mskqh	t2,a0,t2
-	mskql	t3,a0,t3
-	or	t2,t3,t2
-
-	/* Dst is 8-byte aligned */
-
-bcopy_all_aligned:
-	/* If less than 8 bytes,skip loop */
-	subq	a2,1,t0
-	and	a2,7,a2
-	bic	t0,7,t0
-	beq	t0,bcopy_samealign_lp_end
-
-bcopy_samealign_lp:
-	stq_u	t2,0(a1)
-	addq	a1,8,a1
-	ldq_u	t2,8(a0)
-	subq	t0,8,t0
-	addq	a0,8,a0
-	bne	t0,bcopy_samealign_lp
-
-bcopy_samealign_lp_end:
-	/* If we're done, exit */
-	bne	a2,bcopy_small_left
-	stq_u	t2,0(a1)
-	RET
-
-bcopy_small_left:
-	mskql	t2,a2,t4
-	ldq_u	t3,0(a1)
-	mskqh	t3,a2,t3
-	or	t4,t3,t4
-	stq_u	t4,0(a1)
-	RET
-
-bcopy_different_alignment:
-	/*
-	 * this is the fun part
-	 */
-	addq	a0,a2,a3
-	cmpule	a2,8,t0
-	bne	t0,bcopy_da_finish
-
-	beq	t1,bcopy_da_noentry
-
-	/* Do the initial partial word */
-	subq	zero,a1,t0
-	and	t0,7,t0
-	ldq_u	t3,7(a0)
-	extql	t2,a0,t2
-	extqh	t3,a0,t3
-	or	t2,t3,t5
-	insql	t5,a1,t5
-	ldq_u	t6,0(a1)
-	mskql	t6,a1,t6
-	or	t5,t6,t5
-	stq_u	t5,0(a1)
-	addq	a0,t0,a0
-	addq	a1,t0,a1
-	subq	a2,t0,a2
-	ldq_u	t2,0(a0)
-
-bcopy_da_noentry:
-	subq	a2,1,t0
-	bic	t0,7,t0
-	and	a2,7,a2
-	beq	t0,bcopy_da_finish2
-
-bcopy_da_lp:
-	ldq_u	t3,7(a0)
-	addq	a0,8,a0
-	extql	t2,a0,t4
-	extqh	t3,a0,t5
-	subq	t0,8,t0
-	or	t4,t5,t5
-	stq	t5,0(a1)
-	addq	a1,8,a1
-	beq	t0,bcopy_da_finish1
-	ldq_u	t2,7(a0)
-	addq	a0,8,a0
-	extql	t3,a0,t4
-	extqh	t2,a0,t5
-	subq	t0,8,t0
-	or	t4,t5,t5
-	stq	t5,0(a1)
-	addq	a1,8,a1
-	bne	t0,bcopy_da_lp
-
-bcopy_da_finish2:
-	/* Do the last new word */
-	mov	t2,t3
-
-bcopy_da_finish1:
-	/* Do the last partial word */
-	ldq_u	t2,-1(a3)
-	extql	t3,a0,t3
-	extqh	t2,a0,t2
-	or	t2,t3,t2
-	br	zero,bcopy_samealign_lp_end
-
-bcopy_da_finish:
-	/* Do the last word in the next source word */
-	ldq_u	t3,-1(a3)
-	extql	t2,a0,t2
-	extqh	t3,a0,t3
-	or	t2,t3,t2
-	insqh	t2,a1,t3
-	insql	t2,a1,t2
-	lda	t4,-1(zero)
-	mskql	t4,a2,t5
-	cmovne	t5,t5,t4
-	insqh	t4,a1,t5
-	insql	t4,a1,t4
-	addq	a1,a2,a4
-	ldq_u	t6,0(a1)
-	ldq_u	t7,-1(a4)
-	bic	t6,t4,t6
-	bic	t7,t5,t7
-	and	t2,t4,t2
-	and	t3,t5,t3
-	or	t2,t6,t2
-	or	t3,t7,t3
-	stq_u	t3,-1(a4)
-	stq_u	t2,0(a1)
-	RET
-
-bcopy_overlap:
-	/*
-	 * Basically equivalent to previous case, only backwards.
-	 * Not quite as highly optimized
-	 */
-	addq	a0,a2,a3
-	addq	a1,a2,a4
-
-	/* less than 8 bytes - don't worry about overlap */
-	cmpule	a2,8,t0
-	bne	t0,bcopy_ov_short
-
-	/* Possibly do a partial first word */
-	and	a4,7,t4
-	beq	t4,bcopy_ov_nostart2
-	subq	a3,t4,a3
-	subq	a4,t4,a4
-	ldq_u	t1,0(a3)
-	subq	a2,t4,a2
-	ldq_u	t2,7(a3)
-	ldq	t3,0(a4)
-	extql	t1,a3,t1
-	extqh	t2,a3,t2
-	or	t1,t2,t1
-	mskqh	t3,t4,t3
-	mskql	t1,t4,t1
-	or	t1,t3,t1
-	stq	t1,0(a4)
-
-bcopy_ov_nostart2:
-	bic	a2,7,t4
-	and	a2,7,a2
-	beq	t4,bcopy_ov_lp_end
-
-bcopy_ov_lp:
-	/* This could be more pipelined, but it doesn't seem worth it */
-	ldq_u	t0,-8(a3)
-	subq	a4,8,a4
-	ldq_u	t1,-1(a3)
-	subq	a3,8,a3
-	extql	t0,a3,t0
-	extqh	t1,a3,t1
-	subq	t4,8,t4
-	or	t0,t1,t0
-	stq	t0,0(a4)
-	bne	t4,bcopy_ov_lp
-
-bcopy_ov_lp_end:
-	beq	a2,bcopy_done
-
-	ldq_u	t0,0(a0)
-	ldq_u	t1,7(a0)
-	ldq_u	t2,0(a1)
-	extql	t0,a0,t0
-	extqh	t1,a0,t1
-	or	t0,t1,t0
-	insql	t0,a1,t0
-	mskql	t2,a1,t2
-	or	t2,t0,t2
-	stq_u	t2,0(a1)
-
-bcopy_done:
-	RET
-
-bcopy_ov_short:
-	ldq_u	t2,0(a0)
-	br	zero,bcopy_da_finish
-
-	END(memcpy)
 
 /*
  * kcopy(const void *src, void *dst, size_t len);
@@ -1220,20 +864,22 @@ NESTED(kcopy, 3, 32, ra, IM_RA|IM_S0|IM_S1, 0)
 	stq	ra, (32-8)(sp)			/* save ra		     */
 	stq	s0, (32-16)(sp)			/* save s0		     */
 	stq	s1, (32-24)(sp)			/* save s1		     */
-	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
-	GET_CURPROC
-	mov	v0, s1
+	/* Swap a0, a1, for call to memcpy(). */
+	mov	a1, v0
+	mov	a0, a1
+	mov	v0, a0
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	s1, 0(v0)			/* s1 = curlwp		     */
 	lda	v0, kcopyerr			/* set up fault handler.     */
 	.set noat
-	ldq	at_reg, 0(s1)
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s1)
 	ldq	s0, U_PCB_ONFAULT(at_reg)	/* save old handler.	     */
 	stq	v0, U_PCB_ONFAULT(at_reg)
 	.set at
-	CALL(bcopy)				/* do the copy.		     */
+	CALL(memcpy)				/* do the copy.		     */
 	.set noat
-	ldq	at_reg, 0(s1)			/* restore the old handler.  */
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s1)		/* restore the old handler.  */
 	stq	s0, U_PCB_ONFAULT(at_reg)
 	.set at
 	ldq	ra, (32-8)(sp)			/* restore ra.		     */
@@ -1247,15 +893,13 @@ NESTED(kcopy, 3, 32, ra, IM_RA|IM_S0|IM_S1, 0)
 LEAF(kcopyerr, 0)
 	LDGP(pv)
 	.set noat
-	ldq	at_reg, 0(s1)			/* restore the old handler.  */
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s1)		/* restore the old handler.  */
 	stq	s0, U_PCB_ONFAULT(at_reg)
 	.set at
 	ldq	ra, (32-8)(sp)			/* restore ra.		     */
 	ldq	s0, (32-16)(sp)			/* restore s0.		     */
 	ldq	s1, (32-24)(sp)			/* restore s1.		     */
 	lda	sp, 32(sp)			/* kill stack frame.	     */
-	ldiq	v0, EFAULT			/* return EFAULT.	     */
 	RET
 END(kcopyerr)
 
@@ -1266,20 +910,22 @@ NESTED(copyin, 3, 16, ra, IM_RA|IM_S0, 0)
 	stq	s0, (16-16)(sp)			/* save s0		     */
 	ldiq	t0, VM_MAX_ADDRESS		/* make sure that src addr   */
 	cmpult	a0, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
-	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
-	GET_CURPROC
-	mov	v0, s0
+	beq	t1, copyerr_efault		/* if it's not, error out.   */
+	/* Swap a0, a1, for call to memcpy(). */
+	mov	a1, v0
+	mov	a0, a1
+	mov	v0, a0
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	s0, 0(v0)			/* s0 = curlwp		     */
 	lda	v0, copyerr			/* set up fault handler.     */
 	.set noat
-	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s0)
 	stq	v0, U_PCB_ONFAULT(at_reg)
 	.set at
-	CALL(bcopy)				/* do the copy.		     */
+	CALL(memcpy)				/* do the copy.		     */
 	.set noat
-	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s0)		/* kill the fault handler.   */
 	stq	zero, U_PCB_ONFAULT(at_reg)
 	.set at
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
@@ -1296,20 +942,22 @@ NESTED(copyout, 3, 16, ra, IM_RA|IM_S0, 0)
 	stq	s0, (16-16)(sp)			/* save s0		     */
 	ldiq	t0, VM_MAX_ADDRESS		/* make sure that dest addr  */
 	cmpult	a1, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
-	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
-	GET_CURPROC
-	mov	v0, s0
+	beq	t1, copyerr_efault		/* if it's not, error out.   */
+	/* Swap a0, a1, for call to memcpy(). */
+	mov	a1, v0
+	mov	a0, a1
+	mov	v0, a0
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	s0, 0(v0)			/* s0 = curlwp		     */
 	lda	v0, copyerr			/* set up fault handler.     */
 	.set noat
-	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s0)
 	stq	v0, U_PCB_ONFAULT(at_reg)
 	.set at
-	CALL(bcopy)				/* do the copy.		     */
+	CALL(memcpy)				/* do the copy.		     */
 	.set noat
-	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
+	ldq	at_reg, L_ADDR(s0)		/* kill the fault handler.   */
 	stq	zero, U_PCB_ONFAULT(at_reg)
 	.set at
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
@@ -1319,14 +967,306 @@ NESTED(copyout, 3, 16, ra, IM_RA|IM_S0, 0)
 	RET
 	END(copyout)
 
-LEAF(copyerr, 0)
+LEAF(copyerr_efault, 0)
+	ldiq	v0, EFAULT			/* return EFAULT.	     */
+XLEAF(copyerr, 0)
 	LDGP(pv)
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
 	ldq	s0, (16-16)(sp)			/* restore s0.		     */
 	lda	sp, 16(sp)			/* kill stack frame.	     */
-	ldiq	v0, EFAULT			/* return EFAULT.	     */
 	RET
 END(copyerr)
+
+/**************************************************************************/
+
+/*
+ * {fu,su},{ibyte,isword,iword}, fetch or store a byte, short or word to
+ * user text space.
+ * {fu,su},{byte,sword,word}, fetch or store a byte, short or word to
+ * user data space.
+ */
+LEAF(fuword, 1)
+XLEAF(fuiword, 1)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	ldq	v0, 0(a0)
+	zap	v0, 0xf0, v0
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	RET
+	END(fuword)
+
+LEAF(fusword, 1)
+XLEAF(fuisword, 1)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	/* XXX FETCH IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	RET
+	END(fusword)
+
+LEAF(fubyte, 1)
+XLEAF(fuibyte, 1)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	/* XXX FETCH IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	RET
+	END(fubyte)
+
+LEAF(suword, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	stq	a1, 0(a0)			/* do the store. */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	mov	zero, v0
+	RET
+	END(suword)
+
+#ifdef notdef
+LEAF(suiword, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	/* XXX STORE IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	call_pal PAL_OSF1_imb			/* sync instruction stream */
+	mov	zero, v0
+	RET
+	END(suiword)
+
+LEAF(susword, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	/* XXX STORE IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	mov	zero, v0
+	RET
+	END(susword)
+
+LEAF(suisword, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	/* XXX STORE IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	call_pal PAL_OSF1_imb			/* sync instruction stream */
+	mov	zero, v0
+	RET
+	END(suisword)
+#endif /* notdef */
+
+LEAF(subyte, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	zap	a1, 0xfe, a1			/* kill arg's high bytes */
+	insbl	a1, a0, a1			/* move it to the right byte */
+	ldq_u	t0, 0(a0)			/* load quad around byte */
+	mskbl	t0, a0, t0			/* kill the target byte */
+	or	t0, a1, a1			/* put the result together */
+	stq_u	a1, 0(a0)			/* and store it. */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	mov	zero, v0
+	RET
+	END(subyte)
+
+LEAF(suibyte, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	.set at
+	zap	a1, 0xfe, a1			/* kill arg's high bytes */
+	insbl	a1, a0, a1			/* move it to the right byte */
+	ldq_u	t0, 0(a0)			/* load quad around byte */
+	mskbl	t0, a0, t0			/* kill the target byte */
+	or	t0, a1, a1			/* put the result together */
+	stq_u	a1, 0(a0)			/* and store it. */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	call_pal PAL_OSF1_imb			/* sync instruction stream */
+	mov	zero, v0
+	RET
+	END(suibyte)
+
+LEAF(fswberr, 0)
+	LDGP(pv)
+	ldiq	v0, -1
+	RET
+	END(fswberr)
+
+/**************************************************************************/
+
+#ifdef notdef
+/*
+ * fuswintr and suswintr are just like fusword and susword except that if
+ * the page is not in memory or would cause a trap, then we return an error.
+ * The important thing is to prevent sleep() and switch().
+ */
+
+LEAF(fuswintr, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswintrberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswintrberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	stq	a0, U_PCB_ACCESSADDR(at_reg)
+	.set at
+	/* XXX FETCH IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	RET
+	END(fuswintr)
+
+LEAF(suswintr, 2)
+	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that addr */
+	cmpult	a0, t0, t1			/* is in user space. */
+	beq	t1, fswintrberr			/* if it's not, error out. */
+	/* Note: GET_CURLWP clobbers v0, t0, t8...t11. */
+	GET_CURLWP
+	ldq	t1, 0(v0)
+	lda	t0, fswintrberr
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	t0, U_PCB_ONFAULT(at_reg)
+	stq	a0, U_PCB_ACCESSADDR(at_reg)
+	.set at
+	/* XXX STORE IT */
+	.set noat
+	ldq	at_reg, L_ADDR(t1)
+	stq	zero, U_PCB_ONFAULT(at_reg)
+	.set at
+	mov	zero, v0
+	RET
+	END(suswintr)
+#endif
+
+LEAF(fswintrberr, 0)
+XLEAF(fuswintr, 2)				/* XXX what is a 'word'? */
+XLEAF(suswintr, 2)				/* XXX what is a 'word'? */
+	LDGP(pv)
+	ldiq	v0, -1
+	RET
+	END(fswberr)
 
 /**************************************************************************/
 
@@ -1449,8 +1389,7 @@ END(longjmp)
  * void ldt(int rn, u_int64_t *rval);
  */
 
-#ifndef NO_IEEE
-.macro make_freg_util name, op
+.macro	make_freg_util name, op
 	LEAF(alpha_\name, 2)
 	and	a0, 0x1f, a0
 	s8addq	a0, pv, pv
@@ -1458,8 +1397,8 @@ END(longjmp)
 	jmp	(pv)
 1:
 	rn = 0
-	.rept   32
-	\op     $f0 + rn, 0(a1)
+	.rept	32
+	\op	$f0 + rn, 0(a1)
 	RET
 	rn = rn + 1
 	.endr
@@ -1497,21 +1436,3 @@ LEAF(alpha_write_fpcr, 1); f30save = 0; fpcrtmp = 8; framesz = 16
 	lda	sp, framesz(sp)
 	RET
 END(alpha_write_fpcr)
-#endif
-
-#if 0
-NESTED(transfer_check,0,0,ra,0,0)
-	CALL(U_need_2_run_config)
-	END(transfer_check)
-#endif
-
-/* Random data that shouldn't be necessary. */
-	.data
-EXPORT(cold)
-	.long 1			/* cold start flag (.long -> _4_ bytes) */
-	.align 3
-EXPORT(esym)
-	.quad 1			/* store end of kernel symbol table here */
-
-
-/**************************************************************************/

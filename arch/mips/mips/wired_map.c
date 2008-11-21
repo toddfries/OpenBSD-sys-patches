@@ -1,4 +1,4 @@
-/*	$NetBSD: wired_map.c,v 1.2 2005/11/27 16:49:56 tsutsui Exp $	*/
+/*	$NetBSD: wired_map.c,v 1.4 2007/02/28 04:21:54 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2005 Tadpole Computer Inc.
@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wired_map.c,v 1.2 2005/11/27 16:49:56 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wired_map.c,v 1.4 2007/02/28 04:21:54 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,7 +83,7 @@ int mips3_nwired_page;
  * Lower layer API, to supply an explicit page size.  It only wires a
  * single page at a time.
  */
-boolean_t
+bool
 mips3_wired_enter_page(vaddr_t va, paddr_t pa, vsize_t pgsize)
 {
 	struct tlb tlb;
@@ -118,7 +118,7 @@ mips3_wired_enter_page(vaddr_t va, paddr_t pa, vsize_t pgsize)
 #ifdef DIAGNOSTIC
 			printf("mips3_wired_map: entries exhausted\n");
 #endif
-			return FALSE;
+			return false;
 		}
 
 		index = mips3_nwired_page;
@@ -158,7 +158,7 @@ mips3_wired_enter_page(vaddr_t va, paddr_t pa, vsize_t pgsize)
 		    MIPS3_PG_IOPAGE(
 			    PMAP_CCA_FOR_PA(mips3_wired_map[index].pa1));
 	MachTLBWriteIndexedVPS(MIPS3_TLB_WIRED_UPAGES + index, &tlb);
-	return TRUE;
+	return true;
 }
 
 
@@ -170,7 +170,7 @@ mips3_wired_enter_page(vaddr_t va, paddr_t pa, vsize_t pgsize)
  * Typically the caller will just pass a physaddr that is the same as
  * the vaddr with bits 35-32 set nonzero.
  */
-boolean_t
+bool
 mips3_wired_enter_region(vaddr_t va, paddr_t pa, vsize_t size)
 {
 	vaddr_t	vend;
@@ -193,9 +193,9 @@ mips3_wired_enter_region(vaddr_t va, paddr_t pa, vsize_t size)
 
 	while (va < vend) {
 		if (!mips3_wired_enter_page(va, pa, MIPS3_WIRED_SIZE))
-			return FALSE;
+			return false;
 		va += MIPS3_WIRED_SIZE;
 		pa += MIPS3_WIRED_SIZE;
 	}
-	return TRUE;
+	return true;
 }

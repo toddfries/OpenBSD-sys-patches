@@ -1,4 +1,4 @@
-/*	$NetBSD: ewsms.c,v 1.2 2006/11/12 19:00:43 plunky Exp $	*/
+/*	$NetBSD: ewsms.c,v 1.7 2008/05/25 23:37:05 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2004 Steve Rumble
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ewsms.c,v 1.2 2006/11/12 19:00:43 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ewsms.c,v 1.7 2008/05/25 23:37:05 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -69,7 +69,7 @@ __KERNEL_RCSID(0, "$NetBSD: ewsms.c,v 1.2 2006/11/12 19:00:43 plunky Exp $");
 	(EWSMS_SYNC_BTN_R|EWSMS_SYNC_BTN_M|EWSMS_SYNC_BTN_L)
 
 struct ewsms_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 
 	/* tail-chasing fifo */
 	uint8_t sc_rxq[EWSMS_RXQ_LEN];
@@ -103,8 +103,8 @@ struct ewsms_softc {
 	struct device *sc_wsmousedev;
 };
 
-static int  ewsms_zsc_match(struct device *, struct cfdata *, void *);
-static void ewsms_zsc_attach(struct device *, struct device *, void *);
+static int  ewsms_zsc_match(device_t, cfdata_t, void *);
+static void ewsms_zsc_attach(device_t, device_t, void *);
 static int  ewsms_zsc_reset(struct zs_chanstate *);
 static void ewsms_zsc_rxint(struct zs_chanstate *);
 static void ewsms_zsc_txint(struct zs_chanstate *);
@@ -114,9 +114,9 @@ static void ewsms_zsc_softint(struct zs_chanstate *);
 static void ewsms_wsmouse_input(struct ewsms_softc *);
 static int  ewsms_wsmouse_enable(void *);
 static void ewsms_wsmouse_disable(void *);
-static int  ewsms_wsmouse_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+static int  ewsms_wsmouse_ioctl(void *, u_long, void *, int, struct lwp *);
 
-CFATTACH_DECL(ewsms_zsc, sizeof(struct ewsms_softc),
+CFATTACH_DECL_NEW(ewsms_zsc, sizeof(struct ewsms_softc),
     ewsms_zsc_match, ewsms_zsc_attach, NULL, NULL);
 
 static struct zsops ewsms_zsops = {
@@ -133,9 +133,9 @@ static const struct wsmouse_accessops ewsms_wsmouse_accessops = {
 };
 
 int
-ewsms_zsc_match(struct device *parent, struct cfdata *cf, void *aux)
+ewsms_zsc_match(device_t parent, cfdata_t cf, void *aux)
 {
-	struct zsc_softc *zsc = (void *)parent;
+	struct zsc_softc *zsc = device_private(parent);
 	struct zsc_attach_args *zsc_args = aux;
 
 	/* mouse on channel A */
@@ -148,10 +148,10 @@ ewsms_zsc_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 void
-ewsms_zsc_attach(struct device *parent, struct device *self, void *aux)
+ewsms_zsc_attach(device_t parent, device_t self, void *aux)
 {
-	struct zsc_softc *zsc = (void *)parent;
-	struct ewsms_softc *sc = (void *)self;
+	struct ewsms_softc *sc = device_private(self);
+	struct zsc_softc *zsc = device_private(parent);
 	struct zsc_attach_args *zsc_args = aux;
 	struct zs_chanstate *cs;
 	struct wsmousedev_attach_args wsmaa;
@@ -163,6 +163,7 @@ ewsms_zsc_attach(struct device *parent, struct device *self, void *aux)
 	cs->cs_ops = &ewsms_zsops;
 	cs->cs_private = sc;
 
+	sc->sc_dev = self;
 	sc->sc_enabled = 0;
 	sc->sc_rxq_head = 0;
 	sc->sc_rxq_tail = 0;
@@ -177,7 +178,7 @@ ewsms_zsc_attach(struct device *parent, struct device *self, void *aux)
 
 	ewsms_zsc_reset(cs);
 
-	printf(": baud rate %d\n", EWSMS_BAUD);
+	aprint_normal(": baud rate %d\n", EWSMS_BAUD);
 
 	/* attach wsmouse */
 	wsmaa.accessops = &ewsms_wsmouse_accessops;
@@ -191,7 +192,7 @@ ewsms_zsc_reset(struct zs_chanstate *cs)
 	struct ewsms_softc *sc = cs->cs_private;
 	u_int baud;
 	int i, s;
-	const static uint8_t cmd[] =
+	static const uint8_t cmd[] =
 	    { 0x02, 0x52, 0x53, 0x3b, 0x4d, 0x54, 0x2c, 0x36, 0x0d };
 
 	s = splzs();
@@ -217,7 +218,7 @@ void
 ewsms_zsc_rxint(struct zs_chanstate *cs)
 {
 	struct ewsms_softc *sc = cs->cs_private;
-	u_char c, r;
+	uint8_t c, r;
 
 	/* clear errors */
 	r = zs_read_reg(cs, 1);
@@ -237,6 +238,7 @@ ewsms_zsc_rxint(struct zs_chanstate *cs)
 void
 ewsms_zsc_txint(struct zs_chanstate *cs)
 {
+
 	zs_write_reg(cs, 0, ZSWR0_RESET_TXINT);
 
 	/* seems like the in thing to do */
@@ -317,7 +319,7 @@ static void
 ewsms_wsmouse_input(struct ewsms_softc *sc)
 {
 	u_int btns;
-	boolean_t bl, bm, br;
+	bool bl, bm, br;
 	int dx, dy;
 
 	btns = (uint8_t)sc->sc_packet[EWSMS_PACKET_SYNC] & EWSMS_SYNC_BTN_MASK;
@@ -370,7 +372,7 @@ ewsms_wsmouse_disable(void *cookie)
 }
 
 static int
-ewsms_wsmouse_ioctl(void *cookie, u_long cmd, caddr_t data, int flag,
+ewsms_wsmouse_ioctl(void *cookie, u_long cmd, void *data, int flag,
     struct lwp *l)
 {
 

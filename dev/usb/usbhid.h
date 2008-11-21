@@ -1,5 +1,4 @@
-/*	$OpenBSD: usbhid.h,v 1.11 2008/05/08 13:57:43 miod Exp $ */
-/*	$NetBSD: usbhid.h,v 1.11 2001/12/28 00:20:24 augustss Exp $	*/
+/*	$NetBSD: usbhid.h,v 1.13 2008/04/28 20:24:01 martin Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbhid.h,v 1.7 1999/11/17 22:33:51 n_hibma Exp $ */
 
 /*
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +57,7 @@ typedef struct usb_hid_descriptor {
 		uByte		bDescriptorType;
 		uWord		wDescriptorLength;
 	} descrs[1];
-} __packed usb_hid_descriptor_t;
+} UPACKED usb_hid_descriptor_t;
 #define USB_HID_DESCRIPTOR_SIZE(n) (9+(n)*3)
 
 /* Usage pages */
@@ -124,7 +116,6 @@ typedef struct usb_hid_descriptor {
 #define HUG_VBRY		0x0044
 #define HUG_VBRZ		0x0045
 #define HUG_VNO			0x0046
-#define HUG_TWHEEL		0x0048
 #define HUG_SYSTEM_CONTROL	0x0080
 #define HUG_SYSTEM_POWER_DOWN	0x0081
 #define HUG_SYSTEM_SLEEP	0x0082
@@ -198,9 +189,5 @@ typedef struct usb_hid_descriptor {
 #define HIO_NULLSTATE	0x040
 #define HIO_VOLATILE	0x080
 #define HIO_BUFBYTES	0x100
-
-/* Valid values for the country codes */
-#define	HCC_UNDEFINED	0x00
-#define	HCC_MAX		0x23
 
 #endif /* _USBHID_H_ */

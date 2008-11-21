@@ -1,13 +1,12 @@
-/*	$OpenBSD: kthread.h,v 1.3 2002/03/14 03:16:12 millert Exp $	*/
-/*	$NetBSD: kthread.h,v 1.2 1998/11/14 00:08:49 thorpej Exp $	*/
+/*	$NetBSD: kthread.h,v 1.7 2008/04/28 20:24:10 martin Exp $	*/
 
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
  * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
- * NASA Ames Research Center.
+ * NASA Ames Research Center, and by Andrew Doran.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,14 +38,18 @@
  */
 
 #ifdef _KERNEL
-#include <sys/proc.h>	/* struct proc, tsleep(), wakeup() */
+#include <sys/proc.h>
 
-int	kthread_create(void (*)(void *), void *, struct proc **,
-	    const char *, ...)
-	    __attribute__((__format__(__printf__,4,5)));
-void	kthread_create_deferred(void (*)(void *), void *);
-void	kthread_run_deferred_queue(void);
-void	kthread_exit(int) __attribute__((__noreturn__));
+#define	KTHREAD_IDLE	0x01	/* do not set runnable */
+#define	KTHREAD_MPSAFE	0x02	/* does not need kernel_lock */
+#define	KTHREAD_INTR	0x04	/* interrupt handler */
+
+int	kthread_create(pri_t, int, struct cpu_info *,
+		       void (*)(void *), void *,
+		       lwp_t **, const char *, ...)
+	    __attribute__((__format__(__printf__,7,8)));
+void	kthread_exit(int) __dead;
+void	kthread_destroy(lwp_t *);
 #endif /* _KERNEL */
 
 #endif /* _SYS_KTHREAD_H_ */

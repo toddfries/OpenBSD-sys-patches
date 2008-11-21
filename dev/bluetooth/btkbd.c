@@ -1,5 +1,34 @@
-/*	$OpenBSD: btkbd.c,v 1.3 2008/02/24 21:46:19 uwe Exp $	*/
-/*	$NetBSD: btkbd.c,v 1.9 2007/11/03 18:24:01 plunky Exp $	*/
+/*	$NetBSD: btkbd.c,v 1.10 2008/09/09 03:54:56 cube Exp $	*/
+
+/*
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Lennart Augustsson (lennart@augustsson.net) at
+ * Carlstedt Research & Technology.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -36,7 +65,11 @@
  * based on dev/usb/ukbd.c
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: btkbd.c,v 1.10 2008/09/09 03:54:56 cube Exp $");
+
 #include <sys/param.h>
+#include <sys/callout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
@@ -57,6 +90,9 @@
 #include <dev/wscons/wsksymdef.h>
 #include <dev/wscons/wsksymvar.h>
 
+#include "opt_wsdisplay_compat.h"
+#include "opt_btkbd.h"
+
 #define	MAXKEYCODE		6
 #define MAXMOD			8	/* max 32 */
 #define MAXKEYS			(MAXMOD + (2 * MAXKEYCODE))
@@ -73,7 +109,7 @@ struct btkbd_mod {
 
 struct btkbd_softc {
 	struct bthidev		 sc_hidev;	/* device+ */
-	struct device		*sc_wskbd;	/* child */
+	device_t		 sc_wskbd;	/* child */
 	int			 sc_enabled;
 
 	int			(*sc_output)	/* output method */
@@ -100,7 +136,7 @@ struct btkbd_softc {
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	int			 sc_rawkbd;
 #ifdef BTKBD_REPEAT
-	struct timeout		 sc_repeat;
+	callout_t		 sc_repeat;
 	int			 sc_nrep;
 	char			 sc_rep[MAXKEYS];
 #endif
@@ -108,27 +144,19 @@ struct btkbd_softc {
 };
 
 /* autoconf(9) methods */
-int	btkbd_match(struct device *, void *, void *);
-void	btkbd_attach(struct device *, struct device *, void *);
-int	btkbd_detach(struct device *, int);
+static int	btkbd_match(device_t, struct cfdata *, void *);
+static void	btkbd_attach(device_t, device_t, void *);
+static int	btkbd_detach(device_t, int);
 
-struct cfdriver btkbd_cd = {
-	NULL, "btkbd", DV_DULL
-};
-
-const struct cfattach btkbd_ca = {
-	sizeof(struct btkbd_softc),
-	btkbd_match,
-	btkbd_attach,
-	btkbd_detach,
-};
+CFATTACH_DECL_NEW(btkbd, sizeof(struct btkbd_softc),
+    btkbd_match, btkbd_attach, btkbd_detach, NULL);
 
 /* wskbd(4) accessops */
-int	btkbd_enable(void *, int);
-void	btkbd_set_leds(void *, int);
-int	btkbd_ioctl(void *, u_long, caddr_t, int, struct proc *);
+static int	btkbd_enable(void *, int);
+static void	btkbd_set_leds(void *, int);
+static int	btkbd_ioctl(void *, unsigned long, void *, int, struct lwp *);
 
-const struct wskbd_accessops btkbd_accessops = {
+static const struct wskbd_accessops btkbd_accessops = {
 	btkbd_enable,
 	btkbd_set_leds,
 	btkbd_ioctl
@@ -149,34 +177,38 @@ const struct wskbd_mapdata btkbd_keymapdata = {
 };
 
 /* bthid methods */
-void btkbd_input(struct bthidev *, uint8_t *, int);
+static void btkbd_input(struct bthidev *, uint8_t *, int);
 
 /* internal prototypes */
-const char *btkbd_parse_desc(struct btkbd_softc *, int, void *, int);
+static const char *btkbd_parse_desc(struct btkbd_softc *, int, const void *, int);
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 #ifdef BTKBD_REPEAT
-void btkbd_repeat(void *);
+static void btkbd_repeat(void *);
 #endif
 #endif
 
+/*****************************************************************************
+ *
+ *	btkbd autoconf(9) routines
+ */
 
-int
-btkbd_match(struct device *self, void *match, void *aux)
+static int
+btkbd_match(device_t self, struct cfdata *cfdata, void *aux)
 {
 	struct bthidev_attach_args *ba = aux;
 
 	if (hid_is_collection(ba->ba_desc, ba->ba_dlen, ba->ba_id,
-	    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_KEYBOARD)))
+			HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_KEYBOARD)))
 		return 1;
 
 	return 0;
 }
 
-void
-btkbd_attach(struct device *parent, struct device *self, void *aux)
+static void
+btkbd_attach(device_t parent, device_t self, void *aux)
 {
-	struct btkbd_softc *sc = (struct btkbd_softc *)self;
+	struct btkbd_softc *sc = device_private(self);
 	struct bthidev_attach_args *ba = aux;
 	struct wskbddev_attach_args wska;
 	const char *parserr;
@@ -186,15 +218,16 @@ btkbd_attach(struct device *parent, struct device *self, void *aux)
 
 	parserr = btkbd_parse_desc(sc, ba->ba_id, ba->ba_desc, ba->ba_dlen);
 	if (parserr != NULL) {
-		printf("%s\n", parserr);
+		aprint_error("%s\n", parserr);
 		return;
 	}
 
-	printf("\n");
+	aprint_normal("\n");
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 #ifdef BTKBD_REPEAT
-	timeout_set(&sc->sc_repeat, btkbd_repeat, sc);
+	callout_init(&sc->sc_repeat, 0);
+	callout_setfunc(&sc->sc_repeat, btkbd_repeat, sc);
 #endif
 #endif
 
@@ -203,18 +236,20 @@ btkbd_attach(struct device *parent, struct device *self, void *aux)
 	wska.accessops = &btkbd_accessops;
 	wska.accesscookie = sc;
 
-	sc->sc_wskbd = config_found((struct device *)sc, &wska, wskbddevprint);
+	sc->sc_wskbd = config_found(self, &wska, wskbddevprint);
 }
 
-int
-btkbd_detach(struct device *self, int flags)
+static int
+btkbd_detach(device_t self, int flags)
 {
-	struct btkbd_softc *sc = (struct btkbd_softc *)self;
+	struct btkbd_softc *sc = device_private(self);
 	int err = 0;
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 #ifdef BTKBD_REPEAT
-	timeout_del(&sc->sc_repeat);
+	callout_stop(&sc->sc_repeat);
+	KASSERT(!callout_invoking(&sc->sc_repeat));
+	callout_destroy(&sc->sc_repeat);
 #endif
 #endif
 
@@ -226,8 +261,8 @@ btkbd_detach(struct device *self, int flags)
 	return err;
 }
 
-const char *
-btkbd_parse_desc(struct btkbd_softc *sc, int id, void *desc, int dlen)
+static const char *
+btkbd_parse_desc(struct btkbd_softc *sc, int id, const void *desc, int dlen)
 {
 	struct hid_data *d;
 	struct hid_item h;
@@ -276,30 +311,35 @@ btkbd_parse_desc(struct btkbd_softc *sc, int id, void *desc, int dlen)
 	hid_end_parse(d);
 
 	hid_locate(desc, dlen, HID_USAGE2(HUP_LEDS, HUD_LED_NUM_LOCK),
-	    id, hid_output, &sc->sc_numloc, NULL);
+		   id, hid_output, &sc->sc_numloc, NULL);
 
 	hid_locate(desc, dlen, HID_USAGE2(HUP_LEDS, HUD_LED_CAPS_LOCK),
-	    id, hid_output, &sc->sc_capsloc, NULL);
+		   id, hid_output, &sc->sc_capsloc, NULL);
 
 	hid_locate(desc, dlen, HID_USAGE2(HUP_LEDS, HUD_LED_SCROLL_LOCK),
-	    id, hid_output, &sc->sc_scroloc, NULL);
+		   id, hid_output, &sc->sc_scroloc, NULL);
 
 	return (NULL);
 }
 
-int
+/*****************************************************************************
+ *
+ *	wskbd(9) accessops
+ */
+
+static int
 btkbd_enable(void *self, int on)
 {
-	struct btkbd_softc *sc = (struct btkbd_softc *)self;
+	struct btkbd_softc *sc = self;
 
 	sc->sc_enabled = on;
 	return 0;
 }
 
-void
+static void
 btkbd_set_leds(void *self, int leds)
 {
-	struct btkbd_softc *sc = (struct btkbd_softc *)self;
+	struct btkbd_softc *sc = self;
 	uint8_t report;
 
 	if (sc->sc_leds == leds)
@@ -326,35 +366,45 @@ btkbd_set_leds(void *self, int leds)
 		(*sc->sc_output)(&sc->sc_hidev, &report, sizeof(report));
 }
 
-int
-btkbd_ioctl(void *self, u_long cmd, caddr_t data, int flag, struct proc *p)
+static int
+btkbd_ioctl(void *self, unsigned long cmd, void *data, int flag,
+    struct lwp *l)
 {
-	struct btkbd_softc *sc = (struct btkbd_softc *)self;
+	struct btkbd_softc *sc = self;
 
 	switch (cmd) {
 	case WSKBDIO_GTYPE:
 		*(int *)data = WSKBD_TYPE_BLUETOOTH;
-		return 0;
+		break;
 
 	case WSKBDIO_SETLEDS:
 		btkbd_set_leds(sc, *(int *)data);
-		return 0;
+		break;
 
 	case WSKBDIO_GETLEDS:
 		*(int *)data = sc->sc_leds;
-		return 0;
+		break;
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	case WSKBDIO_SETMODE:
 		sc->sc_rawkbd = (*(int *)data == WSKBD_RAW);
 #ifdef BTKBD_REPEAT
-		timeout_del(&sc->sc_repeat);
+		callout_stop(&sc->sc_repeat);
 #endif
-		return 0;
+		break;
 #endif
+
+	default:
+		return EPASSTHROUGH;
 	}
-	return -1;
+
+	return 0;
 }
+
+/*****************************************************************************
+ *
+ *	btkbd input routine, called from our parent
+ */
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 #define NN 0			/* no translation */
@@ -364,7 +414,7 @@ btkbd_ioctl(void *self, u_long cmd, caddr_t data, int flag, struct proc *p)
  *
  * See http://www.microsoft.com/HWDEV/TECH/input/Scancode.asp
  */
-const u_int8_t btkbd_trtab[256] = {
+static const u_int8_t btkbd_trtab[256] = {
       NN,   NN,   NN,   NN, 0x1e, 0x30, 0x2e, 0x20, /* 00 - 07 */
     0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, /* 08 - 0f */
     0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, /* 10 - 17 */
@@ -408,7 +458,7 @@ const u_int8_t btkbd_trtab[256] = {
 #define REP_DELAY1	400
 #define REP_DELAYN	100
 
-void
+static void
 btkbd_input(struct bthidev *self, uint8_t *data, int len)
 {
 	struct btkbd_softc *sc = (struct btkbd_softc *)self;
@@ -430,7 +480,7 @@ btkbd_input(struct bthidev *self, uint8_t *data, int len)
 
 	/* extract keycodes */
 	memcpy(ud->keycode, data + (sc->sc_keycodeloc.pos / 8),
-	    sc->sc_nkeycode);
+	       sc->sc_nkeycode);
 
 	if (ud->keycode[0] == KEY_ERROR)
 		return;		/* ignore  */
@@ -443,8 +493,8 @@ btkbd_input(struct bthidev *self, uint8_t *data, int len)
 			if ((mod & sc->sc_mods[i].mask) !=
 			    (omod & sc->sc_mods[i].mask))
 				ADDKEY(sc->sc_mods[i].key |
-				    (mod & sc->sc_mods[i].mask
-				    ? PRESS : RELEASE));
+				       (mod & sc->sc_mods[i].mask
+					  ? PRESS : RELEASE));
 
 	if (memcmp(ud->keycode, sc->sc_odata.keycode, sc->sc_nkeycode) != 0) {
 		/* Check for released keys. */
@@ -518,10 +568,10 @@ btkbd_input(struct bthidev *self, uint8_t *data, int len)
 		wskbd_rawinput(sc->sc_wskbd, cbuf, j);
 		splx(s);
 #ifdef BTKBD_REPEAT
-		timeout_del(&sc->sc_repeat);
+		callout_stop(&sc->sc_repeat);
 		if (npress != 0) {
 			sc->sc_nrep = npress;
-			timeout_add(&sc->sc_repeat, hz * REP_DELAY1 / 1000);
+			callout_schedule(&sc->sc_repeat, hz * REP_DELAY1 / 1000);
 		}
 #endif
 		return;
@@ -540,7 +590,7 @@ btkbd_input(struct bthidev *self, uint8_t *data, int len)
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 #ifdef BTKBD_REPEAT
-void
+static void
 btkbd_repeat(void *arg)
 {
 	struct btkbd_softc *sc = arg;
@@ -549,7 +599,7 @@ btkbd_repeat(void *arg)
 	s = spltty();
 	wskbd_rawinput(sc->sc_wskbd, sc->sc_rep, sc->sc_nrep);
 	splx(s);
-	timeout_add(&sc->sc_repeat, hz * REP_DELAYN / 1000);
+	callout_schedule(&sc->sc_repeat, hz * REP_DELAYN / 1000);
 }
 #endif
 #endif

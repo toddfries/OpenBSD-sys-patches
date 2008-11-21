@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_paritylog.c,v 1.5 2002/12/16 07:01:04 tdeval Exp $	*/
-/*	$NetBSD: rf_paritylog.c,v 1.5 2000/01/07 03:41:01 oster Exp $	*/
-
+/*	$NetBSD: rf_paritylog.c,v 1.13 2007/03/04 06:02:38 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,19 +26,23 @@
  * rights to redistribute these changes.
  */
 
-/*
- * Code for manipulating in-core parity logs.
+/* Code for manipulating in-core parity logs
+ *
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rf_paritylog.c,v 1.13 2007/03/04 06:02:38 christos Exp $");
 
 #include "rf_archs.h"
 
-#if	RF_INCLUDE_PARITYLOGGING > 0
+#if RF_INCLUDE_PARITYLOGGING > 0
 
 /*
- * Append-only log for recording parity "update" and "overwrite" records.
+ * Append-only log for recording parity "update" and "overwrite" records
  */
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+
 #include "rf_threadstuff.h"
 #include "rf_mcpair.h"
 #include "rf_raid.h"
@@ -56,67 +58,37 @@
 #include "rf_paritylogging.h"
 #include "rf_paritylogDiskMgr.h"
 
-RF_CommonLogData_t *rf_AllocParityLogCommonData(RF_Raid_t *);
-void rf_FreeParityLogCommonData(RF_CommonLogData_t *);
-RF_ParityLogData_t *rf_AllocParityLogData(RF_Raid_t *);
-void rf_FreeParityLogData(RF_ParityLogData_t *);
-void rf_EnqueueParityLogData(RF_ParityLogData_t *, RF_ParityLogData_t **,
-	RF_ParityLogData_t **);
-RF_ParityLogData_t *rf_DequeueParityLogData(RF_Raid_t *, RF_ParityLogData_t **,
-	RF_ParityLogData_t **, int);
-void rf_RequeueParityLogData(RF_ParityLogData_t *, RF_ParityLogData_t **,
-	RF_ParityLogData_t **);
-RF_ParityLogData_t *rf_DequeueMatchingLogData(RF_Raid_t *,
-	RF_ParityLogData_t **, RF_ParityLogData_t **);
-RF_ParityLog_t *rf_AcquireParityLog(RF_ParityLogData_t *, int);
-void rf_ReintLog(RF_Raid_t *, int, RF_ParityLog_t *);
-void rf_FlushLog(RF_Raid_t *, RF_ParityLog_t *);
-int  rf_DumpParityLogToDisk(int, RF_ParityLogData_t *);
-
-RF_CommonLogData_t *
-rf_AllocParityLogCommonData(RF_Raid_t *raidPtr)
+static RF_CommonLogData_t *
+AllocParityLogCommonData(RF_Raid_t * raidPtr)
 {
 	RF_CommonLogData_t *common = NULL;
-	int rc;
 
-	/*
-	 * Return a struct for holding common parity log information from the
-	 * free list (rf_parityLogDiskQueue.freeCommonList). If the free list
-	 * is empty, call RF_Malloc to create a new structure. NON-BLOCKING
-	 */
+	/* Return a struct for holding common parity log information from the
+	 * free list (rf_parityLogDiskQueue.freeCommonList).  If the free list
+	 * is empty, call RF_Malloc to create a new structure. NON-BLOCKING */
 
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	if (raidPtr->parityLogDiskQueue.freeCommonList) {
 		common = raidPtr->parityLogDiskQueue.freeCommonList;
-		raidPtr->parityLogDiskQueue.freeCommonList =
-		    raidPtr->parityLogDiskQueue.freeCommonList->next;
+		raidPtr->parityLogDiskQueue.freeCommonList = raidPtr->parityLogDiskQueue.freeCommonList->next;
 		RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	} else {
 		RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
-		RF_Malloc(common, sizeof(RF_CommonLogData_t),
-		    (RF_CommonLogData_t *));
-		rc = rf_mutex_init(&common->mutex);
-		if (rc) {
-			RF_ERRORMSG3("Unable to init mutex file %s line %d"
-			    " rc=%d\n", __FILE__, __LINE__, rc);
-			RF_Free(common, sizeof(RF_CommonLogData_t));
-			common = NULL;
-		}
+		RF_Malloc(common, sizeof(RF_CommonLogData_t), (RF_CommonLogData_t *));
+		rf_mutex_init(&common->mutex);
 	}
 	common->next = NULL;
 	return (common);
 }
 
-void
-rf_FreeParityLogCommonData(RF_CommonLogData_t *common)
+static void
+FreeParityLogCommonData(RF_CommonLogData_t * common)
 {
 	RF_Raid_t *raidPtr;
 
-	/*
-	 * Insert a single struct for holding parity log information (data)
+	/* Insert a single struct for holding parity log information (data)
 	 * into the free list (rf_parityLogDiskQueue.freeCommonList).
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
 	raidPtr = common->raidPtr;
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
@@ -125,27 +97,23 @@ rf_FreeParityLogCommonData(RF_CommonLogData_t *common)
 	RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 }
 
-RF_ParityLogData_t *
-rf_AllocParityLogData(RF_Raid_t *raidPtr)
+static RF_ParityLogData_t *
+AllocParityLogData(RF_Raid_t * raidPtr)
 {
 	RF_ParityLogData_t *data = NULL;
 
-	/*
-	 * Return a struct for holding parity log information from the free
-	 * list (rf_parityLogDiskQueue.freeList). If the free list is empty,
-	 * call RF_Malloc to create a new structure. NON-BLOCKING
-	 */
+	/* Return a struct for holding parity log information from the free
+	 * list (rf_parityLogDiskQueue.freeList).  If the free list is empty,
+	 * call RF_Malloc to create a new structure. NON-BLOCKING */
 
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	if (raidPtr->parityLogDiskQueue.freeDataList) {
 		data = raidPtr->parityLogDiskQueue.freeDataList;
-		raidPtr->parityLogDiskQueue.freeDataList =
-		    raidPtr->parityLogDiskQueue.freeDataList->next;
+		raidPtr->parityLogDiskQueue.freeDataList = raidPtr->parityLogDiskQueue.freeDataList->next;
 		RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	} else {
 		RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
-		RF_Malloc(data, sizeof(RF_ParityLogData_t),
-		    (RF_ParityLogData_t *));
+		RF_Malloc(data, sizeof(RF_ParityLogData_t), (RF_ParityLogData_t *));
 	}
 	data->next = NULL;
 	data->prev = NULL;
@@ -153,17 +121,15 @@ rf_AllocParityLogData(RF_Raid_t *raidPtr)
 }
 
 
-void
-rf_FreeParityLogData(RF_ParityLogData_t *data)
+static void
+FreeParityLogData(RF_ParityLogData_t * data)
 {
 	RF_ParityLogData_t *nextItem;
 	RF_Raid_t *raidPtr;
 
-	/*
-	 * Insert a linked list of structs for holding parity log information
+	/* Insert a linked list of structs for holding parity log information
 	 * (data) into the free list (parityLogDiskQueue.freeList).
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
 	raidPtr = data->common->raidPtr;
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
@@ -177,35 +143,32 @@ rf_FreeParityLogData(RF_ParityLogData_t *data)
 }
 
 
-void
-rf_EnqueueParityLogData(RF_ParityLogData_t *data, RF_ParityLogData_t **head,
-    RF_ParityLogData_t **tail)
+static void
+EnqueueParityLogData(
+    RF_ParityLogData_t * data,
+    RF_ParityLogData_t ** head,
+    RF_ParityLogData_t ** tail)
 {
 	RF_Raid_t *raidPtr;
 
-	/*
-	 * Insert an in-core parity log (*data) into the head of a disk queue
-	 * (*head, *tail). NON-BLOCKING
-	 */
+	/* Insert an in-core parity log (*data) into the head of a disk queue
+	 * (*head, *tail). NON-BLOCKING */
 
 	raidPtr = data->common->raidPtr;
 	if (rf_parityLogDebug)
-		printf("[enqueueing parity log data, region %d,"
-		    " raidAddress %d, numSector %d]\n", data->regionID,
-		    (int) data->diskAddress.raidAddress,
-		    (int) data->diskAddress.numSector);
+		printf("[enqueueing parity log data, region %d, raidAddress %d, numSector %d]\n", data->regionID, (int) data->diskAddress.raidAddress, (int) data->diskAddress.numSector);
 	RF_ASSERT(data->prev == NULL);
 	RF_ASSERT(data->next == NULL);
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	if (*head) {
-		/* Insert into head of queue. */
+		/* insert into head of queue */
 		RF_ASSERT((*head)->prev == NULL);
 		RF_ASSERT((*tail)->next == NULL);
 		data->next = *head;
 		(*head)->prev = data;
 		*head = data;
 	} else {
-		/* Insert into empty list. */
+		/* insert into empty list */
 		RF_ASSERT(*head == NULL);
 		RF_ASSERT(*tail == NULL);
 		*head = data;
@@ -216,24 +179,25 @@ rf_EnqueueParityLogData(RF_ParityLogData_t *data, RF_ParityLogData_t **head,
 	RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 }
 
-RF_ParityLogData_t *
-rf_DequeueParityLogData(RF_Raid_t *raidPtr, RF_ParityLogData_t **head,
-    RF_ParityLogData_t **tail, int ignoreLocks)
+static RF_ParityLogData_t *
+DequeueParityLogData(
+    RF_Raid_t * raidPtr,
+    RF_ParityLogData_t ** head,
+    RF_ParityLogData_t ** tail,
+    int ignoreLocks)
 {
 	RF_ParityLogData_t *data;
 
-	/*
-	 * Remove and return an in-core parity log from the tail of a disk
-	 * queue (*head, *tail). NON-BLOCKING
-	 */
+	/* Remove and return an in-core parity log from the tail of a disk
+	 * queue (*head, *tail). NON-BLOCKING */
 
-	/* Remove from tail, preserving FIFO order. */
+	/* remove from tail, preserving FIFO order */
 	if (!ignoreLocks)
 		RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	data = *tail;
 	if (data) {
 		if (*head == *tail) {
-			/* Removing last item from queue. */
+			/* removing last item from queue */
 			*head = NULL;
 			*tail = NULL;
 		} else {
@@ -245,10 +209,7 @@ rf_DequeueParityLogData(RF_Raid_t *raidPtr, RF_ParityLogData_t **head,
 		data->next = NULL;
 		data->prev = NULL;
 		if (rf_parityLogDebug)
-			printf("[dequeueing parity log data, region %d,"
-			    " raidAddress %d, numSector %d]\n", data->regionID,
-			    (int) data->diskAddress.raidAddress,
-			    (int) data->diskAddress.numSector);
+			printf("[dequeueing parity log data, region %d, raidAddress %d, numSector %d]\n", data->regionID, (int) data->diskAddress.raidAddress, (int) data->diskAddress.numSector);
 	}
 	if (*head) {
 		RF_ASSERT((*head)->prev == NULL);
@@ -260,33 +221,30 @@ rf_DequeueParityLogData(RF_Raid_t *raidPtr, RF_ParityLogData_t **head,
 }
 
 
-void
-rf_RequeueParityLogData(RF_ParityLogData_t *data, RF_ParityLogData_t **head,
-    RF_ParityLogData_t **tail)
+static void
+RequeueParityLogData(
+    RF_ParityLogData_t * data,
+    RF_ParityLogData_t ** head,
+    RF_ParityLogData_t ** tail)
 {
 	RF_Raid_t *raidPtr;
 
-	/*
-	 * Insert an in-core parity log (*data) into the tail of a disk queue
-	 * (*head, *tail). NON-BLOCKING
-	 */
+	/* Insert an in-core parity log (*data) into the tail of a disk queue
+	 * (*head, *tail). NON-BLOCKING */
 
 	raidPtr = data->common->raidPtr;
 	RF_ASSERT(data);
 	if (rf_parityLogDebug)
-		printf("[requeueing parity log data, region %d,"
-		    " raidAddress %d, numSector %d]\n", data->regionID,
-		    (int) data->diskAddress.raidAddress,
-		    (int) data->diskAddress.numSector);
+		printf("[requeueing parity log data, region %d, raidAddress %d, numSector %d]\n", data->regionID, (int) data->diskAddress.raidAddress, (int) data->diskAddress.numSector);
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	if (*tail) {
-		/* Append to tail of list. */
+		/* append to tail of list */
 		data->prev = *tail;
 		data->next = NULL;
 		(*tail)->next = data;
 		*tail = data;
 	} else {
-		/* Inserting into an empty list. */
+		/* inserting into an empty list */
 		*head = data;
 		*tail = data;
 		(*head)->prev = NULL;
@@ -298,25 +256,28 @@ rf_RequeueParityLogData(RF_ParityLogData_t *data, RF_ParityLogData_t **head,
 }
 
 RF_ParityLogData_t *
-rf_CreateParityLogData(RF_ParityRecordType_t operation, RF_PhysDiskAddr_t *pda,
-    caddr_t bufPtr, RF_Raid_t *raidPtr,
+rf_CreateParityLogData(
+    RF_ParityRecordType_t operation,
+    RF_PhysDiskAddr_t * pda,
+    void *bufPtr,
+    RF_Raid_t * raidPtr,
     int (*wakeFunc) (RF_DagNode_t * node, int status),
-    void *wakeArg, RF_AccTraceEntry_t *tracerec, RF_Etimer_t startTime)
+    void *wakeArg,
+    RF_AccTraceEntry_t * tracerec,
+    RF_Etimer_t startTime)
 {
 	RF_ParityLogData_t *data, *resultHead = NULL, *resultTail = NULL;
 	RF_CommonLogData_t *common;
 	RF_PhysDiskAddr_t *diskAddress;
-	int boundary, offset = 0;
+	int     boundary, offset = 0;
 
-	/*
-	 * Return an initialized struct of info to be logged. Build one item
+	/* Return an initialized struct of info to be logged. Build one item
 	 * per physical disk address, one item per region.
 	 *
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
 	diskAddress = pda;
-	common = rf_AllocParityLogCommonData(raidPtr);
+	common = AllocParityLogCommonData(raidPtr);
 	RF_ASSERT(common);
 
 	common->operation = operation;
@@ -332,38 +293,34 @@ rf_CreateParityLogData(RF_ParityRecordType_t operation, RF_PhysDiskAddr_t *pda,
 		printf("[entering CreateParityLogData]\n");
 	while (diskAddress) {
 		common->cnt++;
-		data = rf_AllocParityLogData(raidPtr);
+		data = AllocParityLogData(raidPtr);
 		RF_ASSERT(data);
 		data->common = common;
 		data->next = NULL;
 		data->prev = NULL;
-		data->regionID = rf_MapRegionIDParityLogging(raidPtr,
-		    diskAddress->startSector);
-		if (data->regionID == rf_MapRegionIDParityLogging(raidPtr,
-		    diskAddress->startSector + diskAddress->numSector - 1)) {
-			/* Disk address does not cross a region boundary. */
+		data->regionID = rf_MapRegionIDParityLogging(raidPtr, diskAddress->startSector);
+		if (data->regionID == rf_MapRegionIDParityLogging(raidPtr, diskAddress->startSector + diskAddress->numSector - 1)) {
+			/* disk address does not cross a region boundary */
 			data->diskAddress = *diskAddress;
 			data->bufOffset = offset;
 			offset = offset + diskAddress->numSector;
-			rf_EnqueueParityLogData(data, &resultHead, &resultTail);
-			/* Adjust disk address. */
+			EnqueueParityLogData(data, &resultHead, &resultTail);
+			/* adjust disk address */
 			diskAddress = diskAddress->next;
 		} else {
-			/* Disk address crosses a region boundary. */
-			/* Find address where region is crossed. */
+			/* disk address crosses a region boundary */
+			/* find address where region is crossed */
 			boundary = 0;
-			while (data->regionID ==
-			    rf_MapRegionIDParityLogging(raidPtr,
-			     diskAddress->startSector + boundary))
+			while (data->regionID == rf_MapRegionIDParityLogging(raidPtr, diskAddress->startSector + boundary))
 				boundary++;
 
-			/* Enter data before the boundary. */
+			/* enter data before the boundary */
 			data->diskAddress = *diskAddress;
 			data->diskAddress.numSector = boundary;
 			data->bufOffset = offset;
 			offset += boundary;
-			rf_EnqueueParityLogData(data, &resultHead, &resultTail);
-			/* Adjust disk address. */
+			EnqueueParityLogData(data, &resultHead, &resultTail);
+			/* adjust disk address */
 			diskAddress->startSector += boundary;
 			diskAddress->numSector -= boundary;
 		}
@@ -375,35 +332,35 @@ rf_CreateParityLogData(RF_ParityRecordType_t operation, RF_PhysDiskAddr_t *pda,
 
 
 RF_ParityLogData_t *
-rf_SearchAndDequeueParityLogData(RF_Raid_t *raidPtr, int regionID,
-    RF_ParityLogData_t **head, RF_ParityLogData_t **tail, int ignoreLocks)
+rf_SearchAndDequeueParityLogData(
+    RF_Raid_t * raidPtr,
+    int regionID,
+    RF_ParityLogData_t ** head,
+    RF_ParityLogData_t ** tail,
+    int ignoreLocks)
 {
 	RF_ParityLogData_t *w;
 
-	/*
-	 * Remove and return an in-core parity log from a specified region
+	/* Remove and return an in-core parity log from a specified region
 	 * (regionID). If a matching log is not found, return NULL.
 	 *
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING. */
 
-	/*
-	 * walk backward through a list, looking for an entry with a matching
-	 * region ID.
-	 */
+	/* walk backward through a list, looking for an entry with a matching
+	 * region ID */
 	if (!ignoreLocks)
 		RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	w = (*tail);
 	while (w) {
 		if (w->regionID == regionID) {
-			/* Remove an element from the list. */
+			/* remove an element from the list */
 			if (w == *tail) {
 				if (*head == *tail) {
-					/* Removing only element in the list. */
+					/* removing only element in the list */
 					*head = NULL;
 					*tail = NULL;
 				} else {
-					/* Removing last item in the list. */
+					/* removing last item in the list */
 					*tail = (*tail)->prev;
 					(*tail)->next = NULL;
 					RF_ASSERT((*head)->prev == NULL);
@@ -411,16 +368,14 @@ rf_SearchAndDequeueParityLogData(RF_Raid_t *raidPtr, int regionID,
 				}
 			} else {
 				if (w == *head) {
-					/* Removing first item in the list. */
+					/* removing first item in the list */
 					*head = (*head)->next;
 					(*head)->prev = NULL;
 					RF_ASSERT((*head)->prev == NULL);
 					RF_ASSERT((*tail)->next == NULL);
 				} else {
-					/*
-					 * Removing an item from the middle of
-					 * the list.
-					 */
+					/* removing an item from the middle of
+					 * the list */
 					w->prev->next = w->next;
 					w->next->prev = w->prev;
 					RF_ASSERT((*head)->prev == NULL);
@@ -430,11 +385,7 @@ rf_SearchAndDequeueParityLogData(RF_Raid_t *raidPtr, int regionID,
 			w->prev = NULL;
 			w->next = NULL;
 			if (rf_parityLogDebug)
-				printf("[dequeueing parity log data,"
-				    " region %d, raidAddress %d,"
-				    " numSector %d]\n", w->regionID,
-				    (int) w->diskAddress.raidAddress,
-				    (int) w->diskAddress.numSector);
+				printf("[dequeueing parity log data, region %d, raidAddress %d, numSector %d]\n", w->regionID, (int) w->diskAddress.raidAddress, (int) w->diskAddress.numSector);
 			return (w);
 		} else
 			w = w->prev;
@@ -444,109 +395,93 @@ rf_SearchAndDequeueParityLogData(RF_Raid_t *raidPtr, int regionID,
 	return (NULL);
 }
 
-RF_ParityLogData_t *
-rf_DequeueMatchingLogData(RF_Raid_t *raidPtr, RF_ParityLogData_t **head,
-    RF_ParityLogData_t **tail)
+static RF_ParityLogData_t *
+DequeueMatchingLogData(
+    RF_Raid_t * raidPtr,
+    RF_ParityLogData_t ** head,
+    RF_ParityLogData_t ** tail)
 {
 	RF_ParityLogData_t *logDataList, *logData;
-	int regionID;
+	int     regionID;
 
-	/*
-	 * Remove and return an in-core parity log from the tail of a disk
-	 * queue (*head, *tail). Then remove all matching (identical
+	/* Remove and return an in-core parity log from the tail of a disk
+	 * queue (*head, *tail).  Then remove all matching (identical
 	 * regionIDs) logData and return as a linked list.
 	 *
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
-	logDataList = rf_DequeueParityLogData(raidPtr, head, tail, RF_TRUE);
+	logDataList = DequeueParityLogData(raidPtr, head, tail, RF_TRUE);
 	if (logDataList) {
 		regionID = logDataList->regionID;
 		logData = logDataList;
-		logData->next = rf_SearchAndDequeueParityLogData(raidPtr,
-		    regionID, head, tail, RF_TRUE);
+		logData->next = rf_SearchAndDequeueParityLogData(raidPtr, regionID, head, tail, RF_TRUE);
 		while (logData->next) {
 			logData = logData->next;
-			logData->next =
-			    rf_SearchAndDequeueParityLogData(raidPtr, regionID,
-			     head, tail, RF_TRUE);
+			logData->next = rf_SearchAndDequeueParityLogData(raidPtr, regionID, head, tail, RF_TRUE);
 		}
 	}
 	return (logDataList);
 }
 
 
-RF_ParityLog_t *
-rf_AcquireParityLog(RF_ParityLogData_t *logData, int finish)
+static RF_ParityLog_t *
+AcquireParityLog(
+    RF_ParityLogData_t * logData,
+    int finish)
 {
 	RF_ParityLog_t *log = NULL;
 	RF_Raid_t *raidPtr;
 
-	/*
-	 * Grab a log buffer from the pool and return it. If no buffers are
-	 * available, return NULL. NON-BLOCKING
-	 */
+	/* Grab a log buffer from the pool and return it. If no buffers are
+	 * available, return NULL. NON-BLOCKING */
 	raidPtr = logData->common->raidPtr;
 	RF_LOCK_MUTEX(raidPtr->parityLogPool.mutex);
 	if (raidPtr->parityLogPool.parityLogs) {
 		log = raidPtr->parityLogPool.parityLogs;
-		raidPtr->parityLogPool.parityLogs =
-		    raidPtr->parityLogPool.parityLogs->next;
+		raidPtr->parityLogPool.parityLogs = raidPtr->parityLogPool.parityLogs->next;
 		log->regionID = logData->regionID;
 		log->numRecords = 0;
 		log->next = NULL;
 		raidPtr->logsInUse++;
-		RF_ASSERT(raidPtr->logsInUse >= 0 &&
-		    raidPtr->logsInUse <= raidPtr->numParityLogs);
+		RF_ASSERT(raidPtr->logsInUse >= 0 && raidPtr->logsInUse <= raidPtr->numParityLogs);
 	} else {
-		/*
-		 * No logs available, so place ourselves on the queue of work
+		/* no logs available, so place ourselves on the queue of work
 		 * waiting on log buffers this is done while
 		 * parityLogPool.mutex is held, to ensure synchronization with
-		 * ReleaseParityLogs.
-		 */
+		 * ReleaseParityLogs. */
 		if (rf_parityLogDebug)
-			printf("[blocked on log, region %d, finish %d]\n",
-			    logData->regionID, finish);
+			printf("[blocked on log, region %d, finish %d]\n", logData->regionID, finish);
 		if (finish)
-			rf_RequeueParityLogData(logData,
-			    &raidPtr->parityLogDiskQueue.logBlockHead,
-			    &raidPtr->parityLogDiskQueue.logBlockTail);
+			RequeueParityLogData(logData, &raidPtr->parityLogDiskQueue.logBlockHead, &raidPtr->parityLogDiskQueue.logBlockTail);
 		else
-			rf_EnqueueParityLogData(logData,
-			    &raidPtr->parityLogDiskQueue.logBlockHead,
-			    &raidPtr->parityLogDiskQueue.logBlockTail);
+			EnqueueParityLogData(logData, &raidPtr->parityLogDiskQueue.logBlockHead, &raidPtr->parityLogDiskQueue.logBlockTail);
 	}
 	RF_UNLOCK_MUTEX(raidPtr->parityLogPool.mutex);
 	return (log);
 }
 
 void
-rf_ReleaseParityLogs(RF_Raid_t *raidPtr, RF_ParityLog_t *firstLog)
+rf_ReleaseParityLogs(
+    RF_Raid_t * raidPtr,
+    RF_ParityLog_t * firstLog)
 {
 	RF_ParityLogData_t *logDataList;
 	RF_ParityLog_t *log, *lastLog;
-	int cnt;
+	int     cnt;
 
-	/*
-	 * Insert a linked list of parity logs (firstLog) to the free list
+	/* Insert a linked list of parity logs (firstLog) to the free list
 	 * (parityLogPool.parityLogPool)
 	 *
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING. */
 
 	RF_ASSERT(firstLog);
 
-	/*
-	 * Before returning logs to global free list, service all requests
-	 * which are blocked on logs. Holding mutexes for parityLogPool and
-	 * parityLogDiskQueue forces synchronization with rf_AcquireParityLog().
-	 */
+	/* Before returning logs to global free list, service all requests
+	 * which are blocked on logs.  Holding mutexes for parityLogPool and
+	 * parityLogDiskQueue forces synchronization with AcquireParityLog(). */
 	RF_LOCK_MUTEX(raidPtr->parityLogPool.mutex);
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
-	logDataList = rf_DequeueMatchingLogData(raidPtr,
-	    &raidPtr->parityLogDiskQueue.logBlockHead,
-	    &raidPtr->parityLogDiskQueue.logBlockTail);
+	logDataList = DequeueMatchingLogData(raidPtr, &raidPtr->parityLogDiskQueue.logBlockHead, &raidPtr->parityLogDiskQueue.logBlockTail);
 	log = firstLog;
 	if (firstLog)
 		firstLog = firstLog->next;
@@ -557,8 +492,7 @@ rf_ReleaseParityLogs(RF_Raid_t *raidPtr, RF_ParityLog_t *firstLog)
 		RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 		rf_ParityLogAppend(logDataList, RF_TRUE, &log, RF_FALSE);
 		if (rf_parityLogDebug)
-			printf("[finishing up buf-blocked log data,"
-			    " region %d]\n", logDataList->regionID);
+			printf("[finishing up buf-blocked log data, region %d]\n", logDataList->regionID);
 		if (log == NULL) {
 			log = firstLog;
 			if (firstLog) {
@@ -570,11 +504,9 @@ rf_ReleaseParityLogs(RF_Raid_t *raidPtr, RF_ParityLog_t *firstLog)
 		RF_LOCK_MUTEX(raidPtr->parityLogPool.mutex);
 		RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 		if (log)
-			logDataList = rf_DequeueMatchingLogData(raidPtr,
-			    &raidPtr->parityLogDiskQueue.logBlockHead,
-			    &raidPtr->parityLogDiskQueue.logBlockTail);
+			logDataList = DequeueMatchingLogData(raidPtr, &raidPtr->parityLogDiskQueue.logBlockHead, &raidPtr->parityLogDiskQueue.logBlockTail);
 	}
-	/* Return remaining logs to pool. */
+	/* return remaining logs to pool */
 	if (log) {
 		log->next = firstLog;
 		firstLog = log;
@@ -582,13 +514,11 @@ rf_ReleaseParityLogs(RF_Raid_t *raidPtr, RF_ParityLog_t *firstLog)
 	if (firstLog) {
 		lastLog = firstLog;
 		raidPtr->logsInUse--;
-		RF_ASSERT(raidPtr->logsInUse >= 0 &&
-		    raidPtr->logsInUse <= raidPtr->numParityLogs);
+		RF_ASSERT(raidPtr->logsInUse >= 0 && raidPtr->logsInUse <= raidPtr->numParityLogs);
 		while (lastLog->next) {
 			lastLog = lastLog->next;
 			raidPtr->logsInUse--;
-			RF_ASSERT(raidPtr->logsInUse >= 0 &&
-			    raidPtr->logsInUse <= raidPtr->numParityLogs);
+			RF_ASSERT(raidPtr->logsInUse >= 0 && raidPtr->logsInUse <= raidPtr->numParityLogs);
 		}
 		lastLog->next = raidPtr->parityLogPool.parityLogs;
 		raidPtr->parityLogPool.parityLogs = firstLog;
@@ -604,26 +534,26 @@ rf_ReleaseParityLogs(RF_Raid_t *raidPtr, RF_ParityLog_t *firstLog)
 	RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 }
 
-void
-rf_ReintLog(RF_Raid_t *raidPtr, int regionID, RF_ParityLog_t *log)
+static void
+ReintLog(
+    RF_Raid_t * raidPtr,
+    int regionID,
+    RF_ParityLog_t * log)
 {
 	RF_ASSERT(log);
 
-	/*
-	 * Insert an in-core parity log (log) into the disk queue of
-	 * reintegration work. Set the flag (reintInProgress) for the
+	/* Insert an in-core parity log (log) into the disk queue of
+	 * reintegration work.  Set the flag (reintInProgress) for the
 	 * specified region (regionID) to indicate that reintegration is in
-	 * progress for this region. NON-BLOCKING
-	 */
+	 * progress for this region. NON-BLOCKING */
 
 	RF_LOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);
-	/* Cleared when reint complete. */
-	raidPtr->regionInfo[regionID].reintInProgress = RF_TRUE;
+	raidPtr->regionInfo[regionID].reintInProgress = RF_TRUE;	/* cleared when reint
+									 * complete */
 
 	if (rf_parityLogDebug)
-		printf("[requesting reintegration of region %d]\n",
-		    log->regionID);
-	/* Move record to reintegration queue. */
+		printf("[requesting reintegration of region %d]\n", log->regionID);
+	/* move record to reintegration queue */
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	log->next = raidPtr->parityLogDiskQueue.reintQueue;
 	raidPtr->parityLogDiskQueue.reintQueue = log;
@@ -632,19 +562,19 @@ rf_ReintLog(RF_Raid_t *raidPtr, int regionID, RF_ParityLog_t *log)
 	RF_SIGNAL_COND(raidPtr->parityLogDiskQueue.cond);
 }
 
-void
-rf_FlushLog(RF_Raid_t *raidPtr, RF_ParityLog_t *log)
+static void
+FlushLog(
+    RF_Raid_t * raidPtr,
+    RF_ParityLog_t * log)
 {
-	/*
-	 * Insert a core log (log) into a list of logs
+	/* insert a core log (log) into a list of logs
 	 * (parityLogDiskQueue.flushQueue) waiting to be written to disk.
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
 	RF_ASSERT(log);
 	RF_ASSERT(log->numRecords == raidPtr->numSectorsPerLog);
 	RF_ASSERT(log->next == NULL);
-	/* Move log to flush queue. */
+	/* move log to flush queue */
 	RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	log->next = raidPtr->parityLogDiskQueue.flushQueue;
 	raidPtr->parityLogDiskQueue.flushQueue = log;
@@ -652,27 +582,27 @@ rf_FlushLog(RF_Raid_t *raidPtr, RF_ParityLog_t *log)
 	RF_SIGNAL_COND(raidPtr->parityLogDiskQueue.cond);
 }
 
-int
-rf_DumpParityLogToDisk(int finish, RF_ParityLogData_t *logData)
+static int
+DumpParityLogToDisk(
+    int finish,
+    RF_ParityLogData_t * logData)
 {
-	int i, diskCount, regionID = logData->regionID;
+	int     i, diskCount, regionID = logData->regionID;
 	RF_ParityLog_t *log;
 	RF_Raid_t *raidPtr;
 
 	raidPtr = logData->common->raidPtr;
 
-	/*
-	 * Move a core log to disk. If the log disk is full, initiate
+	/* Move a core log to disk.  If the log disk is full, initiate
 	 * reintegration.
 	 *
 	 * Return (0) if we can enqueue the dump immediately, otherwise return
 	 * (1) to indicate we are blocked on reintegration and control of the
 	 * thread should be relinquished.
 	 *
-	 * Caller must hold regionInfo[regionID].mutex.
+	 * Caller must hold regionInfo[regionID].mutex
 	 *
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
 	if (rf_parityLogDebug)
 		printf("[dumping parity log to disk, region %d]\n", regionID);
@@ -680,293 +610,200 @@ rf_DumpParityLogToDisk(int finish, RF_ParityLogData_t *logData)
 	RF_ASSERT(log->numRecords == raidPtr->numSectorsPerLog);
 	RF_ASSERT(log->next == NULL);
 
-	/* If reintegration is in progress, must queue work. */
+	/* if reintegration is in progress, must queue work */
 	RF_LOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);
 	if (raidPtr->regionInfo[regionID].reintInProgress) {
-		/*
-		 * Can not proceed since this region is currently being
+		/* Can not proceed since this region is currently being
 		 * reintegrated. We can not block, so queue remaining work and
-		 * return.
-		 */
+		 * return */
 		if (rf_parityLogDebug)
-			printf("[region %d waiting on reintegration]\n",
-			    regionID);
-		/*
-		 * XXX Not sure about the use of finish - shouldn't this
-		 * always be "Enqueue" ?
-		 */
+			printf("[region %d waiting on reintegration]\n", regionID);
+		/* XXX not sure about the use of finish - shouldn't this
+		 * always be "Enqueue"? */
 		if (finish)
-			rf_RequeueParityLogData(logData,
-			    &raidPtr->parityLogDiskQueue.reintBlockHead,
-			    &raidPtr->parityLogDiskQueue.reintBlockTail);
+			RequeueParityLogData(logData, &raidPtr->parityLogDiskQueue.reintBlockHead, &raidPtr->parityLogDiskQueue.reintBlockTail);
 		else
-			rf_EnqueueParityLogData(logData,
-			    &raidPtr->parityLogDiskQueue.reintBlockHead,
-			    &raidPtr->parityLogDiskQueue.reintBlockTail);
+			EnqueueParityLogData(logData, &raidPtr->parityLogDiskQueue.reintBlockHead, &raidPtr->parityLogDiskQueue.reintBlockTail);
 		RF_UNLOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);
-		return (1);	/* Relenquish control of this thread. */
+		return (1);	/* relenquish control of this thread */
 	}
 	RF_UNLOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);
 	raidPtr->regionInfo[regionID].coreLog = NULL;
-	if ((raidPtr->regionInfo[regionID].diskCount) <
-	    raidPtr->regionInfo[regionID].capacity)
-		/*
-		 * IMPORTANT !!!  This loop bound assumes region disk holds an
-		 * integral number of core logs.
-		 */
+	if ((raidPtr->regionInfo[regionID].diskCount) < raidPtr->regionInfo[regionID].capacity)
+		/* IMPORTANT!! this loop bound assumes region disk holds an
+		 * integral number of core logs */
 	{
-		/* Update disk map for this region. */
+		/* update disk map for this region */
 		diskCount = raidPtr->regionInfo[regionID].diskCount;
 		for (i = 0; i < raidPtr->numSectorsPerLog; i++) {
-			raidPtr->regionInfo[regionID].diskMap[i + diskCount]
-			    .operation = log->records[i].operation;
-			raidPtr->regionInfo[regionID].diskMap[i + diskCount]
-			    .parityAddr = log->records[i].parityAddr;
+			raidPtr->regionInfo[regionID].diskMap[i + diskCount].operation = log->records[i].operation;
+			raidPtr->regionInfo[regionID].diskMap[i + diskCount].parityAddr = log->records[i].parityAddr;
 		}
 		log->diskOffset = diskCount;
-		raidPtr->regionInfo[regionID].diskCount +=
-		    raidPtr->numSectorsPerLog;
-		rf_FlushLog(raidPtr, log);
+		raidPtr->regionInfo[regionID].diskCount += raidPtr->numSectorsPerLog;
+		FlushLog(raidPtr, log);
 	} else {
-		/*
-		 * No room for log on disk, send it to disk manager and
-		 * request reintegration.
-		 */
-		RF_ASSERT(raidPtr->regionInfo[regionID].diskCount ==
-		    raidPtr->regionInfo[regionID].capacity);
-		rf_ReintLog(raidPtr, regionID, log);
+		/* no room for log on disk, send it to disk manager and
+		 * request reintegration */
+		RF_ASSERT(raidPtr->regionInfo[regionID].diskCount == raidPtr->regionInfo[regionID].capacity);
+		ReintLog(raidPtr, regionID, log);
 	}
 	if (rf_parityLogDebug)
-		printf("[finished dumping parity log to disk, region %d]\n",
-		    regionID);
+		printf("[finished dumping parity log to disk, region %d]\n", regionID);
 	return (0);
 }
 
 int
-rf_ParityLogAppend(RF_ParityLogData_t *logData, int finish,
-    RF_ParityLog_t **incomingLog, int clearReintFlag)
+rf_ParityLogAppend(
+    RF_ParityLogData_t * logData,
+    int finish,
+    RF_ParityLog_t ** incomingLog,
+    int clearReintFlag)
 {
-	int regionID, logItem, itemDone;
+	int     regionID, logItem, itemDone;
 	RF_ParityLogData_t *item;
-	int punt, done = RF_FALSE;
+	int     punt, done = RF_FALSE;
 	RF_ParityLog_t *log;
 	RF_Raid_t *raidPtr;
 	RF_Etimer_t timer;
-	int (*wakeFunc) (RF_DagNode_t * node, int status);
-	void *wakeArg;
+	int     (*wakeFunc) (RF_DagNode_t * node, int status);
+	void   *wakeArg;
 
-	/*
-	 * Add parity to the appropriate log, one sector at a time. This
+	/* Add parity to the appropriate log, one sector at a time. This
 	 * routine is called is called by dag functions ParityLogUpdateFunc
 	 * and ParityLogOverwriteFunc and therefore MUST BE NONBLOCKING.
 	 *
-	 * Parity to be logged is contained in a linked-list (logData). When
+	 * Parity to be logged is contained in a linked-list (logData).  When
 	 * this routine returns, every sector in the list will be in one of
 	 * three places: 1) entered into the parity log 2) queued, waiting on
-	 * reintegration 3) queued, waiting on a core log.
+	 * reintegration 3) queued, waiting on a core log
 	 *
-	 * Blocked work is passed to the ParityLoggingDiskManager for
-	 * completion. Later, as conditions which required the block are
-	 * removed, the work reenters this routine with the "finish" parameter
-	 * set to "RF_TRUE."
+	 * Blocked work is passed to the ParityLoggingDiskManager for completion.
+	 * Later, as conditions which required the block are removed, the work
+	 * reenters this routine with the "finish" parameter set to "RF_TRUE."
 	 *
-	 * NON-BLOCKING
-	 */
+	 * NON-BLOCKING */
 
 	raidPtr = logData->common->raidPtr;
-	/* Lock the region for the first item in logData. */
+	/* lock the region for the first item in logData */
 	RF_ASSERT(logData != NULL);
 	regionID = logData->regionID;
 	RF_LOCK_MUTEX(raidPtr->regionInfo[regionID].mutex);
 	RF_ASSERT(raidPtr->regionInfo[regionID].loggingEnabled);
 
 	if (clearReintFlag) {
-		/*
-		 * Enable flushing for this region. Holding both locks
-		 * provides a synchronization barrier with
-		 * rf_DumpParityLogToDisk.
-		 */
+		/* Enable flushing for this region.  Holding both locks
+		 * provides a synchronization barrier with DumpParityLogToDisk */
 		RF_LOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);
 		RF_LOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
-		RF_ASSERT(raidPtr->regionInfo[regionID].reintInProgress ==
-		    RF_TRUE);
+		RF_ASSERT(raidPtr->regionInfo[regionID].reintInProgress == RF_TRUE);
 		raidPtr->regionInfo[regionID].diskCount = 0;
 		raidPtr->regionInfo[regionID].reintInProgress = RF_FALSE;
-		/* Flushing is now enabled. */
-		RF_UNLOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);
+		RF_UNLOCK_MUTEX(raidPtr->regionInfo[regionID].reintMutex);	/* flushing is now
+										 * enabled */
 		RF_UNLOCK_MUTEX(raidPtr->parityLogDiskQueue.mutex);
 	}
-	/* Process each item in logData. */
+	/* process each item in logData */
 	while (logData) {
-		/* Remove an item from logData. */
+		/* remove an item from logData */
 		item = logData;
 		logData = logData->next;
 		item->next = NULL;
 		item->prev = NULL;
 
 		if (rf_parityLogDebug)
-			printf("[appending parity log data, region %d,"
-			    " raidAddress %d, numSector %d]\n", item->regionID,
-			    (int) item->diskAddress.raidAddress,
-			    (int) item->diskAddress.numSector);
+			printf("[appending parity log data, region %d, raidAddress %d, numSector %d]\n", item->regionID, (int) item->diskAddress.raidAddress, (int) item->diskAddress.numSector);
 
-		/* See if we moved to a new region. */
+		/* see if we moved to a new region */
 		if (regionID != item->regionID) {
 			RF_UNLOCK_MUTEX(raidPtr->regionInfo[regionID].mutex);
 			regionID = item->regionID;
 			RF_LOCK_MUTEX(raidPtr->regionInfo[regionID].mutex);
 			RF_ASSERT(raidPtr->regionInfo[regionID].loggingEnabled);
 		}
-		punt = RF_FALSE;/*
-				 * Set to RF_TRUE if work is blocked. This
+		punt = RF_FALSE;/* Set to RF_TRUE if work is blocked.  This
 				 * can happen in one of two ways: 1) no core
-				 * log (rf_AcquireParityLog) 2) waiting on
-				 * reintegration (rf_DumpParityLogToDisk).
-				 * If punt is RF_TRUE, the dataItem was queued,
-				 * so skip to next item.
-				 */
+				 * log (AcquireParityLog) 2) waiting on
+				 * reintegration (DumpParityLogToDisk) If punt
+				 * is RF_TRUE, the dataItem was queued, so
+				 * skip to next item. */
 
-		/*
-		 * Process item, one sector at a time, until all sectors
-		 * processed or we punt.
-		 */
+		/* process item, one sector at a time, until all sectors
+		 * processed or we punt */
 		if (item->diskAddress.numSector > 0)
 			done = RF_FALSE;
 		else
 			RF_ASSERT(0);
 		while (!punt && !done) {
-			/* Verify that a core log exists for this region. */
+			/* verify that a core log exists for this region */
 			if (!raidPtr->regionInfo[regionID].coreLog) {
-				/*
-				 * Attempt to acquire a parity log. If
+				/* Attempt to acquire a parity log. If
 				 * acquisition fails, queue remaining work in
-				 * data item and move to nextItem.
-				 */
-				if (incomingLog) {
+				 * data item and move to nextItem. */
+				if (incomingLog)
 					if (*incomingLog) {
-						RF_ASSERT((*incomingLog)->next
-						    == NULL);
-						raidPtr->regionInfo[regionID]
-						    .coreLog = *incomingLog;
-						raidPtr->regionInfo[regionID]
-						    .coreLog->regionID =
-						     regionID;
+						RF_ASSERT((*incomingLog)->next == NULL);
+						raidPtr->regionInfo[regionID].coreLog = *incomingLog;
+						raidPtr->regionInfo[regionID].coreLog->regionID = regionID;
 						*incomingLog = NULL;
 					} else
-						raidPtr->regionInfo[regionID]
-						    .coreLog =
-						     rf_AcquireParityLog(item,
-						      finish);
-				} else
-					raidPtr->regionInfo[regionID].coreLog =
-					    rf_AcquireParityLog(item, finish);
-				/*
-				 * Note: rf_AcquireParityLog either returns
-				 * a log or enqueues currentItem.
-				 */
+						raidPtr->regionInfo[regionID].coreLog = AcquireParityLog(item, finish);
+				else
+					raidPtr->regionInfo[regionID].coreLog = AcquireParityLog(item, finish);
+				/* Note: AcquireParityLog either returns a log
+				 * or enqueues currentItem */
 			}
 			if (!raidPtr->regionInfo[regionID].coreLog)
-				punt = RF_TRUE;	/* Failed to find a core log. */
+				punt = RF_TRUE;	/* failed to find a core log */
 			else {
-				RF_ASSERT(raidPtr->regionInfo[regionID].coreLog
-				    ->next == NULL);
-				/*
-				 * Verify that the log has room for new
-				 * entries.
-				 */
-				/*
-				 * If log is full, dump it to disk and grab a
-				 * new log.
-				 */
-				if (raidPtr->regionInfo[regionID].coreLog
-				    ->numRecords == raidPtr->numSectorsPerLog)
-				{
-					/* Log is full, dump it to disk. */
-					if (rf_DumpParityLogToDisk(finish,
-					    item))
-						/*
-						 * Dump unsuccessful, blocked
-						 * on reintegration.
-						 */
-						punt = RF_TRUE;
+				RF_ASSERT(raidPtr->regionInfo[regionID].coreLog->next == NULL);
+				/* verify that the log has room for new
+				 * entries */
+				/* if log is full, dump it to disk and grab a
+				 * new log */
+				if (raidPtr->regionInfo[regionID].coreLog->numRecords == raidPtr->numSectorsPerLog) {
+					/* log is full, dump it to disk */
+					if (DumpParityLogToDisk(finish, item))
+						punt = RF_TRUE;	/* dump unsuccessful,
+								 * blocked on
+								 * reintegration */
 					else {
-						/* Dump was successful. */
-					  if (incomingLog) {
+						/* dump was successful */
+						if (incomingLog)
 							if (*incomingLog) {
-								RF_ASSERT(
-							(*incomingLog)->next ==
-								    NULL);
-								raidPtr->
-						regionInfo[regionID].coreLog =
-								   *incomingLog;
-								raidPtr->
-						regionInfo[regionID].coreLog->
-							    regionID = regionID;
-								*incomingLog =
-								    NULL;
+								RF_ASSERT((*incomingLog)->next == NULL);
+								raidPtr->regionInfo[regionID].coreLog = *incomingLog;
+								raidPtr->regionInfo[regionID].coreLog->regionID = regionID;
+								*incomingLog = NULL;
 							} else
-								raidPtr->
-						regionInfo[regionID].coreLog =
-						 rf_AcquireParityLog(item,
-						     finish);
-						} else
-							raidPtr->regionInfo
-							    [regionID].coreLog =
-						 rf_AcquireParityLog(item,
-						     finish);
-						/*
-						 * If a core log is not
+								raidPtr->regionInfo[regionID].coreLog = AcquireParityLog(item, finish);
+						else
+							raidPtr->regionInfo[regionID].coreLog = AcquireParityLog(item, finish);
+						/* if a core log is not
 						 * available, must queue work
-						 * and return.
-						 */
-						if (!raidPtr->regionInfo
-						    [regionID].coreLog)
-							/*
-							 * Blocked on log
-							 * availability.
-							 */
-							punt = RF_TRUE;
+						 * and return */
+						if (!raidPtr->regionInfo[regionID].coreLog)
+							punt = RF_TRUE;	/* blocked on log
+									 * availability */
 					}
 				}
 			}
-			/*
-			 * If we didn't punt on this item, attempt to add a
-			 * sector to the core log.
-			 */
+			/* if we didn't punt on this item, attempt to add a
+			 * sector to the core log */
 			if (!punt) {
-				RF_ASSERT(raidPtr->regionInfo[regionID].coreLog
-				    ->next == NULL);
-				/*
-				 * At this point, we have a core log with
-				 * enough room for a sector.
-				 */
-				/* Copy a sector into the log. */
+				RF_ASSERT(raidPtr->regionInfo[regionID].coreLog->next == NULL);
+				/* at this point, we have a core log with
+				 * enough room for a sector */
+				/* copy a sector into the log */
 				log = raidPtr->regionInfo[regionID].coreLog;
-				RF_ASSERT(log->numRecords <
-				    raidPtr->numSectorsPerLog);
+				RF_ASSERT(log->numRecords < raidPtr->numSectorsPerLog);
 				logItem = log->numRecords++;
-				log->records[logItem].parityAddr =
-				    item->diskAddress;
-				RF_ASSERT(log->records[logItem].parityAddr
-				    .startSector >=
-				    raidPtr->regionInfo[regionID]
-				    .parityStartAddr);
-				RF_ASSERT(log->records[logItem].parityAddr
-				    .startSector <
-				    raidPtr->regionInfo[regionID]
-				    .parityStartAddr +
-				    raidPtr->regionInfo[regionID]
-				    .numSectorsParity);
+				log->records[logItem].parityAddr = item->diskAddress;
+				RF_ASSERT(log->records[logItem].parityAddr.startSector >= raidPtr->regionInfo[regionID].parityStartAddr);
+				RF_ASSERT(log->records[logItem].parityAddr.startSector < raidPtr->regionInfo[regionID].parityStartAddr + raidPtr->regionInfo[regionID].numSectorsParity);
 				log->records[logItem].parityAddr.numSector = 1;
-				log->records[logItem].operation =
-				    item->common->operation;
-				bcopy((item->common->bufPtr +
-				    (item->bufOffset++ * (1 <<
-				    item->common->raidPtr->logBytesPerSector))),
-				    log->bufPtr + (logItem * (1 <<
-				    item->common->raidPtr->logBytesPerSector)),
-				    (1 << item->common->raidPtr
-				     ->logBytesPerSector));
+				log->records[logItem].operation = item->common->operation;
+				memcpy((char *)log->bufPtr + (logItem * (1 << item->common->raidPtr->logBytesPerSector)), ((char *)item->common->bufPtr + (item->bufOffset++ * (1 << item->common->raidPtr->logBytesPerSector))), (1 << item->common->raidPtr->logBytesPerSector));
 				item->diskAddress.numSector--;
 				item->diskAddress.startSector++;
 				if (item->diskAddress.numSector == 0)
@@ -975,10 +812,8 @@ rf_ParityLogAppend(RF_ParityLogData_t *logData, int finish,
 		}
 
 		if (!punt) {
-			/*
-			 * Processed this item completely, decrement count of
-			 * items to be processed.
-			 */
+			/* Processed this item completely, decrement count of
+			 * items to be processed. */
 			RF_ASSERT(item->diskAddress.numSector == 0);
 			RF_LOCK_MUTEX(item->common->mutex);
 			item->common->cnt--;
@@ -988,27 +823,23 @@ rf_ParityLogAppend(RF_ParityLogData_t *logData, int finish,
 				itemDone = RF_FALSE;
 			RF_UNLOCK_MUTEX(item->common->mutex);
 			if (itemDone) {
-				/*
-				 * Finished processing all log data for this
+				/* Finished processing all log data for this
 				 * IO Return structs to free list and invoke
-				 * wakeup function.
-				 */
-				/* Grab initial value of timer. */
-				timer = item->common->startTime;
+				 * wakeup function. */
+				timer = item->common->startTime;	/* grab initial value of
+									 * timer */
 				RF_ETIMER_STOP(timer);
 				RF_ETIMER_EVAL(timer);
-				item->common->tracerec->plog_us +=
-				    RF_ETIMER_VAL_US(timer);
+				item->common->tracerec->plog_us += RF_ETIMER_VAL_US(timer);
 				if (rf_parityLogDebug)
-					printf("[waking process for region"
-					    " %d]\n", item->regionID);
+					printf("[waking process for region %d]\n", item->regionID);
 				wakeFunc = item->common->wakeFunc;
 				wakeArg = item->common->wakeArg;
-				rf_FreeParityLogCommonData(item->common);
-				rf_FreeParityLogData(item);
+				FreeParityLogCommonData(item->common);
+				FreeParityLogData(item);
 				(wakeFunc) (wakeArg, 0);
 			} else
-				rf_FreeParityLogData(item);
+				FreeParityLogData(item);
 		}
 	}
 	RF_UNLOCK_MUTEX(raidPtr->regionInfo[regionID].mutex);
@@ -1019,9 +850,9 @@ rf_ParityLogAppend(RF_ParityLogData_t *logData, int finish,
 
 
 void
-rf_EnableParityLogging(RF_Raid_t *raidPtr)
+rf_EnableParityLogging(RF_Raid_t * raidPtr)
 {
-	int regionID;
+	int     regionID;
 
 	for (regionID = 0; regionID < rf_numParityRegions; regionID++) {
 		RF_LOCK_MUTEX(raidPtr->regionInfo[regionID].mutex);
@@ -1031,4 +862,4 @@ rf_EnableParityLogging(RF_Raid_t *raidPtr)
 	if (rf_parityLogDebug)
 		printf("[parity logging enabled]\n");
 }
-#endif	/* RF_INCLUDE_PARITYLOGGING > 0 */
+#endif				/* RF_INCLUDE_PARITYLOGGING > 0 */

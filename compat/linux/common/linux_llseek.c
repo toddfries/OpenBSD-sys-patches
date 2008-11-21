@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_llseek.c,v 1.27 2003/01/18 08:02:53 thorpej Exp $	*/
+/*	$NetBSD: linux_llseek.c,v 1.33 2008/06/18 12:24:17 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_llseek.c,v 1.27 2003/01/18 08:02:53 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_llseek.c,v 1.33 2008/06/18 12:24:17 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,7 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_llseek.c,v 1.27 2003/01/18 08:02:53 thorpej Ex
 #include <sys/malloc.h>
 #include <sys/conf.h>
 
-#include <sys/sa.h>
+#include <sys/sched.h>
 #include <sys/syscallargs.h>
 
 #include <compat/linux/common/linux_types.h>
@@ -63,18 +56,15 @@ __KERNEL_RCSID(0, "$NetBSD: linux_llseek.c,v 1.27 2003/01/18 08:02:53 thorpej Ex
  * This appears to be part of a Linux attempt to switch to 64 bits file sizes.
  */
 int
-linux_sys_llseek(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_llseek(struct lwp *l, const struct linux_sys_llseek_args *uap, register_t *retval)
 {
-	struct linux_sys_llseek_args /* {
+	/* {
 		syscallarg(int) fd;
 		syscallarg(uint32_t) ohigh;
 		syscallarg(uint32_t) olow;
-		syscallarg(caddr_t) res;
+		syscallarg(void *) res;
 		syscallarg(int) whence;
-	} */ *uap = v;
+	} */
 	struct sys_lseek_args bla;
 	int error;
 	off_t off;

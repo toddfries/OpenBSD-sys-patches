@@ -1,5 +1,6 @@
-/*	$OpenBSD: setjmp.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
-/*	$NetBSD: setjmp.h,v 1.1 2003/04/26 18:39:47 fvdl Exp $	*/
+/*	$NetBSD: setjmp.h,v 1.2 2008/10/26 00:08:15 mrg Exp $	*/
+
+#ifdef __x86_64__
 
 /*
  * machine/setjmp.h: machine dependent setjmp-related information.
@@ -19,3 +20,9 @@
 #define _JB_SIGMASK	9
 
 #define	_JBLEN	11		/* size, in longs, of a jmp_buf */
+
+#else	/*	__x86_64__	*/
+
+#include <i386/setjmp.h>
+
+#endif	/*	__x86_64__	*/

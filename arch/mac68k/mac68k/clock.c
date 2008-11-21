@@ -1,8 +1,6 @@
-/*	$OpenBSD: clock.c,v 1.24 2007/07/14 19:06:48 miod Exp $	*/
-/*	$NetBSD: clock.c,v 1.39 1999/11/05 19:14:56 scottr Exp $	*/
+/*	$NetBSD: clock.c,v 1.47 2008/07/22 14:43:45 hauke Exp $	*/
 
 /*
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1990 The Regents of the University of California.
  * All rights reserved.
  *
@@ -19,6 +17,41 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -74,41 +107,48 @@
  *	@(#)clock.c   7.6 (Berkeley) 5/7/91
  */
 
-/*
- * Mac II machine-dependent clock routines.
- */
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.47 2008/07/22 14:43:45 hauke Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
-#include <sys/limits.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/timetc.h>
+
+#include <dev/clock_subr.h>
 
 #include <machine/autoconf.h>
 #include <machine/psl.h>
 #include <machine/cpu.h>
+#include <machine/limits.h>
+
+#if defined(GPROF) && defined(PROFTIMER)
+#include <sys/gprof.h>
+#endif
 
 #include <mac68k/mac68k/pram.h>
+#include <mac68k/mac68k/clockreg.h>
 #include <machine/viareg.h>
-
-#include <dev/clock_subr.h>
 
 #ifdef DEBUG
 int	clock_debug = 0;
 #endif
 
-int	rtclock_intr(void *);
-
-u_int		clk_interval;
-u_int8_t	clk_inth, clk_intl;
+void	rtclock_intr(void);
+static int mac68k_gettime(todr_chip_handle_t, volatile struct timeval *);
+static int mac68k_settime(todr_chip_handle_t, volatile struct timeval *);
+static u_int via1_t2_get_timecount(struct timecounter *);
 
 #define	DIFF19041970	2082844800
+#define	DIFF19701990	630720000
+#define	DIFF19702010	1261440000
+
 
 /*
- * The Macintosh timers decrement once every 1.2766 microseconds.
- * MGFH2, p. 180
+ * Mac II machine-dependent clock routines.
  */
-#define	CLK_RATE	12766
 
 /*
  * Start the real-time clock; i.e. set timer latches and boot timer.
@@ -116,99 +156,208 @@ u_int8_t	clk_inth, clk_intl;
  * We use VIA1 timer 1.
  */
 void
-startrtclock()
+startrtclock(void)
 {
-#ifndef HZ
-	/*
-	 * By default, if HZ is not specified, use 60 Hz, unless we are
-	 * using A/UX style interrupts. We then need to readjust values
-	 * based on a 100Hz value in param.c.
-	 */
-	if (mac68k_machine.aux_interrupts == 0) {
-#define	HZ_60 60
-		hz = HZ_60;
-		tick = 1000000 / HZ_60;
-		tickadj = 240000 / (60 * HZ_60);/* can adjust 240ms in 60s */
-	}
-#endif
-
-	/*
-	 * Calculate clocks needed to hit hz ticks/sec.
-	 *
-	 * The VIA clock speed is 1.2766us, so the timer value needed is:
-	 *
-	 *                    1       1,000,000us     1
-	 *  CLK_INTERVAL = -------- * ----------- * ------
-	 e                 1.2766us       1s          hz
-	 *
-	 * While it may be tempting to simplify the following further,
-	 * we can run into integer overflow problems.
-	 * Also note:  do *not* define HZ to be less than 12; overflow
-	 * will occur, yielding invalid results.
-	 */
-	clk_interval = ((100000000UL / hz) * 100) / 12766;
-	clk_inth = ((clk_interval >> 8) & 0xff);
-	clk_intl = (clk_interval & 0xff);
-
-	/* be certain clock interrupts are off */
-	via_reg(VIA1, vIER) = V1IF_T1;
+/*
+ * BARF MF startrt clock is called twice in init_main, configure,
+ * the reason why is doced in configure
+ */
+	/* be certain all clock interrupts are off */
+	via_reg(VIA1, vIER) = V1IF_T1 | V1IF_T2;
 
 	/* set timer latch */
 	via_reg(VIA1, vACR) |= ACR_T1LATCH;
 
-	/* set VIA timer 1 latch to ``hz'' Hz */
-	via_reg(VIA1, vT1L) = clk_intl;
-	via_reg(VIA1, vT1LH) = clk_inth;
+	/* set VIA timer 1 latch to 60 Hz (100 Hz) */
+	via_reg(VIA1, vT1L) = CLK_INTL;
+	via_reg(VIA1, vT1LH) = CLK_INTH;
 
-	/* set VIA timer 1 counter started for ``hz'' Hz */
-	via_reg(VIA1, vT1C) = clk_intl;
-	via_reg(VIA1, vT1CH) = clk_inth;
+	/* set VIA timer 1 counter started for 60(100) Hz */
+	via_reg(VIA1, vT1C) = CLK_INTL;
+	via_reg(VIA1, vT1CH) = CLK_INTH;
+
+	/*
+	 * Set & start VIA1 timer 2 free-running for timecounter support.
+	 * Since reading the LSB of the counter clears any pending
+	 * interrupt, timer 1 is less suitable as a timecounter.
+	 */
+	via_reg(VIA1, vT2C) = 0x0ff;
+	via_reg(VIA1, vT2CH) = 0x0ff;
 }
 
 void
-cpu_initclocks()
+enablertclock(void)
 {
-	tickfix = 1000000 - (hz * tick);
-	if (tickfix != 0) {
-		int ftp;
-
-		ftp = min(ffs(tickfix), ffs(hz));
-		tickfix >>= (ftp - 1);
-		tickfixinterval = hz >> (ftp - 1);
-	}
-
 	/* clear then enable clock interrupt. */
 	via_reg(VIA1, vIFR) |= V1IF_T1;
 	via_reg(VIA1, vIER) = 0x80 | V1IF_T1;
 }
 
 void
-setstatclockrate(rateinhz)
-	int rateinhz;
+cpu_initclocks(void)
+{
+	static struct todr_chip_handle todr = {
+		.todr_settime = mac68k_settime,
+		.todr_gettime = mac68k_gettime,
+	};
+	static struct timecounter via1_t2_timecounter = {
+		.tc_get_timecount = via1_t2_get_timecount,
+		.tc_poll_pps	  = 0,
+		.tc_counter_mask  = 0x0ffffu,
+		.tc_frequency	  = CLK_FREQ,
+		.tc_name	  = "VIA1 T2",
+		.tc_quality	  = 100,
+		.tc_priv	  = NULL,
+		.tc_next	  = NULL
+	};
+	
+	enablertclock();
+	todr_attach(&todr);
+	tc_init(&via1_t2_timecounter);
+}
+
+void
+setstatclockrate(int rateinhz)
 {
 }
 
-/*
- * Returns number of usec since last clock tick/interrupt.
- *
- * Check high byte twice to prevent missing a roll-over.
- * (race condition?)
- */
-u_long
-clkread()
+void
+disablertclock(void)
 {
-	int high, high2, low;
+	/* disable clock interrupt */
+	via_reg(VIA1, vIER) = V1IF_T1;
+}
 
-	high = via_reg(VIA1, vT1CH);
-	low = via_reg(VIA1, vT1C);
+static u_int
+via1_t2_get_timecount(struct timecounter *tc)
+{
+	uint8_t high, high2, low;
+	int s;
 
-	high2 = via_reg(VIA1, vT1CH);
-	if (high != high2)
+	/* Guard HW timer access */
+	s = splhigh();
+	
+	high = via_reg(VIA1, vT2CH);
+	low = via_reg(VIA1, vT2C);
+
+	high2 = via_reg(VIA1, vT2CH);
+
+	/*
+	 * If we find that the MSB has just been incremented, read
+	 * the LSB again, to avoid a race that could leave us with a new
+	 * MSB and an old LSB value.
+	 * With timecounters, the difference is quite spectacular.
+	 *
+	 * is added that to port-amiga ten years ago. Thanks!
+	 */
+	if (high != high2) {
+		low = via_reg(VIA1, vT2C);
 		high = high2;
-
-	/* return count left in timer / 1.27 */
-	return ((clk_interval - (high << 8) - low) * 10000 / CLK_RATE);
+	}
+	
+	splx(s);
+	
+	return 0x0ffff - ((high << 8) | low);
 }
+
+#ifdef PROFTIMER
+/*
+ * Here, we have implemented code that causes VIA2's timer to count
+ * the profiling clock.  Following the HP300's lead, this reduces
+ * the impact on other tasks, since locore turns off the profiling clock
+ * on context switches.  If need be, the profiling clock's resolution can
+ * be cranked higher than the real-time clock's resolution, to prevent
+ * aliasing and allow higher accuracy.
+ */
+int     profint = PRF_INTERVAL;	/* Clock ticks between interrupts */
+int     profinthigh;
+int     profintlow;
+int     profscale = 0;		/* Scale factor from sys clock to prof clock */
+char    profon = 0;		/* Is profiling clock on? */
+
+/* profon values - do not change, locore.s assumes these values */
+#define	PRF_NONE	0x00
+#define	PRF_USER	0x01
+#define	PRF_KERNEL	0x80
+
+void
+initprofclock(void)
+{
+	/* profile interval must be even divisor of system clock interval */
+	if (profint > CLK_INTERVAL)
+		profint = CLK_INTERVAL;
+	else
+		if (CLK_INTERVAL % profint != 0)
+			/* try to intelligently fix clock interval */
+			profint = CLK_INTERVAL / (CLK_INTERVAL / profint);
+
+	profscale = CLK_INTERVAL / profint;
+
+	profinthigh = profint >> 8;
+	profintlow = profint & 0xff;
+}
+
+void
+startprofclock(void)
+{
+	via_reg(VIA2, vT1L) = (profint - 1) & 0xff;
+	via_reg(VIA2, vT1LH) = (profint - 1) >> 8;
+	via_reg(VIA2, vACR) |= ACR_T1LATCH;
+	via_reg(VIA2, vT1C) = (profint - 1) & 0xff;
+	via_reg(VIA2, vT1CH) = (profint - 1) >> 8;
+}
+
+void
+stopprofclock(void)
+{
+	via_reg(VIA2, vT1L) = 0;
+	via_reg(VIA2, vT1LH) = 0;
+	via_reg(VIA2, vT1C) = 0;
+	via_reg(VIA2, vT1CH) = 0;
+}
+
+#ifdef GPROF
+/*
+ * BARF: we should check this:
+ *
+ * profclock() is expanded in line in lev6intr() unless profiling kernel.
+ * Assumes it is called with clock interrupts blocked.
+ */
+void
+profclock(clockframe *pclk)
+{
+	/*
+	 * Came from user mode.
+	 * If this process is being profiled record the tick.
+	 */
+	if (USERMODE(pclk->ps)) {
+		if (curproc->p_stats.p_prof.pr_scale)
+			addupc_task(&curproc, pclk->pc, 1);
+	}
+	/*
+	 * Came from kernel (supervisor) mode.
+	 * If we are profiling the kernel, record the tick.
+	 */
+	else
+		if (profiling < 2) {
+			int s = pclk->pc - s_lowpc;
+
+			if (s < s_textsize)
+				kcount[s / (HISTFRACTION * sizeof(*kcount))]++;
+		}
+	/*
+	 * Kernel profiling was on but has been disabled.
+	 * Mark as no longer profiling kernel and if all profiling done,
+	 * disable the clock.
+	 */
+	if (profiling && (profon & PRF_KERNEL)) {
+		profon &= ~PRF_KERNEL;
+		if (profon == PRF_NONE)
+			stopprofclock();
+	}
+}
+#endif
+#endif
 
 static u_long	ugmt_2_pramt(u_long);
 static u_long	pramt_2_ugmt(u_long);
@@ -218,13 +367,12 @@ static u_long	pramt_2_ugmt(u_long);
  * GMT bias adjustment is done elsewhere.
  */
 static u_long
-ugmt_2_pramt(t)
-	u_long t;
+ugmt_2_pramt(u_long t)
 {
 	/* don't know how to open a file properly. */
 	/* assume compiled timezone is correct. */
 
-	return (t + DIFF19041970 - 60 * tz.tz_minuteswest);
+	return (t = t + DIFF19041970);
 }
 
 /*
@@ -232,10 +380,9 @@ ugmt_2_pramt(t)
  * GMT bias adjustment is done elsewhere.
  */
 static u_long
-pramt_2_ugmt(t)
-	u_long t;
+pramt_2_ugmt(u_long t)
 {
-	return (t - DIFF19041970 + 60 * tz.tz_minuteswest);
+	return (t = t - DIFF19041970);
 }
 
 /*
@@ -260,64 +407,29 @@ int	mac68k_trust_pram = 1;
  * Set global GMT time register, using a file system time base for comparison
  * and sanity checking.
  */
-void
-inittodr(base)
-	time_t base;
+int
+mac68k_gettime(todr_chip_handle_t tch, volatile struct timeval *tvp)
 {
 	u_long timbuf;
 
-	timbuf = pram_readtime();
-	if (timbuf == 0) {
-		/* We don't know how to access PRAM on this hardware. */
+	timbuf = pramt_2_ugmt(pram_readtime());
+	if ((timbuf - macos_boottime) > 10 * 60) {
+#if DIAGNOSTIC
+		printf(
+		    "PRAM time does not appear to have been read correctly.\n");
+		printf("PRAM: 0x%lx, macos_boottime: 0x%lx.\n",
+		    timbuf, macos_boottime);
+#endif
 		timbuf = macos_boottime;
 		mac68k_trust_pram = 0;
-	} else {
-		timbuf = pramt_2_ugmt(pram_readtime());
-		if ((timbuf - (macos_boottime + 60 * tz.tz_minuteswest)) >
-		    10 * 60) {
-#ifdef DIAGNOSTIC
-			printf("PRAM time does not appear"
-			    " to have been read correctly.\n");
-			printf("PRAM: 0x%lx, macos_boottime: 0x%lx.\n",
-			    timbuf, macos_boottime + 60 * tz.tz_minuteswest);
-#endif
-			timbuf = macos_boottime;
-			mac68k_trust_pram = 0;
-		}
-#ifdef DEBUG
-		else
-			printf("PRAM: 0x%lx, macos_boottime: 0x%lx.\n",
-			    timbuf, macos_boottime);
-#endif
 	}
-
-	/*
-	 * GMT bias is passed in from Booter
-	 * To get GMT, *subtract* GMTBIAS from *our* time
-	 * (gmtbias is in minutes, mult by 60)
-	 */
-	timbuf -= macos_gmtbias * 60;
-
-	if (base < 5 * SECYR) {
-		printf("WARNING: file system time earlier than 1975\n");
-		printf(" -- CHECK AND RESET THE DATE!\n");
-		base = 36 * SECYR;	/* Last update here in 2006... */
-	}
-	if (timbuf < base) {
-		printf(
-		    "WARNING: Battery clock has earlier time than UNIX fs.\n");
-		timbuf = base;
-	}
-	time.tv_sec = timbuf;
-	time.tv_usec = 0;
+	tvp->tv_sec = timbuf;
+	tvp->tv_usec = 0;
+	return 0;
 }
 
-/*
- * Set battery backed clock to a new time, presumably after someone has
- * changed system time.
- */
-void
-resettodr()
+int
+mac68k_settime(todr_chip_handle_t tch, volatile struct timeval *tvp)
 {
 	if (mac68k_trust_pram)
 		/*
@@ -325,8 +437,20 @@ resettodr()
 		 * To get *our* time, add GMTBIAS to GMT.
 		 * (gmtbias is in minutes, multiply by 60).
 		 */
-		pram_settime(ugmt_2_pramt(time.tv_sec + macos_gmtbias * 60));
+		pram_settime(ugmt_2_pramt(tvp->tv_sec + macos_gmtbias * 60));
+#ifdef DEBUG
+	else if (clock_debug)
+		printf("NetBSD/mac68k does not trust itself to try and write "
+		    "to the PRAM on this system.\n");
+#endif
+	return 0;
 }
+
+/*
+ * The Macintosh timers decrement once every 1.2766 microseconds.
+ * MGFH2, p. 180
+ */
+#define	CLK_RATE	12766
 
 #define	DELAY_CALIBRATE	(0xffffff << 7)	/* Large value for calibration */
 
@@ -334,27 +458,27 @@ u_int		delay_factor = DELAY_CALIBRATE;
 volatile int	delay_flag = 1;
 
 int		_delay(u_int);
-static int	delay_timer1_irq(void *);
+static void	delay_timer1_irq(void *);
 
-static int
-delay_timer1_irq(dummy)
-	void *dummy;
+static void
+delay_timer1_irq(void *dummy)
 {
 	delay_flag = 0;
-	return (1);
 }
 
 /*
  * Calibrate delay_factor with VIA1 timer T1.
  */
 void
-mac68k_calibrate_delay()
+mac68k_calibrate_delay(void)
 {
 	u_int sum, n;
 
+	(void)spl0();
+
 	/* Disable VIA1 timer 1 interrupts and set up service routine */
 	via_reg(VIA1, vIER) = V1IF_T1;
-	via1_register_irq(VIA1_T1, delay_timer1_irq, NULL, NULL);
+	via1_register_irq(VIA1_T1, delay_timer1_irq, NULL);
 
 	/* Set the timer for one-shot mode, then clear and enable interrupts */
 	via_reg(VIA1, vACR) &= ~ACR_T1LATCH;
@@ -366,8 +490,6 @@ mac68k_calibrate_delay()
 		printf("mac68k_calibrate_delay(): entering timing loop\n");
 #endif
 
-	(void)_spl(IPLTOPSL(mac68k_machine.via1_ipl) - 1);
-
 	for (sum = 0, n = 8; n > 0; n--) {
 		delay_flag = 1;
 		via_reg(VIA1, vT1C) = 0;	/* 1024 clock ticks */
@@ -375,11 +497,9 @@ mac68k_calibrate_delay()
 		sum += ((delay_factor >> 7) - _delay(1));
 	}
 
-	(void)splhigh();
-
 	/* Disable timer interrupts and reset service routine */
 	via_reg(VIA1, vIER) = V1IF_T1;
-	via1_register_irq(VIA1_T1, rtclock_intr, NULL, NULL);
+	via1_register_irq(VIA1_T1, (void (*)(void *))rtclock_intr, NULL);
 
 	/*
 	 * If this weren't integer math, the following would look
@@ -406,4 +526,6 @@ mac68k_calibrate_delay()
 	if (clock_debug)
 		printf("mac68k_calibrate_delay(): delay_factor calibrated\n");
 #endif
+
+	(void)splhigh();
 }

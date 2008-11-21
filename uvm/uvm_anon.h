@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_anon.h,v 1.14 2007/06/18 21:51:15 pedro Exp $	*/
-/*	$NetBSD: uvm_anon.h,v 1.13 2000/12/27 09:17:04 chs Exp $	*/
+/*	$NetBSD: uvm_anon.h,v 1.25 2008/01/02 11:49:15 ad Exp $	*/
 
 /*
  *
@@ -40,6 +39,10 @@
  * uvm_anon.h
  */
 
+#if defined(_KERNEL_OPT)
+#include "opt_vmswap.h"
+#endif
+
 /*
  * anonymous memory management
  *
@@ -49,12 +52,14 @@
  */
 
 struct vm_anon {
-	struct vm_page *an_page;	/* if in RAM [an_lock] */
 	int an_ref;			/* reference count [an_lock] */
-	int an_swslot;		/* drum swap slot # (if != 0) 
+	kmutex_t an_lock;		/* lock for an_ref */
+	struct vm_page *an_page;/* if in RAM [an_lock] */
+#if defined(VMSWAP) || 1 /* XXX libkvm */
+	int an_swslot;		/* drum swap slot # (if != 0)
 				   [an_lock.  also, it is ok to read
 				   an_swslot if we hold an_page PG_BUSY] */
-	simple_lock_data_t an_lock;	/* lock for an_ref */
+#endif /* defined(VMSWAP) */
 };
 
 /*
@@ -74,7 +79,7 @@ struct vm_anon {
  */
 
 /*
- * processes reference anonymous virtual memory maps with an anonymous 
+ * processes reference anonymous virtual memory maps with an anonymous
  * reference structure:
  */
 
@@ -98,8 +103,13 @@ struct vm_anon *uvm_analloc(void);
 void uvm_anfree(struct vm_anon *);
 void uvm_anon_init(void);
 struct vm_page *uvm_anon_lockloanpg(struct vm_anon *);
+#if defined(VMSWAP)
 void uvm_anon_dropswap(struct vm_anon *);
-boolean_t uvm_anon_pagein(struct vm_anon *);
+#else /* defined(VMSWAP) */
+#define	uvm_anon_dropswap(a)	/* nothing */
+#endif /* defined(VMSWAP) */
+void uvm_anon_release(struct vm_anon *);
+bool uvm_anon_pagein(struct vm_anon *);
 #endif /* _KERNEL */
 
 #endif /* _UVM_UVM_ANON_H_ */

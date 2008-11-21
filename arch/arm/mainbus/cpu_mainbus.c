@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpu_mainbus.c,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
-/*	$NetBSD: cpu_mainbus.c,v 1.3 2002/01/05 22:41:48 chris Exp $	*/
+/*	$NetBSD: cpu_mainbus.c,v 1.8 2005/12/11 12:16:51 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Mark Brinicombe.
@@ -42,40 +41,45 @@
  * Created      : 10/10/95
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cpu_mainbus.c,v 1.8 2005/12/11 12:16:51 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/proc.h>
 #if 0
+#include <sys/conf.h>
 #include <uvm/uvm_extern.h>
 #include <machine/io.h>
-#include <machine/conf.h>
 #endif
 #include <machine/cpu.h>
 #if 0
 #include <arm/cpus.h>
 #include <arm/undefined.h>
 #endif
-#include <arm/mainbus/mainbus.h>
 
 /*
  * Prototypes
  */
-static int cpu_mainbus_match (struct device *, void *, void *);
-static void cpu_mainbus_attach (struct device *, struct device *, void *);
+static int cpu_mainbus_match __P((struct device *, struct cfdata *, void *));
+static void cpu_mainbus_attach __P((struct device *, struct device *, void *));
  
 /*
  * int cpumatch(struct device *parent, struct cfdata *cf, void *aux)
+ *
+ * Probe for the main cpu. Currently all this does is return 1 to
+ * indicate that the cpu was found.
  */ 
  
 static int
-cpu_mainbus_match(struct device *parent, void *vcf, void *aux)
+cpu_mainbus_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
-	struct mainbus_attach_args *ma = aux;
-	struct cfdata *cf = (struct cfdata *)vcf;
-
-	return (strcmp(cf->cf_driver->cd_name, ma->ma_name) == 0);
+	return(1);
 }
 
 /*
@@ -93,10 +97,5 @@ cpu_mainbus_attach(parent, self, aux)
 	cpu_attach(self);
 }
 
-struct cfattach cpu_mainbus_ca = {
-	sizeof(struct device), cpu_mainbus_match, cpu_mainbus_attach
-};
-
-struct cfdriver cpu_cd = {
-	NULL, "cpu", DV_DULL
-};
+CFATTACH_DECL(cpu_mainbus, sizeof(struct device),
+    cpu_mainbus_match, cpu_mainbus_attach, NULL, NULL);

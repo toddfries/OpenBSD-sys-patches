@@ -1,12 +1,11 @@
-/*	$OpenBSD: umidi_quirks.h,v 1.3 2002/06/11 07:49:57 nate Exp $	*/
-/*	$NetBSD: umidi_quirks.h,v 1.2 2001/09/29 22:00:47 tshiozak Exp $	*/
+/*	$NetBSD: umidi_quirks.h,v 1.8 2008/07/08 11:34:43 gmcgarry Exp $	*/
 
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Takuya SHIOZAKI (tshiozak@netbsd.org).
+ * by Takuya SHIOZAKI (tshiozak@NetBSD.org).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -47,24 +39,30 @@
 
 struct umq_data {
 	int		type;
+#define UMQ_TYPE_NONE		0
 #define UMQ_TYPE_FIXED_EP	1
 #define UMQ_TYPE_YAMAHA		2
-	void		*data;
+#define UMQ_TYPE_MIDIMAN_GARBLE	3
+#define UMQ_TYPE_CN_SEQ_PER_EP  4 /* should be default behavior, but isn't */
+#define UMQ_TYPE_CN_SEQ_GLOBAL	5 /* shouldn't be default behavior, but is */
+#define UMQ_TYPE_CN_FIXED       6 /* should be a joke, but isn't funny */
+#define UMQ_TYPE_MD_FIXED       7 /* in case CN_FIXED gives a weird order */
+	const void	*data;
 };
 
 struct umidi_quirk {
 	int			vendor;
 	int			product;
 	int			iface;
-	struct umq_data		*quirks;
+	const struct umq_data	*quirks;
         u_int32_t		type_mask;
 };
 #define UMQ_ISTYPE(q, type) \
 	((q)->sc_quirk && ((q)->sc_quirk->type_mask & (1<<((type)-1))))
 
-#define UMQ_TERMINATOR	{ 0, }
+#define UMQ_TERMINATOR { .type = UMQ_TYPE_NONE, },
 #define UMQ_DEF(v, p, i)					\
-static struct umq_data	umq_##v##_##p##_##i[]
+static const struct umq_data	umq_##v##_##p##_##i[]
 #define UMQ_REG(v, p, i)					\
 	{ USB_VENDOR_##v, USB_PRODUCT_##p, i,			\
 	  umq_##v##_##p##_##i, 0 }
@@ -75,7 +73,8 @@ static struct umq_data	umq_##v##_##p##_##i[]
 #define USB_PRODUCT_ANYPRODUCT		ANYPRODUCT
 
 /*
- * quirk - fixed port
+ * quirk - fixed port. By the way, the ep field contains not the
+ * endpoint address, but the index of the endpoint descriptor.
  */
 
 struct umq_fixed_ep_endpoint {
@@ -83,38 +82,67 @@ struct umq_fixed_ep_endpoint {
 	int	num_jacks;
 };
 struct umq_fixed_ep_desc {
-	int				num_out_ep;
-	int				num_in_ep;
-	struct umq_fixed_ep_endpoint	*out_ep;
-	struct umq_fixed_ep_endpoint	*in_ep;
+	int					num_out_ep;
+	int					num_in_ep;
+	const struct umq_fixed_ep_endpoint	*out_ep;
+	const struct umq_fixed_ep_endpoint	*in_ep;
 };
 
+#define UMQ_FIXED_EP_DATA_DEF(v, p, i, noep, niep)			\
+static const struct umq_fixed_ep_endpoint				\
+umq_##v##_##p##_##i##_fixed_ep_endpoints[noep+niep]
+
 #define UMQ_FIXED_EP_DEF(v, p, i, noep, niep)				\
-static struct umq_fixed_ep_endpoint					\
-umq_##v##_##p##_##i##_fixed_ep_endpoints[noep+niep];			\
-static struct umq_fixed_ep_desc						\
+static const struct umq_fixed_ep_desc					\
 umq_##v##_##p##_##i##_fixed_ep_desc = {					\
 	noep, niep,							\
 	&umq_##v##_##p##_##i##_fixed_ep_endpoints[0],			\
 	&umq_##v##_##p##_##i##_fixed_ep_endpoints[noep],		\
 };									\
-static struct umq_fixed_ep_endpoint					\
-umq_##v##_##p##_##i##_fixed_ep_endpoints[noep+niep]
 
 #define UMQ_FIXED_EP_REG(v, p, i)					\
-{ UMQ_TYPE_FIXED_EP, (void *)&umq_##v##_##p##_##i##_fixed_ep_desc }
+{ UMQ_TYPE_FIXED_EP, &umq_##v##_##p##_##i##_fixed_ep_desc }
 
+/*
+ * quirk - fixed cable numbers. Supply as many values as there are jacks,
+ * in the same jack order implied by the FIXED_EP_DEF. Each value becomes
+ * the cable number of the corresponding jack.
+ */
+#define UMQ_FIXED_CN_DEF(v, p, i)					\
+static const unsigned char umq_##v##_##p##_##i##_fixed_cn_desc[]
+#define UMQ_FIXED_CN_REG(v, p, i)					\
+{ UMQ_TYPE_CN_FIXED, &umq_##v##_##p##_##i##_fixed_cn_desc }
+
+/*
+ * quirk - fixed mididev assignment. Supply pairs of numbers out, in, as
+ * many pairs as mididevs (that is, max(num_out_jack,num_in_jack)). The
+ * pairs, in order, correspond to the mididevs that will be created; in
+ * each pair, out is the index of the out_jack to bind and in is the
+ * index of the in_jack, both in the order implied by the FIXED_EP_DEF.
+ * Either out or in can be -1 to bind no out jack or in jack, respectively,
+ * to the corresponding mididev.
+ */
+#define UMQ_FIXED_MD_DEF(v, p, i)					\
+static const unsigned char umq_##v##_##p##_##i##_fixed_md_desc[]
+#define UMQ_FIXED_MD_REG(v, p, i)					\
+{ UMQ_TYPE_MD_FIXED, &umq_##v##_##p##_##i##_fixed_md_desc }
+
+/*
+ * generic boolean quirk, no data
+ */
+#define UMQ_TYPE(t)							\
+{ UMQ_TYPE_##t, NULL }
 
 /*
  * quirk - yamaha style midi I/F
  */
 #define UMQ_YAMAHA_REG(v, p, i)						\
-{ UMQ_TYPE_YAMAHA, NULL }
+UMQ_TYPE(YAMAHA)
 
 
-/* extern struct umidi_quirk umidi_quirklist[]; */
-struct umidi_quirk *umidi_search_quirk(int, int, int);
-void umidi_print_quirk(struct umidi_quirk *);
-void *umidi_get_quirk_data_from_type(struct umidi_quirk *, u_int32_t);
+/* extern const struct umidi_quirk umidi_quirklist[]; */
+const struct umidi_quirk *umidi_search_quirk(int, int, int);
+void umidi_print_quirk(const struct umidi_quirk *);
+const void *umidi_get_quirk_data_from_type(const struct umidi_quirk *, u_int32_t);
 
 #endif

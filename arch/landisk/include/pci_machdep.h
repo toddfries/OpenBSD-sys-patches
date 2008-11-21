@@ -1,4 +1,3 @@
-/*	$OpenBSD: pci_machdep.h,v 1.1.1.1 2006/10/06 21:16:15 miod Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
@@ -31,14 +30,22 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _LANDISK_PCI_MACHDEP_H
+#define _LANDISK_PCI_MACHDEP_H
+
+/*
+ * Machine-specific definitions for PCI autoconfiguration.
+ */
+#define	__HAVE_PCI_CONF_HOOK
+
 /*
  * Types provided to machine-independent PCI code
  */
 typedef void *pci_chipset_tag_t;
-typedef u_int pcitag_t;
-typedef u_int pci_intr_handle_t;
+typedef int pcitag_t;
+typedef int pci_intr_handle_t;
 
-#include <sh/dev/shpcicvar.h>
+#include <sh3/dev/shpcicvar.h>
 
 /*
  * Forward declarations.
@@ -52,11 +59,13 @@ void landisk_pci_attach_hook(struct device *, struct device *,
     struct pcibus_attach_args *);
 int landisk_pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *landisk_pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
+const struct evcnt *landisk_pci_intr_evcnt(pci_chipset_tag_t,pci_intr_handle_t);
 void *landisk_pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t, int,
-    int (*)(void *), void *, const char *);
+    int (*)(void *), void *);
 void landisk_pci_intr_disestablish(pci_chipset_tag_t, void *);
 void landisk_pci_conf_interrupt(void *v, int bus, int dev, int pin,
     int swiz, int *iline);
+int landisk_pci_conf_hook(void *, int, int, int, pcireg_t);
 
 #define	pci_bus_maxdevs(v, busno) \
 	shpcic_bus_maxdevs(v, busno)
@@ -75,7 +84,22 @@ void landisk_pci_conf_interrupt(void *v, int bus, int dev, int pin,
 	landisk_pci_intr_map(pa, ihp)
 #define	pci_intr_string(v, ih) \
 	landisk_pci_intr_string(v, ih)
-#define	pci_intr_establish(v, ih, level, ih_fun, ih_arg, ih_name) \
-	landisk_pci_intr_establish(v, ih, level, ih_fun, ih_arg, ih_name)
+#define	pci_intr_evcnt(v, ih) \
+	landisk_pci_intr_evcnt(v, ih)
+#define	pci_intr_establish(v, ih, level, ih_fun, ih_arg) \
+	landisk_pci_intr_establish(v, ih, level, ih_fun, ih_arg)
 #define	pci_intr_disestablish(v, cookie) \
 	landisk_pci_intr_disestablish(v, cookie)
+#define	pci_conf_interrupt(v, bus, dev, pin, swiz, iline) \
+	landisk_pci_conf_interrupt(v, bus, dev, pin, swiz, iline)
+#define	pci_conf_hook(v, bus, dev, func, id) \
+	landisk_pci_conf_hook(v, bus, dev, func, id)
+
+#ifdef _KERNEL
+/*
+ * ALL OF THE FOLLOWING ARE MACHINE-DEPENDENT, AND SHOULD NOT BE USED
+ * BY PORTABLE CODE.
+ */
+#endif
+
+#endif /* _LANDISK_PCI_MACHDEP_H */

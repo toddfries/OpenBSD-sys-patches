@@ -1,8 +1,11 @@
-/*	$OpenBSD: emul.c,v 1.3 2002/03/14 01:26:44 millert Exp $	*/
-/*	$NetBSD: emul.c,v 1.3 1997/07/29 09:42:01 fair Exp $	*/
+/*	$NetBSD: emul.c,v 1.16 2008/04/28 20:23:36 martin Exp $	*/
 
-/*
- * Copyright (c) 1997 Christos Zoulas.  All rights reserved.
+/*-
+ * Copyright (c) 1997 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,27 +15,26 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Christos Zoulas.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.16 2008/04/28 20:23:36 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/lwp.h>
 #include <machine/reg.h>
 #include <machine/instr.h>
 #include <machine/cpu.h>
@@ -47,24 +49,22 @@
 
 #define GPR(tf, i)	((int32_t *) &tf->tf_global)[i]
 #define IPR(tf, i)	((int32_t *) tf->tf_out[6])[i - 16]
-#define FPR(p, i)	((int32_t) p->p_md.md_fpstate->fs_regs[i])
+#define FPR(l, i)	((int32_t) l->l_md.md_fpstate->fs_regs[i])
+#define FPRSET(l, i, v)	(l->l_md.md_fpstate->fs_regs[i] = (int32_t)(v))
 
-static __inline int readgpreg(struct trapframe *, int, void *);
-static __inline int readfpreg(struct proc *, int, void *);
-static __inline int writegpreg(struct trapframe *, int, const void *);
-static __inline int writefpreg(struct proc *, int, const void *);
-static __inline int decodeaddr(struct trapframe *, union instr *, void *);
+static inline int readgpreg(struct trapframe *, int, void *);
+static inline int readfpreg(struct lwp *, int, void *);
+static inline int writegpreg(struct trapframe *, int, const void *);
+static inline int writefpreg(struct lwp *, int, const void *);
+static inline int decodeaddr(struct trapframe *, union instr *, void *);
 static int muldiv(struct trapframe *, union instr *, int32_t *, int32_t *,
     int32_t *);
 
 #define	REGNAME(i)	"goli"[i >> 3], i & 7
 
 
-static __inline int
-readgpreg(tf, i, val)
-	struct trapframe *tf;
-	int i;
-	void *val;
+static inline int
+readgpreg(struct trapframe *tf, int i, void *val)
 {
 	int error = 0;
 	if (i == 0)
@@ -77,54 +77,44 @@ readgpreg(tf, i, val)
 	return error;
 }
 
-		
-static __inline int
-writegpreg(tf, i, val)
-	struct trapframe *tf;
-	int i;
-	const void *val;
+
+static inline int
+writegpreg(struct trapframe *tf, int i, const void *val)
 {
 	int error = 0;
 
 	if (i == 0)
 		return error;
 	else if (i < 16)
-		GPR(tf, i) = *(int32_t *) val;
+		GPR(tf, i) = *(const int32_t *) val;
 	else
-		/* XXX: Fix copyout prototype */
-		error = copyout((caddr_t) val, &IPR(tf, i), sizeof(int32_t));
+		error = copyout(val, &IPR(tf, i), sizeof(int32_t));
 
 	return error;
 }
-	
 
-static __inline int
-readfpreg(p, i, val)
-	struct proc *p;
-	int i;
-	void *val;
+
+static inline int
+readfpreg(struct lwp *l, int i, void *val)
 {
-	*(int32_t *) val = FPR(p, i);
+
+	*(int32_t *) val = FPR(l, i);
 	return 0;
 }
 
-		
-static __inline int
-writefpreg(p, i, val)
-	struct proc *p;
-	int i;
-	const void *val;
+
+static inline int
+writefpreg(struct lwp *l, int i, const void *val)
 {
-	FPR(p, i) = *(const int32_t *) val;
+
+	FPRSET(l, i, *(const int32_t *) val);
 	return 0;
 }
 
-static __inline int
-decodeaddr(tf, code, val)
-	struct trapframe *tf;
-	union instr *code;
-	void *val;
+static inline int
+decodeaddr(struct trapframe *tf, union instr *code, void *val)
 {
+
 	if (code->i_simm13.i_i)
 		*((int32_t *) val) = code->i_simm13.i_simm13;
 	else {
@@ -140,10 +130,8 @@ decodeaddr(tf, code, val)
 
 
 static int
-muldiv(tf, code, rd, rs1, rs2)
-	struct trapframe *tf;
-	union instr *code;
-	int32_t *rd, *rs1, *rs2;
+muldiv(struct trapframe *tf,
+       union instr *code, int32_t *rd, int32_t *rs1, int32_t *rs2)
 {
 	/*
 	 * We check for {S,U}{MUL,DIV}{,cc}
@@ -227,9 +215,7 @@ muldiv(tf, code, rd, rs1, rs2)
  */
 
 int
-fixalign(p, tf)
-	struct proc *p;
-	struct trapframe *tf;
+fixalign(struct lwp *l, struct trapframe *tf)
 {
 	static u_char sizedef[] = { 0x4, 0xff, 0x2, 0x8 };
 
@@ -261,7 +247,7 @@ fixalign(p, tf)
 	int error;
 
 	/* fetch and check the instruction that caused the fault */
-	error = copyin((caddr_t) tf->tf_pc, &code.i_int, sizeof(code.i_int));
+	error = copyin((void *) tf->tf_pc, &code.i_int, sizeof(code.i_int));
 	if (error != 0) {
 		DPRINTF(("fixalign: Bad instruction fetch\n"));
 		return EINVAL;
@@ -307,19 +293,19 @@ fixalign(p, tf)
 		uprintf("%c%d\n", REGNAME(code.i_asi.i_rs2));
 #endif
 #ifdef DIAGNOSTIC
-	if (op.bits.fl && p != cpuinfo.fpproc)
+	if (op.bits.fl && l != cpuinfo.fplwp)
 		panic("fp align without being the FP owning process");
 #endif
 
 	if (op.bits.st) {
 		if (op.bits.fl) {
-			savefpstate(p->p_md.md_fpstate);
+			savefpstate(l->l_md.md_fpstate);
 
-			error = readfpreg(p, code.i_op3.i_rd, &data.i[0]);
+			error = readfpreg(l, code.i_op3.i_rd, &data.i[0]);
 			if (error)
 				return error;
 			if (size == 8) {
-				error = readfpreg(p, code.i_op3.i_rd + 1,
+				error = readfpreg(l, code.i_op3.i_rd + 1,
 				    &data.i[1]);
 				if (error)
 					return error;
@@ -338,13 +324,13 @@ fixalign(p, tf)
 		}
 
 		if (size == 2)
-			return copyout(&data.s[1], (caddr_t) rs1, size);
+			return copyout(&data.s[1], (void *) rs1, size);
 		else
-			return copyout(&data.d, (caddr_t) rs1, size);
+			return copyout(&data.d, (void *) rs1, size);
 	}
 	else { /* load */
 		if (size == 2) {
-			error = copyin((caddr_t) rs1, &data.s[1], size);
+			error = copyin((void *) rs1, &data.s[1], size);
 			if (error)
 				return error;
 
@@ -355,22 +341,22 @@ fixalign(p, tf)
 				data.s[0] = 0;
 		}
 		else
-			error = copyin((caddr_t) rs1, &data.d, size);
+			error = copyin((void *) rs1, &data.d, size);
 
 		if (error)
 			return error;
 
 		if (op.bits.fl) {
-			error = writefpreg(p, code.i_op3.i_rd, &data.i[0]);
+			error = writefpreg(l, code.i_op3.i_rd, &data.i[0]);
 			if (error)
 				return error;
 			if (size == 8) {
-				error = writefpreg(p, code.i_op3.i_rd + 1,
+				error = writefpreg(l, code.i_op3.i_rd + 1,
 				    &data.i[1]);
 				if (error)
 					return error;
 			}
-			loadfpstate(p->p_md.md_fpstate);
+			loadfpstate(l->l_md.md_fpstate);
 		}
 		else {
 			error = writegpreg(tf, code.i_op3.i_rd, &data.i[0]);
@@ -388,16 +374,14 @@ fixalign(p, tf)
  * Emulate unimplemented instructions on earlier sparc chips.
  */
 int
-emulinstr(pc, tf)
-	int pc;
-	struct trapframe *tf;
+emulinstr(int pc, struct trapframe *tf)
 {
 	union instr code;
 	int32_t rs1, rs2, rd;
 	int error;
 
 	/* fetch and check the instruction that caused the fault */
-	error = copyin((caddr_t) pc, &code.i_int, sizeof(code.i_int));
+	error = copyin((void *) pc, &code.i_int, sizeof(code.i_int));
 	if (error != 0) {
 		DPRINTF(("emulinstr: Bad instruction fetch\n"));
 		return SIGILL;
@@ -423,7 +407,10 @@ emulinstr(pc, tf)
 
 	switch (code.i_op3.i_op3) {
 	case IOP3_FLUSH:
-		cpuinfo.cache_flush((caddr_t)(rs1 + rs2), 4); /*XXX*/
+		/*
+		 * A FLUSH instruction causing a T_ILLINST!
+		 * Turn it into a NOP.
+		 */
 		return 0;
 
 	default:

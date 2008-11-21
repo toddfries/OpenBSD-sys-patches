@@ -1,5 +1,4 @@
-/*	$OpenBSD: ali1543.c,v 1.2 2002/05/02 17:46:00 mickey Exp $	*/
-/*	$NetBSD: ali1543.c,v 1.2 2001/09/13 14:00:52 tshiozak Exp $	*/
+/*	$NetBSD: ali1543.c,v 1.10 2008/04/28 20:23:24 martin Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -46,13 +45,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -94,6 +86,9 @@
 
 /* HAYAKAWA Koichi wrote ALi 1543 PCI ICU code basing on VIA82C586 driver */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ali1543.c,v 1.10 2008/04/28 20:23:24 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
@@ -108,13 +103,13 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-#include <i386/pci/pcibiosvar.h>
+#include <i386/pci/pci_intr_fixup.h>
 #include <i386/pci/piixvar.h>
 
 
-int ali1543_getclink (pciintr_icu_handle_t, int, int *);
-int ali1543_get_intr (pciintr_icu_handle_t, int, int *);
-int ali1543_set_intr (pciintr_icu_handle_t, int, int);
+int ali1543_getclink(pciintr_icu_handle_t, int, int *);
+int ali1543_get_intr(pciintr_icu_handle_t, int, int *);
+int ali1543_set_intr(pciintr_icu_handle_t, int, int);
 
 
 const struct pciintr_icu ali1543_icu = {
@@ -130,10 +125,10 @@ const struct pciintr_icu ali1543_icu = {
  * Linux source code (linux/arch/i386/kernel/pci-irq.c) says that the
  * irq order of ALi PCI ICU is shuffled.
  */
-const static int ali1543_intr_shuffle_get[16] = {
+static const int ali1543_intr_shuffle_get[16] = {
 	0, 9, 3, 10, 4, 5, 7, 6, 1, 11, 0, 12, 0, 14, 0, 15
 };
-const static int ali1543_intr_shuffle_set[16] = {
+static const int ali1543_intr_shuffle_set[16] = {
 	0, 8, 0, 2, 4, 5, 7, 6, 0, 1, 3, 9, 11, 0, 13, 15
 };
 
@@ -202,7 +197,7 @@ ali1543_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 #endif /* DEBUG_1543 */
 	val = ALI1543_PIRQ(reg, clink);
 	*irqp = (val == 0) ?
-	    I386_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
+	    X86_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
 
 	return (0);
 }

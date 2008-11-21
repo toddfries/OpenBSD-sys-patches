@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_flow.c,v 1.38 2006/12/15 21:18:53 joerg Exp $	*/
+/*	$NetBSD: ip_flow.c,v 1.56 2008/04/28 20:24:09 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_flow.c,v 1.38 2006/12/15 21:18:53 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip_flow.c,v 1.56 2008/04/28 20:24:09 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -62,18 +55,40 @@ __KERNEL_RCSID(0, "$NetBSD: ip_flow.c,v 1.38 2006/12/15 21:18:53 joerg Exp $");
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
-#include <netinet/in_route.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include <netinet/ip_private.h>
 
-POOL_INIT(ipflow_pool, sizeof(struct ipflow), 0, 0, 0, "ipflowpl", NULL);
+/*
+ * Similar code is very well commented in netinet6/ip6_flow.c
+ */ 
+
+struct ipflow {
+	LIST_ENTRY(ipflow) ipf_list;	/* next in active list */
+	LIST_ENTRY(ipflow) ipf_hash;	/* next ipflow in bucket */
+	struct in_addr ipf_dst;		/* destination address */
+	struct in_addr ipf_src;		/* source address */
+	uint8_t ipf_tos;		/* type-of-service */
+	struct route ipf_ro;		/* associated route entry */
+	u_long ipf_uses;		/* number of uses in this period */
+	u_long ipf_last_uses;		/* number of uses in last period */
+	u_long ipf_dropped;		/* ENOBUFS retured by if_output */
+	u_long ipf_errors;		/* other errors returned by if_output */
+	u_int ipf_timer;		/* lifetime timer */
+	time_t ipf_start;		/* creation time */
+};
+
+#define	IPFLOW_HASHBITS		6	/* should not be a multiple of 8 */
+
+POOL_INIT(ipflow_pool, sizeof(struct ipflow), 0, 0, 0, "ipflowpl", NULL,
+    IPL_NET);
 
 LIST_HEAD(ipflowhead, ipflow);
 
 #define	IPFLOW_TIMER		(5 * PR_SLOWHZ)
-#define	IPFLOW_HASHSIZE		(1 << IPFLOW_HASHBITS)
+#define	IPFLOW_DEFAULT_HASHSIZE	(1 << IPFLOW_HASHBITS)
 
-static struct ipflowhead ipflowtable[IPFLOW_HASHSIZE];
+static struct ipflowhead *ipflowtable = NULL;
 static struct ipflowhead ipflowlist;
 static int ipflow_inuse;
 
@@ -93,24 +108,29 @@ do { \
 #define	IPFLOW_MAX		256
 #endif
 int ip_maxflows = IPFLOW_MAX;
+int ip_hashsize = IPFLOW_DEFAULT_HASHSIZE;
 
-static unsigned
-ipflow_hash(struct in_addr dst,	struct in_addr src, unsigned tos)
+static size_t 
+ipflow_hash(const struct ip *ip)
 {
-	unsigned hash = tos;
-	int idx;
-	for (idx = 0; idx < 32; idx += IPFLOW_HASHBITS)
-		hash += (dst.s_addr >> (32 - idx)) + (src.s_addr >> idx);
-	return hash & (IPFLOW_HASHSIZE-1);
+	size_t hash = ip->ip_tos;
+	size_t idx;
+
+	for (idx = 0; idx < 32; idx += IPFLOW_HASHBITS) {
+		hash += (ip->ip_dst.s_addr >> (32 - idx)) +
+		    (ip->ip_src.s_addr >> idx);
+	}
+
+	return hash & (ip_hashsize-1);
 }
 
 static struct ipflow *
 ipflow_lookup(const struct ip *ip)
 {
-	unsigned hash;
+	size_t hash;
 	struct ipflow *ipf;
 
-	hash = ipflow_hash(ip->ip_dst, ip->ip_src, ip->ip_tos);
+	hash = ipflow_hash(ip);
 
 	LIST_FOREACH(ipf, &ipflowtable[hash], ipf_hash) {
 		if (ip->ip_dst.s_addr == ipf->ipf_dst.s_addr
@@ -121,23 +141,39 @@ ipflow_lookup(const struct ip *ip)
 	return ipf;
 }
 
-void
-ipflow_init(void)
+int
+ipflow_init(int table_size)
 {
-	int i;
+	struct ipflowhead *new_table;
+	size_t i;
+
+	new_table = (struct ipflowhead *)malloc(sizeof(struct ipflowhead) *
+	    table_size, M_RTABLE, M_NOWAIT);
+
+	if (new_table == NULL)
+		return 1;
+
+	if (ipflowtable != NULL)
+		free(ipflowtable, M_RTABLE);
+
+	ipflowtable = new_table;
+	ip_hashsize = table_size;
 
 	LIST_INIT(&ipflowlist);
-	for (i = 0; i < IPFLOW_HASHSIZE; i++)
+	for (i = 0; i < ip_hashsize; i++)
 		LIST_INIT(&ipflowtable[i]);
+
+	return 0;
 }
 
 int
 ipflow_fastforward(struct mbuf *m)
 {
-	struct ip *ip, ip_store;
+	struct ip *ip;
+	struct ip ip_store;
 	struct ipflow *ipf;
 	struct rtentry *rt;
-	struct sockaddr *dst;
+	const struct sockaddr *dst;
 	int error;
 	int iplen;
 
@@ -157,10 +193,10 @@ ipflow_fastforward(struct mbuf *m)
 	/*
 	 * IP header with no option and valid version and length
 	 */
-	if (IP_HDR_ALIGNED_P(mtod(m, caddr_t)))
+	if (IP_HDR_ALIGNED_P(mtod(m, const void *)))
 		ip = mtod(m, struct ip *);
 	else {
-		memcpy(&ip_store, mtod(m, caddr_t), sizeof(ip_store));
+		memcpy(&ip_store, mtod(m, const void *), sizeof(ip_store));
 		ip = &ip_store;
 	}
 	iplen = ntohs(ip->ip_len);
@@ -196,9 +232,8 @@ ipflow_fastforward(struct mbuf *m)
 	/*
 	 * Route and interface still up?
 	 */
-	rtcache_check(&ipf->ipf_ro);
-	rt = ipf->ipf_ro.ro_rt;
-	if (rt == NULL || (rt->rt_ifp->if_flags & IFF_UP) == 0)
+	if ((rt = rtcache_validate(&ipf->ipf_ro)) == NULL ||
+	    (rt->rt_ifp->if_flags & IFF_UP) == 0)
 		return 0;
 
 	/*
@@ -231,9 +266,11 @@ ipflow_fastforward(struct mbuf *m)
 
 	/*
 	 * Done modifying the header; copy it back, if necessary.
+	 *
+	 * XXX Use m_copyback_cow(9) here? --dyoung
 	 */
-	if (IP_HDR_ALIGNED_P(mtod(m, caddr_t)) == 0)
-		memcpy(mtod(m, caddr_t), &ip_store, sizeof(ip_store));
+	if (IP_HDR_ALIGNED_P(mtod(m, void *)) == 0)
+		memcpy(mtod(m, void *), &ip_store, sizeof(ip_store));
 
 	/*
 	 * Trim the packet in case it's too long..
@@ -255,7 +292,7 @@ ipflow_fastforward(struct mbuf *m)
 	if (rt->rt_flags & RTF_GATEWAY)
 		dst = rt->rt_gateway;
 	else
-		dst = &ipf->ipf_ro.ro_dst;
+		dst = rtcache_getdst(&ipf->ipf_ro);
 
 	if ((error = (*rt->rt_ifp->if_output)(rt->rt_ifp, m, dst, rt)) != 0) {
 		if (error == ENOBUFS)
@@ -269,13 +306,18 @@ ipflow_fastforward(struct mbuf *m)
 static void
 ipflow_addstats(struct ipflow *ipf)
 {
-	rtcache_check(&ipf->ipf_ro);
-	if (ipf->ipf_ro.ro_rt != NULL)
-		ipf->ipf_ro.ro_rt->rt_use += ipf->ipf_uses;
-	ipstat.ips_cantforward += ipf->ipf_errors + ipf->ipf_dropped;
-	ipstat.ips_total += ipf->ipf_uses;
-	ipstat.ips_forward += ipf->ipf_uses;
-	ipstat.ips_fastforward += ipf->ipf_uses;
+	struct rtentry *rt;
+	uint64_t *ips;
+
+	if ((rt = rtcache_validate(&ipf->ipf_ro)) != NULL)
+		rt->rt_use += ipf->ipf_uses;
+	
+	ips = IP_STAT_GETREF();
+	ips[IP_STAT_CANTFORWARD] += ipf->ipf_errors + ipf->ipf_dropped;
+	ips[IP_STAT_TOTAL] += ipf->ipf_uses;
+	ips[IP_STAT_FORWARD] += ipf->ipf_uses;
+	ips[IP_STAT_FASTFORWARD] += ipf->ipf_uses;
+	IP_STAT_PUTREF();
 }
 
 static void
@@ -298,8 +340,8 @@ ipflow_free(struct ipflow *ipf)
 	splx(s);
 }
 
-struct ipflow *
-ipflow_reap(int just_one)
+static struct ipflow *
+ipflow_reap(bool just_one)
 {
 	while (just_one || ipflow_inuse > ip_maxflows) {
 		struct ipflow *ipf, *maybe_ipf = NULL;
@@ -311,8 +353,7 @@ ipflow_reap(int just_one)
 			 * If this no longer points to a valid route
 			 * reclaim it.
 			 */
-			rtcache_check(&ipf->ipf_ro);
-			if (ipf->ipf_ro.ro_rt == NULL)
+			if (rtcache_validate(&ipf->ipf_ro) == NULL)
 				goto done;
 			/*
 			 * choose the one that's been least recently
@@ -347,33 +388,47 @@ ipflow_reap(int just_one)
 }
 
 void
+ipflow_prune(void)
+{
+
+	(void) ipflow_reap(false);
+}
+
+void
 ipflow_slowtimo(void)
 {
+	struct rtentry *rt;
 	struct ipflow *ipf, *next_ipf;
+	uint64_t *ips;
 
+	mutex_enter(softnet_lock);
+	KERNEL_LOCK(1, NULL);
 	for (ipf = LIST_FIRST(&ipflowlist); ipf != NULL; ipf = next_ipf) {
 		next_ipf = LIST_NEXT(ipf, ipf_list);
-		rtcache_check(&ipf->ipf_ro);
 		if (PRT_SLOW_ISEXPIRED(ipf->ipf_timer) ||
-		    ipf->ipf_ro.ro_rt == NULL) {
+		    (rt = rtcache_validate(&ipf->ipf_ro)) == NULL) {
 			ipflow_free(ipf);
 		} else {
 			ipf->ipf_last_uses = ipf->ipf_uses;
-			ipf->ipf_ro.ro_rt->rt_use += ipf->ipf_uses;
-			ipstat.ips_total += ipf->ipf_uses;
-			ipstat.ips_forward += ipf->ipf_uses;
-			ipstat.ips_fastforward += ipf->ipf_uses;
+			rt->rt_use += ipf->ipf_uses;
+			ips = IP_STAT_GETREF();
+			ips[IP_STAT_TOTAL] += ipf->ipf_uses;
+			ips[IP_STAT_FORWARD] += ipf->ipf_uses;
+			ips[IP_STAT_FASTFORWARD] += ipf->ipf_uses;
+			IP_STAT_PUTREF();
 			ipf->ipf_uses = 0;
 		}
 	}
+	KERNEL_UNLOCK_ONE(NULL);
+	mutex_exit(softnet_lock);
 }
 
 void
 ipflow_create(const struct route *ro, struct mbuf *m)
 {
-	const struct ip *const ip = mtod(m, struct ip *);
+	const struct ip *const ip = mtod(m, const struct ip *);
 	struct ipflow *ipf;
-	unsigned hash;
+	size_t hash;
 	int s;
 
 	/*
@@ -389,7 +444,7 @@ ipflow_create(const struct route *ro, struct mbuf *m)
 	ipf = ipflow_lookup(ip);
 	if (ipf == NULL) {
 		if (ipflow_inuse >= ip_maxflows) {
-			ipf = ipflow_reap(1);
+			ipf = ipflow_reap(true);
 		} else {
 			s = splnet();
 			ipf = pool_get(&ipflow_pool, PR_NOWAIT);
@@ -398,7 +453,7 @@ ipflow_create(const struct route *ro, struct mbuf *m)
 				return;
 			ipflow_inuse++;
 		}
-		bzero((caddr_t) ipf, sizeof(*ipf));
+		memset(ipf, 0, sizeof(*ipf));
 	} else {
 		s = splnet();
 		IPFLOW_REMOVE(ipf);
@@ -412,7 +467,7 @@ ipflow_create(const struct route *ro, struct mbuf *m)
 	/*
 	 * Fill in the updated information.
 	 */
-	rtcache_copy(&ipf->ipf_ro, ro, sizeof(ipf->ipf_ro));
+	rtcache_copy(&ipf->ipf_ro, ro);
 	ipf->ipf_dst = ip->ip_dst;
 	ipf->ipf_src = ip->ip_src;
 	ipf->ipf_tos = ip->ip_tos;
@@ -421,22 +476,28 @@ ipflow_create(const struct route *ro, struct mbuf *m)
 	/*
 	 * Insert into the approriate bucket of the flow table.
 	 */
-	hash = ipflow_hash(ip->ip_dst, ip->ip_src, ip->ip_tos);
+	hash = ipflow_hash(ip);
 	s = splnet();
 	IPFLOW_INSERT(&ipflowtable[hash], ipf);
 	splx(s);
 }
 
-void
-ipflow_invalidate_all(void)
+int
+ipflow_invalidate_all(int new_size)
 {
 	struct ipflow *ipf, *next_ipf;
-	int s;
+	int s, error;
 
+	error = 0;
 	s = splnet();
 	for (ipf = LIST_FIRST(&ipflowlist); ipf != NULL; ipf = next_ipf) {
 		next_ipf = LIST_NEXT(ipf, ipf_list);
 		ipflow_free(ipf);
 	}
+
+	if (new_size)
+		error = ipflow_init(new_size);
 	splx(s);
+
+	return error;
 }

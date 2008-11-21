@@ -1,7 +1,7 @@
-/*	$NetBSD: linux_exec.c,v 1.89 2006/11/16 01:32:42 christos Exp $	*/
+/*	$NetBSD: linux_exec.c,v 1.109 2008/11/19 18:36:03 ad Exp $	*/
 
 /*-
- * Copyright (c) 1994, 1995, 1998, 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 1994, 1995, 1998, 2000, 2007, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_exec.c,v 1.89 2006/11/16 01:32:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_exec.c,v 1.109 2008/11/19 18:36:03 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,14 +45,13 @@ __KERNEL_RCSID(0, "$NetBSD: linux_exec.c,v 1.89 2006/11/16 01:32:42 christos Exp
 #include <sys/exec_elf.h>
 
 #include <sys/mman.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <sys/ptrace.h>	/* For proc_reparent() */
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/reg.h>
 
 #include <compat/linux/common/linux_types.h>
@@ -69,6 +61,8 @@ __KERNEL_RCSID(0, "$NetBSD: linux_exec.c,v 1.89 2006/11/16 01:32:42 christos Exp
 #include <compat/linux/common/linux_machdep.h>
 #include <compat/linux/common/linux_exec.h>
 #include <compat/linux/common/linux_futex.h>
+#include <compat/linux/common/linux_ipc.h>
+#include <compat/linux/common/linux_sem.h>
 
 #include <compat/linux/linux_syscallargs.h>
 #include <compat/linux/linux_syscall.h>
@@ -80,43 +74,14 @@ extern struct sysent linux_sysent[];
 extern const char * const linux_syscallnames[];
 extern char linux_sigcode[], linux_esigcode[];
 
-static void linux_e_proc_exec __P((struct proc *, struct exec_package *));
-static void linux_e_proc_fork __P((struct proc *, struct proc *, int));
-static void linux_e_proc_exit __P((struct proc *));
-static void linux_e_proc_init __P((struct proc *, struct proc *, int));
+static void linux_e_proc_exec(struct proc *, struct exec_package *);
+static void linux_e_proc_fork(struct proc *, struct proc *, int);
+static void linux_e_proc_exit(struct proc *);
+static void linux_e_proc_init(struct proc *, struct proc *, int);
 
 #ifdef LINUX_NPTL
-void linux_userret __P((struct lwp *, void *));
+void linux_userret(void);
 #endif
-
-/*
- * Execve(2). Just check the alternate emulation path, and pass it on
- * to the NetBSD execve().
- */
-int
-linux_sys_execve(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_execve_args /* {
-		syscallarg(const char *) path;
-		syscallarg(char **) argv;
-		syscallarg(char **) envp;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
-	struct sys_execve_args ap;
-	caddr_t sg;
-
-	sg = stackgap_init(p, 0);
-	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
-
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = SCARG(uap, envp);
-
-	return sys_execve(l, &ap, retval);
-}
 
 /*
  * Emulation switch.
@@ -124,7 +89,7 @@ linux_sys_execve(l, v, retval)
 
 struct uvm_object *emul_linux_object;
 
-const struct emul emul_linux = {
+struct emul emul_linux = {
 	"linux",
 	"/emul/linux",
 #ifndef __HAVE_MINIMAL_EMUL
@@ -158,7 +123,9 @@ const struct emul emul_linux = {
 	uvm_default_mapaddr,
 
 	linux_usertrap,
-	NULL,
+	NULL,		/* e_sa */
+	0,
+	NULL,		/* e_startlwp */
 };
 
 static void
@@ -175,22 +142,27 @@ linux_e_proc_init(p, parent, forkflags)
 		MALLOC(e, void *, sizeof(struct linux_emuldata),
 			M_EMULDATA, M_WAITOK);
 	} else  {
+		mutex_enter(proc_lock);
 		e->s->refs--;
 		if (e->s->refs == 0)
 			FREE(e->s, M_EMULDATA);
+		mutex_exit(proc_lock);
 	}
 
 	memset(e, '\0', sizeof(struct linux_emuldata));
 
 	e->proc = p;
+	e->robust_futexes = NULL;
 
 	if (parent)
 		ep = parent->p_emuldata;
 
 	if (forkflags & FORK_SHAREVM) {
+		mutex_enter(proc_lock);
 #ifdef DIAGNOSTIC
 		if (ep == NULL) {
 			killproc(p, "FORK_SHAREVM while emuldata is NULL\n");
+			mutex_exit(proc_lock);
 			FREE(e, M_EMULDATA);
 			return;
 		}
@@ -212,7 +184,7 @@ linux_e_proc_init(p, parent, forkflags)
 		 * use our own vmspace.
 		 */
 		vm = (parent) ? parent->p_vmspace : p->p_vmspace;
-		s->p_break = vm->vm_daddr + ctob(vm->vm_dsize);
+		s->p_break = (char *)vm->vm_daddr + ctob(vm->vm_dsize);
 
 		/*
 		 * Linux threads are emulated as NetBSD processes (not lwp)
@@ -229,6 +201,7 @@ linux_e_proc_init(p, parent, forkflags)
 
 		s->xstat = 0;
 		s->flags = 0;
+		mutex_enter(proc_lock);
 	}
 
 	e->s = s;
@@ -246,6 +219,7 @@ linux_e_proc_init(p, parent, forkflags)
 	}
 #endif /* LINUX_NPTL */
 
+	mutex_exit(proc_lock);
 	p->p_emuldata = e;
 }
 
@@ -257,6 +231,7 @@ linux_e_proc_init(p, parent, forkflags)
 static void
 linux_e_proc_exec(struct proc *p, struct exec_package *epp)
 {
+
 	/* exec, use our vmspace */
 	linux_e_proc_init(p, NULL, 0);
 }
@@ -265,23 +240,26 @@ linux_e_proc_exec(struct proc *p, struct exec_package *epp)
  * Emulation per-process exit hook.
  */
 static void
-linux_e_proc_exit(p)
-	struct proc *p;
+linux_e_proc_exit(struct proc *p)
 {
 	struct linux_emuldata *e = p->p_emuldata;
 
 #ifdef LINUX_NPTL
 	linux_nptl_proc_exit(p);
+	release_futexes(p);
 #endif
+
 	/* Remove the thread for the group thread list */
+	mutex_enter(proc_lock);
 	LIST_REMOVE(e, threads);
 
 	/* free Linux emuldata and set the pointer to null */
 	e->s->refs--;
 	if (e->s->refs == 0)
 		FREE(e->s, M_EMULDATA);
-	FREE(e, M_EMULDATA);
 	p->p_emuldata = NULL;
+	mutex_exit(proc_lock);
+	FREE(e, M_EMULDATA);
 }
 
 /*
@@ -292,6 +270,7 @@ linux_e_proc_fork(p, parent, forkflags)
 	struct proc *p, *parent;
 	int forkflags;
 {
+
 	/*
 	 * The new process might share some vmspace-related stuff
 	 * with parent, depending on fork flags (CLONE_VM et.al).
@@ -302,7 +281,7 @@ linux_e_proc_fork(p, parent, forkflags)
 	linux_e_proc_init(p, parent, forkflags);
 
 #ifdef LINUX_NPTL
-	linux_nptl_proc_fork(p, parent, (*linux_userret));
+	linux_nptl_proc_fork(p, parent, linux_userret);
 #endif
 
 	return;
@@ -310,15 +289,12 @@ linux_e_proc_fork(p, parent, forkflags)
 
 #ifdef LINUX_NPTL
 void
-linux_userret(l, arg)
-	struct lwp *l;
-	void *arg;
+linux_userret(void)
 {
+	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	struct linux_emuldata *led = p->p_emuldata;
 	int error;
-
-	p->p_userret = NULL;
 
 	/* LINUX_CLONE_CHILD_SETTID: copy child's TID to child's memory  */
 	if (led->clone_flags & LINUX_CLONE_CHILD_SETTID) {
@@ -339,11 +315,11 @@ linux_userret(l, arg)
 }
 
 void
-linux_nptl_proc_exit(p)
-	struct proc *p;
+linux_nptl_proc_exit(struct proc *p)
 {
 	struct linux_emuldata *e = p->p_emuldata;
-	int s;
+
+	mutex_enter(proc_lock);
 
 	/* 
 	 * Check if we are a thread group leader victim of another 
@@ -364,12 +340,13 @@ linux_nptl_proc_exit(p)
 	printf("%s:%d e->s->group_pid = %d, p->p_pid = %d, flags = 0x%x\n", 
 	    __func__, __LINE__, e->s->group_pid, p->p_pid, e->s->flags);
 #endif
-	if (e->s->group_pid != p->p_pid) {
-		wakeup(initproc);
-		SCHED_LOCK(s);
+	if ((e->s->group_pid != p->p_pid) &&
+	    (e->clone_flags & LINUX_CLONE_THREAD)) {
 		proc_reparent(p, initproc);	
-		SCHED_UNLOCK(s);
+		cv_broadcast(&initproc->p_waitcv);
 	}
+
+	mutex_exit(proc_lock);
 
 	/* Emulate LINUX_CLONE_CHILD_CLEARTID */
 	if (e->clear_tid != NULL) {
@@ -377,7 +354,6 @@ linux_nptl_proc_exit(p)
 		int null = 0;
 		struct linux_sys_futex_args cup;
 		register_t retval;
-		struct lwp *l;
 
 		error = copyout(&null, e->clear_tid, sizeof(null));
 #ifdef DEBUG_LINUX
@@ -385,14 +361,13 @@ linux_nptl_proc_exit(p)
 			printf("%s: cannot clear TID\n", __func__);
 #endif
 
-		l = proc_representative_lwp(p);
 		SCARG(&cup, uaddr) = e->clear_tid;
 		SCARG(&cup, op) = LINUX_FUTEX_WAKE;
 		SCARG(&cup, val) = 0x7fffffff; /* Awake everyone */
 		SCARG(&cup, timeout) = NULL;
 		SCARG(&cup, uaddr2) = NULL;
 		SCARG(&cup, val3) = 0;
-		if ((error = linux_sys_futex(l, &cup, &retval)) != 0)
+		if ((error = linux_sys_futex(curlwp, &cup, &retval)) != 0)
 			printf("%s: linux_sys_futex failed\n", __func__);
 	}
 
@@ -403,12 +378,9 @@ void
 linux_nptl_proc_fork(p, parent, luserret)
 	struct proc *p;
 	struct proc *parent;
-	void (luserret)(struct lwp *, void *);
+	void (*luserret)(void);
 {
-#ifdef LINUX_NPTL
-	struct linux_emuldata *e;
-#endif
-	e = p->p_emuldata;
+	struct linux_emuldata *e = p->p_emuldata;
 
 	/* LINUX_CLONE_CHILD_CLEARTID: clear TID in child's memory on exit() */
 	if (e->clone_flags & LINUX_CLONE_CHILD_CLEARTID)
@@ -431,15 +403,13 @@ linux_nptl_proc_fork(p, parent, luserret)
 	 */
 	if (e->clone_flags &
 	    (LINUX_CLONE_CHILD_CLEARTID | LINUX_CLONE_SETTLS))
-		p->p_userret = (*luserret);
+		p->p_userret = luserret;
 
 	return;
 }
 
 void
-linux_nptl_proc_init(p, parent)
-	struct proc *p;
-	struct proc *parent;
+linux_nptl_proc_init(struct proc *p, struct proc *parent)
 {
 	struct linux_emuldata *e = p->p_emuldata;
 	struct linux_emuldata *ep;
@@ -454,6 +424,4 @@ linux_nptl_proc_init(p, parent)
 
 	return;
 }
-
-
 #endif /* LINUX_NPTL */

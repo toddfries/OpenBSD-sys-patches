@@ -1,5 +1,4 @@
-/*	$OpenBSD: ethertypes.h,v 1.9 2008/05/05 13:40:17 dlg Exp $	*/
-/*	$NetBSD: ethertypes.h,v 1.13 2002/02/10 01:28:32 thorpej Exp $	*/
+/*	$NetBSD: ethertypes.h,v 1.17 2005/12/10 23:21:38 elad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -42,8 +41,8 @@
  * into the hardware independent ARP code. -is
  *
  * Additional sources of information:
- *	http://standards.ieee.org/regauth/ethertype/eth.txt
  *	http://www.mit.edu/~map/Ethernet/Ethernet.txt
+ *	ftp://venera.isi.edu/in-notes/iana/assignments/ethernet-numbers
  *
  */
 
@@ -289,7 +288,7 @@
 #define	ETHERTYPE_IPAS		0x876C	/* IP Autonomous Systems (RFC1701) */
 #define	ETHERTYPE_SECUREDATA	0x876D	/* Secure Data (RFC1701) */
 #define	ETHERTYPE_FLOWCONTROL	0x8808	/* 802.3x flow control packet */
-#define ETHERTYPE_SLOW		0x8809	/* 803.3ad slow protocols (LACP/Marker) */
+#define	ETHERTYPE_SLOWPROTOCOLS	0x8809	/* Slow protocols */
 #define	ETHERTYPE_PPP		0x880B	/* PPP (obsolete by PPPOE) */
 #define	ETHERTYPE_HITACHI	0x8820	/* Hitachi Cable (Optoelectronic Systems Laboratory) */
 #define	ETHERTYPE_MPLS		0x8847	/* MPLS Unicast */
@@ -298,9 +297,7 @@
 #define	ETHERTYPE_PPPOEDISC	0x8863	/* PPP Over Ethernet Discovery Stage */
 #define	ETHERTYPE_PPPOE		0x8864	/* PPP Over Ethernet Session Stage */
 #define	ETHERTYPE_LANPROBE	0x8888	/* HP LanProbe test? */
-#define	ETHERTYPE_PAE		0x888E	/* 802.1X Port Access Entity */
-#define	ETHERTYPE_AOE		0x88A2	/* ATA over Ethernet */
-#define	ETHERTYPE_LLDP		0x88CC	/* Link Layer Discovery Protocol */
+#define	ETHERTYPE_PAE		0x888e	/* EAPOL PAE/802.1x */
 #define	ETHERTYPE_LOOPBACK	0x9000	/* Loopback */
 #define	ETHERTYPE_LBACK		ETHERTYPE_LOOPBACK	/* DEC MOP loopback */
 #define	ETHERTYPE_XNSSM		0x9001	/* 3Com (Formerly Bridge Communications), XNS Systems Management */
@@ -313,4 +310,4 @@
 
 #define	ETHERTYPE_MAX		0xFFFF	/* Maximum valid ethernet type, reserved */
 
-#endif /* _NET_ETHERTYPES_H_ */
+#endif /* !_NET_ETHERTYPES_H_ */

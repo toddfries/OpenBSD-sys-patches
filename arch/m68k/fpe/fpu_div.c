@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_div.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_div.c,v 1.4 2003/08/07 16:28:11 agc Exp $ */
+/*	$NetBSD: fpu_div.c,v 1.5 2005/12/11 12:17:52 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,12 +44,15 @@
  * Perform an FPU divide (return x / y).
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_div.c,v 1.5 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_arith.h>
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_arith.h"
+#include "fpu_emulate.h"
 
 /*
  * Division of normal numbers is done as follows:
@@ -149,11 +151,11 @@
 
 struct fpn *
 fpu_div(fe)
-	struct fpemu *fe;
+	register struct fpemu *fe;
 {
-	struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
-	u_int q, bit;
-	u_int r0, r1, r2, d0, d1, d2, y0, y1, y2;
+	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
+	register u_int q, bit;
+	register u_int r0, r1, r2, d0, d1, d2, y0, y1, y2;
 	FPU_DECL_CARRY
 
 	fe->fe_fpsr &= ~FPSR_EXCP; /* clear all exceptions */

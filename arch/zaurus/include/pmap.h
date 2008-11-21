@@ -1,4 +1,3 @@
-/*	$OpenBSD: pmap.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/* $NetBSD: pmap.h,v 1.2 2001/11/23 17:29:01 thorpej Exp $ */
+/*	$NetBSD: pmap.h,v 1.1 2006/12/16 05:47:00 ober Exp $	*/
 
-#include <arm/pmap.h>
+#include <arm/arm32/pmap.h>

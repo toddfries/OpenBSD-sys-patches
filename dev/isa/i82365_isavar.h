@@ -1,5 +1,4 @@
-/*	$OpenBSD: i82365_isavar.h,v 1.7 2005/01/27 17:03:23 millert Exp $	*/
-/*	$NetBSD: i82365_isavar.h,v 1.1 1998/06/07 18:28:31 sommerfe Exp $  */
+/*	$NetBSD: i82365_isavar.h,v 1.6 2005/12/11 12:22:02 christos Exp $	*/
 
 /*
  * Copyright (c) 1998 Bill Sommerfeld.  All rights reserved.
@@ -31,24 +30,28 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-extern char pcic_isa_intr_list[];
-extern int npcic_isa_intr_list;
+struct pcic_isa_softc {
+	struct pcic_softc sc_pcic;	/* real pcic softc */
+	isa_chipset_tag_t sc_ic;	/* ISA chipset tag */
+};
 
-/* 
+extern int pcic_isa_intr_alloc_mask;
+
+/*
  * Establish/disestablish interrupts for PCMCIA functions.
  */
 
 void	*pcic_isa_chip_intr_establish(pcmcia_chipset_handle_t,
-	    struct pcmcia_function *, int, int (*) (void *), void *, char *);
+	    struct pcmcia_function *, int, int (*) (void *), void *);
 void	pcic_isa_chip_intr_disestablish(pcmcia_chipset_handle_t, void *);
-const char *pcic_isa_chip_intr_string(pcmcia_chipset_handle_t, void *);
 
 /*
  * Figure out how wide the ISA bus is...
  */
 
-void	pcic_isa_bus_width_probe(struct pcic_softc *, bus_space_tag_t,
-	    bus_space_handle_t, bus_addr_t, u_int32_t);
-
-int	pcic_intr_probe(void *);
-int	pcic_intr_find(struct pcic_softc *, int);
+void pcic_isa_bus_width_probe(struct pcic_softc *, bus_space_tag_t,
+				   bus_space_handle_t, bus_addr_t, u_int32_t);
+void	pcic_isa_chip_intr_disestablish(pcmcia_chipset_handle_t, void *);
+void	pcic_isa_config_interrupts(struct device *);
+void	*pcic_isa_chip_intr_establish(pcmcia_chipset_handle_t,
+	    struct pcmcia_function *, int, int (*) (void *), void *);

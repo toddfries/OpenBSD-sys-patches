@@ -1,4 +1,4 @@
-/*      $NetBSD: sa1111.c,v 1.18 2006/06/27 13:58:08 peter Exp $	*/
+/*      $NetBSD: sa1111.c,v 1.22 2008/04/28 20:23:14 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sa1111.c,v 1.18 2006/06/27 13:58:08 peter Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sa1111.c,v 1.22 2008/04/28 20:23:14 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: sa1111.c,v 1.18 2006/06/27 13:58:08 peter Exp $");
 #include <sys/uio.h>
 
 #include <machine/bus.h>
+#include <machine/intr.h>
 
 #include <arm/sa11x0/sa11x0_reg.h>
 #include <arm/sa11x0/sa11x0_var.h>
@@ -67,11 +61,6 @@ static int	sa1111_print(void *, const char *);
 
 static void	sacc_intr_calculatemasks(struct sacc_softc *);
 static void	sacc_intr_setpolarity(sacc_chipset_tag_t *, int , int);
-
-#if !defined(__HAVE_GENERIC_SOFT_INTERRUPTS)
-void *softintr_establish(int, int (*)(void *), void *);
-void softintr_schedule(void *);
-#endif
 
 #ifdef INTR_DEBUG
 #define DPRINTF(arg)	printf arg
@@ -153,20 +142,10 @@ sacc_intr_establish(sacc_chipset_tag_t *ic, int irq, int type, int level,
 		panic("sacc_intr_establish: type must be unique");
 
 	/* install intr handler */
-#if defined(__GENERIC_SOFT_INTERRUPTS_ALL_LEVELS) || \
-	!defined(__HAVE_GENERIC_SOFT_INTERRUPTS)
-
-	ih->ih_soft = softintr_establish(level, (void (*)(void *)) ih_fun,
-					 ih_arg);
-#else
 	/* map interrupt level to appropriate softinterrupt level */
-	if (level >= IPL_SOFTSERIAL)
-		level = IPL_SOFTSERIAL;
-	else if (level >= IPL_SOFTNET)
-		level = IPL_SOFTNET;
-	ih->ih_soft = softintr_establish(level, (void (*)(void *)) ih_fun,
+	level = SOFTINT_SERIAL;
+	ih->ih_soft = softint_establish(level, (void (*)(void *)) ih_fun,
 					 ih_arg);
-#endif
 	ih->ih_irq = irq;
 	ih->ih_next = NULL;
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_opti_reg.h,v 1.3 2004/09/24 07:38:38 grange Exp $	*/
-/*	$NetBSD: pciide_opti_reg.h,v 1.2 2000/06/07 20:42:53 scw Exp $	*/
+/*	$NetBSD: pciide_opti_reg.h,v 1.12 2008/04/28 20:23:55 martin Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,9 +28,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef _DEV_PCI_PCIIDE_OPTI_REG_H_
-#define _DEV_PCI_PCIIDE_OPTI_REG_H_
 
 /*
  * Register definitions for OPTi PCIIDE controllers based on
@@ -106,28 +95,87 @@
 #define  OPTI_MISC_ADDR_SETUP_MASK	0x3u
 #define  OPTI_MISC_WRITE_MASK		0x7fu
 
+
+/*
+ * Inline functions for accessing the timing registers of the
+ * OPTi controller.
+ *
+ * These *MUST* disable interrupts as they need atomic access to
+ * certain magic registers. Failure to adhere to this *will*
+ * break things in subtle ways if the wdc registers are accessed
+ * by an interrupt routine while this magic sequence is executing.
+ */
+static __inline u_int8_t __unused
+opti_read_config(struct ata_channel *chp, int reg)
+{
+	struct wdc_regs *wdr = CHAN_TO_WDC_REGS(chp);
+	u_int8_t rv;
+	int s = splhigh();
+
+	/* Two consecutive 16-bit reads from register #1 (0x1f1/0x171) */
+	(void) bus_space_read_2(wdr->cmd_iot, wdr->cmd_iohs[wd_features], 0);
+	(void) bus_space_read_2(wdr->cmd_iot, wdr->cmd_iohs[wd_features], 0);
+
+	/* Followed by an 8-bit write of 0x3 to register #2 */
+	bus_space_write_1(wdr->cmd_iot, wdr->cmd_iohs[wd_seccnt], 0, 0x03u);
+
+	/* Now we can read the required register */
+	rv = bus_space_read_1(wdr->cmd_iot, wdr->cmd_iohs[reg], 0);
+
+	/* Restore the real registers */
+	bus_space_write_1(wdr->cmd_iot, wdr->cmd_iohs[wd_seccnt], 0, 0x83u);
+
+	splx(s);
+
+	return rv;
+}
+
+static __inline void __unused
+opti_write_config(struct ata_channel *chp, int reg, u_int8_t val)
+{
+	struct wdc_regs *wdr = CHAN_TO_WDC_REGS(chp);
+	int s = splhigh();
+
+	/* Two consecutive 16-bit reads from register #1 (0x1f1/0x171) */
+	(void) bus_space_read_2(wdr->cmd_iot, wdr->cmd_iohs[wd_features], 0);
+	(void) bus_space_read_2(wdr->cmd_iot, wdr->cmd_iohs[wd_features], 0);
+
+	/* Followed by an 8-bit write of 0x3 to register #2 */
+	bus_space_write_1(wdr->cmd_iot, wdr->cmd_iohs[wd_seccnt], 0, 0x03u);
+
+	/* Now we can write the required register */
+	bus_space_write_1(wdr->cmd_iot, wdr->cmd_iohs[reg], 0, val);
+
+	/* Restore the real registers */
+	bus_space_write_1(wdr->cmd_iot, wdr->cmd_iohs[wd_seccnt], 0, 0x83u);
+
+	splx(s);
+}
+
 /*
  * These are the timing register values for the various IDE modes
  * supported by the OPTi chip. The first index of the two-dimensional
  * arrays is used for a 33MHz PCIbus, the second for a 25MHz PCIbus.
  */
-const static u_int8_t opti_tim_cp[2][8] = {		/* Command Pulse */
+static const u_int8_t opti_tim_cp[2][8] __unused = {
+	/* Command Pulse */
 	{5, 4, 3, 2, 2, 7, 2, 2},
 	{4, 3, 2, 2, 1, 5, 2, 1}
 };
 
-const static u_int8_t opti_tim_rt[2][8] = {		/* Recovery Time */
+static const u_int8_t opti_tim_rt[2][8] __unused = {
+	/* Recovery Time */
 	{9, 4, 0, 0, 0, 6, 0, 0},
 	{6, 2, 0, 0, 0, 4, 0, 0}
 };
 
-const static u_int8_t opti_tim_as[2][8] = {		/* Address Setup */
+static const u_int8_t opti_tim_as[2][8] __unused = {
+	/* Address Setup */
 	{2, 1, 1, 1, 0, 0, 0, 0},
 	{1, 1, 0, 0, 0, 0, 0, 0}
 };
 
-const static u_int8_t opti_tim_em[8] = {		/* Enhanced Mode */
+static const u_int8_t opti_tim_em[8] __unused = {
+	/* Enhanced Mode */
 	0, 0, 0, 1, 2, 0, 1 ,2
 };
-
-#endif	/* !_DEV_PCI_PCIIDE_OPTI_REG_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: filio.h,v 1.5 2007/06/01 22:30:48 deraadt Exp $	*/
-/*	$NetBSD: filio.h,v 1.5 1994/06/29 06:44:14 cgd Exp $	*/
+/*	$NetBSD: filio.h,v 1.10 2005/12/11 12:25:20 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
@@ -50,5 +49,14 @@
 #define	FIOASYNC	_IOW('f', 125, int)	/* set/clear async i/o */
 #define	FIOSETOWN	_IOW('f', 124, int)	/* set owner */
 #define	FIOGETOWN	_IOR('f', 123, int)	/* get owner */
+#define	OFIOGETBMAP	_IOWR('f', 122, uint32_t) /* get underlying block no. */
+#define	FIOGETBMAP	_IOWR('f', 122, daddr_t) /* get underlying block no. */
+#define	FIONWRITE	_IOR('f', 121, int)	/* get # bytes outstanding
+						 * in send queue. */
+#define	FIONSPACE	_IOR('f', 120, int)	/* get space in send queue. */
+
+
+/* Ugly symbol for compatibility with other operating systems */
+#define	FIBMAP		FIOGETBMAP
 
 #endif /* !_SYS_FILIO_H_ */

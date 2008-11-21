@@ -1,7 +1,7 @@
-/* $NetBSD: loadfile_elf32.c,v 1.16 2006/04/06 09:25:58 cherry Exp $ */
+/* $NetBSD: loadfile_elf32.c,v 1.24 2008/09/25 20:59:38 christos Exp $ */
 
 /*-
- * Copyright (c) 1997 The NetBSD Foundation, Inc.
+ * Copyright (c) 1997, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -263,11 +256,7 @@ externalize_shdr(Elf_Byte bo, Elf_Shdr *shdr)
 #endif /* _STANDALONE */
 
 int
-ELFNAMEEND(loadfile)(fd, elf, marks, flags)
-	int fd;
-	Elf_Ehdr *elf;
-	u_long *marks;
-	int flags;
+ELFNAMEEND(loadfile)(int fd, Elf_Ehdr *elf, u_long *marks, int flags)
 {
 	Elf_Shdr *shp;
 	Elf_Phdr *phdr;
@@ -276,6 +265,12 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 	int first;
 	paddr_t minp = ~0, maxp = 0, pos = 0;
 	paddr_t offset = marks[MARK_START], shpp, elfp = 0;
+	ssize_t nr;
+	struct __packed {
+		Elf_Nhdr	nh;
+		uint8_t		name[ELF_NOTE_NETBSD_NAMESZ + 1];
+		uint8_t		desc[ELF_NOTE_NETBSD_DESCSZ];
+	} note;
 
 	/* some ports dont use the offset */
 	offset = offset;
@@ -289,7 +284,13 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 		WARN(("lseek phdr"));
 		goto freephdr;
 	}
-	if (read(fd, phdr, sz) != sz) {
+	nr = read(fd, phdr, sz);
+	if (nr == -1) {
+		WARN(("read program headers"));
+		goto freephdr;
+	}
+	if (nr != sz) {
+		errno = EIO;
 		WARN(("read program headers"));
 		goto freephdr;
 	}
@@ -302,7 +303,6 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 #endif
 		if (MD_LOADSEG(&phdr[i]))
 			goto loadseg;
-
 
 		if (phdr[i].p_type != PT_LOAD ||
 		    (phdr[i].p_flags & (PF_W|PF_X)) == 0)
@@ -318,6 +318,9 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 		    (IS_DATA(phdr[i]) && (flags & LOAD_DATA))) {
 
 		loadseg:
+			if (marks[MARK_DATA] == 0 && IS_DATA(phdr[i]))
+				marks[MARK_DATA] = LOADADDR(phdr[i].p_vaddr);
+
 			/* Read in segment. */
 			PROGRESS(("%s%lu", first ? "" : "+",
 			    (u_long)phdr[i].p_filesz));
@@ -326,8 +329,13 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 				WARN(("lseek text"));
 				goto freephdr;
 			}
-			if (READ(fd, phdr[i].p_vaddr, phdr[i].p_filesz) !=
-			    (ssize_t)phdr[i].p_filesz) {
+			nr = READ(fd, phdr[i].p_vaddr, phdr[i].p_filesz);
+			if (nr == -1) {
+				WARN(("read text error"));
+				goto freephdr;
+			}
+			if (nr != (ssize_t)phdr[i].p_filesz) {
+				errno = EIO;
 				WARN(("read text"));
 				goto freephdr;
 			}
@@ -377,7 +385,13 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 
 		shp = ALLOC(sz);
 
-		if (read(fd, shp, sz) != sz) {
+		nr = read(fd, shp, sz);
+		if (nr == -1) {
+			WARN(("read section headers"));
+			goto freeshp;
+		}
+		if (nr != sz) {
+			errno = EIO;
 			WARN(("read section headers"));
 			goto freeshp;
 		}
@@ -402,7 +416,7 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 			case SHT_STRTAB:
 				for (j = 0; j < elf->e_shnum; j++)
 					if (shp[j].sh_type == SHT_SYMTAB &&
-					    shp[j].sh_link == (unsigned)i)
+					    shp[j].sh_link == (unsigned int)i)
 						goto havesym;
 				/* FALLTHROUGH */
 			default:
@@ -419,8 +433,13 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 						WARN(("lseek symbols"));
 						goto freeshp;
 					}
-					if (READ(fd, maxp, shp[i].sh_size) !=
-					    (ssize_t)shp[i].sh_size) {
+					nr = READ(fd, maxp, shp[i].sh_size);
+					if (nr == -1) {
+						WARN(("read symbols"));
+						goto freeshp;
+					}
+					if (nr != (ssize_t)shp[i].sh_size) {
+						errno = EIO;
 						WARN(("read symbols"));
 						goto freeshp;
 					}
@@ -428,6 +447,37 @@ ELFNAMEEND(loadfile)(fd, elf, marks, flags)
 				shp[i].sh_offset = maxp - elfp;
 				maxp += roundup(shp[i].sh_size, ELFROUND);
 				first = 0;
+				break;
+			case SHT_NOTE:
+				if ((flags & LOAD_NOTE) == 0)
+					break;
+				if (shp[i].sh_size < sizeof(note)) {
+					shp[i].sh_offset = 0;
+					break;
+				}
+				if (lseek(fd, shp[i].sh_offset, SEEK_SET)
+				    == -1) {
+					WARN(("lseek note"));
+					goto freeshp;
+				}
+				nr = read(fd, &note, sizeof(note));
+				if (nr == -1) {
+					WARN(("read note"));
+					goto freeshp;
+				}
+				if (note.nh.n_namesz ==
+				    ELF_NOTE_NETBSD_NAMESZ &&
+				    note.nh.n_descsz ==
+				    ELF_NOTE_NETBSD_DESCSZ &&
+				    note.nh.n_type ==
+				    ELF_NOTE_TYPE_NETBSD_TAG &&
+				    memcmp(note.name, ELF_NOTE_NETBSD_NAME,
+				    sizeof(note.name)) == 0) {
+				    	memcpy(&netbsd_version, &note.desc,
+				    	    sizeof(netbsd_version));
+				}
+				shp[i].sh_offset = 0;
+				break;
 			}
 			/* Since we don't load .shstrtab, zero the name. */
 			shp[i].sh_name = 0;
@@ -482,5 +532,33 @@ freeshp:
 	DEALLOC(shp, sz);
 	return 1;
 }
+
+#ifdef TEST
+#include <stdlib.h>
+#include <fcntl.h>
+#include <err.h>
+#include <stdio.h>
+u_int32_t netbsd_version;
+int
+main(int argc, char *argv[])
+{
+	int fd;
+	u_long marks[MARK_MAX];
+	Elf_Ehdr elf;
+	if (argc != 2) {
+		(void)fprintf(stderr, "Usage: %s <file>\n", getprogname());
+		return 1;
+	}
+	if ((fd = open(argv[1], O_RDONLY)) == -1)
+		err(1, "Can't open `%s'", argv[1]);
+	if (read(fd, &elf, sizeof(elf)) != sizeof(elf))
+		err(1, "Can't read `%s'", argv[1]);
+	memset(marks, 0, sizeof(marks));
+	marks[MARK_START] = (u_long)malloc(2LL * 1024 * 2024 * 1024);
+	ELFNAMEEND(loadfile)(fd, &elf, marks, LOAD_ALL);
+	printf("%d\n", netbsd_version);
+	return 0;
+}
+#endif
 
 #endif /* (ELFSIZE == 32 && BOOT_ELF32) || (ELFSIZE == 64 && BOOT_ELF64) */

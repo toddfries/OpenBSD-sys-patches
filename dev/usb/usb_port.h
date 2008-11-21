@@ -1,6 +1,4 @@
-/*	$OpenBSD: usb_port.h,v 1.96 2007/06/17 07:53:11 mbalmer Exp $ */
-/*	$NetBSD: usb_port.h,v 1.62 2003/02/15 18:33:30 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
+/*	$NetBSD: usb_port.h,v 1.85 2008/06/28 09:06:20 kent Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -18,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,58 +34,71 @@
 #define _USB_PORT_H
 
 /*
- * Macros to ease the import of USB drivers from other operating systems, e.g.
- * NetBSD or FreeBSD.
+ * Macro's to cope with the differences between operating systems.
  */
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-#define USB_USE_SOFTINTR
-#else
-#undef USB_USE_SOFTINTR
+#if defined(_KERNEL)
+#include <sys/mallocvar.h>
+
+MALLOC_DECLARE(M_USB);
+MALLOC_DECLARE(M_USBDEV);
+MALLOC_DECLARE(M_USBHC);
+
+#include <sys/device.h>
+
 #endif
 
+#define USB_USE_SOFTINTR
+
+#ifdef USB_DEBUG
+#define UKBD_DEBUG 1
+#define UHIDEV_DEBUG 1
+#define UHID_DEBUG 1
+#define OHCI_DEBUG 1
+#define UGEN_DEBUG 1
+#define UHCI_DEBUG 1
+#define UHUB_DEBUG 1
+#define ULPT_DEBUG 1
+#define UCOM_DEBUG 1
+#define UPLCOM_DEBUG 1
+#define UMCT_DEBUG 1
+#define UMODEM_DEBUG 1
+#define UAUDIO_DEBUG 1
+#define AUE_DEBUG 1
+#define CUE_DEBUG 1
+#define KUE_DEBUG 1
+#define URL_DEBUG 1
+#define UMASS_DEBUG 1
+#define UVISOR_DEBUG 1
+#define UPL_DEBUG 1
+#define UZCOM_DEBUG 1
+#define URIO_DEBUG 1
+#define UFTDI_DEBUG 1
+#define USCANNER_DEBUG 1
+#define USSCANNER_DEBUG 1
+#define EHCI_DEBUG 1
+#define UIRDA_DEBUG 1
+#define USTIR_DEBUG 1
+#define UISDATA_DEBUG 1
+#define UDSBR_DEBUG 1
+#define UBT_DEBUG 1
+#define AXE_DEBUG 1
+#define UIPAQ_DEBUG 1
+#define UCYCOM_DEBUG 1
 #define Static
-
-#define UMASS_ATAPISTR		"atapiscsi"
-
-/* periph_quirks */
-#define	PQUIRK_NOSENSE		ADEV_NOSENSE	/* can't REQUEST SENSE */
-#define PQUIRK_ONLYBIG		SDEV_ONLYBIG
-
-#define sel_klist si_note
+#else
+#define Static static
+#endif
 
 typedef struct proc *usb_proc_ptr;
 
-#define UCOMBUSCF_PORTNO		0
-#define UCOMBUSCF_PORTNO_DEFAULT	-1
-#define UHIDBUSCF_REPORTID		0
-#define UHIDBUSCF_REPORTID_DEFAULT	-1
-
-#define mstohz(ms) ((ms) * hz / 1000)
-
-#define sel_klist si_note
-
-typedef int usb_malloc_type;
-
-#define if_deactivate(x)
-#define IF_INPUT(ifp, m) ether_input_mbuf((ifp), (m))
-
-#define swap_bytes_change_sign16_le swap_bytes_change_sign16
-#define change_sign16_swap_bytes_le change_sign16_swap_bytes
-#define change_sign16_le change_sign16
-
-#define ulinear8_to_slinear16_le ulinear8_to_linear16_le
-#define ulinear8_to_slinear16_be ulinear8_to_linear16_be
-#define slinear16_to_ulinear8_le linear16_to_ulinear8_le
-#define slinear16_to_ulinear8_be linear16_to_ulinear8_be
-
-typedef struct device *device_ptr_t;
-#define USBBASEDEVICE struct device
-#define USBDEV(bdev) (&(bdev))
-#define USBDEVNAME(bdev) ((bdev).dv_xname)
-#define USBDEVUNIT(bdev) ((bdev).dv_unit)
-#define USBDEVPTRNAME(bdevptr) ((bdevptr)->dv_xname)
-#define USBGETSOFTC(d) ((void *)(d))
+typedef device_t device_ptr_t;
+#define USBBASEDEVICE device_t
+#define USBDEV(bdev) (bdev)
+#define USBDEVNAME(bdev) (device_xname(bdev))
+#define USBDEVUNIT(bdev) device_unit(bdev)
+#define USBDEVPTRNAME(bdevptr) (device_xname(bdevptr))
+#define USBGETSOFTC(d) (device_private(d))
 
 #define DECLARE_USB_DMA_T \
 	struct usb_dma_block; \
@@ -103,86 +107,85 @@ typedef struct device *device_ptr_t;
 		u_int offs; \
 	} usb_dma_t
 
-typedef struct timeout usb_callout_t;
-#define usb_callout_init(h)	timeout_set(&(h), NULL, NULL)
-#define usb_callout(h, t, f, d) \
-	do { \
-		timeout_del(&(h)); \
-		timeout_set(&(h), (f), (d)); \
-		timeout_add(&(h), (t)); \
-	} while (0)
-#define usb_callout_pending(h)	timeout_pending(&(h))
-#define usb_uncallout(h, f, d) timeout_del(&(h))
+typedef struct callout usb_callout_t;
+#define usb_callout_init(h)	callout_init(&(h), 0)
+#define usb_callout_destroy(h)	callout_destroy((&h))
+#define	usb_callout(h, t, f, d)	callout_reset(&(h), (t), (f), (d))
+#define	usb_uncallout(h, f, d)	callout_stop(&(h))
 
-#define USB_DECLARE_DRIVER_CLASS(dname, devclass)  \
-int __CONCAT(dname,_match)(struct device *, void *, void *); \
-void __CONCAT(dname,_attach)(struct device *, struct device *, void *); \
-int __CONCAT(dname,_detach)(struct device *, int); \
-int __CONCAT(dname,_activate)(struct device *, enum devact); \
-\
-struct cfdriver __CONCAT(dname,_cd) = { \
-	NULL, #dname, devclass \
-}; \
-\
-const struct cfattach __CONCAT(dname,_ca) = { \
-	sizeof(struct __CONCAT(dname,_softc)), \
-	__CONCAT(dname,_match), \
-	__CONCAT(dname,_attach), \
-	__CONCAT(dname,_detach), \
-	__CONCAT(dname,_activate), \
-}
+#define usb_kthread_create1		kthread_create
+#define usb_kthread_create(f, a)	((f)(a))
 
-#define USB_DECLARE_DRIVER(dname) USB_DECLARE_DRIVER_CLASS(dname, DV_DULL)
+typedef struct malloc_type *usb_malloc_type;
+
+#define Ether_ifattach ether_ifattach
+#define IF_INPUT(ifp, m) (*(ifp)->if_input)((ifp), (m))
+
+#define logprintf printf
+
+#define	USB_DNAME(dname)	dname
+#define USB_DECLARE_DRIVER(dname)  \
+int __CONCAT(dname,_match)(device_t, cfdata_t, void *); \
+void __CONCAT(dname,_attach)(device_t, device_t, void *); \
+int __CONCAT(dname,_detach)(device_t, int); \
+int __CONCAT(dname,_activate)(device_t, enum devact); \
+\
+extern struct cfdriver __CONCAT(dname,_cd); \
+\
+CFATTACH_DECL_NEW(USB_DNAME(dname), \
+    sizeof(struct ___CONCAT(dname,_softc)), \
+    ___CONCAT(dname,_match), \
+    ___CONCAT(dname,_attach), \
+    ___CONCAT(dname,_detach), \
+    ___CONCAT(dname,_activate))
 
 #define USB_MATCH(dname) \
-int \
-__CONCAT(dname,_match)(parent, match, aux) \
-	struct device *parent; \
-	void *match; \
-	void *aux;
+int __CONCAT(dname,_match)(device_t parent, \
+    cfdata_t match, void *aux)
 
 #define USB_MATCH_START(dname, uaa) \
 	struct usb_attach_arg *uaa = aux
 
+#define USB_IFMATCH_START(dname, uaa) \
+	struct usbif_attach_arg *uaa = aux
+
 #define USB_ATTACH(dname) \
-void \
-__CONCAT(dname,_attach)(parent, self, aux) \
-	struct device *parent; \
-	struct device *self; \
-	void *aux;
+void __CONCAT(dname,_attach)(device_t parent, \
+    device_t self, void *aux)
 
 #define USB_ATTACH_START(dname, sc, uaa) \
 	struct __CONCAT(dname,_softc) *sc = \
-		(struct __CONCAT(dname,_softc) *)self; \
+		device_private(self); \
 	struct usb_attach_arg *uaa = aux
+
+#define USB_IFATTACH_START(dname, sc, uaa) \
+	struct __CONCAT(dname,_softc) *sc = \
+		device_private(self); \
+	struct usbif_attach_arg *uaa = aux
 
 /* Returns from attach */
 #define USB_ATTACH_ERROR_RETURN	return
 #define USB_ATTACH_SUCCESS_RETURN	return
 
-#define USB_ATTACH_SETUP printf("\n")
+#define USB_ATTACH_SETUP \
+	do { \
+		aprint_naive("\n"); \
+		aprint_normal("\n"); \
+	} while (0)
 
 #define USB_DETACH(dname) \
-int \
-__CONCAT(dname,_detach)(self, flags) \
-	struct device *self; \
-	int flags;
+int __CONCAT(dname,_detach)(device_t self, int flags)
 
 #define USB_DETACH_START(dname, sc) \
 	struct __CONCAT(dname,_softc) *sc = \
-		(struct __CONCAT(dname,_softc) *)self
+		device_private(self)
 
 #define USB_GET_SC_OPEN(dname, unit, sc) \
-	if (unit >= __CONCAT(dname,_cd).cd_ndevs) \
-		return (ENXIO); \
-	sc = __CONCAT(dname,_cd).cd_devs[unit]; \
+	sc = device_lookup_private(& __CONCAT(dname,_cd), unit); \
 	if (sc == NULL) \
 		return (ENXIO)
 
 #define USB_GET_SC(dname, unit, sc) \
-	sc = __CONCAT(dname,_cd).cd_devs[unit]
-
-#define USB_DO_ATTACH(dev, bdev, parent, args, print, sub) \
-	(config_found_sm(parent, args, print, sub))
+	sc = device_lookup_private(& __CONCAT(dname,_cd), unit)
 
 #endif /* _USB_PORT_H */

@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_reconmap.h,v 1.3 2002/12/16 07:01:05 tdeval Exp $	*/
-/*	$NetBSD: rf_reconmap.h,v 1.3 1999/02/05 00:06:16 oster Exp $	*/
-
+/*	$NetBSD: rf_reconmap.h,v 1.11 2008/05/19 19:49:54 oster Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -29,73 +27,60 @@
  */
 
 /******************************************************************************
- * rf_reconMap.h
- *
- * -- Header file describing reconstruction status data structure.
+ * rf_reconMap.h -- Header file describing reconstruction status data structure
  ******************************************************************************/
 
-#ifndef	_RF__RF_RECONMAP_H_
-#define	_RF__RF_RECONMAP_H_
+#ifndef _RF__RF_RECONMAP_H_
+#define _RF__RF_RECONMAP_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+#include <sys/pool.h>
+
 #include "rf_threadstuff.h"
 
+/* the number of recon units in the status table. */
+#define RF_RECONMAP_SIZE 32
+
 /*
- * Main reconstruction status descriptor; size and maxsize are used for
- * monitoring only: they have no function for reconstruction.
+ * Main reconstruction status descriptor.
  */
 struct RF_ReconMap_s {
-	RF_SectorCount_t	  sectorsPerReconUnit;
-						/*
-						 * Sectors per reconstruct
-						 * unit.
-						 */
-	RF_SectorCount_t	  sectorsInDisk;/* Total sectors in disk. */
-	RF_SectorCount_t	  unitsLeft;	/* Recon units left to recon. */
-	RF_ReconUnitCount_t	  totalRUs;	/* Total recon units on disk. */
-	RF_ReconUnitCount_t	  spareRUs;	/*
-						 * Total number of spare RUs on
-						 * failed disk.
-						 */
-	RF_StripeCount_t	  totalParityStripes;
-						/*
-						 * Total number of parity
-						 * stripes in array.
-						 */
-	u_int			  size;		/*
-						 * Overall size of this
-						 * structure.
-						 */
-	u_int			  maxSize;	/* Maximum size so far. */
-	RF_ReconMapListElem_t	**status;	/*
-						 * Array of ptrs to list
-						 * elements.
-						 */
-	RF_DECLARE_MUTEX	 (mutex);
+	RF_SectorCount_t sectorsPerReconUnit;	/* sectors per reconstruct
+						 * unit */
+	RF_SectorCount_t sectorsInDisk;	/* total sectors in disk */
+	RF_SectorCount_t unitsLeft;	/* recon units left to recon */
+	RF_ReconUnitCount_t totalRUs;	/* total recon units on disk */
+	RF_ReconUnitCount_t spareRUs;	/* total number of spare RUs on failed
+					 * disk */
+	RF_ReconUnitCount_t low_ru;     /* lowest reconstruction unit number in
+					   the status array */
+	RF_ReconUnitCount_t high_ru;    /* highest reconstruction unit number
+					   in the status array */
+	RF_ReconUnitCount_t head;       /* the position in the array where
+					   low_ru is found */
+	RF_ReconUnitCount_t status_size; /* number of recon units in status */
+	RF_StripeCount_t totalParityStripes;	/* total number of parity
+						 * stripes in array */
+	RF_ReconMapListElem_t **status;	/* array of ptrs to list elements */
+	struct pool elem_pool;          /* pool of RF_ReconMapListElem_t's */
+	RF_DECLARE_MUTEX(mutex)
+	int lock;                       /* 1 if someone has the recon map
+					   locked, 0 otherwise */
 };
-
-/* A list element. */
+/* a list element */
 struct RF_ReconMapListElem_s {
-	/* Bounding sect nums on this block. */
-	RF_SectorNum_t		 startSector;
-	RF_SectorNum_t		 stopSector;
-	RF_ReconMapListElem_t	*next;		/* Next element in list. */
+	RF_SectorNum_t startSector;	/* bounding sect nums on this block */
+	RF_SectorNum_t stopSector;
+	RF_ReconMapListElem_t *next;	/* next element in list */
 };
 
-RF_ReconMap_t *rf_MakeReconMap(RF_Raid_t *,
-	RF_SectorCount_t, RF_SectorCount_t, RF_ReconUnitCount_t);
-
-void rf_ReconMapUpdate(RF_Raid_t *, RF_ReconMap_t *,
-	RF_SectorNum_t, RF_SectorNum_t);
-
+RF_ReconMap_t *rf_MakeReconMap(RF_Raid_t *, RF_SectorCount_t,
+			       RF_SectorCount_t, RF_ReconUnitCount_t);
+void rf_ReconMapUpdate(RF_Raid_t *, RF_ReconMap_t *, RF_SectorNum_t, RF_SectorNum_t);
 void rf_FreeReconMap(RF_ReconMap_t *);
-
-int  rf_CheckRUReconstructed(RF_ReconMap_t *, RF_SectorNum_t);
-
+int rf_CheckRUReconstructed(RF_ReconMap_t *, RF_SectorNum_t);
 RF_ReconUnitCount_t rf_UnitsLeftToReconstruct(RF_ReconMap_t *);
-
-void rf_PrintReconMap(RF_Raid_t *, RF_ReconMap_t *, RF_RowCol_t, RF_RowCol_t);
-
+void rf_PrintReconMap(RF_Raid_t *, RF_ReconMap_t *, RF_RowCol_t);
 void rf_PrintReconSchedule(RF_ReconMap_t *, struct timeval *);
 
-#endif	/* !_RF__RF_RECONMAP_H_ */
+#endif				/* !_RF__RF_RECONMAP_H_ */

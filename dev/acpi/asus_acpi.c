@@ -1,4 +1,4 @@
-/* $NetBSD: asus_acpi.c,v 1.2 2008/03/31 15:29:18 xtraeme Exp $ */
+/* $NetBSD: asus_acpi.c,v 1.6 2008/09/21 21:15:28 jmcneill Exp $ */
 
 /*-
  * Copyright (c) 2007, 2008 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by Jared D. McNeill.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: asus_acpi.c,v 1.2 2008/03/31 15:29:18 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: asus_acpi.c,v 1.6 2008/09/21 21:15:28 jmcneill Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -54,6 +48,8 @@ typedef struct asus_softc {
 #define ASUS_PSW_LAST		1
 	struct sysmon_pswitch	sc_smpsw[ASUS_PSW_LAST];
 	bool			sc_smpsw_valid;
+
+	ACPI_INTEGER		sc_brightness;
 } asus_softc_t;
 
 #define ASUS_NOTIFY_WirelessSwitch	0x10
@@ -72,13 +68,16 @@ typedef struct asus_softc {
 #define		ASUS_SDSP_DVI	0x08
 #define		ASUS_SDSP_ALL	\
 		(ASUS_SDSP_LCD | ASUS_SDSP_CRT | ASUS_SDSP_TV | ASUS_SDSP_DVI)
+#define ASUS_METHOD_PBLG	"PBLG"
+#define ASUS_METHOD_PBLS	"PBLS"
 
-static int	asus_match(device_t, struct cfdata *, void *);
+static int	asus_match(device_t, cfdata_t, void *);
 static void	asus_attach(device_t, device_t, void *);
 
 static void	asus_notify_handler(ACPI_HANDLE, UINT32, void *);
 
 static void	asus_init(device_t);
+static bool	asus_suspend(device_t PMF_FN_PROTO);
 static bool	asus_resume(device_t PMF_FN_PROTO);
 
 CFATTACH_DECL_NEW(asus, sizeof(asus_softc_t),
@@ -131,7 +130,7 @@ asus_attach(device_t parent, device_t self, void *opaque)
 		aprint_error_dev(self, "couldn't install notify handler: %s\n",
 		    AcpiFormatException(rv));
 
-	if (!pmf_device_register(self, NULL, asus_resume))
+	if (!pmf_device_register(self, asus_suspend, asus_resume))
 		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
@@ -193,6 +192,25 @@ asus_init(device_t self)
 	if (ACPI_FAILURE(rv))
 		aprint_error_dev(self, "couldn't evaluate INIT: %s\n",
 		    AcpiFormatException(rv));
+
+	if (ret.Pointer)
+		AcpiOsFree(ret.Pointer);
+}
+
+static bool
+asus_suspend(device_t self PMF_FN_ARGS)
+{
+	asus_softc_t *sc = device_private(self);
+	ACPI_STATUS rv;
+
+	/* capture display brightness when we're sleeping */
+	rv = acpi_eval_integer(sc->sc_node->ad_handle, ASUS_METHOD_PBLG,
+	    &sc->sc_brightness);
+	if (ACPI_FAILURE(rv))
+		aprint_error_dev(sc->sc_dev, "couldn't evaluate PBLG: %s\n",
+		    AcpiFormatException(rv));
+
+	return true;
 }
 
 static bool
@@ -206,17 +224,18 @@ asus_resume(device_t self PMF_FN_ARGS)
 
 	asus_init(self);
 
+	/* restore previous display brightness */
 	ret.Pointer = NULL;
 	ret.Length = ACPI_ALLOCATE_BUFFER;
 	param.Type = ACPI_TYPE_INTEGER;
-	param.Integer.Value = ASUS_SDSP_LCD;
+	param.Integer.Value = sc->sc_brightness;
 	params.Pointer = &param;
 	params.Count = 1;
 
-	rv = AcpiEvaluateObject(sc->sc_node->ad_handle, ASUS_METHOD_SDSP,
+	rv = AcpiEvaluateObject(sc->sc_node->ad_handle, ASUS_METHOD_PBLS,
 	    &params, &ret);
 	if (ACPI_FAILURE(rv))
-		aprint_error_dev(self, "couldn't evaluate SDSP: %s\n",
+		aprint_error_dev(self, "couldn't evaluate PBLS: %s\n",
 		    AcpiFormatException(rv));
 
 	return true;

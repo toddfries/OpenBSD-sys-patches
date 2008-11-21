@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_prctl.h,v 1.11 2006/03/20 13:14:37 drochner Exp $ */
+/*	$NetBSD: irix_prctl.h,v 1.14 2008/04/28 20:23:41 martin Exp $ */
 
 /*-
  * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +35,7 @@
 /* IRIX share group structure */
 struct irix_share_group {
 	LIST_HEAD(isg_head, irix_emuldata) isg_head;	/* list head */
-	struct lock isg_lock;				/* list lock */
+	krwlock_t isg_lock;				/* list lock */
 	int isg_refcount;
 };
 
@@ -61,10 +54,10 @@ struct irix_shared_regions_rec {
 	LIST_ENTRY(irix_shared_regions_rec) isrr_list;
 };
 
-int irix_prda_init __P((struct proc *));
-void irix_vm_sync __P((struct proc *));
-int irix_vm_fault __P((struct proc *, vaddr_t, vm_prot_t));
-void irix_isrr_insert __P((vaddr_t, vsize_t, int, struct proc *));
+int irix_prda_init(struct proc *);
+void irix_vm_sync(struct proc *);
+int irix_vm_fault(struct proc *, vaddr_t, vm_prot_t);
+void irix_isrr_insert(vaddr_t, vsize_t, int, struct proc *);
 
 /* macro used to wrap irix_vm_sync calls */
 #define IRIX_VM_SYNC(q,cmd)                                                   \
@@ -72,14 +65,12 @@ if (((struct irix_emuldata *)((q)->p_emuldata))->ied_share_group == NULL ||   \
     ((struct irix_emuldata *)((q)->p_emuldata))->ied_shareaddr == 0) {        \
 	(cmd);                                                                \
 } else {                                                                      \
-	lockmgr(&((struct irix_emuldata *)                                    \
-	    ((q)->p_emuldata))->ied_share_group->isg_lock,                    \
-	    LK_EXCLUSIVE, NULL);                                              \
+	rw_enter(&((struct irix_emuldata *)                                   \
+	    ((q)->p_emuldata))->ied_share_group->isg_lock, RW_WRITER);        \
 	(cmd);                                                                \
 	irix_vm_sync((q));                                                    \
-	lockmgr(&((struct irix_emuldata *)                                    \
-	    ((q)->p_emuldata))->ied_share_group->isg_lock,                    \
-	    LK_RELEASE, NULL);                                                \
+	rw_exit(&((struct irix_emuldata *)                                    \
+	    ((q)->p_emuldata))->ied_share_group->isg_lock);                   \
 }
 
 /* From IRIX's <sys/prctl.h> */

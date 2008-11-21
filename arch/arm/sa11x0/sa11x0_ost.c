@@ -1,5 +1,4 @@
-/*	$OpenBSD: sa11x0_ost.c,v 1.8 2008/05/15 22:17:08 brad Exp $ */
-/*	$NetBSD: sa11x0_ost.c,v 1.11 2003/07/15 00:24:51 lukem Exp $	*/
+/*	$NetBSD: sa11x0_ost.c,v 1.25 2008/05/10 15:31:04 martin Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -38,11 +37,15 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sa11x0_ost.c,v 1.25 2008/05/10 15:31:04 martin Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/time.h>
+#include <sys/timetc.h>
 #include <sys/device.h>
 
 #include <machine/bus.h>
@@ -54,109 +57,89 @@
 #include <arm/sa11x0/sa11x0_var.h>
 #include <arm/sa11x0/sa11x0_ostreg.h>
 
-static int	saost_match(struct device *, void *, void *);
+static int	saost_match(struct device *, struct cfdata *, void *);
 static void	saost_attach(struct device *, struct device *, void *);
 
-int		gettick(void);
+static void	saost_tc_init(void);
+
+static uint32_t	gettick(void);
 static int	clockintr(void *);
 static int	statintr(void *);
-void		rtcinit(void);
 
 struct saost_softc {
 	struct device		sc_dev;
-	bus_addr_t		sc_baseaddr;
+
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 
-	u_int32_t	sc_clock_count;
-	u_int32_t	sc_statclock_count;
-	u_int32_t	sc_statclock_step;
+	uint32_t		sc_clock_count;
+	uint32_t		sc_statclock_count;
+	uint32_t		sc_statclock_step;
 };
 
 static struct saost_softc *saost_sc = NULL;
 
-#define DEF_TIMER_FREQUENCY         3686400         /* 3.6864MHz */
-int saost_timer_freq =DEF_TIMER_FREQUENCY;
-#define TIMER_FREQUENCY         saost_timer_freq
-#define TICKS_PER_MICROSECOND   (TIMER_FREQUENCY/1000000)
+#if defined(CPU_XSCALE_PXA270) && defined(CPU_XSCALE_PXA250)
+#error ost needs to dynamically configure the frequency
+#elif defined(CPU_XSCALE_PXA270)
+#define TIMER_FREQUENCY         3250000         /* PXA270 uses 3.25MHz */
+#else
+#define TIMER_FREQUENCY         3686400         /* 3.6864MHz */
+#endif
 
 #ifndef STATHZ
 #define STATHZ	64
 #endif
 
-#if 0
 CFATTACH_DECL(saost, sizeof(struct saost_softc),
     saost_match, saost_attach, NULL, NULL);
-#endif
-
-struct cfattach saost_ca = {
-	sizeof (struct saost_softc), saost_match, saost_attach
-};
-
-struct cfdriver saost_cd = {
-	NULL, "saost", DV_DULL
-};
 
 static int
-saost_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+saost_match(struct device *parent, struct cfdata *match, void *aux)
 {
-	return (1);
+
+	return 1;
 }
 
-void
-saost_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+static void
+saost_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct saost_softc *sc = (struct saost_softc*)self;
+	struct saost_softc *sc = (struct saost_softc *)self;
 	struct sa11x0_attach_args *sa = aux;
 
 	printf("\n");
 
 	sc->sc_iot = sa->sa_iot;
-	sc->sc_baseaddr = sa->sa_addr;
 
 	saost_sc = sc;
 
-	/* XXX */
-	if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X)
-		TIMER_FREQUENCY = 3250000; /* XXX */
-
-
-	if(bus_space_map(sa->sa_iot, sa->sa_addr, sa->sa_size, 0, 
-			&sc->sc_ioh))
+	if (bus_space_map(sa->sa_iot, sa->sa_addr, sa->sa_size, 0, 
+	    &sc->sc_ioh))
 		panic("%s: Cannot map registers", self->dv_xname);
 
 	/* disable all channel and clear interrupt status */
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_IR, 0);
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_SR, 0xf);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_IR, 0);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_SR, 0xf);
 
-	printf("%s: SA-11x0 OS Timer\n",  sc->sc_dev.dv_xname);
+	printf("%s: SA-11x0 OS Timer\n", sc->sc_dev.dv_xname);
 }
 
 static int
-clockintr(arg)
-	void *arg;
+clockintr(void *arg)
 {
+	struct saost_softc *sc = saost_sc;
 	struct clockframe *frame = arg;
-	u_int32_t oscr, nextmatch, oldmatch;
+	uint32_t oscr, nextmatch, oldmatch;
 	int s;
 
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-			SAOST_SR, 1);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_SR, 1);
 
 	/* schedule next clock intr */
-	oldmatch = saost_sc->sc_clock_count;
+	oldmatch = sc->sc_clock_count;
 	nextmatch = oldmatch + TIMER_FREQUENCY / hz;
 
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_MR0,
-			  nextmatch);
-	oscr = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-				SAOST_CR);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR0, nextmatch);
+	oscr = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
 
 	if ((nextmatch > oldmatch &&
 	     (oscr > nextmatch || oscr < oldmatch)) ||
@@ -164,43 +147,38 @@ clockintr(arg)
 		/*
 		 * we couldn't set the matching register in time.
 		 * just set it to some value so that next interrupt happens.
-		 * XXX is it possible to compansate lost interrupts?
+		 * XXX is it possible to compensate lost interrupts?
 		 */
 
 		s = splhigh();
-		oscr = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-					SAOST_CR);
+		oscr = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
 		nextmatch = oscr + 10;
-		bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-				  SAOST_MR0, nextmatch);
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR0, nextmatch);
 		splx(s);
 	}
 
-	saost_sc->sc_clock_count = nextmatch;
+	sc->sc_clock_count = nextmatch;
 	hardclock(frame);
 
-	return(1);
+	return 1;
 }
 
 static int
-statintr(arg)
-	void *arg;
+statintr(void *arg)
 {
+	struct saost_softc *sc = saost_sc;
 	struct clockframe *frame = arg;
-	u_int32_t oscr, nextmatch, oldmatch;
+	uint32_t oscr, nextmatch, oldmatch;
 	int s;
 
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-			SAOST_SR, 2);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_SR, 2);
 
 	/* schedule next clock intr */
-	oldmatch = saost_sc->sc_statclock_count;
-	nextmatch = oldmatch + saost_sc->sc_statclock_step;
+	oldmatch = sc->sc_statclock_count;
+	nextmatch = oldmatch + sc->sc_statclock_step;
 
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_MR1,
-			  nextmatch);
-	oscr = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-				SAOST_CR);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR1, nextmatch);
+	oscr = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
 
 	if ((nextmatch > oldmatch &&
 	     (oscr > nextmatch || oscr < oldmatch)) ||
@@ -208,125 +186,105 @@ statintr(arg)
 		/*
 		 * we couldn't set the matching register in time.
 		 * just set it to some value so that next interrupt happens.
-		 * XXX is it possible to compansate lost interrupts?
+		 * XXX is it possible to compensate lost interrupts?
 		 */
 
 		s = splhigh();
-		oscr = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-					SAOST_CR);
+		oscr = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
 		nextmatch = oscr + 10;
-		bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-				  SAOST_MR1, nextmatch);
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR1, nextmatch);
 		splx(s);
 	}
 
-	saost_sc->sc_statclock_count = nextmatch;
+	sc->sc_statclock_count = nextmatch;
 	statclock(frame);
 
-	return(1);
-}
-
-
-void
-setstatclockrate(hz)
-	int hz;
-{
-	u_int32_t count;
-
-	saost_sc->sc_statclock_step = TIMER_FREQUENCY / hz;
-	count = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_CR);
-	count += saost_sc->sc_statclock_step;
-	saost_sc->sc_statclock_count = count;
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-			SAOST_MR1, count);
+	return 1;
 }
 
 void
-cpu_initclocks()
+setstatclockrate(int schz)
 {
+	struct saost_softc *sc = saost_sc;
+	uint32_t count;
+
+	sc->sc_statclock_step = TIMER_FREQUENCY / schz;
+	count = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
+	count += sc->sc_statclock_step;
+	sc->sc_statclock_count = count;
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR1, count);
+}
+
+void
+cpu_initclocks(void)
+{
+	struct saost_softc *sc = saost_sc;
+
 	stathz = STATHZ;
 	profhz = stathz;
-	saost_sc->sc_statclock_step = TIMER_FREQUENCY / stathz;
+	sc->sc_statclock_step = TIMER_FREQUENCY / stathz;
+
+	printf("clock: hz=%d stathz=%d\n", hz, stathz);
 
 	/* Use the channels 0 and 1 for hardclock and statclock, respectively */
-	saost_sc->sc_clock_count = TIMER_FREQUENCY / hz;
-	saost_sc->sc_statclock_count = TIMER_FREQUENCY / stathz;
+	sc->sc_clock_count = TIMER_FREQUENCY / hz;
+	sc->sc_statclock_count = TIMER_FREQUENCY / stathz;
 
-	sa11x0_intr_establish(0, 26, 1, IPL_CLOCK, clockintr, 0, "clock");
-	sa11x0_intr_establish(0, 27, 1, IPL_CLOCK, statintr, 0, "stat");
+	sa11x0_intr_establish(0, 26, 1, IPL_CLOCK, clockintr, 0);
+	sa11x0_intr_establish(0, 27, 1, IPL_CLOCK, statintr, 0);
 
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_SR, 0xf);
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_IR, 3);
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_MR0,
-			  saost_sc->sc_clock_count);
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_MR1,
-			  saost_sc->sc_statclock_count);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_SR, 0xf);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_IR, 3);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR0,
+			  sc->sc_clock_count);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_MR1,
+			  sc->sc_statclock_count);
 
 	/* Zero the counter value */
-	bus_space_write_4(saost_sc->sc_iot, saost_sc->sc_ioh, SAOST_CR, 0);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_CR, 0);
+
+	saost_tc_init();
 }
 
-int
-gettick()
+static u_int
+saost_tc_get_timecount(struct timecounter *tc)
 {
-	int counter;
-	u_int savedints;
-	savedints = disable_interrupts(I32_bit);
+	return (u_int)gettick();
+}
 
-	counter = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-			SAOST_CR);
+static void
+saost_tc_init(void)
+{
+	static struct timecounter saost_tc = {
+		.tc_get_timecount = saost_tc_get_timecount,
+		.tc_frequency = TIMER_FREQUENCY,
+		.tc_counter_mask = ~0,
+		.tc_name = "saost_count",
+		.tc_quality = 100,
+	};
 
-	restore_interrupts(savedints);
+	tc_init(&saost_tc);
+}
+
+static uint32_t
+gettick(void)
+{
+	struct saost_softc *sc = saost_sc;
+	uint32_t counter;
+	u_int saved_ints;
+
+	saved_ints = disable_interrupts(I32_bit);
+	counter = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
+	restore_interrupts(saved_ints);
+
 	return counter;
 }
 
 void
-microtime(tvp)
-	register struct timeval *tvp;
+delay(u_int usecs)
 {
-	int s, tm, deltatm;
-	static struct timeval lasttime;
-
-	if(saost_sc == NULL) {
-		tvp->tv_sec = 0;
-		tvp->tv_usec = 0;
-		return;
-	}
-
-	s = splhigh();
-	tm = bus_space_read_4(saost_sc->sc_iot, saost_sc->sc_ioh,
-			SAOST_CR);
-
-	deltatm = saost_sc->sc_clock_count - tm;
-
-#ifdef OST_DEBUG
-	printf("deltatm = %d\n",deltatm);
-#endif
-
-	*tvp = time;
-	tvp->tv_usec++;		/* XXX */
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-
-	if (tvp->tv_sec == lasttime.tv_sec &&
-		tvp->tv_usec <= lasttime.tv_usec &&
-		(tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000)
-	{
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	lasttime = *tvp;
-	splx(s);
-}
-
-void
-delay(usecs)
-	u_int usecs;
-{
-	u_int32_t tick, otick, delta;
-	int j, csec, usec;
+	uint32_t xtick, otick, delta;
+	int csec, usec;
 
 	csec = usecs / 10000;
 	usec = usecs % 10000;
@@ -334,24 +292,24 @@ delay(usecs)
 	usecs = (TIMER_FREQUENCY / 100) * csec
 	    + (TIMER_FREQUENCY / 100) * usec / 10000;
 
-	if (! saost_sc) {
+	if (saost_sc == NULL) {
+		volatile int k;
+		int j;
 		/* clock isn't initialized yet */
-		for(; usecs > 0; usecs--)
-			for(j = 100; j > 0; j--)
-				;
+		for (; usecs > 0; usecs--)
+			for (j = 100; j > 0; j--, k--)
+				continue;
 		return;
 	}
 
 	otick = gettick();
 
 	while (1) {
-		for(j = 100; j > 0; j--)
-			;
-		tick = gettick();
-		delta = tick - otick;
+		xtick = gettick();
+		delta = xtick - otick;
 		if (delta > usecs)
 			break;
 		usecs -= delta;
-		otick = tick;
+		otick = xtick;
 	}
 }

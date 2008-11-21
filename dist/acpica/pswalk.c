@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: pswalk - Parser routines to walk parsed op tree(s)
- *              xRevision: 1.76 $
+ *              $Revision: 1.4 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,9 +115,6 @@
  *****************************************************************************/
 
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pswalk.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #include "acpi.h"
 #include "acparser.h"
 
@@ -146,7 +143,7 @@ AcpiPsDeleteParseTree (
     ACPI_PARSE_OBJECT       *Parent = NULL;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("PsDeleteParseTree", SubtreeRoot);
+    ACPI_FUNCTION_TRACE_PTR (PsDeleteParseTree, SubtreeRoot);
 
 
     /* Visit all nodes in the subtree */

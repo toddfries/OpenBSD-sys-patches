@@ -1,13 +1,17 @@
-#	$NetBSD: Makefile,v 1.4 2003/04/29 05:42:43 thorpej Exp $
+#	$NetBSD: Makefile,v 1.6 2008/10/25 22:27:37 apb Exp $
 
 # Makefile for evbarm tags file and boot blocks
 
-TEVBARM=	../evbarm/tags
-SEVBARM=	../evbarm/integrator/*.[ch] ../evbarm/include/*.h \
-		../evbarm/dev/*.[ch] ../evbarm/ifpga/*.[ch] \
-		../evbarm/iq80310/*.[ch] \
-		../evbarm/integrator_fpga/*.[ch] \
-AEVBARM=	../evbarm/integrator/*.S ../evbarm/ifpga/*.S \
+TEVBARM=	${SYSDIR}/arch/evbarm/tags
+SEVBARM=	${SYSDIR}/arch/arm/xscale/*.[ch] \
+		${SYSDIR}/arch/evbarm/dev/*.[ch] \
+		${SYSDIR}/arch/evbarm/ifpga/*.[ch] \
+		${SYSDIR}/arch/evbarm/include/*.h \
+		${SYSDIR}/arch/evbarm/integrator/*.[ch] \
+		${SYSDIR}/arch/evbarm/iq31244/*.[ch] \
+		${SYSDIR}/arch/evbarm/iq80310/*.[ch] \
+		${SYSDIR}/arch/evbarm/iq80321/*.[ch]
+AEVBARM=	${SYSDIR}/arch/evbarm/integrator/*.S
 
 # Directories in which to place tags links
 DEVBARM=	include
@@ -15,9 +19,12 @@ DEVBARM=	include
 .include "../../kern/Make.tags.inc"
 
 tags:
-	-ctags -wdtf ${TEVBARM} ${SEVBARM} ${COMM}
+	-rm -f ${TEVBARM}
+	-echo ${SEVBARM} | xargs ctags -wadtf ${TEVBARM}
+	-${FINDCOMM} | xargs ctags -wadtf ${TEVBARM}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AEVBARM} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    ${TOOL_SED} -e \
+		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 	    >> ${TEVBARM}
 	sort -o ${TEVBARM} ${TEVBARM}
 

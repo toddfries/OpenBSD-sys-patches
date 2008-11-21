@@ -1,5 +1,4 @@
-/*	$OpenBSD: mfs_extern.h,v 1.15 2008/05/03 14:41:29 thib Exp $	*/
-/*	$NetBSD: mfs_extern.h,v 1.4 1996/02/09 22:31:27 christos Exp $	*/
+/*	$NetBSD: mfs_extern.h,v 1.30 2008/06/28 01:34:05 rumble Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -29,39 +28,50 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)mfs_extern.h	8.2 (Berkeley) 6/16/94
+ *	@(#)mfs_extern.h	8.4 (Berkeley) 3/30/95
  */
+
+#ifndef _UFS_MFS_MFS_EXTERN_H_
+#define _UFS_MFS_MFS_EXTERN_H_
+
+#include <sys/param.h>
+#include <sys/mount.h>
+#include <sys/mallocvar.h>
 
 struct buf;
 struct mount;
 struct nameidata;
 struct proc;
-struct statfs;
-struct ucred;
+struct statvfs;
 struct vnode;
-struct vfsconf;
-struct mbuf;
-struct mfsnode;
 
 __BEGIN_DECLS
+#define	mfs_ioctl	genfs_enoioctl
+
 /* mfs_vfsops.c */
-int mfs_mount(struct mount *, const char *, void *, struct nameidata *,
-    struct proc *);
-int mfs_start(struct mount *, int, struct proc *);
-int mfs_statfs(struct mount *, struct statfs *, struct proc *);
-int mfs_init(struct vfsconf *);
-int mfs_checkexp(struct mount *, struct mbuf *, int *, struct ucred **);
+VFS_PROTOS(mfs);
+
+int	mfs_initminiroot(void *);
 
 /* mfs_vnops.c */
-int mfs_open(void *);
-int mfs_ioctl(void *);
-int mfs_strategy(void *);
-void mfs_doio(struct mfsnode *, struct buf *);
-int mfs_close(void *);
-int mfs_inactive(void *);
-int mfs_reclaim(void *);
-int mfs_print(void *);
-#define	mfs_revoke vop_generic_revoke
-int mfs_badop(void *);
+int	mfs_open(void *);
+int	mfs_strategy(void *);
+void	mfs_doio(struct buf *, void *);
+int	mfs_bmap(void *);
+int	mfs_close(void *);
+int	mfs_inactive(void *);
+int	mfs_reclaim(void *);
+int	mfs_print(void *);
+int	mfs_fsync(void *);
+
+#ifdef _KERNEL
+
+#include <sys/mutex.h>
+
+extern kmutex_t	mfs_lock;
+
+#endif
 
 __END_DECLS
+
+#endif /* !_UFS_MFS_MFS_EXTERN_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ucomvar.h,v 1.16 2007/06/14 08:08:21 mbalmer Exp $ */
-/*	$NetBSD: ucomvar.h,v 1.10 2001/12/31 12:15:21 augustss Exp $	*/
+/*	$NetBSD: ucomvar.h,v 1.17 2008/05/24 16:40:58 cube Exp $	*/
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,11 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define UCOMBUSCF_PORTNO		0
-#define UCOMBUSCF_PORTNO_DEFAULT	-1
 
-#define ucomcf_portno cf_loc[UCOMBUSCF_PORTNO]
-#define UCOM_UNK_PORTNO UCOMBUSCF_PORTNO_DEFAULT
+/* just for ucom_attach_args, not in the config namespace */
+#define UCOM_UNK_PORTNO (-1)
 
 struct	ucom_softc;
 
@@ -54,7 +44,7 @@ struct ucom_methods {
 #define UCOM_SET_BREAK 3
 	int (*ucom_param)(void *sc, int portno, struct termios *);
 	int (*ucom_ioctl)(void *sc, int portno, u_long cmd,
-			  caddr_t data, int flag, struct proc *p);
+			  void *data, int flag, usb_proc_ptr p);
 	int (*ucom_open)(void *sc, int portno);
 	void (*ucom_close)(void *sc, int portno);
 	void (*ucom_read)(void *sc, int portno, u_char **ptr, u_int32_t *count);
@@ -92,7 +82,6 @@ struct ucom_attach_args {
 	int portno;
 	int bulkin;
 	int bulkout;
-	struct uhidev_softc *uhidev;
 	u_int ibufsize;
 	u_int ibufsizepad;
 	u_int obufsize;
@@ -104,7 +93,6 @@ struct ucom_attach_args {
 	void *arg;
 };
 
-int ucomsubmatch(struct device *, void *, void *);
-
-int ucomprint(void *aux, const char *pnp);
+int ucomprint(void *, const char *);
+int ucomsubmatch(device_t t, cfdata_t, const int *, void *);
 void ucom_status_change(struct ucom_softc *);

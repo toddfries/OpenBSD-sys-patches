@@ -1,29 +1,21 @@
-/*	$OpenBSD: softdep.h,v 1.15 2008/01/05 19:49:26 otto Exp $	*/
+/*	$NetBSD: softdep.h,v 1.11 2007/03/04 06:03:45 christos Exp $	*/
 
 /*
- * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
+ * Copyright 1998 Marshall Kirk McKusick. All Rights Reserved.
  *
  * The soft updates code is derived from the appendix of a University
  * of Michigan technical report (Gregory R. Ganger and Yale N. Patt,
  * "Soft Updates: A Solution to the Metadata Update Problem in File
  * Systems", CSE-TR-254-95, August 1995).
  *
- * Further information about soft updates can be obtained from:
- *
- *	Marshall Kirk McKusick		http://www.mckusick.com/softdep/
- *	1614 Oxford Street		mckusick@mckusick.com
- *	Berkeley, CA 94709-1608		+1-510-843-9542
- *	USA
- *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ *    notice, this list of conditions, and the following disclaimer,
+ *    without modification, immediately at the beginning of the file.
+ * 2. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY MARSHALL KIRK MCKUSICK ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -37,9 +29,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)softdep.h	9.7 (McKusick) 6/21/00
- * $FreeBSD: src/sys/ufs/ffs/softdep.h,v 1.10 2000/06/22 00:29:53 mckusick Exp $
+ * from: @(#)softdep.h	9.6 (McKusick) 2/25/99
  */
+
+#ifndef _UFS_FFS_SOFTDEP_H_
+#define _UFS_FFS_SOFTDEP_H_
 
 #include <sys/queue.h>
 
@@ -47,7 +41,7 @@
  * Allocation dependencies are handled with undo/redo on the in-memory
  * copy of the data. A particular data dependency is eliminated when
  * it is ALLCOMPLETE: that is ATTACHED, DEPCOMPLETE, and COMPLETE.
- * 
+ *
  * ATTACHED means that the data is not currently being written to
  * disk. UNDONE means that the data has been rolled back to a safe
  * state for writing to the disk. When the I/O completes, the data is
@@ -88,34 +82,36 @@
  * says that the files space has been accounted to the pending free
  * space count. The NEWBLOCK flag marks pagedep structures that have
  * just been allocated, so must be claimed by the inode before all
- * dependencies are complete. The ONWORKLIST flag shows whether the
- * structure is currently linked onto a worklist.
- * 
+ * dependencies are complete. The INPROGRESS flag marks worklist
+ * structures that are still on the worklist, but are being considered
+ * for action by some process. The UFS1FMT flag indicates that the
+ * inode being processed is a ufs1 format. The EXTDATA flag indicates
+ * that the allocdirect describes an extended-attributes dependency.
+ * The ONWORKLIST flag shows whether the structure is currently linked
+ * onto a worklist.
  */
 #define	ATTACHED	0x0001
 #define	UNDONE		0x0002
 #define	COMPLETE	0x0004
 #define	DEPCOMPLETE	0x0008
-#define	MKDIR_PARENT	0x0010	/* diradd & mkdir only */
-#define	MKDIR_BODY	0x0020	/* diradd & mkdir only */
-#define	RMDIR		0x0040	/* dirrem only */
-#define	DIRCHG		0x0080	/* diradd & dirrem only */
-#define	GOINGAWAY	0x0100	/* indirdep only */
-#define	IOSTARTED	0x0200	/* inodedep & pagedep only */
-#define	SPACECOUNTED	0x0400	/* inodedep only */
-#define	NEWBLOCK	0x0800	/* pagedep only */
-#define	UFS1FMT		0x2000	/* indirdep only */
-#define	ONWORKLIST	0x8000
+#define MKDIR_PARENT	0x0010	/* diradd & mkdir only */
+#define MKDIR_BODY	0x0020	/* diradd & mkdir only */
+#define RMDIR		0x0040	/* dirrem only */
+#define DIRCHG		0x0080	/* diradd & dirrem only */
+#define GOINGAWAY	0x0100	/* indirdep only */
+#define IOSTARTED	0x0200	/* inodedep & pagedep only */
+#define SPACECOUNTED	0x0400	/* inodedep only */
+#define NEWBLOCK	0x0800	/* pagedep only */
+#define INPROGRESS	0x1000  /* dirrem, freeblks, freefrag, freefile only */
+#define UFS1FMT		0x2000  /* indirdep only */
+#define EXTDATA		0x4000  /* allocdirect only */
+#define ONWORKLIST	0x8000
 
 #define	ALLCOMPLETE	(ATTACHED | COMPLETE | DEPCOMPLETE)
 
-#define	DEP_BITS	"\020\01ATTACHED\02UNDONE\03COMPLETE\04DEPCOMPLETE" \
-    "\05MKDIR_PARENT\06MKDIR_BODY\07RMDIR\010DIRCHG\011GOINGAWAY" \
-    "\012IOSTARTED\013SPACECOUNTED\014NEWBLOCK\016UFS1FMT\020ONWORKLIST"
-
 /*
  * The workitem queue.
- * 
+ *
  * It is sometimes useful and/or necessary to clean up certain dependencies
  * in the background rather than during execution of an application process
  * or interrupt service routine. To realize this, we append dependency
@@ -137,7 +133,7 @@
 struct worklist {
 	LIST_ENTRY(worklist)	wk_list;	/* list of work requests */
 	unsigned short		wk_type;	/* type of request */
-	unsigned short		wk_state;	/* state flags */
+	unsigned		wk_state;	/* state flags */
 };
 #define WK_DATA(wk) ((void *)(wk))
 #define WK_PAGEDEP(wk) ((struct pagedep *)(wk))
@@ -184,7 +180,7 @@ TAILQ_HEAD(allocdirectlst, allocdirect);
  * list, any removed operations are done, and the dependency structure
  * is freed.
  */
-#define DAHASHSZ 6
+#define DAHASHSZ 5
 #define DIRADDHASH(offset) (((offset) >> 2) % DAHASHSZ)
 struct pagedep {
 	struct	worklist pd_list;	/* page buffer */
@@ -192,7 +188,7 @@ struct pagedep {
 	LIST_ENTRY(pagedep) pd_hash;	/* hashed lookup */
 	struct	mount *pd_mnt;		/* associated mount point */
 	ino_t	pd_ino;			/* associated file */
-	daddr64_t pd_lbn;		/* block within file */
+	daddr_t pd_lbn;		/* block within file */
 	struct	dirremhd pd_dirremhd;	/* dirrem's waiting for page */
 	struct	diraddhd pd_diraddhd[DAHASHSZ]; /* diradd dir entry updates */
 	struct	diraddhd pd_pendinghd;	/* directory entries awaiting write */
@@ -202,7 +198,7 @@ struct pagedep {
  * The "inodedep" structure tracks the set of dependencies associated
  * with an inode. One task that it must manage is delayed operations
  * (i.e., work requests that must be held until the inodedep's associated
- * inode has been written to disk). Getting an inode from its incore 
+ * inode has been written to disk). Getting an inode from its incore
  * state to the disk requires two steps to be taken by the filesystem
  * in this order: first the inode must be copied to its disk buffer by
  * the VOP_UPDATE operation; second the inode's buffer must be written
@@ -252,10 +248,6 @@ struct inodedep {
 	struct	fs *id_fs;		/* associated filesystem */
 	ino_t	id_ino;			/* dependent inode */
 	nlink_t	id_nlinkdelta;		/* saved effective link count */
-	union { /* Saved UFS1/UFS2 dinode contents */
-		struct ufs1_dinode *idu_savedino1;
-		struct ufs2_dinode *idu_savedino2;
-	} id_un;
 	LIST_ENTRY(inodedep) id_deps;	/* bmsafemap's list of inodedep's */
 	struct	buf *id_buf;		/* related bmsafemap (if pending) */
 	off_t	id_savedsize;		/* file size saved during rollback */
@@ -264,10 +256,14 @@ struct inodedep {
 	struct	workhead id_inowait;	/* operations waiting inode update */
 	struct	allocdirectlst id_inoupdt; /* updates before inode written */
 	struct	allocdirectlst id_newinoupdt; /* updates when inode written */
+	union {
+	struct  ufs1_dinode *idu_savedino1; /* saved ufs1_dinode contents */
+	struct  ufs2_dinode *idu_savedino2; /* saved ufs2_dinode contents */
+	} id_un;
 };
 
-#define	id_savedino1	id_un.idu_savedino1
-#define	id_savedino2	id_un.idu_savedino2
+#define id_savedino1 id_un.idu_savedino1
+#define id_savedino2 id_un.idu_savedino2
 
 /*
  * A "newblk" structure is attached to a bmsafemap structure when a block
@@ -276,11 +272,11 @@ struct inodedep {
  * an associated allocdirect or allocindir allocation which will attach
  * themselves to the bmsafemap structure if the newblk's DEPCOMPLETE flag
  * is not set (i.e., its cylinder group map has not been written).
- */ 
+ */
 struct newblk {
 	LIST_ENTRY(newblk) nb_hash;	/* hashed lookup */
 	struct	fs *nb_fs;		/* associated filesystem */
-	daddr64_t nb_newblkno;		/* allocated block number */
+	daddr_t nb_newblkno;	/* allocated block number */
 	int	nb_state;		/* state of bitmap dependency */
 	LIST_ENTRY(newblk) nb_deps;	/* bmsafemap's list of newblk's */
 	struct	bmsafemap *nb_bmsafemap; /* associated bmsafemap */
@@ -336,9 +332,9 @@ struct allocdirect {
 	struct	worklist ad_list;	/* buffer holding block */
 #	define	ad_state ad_list.wk_state /* block pointer state */
 	TAILQ_ENTRY(allocdirect) ad_next; /* inodedep's list of allocdirect's */
-	daddr64_t ad_lbn;		/* block within file */
-	daddr64_t ad_newblkno;		/* new value of block pointer */
-	daddr64_t ad_oldblkno;		/* old value of block pointer */
+	daddr_t ad_lbn;		/* block within file */
+	daddr_t ad_newblkno;	/* new value of block pointer */
+	daddr_t ad_oldblkno;	/* old value of block pointer */
 	long	ad_newsize;		/* size of new block */
 	long	ad_oldsize;		/* size of old block */
 	LIST_ENTRY(allocdirect) ad_deps; /* bmsafemap's list of allocdirect's */
@@ -368,7 +364,7 @@ struct allocdirect {
 struct indirdep {
 	struct	worklist ir_list;	/* buffer holding indirect block */
 #	define	ir_state ir_list.wk_state /* indirect block pointer state */
-	caddr_t ir_saveddata;		/* buffer cache contents */
+	void *	ir_saveddata;		/* buffer cache contents */
 	struct	buf *ir_savebp;		/* buffer holding safe copy */
 	struct	allocindirhd ir_donehd;	/* done waiting to update safecopy */
 	struct	allocindirhd ir_deplisthd; /* allocindir deps for this block */
@@ -384,7 +380,7 @@ struct indirdep {
  * to disk, ai_state has the DEPCOMPLETE flag set. When the block itself
  * is written, the COMPLETE flag is set. Once both the cylinder group map
  * and the data itself have been written, it is safe to write the entry in
- * the indirect block that claims the block; the "allocindir" dependency 
+ * the indirect block that claims the block; the "allocindir" dependency
  * can then be freed as it is no longer applicable.
  */
 struct allocindir {
@@ -392,8 +388,8 @@ struct allocindir {
 #	define	ai_state ai_list.wk_state /* indirect block pointer state */
 	LIST_ENTRY(allocindir) ai_next;	/* indirdep's list of allocindir's */
 	int	ai_offset;		/* pointer offset in indirect block */
-	daddr64_t ai_newblkno;		/* new block pointer value */
-	daddr64_t ai_oldblkno;		/* old block pointer value */
+	daddr_t ai_newblkno;	/* new block pointer value */
+	daddr_t ai_oldblkno;	/* old block pointer value */
 	struct	freefrag *ai_freefrag;	/* block to be freed when complete */
 	struct	indirdep *ai_indirdep;	/* address of associated indirdep */
 	LIST_ENTRY(allocindir) ai_deps;	/* bmsafemap's list of allocindir's */
@@ -406,16 +402,16 @@ struct allocindir {
  * The "freefrag" structure is constructed and attached when the replacement
  * block is first allocated. It is processed after the inode claiming the
  * bigger block that replaces it has been written to disk. Note that the
- * ff_state field is used to store the uid, so may lose data. However,
+ * ff_state field is is used to store the uid, so may lose data. However,
  * the uid is used only in printing an error message, so is not critical.
  * Keeping it in a short keeps the data structure down to 32 bytes.
  */
 struct freefrag {
 	struct	worklist ff_list;	/* id_inowait or delayed worklist */
 #	define	ff_state ff_list.wk_state /* owning user; should be uid_t */
-	struct	vnode *ff_devvp;	/* filesystem device vnode */
-	struct	mount *ff_mnt;		/* associated mount point */
-	daddr64_t ff_blkno;		/* fragment physical block number */
+	struct  mount *ff_mnt;		/* associated mount point */
+	struct	fs *ff_fs;		/* addr of superblock */
+	daddr_t ff_blkno;		/* fragment physical block number */
 	long	ff_fragsize;		/* size of fragment being deleted */
 	ino_t	ff_inum;		/* owning inode number */
 };
@@ -428,16 +424,14 @@ struct freefrag {
  */
 struct freeblks {
 	struct	worklist fb_list;	/* id_inowait or delayed worklist */
-#	define	fb_state fb_list.wk_state /* inode and dirty block state */
 	ino_t	fb_previousinum;	/* inode of previous owner of blocks */
-	struct	vnode *fb_devvp;	/* filesystem device vnode */
-	struct	mount *fb_mnt;		/* associated mount point */
+	uid_t	fb_uid;			/* uid of previous owner of blocks */
+	struct  ufsmount *fb_ump;	/* ufsmount structure of mountpoint */
 	off_t	fb_oldsize;		/* previous file size */
 	off_t	fb_newsize;		/* new file size */
-	int	fb_chkcnt;		/* used to check cnt of blks released */
-	uid_t	fb_uid;			/* uid of previous owner of blocks */
-	daddr64_t fb_dblks[NDADDR];	/* direct blk ptrs to deallocate */
-	daddr64_t fb_iblks[NIADDR];	/* indirect blk ptrs to deallocate */
+	int64_t	fb_chkcnt;		/* used to check cnt of blks released */
+	daddr_t fb_dblks[NDADDR];	/* direct blk ptrs to deallocate */
+	daddr_t fb_iblks[NIADDR];	/* indirect blk ptrs to deallocate */
 };
 
 /*
@@ -451,6 +445,7 @@ struct freefile {
 	mode_t	fx_mode;		/* mode of inode */
 	ino_t	fx_oldinum;		/* inum of the unlinked file */
 	struct	vnode *fx_devvp;	/* filesystem device vnode */
+	struct	fs *fx_fs;		/* addr of superblock */
 	struct	mount *fx_mnt;		/* associated mount point */
 };
 
@@ -563,7 +558,6 @@ struct dirrem {
 #define dm_pagedep dm_un.dmu_pagedep
 #define dm_dirinum dm_un.dmu_dirinum
 
-
 /*
  * A "newdirblk" structure tracks the progress of a newly allocated
  * directory block from its creation until it is claimed by its on-disk
@@ -579,11 +573,13 @@ struct dirrem {
  * deleted from their pagedep->id_pendinghd and inodedep->id_pendinghd
  * lists. Note that we could track directory blocks allocated to indirect
  * blocks using a similar scheme with the allocindir structures. Rather
- * than adding this level of complexity, we simply write those newly 
+ * than adding this level of complexity, we simply write those newly
  * allocated indirect blocks synchronously as such allocations are rare.
  */
 struct newdirblk {
-	struct	worklist db_list;/* id_inowait or pg_newdirblk */
+	struct	worklist db_list;	/* id_inowait or pg_newdirblk */
 #	define	db_state db_list.wk_state /* unused */
-	struct	pagedep *db_pagedep;/* associated pagedep */
+	struct	pagedep *db_pagedep;	/* associated pagedep */
 };
+
+#endif /* !_UFS_FFS_SOFTDEP_H_ */

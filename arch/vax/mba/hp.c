@@ -1,5 +1,4 @@
-/*	$OpenBSD: hp.c,v 1.19 2007/09/01 12:45:42 miod Exp $ */
-/*	$NetBSD: hp.c,v 1.22 2000/02/12 16:09:33 ragge Exp $ */
+/*	$NetBSD: hp.c,v 1.46 2008/03/11 05:34:02 matt Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -41,6 +40,10 @@
  *  Handle disk media changes.
  *  Dual-port operations should be supported.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hp.c,v 1.46 2008/03/11 05:34:02 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -48,12 +51,16 @@
 #include <sys/disk.h>
 #include <sys/dkio.h>
 #include <sys/buf.h>
+#include <sys/bufq.h>
 #include <sys/stat.h>
 #include <sys/ioccom.h>
 #include <sys/fcntl.h>
 #include <sys/syslog.h>
 #include <sys/reboot.h>
+#include <sys/conf.h>
+#include <sys/event.h>
 
+#include <machine/bus.h>
 #include <machine/trap.h>
 #include <machine/pte.h>
 #include <machine/mtpr.h>
@@ -63,52 +70,78 @@
 #include <vax/mba/mbareg.h>
 #include <vax/mba/hpreg.h>
 
-#define	HPMASK 0xffff
+#include "ioconf.h"
+#include "locators.h"
 
-struct	hp_softc {
-	struct	device	sc_dev;
-	struct	disk sc_disk;
-	struct	mba_device sc_md;	/* Common struct used by mbaqueue. */
-	int	sc_wlabel;		/* Disklabel area is writable */
-	int	sc_physnr;		/* Physical disk number */
+struct hp_softc {
+	device_t sc_dev;
+	struct disk sc_disk;
+	bus_space_tag_t sc_iot;
+	bus_space_handle_t sc_ioh;
+	struct mba_device sc_md;	/* Common struct used by mbaqueue. */
+	int sc_wlabel;			/* Disklabel area is writable */
 };
 
-int     hpmatch(struct device *, struct cfdata *, void *);
-void    hpattach(struct device *, struct device *, void *);
-void	hpstrategy(struct buf *);
+int     hpmatch(device_t, cfdata_t, void *);
+void    hpattach(device_t, device_t, void *);
 void	hpstart(struct mba_device *);
 int	hpattn(struct mba_device *);
 enum	xfer_action hpfinish(struct mba_device *, int, int *);
-int	hpopen(dev_t, int, int);
-int	hpclose(dev_t, int, int);
-int	hpioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	hpdump(dev_t, daddr64_t, caddr_t, size_t);
-int	hpread(dev_t, struct uio *);
-int	hpwrite(dev_t, struct uio *);
-daddr64_t hpsize(dev_t);
 
-struct	cfattach hp_ca = {
-	sizeof(struct hp_softc), hpmatch, hpattach
+CFATTACH_DECL_NEW(hp, sizeof(struct hp_softc),
+    hpmatch, hpattach, NULL, NULL);
+
+static dev_type_open(hpopen);
+static dev_type_close(hpclose);
+static dev_type_read(hpread);
+static dev_type_write(hpwrite);
+static dev_type_ioctl(hpioctl);
+static dev_type_strategy(hpstrategy);
+static dev_type_size(hppsize);
+
+const struct bdevsw hp_bdevsw = {
+	.d_open = hpopen,
+	.d_close = hpclose,
+	.d_strategy = hpstrategy,
+	.d_ioctl = hpioctl,
+	.d_dump = nulldump,
+	.d_psize = hppsize,
+	.d_flag = D_DISK
 };
 
-extern struct cfdriver hp_cd;
+const struct cdevsw hp_cdevsw = {
+	.d_open = hpopen,
+	.d_close = hpclose,
+	.d_read = hpread,
+	.d_write = hpwrite,
+	.d_ioctl = hpioctl,
+	.d_stop = nostop,
+	.d_tty = notty,
+	.d_poll = nopoll,
+	.d_mmap = nommap,
+	.d_kqfilter = nokqfilter,
+	.d_flag = D_DISK
+};
+
+#define HP_WCSR(reg, val) \
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, (reg), (val))
+#define HP_RCSR(reg) \
+	bus_space_read_4(sc->sc_iot, sc->sc_ioh, (reg))
+
 
 /*
  * Check if this is a disk drive; done by checking type from mbaattach.
  */
 int
-hpmatch(parent, cf, aux)
-	struct	device *parent;
-	struct	cfdata *cf;
-	void	*aux;
+hpmatch(device_t parent, cfdata_t cf, void *aux)
 {
-	struct	mba_attach_args *ma = aux;
+	struct mba_attach_args * const ma = aux;
 
 	if (cf->cf_loc[MBACF_DRIVE] != MBACF_DRIVE_DEFAULT &&
-	    cf->cf_loc[MBACF_DRIVE] != ma->unit)
+	    cf->cf_loc[MBACF_DRIVE] != ma->ma_unit)
 		return 0;
 
-	if (ma->devtyp != MB_RP)
+	if (ma->ma_devtyp != MB_RP)
 		return 0;
 
 	return 1;
@@ -119,33 +152,34 @@ hpmatch(parent, cf, aux)
  * If the on-disk label can't be read; we lose.
  */
 void
-hpattach(parent, self, aux)
-	struct	device *parent, *self;
-	void	*aux;
+hpattach(device_t parent, device_t self, void *aux)
 {
-	struct	hp_softc *sc = (void *)self;
-	struct	mba_softc *ms = (void *)parent;
-	struct	disklabel *dl;
-	struct  mba_attach_args *ma = aux;
-	char	*msg;
+	struct hp_softc * const sc = device_private(self);
+	struct mba_softc * const ms = device_private(parent);
+	struct mba_attach_args * const ma = aux;
+	struct disklabel *dl;
+	const char *msg;
+
+	sc->sc_dev = self;
+	sc->sc_iot = ma->ma_iot;
+	sc->sc_ioh = ma->ma_ioh;
 
 	/*
 	 * Init the common struct for both the adapter and its slaves.
 	 */
-	BUFQ_INIT(&sc->sc_md.md_q);
-	sc->sc_md.md_softc = (void *)sc;	/* Pointer to this softc */
-	sc->sc_md.md_mba = (void *)parent;	/* Pointer to parent softc */
+	bufq_alloc(&sc->sc_md.md_q, "disksort", BUFQ_SORT_CYLINDER);
+	sc->sc_md.md_softc = sc;		/* Pointer to this softc */
+	sc->sc_md.md_mba = ms;			/* Pointer to parent softc */
 	sc->sc_md.md_start = hpstart;		/* Disk start routine */
 	sc->sc_md.md_attn = hpattn;		/* Disk attention routine */
 	sc->sc_md.md_finish = hpfinish;		/* Disk xfer finish routine */
 
-	ms->sc_md[ma->unit] = &sc->sc_md;	/* Per-unit backpointer */
+	ms->sc_md[ma->ma_unit] = &sc->sc_md;	/* Per-unit backpointer */
 
-	sc->sc_physnr = ma->unit;
 	/*
 	 * Init and attach the disk structure.
 	 */
-	sc->sc_disk.dk_name = sc->sc_dev.dv_xname;
+	disk_init(&sc->sc_disk, device_xname(sc->sc_dev), NULL);
 	disk_attach(&sc->sc_disk);
 
 	/*
@@ -161,45 +195,37 @@ hpattach(parent, self, aux)
 	/*
 	 * Read in label.
 	 */
-	if ((msg = readdisklabel(makedev(0, self->dv_unit * 8), hpstrategy,
-	    dl, NULL)) != NULL) {
-		/*printf(": %s", msg);*/
-	}
-	printf(": %.*s, size = %d sectors\n",
-	    (int)sizeof(dl->d_typename), dl->d_typename, DL_GETDSIZE(dl));
-	/*
-	 * check if this was what we booted from.
-	 */
-	if ((B_TYPE(bootdev) == BDEV_HP) && (ma->unit == B_UNIT(bootdev)) &&
-	    (ms->sc_physnr == B_ADAPTOR(bootdev)))
-		booted_from = self;
+	if ((msg = readdisklabel(makedev(0, device_unit(self) * 8), hpstrategy,
+	    dl, NULL)) != NULL)
+		printf(": %s", msg);
+	printf(": %s, size = %d sectors\n", dl->d_typename, dl->d_secperunit);
 }
 
 
 void
-hpstrategy(bp)
-	struct buf *bp;
+hpstrategy(struct buf *bp)
 {
-	struct	hp_softc *sc;
-	struct	buf *gp;
-	int	unit, s;
+	struct hp_softc *sc;
+	struct buf *gp;
 	struct disklabel *lp;
+	int unit, s, err;
 
 	unit = DISKUNIT(bp->b_dev);
-	sc = hp_cd.cd_devs[unit];
+	sc = device_lookup_private(&hp_cd, unit);
 	lp = sc->sc_disk.dk_label;
 
-	if (bounds_check_with_label(bp, lp, sc->sc_wlabel) <= 0)
+	err = bounds_check_with_label(&sc->sc_disk, bp, sc->sc_wlabel);
+	if (err <= 0)
 		goto done;
 
 	bp->b_rawblkno =
-	    bp->b_blkno + DL_GETPOFFSET(&lp->d_partitions[DISKPART(bp->b_dev)]);
+	    bp->b_blkno + lp->d_partitions[DISKPART(bp->b_dev)].p_offset;
 	bp->b_cylinder = bp->b_rawblkno / lp->d_secpercyl;
 
 	s = splbio();
 
-	gp = BUFQ_FIRST(&sc->sc_md.md_q);
-	disksort_cylinder(&sc->sc_md.md_q, bp);
+	gp = BUFQ_PEEK(sc->sc_md.md_q);
+	BUFQ_PUT(sc->sc_md.md_q, bp);
 	if (gp == 0)
 		mbaqueue(&sc->sc_md);
 
@@ -208,32 +234,25 @@ hpstrategy(bp)
 
 done:
 	bp->b_resid = bp->b_bcount;
-	s = splbio();
 	biodone(bp);
-	splx(s);
 }
 
 /*
  * Start transfer on given disk. Called from mbastart().
  */
 void
-hpstart(md)
-	struct	mba_device *md;
+hpstart(struct mba_device *md)
 {
-	struct	hp_softc *sc = md->md_softc;
-	struct	mba_regs *mr = md->md_mba->sc_mbareg;
-	volatile struct	hp_regs *hr;
-	struct	disklabel *lp = sc->sc_disk.dk_label;
-	struct	buf *bp = BUFQ_FIRST(&md->md_q);
+	struct hp_softc * const sc = md->md_softc;
+	struct disklabel * const lp = sc->sc_disk.dk_label;
+	struct buf *bp = BUFQ_PEEK(md->md_q);
 	unsigned bn, cn, sn, tn;
 
 	/*
 	 * Collect statistics.
 	 */
 	disk_busy(&sc->sc_disk);
-	sc->sc_disk.dk_seek++;
-
-	hr = (void *)&mr->mba_md[DISKUNIT(bp->b_dev)];
+	iostat_seek(sc->sc_disk.dk_stats);
 
 	bn = bp->b_rawblkno;
 	if (bn) {
@@ -244,40 +263,33 @@ hpstart(md)
 	} else
 		cn = sn = tn = 0;
 
-	hr->hp_dc = cn;
-	hr->hp_da = (tn << 8) | sn;
+	HP_WCSR(HP_DC, cn);
+	HP_WCSR(HP_DA, (tn << 8) | sn);
 	if (bp->b_flags & B_READ)
-		hr->hp_cs1 = HPCS_READ;		/* GO */
+		HP_WCSR(HP_CS1, HPCS_READ);
 	else
-		hr->hp_cs1 = HPCS_WRITE;
+		HP_WCSR(HP_CS1, HPCS_WRITE);
 }
 
 int
-hpopen(dev, flag, fmt)
-	dev_t	dev;
-	int	flag, fmt;
+hpopen(dev_t dev, int flag, int fmt, struct lwp *l)
 {
-	struct	hp_softc *sc;
-	int	unit, part;
+	struct hp_softc *sc;
+	int	part = DISKPART(dev);
 
-	unit = DISKUNIT(dev);
-	if (unit >= hp_cd.cd_ndevs)
+	sc = device_lookup_private(&hp_cd, DISKUNIT(dev));
+	if (sc == NULL)
 		return ENXIO;
-	sc = hp_cd.cd_devs[unit];
-	if (sc == 0)
-		return ENXIO;
-
-	part = DISKPART(dev);
 
 	if (part >= sc->sc_disk.dk_label->d_npartitions)
 		return ENXIO;
 
 	switch (fmt) {
-	case 	S_IFCHR:
+	case S_IFCHR:
 		sc->sc_disk.dk_copenmask |= (1 << part);
 		break;
 
-	case	S_IFBLK:
+	case S_IFBLK:
 		sc->sc_disk.dk_bopenmask |= (1 << part);
 		break;
 	}
@@ -288,24 +300,17 @@ hpopen(dev, flag, fmt)
 }
 
 int
-hpclose(dev, flag, fmt)
-	dev_t	dev;
-	int	flag, fmt;
+hpclose(dev_t dev, int flag, int fmt, struct lwp *l)
 {
-	struct	hp_softc *sc;
-	int	unit, part;
-
-	unit = DISKUNIT(dev);
-	sc = hp_cd.cd_devs[unit];
-
-	part = DISKPART(dev);
+	struct hp_softc * const sc = device_lookup_private(&hp_cd, DISKUNIT(dev));
+	const int part = DISKPART(dev);
 
 	switch (fmt) {
-	case 	S_IFCHR:
+	case S_IFCHR:
 		sc->sc_disk.dk_copenmask &= ~(1 << part);
 		break;
 
-	case	S_IFBLK:
+	case S_IFBLK:
 		sc->sc_disk.dk_bopenmask &= ~(1 << part);
 		break;
 	}
@@ -316,35 +321,30 @@ hpclose(dev, flag, fmt)
 }
 
 int
-hpioctl(dev, cmd, addr, flag, p)
-	dev_t	dev;
-	u_long	cmd;
-	caddr_t	addr;
-	int	flag;
-	struct	proc *p;
+hpioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 {
-	struct	hp_softc *sc = hp_cd.cd_devs[DISKUNIT(dev)];
-	struct	disklabel *lp = sc->sc_disk.dk_label;
+	struct hp_softc * const sc = device_lookup_private(&hp_cd, DISKUNIT(dev));
+	struct disklabel * const lp = sc->sc_disk.dk_label;
 	int	error;
 
 	switch (cmd) {
-	case	DIOCGDINFO:
-		bcopy(lp, addr, sizeof (struct disklabel));
+	case DIOCGDINFO:
+		*(struct disklabel *)addr = *lp;
 		return 0;
 
-	case	DIOCGPART:
+	case DIOCGPART:
 		((struct partinfo *)addr)->disklab = lp;
 		((struct partinfo *)addr)->part =
 		    &lp->d_partitions[DISKPART(dev)];
 		break;
 
-	case	DIOCSDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
 		return setdisklabel(lp, (struct disklabel *)addr, 0, 0);
 
-	case	DIOCWDINFO:
+	case DIOCWDINFO:
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
 		else {
@@ -353,14 +353,13 @@ hpioctl(dev, cmd, addr, flag, p)
 			sc->sc_wlabel = 0;
 		}
 		return error;
-	case	DIOCWLABEL:
+	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		sc->sc_wlabel = 1;
 		break;
 
 	default:
-		printf("hpioctl: command %x\n", (unsigned int)cmd);
 		return ENOTTY;
 	}
 	return 0;
@@ -371,40 +370,38 @@ hpioctl(dev, cmd, addr, flag, p)
  * Return info about what-to-do-now.
  */
 enum xfer_action
-hpfinish(md, mbasr, attn)
-	struct	mba_device *md;
-	int	mbasr, *attn;
+hpfinish(struct mba_device *md, int mbasr, int *attn)
 {
-	struct	hp_softc *sc = md->md_softc;
-	struct	buf *bp = BUFQ_FIRST(&md->md_q);
-	volatile struct  mba_regs *mr = md->md_mba->sc_mbareg;
-	volatile struct	hp_regs *hr = (void *)&mr->mba_md[DISKUNIT(bp->b_dev)];
-	int	er1, er2;
-	volatile int bc; /* to get GCC read whole longword */
+	struct hp_softc * const sc = md->md_softc;
+	struct buf *bp = BUFQ_PEEK(md->md_q);
+	int er1, er2, bc;
 	unsigned byte;
 
-	er1 = hr->hp_er1 & HPMASK;
-	er2 = hr->hp_er2 & HPMASK;
-	hr->hp_er1 = hr->hp_er2 = 0;
+	er1 = HP_RCSR(HP_ER1);
+	er2 = HP_RCSR(HP_ER2);
+	HP_WCSR(HP_ER1, 0);
+	HP_WCSR(HP_ER2, 0);
+
 hper1:
 	switch (ffs(er1) - 1) {
 	case -1:
-		hr->hp_er1 = 0;
+		HP_WCSR(HP_ER1, 0);
 		goto hper2;
 		
 	case HPER1_DCK: /* Corrected? data read. Just notice. */
-		bc = mr->mba_bc;
+		bc = bus_space_read_4(md->md_mba->sc_iot,
+		    md->md_mba->sc_ioh, MBA_BC);
 		byte = ~(bc >> 16);
-		diskerr(buf, hp_cd.cd_name, "soft ecc", LOG_PRINTF,
+		diskerr(bp, hp_cd.cd_name, "soft ecc", LOG_PRINTF,
 		    btodb(bp->b_bcount - byte), sc->sc_disk.dk_label);
 		er1 &= ~(1<<HPER1_DCK);
-		er1 &= HPMASK;
 		break;
 
 	default:
-		printf("drive error :%s er1 %x er2 %x\n",
-		    sc->sc_dev.dv_xname, er1, er2);
-		hr->hp_er1 = hr->hp_er2 = 0;
+		aprint_error_dev(sc->sc_dev, "drive error: er1 %x er2 %x\n",
+		    er1, er2);
+		HP_WCSR(HP_ER1, 0);
+		HP_WCSR(HP_ER2, 0);
 		goto hper2;
 	}
 	goto hper1;
@@ -412,12 +409,11 @@ hper1:
 hper2:
 	mbasr &= ~(MBASR_DTBUSY|MBASR_DTCMP|MBASR_ATTN);
 	if (mbasr)
-		printf("massbuss error :%s %x\n",
-		    sc->sc_dev.dv_xname, mbasr);
+		aprint_error_dev(sc->sc_dev, "massbuss error: %x\n", mbasr);
 
-	BUFQ_FIRST(&md->md_q)->b_resid = 0;
-	disk_unbusy(&sc->sc_disk, BUFQ_FIRST(&md->md_q)->b_bcount,
-	    (BUFQ_FIRST(&md->md_q)->b_flags & B_READ));
+	BUFQ_PEEK(md->md_q)->b_resid = 0;
+	disk_unbusy(&sc->sc_disk, BUFQ_PEEK(md->md_q)->b_bcount,
+	    (bp->b_flags & B_READ));
 	return XFER_FINISH;
 }
 
@@ -425,64 +421,40 @@ hper2:
  * Non-data transfer interrupt; like volume change.
  */
 int
-hpattn(md)
-	struct	mba_device *md;
+hpattn(struct mba_device *md)
 {
-	struct	hp_softc *sc = md->md_softc;
-	struct	mba_softc *ms = (void *)sc->sc_dev.dv_parent;
-	struct  mba_regs *mr = ms->sc_mbareg;
-	struct  hp_regs *hr = (void *)&mr->mba_md[sc->sc_dev.dv_unit];
+	struct hp_softc * const sc = md->md_softc;
 	int	er1, er2;
 
-        er1 = hr->hp_er1 & HPMASK;
-        er2 = hr->hp_er2 & HPMASK;
+        er1 = HP_RCSR(HP_ER1);
+        er2 = HP_RCSR(HP_ER2);
 
-	printf("%s: Attention! er1 %x er2 %x\n",
-		sc->sc_dev.dv_xname, er1, er2);
+	aprint_error_dev(sc->sc_dev, "Attention! er1 %x er2 %x\n", er1, er2);
 	return 0;
 }
 
 
-daddr64_t
-hpsize(dev)
-	dev_t	dev;
+int
+hppsize(dev_t dev)
 {
-	int	size, unit = DISKUNIT(dev);
-	struct  hp_softc *sc;
+	struct hp_softc * const sc = device_lookup_private(&hp_cd, DISKUNIT(dev));
+	const int part = DISKPART(dev);
 
-	if (unit >= hp_cd.cd_ndevs || hp_cd.cd_devs[unit] == 0)
+	if (sc == NULL || part >= sc->sc_disk.dk_label->d_npartitions)
 		return -1;
 
-	sc = hp_cd.cd_devs[unit];
-	size = DL_GETPSIZE(&sc->sc_disk.dk_label->d_partitions[DISKPART(dev)]) *
+	return sc->sc_disk.dk_label->d_partitions[part].p_size *
 	    (sc->sc_disk.dk_label->d_secsize / DEV_BSIZE);
-
-	return size;
 }
 
 int
-hpdump(dev, a1, a2, size)
-	dev_t	dev;
-	daddr64_t a1;
-	caddr_t a2;
-	size_t	size;
-{
-	printf("hpdump: Not implemented yet.\n");
-	return 0;
-}
-
-int
-hpread(dev, uio)
-	dev_t dev;
-	struct uio *uio;
+hpread(dev_t dev, struct uio *uio, int ioflag)
 {
 	return (physio(hpstrategy, NULL, dev, B_READ, minphys, uio));
 }
 
 int
-hpwrite(dev, uio)
-	dev_t dev;
-	struct uio *uio;
+hpwrite(dev_t dev, struct uio *uio, int ioflag)
 {
 	return (physio(hpstrategy, NULL, dev, B_WRITE, minphys, uio));
 }

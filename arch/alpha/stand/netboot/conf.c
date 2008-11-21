@@ -1,5 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.2 1997/05/05 06:01:59 millert Exp $	*/
-/*	$NetBSD: conf.c,v 1.4 1997/04/06 08:41:23 cgd Exp $	*/
+/* $NetBSD: conf.c,v 1.4 1997/04/06 08:41:23 cgd Exp $ */
 
 #include <sys/types.h>
 #include <netinet/in.h>

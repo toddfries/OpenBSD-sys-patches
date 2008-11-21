@@ -1,5 +1,5 @@
-/*	$OpenBSD: slcompress.h,v 1.7 2003/06/02 23:28:12 millert Exp $	*/
-/*	$NetBSD: slcompress.h,v 1.11 1997/05/17 21:12:11 christos Exp $	*/
+/*	$NetBSD: slcompress.h,v 1.18 2008/02/20 17:05:53 matt Exp $	*/
+/*	Id: slcompress.h,v 1.4 1994/09/21 06:50:08 paulus Exp 	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -57,10 +57,10 @@
  * sequence number changes, one change per bit set in the header
  * (there may be no changes and there are two special cases where
  * the receiver implicitly knows what changed -- see below).
- * 
+ *
  * There are 5 numbers which can change (they are always inserted
  * in the following order): TCP urgent pointer, window,
- * acknowledgement, sequence number and IP ID.  (The urgent pointer
+ * acknowlegement, sequence number and IP ID.  (The urgent pointer
  * is different from the others in that its value is sent, not the
  * change in value.)  Since typical use of SLIP links is biased
  * toward small packets (see comments on MTU/MSS below), changes
@@ -118,12 +118,14 @@
  */
 struct cstate {
 	struct cstate *cs_next;	/* next most recently used cstate (xmit only) */
-	u_int16_t cs_hlen;	/* size of hdr (receive only) */
+	uint16_t cs_hlen;	/* size of hdr (receive only) */
 	u_char cs_id;		/* connection # associated with this state */
 	u_char cs_filler;
 	union {
 		char csu_hdr[MAX_HDR];
+#ifdef INET
 		struct ip csu_ip;	/* ip/tcp hdr from most recent packet */
+#endif
 	} slcs_u;
 };
 #define cs_ip slcs_u.csu_ip
@@ -137,7 +139,7 @@ struct slcompress {
 	struct cstate *last_cs;	/* most recently used tstate */
 	u_char last_recv;	/* last rcvd conn. id */
 	u_char last_xmit;	/* last sent conn. id */
-	u_int16_t flags;
+	uint16_t flags;
 #ifndef SL_NO_STATS
 	int sls_packets;	/* outbound packets */
 	int sls_compressed;	/* outbound compressed packets */
@@ -156,10 +158,12 @@ struct slcompress {
 
 void	sl_compress_init(struct slcompress *);
 void	sl_compress_setup(struct slcompress *, int);
+#ifdef INET
 u_int	sl_compress_tcp(struct mbuf *,
   	    struct ip *, struct slcompress *, int);
+#endif
 int	sl_uncompress_tcp(u_char **, int, u_int, struct slcompress *);
 int	sl_uncompress_tcp_core(u_char *, int, int, u_int,
   	    struct slcompress *, u_char **, u_int *);
 
-#endif /* _NET_SLCOMPRESS_H_ */
+#endif /* !_NET_SLCOMPRESS_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: altivec.c,v 1.11 2005/12/24 20:07:28 perry Exp $	*/
+/*	$NetBSD: altivec.c,v 1.14 2008/04/08 02:33:03 garbled Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -32,13 +32,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: altivec.c,v 1.11 2005/12/24 20:07:28 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: altivec.c,v 1.14 2008/04/08 02:33:03 garbled Exp $");
 
 #include "opt_multiprocessor.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/sa.h>
 #include <sys/systm.h>
 #include <sys/user.h>
 #include <sys/malloc.h>
@@ -49,6 +48,12 @@ __KERNEL_RCSID(0, "$NetBSD: altivec.c,v 1.11 2005/12/24 20:07:28 perry Exp $");
 #include <powerpc/altivec.h>
 #include <powerpc/spr.h>
 #include <powerpc/psl.h>
+
+#ifdef MULTIPROCESSOR
+#include <arch/powerpc/pic/picvar.h>
+#include <arch/powerpc/pic/ipivar.h>
+static void mp_save_vec_lwp(struct lwp *);
+#endif
 
 void
 enable_vec(void)
@@ -186,6 +191,44 @@ save_vec_cpu(void)
 	 */
 	mtmsr(msr);
 }
+
+#ifdef MULTIPROCESSOR
+/*
+ * Save a process's AltiVEC state to its PCB.  The state may be in any CPU.
+ * The process must either be curproc or traced by curproc (and stopped).
+ * (The point being that the process must not run on another CPU during
+ * this function).
+ */
+static void
+mp_save_vec_lwp(struct lwp *l)
+{
+	struct pcb *pcb = &l->l_addr->u_pcb;
+	struct cpu_info *veccpu;
+	int i;
+
+	/*
+	 * Send an IPI to the other CPU with the data and wait for that CPU
+	 * to flush the data.  Note that the other CPU might have switched
+	 * to a different proc's AltiVEC state by the time it receives the IPI,
+	 * but that will only result in an unnecessary reload.
+	 */
+
+	veccpu = pcb->pcb_veccpu;
+	if (veccpu == NULL)
+		return;
+
+	ppc_send_ipi(veccpu->ci_index, PPC_IPI_FLUSH_VEC);
+
+	/* Wait for flush. */
+	for (i = 0; i < 0x3fffffff; i++)
+		if (pcb->pcb_veccpu == NULL)
+			return;
+
+	aprint_error("mp_save_vec_lwp{%d} pid = %d.%d, veccpu->ci_cpuid = %d\n",
+	    cpu_number(), l->l_proc->p_pid, l->l_lid, veccpu->ci_cpuid);
+	panic("mp_save_vec_lwp: timed out");
+}
+#endif /*MULTIPROCESSOR*/
 
 /*
  * Save a process's AltiVEC state to its PCB.  The state may be in any CPU.

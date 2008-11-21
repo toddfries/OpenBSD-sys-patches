@@ -1,22 +1,21 @@
-/* $OpenBSD: tga.c,v 1.30 2007/10/01 15:34:48 krw Exp $ */
-/* $NetBSD: tga.c,v 1.40 2002/03/13 15:05:18 ad Exp $ */
+/* $NetBSD: tga.c,v 1.68 2008/04/10 19:13:38 cegger Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -28,6 +27,9 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tga.c,v 1.68 2008/04/10 19:13:38 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -37,8 +39,8 @@
 #include <sys/buf.h>
 #include <sys/ioctl.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -52,72 +54,60 @@
 #include <dev/ic/ibm561var.h>
 
 #include <dev/wscons/wsconsio.h>
+#include <dev/wscons/wscons_raster.h>
 #include <dev/rasops/rasops.h>
 #include <dev/wsfont/wsfont.h>
-
-#if defined(__alpha__) || defined(__mips__)
 #include <uvm/uvm_extern.h>
-#endif
-
-#ifdef __alpha__
-#include <machine/pte.h>
-#endif
-#ifdef __mips__
-#include <mips/pte.h>
-#endif
 
 int	tgamatch(struct device *, struct cfdata *, void *);
 void	tgaattach(struct device *, struct device *, void *);
 int	tgaprint(void *, const char *);
 
-struct cfdriver tga_cd = {
-	NULL, "tga", DV_DULL
-};
+CFATTACH_DECL(tga, sizeof(struct tga_softc),
+    tgamatch, tgaattach, NULL, NULL);
 
-struct cfattach tga_ca = {
-	sizeof(struct tga_softc), (cfmatch_t)tgamatch, tgaattach,
-};
-
-int	tga_identify(struct tga_devconfig *);
-const struct tga_conf *tga_getconf(int);
-void	tga_getdevconfig(bus_space_tag_t memt, pci_chipset_tag_t pc,
+static void tga_init(bus_space_tag_t memt, pci_chipset_tag_t pc,
 	    pcitag_t tag, struct tga_devconfig *dc);
+
+static int tga_matchcommon(bus_space_tag_t, pci_chipset_tag_t, pcitag_t);
+static void tga_mapaddrs(bus_space_tag_t memt, pci_chipset_tag_t pc,
+	pcitag_t, bus_size_t *pcisize, struct tga_devconfig *dc);
 unsigned tga_getdotclock(struct tga_devconfig *dc);
 
 struct tga_devconfig tga_console_dc;
 
-int	tga_ioctl(void *, u_long, caddr_t, int, struct proc *);
-paddr_t	tga_mmap(void *, off_t, int);
-void	tga_copyrows(void *, int, int, int);
-void	tga_copycols(void *, int, int, int, int);
-int	tga_alloc_screen(void *, const struct wsscreen_descr *,
-	    void **, int *, int *, long *);
-void	tga_free_screen(void *, void *);
-int	tga_show_screen(void *, void *, int,
-			   void (*) (void *, int, int), void *);
-void	tga_burner(void *, u_int, u_int);
-int	tga_rop(struct rasops_info *, int, int, int, int,
+int tga_ioctl(void *, void *, u_long, void *, int, struct lwp *);
+paddr_t tga_mmap(void *, void *, off_t, int);
+static void tga_copyrows(void *, int, int, int);
+static void tga_copycols(void *, int, int, int, int);
+static int tga_alloc_screen(void *, const struct wsscreen_descr *,
+				      void **, int *, int *, long *);
+static void tga_free_screen(void *, void *);
+static int tga_show_screen(void *, void *, int,
+				void (*) (void *, int, int), void *);
+static int tga_rop(struct rasops_info *, int, int, int, int, int,
 	struct rasops_info *, int, int);
-int	tga_rop_vtov(struct rasops_info *, int, int, int,
-	int, struct rasops_info *, int, int );
-void	tga_putchar(void *c, int row, int col, u_int uc, long attr);
-void	tga_eraserows(void *, int, int, long);
-void	tga_erasecols(void *, int, int, int, long);
-void	tga2_init(struct tga_devconfig *);
+static int tga_rop_vtov(struct rasops_info *, int, int, int, int,
+	int, struct rasops_info *, int, int);
+static void tga_putchar(void *c, int row, int col,
+				u_int uc, long attr);
+static void tga_eraserows(void *, int, int, long);
+static void	tga_erasecols(void *, int, int, int, long);
+void tga2_init(struct tga_devconfig *);
 
-void	tga_config_interrupts(struct device *);
+static void tga_config_interrupts(struct device *);
 
 /* RAMDAC interface functions */
-int	 tga_sched_update(void *, void (*)(void *));
-void	 tga_ramdac_wr(void *, u_int, u_int8_t);
-u_int8_t tga_ramdac_rd(void *, u_int);
-void	 tga_bt463_wr(void *, u_int, u_int8_t);
-u_int8_t tga_bt463_rd(void *, u_int);
-void	 tga2_ramdac_wr(void *, u_int, u_int8_t);
-u_int8_t tga2_ramdac_rd(void *, u_int);
+static int		tga_sched_update(void *, void (*)(void *));
+static void		tga_ramdac_wr(void *, u_int, u_int8_t);
+static u_int8_t	tga_ramdac_rd(void *, u_int);
+static void		tga_bt463_wr(void *, u_int, u_int8_t);
+static u_int8_t	tga_bt463_rd(void *, u_int);
+static void		tga2_ramdac_wr(void *, u_int, u_int8_t);
+static u_int8_t	tga2_ramdac_rd(void *, u_int);
 
 /* Interrupt handler */
-int	tga_intr(void *);
+static int	tga_intr(void *);
 
 /* The NULL entries will get filled in by rasops_init().
  * XXX and the non-NULL ones will be overwritten; reset after calling it.
@@ -131,7 +121,7 @@ struct wsdisplay_emulops tga_emulops = {
 	tga_copyrows,
 	tga_eraserows,
 	NULL,
-	NULL
+	NULL,
 };
 
 struct wsscreen_descr tga_stdscreen = {
@@ -139,8 +129,8 @@ struct wsscreen_descr tga_stdscreen = {
 	0, 0,	/* will be filled in -- XXX shouldn't, it's global */
 	&tga_emulops,
 	0, 0,
-	WSSCREEN_UNDERLINE | WSSCREEN_HILIT |
-	    WSSCREEN_WSCOLORS | WSSCREEN_REVERSE
+	WSSCREEN_REVERSE,
+	NULL,
 };
 
 const struct wsscreen_descr *_tga_scrlist[] = {
@@ -158,28 +148,22 @@ struct wsdisplay_accessops tga_accessops = {
 	tga_alloc_screen,
 	tga_free_screen,
 	tga_show_screen,
-	NULL,			/* load_font */
-	NULL,			/* scrollback */
-	NULL,			/* getchar */
-	tga_burner,
+	NULL, /* load_font */
+	NULL,
+	NULL,
 };
 
-void	tga_blank(struct tga_devconfig *);
-void	tga_unblank(struct tga_devconfig *);
+static void	tga_blank(struct tga_devconfig *);
+static void	tga_unblank(struct tga_devconfig *);
 
-#ifdef TGA_DEBUG
-#define DPRINTF(...)      printf (__VA_ARGS__)
-#define DPRINTFN(n, ...)   if (tgadebug > (n)) printf (__VA_ARGS__)
-int tgadebug = 0;
-#else
-#define DPRINTF(...)
-#define DPRINTFN(n,...)
-#endif
-
-const struct pci_matchid tga_devices[] = {
-	{ PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21030 },
-	{ PCI_VENDOR_DEC, PCI_PRODUCT_DEC_PBXGB },
-};
+int
+tga_cnmatch(iot, memt, pc, tag)
+	bus_space_tag_t iot, memt;
+	pci_chipset_tag_t pc;
+	pcitag_t tag;
+{
+	return tga_matchcommon(memt, pc, tag);
+}
 
 int
 tgamatch(parent, match, aux)
@@ -187,15 +171,84 @@ tgamatch(parent, match, aux)
 	struct cfdata *match;
 	void *aux;
 {
-	if (pci_matchbyid((struct pci_attach_args *)aux, tga_devices,
-	    sizeof(tga_devices) / sizeof(tga_devices[0])))
-		return (10);	/* need to return more than vga_pci here! */
+	struct pci_attach_args *pa = aux;
 
-	return (0);
+	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_DEC)
+		return (0);
+
+	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_DEC_21030:
+	case PCI_PRODUCT_DEC_PBXGB:
+		break;
+	default:
+		return 0;
+	}
+
+#if defined(__alpha__) || defined(arc)
+	/* short-circuit the following test, as we
+	 * already have the memory mapped and hence
+	 * cannot perform it---and we are the console
+	 * anyway.
+	 */
+	if (pa->pa_tag == tga_console_dc.dc_pcitag)
+		return 10;
+#endif
+	return tga_matchcommon(pa->pa_memt, pa->pa_pc, pa->pa_tag);
 }
 
-void
-tga_getdevconfig(memt, pc, tag, dc)
+static int
+tga_matchcommon(memt, pc, tag)
+	bus_space_tag_t memt;
+	pci_chipset_tag_t pc;
+	pcitag_t tag;
+{
+	struct tga_devconfig tmp_dc;
+	struct tga_devconfig *dc = &tmp_dc;
+	bus_size_t pcisize;
+
+	tga_mapaddrs(memt, pc, tag, &pcisize, dc);
+	dc->dc_tga_type = tga_identify(dc);
+
+	dc->dc_tgaconf = tga_getconf(dc->dc_tga_type);
+	bus_space_unmap(memt, dc->dc_memh, pcisize);
+	if (dc->dc_tgaconf)
+		return 10;
+	return 0;
+}
+
+static void
+tga_mapaddrs(memt, pc, tag, pcisize, dc)
+	bus_space_tag_t memt;
+	pci_chipset_tag_t pc;
+	pcitag_t tag;
+	bus_size_t *pcisize;
+	struct tga_devconfig *dc;
+{
+	int flags;
+
+	dc->dc_memt = memt;
+	dc->dc_tgaconf = NULL;
+
+	/* XXX magic number */
+	if (pci_mapreg_info(pc, tag, 0x10,
+	    PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT,
+	    &dc->dc_pcipaddr, pcisize, &flags))
+		panic("tga_mapaddrs: pci_mapreg_info() failed");
+	if ((flags & BUS_SPACE_MAP_PREFETCHABLE) == 0)		/* XXX */
+		panic("tga memory not prefetchable");
+
+	if (bus_space_map(memt, dc->dc_pcipaddr, *pcisize,
+	    BUS_SPACE_MAP_PREFETCHABLE | BUS_SPACE_MAP_LINEAR, &dc->dc_memh))
+		panic("tga_mapaddrs: could not map TGA address space");
+	dc->dc_vaddr = (vaddr_t) bus_space_vaddr(memt, dc->dc_memh);
+
+	bus_space_subregion(dc->dc_memt, dc->dc_memh,
+						TGA_MEM_CREGS, TGA_CREGS_SIZE,
+						&dc->dc_regs);
+}
+
+static void
+tga_init(memt, pc, tag, dc)
 	bus_space_tag_t memt;
 	pci_chipset_tag_t pc;
 	pcitag_t tag;
@@ -207,56 +260,16 @@ tga_getdevconfig(memt, pc, tag, dc)
 	bus_size_t pcisize;
 	int i;
 
-	dc->dc_memt = memt;
-
 	dc->dc_pcitag = tag;
-
-	DPRINTF("tga_getdevconfig: Getting map info\n");
-	/* XXX magic number */
-	if (pci_mapreg_info(pc, tag, 0x10,
-	    PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT,
-	    &dc->dc_pcipaddr, &pcisize, NULL))
-		return;
-
-	DPRINTF("tga_getdevconfig: preparing to map\n");
-#ifdef __OpenBSD__
-	if (bus_space_map(memt, dc->dc_pcipaddr, pcisize, 1, &dc->dc_memh))
-		return;
-	dc->dc_vaddr = dc->dc_memh;
-#else
-	if (bus_space_map(memt, dc->dc_pcipaddr, pcisize,
-	    BUS_SPACE_MAP_PREFETCHABLE | BUS_SPACE_MAP_LINEAR, &dc->dc_memh))
-		return;
-	dc->dc_vaddr = (vaddr_t) bus_space_vaddr(memt, dc->dc_memh);
-#endif
-	DPRINTF("tga_getdevconfig: mapped\n");
-
-#ifdef __alpha__
-	dc->dc_paddr = ALPHA_K0SEG_TO_PHYS(dc->dc_vaddr);	/* XXX */
-#endif
-#ifdef arc
-	bus_space_paddr(memt, dc->dc_memh, &dc->dc_paddr);
-#endif
-	DPRINTF("tga_getdevconfig: allocating subregion\n");
-	bus_space_subregion(dc->dc_memt, dc->dc_memh, 
-			    TGA_MEM_CREGS, TGA_CREGS_SIZE,
-			    &dc->dc_regs);
-
-	DPRINTF("tga_getdevconfig: going to identify\n");
+	tga_mapaddrs(memt, pc, tag, &pcisize, dc);
 	dc->dc_tga_type = tga_identify(dc);
-
-	DPRINTF("tga_getdevconfig: preparing to get config\n");
 	tgac = dc->dc_tgaconf = tga_getconf(dc->dc_tga_type);
-	if (tgac == NULL)
-		return;
-
 #if 0
 	/* XXX on the Alpha, pcisize = 4 * cspace_size. */
 	if (tgac->tgac_cspace_size != pcisize)			/* sanity */
-		panic("tga_getdevconfig: memory size mismatch?");
+		panic("tga_init: memory size mismatch?");
 #endif
 
-	DPRINTF("tga_getdevconfig: get revno\n");
 	switch (TGARREG(dc, TGA_REG_GREV) & 0xff) {
 	case 0x01:
 	case 0x02:
@@ -270,16 +283,13 @@ tga_getdevconfig(memt, pc, tag, dc)
 		dc->dc_tga2 = 1;
 		break;
 	default:
-		panic("tga_getdevconfig: TGA Revision not recognized");
+		panic("tga_init: TGA Revision not recognized");
 	}
 
-	if (dc->dc_tga2) {
+	if (dc->dc_tga2)
 		tga2_init(dc);
-	}
-	
-	i = TGARREG(dc, TGA_REG_VHCR) & 0x1ff;
-	DPRINTF("tga_getdevconfig: TGA_REG_VHCR & 0x1ff = %d\n", i);
-	switch (i) {		/* XXX */
+
+	switch (TGARREG(dc, TGA_REG_VHCR) & 0x1ff) {		/* XXX */
 	case 0:
 		dc->dc_wid = 8192;
 		break;
@@ -293,12 +303,10 @@ tga_getdevconfig(memt, pc, tag, dc)
 		break;
 	}
 
-	DPRINTF("tga_getdevconfig: dc->dc_wid = %d\n", dc->dc_wid);
 	/*
 	 * XXX XXX Turning off "odd" shouldn't be necessary,
 	 * XXX XXX but I can't make X work with the weird size.
 	 */
-	DPRINTF("tga_getdevconfig: beginning magic incantation\n");
 	if ((TGARREG(dc, TGA_REG_VHCR) & 0x00000001) != 0 &&	/* XXX */
 	    (TGARREG(dc, TGA_REG_VHCR) & 0x80000000) != 0) {	/* XXX */
 		TGAWREG(dc, TGA_REG_VHCR,
@@ -308,41 +316,26 @@ tga_getdevconfig(memt, pc, tag, dc)
 
 	dc->dc_rowbytes = dc->dc_wid * (dc->dc_tgaconf->tgac_phys_depth / 8);
 	dc->dc_ht = (TGARREG(dc, TGA_REG_VVCR) & 0x7ff);	/* XXX */
-	DPRINTF("tga_getdevconfig: rowbytes = %d, tgac_phys_depth = %d\n"
-		"                  dc_wid = %d, dc_ht = %d\n",
-		dc->dc_rowbytes, dc->dc_tgaconf->tgac_phys_depth,
-		dc->dc_wid, dc->dc_ht);
 
 	/* XXX this seems to be what DEC does */
-	DPRINTF("tga_getdevconfig: more magic\n");
 	TGAWREG(dc, TGA_REG_CCBR, 0);
 	TGAWREG(dc, TGA_REG_VVBR, 1);
 	dc->dc_videobase = dc->dc_vaddr + tgac->tgac_dbuf[0] +
 	    1 * tgac->tgac_vvbr_units;
 	dc->dc_blanked = 1;
 	tga_unblank(dc);
-	
-	DPRINTF("tga_getdevconfig: dc_videobase = 0x%016llx\n"
-		"                  dc_vaddr = 0x%016llx\n"
-		"                  tgac_dbuf[0] = %d\n"
-		"                  tgac_vvbr_units = %d\n",
-		dc->dc_videobase, dc->dc_vaddr, tgac->tgac_dbuf[0],
-		tgac->tgac_vvbr_units);
-	       
+
 	/*
 	 * Set all bits in the pixel mask, to enable writes to all pixels.
 	 * It seems that the console firmware clears some of them
 	 * under some circumstances, which causes cute vertical stripes.
 	 */
-	DPRINTF("tga_getdevconfig: set pixel mask\n");
 	TGAWREG(dc, TGA_REG_GPXR_P, 0xffffffff);
 
 	/* clear the screen */
-	DPRINTF("tga_getdevconfig: clear screen\n");
 	for (i = 0; i < dc->dc_ht * dc->dc_rowbytes; i += sizeof(u_int32_t))
 		*(u_int32_t *)(dc->dc_videobase + i) = 0;
 
-	DPRINTF("tga_getdevconfig: raster ops\n");
 	/* Initialize rasops descriptor */
 	rip = &dc->dc_rinfo;
 	rip->ri_flg = RI_CENTER;
@@ -362,46 +355,42 @@ tga_getdevconfig(memt, pc, tag, dc)
 		rip->ri_bpos = 0;
 	}
 
-	DPRINTF("tga_getdevconfig: wsfont_init\n");
 	wsfont_init();
-	if (rip->ri_width > 80*12) 
-		/* High res screen, choose a big font */
-		cookie = wsfont_find(NULL, 12, 0, 0);
-	else 
-		/*  lower res, choose a 8 pixel wide font */
-		cookie = wsfont_find(NULL, 8, 0, 0);
+	/* prefer 8 pixel wide font */
+	cookie = wsfont_find(NULL, 8, 0, 0, WSDISPLAY_FONTORDER_R2L,
+	    WSDISPLAY_FONTORDER_L2R);
 	if (cookie <= 0)
-		cookie = wsfont_find(NULL, 0, 0, 0);
+		cookie = wsfont_find(NULL, 0, 0, 0, WSDISPLAY_FONTORDER_R2L,
+		    WSDISPLAY_FONTORDER_L2R);
 	if (cookie <= 0) {
 		printf("tga: no appropriate fonts.\n");
 		return;
 	}
 
 	/* the accelerated tga_putchar() needs LSbit left */
-	if (wsfont_lock(cookie, &rip->ri_font,
-	    WSDISPLAY_FONTORDER_R2L, WSDISPLAY_FONTORDER_L2R) <= 0) {
+	if (wsfont_lock(cookie, &dc->dc_rinfo.ri_font)) {
 		printf("tga: couldn't lock font\n");
 		return;
 	}
-	rip->ri_wsfcookie = cookie;
-	/* fill screen size */
-	rasops_init(rip, rip->ri_height / rip->ri_font->fontheight,
-	    rip->ri_width / rip->ri_font->fontwidth); 
-	
+	dc->dc_rinfo.ri_wsfcookie = cookie;
+
+	rasops_init(rip, 34, 80);
+
 	/* add our accelerated functions */
-	/* XXX shouldn't have to do this; rasops should leave non-NULL 
+	/* XXX shouldn't have to do this; rasops should leave non-NULL
 	 * XXX entries alone.
 	 */
-	rip->ri_ops.copyrows = tga_copyrows;
-	rip->ri_ops.eraserows = tga_eraserows;
-	rip->ri_ops.erasecols = tga_erasecols;
-	rip->ri_ops.copycols = tga_copycols;
-	rip->ri_ops.putchar = tga_putchar;	
+	dc->dc_rinfo.ri_ops.copyrows = tga_copyrows;
+	dc->dc_rinfo.ri_ops.eraserows = tga_eraserows;
+	dc->dc_rinfo.ri_ops.erasecols = tga_erasecols;
+	dc->dc_rinfo.ri_ops.copycols = tga_copycols;
+	dc->dc_rinfo.ri_ops.putchar = tga_putchar;
 
-	tga_stdscreen.nrows = rip->ri_rows;
-	tga_stdscreen.ncols = rip->ri_cols;
-	tga_stdscreen.textops = &rip->ri_ops;
-	tga_stdscreen.capabilities = rip->ri_caps;
+	tga_stdscreen.nrows = dc->dc_rinfo.ri_rows;
+	tga_stdscreen.ncols = dc->dc_rinfo.ri_cols;
+	tga_stdscreen.textops = &dc->dc_rinfo.ri_ops;
+	tga_stdscreen.capabilities = dc->dc_rinfo.ri_caps;
+
 
 	dc->dc_intrenabled = 0;
 }
@@ -428,14 +417,12 @@ tgaattach(parent, self, aux)
 		sc->sc_dc = &tga_console_dc;
 		sc->nscreens = 1;
 	} else {
-		sc->sc_dc = malloc(sizeof(struct tga_devconfig), M_DEVBUF,
-		    M_NOWAIT | M_ZERO);
-		if (sc->sc_dc == NULL)
-			return;
-		tga_getdevconfig(pa->pa_memt, pa->pa_pc, pa->pa_tag,
-		    sc->sc_dc);
+		sc->sc_dc = (struct tga_devconfig *)
+		    malloc(sizeof(struct tga_devconfig), M_DEVBUF,
+		    M_WAITOK|M_ZERO);
+		tga_init(pa->pa_memt, pa->pa_pc, pa->pa_tag, sc->sc_dc);
 	}
-	if (sc->sc_dc->dc_vaddr == NULL) {
+	if (sc->sc_dc->dc_vaddr == 0) {
 		printf(": couldn't map memory space; punt!\n");
 		return;
 	}
@@ -448,7 +435,7 @@ tgaattach(parent, self, aux)
 	}
 	intrstr = pci_intr_string(pa->pa_pc, intrh);
 	sc->sc_intr = pci_intr_establish(pa->pa_pc, intrh, IPL_TTY, tga_intr,
-	    sc->sc_dc, sc->sc_dev.dv_xname);
+	    sc->sc_dc);
 	if (sc->sc_intr == NULL) {
 		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
@@ -483,41 +470,33 @@ tgaattach(parent, self, aux)
 	 * to allocate its private storage and pass that back to us.
 	 */
 
-	DPRINTF("tgaattach: Get RAMDAC functions\n");
 	sc->sc_dc->dc_ramdac_funcs = sc->sc_dc->dc_tgaconf->ramdac_funcs();
 	if (!sc->sc_dc->dc_tga2) {
-	    DPRINTF("tgaattach: !sc->sc_dc->dc_tga2\n");
-	    DPRINTF("tgaattach: sc->sc_dc->dc_tgaconf->ramdac_funcs %s "
-		    "bt485_funcs\n",
-		    (sc->sc_dc->dc_tgaconf->ramdac_funcs == bt485_funcs)
-		    ? "==" : "!=");
-	    if (sc->sc_dc->dc_tgaconf->ramdac_funcs == bt485_funcs) 
-		  sc->sc_dc->dc_ramdac_cookie = 
+	    if (sc->sc_dc->dc_tgaconf->ramdac_funcs == bt485_funcs)
+		  sc->sc_dc->dc_ramdac_cookie =
 			sc->sc_dc->dc_ramdac_funcs->ramdac_register(sc->sc_dc,
 		    tga_sched_update, tga_ramdac_wr, tga_ramdac_rd);
 		else
-		  sc->sc_dc->dc_ramdac_cookie = 
+		  sc->sc_dc->dc_ramdac_cookie =
 			sc->sc_dc->dc_ramdac_funcs->ramdac_register(sc->sc_dc,
 		    tga_sched_update, tga_bt463_wr, tga_bt463_rd);
 	} else {
-	        DPRINTF("tgaattach: sc->sc_dc->dc_tga2\n");
-		sc->sc_dc->dc_ramdac_cookie = 
-			sc->sc_dc->dc_ramdac_funcs->ramdac_register(sc->sc_dc, 
+		sc->sc_dc->dc_ramdac_cookie =
+			sc->sc_dc->dc_ramdac_funcs->ramdac_register(sc->sc_dc,
 			tga_sched_update, tga2_ramdac_wr, tga2_ramdac_rd);
 
 		/* XXX this is a bit of a hack, setting the dotclock here */
 		if (sc->sc_dc->dc_tgaconf->ramdac_funcs != bt485_funcs)
 			(*sc->sc_dc->dc_ramdac_funcs->ramdac_set_dotclock)
-				(sc->sc_dc->dc_ramdac_cookie,
-				 tga_getdotclock(sc->sc_dc));
+			    (sc->sc_dc->dc_ramdac_cookie,
+			    tga_getdotclock(sc->sc_dc));
 	}
-	DPRINTF("tgaattach: sc->sc_dc->dc_ramdac_cookie = 0x%016llx\n",
-		sc->sc_dc->dc_ramdac_cookie);
+
 	/*
 	 * Initialize the RAMDAC.  Initialization includes disabling
-	 * cursor, setting a sane colormap, etc.
+	 * cursor, setting a sane colormap, etc.  We presume that we've
+	 * filled in the necessary dot clock for PowerStorm 4d20.
 	 */
-	DPRINTF("tgaattach: Initializing RAMDAC.\n");
 	(*sc->sc_dc->dc_ramdac_funcs->ramdac_init)(sc->sc_dc->dc_ramdac_cookie);
 	TGAWREG(sc->sc_dc, TGA_REG_SISR, 0x00000001); /* XXX */
 
@@ -526,46 +505,41 @@ tgaattach(parent, self, aux)
 		return;
 	}
 	printf("board type %s\n", sc->sc_dc->dc_tgaconf->tgac_name);
-	printf("%s: %d x %d, %dbpp, %s RAMDAC\n", sc->sc_dev.dv_xname,
+	printf("%s: %d x %d, %dbpp, %s RAMDAC\n", device_xname(&sc->sc_dev),
 	    sc->sc_dc->dc_wid, sc->sc_dc->dc_ht,
 	    sc->sc_dc->dc_tgaconf->tgac_phys_depth,
 	    sc->sc_dc->dc_ramdac_funcs->ramdac_name);
 
 	if (intrstr != NULL)
-		printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname,
+		printf("%s: interrupting at %s\n", device_xname(&sc->sc_dev),
 		    intrstr);
 
 	aa.console = console;
 	aa.scrdata = &tga_screenlist;
 	aa.accessops = &tga_accessops;
 	aa.accesscookie = sc;
-	aa.defaultscreens = 0;
 
 	config_found(self, &aa, wsemuldisplaydevprint);
 
-#ifdef __NetBSD__
 	config_interrupts(self, tga_config_interrupts);
-#else
-	tga_config_interrupts(self);
-#endif
 }
 
-void 
+static void
 tga_config_interrupts (d)
 	struct device *d;
 {
 	struct tga_softc *sc = (struct tga_softc *)d;
 	sc->sc_dc->dc_intrenabled = 1;
 }
-	
 
 int
-tga_ioctl(v, cmd, data, flag, p)
+tga_ioctl(v, vs, cmd, data, flag, l)
 	void *v;
+	void *vs;
 	u_long cmd;
-	caddr_t data;
+	void *data;
 	int flag;
-	struct proc *p;
+	struct lwp *l;
 {
 	struct tga_softc *sc = v;
 	struct tga_devconfig *dc = sc->sc_dc;
@@ -575,45 +549,40 @@ tga_ioctl(v, cmd, data, flag, p)
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
 		*(u_int *)data = WSDISPLAY_TYPE_TGA;
-		break;
-
-	case WSDISPLAYIO_SMODE:
-		sc->sc_mode = *(u_int *)data;
-		switch (sc->sc_mode) {
-		case WSDISPLAYIO_MODE_DUMBFB:
-			/* in dump fb mode start the framebuffer at 0 */
-			TGAWREG(dc, TGA_REG_VVBR, 0);
-			break;
-		default:
-			/* XXX it this useful, except for not breaking Xtga? */
-			TGAWREG(dc, TGA_REG_VVBR, 1);
-			break;			
-		}
-		break;
+		return (0);
 
 	case WSDISPLAYIO_GINFO:
 #define	wsd_fbip ((struct wsdisplay_fbinfo *)data)
 		wsd_fbip->height = sc->sc_dc->dc_ht;
 		wsd_fbip->width = sc->sc_dc->dc_wid;
 		wsd_fbip->depth = sc->sc_dc->dc_tgaconf->tgac_phys_depth;
-		wsd_fbip->cmsize = 1024;		/* XXX ??? */
+#if 0
+		wsd_fbip->cmsize = 256;		/* XXX ??? */
+#else
+		wsd_fbip->cmsize = 1024;	/* XXX ??? */
+#endif
 #undef wsd_fbip
-		break;
-
-	case WSDISPLAYIO_LINEBYTES:
-		*(u_int *)data = sc->sc_dc->dc_rowbytes;
-		break;
+		return (0);
 
 	case WSDISPLAYIO_GETCMAP:
 		return (*dcrf->ramdac_get_cmap)(dcrc,
 		    (struct wsdisplay_cmap *)data);
+
 	case WSDISPLAYIO_PUTCMAP:
 		return (*dcrf->ramdac_set_cmap)(dcrc,
 		    (struct wsdisplay_cmap *)data);
 
 	case WSDISPLAYIO_SVIDEO:
+		if (*(u_int *)data == WSDISPLAYIO_VIDEO_OFF)
+			tga_blank(sc->sc_dc);
+		else
+			tga_unblank(sc->sc_dc);
+		return (0);
+
 	case WSDISPLAYIO_GVIDEO:
-		break;
+		*(u_int *)data = dc->dc_blanked ?
+		    WSDISPLAYIO_VIDEO_OFF : WSDISPLAYIO_VIDEO_ON;
+		return (0);
 
 	case WSDISPLAYIO_GCURPOS:
 		return (*dcrf->ramdac_get_curpos)(dcrc,
@@ -634,15 +603,11 @@ tga_ioctl(v, cmd, data, flag, p)
 	case WSDISPLAYIO_SCURSOR:
 		return (*dcrf->ramdac_set_cursor)(dcrc,
 		    (struct wsdisplay_cursor *)data);
-
-	default:
-		return (-1);
 	}
-
-	return (0);
+	return (EPASSTHROUGH);
 }
 
-int
+static int
 tga_sched_update(v, f)
 	void	*v;
 	void	(*f)(void *);
@@ -663,11 +628,11 @@ tga_sched_update(v, f)
 		TGAWREG(dc, TGA_REG_SISR, 0x00000001);
 		TGAREGWB(dc, TGA_REG_SISR, 1);
 	}
-		
+
 	return 0;
 }
 
-int
+static int
 tga_intr(v)
 	void *v;
 {
@@ -685,7 +650,7 @@ tga_intr(v)
 			TGAREGWB(dc, TGA_REG_SISR, 1);
 			/* This was our interrupt, even if we're puzzled as to why
 			 * we got it.  Don't make the interrupt handler think it
-			 * was a stray.  
+			 * was a stray.
 			 */
 			return -1;
 		} else {
@@ -703,31 +668,22 @@ tga_intr(v)
 }
 
 paddr_t
-tga_mmap(v, offset, prot)
+tga_mmap(v, vs, offset, prot)
 	void *v;
+	void *vs;
 	off_t offset;
 	int prot;
 {
 	struct tga_softc *sc = v;
-	struct tga_devconfig *dc = sc->sc_dc;
 
-	if (offset >= dc->dc_tgaconf->tgac_cspace_size || offset < 0)
+	if (offset >= sc->sc_dc->dc_tgaconf->tgac_cspace_size || offset < 0)
 		return -1;
 
-	if (sc->sc_mode == WSDISPLAYIO_MODE_DUMBFB) {
-		/* 
-		 * The framebuffer starts at the upper half of tga mem
-		 */
-		offset += dc->dc_tgaconf->tgac_cspace_size / 2;
-	}
-#if defined(__alpha__) || defined(__mips__)
-	return atop(sc->sc_dc->dc_paddr + offset);
-#else
-	return (-1);
-#endif
+	return (bus_space_mmap(sc->sc_dc->dc_memt, sc->sc_dc->dc_pcipaddr,
+	    offset, prot, BUS_SPACE_MAP_LINEAR));
 }
 
-int
+static int
 tga_alloc_screen(v, type, cookiep, curxp, curyp, attrp)
 	void *v;
 	const struct wsscreen_descr *type;
@@ -744,14 +700,14 @@ tga_alloc_screen(v, type, cookiep, curxp, curyp, attrp)
 	*cookiep = &sc->sc_dc->dc_rinfo; /* one and only for now */
 	*curxp = 0;
 	*curyp = 0;
-	sc->sc_dc->dc_rinfo.ri_ops.alloc_attr(&sc->sc_dc->dc_rinfo, 
+	sc->sc_dc->dc_rinfo.ri_ops.allocattr(&sc->sc_dc->dc_rinfo,
 		0, 0, 0, &defattr);
 	*attrp = defattr;
 	sc->nscreens++;
 	return (0);
 }
 
-void
+static void
 tga_free_screen(v, cookie)
 	void *v;
 	void *cookie;
@@ -764,7 +720,7 @@ tga_free_screen(v, cookie)
 	sc->nscreens--;
 }
 
-int
+static int
 tga_show_screen(v, cookie, waitok, cb, cbarg)
 	void *v;
 	void *cookie;
@@ -785,11 +741,10 @@ tga_cnattach(iot, memt, pc, bus, device, function)
 	struct tga_devconfig *dcp = &tga_console_dc;
 	long defattr;
 
-	tga_getdevconfig(memt, pc,
-	    pci_make_tag(pc, bus, device, function), dcp);
+	tga_init(memt, pc, pci_make_tag(pc, bus, device, function), dcp);
 
 	/* sanity checks */
-	if (dcp->dc_vaddr == NULL)
+	if (dcp->dc_vaddr == 0)
 		panic("tga_console(%d, %d): couldn't map memory space",
 		    device, function);
 	if (dcp->dc_tgaconf == NULL)
@@ -804,10 +759,10 @@ tga_cnattach(iot, memt, pc, bus, device, function)
 	if (dcp->dc_tga2) {
 		if (dcp->dc_tgaconf->ramdac_funcs == bt485_funcs)
 			bt485_cninit(dcp, tga_sched_update, tga2_ramdac_wr,
-				     tga2_ramdac_rd);
+			    tga2_ramdac_rd);
 		else
 			ibm561_cninit(dcp, tga_sched_update, tga2_ramdac_wr,
-				      tga2_ramdac_rd, tga_getdotclock(dcp));
+			    tga2_ramdac_rd, tga_getdotclock(dcp));
 	} else {
 		if (dcp->dc_tgaconf->ramdac_funcs == bt485_funcs)
 			bt485_cninit(dcp, tga_sched_update, tga_ramdac_wr,
@@ -817,30 +772,16 @@ tga_cnattach(iot, memt, pc, bus, device, function)
 				tga_bt463_rd);
 		}
 	}
-	dcp->dc_rinfo.ri_ops.alloc_attr(&dcp->dc_rinfo, 0, 0, 0, &defattr);
+	dcp->dc_rinfo.ri_ops.allocattr(&dcp->dc_rinfo, 0, 0, 0, &defattr);
 	wsdisplay_cnattach(&tga_stdscreen, &dcp->dc_rinfo, 0, 0, defattr);
-	
+
 	return(0);
 }
 
 /*
  * Functions to blank and unblank the display.
  */
-void
-tga_burner(v, on, flags)
-	void *v;
-	u_int on, flags;
-{
-	struct tga_softc *sc = v;
-
-	if (on) {
-		tga_unblank(sc->sc_dc);
-	} else {
-		tga_blank(sc->sc_dc);
-	}
-}
-
-void
+static void
 tga_blank(dc)
 	struct tga_devconfig *dc;
 {
@@ -852,7 +793,7 @@ tga_blank(dc)
 	}
 }
 
-void
+static void
 tga_unblank(dc)
 	struct tga_devconfig *dc;
 {
@@ -874,6 +815,7 @@ tga_builtin_set_cursor(dc, cursorp)
 {
 	struct ramdac_funcs *dcrf = dc->dc_ramdac_funcs;
 	struct ramdac_cookie *dcrc = dc->dc_ramdac_cookie;
+	u_char image[512];
 	u_int count, v;
 	int error;
 
@@ -887,6 +829,11 @@ tga_builtin_set_cursor(dc, cursorp)
 		if ((u_int)cursorp->size.x != 64 ||
 		    (u_int)cursorp->size.y > 64)
 			return (EINVAL);
+		/* The cursor is 2 bits deep, and there is no mask */
+		count = (cursorp->size.y * 64 * 2) / NBBY;
+		error = copyin(cursorp->image, image, count);
+		if (error)
+			return error;
 	}
 	if (v & WSDISPLAY_CURSOR_DOHOT)		/* not supported */
 		return EINVAL;
@@ -895,27 +842,28 @@ tga_builtin_set_cursor(dc, cursorp)
 	if (v & WSDISPLAY_CURSOR_DOCUR) {
 		if (cursorp->enable)
 			/* XXX */
-			TGAWREG(dc, TGA_REG_VVVR, TGARREG(dc, TGA_REG_VVVR) | 0x04);
+			TGAWREG(dc, TGA_REG_VVVR,
+				TGARREG(dc, TGA_REG_VVVR) | 0x04);
 		else
 			/* XXX */
-			TGAWREG(dc, TGA_REG_VVVR, TGARREG(dc, TGA_REG_VVVR) & ~0x04);
+			TGAWREG(dc, TGA_REG_VVVR,
+				TGARREG(dc, TGA_REG_VVVR) & ~0x04);
 	}
 	if (v & WSDISPLAY_CURSOR_DOPOS) {
-		TGAWREG(dc, TGA_REG_CXYR, 
-		    ((cursorp->pos.y & 0xfff) << 12) | (cursorp->pos.x & 0xfff));
+		TGAWREG(dc, TGA_REG_CXYR, ((cursorp->pos.y & 0xfff) << 12) |
+			(cursorp->pos.x & 0xfff));
 	}
 	if (v & WSDISPLAY_CURSOR_DOCMAP) {
-		/* can't fail. */
 		dcrf->ramdac_set_curcmap(dcrc, cursorp);
 	}
 	if (v & WSDISPLAY_CURSOR_DOSHAPE) {
-		/* The cursor is 2 bits deep, and there is no mask */
-		count = (cursorp->size.y * 64 * 2) / NBBY;
+		count = ((64 * 2) / NBBY) * cursorp->size.y;
 		TGAWREG(dc, TGA_REG_CCBR,
-		    (TGARREG(dc, TGA_REG_CCBR) & ~0xfc00) | (cursorp->size.y << 10));
-		if ((error = copyin(cursorp->image,(char *)(dc->dc_vaddr +
-		    (TGARREG(dc, TGA_REG_CCBR) & 0x3ff)), count)) != 0)
-			return (error);
+		    (TGARREG(dc, TGA_REG_CCBR) & ~0xfc00) |
+		     (cursorp->size.y << 10));
+		memcpy((char *)(dc->dc_vaddr +
+				(TGARREG(dc, TGA_REG_CCBR) & 0x3ff)),
+		       image, count);
 	}
 	return (0);
 }
@@ -927,8 +875,7 @@ tga_builtin_get_cursor(dc, cursorp)
 {
 	struct ramdac_funcs *dcrf = dc->dc_ramdac_funcs;
 	struct ramdac_cookie *dcrc = dc->dc_ramdac_cookie;
-	int error;
-	u_int count;
+	int count, error;
 
 	cursorp->which = WSDISPLAY_CURSOR_DOALL &
 	    ~(WSDISPLAY_CURSOR_DOHOT | WSDISPLAY_CURSOR_DOCMAP);
@@ -986,7 +933,7 @@ tga_builtin_get_curmax(dc, curposp)
 /*
  * Copy columns (characters) in a row (line).
  */
-void
+static void
 tga_copycols(id, row, srccol, dstcol, ncols)
 	void *id;
 	int row, srccol, dstcol, ncols;
@@ -999,13 +946,15 @@ tga_copycols(id, row, srccol, dstcol, ncols)
 	dstx = ri->ri_font->fontwidth * dstcol;
 	nx = ri->ri_font->fontwidth * ncols;
 
-	tga_rop(ri, dstx, y, nx, ri->ri_font->fontheight, ri, srcx, y);
+	tga_rop(ri, dstx, y,
+	    nx, ri->ri_font->fontheight, RAS_SRC,
+	    ri, srcx, y);
 }
 
 /*
  * Copy rows (lines).
  */
-void
+static void
 tga_copyrows(id, srcrow, dstrow, nrows)
 	void *id;
 	int srcrow, dstrow, nrows;
@@ -1017,38 +966,53 @@ tga_copyrows(id, srcrow, dstrow, nrows)
 	dsty = ri->ri_font->fontheight * dstrow;
 	ny = ri->ri_font->fontheight * nrows;
 
-	tga_rop(ri, 0, dsty, ri->ri_emuwidth, ny, ri, 0, srcy);
+	tga_rop(ri, 0, dsty,
+	    ri->ri_emuwidth, ny, RAS_SRC,
+	    ri, 0, srcy);
 }
+
+/* Do we need the src? */
+static int needsrc[16] = { 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0 };
+
+/* A mapping between our API and the TGA card */
+static int map_rop[16] = { 0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6,
+	0xe, 0x1, 0x9, 0x5, 0xd, 0x3, 0xb, 0x7, 0xf
+};
 
 /*
  *  Generic TGA raster op.
  *   This covers all possible raster ops, and
  *   clips the sizes and all of that.
  */
-int
-tga_rop(dst, dx, dy, w, h, src, sx, sy)
+static int
+tga_rop(dst, dx, dy, w, h, rop, src, sx, sy)
 	struct rasops_info *dst;
-	int dx, dy, w, h;
+	int dx, dy, w, h, rop;
 	struct rasops_info *src;
 	int sx, sy;
 {
-	if (dst == NULL || src == NULL)
+	if (!dst)
 		return -1;
-
-	/* Clip against src */
-	if (sx < 0) {
-		w += sx;
-		sx = 0;
+	if (needsrc[RAS_GETOP(rop)]) {
+		if (src == NULL)
+			return -1;	/* We want a src */
+		/* Clip against src */
+		if (sx < 0) {
+			w += sx;
+			sx = 0;
+		}
+		if (sy < 0) {
+			h += sy;
+			sy = 0;
+		}
+		if (sx + w > src->ri_emuwidth)
+			w = src->ri_emuwidth - sx;
+		if (sy + h > src->ri_emuheight)
+			h = src->ri_emuheight - sy;
+	} else {
+		if (src != NULL)
+			return -1;	/* We need no src */
 	}
-	if (sy < 0) {
-		h += sy;
-		sy = 0;
-	}
-	if (sx + w > src->ri_emuwidth)
-		w = src->ri_emuwidth - sx;
-	if (sy + h > src->ri_emuheight)
-		h = src->ri_emuheight - sy;
-
 	/* Clip against dst.  We modify src regardless of using it,
 	 * since it really doesn't matter.
 	 */
@@ -1068,8 +1032,11 @@ tga_rop(dst, dx, dy, w, h, src, sx, sy)
 		h = dst->ri_emuheight - dy;
 	if (w <= 0 || h <= 0)
 		return 0;	/* Vacuously true; */
-
-	return tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy);
+	if (!src) {
+		/* XXX Punt! */
+		return -1;
+	}
+	return tga_rop_vtov(dst, dx, dy, w, h, rop, src, sx, sy);
 }
 
 
@@ -1079,10 +1046,10 @@ tga_rop(dst, dx, dy, w, h, src, sx, sy)
  * This function deals with all raster ops that have a src and dst
  * that are on the card.
  */
-int
-tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
+static int
+tga_rop_vtov(dst, dx, dy, w, h, rop, src, sx, sy)
 	struct rasops_info *dst;
-	int dx, dy, w, h;
+	int dx, dy, w, h, rop;
 	struct rasops_info *src;
 	int sx, sy;
 {
@@ -1106,41 +1073,38 @@ tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
 		return -1;
 	}
 
-        wb = w * (dst->ri_depth / 8);
+	srcb = sy * src->ri_stride + sx * (src->ri_depth/8);
+	dstb = dy * dst->ri_stride + dx * (dst->ri_depth/8);
+	tga_srcb = offset + (sy + src->ri_yorigin) * src->ri_stride +
+		(sx + src->ri_xorigin) * (src->ri_depth/8);
+	tga_dstb = offset + (dy + dst->ri_yorigin) * dst->ri_stride +
+		(dx + dst->ri_xorigin) * (dst->ri_depth/8);
+
 	if (sy >= dy) {
 		ystart = 0;
-		yend = h;
+		yend = (h - 1) * dst->ri_stride;
 		ydir = 1;
 	} else {
-		ystart = h;
+		ystart = (h - 1) * dst->ri_stride;
 		yend = 0;
 		ydir = -1;
 	}
-	if (sx >= dx) {      /* moving to the left */
+	yinc = ydir * dst->ri_stride;
+
+        wb = w * (dst->ri_depth / 8);
+	if (sx >= dx || (sx + w) <= dx) {	/* copy forwards */
 		xstart = 0;
-		xend = w * (dst->ri_depth / 8) - 4;
+		xend = wb;
 		xdir = 1;
-	} else {             /* moving to the right */
-		xstart = wb - ( wb >= 4*64 ? 4*64 : wb >= 64 ? 64 : 4 );
+	} else {				/* copy backwards */
+		xstart = wb;
 		xend = 0;
 		xdir = -1;
 	}
-#define XINC4   4
-#define XINC64  64
-#define XINC256 (64*4)
-	yinc = ydir * dst->ri_stride;
-	ystart *= dst->ri_stride;
-	yend *= dst->ri_stride;
 
-	srcb = sy * src->ri_stride + sx * (src->ri_depth/8);
-	dstb = dy * dst->ri_stride + dx * (dst->ri_depth/8);
-	tga_srcb = offset + (sy + src->ri_yorigin) * src->ri_stride + 
-		(sx + src->ri_xorigin) * (src->ri_depth/8);
-	tga_dstb = offset + (dy + dst->ri_yorigin) * dst->ri_stride + 
-		(dx + dst->ri_xorigin) * (dst->ri_depth/8);
-
-	TGAWALREG(dc, TGA_REG_GMOR, 3, 0x0007); /* Copy mode */
-	TGAWALREG(dc, TGA_REG_GOPR, 3, 0x0003); /* SRC */
+	TGAWALREG(dc, TGA_REG_GMOR, 3, 0x0007);		/* Copy mode */
+	TGAWALREG(dc, TGA_REG_GOPR, 3, map_rop[rop]);   /* Set up the op */
+	TGAWALREG(dc, TGA_REG_GPSR, 3, 0);		/* No shift */
 
 	/*
 	 * we have 3 sizes of pixels to move in X direction:
@@ -1151,14 +1115,13 @@ tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
 
 	if (xdir == 1) {   /* move to the left */
 
+		if (wb & ~63)
 		for (y = ystart; (ydir * y) <= (ydir * yend); y += yinc) {
-
 			/* 4*64 byte chunks */
-			for (xleft = wb, x = xstart;
-			     x <= xend && xleft >= 4*64;
-			     x += XINC256, xleft -= XINC256) {
+			for (xleft = wb, x = xstart; xleft >= 4*64;
+			     x += 4*64, xleft -= 4*64) {
 
-				/* XXX XXX Eight writes to different addresses should fill 
+				/* XXX XXX Eight writes to different addresses should fill
 				 * XXX XXX up the write buffers on 21064 and 21164 chips,
 				 * XXX XXX but later CPUs might have larger write buffers which
 				 * XXX XXX require further unrolling of this loop, or the
@@ -1175,73 +1138,72 @@ tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
 			}
 
 			/* 64 byte chunks */
-			for ( ; x <= xend && xleft >= 64;
-			      x += XINC64, xleft -= XINC64) {
+			for (; xleft >= 64; x += 64, xleft -= 64) {
 				TGAWALREG(dc, TGA_REG_GCSR, 0, tga_srcb + y + x + 0 * 64);
 				TGAWALREG(dc, TGA_REG_GCDR, 0, tga_dstb + y + x + 0 * 64);
 			}
-			lastx = x; lastleft = xleft;  /* remember for CPU loop */
-
 		}
+
 		TGAWALREG(dc, TGA_REG_GOPR, 0, 0x0003); /* op -> dst = src */
 		TGAWALREG(dc, TGA_REG_GMOR, 0, 0x0000); /* Simple mode */
 
-		for (y = ystart; (ydir * y) <= (ydir * yend); y += yinc) {
-			/* 4 byte granularity */
-			for (x = lastx, xleft = lastleft;
-			     x <= xend && xleft >= 4;
-			     x += XINC4, xleft -= XINC4) {
-				*(uint32_t *)(dst->ri_bits + dstb + y + x) =
-					*(uint32_t *)(dst->ri_bits + srcb + y + x);
+		lastleft = wb & 63;
+		if (lastleft) {
+			lastx = xstart + (wb & ~63);
+			for (y = ystart; (ydir * y) <= (ydir * yend); y += yinc) {
+				/* 4 byte granularity */
+				for (x = lastx, xleft = lastleft; xleft >= 4;
+				     x += 4, xleft -= 4) {
+					*(uint32_t *)(dst->ri_bits + dstb + y + x + 0 * 4) =
+						*(uint32_t *)(dst->ri_bits + srcb + y + x + 0 * 4);
+				}
 			}
 		}
 	}
 	else {    /* above move to the left, below move to the right */
 
+		if (wb & ~63)
 		for (y = ystart; (ydir * y) <= (ydir * yend); y += yinc) {
-
 			/* 4*64 byte chunks */
-			for (xleft = wb, x = xstart;
-			     x >= xend && xleft >= 4*64;
-			     x -= XINC256, xleft -= XINC256) {
+			for (xleft = wb, x = xstart; xleft >= 4*64;
+			     x -= 4*64, xleft -= 4*64) {
 
-				/* XXX XXX Eight writes to different addresses should fill 
+				/* XXX XXX Eight writes to different addresses should fill
 				 * XXX XXX up the write buffers on 21064 and 21164 chips,
 				 * XXX XXX but later CPUs might have larger write buffers which
 				 * XXX XXX require further unrolling of this loop, or the
 				 * XXX XXX insertion of memory barriers.
 				 */
-				TGAWALREG(dc, TGA_REG_GCSR, 0, tga_srcb + y + x + 3 * 64);
-				TGAWALREG(dc, TGA_REG_GCDR, 0, tga_dstb + y + x + 3 * 64);
-				TGAWALREG(dc, TGA_REG_GCSR, 1, tga_srcb + y + x + 2 * 64);
-				TGAWALREG(dc, TGA_REG_GCDR, 1, tga_dstb + y + x + 2 * 64);
-				TGAWALREG(dc, TGA_REG_GCSR, 2, tga_srcb + y + x + 1 * 64);
-				TGAWALREG(dc, TGA_REG_GCDR, 2, tga_dstb + y + x + 1 * 64);
-				TGAWALREG(dc, TGA_REG_GCSR, 3, tga_srcb + y + x + 0 * 64);
-				TGAWALREG(dc, TGA_REG_GCDR, 3, tga_dstb + y + x + 0 * 64);
+				TGAWALREG(dc, TGA_REG_GCSR, 0, tga_srcb + y + x - 1 * 64);
+				TGAWALREG(dc, TGA_REG_GCDR, 0, tga_dstb + y + x - 1 * 64);
+				TGAWALREG(dc, TGA_REG_GCSR, 1, tga_srcb + y + x - 2 * 64);
+				TGAWALREG(dc, TGA_REG_GCDR, 1, tga_dstb + y + x - 2 * 64);
+				TGAWALREG(dc, TGA_REG_GCSR, 2, tga_srcb + y + x - 3 * 64);
+				TGAWALREG(dc, TGA_REG_GCDR, 2, tga_dstb + y + x - 3 * 64);
+				TGAWALREG(dc, TGA_REG_GCSR, 3, tga_srcb + y + x - 4 * 64);
+				TGAWALREG(dc, TGA_REG_GCDR, 3, tga_dstb + y + x - 4 * 64);
 			}
-
-			if (xleft) x += XINC256 - XINC64;
 
 			/* 64 byte chunks */
-			for ( ; x >= xend && xleft >= 64;
-			      x -= XINC64, xleft -= XINC64) {
-				TGAWALREG(dc, TGA_REG_GCSR, 0, tga_srcb + y + x + 0 * 64);
-				TGAWALREG(dc, TGA_REG_GCDR, 0, tga_dstb + y + x + 0 * 64);
+			for (; xleft >= 64; x -= 64, xleft -= 64) {
+				TGAWALREG(dc, TGA_REG_GCSR, 0, tga_srcb + y + x - 1 * 64);
+				TGAWALREG(dc, TGA_REG_GCDR, 0, tga_dstb + y + x - 1 * 64);
 			}
-			if (xleft) x += XINC64 - XINC4;
-			lastx = x; lastleft = xleft;  /* remember for CPU loop */
 		}
+
 		TGAWALREG(dc, TGA_REG_GOPR, 0, 0x0003); /* op -> dst = src */
 		TGAWALREG(dc, TGA_REG_GMOR, 0, 0x0000); /* Simple mode */
 
-		for (y = ystart; (ydir * y) <= (ydir * yend); y += yinc) {
-			/* 4 byte granularity */
-			for (x = lastx, xleft = lastleft;
-			     x >= xend && xleft >= 4;
-			     x -= XINC4, xleft -= XINC4) {
-				*(uint32_t *)(dst->ri_bits + dstb + y + x) =
-					*(uint32_t *)(dst->ri_bits + srcb + y + x);
+		lastleft = wb & 63;
+		if (lastleft) {
+			lastx = xstart - (wb & ~63);
+			for (y = ystart; (ydir * y) <= (ydir * yend); y += yinc) {
+				/* 4 byte granularity */
+				for (x = lastx, xleft = lastleft; xleft >= 4;
+				     x -= 4, xleft -= 4) {
+					*(uint32_t *)(dst->ri_bits + dstb + y + x - 1 * 4) =
+						*(uint32_t *)(dst->ri_bits + srcb + y + x - 1 * 4);
+				}
 			}
 		}
 	}
@@ -1249,8 +1211,7 @@ tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
 }
 
 
-void
-tga_putchar(c, row, col, uc, attr)
+void tga_putchar (c, row, col, uc, attr)
 	void *c;
 	int row, col;
 	u_int uc;
@@ -1259,7 +1220,6 @@ tga_putchar(c, row, col, uc, attr)
 	struct rasops_info *ri = c;
 	struct tga_devconfig *dc = ri->ri_hw;
 	int fs, height, width;
-	int fg, bg, ul;
 	u_char *fr;
 	int32_t *rp;
 
@@ -1276,10 +1236,9 @@ tga_putchar(c, row, col, uc, attr)
 	 * The rasops code has already expanded the color entry to 32 bits
 	 * for us, even for 8-bit displays, so we don't have to do anything.
 	 */
-	ri->ri_ops.unpack_attr(c, attr, &fg, &bg, &ul);
-	TGAWREG(dc, TGA_REG_GFGR, ri->ri_devcmap[fg]);
-	TGAWREG(dc, TGA_REG_GBGR, ri->ri_devcmap[bg]);
-	
+	TGAWREG(dc, TGA_REG_GFGR, ri->ri_devcmap[(attr >> 24) & 15]);
+	TGAWREG(dc, TGA_REG_GBGR, ri->ri_devcmap[(attr >> 16) & 15]);
+
 	/* Set raster operation to "copy"... */
 	if (ri->ri_depth == 8)
 		TGAWREG(dc, TGA_REG_GOPR, 0x3);
@@ -1291,31 +1250,32 @@ tga_putchar(c, row, col, uc, attr)
 
 	/* Set drawing mode to opaque stipple. */
 	TGAWREG(dc, TGA_REG_GMOR, 0x1);
-	
+
 	/* Insert write barrier before actually sending data */
 	/* XXX Abuses the fact that there is only one write barrier on Alphas */
 	TGAREGWB(dc, TGA_REG_GMOR, 1);
 
-	while (height--) {
+	while(height--) {
 		/* The actual stipple write */
-		*rp = fr[0] | (fr[1] << 8) | (fr[2] << 16) | (fr[3] << 24); 
-						  
+		*rp = fr[0] | (fr[1] << 8) | (fr[2] << 16) | (fr[3] << 24);
+
 		fr += fs;
-		rp = (int32_t *)((caddr_t)rp + ri->ri_stride);
+		rp = (int32_t *)((char *)rp + ri->ri_stride);
 	}
 
 	/* Do underline */
-	if (ul) {
-		rp = (int32_t *)((caddr_t)rp - (ri->ri_stride << 1));
+	if ((attr & 1) != 0) {
+		rp = (int32_t *)((char *)rp - (ri->ri_stride << 1));
 		*rp = 0xffffffff;
 	}
 
 	/* Set grapics mode back to normal. */
 	TGAWREG(dc, TGA_REG_GMOR, 0);
 	TGAWREG(dc, TGA_REG_GPXR_P, 0xffffffff);
+
 }
 
-void
+static void
 tga_eraserows(c, row, num, attr)
 	void *c;
 	int row, num;
@@ -1324,11 +1284,9 @@ tga_eraserows(c, row, num, attr)
 	struct rasops_info *ri = c;
 	struct tga_devconfig *dc = ri->ri_hw;
 	int32_t color, lines, pixels;
-	int fg, bg;
 	int32_t *rp;
 
-	ri->ri_ops.unpack_attr(c, attr, &fg, &bg, NULL);
-	color = ri->ri_devcmap[bg];
+	color = ri->ri_devcmap[(attr >> 16) & 15];
 	rp = (int32_t *)(ri->ri_bits + row*ri->ri_yscale);
 	lines = num * ri->ri_font->fontheight;
 	pixels = ri->ri_emuwidth - 1;
@@ -1356,35 +1314,33 @@ tga_eraserows(c, row, num, attr)
 
 	/* Set drawing mode to block fill. */
 	TGAWREG(dc, TGA_REG_GMOR, 0x2d);
-	
+
 	/* Insert write barrier before actually sending data */
 	/* XXX Abuses the fact that there is only one write barrier on Alphas */
 	TGAREGWB(dc, TGA_REG_GMOR, 1);
 
 	while (lines--) {
 		*rp = pixels;
-		rp = (int32_t *)((caddr_t)rp + ri->ri_stride);
+		rp = (int32_t *)((char *)rp + ri->ri_stride);
 	}
 
 	/* Set grapics mode back to normal. */
 	TGAWREG(dc, TGA_REG_GMOR, 0);
-	
+
 }
 
-void
+static void
 tga_erasecols (c, row, col, num, attr)
-	void *c;
-	int row, col, num;
-	long attr;
+void *c;
+int row, col, num;
+long attr;
 {
 	struct rasops_info *ri = c;
 	struct tga_devconfig *dc = ri->ri_hw;
 	int32_t color, lines, pixels;
-	int fg, bg;
 	int32_t *rp;
 
-	ri->ri_ops.unpack_attr(c, attr, &fg, &bg, NULL);
-	color = ri->ri_devcmap[bg];
+	color = ri->ri_devcmap[(attr >> 16) & 15];
 	rp = (int32_t *)(ri->ri_bits + row*ri->ri_yscale + col*ri->ri_xscale);
 	lines = ri->ri_font->fontheight;
 	pixels = (num * ri->ri_font->fontwidth) - 1;
@@ -1412,14 +1368,14 @@ tga_erasecols (c, row, col, num, attr)
 
 	/* Set drawing mode to block fill. */
 	TGAWREG(dc, TGA_REG_GMOR, 0x2d);
-	
+
 	/* Insert write barrier before actually sending data */
 	/* XXX Abuses the fact that there is only one write barrier on Alphas */
 	TGAREGWB(dc, TGA_REG_GMOR, 1);
 
 	while (lines--) {
 		*rp = pixels;
-		rp = (int32_t *)((caddr_t)rp + ri->ri_stride);
+		rp = (int32_t *)((char *)rp + ri->ri_stride);
 	}
 
 	/* Set grapics mode back to normal. */
@@ -1427,7 +1383,7 @@ tga_erasecols (c, row, col, num, attr)
 }
 
 
-void
+static void
 tga_ramdac_wr(v, btreg, val)
 	void *v;
 	u_int btreg;
@@ -1442,7 +1398,7 @@ tga_ramdac_wr(v, btreg, val)
 	TGAREGWB(dc, TGA_REG_EPDR, 1);
 }
 
-void
+static void
 tga2_ramdac_wr(v, btreg, val)
 	void *v;
 	u_int btreg;
@@ -1454,13 +1410,13 @@ tga2_ramdac_wr(v, btreg, val)
 	if (btreg > BT485_REG_MAX)
 		panic("tga_ramdac_wr: reg %d out of range", btreg);
 
-	bus_space_subregion(dc->dc_memt, dc->dc_memh, TGA2_MEM_RAMDAC + 
+	bus_space_subregion(dc->dc_memt, dc->dc_memh, TGA2_MEM_RAMDAC +
 		(0xe << 12) + (btreg << 8), 4, &ramdac);
 	bus_space_write_4(dc->dc_memt, ramdac, 0, val & 0xff);
 	bus_space_barrier(dc->dc_memt, ramdac, 0, 4, BUS_SPACE_BARRIER_WRITE);
 }
 
-u_int8_t
+static u_int8_t
 tga_bt463_rd(v, btreg)
 	void *v;
 	u_int btreg;
@@ -1468,11 +1424,11 @@ tga_bt463_rd(v, btreg)
 	struct tga_devconfig *dc = v;
 	tga_reg_t rdval;
 
-	/* 
-	 * Strobe CE# (high->low->high) since status and data are latched on 
+	/*
+	 * Strobe CE# (high->low->high) since status and data are latched on
 	 * the falling and rising edges (repsectively) of this active-low signal.
 	 */
-	
+
 	TGAREGWB(dc, TGA_REG_EPSR, 1);
 	TGAWREG(dc, TGA_REG_EPSR, (btreg << 2) | 2 | 1);
 	TGAREGWB(dc, TGA_REG_EPSR, 1);
@@ -1487,7 +1443,7 @@ tga_bt463_rd(v, btreg)
 	return (rdval >> 16) & 0xff;
 }
 
-void
+static void
 tga_bt463_wr(v, btreg, val)
 	void *v;
 	u_int btreg;
@@ -1495,12 +1451,12 @@ tga_bt463_wr(v, btreg, val)
 {
 	struct tga_devconfig *dc = v;
 
-	/* 
+	/*
 	 * In spite of the 21030 documentation, to set the MPU bus bits for
 	 * a write, you set them in the upper bits of EPDR, not EPSR.
 	 */
-	
-	/* 
+
+	/*
 	 * Strobe CE# (high->low->high) since status and data are latched on
 	 * the falling and rising edges of this active-low signal.
 	 */
@@ -1514,7 +1470,7 @@ tga_bt463_wr(v, btreg, val)
 
 }
 
-u_int8_t
+static u_int8_t
 tga_ramdac_rd(v, btreg)
 	void *v;
 	u_int btreg;
@@ -1532,7 +1488,7 @@ tga_ramdac_rd(v, btreg)
 	return (rdval >> 16) & 0xff;				/* XXX */
 }
 
-u_int8_t
+static u_int8_t
 tga2_ramdac_rd(v, btreg)
 	void *v;
 	u_int btreg;
@@ -1544,7 +1500,7 @@ tga2_ramdac_rd(v, btreg)
 	if (btreg > BT485_REG_MAX)
 		panic("tga_ramdac_rd: reg %d out of range", btreg);
 
-	bus_space_subregion(dc->dc_memt, dc->dc_memh, TGA2_MEM_RAMDAC + 
+	bus_space_subregion(dc->dc_memt, dc->dc_memh, TGA2_MEM_RAMDAC +
 		(0xe << 12) + (btreg << 8), 4, &ramdac);
 	retval = bus_space_read_4(dc->dc_memt, ramdac, 0) & 0xff;
 	bus_space_barrier(dc->dc_memt, ramdac, 0, 4, BUS_SPACE_BARRIER_READ);
@@ -1552,10 +1508,7 @@ tga2_ramdac_rd(v, btreg)
 }
 
 #include <dev/ic/decmonitors.c>
-void tga2_ics9110_wr(
-	struct tga_devconfig *dc,
-	int dotclock
-);
+void tga2_ics9110_wr(struct tga_devconfig *dc, int dotclock);
 
 struct monitor *tga_getmonitor(struct tga_devconfig *dc);
 
@@ -1564,7 +1517,6 @@ tga2_init(dc)
 	struct tga_devconfig *dc;
 {
 	struct	monitor *m = tga_getmonitor(dc);
-
 
 	/* Deal with the dot clocks.
 	 */
@@ -1581,19 +1533,19 @@ tga2_init(dc)
 		tga2_ics9110_wr(dc, m->dotclock);
 	}
 #if 0
-	TGAWREG(dc, TGA_REG_VHCR, 
+	TGAWREG(dc, TGA_REG_VHCR,
 	     ((m->hbp / 4) << 21) |
 	     ((m->hsync / 4) << 14) |
 	    (((m->hfp - 4) / 4) << 9) |
 	     ((m->cols + 4) / 4));
 #else
-	TGAWREG(dc, TGA_REG_VHCR, 
+	TGAWREG(dc, TGA_REG_VHCR,
 	     ((m->hbp / 4) << 21) |
 	     ((m->hsync / 4) << 14) |
 	    (((m->hfp) / 4) << 9) |
 	     ((m->cols) / 4));
 #endif
-	TGAWREG(dc, TGA_REG_VVCR, 
+	TGAWREG(dc, TGA_REG_VVCR,
 	    (m->vbp << 22) |
 	    (m->vsync << 16) |
 	    (m->vfp << 11) |
@@ -1649,8 +1601,8 @@ tga2_ics9110_wr(dc, dotclock)
 		N = 0x60; M = 0x32; V = 0x1; X = 0x1; R = 0x2; break;
 	case 202500000:
 		N = 0x60; M = 0x32; V = 0x1; X = 0x1; R = 0x2; break;
-       case  14300000:         /* this one is just a ref clock */
-               N = 0x03; M = 0x03; V = 0x1; X = 0x1; R = 0x3; break;
+	case  14300000:		/* this one is just a ref clock */
+		N = 0x03; M = 0x03; V = 0x1; X = 0x1; R = 0x3; break;
 	default:
 		panic("unrecognized clock rate %d", dotclock);
 	}
@@ -1663,16 +1615,16 @@ tga2_ics9110_wr(dc, dotclock)
 	bus_space_subregion(dc->dc_memt, dc->dc_memh, TGA2_MEM_EXTDEV +
 	    TGA2_MEM_CLOCK + (0xe << 12), 4, &clock); /* XXX */
 
-	for (i = 24; i > 0; i--) {
-		u_int32_t writeval;
-                
+	for (i=24; i>0; i--) {
+		u_int32_t       writeval;
+
 		writeval = valU & 0x1;
-		if (i == 1)  
-			writeval |= 0x2; 
+		if (i == 1)
+			writeval |= 0x2;
 		valU >>= 1;
 		bus_space_write_4(dc->dc_memt, clock, 0, writeval);
 		bus_space_barrier(dc->dc_memt, clock, 0, 4, BUS_SPACE_BARRIER_WRITE);
-        }       
+        }
 	bus_space_subregion(dc->dc_memt, dc->dc_memh, TGA2_MEM_EXTDEV +
 	    TGA2_MEM_CLOCK + (0xe << 12) + (0x1 << 11) + (0x1 << 11), 4,
 		&clock); /* XXX */
@@ -1682,14 +1634,14 @@ tga2_ics9110_wr(dc, dotclock)
 
 struct monitor *
 tga_getmonitor(dc)
-       struct tga_devconfig *dc;
+	struct tga_devconfig *dc;
 {
-       return &decmonitors[(~TGARREG(dc, TGA_REG_GREV) >> 16) & 0x0f];
+	return &decmonitors[(~TGARREG(dc, TGA_REG_GREV) >> 16) & 0x0f];
 }
 
 unsigned
 tga_getdotclock(dc)
-       struct tga_devconfig *dc;
+	struct tga_devconfig *dc;
 {
-       return tga_getmonitor(dc)->dotclock;
+	return tga_getmonitor(dc)->dotclock;
 }

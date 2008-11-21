@@ -1,4 +1,4 @@
-/*	$NetBSD: sync_vnops.c,v 1.16 2006/11/16 01:33:38 christos Exp $	*/
+/*	$NetBSD: sync_vnops.c,v 1.25 2008/05/06 18:43:44 ad Exp $	*/
 
 /*
  * Copyright 1997 Marshall Kirk McKusick. All Rights Reserved.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sync_vnops.c,v 1.16 2006/11/16 01:33:38 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sync_vnops.c,v 1.25 2008/05/06 18:43:44 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -97,7 +97,9 @@ vfs_allocate_syncvnode(mp)
 		}
 		next = start;
 	}
+	mutex_enter(&vp->v_interlock);
 	vn_syncer_add_to_worklist(vp, syncdelay > 0 ? next % syncdelay : 0);
+	mutex_exit(&vp->v_interlock);
 	mp->mnt_syncer = vp;
 	return (0);
 }
@@ -113,9 +115,10 @@ vfs_deallocate_syncvnode(mp)
 
 	vp = mp->mnt_syncer;
 	mp->mnt_syncer = NULL;
+	mutex_enter(&vp->v_interlock);
 	vn_syncer_remove_from_worklist(vp);
 	vp->v_writecount = 0;
-	vrele(vp);
+	mutex_exit(&vp->v_interlock);
 	vgone(vp);
 }
 
@@ -132,11 +135,9 @@ sync_fsync(v)
 		int a_flags;
 		off_t offlo;
 		off_t offhi;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *syncvp = ap->a_vp;
 	struct mount *mp = syncvp->v_mount;
-	int asyncflag;
 
 	/*
 	 * We only need to do something if this is a lazy evaluation.
@@ -147,27 +148,18 @@ sync_fsync(v)
 	/*
 	 * Move ourselves to the back of the sync list.
 	 */
+	mutex_enter(&syncvp->v_interlock);
 	vn_syncer_add_to_worklist(syncvp, syncdelay);
+	mutex_exit(&syncvp->v_interlock);
 
 	/*
 	 * Walk the list of vnodes pushing all that are dirty and
 	 * not already on the sync list.
 	 */
-	simple_lock(&mountlist_slock);
-	if (vfs_busy(mp, LK_NOWAIT, &mountlist_slock) == 0) {
-		if (vn_start_write(NULL, &mp, V_NOWAIT) != 0) {
-			vfs_unbusy(mp);
-			return (0);
-		}
-		asyncflag = mp->mnt_flag & MNT_ASYNC;
-		mp->mnt_flag &= ~MNT_ASYNC;
-		VFS_SYNC(mp, MNT_LAZY, ap->a_cred, ap->a_l);
-		if (asyncflag)
-			mp->mnt_flag |= MNT_ASYNC;
-		vn_finished_write(mp, 0);
-		vfs_unbusy(mp);
-	} else
-		simple_unlock(&mountlist_slock);
+	if (vfs_busy(mp, NULL) == 0) {
+		VFS_SYNC(mp, MNT_LAZY, ap->a_cred);
+		vfs_unbusy(mp, false, NULL);
+	}
 	return (0);
 }
 
@@ -202,14 +194,7 @@ int
 sync_print(v)
 	void *v;
 {
-	struct vop_print_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
-	struct vnode *vp = ap->a_vp;
 
-	printf("syncer vnode");
-	if (vp->v_vnlock != NULL)
-		lockmgr_printinfo(vp->v_vnlock);
-	printf("\n");
+	printf("syncer vnode\n");
 	return (0);
 }

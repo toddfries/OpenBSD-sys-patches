@@ -1,5 +1,4 @@
-/*	$OpenBSD: z8530var.h,v 1.3 2004/09/29 07:35:13 miod Exp $	*/
-/*	$NetBSD: z8530var.h,v 1.1 1997/10/18 00:01:30 gwr Exp $	*/
+/*	$NetBSD: z8530var.h,v 1.9 2008/03/29 19:15:35 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,11 +40,20 @@
  *	@(#)zsvar.h	8.1 (Berkeley) 6/11/93
  */
 
-#include <sparc/dev/z8530sc.h>
+#include <machine/bus.h>
+#include <dev/ic/z8530sc.h>
 
 struct zsc_softc {
-	struct	device zsc_dev;		/* required first: base device */
-	struct	zs_chanstate zsc_cs[2];	/* channel A and B soft state */
+	device_t		zsc_dev;	/* base device */
+	bus_space_tag_t		zsc_bustag;	/* bus space/DMA tags */
+	bus_dma_tag_t		zsc_dmatag;
+	struct zs_chanstate	*zsc_cs[2];	/* channel A and B soft state */
+
+	/* Machine-dependent part follows... */
+	int			zsc_promunit;	/* PROM's view of zs devices */
+	int			zsc_node;	/* PROM node, if any */
+	struct evcnt		zsc_intrcnt;	/* count interrupts */
+	struct zs_chanstate	zsc_cs_store[2];
 };
 
 /*
@@ -62,13 +70,13 @@ struct zsc_softc {
  * about the function call overhead where ZS_DELAY does nothing.
  */
 
-u_char zs_read_reg(struct zs_chanstate *cs, u_char reg);
-u_char zs_read_csr(struct zs_chanstate *cs);
-u_char zs_read_data(struct zs_chanstate *cs);
+uint8_t zs_read_reg(struct zs_chanstate *cs, uint8_t reg);
+uint8_t zs_read_csr(struct zs_chanstate *cs);
+uint8_t zs_read_data(struct zs_chanstate *cs);
 
-void  zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val);
-void  zs_write_csr(struct zs_chanstate *cs, u_char val);
-void  zs_write_data(struct zs_chanstate *cs, u_char val);
+void  zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val);
+void  zs_write_csr(struct zs_chanstate *cs, uint8_t val);
+void  zs_write_data(struct zs_chanstate *cs, uint8_t val);
 
 /* The sparc has splzs() in psl.h */
 
@@ -77,3 +85,6 @@ void  zs_write_data(struct zs_chanstate *cs, u_char val);
 #define ZSCCF_CHANNEL 0
 #define ZSCCF_CHANNEL_DEFAULT -1
 #endif
+
+#undef cn_trap
+#define cn_trap() zs_abort(NULL)

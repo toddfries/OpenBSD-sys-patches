@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_dagdegrd.h,v 1.3 2002/12/16 07:01:03 tdeval Exp $	*/
-/*	$NetBSD: rf_dagdegrd.h,v 1.3 1999/02/05 00:06:07 oster Exp $	*/
-
+/*	$NetBSD: rf_dagdegrd.h,v 1.8 2006/04/26 17:08:48 oster Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -31,23 +29,35 @@
 #ifndef _RF__RF_DAGDEGRD_H_
 #define _RF__RF_DAGDEGRD_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
 
-/* Degraded read DAG creation routines. */
-void rf_CreateRaidFiveDegradedReadDAG(RF_Raid_t *, RF_AccessStripeMap_t *,
-	RF_DagHeader_t *, void *, RF_RaidAccessFlags_t, RF_AllocListElem_t *);
-void rf_CreateRaidOneDegradedReadDAG(RF_Raid_t *, RF_AccessStripeMap_t *,
-	RF_DagHeader_t *, void *, RF_RaidAccessFlags_t, RF_AllocListElem_t *);
-void rf_CreateDegradedReadDAG(RF_Raid_t *, RF_AccessStripeMap_t *,
-	RF_DagHeader_t *, void *, RF_RaidAccessFlags_t, RF_AllocListElem_t *,
-	RF_RedFuncs_t *);
-void rf_CreateRaidCDegradedReadDAG(RF_Raid_t *, RF_AccessStripeMap_t *,
-	RF_DagHeader_t *, void *, RF_RaidAccessFlags_t, RF_AllocListElem_t *);
-void rf_DD_GenerateFailedAccessASMs(RF_Raid_t *, RF_AccessStripeMap_t *,
-	RF_PhysDiskAddr_t **, int *, RF_PhysDiskAddr_t **, int *,
-	RF_AllocListElem_t *);
-void rf_DoubleDegRead(RF_Raid_t *, RF_AccessStripeMap_t *, RF_DagHeader_t *,
-	void *, RF_RaidAccessFlags_t, RF_AllocListElem_t *, char *, char *,
-	int (*) (RF_DagNode_t *));
+/* degraded read DAG creation routines */
+void
+rf_CreateRaidFiveDegradedReadDAG(RF_Raid_t * raidPtr,
+    RF_AccessStripeMap_t * asmap, RF_DagHeader_t * dag_h, void *bp,
+    RF_RaidAccessFlags_t flags, RF_AllocListElem_t * allocList);
+void
+rf_CreateRaidOneDegradedReadDAG(RF_Raid_t * raidPtr,
+    RF_AccessStripeMap_t * asmap, RF_DagHeader_t * dag_h, void *bp,
+    RF_RaidAccessFlags_t flags, RF_AllocListElem_t * allocList);
+void
+rf_CreateDegradedReadDAG(RF_Raid_t * raidPtr,
+    RF_AccessStripeMap_t * asmap, RF_DagHeader_t * dag_h, void *bp,
+    RF_RaidAccessFlags_t flags, RF_AllocListElem_t * allocList,
+    const RF_RedFuncs_t * recFunc);
+void
+rf_CreateRaidCDegradedReadDAG(RF_Raid_t * raidPtr,
+    RF_AccessStripeMap_t * asmap, RF_DagHeader_t * dag_h, void *bp,
+    RF_RaidAccessFlags_t flags, RF_AllocListElem_t * allocList);
+void
+rf_DD_GenerateFailedAccessASMs(RF_Raid_t * raidPtr,
+    RF_AccessStripeMap_t * asmap, RF_PhysDiskAddr_t ** pdap,
+    int *nNodep, RF_PhysDiskAddr_t ** pqpdap, int *nPQNodep,
+    RF_AllocListElem_t * allocList);
+void
+rf_DoubleDegRead(RF_Raid_t * raidPtr, RF_AccessStripeMap_t * asmap,
+    RF_DagHeader_t * dag_h, void *bp, RF_RaidAccessFlags_t flags,
+    RF_AllocListElem_t * allocList, const char *redundantReadNodeName,
+    const char *recoveryNodeName, int (*recovFunc) (RF_DagNode_t *));
 
-#endif	/* !_RF__RF_DAGDEGRD_H_ */
+#endif				/* !_RF__RF_DAGDEGRD_H_ */

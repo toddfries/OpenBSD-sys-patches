@@ -1,3 +1,5 @@
+/*	$NetBSD: mga_drv.c,v 1.5 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* mga_drv.c -- Matrox G200/G400 driver -*- linux-c -*-
  * Created: Mon Dec 13 01:56:22 1999 by jhartmann@precisioninsight.com
  */
@@ -31,14 +33,17 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mga_drv.c,v 1.5 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mga_drv.c,v 1.12 2006/05/17 06:36:28 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "mga_drm.h"
 #include "mga_drv.h"
 #include "drm_pciids.h"
-
-int	mga_driver_device_is_agp(drm_device_t * );
-void	mga_configure(drm_device_t *);
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mga_pciidlist[] = {
@@ -62,11 +67,11 @@ static drm_pci_id_list_t mga_pciidlist[] = {
  * This function needs to be filled in!  The implementation in
  * linux-core/mga_drv.c shows what needs to be done.
  */
-int
-mga_driver_device_is_agp(drm_device_t * dev)
+static int mga_driver_device_is_agp(drm_device_t * dev)
 {
 #ifdef __FreeBSD__
 	device_t bus;
+#endif
 
 	/* There are PCI versions of the G450.  These cards have the
 	 * same PCI ID as the AGP G450, but have an additional PCI-to-PCI
@@ -76,6 +81,7 @@ mga_driver_device_is_agp(drm_device_t * dev)
 	 * device is 0x0021 (HB6 Universal PCI-PCI bridge), we reject the
 	 * device.
 	 */
+#ifdef __FreeBSD__
 #if __FreeBSD_version >= 700010
 	bus = device_get_parent(device_get_parent(dev->device));
 #else
@@ -86,13 +92,15 @@ mga_driver_device_is_agp(drm_device_t * dev)
 	    pci_get_device(bus) == 0x0021)
 		return DRM_IS_NOT_AGP;
 	else
-#endif /* XXX Fixme for non freebsd */
 		return DRM_MIGHT_BE_AGP;
-
+#endif
+#ifdef __NetBSD__
+	/* FIX THIS */
+	return DRM_MIGHT_BE_AGP;
+#endif
 }
 
-void
-mga_configure(drm_device_t *dev)
+static void mga_configure(drm_device_t *dev)
 {
 	dev->driver.buf_priv_size	= sizeof(drm_mga_buf_priv_t);
 	dev->driver.load		= mga_driver_load;
@@ -169,44 +177,24 @@ MODULE_DEPEND(mga, drm, 1, 1, 1);
 
 #elif defined(__NetBSD__) || defined(__OpenBSD__)
 
-int	mgadrm_probe(struct device *, void *, void *);
-void	mgadrm_attach(struct device *, struct device *, void *);
-int
-#if defined(__OpenBSD__)
-mgadrm_probe(struct device *parent, void *match, void *aux)
-#else
+static int
 mgadrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
-	return drm_probe((struct pci_attach_args *)aux, mga_pciidlist);
+	struct pci_attach_args *pa = aux;
+	return drm_probe(pa, mga_pciidlist);
 }
 
-void
+static void
 mgadrm_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	drm_device_t *dev = (drm_device_t *)self;
+	drm_device_t *dev = device_private(self);
 
 	mga_configure(dev);
-	return drm_attach(parent, self, pa, mga_pciidlist);
+	return drm_attach(self, pa, mga_pciidlist);
 }
 
-#if defined(__OpenBSD__)
-struct cfattach mgadrm_ca = {
-	sizeof(drm_device_t), mgadrm_probe, mgadrm_attach,
-	drm_detach, drm_activate
-};
-
-struct cfdriver mgadrm_cd = {
-	0, "mgadrm", DV_DULL
-};
-#else
-#ifdef _LKM
-CFDRIVER_DECL(mgadrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(mgadrm, sizeof(drm_device_t), mgadrm_probe, mgadrm_attach, drm_detach,
-    drm_activate);
-#endif
-#endif
+CFATTACH_DECL_NEW(mgadrm, sizeof(drm_device_t), mgadrm_probe, mgadrm_attach,
+	drm_detach, drm_activate);
 
 #endif

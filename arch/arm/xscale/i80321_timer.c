@@ -1,4 +1,4 @@
-/*	$NetBSD: i80321_timer.c,v 1.15 2006/09/10 23:13:59 gavan Exp $	*/
+/*	$NetBSD: i80321_timer.c,v 1.19 2008/04/27 18:58:45 matt Exp $ */
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i80321_timer.c,v 1.15 2006/09/10 23:13:59 gavan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: i80321_timer.c,v 1.19 2008/04/27 18:58:45 matt Exp $");
 
 #include "opt_perfctrs.h"
 #include "opt_i80321.h"
@@ -68,9 +68,7 @@ void	(*i80321_hardclock_hook)(void);
 #endif
 #define	COUNTS_PER_USEC		(COUNTS_PER_SEC / 1000000)
 
-#ifdef __HAVE_TIMECOUNTER
 static void tmr1_tc_init(void);
-#endif
 
 static void *clock_ih;
 
@@ -125,8 +123,6 @@ trr0_write(uint32_t val)
 		: "r" (val));
 }
 
-#ifdef __HAVE_TIMECOUNTER
-
 static inline uint32_t
 tmr1_read(void)
 {
@@ -173,8 +169,6 @@ trr1_write(uint32_t val)
 		:
 		: "r" (val));
 }
-
-#endif /* __HAVE_TIMECOUNTER */
 
 static inline void
 tisr_write(uint32_t val)
@@ -225,17 +219,6 @@ cpu_initclocks(void)
 		aprint_error("Cannot get %d Hz clock; using 100 Hz\n", hz);
 		hz = 100;
 	}
-#ifndef __HAVE_TIMECOUNTER
-	tick = 1000000 / hz;	/* number of microseconds between interrupts */
-	tickfix = 1000000 - (hz * tick);
-	if (tickfix) {
-		int ftp;
-
-		ftp = min(ffs(tickfix), ffs(hz));
-		tickfix >>= (ftp - 1);
-		tickfixinterval = hz >> (ftp - 1);
-	}
-#endif
 
 	/*
 	 * We only have one timer available; stathz and profhz are
@@ -262,7 +245,7 @@ cpu_initclocks(void)
 		panic("cpu_initclocks: unable to register timer interrupt");
 
 #if defined(PERFCTRS)
-	pmu_ih = i80321_intr_establish(ICU_INT_PMU, IPL_STATCLOCK,
+	pmu_ih = i80321_intr_establish(ICU_INT_PMU, IPL_HIGH,
 	    xscale_pmc_dispatch, NULL);
 	if (pmu_ih == NULL)
 		panic("cpu_initclocks: unable to register timer interrupt");
@@ -282,9 +265,7 @@ cpu_initclocks(void)
 
 	restore_interrupts(oldirqstate);
 
-#ifdef	__HAVE_TIMECOUNTER
 	tmr1_tc_init();
-#endif
 }
 
 /*
@@ -304,53 +285,6 @@ setstatclockrate(int newhz)
 	 * XXX Use TMR1?
 	 */
 }
-
-#ifndef __HAVE_TIMECOUNTER
-
-/*
- * microtime:
- *
- *	Fill in the specified timeval struct with the current time
- *	accurate to the microsecond.
- */
-void
-microtime(struct timeval *tvp)
-{
-	static struct timeval lasttv;
-	u_int oldirqstate;
-	uint32_t counts;
-
-	oldirqstate = disable_interrupts(I32_bit);
-
-	counts = counts_per_hz - tcr0_read();
-
-	/* Fill in the timeval struct. */
-	*tvp = time;
-	tvp->tv_usec += (counts / COUNTS_PER_USEC);
-
-	/* Make sure microseconds doesn't overflow. */
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_usec -= 1000000;
-		tvp->tv_sec++;
-	}
-
-	/* Make sure the time has advanced. */
-	if (tvp->tv_sec == lasttv.tv_sec &&
-	    tvp->tv_usec <= lasttv.tv_usec) {
-		tvp->tv_usec = lasttv.tv_usec + 1;
-		if (tvp->tv_usec >= 1000000) {
-			tvp->tv_usec -= 1000000;
-			tvp->tv_sec++;
-		}
-	}
-
-	lasttv = *tvp;
-
-	restore_interrupts(oldirqstate);
-}
-
-
-#else
 
 static inline uint32_t
 tmr1_tc_get(struct timecounter *tch)
@@ -379,7 +313,6 @@ tmr1_tc_init(void)
 	trr1_write(~0);
 	tc_init(&tmr1_tc);
 }
-#endif
 
 /*
  * delay:
@@ -415,95 +348,6 @@ delay(u_int n)
 		}
 	}
 }
-
-#ifndef __HAVE_GENERIC_TODR
-todr_chip_handle_t todr_handle;
-
-/*
- * todr_attach:
- *
- *	Set the specified time-of-day register as the system real-time clock.
- */
-void
-todr_attach(todr_chip_handle_t todr)
-{
-
-	if (todr_handle)
-		panic("todr_attach: rtc already configured");
-	todr_handle = todr;
-}
-
-/*
- * inittodr:
- *
- *	Initialize time from the time-of-day register.
- */
-#define	MINYEAR		2003	/* minimum plausible year */
-void
-inittodr(time_t base)
-{
-	time_t deltat;
-	int badbase;
-
-	if (base < (MINYEAR - 1970) * SECYR) {
-		printf("WARNING: preposterous time in file system");
-		/* read the system clock anyway */
-		base = (MINYEAR - 1970) * SECYR;
-		badbase = 1;
-	} else
-		badbase = 0;
-
-	if (todr_handle == NULL ||
-	    todr_gettime(todr_handle, &time) != 0 ||
-	    time.tv_sec == 0) {
-		/*
-		 * Believe the time in the file system for lack of
-		 * anything better, resetting the TODR.
-		 */
-		time.tv_sec = base;
-		time.tv_usec = 0;
-		if (todr_handle != NULL && !badbase) {
-			printf("WARNING: preposterous clock chip time\n");
-			resettodr();
-		}
-		goto bad;
-	}
-
-	if (!badbase) {
-		/*
-		 * See if we gained/lost two or more days; if
-		 * so, assume something is amiss.
-		 */
-		deltat = time.tv_sec - base;
-		if (deltat < 0)
-			deltat = -deltat;
-		if (deltat < 2 * SECDAY)
-			return;		/* all is well */
-		printf("WARNING: clock %s %ld days\n",
-		    time.tv_sec < base ? "lost" : "gained",
-		    (long)deltat / SECDAY);
-	}
- bad:
-	printf("WARNING: CHECK AND RESET THE DATE!\n");
-}
-
-/*
- * resettodr:
- *
- *	Reset the time-of-day register with the current time.
- */
-void
-resettodr(void)
-{
-
-	if (time.tv_sec == 0)
-		return;
-
-	if (todr_handle != NULL &&
-	    todr_settime(todr_handle, &time) != 0)
-		printf("resettodr: failed to set time\n");
-}
-#endif
 
 /*
  * clockhandler:

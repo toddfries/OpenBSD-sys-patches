@@ -1,5 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.5 2004/07/10 18:56:59 kettenis Exp $	*/
-/*	$NetBSD: process_machdep.c,v 1.1 2003/04/26 18:39:31 fvdl Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.16 2008/04/28 20:23:12 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -60,6 +52,9 @@
  */
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.16 2008/04/28 20:23:12 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/time.h>
@@ -76,70 +71,49 @@
 #include <machine/segments.h>
 #include <machine/fpu.h>
 
-static __inline struct trapframe *process_frame(struct proc *);
-static __inline struct fxsave64 *process_fpframe(struct proc *);
+static inline struct trapframe *process_frame(struct lwp *);
+static inline struct fxsave64 *process_fpframe(struct lwp *);
 #if 0
-static __inline int verr_gdt(struct pmap *, int sel);
-static __inline int verr_ldt(struct pmap *, int sel);
+static inline int verr_gdt(struct pmap *, int sel);
+static inline int verr_ldt(struct pmap *, int sel);
 #endif
 
-static __inline struct trapframe *
-process_frame(struct proc *p)
+static inline struct trapframe *
+process_frame(struct lwp *l)
 {
 
-	return (p->p_md.md_regs);
+	return (l->l_md.md_regs);
 }
 
-static __inline struct fxsave64 *
-process_fpframe(struct proc *p)
+static inline struct fxsave64 *
+process_fpframe(struct lwp *l)
 {
 
-	return (&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave);
+	return (&l->l_addr->u_pcb.pcb_savefpu.fp_fxsave);
 }
 
 int
-process_read_regs(struct proc *p, struct reg *regs)
+process_read_regs(struct lwp *l, struct reg *regs)
 {
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
 
-        regs->r_rdi = tf->tf_rdi;
-        regs->r_rsi = tf->tf_rsi;
-        regs->r_rdx = tf->tf_rdx;
-        regs->r_rcx = tf->tf_rcx;
-        regs->r_r8  = tf->tf_r8;
-        regs->r_r9  = tf->tf_r9;
-        regs->r_r10 = tf->tf_r10;
-        regs->r_r11 = tf->tf_r11;
-        regs->r_r12 = tf->tf_r12;
-        regs->r_r13 = tf->tf_r13;
-        regs->r_r14 = tf->tf_r14;
-        regs->r_r15 = tf->tf_r15;
-        regs->r_rbp = tf->tf_rbp;
-        regs->r_rbx = tf->tf_rbx;
-        regs->r_rax = tf->tf_rax;
-        regs->r_rsp = tf->tf_rsp;
-        regs->r_rip = tf->tf_rip;
-        regs->r_rflags = tf->tf_rflags;
-        regs->r_cs  = tf->tf_cs;
-        regs->r_ss  = tf->tf_ss;
-        regs->r_ds  = tf->tf_ds;
-        regs->r_es  = tf->tf_es;
-        regs->r_fs  = tf->tf_fs;
-        regs->r_gs  = tf->tf_gs;
+#define copy_to_reg(reg, REG, idx) regs->regs[_REG_##REG] = tf->tf_##reg;
+	_FRAME_GREG(copy_to_reg)
+#undef copy_to_reg
 
 	return (0);
 }
 
 int
-process_read_fpregs(struct proc *p, struct fpreg *regs)
+process_read_fpregs(struct lwp *l, struct fpreg *regs)
 {
-	struct fxsave64 *frame = process_fpframe(p);
+	struct fxsave64 *frame = process_fpframe(l);
 
-	if (p->p_md.md_flags & MDP_USEDFPU) {
-		fpusave_proc(p, 1);
+	if (l->l_md.md_flags & MDP_USEDFPU) {
+		fpusave_lwp(l, true);
 	} else {
-		u_int16_t cw;
-		u_int32_t mxcsr, mxcsr_mask;
+		uint16_t cw;
+		uint32_t mxcsr, mxcsr_mask;
 
 		/*
 		 * Fake a FNINIT.
@@ -155,63 +129,45 @@ process_read_fpregs(struct proc *p, struct fpreg *regs)
 		frame->fx_ftw = 0xff;
 		frame->fx_mxcsr = mxcsr;
 		frame->fx_mxcsr_mask = mxcsr_mask;
-		p->p_md.md_flags |= MDP_USEDFPU;
+		l->l_md.md_flags |= MDP_USEDFPU;
 	}
 
 	memcpy(&regs->fxstate, frame, sizeof(*regs));
 	return (0);
 }
 
-#ifdef	PTRACE
-
 int
-process_write_regs(struct proc *p, struct reg *regs)
+process_write_regs(struct lwp *l, const struct reg *regp)
 {
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
+	int error;
+	const long *regs = regp->regs;
 
 	/*
 	 * Check for security violations.
+	 * Note that struct regs is compatible with
+	 * the __gregs array in mcontext_t.
 	 */
-	if (check_context(regs, tf))
-		return (EINVAL);
+	error = check_mcontext(l, (const mcontext_t *)regs, tf);
+	if (error != 0)
+		return error;
 
-        tf->tf_rdi = regs->r_rdi;
-        tf->tf_rsi = regs->r_rsi;
-        tf->tf_rdx = regs->r_rdx;
-        tf->tf_rcx = regs->r_rcx;
-        tf->tf_r8  = regs->r_r8;
-        tf->tf_r9  = regs->r_r9;
-        tf->tf_r10 = regs->r_r10;
-        tf->tf_r11 = regs->r_r11;
-        tf->tf_r12 = regs->r_r12;
-        tf->tf_r13 = regs->r_r13;
-        tf->tf_r14 = regs->r_r14;
-        tf->tf_r15 = regs->r_r15;
-        tf->tf_rbp = regs->r_rbp;
-        tf->tf_rbx = regs->r_rbx;
-        tf->tf_rax = regs->r_rax;
-        tf->tf_rsp = regs->r_rsp;
-        tf->tf_rip = regs->r_rip;
-        tf->tf_rflags = regs->r_rflags;
-        tf->tf_cs  = regs->r_cs;
-        tf->tf_ss  = regs->r_ss;
-        tf->tf_ds  = regs->r_ds;
-        tf->tf_es  = regs->r_es;
-        tf->tf_fs  = regs->r_fs;
-        tf->tf_gs  = regs->r_gs;
+#define copy_to_frame(reg, REG, idx) tf->tf_##reg = regs[_REG_##REG];
+	_FRAME_GREG(copy_to_frame)
+#undef copy_to_frame
 
 	return (0);
 }
 
 int
-process_write_fpregs(struct proc *p, struct fpreg *regs)
+process_write_fpregs(struct lwp *l, const struct fpreg *regs)
 {
-	struct fxsave64 *frame = process_fpframe(p);
+	struct fxsave64 *frame = process_fpframe(l);
 
-	if (p->p_md.md_flags & MDP_USEDFPU) {
-		fpusave_proc(p, 0);
+	if (l->l_md.md_flags & MDP_USEDFPU) {
+		fpusave_lwp(l, false);
 	} else {
-		p->p_md.md_flags |= MDP_USEDFPU;
+		l->l_md.md_flags |= MDP_USEDFPU;
 	}
 
 	memcpy(frame, &regs->fxstate, sizeof(*regs));
@@ -219,9 +175,9 @@ process_write_fpregs(struct proc *p, struct fpreg *regs)
 }
 
 int
-process_sstep(struct proc *p, int sstep)
+process_sstep(struct lwp *l, int sstep)
 {
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
 
 	if (sstep)
 		tf->tf_rflags |= PSL_T;
@@ -232,15 +188,13 @@ process_sstep(struct proc *p, int sstep)
 }
 
 int
-process_set_pc(struct proc *p, caddr_t addr)
+process_set_pc(struct lwp *l, void *addr)
 {
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
 
-	if ((u_int64_t)addr > VM_MAXUSER_ADDRESS)
+	if ((uint64_t)addr > VM_MAXUSER_ADDRESS)
 		return EINVAL;
-	tf->tf_rip = (u_int64_t)addr;
+	tf->tf_rip = (uint64_t)addr;
 
 	return (0);
 }
-
-#endif	/* PTRACE */

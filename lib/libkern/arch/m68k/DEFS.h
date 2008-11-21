@@ -1,4 +1,3 @@
-/*	$OpenBSD: DEFS.h,v 1.2 1997/11/07 15:57:00 niklas Exp $	*/
-/*	$NetBSD: DEFS.h,v 1.2 1994/10/26 06:39:21 cgd Exp $	*/
+/*	$NetBSD: DEFS.h,v 1.4 1999/11/11 01:32:10 thorpej Exp $ */
 
 #include <machine/asm.h>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: kbd.c,v 1.2 2006/08/17 06:31:10 miod Exp $	*/
-/*	$NetBSD: kbd.c,v 1.2 1997/05/12 07:51:32 thorpej Exp $	*/
+/*	$NetBSD: kbd.c,v 1.7 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,19 +15,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -47,8 +39,8 @@
 
 #include <lib/libsa/stand.h>
 
-#include "samachdep.h"
-#include "kbdvar.h"
+#include <hp300/stand/common/samachdep.h>
+#include <hp300/stand/common/kbdvar.h>
 
 #ifndef SMALL
 
@@ -58,14 +50,14 @@
 struct kbdsw *selected_kbd;
 
 int
-kbdgetc()
+kbdgetc(void)
 {
 
-	return ((selected_kbd != NULL) ? (*selected_kbd->k_getc)() : 0);
+	return (selected_kbd != NULL) ? (*selected_kbd->k_getc)() : 0;
 }
 
 void
-kbdnmi()
+kbdnmi(void)
 {
 
 	if (selected_kbd != NULL)
@@ -83,7 +75,7 @@ kbdnmi()
 }
 
 void
-kbdinit()
+kbdinit(void)
 {
 	int i;
 

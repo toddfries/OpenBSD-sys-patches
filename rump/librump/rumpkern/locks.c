@@ -1,4 +1,4 @@
-/*	$NetBSD: locks.c,v 1.14 2008/04/11 15:23:45 ad Exp $	*/
+/*	$NetBSD: locks.c,v 1.20 2008/10/10 13:14:41 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,9 +59,9 @@
 #include <sys/rwlock.h>
 #include <sys/atomic.h>
 
-#include "rump_private.h"
+#include <rump/rumpuser.h>
 
-#include "rumpuser.h"
+#include "rump_private.h"
 
 void
 mutex_init(kmutex_t *mtx, kmutex_type_t type, int ipl)
@@ -95,7 +88,8 @@ void
 mutex_spin_enter(kmutex_t *mtx)
 {
 
-	mutex_enter(mtx);
+	if (__predict_true(mtx != RUMP_LMUTEX_MAGIC))
+		mutex_enter(mtx);
 }
 
 int
@@ -116,7 +110,8 @@ void
 mutex_spin_exit(kmutex_t *mtx)
 {
 
-	mutex_exit(mtx);
+	if (__predict_true(mtx != RUMP_LMUTEX_MAGIC))
+		mutex_exit(mtx);
 }
 
 int
@@ -229,7 +224,9 @@ cv_wait_sig(kcondvar_t *cv, kmutex_t *mtx)
 int
 cv_timedwait(kcondvar_t *cv, kmutex_t *mtx, int ticks)
 {
+#ifdef DIAGNOSTIC
 	extern int hz;
+#endif
 
 	if (ticks == 0) {
 		cv_wait(cv, mtx);
@@ -261,24 +258,52 @@ cv_broadcast(kcondvar_t *cv)
 	rumpuser_cv_broadcast(RUMPCV(cv));
 }
 
-/* kernel biglock, only for vnode_if */
+bool
+cv_has_waiters(kcondvar_t *cv)
+{
 
+	return rumpuser_cv_has_waiters(RUMPCV(cv));
+}
+
+/*
+ * giant lock
+ */
+
+static int lockcnt;
 void
 _kernel_lock(int nlocks)
 {
 
-	KASSERT(nlocks == 1);
-	mutex_enter(&rump_giantlock);
+	while (nlocks--) {
+		mutex_enter(&rump_giantlock);
+		lockcnt++;
+	}
 }
 
 void
 _kernel_unlock(int nlocks, int *countp)
 {
 
-	KASSERT(nlocks == 1);
-	mutex_exit(&rump_giantlock);
+	if (!mutex_owned(&rump_giantlock)) {
+		KASSERT(nlocks == 0);
+		if (countp)
+			*countp = 0;
+		return;
+	}
+
 	if (countp)
-		*countp = 1;
+		*countp = lockcnt;
+	if (nlocks == 0)
+		nlocks = lockcnt;
+	if (nlocks == -1) {
+		KASSERT(lockcnt == 1);
+		nlocks = 1;
+	}
+	KASSERT(nlocks <= lockcnt);
+	while (nlocks--) {
+		lockcnt--;
+		mutex_exit(&rump_giantlock);
+	}
 }
 
 struct kmutexobj {

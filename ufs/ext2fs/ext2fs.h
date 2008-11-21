@@ -1,8 +1,6 @@
-/*	$OpenBSD: ext2fs.h,v 1.13 2008/01/05 19:49:26 otto Exp $	*/
-/*	$NetBSD: ext2fs.h,v 1.10 2000/01/28 16:00:23 bouyer Exp $	*/
+/*	$NetBSD: ext2fs.h,v 1.26 2007/12/25 18:33:49 perry Exp $	*/
 
 /*
- * Copyright (c) 1997 Manuel Bouyer.
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -34,7 +32,42 @@
  *  Modified for ext2fs by Manuel Bouyer.
  */
 
-#include <machine/endian.h>
+/*
+ * Copyright (c) 1997 Manuel Bouyer.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	@(#)fs.h	8.10 (Berkeley) 10/27/94
+ *  Modified for ext2fs by Manuel Bouyer.
+ */
+
+#ifndef _UFS_EXT2FS_EXT2FS_H_
+#define _UFS_EXT2FS_EXT2FS_H_
+
+#include <sys/bswap.h>
 
 /*
  * Each disk drive contains some number of file systems.
@@ -55,8 +88,8 @@
 #define SBSIZE		1024
 #define	BBOFF		((off_t)(0))
 #define	SBOFF		((off_t)(BBOFF + BBSIZE))
-#define	BBLOCK		((daddr64_t)(0))
-#define	SBLOCK		((daddr64_t)(BBLOCK + BBSIZE / DEV_BSIZE))
+#define	BBLOCK		((daddr_t)(0))
+#define	SBLOCK		((daddr_t)(BBLOCK + BBSIZE / DEV_BSIZE))
 
 /*
  * Addresses stored in inodes are capable of addressing blocks
@@ -70,7 +103,7 @@
  * Note that super blocks are always of size SBSIZE,
  * and that both SBSIZE and MAXBSIZE must be >= MINBSIZE.
  */
-#define LOG_MINBSIZE 10
+#define LOG_MINBSIZE	10
 #define MINBSIZE	(1 << LOG_MINBSIZE)
 
 /*
@@ -136,7 +169,7 @@ struct ext2fs {
 	u_int32_t  e2fs_algo;		/* For compression */
 	u_int8_t   e2fs_prealloc;	/* # of blocks to preallocate */
 	u_int8_t   e2fs_dir_prealloc;	/* # of blocks to preallocate for dir */
-	u_int16_t  pad1;
+	u_int16_t  e2fs_reserved_ngdb; /* # of reserved gd blocks for resize */
 	u_int32_t  reserved2[204];
 };
 
@@ -156,7 +189,7 @@ struct m_ext2fs {
 	int32_t	e2fs_ngdb;	/* number of group descriptor block */
 	int32_t	e2fs_ipb;	/* number of inodes per block */
 	int32_t	e2fs_itpg;	/* number of inode table per group */
-	struct	ext2_gd *e2fs_gd; /* group descriptors */
+	struct	ext2_gd *e2fs_gd; /* group descripors */
 };
 
 
@@ -165,11 +198,12 @@ struct m_ext2fs {
  * Filesystem identification
  */
 #define	E2FS_MAGIC	0xef53	/* the ext2fs magic number */
-#define E2FS_REV0	0	/* revision levels */
-#define E2FS_REV1	1	/* revision levels */
+#define E2FS_REV0	0	/* GOOD_OLD revision */
+#define E2FS_REV1	1	/* Support compat/incompat features */
 
-/* compatible/imcompatible features */
+/* compatible/incompatible features */
 #define EXT2F_COMPAT_PREALLOC		0x0001
+#define EXT2F_COMPAT_RESIZE		0x0010
 
 #define EXT2F_ROCOMPAT_SPARSESUPER	0x0001
 #define EXT2F_ROCOMPAT_LARGEFILE	0x0002
@@ -177,21 +211,41 @@ struct m_ext2fs {
 
 #define EXT2F_INCOMPAT_COMP		0x0001
 #define EXT2F_INCOMPAT_FTYPE		0x0002
-#define EXT2F_INCOMPAT_RECOVER		0x0004
-#define EXT2F_INCOMPAT_JOURNAL_DEV	0x0008
 
-/* features supported in this implementation */
+/*
+ * Features supported in this implementation
+ *
+ * We support the following REV1 features:
+ * - EXT2F_ROCOMPAT_SPARSESUPER
+ *    superblock backups stored only in cg_has_sb(bno) groups
+ * - EXT2F_ROCOMPAT_LARGEFILE
+ *    use e2di_dacl in struct ext2fs_dinode to store 
+ *    upper 32bit of size for >2GB files
+ * - EXT2F_INCOMPAT_FTYPE
+ *    store file type to e2d_type in struct ext2fs_direct
+ *    (on REV0 e2d_namlen is uint16_t and no e2d_type, like ffs)
+ */
 #define EXT2F_COMPAT_SUPP		0x0000
 #define EXT2F_ROCOMPAT_SUPP		(EXT2F_ROCOMPAT_SPARSESUPER \
-					| EXT2F_ROCOMPAT_LARGEFILE)
+					 | EXT2F_ROCOMPAT_LARGEFILE)
 #define EXT2F_INCOMPAT_SUPP		EXT2F_INCOMPAT_FTYPE
+
+/*
+ * Definitions of behavior on errors
+ */
+#define E2FS_BEH_CONTINUE	1	/* continue operation */
+#define E2FS_BEH_READONLY	2	/* remount fs read only */
+#define E2FS_BEH_PANIC		3	/* cause panic */
+#define E2FS_BEH_DEFAULT	E2FS_BEH_CONTINUE
 
 /*
  * OS identification
  */
-#define E2FS_OS_LINUX 0
-#define E2FS_OS_HURD  1
-#define E2FS_OS_MASIX 2
+#define E2FS_OS_LINUX	0
+#define E2FS_OS_HURD	1
+#define E2FS_OS_MASIX	2
+#define E2FS_OS_FREEBSD	3
+#define E2FS_OS_LITES	4
 
 /*
  * Filesystem clean flags
@@ -212,18 +266,18 @@ struct ext2_gd {
 	u_int32_t reserved2[3];
 };
 
+
 /*
  * If the EXT2F_ROCOMPAT_SPARSESUPER flag is set, the cylinder group has a
  * copy of the super and cylinder group descriptors blocks only if it's
- * a power of 3, 5 or 7
+ * 1, a power of 3, 5 or 7
  */
 
-static __inline__ int cg_has_sb(int) __attribute__((__unused__));
+static __inline int cg_has_sb(int) __unused;
 static __inline int
-cg_has_sb(i)
-	int i;
+cg_has_sb(int i)
 {
-	int a3 ,a5 , a7;
+	int a3, a5, a7;
 
 	if (i == 0 || i == 1)
 		return 1;
@@ -235,27 +289,34 @@ cg_has_sb(i)
 	return 0;
 }
 
-/*
- * EXT2FS metadatas are stored in little-endian byte order. These macros
+/* EXT2FS metadatas are stored in little-endian byte order. These macros
  * helps reading theses metadatas
  */
 
-#define h2fs16(x) htole16(x)
-#define h2fs32(x) htole32(x)
-#define fs2h16(x) letoh16(x)
-#define fs2h32(x) letoh32(x)
 #if BYTE_ORDER == LITTLE_ENDIAN
-#define e2fs_sbload(old, new) memcpy((new), (old), SBSIZE);
-#define e2fs_cgload(old, new, size) memcpy((new), (old), (size));
-#define e2fs_sbsave(old, new) memcpy((new), (old), SBSIZE);
-#define e2fs_cgsave(old, new, size) memcpy((new), (old), (size));
+#	define h2fs16(x) (x)
+#	define h2fs32(x) (x)
+#	define h2fs64(x) (x)
+#	define fs2h16(x) (x)
+#	define fs2h32(x) (x)
+#	define fs2h64(x) (x)
+#	define e2fs_sbload(old, new) memcpy((new), (old), SBSIZE);
+#	define e2fs_cgload(old, new, size) memcpy((new), (old), (size));
+#	define e2fs_sbsave(old, new) memcpy((new), (old), SBSIZE);
+#	define e2fs_cgsave(old, new, size) memcpy((new), (old), (size));
 #else
 void e2fs_sb_bswap(struct ext2fs *, struct ext2fs *);
 void e2fs_cg_bswap(struct ext2_gd *, struct ext2_gd *, int);
-#define e2fs_sbload(old, new) e2fs_sb_bswap((old), (new))
-#define e2fs_cgload(old, new, size) e2fs_cg_bswap((old), (new), (size));
-#define e2fs_sbsave(old, new) e2fs_sb_bswap((old), (new))
-#define e2fs_cgsave(old, new, size) e2fs_cg_bswap((old), (new), (size));
+#	define h2fs16(x) bswap16(x)
+#	define h2fs32(x) bswap32(x)
+#	define h2fs64(x) bswap64(x)
+#	define fs2h16(x) bswap16(x)
+#	define fs2h32(x) bswap32(x)
+#	define fs2h64(x) bswap64(x)
+#	define e2fs_sbload(old, new) e2fs_sb_bswap((old), (new))
+#	define e2fs_cgload(old, new, size) e2fs_cg_bswap((old), (new), (size));
+#	define e2fs_sbsave(old, new) e2fs_sb_bswap((old), (new))
+#	define e2fs_cgsave(old, new, size) e2fs_cg_bswap((old), (new), (size));
 #endif
 
 /*
@@ -273,9 +334,9 @@ void e2fs_cg_bswap(struct ext2_gd *, struct ext2_gd *, int);
  */
 #define	ino_to_cg(fs, x)	(((x) - 1) / (fs)->e2fs.e2fs_ipg)
 #define	ino_to_fsba(fs, x)						\
-	((fs)->e2fs_gd[ino_to_cg(fs, x)].ext2bgd_i_tables + \
-	(((x)-1) % (fs)->e2fs.e2fs_ipg)/(fs)->e2fs_ipb)
-#define	ino_to_fsbo(fs, x)	(((x)-1) % (fs)->e2fs_ipb)
+	((fs)->e2fs_gd[ino_to_cg((fs), (x))].ext2bgd_i_tables +		\
+	(((x) - 1) % (fs)->e2fs.e2fs_ipg) / (fs)->e2fs_ipb)
+#define	ino_to_fsbo(fs, x)	(((x) - 1) % (fs)->e2fs_ipb)
 
 /*
  * Give cylinder group number for a file system block.
@@ -300,14 +361,16 @@ void e2fs_cg_bswap(struct ext2_gd *, struct ext2_gd *, int);
 	(((size) + (fs)->e2fs_qbmask) & (fs)->e2fs_bmask)
 #define fragroundup(fs, size)	/* calculates roundup(size, fs->e2fs_bsize) */ \
 	(((size) + (fs)->e2fs_qbmask) & (fs)->e2fs_bmask)
-/* 
+/*
  * Determine the number of available frags given a
  * percentage to hold in reserve.
- */   
+ */
 #define freespace(fs) \
-   ((fs)->e2fs.e2fs_fbcount - (fs)->e2fs.e2fs_rbcount) 
+   ((fs)->e2fs.e2fs_fbcount - (fs)->e2fs.e2fs_rbcount)
 
 /*
  * Number of indirects in a file system block.
  */
 #define	NINDIR(fs)	((fs)->e2fs_bsize / sizeof(u_int32_t))
+
+#endif /* !_UFS_EXT2FS_EXT2FS_H_ */

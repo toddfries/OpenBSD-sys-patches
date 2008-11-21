@@ -1,5 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: conf.c,v 1.10 2000/06/15 19:53:23 ragge Exp $ */
+/*	$NetBSD: conf.c,v 1.14 2005/12/11 12:19:30 christos Exp $ */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -32,18 +31,19 @@
 
  /* All bugs are subject to removal without further notice */
 
-#include "sys/param.h"
+#include <sys/param.h>
 
 #include <netinet/in.h>
 
 #include "../../include/rpb.h"
 
-#include "lib/libkern/libkern.h"
+#include <lib/libkern/libkern.h>
 
-#include "lib/libsa/stand.h"
-#include "lib/libsa/ufs.h"
-#include "lib/libsa/nfs.h"
-#include "lib/libsa/cd9660.h"
+#include <lib/libsa/stand.h>
+#include <lib/libsa/ufs.h>
+#include <lib/libsa/nfs.h>
+#include <lib/libsa/cd9660.h>
+#include <lib/libsa/ustarfs.h>
 
 #include "vaxstand.h"
 
@@ -56,12 +56,12 @@ struct	devsw devsw[]={
 	SADEV("ra",rastrategy, raopen, nullsys, noioctl),
 	SADEV("mt",rastrategy, raopen, nullsys, noioctl),
         SADEV("rom",romstrategy, romopen, nullsys, noioctl),
-        SADEV("hd",mfmstrategy, mfmopen, nullsys, noioctl),
+        SADEV("rd",mfmstrategy, mfmopen, nullsys, noioctl),
         SADEV("sd",romstrategy, romopen, nullsys, noioctl),
-	SADEV("sd",romstrategy, romopen, nullsys, noioctl),	/* SDN */
+        SADEV("sd",romstrategy, romopen, nullsys, noioctl),
 	SADEV("st",nullsys, nullsys, nullsys, noioctl),
 	SADEV("le",nostrategy, leopen, leclose, noioctl), /* LANCE */
-	SADEV("ze",nostrategy, zeopen, zeclose, noioctl), /* SGEC */
+        SADEV("ze",nostrategy, zeopen, zeclose, noioctl), /* SGEC */
 	SADEV("rl",romstrategy, romopen, nullsys, noioctl),
 	SADEV("de",nostrategy, deopen, declose, noioctl), /* DEUNA */
 	SADEV("ni",nostrategy, niopen, nullsys, noioctl), /* DEBNA */
@@ -88,10 +88,10 @@ int	cnvtab[] = {
 int     ndevs = (sizeof(devsw)/sizeof(devsw[0]));
 
 struct fs_ops file_system[] = {
-	{ ufs_open, ufs_close, ufs_read, ufs_write, ufs_seek, ufs_stat },
-	{ nfs_open, nfs_close, nfs_read, nfs_write, nfs_seek, nfs_stat },
-	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write,
-	    cd9660_seek, cd9660_stat },
+	FS_OPS(ufs),
+	FS_OPS(nfs),
+	FS_OPS(cd9660),
+	FS_OPS(ustarfs),
 };
 
 int nfsys = (sizeof(file_system) / sizeof(struct fs_ops));

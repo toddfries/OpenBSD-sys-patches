@@ -1,5 +1,4 @@
-/* $OpenBSD: pci_1000a.c,v 1.6 2008/01/09 22:23:00 kettenis Exp $ */
-/* $NetBSD: pci_1000a.c,v 1.14 2001/07/27 00:25:20 thorpej Exp $ */
+/* $NetBSD: pci_1000a.c,v 1.20 2008/04/28 20:23:11 martin Exp $ */
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,6 +58,10 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: pci_1000a.c,v 1.20 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
@@ -73,6 +69,7 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
+#include <sys/syslog.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -97,20 +94,20 @@
 static bus_space_tag_t mystery_icu_iot;
 static bus_space_handle_t mystery_icu_ioh[2];
 
-int	dec_1000a_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
-const char *dec_1000a_intr_string(void *, pci_intr_handle_t);
-int	dec_1000a_intr_line(void *, pci_intr_handle_t);
-void	*dec_1000a_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void	dec_1000a_intr_disestablish(void *, void *);
+int	dec_1000a_intr_map __P((struct pci_attach_args *,
+	    pci_intr_handle_t *));
+const char *dec_1000a_intr_string __P((void *, pci_intr_handle_t));
+const struct evcnt *dec_1000a_intr_evcnt __P((void *, pci_intr_handle_t));
+void	*dec_1000a_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *));
+void	dec_1000a_intr_disestablish __P((void *, void *));
 
 struct alpha_shared_intr *dec_1000a_pci_intr;
 
-void dec_1000a_iointr(void *arg, unsigned long vec);
-void dec_1000a_enable_intr(int irq);
-void dec_1000a_disable_intr(int irq);
-void pci_1000a_imi(void);
+static void dec_1000a_iointr __P((void *arg, unsigned long vec));
+static void dec_1000a_enable_intr __P((int irq));
+static void dec_1000a_disable_intr __P((int irq));
+static void pci_1000a_imi __P((void));
 static pci_chipset_tag_t pc_tag;
 
 void
@@ -119,9 +116,7 @@ pci_1000a_pickintr(core, iot, memt, pc)
 	bus_space_tag_t iot, memt;
 	pci_chipset_tag_t pc;
 {
-#if 0
 	char *cp;
-#endif
 	int i;
 
 	mystery_icu_iot = iot;
@@ -133,17 +128,22 @@ pci_1000a_pickintr(core, iot, memt, pc)
         pc->pc_intr_v = core;
         pc->pc_intr_map = dec_1000a_intr_map;
         pc->pc_intr_string = dec_1000a_intr_string;
-	pc->pc_intr_line = dec_1000a_intr_line;
+	pc->pc_intr_evcnt = dec_1000a_intr_evcnt;
         pc->pc_intr_establish = dec_1000a_intr_establish;
         pc->pc_intr_disestablish = dec_1000a_intr_disestablish;
 
 	pc->pc_pciide_compat_intr_establish = NULL;
-	pc->pc_pciide_compat_intr_disestablish = NULL;
 
-	dec_1000a_pci_intr = alpha_shared_intr_alloc(PCI_NIRQ);
+	dec_1000a_pci_intr = alpha_shared_intr_alloc(PCI_NIRQ, 8);
 	for (i = 0; i < PCI_NIRQ; i++) {
 		alpha_shared_intr_set_maxstrays(dec_1000a_pci_intr, i,
 		    PCI_STRAY_MAX);
+
+		cp = alpha_shared_intr_string(dec_1000a_pci_intr, i);
+		sprintf(cp, "irq %d", i);
+		evcnt_attach_dynamic(alpha_shared_intr_evcnt(
+		    dec_1000a_pci_intr, i), EVCNT_TYPE_INTR, NULL,
+		    "dec_1000a", cp);
 	}
 
 	pci_1000a_imi();
@@ -153,12 +153,13 @@ pci_1000a_pickintr(core, iot, memt, pc)
 }
 
 int     
-dec_1000a_intr_map(ccv, bustag, buspin, line, ihp)
-	void *ccv;
-	pcitag_t bustag;
-	int buspin, line;
+dec_1000a_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
         pci_intr_handle_t *ihp;
 {
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int imrbit, device;
 	/*
 	 * Get bit number in mystery ICU imr
@@ -187,7 +188,7 @@ dec_1000a_intr_map(ccv, bustag, buspin, line, ihp)
 		return 1;
 	if (!(1 <= buspin && buspin <= 4))
 		goto bad;
-	pci_decompose_tag(pc_tag, bustag, NULL, &device, NULL);
+	pci_decompose_tag(pc, bustag, NULL, &device, NULL);
 	if (0 <= device && device < sizeof imrmap / sizeof imrmap[0]) {
 		if (device == 0)
 			printf("dec_1000a_intr_map: ?! UNEXPECTED DEV 0\n");
@@ -197,7 +198,7 @@ dec_1000a_intr_map(ccv, bustag, buspin, line, ihp)
 			return 0;
 		}
 	}
-bad:
+bad:	printf("dec_1000a_intr_map: can't map dev %d pin %d\n", device, buspin);
 	return 1;
 }
 
@@ -217,26 +218,24 @@ dec_1000a_intr_string(ccv, ih)
         return (irqstr);
 }
 
-int
-dec_1000a_intr_line(ccv, ih)
+const struct evcnt *
+dec_1000a_intr_evcnt(ccv, ih)
 	void *ccv;
 	pci_intr_handle_t ih;
 {
-#if NSIO > 0
-	return sio_intr_line(NULL /*XXX*/, ih);
-#else
-	return (ih);
-#endif
+
+	if (ih >= PCI_NIRQ)
+		panic("dec_1000a_intr_evcnt: bogus dec_1000a IRQ 0x%lx", ih);
+
+	return (alpha_shared_intr_evcnt(dec_1000a_pci_intr, ih));
 }
 
 void *
-dec_1000a_intr_establish(ccv, ih, level, func, arg, name)
-        void *ccv;
+dec_1000a_intr_establish(ccv, ih, level, func, arg)
+        void *ccv, *arg;
         pci_intr_handle_t ih;
         int level;
-        int (*func)(void *);
-	void *arg;
-	char *name;
+        int (*func) __P((void *));
 {           
 	void *cookie;
 
@@ -244,13 +243,13 @@ dec_1000a_intr_establish(ccv, ih, level, func, arg, name)
                 panic("dec_1000a_intr_establish: IRQ too high, 0x%lx", ih);
 
 	cookie = alpha_shared_intr_establish(dec_1000a_pci_intr, ih, IST_LEVEL,
-	    level, func, arg, name);
+	    level, func, arg, "dec_1000a irq");
 
 	if (cookie != NULL &&
 	    alpha_shared_intr_firstactive(dec_1000a_pci_intr, ih)) {
-		scb_set(0x900 + SCB_IDXTOVEC(ih), dec_1000a_iointr, NULL);
+		scb_set(0x900 + SCB_IDXTOVEC(ih), dec_1000a_iointr, NULL,
+		    level);
 		dec_1000a_enable_intr(ih);
-
 	}
 	return (cookie);
 }
@@ -277,7 +276,7 @@ dec_1000a_intr_disestablish(ccv, cookie)
 	splx(s);
 }
 
-void
+static void
 dec_1000a_iointr(framep, vec)
 	void *framep;
 	unsigned long vec;
@@ -306,7 +305,7 @@ dec_1000a_iointr(framep, vec)
  * Enable and disable interrupts at the ICU level
  */
 
-void
+static void
 dec_1000a_enable_intr(irq)
 	int irq;
 {
@@ -316,7 +315,7 @@ dec_1000a_enable_intr(irq)
 	IW(i, IR(i) | 1 << (imrval & 0xf));
 }
 
-void
+static void
 dec_1000a_disable_intr(irq)
 	int irq;
 {
@@ -328,7 +327,7 @@ dec_1000a_disable_intr(irq)
 /*
  * Initialize mystery ICU
  */
-void
+static void
 pci_1000a_imi()
 {
 	IW(0, IR(0) & 1);

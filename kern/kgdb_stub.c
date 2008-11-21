@@ -1,5 +1,4 @@
-/*	$OpenBSD: kgdb_stub.c,v 1.8 2005/11/17 19:23:01 fgsch Exp $	*/
-/*	$NetBSD: kgdb_stub.c,v 1.6 1998/08/30 20:30:57 scottr Exp $	*/
+/*	$NetBSD: kgdb_stub.c,v 1.22 2005/12/07 05:53:24 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -42,49 +41,58 @@
  */
 
 /*
- * "Stub" to allow remote cpu to debug over a serial line using gdb.
+ * "Stub" to allow remote CPU to debug over a serial line using gdb.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kgdb_stub.c,v 1.22 2005/12/07 05:53:24 thorpej Exp $");
+
+#include "opt_kgdb.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kgdb.h>
 
-/* #define	DEBUG_KGDB XXX */
+#undef	DEBUG_KGDB
+
+#ifdef DEBUG_KGDB
+#define DPRINTF(x)	printf x
+#else
+#define DPRINTF(x)
+#endif
 
 /* XXX: Maybe these should be in the MD files? */
-#ifndef KGDBDEV
-#define KGDBDEV -1
+#ifndef KGDB_DEV
+#define KGDB_DEV NODEV
 #endif
-#ifndef KGDBRATE
-#define KGDBRATE 19200
+#ifndef KGDB_DEVRATE
+#define KGDB_DEVRATE 19200
 #endif
 
-int kgdb_dev = KGDBDEV;		/* remote debugging device (-1 if none) */
-int kgdb_rate = KGDBRATE;	/* remote debugging baud rate */
+int kgdb_dev = KGDB_DEV;	/* remote debugging device (NODEV if none) */
+int kgdb_rate = KGDB_DEVRATE;	/* remote debugging baud rate */
 int kgdb_active = 0;		/* remote debugging active if != 0 */
 int kgdb_debug_init = 0;	/* != 0 waits for remote at system init */
 int kgdb_debug_panic = 0;	/* != 0 waits for remote on panic */
 label_t *kgdb_recover = 0;
 
-static void kgdb_copy(void *, void *, int);
-/* static void kgdb_zero(void *, int); */
-static void kgdb_send(u_char *);
-static int kgdb_recv(u_char *, int);
-static int digit2i(u_char);
-static u_char i2digit(int);
-static void mem2hex(void *, void *, int);
-static u_char *hex2mem(void *, u_char *, int);
-static vaddr_t hex2i(u_char **);
-
 static int (*kgdb_getc)(void *);
 static void (*kgdb_putc)(void *, int);
 static void *kgdb_ioarg;
 
+/* KGDB_BUFLEN must be at least (2*KGDB_NUMREGS*sizeof(kgdb_reg_t)+1) */
 static u_char buffer[KGDB_BUFLEN];
 static kgdb_reg_t gdb_regs[KGDB_NUMREGS];
 
 #define GETC()	((*kgdb_getc)(kgdb_ioarg))
 #define PUTC(c)	((*kgdb_putc)(kgdb_ioarg, c))
+
+/*
+ * db_trap_callback can be hooked by MD port code to handle special
+ * cases such as disabling hardware watchdogs while in kgdb.  Name
+ * is shared with DDB.
+ */
+void (*db_trap_callback)(int);
 
 /*
  * This little routine exists simply so that bcopy() can be debugged.
@@ -137,7 +145,7 @@ digit2i(u_char c)
 static u_char
 i2digit(int n)
 {
-	return ("0123456789abcdef"[n & 0x0f]);
+	return (hexdigits[n & 0x0f]);
 }
 
 /*
@@ -205,14 +213,12 @@ hex2i(u_char **srcp)
  * Send a packet.
  */
 static void
-kgdb_send(u_char *bp)
+kgdb_send(const u_char *bp)
 {
-	u_char *p;
+	const u_char *p;
 	u_char csum, c;
 
-#ifdef	DEBUG_KGDB
-	printf("kgdb_send: %s\n", bp);
-#endif
+	DPRINTF(("kgdb_send: %s\n", bp));
 	do {
 		p = bp;
 		PUTC(KGDB_START);
@@ -233,16 +239,19 @@ static int
 kgdb_recv(u_char *bp, int maxlen)
 {
 	u_char *p;
-	int c, csum;
+	int c, csum, tmpcsum;
 	int len;
 
+	DPRINTF(("kgdb_recv:  "));
 	do {
 		p = bp;
 		csum = len = 0;
 		while ((c = GETC()) != KGDB_START)
-			;
+			DPRINTF(("%c",c));
+		DPRINTF(("%c Start ",c));
 
 		while ((c = GETC()) != KGDB_END && len < maxlen) {
+			DPRINTF(("%c",c));
 			c &= 0x7f;
 			csum += c;
 			*p++ = c;
@@ -250,19 +259,28 @@ kgdb_recv(u_char *bp, int maxlen)
 		}
 		csum &= 0xff;
 		*p = '\0';
+		DPRINTF(("%c End ", c));
 
 		if (len >= maxlen) {
+			DPRINTF(("Long- "));
 			PUTC(KGDB_BADP);
 			continue;
 		}
+		tmpcsum = csum;
 
-		csum -= digit2i(GETC()) * 16;
-		csum -= digit2i(GETC());
+		c = GETC();
+		DPRINTF(("%c",c));
+		csum -= digit2i(c) * 16;
+		c = GETC();
+		DPRINTF(("%c",c));
+		csum -= digit2i(c);
 
 		if (csum == 0) {
+			DPRINTF(("Good+ "));
 			PUTC(KGDB_GOODP);
 			/* Sequence present? */
 			if (bp[2] == ':') {
+				DPRINTF(("Seq %c%c ", bp[0], bp[1]));
 				PUTC(bp[0]);
 				PUTC(bp[1]);
 				len -= 3;
@@ -270,11 +288,10 @@ kgdb_recv(u_char *bp, int maxlen)
 			}
 			break;
 		}
+		DPRINTF((" Bad(wanted %x, off by %d)- ", tmpcsum, csum));
 		PUTC(KGDB_BADP);
 	} while (1);
-#ifdef	DEBUG_KGDB
-	printf("kgdb_recv: %s\n", bp);
-#endif
+	DPRINTF(("kgdb_recv: %s\n", bp));
 	return (len);
 }
 
@@ -309,10 +326,14 @@ kgdb_trap(int type, db_regs_t *regs)
 		return (0);
 	}
 
+	db_clear_single_step(regs);
+
+	if (db_trap_callback) db_trap_callback(1);
+
 	/* Detect and recover from unexpected traps. */
 	if (kgdb_recover != 0) {
 		printf("kgdb: caught trap 0x%x at %p\n",
-			   type, (void *)PC_REGS(regs));
+			   type, (void*)PC_REGS(regs));
 		kgdb_send("E0E"); /* 14==EFAULT */
 		longjmp(kgdb_recover);
 	}
@@ -340,6 +361,7 @@ kgdb_trap(int type, db_regs_t *regs)
 	if (kgdb_active == 0) {
 		if (!IS_BREAKPOINT_TRAP(type, 0)) {
 			/* No debugger active -- let trap handle this. */
+			if (db_trap_callback) db_trap_callback(0);
 			return (0);
 		}
 		/* Make the PC point at the breakpoint... */
@@ -355,7 +377,7 @@ kgdb_trap(int type, db_regs_t *regs)
 		kgdb_active = 1;
 	} else {
 		/* Tell remote host that an exception has occurred. */
-		snprintf(buffer, sizeof buffer, "S%02x", kgdb_signal(type));
+		snprintf(buffer, sizeof(buffer), "S%02x", kgdb_signal(type));
 		kgdb_send(buffer);
 	}
 
@@ -383,7 +405,7 @@ kgdb_trap(int type, db_regs_t *regs)
 			 * knowing if we're in or out of this loop
 			 * when he issues a "remote-signal".
 			 */
-			snprintf(buffer, sizeof buffer, "S%02x",
+			snprintf(buffer, sizeof(buffer), "S%02x",
 			    kgdb_signal(type));
 			kgdb_send(buffer);
 			continue;
@@ -459,16 +481,11 @@ kgdb_trap(int type, db_regs_t *regs)
 			continue;
 
 		case KGDB_DETACH:
-			kgdb_active = 0;
-			printf("kgdb detached\n");
-			db_clear_single_step(regs);
-			kgdb_send("OK");
-			goto out;
-
 		case KGDB_KILL:
 			kgdb_active = 0;
 			printf("kgdb detached\n");
 			db_clear_single_step(regs);
+			kgdb_send("OK");
 			goto out;
 
 		case KGDB_CONT:
@@ -480,7 +497,14 @@ kgdb_trap(int type, db_regs_t *regs)
 					continue;
 				}
 				PC_REGS(regs) = addr;
+				DPRINTF(("kgdb: continuing at %08lx\n", addr));
+
+			} else {
+				DPRINTF((
+				  "kgdb: continuing at old address %08lx\n",
+				  (vaddr_t)PC_REGS(regs)));
 			}
+
 			db_clear_single_step(regs);
 			goto out;
 
@@ -499,42 +523,7 @@ kgdb_trap(int type, db_regs_t *regs)
 		}
 	}
  out:
+	if (db_trap_callback) db_trap_callback(0);
 	kgdb_recover = 0;
 	return (1);
-}
-
-/*
- * Trap into kgdb to wait for debugger to connect,
- * noting on the console why nothing else is going on.
- */
-void
-kgdb_connect(int verbose)
-{
-	if (kgdb_dev < 0)
-		return;
-
-	KGDB_PREPARE;
-
-	if (verbose)
-		printf("kgdb waiting...");
-
-	KGDB_ENTER;
-
-	if (verbose)
-		printf("connected.\n");
-
-	kgdb_debug_panic = 1;
-}
-
-/*
- * Decide what to do on panic.
- * (This is called by panic, like Debugger())
- */
-void
-kgdb_panic()
-{
-	if (kgdb_dev >= 0 && kgdb_debug_panic) {
-		printf("entering kgdb\n");
-		kgdb_connect(kgdb_active == 0);
-	}
 }

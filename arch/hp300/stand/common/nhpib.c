@@ -1,5 +1,4 @@
-/*	$OpenBSD: nhpib.c,v 1.4 2006/08/17 06:31:10 miod Exp $	*/
-/*	$NetBSD: nhpib.c,v 1.5 1995/08/05 16:47:46 thorpej Exp $	*/
+/*	$NetBSD: nhpib.c,v 1.6 2006/06/25 17:37:43 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -40,19 +39,17 @@
 
 #include <hp300/dev/nhpibreg.h>
 
-#include "samachdep.h"
-#include "hpibvar.h"
+#include <hp300/stand/common/hpibvar.h>
+#include <hp300/stand/common/samachdep.h>
 
-int	nhpibiwait(struct nhpibdevice *);
-int	nhpibowait(struct nhpibdevice *);
-void	nhpibreset(int);
+static int nhpibiwait(struct nhpibdevice *);
+static int nhpibowait(struct nhpibdevice *);
 
 int
 nhpibinit(int unit)
 {
 	struct hpib_softc *hs = &hpib_softc[unit];
-	struct nhpibdevice *hd = (struct nhpibdevice *)hs->sc_addr;
-	extern int internalhpib;
+	struct nhpibdevice *hd = (void *)hs->sc_addr;
 
 	if ((int)hd == internalhpib) {
 		hs->sc_type = HPIBA;
@@ -63,9 +60,9 @@ nhpibinit(int unit)
 		hs->sc_ba = hd->hpib_csa & CSA_BA;
 	}
 	else
-		return(0);
+		return 0;
 	nhpibreset(unit);
-	return(1);
+	return 1;
 }
 
 void
@@ -74,7 +71,7 @@ nhpibreset(int unit)
 	struct hpib_softc *hs = &hpib_softc[unit];
 	struct nhpibdevice *hd;
 
-	hd = (struct nhpibdevice *)hs->sc_addr;
+	hd = (void *)hs->sc_addr;
 	hd->hpib_acr = AUX_SSWRST;
 	hd->hpib_ar = hs->sc_ba;
 	hd->hpib_lim = 0;
@@ -99,13 +96,13 @@ nhpibreset(int unit)
 }
 
 int
-nhpibsend(int unit, int slave, int sec, char *buf, int cnt)
+nhpibsend(int unit, int slave, int sec, uint8_t *buf, int cnt)
 {
 	struct hpib_softc *hs = &hpib_softc[unit];
 	struct nhpibdevice *hd;
 	int origcnt = cnt;
 
-	hd = (struct nhpibdevice *)hs->sc_addr;
+	hd = (void *)hs->sc_addr;
 	hd->hpib_acr = AUX_TCA;
 	hd->hpib_data = C_UNL;
 	nhpibowait(hd);
@@ -131,17 +128,17 @@ nhpibsend(int unit, int slave, int sec, char *buf, int cnt)
 			cnt++;
 		hd->hpib_acr = AUX_TCA;
 	}
-	return(origcnt - cnt);
+	return origcnt - cnt;
 }
 
 int
-nhpibrecv(int unit, int slave, int sec, char *buf, int cnt)
+nhpibrecv(int unit, int slave, int sec, uint8_t *buf, int cnt)
 {
 	struct hpib_softc *hs = &hpib_softc[unit];
 	struct nhpibdevice *hd;
 	int origcnt = cnt;
 
-	hd = (struct nhpibdevice *)hs->sc_addr;
+	hd = (void *)hs->sc_addr;
 	hd->hpib_acr = AUX_TCA;
 	hd->hpib_data = C_UNL;
 	nhpibowait(hd);
@@ -165,7 +162,7 @@ nhpibrecv(int unit, int slave, int sec, char *buf, int cnt)
 		cnt++;
 		hd->hpib_acr = AUX_TCA;
 	}
-	return(origcnt - cnt);
+	return origcnt - cnt;
 }
 
 int
@@ -175,15 +172,15 @@ nhpibppoll(int unit)
 	struct nhpibdevice *hd;
 	int ppoll;
 
-	hd = (struct nhpibdevice *)hs->sc_addr;
+	hd = (void *)hs->sc_addr;
 	hd->hpib_acr = AUX_SPP;
 	DELAY(25);
 	ppoll = hd->hpib_cpt;
 	hd->hpib_acr = AUX_CPP;
-	return(ppoll);
+	return ppoll;
 }
 
-int
+static int
 nhpibowait(struct nhpibdevice *hd)
 {
 	int timo = 100000;
@@ -191,11 +188,11 @@ nhpibowait(struct nhpibdevice *hd)
 	while ((hd->hpib_mis & MIS_BO) == 0 && --timo)
 		;
 	if (timo == 0)
-		return(-1);
-	return(0);
+		return -1;
+	return 0;
 }
 
-int
+static int
 nhpibiwait(struct nhpibdevice *hd)
 {
 	int timo = 100000;
@@ -203,6 +200,6 @@ nhpibiwait(struct nhpibdevice *hd)
 	while ((hd->hpib_mis & MIS_BI) == 0 && --timo)
 		;
 	if (timo == 0)
-		return(-1);
-	return(0);
+		return -1;
+	return 0;
 }

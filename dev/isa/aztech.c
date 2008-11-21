@@ -1,4 +1,5 @@
-/* $OpenBSD: aztech.c,v 1.4 2002/01/23 20:30:38 mickey Exp $ */
+/* $NetBSD: aztech.c,v 1.14 2008/04/08 20:08:49 cegger Exp $ */
+/* $OpenBSD: aztech.c,v 1.2 2001/12/05 10:27:06 mickey Exp $ */
 /* $RuOBSD: aztech.c,v 1.11 2001/10/20 13:23:47 pva Exp $ */
 
 /*
@@ -31,11 +32,14 @@
 
 /*
  * Sanyo LM7001J Direct PLL Frequency Synthesizer:
- *	??? See http://www.redsword.com/tjacobs/geeb/fmcard.htm
+ *     ??? See http://www.redsword.com/tjacobs/geeb/fmcard.htm
  *
  * Philips TEA5712T AM/FM Stereo DTS Radio:
- *	http://www.semiconductors.philips.com/pip/TEA5712
+ *     http://www.semiconductors.philips.com/pip/TEA5712
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: aztech.c,v 1.14 2008/04/08 20:08:49 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,7 +49,7 @@
 #include <sys/device.h>
 #include <sys/radioio.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/ic/lm700x.h>
@@ -59,14 +63,10 @@
 #define VOLUME_RATIO(x)	(255 * x / MAX_VOL)
 
 #define AZ_BASE_VALID(x)	((x == 0x350) || (x == 0x358))
-#define AZTECH_CAPABILITIES	RADIO_CAPS_DETECT_STEREO |		\
-				RADIO_CAPS_DETECT_SIGNAL |		\
-				RADIO_CAPS_SET_MONO |			\
+#define AZTECH_CAPABILITIES	RADIO_CAPS_DETECT_STEREO | 		\
+				RADIO_CAPS_DETECT_SIGNAL | 		\
+				RADIO_CAPS_SET_MONO | 			\
 				RADIO_CAPS_REFERENCE_FREQ
-
-
-#define AZTECH_STEREO	(1 << 0)
-#define AZTECH_SIGNAL	(1 << 1)
 
 #define	AZ_WREN_ON	(1 << 1)
 #define	AZ_WREN_OFF	(0 << 1)
@@ -77,13 +77,13 @@
 #define AZ_DATA_ON	(1 << 7)
 #define AZ_DATA_OFF	(0 << 7)
 
-int	az_probe(struct device *, void *, void *);
+int	az_probe(struct device *, struct cfdata *, void *);
 void	az_attach(struct device *, struct device * self, void *);
 
 int	az_get_info(void *, struct radio_info *);
 int	az_set_info(void *, struct radio_info *);
 
-struct radio_hw_if az_hw_if = {
+const struct radio_hw_if az_hw_if = {
 	NULL,	/* open */
 	NULL,	/* close */
 	az_get_info,
@@ -103,13 +103,8 @@ struct az_softc {
 	struct lm700x_t	lm;
 };
 
-struct cfattach az_ca = {
-	sizeof(struct az_softc), az_probe, az_attach
-};
-
-struct cfdriver az_cd = {
-	NULL, "az", DV_DULL
-};
+CFATTACH_DECL(az, sizeof(struct az_softc),
+    az_probe, az_attach, NULL, NULL);
 
 u_int	az_find(bus_space_tag_t, bus_space_handle_t);
 void	az_set_mute(struct az_softc *);
@@ -123,36 +118,52 @@ u_int8_t	az_conv_vol(u_int8_t);
 u_int8_t	az_unconv_vol(u_int8_t);
 
 int
-az_probe(struct device *parent, void *self, void *aux)
+az_probe(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
 	bus_space_handle_t ioh;
+	u_int r;
+	int iosize = 1, iobase;
 
-	int iosize = 1, iobase = ia->ia_iobase;
+	if (ISA_DIRECT_CONFIG(ia))
+		return 0;
+
+	if (ia->ia_nio < 1)
+		return 0;
+
+	iobase = ia->ia_io[0].ir_addr;
 
 	if (!AZ_BASE_VALID(iobase)) {
-		printf("az: configured iobase 0x%x invalid\n", iobase);
-		return (0);
+		printf("az: configured iobase 0x%x invalid", iobase);
+		return 0;
 	}
 
 	if (bus_space_map(iot, iobase, iosize, 0, &ioh))
-		return (0);
+		return 0;
 
-	if (!az_find(iot, ioh)) {
-		bus_space_unmap(iot, ioh, iosize);
-		return (0);
-	}
+	r = az_find(iot, ioh);
 
 	bus_space_unmap(iot, ioh, iosize);
-	ia->ia_iosize = iosize;
-	return (1);
+
+	if (r != 0) {
+		ia->ia_nio = 1;
+		ia->ia_io[0].ir_size = iosize;
+
+		ia->ia_niomem = 0;
+		ia->ia_nirq = 0;
+		ia->ia_ndrq = 0;
+
+		return (1);
+	}
+
+	return (0);
 }
 
 void
 az_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct az_softc *sc = (void *) self;
+	struct az_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 
 	sc->lm.iot = ia->ia_iot;
@@ -163,11 +174,9 @@ az_attach(struct device *parent, struct device *self, void *aux)
 	sc->vol = 0;
 
 	/* remap I/O */
-	if (bus_space_map(sc->lm.iot, ia->ia_iobase, ia->ia_iosize,
-			  0, &sc->lm.ioh)) {
-		printf(": bus_space_map() failed\n");
-		return;
-	}
+	if (bus_space_map(sc->lm.iot, ia->ia_io[0].ir_addr,
+	    ia->ia_io[0].ir_size, 0, &sc->lm.ioh))
+		panic(": bus_space_map() of %s failed", device_xname(&sc->sc_dev));
 
 	printf(": Aztech/PackardBell\n");
 
@@ -195,7 +204,7 @@ az_set_mute(struct az_softc *sc)
 {
 	bus_space_write_1(sc->lm.iot, sc->lm.ioh, 0,
 	    sc->mute ? 0 : sc->vol);
-	DELAY(6);
+	delay(6);
 	bus_space_write_1(sc->lm.iot, sc->lm.ioh, 0,
 	    sc->mute ? 0 : sc->vol);
 }
@@ -229,14 +238,7 @@ az_set_freq(struct az_softc *sc, u_int32_t nfreq)
 u_int8_t
 az_state(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
-	u_int8_t info = 0, portdata;
-
-	portdata = bus_space_read_1(iot, ioh, 0);
-
-	info |= portdata & AZTECH_STEREO ? 0 : RADIO_INFO_STEREO;
-	info |= portdata & AZTECH_SIGNAL ? 0 : RADIO_INFO_SIGNAL;
-
-	return info;
+	return (3 ^ bus_space_read_1(iot, ioh, 0)) & 3;
 }
 
 /*
@@ -277,7 +279,7 @@ u_int
 az_find(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	struct az_softc sc;
-	u_int i;
+	u_int i, scanres = 0;
 
 	sc.lm.iot = iot;
 	sc.lm.ioh = ioh;
@@ -299,18 +301,17 @@ az_find(bus_space_tag_t iot, bus_space_handle_t ioh)
 	 * Scan whole FM range. If there is a card it'll
 	 * respond on some frequency.
 	 */
-	for (i = MIN_FM_FREQ; i < MAX_FM_FREQ; i += 10) {
+	for (i = MIN_FM_FREQ; !scanres && i < MAX_FM_FREQ; i += 10) {
 		az_set_freq(&sc, i);
-		if (az_state(iot, ioh))
-			return 1;
+		scanres += 3 - az_state(iot, ioh);
 	}
 
-	return 0;
+	return scanres;
 }
 
 void
-az_lm700x_init(bus_space_tag_t iot, bus_space_handle_t ioh, bus_size_t off,
-		u_int32_t data)
+az_lm700x_init(bus_space_tag_t iot, bus_space_handle_t ioh,
+    bus_size_t off, u_int32_t data)
 {
 	/* Do nothing */
 	return;

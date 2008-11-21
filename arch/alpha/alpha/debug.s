@@ -1,8 +1,7 @@
-/* $OpenBSD: debug.s,v 1.4 2008/01/13 20:59:52 kettenis Exp $ */
-/* $NetBSD: debug.s,v 1.5 1999/06/18 18:11:56 thorpej Exp $ */
+/* $NetBSD: debug.s,v 1.11 2008/04/28 20:23:10 martin Exp $ */
 
 /*-
- * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1999, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,19 +30,17 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined (MULTIPROCESSOR)
-.file	5 __FILE__
-.loc	5 __LINE__
-#else
-.file	4 __FILE__
-.loc	4 __LINE__
-#endif
+__KERNEL_RCSID(6, "$NetBSD: debug.s,v 1.11 2008/04/28 20:23:10 martin Exp $")
+
+#include "opt_multiprocessor.h"
+#include "opt_kgdb.h"
 
 /*
  * Debugger glue.
  */
 
 	.text
+inc6:	.stabs	__FILE__,132,0,0,inc6; .loc	1 __LINE__
 
 /*
  * Debugger stack.
@@ -86,9 +76,9 @@ NESTED_NOPROFILE(alpha_debug, 5, 32, ra, IM_RA|IM_S0, 0)
 	mov	sp, s0
 
 #if defined(MULTIPROCESSOR)
-	/*
-	 * XXX PAUSE ALL OTHER CPUs.
-	 */
+	/* Pause all other CPUs. */
+	ldiq	a0, 1
+	CALL(cpu_pause_resume_all)
 #endif
 
 	/*
@@ -105,15 +95,27 @@ NESTED_NOPROFILE(alpha_debug, 5, 32, ra, IM_RA|IM_S0, 0)
 2:	lda	sp, debug_stack_top	/* sp <- debug_stack_top */
 
 3:	/* Dispatch to the debugger - arguments are already in place. */
+#if defined(KGDB)
+	mov	a3, a0			/* a0 == entry (trap type) */
+	mov	a4, a1			/* a1 == frame pointer */
+	CALL(kgdb_trap)
+	br	9f
+#endif
+#if defined(DDB)
 	CALL(ddb_trap)
-
-	/* Debugger return value in v0; switch back to our previous stack. */
+	br	9f
+#endif
+9:	/* Debugger return value in v0; switch back to our previous stack. */
 	mov	s0, sp
 
 #if defined(MULTIPROCESSOR)
-	/*
-	 * XXX RESUME ALL OTHER CPUs.
-	 */
+	mov	v0, s0
+
+	/* Resume all other CPUs. */
+	mov	zero, a0
+	CALL(cpu_pause_resume_all)
+
+	mov	s0, v0
 #endif
 
 	ldq	ra, (32-8)(sp)		/* restore ra */

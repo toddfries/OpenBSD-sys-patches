@@ -1,4 +1,4 @@
-/* $NetBSD: ofw_consinit.c,v 1.6 2007/11/26 19:58:31 garbled Exp $ */
+/* $NetBSD: ofw_consinit.c,v 1.8 2008/09/25 14:47:54 macallan Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofw_consinit.c,v 1.6 2007/11/26 19:58:31 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofw_consinit.c,v 1.8 2008/09/25 14:47:54 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -298,17 +291,30 @@ cninit_kd(void)
 	 * stdin is /pseudo-hid/keyboard.  There is no 
 	 * `adb-kbd-ihandle or `usb-kbd-ihandles methods
 	 * available. Try attaching as ADB.
+	 * But only if ADB support is actually present.
 	 *
 	 * XXX This must be called before pmap_bootstrap().
 	 */
 	if (strcmp(name, "pseudo-hid") == 0) {
-		printf("console keyboard type: unknown, assuming ADB\n");
+		int adb_node;
+
+		adb_node = OF_finddevice("/pci/mac-io/via-pmu/adb");
+		if (adb_node > 0) {
+			printf("ADB support found\n");
 #if NAKBD > 0
-		akbd_cnattach();
+			akbd_cnattach();
 #endif
 #if NADBKBD > 0
-		adbkbd_cnattach();
+			adbkbd_cnattach();
 #endif
+		} else {
+			/* must be USB */
+			printf("No ADB support present, assuming USB " 
+			       "keyboard\n");
+#if NUKBD > 0
+			ukbd_cnattach();
+#endif
+		}
 		goto kbd_found;
 	}
 
@@ -375,7 +381,7 @@ cninit_kd(void)
 	return;
 
 kbd_found:;
-#if NAKBD + NUKBD + NADBKBD > 0
+#if NAKBD + NUKBD + NADBKBD + NPCKBC > 0
 	/*
 	 * XXX This is a little gross, but we don't get to call
 	 * XXX wskbd_cnattach() twice.

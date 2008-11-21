@@ -1,5 +1,4 @@
-/*	$OpenBSD: dev.c,v 1.4 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: dev.c,v 1.4 1994/10/30 21:48:23 cgd Exp $	*/
+/*	$NetBSD: dev.c,v 1.8 2007/11/24 13:20:54 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -37,12 +36,11 @@
 
 #include "stand.h"
 
-int errno;
-
 int
 nodev(void)
 {
-	return (ENXIO);
+
+	return ENXIO;
 }
 
 void
@@ -54,5 +52,6 @@ nullsys(void)
 int
 noioctl(struct open_file *f, u_long cmd, void *data)
 {
-	return (EINVAL);
+
+	return EINVAL;
 }

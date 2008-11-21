@@ -1,5 +1,4 @@
-/*	$OpenBSD: kgdb_m68k.c,v 1.2 2003/06/02 23:27:48 millert Exp $	*/
-/*	$NetBSD: kgdb_m68k.c,v 1.1 1997/02/12 00:58:01 gwr Exp $	*/
+/*	$NetBSD: kgdb_m68k.c,v 1.7 2006/07/22 06:58:17 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -45,6 +44,9 @@
  * Machine-dependent (m68k) part of the KGDB remote "stub"
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kgdb_m68k.c,v 1.7 2006/07/22 06:58:17 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/kgdb.h>
 
@@ -55,9 +57,8 @@
  * Translate a trap number into a unix compatible signal value.
  * (gdb only understands unix signal numbers).
  */
-int 
-kgdb_signal(type)
-	int type;
+int
+kgdb_signal(int type)
 {
 	int sigval;
 
@@ -100,7 +101,7 @@ kgdb_signal(type)
 		sigval = SIGEMT;
 		break;
 	}
-	return (sigval);
+	return sigval;
 }
 
 /*
@@ -123,28 +124,23 @@ kgdb_signal(type)
  */
 
 void
-kgdb_getregs(regs, gdb_regs)
-	db_regs_t *regs;
-	kgdb_reg_t *gdb_regs;
+kgdb_getregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
 {
 	int i;
 
 	for (i = 0; i < 16; i++)
-	    gdb_regs[i]  = regs->tf_regs[i];
+		gdb_regs[i]  = regs->tf_regs[i];
 	gdb_regs[GDB_SR] = regs->tf_sr;
 	gdb_regs[GDB_PC] = regs->tf_pc;
 }
 
 void
-kgdb_setregs(regs, gdb_regs)
-	db_regs_t *regs;
-	kgdb_reg_t *gdb_regs;
+kgdb_setregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
 {
 	int i;
 
 	for (i = 0; i < 16; i++)
 		regs->tf_regs[i] = gdb_regs[i];
-	regs->tf_sr = gdb_regs[GDB_SR] |
-		(regs->tf_sr & PSL_T);
+	regs->tf_sr = gdb_regs[GDB_SR] | (regs->tf_sr & PSL_T);
 	regs->tf_pc = gdb_regs[GDB_PC];
 }

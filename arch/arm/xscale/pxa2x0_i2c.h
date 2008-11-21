@@ -1,3 +1,4 @@
+/*	$NetBSD: pxa2x0_i2c.h,v 1.1 2006/12/17 16:03:33 peter Exp $	*/
 /*	$OpenBSD: pxa2x0_i2c.h,v 1.2 2005/05/26 03:52:07 pascoe Exp $	*/
 
 /*

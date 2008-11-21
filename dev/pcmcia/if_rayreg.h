@@ -1,10 +1,8 @@
-/*	$OpenBSD: if_rayreg.h,v 1.7 2003/12/12 02:36:07 mcbride Exp $	*/
-/*	$NetBSD: if_rayreg.h,v 1.3 2000/08/10 11:48:46 ad Exp $	*/
-
-/* 
+/*	$NetBSD: if_rayreg.h,v 1.10 2007/12/25 18:33:42 perry Exp $	*/
+/*
  * Copyright (c) 2000 Christian E. Hopps
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -32,31 +30,30 @@
 
 #define	RAY_MAXSSIDLEN	32
 
-#pragma pack(1)
+/*
+ * CCR registers
+ */
+#define RAY_COR		0	/* config option register */
+#define	RAY_CCSR	1	/* card config and status register */
+#define	RAY_PIN		2	/* not in hw */
+#define	RAY_SOCKETCOPY	3	/* not used by hw */
+#define	RAY_HCSIR	5	/* HCS intr register */
+#define	RAY_ECFIR	6	/* ECF intr register */
+#define	RAY_AR0		8	/* authorization register 0 (unused) */
+#define	RAY_AR1		9	/* authorization register 1 (unused) */
+#define	RAY_PMR		10	/* program mode register (unused) */
+#define	RAY_TMR		11	/* pc test mode register (unused) */
+#define	RAY_FCWR	16	/* frequency control word register */
 
 /*
- * CCR registers 
- */
-#define RAY_COR		(0x00)	/* config option register */
-#define	RAY_CCSR	(0x01)	/* card config and status register */
-#define	RAY_PIN		(0x02)	/* not in hw */
-#define	RAY_SOCKETCOPY	(0x03)	/* not used by hw */
-#define	RAY_HCSIR	(0x05)	/* HCS intr register */
-#define	RAY_ECFIR	(0x06)	/* ECF intr register */
-#define	RAY_AR0		(0x08)	/* authorization register 0 (unused) */
-#define	RAY_AR1		(0x09)	/* authorization register 1 (unused) */
-/*
- * XXX these registers cannot be accessed with pcmcia.c's 14 byte mapping
+ * XXX these registers cannot be accessed with pcmcia.c's 0x14 byte mapping
  * of the CCR for us
  */
 #if 0
-#define	RAY_PMR		0x0a	/* program mode register (unused) */
-#define	RAY_TMR		0x0b	/* pc test mode register (unused) */
-#define	RAY_FCWR	0x10	/* frequency control word register */
-#define RAY_TMC1	0x14	/* test mode control 1 (unused) */
-#define RAY_TMC2	0x15	/* test mode control 1 (unused) */
-#define RAY_TMC3	0x16	/* test mode control 1 (unused) */
-#define RAY_TMC4	0x17	/* test mode control 1 (unused) */
+#define RAY_TMC1	0x014	/* test mode control 1 (unused) */
+#define RAY_TMC2	0x015	/* test mode control 1 (unused) */
+#define RAY_TMC3	0x016	/* test mode control 1 (unused) */
+#define RAY_TMC4	0x017	/* test mode control 1 (unused) */
 #endif
 
 /*
@@ -226,7 +223,7 @@ struct ray_startup_params_head {
 /*48*/	u_int8_t	sp_country_code;
 /*49*/	u_int8_t	sp_hop_seq;
 /*4a*/	u_int8_t	sp_hop_seq_len;	/* no longer supported */
-};
+} __packed;
 
 /* build 5 tail to the startup params */
 struct ray_startup_params_tail_5 {
@@ -244,7 +241,7 @@ struct ray_startup_params_tail_5 {
 	u_int8_t	sp_privacy_must_start;
 	u_int8_t	sp_privacy_can_join;
 	u_int8_t	sp_basic_rate_set[8];
-};
+} __packed;
 
 /* build 4 (webgear) tail to the startup params */
 struct ray_startup_params_tail_4 {
@@ -259,7 +256,7 @@ struct ray_startup_params_tail_4 {
 	u_int8_t	sp_test_min_chan;
 	u_int8_t	sp_test_max_chan;
 	/* more bytes in build 5 */
-};
+} __packed;
 
 /*
  * Parameter IDs for the update/report param commands and values if
@@ -412,9 +409,9 @@ struct ray_startup_params_tail_4 {
 #define	RAY_RCCS_LAST	127
 
 struct ray_cmd {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 };
 
 #define	RAY_CCS_STATUS_FREE		0x0
@@ -424,9 +421,9 @@ struct ray_cmd {
 
 /* RAY_CMD_UPDATE_PARAMS */
 struct ray_cmd_update {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_paramid;
 	u_int8_t	c_nparam;
 	u_int8_t	c_failcause;
@@ -434,9 +431,9 @@ struct ray_cmd_update {
 
 /* RAY_CMD_REPORT_PARAMS */
 struct ray_cmd_report {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_paramid;
 	u_int8_t	c_nparam;
 	u_int8_t	c_failcause;
@@ -445,25 +442,25 @@ struct ray_cmd_report {
 
 /* RAY_CMD_UPDATE_MCAST */
 struct ray_cmd_update_mcast {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_nmcast;
 };
 
 /* RAY_CMD_UPDATE_APM */
 struct ray_cmd_udpate_apm {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_mode;
 };
 
 /* RAY_CMD_START_NET and RAY_CMD_JOIN_NET */
 struct ray_cmd_net {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_upd_param;
 	u_int8_t	c_bss_id[ETHER_ADDR_LEN];
 	u_int8_t	c_inited;
@@ -481,18 +478,18 @@ struct ray_net_params {
 
 /* RAY_CMD_UPDATE_ASSOC */
 struct ray_cmd_update_assoc {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_astatus;
 	u_int8_t	c_aid[2];
 };
 
 /* RAY_CMD_TX_REQ */
 struct ray_cmd_tx {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_bufp[2];
 	u_int8_t	c_len[2];
 	u_int8_t	c_resv[5];
@@ -504,9 +501,9 @@ struct ray_cmd_tx {
 
 /* RAY_CMD_TX_REQ (for build 4) */
 struct ray_cmd_tx_4 {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_bufp[2];
 	u_int8_t	c_len[2];
 	u_int8_t	c_addr[ETHER_ADDR_LEN];
@@ -517,9 +514,9 @@ struct ray_cmd_tx_4 {
 
 /* RAY_CMD_DUMP_MEM */
 struct ray_cmd_dump_mem {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_memtype;
 	u_int8_t	c_memp[2];
 	u_int8_t	c_len;
@@ -527,16 +524,16 @@ struct ray_cmd_dump_mem {
 
 /* RAY_CMD_START_TIMER */
 struct ray_cmd_start_timer {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_duration[2];
 };
 
 struct ray_cmd_rx {
-	u_int8_t	c_status;	/* ccs generic header */
-	u_int8_t	c_cmd;		/* " */
-	u_int8_t	c_link;		/* " */
+	u_int8_t	c_status;		/* ccs generic header */
+	u_int8_t	c_cmd;			/* " */
+	u_int8_t	c_link;			/* " */
 	u_int8_t	c_bufp[2];	/* buffer pointer */
 	u_int8_t	c_len[2];	/* length */
 	u_int8_t	c_siglev;	/* signal level */
@@ -545,8 +542,6 @@ struct ray_cmd_rx {
 	u_int8_t	c_antenna;	/* antenna with best reception */
 	u_int8_t	c_updbss;	/* only 1 for beacon messages */
 };
-
-#pragma pack()
 
 #define	RAY_TX_PHY_SIZE	0x4
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: tss.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
-/*	$NetBSD: tss.h,v 1.1 2003/04/26 18:39:49 fvdl Exp $	*/
+/*	$NetBSD: tss.h,v 1.5 2008/10/26 00:08:15 mrg Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -39,6 +38,8 @@
 #ifndef _AMD64_TSS_H_
 #define _AMD64_TSS_H_
 
+#ifdef __x86_64__
+
 /*
  * TSS structure. Since TSS hw switching is not supported in long
  * mode, this is mainly there for the I/O permission map in
@@ -46,17 +47,28 @@
  */
 
 struct x86_64_tss {
-	u_int32_t	tss_reserved1;
-	u_int64_t	tss_rsp0;
-	u_int64_t	tss_rsp1;
-	u_int64_t	tss_rsp3;
-	u_int32_t	tss_reserved2;
-	u_int32_t	tss_reserved3;
-	u_int64_t	tss_ist[7];
-	u_int32_t	tss_reserved4;
-	u_int32_t	tss_reserved5;
-	u_int16_t	tss_reserved6;
-	u_int16_t	tss_iobase;
-} __attribute__((packed));
+	uint32_t	tss_reserved1;
+	uint64_t	tss_rsp0;
+	uint64_t	tss_rsp1;
+	uint64_t	tss_rsp3;
+	uint32_t	tss_reserved2;
+	uint32_t	tss_reserved3;
+	uint64_t	tss_ist[7];
+	uint32_t	tss_reserved4;
+	uint32_t	tss_reserved5;
+	uint32_t	tss_iobase;
+} __packed;
+
+/*
+ * I/O bitmap offset beyond TSS's segment limit means no bitmaps.
+ * (i.e. any I/O attempt generates an exception.)
+ */
+#define	IOMAP_INVALOFF	0xffff
+
+#else	/*	__x86_64__	*/
+
+#include <i386/tss.h>
+
+#endif	/*	__x86_64__	*/
 
 #endif /* _AMD64_TSS_H_ */

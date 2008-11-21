@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_machdep.h,v 1.21 2006/03/14 22:05:05 cube Exp $	*/
+/*	$NetBSD: netbsd32_machdep.h,v 1.27 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -12,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -35,12 +33,12 @@
 
 struct proc;
 
-typedef	uint32_t netbsd32_pointer_t;
+/* sparc64 uses an unsigned 32bit integer for 32bit pointers */
+#define NETBSD32_POINTER_TYPE uint32_t
+typedef struct { NETBSD32_POINTER_TYPE i32; } netbsd32_pointer_t;
 
-/*
- * Convert a pointer in the 32-bit world to a valid 64-bit pointer.
- */
-#define	NETBSD32PTR64(p32)	((void *)(u_long)(u_int)(p32))
+/* sparc32 has 64bit aligned 64bit integers */
+#define NETBSD32_INT64_ALIGN
 
 /* from <arch/sparc/include/signal.h> */
 typedef uint32_t netbsd32_sigcontextp_t;
@@ -77,17 +75,6 @@ struct netbsd32_sigcontext13 {
 int netbsd32_md_ioctl(struct file *, netbsd32_u_long, void *, struct lwp *);
 
 #define NETBSD32_MID_MACHINE MID_SPARC
-
-/*
- * When returning an off_t to userland, we need to modify the syscall
- * retval array. We return a 64 bit value in %o0 (high) and %o1 (low)
- * for 32bit userland.
- */
-#define NETBSD32_OFF_T_RETURN(RV)	\
-	do {				\
-		(RV)[1] = (RV)[0];	\
-		(RV)[0] >>= 32;		\
-	} while (0)
 
 int netbsd32_process_read_regs(struct lwp *, struct reg32 *);
 int netbsd32_process_read_fpregs(struct lwp *, struct fpreg32 *);

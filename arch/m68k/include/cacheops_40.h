@@ -1,4 +1,4 @@
-/*	$NetBSD: cacheops_40.h,v 1.8 2006/02/16 20:17:13 perry Exp $	*/
+/*	$NetBSD: cacheops_40.h,v 1.11 2008/04/28 20:23:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -51,7 +44,7 @@ TBIA_40(void)
 static __inline void __attribute__((__unused__))
 TBIS_40(vaddr_t va)
 {
-	register vaddr_t	r_va __asm("%a0") = va;
+	register uint8_t *r_va __asm("%a0") = (void *)va;
 	int	tmp;
 
 	__asm volatile (" movc   %1, %%dfc;"	/* select supervisor	*/
@@ -125,7 +118,7 @@ DCIU_40(void)
 static __inline void __attribute__((__unused__))
 DCIAS_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf468;" : : "a" (r_pa)); /* cpushl dc,%a0@ */
 }
@@ -146,7 +139,7 @@ DCFA_40(void)
 static __inline void __attribute__((__unused__))
 ICPL_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf488;" : : "a" (r_pa)); /* cinvl ic,%a0@ */
 }
@@ -155,7 +148,7 @@ ICPL_40(paddr_t pa)
 static __inline void __attribute__((__unused__))
 ICPP_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf490;" : : "a" (r_pa)); /* cinvp ic,%a0@ */
 }
@@ -164,7 +157,7 @@ ICPP_40(paddr_t pa)
 static __inline void __attribute__((__unused__))
 DCPL_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf448;" : : "a" (r_pa)); /* cinvl dc,%a0@ */
 }
@@ -173,7 +166,7 @@ DCPL_40(paddr_t pa)
 static __inline void __attribute__((__unused__))
 DCPP_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf450;" : : "a" (r_pa)); /* cinvp dc,%a0@ */
 }
@@ -189,7 +182,7 @@ DCPA_40(void)
 static __inline void __attribute__((__unused__))
 DCFL_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf468;" : : "a" (r_pa)); /* cpushl dc,%a0@ */
 }
@@ -198,7 +191,7 @@ DCFL_40(paddr_t pa)
 static __inline void __attribute__((__unused__))
 DCFP_40(paddr_t pa)
 {
-	register paddr_t	r_pa __asm("%a0") = pa;
+	register uint8_t *r_pa __asm("%a0") = (void *)pa;
 
 	__asm volatile (" .word 0xf470;" : : "a" (r_pa)); /* cpushp dc,%a0@ */
 }

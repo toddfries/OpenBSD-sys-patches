@@ -1,5 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.5 2004/02/08 00:04:20 deraadt Exp $	*/
-/*	$NetBSD: ptrace.h,v 1.4 1994/11/20 20:53:27 deraadt Exp $ */
+/*	$NetBSD: ptrace.h,v 1.7 2008/01/25 12:03:37 skrll Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -48,8 +47,9 @@
 #define	PT_SETREGS	(PT_FIRSTMACH + 1)
 #define	PT_GETFPREGS	(PT_FIRSTMACH + 2)
 #define	PT_SETFPREGS	(PT_FIRSTMACH + 3)
-#define	PT_WCOOKIE	(PT_FIRSTMACH + 4)
 
-#ifdef _KERNEL
-register_t process_get_wcookie(struct proc *p);
-#endif
+#define PT_MACHDEP_STRINGS \
+	"PT_GETREGS", \
+	"PT_SETREGS", \
+	"PT_GETFPREGS", \
+	"PT_SETFPREGS",

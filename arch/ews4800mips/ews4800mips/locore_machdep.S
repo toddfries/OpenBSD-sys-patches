@@ -1,4 +1,4 @@
-/*	$NetBSD: locore_machdep.S,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
+/*	$NetBSD: locore_machdep.S,v 1.5 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -53,14 +46,27 @@ LEAF_NOPROFILE(ews4800mips_nmi_vec)
 END(ews4800mips_nmi_vec)
 
 LEAF_NOPROFILE(nmi_exception)
-	li	a0, 0		/* x-pos */
-2:	li	a2, 64		/* '@' */
+	li	a0, 0			/* x-pos */
+	li	k0, 32
+1:
+	mfc0	v0, MIPS_COP_0_ERROR_PC	/* get Error EPC */
+	addu	k0, k0, -4
+	srl	v0, v0, k0
+	andi	v1, v0, 0xf
+	sltiu	v0, v1, 10
+	bnez	v0, 2f
+	 nop
+	addi	v1, v1, 'a' - ('9' + 1)
+2:
+	addi	a2, v1, '0'
 	lui	v0, 0xbfc0
 	ori	v0, 0xff60
-	li	a1, 0		/* y-pos */
-	jal	v0
-	 nop
-	b	2b
+	jal	v0			/* ROM_PUTC(x, y, c) */
+	 li	a1, 0			/* y-pos */
+	bne	k0, zero, 1b
 	 addiu	a0, a0, 12
+3:
+	b	3b
+	 nop
 	/* NOTREACHED */
 END(nmi_exception)

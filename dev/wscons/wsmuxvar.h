@@ -1,5 +1,4 @@
-/*	$OpenBSD: wsmuxvar.h,v 1.7 2006/08/05 16:59:57 miod Exp $	*/
-/*      $NetBSD: wsmuxvar.h,v 1.10 2005/04/30 03:47:12 augustss Exp $   */
+/*	$NetBSD: wsmuxvar.h,v 1.14 2008/04/28 20:24:01 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,13 +33,12 @@
  * A ws event source, i.e., wskbd, wsmouse, or wsmux.
  */
 struct wsevsrc {
-	struct device me_dv;
+	device_t me_dv;
 	const struct wssrcops *me_ops;	/* method pointers */
 	struct wseventvar me_evar;	/* wseventvar opened directly */
 	struct wseventvar *me_evp;	/* our wseventvar when open */
 #if NWSDISPLAY > 0
-	struct device *me_dispdv;	/* our display if part of one */
-#define	sc_displaydv	sc_base.me_dispdv
+	device_t me_dispdv;       /* our display if part of one */
 #endif
 #if NWSMUX > 0
 	struct wsmux_softc *me_parent;	/* parent mux device */
@@ -60,48 +51,43 @@ struct wsevsrc {
  * from a wsmux.
  */
 struct wssrcops {
-	int type;			/* device type: WSMUX_{MOUSE,KBD,MUX} */
+	int type;		/* device type: WSMUX_{MOUSE,KBD,MUX} */
 	int (*dopen)(struct wsevsrc *, struct wseventvar *);
 	int (*dclose)(struct wsevsrc *);
-	int (*dioctl)(struct device *, u_long, caddr_t, int, struct proc *);
-	int (*ddispioctl)(struct device *, u_long, caddr_t, int, struct proc *);
-	int (*dsetdisplay)(struct device *, struct device *);
+	int (*dioctl)(device_t, u_long, void *, int, struct lwp *);
+	int (*ddispioctl)(device_t, u_long, void *, int, struct lwp *);
+	int (*dsetdisplay)(device_t, struct wsevsrc *);
 };
 
 #define wsevsrc_open(me, evp) \
 	((me)->me_ops->dopen((me), evp))
 #define wsevsrc_close(me) \
 	((me)->me_ops->dclose((me)))
-#define wsevsrc_ioctl(me, cmd, data, flag, p) \
-	((me)->me_ops->dioctl(&(me)->me_dv, cmd, (caddr_t)data, flag, p))
-#define wsevsrc_display_ioctl(me, cmd, data, flag, p) \
-	((me)->me_ops->ddispioctl(&(me)->me_dv, cmd, (caddr_t)data, flag, p))
+#define wsevsrc_ioctl(me, cmd, data, flag, l) \
+	((me)->me_ops->dioctl((me)->me_dv, cmd, (void *)data, flag, l))
+#define wsevsrc_display_ioctl(me, cmd, data, flag, l) \
+	((me)->me_ops->ddispioctl((me)->me_dv, cmd, (void *)data, flag, l))
 #define wsevsrc_set_display(me, arg) \
-	((me)->me_ops->dsetdisplay(&(me)->me_dv, arg))
+	((me)->me_ops->dsetdisplay((me)->me_dv, arg))
 
 #if NWSMUX > 0
 struct wsmux_softc {
 	struct wsevsrc sc_base;
 	struct proc *sc_p;		/* open proc */
-	CIRCLEQ_HEAD(, wsevsrc) sc_cld;	/* list of children */
+	CIRCLEQ_HEAD(, wsevsrc) sc_cld; /* list of children */
 	u_int32_t sc_kbd_layout;	/* current layout of keyboard */
 #ifdef WSDISPLAY_COMPAT_RAWKBD
-	int sc_rawkbd;			/* A hack to remember the kbd mode */
+	int sc_rawkbd;		        /* A hack to remember the kbd mode */
 #endif
 };
-
-/*
- * configure defines
- */
-#define WSMOUSEDEVCF_MUX		0
 
 struct	wsmux_softc *wsmux_getmux(int);
 struct	wsmux_softc *wsmux_create(const char *, int);
 int	wsmux_attach_sc(struct wsmux_softc *, struct wsevsrc *);
 void	wsmux_detach_sc(struct wsevsrc *);
-int	wsmux_set_display(struct wsmux_softc *, struct device *);
+int	wsmux_set_display(struct wsmux_softc *, device_t);
 
 int	wskbd_add_mux(int, struct wsmux_softc *);
 int	wsmouse_add_mux(int, struct wsmux_softc *);
 
-#endif	/* NWSMUX > 0 */
+#endif /* NWSMUX > 0 */

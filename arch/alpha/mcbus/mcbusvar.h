@@ -1,4 +1,3 @@
-/* $OpenBSD: mcbusvar.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcbusvar.h,v 1.6 2005/12/11 12:16:17 christos Exp $ */
 
 /*
@@ -40,7 +39,6 @@
  * The structure used to attach devices to the MCbus.
  */
 struct mcbus_dev_attach_args {
-	char *		ma_name;	/* so things aren't confused */
 	u_int8_t	ma_gid;		/* GID of MCBUS (MCBUS #) */
 	u_int8_t	ma_mid;		/* Module ID on MCBUS */
 	u_int8_t	ma_type;	/* Module "type" */

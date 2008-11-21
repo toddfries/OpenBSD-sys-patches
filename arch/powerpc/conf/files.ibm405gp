@@ -1,4 +1,4 @@
-#	$NetBSD: files.ibm405gp,v 1.6 2006/09/19 00:50:39 simonb Exp $
+#	$NetBSD: files.ibm405gp,v 1.8 2008/02/20 21:43:35 drochner Exp $
 #
 # IBM 405GPx specific configuration info
 

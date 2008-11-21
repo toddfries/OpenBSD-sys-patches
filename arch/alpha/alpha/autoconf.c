@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.31 2007/06/01 19:25:09 deraadt Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.16 1996/11/13 21:13:04 cgd Exp $	*/
+/* $NetBSD: autoconf.c,v 1.44 2007/12/03 15:33:04 ad Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,33 +40,30 @@
  *	@(#)autoconf.c	8.4 (Berkeley) 10/1/93
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.44 2007/12/03 15:33:04 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/disklabel.h>
-#include <sys/conf.h>
 #include <sys/reboot.h>
 #include <sys/device.h>
-
-#include <uvm/uvm_extern.h>
+#include <sys/conf.h>
+#include <dev/cons.h>
 
 #include <machine/autoconf.h>
-#include <machine/rpb.h>
+#include <machine/alpha.h>
+#include <machine/cpu.h>
 #include <machine/prom.h>
 #include <machine/cpuconf.h>
 #include <machine/intr.h>
 
-#include <dev/cons.h>
-
-extern char		root_device[17];		/* XXX */
-
-struct device		*booted_device;
-int			booted_partition;
 struct bootdev_data	*bootdev_data;
-char			boot_dev[128];
 
-void	parse_prom_bootdev(void);
-int	atoi(char *);
+void	parse_prom_bootdev __P((void));
+int	atoi __P((char *));
 
 /*
  * cpu_configure:
@@ -76,8 +72,8 @@ int	atoi(char *);
 void
 cpu_configure()
 {
+
 	parse_prom_bootdev();
-	softintr_init();
 
 	/*
 	 * Disable interrupts during autoconfiguration.  splhigh() won't
@@ -86,28 +82,25 @@ cpu_configure()
 	 * during autoconfig.
 	 */
 	(void)alpha_pal_swpipl(ALPHA_PSL_IPL_HIGH);
-	if (config_rootfound("mainbus", "mainbus") == NULL)
+	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("no mainbus found");
 	(void)spl0();
 
+	/*
+	 * Note that bootstrapping is finished, and set the HWRPB up  
+	 * to do restarts.
+	 */
 	hwrpb_restart_setup();
-	cold = 0;
 }
 
 void
-diskconf(void)
+cpu_rootconf()
 {
-	struct device *bootdv;
-	int bootpartition;
 
 	if (booted_device == NULL)
 		printf("WARNING: can't figure what device matches \"%s\"\n",
-		    boot_dev);
-	bootdv = booted_device;
-	bootpartition = booted_partition;
-
-	setroot(bootdv, bootpartition, RB_USERREQ);
-	dumpconf();
+		    bootinfo.booted_dev);
+	setroot(booted_device, booted_partition);
 }
 
 void
@@ -122,9 +115,10 @@ parse_prom_bootdev()
 	booted_partition = 0;
 	bootdev_data = NULL;
 
-	bcopy(bootinfo.booted_dev, hacked_boot_dev, sizeof hacked_boot_dev);
+	memcpy(hacked_boot_dev, bootinfo.booted_dev,
+	    min(sizeof bootinfo.booted_dev, sizeof hacked_boot_dev));
 #if 0
-	printf("parse_prom_bootdev: boot dev = \"%s\"\n", boot_dev);
+	printf("parse_prom_bootdev: boot dev = \"%s\"\n", hacked_boot_dev);
 #endif
 
 	i = 0;
@@ -184,7 +178,7 @@ atoi(s)
 	}
 
 	while (*s != '\0') {
-		if (*s < '0' || *s > '9')
+		if (*s < '0' && *s > '9')
 			break;
 
 		n = (10 * n) + (*s - '0');
@@ -205,18 +199,6 @@ device_register(dev, aux)
 		 */
 		return;
 	}
-
 	if (platform.device_register)
 		(*platform.device_register)(dev, aux);
 }
-
-struct nam2blk nam2blk[] = {
-	{ "st",		2 },
-	{ "cd",		3 },
-	{ "fd",		4 },
-	{ "rd",		6 },
-	{ "sd",		8 },
-	{ "wd",		0 },
-	{ "raid",	16 },
-	{ NULL,		-1 }
-};

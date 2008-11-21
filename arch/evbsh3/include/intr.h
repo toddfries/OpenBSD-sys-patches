@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.9 2006/12/21 15:55:22 yamt Exp $	*/
+/*	$NetBSD: intr.h,v 1.13 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,18 +35,11 @@
 #define _INTR_N		11	/* TMU0, TMU1, TMU2, (SCIF and SCI) * 4 */
 
 /* Interrupt priority levels */
-#define	IPL_BIO		9	/* block I/O */
-#define	IPL_NET		11	/* network */
-#define	IPL_TTY		12	/* terminal */
-#define	IPL_VM		IPL_TTY
-#define	IPL_SERIAL	12	/* serial */
-#define	IPL_CLOCK	14	/* clock */
-#define	IPL_STATCLOCK	IPL_CLOCK
-#define	IPL_SCHED	IPL_CLOCK
+#define	IPL_VM		12
+#define	IPL_SCHED	14	/* clock */
 #define	IPL_HIGH	15	/* everything */
-#define	IPL_LOCK	IPL_HIGH
 
-typedef int ipl_t;
+typedef uint8_t ipl_t;
 typedef struct {
 	ipl_t _ipl;
 } ipl_cookie_t;
@@ -76,7 +62,5 @@ splraiseipl(ipl_cookie_t icookie)
 
 #define	spl0()			_cpu_intr_resume(0)
 #define	splx(x)			_cpu_intr_resume(x)
-
-#define	spllowersoftclock()	_cpu_intr_resume(IPL_SOFTCLOCK << 4)
 
 #endif /* !_EVBSH3_INTR_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: sys_machdep.c,v 1.7 2006/07/22 06:34:42 tsutsui Exp $	*/
+/*	$NetBSD: sys_machdep.c,v 1.14 2007/12/31 13:38:51 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -34,15 +34,12 @@
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD");
 
-#include "opt_compat_hpux.h"
-
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <machine/cpu.h>
@@ -74,16 +71,9 @@ cachectl1(u_long req, vaddr_t addr, size_t len, struct proc *p)
 #if defined(M68040) || defined(M68060)
 	if (mmutype == MMU_68040) {
 		int inc = 0;
-		boolean_t doall = FALSE;
+		bool doall = false;
 		paddr_t pa = 0;
 		vaddr_t end = 0;
-#ifdef COMPAT_HPUX
-		extern struct emul emul_hpux;
-
-		if ((p->p_emul == &emul_hpux) &&
-		    len != 16 && len != PAGE_SIZE)
-			doall = 1;
-#endif
 
 		if (addr == 0 ||
 #if defined(M68060)
@@ -113,7 +103,7 @@ cachectl1(u_long req, vaddr_t addr, size_t len, struct proc *p)
 			if (!doall &&
 			    (pa == 0 || m68k_page_offset(addr) == 0)) {
 				if (pmap_extract(p->p_vmspace->vm_map.pmap,
-				    addr, &pa) == FALSE)
+				    addr, &pa) == false)
 					doall = 1;
 			}
 			switch (req) {
@@ -194,7 +184,7 @@ cachectl1(u_long req, vaddr_t addr, size_t len, struct proc *p)
 }
 
 int
-sys_sysarch(struct lwp *l, void *v, register_t *retval)
+sys_sysarch(struct lwp *l, const struct sys_sysarch_args *uap, register_t *retval)
 {
 
 	return ENOSYS;
@@ -208,23 +198,23 @@ sys_sysarch(struct lwp *l, void *v, register_t *retval)
 
 /*ARGSUSED1*/
 int
-dma_cachectl(caddr_t addr, int len)
+dma_cachectl(void *addr, int len)
 {
 #if defined(M68040) || defined(M68060)
 	int inc = 0;
 	int pa = 0;
-	caddr_t end;
+	void *end;
 
 	if (mmutype != MMU_68040) {
 		return 0;
 	}
 
-	end = addr + len;
+	end = (char*)addr + len;
 	if (len <= 1024) {
-		addr = (caddr_t)((vaddr_t)addr & ~0xf);
+		addr = (void *)((vaddr_t)addr & ~0xf);
 		inc = 16;
 	} else {
-		addr = (caddr_t)((vaddr_t)addr & ~PGOFSET);
+		addr = (void *)((vaddr_t)addr & ~PGOFSET);
 		inc = PAGE_SIZE;
 	}
 	do {
@@ -242,7 +232,7 @@ dma_cachectl(caddr_t addr, int len)
 			ICPP(pa);
 		}
 		pa += inc;
-		addr += inc;
+		addr = (char*)addr + inc;
 	} while (addr < end);
 #endif	/* defined(M68040) || defined(M68060) */
 	return 0;

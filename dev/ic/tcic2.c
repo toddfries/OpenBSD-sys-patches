@@ -1,7 +1,4 @@
-/*	$OpenBSD: tcic2.c,v 1.8 2007/11/25 16:40:04 jmc Exp $	*/
-/*	$NetBSD: tcic2.c,v 1.3 2000/01/13 09:38:17 joda Exp $	*/
-
-#undef	TCICDEBUG
+/*	$NetBSD: tcic2.c,v 1.30 2008/04/08 12:07:27 cegger Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Christoph Badura.  All rights reserved.
@@ -33,7 +30,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tcic2.c,v 1.30 2008/04/08 12:07:27 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -41,16 +40,16 @@
 #include <sys/malloc.h>
 #include <sys/kthread.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/pcmcia/pcmciareg.h>
 #include <dev/pcmcia/pcmciavar.h>
 
 #include <dev/ic/tcic2reg.h>
 #include <dev/ic/tcic2var.h>
+
+#include "locators.h"
 
 #ifdef TCICDEBUG
 int	tcic_debug = 1;
@@ -69,7 +68,6 @@ int	tcic_debug = 1;
 void	tcic_attach_socket(struct tcic_handle *);
 void	tcic_init_socket(struct tcic_handle *);
 
-int	tcic_submatch(struct device *, void *, void *);
 int	tcic_print(void *arg, const char *pnp);
 int	tcic_intr_socket(struct tcic_handle *);
 
@@ -84,10 +82,6 @@ void	tcic_create_event_thread(void *);
 void	tcic_event_thread(void *);
 
 void	tcic_queue_event(struct tcic_handle *, int);
-
-struct cfdriver tcic_cd = {
-	NULL, "tcic", DV_DULL
-};
 
 /* Map between irq numbers and internal representation */
 #if 1
@@ -133,7 +127,7 @@ tcic_check_reserved_bits(iot, ioh)
 		return 0;
 
 	DPRINTF(("tcic: chkrsvd 4\n"));
-	/* R_IENA bits 7,2 are reserved. */
+	/* R_IENA bits 7,2 are reserverd. */
 	val = bus_space_read_1(iot, ioh, TCIC_R_IENA);
 	if (val & TCIC_IENA_RSVD)
 		return 0;
@@ -266,7 +260,7 @@ tcic_chipid_known(id)
 	return 0;
 }
 
-char *
+const char *
 tcic_chipid_to_string(id)
 	int id;
 {
@@ -322,7 +316,7 @@ tcic_attach(sc)
 {
 	int i, reg;
 
-	/* set more chipset-dependent parameters in the softc. */
+	/* set more chipset dependent parameters in the softc. */
 	switch (sc->chipid) {
 	case TCIC_CHIPID_DB86084_1:
 	case TCIC_CHIPID_DB86084A:
@@ -368,7 +362,7 @@ tcic_attach(sc)
 		/* XXX make more clear what happens here -chb */
 		tcic_sel_sock(&sc->handle[i]);
 		tcic_write_ind_2(&sc->handle[i], TCIC_IR_SCF1_N(i), 0);
-		tcic_write_ind_2(&sc->handle[i], TCIC_IR_SCF2_N(i), 
+		tcic_write_ind_2(&sc->handle[i], TCIC_IR_SCF2_N(i),
 		    (TCIC_SCF2_MCD|TCIC_SCF2_MWP|TCIC_SCF2_MRDY
 #if 1		/* XXX explain byte routing issue */
 		    |TCIC_SCF2_MLBAT2|TCIC_SCF2_MLBAT1|TCIC_SCF2_IDBR));
@@ -384,7 +378,7 @@ tcic_attach(sc)
 
 	if ((sc->handle[0].flags & TCIC_FLAG_SOCKETP) ||
 	    (sc->handle[1].flags & TCIC_FLAG_SOCKETP)) {
-		printf("%s: %s has ", sc->dev.dv_xname,
+		printf("%s: %s has ", device_xname(&sc->dev),
 		       tcic_chipid_to_string(sc->chipid));
 
 		if ((sc->handle[0].flags & TCIC_FLAG_SOCKETP) &&
@@ -414,6 +408,7 @@ tcic_attach_socket(h)
 	struct tcic_handle *h;
 {
 	struct pcmciabus_attach_args paa;
+	int locs[PCMCIABUSCF_NLOCS];
 
 	/* initialize the rest of the handle */
 
@@ -430,15 +425,16 @@ tcic_attach_socket(h)
 	paa.iobase = h->sc->iobase;
 	paa.iosize = h->sc->iosize;
 
-	h->pcmcia = config_found_sm(&h->sc->dev, &paa, tcic_print,
-	    tcic_submatch);
+	locs[PCMCIABUSCF_CONTROLLER] = 0;
+	locs[PCMCIABUSCF_SOCKET] = h->sock;
+
+	h->pcmcia = config_found_sm_loc(&h->sc->dev, "pcmciabus", locs, &paa,
+					tcic_print, config_stdsubmatch);
 
 	/* if there's actually a pcmcia device attached, initialize the slot */
 
 	if (h->pcmcia)
 		tcic_init_socket(h);
-	else
-		h->flags &= ~TCIC_FLAG_SOCKETP;
 }
 
 void
@@ -459,10 +455,9 @@ tcic_create_event_thread(arg)
 		panic("tcic_create_event_thread: unknown tcic socket");
 	}
 
-	if (kthread_create(tcic_event_thread, h, &h->event_thread,
-	    "%s,%s", h->sc->dev.dv_xname, cs)) {
-		printf("%s: unable to create event thread for sock 0x%02x\n",
-		    h->sc->dev.dv_xname, h->sock);
+	if (kthread_create(PRI_NONE, 0, NULL, tcic_event_thread, h,
+	    &h->event_thread, "%s,%s", device_xname(&h->sc->dev), cs)) {
+		aprint_error_dev(&h->sc->dev, "unable to create event thread for sock 0x%02x\n", h->sock);
 		panic("tcic_create_event_thread");
 	}
 }
@@ -487,12 +482,12 @@ tcic_event_thread(arg)
 
 		switch (pe->pe_type) {
 		case TCIC_EVENT_INSERTION:
-			DPRINTF(("%s: insertion event\n", h->sc->dev.dv_xname));
+			DPRINTF(("%s: insertion event\n", device_xname(&h->sc->dev)));
 			tcic_attach_card(h);
 			break;
 
 		case TCIC_EVENT_REMOVAL:
-			DPRINTF(("%s: removal event\n", h->sc->dev.dv_xname));
+			DPRINTF(("%s: removal event\n", device_xname(&h->sc->dev)));
 			tcic_detach_card(h, DETACH_FORCE);
 			break;
 
@@ -536,47 +531,6 @@ tcic_init_socket(h)
 }
 
 int
-tcic_submatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
-{
-	struct cfdata *cf = match;
-
-	struct pcmciabus_attach_args *paa = aux;
-	struct tcic_handle *h = (struct tcic_handle *) paa->pch;
-
-	switch (h->sock) {
-	case 0:
-		if (cf->cf_loc[0 /* PCMCIABUSCF_CONTROLLER */] !=
-		    -1 /* PCMCIABUSCF_CONTROLLER_DEFAULT */ &&
-		    cf->cf_loc[0 /* PCMCIABUSCF_CONTROLLER */] != 0)
-			return 0;
-		if (cf->cf_loc[1 /* PCMCIABUSCF_SOCKET */] !=
-		    -1 /* PCMCIABUSCF_SOCKET_DEFAULT */ &&
-		    cf->cf_loc[1 /* PCMCIABUSCF_SOCKET */] != 0)
-			return 0;
-
-		break;
-	case 1:
-		if (cf->cf_loc[0 /* PCMCIABUSCF_CONTROLLER */] !=
-		    -1 /* PCMCIABUSCF_CONTROLLER_DEFAULT */ &&
-		    cf->cf_loc[0 /* PCMCIABUSCF_CONTROLLER */] != 0)
-			return 0;
-		if (cf->cf_loc[1 /* PCMCIABUSCF_SOCKET */] !=
-		    -1 /* PCMCIABUSCF_SOCKET_DEFAULT */ &&
-		    cf->cf_loc[1 /* PCMCIABUSCF_SOCKET */] != 1)
-			return 0;
-
-		break;
-	default:
-		panic("unknown tcic socket");
-	}
-
-	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
-}
-
-int
 tcic_print(arg, pnp)
 	void *arg;
 	const char *pnp;
@@ -586,18 +540,10 @@ tcic_print(arg, pnp)
 
 	/* Only "pcmcia"s can attach to "tcic"s... easy. */
 	if (pnp)
-		printf("pcmcia at %s", pnp);
+		aprint_normal("pcmcia at %s", pnp);
 
-	switch (h->sock) {
-	case 0:
-		printf(" socket 0");
-		break;
-	case 1:
-		printf(" socket 1");
-		break;
-	default:
-		panic("unknown tcic socket");
-	}
+	aprint_normal(" socket %d", h->sock);
+
 	return (UNCONF);
 }
 
@@ -608,7 +554,7 @@ tcic_intr(arg)
 	struct tcic_softc *sc = arg;
 	int i, ret = 0;
 
-	DPRINTF(("%s: intr\n", sc->dev.dv_xname));
+	DPRINTF(("%s: intr\n", device_xname(&sc->dev)));
 
 	for (i = 0; i < TCIC_NSLOTS; i++)
 		if (sc->handle[i].flags & TCIC_FLAG_SOCKETP)
@@ -627,19 +573,19 @@ tcic_intr_socket(h)
 	tcic_sel_sock(h);
 	icsr = tcic_read_1(h, TCIC_R_ICSR);
 
-	DPRINTF(("%s: %d icsr: 0x%02x \n", h->sc->dev.dv_xname, h->sock, icsr));
+	DPRINTF(("%s: %d icsr: 0x%02x \n", device_xname(&h->sc->dev), h->sock, icsr));
 
 	/* XXX or should the next three be handled in tcic_intr? -chb */
 	if (icsr & TCIC_ICSR_PROGTIME) {
-		DPRINTF(("%s: %02x PROGTIME\n", h->sc->dev.dv_xname, h->sock));
+		DPRINTF(("%s: %02x PROGTIME\n", device_xname(&h->sc->dev), h->sock));
 		rv = 1;
 	}
 	if (icsr & TCIC_ICSR_ILOCK) {
-		DPRINTF(("%s: %02x ILOCK\n", h->sc->dev.dv_xname, h->sock));
+		DPRINTF(("%s: %02x ILOCK\n", device_xname(&h->sc->dev), h->sock));
 		rv = 1;
 	}
 	if (icsr & TCIC_ICSR_ERR) {
-		DPRINTF(("%s: %02x ERR\n", h->sc->dev.dv_xname, h->sock));
+		DPRINTF(("%s: %02x ERR\n", device_xname(&h->sc->dev), h->sock));
 		rv = 1;
 	}
 	if (icsr & TCIC_ICSR_CDCHG) {
@@ -654,7 +600,7 @@ tcic_intr_socket(h)
 		if (delta)
 			rv = 1;
 
-		DPRINTF(("%s: %02x CDCHG %x\n", h->sc->dev.dv_xname, h->sock,
+		DPRINTF(("%s: %02x CDCHG %x\n", device_xname(&h->sc->dev), h->sock,
 		    delta));
 
 		/*
@@ -665,35 +611,35 @@ tcic_intr_socket(h)
 		if (delta & TCIC_SSTAT_CD) {
 			if (sstat & TCIC_SSTAT_CD) {
 				if (!(h->flags & TCIC_FLAG_CARDP)) {
-					DPRINTF(("%s: enqueuing INSERTION event\n",
-					    h->sc->dev.dv_xname));
+					DPRINTF(("%s: enqueing INSERTION event\n",
+					    device_xname(&h->sc->dev)));
 					tcic_queue_event(h, TCIC_EVENT_INSERTION);
 				}
 			} else {
 				if (h->flags & TCIC_FLAG_CARDP) {
 					/* Deactivate the card now. */
 					DPRINTF(("%s: deactivating card\n",
-					    h->sc->dev.dv_xname));
+					    device_xname(&h->sc->dev)));
 					tcic_deactivate_card(h);
 
-					DPRINTF(("%s: enqueuing REMOVAL event\n",
-					    h->sc->dev.dv_xname));
+					DPRINTF(("%s: enqueing REMOVAL event\n",
+					    device_xname(&h->sc->dev)));
 					tcic_queue_event(h, TCIC_EVENT_REMOVAL);
 				}
 			}
 		}
 		if (delta & TCIC_SSTAT_RDY) {
-			DPRINTF(("%s: %02x READY\n", h->sc->dev.dv_xname, h->sock));
+			DPRINTF(("%s: %02x READY\n", device_xname(&h->sc->dev), h->sock));
 			/* shouldn't happen */
 		}
 		if (delta & TCIC_SSTAT_LBAT1) {
-			DPRINTF(("%s: %02x LBAT1\n", h->sc->dev.dv_xname, h->sock));
+			DPRINTF(("%s: %02x LBAT1\n", device_xname(&h->sc->dev), h->sock));
 		}
 		if (delta & TCIC_SSTAT_LBAT2) {
-			DPRINTF(("%s: %02x LBAT2\n", h->sc->dev.dv_xname, h->sock));
+			DPRINTF(("%s: %02x LBAT2\n", device_xname(&h->sc->dev), h->sock));
 		}
 		if (delta & TCIC_SSTAT_WP) {
-			DPRINTF(("%s: %02x WP\n", h->sc->dev.dv_xname, h->sock));
+			DPRINTF(("%s: %02x WP\n", device_xname(&h->sc->dev), h->sock));
 		}
 	}
 	return rv;
@@ -784,7 +730,7 @@ tcic_deactivate_card(h)
 }
 
 /* XXX the following routine may need to be rewritten. -chb */
-int 
+int
 tcic_chip_mem_alloc(pch, size, pcmhp)
 	pcmcia_chipset_handle_t pch;
 	bus_size_t size;
@@ -794,7 +740,7 @@ tcic_chip_mem_alloc(pch, size, pcmhp)
 	bus_space_handle_t memh;
 	bus_addr_t addr;
 	bus_size_t sizepg;
-	int i, mask, mhandle;
+	int i, mask, mhandle, got = 0;
 
 	/* out of sc->memh, allocate as many pages as necessary */
 
@@ -828,11 +774,12 @@ tcic_chip_mem_alloc(pch, size, pcmhp)
 			mhandle = mask << i;
 			addr = h->sc->membase + (i * TCIC_MEM_PAGESIZE);
 			h->sc->subregionmask &= ~(mhandle);
+			got = 1;
 			break;
 		}
 	}
 
-	if (i == (TCIC_MEM_PAGES + 1 - sizepg))
+	if (got == 0)
 		return (1);
 
 	DPRINTF(("tcic_chip_mem_alloc bus addr 0x%lx+0x%lx\n", (u_long) addr,
@@ -849,7 +796,7 @@ tcic_chip_mem_alloc(pch, size, pcmhp)
 }
 
 /* XXX the following routine may need to be rewritten. -chb */
-void 
+void
 tcic_chip_mem_free(pch, pcmhp)
 	pcmcia_chipset_handle_t pch;
 	struct pcmcia_mem_handle *pcmhp;
@@ -859,7 +806,7 @@ tcic_chip_mem_free(pch, pcmhp)
 	h->sc->subregionmask |= pcmhp->mhandle;
 }
 
-void 
+void
 tcic_chip_do_mem_map(h, win)
 	struct tcic_handle *h;
 	int win;
@@ -940,7 +887,7 @@ tcic_chip_do_mem_map(h, win)
 }
 
 /* XXX needs work */
-int 
+int
 tcic_chip_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
 	pcmcia_chipset_handle_t pch;
 	int kind;
@@ -1013,26 +960,24 @@ tcic_chip_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
 	return (0);
 }
 
-void 
+void
 tcic_chip_mem_unmap(pch, window)
 	pcmcia_chipset_handle_t pch;
 	int window;
 {
 	struct tcic_handle *h = (struct tcic_handle *) pch;
-	int reg, hwwin;
+	int hwwin;
 
 	if (window >= h->memwins)
 		panic("tcic_chip_mem_unmap: window out of range");
 
 	hwwin = (window << 1) + h->sock;
-	reg = tcic_read_ind_2(h, TCIC_WR_MCTL_N(hwwin));
-	reg &= ~TCIC_MCTL_ENA;
-	tcic_write_ind_2(h, TCIC_WR_MCTL_N(hwwin), reg);
+	tcic_write_ind_2(h, TCIC_WR_MCTL_N(hwwin), 0);
 
 	h->memalloc &= ~(1 << window);
 }
 
-int 
+int
 tcic_chip_io_alloc(pch, start, size, align, pcihp)
 	pcmcia_chipset_handle_t pch;
 	bus_addr_t start;
@@ -1098,10 +1043,9 @@ tcic_chip_io_alloc(pch, start, size, align, pcihp)
 	return (0);
 }
 
-void 
-tcic_chip_io_free(pch, pcihp)
-	pcmcia_chipset_handle_t pch;
-	struct pcmcia_io_handle *pcihp;
+void
+tcic_chip_io_free(pcmcia_chipset_handle_t pch,
+    struct pcmcia_io_handle *pcihp)
 {
 	bus_space_tag_t iot = pcihp->iot;
 	bus_space_handle_t ioh = pcihp->ioh;
@@ -1116,7 +1060,7 @@ tcic_chip_io_free(pch, pcihp)
 static int tcic_iowidth_map[] =
     { TCIC_ICTL_AUTOSZ, TCIC_ICTL_B8, TCIC_ICTL_B16 };
 
-void 
+void
 tcic_chip_do_io_map(h, win)
 	struct tcic_handle *h;
 	int win;
@@ -1174,7 +1118,7 @@ tcic_chip_do_io_map(h, win)
 #endif
 }
 
-int 
+int
 tcic_chip_io_map(pch, width, offset, size, pcihp, windowp)
 	pcmcia_chipset_handle_t pch;
 	int width;
@@ -1187,7 +1131,7 @@ tcic_chip_io_map(pch, width, offset, size, pcihp, windowp)
 	bus_addr_t ioaddr = pcihp->addr + offset;
 	int i, win;
 #ifdef TCICDEBUG
-	static char *width_names[] = { "auto", "io8", "io16" };
+	static const char *width_names[] = { "auto", "io8", "io16" };
 #endif
 
 	/* XXX Sanity check offset/size. */
@@ -1216,9 +1160,10 @@ tcic_chip_io_map(pch, width, offset, size, pcihp, windowp)
 
 	/* XXX wtf is this doing here? */
 
-	printf(" port 0x%lx", (u_long) ioaddr);
+	printf("%s: port 0x%lx", device_xname(&h->sc->dev), (u_long) ioaddr);
 	if (size > 1)
 		printf("-0x%lx", (u_long) ioaddr + (u_long) size - 1);
+	printf("\n");
 
 	h->io[win].addr = ioaddr;
 	h->io[win].size = size;
@@ -1229,21 +1174,19 @@ tcic_chip_io_map(pch, width, offset, size, pcihp, windowp)
 	return (0);
 }
 
-void 
+void
 tcic_chip_io_unmap(pch, window)
 	pcmcia_chipset_handle_t pch;
 	int window;
 {
 	struct tcic_handle *h = (struct tcic_handle *) pch;
-	int reg, hwwin;
+	int hwwin;
 
 	if (window >= TCIC_IO_WINS)
 		panic("tcic_chip_io_unmap: window out of range");
 
 	hwwin = (window << 1) + h->sock;
-	reg = tcic_read_ind_2(h, TCIC_WR_ICTL_N(hwwin));
-	reg &= ~TCIC_ICTL_ENA;
-	tcic_write_ind_2(h, TCIC_WR_ICTL_N(hwwin), reg);
+	tcic_write_ind_2(h, TCIC_WR_ICTL_N(hwwin), 0);
 
 	h->ioalloc &= ~(1 << window);
 }
@@ -1253,7 +1196,7 @@ tcic_chip_socket_enable(pch)
 	pcmcia_chipset_handle_t pch;
 {
 	struct tcic_handle *h = (struct tcic_handle *) pch;
-	int cardtype, reg, win;
+	int reg, win;
 
 	tcic_sel_sock(h);
 
@@ -1268,6 +1211,18 @@ tcic_chip_socket_enable(pch)
 	reg &= ~(TCIC_ILOCK_CRESET|TCIC_ILOCK_CRESENA);
 	tcic_write_aux_2(h->sc->iot, h->sc->ioh, TCIC_AR_ILOCK, reg);
 	tcic_write_1(h, TCIC_R_SCTRL, 0);	/* clear TCIC_SCTRL_ENA */
+
+	/* zero out the address windows */
+
+	tcic_write_ind_2(h, TCIC_IR_SCF1_N(h->sock), 0);
+	/* writing to WR_MBASE_N disables the window */
+	for (win = 0; win < h->memwins; win++) {
+		tcic_write_ind_2(h, TCIC_WR_MBASE_N((win << 1) + h->sock), 0);
+	}
+	/* writing to WR_IBASE_N disables the window */
+	for (win = 0; win < TCIC_IO_WINS; win++) {
+		tcic_write_ind_2(h, TCIC_WR_IBASE_N((win << 1) + h->sock), 0);
+	}
 
 	/* power up the socket */
 
@@ -1301,36 +1256,6 @@ tcic_chip_socket_enable(pch)
 	tcic_wait_ready(h);
 
 	/* WWW */
-	/* zero out the address windows */
-
-	/* writing to WR_MBASE_N disables the window */
-	for (win = 0; win < h->memwins; win++) {
-		tcic_write_ind_2(h, TCIC_WR_MBASE_N((win<<1)+h->sock), 0);
-	}
-	/* writing to WR_IBASE_N disables the window */
-	for (win = 0; win < TCIC_IO_WINS; win++) {
-		tcic_write_ind_2(h, TCIC_WR_IBASE_N((win<<1)+h->sock), 0);
-	}
-
-	/* set the card type */
-
-	cardtype = pcmcia_card_gettype(h->pcmcia);
-
-#if 0
-	reg = tcic_read_ind_2(h, TCIC_IR_SCF1_N(h->sock));
-	reg &= ~TCIC_SCF1_IRQ_MASK;
-#else
-	reg = 0;
-#endif
-	reg |= ((cardtype == PCMCIA_IFTYPE_IO) ?
-		TCIC_SCF1_IOSTS : 0);
-	reg |= tcic_irqmap[h->ih_irq];		/* enable interrupts */
-	reg &= ~TCIC_SCF1_IRQOD;
-	tcic_write_ind_2(h, TCIC_IR_SCF1_N(h->sock), reg);
-
-	DPRINTF(("%s: tcic_chip_socket_enable %d cardtype %s 0x%02x\n",
-	    h->sc->dev.dv_xname, h->sock,
-	    ((cardtype == PCMCIA_IFTYPE_IO) ? "io" : "mem"), reg));
 
 	/* reinstall all the memory and io mappings */
 
@@ -1341,6 +1266,30 @@ tcic_chip_socket_enable(pch)
 	for (win = 0; win < TCIC_IO_WINS; win++)
 		if (h->ioalloc & (1 << win))
 			tcic_chip_do_io_map(h, win);
+}
+
+void
+tcic_chip_socket_settype(pch, type)
+	pcmcia_chipset_handle_t pch;
+	int type;
+{
+	struct tcic_handle *h = (struct tcic_handle *) pch;
+	int reg;
+
+	tcic_sel_sock(h);
+
+	/* set the card type */
+
+	reg = 0;
+	if (type == PCMCIA_IFTYPE_IO) {
+		reg |= TCIC_SCF1_IOSTS;
+		reg |= tcic_irqmap[h->ih_irq];		/* enable interrupts */
+	}
+	tcic_write_ind_2(h, TCIC_IR_SCF1_N(h->sock), reg);
+
+	DPRINTF(("%s: tcic_chip_socket_enable %d cardtype %s 0x%02x\n",
+	    device_xname(&h->sc->dev), h->sock,
+	    ((type == PCMCIA_IFTYPE_IO) ? "io" : "mem"), reg));
 }
 
 void

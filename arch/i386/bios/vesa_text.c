@@ -1,7 +1,7 @@
-/* $NetBSD: vesa_text.c,v 1.7 2006/02/19 14:59:22 thorpej Exp $ */
+/* $NetBSD: vesa_text.c,v 1.9 2008/07/09 20:40:16 joerg Exp $ */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vesa_text.c,v 1.7 2006/02/19 14:59:22 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vesa_text.c,v 1.9 2008/07/09 20:40:16 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -14,38 +14,32 @@ __KERNEL_RCSID(0, "$NetBSD: vesa_text.c,v 1.7 2006/02/19 14:59:22 thorpej Exp $"
 #include <arch/i386/bios/vesabios.h>
 #include <arch/i386/bios/vesabiosreg.h>
 
-static int vesatext_match(struct device *, struct cfdata *, void *);
-static void vesatext_attach(struct device *, struct device *, void *);
+static int vesatext_match(device_t, cfdata_t, void *);
+static void vesatext_attach(device_t, device_t, void *);
 
 struct vesatextsc {
-	struct device sc_dev;
 	int *sc_modes;
 	int sc_nmodes;
 };
 
-CFATTACH_DECL(vesatext, sizeof(struct vesatextsc),
+CFATTACH_DECL_NEW(vesatext, sizeof(struct vesatextsc),
     vesatext_match, vesatext_attach, NULL, NULL);
 
 static int
-vesatext_match(parent, match, aux)
-	struct device *parent;
-	struct cfdata *match;
-	void *aux;
+vesatext_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct vesabiosdev_attach_args *vaa = aux;
 
 	if (strcmp(vaa->vbaa_type, "text"))
-		return (0);
+		return 0;
 
-	return (1);
+	return 1;
 }
 
 static void
-vesatext_attach(parent, dev, aux)
-	struct device *parent, *dev;
-	void *aux;
+vesatext_attach(device_t parent, device_t self, void *aux)
 {
-	struct vesatextsc *sc = (struct vesatextsc *)dev;
+	struct vesatextsc *sc = device_private(self);
 	struct vesabiosdev_attach_args *vaa = aux;
 	int i;
 

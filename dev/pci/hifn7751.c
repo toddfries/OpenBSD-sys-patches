@@ -1,4 +1,6 @@
-/*	$OpenBSD: hifn7751.c,v 1.154 2007/10/01 15:34:48 krw Exp $	*/
+/*	$NetBSD: hifn7751.c,v 1.37 2008/04/10 19:13:36 cegger Exp $	*/
+/*	$FreeBSD: hifn7751.c,v 1.5.2.7 2003/10/08 23:52:00 sam Exp $ */
+/*	$OpenBSD: hifn7751.c,v 1.140 2003/08/01 17:55:54 deraadt Exp $	*/
 
 /*
  * Invertex AEON / Hifn 7751 driver
@@ -7,7 +9,7 @@
  * Copyright (c) 2000-2001 Network Security Technologies, Inc.
  *			http://www.netsec.net
  * Copyright (c) 2003 Hifn Inc.
-
+ *
  * This driver is based on a previous driver by Invertex, for which they
  * requested:  Please send any comments, feedback, bug-fixes, or feature
  * requests to software@invertex.com.
@@ -42,8 +44,18 @@
  */
 
 /*
- * Driver for various Hifn encryption processors.
+ * Driver for various  Hifn pre-HIPP encryption processors.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hifn7751.c,v 1.37 2008/04/10 19:13:36 cegger Exp $");
+
+#include "rnd.h"
+
+#if NRND == 0
+#error hifn7751 requires rnd pseudo-devices
+#endif
+
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,8 +66,16 @@
 #include <sys/mbuf.h>
 #include <sys/device.h>
 
-#include <crypto/cryptodev.h>
+#include <uvm/uvm_extern.h>
+
+
+#ifdef __OpenBSD__
+#include <crypto/crypto.h>
 #include <dev/rndvar.h>
+#else
+#include <opencrypto/cryptodev.h>
+#include <sys/rnd.h>
+#endif
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -66,120 +86,205 @@
 
 #undef HIFN_DEBUG
 
+#ifdef __NetBSD__
+#define M_DUP_PKTHDR M_COPY_PKTHDR	/* XXX */
+#endif
+
+#ifdef HIFN_DEBUG
+extern int hifn_debug;		/* patchable */
+int hifn_debug = 1;
+#endif
+
+#ifdef __OpenBSD__
+#define HAVE_CRYPTO_LZS		/* OpenBSD OCF supports CRYPTO_COMP_LZS */
+#endif
+
 /*
  * Prototypes and count for the pci_device structure
  */
-int hifn_probe(struct device *, void *, void *);
-void hifn_attach(struct device *, struct device *, void *);
+#ifdef __OpenBSD__
+static int hifn_probe((struct device *, void *, void *);
+#else
+static int hifn_probe(struct device *, struct cfdata *, void *);
+#endif
+static void hifn_attach(struct device *, struct device *, void *);
 
-struct cfattach hifn_ca = {
-	sizeof(struct hifn_softc), hifn_probe, hifn_attach,
-};
+CFATTACH_DECL(hifn, sizeof(struct hifn_softc),
+    hifn_probe, hifn_attach, NULL, NULL);
 
+#ifdef __OpenBSD__
 struct cfdriver hifn_cd = {
 	0, "hifn", DV_DULL
 };
+#endif
 
-void	hifn_reset_board(struct hifn_softc *, int);
-void	hifn_reset_puc(struct hifn_softc *);
-void	hifn_puc_wait(struct hifn_softc *);
-int	hifn_enable_crypto(struct hifn_softc *, pcireg_t);
-void	hifn_set_retry(struct hifn_softc *);
-void	hifn_init_dma(struct hifn_softc *);
-void	hifn_init_pci_registers(struct hifn_softc *);
-int	hifn_sramsize(struct hifn_softc *);
-int	hifn_dramsize(struct hifn_softc *);
-int	hifn_ramtype(struct hifn_softc *);
-void	hifn_sessions(struct hifn_softc *);
-int	hifn_intr(void *);
-u_int	hifn_write_command(struct hifn_command *, u_int8_t *);
-u_int32_t hifn_next_signature(u_int32_t a, u_int cnt);
-int	hifn_newsession(u_int32_t *, struct cryptoini *);
-int	hifn_freesession(u_int64_t);
-int	hifn_process(struct cryptop *);
-void	hifn_callback(struct hifn_softc *, struct hifn_command *, u_int8_t *);
-int	hifn_crypto(struct hifn_softc *, struct hifn_command *,
-    struct cryptop *);
-int	hifn_readramaddr(struct hifn_softc *, int, u_int8_t *);
-int	hifn_writeramaddr(struct hifn_softc *, int, u_int8_t *);
-int	hifn_dmamap_aligned(bus_dmamap_t);
-int	hifn_dmamap_load_src(struct hifn_softc *, struct hifn_command *);
-int	hifn_dmamap_load_dst(struct hifn_softc *, struct hifn_command *);
-int	hifn_init_pubrng(struct hifn_softc *);
-void	hifn_rng(void *);
-void	hifn_tick(void *);
-void	hifn_abort(struct hifn_softc *);
-void	hifn_alloc_slot(struct hifn_softc *, int *, int *, int *, int *);
-void	hifn_write_4(struct hifn_softc *, int, bus_size_t, u_int32_t);
-u_int32_t hifn_read_4(struct hifn_softc *, int, bus_size_t);
-int	hifn_compression(struct hifn_softc *, struct cryptop *,
-    struct hifn_command *);
-struct mbuf *hifn_mkmbuf_chain(int, struct mbuf *);
-int	hifn_compress_enter(struct hifn_softc *, struct hifn_command *);
-void	hifn_callback_comp(struct hifn_softc *, struct hifn_command *,
-    u_int8_t *);
+static void	hifn_reset_board(struct hifn_softc *, int);
+static void	hifn_reset_puc(struct hifn_softc *);
+static void	hifn_puc_wait(struct hifn_softc *);
+static const char *hifn_enable_crypto(struct hifn_softc *, pcireg_t);
+static void	hifn_set_retry(struct hifn_softc *);
+static void	hifn_init_dma(struct hifn_softc *);
+static void	hifn_init_pci_registers(struct hifn_softc *);
+static int	hifn_sramsize(struct hifn_softc *);
+static int	hifn_dramsize(struct hifn_softc *);
+static int	hifn_ramtype(struct hifn_softc *);
+static void	hifn_sessions(struct hifn_softc *);
+static int	hifn_intr(void *);
+static u_int	hifn_write_command(struct hifn_command *, u_int8_t *);
+static u_int32_t hifn_next_signature(u_int32_t a, u_int cnt);
+static int	hifn_newsession(void*, u_int32_t *, struct cryptoini *);
+static int	hifn_freesession(void*, u_int64_t);
+static int	hifn_process(void*, struct cryptop *, int);
+static void	hifn_callback(struct hifn_softc *, struct hifn_command *,
+			      u_int8_t *);
+static int	hifn_crypto(struct hifn_softc *, struct hifn_command *,
+			    struct cryptop*, int);
+static int	hifn_readramaddr(struct hifn_softc *, int, u_int8_t *);
+static int	hifn_writeramaddr(struct hifn_softc *, int, u_int8_t *);
+static int	hifn_dmamap_aligned(bus_dmamap_t);
+static int	hifn_dmamap_load_src(struct hifn_softc *,
+				     struct hifn_command *);
+static int	hifn_dmamap_load_dst(struct hifn_softc *,
+				     struct hifn_command *);
+static int	hifn_init_pubrng(struct hifn_softc *);
+static void	hifn_rng(void *);
+static void	hifn_tick(void *);
+static void	hifn_abort(struct hifn_softc *);
+static void	hifn_alloc_slot(struct hifn_softc *, int *, int *, int *,
+				int *);
+static void	hifn_write_4(struct hifn_softc *, int, bus_size_t, u_int32_t);
+static u_int32_t hifn_read_4(struct hifn_softc *, int, bus_size_t);
+#ifdef	HAVE_CRYPTO_LZS
+static int	hifn_compression(struct hifn_softc *, struct cryptop *,
+				 struct hifn_command *);
+static struct mbuf *hifn_mkmbuf_chain(int, struct mbuf *);
+static int	hifn_compress_enter(struct hifn_softc *, struct hifn_command *);
+static void	hifn_callback_comp(struct hifn_softc *, struct hifn_command *,
+				   u_int8_t *);
+#endif	/* HAVE_CRYPTO_LZS */
+
 
 struct hifn_stats hifnstats;
 
-const struct pci_matchid hifn_devices[] = {
-	{ PCI_VENDOR_INVERTEX, PCI_PRODUCT_INVERTEX_AEON },
-	{ PCI_VENDOR_HIFN, PCI_PRODUCT_HIFN_7751 },
-	{ PCI_VENDOR_HIFN, PCI_PRODUCT_HIFN_7811 },
-	{ PCI_VENDOR_HIFN, PCI_PRODUCT_HIFN_7951 },
-	{ PCI_VENDOR_HIFN, PCI_PRODUCT_HIFN_7955 },
-	{ PCI_VENDOR_HIFN, PCI_PRODUCT_HIFN_7956 },
-	{ PCI_VENDOR_NETSEC, PCI_PRODUCT_NETSEC_7751 },
+static const struct hifn_product {
+	pci_vendor_id_t		hifn_vendor;
+	pci_product_id_t	hifn_product;
+	int			hifn_flags;
+	const char		*hifn_name;
+} hifn_products[] = {
+	{ PCI_VENDOR_INVERTEX,	PCI_PRODUCT_INVERTEX_AEON,
+	  0,
+	  "Invertex AEON",
+	},
+
+	{ PCI_VENDOR_HIFN,	PCI_PRODUCT_HIFN_7751,
+	  0,
+	  "Hifn 7751",
+	},
+	{ PCI_VENDOR_NETSEC,	PCI_PRODUCT_NETSEC_7751,
+	  0,
+	  "Hifn 7751 (NetSec)"
+	},
+
+	{ PCI_VENDOR_HIFN,	PCI_PRODUCT_HIFN_7811,
+	  HIFN_IS_7811 | HIFN_HAS_RNG | HIFN_HAS_LEDS | HIFN_NO_BURSTWRITE,
+	  "Hifn 7811",
+	},
+
+	{ PCI_VENDOR_HIFN,	PCI_PRODUCT_HIFN_7951,
+	  HIFN_HAS_RNG | HIFN_HAS_PUBLIC,
+	  "Hifn 7951",
+	},
+
+	{ PCI_VENDOR_HIFN,	PCI_PRODUCT_HIFN_7955,
+	  HIFN_HAS_RNG | HIFN_HAS_PUBLIC | HIFN_IS_7956 | HIFN_HAS_AES,
+	  "Hifn 7955",
+	},
+
+	{ PCI_VENDOR_HIFN,	PCI_PRODUCT_HIFN_7956,
+	  HIFN_HAS_RNG | HIFN_HAS_PUBLIC | HIFN_IS_7956 | HIFN_HAS_AES,
+	  "Hifn 7956",
+	},
+
+
+	{ 0,			0,
+	  0,
+	  NULL
+	}
 };
 
-int
-hifn_probe(struct device *parent, void *match, void *aux)
+static const struct hifn_product *
+hifn_lookup(const struct pci_attach_args *pa)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, hifn_devices,
-	    sizeof(hifn_devices)/sizeof(hifn_devices[0])));
+	const struct hifn_product *hp;
+
+	for (hp = hifn_products; hp->hifn_name != NULL; hp++) {
+		if (PCI_VENDOR(pa->pa_id) == hp->hifn_vendor &&
+		    PCI_PRODUCT(pa->pa_id) == hp->hifn_product)
+			return (hp);
+	}
+	return (NULL);
 }
 
-void 
+static int
+hifn_probe(struct device *parent, struct cfdata *match,
+    void *aux)
+{
+	struct pci_attach_args *pa = (struct pci_attach_args *) aux;
+
+	if (hifn_lookup(pa) != NULL)
+		return (1);
+
+	return (0);
+}
+
+static void
 hifn_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct hifn_softc *sc = (struct hifn_softc *)self;
 	struct pci_attach_args *pa = aux;
+	const struct hifn_product *hp;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
+	const char *hifncap;
 	char rbase;
 	bus_size_t iosize0, iosize1;
+	u_int32_t cmd;
 	u_int16_t ena;
+	bus_dma_segment_t seg;
+	bus_dmamap_t dmamap;
 	int rseg;
-	caddr_t kva;
-	int algs[CRYPTO_ALGORITHM_MAX + 1];
+	void *kva;
+
+	hp = hifn_lookup(pa);
+	if (hp == NULL) {
+		printf("\n");
+		panic("hifn_attach: impossible");
+	}
+
+	aprint_naive(": Crypto processor\n");
+	aprint_normal(": %s, rev. %d\n", hp->hifn_name,
+	    PCI_REVISION(pa->pa_class));
 
 	sc->sc_pci_pc = pa->pa_pc;
 	sc->sc_pci_tag = pa->pa_tag;
 
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_HIFN &&
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_HIFN_7951))
-		sc->sc_flags = HIFN_HAS_RNG | HIFN_HAS_PUBLIC;
+	sc->sc_flags = hp->hifn_flags;
 
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_HIFN &&
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_HIFN_7955 ||
-	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_HIFN_7956))
-		sc->sc_flags = HIFN_IS_7956 | HIFN_HAS_AES | HIFN_HAS_RNG |
-		    HIFN_HAS_PUBLIC;
-
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_HIFN &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_HIFN_7811)
-		sc->sc_flags |= HIFN_IS_7811 | HIFN_HAS_RNG | HIFN_HAS_LEDS |
-		    HIFN_NO_BURSTWRITE;
+	cmd = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	cmd |= PCI_COMMAND_MASTER_ENABLE;
+	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, cmd);
 
 	if (pci_mapreg_map(pa, HIFN_BAR0, PCI_MAPREG_TYPE_MEM, 0,
-	    &sc->sc_st0, &sc->sc_sh0, NULL, &iosize0, 0)) {
-		printf(": can't find mem space %d\n", 0);
+	    &sc->sc_st0, &sc->sc_sh0, NULL, &iosize0)) {
+		aprint_error_dev(&sc->sc_dv, "can't map mem space %d\n", 0);
 		return;
 	}
 
 	if (pci_mapreg_map(pa, HIFN_BAR1, PCI_MAPREG_TYPE_MEM, 0,
-	    &sc->sc_st1, &sc->sc_sh1, NULL, &iosize1, 0)) {
-		printf(": can't find mem space %d\n", 1);
+	    &sc->sc_st1, &sc->sc_sh1, NULL, &iosize1)) {
+		aprint_error_dev(&sc->sc_dv, "can't find mem space %d\n", 1);
 		goto fail_io0;
 	}
 
@@ -191,40 +296,41 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	sc->sc_dmat = pa->pa_dmat;
-	if (bus_dmamap_create(sc->sc_dmat, sizeof(*sc->sc_dma), 1,
-	    sizeof(*sc->sc_dma), 0, BUS_DMA_NOWAIT, &sc->sc_dmamap)) {
-		printf(": can't create dma map\n");
-		goto fail_io1;
-	}
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(*sc->sc_dma), PAGE_SIZE, 0,
-	    sc->sc_dmasegs, 1, &sc->sc_dmansegs, BUS_DMA_NOWAIT)) {
-		printf(": can't alloc dma buffer\n");
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_dmamap);
+	    &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+		aprint_error_dev(&sc->sc_dv, "can't alloc DMA buffer\n");
 		goto fail_io1;
-	}
-	if (bus_dmamem_map(sc->sc_dmat, sc->sc_dmasegs, sc->sc_dmansegs,
-	    sizeof(*sc->sc_dma), &kva, BUS_DMA_NOWAIT)) {
-		printf(": can't map dma buffers (%lu bytes)\n",
+        }
+	if (bus_dmamem_map(sc->sc_dmat, &seg, rseg, sizeof(*sc->sc_dma), &kva,
+	    BUS_DMA_NOWAIT)) {
+		aprint_error_dev(&sc->sc_dv, "can't map DMA buffers (%lu bytes)\n",
 		    (u_long)sizeof(*sc->sc_dma));
-		bus_dmamem_free(sc->sc_dmat, sc->sc_dmasegs, sc->sc_dmansegs);
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_dmamap);
+		bus_dmamem_free(sc->sc_dmat, &seg, rseg);
 		goto fail_io1;
 	}
-	if (bus_dmamap_load(sc->sc_dmat, sc->sc_dmamap, kva,
-	    sizeof(*sc->sc_dma), NULL, BUS_DMA_NOWAIT)) {
-		printf(": can't load dma map\n");
+	if (bus_dmamap_create(sc->sc_dmat, sizeof(*sc->sc_dma), 1,
+	    sizeof(*sc->sc_dma), 0, BUS_DMA_NOWAIT, &dmamap)) {
+		aprint_error_dev(&sc->sc_dv, "can't create DMA map\n");
 		bus_dmamem_unmap(sc->sc_dmat, kva, sizeof(*sc->sc_dma));
-		bus_dmamem_free(sc->sc_dmat, sc->sc_dmasegs, sc->sc_dmansegs);
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_dmamap);
+		bus_dmamem_free(sc->sc_dmat, &seg, rseg);
 		goto fail_io1;
 	}
+	if (bus_dmamap_load(sc->sc_dmat, dmamap, kva, sizeof(*sc->sc_dma),
+	    NULL, BUS_DMA_NOWAIT)) {
+		aprint_error_dev(&sc->sc_dv, "can't load DMA map\n");
+		bus_dmamap_destroy(sc->sc_dmat, dmamap);
+		bus_dmamem_unmap(sc->sc_dmat, kva, sizeof(*sc->sc_dma));
+		bus_dmamem_free(sc->sc_dmat, &seg, rseg);
+		goto fail_io1;
+	}
+	sc->sc_dmamap = dmamap;
 	sc->sc_dma = (struct hifn_dma *)kva;
 	bzero(sc->sc_dma, sizeof(*sc->sc_dma));
 
 	hifn_reset_board(sc, 0);
 
-	if (hifn_enable_crypto(sc, pa->pa_id) != 0) {
-		printf("%s: crypto enabling failed\n", sc->sc_dv.dv_xname);
+	if ((hifncap = hifn_enable_crypto(sc, pa->pa_id)) == NULL) {
+		aprint_error_dev(&sc->sc_dv, "crypto enabling failed\n");
 		goto fail_mem;
 	}
 	hifn_reset_puc(sc);
@@ -232,6 +338,7 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 	hifn_init_dma(sc);
 	hifn_init_pci_registers(sc);
 
+	/* XXX can't dynamically determine ram type for 795x; force dram */
 	if (sc->sc_flags & HIFN_IS_7956)
 		sc->sc_drammodel = 1;
 	else if (hifn_ramtype(sc))
@@ -252,17 +359,21 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_ramsize >>= 1;
 
 	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
+		aprint_error_dev(&sc->sc_dv, "couldn't map interrupt\n");
 		goto fail_mem;
 	}
 	intrstr = pci_intr_string(pc, ih);
+#ifdef	__OpenBSD__
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, hifn_intr, sc,
 	    self->dv_xname);
+#else
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, hifn_intr, sc);
+#endif
 	if (sc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt");
+		aprint_error_dev(&sc->sc_dv, "couldn't establish interrupt\n");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		goto fail_mem;
 	}
 
@@ -274,37 +385,44 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 		rbase = 'M';
 		rseg /= 1024;
 	}
-	printf("%d%cB %cram, %s\n", rseg, rbase,
+	aprint_normal_dev(&sc->sc_dv, "%s, %d%cB %cram, interrupting at %s\n",
+	    hifncap, rseg, rbase,
 	    sc->sc_drammodel ? 'd' : 's', intrstr);
 
 	sc->sc_cid = crypto_get_driverid(0);
-	if (sc->sc_cid < 0)
+	if (sc->sc_cid < 0) {
+		aprint_error_dev(&sc->sc_dv, "couldn't get crypto driver id\n");
 		goto fail_intr;
+	}
 
 	WRITE_REG_0(sc, HIFN_0_PUCNFG,
 	    READ_REG_0(sc, HIFN_0_PUCNFG) | HIFN_PUCNFG_CHIPID);
 	ena = READ_REG_0(sc, HIFN_0_PUSTAT) & HIFN_PUSTAT_CHIPENA;
 
-	bzero(algs, sizeof(algs));
-
-	algs[CRYPTO_LZS_COMP] = CRYPTO_ALG_FLAG_SUPPORTED;
 	switch (ena) {
 	case HIFN_PUSTAT_ENA_2:
-		algs[CRYPTO_3DES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
-		algs[CRYPTO_ARC4] = CRYPTO_ALG_FLAG_SUPPORTED;
+		crypto_register(sc->sc_cid, CRYPTO_3DES_CBC, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		crypto_register(sc->sc_cid, CRYPTO_ARC4, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		if (sc->sc_flags & HIFN_HAS_AES)
+			crypto_register(sc->sc_cid, CRYPTO_AES_CBC,  0, 0,
+				hifn_newsession, hifn_freesession,
+				hifn_process, sc);
 		/*FALLTHROUGH*/
 	case HIFN_PUSTAT_ENA_1:
-		algs[CRYPTO_MD5] = CRYPTO_ALG_FLAG_SUPPORTED;
-		algs[CRYPTO_SHA1] = CRYPTO_ALG_FLAG_SUPPORTED;
-		algs[CRYPTO_MD5_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
-		algs[CRYPTO_SHA1_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
-		algs[CRYPTO_DES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
+		crypto_register(sc->sc_cid, CRYPTO_MD5, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		crypto_register(sc->sc_cid, CRYPTO_SHA1, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		crypto_register(sc->sc_cid, CRYPTO_MD5_HMAC_96, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		crypto_register(sc->sc_cid, CRYPTO_SHA1_HMAC_96, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		crypto_register(sc->sc_cid, CRYPTO_DES_CBC, 0, 0,
+		    hifn_newsession, hifn_freesession, hifn_process, sc);
+		break;
 	}
-	if (sc->sc_flags & HIFN_HAS_AES)
-		algs[CRYPTO_AES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
-
-	crypto_register(sc->sc_cid, algs, hifn_newsession,
-	    hifn_freesession, hifn_process);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, 0,
 	    sc->sc_dmamap->dm_mapsize,
@@ -313,18 +431,22 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_flags & (HIFN_HAS_PUBLIC | HIFN_HAS_RNG))
 		hifn_init_pubrng(sc);
 
+#ifdef	__OpenBSD__
 	timeout_set(&sc->sc_tickto, hifn_tick, sc);
 	timeout_add(&sc->sc_tickto, hz);
-
+#else
+	callout_init(&sc->sc_tickto, 0);
+	callout_reset(&sc->sc_tickto, hz, hifn_tick, sc);
+#endif
 	return;
 
 fail_intr:
 	pci_intr_disestablish(pc, sc->sc_ih);
 fail_mem:
-	bus_dmamap_unload(sc->sc_dmat, sc->sc_dmamap);
+	bus_dmamap_unload(sc->sc_dmat, dmamap);
+	bus_dmamap_destroy(sc->sc_dmat, dmamap);
 	bus_dmamem_unmap(sc->sc_dmat, kva, sizeof(*sc->sc_dma));
-	bus_dmamem_free(sc->sc_dmat, sc->sc_dmasegs, sc->sc_dmansegs);
-	bus_dmamap_destroy(sc->sc_dmat, sc->sc_dmamap);
+	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
 
 	/* Turn off DMA polling */
 	WRITE_REG_1(sc, HIFN_1_DMA_CNFG, HIFN_DMACNFG_MSTRESET |
@@ -336,7 +458,7 @@ fail_io0:
 	bus_space_unmap(sc->sc_st0, sc->sc_sh0, iosize0);
 }
 
-int
+static int
 hifn_init_pubrng(struct hifn_softc *sc)
 {
 	u_int32_t r;
@@ -356,7 +478,7 @@ hifn_init_pubrng(struct hifn_softc *sc)
 
 		if (i == 100) {
 			printf("%s: public key init failed\n",
-			    sc->sc_dv.dv_xname);
+			    device_xname(&sc->sc_dv));
 			return (1);
 		}
 	}
@@ -378,13 +500,41 @@ hifn_init_pubrng(struct hifn_softc *sc)
 			    READ_REG_1(sc, HIFN_1_RNG_CONFIG) |
 			    HIFN_RNGCFG_ENA);
 
+		/*
+		 * The Hifn RNG documentation states that at their
+		 * recommended "conservative" RNG config values,
+		 * the RNG must warm up for 0.4s before providing
+		 * data that meet their worst-case estimate of 0.06
+		 * bits of random data per output register bit.
+		 */
+		DELAY(4000);
+
+#ifdef __NetBSD__
+		/*
+		 * XXX Careful!  The use of RND_FLAG_NO_ESTIMATE
+		 * XXX here is unobvious: we later feed raw bits
+		 * XXX into the "entropy pool" with rnd_add_data,
+		 * XXX explicitly supplying an entropy estimate.
+		 * XXX In this context, NO_ESTIMATE serves only
+		 * XXX to prevent rnd_add_data from trying to
+		 * XXX use the *time at which we added the data*
+		 * XXX as entropy, which is not a good idea since
+		 * XXX we add data periodically from a callout.
+		 */
+		rnd_attach_source(&sc->sc_rnd_source, device_xname(&sc->sc_dv),
+				  RND_TYPE_RNG, RND_FLAG_NO_ESTIMATE);
+#endif
+
 		sc->sc_rngfirst = 1;
 		if (hz >= 100)
 			sc->sc_rnghz = hz / 100;
 		else
 			sc->sc_rnghz = 1;
+#ifdef	__OpenBSD__
 		timeout_set(&sc->sc_rngto, hifn_rng, sc);
-		timeout_add(&sc->sc_rngto, sc->sc_rnghz);
+#else	/* !__OpenBSD__ */
+		callout_init(&sc->sc_rngto, 0);
+#endif	/* !__OpenBSD__ */
 	}
 
 	/* Enable public key engine, if available */
@@ -394,22 +544,30 @@ hifn_init_pubrng(struct hifn_softc *sc)
 		WRITE_REG_1(sc, HIFN_1_DMA_IER, sc->sc_dmaier);
 	}
 
+	/* Call directly into the RNG once to prime the pool. */
+	hifn_rng(sc);   /* Sets callout/timeout at end */
+
 	return (0);
 }
 
-void
+static void
 hifn_rng(void *vsc)
 {
 	struct hifn_softc *sc = vsc;
-	u_int32_t num1, sts, num2;
+#ifdef __NetBSD__
+	u_int32_t num[HIFN_RNG_BITSPER * RND_ENTROPY_THRESHOLD];
+#else
+	u_int32_t num[2];
+#endif
+	u_int32_t sts;
 	int i;
 
 	if (sc->sc_flags & HIFN_IS_7811) {
-		for (i = 0; i < 5; i++) {
+		for (i = 0; i < 5; i++) {	/* XXX why 5? */
 			sts = READ_REG_1(sc, HIFN_1_7811_RNGSTS);
 			if (sts & HIFN_7811_RNGSTS_UFL) {
 				printf("%s: RNG underflow: disabling\n",
-				    sc->sc_dv.dv_xname);
+				    device_xname(&sc->sc_dv));
 				return;
 			}
 			if ((sts & HIFN_7811_RNGSTS_RDY) == 0)
@@ -419,28 +577,95 @@ hifn_rng(void *vsc)
 			 * There are at least two words in the RNG FIFO
 			 * at this point.
 			 */
-			num1 = READ_REG_1(sc, HIFN_1_7811_RNGDAT);
-			num2 = READ_REG_1(sc, HIFN_1_7811_RNGDAT);
+			num[0] = READ_REG_1(sc, HIFN_1_7811_RNGDAT);
+			num[1] = READ_REG_1(sc, HIFN_1_7811_RNGDAT);
+
 			if (sc->sc_rngfirst)
 				sc->sc_rngfirst = 0;
-			else {
-				add_true_randomness(num1);
-				add_true_randomness(num2);
-			}
+#ifdef __NetBSD__
+			rnd_add_data(&sc->sc_rnd_source, num,
+			    2 * sizeof(num[0]),
+			    (2 * sizeof(num[0]) * NBBY) /
+			    HIFN_RNG_BITSPER);
+#else
+			/*
+			 * XXX This is a really bad idea.
+			 * XXX Hifn estimate as little as 0.06
+			 * XXX actual bits of entropy per output
+			 * XXX register bit.  How can we tell the
+			 * XXX kernel RNG subsystem we're handing
+			 * XXX it 64 "true" random bits, for any
+			 * XXX sane value of "true"?
+			 * XXX
+			 * XXX The right thing to do here, if we
+			 * XXX cannot supply an estimate ourselves,
+			 * XXX would be to hash the bits locally.
+			 */
+			add_true_randomness(num[0]);
+			add_true_randomness(num[1]);
+#endif
+				
 		}
 	} else {
-		num1 = READ_REG_1(sc, HIFN_1_RNG_DATA);
+#ifdef __NetBSD__
+		/* First time through, try to help fill the pool. */
+		int nwords = sc->sc_rngfirst ?
+		    sizeof(num) / sizeof(num[0]) : 4;
+#else
+		int nwords = 2;
+#endif
+		/*
+		 * We must be *extremely* careful here.  The Hifn
+		 * 795x differ from the published 6500 RNG design
+		 * in more ways than the obvious lack of the output
+		 * FIFO and LFSR control registers.  In fact, there
+		 * is only one LFSR, instead of the 6500's two, and
+		 * it's 32 bits, not 31.
+		 *
+		 * Further, a block diagram obtained from Hifn shows
+		 * a very curious latching of this register: the LFSR
+		 * rotates at a frequency of RNG_Clk / 8, but the
+		 * RNG_Data register is latched at a frequency of
+		 * RNG_Clk, which means that it is possible for
+		 * consecutive reads of the RNG_Data register to read
+		 * identical state from the LFSR.  The simplest
+		 * workaround seems to be to read eight samples from
+		 * the register for each one that we use.  Since each
+		 * read must require at least one PCI cycle, and
+		 * RNG_Clk is at least PCI_Clk, this is safe.
+		 */
 
-		if (sc->sc_rngfirst)
+
+		if (sc->sc_rngfirst) {
 			sc->sc_rngfirst = 0;
-		else
-			add_true_randomness(num1);
+		}
+		
+
+		for(i = 0 ; i < nwords * 8; i++)
+		{
+			volatile u_int32_t regtmp;
+			regtmp = READ_REG_1(sc, HIFN_1_RNG_DATA);
+			num[i / 8] = regtmp;
+		}
+#ifdef __NetBSD__
+		rnd_add_data(&sc->sc_rnd_source, num,
+		    nwords * sizeof(num[0]),
+		    (nwords * sizeof(num[0]) * NBBY) /
+		    HIFN_RNG_BITSPER);
+#else
+		/* XXX a bad idea; see 7811 block above */
+		add_true_randomness(num[0]);
+#endif
 	}
 
+#ifdef	__OpenBSD__
 	timeout_add(&sc->sc_rngto, sc->sc_rnghz);
+#else
+	callout_reset(&sc->sc_rngto, sc->sc_rnghz, hifn_rng, sc);
+#endif
 }
 
-void
+static void
 hifn_puc_wait(struct hifn_softc *sc)
 {
 	int i;
@@ -451,13 +676,13 @@ hifn_puc_wait(struct hifn_softc *sc)
 			break;
 	}
 	if (!i)
-		printf("%s: proc unit did not reset\n", sc->sc_dv.dv_xname);
+		printf("%s: proc unit did not reset\n", device_xname(&sc->sc_dv));
 }
 
 /*
  * Reset the processing unit.
  */
-void
+static void
 hifn_reset_puc(struct hifn_softc *sc)
 {
 	/* Reset processing unit */
@@ -465,7 +690,7 @@ hifn_reset_puc(struct hifn_softc *sc)
 	hifn_puc_wait(sc);
 }
 
-void
+static void
 hifn_set_retry(struct hifn_softc *sc)
 {
 	u_int32_t r;
@@ -479,7 +704,7 @@ hifn_set_retry(struct hifn_softc *sc)
  * Resets the board.  Values in the regesters are left as is
  * from the reset (i.e. initial values are assigned elsewhere).
  */
-void
+static void
 hifn_reset_board(struct hifn_softc *sc, int full)
 {
 	u_int32_t reg;
@@ -529,7 +754,7 @@ hifn_reset_board(struct hifn_softc *sc, int full)
 	}
 }
 
-u_int32_t
+static u_int32_t
 hifn_next_signature(u_int32_t a, u_int cnt)
 {
 	int i;
@@ -551,11 +776,11 @@ hifn_next_signature(u_int32_t a, u_int cnt)
 	return a;
 }
 
-struct pci2id {
+static struct pci2id {
 	u_short		pci_vendor;
 	u_short		pci_prod;
 	char		card_id[13];
-} pci2id[] = {
+} const pci2id[] = {
 	{
 		PCI_VENDOR_HIFN,
 		PCI_PRODUCT_HIFN_7951,
@@ -604,11 +829,11 @@ struct pci2id {
  * "hifn_enable_crypto" is called to enable it.  The check is important,
  * as enabling crypto twice will lock the board.
  */
-int 
+static const char *
 hifn_enable_crypto(struct hifn_softc *sc, pcireg_t pciid)
 {
 	u_int32_t dmacfg, ramcfg, encl, addr, i;
-	char *offtbl = NULL;
+	const char *offtbl = NULL;
 
 	for (i = 0; i < sizeof(pci2id)/sizeof(pci2id[0]); i++) {
 		if (pci2id[i].pci_vendor == PCI_VENDOR(pciid) &&
@@ -620,9 +845,9 @@ hifn_enable_crypto(struct hifn_softc *sc, pcireg_t pciid)
 
 	if (offtbl == NULL) {
 #ifdef HIFN_DEBUG
-		printf(": Unknown card!\n");
+		aprint_debug_dev(&sc->sc_dv, "Unknown card!\n");
 #endif
-		return (1);
+		return (NULL);
 	}
 
 	ramcfg = READ_REG_0(sc, HIFN_0_PUCNFG);
@@ -642,16 +867,16 @@ hifn_enable_crypto(struct hifn_softc *sc, pcireg_t pciid)
 	 */
 	if (encl == HIFN_PUSTAT_ENA_1 || encl == HIFN_PUSTAT_ENA_2) {
 #ifdef HIFN_DEBUG
-		printf(": Strong Crypto already enabled!\n");
+		aprint_debug_dev(&sc->sc_dv, "Strong Crypto already enabled!\n");
 #endif
 		goto report;
 	}
 
 	if (encl != 0 && encl != HIFN_PUSTAT_ENA_0) {
 #ifdef HIFN_DEBUG
-		printf(": Unknown encryption level\n");
+		aprint_debug_dev(&sc->sc_dv, "Unknown encryption level\n");
 #endif
-		return 1;
+		return (NULL);
 	}
 
 	WRITE_REG_1(sc, HIFN_1_DMA_CNFG, HIFN_DMACNFG_UNLOCK |
@@ -674,9 +899,9 @@ hifn_enable_crypto(struct hifn_softc *sc, pcireg_t pciid)
 
 #ifdef HIFN_DEBUG
 	if (encl != HIFN_PUSTAT_ENA_1 && encl != HIFN_PUSTAT_ENA_2)
-		printf(": engine is permanently locked until next system reset");
+		aprint_debug("Encryption engine is permanently locked until next system reset.");
 	else
-		printf(": engine enabled successfully!");
+		aprint_debug("Encryption engine enabled successfully!");
 #endif
 
 report:
@@ -685,35 +910,28 @@ report:
 
 	switch (encl) {
 	case HIFN_PUSTAT_ENA_0:
-		offtbl = "LZS";
-		break;
-	case HIFN_PUSTAT_ENA_1:
-		offtbl = "LZS DES";
-		break;
-	case HIFN_PUSTAT_ENA_2:
-		offtbl = "LZS 3DES ARC4 MD5 SHA1";
-		break;
-	default:
-		offtbl = "disabled";
-		break;
-	}
-	printf(": %s", offtbl);
-	if (sc->sc_flags & HIFN_HAS_RNG)
-		printf(" RNG");
-	if (sc->sc_flags & HIFN_HAS_AES)
-		printf(" AES");
-	if (sc->sc_flags & HIFN_HAS_PUBLIC)
-		printf(" PK");
-	printf(", ");
+		return ("LZS-only (no encr/auth)");
 
-	return (0);
+	case HIFN_PUSTAT_ENA_1:
+		return ("DES");
+
+	case HIFN_PUSTAT_ENA_2:
+		if (sc->sc_flags & HIFN_HAS_AES)
+		    return ("3DES/AES");
+		else
+		    return ("3DES");
+
+	default:
+		return ("disabled");
+	}
+	/* NOTREACHED */
 }
 
 /*
  * Give initial values to the registers listed in the "Register Space"
  * section of the HIFN Software Development reference manual.
  */
-void 
+static void
 hifn_init_pci_registers(struct hifn_softc *sc)
 {
 	/* write fixed values needed by the Initialization registers */
@@ -788,7 +1006,7 @@ hifn_init_pci_registers(struct hifn_softc *sc)
  * is configured.  This should be configured before this
  * routine is called.
  */
-void
+static void
 hifn_sessions(struct hifn_softc *sc)
 {
 	u_int32_t pucnfg;
@@ -821,7 +1039,7 @@ hifn_sessions(struct hifn_softc *sc)
  * Determine ram type (sram or dram).  Board should be just out of a reset
  * state when this is called.
  */
-int
+static int
 hifn_ramtype(struct hifn_softc *sc)
 {
 	u_int8_t data[8], dataexpect[8];
@@ -856,7 +1074,7 @@ hifn_ramtype(struct hifn_softc *sc)
 #define	HIFN_SRAM_STEP_SIZE	16384
 #define	HIFN_SRAM_GRANULARITY	(HIFN_SRAM_MAX / HIFN_SRAM_STEP_SIZE)
 
-int
+static int
 hifn_sramsize(struct hifn_softc *sc)
 {
 	u_int32_t a;
@@ -891,14 +1109,14 @@ hifn_sramsize(struct hifn_softc *sc)
  * HIFN_PUCNFG_DSZ_*'s.  This just assumes that PUCNFG
  * is already set up correctly.
  */
-int
+static int
 hifn_dramsize(struct hifn_softc *sc)
 {
 	u_int32_t cnfg;
 
 	if (sc->sc_flags & HIFN_IS_7956) {
 		/*
-		 * 7956/7956 have a fixed internal ram of only 32K.
+		 * 7955/7956 have a fixed internal ram of only 32K.
 		 */
 		sc->sc_ramsize = 32768;
 	} else {
@@ -909,9 +1127,9 @@ hifn_dramsize(struct hifn_softc *sc)
 	return (0);
 }
 
-void
-hifn_alloc_slot(struct hifn_softc *sc, int *cmdp, int *srcp,
-    int *dstp, int *resp)
+static void
+hifn_alloc_slot(struct hifn_softc *sc, int *cmdp, int *srcp, int *dstp,
+    int *resp)
 {
 	struct hifn_dma *dma = sc->sc_dma;
 
@@ -956,7 +1174,7 @@ hifn_alloc_slot(struct hifn_softc *sc, int *cmdp, int *srcp,
 	dma->resk = dma->resi;
 }
 
-int
+static int
 hifn_writeramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -1008,7 +1226,7 @@ hifn_writeramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 	if (r == 0) {
 		printf("%s: writeramaddr -- "
 		    "result[%d](addr %d) still valid\n",
-		    sc->sc_dv.dv_xname, resi, addr);
+		    device_xname(&sc->sc_dv), resi, addr);
 		r = -1;
 		return (-1);
 	} else
@@ -1021,7 +1239,7 @@ hifn_writeramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 	return (r);
 }
 
-int
+static int
 hifn_readramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -1072,7 +1290,7 @@ hifn_readramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 	if (r == 0) {
 		printf("%s: readramaddr -- "
 		    "result[%d](addr %d) still valid\n",
-		    sc->sc_dv.dv_xname, resi, addr);
+		    device_xname(&sc->sc_dv), resi, addr);
 		r = -1;
 	} else {
 		r = 0;
@@ -1089,7 +1307,7 @@ hifn_readramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 /*
  * Initialize the descriptor rings.
  */
-void 
+static void
 hifn_init_dma(struct hifn_softc *sc)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -1127,7 +1345,7 @@ hifn_init_dma(struct hifn_softc *sc)
  * Writes out the raw command buffer space.  Returns the
  * command buffer size.
  */
-u_int
+static u_int
 hifn_write_command(struct hifn_command *cmd, u_int8_t *buf)
 {
 	u_int8_t *buf_pos;
@@ -1155,7 +1373,7 @@ hifn_write_command(struct hifn_command *cmd, u_int8_t *buf)
 	base_cmd->total_dest_count = htole16(dlen & HIFN_BASE_CMD_LENMASK_LO);
 	dlen >>= 16;
 	slen >>= 16;
-	base_cmd->session_num = htole16(
+	base_cmd->session_num = htole16(cmd->session_num |
 	    ((slen << HIFN_BASE_CMD_SRCLEN_S) & HIFN_BASE_CMD_SRCLEN_M) |
 	    ((dlen << HIFN_BASE_CMD_DSTLEN_S) & HIFN_BASE_CMD_DSTLEN_M));
 	buf_pos += sizeof(struct hifn_base_command);
@@ -1226,7 +1444,7 @@ hifn_write_command(struct hifn_command *cmd, u_int8_t *buf)
 			break;
 		case HIFN_CRYPT_CMD_ALG_AES:
 			/*
-			 * AES key are variable 128, 192 and
+			 * AES keys are variable 128, 192 and
 			 * 256 bits (16, 24 and 32 bytes).
 			 */
 			bcopy(cmd->ck, buf_pos, cmd->cklen);
@@ -1236,11 +1454,14 @@ hifn_write_command(struct hifn_command *cmd, u_int8_t *buf)
 	}
 
 	if (using_crypt && cmd->cry_masks & HIFN_CRYPT_CMD_NEW_IV) {
-		if ((cmd->cry_masks & HIFN_CRYPT_CMD_ALG_MASK) ==
-		    HIFN_CRYPT_CMD_ALG_AES)
+		switch (cmd->cry_masks & HIFN_CRYPT_CMD_ALG_MASK) {
+		case HIFN_CRYPT_CMD_ALG_AES:
 			ivlen = HIFN_AES_IV_LENGTH;
-		else
+			break;
+		default:
 			ivlen = HIFN_IV_LENGTH;
+			break;
+		}
 		bcopy(cmd->iv, buf_pos, ivlen);
 		buf_pos += ivlen;
 	}
@@ -1254,7 +1475,7 @@ hifn_write_command(struct hifn_command *cmd, u_int8_t *buf)
 	return (buf_pos - buf);
 }
 
-int
+static int
 hifn_dmamap_aligned(bus_dmamap_t map)
 {
 	int i;
@@ -1269,7 +1490,7 @@ hifn_dmamap_aligned(bus_dmamap_t map)
 	return (1);
 }
 
-int
+static int
 hifn_dmamap_load_dst(struct hifn_softc *sc, struct hifn_command *cmd)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -1341,7 +1562,7 @@ hifn_dmamap_load_dst(struct hifn_softc *sc, struct hifn_command *cmd)
 	return (idx);
 }
 
-int
+static int
 hifn_dmamap_load_src(struct hifn_softc *sc, struct hifn_command *cmd)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -1373,13 +1594,13 @@ hifn_dmamap_load_src(struct hifn_softc *sc, struct hifn_command *cmd)
 	return (idx);
 }
 
-int 
+static int
 hifn_crypto(struct hifn_softc *sc, struct hifn_command *cmd,
-    struct cryptop *crp)
+    struct cryptop *crp, int hint)
 {
 	struct	hifn_dma *dma = sc->sc_dma;
 	u_int32_t cmdlen;
-	int cmdi, resi, s, err = 0;
+	int	cmdi, resi, s, err = 0;
 
 	if (bus_dmamap_create(sc->sc_dmat, HIFN_MAX_DMALEN, MAX_SCATTER,
 	    HIFN_MAX_SEGLEN, 0, BUS_DMA_NOWAIT, &cmd->src_map))
@@ -1489,11 +1710,13 @@ hifn_crypto(struct hifn_softc *sc, struct hifn_command *cmd,
 	}
 
 #ifdef HIFN_DEBUG
-	printf("%s: Entering cmd: stat %8x ien %8x u %d/%d/%d/%d n %d/%d\n",
-	    sc->sc_dv.dv_xname,
-	    READ_REG_1(sc, HIFN_1_DMA_CSR), READ_REG_1(sc, HIFN_1_DMA_IER),
-	    dma->cmdu, dma->srcu, dma->dstu, dma->resu,
-	    cmd->src_map->dm_nsegs, cmd->dst_map->dm_nsegs);
+	if (hifn_debug)
+		printf("%s: Entering cmd: stat %8x ien %8x u %d/%d/%d/%d n %d/%d\n",
+		    device_xname(&sc->sc_dv),
+		    READ_REG_1(sc, HIFN_1_DMA_CSR),
+		    READ_REG_1(sc, HIFN_1_DMA_IER),
+		    dma->cmdu, dma->srcu, dma->dstu, dma->resu,
+		    cmd->src_map->dm_nsegs, cmd->dst_map->dm_nsegs);
 #endif
 
 	if (cmd->src_map == cmd->dst_map)
@@ -1550,13 +1773,22 @@ hifn_crypto(struct hifn_softc *sc, struct hifn_command *cmd,
 	}
 
 	/*
-	 * Always enable the command wait interrupt.  We are obviously
-	 * missing an interrupt or two somewhere. Enabling the command wait
-	 * interrupt will guarantee we get called periodically until all
-	 * of the queues are drained and thus work around this.
+	 * We don't worry about missing an interrupt (which a "command wait"
+	 * interrupt salvages us from), unless there is more than one command
+	 * in the queue.
+	 *
+	 * XXX We do seem to miss some interrupts.  So we always enable
+	 * XXX command wait.  From OpenBSD revision 1.149.
+	 *
 	 */
-	sc->sc_dmaier |= HIFN_DMAIER_C_WAIT;
-	WRITE_REG_1(sc, HIFN_1_DMA_IER, sc->sc_dmaier);
+#if 0
+	if (dma->cmdu > 1) {
+#endif
+		sc->sc_dmaier |= HIFN_DMAIER_C_WAIT;
+		WRITE_REG_1(sc, HIFN_1_DMA_IER, sc->sc_dmaier);
+#if 0
+	}
+#endif
 
 	hifnstats.hst_ipackets++;
 	hifnstats.hst_ibytes += cmd->src_map->dm_mapsize;
@@ -1573,7 +1805,8 @@ hifn_crypto(struct hifn_softc *sc, struct hifn_command *cmd,
 	 * result descriptor.
 	 */
 #ifdef HIFN_DEBUG
-	printf("load res\n");
+	if (hifn_debug)
+		printf("load res\n");
 #endif
 	if (dma->resi == HIFN_D_RES_RSIZE) {
 		dma->resi = 0;
@@ -1607,13 +1840,13 @@ hifn_crypto(struct hifn_softc *sc, struct hifn_command *cmd,
 	}
 
 #ifdef HIFN_DEBUG
-	printf("%s: command: stat %8x ier %8x\n",
-	    sc->sc_dv.dv_xname,
-	    READ_REG_1(sc, HIFN_1_DMA_CSR), READ_REG_1(sc, HIFN_1_DMA_IER));
+	if (hifn_debug)
+		printf("%s: command: stat %8x ier %8x\n",
+		    device_xname(&sc->sc_dv),
+		    READ_REG_1(sc, HIFN_1_DMA_CSR), READ_REG_1(sc, HIFN_1_DMA_IER));
 #endif
 
 	sc->sc_active = 5;
-	cmd->cmd_callback = hifn_callback;
 	splx(s);
 	return (err);		/* success */
 
@@ -1633,7 +1866,7 @@ err_srcmap1:
 	return (err);
 }
 
-void
+static void
 hifn_tick(void *vsc)
 {
 	struct hifn_softc *sc = vsc;
@@ -1669,10 +1902,14 @@ hifn_tick(void *vsc)
 	else
 		sc->sc_active--;
 	splx(s);
+#ifdef	__OpenBSD__
 	timeout_add(&sc->sc_tickto, hz);
+#else
+	callout_reset(&sc->sc_tickto, hz, hifn_tick, sc);
+#endif
 }
 
-int 
+static int
 hifn_intr(void *arg)
 {
 	struct hifn_softc *sc = arg;
@@ -1683,10 +1920,11 @@ hifn_intr(void *arg)
 	dmacsr = READ_REG_1(sc, HIFN_1_DMA_CSR);
 
 #ifdef HIFN_DEBUG
-	printf("%s: irq: stat %08x ien %08x u %d/%d/%d/%d\n",
-	    sc->sc_dv.dv_xname,
-	    dmacsr, READ_REG_1(sc, HIFN_1_DMA_IER),
-	    dma->cmdu, dma->srcu, dma->dstu, dma->resu);
+	if (hifn_debug)
+		printf("%s: irq: stat %08x ien %08x u %d/%d/%d/%d\n",
+		       device_xname(&sc->sc_dv),
+		       dmacsr, READ_REG_1(sc, HIFN_1_DMA_IER),
+		       dma->cmdu, dma->srcu, dma->dstu, dma->resu);
 #endif
 
 	/* Nothing in the DMA unit interrupted */
@@ -1705,19 +1943,19 @@ hifn_intr(void *arg)
 
 	restart = dmacsr & (HIFN_DMACSR_R_OVER | HIFN_DMACSR_D_OVER);
 	if (restart)
-		printf("%s: overrun %x\n", sc->sc_dv.dv_xname, dmacsr);
+		printf("%s: overrun %x\n", device_xname(&sc->sc_dv), dmacsr);
 
 	if (sc->sc_flags & HIFN_IS_7811) {
 		if (dmacsr & HIFN_DMACSR_ILLR)
-			printf("%s: illegal read\n", sc->sc_dv.dv_xname);
+			printf("%s: illegal read\n", device_xname(&sc->sc_dv));
 		if (dmacsr & HIFN_DMACSR_ILLW)
-			printf("%s: illegal write\n", sc->sc_dv.dv_xname);
+			printf("%s: illegal write\n", device_xname(&sc->sc_dv));
 	}
 
 	restart = dmacsr & (HIFN_DMACSR_C_ABORT | HIFN_DMACSR_S_ABORT |
 	    HIFN_DMACSR_D_ABORT | HIFN_DMACSR_R_ABORT);
 	if (restart) {
-		printf("%s: abort, resetting.\n", sc->sc_dv.dv_xname);
+		printf("%s: abort, resetting.\n", device_xname(&sc->sc_dv));
 		hifnstats.hst_abort++;
 		hifn_abort(sc);
 		return (1);
@@ -1749,8 +1987,11 @@ hifn_intr(void *arg)
 
 			HIFN_RES_SYNC(sc, i, BUS_DMASYNC_POSTREAD);
 			cmd = dma->hifn_commands[i];
+			KASSERT(cmd != NULL
+				/*("hifn_intr: null command slot %u", i)*/);
+			dma->hifn_commands[i] = NULL;
 
-			(*cmd->cmd_callback)(sc, cmd, dma->result_bufs[i]);
+			hifn_callback(sc, cmd, dma->result_bufs[i]);
 			hifnstats.hst_opackets++;
 		}
 
@@ -1803,64 +2044,29 @@ hifn_intr(void *arg)
  * contains our registration id, and should contain an encoded session
  * id on successful allocation.
  */
-int
-hifn_newsession(u_int32_t *sidp, struct cryptoini *cri)
+static int
+hifn_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
 {
 	struct cryptoini *c;
-	struct hifn_softc *sc = NULL;
-	int i, mac = 0, cry = 0, comp = 0, sesn;
-	struct hifn_session *ses = NULL;
+	struct hifn_softc *sc = arg;
+	int i, mac = 0, cry = 0, comp = 0;
 
-	if (sidp == NULL || cri == NULL)
+	KASSERT(sc != NULL /*, ("hifn_newsession: null softc")*/);
+	if (sidp == NULL || cri == NULL || sc == NULL)
 		return (EINVAL);
 
-	for (i = 0; i < hifn_cd.cd_ndevs; i++) {
-		sc = hifn_cd.cd_devs[i];
-		if (sc == NULL)
+	for (i = 0; i < sc->sc_maxses; i++)
+		if (sc->sc_sessions[i].hs_state == HS_STATE_FREE)
 			break;
-		if (sc->sc_cid == (*sidp))
-			break;
-	}
-	if (sc == NULL)
-		return (EINVAL);
-
-	if (sc->sc_sessions == NULL) {
-		ses = sc->sc_sessions = (struct hifn_session *)malloc(
-		    sizeof(*ses), M_DEVBUF, M_NOWAIT);
-		if (ses == NULL)
-			return (ENOMEM);
-		sesn = 0;
-		sc->sc_nsessions = 1;
-	} else {
-		for (sesn = 0; sesn < sc->sc_nsessions; sesn++) {
-			if (!sc->sc_sessions[sesn].hs_used) {
-				ses = &sc->sc_sessions[sesn];
-				break;
-			}
-		}
-
-		if (ses == NULL) {
-			sesn = sc->sc_nsessions;
-			ses = (struct hifn_session *)malloc((sesn + 1) *
-			    sizeof(*ses), M_DEVBUF, M_NOWAIT);
-			if (ses == NULL)
-				return (ENOMEM);
-			bcopy(sc->sc_sessions, ses, sesn * sizeof(*ses));
-			bzero(sc->sc_sessions, sesn * sizeof(*ses));
-			free(sc->sc_sessions, M_DEVBUF);
-			sc->sc_sessions = ses;
-			ses = &sc->sc_sessions[sesn];
-			sc->sc_nsessions++;
-		}
-	}
-	bzero(ses, sizeof(*ses));
+	if (i == sc->sc_maxses)
+		return (ENOMEM);
 
 	for (c = cri; c != NULL; c = c->cri_next) {
 		switch (c->cri_alg) {
 		case CRYPTO_MD5:
 		case CRYPTO_SHA1:
-		case CRYPTO_MD5_HMAC:
-		case CRYPTO_SHA1_HMAC:
+		case CRYPTO_MD5_HMAC_96:
+		case CRYPTO_SHA1_HMAC_96:
 			if (mac)
 				return (EINVAL);
 			mac = 1;
@@ -1868,20 +2074,35 @@ hifn_newsession(u_int32_t *sidp, struct cryptoini *cri)
 		case CRYPTO_DES_CBC:
 		case CRYPTO_3DES_CBC:
 		case CRYPTO_AES_CBC:
-			arc4random_bytes(ses->hs_iv,
-			    (c->cri_alg == CRYPTO_AES_CBC ?
-			    HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH));
+			/* Note that this is an initialization
+			   vector, not a cipher key; any function
+			   giving sufficient Hamming distance
+			   between outputs is fine.  Use of RC4
+			   to generate IVs has been FIPS140-2
+			   certified by several labs. */
+#ifdef __NetBSD__
+			arc4randbytes(sc->sc_sessions[i].hs_iv,
+			    c->cri_alg == CRYPTO_AES_CBC ?
+				HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH);
+#else	/* FreeBSD and OpenBSD have get_random_bytes */
+			/* XXX this may read fewer, does it matter? */
+ 			get_random_bytes(sc->sc_sessions[i].hs_iv,
+				c->cri_alg == CRYPTO_AES_CBC ?
+					HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH);
+#endif
 			/*FALLTHROUGH*/
 		case CRYPTO_ARC4:
 			if (cry)
 				return (EINVAL);
 			cry = 1;
 			break;
+#ifdef HAVE_CRYPTO_LZS
 		case CRYPTO_LZS_COMP:
 			if (comp)
 				return (EINVAL);
 			comp = 1;
 			break;
+#endif
 		default:
 			return (EINVAL);
 		}
@@ -1896,8 +2117,8 @@ hifn_newsession(u_int32_t *sidp, struct cryptoini *cri)
 	if ((comp && mac) || (comp && cry))
 		return (EINVAL);
 
-	*sidp = HIFN_SID(sc->sc_dv.dv_unit, sesn);
-	ses->hs_used = 1;
+	*sidp = HIFN_SID(device_unit(&sc->sc_dv), i);
+	sc->sc_sessions[i].hs_state = HS_STATE_USED;
 
 	return (0);
 }
@@ -1907,59 +2128,48 @@ hifn_newsession(u_int32_t *sidp, struct cryptoini *cri)
  * XXX this routine should run a zero'd mac/encrypt key into context ram.
  * XXX to blow away any keys already stored there.
  */
-int
-hifn_freesession(u_int64_t tid)
+static int
+hifn_freesession(void *arg, u_int64_t tid)
 {
-	struct hifn_softc *sc;
-	int card, session;
-	u_int32_t sid = ((u_int32_t)tid) & 0xffffffff;
+	struct hifn_softc *sc = arg;
+	int session;
+	u_int32_t sid = ((u_int32_t) tid) & 0xffffffff;
 
-	card = HIFN_CARD(sid);
-	if (card >= hifn_cd.cd_ndevs || hifn_cd.cd_devs[card] == NULL)
+	KASSERT(sc != NULL /*, ("hifn_freesession: null softc")*/);
+	if (sc == NULL)
 		return (EINVAL);
 
-	sc = hifn_cd.cd_devs[card];
 	session = HIFN_SESSION(sid);
-	if (session >= sc->sc_nsessions)
+	if (session >= sc->sc_maxses)
 		return (EINVAL);
 
 	bzero(&sc->sc_sessions[session], sizeof(sc->sc_sessions[session]));
 	return (0);
 }
 
-int
-hifn_process(struct cryptop *crp)
+static int
+hifn_process(void *arg, struct cryptop *crp, int hint)
 {
+	struct hifn_softc *sc = arg;
 	struct hifn_command *cmd = NULL;
-	int card, session, err, ivlen;
-	struct hifn_softc *sc;
+	int session, err, ivlen;
 	struct cryptodesc *crd1, *crd2, *maccrd, *enccrd;
 
 	if (crp == NULL || crp->crp_callback == NULL) {
 		hifnstats.hst_invalid++;
 		return (EINVAL);
 	}
-
-	if (crp->crp_ilen == 0) {
-		err = EINVAL;
-		goto errout;
-	}
-
-	card = HIFN_CARD(crp->crp_sid);
-	if (card >= hifn_cd.cd_ndevs || hifn_cd.cd_devs[card] == NULL) {
-		err = EINVAL;
-		goto errout;
-	}
-
-	sc = hifn_cd.cd_devs[card];
 	session = HIFN_SESSION(crp->crp_sid);
-	if (session >= sc->sc_nsessions) {
+
+	if (sc == NULL || session >= sc->sc_maxses) {
 		err = EINVAL;
 		goto errout;
 	}
 
-	cmd = malloc(sizeof(*cmd), M_DEVBUF, M_NOWAIT | M_ZERO);
+	cmd = (struct hifn_command *)malloc(sizeof(struct hifn_command),
+	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (cmd == NULL) {
+		hifnstats.hst_nomem++;
 		err = ENOMEM;
 		goto errout;
 	}
@@ -1983,29 +2193,31 @@ hifn_process(struct cryptop *crp)
 	crd2 = crd1->crd_next;
 
 	if (crd2 == NULL) {
-		if (crd1->crd_alg == CRYPTO_MD5_HMAC ||
-		    crd1->crd_alg == CRYPTO_SHA1_HMAC ||
+		if (crd1->crd_alg == CRYPTO_MD5_HMAC_96 ||
+		    crd1->crd_alg == CRYPTO_SHA1_HMAC_96 ||
 		    crd1->crd_alg == CRYPTO_SHA1 ||
 		    crd1->crd_alg == CRYPTO_MD5) {
 			maccrd = crd1;
 			enccrd = NULL;
 		} else if (crd1->crd_alg == CRYPTO_DES_CBC ||
-		    crd1->crd_alg == CRYPTO_3DES_CBC ||
-		    crd1->crd_alg == CRYPTO_AES_CBC ||
-		    crd1->crd_alg == CRYPTO_ARC4) {
+			   crd1->crd_alg == CRYPTO_3DES_CBC ||
+			   crd1->crd_alg == CRYPTO_AES_CBC ||
+			   crd1->crd_alg == CRYPTO_ARC4) {
 			if ((crd1->crd_flags & CRD_F_ENCRYPT) == 0)
 				cmd->base_masks |= HIFN_BASE_CMD_DECODE;
 			maccrd = NULL;
 			enccrd = crd1;
+#ifdef	HAVE_CRYPTO_LZS
 		} else if (crd1->crd_alg == CRYPTO_LZS_COMP) {
-			return (hifn_compression(sc, crp, cmd));
+		  return (hifn_compression(sc, crp, cmd));
+#endif
 		} else {
 			err = EINVAL;
 			goto errout;
 		}
 	} else {
-		if ((crd1->crd_alg == CRYPTO_MD5_HMAC ||
-		     crd1->crd_alg == CRYPTO_SHA1_HMAC ||
+		if ((crd1->crd_alg == CRYPTO_MD5_HMAC_96 ||
+		     crd1->crd_alg == CRYPTO_SHA1_HMAC_96 ||
 		     crd1->crd_alg == CRYPTO_MD5 ||
 		     crd1->crd_alg == CRYPTO_SHA1) &&
 		    (crd2->crd_alg == CRYPTO_DES_CBC ||
@@ -2017,14 +2229,14 @@ hifn_process(struct cryptop *crp)
 			maccrd = crd1;
 			enccrd = crd2;
 		} else if ((crd1->crd_alg == CRYPTO_DES_CBC ||
-		     crd1->crd_alg == CRYPTO_ARC4 ||
-		     crd1->crd_alg == CRYPTO_AES_CBC ||
-		     crd1->crd_alg == CRYPTO_3DES_CBC) &&
-		    (crd2->crd_alg == CRYPTO_MD5_HMAC ||
-		     crd2->crd_alg == CRYPTO_SHA1_HMAC ||
-		     crd2->crd_alg == CRYPTO_MD5 ||
-		     crd2->crd_alg == CRYPTO_SHA1) &&
-		    (crd1->crd_flags & CRD_F_ENCRYPT)) {
+			    crd1->crd_alg == CRYPTO_ARC4 ||
+			    crd1->crd_alg == CRYPTO_3DES_CBC ||
+			    crd1->crd_alg == CRYPTO_AES_CBC) &&
+			   (crd2->crd_alg == CRYPTO_MD5_HMAC_96 ||
+			    crd2->crd_alg == CRYPTO_SHA1_HMAC_96 ||
+			    crd2->crd_alg == CRYPTO_MD5 ||
+			    crd2->crd_alg == CRYPTO_SHA1) &&
+			   (crd1->crd_flags & CRD_F_ENCRYPT)) {
 			enccrd = crd1;
 			maccrd = crd2;
 		} else {
@@ -2042,6 +2254,10 @@ hifn_process(struct cryptop *crp)
 		switch (enccrd->crd_alg) {
 		case CRYPTO_ARC4:
 			cmd->cry_masks |= HIFN_CRYPT_CMD_ALG_RC4;
+			if ((enccrd->crd_flags & CRD_F_ENCRYPT)
+			    != sc->sc_sessions[session].hs_prev_op)
+				sc->sc_sessions[session].hs_state =
+				    HS_STATE_USED;
 			break;
 		case CRYPTO_DES_CBC:
 			cmd->cry_masks |= HIFN_CRYPT_CMD_ALG_DES |
@@ -2064,7 +2280,7 @@ hifn_process(struct cryptop *crp)
 		}
 		if (enccrd->crd_alg != CRYPTO_ARC4) {
 			ivlen = ((enccrd->crd_alg == CRYPTO_AES_CBC) ?
-			    HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH);
+				HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH);
 			if (enccrd->crd_flags & CRD_F_ENCRYPT) {
 				if (enccrd->crd_flags & CRD_F_IV_EXPLICIT)
 					bcopy(enccrd->crd_iv, cmd->iv, ivlen);
@@ -2088,18 +2304,15 @@ hifn_process(struct cryptop *crp)
 					bcopy(enccrd->crd_iv, cmd->iv, ivlen);
 				else if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copydata(cmd->srcu.src_m,
-					    enccrd->crd_inject,
-					    ivlen, cmd->iv);
+					    enccrd->crd_inject, ivlen, cmd->iv);
 				else if (crp->crp_flags & CRYPTO_F_IOV)
 					cuio_copydata(cmd->srcu.src_io,
-					    enccrd->crd_inject,
-					    ivlen, cmd->iv);
+					    enccrd->crd_inject, ivlen, cmd->iv);
 			}
 		}
 
 		cmd->ck = enccrd->crd_key;
 		cmd->cklen = enccrd->crd_klen >> 3;
-		cmd->cry_masks |= HIFN_CRYPT_CMD_NEW_KEY;
 
 		/*
 		 * Need to specify the size for the AES key in the masks.
@@ -2121,6 +2334,9 @@ hifn_process(struct cryptop *crp)
 				goto errout;
 			}
 		}
+
+		if (sc->sc_sessions[session].hs_state == HS_STATE_USED)
+			cmd->cry_masks |= HIFN_CRYPT_CMD_NEW_KEY;
 	}
 
 	if (maccrd) {
@@ -2133,7 +2349,7 @@ hifn_process(struct cryptop *crp)
 			    HIFN_MAC_CMD_RESULT | HIFN_MAC_CMD_MODE_HASH |
 			    HIFN_MAC_CMD_POS_IPSEC;
 			break;
-		case CRYPTO_MD5_HMAC:
+		case CRYPTO_MD5_HMAC_96:
 			cmd->mac_masks |= HIFN_MAC_CMD_ALG_MD5 |
 			    HIFN_MAC_CMD_RESULT | HIFN_MAC_CMD_MODE_HMAC |
 			    HIFN_MAC_CMD_POS_IPSEC | HIFN_MAC_CMD_TRUNC;
@@ -2143,15 +2359,16 @@ hifn_process(struct cryptop *crp)
 			    HIFN_MAC_CMD_RESULT | HIFN_MAC_CMD_MODE_HASH |
 			    HIFN_MAC_CMD_POS_IPSEC;
 			break;
-		case CRYPTO_SHA1_HMAC:
+		case CRYPTO_SHA1_HMAC_96:
 			cmd->mac_masks |= HIFN_MAC_CMD_ALG_SHA1 |
 			    HIFN_MAC_CMD_RESULT | HIFN_MAC_CMD_MODE_HMAC |
 			    HIFN_MAC_CMD_POS_IPSEC | HIFN_MAC_CMD_TRUNC;
 			break;
 		}
 
-		if (maccrd->crd_alg == CRYPTO_SHA1_HMAC ||
-		     maccrd->crd_alg == CRYPTO_MD5_HMAC) {
+		if ((maccrd->crd_alg == CRYPTO_SHA1_HMAC_96 ||
+		     maccrd->crd_alg == CRYPTO_MD5_HMAC_96) &&
+		    sc->sc_sessions[session].hs_state == HS_STATE_USED) {
 			cmd->mac_masks |= HIFN_MAC_CMD_NEW_KEY;
 			bcopy(maccrd->crd_key, cmd->mac, maccrd->crd_klen >> 3);
 			bzero(cmd->mac + (maccrd->crd_klen >> 3),
@@ -2163,9 +2380,28 @@ hifn_process(struct cryptop *crp)
 	cmd->session_num = session;
 	cmd->softc = sc;
 
-	err = hifn_crypto(sc, cmd, crp);
-	if (!err)
+	err = hifn_crypto(sc, cmd, crp, hint);
+	if (err == 0) {
+		if (enccrd)
+			sc->sc_sessions[session].hs_prev_op =
+				enccrd->crd_flags & CRD_F_ENCRYPT;
+		if (sc->sc_sessions[session].hs_state == HS_STATE_USED)
+			sc->sc_sessions[session].hs_state = HS_STATE_KEY;
 		return 0;
+	} else if (err == ERESTART) {
+		/*
+		 * There weren't enough resources to dispatch the request
+		 * to the part.  Notify the caller so they'll requeue this
+		 * request and resubmit it again soon.
+		 */
+#ifdef HIFN_DEBUG
+		if (hifn_debug)
+			printf(device_xname(&sc->sc_dv), "requeue request\n");
+#endif
+		free(cmd, M_DEVBUF);
+		sc->sc_needwakeup |= CRYPTO_SYMQ;
+		return (err);
+	}
 
 errout:
 	if (cmd != NULL)
@@ -2179,7 +2415,7 @@ errout:
 	return (0);
 }
 
-void
+static void
 hifn_abort(struct hifn_softc *sc)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -2190,18 +2426,20 @@ hifn_abort(struct hifn_softc *sc)
 	i = dma->resk; u = dma->resu;
 	while (u != 0) {
 		cmd = dma->hifn_commands[i];
+		KASSERT(cmd != NULL /*, ("hifn_abort: null cmd slot %u", i)*/);
+		dma->hifn_commands[i] = NULL;
 		crp = cmd->crp;
 
 		if ((dma->resr[i].l & htole32(HIFN_D_VALID)) == 0) {
 			/* Salvage what we can. */
 			hifnstats.hst_opackets++;
-			(*cmd->cmd_callback)(sc, cmd, dma->result_bufs[i]);
+			hifn_callback(sc, cmd, dma->result_bufs[i]);
 		} else {
-			if (cmd->src_map == cmd->dst_map)
+			if (cmd->src_map == cmd->dst_map) {
 				bus_dmamap_sync(sc->sc_dmat, cmd->src_map,
-				    0, cmd->src_map->dm_mapsize,
+						0, cmd->src_map->dm_mapsize,
 				    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-			else {
+			} else {
 				bus_dmamap_sync(sc->sc_dmat, cmd->src_map,
 				    0, cmd->src_map->dm_mapsize,
 				    BUS_DMASYNC_POSTWRITE);
@@ -2212,7 +2450,7 @@ hifn_abort(struct hifn_softc *sc)
 
 			if (cmd->srcu.src_m != cmd->dstu.dst_m) {
 				m_freem(cmd->srcu.src_m);
-				crp->crp_buf = (caddr_t)cmd->dstu.dst_m;
+				crp->crp_buf = (void *)cmd->dstu.dst_m;
 			}
 
 			/* non-shared buffers cannot be restarted */
@@ -2241,14 +2479,18 @@ hifn_abort(struct hifn_softc *sc)
 	}
 	dma->resk = i; dma->resu = u;
 
+	/* Force upload of key next time */
+	for (i = 0; i < sc->sc_maxses; i++)
+		if (sc->sc_sessions[i].hs_state == HS_STATE_KEY)
+			sc->sc_sessions[i].hs_state = HS_STATE_USED;
+
 	hifn_reset_board(sc, 1);
 	hifn_init_dma(sc);
 	hifn_init_pci_registers(sc);
 }
 
-void
-hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
-    u_int8_t *resbuf)
+static void
+hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd, u_int8_t *resbuf)
 {
 	struct hifn_dma *dma = sc->sc_dma;
 	struct cryptop *crp = cmd->crp;
@@ -2269,7 +2511,7 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 
 	if (crp->crp_flags & CRYPTO_F_IMBUF) {
 		if (cmd->srcu.src_m != cmd->dstu.dst_m) {
-			crp->crp_buf = (caddr_t)cmd->dstu.dst_m;
+			crp->crp_buf = (void *)cmd->dstu.dst_m;
 			totlen = cmd->src_map->dm_mapsize;
 			for (m = cmd->dstu.dst_m; m != NULL; m = m->m_next) {
 				if (totlen < m->m_len) {
@@ -2288,11 +2530,11 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 		if (crp->crp_flags & CRYPTO_F_IMBUF)
 			m_copyback((struct mbuf *)crp->crp_buf,
 			    cmd->src_map->dm_mapsize - cmd->sloplen,
-			    cmd->sloplen, &dma->slop[cmd->slopidx]);
+			    cmd->sloplen, (void *)&dma->slop[cmd->slopidx]);
 		else if (crp->crp_flags & CRYPTO_F_IOV)
 			cuio_copyback((struct uio *)crp->crp_buf,
 			    cmd->src_map->dm_mapsize - cmd->sloplen,
-			    cmd->sloplen, &dma->slop[cmd->slopidx]);
+			    cmd->sloplen, (void *)&dma->slop[cmd->slopidx]);
 	}
 
 	i = dma->dstk; u = dma->dstu;
@@ -2324,16 +2566,19 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 			    crd->crd_alg != CRYPTO_AES_CBC)
 				continue;
 			ivlen = ((crd->crd_alg == CRYPTO_AES_CBC) ?
-			    HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH);
+				HIFN_AES_IV_LENGTH : HIFN_IV_LENGTH);
 			if (crp->crp_flags & CRYPTO_F_IMBUF)
 				m_copydata((struct mbuf *)crp->crp_buf,
-				    crd->crd_skip + crd->crd_len - ivlen, ivlen,
+				    crd->crd_skip + crd->crd_len - ivlen,
+				    ivlen,
 				    cmd->softc->sc_sessions[cmd->session_num].hs_iv);
 			else if (crp->crp_flags & CRYPTO_F_IOV) {
 				cuio_copydata((struct uio *)crp->crp_buf,
-				    crd->crd_skip + crd->crd_len - ivlen, ivlen,
+				    crd->crd_skip + crd->crd_len - ivlen,
+				    ivlen,
 				    cmd->softc->sc_sessions[cmd->session_num].hs_iv);
 			}
+			/* XXX We do not handle contig data */
 			break;
 		}
 	}
@@ -2353,8 +2598,8 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 				len = 16;
 			else if (crd->crd_alg == CRYPTO_SHA1)
 				len = 20;
-			else if (crd->crd_alg == CRYPTO_MD5_HMAC ||
-			    crd->crd_alg == CRYPTO_SHA1_HMAC)
+			else if (crd->crd_alg == CRYPTO_MD5_HMAC_96 ||
+			    crd->crd_alg == CRYPTO_SHA1_HMAC_96)
 				len = 12;
 			else
 				continue;
@@ -2363,7 +2608,7 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 				m_copyback((struct mbuf *)crp->crp_buf,
 				    crd->crd_inject, len, macbuf);
 			else if ((crp->crp_flags & CRYPTO_F_IOV) && crp->crp_mac)
-				bcopy((caddr_t)macbuf, crp->crp_mac, len);
+				bcopy((void *)macbuf, crp->crp_mac, len);
 			break;
 		}
 	}
@@ -2378,7 +2623,9 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 	crypto_done(crp);
 }
 
-int
+#ifdef HAVE_CRYPTO_LZS
+
+static int
 hifn_compression(struct hifn_softc *sc, struct cryptop *crp,
     struct hifn_command *cmd)
 {
@@ -2511,7 +2758,7 @@ fail:
 /*
  * must be called at splnet()
  */
-int
+static int
 hifn_compress_enter(struct hifn_softc *sc, struct hifn_command *cmd)
 {
 	struct hifn_dma *dma = sc->sc_dma;
@@ -2550,13 +2797,14 @@ hifn_compress_enter(struct hifn_softc *sc, struct hifn_command *cmd)
 	}
 
 	/*
-	 * Always enable the command wait interrupt.  We are obviously
-	 * missing an interrupt or two somewhere. Enabling the command wait
-	 * interrupt will guarantee we get called periodically until all
-	 * of the queues are drained and thus work around this.
+	 * We don't worry about missing an interrupt (which a "command wait"
+	 * interrupt salvages us from), unless there is more than one command
+	 * in the queue.
 	 */
-	sc->sc_dmaier |= HIFN_DMAIER_C_WAIT;
-	WRITE_REG_1(sc, HIFN_1_DMA_IER, sc->sc_dmaier);
+	if (dma->cmdu > 1) {
+		sc->sc_dmaier |= HIFN_DMAIER_C_WAIT;
+		WRITE_REG_1(sc, HIFN_1_DMA_IER, sc->sc_dmaier);
+	}
 
 	hifnstats.hst_ipackets++;
 	hifnstats.hst_ibytes += cmd->src_map->dm_mapsize;
@@ -2607,7 +2855,7 @@ hifn_compress_enter(struct hifn_softc *sc, struct hifn_command *cmd)
 	return (0);
 }
 
-void
+static void
 hifn_callback_comp(struct hifn_softc *sc, struct hifn_command *cmd,
     u_int8_t *resbuf)
 {
@@ -2703,7 +2951,7 @@ hifn_callback_comp(struct hifn_softc *sc, struct hifn_command *cmd,
 	m = cmd->dstu.dst_m;
 	if (m->m_flags & M_PKTHDR)
 		m->m_pkthdr.len = olen;
-	crp->crp_buf = (caddr_t)m;
+	crp->crp_buf = (void *)m;
 	for (; m != NULL; m = m->m_next) {
 		if (olen >= m->m_len)
 			olen -= m->m_len;
@@ -2737,7 +2985,7 @@ out:
 	crypto_done(crp);
 }
 
-struct mbuf *
+static struct mbuf *
 hifn_mkmbuf_chain(int totlen, struct mbuf *mtemplate)
 {
 	int len;
@@ -2786,10 +3034,10 @@ hifn_mkmbuf_chain(int totlen, struct mbuf *mtemplate)
 
 	return (m0);
 }
+#endif	/* HAVE_CRYPTO_LZS */
 
-void
-hifn_write_4(struct hifn_softc *sc, int reggrp, bus_size_t reg,
-    u_int32_t val)
+static void
+hifn_write_4(struct hifn_softc *sc, int reggrp, bus_size_t reg, u_int32_t val)
 {
 	/*
 	 * 7811 PB3 rev/2 parts lock-up on burst writes to Group 0
@@ -2811,7 +3059,7 @@ hifn_write_4(struct hifn_softc *sc, int reggrp, bus_size_t reg,
 
 }
 
-u_int32_t
+static u_int32_t
 hifn_read_4(struct hifn_softc *sc, int reggrp, bus_size_t reg)
 {
 	if (sc->sc_flags & HIFN_NO_BURSTWRITE) {

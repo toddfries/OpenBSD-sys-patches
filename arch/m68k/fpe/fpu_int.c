@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_int.c,v 1.4 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_int.c,v 1.6 2003/07/15 02:43:10 lukem Exp $	*/
+/*	$NetBSD: fpu_int.c,v 1.7 2005/12/11 12:17:52 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Ken Nakata
@@ -29,20 +28,23 @@
  *	@(#)fpu_int.c
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_int.c,v 1.7 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_arith.h>
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_arith.h"
+#include "fpu_emulate.h"
 
 /* FINTRZ - always round to zero */
 struct fpn *
 fpu_intrz(fe)
      struct fpemu *fe;
 {
-  struct fpn *x = &fe->fe_f2;
-  int sh, clr, mask, i;
+  register struct fpn *x = &fe->fe_f2;
+  register int sh, clr, mask, i;
 
   /* special cases first */
   if (x->fp_class != FPC_NUM) {
@@ -77,8 +79,8 @@ struct fpn *
 fpu_int(fe)
      struct fpemu *fe;
 {
-  struct fpn *x = &fe->fe_f2;
-  int rsh, lsh, wsh, i;
+  register struct fpn *x = &fe->fe_f2;
+  register int rsh, lsh, wsh, i;
 
   /* special cases first */
   if (x->fp_class != FPC_NUM) {

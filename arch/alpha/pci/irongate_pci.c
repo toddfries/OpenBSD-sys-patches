@@ -1,5 +1,4 @@
-/*	$OpenBSD: irongate_pci.c,v 1.4 2002/03/14 01:26:27 millert Exp $	*/
-/* $NetBSD: irongate_pci.c,v 1.2 2000/06/29 08:58:47 mrg Exp $ */
+/* $NetBSD: irongate_pci.c,v 1.5 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,6 +34,10 @@
  * chipset.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: irongate_pci.c,v 1.5 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -54,14 +50,14 @@
 #include <alpha/pci/irongatereg.h>
 #include <alpha/pci/irongatevar.h>
 
-void		irongate_attach_hook(struct device *, struct device *,
-		    struct pcibus_attach_args *);
-int		irongate_bus_maxdevs(void *, int);
-pcitag_t	irongate_make_tag(void *, int, int, int);
-void		irongate_decompose_tag(void *, pcitag_t, int *, int *,
-		    int *);
-pcireg_t	irongate_conf_read(void *, pcitag_t, int);
-void		irongate_conf_write(void *, pcitag_t, int, pcireg_t);
+void		irongate_attach_hook __P((struct device *, struct device *,
+		    struct pcibus_attach_args *));
+int		irongate_bus_maxdevs __P((void *, int));
+pcitag_t	irongate_make_tag __P((void *, int, int, int));
+void		irongate_decompose_tag __P((void *, pcitag_t, int *, int *,
+		    int *));
+pcireg_t	irongate_conf_read __P((void *, pcitag_t, int));
+void		irongate_conf_write __P((void *, pcitag_t, int, pcireg_t));
 
 /* AMD 751 systems are always single-processor, so this is easy. */
 #define	PCI_CONF_LOCK(s)	(s) = splhigh()
@@ -70,7 +66,7 @@ void		irongate_conf_write(void *, pcitag_t, int, pcireg_t);
 #define	PCI_CONF_ADDR	(IRONGATE_IO_BASE|IRONGATE_CONFADDR)
 #define	PCI_CONF_DATA	(IRONGATE_IO_BASE|IRONGATE_CONFDATA)
 
-#define	REGVAL(r)	(*(__volatile u_int32_t *)ALPHA_PHYS_TO_K0SEG(r))
+#define	REGVAL(r)	(*(volatile u_int32_t *)ALPHA_PHYS_TO_K0SEG(r))
 
 void
 irongate_pci_init(pci_chipset_tag_t pc, void *v)
@@ -130,7 +126,7 @@ irongate_conf_read(void *ipv, pcitag_t tag, int offset)
 	 * point for getting at it from machdep code.
 	 */
 	irongate_decompose_tag(ipv, tag, NULL, &d, NULL);
-	if (d == IRONGATE_PCIHOST_DEV)
+	if (d == IRONGATE_PCIHOST_DEV && offset == PCI_ID_REG)
 		return ((pcireg_t) -1);
 	
 	return (irongate_conf_read0(ipv, tag, offset));

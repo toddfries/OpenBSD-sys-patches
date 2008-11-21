@@ -1,10 +1,3 @@
-/*	$OpenBSD: atomic.h,v 1.4 2007/02/19 17:18:43 deraadt Exp $	*/
-
-/* Public Domain */
-
-#ifndef __ZAURUS_ATOMIC_H__
-#define __ZAURUS_ATOMIC_H__
+/*	$NetBSD: atomic.h,v 1.1 2006/12/16 05:43:06 ober Exp $	*/
 
 #include <arm/atomic.h>
-
-#endif /* __ZAURUS_ATOMIC_H__ */

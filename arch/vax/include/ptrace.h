@@ -1,5 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.2 1997/05/29 00:04:48 niklas Exp $	*/
-/*	$NetBSD: ptrace.h,v 1.3 1995/04/12 15:26:49 ragge Exp $	*/
+/*	$NetBSD: ptrace.h,v 1.4 2008/01/25 12:03:37 skrll Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -38,3 +37,7 @@
 #define PT_GETREGS      (PT_FIRSTMACH + 1)
 #define PT_SETREGS      (PT_FIRSTMACH + 2)
 
+#define PT_MACHDEP_STRINGS \
+	"PT_STEP", \
+	"PT_GETREGS", \
+	"PT_SETREGS",

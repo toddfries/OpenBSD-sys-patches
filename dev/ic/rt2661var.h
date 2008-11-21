@@ -1,4 +1,5 @@
-/*	$OpenBSD: rt2661var.h,v 1.9 2006/10/22 12:14:44 damien Exp $	*/
+/*	$NetBSD: rt2661var.h,v 1.8 2008/04/29 22:21:45 scw Exp $	*/
+/*	$OpenBSD: rt2661var.h,v 1.4 2006/02/25 12:56:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -93,18 +94,18 @@ struct rt2661_softc {
 	struct ieee80211com		sc_ic;
 	int				(*sc_newstate)(struct ieee80211com *,
 					    enum ieee80211_state, int);
-	struct ieee80211_amrr		amrr;
 
 	int				(*sc_enable)(struct rt2661_softc *);
 	void				(*sc_disable)(struct rt2661_softc *);
-	void				(*sc_power)(struct rt2661_softc *, int);
 
 	bus_dma_tag_t			sc_dmat;
 	bus_space_tag_t			sc_st;
 	bus_space_handle_t		sc_sh;
 
-	struct timeout			scan_to;
-	struct timeout			amrr_to;
+	struct ethercom			sc_ec;
+
+	struct callout			scan_ch;
+	struct callout			amrr_ch;
 
 	int				sc_id;
 	int				sc_flags;
@@ -116,6 +117,7 @@ struct rt2661_softc {
 	int				sc_tx_timer;
 
 	struct ieee80211_channel	*sc_curchan;
+	struct ieee80211_amrr		amrr;
 
 	uint8_t				rf_rev;
 
@@ -157,27 +159,26 @@ struct rt2661_softc {
 	uint8_t				bbp64;
 
 #if NBPFILTER > 0
-	caddr_t				sc_drvbpf;
+	void *			sc_drvbpf;
 
 	union {
 		struct rt2661_rx_radiotap_header th;
 		uint8_t	pad[64];
-	}				sc_rxtapu;
-#define sc_rxtap			sc_rxtapu.th
-	int				sc_rxtap_len;
+	}			sc_rxtapu;
+#define sc_rxtap		sc_rxtapu.th
+	int			sc_rxtap_len;
 
 	union {
 		struct rt2661_tx_radiotap_header th;
 		uint8_t	pad[64];
-	}				sc_txtapu;
-#define sc_txtap			sc_txtapu.th
-	int				sc_txtap_len;
+	}			sc_txtapu;
+#define sc_txtap		sc_txtapu.th
+	int			sc_txtap_len;
 #endif
-	void				*sc_sdhook;
-	void				*sc_powerhook;
 };
+
+#define	sc_if		sc_ec.ec_if
 
 int	rt2661_attach(void *, int);
 int	rt2661_detach(void *);
 int	rt2661_intr(void *);
-void	rt2661_shutdown(void *);

@@ -1,5 +1,4 @@
-/*	$OpenBSD: qereg.h,v 1.3 2006/05/29 20:40:03 miod Exp $	*/
-/*	$NetBSD: qereg.h,v 1.3 2000/07/24 04:28:51 mycroft Exp $	*/
+/*	$NetBSD: qereg.h,v 1.6 2008/04/28 20:23:57 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,6 +41,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the authors may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -102,7 +96,7 @@ struct qe_cregs {
 /* qe_cregs.ctrl: control. */
 #define	QE_CR_CTRL_RXOFF	0x00000004	/* disable receiver */
 #define	QE_CR_CTRL_RESET	0x00000002	/* reset this channel */
-#define	QE_CR_CTRL_TWAKEUP	0x00000001	/* tx dma wakeup */
+#define	QE_CR_CTRL_TWAKEUP	0x00000001	/* tx DMA wakeup */
 
 /* qe_cregs.stat: status. */
 #define	QE_CR_STAT_EDEFER	0x10000000	/* excessive defers */
@@ -131,16 +125,16 @@ struct qe_cregs {
 #define	QE_CR_STAT_RXLERR	0x00000004	/* rx late error */
 #define	QE_CR_STAT_RXPERR	0x00000002	/* rx parity error */
 #define	QE_CR_STAT_RXSERR	0x00000001	/* rx sbus error ack */
-#define QE_CR_STAT_BITS		"\020"				\
-			"\01RXSERR\02RXPERR\03RXLERR"		\
-			"\04RXSMALL\05RXDROP\06RXIRQ"		\
-			"\07CECOFLOW\010FCOFLOW\011RLCOLL"	\
-			"\012RXFOFLOW\013MCOFLOW\014RUOFLOW"	\
-			"\015RCCOFLOW\021TXSERR\022TXPERR"	\
-			"\023TXLERR\024TXDERROR\025TCCOFLOW"	\
-			"\026TXIRQ\027BERROR\030JERROR"		\
-			"\031FUFLOW\032LCOLL\033ERETRIES"	\
-			"\034CLOSS\035EDEFER"
+#define QE_CR_STAT_BITS		"\177\020"				\
+			"b\0RXSERR\0b\1RXPERR\0b\2RXLERR\0"		\
+			"b\3RXSMALL\0b\4RXDROP\0b\5RXIRQ\0"		\
+			"b\6CECOFLOW\0b\7FCOFLOW\0b\10RLCOLL\0"		\
+			"b\11RXFOFLOW\0b\12MCOFLOW\0b\13RUOFLOW\0"	\
+			"b\14RCCOFLOW\0b\20TXSERR\0b\21TXPERR\0"	\
+			"b\22TXLERR\0b\23TXDERROR\0b\24TCCOFLOW\0"	\
+			"b\25TXIRQ\0b\26BERROR\0b\27JERROR\0"		\
+			"b\30FUFLOW\0b\31LCOLL\0b\32ERETRIES\0"		\
+			"b\33CLOSS\0b\34EDEFER\0\0"
 
 /*
  * Errors: all status bits except for TX/RX IRQ

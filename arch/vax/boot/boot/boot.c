@@ -1,5 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.17 2008/03/30 19:54:05 miod Exp $ */
-/*	$NetBSD: boot.c,v 1.18 2002/05/31 15:58:26 ragge Exp $ */
+/*	$NetBSD: boot.c,v 1.26 2005/12/24 22:45:40 perry Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
  * All rights reserved.
@@ -33,15 +32,15 @@
 
 #include <sys/param.h>
 #include <sys/reboot.h>
+#include <sys/boot_flag.h>
 
-#include <lib/libkern/libkern.h>
 #include <lib/libsa/stand.h>
 #include <lib/libsa/loadfile.h>
+#include <lib/libkern/libkern.h>
 
 #define V750UCODE(x)    ((x>>8)&255)
 
 #include "machine/rpb.h"
-#include "machine/sid.h"
 
 #include "vaxstand.h"
 
@@ -61,9 +60,7 @@ void	autoconf(void);
 int	getsecs(void);
 int	setjmp(int *);
 int	testkey(void);
-#if 0
 void	loadpcs(void);
-#endif
 
 const struct vals {
 	char	*namn;
@@ -77,6 +74,18 @@ const struct vals {
 	{0, 0},
 };
 
+static struct {
+	char name[12];
+	int quiet;
+} filelist[] = {
+	{ "netbsd.vax", 1 },
+	{ "netbsd", 0 },
+	{ "netbsd.gz", 0 },
+	{ "netbsd.old", 0 },
+	{ "gennetbsd", 0 },
+	{ "", 0 },
+};
+
 int jbuf[10];
 int sluttid, senast, skip, askname;
 struct rpb bootrpb;
@@ -86,30 +95,17 @@ Xmain(void)
 {
 	int io;
 	int j, nu;
-	char transition = '\010';
 	u_long marks[MARK_MAX];
+	extern const char bootprog_rev[], bootprog_date[];
 
 	io = 0;
 	skip = 1;
 	autoconf();
 
-	/*
-	 * Some VAXstation 4000 PROMs slowly erase the whole screen with \010
-	 * if running with glass console - at least VS4000/60 and VS4000/VLC;
-	 * this is probably the LCG PROM at fault. Use a different transition
-	 * pattern, it's not as nice but it does not take 3(!) seconds to
-	 * display...
-	 */
-	if (((vax_boardtype == VAX_BTYP_46 &&
-	      (vax_siedata & 0xff) == VAX_VTYP_46) ||
-	     (vax_boardtype == VAX_BTYP_48 &&
-	      ((vax_siedata >> 8) & 0xff) == VAX_STYP_48)) &&
-	    (vax_confdata & 0x100) == 0)
-		transition = ' ';
-
 	askname = bootrpb.rpb_bootr5 & RB_ASKNAME;
-	printf("\n\r>> OpenBSD/vax boot [%s] [%s] <<\n", "1.13", __DATE__);
-	printf(">> Press enter to autoboot now, or any other key to abort:  ");
+	printf("\n\r>> NetBSD/vax boot [%s %s] <<\n", bootprog_rev,
+		bootprog_date);
+	printf(">> Press any key to abort autoboot  ");
 	sluttid = getsecs() + 5;
 	senast = 0;
 	skip = 0;
@@ -117,7 +113,7 @@ Xmain(void)
 	for (;;) {
 		nu = sluttid - getsecs();
 		if (senast != nu)
-			printf("%c%d", transition, nu);
+			printf("%c%d", 8, nu);
 		if (nu <= 0)
 			break;
 		senast = nu;
@@ -132,30 +128,39 @@ Xmain(void)
 	}
 	skip = 1;
 	printf("\n");
-
 	if (setjmp(jbuf))
 		askname = 1;
 
 	/* First try to autoboot */
 	if (askname == 0) {
-		int err;
-
-		errno = 0;
-		printf("> boot bsd\n");
-		marks[MARK_START] = 0;
-		err = loadfile("bsd", marks,
-		    LOAD_KERNEL|COUNT_KERNEL);
-		if (err == 0) {
-			machdep_start((char *)marks[MARK_ENTRY],
-					      marks[MARK_NSYM],
-				      (void *)marks[MARK_START],
-				      (void *)marks[MARK_SYM],
-				      (void *)marks[MARK_END]);
+		int fileindex;
+		for (fileindex = 0; filelist[fileindex].name[0] != '\0';
+		    fileindex++) {
+			int err;
+			errno = 0;
+			if (!filelist[fileindex].quiet)
+				printf("> boot %s\n", filelist[fileindex].name);
+			marks[MARK_START] = 0;
+			err = loadfile(filelist[fileindex].name, marks,
+			    LOAD_KERNEL|COUNT_KERNEL);
+			if (err == 0) {
+				machdep_start((char *)marks[MARK_ENTRY],
+						      marks[MARK_NSYM],
+					      (void *)marks[MARK_START],
+					      (void *)marks[MARK_SYM],
+					      (void *)marks[MARK_END]);
+			}
+			if (!filelist[fileindex].quiet)
+				printf("%s: boot failed: %s\n",
+				    filelist[fileindex].name, strerror(errno));
+#if 0 /* Will hang VAX 4000 machines */
+			if (testkey())
+				break;
+#endif
 		}
-		printf("bsd: boot failed: %s\n", strerror(errno));
 	}
 
-	/* If any key pressed, or autoboot failed, go to conversational boot */
+	/* If any key pressed, go to conversational boot */
 	for (;;) {
 		const struct vals *v = &val[0];
 		char *c, *d;
@@ -188,13 +193,13 @@ Xmain(void)
 void
 halt(char *hej)
 {
-	asm("halt");
+	__asm("halt");
 }
 
 void
 boot(char *arg)
 {
-	char *fn = "bsd";
+	char *fn = "netbsd";
 	int howto, fl, err;
 	u_long marks[MARK_MAX];
 
@@ -212,27 +217,21 @@ boot(char *arg)
 				goto load;
 		}
 		if (*arg != '-') {
-fail:			printf("usage: boot [filename] [-acsd]\n");
+fail:			printf("usage: boot [filename] [-asdqv]\n");
 			return;
 		}
 
 		howto = 0;
-
 		while (*++arg) {
-			if (*arg == 'a')
-				howto |= RB_ASKNAME;
-			else if (*arg == 'c')
-				howto |= RB_CONFIG;
-			else if (*arg == 'd')
-				howto |= RB_KDB;
-			else if (*arg == 's')
-				howto |= RB_SINGLE;
-			else
+			fl = 0;
+			BOOT_FLAG(*arg, fl);
+			if (!fl)
 				goto fail;
+			howto |= fl;
 		}
 		bootrpb.rpb_bootr5 = howto;
 	}
-load:  
+load:
 	marks[MARK_START] = 0;
 	err = loadfile(fn, marks, LOAD_KERNEL|COUNT_KERNEL);
 	if (err == 0) {
@@ -244,8 +243,6 @@ load:
 	}
 	printf("Boot failed: %s\n", strerror(errno));
 }
-
-#if 0
 
 /* 750 Patchable Control Store magic */
 
@@ -261,14 +258,14 @@ load:
 
 #define	extzv(one, two, three,four)	\
 ({			\
-	asm __volatile (" extzv %0,%3,(%1),(%2)+"	\
+	__asm volatile ("extzv %0,%3,%1,%2"	\
 			:			\
-			: "g"(one),"g"(two),"g"(three),"g"(four));	\
+			: "g"(one),"m"(two),"mo>"(three),"g"(four));	\
 })
 
 
 void
-loadpcs(void)
+loadpcs()
 {
 	static int pcsdone = 0;
 	int mid = mfpr(PR_SID);
@@ -288,8 +285,7 @@ loadpcs(void)
 		i = cp - line + 1;
 	} else
 		i = 0;
-	strncpy(pcs + i, "pcs750.bin", sizeof(pcs) - i - 1);
-	pcs[sizeof(pcs)-1] = '\0';
+	strcpy(pcs + i, "pcs750.bin");
 	i = open(pcs, 0);
 	if (i < 0) {
 		printf("bad luck - missing pcs750.bin :-(\n");
@@ -315,7 +311,7 @@ loadpcs(void)
 	ip = (int *)PCS_PATCHADDR;
 	jp = (int *)0;
 	for (i=0; i < PCS_BITCNT; i++) {
-		extzv(i,jp,ip,1);
+		extzv(i,*jp,*ip++,1);
 	}
 	*((int *)PCS_PATCHBIT) = 0;
 
@@ -325,7 +321,7 @@ loadpcs(void)
 	ip = (int *)PCS_PCSADDR;
 	jp = (int *)1024;
 	for (i=j=0; j < PCS_MICRONUM * 4; i+=20, j++) {
-		extzv(i,jp,ip,20);
+		extzv(i,*jp,*ip++,20);
 	}
 
 	/*
@@ -341,20 +337,14 @@ loadpcs(void)
 	pcsdone = 1;
 }
 
-#endif
-
 void
 usage(char *hej)
 {
 	const struct vals *v = &val[0];
-	int i;
 
 	printf("Commands:\n");
 	while (v->namn) {
-		printf("%s ", v->namn);
-		for (i = 1 + strlen(v->namn); (i & 7) != 0; i++)
-			printf(" ");
-		printf("%s\n", v->info);
+		printf("%s\t%s\n", v->namn, v->info);
 		v++;
 	}
 }

@@ -1,5 +1,4 @@
-/* $OpenBSD: egavar.h,v 1.4 2004/04/02 04:39:51 deraadt Exp $ */
-/* $NetBSD: egavar.h,v 1.1 1999/12/13 16:28:57 drochner Exp $ */
+/* $NetBSD: egavar.h,v 1.4 2005/12/11 12:22:02 christos Exp $ */
 
 /*
  * Copyright (c) 1999

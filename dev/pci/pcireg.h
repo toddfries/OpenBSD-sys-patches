@@ -1,9 +1,9 @@
-/*	$OpenBSD: pcireg.h,v 1.34 2007/11/26 13:20:28 jsg Exp $	*/
-/*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
+/*	$NetBSD: pcireg.h,v 1.57 2007/12/25 18:33:42 perry Exp $	*/
 
 /*
- * Copyright (c) 1995, 1996 Christopher G. Demetriou.  All rights reserved.
- * Copyright (c) 1994, 1996 Charles Hannum.  All rights reserved.
+ * Copyright (c) 1995, 1996, 1999, 2000
+ *     Christopher G. Demetriou.  All rights reserved.
+ * Copyright (c) 1994, 1996 Charles M. Hannum.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,7 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by Charles Hannum.
+ *	This product includes software developed by Charles M. Hannum.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
@@ -58,14 +58,22 @@ typedef u_int16_t pci_product_id_t;
 #define	PCI_PRODUCT(id) \
 	    (((id) >> PCI_PRODUCT_SHIFT) & PCI_PRODUCT_MASK)
 
-#define PCI_ID_CODE(vid,pid) \
-	((((vid) & PCI_VENDOR_MASK) << PCI_VENDOR_SHIFT) | \
-	 (((pid) & PCI_PRODUCT_MASK) << PCI_PRODUCT_SHIFT))
+#define PCI_ID_CODE(vid,pid)					\
+	((((vid) & PCI_VENDOR_MASK) << PCI_VENDOR_SHIFT) |	\
+	 (((pid) & PCI_PRODUCT_MASK) << PCI_PRODUCT_SHIFT))	\
 
 /*
  * Command and status register.
  */
 #define	PCI_COMMAND_STATUS_REG			0x04
+#define	PCI_COMMAND_SHIFT			0
+#define	PCI_COMMAND_MASK			0xffff
+#define	PCI_STATUS_SHIFT			16
+#define	PCI_STATUS_MASK				0xffff
+
+#define PCI_COMMAND_STATUS_CODE(cmd,stat)			\
+	((((cmd) & PCI_COMMAND_MASK) << PCI_COMMAND_SHIFT) |	\
+	 (((stat) & PCI_STATUS_MASK) << PCI_STATUS_SHIFT))	\
 
 #define	PCI_COMMAND_IO_ENABLE			0x00000001
 #define	PCI_COMMAND_MEM_ENABLE			0x00000002
@@ -77,6 +85,7 @@ typedef u_int16_t pci_product_id_t;
 #define	PCI_COMMAND_STEPPING_ENABLE		0x00000080
 #define	PCI_COMMAND_SERR_ENABLE			0x00000100
 #define	PCI_COMMAND_BACKTOBACK_ENABLE		0x00000200
+#define	PCI_COMMAND_INTERRUPT_DISABLE		0x00000400
 
 #define	PCI_STATUS_CAPLIST_SUPPORT		0x00100000
 #define	PCI_STATUS_66MHZ_SUPPORT		0x00200000
@@ -93,12 +102,6 @@ typedef u_int16_t pci_product_id_t;
 #define	PCI_STATUS_SPECIAL_ERROR		0x40000000
 #define	PCI_STATUS_PARITY_DETECT		0x80000000
 
-#define	PCI_COMMAND_STATUS_BITS \
-    ("\020\01IO\02MEM\03MASTER\04SPECIAL\05INVALIDATE\06PALETTE\07PARITY"\
-     "\010STEPPING\011SERR\012BACKTOBACK\025CAPLIST\026CLK66\027UDF"\
-     "\030BACK2BACK_STAT\031PARITY_STAT\032DEVSEL_MEDIUM\033DEVSEL_SLOW"\
-     "\034TARGET_TARGET_ABORT\035MASTER_TARGET_ABORT\036MASTER_ABORT"\
-     "\037SPECIAL_ERROR\040PARITY_DETECT")
 /*
  * PCI Class and Revision Register; defines type and revision of device.
  */
@@ -128,6 +131,11 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_REVISION_MASK			0xff
 #define	PCI_REVISION(cr) \
 	    (((cr) >> PCI_REVISION_SHIFT) & PCI_REVISION_MASK)
+
+#define	PCI_CLASS_CODE(mainclass, subclass, interface) \
+	    ((((mainclass) & PCI_CLASS_MASK) << PCI_CLASS_SHIFT) | \
+	     (((subclass) & PCI_SUBCLASS_MASK) << PCI_SUBCLASS_SHIFT) | \
+	     (((interface) & PCI_INTERFACE_MASK) << PCI_INTERFACE_SHIFT))
 
 /* base classes */
 #define	PCI_CLASS_PREHISTORIC			0x00
@@ -197,7 +205,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_BRIDGE_HOST		0x00
 #define	PCI_SUBCLASS_BRIDGE_ISA			0x01
 #define	PCI_SUBCLASS_BRIDGE_EISA		0x02
-#define	PCI_SUBCLASS_BRIDGE_MC			0x03
+#define	PCI_SUBCLASS_BRIDGE_MC			0x03	/* XXX _MCA? */
 #define	PCI_SUBCLASS_BRIDGE_PCI			0x04
 #define	PCI_SUBCLASS_BRIDGE_PCMCIA		0x05
 #define	PCI_SUBCLASS_BRIDGE_NUBUS		0x06
@@ -251,7 +259,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_SERIALBUS_ACCESS		0x01
 #define	PCI_SUBCLASS_SERIALBUS_SSA		0x02
 #define	PCI_SUBCLASS_SERIALBUS_USB		0x03
-#define	PCI_SUBCLASS_SERIALBUS_FIBER		0x04
+#define	PCI_SUBCLASS_SERIALBUS_FIBER		0x04	/* XXX _FIBRECHANNEL */
 #define	PCI_SUBCLASS_SERIALBUS_SMBUS		0x05
 #define	PCI_SUBCLASS_SERIALBUS_INFINIBAND	0x06
 #define	PCI_SUBCLASS_SERIALBUS_IPMI		0x07
@@ -272,7 +280,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_I2O_STANDARD		0x00
 
 /* 0x0f satellite communication subclasses */
-/*	PCI_SUBCLASS_SATCOM_???			0x00    / * XXX ??? */
+/*	PCI_SUBCLASS_SATCOM_???			0x00	/ * XXX ??? */
 #define	PCI_SUBCLASS_SATCOM_TV			0x01
 #define	PCI_SUBCLASS_SATCOM_AUDIO		0x02
 #define	PCI_SUBCLASS_SATCOM_VOICE		0x03
@@ -305,7 +313,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_HDRTYPE(bhlcr) \
 	    (((bhlcr) >> PCI_HDRTYPE_SHIFT) & PCI_HDRTYPE_MASK)
 
-#define PCI_HDRTYPE_TYPE(bhlcr) \
+#define	PCI_HDRTYPE_TYPE(bhlcr) \
 	    (PCI_HDRTYPE(bhlcr) & 0x7f)
 #define	PCI_HDRTYPE_MULTIFN(bhlcr) \
 	    ((PCI_HDRTYPE(bhlcr) & 0x80) != 0)
@@ -320,74 +328,26 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_CACHELINE(bhlcr) \
 	    (((bhlcr) >> PCI_CACHELINE_SHIFT) & PCI_CACHELINE_MASK)
 
-/* config registers for header type 0 devices */
+#define PCI_BHLC_CODE(bist,type,multi,latency,cacheline)		\
+	    ((((bist) & PCI_BIST_MASK) << PCI_BIST_SHIFT) |		\
+	     (((type) & PCI_HDRTYPE_MASK) << PCI_HDRTYPE_SHIFT) |	\
+	     (((multi)?0x80:0) << PCI_HDRTYPE_SHIFT) |			\
+	     (((latency) & PCI_LATTIMER_MASK) << PCI_LATTIMER_SHIFT) |	\
+	     (((cacheline) & PCI_CACHELINE_MASK) << PCI_CACHELINE_SHIFT))
 
-#define PCI_MAPS	0x10
-#define PCI_CARDBUSCIS	0x28
-#define PCI_SUBVEND_0	0x2c
-#define PCI_SUBDEV_0	0x2e
-#define PCI_INTLINE	0x3c
-#define PCI_INTPIN	0x3d
-#define PCI_MINGNT	0x3e
-#define PCI_MAXLAT	0x3f
-
-/* config registers for header type 1 devices */
-
-#define PCI_SECSTAT_1	0 /**/
-
-#define PCI_PRIBUS_1	0x18
-#define PCI_SECBUS_1	0x19
-#define PCI_SUBBUS_1	0x1a
-#define PCI_SECLAT_1	0x1b
-
-#define PCI_IOBASEL_1	0x1c
-#define PCI_IOLIMITL_1	0x1d
-#define PCI_IOBASEH_1	0 /**/
-#define PCI_IOLIMITH_1	0 /**/
-
-#define PCI_MEMBASE_1	0x20
-#define PCI_MEMLIMIT_1	0x22
-
-#define PCI_PMBASEL_1	0x24
-#define PCI_PMLIMITL_1	0x26
-#define PCI_PMBASEH_1	0 /**/
-#define PCI_PMLIMITH_1	0 /**/
-
-#define PCI_BRIDGECTL_1 0 /**/
-
-#define PCI_SUBVEND_1	0x34
-#define PCI_SUBDEV_1	0x36
-
-/* config registers for header type 2 devices */
-
-#define PCI_SECSTAT_2	0x16
-
-#define PCI_PRIBUS_2	0x18
-#define PCI_SECBUS_2	0x19
-#define PCI_SUBBUS_2	0x1a
-#define PCI_SECLAT_2	0x1b
-
-#define PCI_MEMBASE0_2	0x1c
-#define PCI_MEMLIMIT0_2 0x20
-#define PCI_MEMBASE1_2	0x24
-#define PCI_MEMLIMIT1_2 0x28
-#define PCI_IOBASE0_2	0x2c
-#define PCI_IOLIMIT0_2	0x30
-#define PCI_IOBASE1_2	0x34
-#define PCI_IOLIMIT1_2	0x38
-
-#define PCI_BRIDGECTL_2 0x3e
-
-#define PCI_SUBVEND_2	0x40
-#define PCI_SUBDEV_2	0x42
-
-#define PCI_PCCARDIF_2	0x44
+/*
+ * PCI header type
+ */
+#define PCI_HDRTYPE_DEVICE	0
+#define PCI_HDRTYPE_PPB		1
+#define PCI_HDRTYPE_PCB		2
 
 /*
  * Mapping registers
  */
 #define	PCI_MAPREG_START		0x10
 #define	PCI_MAPREG_END			0x28
+#define	PCI_MAPREG_ROM			0x30
 #define	PCI_MAPREG_PPB_END		0x18
 #define	PCI_MAPREG_PCB_END		0x14
 
@@ -396,7 +356,9 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_MAPREG_TYPE_MASK			0x00000001
 
 #define	PCI_MAPREG_TYPE_MEM			0x00000000
+#define	PCI_MAPREG_TYPE_ROM			0x00000000
 #define	PCI_MAPREG_TYPE_IO			0x00000001
+#define	PCI_MAPREG_ROM_ENABLE			0x00000001
 
 #define	PCI_MAPREG_MEM_TYPE(mr)						\
 	    ((mr) & PCI_MAPREG_MEM_TYPE_MASK)
@@ -406,12 +368,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_MAPREG_MEM_TYPE_32BIT_1M		0x00000002
 #define	PCI_MAPREG_MEM_TYPE_64BIT		0x00000004
 
-#define _PCI_MAPREG_TYPEBITS(reg) \
-	(PCI_MAPREG_TYPE(reg) == PCI_MAPREG_TYPE_IO ? \
-	reg & PCI_MAPREG_TYPE_MASK : \
-	reg & (PCI_MAPREG_TYPE_MASK|PCI_MAPREG_MEM_TYPE_MASK))
-
-#define	PCI_MAPREG_MEM_PREFETCHABLE(mr)					\
+#define	PCI_MAPREG_MEM_PREFETCHABLE(mr)				\
 	    (((mr) & PCI_MAPREG_MEM_PREFETCHABLE_MASK) != 0)
 #define	PCI_MAPREG_MEM_PREFETCHABLE_MASK	0x00000008
 
@@ -431,7 +388,14 @@ typedef u_int8_t pci_revision_t;
 	    ((mr) & PCI_MAPREG_IO_ADDR_MASK)
 #define	PCI_MAPREG_IO_SIZE(mr)						\
 	    (PCI_MAPREG_IO_ADDR(mr) & -PCI_MAPREG_IO_ADDR(mr))
-#define	PCI_MAPREG_IO_ADDR_MASK			0xfffffffe
+#define	PCI_MAPREG_IO_ADDR_MASK			0xfffffffc
+
+#define PCI_MAPREG_SIZE_TO_MASK(size)					\
+	    (-(size))
+
+#define PCI_MAPREG_NUM(offset)						\
+	    (((unsigned)(offset)-PCI_MAPREG_START)/4)
+
 
 /*
  * Cardbus CIS pointer (PCI rev. 2.1)
@@ -446,44 +410,33 @@ typedef u_int8_t pci_revision_t;
 #define PCI_SUBSYS_ID_REG 0x2c
 
 /*
- * Expansion ROM Base Address register
- * (PCI rev. 2.0)
+ * Capabilities link list (PCI rev. 2.2)
  */
-#define PCI_ROM_REG 0x30
+#define	PCI_CAPLISTPTR_REG		0x34	/* header type 0 */
+#define	PCI_CARDBUS_CAPLISTPTR_REG	0x14	/* header type 2 */
+#define	PCI_CAPLIST_PTR(cpr)	((cpr) & 0xff)
+#define	PCI_CAPLIST_NEXT(cr)	(((cr) >> 8) & 0xff)
+#define	PCI_CAPLIST_CAP(cr)	((cr) & 0xff)
 
-#define PCI_ROM_ENABLE			0x00000001
-#define PCI_ROM_ADDR_MASK		0xfffff800
-#define PCI_ROM_ADDR(mr)						\
-	    ((mr) & PCI_ROM_ADDR_MASK)
-#define PCI_ROM_SIZE(mr)						\
-	    (PCI_ROM_ADDR(mr) & -PCI_ROM_ADDR(mr))
-
-/*
- * capabilities link list (PCI rev. 2.2)
- */
-#define PCI_CAPLISTPTR_REG		0x34	/* header type 0 */
-#define PCI_CARDBUS_CAPLISTPTR_REG	0x14	/* header type 2 */
-#define PCI_CAPLIST_PTR(cpr) ((cpr) & 0xff)
-#define PCI_CAPLIST_NEXT(cr) (((cr) >> 8) & 0xff)
-#define PCI_CAPLIST_CAP(cr) ((cr) & 0xff)
-
-#define PCI_CAP_RESERVED	0x00
-#define PCI_CAP_PWRMGMT		0x01
-#define PCI_CAP_AGP		0x02
-#define PCI_CAP_VPD		0x03
-#define PCI_CAP_SLOTID		0x04
-#define PCI_CAP_MSI		0x05
-#define PCI_CAP_CPCI_HOTSWAP	0x06
-#define PCI_CAP_PCIX		0x07
-#define PCI_CAP_LDT		0x08
-#define PCI_CAP_VENDSPEC	0x09
-#define PCI_CAP_DEBUGPORT	0x0a
-#define PCI_CAP_CPCI_RSRCCTL	0x0b
-#define PCI_CAP_HOTPLUG		0x0c
-#define PCI_CAP_AGP8		0x0e
-#define PCI_CAP_SECURE		0x0f
-#define PCI_CAP_PCIEXPRESS     	0x10
-#define PCI_CAP_MSIX		0x11
+#define	PCI_CAP_RESERVED0	0x00
+#define	PCI_CAP_PWRMGMT		0x01
+#define	PCI_CAP_AGP		0x02
+#define PCI_CAP_AGP_MAJOR(cr)	(((cr) >> 20) & 0xf)
+#define PCI_CAP_AGP_MINOR(cr)	(((cr) >> 16) & 0xf)
+#define	PCI_CAP_VPD		0x03
+#define	PCI_CAP_SLOTID		0x04
+#define	PCI_CAP_MSI		0x05
+#define	PCI_CAP_CPCI_HOTSWAP	0x06
+#define	PCI_CAP_PCIX		0x07
+#define	PCI_CAP_LDT		0x08
+#define	PCI_CAP_VENDSPEC	0x09
+#define	PCI_CAP_DEBUGPORT	0x0a
+#define	PCI_CAP_CPCI_RSRCCTL	0x0b
+#define	PCI_CAP_HOTPLUG		0x0c
+#define	PCI_CAP_AGP8		0x0e
+#define	PCI_CAP_SECURE		0x0f
+#define	PCI_CAP_PCIEXPRESS     	0x10
+#define	PCI_CAP_MSIX		0x11
 
 /*
  * Vital Product Data; access via capability pointer (PCI rev 2.2).
@@ -496,56 +449,123 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_VPD_OPFLAG		0x80000000
 
 /*
- * Power Management Control Status Register; access via capability pointer.
+ * Power Management Capability; access via capability pointer.
  */
+
+/* Power Management Capability Register */
+#define PCI_PMCR_SHIFT		16
+#define PCI_PMCR		0x02
+#define PCI_PMCR_D1SUPP		0x0200
+#define PCI_PMCR_D2SUPP		0x0400
+/* Power Management Control Status Register */
 #define PCI_PMCSR		0x04
+#define	PCI_PMCSR_PME_EN	0x100
 #define PCI_PMCSR_STATE_MASK	0x03
-#define PCI_PMCSR_STATE_D0	0x00
-#define PCI_PMCSR_STATE_D1	0x01
-#define PCI_PMCSR_STATE_D2	0x02
-#define PCI_PMCSR_STATE_D3	0x03
+#define PCI_PMCSR_STATE_D0      0x00
+#define PCI_PMCSR_STATE_D1      0x01
+#define PCI_PMCSR_STATE_D2      0x02
+#define PCI_PMCSR_STATE_D3      0x03
 
 /*
- * PCI Express; access via capability pointer.
+ * PCI-X capability.
  */
-#define PCI_PCIE_XCAP		0x00
-#define PCI_PCIE_XCAP_SI	0x01000000
-#define PCI_PCIE_DCAP		0x04
-#define PCI_PCIE_DCSR		0x08
-#define PCI_PCIE_LCAP		0x0c
-#define PCI_PCIE_LCSR		0x10
-#define PCI_PCIE_SLCAP		0x14
-#define PCI_PCIE_SLCAP_ABP	0x00000001
-#define PCI_PCIE_SLCAP_PCP	0x00000002
-#define PCI_PCIE_SLCAP_MSP	0x00000004
-#define PCI_PCIE_SLCAP_AIP	0x00000008
-#define PCI_PCIE_SLCAP_PIP	0x00000010
-#define PCI_PCIE_SLCAP_HPS	0x00000020
-#define PCI_PCIE_SLCAP_HPC	0x00000040
-#define PCI_PCIE_SLCSR		0x18
-#define PCI_PCIE_SLCSR_ABE	0x00000001
-#define PCI_PCIE_SLCSR_PFE	0x00000002
-#define PCI_PCIE_SLCSR_MSE	0x00000004
-#define PCI_PCIE_SLCSR_PDE	0x00000008
-#define PCI_PCIE_SLCSR_CCE	0x00000010
-#define PCI_PCIE_SLCSR_HPE	0x00000020
-#define PCI_PCIE_SLCSR_ABP	0x00010000
-#define PCI_PCIE_SLCSR_PFD	0x00020000
-#define PCI_PCIE_SLCSR_MSC	0x00040000
-#define PCI_PCIE_SLCSR_PDC	0x00080000
-#define PCI_PCIE_SLCSR_CC	0x00100000
-#define PCI_PCIE_SLCSR_MS	0x00200000
-#define PCI_PCIE_SLCSR_PDS	0x00400000
-#define PCI_PCIE_SLCSR_LACS	0x01000000
-#define PCI_PCIE_RCSR		0x1c
+
+/*
+ * Command. 16 bits at offset 2 (e.g. upper 16 bits of the first 32-bit
+ * word at the capability; the lower 16 bits are the capability ID and
+ * next capability pointer).
+ *
+ * Since we always read PCI config space in 32-bit words, we define these
+ * as 32-bit values, offset and shifted appropriately.  Make sure you perform
+ * the appropriate R/M/W cycles!
+ */
+#define PCI_PCIX_CMD			0x00
+#define PCI_PCIX_CMD_PERR_RECOVER	0x00010000
+#define PCI_PCIX_CMD_RELAXED_ORDER	0x00020000
+#define PCI_PCIX_CMD_BYTECNT_MASK	0x000c0000
+#define	PCI_PCIX_CMD_BYTECNT_SHIFT	18
+#define		PCI_PCIX_CMD_BCNT_512		0x00000000
+#define		PCI_PCIX_CMD_BCNT_1024		0x00040000
+#define		PCI_PCIX_CMD_BCNT_2048		0x00080000
+#define		PCI_PCIX_CMD_BCNT_4096		0x000c0000
+#define PCI_PCIX_CMD_SPLTRANS_MASK	0x00700000
+#define		PCI_PCIX_CMD_SPLTRANS_1		0x00000000
+#define		PCI_PCIX_CMD_SPLTRANS_2		0x00100000
+#define		PCI_PCIX_CMD_SPLTRANS_3		0x00200000
+#define		PCI_PCIX_CMD_SPLTRANS_4		0x00300000
+#define		PCI_PCIX_CMD_SPLTRANS_8		0x00400000
+#define		PCI_PCIX_CMD_SPLTRANS_12	0x00500000
+#define		PCI_PCIX_CMD_SPLTRANS_16	0x00600000
+#define		PCI_PCIX_CMD_SPLTRANS_32	0x00700000
+
+/*
+ * Status. 32 bits at offset 4.
+ */
+#define PCI_PCIX_STATUS			0x04
+#define PCI_PCIX_STATUS_FN_MASK		0x00000007
+#define PCI_PCIX_STATUS_DEV_MASK	0x000000f8
+#define PCI_PCIX_STATUS_BUS_MASK	0x0000ff00
+#define PCI_PCIX_STATUS_64BIT		0x00010000
+#define PCI_PCIX_STATUS_133		0x00020000
+#define PCI_PCIX_STATUS_SPLDISC		0x00040000
+#define PCI_PCIX_STATUS_SPLUNEX		0x00080000
+#define PCI_PCIX_STATUS_DEVCPLX		0x00100000
+#define PCI_PCIX_STATUS_MAXB_MASK	0x00600000
+#define	PCI_PCIX_STATUS_MAXB_SHIFT	21
+#define		PCI_PCIX_STATUS_MAXB_512	0x00000000
+#define		PCI_PCIX_STATUS_MAXB_1024	0x00200000
+#define		PCI_PCIX_STATUS_MAXB_2048	0x00400000
+#define		PCI_PCIX_STATUS_MAXB_4096	0x00600000
+#define PCI_PCIX_STATUS_MAXST_MASK	0x03800000
+#define		PCI_PCIX_STATUS_MAXST_1		0x00000000
+#define		PCI_PCIX_STATUS_MAXST_2		0x00800000
+#define		PCI_PCIX_STATUS_MAXST_3		0x01000000
+#define		PCI_PCIX_STATUS_MAXST_4		0x01800000
+#define		PCI_PCIX_STATUS_MAXST_8		0x02000000
+#define		PCI_PCIX_STATUS_MAXST_12	0x02800000
+#define		PCI_PCIX_STATUS_MAXST_16	0x03000000
+#define		PCI_PCIX_STATUS_MAXST_32	0x03800000
+#define PCI_PCIX_STATUS_MAXRS_MASK	0x1c000000
+#define		PCI_PCIX_STATUS_MAXRS_1K	0x00000000
+#define		PCI_PCIX_STATUS_MAXRS_2K	0x04000000
+#define		PCI_PCIX_STATUS_MAXRS_4K	0x08000000
+#define		PCI_PCIX_STATUS_MAXRS_8K	0x0c000000
+#define		PCI_PCIX_STATUS_MAXRS_16K	0x10000000
+#define		PCI_PCIX_STATUS_MAXRS_32K	0x14000000
+#define		PCI_PCIX_STATUS_MAXRS_64K	0x18000000
+#define		PCI_PCIX_STATUS_MAXRS_128K	0x1c000000
+#define PCI_PCIX_STATUS_SCERR			0x20000000
+
 
 /*
  * Interrupt Configuration Register; contains interrupt pin and line.
  */
 #define	PCI_INTERRUPT_REG		0x3c
 
+typedef u_int8_t pci_intr_latency_t;
+typedef u_int8_t pci_intr_grant_t;
 typedef u_int8_t pci_intr_pin_t;
 typedef u_int8_t pci_intr_line_t;
+
+#define PCI_MAX_LAT_SHIFT			24
+#define	PCI_MAX_LAT_MASK			0xff
+#define	PCI_MAX_LAT(icr) \
+	    (((icr) >> PCI_MAX_LAT_SHIFT) & PCI_MAX_LAT_MASK)
+
+#define PCI_MIN_GNT_SHIFT			16
+#define	PCI_MIN_GNT_MASK			0xff
+#define	PCI_MIN_GNT(icr) \
+	    (((icr) >> PCI_MIN_GNT_SHIFT) & PCI_MIN_GNT_MASK)
+
+#define	PCI_INTERRUPT_GRANT_SHIFT		24
+#define	PCI_INTERRUPT_GRANT_MASK		0xff
+#define	PCI_INTERRUPT_GRANT(icr) \
+	    (((icr) >> PCI_INTERRUPT_GRANT_SHIFT) & PCI_INTERRUPT_GRANT_MASK)
+
+#define	PCI_INTERRUPT_LATENCY_SHIFT		16
+#define	PCI_INTERRUPT_LATENCY_MASK		0xff
+#define	PCI_INTERRUPT_LATENCY(icr) \
+	    (((icr) >> PCI_INTERRUPT_LATENCY_SHIFT) & PCI_INTERRUPT_LATENCY_MASK)
 
 #define	PCI_INTERRUPT_PIN_SHIFT			8
 #define	PCI_INTERRUPT_PIN_MASK			0xff
@@ -557,15 +577,11 @@ typedef u_int8_t pci_intr_line_t;
 #define	PCI_INTERRUPT_LINE(icr) \
 	    (((icr) >> PCI_INTERRUPT_LINE_SHIFT) & PCI_INTERRUPT_LINE_MASK)
 
-#define	PCI_MIN_GNT_SHIFT			16
-#define	PCI_MIN_GNT_MASK			0xff
-#define	PCI_MIN_GNT(icr) \
-	    (((icr) >> PCI_MIN_GNT_SHIFT) & PCI_MIN_GNT_MASK)
-
-#define	PCI_MAX_LAT_SHIFT			24
-#define	PCI_MAX_LAT_MASK			0xff
-#define	PCI_MAX_LAT(icr) \
-	    (((icr) >> PCI_MAX_LAT_SHIFT) & PCI_MAX_LAT_MASK)
+#define PCI_INTERRUPT_CODE(lat,gnt,pin,line)		\
+	  ((((lat)&PCI_INTERRUPT_LATENCY_MASK)<<PCI_INTERRUPT_LATENCY_SHIFT)| \
+	   (((gnt)&PCI_INTERRUPT_GRANT_MASK)  <<PCI_INTERRUPT_GRANT_SHIFT)  | \
+	   (((pin)&PCI_INTERRUPT_PIN_MASK)    <<PCI_INTERRUPT_PIN_SHIFT)    | \
+	   (((line)&PCI_INTERRUPT_LINE_MASK)  <<PCI_INTERRUPT_LINE_SHIFT))
 
 #define	PCI_INTERRUPT_PIN_NONE			0x00
 #define	PCI_INTERRUPT_PIN_A			0x01
@@ -573,6 +589,60 @@ typedef u_int8_t pci_intr_line_t;
 #define	PCI_INTERRUPT_PIN_C			0x03
 #define	PCI_INTERRUPT_PIN_D			0x04
 #define	PCI_INTERRUPT_PIN_MAX			0x04
+
+/* Header Type 1 (Bridge) configuration registers */
+#define PCI_BRIDGE_BUS_REG		0x18
+#define   PCI_BRIDGE_BUS_PRIMARY_SHIFT		0
+#define   PCI_BRIDGE_BUS_SECONDARY_SHIFT	8
+#define   PCI_BRIDGE_BUS_SUBORDINATE_SHIFT	16
+
+#define PCI_BRIDGE_STATIO_REG		0x1C
+#define	  PCI_BRIDGE_STATIO_IOBASE_SHIFT	0
+#define	  PCI_BRIDGE_STATIO_IOLIMIT_SHIFT	8
+#define	  PCI_BRIDGE_STATIO_STATUS_SHIFT	16
+#define	  PCI_BRIDGE_STATIO_IOBASE_MASK		0xf0
+#define	  PCI_BRIDGE_STATIO_IOLIMIT_MASK	0xf0
+#define	  PCI_BRIDGE_STATIO_STATUS_MASK		0xffff
+#define	  PCI_BRIDGE_IO_32BITS(reg)		(((reg) & 0xf) == 1)
+
+#define PCI_BRIDGE_MEMORY_REG		0x20
+#define	  PCI_BRIDGE_MEMORY_BASE_SHIFT		4
+#define	  PCI_BRIDGE_MEMORY_LIMIT_SHIFT		20
+#define	  PCI_BRIDGE_MEMORY_BASE_MASK		0x0fff
+#define	  PCI_BRIDGE_MEMORY_LIMIT_MASK		0x0fff
+
+#define PCI_BRIDGE_PREFETCHMEM_REG	0x24
+#define	  PCI_BRIDGE_PREFETCHMEM_BASE_SHIFT	4
+#define	  PCI_BRIDGE_PREFETCHMEM_LIMIT_SHIFT	20
+#define	  PCI_BRIDGE_PREFETCHMEM_BASE_MASK	0x0fff
+#define	  PCI_BRIDGE_PREFETCHMEM_LIMIT_MASK	0x0fff
+#define	  PCI_BRIDGE_PREFETCHMEM_64BITS(reg)	((reg) & 0xf)
+
+#define PCI_BRIDGE_PREFETCHBASE32_REG	0x28
+#define PCI_BRIDGE_PREFETCHLIMIT32_REG	0x2C
+
+#define PCI_BRIDGE_IOHIGH_REG		0x30
+#define	  PCI_BRIDGE_IOHIGH_BASE_SHIFT		0
+#define	  PCI_BRIDGE_IOHIGH_LIMIT_SHIFT		16
+#define	  PCI_BRIDGE_IOHIGH_BASE_MASK		0xffff
+#define	  PCI_BRIDGE_IOHIGH_LIMIT_MASK		0xffff
+
+#define PCI_BRIDGE_CONTROL_REG		0x3C
+#define	  PCI_BRIDGE_CONTROL_SHIFT		16
+#define	  PCI_BRIDGE_CONTROL_MASK		0xffff
+#define   PCI_BRIDGE_CONTROL_PERE		(1 <<  0)
+#define   PCI_BRIDGE_CONTROL_SERR		(1 <<  1)
+#define   PCI_BRIDGE_CONTROL_ISA		(1 <<  2)
+#define   PCI_BRIDGE_CONTROL_VGA		(1 <<  3)
+/* Reserved					(1 <<  4) */
+#define   PCI_BRIDGE_CONTROL_MABRT		(1 <<  5)
+#define   PCI_BRIDGE_CONTROL_SECBR		(1 <<  6)
+#define   PCI_BRIDGE_CONTROL_SECFASTB2B		(1 <<  7)
+#define   PCI_BRIDGE_CONTROL_PRI_DISC_TIMER	(1 <<  8)
+#define   PCI_BRIDGE_CONTROL_SEC_DISC_TIMER	(1 <<  9)
+#define   PCI_BRIDGE_CONTROL_DISC_TIMER_STAT	(1 << 10)
+#define   PCI_BRIDGE_CONTROL_DISC_TIMER_SERR	(1 << 11)
+/* Reserved					(1 << 12) - (1 << 15) */
 
 /*
  * Vital Product Data resource tags.
@@ -636,5 +706,53 @@ struct pci_vpd {
  *
  *	Z0-ZZ		User/Product Specific
  */
+
+/*
+ * PCI Expansion Rom
+ */
+
+struct pci_rom_header {
+	uint16_t		romh_magic;	/* 0xAA55 little endian */
+	uint8_t			romh_reserved[22];
+	uint16_t		romh_data_ptr;	/* pointer to pci_rom struct */
+} __packed;
+
+#define	PCI_ROM_HEADER_MAGIC	0xAA55		/* little endian */
+
+struct pci_rom {
+	uint32_t		rom_signature;
+	pci_vendor_id_t		rom_vendor;
+	pci_product_id_t	rom_product;
+	uint16_t		rom_vpd_ptr;	/* reserved in PCI 2.2 */
+	uint16_t		rom_data_len;
+	uint8_t			rom_data_rev;
+	pci_interface_t		rom_interface;	/* the class reg is 24-bits */
+	pci_subclass_t		rom_subclass;	/* in little endian */
+	pci_class_t		rom_class;
+	uint16_t		rom_len;	/* code length / 512 byte */
+	uint16_t		rom_rev;	/* code revision level */
+	uint8_t			rom_code_type;	/* type of code */
+	uint8_t			rom_indicator;
+	uint16_t		rom_reserved;
+	/* Actual data. */
+} __packed;
+
+#define	PCI_ROM_SIGNATURE	0x52494350	/* "PCIR", endian reversed */
+#define	PCI_ROM_CODE_TYPE_X86	0		/* Intel x86 BIOS */
+#define	PCI_ROM_CODE_TYPE_OFW	1		/* Open Firmware */
+#define	PCI_ROM_CODE_TYPE_HPPA	2		/* HP PA/RISC */
+
+#define	PCI_ROM_INDICATOR_LAST	0x80
+
+/*
+ * Threshold below which 32bit PCI DMA needs bouncing.
+ */
+#define PCI32_DMA_BOUNCE_THRESHOLD	0x100000000ULL
+
+/*
+ * Common PCI register for PCI transmit handling.
+ */
+#define	PCI_RETRY_TIMEOUT_REG		0x40
+#define		PCI_RETRY_TIMEOUT_REG_MASK	0x0000ff00
 
 #endif /* _DEV_PCI_PCIREG_H_ */

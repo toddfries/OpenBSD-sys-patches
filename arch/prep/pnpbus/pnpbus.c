@@ -1,4 +1,4 @@
-/*	$NetBSD: pnpbus.c,v 1.6 2006/10/27 19:52:51 garbled Exp $	*/
+/*	$NetBSD: pnpbus.c,v 1.9 2008/04/28 20:23:33 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pnpbus.c,v 1.6 2006/10/27 19:52:51 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pnpbus.c,v 1.9 2008/04/28 20:23:33 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,7 +68,11 @@ extern struct cfdriver pnpbus_cd;
 static int
 pnpbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	return 1;
+	struct pnpbus_attach_args *paa = aux;
+
+	if (paa->paa_name != NULL && strcmp(paa->paa_name, "pnpbus") == 0)
+		return 1;
+	return 0;
 }
 
 static void
@@ -84,7 +81,7 @@ pnpbus_attach(struct device *parent, struct device *self, void *aux)
 	struct pnpbus_softc *sc = (struct pnpbus_softc *)self;
 	struct pnpbus_attach_args *paa = aux;
 
-	printf("\n");
+	aprint_normal("\n");
 
 	pnpbus_softc = sc;
 	sc->sc_ic = paa->paa_ic;
@@ -491,7 +488,7 @@ pnpbus_print(void *args, const char *name)
  * Set up an interrupt handler to start being called.
  */
 void *
-pnpbus_intr_establish(int idx, int level, int (*ih_fun)(void *),
+pnpbus_intr_establish(int idx, int level, int tover, int (*ih_fun)(void *),
     void *ih_arg, struct pnpresources *r)
 {
 	struct pnpbus_irq *irq;
@@ -506,6 +503,8 @@ pnpbus_intr_establish(int idx, int level, int (*ih_fun)(void *),
 
 	irqnum = ffs(irq->mask) - 1;
 	type = (irq->flags & 0x0c) ? IST_LEVEL : IST_EDGE;
+	if (tover != IST_PNP)
+		type = tover;
 
 	return (void *)intr_establish(irqnum, type, level, ih_fun, ih_arg);
 }
@@ -588,8 +587,8 @@ pnpbus_io_map(struct pnpresources *r, int idx, bus_space_tag_t *tagp,
 	while (idx--)
 		io = SIMPLEQ_NEXT(io, next);
 
-	*tagp = &prep_isa_io_space_tag;
-	return (bus_space_map(&prep_isa_io_space_tag, io->minbase, io->len,
+	*tagp = &genppc_isa_io_space_tag;
+	return (bus_space_map(&genppc_isa_io_space_tag, io->minbase, io->len,
 	    0, hdlp));
 }
 
@@ -641,8 +640,8 @@ pnpbus_iomem_map(struct pnpresources *r, int idx, bus_space_tag_t *tagp,
 	while (idx--)
 		mem = SIMPLEQ_NEXT(mem, next);
 
-	*tagp = &prep_isa_mem_space_tag;
-	return (bus_space_map(&prep_isa_mem_space_tag, mem->minbase, mem->len,
+	*tagp = &genppc_isa_mem_space_tag;
+	return (bus_space_map(&genppc_isa_mem_space_tag, mem->minbase, mem->len,
 	    0, hdlp));
 }
 

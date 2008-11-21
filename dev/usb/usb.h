@@ -1,5 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.30 2007/11/28 16:50:22 robert Exp $ */
-/*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
+/*	$NetBSD: usb.h,v 1.82 2008/08/02 23:14:34 jmcneill Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
 /*
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,6 +40,10 @@
 
 #include <sys/ioctl.h>
 
+#if defined(_KERNEL)
+#include <dev/usb/usb_port.h>
+#endif /* _KERNEL */
+
 #define USB_STACK_VERSION 2
 
 #define USB_MAX_DEVICES 128
@@ -70,7 +66,7 @@ typedef u_int8_t uDWord[4];
 
 #define USETW2(w,h,l) ((w)[0] = (u_int8_t)(l), (w)[1] = (u_int8_t)(h))
 
-#if defined(__STRICT_ALIGNMENT) || _BYTE_ORDER != _LITTLE_ENDIAN
+#if 1
 #define UGETW(w) ((w)[0] | ((w)[1] << 8))
 #define USETW(w,v) ((w)[0] = (u_int8_t)(v), (w)[1] = (u_int8_t)((v) >> 8))
 #define UGETDW(w) ((w)[0] | ((w)[1] << 8) | ((w)[2] << 16) | ((w)[3] << 24))
@@ -80,7 +76,7 @@ typedef u_int8_t uDWord[4];
 		     (w)[3] = (u_int8_t)((v) >> 24))
 #else
 /*
- * On little-endian machines that can handle unaligned accesses
+ * On little-endian machines that can handle unanliged accesses
  * (e.g. i386) these macros can be replaced by the following.
  */
 #define UGETW(w) (*(u_int16_t *)(w))
@@ -89,13 +85,15 @@ typedef u_int8_t uDWord[4];
 #define USETDW(w,v) (*(u_int32_t *)(w) = (v))
 #endif
 
+#define UPACKED __packed
+
 typedef struct {
 	uByte		bmRequestType;
 	uByte		bRequest;
 	uWord		wValue;
 	uWord		wIndex;
 	uWord		wLength;
-} __packed usb_device_request_t;
+} UPACKED usb_device_request_t;
 
 #define UT_WRITE		0x00
 #define UT_READ			0x80
@@ -171,8 +169,7 @@ typedef struct {
 typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
-	uByte		bDescriptorSubtype;
-} __packed usb_descriptor_t;
+} UPACKED usb_descriptor_t;
 
 typedef struct {
 	uByte		bLength;
@@ -192,7 +189,7 @@ typedef struct {
 	uByte		iProduct;
 	uByte		iSerialNumber;
 	uByte		bNumConfigurations;
-} __packed usb_device_descriptor_t;
+} UPACKED usb_device_descriptor_t;
 #define USB_DEVICE_DESCRIPTOR_SIZE 18
 
 typedef struct {
@@ -203,12 +200,12 @@ typedef struct {
 	uByte		bConfigurationValue;
 	uByte		iConfiguration;
 	uByte		bmAttributes;
-#define UC_BUS_POWERED		0x80
+#define UC_ATTR_MBO		0x80
 #define UC_SELF_POWERED		0x40
 #define UC_REMOTE_WAKEUP	0x20
 	uByte		bMaxPower; /* max current in 2 mA units */
 #define UC_POWER_FACTOR 2
-} __packed usb_config_descriptor_t;
+} UPACKED usb_config_descriptor_t;
 #define USB_CONFIG_DESCRIPTOR_SIZE 9
 
 typedef struct {
@@ -221,7 +218,7 @@ typedef struct {
 	uByte		bInterfaceSubClass;
 	uByte		bInterfaceProtocol;
 	uByte		iInterface;
-} __packed usb_interface_descriptor_t;
+} UPACKED usb_interface_descriptor_t;
 #define USB_INTERFACE_DESCRIPTOR_SIZE 9
 
 typedef struct {
@@ -247,26 +244,20 @@ typedef struct {
 #define  UE_ISO_SYNC	0x0c
 #define UE_GET_ISO_TYPE(a)	((a) & UE_ISO_TYPE)
 	uWord		wMaxPacketSize;
+#define UE_GET_TRANS(a)		(((a) >> 11) & 0x3)
+#define UE_GET_SIZE(a)		((a) & 0x7ff)
 	uByte		bInterval;
-} __packed usb_endpoint_descriptor_t;
+} UPACKED usb_endpoint_descriptor_t;
 #define USB_ENDPOINT_DESCRIPTOR_SIZE 7
 
-/*
- * Note: The length of the USB string descriptor is stored in a one byte
- * value and can therefore be no longer than 255 bytes.  Two bytes are
- * used for the length itself and the descriptor type, a theoretical maximum
- * of 253 bytes is left for the actual string data.  Since the strings are
- * encoded as 2-byte unicode characters, only 252 bytes or 126 two-byte
- * characters can be used.  USB_MAX_STRING_LEN is defined as 127, leaving
- * space for the terminal '\0' character in C strings.
- */
 typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
 	uWord		bString[126];
-} __packed usb_string_descriptor_t;
-#define USB_MAX_STRING_LEN 127
+} UPACKED usb_string_descriptor_t;
+#define USB_MAX_STRING_LEN 128
 #define USB_LANGUAGE_TABLE 0	/* # of the string language id table */
+#define USB_MAX_ENCODED_STRING_LEN (USB_MAX_STRING_LEN * 3) /* UTF8 */
 
 /* Hub specific request */
 #define UR_GET_BUS_STATE	0x02
@@ -320,7 +311,7 @@ typedef struct {
 #define UHD_NOT_REMOV(desc, i) \
     (((desc)->DeviceRemovable[(i)/8] >> ((i) % 8)) & 1)
 	/* deprecated */ uByte		PortPowerCtrlMask[1];
-} __packed usb_hub_descriptor_t;
+} UPACKED usb_hub_descriptor_t;
 #define USB_HUB_DESCRIPTOR_SIZE 9 /* includes deprecated PortPowerCtrlMask */
 
 typedef struct {
@@ -333,7 +324,7 @@ typedef struct {
 	uByte		bMaxPacketSize0;
 	uByte		bNumConfigurations;
 	uByte		bReserved;
-} __packed usb_device_qualifier_t;
+} UPACKED usb_device_qualifier_t;
 #define USB_DEVICE_QUALIFIER_SIZE 10
 
 typedef struct {
@@ -342,7 +333,7 @@ typedef struct {
 	uByte		bmAttributes;
 #define UOTG_SRP	0x01
 #define UOTG_HNP	0x02
-} __packed usb_otg_descriptor_t;
+} UPACKED usb_otg_descriptor_t;
 
 /* OTG feature selectors */
 #define UOTG_B_HNP_ENABLE	3
@@ -356,14 +347,14 @@ typedef struct {
 #define UDS_REMOTE_WAKEUP		0x0002
 /* Endpoint status flags */
 #define UES_HALT			0x0001
-} __packed usb_status_t;
+} UPACKED usb_status_t;
 
 typedef struct {
 	uWord		wHubStatus;
 #define UHS_LOCAL_POWER			0x0001
 #define UHS_OVER_CURRENT		0x0002
 	uWord		wHubChange;
-} __packed usb_hub_status_t;
+} UPACKED usb_hub_status_t;
 
 typedef struct {
 	uWord		wPortStatus;
@@ -383,7 +374,7 @@ typedef struct {
 #define UPS_C_SUSPEND			0x0004
 #define UPS_C_OVERCURRENT_INDICATOR	0x0008
 #define UPS_C_PORT_RESET		0x0010
-} __packed usb_port_status_t;
+} UPACKED usb_port_status_t;
 
 /* Device class codes */
 #define UDCLASS_IN_INTERFACE	0x00
@@ -395,7 +386,6 @@ typedef struct {
 #define  UDPROTO_HSHUBMTT	0x02
 #define UDCLASS_DIAGNOSTIC	0xdc
 #define UDCLASS_WIRELESS	0xe0
-#define UDCLASS_VIDEO		0xef
 #define  UDSUBCLASS_RF		0x01
 #define   UDPROTO_BLUETOOTH	0x01
 #define UDCLASS_VENDOR		0xff
@@ -407,6 +397,11 @@ typedef struct {
 #define  UISUBCLASS_AUDIOCONTROL	1
 #define  UISUBCLASS_AUDIOSTREAM		2
 #define  UISUBCLASS_MIDISTREAM		3
+
+#define UICLASS_VIDEO		0x0E
+#define  UISUBCLASS_VIDEOCONTROL	1
+#define  UISUBCLASS_VIDEOSTREAMING	2
+#define  UISUBCLASS_VIDEOCOLLECTION	3
 
 #define UICLASS_CDC		0x02 /* communication */
 #define	 UISUBCLASS_DIRECT_LINE_CONTROL_MODEL	1
@@ -471,11 +466,6 @@ typedef struct {
 /*#define UICLASS_FIRM_UPD	0x0c*/
 
 #define UICLASS_SECURITY	0x0d
-
-#define UICLASS_VIDEO		0x0e
-#define  UISUBCLASS_VIDEOCONTROL		1
-#define  UISUBCLASS_VIDEOSTREAM			2
-#define  UISUBCLASS_VIDEO_IF_COLLECTION		3 
 
 #define UICLASS_DIAGNOSTIC	0xdc
 
@@ -598,9 +588,10 @@ struct usb_device_info {
 	u_int8_t	udi_bus;
 	u_int8_t	udi_addr;	/* device address */
 	usb_event_cookie_t udi_cookie;
-	char		udi_product[USB_MAX_STRING_LEN];
-	char		udi_vendor[USB_MAX_STRING_LEN];
+	char		udi_product[USB_MAX_ENCODED_STRING_LEN];
+	char		udi_vendor[USB_MAX_ENCODED_STRING_LEN];
 	char		udi_release[8];
+	char		udi_serial[USB_MAX_ENCODED_STRING_LEN];
 	u_int16_t	udi_productNo;
 	u_int16_t	udi_vendorNo;
 	u_int16_t	udi_releaseNo;
@@ -622,6 +613,28 @@ struct usb_device_info {
 #define USB_PORT_DISABLED 0xfc
 };
 
+/* <=3.0 had this layout of the structure */
+struct usb_device_info_old {
+        u_int8_t        udi_bus;
+        u_int8_t        udi_addr;       /* device address */
+        usb_event_cookie_t udi_cookie;
+        char            udi_product[USB_MAX_STRING_LEN];
+        char            udi_vendor[USB_MAX_STRING_LEN];
+        char            udi_release[8];
+        u_int16_t       udi_productNo;
+        u_int16_t       udi_vendorNo;
+        u_int16_t       udi_releaseNo;
+        u_int8_t        udi_class;
+        u_int8_t        udi_subclass;
+        u_int8_t        udi_protocol;
+        u_int8_t        udi_config;
+        u_int8_t        udi_speed;
+        int             udi_power;      /* power consumption in mA, 0 if selfpowered */
+        int             udi_nports;
+        char            udi_devnames[USB_MAX_DEVNAMES][USB_MAX_DEVNAMELEN];
+        u_int8_t        udi_ports[16];/* hub only: addresses of devices on ports */
+};
+
 struct usb_ctl_report {
 	int	ucr_report;
 	u_char	ucr_data[1024];	/* filled data size will vary */
@@ -629,6 +642,11 @@ struct usb_ctl_report {
 
 struct usb_device_stats {
 	u_long	uds_requests[4];	/* indexed by transfer type UE_* */
+};
+
+struct usb_bulk_ra_wb_opt {
+	u_int	ra_wb_buffer_size;
+	u_int	ra_wb_request_size;
 };
 
 /* Events that can be read from /dev/usb */
@@ -655,11 +673,29 @@ struct usb_event {
 	} u;
 };
 
+/* old <=3.0 compat event */
+struct usb_event_old {
+	int                     ue_type;
+	struct timespec         ue_time;
+	union {
+		struct {
+			int                     ue_bus;
+		} ue_ctrlr;
+		struct usb_device_info_old          ue_device;
+		struct {
+			usb_event_cookie_t      ue_cookie;
+			char                    ue_devname[16];
+		} ue_driver;
+	} u;
+};
+
+
 /* USB controller */
 #define USB_REQUEST		_IOWR('U', 1, struct usb_ctl_request)
 #define USB_SETDEBUG		_IOW ('U', 2, int)
 #define USB_DISCOVER		_IO  ('U', 3)
 #define USB_DEVICEINFO		_IOWR('U', 4, struct usb_device_info)
+#define USB_DEVICEINFO_OLD	_IOWR('U', 4, struct usb_device_info_old)
 #define USB_DEVICESTATS		_IOR ('U', 5, struct usb_device_stats)
 
 /* Generic HID device */
@@ -683,8 +719,13 @@ struct usb_event {
 #define USB_GET_STRING_DESC	_IOWR('U', 110, struct usb_string_desc)
 #define USB_DO_REQUEST		_IOWR('U', 111, struct usb_ctl_request)
 #define USB_GET_DEVICEINFO	_IOR ('U', 112, struct usb_device_info)
+#define USB_GET_DEVICEINFO_OLD	_IOR ('U', 112, struct usb_device_info_old)
 #define USB_SET_SHORT_XFER	_IOW ('U', 113, int)
 #define USB_SET_TIMEOUT		_IOW ('U', 114, int)
+#define USB_SET_BULK_RA		_IOW ('U', 115, int)
+#define USB_SET_BULK_WB		_IOW ('U', 116, int)
+#define USB_SET_BULK_RA_OPT	_IOW ('U', 117, struct usb_bulk_ra_wb_opt)
+#define USB_SET_BULK_WB_OPT	_IOW ('U', 118, struct usb_bulk_ra_wb_opt)
 
 /* Modem device */
 #define USB_GET_CM_OVER_DATA	_IOR ('U', 130, int)

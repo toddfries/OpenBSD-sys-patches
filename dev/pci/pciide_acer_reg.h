@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_acer_reg.h,v 1.7 2004/09/24 07:38:38 grange Exp $	*/
-/*	$NetBSD: pciide_acer_reg.h,v 1.4 2001/07/26 20:02:22 bouyer Exp $	*/
+/*	$NetBSD: pciide_acer_reg.h,v 1.11 2007/12/25 18:33:41 perry Exp $	*/
 
 /*
  * Copyright (c) 1999 Manuel Bouyer.
@@ -15,9 +14,8 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,9 +29,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
-#ifndef _DEV_PCI_PCIIDE_ACER_REG_H_
-#define _DEV_PCI_PCIIDE_ACER_REG_H_
 
 /*  class code attribute register 1 (1 byte) */
 #define ACER_CCAR1	0x43
@@ -95,6 +90,10 @@
 #define ACER_0x79_REVC2_EN	0x4
 #define ACER_0x79_EN		0x2
 
+/* OpenSolaris: channel enable/disable in the PCI-ISA bridge */
+#define ACER_PCIB_CTRL	0x58
+#define ACER_PCIB_CTRL_ENCHAN(chan) (0x4 << (chan))
+
 /*
  * IDE bus frequency (1 byte)
  * This should be setup by the BIOS - can we rely on this ?
@@ -102,10 +101,11 @@
 #define ACER_IDE_CLK	0x78
 
 /* acer UDMA3/4/5 from FreeBSD */
-static int8_t acer_udma[] = {0x4, 0x3, 0x2, 0x1, 0x0, 0x7};
-static int8_t acer_pio[] = {0x0c, 0x58, 0x44, 0x33, 0x31};
+static const int8_t acer_udma[] __unused =
+    {0x4, 0x3, 0x2, 0x1, 0x0, 0x7};
+static const int8_t acer_pio[] __unused =
+    {0x0c, 0x58, 0x44, 0x33, 0x31};
 #ifdef unused
-static int8_t acer_dma[] = {0x08, 0x33, 0x31};
+static const int8_t acer_dma[] __unused =
+    {0x08, 0x33, 0x31};
 #endif
-
-#endif	/* !_DEV_PCI_PCIIDE_ACER_REG_H_ */

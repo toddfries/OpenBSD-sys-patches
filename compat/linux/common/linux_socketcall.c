@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_socketcall.c,v 1.30 2005/12/11 12:20:19 christos Exp $	*/
+/*	$NetBSD: linux_socketcall.c,v 1.39 2008/07/03 14:07:09 njoly Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_socketcall.c,v 1.30 2005/12/11 12:20:19 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_socketcall.c,v 1.39 2008/07/03 14:07:09 njoly Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -58,9 +51,11 @@ __KERNEL_RCSID(0, "$NetBSD: linux_socketcall.c,v 1.30 2005/12/11 12:20:19 christ
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/device.h>
+#include <sys/ktrace.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
+
+#include <compat/sys/socket.h>
 
 #include <compat/linux/common/linux_types.h>
 #include <compat/linux/common/linux_util.h>
@@ -119,27 +114,27 @@ static const struct {
  * make and take appropriate action.
  */
 int
-linux_sys_socketcall(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_socketcall(struct lwp *l, const struct linux_sys_socketcall_args *uap, register_t *retval)
 {
-	struct linux_sys_socketcall_args /* {
+	/* {
 		syscallarg(int) what;
 		syscallarg(void *) args;
-	} */ *uap = v;
+	} */
 	struct linux_socketcall_dummy_args lda;
 	int error;
 
 	if (SCARG(uap, what) < 0 || SCARG(uap, what) > LINUX_MAX_SOCKETCALL)
 		return ENOSYS;
 
-	if ((error = copyin((caddr_t) SCARG(uap, args), (caddr_t) &lda,
+	if ((error = copyin(SCARG(uap, args), &lda,
 	    linux_socketcall[SCARG(uap, what)].argsize))) {
 		DPRINTF(("copyin for %s failed %d\n",
 		linux_socketcall[SCARG(uap, what)].name, error));
 		return error;
 	}
+
+	ktrkuser(linux_socketcall[SCARG(uap, what)].name, &lda,
+	    linux_socketcall[SCARG(uap, what)].argsize);
 
 #ifdef DEBUG_LINUX
 	/* dump the passed argument data */

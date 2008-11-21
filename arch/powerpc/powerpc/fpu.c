@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.11 2008/04/27 16:01:47 drahn Exp $	*/
-/*	$NetBSD: fpu.c,v 1.1 1996/09/30 16:34:44 ws Exp $	*/
+/*	$NetBSD: fpu.c,v 1.21 2008/04/08 02:33:03 garbled Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -31,137 +30,317 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.21 2008/04/08 02:33:03 garbled Exp $");
+
+#include "opt_multiprocessor.h"
+
 #include <sys/param.h>
 #include <sys/proc.h>
+#include <sys/systm.h>
 #include <sys/user.h>
+#include <sys/siginfo.h>
 
 #include <machine/fpu.h>
 #include <machine/psl.h>
 
+#ifdef MULTIPROCESSOR
+#include <arch/powerpc/pic/picvar.h>
+#include <arch/powerpc/pic/ipivar.h>
+static void mp_save_fpu_lwp(struct lwp *);
+#endif
+
 void
-enable_fpu(struct proc *p)
+enable_fpu(void)
 {
 	struct cpu_info *ci = curcpu();
-	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct trapframe *tf = trapframe(p);
+	struct lwp *l = curlwp;
+	struct pcb *pcb = &l->l_addr->u_pcb;
+	struct trapframe *tf = trapframe(l);
 	int msr;
-	
+
+	KASSERT(pcb->pcb_fpcpu == NULL);
 	if (!(pcb->pcb_flags & PCB_FPU)) {
-		bzero(&pcb->pcb_fpu, sizeof pcb->pcb_fpu);
+		memset(&pcb->pcb_fpu, 0, sizeof pcb->pcb_fpu);
 		pcb->pcb_flags |= PCB_FPU;
 	}
-
-	if (pcb->pcb_fpcpu != NULL || ci->ci_fpuproc != NULL) {
-		printf("attempting to restore fpu state when in use pcb %x"
-		    " fpproc %x\n", pcb->pcb_fpcpu, ci->ci_fpuproc);
+	/*
+	 * If we own the CPU but FP is disabled, simply enable it and return.
+	 */
+	if (ci->ci_fpulwp == l) {
+		tf->srr1 |= PSL_FP | (pcb->pcb_flags & (PCB_FE0|PCB_FE1));
+		return;
 	}
-	msr = ppc_mfmsr();
-	ppc_mtmsr((msr  & ~PSL_EE) | PSL_FP);
-	__asm volatile("isync");
-
-	asm volatile ("lfd 0,0(%0); mtfsf 0xff,0" :: "b"(&pcb->pcb_fpu.fpcsr));
-	asm ("lfd 0,0(%0);"
-	     "lfd 1,8(%0);"
-	     "lfd 2,16(%0);"
-	     "lfd 3,24(%0);"
-	     "lfd 4,32(%0);"
-	     "lfd 5,40(%0);"
-	     "lfd 6,48(%0);"
-	     "lfd 7,56(%0);"
-	     "lfd 8,64(%0);"
-	     "lfd 9,72(%0);"
-	     "lfd 10,80(%0);"
-	     "lfd 11,88(%0);"
-	     "lfd 12,96(%0);"
-	     "lfd 13,104(%0);"
-	     "lfd 14,112(%0);"
-	     "lfd 15,120(%0);"
-	     "lfd 16,128(%0);"
-	     "lfd 17,136(%0);"
-	     "lfd 18,144(%0);"
-	     "lfd 19,152(%0);"
-	     "lfd 20,160(%0);"
-	     "lfd 21,168(%0);"
-	     "lfd 22,176(%0);"
-	     "lfd 23,184(%0);"
-	     "lfd 24,192(%0);"
-	     "lfd 25,200(%0);"
-	     "lfd 26,208(%0);"
-	     "lfd 27,216(%0);"
-	     "lfd 28,224(%0);"
-	     "lfd 29,232(%0);"
-	     "lfd 30,240(%0);"
-	     "lfd 31,248(%0)" :: "b"(&pcb->pcb_fpu.fpr[0]));
-	ci->ci_fpuproc = p;
+	msr = mfmsr();
+        mtmsr((msr & ~PSL_EE) | PSL_FP);
+	__asm volatile ("isync");
+	if (ci->ci_fpulwp) {
+		save_fpu_cpu();
+	}
+	KASSERT(ci->ci_fpulwp == NULL);
+	__asm volatile (
+		"lfd	0,0(%0)\n"
+		"mtfsf	0xff,0\n"
+	    :: "b"(&pcb->pcb_fpu.fpscr));
+	__asm (
+		"lfd	0,0(%0)\n"
+		"lfd	1,8(%0)\n"
+		"lfd	2,16(%0)\n"
+		"lfd	3,24(%0)\n"
+		"lfd	4,32(%0)\n"
+		"lfd	5,40(%0)\n"
+		"lfd	6,48(%0)\n"
+		"lfd	7,56(%0)\n"
+		"lfd	8,64(%0)\n"
+		"lfd	9,72(%0)\n"
+		"lfd	10,80(%0)\n"
+		"lfd	11,88(%0)\n"
+		"lfd	12,96(%0)\n"
+		"lfd	13,104(%0)\n"
+		"lfd	14,112(%0)\n"
+		"lfd	15,120(%0)\n"
+		"lfd	16,128(%0)\n"
+		"lfd	17,136(%0)\n"
+		"lfd	18,144(%0)\n"
+		"lfd	19,152(%0)\n"
+		"lfd	20,160(%0)\n"
+		"lfd	21,168(%0)\n"
+		"lfd	22,176(%0)\n"
+		"lfd	23,184(%0)\n"
+		"lfd	24,192(%0)\n"
+		"lfd	25,200(%0)\n"
+		"lfd	26,208(%0)\n"
+		"lfd	27,216(%0)\n"
+		"lfd	28,224(%0)\n"
+		"lfd	29,232(%0)\n"
+		"lfd	30,240(%0)\n"
+		"lfd	31,248(%0)\n"
+	    :: "b"(&pcb->pcb_fpu.fpreg[0]));
+	__asm volatile ("isync");
+	tf->srr1 |= PSL_FP | (pcb->pcb_flags & (PCB_FE0|PCB_FE1));
+	ci->ci_fpulwp = l;
 	pcb->pcb_fpcpu = ci;
-	tf->srr1 |= PSL_FP;
-	ppc_mtmsr(msr);
-	__asm volatile("isync");
+	pcb->pcb_flags |= PCB_OWNFPU;
+	__asm volatile ("sync");
+	mtmsr(msr);
 }
 
+/*
+ * Save the contents of the current CPU's FPU to its PCB.
+ */
 void
-save_fpu()
+save_fpu_cpu(void)
 {
 	struct cpu_info *ci = curcpu();
+	struct lwp *l;
 	struct pcb *pcb;
-	struct proc *p;
-	struct trapframe *tf;
 	int msr;
-		
-	msr = ppc_mfmsr();
-	ppc_mtmsr((msr  & ~PSL_EE) | PSL_FP);
 
-	p = ci->ci_fpuproc;
+	msr = mfmsr();
+        mtmsr((msr & ~PSL_EE) | PSL_FP);
+	__asm volatile ("isync");
+	l = ci->ci_fpulwp;
+	if (l == NULL) {
+		goto out;
+	}
+	pcb = &l->l_addr->u_pcb;
+	__asm (
+		"stfd	0,0(%0)\n"
+		"stfd	1,8(%0)\n"
+		"stfd	2,16(%0)\n"
+		"stfd	3,24(%0)\n"
+		"stfd	4,32(%0)\n"
+		"stfd	5,40(%0)\n"
+		"stfd	6,48(%0)\n"
+		"stfd	7,56(%0)\n"
+		"stfd	8,64(%0)\n"
+		"stfd	9,72(%0)\n"
+		"stfd	10,80(%0)\n"
+		"stfd	11,88(%0)\n"
+		"stfd	12,96(%0)\n"
+		"stfd	13,104(%0)\n"
+		"stfd	14,112(%0)\n"
+		"stfd	15,120(%0)\n"
+		"stfd	16,128(%0)\n"
+		"stfd	17,136(%0)\n"
+		"stfd	18,144(%0)\n"
+		"stfd	19,152(%0)\n"
+		"stfd	20,160(%0)\n"
+		"stfd	21,168(%0)\n"
+		"stfd	22,176(%0)\n"
+		"stfd	23,184(%0)\n"
+		"stfd	24,192(%0)\n"
+		"stfd	25,200(%0)\n"
+		"stfd	26,208(%0)\n"
+		"stfd	27,216(%0)\n"
+		"stfd	28,224(%0)\n"
+		"stfd	29,232(%0)\n"
+		"stfd	30,240(%0)\n"
+		"stfd	31,248(%0)\n"
+	    :: "b"(&pcb->pcb_fpu.fpreg[0]));
+	__asm volatile (
+		"mffs	0\n"
+		"stfd	0,0(%0)\n"
+	    :: "b"(&pcb->pcb_fpu.fpscr));
+	__asm volatile ("sync");
+	pcb->pcb_fpcpu = NULL;
+	ci->ci_fpulwp = NULL;
+	ci->ci_ev_fpusw.ev_count++;
+	__asm volatile ("sync");
+ out:
+	mtmsr(msr);
+}
 
-	if (p == NULL) {
-		ppc_mtmsr(msr);
+#ifdef MULTIPROCESSOR
+
+/*
+ * Save a process's FPU state to its PCB.  The state is in another CPU
+ * (though by the time our IPI is processed, it may have been flushed already).
+ */
+static void
+mp_save_fpu_lwp(struct lwp *l)
+{
+	struct pcb *pcb = &l->l_addr->u_pcb;
+	struct cpu_info *fpcpu;
+	int i;
+
+	/*
+	 * Send an IPI to the other CPU with the data and wait for that CP		 * to flush the data.  Note that the other CPU might have switched
+	 * to a different proc's FPU state by the time it receives the IPI,
+	 * but that will only result in an unnecessary reload.
+	 */
+
+	fpcpu = pcb->pcb_fpcpu;
+	if (fpcpu == NULL)
+		return;
+
+	ppc_send_ipi(fpcpu->ci_index, PPC_IPI_FLUSH_FPU);
+
+	/* Wait for flush. */
+	for (i = 0; i < 0x3fffffff; i++) {
+		if (pcb->pcb_fpcpu == NULL)
+			return;
+	}
+
+	aprint_error("mp_save_fpu_proc{%d} pid = %d.%d, fpcpu->ci_cpuid = %d\n",
+	    cpu_number(), l->l_proc->p_pid, l->l_lid, fpcpu->ci_cpuid);
+	panic("mp_save_fpu_proc: timed out");
+}
+#endif /* MULTIPROCESSOR */
+
+/*
+ * Save a process's FPU state to its PCB.  The state may be in any CPU.
+ * The process must either be curproc or traced by curproc (and stopped).
+ * (The point being that the process must not run on another CPU during
+ * this function).
+ */
+void
+save_fpu_lwp(struct lwp *l, int discard)
+{
+	struct pcb * const pcb = &l->l_addr->u_pcb;
+	struct cpu_info * const ci = curcpu();
+
+	/*
+	 * If it's already in the PCB, there's nothing to do.
+	 */
+
+	if (pcb->pcb_fpcpu == NULL)
+		return;
+
+	/*
+	 * If we simply need to discard the information, then don't
+	 * to save anything.
+	 */
+	if (discard) {
+#ifndef MULTIPROCESSOR
+		KASSERT(ci == pcb->pcb_fpcpu);
+#endif
+		KASSERT(l == pcb->pcb_fpcpu->ci_fpulwp);
+		pcb->pcb_fpcpu->ci_fpulwp = NULL;
+		pcb->pcb_fpcpu = NULL;
+		pcb->pcb_flags &= ~PCB_OWNFPU;
 		return;
 	}
 
-	pcb = &p->p_addr->u_pcb;
-	
-	__asm volatile("isync");
+	/*
+	 * If the state is in the current CPU, just flush the current CPU's
+	 * state.
+	 */
+	if (l == ci->ci_fpulwp) {
+		save_fpu_cpu();
+		return;
+	}
 
-	asm ("stfd 0,0(%0);"
-	     "stfd 1,8(%0);"
-	     "stfd 2,16(%0);"
-	     "stfd 3,24(%0);"
-	     "stfd 4,32(%0);"
-	     "stfd 5,40(%0);"
-	     "stfd 6,48(%0);"
-	     "stfd 7,56(%0);"
-	     "stfd 8,64(%0);"
-	     "stfd 9,72(%0);"
-	     "stfd 10,80(%0);"
-	     "stfd 11,88(%0);"
-	     "stfd 12,96(%0);"
-	     "stfd 13,104(%0);"
-	     "stfd 14,112(%0);"
-	     "stfd 15,120(%0);"
-	     "stfd 16,128(%0);"
-	     "stfd 17,136(%0);"
-	     "stfd 18,144(%0);"
-	     "stfd 19,152(%0);"
-	     "stfd 20,160(%0);"
-	     "stfd 21,168(%0);"
-	     "stfd 22,176(%0);"
-	     "stfd 23,184(%0);"
-	     "stfd 24,192(%0);"
-	     "stfd 25,200(%0);"
-	     "stfd 26,208(%0);"
-	     "stfd 27,216(%0);"
-	     "stfd 28,224(%0);"
-	     "stfd 29,232(%0);"
-	     "stfd 30,240(%0);"
-	     "stfd 31,248(%0)" :: "b"(&pcb->pcb_fpu.fpr[0]));
-	asm volatile ("mffs 0; stfd 0,0(%0)" :: "b"(&pcb->pcb_fpu.fpcsr));
-	asm ("lfd 0,0(%0);" :: "b"(&pcb->pcb_fpu.fpr[0]));
+#ifdef MULTIPROCESSOR
+	/*
+	 * It must be on another CPU, flush it from there.
+	 */
+	mp_save_fpu_lwp(l);
+#endif
+}
 
-	tf = trapframe(ci->ci_fpuproc);
-	tf->srr1 &= ~PSL_FP;
-	ci->ci_fpuproc = NULL;
-	pcb->pcb_fpcpu = NULL;
+#define	STICKYBITS	(FPSCR_VX|FPSCR_OX|FPSCR_UX|FPSCR_ZX|FPSCR_XX)
+#define	STICKYSHIFT	25
+#define	MASKBITS	(FPSCR_VE|FPSCR_OE|FPSCR_UE|FPSCR_ZE|FPSCR_XE)
+#define	MASKSHIFT	3
 
-	ppc_mtmsr(msr);
-	__asm volatile("isync");
+int
+get_fpu_fault_code(void)
+{
+#ifdef DIAGNOSTIC
+	struct cpu_info *ci = curcpu();
+#endif
+	struct pcb *pcb = curpcb;
+	register_t msr;
+	uint64_t tmp, fpscr64;
+	uint32_t fpscr, ofpscr;
+	int code;
+
+	KASSERT(pcb->pcb_fpcpu == ci);
+	KASSERT(pcb->pcb_flags & PCB_FPU);
+	KASSERT(pcb->pcb_flags & PCB_OWNFPU);
+	KASSERT(ci->ci_fpulwp == curlwp);
+	msr = mfmsr();
+        mtmsr((msr & ~PSL_EE) | PSL_FP);
+	__asm volatile ("isync");
+	__asm volatile (
+		"stfd	0,0(%0)\n"	/* save f0 */
+		"mffs	0\n"		/* get FPSCR */
+		"stfd	0,0(%2)\n"	/* store a temp copy */
+		"mtfsb0	0\n"		/* clear FPSCR_FX */
+		"mtfsb0	24\n"		/* clear FPSCR_VE */
+		"mtfsb0	25\n"		/* clear FPSCR_OE */
+		"mtfsb0	26\n"		/* clear FPSCR_UE */
+		"mtfsb0	27\n"		/* clear FPSCR_ZE */
+		"mtfsb0	28\n"		/* clear FPSCR_XE */
+		"mffs	0\n"		/* get FPSCR */
+		"stfd	0,0(%1)\n"	/* store it */
+		"lfd	0,0(%0)\n"	/* restore f0 */
+	    :: "b"(&tmp), "b"(&pcb->pcb_fpu.fpscr), "b"(&fpscr64));
+        mtmsr(msr);
+	__asm volatile ("isync");
+	/*
+	 * Now determine the fault type.  First we test to see if any of sticky
+	 * bits correspond to the enabled exceptions.  If so, we only test
+	 * those bits.  If not, we look at all the bits.  (In reality, we only
+	 * could get an exception if FPSCR_FEX changed state.  So we should
+	 * have at least one bit that corresponds).
+	 */
+	ofpscr = (uint32_t)fpscr64;
+	ofpscr &= ofpscr << (STICKYSHIFT - MASKSHIFT);
+	fpscr = (uint32_t)(*(uint64_t *)&pcb->pcb_fpu.fpscr);
+	if (fpscr & ofpscr & STICKYBITS)
+		fpscr &= ofpscr;
+
+	/*
+	 * Let's determine what the appropriate code is.
+	 */
+	if (fpscr & FPSCR_VX)		code = FPE_FLTINV;
+	else if (fpscr & FPSCR_OX)	code = FPE_FLTOVF;
+	else if (fpscr & FPSCR_UX)	code = FPE_FLTUND;
+	else if (fpscr & FPSCR_ZX)	code = FPE_FLTDIV;
+	else if (fpscr & FPSCR_XX)	code = FPE_FLTRES;
+	else				code = 0;
+	return code;
 }

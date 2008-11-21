@@ -1,5 +1,4 @@
-/*	$OpenBSD: pci_eb164.h,v 1.4 2004/06/28 02:28:43 aaron Exp $	*/
-/*	$NetBSD: pci_eb164.h,v 1.1 1996/11/11 21:08:13 cgd Exp $	*/
+/* $NetBSD: pci_eb164.h,v 1.3 2000/06/05 21:47:25 thorpej Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,4 +27,4 @@
  * rights to redistribute these changes.
  */
 
-void	pci_eb164_pickintr(struct cia_config *);
+void	pci_eb164_pickintr __P((struct cia_config *));

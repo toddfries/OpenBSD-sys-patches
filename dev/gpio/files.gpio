@@ -1,4 +1,4 @@
-# $OpenBSD: files.gpio,v 1.6 2006/03/04 16:27:03 grange Exp $
+# $NetBSD: files.gpio,v 1.4 2006/04/07 18:55:21 riz Exp $
 
 define	gpio {offset, mask}
 
@@ -6,12 +6,6 @@ device	gpio: gpio
 attach	gpio at gpiobus
 file	dev/gpio/gpio.c				gpio	needs-flag
 
-# I2C bus bit-banging
-device	gpioiic: i2cbus, i2c_bitbang
-attach	gpioiic at gpio
-file	dev/gpio/gpioiic.c			gpioiic
-
-# 1-Wire bus bit-banging
 device	gpioow: onewirebus, onewire_bitbang
 attach	gpioow at gpio
 file	dev/gpio/gpioow.c			gpioow

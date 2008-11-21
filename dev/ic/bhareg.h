@@ -1,5 +1,4 @@
-/*	$OpenBSD: bhareg.h,v 1.2 2003/10/21 18:58:49 jmc Exp $	*/
-/*	$NetBSD: bhareg.h,v 1.12 1998/08/17 00:26:33 mycroft Exp $	*/
+/*	$NetBSD: bhareg.h,v 1.20 2008/04/28 20:23:49 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -86,7 +78,6 @@ typedef u_int8_t physlen[4];
 #define BHA_STAT_CDF		0x08	/* cmd/data out port full */
 #define BHA_STAT_DF		0x04	/* Data in port full */
 #define BHA_STAT_INVDCMD	0x01	/* Invalid command */
-#define	BHA_STAT_BITS	"\020\1invcmd\3df\4cdf\5idle\6init\7diagf\10stst"
 
 /*
  * BHA_CMD opcodes
@@ -146,8 +137,6 @@ typedef u_int8_t physlen[4];
 #define BHA_INTR_MBOA		0x02	/* MBX out empty */
 #define BHA_INTR_MBIF		0x01	/* MBX in full */
 
-#pragma pack(1)
-
 struct bha_mbx_out {
 	physaddr ccb_addr;
 	u_int8_t reserved[3];
@@ -189,7 +178,7 @@ WARNING...THIS WON'T WORK(won't fit on 1 page)
 #endif /* BIG_DMA */
 
 struct bha_scat_gath {
-	physlen seg_len;
+	physlen  seg_len;
 	physaddr seg_addr;
 };
 
@@ -211,9 +200,9 @@ struct bha_ccb {
 	u_int8_t	scsi_cmd_length;
 	u_int8_t	req_sense_length;
 	/*------------------------------------longword boundary */
-	physlen data_length;
+	physlen		data_length;
 	/*------------------------------------longword boundary */
-	physaddr data_addr;
+	physaddr	data_addr;
 	/*------------------------------------longword boundary */
 	u_int8_t	reserved1[2];
 	u_int8_t	host_stat;
@@ -229,23 +218,23 @@ struct bha_ccb {
 			tag_enable		:1,
 			lun			:5;
 #endif
-	struct scsi_generic scsi_cmd;
+	u_int8_t	scsi_cmd[12];
 	u_int8_t	reserved2[1];
 	u_int8_t	link_id;
 	/*------------------------------------longword boundary */
-	physaddr link_addr;
+	physaddr	link_addr;
 	/*------------------------------------longword boundary */
-	physaddr sense_ptr;
+	physaddr	sense_ptr;
 /*-----end of HW fields-----------------------longword boundary */
 	struct scsi_sense_data scsi_sense;
 	/*------------------------------------longword boundary */
 	struct bha_scat_gath scat_gath[BHA_NSEG];
 	/*------------------------------------longword boundary */
 	TAILQ_ENTRY(bha_ccb) chain;
-	struct bha_ccb *nexthash;
+	struct bha_ccb	*nexthash;
 	bus_addr_t	hashkey;
 
-	struct scsi_xfer *xs;		/* the scsipi_xfer for this cmd */
+	struct scsipi_xfer *xs;		/* the scsipi_xfer for this cmd */
 
 	int flags;
 #define	CCB_ALLOC	0x01
@@ -275,20 +264,20 @@ struct bha_ccb {
 /*
  * bha_ccb.host_stat values
  */
-#define BHA_OK		0x00	/* cmd ok */
-#define BHA_LINK_OK	0x0a	/* Link cmd ok */
-#define BHA_LINK_IT	0x0b	/* Link cmd ok + int */
+#define BHA_OK			0x00	/* cmd ok */
+#define BHA_LINK_OK		0x0a	/* Link cmd ok */
+#define BHA_LINK_IT		0x0b	/* Link cmd ok + int */
 #define	BHA_DATA_UNDRN		0x0c	/* data underrun error */
-#define BHA_SEL_TIMEOUT	0x11	/* Selection time out */
-#define BHA_OVER_UNDER	0x12	/* Data over/under run */
-#define BHA_BUS_FREE	0x13	/* Bus dropped at unexpected time */
-#define BHA_INV_BUS	0x14	/* Invalid bus phase/sequence */
-#define BHA_BAD_MBO	0x15	/* Incorrect MBO cmd */
-#define BHA_BAD_CCB	0x16	/* Incorrect ccb opcode */
-#define BHA_BAD_LINK	0x17	/* Not same values of LUN for links */
-#define BHA_INV_TARGET	0x18	/* Invalid target direction */
-#define BHA_CCB_DUP	0x19	/* Duplicate CCB received */
-#define BHA_INV_CCB	0x1a	/* Invalid CCB or segment list */
+#define BHA_SEL_TIMEOUT		0x11	/* Selection time out */
+#define BHA_OVER_UNDER		0x12	/* Data over/under run */
+#define BHA_BUS_FREE		0x13	/* Bus dropped at unexpected time */
+#define BHA_INV_BUS		0x14	/* Invalid bus phase/sequence */
+#define BHA_BAD_MBO		0x15	/* Incorrect MBO cmd */
+#define BHA_BAD_CCB		0x16	/* Incorrect ccb opcode */
+#define BHA_BAD_LINK		0x17	/* Not same values of LUN for links */
+#define BHA_INV_TARGET		0x18	/* Invalid target direction */
+#define BHA_CCB_DUP		0x19	/* Duplicate CCB received */
+#define BHA_INV_CCB		0x1a	/* Invalid CCB or segment list */
 #define	BHA_AUTOSENSE_FAILED	0x1b	/* auto REQUEST SENSE failed */
 #define	BHA_TAGGED_MSG_REJ	0x1c	/* tagged queueing message rejected */
 #define	BHA_UNSUP_MSG_RECVD	0x1d	/* unsupported message received */
@@ -319,9 +308,9 @@ struct bha_extended_inquire {
 		u_char	mbox_baseaddr[4]; /* packed/unaligned u_int32_t */
 		u_char	intrflags;
 #define	BHA_INTR_FASTEISA	0x04
-#define BHA_INTR_LEVEL	0x40		/* bit 6: level-sensitive interrupt */
+#define BHA_INTR_LEVEL		0x40	/* bit 6: level-sensitive interrupt */
 		u_char	firmware_level[3]; /* last 3 digits of firmware rev */
-		u_char	scsi_flags;	/* supported SCSI  features */
+		u_char	scsi_flags;	/* supported SCSI features */
 #define BHA_SCSI_WIDE		0x01	/* host adapter is wide */
 #define BHA_SCSI_DIFFERENTIAL	0x02	/* host adapter is differential */
 #define BHA_SCSI_SCAM		0x04	/* host adapter supports SCAM */
@@ -432,8 +421,8 @@ struct bha_setup_reply {
 	u_int8_t	num_mbx;
 	u_int8_t	mbx[3];		/*XXX */
 	/* doesn't make sense with 32bit addresses */
-	struct bha_sync	sync[8];
-	u_int8_t	disc_sts;
+	struct bha_sync	sync_low[8];
+	u_int8_t	low_disc_info;
 };
 
 /* additional reply data supplied by wide controllers */
@@ -478,8 +467,6 @@ struct bha_isadisable {
 		u_char	modifier;
 	} cmd;
 };
-
-#pragma pack()
 
 /*
  * bha_isadisable.modifier parameters

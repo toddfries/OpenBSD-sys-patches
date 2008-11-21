@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.31 2006/11/29 19:56:47 freza Exp $	*/
+/*	$NetBSD: machdep.c,v 1.38 2008/11/12 12:36:00 ad Exp $	*/
 
 /*
  * Copyright 2001, 2002 Wasabi Systems, Inc.
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/11/29 19:56:47 freza Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.38 2008/11/12 12:36:00 ad Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_ddb.h"
@@ -82,7 +82,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/11/29 19:56:47 freza Exp $");
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
@@ -90,6 +89,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/11/29 19:56:47 freza Exp $");
 #include <sys/user.h>
 #include <sys/boot_flag.h>
 #include <sys/ksyms.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -104,7 +104,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/11/29 19:56:47 freza Exp $");
 
 #include <powerpc/spr.h>
 #include <powerpc/ibm4xx/dcr405gp.h>
-#include <machine/bus.h>
 
 #include <dev/cons.h>
 
@@ -121,7 +120,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/11/29 19:56:47 freza Exp $");
 /*
  * Global variables used here and there
  */
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -138,7 +136,7 @@ char bootpath[256];
 paddr_t msgbuf_paddr;
 vaddr_t msgbuf_vaddr;
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 void *startsym, *endsym;
 #endif
 
@@ -323,7 +321,7 @@ initppc(u_int startkernel, u_int endkernel, char *args, void *info_block)
 	printf("  pci_speed = %u\n", board_data.pci_speed);
 #endif
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init((int)((u_int)endsym - (u_int)startsym), startsym, endsym);
 #endif
 #ifdef DDB
@@ -387,9 +385,9 @@ cpu_startup(void)
 	for (i = 0; i < btoc(MSGBUFSIZE); i++)
 		pmap_kenter_pa(msgbuf_vaddr + i * PAGE_SIZE,
 		    msgbuf_paddr + i * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
-	initmsgbuf((caddr_t)msgbuf_vaddr, round_page(MSGBUFSIZE));
+	initmsgbuf((void *)msgbuf_vaddr, round_page(MSGBUFSIZE));
 #else
-	initmsgbuf((caddr_t)msgbuf, round_page(MSGBUFSIZE));
+	initmsgbuf((void *)msgbuf, round_page(MSGBUFSIZE));
 #endif
 
 	printf("%s%s", copyright, version);
@@ -400,17 +398,10 @@ cpu_startup(void)
 
 	minaddr = 0;
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, 0, FALSE, NULL);
+				 VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -429,7 +420,7 @@ cpu_startup(void)
 
 	pn = prop_number_create_integer(board_data.mem_size);
 	KASSERT(pn != NULL);
-	if (prop_dictionary_set(board_properties, "mem-size", pn) == FALSE)
+	if (prop_dictionary_set(board_properties, "mem-size", pn) == false)
 		panic("setting mem-size");
 	prop_object_release(pn);
 
@@ -437,7 +428,7 @@ cpu_startup(void)
 					  sizeof(board_data.mac_address_local));
 	KASSERT(pd != NULL);
 	if (prop_dictionary_set(board_properties, "emac0-mac-addr",
-				pd) == FALSE)
+				pd) == false)
 		panic("setting emac0-mac-addr");
 	prop_object_release(pd);
 
@@ -445,14 +436,14 @@ cpu_startup(void)
 					  sizeof(board_data.mac_address_pci));
 	KASSERT(pd != NULL);
 	if (prop_dictionary_set(board_properties, "sip0-mac-addr",
-				pd) == FALSE)
+				pd) == false)
 		panic("setting sip0-mac-addr");
 	prop_object_release(pd);
 
 	pn = prop_number_create_integer(board_data.processor_speed);
 	KASSERT(pn != NULL);
 	if (prop_dictionary_set(board_properties, "processor-frequency",
-				pn) == FALSE)
+				pn) == false)
 		panic("setting processor-frequency");
 	prop_object_release(pn);
 
@@ -494,6 +485,8 @@ cpu_reboot(int howto, char *what)
 		dumpsys();
 
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 	  /* Power off here if we know how...*/

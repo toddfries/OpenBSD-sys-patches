@@ -1,7 +1,5 @@
-/*	$OpenBSD: cfl.c,v 1.6 2006/01/20 23:27:26 miod Exp $	*/
-/*	$NetBSD: cfl.c,v 1.2 1998/04/13 12:10:26 ragge Exp $	*/
+/*	$NetBSD: cfl.c,v 1.18 2008/03/11 05:34:03 matt Exp $	*/
 /*-
- * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * Copyright (c) 1982, 1986 The Regents of the University of California.
  * All rights reserved.
  *
@@ -32,11 +30,48 @@
  *	@(#)crl.c	7.5 (Berkeley) 5/9/91
  */
 
+/*-
+ * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)crl.c	7.5 (Berkeley) 5/9/91
+ */
+
 /*
  * Console floppy driver for 11/780.
  *	XXX - Does not work. (Not completed)
  *	Included here if someone wants to finish it.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cfl.c,v 1.18 2008/03/11 05:34:03 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,18 +118,20 @@ struct {
 #define	CFL_FINISH	6
 #define	CFL_GETIN	7
 
-static	void cflstart(void);
+static void cflstart(void);
 
-int	cflopen(dev_t, int, struct proc *);
-int	cflclose(dev_t, int, struct proc *);
-int	cflrw(dev_t, struct uio *, int);
+static dev_type_open(cflopen);
+static dev_type_close(cflclose);
+static dev_type_read(cflrw);
+
+const struct cdevsw cfl_cdevsw = {
+	cflopen, cflclose, cflrw, cflrw, noioctl,
+	nostop, notty, nopoll, nommap, nokqfilter,
+};
 
 /*ARGSUSED*/
 int
-cflopen(dev, flag, p)
-	dev_t dev;
-	int flag;
-	struct proc *p;
+cflopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	if (vax_cputype != VAX_780)
 		return (ENXIO);
@@ -107,34 +144,30 @@ cflopen(dev, flag, p)
 
 /*ARGSUSED*/
 int
-cflclose(dev, flag, p)
-	dev_t dev;
-	int flag;
-	struct proc *p;
+cflclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-
-	brelse(cfltab.cfl_buf);
+	int s;
+	s = splbio();
+	brelse(cfltab.cfl_buf, 0);
+	splx(s);
 	cfltab.cfl_state = IDLE;
 	return 0;
 }
 
 /*ARGSUSED*/
 int
-cflrw(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+cflrw(dev_t dev, struct uio *uio, int flag)
 {
-	register struct buf *bp;
-	register int i;
-	register int s;
+	struct buf *bp;
+	int i;
+	int s;
 	int error;
 
 	if (uio->uio_resid == 0) 
 		return (0);
-	s = spl4();
+	s = splconsmedia();
 	while (cfltab.cfl_state == BUSY)
-		tsleep((caddr_t)&cfltab, PRIBIO, "cflrw", 0);
+		(void) tsleep(&cfltab, PRIBIO, "cflbusy", 0);
 	cfltab.cfl_state = BUSY;
 	splx(s);
 
@@ -152,14 +185,21 @@ cflrw(dev, uio, flag)
 			if (error)
 				break;
 		}
-		bp->b_flags = uio->uio_rw == UIO_WRITE ? B_WRITE : B_READ;
-		s = spl4(); 
+		if (uio->uio_rw == UIO_WRITE) {
+			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_READ);
+			bp->b_flags |= B_WRITE;
+		} else {
+			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_WRITE);
+			bp->b_flags |= B_READ;
+		}
+		s = splconsmedia(); 
 		cflstart();
-		while ((bp->b_flags & B_DONE) == 0)
-			tsleep((caddr_t)bp, PRIBIO, "cflrw", 0);	
+		biowait(bp);
 		splx(s);
-		if (bp->b_flags & B_ERROR) {
-			error = EIO;
+		if (bp->b_error != 0) {
+			error = bp->b_error;
 			break;
 		}
 		if (uio->uio_rw == UIO_READ) {
@@ -169,14 +209,14 @@ cflrw(dev, uio, flag)
 		}
 	}
 	cfltab.cfl_state = OPEN;
-	wakeup((caddr_t)&cfltab);
+	wakeup((void *)&cfltab);
 	return (error);
 }
 
 void
-cflstart()
+cflstart(void)
 {
-	register struct buf *bp;
+	struct buf *bp;
 
 	bp = cfltab.cfl_buf;
 	cfltab.cfl_errcnt = 0;
@@ -199,10 +239,9 @@ cflstart()
 void cfltint(int);
 
 void
-cfltint(arg)
-	int arg;
+cfltint(int arg)
 {
-	register struct buf *bp = cfltab.cfl_buf;
+	struct buf *bp = cfltab.cfl_buf;
 
 	switch (cfltab.cfl_active) {
 	case CFL_START:/* do a read */
@@ -233,8 +272,7 @@ cfltint(arg)
 void cflrint(int);
 
 void
-cflrint(ch)
-	int ch;
+cflrint(int ch)
 {
 	struct buf *bp = cfltab.cfl_buf;
 
@@ -244,8 +282,10 @@ cflrint(ch)
 			cfltab.cfl_active = CFL_GETIN;
 		else {
 			cfltab.cfl_active = CFL_IDLE;
-			bp->b_flags |= B_DONE;
-			wakeup(bp);
+			mutex_enter(bp->b_objlock);
+			bp->b_oflags |= BO_DONE;
+			cv_broadcast(&bp->b_done);
+			mutex_exit(bp->b_objlock);
 		}
 		break;
 
@@ -253,8 +293,10 @@ cflrint(ch)
 		*cfltab.cfl_xaddr++ = ch & 0377;
 		if (--bp->b_bcount==0) {
 			cfltab.cfl_active = CFL_IDLE;
-			bp->b_flags |= B_DONE;
-			wakeup(bp);
+			mutex_enter(bp->b_objlock);
+			bp->b_oflags |= BO_DONE;
+			cv_broadcast(&bp->b_done);
+			mutex_exit(bp->b_objlock);
 		}
 		break;
 	}

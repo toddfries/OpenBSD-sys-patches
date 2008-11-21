@@ -1,5 +1,4 @@
-/*	$OpenBSD: varargs.h,v 1.5 2003/06/02 23:27:57 millert Exp $	*/
-/*	$NetBSD: varargs.h,v 1.9 1995/12/26 01:16:35 mycroft Exp $	*/
+/*	$NetBSD: varargs.h,v 1.11 2005/12/11 12:19:34 christos Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.

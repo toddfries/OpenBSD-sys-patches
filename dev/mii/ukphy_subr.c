@@ -1,5 +1,4 @@
-/*	$OpenBSD: ukphy_subr.c,v 1.7 2006/12/27 19:11:09 kettenis Exp $	*/
-/*	$NetBSD: ukphy_subr.c,v 1.2 1998/11/05 04:08:02 thorpej Exp $	*/
+/*	$NetBSD: ukphy_subr.c,v 1.10 2008/04/28 20:23:53 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,6 +33,9 @@
 /*
  * Subroutines shared by the ukphy driver and other PHY drivers.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ukphy_subr.c,v 1.10 2008/04/28 20:23:53 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -107,23 +102,26 @@ ukphy_status(struct mii_softc *phy)
 			mii->mii_media_active |= IFM_1000_T|IFM_FDX;
 		else if ((gtcr & GTCR_ADV_1000THDX) &&
 			 (gtsr & GTSR_LP_1000THDX))
-			mii->mii_media_active |= IFM_1000_T|IFM_HDX;
+			mii->mii_media_active |= IFM_1000_T;
 		else if (anlpar & ANLPAR_T4)
-			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
+			mii->mii_media_active |= IFM_100_T4;
 		else if (anlpar & ANLPAR_TX_FD)
 			mii->mii_media_active |= IFM_100_TX|IFM_FDX;
 		else if (anlpar & ANLPAR_TX)
-			mii->mii_media_active |= IFM_100_TX|IFM_HDX;
+			mii->mii_media_active |= IFM_100_TX;
 		else if (anlpar & ANLPAR_10_FD)
 			mii->mii_media_active |= IFM_10_T|IFM_FDX;
 		else if (anlpar & ANLPAR_10)
-			mii->mii_media_active |= IFM_10_T|IFM_HDX;
+			mii->mii_media_active |= IFM_10_T;
 		else
 			mii->mii_media_active |= IFM_NONE;
 
-		if ((IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) &&
+		if ((mii->mii_media_active & IFM_1000_T) &&
 		    (gtsr & GTSR_MS_RES))
 			mii->mii_media_active |= IFM_ETH_MASTER;
+
+		if (mii->mii_media_active & IFM_FDX)
+			mii->mii_media_active |= mii_phy_flowstatus(phy);
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

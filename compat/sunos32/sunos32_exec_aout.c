@@ -1,4 +1,4 @@
-/*	$NetBSD: sunos32_exec_aout.c,v 1.8 2005/12/11 12:20:23 christos Exp $	*/
+/*	$NetBSD: sunos32_exec_aout.c,v 1.11 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 2001 Matthew R. Green
@@ -12,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunos32_exec_aout.c,v 1.8 2005/12/11 12:20:23 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunos32_exec_aout.c,v 1.11 2008/05/29 14:51:26 mrg Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_execfmt.h"
@@ -44,17 +42,14 @@ __KERNEL_RCSID(0, "$NetBSD: sunos32_exec_aout.c,v 1.8 2005/12/11 12:20:23 christ
 #include <sys/file.h>
 #include <sys/exec.h>
 
+#include <compat/netbsd32/netbsd32.h>
+#include <compat/netbsd32/netbsd32_exec.h>
 #include <compat/sunos32/sunos32.h>
 #include <compat/sunos32/sunos32_exec.h>
 #include <compat/sunos/sunos_exec.h>
 
-#include <compat/netbsd32/netbsd32.h>
-#include <compat/netbsd32/netbsd32_exec.h>
-
 int
-exec_sunos32_aout_makecmds(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_sunos32_aout_makecmds(struct lwp *l, struct exec_package *epp)
 {
 	struct sunos_exec *sunmag = epp->ep_hdr;
 	int error = ENOEXEC;

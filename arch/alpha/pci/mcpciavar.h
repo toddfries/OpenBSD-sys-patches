@@ -1,4 +1,3 @@
-/* $OpenBSD: mcpciavar.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcpciavar.h,v 1.4 1999/04/16 02:18:07 thorpej Exp $ */
 
 /*
@@ -62,12 +61,6 @@ struct mcpcia_config {
 	struct alpha_bus_dma_tag	cc_dmat_isa_sgmap;
 	struct alpha_sgmap		cc_pci_sgmap;
 	struct alpha_sgmap		cc_isa_sgmap;
-	char				pc_io_ex_name[16];
-	char				pc_mem_dex_name[16];
-	char				pc_mem_sex_name[16];
-	long				pc_io_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
-	long				pc_mem_dex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
-	long				pc_mem_sex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
 };
 
 struct mcpcia_softc {
@@ -75,18 +68,19 @@ struct mcpcia_softc {
 	struct mcpcia_config	*mcpcia_cc;	/* config info */
 };
 
-void	mcpcia_init (void);
-void	mcpcia_init0 (struct mcpcia_config *, int);
-void	mcpcia_pci_init (pci_chipset_tag_t, void *);
-void	mcpcia_dma_init (struct mcpcia_config *);
+void	mcpcia_init __P((void));
+void	mcpcia_config_cleanup __P((void));
 
-void	mcpcia_bus_io_init (bus_space_tag_t, void *);
-void	mcpcia_bus_mem_init (bus_space_tag_t, void *);
+void	mcpcia_pci_init __P((pci_chipset_tag_t, void *));
+void	mcpcia_dma_init __P((struct mcpcia_config *));
+
+void	mcpcia_bus_io_init __P((bus_space_tag_t, void *));
+void	mcpcia_bus_mem_init __P((bus_space_tag_t, void *));
 
 /*
  * IO Interrupt handler.
  */
-void 	mcpcia_iointr (void *, unsigned long);
+void 	mcpcia_iointr __P((void *, unsigned long));
 
 /*
  * There are four PCI slots per MCPCIA PCI bus here, but some are 'hidden'-

@@ -1,3 +1,3 @@
-#	$NetBSD: Makefile.inc,v 1.1 2002/09/01 23:04:48 thorpej Exp $
+#	$NetBSD: Makefile.inc,v 1.4 2008/02/20 21:01:23 ad Exp $
 
-SYS_GDBINIT=	bdump kdump msgbuf pgrpdump stats vchain vdump xps
+SYS_GDBINIT=	bdump cpus kdump lwps msgbuf pgrpdump procs vchain vdump

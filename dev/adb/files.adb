@@ -1,11 +1,28 @@
-#	$OpenBSD: files.adb,v 1.1 2006/01/18 23:21:17 miod Exp $
+# 
+#	$NetBSD: files.adb,v 1.5 2007/04/16 23:34:43 macallan Exp $
+#
+# Apple Desktop Bus protocol and drivers
 
-file	dev/adb/adb_subr.c		adb
+defflag	adbdebug.h	ADB_DEBUG
+defflag	adbdebug.h	ADBKBD_DEBUG
+defflag	adbdebug.h	ADBMS_DEBUG
+defflag	adbdebug.h	ADBBT_DEBUG
+defflag adbdebug.h	ADBKBD_POWER_PANIC
 
-device	akbd: wskbddev
-attach	akbd at adb
-file	dev/adb/akbd.c			akbd needs-flag
+define adb_bus {}
 
-device	ams: wsmousedev
-attach	ams at adb
-file	dev/adb/ams.c			ams needs-flag
+device nadb {}
+attach nadb at adb_bus
+file dev/adb/adb_bus.c		nadb needs-flag
+
+device adbkbd : wskbddev, wsmousedev, sysmon_power, sysmon_taskq
+attach adbkbd at nadb
+file dev/adb/adb_kbd.c		adbkbd needs-flag
+
+device adbbt : wskbddev
+attach adbbt at nadb
+file dev/adb/adb_bt.c		adbbt
+
+device adbms : wsmousedev
+attach adbms at nadb
+file dev/adb/adb_ms.c		adbms needs-flag

@@ -1,4 +1,3 @@
-/* $OpenBSD: aicasm_symbol.h,v 1.8 2003/12/24 23:27:55 krw Exp $ */
 /*	$NetBSD: aicasm_symbol.h,v 1.2 2003/04/19 19:26:11 fvdl Exp $	*/
 
 /*
@@ -109,11 +108,11 @@ struct cond_info {
 };
 
 struct macro_arg {
-	TAILQ_ENTRY(macro_arg)	links;
+	STAILQ_ENTRY(macro_arg)	links;
 	regex_t	arg_regex;
 	char   *replacement_text;
 };
-TAILQ_HEAD(macro_arg_list, macro_arg) args;
+STAILQ_HEAD(macro_arg_list, macro_arg) args;
 
 struct macro_info {
 	struct macro_arg_list args;

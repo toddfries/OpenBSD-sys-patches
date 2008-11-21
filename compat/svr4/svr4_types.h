@@ -1,5 +1,4 @@
-/*	$OpenBSD: svr4_types.h,v 1.6 2007/06/06 17:15:13 deraadt Exp $	*/
-/*	$NetBSD: svr4_types.h,v 1.11 1998/09/11 12:34:46 mycroft Exp $	*/
+/*	$NetBSD: svr4_types.h,v 1.14 2008/04/28 20:23:45 martin Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,19 +38,21 @@ typedef quad_t		 svr4_blkcnt64_t;
 typedef u_quad_t	 svr4_fsblkcnt64_t;
 
 typedef long  		 svr4_off_t;
+typedef int  		 svr4_off32_t;
 typedef u_long		 svr4_dev_t;
 typedef u_long		 svr4_ino_t;
-typedef u_long		 svr4_mode_t;
-typedef u_long		 svr4_nlink_t;
-typedef long		 svr4_uid_t;
-typedef long		 svr4_gid_t;
-typedef int32_t		 svr4_daddr_t;
-typedef long		 svr4_pid_t;
+typedef u_int		 svr4_mode_t;
+typedef u_int		 svr4_nlink_t;
+typedef int		 svr4_uid_t;
+typedef int		 svr4_gid_t;
+typedef long		 svr4_daddr_t;
+typedef int		 svr4_pid_t;
 typedef long		 svr4_time_t;
+typedef int		 svr4_time32_t;
 typedef long		 svr4_blkcnt_t;
 typedef u_long		 svr4_fsblkcnt_t;
 typedef char		*svr4_caddr_t;
-typedef u_int		 svr4_size_t;
+typedef u_long		 svr4_size_t;
 
 typedef short		 svr4_o_dev_t;
 typedef short		 svr4_o_pid_t;
@@ -70,7 +64,17 @@ typedef u_short		 svr4_o_gid_t;
 typedef long		 svr4_clock_t;
 typedef int		 svr4_key_t;
 
+#ifdef _LP64
+/*
+ * Solaris uses a `long' time_t.
+ */
+typedef struct {
+	svr4_time_t	tv_sec;		/* seconds */
+	long		tv_nsec;	/* and nanoseconds */
+} svr4_timestruc_t;
+#else
 typedef struct timespec  svr4_timestruc_t;
+#endif
 
 #define	svr4_omajor(x)		((int32_t)((((x) & 0x7f00) >> 8)))
 #define	svr4_ominor(x)		((int32_t)((((x) & 0x00ff) >> 0)))

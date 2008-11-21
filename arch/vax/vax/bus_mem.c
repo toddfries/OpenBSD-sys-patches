@@ -1,5 +1,4 @@
-/*	$OpenBSD: bus_mem.c,v 1.4 2001/11/06 19:53:17 miod Exp $	*/
-/*	$NetBSD: bus_mem.c,v 1.8 2000/06/29 07:14:23 mrg Exp $ */
+/*	$NetBSD: bus_mem.c,v 1.12 2005/11/24 13:08:34 yamt Exp $ */
 /*
  * Copyright (c) 1998 Matt Thomas
  * All rights reserved.
@@ -33,6 +32,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bus_mem.c,v 1.12 2005/11/24 13:08:34 yamt Exp $");
+
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/device.h>
@@ -58,7 +60,7 @@ vax_mem_bus_space_map(
 	vaddr_t va;
 
 	size += (pa & VAX_PGOFSET);	/* have to include the byte offset */
-	va = uvm_km_valloc(kernel_map, size);
+	va = uvm_km_alloc(kernel_map, size, 0, UVM_KMF_VAONLY | UVM_KMF_NOWAIT);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -95,7 +97,7 @@ vax_mem_bus_space_unmap(
          * Free the kernel virtual mapping.
          */
 	iounaccess(va, size >> VAX_PGSHIFT);
-	uvm_km_free(kernel_map, va, endva - va);
+	uvm_km_free(kernel_map, va, endva - va, UVM_KMF_VAONLY);
 }
 
 static int
@@ -121,12 +123,22 @@ vax_mem_bus_space_free(
 {    
 	panic("vax_mem_bus_free not implemented");
 }
-	
+
+static paddr_t
+vax_mem_bus_space_mmap(void *v, bus_addr_t addr, off_t off, int prot, int flags)
+{
+	bus_addr_t rv;
+
+	rv = addr + off;
+	return btop(rv);
+}
+
 struct vax_bus_space vax_mem_bus_space = {
 	NULL,
 	vax_mem_bus_space_map,
 	vax_mem_bus_space_unmap,
 	vax_mem_bus_space_subregion,
 	vax_mem_bus_space_alloc,
-	vax_mem_bus_space_free
+	vax_mem_bus_space_free,
+	vax_mem_bus_space_mmap,
 };

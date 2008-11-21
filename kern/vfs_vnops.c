@@ -1,5 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.59 2008/04/08 14:46:45 thib Exp $	*/
-/*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
+/*	$NetBSD: vfs_vnops.c,v 1.161 2008/11/12 12:36:16 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -34,37 +33,62 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vfs_vnops.c	8.5 (Berkeley) 12/8/94
+ *	@(#)vfs_vnops.c	8.14 (Berkeley) 6/15/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: vfs_vnops.c,v 1.161 2008/11/12 12:36:16 ad Exp $");
+
+#include "veriexec.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/malloc.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
+#include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
-#include <sys/cdio.h>
 #include <sys/poll.h>
+#include <sys/kauth.h>
+#include <sys/syslog.h>
+#include <sys/fstrans.h>
+#include <sys/atomic.h>
+#include <sys/filedesc.h>
+#include <sys/wapbl.h>
 
-#include <uvm/uvm_extern.h>
 #include <miscfs/specfs/specdev.h>
 
-int vn_read(struct file *, off_t *, struct uio *, struct ucred *);
-int vn_write(struct file *, off_t *, struct uio *, struct ucred *);
-int vn_poll(struct file *, int, struct proc *);
-int vn_kqfilter(struct file *, struct knote *);
-int vn_closefile(struct file *, struct proc *);
+#include <uvm/uvm_extern.h>
+#include <uvm/uvm_readahead.h>
 
-struct 	fileops vnops =
-	{ vn_read, vn_write, vn_ioctl, vn_poll, vn_kqfilter, vn_statfile,
-	  vn_closefile };
+#ifdef UNION
+#include <fs/union/union.h>
+#endif
+
+int (*vn_union_readdir_hook) (struct vnode **, struct file *, struct lwp *);
+
+#include <sys/verified_exec.h>
+
+static int vn_read(file_t *fp, off_t *offset, struct uio *uio,
+	    kauth_cred_t cred, int flags);
+static int vn_write(file_t *fp, off_t *offset, struct uio *uio,
+	    kauth_cred_t cred, int flags);
+static int vn_closefile(file_t *fp);
+static int vn_poll(file_t *fp, int events);
+static int vn_fcntl(file_t *fp, u_int com, void *data);
+static int vn_statfile(file_t *fp, struct stat *sb);
+static int vn_ioctl(file_t *fp, u_long com, void *data);
+
+const struct fileops vnops = {
+	vn_read, vn_write, vn_ioctl, vn_fcntl, vn_poll,
+	vn_statfile, vn_closefile, vn_kqfilter
+};
 
 /*
  * Common code for vnode open operations.
@@ -74,32 +98,52 @@ int
 vn_open(struct nameidata *ndp, int fmode, int cmode)
 {
 	struct vnode *vp;
-	struct proc *p = ndp->ni_cnd.cn_proc;
-	struct ucred *cred = p->p_ucred;
+	struct lwp *l = curlwp;
+	kauth_cred_t cred = l->l_cred;
 	struct vattr va;
-	struct cloneinfo *cip;
 	int error;
+	char *path;
 
-	if ((fmode & (FREAD|FWRITE)) == 0)
-		return (EINVAL);
-	if ((fmode & (O_TRUNC | FWRITE)) == O_TRUNC)
-		return (EINVAL);
+	ndp->ni_cnd.cn_flags &= TRYEMULROOT;
+
 	if (fmode & O_CREAT) {
 		ndp->ni_cnd.cn_nameiop = CREATE;
-		ndp->ni_cnd.cn_flags = LOCKPARENT | LOCKLEAF;
-		if ((fmode & O_EXCL) == 0 && (fmode & O_NOFOLLOW) == 0)
+		ndp->ni_cnd.cn_flags |= LOCKPARENT | LOCKLEAF;
+		if ((fmode & O_EXCL) == 0 &&
+		    ((fmode & O_NOFOLLOW) == 0))
 			ndp->ni_cnd.cn_flags |= FOLLOW;
-		if ((error = namei(ndp)) != 0)
-			return (error);
+	} else {
+		ndp->ni_cnd.cn_nameiop = LOOKUP;
+		ndp->ni_cnd.cn_flags |= LOCKLEAF;
+		if ((fmode & O_NOFOLLOW) == 0)
+			ndp->ni_cnd.cn_flags |= FOLLOW;
+	}
 
+	VERIEXEC_PATH_GET(ndp->ni_dirp, ndp->ni_segflg, ndp->ni_dirp, path);
+
+	error = namei(ndp);
+	if (error)
+		goto out;
+
+	vp = ndp->ni_vp;
+
+#if NVERIEXEC > 0
+	error = veriexec_openchk(l, ndp->ni_vp, ndp->ni_dirp, fmode);
+	if (error)
+		goto bad;
+#endif /* NVERIEXEC > 0 */
+
+	if (fmode & O_CREAT) {
 		if (ndp->ni_vp == NULL) {
 			VATTR_NULL(&va);
 			va.va_type = VREG;
 			va.va_mode = cmode;
+			if (fmode & O_EXCL)
+				 va.va_vaflags |= VA_EXCLUSIVE;
 			error = VOP_CREATE(ndp->ni_dvp, &ndp->ni_vp,
 					   &ndp->ni_cnd, &va);
 			if (error)
-				return (error);
+				goto out;
 			fmode &= ~O_TRUNC;
 			vp = ndp->ni_vp;
 		} else {
@@ -117,63 +161,46 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 			fmode &= ~O_CREAT;
 		}
 	} else {
-		ndp->ni_cnd.cn_nameiop = LOOKUP;
-		ndp->ni_cnd.cn_flags =
-		    ((fmode & O_NOFOLLOW) ? NOFOLLOW : FOLLOW) | LOCKLEAF;
-		if ((error = namei(ndp)) != 0)
-			return (error);
 		vp = ndp->ni_vp;
 	}
 	if (vp->v_type == VSOCK) {
 		error = EOPNOTSUPP;
 		goto bad;
 	}
-	if (vp->v_type == VLNK) {
-		error = EMLINK;
+	if (ndp->ni_vp->v_type == VLNK) {
+		error = EFTYPE;
 		goto bad;
 	}
+
 	if ((fmode & O_CREAT) == 0) {
-		if (fmode & FREAD) {
-			if ((error = VOP_ACCESS(vp, VREAD, cred, p)) != 0)
-				goto bad;
-		}
-		if (fmode & FWRITE) {
-			if (vp->v_type == VDIR) {
-				error = EISDIR;
-				goto bad;
-			}
-			if ((error = vn_writechk(vp)) != 0 ||
-			    (error = VOP_ACCESS(vp, VWRITE, cred, p)) != 0)
-				goto bad;
-		}
-	}
-	if ((fmode & O_TRUNC) && vp->v_type == VREG) {
-		VATTR_NULL(&va);
-		va.va_size = 0;
-		if ((error = VOP_SETATTR(vp, &va, cred, p)) != 0)
+		error = vn_openchk(vp, cred, fmode);
+		if (error != 0)
 			goto bad;
 	}
-	if ((error = VOP_OPEN(vp, fmode, cred, p)) != 0)
+
+	if (fmode & O_TRUNC) {
+		VOP_UNLOCK(vp, 0);			/* XXX */
+
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);	/* XXX */
+		VATTR_NULL(&va);
+		va.va_size = 0;
+		error = VOP_SETATTR(vp, &va, cred);
+		if (error != 0)
+			goto bad;
+	}
+	if ((error = VOP_OPEN(vp, fmode, cred)) != 0)
 		goto bad;
-
-	if (vp->v_flag & VCLONED) {
-		cip = (struct cloneinfo *)vp->v_data;
-
-		vp->v_flag &= ~VCLONED;
-
-		ndp->ni_vp = cip->ci_vp;	/* return cloned vnode */
-		vp->v_data = cip->ci_data;	/* restore v_data */
-		VOP_UNLOCK(vp, 0, p);		/* keep a reference */
-		vp = ndp->ni_vp;		/* for the increment below */
-
-		free(cip, M_TEMP);
+	if (fmode & FWRITE) {
+		mutex_enter(&vp->v_interlock);
+		vp->v_writecount++;
+		mutex_exit(&vp->v_interlock);
 	}
 
-	if (fmode & FWRITE)
-		vp->v_writecount++;
-	return (0);
 bad:
-	vput(vp);
+	if (error)
+		vput(vp);
+out:
+	VERIEXEC_PATH_PUT(path);
 	return (error);
 }
 
@@ -184,58 +211,106 @@ bad:
 int
 vn_writechk(struct vnode *vp)
 {
-	/*
-	 * Disallow write attempts on read-only file systems;
-	 * unless the file is a socket or a block or character
-	 * device resident on the file system.
-	 */
-	if (vp->v_mount->mnt_flag & MNT_RDONLY) {
-		switch (vp->v_type) {
-		case VREG:
-		case VDIR:
-		case VLNK:
-			return (EROFS);
-		case VNON:
-		case VCHR:
-		case VSOCK:
-		case VFIFO:
-		case VBAD:
-		case VBLK:
-			break;
-		}
-	}
-	/*
-	 * If there's shared text associated with
-	 * the vnode, try to free it up once.  If
-	 * we fail, we can't allow writing.
-	 */
-	if ((vp->v_flag & VTEXT) && !uvm_vnp_uncache(vp))
-		return (ETXTBSY);
 
+	/*
+	 * If the vnode is in use as a process's text,
+	 * we can't allow writing.
+	 */
+	if (vp->v_iflag & VI_TEXT)
+		return (ETXTBSY);
+	return (0);
+}
+
+int
+vn_openchk(struct vnode *vp, kauth_cred_t cred, int fflags)
+{
+	int permbits = 0;
+	int error;
+
+	if ((fflags & FREAD) != 0) {
+		permbits = VREAD;
+	}
+	if ((fflags & (FWRITE | O_TRUNC)) != 0) {
+		permbits |= VWRITE;
+		if (vp->v_type == VDIR) {
+			error = EISDIR;
+			goto bad;
+		}
+		error = vn_writechk(vp);
+		if (error != 0)
+			goto bad;
+	}
+	error = VOP_ACCESS(vp, permbits, cred);
+bad:
+	return error;
+}
+
+/*
+ * Mark a vnode as having executable mappings.
+ */
+void
+vn_markexec(struct vnode *vp)
+{
+
+	if ((vp->v_iflag & VI_EXECMAP) != 0) {
+		/* Safe unlocked, as long as caller holds a reference. */
+		return;
+	}
+
+	mutex_enter(&vp->v_interlock);
+	if ((vp->v_iflag & VI_EXECMAP) == 0) {
+		atomic_add_int(&uvmexp.filepages, -vp->v_uobj.uo_npages);
+		atomic_add_int(&uvmexp.execpages, vp->v_uobj.uo_npages);
+		vp->v_iflag |= VI_EXECMAP;
+	}
+	mutex_exit(&vp->v_interlock);
+}
+
+/*
+ * Mark a vnode as being the text of a process.
+ * Fail if the vnode is currently writable.
+ */
+int
+vn_marktext(struct vnode *vp)
+{
+
+	if ((vp->v_iflag & (VI_TEXT|VI_EXECMAP)) == (VI_TEXT|VI_EXECMAP)) {
+		/* Safe unlocked, as long as caller holds a reference. */
+		return (0);
+	}
+
+	mutex_enter(&vp->v_interlock);
+	if (vp->v_writecount != 0) {
+		KASSERT((vp->v_iflag & VI_TEXT) == 0);
+		mutex_exit(&vp->v_interlock);
+		return (ETXTBSY);
+	}
+	if ((vp->v_iflag & VI_EXECMAP) == 0) {
+		atomic_add_int(&uvmexp.filepages, -vp->v_uobj.uo_npages);
+		atomic_add_int(&uvmexp.execpages, vp->v_uobj.uo_npages);
+	}
+	vp->v_iflag |= (VI_TEXT | VI_EXECMAP);
+	mutex_exit(&vp->v_interlock);
 	return (0);
 }
 
 /*
- * Mark a vnode as being the text image of a running process.
- */
-void
-vn_marktext(struct vnode *vp)
-{
-	vp->v_flag |= VTEXT;
-}
-
-/*
  * Vnode close call
+ *
+ * Note: takes an unlocked vnode, while VOP_CLOSE takes a locked node.
  */
 int
-vn_close(struct vnode *vp, int flags, struct ucred *cred, struct proc *p)
+vn_close(struct vnode *vp, int flags, kauth_cred_t cred)
 {
 	int error;
 
-	if (flags & FWRITE)
+	if (flags & FWRITE) {
+		mutex_enter(&vp->v_interlock);
 		vp->v_writecount--;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	error = VOP_CLOSE(vp, flags, cred, p);
+		mutex_exit(&vp->v_interlock);
+	}
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	error = VOP_CLOSE(vp, flags, cred);
 	vput(vp);
 	return (error);
 }
@@ -244,25 +319,33 @@ vn_close(struct vnode *vp, int flags, struct ucred *cred, struct proc *p)
  * Package up an I/O request on a vnode into a uio and do it.
  */
 int
-vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, int len, off_t offset,
-    enum uio_seg segflg, int ioflg, struct ucred *cred, size_t *aresid,
-    struct proc *p)
+vn_rdwr(enum uio_rw rw, struct vnode *vp, void *base, int len, off_t offset,
+    enum uio_seg segflg, int ioflg, kauth_cred_t cred, size_t *aresid,
+    struct lwp *l)
 {
 	struct uio auio;
 	struct iovec aiov;
 	int error;
 
-	if ((ioflg & IO_NODELOCKED) == 0)
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	if ((ioflg & IO_NODELOCKED) == 0) {
+		if (rw == UIO_READ) {
+			vn_lock(vp, LK_SHARED | LK_RETRY);
+		} else /* UIO_WRITE */ {
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+		}
+	}
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
 	aiov.iov_base = base;
 	aiov.iov_len = len;
 	auio.uio_resid = len;
 	auio.uio_offset = offset;
-	auio.uio_segflg = segflg;
 	auio.uio_rw = rw;
-	auio.uio_procp = p;
+	if (segflg == UIO_SYSSPACE) {
+		UIO_SETUP_SYSSPACE(&auio);
+	} else {
+		auio.uio_vmspace = l->l_proc->p_vmspace;
+	}
 	if (rw == UIO_READ) {
 		error = VOP_READ(vp, &auio, ioflg, cred);
 	} else {
@@ -273,84 +356,172 @@ vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, int len, off_t offset,
 	else
 		if (auio.uio_resid && error == 0)
 			error = EIO;
-	if ((ioflg & IO_NODELOCKED) == 0)
-		VOP_UNLOCK(vp, 0, p);
+	if ((ioflg & IO_NODELOCKED) == 0) {
+		VOP_UNLOCK(vp, 0);
+	}
 	return (error);
+}
+
+int
+vn_readdir(file_t *fp, char *bf, int segflg, u_int count, int *done,
+    struct lwp *l, off_t **cookies, int *ncookies)
+{
+	struct vnode *vp = (struct vnode *)fp->f_data;
+	struct iovec aiov;
+	struct uio auio;
+	int error, eofflag;
+
+	/* Limit the size on any kernel buffers used by VOP_READDIR */
+	count = min(MAXBSIZE, count);
+
+unionread:
+	if (vp->v_type != VDIR)
+		return (EINVAL);
+	aiov.iov_base = bf;
+	aiov.iov_len = count;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	if (segflg == UIO_SYSSPACE) {
+		UIO_SETUP_SYSSPACE(&auio);
+	} else {
+		KASSERT(l == curlwp);
+		auio.uio_vmspace = l->l_proc->p_vmspace;
+	}
+	auio.uio_resid = count;
+	vn_lock(vp, LK_SHARED | LK_RETRY);
+	auio.uio_offset = fp->f_offset;
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookies,
+		    ncookies);
+	FILE_LOCK(fp);
+	fp->f_offset = auio.uio_offset;
+	FILE_UNLOCK(fp);
+	VOP_UNLOCK(vp, 0);
+	if (error)
+		return (error);
+
+	if (count == auio.uio_resid && vn_union_readdir_hook) {
+		struct vnode *ovp = vp;
+
+		error = (*vn_union_readdir_hook)(&vp, fp, l);
+		if (error)
+			return (error);
+		if (vp != ovp)
+			goto unionread;
+	}
+
+	if (count == auio.uio_resid && (vp->v_vflag & VV_ROOT) &&
+	    (vp->v_mount->mnt_flag & MNT_UNION)) {
+		struct vnode *tvp = vp;
+		vp = vp->v_mount->mnt_vnodecovered;
+		VREF(vp);
+		FILE_LOCK(fp);
+		fp->f_data = vp;
+		fp->f_offset = 0;
+		FILE_UNLOCK(fp);
+		vrele(tvp);
+		goto unionread;
+	}
+	*done = count - auio.uio_resid;
+	return error;
 }
 
 /*
  * File table vnode read routine.
  */
-int
-vn_read(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
+static int
+vn_read(file_t *fp, off_t *offset, struct uio *uio, kauth_cred_t cred,
+    int flags)
 {
 	struct vnode *vp = (struct vnode *)fp->f_data;
-	int error = 0;
-	size_t count;
-	struct proc *p = uio->uio_procp;
+	int count, error, ioflag, fflag;
 
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	uio->uio_offset = *poff;
+	ioflag = IO_ADV_ENCODE(fp->f_advice);
+	fflag = fp->f_flag;
+	if (fflag & FNONBLOCK)
+		ioflag |= IO_NDELAY;
+	if ((fflag & (FFSYNC | FRSYNC)) == (FFSYNC | FRSYNC))
+		ioflag |= IO_SYNC;
+	if (fflag & FALTIO)
+		ioflag |= IO_ALTSEMANTICS;
+	if (fflag & FDIRECT)
+		ioflag |= IO_DIRECT;
+	vn_lock(vp, LK_SHARED | LK_RETRY);
+	uio->uio_offset = *offset;
 	count = uio->uio_resid;
-	if (vp->v_type != VDIR)
-		error = VOP_READ(vp, uio,
-		    (fp->f_flag & FNONBLOCK) ? IO_NDELAY : 0, cred);
-	*poff += count - uio->uio_resid;
-	VOP_UNLOCK(vp, 0, p);
+	error = VOP_READ(vp, uio, ioflag, cred);
+	if (flags & FOF_UPDATE_OFFSET)
+		*offset += count - uio->uio_resid;
+	VOP_UNLOCK(vp, 0);
 	return (error);
 }
 
 /*
  * File table vnode write routine.
  */
-int
-vn_write(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
+static int
+vn_write(file_t *fp, off_t *offset, struct uio *uio, kauth_cred_t cred,
+    int flags)
 {
 	struct vnode *vp = (struct vnode *)fp->f_data;
-	struct proc *p = uio->uio_procp;
-	int error, ioflag = IO_UNIT;
-	size_t count;
+	int count, error, ioflag, fflag;
 
-	if (vp->v_type == VREG && (fp->f_flag & O_APPEND))
+	ioflag = IO_ADV_ENCODE(fp->f_advice) | IO_UNIT;
+	fflag = fp->f_flag;
+	if (vp->v_type == VREG && (fflag & O_APPEND))
 		ioflag |= IO_APPEND;
-	if (fp->f_flag & FNONBLOCK)
+	if (fflag & FNONBLOCK)
 		ioflag |= IO_NDELAY;
-	if ((fp->f_flag & FFSYNC) ||
+	if (fflag & FFSYNC ||
 	    (vp->v_mount && (vp->v_mount->mnt_flag & MNT_SYNCHRONOUS)))
 		ioflag |= IO_SYNC;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	uio->uio_offset = *poff;
+	else if (fflag & FDSYNC)
+		ioflag |= IO_DSYNC;
+	if (fflag & FALTIO)
+		ioflag |= IO_ALTSEMANTICS;
+	if (fflag & FDIRECT)
+		ioflag |= IO_DIRECT;
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	uio->uio_offset = *offset;
 	count = uio->uio_resid;
 	error = VOP_WRITE(vp, uio, ioflag, cred);
-	if (ioflag & IO_APPEND)
-		*poff = uio->uio_offset;
-	else
-		*poff += count - uio->uio_resid;
-	VOP_UNLOCK(vp, 0, p);
+	if (flags & FOF_UPDATE_OFFSET) {
+		if (ioflag & IO_APPEND) {
+			/*
+			 * SUSv3 describes behaviour for count = 0 as following:
+			 * "Before any action ... is taken, and if nbyte is zero
+			 * and the file is a regular file, the write() function
+			 * ... in the absence of errors ... shall return zero
+			 * and have no other results."
+			 */ 
+			if (count)
+				*offset = uio->uio_offset;
+		} else
+			*offset += count - uio->uio_resid;
+	}
+	VOP_UNLOCK(vp, 0);
 	return (error);
 }
 
 /*
- * File table wrapper for vn_stat
+ * File table vnode stat routine.
  */
-int
-vn_statfile(struct file *fp, struct stat *sb, struct proc *p)
+static int
+vn_statfile(file_t *fp, struct stat *sb)
 {
 	struct vnode *vp = (struct vnode *)fp->f_data;
-	return vn_stat(vp, sb, p);
+
+	return vn_stat(vp, sb);
 }
 
-/*
- * vnode stat routine.
- */
 int
-vn_stat(struct vnode *vp, struct stat *sb, struct proc *p)
+vn_stat(struct vnode *vp, struct stat *sb)
 {
 	struct vattr va;
 	int error;
 	mode_t mode;
 
-	error = VOP_GETATTR(vp, &va, p->p_ucred, p);
+	error = VOP_GETATTR(vp, &va, kauth_cred_get());
 	if (error)
 		return (error);
 	/*
@@ -383,7 +554,7 @@ vn_stat(struct vnode *vp, struct stat *sb, struct proc *p)
 		break;
 	default:
 		return (EBADF);
-	}
+	};
 	sb->st_mode = mode;
 	sb->st_nlink = va.va_nlink;
 	sb->st_uid = va.va_uid;
@@ -393,20 +564,34 @@ vn_stat(struct vnode *vp, struct stat *sb, struct proc *p)
 	sb->st_atimespec = va.va_atime;
 	sb->st_mtimespec = va.va_mtime;
 	sb->st_ctimespec = va.va_ctime;
+	sb->st_birthtimespec = va.va_birthtime;
 	sb->st_blksize = va.va_blocksize;
 	sb->st_flags = va.va_flags;
-	sb->st_gen = va.va_gen;
+	sb->st_gen = 0;
 	sb->st_blocks = va.va_bytes / S_BLKSIZE;
 	return (0);
 }
 
 /*
+ * File table vnode fcntl routine.
+ */
+static int
+vn_fcntl(file_t *fp, u_int com, void *data)
+{
+	struct vnode *vp = fp->f_data;
+	int error;
+
+	error = VOP_FCNTL(vp, com, data, fp->f_flag, kauth_cred_get());
+	return (error);
+}
+
+/*
  * File table vnode ioctl routine.
  */
-int
-vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
+static int
+vn_ioctl(file_t *fp, u_long com, void *data)
 {
-	struct vnode *vp = ((struct vnode *)fp->f_data);
+	struct vnode *vp = fp->f_data, *ovp;
 	struct vattr vattr;
 	int error;
 
@@ -415,39 +600,82 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 	case VREG:
 	case VDIR:
 		if (com == FIONREAD) {
-			error = VOP_GETATTR(vp, &vattr, p->p_ucred, p);
+			error = VOP_GETATTR(vp, &vattr,
+			    kauth_cred_get());
 			if (error)
 				return (error);
 			*(int *)data = vattr.va_size - fp->f_offset;
 			return (0);
 		}
-		if (com == FIONBIO || com == FIOASYNC)  /* XXX */
+		if ((com == FIONWRITE) || (com == FIONSPACE)) {
+			/*
+			 * Files don't have send queues, so there never
+			 * are any bytes in them, nor is there any
+			 * open space in them.
+			 */
+			*(int *)data = 0;
+			return (0);
+		}
+		if (com == FIOGETBMAP) {
+			daddr_t *block;
+
+			if (*(daddr_t *)data < 0)
+				return (EINVAL);
+			block = (daddr_t *)data;
+			return (VOP_BMAP(vp, *block, NULL, block, NULL));
+		}
+		if (com == OFIOGETBMAP) {
+			daddr_t ibn, obn;
+
+			if (*(int32_t *)data < 0)
+				return (EINVAL);
+			ibn = (daddr_t)*(int32_t *)data;
+			error = VOP_BMAP(vp, ibn, NULL, &obn, NULL);
+			*(int32_t *)data = (int32_t)obn;
+			return error;
+		}
+		if (com == FIONBIO || com == FIOASYNC)	/* XXX */
 			return (0);			/* XXX */
-		/* FALLTHROUGH */
-	default:
-		return (ENOTTY);
-		
+		/* fall into ... */
 	case VFIFO:
 	case VCHR:
 	case VBLK:
-		error = VOP_IOCTL(vp, com, data, fp->f_flag, p->p_ucred, p);
+		error = VOP_IOCTL(vp, com, data, fp->f_flag,
+		    kauth_cred_get());
 		if (error == 0 && com == TIOCSCTTY) {
-			if (p->p_session->s_ttyvp)
-				vrele(p->p_session->s_ttyvp);
-			p->p_session->s_ttyvp = vp;
 			VREF(vp);
+			mutex_enter(proc_lock);
+			ovp = curproc->p_session->s_ttyvp;
+			curproc->p_session->s_ttyvp = vp;
+			mutex_exit(proc_lock);
+			if (ovp != NULL)
+				vrele(ovp);
 		}
 		return (error);
+
+	default:
+		return (EPASSTHROUGH);
 	}
 }
 
 /*
  * File table vnode poll routine.
  */
-int
-vn_poll(struct file *fp, int events, struct proc *p)
+static int
+vn_poll(file_t *fp, int events)
 {
-	return (VOP_POLL(((struct vnode *)fp->f_data), events, p));
+
+	return (VOP_POLL(fp->f_data, events));
+}
+
+/*
+ * File table vnode kqfilter routine.
+ */
+int
+vn_kqfilter(file_t *fp, struct knote *kn)
+{
+
+	return (VOP_KQFILTER(fp->f_data, kn));
 }
 
 /*
@@ -455,21 +683,48 @@ vn_poll(struct file *fp, int events, struct proc *p)
  * acquire requested lock.
  */
 int
-vn_lock(struct vnode *vp, int flags, struct proc *p)
+vn_lock(struct vnode *vp, int flags)
 {
 	int error;
 
-	if ((flags & LK_RECURSEFAIL) == 0)
-		flags |= LK_CANRECURSE;
-	
+#if 0
+	KASSERT(vp->v_usecount > 0 || (flags & LK_INTERLOCK) != 0
+	    || (vp->v_iflag & VI_ONWORKLST) != 0);
+#endif
+	KASSERT((flags &
+	    ~(LK_INTERLOCK|LK_SHARED|LK_EXCLUSIVE|LK_NOWAIT|LK_RETRY|
+	    LK_CANRECURSE))
+	    == 0);
+
+#ifdef DIAGNOSTIC
+	if (wapbl_vphaswapbl(vp))
+		WAPBL_JUNLOCK_ASSERT(wapbl_vptomp(vp));
+#endif
+
 	do {
-		if (vp->v_flag & VXLOCK) {
-			vp->v_flag |= VXWANT;
-			tsleep(vp, PINOD, "vn_lock", 0);
+		/*
+		 * XXX PR 37706 forced unmount of file systems is unsafe.
+		 * Race between vclean() and this the remaining problem.
+		 */
+		if (vp->v_iflag & VI_XLOCK) {
+			if ((flags & LK_INTERLOCK) == 0) {
+				mutex_enter(&vp->v_interlock);
+			}
+			flags &= ~LK_INTERLOCK;
+			if (flags & LK_NOWAIT) {
+				mutex_exit(&vp->v_interlock);
+				return EBUSY;
+			}
+			vwait(vp, VI_XLOCK);
+			mutex_exit(&vp->v_interlock);
 			error = ENOENT;
 		} else {
-			error = VOP_LOCK(vp, flags, p);
-			if (error == 0)
+			if ((flags & LK_INTERLOCK) != 0) {
+				mutex_exit(&vp->v_interlock);
+			}
+			flags &= ~LK_INTERLOCK;
+			error = VOP_LOCK(vp, (flags & ~LK_RETRY));
+			if (error == 0 || error == EDEADLK || error == EBUSY)
 				return (error);
 		}
 	} while (flags & LK_RETRY);
@@ -479,33 +734,154 @@ vn_lock(struct vnode *vp, int flags, struct proc *p)
 /*
  * File table vnode close routine.
  */
-int
-vn_closefile(struct file *fp, struct proc *p)
+static int
+vn_closefile(file_t *fp)
 {
-	return (vn_close(((struct vnode *)fp->f_data), fp->f_flag,
-		fp->f_cred, p));
-}
 
-int
-vn_kqfilter(struct file *fp, struct knote *kn)
-{
-	return (VOP_KQFILTER(((struct vnode *)fp->f_data), kn));
+	return vn_close(fp->f_data, fp->f_flag, fp->f_cred);
 }
 
 /*
- * Common code for vnode access operations.
+ * Enable LK_CANRECURSE on lock. Return prior status.
  */
+u_int
+vn_setrecurse(struct vnode *vp)
+{
+	struct vnlock *lkp;
 
-/* Check if a directory can be found inside another in the hierarchy */
+	lkp = (vp->v_vnlock != NULL ? vp->v_vnlock : &vp->v_lock);
+	atomic_inc_uint(&lkp->vl_canrecurse);
+
+	return 0;
+}
+
+/*
+ * Called when done with locksetrecurse.
+ */
+void
+vn_restorerecurse(struct vnode *vp, u_int flags)
+{
+	struct vnlock *lkp;
+
+	lkp = (vp->v_vnlock != NULL ? vp->v_vnlock : &vp->v_lock);
+	atomic_dec_uint(&lkp->vl_canrecurse);
+}
+
+/*
+ * Simplified in-kernel wrapper calls for extended attribute access.
+ * Both calls pass in a NULL credential, authorizing a "kernel" access.
+ * Set IO_NODELOCKED in ioflg if the vnode is already locked.
+ */
 int
-vn_isunder(struct vnode *lvp, struct vnode *rvp, struct proc *p)
+vn_extattr_get(struct vnode *vp, int ioflg, int attrnamespace,
+    const char *attrname, size_t *buflen, void *bf, struct lwp *l)
+{
+	struct uio auio;
+	struct iovec aiov;
+	int error;
+
+	aiov.iov_len = *buflen;
+	aiov.iov_base = bf;
+
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_offset = 0;
+	auio.uio_resid = *buflen;
+	UIO_SETUP_SYSSPACE(&auio);
+
+	if ((ioflg & IO_NODELOCKED) == 0)
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+
+	error = VOP_GETEXTATTR(vp, attrnamespace, attrname, &auio, NULL, NULL);
+
+	if ((ioflg & IO_NODELOCKED) == 0)
+		VOP_UNLOCK(vp, 0);
+
+	if (error == 0)
+		*buflen = *buflen - auio.uio_resid;
+
+	return (error);
+}
+
+/*
+ * XXX Failure mode if partially written?
+ */
+int
+vn_extattr_set(struct vnode *vp, int ioflg, int attrnamespace,
+    const char *attrname, size_t buflen, const void *bf, struct lwp *l)
+{
+	struct uio auio;
+	struct iovec aiov;
+	int error;
+
+	aiov.iov_len = buflen;
+	aiov.iov_base = __UNCONST(bf);		/* XXXUNCONST kills const */
+
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_WRITE;
+	auio.uio_offset = 0;
+	auio.uio_resid = buflen;
+	UIO_SETUP_SYSSPACE(&auio);
+
+	if ((ioflg & IO_NODELOCKED) == 0) {
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	}
+
+	error = VOP_SETEXTATTR(vp, attrnamespace, attrname, &auio, NULL);
+
+	if ((ioflg & IO_NODELOCKED) == 0) {
+		VOP_UNLOCK(vp, 0);
+	}
+
+	return (error);
+}
+
+int
+vn_extattr_rm(struct vnode *vp, int ioflg, int attrnamespace,
+    const char *attrname, struct lwp *l)
 {
 	int error;
 
-	error = vfs_getcwd_common(lvp, rvp, NULL, NULL, MAXPATHLEN/2, 0, p);
+	if ((ioflg & IO_NODELOCKED) == 0) {
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	}
 
-	if (!error)
-		return (1);
+	error = VOP_DELETEEXTATTR(vp, attrnamespace, attrname, NULL);
+	if (error == EOPNOTSUPP)
+		error = VOP_SETEXTATTR(vp, attrnamespace, attrname, NULL, NULL);
 
-	return (0);
+	if ((ioflg & IO_NODELOCKED) == 0) {
+		VOP_UNLOCK(vp, 0);
+	}
+
+	return (error);
+}
+
+void
+vn_ra_allocctx(struct vnode *vp)
+{
+	struct uvm_ractx *ra = NULL;
+
+	KASSERT(mutex_owned(&vp->v_interlock));
+
+	if (vp->v_type != VREG) {
+		return;
+	}
+	if (vp->v_ractx != NULL) {
+		return;
+	}
+	if (vp->v_ractx == NULL) {
+		mutex_exit(&vp->v_interlock);
+		ra = uvm_ra_allocctx();
+		mutex_enter(&vp->v_interlock);
+		if (ra != NULL && vp->v_ractx == NULL) {
+			vp->v_ractx = ra;
+			ra = NULL;
+		}
+	}
+	if (ra != NULL) {
+		uvm_ra_freectx(ra);
+	}
 }

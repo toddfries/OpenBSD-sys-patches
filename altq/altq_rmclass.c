@@ -1,5 +1,5 @@
-/*	$OpenBSD: altq_rmclass.c,v 1.15 2008/05/08 15:22:02 chl Exp $	*/
-/*	$KAME: altq_rmclass.c,v 1.10 2001/02/09 07:20:40 kjc Exp $	*/
+/*	$NetBSD: altq_rmclass.c,v 1.21 2008/07/15 16:18:08 christos Exp $	*/
+/*	$KAME: altq_rmclass.c,v 1.19 2005/04/13 03:44:25 suz Exp $	*/
 
 /*
  * Copyright (c) 1991-1997 Regents of the University of California.
@@ -37,6 +37,18 @@
  * For questions and/or comments, please send mail to cbq@ee.lbl.gov
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: altq_rmclass.c,v 1.21 2008/07/15 16:18:08 christos Exp $");
+
+/* #ident "@(#)rm_class.c  1.48     97/12/05 SMI" */
+
+#ifdef _KERNEL_OPT
+#include "opt_altq.h"
+#include "opt_inet.h"
+#endif
+
+#ifdef ALTQ_CBQ	/* cbq is enabled by ALTQ_CBQ option in opt_altq.h */
+
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -44,8 +56,16 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/time.h>
+#ifdef ALTQ3_COMPAT
+#include <sys/kernel.h>
+#endif
 
 #include <net/if.h>
+#ifdef ALTQ3_COMPAT
+#include <netinet/in.h>
+#include <netinet/in_systm.h>
+#include <netinet/ip.h>
+#endif
 
 #include <altq/altq.h>
 #include <altq/altq_rmclass.h>
@@ -63,24 +83,24 @@
  * Local routines.
  */
 
-static int	 rmc_satisfied(struct rm_class *, struct timeval *);
-static void	 rmc_wrr_set_weights(struct rm_ifdat *);
-static void	 rmc_depth_compute(struct rm_class *);
-static void	 rmc_depth_recompute(rm_class_t *);
+static int	rmc_satisfied(struct rm_class *, struct timeval *);
+static void	rmc_wrr_set_weights(struct rm_ifdat *);
+static void	rmc_depth_compute(struct rm_class *);
+static void	rmc_depth_recompute(rm_class_t *);
 
 static mbuf_t	*_rmc_wrr_dequeue_next(struct rm_ifdat *, int);
 static mbuf_t	*_rmc_prr_dequeue_next(struct rm_ifdat *, int);
 
-static int	 _rmc_addq(rm_class_t *, mbuf_t *);
-static void	 _rmc_dropq(rm_class_t *);
+static int	_rmc_addq(rm_class_t *, mbuf_t *);
+static void	_rmc_dropq(rm_class_t *);
 static mbuf_t	*_rmc_getq(rm_class_t *);
 static mbuf_t	*_rmc_pollq(rm_class_t *);
 
-static int	 rmc_under_limit(struct rm_class *, struct timeval *);
-static void	 rmc_tl_satisfied(struct rm_ifdat *, struct timeval *);
-static void	 rmc_drop_action(struct rm_class *);
-static void	 rmc_restart(struct rm_class *);
-static void	 rmc_root_overlimit(struct rm_class *, struct rm_class *);
+static int	rmc_under_limit(struct rm_class *, struct timeval *);
+static void	rmc_tl_satisfied(struct rm_ifdat *, struct timeval *);
+static void	rmc_drop_action(struct rm_class *);
+static void	rmc_restart(struct rm_class *);
+static void	rmc_root_overlimit(struct rm_class *, struct rm_class *);
 
 #define	BORROW_OFFTIME
 /*
@@ -167,10 +187,9 @@ static void	 rmc_root_overlimit(struct rm_class *, struct rm_class *);
  * offtime = offtime * 8 / (1000 * nsecPerByte)
  *
  * When USE_HRTIME is employed, then maxidle and offtime become:
- *	maxidle = maxilde * (8.0 / nsecPerByte);
- *	offtime = offtime * (8.0 / nsecPerByte);
+ * 	maxidle = maxilde * (8.0 / nsecPerByte);
+ * 	offtime = offtime * (8.0 / nsecPerByte);
  */
-
 struct rm_class *
 rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
     void (*action)(rm_class_t *, rm_class_t *), int maxq,
@@ -201,8 +220,15 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 #endif
 
 	cl = malloc(sizeof(struct rm_class), M_DEVBUF, M_WAITOK|M_ZERO);
+	if (cl == NULL)
+		return (NULL);
 	CALLOUT_INIT(&cl->callout_);
+
 	cl->q_ = malloc(sizeof(class_queue_t), M_DEVBUF, M_WAITOK|M_ZERO);
+	if (cl->q_ == NULL) {
+		free(cl, M_DEVBUF);
+		return (NULL);
+	}
 
 	/*
 	 * Class initialization.
@@ -264,13 +290,15 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 			    qlimit(cl->q_) * 10/100,
 			    qlimit(cl->q_) * 30/100,
 			    red_flags, red_pkttime);
-			qtype(cl->q_) = Q_RED;
+			if (cl->red_ != NULL)
+				qtype(cl->q_) = Q_RED;
 		}
 #ifdef ALTQ_RIO
 		else {
 			cl->red_ = (red_t *)rio_alloc(0, NULL,
 						      red_flags, red_pkttime);
-			qtype(cl->q_) = Q_RIO;
+			if (cl->red_ != NULL)
+				qtype(cl->q_) = Q_RIO;
 		}
 #endif
 	}
@@ -614,7 +642,7 @@ rmc_delete_class(struct rm_ifdat *ifd, struct rm_class *cl)
 
 
 /*
- * void
+ * int
  * rmc_init(...) - Initialize the resource management data structures
  *	associated with the output portion of interface 'ifp'.  'ifd' is
  *	where the structures will be built (for backwards compatibility, the
@@ -626,23 +654,29 @@ rmc_delete_class(struct rm_ifdat *ifd, struct rm_class *cl)
  *	is the maximum number of packets that the resource management
  *	code will allow to be queued 'downstream' (this is typically 1).
  *
- *	Returns:	NONE
+ *	Returns:	0 on success
  */
 
-void
+int
 rmc_init(struct ifaltq *ifq, struct rm_ifdat *ifd, u_int nsecPerByte,
     void (*restart)(struct ifaltq *), int maxq, int maxqueued, u_int maxidle,
     int minidle, u_int offtime, int flags)
 {
-	int		i, mtu;
+	int i, mtu;
 
 	/*
 	 * Initialize the CBQ tracing/debug facility.
 	 */
 	CBQTRACEINIT();
 
-	bzero((char *)ifd, sizeof (*ifd));
 	mtu = ifq->altq_ifp->if_mtu;
+	if (mtu < 1) {
+		printf("altq: %s: invalid MTU (interface not initialized?)\n",
+		    ifq->altq_ifp->if_xname);
+		return (EINVAL);
+	}
+
+	(void)memset((char *)ifd, 0, sizeof (*ifd));
 	ifd->ifq_ = ifq;
 	ifd->restart = restart;
 	ifd->maxqueued_ = maxqueued;
@@ -690,9 +724,11 @@ rmc_init(struct ifaltq *ifq, struct rm_ifdat *ifd, u_int nsecPerByte,
 				       maxidle, minidle, offtime,
 				       0, 0)) == NULL) {
 		printf("rmc_init: root class not allocated\n");
-		return ;
+		return (ENOMEM);
 	}
 	ifd->root_->depth_ = 0;
+
+	return (0);
 }
 
 /*
@@ -771,7 +807,7 @@ rmc_queue_packet(struct rm_class *cl, mbuf_t *m)
 /*
  * void
  * rmc_tl_satisfied(struct rm_ifdat *ifd, struct timeval *now) - Check all
- *	classes to see if they are satisfied.
+ *	classes to see if there are satified.
  */
 
 static void
@@ -1399,7 +1435,8 @@ rmc_drop_action(struct rm_class *cl)
 		ifd->na_[cl->pri_]--;
 }
 
-void rmc_dropall(struct rm_class *cl)
+void
+rmc_dropall(struct rm_class *cl)
 {
 	struct rm_ifdat	*ifd = cl->ifdat_;
 
@@ -1410,11 +1447,26 @@ void rmc_dropall(struct rm_class *cl)
 	}
 }
 
+#if (__FreeBSD_version > 300000)
+static int tvhzto(struct timeval *);
+
+static int
+tvhzto(struct timeval *tv)
+{
+	struct timeval t2;
+
+	getmicrotime(&t2);
+	t2.tv_sec = tv->tv_sec - t2.tv_sec;
+	t2.tv_usec = tv->tv_usec - t2.tv_usec;
+	return (tvtohz(&t2));
+}
+#endif /* __FreeBSD_version > 300000 */
+
 /*
  * void
  * rmc_delay_action(struct rm_class *cl) - This function is the generic CBQ
  *	delay action routine.  It is invoked via rmc_under_limit when the
- *	packet is discovered to be overlimit.
+ *	packet is discoverd to be overlimit.
  *
  *	If the delay action is result of borrow class being overlimit, then
  *	delay for the offtime of the borrowing class that is overlimit.
@@ -1425,12 +1477,12 @@ void rmc_dropall(struct rm_class *cl)
 void
 rmc_delay_action(struct rm_class *cl, struct rm_class *borrow)
 {
-	int	delay, t, extradelay;
+	int	ndelay, t, extradelay;
 
 	cl->stats_.overactions++;
-	TV_DELTA(&cl->undertime_, &cl->overtime_, delay);
+	TV_DELTA(&cl->undertime_, &cl->overtime_, ndelay);
 #ifndef BORROW_OFFTIME
-	delay += cl->offtime_;
+	ndelay += cl->offtime_;
 #endif
 
 	if (!cl->sleeping_) {
@@ -1455,7 +1507,7 @@ rmc_delay_action(struct rm_class *cl, struct rm_class *borrow)
 #endif
 		if (extradelay > 0) {
 			TV_ADD_DELTA(&cl->undertime_, extradelay, &cl->undertime_);
-			delay += extradelay;
+			ndelay += extradelay;
 		}
 
 		cl->sleeping_ = 1;
@@ -1468,18 +1520,18 @@ rmc_delay_action(struct rm_class *cl, struct rm_class *borrow)
 		 * NOTE:  If there's no other traffic, we need the timer as
 		 * a 'backstop' to restart this class.
 		 */
-		if (delay > tick * 2) {
+		if (ndelay > tick * 2) {
 #ifdef __FreeBSD__
 			/* FreeBSD rounds up the tick */
-			t = hzto(&cl->undertime_);
+			t = tvhzto(&cl->undertime_);
 #else
 			/* other BSDs round down the tick */
-			t = hzto(&cl->undertime_) + 1;
+			t = tvhzto(&cl->undertime_) + 1;
 #endif
 		} else
 			t = 2;
 		CALLOUT_RESET(&cl->callout_, t,
-			      (timeout_t *)rmc_restart, (caddr_t)cl);
+			      (timeout_t *)rmc_restart, (void *)cl);
 	}
 }
 
@@ -1528,9 +1580,10 @@ rmc_restart(struct rm_class *cl)
  */
 
 static void
-rmc_root_overlimit(struct rm_class *cl, struct rm_class *borrow)
+rmc_root_overlimit(struct rm_class *cl,
+    struct rm_class *borrow)
 {
-    panic("rmc_root_overlimit");
+	panic("rmc_root_overlimit");
 }
 
 /*
@@ -1617,7 +1670,8 @@ static struct rmc_funcs {
 	NULL,			NULL
 };
 
-static char *rmc_funcname(void *func)
+static char *
+rmc_funcname(void *func)
 {
 	struct rmc_funcs *fp;
 
@@ -1627,7 +1681,8 @@ static char *rmc_funcname(void *func)
 	return ("unknown");
 }
 
-void cbqtrace_dump(int counter)
+void
+cbqtrace_dump(int counter)
 {
 	int	 i, *p;
 	char	*cp;
@@ -1647,6 +1702,7 @@ void cbqtrace_dump(int counter)
 	}
 }
 #endif /* CBQ_TRACE */
+#endif /* ALTQ_CBQ */
 
 #if defined(ALTQ_CBQ) || defined(ALTQ_RED) || defined(ALTQ_RIO) || defined(ALTQ_HFSC) || defined(ALTQ_PRIQ)
 #if !defined(__GNUC__) || defined(ALTQ_DEBUG)
@@ -1721,7 +1777,7 @@ _getq_random(class_queue_t *q)
 	} else {
 		struct mbuf *prev = NULL;
 
-		n = arc4random_uniform(qlen(q)) + 1;
+		n = arc4random() % qlen(q) + 1;
 		for (i = 0; i < n; i++) {
 			prev = m;
 			m = m->m_nextpkt;

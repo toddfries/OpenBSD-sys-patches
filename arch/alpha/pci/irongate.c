@@ -1,12 +1,11 @@
-/*	$OpenBSD: irongate.c,v 1.9 2006/12/14 17:36:12 kettenis Exp $	*/
-/* $NetBSD: irongate.c,v 1.3 2000/11/29 06:29:10 thorpej Exp $ */
+/* $NetBSD: irongate.c,v 1.14 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
- * Copyright (c) 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Jason R. Thorpe.
+ * by Jason R. Thorpe of Wasabi Systems, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "opt_api_up1000.h"
+
+#include <sys/cdefs.h>
+
+__KERNEL_RCSID(0, "$NetBSD: irongate.c,v 1.14 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -44,11 +42,13 @@
 
 #include <machine/autoconf.h>
 #include <machine/rpb.h>
+#include <machine/sysarch.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/agpvar.h>
 
 #include <alpha/pci/irongatereg.h>
 #include <alpha/pci/irongatevar.h>
@@ -57,27 +57,20 @@
 #include <alpha/pci/pci_up1000.h>
 #endif
 
-int	irongate_match(struct device *, void *, void *);
+int	irongate_match(struct device *, struct cfdata *, void *);
 void	irongate_attach(struct device *, struct device *, void *);
 
-struct cfattach irongate_ca = {
-	sizeof(struct device), irongate_match, irongate_attach,
-};
+CFATTACH_DECL(irongate, sizeof(struct irongate_softc),
+    irongate_match, irongate_attach, NULL, NULL);
 
-int	irongate_print(void *, const char *pnp);
-
-struct cfdriver irongate_cd = {
-	NULL, "irongate", DV_DULL,
-};
+extern struct cfdriver irongate_cd;
 
 /* There can be only one. */
 struct irongate_config irongate_configuration;
 int	irongate_found;
 
-#if 0
 int	irongate_bus_get_window(int, int,
 	    struct alpha_bus_space_translation *);
-#endif
 
 /*
  * Set up the chipset's function pointers.
@@ -96,10 +89,6 @@ irongate_init(struct irongate_config *icp, int mallocsafe)
 	 */
 	irongate_pci_init(&icp->ic_pc, icp);
 	alpha_pci_chipset = &icp->ic_pc;
-	alpha_pci_chipset->pc_name = "irongate";
-	alpha_pci_chipset->pc_mem = IRONGATE_MEM_BASE;
-	alpha_pci_chipset->pc_mem = IRONGATE_MEM_BASE;
-	alpha_pci_chipset->pc_bwx = 1;
 
 	tag = pci_make_tag(&icp->ic_pc, 0, IRONGATE_PCIHOST_DEV, 0);
 
@@ -112,20 +101,18 @@ irongate_init(struct irongate_config *icp, int mallocsafe)
 		irongate_bus_io_init(&icp->ic_iot, icp);
 		irongate_bus_mem_init(&icp->ic_memt, icp);
 
-#if 0
 		/* Only one each PCI I/O and MEM window. */
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 1;
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 1;
 		
 		alpha_bus_get_window = irongate_bus_get_window;
-#endif
 	}
 
 	icp->ic_initted = 1;
 }
 
 int
-irongate_match(struct device *parent, void *match, void *aux)
+irongate_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -142,8 +129,11 @@ irongate_match(struct device *parent, void *match, void *aux)
 void
 irongate_attach(struct device *parent, struct device *self, void *aux)
 {
+	struct irongate_softc *sc = (void *) self;
 	struct irongate_config *icp;
 	struct pcibus_attach_args pba;
+	struct agpbus_attach_args apa;
+	pcitag_t tag;
 
 	/* Note that we've attached the chipset; can't have 2 Irongates. */
 	irongate_found = 1;
@@ -153,10 +143,10 @@ irongate_attach(struct device *parent, struct device *self, void *aux)
 	 * (maybe), but we must do it here as well to take care of things
 	 * that need to use memory allocation.
 	 */
-	icp = &irongate_configuration;
+	icp = sc->sc_icp = &irongate_configuration;
 	irongate_init(icp, 1);
 
-	printf(": rev. %d\n", icp->ic_rev);
+	printf(": AMD 751 Core Logic + AGP Chipset, rev. %d\n", icp->ic_rev);
 
 	irongate_dma_init(icp);
 
@@ -177,35 +167,41 @@ irongate_attach(struct device *parent, struct device *self, void *aux)
 		panic("irongate_attach: shouldn't be here, really...");
 	}
 
-	pba.pba_busname = "pci";
+	tag = pci_make_tag(&icp->ic_pc, 0, IRONGATE_PCIHOST_DEV, 0);
+
 	pba.pba_iot = &icp->ic_iot;
 	pba.pba_memt = &icp->ic_memt;
 	pba.pba_dmat =
 	    alphabus_dma_get_tag(&icp->ic_dmat_pci, ALPHA_BUS_PCI);
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &icp->ic_pc;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
-#ifdef notyet
 	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED |
 	    PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY | PCI_FLAGS_MWI_OKAY;
-#endif
-	(void) config_found(self, &pba, irongate_print);
+
+	if (pci_get_capability(&icp->ic_pc, tag, PCI_CAP_AGP,
+	    NULL, NULL) != 0) {
+		apa.apa_pci_args.pa_iot = pba.pba_iot;
+		apa.apa_pci_args.pa_memt = pba.pba_memt;
+		apa.apa_pci_args.pa_dmat = pba.pba_dmat;
+		apa.apa_pci_args.pa_pc = pba.pba_pc;
+		apa.apa_pci_args.pa_bus = pba.pba_bus;
+		apa.apa_pci_args.pa_device = IRONGATE_PCIHOST_DEV;
+		apa.apa_pci_args.pa_function = 0;
+		apa.apa_pci_args.pa_tag = tag;
+		apa.apa_pci_args.pa_id =
+		    irongate_conf_read0(icp, tag, PCI_ID_REG);
+		apa.apa_pci_args.pa_class =
+		    irongate_conf_read0(icp, tag, PCI_CLASS_REG);
+		apa.apa_pci_args.pa_flags = pba.pba_flags;
+
+		(void) config_found_ia(self, "agpbus", &apa, agpbusprint);
+	}
+
+	(void) config_found_ia(self, "pcibus", &pba, pcibusprint);
 }
 
-int
-irongate_print(void *aux, const char *pnp)
-{
-	struct pcibus_attach_args *pba = aux;
-
-	/* Only PCIs can attach to Irongates; easy. */
-	if (pnp != NULL)
-		printf("%s at %s", pba->pba_busname, pnp);
-	printf(" bus %d", pba->pba_bus);
-	return (UNCONF);
-}
-
-#if 0
 int
 irongate_bus_get_window(int type, int window,
     struct alpha_bus_space_translation *abst)
@@ -236,4 +232,3 @@ irongate_bus_get_window(int type, int window,
 
 	return (0);
 }
-#endif

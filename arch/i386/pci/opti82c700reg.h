@@ -1,5 +1,4 @@
-/*	$OpenBSD: opti82c700reg.h,v 1.4 2000/08/08 19:12:47 mickey Exp $	*/
-/*	$NetBSD: opti82c700reg.h,v 1.1 1999/11/17 01:21:20 thorpej Exp $	*/
+/*	$NetBSD: opti82c700reg.h,v 1.2 2000/07/18 11:07:21 soda Exp $	*/
 
 /*
  * Copyright (c) 1999, by UCHIYAMA Yasushi

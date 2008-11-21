@@ -1,5 +1,4 @@
-/*	$OpenBSD: dir.h,v 1.10 2005/06/18 18:09:43 millert Exp $	*/
-/*	$NetBSD: dir.h,v 1.8 1996/03/09 19:42:41 scottr Exp $	*/
+/*	$NetBSD: dir.h,v 1.20 2005/12/11 12:25:28 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -34,11 +33,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)dir.h	8.4 (Berkeley) 8/10/94
+ *	@(#)dir.h	8.5 (Berkeley) 4/27/95
  */
 
-#ifndef _DIR_H_
-#define	_DIR_H_
+#ifndef _UFS_UFS_DIR_H_
+#define	_UFS_UFS_DIR_H_
 
 /*
  * Theoretically, directories can be more than 2Gb in length, however, in
@@ -57,9 +56,9 @@
  * structures, which are of variable length.  Each directory entry has
  * a struct direct at the front of it, containing its inode number,
  * the length of the entry, and the length of the name contained in
- * the entry.  These are followed by the name padded to a 4 byte boundary
- * with null bytes.  All names are guaranteed null terminated.
- * The maximum length of a name in a directory is MAXNAMLEN.
+ * the entry.  These are followed by the name padded to a 4 byte boundary.
+ * All names are guaranteed null terminated.
+ * The maximum length of a name in a directory is FFS_MAXNAMLEN.
  *
  * The macro DIRSIZ(fmt, dp) gives the amount of space required to represent
  * a directory entry.  Free space in a directory is represented by
@@ -73,15 +72,18 @@
  * Entries other than the first in a directory do not normally have
  * dp->d_ino set to 0.
  */
-#define DIRBLKSIZ	DEV_BSIZE
-#define	MAXNAMLEN	255
+#undef	DIRBLKSIZ
+#define	DIRBLKSIZ	DEV_BSIZE
+#define	FFS_MAXNAMLEN	255
+#define APPLEUFS_DIRBLKSIZ 1024
 
+#define d_ino d_fileno
 struct	direct {
-	u_int32_t d_ino;		/* inode number of entry */
+	u_int32_t d_fileno;		/* inode number of entry */
 	u_int16_t d_reclen;		/* length of this record */
 	u_int8_t  d_type; 		/* file type, see below */
 	u_int8_t  d_namlen;		/* length of string in d_name */
-	char	  d_name[MAXNAMLEN + 1];/* name with length <= MAXNAMLEN */
+	char	  d_name[FFS_MAXNAMLEN + 1];/* name with length <= FFS_MAXNAMLEN */
 };
 
 /*
@@ -95,6 +97,7 @@ struct	direct {
 #define	DT_REG		 8
 #define	DT_LNK		10
 #define	DT_SOCK		12
+#define	DT_WHT		14
 
 /*
  * Convert between stat structure types and directory types.
@@ -108,24 +111,25 @@ struct	direct {
  * without the d_name field, plus enough space for the name with a terminating
  * null byte (dp->d_namlen+1), rounded up to a 4 byte boundary.
  */
-#define DIRECTSIZ(namlen)						\
-	(((int)&((struct direct *)0)->d_name +				\
-	  ((namlen)+1)*sizeof(((struct direct *)0)->d_name[0]) + 3) & ~3)
+#define	DIRECTSIZ(namlen) \
+	((sizeof(struct direct) - (FFS_MAXNAMLEN+1)) + (((namlen)+1 + 3) &~ 3))
+
 #if (BYTE_ORDER == LITTLE_ENDIAN)
-#define DIRSIZ(oldfmt, dp) \
-    ((oldfmt) ? \
-    ((sizeof(struct direct) - (MAXNAMLEN+1)) + (((dp)->d_type+1 + 3) &~ 3)) : \
-    ((sizeof(struct direct) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3)))
+#define DIRSIZ(oldfmt, dp, needswap)	\
+    (((oldfmt) && !(needswap)) ?	\
+    DIRECTSIZ((dp)->d_type) : DIRECTSIZ((dp)->d_namlen))
 #else
-#define DIRSIZ(oldfmt, dp) \
-    ((sizeof(struct direct) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3))
+#define DIRSIZ(oldfmt, dp, needswap)	\
+    (((oldfmt) && (needswap)) ?		\
+    DIRECTSIZ((dp)->d_type) : DIRECTSIZ((dp)->d_namlen))
 #endif
+
 #define OLDDIRFMT	1
 #define NEWDIRFMT	0
 
 /*
  * Template for manipulating directories.  Should use struct direct's,
- * but the name field is MAXNAMLEN - 1, and this just won't do.
+ * but the name field is FFS_MAXNAMLEN - 1, and this just won't do.
  */
 struct dirtemplate {
 	u_int32_t	dot_ino;
@@ -153,4 +157,4 @@ struct odirtemplate {
 	u_int16_t	dotdot_namlen;
 	char		dotdot_name[4];	/* ditto */
 };
-#endif /* !_DIR_H_ */
+#endif /* !_UFS_UFS_DIR_H_ */

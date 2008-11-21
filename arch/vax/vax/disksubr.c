@@ -1,5 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.54 2007/07/13 20:24:44 miod Exp $	*/
-/*	$NetBSD: disksubr.c,v 1.21 1999/06/30 18:48:06 ragge Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.48 2008/03/11 05:34:03 matt Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -28,16 +27,22 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	@(#)ufs_disksubr.c	7.16 (Berkeley) 5/4/91
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.48 2008/03/11 05:34:03 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
+#include <sys/dkbad.h>
 #include <sys/disklabel.h>
+#include <sys/disk.h>
 #include <sys/syslog.h>
 #include <sys/proc.h>
 #include <sys/user.h>
-#include <sys/disk.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -46,9 +51,17 @@
 #include <machine/pcb.h>
 #include <machine/cpu.h>
 
-#include <vax/mscp/mscp.h> /* For disk encoding scheme */
+#include <dev/mscp/mscp.h> /* For disk encoding scheme */
 
-#include "mba.h"
+#include "opt_compat_ultrix.h"
+#ifdef COMPAT_ULTRIX
+#include <dev/dec/dec_boot.h>
+#include <ufs/ufs/dinode.h>	/* XXX for fs.h */
+#include <ufs/ffs/fs.h>		/* XXX for BBSIZE & SBSIZE */
+
+static const char *compat_label(dev_t dev, void (*strat)(struct buf *bp),
+	struct disklabel *lp, struct cpu_disklabel *osdep);
+#endif /* COMPAT_ULTRIX */
 
 /*
  * Attempt to read a disk label from a device
@@ -58,54 +71,172 @@
  * (e.g., sector size) must be filled in before calling us.
  * Returns null on success and an error string on failure.
  */
-char *
+const char *
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
-    struct disklabel *lp, int spoofonly)
+    struct disklabel *lp, struct cpu_disklabel *osdep)
 {
-	struct buf *bp = NULL;
-	char *msg;
+	struct buf *bp;
+	struct disklabel *dlp;
+	const char *msg = NULL;
 
-	if ((msg = initdisklabel(lp)))
-		goto done;
+	if (lp->d_npartitions == 0) { /* Assume no label */
+		lp->d_secperunit = 0x1fffffff;
+		lp->d_npartitions = 3;
+		lp->d_partitions[2].p_size = 0x1fffffff;
+		lp->d_partitions[2].p_offset = 0;
+	}
 
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
-
-	if (spoofonly)
-		goto done;
-
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags |= B_READ;
+	bp->b_cylinder = LABELSECTOR / lp->d_secpercyl;
 	(*strat)(bp);
+	if (biowait(bp)) {
+		msg = "I/O error";
+	} else {
+		dlp = (struct disklabel *)((char *)bp->b_data + LABELOFFSET);
+		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
+			msg = "no disk label";
+		} else if (dlp->d_npartitions > MAXPARTITIONS ||
+		    dkcksum(dlp) != 0)
+			msg = "disk label corrupted";
+		else {
+			*lp = *dlp;
+		}
+	}
+	brelse(bp, 0);
+
+#ifdef COMPAT_ULTRIX
+	/*
+	 * If no NetBSD label was found, check for an Ultrix label and
+	 * construct tne incore label from the Ultrix partition information.
+	 */
+	if (msg != NULL) {
+		msg = compat_label(dev, strat, lp, osdep);
+		if (msg == NULL) {
+			printf("WARNING: using Ultrix partition information\n");
+			/* set geometry? */
+		}
+	}
+#endif
+	return (msg);
+}
+
+#ifdef COMPAT_ULTRIX
+/*
+ * Given a buffer bp, try and interpret it as an Ultrix disk label,
+ * putting the partition info into a native NetBSD label
+ */
+const char *
+compat_label(dev_t dev, void (*strat)(struct buf *bp), struct disklabel *lp,
+	struct cpu_disklabel *osdep)
+{
+	dec_disklabel *dlp;
+	struct buf *bp = NULL;
+	const char *msg = NULL;
+	uint8_t *dp;
+
+	bp = geteblk((int)lp->d_secsize);
+	dp = bp->b_data;
+	bp->b_dev = dev;
+	bp->b_blkno = DEC_LABEL_SECTOR;
+	bp->b_bcount = lp->d_secsize;
+	bp->b_flags |= B_READ;
+	bp->b_cylinder = DEC_LABEL_SECTOR / lp->d_secpercyl;
+	(*strat)(bp);
+
 	if (biowait(bp)) {
 		msg = "I/O error";
 		goto done;
 	}
 
-	msg = checkdisklabel(bp->b_data + LABELOFFSET, lp);
-	if (msg == NULL)
-		goto done;
+	for (dlp = (dec_disklabel *)dp;
+	    dlp <= (dec_disklabel *)(dp+DEV_BSIZE-sizeof(*dlp));
+	    dlp = (dec_disklabel *)((char *)dlp + sizeof(long))) {
 
-#if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
-		goto done;
-	}
+		int part;
+
+		if (dlp->magic != DEC_LABEL_MAGIC) {
+			printf("label: %x\n",dlp->magic);
+			msg = ((msg != NULL) ? msg: "no disk label");
+			goto done;
+		}
+
+		lp->d_magic = DEC_LABEL_MAGIC;
+		lp->d_npartitions = 0;
+		strncpy(lp->d_packname, "Ultrix label", 16);
+		lp->d_rpm = 3600;
+		lp->d_interleave = 1;
+		lp->d_flags = 0;
+		lp->d_bbsize = BBSIZE;
+		lp->d_sbsize = 8192;
+		for (part = 0;
+		     part <((MAXPARTITIONS<DEC_NUM_DISK_PARTS) ?
+		            MAXPARTITIONS : DEC_NUM_DISK_PARTS);
+		     part++) {
+			lp->d_partitions[part].p_size = dlp->map[part].num_blocks;
+			lp->d_partitions[part].p_offset = dlp->map[part].start_block;
+			lp->d_partitions[part].p_fsize = 1024;
+			lp->d_partitions[part].p_fstype =
+			    (part==1) ? FS_SWAP : FS_BSDFFS;
+			lp->d_npartitions += 1;
+
+#ifdef DIAGNOSTIC
+			printf(" Ultrix label rz%d%c: start %d len %d\n",
+			       DISKUNIT(dev), "abcdefgh"[part],
+			       lp->d_partitions[part].p_offset,
+			       lp->d_partitions[part].p_size);
 #endif
-#if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
-		goto done;
+		}
+		break;
 	}
-#endif
 
 done:
-	if (bp) {
-		bp->b_flags |= B_INVAL;
-		brelse(bp);
-	}
+	brelse(bp, 0);
 	return (msg);
+}
+#endif /* COMPAT_ULTRIX */
+
+/*
+ * Check new disk label for sensibility
+ * before setting it.
+ */
+int
+setdisklabel(struct disklabel *olp, struct disklabel *nlp,
+    u_long openmask, struct cpu_disklabel *osdep)
+{
+	int i;
+	struct partition *opp, *npp;
+
+	if (nlp->d_magic != DISKMAGIC || nlp->d_magic2 != DISKMAGIC ||
+	    dkcksum(nlp) != 0)
+		return (EINVAL);
+	while ((i = ffs(openmask)) != 0) {
+		i--;
+		openmask &= ~(1 << i);
+		if (nlp->d_npartitions <= i)
+			return (EBUSY);
+		opp = &olp->d_partitions[i];
+		npp = &nlp->d_partitions[i];
+		if (npp->p_offset != opp->p_offset || npp->p_size < opp->p_size)
+			return (EBUSY);
+		/*
+		 * Copy internally-set partition information
+		 * if new label doesn't include it.		XXX
+		 */
+		if (npp->p_fstype == FS_UNUSED && opp->p_fstype != FS_UNUSED) {
+			npp->p_fstype = opp->p_fstype;
+			npp->p_fsize = opp->p_fsize;
+			npp->p_frag = opp->p_frag;
+			npp->p_cpg = opp->p_cpg;
+		}
+	}
+	nlp->d_checksum = 0;
+	nlp->d_checksum = dkcksum(nlp);
+	*olp = *nlp;
+	return (0);
 }
 
 /*
@@ -113,42 +244,39 @@ done:
  * Always allow writing of disk label; even if the disk is unlabeled.
  */
 int
-writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
+writedisklabel(dev_t dev, void (*strat)(struct buf *),
+    struct disklabel *lp, struct cpu_disklabel *osdep)
 {
-	struct buf *bp = NULL;
+	struct buf *bp;
 	struct disklabel *dlp;
 	int error = 0;
 
 	bp = geteblk((int)lp->d_secsize);
-	bp->b_dev = dev;
-
-	/* Read it in, slap the new label in, and write it back out */
+	bp->b_dev = MAKEDISKDEV(major(dev), DISKUNIT(dev), RAW_PART);
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags |= B_READ;
 	(*strat)(bp);
-	if ((error = biowait(bp)) != 0)
+	if ((error = biowait(bp)))
 		goto done;
-
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
-	*dlp = *lp;
-	bp->b_flags = B_BUSY | B_WRITE;
+	dlp = (struct disklabel *)((char *)bp->b_data + LABELOFFSET);
+	bcopy(lp, dlp, sizeof(struct disklabel));
+	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_READ);
+	bp->b_flags |= B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
 
 done:
-	if (bp) {
-		bp->b_flags |= B_INVAL;
-		brelse(bp);
-	}
+	brelse(bp, 0);
 	return (error);
 }
 
-/*
+/*	
  * Print out the name of the device; ex. TK50, RA80. DEC uses a common
  * disk type encoding scheme for most of its disks.
- */
-void
+ */   
+void  
 disk_printtype(int unit, int type)
 {
 	printf(" drive %d: %c%c", unit, (int)MSCP_MID_CHAR(2, type),
@@ -158,21 +286,19 @@ disk_printtype(int unit, int type)
 	printf("%d\n", MSCP_MID_NUM(type));
 }
 
-#if NMBA > 0
 /*
  * Be sure that the pages we want to do DMA to is actually there
  * by faking page-faults if necessary. If given a map-register address,
  * also map it in.
  */
 void
-disk_reallymapin(struct buf *bp, pt_entry_t *map, int reg, int flag)
+disk_reallymapin(struct buf *bp, struct pte *map, int reg, int flag)
 {
 	struct proc *p;
 	volatile pt_entry_t *io;
 	pt_entry_t *pte;
-	struct pcb *pcb;
 	int pfnum, npf, o;
-	caddr_t addr;
+	void *addr;
 
 	o = (int)bp->b_data & VAX_PGOFSET;
 	npf = vax_btoc(bp->b_bcount + o) + 1;
@@ -185,22 +311,26 @@ disk_reallymapin(struct buf *bp, pt_entry_t *map, int reg, int flag)
 	 */
 	if ((bp->b_flags & B_PHYS) == 0) {
 		pte = kvtopte(addr);
-		p = &proc0;
+		if (p == 0)
+			p = &proc0;
 	} else {
-		pcb = &p->p_addr->u_pcb;
-		pte = uvtopte(addr, pcb);
+		long xaddr = (long)addr;
+		if (xaddr & 0x40000000)
+			pte = &p->p_vmspace->vm_map.pmap->pm_p1br[xaddr &
+			    ~0x40000000];
+		else
+			pte = &p->p_vmspace->vm_map.pmap->pm_p0br[xaddr];
 	}
 
 	if (map) {
 		io = &map[reg];
 		while (--npf > 0) {
-			pfnum = (*pte & PG_FRAME);
+			pfnum = pte->pg_pfn;
 			if (pfnum == 0)
 				panic("mapin zero entry");
 			pte++;
-			*(int *)io++ = pfnum | flag;
+			*(volatile int *)io++ = pfnum | flag;
 		}
-		*(int *)io = 0;
+		*(volatile int *)io = 0;
 	}
 }
-#endif

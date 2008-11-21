@@ -1,5 +1,4 @@
-/*	$OpenBSD: localedef.h,v 1.3 1996/04/21 22:31:47 deraadt Exp $	*/
-/*	$NetBSD: localedef.h,v 1.4 1996/04/09 20:55:31 cgd Exp $	*/
+/*	$NetBSD: localedef.h,v 1.9 2008/05/17 03:49:54 ginsbach Exp $	*/
 
 /*
  * Copyright (c) 1994 Winning Strategies, Inc.
@@ -34,30 +33,25 @@
 #ifndef _SYS_LOCALEDEF_H_
 #define _SYS_LOCALEDEF_H_
 
-#include <sys/param.h>
-#include <sys/types.h>
-
-typedef struct
-{
-	char *yesexpr;
-	char *noexpr;
-	char *yesstr;
-	char *nostr;
+typedef struct {
+	const char *yesexpr;
+	const char *noexpr;
+	const char *yesstr;
+	const char *nostr;
 } _MessagesLocale;
 
 extern const _MessagesLocale *_CurrentMessagesLocale;
 extern const _MessagesLocale  _DefaultMessagesLocale;
 
 
-typedef struct
-{
-	char *int_curr_symbol;
-	char *currency_symbol;
-	char *mon_decimal_point;
-	char *mon_thousands_sep;
-	char *mon_grouping;
-	char *positive_sign;
-	char *negative_sign;
+typedef struct {
+	const char *int_curr_symbol;
+	const char *currency_symbol;
+	const char *mon_decimal_point;
+	const char *mon_thousands_sep;
+	const char *mon_grouping;
+	const char *positive_sign;
+	const char *negative_sign;
 	char int_frac_digits;
 	char frac_digits;
 	char p_cs_precedes;
@@ -66,14 +60,19 @@ typedef struct
 	char n_sep_by_space;
 	char p_sign_posn;
 	char n_sign_posn;
+	char int_p_cs_precedes;
+	char int_n_cs_precedes;
+	char int_p_sep_by_space;
+	char int_n_sep_by_space;
+	char int_p_sign_posn;
+	char int_n_sign_posn;
 } _MonetaryLocale;
 
 extern const _MonetaryLocale *_CurrentMonetaryLocale;
 extern const _MonetaryLocale  _DefaultMonetaryLocale;
 
 
-typedef struct
-{
+typedef struct {
 	const char *decimal_point;
 	const char *thousands_sep;
 	const char *grouping;

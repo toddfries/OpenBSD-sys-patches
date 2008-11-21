@@ -1,5 +1,4 @@
-/*	$OpenBSD: anvar.h,v 1.21 2006/02/20 11:13:57 jsg Exp $	*/
-/*	$NetBSD: anvar.h,v 1.10 2005/02/27 00:27:00 perry Exp $	*/
+/*	$NetBSD: anvar.h,v 1.17 2008/07/03 18:10:08 drochner Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -37,6 +36,8 @@
 #ifndef _DEV_IC_ANVAR_H
 #define _DEV_IC_ANVAR_H
 
+#include <net80211/ieee80211_radiotap.h>
+
 #define AN_TIMEOUT	65536
 #define	AN_MAGIC	0x414e
 
@@ -72,41 +73,41 @@ struct an_wepkey {
 	int			an_wep_keylen;
 };
 
-#define	AN_GAPLEN_MAX	8
-
-#define AN_RX_RADIOTAP_PRESENT	((1 << IEEE80211_RADIOTAP_FLAGS) | \
-				 (1 << IEEE80211_RADIOTAP_RATE) | \
-				 (1 << IEEE80211_RADIOTAP_CHANNEL) | \
-				 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL))
+/* Radio capture format for Aironet */
+#define AN_RX_RADIOTAP_PRESENT  ((1 << IEEE80211_RADIOTAP_FLAGS) | \
+                                 (1 << IEEE80211_RADIOTAP_RATE) | \
+	                         (1 << IEEE80211_RADIOTAP_CHANNEL) | \
+                                 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL))
 
 struct an_rx_radiotap_header {
-	struct ieee80211_radiotap_header	ar_ihdr;
-	u_int8_t				ar_flags;
-	u_int8_t				ar_rate;
-	u_int16_t				ar_chan_freq;
-	u_int16_t				ar_chan_flags;
-	int8_t					ar_antsignal;
+        struct ieee80211_radiotap_header        ar_ihdr;
+        u_int8_t                                ar_flags;
+        u_int8_t                                ar_rate;
+        u_int16_t                               ar_chan_freq;
+        u_int16_t                               ar_chan_flags;
+        int8_t                                  ar_antsignal;
 } __packed;
 
-#define AN_TX_RADIOTAP_PRESENT	((1 << IEEE80211_RADIOTAP_FLAGS) | \
-				 (1 << IEEE80211_RADIOTAP_RATE) | \
-				 (1 << IEEE80211_RADIOTAP_CHANNEL))
+#define AN_TX_RADIOTAP_PRESENT  ((1 << IEEE80211_RADIOTAP_FLAGS) | \
+                                 (1 << IEEE80211_RADIOTAP_RATE) | \
+                                 (1 << IEEE80211_RADIOTAP_CHANNEL))
 
 struct an_tx_radiotap_header {
-	struct ieee80211_radiotap_header	at_ihdr;
-	u_int8_t				at_flags;
-	u_int8_t				at_rate;
-	u_int16_t				at_chan_freq;
-	u_int16_t				at_chan_flags;
+        struct ieee80211_radiotap_header        at_ihdr;
+        u_int8_t                                at_flags;
+        u_int8_t                                at_rate;
+        u_int16_t                               at_chan_freq;
+        u_int16_t                               at_chan_flags;
 } __packed;
 
+#define	AN_GAPLEN_MAX	8
 
 struct an_softc	{
-	struct device		sc_dev;
+	device_t		sc_dev;
+	struct ethercom		sc_ec;
 	struct ieee80211com	sc_ic;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
-	void			*sc_ih;
 	int			(*sc_enable)(struct an_softc *);
 	void			(*sc_disable)(struct an_softc *);
 	int			(*sc_newstate)(struct ieee80211com *,
@@ -115,8 +116,6 @@ struct an_softc	{
 	int			sc_enabled;
 	int			sc_invalid;
 	int			sc_attached;
-	void			*sc_sdhook;
-
 
 	int			sc_bap_id;
 	int			sc_bap_off;
@@ -147,7 +146,8 @@ struct an_softc	{
 		struct an_rid_encap	sc_encap;
 	}			sc_buf;
 
-	caddr_t			sc_drvbpf;
+	/* radiotap header */
+	void *			sc_drvbpf;
 	union {
 		struct an_rx_radiotap_header	tap;
 		u_int8_t			pad[64];
@@ -158,16 +158,13 @@ struct an_softc	{
 	} sc_txtapu;
 };
 
-#define sc_rxtap	sc_rxtapu.tap
-#define sc_txtap	sc_txtapu.tap
+#define	sc_if	sc_ec.ec_if
+#define	sc_rxtap	sc_rxtapu.tap
+#define	sc_txtap	sc_txtapu.tap
 
 int	an_attach(struct an_softc *);
 int	an_detach(struct an_softc *);
 int	an_activate(struct device *, enum devact);
-void	an_power(int, void *);
-void	an_shutdown(void *);
 int	an_intr(void *);
-int	an_init(struct ifnet *);
-void	an_stop(struct ifnet *, int);
 
 #endif	/* _DEV_IC_ANVAR_H */

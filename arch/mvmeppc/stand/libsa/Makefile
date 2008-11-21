@@ -1,40 +1,53 @@
-#	$OpenBSD: Makefile,v 1.8 2007/11/26 10:26:02 deraadt Exp $
+#	$NetBSD: Makefile,v 1.6 2006/01/26 22:26:52 he Exp $
 
 LIB=sa
 
-NOPIC=nopic
-NOPROFILE=noprofile
-
 # Logically src/sys
-S=${.CURDIR}/../../../..
+DIR_SA=$S/lib/libsa
+DIR_KERN=$S/lib/libkern
 
-SRCS=	bugdev.c clock.c conf.c parse_args.c rawfs.c tftpfs.c exec_mvme.c
+SRC_net= nfs.c rpc.c net.c ether.c arp.c ip_cksum.c netif.c \
+	 bootparam.c rarp.c dev_net.c bootp.c
 
-.PATH:	${S}/lib/libsa
-SRCS+=	alloc.c memcpy.c exit.c getfile.c gets.c globals.c \
-	printf.c strerror.c memset.c memcmp.c strncpy.c strcmp.c strlen.c \
-	strlcpy.c strlcat.c snprintf.c \
-	close.c closeall.c dev.c disklabel.c dkcksum.c \
-	lseek.c open.c nullfs.c read.c fstat.c \
-	ufs.c cread.c loadfile.c
-SRCS+=	arp.c ether.c in_cksum.c net.c netif.c rpc.c nfs.c \
-	rarp.c bootparam.c 
 
-.PATH:	${S}/lib/libkern/arch/m88k ${S}/lib/libkern
-SRCS+=	ashrdi3.c bzero.c
+SRC_sa = alloc.c memcpy.c memset.c close.c exit.c files.c getfile.c gets.c \
+	 open.c printf.c read.c strerror.c ufs.c globals.c lseek.c panic.c \
+	 closeall.c dev.c dkcksum.c nullfs.c fstat.c twiddle.c sprintf.c \
+	 subr_prf.c intoa.c udp.c memcmp.c loadfile.c loadfile_aout.c \
+	 loadfile_elf32.c dev_net.c ether_sprintf.c snprintf.c
+
+# XXX Needed until libsa's memcmp.c doesn't depend on bcmp...
+SRC_sa+= bcmp.c
+
+SRC_kern= ashldi3.c ashrdi3.c strcmp.c strlen.c strncpy.c inet_addr.c
+
+SRC_here= bugsyscalls.S exec_mvme.c parse_args.c getchar.c putchar.c
+SRC_here+= if_bug.c clock.c
+
+SRCS= ${SRC_net} ${SRC_sa} ${SRC_kern} ${SRC_here}
 
 # DBG= -DDEBUG -DNETIF_DEBUG -DNFS_DEBUG -DRPC_DEBUG \
 # 	-DNET_DEBUG -DRARP_DEBUG -DETHER_DEBUG
 
-#DEFS= -DCOMPAT_UFS
-DEFS= -D__INTERNAL_LIBSA_CREAD 
-#-DNETIF_DEBUG
-INCL= -I${.CURDIR} -I${.CURDIR}/../libbug -I${S}/lib/libsa -I${S}
-COPTS= #-fno-defer-pop
-CFLAGS+= ${XCFLAGS} ${COPTS} ${DEFS} ${DBG} ${INCL} -O2
+DEFS= ${DBG} #-fno-defer-pop
 
-all: libsa.a
+CPPFLAGS+= -DSUPPORT_BOOTP -DSUPPORT_DHCP
+#CPPFLAGS+= -DSUPPORT_DHCP
+#CPPFLAGS+= -DSUPPORT_RARP -DSUPPORT_BOOTPARAM
+CPPFLAGS+= -DSUPPORT_NFS -DNFS_NOSYMLINK
 
-install:
+CLEANFILES+= srt0.o
 
+.include "../Makefile.booters"
+.include "${S}/../common/lib/libc/Makefile.inc"
+
+.PATH:  ${DIR_SA} ${DIR_KERN}
+
+# only needed during build
+libinstall::
+
+all realall: lib${LIB}.a srt0.o
+
+.include <bsd.own.mk>
+.undef DESTDIR
 .include <bsd.lib.mk>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: powerpc.h,v 1.8 2005/12/17 07:31:26 miod Exp $	*/
-/*	$NetBSD: powerpc.h,v 1.1 1996/09/30 16:34:30 ws Exp $	*/
+/*	$NetBSD: powerpc.h,v 1.6 2006/08/05 21:26:48 sanjayl Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -35,58 +34,25 @@
 #define	_MACHINE_POWERPC_H_
 
 struct mem_region {
-	vaddr_t start;
-	vsize_t size;
-};
+#if defined (PMAC_G5)
+	paddr_t start_hi;
+#endif
+	paddr_t start;
+	psize_t size;
+}__attribute__((packed));
 
-void mem_regions(struct mem_region **, struct mem_region **);
+void mem_regions __P((struct mem_region **, struct mem_region **));
 
 /*
  * These two functions get used solely in boot() in machdep.c.
  *
  * Not sure whether boot itself should be implementation dependent instead.	XXX
  */
-typedef void (exit_f)(void) /*__attribute__((__noreturn__))*/ ;
-typedef void (boot_f)(char *bootspec) /* __attribute__((__noreturn__))*/ ;
-typedef void (vmon_f)(void);
+void ppc_exit __P((void)) __attribute__((__noreturn__));
+void ppc_boot __P((char *bootspec)) __attribute__((__noreturn__));
 
-/* firmware interface.
- * regardless of type of firmware used several items
- * are need from firmware to boot up.
- * these include:
- *	memory information
- *	vmsetup for firmware calls.
- *	default character print mechanism ???
- *	firmware exit (return)
- *	firmware boot (reset)
- *	vmon - tell firmware the bsd vm is active.
- */
+int dk_match __P((char *name));
 
-typedef void (mem_regions_f)(struct mem_region **memp,
-	struct mem_region **availp);
+void ofrootfound __P((void));
 
-struct firmware {
-	mem_regions_f	*mem_regions;
-	exit_f		*exit;
-	boot_f		*boot;
-	vmon_f		*vmon;
-	
-#ifdef FW_HAS_PUTC
-	boot_f		*putc;
-#endif
-};
-extern  struct firmware *fw;
-int ppc_open_pci_bridge(void);
-void ppc_close_pci_bridge(int);
-void install_extint(void (*handler) (void));
-void ppc_intr_enable(int enable);
-int ppc_intr_disable(void);
-
-struct dumpmem {
-	vaddr_t         start;
-	vsize_t         end;
-};
-extern struct dumpmem dumpmem[VM_PHYSSEG_MAX];
-extern u_int ndumpmem;
-extern vaddr_t dumpspace;
 #endif	/* _MACHINE_POWERPC_H_ */

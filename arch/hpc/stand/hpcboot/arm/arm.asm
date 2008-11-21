@@ -1,4 +1,4 @@
-;	$NetBSD: arm.asm,v 1.6 2006/03/05 04:05:39 uwe Exp $	
+;	$NetBSD: arm.asm,v 1.8 2008/05/03 23:49:14 martin Exp $	
 ;
 ; Copyright (c) 2001 The NetBSD Foundation, Inc.
 ; All rights reserved.
@@ -14,13 +14,6 @@
 ; 2. Redistributions in binary form must reproduce the above copyright
 ;    notice, this list of conditions and the following disclaimer in the
 ;    documentation and/or other materials provided with the distribution.
-; 3. All advertising materials mentioning features or use of this software
-;    must display the following acknowledgement:
-;        This product includes software developed by the NetBSD
-;        Foundation, Inc. and its contributors.
-; 4. Neither the name of The NetBSD Foundation nor the names of its
-;    contributors may be used to endorse or promote products derived
-;    from this software without specific prior written permission.
 ;
 ; THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 ; ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -337,7 +330,7 @@
 
 	EXPORT |colorbar|
 |colorbar| PROC
-	stmea	sp!, {r4-r7, lr}
+	stmfd	sp!, {r4-r7, lr}
 	adr	r4, |$FBADDR|
 	ldr	r4, [r4]
 
@@ -357,7 +350,7 @@
 	subs	r7, r7, #1
 	bne	|color_loop|
 
-	ldmea	sp!, {r4-r7, pc}
+	ldmfd	sp!, {r4-r7, pc}
 |$FBADDR|
 	DCD	0xc0003000	; use WindowsCE default.
 	ENDP  ; |colorbar|
@@ -465,7 +458,7 @@
 	ENDP	;|btputc|
 
 |hexdump| PROC
-	stmea	sp!, {r4-r5, lr}
+	stmfd	sp!, {r4-r5, lr}
 	mov	r4, r0
 	mov	r0, #0x30
 	bl	btputc
@@ -497,7 +490,7 @@
 	bl	btputc
 	mov	r0, #0x0a
 	bl	btputc
-	ldmea	sp!, {r4-r5, pc}
+	ldmfd	sp!, {r4-r5, pc}
 	ENDP	;|hexdump|
 
 |$UARTTXADR|

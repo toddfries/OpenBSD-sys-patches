@@ -1,5 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.5 2005/05/10 04:04:39 brad Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.7 2003/08/07 16:30:19 agc Exp $	*/
+/*	$NetBSD: in_cksum.c,v 1.11 2008/03/11 05:34:03 matt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1992, 1993
@@ -32,6 +31,9 @@
  *	@(#)in_cksum.c	8.1 (Berkeley) 6/10/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.11 2008/03/11 05:34:03 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/systm.h>
@@ -52,26 +54,26 @@
 #define ADVANCE(n)	{w += n; mlen -= n;}
 #define SWAP		{sum <<= 8;}		/* depends on recent REDUCE */
 
-#define Asm     __asm __volatile
-#define ADDL    Asm("addl2 (%2)+,%0" : "=r" (sum) : "0" (sum), "r" (w))
-#define ADWC    Asm("adwc  (%2)+,%0" : "=r" (sum) : "0" (sum), "r" (w))
+#define Asm     __asm volatile
+#define	ADDL	Asm("addl2 (%0)+,%1": "=r" (w), "=r" (sum): "0" (w), "1" (sum))
+#define	ADWC	Asm("adwc  (%0)+,%1": "=r" (w), "=r" (sum): "0" (w), "1" (sum))
 #define ADDC    Asm("adwc     $0,%0" : "=r" (sum) : "0" (sum))
 #define UNSWAP  Asm("rotl  $8,%0,%0" : "=r" (sum) : "0" (sum))
 #define ADDBYTE	{sum += *w; SWAP; byte_swapped ^= 1;}
-#define ADDWORD	{sum += *(u_short *)w;}
+#define ADDWORD	{sum += *(uint16_t *)w;}
 
 int
 in_cksum(struct mbuf *m, int len)
 {
-	u_int8_t *w;
-	u_int32_t sum = 0;
+	uint8_t *w;
+	uint32_t sum = 0;
 	int mlen = 0;
 	int byte_swapped = 0;
 
 	for (;m && len; m = m->m_next) {
 		if ((mlen = m->m_len) == 0)
 			continue;
-		w = mtod(m, u_int8_t *);
+		w = mtod(m, uint8_t *);
 		if (len < mlen)
 			mlen = len;
 		len -= mlen;
@@ -81,13 +83,13 @@ in_cksum(struct mbuf *m, int len)
 		 * Ensure that we're aligned on a word boundary here so
 		 * that we can do 32 bit operations below.
 		 */
-		if ((3 & (u_long) w) != 0) {
+		if ((3 & (intptr_t) w) != 0) {
 			REDUCE;
-			if ((1 & (u_long) w) != 0) {
+			if ((1 & (intptr_t) w) != 0) {
 				ADDBYTE;
 				ADVANCE(1);
 			}
-			if ((2 & (u_long) w) != 0) {
+			if ((2 & (intptr_t) w) != 0) {
 				ADDWORD;
 				ADVANCE(2);
 			}

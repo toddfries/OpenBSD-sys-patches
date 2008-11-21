@@ -1,4 +1,4 @@
-/*	$NetBSD: iwm_fd.c,v 1.35 2005/12/11 12:18:03 christos Exp $	*/
+/*	$NetBSD: iwm_fd.c,v 1.44 2008/11/12 12:36:03 ad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998 Hauke Fath.  All rights reserved.
@@ -11,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -34,9 +32,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iwm_fd.c,v 1.35 2005/12/11 12:18:03 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iwm_fd.c,v 1.44 2008/11/12 12:36:03 ad Exp $");
 
-#ifdef _LKM
+#ifdef _MODULE
 #define IWMCF_DRIVE 0
 #else
 #include "locators.h"
@@ -99,7 +97,7 @@ static int checkTrack(diskPosition_t *, int);
 static int initCylinderCache(fd_softc_t *);
 static void invalidateCylinderCache(fd_softc_t *);
 
-#ifdef _LKM
+#ifdef _MODULE
 static int probe_fd(void);
 int fd_mod_init(void);
 void fd_mod_free(void);
@@ -225,12 +223,12 @@ enum {
  * {device}_cd
  * references all found devices of a type.
  */
-#ifndef _LKM
+#ifndef _MODULE
 
 extern struct cfdriver iwm_cd;
 extern struct cfdriver fd_cd;
 
-#endif /* defined _LKM */
+#endif /* defined _MODULE */
 
 /* IWM floppy disk controller */
 CFATTACH_DECL(iwm, sizeof(iwm_softc_t),
@@ -276,7 +274,7 @@ int
 iwm_match(struct device *parent, struct cfdata *match, void *auxp)
 {
 	int matched;
-#ifdef _LKM
+#ifdef _MODULE
 	int iwmErr;
 #endif
 	extern u_long IOBase;		/* from mac68k/machdep.c */
@@ -298,7 +296,7 @@ iwm_match(struct device *parent, struct cfdata *match, void *auxp)
 			printf("iwm: IWMBase mapped to 0x%lx in VM.\n", 
 			    IWMBase);
 		}
-#ifdef _LKM
+#ifdef _MODULE
 		iwmErr = iwmInit();
 		if (TRACE_CONFIG)
 			printf("initIWM() says %d.\n", iwmErr);
@@ -461,7 +459,7 @@ fd_attach(struct device *parent, struct device *self, void *auxp)
 	iwm->drives++;
 
 	bufq_alloc(&fd->bufQueue, "disksort", BUFQ_SORT_CYLINDER);
-	callout_init(&fd->motor_ch);
+	callout_init(&fd->motor_ch, 0);
 
 	printf(" drive %d: ", fd->unit);
 
@@ -488,8 +486,7 @@ fd_attach(struct device *parent, struct device *self, void *auxp)
 		}
 		splx(spl);
 	}
-	fd->diskInfo.dk_name = fd->devInfo.dv_xname;
-	fd->diskInfo.dk_driver = &fd_dkDriver;
+	disk_init(&fd->diskInfo, fd->devInfo.dv_xname, &fd_dkDriver);
 	disk_attach(&fd->diskInfo);
 }
 
@@ -514,7 +511,7 @@ fd_print(void *auxp, const char *controller)
 }
 
 
-#ifdef _LKM
+#ifdef _MODULE
 
 static iwm_softc_t *iwm;
 
@@ -560,6 +557,7 @@ fd_mod_free(void)
 			 */
 			callout_stop(&iwm->fd[unit]->motor_ch);
 			disk_detach(&iwm->fd[unit]->diskInfo);
+			disk_destroy(&iwm->fd[unit]->diskInfo);
 			free(iwm->fd[unit], M_DEVBUF);
 			iwm->fd[unit] = NULL;
 		}
@@ -616,7 +614,7 @@ probe_fd(void)
 	return err;
 }
 
-#endif /* defined _LKM */
+#endif /* defined _MODULE */
 
 
 /**
@@ -642,8 +640,8 @@ fdopen(dev_t dev, int flags, int devType, struct lwp *l)
 	int partitionMask;
 	int fdType, fdUnit;
 	int ierr, err;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0); /* XXX */
 #endif
 	info = NULL;		/* XXX shut up egcs */
 	fd = NULL;		/* XXX shut up gcc3 */
@@ -776,8 +774,8 @@ fdclose(dev_t dev, int flags, int devType, struct lwp *l)
 {
 	fd_softc_t *fd;
 	int partitionMask, fdUnit, fdType;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0);
 #endif
 
 	if (TRACE_CLOSE)
@@ -816,12 +814,12 @@ fdclose(dev_t dev, int flags, int devType, struct lwp *l)
  * we do not support them.
  */
 int
-fdioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct lwp *l)
+fdioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 {
 	int result, fdUnit, fdType;
 	fd_softc_t *fd;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0);
 #endif
 
 	if (TRACE_IOCTL)
@@ -983,8 +981,8 @@ fdstrategy(struct buf *bp)
 	int sectSize, transferSize;
 	diskPosition_t physDiskLoc;
 	fd_softc_t *fd;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0);
 #endif
 
 	err = 0;
@@ -1090,10 +1088,8 @@ fdstrategy(struct buf *bp)
 		if (TRACE_STRAT)
 			printf(" fdstrategy() finished early, err = %d.\n",
 			    err);
-		if (err) {
+		if (err)
 			bp->b_error = err;
-			bp->b_flags |= B_ERROR;
-		}
 		bp->b_resid = bp->b_bcount;
 		biodone(bp);
 	}
@@ -1278,8 +1274,8 @@ fdstart_Read(fd_softc_t *fd)
 	int i;
 	diskPosition_t *pos;
 	sectorHdr_t *shdr;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0); /* XXX */
 #endif
 	
 	/* Initialize retry counters */
@@ -1394,8 +1390,8 @@ fdstart_Flush(fd_softc_t *fd)
 	int i, dcnt;
 	diskPosition_t *pos;
 	sectorHdr_t *shdr;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0); /* XXX */
 #endif
 	dcnt = 0;
 	pos = &fd->pos;
@@ -1524,8 +1520,8 @@ static int
 fdstart_IOErr(fd_softc_t *fd)
 {
 	int state;
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0); /* XXX */
 #endif
 	
 #ifdef DIAGNOSTIC
@@ -1592,8 +1588,6 @@ fdstart_Exit(fd_softc_t *fd)
 
 	bp->b_resid = fd->bytesLeft;
 	bp->b_error = (0 == fd->iwmErr) ? 0 : EIO;
-	if (fd->iwmErr)
-		bp->b_flags |= B_ERROR;
 
 	if (TRACE_STRAT) {
 		printf(" fdstart() finished job; fd->iwmErr = %d, b_error = %d",
@@ -1892,8 +1886,8 @@ seek(fd_softc_t *fd, int style)
 	diskPosition_t *loc;
 	sectorHdr_t hdr;
 	char action[32];
-#ifndef _LKM
-	iwm_softc_t *iwm = iwm_cd.cd_devs[0];
+#ifndef _MODULE
+	iwm_softc_t *iwm = device_lookup_private(&iwm_cd, 0); /* XXX */
 #endif
 
 	const char *stateDesc[] = {

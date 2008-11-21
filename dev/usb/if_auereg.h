@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_auereg.h,v 1.13 2007/06/10 10:15:35 mbalmer Exp $ */
-/*	$NetBSD: if_auereg.h,v 1.16 2001/10/10 02:14:17 augustss Exp $	*/
+/*	$NetBSD: if_auereg.h,v 1.21 2008/05/22 01:21:18 dyoung Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
@@ -225,14 +224,22 @@ struct aue_cdata {
 };
 
 struct aue_softc {
-	struct device		aue_dev;
+	USBBASEDEVICE		aue_dev;
 
-	struct arpcom		arpcom;
+	struct ethercom		aue_ec;
 	struct mii_data		aue_mii;
-#define GET_IFP(sc) (&(sc)->arpcom.ac_if)
+#if NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
+	struct lwp		*aue_thread;
+	int			aue_closing;
+	kcondvar_t		aue_domc;
+	kcondvar_t		aue_closemc;
+	kmutex_t		aue_mcmtx;
+#define GET_IFP(sc) (&(sc)->aue_ec.ec_if)
 #define GET_MII(sc) (&(sc)->aue_mii)
 
-	struct timeout		aue_stat_ch;
+	usb_callout_t		aue_stat_ch;
 
 	usbd_device_handle	aue_udev;
 	usbd_interface_handle	aue_iface;
@@ -256,12 +263,11 @@ struct aue_softc {
 	struct usb_task		aue_tick_task;
 	struct usb_task		aue_stop_task;
 
-	struct rwlock		aue_mii_lock;
-
-	void			*sc_sdhook;
+	kmutex_t		aue_mii_lock;
 };
 
 #define AUE_TIMEOUT		1000
+#define ETHER_ALIGN		2
 #define AUE_BUFSZ		1536
 #define AUE_MIN_FRAMELEN	60
 #define AUE_TX_TIMEOUT		10000 /* ms */

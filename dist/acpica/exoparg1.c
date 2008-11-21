@@ -2,7 +2,7 @@
 /******************************************************************************
  *
  * Module Name: exoparg1 - AML execution - opcodes with 1 argument
- *              xRevision: 1.176 $
+ *              $Revision: 1.4 $
  *
  *****************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,9 +115,6 @@
  *
  *****************************************************************************/
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: exoparg1.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #define __EXOPARG1_C__
 
 #include "acpi.h"
@@ -174,7 +171,7 @@ AcpiExOpcode_0A_0T_1R (
     ACPI_OPERAND_OBJECT     *ReturnDesc = NULL;
 
 
-    ACPI_FUNCTION_TRACE_STR ("ExOpcode_0A_0T_1R",
+    ACPI_FUNCTION_TRACE_STR (ExOpcode_0A_0T_1R,
         AcpiPsGetOpcodeName (WalkState->Opcode));
 
 
@@ -192,9 +189,7 @@ AcpiExOpcode_0A_0T_1R (
             Status = AE_NO_MEMORY;
             goto Cleanup;
         }
-#if ACPI_MACHINE_WIDTH != 16
         ReturnDesc->Integer.Value = AcpiOsGetTimer ();
-#endif
         break;
 
     default:                /*  Unknown opcode  */
@@ -212,6 +207,7 @@ Cleanup:
     if ((ACPI_FAILURE (Status)) || WalkState->ResultObj)
     {
         AcpiUtRemoveReference (ReturnDesc);
+        WalkState->ResultObj = NULL;
     }
     else
     {
@@ -245,7 +241,7 @@ AcpiExOpcode_1A_0T_0R (
     ACPI_STATUS             Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE_STR ("ExOpcode_1A_0T_0R",
+    ACPI_FUNCTION_TRACE_STR (ExOpcode_1A_0T_0R,
         AcpiPsGetOpcodeName (WalkState->Opcode));
 
 
@@ -322,7 +318,7 @@ AcpiExOpcode_1A_1T_0R (
     ACPI_OPERAND_OBJECT     **Operand = &WalkState->Operands[0];
 
 
-    ACPI_FUNCTION_TRACE_STR ("ExOpcode_1A_1T_0R",
+    ACPI_FUNCTION_TRACE_STR (ExOpcode_1A_1T_0R,
         AcpiPsGetOpcodeName (WalkState->Opcode));
 
 
@@ -377,7 +373,7 @@ AcpiExOpcode_1A_1T_1R (
     ACPI_INTEGER            Digit;
 
 
-    ACPI_FUNCTION_TRACE_STR ("ExOpcode_1A_1T_1R",
+    ACPI_FUNCTION_TRACE_STR (ExOpcode_1A_1T_1R,
         AcpiPsGetOpcodeName (WalkState->Opcode));
 
 
@@ -443,8 +439,8 @@ AcpiExOpcode_1A_1T_1R (
 
             /* Since the bit position is one-based, subtract from 33 (65) */
 
-            ReturnDesc->Integer.Value = Temp32 == 0 ? 0 :
-                                        (ACPI_INTEGER_BIT_SIZE + 1) - Temp32;
+            ReturnDesc->Integer.Value =
+                Temp32 == 0 ? 0 : (ACPI_INTEGER_BIT_SIZE + 1) - Temp32;
             break;
 
 
@@ -481,8 +477,8 @@ AcpiExOpcode_1A_1T_1R (
 
                 /* Sum the digit into the result with the current power of 10 */
 
-                ReturnDesc->Integer.Value += (((ACPI_INTEGER) Temp32) *
-                                              PowerOfTen);
+                ReturnDesc->Integer.Value +=
+                    (((ACPI_INTEGER) Temp32) * PowerOfTen);
 
                 /* Shift to next BCD digit */
 
@@ -510,8 +506,8 @@ AcpiExOpcode_1A_1T_1R (
                  * Insert the BCD digit that resides in the
                  * remainder from above
                  */
-                ReturnDesc->Integer.Value |= (((ACPI_INTEGER) Temp32) <<
-                                                ACPI_MUL_4 (i));
+                ReturnDesc->Integer.Value |=
+                    (((ACPI_INTEGER) Temp32) << ACPI_MUL_4 (i));
             }
 
             /* Overflow if there is any data left in Digit */
@@ -685,16 +681,18 @@ AcpiExOpcode_1A_1T_1R (
 
 Cleanup:
 
-    if (!WalkState->ResultObj)
-    {
-        WalkState->ResultObj = ReturnDesc;
-    }
-
     /* Delete return object on error */
 
     if (ACPI_FAILURE (Status))
     {
         AcpiUtRemoveReference (ReturnDesc);
+    }
+
+    /* Save return object on success */
+
+    else if (!WalkState->ResultObj)
+    {
+        WalkState->ResultObj = ReturnDesc;
     }
 
     return_ACPI_STATUS (Status);
@@ -725,7 +723,7 @@ AcpiExOpcode_1A_0T_1R (
     ACPI_INTEGER            Value;
 
 
-    ACPI_FUNCTION_TRACE_STR ("ExOpcode_1A_0T_1R",
+    ACPI_FUNCTION_TRACE_STR (ExOpcode_1A_0T_1R,
         AcpiPsGetOpcodeName (WalkState->Opcode));
 
 
@@ -837,6 +835,7 @@ AcpiExOpcode_1A_0T_1R (
         {
             goto Cleanup;
         }
+
         /* Allocate a descriptor to hold the type. */
 
         ReturnDesc = AcpiUtCreateInternalObject (ACPI_TYPE_INTEGER);
@@ -881,23 +880,36 @@ AcpiExOpcode_1A_0T_1R (
             Value = AcpiGbl_IntegerByteWidth;
             break;
 
-        case ACPI_TYPE_BUFFER:
-            Value = TempDesc->Buffer.Length;
-            break;
-
         case ACPI_TYPE_STRING:
             Value = TempDesc->String.Length;
             break;
 
+        case ACPI_TYPE_BUFFER:
+
+            /* Buffer arguments may not be evaluated at this point */
+
+            Status = AcpiDsGetBufferArguments (TempDesc);
+            Value = TempDesc->Buffer.Length;
+            break;
+
         case ACPI_TYPE_PACKAGE:
+
+            /* Package arguments may not be evaluated at this point */
+
+            Status = AcpiDsGetPackageArguments (TempDesc);
             Value = TempDesc->Package.Count;
             break;
 
         default:
             ACPI_ERROR ((AE_INFO,
-                "Operand is not Buf/Int/Str/Pkg - found type %s",
+                "Operand must be Buffer/Integer/String/Package - found type %s",
                 AcpiUtGetTypeName (Type)));
             Status = AE_AML_OPERAND_TYPE;
+            goto Cleanup;
+        }
+
+        if (ACPI_FAILURE (Status))
+        {
             goto Cleanup;
         }
 
@@ -1018,8 +1030,8 @@ AcpiExOpcode_1A_0T_1R (
                  * 2) Dereference the node to an actual object. Could be a
                  *    Field, so we need to resolve the node to a value.
                  */
-                Status = AcpiNsGetNodeByPath (Operand[0]->String.Pointer,
-                            WalkState->ScopeInfo->Scope.Node,
+                Status = AcpiNsGetNode (WalkState->ScopeInfo->Scope.Node,
+                            Operand[0]->String.Pointer,
                             ACPI_NS_SEARCH_PARENT,
                             ACPI_CAST_INDIRECT_PTR (
                                 ACPI_NAMESPACE_NODE, &ReturnDesc));
@@ -1106,7 +1118,6 @@ AcpiExOpcode_1A_0T_1R (
                     {
                         AcpiUtAddReference (ReturnDesc);
                     }
-
                     break;
 
 
@@ -1128,7 +1139,6 @@ AcpiExOpcode_1A_0T_1R (
                 if (ACPI_GET_DESCRIPTOR_TYPE (ReturnDesc) ==
                         ACPI_DESC_TYPE_NAMED)
                 {
-
                     ReturnDesc = AcpiNsGetAttachedObject (
                                     (ACPI_NAMESPACE_NODE *) ReturnDesc);
                 }
@@ -1141,7 +1151,7 @@ AcpiExOpcode_1A_0T_1R (
 
             default:
                 ACPI_ERROR ((AE_INFO,
-                    "Unknown opcode in ref(%p) - %X",
+                    "Unknown opcode in reference(%p) - %X",
                     Operand[0], Operand[0]->Reference.Opcode));
 
                 Status = AE_TYPE;
@@ -1169,7 +1179,13 @@ Cleanup:
         AcpiUtRemoveReference (ReturnDesc);
     }
 
-    WalkState->ResultObj = ReturnDesc;
+    /* Save return object on success */
+
+    else
+    {
+        WalkState->ResultObj = ReturnDesc;
+    }
+
     return_ACPI_STATUS (Status);
 }
 

@@ -1,11 +1,10 @@
-/*	$OpenBSD: ahc_eisa.c,v 1.18 2007/04/10 17:47:55 miod Exp $	*/
-/*	$NetBSD: ahc_eisa.c,v 1.10 1996/10/21 22:30:58 thorpej Exp $	*/
+/*	$NetBSD: ahc_eisa.c,v 1.36 2008/04/06 08:54:43 cegger Exp $	*/
 
 /*
  * Product specific probe and attach routines for:
- * 	27/284X and aic7770 motherboard SCSI controllers
+ * 	274X and aic7770 motherboard SCSI controllers
  *
- * Copyright (c) 1994, 1995, 1996 Justin T. Gibbs.
+ * Copyright (c) 1994, 1995, 1996, 1997, 1998 Justin T. Gibbs.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -14,10 +13,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice immediately at the beginning of the file, without modification,
  *    this list of conditions, and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
+ * 2. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
@@ -32,83 +28,49 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: ahc_eisa.c,v 1.18 2007/04/10 17:47:55 miod Exp $
+ * $FreeBSD: src/sys/dev/aic7xxx/ahc_eisa.c,v 1.15 2000/01/29 14:22:19 peter Exp $
  */
 
-#include "eisa.h"
-#if NEISA > 0
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ahc_eisa.c,v 1.36 2008/04/06 08:54:43 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/reboot.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
+
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include <dev/eisa/eisareg.h>
 #include <dev/eisa/eisavar.h>
 #include <dev/eisa/eisadevs.h>
-#include <dev/ic/aic7xxx_openbsd.h>
+
+#include <dev/ic/aic7xxx_osm.h>
 #include <dev/ic/aic7xxx_inline.h>
+#include <dev/ic/aic77xxreg.h>
+#include <dev/ic/aic77xxvar.h>
 
-#define AHC_EISA_SLOT_OFFSET	0xc00
-#define AHC_EISA_IOSIZE		0x100
-
-int   ahc_eisa_irq(bus_space_tag_t, bus_space_handle_t);
-int   ahc_eisa_match(struct device *, void *, void *);
-void  ahc_eisa_attach(struct device *, struct device *, void *);
+static int	ahc_eisa_match(struct device *, struct cfdata *, void *);
+static void	ahc_eisa_attach(struct device *, struct device *, void *);
 
 
-struct cfattach ahc_eisa_ca = {
-	sizeof(struct ahc_softc), ahc_eisa_match, ahc_eisa_attach
-};
-
-/*
- * Return irq setting of the board, otherwise -1.
- */
-int
-ahc_eisa_irq(iot, ioh)
-bus_space_tag_t iot;
-bus_space_handle_t ioh;
-{
-	int irq;
-	u_char intdef;
-	u_char hcntrl;
-	
-	/* Pause the card preserving the IRQ type */
-	hcntrl = bus_space_read_1(iot, ioh, HCNTRL) & IRQMS;
-	bus_space_write_1(iot, ioh, HCNTRL, hcntrl | PAUSE);
-	
-	intdef = bus_space_read_1(iot, ioh, INTDEF);
-	switch (irq = (intdef & VECTOR)) {
-	case 9:
-	case 10:
-	case 11:
-	case 12:
-	case 14:
-	case 15:
-		break;
-	default:
-		printf("ahc_eisa_irq: illegal irq setting %d\n", intdef);
-		return -1;
-	}
-
-	/* Note that we are going and return (to probe) */
-	return irq;
-}
+CFATTACH_DECL(ahc_eisa, sizeof(struct ahc_softc),
+    ahc_eisa_match, ahc_eisa_attach, NULL, NULL);
 
 /*
  * Check the slots looking for a board we recognise
- * If we find one, note its address (slot) and call
+ * If we find one, note it's address (slot) and call
  * the actual probe routine to check it out.
  */
-int
-ahc_eisa_match(parent, match, aux)
-struct device *parent;
-void *match, *aux;
+static int
+ahc_eisa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct eisa_attach_args *ea = aux;
 	bus_space_tag_t iot = ea->ea_iot;
@@ -117,98 +79,108 @@ void *match, *aux;
 
 	/* must match one of our known ID strings */
 	if (strcmp(ea->ea_idstring, "ADP7770") &&
-		 strcmp(ea->ea_idstring, "ADP7771")
-#if 0
-		 && strcmp(ea->ea_idstring, "ADP7756")	/* not EISA, but VL */
-		 && strcmp(ea->ea_idstring, "ADP7757")	/* not EISA, but VL */
-#endif
-		)
+	    strcmp(ea->ea_idstring, "ADP7771"))
 		return (0);
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
-			  AHC_EISA_SLOT_OFFSET, AHC_EISA_IOSIZE, 0, &ioh))
+	    AHC_EISA_SLOT_OFFSET, AHC_EISA_IOSIZE, 0, &ioh))
 		return (0);
 
-	irq = ahc_eisa_irq(iot, ioh);
+	irq = ahc_aic77xx_irq(iot, ioh);
 
 	bus_space_unmap(iot, ioh, AHC_EISA_IOSIZE);
 
 	return (irq >= 0);
 }
 
-void
-ahc_eisa_attach(parent, self, aux)
-struct device *parent, *self;
-void *aux;
+static void
+ahc_eisa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ahc_softc *ahc = (void *)self;
+	struct ahc_softc *ahc = device_private(self);
 	struct eisa_attach_args *ea = aux;
-	bus_space_tag_t iot = ea->ea_iot;
-	bus_space_handle_t ioh;
-	int irq;
 	eisa_chipset_tag_t ec = ea->ea_ec;
 	eisa_intr_handle_t ih;
-	const char *model, *intrstr;
+	bus_space_tag_t iot = ea->ea_iot;
+	bus_space_handle_t ioh;
+	int irq, intrtype;
+	const char *intrstr, *intrtypestr;
 	u_int biosctrl;
 	u_int scsiconf;
 	u_int scsiconf1;
-	u_int intdef;
-	
-	ahc_set_name(ahc, ahc->sc_dev.dv_xname);
-	ahc_set_unit(ahc, ahc->sc_dev.dv_unit);
-	
-	/* set dma tags */
-	ahc->parent_dmat = ea->ea_dmat;
+	u_char intdef;
+#ifdef AHC_DEBUG
+	int i;
+#endif
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
-			  AHC_EISA_SLOT_OFFSET, AHC_EISA_IOSIZE, 0, &ioh))
-		panic("ahc_eisa_attach: could not map I/O addresses");
-	if ((irq = ahc_eisa_irq(iot, ioh)) < 0)
-		panic("ahc_eisa_attach: ahc_eisa_irq failed!");
+	    AHC_EISA_SLOT_OFFSET, AHC_EISA_IOSIZE, 0, &ioh)) {
+		aprint_error_dev(&ahc->sc_dev, "could not map I/O addresses");
+		return;
+	}
+	if ((irq = ahc_aic77xx_irq(iot, ioh)) < 0) {
+		aprint_error_dev(&ahc->sc_dev, "ahc_aic77xx_irq failed!");
+		goto free_io;
+	}
 
 	if (strcmp(ea->ea_idstring, "ADP7770") == 0) {
-		model = EISA_PRODUCT_ADP7770;
+		printf(": %s\n", EISA_PRODUCT_ADP7770);
 	} else if (strcmp(ea->ea_idstring, "ADP7771") == 0) {
-		model = EISA_PRODUCT_ADP7771;
+		printf(": %s\n", EISA_PRODUCT_ADP7771);
 	} else {
-		panic("ahc_eisa_attach: Unknown device type %s",
-				ea->ea_idstring);
+		printf(": Unknown device type %s", ea->ea_idstring);
+		goto free_io;
 	}
-	printf(": %s\n", model);
-	
-	ahc->channel = 'A';
+
+	ahc_set_name(ahc, device_xname(&ahc->sc_dev));
+	ahc->parent_dmat = ea->ea_dmat;
 	ahc->chip = AHC_AIC7770|AHC_EISA;
 	ahc->features = AHC_AIC7770_FE;
-	ahc->bugs |= AHC_TMODE_WIDEODD_BUG;
-	ahc->flags |= AHC_PAGESCBS;
-	
-	if (ahc_reset(ahc, /*reinit*/FALSE) != 0)
-		return;
-	
-	/* See if we are edge triggered */
-	intdef = ahc_inb(ahc, INTDEF);
-	if ((intdef & EDGE_TRIG) != 0)
-		ahc->flags |= AHC_EDGE_INTERRUPT;
-	
+	ahc->flags = AHC_PAGESCBS;
+	ahc->bugs = AHC_TMODE_WIDEODD_BUG;
+	ahc->tag = iot;
+	ahc->bsh = ioh;
+	ahc->channel = 'A';
+
+	if (ahc_softc_init(ahc) != 0)
+		goto free_io;
+
+	ahc_intr_enable(ahc, FALSE);
+
+	if (ahc_reset(ahc) != 0)
+		goto free_io;
+
 	if (eisa_intr_map(ec, irq, &ih)) {
-		printf("%s: couldn't map interrupt (%d)\n",
-		       ahc->sc_dev.dv_xname, irq);
-		return;
+		aprint_error_dev(&ahc->sc_dev, "couldn't map interrupt (%d)\n",
+		    irq);
+		goto free_io;
 	}
 
-	/*
-	 * Tell the user what type of interrupts we're using.
-	 * useful for debugging irq problems
-	 */
-	if (bootverbose) {
-		printf("%s: Using %s Interrupts\n",
-		       ahc_name(ahc),
-		       ahc->pause & IRQMS ?
-		       "Level Sensitive" : "Edge Triggered");
+	intdef = bus_space_read_1(iot, ioh, INTDEF);
+
+	if (intdef & EDGE_TRIG) {
+		intrtype = IST_EDGE;
+		intrtypestr = "edge triggered";
+	} else {
+		intrtype = IST_LEVEL;
+		intrtypestr = "level sensitive";
 	}
+	intrstr = eisa_intr_string(ec, ih);
+	ahc->ih = eisa_intr_establish(ec, ih,
+	    intrtype, IPL_BIO, ahc_intr, ahc);
+	if (ahc->ih == NULL) {
+		aprint_error_dev(&ahc->sc_dev, "couldn't establish %s interrupt",
+		    intrtypestr);
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
+		goto free_io;
+	}
+	if (intrstr != NULL)
+		printf("%s: %s interrupting at %s\n", device_xname(&ahc->sc_dev),
+		       intrtypestr, intrstr);
 
 	/*
-	 * Now that we know we own the resources we need, do the 
+	 * Now that we know we own the resources we need, do the
 	 * card initialization.
 	 *
 	 * First, the aic7770 card specific setup.
@@ -216,7 +188,22 @@ void *aux;
 	biosctrl = ahc_inb(ahc, HA_274_BIOSCTRL);
 	scsiconf = ahc_inb(ahc, SCSICONF);
 	scsiconf1 = ahc_inb(ahc, SCSICONF + 1);
-	
+
+#ifdef AHC_DEBUG
+	for (i = TARG_SCSIRATE; i <= HA_274_BIOSCTRL; i+=8) {
+		printf("0x%x, 0x%x, 0x%x, 0x%x, "
+		       "0x%x, 0x%x, 0x%x, 0x%x\n",
+		       ahc_inb(ahc, i),
+		       ahc_inb(ahc, i+1),
+		       ahc_inb(ahc, i+2),
+		       ahc_inb(ahc, i+3),
+		       ahc_inb(ahc, i+4),
+		       ahc_inb(ahc, i+5),
+		       ahc_inb(ahc, i+6),
+		       ahc_inb(ahc, i+7));
+	}
+#endif
+
 	/* Get the primary channel information */
 	if ((biosctrl & CHANNEL_B_PRIMARY) != 0)
 		ahc->flags |= AHC_PRIMARY_CHANNEL;
@@ -235,96 +222,15 @@ void *aux;
 		if (scsiconf1 & TERM_ENB)
 			ahc->flags |= AHC_TERM_ENB_B;
 	}
-	/*
-	 * We have no way to tell, so assume extended
-	 * translation is enabled.
-	 */
-	
-	ahc->flags |= AHC_EXTENDED_TRANS_A|AHC_EXTENDED_TRANS_B;
-	
-	/*      
-	 * See if we have a Rev E or higher aic7770. Anything below a
-	 * Rev E will have a R/O autoflush disable configuration bit.
-	 * It's still not clear exactly what is different about the Rev E.
-	 * We think it allows 8 bit entries in the QOUTFIFO to support
-	 * "paging" SCBs so you can have more than 4 commands active at
-	 * once.
-	 */
-	{
-		char *id_string;
-		u_char sblkctl;
-		u_char sblkctl_orig;
+	if ((ahc_inb(ahc, HA_274_BIOSGLOBAL) & HA_274_EXTENDED_TRANS))
+		ahc->flags |= AHC_EXTENDED_TRANS_A|AHC_EXTENDED_TRANS_B;
 
-		sblkctl_orig = ahc_inb(ahc, SBLKCTL);
-		sblkctl = sblkctl_orig ^ AUTOFLUSHDIS;
-		ahc_outb(ahc, SBLKCTL, sblkctl);
-		sblkctl = ahc_inb(ahc, SBLKCTL);
-		if (sblkctl != sblkctl_orig) {
-			id_string = "aic7770 >= Rev E, ";
-			/*
-			 * Ensure autoflush is enabled
-			 */
-			sblkctl &= ~AUTOFLUSHDIS;
-			ahc_outb(ahc, SBLKCTL, sblkctl);
+	/* Attach sub-devices */
+	if (ahc_aic77xx_attach(ahc) == 0)
+		return; /* succeed */
 
-			/* Allow paging on this adapter */
-			ahc->flags |= AHC_PAGESCBS;
-		} else
-			id_string = "aic7770 <= Rev C, ";
-
-		printf("%s: %s", ahc_name(ahc), id_string);
-	}
-
-	/* Setup the FIFO threshold and the bus off time */
-	{
-		u_char hostconf = ahc_inb(ahc, HOSTCONF);
-		ahc_outb(ahc, BUSSPD, hostconf & DFTHRSH);
-		ahc_outb(ahc, BUSTIME, (hostconf << 2) & BOFF);
-	}
-
-	/*
-	 * Generic aic7xxx initialization.
-	 */
-	if (ahc_init(ahc)) {
-		ahc_free(ahc);
-		return;
-	}
- 
-	/*
-	 * Link this softc in with all other ahc instances.
-	 */
-	ahc_softc_insert(ahc);
-	
-	/*
-	 * Enable the board's BUS drivers
-	 */
-	ahc_outb(ahc, BCTL, ENABLE);
-
-	intrstr = eisa_intr_string(ec, ih);
-	/*
-	 * The IRQMS bit enables level sensitive interrupts only allow
-	 * IRQ sharing if its set.
-	 */
-	ahc->ih = eisa_intr_establish(ec, ih,
-	    ahc->pause & IRQMS ? IST_LEVEL : IST_EDGE, IPL_BIO,
-	    ahc_platform_intr, ahc, ahc->sc_dev.dv_xname);
-	if (ahc->ih == NULL) {
-		printf("%s: couldn't establish interrupt",
-		       ahc->sc_dev.dv_xname);
-		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		ahc_free(ahc);
-		return;
-	}
-	if (intrstr != NULL)
-		printf("%s: interrupting at %s\n", ahc->sc_dev.dv_xname,
-		       intrstr);
-	
-	ahc_intr_enable(ahc, TRUE);
-
-	/* Attach sub-devices - always succeeds */
-	ahc_attach(ahc);
-
+	/* failed */
+	eisa_intr_disestablish(ec, ahc->ih);
+free_io:
+	bus_space_unmap(iot, ioh, AHC_EISA_IOSIZE);
 }
-#endif /* NEISA > 0 */

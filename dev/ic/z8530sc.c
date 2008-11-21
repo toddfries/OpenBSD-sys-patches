@@ -1,8 +1,6 @@
-/*	$OpenBSD: z8530sc.c,v 1.6 2003/06/02 23:28:02 millert Exp $ */
-/*	$NetBSD: z8530sc.c,v 1.4 1996/05/17 19:30:34 gwr Exp $	*/
+/*	$NetBSD: z8530sc.c,v 1.28 2008/03/29 19:15:36 tsutsui Exp $	*/
 
 /*
- * Copyright (c) 1994 Gordon W. Ross
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -43,11 +41,57 @@
  */
 
 /*
+ * Copyright (c) 1994 Gordon W. Ross
+ *
+ * This software was developed by the Computer Systems Engineering group
+ * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
+ * contributed to Berkeley.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Lawrence Berkeley Laboratory.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)zs.c	8.1 (Berkeley) 7/19/93
+ */
+
+/*
  * Zilog Z8530 Dual UART driver (common part)
  *
  * This file contains the machine-independent parts of the
  * driver common to tty and keyboard/mouse sub-drivers.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: z8530sc.c,v 1.28 2008/03/29 19:15:36 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,17 +108,10 @@
 #include <dev/ic/z8530reg.h>
 #include <machine/z8530var.h>
 
-static void zsnull_intr(struct zs_chanstate *);
-static void zsnull_softint(struct zs_chanstate *);
-
 void
-zs_break(cs, set)
-	struct zs_chanstate *cs;
-	int set;
+zs_break(struct zs_chanstate *cs, int set)
 {
-	int s;
 
-	s = splzs();
 	if (set) {
 		cs->cs_preg[5] |= ZSWR5_BREAK;
 		cs->cs_creg[5] |= ZSWR5_BREAK;
@@ -83,34 +120,23 @@ zs_break(cs, set)
 		cs->cs_creg[5] &= ~ZSWR5_BREAK;
 	}
 	zs_write_reg(cs, 5, cs->cs_creg[5]);
-	splx(s);
 }
 
-
-/*
- * Compute the current baud rate given a ZSCC channel.
- */
-int
-zs_getspeed(cs)
-	struct zs_chanstate *cs;
-{
-	int tconst;
-
-	tconst = zs_read_reg(cs, 12);
-	tconst |= zs_read_reg(cs, 13) << 8;
-	return (TCONST_TO_BPS(cs->cs_brg_clk, tconst));
-}
 
 /*
  * drain on-chip fifo
  */
 void
-zs_iflush(cs)
-	struct zs_chanstate *cs;
+zs_iflush(struct zs_chanstate *cs)
 {
-	u_char c, rr0, rr1;
+	uint8_t c, rr0, rr1;
+	int i;
 
-	for (;;) {
+	/*
+	 * Count how many times we loop. Some systems, such as some
+	 * Apple PowerBooks, claim to have SCC's which they really don't.
+	 */
+	for (i = 0; i < 32; i++) {
 		/* Is there input available? */
 		rr0 = zs_read_csr(cs);
 		if ((rr0 & ZSRR0_RX_READY) == 0)
@@ -129,7 +155,7 @@ zs_iflush(cs)
 		}
 	}
 }
-	
+
 
 /*
  * Write the given register set to the given zs channel in the proper order.
@@ -138,16 +164,11 @@ zs_iflush(cs)
  * Call this with interrupts disabled.
  */
 void
-zs_loadchannelregs(cs)
-	struct zs_chanstate *cs;
+zs_loadchannelregs(struct zs_chanstate *cs)
 {
-	u_char *reg;
+	uint8_t *reg, v;
 
-	/* Copy "pending" regs to "current" */
-	bcopy((caddr_t)cs->cs_preg, (caddr_t)cs->cs_creg, 16);
-	reg = cs->cs_creg;	/* current regs */
-
-	zs_write_csr(cs, ZSM_RESET_ERR);	/* XXX: reset error condition */
+	zs_write_csr(cs, ZSM_RESET_ERR); /* XXX: reset error condition */
 
 #if 1
 	/*
@@ -156,6 +177,22 @@ zs_loadchannelregs(cs)
 	 */
 	zs_iflush(cs);	/* XXX */
 #endif
+
+	if (cs->cs_ctl_chan != NULL)
+		v = ((cs->cs_ctl_chan->cs_creg[5] & (ZSWR5_RTS | ZSWR5_DTR)) !=
+		    (cs->cs_ctl_chan->cs_preg[5] & (ZSWR5_RTS | ZSWR5_DTR)));
+	else
+		v = 0;
+
+	if (memcmp((void *)cs->cs_preg, (void *)cs->cs_creg, 16) == 0 && !v)
+		return;	/* only change if values are different */
+
+	/* Copy "pending" regs to "current" */
+	memcpy((void *)cs->cs_creg, (void *)cs->cs_preg, 16);
+	reg = cs->cs_creg;	/* current regs */
+
+	/* disable interrupts */
+	zs_write_reg(cs, 1, reg[1] & ~ZSWR1_IMASK);
 
 	/* baud clock divisor, stop bits, parity */
 	zs_write_reg(cs, 4, reg[4]);
@@ -167,8 +204,9 @@ zs_loadchannelregs(cs)
 	zs_write_reg(cs, 3, reg[3] & ~ZSWR3_RX_ENABLE);
 	zs_write_reg(cs, 5, reg[5] & ~ZSWR5_TX_ENABLE);
 
-	/* interrupt enables: TX, TX, STATUS */
-	zs_write_reg(cs, 1, reg[1]);
+	/* synchronous mode stuff */
+	zs_write_reg(cs, 6, reg[6]);
+	zs_write_reg(cs, 7, reg[7]);
 
 #if 0
 	/*
@@ -184,6 +222,14 @@ zs_loadchannelregs(cs)
 	zs_write_reg(cs, 9, reg[9]);
 #endif
 
+	/* Shut down the BRG */
+	zs_write_reg(cs, 14, reg[14] & ~ZSWR14_BAUD_ENA);
+
+#ifdef	ZS_MD_SETCLK
+	/* Let the MD code setup any external clock. */
+	ZS_MD_SETCLK(cs);
+#endif	/* ZS_MD_SETCLK */
+
 	/* clock mode control */
 	zs_write_reg(cs, 11, reg[11]);
 
@@ -197,11 +243,36 @@ zs_loadchannelregs(cs)
 	/* which lines cause status interrupts */
 	zs_write_reg(cs, 15, reg[15]);
 
+	/*
+	 * Zilog docs recommend resetting external status twice at this
+	 * point. Mainly as the status bits are latched, and the first
+	 * interrupt clear might unlatch them to new values, generating
+	 * a second interrupt request.
+	 */
+	zs_write_csr(cs, ZSM_RESET_STINT);
+	zs_write_csr(cs, ZSM_RESET_STINT);
+
 	/* char size, enable (RX/TX)*/
 	zs_write_reg(cs, 3, reg[3]);
 	zs_write_reg(cs, 5, reg[5]);
+
+	/* Write the status bits on the alternate channel also. */
+	if (cs->cs_ctl_chan != NULL) {
+		v = cs->cs_ctl_chan->cs_preg[5];
+		cs->cs_ctl_chan->cs_creg[5] = v;
+		zs_write_reg(cs->cs_ctl_chan, 5, v);
+	}
+
+	/* interrupt enables: RX, TX, STATUS */
+	zs_write_reg(cs, 1, reg[1]);
 }
 
+void
+zs_lock_init(struct zs_chanstate *cs)
+{
+
+	mutex_init(&cs->cs_lock, MUTEX_NODEBUG, IPL_ZS);
+}
 
 /*
  * ZS hardware interrupt.  Scan all ZS channels.  NB: we know here that
@@ -215,56 +286,58 @@ zs_loadchannelregs(cs)
  * the order.
  */
 int
-zsc_intr_hard(arg)
-	void *arg;
+zsc_intr_hard(void *arg)
 {
-	register struct zsc_softc *zsc = arg;
-	register struct zs_chanstate *cs_a;
-	register struct zs_chanstate *cs_b;
-	register int rval;
-	register u_char rr3;
+	struct zsc_softc *zsc = arg;
+	struct zs_chanstate *cs;
+	uint8_t rr3;
 
-	cs_a = &zsc->zsc_cs[0];
-	cs_b = &zsc->zsc_cs[1];
-	rval = 0;
+	/* First look at channel A. */
+	cs = zsc->zsc_cs[0];
 
+	/* Lock both channels */
+	mutex_spin_enter(&cs->cs_lock);
+	mutex_spin_enter(&zsc->zsc_cs[1]->cs_lock);
 	/* Note: only channel A has an RR3 */
-	rr3 = zs_read_reg(cs_a, 3);
+	rr3 = zs_read_reg(cs, 3);
 
-	/* Handle receive interrupts first. */
-	if (rr3 & ZSRR3_IP_A_RX)
-		(*cs_a->cs_ops->zsop_rxint)(cs_a);
-	if (rr3 & ZSRR3_IP_B_RX)
-		(*cs_b->cs_ops->zsop_rxint)(cs_b);
-
-	/* Handle status interrupts (i.e. flow control). */
-	if (rr3 & ZSRR3_IP_A_STAT)
-		(*cs_a->cs_ops->zsop_stint)(cs_a);
-	if (rr3 & ZSRR3_IP_B_STAT)
-		(*cs_b->cs_ops->zsop_stint)(cs_b);
-
-	/* Handle transmit done interrupts. */
-	if (rr3 & ZSRR3_IP_A_TX)
-		(*cs_a->cs_ops->zsop_txint)(cs_a);
-	if (rr3 & ZSRR3_IP_B_TX)
-		(*cs_b->cs_ops->zsop_txint)(cs_b);
-
-	/* Clear interrupt. */
+	/*
+	 * Clear interrupt first to avoid a race condition.
+	 * If a new interrupt condition happens while we are
+	 * servicing this one, we will get another interrupt
+	 * shortly.  We can NOT just sit here in a loop, or
+	 * we will cause horrible latency for other devices
+	 * on this interrupt level (i.e. sun3x floppy disk).
+	 */
 	if (rr3 & (ZSRR3_IP_A_RX | ZSRR3_IP_A_TX | ZSRR3_IP_A_STAT)) {
-		zs_write_csr(cs_a, ZSWR0_CLR_INTR);
-		rval |= 1;
+		zs_write_csr(cs, ZSWR0_CLR_INTR);
+		if (rr3 & ZSRR3_IP_A_RX)
+			(*cs->cs_ops->zsop_rxint)(cs);
+		if (rr3 & ZSRR3_IP_A_STAT)
+			(*cs->cs_ops->zsop_stint)(cs, 0);
+		if (rr3 & ZSRR3_IP_A_TX)
+			(*cs->cs_ops->zsop_txint)(cs);
 	}
+
+	/* Done with channel A */
+	mutex_spin_exit(&cs->cs_lock);
+
+	/* Now look at channel B. */
+	cs = zsc->zsc_cs[1];
 	if (rr3 & (ZSRR3_IP_B_RX | ZSRR3_IP_B_TX | ZSRR3_IP_B_STAT)) {
-		zs_write_csr(cs_b, ZSWR0_CLR_INTR);
-		rval |= 2;
+		zs_write_csr(cs, ZSWR0_CLR_INTR);
+		if (rr3 & ZSRR3_IP_B_RX)
+			(*cs->cs_ops->zsop_rxint)(cs);
+		if (rr3 & ZSRR3_IP_B_STAT)
+			(*cs->cs_ops->zsop_stint)(cs, 0);
+		if (rr3 & ZSRR3_IP_B_TX)
+			(*cs->cs_ops->zsop_txint)(cs);
 	}
 
-	if ((cs_a->cs_softreq) || (cs_b->cs_softreq)) {
-		/* This is a machine-dependent function (or macro). */
-		zsc_req_softint(zsc);
-	}
+	mutex_spin_exit(&cs->cs_lock);
 
-	return (rval);
+	/* Note: caller will check cs_x->cs_softreq and DTRT. */
+	return (rr3);
 }
 
 
@@ -272,16 +345,15 @@ zsc_intr_hard(arg)
  * ZS software interrupt.  Scan all channels for deferred interrupts.
  */
 int
-zsc_intr_soft(arg)
-	void *arg;
+zsc_intr_soft(void *arg)
 {
-	register struct zsc_softc *zsc = arg;
-	register struct zs_chanstate *cs;
-	register int rval, unit;
+	struct zsc_softc *zsc = arg;
+	struct zs_chanstate *cs;
+	int rval, chan;
 
 	rval = 0;
-	for (unit = 0; unit < 2; unit++) {
-		cs = &zsc->zsc_cs[unit];
+	for (chan = 0; chan < 2; chan++) {
+		cs = zsc->zsc_cs[chan];
 
 		/*
 		 * The softint flag can be safely cleared once
@@ -291,30 +363,56 @@ zsc_intr_soft(arg)
 		if (cs->cs_softreq) {
 			cs->cs_softreq = 0;
 			(*cs->cs_ops->zsop_softint)(cs);
-			rval = 1;
+			rval++;
 		}
 	}
 	return (rval);
 }
 
+/*
+ * Provide a null zs "ops" vector.
+ */
+
+static void zsnull_rxint  (struct zs_chanstate *);
+static void zsnull_stint  (struct zs_chanstate *, int);
+static void zsnull_txint  (struct zs_chanstate *);
+static void zsnull_softint(struct zs_chanstate *);
 
 static void
-zsnull_intr(cs)
-	struct zs_chanstate *cs;
+zsnull_rxint(struct zs_chanstate *cs)
 {
+
+	/* Ask for softint() call. */
+	cs->cs_softreq = 1;
+}
+
+static void
+zsnull_stint(struct zs_chanstate *cs, int force)
+{
+
+	/* Ask for softint() call. */
+	cs->cs_softreq = 1;
+}
+
+static void
+zsnull_txint(struct zs_chanstate *cs)
+{
+
+	/* Ask for softint() call. */
+	cs->cs_softreq = 1;
+}
+
+static void
+zsnull_softint(struct zs_chanstate *cs)
+{
+
 	zs_write_reg(cs,  1, 0);
 	zs_write_reg(cs, 15, 0);
 }
 
-static void
-zsnull_softint(cs)
-	struct zs_chanstate *cs;
-{
-}
-
 struct zsops zsops_null = {
-	zsnull_intr,	/* receive char available */
-	zsnull_intr,	/* external/status */
-	zsnull_intr,	/* xmit buffer empty */
+	zsnull_rxint,	/* receive char available */
+	zsnull_stint,	/* external/status */
+	zsnull_txint,	/* xmit buffer empty */
 	zsnull_softint,	/* process software interrupt */
 };

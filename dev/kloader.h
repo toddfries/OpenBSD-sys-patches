@@ -1,4 +1,4 @@
-/*	$NetBSD: kloader.h,v 1.4 2006/01/20 02:47:30 uwe Exp $	*/
+/*	$NetBSD: kloader.h,v 1.7 2008/09/08 23:36:54 gmcgarry Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002, 2004 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,7 +70,7 @@ struct kloader_page_tag {
 	uint32_t src;
 	uint32_t dst;
 	uint32_t sz;
-} __attribute__((__packed__, __aligned__(4)));
+} __packed __aligned(4);
 
 #define KLOADER_KERNELARGS_MAX		256
 
@@ -94,7 +87,7 @@ struct kloader_bootinfo {
 
 	/* argv buffer */
 	char _argbuf[KLOADER_KERNELARGS_MAX];
-} __attribute__((__packed__, __aligned__(4)));
+} __packed __aligned(4);
 
 /*
  * kloader_reboot_setup sets machine dependent kloader_ops to
@@ -107,7 +100,7 @@ void __kloader_reboot_setup(struct kloader_ops *, const char *);
  * kloader_reboot jumps to 2nd boot loader.
  * call after all shutdown hooks done.
  */
-void kloader_reboot(void) __attribute__((__noreturn__));
+void kloader_reboot(void) __dead;
 
 /*
  * kloader_bootinfo_set sets arguments of new kernel to boot. this is optional.

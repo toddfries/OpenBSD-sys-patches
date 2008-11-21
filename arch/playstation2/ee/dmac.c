@@ -1,4 +1,4 @@
-/*	$NetBSD: dmac.c,v 1.6 2005/12/24 23:24:01 perry Exp $	*/
+/*	$NetBSD: dmac.c,v 1.9 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dmac.c,v 1.6 2005/12/24 23:24:01 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dmac.c,v 1.9 2008/04/28 20:23:31 martin Exp $");
 
 #include "debug_playstation2.h"
 
@@ -77,7 +70,7 @@ STATIC vaddr_t __dmac_channel_base[_DMAC_NINTR] = {
 
 u_int32_t __dmac_enabled_channel;
 
-STATIC int __dmac_intialized;
+STATIC int __dmac_initialized;
 STATIC struct _ipl_dispatcher __dmac_dispatcher[_DMAC_NINTR];
 STATIC struct _ipl_holder __dmac_ipl_holder[_IPL_N];
 STATIC SLIST_HEAD(, _ipl_dispatcher) __dmac_dispatcher_head =
@@ -88,7 +81,7 @@ dmac_init()
 {
 	int i;
 
-	if (__dmac_intialized++)
+	if (__dmac_initialized++)
 		return;
 
 	/* disable DMAC */
@@ -154,7 +147,7 @@ dmac_intr(u_int32_t mask)
 			if (bit & dispatch) {
 				dmac_intr_disable(i);
 				printf("%s: spurious interrupt %d disabled.\n",
-				    __FUNCTION__, i);
+				    __func__, i);
 			}
 		}
 	}

@@ -1,3 +1,3 @@
-/*	$OpenBSD: db_machdep.h,v 1.5 2002/06/08 16:02:13 miod Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.2 1998/05/29 10:32:51 tsubai Exp $	*/
 
 #include <powerpc/db_machdep.h>

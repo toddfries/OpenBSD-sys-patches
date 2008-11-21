@@ -1,5 +1,4 @@
-/*	$OpenBSD: kernel.h,v 1.12 2007/05/16 17:27:30 art Exp $	*/
-/*	$NetBSD: kernel.h,v 1.11 1995/03/03 01:24:16 cgd Exp $	*/
+/*	$NetBSD: kernel.h,v 1.27 2008/01/20 18:09:13 joerg Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,31 +36,34 @@
  *	@(#)kernel.h	8.3 (Berkeley) 1/21/94
  */
 
+#ifndef _SYS_KERNEL_H_
+#define _SYS_KERNEL_H_
+
+#if defined(_KERNEL) || defined(_STANDALONE)
 /* Global variables for the kernel. */
 
-/* 1.1 */
 extern long hostid;
 extern char hostname[MAXHOSTNAMELEN];
 extern int hostnamelen;
 extern char domainname[MAXHOSTNAMELEN];
 extern int domainnamelen;
 
-/* 1.2 */
 extern struct timeval boottime;
-#ifndef __HAVE_TIMECOUNTER
-extern volatile struct timeval mono_time;
-extern volatile struct timeval time;
-#endif
-extern struct timezone tz;			/* XXX */
 
+extern int rtc_offset;		/* offset of rtc from UTC in minutes */
+
+extern int cold;		/* still working on startup */
 extern int tick;		/* usec per tick (1000000 / hz) */
-extern int tickfix;		/* periodic tick adj. tick not integral */
-extern int tickfixinterval;	/* interval at which to apply adjustment */
 extern int tickadj;		/* "standard" clock skew, us./tick */
+extern int hardclock_ticks;	/* # of hardclock ticks */
 extern int hz;			/* system clock's frequency */
 extern int stathz;		/* statistics clock's frequency */
 extern int profhz;		/* profiling clock's frequency */
-extern int lbolt;		/* once a second sleep address */
-extern int tickdelta;
-extern long timedelta;
 
+extern int profsrc;		/* profiling source */
+
+#define PROFSRC_CLOCK	0
+
+#endif
+
+#endif /* _SYS_KERNEL_H_ */

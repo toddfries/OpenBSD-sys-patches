@@ -1,5 +1,4 @@
-/* $OpenBSD: auixpreg.h,v 1.1 2005/08/07 20:08:45 mickey Exp $ */
-/* $NetBSD: auixpreg.h,v 1.2 2005/01/12 00:28:03 reinoud Exp $ */
+/* $NetBSD: auixpreg.h,v 1.3 2005/12/11 12:22:48 christos Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Reinoud Zandijk <reinoud@netbsd.org>
@@ -44,10 +43,10 @@
 
 
 typedef struct atiixp_dma_desc {
-	u_int32_t	addr;		/* DMA buffer address */
-	u_int16_t	status;		/* status bits; function unknown */
-	u_int16_t	size;		/* size of this DMA packet in dwords */
-	u_int32_t	next;		/* phys pointer to next packet descriptor */
+	uint32_t	addr;		/* DMA buffer address */
+	uint16_t	status;		/* status bits; function unknown */
+	uint16_t	size;		/* size of this DMA packet in dwords */
+	uint32_t	next;		/* phys pointer to next packet descriptor */
 } __packed atiixp_dma_desc_t;
 
 
@@ -179,3 +178,6 @@ typedef struct atiixp_dma_desc {
 #define  ATI_REG_DMA_FIFO_USED		(0x1fU<<16)
 #define  ATI_REG_DMA_FIFO_FREE		(0x1fU<<21)
 #define  ATI_REG_DMA_STATE		(7U<<26)
+
+
+

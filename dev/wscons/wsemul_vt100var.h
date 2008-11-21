@@ -1,5 +1,4 @@
-/* $OpenBSD: wsemul_vt100var.h,v 1.8 2007/11/27 16:37:27 miod Exp $ */
-/* $NetBSD: wsemul_vt100var.h,v 1.5 2000/04/28 21:56:17 mycroft Exp $ */
+/* $NetBSD: wsemul_vt100var.h,v 1.13 2006/10/09 11:03:43 peter Exp $ */
 
 /*
  * Copyright (c) 1998
@@ -34,13 +33,12 @@ struct wsemul_vt100_emuldata {
 	void *emulcookie;
 	int scrcapabilities;
 	u_int nrows, ncols, crow, ccol;
+	struct wsdisplay_msgattrs msgattrs;
 	long defattr;			/* default attribute */
 
 	long kernattr;			/* attribute for kernel output */
 	void *cbcookie;
-#ifdef DIAGNOSTIC
-	int console;
-#endif
+	int console;			/* used for DIAGNOSTIC */
 
 	u_int state;			/* processing state */
 	int flags;
@@ -127,15 +125,15 @@ struct wsemul_vt100_emuldata {
  */
 #define WSEMUL_VT_ID2 "\033[>24;20;0c"
 
-void	wsemul_vt100_reset(struct wsemul_vt100_emuldata *);
-void	wsemul_vt100_scrollup(struct wsemul_vt100_emuldata *, int);
-void	wsemul_vt100_scrolldown(struct wsemul_vt100_emuldata *, int);
-void	wsemul_vt100_ed(struct wsemul_vt100_emuldata *, int);
-void	wsemul_vt100_el(struct wsemul_vt100_emuldata *, int);
-void	wsemul_vt100_handle_csi(struct wsemul_vt100_emuldata *, u_char);
-void	wsemul_vt100_handle_dcs(struct wsemul_vt100_emuldata *);
+void wsemul_vt100_reset(struct wsemul_vt100_emuldata *);
+void wsemul_vt100_scrollup(struct wsemul_vt100_emuldata *, int);
+void wsemul_vt100_scrolldown(struct wsemul_vt100_emuldata *, int);
+void wsemul_vt100_ed(struct wsemul_vt100_emuldata *, int);
+void wsemul_vt100_el(struct wsemul_vt100_emuldata *, int);
+void wsemul_vt100_handle_csi(struct wsemul_vt100_emuldata *, u_char);
+void wsemul_vt100_handle_dcs(struct wsemul_vt100_emuldata *);
 
-int	wsemul_vt100_translate(void *cookie, keysym_t, const char **);
+int wsemul_vt100_translate(void *, keysym_t, const char **);
 
-void	vt100_initchartables(struct wsemul_vt100_emuldata *);
-int	vt100_setnrc(struct wsemul_vt100_emuldata *, int);
+void vt100_initchartables(struct wsemul_vt100_emuldata *);
+void vt100_setnrc(struct wsemul_vt100_emuldata *, int);

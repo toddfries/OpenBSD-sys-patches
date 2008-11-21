@@ -1,4 +1,4 @@
-/*	$NetBSD: et4000.c,v 1.12 2005/12/11 12:17:02 christos Exp $	*/
+/*	$NetBSD: et4000.c,v 1.15 2008/06/11 14:35:53 tsutsui Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +45,7 @@
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: et4000.c,v 1.12 2005/12/11 12:17:02 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: et4000.c,v 1.15 2008/06/11 14:35:53 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
@@ -111,8 +104,8 @@ static struct et_addresses {
 #define NETSTD (sizeof(etstd) / sizeof(etstd[0]))
 
 struct grfabs_et_priv {
-	volatile caddr_t	regkva;
-	volatile caddr_t	memkva;
+	volatile void *	regkva;
+	volatile void *	memkva;
 	int			regsz;
 	int			memsz;
 } et_priv;
@@ -377,8 +370,8 @@ et_vme_attach(parent, self, aux)
 	sc->sc_iosize = va->va_iosize;
 	sc->sc_msize = va->va_msize;
 
-	et_priv.regkva = (volatile caddr_t)ioh;
-	et_priv.memkva = (volatile caddr_t)memh;
+	et_priv.regkva = (volatile void *)ioh;
+	et_priv.memkva = (volatile void *)memh;
 	et_priv.regsz = va->va_iosize;
 	et_priv.memsz = va->va_msize;
 }
@@ -391,9 +384,9 @@ etopen(dev, flags, devtype, l)
 {
 	struct et_softc *sc;
 
-	if (minor(dev) >= et_cd.cd_ndevs)
+	sc = device_lookup_private(&et_cd, minor(dev));
+	if (sc == NULL)
 		return(ENXIO);
-	sc = et_cd.cd_devs[minor(dev)];
 	if (sc->sc_flags & ET_SC_FLAGS_INUSE)
 		return(EBUSY);
 	sc->sc_flags |= ET_SC_FLAGS_INUSE;
@@ -411,7 +404,7 @@ etclose(dev, flags, devtype, l)
 	/*
 	 * XXX: Should we reset to a default mode?
 	 */
-	sc = et_cd.cd_devs[minor(dev)];
+	sc = device_lookup_private(&et_cd, minor(dev));
 	sc->sc_flags &= ~ET_SC_FLAGS_INUSE;
 	return(0);
 }
@@ -438,14 +431,14 @@ int
 etioctl(dev, cmd, data, flags, l)
 	dev_t dev;
 	u_long cmd;
-	caddr_t data;
+	void *data;
 	int flags;
 	struct lwp *l;
 {
 	struct grfinfo g_display;
 	struct et_softc *sc;
 
-	sc = et_cd.cd_devs[minor(dev)];
+	sc = device_lookup_private(&et_cd, minor(dev));
 	switch (cmd) {
 	case GRFIOCON:
 		return(0);
@@ -454,12 +447,12 @@ etioctl(dev, cmd, data, flags, l)
 		return(0);
 		break;
 	case GRFIOCGINFO:
-		g_display.gd_fbaddr = (caddr_t) (sc->sc_maddr);
+		g_display.gd_fbaddr = (void *) (sc->sc_maddr);
 		g_display.gd_fbsize = sc->sc_msize;
 		g_display.gd_linbase = FRAME_BASE;
-		g_display.gd_regaddr = (caddr_t) (sc->sc_iobase);
+		g_display.gd_regaddr = (void *) (sc->sc_iobase);
 		g_display.gd_regsize = sc->sc_iosize;
-		g_display.gd_vgaaddr = (caddr_t) (sc->sc_maddr);
+		g_display.gd_vgaaddr = (void *) (sc->sc_maddr);
 		g_display.gd_vgasize = VGA_MAPPABLE;
 		g_display.gd_vgabase = VGA_BASE;
 		g_display.gd_colors = 16;
@@ -473,7 +466,7 @@ etioctl(dev, cmd, data, flags, l)
 		g_display.gd_dx = 0;
 		g_display.gd_dy = 0;
 		g_display.gd_bank_size = 0;
-		bcopy((caddr_t)&g_display, data, sizeof(struct grfinfo));
+		bcopy((void *)&g_display, data, sizeof(struct grfinfo));
 		break;
 	case GRFIOCMAP:
 		return(EINVAL);
@@ -496,7 +489,7 @@ etmmap(dev, offset, prot)
 {
 	struct et_softc *sc;
 
-	sc = et_cd.cd_devs[minor(dev)];
+	sc = device_lookup_private(&et_cd, minor(dev));
 
 	/* 
 	 * control registers
@@ -530,8 +523,8 @@ eton(dev)
 
 	if (minor(dev) >= et_cd.cd_ndevs)
 		return(ENXIO);
-	sc = et_cd.cd_devs[minor(dev)];
-	if (!sc)
+	sc = device_lookup_private(&et_cd, minor(dev));
+	if (sc == NULL)
 		return(ENXIO);
 	return(0);
 }

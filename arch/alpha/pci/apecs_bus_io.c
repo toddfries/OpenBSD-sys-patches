@@ -1,5 +1,4 @@
-/*	$OpenBSD: apecs_bus_io.c,v 1.6 2001/11/06 19:53:13 miod Exp $	*/
-/* $NetBSD: apecs_bus_io.c,v 1.8 1997/09/02 13:19:10 thorpej Exp $ */
+/* $NetBSD: apecs_bus_io.c,v 1.9 2000/06/29 08:58:45 mrg Exp $ */
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -27,6 +26,10 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  */
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(1, "$NetBSD: apecs_bus_io.c,v 1.9 2000/06/29 08:58:45 mrg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>

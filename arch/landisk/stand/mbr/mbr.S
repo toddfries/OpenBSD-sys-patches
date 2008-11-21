@@ -1,4 +1,3 @@
-/*	$OpenBSD: mbr.S,v 1.1 2006/10/06 21:48:50 mickey Exp $	*/
 /*	$NetBSD: mbr.S,v 1.1 2006/09/01 21:26:19 uwe Exp $	*/
 
 /*-
@@ -28,6 +27,7 @@
  */
 
 #include <machine/asm.h>
+#include <sys/bootblock.h>
 
 ENTRY(start)
 	mova	mbr_end, r0
@@ -64,18 +64,20 @@ jmp_start:
 	mov	#6, r0
 	trapa	#0x3f
 
+#ifndef	NO_BANNER
 	/* print banner */
 	mova	banner, r0
-	bsr	message
+	bsr	message_crlf
 	 mov	r0, r4
+#endif
 
 	/* search bootable partition */
 	mov.w	part_offset, r12
 	add	r11, r12		/* r12: pointer to partition entry */
-	mov	#4, r8			/* r8: partition loop counter */
+	mov	#MBR_PART_COUNT, r8	/* r8: partition loop counter */
 loop_part:
 	mov.b	@(4, r12), r0
-	cmp/eq	#0x00, r0
+	cmp/eq	#MBR_PTYPE_UNUSED, r0
 	bt	next_part
 
 	/* check active partition */
@@ -105,7 +107,7 @@ noos_error:
 	/* Not found bootable partition */
 	mova	ERR_NOOS, r0
 error:
-	bsr	message
+	bsr	message_crlf
 	 mov	r0, r4
 99:	bra	99b
 	 nop
@@ -114,7 +116,11 @@ read_error:
 	bra	error
 	 mova	ERR_READ, r0
 
-message:
+message_crlf:
+	mov	#32, r0
+	trapa	#0x3f
+	mova	crlf, r0
+	mov	r0, r4
 	mov	#32, r0
 	trapa	#0x3f
 	rts
@@ -163,36 +169,40 @@ mbr_size:	.word	mbr_end - _C_LABEL(start)
 	.align	1
 stack_offset:	.word	0x1000
 	.align	1
-part_offset:	.word	0x1be
+part_offset:	.word	MBR_PART_OFFSET
 	.align	1
-magic_offset:	.word	0x1fe
+magic_offset:	.word	MBR_MAGIC_OFFSET
 
 	.align	2
 found_sector:	.long	0
 
+#ifndef	NO_BANNER
 	.align	2
-banner:		.asciz	"\r\nOpenBSD MBR\r\n"
+banner:		.asciz	"\r\nNetBSD MBR boot"
+#endif
+	.align	2
+crlf:		.asciz	"\r\n"
 
 	.align	2
-ERR_INVPART:	.asciz	"No active partition\r\n"
+ERR_INVPART:	.asciz	"No active partition"
 	.align	2
-ERR_READ:	.asciz	"Read error\r\n"
+ERR_READ:	.asciz	"Disk read error"
 	.align	2
-ERR_NOOS:	.asciz	"No O/S\r\n"
+ERR_NOOS:	.asciz	"No operating system"
 
 
 /* space for mbr_dsn */
-	. = _C_LABEL(start) + 0x1b4
+	. = _C_LABEL(start) + MBR_DSN_OFFSET
 	.long	0
 
 /* mbr_bootsel_magic */
-	. = _C_LABEL(start) + 0x1b8
-	.word	0
+	. = _C_LABEL(start) + MBR_BS_MAGIC_OFFSET
+	.word	MBR_BS_MAGIC
 
 /*
  * MBR partition table
  */
-	. = _C_LABEL(start) + 0x1be
+	. = _C_LABEL(start) + MBR_PART_OFFSET
 _pbr_part0:
 	.byte	0, 0, 0, 0, 0, 0, 0, 0	
 	.byte	0, 0, 0, 0, 0, 0, 0, 0
@@ -203,10 +213,10 @@ _pbr_part2:
 	.byte	0, 0, 0, 0, 0, 0, 0, 0	
 	.byte	0, 0, 0, 0, 0, 0, 0, 0
 _pbr_part3:
-	.byte	0x80, 0, 1, 0, 0xa6, 255, 255, 255	
-	.word	0, 0, 0xffff, 0x7fff
+	.byte	0, 0, 0, 0, 0, 0, 0, 0	
+	.byte	0, 0, 0, 0, 0, 0, 0, 0
 
-	. = _C_LABEL(start) + 0x1fe
+	. = _C_LABEL(start) + MBR_MAGIC_OFFSET
 magic:
-	.word	0xaa55
+	.word	MBR_MAGIC
 mbr_end:

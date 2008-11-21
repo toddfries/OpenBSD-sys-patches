@@ -1,9 +1,7 @@
-/* $OpenBSD: spc.c,v 1.12 2005/11/14 21:51:55 miod Exp $ */
-/* $NetBSD: spc.c,v 1.2 2003/11/17 14:37:59 tsutsui Exp $ */
+/* $NetBSD: spc.c,v 1.7 2008/05/14 13:29:28 tsutsui Exp $ */
 
-/*
- * Copyright (c) 2003 Izumi Tsutsui.
- * All rights reserved.
+/*-
+ * Copyright (c) 2003 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,12 +24,18 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "opt_ddb.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.7 2008/05/14 13:29:28 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/buf.h>
 
 #include <machine/autoconf.h>
+#include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
 
@@ -41,39 +43,31 @@
 #include <hp300/dev/diovar.h>
 #include <hp300/dev/diodevs.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsi_message.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsi_message.h>
+#include <dev/scsipi/scsiconf.h>
 
-#include <hp300/dev/mb89352reg.h>
-#include <hp300/dev/mb89352var.h>
+#include <dev/ic/mb89352reg.h>
+#include <dev/ic/mb89352var.h>
 
 #include <hp300/dev/hp98265reg.h>
 #include <hp300/dev/dmareg.h>
 #include <hp300/dev/dmavar.h>
 
-#ifdef USELEDS
-#include <hp300/hp300/leds.h>
-#endif
-
-int  spc_dio_match(struct device *, void *, void *);
-void spc_dio_attach(struct device *, struct device *, void *);
-int  spc_dio_dmastart(struct spc_softc *, void *, size_t, int);
-int  spc_dio_dmadone(struct spc_softc *);
-void spc_dio_dmago(void *);
-void spc_dio_dmastop(void *);
-int  spc_dio_intr(void *);
-void spc_dio_reset(struct spc_softc *);
-
-#define	HPSPC_ADDRESS(o)	(dsc->sc_dregs + ((o) << 1) + 1)
-#define	hpspc_read(o)		*(volatile u_int8_t *)(HPSPC_ADDRESS(o))
-#define	hpspc_write(o, v)	*(volatile u_int8_t *)(HPSPC_ADDRESS(o)) = (v)
+static int	spc_dio_match(device_t, cfdata_t, void *);
+static void	spc_dio_attach(device_t, device_t, void *);
+static void	spc_dio_dmastart(struct spc_softc *, void *, size_t, int);
+static void	spc_dio_dmadone(struct spc_softc *);
+static void	spc_dio_dmago(void *);
+static void	spc_dio_dmastop(void *);
 
 struct spc_dio_softc {
 	struct spc_softc sc_spc;	/* MI spc softc */
-	struct isr sc_isr;
-	volatile u_int8_t *sc_dregs;	/* Complete registers */
 
+	/* DIO specific goo. */
+	struct bus_space_tag sc_tag;	/* bus space tag with oddbyte func */
+	bus_space_handle_t sc_iohsc;	/* bus space handle for HPSCSI */
 	struct dmaqueue sc_dq;		/* DMA job queue */
 	u_int sc_dflags;		/* DMA flags */
 #define SCSI_DMA32	0x01		/* 32-bit DMA should be used */
@@ -81,19 +75,11 @@ struct spc_dio_softc {
 #define SCSI_DATAIN	0x04		/* DMA direction */
 };
 
-struct cfattach spc_ca = {
-	sizeof(struct spc_dio_softc), spc_dio_match, spc_dio_attach
-};
+CFATTACH_DECL_NEW(spc, sizeof(struct spc_dio_softc),
+    spc_dio_match, spc_dio_attach, NULL, NULL);
 
-struct cfdriver spc_cd = {
-	NULL, "spc", DV_DULL
-};
-
-/* cf_flags */
-#define	SPC_NODMA	0x01
-
-int
-spc_dio_match(struct device *parent, void *vcf, void *aux)
+static int
+spc_dio_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -108,82 +94,69 @@ spc_dio_match(struct device *parent, void *vcf, void *aux)
 	return 0;
 }
 
-void
-spc_dio_attach(struct device *parent, struct device *self, void *aux)
+static void
+spc_dio_attach(device_t parent, device_t self, void *aux)
 {
-	struct spc_dio_softc *dsc = (struct spc_dio_softc *)self;
+	struct spc_dio_softc *dsc = device_private(self);
 	struct spc_softc *sc = &dsc->sc_spc;
 	struct dio_attach_args *da = aux;
-	int ipl;
-	u_int8_t id, hconf;
+	bus_space_tag_t iot = &dsc->sc_tag;
+	bus_space_handle_t iohsc, iohspc;
+	uint8_t id;
 
-	dsc->sc_dregs = (u_int8_t *)iomap(dio_scodetopa(da->da_scode),
-	    da->da_size);
-	if (dsc->sc_dregs == NULL) {
-		printf(": can't map SCSI registers\n");
+	sc->sc_dev = self;
+	memcpy(iot, da->da_bst, sizeof(struct bus_space_tag));
+	dio_set_bus_space_oddbyte(iot);
+
+	if (bus_space_map(iot, da->da_addr, da->da_size, 0, &iohsc)) {
+		aprint_error(": can't map SCSI registers\n");
 		return;
 	}
-	sc->sc_regs = dsc->sc_dregs + SPC_OFFSET;
 
-	ipl = DIO_IPL(sc->sc_regs);
-	printf(" ipl %d: 98265A SCSI", ipl);
+	if (bus_space_subregion(iot, iohsc, SPC_OFFSET, SPC_SIZE, &iohspc)) {
+		aprint_error(": can't map SPC registers\n");
+		return;
+	}
 
-	hpspc_write(HPSCSI_ID, 0xff);
+	aprint_normal(": 98265A SCSI");
+
+	bus_space_write_1(iot, iohsc, HPSCSI_ID, 0xff);
 	DELAY(100);
-	id = hpspc_read(HPSCSI_ID);
-	hconf = hpspc_read(HPSCSI_HCONF);
-
+	id = bus_space_read_1(iot, iohsc, HPSCSI_ID);
 	if ((id & ID_WORD_DMA) == 0) {
-		printf(", 32-bit DMA");
+		aprint_normal(", 32-bit DMA");
 		dsc->sc_dflags |= SCSI_DMA32;
 	}
-	if ((hconf & HCONF_PARITY) == 0)
-		printf(", no parity");
-
 	id &= ID_MASK;
-	printf(", SCSI ID %d\n", id);
+	aprint_normal(", SCSI ID %d\n", id);
 
-	if ((hconf & HCONF_PARITY) != 0)
-		sc->sc_ctlflags = SCTL_PARITY_ENAB;
-
+	sc->sc_iot = iot;
+	sc->sc_ioh = iohspc;
 	sc->sc_initiator = id;
 
-	if ((sc->sc_dev.dv_cfdata->cf_flags & SPC_NODMA) == 0) {
-		sc->sc_dma_start = spc_dio_dmastart;
-		sc->sc_dma_done  = spc_dio_dmadone;
-	}
-	sc->sc_reset = spc_dio_reset;
+	sc->sc_dma_start = spc_dio_dmastart;
+	sc->sc_dma_done  = spc_dio_dmadone;
 
+	dsc->sc_iohsc = iohsc;
 	dsc->sc_dq.dq_softc = dsc;
 	dsc->sc_dq.dq_start = spc_dio_dmago;
 	dsc->sc_dq.dq_done  = spc_dio_dmastop;
 
-	hpspc_write(HPSCSI_CSR, 0x00);
-	hpspc_write(HPSCSI_HCONF, 0x00);
+	bus_space_write_1(iot, iohsc, HPSCSI_CSR, 0x00);
+	bus_space_write_1(iot, iohsc, HPSCSI_HCONF, 0x00);
 
-	dsc->sc_isr.isr_func = spc_dio_intr;
-	dsc->sc_isr.isr_arg = dsc;
-	dsc->sc_isr.isr_ipl = ipl;
-	dsc->sc_isr.isr_priority = IPL_BIO;
-	dio_intr_establish(&dsc->sc_isr, self->dv_xname);
+	dio_intr_establish(spc_intr, (void *)sc, da->da_ipl, IPL_BIO);
 
 	spc_attach(sc);
 
 	/* Enable SPC interrupts. */
-	hpspc_write(HPSCSI_CSR, CSR_IE);
+	bus_space_write_1(iot, iohsc, HPSCSI_CSR, CSR_IE);
 }
 
-int
+static void
 spc_dio_dmastart(struct spc_softc *sc, void *addr, size_t size, int datain)
 {
 	struct spc_dio_softc *dsc = (struct spc_dio_softc *)sc;
-
-	/*
-	 * The HP98658 hardware cannot do odd length transfers, the
-	 * last byte of data will always be 0x00.
-	 */
-	if ((size & 1) != 0)
-		return (EINVAL);
 
 	dsc->sc_dq.dq_chan = DMA0 | DMA1;
 	dsc->sc_dflags |= SCSI_HAVEDMA;
@@ -194,22 +167,27 @@ spc_dio_dmastart(struct spc_softc *sc, void *addr, size_t size, int datain)
 
 	if (dmareq(&dsc->sc_dq) != 0)
 		/* DMA channel is available, so start DMA immediately */
-		spc_dio_dmago((void *)dsc);
+		spc_dio_dmago(dsc);
 	/* else dma start function will be called later from dmafree(). */
-
-	return (0);
 }
 
-void
+static void
 spc_dio_dmago(void *arg)
 {
-	struct spc_dio_softc *dsc = (struct spc_dio_softc *)arg;
+	struct spc_dio_softc *dsc = arg;
 	struct spc_softc *sc = &dsc->sc_spc;
+	bus_space_tag_t iot;
+	bus_space_handle_t iohsc, iohspc;
 	int len, chan;
-	u_int32_t dmaflags;
-	u_int8_t cmd;
+	uint32_t dmaflags;
+	uint8_t cmd;
 
-	hpspc_write(HPSCSI_HCONF, 0);
+	iot = sc->sc_iot;
+	iohspc = sc->sc_ioh;
+	iohsc = dsc->sc_iohsc;
+
+	bus_space_write_1(iot, iohsc, HPSCSI_HCONF, 0);
+
 	cmd = CSR_IE;
 	dmaflags = DMAGO_NOINT;
 	chan = dsc->sc_dq.dq_chan;
@@ -222,109 +200,90 @@ spc_dio_dmago(void *arg)
 	    (sc->sc_dleft & 3) == 0) {
 		cmd |= CSR_DMA32;
 		dmaflags |= DMAGO_LWORD;
-	} else {
+	} else
 		dmaflags |= DMAGO_WORD;
-	}
 
-	sc->sc_flags |= SPC_DOINGDMA;
 	dmago(chan, sc->sc_dp, sc->sc_dleft, dmaflags);
 
-	hpspc_write(HPSCSI_CSR, cmd);
+	bus_space_write_1(iot, iohsc, HPSCSI_CSR, cmd);
 	cmd |= (chan == 0) ? CSR_DE0 : CSR_DE1;
-	hpspc_write(HPSCSI_CSR, cmd);
+	bus_space_write_1(iot, iohsc, HPSCSI_CSR, cmd);
 
 	cmd = SCMD_XFR;
 	len = sc->sc_dleft;
 
-	if ((len & (DEV_BSIZE -1)) != 0) {
+	if ((len & (DEV_BSIZE - 1)) != 0) /* XXX ??? */ {
 		cmd |= SCMD_PAD;
 #if 0
-		/*
-		 * XXX - If we don't do this, the last 2 or 4 bytes
-		 * (depending on word/lword DMA) of a read get trashed.
-		 * It looks like it is necessary for the DMA to complete
-		 * before the SPC goes into "pad mode"???  Note: if we
-		 * also do this on a write, the request never completes.
-		 */
 		if ((dsc->sc_dflags & SCSI_DATAIN) != 0)
-			len += 2;
+			len += 2; /* XXX ??? */
 #endif
 	}
 
-	spc_write(TCH, len >> 16);
-	spc_write(TCM, len >>  8);
-	spc_write(TCL, len);
-	spc_write(PCTL, sc->sc_phase | PCTL_BFINT_ENAB);
-	spc_write(SCMD, cmd);
+	bus_space_write_1(iot, iohspc, TCH, len >> 16);
+	bus_space_write_1(iot, iohspc, TCM, len >>  8);
+	bus_space_write_1(iot, iohspc, TCL, len);
+	bus_space_write_1(iot, iohspc, PCTL, sc->sc_phase | PCTL_BFINT_ENAB);
+	bus_space_write_1(iot, iohspc, SCMD, cmd);
+
+	sc->sc_flags |= SPC_DOINGDMA;
 }
 
-int
+static void
 spc_dio_dmadone(struct spc_softc *sc)
 {
 	struct spc_dio_softc *dsc = (struct spc_dio_softc *)sc;
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh, iohsc;
 	int resid, trans;
-	u_int8_t cmd;
+	uint8_t cmd;
 
-	/* Check if the DMA operation is finished. */
-	if ((spc_read(SSTS) & SSTS_BUSY) != 0)
-		return (0);
+	iot = sc->sc_iot;
+	ioh = sc->sc_ioh;
+	iohsc = dsc->sc_iohsc;
 
-	sc->sc_flags &= ~SPC_DOINGDMA;
-	if ((dsc->sc_dflags & SCSI_HAVEDMA) != 0) {
-		dsc->sc_dflags &= ~SCSI_HAVEDMA;
-		dmafree(&dsc->sc_dq);
+	/* wait DMA complete */
+	if ((bus_space_read_1(iot, ioh, SSTS) & SSTS_BUSY) != 0) {
+		int timeout = 1000; /* XXX how long? */
+		while ((bus_space_read_1(iot, ioh, SSTS) & SSTS_BUSY) != 0) {
+			if (--timeout < 0)
+				printf("%s: DMA complete timeout\n",
+				    device_xname(sc->sc_dev));
+			DELAY(1);
+		}
 	}
 
-	cmd = hpspc_read(HPSCSI_CSR);
-	cmd &= ~(CSR_DE1 | CSR_DE0);
-	hpspc_write(HPSCSI_CSR, cmd);
+	if ((dsc->sc_dflags & SCSI_HAVEDMA) != 0) {
+		dmafree(&dsc->sc_dq);
+		dsc->sc_dflags &= ~SCSI_HAVEDMA;
+	}
 
-	resid = spc_read(TCH) << 16 |
-	    spc_read(TCM) << 8 |
-	    spc_read(TCL);
+	cmd = bus_space_read_1(iot, iohsc, HPSCSI_CSR);
+	cmd &= ~(CSR_DE1|CSR_DE0);
+	bus_space_write_1(iot, iohsc, HPSCSI_CSR, cmd);
+
+	resid = bus_space_read_1(iot, ioh, TCH) << 16 |
+	    bus_space_read_1(iot, ioh, TCM) << 8 |
+	    bus_space_read_1(iot, ioh, TCL);
 	trans = sc->sc_dleft - resid;
 	sc->sc_dp += trans;
 	sc->sc_dleft -= trans;
 
-	return (1);
-}
-
-void
-spc_dio_dmastop(void *arg)
-{
-	struct spc_dio_softc *dsc = (struct spc_dio_softc *)arg;
-	struct spc_softc *sc = &dsc->sc_spc;
-	u_int8_t cmd;
-
-	cmd = hpspc_read(HPSCSI_CSR);
-	cmd &= ~(CSR_DE1 | CSR_DE0);
-	hpspc_write(HPSCSI_CSR, cmd);
-
-	dsc->sc_dflags &= ~SCSI_HAVEDMA;
 	sc->sc_flags &= ~SPC_DOINGDMA;
 }
 
-int
-spc_dio_intr(void *arg)
+static void
+spc_dio_dmastop(void *arg)
 {
-	struct spc_dio_softc *dsc = (struct spc_dio_softc *)arg;
+	struct spc_dio_softc *dsc = arg;
+	struct spc_softc *sc = &dsc->sc_spc;
+	uint8_t cmd;
 
-	/* if we are sharing the ipl level, this interrupt may not be for us. */
-	if ((hpspc_read(HPSCSI_CSR) & (CSR_IE | CSR_IR)) != (CSR_IE | CSR_IR))
-		return (0);
+	/* XXX When is this function called? */
+	cmd = bus_space_read_1(sc->sc_iot, dsc->sc_iohsc, HPSCSI_CSR);
+	cmd &= ~(CSR_DE1|CSR_DE0);
+	bus_space_write_1(sc->sc_iot, dsc->sc_iohsc, HPSCSI_CSR, cmd);
 
-#ifdef USELEDS
-	ledcontrol(0, 0, LED_DISK);
-#endif
-
-	return (spc_intr(arg));
-}
-
-void
-spc_dio_reset(struct spc_softc *sc)
-{
-	struct spc_dio_softc *dsc = (struct spc_dio_softc *)sc;
-
-	spc_reset(sc);
-	hpspc_write(HPSCSI_HCONF, 0x00);
+	dsc->sc_dflags &= ~SCSI_HAVEDMA;
+	sc->sc_flags &= ~SPC_DOINGDMA;
 }

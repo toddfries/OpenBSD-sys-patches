@@ -1,30 +1,29 @@
-/*	$OpenBSD: db_print.c,v 1.12 2007/11/05 19:23:24 miod Exp $	*/
-/*	$NetBSD: db_print.c,v 1.5 1996/02/05 01:57:11 christos Exp $	*/
+/*	$NetBSD: db_print.c,v 1.26 2007/02/22 06:41:01 thorpej Exp $	*/
 
-/* 
+/*
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
+ *
  * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
+ *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
  *
  * 	Author: David B. Golub, Carnegie Mellon University
  *	Date:	7/90
@@ -33,10 +32,12 @@
 /*
  * Miscellaneous printing.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_print.c,v 1.26 2007/02/22 06:41:01 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/db_machdep.h>
 
@@ -48,25 +49,31 @@
 
 /*ARGSUSED*/
 void
-db_show_regs(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_show_regs(db_expr_t addr, bool have_addr,
+    db_expr_t count, const char *modif)
 {
-	struct db_variable *regp;
-	db_expr_t	value, offset;
-	char *		name;
-	char		tmpfmt[28];
+	const struct db_variable *regp;
+	struct db_variable vs;
+	db_expr_t value, offset;
+	const char *name;
 
 	for (regp = db_regs; regp < db_eregs; regp++) {
-	    db_read_variable(regp, &value);
-	    db_printf("%-12s%s", regp->name, db_format(tmpfmt, sizeof tmpfmt,
-	      (long)value, DB_FORMAT_N, 1, sizeof(long) * 3));
-	    db_find_xtrn_sym_and_offset((db_addr_t)value, &name, &offset);
-	    if (name != 0 && offset <= db_maxoff && offset != value) {
-		db_printf("\t%s", name);
-		if (offset != 0)
-		    db_printf("+%s", db_format(tmpfmt, sizeof tmpfmt,
-		      (long)offset, DB_FORMAT_R, 1, 0));
-	    }
-	    db_printf("\n");
+		vs = *regp;
+		vs.modif = modif;
+		db_read_variable(&vs, &value);
+		db_printf("%-12s%s", vs.name, db_num_to_str(value));
+		db_find_xtrn_sym_and_offset((db_addr_t)value, &name, &offset);
+		if (name != NULL &&
+		    (unsigned int) offset <= db_maxoff && offset != value) {
+			db_printf("\t%s", name);
+			if (offset != 0) {
+				char tbuf[24];
+
+				db_format_radix(tbuf, 24, offset, true);
+				db_printf("+%s", tbuf);
+			}
+		}
+		db_printf("\n");
 	}
 	db_print_loc_and_inst(PC_REGS(DDB_REGS));
 }

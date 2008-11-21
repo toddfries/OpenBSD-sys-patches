@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.13 2006/07/11 18:58:15 miod Exp $	*/
-/*	$NetBSD: autoconf.h,v 1.5 1996/12/17 06:47:40 scottr Exp $	*/
+/*	$NetBSD: autoconf.h,v 1.12 2007/03/04 06:00:08 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -33,28 +32,37 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _MAC68K_AUTOCONF_H_
-#define _MAC68K_AUTOCONF_H_
+#include <sys/device.h>
+
+#include <machine/bus.h>
 
 /*
  * Autoconfiguration information.
  * From sun3 port--adapted for mac68k platform by Allen Briggs.
  */
 
-#ifdef _KERNEL
+struct mainbus_attach_args {
+	bus_space_tag_t	mba_bst;
+	bus_dma_tag_t	mba_dmat;
+};
+
 /* autoconf.c */
 void	setconf(void);
 
 /* machdep.c */
 void	mac68k_set_io_offsets(vaddr_t);
 void	dumpconf(void);
+int	badbaddr(void *);
+int	badwaddr(void *);
+int	badladdr(void *);
 
-/* clock.h */
-
-u_long	clkread(void);
+/* clock.c */
+void	enablertclock(void);
+void	cpu_initclocks(void);
+void	setstatclockrate(int);
+void	disablertclock(void);
 void	mac68k_calibrate_delay(void);
 void	startrtclock(void);
 
-#endif	/* _KERNEL */
-
-#endif	/* _MAC68K_AUTOCONF_H_ */
+/* macrom.c */
+void	mrg_init(void);

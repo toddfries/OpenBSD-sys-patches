@@ -1,4 +1,3 @@
-/*	$OpenBSD: delay.c,v 1.1 2006/10/06 21:48:50 mickey Exp $	*/
 /*	$NetBSD: delay.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -27,10 +26,13 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <libsa.h>
+#include <sys/types.h>
 
-#include <sh/tmureg.h>
+#include <lib/libsa/stand.h>
+
+#include <sh3/tmureg.h>
+
+#include "boot.h"
 
 #ifndef	TICK_CH
 #define	TICK_CH	0

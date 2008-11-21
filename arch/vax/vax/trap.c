@@ -1,5 +1,5 @@
-/*	$OpenBSD: trap.c,v 1.39 2007/05/16 05:19:15 miod Exp $     */
-/*	$NetBSD: trap.c,v 1.47 1999/08/21 19:26:20 matt Exp $     */
+/*	$NetBSD: trap.c,v 1.116 2008/10/15 06:51:19 wrstuden Exp $     */
+
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -31,6 +31,13 @@
  */
 
  /* All bugs are subject to removal without further notice */
+		
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.116 2008/10/15 06:51:19 wrstuden Exp $");
+
+#include "opt_ddb.h"
+#include "opt_multiprocessor.h"
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -39,9 +46,10 @@
 #include <sys/systm.h>
 #include <sys/signalvar.h>
 #include <sys/exec.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
+#include <sys/sa.h>
+#include <sys/savar.h>
+#include <sys/pool.h>
+#include <sys/kauth.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -51,25 +59,23 @@
 #include <machine/trap.h>
 #include <machine/pmap.h>
 #include <machine/cpu.h>
+#include <machine/userret.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
 #endif
 #include <kern/syscalls.c>
-#ifdef KTRACE
 #include <sys/ktrace.h>
-#endif
 
 #ifdef TRAPDEBUG
-volatile int startsysc = 0, faultdebug = 0;
+volatile int faultdebug = 0;
 #endif
 
-static __inline void userret(struct proc *);
+int	cpu_printfataltraps = 0;
 
-void	arithflt(struct trapframe *);
-void	syscall(struct trapframe *);
+void	trap (struct trapframe *);
 
-char *traptypes[]={
+const char * const traptypes[]={
 	"reserved addressing",
 	"privileged instruction",
 	"reserved operand",
@@ -91,54 +97,44 @@ char *traptypes[]={
 };
 int no_traps = 18;
 
-#define USERMODE(framep)   ((((framep)->psl) & (PSL_U)) == PSL_U)
+#define USERMODE_P(framep)   ((((framep)->psl) & (PSL_U)) == PSL_U)
 #define FAULTCHK						\
-	do if (p->p_addr->u_pcb.iftrap) {			\
-		frame->pc = (unsigned)p->p_addr->u_pcb.iftrap;	\
+	if (l->l_addr->u_pcb.iftrap) {				\
+		frame->pc = (unsigned)l->l_addr->u_pcb.iftrap;	\
 		frame->psl &= ~PSL_FPD;				\
 		frame->r0 = EFAULT;/* for copyin/out */		\
 		frame->r1 = -1; /* for fetch/store */		\
 		return;						\
-	} while (0)
-
-/*
- * userret:
- *
- *	Common code used by various exception handlers to
- *	return to usermode.
- */
-static __inline void
-userret(struct proc *p)
-{
-	int sig;
-
-	/* Take pending signals. */
-	while ((sig = CURSIG(p)) !=0)
-		postsig(sig);
-
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
-}
-
-void
-arithflt(frame)
-	struct trapframe *frame;
-{
-	u_int	sig = 0, type = frame->trap, trapsig = 1;
-	u_int	rv, addr, umode;
-	struct	proc *p = curproc;
-	struct vm_map *map;
-	vm_prot_t ftype;
-	int typ;
-	union sigval sv;
-	
-	sv.sival_int = frame->pc;
-	uvmexp.traps++;
-	if ((umode = USERMODE(frame))) {
-		type |= T_USER;
-		p->p_addr->u_pcb.framep = frame; 
 	}
 
-	type&=~(T_WRITE|T_PTEFETCH);
+
+void
+trap(struct trapframe *frame)
+{
+	u_int	sig = 0, type = frame->trap, code = 0;
+	u_int	rv, addr;
+	bool trapsig = true;
+	const bool usermode = USERMODE_P(frame);;
+	struct	lwp *l;
+	struct	proc *p;
+	u_quad_t oticks = 0;
+	struct vmspace *vm;
+	struct vm_map *map;
+	vm_prot_t ftype;
+
+	l = curlwp;
+	KASSERT(l != NULL);
+	p = l->l_proc;
+	KASSERT(p != NULL);
+	uvmexp.traps++;
+	if (usermode) {
+		type |= T_USER;
+		oticks = p->p_sticks;
+		l->l_addr->u_pcb.framep = frame; 
+		LWP_CACHE_CREDS(l, p);
+	}
+
+	type &= ~(T_WRITE|T_PTEFETCH);
 
 
 #ifdef TRAPDEBUG
@@ -147,19 +143,21 @@ if(faultdebug)printf("Trap: type %lx, code %lx, pc %lx, psl %lx\n",
 		frame->trap, frame->code, frame->pc, frame->psl);
 fram:
 #endif
-	switch(type){
+	switch (type) {
 
 	default:
 #ifdef DDB
 		kdb_trap(frame);
 #endif
-		printf("Trap: type %x, code %x, pc %x, psl %x\n",
+		panic("trap: type %x, code %x, pc %x, psl %x",
 		    (u_int)frame->trap, (u_int)frame->code,
 		    (u_int)frame->pc, (u_int)frame->psl);
-		panic("trap");
 
 	case T_KSPNOTVAL:
-		panic("kernel stack invalid");
+		panic("%d.%d (%s): KSP invalid %#x@%#x pcb %p fp %#x psl %#x)",
+		    p->p_pid, l->l_lid, l->l_name ? l->l_name : "??",
+		    mfpr(PR_KSP), (u_int)frame->pc, l->l_addr,
+		    (u_int)frame->fp, (u_int)frame->psl);
 
 	case T_TRANSFLT|T_USER:
 	case T_TRANSFLT:
@@ -176,13 +174,16 @@ fram:
 #ifdef nohwbug
 		panic("translation fault");
 #endif
+
+	case T_PTELEN|T_USER:	/* Page table length exceeded */
 	case T_ACCFLT|T_USER:
 		if (frame->code < 0) { /* Check for kernel space */
-			sv.sival_int = frame->code;
 			sig = SIGSEGV;
-			typ = SEGV_ACCERR;
+			code = SEGV_ACCERR;
 			break;
 		}
+
+	case T_PTELEN:
 	case T_ACCFLT:
 #ifdef TRAPDEBUG
 if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
@@ -192,6 +193,8 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 		if (p == 0)
 			panic("trap: access fault: addr %lx code %lx",
 			    frame->pc, frame->code);
+		if (frame->psl & PSL_IS)
+			panic("trap: pflt on IS");
 #endif
 
 		/*
@@ -201,98 +204,96 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 		 * because we must check for PTE pages anyway we don't
 		 * bother doing it here.
 		 */
-		sv.sival_int = frame->code;
-		if ((umode == 0) && (frame->code < 0))
+		addr = trunc_page(frame->code);
+		if (!usermode && (frame->code < 0)) {
+			vm = NULL;
 			map = kernel_map;
-		else
-			map = &p->p_vmspace->vm_map;
+
+		} else {
+			vm = p->p_vmspace;
+			map = &vm->vm_map;
+		}
 
 		if (frame->trap & T_WRITE)
-			ftype = VM_PROT_WRITE|VM_PROT_READ;
+			ftype = VM_PROT_WRITE;
 		else
 			ftype = VM_PROT_READ;
 
-		addr = trunc_page((vaddr_t)frame->code);
-		rv = uvm_fault(map, addr, 0, ftype);
-		if (rv) {
-			if (umode == 0) {
+		if ((usermode) && (l->l_flag & LW_SA)) {
+			l->l_savp->savp_faultaddr = (vaddr_t)frame->code;
+			l->l_pflag |= LP_SA_PAGEFAULT;
+		}
+
+		rv = uvm_fault(map, addr, ftype);
+		if (rv != 0) {
+			if (!usermode) {
 				FAULTCHK;
 				panic("Segv in kernel mode: pc %x addr %x",
 				    (u_int)frame->pc, (u_int)frame->code);
 			}
+			code = SEGV_ACCERR;
 			if (rv == ENOMEM) {
-				printf("UVM: pid %d (%s), uid %u killed: "
+				printf("UVM: pid %d (%s), uid %d killed: "
 				       "out of swap\n",
 				       p->p_pid, p->p_comm,
-				       p->p_cred && p->p_ucred ?
-				       p->p_ucred->cr_uid : -1);
+				       l->l_cred ?
+				       kauth_cred_geteuid(l->l_cred) : -1);
 				sig = SIGKILL;
-				typ = 0;
 			} else {
 				sig = SIGSEGV;
-				typ = SEGV_MAPERR;
+				if (rv != EACCES)
+					code = SEGV_MAPERR;
 			}
 		} else {
-			trapsig = 0;
-			if (umode != 0)
+			trapsig = false;
+			if (map != kernel_map && addr > 0
+			    && (void *)addr >= vm->vm_maxsaddr)
 				uvm_grow(p, addr);
+		}
+		if (usermode) {
+			l->l_pflag &= ~LP_SA_PAGEFAULT;
 		}
 		break;
 
-	case T_PTELEN:
-		if (p && p->p_addr)
-			FAULTCHK;
-		panic("ptelen fault in system space: addr %lx pc %lx",
-		    frame->code, frame->pc);
-
-	case T_PTELEN|T_USER:	/* Page table length exceeded */
-		sv.sival_int = frame->code;
-		sig = SIGSEGV;
-		typ = SEGV_MAPERR;
-		break;
-
 	case T_BPTFLT|T_USER:
-		typ = TRAP_BRKPT;
 		sig = SIGTRAP;
-		frame->psl &= ~PSL_T;
+		code = TRAP_BRKPT;
 		break;
-
 	case T_TRCTRAP|T_USER:
-		typ = TRAP_TRACE;
 		sig = SIGTRAP;
+		code = TRAP_TRACE;
 		frame->psl &= ~PSL_T;
 		break;
 
 	case T_PRIVINFLT|T_USER:
-	case T_RESOPFLT|T_USER:
-		typ = ILL_ILLOPC;
 		sig = SIGILL;
+		code = ILL_PRVOPC;
 		break;
-
 	case T_RESADFLT|T_USER:
-		typ = ILL_ILLADR;
 		sig = SIGILL;
+		code = ILL_ILLADR;
+		break;
+	case T_RESOPFLT|T_USER:
+		sig = SIGILL;
+		code = ILL_ILLOPC;
 		break;
 
 	case T_XFCFLT|T_USER:
-		typ = EMT_TAGOVF;
 		sig = SIGEMT;
 		break;
 
 	case T_ARITHFLT|T_USER:
-		sv.sival_int = frame->code;
-		typ = FPE_FLTINV;
 		sig = SIGFPE;
+		switch (frame->code) {
+		case AFLT_FLTDIV: code = FPE_FLTDIV; break;
+		case AFLT_FLTUND: code = FPE_FLTUND; break;
+		case AFLT_FLTOVF: code = FPE_FLTOVF; break;
+		}
 		break;
 
 	case T_ASTFLT|T_USER:
 		mtpr(AST_NO,PR_ASTLVL);
-		trapsig = 0;
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-		if (want_resched)
-			preempt(NULL);
+		trapsig = false;
 		break;
 
 #ifdef DDB
@@ -304,165 +305,68 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 		return;
 #endif
 	}
-
-	if (trapsig) { 
-		trapsignal(p, sig, frame->code, typ, sv);
-
-		/*
-		 * Arithmetic exceptions can be of two kinds:
-		 * - traps (codes 1..7), where pc points to the
-		 *   next instruction to execute.
-		 * - faults (codes 8..10), where pc points to the
-		 *   faulting instruction.
-		 * In the latter case, we need to advance pc by ourselves
-		 * to prevent a signal loop.
-		 *
-		 * XXX this is gross -- miod
-		 */
-		if (type == (T_ARITHFLT | T_USER) && frame->code >= 8) {
-			extern long skip_opcode(long);
-
-			frame->pc = skip_opcode(frame->pc);
-		}
+	if (trapsig) {
+		ksiginfo_t ksi;
+		if ((sig == SIGSEGV || sig == SIGILL) && cpu_printfataltraps)
+			printf("pid %d.%d (%s): sig %d: type %lx, code %lx, pc %lx, psl %lx\n",
+			       p->p_pid, l->l_lid, p->p_comm, sig, frame->trap,
+			       frame->code, frame->pc, frame->psl);
+		KSI_INIT_TRAP(&ksi);
+		ksi.ksi_signo = sig;
+		ksi.ksi_trap = frame->trap;
+		ksi.ksi_addr = (void *)frame->code;
+		ksi.ksi_code = code;
+		trapsignal(l, &ksi);
 	}
 
-	if (umode == 0)
+	if (!usermode)
 		return;
 
-	userret(p);
+	userret(l, frame, oticks);
 }
 
 void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
+setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	struct trapframe *exptr;
 
-	exptr = p->p_addr->u_pcb.framep;
+	exptr = l->l_addr->u_pcb.framep;
 	exptr->pc = pack->ep_entry + 2;
 	exptr->sp = stack;
-	exptr->r6 = stack;			/* for ELF */
-	exptr->r7 = 0;				/* for ELF */
-	exptr->r8 = 0;				/* for ELF */
-	exptr->r9 = (u_long) PS_STRINGS;	/* for ELF */
+	exptr->r6 = stack;				/* for ELF */
+	exptr->r7 = 0;					/* for ELF */
+	exptr->r8 = 0;					/* for ELF */
+	exptr->r9 = (u_long) l->l_proc->p_psstr;	/* for ELF */
+}
 
-	retval[1] = 0;
+
+/* 
+ * Start a new LWP
+ */
+void
+startlwp(void *arg)
+{
+	int err;
+	ucontext_t *uc = arg;
+	struct lwp *l = curlwp;
+
+	err = cpu_setmcontext(l, &uc->uc_mcontext, uc->uc_flags);
+#if DIAGNOSTIC
+	if (err) {
+		printf("Error %d from cpu_setmcontext.", err);
+	}
+#endif
+	pool_put(&lwp_uc_pool, uc);
+
+	/* XXX - profiling spoiled here */
+	userret(l, l->l_addr->u_pcb.framep, l->l_proc->p_sticks);
 }
 
 void
-syscall(frame)
-	struct	trapframe *frame;
+upcallret(struct lwp *l)
 {
-	struct sysent *callp;
-	int nsys;
-	int err, rval[2], args[8];
-	struct trapframe *exptr;
-	struct proc *p = curproc;
 
-#ifdef TRAPDEBUG
-if(startsysc)printf("trap syscall %s pc %lx, psl %lx, sp %lx, pid %d, frame %p\n",
-	       syscallnames[frame->code], frame->pc, frame->psl,frame->sp,
-		curproc->p_pid,frame);
-#endif
-	uvmexp.syscalls++;
- 
-	exptr = p->p_addr->u_pcb.framep = frame;
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
-
-	if(frame->code == SYS___syscall){
-		int g = *(int *)(frame->ap);
-
-		frame->code = *(int *)(frame->ap + 4);
-		frame->ap += 8;
-		*(int *)(frame->ap) = g - 2;
-	}
-
-	if(frame->code < 0 || frame->code >= nsys)
-		callp += p->p_emul->e_nosys;
-	else
-		callp += frame->code;
-
-	rval[0] = 0;
-	rval[1] = frame->r1;
-	if(callp->sy_narg) {
-		err = copyin((char *)frame->ap + 4, args, callp->sy_argsize);
-		if (err) {
-#ifdef KTRACE
-			if (KTRPOINT(p, KTR_SYSCALL))
-				ktrsyscall(p, frame->code,
-				    callp->sy_argsize, args);
-#endif
-			goto bad;
-		}
-	}
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
-		ktrsyscall(p, frame->code, callp->sy_argsize, args);
-#endif
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
-		err = systrace_redirect(frame->code, curproc, args, rval);
-	else
-#endif
-		err = (*callp->sy_call)(curproc, args, rval);
-
-#ifdef TRAPDEBUG
-if(startsysc)
-	printf("retur %s pc %lx, psl %lx, sp %lx, pid %d, v{rde %d r0 %d, r1 %d, frame %p\n",
-	       syscallnames[exptr->code], exptr->pc, exptr->psl,exptr->sp,
-		curproc->p_pid,err,rval[0],rval[1],exptr);
-#endif
-
-bad:
-	switch (err) {
-	case 0:
-		exptr->r1 = rval[1];
-		exptr->r0 = rval[0];
-		exptr->psl &= ~PSL_C;
-		break;
-
-	case EJUSTRETURN:
-		return;
-
-	case ERESTART:
-		exptr->pc -= (exptr->code > 63 ? 4 : 2);
-		break;
-
-	default:
-		exptr->r0 = err;
-		exptr->psl |= PSL_C;
-		break;
-	}
-
-	userret(p);
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, frame->code, err, rval[0]);
-#endif
+	/* XXX - profiling */
+	userret(l, l->l_addr->u_pcb.framep, l->l_proc->p_sticks);
 }
 
-void
-child_return(arg)
-	void *arg;
-{
-	struct proc *p = arg;
-	struct trapframe *frame;
-
-	frame = p->p_addr->u_pcb.framep;
-	frame->r1 = frame->r0 = 0;
-	frame->psl &= ~PSL_C;
-
-	userret(p);
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
-#endif
-}

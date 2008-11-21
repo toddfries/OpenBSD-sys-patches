@@ -1,4 +1,4 @@
-/*	$NetBSD: mb86950.c,v 1.10 2007/10/19 11:59:55 ad Exp $	*/
+/*	$NetBSD: mb86950.c,v 1.12 2008/11/07 00:20:02 dyoung Exp $	*/
 
 /*
  * All Rights Reserved, Copyright (C) Fujitsu Limited 1995
@@ -67,7 +67,7 @@
   */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mb86950.c,v 1.10 2007/10/19 11:59:55 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mb86950.c,v 1.12 2008/11/07 00:20:02 dyoung Exp $");
 
 /*
  * Device driver for Fujitsu mb86950 based Ethernet cards.
@@ -200,7 +200,7 @@ mb86950_attach(sc, myea)
 #ifdef DIAGNOSTIC
 	if (myea == NULL) {
 		printf("%s: ethernet address shouldn't be NULL\n",
-		    sc->sc_dev.dv_xname);
+		    device_xname(&sc->sc_dev));
 		panic("NULL ethernet address");
 	}
 #endif
@@ -278,7 +278,7 @@ mb86950_config(struct mb86950_softc *sc, int *media,
 	bus_space_handle_t bsh = sc->sc_bsh;
 
 	/* Initialize ifnet structure. */
-	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
+	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_start = mb86950_start;
 	ifp->if_ioctl = mb86950_ioctl;
@@ -304,7 +304,7 @@ mb86950_config(struct mb86950_softc *sc, int *media,
 	ether_ifattach(ifp, sc->sc_enaddr);
 
 #if NRND > 0
-	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
+	rnd_attach_source(&sc->rnd_source, device_xname(&sc->sc_dev),
 	    RND_TYPE_NET, 0);
 #endif
 
@@ -335,7 +335,7 @@ mb86950_config(struct mb86950_softc *sc, int *media,
 	if (sc->rxb_num_pkt == 0) sc->rxb_num_pkt = 100;
 
 	/* Print additional info when attached. */
-	printf("%s: Ethernet address %s\n", sc->sc_dev.dv_xname,
+	printf("%s: Ethernet address %s\n", device_xname(&sc->sc_dev),
 	    ether_sprintf(sc->sc_enaddr));
 
 	/* The attach is successful. */
@@ -389,7 +389,7 @@ mb86950_reset(sc)
 	int s;
 
 	s = splnet();
-	log(LOG_ERR, "%s: device reset\n", sc->sc_dev.dv_xname);
+	log(LOG_ERR, "%s: device reset\n", device_xname(&sc->sc_dev));
 	mb86950_stop(sc);
 	mb86950_init(sc);
 	splx(s);
@@ -413,21 +413,21 @@ mb86950_watchdog(ifp)
 		if (tstat & TX_CR_LOST) {
 			if ((tstat & (TX_COL | TX_16COL)) == 0) {
 				 log(LOG_ERR, "%s: carrier lost\n",
-				    sc->sc_dev.dv_xname);
+				    device_xname(&sc->sc_dev));
 			} else {
 				log(LOG_ERR, "%s: excessive collisions\n",
-				    sc->sc_dev.dv_xname);
+				    device_xname(&sc->sc_dev));
 			}
 		}
 		else if ((tstat & (TX_UNDERFLO | TX_BUS_WR_ERR)) != 0) {
 			log(LOG_ERR, "%s: tx fifo underflow/overflow\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(&sc->sc_dev));
 		} else {
 			log(LOG_ERR, "%s: transmit error\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(&sc->sc_dev));
 		}
 	} else {
-		log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
+		log(LOG_ERR, "%s: device timeout\n", device_xname(&sc->sc_dev));
 	}
 
 	/* Don't know how many packets are lost by this accident.
@@ -444,10 +444,7 @@ mb86950_watchdog(ifp)
  * Process an ioctl request.
  */
 int
-mb86950_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	void *data;
+mb86950_ioctl(struct ifnet *ifp, unsigned long cmd, void *data)
 {
 	struct mb86950_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -458,32 +455,34 @@ mb86950_ioctl(ifp, cmd, data)
 	s = splnet();
 
 	switch (cmd) {
-	case SIOCSIFADDR:
-		/* XXX depreciated ? What should I use instead? */
+	case SIOCINITIFADDR:
+		/* XXX deprecated ? What should I use instead? */
 		if ((error = mb86950_enable(sc)) != 0)
 			break;
 
 		ifp->if_flags |= IFF_UP;
 
+		mb86950_init(sc);
 		switch (ifa->ifa_addr->sa_family) {
 
 #ifdef INET
 		case AF_INET:
-			mb86950_init(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif
 
 
 		default:
-			mb86950_init(sc);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		/* XXX re-use ether_ioctl() */
+		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
+		case IFF_RUNNING:
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
@@ -491,9 +490,8 @@ mb86950_ioctl(ifp, cmd, data)
 			mb86950_stop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
 			mb86950_disable(sc);
-
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-			(ifp->if_flags & IFF_RUNNING) == 0) {
+			break;
+		case IFF_UP:
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
@@ -501,22 +499,26 @@ mb86950_ioctl(ifp, cmd, data)
 			if ((error = mb86950_enable(sc)) != 0)
 				break;
 			mb86950_init(sc);
-
-		} else if ((ifp->if_flags & IFF_UP) != 0) {
+			break;
+		case IFF_UP|IFF_RUNNING:
 			/*
 			 * Reset the interface to pick up changes in any other
 			 * flags that affect hardware registers.
 			 */
-/* Setmode not supported
+#if 0
+			/* Setmode not supported */
 			mb86950_setmode(sc);
-*/
+#endif
+			break;
+		case 0:
+			break;
 		}
 
 #if ESTAR_DEBUG >= 1
 		/* "ifconfig fe0 debug" to print register dump. */
 		if (ifp->if_flags & IFF_DEBUG) {
 			log(LOG_INFO, "%s: SIOCSIFFLAGS(DEBUG)\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(&sc->sc_dev));
 			mb86950_dump(LOG_DEBUG, sc);
 		}
 #endif
@@ -528,7 +530,7 @@ mb86950_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 
@@ -600,7 +602,7 @@ mb86950_start(ifp)
 
 	/* XXX bus_space_barrier here ? */
 	if (bus_space_read_1(bst, bsh, DLCR_TX_STAT) & (TX_UNDERFLO | TX_BUS_WR_ERR)) {
-		log(LOG_ERR, "%s: tx fifo underflow/overflow\n", sc->sc_dev.dv_xname);
+		log(LOG_ERR, "%s: tx fifo underflow/overflow\n", device_xname(&sc->sc_dev));
 	}
 
 	bus_space_write_2(bst, bsh, BMPR_TX_LENGTH, len | TRANSMIT_START);
@@ -954,8 +956,7 @@ mb86950_enable(sc)
 
 	if ((sc->sc_stat & ESTAR_STAT_ENABLED) == 0 && sc->sc_enable != NULL) {
 		if ((*sc->sc_enable)(sc) != 0) {
-			printf("%s: device enable failed\n",
-			    sc->sc_dev.dv_xname);
+			aprint_error_dev(&sc->sc_dev, "device enable failed\n");
 			return (EIO);
 		}
 	}

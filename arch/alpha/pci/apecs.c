@@ -1,5 +1,4 @@
-/*	$OpenBSD: apecs.c,v 1.20 2006/12/14 17:36:12 kettenis Exp $	*/
-/*	$NetBSD: apecs.c,v 1.16 1996/12/05 01:39:34 cgd Exp $	*/
+/* $NetBSD: apecs.c,v 1.46 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,15 +56,26 @@
  * rights to redistribute these changes.
  */
 
+#include "opt_dec_2100_a50.h"
+#include "opt_dec_eb64plus.h"
+#include "opt_dec_1000a.h"
+#include "opt_dec_1000.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: apecs.c,v 1.46 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
+
 #include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/rpb.h>
+#include <machine/sysarch.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -94,18 +97,16 @@
 #include <alpha/pci/pci_1000.h>
 #endif
 
-int	apecsmatch(struct device *, void *, void *);
-void	apecsattach(struct device *, struct device *, void *);
+int	apecsmatch __P((struct device *, struct cfdata *, void *));
+void	apecsattach __P((struct device *, struct device *, void *));
 
-struct cfattach apecs_ca = {
-	sizeof(struct device), apecsmatch, apecsattach,
-};
+CFATTACH_DECL(apecs, sizeof(struct apecs_softc),
+    apecsmatch, apecsattach, NULL, NULL);
 
-struct cfdriver apecs_cd = {
-	NULL, "apecs", DV_DULL,
-};
+extern struct cfdriver apecs_cd;
 
-int	apecsprint(void *, const char *pnp);
+int	apecs_bus_get_window __P((int, int,
+	    struct alpha_bus_space_translation *));
 
 /* There can be only one. */
 int apecsfound;
@@ -114,7 +115,7 @@ struct apecs_config apecs_configuration;
 int
 apecsmatch(parent, match, aux)
 	struct device *parent;
-	void *match;
+	struct cfdata *match;
 	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
@@ -152,25 +153,17 @@ apecs_init(acp, mallocsafe)
 		apecs_bus_io_init(&acp->ac_iot, acp);
 		apecs_bus_mem_init(&acp->ac_memt, acp);
 
-#if 0
 		/*
 		 * We have two I/O windows and 3 MEM windows.
 		 */
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 2;
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 3;
 		alpha_bus_get_window = apecs_bus_get_window;
-#endif
 	}
 	acp->ac_mallocsafe = mallocsafe;
 
 	apecs_pci_init(&acp->ac_pc, acp);
 	alpha_pci_chipset = &acp->ac_pc;
-	alpha_pci_chipset->pc_name = "apecs";
-	alpha_pci_chipset->pc_mem = APECS_PCI_SPARSE;
-	alpha_pci_chipset->pc_dense = APECS_PCI_DENSE;
-	alpha_pci_chipset->pc_ports = APECS_PCI_SIO;
-	alpha_pci_chipset->pc_bwx = 0;
-	alpha_pci_chipset->pc_hae_mask = EPIC_HAXR1_EADDR;
 
 	acp->ac_initted = 1;
 }
@@ -180,6 +173,7 @@ apecsattach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
+	struct apecs_softc *sc = (struct apecs_softc *)self;
 	struct apecs_config *acp;
 	struct pcibus_attach_args pba;
 
@@ -190,7 +184,7 @@ apecsattach(parent, self, aux)
 	 * set up the chipset's info; done once at console init time
 	 * (maybe), but doesn't hurt to do twice.
 	 */
-	acp = &apecs_configuration;
+	acp = sc->sc_acp = &apecs_configuration;
 	apecs_init(acp, 1);
 
 	apecs_dma_init(acp);
@@ -237,37 +231,19 @@ apecsattach(parent, self, aux)
 		panic("apecsattach: shouldn't be here, really...");
 	}
 
-	pba.pba_busname = "pci";
 	pba.pba_iot = &acp->ac_iot;
 	pba.pba_memt = &acp->ac_memt;
 	pba.pba_dmat =
 	    alphabus_dma_get_tag(&acp->ac_dmat_direct, ALPHA_BUS_PCI);
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &acp->ac_pc;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
-#ifdef notyet
 	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED |
 	    PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY | PCI_FLAGS_MWI_OKAY;
-#endif
-	config_found(self, &pba, apecsprint);
+	config_found_ia(self, "pcibus", &pba, pcibusprint);
 }
 
-int
-apecsprint(aux, pnp)
-	void *aux;
-	const char *pnp;
-{
-	register struct pcibus_attach_args *pba = aux;
-
-	/* only PCIs can attach to APECSes; easy. */
-	if (pnp)
-		printf("%s at %s", pba->pba_busname, pnp);
-	printf(" bus %d", pba->pba_bus);
-	return (UNCONF);
-}
-
-#if 0
 int
 apecs_bus_get_window(type, window, abst)
 	int type, window;
@@ -291,4 +267,3 @@ apecs_bus_get_window(type, window, abst)
 
 	return (alpha_bus_space_get_window(st, window, abst));
 }
-#endif

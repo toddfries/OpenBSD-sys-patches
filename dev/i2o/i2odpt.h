@@ -1,4 +1,4 @@
-/*	$NetBSD: i2odpt.h,v 1.3 2005/12/11 12:21:23 christos Exp $	*/
+/*	$NetBSD: i2odpt.h,v 1.5 2008/09/08 23:36:54 gmcgarry Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,7 +70,7 @@ struct i2o_dpt_scsi_scb_exec {
 	u_int32_t	scbflags;
 	u_int8_t	cdb[16];
 	u_int32_t	bytecount;
-} __attribute__ ((__packed__));
+} __packed;
 
 #define	I2O_DPT_FLASH_REGION_SIZE	0x0100
 #define	I2O_DPT_FLASH_REGION_READ	0x0101
@@ -92,7 +85,7 @@ struct i2o_dpt_flash_region {
 	u_int32_t	region;
 	u_int32_t	regionoffset;
 	u_int32_t	bytecount;
-} __attribute__ ((__packed__));
+} __packed;
 
 #define	DPT_FLASH_REGION_OP_FIRMWARE	0x00
 #define	DPT_FLASH_REGION_SOFTWARE	0x01
@@ -109,7 +102,7 @@ struct i2o_dpt_driver_printf {
 	u_int32_t	privfunc;
 	u_int32_t	printbuffersize;
 	u_int8_t	printbuffer[1];
-} __attribute__ ((__packed__));
+} __packed;
 
 #define	I2O_DPT_DIAG_ENABLE		0x0201
 struct i2o_dpt_diag_enable {
@@ -118,7 +111,7 @@ struct i2o_dpt_diag_enable {
 	u_int32_t	msgictx;
 	u_int32_t	msgtctx;
 	u_int32_t	privfunc;
-} __attribute__ ((__packed__));
+} __packed;
 
 #define	I2O_DPT_DRIVER_GET		0x0300
 struct i2o_dpt_driver_get {
@@ -131,7 +124,7 @@ struct i2o_dpt_driver_get {
 	u_int32_t	bytecount;
 
 	/* SGL follows. */
-} __attribute__ ((__packed__));
+} __packed;
 
 #define	I2O_DPT_DRIVER_SET		0x0301
 struct i2o_dpt_driver_set {
@@ -144,7 +137,7 @@ struct i2o_dpt_driver_set {
 	u_int32_t	bytecount;
 
 	/* SGL follows. */
-} __attribute__ ((__packed__));
+} __packed;
 
 /*
  * ================= Parameter groups =================
@@ -157,7 +150,7 @@ struct i2o_dpt_param_device_info {
 	u_int16_t	bus;
 	u_int32_t	identifier;
 	u_int8_t	luninfo[8];
-} __attribute__ ((__packed__));
+} __packed;
 
 #define	I2O_DPT_PARAM_EXEC_IOP_BUFFERS	0x8000
 struct i2o_dpt_param_exec_iop_buffers {
@@ -165,6 +158,6 @@ struct i2o_dpt_param_exec_iop_buffers {
 	u_int32_t	serialoutputsize;
 	u_int32_t	serialheadersize;
 	u_int32_t	serialflagssupported;
-} __attribute__ ((__packed__));
+} __packed;
 
 #endif	/* _I2O_I2ODPT_H_ */

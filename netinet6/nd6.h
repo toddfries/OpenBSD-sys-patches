@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.h,v 1.25 2003/07/08 21:43:18 itojun Exp $	*/
+/*	$NetBSD: nd6.h,v 1.51 2008/10/24 17:07:33 dyoung Exp $	*/
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 #endif
 
 #include <sys/queue.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 
 struct	llinfo_nd6 {
 	struct	llinfo_nd6 *ln_next;
@@ -53,7 +53,7 @@ struct	llinfo_nd6 {
 	int	ln_byhint;	/* # of times we made it reachable by UL hint */
 
 	long	ln_ntick;
-	struct timeout ln_timer_ch;
+	struct callout ln_timer_ch;
 };
 
 #define ND6_LLINFO_NOSTATE	-2
@@ -72,7 +72,7 @@ struct	llinfo_nd6 {
 #define ND6_LLINFO_PROBE	4
 
 #define ND6_IS_LLINFO_PROBREACH(n) ((n)->ln_state > ND6_LLINFO_INCOMPLETE)
-#define ND6_LLINFO_PERMANENT(n)	((n)->ln_expire == 0)
+#define ND6_LLINFO_PERMANENT(n)	(((n)->ln_expire == 0) && ((n)->ln_state > ND6_LLINFO_INCOMPLETE))
 
 struct nd_ifinfo {
 	u_int32_t linkmtu;		/* LinkMTU */
@@ -92,6 +92,10 @@ struct nd_ifinfo {
 
 #define ND6_IFF_PERFORMNUD	0x1
 #define ND6_IFF_ACCEPT_RTADV	0x2
+#define ND6_IFF_PREFER_SOURCE	0x4 /* XXX: not related to ND. */
+#define ND6_IFF_IFDISABLED	0x8 /* IPv6 operation is disabled due to
+				     * DAD failure.  (XXX: not ND-specific)
+				     */
 
 #ifdef _KERNEL
 #define ND_IFINFO(ifp) \
@@ -215,8 +219,8 @@ struct	in6_ndifreq {
 #define NDPRF_HOME		0x4
 
 /* protocol constants */
-#define MAX_RTR_SOLICITATION_DELAY	1	/*1sec*/
-#define RTR_SOLICITATION_INTERVAL	4	/*4sec*/
+#define MAX_RTR_SOLICITATION_DELAY	1	/* 1sec */
+#define RTR_SOLICITATION_INTERVAL	4	/* 4sec */
 #define MAX_RTR_SOLICITATIONS		3
 
 #define ND6_INFINITE_LIFETIME		0xffffffff
@@ -228,6 +232,10 @@ struct	in6_ndifreq {
 #define RETRANS_TIMER			1000	/* msec */
 #define MIN_RANDOM_FACTOR		512	/* 1024 * 0.5 */
 #define MAX_RANDOM_FACTOR		1536	/* 1024 * 1.5 */
+#define DEF_TEMP_VALID_LIFETIME		604800	/* 1 week */
+#define DEF_TEMP_PREFERRED_LIFETIME	86400	/* 1 day */
+#define TEMPADDR_REGEN_ADVANCE		5	/* sec */
+#define MAX_TEMP_DESYNC_FACTOR		600	/* 10 min */
 #define ND_COMPUTE_RTIME(x) \
 		(((MIN_RANDOM_FACTOR * (x >> 10)) + (arc4random() & \
 		((MAX_RANDOM_FACTOR - MIN_RANDOM_FACTOR) * (x >> 10)))) /1000)
@@ -241,6 +249,19 @@ struct	nd_defrouter {
 	u_long	expire;
 	struct  ifnet *ifp;
 	int	installed;	/* is installed into kernel routing table */
+};
+
+struct nd_prefixctl {
+	struct ifnet *ndpr_ifp;
+
+	/* prefix */
+	struct sockaddr_in6 ndpr_prefix;
+	u_char	ndpr_plen;
+
+	u_int32_t ndpr_vltime;	/* advertised valid lifetime */
+	u_int32_t ndpr_pltime;	/* advertised preferred lifetime */
+
+	struct prf_ra ndpr_flags;
 };
 
 struct nd_prefix {
@@ -263,8 +284,6 @@ struct nd_prefix {
 	u_char	ndpr_plen;
 	int	ndpr_refcnt;	/* reference couter from addresses */
 };
-
-#define ndpr_next		ndpr_entry.le_next
 
 #define ndpr_raf		ndpr_flags
 #define ndpr_raf_onlink		ndpr_flags.onlink
@@ -299,11 +318,13 @@ struct inet6_ndpr_msghdr {
 
 struct nd_pfxrouter {
 	LIST_ENTRY(nd_pfxrouter) pfr_entry;
-#define pfr_next pfr_entry.le_next
 	struct nd_defrouter *router;
 };
 
 LIST_HEAD(nd_prhead, nd_prefix);
+
+#include <sys/mallocvar.h>
+MALLOC_DECLARE(M_IP6NDP);
 
 /* nd6.c */
 extern int nd6_prune;
@@ -318,15 +339,19 @@ extern struct nd_drhead nd_defrouter;
 extern struct nd_prhead nd_prefix;
 extern int nd6_debug;
 
-#define nd6log(x)	do { if (nd6_debug) log x; } while (0)
+#define nd6log(x)	do { if (nd6_debug) log x; } while (/*CONSTCOND*/ 0)
 
-extern struct timeout nd6_timer_ch;
+extern struct callout nd6_timer_ch;
 
 /* nd6_rtr.c */
 extern int nd6_defifindex;
+extern int ip6_desync_factor;	/* seconds */
+extern u_int32_t ip6_temp_preferred_lifetime; /* seconds */
+extern u_int32_t ip6_temp_valid_lifetime; /* seconds */
+extern int ip6_temp_regen_advance; /* seconds */
 
 union nd_opts {
-	struct nd_opt_hdr *nd_opt_array[9];
+	struct nd_opt_hdr *nd_opt_array[8];
 	struct {
 		struct nd_opt_hdr *zero;
 		struct nd_opt_hdr *src_lladdr;
@@ -355,11 +380,11 @@ union nd_opts {
 void nd6_init(void);
 struct nd_ifinfo *nd6_ifattach(struct ifnet *);
 void nd6_ifdetach(struct nd_ifinfo *);
-int nd6_is_addr_neighbor(struct sockaddr_in6 *, struct ifnet *);
+int nd6_is_addr_neighbor(const struct sockaddr_in6 *, struct ifnet *);
 void nd6_option_init(void *, int, union nd_opts *);
 struct nd_opt_hdr *nd6_option(union nd_opts *);
 int nd6_options(union nd_opts *);
-struct	rtentry *nd6_lookup(struct in6_addr *, int, struct ifnet *);
+struct	rtentry *nd6_lookup(const struct in6_addr *, int, struct ifnet *);
 void nd6_setmtu(struct ifnet *);
 void nd6_llinfo_settimer(struct llinfo_nd6 *, long);
 void nd6_timer(void *);
@@ -367,26 +392,28 @@ void nd6_purge(struct ifnet *);
 void nd6_nud_hint(struct rtentry *, struct in6_addr *, int);
 int nd6_resolve(struct ifnet *, struct rtentry *,
 	struct mbuf *, struct sockaddr *, u_char *);
-void nd6_rtrequest(int, struct rtentry *, struct rt_addrinfo *);
-int nd6_ioctl(u_long, caddr_t, struct ifnet *);
+void nd6_rtrequest(int, struct rtentry *, const struct rt_addrinfo *);
+int nd6_ioctl(u_long, void *, struct ifnet *);
 struct rtentry *nd6_cache_lladdr(struct ifnet *, struct in6_addr *,
 	char *, int, int, int);
 int nd6_output(struct ifnet *, struct ifnet *, struct mbuf *,
-	struct sockaddr_in6 *, struct rtentry *);
-int nd6_storelladdr(struct ifnet *, struct rtentry *, struct mbuf *,
-	 struct sockaddr *, u_char *);
+	const struct sockaddr_in6 *, struct rtentry *);
+int nd6_storelladdr(const struct ifnet *, const struct rtentry *, struct mbuf *,
+	const struct sockaddr *, uint8_t *, size_t);
 int nd6_sysctl(int, void *, size_t *, void *, size_t);
 int nd6_need_cache(struct ifnet *);
+void nd6_llinfo_release_pkts(struct llinfo_nd6 *, struct ifnet *,
+    struct rtentry *);
 
 /* nd6_nbr.c */
 void nd6_na_input(struct mbuf *, int, int);
-void nd6_na_output(struct ifnet *, struct in6_addr *,
-	struct in6_addr *, u_long, int, struct sockaddr *);
+void nd6_na_output(struct ifnet *, const struct in6_addr *,
+	const struct in6_addr *, u_long, int, const struct sockaddr *);
 void nd6_ns_input(struct mbuf *, int, int);
-void nd6_ns_output(struct ifnet *, struct in6_addr *,
-	struct in6_addr *, struct llinfo_nd6 *, int);
-caddr_t nd6_ifptomac(struct ifnet *);
-void nd6_dad_start(struct ifaddr *, int *);
+void nd6_ns_output(struct ifnet *, const struct in6_addr *,
+	const struct in6_addr *, struct llinfo_nd6 *, int);
+const void *nd6_ifptomac(const struct ifnet *);
+void nd6_dad_start(struct ifaddr *, int);
 void nd6_dad_stop(struct ifaddr *);
 void nd6_dad_duplicated(struct ifaddr *);
 
@@ -399,19 +426,18 @@ void defrouter_reset(void);
 void defrouter_select(void);
 void defrtrlist_del(struct nd_defrouter *);
 void prelist_remove(struct nd_prefix *);
-int prelist_update(struct nd_prefix *, struct nd_defrouter *, struct mbuf *);
-int nd6_prelist_add(struct nd_prefix *, struct nd_defrouter *,
+int nd6_prelist_add(struct nd_prefixctl *, struct nd_defrouter *,
 	struct nd_prefix **);
 int nd6_prefix_onlink(struct nd_prefix *);
 int nd6_prefix_offlink(struct nd_prefix *);
 void pfxlist_onlink_check(void);
-struct nd_defrouter *defrouter_lookup(struct in6_addr *, struct ifnet *);
-struct nd_prefix *nd6_prefix_lookup(struct nd_prefix *);
+struct nd_defrouter *defrouter_lookup(const struct in6_addr *, struct ifnet *);
+struct nd_prefix *nd6_prefix_lookup(struct nd_prefixctl *);
 int in6_ifdel(struct ifnet *, struct in6_addr *);
-int in6_init_prefix_ltimes(struct nd_prefix *ndpr);
 void rt6_flush(struct in6_addr *, struct ifnet *);
 int nd6_setdefaultiface(int);
+int in6_tmpifadd(const struct in6_ifaddr *, int, int);
 
 #endif /* _KERNEL */
 
-#endif /* _NETINET6_ND6_H_ */
+#endif /* !_NETINET6_ND6_H_ */

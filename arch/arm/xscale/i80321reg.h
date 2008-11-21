@@ -1,5 +1,4 @@
-/*	$OpenBSD: i80321reg.h,v 1.3 2006/06/27 05:18:25 drahn Exp $	*/
-/*	$NetBSD: i80321reg.h,v 1.15 2005/12/11 12:16:51 christos Exp $	*/
+/*	$NetBSD: i80321reg.h,v 1.17 2007/10/17 19:53:43 garbled Exp $	*/
 
 /*
  * Copyright (c) 2002 Wasabi Systems, Inc.
@@ -56,6 +55,7 @@
 
 #define	VERDE_OUT_DIRECT_WIN_BASE	0x00000000UL
 #define	VERDE_OUT_DIRECT_WIN_SIZE	0x80000000UL
+#define VERDE_OUT_DIRECT_WIN_SKIP	0x10000000UL
 
 #define	VERDE_OUT_XLATE_MEM_WIN_SIZE	0x04000000UL
 #define	VERDE_OUT_XLATE_IO_WIN_SIZE	0x00010000UL
@@ -299,7 +299,6 @@
 #define	TMRx_TC			(1U << 0)
 #define	TMRx_ENABLE		(1U << 1)
 #define	TMRx_RELOAD		(1U << 2)
-#define	TMRx_PRIV		(1U << 3)
 #define	TMRx_CSEL_CORE		(0 << 4)
 #define	TMRx_CSEL_CORE_div4	(1 << 4)
 #define	TMRx_CSEL_CORE_div8	(2 << 4)
@@ -337,7 +336,6 @@
 #define	ICU_INT_SSP		25	/* SSP serial port */
 #define	ICU_INT_MUE		24	/* msg unit error */
 #define	ICU_INT_AAUE		23	/* AAU error */
-#define	ICU_INT_bit23		23
 #define	ICU_INT_bit22		22
 #define	ICU_INT_DMA1E		21	/* DMA Ch 1 error */
 #define	ICU_INT_DMA0E		20	/* DMA Ch 0 error */

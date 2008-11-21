@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6.c,v 1.16 2007/05/31 23:17:38 mcbride Exp $	*/
+/*	$NetBSD: route6.c,v 1.23 2008/04/15 03:57:04 thorpej Exp $	*/
 /*	$KAME: route6.c,v 1.22 2000/12/03 00:54:00 itojun Exp $	*/
 
 /*
@@ -30,10 +30,14 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: route6.c,v 1.23 2008/04/15 03:57:04 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
+#include <sys/queue.h>
 
 #include <net/if.h>
 
@@ -41,6 +45,8 @@
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/ip6_private.h>
+#include <netinet6/scope6_var.h>
 
 #include <netinet/icmp6.h>
 
@@ -49,9 +55,7 @@ static int ip6_rthdr0(struct mbuf *, struct ip6_hdr *, struct ip6_rthdr0 *);
 #endif
 
 int
-route6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;	/* proto is unused */
+route6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct ip6_hdr *ip6;
 	struct mbuf *m = *mp;
@@ -61,7 +65,7 @@ route6_input(mp, offp, proto)
 	ip6 = mtod(m, struct ip6_hdr *);
 	IP6_EXTHDR_GET(rh, struct ip6_rthdr *, m, off, sizeof(*rh));
 	if (rh == NULL) {
-		ip6stat.ip6s_tooshort++;
+		IP6_STATINC(IP6_STAT_TOOSHORT);
 		return IPPROTO_DONE;
 	}
 
@@ -84,8 +88,6 @@ route6_input(mp, offp, proto)
 	 */
 	case IPV6_RTHDR_TYPE_0:
 		rhlen = (rh->ip6r_len + 1) << 3;
-		if (rh->ip6r_segleft == 0)
-			break;	/* Final dst. Just ignore the header. */
 		/*
 		 * note on option length:
 		 * maximum rhlen: 2048
@@ -96,7 +98,7 @@ route6_input(mp, offp, proto)
 		 */
 		IP6_EXTHDR_GET(rh, struct ip6_rthdr *, m, off, rhlen);
 		if (rh == NULL) {
-			ip6stat.ip6s_tooshort++;
+			IP6_STATINC(IP6_STAT_TOOSHORT);
 			return IPPROTO_DONE;
 		}
 		if (ip6_rthdr0(m, ip6, (struct ip6_rthdr0 *)rh))
@@ -109,9 +111,9 @@ route6_input(mp, offp, proto)
 			rhlen = (rh->ip6r_len + 1) << 3;
 			break;	/* Final dst. Just ignore the header. */
 		}
-		ip6stat.ip6s_badoptions++;
+		IP6_STATINC(IP6_STAT_BADOPTIONS);
 		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER,
-			    (caddr_t)&rh->ip6r_type - (caddr_t)ip6);
+			    (char *)&rh->ip6r_type - (char *)ip6);
 		return (IPPROTO_DONE);
 	}
 
@@ -127,33 +129,36 @@ route6_input(mp, offp, proto)
  * as it was dropped between RFC1883 and RFC2460.
  */
 static int
-ip6_rthdr0(m, ip6, rh0)
-	struct mbuf *m;
-	struct ip6_hdr *ip6;
-	struct ip6_rthdr0 *rh0;
+ip6_rthdr0(struct mbuf *m, struct ip6_hdr *ip6, 
+	struct ip6_rthdr0 *rh0)
 {
 	int addrs, index;
 	struct in6_addr *nextaddr, tmpaddr;
+	const struct ip6aux *ip6a;
 
 	if (rh0->ip6r0_segleft == 0)
 		return (0);
 
-	if (rh0->ip6r0_len % 2) {
+	if (rh0->ip6r0_len % 2
+#ifdef COMPAT_RFC1883
+	    || rh0->ip6r0_len > 46
+#endif
+		) {
 		/*
 		 * Type 0 routing header can't contain more than 23 addresses.
-		 * RFC 2460: this limitation was removed since strict/loose
+		 * RFC 2462: this limitation was removed since strict/loose
 		 * bitmap field was deleted.
 		 */
-		ip6stat.ip6s_badoptions++;
+		IP6_STATINC(IP6_STAT_BADOPTIONS);
 		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER,
-			    (caddr_t)&rh0->ip6r0_len - (caddr_t)ip6);
+			    (char *)&rh0->ip6r0_len - (char *)ip6);
 		return (-1);
 	}
 
 	if ((addrs = rh0->ip6r0_len / 2) < rh0->ip6r0_segleft) {
-		ip6stat.ip6s_badoptions++;
+		IP6_STATINC(IP6_STAT_BADOPTIONS);
 		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER,
-			    (caddr_t)&rh0->ip6r0_segleft - (caddr_t)ip6);
+			    (char *)&rh0->ip6r0_segleft - (char *)ip6);
 		return (-1);
 	}
 
@@ -170,14 +175,26 @@ ip6_rthdr0(m, ip6, rh0)
 	    IN6_IS_ADDR_UNSPECIFIED(nextaddr) ||
 	    IN6_IS_ADDR_V4MAPPED(nextaddr) ||
 	    IN6_IS_ADDR_V4COMPAT(nextaddr)) {
-		ip6stat.ip6s_badoptions++;
+		p6stat[IP6_STAT_BADOPTIONS]++;
 		goto bad;
 	}
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst) ||
 	    IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_dst) ||
 	    IN6_IS_ADDR_V4MAPPED(&ip6->ip6_dst) ||
 	    IN6_IS_ADDR_V4COMPAT(&ip6->ip6_dst)) {
-		ip6stat.ip6s_badoptions++;
+		IP6_STATINC(IP6_STAT_BADOPTIONS);
+		goto bad;
+	}
+
+	/*
+	 * Determine the scope zone of the next hop, based on the interface
+	 * of the current hop. [RFC4007, Section 9]
+	 * Then disambiguate the scope zone for the next hop (if necessary). 
+	 */
+	if ((ip6a = ip6_getdstifaddr(m)) == NULL)
+		goto bad;
+	if (in6_setzoneid(nextaddr, ip6a->ip6a_scope_id) != 0) {
+		IP6_STATINC(IP6_STAT_BADSCOPE);
 		goto bad;
 	}
 
@@ -186,13 +203,17 @@ ip6_rthdr0(m, ip6, rh0)
 	 */
 	tmpaddr = *nextaddr;
 	*nextaddr = ip6->ip6_dst;
-	if (IN6_IS_ADDR_LINKLOCAL(nextaddr))
-		nextaddr->s6_addr16[1] = 0;
+	in6_clearscope(nextaddr); /* XXX */
 	ip6->ip6_dst = tmpaddr;
-	if (IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_dst))
-		ip6->ip6_dst.s6_addr16[1] = htons(m->m_pkthdr.rcvif->if_index);
 
+#ifdef COMPAT_RFC1883
+	if (rh0->ip6r0_slmap[index / 8] & (1 << (7 - (index % 8))))
+		ip6_forward(m, IPV6_SRCRT_NEIGHBOR);
+	else
+		ip6_forward(m, IPV6_SRCRT_NOTNEIGHBOR);
+#else
 	ip6_forward(m, 1);
+#endif
 
 	return (-1);			/* m would be freed in ip6_forward() */
 

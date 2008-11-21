@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_ne_pci.c,v 1.16 2006/10/20 17:02:24 brad Exp $	*/
-/*	$NetBSD: if_ne_pci.c,v 1.8 1998/07/05 00:51:24 jonathan Exp $	*/
+/*	$NetBSD: if_ne_pci.c,v 1.32 2008/04/28 20:23:55 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +30,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "bpfilter.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_ne_pci.c,v 1.32 2008/04/28 20:23:55 martin Exp $");
+
+#include "opt_ipkdb.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,21 +43,19 @@
 #include <sys/device.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#ifdef IPKDB_NE_PCI
+#include <ipkdb/ipkdb.h>
+#endif
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
-
-#include <dev/mii/miivar.h>
 
 #include <dev/ic/dp8390reg.h>
 #include <dev/ic/dp8390var.h>
@@ -80,74 +73,91 @@ struct ne_pci_softc {
 	void *sc_ih;				/* interrupt handle */
 };
 
-int ne_pci_match(struct device *, void *, void *);
-void ne_pci_attach(struct device *, struct device *, void *);
+static int	ne_pci_match(struct device *, struct cfdata *, void *);
+static void	ne_pci_attach(struct device *, struct device *, void *);
 
-struct cfattach ne_pci_ca = {
-	sizeof(struct ne_pci_softc), ne_pci_match, ne_pci_attach
-};
+CFATTACH_DECL_NEW(ne_pci, sizeof(struct ne_pci_softc),
+    ne_pci_match, ne_pci_attach, NULL, NULL);
 
-const struct ne_pci_product {
+#ifdef IPKDB_NE_PCI
+static struct ne_pci_softc ipkdb_softc;
+static pci_chipset_tag_t ipkdb_pc;
+static pcitag_t ipkdb_tag;
+static struct ipkdb_if *ne_kip;
+
+int ne_pci_ipkdb_attach(struct ipkdb_if *, bus_space_tag_t,       /* XXX */
+			pci_chipset_tag_t, int, int);
+
+static int ne_pci_isipkdb(pci_chipset_tag_t, pcitag_t);
+#endif
+
+static const struct ne_pci_product {
 	pci_vendor_id_t npp_vendor;
 	pci_product_id_t npp_product;
 	int (*npp_mediachange)(struct dp8390_softc *);
-	void (*npp_mediastatus)(struct dp8390_softc *,
-	    struct ifmediareq *);
+	void (*npp_mediastatus)(struct dp8390_softc *, struct ifmediareq *);
 	void (*npp_init_card)(struct dp8390_softc *);
 	void (*npp_media_init)(struct dp8390_softc *);
-} ne_pci_prod[] = {
+	const char *npp_name;
+} ne_pci_products[] = {
 	{ PCI_VENDOR_REALTEK,		PCI_PRODUCT_REALTEK_RT8029,
 	  rtl80x9_mediachange,		rtl80x9_mediastatus,
 	  rtl80x9_init_card,		rtl80x9_media_init,
-	  /* RealTek 8029 */ },
+	  "Realtek 8029" },
 
 	{ PCI_VENDOR_WINBOND,		PCI_PRODUCT_WINBOND_W89C940F,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* Winbond 89C940F */ },
+	  "Winbond 89C940F" },
+
+	{ PCI_VENDOR_WINBOND,		PCI_PRODUCT_WINBOND_W89C940F_1,
+	  NULL,				NULL,
+	  NULL,				NULL,
+	  "Winbond 89C940F" },
 
 	{ PCI_VENDOR_VIATECH,		PCI_PRODUCT_VIATECH_VT86C926,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* VIA Technologies VT86C926 */ },
+	  "VIA Technologies VT86C926" },
 
 	{ PCI_VENDOR_SURECOM,		PCI_PRODUCT_SURECOM_NE34,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* Surecom NE-34 */ },
+	  "Surecom NE-34" },
 
-	{ PCI_VENDOR_NETVIN,		PCI_PRODUCT_NETVIN_NV5000,
+	{ PCI_VENDOR_NETVIN,		PCI_PRODUCT_NETVIN_5000,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* NetVin 5000 */ },
+	  "NetVin 5000" },
 
 	/* XXX The following entries need sanity checking in pcidevs */
-	{ PCI_VENDOR_COMPEX,		PCI_PRODUCT_COMPEX_COMPEXE,
+	{ PCI_VENDOR_COMPEX,		PCI_PRODUCT_COMPEX_NE2KETHER,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* Compex */ },
+	  "Compex" },
 
-	{ PCI_VENDOR_WINBOND2,		PCI_PRODUCT_WINBOND2_W89C940,
+	{ PCI_VENDOR_PROLAN,		PCI_PRODUCT_PROLAN_NE2KETHER,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* ProLAN */ },
+	  "ProLAN" },
 
-	{ PCI_VENDOR_KTI,		PCI_PRODUCT_KTI_KTIE,
+	{ PCI_VENDOR_KTI,		PCI_PRODUCT_KTI_NE2KETHER,
 	  NULL,				NULL,
 	  NULL,				NULL,
-	  /* KTI */ },
+	  "KTI" },
+
+	{ 0,				0,
+	  NULL,				NULL,
+	  NULL,				NULL,
+	  NULL },
 };
 
-const struct ne_pci_product *ne_pci_lookup(struct pci_attach_args *);
-
-const struct ne_pci_product *
-ne_pci_lookup(struct pci_attach_args *pa)
+static const struct ne_pci_product *
+ne_pci_lookup(const struct pci_attach_args *pa)
 {
 	const struct ne_pci_product *npp;
 
-	for (npp = ne_pci_prod;
-	    npp < &ne_pci_prod[sizeof(ne_pci_prod)/sizeof(ne_pci_prod[0])];
-	    npp++) {
+	for (npp = ne_pci_products; npp->npp_name != NULL; npp++) {
 		if (PCI_VENDOR(pa->pa_id) == npp->npp_vendor &&
 		    PCI_PRODUCT(pa->pa_id) == npp->npp_product)
 			return (npp);
@@ -161,26 +171,26 @@ ne_pci_lookup(struct pci_attach_args *pa)
  */
 #define PCI_CBIO	0x10		/* Configuration Base IO Address */
 
-int
-ne_pci_match(struct device *parent, void *match, void *aux)
+static int
+ne_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
 	if (ne_pci_lookup(pa) != NULL)
- 		return (1);
+		return (1);
 
 	return (0);
 }
 
-void
+static void
 ne_pci_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ne_pci_softc *psc = (struct ne_pci_softc *)self;
+	struct ne_pci_softc *psc = device_private(self);
 	struct ne2000_softc *nsc = &psc->sc_ne2000;
 	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	bus_size_t iosize;
 	bus_space_tag_t nict;
 	bus_space_handle_t nich;
 	bus_space_tag_t asict;
@@ -188,6 +198,7 @@ ne_pci_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr;
 	const struct ne_pci_product *npp;
 	pci_intr_handle_t ih;
+	pcireg_t csr;
 
 	npp = ne_pci_lookup(pa);
 	if (npp == NULL) {
@@ -195,17 +206,27 @@ ne_pci_attach(struct device *parent, struct device *self, void *aux)
 		panic("ne_pci_attach: impossible");
 	}
 
+	dsc->sc_dev = self;
+
+	printf(": %s Ethernet\n", npp->npp_name);
+
+#ifdef IPKDB_NE_PCI
+	if (ne_pci_isipkdb(pc, pa->pa_tag)) {
+		nict = ipkdb_softc.sc_ne2000.sc_dp8390.sc_regt;
+		nich = ipkdb_softc.sc_ne2000.sc_dp8390.sc_regh;
+		ne_kip->port = nsc;
+	} else
+#endif
 	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0,
-	    &nict, &nich, NULL, &iosize, 0)) {
-		printf(": can't map i/o space\n");
+	    &nict, &nich, NULL, NULL)) {
+		aprint_error_dev(dsc->sc_dev, "can't map i/o space\n");
 		return;
 	}
 
 	asict = nict;
 	if (bus_space_subregion(nict, nich, NE2000_ASIC_OFFSET,
 	    NE2000_ASIC_NPORTS, &asich)) {
-		printf(": can't subregion i/o space\n");
-		bus_space_unmap(nict, nich, iosize);
+		aprint_error_dev(dsc->sc_dev, "can't subregion i/o space\n");
 		return;
 	}
 
@@ -215,6 +236,12 @@ ne_pci_attach(struct device *parent, struct device *self, void *aux)
 	nsc->sc_asict = asict;
 	nsc->sc_asich = asich;
 
+	/* Enable the card. */
+	csr = pci_conf_read(pc, pa->pa_tag,
+	    PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+	    csr | PCI_COMMAND_MASTER_ENABLE);
+
 	/* This interface is always enabled. */
 	dsc->sc_enabled = 1;
 
@@ -223,28 +250,88 @@ ne_pci_attach(struct device *parent, struct device *self, void *aux)
 	dsc->sc_media_init = npp->npp_media_init;
 	dsc->init_card = npp->npp_init_card;
 
-	/* Map and establish the interrupt. */
-	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
-		bus_space_unmap(nict, nich, iosize);
-		return;
-	}
-	intrstr = pci_intr_string(pc, ih);
-	psc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, dp8390_intr, dsc,
-		dsc->sc_dev.dv_xname);
-	if (psc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt");
-		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		bus_space_unmap(nict, nich, iosize);
-		return;
-	}
-	printf(": %s", intrstr);
-
 	/*
 	 * Do generic NE2000 attach.  This will read the station address
 	 * from the EEPROM.
 	 */
 	ne2000_attach(nsc, NULL);
+
+	/* Map and establish the interrupt. */
+	if (pci_intr_map(pa, &ih)) {
+		aprint_error_dev(dsc->sc_dev, "couldn't map interrupt\n");
+		return;
+	}
+	intrstr = pci_intr_string(pc, ih);
+	psc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, dp8390_intr, dsc);
+	if (psc->sc_ih == NULL) {
+		aprint_error_dev(dsc->sc_dev, "couldn't establish interrupt");
+		if (intrstr != NULL)
+			aprint_error(" at %s", intrstr);
+		aprint_error("\n");
+		return;
+	}
+	aprint_normal_dev(dsc->sc_dev, "interrupting at %s\n", intrstr);
 }
+
+#ifdef IPKDB_NE_PCI
+static int
+ne_pci_isipkdb(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	return !memcmp(&pc, &ipkdb_pc, sizeof pc)
+		&& !memcmp(&tag, &ipkdb_tag, sizeof tag);
+}
+
+int
+ne_pci_ipkdb_attach(struct ipkdb_if *kip, bus_space_tag_t iot,
+    pci_chipset_tag_t pc, int bus, int dev)
+{
+	struct pci_attach_args pa;
+	bus_space_tag_t nict, asict;
+	bus_space_handle_t nich, asich;
+	u_int32_t csr;
+
+	pa.pa_iot = iot;
+	pa.pa_pc = pc;
+	pa.pa_device = dev;
+	pa.pa_function = 0;
+	pa.pa_flags = PCI_FLAGS_IO_ENABLED;
+	pa.pa_tag = pci_make_tag(pc, bus, dev, /*func*/0);
+	pa.pa_id = pci_conf_read(pc, pa.pa_tag, PCI_ID_REG);
+	pa.pa_class = pci_conf_read(pc, pa.pa_tag, PCI_CLASS_REG);
+	if (ne_pci_lookup(&pa) == NULL)
+		return -1;
+
+	if (pci_mapreg_map(&pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0,
+			&nict, &nich, NULL, NULL))
+		return -1;
+
+	asict = nict;
+	if (bus_space_subregion(nict, nich, NE2000_ASIC_OFFSET,
+				NE2000_ASIC_NPORTS, &asich)) {
+		bus_space_unmap(nict, nich, NE2000_NPORTS);
+		return -1;
+	}
+
+	/* Enable card */
+	csr = pci_conf_read(pc, pa.pa_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, pa.pa_tag, PCI_COMMAND_STATUS_REG,
+			csr | PCI_COMMAND_MASTER_ENABLE);
+
+	ipkdb_softc.sc_ne2000.sc_dp8390.sc_regt = nict;
+	ipkdb_softc.sc_ne2000.sc_dp8390.sc_regh = nich;
+	ipkdb_softc.sc_ne2000.sc_asict = asict;
+	ipkdb_softc.sc_ne2000.sc_asich = asich;
+
+	kip->port = &ipkdb_softc;
+	ipkdb_pc = pc;
+	ipkdb_tag = pa.pa_tag;
+	ne_kip = kip;
+
+	if (ne2000_ipkdb_attach(kip) < 0) {
+		bus_space_unmap(nict, nich, NE2000_NPORTS);
+		return -1;
+	}
+
+	return 0;
+}
+#endif /* IPKDB_NE_PCI */

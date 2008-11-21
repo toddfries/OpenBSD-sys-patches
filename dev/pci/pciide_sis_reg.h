@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_sis_reg.h,v 1.7 2004/10/17 18:16:12 grange Exp $	*/
-/*	$NetBSD: pciide_sis_reg.h,v 1.6 2000/05/15 08:46:01 bouyer Exp $	*/
+/*	$NetBSD: pciide_sis_reg.h,v 1.15 2007/12/25 18:33:42 perry Exp $ */
 
 /*
  * Copyright (c) 1998 Manuel Bouyer.
@@ -15,9 +14,8 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,9 +29,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
-#ifndef _DEV_PCI_PCIIDE_SIS_REG_H_
-#define _DEV_PCI_PCIIDE_SIS_REG_H_
 
 /*
  * Registers definitions for SiS SiS5597/98 PCI IDE controller.
@@ -91,34 +86,31 @@
 #define SIS96x_REG_CBL(channel) (0x51 + (channel) * 2)
 #define SIS96x_REG_CBL_33 0x80
 
-#define SIS_PRODUCT_5518 0x5518
+/* SIS96x: when bit 7 in reg 0x40 is 0, the device masquerade as a SIS503 */
+#define SIS96x_DETECT	0x40
+#define SIS96x_DETECT_MASQ	0x40
 
-/* Private data */
-struct pciide_sis {
-	u_int8_t sis_type;
-};
+#define SIS_PRODUCT_5518 0x5518
 
 /* timings values, mostly from FreeBSD */
 /* PIO timings, for all up to 133NEW */
-static const u_int8_t sis_pio_act[] =
+static const u_int8_t sis_pio_act[] __unused =
     {12, 6, 4, 3, 3};
-static const u_int8_t sis_pio_rec[] =
+static const u_int8_t sis_pio_rec[] __unused =
     {11, 7, 4, 3, 1};
 /* DMA timings for 66 and 100OLD */
-static const u_int8_t sis_udma66_tim[] =
+static const u_int8_t sis_udma66_tim[] __unused =
     {15, 13, 11, 10, 9, 8};
 /* DMA timings for 100NEW */
-static const u_int8_t sis_udma100new_tim[] =
+static const u_int8_t sis_udma100new_tim[] __unused =
     {0x8b, 0x87, 0x85, 0x84, 0x82, 0x81};
 /* DMA timings for 133OLD */
-static const u_int8_t sis_udma133old_tim[] =
+static const u_int8_t sis_udma133old_tim[] __unused =
     {0x8f, 0x8a, 0x87, 0x85, 0x83, 0x82, 0x81};
 /* PIO, DMA and UDMA timings for 133NEW */
-static const u_int32_t sis_pio133new_tim[] =
+static const u_int32_t sis_pio133new_tim[] __unused =
     {0x28269008, 0x0c266008, 0x4263008, 0x0c0a3008, 0x05093008};
-static const u_int32_t sis_dma133new_tim[] =
+static const u_int32_t sis_dma133new_tim[] __unused =
     {0x22196008, 0x0c0a3008, 0x05093008};
-static const u_int32_t sis_udma133new_tim[] =
+static const u_int32_t sis_udma133new_tim[] __unused =
     {0x9f4, 0x64a, 0x474, 0x254, 0x234, 0x224, 0x214};
-
-#endif	/* !_DEV_PCI_PCIIDE_SIS_REG_H_ */

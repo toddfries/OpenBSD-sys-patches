@@ -1,5 +1,4 @@
-/*	$OpenBSD: i82365reg.h,v 1.7 1999/05/02 22:35:40 fgsch Exp $	*/
-/*	$NetBSD: i82365reg.h,v 1.2 1997/10/16 23:18:18 thorpej Exp $	*/
+/*	$NetBSD: i82365reg.h,v 1.10 2005/12/11 12:21:26 christos Exp $	*/
 
 /*
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -47,13 +46,9 @@
  * the same device.
  */
 
-#define	PCIC_CHIP0_BASE		0x00
-#define	PCIC_CHIP1_BASE		0x80
-
-/* Each PCIC chip can drive two sockets */
-
-#define	PCIC_SOCKETA_INDEX	0x00
-#define	PCIC_SOCKETB_INDEX	0x40
+/* pcic can have 2 controllers offset by 0x80 and 2 sockets offset by 0x40 */
+#define	PCIC_CHIP_OFFSET	0x80
+#define	PCIC_SOCKET_OFFSET	0x40
 
 /* general setup registers */
 
@@ -65,9 +60,15 @@
 #define	PCIC_IDENT_IFTYPE_RESERVED		0xC0
 #define	PCIC_IDENT_ZERO				0x30
 #define	PCIC_IDENT_REV_MASK			0x0F
-#define	PCIC_IDENT_REV_I82365SLR0		0x82
-#define	PCIC_IDENT_REV_I82365SLR1		0x83
-#define	PCIC_IDENT_REV_I82365SLR2		0x84
+#define	PCIC_IDENT_REV_I82365SLR0		0x02
+#define	PCIC_IDENT_REV_I82365SLR1		0x03
+
+#define PCIC_IDENT_ID_INTEL0 0x82
+#define PCIC_IDENT_ID_INTEL1 0x83
+#define PCIC_IDENT_ID_INTEL2 0x84
+#define PCIC_IDENT_ID_IBM1 0x88
+#define PCIC_IDENT_ID_IBM2 0x89
+#define PCIC_IDENT_ID_IBM3 0x8A
 
 #define	PCIC_IF_STATUS				0x01	/* RO */
 #define	PCIC_IF_STATUS_GPI			0x80 /* General Purpose Input */
@@ -88,19 +89,17 @@
 #define	PCIC_PWRCTL_AUTOSWITCH_ENABLE		0x20
 #define	PCIC_PWRCTL_PWR_ENABLE			0x10
 #define	PCIC_PWRCTL_VPP2_MASK			0x0C
-/* XXX these are a little unclear from the data sheet */
 #define	PCIC_PWRCTL_VPP2_RESERVED		0x0C
-#define	PCIC_PWRCTL_VPP2_EN1			0x08
-#define	PCIC_PWRCTL_VPP2_EN0			0x04
-#define	PCIC_PWRCTL_VPP2_ENX			0x00
+#define	PCIC_PWRCTL_VPP2_12V			0x08
+#define	PCIC_PWRCTL_VPP2_VCC			0x04
+#define	PCIC_PWRCTL_VPP2_OFF			0x00
 #define	PCIC_PWRCTL_VPP1_MASK			0x03
-/* XXX these are a little unclear from the data sheet */
 #define	PCIC_PWRCTL_VPP1_RESERVED		0x03
-#define	PCIC_PWRCTL_VPP1_EN1			0x02
-#define	PCIC_PWRCTL_VPP1_EN0			0x01
-#define	PCIC_PWRCTL_VPP1_ENX			0x00
+#define	PCIC_PWRCTL_VPP1_12V			0x02
+#define	PCIC_PWRCTL_VPP1_VCC			0x01
+#define	PCIC_PWRCTL_VPP1_OFF			0x00
 
-#define	PCIC_CSC				0x04	/* RW */
+#define	PCIC_CSC				0x04	/* RO */
 #define	PCIC_CSC_ZERO				0xE0
 #define	PCIC_CSC_GPI				0x10
 #define	PCIC_CSC_CD				0x08 /* Card Detect Change */
@@ -119,6 +118,7 @@
 #define	PCIC_ADDRWIN_ENABLE_MEM1		0x02
 #define	PCIC_ADDRWIN_ENABLE_MEM0		0x01
 
+/* this is _not_ available on cirrus chips */
 #define	PCIC_CARD_DETECT			0x16	/* RW */
 #define	PCIC_CARD_DETECT_RESERVED		0xC0
 #define	PCIC_CARD_DETECT_SW_INTR		0x20
@@ -182,6 +182,12 @@
 #define	PCIC_CSC_INTR_BATTWARN_ENABLE		0x02
 #define	PCIC_CSC_INTR_BATTDEAD_ENABLE		0x01	/* for memory cards */
 #define	PCIC_CSC_INTR_RI_ENABLE			0x01	/* for I/O cards */
+
+#define PCIC_CSC_INTR_FORMAT "\177\020" "f\4\4CSC_INTR_IRQ\0"   \
+				"b\0RI\0"			\
+				"b\1BATTWARN\0" 		\
+				"b\2READY\0"			\
+				"b\3CD\0"
 
 #define	PCIC_CSC_INTR_IRQ_VALIDMASK		0xDEB8 /* 1101 1110 1011 1000 */
 
@@ -325,23 +331,39 @@
 #define	PCIC_INTEL_GLOBAL_CTL_IRQLEVEL_ENABLE	0x02
 #define	PCIC_INTEL_GLOBAL_CTL_POWERDOWN		0x01
 
-#define	PCIC_CIRRUS_MISC_CTL_2			0x1E
+#define	PCIC_CIRRUS_MISC_CTL_1			0x16	/* RW */
+#define	PCIC_CIRRUS_MISC_CTL_1_SPKR_ENABLE	0x10
+
+#define	PCIC_CIRRUS_FIFO_CTL			0x17	/* RW */
+#define	PCIC_CIRRUS_FIFO_CTL_EMPTY		0x80	/* I/O read */
+#define	PCIC_CIRRUS_FIFO_CTL_FLUSH		0x80	/* I/O write */
+
+#define	PCIC_CIRRUS_MISC_CTL_2			0x1E	/* RW */
 #define	PCIC_CIRRUS_MISC_CTL_2_SUSPEND		0x04
+#define	PCIC_CIRRUS_MISC_CTL_2_LP_DYNAMIC_MODE	0x02
 
 #define	PCIC_CIRRUS_CHIP_INFO			0x1F
 #define	PCIC_CIRRUS_CHIP_INFO_CHIP_ID		0xC0
 #define	PCIC_CIRRUS_CHIP_INFO_SLOTS		0x20
 #define	PCIC_CIRRUS_CHIP_INFO_REV		0x1F
 
-#define	PCIC_CIRRUS_EXTENDED_INDEX		0x2E
-#define	PCIC_CIRRUS_EXTENDED_DATA		0x2F
+#define PCIC_CIRRUS_EXTENDED_INDEX		0x2E
+#define PCIC_CIRRUS_EXTENDED_DATA		0x2F
+
 #define	PCIC_CIRRUS_EXT_CONTROL_1		0x03
 #define	PCIC_CIRRUS_EXT_CONTROL_1_PCI_INTR_MASK	0x18
 
-#define	PCIC_IDENT_VADEM_MASK			0x08
+#define	PCIC_CIRRUS_PROD_ID			0x35	/* RO */
+#define	PCIC_CIRRUS_PROD_ID_FAM_MASK		0xF0
+#define	PCIC_CIRRUS_PROD_ID_FAM_PD6729		0x20
+#define	PCIC_CIRRUS_PROD_ID_PROD_MASK		0x0F
+#define	PCIC_CIRRUS_PROD_ID_PROD_PD6729		0x00
 
-#define	PCIC_VG468_MISC				0x3A
-#define	PCIC_VG468_MISC_VADEMREV		0x40
-
-#define	PCIC_VG469_VSELECT			0x2f
-#define	PCIC_VG469_VSELECT_VCC			0x03
+#define PCIC_RICOH_REG_CHIP_ID 0x3A
+#define PCIC_RICOH_CHIP_ID_5C296 0x32
+#define PCIC_RICOH_CHIP_ID_5C396 0xB2
+#define PCIC_RICOH_REG_MCR2 0x2F
+#define	PCIC_RICOH_MCR2_VCC_DIRECT 0x08
+#define PCIC_RICOH_MCR2_VCC_SEL_MASK 0x01
+#define PCIC_RICOH_MCR2_VCC_SEL_3V 0x01
+#define PCIC_RICOH_MCR2_VCC_SEL_5V 0x00

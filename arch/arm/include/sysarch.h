@@ -1,5 +1,4 @@
-/*	$OpenBSD: sysarch.h,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
-/*	$NetBSD: sysarch.h,v 1.4 2002/03/30 06:23:39 thorpej Exp $	*/
+/*	$NetBSD: sysarch.h,v 1.6 2005/12/11 12:16:47 christos Exp $	*/
 
 /*
  * Copyright (c) 1996-1997 Mark Brinicombe.
@@ -39,6 +38,11 @@
 #include <sys/cdefs.h>
 
 /*
+ * Pickup definition of uintptr_t
+ */
+#include <sys/stdint.h>
+
+/*
  * Architecture specific syscalls (arm)
  */
 
@@ -46,15 +50,15 @@
 #define ARM_DRAIN_WRITEBUF	1
 
 struct arm_sync_icache_args {
-	u_int32_t	addr;		/* Virtual start address */
+	uintptr_t	addr;		/* Virtual start address */
 	size_t		len;		/* Region size */
 };
 
 #ifndef _KERNEL
 __BEGIN_DECLS
-int	arm_sync_icache (u_int addr, int len);
-int	arm_drain_writebuf (void);
-int	sysarch (int, void *);
+int	arm_sync_icache __P((u_int addr, int len));
+int	arm_drain_writebuf __P((void));
+int	sysarch __P((int, void *));
 __END_DECLS
 #endif
 

@@ -1,4 +1,3 @@
-/* * $OpenBSD: freebsd_ptrace.h,v 1.4 2003/06/02 23:28:00 millert Exp $*/
 /*-
  * Copyright (c) 1984, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -28,6 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ptrace.h	8.2 (Berkeley) 1/4/94
+ *	$NetBSD: freebsd_ptrace.h,v 1.6 2007/12/04 18:40:08 dsl Exp $
  */
 
 #ifndef	_FREEBSD_PTRACE_H_
@@ -55,9 +55,9 @@ void netbsd_to_freebsd_ptrace_regs(struct reg *, struct fpreg *,
 					struct freebsd_ptrace_reg *);
 void freebsd_to_netbsd_ptrace_regs(struct freebsd_ptrace_reg *,
 					struct reg *, struct fpreg *);
-int freebsd_ptrace_getregs(struct freebsd_ptrace_reg *, caddr_t,
+int freebsd_ptrace_getregs(struct freebsd_ptrace_reg *, void *,
 				register_t *);
-int freebsd_ptrace_setregs(struct freebsd_ptrace_reg *, caddr_t,
+int freebsd_ptrace_setregs(struct freebsd_ptrace_reg *, void *,
 				int);
 
 #endif	/* !_FREEBSD_PTRACE_H_ */

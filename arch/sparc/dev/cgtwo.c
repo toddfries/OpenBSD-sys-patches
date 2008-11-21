@@ -1,31 +1,6 @@
-/*	$OpenBSD: cgtwo.c,v 1.36 2006/12/03 16:40:06 miod Exp $	*/
-/*	$NetBSD: cgtwo.c,v 1.22 1997/05/24 20:16:12 pk Exp $ */
+/*	$NetBSD: cgtwo.c,v 1.54 2008/06/11 21:25:31 drochner Exp $ */
 
 /*
- * Copyright (c) 2002 Miodrag Vallat.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- *
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -73,6 +48,9 @@
  * XXX should defer colormap updates to vertical retrace interrupts
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cgtwo.c,v 1.54 2008/06/11 21:25:31 drochner Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
@@ -86,327 +64,334 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
-#include <machine/pmap.h>
-#if defined(SUN4)
+
+#include <dev/sun/fbio.h>
+#include <dev/sun/fbvar.h>
+
+#include <dev/vme/vmevar.h>
+
 #include <machine/eeprom.h>
-#endif
-#include <machine/conf.h>
-
-#include <sparc/dev/cgtworeg.h>
-
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplayvar.h>
-#include <dev/rasops/rasops.h>
-#include <machine/fbvar.h>
+#include <machine/cgtworeg.h>
 
 
 /* per-display variables */
 struct cgtwo_softc {
-	struct	sunfb sc_sunfb;		/* common base part */
-	struct	rom_reg	sc_phys;	/* display RAM (phys addr) */
+	struct	device sc_dev;		/* base device */
+	struct	fbdevice sc_fb;		/* frame buffer device */
+	vme_addr_t		sc_paddr;
+	vme_chipset_tag_t	sc_ct;
+	bus_space_tag_t		sc_bt;
 	volatile struct cg2statusreg *sc_reg;	/* CG2 control registers */
-	volatile u_short *sc_ppmask;
 	volatile u_short *sc_cmap;
-#define sc_redmap(cmap)		((cmap))
-#define sc_greenmap(cmap)	((cmap) + CG2_CMSIZE)
-#define sc_bluemap(cmap)	((cmap) + 2 * CG2_CMSIZE)
+#define sc_redmap(sc)	((sc)->sc_cmap)
+#define sc_greenmap(sc)	((sc)->sc_cmap + CG2_CMSIZE)
+#define sc_bluemap(sc)	((sc)->sc_cmap + 2 * CG2_CMSIZE)
 };
 
-void	cgtwo_burner(void *, u_int, u_int);
-int	cgtwo_getcmap(struct cgtwo_softc *, struct wsdisplay_cmap *);
-int	cgtwo_ioctl(void *, u_long, caddr_t, int, struct proc *);
-paddr_t	cgtwo_mmap(void *, off_t, int);
-int	cgtwo_putcmap(struct cgtwo_softc *, struct wsdisplay_cmap *);
-void	cgtwo_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
+/* autoconfiguration driver */
+static int	cgtwomatch(struct device *, struct cfdata *, void *);
+static void	cgtwoattach(struct device *, struct device *, void *);
+static void	cgtwounblank(struct device *);
+int		cgtwogetcmap(struct cgtwo_softc *, struct fbcmap *);
+int		cgtwoputcmap(struct cgtwo_softc *, struct fbcmap *);
 
-struct wsdisplay_accessops cgtwo_accessops = {
-	cgtwo_ioctl,
-	cgtwo_mmap,
-	NULL,	/* alloc_screen */
-	NULL,	/* free_screen */
-	NULL,	/* show_screen */
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	cgtwo_burner,
-	NULL	/* pollc */
+CFATTACH_DECL(cgtwo, sizeof(struct cgtwo_softc),
+    cgtwomatch, cgtwoattach, NULL, NULL);
+
+extern struct cfdriver cgtwo_cd;
+
+dev_type_open(cgtwoopen);
+dev_type_ioctl(cgtwoioctl);
+dev_type_mmap(cgtwommap);
+
+const struct cdevsw cgtwo_cdevsw = {
+	cgtwoopen, nullclose, noread, nowrite, cgtwoioctl,
+	nostop, notty, nopoll, cgtwommap, nokqfilter,
 };
 
-int	cgtwomatch(struct device *, void *, void *);
-void	cgtwoattach(struct device *, struct device *, void *);
-
-struct cfattach cgtwo_ca = {
-	sizeof(struct cgtwo_softc), cgtwomatch, cgtwoattach
+/* frame buffer generic driver */
+static struct fbdriver cgtwofbdriver = {
+	cgtwounblank, cgtwoopen, nullclose, cgtwoioctl, nopoll, cgtwommap,
+	nokqfilter
 };
 
-struct cfdriver cgtwo_cd = {
-	NULL, "cgtwo", DV_DULL
-};
-
-int
-cgtwomatch(struct device *parent, void *vcf, void *aux)
+/*
+ * Match a cgtwo.
+ */
+static int
+cgtwomatch(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct cfdata *cf = vcf;
-	struct confargs *ca = aux;
-	struct romaux *ra = &ca->ca_ra;
-	caddr_t tmp;
+	struct vme_attach_args	*va = aux;
+	vme_chipset_tag_t	ct = va->va_vct;
+	vme_am_t		mod;
 
-	if (strcmp(cf->cf_driver->cd_name, ra->ra_name))
+	/*
+	 * Mask out invalid flags from the user.
+	 */
+	cf->cf_flags &= FB_USERMASK;
+
+	mod = 0x3d; /* VME_AM_A24 | VME_AM_MBO | VME_AM_SUPER | VME_AM_DATA */
+	if (vme_probe(ct, va->r[0].offset + CG2_CTLREG_OFF, 2, mod, VME_D16,
+			  0, 0)) {
 		return (0);
+	}
 
-	if (!CPU_ISSUN4 || ca->ca_bustype != BUS_VME16)
-		return (0);
-
-	/* XXX - Must do our own mapping at CG2_CTLREG_OFF */
-	bus_untmp();
-	tmp = (caddr_t)mapdev(ra->ra_reg, TMPMAP_VA, CG2_CTLREG_OFF, NBPG);
-	if (probeget(tmp, 2) != -1)
-		return (1);
-
-	return (0);
+	return (1);
 }
 
-void
-cgtwoattach(struct device *parent, struct device *self, void *args)
+/*
+ * Attach a display.  We need to notice if it is the console, too.
+ */
+static void
+cgtwoattach(struct device *parent, struct device *self, void *aux)
 {
-	struct cgtwo_softc *sc = (struct cgtwo_softc *)self;
-	struct confargs *ca = args;
-	int node = 0;
+	struct vme_attach_args	*va = aux;
+	vme_chipset_tag_t	ct = va->va_vct;
+	bus_space_tag_t		bt;
+	bus_space_handle_t	bh;
+	vme_am_t		mod;
+	vme_mapresc_t resc;
+	struct cgtwo_softc *sc = device_private(self);
+	struct fbdevice *fb = &sc->sc_fb;
+	struct eeprom *eep = (struct eeprom *)eeprom_va;
 	int isconsole = 0;
 
-	if (CPU_ISSUN4) {
-		struct eeprom *eep = (struct eeprom *)eeprom_va;
-		/*
-		 * Assume this is the console if there's no eeprom info
-		 * to be found.
-		 */
-		if (eep == NULL || eep->eeConsole == EE_CONS_COLOR)
-			isconsole = 1;
-	}
+	sc->sc_ct = ct;
+	fb->fb_driver = &cgtwofbdriver;
+	fb->fb_device = &sc->sc_dev;
+	fb->fb_type.fb_type = FBTYPE_SUN2COLOR;
+	fb->fb_flags = device_cfdata(&sc->sc_dev)->cf_flags;
+
+	fb->fb_type.fb_depth = 8;
+	fb_setsize_eeprom(fb, fb->fb_type.fb_depth, 1152, 900);
+
+	fb->fb_type.fb_cmsize = 256;
+	fb->fb_type.fb_size = roundup(CG2_MAPPED_SIZE, PAGE_SIZE);
+	printf(": cgtwo, %d x %d",
+	       fb->fb_type.fb_width, fb->fb_type.fb_height);
 
 	/*
 	 * When the ROM has mapped in a cgtwo display, the address
 	 * maps only the video RAM, so in any case we have to map the
-	 * registers ourselves.
+	 * registers ourselves.  We only need the video RAM if we are
+	 * going to print characters via rconsole.
 	 */
-	sc->sc_phys = ca->ca_ra.ra_reg[0];
-	/* Apparently, the pixels are 32-bit data space */
-	sc->sc_phys.rr_iospace = PMAP_VME32;
+	sc->sc_paddr = va->r[0].offset;
+	mod = 0x3d; /* VME_AM_A24 | VME_AM_MBO | VME_AM_SUPER | VME_AM_DATA */
 
-	sc->sc_reg = (volatile struct cg2statusreg *)
-	    mapiodev(ca->ca_ra.ra_reg,
-		CG2_ROPMEM_OFF + offsetof(struct cg2fb, status.reg),
-		sizeof(struct cg2statusreg));
+	if (vme_space_map(ct, sc->sc_paddr + CG2_ROPMEM_OFF +
+				offsetof(struct cg2fb, status.reg),
+			sizeof(struct cg2statusreg), mod, VME_D16, 0,
+			&bt, &bh, &resc) != 0)
+		panic("cgtwo: vme_map status");
+	sc->sc_bt = bt;
+	sc->sc_reg = (volatile struct cg2statusreg *)bh; /* XXX */
 
-	sc->sc_ppmask = (volatile u_short *)
-	    mapiodev(ca->ca_ra.ra_reg,
-		CG2_ROPMEM_OFF + offsetof(struct cg2fb, ppmask.reg),
-		sizeof(u_short));
+	if (vme_space_map(ct, sc->sc_paddr + CG2_ROPMEM_OFF +
+				offsetof(struct cg2fb, redmap[0]),
+			3 * CG2_CMSIZE, mod, VME_D16, 0,
+			&bt, &bh, &resc) != 0)
+		panic("cgtwo: vme_map cmap");
+	sc->sc_cmap = (volatile u_short *)bh; /* XXX */
 
-	sc->sc_cmap = (volatile u_short *)
-	    mapiodev(ca->ca_ra.ra_reg,
-		     CG2_ROPMEM_OFF + offsetof(struct cg2fb, redmap),
-		     3 * CG2_CMSIZE * sizeof(u_short));
-
-	/* enable video */
-	*sc->sc_ppmask = 0xffff;	/* enable all color planes... */
-	cgtwo_burner(sc, 1, 0);		/* ... and video signals */
-
-	fb_setsize(&sc->sc_sunfb, 8, 1152, 900, node, ca->ca_bustype);
-	sc->sc_sunfb.sf_ro.ri_bits = mapiodev(&sc->sc_phys, CG2_PIXMAP_OFF,
-	    round_page(sc->sc_sunfb.sf_fbsize));
-	sc->sc_sunfb.sf_ro.ri_hw = sc;
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
-	fbwscons_setcolormap(&sc->sc_sunfb, cgtwo_setcolor);
-
-	printf(": %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
+	/*
+	 * Assume this is the console if there's no eeprom info
+	 * to be found.
+	 */
+	if (eep == NULL || eep->eeConsole == EE_CONS_COLOR)
+		isconsole = fb_is_console(0);
+	else
+		isconsole = 0;
 
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
+		if (vme_space_map(ct, sc->sc_paddr + CG2_PIXMAP_OFF,
+				CG2_PIXMAP_SIZE, mod, VME_D16, 0,
+				  &bt, &bh, &resc) != 0)
+			panic("cgtwo: vme_map pixels");
 
-	fbwscons_attach(&sc->sc_sunfb, &cgtwo_accessops, isconsole);
+		fb->fb_pixels = (void *)bh; /* XXX */
+		printf(" (console)\n");
+#ifdef RASTERCONSOLE
+		fbrcons_init(fb);
+#endif
+	} else
+		printf("\n");
+
+	fb_attach(fb, isconsole);
 }
 
 int
-cgtwo_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
+cgtwoopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct cgtwo_softc *sc = v;
-	struct wsdisplay_fbinfo *wdf;
-	struct wsdisplay_cmap *cm;
-	int error;
+	int unit = minor(dev);
+
+	if (device_lookup(&cgtwo_cd, unit) == NULL)
+		return (ENXIO);
+	return (0);
+}
+
+int
+cgtwoioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
+{
+	register struct cgtwo_softc *sc = device_lookup_private(&cgtwo_cd,
+								minor(dev));
+	register struct fbgattr *fba;
 
 	switch (cmd) {
-	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_SUNCG2;
-		break;
-	case WSDISPLAYIO_GINFO:
-		wdf = (struct wsdisplay_fbinfo *)data;
-		wdf->height = sc->sc_sunfb.sf_height;
-		wdf->width  = sc->sc_sunfb.sf_width;
-		wdf->depth  = sc->sc_sunfb.sf_depth;
-		wdf->cmsize = CG2_CMSIZE;
-		break;
-	case WSDISPLAYIO_LINEBYTES:
-		*(u_int *)data = sc->sc_sunfb.sf_linebytes;
-		break;
-		
-	case WSDISPLAYIO_GETCMAP:
-		cm = (struct wsdisplay_cmap *)data;
-		error = cgtwo_getcmap(sc, cm);
-		if (error)
-			return (error);
+
+	case FBIOGTYPE:
+		*(struct fbtype *)data = sc->sc_fb.fb_type;
 		break;
 
-	case WSDISPLAYIO_PUTCMAP:
-		cm = (struct wsdisplay_cmap *)data;
-		error = cgtwo_putcmap(sc, cm);
-		if (error)
-			return (error);
+	case FBIOGATTR:
+		fba = (struct fbgattr *)data;
+		fba->real_type = sc->sc_fb.fb_type.fb_type;
+		fba->owner = 0;		/* XXX ??? */
+		fba->fbtype = sc->sc_fb.fb_type;
+		fba->sattr.flags = 0;
+		fba->sattr.emu_type = sc->sc_fb.fb_type.fb_type;
+		fba->sattr.dev_specific[0] = -1;
+		fba->emu_types[0] = sc->sc_fb.fb_type.fb_type;
+		fba->emu_types[1] = -1;
 		break;
 
-	case WSDISPLAYIO_SVIDEO:
-	case WSDISPLAYIO_GVIDEO:
+	case FBIOGETCMAP:
+		return cgtwogetcmap(sc, (struct fbcmap *) data);
+
+	case FBIOPUTCMAP:
+		return cgtwoputcmap(sc, (struct fbcmap *) data);
+
+	case FBIOGVIDEO:
+		*(int *)data = sc->sc_reg->video_enab;
 		break;
 
-	case WSDISPLAYIO_GCURPOS:
-	case WSDISPLAYIO_SCURPOS:
-	case WSDISPLAYIO_GCURMAX:
-	case WSDISPLAYIO_GCURSOR:
-	case WSDISPLAYIO_SCURSOR:
+	case FBIOSVIDEO:
+		sc->sc_reg->video_enab = (*(int*)data) & 1;
+		break;
+
 	default:
-		return (-1);	/* not supported yet */
+		return (ENOTTY);
 	}
-
 	return (0);
 }
 
-paddr_t
-cgtwo_mmap(void *v, off_t offset, int prot)
+/*
+ * Undo the effect of an FBIOSVIDEO that turns the video off.
+ */
+static void
+cgtwounblank(struct device *dev)
 {
-	struct cgtwo_softc *sc = v;
-
-	if (offset & PGOFSET)
-		return (-1);
-
-	if (offset >= 0 && offset < sc->sc_sunfb.sf_fbsize) {
-		return (REG2PHYS(&sc->sc_phys,
-		    CG2_PIXMAP_OFF + offset) | PMAP_NC);
-	}
-
-	return (-1);
+	struct cgtwo_softc *sc = device_private(dev);
+	sc->sc_reg->video_enab = 1;
 }
 
-void
-cgtwo_burner(void *v, u_int on, u_int flags)
-{
-	struct cgtwo_softc *sc = v;
-	int s;
-
-	s = splhigh();
-	if (on)
-		sc->sc_reg->video_enab = 1;
-	else
-		sc->sc_reg->video_enab = 0;
-	splx(s);
-}
-
+/*
+ */
 int
-cgtwo_getcmap(struct cgtwo_softc *sc, struct wsdisplay_cmap *cmap)
+cgtwogetcmap(struct cgtwo_softc *sc, struct fbcmap *cmap)
 {
-	u_int index = cmap->index, count = cmap->count, i;
 	u_char red[CG2_CMSIZE], green[CG2_CMSIZE], blue[CG2_CMSIZE];
-	volatile u_short *hwcmap = sc->sc_cmap;
-	int error;
-	volatile u_short *p;
+	int error, start, count, ecount;
+	register u_int i;
+	register volatile u_short *p;
 
-
-	if (index >= CG2_CMSIZE || count >= CG2_CMSIZE - index)
+	start = cmap->index;
+	count = cmap->count;
+	ecount = start + count;
+	if (start >= CG2_CMSIZE || count > CG2_CMSIZE - start)
 		return (EINVAL);
 
-	while (sc->sc_reg->retrace == 0)
-		DELAY(1);
-
-	sc->sc_reg->update_cmap = 0;
+	/* XXX - Wait for retrace? */
 
 	/* Copy hardware to local arrays. */
-	p = &sc_redmap(hwcmap)[index];
-	for (i = 0; i < count; i++)
+	p = &sc_redmap(sc)[start];
+	for (i = start; i < ecount; i++)
 		red[i] = *p++;
-	p = &sc_greenmap(hwcmap)[index];
-	for (i = 0; i < count; i++)
+	p = &sc_greenmap(sc)[start];
+	for (i = start; i < ecount; i++)
 		green[i] = *p++;
-	p = &sc_bluemap(hwcmap)[index];
-	for (i = 0; i < count; i++)
+	p = &sc_bluemap(sc)[start];
+	for (i = start; i < ecount; i++)
 		blue[i] = *p++;
 
-	sc->sc_reg->update_cmap = 1;
-
 	/* Copy local arrays to user space. */
-	if ((error = copyout(red, cmap->red, count)) != 0)
+	if ((error = copyout(red + start, cmap->red, count)) != 0)
 		return (error);
-	if ((error = copyout(green, cmap->green, count)) != 0)
+	if ((error = copyout(green + start, cmap->green, count)) != 0)
 		return (error);
-	if ((error = copyout(blue, cmap->blue, count)) != 0)
+	if ((error = copyout(blue + start, cmap->blue, count)) != 0)
 		return (error);
 
 	return (0);
 }
 
+/*
+ */
 int
-cgtwo_putcmap(struct cgtwo_softc *sc, struct wsdisplay_cmap *cmap)
+cgtwoputcmap(struct cgtwo_softc *sc, struct fbcmap *cmap)
 {
-	u_int index = cmap->index, count = cmap->count, i;
 	u_char red[CG2_CMSIZE], green[CG2_CMSIZE], blue[CG2_CMSIZE];
-	volatile u_short *hwcmap = sc->sc_cmap;
 	int error;
-	volatile u_short *p;
+	u_int start, count, ecount;
+	register u_int i;
+	register volatile u_short *p;
 
-	if (index >= CG2_CMSIZE || count >= CG2_CMSIZE - index)
+	start = cmap->index;
+	count = cmap->count;
+	ecount = start + count;
+	if (start >= CG2_CMSIZE || count > CG2_CMSIZE - start)
 		return (EINVAL);
 
 	/* Copy from user space to local arrays. */
-	if ((error = copyin(cmap->red, red, count)) != 0)
+	if ((error = copyin(cmap->red, red + start, count)) != 0)
 		return (error);
-	if ((error = copyin(cmap->green, green, count)) != 0)
+	if ((error = copyin(cmap->green, green + start, count)) != 0)
 		return (error);
-	if ((error = copyin(cmap->blue, blue, count)) != 0)
+	if ((error = copyin(cmap->blue, blue + start, count)) != 0)
 		return (error);
 
-	while (sc->sc_reg->retrace == 0)
-		DELAY(1);
-
-	sc->sc_reg->update_cmap = 0;
+	/* XXX - Wait for retrace? */
 
 	/* Copy from local arrays to hardware. */
-	p = &sc_redmap(hwcmap)[index];
-	for (i = 0; i < count; i++)
+	p = &sc_redmap(sc)[start];
+	for (i = start; i < ecount; i++)
 		*p++ = red[i];
-	p = &sc_greenmap(hwcmap)[index];
-	for (i = 0; i < count; i++)
+	p = &sc_greenmap(sc)[start];
+	for (i = start; i < ecount; i++)
 		*p++ = green[i];
-	p = &sc_bluemap(hwcmap)[index];
-	for (i = 0; i < count; i++)
+	p = &sc_bluemap(sc)[start];
+	for (i = start; i < ecount; i++)
 		*p++ = blue[i];
-
-	sc->sc_reg->update_cmap = 1;
 
 	return (0);
 }
 
-void
-cgtwo_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
+/*
+ * Return the address that would map the given device at the given
+ * offset, allowing for the given protection, or return -1 for error.
+ */
+paddr_t
+cgtwommap(dev_t dev, off_t off, int prot)
 {
-	struct cgtwo_softc *sc = v;
+	extern int sparc_vme_mmap_cookie(vme_addr_t, vme_am_t,
+					 bus_space_handle_t *);
 
-	while (sc->sc_reg->retrace == 0)
-		DELAY(1);
+	register struct cgtwo_softc *sc = device_lookup_private(&cgtwo_cd,
+								minor(dev));
+	vme_am_t mod;
+	bus_space_handle_t bh;
 
-	sc->sc_reg->update_cmap = 0;
+	if (off & PGOFSET)
+		panic("cgtwommap");
 
-	sc_redmap(sc->sc_cmap)[index] = r;
-	sc_greenmap(sc->sc_cmap)[index] = g;
-	sc_bluemap(sc->sc_cmap)[index] = b;
+	if (off >= sc->sc_fb.fb_type.fb_size)
+		return (-1);
 
-	sc->sc_reg->update_cmap = 1;
+	/* Apparently, the pixels are in 32-bit data space */
+	mod = 0x3d; /* VME_AM_A24 | VME_AM_MBO | VME_AM_SUPER | VME_AM_DATA */
+
+	if (sparc_vme_mmap_cookie(sc->sc_paddr + off, mod, &bh) != 0)
+		panic("cgtwommap");
+
+	return ((paddr_t)bh);
 }

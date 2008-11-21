@@ -1,9 +1,11 @@
-/*	$OpenBSD: i82595reg.h,v 1.3 2003/10/21 18:58:49 jmc Exp $	*/
-/*	$NetBSD: i82595reg.h,v 1.1 1996/05/06 21:36:51 is Exp $	*/
+/*	$NetBSD: i82595reg.h,v 1.10 2008/04/28 20:23:50 martin Exp $	*/
 
-/*
- * Copyright (c) 1996, Ignatios Souvatzis.
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Ignatios Souvatzis.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,30 +15,24 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ignatios Souvatzis
- *	for the NetBSD project.
- * 4. The name of the author may not be used to endorse or promote products 
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, 
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES 
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
  * Intel 82595 Ethernet chip register, bit, and structure definitions.
  *
- * Written by is with reference to Intel's i82595FX data sheet, with some 
+ * Written by is with reference to Intel's i82595FX data sheet, with some
  * clarification coming from looking at the Clarkson Packet Driver code for this
  * chip written by Russ Nelson and others;
  *
@@ -100,6 +96,8 @@
 #define RCV_STOP_LOW 6
 #define RCV_STOP_HIGH 7
 
+#define RCV_COPY_THRESHOLD 8	/* byte */
+
 #define XMT_ADDR_REG 0x0a
 #define HOST_ADDR_REG 0x0c
 #define MEM_PORT_REG 0x0e
@@ -130,13 +128,15 @@
 #define RECV_MODES_REG 2
 
 #define		PROMISC_MODE	0x01
+#define		NO_BRDCST	0x02
 #define		NO_RX_CRC	0x04
 #define		NO_ADD_INS	0x10
 #define		MULTI_IA	0x20
 
-#define		MATCH_ID	(NO_ADD_INS | NO_RX_CRC | 0x02)
-#define		MATCH_ALL	(NO_ADD_INS | NO_RX_CRC | 0x01)
+#define		MATCH_ID	(NO_ADD_INS | NO_RX_CRC | NO_BRDCST)
 #define		MATCH_BRDCST	(NO_ADD_INS | NO_RX_CRC)
+#define		MATCH_MULTI	(NO_ADD_INS | NO_RX_CRC | MULTI_IA)
+#define		MATCH_ALL	(NO_ADD_INS | NO_RX_CRC | PROMISC_MODE)
 
 #define MEDIA_SELECT 3
 
@@ -168,7 +168,7 @@
 
 #define EEPPW1		1
 #define		EEPP_Int	0x0007
-#define		EEPP_INTMAP	{3, 5, 9, 10, 11, -1, -1, -1}
+#define		EEPP_INTMAP	{9, 3, 5, 10, 11, -1, -1, -1}
 #define		EEPP_RINTMAP	{0xff, 0xff, 0x02, 0x00, 0xff, 0x01, 0xff, \
 				 0xff, 0xff, 0x02, 0x03, 0x04 }
 
@@ -200,6 +200,11 @@
 
 #define EEPP_LENGTH 0x40
 #define EEPP_CHKSUM 0xBABA /* Intel claim 0x0, but this seems to be wrong */
+
+#define RCV_NO_RSC_REG	11
+	/* How many packets were dropped due to insufficient space */
+
+/* ---- xmt /rcv /exec buffer format ---- */
 
 #define I595_XMT_HDRLEN	8
 

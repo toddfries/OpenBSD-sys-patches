@@ -1,3 +1,5 @@
+;	$NetBSD: milli.S,v 1.1 2002/06/06 20:03:39 fredette Exp $
+;
 ;	$OpenBSD: milli.S,v 1.5 2001/03/29 04:08:20 mickey Exp $
 ;
 ;  (c) Copyright 1986 HEWLETT-PACKARD COMPANY

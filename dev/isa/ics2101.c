@@ -1,5 +1,4 @@
-/* $OpenBSD: ics2101.c,v 1.6 2003/04/10 10:11:24 miod Exp $ */
-/* $NetBSD: ics2101.c,v 1.6 1997/10/09 07:57:23 jtc Exp $ */
+/* $NetBSD: ics2101.c,v 1.15 2008/04/28 20:23:52 martin Exp $ */
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD 
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its 
- *    contributors may be used to endorse or promote products derived 
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ics2101.c,v 1.15 2008/04/28 20:23:52 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
@@ -46,7 +41,7 @@
 #include <sys/proc.h>
 #include <sys/buf.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -82,12 +77,12 @@ ics2101_mix_doit(sc, chan, side, value, flags)
 	bus_space_tag_t iot = sc->sc_iot;
 	unsigned char flip_left[6] = {0x01, 0x01, 0x01, 0x02, 0x01, 0x02};
 	unsigned char flip_right[6] = {0x02, 0x02, 0x02, 0x01, 0x02, 0x01};
-	register unsigned char ctrl_addr;
-	register unsigned char attn_addr;
-	register unsigned char normal;
+	unsigned char ctrl_addr;
+	unsigned char attn_addr;
+	unsigned char normal;
 	int s;
 
-	if (chan < ICSMIX_CHAN_0 || chan > ICSMIX_CHAN_5)
+	if (/* chan < ICSMIX_CHAN_0 || */ chan > ICSMIX_CHAN_5)
 		return;
 	if (side != ICSMIX_LEFT && side != ICSMIX_RIGHT)
 		return;

@@ -1,5 +1,39 @@
-/*	$OpenBSD: pte.h,v 1.9 2007/02/20 21:15:01 tom Exp $	*/
-/*	$NetBSD: pte.h,v 1.11 1998/02/06 21:58:05 thorpej Exp $	*/
+/*	$NetBSD: pte.h,v 1.17 2008/01/23 19:46:44 bouyer Exp $	*/
+
+/*
+ * Copyright (c) 2001 Wasabi Systems, Inc.
+ * All rights reserved.
+ *
+ * Written by Frank van der Linden for Wasabi Systems, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed for the NetBSD Project by
+ *      Wasabi Systems, Inc.
+ * 4. The name of Wasabi Systems, Inc. may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  *
@@ -43,9 +77,12 @@
 
 #ifndef _I386_PTE_H_
 #define _I386_PTE_H_
+#ifdef _KERNEL_OPT
+#include "opt_xen.h"
+#endif
 
 /*
- * i386 MMU hardware structure:
+ * i386 MMU hardware structure (without PAE extention):
  *
  * the i386 MMU is a two-level MMU which maps 4GB of virtual memory.
  * the pagesize is 4K (4096 [0x1000] bytes), although newer pentium
@@ -54,8 +91,8 @@
  * the first level table (segment table?) is called a "page directory"
  * and it contains 1024 page directory entries (PDEs).   each PDE is
  * 4 bytes (an int), so a PD fits in a single 4K page.   this page is
- * the page directory page (PDP).  each PDE in a PDP maps 4MB of space
- * (1024 * 4MB = 4GB).   a PDE contains the physical address of the
+ * the page directory page (PDP).  each PDE in a PDP maps 4MB of space 
+ * (1024 * 4MB = 4GB).   a PDE contains the physical address of the 
  * second level table: the page table.   or, if 4MB pages are being used,
  * then the PDE contains the PA of the 4MB page being mapped.
  *
@@ -65,7 +102,7 @@
  * each PTE in a PTP maps one 4K page (1024 * 4K = 4MB).   a PTE contains
  * the physical address of the page it maps and some flag bits (described
  * below).
- *
+ * 
  * the processor has a special register, "cr3", which points to the
  * the PDP which is currently controlling the mappings of the virtual
  * address space.
@@ -92,7 +129,7 @@
  *                                                p h y s i c a l  a d d r
  *
  * the i386 caches PTEs in a TLB.   it is important to flush out old
- * TLB mappings when making a change to a mappings.   writing to the
+ * TLB mappings when making a change to a mappings.   writing to the 
  * %cr3 will flush the entire TLB.    newer processors also have an
  * instruction that will invalidate the mapping of a single page (which
  * is useful if you are changing a single mappings because it preserves
@@ -105,7 +142,7 @@
  *   10		n/a	available for OS use, hardware ignores it
  *   9		n/a	available for OS use, hardware ignores it
  *   8		G	global bit (see discussion below)
- *   7		PS	page size [for PDEs] (0=4k, 1=4M <if supported>)
+ *   7		PS	page size [for PDEs] (0=4k, 1=4M <if supported>) 
  *   6		D	dirty (modified) page
  *   5		A	accessed (referenced) page
  *   4		PCD	cache disable
@@ -114,18 +151,31 @@
  *   1		R/W	read/write bit (0=read only, 1=read-write)
  *   0		P	present (valid)
  *
- * notes:
+ * notes: 
  *  - on the i386 the R/W bit is ignored if processor is in supervisor
  *    state (bug!)
  *  - PS is only supported on newer processors
- *  - PTEs with the G bit are global in the sense that they are not
- *    flushed from the TLB when %cr3 is written (to flush, use the
+ *  - PTEs with the G bit are global in the sense that they are not 
+ *    flushed from the TLB when %cr3 is written (to flush, use the 
  *    "flush single page" instruction).   this is only supported on
  *    newer processors.    this bit can be used to keep the kernel's
  *    TLB entries around while context switching.   since the kernel
- *    is mapped into all processes at the same place it does not make
+ *    is mapped into all processes at the same place it does not make 
  *    sense to flush these entries when switching from one process'
  *    pmap to another.
+ *
+ * The PAE extention extends the size of the PTE to 64 bits (52bits physical
+ * address) and is compatible with the amd64 PTE format. The first level
+ * maps 2M, the second 1G, so a third level page table is intruduced to
+ * map the 4GB virtual address space. This PD has only 4 entries.
+ * We can't use recursive mapping at level 3 to map the PD pages, as
+ * this would eat one GB of address space. In addition, Xen impose restrictions
+ * on the entries we put in the L3 page (for example, the page pointed to by
+ * the last slot can't be shared among different L3 pages), which makes 
+ * handling this L3 page in the same way we do for L2 on i386 (or L4 on amd64)
+ * difficult. For most things we'll just pretend to have only 2 levels,
+ * with the 2 high bits of the L2 index being in fact the index in the
+ * L3.
  */
 
 #if !defined(_LOCORE)
@@ -133,9 +183,13 @@
 /*
  * here we define the data types for PDEs and PTEs
  */
-
-typedef u_int32_t pd_entry_t;		/* PDE */
-typedef u_int32_t pt_entry_t;		/* PTE */
+#ifdef PAE
+typedef uint64_t pd_entry_t;		/* PDE */
+typedef uint64_t pt_entry_t;		/* PTE */
+#else
+typedef uint32_t pd_entry_t;		/* PDE */
+typedef uint32_t pt_entry_t;		/* PTE */
+#endif
 
 #endif
 
@@ -143,17 +197,45 @@ typedef u_int32_t pt_entry_t;		/* PTE */
  * now we define various for playing with virtual addresses
  */
 
-#define	PDSHIFT		22		/* offset of PD index in VA */
-#define	NBPD		(1 << PDSHIFT)	/* # bytes mapped by PD (4MB) */
-#define	PDOFSET		(NBPD-1)	/* mask for non-PD part of VA */
-#if 0 /* not used? */
-#define	NPTEPD		(NBPD / NBPG)	/* # of PTEs in a PD */
-#else
-#define	PTES_PER_PTP	(NBPD / NBPG)	/* # of PTEs in a PTP */
-#endif
-#define	PD_MASK		0xffc00000	/* page directory address bits */
-#define	PT_MASK		0x003ff000	/* page table address bits */
+#ifdef PAE
+#define	L1_SHIFT	12
+#define	L2_SHIFT	21
+#define	L3_SHIFT	30
+#define	NBPD_L1		(1ULL << L1_SHIFT) /* # bytes mapped by L1 ent (4K) */
+#define	NBPD_L2		(1ULL << L2_SHIFT) /* # bytes mapped by L2 ent (2MB) */
+#define	NBPD_L3		(1ULL << L3_SHIFT) /* # bytes mapped by L3 ent (1GB) */
 
+#define	L3_MASK		0xc0000000
+#define	L2_REALMASK	0x3fe00000
+#define	L2_MASK		(L2_REALMASK | L3_MASK)
+#define	L1_MASK		0x001ff000
+
+#define	L3_FRAME	(L3_MASK)
+#define	L2_FRAME	(L3_FRAME | L2_MASK)
+#define	L1_FRAME	(L2_FRAME|L1_MASK)
+
+#define	PG_FRAME	0x000ffffffffff000ULL /* page frame mask */
+#define	PG_LGFRAME	0x000fffffffe00000ULL /* large (2MB) page frame mask */
+
+/* macros to get real L2 and L3 index, from our "extended" L2 index */
+#define l2tol3(idx)	((idx) >> (L3_SHIFT - L2_SHIFT))
+#define l2tol2(idx)	((idx) & (L2_REALMASK >>  L2_SHIFT))
+#else /* PAE */
+#define	L1_SHIFT	12
+#define	L2_SHIFT	22
+#define	NBPD_L1		(1ULL << L1_SHIFT) /* # bytes mapped by L1 ent (4K) */
+#define	NBPD_L2		(1ULL << L2_SHIFT) /* # bytes mapped by L2 ent (4MB) */
+
+#define L2_MASK		0xffc00000
+#define L1_MASK		0x003ff000
+
+#define L2_FRAME	(L2_MASK)
+#define L1_FRAME	(L2_FRAME|L1_MASK)
+
+#define	PG_FRAME	0xfffff000	/* page frame mask */
+#define	PG_LGFRAME	0xffc00000	/* large (4MB) page frame mask */
+
+#endif /* PAE */
 /*
  * here we define the bits of the PDE/PTE, as described above:
  *
@@ -173,8 +255,6 @@ typedef u_int32_t pt_entry_t;		/* PTE */
 #define PG_AVAIL1	0x00000200	/* ignored by hardware */
 #define PG_AVAIL2	0x00000400	/* ignored by hardware */
 #define PG_AVAIL3	0x00000800	/* ignored by hardware */
-#define PG_FRAME	0xfffff000	/* page frame mask */
-#define PG_LGFRAME	0xffc00000	/* large (4M) page frame mask */
 
 /*
  * various short-hand protection codes
@@ -182,6 +262,7 @@ typedef u_int32_t pt_entry_t;		/* PTE */
 
 #define	PG_KR		0x00000000	/* kernel read-only */
 #define	PG_KW		0x00000002	/* kernel read-write */
+#define	PG_NX		0		/* dummy */
 
 /*
  * page protection exception bits
@@ -190,6 +271,5 @@ typedef u_int32_t pt_entry_t;		/* PTE */
 #define PGEX_P		0x01	/* protection violation (vs. no mapping) */
 #define PGEX_W		0x02	/* exception during a write cycle */
 #define PGEX_U		0x04	/* exception while in user mode (upl) */
-#define PGEX_I		0x10	/* instruction fetch blocked by NX */
 
 #endif /* _I386_PTE_H_ */

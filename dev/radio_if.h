@@ -1,4 +1,5 @@
-/* $OpenBSD: radio_if.h,v 1.3 2002/05/30 15:22:26 mickey Exp $ */
+/* $NetBSD: radio_if.h,v 1.5 2008/07/09 13:12:54 joerg Exp $ */
+/* $OpenBSD: radio_if.h,v 1.2 2001/12/05 10:27:06 mickey Exp $ */
 /* $RuOBSD: radio_if.h,v 1.6 2001/10/18 16:51:36 pva Exp $ */
 
 /*
@@ -37,7 +38,7 @@
 
 struct radio_hw_if {
 	/* open hardware */
-	int	(*open)(void *, int, int, struct proc *);	
+	int	(*open)(void *, int, int, struct proc *);
 
 	/* close hardware */
 	int	(*close)(void *, int, int, struct proc *);
@@ -47,6 +48,11 @@ struct radio_hw_if {
 	int     (*search)(void *, int);
 };
 
-struct device  *radio_attach_mi(struct radio_hw_if *, void *, struct device *);
+struct radio_attach_args {
+	const struct radio_hw_if *hwif;
+	void    *hdl;
+};
+
+device_t radio_attach_mi(const struct radio_hw_if *, void *, device_t);
 
 #endif /* _SYS_DEV_RADIO_IF_H */

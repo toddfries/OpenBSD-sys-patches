@@ -1,9 +1,7 @@
-#	$OpenBSD: Makefile,v 1.1 1997/09/17 10:46:13 downsj Exp $
+#	$NetBSD: Makefile,v 1.3 2001/12/12 01:49:51 tv Exp $
 
-NOMAN=	noman
+NOMAN=	# defined
 
-beforeinstall:
-	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} \
-	    ${.CURDIR}/binstall.sh ${DESTDIR}${BINDIR}/binstall
+SCRIPTS=	binstall.sh
 
 .include <bsd.prog.mk>

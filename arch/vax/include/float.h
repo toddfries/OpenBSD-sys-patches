@@ -1,5 +1,4 @@
-/*	$OpenBSD: float.h,v 1.6 2003/06/02 23:27:57 millert Exp $	*/
-/*	$NetBSD: float.h,v 1.5 1998/10/10 02:13:55 matt Exp $	*/
+/*	$NetBSD: float.h,v 1.10 2005/12/11 12:19:34 christos Exp $	*/
 
 /*
  * Copyright (c) 1989 Regents of the University of California.
@@ -35,32 +34,46 @@
 #ifndef _VAX_FLOAT_H_
 #define _VAX_FLOAT_H_
 
+#include <sys/cdefs.h>
+#include <sys/featuretest.h>
+
 #define FLT_RADIX	2		/* b */
 #define FLT_ROUNDS	1		/* FP addition rounds to nearest */
 
+#if !defined(_ANSI_SOURCE) && !defined(_POSIX_C_SOURCE) && \
+    !defined(_XOPEN_SOURCE) || \
+    ((__STDC_VERSION__ - 0) >= 199901L) || \
+    ((_POSIX_C_SOURCE - 0) >= 200112L) || \
+    ((_XOPEN_SOURCE  - 0) >= 600) || \
+    defined(_ISOC99_SOURCE) || defined(_NETBSD_SOURCE)
+#if __GNUC_PREREQ__(3, 3)
+#define	FLT_EVAL_METHOD	__FLT_EVAL_METHOD__
+#else
+#define	FLT_EVAL_METHOD	0		/* evaluate all operations and
+					   constants just to the range and
+					   precision of the type */
+#endif /* GCC >= 3.3 */
+#endif /* !defined(_ANSI_SOURCE) && ... */
+					   
 #define FLT_MANT_DIG	24		/* p */
 #define FLT_EPSILON	1.19209290E-7F	/* b**(1-p) */
+#define FLT_DIG		6		/* floor((p-1)*log10(b))+(b == 10) */
 #define FLT_MIN_EXP	(-127)		/* emin */
+#define FLT_MIN		2.93873588E-39F	/* b**(emin-1) */
 #define FLT_MIN_10_EXP	(-38)		/* ceil(log10(b**(emin-1))) */
 #define FLT_MAX_EXP	127		/* emax */
+#define FLT_MAX		1.70141173E+38F	/* (1-b**(-p))*b**emax */
 #define FLT_MAX_10_EXP	38		/* floor(log10((1-b**(-p))*b**emax)) */
 
 #define DBL_MANT_DIG	56
 #define DBL_EPSILON	2.77555756156289135E-17
+#define DBL_DIG		16
 #define DBL_MIN_EXP	(-127)
+#define DBL_MIN		2.938735877055718770E-39
 #define DBL_MIN_10_EXP	(-38)
 #define DBL_MAX_EXP	127
+#define DBL_MAX		1.701411834604692294E+38
 #define DBL_MAX_10_EXP	38
-
-/* limits.h also defines this */
-#if !defined(FLT_DIG)
-# define FLT_DIG	6		/* floor((p-1)*log10(b))+(b == 10) */
-# define FLT_MIN	2.93873588E-39F	/* b**(emin-1) */
-# define FLT_MAX	1.70141173E+38F	/* (1-b**(-p))*b**emax */
-# define DBL_DIG	16
-# define DBL_MIN	2.938735877055718770E-39
-# define DBL_MAX	1.701411834604692294E+38
-#endif
 
 #define LDBL_MANT_DIG	DBL_MANT_DIG
 #define LDBL_EPSILON	DBL_EPSILON
@@ -72,4 +85,12 @@
 #define LDBL_MAX	DBL_MAX
 #define LDBL_MAX_10_EXP	DBL_MAX_10_EXP
 
+#if !defined(_ANSI_SOURCE) && !defined(_POSIX_C_SOURCE) && \
+    !defined(_XOPEN_SOURCE) || \
+    ((__STDC_VERSION__ - 0) >= 199901L) || \
+    ((_POSIX_C_SOURCE - 0) >= 200112L) || \
+    ((_XOPEN_SOURCE  - 0) >= 600) || \
+    defined(_ISOC99_SOURCE) || defined(_NETBSD_SOURCE)
+#define	DECIMAL_DIG	18		/* ceil((1+p*log10(b))-(b==10) */
+#endif
 #endif	/* _VAX_FLOAT_H_ */

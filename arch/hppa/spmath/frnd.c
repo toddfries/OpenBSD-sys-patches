@@ -1,24 +1,54 @@
-/*	$OpenBSD: frnd.c,v 1.8 2003/04/10 17:27:58 mickey Exp $	*/
-/*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)frnd.c: Revision: 2.7.88.1 Date: 93/12/07 15:06:24 */
+/*	$NetBSD: frnd.c,v 1.4 2007/02/22 05:46:30 thorpej Exp $	*/
 
-#include "float.h"
-#include "sgl_float.h"
-#include "dbl_float.h"
-#include "quad_float.h"
-#include "cnv_float.h"
+/*	$OpenBSD: frnd.c,v 1.5 2001/03/29 03:58:18 mickey Exp $	*/
+
+/*
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: frnd.c,v 1.4 2007/02/22 05:46:30 thorpej Exp $");
+
+#include "../spmath/float.h"
+#include "../spmath/sgl_float.h"
+#include "../spmath/dbl_float.h"
+#include "../spmath/quad_float.h"
+#include "../spmath/cnv_float.h"
 
 /*
  *  Single Floating-point Round to Integer
@@ -26,13 +56,14 @@
 
 /*ARGSUSED*/
 int
-sgl_frnd(srcptr, null, dstptr, status)
-	sgl_floating_point *srcptr, *null, *dstptr;
-	unsigned int *status;
+sgl_frnd(srcptr,dstptr,status)
+
+sgl_floating_point *srcptr, *dstptr;
+unsigned int *status;
 {
 	register unsigned int src, result;
 	register int src_exponent;
-	register int inexact = FALSE;
+	register int inexact = false;
 
 	src = *srcptr;
 	/*
@@ -71,7 +102,7 @@ sgl_frnd(srcptr, null, dstptr, status)
 		Sgl_rightshift(result,(SGL_P-1) - (src_exponent));
 		/* check for inexact */
 		if (Sgl_isinexact_to_fix(src,src_exponent)) {
-			inexact = TRUE;
+			inexact = true;
 			/*  round result  */
 			switch (Rounding_mode()) {
 			case ROUNDPLUS:
@@ -97,7 +128,7 @@ sgl_frnd(srcptr, null, dstptr, status)
 		Sgl_setzero_exponentmantissa(result);
 		/* check for inexact */
 		if (Sgl_isnotzero_exponentmantissa(src)) {
-			inexact = TRUE;
+			inexact = true;
 			/*  round result  */
 			switch (Rounding_mode()) {
 			case ROUNDPLUS:
@@ -129,13 +160,14 @@ sgl_frnd(srcptr, null, dstptr, status)
 
 /*ARGSUSED*/
 int
-dbl_frnd(srcptr, null, dstptr, status)
-	dbl_floating_point *srcptr, *null, *dstptr;
-	unsigned int *status;
+dbl_frnd(srcptr,dstptr,status)
+
+dbl_floating_point *srcptr, *dstptr;
+unsigned int *status;
 {
 	register unsigned int srcp1, srcp2, resultp1, resultp2;
 	register int src_exponent;
-	register int inexact = FALSE;
+	register int inexact = false;
 
 	Dbl_copyfromptr(srcptr,srcp1,srcp2);
 	/*
@@ -175,7 +207,7 @@ dbl_frnd(srcptr, null, dstptr, status)
 		Dbl_rightshift(resultp1,resultp2,(DBL_P-1) - (src_exponent));
 		/* check for inexact */
 		if (Dbl_isinexact_to_fix(srcp1,srcp2,src_exponent)) {
-			inexact = TRUE;
+			inexact = true;
 			/*  round result  */
 			switch (Rounding_mode()) {
 			case ROUNDPLUS:
@@ -203,7 +235,7 @@ dbl_frnd(srcptr, null, dstptr, status)
 		Dbl_setzero_exponentmantissa(resultp1,resultp2);
 		/* check for inexact */
 		if (Dbl_isnotzero_exponentmantissa(srcp1,srcp2)) {
-			inexact = TRUE;
+			inexact = true;
 			/*  round result  */
 			switch (Rounding_mode()) {
 			case ROUNDPLUS:
@@ -231,9 +263,11 @@ dbl_frnd(srcptr, null, dstptr, status)
 
 /*ARGSUSED*/
 int
-quad_frnd(srcptr, null, dstptr, status)
-	quad_floating_point *srcptr, *null, *dstptr;
-	unsigned int *status;
+quad_frnd(srcptr,dstptr,status)
+
+quad_floating_point *srcptr, *dstptr;
+unsigned int *status;
 {
 	return(UNIMPLEMENTEDEXCEPTION);
 }
+

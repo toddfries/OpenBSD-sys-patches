@@ -1,5 +1,4 @@
-/*	$OpenBSD: lcavar.h,v 1.11 2006/03/16 22:32:44 miod Exp $	*/
-/* $NetBSD: lcavar.h,v 1.7 1997/06/06 23:54:32 thorpej Exp $ */
+/* $NetBSD: lcavar.h,v 1.8 1997/09/02 12:40:22 thorpej Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -55,9 +54,15 @@ struct lca_config {
 	int	lc_mallocsafe;
 };
 
-void	lca_init(struct lca_config *, int);
-void	lca_pci_init(pci_chipset_tag_t, void *);
-void	lca_dma_init(struct lca_config *);
+struct lca_softc {
+	struct	device sc_dev;
 
-void	lca_bus_io_init(bus_space_tag_t, void *);
-void	lca_bus_mem_init(bus_space_tag_t, void *);
+	struct	lca_config *sc_lcp;
+};
+
+void	lca_init __P((struct lca_config *, int));
+void	lca_pci_init __P((pci_chipset_tag_t, void *));
+void	lca_dma_init __P((struct lca_config *));
+
+void	lca_bus_io_init __P((bus_space_tag_t, void *));
+void	lca_bus_mem_init __P((bus_space_tag_t, void *));

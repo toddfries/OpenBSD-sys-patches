@@ -1,5 +1,4 @@
-/*	$OpenBSD: vectors.s,v 1.9 2006/01/13 19:36:47 miod Exp $	*/
-|	$NetBSD: vectors.s,v 1.10 1998/08/12 06:58:42 scottr Exp $
+|	$NetBSD: vectors.s,v 1.16 2005/12/11 12:18:03 christos Exp $
 
 | Copyright (c) 1988 University of Utah
 | Copyright (c) 1990 Regents of the University of California.
@@ -13,7 +12,11 @@
 | 2. Redistributions in binary form must reproduce the above copyright
 |    notice, this list of conditions and the following disclaimer in the
 |    documentation and/or other materials provided with the distribution.
-| 3. Neither the name of the University nor the names of its contributors
+| 3. All advertising materials mentioning features or use of this software
+|    must display the following acknowledgement:
+|	This product includes software developed by the University of
+|	California, Berkeley and its contributors.
+| 4. Neither the name of the University nor the names of its contributors
 |    may be used to endorse or promote products derived from this software
 |    without specific prior written permission.
 |
@@ -32,17 +35,17 @@
 |	@(#)vectors.s	7.2 (Berkeley) 5/7/91
 |
 
-#define		BADTRAP16		\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
-	VECTOR(badtrap) ; VECTOR(badtrap) ;	\
+#define	BADTRAP16	\
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
+	VECTOR(badtrap) ; VECTOR(badtrap) ; \
 	VECTOR(badtrap) ; VECTOR(badtrap)
 
-	.data
+	.text
 GLOBAL(vectab)
 	VECTOR_UNUSED		/* 0: NOT USED (reset SSP) */
 	VECTOR_UNUSED		/* 1: NOT USED (reset PC) */
@@ -53,8 +56,12 @@ GLOBAL(vectab)
 	VECTOR(chkinst)		/* 6: CHK instruction */
 	VECTOR(trapvinst)	/* 7: TRAPV instruction */
 	VECTOR(privinst)	/* 8: privilege violation */
+#if defined(MRG_TRACE)
+	VECTOR(mrg_tracetrap)	/* 9: trace */
+#else /* MRG_TRACE */
 	VECTOR(trace)		/* 9: trace */
-	VECTOR(illinst)		/* 10: line 1010 emulator */
+#endif /* MRG_TRACE */
+	VECTOR(alinetrap)	/* 10: line 1010 emulator ; see macromasm.s */
 	VECTOR(fpfline)		/* 11: line 1111 emulator */
 	VECTOR(badtrap)		/* 12: unassigned, reserved */
 	VECTOR(coperr)		/* 13: coprocessor protocol violation */
@@ -62,7 +69,7 @@ GLOBAL(vectab)
 	VECTOR(badtrap)		/* 15: uninitialized interrupt vector */
 	VECTOR(badtrap)		/* 16: unassigned, reserved */
 	VECTOR(badtrap)		/* 17: unassigned, reserved */
-	VECTOR(badtrap)		/* 17: unassigned, reserved */
+	VECTOR(badtrap)		/* 18: unassigned, reserved */
 	VECTOR(badtrap)		/* 19: unassigned, reserved */
 	VECTOR(badtrap)		/* 20: unassigned, reserved */
 	VECTOR(badtrap)		/* 21: unassigned, reserved */
@@ -77,9 +84,17 @@ GLOBAL(vectab)
 	VECTOR(intrhand)	/* 30: level 6 interrupt autovector */
 	VECTOR(lev7intr)	/* 31: level 7 interrupt autovector */
 	VECTOR(trap0)		/* 32: syscalls */
-	VECTOR(trap1)		/* 33: sigreturn syscall or breakpoint */
-	VECTOR(trap2)		/* 34: breakpoint or sigreturn syscall */
-	VECTOR(illinst)		/* 35: TRAP instruction vector */
+#ifdef COMPAT_13
+	VECTOR(trap1)		/* 33: compat_13_sigreturn */
+#else
+	VECTOR(illinst)
+#endif
+	VECTOR(trap2)		/* 34: breakpoint or compat_13_sigreturn */
+#ifdef COMPAT_16
+	VECTOR(trap3)		/* 35: compat_16_sigreturn */
+#else
+	VECTOR(illinst)	
+#endif
 	VECTOR(illinst)		/* 36: TRAP instruction vector */
 	VECTOR(illinst)		/* 37: TRAP instruction vector */
 	VECTOR(illinst)		/* 38: TRAP instruction vector */
@@ -92,17 +107,23 @@ GLOBAL(vectab)
 	VECTOR(illinst)		/* 45: TRAP instruction vector */
 	VECTOR(illinst)		/* 46: TRAP instruction vector */
 	VECTOR(trap15)		/* 47: TRAP instruction vector */
-
-GLOBAL(fpvect_tab)
-	VECTOR(fpfault)		/* 48: FPCP branch/set on unordered cond */
-	VECTOR(fpfault)		/* 49: FPCP inexact result */
-	VECTOR(fpfault)		/* 50: FPCP divide by zero */
-	VECTOR(fpfault)		/* 51: FPCP underflow */
-	VECTOR(fpfault)		/* 52: FPCP operand error */
-	VECTOR(fpfault)		/* 53: FPCP overflow */
-	VECTOR(fpfault)		/* 54: FPCP signalling NAN */
-GLOBAL(fpvect_end)
-
+#ifdef FPSP
+ 	ASVECTOR(bsun)		/* 48: FPCP branch/set on unordered cond */
+ 	ASVECTOR(inex)		/* 49: FPCP inexact result */
+ 	ASVECTOR(dz)		/* 50: FPCP divide by zero */
+ 	ASVECTOR(unfl)		/* 51: FPCP underflow */
+ 	ASVECTOR(operr)		/* 52: FPCP operand error */
+ 	ASVECTOR(ovfl)		/* 53: FPCP overflow */
+ 	ASVECTOR(snan)		/* 54: FPCP signalling NAN */
+#else
+ 	VECTOR(fpfault)		/* 48: FPCP branch/set on unordered cond */
+ 	VECTOR(fpfault)		/* 49: FPCP inexact result */
+ 	VECTOR(fpfault)		/* 50: FPCP divide by zero */
+ 	VECTOR(fpfault)		/* 51: FPCP underflow */
+ 	VECTOR(fpfault)		/* 52: FPCP operand error */
+ 	VECTOR(fpfault)		/* 53: FPCP overflow */
+ 	VECTOR(fpfault)		/* 54: FPCP signalling NAN */
+#endif
 	VECTOR(fpunsupp)	/* 55: FPCP unimplemented data type */
 	VECTOR(badtrap)		/* 56: unassigned, reserved */
 	VECTOR(badtrap)		/* 57: unassigned, reserved */
@@ -112,29 +133,16 @@ GLOBAL(fpvect_end)
 	VECTOR(badtrap)		/* 61: unassigned, reserved */
 	VECTOR(badtrap)		/* 62: unassigned, reserved */
 	VECTOR(badtrap)		/* 63: unassigned, reserved */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
-	BADTRAP16		/* 64-255: user interrupt vectors */
 
-#ifdef FPSP
-	/*
-	 * 68040: this chunk of vectors is copied into the fpfault zone
-	 */
-GLOBAL(fpsp_tab)
-	ASVECTOR(fpsp_bsun)	/* 48: FPCP branch/set on unordered cond */
-	ASVECTOR(inex)		/* 49: FPCP inexact result */
-	ASVECTOR(dz)		/* 50: FPCP divide by zero */
-	ASVECTOR(fpsp_unfl)	/* 51: FPCP underflow */
-	ASVECTOR(fpsp_operr)	/* 52: FPCP operand error */
-	ASVECTOR(fpsp_ovfl)	/* 53: FPCP overflow */
-	ASVECTOR(fpsp_snan)	/* 54: FPCP signalling NAN */
-#endif /* FPSP */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */
+	BADTRAP16		/* 64-255: user interrupt vectors */

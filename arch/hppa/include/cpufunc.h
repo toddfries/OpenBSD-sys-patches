@@ -1,7 +1,9 @@
-/*	$OpenBSD: cpufunc.h,v 1.27 2005/04/07 00:19:28 mickey Exp $	*/
+/*	$NetBSD: cpufunc.h,v 1.10 2007/10/18 18:55:10 skrll Exp $	*/
+
+/*	$OpenBSD: cpufunc.h,v 1.17 2000/05/15 17:22:40 mickey Exp $	*/
 
 /*
- * Copyright (c) 1998-2004 Michael Shalayeff
+ * Copyright (c) 1998,2000 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,18 +14,22 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /*
  *  (c) Copyright 1988 HEWLETT-PACKARD COMPANY
@@ -54,8 +60,8 @@
  *	Author: Bob Wheeler, University of Utah CSL
  */
 
-#ifndef _MACHINE_CPUFUNC_H_
-#define _MACHINE_CPUFUNC_H_
+#ifndef _HPPA_CPUFUNC_H_
+#define _HPPA_CPUFUNC_H_
 
 #include <machine/psl.h>
 #include <machine/pte.h>
@@ -68,38 +74,37 @@
 /* Get space register for an address */
 static __inline register_t ldsid(vaddr_t p) {
 	register_t ret;
-	__asm __volatile("ldsid (%1),%0" : "=r" (ret) : "r" (p));
+	__asm volatile("ldsid (%1),%0" : "=r" (ret) : "r" (p));
 	return ret;
 }
 
-#define mtctl(v,r) __asm __volatile("mtctl %0,%1":: "r" (v), "i" (r))
-#define mfctl(r,v) __asm __volatile("mfctl %1,%0": "=r" (v): "i" (r))
+#define mtctl(v,r) __asm volatile("mtctl %0,%1":: "r" (v), "i" (r))
+#define mfctl(r,v) __asm volatile("mfctl %1,%0": "=r" (v): "i" (r))
 
-#define	mfcpu(r,v)	/* XXX for the lack of the mnemonics */		\
-	__asm __volatile(".word	%1\n\t"					\
-			 "copy	%%r22, %0"				\
-	    : "=r" (v) : "i" ((0x14001400 | ((r) << 21) | (22)))	\
-	    : "r22")
+#define mfcpu(r,v)	/* XXX for the lack of the mnemonics */		\
+	__asm volatile("diag  %1\n\t"					\
+			 "copy  %%r22, %0"				\
+	: "=r" (v) : "i" ((0x1400 | ((r) << 21) | (22))) : "r22")
 
-#define mtsp(v,r) __asm __volatile("mtsp %0,%1":: "r" (v), "i" (r))
-#define mfsp(r,v) __asm __volatile("mfsp %1,%0": "=r" (v): "i" (r))
+#define mtsp(v,r) __asm volatile("mtsp %0,%1":: "r" (v), "i" (r))
+#define mfsp(r,v) __asm volatile("mfsp %1,%0": "=r" (v): "i" (r))
 
-#define ssm(v,r) __asm __volatile("ssm %1,%0": "=r" (r): "i" (v))
-#define rsm(v,r) __asm __volatile("rsm %1,%0": "=r" (r): "i" (v))
+#define ssm(v,r) __asm volatile("ssm %1,%0": "=r" (r): "i" (v))
+#define rsm(v,r) __asm volatile("rsm %1,%0": "=r" (r): "i" (v))
 
 /* Move to system mask. Old value of system mask is returned. */
-static __inline register_t
-mtsm(register_t mask) {
+static __inline register_t mtsm(register_t mask) {
 	register_t ret;
-	__asm __volatile("ssm 0,%0\n\t"
-			 "mtsm %1": "=&r" (ret) : "r" (mask));
+	__asm volatile(
+	    "ssm 0,%0\n\t"
+	    "mtsm %1": "=&r" (ret) : "r" (mask));
 	return ret;
 }
 
-#define	fdce(sp,off) __asm __volatile("fdce 0(%0,%1)":: "i" (sp), "r" (off))
-#define	fice(sp,off) __asm __volatile("fice 0(%0,%1)":: "i" (sp), "r" (off))
-#define sync_caches() __asm __volatile(\
-    "sync\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop":::"memory")
+#define	fdce(sp,off) __asm volatile("fdce 0(%0,%1)":: "i" (sp), "r" (off))
+#define	fice(sp,off) __asm volatile("fice 0(%0,%1)":: "i" (sp), "r" (off))
+#define sync_caches() \
+    __asm volatile("sync\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop":::"memory")
 
 static __inline void
 iitlba(u_int pg, pa_space_t sp, vaddr_t va)
@@ -157,63 +162,49 @@ pdtlbe(pa_space_t sp, vaddr_t va)
 	__asm volatile("pdtlbe %%r0(%%sr1, %0)":: "r" (va));
 }
 
-#ifdef USELEDS
-#define	PALED_NETSND	0x01
-#define	PALED_NETRCV	0x02
-#define	PALED_DISK	0x04
-#define	PALED_HEARTBEAT	0x08
-#define	PALED_LOADMASK	0xf0
-
-#define	PALED_DATA	0x01
-#define	PALED_STROBE	0x02
-
-extern volatile u_int8_t *machine_ledaddr;
-extern int machine_ledword, machine_leds;
-
-static __inline void
-ledctl(int on, int off, int toggle)
-{
-	if (machine_ledaddr) {
-		int r;
-
-		if (on)
-			machine_leds |= on;
-		if (off)
-			machine_leds &= ~off;
-		if (toggle)
-			machine_leds ^= toggle;
-			
-		r = ~machine_leds;	/* it seems they should be reversed */
-
-		if (machine_ledword)
-			*machine_ledaddr = r;
-		else {
-			register int b;
-			for (b = 0x80; b; b >>= 1) {
-				*machine_ledaddr = (r & b)? PALED_DATA : 0;
-				DELAY(1);
-				*machine_ledaddr = ((r & b)? PALED_DATA : 0) |
-				    PALED_STROBE;
-			}
-		}
-	}
-}
-#endif
-
 #ifdef _KERNEL
-extern int (*cpu_hpt_init)(vaddr_t hpt, vsize_t hptsize);
-
-void fpu_save(vaddr_t va);
-void fpu_exit(void);
 void ficache(pa_space_t sp, vaddr_t va, vsize_t size);
 void fdcache(pa_space_t sp, vaddr_t va, vsize_t size);
 void pdcache(pa_space_t sp, vaddr_t va, vsize_t size);
-void ficacheall(void);
-void fdcacheall(void);
+void fcacheall(void);
 void ptlball(void);
-int btlb_insert(pa_space_t space, vaddr_t va, paddr_t pa, vsize_t *lenp, u_int prot);
-hppa_hpa_t cpu_gethpa(int n);
-void eaio_l2(int i);
-#endif
+hppa_hpa_t cpu_gethpa(int);
 
-#endif /* _MACHINE_CPUFUNC_H_ */
+#define PCXL2_ACCEL_IO_START		0xf4000000
+#define PCXL2_ACCEL_IO_END		(0xfc000000 - 1)
+#define PCXL2_ACCEL_IO_ADDR2MASK(a)	(0x8 >> ((((a) >> 25) - 2) & 3))
+void eaio_l2(int);
+
+/*
+ * These flush or purge the data cache for a item whose total 
+ * size is <= the size of a data cache line, however they don't
+ * check this constraint.
+ */
+static __inline void
+fdcache_small(pa_space_t sp, vaddr_t va, vsize_t size)
+{
+	__asm volatile(
+		"	mtsp	%0,%%sr1		\n"
+		"	fdc	%%r0(%%sr1, %1)		\n"
+		"	fdc	%2(%%sr1, %1)		\n"
+		"	sync				\n"
+		"	syncdma				\n"
+		:
+		: "r" (sp), "r" (va), "r" (size - 1));
+}
+static __inline void
+pdcache_small(pa_space_t sp, vaddr_t va, vsize_t size)
+{
+	__asm volatile(
+		"	mtsp	%0,%%sr1		\n"
+		"	pdc	%%r0(%%sr1, %1)		\n"
+		"	pdc	%2(%%sr1, %1)		\n"
+		"	sync				\n"
+		"	syncdma				\n"
+		:
+		: "r" (sp), "r" (va), "r" (size - 1));
+}
+
+#endif /* _KERNEL */
+
+#endif /* _HPPA_CPUFUNC_H_ */

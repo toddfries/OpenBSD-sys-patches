@@ -1,4 +1,4 @@
-/*	$NetBSD: exception.c,v 1.33 2006/10/08 18:20:42 uwe Exp $	*/
+/*	$NetBSD: exception.c,v 1.52 2008/10/21 04:16:59 wrstuden Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc. All rights reserved.
@@ -79,26 +79,18 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: exception.c,v 1.33 2006/10/08 18:20:42 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: exception.c,v 1.52 2008/10/21 04:16:59 wrstuden Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_ktrace.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
-#include <sys/pool.h>
-#include <sys/user.h>
 #include <sys/kernel.h>
+#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/signal.h>
-#include <sys/syscall.h>
-#include <sys/sa.h>
-#include <sys/savar.h>
 
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 #ifdef DDB
 #include <sh3/db_machdep.h>
 #endif
@@ -131,7 +123,7 @@ const char * const exp_type[] = {
 	"--",					/* 0x1c0 (external interrupt) */
 	"user break point trap",		/* 0x1e0 EXPEVT_BREAK */
 };
-const int exp_types = sizeof exp_type / sizeof exp_type[0];
+const int exp_types = __arraycount(exp_type);
 
 void general_exception(struct lwp *, struct trapframe *, uint32_t);
 void tlb_exception(struct lwp *, struct trapframe *, uint32_t);
@@ -147,14 +139,23 @@ void
 general_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 {
 	int expevt = tf->tf_expevt;
-	boolean_t usermode = !KERNELMODE(tf->tf_ssr);
-	int ipl;
+	bool usermode = !KERNELMODE(tf->tf_ssr);
 	ksiginfo_t ksi;
+	uint32_t trapcode;
+#ifdef DDB
+	uint32_t code;
+#endif
 
 	uvmexp.traps++;
 
-	ipl = tf->tf_ssr & PSL_IMASK;
-	splx(ipl);
+	/*
+	 * Read trap code from TRA before enabling interrupts,
+	 * otherwise it can be clobbered by a ddb breakpoint in an
+	 * interrupt handler.
+	 */
+	trapcode = _reg_read_4(SH_(TRA)) >> 2;
+
+	splx(tf->tf_ssr & PSL_IMASK);
 
 	if (l == NULL)
  		goto do_panic;
@@ -168,7 +169,7 @@ general_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 	switch (expevt) {
 	case EXPEVT_TRAPA | EXP_USER:
 		/* Check for debugger break */
-		if (_reg_read_4(SH_(TRA)) == (_SH_TRA_BREAK << 2)) {
+		if (trapcode == _SH_TRA_BREAK) {
 			tf->tf_spc -= 2; /* back to the breakpoint address */
 			KSI_INIT_TRAP(&ksi);
 			ksi.ksi_signo = SIGTRAP;
@@ -181,6 +182,13 @@ general_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 			return;
 		}
 		break;
+
+	case EXPEVT_BREAK | EXP_USER:
+		KSI_INIT_TRAP(&ksi);
+		ksi.ksi_signo = SIGTRAP;
+		ksi.ksi_code = TRAP_TRACE;
+		ksi.ksi_addr = (void *)tf->tf_spc;
+		goto trapsignal;
 
 	case EXPEVT_ADDR_ERR_LD: /* FALLTHROUGH */
 	case EXPEVT_ADDR_ERR_ST:
@@ -211,13 +219,6 @@ general_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 		ksi.ksi_addr = (void *)tf->tf_spc;
 		goto trapsignal;
 
-	case EXPEVT_BREAK | EXP_USER:
-		KSI_INIT_TRAP(&ksi);
-		ksi.ksi_signo = SIGTRAP;
-		ksi.ksi_code = TRAP_TRACE;
-		ksi.ksi_addr = (void *)tf->tf_spc;
-		goto trapsignal;
-
 	default:
 		goto do_panic;
 	}
@@ -228,15 +229,21 @@ general_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 
  trapsignal:
 	ksi.ksi_trap = tf->tf_expevt;
-	KERNEL_PROC_LOCK(l);
 	trapsignal(l, &ksi);
-	KERNEL_PROC_UNLOCK(l);
 	userret(l);
 	return;
 
  do_panic:
 #ifdef DDB
-	if (kdb_trap(expevt, 0, tf))
+	switch (expevt & ~EXP_USER) {
+	case EXPEVT_TRAPA:
+		code = trapcode;
+		break;
+	default:
+		code = 0;
+		break;
+	}
+	if (kdb_trap(expevt, code, tf))
 		return;
 #endif
 #ifdef KGDB
@@ -267,7 +274,7 @@ tlb_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 	struct vm_map *map;
 	pmap_t pmap;
 	ksiginfo_t ksi;
-	boolean_t usermode;
+	bool usermode;
 	int err, track, ftype;
 	const char *panic_msg;
 
@@ -279,15 +286,18 @@ tlb_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 			}				\
 		} while(/*CONSTCOND*/0)
 
+	splx(tf->tf_ssr & PSL_IMASK);
 
 	usermode = !KERNELMODE(tf->tf_ssr);
 	if (usermode) {
 		KDASSERT(l->l_md.md_regs == tf);
 		LWP_CACHE_CREDS(l, l->l_proc);
 	} else {
+#if 0 /* FIXME: probably wrong for yamt-idlelwp */
 		KDASSERT(l == NULL ||		/* idle */
 		    l == &lwp0 ||		/* kthread */
 		    l->l_md.md_regs != tf);	/* other */
+#endif
 	}
 
 	switch (tf->tf_expevt) {
@@ -366,11 +376,6 @@ tlb_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 		return;
 	}
 
-	if ((map != kernel_map) && (l->l_flag & L_SA)) {
-		l->l_savp->savp_faultaddr = (vaddr_t)va;
-		l->l_flag |= L_SA_PAGEFAULT;
-	}
-
 	err = uvm_fault(map, va, ftype);
 
 	/* User stack extension */
@@ -388,11 +393,9 @@ tlb_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 		}
 	}
 
-	if (map != kernel_map)
-		l->l_flag &= ~L_SA_PAGEFAULT;
 	/* Page in. load PTE to TLB. */
 	if (err == 0) {
-		boolean_t loaded = __pmap_pte_load(pmap, va, track);
+		bool loaded = __pmap_pte_load(pmap, va, track);
 		TLB_ASSERT(loaded, "page table entry not found");
 		if (usermode)
 			userret(l);
@@ -417,10 +420,8 @@ tlb_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 	return;
 
  user_fault:
-	ksi.ksi_trap = tf->tf_expevt
-	KERNEL_PROC_LOCK(l);
+	ksi.ksi_trap = tf->tf_expevt;
 	trapsignal(l, &ksi);
-	KERNEL_PROC_UNLOCK(l);
 	userret(l);
 	ast(l, tf);
 	return;
@@ -444,27 +445,26 @@ tlb_exception(struct lwp *l, struct trapframe *tf, uint32_t va)
 void
 ast(struct lwp *l, struct trapframe *tf)
 {
-	struct proc *p;
 
-	if (KERNELMODE(tf->tf_ssr))
+	if (KERNELMODE(tf->tf_ssr)) {
 		return;
+	}
+
 	KDASSERT(l != NULL);
 	KDASSERT(l->l_md.md_regs == tf);
 
-	p = l->l_proc;
-
-	while (p->p_md.md_astpending) {
+	while (l->l_md.md_astpending) {
 		uvmexp.softs++;
-		p->p_md.md_astpending = 0;
+		l->l_md.md_astpending = 0;
 
-		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
+		if (l->l_pflag & LP_OWEUPC) {
+			l->l_pflag &= ~LP_OWEUPC;
 			ADDUPROF(p);
 		}
 
-		if (want_resched) {
+		if (l->l_cpu->ci_want_resched) {
 			/* We are being preempted. */
-			preempt(0);
+			preempt();
 		}
 
 		userret(l);
@@ -472,57 +472,10 @@ ast(struct lwp *l, struct trapframe *tf)
 }
 
 /*
- * void child_return(void *arg):
- *
- *	uvm_fork sets this routine to proc_trampoline's service function.
- *	when return from here, jump to user-land.
- */
-void
-child_return(void *arg)
-{
-	struct lwp *l = arg;
-#ifdef KTRACE
-	struct proc *p = l->l_proc;
-#endif
-	struct trapframe *tf = l->l_md.md_regs;
-
-	tf->tf_r0 = 0;
-	tf->tf_ssr |= PSL_TBIT; /* This indicates no error. */
-
-	userret(l);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(l, SYS_fork, 0, 0);
-#endif
-}
-
-/*
- * void startlwp(void *arg):
- *
- *	Start a new LWP.
- */
-void
-startlwp(void *arg)
-{
-	ucontext_t *uc = arg;
-	struct lwp *l = curlwp;
-	int error;
-
-	error = cpu_setmcontext(l, &uc->uc_mcontext, uc->uc_flags);
-#ifdef DIAGNOSTIC
-	if (error)
-		printf("startlwp: error %d from cpu_setmcontext()", error);
-#endif
-	pool_put(&lwp_uc_pool, uc);
-
-	userret(l);
-}
-
-/*
  * void upcallret(struct lwp *l):
  *
- *	Perform userret() for an LWP.
- *	XXX This is a terrible name.
+ *     Perform userret() for an LWP.
+ *     XXX This is a terrible name.
  */
 void
 upcallret(struct lwp *l)

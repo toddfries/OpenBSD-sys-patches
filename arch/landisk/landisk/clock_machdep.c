@@ -1,4 +1,4 @@
-/*	$NetBSD: clock_machdep.c,v 1.2 2006/09/07 01:55:03 uwe Exp $	*/
+/*	$NetBSD: clock_machdep.c,v 1.4 2008/05/04 19:43:06 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,10 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,26 +26,17 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: clock_machdep.c,v 1.4 2008/05/04 19:43:06 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 
-#include <sh/clock.h>
-
-static void landisk_rtc_init(void *cookie);
-
-static struct rtc_ops landisk_rtc_ops = {
-	.init = landisk_rtc_init,
-};
+#include <sh3/clock.h>
 
 void
 machine_clock_init(void)
 {
 
-	sh_clock_init(SH_CLOCK_NORTC, &landisk_rtc_ops);
-}
-
-static void
-landisk_rtc_init(void *cookie)
-{
-	/* DUMMY */
+	sh_clock_init(SH_CLOCK_NORTC);
 }

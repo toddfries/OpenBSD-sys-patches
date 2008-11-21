@@ -1,4 +1,4 @@
-/*	$NetBSD: fpu.c,v 1.12 2005/12/24 20:07:04 perry Exp $	*/
+/*	$NetBSD: fpu.c,v 1.16 2008/08/28 08:45:26 skrll Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,9 +34,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.12 2005/12/24 20:07:04 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.16 2008/08/28 08:45:26 skrll Exp $");
 
-#include <sys/param.h>       
+#include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
@@ -282,7 +275,7 @@ hppa_fpu_ls(struct trapframe *frame, struct lwp *l)
 	log2size = (inst & OPCODE_DOUBLE) ? 3 : 2;
 
 	/* Get the floating point register. */
-	fpreg = ((caddr_t)l->l_addr->u_pcb.pcb_fpregs) + (inst_t << log2size);
+	fpreg = ((char *)l->l_addr->u_pcb.pcb_fpregs) + (inst_t << log2size);
 
 	/* Get the base register. */
 	base = FRAME_REG(frame, inst_b, r0);

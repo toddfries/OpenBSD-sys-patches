@@ -1,5 +1,4 @@
-/*	$OpenBSD: syslog.h,v 1.12 2006/01/06 18:53:06 millert Exp $	*/
-/*	$NetBSD: syslog.h,v 1.14 1996/04/03 20:46:44 christos Exp $	*/
+/*	$NetBSD: syslog.h,v 1.32 2008/10/31 16:12:18 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988, 1993
@@ -35,7 +34,7 @@
 #ifndef _SYS_SYSLOG_H_
 #define _SYS_SYSLOG_H_
 
-#define	_PATH_LOG	"/dev/log"
+#define	_PATH_LOG	"/var/run/log"
 
 /*
  * priorities/facilities are encoded into a single 32-bit quantity, where the
@@ -82,7 +81,7 @@ CODE prioritynames[] = {
 	{ "panic", 	LOG_EMERG },		/* DEPRECATED */
 	{ "warn",	LOG_WARNING },		/* DEPRECATED */
 	{ "warning",	LOG_WARNING },
-	{ NULL,		-1 },
+	{ NULL,		-1 }
 };
 #endif
 
@@ -139,23 +138,9 @@ CODE facilitynames[] = {
 	{ "local5",	LOG_LOCAL5 },
 	{ "local6",	LOG_LOCAL6 },
 	{ "local7",	LOG_LOCAL7 },
-	{ NULL,		-1 },
+	{ NULL,		-1 }
 };
 #endif
-
-/* Used by reentrant functions */
-
-struct syslog_data {
-	int	log_file;
-	int	connected;
-	int	opened;
-	int	log_stat;
-	const char 	*log_tag;
-	int 	log_fac;
-	int 	log_mask;
-};
-
-#define SYSLOG_DATA_INIT {-1, 0, 0, 0, (const char *)0, LOG_USER, 0xff}
 
 #ifdef _KERNEL
 #define	LOG_PRINTF	-1	/* pseudo-priority to indicate use of printf */
@@ -182,40 +167,75 @@ struct syslog_data {
 
 #ifndef _KERNEL
 
+/* Used by reentrant functions */
+
+struct syslog_data {
+	int	log_file;
+	int	connected;
+	int	opened;
+	int	log_stat;
+	const char 	*log_tag;
+	int 	log_fac;
+	int 	log_mask;
+};
+
+#define SYSLOG_DATA_INIT { \
+    .log_file = -1, \
+    .log_fac = LOG_USER, \
+    .log_mask = 0xff, \
+}
+
 /*
  * Don't use va_list in the vsyslog() prototype.   Va_list is typedef'd in two
  * places (<machine/varargs.h> and <machine/stdarg.h>), so if we include one
  * of them here we may collide with the utility's includes.  It's unreasonable
  * for utilities to have to include one of them to include syslog.h, so we get
- * __va_list from <machine/_types.h> and use it.
+ * _BSD_VA_LIST_ from <machine/ansi.h> and use it.
  */
+#include <machine/ansi.h>
 #include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <sys/featuretest.h>
 
 __BEGIN_DECLS
 void	closelog(void);
 void	openlog(const char *, int, int);
 int	setlogmask(int);
 void	syslog(int, const char *, ...)
-    __attribute__((__format__(__syslog__,2,3)));
-void	vsyslog(int, const char *, __va_list);
+    __attribute__((__format__(__printf__,2,3)));
+#if defined(_NETBSD_SOURCE)
+void	vsyslog(int, const char *, _BSD_VA_LIST_)
+    __attribute__((__format__(__printf__,2,0)));
 void	closelog_r(struct syslog_data *);
 void	openlog_r(const char *, int, int, struct syslog_data *);
 int	setlogmask_r(int, struct syslog_data *);
 void	syslog_r(int, struct syslog_data *, const char *, ...)
-     __attribute__((__format__(__syslog__,3,4)));
-void	vsyslog_r(int, struct syslog_data *, const char *, __va_list);
+    __attribute__((__format__(__printf__,3,4)));
+void	vsyslog_r(int, struct syslog_data *, const char *, _BSD_VA_LIST_)
+    __attribute__((__format__(__printf__,3,0)));
+void syslogp(int, const char *, const char *, const char *, ...)
+    __attribute__((__format__(__printf__,4,5)));
+void vsyslogp(int, const char *, const char *, const char *, _BSD_VA_LIST_)
+    __attribute__((__format__(__printf__,4,0)));
+void syslogp_r(int, struct syslog_data *, const char *, const char *,
+    const char *, ...)
+    __attribute__((__format__(__printf__,5,6)));
+void vsyslogp_r(int, struct syslog_data *, const char *, const char *,
+    const char *, _BSD_VA_LIST_)
+    __attribute__((__format__(__printf__,5,0)));
+#endif
 __END_DECLS
 
 #else /* !_KERNEL */
 
 void	logpri(int);
 void	log(int, const char *, ...)
-    __attribute__((__format__(__kprintf__,2,3)));
-int	addlog(const char *, ...)
-    __attribute__((__format__(__kprintf__,1,2)));
+    __attribute__((__format__(__printf__,2,3)));
+void	vlog(int, const char *, _BSD_VA_LIST_)
+    __attribute__((__format__(__printf__,2,0)));
+void	addlog(const char *, ...)
+    __attribute__((__format__(__printf__,1,2)));
 void	logwakeup(void);
 
 #endif /* !_KERNEL */
-#endif /* !_SYS_SYSLOG_H_ */
 
+#endif /* !_SYS_SYSLOG_H_ */

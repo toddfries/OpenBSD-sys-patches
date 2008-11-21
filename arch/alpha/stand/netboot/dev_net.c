@@ -1,5 +1,4 @@
-/*	$OpenBSD: dev_net.c,v 1.3 2002/03/14 03:15:51 millert Exp $	*/
-/*	$NetBSD: dev_net.c,v 1.4 1997/04/06 08:41:24 cgd Exp $	*/
+/* $NetBSD: dev_net.c,v 1.12 2003/03/19 17:21:41 drochner Exp $ */
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -49,19 +48,26 @@
  * for use by the NFS open code (NFS/lookup).
  */
 
-#include <stdarg.h>
+#include <machine/stdarg.h>
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
 
 #include <lib/libsa/stand.h>
 #include <lib/libsa/net.h>
 #include <lib/libsa/netif.h>
 #include <lib/libsa/bootparam.h>
+#include <lib/libsa/nfs.h>
+
+#include <lib/libkern/libkern.h>
+
 #include "dev_net.h"
+
+#ifndef SUN_BOOTPARAMS
+void bootp      __P((int));
+#endif
 
 extern int debug;
 extern int nfs_root_node[];	/* XXX - get from nfs_mount() */
@@ -81,18 +87,15 @@ struct	in_addr gateip;		/* swap ip address */
 n_long	netmask;		/* subnet or net mask */
 
 char rootpath[FNAME_SIZE];
-
-int hostnamelen;
 char hostname[FNAME_SIZE];
-
-int domainnamelen;
-char domainname[FNAME_SIZE];
 
 /*
  * Local things...
  */
 static int netdev_sock = -1;
 static int netdev_opens;
+
+int net_getparams __P((int));
 
 /*
  * Called by devopen after it sets f->f_dev to our devsw entry.
@@ -107,7 +110,7 @@ net_open(struct open_file *f, ...)
 	int error = 0;
 
 	va_start(ap, f);
-	devname = va_arg(ap, char *);
+	devname = va_arg(ap, char*);
 	va_end(ap);
 
 #ifdef	NETIF_DEBUG
@@ -137,6 +140,7 @@ net_open(struct open_file *f, ...)
 			/* Get the NFS file handle (mountd). */
 			error = nfs_mount(netdev_sock, rootip, rootpath);
 			if (error) {
+				error = errno;
 				printf("net_open: NFS mount error=%d\n", error);
 				rootip.s_addr = 0;
 			fail:
@@ -183,13 +187,22 @@ net_close(f)
 }
 
 int
-net_ioctl()
+net_ioctl(f, cmd, data)
+	struct open_file *f;
+	u_long cmd;
+	void *data;
 {
 	return EIO;
 }
 
 int
-net_strategy()
+net_strategy(devdata, rw, blk, size, buf, rsize)
+	void *devdata;
+	int rw;
+	daddr_t blk;
+	size_t size;
+	void *buf;
+	size_t *rsize;
 {
 	return EIO;
 }

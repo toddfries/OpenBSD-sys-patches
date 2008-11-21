@@ -1,4 +1,5 @@
-/*	$OpenBSD: if_atureg.h,v 1.31 2007/11/27 16:22:13 martynas Exp $ */
+/*	$NetBSD: if_atureg.h,v 1.6 2006/12/25 18:39:48 wiz Exp $ */
+/*	$OpenBSD: if_atureg.h,v 1.21 2004/12/23 13:19:38 dlg Exp $ */
 /*
  * Copyright (c) 2003
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -35,11 +36,11 @@
 #define ATU_CONFIG_NO		1
 #define ATU_IFACE_IDX		0
 
-/* the number of simultaneously requested RX transfers */
+/* the number of simultaniuously requested RX transfers */
 #define ATU_RX_LIST_CNT	1
 
 /*
- * the number of simultaneously started TX transfers
+ * the number of simultaniously started TX transfers
  * my measurements :
  * 1		430.82 KB/sec
  * 2		534.66 KB/sec
@@ -58,7 +59,7 @@
  */
 #define ATU_RX_BUFSZ		(ATU_RX_HDRLEN + \
 				 sizeof(struct ieee80211_frame_addr4) + 2312 + 4)
-/* BE CAREFUL! should add ATU_TX_PADDING */
+/* BE CAREFULL! should add ATU_TX_PADDING */
 #define ATU_TX_BUFSZ		(ATU_TX_HDRLEN + \
 				 sizeof(struct ieee80211_frame_addr4) + 2312)
 
@@ -90,10 +91,7 @@ enum atu_radio_type {
 	RadioRFMD = 0,
 	RadioRFMD2958,
 	RadioRFMD2958_SMC,
-	RadioIntersil,
-	AT76C503_i3863,
-	AT76C503_rfmd_acc,
-	AT76C505_rfmd
+	RadioIntersil
 };
 
 struct atu_type {
@@ -116,43 +114,6 @@ struct atu_chain {
 	SLIST_ENTRY(atu_chain)	atu_list;
 };
 
-/* Radio capture format */
-
-#define ATU_RX_RADIOTAP_PRESENT					\
-	((1 << IEEE80211_RADIOTAP_TSFT)			|	\
-	 (1 << IEEE80211_RADIOTAP_FLAGS)		|	\
-	 (1 << IEEE80211_RADIOTAP_RATE)			|	\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL)		|	\
-	 (1 << IEEE80211_RADIOTAP_LOCK_QUALITY)		|	\
-	 (1 << IEEE80211_RADIOTAP_RSSI)			|	\
-	 0)
-
-struct atu_rx_radiotap_header {
-	struct ieee80211_radiotap_header	rr_ihdr;
-	u_int64_t				rr_tsft;
-	u_int8_t				rr_flags;
-	u_int8_t				rr_rate;
-	u_int16_t				rr_chan_freq;
-	u_int16_t				rr_chan_flags;
-	u_int16_t				rr_barker_lock;
-	u_int8_t				rr_rssi;
-	u_int8_t				rr_max_rssi;
-} __packed;
-
-#define ATU_TX_RADIOTAP_PRESENT				\
-	((1 << IEEE80211_RADIOTAP_FLAGS)	|	\
-	 (1 << IEEE80211_RADIOTAP_RATE)		|	\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL)	|	\
-	 0)
-
-struct atu_tx_radiotap_header {
-	struct ieee80211_radiotap_header	rt_ihdr;
-	u_int8_t				rt_flags;
-	u_int8_t				rt_rate;
-	u_int16_t				rt_chan_freq;
-	u_int16_t				rt_chan_flags;
-} __packed;
-
 struct atu_cdata {
 	struct atu_chain	atu_tx_chain[ATU_TX_LIST_CNT];
 	struct atu_chain	atu_rx_chain[ATU_RX_LIST_CNT];
@@ -161,14 +122,15 @@ struct atu_cdata {
 	struct atu_list_head	atu_tx_free;
 
 	u_int8_t		atu_tx_inuse;
-	u_int8_t		atu_tx_last_idx;	
+	u_int8_t		atu_tx_last_idx;
 };
 
 #define MAX_SSID_LEN		32
 #define ATU_AVG_TIME		20
 
 struct atu_softc {
-	struct device           atu_dev;
+	USBBASEDEVICE           atu_dev;
+	struct ethercom		sc_ec;
 	struct ieee80211com	sc_ic;
 	int			(*sc_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
@@ -185,6 +147,7 @@ struct atu_softc {
 
 	usbd_device_handle	atu_udev;
 	usbd_interface_handle	atu_iface;
+	struct ethercom		atu_ec;
 	struct ifmedia		atu_media;
 	int			atu_ed[ATU_ENDPT_MAX];
 	usbd_pipe_handle	atu_ep[ATU_ENDPT_MAX];
@@ -194,11 +157,11 @@ struct atu_softc {
 	struct atu_cdata	atu_cdata;
 
 	struct timeval		atu_rx_notice;
-	
+
 	u_int8_t		atu_bssid[ETHER_ADDR_LEN];
 	enum atu_radio_type	atu_radio;
 	u_int16_t		atu_quirk;
-	
+
 	u_int8_t		atu_channel;
 	u_int16_t		atu_desired_channel;
 	u_int8_t		atu_mode;
@@ -207,21 +170,16 @@ struct atu_softc {
 #define INFRASTRUCTURE_MODE	2
 
 	u_int8_t		atu_radio_on;
-	caddr_t			sc_radiobpf;
-
-	union {
-		struct atu_rx_radiotap_header	tap;
-		u_int8_t			pad[64];
-	} sc_rxtapu;
-	union {
-		struct atu_tx_radiotap_header	tap;
-		u_int8_t			pad[64];
-	} sc_txtapu;
-
+	u_int8_t		atu_encrypt;
+#define ATU_WEP_RX		0x01
+#define ATU_WEP_TX		0x02
+#define ATU_WEP_TXRX		(ATU_WEP_RX | ATU_WEP_TX)
+	int			atu_wepkey;
+	int			atu_wepkeylen;
+	u_int8_t		atu_wepkeys[4][13];
 };
 
-#define sc_rxtap	sc_rxtapu.tap
-#define sc_txtap	sc_txtapu.tap
+#define	sc_if	sc_ec.ec_if
 
 /* Commands for uploading the firmware (standard DFU interface) */
 #define DFU_DNLOAD		UT_WRITE_CLASS_INTERFACE, 0x01
@@ -277,7 +235,7 @@ struct atu_cmd {
 	uByte			Cmd;
 	uByte			Reserved;
 	uWord			Size;
-} __packed;
+} UPACKED;
 
 /* CMD_SET_MIB command (0x01) */
 struct atu_cmd_set_mib {
@@ -294,14 +252,14 @@ struct atu_cmd_set_mib {
 
 	/* MIB data */
 	uByte		data[72];
-} __packed;
+} UPACKED;
 
 /* CMD_STARTUP command (0x0b) */
 struct atu_cmd_card_config {
 	uByte			Cmd;
 	uByte			Reserved;
 	uWord			Size;
-		
+
 	uByte			ExcludeUnencrypted;
 	uByte			PromiscuousMode;
 	uByte			ShortRetryLimit;
@@ -318,14 +276,14 @@ struct atu_cmd_card_config {
 	uByte			SSID_Len;
 	uByte			ShortPreamble;
 	uWord			BeaconPeriod;
-} __packed;
+} UPACKED;
 
 /* CMD_SCAN command (0x03) */
 struct atu_cmd_do_scan {
 	uByte			Cmd;
 	uByte			Reserved;
 	uWord			Size;
-	
+
 	uByte			BSSID[ETHER_ADDR_LEN];
 	uByte			SSID[MAX_SSID_LEN];
 	uByte			ScanType;
@@ -334,8 +292,8 @@ struct atu_cmd_do_scan {
 	uWord			MinChannelTime;
 	uWord			MaxChannelTime;
 	uByte			SSID_Len;
-	uByte			InternationalScan;  
-} __packed;
+	uByte			InternationalScan;
+} UPACKED;
 
 #define ATU_SCAN_ACTIVE		0x00
 #define ATU_SCAN_PASSIVE	0x01
@@ -345,7 +303,7 @@ struct atu_cmd_join {
 	uByte			Cmd;
 	uByte			Reserved;
 	uWord			Size;
-	
+
 	uByte			bssid[ETHER_ADDR_LEN];
 	uByte			essid[32];
 	uByte			bss_type;
@@ -353,21 +311,21 @@ struct atu_cmd_join {
 	uWord			timeout;
 	uByte			essid_size;
 	uByte			reserved;
-} __packed;
+} UPACKED;
 
 /* CMD_START_IBSS (0x05) */
 struct atu_cmd_start_ibss {
 	uByte		Cmd;
 	uByte		Reserved;
 	uWord		Size;
-	
+
 	uByte		BSSID[ETHER_ADDR_LEN];
 	uByte		SSID[32];
-	uByte		BSSType; 
-	uByte		Channel; 
+	uByte		BSSType;
+	uByte		Channel;
 	uByte		SSIDSize;
-	uByte		Res[3];  
-} __packed;
+	uByte		Res[3];
+} UPACKED;
 
 /*
  * The At76c503 adapters come with different types of radios on them.
@@ -387,7 +345,7 @@ struct atu_rfmd_conf {
 	u_int8_t		Reserved[3];
 	/* then we have 84 bytes, somehow Windows reads 95?? */
 	u_int8_t		Rest[11];
-} __packed;
+} UPACKED;
 
 /* The config structure of an Intersil radio */
 struct atu_intersil_conf {
@@ -400,7 +358,7 @@ struct atu_intersil_conf {
 	u_int8_t		PidVid[4];
 	u_int8_t		RegulatoryDomain;
 	u_int8_t		Reserved[1];
-} __packed;
+} UPACKED;
 
 
 /* Firmware information request */
@@ -409,8 +367,8 @@ struct atu_fw {
 	u_int8_t		minor;
 	u_int8_t		patch;
 	u_int8_t		build;
-} __packed;
-        
+} UPACKED;
+
 /*
  * The header the AT76c503 puts in front of RX packets (for both managment &
  * data)
@@ -424,7 +382,7 @@ struct atu_rx_hdr {
 	uByte			link_quality;
 	uByte			noise_level;
 	uDWord			rx_time;
-} __packed;
+} UPACKED;
 #define ATU_RX_HDRLEN sizeof(struct atu_rx_hdr)
 
 /*
@@ -436,7 +394,7 @@ struct atu_tx_hdr {
 	uByte				tx_rate;
 	uByte				padding;
 	uByte				reserved[4];
-} __packed;
+} UPACKED;
 #define ATU_TX_HDRLEN sizeof(struct atu_tx_hdr)
 
 #define NR(x)		(void *)((long)x)

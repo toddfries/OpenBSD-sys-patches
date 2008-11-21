@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.5 2005/04/19 15:23:34 miod Exp $	*/
-/*	$NetBSD: db_machdep.h,v 1.5 2001/11/22 18:00:00 thorpej Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.15 2008/08/29 19:08:29 matt Exp $	*/
 
 /*
  * Copyright (c) 1996 Scott K Stevens
@@ -48,23 +47,30 @@ typedef	long		db_expr_t;	/* expression - signed */
 
 typedef trapframe_t db_regs_t;
 
-extern db_regs_t		ddb_regs;	/* register state */
+extern db_regs_t	ddb_regs;	/* register state */
 #define	DDB_REGS	(&ddb_regs)
 
 #ifdef __PROG26
-#define	PC_REGS(regs)	((db_addr_t)(regs)->tf_r15 & R15_PC)
-#define PC_ADVANCE(regs) ((regs)->tf_r15 += 4)
+#define	PC_REGS(regs)	((regs)->tf_r15 & R15_PC)
+#define PC_ADVANCE(regs) ((regs)->tf_r15 += BKPT_SIZE)
 #else
-#define	PC_REGS(regs)	((db_addr_t)(regs)->tf_pc)
-#define	SET_PC_REGS(regs, value)	(regs)->tf_pc = (register_t)(value)
+#define	PC_REGS(regs)	((regs)->tf_pc)
+#define PC_ADVANCE(r)   ((r)->tf_r15 += BKPT_SIZE)
 #endif
 
+#define	BKPT_ADDR(addr)	(addr)			/* breakpoint address */
+#if defined(DDB)
 #define	BKPT_INST	(KERNEL_BREAKPOINT)	/* breakpoint instruction */
+#else
+/* breakpoint instruction if we use KGDB, this is used in db_set_temp_breakpoint() */
+#define BKPT_INST	(GDB5_BREAKPOINT)
+#endif
 #define	BKPT_SIZE	(INSN_SIZE)		/* size of breakpoint inst */
-#define	BKPT_SET(inst)	(BKPT_INST)
+#define	BKPT_SET(inst, addr)	(BKPT_INST)
 
 /*#define FIXUP_PC_AFTER_BREAK(regs)	((regs)->tf_pc -= BKPT_SIZE)*/
 
+#define	T_FAULT				(0)
 #define T_BREAKPOINT			(1)
 
 #define	IS_BREAKPOINT_TRAP(type, code)	((type) == T_BREAKPOINT)
@@ -87,7 +93,8 @@ extern db_regs_t		ddb_regs;	/* register state */
 /* ldr pc, [pc, reg, lsl #2]
 					    0000000f  register */
 #define	inst_branch(ins)	(((ins) & 0x0f000000) == 0x0a000000 || \
-				 ((ins) & 0x0fdffff0) == 0x079ff100)
+				 ((ins) & 0x0fdffff0) == 0x079ff100 || \
+				 ((ins) & 0x0ff0f000) == 0x0590f000)
 #define inst_load(ins)		(0)
 #define inst_store(ins)		(0)
 #define inst_unconditional_flow_transfer(ins)	\
@@ -101,16 +108,22 @@ extern db_regs_t		ddb_regs;	/* register state */
 
 #define SOFTWARE_SSTEP
 
-db_addr_t	db_branch_taken(u_int inst, db_addr_t pc, db_regs_t *regs);
-int kdb_trap (int, db_regs_t *);
-void db_machine_init (void);
-
-#define branch_taken(ins, pc, fun, regs) \
-				db_branch_taken((ins), (pc), (regs))
+u_int branch_taken __P((u_int insn, u_int pc, db_regs_t *db_regs));
+int kdb_trap __P((int, db_regs_t *));
+void db_machine_init __P((void));
+int db_validate_address(vm_offset_t addr);
 
 #define DB_ELF_SYMBOLS
 #define DB_ELFSIZE 32
 
-void db_show_frame_cmd	(db_expr_t, int, db_expr_t, char *);
+/*
+ * kgdb
+ */
+typedef register_t	kgdb_reg_t;
+#define KGDB_NUMREGS	(16 + 8*3 + 2)	/* r0..r15, f0..f7, fps, cpsr
+					 * fp-registers are 12 bytes wide */
+#define KGDB_REGNUM_R0		0
+#define KGDB_REGNUM_SPSR	16 + 8*3 + 1
+#define KGDB_BUFLEN		1024
 
 #endif	/* _ARM_DB_MACHDEP_H_ */

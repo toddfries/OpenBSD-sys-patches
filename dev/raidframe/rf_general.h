@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_general.h,v 1.6 2003/04/27 11:22:54 ho Exp $	*/
-/*	$NetBSD: rf_general.h,v 1.5 2000/03/03 02:04:48 oster Exp $	*/
-
+/*	$NetBSD: rf_general.h,v 1.17 2006/04/14 22:40:09 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -29,88 +27,67 @@
  */
 
 /*
- * rf_general.h -- Some general-use definitions.
+ * rf_general.h -- some general-use definitions
  */
 
-/*#define NOASSERT*/
+/* #define NOASSERT */
 
-#ifndef	_RF__RF_GENERAL_H_
-#define	_RF__RF_GENERAL_H_
+#ifndef _RF__RF_GENERAL_H_
+#define _RF__RF_GENERAL_H_
 
-/* Error reporting and handling. */
+#ifdef _KERNEL_OPT
+#include "opt_raid_diagnostic.h"
+#endif /* _KERNEL_OPT */
 
-#ifdef	_KERNEL
-#include <sys/systm.h>		/* printf, snprintf, and friends. */
-#endif
+/* error reporting and handling */
 
-#define	RF_ERRORMSG(s)		printf((s))
-#define	RF_ERRORMSG1(s,a)	printf((s), (a))
-#define	RF_ERRORMSG2(s,a,b)	printf((s), (a), (b))
-#define	RF_ERRORMSG3(s,a,b,c)	printf((s), (a), (b), (c))
+#include <sys/systm.h>		/* printf, sprintf, and friends */
+#include <uvm/uvm_extern.h>	/* PAGE_SIZE, PAGE_MASK */
 
-extern char rf_panicbuf[2048];
-#define	RF_PANIC()							\
-do {									\
-	snprintf(rf_panicbuf, sizeof rf_panicbuf,			\
-	    "RAIDframe error at line %d file %s",			\
-	    __LINE__, __FILE__);					\
-	panic(rf_panicbuf);						\
-} while (0)
+#define RF_ERRORMSG(s)            printf((s))
+#define RF_ERRORMSG1(s,a)         printf((s),(a))
+#define RF_ERRORMSG2(s,a,b)       printf((s),(a),(b))
+#define RF_ERRORMSG3(s,a,b,c)     printf((s),(a),(b),(c))
 
-#ifdef	_KERNEL
-#ifdef	RF_ASSERT
-#undef	RF_ASSERT
-#endif	/* RF_ASSERT */
-#ifndef	NOASSERT
-#define	RF_ASSERT(_x_)							\
-do {									\
-	if (!(_x_)) {							\
-		snprintf(rf_panicbuf, sizeof rf_panicbuf,		\
-		    "RAIDframe error at line %d"			\
-		    " file %s (failed asserting %s)\n", __LINE__,	\
-		     __FILE__, #_x_);					\
-		panic(rf_panicbuf);					\
-	}								\
-} while (0)
-#else	/* !NOASSERT */
-#define	RF_ASSERT(x)		{/*noop*/}
-#endif	/* !NOASSERT */
-#else	/* _KERNEL */
-#define	RF_ASSERT(x)		{/*noop*/}
-#endif	/* _KERNEL */
+void rf_print_panic_message(int, const char *);
+void rf_print_assert_panic_message(int, const char *, const char *);
+void rf_print_unable_to_init_mutex(const char *, int, int);
+void rf_print_unable_to_add_shutdown(const char *, int, int);
 
-/* Random stuff. */
-#define	RF_MAX(a,b)		(((a) > (b)) ? (a) : (b))
-#define	RF_MIN(a,b)		(((a) < (b)) ? (a) : (b))
 
-/* Divide-by-zero check. */
-#define	RF_DB0_CHECK(a,b)	(((b)==0) ? 0 : (a)/(b))
+extern char rf_panicbuf[];
+#define RF_PANIC() {rf_print_panic_message(__LINE__,__FILE__); panic(rf_panicbuf);}
 
-/* Get time of day. */
-#define	RF_GETTIME(_t)		microtime(&(_t))
+#if defined(RAID_DIAGNOSTIC) || defined(__COVERITY__)
+#define RF_ASSERT(_x_) { \
+  if (!(_x_)) { \
+    rf_print_assert_panic_message(__LINE__, __FILE__, #_x_); \
+    panic(rf_panicbuf); \
+  } \
+}
+#else /* RAID_DIAGNOSTIC */
+#define RF_ASSERT(x) {/*noop*/}
+#endif /* RAID_DIAGNOSTIC */
 
-/*
- * Zero memory - Not all bzero calls go through here, only
- * those which in the kernel may have a user address.
- */
+/* random stuff */
+#define RF_MAX(a,b) (((a) > (b)) ? (a) : (b))
+#define RF_MIN(a,b) (((a) < (b)) ? (a) : (b))
 
-#define	RF_BZERO(_bp,_b,_l)	bzero(_b, _l)	/*
-						 * XXX This is likely
-						 * incorrect. GO
-						 */
+/* divide-by-zero check */
+#define RF_DB0_CHECK(a,b) ( ((b)==0) ? 0 : (a)/(b) )
 
-#define	RF_UL(x)		((unsigned long)(x))
-#define	RF_PGMASK		RF_UL(NBPG-1)
-#define	RF_BLIP(x)		(NBPG - (RF_UL(x) & RF_PGMASK))	/*
-								 * Bytes left
-								 * in page.
-								 */
-#define	RF_PAGE_ALIGNED(x)	((RF_UL(x) & RF_PGMASK) == 0)
+/* get time of day */
+#define RF_GETTIME(_t) microtime(&(_t))
 
-#ifdef	__STDC__
-#define	RF_STRING(_str_)	#_str_
-#else	/* __STDC__ */
-#define	RF_STRING(_str_)	"_str_"
-#endif	/* __STDC__ */
+#define RF_UL(x)           ((unsigned long) (x))
+#define RF_PGMASK          PAGE_MASK
+#define RF_BLIP(x)         (PAGE_SIZE - (RF_UL(x) & RF_PGMASK))	/* bytes left in page */
+#define RF_PAGE_ALIGNED(x) ((RF_UL(x) & RF_PGMASK) == 0)
 
-#endif	/* !_RF__RF_GENERAL_H_ */
+#ifdef __STDC__
+#define RF_STRING(_str_) #_str_
+#else				/* __STDC__ */
+#define RF_STRING(_str_) "_str_"
+#endif				/* __STDC__ */
+
+#endif				/* !_RF__RF_GENERAL_H_ */

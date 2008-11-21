@@ -1,3 +1,5 @@
+/*	$NetBSD: mach64_irq.c,v 1.6 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* mach64_irq.c -- IRQ handling for ATI Mach64 -*- linux-c -*-
  * Created: Tue Feb 25, 2003 by Leif Delgass, based on radeon_irq.c/r128_irq.c
  */
@@ -35,6 +37,12 @@
  *    Leif Delgass <ldelgass@retinalburn.net>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mach64_irq.c,v 1.6 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_irq.c,v 1.2 2005/11/28 23:13:53 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "mach64_drm.h"
@@ -42,7 +50,7 @@
 
 irqreturn_t mach64_driver_irq_handler(DRM_IRQ_ARGS)
 {
-	struct drm_device *dev = (struct drm_device *) arg;
+	drm_device_t *dev = (drm_device_t *) arg;
 	drm_mach64_private_t *dev_priv =
 	    (drm_mach64_private_t *) dev->dev_private;
 	int status;
@@ -70,7 +78,7 @@ irqreturn_t mach64_driver_irq_handler(DRM_IRQ_ARGS)
 	return IRQ_NONE;
 }
 
-int mach64_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence)
+int mach64_driver_vblank_wait(drm_device_t * dev, unsigned int *sequence)
 {
 	unsigned int cur_vblank;
 	int ret = 0;
@@ -90,7 +98,7 @@ int mach64_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence)
 
 /* drm_dma.h hooks
 */
-void mach64_driver_irq_preinstall(struct drm_device * dev)
+void mach64_driver_irq_preinstall(drm_device_t * dev)
 {
 	drm_mach64_private_t *dev_priv =
 	    (drm_mach64_private_t *) dev->dev_private;
@@ -104,7 +112,7 @@ void mach64_driver_irq_preinstall(struct drm_device * dev)
 		     | MACH64_CRTC_VBLANK_INT);
 }
 
-void mach64_driver_irq_postinstall(struct drm_device * dev)
+void mach64_driver_irq_postinstall(drm_device_t * dev)
 {
 	drm_mach64_private_t *dev_priv =
 	    (drm_mach64_private_t *) dev->dev_private;
@@ -118,7 +126,7 @@ void mach64_driver_irq_postinstall(struct drm_device * dev)
 
 }
 
-void mach64_driver_irq_uninstall(struct drm_device * dev)
+void mach64_driver_irq_uninstall(drm_device_t * dev)
 {
 	drm_mach64_private_t *dev_priv =
 	    (drm_mach64_private_t *) dev->dev_private;

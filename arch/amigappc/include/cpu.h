@@ -1,4 +1,4 @@
-/*      $NetBSD: cpu.h,v 1.12 2005/12/11 12:16:36 christos Exp $ */
+/*      $NetBSD: cpu.h,v 1.14 2007/03/04 05:59:32 christos Exp $ */
 
 /*
  * Copyright (C) 1995-1997 Wolfgang Solfrank.
@@ -46,7 +46,7 @@
 #ifdef _KERNEL
 
 u_long	clkread	__P((void));
-void	physaccess	__P((caddr_t, caddr_t, int, int));
+void	physaccess	__P((void *, void *, int, int));
 
 #endif /* _KERNEL */
 
@@ -54,7 +54,6 @@ void	physaccess	__P((caddr_t, caddr_t, int, int));
 
 /* ADAM: taken from macppc/cpu.h */
 #define CLKF_USERMODE(frame)    (((frame)->srr1 & PSL_PR) != 0)
-#define CLKF_BASEPRI(frame)     ((frame)->pri == 0)
 #define CLKF_PC(frame)          ((frame)->srr0)
 #define CLKF_INTR(frame)        ((frame)->depth > 0)
 

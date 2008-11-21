@@ -1,5 +1,4 @@
-/*	$OpenBSD: wssvar.h,v 1.2 2002/03/14 01:26:57 millert Exp $	*/
-/*	$NetBSD: wssvar.h,v 1.1 1998/01/19 22:18:25 augustss Exp $	*/
+/*	$NetBSD: wssvar.h,v 1.9 2005/12/11 12:22:03 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 John Brezak
@@ -43,37 +42,37 @@
 #define WSS_LINE_IN_LVL		1
 #define WSS_DAC_LVL		2
 #define WSS_REC_LVL		3
-#define WSS_MON_LVL		4
+#define WSS_MONITOR_LVL		4
 #define WSS_MIC_IN_MUTE		5
 #define WSS_LINE_IN_MUTE	6
 #define WSS_DAC_MUTE		7
+#define WSS_MONITOR_MUTE	8
 
-#define WSS_RECORD_SOURCE	8
+#define WSS_RECORD_SOURCE	9
 
 /* Classes */
-#define WSS_INPUT_CLASS		9
-#define WSS_RECORD_CLASS	10
-#define WSS_MONITOR_CLASS	11
+#define WSS_INPUT_CLASS		10
+#define WSS_RECORD_CLASS	11
+#define WSS_MONITOR_CLASS	12
 
 struct wss_softc {
-	struct	device sc_dev;		/* base device */
-	struct	isadev sc_id;		/* ISA device */
-	void	*sc_ih;			/* interrupt vectoring */
+	struct  ad1848_isa_softc sc_ad1848;
+#define	wss_ic	    sc_ad1848.sc_ic
+#define wss_irq     sc_ad1848.sc_irq
+#define wss_playdrq sc_ad1848.sc_playdrq
+#define wss_recdrq  sc_ad1848.sc_recdrq
+
 	bus_space_tag_t sc_iot;		/* tag */
 	bus_space_handle_t sc_ioh;	/* handle */
-	isa_chipset_tag_t sc_ic;
 
-	struct  ad1848_softc sc_ad1848;
-#define wss_irq    sc_ad1848.sc_irq
-#define wss_drq    sc_ad1848.sc_drq
-#define wss_recdrq sc_ad1848.sc_recdrq
+	bus_space_handle_t sc_opl_ioh;	/* OPL handle */
 
-	int 	mic_mute, cd_mute, dac_mute;
+	int	mic_mute, cd_mute, dac_mute;
 
 	int	mad_chip_type;		/* chip type if MAD emulation of WSS */
 	int	mad_ioindex;
 	bus_space_handle_t mad_ioh;	/* MAD handle */
-	bus_space_handle_t mad_ioh1, mad_ioh2, mad_ioh3;
+	bus_space_handle_t mad_ioh1, mad_ioh2;
 };
 
 void	wssattach(struct wss_softc *);

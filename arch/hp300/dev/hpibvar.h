@@ -1,8 +1,35 @@
-/*	$OpenBSD: hpibvar.h,v 1.10 2005/11/18 00:09:15 miod Exp $	*/
-/*	$NetBSD: hpibvar.h,v 1.10 1997/03/31 07:34:25 scottr Exp $	*/
+/*	$NetBSD: hpibvar.h,v 1.20 2008/04/28 20:23:19 martin Exp $	*/
+
+/*-
+ * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
- * Copyright (c) 1996, 1997 Jason R. Thorpe.  All rights reserved.
  * Copyright (c) 1982, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -100,17 +127,16 @@ struct hpibdev_attach_args {
  * Attach an HP-IB device to an HP-IB bus.
  */
 struct hpibbus_attach_args {
-	u_int16_t ha_id;		/* device id */
+	uint16_t ha_id;			/* device id */
 	int	ha_slave;		/* HP-IB bus slave */
 	int	ha_punit;		/* physical unit on slave */
 };
 
 /* Locator short-hand */
-#define	hpibbuscf_slave		cf_loc[0]
-#define	hpibbuscf_punit		cf_loc[1]
+#include "locators.h"
 
-#define	HPIBBUS_SLAVE_UNK	-1
-#define	HPIBBUS_PUNIT_UNK	-1
+#define	hpibbuscf_slave		cf_loc[HPIBBUSCF_SLAVE]
+#define	hpibbuscf_punit		cf_loc[HPIBBUSCF_PUNIT]
 
 #define	HPIB_NSLAVES		8	/* number of slaves on a bus */
 #define	HPIB_NPUNITS		2	/* number of punits per slave */
@@ -138,7 +164,7 @@ struct dmaqueue;
  * Software state per HP-IB bus.
  */
 struct hpibbus_softc {
-	struct	device sc_dev;		/* generic device glue */
+	device_t sc_dev;		/* generic device glue */
 	struct	hpib_controller *sc_ops; /* controller ops vector */
 	volatile int sc_flags;		/* misc flags */
 	struct	dmaqueue *sc_dq;
@@ -148,6 +174,12 @@ struct hpibbus_softc {
 	char	*sc_addr;
 	int	sc_count;
 	int	sc_curcnt;
+
+	/*
+	 * HP-IB is an indirect bus; this cheezy resource map
+	 * keeps track of slave/punit allocations.
+	 */
+	char	sc_rmap[HPIB_NSLAVES][HPIB_NPUNITS];
 };
 
 /* sc_flags */
@@ -158,36 +190,8 @@ struct hpibbus_softc {
 #define	HPIBF_TIMO	0x10
 #define	HPIBF_DMA16	0x8000
 
-/*
- * Description structure for CS/80 devices.
- */
-
-struct cs80_describe {
-	u_int	d_iuw:16,	/* controller: installed unit word */
-		d_cmaxxfr:16,	/* controller: max transfer rate (Kb) */
-		d_ctype:8,	/* controller: controller type */
-		d_utype:8,	/* unit: unit type */
-		d_name:24,	/* unit: name (6 BCD digits) */
-		d_sectsize:16,	/* unit: # of bytes per block (sector) */
-		d_blkbuf:8,	/* unit: # of blocks which can be buffered */
-		d_burstsize:8,	/* unit: recommended burst size */
-		d_blocktime:16,	/* unit: block time (u-sec) */
-		d_uavexfr:16,	/* unit: average transfer rate (Kb) */
-		d_retry:16,	/* unit: optimal retry time (1/100-sec) */
-		d_access:16,	/* unit: access time param (1/100-sec) */
-		d_maxint:8,	/* unit: maximum interleave */
-		d_fvbyte:8,	/* unit: fixed volume byte */
-		d_rvbyte:8,	/* unit: removable volume byte */
-		d_maxcyl:24,	/* volume: maximum cylinder */
-		d_maxhead:8,	/* volume: maximum head */
-		d_maxsect:16,	/* volume: maximum sector on track */
-		d_maxvsecth:16,	/* volume: maximum sector on volume (MSW) */
-		d_maxvsectl:32,	/* volume: maximum sector on volume (LSWs) */
-		d_interleave:8;	/* volume: current interleave */
-} __packed;
-
 #ifdef _KERNEL
-extern	caddr_t internalhpib;
+extern	void *internalhpib;
 extern	int hpibtimeout;
 extern	int hpibdmathresh;
 
@@ -195,9 +199,7 @@ void	hpibreset(int);
 int	hpibsend(int, int, int, void *, int);
 int	hpibrecv(int, int, int, void *, int);
 int	hpibustart(int);
-void	hpibstart(void *);
 void	hpibgo(int, int, int, void *, int, int, int);
-void	hpibdone(void *);
 int	hpibpptest(int, int);
 void	hpibppclear(int);
 void	hpibawait(int);

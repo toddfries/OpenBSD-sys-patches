@@ -1,4 +1,4 @@
-/*	$NetBSD: if_gfe.c,v 1.26 2007/10/19 12:00:33 ad Exp $	*/
+/*	$NetBSD: if_gfe.c,v 1.31 2008/11/07 00:20:07 dyoung Exp $	*/
 
 /*
  * Copyright (c) 2002 Allegro Networks, Inc., Wasabi Systems, Inc.
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_gfe.c,v 1.26 2007/10/19 12:00:33 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_gfe.c,v 1.31 2008/11/07 00:20:07 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -155,8 +155,6 @@ STATIC int gfe_ifioctl (struct ifnet *, u_long, void *);
 STATIC void gfe_ifstart (struct ifnet *);
 STATIC void gfe_ifwatchdog (struct ifnet *);
 
-STATIC int gfe_mii_mediachange (struct ifnet *);
-STATIC void gfe_mii_mediastatus (struct ifnet *, struct ifmediareq *);
 STATIC int gfe_mii_read (struct device *, int, int);
 STATIC void gfe_mii_write (struct device *, int, int, int);
 STATIC void gfe_mii_statchg (struct device *);
@@ -309,8 +307,9 @@ gfe_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_mii.mii_writereg = gfe_mii_write;
 	sc->sc_mii.mii_statchg = gfe_mii_statchg;
 
-	ifmedia_init(&sc->sc_mii.mii_media, 0, gfe_mii_mediachange,
-		gfe_mii_mediastatus);
+	sc->sc_ec.ec_mii = &sc->sc_mii;
+	ifmedia_init(&sc->sc_mii.mii_media, 0, ether_mediachange,
+		ether_mediastatus);
 
 	mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff, phyaddr,
 		MII_OFFSET_ANY, MIIF_NOISOLATE);
@@ -321,7 +320,7 @@ gfe_attach(struct device *parent, struct device *self, void *aux)
 		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_AUTO);
 	}
 
-	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
+	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
 	ifp->if_softc = sc;
 	/* ifp->if_mowner = &sc->sc_mowner; */
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
@@ -356,7 +355,7 @@ gfe_attach(struct device *parent, struct device *self, void *aux)
 	bpfattach(ifp, DLT_EN10MB, sizeof(struct ether_header));
 #endif
 #if NRND > 0
-	rnd_attach_source(&sc->sc_rnd_source, self->dv_xname, RND_TYPE_NET, 0);
+	rnd_attach_source(&sc->sc_rnd_source, device_xname(self), RND_TYPE_NET, 0);
 #endif
 	intr_establish(IRQ_ETH0 + sc->sc_macno, IST_LEVEL, IPL_NET,
 	    gfe_intr, sc);
@@ -437,23 +436,25 @@ gfe_ifioctl(struct ifnet *ifp, u_long cmd, void *data)
 	s = splnet();
 
 	switch (cmd) {
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
+		error = gfe_whack(sc, GE_WHACK_START);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-			error = gfe_whack(sc, GE_WHACK_START);
 			if (error == 0)
 				arp_ifinit(ifp, ifa);
 			break;
 #endif
 		default:
-			error = gfe_whack(sc, GE_WHACK_START);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		/* XXX re-use ether_ioctl() */
 		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
 		case IFF_UP|IFF_RUNNING:/* active->active, update */
 			error = gfe_whack(sc, GE_WHACK_CHANGE);
@@ -469,6 +470,8 @@ gfe_ifioctl(struct ifnet *ifp, u_long cmd, void *data)
 		}
 		break;
 
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		if ((error = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
@@ -484,16 +487,12 @@ gfe_ifioctl(struct ifnet *ifp, u_long cmd, void *data)
 			error = EINVAL;
 			break;
 		}
-		ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
-	case SIOCSIFMEDIA:
-	case SIOCGIFMEDIA:
-		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
+		if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET)
+			error = 0;
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 	splx(s);
@@ -554,7 +553,7 @@ gfe_ifwatchdog(struct ifnet *ifp)
 	struct gfe_txqueue * const txq = &sc->sc_txq[GE_TXPRIO_HI];
 
 	GE_FUNC_ENTER(sc, "gfe_ifwatchdog");
-	printf("%s: device timeout", sc->sc_dev.dv_xname);
+	printf("%s: device timeout", device_xname(&sc->sc_dev));
 	if (ifp->if_flags & IFF_RUNNING) {
 		uint32_t curtxdnum = (bus_space_read_4(sc->sc_gt_memt, sc->sc_gt_memh, txq->txq_ectdp) - txq->txq_desc_busaddr) / sizeof(txq->txq_descs[0]);
 		GE_TXDPOSTSYNC(sc, txq, txq->txq_fi);
@@ -759,7 +758,7 @@ gfe_rx_get(struct gfe_softc *sc, enum gfe_rxprio rxprio)
 		    rxq->rxq_fi * sizeof(*rxb), buflen, BUS_DMASYNC_POSTREAD);
 
 		KASSERT(m->m_len == 0 && m->m_pkthdr.len == 0);
-		memcpy(m->m_data + m->m_len, rxb->rb_data, buflen);
+		memcpy(m->m_data + m->m_len, rxb->rxb_data, buflen);
 		m->m_len = buflen;
 		m->m_pkthdr.len = buflen;
 
@@ -836,7 +835,7 @@ gfe_rx_process(struct gfe_softc *sc, uint32_t cause, uint32_t intrmask)
 		}
 		ifp->if_ierrors++;
 		GE_DPRINTF(sc, ("%s: rx queue %d filled at %u\n",
-		    sc->sc_dev.dv_xname, rxprio, rxq->rxq_fi));
+		    device_xname(&sc->sc_dev), rxprio, rxq->rxq_fi));
 		memset(masks, 0, sizeof(masks));
 		bus_dmamap_sync(sc->sc_dmat, rxq->rxq_desc_mem.gdm_map,
 		    0, rxq->rxq_desc_mem.gdm_size,
@@ -852,7 +851,7 @@ gfe_rx_process(struct gfe_softc *sc, uint32_t cause, uint32_t intrmask)
 		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 #if defined(DEBUG)
 		printf("%s: rx queue %d filled at %u=%#x(%#x/%#x)\n",
-		    sc->sc_dev.dv_xname, rxprio, rxq->rxq_fi,
+		    device_xname(&sc->sc_dev), rxprio, rxq->rxq_fi,
 		    rxq->rxq_cmdsts, masks[0], masks[1]);
 #endif
 	}
@@ -1064,7 +1063,7 @@ gfe_tx_enqueue(struct gfe_softc *sc, enum gfe_txprio txprio)
 			}
 #ifdef DEBUG
 			printf("%s: txenqueue: transmitter resynced at %d\n",
-			    sc->sc_dev.dv_xname, txq->txq_fi);
+			    device_xname(&sc->sc_dev), txq->txq_fi);
 #endif
 		}
 		if (++txq->txq_fi == GE_TXDESC_MAX)
@@ -1234,7 +1233,7 @@ gfe_tx_done(struct gfe_softc *sc, enum gfe_txprio txprio, uint32_t intrmask)
 			}
 #ifdef DEBUG
 			printf("%s: txdone: transmitter resynced at %d\n",
-			    sc->sc_dev.dv_xname, txq->txq_fi);
+			    device_xname(&sc->sc_dev), txq->txq_fi);
 #endif
 		}
 #if 0
@@ -1264,7 +1263,7 @@ gfe_tx_done(struct gfe_softc *sc, enum gfe_txprio txprio, uint32_t intrmask)
 	}
 	if (txq->txq_nactive != 0)
 		panic("%s: transmit fifo%d empty but active count (%d) > 0!",
-		    sc->sc_dev.dv_xname, txprio, txq->txq_nactive);
+		    device_xname(&sc->sc_dev), txprio, txq->txq_nactive);
 	ifp->if_timer = 0;
 	intrmask &= ~(txq->txq_intrbits & (ETH_IR_TxEndHigh|ETH_IR_TxEndLow));
 	intrmask &= ~(txq->txq_intrbits & (ETH_IR_TxBufferHigh|ETH_IR_TxBufferLow));
@@ -1481,29 +1480,6 @@ gfe_intr(void *arg)
 }
 
 int
-gfe_mii_mediachange (struct ifnet *ifp)
-{
-	struct gfe_softc *sc = ifp->if_softc;
-
-	if (ifp->if_flags & IFF_UP)
-		mii_mediachg(&sc->sc_mii);
-
-	return (0);
-}
-void
-gfe_mii_mediastatus (struct ifnet *ifp, struct ifmediareq *ifmr)
-{
-	struct gfe_softc *sc = ifp->if_softc;
-
-	if (sc->sc_flags & GE_PHYSTSCHG) {
-		sc->sc_flags &= ~GE_PHYSTSCHG;
-		mii_pollstat(&sc->sc_mii);
-	}
-	ifmr->ifm_status = sc->sc_mii.mii_media_status;
-	ifmr->ifm_active = sc->sc_mii.mii_media_active;
-}
-
-int
 gfe_mii_read (struct device *self, int phy, int reg)
 {
 	return gt_mii_read(self, device_parent(self), phy, reg);
@@ -1699,7 +1675,7 @@ gfe_hash_entry_op(struct gfe_softc *sc, enum gfe_hash_op op,
 	hash = gfe_hash_compute(sc, eaddr);
 
 	if (sc->sc_hashtable == NULL) {
-		panic("%s:%d: hashtable == NULL!", sc->sc_dev.dv_xname,
+		panic("%s:%d: hashtable == NULL!", device_xname(&sc->sc_dev),
 			__LINE__);
 	}
 
@@ -1838,7 +1814,7 @@ gfe_hash_multichg(struct ethercom *ec, const struct ether_multi *enm, u_long cmd
 	error = gfe_hash_entry_op(sc, op, prio, enm->enm_addrlo);
 	if (error == EBUSY) {
 		printf("%s: multichg: tried to %s %s again\n",
-		       sc->sc_dev.dv_xname,
+		       device_xname(&sc->sc_dev),
 		       cmd == SIOCDELMULTI ? "remove" : "add",
 		       ether_sprintf(enm->enm_addrlo));
 		GE_FUNC_EXIT(sc, "");
@@ -1847,7 +1823,7 @@ gfe_hash_multichg(struct ethercom *ec, const struct ether_multi *enm, u_long cmd
 
 	if (error == ENOENT) {
 		printf("%s: multichg: failed to remove %s: not in table\n",
-		       sc->sc_dev.dv_xname,
+		       device_xname(&sc->sc_dev),
 		       ether_sprintf(enm->enm_addrlo));
 		GE_FUNC_EXIT(sc, "");
 		return 0;
@@ -1855,13 +1831,13 @@ gfe_hash_multichg(struct ethercom *ec, const struct ether_multi *enm, u_long cmd
 
 	if (error == ENOSPC) {
 		printf("%s: multichg: failed to add %s: no space; regenerating table\n",
-		       sc->sc_dev.dv_xname,
+		       device_xname(&sc->sc_dev),
 		       ether_sprintf(enm->enm_addrlo));
 		GE_FUNC_EXIT(sc, "");
 		return ENETRESET;
 	}
 	GE_DPRINTF(sc, ("%s: multichg: %s: %s succeeded\n",
-	       sc->sc_dev.dv_xname,
+	       device_xname(&sc->sc_dev),
 	       cmd == SIOCDELMULTI ? "remove" : "add",
 	       ether_sprintf(enm->enm_addrlo)));
 	GE_FUNC_EXIT(sc, "");
@@ -1914,7 +1890,7 @@ gfe_hash_alloc(struct gfe_softc *sc)
 	    BUS_DMA_NOCACHE);
 	if (error) {
 		printf("%s: failed to allocate %d bytes for hash table: %d\n",
-		    sc->sc_dev.dv_xname, sc->sc_hashmask + 1, error);
+		    device_xname(&sc->sc_dev), sc->sc_hashmask + 1, error);
 		GE_FUNC_EXIT(sc, "");
 		return error;
 	}

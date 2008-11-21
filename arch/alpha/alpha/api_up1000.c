@@ -1,5 +1,4 @@
-/*	$OpenBSD: api_up1000.c,v 1.8 2006/11/28 16:56:50 dlg Exp $	*/
-/* $NetBSD: api_up1000.c,v 1.4 2000/06/20 03:48:53 matt Exp $ */
+/* $NetBSD: api_up1000.c,v 1.23 2007/03/04 15:18:09 yamt Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997 Carnegie-Mellon University.
@@ -31,13 +30,20 @@
  * Additional Copyright (c) 1997 by Matthew Jacob for NASA/Ames Research Center
  */
 
+#include "opt_kgdb.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: api_up1000.c,v 1.23 2007/03/04 15:18:09 yamt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/termios.h>
-#include <dev/cons.h>
 #include <sys/conf.h>
+#include <dev/cons.h>
 
+#include <machine/alpha.h>
 #include <machine/rpb.h>
 #include <machine/autoconf.h>
 #include <machine/cpuconf.h>
@@ -56,8 +62,9 @@
 #include <alpha/pci/irongatereg.h>
 #include <alpha/pci/irongatevar.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 #include <dev/ata/atavar.h>
 
 #include "pckbd.h"
@@ -67,22 +74,26 @@
 #endif
 static int comcnrate = CONSPEED;
 
-#ifdef DEBUG
-int bootdev_debug;
 #define	DPRINTF(x)	if (bootdev_debug) printf x
-#else
-#define DPRINTF(x)
-#endif
 
-void api_up1000_init(void);
-static void api_up1000_cons_init(void);
-static void api_up1000_device_register(struct device *, void *);
+void api_up1000_init __P((void));
+static void api_up1000_cons_init __P((void));
+static void api_up1000_device_register __P((struct device *, void *));
+
+#ifdef KGDB
+#include <machine/db_machdep.h>
+
+static const char *kgdb_devlist[] = {
+	"com",
+	NULL,
+};
+#endif /* KGDB */
 
 void
 api_up1000_init()
 {
 
-	platform.family = "API UP1000";
+	platform.family = "Alpha Processor, Inc. UP1000";
 
 	if ((platform.model = alpha_dsr_sysname()) == NULL) {
 		/* XXX Don't know the system variations, yet. */
@@ -104,7 +115,7 @@ api_up1000_cons_init()
 	icp = &irongate_configuration;
 	irongate_init(icp, 0);
 
-	ctb = (struct ctb *)(((caddr_t)hwrpb) + hwrpb->rpb_ctb_off);
+	ctb = (struct ctb *)(((char *)hwrpb) + hwrpb->rpb_ctb_off);
 
 	switch (ctb->ctb_term_type) {
 	case CTB_PRINTERPORT: 
@@ -118,8 +129,8 @@ api_up1000_cons_init()
 			 */
 			DELAY(160000000 / comcnrate);
 
-			if (comcnattach(&icp->ic_iot, 0x3f8, comcnrate,
-			    COM_FREQ,
+			if(comcnattach(&icp->ic_iot, 0x3f8, comcnrate,
+			    COM_FREQ, COM_TYPE_NORMAL,
 			    (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8))
 				panic("can't init serial console");
 
@@ -152,6 +163,10 @@ api_up1000_cons_init()
 		panic("consinit: unknown console type %ld",
 		    ctb->ctb_term_type);
 	}
+#ifdef KGDB
+	/* Attach the KGDB device. */
+	alpha_kgdb_init(kgdb_devlist, &icp->ic_iot);
+#endif /* KGDB */
 }
 
 static void
@@ -159,33 +174,25 @@ api_up1000_device_register(dev, aux)
 	struct device *dev;
 	void *aux;
 {
-	static int found, initted, scsiboot, ideboot, netboot;
-	static struct device *pcidev, *scsidev;
+	static int found, initted, diskboot, netboot;
+	static struct device *pcidev, *ctrlrdev;
 	struct bootdev_data *b = bootdev_data;
-	struct device *parent = dev->dv_parent;
-	struct cfdata *cf = dev->dv_cfdata;
-	struct cfdriver *cd = cf->cf_driver;
+	struct device *parent = device_parent(dev);
 
 	if (found)
 		return;
 
 	if (!initted) {
-		scsiboot = (strcmp(b->protocol, "SCSI") == 0);
-		netboot = (strcmp(b->protocol, "BOOTP") == 0) ||
-		    (strcmp(b->protocol, "MOP") == 0);
-		/*
-		 * Add an extra check to boot from ide drives:
-		 * Newer SRM firmware use the protocol identifier IDE,
-		 * older SRM firmware use the protocol identifier SCSI.
-		 */
-		ideboot = (strcmp(b->protocol, "IDE") == 0);
-		DPRINTF(("\nscsiboot = %d, ideboot = %d, netboot = %d\n",
-		    scsiboot, ideboot, netboot));
+		diskboot = (strcasecmp(b->protocol, "SCSI") == 0) ||
+		    (strcasecmp(b->protocol, "IDE") == 0);
+		netboot = (strcasecmp(b->protocol, "BOOTP") == 0) ||
+		    (strcasecmp(b->protocol, "MOP") == 0);
+		DPRINTF(("\ndiskboot = %d, netboot = %d\n", diskboot, netboot));
 		initted = 1;
 	}
 
 	if (pcidev == NULL) {
-		if (strcmp(cd->cd_name, "pci"))
+		if (!device_is_a(dev, "pci"))
 			return;
 		else {
 			struct pcibus_attach_args *pba = aux;
@@ -194,103 +201,83 @@ api_up1000_device_register(dev, aux)
 				return;
 	
 			pcidev = dev;
-			DPRINTF(("\npcidev = %s\n", pcidev->dv_xname));
+			DPRINTF(("\npcidev = %s\n", dev->dv_xname));
 			return;
 		}
 	}
 
-	if ((ideboot || scsiboot) && (scsidev == NULL)) {
+	if (ctrlrdev == NULL) {
 		if (parent != pcidev)
 			return;
 		else {
 			struct pci_attach_args *pa = aux;
+			int slot;
 
-			if (b->slot % 1000 / 100 != pa->pa_function)
-				return;
-			if (b->slot % 100 != pa->pa_device)
+			slot = pa->pa_bus * 1000 + pa->pa_function * 100 +
+			    pa->pa_device;
+			if (b->slot != slot)
 				return;
 	
-			scsidev = dev;
-			DPRINTF(("\nscsidev = %s\n", scsidev->dv_xname));
+			if (netboot) {
+				booted_device = dev;
+				DPRINTF(("\nbooted_device = %s\n",
+				    dev->dv_xname));
+				found = 1;
+			} else {
+				ctrlrdev = dev;
+				DPRINTF(("\nctrlrdev = %s\n", dev->dv_xname));
+			}
 			return;
 		}
 	}
 
-	if ((ideboot || scsiboot) &&
-	    (!strcmp(cd->cd_name, "sd") ||
-	     !strcmp(cd->cd_name, "st") ||
-	     !strcmp(cd->cd_name, "cd"))) {
-		struct scsi_attach_args *sa = aux;
+	if (!diskboot)
+		return;
 
-		if (parent->dv_parent != scsidev)
+	if (device_is_a(dev, "sd") ||
+	    device_is_a(dev, "st") ||
+	    device_is_a(dev, "cd")) {
+		struct scsipibus_attach_args *sa = aux;
+		struct scsipi_periph *periph = sa->sa_periph;
+		int unit;
+
+		if (device_parent(parent) != ctrlrdev)
 			return;
 
-		if (b->unit / 100 != sa->sa_sc_link->target)
+		unit = periph->periph_target * 100 + periph->periph_lun;
+		if (b->unit != unit)
 			return;
-
-		/* XXX LUN! */
-
-		switch (b->boot_dev_type) {
-		case 0:
-			if (strcmp(cd->cd_name, "sd") &&
-			    strcmp(cd->cd_name, "cd"))
-				return;
-			break;
-		case 1:
-			if (strcmp(cd->cd_name, "st"))
-				return;
-			break;
-		default:
+		if (b->channel != periph->periph_channel->chan_channel)
 			return;
-		}
 
 		/* we've found it! */
 		booted_device = dev;
-		DPRINTF(("\nbooted_device = %s\n", booted_device->dv_xname));
+		DPRINTF(("\nbooted_device = %s\n", dev->dv_xname));
 		found = 1;
 	}
 
 	/*
 	 * Support to boot from IDE drives.
 	 */
-	if ((ideboot || scsiboot) && !strcmp(cd->cd_name, "wd")) {
-		struct ata_atapi_attach *aa_link = aux;
-		if ((strncmp("pciide", parent->dv_xname, 6) != 0)) {
+	if (device_is_a(dev, "wd")) {
+		struct ata_device *adev = aux;
+
+		if (!device_is_a(parent, "atabus"))
 			return;
-		} else {
-			if (parent != scsidev)
-				return;
-		}
+		if (device_parent(parent) != ctrlrdev)
+			return;
+
 		DPRINTF(("\natapi info: drive %d, channel %d\n",
-		    aa_link->aa_drv_data->drive, aa_link->aa_channel));
+		    adev->adev_drv_data->drive, adev->adev_channel));
 		DPRINTF(("bootdev info: unit: %d, channel: %d\n",
 		    b->unit, b->channel));
-		if (b->unit != aa_link->aa_drv_data->drive ||
-		    b->channel != aa_link->aa_channel)
+		if (b->unit != adev->adev_drv_data->drive ||
+		    b->channel != adev->adev_channel)
 			return;
 
 		/* we've found it! */
 		booted_device = dev;
-		DPRINTF(("booted_device = %s\n", booted_device->dv_xname));
+		DPRINTF(("booted_device = %s\n", dev->dv_xname));
 		found = 1;
-	}
-
-	if (netboot) {
-		if (parent != pcidev)
-			return;
-		else {
-			struct pci_attach_args *pa = aux;
-
-			if ((b->slot % 1000) != pa->pa_device)
-				return;
-
-			/* XXX function? */
-	
-			booted_device = dev;
-			DPRINTF(("\nbooted_device = %s\n",
-			    booted_device->dv_xname));
-			found = 1;
-			return;
-		}
 	}
 }

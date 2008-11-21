@@ -1,5 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.4 2007/04/12 12:00:02 miod Exp $	*/
-/*	$NetBSD: bus.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
+/*	$NetBSD: bus.h,v 1.4 2008/04/28 20:23:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,6 +66,42 @@
 
 #include <sys/types.h>
 
+#ifdef _KERNEL
+/*
+ * Turn on BUS_SPACE_DEBUG if the global DEBUG option is enabled.
+ */
+#if defined(DEBUG) && !defined(BUS_SPACE_DEBUG)
+#define	BUS_SPACE_DEBUG
+#endif
+
+#ifdef BUS_SPACE_DEBUG
+#include <sys/systm.h> /* for printf() prototype */
+/*
+ * Macros for checking the aligned-ness of pointers passed to bus
+ * space ops.  Strict alignment is required by the Alpha architecture,
+ * and a trap will occur if unaligned access is performed.  These
+ * may aid in the debugging of a broken device driver by displaying
+ * useful information about the problem.
+ */
+#define	__BUS_SPACE_ALIGNED_ADDRESS(p, t)				\
+	((((u_long)(p)) & (sizeof(t)-1)) == 0)
+
+#define	__BUS_SPACE_ADDRESS_SANITY(p, t, d)				\
+({									\
+	if (__BUS_SPACE_ALIGNED_ADDRESS((p), t) == 0) {			\
+		printf("%s 0x%lx not aligned to %lu bytes %s:%d\n",	\
+		    d, (u_long)(p), (u_long)sizeof(t), __FILE__, __LINE__);	\
+	}								\
+	(void) 0;							\
+})
+
+#define BUS_SPACE_ALIGNED_POINTER(p, t) __BUS_SPACE_ALIGNED_ADDRESS(p, t)
+#else
+#define	__BUS_SPACE_ADDRESS_SANITY(p, t, d)	(void) 0
+#define BUS_SPACE_ALIGNED_POINTER(p, t) ALIGNED_POINTER(p, t)
+#endif /* BUS_SPACE_DEBUG */
+#endif /* _KERNEL */
+
 typedef	u_long	bus_addr_t;
 typedef	u_long	bus_size_t;
 
@@ -103,7 +131,7 @@ struct _bus_space {
 	void *		(*bs_vaddr)(void *, bus_space_handle_t);
 
 	/* read (single) */
-	uint8_t		(*bs_r_1)(void *, bus_space_handle_t,
+	uint8_t	(*bs_r_1)(void *, bus_space_handle_t,
 			    bus_size_t);
 	uint16_t	(*bs_r_2)(void *, bus_space_handle_t,
 			    bus_size_t);
@@ -121,14 +149,7 @@ struct _bus_space {
 			    bus_size_t, uint32_t *, bus_size_t);
 	void		(*bs_rm_8)(void *, bus_space_handle_t,
 			    bus_size_t, uint64_t *, bus_size_t);
-
-	void		(*bs_rrm_2)(void *, bus_space_handle_t,
-			    bus_size_t, uint8_t *, bus_size_t);
-	void		(*bs_rrm_4)(void *, bus_space_handle_t,
-			    bus_size_t, uint8_t *, bus_size_t);
-	void		(*bs_rrm_8)(void *, bus_space_handle_t,
-			    bus_size_t, uint8_t *, bus_size_t);
-
+					
 	/* read region */
 	void		(*bs_rr_1)(void *, bus_space_handle_t,
 			    bus_size_t, uint8_t *, bus_size_t);
@@ -138,14 +159,7 @@ struct _bus_space {
 			    bus_size_t, uint32_t *, bus_size_t);
 	void		(*bs_rr_8)(void *, bus_space_handle_t,
 			    bus_size_t, uint64_t *, bus_size_t);
-
-	void		(*bs_rrr_2)(void *, bus_space_handle_t,
-			    bus_size_t, uint8_t *, bus_size_t);
-	void		(*bs_rrr_4)(void *, bus_space_handle_t,
-			    bus_size_t, uint8_t *, bus_size_t);
-	void		(*bs_rrr_8)(void *, bus_space_handle_t,
-			    bus_size_t, uint8_t *, bus_size_t);
-
+					
 	/* write (single) */
 	void		(*bs_w_1)(void *, bus_space_handle_t,
 			    bus_size_t, uint8_t);
@@ -165,14 +179,7 @@ struct _bus_space {
 			    bus_size_t, const uint32_t *, bus_size_t);
 	void		(*bs_wm_8)(void *, bus_space_handle_t,
 			    bus_size_t, const uint64_t *, bus_size_t);
-
-	void		(*bs_wrm_2)(void *, bus_space_handle_t,
-			    bus_size_t, const uint8_t *, bus_size_t);
-	void		(*bs_wrm_4)(void *, bus_space_handle_t,
-			    bus_size_t, const uint8_t *, bus_size_t);
-	void		(*bs_wrm_8)(void *, bus_space_handle_t,
-			    bus_size_t, const uint8_t *, bus_size_t);
-
+					
 	/* write region */
 	void		(*bs_wr_1)(void *, bus_space_handle_t,
 			    bus_size_t, const uint8_t *, bus_size_t);
@@ -182,13 +189,6 @@ struct _bus_space {
 			    bus_size_t, const uint32_t *, bus_size_t);
 	void		(*bs_wr_8)(void *, bus_space_handle_t,
 			    bus_size_t, const uint64_t *, bus_size_t);
-
-	void		(*bs_wrr_2)(void *, bus_space_handle_t,
-			    bus_size_t, const uint8_t *, bus_size_t);
-	void		(*bs_wrr_4)(void *, bus_space_handle_t,
-			    bus_size_t, const uint8_t *, bus_size_t);
-	void		(*bs_wrr_8)(void *, bus_space_handle_t,
-			    bus_size_t, const uint8_t *, bus_size_t);
 
 	/* set multiple */
 	void		(*bs_sm_1)(void *, bus_space_handle_t,
@@ -229,19 +229,34 @@ struct _bus_space {
 #define	__bs_opname(op,size)	__bs_c(__bs_c(__bs_c(bs_,op),_),size)
 
 #define	__bs_rs(sz, tn, t, h, o)					\
-	(*(t)->__bs_opname(r,sz))((t)->bs_cookie, h, o)
+	(__BUS_SPACE_ADDRESS_SANITY((h) + (o), tn, "bus addr"),		\
+	 (*(t)->__bs_opname(r,sz))((t)->bs_cookie, h, o))
 
 #define	__bs_ws(sz, tn, t, h, o, v)					\
-	(*(t)->__bs_opname(w,sz))((t)->bs_cookie, h, o, v)
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), tn, "bus addr");		\
+	(*(t)->__bs_opname(w,sz))((t)->bs_cookie, h, o, v);		\
+} while (0)
 
 #define	__bs_nonsingle(type, sz, tn, t, h, o, a, c)			\
-	(*(t)->__bs_opname(type,sz))((t)->bs_cookie, h, o, a, c)
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), tn, "buffer");			\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), tn, "bus addr");		\
+	(*(t)->__bs_opname(type,sz))((t)->bs_cookie, h, o, a, c);	\
+} while (0)
 
 #define	__bs_set(type, sz, tn, t, h, o, v, c)				\
-	(*(t)->__bs_opname(type,sz))((t)->bs_cookie, h, o, v, c)
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), tn, "bus addr");		\
+	(*(t)->__bs_opname(type,sz))((t)->bs_cookie, h, o, v, c);	\
+} while (0)
 
 #define	__bs_copy(sz, tn, t, h1, o1, h2, o2, cnt)			\
-	(*(t)->__bs_opname(c,sz))((t)->bs_cookie, h1, o1, h2, o2, cnt)
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h1) + (o1), tn, "bus addr 1");	\
+	__BUS_SPACE_ADDRESS_SANITY((h2) + (o2), tn, "bus addr 2");	\
+	(*(t)->__bs_opname(c,sz))((t)->bs_cookie, h1, o1, h2, o2, cnt); \
+} while (0)
 
 
 /*
@@ -308,13 +323,6 @@ struct _bus_space {
 #define	bus_space_read_multi_8(t, h, o, a, c)				\
 	__bs_nonsingle(rm,8,uint64_t,(t),(h),(o),(a),(c))
 
-#define	bus_space_read_raw_multi_2(t, h, o, a, c)			\
-	__bs_nonsingle(rrm,2,uint16_t,(t),(h),(o),(a),(c))
-#define	bus_space_read_raw_multi_4(t, h, o, a, c)			\
-	__bs_nonsingle(rrm,4,uint32_t,(t),(h),(o),(a),(c))
-#define	bus_space_read_raw_multi_8(t, h, o, a, c)			\
-	__bs_nonsingle(rrm,8,uint64_t,(t),(h),(o),(a),(c))
-
 
 /*
  * Bus read region operations.
@@ -327,13 +335,6 @@ struct _bus_space {
 	__bs_nonsingle(rr,4,uint32_t,(t),(h),(o),(a),(c))
 #define	bus_space_read_region_8(t, h, o, a, c)				\
 	__bs_nonsingle(rr,8,uint64_t,(t),(h),(o),(a),(c))
-
-#define	bus_space_read_raw_region_2(t, h, o, a, c)			\
-	__bs_nonsingle(rrr,2,uint16_t,(t),(h),(o),(a),(c))
-#define	bus_space_read_raw_region_4(t, h, o, a, c)			\
-	__bs_nonsingle(rrr,4,uint32_t,(t),(h),(o),(a),(c))
-#define	bus_space_read_raw_region_8(t, h, o, a, c)			\
-	__bs_nonsingle(rrr,8,uint64_t,(t),(h),(o),(a),(c))
 
 
 /*
@@ -357,13 +358,6 @@ struct _bus_space {
 #define	bus_space_write_multi_8(t, h, o, a, c)				\
 	__bs_nonsingle(wm,8,uint64_t,(t),(h),(o),(a),(c))
 
-#define	bus_space_write_raw_multi_2(t, h, o, a, c)			\
-	__bs_nonsingle(wrm,2,uint16_t,(t),(h),(o),(a),(c))
-#define	bus_space_write_raw_multi_4(t, h, o, a, c)			\
-	__bs_nonsingle(wrm,4,uint32_t,(t),(h),(o),(a),(c))
-#define	bus_space_write_raw_multi_8(t, h, o, a, c)			\
-	__bs_nonsingle(wrm,8,uint64_t,(t),(h),(o),(a),(c))
-
 
 /*
  * Bus write region operations.
@@ -376,13 +370,6 @@ struct _bus_space {
 	__bs_nonsingle(wr,4,uint32_t,(t),(h),(o),(a),(c))
 #define	bus_space_write_region_8(t, h, o, a, c)				\
 	__bs_nonsingle(wr,8,uint64_t,(t),(h),(o),(a),(c))
-
-#define	bus_space_write_raw_region_2(t, h, o, a, c)			\
-	__bs_nonsingle(wrr,2,uint16_t,(t),(h),(o),(a),(c))
-#define	bus_space_write_raw_region_4(t, h, o, a, c)			\
-	__bs_nonsingle(wrr,4,uint32_t,(t),(h),(o),(a),(c))
-#define	bus_space_write_raw_region_8(t, h, o, a, c)			\
-	__bs_nonsingle(wrr,8,uint64_t,(t),(h),(o),(a),(c))
 
 
 /*
@@ -422,6 +409,35 @@ struct _bus_space {
 	__bs_copy(4, uint32_t, (t), (h1), (o1), (h2), (o2), (c))
 #define	bus_space_copy_region_8(t, h1, o1, h2, o2, c)			\
 	__bs_copy(8, uint64_t, (t), (h1), (o1), (h2), (o2), (c))
+
+/*
+ * Bus stream operations--defined in terms of non-stream counterparts
+ */
+#define __BUS_SPACE_HAS_STREAM_METHODS
+#define bus_space_read_stream_1 bus_space_read_1
+#define bus_space_read_stream_2 bus_space_read_2
+#define bus_space_read_stream_4 bus_space_read_4
+#define	bus_space_read_stream_8 bus_space_read_8
+#define bus_space_read_multi_stream_1 bus_space_read_multi_1
+#define bus_space_read_multi_stream_2 bus_space_read_multi_2
+#define bus_space_read_multi_stream_4 bus_space_read_multi_4
+#define	bus_space_read_multi_stream_8 bus_space_read_multi_8
+#define bus_space_read_region_stream_1 bus_space_read_region_1
+#define bus_space_read_region_stream_2 bus_space_read_region_2
+#define bus_space_read_region_stream_4 bus_space_read_region_4
+#define	bus_space_read_region_stream_8 bus_space_read_region_8
+#define bus_space_write_stream_1 bus_space_write_1
+#define bus_space_write_stream_2 bus_space_write_2
+#define bus_space_write_stream_4 bus_space_write_4
+#define	bus_space_write_stream_8 bus_space_write_8
+#define bus_space_write_multi_stream_1 bus_space_write_multi_1
+#define bus_space_write_multi_stream_2 bus_space_write_multi_2
+#define bus_space_write_multi_stream_4 bus_space_write_multi_4
+#define	bus_space_write_multi_stream_8 bus_space_write_multi_8
+#define bus_space_write_region_stream_1 bus_space_write_region_1
+#define bus_space_write_region_stream_2 bus_space_write_region_2
+#define bus_space_write_region_stream_4 bus_space_write_region_4
+#define	bus_space_write_region_stream_8	bus_space_write_region_8
 
 #endif /* _KERNEL */
 
@@ -509,8 +525,8 @@ struct _bus_dma_tag {
 	void	(*_dmamem_free)(bus_dma_tag_t,
 		    bus_dma_segment_t *, int);
 	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, caddr_t *, int);
-	void	(*_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
+		    int, size_t, void **, int);
+	void	(*_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
@@ -543,6 +559,9 @@ struct _bus_dma_tag {
 	(*(t)->_dmamem_unmap)((t), (k), (s))
 #define	bus_dmamem_mmap(t, sg, n, o, p, f)			\
 	(*(t)->_dmamem_mmap)((t), (sg), (n), (o), (p), (f))
+
+#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
+#define bus_dmatag_destroy(t)
 
 /*
  *	bus_dmamap_t
@@ -589,8 +608,8 @@ int	_bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
-	    size_t size, caddr_t *kvap, int flags);
-void	_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva, size_t size);
+	    size_t size, void **kvap, int flags);
+void	_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva, size_t size);
 paddr_t	_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);
 #endif	/* _LANDISK_BUS_DMA_PRIVATE */

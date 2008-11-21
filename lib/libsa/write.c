@@ -1,5 +1,4 @@
-/*	$OpenBSD: write.c,v 1.6 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: write.c,v 1.7 1996/06/21 20:29:30 pk Exp $	*/
+/*	$NetBSD: write.c,v 1.15 2007/12/02 04:59:26 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -65,26 +64,33 @@
 #include "stand.h"
 
 ssize_t
-write(int fd, void *dest, size_t bcount)
+write(int fd, const void *destp, size_t bcount)
 {
 	struct open_file *f = &files[fd];
 	size_t resid;
+	void *dest = __UNCONST(destp);
 
-	if ((unsigned)fd >= SOPEN_MAX || !(f->f_flags & F_WRITE)) {
+#if !defined(LIBSA_NO_FD_CHECKING)
+	if ((unsigned int)fd >= SOPEN_MAX || !(f->f_flags & F_WRITE)) {
 		errno = EBADF;
-		return (-1);
+		return -1;
 	}
+#endif
+#if !defined(LIBSA_NO_RAW_ACCESS)
 	if (f->f_flags & F_RAW) {
+#if !defined(LIBSA_NO_TWIDDLE)
 		twiddle();
-		errno = (f->f_dev->dv_strategy)(f->f_devdata, F_WRITE,
-		    btodb(f->f_offset), bcount, dest, &resid);
+#endif
+		errno = DEV_STRATEGY(f->f_dev)(f->f_devdata, F_WRITE,
+			btodb(f->f_offset), bcount, dest, &resid);
 		if (errno)
-			return (-1);
+			return -1;
 		f->f_offset += resid;
-		return (resid);
+		return resid;
 	}
+#endif
 	resid = bcount;
-	if ((errno = (f->f_ops->write)(f, dest, bcount, &resid)))
-		return (-1);
-	return (0);
+	if ((errno = FS_WRITE(f->f_ops)(f, dest, bcount, &resid)))
+		return -1;
+	return 0;
 }

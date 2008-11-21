@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_emulate.c,v 1.15 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_emulate.c,v 1.25 2003/09/22 14:18:34 cl Exp $	*/
+/*	$NetBSD: fpu_emulate.c,v 1.27 2007/03/09 16:23:01 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -37,24 +36,36 @@
  * XXX - Just a start at it for now...
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_emulate.c,v 1.27 2007/03/09 16:23:01 tsutsui Exp $");
+
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/signal.h>
 #include <sys/systm.h>
 #include <machine/frame.h>
 
 #if defined(DDB) && defined(DEBUG_FPE)
-#include <machine/db_machdep.h>
+# include <m68k/db_machdep.h>
 #endif
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
-int fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *);
-int fpu_emul_fmovm(struct fpemu *fe, struct instruction *insn, int *);
-int fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *);
-int fpu_emul_type1(struct fpemu *fe, struct instruction *insn, int *);
-int fpu_emul_brcc(struct fpemu *fe, struct instruction *insn);
-int test_cc(struct fpemu *fe, int pred);
-struct fpn *fpu_cmp(struct fpemu *fe);
+#define	fpe_abort(tfp, ksi, signo, code) 		\
+    do {						\
+	    (ksi)->ksi_signo = (signo);			\
+	    (ksi)->ksi_code = (code);			\
+	    (ksi)->ksi_addr = (void *)(frame)->f_pc;	\
+	    return -1;					\
+    } while (/*CONSTCOND*/0)
+
+static int fpu_emul_fmovmcr __P((struct fpemu *fe, struct instruction *insn));
+static int fpu_emul_fmovm __P((struct fpemu *fe, struct instruction *insn));
+static int fpu_emul_arith __P((struct fpemu *fe, struct instruction *insn));
+static int fpu_emul_type1 __P((struct fpemu *fe, struct instruction *insn));
+static int fpu_emul_brcc __P((struct fpemu *fe, struct instruction *insn));
+static int test_cc __P((struct fpemu *fe, int pred));
+static struct fpn *fpu_cmp __P((struct fpemu *fe));
 
 #if DEBUG_FPE
 #  define DUMP_INSN(insn)						\
@@ -71,12 +82,14 @@ struct fpn *fpu_cmp(struct fpemu *fe);
  * (Typically: zero, SIGFPE, SIGILL, SIGSEGV)
  */
 int
-fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
+fpu_emulate(frame, fpf, ksi)
+     struct frame *frame;
+     struct fpframe *fpf;
+     ksiginfo_t *ksi;
 {
     static struct instruction insn;
     static struct fpemu fe;
-    int optype, sig;
-    u_int16_t word;
+    int word, optype, sig;
 
 
     /* initialize insn.is_datasize to tell it is *not* initialized */
@@ -113,36 +126,37 @@ fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
 	frame->f_pc = insn.is_pc;
     }
 
-    if (copyin((void *)insn.is_pc, &word, sizeof(word)) != 0) {
+    word = fusword((void *) (insn.is_pc));
+    if (word < 0) {
 #ifdef DEBUG
 	printf("fpu_emulate: fault reading opcode\n");
 #endif
-	return (SIGSEGV);
+	fpe_abort(frame, ksi, SIGSEGV, SEGV_ACCERR);
     }
 
     if ((word & 0xf000) != 0xf000) {
 #ifdef DEBUG
 	printf("fpu_emulate: not coproc. insn.: opcode=0x%x\n", word);
 #endif
-	return (SIGILL);
+	fpe_abort(frame, ksi, SIGILL, ILL_ILLOPC);
     }
 
     if ((word & 0x0E00) != 0x0200) {
 #ifdef DEBUG
 	printf("fpu_emulate: bad coproc. id: opcode=0x%x\n", word);
 #endif
-	*typ = ILL_COPROC;
-	return (SIGILL);
+	fpe_abort(frame, ksi, SIGILL, ILL_ILLOPC);
     }
 
     insn.is_opcode = word;
     optype = (word & 0x01C0);
 
-    if (copyin((void *)(insn.is_pc + 2), &word, sizeof(word)) != 0) {
+    word = fusword((void *) (insn.is_pc + 2));
+    if (word < 0) {
 #ifdef DEBUG
 	printf("fpu_emulate: fault reading word1\n");
 #endif
-	return (SIGSEGV);
+	fpe_abort(frame, ksi, SIGSEGV, SEGV_ACCERR);
     }
     insn.is_word1 = word;
     /* all FPU instructions are at least 4-byte long */
@@ -161,36 +175,36 @@ fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
 #if DEBUG_FPE
 	    printf("fpu_emulate: fmovm FPr\n");
 #endif
-	    sig = fpu_emul_fmovm(&fe, &insn, typ);
+	    sig = fpu_emul_fmovm(&fe, &insn);
 	} else if ((word & 0xc000) == 0x8000) {
 #if DEBUG_FPE
 	    printf("fpu_emulate: fmovm FPcr\n");
 #endif
-	    sig = fpu_emul_fmovmcr(&fe, &insn, typ);
+	    sig = fpu_emul_fmovmcr(&fe, &insn);
 	} else if ((word & 0xe000) == 0x6000) {
 	    /* fstore = fmove FPn,mem */
 #if DEBUG_FPE
 	    printf("fpu_emulate: fmove to mem\n");
 #endif
-	    sig = fpu_emul_fstore(&fe, &insn, typ);
+	    sig = fpu_emul_fstore(&fe, &insn);
 	} else if ((word & 0xfc00) == 0x5c00) {
 	    /* fmovecr */
 #if DEBUG_FPE
 	    printf("fpu_emulate: fmovecr\n");
 #endif
-	    sig = fpu_emul_fmovecr(&fe, &insn, typ);
+	    sig = fpu_emul_fmovecr(&fe, &insn);
 	} else if ((word & 0xa07f) == 0x26) {
 	    /* fscale */
 #if DEBUG_FPE
 	    printf("fpu_emulate: fscale\n");
 #endif
-	    sig = fpu_emul_fscale(&fe, &insn, typ);
+	    sig = fpu_emul_fscale(&fe, &insn);
 	} else {
 #if DEBUG_FPE
 	    printf("fpu_emulate: other type0\n");
 #endif
 	    /* all other type0 insns are arithmetic */
-	    sig = fpu_emul_arith(&fe, &insn, typ);
+	    sig = fpu_emul_arith(&fe, &insn);
 	}
 	if (sig == 0) {
 #if DEBUG_FPE
@@ -210,7 +224,7 @@ fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
 #if DEBUG_FPE
 	printf("fpu_emulate: type1\n");
 #endif
-	sig = fpu_emul_type1(&fe, &insn, typ);
+	sig = fpu_emul_type1(&fe, &insn);
     } else {
 	/* type=4: fsave    (privileged) */
 	/* type=5: frestore (privileged) */
@@ -219,7 +233,6 @@ fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
 #ifdef DEBUG
 	printf("fpu_emulate: bad opcode type: opcode=0x%x\n", insn.is_opcode);
 #endif
-	*typ = ILL_PRVOPC;
 	sig = SIGILL;
     }
 
@@ -236,7 +249,7 @@ fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
     else {
 	printf("fpu_emulate: sig=%d, opcode=%x, word1=%x\n",
 	       sig, insn.is_opcode, insn.is_word1);
-	kdb_trap(-1, (db_regs_t *)frame);
+	kdb_trap(-1, (db_regs_t *)&frame);
     }
 #endif
 #if 0 /* XXX something is wrong */
@@ -252,18 +265,8 @@ fpu_emulate(struct frame *frame, struct fpframe *fpf, int *typ)
 	   fe.fe_fpsr, fe.fe_fpcr);
 #endif
 
-    if (*typ == 0)
-	switch (sig) {
-	case SIGSEGV:
-		*typ = SEGV_MAPERR;
-		break;
-	case SIGILL:
-		*typ = ILL_ILLOPC;
-		break;
-	case SIGFPE:
-		*typ = FPE_FLTINV;
-		break;
-	}
+    if (sig)
+	fpe_abort(frame, ksi, sig, 0);
     return (sig);
 }
 
@@ -370,8 +373,10 @@ fpu_upd_fpsr(fe, fp)
     return fpsr;
 }
 
-int
-fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *typ)
+static int
+fpu_emul_fmovmcr(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     struct frame *frame = fe->fe_frame;
     struct fpframe *fpf = fe->fe_fpframe;
@@ -386,7 +391,7 @@ fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *typ)
 
     insn->is_datasize = 4;
     insn->is_advance = 4;
-    sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode, typ);
+    sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode);
     if (sig) { return sig; }
 
     if (reglist != 1 && reglist != 2 && reglist != 4 &&
@@ -414,7 +419,7 @@ fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *typ)
 			       (char *)&fpf->fpf_fpcr);
 	} else {
 	    sig = fpu_load_ea(frame, insn, &insn->is_ea,
-			      (char *)&fpf->fpf_fpcr, typ);
+			      (char *)&fpf->fpf_fpcr);
 	}
     }
     if (sig) { return sig; }
@@ -435,7 +440,7 @@ fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *typ)
 			       (char *)&fpf->fpf_fpsr);
 	} else {
 	    sig = fpu_load_ea(frame, insn, &insn->is_ea,
-			      (char *)&fpf->fpf_fpsr, typ);
+			      (char *)&fpf->fpf_fpsr);
 	}
     }
     if (sig) { return sig; }
@@ -447,7 +452,7 @@ fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *typ)
 			       (char *)&fpf->fpf_fpiar);
 	} else {
 	    sig = fpu_load_ea(frame, insn, &insn->is_ea,
-			      (char *)&fpf->fpf_fpiar, typ);
+			      (char *)&fpf->fpf_fpiar);
 	}
     }
     return sig;
@@ -463,8 +468,10 @@ fpu_emul_fmovmcr(struct fpemu *fe, struct instruction *insn, int *typ)
  * No conversion or rounding is done by this instruction,
  * and the FPSR is not affected.
  */
-int
-fpu_emul_fmovm(struct fpemu *fe, struct instruction *insn, int *typ)
+static int
+fpu_emul_fmovm(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     struct frame *frame = fe->fe_frame;
     struct fpframe *fpf = fe->fe_fpframe;
@@ -498,7 +505,7 @@ fpu_emul_fmovm(struct fpemu *fe, struct instruction *insn, int *typ)
     reglist &= 0xFF;
 
     /* Get effective address. (modreg=opcode&077) */
-    sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode, typ);
+    sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode);
     if (sig) { return sig; }
 
     /* Get address of soft coprocessor regs. */
@@ -517,7 +524,7 @@ fpu_emul_fmovm(struct fpemu *fe, struct instruction *insn, int *typ)
 	if (regmask & reglist) {
 	    if (fpu_to_mem) {
 		sig = fpu_store_ea(frame, insn, &insn->is_ea,
-				   (char *)&fpregs[regnum * 3]);
+				   (char*)&fpregs[regnum * 3]);
 #if DEBUG_FPE
 		printf("fpu_emul_fmovm: FP%d (%08x,%08x,%08x) saved\n",
 		       regnum, fpregs[regnum * 3], fpregs[regnum * 3 + 1],
@@ -525,7 +532,7 @@ fpu_emul_fmovm(struct fpemu *fe, struct instruction *insn, int *typ)
 #endif
 	    } else {		/* mem to fpu */
 		sig = fpu_load_ea(frame, insn, &insn->is_ea,
-				  (char *)&fpregs[regnum * 3], typ);
+				  (char*)&fpregs[regnum * 3]);
 #if DEBUG_FPE
 		printf("fpu_emul_fmovm: FP%d (%08x,%08x,%08x) loaded\n",
 		       regnum, fpregs[regnum * 3], fpregs[regnum * 3 + 1],
@@ -541,7 +548,7 @@ fpu_emul_fmovm(struct fpemu *fe, struct instruction *insn, int *typ)
     return sig;
 }
 
-struct fpn *
+static struct fpn *
 fpu_cmp(fe)
      struct fpemu *fe;
 {
@@ -594,8 +601,10 @@ fpu_cmp(fe)
 /*
  * arithmetic oprations
  */
-int
-fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
+static int
+fpu_emul_arith(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     struct frame *frame = fe->fe_frame;
     u_int *fpregs = &(fe->fe_fpframe->fpf_regs[0]);
@@ -657,13 +666,12 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	    insn->is_datasize = 12;
 	} else {
 	    /* invalid or unsupported operand format */
-	    *typ = ILL_ILLOPN;
-	    sig = SIGILL;
+	    sig = SIGFPE;
 	    return sig;
 	}
 
 	/* Get effective address. (modreg=opcode&077) */
-	sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode, typ);
+	sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode);
 	if (sig) {
 #if DEBUG_FPE
 	    printf("fpu_emul_arith: error in fpu_decode_ea\n");
@@ -708,7 +716,7 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	}
 #endif /* DEBUG_FPE */
 
-	fpu_load_ea(frame, insn, &insn->is_ea, (char *)buf, typ);
+	fpu_load_ea(frame, insn, &insn->is_ea, (char*)buf);
 	if (format == FTYPE_WRD) {
 	    /* sign-extend */
 	    buf[0] &= 0xffff;
@@ -755,6 +763,10 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	res = fpu_int(fe);
 	break;
 
+    case 0x02:			/* fsinh */
+	res = fpu_sinh(fe);
+	break;
+
     case 0x03:			/* fintrz */
 	res = fpu_intrz(fe);
 	break;
@@ -765,6 +777,46 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 
     case 0x06:			/* flognp1 */
 	res = fpu_lognp1(fe);
+	break;
+
+    case 0x08:			/* fetoxm1 */
+	res = fpu_etoxm1(fe);
+	break;
+
+    case 0x09:			/* ftanh */
+	res = fpu_tanh(fe);
+	break;
+
+    case 0x0A:			/* fatan */
+	res = fpu_atan(fe);
+	break;
+
+    case 0x0C:			/* fasin */
+	res = fpu_asin(fe);
+	break;
+
+    case 0x0D:			/* fatanh */
+	res = fpu_atanh(fe);
+	break;
+
+    case 0x0E:			/* fsin */
+	res = fpu_sin(fe);
+	break;
+
+    case 0x0F:			/* ftan */
+	res = fpu_tan(fe);
+	break;
+
+    case 0x10:			/* fetox */
+	res = fpu_etox(fe);
+	break;
+
+    case 0x11:			/* ftwotox */
+	res = fpu_twotox(fe);
+	break;
+
+    case 0x12:			/* ftentox */
+	res = fpu_tentox(fe);
 	break;
 
     case 0x14:			/* flogn */
@@ -784,9 +836,21 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	res = &fe->fe_f2;
 	break;
 
+    case 0x19:			/* fcosh */
+	res = fpu_cosh(fe);
+	break;
+
     case 0x1A:			/* fneg */
 	fe->fe_f2.fp_sign = !fe->fe_f2.fp_sign;
 	res = &fe->fe_f2;
+	break;
+
+    case 0x1C:			/* facos */
+	res = fpu_acos(fe);
+	break;
+
+    case 0x1D:			/* fcos */
+	res = fpu_cos(fe);
 	break;
 
     case 0x1E:			/* fgetexp */
@@ -825,6 +889,17 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	/* fscale is handled by a separate function */
 	break;
 
+    case 0x30:
+    case 0x31:
+    case 0x32:
+    case 0x33:
+    case 0x34:
+    case 0x35:
+    case 0x36:
+    case 0x37:			/* fsincos */
+	res = fpu_sincos(fe, word1 & 7);
+	break;
+
     case 0x38:			/* fcmp */
 	res = fpu_cmp(fe);
 	discard_result = 1;
@@ -835,28 +910,6 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	discard_result = 1;
 	break;
 
-    case 0x02:			/* fsinh */
-    case 0x08:			/* fetoxm1 */
-    case 0x09:			/* ftanh */
-    case 0x0A:			/* fatan */
-    case 0x0C:			/* fasin */
-    case 0x0D:			/* fatanh */
-    case 0x0E:			/* fsin */
-    case 0x0F:			/* ftan */
-    case 0x10:			/* fetox */
-    case 0x11:			/* ftwotox */
-    case 0x12:			/* ftentox */
-    case 0x19:			/* fcosh */
-    case 0x1C:			/* facos */
-    case 0x1D:			/* fcos */
-    case 0x30:			/* fsincos */
-    case 0x31:			/* fsincos */
-    case 0x32:			/* fsincos */
-    case 0x33:			/* fsincos */
-    case 0x34:			/* fsincos */
-    case 0x35:			/* fsincos */
-    case 0x36:			/* fsincos */
-    case 0x37:			/* fsincos */
     default:
 #ifdef DEBUG
 	printf("fpu_emul_arith: bad opcode=0x%x, word1=0x%x\n",
@@ -872,7 +925,8 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
 	       fpregs[regnum*3], fpregs[regnum*3+1],
 	       fpregs[regnum*3+2], regnum);
     } else if (sig == 0) {
-	static char *class_name[] = { "SNAN", "QNAN", "ZERO", "NUM", "INF" };
+	static const char *class_name[] =
+	    { "SNAN", "QNAN", "ZERO", "NUM", "INF" };
 	printf("fpu_emul_arith: result(%s,%c,%d,%08x,%08x,%08x) discarded\n",
 	       class_name[res->fp_class + 2],
 	       res->fp_sign ? '-' : '+', res->fp_exp,
@@ -900,7 +954,7 @@ fpu_emul_arith(struct fpemu *fe, struct instruction *insn, int *typ)
  * returns -1 when the predicate evaluates to true, 0 when false.
  * signal numbers are returned when an error is detected.
  */
-int
+static int
 test_cc(fe, pred)
      struct fpemu *fe;
      int pred;
@@ -1018,12 +1072,13 @@ test_cc(fe, pred)
  * In this function, we know:
  *   (opcode & 0x01C0) == 0x0040
  */
-int
-fpu_emul_type1(struct fpemu *fe, struct instruction *insn, int *typ)
+static int
+fpu_emul_type1(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     struct frame *frame = fe->fe_frame;
-    int advance, sig, branch;
-    int16_t displ;
+    int advance, sig, branch, displ;
 
     branch = test_cc(fe, insn->is_word1);
     fe->fe_fpframe->fpf_fpsr = fe->fe_fpsr;
@@ -1041,14 +1096,19 @@ fpu_emul_type1(struct fpemu *fe, struct instruction *insn, int *typ)
 	    u_int16_t count = frame->f_regs[insn->is_opcode & 7];
 
 	    if (count-- != 0) {
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &displ,
-		    sizeof(displ)) != 0) {
+		displ = fusword((void *) (insn->is_pc + insn->is_advance));
+		if (displ < 0) {
 #ifdef DEBUG
 		    printf("fpu_emul_type1: fault reading displacement\n");
 #endif
 		    return SIGSEGV;
 		}
-		insn->is_advance += (int)displ;
+		/* sign-extend the displacement */
+		displ &= 0xffff;
+		if (displ & 0x8000) {
+		    displ |= 0xffff0000;
+		}
+		insn->is_advance += displ;
 		/* XXX insn->is_nextpc = insn->is_pc + insn->is_advance; */
 	    } else {
 		insn->is_advance = 6;
@@ -1082,8 +1142,7 @@ fpu_emul_type1(struct fpemu *fe, struct instruction *insn, int *typ)
 		sig = 0;
 	    } else {
 		/* trap */
-		sig = SIGILL;
-		*typ = ILL_ILLTRP;
+		sig = SIGFPE;
 	    }
 	    break;
 	} /* if ((insn->is_opcode & 7) < 2), fall through to FScc */
@@ -1091,7 +1150,7 @@ fpu_emul_type1(struct fpemu *fe, struct instruction *insn, int *typ)
     default:			/* fscc */
 	insn->is_advance = 4;
 	insn->is_datasize = 1;	/* always byte */
-	sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode, typ);
+	sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode);
 	if (sig) {
 	    break;
 	}
@@ -1112,14 +1171,13 @@ fpu_emul_type1(struct fpemu *fe, struct instruction *insn, int *typ)
  * In this function, we know:
  *   (opcode & 0x0180) == 0x0080
  */
-int
+static int
 fpu_emul_brcc(fe, insn)
      struct fpemu *fe;
      struct instruction *insn;
 {
-    int displ;
+    int displ, word2;
     int sig;
-    u_int16_t word2;
 
     /*
      * Get branch displacement.
@@ -1128,8 +1186,8 @@ fpu_emul_brcc(fe, insn)
     displ = insn->is_word1;
 
     if (insn->is_opcode & 0x40) {
-	if (copyin((void *)(insn->is_pc + insn->is_advance), &word2,
-	    sizeof(word2)) != 0) {
+	word2 = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (word2 < 0) {
 #ifdef DEBUG
 	    printf("fpu_emul_brcc: fault reading word2\n");
 #endif

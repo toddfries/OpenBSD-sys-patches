@@ -1,4 +1,4 @@
-/*	$NetBSD: mach_exception.c,v 1.8 2006/03/07 03:32:06 thorpej Exp $ */
+/*	$NetBSD: mach_exception.c,v 1.13 2008/04/28 20:23:44 martin Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mach_exception.c,v 1.8 2006/03/07 03:32:06 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mach_exception.c,v 1.13 2008/04/28 20:23:44 martin Exp $");
 
 #include "opt_compat_darwin.h"
 
@@ -75,9 +68,7 @@ static void mach_siginfo_to_exception(const struct ksiginfo *, int *);
  * mach_trapinfo1 and handle signals if it gets a non zero return value.
  */
 void
-mach_trapsignal(l, ksi)
-	struct lwp *l;
-	const struct ksiginfo *ksi;
+mach_trapsignal(struct lwp *l, struct ksiginfo *ksi)
 {
 	if (mach_trapsignal1(l, ksi) != 0)
 		trapsignal(l, ksi);
@@ -85,9 +76,7 @@ mach_trapsignal(l, ksi)
 }
 
 int
-mach_trapsignal1(l, ksi)
-	struct lwp *l;
-	const struct ksiginfo *ksi;
+mach_trapsignal1(struct lwp *l, struct ksiginfo *ksi)
 {
 	struct proc *p = l->l_proc;
 	struct mach_emuldata *med;
@@ -161,18 +150,17 @@ mach_exception(exc_l, exc, code)
 	 * the process at the time it dies.
 	 */
 	if (mach_exception_hang) {
-		int s;
 		struct proc *p = exc_l->l_proc;
 
-		sigminusset(&contsigmask, &p->p_sigctx.ps_siglist);
-		SCHED_LOCK(s);
+		sigminusset(&contsigmask, &exc_l->l_sigpendset->sp_set);
+		lwp_lock(exc_l);
 		p->p_pptr->p_nstopchild++;
 		p->p_stat = SSTOP;
 		exc_l->l_stat = LSSTOP;
 		p->p_nrlwps--;
-		mi_switch(exc_l, NULL);
-		SCHED_ASSERT_UNLOCKED();
-		splx(s);
+		KERNEL_UNLOCK_ALL(exc_l, &exc_l->l_biglocks);
+		mi_switch(exc_l);
+		KERNEL_LOCK(exc_l->l_biglocks, exc_l);
 	}
 
 	/*
@@ -223,8 +211,8 @@ mach_exception(exc_l, exc, code)
 	 * a dying parent, a signal is sent instead of the
 	 * notification, this fixes the problem.
 	 */
-	if ((exc_l->l_proc->p_flag & P_TRACED) &&
-	    (exc_l->l_proc->p_pptr->p_flag & P_WEXIT)) {
+	if ((exc_l->l_proc->p_slflag & PSL_TRACED) &&
+	    (exc_l->l_proc->p_pptr->p_sflag & PS_WEXIT)) {
 #ifdef DEBUG_MACH
 		printf("mach_exception: deadlock avoided\n");
 #endif
@@ -369,7 +357,7 @@ mach_exception(exc_l, exc, code)
 	 * no new exception will be taken until the catcher
 	 * acknowledge the first one.
 	 */
-	lockmgr(&catcher_med->med_exclock, LK_EXCLUSIVE, NULL);
+	rw_enter(&catcher_med->med_exclock, RW_WRITER);
 
 	/*
 	 * If the catcher died, we are done.
@@ -401,7 +389,7 @@ mach_exception(exc_l, exc, code)
 	/*
 	 * Unlock the catcher's exception handler
 	 */
-	lockmgr(&catcher_med->med_exclock, LK_RELEASE, NULL);
+	rw_exit(&catcher_med->med_exclock);
 
 out:
 	MACH_PORT_UNREF(exc_port);
@@ -409,9 +397,7 @@ out:
 }
 
 static void
-mach_siginfo_to_exception(ksi, code)
-	const struct ksiginfo *ksi;
-	int *code;
+mach_siginfo_to_exception(const struct ksiginfo *ksi, int *code)
 {
 	code[1] = (long)ksi->ksi_addr;
 	switch (ksi->ksi_signo) {
@@ -484,8 +470,7 @@ mach_siginfo_to_exception(ksi, code)
 }
 
 int
-mach_exception_raise(args)
-	struct mach_trap_args *args;
+mach_exception_raise(struct mach_trap_args *args)
 {
 	struct lwp *l = args->l;
 	mach_exception_raise_reply_t *rep;
@@ -516,7 +501,7 @@ mach_exception_raise(args)
 	 * Check for unexpected exception acknowledge, whereas
 	 * the kernel sent no exception message.
 	 */
-	if (lockstatus(&med->med_exclock) == 0) {
+	if (!rw_lock_held(&med->med_exclock)) {
 #ifdef DEBUG_MACH
 		printf("spurious mach_exception_raise\n");
 #endif
@@ -535,15 +520,13 @@ mach_exception_raise(args)
 }
 
 int
-mach_exception_raise_state(args)
-	struct mach_trap_args *args;
+mach_exception_raise_state(struct mach_trap_args *args)
 {
 	return mach_exception_raise(args);
 }
 
 int
-mach_exception_raise_state_identity(args)
-	struct mach_trap_args *args;
+mach_exception_raise_state_identity(struct mach_trap_args *args)
 {
 	return mach_exception_raise(args);
 }

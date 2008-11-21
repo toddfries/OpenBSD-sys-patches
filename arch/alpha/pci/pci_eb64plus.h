@@ -1,4 +1,3 @@
-/* $OpenBSD */
 /* $NetBSD: pci_eb64plus.h,v 1.2 2000/06/05 21:47:26 thorpej Exp $ */
 
 /*
@@ -28,4 +27,4 @@
  * rights to redistribute these changes.
  */
 
-void	pci_eb64plus_pickintr(struct apecs_config *);
+void	pci_eb64plus_pickintr __P((struct apecs_config *));

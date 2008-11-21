@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ieee1394subr.c,v 1.32 2006/06/07 22:33:42 kardel Exp $	*/
+/*	$NetBSD: if_ieee1394subr.c,v 1.41 2008/11/07 00:20:13 dyoung Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ieee1394subr.c,v 1.32 2006/06/07 22:33:42 kardel Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ieee1394subr.c,v 1.41 2008/11/07 00:20:13 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -85,20 +78,21 @@ __KERNEL_RCSID(0, "$NetBSD: if_ieee1394subr.c,v 1.32 2006/06/07 22:33:42 kardel 
 
 #define	senderr(e)	do { error = (e); goto bad; } while(0/*CONSTCOND*/)
 
-static int  ieee1394_output(struct ifnet *, struct mbuf *, struct sockaddr *,
-		struct rtentry *);
-static struct mbuf *ieee1394_reass(struct ifnet *, struct mbuf *, u_int16_t);
+static int  ieee1394_output(struct ifnet *, struct mbuf *,
+		const struct sockaddr *, struct rtentry *);
+static struct mbuf *ieee1394_reass(struct ifnet *, struct mbuf *, uint16_t);
 
 static int
-ieee1394_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
+ieee1394_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
     struct rtentry *rt0)
 {
-	u_int16_t etype = 0;
+	uint16_t etype = 0;
 	struct mbuf *m;
 	int s, hdrlen, error = 0;
 	struct rtentry *rt;
 	struct mbuf *mcopy = NULL;
-	struct ieee1394_hwaddr *hwdst, *myaddr, baddr;
+	struct ieee1394_hwaddr *hwdst, baddr;
+	const struct ieee1394_hwaddr *myaddr;
 	ALTQ_DECL(struct altq_pktattr pktattr;)
 #ifdef INET
 	struct arphdr *ah;
@@ -194,8 +188,8 @@ ieee1394_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 #endif /* INET */
 #ifdef INET6
 	case AF_INET6:
-		if (unicast &&
-		    (!nd6_storelladdr(ifp, rt, m0, dst, (u_char *)hwdst))) {
+		if (unicast && (!nd6_storelladdr(ifp, rt, m0, dst,
+		    hwdst->iha_uid, IEEE1394_ADDR_LEN))) {
 			/* something bad happened */
 			return 0;
 		}
@@ -215,7 +209,7 @@ ieee1394_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 
 	if (mcopy)
 		looutput(ifp, mcopy, dst, rt);
-	myaddr = (struct ieee1394_hwaddr *)LLADDR(ifp->if_sadl);
+	myaddr = (const struct ieee1394_hwaddr *)CLLADDR(ifp->if_sadl);
 #if NBPFILTER > 0
 	if (ifp->if_bpf) {
 		struct ieee1394_bpfhdr h;
@@ -294,7 +288,7 @@ ieee1394_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 
 struct mbuf *
 ieee1394_fragment(struct ifnet *ifp, struct mbuf *m0, int maxsize,
-    u_int16_t etype)
+    uint16_t etype)
 {
 	struct ieee1394com *ic = (struct ieee1394com *)ifp;
 	int totlen, fraglen, off;
@@ -364,10 +358,10 @@ ieee1394_fragment(struct ifnet *ifp, struct mbuf *m0, int maxsize,
 }
 
 void
-ieee1394_input(struct ifnet *ifp, struct mbuf *m, u_int16_t src)
+ieee1394_input(struct ifnet *ifp, struct mbuf *m, uint16_t src)
 {
 	struct ifqueue *inq;
-	u_int16_t etype;
+	uint16_t etype;
 	int s;
 	struct ieee1394_unfraghdr *iuh;
 
@@ -395,7 +389,7 @@ ieee1394_input(struct ifnet *ifp, struct mbuf *m, u_int16_t src)
 	if (ifp->if_bpf) {
 		struct ieee1394_bpfhdr h;
 		struct m_tag *mtag;
-		struct ieee1394_hwaddr *myaddr;
+		const struct ieee1394_hwaddr *myaddr;
 
 		mtag = m_tag_locate(m,
 		    MTAG_FIREWIRE, MTAG_FIREWIRE_SENDER_EUID, 0);
@@ -408,7 +402,8 @@ ieee1394_input(struct ifnet *ifp, struct mbuf *m, u_int16_t src)
 			    ((const struct ieee1394_hwaddr *)
 			    ifp->if_broadcastaddr)->iha_uid, 8);
 		else {
-			myaddr = (struct ieee1394_hwaddr *)LLADDR(ifp->if_sadl);
+			myaddr =
+			  (const struct ieee1394_hwaddr *)CLLADDR(ifp->if_sadl);
 			memcpy(h.ibh_dhost, myaddr->iha_uid, 8);
 		}
 		h.ibh_type = htons(etype);
@@ -451,7 +446,7 @@ ieee1394_input(struct ifnet *ifp, struct mbuf *m, u_int16_t src)
 }
 
 static struct mbuf *
-ieee1394_reass(struct ifnet *ifp, struct mbuf *m0, u_int16_t src)
+ieee1394_reass(struct ifnet *ifp, struct mbuf *m0, uint16_t src)
 {
 	struct ieee1394com *ic = (struct ieee1394com *)ifp;
 	struct ieee1394_fraghdr *ifh;
@@ -459,8 +454,8 @@ ieee1394_reass(struct ifnet *ifp, struct mbuf *m0, u_int16_t src)
 	struct ieee1394_reassq *rq;
 	struct ieee1394_reass_pkt *rp, *trp, *nrp = NULL;
 	int len;
-	u_int16_t etype, off, ftype, size, dgl;
-	u_int32_t id;
+	uint16_t etype, off, ftype, size, dgl;
+	uint32_t id;
 
 	if (m0->m_len < sizeof(*ifh)) {
 		if ((m0 = m_pullup(m0, sizeof(*ifh))) == NULL)
@@ -663,7 +658,7 @@ ieee1394_watchdog(struct ifnet *ifp)
 }
 
 const char *
-ieee1394_sprintf(const u_int8_t *laddr)
+ieee1394_sprintf(const uint8_t *laddr)
 {
 	static char buf[3*8];
 
@@ -680,7 +675,6 @@ ieee1394_ifattach(struct ifnet *ifp, const struct ieee1394_hwaddr *hwaddr)
 	struct ieee1394com *ic = (struct ieee1394com *)ifp;
 
 	ifp->if_type = IFT_IEEE1394;
-	ifp->if_addrlen = sizeof(struct ieee1394_hwaddr);
 	ifp->if_hdrlen = sizeof(struct ieee1394_header);
 	ifp->if_dlt = DLT_EN10MB;	/* XXX */
 	ifp->if_mtu = IEEE1394MTU;
@@ -691,8 +685,7 @@ ieee1394_ifattach(struct ifnet *ifp, const struct ieee1394_hwaddr *hwaddr)
 	if (ifp->if_baudrate == 0)
 		ifp->if_baudrate = IF_Mbps(100);
 
-	if_alloc_sadl(ifp);
-	memcpy(LLADDR(ifp->if_sadl), hwaddr, ifp->if_addrlen);
+	if_set_sadl(ifp, hwaddr, sizeof(struct ieee1394_hwaddr), true);
 
 	baddr = malloc(ifp->if_addrlen, M_DEVBUF, M_WAITOK);
 	memset(baddr->iha_uid, 0xff, IEEE1394_ADDR_LEN);
@@ -722,55 +715,38 @@ ieee1394_ifdetach(struct ifnet *ifp)
 }
 
 int
-ieee1394_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+ieee1394_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int error = 0;
-#if __NetBSD_Version__ < 105080000
-	int fw_init(struct ifnet *);
-	void fw_stop(struct ifnet *, int);
-#endif
 
 	switch (cmd) {
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-#if __NetBSD_Version__ >= 105080000
 			if ((error = (*ifp->if_init)(ifp)) != 0)
-#else
-			if ((error = fw_init(ifp)) != 0)
-#endif
 				break;
 			arp_ifinit(ifp, ifa);
 			break;
 #endif /* INET */
 		default:
-#if __NetBSD_Version__ >= 105080000
 			error = (*ifp->if_init)(ifp);
-#else
-			error = fw_init(ifp);
-#endif
 			break;
 		}
 		break;
 
-	case SIOCGIFADDR:
-		memcpy(((struct sockaddr *)&ifr->ifr_data)->sa_data,
-		    LLADDR(ifp->if_sadl), IEEE1394_ADDR_LEN);
-		    break;
-
 	case SIOCSIFMTU:
 		if (ifr->ifr_mtu > IEEE1394MTU)
 			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
+		else if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET)
+			error = 0;
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ifioctl_common(ifp, cmd, data);
 		break;
 	}
 

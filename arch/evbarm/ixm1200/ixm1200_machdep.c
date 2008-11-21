@@ -1,4 +1,4 @@
-/*	$NetBSD: ixm1200_machdep.c,v 1.32 2006/05/17 04:22:46 mrg Exp $ */
+/*	$NetBSD: ixm1200_machdep.c,v 1.36 2008/11/12 12:35:59 ad Exp $ */
 
 /*
  * Copyright (c) 2002, 2003
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ixm1200_machdep.c,v 1.32 2006/05/17 04:22:46 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ixm1200_machdep.c,v 1.36 2008/11/12 12:35:59 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_pmap_debug.h"
@@ -89,7 +89,7 @@ __KERNEL_RCSID(0, "$NetBSD: ixm1200_machdep.c,v 1.32 2006/05/17 04:22:46 mrg Exp
 
 #include "ksyms.h"
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
@@ -116,8 +116,6 @@ __KERNEL_RCSID(0, "$NetBSD: ixm1200_machdep.c,v 1.32 2006/05/17 04:22:46 mrg Exp
 
 #include <evbarm/ixm1200/ixm1200reg.h>
 #include <evbarm/ixm1200/ixm1200var.h>
-
-#include "opt_ipkdb.h"
 
 /* XXX for consinit related hacks */
 #include <sys/conf.h>
@@ -158,11 +156,7 @@ u_int cpu_reset_address = (u_int) ixp12x0_reset;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE  1
 #define ABT_STACK_SIZE  1
-#ifdef IPKDB
-#define UND_STACK_SIZE  2
-#else
 #define UND_STACK_SIZE  1
-#endif
 
 BootConfig bootconfig;          /* Boot config storage */
 char *boot_args = NULL;
@@ -182,7 +176,6 @@ int max_processes = 64;                 /* Default number */
 #endif  /* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
-pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -247,6 +240,7 @@ cpu_reboot(howto, bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("Halted while still in the ICE age.\n");
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
@@ -276,6 +270,8 @@ cpu_reboot(howto, bootstr)
 
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -364,8 +360,7 @@ initarm(void *arg)
 	u_int kerneldatasize, symbolsize;
 	vaddr_t l1pagetable;
 	vaddr_t freemempos;
-	pv_addr_t kernel_l1pt;
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
         Elf_Shdr *sh;
 #endif
 
@@ -399,7 +394,7 @@ initarm(void *arg)
 	pmap_debug(-1);
 #endif
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
         if (! memcmp(&end, "\177ELF", 4)) {
                 sh = (Elf_Shdr *)((char *)&end + ((Elf_Ehdr *)&end)->e_shoff);
                 loop = ((Elf_Ehdr *)&end)->e_shnum;
@@ -453,8 +448,6 @@ initarm(void *arg)
 	freemempos += (np) * PAGE_SIZE;
 
 	loop1 = 0;
-	kernel_l1pt.pv_pa = 0;
-	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if (((physical_freeend - L1_TABLE_SIZE) & (L1_TABLE_SIZE - 1)) == 0
@@ -718,8 +711,7 @@ initarm(void *arg)
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
-	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 	/* Setup the IRQ system */
 #ifdef VERBOSE_INIT_ARM
@@ -749,14 +741,7 @@ initarm(void *arg)
 	printf("bootstrap done.\n");
 #endif
 
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif  /* NIPKDB */
-
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init(symbolsize, ((int *)&end), ((char *)&end) + symbolsize);
 #endif
 

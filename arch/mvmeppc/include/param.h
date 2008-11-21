@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.5 2005/09/12 23:05:05 miod Exp $	*/
-/*	$NetBSD: param.h,v 1.1 1996/09/30 16:34:28 ws Exp $	*/
+/*	$NetBSD: param.h,v 1.3 2002/03/09 23:35:58 chs Exp $	*/
 
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -36,16 +35,14 @@
 #ifndef	_LOCORE
 #include <machine/cpu.h>
 #endif	/* _LOCORE */
-#endif
-
-#include <powerpc/param.h>
+#endif	/* _KERNEL */
 
 /*
  * Machine dependent constants for PowerPC (32-bit only currently)
  */
 #define	MACHINE		"mvmeppc"
-#define	_MACHINE	mvmeppc
 
-#define	KERNBASE	0x100000
+#define	KERNBASE	0x4000
 
-#define MSGBUFSIZE	(NBPG*2)
+#include <powerpc/param.h>
+

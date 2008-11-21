@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_fscale.c,v 1.8 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_fscale.c,v 1.11 2003/07/15 02:43:10 lukem Exp $	*/
+/*	$NetBSD: fpu_fscale.c,v 1.12 2005/12/11 12:17:52 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Ken Nakata
@@ -38,15 +37,20 @@
  * only if the source operand is *not* an integer.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_fscale.c,v 1.12 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 #include <sys/signal.h>
 #include <sys/systm.h>
 #include <machine/frame.h>
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
 int
-fpu_emul_fscale(struct fpemu *fe, struct instruction *insn, int *typ)
+fpu_emul_fscale(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     struct frame *frame;
     u_int *fpregs;
@@ -103,13 +107,12 @@ fpu_emul_fscale(struct fpemu *fe, struct instruction *insn, int *typ)
 	    insn->is_datasize = 12;
 	} else {
 	    /* invalid or unsupported operand format */
-	    *typ = ILL_ILLOPN;
-	    sig = SIGILL;
+	    sig = SIGFPE;
 	    return sig;
 	}
 
 	/* Get effective address. (modreg=opcode&077) */
-	sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode, typ);
+	sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode);
 	if (sig) {
 #if DEBUG_FPE
 	    printf("fpu_emul_fscale: error in decode_ea\n");
@@ -145,7 +148,7 @@ fpu_emul_fscale(struct fpemu *fe, struct instruction *insn, int *typ)
 	    printf("%c%d@\n", regname, insn->is_ea.ea_regnum & 7);
 	}
 #endif
-	fpu_load_ea(frame, insn, &insn->is_ea, (char *)buf, typ);
+	fpu_load_ea(frame, insn, &insn->is_ea, (char*)buf);
 
 #if DEBUG_FPE
 	printf("fpu_emul_fscale: src = %08x%08x%08x, siz = %d\n",

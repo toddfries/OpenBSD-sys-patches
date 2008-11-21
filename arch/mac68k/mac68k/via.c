@@ -1,5 +1,4 @@
-/*	$OpenBSD: via.c,v 1.31 2007/09/10 20:29:50 miod Exp $	*/
-/*	$NetBSD: via.c,v 1.62 1997/09/10 04:38:48 scottr Exp $	*/
+/*	$NetBSD: via.c,v 1.75 2005/12/11 12:18:03 christos Exp $	*/
 
 /*-
  * Copyright (C) 1993	Allen K. Briggs, Chris P. Caputo,
@@ -36,35 +35,85 @@
  */
 
 /*
- *	This code handles both the VIA, RBV and OSS functionality.
+ *	This code handles VIA, RBV, and OSS functionality.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via.c,v 1.75 2005/12/11 12:18:03 christos Exp $");
+
+#include "opt_mac68k.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
-#include <sys/evcount.h>
-
 #include <machine/cpu.h>
 #include <machine/frame.h>
 #include <machine/intr.h>
 #include <machine/viareg.h>
 
-int	rtclock_intr(void *);
+void	mrg_adbintr(void *);
+void	mrg_pmintr(void *);
+void	rtclock_intr(void *);
+void	profclock(void *);
 
-int	via1_intr(void *);
-int	via2_intr(void *);
-int	rbv_intr(void *);
-int	oss_intr(void *);
-int	via2_nubus_intr(void *);
-int	rbv_nubus_intr(void *);
+void	via1_intr(void *);
+void	via2_intr(void *);
+void	rbv_intr(void *);
+void	oss_intr(void *);
+void	via2_nubus_intr(void *);
+void	rbv_nubus_intr(void *);
 
-static	int slot_ignore(void *);
+static void	via1_noint(void *);
+static void	via2_noint(void *);
+static void	slot_ignore(void *);
+static void	slot_noint(void *);
 
 int	VIA2 = VIA2OFF;		/* default for II, IIx, IIcx, SE/30. */
 
-struct intrhand via1intrs[7];
-via2hand_t via2intrs[7];
+/* VIA1 interrupt handler table */
+void (*via1itab[7])(void *) = {
+	via1_noint,
+	via1_noint,
+	mrg_adbintr,
+	via1_noint,
+	mrg_pmintr,
+	via1_noint,
+	rtclock_intr,
+};
+
+/* Arg array for VIA1 interrupts. */
+void *via1iarg[7] = {
+	(void *)0,
+	(void *)1,
+	(void *)2,
+	(void *)3,
+	(void *)4,
+	(void *)5,
+	(void *)6
+};
+
+/* VIA2 interrupt handler table */
+void (*via2itab[7])(void *) = {
+	via2_noint,
+	via2_nubus_intr,
+	via2_noint,
+	via2_noint,
+	via2_noint,	/* snd_intr */
+	via2_noint,	/* via2t2_intr */
+	via2_noint,
+};
+
+/* Arg array for VIA2 interrupts. */
+void *via2iarg[7] = {
+	(void *)0,
+	(void *)1,
+	(void *)2,
+	(void *)3,
+	(void *)4,
+	(void *)5,
+	(void *)6
+};
 
 /*
  * Nubus slot interrupt routines and parameters for slots 9-15.  Note
@@ -72,15 +121,31 @@ via2hand_t via2intrs[7];
  * as a slot 15 interrupt; this slot is quite fictitious in real-world
  * Macs.  See also GMFH, pp. 165-167, and "Monster, Loch Ness."
  */
-struct intrhand slotintrs[7];
+void (*slotitab[7])(void *) = {
+	slot_noint,
+	slot_noint,
+	slot_noint,
+	slot_noint,
+	slot_noint,
+	slot_noint,
+	slot_noint	/* int_video_intr */
+};
 
-static struct via2hand nubus_intr;
+void *slotptab[7] = {
+	(void *)0,
+	(void *)1,
+	(void *)2,
+	(void *)3,
+	(void *)4,
+	(void *)5,
+	(void *)6
+};
+
+static int	nubus_intr_mask = 0;
 
 void
-via_init()
+via_init(void)
 {
-	unsigned int i;
-
 	/* Initialize VIA1 */
 	/* set all timers to 0 */
 	via_reg(VIA1, vT1L) = 0;
@@ -93,13 +158,7 @@ via_init()
 	/* turn off timer latch */
 	via_reg(VIA1, vACR) &= 0x3f;
 
-	intr_establish(via1_intr, NULL, mac68k_machine.via1_ipl, "via1");
-
-	/* register default VIA1 interrupts */
-	via1_register_irq(VIA1_T1, rtclock_intr, NULL, "clock");
-
-	for (i = 0; i < 7; i++)
-		SLIST_INIT(&via2intrs[i]);
+	intr_establish((int (*)(void *)) via1_intr, NULL, mac68k_machine.via1_ipl);
 
 	if (VIA2 == VIA2OFF) {
 		/* Initialize VIA2 */
@@ -113,12 +172,6 @@ via_init()
 		/* turn off timer latch */
 		via2_reg(vACR) &= 0x3f;
 
-		/* register default VIA2 interrupts */
-		nubus_intr.vh_ipl = 1;
-		nubus_intr.vh_fn = via2_nubus_intr;
-		via2_register_irq(&nubus_intr, NULL);
-		/* 4 snd_intr, 5 via2t2_intr */
-
 		/*
 		 * Turn off SE/30 video interrupts.
 		 */
@@ -130,7 +183,7 @@ via_init()
 		/*
 		 * Set vPCR for SCSI interrupts.
 		 */
-		via2_reg(vPCR)   = 0x66;
+		via2_reg(vPCR) = 0x66;
 		switch(mac68k_machine.machineid) {
 		case MACH_MACPB140:
 		case MACH_MACPB145:
@@ -148,26 +201,28 @@ via_init()
 			break;
 		}
 
-		intr_establish(via2_intr, NULL, 2, "via2");
+		intr_establish((int (*)(void*))via2_intr, NULL,
+				mac68k_machine.via2_ipl);
+		via2itab[1] = via2_nubus_intr;
 	} else if (current_mac_model->class == MACH_CLASSIIfx) { /* OSS */
 		volatile u_char *ossintr;
-		ossintr = (volatile u_char *)Via2Base + 6;
+		ossintr = (volatile u_char *)IOBase + 0x1a006;
 		*ossintr = 0;
-		intr_establish(oss_intr, NULL, 2, "via2");
+		intr_establish((int (*)(void*))oss_intr, NULL,
+	 			mac68k_machine.via2_ipl);
 	} else {	/* RBV */
+#ifdef DISABLE_EXT_CACHE
 		if (current_mac_model->class == MACH_CLASSIIci) {
 			/*
-			 * Disable cache card. (p. 174--GtMFH)
+			 * Disable cache card. (p. 174 -- GMFH)
 			 */
 			via2_reg(rBufB) |= DB2O_CEnable;
 		}
-		intr_establish(rbv_intr, NULL, 2, "via2");
-
-		nubus_intr.vh_ipl = 1;
-		nubus_intr.vh_fn = rbv_nubus_intr;
-		via2_register_irq(&nubus_intr, NULL);
-		/* XXX necessary? */
-		add_nubus_intr(0, IPL_NONE, slot_ignore, (void *)0, "dummy");
+#endif
+		intr_establish((int (*)(void*))rbv_intr, NULL,
+				mac68k_machine.via2_ipl);
+		via2itab[1] = rbv_nubus_intr;
+		add_nubus_intr(0, slot_ignore, NULL);
 	}
 }
 
@@ -184,10 +239,9 @@ via_set_modem(int onoff)
 		via_reg(VIA1, vBufA) &= ~DA1O_vSync;
 }
 
-int
-via1_intr(void *arg)
+void
+via1_intr(void *intr_arg)
 {
-	struct intrhand *ih;
 	u_int8_t intbits, bitnum;
 	u_int mask;
 
@@ -195,7 +249,7 @@ via1_intr(void *arg)
 	intbits &= via_reg(VIA1, vIER);		/* only care about enabled */
 
 	if (intbits == 0)
-		return (0);
+		return;
 
 	/*
 	 * Unflag interrupts here.  If we do it after each interrupt,
@@ -205,139 +259,137 @@ via1_intr(void *arg)
 
 	intbits &= 0x7f;
 	mask = 1;
-	for (bitnum = 0, ih = via1intrs; ; bitnum++, ih++) {
-		if ((intbits & mask) != 0 && ih->ih_fn != NULL)
-			if ((*ih->ih_fn)(ih->ih_arg) != 0)
-				ih->ih_count.ec_count++;
+	bitnum = 0;
+	do {
+		if (intbits & mask) {
+			via1itab[bitnum](via1iarg[bitnum]);
+			/* via_reg(VIA1, vIFR) = mask; */
+		}
 		mask <<= 1;
-		if (intbits < mask)
-			break;
-	}
-
-	return (1);
+		++bitnum;
+	} while (intbits >= mask);
 }
 
-int
-via2_intr(void *arg)
+void
+via2_intr(void *intr_arg)
 {
-	struct via2hand *v2h;
-	via2hand_t *anchor;
 	u_int8_t intbits, bitnum;
 	u_int mask;
-	int handled, rc;
 
 	intbits = via2_reg(vIFR);		/* get interrupts pending */
 	intbits &= via2_reg(vIER);		/* only care about enabled */
 
 	if (intbits == 0)
-		return (0);
+		return;
 
 	via2_reg(vIFR) = intbits;
 
 	intbits &= 0x7f;
 	mask = 1;
-	for (bitnum = 0, anchor = via2intrs; ; bitnum++, anchor++) {
-		if ((intbits & mask) != 0) {
-			handled = 0;
-			SLIST_FOREACH(v2h, anchor, v2h_link) {
-				struct intrhand *ih = &v2h->v2h_ih;
-				rc = (*ih->ih_fn)(ih->ih_arg);
-				if (rc != 0) {
-					ih->ih_count.ec_count++;
-					handled |= rc;
-				}
-			}
-		}
+	bitnum = 0;
+	do {
+		if (intbits & mask)
+			via2itab[bitnum](via2iarg[bitnum]);
 		mask <<= 1;
-		if (intbits < mask)
-			break;
-	}
-
-	return (1);
+		++bitnum;
+	} while (intbits >= mask);
 }
 
-int
-rbv_intr(void *arg)
+void
+rbv_intr(void *intr_arg)
 {
-	struct via2hand *v2h;
-	via2hand_t *anchor;
 	u_int8_t intbits, bitnum;
 	u_int mask;
-	int handled, rc;
 
-	intbits = via2_reg(vIFR + rIFR);
-	intbits &= via2_reg(vIER + rIER);
+	intbits = (via2_reg(vIFR + rIFR) & via2_reg(vIER + rIER));
 
 	if (intbits == 0)
-		return (0);
+		return;
 
 	via2_reg(rIFR) = intbits;
 
 	intbits &= 0x7f;
 	mask = 1;
-	for (bitnum = 0, anchor = via2intrs; ; bitnum++, anchor++) {
-		if ((intbits & mask) != 0) {
-			handled = 0;
-			SLIST_FOREACH(v2h, anchor, v2h_link) {
-				struct intrhand *ih = &v2h->v2h_ih;
-				rc = (*ih->ih_fn)(ih->ih_arg);
-				if (rc != 0) {
-					ih->ih_count.ec_count++;
-					handled |= rc;
-				}
-			}
-		}
+	bitnum = 0;
+	do {
+		if (intbits & mask)
+			via2itab[bitnum](via2iarg[bitnum]);
 		mask <<= 1;
-		if (intbits < mask)
-			break;
-	}
-
-	return (1);
+		++bitnum;
+	} while (intbits >= mask);
 }
 
-int nubus_intr_mask = 0;
-
 void
-add_nubus_intr(int slot, int ipl, int (*func)(void *), void *client_data,
-    const char *name)
+oss_intr(void *intr_arg)
 {
-	struct intrhand *ih;
-	int s;
+	u_int8_t intbits, bitnum;
+	u_int mask;
+
+	intbits = via2_reg(vIFR + rIFR);
+
+	if (intbits == 0)
+		return;
+
+	intbits &= 0x7f;
+	mask = 1;
+	bitnum = 0;
+	do {
+		if (intbits & mask) {
+			(*slotitab[bitnum])(slotptab[bitnum]);
+			via2_reg(rIFR) = mask;
+		}
+		mask <<= 1;
+		++bitnum;
+	} while (intbits >= mask);
+}
+
+static void
+via1_noint(void *bitnum)
+{
+	printf("via1_noint(%d)\n", (int)bitnum);
+}
+
+static void
+via2_noint(void *bitnum)
+{
+	printf("via2_noint(%d)\n", (int)bitnum);
+}
+
+int
+add_nubus_intr(int slot, void (*func)(void *), void *client_data)
+{
+	int	s;
 
 	/*
 	 * Map Nubus slot 0 to "slot" 15; see note on Nubus slot
 	 * interrupt tables.
 	 */
-#ifdef DIAGNOSTIC
-	if (slot != 0 && (slot < 9 || slot > 14))
-		panic("add_nubus_intr: wrong slot %d", slot + 9);
-#endif
 	if (slot == 0)
-		slot = 15 - 9;
-	else
-		slot -= 9;
+		slot = 15;
+	if (slot < 9 || slot > 15)
+		return 0;
 
 	s = splhigh();
 
-	ih = &slotintrs[slot];
-
-#ifdef DIAGNOSTIC
-	if (ih->ih_fn != NULL)
-		panic("add_nubus_intr: attempt to share slot %d", slot + 9);
-#endif
-
-	ih->ih_fn = func;
-	ih->ih_arg = client_data;
-	ih->ih_ipl = ipl;
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl, &evcount_intr);
-
-	nubus_intr_mask |= 1 << slot;
+	if (func == NULL) {
+		slotitab[slot - 9] = slot_noint;
+		nubus_intr_mask &= ~(1 << (slot - 9));
+	} else {
+		slotitab[slot - 9] = func;
+		nubus_intr_mask |= (1 << (slot - 9));
+	}
+	if (client_data == NULL)
+		slotptab[slot - 9] = (void *)(slot - 9);
+	else
+		slotptab[slot - 9] = client_data;
 
 	splx(s);
+
+	return 1;
 }
 
 void
-enable_nubus_intr()
+enable_nubus_intr(void)
 {
 	if ((nubus_intr_mask & 0x3f) == 0)
 		return;
@@ -348,96 +400,47 @@ enable_nubus_intr()
 		via2_reg(rIER) = 0x80 | V2IF_SLOTINT;
 }
 
-int
-oss_intr(void *arg)
-{
-	struct intrhand *ih;
-	u_int8_t intbits, bitnum;
-	u_int mask;
-	int s;
-
-	intbits = via2_reg(vIFR + rIFR);
-
-	if (intbits == 0)
-		return (0);
-
-	intbits &= 0x7f;
-	mask = 1;
-	for (bitnum = 0, ih = slotintrs; ; bitnum++, ih++) {
-		if (intbits & mask) {
-			if (ih->ih_fn != NULL) {
-				s = _splraise(IPLTOPSL(ih->ih_ipl));
-				if ((*ih->ih_fn)(ih->ih_arg) != 0)
-					ih->ih_count.ec_count++;
-				splx(s);
-			}
-			via2_reg(rIFR) = mask;
-		}
-		mask <<= 1;
-		if (intbits < mask)
-			break;
-	}
-
-	return (1);
-}
-
 /*ARGSUSED*/
-int
+void
 via2_nubus_intr(void *bitarg)
 {
-	struct intrhand *ih;
 	u_int8_t i, intbits, mask;
-	int s, rv = 0;
 
 	via2_reg(vIFR) = V2IF_SLOTINT;
 	while ((intbits = (~via2_reg(vBufA)) & nubus_intr_mask)) {
-		for (i = 6, ih = &slotintrs[i], mask = 1 << i; mask != 0;
-		    i--, ih--, mask >>= 1) {
-			if (intbits & mask) {
-				if (ih->ih_fn != NULL) {
-					s = _splraise(IPLTOPSL(ih->ih_ipl));
-					if ((*ih->ih_fn)(ih->ih_arg) != 0) {
-						ih->ih_count.ec_count++;
-						rv = 1;
-					}
-					splx(s);
-				}
-			}
-		}
+		i = 6;
+		mask = (1 << i);
+		do {
+			if (intbits & mask)
+				(*slotitab[i])(slotptab[i]);
+			i--;
+			mask >>= 1;
+		} while (mask);
 		via2_reg(vIFR) = V2IF_SLOTINT;
 	}
-	return (rv);
 }
 
 /*ARGSUSED*/
-int
+void
 rbv_nubus_intr(void *bitarg)
 {
-	struct intrhand *ih;
 	u_int8_t i, intbits, mask;
-	int s, rv = 0;
 
 	via2_reg(rIFR) = 0x80 | V2IF_SLOTINT;
 	while ((intbits = (~via2_reg(rBufA)) & via2_reg(rSlotInt))) {
-		for (i = 6, ih = &slotintrs[i], mask = 1 << i; mask != 0;
-		    i--, ih--, mask >>= 1) {
-			if (intbits & mask) {
-				if (ih->ih_fn != NULL) {
-					s = _splraise(IPLTOPSL(ih->ih_ipl));
-					if ((*ih->ih_fn)(ih->ih_arg) != 0) {
-						ih->ih_count.ec_count++;
-						rv = 1;
-					}
-					splx(s);
-				}
-			}
-		}
+		i = 6;
+		mask = (1 << i);
+		do {
+			if (intbits & mask)
+				(*slotitab[i])(slotptab[i]);
+			i--;
+			mask >>= 1;
+		} while (mask);
 		via2_reg(rIFR) = 0x80 | V2IF_SLOTINT;
 	}
-	return (rv);
 }
 
-static int
+static void
 slot_ignore(void *client_data)
 {
 	int mask = (1 << (int)client_data);
@@ -448,12 +451,21 @@ slot_ignore(void *client_data)
 		via2_reg(vDirA) &= ~mask;
 	} else
 		via2_reg(rBufA) = mask;
+}
 
-	return (1);
+static void
+slot_noint(void *client_data)
+{
+	int slot = (int)client_data + 9;
+
+	printf("slot_noint() slot %x\n", slot);
+
+	/* attempt to clear the interrupt */
+	slot_ignore(client_data);
 }
 
 void
-via_powerdown()
+via_powerdown(void)
 {
 	if (VIA2 == VIA2OFF) {
 		via2_reg(vDirB) |= 0x04;  /* Set write for bit 2 */
@@ -470,51 +482,25 @@ via_powerdown()
 }
 
 void
-via1_register_irq(int irq, int (*irq_func)(void *), void *client_data,
-    const char *name)
+via1_register_irq(int irq, void (*irq_func)(void *), void *client_data)
 {
-	struct intrhand *ih;
-
-#ifdef DIAGNOSTIC
-	if (irq < 0 || irq > 7)
-		panic("via1_register_irq: bad irq %d", irq);
-#endif
-
-	ih = &via1intrs[irq];
-
-	/*
-	 * VIA1 interrupts are special, since we start with temporary handlers,
-	 * and later switch to better routines whenever possible.
-	 * To avoid a loop in evcount lists, only invoke evcount_attach() if
-	 * name is non-NULL, and have the replacements calls in adb_direct.c,
-	 * clock.c and pm_direct.c pass a NULL pointer.
-	 */
-#ifdef DIAGNOSTIC
-	if (ih->ih_fn != NULL && name != NULL)
-		panic("via1_register_irq: improper invocation");
-#endif
-
-	ih->ih_fn = irq_func;
-	ih->ih_arg = client_data;
-	ih->ih_ipl = irq;
-	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl,
-		    &evcount_intr);
+	if (irq_func) {
+ 		via1itab[irq] = irq_func;
+ 		via1iarg[irq] = client_data;
+	} else {
+ 		via1itab[irq] = via1_noint;
+ 		via1iarg[irq] = (void *)0;
+	}
 }
 
-int
-via2_register_irq(struct via2hand *vh, const char *name)
+void
+via2_register_irq(int irq, void (*irq_func)(void *), void *client_data)
 {
-	int irq = vh->vh_ipl;
-
-#ifdef DIAGNOSTIC
-	if (irq < 0 || irq > 7)
-		panic("via2_register_irq: bad irq %d", irq);
-#endif
-
-	if (name != NULL)
-		evcount_attach(&vh->vh_count, name, (void *)&vh->vh_ipl,
-		    &evcount_intr);
-	SLIST_INSERT_HEAD(&via2intrs[irq], vh, v2h_link);
-	return (0);
+	if (irq_func) {
+ 		via2itab[irq] = irq_func;
+		via2iarg[irq] = client_data;
+	} else {
+ 		via2itab[irq] = via2_noint;
+		via2iarg[irq] = (void *)0;
+	}
 }

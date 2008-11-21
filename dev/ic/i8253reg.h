@@ -1,5 +1,4 @@
-/*	$OpenBSD: i8253reg.h,v 1.3 2003/06/02 23:28:02 millert Exp $	*/
-/*	$NetBSD: i8253reg.h,v 1.5 1998/01/19 11:38:00 drochner Exp $	*/
+/*	$NetBSD: i8253reg.h,v 1.9 2005/12/11 12:21:26 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993 The Regents of the University of California.
@@ -41,7 +40,7 @@
  * register.  (Why are hardware interfaces always so braindead?).
  *
  * To write a value into the countdown register, the mode register
- * is first programmed with a command indicating which byte of
+ * is first programmed with a command indicating the which byte of
  * the two byte register is to be modified.  The three possibilities
  * are load msb (TMR_MR_MSB), load lsb (TMR_MR_LSB), or load lsb then
  * msb (TMR_MR_BOTH).
@@ -57,7 +56,7 @@
  * The outputs of the three timers are connected as follows:
  *
  *	 timer 0 -> irq 0
- *	 timer 1 -> dma chan 0 (for dram refresh)
+ *	 timer 1 -> DMA chan 0 (for dram refresh)
  * 	 timer 2 -> speaker (via keyboard controller)
  *
  * Timer 0 is used to call hardclock.
@@ -66,7 +65,7 @@
 
 /*
  * Frequency of all three count-down timers; (TIMER_FREQ/freq) is the
- * appropriate count to generate a frequency of freq hz.
+ * appropriate count to generate a frequency of freq Hz.
  */
 #ifndef TIMER_FREQ
 #define	TIMER_FREQ	1193182

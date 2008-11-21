@@ -1,5 +1,4 @@
-/*	$OpenBSD: subr_prof.c,v 1.17 2007/03/15 10:22:30 art Exp $	*/
-/*	$NetBSD: subr_prof.c,v 1.12 1996/04/22 01:38:50 christos Exp $	*/
+/*	$NetBSD: subr_prof.c,v 1.43 2007/12/20 23:03:10 dsl Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -29,8 +28,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)subr_prof.c	8.3 (Berkeley) 9/23/93
+ *	@(#)subr_prof.c	8.4 (Berkeley) 2/14/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: subr_prof.c,v 1.43 2007/12/20 23:03:10 dsl Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,18 +41,23 @@
 #include <sys/user.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+#include <sys/sysctl.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 
 #ifdef GPROF
 #include <sys/malloc.h>
 #include <sys/gmon.h>
-#include <uvm/uvm_extern.h>
+
+MALLOC_DEFINE(M_GPROF, "gprof", "kernel profiling buffer");
 
 /*
  * Froms is actually a bunch of unsigned shorts indexing tos
  */
-struct gmonparam _gmonparam = { GMON_PROF_OFF };
+struct gmonparam _gmonparam = { .state = GMON_PROF_OFF };
+
+/* Actual start of the kernel text segment. */
+extern char kernel_text[];
 
 extern char etext[];
 
@@ -60,14 +67,14 @@ kmstartup(void)
 {
 	char *cp;
 	struct gmonparam *p = &_gmonparam;
-	int size;
-
 	/*
 	 * Round lowpc and highpc to multiples of the density we're using
 	 * so the rest of the scaling (here and in gprof) stays in ints.
 	 */
-	p->lowpc = ROUNDDOWN(KERNBASE, HISTFRACTION * sizeof(HISTCOUNTER));
-	p->highpc = ROUNDUP((u_long)etext, HISTFRACTION * sizeof(HISTCOUNTER));
+	p->lowpc = rounddown(((u_long)kernel_text),
+		HISTFRACTION * sizeof(HISTCOUNTER));
+	p->highpc = roundup((u_long)etext,
+		HISTFRACTION * sizeof(HISTCOUNTER));
 	p->textsize = p->highpc - p->lowpc;
 	printf("Profiling kernel, textsize=%ld [%lx..%lx]\n",
 	       p->textsize, p->lowpc, p->highpc);
@@ -80,8 +87,8 @@ kmstartup(void)
 	else if (p->tolimit > MAXARCS)
 		p->tolimit = MAXARCS;
 	p->tossize = p->tolimit * sizeof(struct tostruct);
-	size = p->kcountsize + p->fromssize + p->tossize;
-	cp = (char *)uvm_km_zalloc(kernel_map, round_page(size));
+	cp = (char *)malloc(p->kcountsize + p->fromssize + p->tossize,
+	    M_GPROF, M_NOWAIT | M_ZERO);
 	if (cp == 0) {
 		printf("No memory for profiling.\n");
 		return;
@@ -96,42 +103,107 @@ kmstartup(void)
 /*
  * Return kernel profiling information.
  */
-int
-sysctl_doprof(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
-    size_t newlen)
+/*
+ * sysctl helper routine for kern.profiling subtree.  enables/disables
+ * kernel profiling and gives out copies of the profiling data.
+ */
+static int
+sysctl_kern_profiling(SYSCTLFN_ARGS)
 {
 	struct gmonparam *gp = &_gmonparam;
 	int error;
+	struct sysctlnode node;
 
-	/* all sysctl names at this level are terminal */
-	if (namelen != 1)
-		return (ENOTDIR);		/* overloaded */
+	node = *rnode;
 
-	switch (name[0]) {
+	switch (node.sysctl_num) {
 	case GPROF_STATE:
-		error = sysctl_int(oldp, oldlenp, newp, newlen, &gp->state);
-		if (error)
-			return (error);
+		node.sysctl_data = &gp->state;
+		break;
+	case GPROF_COUNT:
+		node.sysctl_data = gp->kcount;
+		node.sysctl_size = gp->kcountsize;
+		break;
+	case GPROF_FROMS:
+		node.sysctl_data = gp->froms;
+		node.sysctl_size = gp->fromssize;
+		break;
+	case GPROF_TOS:
+		node.sysctl_data = gp->tos;
+		node.sysctl_size = gp->tossize;
+		break;
+	case GPROF_GMONPARAM:
+		node.sysctl_data = gp;
+		node.sysctl_size = sizeof(*gp);
+		break;
+	default:
+		return (EOPNOTSUPP);
+	}
+
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return (error);
+
+	if (node.sysctl_num == GPROF_STATE) {
+		mutex_spin_enter(&proc0.p_stmutex);
 		if (gp->state == GMON_PROF_OFF)
 			stopprofclock(&proc0);
 		else
 			startprofclock(&proc0);
-		return (0);
-	case GPROF_COUNT:
-		return (sysctl_struct(oldp, oldlenp, newp, newlen,
-		    gp->kcount, gp->kcountsize));
-	case GPROF_FROMS:
-		return (sysctl_struct(oldp, oldlenp, newp, newlen,
-		    gp->froms, gp->fromssize));
-	case GPROF_TOS:
-		return (sysctl_struct(oldp, oldlenp, newp, newlen,
-		    gp->tos, gp->tossize));
-	case GPROF_GMONPARAM:
-		return (sysctl_rdstruct(oldp, oldlenp, newp, gp, sizeof *gp));
-	default:
-		return (EOPNOTSUPP);
+		mutex_spin_exit(&proc0.p_stmutex);
 	}
-	/* NOTREACHED */
+
+	return (0);
+}
+
+SYSCTL_SETUP(sysctl_kern_gprof_setup, "sysctl kern.profiling subtree setup")
+{
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "kern", NULL,
+		       NULL, 0, NULL, 0,
+		       CTL_KERN, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "profiling",
+		       SYSCTL_DESCR("Profiling information (available)"),
+		       NULL, 0, NULL, 0,
+		       CTL_KERN, KERN_PROF, CTL_EOL);
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_INT, "state",
+		       SYSCTL_DESCR("Profiling state"),
+		       sysctl_kern_profiling, 0, NULL, 0,
+		       CTL_KERN, KERN_PROF, GPROF_STATE, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_STRUCT, "count",
+		       SYSCTL_DESCR("Array of statistical program counters"),
+		       sysctl_kern_profiling, 0, NULL, 0,
+		       CTL_KERN, KERN_PROF, GPROF_COUNT, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_STRUCT, "froms",
+		       SYSCTL_DESCR("Array indexed by program counter of "
+				    "call-from points"),
+		       sysctl_kern_profiling, 0, NULL, 0,
+		       CTL_KERN, KERN_PROF, GPROF_FROMS, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_STRUCT, "tos",
+		       SYSCTL_DESCR("Array of structures describing "
+				    "destination of calls and their counts"),
+		       sysctl_kern_profiling, 0, NULL, 0,
+		       CTL_KERN, KERN_PROF, GPROF_TOS, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_STRUCT, "gmonparam",
+		       SYSCTL_DESCR("Structure giving the sizes of the above "
+				    "arrays"),
+		       sysctl_kern_profiling, 0, NULL, 0,
+		       CTL_KERN, KERN_PROF, GPROF_GMONPARAM, CTL_EOL);
 }
 #endif /* GPROF */
 
@@ -143,33 +215,35 @@ sysctl_doprof(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
  */
 /* ARGSUSED */
 int
-sys_profil(struct proc *p, void *v, register_t *retval)
+sys_profil(struct lwp *l, const struct sys_profil_args *uap, register_t *retval)
 {
-	struct sys_profil_args /* {
-		syscallarg(caddr_t) samples;
-		syscallarg(size_t) size;
-		syscallarg(u_long) offset;
+	/* {
+		syscallarg(char *) samples;
+		syscallarg(u_int) size;
+		syscallarg(u_int) offset;
 		syscallarg(u_int) scale;
-	} */ *uap = v;
+	} */
+	struct proc *p = l->l_proc;
 	struct uprof *upp;
-	int s;
 
 	if (SCARG(uap, scale) > (1 << 16))
 		return (EINVAL);
 	if (SCARG(uap, scale) == 0) {
+		mutex_spin_enter(&p->p_stmutex);
 		stopprofclock(p);
+		mutex_spin_exit(&p->p_stmutex);
 		return (0);
 	}
 	upp = &p->p_stats->p_prof;
 
 	/* Block profile interrupts while changing state. */
-	s = splstatclock();
+	mutex_spin_enter(&p->p_stmutex);
 	upp->pr_off = SCARG(uap, offset);
 	upp->pr_scale = SCARG(uap, scale);
-	upp->pr_base = (caddr_t)SCARG(uap, samples);
+	upp->pr_base = SCARG(uap, samples);
 	upp->pr_size = SCARG(uap, size);
 	startprofclock(p);
-	splx(s);
+	mutex_spin_exit(&p->p_stmutex);
 
 	return (0);
 }
@@ -186,52 +260,83 @@ sys_profil(struct proc *p, void *v, register_t *retval)
 /*
  * Collect user-level profiling statistics; called on a profiling tick,
  * when a process is running in user-mode.  This routine may be called
- * from an interrupt context. Schedule an AST that will vector us to
- * trap() with a context in which copyin and copyout will work.
- * Trap will then call addupc_task().
+ * from an interrupt context.  We try to update the user profiling buffers
+ * cheaply with fuswintr() and suswintr().  If that fails, we revert to
+ * an AST that will vector us to trap() with a context in which copyin
+ * and copyout will work.  Trap will then call addupc_task().
+ *
+ * Note that we may (rarely) not get around to the AST soon enough, and
+ * lose profile ticks when the next tick overwrites this one, but in this
+ * case the system is overloaded and the profile is probably already
+ * inaccurate.
  */
 void
-addupc_intr(struct proc *p, u_long pc)
+addupc_intr(struct lwp *l, u_long pc)
 {
 	struct uprof *prof;
+	struct proc *p;
+	void *addr;
+	u_int i;
+	int v;
+
+	p = l->l_proc;
+
+	KASSERT(mutex_owned(&p->p_stmutex));
 
 	prof = &p->p_stats->p_prof;
-	if (pc < prof->pr_off || PC_TO_INDEX(pc, prof) >= prof->pr_size)
+	if (pc < prof->pr_off ||
+	    (i = PC_TO_INDEX(pc, prof)) >= prof->pr_size)
 		return;			/* out of range; ignore */
 
-	prof->pr_addr = pc;
-	prof->pr_ticks++;
-	atomic_setbits_int(&p->p_flag, P_OWEUPC);
-	need_proftick(p);
+	addr = prof->pr_base + i;
+	mutex_spin_exit(&p->p_stmutex);
+	if ((v = fuswintr(addr)) == -1 || suswintr(addr, v + 1) == -1) {
+		/* XXXSMP */
+		prof->pr_addr = pc;
+		prof->pr_ticks++;
+		cpu_need_proftick(l);
+	}
+	mutex_spin_enter(&p->p_stmutex);
 }
-
 
 /*
  * Much like before, but we can afford to take faults here.  If the
  * update fails, we simply turn off profiling.
  */
 void
-addupc_task(struct proc *p, u_long pc, u_int nticks)
+addupc_task(struct lwp *l, u_long pc, u_int ticks)
 {
 	struct uprof *prof;
-	caddr_t addr;
+	struct proc *p;
+	void *addr;
+	int error;
 	u_int i;
 	u_short v;
 
-	/* Testing P_PROFIL may be unnecessary, but is certainly safe. */
-	if ((p->p_flag & P_PROFIL) == 0 || nticks == 0)
+	p = l->l_proc;
+
+	if (ticks == 0)
 		return;
 
+	mutex_spin_enter(&p->p_stmutex);
 	prof = &p->p_stats->p_prof;
-	if (pc < prof->pr_off ||
-	    (i = PC_TO_INDEX(pc, prof)) >= prof->pr_size)
+
+	/* Testing P_PROFIL may be unnecessary, but is certainly safe. */
+	if ((p->p_stflag & PST_PROFIL) == 0 || pc < prof->pr_off ||
+	    (i = PC_TO_INDEX(pc, prof)) >= prof->pr_size) {
+		mutex_spin_exit(&p->p_stmutex);
 		return;
+	}
 
 	addr = prof->pr_base + i;
-	if (copyin(addr, (caddr_t)&v, sizeof(v)) == 0) {
-		v += nticks;
-		if (copyout((caddr_t)&v, addr, sizeof(v)) == 0)
-			return;
+	mutex_spin_exit(&p->p_stmutex);
+	if ((error = copyin(addr, (void *)&v, sizeof(v))) == 0) {
+		v += ticks;
+		error = copyout((void *)&v, addr, sizeof(v));
 	}
-	stopprofclock(p);
+	if (error != 0) {
+		mutex_spin_enter(&p->p_stmutex);
+		stopprofclock(p);
+		mutex_spin_exit(&p->p_stmutex);
+	}
 }

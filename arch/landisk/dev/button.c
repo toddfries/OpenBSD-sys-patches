@@ -1,4 +1,4 @@
-/*	$NetBSD: button.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
+/*	$NetBSD: button.c,v 1.5 2008/03/01 14:16:49 rmind Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -36,13 +36,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: button.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: button.c,v 1.5 2008/03/01 14:16:49 rmind Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-#include <sys/lock.h>
+#include <sys/simplelock.h>
 #include <sys/queue.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
@@ -101,8 +101,6 @@ static int
 btn_queue_event(button_event_t *bev)
 {
 
-	LOCK_ASSERT(simple_lock_held(&btn_event_queue_slock));
-
 	if (btn_event_queue_count == BTN_MAX_EVENTS)
 		return (0);
 
@@ -116,8 +114,6 @@ btn_queue_event(button_event_t *bev)
 static int
 btn_get_event(button_event_t *bev)
 {
-
-	LOCK_ASSERT(simple_lock_held(&btn_event_queue_slock));
 
 	if (btn_event_queue_count == 0)
 		return (0);
@@ -142,7 +138,13 @@ btn_event_queue_flush(void)
 int
 btnopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	static bool btn_event_queue_selinfo_init;	/* XXX */
 	int error;
+
+	if (!btn_event_queue_selinfo_init) {
+		selinit(&btn_event_queue_selinfo);
+		btn_event_queue_selinfo_init = true;
+	}
 
 	if (minor(dev) != 0) {
 		return (ENODEV);
@@ -184,7 +186,7 @@ btnclose(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 int
-btnioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+btnioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	int error = 0;
 
@@ -385,7 +387,7 @@ btn_event_send(struct btn_event *bev, int event)
 			} else {
 				simple_unlock(&btn_event_queue_slock);
 			}
-			selnotify(&btn_event_queue_selinfo, 0);
+			selnotify(&btn_event_queue_selinfo, 0, 0);
 		}
 		return;
 	}

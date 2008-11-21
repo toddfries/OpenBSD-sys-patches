@@ -1,5 +1,4 @@
-/*	$OpenBSD: netio.c,v 1.4 2002/06/11 09:36:23 hugh Exp $	*/
-/*	$NetBSD: netio.c,v 1.6 2000/05/26 20:16:46 ragge Exp $	*/
+/*	$NetBSD: netio.c,v 1.10 2008/04/28 20:23:39 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -92,12 +84,14 @@
 #include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
 
-#include "lib/libsa/stand.h"
-#include "lib/libsa/net.h"
-#include "lib/libsa/netif.h"
-#include "lib/libsa/bootparam.h"
-#include "lib/libsa/nfs.h"
-#include "lib/libsa/bootp.h"
+#include <lib/libsa/stand.h>
+#include <lib/libsa/net.h>
+#include <lib/libsa/netif.h>
+#include <lib/libsa/bootparam.h>
+#include <lib/libsa/nfs.h>
+#include <lib/libsa/bootp.h>
+
+#include <lib/libkern/libkern.h>
 
 #include "vaxstand.h"
 
@@ -183,11 +177,13 @@ net_devinit(struct open_file *f, struct netif_driver *drv, u_char *eaddr) {
 ssize_t
 netif_put(struct iodesc *desc, void *pkt, size_t len)
 {
-	return (*desc->io_netif->nif_driver->netif_put)(desc, pkt, len);
+	return (*((struct netif*)desc->io_netif)->nif_driver->netif_put)
+		(desc, pkt, len);
 }
 
 ssize_t
 netif_get(struct iodesc *desc, void *pkt, size_t len, time_t timo)
 {
-	return (*desc->io_netif->nif_driver->netif_get)(desc, pkt, len, timo);
+	return (*((struct netif*)desc->io_netif)->nif_driver->netif_get)
+		(desc, pkt, len, timo);
 }

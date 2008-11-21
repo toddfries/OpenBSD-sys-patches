@@ -1,5 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: devopen.c,v 1.10 2002/05/24 21:40:59 ragge Exp $ */
+/*	$NetBSD: devopen.c,v 1.15 2008/10/16 13:39:25 hans Exp $ */
 /*
  * Copyright (c) 1997 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -14,7 +13,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed at Ludd, University of 
+ *      This product includes software developed at Ludd, University of
  *      Lule}, Sweden and its contributors.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
@@ -31,15 +30,16 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "lib/libsa/stand.h"
+#include <lib/libsa/stand.h>
+#include <lib/libkern/libkern.h>
 
-#include "machine/rpb.h"
-#include "machine/sid.h"
-#include "machine/pte.h"
+#include <machine/rpb.h>
+#include <machine/sid.h>
+#include <machine/pte.h>
 #define	VAX780 1
-#include "machine/ka750.h"
+#include <machine/ka750.h>
 
-#include "arch/vax/bi/bireg.h"
+#include <dev/bi/bireg.h>
 
 #include "vaxstand.h"
 
@@ -62,7 +62,7 @@ devopen(f, fname, file)
 
 	/*
 	 * Adaptor and controller are normally zero (or uninteresting),
-	 * but we need to do some conversion here anyway (if it's a 
+	 * but we need to do some conversion here anyway (if it's a
 	 * manual boot, but that's checked by the device driver).
 	 * Set them to -1 to tell if it's a set number or default.
 	 */
@@ -78,7 +78,7 @@ devopen(f, fname, file)
 			dp = devsw + i;
 
 	x = 0;
-	if ((s = index((char *)fname, '('))) {
+	if ((s = strchr((char *)fname, '('))) {
 		*s++ = 0;
 
 		for (i = 0, dp = devsw; i < ndevs; i++, dp++)
@@ -94,7 +94,7 @@ devopen(f, fname, file)
 			return -1;
 		}
 		dev = cnvtab[i];
-		if ((c = index(s, ')')) == 0)
+		if ((c = strchr(s, ')')) == 0)
 			goto usage;
 
 		*c++ = 0;
@@ -184,9 +184,11 @@ devopen(f, fname, file)
 		csrbase = 0x20000000;
 		/* Always map in the lowest 4M on qbus-based machines */
 		mapregs = (void *)0x20088000;
-		if (bootrpb.adpphy == 0x20087800)
+		if (bootrpb.adpphy == 0x20087800) {
+			nexaddr = bootrpb.adpphy;
 			for (i = 0; i < 8192; i++)
 				mapregs[i] = PG_V | i;
+		}
 		break;
 	}
 

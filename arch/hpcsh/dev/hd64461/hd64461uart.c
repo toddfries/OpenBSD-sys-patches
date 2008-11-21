@@ -1,4 +1,4 @@
-/*	$NetBSD: hd64461uart.c,v 1.19 2006/07/13 22:56:01 gdamore Exp $	*/
+/*	$NetBSD: hd64461uart.c,v 1.22 2008/04/28 20:23:22 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hd64461uart.c,v 1.19 2006/07/13 22:56:01 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hd64461uart.c,v 1.22 2008/04/28 20:23:22 martin Exp $");
 
 #include "opt_kgdb.h"
 
@@ -81,10 +74,10 @@ struct hd64461uart_softc {
 void hd64461uartcnprobe(struct consdev *);
 void hd64461uartcninit(struct consdev *);
 
-STATIC int hd64461uart_match(struct device *, struct cfdata *, void *);
-STATIC void hd64461uart_attach(struct device *, struct device *, void *);
+STATIC int hd64461uart_match(device_t, cfdata_t , void *);
+STATIC void hd64461uart_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(hd64461uart, sizeof(struct hd64461uart_softc),
+CFATTACH_DECL_NEW(hd64461uart, sizeof(struct hd64461uart_softc),
     hd64461uart_match, hd64461uart_attach, NULL, NULL);
 
 STATIC void hd64461uart_init(void);
@@ -138,7 +131,7 @@ hd64461uart_kgdb_init(void)
 
 	if (com_kgdb_attach(hd64461uart_chip.io_tag, 0x0, kgdb_rate,
 	    COM_FREQ, COM_TYPE_NORMAL, CONMODE) != 0) {
-		printf("%s: KGDB console open failed.\n", __FUNCTION__);
+		printf("%s: KGDB console open failed.\n", __func__);
 		return (1);
 	}
 
@@ -147,7 +140,7 @@ hd64461uart_kgdb_init(void)
 #endif /* KGDB */
 
 STATIC int
-hd64461uart_match(struct device *parent, struct cfdata *cf, void *aux)
+hd64461uart_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct hd64461_attach_args *ha = aux;
 
@@ -155,14 +148,15 @@ hd64461uart_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 STATIC void
-hd64461uart_attach(struct device *parent, struct device *self, void *aux)
+hd64461uart_attach(device_t parent, device_t self, void *aux)
 {
 	struct hd64461_attach_args *ha = aux;
-	struct hd64461uart_softc *sc = (struct hd64461uart_softc *)self;
+	struct hd64461uart_softc *sc = device_private(self);
 	struct com_softc *csc = &sc->sc_com;
 	uint16_t r16;
 	bus_space_handle_t ioh;
 
+	csc->sc_dev = self;
 	sc->sc_chip = &hd64461uart_chip;
 
 	sc->sc_module_id = ha->ha_module_id;
@@ -183,7 +177,7 @@ hd64461uart_attach(struct device *parent, struct device *self, void *aux)
 
 	/* sanity check */
 	if (!com_probe_subr(&csc->sc_regs)) {
-		printf(": device problem. don't attach.\n");
+		aprint_error(": device problem. don't attach.\n");
 
 		/* stop clock */
 		r16 |= HD64461_SYSSTBCR_SURTSD;

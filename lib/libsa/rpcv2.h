@@ -1,5 +1,4 @@
-/*	$OpenBSD: rpcv2.h,v 1.5 2003/06/02 23:28:09 millert Exp $	*/
-/*	$NetBSD: rpcv2.h,v 1.1 1996/02/26 23:05:32 gwr Exp $	*/
+/*	$NetBSD: rpcv2.h,v 1.3 2005/12/11 12:24:46 christos Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993

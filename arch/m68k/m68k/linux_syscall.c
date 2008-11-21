@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_syscall.c,v 1.14 2006/03/07 07:21:50 thorpej Exp $	*/
+/*	$NetBSD: linux_syscall.c,v 1.19 2008/10/21 12:16:59 ad Exp $	*/
 
 /*-
  * Portions Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -110,7 +110,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_syscall.c,v 1.14 2006/03/07 07:21:50 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_syscall.c,v 1.19 2008/10/21 12:16:59 ad Exp $");
 
 #include "opt_execfmt.h"
 
@@ -120,6 +120,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_syscall.c,v 1.14 2006/03/07 07:21:50 thorpej E
 #include <sys/acct.h>
 #include <sys/kernel.h>
 #include <sys/syscall.h>
+#include <sys/syscallvar.h>
 #include <sys/syslog.h>
 #include <sys/user.h>
 
@@ -147,7 +148,7 @@ static void
 linux_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 {
 	struct proc *p = l->l_proc;
-	caddr_t params;
+	char *params;
 	const struct sysent *callp;
 	int error, nsys;
 	size_t argsize;
@@ -155,7 +156,7 @@ linux_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
-	params = (caddr_t)frame->f_regs[SP] + sizeof(int);
+	params = (char *)frame->f_regs[SP] + sizeof(int);
 
 	if (code < 0 || code >= nsys)
 		callp += p->p_emul->e_nosys;		/* illegal */
@@ -188,7 +189,7 @@ linux_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 
 	rval[0] = 0;
 	rval[1] = frame->f_regs[D1];
-	error = (*callp->sy_call)(l, args, rval);
+	error = sy_call(callp, l, args, rval);
 
 	switch (error) {
 	case 0:
@@ -224,7 +225,7 @@ static void
 linux_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 {
 	struct proc *p = l->l_proc;
-	caddr_t params;
+	char *params;
 	const struct sysent *callp;
 	int error, nsys;
 	size_t argsize;
@@ -232,7 +233,7 @@ linux_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
-	params = (caddr_t)frame->f_regs[SP] + sizeof(int);
+	params = (char *)frame->f_regs[SP] + sizeof(int);
 
 	if (code < 0 || code >= nsys)
 		callp += p->p_emul->e_nosys;		/* illegal */
@@ -263,12 +264,12 @@ linux_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 		break;
 	}
 
-	if ((error = trace_enter(l, code, code, NULL, args)) != 0)
+	if ((error = trace_enter(code, args, callp->sy_narg)) != 0)
 		goto out;
 
 	rval[0] = 0;
 	rval[1] = frame->f_regs[D1];
-	error = (*callp->sy_call)(l, args, rval);
+	error = sy_call(callp, l, args, rval);
 out:
 	switch (error) {
 	case 0:
@@ -299,5 +300,5 @@ out:
 		break;
 	}
 
-	trace_exit(l, code, args, rval, error);
+	trace_exit(code, rval, error);
 }

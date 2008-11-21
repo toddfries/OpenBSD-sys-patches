@@ -1,4 +1,3 @@
-/*	$OpenBSD: rgephyreg.h,v 1.3 2007/10/10 12:14:26 jsg Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -30,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: rgephyreg.h,v 1.1 2003/09/11 03:53:46 wpaul Exp $
+ * $FreeBSD: /repoman/r/ncvs/src/sys/dev/mii/rgephyreg.h,v 1.1 2003/09/11 03:53:46 wpaul Exp $
  */
 
 #ifndef _DEV_MII_RGEPHYREG_H_
@@ -138,15 +137,17 @@
 #define RGEPHY_EXTSTS_T_FD_CAP	0x2000	/* 1000base-T FD capable */
 #define RGEPHY_EXTSTS_T_HD_CAP	0x1000	/* 1000base-T HD capable */
 
-/* RTL8211B */
-#define RGEPHY_SR		0x11	/* PHY Specific Status */
-#define RGEPHY_SR_CROSSOVER		(1 <<  6)
-#define RGEPHY_SR_LINK			(1 << 10)
-#define RGEPHY_SR_FDX			(1 << 13)
-#define RGEPHY_SR_SPEED_MASK		(3 << 14)
-#define RGEPHY_SR_SPEED_1000MBPS	(2 << 14)
-#define RGEPHY_SR_SPEED_100MBPS		(1 << 14)
-#define RGEPHY_SR_SPEED_10MBPS		(0 << 14)
-#define RGEPHY_SR_SPEED(X)		((X) & RGEPHY_SR_SPEED_MASK)
+/* RTL8211B(L) */
+#define RGEPHY_MII_SSR		0x11	/* PHY Specific status register */
+#define	RGEPHY_SSR_S1000	0x8000	/* 1000Mbps */
+#define	RGEPHY_SSR_S100		0x4000	/* 100Mbps */
+#define	RGEPHY_SSR_S10		0x0000	/* 10Mbps */
+#define	RGEPHY_SSR_SPD_MASK	0xc000
+#define	RGEPHY_SSR_FDX		0x2000	/* full duplex */
+#define	RGEPHY_SSR_PAGE_RECEIVED	0x1000	/* new page received */
+#define	RGEPHY_SSR_SPD_DPLX_RESOLVED	0x0800	/* speed/duplex resolved */
+#define	RGEPHY_SSR_LINK		0x0400	/* link up */
+#define	RGEPHY_SSR_MDI_XOVER	0x0040	/* MDI crossover */
+#define	RGEPHY_SSR_JABBER	0x0001	/* Jabber */
 
-#endif /* _DEV_RGEPHY_MIIREG_H_ */
+#endif /* _DEV_MII_RGEPHYREG_H_ */

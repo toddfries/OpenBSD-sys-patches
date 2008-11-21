@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ether.h,v 1.43 2006/11/24 01:04:30 rpaulo Exp $	*/
+/*	$NetBSD: if_ether.h,v 1.54 2008/11/07 00:20:13 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -56,27 +56,29 @@
  * Some Ethernet extensions.
  */
 #define	ETHER_VLAN_ENCAP_LEN 4	/* length of 802.1Q VLAN encapsulation */
+#define	ETHER_PPPOE_ENCAP_LEN 8	/* length of PPPoE encapsulation */
 
 /*
  * Ethernet address - 6 octets
  * this is only used by the ethers(3) functions.
  */
 struct ether_addr {
-	u_int8_t ether_addr_octet[ETHER_ADDR_LEN];
-} __attribute__((__packed__));
+	uint8_t ether_addr_octet[ETHER_ADDR_LEN];
+} __packed;
 
 /*
  * Structure of a 10Mb/s Ethernet header.
  */
-struct	ether_header {
-	u_int8_t  ether_dhost[ETHER_ADDR_LEN];
-	u_int8_t  ether_shost[ETHER_ADDR_LEN];
-	u_int16_t ether_type;
-} __attribute__((__packed__));
+struct ether_header {
+	uint8_t  ether_dhost[ETHER_ADDR_LEN];
+	uint8_t  ether_shost[ETHER_ADDR_LEN];
+	uint16_t ether_type;
+} __packed;
 
 #include <net/ethertypes.h>
 
 #define	ETHER_IS_MULTICAST(addr) (*(addr) & 0x01) /* is address mcast/bcast? */
+#define	ETHER_IS_LOCAL(addr) (*(addr) & 0x02) /* is address local? */
 
 #define	ETHERMTU_JUMBO	(ETHER_MAX_LEN_JUMBO - ETHER_HDR_LEN - ETHER_CRC_LEN)
 #define	ETHERMTU	(ETHER_MAX_LEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
@@ -89,7 +91,8 @@ struct	ether_header {
 #define	ETHER_MAX_FRAME(ifp, etype, hasfcs)				\
 	((ifp)->if_mtu + ETHER_HDR_LEN +				\
 	 ((hasfcs) ? ETHER_CRC_LEN : 0) +				\
-	 (((etype) == ETHERTYPE_VLAN) ? ETHER_VLAN_ENCAP_LEN : 0))
+	 (((etype) == ETHERTYPE_VLAN) ? ETHER_VLAN_ENCAP_LEN : 0) +	\
+	 (((etype) == ETHERTYPE_PPPOE) ? ETHER_PPPOE_ENCAP_LEN : 0))
 
 /*
  * Ethernet CRC32 polynomials (big- and little-endian verions).
@@ -112,16 +115,16 @@ struct	ether_header {
  * and the low-order 23 bits are taken from the low end of the IP address.
  */
 #define ETHER_MAP_IP_MULTICAST(ipaddr, enaddr)				\
-	/* struct in_addr *ipaddr; */					\
-	/* u_int8_t enaddr[ETHER_ADDR_LEN]; */				\
-{									\
+	/* const struct in_addr *ipaddr; */				\
+	/* uint8_t enaddr[ETHER_ADDR_LEN]; */				\
+do {									\
 	(enaddr)[0] = 0x01;						\
 	(enaddr)[1] = 0x00;						\
 	(enaddr)[2] = 0x5e;						\
-	(enaddr)[3] = ((u_int8_t *)ipaddr)[1] & 0x7f;			\
-	(enaddr)[4] = ((u_int8_t *)ipaddr)[2];				\
-	(enaddr)[5] = ((u_int8_t *)ipaddr)[3];				\
-}
+	(enaddr)[3] = ((const uint8_t *)ipaddr)[1] & 0x7f;		\
+	(enaddr)[4] = ((const uint8_t *)ipaddr)[2];			\
+	(enaddr)[5] = ((const uint8_t *)ipaddr)[3];			\
+} while (/*CONSTCOND*/0)
 /*
  * Macro to map an IP6 multicast address to an Ethernet multicast address.
  * The high-order 16 bits of the Ethernet address are statically assigned,
@@ -129,23 +132,29 @@ struct	ether_header {
  */
 #define ETHER_MAP_IPV6_MULTICAST(ip6addr, enaddr)			\
 	/* struct in6_addr *ip6addr; */					\
-	/* u_int8_t enaddr[ETHER_ADDR_LEN]; */				\
+	/* uint8_t enaddr[ETHER_ADDR_LEN]; */				\
 {                                                                       \
 	(enaddr)[0] = 0x33;						\
 	(enaddr)[1] = 0x33;						\
-	(enaddr)[2] = ((u_int8_t *)ip6addr)[12];			\
-	(enaddr)[3] = ((u_int8_t *)ip6addr)[13];			\
-	(enaddr)[4] = ((u_int8_t *)ip6addr)[14];			\
-	(enaddr)[5] = ((u_int8_t *)ip6addr)[15];			\
+	(enaddr)[2] = ((const uint8_t *)ip6addr)[12];			\
+	(enaddr)[3] = ((const uint8_t *)ip6addr)[13];			\
+	(enaddr)[4] = ((const uint8_t *)ip6addr)[14];			\
+	(enaddr)[5] = ((const uint8_t *)ip6addr)[15];			\
 }
 #endif
+
+struct mii_data;
+
+struct ethercom;
+
+typedef int (*ether_cb_t)(struct ethercom *);
 
 /*
  * Structure shared between the ethernet driver modules and
  * the multicast list code.  For example, each ec_softc or il_softc
  * begins with this structure.
  */
-struct	ethercom {
+struct ethercom {
 	struct	ifnet ec_if;			/* network-visible interface */
 	LIST_HEAD(, ether_multi) ec_multiaddrs;	/* list of ether multicast
 						   addrs */
@@ -157,6 +166,13 @@ struct	ethercom {
 						   capabilities to enable */
 
 	int	ec_nvlans;			/* # VLANs on this interface */
+	/* The device handle for the MII bus child device. */
+	struct mii_data				*ec_mii;
+	/* Called after a change to ec_if.if_flags.  Returns
+	 * ENETRESET if the device should be reinitialized with
+	 * ec_if.if_init, 0 on success, not 0 on failure.
+	 */
+	ether_cb_t				ec_ifflags_cb;
 #ifdef MBUFTRACE
 	struct	mowner ec_rx_mowner;		/* mbufs received */
 	struct	mowner ec_tx_mowner;		/* mbufs transmitted */
@@ -173,11 +189,11 @@ extern const uint8_t ethermulticastaddr_slowprotocols[ETHER_ADDR_LEN];
 extern const uint8_t ether_ipmulticast_min[ETHER_ADDR_LEN];
 extern const uint8_t ether_ipmulticast_max[ETHER_ADDR_LEN];
 
-int	ether_ioctl(struct ifnet *, u_long, caddr_t);
-int	ether_addmulti (struct ifreq *, struct ethercom *);
-int	ether_delmulti (struct ifreq *, struct ethercom *);
-int	ether_changeaddr (struct ifreq *, struct ethercom *);
-int	ether_multiaddr(struct sockaddr *, u_int8_t[], u_int8_t[]);
+void	ether_set_ifflags_cb(struct ethercom *, ether_cb_t);
+int	ether_ioctl(struct ifnet *, u_long, void *);
+int	ether_addmulti(const struct sockaddr *, struct ethercom *);
+int	ether_delmulti(const struct sockaddr *, struct ethercom *);
+int	ether_multiaddr(const struct sockaddr *, uint8_t[], uint8_t[]);
 #endif /* _KERNEL */
 
 /*
@@ -187,8 +203,8 @@ int	ether_multiaddr(struct sockaddr *, u_int8_t[], u_int8_t[]);
  * rooted in the interface's ethercom structure.
  */
 struct ether_multi {
-	u_int8_t enm_addrlo[ETHER_ADDR_LEN]; /* low  or only address of range */
-	u_int8_t enm_addrhi[ETHER_ADDR_LEN]; /* high or only address of range */
+	uint8_t enm_addrlo[ETHER_ADDR_LEN]; /* low  or only address of range */
+	uint8_t enm_addrhi[ETHER_ADDR_LEN]; /* high or only address of range */
 	u_int	 enm_refcount;		/* no. claims to this addr/range */
 	LIST_ENTRY(ether_multi) enm_list;
 };
@@ -207,8 +223,8 @@ struct ether_multistep {
  * record is found, "enm" returns NULL.
  */
 #define ETHER_LOOKUP_MULTI(addrlo, addrhi, ec, enm)			\
-	/* u_int8_t addrlo[ETHER_ADDR_LEN]; */				\
-	/* u_int8_t addrhi[ETHER_ADDR_LEN]; */				\
+	/* uint8_t addrlo[ETHER_ADDR_LEN]; */				\
+	/* uint8_t addrhi[ETHER_ADDR_LEN]; */				\
 	/* struct ethercom *ec; */					\
 	/* struct ether_multi *enm; */					\
 {									\
@@ -250,24 +266,31 @@ struct ether_multistep {
  */
 
 /* add VLAN tag to input/received packet */
-#define	VLAN_INPUT_TAG(ifp, m, vlanid, _errcase)	\
-	do {								\
-                struct m_tag *mtag =					\
-                    m_tag_get(PACKET_TAG_VLAN, sizeof(u_int), M_NOWAIT);\
-                if (mtag == NULL) {					\
-			ifp->if_ierrors++;				\
-                        printf("%s: unable to allocate VLAN tag\n",	\
-                            ifp->if_xname);				\
-                        m_freem(m);					\
-                        _errcase;					\
-                }							\
-                *(u_int *)(mtag + 1) = vlanid;				\
-                m_tag_prepend(m, mtag);					\
-	} while(0)
+static inline int vlan_input_tag(struct ifnet *, struct mbuf *, u_int);
+static inline int
+vlan_input_tag(struct ifnet *ifp, struct mbuf *m, u_int vlanid)
+{
+	struct m_tag *mtag;
+	mtag = m_tag_get(PACKET_TAG_VLAN, sizeof(u_int), M_NOWAIT);
+	if (mtag == NULL) {
+		ifp->if_ierrors++;
+		printf("%s: unable to allocate VLAN tag\n", ifp->if_xname);
+		m_freem(m);
+		return 1;
+	}
+	*(u_int *)(mtag + 1) = vlanid;
+	m_tag_prepend(m, mtag);
+	return 0;
+}
+
+#define VLAN_INPUT_TAG(ifp, m, vlanid, _errcase)		\
+    if (vlan_input_tag(ifp, m, vlanid) != 0) {	 		\
+	_errcase;						\
+    }
 
 /* extract VLAN tag from output/trasmit packet */
 #define VLAN_OUTPUT_TAG(ec, m0)			\
-	VLAN_ATTACHED(ec) ? m_tag_find((m0), PACKET_TAG_VLAN, NULL) : NULL
+	(VLAN_ATTACHED(ec) ? m_tag_find((m0), PACKET_TAG_VLAN, NULL) : NULL)
 
 /* extract VLAN ID value from a VLAN tag */
 #define VLAN_TAG_VALUE(mtag)	\
@@ -276,14 +299,16 @@ struct ether_multistep {
 /* test if any VLAN is configured for this interface */
 #define VLAN_ATTACHED(ec)	((ec)->ec_nvlans > 0)
 
-void	ether_ifattach(struct ifnet *, const u_int8_t *);
+void	ether_ifattach(struct ifnet *, const uint8_t *);
 void	ether_ifdetach(struct ifnet *);
+int	ether_mediachange(struct ifnet *);
+void	ether_mediastatus(struct ifnet *, struct ifmediareq *);
 
-char	*ether_sprintf(const u_int8_t *);
-char	*ether_snprintf(char *, size_t, const u_int8_t *);
+char	*ether_sprintf(const uint8_t *);
+char	*ether_snprintf(char *, size_t, const uint8_t *);
 
-u_int32_t ether_crc32_le(const u_int8_t *, size_t);
-u_int32_t ether_crc32_be(const u_int8_t *, size_t);
+uint32_t ether_crc32_le(const uint8_t *, size_t);
+uint32_t ether_crc32_be(const uint8_t *, size_t);
 
 int	ether_nonstatic_aton(u_char *, char *);
 #else

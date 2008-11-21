@@ -1,5 +1,4 @@
-/*	$OpenBSD: ioccom.h,v 1.4 2006/05/18 21:27:25 miod Exp $	*/
-/*	$NetBSD: ioccom.h,v 1.4 1994/10/30 21:49:56 cgd Exp $	*/
+/*	$NetBSD: ioccom.h,v 1.9 2007/05/29 21:32:30 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
@@ -29,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ioccom.h	8.2 (Berkeley) 3/28/94
+ *	@(#)ioccom.h	8.3 (Berkeley) 1/9/95
  */
 
 #ifndef	_SYS_IOCCOM_H_
@@ -41,9 +40,11 @@
  * upper word are used to encode the in/out status of the parameter.
  */
 #define	IOCPARM_MASK	0x1fff		/* parameter length, at most 13 bits */
-#define	IOCPARM_LEN(x)	(((x) >> 16) & IOCPARM_MASK)
-#define	IOCBASECMD(x)	((x) & ~(IOCPARM_MASK << 16))
-#define	IOCGROUP(x)	(((x) >> 8) & 0xff)
+#define	IOCPARM_SHIFT	16
+#define	IOCGROUP_SHIFT	8
+#define	IOCPARM_LEN(x)	(((x) >> IOCPARM_SHIFT) & IOCPARM_MASK)
+#define	IOCBASECMD(x)	((x) & ~(IOCPARM_MASK << IOCPARM_SHIFT))
+#define	IOCGROUP(x)	(((x) >> IOCGROUP_SHIFT) & 0xff)
 
 #define	IOCPARM_MAX	NBPG	/* max size of ioctl args, mult. of NBPG */
 				/* no parameters */

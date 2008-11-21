@@ -1,4 +1,3 @@
-/* $OpenBSD: mcpcia_bus_io.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcpcia_bus_io.c,v 1.3 2000/06/29 08:58:47 mrg Exp $ */
 
 /*
@@ -32,6 +31,9 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(1, "$NetBSD: mcpcia_bus_io.c,v 1.3 2000/06/29 08:58:47 mrg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -70,7 +72,4 @@
 #define	CHIP_IO_W2_SYS_END(v)						\
 	((CHIP_IO_W1_SYS_START(v) + ((CHIP_IO_W2_BUS_END(v) + 1) << 5) - 1))
 
-#define CHIP_EXTENT_NAME(v)		((struct mcpcia_config *)(v))->pc_io_ex_name
-#define CHIP_EXTENT_STORAGE(v)		((struct mcpcia_config *)(v))->pc_io_ex_storage
-
-#include "alpha/pci/pci_swiz_bus_io_chipdep.c"
+#include <alpha/pci/pci_swiz_bus_io_chipdep.c>

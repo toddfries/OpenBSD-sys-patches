@@ -1,4 +1,4 @@
-/*	$NetBSD: icmp_private.h,v 1.1 2008/04/12 05:58:22 thorpej Exp $	*/
+/*	$NetBSD: icmp_private.h,v 1.3 2008/04/28 20:24:09 martin Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,19 +38,11 @@
  */
 
 #ifdef _KERNEL
-#include <sys/percpu.h>
+#include <net/net_stats.h>
 
 extern percpu_t *icmpstat_percpu;
 
-/*
- * Most ICMP statistics are exceptional conditions, so this is good enough.
- */
-#define	ICMP_STATINC(x)							\
-do {									\
-	uint64_t *_icps_ = percpu_getref(icmpstat_percpu);		\
-	_icps_[x]++;							\
-	percpu_putref(icmpstat_percpu);					\
-} while (/*CONSTCOND*/0)
+#define	ICMP_STATINC(x)		_NET_STATINC(icmpstat_percpu, x)
 
 #ifdef __NO_STRICT_ALIGNMENT
 #define	ICMP_HDR_ALIGNED_P(ic)	1

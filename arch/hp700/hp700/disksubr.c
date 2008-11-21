@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.20 2006/11/25 11:59:56 scw Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.25 2008/01/10 12:44:50 skrll Exp $	*/
 
 /*	$OpenBSD: disksubr.c,v 1.6 2000/10/18 21:00:34 mickey Exp $	*/
 
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.20 2006/11/25 11:59:56 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.25 2008/01/10 12:44:50 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -101,7 +101,9 @@ readbsdlabel(struct buf *bp, void (*strat)(struct buf *), int cyl, int sec,
 	bp->b_blkno = sec;
 	bp->b_cylinder = cyl;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_cflags = BC_BUSY;
+	bp->b_flags = B_READ;
+	bp->b_oflags = 0;
 	(*strat)(bp);
 
 	/* if successful, locate disk label within block and validate */
@@ -116,7 +118,7 @@ readbsdlabel(struct buf *bp, void (*strat)(struct buf *), int cyl, int sec,
 	 * the label, otherwise, just look at the specific location
 	 * we're given.
 	 */
-	dlp = (struct disklabel *)(bp->b_data + (off >= 0 ? off : 0));
+	dlp = (struct disklabel *)((char *)bp->b_data + (off >= 0 ? off : 0));
 	do {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
@@ -134,8 +136,8 @@ readbsdlabel(struct buf *bp, void (*strat)(struct buf *), int cyl, int sec,
 		if (off >= 0)
 			break;
 		dlp = (struct disklabel *)((char *)dlp + sizeof(int32_t));
-	} while (dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize -
-	    sizeof(*dlp)));
+	} while (dlp <= (struct disklabel *)((char *)bp->b_data +
+		 lp->d_secsize - sizeof(*dlp)));
 	return (msg);
 }
 
@@ -193,8 +195,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 		*lp = fallbacklabel;
 
 	if (bp) {
-		bp->b_flags |= B_INVAL;
-		brelse(bp);
+		brelse(bp, BC_INVAL);
 	}
 	return (msg);
 }
@@ -209,7 +210,8 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
 	/* read LIF volume header */
 	bp->b_blkno = btodb(HP700_LIF_VOLSTART);
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_cflags = BC_BUSY;
+	bp->b_flags = B_READ;
 	bp->b_cylinder = btodb(HP700_LIF_VOLSTART) / lp->d_secpercyl;
 	(*strat)(bp);
 
@@ -232,7 +234,8 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
 		/* read LIF directory */
 		dbp->b_blkno = btodb(HP700_LIF_DIRSTART);
 		dbp->b_bcount = lp->d_secsize;
-		dbp->b_flags = B_BUSY | B_READ;
+		dbp->b_cflags = BC_BUSY;
+		dbp->b_flags = B_READ;
 		dbp->b_cylinder = (HP700_LIF_DIRSTART) / lp->d_secpercyl;
 
 		(*strat)(dbp);
@@ -240,15 +243,13 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
 		if (biowait(dbp)) {
 			if (partoffp)
 				*partoffp = -1;
-			dbp->b_flags |= B_INVAL;
-			brelse(dbp);
+			brelse(dbp, BC_INVAL);
 
 			return "LIF directory I/O error";
 		}
 
 		memcpy(osdep->lifdir, dbp->b_data, HP700_LIF_DIRSIZE);
-		dbp->b_flags |= B_INVAL;
-		brelse(dbp);
+		brelse(dbp, BC_INVAL);
 		/* scan for LIF_DIR_FS dir entry */
 		for (fsoff = -1,  p = &osdep->lifdir[0];
 		     fsoff < 0 && p < &osdep->lifdir[HP700_LIF_NUMDIR]; p++)
@@ -368,13 +369,13 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 		bp->b_bcount = lp->d_secsize;
 	}
 
-	*(struct disklabel *)(bp->b_data + labeloffset) = *lp;
+	*(struct disklabel *)((char *)bp->b_data + labeloffset) = *lp;
 
-	bp->b_flags = B_BUSY | B_WRITE;
+	bp->b_cflags = BC_BUSY;
+	bp->b_flags = B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
 
-	bp->b_flags |= B_INVAL;
-	brelse(bp);
+	brelse(bp, BC_INVAL);
 	return (error);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: sa11x0_irq.S,v 1.9 2006/03/05 11:30:58 peter Exp $	*/
+/*	$NetBSD: sa11x0_irq.S,v 1.14 2008/06/13 13:24:10 rafal Exp $	*/
 
 /*
  * Copyright (c) 1998 Mark Brinicombe.
@@ -49,14 +49,11 @@
 	.text
 	.align 0
 
-Lcurrent_spl_level:	
-	.word	_C_LABEL(current_spl_level)
-
-Lcurrent_intr_depth:
-	.word	_C_LABEL(current_intr_depth)
-
 Lspl_masks:
 	.word	_C_LABEL(spl_masks)
+
+Lcpu_info_store:
+        .word   _C_LABEL(cpu_info_store)
 
 	.globl	_C_LABEL(saipic_base)
 _C_LABEL(saipic_base):
@@ -65,7 +62,10 @@ _C_LABEL(saipic_base):
 #ifdef INTR_DEBUG
 Ldbg_str:
 	.asciz	"irq_entry %x %x\n"
+	.align 5
 #endif
+
+LOCK_CAS_CHECK_LOCALS
 
 AST_ALIGNMENT_FAULT_LOCALS
 
@@ -103,10 +103,9 @@ ASENTRY_NP(irq_entry)
 	 * each time the interrupt handler is nested.
 	 */
 
-	ldr	r0, Lcurrent_intr_depth
-	ldr	r1, [r0]
+	ldr	r1, [r4, #CI_INTR_DEPTH]
 	add	r1, r1, #1
-	str	r1, [r0]
+	str	r1, [r4, #CI_INTR_DEPTH]
 
 	/*
  	 * Need to block all interrupts at the IPL or lower for
@@ -121,7 +120,7 @@ ASENTRY_NP(irq_entry)
 	 * This would benefit from a special ffs type routine
 	 */
 
-	mov	r9, #(_SPL_LEVELS - 1)
+	mov	r9, #(NIPL - 1)
 	ldr	r7, Lspl_masks
 
 Lfind_highest_ipl:
@@ -133,11 +132,9 @@ Lfind_highest_ipl:
 	/* r9 = SPL level of highest priority interrupt */
 	add	r9, r9, #1
 	ldr	r2, [r7, r9, lsl #2]
-	mvn	r2, r2
 
-	ldr	r0, Lcurrent_spl_level
-	ldr	r1, [r0]
-	str	r9, [r0]
+	ldr	r1, [r4, #CI_CPL]
+	str	r9, [r4, #CI_CPL]
 	stmfd	sp!, {r1}
 
 	/* Update the SAIP irq masks */
@@ -218,13 +215,14 @@ nextirq:
 	bne	irqloop			/* no - loop back. */
 
 	ldmfd	sp!, {r2}
-	ldr	r1, Lcurrent_spl_level
-	str	r2, [r1]
+	str	r2, [r4, #CI_CPL]
 
 	/* Restore previous disabled mask */
 	bl	_C_LABEL(irq_setmasks)
 
+#ifdef __HAVE_FAST_SOFTINTS
 	bl	_C_LABEL(dosoftints)	/* Handle the soft interrupts */
+#endif
 
 	/* Kill IRQ's in preparation for exit */
         mrs     r0, cpsr_all
@@ -239,10 +237,11 @@ nextirq:
 #endif
 
 	/* Decrement the nest count */
-	ldr	r0, Lcurrent_intr_depth
-	ldr	r1, [r0]
+	ldr	r1, [r4, #CI_INTR_DEPTH]
 	sub	r1, r1, #1
-	str	r1, [r0]
+	str	r1, [r4, #CI_INTR_DEPTH]
+
+	LOCK_CAS_CHECK
 
 	DO_AST_AND_RESTORE_ALIGNMENT_FAULTS
 	PULLFRAMEFROMSVCANDEXIT
@@ -251,23 +250,25 @@ nextirq:
 	b	. - 8
 
 ENTRY(irq_setmasks)
+	stmfd	sp!, {r0, r1, r4, lr}	/* Preserve registers */
+
 	/* Disable interrupts */
-	mrs	r3, cpsr_all
-	orr	r1, r3,  #(I32_bit)
-	msr	cpsr_all, r1
+	mrs	r1, cpsr_all
+	orr	r3, r1,  #(I32_bit)
+	msr	cpsr_all, r3
 
 	/* Calculate interrupt mask */
 	ldr	r0, Lspl_masks
-	ldr	r2, Lcurrent_spl_level
-	ldr	r2, [r2]
+	ldr	r4, Lcpu_info_store
+	ldr	r2, [r4, #CI_CPL]
 	ldr	r2, [r0, r2, lsl #2]
 
 	ldr	r0, _C_LABEL(saipic_base)
 	str	r2, [r0, #(SAIPIC_MR)]	/* Set mask register */
 
 	/* Restore old cpsr and exit */
-	msr	cpsr_all, r3
-	mov	pc, lr
+	msr	cpsr_all, r1
+	ldmia	sp!, {r0, r1, r4, pc}	/* Restore registers */
 
 Lcnt:
 	.word	_C_LABEL(uvmexp)

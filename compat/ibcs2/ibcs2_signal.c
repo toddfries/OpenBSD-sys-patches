@@ -1,5 +1,4 @@
-/*	$OpenBSD: ibcs2_signal.c,v 1.8 2008/05/01 11:53:26 miod Exp $	*/
-/*	$NetBSD: ibcs2_signal.c,v 1.8 1996/05/03 17:05:27 christos Exp $	*/
+/*	$NetBSD: ibcs2_signal.c,v 1.29 2007/12/20 23:02:49 dsl Exp $	*/
 
 /*
  * Copyright (c) 1995 Scott Bartram
@@ -28,6 +27,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_signal.c,v 1.29 2007/12/20 23:02:49 dsl Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
@@ -38,7 +40,6 @@
 #include <sys/kernel.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
-#include <sys/malloc.h>
 
 #include <sys/syscallargs.h>
 
@@ -46,103 +47,28 @@
 #include <compat/ibcs2/ibcs2_signal.h>
 #include <compat/ibcs2/ibcs2_syscallargs.h>
 #include <compat/ibcs2/ibcs2_util.h>
-
-#define sigemptyset(s)		bzero((s), sizeof(*(s)))
-#define sigismember(s, n)	(*(s) & sigmask(n))
-#define sigaddset(s, n)		(*(s) |= sigmask(n))
+#include <compat/common/compat_sigaltstack.h>
 
 #define	ibcs2_sigmask(n)	(1 << ((n) - 1))
-#define ibcs2_sigemptyset(s)	bzero((s), sizeof(*(s)))
+#define ibcs2_sigemptyset(s)	memset((s), 0, sizeof(*(s)))
 #define ibcs2_sigismember(s, n)	(*(s) & ibcs2_sigmask(n))
 #define ibcs2_sigaddset(s, n)	(*(s) |= ibcs2_sigmask(n))
 
-int bsd_to_ibcs2_sig[] = {
-	0,			/* 0 */
-	IBCS2_SIGHUP,		/* 1 */
-	IBCS2_SIGINT,		/* 2 */
-	IBCS2_SIGQUIT,		/* 3 */
-	IBCS2_SIGILL,		/* 4 */
-	IBCS2_SIGTRAP,		/* 5 */
-	IBCS2_SIGABRT,		/* 6 */
-	IBCS2_SIGEMT,		/* 7 */
-	IBCS2_SIGFPE,		/* 8 */
-	IBCS2_SIGKILL,		/* 9 */
-	IBCS2_SIGBUS,		/* 10 */
-	IBCS2_SIGSEGV,		/* 11 */
-	IBCS2_SIGSYS,		/* 12 */
-	IBCS2_SIGPIPE,		/* 13 */
-	IBCS2_SIGALRM,		/* 14 */
-	IBCS2_SIGTERM,		/* 15 */
-	0,			/* 16 - SIGURG */
-	IBCS2_SIGSTOP,		/* 17 */
-	IBCS2_SIGTSTP,		/* 18 */
-	IBCS2_SIGCONT,		/* 19 */
-	IBCS2_SIGCLD,		/* 20 */
-	IBCS2_SIGTTIN,		/* 21 */
-	IBCS2_SIGTTOU,		/* 22 */
-	IBCS2_SIGPOLL,		/* 23 */
-	0,			/* 24 - SIGXCPU */
-	0,			/* 25 - SIGXFSZ */
-	IBCS2_SIGVTALRM,	/* 26 */
-	IBCS2_SIGPROF,		/* 27 */
-	IBCS2_SIGWINCH,		/* 28 */
-	0,			/* 29 */
-	IBCS2_SIGUSR1,		/* 30 */
-	IBCS2_SIGUSR2,		/* 31 */
-};
+extern const int native_to_ibcs2_signo[];
+extern const int ibcs2_to_native_signo[];
 
-int ibcs2_to_bsd_sig[] = {
-	0,			/* 0 */
-	SIGHUP,			/* 1 */
-	SIGINT,			/* 2 */
-	SIGQUIT,		/* 3 */
-	SIGILL,			/* 4 */
-	SIGTRAP,		/* 5 */
-	SIGABRT,		/* 6 */
-	SIGEMT,			/* 7 */
-	SIGFPE,			/* 8 */
-	SIGKILL,		/* 9 */
-	SIGBUS,			/* 10 */
-	SIGSEGV,		/* 11 */
-	SIGSYS,			/* 12 */
-	SIGPIPE,		/* 13 */
-	SIGALRM,		/* 14 */
-	SIGTERM,		/* 15 */
-	SIGUSR1,		/* 16 */
-	SIGUSR2,		/* 17 */
-	SIGCHLD,		/* 18 */
-	0,			/* 19 - SIGPWR */
-	SIGWINCH,		/* 20 */
-	0,			/* 21 */
-	SIGIO,			/* 22 */
-	SIGSTOP,		/* 23 */
-	SIGTSTP,		/* 24 */
-	SIGCONT,		/* 25 */
-	SIGTTIN,		/* 26 */
-	SIGTTOU,		/* 27 */
-	SIGVTALRM,		/* 28 */
-	SIGPROF,		/* 29 */
-	0,			/* 30 */
-	0,			/* 31 */
-};
-
-void ibcs2_to_bsd_sigset(const ibcs2_sigset_t *, sigset_t *);
-void bsd_to_ibcs2_sigset(const sigset_t *, ibcs2_sigset_t *);
-void ibcs2_to_bsd_sigaction(struct ibcs2_sigaction *,
-    struct sigaction *);
-void bsd_to_ibcs2_sigaction(struct sigaction *, struct ibcs2_sigaction *);
+void ibcs2_to_native_sigaction(const struct ibcs2_sigaction *, struct sigaction *);
+void native_to_ibcs2_sigaction(const struct sigaction *, struct ibcs2_sigaction *);
 
 void
-ibcs2_to_bsd_sigset(iss, bss)
-	const ibcs2_sigset_t *iss;
-	sigset_t *bss;
+ibcs2_to_native_sigset(const ibcs2_sigset_t *iss, sigset_t *bss)
 {
 	int i, newsig;
 
 	sigemptyset(bss);
 	for (i = 1; i < IBCS2_NSIG; i++) {
 		if (ibcs2_sigismember(iss, i)) {
-			newsig = ibcs2_to_bsd_sig[i];
+			newsig = ibcs2_to_native_signo[i];
 			if (newsig)
 				sigaddset(bss, newsig);
 		}
@@ -150,16 +76,14 @@ ibcs2_to_bsd_sigset(iss, bss)
 }
 
 void
-bsd_to_ibcs2_sigset(bss, iss)
-	const sigset_t *bss;
-	ibcs2_sigset_t *iss;
+native_to_ibcs2_sigset(const sigset_t *bss, ibcs2_sigset_t *iss)
 {
 	int i, newsig;
 
 	ibcs2_sigemptyset(iss);
 	for (i = 1; i < NSIG; i++) {
 		if (sigismember(bss, i)) {
-			newsig = bsd_to_ibcs2_sig[i];
+			newsig = native_to_ibcs2_signo[i];
 			if (newsig)
 				ibcs2_sigaddset(iss, newsig);
 		}
@@ -167,340 +91,257 @@ bsd_to_ibcs2_sigset(bss, iss)
 }
 
 void
-ibcs2_to_bsd_sigaction(isa, bsa)
-	struct ibcs2_sigaction *isa;
-	struct sigaction *bsa;
+ibcs2_to_native_sigaction(const struct ibcs2_sigaction *isa, struct sigaction *bsa)
 {
 
-	bsa->sa_handler = isa->sa__handler;
-	ibcs2_to_bsd_sigset(&isa->sa_mask, &bsa->sa_mask);
+	bsa->sa_handler = isa->ibcs2_sa_handler;
+	ibcs2_to_native_sigset(&isa->ibcs2_sa_mask, &bsa->sa_mask);
 	bsa->sa_flags = 0;
-	if ((isa->sa_flags & IBCS2_SA_NOCLDSTOP) != 0)
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_NOCLDSTOP) != 0)
 		bsa->sa_flags |= SA_NOCLDSTOP;
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_RESETHAND) != 0)
+		bsa->sa_flags |= SA_RESETHAND;
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_RESTART) != 0)
+		bsa->sa_flags |= SA_RESTART;
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_SIGINFO) != 0)
+/*XXX*/		printf("ibcs2_to_native_sigaction: SA_SIGINFO ignored\n");
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_NODEFER) != 0)
+		bsa->sa_flags |= SA_NODEFER;
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_ONSTACK) != 0)
+		bsa->sa_flags |= SA_ONSTACK;
+	if ((isa->ibcs2_sa_flags & IBCS2_SA_NOCLDWAIT) != 0)
+/*XXX*/		printf("ibcs2_to_native_sigaction: SA_NOCLDWAIT ignored\n");
+	if ((isa->ibcs2_sa_flags & ~IBCS2_SA_ALLBITS) != 0)
+/*XXX*/		printf("ibcs2_to_native_sigaction: extra bits ignored\n");
 }
 
 void
-bsd_to_ibcs2_sigaction(bsa, isa)
-	struct sigaction *bsa;
-	struct ibcs2_sigaction *isa;
+native_to_ibcs2_sigaction(const struct sigaction *bsa, struct ibcs2_sigaction *isa)
 {
 
-	isa->sa__handler = bsa->sa_handler;
-	bsd_to_ibcs2_sigset(&bsa->sa_mask, &isa->sa_mask);
-	isa->sa_flags = 0;
+	isa->ibcs2_sa_handler = bsa->sa_handler;
+	native_to_ibcs2_sigset(&bsa->sa_mask, &isa->ibcs2_sa_mask);
+	isa->ibcs2_sa_flags = 0;
 	if ((bsa->sa_flags & SA_NOCLDSTOP) != 0)
-		isa->sa_flags |= IBCS2_SA_NOCLDSTOP;
+		isa->ibcs2_sa_flags |= IBCS2_SA_NOCLDSTOP;
+	if ((bsa->sa_flags & SA_RESETHAND) != 0)
+		isa->ibcs2_sa_flags |= IBCS2_SA_RESETHAND;
+	if ((bsa->sa_flags & SA_RESTART) != 0)
+		isa->ibcs2_sa_flags |= IBCS2_SA_RESTART;
+	if ((bsa->sa_flags & SA_NODEFER) != 0)
+		isa->ibcs2_sa_flags |= IBCS2_SA_NODEFER;
+	if ((bsa->sa_flags & SA_ONSTACK) != 0)
+		isa->ibcs2_sa_flags |= IBCS2_SA_ONSTACK;
 }
 
+
 int
-ibcs2_sys_sigaction(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_sigaction(struct lwp *l, const struct ibcs2_sys_sigaction_args *uap, register_t *retval)
 {
-	struct ibcs2_sys_sigaction_args /* {
+	/* {
 		syscallarg(int) signum;
-		syscallarg(struct ibcs2_sigaction *) nsa;
+		syscallarg(const struct ibcs2_sigaction *) nsa;
 		syscallarg(struct ibcs2_sigaction *) osa;
-	} */ *uap = v;
-	struct ibcs2_sigaction *nisa, *oisa, tmpisa;
-	struct sigaction *nbsa, *obsa, tmpbsa;
-	struct sys_sigaction_args sa;
-	caddr_t sg;
-	int error;
+	} */
+	struct ibcs2_sigaction nisa, oisa;
+	struct sigaction nbsa, obsa;
+	int error, signum = SCARG(uap, signum);
 
-	if (SCARG(uap, signum) < 0 || SCARG(uap, signum) >= IBCS2_NSIG)
-		return (EINVAL);
+	if (signum < 0 || signum >= IBCS2_NSIG)
+		return EINVAL;
+	signum = ibcs2_to_native_signo[signum];
 
-	sg = stackgap_init(p->p_emul);
-	nisa = SCARG(uap, nsa);
-	oisa = SCARG(uap, osa);
-
-	if (oisa != NULL)
-		obsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-	else
-		obsa = NULL;
-
-	if (nisa != NULL) {
-		nbsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-		if ((error = copyin(nisa, &tmpisa, sizeof(tmpisa))) != 0)
-			return error;
-		ibcs2_to_bsd_sigaction(&tmpisa, &tmpbsa);
-		if ((error = copyout(&tmpbsa, nbsa, sizeof(tmpbsa))) != 0)
-			return error;
-	} else
-		nbsa = NULL;
-
-	SCARG(&sa, signum) = ibcs2_to_bsd_sig[SCARG(uap, signum)];
-	SCARG(&sa, nsa) = nbsa;
-	SCARG(&sa, osa) = obsa;
-
-	if ((error = sys_sigaction(p, &sa, retval)) != 0)
-		return error;
-
-	if (oisa != NULL) {
-		if ((error = copyin(obsa, &tmpbsa, sizeof(tmpbsa))) != 0)
-			return error;
-		bsd_to_ibcs2_sigaction(&tmpbsa, &tmpisa);
-		if ((error = copyout(&tmpisa, oisa, sizeof(tmpisa))) != 0)
-			return error;
+	if (SCARG(uap, nsa)) {
+		error = copyin(SCARG(uap, nsa), &nisa, sizeof(nisa));
+		if (error)
+			return (error);
+		ibcs2_to_native_sigaction(&nisa, &nbsa);
 	}
-
-	return 0;
+	error = sigaction1(l, signum,
+	    SCARG(uap, nsa) ? &nbsa : 0, SCARG(uap, osa) ? &obsa : 0,
+	    NULL, 0);
+	if (error)
+		return (error);
+	if (SCARG(uap, osa)) {
+		native_to_ibcs2_sigaction(&obsa, &oisa);
+		error = copyout(&oisa, SCARG(uap, osa), sizeof(oisa));
+		if (error)
+			return (error);
+	}
+	return (0);
 }
 
 int
-ibcs2_sys_sigsys(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_sigaltstack(struct lwp *l, const struct ibcs2_sys_sigaltstack_args *uap, register_t *retval)
 {
-	struct ibcs2_sys_sigsys_args /* {
+	/* {
+		syscallarg(const struct ibcs2_sigaltstack *) nss;
+		syscallarg(struct ibcs2_sigaltstack *) oss;
+	} */
+	compat_sigaltstack(uap, ibcs2_sigaltstack,
+	    IBCS2_SS_ONSTACK, IBCS2_SS_DISABLE);
+}
+
+int
+ibcs2_sys_sigsys(struct lwp *l, const struct ibcs2_sys_sigsys_args *uap, register_t *retval)
+{
+	/* {
 		syscallarg(int) sig;
 		syscallarg(ibcs2_sig_t) fp;
-	} */ *uap = v;
-	int signum, error;
-	caddr_t sg = stackgap_init(p->p_emul);
+	} */
+	struct sigaction nbsa, obsa;
+	sigset_t ss;
+	int error, signum = IBCS2_SIGNO(SCARG(uap, sig));
 
-	signum = IBCS2_SIGNO(SCARG(uap, sig));
-	if (signum < 0 || signum >= IBCS2_NSIG) {
-		if (IBCS2_SIGCALL(SCARG(uap, sig)) == IBCS2_SIGNAL_MASK ||
-		    IBCS2_SIGCALL(SCARG(uap, sig)) == IBCS2_SIGSET_MASK)
-			*retval = (int)IBCS2_SIG_ERR;
+	if (signum < 0 || signum >= IBCS2_NSIG)
 		return EINVAL;
-	}
-	signum = ibcs2_to_bsd_sig[signum];
-	
-	switch (IBCS2_SIGCALL(SCARG(uap, sig))) {
-	/*
-	 * sigset is identical to signal() except that SIG_HOLD is allowed as
-	 * an action.
-	 */
-	case IBCS2_SIGSET_MASK:
-		/*
-		 * sigset is identical to signal() except
-		 * that SIG_HOLD is allowed as
-		 * an action.
-		 */
-		if (SCARG(uap, fp) == IBCS2_SIG_HOLD) {
-			struct sys_sigprocmask_args sa;
+	signum = ibcs2_to_native_signo[signum];
 
-			SCARG(&sa, how) = SIG_BLOCK;
-			SCARG(&sa, mask) = sigmask(signum);
-			return sys_sigprocmask(p, &sa, retval);
-		}
+	switch (IBCS2_SIGCALL(SCARG(uap, sig))) {
+	case IBCS2_SIGSET_MASK:
+		if (SCARG(uap, fp) == IBCS2_SIG_HOLD)
+			goto sighold;
 		/* FALLTHROUGH */
 
 	case IBCS2_SIGNAL_MASK:
-		{
-			struct sys_sigaction_args sa_args;
-			struct sigaction *nbsa, *obsa, sa;
+		nbsa.sa_handler = (sig_t)SCARG(uap, fp);
+		sigemptyset(&nbsa.sa_mask);
+		nbsa.sa_flags = 0;
+		error = sigaction1(l, signum, &nbsa, &obsa, NULL, 0);
+		if (error)
+			return (error);
+		*retval = (int)obsa.sa_handler;
+		return (0);
 
-			nbsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-			obsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-			SCARG(&sa_args, signum) = signum;
-			SCARG(&sa_args, nsa) = nbsa;
-			SCARG(&sa_args, osa) = obsa;
-
-			sa.sa_handler = SCARG(uap, fp);
-			sigemptyset(&sa.sa_mask);
-			sa.sa_flags = 0;
-#if 0
-			if (signum != SIGALRM)
-				sa.sa_flags = SA_RESTART;
-#endif
-			if ((error = copyout(&sa, nbsa, sizeof(sa))) != 0)
-				return error;
-			if ((error = sys_sigaction(p, &sa_args, retval)) != 0) {
-				DPRINTF(("signal: sigaction failed: %d\n",
-					 error));
-				*retval = (int)IBCS2_SIG_ERR;
-				return error;
-			}
-			if ((error = copyin(obsa, &sa, sizeof(sa))) != 0)
-				return error;
-			*retval = (int)sa.sa_handler;
-			return 0;
-		}
-		
 	case IBCS2_SIGHOLD_MASK:
-		{
-			struct sys_sigprocmask_args sa;
+	sighold:
+		sigemptyset(&ss);
+		sigaddset(&ss, signum);
+		return (sigprocmask1(l, SIG_BLOCK, &ss, 0));
 
-			SCARG(&sa, how) = SIG_BLOCK;
-			SCARG(&sa, mask) = sigmask(signum);
-			return sys_sigprocmask(p, &sa, retval);
-		}
-		
 	case IBCS2_SIGRELSE_MASK:
-		{
-			struct sys_sigprocmask_args sa;
+		sigemptyset(&ss);
+		sigaddset(&ss, signum);
+		return (sigprocmask1(l, SIG_UNBLOCK, &ss, 0));
 
-			SCARG(&sa, how) = SIG_UNBLOCK;
-			SCARG(&sa, mask) = sigmask(signum);
-			return sys_sigprocmask(p, &sa, retval);
-		}
-		
 	case IBCS2_SIGIGNORE_MASK:
-		{
-			struct sys_sigaction_args sa_args;
-			struct sigaction *bsa, sa;
+		nbsa.sa_handler = SIG_IGN;
+		sigemptyset(&nbsa.sa_mask);
+		nbsa.sa_flags = 0;
+		return (sigaction1(l, signum, &nbsa, 0, NULL, 0));
 
-			bsa = stackgap_alloc(&sg, sizeof(struct sigaction));
-			SCARG(&sa_args, signum) = signum;
-			SCARG(&sa_args, nsa) = bsa;
-			SCARG(&sa_args, osa) = NULL;
-
-			sa.sa_handler = SIG_IGN;
-			sigemptyset(&sa.sa_mask);
-			sa.sa_flags = 0;
-			if ((error = copyout(&sa, bsa, sizeof(sa))) != 0)
-				return error;
-			if ((error = sys_sigaction(p, &sa_args, retval)) != 0) {
-				DPRINTF(("sigignore: sigaction failed\n"));
-				return error;
-			}
-			return 0;
-		}
-		
 	case IBCS2_SIGPAUSE_MASK:
-		{
-			struct sys_sigsuspend_args sa;
+		ss = l->l_sigmask;
+		sigdelset(&ss, signum);
+		return (sigsuspend1(l, &ss));
 
-			SCARG(&sa, mask) = p->p_sigmask &~ sigmask(signum);
-			return sys_sigsuspend(p, &sa, retval);
-		}
-		
 	default:
-		return ENOSYS;
+		return (ENOSYS);
 	}
 }
 
 int
-ibcs2_sys_sigprocmask(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_sigprocmask(struct lwp *l, const struct ibcs2_sys_sigprocmask_args *uap, register_t *retval)
 {
-	struct ibcs2_sys_sigprocmask_args /* {
+	/* {
 		syscallarg(int) how;
-		syscallarg(ibcs2_sigset_t *) set;
+		syscallarg(const ibcs2_sigset_t *) set;
 		syscallarg(ibcs2_sigset_t *) oset;
-	} */ *uap = v;
-	ibcs2_sigset_t iss;
-	sigset_t bss;
-	int error = 0;
-	int s;
-
-	if (SCARG(uap, oset) != NULL) {
-		/* Fix the return value first if needed */
-		bsd_to_ibcs2_sigset(&p->p_sigmask, &iss);
-		if ((error = copyout(&iss, SCARG(uap, oset), sizeof(iss))) != 0)
-			return error;
-	}
-		
-	if (SCARG(uap, set) == NULL)
-		/* Just examine */
-		return 0;
-
-	if ((error = copyin(SCARG(uap, set), &iss, sizeof(iss))) != 0)
-		return error;
-
-	ibcs2_to_bsd_sigset(&iss, &bss);
-
-	s = splhigh();
+	} */
+	ibcs2_sigset_t niss, oiss;
+	sigset_t nbss, obss;
+	int how;
+	int error;
 
 	switch (SCARG(uap, how)) {
 	case IBCS2_SIG_BLOCK:
-		p->p_sigmask |= bss & ~sigcantmask;
+		how = SIG_BLOCK;
 		break;
-
 	case IBCS2_SIG_UNBLOCK:
-		p->p_sigmask &= ~bss;
+		how = SIG_UNBLOCK;
 		break;
-
 	case IBCS2_SIG_SETMASK:
-		p->p_sigmask = bss & ~sigcantmask;
+		how = SIG_SETMASK;
 		break;
-
 	default:
-		error = EINVAL;
-		break;
+		return (EINVAL);
 	}
 
-	splx(s);
-
-	return error;
+	if (SCARG(uap, set)) {
+		error = copyin(SCARG(uap, set), &niss, sizeof(niss));
+		if (error)
+			return (error);
+		ibcs2_to_native_sigset(&niss, &nbss);
+	}
+	error = sigprocmask1(l, how,
+	    SCARG(uap, set) ? &nbss : 0, SCARG(uap, oset) ? &obss : 0);
+	if (error)
+		return (error);
+	if (SCARG(uap, oset)) {
+		native_to_ibcs2_sigset(&obss, &oiss);
+		error = copyout(&oiss, SCARG(uap, oset), sizeof(oiss));
+		if (error)
+			return (error);
+	}
+	return (0);
 }
 
 int
-ibcs2_sys_sigpending(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_sigpending(struct lwp *l, const struct ibcs2_sys_sigpending_args *uap, register_t *retval)
 {
-	struct ibcs2_sys_sigpending_args /* {
-		syscallarg(ibcs2_sigset_t *) mask;
-	} */ *uap = v;
+	/* {
+		syscallarg(ibcs2_sigset_t *) set;
+	} */
 	sigset_t bss;
 	ibcs2_sigset_t iss;
 
-	bss = p->p_siglist & p->p_sigmask;
-	bsd_to_ibcs2_sigset(&bss, &iss);
-
-	return copyout(&iss, SCARG(uap, mask), sizeof(iss));
+	sigpending1(l, &bss);
+	native_to_ibcs2_sigset(&bss, &iss);
+	return (copyout(&iss, SCARG(uap, set), sizeof(iss)));
 }
 
 int
-ibcs2_sys_sigsuspend(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_sigsuspend(struct lwp *l, const struct ibcs2_sys_sigsuspend_args *uap, register_t *retval)
 {
-	struct ibcs2_sys_sigsuspend_args /* {
-		syscallarg(ibcs2_sigset_t *) mask;
-	} */ *uap = v;
+	/* {
+		syscallarg(const ibcs2_sigset_t *) set;
+	} */
 	ibcs2_sigset_t sss;
 	sigset_t bss;
-	struct sys_sigsuspend_args sa;
 	int error;
 
-	if ((error = copyin(SCARG(uap, mask), &sss, sizeof(sss))) != 0)
-		return error;
+	if (SCARG(uap, set)) {
+		error = copyin(SCARG(uap, set), &sss, sizeof(sss));
+		if (error)
+			return (error);
+		ibcs2_to_native_sigset(&sss, &bss);
+	}
 
-	ibcs2_to_bsd_sigset(&sss, &bss);
-
-	SCARG(&sa, mask) = bss;
-	return sys_sigsuspend(p, &sa, retval);
+	return (sigsuspend1(l, SCARG(uap, set) ? &bss : 0));
 }
 
 int
-ibcs2_sys_pause(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_pause(struct lwp *l, const void *v, register_t *retval)
 {
-	struct sys_sigsuspend_args bsa;
 
-	SCARG(&bsa, mask) = p->p_sigmask;
-	return sys_sigsuspend(p, &bsa, retval);
+	return (sigsuspend1(l, 0));
 }
 
 int
-ibcs2_sys_kill(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+ibcs2_sys_kill(struct lwp *l, const struct ibcs2_sys_kill_args *uap, register_t *retval)
 {
-	struct ibcs2_sys_kill_args /* {
+	/* {
 		syscallarg(int) pid;
 		syscallarg(int) signo;
-	} */ *uap = v;
+	} */
 	struct sys_kill_args ka;
+	int signum = SCARG(uap, signo);
 
-	if (SCARG(uap, signo) < 0 || SCARG(uap, signo) >= IBCS2_NSIG)
-		return (EINVAL);
+	if (signum < 0 || signum >= IBCS2_NSIG)
+		return EINVAL;
+	signum = ibcs2_to_native_signo[signum];
+
 	SCARG(&ka, pid) = SCARG(uap, pid);
-	SCARG(&ka, signum) = ibcs2_to_bsd_sig[SCARG(uap, signo)];
-	return sys_kill(p, &ka, retval);
+	SCARG(&ka, signum) = signum;
+	return sys_kill(l, &ka, retval);
 }

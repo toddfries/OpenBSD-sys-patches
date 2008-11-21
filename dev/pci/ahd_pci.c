@@ -1,31 +1,4 @@
-/*	$OpenBSD: ahd_pci.c,v 1.17 2007/10/22 03:16:35 fgsch Exp $	*/
-
-/*
- * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- */
+/*	$NetBSD: ahd_pci.c,v 1.27 2008/03/21 08:17:30 dyoung Exp $	*/
 
 /*
  * Product specific probe and attach routines for:
@@ -67,21 +40,24 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
+ * Id: //depot/aic7xxx/aic7xxx/aic79xx_pci.c#80 $
+ *
+ * $FreeBSD: src/sys/dev/aic7xxx/aic79xx_pci.c,v 1.16 2003/06/28 04:39:49 gibbs Exp $
+ */
+/*
+ * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
  */
 
 #include <sys/cdefs.h>
-/*
-__FBSDID("$FreeBSD: src/sys/dev/aic7xxx/aic79xx_pci.c,v 1.18 2004/02/04 16:38:38 gibbs Exp $");
-*/
+__KERNEL_RCSID(0, "$NetBSD: ahd_pci.c,v 1.27 2008/03/21 08:17:30 dyoung Exp $");
 
-#include <dev/ic/aic79xx_openbsd.h>
+#define AHD_PCI_IOADDR	PCI_MAPREG_START	/* I/O Address */
+#define AHD_PCI_MEMADDR	(PCI_MAPREG_START + 4)	/* Mem I/O Address */
+
+#include <dev/ic/aic79xx_osm.h>
 #include <dev/ic/aic79xx_inline.h>
-#include <dev/ic/aic79xx.h>
 
-#include <dev/pci/pcivar.h>
-
-__inline uint64_t ahd_compose_id(u_int, u_int, u_int, u_int);
-__inline uint64_t
+static inline uint64_t
 ahd_compose_id(u_int device, u_int vendor, u_int subdevice, u_int subvendor)
 {
 	uint64_t id;
@@ -113,10 +89,10 @@ ahd_compose_id(u_int device, u_int vendor, u_int subdevice, u_int subvendor)
 #define ID_AHA_29320			0x8012900500429005ull
 #define ID_AHA_29320B			0x8013900500439005ull
 #define ID_AHA_39320_B			0x8015900500409005ull
-#define ID_AHA_39320_B_DELL		0x8015900501681028ull
 #define ID_AHA_39320A			0x8016900500409005ull
 #define ID_AHA_39320D			0x8011900500419005ull
 #define ID_AHA_39320D_B			0x801C900500419005ull
+#define ID_AHA_39320_B_DELL		0x8015900501681028ull
 #define ID_AHA_39320D_HP		0x8011900500AC0E11ull
 #define ID_AHA_39320D_B_HP		0x801C900500AC0E11ull
 #define ID_AIC7902_PCI_REV_A4		0x3
@@ -146,103 +122,107 @@ ahd_compose_id(u_int device, u_int vendor, u_int subdevice, u_int subvendor)
 #define		SUBID_9005_SEEPTYPE_NONE	0x0
 #define		SUBID_9005_SEEPTYPE_4K		0x1
 
-ahd_device_setup_t ahd_aic7901_setup;
-ahd_device_setup_t ahd_aic7901A_setup;
-ahd_device_setup_t ahd_aic7902_setup;
-ahd_device_setup_t ahd_aic790X_setup;
+static ahd_device_setup_t ahd_aic7901_setup;
+static ahd_device_setup_t ahd_aic7901A_setup;
+static ahd_device_setup_t ahd_aic7902_setup;
+static ahd_device_setup_t ahd_aic790X_setup;
 
-struct ahd_pci_identity ahd_pci_ident_table [] =
+static struct ahd_pci_identity ahd_pci_ident_table [] =
 {
 	/* aic7901 based controllers */
 	{
 		ID_AHA_29320A,
 		ID_ALL_MASK,
+		"Adaptec 29320A Ultra320 SCSI adapter",
 		ahd_aic7901_setup
 	},
 	{
 		ID_AHA_29320ALP,
 		ID_ALL_MASK,
+		"Adaptec 29320ALP Ultra320 SCSI adapter",
 		ahd_aic7901_setup
 	},
 	/* aic7901A based controllers */
 	{
 		ID_AHA_29320LP,
 		ID_ALL_MASK,
+		"Adaptec 29320LP Ultra320 SCSI adapter",
 		ahd_aic7901A_setup
 	},
-	/* aic7902 based controllers */	
-	{
-		ID_AHA_29320,
-		ID_ALL_MASK,
-		ahd_aic7902_setup
-	},
-	{
-		ID_AHA_29320B,
-		ID_ALL_MASK,
-		ahd_aic7902_setup
-	},
+	/* aic7902 based controllers */
 	{
 		ID_AHA_39320,
 		ID_ALL_MASK,
+		"Adaptec 39320 Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320_B,
 		ID_ALL_MASK,
+		"Adaptec 39320 Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320_B_DELL,
-		ID_ALL_MASK,
+		ID_ALL_IROC_MASK,
+		"Adaptec (Dell OEM) 39320 Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320A,
 		ID_ALL_MASK,
+		"Adaptec 39320A Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320D,
 		ID_ALL_MASK,
+		"Adaptec 39320D Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320D_HP,
 		ID_ALL_MASK,
+		"Adaptec (HP OEM) 39320D Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320D_B,
 		ID_ALL_MASK,
+		"Adaptec 39320D Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	{
 		ID_AHA_39320D_B_HP,
 		ID_ALL_MASK,
+		"Adaptec (HP OEM) 39320D Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	},
 	/* Generic chip probes for devices we don't know 'exactly' */
 	{
 		ID_AIC7901 & ID_9005_GENERIC_MASK,
 		ID_9005_GENERIC_MASK,
+		"Adaptec AIC7901 Ultra320 SCSI adapter",
 		ahd_aic7901_setup
 	},
 	{
 		ID_AIC7901A & ID_DEV_VENDOR_MASK,
 		ID_DEV_VENDOR_MASK,
+		"Adaptec AIC7901A Ultra320 SCSI adapter",
 		ahd_aic7901A_setup
 	},
 	{
 		ID_AIC7902 & ID_9005_GENERIC_MASK,
 		ID_9005_GENERIC_MASK,
+		"Adaptec AIC7902 Ultra320 SCSI adapter",
 		ahd_aic7902_setup
 	}
 };
 
-const u_int ahd_num_pci_devs = NUM_ELEMENTS(ahd_pci_ident_table);
-		
-#define			DEVCONFIG		0x40
-#define			PCIXINITPAT		0x0000E000ul
+static const u_int ahd_num_pci_devs = NUM_ELEMENTS(ahd_pci_ident_table);
+
+#define	                DEVCONFIG		0x40
+#define		        PCIXINITPAT	        0x0000E000ul
 #define			PCIXINIT_PCI33_66	0x0000E000ul
 #define			PCIXINIT_PCIX50_66	0x0000C000ul
 #define			PCIXINIT_PCIX66_100	0x0000A000ul
@@ -256,10 +236,10 @@ static const char *pci_bus_modes[] =
 	"PCI bus mode unknown",
 	"PCI bus mode unknown",
 	"PCI bus mode unknown",
-	"PCI-X 101-133MHz",
-	"PCI-X 67-100MHz",
-	"PCI-X 50-66MHz",
-	"PCI 33 or 66MHz"
+	"PCI-X 101-133 MHz",
+	"PCI-X 67-100 MHz",
+	"PCI-X 50-66 MHz",
+	"PCI 33 or 66 MHz"
 };
 
 #define		TESTMODE	0x00000800ul
@@ -273,93 +253,119 @@ static const char *pci_bus_modes[] =
 #define		STPWLEVEL	0x00000002ul
 #define		QWENDIANSEL	0x00000001ul
 
-#define	DEVCONFIG1		0x44
+#define	        DEVCONFIG1     	0x44
 #define		PREQDIS		0x01
 
-#define	CSIZE_LATTIME		0x0c
-#define		CACHESIZE	0x000000fful
 #define		LATTIME		0x0000ff00ul
 
-int	ahd_pci_probe(struct device *, void *, void *);
-void	ahd_pci_attach(struct device *, struct device *, void *);
-
-struct cfattach ahd_pci_ca = {
-	        sizeof(struct ahd_softc), ahd_pci_probe, ahd_pci_attach
-};
-
-int	ahd_check_extport(struct ahd_softc *ahd);
-void	ahd_configure_termination(struct ahd_softc *ahd,
+static int	ahd_check_extport(struct ahd_softc *ahd);
+static void	ahd_configure_termination(struct ahd_softc *ahd,
 					  u_int adapter_control);
-void	ahd_pci_split_intr(struct ahd_softc *ahd, u_int intstat);
+static void	ahd_pci_split_intr(struct ahd_softc *ahd, u_int intstat);
 
-const struct ahd_pci_identity *
+static int	ahd_pci_test_register_access(struct ahd_softc *);
+
+static int	ahd_pci_intr(struct ahd_softc *);
+
+static const struct ahd_pci_identity *
 ahd_find_pci_device(pcireg_t id, pcireg_t subid)
 {
-	const struct ahd_pci_identity *entry;
-	u_int64_t full_id;
-	u_int i;
+	u_int64_t  full_id;
+	const struct	   ahd_pci_identity *entry;
+	u_int	   i;
 
 	full_id = ahd_compose_id(PCI_PRODUCT(id), PCI_VENDOR(id),
-	    PCI_PRODUCT(subid), PCI_VENDOR(subid));
-
-	/*
-	 * If we are configured to attach to HostRAID
-	 * controllers, mask out the IROC/HostRAID bit
-	 * in the
-	 */
-	if (ahd_attach_to_HostRAID_controllers)
-		full_id &= ID_ALL_IROC_MASK;
+				 PCI_PRODUCT(subid), PCI_VENDOR(subid));
 
 	for (i = 0; i < ahd_num_pci_devs; i++) {
 		entry = &ahd_pci_ident_table[i];
-		if (entry->full_id == (full_id & entry->id_mask)) {
+		if (entry->full_id == (full_id & entry->id_mask))
 			return (entry);
-		}
 	}
 	return (NULL);
 }
 
-int
-ahd_pci_probe(struct device *parent, void *match, void *aux)
+static int
+ahd_pci_probe(device_t parent, struct cfdata *match, void *aux)
 {
-	const struct ahd_pci_identity *entry;
 	struct pci_attach_args *pa = aux;
-	pcireg_t subid;
+	const struct	   ahd_pci_identity *entry;
+	pcireg_t   subid;
 
 	subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	entry = ahd_find_pci_device(pa->pa_id, subid);
 	return entry != NULL ? 1 : 0;
 }
 
-void
-ahd_pci_attach(struct device *parent, struct device *self, void *aux)
+static void
+ahd_pci_attach(device_t parent, device_t self, void *aux)
 {
-	const struct ahd_pci_identity *entry;
-	struct pci_attach_args *pa = aux;
-	struct ahd_softc *ahd = (void *)self;
-	pci_intr_handle_t ih;
-	const char *intrstr;
-	pcireg_t devconfig, memtype, subid;
-	uint16_t device, subvendor; 
-	int error, ioh_valid, ioh2_valid, l, memh_valid;
+	struct pci_attach_args	*pa = aux;
+	struct ahd_softc       	*ahd = device_private(self);
 
-	ahd->dev_softc = pa;
+	const struct ahd_pci_identity *entry;
+
+	uint32_t	   	devconfig;
+	pcireg_t	   	command;
+	int		   	error;
+	pcireg_t	   	subid;
+	uint16_t	   	subvendor;
+	pcireg_t           	reg;
+	int		   	ioh_valid, ioh2_valid, memh_valid;
+	pcireg_t           	memtype;
+	pci_intr_handle_t  	ih;
+	const char         	*intrstr;
+	struct ahd_pci_busdata 	*bd;
+
+	ahd_set_name(ahd, device_xname(&ahd->sc_dev));
 	ahd->parent_dmat = pa->pa_dmat;
 
-	if (ahd_alloc(ahd, ahd->sc_dev.dv_xname) == NULL)
-		return;
-
+	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	entry = ahd_find_pci_device(pa->pa_id, subid);
 	if (entry == NULL)
 		return;
 
-	/*
-	 * Record if this is a HostRAID board.
-	 */
-	device = PCI_PRODUCT(pa->pa_id);
-	if (DEVID_9005_HOSTRAID(device))
-		ahd->flags |= AHD_HOSTRAID_BOARD;
+	/* Keep information about the PCI bus */
+	bd = malloc(sizeof (struct ahd_pci_busdata), M_DEVBUF, M_NOWAIT);
+	if (bd == NULL) {
+		aprint_error("%s: unable to allocate bus-specific data\n", ahd_name(ahd));
+		return;
+	}
+	memset(bd, 0, sizeof(struct ahd_pci_busdata));
+
+	bd->pc = pa->pa_pc;
+	bd->tag = pa->pa_tag;
+	bd->func = pa->pa_function;
+	bd->dev = pa->pa_device;
+
+	ahd->bus_data = bd;
+
+	ahd->description = entry->name;
+
+	ahd->seep_config = malloc(sizeof(*ahd->seep_config),
+				  M_DEVBUF, M_NOWAIT);
+	if (ahd->seep_config == NULL) {
+		aprint_error("%s: cannot malloc seep_config!\n", ahd_name(ahd));
+		return;
+	}
+	memset(ahd->seep_config, 0, sizeof(*ahd->seep_config));
+
+	LIST_INIT(&ahd->pending_scbs);
+	ahd_timer_init(&ahd->reset_timer);
+	ahd_timer_init(&ahd->stat_timer);
+	ahd->flags = AHD_SPCHK_ENB_A|AHD_RESET_BUS_A|AHD_TERM_ENB_A
+	    | AHD_EXTENDED_TRANS_A|AHD_STPWLEVEL_A;
+	ahd->int_coalescing_timer = AHD_INT_COALESCING_TIMER_DEFAULT;
+	ahd->int_coalescing_maxcmds = AHD_INT_COALESCING_MAXCMDS_DEFAULT;
+	ahd->int_coalescing_mincmds = AHD_INT_COALESCING_MINCMDS_DEFAULT;
+	ahd->int_coalescing_threshold = AHD_INT_COALESCING_THRESHOLD_DEFAULT;
+	ahd->int_coalescing_stop_threshold = AHD_INT_COALESCING_STOP_THRESHOLD_DEFAULT;
+
+	if (ahd_platform_alloc(ahd, NULL) != 0) {
+                ahd_free(ahd);
+                return;
+        }
 
 	/*
 	 * Record if this is an HP board.
@@ -371,10 +377,8 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	error = entry->setup(ahd, pa);
 	if (error != 0)
 		return;
-	
-	/* XXX ahc on sparc64 needs this twice */
+
 	devconfig = pci_conf_read(pa->pa_pc, pa->pa_tag, DEVCONFIG);
-	
 	if ((devconfig & PCIXINITPAT) == PCIXINIT_PCI33_66) {
 		ahd->chip |= AHD_PCI;
 		/* Disable PCIX workarounds when running in PCI mode. */
@@ -387,84 +391,105 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	memh_valid = ioh_valid = ioh2_valid = 0;
 
 	if (!pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PCIX,
-	    &ahd->pcix_off, NULL)) {
+	    &bd->pcix_off, NULL)) {
 		if (ahd->chip & AHD_PCIX)
-			printf("%s: warning: can't find PCI-X capability\n",
-			    ahd_name(ahd));
+			aprint_error_dev(&ahd->sc_dev,
+			    "warning: can't find PCI-X capability\n");
 		ahd->chip &= ~AHD_PCIX;
 		ahd->chip |= AHD_PCI;
 		ahd->bugs &= ~AHD_PCIX_BUG_MASK;
 	}
 
 	/*
-	 * Map PCI registers
+	 * Map PCI Registers
 	 */
 	if ((ahd->bugs & AHD_PCIX_MMAPIO_BUG) == 0) {
 		memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag,
-		    AHD_PCI_MEMADDR);
+					  AHD_PCI_MEMADDR);
 		switch (memtype) {
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
 			memh_valid = (pci_mapreg_map(pa, AHD_PCI_MEMADDR,
-			    memtype, 0, &ahd->tags[0], &ahd->bshs[0], NULL,
-			    NULL, 0) == 0);
+						     memtype, 0, &ahd->tags[0],
+						     &ahd->bshs[0],
+						     NULL, NULL) == 0);
 			if (memh_valid) {
 				ahd->tags[1] = ahd->tags[0];
 				bus_space_subregion(ahd->tags[0], ahd->bshs[0],
-				    /*offset*/0x100, /*size*/0x100,
-				    &ahd->bshs[1]);
+						    /*offset*/0x100,
+						    /*size*/0x100,
+						    &ahd->bshs[1]);
 				if (ahd_pci_test_register_access(ahd) != 0)
 					memh_valid = 0;
 			}
 			break;
 		default:
 			memh_valid = 0;
-			printf("%s: unknown memory type: 0x%x\n",
-			ahd_name(ahd), memtype);
+			aprint_error("%s: unknown memory type: 0x%x\n",
+			       ahd_name(ahd), memtype);
 			break;
 		}
 
+		if (memh_valid) {
+			command &= ~PCI_COMMAND_IO_ENABLE;
+                        pci_conf_write(pa->pa_pc, pa->pa_tag,
+                        	       PCI_COMMAND_STATUS_REG, command);
+		}
 #ifdef AHD_DEBUG
-		printf("%s: doing memory mapping tag0 0x%x, tag1 0x%x, shs0 "
-		    "0x%lx, shs1 0x%lx\n", ahd_name(ahd), ahd->tags[0],
-		    ahd->tags[1], ahd->bshs[0], ahd->bshs[1]);
-#endif
-	}
-
-	if (!memh_valid) {
-		/* First BAR */
-		ioh_valid = (pci_mapreg_map(pa, AHD_PCI_IOADDR,
-		    PCI_MAPREG_TYPE_IO, 0, &ahd->tags[0], &ahd->bshs[0], NULL,
-		    NULL, 0) == 0);
-
-		/* 2nd BAR */
-		ioh2_valid = (pci_mapreg_map(pa, AHD_PCI_IOADDR1,
-		    PCI_MAPREG_TYPE_IO, 0, &ahd->tags[1], &ahd->bshs[1], NULL,
-		    NULL, 0) == 0);
-
-#ifdef AHD_DEBUG
-		printf("%s: doing io mapping tag0 0x%x, tag1 0x%x, shs0 0x%lx, "
-		    "shs1 0x%lx\n", ahd_name(ahd), ahd->tags[0], ahd->tags[1],
+		printf("%s: doing memory mapping tag0 0x%x, tag1 0x%x, "
+		    "shs0 0x%lx, shs1 0x%lx\n",
+		    ahd_name(ahd), ahd->tags[0], ahd->tags[1],
 		    ahd->bshs[0], ahd->bshs[1]);
 #endif
 	}
 
+	if (command & PCI_COMMAND_IO_ENABLE) {
+		/* First BAR */
+		ioh_valid = (pci_mapreg_map(pa, AHD_PCI_IOADDR,
+					    PCI_MAPREG_TYPE_IO, 0,
+					    &ahd->tags[0], &ahd->bshs[0],
+					    NULL, NULL) == 0);
+
+		/* 2nd BAR */
+		ioh2_valid = (pci_mapreg_map(pa, AHD_PCI_IOADDR1,
+					     PCI_MAPREG_TYPE_IO, 0,
+					     &ahd->tags[1], &ahd->bshs[1],
+					     NULL, NULL) == 0);
+
+		if (ioh_valid && ioh2_valid) {
+			KASSERT(memh_valid == 0);
+			command &= ~PCI_COMMAND_MEM_ENABLE;
+                        pci_conf_write(pa->pa_pc, pa->pa_tag,
+                        	       PCI_COMMAND_STATUS_REG, command);
+		}
+#ifdef AHD_DEBUG
+		printf("%s: doing io mapping tag0 0x%x, tag1 0x%x, "
+		    "shs0 0x%lx, shs1 0x%lx\n", ahd_name(ahd), ahd->tags[0],
+		    ahd->tags[1], ahd->bshs[0], ahd->bshs[1]);
+#endif
+
+	}
+
 	if (memh_valid == 0 && (ioh_valid == 0 || ioh2_valid == 0)) {
-		printf("%s: unable to map registers\n", ahd_name(ahd));
+		aprint_error("%s: unable to map registers\n", ahd_name(ahd));
 		return;
 	}
 
-	/*
-	 * Set Power State D0.
-	 */
-	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+	aprint_normal("\n");
+	aprint_naive("\n");
 
+	/* power up chip */
+	if ((error = pci_activate(pa->pa_pc, pa->pa_tag, self,
+	    pci_activate_null)) && error != EOPNOTSUPP) {
+		aprint_error_dev(&ahd->sc_dev, "cannot activate %d\n", error);
+		return;
+	}
 	/*
-	 * Should we bother disabling 39Bit addressing
-	 * based on installed memory?
-	 */
-	if (sizeof(bus_addr_t) > 4)
-		ahd->flags |= AHD_39BIT_ADDRESSING;
+         * Should we bother disabling 39Bit addressing
+         * based on installed memory?
+         */
+        if (sizeof(bus_addr_t) > 4)
+        	ahd->flags |= AHD_39BIT_ADDRESSING;
 
 	/*
 	 * If we need to support high memory, enable dual
@@ -473,18 +498,23 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * 64bit bus (PCI64BIT set in devconfig).
 	 */
 	if ((ahd->flags & (AHD_39BIT_ADDRESSING|AHD_64BIT_ADDRESSING)) != 0) {
-		if (bootverbose)
-			printf("%s: Enabling 39Bit Addressing\n",
-			       ahd_name(ahd));
-		devconfig = pci_conf_read(pa->pa_pc, pa->pa_tag, DEVCONFIG);
-		devconfig |= DACEN;
-		pci_conf_write(pa->pa_pc, pa->pa_tag, DEVCONFIG, devconfig);
+		uint32_t dvconfig;
+
+		aprint_normal("%s: Enabling 39Bit Addressing\n", ahd_name(ahd));
+		dvconfig = pci_conf_read(pa->pa_pc, pa->pa_tag, DEVCONFIG);
+		dvconfig |= DACEN;
+		pci_conf_write(pa->pa_pc, pa->pa_tag, DEVCONFIG, dvconfig);
 	}
-	
+
+	/* Ensure busmastering is enabled */
+        reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+        pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+		       reg | PCI_COMMAND_MASTER_ENABLE);
+
 	ahd_softc_init(ahd);
 
 	/*
-	 * Map the interrupts routines
+	 * Map the interrupt routines
 	 */
 	ahd->bus_intr = ahd_pci_intr;
 
@@ -495,29 +525,30 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (pci_intr_map(pa, &ih)) {
-		printf("%s: couldn't map interrupt\n", ahd_name(ahd));
+		aprint_error("%s: couldn't map interrupt\n", ahd_name(ahd));
 		ahd_free(ahd);
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	ahd->ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
-	ahd_platform_intr, ahd, ahd->sc_dev.dv_xname);
+	ahd->ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO, ahd_intr, ahd);
 	if (ahd->ih == NULL) {
-		printf("%s: couldn't establish interrupt", ahd_name(ahd));
+		aprint_error("%s: couldn't establish interrupt",
+		       ahd_name(ahd));
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_error(" at %s", intrstr);
+		aprint_error("\n");
 		ahd_free(ahd);
 		return;
 	}
 	if (intrstr != NULL)
-		printf(": %s\n", intrstr);
-	
+		aprint_normal("%s: interrupting at %s\n", ahd_name(ahd),
+		       intrstr);
+
 	/* Get the size of the cache */
 	ahd->pci_cachesize = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_BHLC_REG);
 	ahd->pci_cachesize *= 4;
 
-	ahd_set_modes(ahd, AHD_MODE_SCSI, AHD_MODE_SCSI);
+ 	ahd_set_modes(ahd, AHD_MODE_SCSI, AHD_MODE_SCSI);
 	/* See if we have a SEEPROM and perform auto-term */
 	error = ahd_check_extport(ahd);
 	if (error != 0)
@@ -528,29 +559,26 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (error != 0)
 		return;
 
-	ahd_list_lock(&l);
 	/*
 	 * Link this softc in with all other ahd instances.
 	 */
-	ahd_softc_insert(ahd);
-	ahd_list_unlock(&l);
-
-	/* complete the attach */
 	ahd_attach(ahd);
 }
+
+CFATTACH_DECL(ahd_pci, sizeof(struct ahd_softc),
+    ahd_pci_probe, ahd_pci_attach, NULL, NULL);
 
 /*
  * Perform some simple tests that should catch situations where
  * our registers are invalidly mapped.
  */
-int
+static int
 ahd_pci_test_register_access(struct ahd_softc *ahd)
 {
-	const pci_chipset_tag_t pc = ahd->dev_softc->pa_pc;
-	const pcitag_t tag = ahd->dev_softc->pa_tag;
-	pcireg_t cmd;
+	uint32_t cmd;
+	struct ahd_pci_busdata *bd = ahd->bus_data;
 	u_int	 targpcistat;
-	pcireg_t pci_status1;
+	uint32_t pci_status1;
 	int	 error;
 	uint8_t	 hcntrl;
 
@@ -560,9 +588,9 @@ ahd_pci_test_register_access(struct ahd_softc *ahd)
 	 * Enable PCI error interrupt status, but suppress NMIs
 	 * generated by SERR raised due to target aborts.
 	 */
-	cmd = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
-	    cmd & ~PCI_COMMAND_SERR_ENABLE);
+	cmd = pci_conf_read(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG,
+			     cmd & ~PCI_COMMAND_SERR_ENABLE);
 
 	/*
 	 * First a simple test to see if any
@@ -593,8 +621,8 @@ ahd_pci_test_register_access(struct ahd_softc *ahd)
 	ahd_set_modes(ahd, AHD_MODE_CFG, AHD_MODE_CFG);
 	targpcistat = ahd_inb(ahd, TARGPCISTAT);
 	ahd_outb(ahd, TARGPCISTAT, targpcistat);
-	pci_status1 = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, pci_status1);
+	pci_status1 = pci_conf_read(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG, pci_status1);
 	ahd_set_modes(ahd, AHD_MODE_SCSI, AHD_MODE_SCSI);
 	ahd_outb(ahd, CLRINT, CLRPCIINT);
 
@@ -604,9 +632,11 @@ ahd_pci_test_register_access(struct ahd_softc *ahd)
 		goto fail;
 
 	if ((ahd_inb(ahd, INTSTAT) & PCIINT) != 0) {
+		u_int trgpcistat;
+
 		ahd_set_modes(ahd, AHD_MODE_CFG, AHD_MODE_CFG);
-		targpcistat = ahd_inb(ahd, TARGPCISTAT);
-		if ((targpcistat & STA) != 0)
+		trgpcistat = ahd_inb(ahd, TARGPCISTAT);
+		if ((trgpcistat & STA) != 0)
 			goto fail;
 	}
 
@@ -620,12 +650,14 @@ fail:
 
 		/* Silently clear any latched errors. */
 		ahd_outb(ahd, TARGPCISTAT, targpcistat);
-		pci_status1 = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, pci_status1);
+		pci_status1 = pci_conf_read(bd->pc, bd->tag,
+		    PCI_COMMAND_STATUS_REG);
+		pci_conf_write(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG,
+		    pci_status1);
 		ahd_outb(ahd, CLRINT, CLRPCIINT);
 	}
 	ahd_outb(ahd, SEQCTL0, PERRORDIS|FAILDIS);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, cmd);
+	pci_conf_write(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG, cmd);
 	return (error);
 }
 
@@ -633,7 +665,7 @@ fail:
  * Check the external port logic for a serial eeprom
  * and termination/cable detection contrls.
  */
-int
+static int
 ahd_check_extport(struct ahd_softc *ahd)
 {
 	struct	vpd_config vpd;
@@ -650,10 +682,10 @@ ahd_check_extport(struct ahd_softc *ahd)
 		/*
 		 * Fetch VPD for this function and parse it.
 		 */
-		if (bootverbose) 
-			printf("%s: Reading VPD from SEEPROM...",
-			       ahd_name(ahd));
-
+#ifdef AHD_DEBUG
+		printf("%s: Reading VPD from SEEPROM...",
+		       ahd_name(ahd));
+#endif
 		/* Address is always in units of 16bit words */
 		start_addr = ((2 * sizeof(*sc))
 			    + (sizeof(vpd) * (ahd->channel - 'A'))) / 2;
@@ -663,13 +695,15 @@ ahd_check_extport(struct ahd_softc *ahd)
 					 /*bytestream*/TRUE);
 		if (error == 0)
 			error = ahd_parse_vpddata(ahd, &vpd);
-		if (bootverbose) 
-			printf("%s: VPD parsing %s\n",
-			       ahd_name(ahd),
-			       error == 0 ? "successful" : "failed");
+#ifdef AHD_DEBUG
+		printf("%s: VPD parsing %s\n",
+		       ahd_name(ahd),
+		       error == 0 ? "successful" : "failed");
+#endif
 
-		if (bootverbose) 
-			printf("%s: Reading SEEPROM...", ahd_name(ahd));
+#ifdef AHD_DEBUG
+		printf("%s: Reading SEEPROM...", ahd_name(ahd));
+#endif
 
 		/* Address is always in units of 16bit words */
 		start_addr = (sizeof(*sc) / 2) * (ahd->channel - 'A');
@@ -679,17 +713,18 @@ ahd_check_extport(struct ahd_softc *ahd)
 					 /*bytestream*/FALSE);
 
 		if (error != 0) {
+#ifdef AHD_DEBUG
 			printf("Unable to read SEEPROM\n");
+#endif
 			have_seeprom = 0;
 		} else {
 			have_seeprom = ahd_verify_cksum(sc);
-
-			if (bootverbose) {
-				if (have_seeprom == 0)
-					printf ("checksum error\n");
-				else
-					printf ("done.\n");
-			}
+#ifdef AHD_DEBUG
+			if (have_seeprom == 0)
+				printf ("checksum error\n");
+			else
+				printf ("done.\n");
+#endif
 		}
 		ahd_release_seeprom(ahd);
 	}
@@ -733,8 +768,7 @@ ahd_check_extport(struct ahd_softc *ahd)
 	}
 
 #ifdef AHD_DEBUG
-	if (have_seeprom != 0
-	 && (ahd_debug & AHD_DUMP_SEEPROM) != 0) {
+	if ((have_seeprom != 0)	 && (ahd_debug & AHD_DUMP_SEEPROM) != 0) {
 		uint16_t *sc_data;
 		int	  i;
 
@@ -747,8 +781,7 @@ ahd_check_extport(struct ahd_softc *ahd)
 #endif
 
 	if (!have_seeprom) {
-		if (bootverbose)
-			printf("%s: No SEEPROM available.\n", ahd_name(ahd));
+		aprint_error("%s: No SEEPROM available.\n", ahd_name(ahd));
 		ahd->flags |= AHD_USEDEFAULTS;
 		error = ahd_default_config(ahd);
 		adapter_control = CFAUTOTERM|CFSEAUTOTERM;
@@ -766,24 +799,24 @@ ahd_check_extport(struct ahd_softc *ahd)
 	return (0);
 }
 
-void
+static void
 ahd_configure_termination(struct ahd_softc *ahd, u_int adapter_control)
 {
-	const pci_chipset_tag_t pc = ahd->dev_softc->pa_pc;
-	const pcitag_t tag = ahd->dev_softc->pa_tag;
 	int	 error;
 	u_int	 sxfrctl1;
 	uint8_t	 termctl;
-	pcireg_t devconfig;
+	uint32_t devconfig;
+	struct ahd_pci_busdata 	*bd = ahd->bus_data;
 
-	devconfig = pci_conf_read(pc, tag, DEVCONFIG);
+	devconfig = pci_conf_read(bd->pc, bd->tag, DEVCONFIG);
 	devconfig &= ~STPWLEVEL;
 	if ((ahd->flags & AHD_STPWLEVEL_A) != 0)
 		devconfig |= STPWLEVEL;
-	if (bootverbose)
-		printf("%s: STPWLEVEL is %s\n",
-		       ahd_name(ahd), (devconfig & STPWLEVEL) ? "on" : "off");
-	pci_conf_write(pc, tag, DEVCONFIG, devconfig);
+#ifdef AHD_DEBUG
+	printf("%s: STPWLEVEL is %s\n",
+	       ahd_name(ahd), (devconfig & STPWLEVEL) ? "on" : "off");
+#endif
+	pci_conf_write(bd->pc, bd->tag, DEVCONFIG, devconfig);
 
 	/* Make sure current sensing is off. */
 	if ((ahd->flags & AHD_CURRENT_SENSING) != 0) {
@@ -804,8 +837,9 @@ ahd_configure_termination(struct ahd_softc *ahd, u_int adapter_control)
 		if ((adapter_control & CFWSTERM) != 0)
 			termctl |= FLX_TERMCTL_ENPRIHIGH;
 	} else if (error != 0) {
-		printf("%s: Primary Auto-Term Sensing failed! "
-		       "Using Defaults.\n", ahd_name(ahd));
+		if (bootverbose)
+			printf("%s: Primary Auto-Term Sensing failed! "
+			       "Using Defaults.\n", ahd_name(ahd));
 		termctl = FLX_TERMCTL_ENPRILOW|FLX_TERMCTL_ENPRIHIGH;
 	}
 
@@ -819,8 +853,9 @@ ahd_configure_termination(struct ahd_softc *ahd, u_int adapter_control)
 		if ((adapter_control & CFSEHIGHTERM) != 0)
 			termctl |= FLX_TERMCTL_ENSECHIGH;
 	} else if (error != 0) {
-		printf("%s: Secondary Auto-Term Sensing failed! "
-		       "Using Defaults.\n", ahd_name(ahd));
+		if (bootverbose)
+			printf("%s: Secondary Auto-Term Sensing failed! "
+			    "Using Defaults.\n", ahd_name(ahd));
 		termctl |= FLX_TERMCTL_ENSECLOW|FLX_TERMCTL_ENSECHIGH;
 	}
 
@@ -828,7 +863,6 @@ ahd_configure_termination(struct ahd_softc *ahd, u_int adapter_control)
 	 * Now set the termination based on what we found.
 	 */
 	sxfrctl1 = ahd_inb(ahd, SXFRCTL1) & ~STPWEN;
-	ahd->flags &= ~AHD_TERM_ENB_A;
 	if ((termctl & FLX_TERMCTL_ENPRILOW) != 0) {
 		ahd->flags |= AHD_TERM_ENB_A;
 		sxfrctl1 |= STPWEN;
@@ -839,24 +873,26 @@ ahd_configure_termination(struct ahd_softc *ahd, u_int adapter_control)
 
 	error = ahd_write_flexport(ahd, FLXADDR_TERMCTL, termctl);
 	if (error != 0) {
-		printf("%s: Unable to set termination settings!\n",
+		aprint_error("%s: Unable to set termination settings!\n",
 		       ahd_name(ahd));
-	} else if (bootverbose) {
-		printf("%s: Primary High byte termination %sabled\n",
-		       ahd_name(ahd),
-		       (termctl & FLX_TERMCTL_ENPRIHIGH) ? "En" : "Dis");
+	} else {
+		if (bootverbose) {
+			printf("%s: Primary High byte termination %sabled\n",
+			    ahd_name(ahd),
+			    (termctl & FLX_TERMCTL_ENPRIHIGH) ? "En" : "Dis");
 
-		printf("%s: Primary Low byte termination %sabled\n",
-		       ahd_name(ahd),
-		       (termctl & FLX_TERMCTL_ENPRILOW) ? "En" : "Dis");
+			printf("%s: Primary Low byte termination %sabled\n",
+			    ahd_name(ahd),
+			    (termctl & FLX_TERMCTL_ENPRILOW) ? "En" : "Dis");
 
-		printf("%s: Secondary High byte termination %sabled\n",
-		       ahd_name(ahd),
-		       (termctl & FLX_TERMCTL_ENSECHIGH) ? "En" : "Dis");
+			printf("%s: Secondary High byte termination %sabled\n",
+			    ahd_name(ahd),
+			    (termctl & FLX_TERMCTL_ENSECHIGH) ? "En" : "Dis");
 
-		printf("%s: Secondary Low byte termination %sabled\n",
-		       ahd_name(ahd),
-		       (termctl & FLX_TERMCTL_ENSECLOW) ? "En" : "Dis");
+			printf("%s: Secondary Low byte termination %sabled\n",
+			    ahd_name(ahd),
+			    (termctl & FLX_TERMCTL_ENSECLOW) ? "En" : "Dis");
+		}
 	}
 	return;
 }
@@ -890,7 +926,7 @@ static const char *pci_status_source[] =
 
 static const char *split_status_strings[] =
 {
-	"%s: Received split response in %s.\n",
+  	"%s: Received split response in %s.\n",
 	"%s: Received split completion error message in %s\n",
 	"%s: Receive overrun in %s\n",
 	"%s: Count not complete in %s\n",
@@ -912,25 +948,24 @@ static const char *pci_status_strings[] =
 	"%s: Address or Write Phase Parity Error Detected in %s.\n"
 };
 
-void
+static int
 ahd_pci_intr(struct ahd_softc *ahd)
 {
-	const pci_chipset_tag_t pc = ahd->dev_softc->pa_pc;
-	const pcitag_t tag = ahd->dev_softc->pa_tag;
-	uint8_t		pci_status[8];
-	ahd_mode_state	saved_modes;
-	pcireg_t	pci_status1;
-	u_int		intstat;
-	u_int		i;
-	u_int		reg;
-	
+	uint8_t			pci_status[8];
+	ahd_mode_state		saved_modes;
+	u_int			pci_status1;
+	u_int			intstat;
+	u_int			i;
+	u_int			reg;
+	struct ahd_pci_busdata 	*bd = ahd->bus_data;
+
 	intstat = ahd_inb(ahd, INTSTAT);
 
 	if ((intstat & SPLTINT) != 0)
 		ahd_pci_split_intr(ahd, intstat);
 
 	if ((intstat & PCIINT) == 0)
-		return;
+		return 0;
 
 	printf("%s: PCI error Interrupt\n", ahd_name(ahd));
 	saved_modes = ahd_save_modes(ahd);
@@ -947,7 +982,7 @@ ahd_pci_intr(struct ahd_softc *ahd)
 
 	for (i = 0; i < 8; i++) {
 		u_int bit;
-	
+
 		if (i == 5)
 			continue;
 
@@ -961,36 +996,36 @@ ahd_pci_intr(struct ahd_softc *ahd)
 					s = "%s: Signaled Target Abort\n";
 				printf(s, ahd_name(ahd), pci_status_source[i]);
 			}
-		}	
+		}
 	}
-	pci_status1 = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG , pci_status1);
+	pci_status1 = pci_conf_read(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(bd->pc, bd->tag, PCI_COMMAND_STATUS_REG , pci_status1);
 
 	ahd_restore_modes(ahd, saved_modes);
 	ahd_outb(ahd, CLRINT, CLRPCIINT);
 	ahd_unpause(ahd);
 
-	return;
+	return 1;
 }
 
-void
+static void
 ahd_pci_split_intr(struct ahd_softc *ahd, u_int intstat)
 {
-	const pci_chipset_tag_t pc = ahd->dev_softc->pa_pc;
-	const pcitag_t tag = ahd->dev_softc->pa_tag;
-	uint8_t		split_status[4];
-	uint8_t		split_status1[4];
-	uint8_t		sg_split_status[2];
-	uint8_t		sg_split_status1[2];
-	ahd_mode_state	saved_modes;
-	u_int		i;
-	pcireg_t	pcix_status;
+	uint8_t			split_status[4];
+	uint8_t			split_status1[4];
+	uint8_t			sg_split_status[2];
+	uint8_t			sg_split_status1[2];
+	ahd_mode_state		saved_modes;
+	u_int			i;
+	pcireg_t		pcix_status;
+	struct ahd_pci_busdata 	*bd = ahd->bus_data;
 
 	/*
 	 * Check for splits in all modes.  Modes 0 and 1
 	 * additionally have SG engine splits to look at.
 	 */
-	pcix_status = pci_conf_read(pc, tag, ahd->pcix_off + 0x04);
+	pcix_status = pci_conf_read(bd->pc, bd->tag,
+	    bd->pcix_off + PCI_PCIX_STATUS);
 	printf("%s: PCI Split Interrupt - PCI-X status = 0x%x\n",
 	       ahd_name(ahd), pcix_status);
 
@@ -1025,7 +1060,7 @@ ahd_pci_split_intr(struct ahd_softc *ahd, u_int intstat)
 				       split_status_source[i]);
 			}
 
-			if (i > 1)
+			if (i > 0)
 				continue;
 
 			if ((sg_split_status[i] & (0x1 << bit)) != 0) {
@@ -1039,12 +1074,13 @@ ahd_pci_split_intr(struct ahd_softc *ahd, u_int intstat)
 	/*
 	 * Clear PCI-X status bits.
 	 */
-	pci_conf_write(pc, tag, ahd->pcix_off + 0x04, pcix_status);
+	pci_conf_write(bd->pc, bd->tag, bd->pcix_off + PCI_PCIX_STATUS,
+	    pcix_status);
 	ahd_outb(ahd, CLRINT, CLRSPLTINT);
 	ahd_restore_modes(ahd, saved_modes);
 }
 
-int
+static int
 ahd_aic7901_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 {
 
@@ -1053,7 +1089,7 @@ ahd_aic7901_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 	return (ahd_aic790X_setup(ahd, pa));
 }
 
-int
+static int
 ahd_aic7901A_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 {
 
@@ -1062,16 +1098,17 @@ ahd_aic7901A_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 	return (ahd_aic790X_setup(ahd, pa));
 }
 
-int
+static int
 ahd_aic7902_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 {
+
 	ahd->chip = AHD_AIC7902;
 	ahd->features = AHD_AIC7902_FE;
 	return (ahd_aic790X_setup(ahd, pa));
 }
 
-int
-ahd_aic790X_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
+static int
+ahd_aic790X_setup(struct ahd_softc *ahd, struct pci_attach_args	*pa)
 {
 	u_int rev;
 
@@ -1080,7 +1117,7 @@ ahd_aic790X_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 	printf("\n%s: aic7902 chip revision 0x%x\n", ahd_name(ahd), rev);
 #endif
 	if (rev < ID_AIC7902_PCI_REV_A4) {
-		printf("%s: Unable to attach to unsupported chip revision %d\n",
+		aprint_error("%s: Unable to attach to unsupported chip revision %d\n",
 		       ahd_name(ahd), rev);
 		pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, 0);
 		return (ENXIO);
@@ -1103,6 +1140,7 @@ ahd_aic790X_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 			  |  AHD_NONPACKFIFO_BUG|AHD_PACED_NEGTABLE_BUG
 			  |  AHD_FAINT_LED_BUG;
 
+
 		/*
 		 * IO Cell parameter setup.
 		 */
@@ -1111,12 +1149,11 @@ ahd_aic790X_setup(struct ahd_softc *ahd, struct pci_attach_args *pa)
 		if ((ahd->flags & AHD_HP_BOARD) == 0)
 			AHD_SET_SLEWRATE(ahd, AHD_SLEWRATE_DEF_REVA);
 	} else {
-		pcireg_t devconfig1;
+		u_int devconfig1;
 
 		ahd->features |= AHD_RTI|AHD_NEW_IOCELL_OPTS
-			      |  AHD_NEW_DFCNTRL_OPTS|AHD_FAST_CDB_DELIVERY;
-		ahd->bugs |= AHD_LQOOVERRUN_BUG|AHD_EARLY_REQ_BUG
-		    	  |  AHD_BUSFREEREV_BUG;
+			      |  AHD_NEW_DFCNTRL_OPTS;
+		ahd->bugs |= AHD_LQOOVERRUN_BUG|AHD_EARLY_REQ_BUG;
 
 		/*
 		 * Some issues have been resolved in the 7901B.

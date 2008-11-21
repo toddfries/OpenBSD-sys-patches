@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_stat.c,v 1.19 2007/04/19 16:20:07 art Exp $	 */
-/*	$NetBSD: uvm_stat.c,v 1.18 2001/03/09 01:02:13 chs Exp $	 */
+/*	$NetBSD: uvm_stat.c,v 1.31 2008/08/08 17:09:28 skrll Exp $	 */
 
 /*
  *
@@ -39,6 +38,13 @@
  * uvm_stat.c
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uvm_stat.c,v 1.31 2008/08/08 17:09:28 skrll Exp $");
+
+#include "opt_uvmhist.h"
+#include "opt_readahead.h"
+#include "opt_ddb.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 
@@ -48,8 +54,6 @@
 /*
  * globals
  */
-
-struct uvm_cnt *uvm_cnt_head = NULL;
 
 #ifdef UVMHIST
 struct uvm_history_head uvm_histories;
@@ -76,8 +80,7 @@ void uvmcnt_dump(void);
 #ifdef UVMHIST
 /* call this from ddb */
 void
-uvmhist_dump(l)
-	struct uvm_history *l;
+uvmhist_dump(struct uvm_history *l)
 {
 	int lcv, s;
 
@@ -85,7 +88,7 @@ uvmhist_dump(l)
 	lcv = l->f;
 	do {
 		if (l->e[lcv].fmt)
-			uvmhist_print(&l->e[lcv]);
+			uvmhist_entry_print(&l->e[lcv]);
 		lcv = (lcv + 1) % l->n;
 	} while (lcv != l->f);
 	splx(s);
@@ -95,8 +98,7 @@ uvmhist_dump(l)
  * print a merged list of uvm_history structures
  */
 static void
-uvmhist_dump_histories(hists)
-	struct uvm_history *hists[];
+uvmhist_dump_histories(struct uvm_history *hists[])
 {
 	struct timeval  tv;
 	int	cur[MAXHISTS];
@@ -135,7 +137,7 @@ restart:
 					cur[lcv] = -1;
 				goto restart;
 			}
-				
+
 			/*
 			 * if the time hasn't been set yet, or this entry is
 			 * earlier than the current tv, set the time and history
@@ -153,13 +155,11 @@ restart:
 			break;
 
 		/* print and move to the next entry */
-		uvmhist_print(&hists[hi]->e[cur[hi]]);
+		uvmhist_entry_print(&hists[hi]->e[cur[hi]]);
 		cur[hi] = (cur[hi] + 1) % (hists[hi]->n);
 		if (cur[hi] == hists[hi]->f)
 			cur[hi] = -1;
 	}
-	
-	/* done! */
 	splx(s);
 }
 
@@ -168,8 +168,7 @@ restart:
  * merges the named histories.
  */
 void
-uvm_hist(bitmask)
-	u_int32_t	bitmask;	/* XXX only support 32 hists */
+uvm_hist(u_int32_t bitmask)	/* XXX only support 32 hists */
 {
 	struct uvm_history *hists[MAXHISTS + 1];
 	int i = 0;
@@ -180,59 +179,59 @@ uvm_hist(bitmask)
 	if ((bitmask & UVMHIST_PDHIST) || bitmask == 0)
 		hists[i++] = &pdhist;
 
+	if ((bitmask & UVMHIST_UBCHIST) || bitmask == 0)
+		hists[i++] = &ubchist;
+
+	if ((bitmask & UVMHIST_LOANHIST) || bitmask == 0)
+		hists[i++] = &loanhist;
+
 	hists[i] = NULL;
 
 	uvmhist_dump_histories(hists);
 }
-#endif /* UVMHIST */
 
+/*
+ * uvmhist_print: ddb hook to print uvm history
+ */
 void
-uvmcnt_dump()
+uvmhist_print(void (*pr)(const char *, ...))
 {
-	struct uvm_cnt *uvc = uvm_cnt_head;
-
-	while (uvc) {
-		if ((uvc->t & UVMCNT_MASK) != UVMCNT_CNT)
-			continue;
-		printf("%s = %d\n", uvc->name, uvc->c);
-		uvc = uvc->next;
-	}
+	uvmhist_dump(LIST_FIRST(&uvm_histories));
 }
+
+#endif /* UVMHIST */
 
 /*
  * uvmexp_print: ddb hook to print interesting uvm counters
  */
 void
-uvmexp_print(int (*pr)(const char *, ...))
+uvmexp_print(void (*pr)(const char *, ...))
 {
+	int active, inactive;
+
+	uvm_estimatepageable(&active, &inactive);
 
 	(*pr)("Current UVM status:\n");
 	(*pr)("  pagesize=%d (0x%x), pagemask=0x%x, pageshift=%d\n",
 	    uvmexp.pagesize, uvmexp.pagesize, uvmexp.pagemask,
 	    uvmexp.pageshift);
 	(*pr)("  %d VM pages: %d active, %d inactive, %d wired, %d free\n",
-	    uvmexp.npages, uvmexp.active, uvmexp.inactive, uvmexp.wired,
+	    uvmexp.npages, active, inactive, uvmexp.wired,
 	    uvmexp.free);
-	(*pr)("  min  %d%% (%d) anon, %d%% (%d) vnode, %d%% (%d) vtext\n",
-	    uvmexp.anonminpct, uvmexp.anonmin, uvmexp.vnodeminpct,
-	    uvmexp.vnodemin, uvmexp.vtextminpct, uvmexp.vtextmin);
-	(*pr)("  pages  %d anon, %d vnode, %d vtext\n",
-	    uvmexp.anonpages, uvmexp.vnodepages, uvmexp.vtextpages);
-	(*pr)("  freemin=%d, free-target=%d, inactive-target=%d, "
-	    "wired-max=%d\n", uvmexp.freemin, uvmexp.freetarg, uvmexp.inactarg,
-	    uvmexp.wiredmax);
-	(*pr)("  faults=%d, traps=%d, intrs=%d, ctxswitch=%d fpuswitch=%d\n",
-	    uvmexp.faults, uvmexp.traps, uvmexp.intrs, uvmexp.swtch,
-	    uvmexp.fpswtch);
-	(*pr)("  softint=%d, syscalls=%d, swapins=%d, swapouts=%d, "
-	    "kmapent=%d\n", uvmexp.softs, uvmexp.syscalls, uvmexp.swapins,
-	    uvmexp.swapouts, uvmexp.kmapent);
+	(*pr)("  pages  %d anon, %d file, %d exec\n",
+	    uvmexp.anonpages, uvmexp.filepages, uvmexp.execpages);
+	(*pr)("  freemin=%d, free-target=%d, wired-max=%d\n",
+	    uvmexp.freemin, uvmexp.freetarg, uvmexp.wiredmax);
+	(*pr)("  faults=%d, traps=%d, intrs=%d, ctxswitch=%d\n",
+	    uvmexp.faults, uvmexp.traps, uvmexp.intrs, uvmexp.swtch);
+	(*pr)("  softint=%d, syscalls=%d, swapins=%d, swapouts=%d\n",
+	    uvmexp.softs, uvmexp.syscalls, uvmexp.swapins, uvmexp.swapouts);
 
 	(*pr)("  fault counts:\n");
 	(*pr)("    noram=%d, noanon=%d, pgwait=%d, pgrele=%d\n",
 	    uvmexp.fltnoram, uvmexp.fltnoanon, uvmexp.fltpgwait,
 	    uvmexp.fltpgrele);
-	(*pr)("    ok relocks(total)=%d(%d), anget(retries)=%d(%d), "
+	(*pr)("    ok relocks(total)=%d(%d), anget(retrys)=%d(%d), "
 	    "amapcopy=%d\n", uvmexp.fltrelckok, uvmexp.fltrelck,
 	    uvmexp.fltanget, uvmexp.fltanretry, uvmexp.fltamcopy);
 	(*pr)("    neighbor anon/obj pg=%d/%d, gets(lock/unlock)=%d/%d\n",
@@ -249,13 +248,22 @@ uvmexp_print(int (*pr)(const char *, ...))
 	    uvmexp.pdbusy, uvmexp.pdfreed, uvmexp.pdreact, uvmexp.pddeact);
 	(*pr)("    pageouts=%d, pending=%d, nswget=%d\n", uvmexp.pdpageouts,
 	    uvmexp.pdpending, uvmexp.nswget);
-	(*pr)("    nswapdev=%d, nanon=%d, nanonneeded=%d nfreeanon=%d\n",
-	    uvmexp.nswapdev, uvmexp.nanon, uvmexp.nanonneeded,
-	    uvmexp.nfreeanon);
-	(*pr)("    swpages=%d, swpginuse=%d, swpgonly=%d paging=%d\n",
+	(*pr)("    nswapdev=%d, swpgavail=%d\n",
+	    uvmexp.nswapdev, uvmexp.swpgavail);
+	(*pr)("    swpages=%d, swpginuse=%d, swpgonly=%d, paging=%d\n",
 	    uvmexp.swpages, uvmexp.swpginuse, uvmexp.swpgonly, uvmexp.paging);
-
-	(*pr)("  kernel pointers:\n");
-	(*pr)("    objs(kern)=%p\n", uvm.kernel_object);
 }
 #endif
+
+#if defined(READAHEAD_STATS)
+
+#define	UVM_RA_EVCNT_DEFINE(name) \
+struct evcnt uvm_ra_##name = \
+EVCNT_INITIALIZER(EVCNT_TYPE_MISC, NULL, "readahead", #name); \
+EVCNT_ATTACH_STATIC(uvm_ra_##name);
+
+UVM_RA_EVCNT_DEFINE(total);
+UVM_RA_EVCNT_DEFINE(hit);
+UVM_RA_EVCNT_DEFINE(miss);
+
+#endif /* defined(READAHEAD_STATS) */

@@ -1,4 +1,4 @@
-/*	$NetBSD: genfb.c,v 1.11 2007/11/05 16:57:46 macallan Exp $ */
+/*	$NetBSD: genfb.c,v 1.17 2008/04/29 06:53:03 martin Exp $ */
 
 /*-
  * Copyright (c) 2007 Michael Lorenz
@@ -12,9 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: genfb.c,v 1.11 2007/11/05 16:57:46 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: genfb.c,v 1.17 2008/04/29 06:53:03 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,21 +93,21 @@ genfb_init(struct genfb_softc *sc)
 	printf(prop_dictionary_externalize(dict));
 #endif
 	if (!prop_dictionary_get_uint32(dict, "width", &sc->sc_width)) {
-		GPRINTF("no width property");
+		GPRINTF("no width property\n");
 		return;
 	}
 	if (!prop_dictionary_get_uint32(dict, "height", &sc->sc_height)) {
-		GPRINTF("no height property");
+		GPRINTF("no height property\n");
 		return;
 	}
 	if (!prop_dictionary_get_uint32(dict, "depth", &sc->sc_depth)) {
-		GPRINTF("no depth property");
+		GPRINTF("no depth property\n");
 		return;
 	}
 
 	/* XXX should be a 64bit value */
 	if (!prop_dictionary_get_uint32(dict, "address", &fboffset)) {
-		GPRINTF("no address property");
+		GPRINTF("no address property\n");
 		return;
 	}
 
@@ -118,6 +115,14 @@ genfb_init(struct genfb_softc *sc)
 
 	if (!prop_dictionary_get_uint32(dict, "linebytes", &sc->sc_stride))
 		sc->sc_stride = (sc->sc_width * sc->sc_depth) >> 3;
+
+	/*
+	 * deal with a bug in the Raptor firmware which always sets
+	 * stride = width even when depth != 8
+	 */
+	if (sc->sc_stride < sc->sc_width * (sc->sc_depth >> 3))
+		sc->sc_stride = sc->sc_width * (sc->sc_depth >> 3);
+
 	sc->sc_fbsize = sc->sc_height * sc->sc_stride;
 
 	/* optional colour map callback */
@@ -138,8 +143,17 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 	int i, j;
 	bool console;
 
-	aprint_verbose("%s: framebuffer at %p, size %dx%d, depth %d, "
-	    "stride %d\n", sc->sc_dev.dv_xname, sc->sc_fbaddr,
+	dict = device_properties(&sc->sc_dev);
+	prop_dictionary_get_bool(dict, "is_console", &console);
+
+	/* do not attach when we're not console */
+	if (!console) {
+		aprint_normal_dev(&sc->sc_dev, "no console, unable to continue\n");
+		return -1;
+	}
+
+	aprint_verbose_dev(&sc->sc_dev, "framebuffer at %p, size %dx%d, depth %d, "
+	    "stride %d\n", sc->sc_fbaddr,
 	    sc->sc_width, sc->sc_height, sc->sc_depth, sc->sc_stride);
 
 	sc->sc_defaultscreen_descr = (struct wsscreen_descr){
@@ -157,10 +171,6 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 
 	sc->sc_shadowfb = malloc(sc->sc_fbsize, M_DEVBUF, M_WAITOK);
 
-	dict = device_properties(&sc->sc_dev);
-
-	prop_dictionary_get_bool(dict, "is_console", &console);
-
 	vcons_init(&sc->vd, sc, &sc->sc_defaultscreen_descr,
 	    &genfb_accessops);
 	sc->vd.init_screen = genfb_init_screen;
@@ -170,24 +180,16 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 
 	ri = &sc->sc_console_screen.scr_ri;
 
-	if (console) {
-		vcons_init_screen(&sc->vd, &sc->sc_console_screen, 1,
-		    &defattr);
-		sc->sc_console_screen.scr_flags |= VCONS_SCREEN_IS_STATIC;
+	vcons_init_screen(&sc->vd, &sc->sc_console_screen, 1,
+	    &defattr);
+	sc->sc_console_screen.scr_flags |= VCONS_SCREEN_IS_STATIC;
 
-		sc->sc_defaultscreen_descr.textops = &ri->ri_ops;
-		sc->sc_defaultscreen_descr.capabilities = ri->ri_caps;
-		sc->sc_defaultscreen_descr.nrows = ri->ri_rows;
-		sc->sc_defaultscreen_descr.ncols = ri->ri_cols;
-		wsdisplay_cnattach(&sc->sc_defaultscreen_descr, ri, 0, 0,
-		    defattr);
-	} else {
-		/*
-		 * since we're not the console we can postpone the rest
-		 * until someone actually allocates a screen for us
-		 */
-		(*ri->ri_ops.allocattr)(ri, 0, 0, 0, &defattr);
-	}
+	sc->sc_defaultscreen_descr.textops = &ri->ri_ops;
+	sc->sc_defaultscreen_descr.capabilities = ri->ri_caps;
+	sc->sc_defaultscreen_descr.nrows = ri->ri_rows;
+	sc->sc_defaultscreen_descr.ncols = ri->ri_cols;
+	wsdisplay_cnattach(&sc->sc_defaultscreen_descr, ri, 0, 0,
+	    defattr);
 
 	/* Clear the whole screen to bring it to a known state. */
 	(*ri->ri_ops.eraserows)(ri, 0, ri->ri_rows, defattr);

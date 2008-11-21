@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.10 2008/05/21 19:42:07 miod Exp $ */
-/*	$NetBSD: autoconf.c,v 1.19 2002/06/01 15:33:22 ragge Exp $ */
+/*	$NetBSD: autoconf.c,v 1.26 2008/03/31 06:19:59 he Exp $ */
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -38,11 +37,12 @@
 
 #include <lib/libsa/stand.h>
 
-#include "../../include/mtpr.h"
-#include "../../include/sid.h"
-#include "../../include/intr.h"
-#include "../../include/rpb.h"
-#include "../../include/scb.h"
+#include "../include/mtpr.h"
+#include "../include/sid.h"
+#include "../include/intr.h"
+#include "../include/rpb.h"
+#include "../include/scb.h"
+
 #include "vaxstand.h"
 
 void autoconf(void);
@@ -51,7 +51,7 @@ void consinit(void);
 void scbinit(void);
 int getsecs(void);
 void scb_stray(void *);
-void longjmp(int *);
+void longjmp(int *, int);
 void rtimer(void *);
 
 long *bootregs;
@@ -62,7 +62,7 @@ long *bootregs;
  */
 
 void
-autoconf(void)
+autoconf()
 {
 	int copyrpb = 1;
 	int fromnet = (bootregs[12] != -1);
@@ -111,10 +111,10 @@ autoconf(void)
 
 	if (copyrpb) {
 		struct rpb *prpb = (struct rpb *)bootregs[11];
-		bcopy((caddr_t)prpb, &bootrpb, sizeof(struct rpb));
+		memcpy(&bootrpb, (void *)prpb, sizeof(struct rpb));
 		if (prpb->iovec) {
 			bootrpb.iovec = (int)alloc(prpb->iovecsz);
-			bcopy((caddr_t)prpb->iovec, (caddr_t)bootrpb.iovec,
+			memcpy((void *)bootrpb.iovec, (void *)prpb->iovec,
 			    prpb->iovecsz);
 		}
 	}
@@ -127,7 +127,7 @@ autoconf(void)
 volatile int tickcnt;
 
 int
-getsecs(void)
+getsecs()
 {
 	return tickcnt/100;
 }
@@ -140,11 +140,11 @@ extern int jbuf[10];
 static void
 mcheck(void *arg)
 {
-	int off, *mfp = (int *)&arg;
+	int off, *mfp = (int *)(void *)&arg;
 
 	off = (mfp[7]/4 + 8);
 	printf("Machine check, pc=%x, psl=%x\n", mfp[off], mfp[off+1]);
-	longjmp(jbuf);
+	longjmp(jbuf, 1);
 }
 
 /*
@@ -152,9 +152,9 @@ mcheck(void *arg)
  * to detect unwanted interrupts.
  */
 void
-scbinit(void)
+scbinit()
 {
-	int i;
+	int i, addr;
 
 	/*
 	 * Allocate space. We need one page for the SCB, and 128*20 == 2.5k
@@ -169,7 +169,9 @@ scbinit(void)
 
 	for (i = 0; i < 128; i++) {
 		scb[i] = &scb_vec[i];
-		(int)scb[i] |= SCB_ISTACK;	/* Only interrupt stack */
+		addr = (int)scb[i];
+		addr |= SCB_ISTACK;		/* Only interrupt stack */
+		scb[i] = (struct ivec_dsp*)addr;
 		scb_vec[i] = idsptch;
 		scb_vec[i].hoppaddr = scb_stray;
 		scb_vec[i].pushlarg = (void *) (i * 4);
@@ -190,7 +192,7 @@ extern int sluttid, senast, skip;
 void
 rtimer(void *arg)
 {
-	mtpr(31, PR_IPL);
+	mtpr(IPL_HIGH, PR_IPL);
 	tickcnt++;
 	mtpr(0xc1, PR_ICCS);
 	if (skip)
@@ -201,7 +203,7 @@ rtimer(void *arg)
 		int nu = sluttid - getsecs();
 		if (senast != nu) {
 			mtpr(20, PR_IPL);
-			longjmp(jbuf);
+			longjmp(jbuf, 1);
 		}
 	}
 }
@@ -216,26 +218,26 @@ rtimer(void *arg)
 #define	CMN_IDSPTCH "_cmn_idsptch"
 #endif
 
-asm("
-	.text
-	.align	2
-	.globl	" IDSPTCH ", " EIDSPTCH "
-" IDSPTCH ":
-	pushr	$0x3f
-	.word	0x9f16
-	.long	" CMN_IDSPTCH "
-	.long	0
-	.long	0
-	.long	0
-" EIDSPTCH ":
+__asm(
+"	.text;"
+"	.align	2;"
+"	.globl  " IDSPTCH ", " EIDSPTCH ";"
+IDSPTCH ":;"
+"	pushr   $0x3f;"
+"	.word	0x9f16;"
+"	.long   " CMN_IDSPTCH ";"
+"	.long	0;"
+"	.long	0;"
+"	.long	0;"
+EIDSPTCH ":;"
 
-" CMN_IDSPTCH ":
-	movl	(sp)+,r0
-	pushl	4(r0)
-	calls	$1,*(r0)
-	popr	$0x3f
-	rei
-");
+CMN_IDSPTCH ":;"
+"	movl	(%sp)+,%r0;"
+"	pushl	4(%r0);"
+"	calls	$1,*(%r0);"
+"	popr	$0x3f;"
+"	rei;"
+);
 
 /*
  * Stray interrupt handler.

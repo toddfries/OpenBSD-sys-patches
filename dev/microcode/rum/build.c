@@ -1,4 +1,5 @@
-/*	$OpenBSD: build.c,v 1.1 2006/08/17 08:32:30 damien Exp $	*/
+/*	$NetBSD: build.c,v 1.1 2006/10/31 22:21:17 joerg Exp $	*/
+/*	$OpenBSD: build.c,v 1.1 2006/01/09 20:03:40 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -50,7 +51,7 @@ output(const char *name, const uint8_t *ucode, int size)
 int
 main(void)
 {
-	output("rum-rt2573", rt2573, sizeof rt2573);
+	output("rum-rt2573",  rt2573,  sizeof rt2573);
 
 	return 0;
 }

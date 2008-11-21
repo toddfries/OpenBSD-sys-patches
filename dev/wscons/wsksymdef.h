@@ -1,5 +1,4 @@
-/*	$OpenBSD: wsksymdef.h,v 1.31 2006/07/20 10:44:40 mickey Exp $	*/
-/*	$NetBSD: wsksymdef.h,v 1.34.4.1 2000/07/07 09:49:54 hannken Exp $ */
+/*	$NetBSD: wsksymdef.h,v 1.61 2008/05/21 07:39:24 ghen Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -51,6 +43,7 @@
  *
  * and don't modify the border comments.
  */
+
 
 /*BEGINKEYSYMDECL*/
 
@@ -274,218 +267,82 @@
 #define	KS_dead_diaeresis 	0x0308
 #define	KS_dead_abovering 	0x030a
 #define	KS_dead_cedilla 	0x0327
+#define        KS_dead_semi		0x0328
+#define        KS_dead_colon		0x0329
 
 /*
- * Group Cyrillic (koi8-r)
+ * Group Greek
  */
 
-#define KS_Cyrillic_A		0xe1
-#define KS_Cyrillic_BE		0xe2
-#define KS_Cyrillic_VE		0xf7
-#define KS_Cyrillic_GE		0xe7
-#define KS_Cyrillic_DE		0xe4
-#define KS_Cyrillic_IE		0xe5
-#define KS_Cyrillic_YO		0xb3
-#define KS_Cyrillic_ZHE		0xf6
-#define KS_Cyrillic_ZE		0xfa
-#define KS_Cyrillic_I		0xe9
-#define KS_Cyrillic_ISHORT	0xea
-#define KS_Cyrillic_IUKR	0xb6
-#define KS_Cyrillic_YI		0xb7
-#define KS_Cyrillic_KA		0xeb
-#define KS_Cyrillic_EL		0xec
-#define KS_Cyrillic_EM		0xed
-#define KS_Cyrillic_EN		0xee
-#define KS_Cyrillic_O		0xef
-#define KS_Cyrillic_PE		0xf0
-#define KS_Cyrillic_ER		0xf2
-#define KS_Cyrillic_ES		0xf3
-#define KS_Cyrillic_TE		0xf4
-#define KS_Cyrillic_U		0xf5
-#define KS_Cyrillic_EF		0xe6
-#define KS_Cyrillic_HA		0xe8
-#define KS_Cyrillic_TSE		0xe3
-#define KS_Cyrillic_CHE		0xfe
-#define KS_Cyrillic_SHA		0xfb
-#define KS_Cyrillic_SCHA	0xfd
-#define KS_Cyrillic_HSIGHN	0xff
-#define KS_Cyrillic_YERU	0xf9
-#define KS_Cyrillic_SSIGHN	0xf8
-#define KS_Cyrillic_E		0xfc
-#define KS_Cyrillic_YU		0xe0
-#define KS_Cyrillic_YA		0xf1
-#define KS_Cyrillic_a		0xc1
-#define KS_Cyrillic_be		0xc2
-#define KS_Cyrillic_ve		0xd7
-#define KS_Cyrillic_ge		0xc7
-#define KS_Cyrillic_de		0xc4
-#define KS_Cyrillic_ie		0xc5
-#define KS_Cyrillic_yo		0xa3
-#define KS_Cyrillic_zhe		0xd6
-#define KS_Cyrillic_ze		0xda
-#define KS_Cyrillic_i		0xc9
-#define KS_Cyrillic_ishort	0xca
-#define KS_Cyrillic_iukr	0xa6
-#define KS_Cyrillic_yi		0xa7
-#define KS_Cyrillic_ka		0xcb
-#define KS_Cyrillic_el		0xcc
-#define KS_Cyrillic_em		0xcd
-#define KS_Cyrillic_en		0xce
-#define KS_Cyrillic_o		0xcf
-#define KS_Cyrillic_pe		0xd0
-#define KS_Cyrillic_er		0xd2
-#define KS_Cyrillic_es		0xd3
-#define KS_Cyrillic_te		0xd4
-#define KS_Cyrillic_u		0xd5
-#define KS_Cyrillic_ef		0xc6
-#define KS_Cyrillic_ha		0xc8
-#define KS_Cyrillic_tse		0xc3
-#define KS_Cyrillic_che		0xde
-#define KS_Cyrillic_sha		0xdb
-#define KS_Cyrillic_scha	0xdd
-#define KS_Cyrillic_hsighn	0xdf
-#define KS_Cyrillic_yeru	0xd9
-#define KS_Cyrillic_ssighn	0xd8
-#define KS_Cyrillic_e		0xdc
-#define KS_Cyrillic_yu		0xc0
-#define KS_Cyrillic_ya		0xd1
-#define KS_Cyrillic_gheukr	0xad
-#define KS_Cyrillic_GHEUKR	0xbd
-#define KS_Cyrillic_yeukr	0xa4
-#define KS_Cyrillic_YEUKR	0xb4
-
-/*
- * Group Latin-2 (iso8859-2)
- */
-
-#define KS_L2_Aogonek		0xa1
-#define KS_L2_breve		0xa2
-#define KS_L2_Lstroke		0xa3
-#define KS_L2_Lcaron		0xa5
-#define KS_L2_Sacute		0xa6
-#define KS_L2_Scaron		0xa9
-#define KS_L2_Scedilla		0xaa
-#define KS_L2_Tcaron		0xab
-#define KS_L2_Zacute		0xac
-#define KS_L2_Zcaron		0xae
-#define KS_L2_Zdotabove		0xaf
-#define KS_L2_aogonek		0xb1
-#define KS_L2_ogonek		0xb2
-#define KS_L2_lstroke		0xb3
-#define KS_L2_lcaron		0xb5
-#define KS_L2_sacute		0xb6
-#define KS_L2_caron		0xb7
-#define KS_L2_scaron		0xb9
-#define KS_L2_scedilla		0xba
-#define KS_L2_tcaron		0xbb
-#define KS_L2_zacute		0xbc
-#define KS_L2_dblacute		0xbd
-#define KS_L2_zcaron		0xbe
-#define KS_L2_zdotabove		0xbf
-#define KS_L2_Racute		0xc0
-#define KS_L2_Abreve		0xc3
-#define KS_L2_Lacute		0xc5
-#define KS_L2_Cacute		0xc6
-#define KS_L2_Ccaron		0xc8
-#define KS_L2_Eogonek		0xca
-#define KS_L2_Ecaron		0xcc
-#define KS_L2_Dcaron		0xcf
-#define KS_L2_Dstroke		0xd0
-#define KS_L2_Nacute		0xd1
-#define KS_L2_Ncaron		0xd2
-#define KS_L2_Odoubleacute	0xd5
-#define KS_L2_Rcaron		0xd8
-#define KS_L2_Uring		0xd9
-#define KS_L2_Udoubleacute	0xdb
-#define KS_L2_Tcedilla		0xde
-#define KS_L2_racute		0xe0
-#define KS_L2_abreve		0xe3
-#define KS_L2_lacute		0xe5
-#define KS_L2_cacute		0xe6
-#define KS_L2_ccaron		0xe8
-#define KS_L2_eogonek		0xea
-#define KS_L2_ecaron		0xec
-#define KS_L2_dcaron		0xef
-#define KS_L2_dstroke		0xf0
-#define KS_L2_nacute		0xf1
-#define KS_L2_odoubleacute	0xf5
-#define KS_L2_rcaron		0xf8
-#define KS_L2_uring		0xf9
-#define KS_L2_udoubleacute	0xfb
-#define KS_L2_tcedilla		0xfe
-#define KS_L2_dotabove		0xff
-
-/*
- * Group Latin-5 (iso8859-9)
- */
-
-#define KS_L5_Gbreve		0xd0
-#define KS_L5_Idotabove		0xdd
-#define KS_L5_Scedilla		0xde
-#define KS_L5_gbreve		0xf0
-#define KS_L5_idotless		0xfd
-#define KS_L5_scedilla		0xfe
-
- /*
- * Group Latin-7 (iso8859-13)
- */
-
-#define KS_L7_rightdblquot     0xa1
-#define KS_L7_dbllow9quot      0xa5
-#define KS_L7_Ostroke          0xa8
-#define KS_L7_Rcedilla         0xaa
-#define KS_L7_AE               0xaf
-#define KS_L7_leftdblquot      0xb4
-#define KS_L7_ostroke          0xb8
-#define KS_L7_rcedilla         0xba
-#define KS_L7_ae               0xbf
-#define KS_L7_Aogonek          0xc0
-#define KS_L7_Iogonek          0xc1
-#define KS_L7_Amacron          0xc2
-#define KS_L7_Cacute           0xc3
-#define KS_L7_Eogonek          0xc6
-#define KS_L7_Emacron          0xc7
-#define KS_L7_Ccaron           0xc8
-#define KS_L7_Zacute           0xca
-#define KS_L7_Edot             0xcb
-#define KS_L7_Gcedilla         0xcc
-#define KS_L7_Kcedilla         0xcd
-#define KS_L7_Imacron          0xce
-#define KS_L7_Lcedilla         0xcf
-#define KS_L7_Scaron           0xd0
-#define KS_L7_Nacute           0xd1
-#define KS_L7_Ncedilla         0xd2
-#define KS_L7_Omacron          0xd4
-#define KS_L7_Uogonek          0xd8
-#define KS_L7_Lstroke          0xd9
-#define KS_L7_Sacute           0xda
-#define KS_L7_Umacron          0xdb
-#define KS_L7_Zdot             0xdd
-#define KS_L7_Zcaron           0xde
-#define KS_L7_aogonek          0xe0
-#define KS_L7_iogonek          0xe1
-#define KS_L7_amacron          0xe2
-#define KS_L7_cacute           0xe3
-#define KS_L7_eogonek          0xe6
-#define KS_L7_emacron          0xe7
-#define KS_L7_ccaron           0xe8
-#define KS_L7_zacute           0xea
-#define KS_L7_edot             0xeb
-#define KS_L7_gcedilla         0xec
-#define KS_L7_kcedilla         0xed
-#define KS_L7_imacron          0xee
-#define KS_L7_lcedilla         0xef
-#define KS_L7_scaron           0xf0
-#define KS_L7_nacute           0xf1
-#define KS_L7_ncedilla         0xf2
-#define KS_L7_omacron          0xf4
-#define KS_L7_uogonek          0xf8
-#define KS_L7_lstroke          0xf9
-#define KS_L7_sacute           0xfa
-#define KS_L7_umacron          0xfb
-#define KS_L7_zdot             0xfd
-#define KS_L7_zcaron           0xfe
-#define KS_L7_rightsnglquot    0xff
+#define KS_gr_At		0xb6
+#define KS_gr_Et		0xb8
+#define KS_gr_Ht		0xb9
+#define KS_gr_It		0xba
+#define KS_gr_Ot		0xbc
+#define KS_gr_Yt		0xbe
+#define KS_gr_Vt		0xbf
+#define KS_gr_itd		0xc0
+#define KS_gr_A		0xc1
+#define KS_gr_B		0xc2
+#define KS_gr_G		0xc3
+#define KS_gr_D		0xc4
+#define KS_gr_E		0xc5
+#define KS_gr_Z		0xc6
+#define KS_gr_H		0xc7
+#define KS_gr_U		0xc8
+#define KS_gr_I		0xc9
+#define KS_gr_K		0xca
+#define KS_gr_L		0xcb
+#define KS_gr_M		0xcc
+#define KS_gr_N		0xcd
+#define KS_gr_J		0xce
+#define KS_gr_O		0xcf
+#define KS_gr_P		0xd0
+#define KS_gr_R		0xd1
+#define KS_gr_S		0xd3
+#define KS_gr_T		0xd4
+#define KS_gr_Y		0xd5
+#define KS_gr_F		0xd6
+#define KS_gr_X		0xd7
+#define KS_gr_C		0xd8
+#define KS_gr_V		0xd9
+#define KS_gr_Id		0xda
+#define KS_gr_Yd		0xdb
+#define KS_gr_at		0xdc
+#define KS_gr_et		0xdd
+#define KS_gr_ht		0xde
+#define KS_gr_it		0xdf
+#define KS_gr_ytd		0xe0
+#define KS_gr_a		0xe1
+#define KS_gr_b		0xe2
+#define KS_gr_g		0xe3
+#define KS_gr_d		0xe4
+#define KS_gr_e		0xe5
+#define KS_gr_z		0xe6
+#define KS_gr_h		0xe7
+#define KS_gr_u		0xe8
+#define KS_gr_i		0xe9
+#define KS_gr_k		0xea
+#define KS_gr_l		0xeb
+#define KS_gr_m		0xec
+#define KS_gr_n		0xed
+#define KS_gr_j		0xee
+#define KS_gr_o		0xef
+#define KS_gr_p		0xf0
+#define KS_gr_r		0xf1
+#define KS_gr_teliko_s		0xf2
+#define KS_gr_s		0xf3
+#define KS_gr_t		0xf4
+#define KS_gr_y		0xf5
+#define KS_gr_f		0xf6
+#define KS_gr_x		0xf7
+#define KS_gr_c		0xf8
+#define KS_gr_v		0xf9
+#define KS_gr_id		0xfa
+#define KS_gr_yd		0xfb
+#define KS_gr_ot		0xfc
+#define KS_gr_yt		0xfd
+#define KS_gr_vt		0xfe
 
 /*
  * Group 1 (modifiers)
@@ -513,7 +370,6 @@
 #define KS_Henkan_Mode		0xf114	/* Start/Stop Conversion */
 #define KS_Henkan		0xf115	/* Alias for Henkan_Mode */
 #define KS_Muhenkan		0xf116	/* Cancel Conversion */
-#define KS_Mode_Lock		0xf117
 
 /*
  * Group 2 (keypad) character in low byte
@@ -603,6 +459,8 @@
 #define KS_F19			0xf352
 #define KS_F20			0xf353
 
+#define KS_Power		0xf36d
+
 #define KS_Home			0xf381
 #define KS_Prior		0xf382
 #define KS_Next			0xf383
@@ -616,22 +474,18 @@
 #define KS_Execute		0xf38b
 #define KS_Find			0xf38c
 #define KS_Select		0xf38d
-#define KS_Again		0xf38e
-#define KS_Props		0xf38f
-#define KS_Undo			0xf390
-#define KS_Front		0xf391
-#define KS_Copy			0xf392
-#define KS_Open			0xf393
-#define KS_Paste		0xf394
-#define KS_Cut			0xf395
+#define KS_Again                0xf38e
+#define KS_Props                0xf38f
+#define KS_Undo                 0xf390
+#define KS_Front                0xf391
+#define KS_Copy                 0xf392
+#define KS_Open                 0xf393
+#define KS_Paste                0xf394
+#define KS_Cut                  0xf395
 
 #define KS_Menu			0xf3c0
 #define KS_Pause		0xf3c1
 #define KS_Print_Screen		0xf3c2
-
-#define KS_AudioMute		0xf3d1
-#define KS_AudioLower		0xf3d2
-#define KS_AudioRaise		0xf3d3
 
 /*
  * Group 4 (command)
@@ -647,8 +501,6 @@
 #define KS_Cmd_Screen7		0xf407
 #define KS_Cmd_Screen8		0xf408
 #define KS_Cmd_Screen9		0xf409
-#define KS_Cmd_Screen10		0xf40a
-#define KS_Cmd_Screen11		0xf40b
 #define KS_Cmd_Debugger		0xf420
 #define KS_Cmd_ResetEmul	0xf421
 #define KS_Cmd_ResetClose	0xf422
@@ -661,9 +513,13 @@
 #define KS_Cmd_ContrastUp	0xf429
 #define KS_Cmd_ContrastDown	0xf42a
 #define KS_Cmd_ContrastRotate	0xf42b
-#define KS_Cmd_ScrollBack	0xf42c
-#define KS_Cmd_ScrollFwd	0xf42d
-#define KS_Cmd_KbdReset		0xf42e
+#define KS_Cmd_ScrollFastUp	0xf42c
+#define KS_Cmd_ScrollFastDown	0xf42d
+#define KS_Cmd_ScrollSlowUp	0xf42e
+#define KS_Cmd_ScrollSlowDown	0xf42f
+#define KS_Cmd_VolumeUp		0xf430
+#define KS_Cmd_VolumeDown	0xf431
+#define KS_Cmd_VolumeToggle	0xf432
 
 /*
  * Group 5 (internal)
@@ -677,14 +533,14 @@
  * keysym groups
  */
 
-#define KS_GROUP_Mod		0xf100
-#define KS_GROUP_Keypad		0xf200
-#define KS_GROUP_Function	0xf300
-#define KS_GROUP_Command	0xf400
-#define KS_GROUP_Internal	0xf500
-#define KS_GROUP_Dead		0xf801		/* not encoded in keysym */
-#define KS_GROUP_Ascii		0xf802		/* not encoded in keysym */
-#define KS_GROUP_Keycode	0xf803		/* not encoded in keysym */
+#define KS_GROUP_Mod		0xf100U
+#define KS_GROUP_Keypad		0xf200U
+#define KS_GROUP_Function	0xf300U
+#define KS_GROUP_Command	0xf400U
+#define KS_GROUP_Internal	0xf500U
+#define KS_GROUP_Dead		0xf801U		/* not encoded in keysym */
+#define KS_GROUP_Ascii		0xf802U		/* not encoded in keysym */
+#define KS_GROUP_Keycode	0xf803U		/* not encoded in keysym */
 
 #define KS_NUMKEYCODES	0x1000
 #define KS_KEYCODE(v)	((v) | 0xe000)
@@ -704,73 +560,52 @@
 #define KB_ENCODING(e)		((e) & 0x0000ff00)
 #define KB_VARIANT(e)		((e) & 0xffff00ff)
 
-#define	KB_NONE			0x0000
-#define KB_USER			0x0100
-#define KB_US			0x0200
-#define KB_DE			0x0300
-#define KB_DK			0x0400
-#define KB_IT			0x0500
-#define KB_FR			0x0600
-#define KB_UK			0x0700
-#define KB_JP			0x0800
-#define KB_SV			0x0900
-#define KB_NO			0x0a00
-#define KB_ES			0x0b00
-#define KB_HU			0x0c00
-#define KB_BE			0x0d00
-#define KB_RU			0x0e00
-#define KB_SG			0x0f00
-#define KB_SF			0x1000
-#define KB_PT			0x1100
-#define KB_UA			0x1200
-#define KB_LT			0x1300
-#define KB_LA			0x1400
-#define KB_BR			0x1500
-#define KB_NL			0x1600
-#define KB_TR			0x1700
-#define KB_PL			0x1800
-#define KB_SI			0x1900
-#define KB_CF			0x1a00
-#define KB_LV			0x1b00
+#define KB_NODEAD		0x0001
+#define KB_DECLK		0x0002	/* DEC LKnnn layout */
+#define KB_LK401		0x0004	/* DEC LK401 instead LK201 */
+#define KB_SWAPCTRLCAPS		0x0008	/* Swap Left-Control and Caps-Lock */
+#define KB_DVORAK		0x0010	/* Dvorak layout */
+#define KB_METAESC		0x0020	/* generate ESC prefix on ALT-key */
+#define KB_IOPENER		0x0040	/* f1-f12 -> ESC,f1-f11 */
+#define KB_MACHDEP		0x0080	/* machine dependent */
+#define KB_COLEMAK	    0x00010000	/* Colemak layout */
 
-#define KB_NODEAD		0x000001 /* disable dead accents */
-#define KB_DECLK		0x000002 /* DEC LKnnn layout */
-#define KB_LK401		0x000004 /* DEC LK401 instead LK201 */
-#define KB_SWAPCTRLCAPS		0x000008 /* swap Left-Control and Caps-Lock */
-#define KB_DVORAK		0x000010 /* Dvorak layout */
-#define KB_METAESC		0x000020 /* generate ESC prefix on ALT-key */
-#define KB_IOPENER		0x000040 /* f1-f12 -> ESC,f1-f11 */
-#define KB_MACHDEP		0x000080 /* machine dependent */
-#define	KB_APPLE		0x010000 /* Apple specific layout */
+/*
+ * Define keyboard type and texts all in one table.
+ * Include default variants (and their text form) for sysinst.
+ * Sort (loosely) by country name.
+ */
+#define KB_ENC_FUN(action) \
+action(KB_USER,	0,	0x0100,	"user",	,	"User-defined")	\
+action(KB_US,	0,	0x0200,	"us",	,	"US-English")	\
+action(KB_UK,	0,	0x0700,	"uk",	,	"UK-English")	\
+action(KB_BE,	0,	0x1300,	"be",	,	"Belgian")	\
+action(KB_DK,	0,	0x0400,	"dk",	,	"Danish")	\
+action(KB_FI,	0,	0x0900,	"fi",	,	"Finnish")	\
+action(KB_FR,	0,	0x0600,	"fr",	,	"French")	\
+action(KB_DE, KB_NODEAD,0x0300,	"de",".nodead",	"German")	\
+action(KB_GR,	0,	0x1400,	"gr",	,	"Greek")	\
+action(KB_HU,	0,	0x0c00,	"hu",	,	"Hungarian")	\
+action(KB_IT,	0,	0x0500,	"it",	,	"Italian")	\
+action(KB_JP,	0,	0x0800,	"jp",	,	"Japanese")	\
+action(KB_NO,	0,	0x0a00,	"no",	,	"Norwegian")	\
+action(KB_PL,	0,	0x0d00,	"pl",	,	"Polish")	\
+action(KB_PT,	0,	0x1100,	"pt",	,	"Portugese")	\
+action(KB_RU,	0,	0x0e00,	"ru",	,	"Russian")	\
+action(KB_ES,	0,	0x0b00,	"es",	,	"Spanish")	\
+action(KB_SV,	0,	0x0900,	"sv",	,	"Swedish")	\
+action(KB_SF,	0,	0x1000,	"sf",	,	"Swiss French")	\
+action(KB_SG,	0,	0x0f00,	"sg",	,	"Swiss German")	\
+action(KB_UA,	0,	0x1200,	"ua",	,	"Ukrainian")
+#define KB_NONE 0x0000
 
-#define KB_ENCTAB \
-	{ KB_USER,	"user" }, \
-	{ KB_US,	"us" }, \
-	{ KB_DE,	"de" }, \
-	{ KB_DK,	"dk" }, \
-	{ KB_IT,	"it" }, \
-	{ KB_FR,	"fr" }, \
-	{ KB_UK,	"uk" }, \
-	{ KB_JP,	"jp" }, \
-	{ KB_SV,	"sv" }, \
-	{ KB_NO,	"no" }, \
-	{ KB_ES,	"es" }, \
-	{ KB_HU,	"hu" }, \
-	{ KB_BE,	"be" }, \
-	{ KB_RU,	"ru" }, \
-	{ KB_UA,	"ua" }, \
-	{ KB_SG,	"sg" }, \
-	{ KB_SF,	"sf" }, \
-	{ KB_PT,	"pt" }, \
-	{ KB_LT,	"lt" }, \
-	{ KB_LA,	"la" }, \
-	{ KB_BR,	"br" },	\
-	{ KB_NL,	"nl" }, \
-	{ KB_TR,	"tr" }, \
-	{ KB_PL,	"pl" }, \
-	{ KB_SI,	"si" }, \
-	{ KB_CF,	"cf" }, \
-	{ KB_LV,	"lv" }
+/* Define all the KB_xx numeric values using above table */
+#define KBF_ENUM(tag, tagf, value, cc, ccf, country) tag=value,
+enum { KB_ENC_FUN(KBF_ENUM) KB_NEXT=0x1500 };
+
+/* Define list of KB_xxx and country codes for array initialisation */
+#define KBF_ENCTAB(tag, tagf, value, cc, ccf, country) { tag, cc },
+#define KB_ENCTAB KB_ENC_FUN(KBF_ENCTAB)
 
 #define KB_VARTAB \
 	{ KB_NODEAD,	"nodead" }, \
@@ -781,6 +616,6 @@
 	{ KB_METAESC,	"metaesc" }, \
 	{ KB_IOPENER,	"iopener" }, \
 	{ KB_MACHDEP,	"machdep" }, \
-	{ KB_APPLE,	"apple" }
+	{ KB_COLEMAK,	"colemak" }
 
 #endif /* !_DEV_WSCONS_WSKSYMDEF_H_ */

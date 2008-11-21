@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.11 2005/12/11 12:17:05 christos Exp $	*/
+/*	$NetBSD: cpu.h,v 1.21 2008/02/27 18:26:15 xtraeme Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -93,6 +93,10 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
+	cpuid_t	ci_cpuid;
+	int	ci_mtx_count;
+	int	ci_mtx_oldspl;
+	int	ci_want_resched;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -121,7 +125,6 @@ struct clockframe {
 } __attribute__((packed));
 
 #define	CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
-#define	CLKF_BASEPRI(framep)	(((framep)->sr & PSL_IPL) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
 #if 0
 /* We would like to do it this way... */
@@ -136,40 +139,25 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-extern int want_resched;	/* resched() was called */
-#define	need_resched(ci)	{ want_resched++; aston(); }
+#define	cpu_need_resched(ci, flags)	\
+	do { ci->ci_want_resched = 1; aston(); } while (/* CONSTCOND */0)
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the hp300, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	{ (p)->p_flag |= P_OWEUPC; aston(); }
+#define	cpu_need_proftick(l)	\
+	do { (l)->l_pflag |= LP_OWEUPC; aston(); } while (/* CONSTCOND */0)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	signotify(p)	aston()
+#define	cpu_signotify(l)	aston()
 
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending++)
-
-/*
- * simulated software interrupt register
- */
-extern unsigned char ssir;
-
-#define SIR_NET		0x1
-#define SIR_CLOCK	0x2
-#define SIR_ZS		0x4
-
-#define siroff(x)	ssir &= ~(x)
-#define setsoftnet()	ssir |= SIR_NET
-#define setsoftclock()	ssir |= SIR_CLOCK
-#define setsoftzs()	ssir |= SIR_ZS
-
-void softzs __P((void));
 
 #endif /* _KERNEL */
 
@@ -178,11 +166,6 @@ void softzs __P((void));
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_MAXID		2	/* number of valid machdep ids */
-
-#define CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "console_device", CTLTYPE_STRUCT }, \
-}
 
 #ifdef _KERNEL
 
@@ -194,34 +177,20 @@ void softzs __P((void));
 #define	M68K_MMU_MOTOROLA
 #endif /* ! M68K_MMU_MOTOROLA */
 
-struct frame;
 struct fpframe;
-struct pcb;
 
 /* locore.s functions */
 void	m68881_save __P((struct fpframe *));
 void	m68881_restore __P((struct fpframe *));
-int	suline __P((caddr_t, caddr_t));
-void	savectx __P((struct pcb *));
-void	switch_exit __P((struct lwp *));
-void	switch_lwp_exit __P((struct lwp *));
-void	proc_trampoline __P((void));
+int	suline __P((void *, void *));
 void	loadustp __P((int));
 
 void	doboot __P((void))
 	__attribute__((__noreturn__));
 
 /* machdep.c functions */
-int	badaddr __P((caddr_t));
-int	badbaddr __P((caddr_t));
-
-/* sys_machdep.c functions */
-int	cachectl1 __P((unsigned long, vaddr_t, size_t, struct proc *));
-
-/* vm_machdep.c functions */
-void	physaccess __P((caddr_t, caddr_t, int, int));
-void	physunaccess __P((caddr_t, int));
-int	kvtop __P((caddr_t));
+int	badaddr __P((void *));
+int	badbaddr __P((void *));
 
 void kgdb_panic __P((void));
 

@@ -1,4 +1,3 @@
-/*	$OpenBSD: hci_misc.c,v 1.2 2008/02/24 21:34:48 uwe Exp $	*/
 /*	$NetBSD: hci_misc.c,v 1.3 2007/09/16 19:59:30 plunky Exp $	*/
 
 /*-
@@ -31,6 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hci_misc.c,v 1.3 2007/09/16 19:59:30 plunky Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -62,7 +64,7 @@ hci_route_lookup(bdaddr_t *src, bdaddr_t *dest)
 	 * Walk the ACL connections, if we have a connection
 	 * to 'dest' already then thats best..
 	 */
-	TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
+	SIMPLEQ_FOREACH(unit, &hci_unit_list, hci_next) {
 		if ((unit->hci_flags & BTF_UP) == 0)
 			continue;
 
@@ -79,7 +81,7 @@ hci_route_lookup(bdaddr_t *src, bdaddr_t *dest)
 	 * Now check all the memos to see if there has been an
 	 * inquiry repsonse..
 	 */
-	TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
+	SIMPLEQ_FOREACH(unit, &hci_unit_list, hci_next) {
 		if ((unit->hci_flags & BTF_UP) == 0)
 			continue;
 
@@ -92,7 +94,7 @@ hci_route_lookup(bdaddr_t *src, bdaddr_t *dest)
 	 * Last ditch effort, lets use the first unit we find
 	 * thats up and running. (XXX settable default route?)
 	 */
-	TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
+	SIMPLEQ_FOREACH(unit, &hci_unit_list, hci_next) {
 		if ((unit->hci_flags & BTF_UP) == 0)
 			continue;
 

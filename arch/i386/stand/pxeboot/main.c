@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.11 2005/11/13 22:23:30 dsl Exp $	*/
+/*	$NetBSD: main.c,v 1.15 2008/09/26 14:12:50 christos Exp $	*/
 
 /*
  * Copyright (c) 1996
@@ -46,14 +46,14 @@
 
 #include <libi386.h>
 #include "pxeboot.h"
+#include "bootmod.h"
 
 extern struct x86_boot_params boot_params;
 
 int errno;
 int debug;
 
-extern char	bootprog_name[], bootprog_rev[], bootprog_date[],
-		bootprog_maker[];
+extern char	bootprog_name[], bootprog_rev[], bootprog_kernrev[];
 
 int	main(void);
 
@@ -61,6 +61,8 @@ void	command_help __P((char *));
 void	command_quit __P((char *));
 void	command_boot __P((char *));
 void	command_consdev(char *);
+void	command_load(char *);
+void	command_modules(char *);
 
 const struct bootblk_command commands[] = {
 	{ "help",	command_help },
@@ -68,28 +70,15 @@ const struct bootblk_command commands[] = {
 	{ "quit",	command_quit },
 	{ "boot",	command_boot },
 	{ "consdev",	command_consdev },
+	{ "modules",    command_modules },
+	{ "load",	command_load },
 	{ NULL,		NULL },
 };
-
-#ifdef COMPAT_OLDBOOT
-int
-parsebootfile(const char *fname, char **fsname, char **devname,
-    int *unit, int *partition, const char **file)
-{
-	return (EINVAL);
-}
-
-int 
-biosdisk_gettype(struct open_file *f)
-{
-	return (0);
-}
-#endif
 
 static int 
 bootit(const char *filename, int howto)
 {
-	if (exec_netbsd(filename, 0, howto) < 0)
+	if (exec_netbsd(filename, 0, howto, 0) < 0)
 		printf("boot: %s\n", strerror(errno));
 	else
 		printf("boot returned\n");
@@ -103,11 +92,9 @@ print_banner(void)
 	int ext = getextmem();
 
 	printf("\n"
-	       ">> %s, Revision %s\n"
-	       ">> (%s, %s)\n"
+	       ">> %s, Revision %s (from NetBSD %s)\n"
 	       ">> Memory: %d/%d k\n",
-	       bootprog_name, bootprog_rev,
-	       bootprog_maker, bootprog_date,
+	       bootprog_name, bootprog_rev, bootprog_kernrev,
 	       base, ext);
 }
 
@@ -154,6 +141,8 @@ command_help(char *arg)
 	       "boot [filename] [-adsqv]\n"
 	       "     (ex. \"netbsd.old -s\"\n"
 	       "consdev {pc|com[0123]|com[0123]kbd|auto}\n"
+	       "modules {enabled|disabled}\n"
+	       "load {path_to_module}\n"
 	       "help|?\n"
 	       "quit\n");
 }
@@ -210,4 +199,43 @@ command_consdev(char *arg)
 		}
 	}
 	printf("invalid console device.\n");
+}
+void
+command_modules(char *arg)
+{
+	if (strcmp(arg, "enabled") == 0 ||
+			strcmp(arg, "on") == 0)
+		boot_modules_enabled = true;
+	else if (strcmp(arg, "disabled") == 0 ||
+			strcmp(arg, "off") == 0)
+		boot_modules_enabled = false;
+	else
+		printf("invalid flag, must be 'enabled' or 'disabled'.\n");
+}
+
+void
+command_load(char *arg)
+{
+	boot_module_t *bm, *bmp;
+	size_t len;
+	char *str;
+	
+	bm = alloc(sizeof(boot_module_t));
+	len = strlen(arg) + 1;
+	str = alloc(len);
+	if (bm == NULL || str == NULL) {
+		printf("couldn't allocate module\n");
+		return;
+	}
+	memcpy(str, arg, len);
+	bm->bm_path = str;
+	bm->bm_next = NULL;
+	if (boot_modules == NULL)
+		boot_modules = bm;
+	else {
+		for (bmp = boot_modules; bmp->bm_next;
+				bmp = bmp->bm_next)
+			;
+		bmp->bm_next = bm;
+	}
 }

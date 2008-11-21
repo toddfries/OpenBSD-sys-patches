@@ -1,4 +1,4 @@
-/*	$NetBSD: if_netdock_nubus.c,v 1.11 2005/12/24 23:24:01 perry Exp $	*/
+/*	$NetBSD: if_netdock_nubus.c,v 1.19 2008/11/07 00:20:02 dyoung Exp $	*/
 
 /*
  * Copyright (C) 2000,2002 Daishi Kato <daishi@axlight.com>
@@ -43,7 +43,7 @@
 /***********************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_netdock_nubus.c,v 1.11 2005/12/24 23:24:01 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_netdock_nubus.c,v 1.19 2008/11/07 00:20:02 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -118,7 +118,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_netdock_nubus.c,v 1.11 2005/12/24 23:24:01 perry 
 /***********************/
 
 typedef struct netdock_softc {
-	struct device	sc_dev;
+	device_t	sc_dev;
 	struct ethercom	sc_ethercom;
 #define sc_if		sc_ethercom.ec_if
 
@@ -146,7 +146,7 @@ void	netdock_intr(void *);
 static void	netdock_watchdog(struct ifnet *);
 static int	netdock_init(struct netdock_softc *);
 static int	netdock_stop(struct netdock_softc *);
-static int	netdock_ioctl(struct ifnet *, u_long, caddr_t);
+static int	netdock_ioctl(struct ifnet *, u_long, void *);
 static void	netdock_start(struct ifnet *);
 static void	netdock_reset(struct netdock_softc *);
 static void	netdock_txint(struct netdock_softc *);
@@ -357,9 +357,9 @@ netdock_setup(struct netdock_softc *sc, u_int8_t *lladdr)
 
 	memcpy(sc->sc_enaddr, lladdr, ETHER_ADDR_LEN);
 	printf("%s: Ethernet address %s\n",
-	    sc->sc_dev.dv_xname, ether_sprintf(lladdr));
+	    sc->sc_dev->dv_xname, ether_sprintf(lladdr));
 
-	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
+	memcpy(ifp->if_xname, device_xname(sc->sc_dev), IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_ioctl = netdock_ioctl;
 	ifp->if_start = netdock_start;
@@ -374,33 +374,34 @@ netdock_setup(struct netdock_softc *sc, u_int8_t *lladdr)
 }
 
 static int
-netdock_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+netdock_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct ifaddr *ifa;
-	struct ifreq *ifr;
 	struct netdock_softc *sc = ifp->if_softc;
 	int s = splnet();
 	int err = 0;
 	int temp;
 
 	switch (cmd) {
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
+		(void)netdock_init(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-			(void)netdock_init(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif
 		default:
-			(void)netdock_init(sc);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
+		if ((err = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		/* XXX see the comment in ed_ioctl() about code re-use */
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			netdock_stop(sc);
@@ -418,13 +419,7 @@ netdock_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
-		if (cmd == SIOCADDMULTI)
-			err = ether_addmulti(ifr, &sc->sc_ethercom);
-		else
-			err = ether_delmulti(ifr, &sc->sc_ethercom);
-
-		if (err == ENETRESET) {
+		if ((err = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
 			if (ifp->if_flags & IFF_RUNNING) {
 				temp = ifp->if_flags & IFF_UP;
 				netdock_reset(sc);
@@ -434,7 +429,7 @@ netdock_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 	default:
-		err = EINVAL;
+		err = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 	splx(s);
@@ -457,7 +452,7 @@ netdock_start(struct ifnet *ifp)
 
 		if ((m->m_flags & M_PKTHDR) == 0)
 			panic("%s: netdock_start: no header mbuf",
-				sc->sc_dev.dv_xname);
+			    device_xname(sc->sc_dev));
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -580,7 +575,8 @@ netdock_put(struct netdock_softc *sc, struct mbuf *m0)
 		totlen += m->m_len;
 
 	if (totlen >= ETHER_MAX_LEN)
-		panic("%s: netdock_put: packet overflow", sc->sc_dev.dv_xname);
+		panic("%s: netdock_put: packet overflow",
+		    device_xname(sc->sc_dev));
 
 	totlen += 6;
 	tmplen = totlen;
@@ -822,7 +818,7 @@ netdock_get(struct netdock_softc *sc, int datalen)
 		}
 
 		if (mp == &top) {
-			caddr_t newdata = (caddr_t)
+			char *newdata = (char *)
 			    ALIGN(m->m_data + sizeof(struct ether_header)) -
 			    sizeof(struct ether_header);
 			len -= newdata - m->m_data;

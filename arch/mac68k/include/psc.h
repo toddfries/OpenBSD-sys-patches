@@ -1,5 +1,4 @@
-/*	$OpenBSD: psc.h,v 1.5 2004/12/14 14:50:55 martin Exp $	*/
-/*	$NetBSD: psc.h,v 1.5 2004/03/26 12:15:46 wiz Exp $	*/
+/*	$NetBSD: psc.h,v 1.7 2005/12/11 12:18:03 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997 David Huang <khym@azeotrope.org>
@@ -72,8 +71,8 @@ int	remove_psc_lev6_intr(int);
  */
 
 /* PSC interrupt registers */
-#define PSC_ISR_BASE   0x100   /* ISR is BASE + 0x10 * level */
-#define PSC_IER_BASE   0x104   /* IER is BASE + 0x10 * level */
+#define PSC_ISR_BASE	0x100	/* ISR is BASE + 0x10 * level */
+#define PSC_IER_BASE	0x104	/* IER is BASE + 0x10 * level */
 
 #define	PSC_LEV3_ISR	0x130	/* level 3 interrupt status register */
 #define	PSC_LEV3_IER	0x134	/* level 3 interrupt enable register */
@@ -94,13 +93,13 @@ int	remove_psc_lev6_intr(int);
 /* PSC DMA channel control registers */
 #define	PSC_CTLBASE	0xc00
 
-#define PSC_SCSI_CTL	0xc00	/* SCSI control/status */
+#define	PSC_SCSI_CTL	0xc00	/* SCSI control/status */
 #define	PSC_ENETRD_CTL	0xc10	/* MACE receive DMA channel control/status */
 #define	PSC_ENETWR_CTL	0xc20	/* MACE transmit DMA channel control/status */
 #define	PSC_FDC_CTL	0xc30	/* Floppy disk */
-#define PSC_SCCA_CTL	0xc40	/* SCC channel A */
-#define PSC_SCCB_CTL	0xc50	/* SCC channel B */
-#define PSC_SCCATX_CTL	0xc60	/* SCC channel A transmit */
+#define	PSC_SCCA_CTL	0xc40	/* SCC channel A */
+#define	PSC_SCCB_CTL	0xc50	/* SCC channel B */
+#define	PSC_SCCATX_CTL	0xc60	/* SCC channel A transmit */
 
 /* PSC DMA channels */
 #define	PSC_ADDRBASE	0x1000
@@ -108,7 +107,7 @@ int	remove_psc_lev6_intr(int);
 #define	PSC_CMDBASE	0x1008
 
 #define	PSC_SCSI_ADDR	0x1000	/* SCSI DMA address register */
-#define PSC_SCSI_LEN	0x1004	/* SCSI DMA buffer count */
+#define	PSC_SCSI_LEN	0x1004	/* SCSI DMA buffer count */
 #define	PSC_SCSI_CMD	0x1008	/* SCSI DMA command register */
 #define	PSC_ENETRD_ADDR	0x1020	/* MACE receive DMA address register */
 #define	PSC_ENETRD_LEN	0x1024	/* MACE receive DMA buffer count */

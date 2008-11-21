@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_gpio.c,v 1.20 2008/05/19 18:42:12 miod Exp $ */
-/*	$NetBSD: pxa2x0_gpio.c,v 1.2 2003/07/15 00:24:55 lukem Exp $	*/
+/*	$NetBSD: pxa2x0_gpio.c,v 1.11 2008/11/07 16:13:16 rafal Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -36,20 +35,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_gpio.c,v 1.11 2008/11/07 16:13:16 rafal Exp $");
+
+#include "opt_pxa2x0_gpio.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/evcount.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
 
-#include <arm/cpufunc.h>
-
+#include <arm/xscale/pxa2x0cpu.h>
 #include <arm/xscale/pxa2x0reg.h>
 #include <arm/xscale/pxa2x0var.h>
 #include <arm/xscale/pxa2x0_gpio.h>
+
+#include "locators.h"
 
 struct gpio_irq_handler {
 	struct gpio_irq_handler *gh_next;
@@ -58,8 +62,6 @@ struct gpio_irq_handler {
 	int gh_spl;
 	u_int gh_gpio;
 	int gh_level;
-	int gh_irq;
-	struct evcount gh_count;
 };
 
 struct pxagpio_softc {
@@ -67,53 +69,33 @@ struct pxagpio_softc {
 	bus_space_tag_t sc_bust;
 	bus_space_handle_t sc_bush;
 	void *sc_irqcookie[4];
-	u_int32_t sc_mask[3];
+	u_int32_t sc_mask[4];
 #ifdef PXAGPIO_HAS_GPION_INTRS
 	struct gpio_irq_handler *sc_handlers[GPIO_NPINS];
-	int sc_minipl;
-	int sc_maxipl;
 #else
 	struct gpio_irq_handler *sc_handlers[2];
 #endif
-	int npins;
-	int pxa27x_pins;
 };
 
-int	pxagpio_match(struct device *, void *, void *);
-void	pxagpio_attach(struct device *, struct device *, void *);
+static int	pxagpio_match(struct device *, struct cfdata *, void *);
+static void	pxagpio_attach(struct device *, struct device *, void *);
 
-#ifdef __NetBSD__
 CFATTACH_DECL(pxagpio, sizeof(struct pxagpio_softc),
     pxagpio_match, pxagpio_attach, NULL, NULL);
-#else
-struct cfattach pxagpio_ca = {
-        sizeof (struct pxagpio_softc), pxagpio_match, pxagpio_attach
-};
-	 
-struct cfdriver pxagpio_cd = {
-	NULL, "pxagpio", DV_DULL
-};
-
-#endif
 
 static struct pxagpio_softc *pxagpio_softc;
 static vaddr_t pxagpio_regs;
 #define GPIO_BOOTSTRAP_REG(reg)	\
 	(*((volatile u_int32_t *)(pxagpio_regs + (reg))))
 
-void pxa2x0_gpio_set_intr_level(u_int, int);
-int pxagpio_intr0(void *);
-int pxagpio_intr1(void *);
+static int gpio_intr0(void *);
+static int gpio_intr1(void *);
 #ifdef PXAGPIO_HAS_GPION_INTRS
-int pxagpio_dispatch(struct pxagpio_softc *, int);
-int pxagpio_intrN(void *);
-int pxagpio_intrlow(void *);
-void pxa2x0_gpio_intr_fixup(int minipl, int maxipl);
+static int gpio_dispatch(struct pxagpio_softc *, int);
+static int gpio_intrN(void *);
 #endif
-u_int32_t pxagpio_reg_read(struct pxagpio_softc *sc, int reg);
-void pxagpio_reg_write(struct pxagpio_softc *sc, int reg, u_int32_t val);
 
-u_int32_t
+static inline u_int32_t
 pxagpio_reg_read(struct pxagpio_softc *sc, int reg)
 {
 	if (__predict_true(sc != NULL))
@@ -124,7 +106,7 @@ pxagpio_reg_read(struct pxagpio_softc *sc, int reg)
 	panic("pxagpio_reg_read: not bootstrapped");
 }
 
-void
+static inline void
 pxagpio_reg_write(struct pxagpio_softc *sc, int reg, u_int32_t val)
 {
 	if (__predict_true(sc != NULL))
@@ -137,8 +119,8 @@ pxagpio_reg_write(struct pxagpio_softc *sc, int reg, u_int32_t val)
 	return;
 }
 
-int
-pxagpio_match(struct device *parent, void *cf, void *aux)
+static int
+pxagpio_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct pxaip_attach_args *pxa = aux;
 
@@ -150,7 +132,7 @@ pxagpio_match(struct device *parent, void *cf, void *aux)
 	return (1);
 }
 
-void
+static void
 pxagpio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pxagpio_softc *sc = (struct pxagpio_softc *)self;
@@ -158,21 +140,15 @@ pxagpio_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_bust = pxa->pxa_iot;
 
-	printf(": GPIO Controller\n");
-
-	if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X) {
-		sc->npins = GPIO_NPINS;
-		sc->pxa27x_pins = 1;
-	} else  {
-		sc->npins = GPIO_NPINS_25x;
-		sc->pxa27x_pins = 0;
-	}
+	aprint_normal(": GPIO Controller\n");
 
 	if (bus_space_map(sc->sc_bust, pxa->pxa_addr, pxa->pxa_size, 0,
 	    &sc->sc_bush)) {
-		printf("%s: Can't map registers!\n", sc->sc_dev.dv_xname);
+		aprint_error("%s: Can't map registers!\n", sc->sc_dev.dv_xname);
 		return;
 	}
+
+	pxagpio_regs = (vaddr_t)bus_space_vaddr(sc->sc_bust, sc->sc_bush);
 
 	memset(sc->sc_handlers, 0, sizeof(sc->sc_handlers));
 
@@ -182,19 +158,28 @@ pxagpio_attach(struct device *parent, struct device *self, void *aux)
 	pxagpio_reg_write(sc, GPIO_GRER0, 0);
 	pxagpio_reg_write(sc, GPIO_GRER1, 0);
 	pxagpio_reg_write(sc, GPIO_GRER2, 0);
-	pxagpio_reg_write(sc, GPIO_GRER3, 0);
 	pxagpio_reg_write(sc, GPIO_GFER0, 0);
 	pxagpio_reg_write(sc, GPIO_GFER1, 0);
 	pxagpio_reg_write(sc, GPIO_GFER2, 0);
-	pxagpio_reg_write(sc, GPIO_GFER3, 0);
 	pxagpio_reg_write(sc, GPIO_GEDR0, ~0);
 	pxagpio_reg_write(sc, GPIO_GEDR1, ~0);
 	pxagpio_reg_write(sc, GPIO_GEDR2, ~0);
-	pxagpio_reg_write(sc, GPIO_GEDR3, ~0);
+#ifdef	CPU_XSCALE_PXA270
+	if (CPU_IS_PXA270) {
+		pxagpio_reg_write(sc, GPIO_GRER3, 0);
+		pxagpio_reg_write(sc, GPIO_GFER3, 0);
+		pxagpio_reg_write(sc, GPIO_GEDR3, ~0);
+	}
+#endif
 
 #ifdef PXAGPIO_HAS_GPION_INTRS
-	sc->sc_minipl = IPL_NONE;
-	sc->sc_maxipl = IPL_NONE;
+	sc->sc_irqcookie[2] = pxa2x0_intr_establish(PXA2X0_INT_GPION, IPL_BIO,
+	    gpio_intrN, sc);
+	if (sc->sc_irqcookie[2] == NULL) {
+		aprint_error("%s: failed to hook main GPIO interrupt\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
 #endif
 
 	sc->sc_irqcookie[0] = sc->sc_irqcookie[1] = NULL;
@@ -211,73 +196,82 @@ pxa2x0_gpio_bootstrap(vaddr_t gpio_regs)
 
 void *
 pxa2x0_gpio_intr_establish(u_int gpio, int level, int spl, int (*func)(void *),
-    void *arg, char *name)
+    void *arg)
 {
 	struct pxagpio_softc *sc = pxagpio_softc;
 	struct gpio_irq_handler *gh;
-	u_int32_t bit;
+	u_int32_t bit, reg;
 
-#ifdef DEBUG
 #ifdef PXAGPIO_HAS_GPION_INTRS
-	if (gpio >= sc->npins)
+	if (gpio >= GPIO_NPINS)
 		panic("pxa2x0_gpio_intr_establish: bad pin number: %d", gpio);
 #else
 	if (gpio > 1)
 		panic("pxa2x0_gpio_intr_establish: bad pin number: %d", gpio);
 #endif
-#endif
 
-	if (GPIO_FN_IS_OUT(pxa2x0_gpio_get_function(gpio)) != GPIO_IN)
+	if (!GPIO_IS_GPIO_IN(pxa2x0_gpio_get_function(gpio)))
 		panic("pxa2x0_gpio_intr_establish: Pin %d not GPIO_IN", gpio);
 
-	gh = (struct gpio_irq_handler *)malloc(sizeof(struct gpio_irq_handler),
+	switch (level) {
+	case IST_EDGE_FALLING:
+	case IST_EDGE_RISING:
+	case IST_EDGE_BOTH:
+		break;
+
+	default:
+		panic("pxa2x0_gpio_intr_establish: bad level: %d", level);
+		break;
+	}
+
+	if (sc->sc_handlers[gpio] != NULL)
+		panic("pxa2x0_gpio_intr_establish: illegal shared interrupt");
+
+	MALLOC(gh, struct gpio_irq_handler *, sizeof(struct gpio_irq_handler),
 	    M_DEVBUF, M_NOWAIT);
 
 	gh->gh_func = func;
 	gh->gh_arg = arg;
 	gh->gh_spl = spl;
 	gh->gh_gpio = gpio;
-	gh->gh_irq = gpio+32;
 	gh->gh_level = level;
-	evcount_attach(&gh->gh_count, name, (void *)&gh->gh_irq, &evcount_intr);
-
 	gh->gh_next = sc->sc_handlers[gpio];
 	sc->sc_handlers[gpio] = gh;
 
 	if (gpio == 0) {
 		KDASSERT(sc->sc_irqcookie[0] == NULL);
 		sc->sc_irqcookie[0] = pxa2x0_intr_establish(PXA2X0_INT_GPIO0,
-		    spl, pxagpio_intr0, sc, NULL);
+		    spl, gpio_intr0, sc);
 		KDASSERT(sc->sc_irqcookie[0]);
-	} else if (gpio == 1) {
+	} else
+	if (gpio == 1) {
 		KDASSERT(sc->sc_irqcookie[1] == NULL);
 		sc->sc_irqcookie[1] = pxa2x0_intr_establish(PXA2X0_INT_GPIO1,
-		    spl, pxagpio_intr1, sc, NULL);
+		    spl, gpio_intr1, sc);
 		KDASSERT(sc->sc_irqcookie[1]);
-	} else {
-#ifdef PXAGPIO_HAS_GPION_INTRS
-		int minipl, maxipl;
-		
-		if (sc->sc_maxipl == IPL_NONE || spl > sc->sc_maxipl) {
-			maxipl = spl;
-		} else {
-			maxipl = sc->sc_maxipl;
-		}
-
-		
-		if (sc->sc_minipl == IPL_NONE || spl < sc->sc_minipl) {
-			minipl = spl;
-		} else {
-			minipl = sc->sc_minipl;
-		}
-		pxa2x0_gpio_intr_fixup(minipl, maxipl);
-#endif
 	}
 
 	bit = GPIO_BIT(gpio);
 	sc->sc_mask[GPIO_BANK(gpio)] |= bit;
 
-	pxa2x0_gpio_set_intr_level(gpio, gh->gh_level);
+	switch (level) {
+	case IST_EDGE_FALLING:
+		reg = pxagpio_reg_read(sc, GPIO_REG(GPIO_GFER0, gpio));
+		pxagpio_reg_write(sc, GPIO_REG(GPIO_GFER0, gpio), reg | bit);
+		break;
+
+	case IST_EDGE_RISING:
+		reg = pxagpio_reg_read(sc, GPIO_REG(GPIO_GRER0, gpio));
+		pxagpio_reg_write(sc, GPIO_REG(GPIO_GRER0, gpio), reg | bit);
+		break;
+
+	case IST_EDGE_BOTH:
+		reg = pxagpio_reg_read(sc, GPIO_REG(GPIO_GFER0, gpio));
+		pxagpio_reg_write(sc, GPIO_REG(GPIO_GFER0, gpio), reg | bit);
+		reg = pxagpio_reg_read(sc, GPIO_REG(GPIO_GRER0, gpio));
+		pxagpio_reg_write(sc, GPIO_REG(GPIO_GRER0, gpio), reg | bit);
+		break;
+	}
 
 	return (gh);
 }
@@ -288,8 +282,6 @@ pxa2x0_gpio_intr_disestablish(void *cookie)
 	struct pxagpio_softc *sc = pxagpio_softc;
 	struct gpio_irq_handler *gh = cookie;
 	u_int32_t bit, reg;
-
-	evcount_detach(&gh->gh_count);
 
 	bit = GPIO_BIT(gh->gh_gpio);
 
@@ -306,109 +298,29 @@ pxa2x0_gpio_intr_disestablish(void *cookie)
 	sc->sc_handlers[gh->gh_gpio] = NULL;
 
 	if (gh->gh_gpio == 0) {
+#if 0
 		pxa2x0_intr_disestablish(sc->sc_irqcookie[0]);
 		sc->sc_irqcookie[0] = NULL;
-	} else if (gh->gh_gpio == 1) {
+#else
+		panic("pxa2x0_gpio_intr_disestablish: can't unhook GPIO#0");
+#endif
+	} else
+	if (gh->gh_gpio == 1) {
+#if 0
 		pxa2x0_intr_disestablish(sc->sc_irqcookie[1]);
 		sc->sc_irqcookie[1] = NULL;
-	}  else { 
-#ifdef PXAGPIO_HAS_GPION_INTRS
-		int i, minipl, maxipl, ipl;
-		minipl = IPL_HIGH;
-		maxipl = IPL_NONE;
-		for (i = 2; i < sc->npins; i++) {
-			if (sc->sc_handlers[i] != NULL) {
-				ipl = sc->sc_handlers[i]->gh_spl;
-				if (minipl > ipl)
-					minipl = ipl;
-
-				if (maxipl < ipl)
-					maxipl = ipl;
-			}
-		}
-		pxa2x0_gpio_intr_fixup(minipl, maxipl);
-#endif /* PXAGPIO_HAS_GPION_INTRS */
+#else
+		panic("pxa2x0_gpio_intr_disestablish: can't unhook GPIO#1");
+#endif
 	}
 
-	free(gh, M_DEVBUF); 
+	FREE(gh, M_DEVBUF);
 }
 
-#ifdef PXAGPIO_HAS_GPION_INTRS
-void
-pxa2x0_gpio_intr_fixup(int minipl, int maxipl)
-{
-	struct pxagpio_softc *sc = pxagpio_softc;
-	int save = disable_interrupts(I32_bit);
-
-	if (maxipl == IPL_NONE  && minipl == IPL_HIGH) {
-		/* no remaining interrupts */
-		if (sc->sc_irqcookie[2])
-			pxa2x0_intr_disestablish(sc->sc_irqcookie[2]);
-		sc->sc_irqcookie[2] = NULL;
-		if (sc->sc_irqcookie[3])
-			pxa2x0_intr_disestablish(sc->sc_irqcookie[3]);
-		sc->sc_irqcookie[3] = NULL;
-		sc->sc_minipl = IPL_NONE;
-		sc->sc_maxipl = IPL_NONE;
-		restore_interrupts(save);
-		return;
-	}
-		
-	if (sc->sc_maxipl == IPL_NONE || maxipl > sc->sc_maxipl) {
-		if (sc->sc_irqcookie[2])
-			pxa2x0_intr_disestablish(sc->sc_irqcookie[2]);
-
-		sc->sc_maxipl = maxipl;
-		sc->sc_irqcookie[2] =
-		    pxa2x0_intr_establish(PXA2X0_INT_GPION,
-		    maxipl, pxagpio_intrN, sc, NULL);
-
-		if (sc->sc_irqcookie[2] == NULL) {
-			printf("%s: failed to hook main "
-			    "GPIO interrupt\n",
-			    sc->sc_dev.dv_xname);
-			/* XXX - panic? */
-		}
-	}
-	if (sc->sc_minipl == IPL_NONE || minipl < sc->sc_minipl) {
-		if (sc->sc_irqcookie[3])
-			pxa2x0_intr_disestablish(sc->sc_irqcookie[3]);
-
-		sc->sc_minipl = minipl;
-		sc->sc_irqcookie[3] =
-		    pxa2x0_intr_establish(PXA2X0_INT_GPION,
-		    sc->sc_minipl, pxagpio_intrlow, sc, NULL);
-
-		if (sc->sc_irqcookie[3] == NULL) {
-			printf("%s: failed to hook main "
-			    "GPIO interrupt\n",
-			    sc->sc_dev.dv_xname);
-			/* XXX - panic? */
-		}
-	}
-	restore_interrupts(save);
-}
-#endif /* PXAGPIO_HAS_GPION_INTRS */
-
-const char *
-pxa2x0_gpio_intr_string(void *cookie)
-{
-	static char irqstr[32];
-	struct gpio_irq_handler *gh = cookie;
-
-	if (gh == NULL)
-		snprintf(irqstr, sizeof irqstr, "couldn't establish interrupt");
-	else 
-		snprintf(irqstr, sizeof irqstr, "irq %ld", gh->gh_irq);
-	return(irqstr);
-}
-
-
-int
-pxagpio_intr0(void *arg)
+static int
+gpio_intr0(void *arg)
 {
 	struct pxagpio_softc *sc = arg;
-	int ret;
 
 #ifdef DIAGNOSTIC
 	if (sc->sc_handlers[0] == NULL) {
@@ -421,17 +333,13 @@ pxagpio_intr0(void *arg)
 	bus_space_write_4(sc->sc_bust, sc->sc_bush, GPIO_REG(GPIO_GEDR0, 0),
 	    GPIO_BIT(0));
 
-	ret = (sc->sc_handlers[0]->gh_func)(sc->sc_handlers[0]->gh_arg);
-	if (ret != 0)
-		sc->sc_handlers[0]->gh_count.ec_count++;
-	return ret;
+	return ((sc->sc_handlers[0]->gh_func)(sc->sc_handlers[0]->gh_arg));
 }
 
-int
-pxagpio_intr1(void *arg)
+static int
+gpio_intr1(void *arg)
 {
 	struct pxagpio_softc *sc = arg;
-	int ret;
 
 #ifdef DIAGNOSTIC
 	if (sc->sc_handlers[1] == NULL) {
@@ -444,15 +352,12 @@ pxagpio_intr1(void *arg)
 	bus_space_write_4(sc->sc_bust, sc->sc_bush, GPIO_REG(GPIO_GEDR0, 1),
 	    GPIO_BIT(1));
 
-	ret =  (sc->sc_handlers[1]->gh_func)(sc->sc_handlers[1]->gh_arg);
-	if (ret != 0)
-		sc->sc_handlers[1]->gh_count.ec_count++;
-	return ret;
+	return ((sc->sc_handlers[1]->gh_func)(sc->sc_handlers[1]->gh_arg));
 }
 
 #ifdef PXAGPIO_HAS_GPION_INTRS
-int
-pxagpio_dispatch(struct pxagpio_softc *sc, int gpio_base)
+static int
+gpio_dispatch(struct pxagpio_softc *sc, int gpio_base)
 {
 	struct gpio_irq_handler **ghp, *gh;
 	int i, s, nhandled, handled, pins;
@@ -489,9 +394,9 @@ pxagpio_dispatch(struct pxagpio_softc *sc, int gpio_base)
 
 	gedr &= sc->sc_mask[bank];
 	ghp = &sc->sc_handlers[gpio_base];
-	if (sc->pxa27x_pins == 1)
+	if (CPU_IS_PXA270)
 		pins = (gpio_base < 96) ? 32 : 25;
-	else 
+	else
 		pins = (gpio_base < 64) ? 32 : 17;
 	handled = 0;
 
@@ -509,8 +414,6 @@ pxagpio_dispatch(struct pxagpio_softc *sc, int gpio_base)
 		s = _splraise(gh->gh_spl);
 		do {
 			nhandled = (gh->gh_func)(gh->gh_arg);
-			if (nhandled != 0)
-				gh->gh_count.ec_count++;
 			handled |= nhandled;
 			gh = gh->gh_next;
 		} while (gh != NULL);
@@ -520,25 +423,18 @@ pxagpio_dispatch(struct pxagpio_softc *sc, int gpio_base)
 	return (handled);
 }
 
-int
-pxagpio_intrN(void *arg)
+static int
+gpio_intrN(void *arg)
 {
 	struct pxagpio_softc *sc = arg;
 	int handled;
 
-	handled = pxagpio_dispatch(sc, 0);
-	handled |= pxagpio_dispatch(sc, 32);
-	handled |= pxagpio_dispatch(sc, 64);
-	handled |= pxagpio_dispatch(sc, 96);
-
+	handled = gpio_dispatch(sc, 0);
+	handled |= gpio_dispatch(sc, 32);
+	handled |= gpio_dispatch(sc, 64);
+	if (CPU_IS_PXA270)
+		handled |= gpio_dispatch(sc, 96);
 	return (handled);
-}
-
-int
-pxagpio_intrlow(void *arg)
-{
-	/* dummy */
-	return 0;
 }
 #endif	/* PXAGPIO_HAS_GPION_INTRS */
 
@@ -548,8 +444,7 @@ pxa2x0_gpio_get_function(u_int gpio)
 	struct pxagpio_softc *sc = pxagpio_softc;
 	u_int32_t rv, io;
 
-	if (__predict_true(sc != NULL))
-		KDASSERT(gpio < sc->npins);
+	KDASSERT(gpio < GPIO_NPINS);
 
 	rv = pxagpio_reg_read(sc, GPIO_FN_REG(gpio)) >> GPIO_FN_SHIFT(gpio);
 	rv = GPIO_FN(rv);
@@ -572,8 +467,7 @@ pxa2x0_gpio_set_function(u_int gpio, u_int fn)
 	u_int32_t rv, bit;
 	u_int oldfn;
 
-	if (__predict_true(sc != NULL))
-		KDASSERT(gpio < sc->npins);
+	KDASSERT(gpio < GPIO_NPINS);
 
 	oldfn = pxa2x0_gpio_get_function(gpio);
 
@@ -713,7 +607,7 @@ pxa2x0_gpio_clear_intr(u_int gpio)
 void
 pxa2x0_gpio_intr_mask(void *v)
 {
-	struct gpio_irq_handler *gh = v;
+	struct gpio_irq_handler *gh = (struct gpio_irq_handler *)v;
 
 	pxa2x0_gpio_set_intr_level(gh->gh_gpio, IPL_NONE);
 }
@@ -724,7 +618,7 @@ pxa2x0_gpio_intr_mask(void *v)
 void
 pxa2x0_gpio_intr_unmask(void *v)
 {
-	struct gpio_irq_handler *gh = v;
+	struct gpio_irq_handler *gh = (struct gpio_irq_handler *)v;
 
 	pxa2x0_gpio_set_intr_level(gh->gh_gpio, gh->gh_level);
 }
@@ -773,4 +667,281 @@ pxa2x0_gpio_set_intr_level(u_int gpio, int level)
 	pxagpio_reg_write(sc, GPIO_REG(GPIO_GRER0, gpio), grer);
 
 	splx(s);
+}
+
+
+#if defined(CPU_XSCALE_PXA250)
+/*
+ * Configurations of GPIO for PXA25x
+ */
+struct pxa2x0_gpioconf pxa25x_com_btuart_gpioconf[] = {
+	{ 42, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* BTRXD */
+	{ 43, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* BTTXD */
+
+#if 0	/* optional */
+	{ 44, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* BTCTS */
+	{ 45, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* BTRTS */
+#endif
+
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_com_ffuart_gpioconf[] = {
+	{ 34, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRXD */
+
+#if 0	/* optional */
+	{ 35, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* CTS */
+	{ 36, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* DCD */
+	{ 37, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* DSR */
+	{ 38, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* RI */
+#endif
+
+	{ 39, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* FFTXD */
+
+#if 0	/* optional */
+	{ 40, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* DTR */
+	{ 41, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* RTS */
+#endif
+
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_com_hwuart_gpioconf[] = {
+#if 0	/* We can select and/or. */
+	{ 42, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* HWRXD */
+	{ 49, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* HWRXD */
+
+	{ 43, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* HWTXD */
+	{ 48, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* HWTXD */
+
+#if 0	/* optional */
+	{ 44, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* HWCST */
+	{ 51, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* HWCST */
+
+	{ 45, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* HWRST */
+	{ 52, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* HWRST */
+#endif
+#endif
+
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_com_stuart_gpioconf[] = {
+	{ 46, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* RXD */
+	{ 47, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* TXD */
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_i2c_gpioconf[] = {
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_i2s_gpioconf[] = {
+	{ 28, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* BITCLK */
+	{ 29, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* SDATA_IN */
+	{ 30, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* SDATA_OUT */
+	{ 31, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* SYNC */
+	{ 32, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* SYSCLK */
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_pcic_gpioconf[] = {
+	{ 48, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPOE */
+	{ 49, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPWE */
+	{ 50, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPIOR */
+	{ 51, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPIOW */
+
+#if 0	/* We can select and/or. */
+	{ 52, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPCE1 */
+	{ 53, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPCE2 */
+#endif
+
+	{ 54, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* pSKTSEL */
+	{ 55, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPREG */
+	{ 56, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* nPWAIT */
+	{ 57, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* nIOIS16 */
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_pxaacu_gpioconf[] = {
+	{ 28, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* BITCLK */
+	{ 30, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* SDATA_OUT */
+	{ 31, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* SYNC */
+
+#if 0	/* We can select and/or. */
+	{ 29, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SDATA_IN0 */
+	{ 32, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SDATA_IN1 */
+#endif
+
+	{ -1 }
+};
+
+struct pxa2x0_gpioconf pxa25x_pxamci_gpioconf[] = {
+#if 0	/* We can select and/or. */
+	{  6, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCLK */
+	{ 53, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCLK */
+	{ 54, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCLK */
+
+	{  8, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCS0 */
+	{ 34, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* MMCCS0 */
+	{ 67, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCS0 */
+
+	{  9, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCS1 */
+	{ 39, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCS1 */
+	{ 68, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* MMCCS1 */
+#endif
+
+	{  -1 }
+};
+#endif
+
+#if defined(CPU_XSCALE_PXA270)
+/*
+ * Configurations of GPIO for PXA27x
+ */
+struct pxa2x0_gpioconf pxa27x_com_btuart_gpioconf[] = {
+	{  42, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* BTRXD */
+	{  43, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* BTTXD */
+
+#if 0	/* optional */
+	{  44, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* BTCTS */
+	{  45, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* BTRTS */
+#endif
+
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_com_ffuart_gpioconf[] = {
+#if 0	/* We can select and/or. */
+	{  16, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFTXD */
+	{  37, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFTXD */
+	{  39, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* FFTXD */
+	{  83, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* FFTXD */
+	{  99, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFTXD */
+
+	{  19, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* FFRXD */
+	{  33, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRXD */
+	{  34, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRXD */
+	{  41, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRXD */
+	{  53, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRXD */
+	{  85, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRXD */
+	{  96, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* FFRXD */
+	{ 102, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* FFRXD */
+
+	{   9, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* FFCTS */
+	{  26, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* FFCTS */
+	{  35, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFCTS */
+	{ 100, GPIO_CLR | GPIO_ALT_FN_3_IN },	/* FFCTS */
+
+	{  27, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFRTS */
+	{  41, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* FFRTS */
+	{  83, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFRTS */
+	{  98, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFRTS */
+
+	{  40, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* FFDTR */
+	{  82, GPIO_CLR | GPIO_ALT_FN_3_OUT },	/* FFDTR */
+
+	{  36, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFDCD */
+
+	{  33, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* FFDSR */
+	{  37, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFDSR */
+
+	{  38, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* FFRI */
+#endif
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_com_hwuart_gpioconf[] = {
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_com_stuart_gpioconf[] = {
+	{  46, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* STD_RXD */
+	{  47, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* STD_TXD */
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_i2c_gpioconf[] = {
+	{ 117, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SCL */
+	{ 118, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SDA */
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_i2s_gpioconf[] = {
+	{  28, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* I2S_BITCLK */
+	{  29, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* I2S_SDATA_IN */
+	{  30, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* I2S_SDATA_OUT */
+	{  31, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* I2S_SYNC */
+	{ 113, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* I2S_SYSCLK */
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_pcic_gpioconf[] = {
+	{  48, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPOE */
+	{  49, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPWE */
+	{  50, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPIOR */
+	{  51, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPIOW */
+	{  55, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPREG */
+	{  56, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* nPWAIT */
+	{  57, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* nIOIS16 */
+	{ 104, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* pSKTSEL */
+
+#if 0	/* We can select and/or. */
+	{  85, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* nPCE1 */
+	{  86, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* nPCE1 */
+	{ 102, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* nPCE1 */
+
+	{  54, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* nPCE2 */
+	{  78, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* nPCE2 */
+	{ 105, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* nPCE2 */
+#endif
+
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_pxaacu_gpioconf[] = {
+	{  28, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* BITCLK */
+	{  30, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* SDATA_OUT */
+
+#if 0	/* We can select and/or. */
+	{  31, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* SYNC */
+	{  94, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* SYNC */
+
+	{  29, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SDATA_IN0 */
+	{ 116, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* SDATA_IN0 */
+
+	{  32, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SDATA_IN1 */
+	{  99, GPIO_CLR | GPIO_ALT_FN_2_IN },	/* SDATA_IN1 */
+
+	{  95, GPIO_CLR | GPIO_ALT_FN_1_OUT },	/* RESET_n */
+	{ 113, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* RESET_n */
+#endif
+
+	{  -1 }
+};
+
+struct pxa2x0_gpioconf pxa27x_pxamci_gpioconf[] = {
+	{  32, GPIO_CLR | GPIO_ALT_FN_2_OUT },	/* MMCLK */
+	{ 112, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* MMCMD */
+	{  92, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* MMDAT<0> */
+
+#if 0	/* optional */
+	{ 109, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* MMDAT<1> */
+	{ 110, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* MMDAT<2>/MMCCS<0> */
+	{ 111, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* MMDAT<3>/MMCCS<1> */
+#endif
+
+	{  -1 }
+};
+#endif
+
+void
+pxa2x0_gpio_config(struct pxa2x0_gpioconf **conflist)
+{
+	int i, j;
+
+	for (i = 0; conflist[i] != NULL; i++)
+		for (j = 0; conflist[i][j].pin != -1; j++)
+			pxa2x0_gpio_set_function(conflist[i][j].pin,
+			    conflist[i][j].value);
 }

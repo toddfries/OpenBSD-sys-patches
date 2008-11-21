@@ -1,5 +1,4 @@
-/*	$OpenBSD: urlphy.c,v 1.12 2006/12/27 19:11:09 kettenis Exp $ */
-/*	$NetBSD: urlphy.c,v 1.1 2002/03/28 21:07:53 ichiro Exp $	*/
+/*	$NetBSD: urlphy.c,v 1.24 2008/11/17 03:04:27 dyoung Exp $	*/
 /*
  * Copyright (c) 2001, 2002
  *     Shingo WATANABE <nabe@nabechan.org>.  All rights reserved.
@@ -34,6 +33,9 @@
  * driver for Realtek RL8150L internal phy
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: urlphy.c,v 1.24 2008/11/17 03:04:27 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -48,7 +50,6 @@
 #include <dev/mii/miidevs.h>
 #include <dev/mii/urlphyreg.h>
 
-#define	URLPHY_DEBUG	0
 #ifdef URLPHY_DEBUG
 #define DPRINTF(x)	if (urlphydebug) printf x
 #define DPRINTFN(n,x)	if (urlphydebug>(n)) printf x
@@ -58,27 +59,21 @@ int urlphydebug = URLPHY_DEBUG;
 #define DPRINTFN(n,x)
 #endif
 
-int urlphy_match(struct device *, void *, void *);
-void urlphy_attach(struct device *, struct device *, void *);
+static int	urlphy_match(device_t, cfdata_t, void *);
+static void	urlphy_attach(device_t, device_t, void *);
 
-struct cfattach urlphy_ca = {
-	sizeof(struct mii_softc), urlphy_match, urlphy_attach, mii_phy_detach,
-	mii_phy_activate
-};
+CFATTACH_DECL_NEW(urlphy, sizeof(struct mii_softc),
+    urlphy_match, urlphy_attach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver urlphy_cd = {
-	NULL, "urlphy", DV_DULL
-};
+static int	urlphy_service(struct mii_softc *, struct mii_data *, int);
+static void	urlphy_status(struct mii_softc *);
 
-int urlphy_service(struct mii_softc *, struct mii_data *, int);
-void urlphy_status(struct mii_softc *);
-
-const struct mii_phy_funcs urlphy_funcs = {
+static const struct mii_phy_funcs urlphy_funcs = {
 	urlphy_service, urlphy_status, mii_phy_reset,
 };
 
-int
-urlphy_match(struct device *parent, void *match, void *aux)
+static int
+urlphy_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -92,28 +87,30 @@ urlphy_match(struct device *parent, void *match, void *aux)
 	/*
 	 * Make sure the parent is an 'url' device.
 	 */
-	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "url") != 0)
-		return (0);
+	if (!device_is_a(parent, "url"))
+		return(0);
 
 	return (10);
 }
 
-void
-urlphy_attach(struct device *parent, struct device *self, void *aux)
+static void
+urlphy_attach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 
-	printf(": RTL internal phy\n");
+	aprint_naive(": Media interface\n");
+	aprint_normal(": Realtek RTL8150L internal media interface\n");
 
-	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __func__));
+	DPRINTF(("%s: %s: enter\n", device_xname(self), __func__));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &urlphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = ma->mii_flags;
+	sc->mii_flags = mii->mii_flags;
 	sc->mii_anegticks = MII_ANEGTICKS_GIGE;
 
 	/* Don't do loopback on this PHY. */
@@ -122,27 +119,27 @@ urlphy_attach(struct device *parent, struct device *self, void *aux)
 	sc->mii_flags |= MIIF_NOISOLATE;
 
 	if (mii->mii_instance != 0) {
-		printf("%s: ignoring this PHY, non-zero instance\n",
-		       sc->mii_dev.dv_xname);
+		aprint_error_dev(self, "ignoring this PHY, non-zero instance\n");
 		return;
 	}
 	PHY_RESET(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 urlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
 
-	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __func__));
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
+	DPRINTF(("%s: %s: enter\n", device_xname(sc->mii_dev), __func__));
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -193,8 +190,9 @@ urlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			return (0);
 
 		/*
-	 	 * Only retry autonegotiation every mii_anegticks seconds.
+		 * Only retry autonegotiation every N seconds.
 		 */
+		KASSERT(sc->mii_anegticks != 0);
 		if (++sc->mii_ticks <= sc->mii_anegticks)
 			return (0);
 
@@ -220,14 +218,14 @@ urlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 urlphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int msr, bmsr, bmcr;
 
-	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __func__));
+	DPRINTF(("%s: %s: enter\n", device_xname(sc->mii_dev), __func__));
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
@@ -240,7 +238,7 @@ urlphy_status(struct mii_softc *sc)
 	if (msr & URLPHY_MSR_LINK)
 		mii->mii_media_status |= IFM_ACTIVE;
 
-	DPRINTF(("%s: %s: link %s\n", sc->mii_dev.dv_xname, __func__,
+	DPRINTF(("%s: %s: link %s\n", device_xname(sc->mii_dev), __func__,
 		 mii->mii_media_status & IFM_ACTIVE ? "up" : "down"));
 
 	bmcr = PHY_READ(sc, MII_BMCR);
@@ -256,11 +254,8 @@ urlphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
-
 		if (msr & URLPHY_MSR_DUPLEX)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

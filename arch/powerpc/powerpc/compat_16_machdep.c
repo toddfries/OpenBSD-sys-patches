@@ -1,4 +1,4 @@
-/*	$NetBSD: compat_16_machdep.c,v 1.6 2005/12/11 12:18:46 christos Exp $	*/
+/*	$NetBSD: compat_16_machdep.c,v 1.11 2008/04/24 18:39:21 ad Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.6 2005/12/11 12:18:46 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.11 2008/04/24 18:39:21 ad Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_altivec.h"
@@ -41,8 +41,6 @@ __KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.6 2005/12/11 12:18:46 christ
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
-#include <sys/sa.h>
-#include <sys/savar.h>
 #include <sys/syscallargs.h>
 #include <sys/systm.h>
 #include <sys/ucontext.h>
@@ -65,20 +63,20 @@ sendsig_sigcontext(int sig, const sigset_t *mask, u_long code)
 	struct sigcontext *fp, frame;
 	struct trapframe *tf;
 	struct utrapframe *utf = &frame.sc_frame;
-	int onstack;
+	int onstack, error;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
 
 	tf = trapframe(l);
 
 	/* Do we need to jump onto the signal stack? */
 	onstack =
-	    (p->p_sigctx.ps_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
 	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 
 	/* Allocate space for the signal handler context. */
 	if (onstack)
-		fp = (struct sigcontext *)((caddr_t)p->p_sigctx.ps_sigstk.ss_sp +
-						p->p_sigctx.ps_sigstk.ss_size);
+		fp = (struct sigcontext *)((char *)l->l_sigstk.ss_sp +
+						l->l_sigstk.ss_size);
 	else
 		fp = (struct sigcontext *)tf->fixreg[1];
 	fp = (struct sigcontext *)((uintptr_t)(fp - 1) & ~0xf);
@@ -103,7 +101,7 @@ sendsig_sigcontext(int sig, const sigset_t *mask, u_long code)
 #endif
 
 	/* Save signal stack. */
-	frame.sc_onstack = p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK;
+	frame.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Save signal mask. */
 	frame.sc_mask = *mask;
@@ -117,8 +115,12 @@ sendsig_sigcontext(int sig, const sigset_t *mask, u_long code)
 	 */
 	native_sigset_to_sigset13(mask, &frame.__sc_mask13);
 #endif
+	sendsig_reset(l, sig);
+	mutex_exit(p->p_lock);
+	error = copyout(&frame, fp, sizeof frame);
+	mutex_enter(p->p_lock);
 
-	if (copyout(&frame, fp, sizeof frame) != 0) {
+	if (error != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instructoin to halt it in its tracks.
@@ -159,18 +161,18 @@ sendsig_sigcontext(int sig, const sigset_t *mask, u_long code)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 /*
  * System call to cleanup state after a signal handler returns.
  */
 int
-compat_16_sys___sigreturn14(struct lwp *l, void *v, register_t *retval)
+compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigreturn14_args *uap, register_t *retval)
 {
-	struct compat_16_sys___sigreturn14_args /* {
+	/* {
 		syscallarg(struct sigcontext *) sigcntxp;
-	} */ *uap = v;
+	} */
 	struct proc *p = l->l_proc;
 	struct sigcontext sc;
 	struct trapframe *tf;
@@ -211,14 +213,15 @@ compat_16_sys___sigreturn14(struct lwp *l, void *v, register_t *retval)
 	tf->tf_xtra[TF_MQ] = utf->mq;
 #endif
 
+	mutex_enter(p->p_lock);
 	/* Restore signal stack. */
 	if (sc.sc_onstack & SS_ONSTACK)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
-
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
 	/* Restore signal mask. */
-	(void) sigprocmask1(p, SIG_SETMASK, &sc.sc_mask, 0);
+	(void) sigprocmask1(l, SIG_SETMASK, &sc.sc_mask, 0);
+	mutex_exit(p->p_lock);
 
 	return (EJUSTRETURN);
 }

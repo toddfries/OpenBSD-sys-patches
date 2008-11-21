@@ -1,5 +1,4 @@
-/*	$OpenBSD: hdc9224.h,v 1.7 2006/11/06 22:16:28 miod Exp $	*/
-/*	$NetBSD: hdc9224.h,v 1.5 2003/11/10 08:51:52 wiz Exp $ */
+/*	$NetBSD: hdc9224.h,v 1.6 2005/12/11 12:19:37 christos Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -32,6 +31,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 
 struct hdc9224_DKCreg {
 	unsigned char dkc_reg;	/* Disk Register Data Access Port (rw)*/
@@ -194,3 +194,5 @@ struct hdc9224_UDCreg { /* internal disk controller registers */
 #define UDC_DS_WRPROT	(1<<2)	/* write protect (floppy only!) */
 #define UDC_DS_READY	(1<<1)	/* drive ready bit */
 #define UDC_DS_WRFAULT	(1<<0)	/* write fault */
+
+

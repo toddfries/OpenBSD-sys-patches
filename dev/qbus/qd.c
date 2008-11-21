@@ -1,4 +1,4 @@
-/*	$NetBSD: qd.c,v 1.39 2007/10/19 12:01:09 ad Exp $	*/
+/*	$NetBSD: qd.c,v 1.44 2008/06/12 23:06:14 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1988 Regents of the University of California.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: qd.c,v 1.39 2007/10/19 12:01:09 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: qd.c,v 1.44 2008/06/12 23:06:14 cegger Exp $");
 
 #include "opt_ddb.h"
 
@@ -234,8 +234,8 @@ int QDlast_DMAtype;		/* type of the last DMA operation */
  */
 #define TOY ((time.tv_sec * 100) + (time.tv_usec / 10000))
 
-void qd_attach(struct device *, struct device *, void *);
-static int qd_match(struct device *, struct cfdata *, void *);
+void qd_attach(device_t, device_t, void *);
+static int qd_match(device_t, cfdata_t, void *);
 
 static void qddint(void *);	/* DMA gate array intrpt service */
 static void qdaint(void *);	/* Dragon ADDER intrpt service */
@@ -522,6 +522,7 @@ qdcninit(cndev)
 	ldfont(unit);			/* load the console font */
 	ldcursor(unit, cons_cursor);	/* load default cursor map */
 	setup_input(unit);		/* init the DUART */
+	selinit(&qdrsel[unit]);
 
 	/* Set flag so probe knows */
 	qd0cninited = 1;
@@ -549,8 +550,8 @@ CFATTACH_DECL(qd, sizeof(struct qd_softc),
  */
 static int
 qd_match(parent, match, aux)
-	struct device *parent;
-	struct cfdata *match;
+	device_t parent;
+	cfdata_t match;
 	void *aux;
 {
 	struct qd_softc ssc;
@@ -728,7 +729,7 @@ qd_match(parent, match, aux)
 
 
 void qd_attach(parent, self, aux)
-	   struct device *parent, *self;
+	   device_t parent, *self;
 	   void *aux;
 {
 	struct uba_attach_args *ua = aux;
@@ -791,14 +792,12 @@ void qd_attach(parent, self, aux)
 
 /*ARGSUSED*/
 int
-qdopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+qdopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	volatile struct dga *dga;	/* ptr to gate array struct */
 	struct tty *tp;
 	volatile struct duart *duart;
+	struct uba_softc *sc;
 	int unit;
 	int minor_dev;
 
@@ -808,8 +807,9 @@ qdopen(dev, flag, mode, p)
 	/*
 	* check for illegal conditions
 	*/
-	if (unit >= qd_cd.cd_ndevs || qd_cd.cd_devs[unit] == NULL)
-		return (ENXIO);		/* no such device or address */
+	sc = device_lookup_private(&qd_cd, unit);
+	if (sc == NULL)
+		return ENXIO;
 
 	duart = (struct duart *) qdmap[unit].duart;
 	dga = (struct dga *) qdmap[unit].dga;
@@ -877,10 +877,7 @@ qdopen(dev, flag, mode, p)
 
 /*ARGSUSED*/
 int
-qdclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+qdclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	struct tty *tp;
 	struct qdmap *qd;
@@ -898,8 +895,7 @@ qdclose(dev, flag, mode, p)
 	unit = minor_dev >> 2;		/* get QDSS number */
 	qd = &qdmap[unit];
 
-	uh = (struct uba_softc *)
-	     device_parent((struct device *)(qd_cd.cd_devs[unit]));
+	uh = device_private(device_parent(device_lookup(&qd_cd, unit)));
 
 
 	if ((minor_dev & 0x03) == 2) {
@@ -1101,8 +1097,7 @@ qdioctl(dev, cmd, datap, flags, p)
 	short *temp;			/* a pointer to template RAM */
 	struct uba_softc *uh;
 
-	uh = (struct uba_softc *)
-	     device_parent((struct device *)(qd_cd.cd_devs[unit]));
+	uh = device_private(device_parent(device_lookup(&qd_cd, unit)));
 
 	/*
 	* service graphic device ioctl commands
@@ -1623,7 +1618,7 @@ qdkqfilter(dev_t dev, struct knote *kn)
 		break;
 
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = (void *)(intptr_t) dev;
@@ -1717,8 +1712,7 @@ qd_strategy(bp)
 
 	unit = (minor(bp->b_dev) >> 2) & 0x07;
 
-	uh = (struct uba_softc *)
-	     device_parent((struct device *)(qd_cd.cd_devs[unit]));
+	uh = device_private(device_parent(device_lookup(&qd_cd, unit)));
 
 	/*
 	* init pointers
@@ -1808,17 +1802,7 @@ void qdstart(tp)
 		if (unit == 0)
 			blitc(which_unit, (u_char)c);
 	}
-	/*
-	* If there are sleepers, and output has drained below low
-	* water mark, wake up the sleepers.
-	*/
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP){
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((void *) &tp->t_outq);
-		}
-	}
-
+	ttypull(tp);
 	tp->t_state &= ~TS_BUSY;
 
 out:
@@ -2060,7 +2044,7 @@ static void
 qddint(arg)
 	void *arg;
 {
-	struct device *dv = arg;
+	device_t dv = arg;
 	struct DMAreq_header *header;
 	struct DMAreq *request;
 	volatile struct dga *dga;
@@ -2121,7 +2105,7 @@ qddint(arg)
 		header->newest = header->oldest;
 		header->used = 0;
 
-		selnotify(&qdrsel[unit], 0);
+		selnotify(&qdrsel[unit], 0, 0);
 
 		if (dga->bytcnt_lo != 0) {
 			dga->bytcnt_lo = 0;
@@ -2136,7 +2120,7 @@ qddint(arg)
 	* wakeup "select" client.
 	*/
 	if (DMA_ISFULL(header)) {
-		selnotify(&qdrsel[unit], 0);
+		selnotify(&qdrsel[unit], 0, 0);
 	}
 
 	header->DMAreq[header->oldest].DMAdone |= REQUEST_DONE;
@@ -2152,7 +2136,7 @@ qddint(arg)
 	* if no more DMA pending, wake up "select" client and exit
 	*/
 	if (DMA_ISEMPTY(header)) {
-		selnotify(&qdrsel[unit], 0);
+		selnotify(&qdrsel[unit], 0, 0);
 		DMA_CLRACTIVE(header);  /* flag DMA done */
 		return;
 	}
@@ -2238,7 +2222,7 @@ static void
 qdaint(arg)
 	void *arg;
 {
-	struct device *dv = arg;
+	device_t dv = arg;
 	volatile struct adder *adder;
 	struct color_buf *cbuf;
 	int i;
@@ -2322,10 +2306,9 @@ qdaint(arg)
  */
 
 static void
-qdiint(arg)
-	void *arg;
+qdiint(void *arg)
 {
-	struct device *dv = arg;
+	device_t dv = arg;
 	struct _vs_event *event;
 	struct qdinput *eqh;
 	volatile struct dga *dga;
@@ -2784,7 +2767,7 @@ GET_TBUTTON:
 		* do select wakeup
 		*/
 		if (do_wakeup) {
-			selnotify(&qdrsel[unit], 0);
+			selnotify(&qdrsel[unit], 0, 0);
 			do_wakeup = 0;
 		}
 	} else {
@@ -2794,7 +2777,7 @@ GET_TBUTTON:
 		if (qdpolling)
 			return;
 
-		if (unit >= qd_cd.cd_ndevs || qd_cd.cd_devs[unit] == NULL)
+		if (unit >= qd_cd.cd_ndevs || device_lookup(&qd_cd, unit) == NULL)
 			return;		/* no such device or address */
 
 		tp = qd_tty[unit << 2];

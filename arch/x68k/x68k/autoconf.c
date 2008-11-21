@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.49 2006/11/24 22:04:24 wiz Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.57 2008/07/16 18:50:58 drochner Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.49 2006/11/24 22:04:24 wiz Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.57 2008/07/16 18:50:58 drochner Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "scsibus.h"
@@ -43,7 +43,6 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.49 2006/11/24 22:04:24 wiz Exp $");
 #include <sys/device.h>
 #include <sys/disk.h>
 #include <sys/disklabel.h>
-#include <sys/malloc.h>
 #include <machine/cpu.h>
 #include <x68k/x68k/iodevice.h>
 #include <machine/bootinfo.h>
@@ -54,16 +53,13 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.49 2006/11/24 22:04:24 wiz Exp $");
 
 void configure(void);
 static void findroot(void);
-void mbattach(struct device *, struct device *, void *);
-int mbmatch(struct device *, struct cfdata *, void *);
+int mbmatch(device_t, cfdata_t, void *);
+void mbattach(device_t, device_t, void *);
 int x68k_config_found(struct cfdata *, struct device *, void *, cfprint_t);
 
 static struct device *scsi_find(dev_t);
-static struct device *find_dev_byname(const char *);
 
 int x68k_realconfig;
-
-#include <sys/kernel.h>
 
 /*
  * called at boot time, configure all devices on system
@@ -93,8 +89,8 @@ cpu_rootconf(void)
 
 /*
  * use config_search_ia to find appropriate device, then call that device
- * directly with NULL device variable storage.  A device can then 
- * always tell the difference between the real and console init 
+ * directly with NULL device variable storage.  A device can then
+ * always tell the difference between the real and console init
  * by checking for NULL.
  */
 int
@@ -129,7 +125,7 @@ x68k_config_found(struct cfdata *pcfp, struct device *pdp, void *auxp,
 
 /*
  * this function needs to get enough configured to do a console
- * basically this means start attaching the grfxx's that support 
+ * basically this means start attaching the grfxx's that support
  * the console. Kinda hacky but it works.
  */
 void
@@ -156,7 +152,6 @@ findroot(void)
 {
 	int majdev, unit, part;
 	const char *name;
-	char buf[32];
 
 	if (booted_device)
 		return;
@@ -183,9 +178,7 @@ findroot(void)
 	part = B_PARTITION(bootdev);
 	unit = B_UNIT(bootdev);
 
-	sprintf(buf, "%s%d", name, unit);
-
-	if ((booted_device = find_dev_byname(buf)) != NULL)
+	if ((booted_device = device_find_by_driver_unit(name, unit)) != NULL)
 		booted_partition = part;
 }
 
@@ -245,7 +238,7 @@ scsi_find(dev_t bdev)
 		 */
 		printf("warning: scsi_find: can't get boot interface -- "
 		       "update boot loader\n");
-		scsibus = find_dev_byname("scsibus0");
+		scsibus = device_find_by_xname("scsibus0");
 #else
 		/* can't determine interface type */
 		return NULL;
@@ -266,7 +259,7 @@ scsi_find(dev_t bdev)
 	}
 	if (!scsibus)
 		return NULL;
-	sbsc = (struct scsibus_softc *) scsibus;
+	sbsc = device_private(scsibus);
 	periph = scsipi_lookup_periph(sbsc->sc_channel,
 	    B_X68K_SCSI_ID(bdev), B_X68K_SCSI_LUN(bdev));
 
@@ -277,31 +270,15 @@ scsi_find(dev_t bdev)
 }
 
 /*
- * Given a device name, find its struct device
- * XXX - Move this to some common file?
+ * mainbus driver
  */
-static struct device *
-find_dev_byname(const char *name)
-{
-	struct device *dv;
-
-	for (dv = TAILQ_FIRST(&alldevs); dv; dv = TAILQ_NEXT(dv, dv_list))
-		if (!strcmp(dv->dv_xname, name))
-			break;
-
-	return dv;
-}
-
-/* 
- * mainbus driver 
- */
-CFATTACH_DECL(mainbus, sizeof(struct device),
+CFATTACH_DECL_NEW(mainbus, 0,
     mbmatch, mbattach, NULL, NULL);
 
 static int mb_attached;
 
 int
-mbmatch(struct device *pdp, struct cfdata *cfp, void *auxp)
+mbmatch(device_t parent, cfdata_t cf, void *auxp)
 {
 
 	if (mb_attached)
@@ -314,12 +291,12 @@ mbmatch(struct device *pdp, struct cfdata *cfp, void *auxp)
  * "find" all the things that should be there.
  */
 void
-mbattach(struct device *pdp, struct device *dp, void *auxp)
+mbattach(device_t parent, device_t dp, void *auxp)
 {
 
 	mb_attached = 1;
 
-	printf("\n");
+	aprint_normal("\n");
 
 	config_found(dp, __UNCONST("intio")  , NULL);
 	config_found(dp, __UNCONST("grfbus") , NULL);

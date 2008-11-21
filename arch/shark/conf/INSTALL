@@ -1,4 +1,4 @@
-#	$NetBSD: INSTALL,v 1.30 2006/10/02 03:28:31 chs Exp $
+#	$NetBSD: INSTALL,v 1.39 2008/11/12 12:36:06 ad Exp $
 #
 #	Shark installation kernel
 #
@@ -62,6 +62,7 @@ file-system	KERNFS		# /kern
 #options 	FFS_EI		# FFS Endian Independant support
 #options 	NFSSERVER
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
+options 	WAPBL		# File system journaling support - Experimental
 
 # Networking options
 
@@ -84,6 +85,7 @@ options 	NFS_BOOT_DHCP	# use NetBSD standard DHCP/NFS boot code
 # Compatibility options
 
 #options 	COMPAT_43	# 4.3BSD compatibility.
+#options 	COMPAT_40	# NetBSD 4.0 compatibility.
 #options 	COMPAT_30	# NetBSD 3.0 compatibility.
 #options 	COMPAT_20	# NetBSD 2.0 compatibility.
 #options 	COMPAT_16	# NetBSD 1.6 compatibility.
@@ -110,7 +112,6 @@ options 	MEMORY_DISK_HOOKS	# boottime setup of ramdisk
 options 	MEMORY_DISK_IS_ROOT	# use memory disk as root
 options 	MEMORY_DISK_ROOT_SIZE=7000	# Size in blocks (3.5MB)
 
-options 	XSERVER			# also need INSECURE for now
 options 	INSECURE		# disable kernel securelevel
 
 # Use the following to force the serial to always be the console
@@ -122,7 +123,6 @@ options 	INSECURE		# disable kernel securelevel
 # Miscellaneous kernel options
 #options 	KTRACE		# system call tracing, a la ktrace(1)
 #options 	IRQSTATS	# manage IRQ statistics, XXX temp required
-#options 	LKM		# loadable kernel modules
 #options 	KMEMSTATS	# kernel memory statistics, XXX temp required
 options 	USERCONF	# userconf(4) support
 options		PIPE_SOCKETPAIR		# smaller, but slower pipe(2)
@@ -134,12 +134,49 @@ options		PIPE_SOCKETPAIR		# smaller, but slower pipe(2)
 #options 	PORTMASTER	# Enable PortMaster only options
 #options 	DIAGNOSTIC	# internal consistency checks
 #options 	PMAP_DEBUG	# Enable pmap_debug_level code
-#options 	IPKDB		# remote kernel debugging
 options 	DDB		# in-kernel debugger
 #options 	DDB_ONPANIC=0	# don't run DDB at panictime
 #options 	DDB_HISTORY_SIZE=100	# Enable history editing in DDB
 #options 	KERNEL_DEBUG	# compile in kernel debugging capability
 #makeoptions	DEBUG="-g"	# compile full symbol table
+
+#
+# wscons options
+#
+# builtin terminal emulations
+#options 	WSEMUL_SUN		# sun terminal emulation
+options 	WSEMUL_VT100		# VT100 / VT220 emulation
+# customization of console and kernel output - see dev/wscons/wsdisplayvar.h
+#options 	WSDISPLAY_CUSTOM_OUTPUT	# color customization from wsconsctl(8)
+#options 	WS_DEFAULT_FG=WSCOL_WHITE
+#options 	WS_DEFAULT_BG=WSCOL_BLACK
+#options 	WS_DEFAULT_COLATTR="(0)"
+#options 	WS_DEFAULT_MONOATTR="(0)"
+#options 	WS_KERNEL_FG=WSCOL_GREEN
+#options 	WS_KERNEL_BG=WSCOL_BLACK
+#options 	WS_KERNEL_COLATTR=""
+#options 	WS_KERNEL_MONOATTR=""
+# customization of console border color
+#options 	WSDISPLAY_CUSTOM_BORDER	# border customization from wsconsctl(8)
+#options 	WSDISPLAY_BORDER_COLOR=WSCOL_BLUE	# default color
+# compatibility to other console drivers
+#options 	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls
+#options 	WSDISPLAY_COMPAT_SYSCONS	# emulate some ioctls
+#options 	WSDISPLAY_COMPAT_USL		# VT handling
+#options 	WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
+# see dev/pckbport/wskbdmap_mfii.c for implemented layouts
+#options 	PCKBD_LAYOUT="(KB_DE | KB_NODEAD)"
+#options 	PCKBD_LAYOUT="(KB_US | KB_SWAPCTRLCAPS)"
+# allocate a number of virtual screens at autoconfiguration time
+#options 	WSDISPLAY_DEFAULTSCREENS=4
+# use a large software cursor that doesn't blink
+#options 	PCDISPLAY_SOFTCURSOR
+# modify the screen type of the console; defaults to "80x25"
+#options 	VGA_CONSOLE_SCREENTYPE="\"80x24\""
+# console scrolling support.
+#options 	WSDISPLAY_SCROLLSUPPORT
+# enable VGA raster mode capable of displaying multilingual text on console
+#options 	VGA_RASTERCONSOLE
 
 config		netbsd		root on ? type ffs	# root on miniroot
 
@@ -171,11 +208,21 @@ cd*		at atapibus? drive?
 sd*		at atapibus? drive?
 
 # PCCONS@OFW
-ofisapc*	at ofbus?
-pc*		at ofisapc?
+#ofisapc*	at ofbus?
+#pc*		at ofisapc?
 
 # PS/2 Mouse
-opms0		at spckbd? irq 12
+#opms0		at spckbd? irq 12
+
+# wscons
+pckbc*		at ofisa?
+pckbd*		at pckbc?
+#pms*		at pckbc?
+vga*		at ofbus?
+#igsfb*		at ofbus?
+wsdisplay*	at wsemuldisplaydev?
+wskbd*		at pckbd? console ?
+#wsmouse*	at pms? mux 0
 
 # CS8900 Ethernet@OFW
 cs*		at ofisa?
@@ -215,3 +262,5 @@ pseudo-device	rnd			# /dev/random and /dev/urandom
 pseudo-device	md	1		# Ramdisk driver
 #pseudo-device	profiler 1		# fiq based profiling device
 #pseudo-device	sequencer 1		# MIDI sequencer
+pseudo-device	wsmux			# mouse & keyboard multiplexor
+#pseudo-device	wsfont

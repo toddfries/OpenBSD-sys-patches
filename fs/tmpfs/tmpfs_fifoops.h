@@ -1,4 +1,4 @@
-/*	$NetBSD: tmpfs_fifoops.h,v 1.4 2005/12/03 17:34:44 christos Exp $	*/
+/*	$NetBSD: tmpfs_fifoops.h,v 1.6 2008/04/28 20:24:02 martin Exp $	*/
 
 /*
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -92,7 +85,6 @@ int	tmpfs_fifo_write	(void *);
 #define	tmpfs_fifo_pathconf	fifo_pathconf
 #define	tmpfs_fifo_islocked	tmpfs_islocked
 #define	tmpfs_fifo_advlock	fifo_advlock
-#define	tmpfs_fifo_lease	tmpfs_lease
 #define	tmpfs_fifo_bwrite	tmpfs_bwrite
 #define	tmpfs_fifo_getpages	genfs_badop
 #define	tmpfs_fifo_putpages	fifo_putpages

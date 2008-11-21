@@ -1,5 +1,4 @@
-/*	$OpenBSD: sunos_misc.c,v 1.46 2004/06/24 19:35:23 tholo Exp $	*/
-/*	$NetBSD: sunos_misc.c,v 1.65 1996/04/22 01:44:31 christos Exp $	*/
+/*	$NetBSD: sunos_misc.c,v 1.163 2008/11/19 18:36:05 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -40,7 +39,7 @@
  *
  *	@(#)sunos_misc.c	8.1 (Berkeley) 6/18/93
  *
- *	Header: sunos_misc.c,v 1.16 93/04/07 02:46:27 torek Exp 
+ *	Header: sunos_misc.c,v 1.16 93/04/07 02:46:27 torek Exp
  */
 
 /*
@@ -49,6 +48,9 @@
  * SunOS system calls that are implemented differently in BSD are
  * handled here.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sunos_misc.c,v 1.163 2008/11/19 18:36:05 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -77,17 +79,21 @@
 #include <sys/wait.h>
 #include <sys/utsname.h>
 #include <sys/unistd.h>
+#include <sys/syscall.h>
 #include <sys/syscallargs.h>
 #include <sys/conf.h>
 #include <sys/socketvar.h>
-#include <sys/times.h>
+#include <sys/exec.h>
+#include <sys/swap.h>
+#include <sys/kauth.h>
+
+#include <compat/sys/signal.h>
 
 #include <compat/sunos/sunos.h>
 #include <compat/sunos/sunos_syscallargs.h>
-#include <compat/sunos/sunos_util.h>
+#include <compat/common/compat_util.h>
 #include <compat/sunos/sunos_dirent.h>
-
-#include <compat/common/compat_dir.h>
+#include <compat/sys/mount.h>
 
 #include <netinet/in.h>
 
@@ -96,141 +102,103 @@
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
+#include <nfs/nfsmount.h>
 
-#include <uvm/uvm_extern.h>
-
-#ifdef sun3
-# include <machine/machdep.h>	/* for prototype of reboot2() */
-#endif
-
-static int sunstatfs(struct statfs *, caddr_t);
+static int sunstatfs(struct statvfs *, void *);
 
 int
-sunos_sys_wait4(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_stime(struct lwp *l, const struct sunos_sys_stime_args *uap, register_t *retval)
 {
-	struct sunos_sys_wait4_args *uap = v;
-	if (SCARG(uap, pid) == 0)
-		SCARG(uap, pid) = WAIT_ANY;
-	return (sys_wait4(p, uap, retval));
+	struct timeval tv;
+	int error;
+
+	error = copyin(SCARG(uap, tp), &tv.tv_sec, sizeof(tv.tv_sec));
+	if (error)
+		return error;
+	tv.tv_usec = 0;
+
+	return settimeofday1(&tv, false, NULL, l, true);
 }
 
 int
-sunos_sys_creat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_wait4(struct lwp *l, const struct sunos_sys_wait4_args *uap, register_t *retval)
 {
-	struct sunos_sys_creat_args *uap = v;
-	struct sys_open_args ouap;
+	struct sys_wait4_args bsd_ua;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	SCARG(&bsd_ua, pid) = SCARG(uap, pid) == 0 ? WAIT_ANY : SCARG(uap, pid);
+	SCARG(&bsd_ua, status) = SCARG(uap, status);
+	SCARG(&bsd_ua, options) = SCARG(uap, options);
+	SCARG(&bsd_ua, rusage) = SCARG(uap, rusage);
+
+	return (sys_wait4(l, &bsd_ua, retval));
+}
+
+int
+sunos_sys_creat(struct lwp *l, const struct sunos_sys_creat_args *uap, register_t *retval)
+{
+	struct sys_open_args ouap;
 
 	SCARG(&ouap, path) = SCARG(uap, path);
 	SCARG(&ouap, flags) = O_WRONLY | O_CREAT | O_TRUNC;
 	SCARG(&ouap, mode) = SCARG(uap, mode);
 
-	return (sys_open(p, &ouap, retval));
+	return (sys_open(l, &ouap, retval));
 }
 
 int
-sunos_sys_access(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_execv(struct lwp *l, const struct sunos_sys_execv_args *uap, register_t *retval)
 {
-	struct sunos_sys_access_args *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	/* {
+		syscallarg(const char *) path;
+		syscallarg(char **) argv;
+	} */
+	struct sys_execve_args ap;
 
-	return (sys_access(p, uap, retval));
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, argp) = SCARG(uap, argp);
+	SCARG(&ap, envp) = NULL;
+
+	return (sys_execve(l, &ap, retval));
 }
 
 int
-sunos_sys_stat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_execve(struct lwp *l, const struct sunos_sys_execve_args *uap, register_t *retval)
 {
-	struct sunos_sys_stat_args *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return (compat_43_sys_stat(p, uap, retval));
-}
-
-int
-sunos_sys_lstat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_lstat_args *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	return (compat_43_sys_lstat(p, uap, retval));
-}
-
-int
-sunos_sys_execve(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_execve_args /* {
-		syscallarg(char *) path;
+	/* {
+		syscallarg(const char *) path;
 		syscallarg(char **) argv;
 		syscallarg(char **) envp;
-        } */ *uap = v;
+	} */
 	struct sys_execve_args ap;
-	caddr_t sg;
-
-	sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
 	SCARG(&ap, path) = SCARG(uap, path);
 	SCARG(&ap, argp) = SCARG(uap, argp);
 	SCARG(&ap, envp) = SCARG(uap, envp);
 
-	return (sys_execve(p, &ap, retval));
+	return (sys_execve(l, &ap, retval));
 }
 
 int
-sunos_sys_execv(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_omsync(struct lwp *l, const struct sunos_sys_omsync_args *uap, register_t *retval)
 {
-	struct sunos_sys_execv_args *uap = v;
-	struct sys_execve_args ouap;
+	struct sys___msync13_args ouap;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	SCARG(&ouap, addr) = SCARG(uap, addr);
+	SCARG(&ouap, len) = SCARG(uap, len);
+	SCARG(&ouap, flags) = SCARG(uap, flags);
 
-	SCARG(&ouap, path) = SCARG(uap, path);
-	SCARG(&ouap, argp) = SCARG(uap, argp);
-	SCARG(&ouap, envp) = NULL;
-
-	return (sys_execve(p, &ouap, retval));
+	return (sys___msync13(l, &ouap, retval));
 }
 
 int
-sunos_sys_unmount(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_unmount(struct lwp *l, const struct sunos_sys_unmount_args *uap, register_t *retval)
 {
-	struct sunos_sys_unmount_args *uap = v;
 	struct sys_unmount_args ouap;
 
 	SCARG(&ouap, path) = SCARG(uap, path);
 	SCARG(&ouap, flags) = 0;
 
-	return (sys_unmount(p, &ouap, retval));
+	return (sys_unmount(l, &ouap, retval));
 }
 
 /*
@@ -258,15 +226,11 @@ static struct {
 };
 
 int
-sunos_sys_mount(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_mount(struct lwp *l, const struct sunos_sys_mount_args *uap, register_t *retval)
 {
-	struct sunos_sys_mount_args *uap = v;
 	int oflags = SCARG(uap, flags), nflags, error;
 	char fsname[MFSNAMELEN];
-	caddr_t sg = stackgap_init(p->p_emul);
+	register_t dummy;
 
 	if (oflags & (SUNM_NOSUB | SUNM_SYS5))
 		return (EINVAL);
@@ -279,40 +243,26 @@ sunos_sys_mount(p, v, retval)
 		nflags |= MNT_NOSUID;
 	if (oflags & SUNM_REMOUNT)
 		nflags |= MNT_UPDATE;
-	SCARG(uap, flags) = nflags;
 
-	error = copyinstr((caddr_t)SCARG(uap, type), fsname,
-	    sizeof fsname, (size_t *)0);
+	error = copyinstr(SCARG(uap, type), fsname, sizeof fsname, NULL);
 	if (error)
 		return (error);
 
-	if (strncmp(fsname, "4.2", sizeof fsname) == 0) {
-		SCARG(uap, type) = stackgap_alloc(&sg, sizeof("ffs"));
-		error = copyout("ffs", SCARG(uap, type), sizeof("ffs"));
-		if (error)
-			return (error);
-	} else if (strncmp(fsname, "nfs", sizeof fsname) == 0) {
+	if (strcmp(fsname, "nfs") == 0) {
 		struct sunos_nfs_args sna;
-		struct sockaddr_in sain;
 		struct nfs_args na;
-		struct sockaddr sa;
 		int n;
 
 		error = copyin(SCARG(uap, data), &sna, sizeof sna);
 		if (error)
 			return (error);
-		error = copyin(sna.addr, &sain, sizeof sain);
-		if (error)
-			return (error);
-		bcopy(&sain, &sa, sizeof sa);
-		sa.sa_len = sizeof(sain);
-		SCARG(uap, data) = stackgap_alloc(&sg, sizeof(na));
+		/* sa.sa_len = sizeof(sain); */
 		na.version = NFS_ARGSVERSION;
-		na.addr = stackgap_alloc(&sg, sizeof(struct sockaddr));
+		na.addr = (void *)sna.addr;
 		na.addrlen = sizeof(struct sockaddr);
 		na.sotype = SOCK_DGRAM;
 		na.proto = IPPROTO_UDP;
-		na.fh = (void *)sna.fh;
+		na.fh = sna.fh;
 		na.fhsize = NFSX_V2FH;
 		na.flags = 0;
 		n = sizeof(sunnfs_flgtab) / sizeof(sunnfs_flgtab[0]);
@@ -327,44 +277,71 @@ sunos_sys_mount(p, v, retval)
 		}
 		na.timeo = sna.timeo;
 		na.retrans = sna.retrans;
-		na.hostname = sna.hostname;
+		na.hostname = /* (char *)(u_long) */ sna.hostname;
 
-		error = copyout(&sa, na.addr, sizeof sa);
-		if (error)
-			return (error);
-		error = copyout(&na, SCARG(uap, data), sizeof na);
-		if (error)
-			return (error);
+		return do_sys_mount(l, vfs_getopsbyname("nfs"), NULL,
+		    SCARG(uap, dir), nflags, &na,
+		    UIO_SYSSPACE, sizeof na, &dummy);
 	}
-	return (sys_mount(p, (struct sys_mount_args *)uap, retval));
+
+	if (strcmp(fsname, "4.2") == 0)
+		strcpy(fsname, "ffs");
+
+	return do_sys_mount(l, vfs_getopsbyname(fsname), NULL,
+	    SCARG(uap, dir), nflags, SCARG(uap, data),
+	    UIO_USERSPACE, 0, &dummy);
 }
 
-#if defined(NFSCLIENT)
 int
-async_daemon(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+async_daemon(struct lwp *l, const void *v, register_t *retval)
 {
-	struct sys_nfssvc_args ouap;
 
-	SCARG(&ouap, flag) = NFSSVC_BIOD;
-	SCARG(&ouap, argp) = NULL;
-
-	return (sys_nfssvc(p, &ouap, retval));
+	return kpause("fakeniod", false, 0, NULL);
 }
-#endif /* NFSCLIENT */
+
+void	native_to_sunos_sigset(const sigset_t *, int *);
+void	sunos_to_native_sigset(const int, sigset_t *);
+
+inline void
+native_to_sunos_sigset(const sigset_t *ss, int *mask)
+{
+	*mask = ss->__bits[0];
+}
+
+inline void
+sunos_to_native_sigset(const int mask, sigset_t *ss)
+{
+
+	ss->__bits[0] = mask;
+	ss->__bits[1] = 0;
+	ss->__bits[2] = 0;
+	ss->__bits[3] = 0;
+}
 
 int
-sunos_sys_sigpending(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_sigpending(struct lwp *l, const struct sunos_sys_sigpending_args *uap, register_t *retval)
 {
-	struct sunos_sys_sigpending_args *uap = v;
-	int mask = p->p_siglist & p->p_sigmask;
+	sigset_t ss;
+	int mask;
 
-	return (copyout((caddr_t)&mask, (caddr_t)SCARG(uap, mask), sizeof(int)));
+	sigpending1(l, &ss);
+	native_to_sunos_sigset(&ss, &mask);
+
+	return (copyout((void *)&mask, (void *)SCARG(uap, mask), sizeof(int)));
+}
+
+int
+sunos_sys_sigsuspend(struct lwp *l, const struct sunos_sys_sigsuspend_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(int) mask;
+	} */
+	int mask;
+	sigset_t ss;
+
+	mask = SCARG(uap, mask);
+	sunos_to_native_sigset(mask, &ss);
+	return (sigsuspend1(l, &ss));
 }
 
 /*
@@ -374,94 +351,134 @@ sunos_sys_sigpending(p, v, retval)
  *
  * This is quite ugly, but what do you expect from compatibility code?
  */
-int sunos_readdir_callback(void *, struct dirent *, off_t);
-
-struct sunos_readdir_callback_args {
-	caddr_t outp;
-	int     resid;
-};
-
 int
-sunos_readdir_callback(arg, bdp, cookie)
-	void *arg;
+sunos_sys_getdents(struct lwp *l, const struct sunos_sys_getdents_args *uap, register_t *retval)
+{
 	struct dirent *bdp;
-	off_t cookie;
-{
-	struct sunos_dirent idb;
-	struct sunos_readdir_callback_args *cb = arg; 
-	int sunos_reclen;
-	int error;
-
-	sunos_reclen = SUNOS_RECLEN(&idb, bdp->d_namlen);
-	if (cb->resid < sunos_reclen)
-		return (ENOMEM);
-	
-	idb.d_fileno = bdp->d_fileno;
-	idb.d_off = cookie;
-	idb.d_reclen = sunos_reclen;
-	idb.d_namlen = bdp->d_namlen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-
-	if ((error = copyout((caddr_t)&idb, cb->outp, sunos_reclen)))
-		return (error);
-
-	cb->outp += sunos_reclen;
-	cb->resid -= sunos_reclen;
-
-	return (0);
-}
-
-int
-sunos_sys_getdents(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_getdents_args /* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(int) nbytes;
-	} */ *uap = v;
 	struct vnode *vp;
+	char *inp, *buf;	/* BSD-format */
+	int len, reclen;	/* BSD-format */
+	char *outp;		/* Sun-format */
+	int resid, sunos_reclen;/* Sun-format */
 	struct file *fp;
-	int error;
-	struct sunos_readdir_callback_args args;
+	struct uio auio;
+	struct iovec aiov;
+	struct sunos_dirent idb;
+	off_t off;			/* true file offset */
+	int buflen, error, eofflag;
+	off_t *cookiebuf, *cookie;
+	int ncookies;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
 		return (error);
 
-	vp = (struct vnode *)fp->f_data;
-	/* SunOS returns ENOTDIR here, BSD would use EINVAL */
-	if (vp->v_type != VDIR) {
-		error = ENOTDIR;
-		goto bad;
+	if ((fp->f_flag & FREAD) == 0) {
+		error = EBADF;
+		goto out1;
 	}
 
-	args.resid = SCARG(uap, nbytes);
-	args.outp = (caddr_t)SCARG(uap, buf);
+	vp = fp->f_data;
+	if (vp->v_type != VDIR) {
+		error = EINVAL;
+		goto out1;
+	}
 
-	error = readdir_with_callback(fp, &fp->f_offset, args.resid,
-	    sunos_readdir_callback, &args);
-bad:
-	FRELE(fp);
+	buflen = min(MAXBSIZE, SCARG(uap, nbytes));
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	off = fp->f_offset;
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
+	UIO_SETUP_SYSSPACE(&auio);
+	/*
+	 * First we read into the malloc'ed buffer, then
+	 * we massage it into user space, one record at a time.
+	 */
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, &cookiebuf,
+	    &ncookies);
 	if (error)
-		return (error);
+		goto out;
 
-	*retval = SCARG(uap, nbytes) - args.resid;
+	inp = buf;
+	outp = SCARG(uap, buf);
+	resid = SCARG(uap, nbytes);
+	if ((len = buflen - auio.uio_resid) == 0)
+		goto eof;
 
-	return (0);
+	for (cookie = cookiebuf; len > 0; len -= reclen) {
+		bdp = (struct dirent *)inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3)
+			panic("sunos_getdents");
+		if ((*cookie >> 32) != 0) {
+			compat_offseterr(vp, "sunos_getdents");
+			error = EINVAL;
+			goto out;
+		}
+		if (bdp->d_fileno == 0) {
+			inp += reclen;	/* it is a hole; squish it out */
+			if (cookie)
+				off = *cookie++;
+			else
+				off += reclen;
+			continue;
+		}
+		sunos_reclen = SUNOS_RECLEN(&idb, bdp->d_namlen);
+		if (reclen > len || resid < sunos_reclen) {
+			/* entry too big for buffer, so just stop */
+			outp++;
+			break;
+		}
+		if (cookie)
+			off = *cookie++;	/* each entry points to next */
+		else
+			off += reclen;
+		/*
+		 * Massage in place to make a Sun-shaped dirent (otherwise
+		 * we have to worry about touching user memory outside of
+		 * the copyout() call).
+		 */
+		idb.d_fileno = bdp->d_fileno;
+		idb.d_off = off;
+		idb.d_reclen = sunos_reclen;
+		idb.d_namlen = bdp->d_namlen;
+		strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
+		if ((error = copyout((void *)&idb, outp, sunos_reclen)) != 0)
+			goto out;
+		/* advance past this real entry */
+		inp += reclen;
+		/* advance output past Sun-shaped entry */
+		outp += sunos_reclen;
+		resid -= sunos_reclen;
+	}
+
+	/* if we squished out the whole block, try again */
+	if (outp == SCARG(uap, buf))
+		goto again;
+	fp->f_offset = off;		/* update the vnode offset */
+
+eof:
+	*retval = SCARG(uap, nbytes) - resid;
+out:
+	VOP_UNLOCK(vp, 0);
+	free(cookiebuf, M_TEMP);
+	free(buf, M_TEMP);
+ out1:
+ 	fd_putfile(SCARG(uap, fd));
+	return (error);
 }
-
 
 #define	SUNOS__MAP_NEW	0x80000000	/* if not, old mmap & cannot handle */
 
 int
-sunos_sys_mmap(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_mmap(struct lwp *l, const struct sunos_sys_mmap_args *uap, register_t *retval)
 {
-	struct sunos_sys_mmap_args *uap = v;
 	struct sys_mmap_args ouap;
 
 	/*
@@ -475,18 +492,12 @@ sunos_sys_mmap(p, v, retval)
 
 	SCARG(&ouap, flags) = SCARG(uap, flags) & ~SUNOS__MAP_NEW;
 	SCARG(&ouap, addr) = SCARG(uap, addr);
-
-	if ((SCARG(&ouap, flags) & MAP_FIXED) == 0 &&
-	    SCARG(&ouap, addr) != 0 &&
-	    SCARG(&ouap, addr) < (void *)round_page((vaddr_t)p->p_vmspace->vm_daddr+MAXDSIZ))
-		SCARG(&ouap, addr) = (void *)round_page((vaddr_t)p->p_vmspace->vm_daddr+MAXDSIZ);
-
 	SCARG(&ouap, len) = SCARG(uap, len);
 	SCARG(&ouap, prot) = SCARG(uap, prot);
 	SCARG(&ouap, fd) = SCARG(uap, fd);
 	SCARG(&ouap, pos) = SCARG(uap, pos);
 
-	return (sys_mmap(p, &ouap, retval));
+	return (sys_mmap(l, &ouap, retval));
 }
 
 #define	MC_SYNC		1
@@ -497,44 +508,38 @@ sunos_sys_mmap(p, v, retval)
 #define	MC_UNLOCKAS	6
 
 int
-sunos_sys_mctl(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_mctl(struct lwp *l, const struct sunos_sys_mctl_args *uap, register_t *retval)
 {
-	register struct sunos_sys_mctl_args *uap = v;
 
 	switch (SCARG(uap, func)) {
 	case MC_ADVISE:		/* ignore for now */
 		return (0);
 	case MC_SYNC:		/* translate to msync */
-		return (sys_msync(p, uap, retval));
+		return (sys___msync13(l, (const void *)uap, retval));
 	default:
 		return (EINVAL);
 	}
 }
 
 int
-sunos_sys_setsockopt(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_setsockopt(struct lwp *l, const struct sunos_sys_setsockopt_args *uap, register_t *retval)
 {
-	struct sunos_sys_setsockopt_args *uap = v;
-	struct file *fp;
-	struct mbuf *m = NULL;
+	struct sockopt sopt;
+	struct socket *so;
+	int name = SCARG(uap, name);
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	/* fd_getsock() will use the descriptor for us */
+	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
 		return (error);
 #define	SO_DONTLINGER (~SO_LINGER)
-	if (SCARG(uap, name) == SO_DONTLINGER) {
-		m = m_get(M_WAIT, MT_SOOPTS);
-		mtod(m, struct linger *)->l_onoff = 0;
-		m->m_len = sizeof(struct linger);
-		error = (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
-		    SO_LINGER, m));
-		goto bad;
+	if (name == SO_DONTLINGER) {
+		struct linger lg;
+
+		lg.l_onoff = 0;
+		error = so_setsockopt(l, so, SCARG(uap, level), SO_LINGER,
+		    &lg, sizeof(lg));
+		goto out;
 	}
 	if (SCARG(uap, level) == IPPROTO_IP) {
 #define		SUNOS_IP_MULTICAST_IF		2
@@ -542,117 +547,117 @@ sunos_sys_setsockopt(p, v, retval)
 #define		SUNOS_IP_MULTICAST_LOOP		4
 #define		SUNOS_IP_ADD_MEMBERSHIP		5
 #define		SUNOS_IP_DROP_MEMBERSHIP	6
-		static int ipoptxlat[] = {
+		static const int ipoptxlat[] = {
 			IP_MULTICAST_IF,
 			IP_MULTICAST_TTL,
 			IP_MULTICAST_LOOP,
 			IP_ADD_MEMBERSHIP,
 			IP_DROP_MEMBERSHIP
 		};
-		if (SCARG(uap, name) >= SUNOS_IP_MULTICAST_IF &&
-		    SCARG(uap, name) <= SUNOS_IP_DROP_MEMBERSHIP) {
-			SCARG(uap, name) =
-			    ipoptxlat[SCARG(uap, name) - SUNOS_IP_MULTICAST_IF];
+		if (name >= SUNOS_IP_MULTICAST_IF &&
+		    name <= SUNOS_IP_DROP_MEMBERSHIP) {
+			name = ipoptxlat[name - SUNOS_IP_MULTICAST_IF];
 		}
 	}
 	if (SCARG(uap, valsize) > MLEN) {
 		error = EINVAL;
-		goto bad;
+		goto out;
 	}
+	sockopt_init(&sopt, SCARG(uap, level), name, SCARG(uap, valsize));
 	if (SCARG(uap, val)) {
-		m = m_get(M_WAIT, MT_SOOPTS);
-		error = copyin(SCARG(uap, val), mtod(m, caddr_t),
+		error = copyin(SCARG(uap, val), sopt.sopt_data,
 		    (u_int)SCARG(uap, valsize));
-		if (error) {
-			(void) m_free(m);
-			goto bad;
-		}
-		m->m_len = SCARG(uap, valsize);
 	}
-	error = (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
-	    SCARG(uap, name), m));
-bad:
-	FRELE(fp);
+	if (error == 0)
+		error = sosetopt(so, &sopt);
+	sockopt_destroy(&sopt);
+ out:
+ 	fd_putfile(SCARG(uap, s));
+	return (error);
+}
+
+static inline int sunos_sys_socket_common(struct lwp *, register_t *,
+					      int type);
+static inline int
+sunos_sys_socket_common(struct lwp *l, register_t *retval, int type)
+{
+	struct socket *so;
+	int error, fd;
+
+	/* fd_getsock() will use the descriptor for us */
+	fd = (int)*retval;
+	if ((error = fd_getsock(fd, &so)) == 0) {
+		if (type == SOCK_DGRAM)
+			so->so_options |= SO_BROADCAST;
+		fd_putfile(fd);
+	}
 	return (error);
 }
 
 int
-sunos_sys_fchroot(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_socket(struct lwp *l, const struct sunos_sys_socket_args *uap, register_t *retval)
 {
-	register struct sunos_sys_fchroot_args *uap = v;
-	register struct filedesc *fdp = p->p_fd;
-	register struct vnode *vp;
-	struct file *fp;
+	/* {
+		syscallarg(int) domain;
+		syscallarg(int) type;
+		syscallarg(int) protocol;
+	} */
 	int error;
 
-	if ((error = suser(p, 0)) != 0)
+	error = compat_30_sys_socket(l, (const void *)uap, retval);
+	if (error)
 		return (error);
-	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
+	return sunos_sys_socket_common(l, retval, SCARG(uap, type));
+}
+
+int
+sunos_sys_socketpair(struct lwp *l, const struct sunos_sys_socketpair_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(int) domain;
+		syscallarg(int) type;
+		syscallarg(int) protocol;
+		syscallarg(int *) rsv;
+	} */
+	int error;
+
+	error = sys_socketpair(l, (const void *)uap, retval);
+	if (error)
 		return (error);
-	vp = (struct vnode *)fp->f_data;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	if (vp->v_type != VDIR)
-		error = ENOTDIR;
-	else
-		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
-	VOP_UNLOCK(vp, 0, p);
-	if (error) {
-		FRELE(fp);
-		return (error);
-	}
-	VREF(vp);
-	if (fdp->fd_rdir != NULL)
-		vrele(fdp->fd_rdir);
-	fdp->fd_rdir = vp;
-	FRELE(fp);
-	return (0);
+	return sunos_sys_socket_common(l, retval, SCARG(uap, type));
 }
 
 /*
  * XXX: This needs cleaning up.
  */
 int
-sunos_sys_auditsys(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_auditsys(struct lwp *l, const struct sunos_sys_auditsys_args *uap, register_t *retval)
 {
 	return 0;
 }
 
 int
-sunos_sys_uname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_uname(struct lwp *l, const struct sunos_sys_uname_args *uap, register_t *retval)
 {
-	struct sunos_sys_uname_args *uap = v;
 	struct sunos_utsname sut;
-	extern char machine[];
 
-	bzero(&sut, sizeof(sut));
+	memset(&sut, 0, sizeof(sut));
 
-	bcopy(ostype, sut.sysname, sizeof(sut.sysname) - 1);
-	bcopy(hostname, sut.nodename, sizeof(sut.nodename));
+	memcpy(sut.sysname, ostype, sizeof(sut.sysname) - 1);
+	memcpy(sut.nodename, hostname, sizeof(sut.nodename));
 	sut.nodename[sizeof(sut.nodename)-1] = '\0';
-	bcopy(osrelease, sut.release, sizeof(sut.release) - 1);
-	strlcpy(sut.version, "1", sizeof(sut.version));
-	bcopy(machine, sut.machine, sizeof(sut.machine) - 1);
+	memcpy(sut.release, osrelease, sizeof(sut.release) - 1);
+	memcpy(sut.version, "1", sizeof(sut.version) - 1);
+	memcpy(sut.machine, machine, sizeof(sut.machine) - 1);
 
-	return copyout((caddr_t)&sut, (caddr_t)SCARG(uap, name),
+	return copyout((void *)&sut, (void *)SCARG(uap, name),
 	    sizeof(struct sunos_utsname));
 }
 
 int
-sunos_sys_setpgrp(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_setpgrp(struct lwp *l, const struct sunos_sys_setpgrp_args *uap, register_t *retval)
 {
-	struct sunos_sys_setpgrp_args *uap = v;
+	struct proc *p = l->l_proc;
 
 	/*
 	 * difference to our setpgid call is to include backwards
@@ -662,97 +667,90 @@ sunos_sys_setpgrp(p, v, retval)
 	 */
 	if (!SCARG(uap, pgid) &&
 	    (!SCARG(uap, pid) || SCARG(uap, pid) == p->p_pid))
-		return sys_setsid(p, uap, retval);
+		return sys_setsid(l, NULL, retval);
 	else
-		return sys_setpgid(p, uap, retval);
+		return sys_setpgid(l, (const void *)uap, retval);
 }
 
 int
-sunos_sys_open(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_open(struct lwp *l, const struct sunos_sys_open_args *uap, register_t *retval)
 {
-	struct sunos_sys_open_args *uap = v;
-	int l, r;
+	struct proc *p = l->l_proc;
+	struct sys_open_args open_ua;
+	int smode, nmode;
 	int noctty;
 	int ret;
-	
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
 	/* convert mode into NetBSD mode */
-	l = SCARG(uap, flags);
-	noctty = l & 0x8000;
-	r =	(l & (0x0001 | 0x0002 | 0x0008 | 0x0040 | 0x0200 | 0x0400 | 0x0800));
-	r |=	((l & (0x0004 | 0x1000 | 0x4000)) ? O_NONBLOCK : 0);
-	r |=	((l & 0x0080) ? O_SHLOCK : 0);
-	r |=	((l & 0x0100) ? O_EXLOCK : 0);
-	r |=	((l & 0x2000) ? O_SYNC : 0);
+	smode = SCARG(uap, flags);
+	noctty = smode & 0x8000;
+	nmode =	smode &
+		(0x0001 | 0x0002 | 0x0008 | 0x0040 | 0x0200 | 0x0400 | 0x0800);
+	nmode |= ((smode & (0x0004 | 0x1000 | 0x4000)) ? O_NONBLOCK : 0);
+	nmode |= ((smode & 0x0080) ? O_SHLOCK : 0);
+	nmode |= ((smode & 0x0100) ? O_EXLOCK : 0);
+	nmode |= ((smode & 0x2000) ? O_FSYNC : 0);
 
-	SCARG(uap, flags) = r;
-	ret = sys_open(p, (struct sys_open_args *)uap, retval);
+	SCARG(&open_ua, path) = SCARG(uap, path);
+	SCARG(&open_ua, flags) = nmode;
+	SCARG(&open_ua, mode) = SCARG(uap, mode);
+	ret = sys_open(l, &open_ua, retval);
 
-	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_flag & P_CONTROLT)) {
-		struct filedesc *fdp = p->p_fd;
-		struct file *fp;
+	/* XXXSMP */
+	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
+		file_t *fp;
+		int fd;
 
-		if ((fp = fd_getfile(fdp, *retval)) == NULL)
-			return (EBADF);
-		FREF(fp);
+		fd = (int)*retval;
+		fp = fd_getfile(fd);
+
 		/* ignore any error, just give it a try */
-		if (fp->f_type == DTYPE_VNODE)
-			(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, (caddr_t)0, p);
-		FRELE(fp);
+		if (fp != NULL) {
+			if (fp->f_type == DTYPE_VNODE)
+				(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, NULL);
+			fd_putfile(fd);
+		}
 	}
 	return ret;
 }
 
-#if defined (NFSSERVER)
 int
-sunos_sys_nfssvc(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_nfssvc(struct lwp *l, const struct sunos_sys_nfssvc_args *uap, register_t *retval)
 {
 #if 0
-	struct sunos_sys_nfssvc_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct emul *e = p->p_emul;
 	struct sys_nfssvc_args outuap;
 	struct sockaddr sa;
 	int error;
+	void *sg = stackgap_init(p, 0);
 
-	bzero(&outuap, sizeof outuap);
+	memset(&outuap, 0, sizeof outuap);
 	SCARG(&outuap, fd) = SCARG(uap, fd);
-	SCARG(&outuap, mskval) = STACKGAPBASE;
-	SCARG(&outuap, msklen) = sizeof sa;
-	SCARG(&outuap, mtchval) = SCARG(&outuap, mskval) + sizeof sa;
-	SCARG(&outuap, mtchlen) = sizeof sa;
+	SCARG(&outuap, mskval) = stackgap_alloc(p, &sg, sizeof(sa));
+	SCARG(&outuap, msklen) = sizeof(sa);
+	SCARG(&outuap, mtchval) = stackgap_alloc(p, &sg, sizeof(sa));
+	SCARG(&outuap, mtchlen) = sizeof(sa);
 
-	bzero(&sa, sizeof sa);
+	memset(&sa, 0, sizeof sa);
 	if (error = copyout(&sa, SCARG(&outuap, mskval), SCARG(&outuap, msklen)))
 		return (error);
 	if (error = copyout(&sa, SCARG(&outuap, mtchval), SCARG(&outuap, mtchlen)))
 		return (error);
 
-	return nfssvc(p, &outuap, retval);
+	return nfssvc(l, &outuap, retval);
 #else
 	return (ENOSYS);
 #endif
 }
-#endif /* NFSSERVER */
 
 int
-sunos_sys_ustat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_ustat(struct lwp *l, const struct sunos_sys_ustat_args *uap, register_t *retval)
 {
-	struct sunos_sys_ustat_args *uap = v;
 	struct sunos_ustat us;
 	int error;
 
-	bzero(&us, sizeof us);
+	memset(&us, 0, sizeof us);
 
 	/*
 	 * XXX: should set f_tfree and f_tinode at least
@@ -765,21 +763,16 @@ sunos_sys_ustat(p, v, retval)
 }
 
 int
-sunos_sys_quotactl(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_quotactl(struct lwp *l, const struct sunos_sys_quotactl_args *uap, register_t *retval)
 {
 
 	return EINVAL;
 }
 
 int
-sunos_sys_vhangup(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_vhangup(struct lwp *l, const void *v, register_t *retval)
 {
+	struct proc *p = l->l_proc;
 	struct session *sp = p->p_session;
 
 	if (sp->s_ttyvp == 0)
@@ -799,13 +792,11 @@ sunos_sys_vhangup(p, v, retval)
 }
 
 static int
-sunstatfs(sp, buf)
-	struct statfs *sp;
-	caddr_t buf;
+sunstatfs(struct statvfs *sp, void *buf)
 {
 	struct sunos_statfs ssfs;
 
-	bzero(&ssfs, sizeof ssfs);
+	memset(&ssfs, 0, sizeof ssfs);
 	ssfs.f_type = 0;
 	ssfs.f_bsize = sp->f_bsize;
 	ssfs.f_blocks = sp->f_blocks;
@@ -813,66 +804,55 @@ sunstatfs(sp, buf)
 	ssfs.f_bavail = sp->f_bavail;
 	ssfs.f_files = sp->f_files;
 	ssfs.f_ffree = sp->f_ffree;
-	ssfs.f_fsid = sp->f_fsid;
-	return copyout((caddr_t)&ssfs, buf, sizeof ssfs);
-}	
+	ssfs.f_fsid = sp->f_fsidx;
+	return copyout((void *)&ssfs, buf, sizeof ssfs);
+}
 
 int
-sunos_sys_statfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_statfs(struct lwp *l, const struct sunos_sys_statfs_args *uap, register_t *retval)
 {
-	struct sunos_sys_statfs_args *uap = v;
-	register struct mount *mp;
-	register struct statfs *sp;
+	struct mount *mp;
+	struct statvfs *sp;
 	int error;
 	struct nameidata nd;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	NDINIT(&nd, LOOKUP, FOLLOW | TRYEMULROOT, UIO_USERSPACE,
+	    SCARG(uap, path));
 	if ((error = namei(&nd)) != 0)
 		return (error);
 	mp = nd.ni_vp->v_mount;
 	sp = &mp->mnt_stat;
 	vrele(nd.ni_vp);
-	if ((error = VFS_STATFS(mp, sp, p)) != 0)
+	if ((error = VFS_STATVFS(mp, sp)) != 0)
 		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return sunstatfs(sp, (caddr_t)SCARG(uap, buf));
+	sp->f_flag = mp->mnt_flag & MNT_VISFLAGMASK;
+	return sunstatfs(sp, (void *)SCARG(uap, buf));
 }
 
 int
-sunos_sys_fstatfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_fstatfs(struct lwp *l, const struct sunos_sys_fstatfs_args *uap, register_t *retval)
 {
-	struct sunos_sys_fstatfs_args *uap = v;
-	struct file *fp;
+	file_t *fp;
 	struct mount *mp;
-	struct statfs *sp;
+	struct statvfs *sp;
 	int error;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	/* fd_getvnode() will use the descriptor for us */
+	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	sp = &mp->mnt_stat;
-	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp);
-	if (error)
-		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return sunstatfs(sp, (caddr_t)SCARG(uap, buf));
+	if ((error = VFS_STATVFS(mp, sp)) != 0)
+		goto out;
+	sp->f_flag = mp->mnt_flag & MNT_VISFLAGMASK;
+	error = sunstatfs(sp, (void *)SCARG(uap, buf));
+ out:
+ 	fd_putfile(SCARG(uap, fd));
+	return (error);
 }
 
 int
-sunos_sys_exportfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_exportfs(struct lwp *l, const struct sunos_sys_exportfs_args *uap, register_t *retval)
 {
 	/*
 	 * XXX: should perhaps translate into a mount(2)
@@ -882,20 +862,17 @@ sunos_sys_exportfs(p, v, retval)
 }
 
 int
-sunos_sys_mknod(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_mknod(struct lwp *l, const struct sunos_sys_mknod_args *uap, register_t *retval)
 {
-	struct sunos_sys_mknod_args *uap = v;
+	struct sys_mkfifo_args fifo_ua;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	if (S_ISFIFO(SCARG(uap, mode))) {
+		SCARG(&fifo_ua, path) = SCARG(uap, path);
+		SCARG(&fifo_ua, mode) = SCARG(uap, mode);
+		return sys_mkfifo(l, &fifo_ua, retval);
+	}
 
-	if (S_ISFIFO(SCARG(uap, mode)))
-		return sys_mkfifo(p, uap, retval);
-
-	return sys_mknod(p, (struct sys_mknod_args *)uap, retval);
+	return sys_mknod(l, (const struct sys_mknod_args *)uap, retval);
 }
 
 #define SUNOS_SC_ARG_MAX	1
@@ -908,13 +885,8 @@ sunos_sys_mknod(p, v, retval)
 #define SUNOS_SC_VERSION	8
 
 int
-sunos_sys_sysconf(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_sysconf(struct lwp *l, const struct sunos_sys_sysconf_args *uap, register_t *retval)
 {
-	struct sunos_sys_sysconf_args *uap = v;
-	extern int maxfiles;
 
 	switch(SCARG(uap, name)) {
 	case SUNOS_SC_ARG_MAX:
@@ -955,58 +927,64 @@ sunos_sys_sysconf(p, v, retval)
 #define SUNOS_RLIM_NLIMITS	7
 
 int
-sunos_sys_getrlimit(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_getrlimit(struct lwp *l, const struct sunos_sys_getrlimit_args *uap, register_t *retval)
 {
-	struct sunos_sys_getrlimit_args *uap = v;
+	struct compat_43_sys_getrlimit_args ua_43;
+
+	SCARG(&ua_43, which) = SCARG(uap, which);
+	SCARG(&ua_43, rlp) = SCARG(uap, rlp);
 
 	if (SCARG(uap, which) >= SUNOS_RLIM_NLIMITS)
 		return EINVAL;
 
 	if (SCARG(uap, which) == SUNOS_RLIMIT_NOFILE)
-		SCARG(uap, which) = RLIMIT_NOFILE;
+		SCARG(&ua_43, which) = RLIMIT_NOFILE;
 
-	return compat_43_sys_getrlimit(p, uap, retval);
+	return compat_43_sys_getrlimit(l, &ua_43, retval);
 }
 
 int
-sunos_sys_setrlimit(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_setrlimit(struct lwp *l, const struct sunos_sys_setrlimit_args *uap, register_t *retval)
 {
-	struct sunos_sys_getrlimit_args *uap = v;
+	struct compat_43_sys_setrlimit_args ua_43;
+
+	SCARG(&ua_43, which) = SCARG(uap, which);
+	SCARG(&ua_43, rlp) = SCARG(uap, rlp);
 
 	if (SCARG(uap, which) >= SUNOS_RLIM_NLIMITS)
 		return EINVAL;
 
 	if (SCARG(uap, which) == SUNOS_RLIMIT_NOFILE)
-		SCARG(uap, which) = RLIMIT_NOFILE;
+		SCARG(&ua_43, which) = RLIMIT_NOFILE;
 
-	return compat_43_sys_setrlimit(p, uap, retval);
+	return compat_43_sys_setrlimit(l, &ua_43, retval);
 }
 
-#ifdef PTRACE
+/* for the m68k machines */
+#ifndef PT_GETFPREGS
+#define PT_GETFPREGS -1
+#endif
+#ifndef PT_SETFPREGS
+#define PT_SETFPREGS -1
+#endif
 
-static int sreq2breq[] = {
+static const int sreq2breq[] = {
 	PT_TRACE_ME,    PT_READ_I,      PT_READ_D,      -1,
 	PT_WRITE_I,     PT_WRITE_D,     -1,             PT_CONTINUE,
 	PT_KILL,        -1,             PT_ATTACH,      PT_DETACH,
 	PT_GETREGS,     PT_SETREGS,     PT_GETFPREGS,   PT_SETFPREGS
 };
-static int nreqs = sizeof(sreq2breq) / sizeof(sreq2breq[0]);
+static const int nreqs = sizeof(sreq2breq) / sizeof(sreq2breq[0]);
 
 int
-sunos_sys_ptrace(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_ptrace(struct lwp *l, const struct sunos_sys_ptrace_args *uap, register_t *retval)
 {
-	struct sunos_sys_ptrace_args *uap = v;
 	struct sys_ptrace_args pa;
 	int req;
+
+#define	sys_ptrace sysent[SYS_ptrace].sy_call 
+	if (sys_ptrace == sys_nosys)
+		return ENOSYS;
 
 	req = SCARG(uap, req);
 
@@ -1019,43 +997,48 @@ sunos_sys_ptrace(p, v, retval)
 
 	SCARG(&pa, req) = req;
 	SCARG(&pa, pid) = (pid_t)SCARG(uap, pid);
-	SCARG(&pa, addr) = (caddr_t)SCARG(uap, addr);
+	SCARG(&pa, addr) = (void *)SCARG(uap, addr);
 	SCARG(&pa, data) = SCARG(uap, data);
 
-	return sys_ptrace(p, &pa, retval);
+	return sys_ptrace(l, &pa, retval);
 }
-
-#endif	/* PTRACE */
 
 /*
  * SunOS reboot system call (for compatibility).
  * Sun lets you pass in a boot string which the PROM
  * saves and provides to the next boot program.
  */
+
+#define SUNOS_RB_ASKNAME	0x001
+#define SUNOS_RB_SINGLE 	0x002
+#define SUNOS_RB_NOSYNC		0x004
+#define SUNOS_RB_HALT		0x008
+#define SUNOS_RB_DUMP		0x080
+#define	SUNOS_RB_STRING		0x200
+
 static struct sunos_howto_conv {
 	int sun_howto;
 	int bsd_howto;
 } sunos_howto_conv[] = {
-	{ 0x001,	RB_ASKNAME },
-	{ 0x002,	RB_SINGLE },
-	{ 0x004,	RB_NOSYNC },
-	{ 0x008,	RB_HALT },
-	{ 0x080,	RB_DUMP },
-	{ 0x000,	0 },
+	{ SUNOS_RB_ASKNAME,	RB_ASKNAME },
+	{ SUNOS_RB_SINGLE,	RB_SINGLE },
+	{ SUNOS_RB_NOSYNC,	RB_NOSYNC },
+	{ SUNOS_RB_HALT,	RB_HALT },
+	{ SUNOS_RB_DUMP,	RB_DUMP },
+	{ SUNOS_RB_STRING,	RB_STRING },
+	{ 0x000,		0 },
 };
-#define	SUNOS_RB_STRING	0x200
 
 int
-sunos_sys_reboot(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_reboot(struct lwp *l, const struct sunos_sys_reboot_args *uap, register_t *retval)
 {
-	struct sunos_sys_reboot_args *uap = v;
+	struct sys_reboot_args ua;
 	struct sunos_howto_conv *convp;
 	int error, bsd_howto, sun_howto;
+	char *bootstr;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = kauth_authorize_system(l->l_cred, KAUTH_SYSTEM_REBOOT,
+	    0, NULL, NULL, NULL)) != 0)
 		return (error);
 
 	/*
@@ -1065,31 +1048,32 @@ sunos_sys_reboot(p, v, retval)
 	bsd_howto = 0;
 	convp = sunos_howto_conv;
 	while (convp->sun_howto) {
-		if (sun_howto &  convp->sun_howto)
+		if (sun_howto & convp->sun_howto)
 			bsd_howto |= convp->bsd_howto;
 		convp++;
 	}
 
-#ifdef sun3
 	/*
 	 * Sun RB_STRING (Get user supplied bootstring.)
 	 * If the machine supports passing a string to the
-	 * next booted kernel, add the machine name above
-	 * and provide a reboot2() function (see sun3).
+	 * next booted kernel.
 	 */
 	if (sun_howto & SUNOS_RB_STRING) {
 		char bs[128];
 
 		error = copyinstr(SCARG(uap, bootstr), bs, sizeof(bs), 0);
+
 		if (error)
-			return error;
+			bootstr = NULL;
+		else
+			bootstr = bs;
+	} else
+		bootstr = NULL;
 
-		return (reboot2(bsd_howto, bs));
-	}
-#endif	/* sun3 */
-
-	boot(bsd_howto);
-	return 0;
+	SCARG(&ua, opt) = bsd_howto;
+	SCARG(&ua, bootstr) = bootstr;
+	sys_reboot(l, &ua, retval);
+	return(0);
 }
 
 /*
@@ -1097,116 +1081,50 @@ sunos_sys_reboot(p, v, retval)
  */
 /* ARGSUSED */
 int
-sunos_sys_sigvec(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_sigvec(struct lwp *l, const struct sunos_sys_sigvec_args *uap, register_t *retval)
 {
-	register struct sunos_sys_sigvec_args /* {
+	/* {
 		syscallarg(int) signum;
 		syscallarg(struct sigvec *) nsv;
 		syscallarg(struct sigvec *) osv;
-	} */ *uap = v;
-	struct sigvec vec;
-	register struct sigacts *ps = p->p_sigacts;
-	register struct sigvec *sv;
-	register int signum;
-	int bit, error;
+	} */
+	struct sigvec nsv, osv;
+	struct sigaction nsa, osa;
+	int error;
+/*XXX*/extern	void compat_43_sigvec_to_sigaction
+(const struct sigvec *, struct sigaction *);
+/*XXX*/extern	void compat_43_sigaction_to_sigvec
+(const struct sigaction *, struct sigvec *);
 
-	signum = SCARG(uap, signum);
-	if (signum <= 0 || signum >= NSIG ||
-	    signum == SIGKILL || signum == SIGSTOP)
-		return (EINVAL);
-	sv = &vec;
-	if (SCARG(uap, osv)) {
-		*(sig_t *)&sv->sv_handler = ps->ps_sigact[signum];
-		sv->sv_mask = ps->ps_catchmask[signum];
-		bit = sigmask(signum);
-		sv->sv_flags = 0;
-		if ((ps->ps_sigonstack & bit) != 0)
-			sv->sv_flags |= SV_ONSTACK;
-		if ((ps->ps_sigintr & bit) != 0)
-			sv->sv_flags |= SV_INTERRUPT;
-		if ((ps->ps_sigreset & bit) != 0)
-			sv->sv_flags |= SA_RESETHAND;
-		sv->sv_mask &= ~bit;
-		error = copyout((caddr_t)sv, (caddr_t)SCARG(uap, osv),
-		    sizeof (vec));
-		if (error)
-			return (error);
-	}
 	if (SCARG(uap, nsv)) {
-		error = copyin((caddr_t)SCARG(uap, nsv), (caddr_t)sv,
-		    sizeof (vec));
-		if (error)
+		error = copyin(SCARG(uap, nsv), &nsv, sizeof(nsv));
+		if (error != 0)
 			return (error);
+
 		/*
 		 * SunOS uses the mask 0x0004 as SV_RESETHAND
 		 * meaning: `reset to SIG_DFL on delivery'.
 		 * We support only the bits in: 0xF
 		 * (those bits are the same as ours)
 		 */
-		if (sv->sv_flags & ~0xF)
+		if (nsv.sv_flags & ~0xF)
 			return (EINVAL);
-		/* SunOS binaries have a user-mode trampoline. */
-		sv->sv_flags |= SA_USERTRAMP;
-		/* Convert sigvec:SV_INTERRUPT to sigaction:SA_RESTART */
-		sv->sv_flags ^= SA_RESTART;	/* same bit, inverted */
-		setsigvec(p, signum, (struct sigaction *)sv);
+
+		compat_43_sigvec_to_sigaction(&nsv, &nsa);
 	}
-	return (0);
-}
-
-int
-sunos_sys_ostime(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_ostime_args /* {
-		syscallarg(int) time;
-	} */ *uap = v;
-	struct timespec ts;
-	int error;
-
-	if ((error = suser(p, 0)) != 0)
+	error = sigaction1(l, SCARG(uap, signum),
+			   SCARG(uap, nsv) ? &nsa : 0,
+			   SCARG(uap, osv) ? &osa : 0,
+			   NULL, 0);
+	if (error != 0)
 		return (error);
 
-	ts.tv_sec = SCARG(uap, time);
-	ts.tv_nsec = 0;
-	error = settime(&ts);
-	return (error);
-}
+	if (SCARG(uap, osv)) {
+		compat_43_sigaction_to_sigvec(&osa, &osv);
+		error = copyout(&osv, SCARG(uap, osv), sizeof(osv));
+		if (error != 0)
+			return (error);
+	}
 
-/*
- * This code is partly stolen from src/lib/libc/gen/times.c
- * XXX - CLK_TCK isn't declared in /sys, just in <time.h>, done here
- */
-
-#define	CLK_TCK	100
-#define	CONVTCK(r)	(r.tv_sec * CLK_TCK + r.tv_usec / (1000000 / CLK_TCK))
-
-int
-sunos_sys_otimes(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_otimes_args /* {
-		syscallarg(struct tms *) tp;
-	} */ *uap = v;
-	struct tms tms;
-	struct rusage ru, *rup;
-
-	/* RUSAGE_SELF */
-	calcru(p, &ru.ru_utime, &ru.ru_stime, NULL);
-	tms.tms_utime = CONVTCK(ru.ru_utime);
-	tms.tms_stime = CONVTCK(ru.ru_stime);
-
-	/* RUSAGE_CHILDREN */
-	rup = &p->p_stats->p_cru;
-	tms.tms_cutime = CONVTCK(rup->ru_utime);
-	tms.tms_cstime = CONVTCK(rup->ru_stime);
-
-	return copyout(&tms, SCARG(uap, tp), sizeof(*(SCARG(uap, tp))));
+	return (0);
 }

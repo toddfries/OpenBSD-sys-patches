@@ -1,5 +1,4 @@
-/*	$OpenBSD: timeb.h,v 1.5 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: timeb.h,v 1.10 1995/06/05 19:39:35 pk Exp $	*/
+/*	$NetBSD: timeb.h,v 1.14 2005/12/11 12:25:21 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -44,7 +43,7 @@
 struct timeb {
 	time_t	time;			/* seconds since the Epoch */
 	unsigned short millitm;		/* + milliseconds since the Epoch */
-	short	timezone;		/* minutes west of UTC */
+	short	timezone;		/* minutes west of CUT */
 	short	dstflag;		/* DST == non-zero */
 };
 
@@ -52,7 +51,7 @@ struct timeb {
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int ftime(struct timeb *tp);
+int ftime(struct timeb *);
 __END_DECLS
 #endif /* _KERNEL */
 

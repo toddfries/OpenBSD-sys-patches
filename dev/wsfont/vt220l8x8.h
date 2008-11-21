@@ -1,5 +1,4 @@
-/*	$OpenBSD: vt220l8x8.h,v 1.1 2001/03/18 04:30:24 nate Exp $ */
-/* 	$NetBSD: vt220l8x8.h,v 1.3 2000/01/05 18:44:25 ad Exp $	*/
+/* 	$NetBSD: vt220l8x8.h,v 1.9 2005/12/11 12:24:12 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch
@@ -37,11 +36,10 @@
  * Translated into a wsfont form by Shin Takemura in Nov 2, 1999.
  */
 
-extern u_char vt220l8x8_data[];
+static u_char vt220l8x8_data[];
 
-struct wsdisplay_font vt220l8x8 = {
+static struct wsdisplay_font vt220l8x8 = {
 	"vt220l",			/* typeface name */
-	0,				/* index */
 	'\0',				/* firstchar */
 	256,				/* numchars */
 	WSDISPLAY_FONTENC_IBM,		/* encoding */
@@ -50,7 +48,6 @@ struct wsdisplay_font vt220l8x8 = {
 	1,				/* stride */
 	WSDISPLAY_FONTORDER_L2R,	/* bit order */
 	WSDISPLAY_FONTORDER_L2R,	/* byte order */
-	NULL,				/* cookie */
 	vt220l8x8_data			/* data */
 };
 

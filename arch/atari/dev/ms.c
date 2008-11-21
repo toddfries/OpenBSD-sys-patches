@@ -1,4 +1,4 @@
-/*	$NetBSD: ms.c,v 1.16 2005/12/11 12:16:54 christos Exp $	*/
+/*	$NetBSD: ms.c,v 1.20 2008/01/08 18:04:16 joerg Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman.
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.16 2005/12/11 12:16:54 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.20 2008/01/08 18:04:16 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -103,7 +103,7 @@ mouseattach(cnt)
 {
 	printf("1 mouse configured\n");
 	ms_softc[0].ms_emul3b = 1;
-	callout_init(&ms_softc[0].ms_delay_ch);
+	callout_init(&ms_softc[0].ms_delay_ch, 0);
 	return(NMOUSE);
 }
 
@@ -214,7 +214,7 @@ int		size, type;
 		}
 		fe->id    = LOC_X_DELTA;
 		fe->value = rel_ms->dx;
-		fe->time  = time;
+		getmicrotime(&fe->time);
 		if (put >= EV_QSIZE) {
 			put = 0;
 			fe  = &ms->ms_events.ev_q[0];
@@ -228,7 +228,7 @@ int		size, type;
 		}
 		fe->id    = LOC_Y_DELTA;
 		fe->value = rel_ms->dy;
-		fe->time  = time;
+		getmicrotime(&fe->time);
 		if (put >= EV_QSIZE) {
 			put = 0;
 			fe  = &ms->ms_events.ev_q[0];
@@ -246,7 +246,7 @@ int		size, type;
 				fe2->id = MS_LEFT;
 			else fe2->id = MS_MIDDLE;
 			fe2->value = rel_ms->id & bmask ? VKEY_DOWN : VKEY_UP;
-			fe2->time  = time;
+			getmicrotime(&fe2->time);
 		}
 	}
 
@@ -376,7 +376,7 @@ int
 msioctl(dev, cmd, data, flag, l)
 dev_t			dev;
 u_long			cmd;
-register caddr_t 	data;
+register void *	data;
 int			flag;
 struct lwp		*l;
 {

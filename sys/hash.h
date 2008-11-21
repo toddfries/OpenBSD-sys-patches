@@ -1,8 +1,11 @@
-/*	$OpenBSD: hash.h,v 1.4 2004/05/25 18:37:23 jmc Exp $	*/
+/*	$NetBSD: hash.h,v 1.6 2008/04/28 20:24:10 martin Exp $	*/
 
-/*
- * Copyright (c) 2001 Tobias Weingartner
+/*-
+ * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Luke Mewburn.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,115 +16,88 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _SYS_HASH_H_
+#ifndef	_SYS_HASH_H_
 #define	_SYS_HASH_H_
+
 #include <sys/types.h>
-
-/*
- * Note: SMALL_KERNEL might be used to shrink these, right now I
- * do not see the point, as my kernel did not grow appreciably when
- * I switched to these from other inline code.  This may have to be
- * revisited when/if these functions become more prevalent in the
- * kernel.
- */
-
-/* Convenience */
-#ifndef	HASHINIT
-#define	HASHINIT	5381
-#define	HASHSTEP(x,c)	(((x << 5) + x) + (c))
+#ifdef __HAVE_MACHINE_HASH_H
+#include <machine/hash.h>
 #endif
 
+
+#ifndef __HAVE_HASH32_BUF			/* not overridden by MD hash */
+
+#define	HASH32_BUF_INIT	5381
+
 /*
- * Return a 32-bit hash of the given buffer.  The init
- * value should be 0, or the previous hash value to extend
- * the previous hash.
+ * uint32_t
+ * hash32_buf(const void *bf, size_t len, uint32_t hash)
+ *	return a 32 bit hash of the binary buffer buf (size len),
+ *	seeded with an initial hash value of hash (usually HASH32_BUF_INIT).
  */
 static __inline uint32_t
-hash32_buf(const void *buf, size_t len, uint32_t hash)
+hash32_buf(const void *bf, size_t len, uint32_t hash)
 {
-	const unsigned char *p = buf;
+	const uint8_t *s = bf;
 
-	while (len--)
-		hash = HASHSTEP(hash, *p++);
+	while (len-- != 0)			/* "nemesi": k=257, r=r*257 */
+		hash = hash * 257 + *s++;
+	return (hash * 257);
+}
+#endif	/* __HAVE_HASH32_BUF */
 
-	return hash;
+
+#ifndef __HAVE_HASH32_STR			/* not overridden by MD hash */
+
+#define	HASH32_STR_INIT	5381
+/*
+ * uint32_t
+ * hash32_str(const void *bf, uint32_t hash)
+ *	return a 32 bit hash of NUL terminated ASCII string buf,
+ *	seeded with an initial hash value of hash (usually HASH32_STR_INIT).
+ */
+static __inline uint32_t
+hash32_str(const void *bf, uint32_t hash)
+{
+	const uint8_t *s = bf;
+	uint8_t	c;
+
+	while ((c = *s++) != 0)
+		hash = hash * 33 + c;		/* "perl": k=33, r=r+r/32 */
+	return (hash + (hash >> 5));
 }
 
 /*
- * Return a 32-bit hash of the given string.
+ * uint32_t
+ * hash32_strn(const void *bf, size_t len, uint32_t hash)
+ *	return a 32 bit hash of NUL terminated ASCII string buf up to
+ *	a maximum of len bytes,
+ *	seeded with an initial hash value of hash (usually HASH32_STR_INIT).
  */
 static __inline uint32_t
-hash32_str(const void *buf, uint32_t hash)
+hash32_strn(const void *bf, size_t len, uint32_t hash)
 {
-	const unsigned char *p = buf;
+	const uint8_t	*s = bf;
+	uint8_t	c;
 
-	while (*p)
-		hash = HASHSTEP(hash, *p++);
-
-	return hash;
+	while ((c = *s++) != 0 && len-- != 0)
+		hash = hash * 33 + c;		/* "perl": k=33, r=r+r/32 */
+	return (hash + (hash >> 5));
 }
+#endif	/* __HAVE_HASH32_STR */
 
-/*
- * Return a 32-bit hash of the given string, limited by N.
- */
-static __inline uint32_t
-hash32_strn(const void *buf, size_t len, uint32_t hash)
-{
-	const unsigned char *p = buf;
 
-	while (*p && len--)
-		hash = HASHSTEP(hash, *p++);
-
-	return hash;
-}
-
-/*
- * Return a 32-bit hash of the given string terminated by C,
- * (as well as 0).  This is mainly here as a helper for the
- * namei() hashing of path name parts.
- */
-static __inline uint32_t
-hash32_stre(const void *buf, int end, char **ep, uint32_t hash)
-{
-	const unsigned char *p = buf;
-
-	while (*p && (*p != end))
-		hash = HASHSTEP(hash, *p++);
-
-	if (ep)
-		*ep = (char *)p;
-
-	return hash;
-}
-
-/*
- * Return a 32-bit hash of the given string, limited by N,
- * and terminated by C (as well as 0).  This is mainly here
- * as a helper for the namei() hashing of path name parts.
- */
-static __inline uint32_t
-hash32_strne(const void *buf, size_t len, int end, char **ep, uint32_t hash)
-{
-	const unsigned char *p = buf;
-
-	while (*p && (*p != end) && len--)
-		hash = HASHSTEP(hash, *p++);
-
-	if (ep)
-		*ep = (char *)p;
-
-	return hash;
-}
-#endif /* !_SYS_HASH_H_ */
+#endif	/* !_SYS_HASH_H_ */

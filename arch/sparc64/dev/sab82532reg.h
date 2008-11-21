@@ -1,4 +1,5 @@
-/*	$OpenBSD: sab82532reg.h,v 1.3 2003/06/02 20:02:49 jason Exp $	*/
+/*	$NetBSD: sab82532reg.h,v 1.2 2003/05/03 18:11:02 wiz Exp $	*/
+/*	$OpenBSD: sab82532reg.h,v 1.2 2002/04/08 17:49:42 jason Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -12,6 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Jason L. Wright
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -156,7 +162,7 @@
 #define	SAB_RBCH_CNT	0x0f	/* ms 4 bits of rx byte count (not used) */
 
 /* SAB_XBCH: transmit byte count high */
-#define	SAB_XBCH_DMA	0x80	/* dma mode: 1:dma, 0:interrupt */
+#define	SAB_XBCH_DMA	0x80	/* DMA mode: 1:DMA, 0:interrupt */
 #define	SAB_XBCH_CAS	0x20	/* carrier detect auto-start */
 #define	SAB_XBCH_XC	0x10	/* transmit continuously */
 #define	SAB_XBCH_CNT	0x0f	/* ms 4 bits of tx byte count */
@@ -212,7 +218,7 @@
 /* clock mode 0b, 2, 3, 4, 5, 6, 7 */
 #define	SAB_CCR2_TOE	0x08	/* tx clock output enable */
 /* clock mode 0a, 0b, 1, 2, 3, 4, 5, 6, 7 */
-#define	SAB_CCR2_RWX	0x04	/* read/write exchange (dma mode only) */
+#define	SAB_CCR2_RWX	0x04	/* read/write exchange (DMA mode only) */
 #define	SAB_CCR2_DIV	0x01	/* data inversion (nrz) */
 
 /* SAB_CCR3: channel configuration register 3 (v2 or greater) */

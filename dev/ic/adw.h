@@ -1,10 +1,9 @@
-/*	$OpenBSD: adw.h,v 1.9 2002/03/14 01:26:53 millert Exp $ */
-/*      $NetBSD: adw.h,v 1.9 2000/05/26 15:13:43 dante Exp $        */
+/*      $NetBSD: adw.h,v 1.14 2005/12/11 12:21:25 christos Exp $        */
 
 /*
  * Generic driver definitions and exported functions for the Advanced
  * Systems Inc. SCSI controllers
- * 
+ *
  * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -54,7 +53,7 @@ typedef void (* ADW_ASYNC_CALLBACK) (ADW_SOFTC *, u_int8_t);
  */
 #define ADW_MAX_SG_LIST		255
 
-/* 
+/*
  * Scatter-Gather Definitions per request.
  */
 
@@ -69,17 +68,16 @@ struct adw_ccb {
 	ADW_SCSI_REQ_Q		scsiq;
 	ADW_SG_BLOCK		sg_block[ADW_NUM_SG_BLOCK];
 
-	struct scsi_sense_data  scsi_sense;
+	struct scsi_sense_data scsi_sense;
 
 	TAILQ_ENTRY(adw_ccb)	chain;
 	struct adw_ccb		*nexthash;
 	u_int32_t		hashkey;
 
-	struct scsi_xfer	*xs;	/* the scsi_xfer for this cmd */
+	struct scsipi_xfer	*xs;	/* the scsipi_xfer for this cmd */
 	int			flags;	/* see below */
 
 	int			timeout;
-
 	/*
 	 * This DMA map maps the buffer involved in the transfer.
 	 */
@@ -109,9 +107,9 @@ struct adw_control {
 
 /******************************************************************************/
 
-int adw_init(ADW_SOFTC *sc);
-void adw_attach(ADW_SOFTC *sc);
-int adw_intr(void *arg);
+int adw_init(ADW_SOFTC *);
+void adw_attach(ADW_SOFTC *);
+int adw_intr(void *);
 ADW_CCB *adw_ccb_phys_kv(ADW_SOFTC *, u_int32_t);
 
 /******************************************************************************/

@@ -1,4 +1,4 @@
-/*	$NetBSD: compat_13_machdep.c,v 1.13 2005/12/11 12:18:09 christos Exp $	*/
+/*	$NetBSD: compat_13_machdep.c,v 1.16 2008/04/24 18:39:21 ad Exp $	*/
 
 /*
  * Copyright 1996 The Board of Trustees of The Leland Stanford
@@ -15,7 +15,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.13 2005/12/11 12:18:09 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.16 2008/04/24 18:39:21 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -24,7 +24,6 @@ __KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.13 2005/12/11 12:18:09 chris
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/mount.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/sys/signal.h>
@@ -41,14 +40,11 @@ extern int sigdebug;
 #endif
 
 int
-compat_13_sys_sigreturn(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+compat_13_sys_sigreturn(struct lwp *l, const struct compat_13_sys_sigreturn_args *uap, register_t *retval)
 {
-	struct compat_13_sys_sigreturn_args /* {
+	/* {
 		syscallarg(struct sigcontext13 *) sigcntxp;
-	} */ *uap = v;
+	} */
 	struct sigcontext13 *scp, ksc;
 	struct proc *p = l->l_proc;
 	int error;
@@ -81,15 +77,19 @@ compat_13_sys_sigreturn(l, v, retval)
 	if (scp->sc_fpused)
 		l->l_addr->u_pcb.pcb_fpregs = *(struct fpreg *)scp->sc_fpregs;
 
+	mutex_enter(p->p_lock);
+
 	/* Restore signal stack. */
 	if (ksc.sc_onstack & SS_ONSTACK)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
 
-	/* Restore signal mask. */
+	mutex_exit(p->p_lock);
+
+	/* Restore signal mask-> */
 	native_sigset13_to_sigset(&ksc.sc_mask, &mask);
-	(void) sigprocmask1(p, SIG_SETMASK, &mask, 0);
+	(void) sigprocmask1(l, SIG_SETMASK, &mask, 0);
 
 	return (EJUSTRETURN);
 }

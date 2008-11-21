@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.8 2005/12/11 12:16:05 christos Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.13 2008/02/14 00:25:39 joerg Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.8 2005/12/11 12:16:05 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.13 2008/02/14 00:25:39 joerg Exp $");
 
 #include "opt_md.h"
 
@@ -77,12 +77,11 @@ static void set_root_device __P((void));
 /* Decode a device name to a major and minor number */
 
 static void
-get_device(name)
-	char *name;
+get_device(char *name)
 {
 	int unit, part;
-	char devname[16], buf[32], *cp;
-	struct device *dv;
+	char devname[16], *cp;
+	device_t dv;
 
 	if (strncmp(name, "/dev/", 5) == 0)
 		name += 5;
@@ -103,13 +102,10 @@ get_device(name)
 		part = *cp - 'a';
 	else if (*cp != '\0' && *cp != ' ')
 		return;
-	sprintf(buf, "%s%d", devname, unit);
-	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
-		if (strcmp(buf, dv->dv_xname) == 0) {
-			booted_device = dv;
-			booted_partition = part;
-			return;
-		}
+
+	if ((dv = device_find_by_driver_unit(devname, unit)) != NULL) {
+		booted_device = dv;
+		booted_partition = part;
 	}
 }
 
@@ -174,15 +170,15 @@ cpu_configure()
 	config_rootfound("podulebus", NULL);
 #endif	/* NPODULEBUS */
 
+#if defined(DEBUG)
 	/* Debugging information */
-#ifndef TERSE
 	printf("ipl_bio=%08x ipl_net=%08x ipl_tty=%08x ipl_vm=%08x\n",
 	    irqmasks[IPL_BIO], irqmasks[IPL_NET], irqmasks[IPL_TTY],
 	    irqmasks[IPL_VM]);
 	printf("ipl_audio=%08x ipl_imp=%08x ipl_high=%08x ipl_serial=%08x\n",
 	    irqmasks[IPL_AUDIO], irqmasks[IPL_CLOCK], irqmasks[IPL_HIGH],
 	    irqmasks[IPL_SERIAL]);
-#endif
+#endif /* defined(DEBUG) */
 
 	/* Time to start taking interrupts so lets open the flood gates .... */
 	(void)spl0();

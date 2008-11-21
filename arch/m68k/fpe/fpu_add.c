@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_add.c,v 1.4 2006/01/16 22:08:26 miod Exp $	*/
-/*	$NetBSD: fpu_add.c,v 1.5 2003/08/07 16:28:10 agc Exp $ */
+/*	$NetBSD: fpu_add.c,v 1.6 2005/12/11 12:17:52 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -47,6 +46,9 @@
  * To subtract, negate y and call add.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_add.c,v 1.6 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 #include <sys/systm.h>
 
@@ -57,11 +59,11 @@
 
 struct fpn *
 fpu_add(fe)
-	struct fpemu *fe;
+	register struct fpemu *fe;
 {
-	struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2, *r;
-	u_int r0, r1, r2;
-	int rd;
+	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2, *r;
+	register u_int r0, r1, r2;
+	register int rd;
 
 	/*
 	 * Put the `heavier' operand on the right (see fpu_emu.h).

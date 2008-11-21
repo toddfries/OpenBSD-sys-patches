@@ -1,18 +1,11 @@
-#	$OpenBSD: Makefile,v 1.3 2007/06/04 10:34:04 mbalmer Exp $
-#	$NetBSD: Makefile.usbdevs,v 1.2 1999/01/07 22:18:23 augustss Exp $
+#	$NetBSD: Makefile,v 1.9 2006/05/14 21:47:00 elad Exp $
 
-AWK=	awk
-UNAME=	uname
+# use 'make -f Makefile.usbdevs' to make usbdevs.h and usbdevs_data.h
+# _after_ you committed usbdevs. See comment in Makefile.usbdevs
 
-PROG=	makemap.awk
-MAP=	../pckbc/wskbdmap_mfii.c
+INCSDIR= /usr/include/dev/usb
 
-all:	usbdevs.h ukbdmap.c
+# Only install includes which are used by userland
+INCS=	ukyopon.h urio.h usb.h usbhid.h utoppy.h
 
-usbdevs.h usbdevs_data.h: usbdevs devlist2h.awk
-	/bin/rm -f usbdevs.h usbdevs_data.h
-	${AWK} -f devlist2h.awk usbdevs
-
-ukbdmap.c: ${MAP} ${PROG}
-	/bin/rm -f $@
-	${AWK} -f ${PROG} ${MAP} > $@
+.include <bsd.kinc.mk>

@@ -1,4 +1,4 @@
-/*	$NetBSD: adv_cardbus.c,v 1.16 2007/10/19 11:59:37 ad Exp $	*/
+/*	$NetBSD: adv_cardbus.c,v 1.19 2008/06/24 19:44:52 drochner Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adv_cardbus.c,v 1.16 2007/10/19 11:59:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adv_cardbus.c,v 1.19 2008/06/24 19:44:52 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,14 +67,14 @@ __KERNEL_RCSID(0, "$NetBSD: adv_cardbus.c,v 1.16 2007/10/19 11:59:37 ad Exp $");
 #define ADV_CARDBUS_DEBUG
 #define ADV_CARDBUS_ALLOW_MEMIO
 
-#define DEVNAME(sc) sc->sc_dev.dv_xname
+#define DEVNAME(sc) device_xname(&(sc)->sc_dev)
 
 struct adv_cardbus_softc {
 	struct asc_softc sc_adv;	/* real ADV */
 
 	/* CardBus-specific goo. */
 	cardbus_devfunc_t sc_ct;	/* our CardBus devfuncs */
-	int	sc_intrline;		/* our interrupt line */
+	cardbus_intr_line_t sc_intrline; /* our interrupt line */
 	cardbustag_t sc_tag;
 
 	int	sc_cbenable;		/* what CardBus access type to enable */
@@ -185,8 +178,7 @@ adv_cardbus_attach(struct device *parent, struct device *self,
 		csc->sc_cbenable = CARDBUS_IO_ENABLE;
 		csc->sc_csr |= PCI_COMMAND_IO_ENABLE;
 	} else {
-		printf("%s: unable to map device registers\n",
-		    DEVNAME(sc));
+		aprint_error_dev(&sc->sc_dev, "unable to map device registers\n");
 		return;
 	}
 
@@ -235,11 +227,10 @@ adv_cardbus_attach(struct device *parent, struct device *self,
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline, IPL_BIO,
 	    adv_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf("%s: unable to establish interrupt at %d\n",
-		    DEVNAME(sc), ca->ca_intrline);
+		aprint_error_dev(&sc->sc_dev,
+				 "unable to establish interrupt\n");
 		return;
 	}
-	printf("%s: interrupting at %d\n", DEVNAME(sc), ca->ca_intrline);
 
 	/*
 	 * Attach.

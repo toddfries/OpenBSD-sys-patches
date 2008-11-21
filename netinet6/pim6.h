@@ -1,4 +1,4 @@
-/*	$OpenBSD: pim6.h,v 1.3 2005/12/10 01:30:14 deraadt Exp $	*/
+/*	$NetBSD: pim6.h,v 1.5 2005/12/10 23:39:56 elad Exp $	*/
 /*	$KAME: pim6.h,v 1.3 2000/03/25 07:23:58 sumikawa Exp $	*/
 
 /*
@@ -29,6 +29,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
+#ifndef _NETINET6_PIM6_H_
+#define _NETINET6_PIM6_H_
+
 /*
  * Protocol Independent Multicast (PIM) definitions
  *
@@ -43,14 +47,14 @@
 #define PIM_VERSION	2
 struct pim {
 #if defined(BYTE_ORDER) && (BYTE_ORDER == LITTLE_ENDIAN)
-	u_int	pim_type:4, /* the PIM message type, currently they are:
+	u_char	pim_type:4, /* the PIM message type, currently they are:
 			     * Hello, Register, Register-Stop, Join/Prune,
 			     * Bootstrap, Assert, Graft (PIM-DM only),
 			     * Graft-Ack (PIM-DM only), C-RP-Adv
 			     */
 		pim_ver:4;  /* PIM version number; 2 for PIMv2 */
 #else
-	u_int	pim_ver:4,	/* PIM version */
+	u_char	pim_ver:4,	/* PIM version */
 		pim_type:4;	/* PIM type    */
 #endif
 	u_char  pim_rsv;	/* Reserved */
@@ -67,3 +71,5 @@ struct pim {
 
 /* second bit in reg_head is the null bit */
 #define PIM_NULL_REGISTER 0x40000000
+
+#endif /* !_NETINET6_PIM6_H_ */

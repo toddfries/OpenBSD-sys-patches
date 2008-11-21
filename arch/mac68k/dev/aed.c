@@ -1,4 +1,4 @@
-/*	$NetBSD: aed.c,v 1.22 2006/03/29 04:16:45 thorpej Exp $	*/
+/*	$NetBSD: aed.c,v 1.28 2008/06/11 23:54:45 cegger Exp $	*/
 
 /*
  * Copyright (C) 1994	Bradley A. Grantham
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aed.c,v 1.22 2006/03/29 04:16:45 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: aed.c,v 1.28 2008/06/11 23:54:45 cegger Exp $");
 
 #include "opt_adb.h"
 
@@ -109,7 +109,8 @@ aedattach(struct device *parent, struct device *self, void *aux)
 	struct adb_attach_args *aa_args = (struct adb_attach_args *)aux;
 	struct aed_softc *sc = (struct aed_softc *)self;
 
-	callout_init(&sc->sc_repeat_ch);
+	callout_init(&sc->sc_repeat_ch, 0);
+	selinit(&sc->sc_selinfo);
 
 	sc->origaddr = aa_args->origaddr;
 	sc->adbaddr = aa_args->adbaddr;
@@ -383,7 +384,7 @@ aed_enqevent(adb_event_t *event)
 {
 	int s;
 
-	s = spladb();
+	s = splvm();
 
 #ifdef DIAGNOSTIC
 	if (aed_sc->sc_evq_tail < 0 || aed_sc->sc_evq_tail >= AED_MAX_EVENTS)
@@ -401,7 +402,7 @@ aed_enqevent(adb_event_t *event)
 	    AED_MAX_EVENTS] = *event;
 	aed_sc->sc_evq_len++;
 
-	selnotify(&aed_sc->sc_selinfo, 0);
+	selnotify(&aed_sc->sc_selinfo, 0, 0);
 	if (aed_sc->sc_ioproc)
 		psignal(aed_sc->sc_ioproc, SIGIO);
 
@@ -414,11 +415,11 @@ aedopen(dev_t dev, int flag, int mode, struct lwp *l)
 	struct aed_softc *sc;
 	int s;
 
-	sc = device_lookup(&aed_cd, minor(dev));
+	sc = device_lookup_private(&aed_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
-	s = spladb();
+	s = splvm();
 	if (sc->sc_open) {
 		splx(s);
 		return (EBUSY);
@@ -438,7 +439,7 @@ aedclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	int s;
 
-	s = spladb();
+	s = splvm();
 	aed_sc->sc_open = 0;
 	aed_sc->sc_ioproc = NULL;
 	splx(s);
@@ -459,7 +460,7 @@ aedread(dev_t dev, struct uio *uio, int flag)
 	if (uio->uio_resid < sizeof(adb_event_t))
 		return (EMSGSIZE);	/* close enough. */
 
-	s = spladb();
+	s = splvm();
 	if (aed_sc->sc_evq_len == 0) {
 		splx(s);
 		return (0);
@@ -470,7 +471,7 @@ aedread(dev_t dev, struct uio *uio, int flag)
 	firstmove = (aed_sc->sc_evq_tail + total > AED_MAX_EVENTS)
 	    ? (AED_MAX_EVENTS - aed_sc->sc_evq_tail) : total;
 
-	error = uiomove((caddr_t) & aed_sc->sc_evq[aed_sc->sc_evq_tail],
+	error = uiomove((void *) & aed_sc->sc_evq[aed_sc->sc_evq_tail],
 	    firstmove * sizeof(adb_event_t), uio);
 	if (error) {
 		splx(s);
@@ -479,7 +480,7 @@ aedread(dev_t dev, struct uio *uio, int flag)
 	moremove = total - firstmove;
 
 	if (moremove > 0) {
-		error = uiomove((caddr_t) & aed_sc->sc_evq[0],
+		error = uiomove((void *) & aed_sc->sc_evq[0],
 		    moremove * sizeof(adb_event_t), uio);
 		if (error) {
 			splx(s);
@@ -493,7 +494,7 @@ aedread(dev_t dev, struct uio *uio, int flag)
 }
 
 int 
-aedioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+aedioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	switch (cmd) {
 	case ADBIOC_DEVSINFO: {
@@ -566,7 +567,7 @@ aedpoll(dev_t dev, int events, struct lwp *l)
 	if ((events & (POLLIN | POLLRDNORM)) == 0)
 		return (revents);
 
-	s = spladb();
+	s = splvm();
 	if (aed_sc->sc_evq_len > 0)
 		revents |= events & (POLLIN | POLLRDNORM);
 	else
@@ -581,7 +582,7 @@ filt_aedrdetach(struct knote *kn)
 {
 	int s;
 
-	s = spladb();
+	s = splvm();
 	SLIST_REMOVE(&aed_sc->sc_selinfo.sel_klist, kn, knote, kn_selnext);
 	splx(s);
 }
@@ -623,7 +624,7 @@ aedkqfilter(dev_t dev, struct knote *kn)
 
 	kn->kn_hook = NULL;
 
-	s = spladb();
+	s = splvm();
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
 	splx(s);
 

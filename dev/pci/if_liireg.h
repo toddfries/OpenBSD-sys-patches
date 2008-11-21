@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_liireg.h,v 1.2 2007/12/31 15:18:06 jasper Exp $	*/
+/*	$NetBSD: if_liireg.h,v 1.2 2008/04/29 06:53:03 martin Exp $	*/
 
 /*
- *  Copyright (c) 2007 The NetBSD Foundation.
+ *  Copyright (c) 2008 The NetBSD Foundation.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -12,9 +12,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of The NetBSD Foundation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -115,6 +112,15 @@
 /* PCI-Express PHY Miscellaneous register (size unknown) */
 #define ATL2_PCEPM	0x1000
 #define 	PCEPM_FORCE_RCV_DET	0x04
+
+/* PCI-Express DLL TX Control register */
+#define ATL2_PCEDTXC	0x1104
+#define 	PCEDTX_SEL_NOR_CLK	0x00000400
+#define 	PCEDTX_DEF		0x00000568
+
+/* PCI-Express-related register (LTSSM test mode) */
+#define ATL2_PCELTM	0x12fc
+#define 	PCELTM_DEF		0x00006500
 
 /* Selene Master Control register */
 #define ATL2_SMC	0x1400
@@ -322,7 +328,8 @@
 #define ATL2_IMR	0x1604
 #define 	IMR_NORMAL_MASK		(ISR_DMAR_TO_RST | ISR_DMAW_TO_RST | \
 					 ISR_PHY | ISR_PHY_LINKDOWN | \
-					 ISR_TS_UPDATE | ISR_RS_UPDATE)
+					 ISR_TS_UPDATE | ISR_RS_UPDATE | \
+					 ISR_MANUAL)
 
 /* MAC RX Statistics registers */
 #define ATL2_STS_RX_PAUSE	0x1700

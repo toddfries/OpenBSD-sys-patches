@@ -1,5 +1,4 @@
-/*	$OpenBSD: ax88190.c,v 1.2 2003/06/25 17:35:36 miod Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: ax88190.c,v 1.11 2008/04/28 20:23:49 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ax88190.c,v 1.11 2008/04/28 20:23:49 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -46,16 +41,9 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_media.h>
+#include <net/if_ether.h>
 
-#ifdef INET
-#include <netinet/in.h>   
-#include <netinet/in_systm.h>
-#include <netinet/in_var.h>
-#include <netinet/ip.h>
-#include <netinet/if_ether.h>
-#endif
-
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <dev/mii/miivar.h>
 #include <dev/mii/mii.h>
@@ -70,17 +58,17 @@
 #include <dev/ic/ax88190reg.h>
 #include <dev/ic/ax88190var.h>
 
-int	ax88190_mii_readreg(struct device *, int, int);
-void	ax88190_mii_writereg(struct device *, int, int, int);
-void	ax88190_mii_statchg(struct device *);
+static int	ax88190_mii_readreg(device_t, int, int);
+static void	ax88190_mii_writereg(device_t, int, int, int);
+static void	ax88190_mii_statchg(device_t);
 
 /*
  * MII bit-bang glue.
  */
-u_int32_t	ax88190_mii_bitbang_read(struct device *);
-void		ax88190_mii_bitbang_write(struct device *, u_int32_t);
+static u_int32_t	ax88190_mii_bitbang_read(device_t);
+static void		ax88190_mii_bitbang_write(device_t, u_int32_t);
 
-const struct mii_bitbang_ops ax88190_mii_bitbang_ops = {
+static const struct mii_bitbang_ops ax88190_mii_bitbang_ops = {
 	ax88190_mii_bitbang_read,
 	ax88190_mii_bitbang_write,
 	{
@@ -95,16 +83,16 @@ const struct mii_bitbang_ops ax88190_mii_bitbang_ops = {
 void
 ax88190_media_init(struct dp8390_softc *sc)
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ec.ec_if;
 
 	sc->sc_mii.mii_ifp = ifp;
 	sc->sc_mii.mii_readreg = ax88190_mii_readreg;
 	sc->sc_mii.mii_writereg = ax88190_mii_writereg;
 	sc->sc_mii.mii_statchg = ax88190_mii_statchg;
-	ifmedia_init(&sc->sc_mii.mii_media, 0, dp8390_mediachange,
+	ifmedia_init(&sc->sc_mii.mii_media, IFM_IMASK, dp8390_mediachange,
 	    dp8390_mediastatus);
 
-	mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
+	mii_attach(sc->sc_dev, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
 	    MII_OFFSET_ANY, 0);
 
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) == NULL) {
@@ -118,19 +106,24 @@ ax88190_media_init(struct dp8390_softc *sc)
 void
 ax88190_media_fini(struct dp8390_softc *sc)
 {
+
 	mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 }
 
 int
 ax88190_mediachange(struct dp8390_softc *sc)
 {
-	mii_mediachg(&sc->sc_mii);
-	return (0);
+	int rc;
+
+	if ((rc = mii_mediachg(&sc->sc_mii)) == ENXIO)
+		return 0;
+	return rc;
 }
 
 void
 ax88190_mediastatus(struct dp8390_softc *sc, struct ifmediareq *ifmr)
 {
+
 	mii_pollstat(&sc->sc_mii);
 	ifmr->ifm_status = sc->sc_mii.mii_media_status;
 	ifmr->ifm_active = sc->sc_mii.mii_media_active;
@@ -139,53 +132,50 @@ ax88190_mediastatus(struct dp8390_softc *sc, struct ifmediareq *ifmr)
 void
 ax88190_init_card(struct dp8390_softc *sc)
 {
+
 	mii_mediachg(&sc->sc_mii);
 }
 
 void
 ax88190_stop_card(struct dp8390_softc *sc)
 {
+
 	mii_down(&sc->sc_mii);
 }
 
-u_int32_t
-ax88190_mii_bitbang_read(self)
-	struct device *self;
+static u_int32_t
+ax88190_mii_bitbang_read(device_t self)
 {
-	struct ne2000_softc *sc = (void *)self;
+	struct ne2000_softc *sc = device_private(self);
 
 	return (bus_space_read_1(sc->sc_asict, sc->sc_asich, AX88190_MEMR));
 }
 
-void
-ax88190_mii_bitbang_write(self, val)
-	struct device *self;
-	u_int32_t val;
+static void
+ax88190_mii_bitbang_write(device_t self, uint32_t val)
 {
-	struct ne2000_softc *sc = (void *)self;
+	struct ne2000_softc *sc = device_private(self);
 
 	bus_space_write_1(sc->sc_asict, sc->sc_asich, AX88190_MEMR, val);
 }
 
-int
-ax88190_mii_readreg(self, phy, reg)
-	struct device *self;
-	int phy, reg;
+static int
+ax88190_mii_readreg(device_t self, int phy, int reg)
 {
+
 	return (mii_bitbang_readreg(self, &ax88190_mii_bitbang_ops, phy, reg));
 }
 
-void
-ax88190_mii_writereg(self, phy, reg, val)
-	struct device *self;
-	int phy, reg, val;
+static void
+ax88190_mii_writereg(device_t self, int phy, int reg, int val)
 {
+
 	mii_bitbang_writereg(self, &ax88190_mii_bitbang_ops, phy, reg, val);
 }
 
-void
-ax88190_mii_statchg(self)
-	struct device *self;
+static void
+ax88190_mii_statchg(device_t self)
 {
+
 	/* XXX */
 }

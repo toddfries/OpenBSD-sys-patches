@@ -1,36 +1,42 @@
-/*	$OpenBSD: svr4_net.c,v 1.17 2005/11/21 18:16:38 millert Exp $	 */
-/*	$NetBSD: svr4_net.c,v 1.12 1996/09/07 12:40:51 mycroft Exp $	 */
+/*	$NetBSD: svr4_net.c,v 1.53 2008/04/28 20:23:45 martin Exp $	*/
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
- * Redistribution ast use in source ast binary forms, with or without
- * modification, are permitted provided that the following costitions
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of costitions ast the following disclaimer.
+ *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of costitions ast the following disclaimer in the
- *    documentation ast/or other materials provided with the distribution.
- * 3. The name of the author may not be used to estorse or promote products
- *    derived from this software without specific prior written permission
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
  * Emulate /dev/{udp,tcp,...}
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: svr4_net.c,v 1.53 2008/04/28 20:23:45 martin Exp $");
+
+#define COMPAT_SVR4 1
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -41,7 +47,8 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/selinfo.h>
+#include <sys/fcntl.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
@@ -52,15 +59,26 @@
 #include <sys/vnode.h>
 #include <sys/device.h>
 #include <sys/conf.h>
+#include <sys/mount.h>
 
+#include <sys/syscallargs.h>
 
 #include <compat/svr4/svr4_types.h>
 #include <compat/svr4/svr4_util.h>
 #include <compat/svr4/svr4_signal.h>
+#include <compat/svr4/svr4_lwp.h>
+#include <compat/svr4/svr4_ucontext.h>
 #include <compat/svr4/svr4_syscallargs.h>
 #include <compat/svr4/svr4_ioctl.h>
 #include <compat/svr4/svr4_stropts.h>
 #include <compat/svr4/svr4_socket.h>
+
+dev_type_open(svr4_netopen);
+
+const struct cdevsw svr4_net_cdevsw = {
+	svr4_netopen, noclose, noread, nowrite, noioctl,
+	nostop, notty, nopoll, nommap, nokqfilter, D_OTHER,
+};
 
 /*
  * Device minor numbers
@@ -79,11 +97,11 @@ enum {
 
 int svr4_netattach(int);
 
-static int svr4_soo_close(struct file *fp, struct proc *p);
+int svr4_soo_close(file_t *);
 
-static struct fileops svr4_netops = {
-	soo_read, soo_write, soo_ioctl, soo_poll, soo_kqfilter,
-	soo_stat, svr4_soo_close
+static const struct fileops svr4_netops = {
+	soo_read, soo_write, soo_ioctl, soo_fcntl, soo_poll,
+	soo_stat, svr4_soo_close, soo_kqfilter
 };
 
 
@@ -91,30 +109,25 @@ static struct fileops svr4_netops = {
  * Used by new config, but we don't need it.
  */
 int
-svr4_netattach(n)
-	int n;
+svr4_netattach(int n)
 {
 	return 0;
 }
 
 
 int
-svr4_netopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
+svr4_netopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	int type, protocol;
 	int fd;
-	struct file *fp;
+	file_t *fp;
 	struct socket *so;
 	int error;
 	int family;
 
 	DPRINTF(("netopen("));
 
-	if (p->p_dupfd >= 0)
+	if (curlwp->l_dupfd >= 0)	/* XXX */
 		return ENODEV;
 
 	switch (minor(dev)) {
@@ -148,7 +161,7 @@ svr4_netopen(dev, flag, mode, p)
 		break;
 
 	case dev_unix_dgram:
-		family = AF_UNIX;
+		family = AF_LOCAL;
 		type = SOCK_DGRAM;
 		protocol = 0;
 		DPRINTF(("unix-dgram, "));
@@ -156,7 +169,7 @@ svr4_netopen(dev, flag, mode, p)
 
 	case dev_unix_stream:
 	case dev_unix_ord_stream:
-		family = AF_UNIX;
+		family = AF_LOCAL;
 		type = SOCK_STREAM;
 		protocol = 0;
 		DPRINTF(("unix-stream, "));
@@ -167,44 +180,37 @@ svr4_netopen(dev, flag, mode, p)
 		return EOPNOTSUPP;
 	}
 
-	if ((error = falloc(p, &fp, &fd)) != 0)
-		return (error);
+	if ((error = fd_allocfile(&fp, &fd)) != 0)
+		return error;
 
-	if ((error = socreate(family, &so, type, protocol)) != 0) {
+	if ((error = socreate(family, &so, type, protocol, l, NULL)) != 0) {
 		DPRINTF(("socreate error %d\n", error));
-		fdremove(p->p_fd, fd);
-		closef(fp, p);
+		fd_abort(curproc, fp, fd);
 		return error;
 	}
 
-	fp->f_flag = FREAD|FWRITE;
+	error = fd_clone(fp, fd, flag, &svr4_netops, so);
 	fp->f_type = DTYPE_SOCKET;
-	fp->f_ops = &svr4_netops;
-
-	fp->f_data = (caddr_t)so;
-	(void) svr4_stream_get(fp);
+	(void)svr4_stream_get(fp);
 
 	DPRINTF(("ok);\n"));
-
-	p->p_dupfd = fd;
-	FILE_SET_MATURE(fp);
-	return ENXIO;
+	return error;
 }
 
-static int
-svr4_soo_close(fp, p)
-	struct file *fp;
-	struct proc *p;
+
+int
+svr4_soo_close(file_t *fp)
 {
-	struct socket *so = (struct socket *) fp->f_data;
-	svr4_delete_socket(p, fp);
+	struct socket *so = fp->f_data;
+
+	svr4_delete_socket(curproc, fp);
 	free(so->so_internal, M_NETADDR);
-	return soo_close(fp, p);
+	return soo_close(fp);
 }
+
 
 struct svr4_strm *
-svr4_stream_get(fp)
-	struct file *fp;
+svr4_stream_get(file_t *fp)
 {
 	struct socket *so;
 	struct svr4_strm *st;
@@ -212,7 +218,7 @@ svr4_stream_get(fp)
 	if (fp == NULL || fp->f_type != DTYPE_SOCKET)
 		return NULL;
 
-	so = (struct socket *) fp->f_data;
+	so = fp->f_data;
 
 	if (so->so_internal)
 		return so->so_internal;
@@ -223,6 +229,7 @@ svr4_stream_get(fp)
 	st->s_family = so->so_proto->pr_domain->dom_family;
 	st->s_cmd = ~0;
 	st->s_afd = -1;
+	st->s_eventmask = 0;
 	so->so_internal = st;
 
 	return st;

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ns16550reg.h,v 1.5 2003/06/02 23:28:02 millert Exp $	*/
-/*	$NetBSD: ns16550reg.h,v 1.4 1994/10/27 04:18:43 cgd Exp $	*/
+/*	$NetBSD: ns16550reg.h,v 1.7 2005/12/11 12:21:28 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -33,7 +32,7 @@
  */
 
 /*
- * NS16550 (and above) UART registers
+ * NS16550 UART registers
  */
 
 #define	com_data	0	/* data register (R/W) */
@@ -42,11 +41,9 @@
 #define	com_ier		1	/* interrupt enable (W) */
 #define	com_iir		2	/* interrupt identification (R) */
 #define	com_fifo	2	/* FIFO control (W) */
-#define com_fctl	2	/* extended FIFO control (W) */
-#define com_efr		2	/* extended features register (W) */
 #define	com_lctl	3	/* line control register (R/W) */
 #define	com_cfcr	3	/* line control register (R/W) */
 #define	com_mcr		4	/* modem control register (R/W) */
 #define	com_lsr		5	/* line status register (R/W) */
 #define	com_msr		6	/* modem status register (R/W) */
-#define com_scratch	7	/* scratch register (R/W) */
+#define	com_scratch	7	/* scratch register (R/W) */

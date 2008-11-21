@@ -1,4 +1,4 @@
-/*	$NetBSD: ms.c,v 1.30 2006/11/12 19:00:42 plunky Exp $ */
+/*	$NetBSD: ms.c,v 1.34 2007/12/28 20:49:49 joerg Exp $ */
 
 /*
  * based on:
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.30 2006/11/12 19:00:42 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.34 2007/12/28 20:49:49 joerg Exp $");
 
 /*
  * Mouse driver.
@@ -151,7 +151,7 @@ const struct cdevsw ms_cdevsw = {
  * Callbacks for wscons.
  */
 static int ms_wscons_enable(void *);
-static int ms_wscons_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+static int ms_wscons_ioctl(void *, u_long, void *, int, struct lwp *);
 static void ms_wscons_disable(void *);
 
 static struct wsmouse_accessops ms_wscons_accessops = {
@@ -186,7 +186,7 @@ msattach(struct device *pdp, struct device *dp, void *auxp)
 	printf("\n");
 	for (i = 0; i < MS_NPORTS; i++) {
 		sc->sc_ports[i].ms_portno = i;
-		callout_init(&sc->sc_ports[i].ms_intr_ch);
+		callout_init(&sc->sc_ports[i].ms_intr_ch, 0);
 #if NWSMOUSE > 0
 		waa.accessops = &ms_wscons_accessops;
 		waa.accesscookie = &sc->sc_ports[i];
@@ -355,7 +355,7 @@ msintr(void *arg)
 			d = to_one[d - 1];	/* from 1..7 to {1,2,4} */
 			fe->id = to_id[d - 1];	/* from {1,2,4} to ID */
 			fe->value = mb & d ? VKEY_DOWN : VKEY_UP;
-			fe->time = time;
+			getmicrotime(&fe->time);
 			fe++;
 
 			if (put >= EV_QSIZE) {
@@ -374,7 +374,7 @@ msintr(void *arg)
 
 			fe->id = LOC_X_DELTA;
 			fe->value = ms->ms_dx;
-			fe->time = time;
+			getmicrotime(&fe->time);
 			fe++;
 
 			if (put >= EV_QSIZE) {
@@ -393,7 +393,7 @@ msintr(void *arg)
 
 			fe->id = LOC_Y_DELTA;
 			fe->value = ms->ms_dy;
-			fe->time = time;
+			getmicrotime(&fe->time);
 			fe++;
 
 			if (put >= EV_QSIZE) {
@@ -479,7 +479,7 @@ msread(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-msioctl(dev_t dev, u_long cmd, register caddr_t data, int flag,
+msioctl(dev_t dev, u_long cmd, register void *data, int flag,
         struct lwp *l)
 {
 	struct ms_port *ms;
@@ -537,7 +537,7 @@ mskqfilter(dev, kn)
 #if NWSMOUSE > 0
 
 static int
-ms_wscons_ioctl(void *cookie, u_long cmd, caddr_t data, int flag, 
+ms_wscons_ioctl(void *cookie, u_long cmd, void *data, int flag, 
 		struct lwp *l)
 {
 	switch(cmd) {

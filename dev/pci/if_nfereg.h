@@ -1,3 +1,4 @@
+/*	$NetBSD: if_nfereg.h,v 1.7 2008/04/17 19:12:26 christos Exp $	*/
 /*	$OpenBSD: if_nfereg.h,v 1.22 2007/12/05 08:30:33 jsg Exp $	*/
 
 /*-
@@ -20,6 +21,11 @@
 
 #define NFE_RX_RING_COUNT	128
 #define NFE_TX_RING_COUNT	256
+
+#define NFE_RX_NEXTDESC(x)	(((x) + 1) & (NFE_RX_RING_COUNT - 1))
+#define NFE_TX_NEXTDESC(x)	(((x) + 1) & (NFE_TX_RING_COUNT - 1))
+
+#define	ETHER_ALIGN		2
 
 #define NFE_JUMBO_FRAMELEN	9018
 #define NFE_JUMBO_MTU		(NFE_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
@@ -86,6 +92,8 @@
 
 #define NFE_STATUS_MAGIC	0x140000
 
+#define NFE_MAC_ADDR_INORDER	0x8000
+
 #define NFE_R1_MAGIC		0x16070f
 #define NFE_R2_MAGIC		0x16
 #define NFE_R4_MAGIC		0x08
@@ -150,9 +158,9 @@
 
 /* Rx/Tx descriptor */
 struct nfe_desc32 {
-	uint32_t	physaddr;
-	uint16_t	length;
-	uint16_t	flags;
+	volatile uint32_t	physaddr;
+	volatile uint16_t	length;
+	volatile uint16_t	flags;
 #define NFE_RX_FIXME_V1		0x6004
 #define NFE_RX_VALID_V1		(1 << 0)
 #define NFE_TX_ERROR_V1		0x7808
@@ -165,12 +173,12 @@ struct nfe_desc32 {
 
 /* V2 Rx/Tx descriptor */
 struct nfe_desc64 {
-	uint32_t	physaddr[2];
-	uint32_t	vtag;
+	volatile uint32_t	physaddr[2];
+	volatile uint32_t	vtag;
 #define NFE_RX_VTAG		(1 << 16)
 #define NFE_TX_VTAG		(1 << 18)
-	uint16_t	length;
-	uint16_t	flags;
+	volatile uint16_t	length;
+	volatile uint16_t	flags;
 #define NFE_RX_FIXME_V2		0x4300
 #define NFE_RX_VALID_V2		(1 << 13)
 #define NFE_TX_ERROR_V2		0x5c04

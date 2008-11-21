@@ -1,8 +1,8 @@
-/*	$OpenBSD: if_altq.h,v 1.11 2007/11/18 12:51:48 mpf Exp $	*/
-/*	$KAME: if_altq.h,v 1.6 2001/01/29 19:59:09 itojun Exp $	*/
+/*	$NetBSD: if_altq.h,v 1.12 2007/03/04 05:59:03 christos Exp $	*/
+/*	$KAME: if_altq.h,v 1.12 2005/04/13 03:44:25 suz Exp $	*/
 
 /*
- * Copyright (C) 1997-2000
+ * Copyright (C) 1997-2003
  *	Sony Computer Science Laboratories Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,10 +29,8 @@
 #ifndef _ALTQ_IF_ALTQ_H_
 #define	_ALTQ_IF_ALTQ_H_
 
-#ifdef KERNEL
-#ifndef _KERNEL
-#define	_KERNEL
-#endif
+#if defined(_KERNEL_OPT)
+#include "opt_altq_enabled.h"
 #endif
 
 struct altq_pktattr; struct tb_regulator; struct top_cdnr;
@@ -47,7 +45,9 @@ struct	ifaltq {
 	int	ifq_len;
 	int	ifq_maxlen;
 	int	ifq_drops;
-	struct	timeout *ifq_congestion;
+#ifdef __FreeBSD__
+	struct	mtx ifq_mtx;
+#endif
 
 	/* alternate queueing related fields */
 	int	altq_type;		/* discipline type */
@@ -56,7 +56,7 @@ struct	ifaltq {
 	struct	ifnet *altq_ifp;	/* back pointer to interface */
 
 	int	(*altq_enqueue)(struct ifaltq *, struct mbuf *,
-				     struct altq_pktattr *);
+				struct altq_pktattr *);
 	struct	mbuf *(*altq_dequeue)(struct ifaltq *, int);
 	int	(*altq_request)(struct ifaltq *, int, void *);
 
@@ -88,7 +88,17 @@ struct	ifaltq {
 struct altq_pktattr {
 	void	*pattr_class;		/* sched class set by classifier */
 	int	pattr_af;		/* address family */
-	caddr_t	pattr_hdr;		/* saved header position in mbuf */
+	void *	pattr_hdr;		/* saved header position in mbuf */
+};
+
+/*
+ * mbuf tag to carry a queue id (and hints for ECN).
+ */
+struct altq_tag {
+	u_int32_t	qid;		/* queue id */
+	/* hints for ecn */
+	int		af;		/* address family */
+	void		*hdr;		/* saved header position in mbuf */
 };
 
 /*
@@ -120,7 +130,7 @@ struct tb_regulator {
 #define	ALTQF_DRIVER1	 0x40	/* driver specific */
 
 /* if_altqflags set internally only: */
-#define	ALTQF_CANTCHANGE	(ALTQF_READY)
+#define	ALTQF_CANTCHANGE 	(ALTQF_READY)
 
 /* altq_dequeue 2nd arg */
 #define	ALTDQ_REMOVE		1	/* dequeue mbuf from the queue */
@@ -150,18 +160,20 @@ struct tb_regulator {
 #define	TBR_IS_ENABLED(ifq)		((ifq)->altq_tbr != NULL)
 
 extern int altq_attach(struct ifaltq *, int, void *,
-			    int (*)(struct ifaltq *, struct mbuf *,
-				    struct altq_pktattr *),
-			    struct mbuf *(*)(struct ifaltq *, int),
-			    int (*)(struct ifaltq *, int, void *),
-			    void *,
-			    void *(*)(void *, struct mbuf *, int));
+		       int (*)(struct ifaltq *, struct mbuf *,
+			       struct altq_pktattr *),
+		       struct mbuf *(*)(struct ifaltq *, int),
+		       int (*)(struct ifaltq *, int, void *),
+		       void *,
+		       void *(*)(void *, struct mbuf *, int));
 extern int altq_detach(struct ifaltq *);
 extern int altq_enable(struct ifaltq *);
 extern int altq_disable(struct ifaltq *);
 extern struct mbuf *tbr_dequeue(struct ifaltq *, int);
 extern int (*altq_input)(struct mbuf *, int);
-
+#if 1 /* ALTQ3_CLFIER_COMPAT */
+void altq_etherclassify(struct ifaltq *, struct mbuf *, struct altq_pktattr *);
+#endif
 #endif /* _KERNEL */
 
 #endif /* _ALTQ_IF_ALTQ_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: scifcons.c,v 1.2 2006/10/10 05:26:54 miod Exp $	*/
-/*	$NetBSD: scifcons.c,v 1.1 2006/09/01 21:26:18 uwe Exp $ */
+/*	$NetBSD: scifcons.c,v 1.2 2008/04/28 20:23:26 martin Exp $ */
 /*	NetBSD: scif.c,v 1.38 2004/12/13 02:14:13 chs Exp */
 
 /*-
@@ -27,6 +26,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -42,13 +42,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -62,6 +55,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
 /*
  * Copyright (c) 1991 The Regents of the University of California.
  * All rights reserved.
@@ -92,15 +86,20 @@
  *
  *	@(#)com.c	7.5 (Berkeley) 5/16/91
  */
+
 /*
  * SH internal serial driver
  *
  * This code is derived from both z8530tty.c and com.c
  */
 
-#include <libsa.h>
+#include <lib/libsa/stand.h>
+#include <lib/libkern/libkern.h>
 
-#include <arch/sh/dev/scifreg.h>
+#include <sh3/scifreg.h>
+
+#include "boot.h"
+#include "cons.h"
 
 #define scif_smr_read()		SHREG_SCSMR2
 #define scif_smr_write(v)	(SHREG_SCSMR2 = (v))
@@ -218,7 +217,7 @@ scif_putc(int c)
 }
 
 int
-cnischar(void)
+scif_status(void)
 {
 	unsigned char c, err_c;
 	unsigned short err_c2;
@@ -247,4 +246,14 @@ cnischar(void)
 		}
 	}
 	return (0);	/* nothing out there... */
+}
+
+int
+scif_status2(void)
+{
+
+	if (scif_fdr_read() & SCFDR2_RECVCNT) {
+		return (1);
+	}
+	return (0);
 }

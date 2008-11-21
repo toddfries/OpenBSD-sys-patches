@@ -1,4 +1,3 @@
-/*	$OpenBSD: mainbus.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /* $NetBSD: mainbus.h,v 1.1 2001/02/24 19:38:02 reinoud Exp $ */
 
 /*
@@ -49,13 +48,12 @@
  */
 
 struct mainbus_attach_args {
-	u_int		ma_iobase;	/* base i/o address */
-	int		ma_iosize;	/* span of ports used */
-	int		ma_irq;		/* interrupt request */
-	int		ma_drq;		/* DMA request */
-	void		*ma_aux;	/* driver specific */
-	bus_space_tag_t	ma_iot;		/* bus space tag */
-	char		*ma_name;
+	u_int		mb_iobase;	/* base i/o address */
+	int		mb_iosize;	/* span of ports used */
+	int		mb_irq;		/* interrupt request */
+	int		mb_drq;		/* DMA request */
+	void		*mb_aux;	/* driver specific */
+	bus_space_tag_t	mb_iot;		/* bus space tag */
 };
 
 /* End of mainbus.h */

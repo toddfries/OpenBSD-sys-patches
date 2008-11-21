@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.12 2006/09/28 23:54:14 bjh21 Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.16 2007/10/17 19:52:51 garbled Exp $	*/
 
 /* 
  * Copyright (c) 1996 Scott K. Stevens
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.12 2006/09/28 23:54:14 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.16 2007/10/17 19:52:51 garbled Exp $");
 
 #include "opt_ddb.h"
 
@@ -153,9 +153,9 @@ kdb_trap(int type, db_regs_t *regs)
 
 	s = splhigh();
 	db_active++;
-	cnpollc(TRUE);
+	cnpollc(true);
 	db_trap(type, 0/*code*/);
-	cnpollc(FALSE);
+	cnpollc(false);
 	db_active--;
 	splx(s);
 
@@ -164,17 +164,17 @@ kdb_trap(int type, db_regs_t *regs)
 	return 1;
 }
 
-volatile boolean_t db_validating, db_faulted;
+volatile bool db_validating, db_faulted;
 
 int
 db_validate_address(vm_offset_t addr)
 {
 	volatile uint8_t tmp;
 
-	db_faulted = FALSE;
-	db_validating = TRUE;
+	db_faulted = false;
+	db_validating = true;
 	tmp = *(uint8_t *)addr;
-	db_validating = FALSE;
+	db_validating = false;
 	return db_faulted;
 }
 
@@ -241,11 +241,11 @@ db_write_bytes(vm_offset_t addr, size_t size, const char *data)
 }
 
 const struct db_command db_machine_command_table[] = {
-	{ "bsw",	db_bus_write_cmd,	CS_MORE, NULL },
-	{ "frame",	db_show_frame_cmd,	0, NULL },
-	{ "irqstat",	db_irqstat_cmd,		0, NULL },
-	{ "panic",	db_show_panic_cmd,	0, NULL },
-	{ NULL, 	NULL, 			0, NULL }
+	{ DDB_ADD_CMD("bsw",	db_bus_write_cmd,	CS_MORE, NULL,NULL,NULL) },
+	{ DDB_ADD_CMD("frame",	db_show_frame_cmd,	0, NULL, NULL,NULL) },
+	{ DDB_ADD_CMD("irqstat",db_irqstat_cmd,		0, NULL, NULL,NULL) },
+	{ DDB_ADD_CMD("panic",	db_show_panic_cmd,	0, NULL, NULL,NULL) },
+	{ DDB_ADD_CMD( NULL,     NULL,              0, NULL, NULL,NULL) }
 };
 
 int

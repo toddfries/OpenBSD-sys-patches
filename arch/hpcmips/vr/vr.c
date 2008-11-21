@@ -1,4 +1,4 @@
-/*	$NetBSD: vr.c,v 1.46 2005/12/11 12:17:34 christos Exp $	*/
+/*	$NetBSD: vr.c,v 1.51 2008/04/04 12:36:06 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1999-2002
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vr.c,v 1.46 2005/12/11 12:17:34 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vr.c,v 1.51 2008/04/04 12:36:06 tsutsui Exp $");
 
 #include "opt_vr41xx.h"
 #include "opt_tx39xx.h"
@@ -44,12 +44,13 @@ __KERNEL_RCSID(0, "$NetBSD: vr.c,v 1.46 2005/12/11 12:17:34 christos Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/reboot.h>
+#include <sys/device.h>
+#include <sys/bus.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <machine/sysconf.h>
 #include <machine/bootinfo.h>
-#include <machine/bus.h>
 #include <machine/bus_space_hpcmips.h>
 #include <machine/platid.h>
 #include <machine/platid_mask.h>
@@ -128,32 +129,19 @@ __KERNEL_RCSID(0, "$NetBSD: vr.c,v 1.46 2005/12/11 12:17:34 christos Exp $");
 const u_int32_t __ipl_sr_bits_vr[_IPL_N] = {
 	0,					/* IPL_NONE */
 
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFT */
-
 	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFTCLOCK */
 
 	MIPS_SOFT_INT_MASK_0|
 		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTNET */
 
 	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTSERIAL */
-
-	MIPS_SOFT_INT_MASK_0|
 		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0,		/* IPL_BIO */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0,		/* IPL_NET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0,		/* IPL_{TTY,SERIAL} */
+		MIPS_INT_MASK_0,		/* IPL_VM */
 
 	MIPS_SOFT_INT_MASK_0|
 		MIPS_SOFT_INT_MASK_1|
 		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1,		/* IPL_{CLOCK,HIGH} */
+		MIPS_INT_MASK_1,		/* IPL_SCHED */
 };
 
 #if defined(VR41XX) && defined(TX39XX)
@@ -166,7 +154,7 @@ void vr_init(void);
 void VR_INTR(u_int32_t, u_int32_t, u_int32_t, u_int32_t);
 extern void vr_idle(void);
 STATIC void vr_cons_init(void);
-STATIC void vr_fb_init(caddr_t *);
+STATIC void vr_fb_init(void **);
 STATIC void vr_mem_init(paddr_t);
 STATIC void vr_find_dram(paddr_t, paddr_t);
 STATIC void vr_reboot(int, char *);
@@ -343,7 +331,7 @@ void
 vr_find_dram(paddr_t addr, paddr_t end)
 {
 	int n;
-	caddr_t page;
+	char *page;
 #ifdef NARLY_MEMORY_PROBE
 	int x, i;
 #endif
@@ -355,7 +343,7 @@ vr_find_dram(paddr_t addr, paddr_t end)
 	n = mem_cluster_cnt;
 	for (; addr < end; addr += PAGE_SIZE) {
 
-		page = (void *)MIPS_PHYS_TO_KSEG1(addr);
+		page = (char *)MIPS_PHYS_TO_KSEG1(addr);
 		if (badaddr(page, 4))
 			goto bad;
 
@@ -409,7 +397,7 @@ vr_find_dram(paddr_t addr, paddr_t end)
 }
 
 void
-vr_fb_init(caddr_t *kernend)
+vr_fb_init(void **kernend)
 {
 	/* Nothing to do */
 }
@@ -544,6 +532,10 @@ vr_reboot(int howto, char *bootstr)
 void
 VR_INTR(u_int32_t status, u_int32_t cause, u_int32_t pc, u_int32_t ipending)
 {
+	struct cpu_info *ci;
+
+	ci = curcpu();
+	ci->ci_idepth++;
 	uvmexp.intrs++;
 
 	/* Deal with unneded compare interrupts occasionally so that we can
@@ -565,7 +557,9 @@ VR_INTR(u_int32_t status, u_int32_t cause, u_int32_t pc, u_int32_t ipending)
 		_splset(MIPS_INT_MASK_1|MIPS_SR_INT_IE);
 		(*vr_intr_handler[0])(vr_intr_arg[0], pc, status);
 	}
+	ci->ci_idepth--;
 
+#ifdef __HAVE_FAST_SOFTINTS
 	if (ipending & MIPS_SOFT_INT_MASK_1) {
 		_splset(MIPS_INT_MASK_1|MIPS_INT_MASK_0|MIPS_SR_INT_IE);
 		softintr(MIPS_SOFT_INT_MASK_1);
@@ -576,6 +570,7 @@ VR_INTR(u_int32_t status, u_int32_t cause, u_int32_t pc, u_int32_t ipending)
 		    MIPS_SR_INT_IE);
 		softintr(MIPS_SOFT_INT_MASK_0);
 	}
+#endif
 }
 
 void *

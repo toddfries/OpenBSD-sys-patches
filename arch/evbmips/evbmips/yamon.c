@@ -1,4 +1,4 @@
-/*	$NetBSD: yamon.c,v 1.7 2006/07/13 21:06:18 gdamore Exp $	*/
+/*	$NetBSD: yamon.c,v 1.11 2008/05/26 15:59:29 tsutsui Exp $	*/
 
 /*
  * Copyright 2002 Wasabi Systems, Inc.
@@ -38,12 +38,13 @@
 /* XXX move to arch/mips/yamon/yamon.c or similar? */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: yamon.c,v 1.7 2006/07/13 21:06:18 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: yamon.c,v 1.11 2008/05/26 15:59:29 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/cpu.h>
 
 #include <dev/cons.h>
 
@@ -152,7 +153,6 @@ yamon_setcpufreq(int force)
 		curcpu()->ci_cycles_per_hz /= 2;
 		curcpu()->ci_divisor_delay /= 2;
 	}
-	MIPS_SET_CI_RECIPRICAL(curcpu());
 
 	return ret;
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pucvar.h,v 1.6 2007/12/04 21:49:35 kettenis Exp $	*/
-/*	$NetBSD: pucvar.h,v 1.2 1999/02/06 06:29:54 cgd Exp $	*/
+/*	$NetBSD: pucvar.h,v 1.8 2005/12/11 12:22:50 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Christopher G. Demetriou.  All rights reserved.
@@ -41,12 +40,13 @@
 #define	PUC_MAX_PORTS		8
 
 struct puc_device_description {
-	u_long	rval[4];
-	u_long	rmask[4];
+	const char		*name;
+	pcireg_t		rval[4];
+	pcireg_t		rmask[4];
 	struct {
-		u_char	type;
-		u_char	bar;
-		u_short	offset;
+		int	type;
+		int	bar;
+		int	offset;
 		int	flags;
 	}			ports[PUC_MAX_PORTS];
 };
@@ -68,53 +68,42 @@ struct puc_device_description {
 /* * assume all clock rates have 8 lower bits to 0 - this leaves us 8 flags */
 #define PUC_COM_CLOCKMASK 0xffffff00
 
+#define PUC_COM_FLAG0	(1 << 0)
+#define PUC_COM_FLAG1	(1 << 1)
+#define PUC_COM_FLAG2	(1 << 2)
+#define PUC_COM_FLAG3	(1 << 3)
+#define PUC_COM_FLAG4	(1 << 4)
+#define PUC_COM_FLAG5	(1 << 5)
+#define PUC_COM_FLAG6	(1 << 6)
+#define PUC_COM_FLAG7	(1 << 7)
+
+/* Flags for SIIG Cyberserial options */
+#define PUC_COM_SIIG10x	PUC_COM_FLAG7
+#define PUC_COM_SIIG20x	PUC_COM_FLAG6
+#define PUC_PORT_USR0	PUC_COM_FLAG0
+#define PUC_PORT_USR1	PUC_COM_FLAG1
+#define PUC_PORT_USR2	PUC_COM_FLAG2
+#define PUC_PORT_USR3	PUC_COM_FLAG3
+
+/* Flags for PUC_PORT_TYPE_LPT */
+/* none currently */
+
 struct puc_attach_args {
 	int			port;
 	int			type;
-	int			hwtype;
-	void			*puc;
+	int			flags;
+
+	pci_chipset_tag_t	pc;
+	pci_intr_handle_t	intrhandle;
+	pcitag_t		tag;
 
 	bus_addr_t		a;
 	bus_space_tag_t		t;
 	bus_space_handle_t	h;
-	int			flags;
-
-	const char *(*intr_string)(struct puc_attach_args *);
-	void *(*intr_establish)(struct puc_attach_args *, int, int (*)(void *),
-	    void *, char *);
-	void (*intr_disestablish)(struct puc_attach_args *, void *);
+	bus_dma_tag_t		dmat;
+	bus_dma_tag_t		dmat64;
 };
 
 extern const struct puc_device_description puc_devices[];
-
-#define	PUC_NBARS	6
-struct puc_softc {
-	struct device		sc_dev;
-
-	/* static configuration data */
-	const struct puc_device_description *sc_desc;
-
-	/* card-global dynamic data */
-	struct {
-		int		mapped;
-		u_long		type;
-		bus_addr_t	a;
-		bus_size_t	s;
-		bus_space_tag_t	t;
-		bus_space_handle_t h;
-	} sc_bar_mappings[PUC_NBARS];
-
-	/* per-port dynamic data */
-	struct {
-		struct device   *dev;
-		/* filled in by port attachments */
-		void	*intrhand;
-	} sc_ports[PUC_MAX_PORTS];
-};
-
-const struct puc_device_description *
-    puc_find_description(u_long, u_long, u_long, u_long);
-void	puc_print_ports(const struct puc_device_description *);
-void	puc_common_attach(struct puc_softc *, struct puc_attach_args *);
-int	puc_print(void *, const char *);
-int	puc_submatch(struct device *, void *, void *);
+extern const struct puc_device_description *
+	puc_find_description(pcireg_t, pcireg_t, pcireg_t, pcireg_t);

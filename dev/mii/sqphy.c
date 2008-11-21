@@ -1,8 +1,7 @@
-/*	$OpenBSD: sqphy.c,v 1.15 2006/12/27 19:11:09 kettenis Exp $	*/
-/*	$NetBSD: sqphy.c,v 1.17 2000/02/02 23:34:57 thorpej Exp $	*/
+/*	$NetBSD: sqphy.c,v 1.48 2008/11/17 03:04:27 dyoung Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,9 +60,12 @@
  */
 
 /*
- * driver for Seeq 80220/80221 and 80223 10/100 ethernet PHYs
+ * driver for Seeq 80220/80221, 80223, and 80225 10/100 ethernet PHYs
  * datasheet from www.seeq.com
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sqphy.c,v 1.48 2008/11/17 03:04:27 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,39 +83,40 @@
 
 #include <dev/mii/sqphyreg.h>
 
-int	sqphymatch(struct device *, void *, void *);
-void	sqphyattach(struct device *, struct device *, void *);
+static int	sqphymatch(device_t, cfdata_t, void *);
+static void	sqphyattach(device_t, device_t, void *);
 
-struct cfattach sqphy_ca = {
-	sizeof(struct mii_softc), sqphymatch, sqphyattach, mii_phy_detach,
-	    mii_phy_activate
-};
+CFATTACH_DECL_NEW(sqphy, sizeof(struct mii_softc),
+    sqphymatch, sqphyattach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver sqphy_cd = {
-	NULL, "sqphy", DV_DULL
-};
+static int	sqphy_service(struct mii_softc *, struct mii_data *, int);
+static void	sqphy_status(struct mii_softc *);
+static void	sqphy_84220_reset(struct mii_softc *);
 
-int	sqphy_service(struct mii_softc *, struct mii_data *, int);
-void	sqphy_status(struct mii_softc *);
-
-const struct mii_phy_funcs sqphy_funcs = {
+static const struct mii_phy_funcs sqphy_funcs = {
 	sqphy_service, sqphy_status, mii_phy_reset,
 };
 
+static const struct mii_phy_funcs sqphy_84220_funcs = {
+	sqphy_service, sqphy_status, sqphy_84220_reset,
+};
+
 static const struct mii_phydesc sqphys[] = {
-	{ MII_OUI_xxSEEQ,		MII_MODEL_xxSEEQ_80220,
-	  MII_STR_xxSEEQ_80220 },
-	{ MII_OUI_xxSEEQ,		MII_MODEL_xxSEEQ_80225,
-	  MII_STR_xxSEEQ_80225 },
-	{ MII_OUI_xxSEEQ,		MII_MODEL_xxSEEQ_84220,
-	  MII_STR_xxSEEQ_84220 },
+	{ MII_OUI_SEEQ,			MII_MODEL_SEEQ_80220,
+	  MII_STR_SEEQ_80220 },
+
+	{ MII_OUI_SEEQ,			MII_MODEL_SEEQ_80225,
+	  MII_STR_SEEQ_80225 },
+
+	{ MII_OUI_SEEQ,			MII_MODEL_SEEQ_84220,
+	  MII_STR_SEEQ_84220 },
 
 	{ 0,				0,
 	  NULL },
 };
 
-int
-sqphymatch(struct device *parent, void *match, void *aux)
+static int
+sqphymatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -130,39 +126,52 @@ sqphymatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-void
-sqphyattach(struct device *parent, struct device *self, void *aux)
+static void
+sqphyattach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
 	mpd = mii_phy_match(ma, sqphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	aprint_naive(": Media interface\n");
+	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_funcs = &sqphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
+	sc->mii_anegticks = MII_ANEGTICKS;
+
+	switch (MII_MODEL(ma->mii_id2)) {
+	case MII_MODEL_SEEQ_84220:
+		sc->mii_funcs = &sqphy_84220_funcs;
+		aprint_normal_dev(self, "using Seeq 84220 isolate/reset hack\n");
+		break;
+
+	default:
+		sc->mii_funcs = &sqphy_funcs;
+	}
 
 	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 sqphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -217,7 +226,7 @@ sqphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 sqphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -258,11 +267,35 @@ sqphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
-
 		if (status & STATUS_DPLX_DET)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
+}
+
+static void
+sqphy_84220_reset(struct mii_softc *sc)
+{
+	int reg;
+
+	mii_phy_reset(sc);
+
+	/*
+	 * This PHY sometimes insists on coming out of reset isolated,
+	 * even when the MDA[0-3] pins are pulled high (to indicate
+	 * PHY address 0), contrary to the device's datasheet.
+	 *
+	 * Morever, simply clearing BMCR_ISO here isn't enough; the
+	 * change won't stick until about 30mS *after* the PHY has
+	 * been reset.
+	 *
+	 * This sucks.
+	 */
+	while ((sc->mii_inst == 0 || (sc->mii_flags & MIIF_NOISOLATE)) &&
+	    ((reg = PHY_READ(sc, MII_BMCR)) & BMCR_ISO) != 0) {
+
+		delay(35000);
+		PHY_WRITE(sc, MII_BMCR, reg & ~BMCR_ISO);
+		delay(35000);
+	}
 }

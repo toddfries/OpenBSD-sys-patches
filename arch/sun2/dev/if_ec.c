@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ec.c,v 1.11 2005/12/11 12:19:16 christos Exp $	*/
+/*	$NetBSD: if_ec.c,v 1.16 2008/11/07 00:20:02 dyoung Exp $	*/
 
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ec.c,v 1.11 2005/12/11 12:19:16 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ec.c,v 1.16 2008/11/07 00:20:02 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "opt_ns.h"
@@ -98,7 +91,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_ec.c,v 1.11 2005/12/11 12:19:16 christos Exp $");
  * Interface softc.
  */
 struct ec_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 	void *sc_ih;
 
 	struct ethercom sc_ethercom;	/* ethernet common */
@@ -138,7 +131,7 @@ struct ec_softc {
 int ec_intr(void *);
 void ec_reset(struct ifnet *);
 int ec_init(struct ifnet *);
-int ec_ioctl(struct ifnet *, u_long, caddr_t);
+int ec_ioctl(struct ifnet *, u_long, void *);
 void ec_watchdog(struct ifnet *);
 void ec_start(struct ifnet *);
 
@@ -150,10 +143,10 @@ void ec_copyout(struct ec_softc *, const void *, int, size_t);
 int ec_mediachange(struct ifnet *);
 void ec_mediastatus(struct ifnet *, struct ifmediareq *);
 
-int ec_match(struct device *, struct cfdata *, void *);
-void ec_attach(struct device *, struct device *, void *);
+int ec_match(device_t, cfdata_t, void *);
+void ec_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(ec, sizeof(struct ec_softc),
+CFATTACH_DECL_NEW(ec, sizeof(struct ec_softc),
     ec_match, ec_attach, NULL, NULL);
 
 /*
@@ -162,6 +155,7 @@ CFATTACH_DECL(ec, sizeof(struct ec_softc),
 void 
 ec_copyin(struct ec_softc *sc, void *p, int offset, size_t size)
 {
+
 	bus_space_copyin(sc->sc_iot, sc->sc_ioh, offset, p, size);
 }
 
@@ -171,51 +165,54 @@ ec_copyin(struct ec_softc *sc, void *p, int offset, size_t size)
 void 
 ec_copyout(struct ec_softc *sc, const void *p, int offset, size_t size)
 {
+
 	bus_space_copyout(sc->sc_iot, sc->sc_ioh, offset, p, size);
 }
 
 int 
-ec_match(struct device *parent, struct cfdata *match, void *aux)
+ec_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct mbmem_attach_args *mbma = aux;
 	bus_space_handle_t bh;
-	int matched;
+	bool matched;
 
 	/* No default Multibus address. */
 	if (mbma->mbma_paddr == -1)
-		return (0);
+		return 0;
 
 	/* Make sure there is something there... */
 	if (bus_space_map(mbma->mbma_bustag, mbma->mbma_paddr, ECREG_BANK_SZ, 
-			  0, &bh))
-		return (0);
+	    0, &bh))
+		return 0;
 	matched = (bus_space_peek_2(mbma->mbma_bustag, bh, 0, NULL) == 0);
 	bus_space_unmap(mbma->mbma_bustag, bh, ECREG_BANK_SZ);
 	if (!matched)
-		return (0);
+		return 0;
 
 	/* Default interrupt priority. */
 	if (mbma->mbma_pri == -1)
 		mbma->mbma_pri = 3;
 
-	return (1);
+	return 1;
 }
 
 void 
-ec_attach(struct device *parent, struct device *self, void *aux)
+ec_attach(device_t parent, device_t self, void *aux)
 {
-	struct ec_softc *sc = (void *) self;
+	struct ec_softc *sc = device_private(self);
 	struct mbmem_attach_args *mbma = aux;
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	uint8_t myaddr[ETHER_ADDR_LEN];
 
-	printf("\n");
+	sc->sc_dev = self;
+
+	aprint_normal("\n");
 
 	/* Map in the board control regs. */
 	sc->sc_iot = mbma->mbma_bustag;
 	if (bus_space_map(mbma->mbma_bustag, mbma->mbma_paddr, ECREG_BANK_SZ,
-		0, &sc->sc_ioh))
-		panic("ec_attach: can't map regs");
+	    0, &sc->sc_ioh))
+		panic("%s: can't map regs", __func__);
 
 	/* Reset the board. */
 	ECREG_CSR_WR(EC_CSR_RESET);
@@ -226,11 +223,13 @@ ec_attach(struct device *parent, struct device *self, void *aux)
 	 * and use the non-vendor-ID part to seed
 	 * our backoff pseudorandom number generator.
 	 */
-	bus_space_read_region_1(sc->sc_iot, sc->sc_ioh, ECREG_AROM, myaddr, ETHER_ADDR_LEN);
-	sc->sc_backoff_seed = (myaddr[3] << 16) | (myaddr[4] << 8) | (myaddr[5]) | 1;
+	bus_space_read_region_1(sc->sc_iot, sc->sc_ioh,
+	    ECREG_AROM, myaddr, ETHER_ADDR_LEN);
+	sc->sc_backoff_seed =
+	    (myaddr[3] << 16) | (myaddr[4] << 8) | (myaddr[5]) | 1;
 
 	/* Initialize ifnet structure. */
-	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	strcpy(ifp->if_xname, device_xname(self));
 	ifp->if_softc = sc;
 	ifp->if_start = ec_start;
 	ifp->if_ioctl = ec_ioctl;
@@ -248,13 +247,13 @@ ec_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	idprom_etheraddr(myaddr);
 	ether_ifattach(ifp, myaddr);
-	printf("%s: address %s\n", self->dv_xname, ether_sprintf(myaddr));
+	aprint_normal_dev(self, "address %s\n", ether_sprintf(myaddr));
 
 	bus_intr_establish(mbma->mbma_bustag, mbma->mbma_pri, IPL_NET, 0,
 	    ec_intr, sc);
 
 #if NRND > 0
-	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
+	rnd_attach_source(&sc->rnd_source, device_xname(self),
 	    RND_TYPE_NET, 0);
 #endif
 }
@@ -286,12 +285,15 @@ ec_init(struct ifnet *ifp)
 	delay(160);
 
 	/* Set the Ethernet address. */
-	bus_space_write_region_1(sc->sc_iot, sc->sc_ioh, ECREG_ARAM, LLADDR(sc->sc_ethercom.ec_if.if_sadl), ETHER_ADDR_LEN);
+	bus_space_write_region_1(sc->sc_iot, sc->sc_ioh,
+	    ECREG_ARAM, CLLADDR(sc->sc_ethercom.ec_if.if_sadl), ETHER_ADDR_LEN);
 	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) | EC_CSR_AMSW);
 	ECREG_CSR_WR(ECREG_CSR_RD & 0);
 
 	/* Enable interrupts. */
-	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) | EC_CSR_BBSW | EC_CSR_ABSW | EC_CSR_BINT | EC_CSR_AINT | (ifp->if_flags & IFF_PROMISC ? EC_CSR_PROMISC : EC_CSR_PA));
+	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) |
+	    EC_CSR_BBSW | EC_CSR_ABSW | EC_CSR_BINT | EC_CSR_AINT |
+	    (ifp->if_flags & IFF_PROMISC ? EC_CSR_PROMISC : EC_CSR_PA));
 
 	/* Set flags appropriately. */
 	ifp->if_flags |= IFF_RUNNING;
@@ -300,7 +302,7 @@ ec_init(struct ifnet *ifp)
 	/* Start output. */
 	ec_start(ifp);
 
-	return (0);
+	return 0;
 }
 
 /*
@@ -349,7 +351,8 @@ ec_start(struct ifnet *ifp)
 		ec_copyout(sc, padding, ECREG_TBUF + off, count - realcount);
 
 	/* Enable the transmitter. */
-	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_PA) | EC_CSR_TBSW | EC_CSR_TINT | EC_CSR_JINT);
+	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_PA) |
+	    EC_CSR_TBSW | EC_CSR_TINT | EC_CSR_JINT);
 	ifp->if_flags |= IFF_OACTIVE;
 
 	/* Done. */
@@ -379,8 +382,10 @@ ec_intr(void *arg)
 	case (EC_CSR_BBSW | EC_CSR_ABSW | EC_CSR_RBBA):
 		/* Neither buffer is full.  Is this a transmit interrupt?
 		 * Acknowledge the interrupt ourselves. */
-		ECREG_CSR_WR(ECREG_CSR_RD & (EC_CSR_TINT | EC_CSR_JINT | EC_CSR_PAMASK));
-		ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) | EC_CSR_BINT | EC_CSR_AINT);
+		ECREG_CSR_WR(ECREG_CSR_RD &
+		    (EC_CSR_TINT | EC_CSR_JINT | EC_CSR_PAMASK));
+		ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) |
+		    EC_CSR_BINT | EC_CSR_AINT);
 		break;
 
 	case EC_CSR_BBSW:
@@ -414,7 +419,9 @@ ec_intr(void *arg)
 	if (recv_first) {
 
 		/* Acknowledge the interrupt. */
-		ECREG_CSR_WR(ECREG_CSR_RD & ((EC_CSR_BINT | EC_CSR_AINT | EC_CSR_TINT | EC_CSR_JINT | EC_CSR_PAMASK) ^ (recv_first | recv_second)));
+		ECREG_CSR_WR(ECREG_CSR_RD &
+		    ((EC_CSR_BINT | EC_CSR_AINT | EC_CSR_TINT | EC_CSR_JINT |
+		      EC_CSR_PAMASK) ^ (recv_first | recv_second)));
 
 		/* Receive a packet. */
 		ec_recv(sc, recv_first);
@@ -430,7 +437,8 @@ ec_intr(void *arg)
 
 		/* If we got a collision. */
 		if (ECREG_CSR_RD & EC_CSR_JAM) {
-			ECREG_CSR_WR(ECREG_CSR_RD & (EC_CSR_BINT | EC_CSR_AINT | EC_CSR_PAMASK));
+			ECREG_CSR_WR(ECREG_CSR_RD &
+			    (EC_CSR_BINT | EC_CSR_AINT | EC_CSR_PAMASK));
 			sc->sc_ethercom.ec_if.if_collisions++;
 			retval++;
 			ec_coll(sc);
@@ -438,7 +446,8 @@ ec_intr(void *arg)
 		}
 		/* If we transmitted a packet. */
 		else if ((ECREG_CSR_RD & EC_CSR_TBSW) == 0) {
-			ECREG_CSR_WR(ECREG_CSR_RD & (EC_CSR_BINT | EC_CSR_AINT | EC_CSR_PAMASK));
+			ECREG_CSR_WR(ECREG_CSR_RD &
+			    (EC_CSR_BINT | EC_CSR_AINT | EC_CSR_PAMASK));
 			retval++;
 			sc->sc_ethercom.ec_if.if_opackets++;
 			sc->sc_jammed = 0;
@@ -450,7 +459,8 @@ ec_intr(void *arg)
 	} else {
 
 		/* Make sure we disable transmitter interrupts. */
-		ECREG_CSR_WR(ECREG_CSR_RD & (EC_CSR_BINT | EC_CSR_AINT | EC_CSR_PAMASK));
+		ECREG_CSR_WR(ECREG_CSR_RD &
+		    (EC_CSR_BINT | EC_CSR_AINT | EC_CSR_PAMASK));
 	}
 
 	return retval;
@@ -475,14 +485,14 @@ ec_recv(struct ec_softc *sc, int intbit)
 	status = bus_space_read_2(sc->sc_iot, sc->sc_ioh, buf);
 	doff = status & EC_PKT_DOFF;
 
-	for (total_length = -1, m0 = 0;;) {
+	for (total_length = -1, m0 = NULL;;) {
 
 		/* Check for an error. */
 		if (status & (EC_PKT_FCSERR | EC_PKT_RGERR | EC_PKT_FRERR) ||
 		    doff < EC_PKT_MINRDOFF ||
 		    doff > EC_PKT_MAXRDOFF) {
 			printf("%s: garbled packet, status 0x%04x; dropping\n",
-			    sc->sc_dev.dv_xname, (unsigned int) status);
+			    device_xname(sc->sc_dev), (unsigned int)status);
 			break;
 		}
 
@@ -494,13 +504,13 @@ ec_recv(struct ec_softc *sc, int intbit)
 		if (total_length > (ETHER_MAX_LEN - ETHER_CRC_LEN)) {
 #ifdef DEBUG
 			printf("%s: fixing too-large length of %d\n",
-			    sc->sc_dev.dv_xname, total_length);
+			    device_xname(sc->sc_dev), total_length);
 #endif
 			total_length = (ETHER_MAX_LEN - ETHER_CRC_LEN);
 		}
 
 		MGETHDR(m0, M_DONTWAIT, MT_DATA);
-		if (m0 == 0)
+		if (m0 == NULL)
 			break;
 		m0->m_pkthdr.rcvif = ifp;
 		m0->m_pkthdr.len = total_length;
@@ -521,7 +531,7 @@ ec_recv(struct ec_softc *sc, int intbit)
 
 			if (total_length > 0) {
 				MGET(newm, M_DONTWAIT, MT_DATA);
-				if (newm == 0)
+				if (newm == NULL)
 					break;
 				length = MLEN;
 				m = m->m_next = newm;
@@ -543,11 +553,11 @@ ec_recv(struct ec_softc *sc, int intbit)
 #endif
 
 		/* Pass the packet up. */
-		(*ifp->if_input) (ifp, m0);
+		(*ifp->if_input)(ifp, m0);
 
 	} else {
 		/* Something went wrong. */
-		if (m0)
+		if (m0 != NULL)
 			m_freem(m0);
 		ifp->if_ierrors++;
 	}
@@ -555,18 +565,21 @@ ec_recv(struct ec_softc *sc, int intbit)
 	/* Give the receive buffer back to the card. */
 	buf = EC_CSR_INT_BUF(intbit);
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, buf, 0);
-	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) | EC_CSR_INT_BSW(intbit) | intbit);
+	ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) |
+	    EC_CSR_INT_BSW(intbit) | intbit);
 }
 
 int 
 ec_mediachange(struct ifnet *ifp)
 {               
-	return (0);
+
+	return 0;
 }
 
 void 
 ec_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
 {  
+
 	if ((ifp->if_flags & IFF_UP) == 0)
 		return;
         
@@ -577,9 +590,9 @@ ec_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
  * Process an ioctl request. This code needs some work - it looks pretty ugly.
  */
 int 
-ec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+ec_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
-	struct ifaddr *ifa = (struct ifaddr *) data;
+	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ec_softc *sc = ifp->if_softc;
 	int s, error = 0;
@@ -588,7 +601,7 @@ ec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	switch (cmd) {
 
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
@@ -598,23 +611,6 @@ ec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(ifp, ifa);
 			break;
 #endif
-#ifdef NS
-			/* XXX - This code is probably wrong. */
-		case AF_NS:
-			{
-				struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-				if (ns_nullhost(*ina))
-					ina->x_host =
-					    *(union ns_host *) LLADDR(ifp->if_sadl);
-				else
-					bcopy(ina->x_host.c_host, LLADDR(ifp->if_sadl),
-					    ETHER_ADDR_LEN);
-				/* Set new address. */
-				ec_init(ifp);
-				break;
-			}
-#endif
 		default:
 			ec_init(ifp);
 			break;
@@ -622,26 +618,30 @@ ec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
+		case IFF_RUNNING:
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
 			 */
 			ifp->if_flags &= ~IFF_RUNNING;
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-		    (ifp->if_flags & IFF_RUNNING) == 0) {
+			break;
+		case IFF_UP:
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			ec_init(ifp);
-		} else {
+			break;
+		default:
 			/*
 			 * Some other important flag might have changed, so
 			 * reset.
 			 */
 			ec_reset(ifp);
+			break;
 		}
 		break;
 
@@ -651,7 +651,7 @@ ec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 
@@ -673,7 +673,7 @@ ec_coll(struct ec_softc *sc)
 		sc->sc_ethercom.ec_if.if_oerrors++;
 		if (!sc->sc_jammed)
 			printf("%s: ethernet jammed\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(sc->sc_dev));
 		sc->sc_jammed = 1;
 		sc->sc_colliding = 0;
 		ifp->if_flags &= ~IFF_OACTIVE;
@@ -682,9 +682,13 @@ ec_coll(struct ec_softc *sc)
 			ec_start(ifp);
 	} else {
 		jams = MAX(sc->sc_colliding, EC_BACKOFF_PRNG_COLL_MAX);
-		sc->sc_backoff_seed = ((sc->sc_backoff_seed * EC_BACKOFF_PRNG_MUL) + EC_BACKOFF_PRNG_ADD) & EC_BACKOFF_PRNG_MASK;
-		bus_space_write_2(sc->sc_iot, sc->sc_ioh, ECREG_BACKOFF, -(((sc->sc_backoff_seed >> 8) & ~(-1 << jams)) + 1));
-		ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) | EC_CSR_JAM | EC_CSR_TINT | EC_CSR_JINT);
+		sc->sc_backoff_seed =
+		    ((sc->sc_backoff_seed * EC_BACKOFF_PRNG_MUL) +
+		    EC_BACKOFF_PRNG_ADD) & EC_BACKOFF_PRNG_MASK;
+		bus_space_write_2(sc->sc_iot, sc->sc_ioh, ECREG_BACKOFF,
+		    -(((sc->sc_backoff_seed >> 8) & ~(-1 << jams)) + 1));
+		ECREG_CSR_WR((ECREG_CSR_RD & EC_CSR_INTPA) |
+		    EC_CSR_JAM | EC_CSR_TINT | EC_CSR_JINT);
 	}
 }
 
@@ -696,7 +700,7 @@ ec_watchdog(struct ifnet *ifp)
 {
 	struct ec_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
+	log(LOG_ERR, "%s: device timeout\n", device_xname(sc->sc_dev));
 	sc->sc_ethercom.ec_if.if_oerrors++;
 
 	ec_reset(ifp);

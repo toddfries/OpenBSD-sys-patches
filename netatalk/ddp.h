@@ -1,4 +1,4 @@
-/*	$OpenBSD: ddp.h,v 1.2 2005/12/11 17:21:53 deraadt Exp $	*/
+/*	$NetBSD: ddp.h,v 1.2 2005/12/10 23:29:05 elad Exp $	 */
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -14,63 +14,24 @@
  * permission. This software is supplied as is without expressed or
  * implied warranties of any kind.
  *
- *	Research Systems Unix Group
- *	The University of Michigan
- *	c/o Mike Clark
- *	535 W. William Street
- *	Ann Arbor, Michigan
- *	+1-313-763-0525
- *	netatalk@itd.umich.edu
- */
-
-/*
- * The following is the contents of the COPYRIGHT file from the
- * netatalk-1.4a2 distribution, from which this file is derived.
- */
-/*
- * Copyright (c) 1990,1996 Regents of The University of Michigan.
- *
- * All Rights Reserved.
- *
- *    Permission to use, copy, modify, and distribute this software and
- *    its documentation for any purpose and without fee is hereby granted,
- *    provided that the above copyright notice appears in all copies and
- *    that both that copyright notice and this permission notice appear
- *    in supporting documentation, and that the name of The University
- *    of Michigan not be used in advertising or publicity pertaining to
- *    distribution of the software without specific, written prior
- *    permission. This software is supplied as is without expressed or
- *    implied warranties of any kind.
- *
  * This product includes software developed by the University of
  * California, Berkeley and its contributors.
  *
- * Solaris code is encumbered by the following:
- *
- *     Copyright (C) 1996 by Sun Microsystems Computer Co.
- *
- *     Permission to use, copy, modify, and distribute this software and
- *     its documentation for any purpose and without fee is hereby
- *     granted, provided that the above copyright notice appear in all
- *     copies and that both that copyright notice and this permission
- *     notice appear in supporting documentation.  This software is
- *     provided "as is" without express or implied warranty.
- *
- * Research Systems Unix Group
- * The University of Michigan
- * c/o Wesley Craig
- * 535 W. William Street
- * Ann Arbor, Michigan
- * +1-313-764-2278
- * netatalk@umich.edu
- */
-/*
- * None of the Solaris code mentioned is included in OpenBSD.
- * This code also relies heavily on previous effort in FreeBSD and NetBSD.
+ *	Research Systems Unix Group
+ *	The University of Michigan
+ *	c/o Wesley Craig
+ *	535 W. William Street
+ *	Ann Arbor, Michigan
+ *	+1-313-764-2278
+ *	netatalk@umich.edu
  */
 
 #ifndef _NETATALK_DDP_H_
-#define _NETATALK_DDP_H_ 1
+#define _NETATALK_DDP_H_
+
+#ifndef BYTE_ORDER
+  #error "Undefined Byte order"
+#endif
 
 /*
  * <-1byte(8bits) ->
@@ -107,9 +68,9 @@
  */
 
 struct elaphdr {
-    u_char	el_dnode;
-    u_char	el_snode;
-    u_char	el_type;
+	u_char          el_dnode;
+	u_char          el_snode;
+	u_char          el_type;
 };
 
 #define	SZ_ELAPHDR	3
@@ -122,60 +83,61 @@ struct elaphdr {
  * bitfields on a little-endian arch.
  */
 struct ddpehdr {
-    union {
-	struct {
+	union {
+		struct {
 #if BYTE_ORDER == BIG_ENDIAN
-    unsigned int	dub_pad:2;
-    unsigned int	dub_hops:4;
-    unsigned int	dub_len:10;
-    unsigned int	dub_sum:16;
+			unsigned        dub_pad:2;
+			unsigned        dub_hops:4;
+			unsigned        dub_len:10;
+			unsigned        dub_sum:16;
 #endif
 #if BYTE_ORDER == LITTLE_ENDIAN
-    unsigned int	dub_sum:16;
-    unsigned int	dub_len:10;
-    unsigned int	dub_hops:4;
-    unsigned int	dub_pad:2;
+			unsigned        dub_sum:16;
+			unsigned        dub_len:10;
+			unsigned        dub_hops:4;
+			unsigned        dub_pad:2;
 #endif
-	} du_bits;
-	unsigned int	du_bytes;
-    } deh_u;
+		} 		du_bits;
+		unsigned        du_bytes;
+	}               deh_u;
 #define deh_pad		deh_u.du_bits.dub_pad
 #define deh_hops	deh_u.du_bits.dub_hops
 #define deh_len		deh_u.du_bits.dub_len
 #define deh_sum		deh_u.du_bits.dub_sum
 #define deh_bytes	deh_u.du_bytes
-    u_short		deh_dnet;
-    u_short		deh_snet;
-    u_char		deh_dnode;
-    u_char		deh_snode;
-    u_char		deh_dport;
-    u_char		deh_sport;
+	u_short         deh_dnet;
+	u_short         deh_snet;
+	u_char          deh_dnode;
+	u_char          deh_snode;
+	u_char          deh_dport;
+	u_char          deh_sport;
 };
 
 #define DDP_MAXHOPS	15
 
 struct ddpshdr {
-    union {
-	struct {
+	union {
+		struct {
 #if BYTE_ORDER == BIG_ENDIAN
-    unsigned int	dub_pad:6;
-    unsigned int	dub_len:10;
-    unsigned int	dub_dport:8;
-    unsigned int	dub_sport:8;
+			unsigned        dub_pad:6;
+			unsigned        dub_len:10;
+			unsigned        dub_dport:8;
+			unsigned        dub_sport:8;
 #endif
 #if BYTE_ORDER == LITTLE_ENDIAN
-    unsigned int	dub_sport:8;
-    unsigned int	dub_dport:8;
-    unsigned int	dub_len:10;
-    unsigned int	dub_pad:6;
+			unsigned        dub_sport:8;
+			unsigned        dub_dport:8;
+			unsigned        dub_len:10;
+			unsigned        dub_pad:6;
 #endif
-	} du_bits;
-	unsigned int	du_bytes;
-    } dsh_u;
+		}               du_bits;
+		unsigned        du_bytes;
+	}               dsh_u;
 #define dsh_pad		dsh_u.du_bits.dub_pad
 #define dsh_len		dsh_u.du_bits.dub_len
 #define dsh_dport	dsh_u.du_bits.dub_dport
 #define dsh_sport	dsh_u.du_bits.dub_sport
 #define dsh_bytes	dsh_u.du_bytes
 };
-#endif /* _NETATALK_DDP_H_ */
+
+#endif /* !_NETATALK_DDP_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: disassem.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: disassem.c,v 1.14 2003/03/27 16:58:36 mycroft Exp $	*/
+/*	$NetBSD: disassem.c,v 1.18 2008/04/27 18:58:43 matt Exp $	*/
 
 /*
  * Copyright (c) 1996 Mark Brinicombe.
@@ -50,12 +49,9 @@
 
 #include <sys/param.h>
 
+__KERNEL_RCSID(0, "$NetBSD: disassem.c,v 1.18 2008/04/27 18:58:43 matt Exp $");
+
 #include <sys/systm.h>
-#include <machine/db_machdep.h>
-#include <ddb/db_access.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_variables.h>
-#include <ddb/db_interface.h>
 #include <arch/arm/arm/disassem.h>
 
 /*
@@ -106,8 +102,8 @@
 struct arm32_insn {
 	u_int mask;
 	u_int pattern;
-	char* name;
-	char* format;
+	const char* name;
+	const char* format;
 };
 
 static const struct arm32_insn arm32_i[] = {
@@ -215,6 +211,9 @@ static const struct arm32_insn arm32_i[] = {
     { 0x0f100010, 0x0e100010, "mrc",	"#z" },
     { 0xff000010, 0xfe000000, "cdp2",	"#y" },
     { 0x0f000010, 0x0e000000, "cdp",	"#y" },
+    { 0x0f100010, 0x0e000010, "mcr",	"#z" },
+    { 0x0ff00000, 0x0c400000, "mcrr",	"#&" },
+    { 0x0ff00000, 0x0c500000, "mrrc",	"#&" },
     { 0xfe100090, 0xfc100000, "ldc2",	"L#v" },
     { 0x0e100090, 0x0c100000, "ldc",	"L#v" },
     { 0xfe100090, 0xfc000000, "stc2",	"L#v" },
@@ -272,8 +271,8 @@ static void disasm_insn_ldrhstrh(const disasm_interface_t *di, u_int insn,
     u_int loc);
 static void disasm_insn_ldcstc(const disasm_interface_t *di, u_int insn,
     u_int loc);
-static db_expr_t disassemble_readword(db_expr_t address);
-static void disassemble_printaddr(db_expr_t address);
+static u_int disassemble_readword(u_int address);
+static void disassemble_printaddr(u_int address);
 
 vaddr_t
 disasm(const disasm_interface_t *di, vaddr_t loc, int altfmt)
@@ -283,8 +282,14 @@ disasm(const disasm_interface_t *di, vaddr_t loc, int altfmt)
 	u_int insn;
 	int matchp;
 	int branch;
-	char* f_ptr;
+	const char* f_ptr;
 	int fmt;
+
+	if (loc & 3) {
+		/* Don't crash for now.  */
+		di->di_printf("thumb insn\n");
+		return (loc + THUMB_INSN_SIZE);
+	}
 
 	fmt = 0;
 	matchp = 0;
@@ -499,6 +504,12 @@ disasm(const disasm_interface_t *di, vaddr_t loc, int altfmt)
 /*			if (((insn >> 5) & 0x07) != 0)
 				di->di_printf(", %d", (insn >> 5) & 0x07);*/
 			break;
+		/* & - co-processor register range transfer registers */
+		case '&':
+			di->di_printf("%d, r%d, r%d, c%d",
+			    (insn >> 4) & 0x0f, (insn >> 12) & 0x0f,
+			    (insn >> 16) & 0x0f, insn & 0x0f);
+			break;
 		default:
 			di->di_printf("[%c - unknown]", *f_ptr);
 			break;
@@ -656,14 +667,14 @@ disasm_insn_ldcstc(const disasm_interface_t *di, u_int insn, u_int loc)
 		di->di_printf("!");
 }
 
-static db_expr_t
-disassemble_readword(db_expr_t address)
+static u_int
+disassemble_readword(u_int address)
 {
 	return(*((u_int *)address));
 }
 
 static void
-disassemble_printaddr(db_expr_t address)
+disassemble_printaddr(u_int address)
 {
 	printf("0x%08x", address);
 }

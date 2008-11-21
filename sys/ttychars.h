@@ -1,5 +1,4 @@
-/*	$OpenBSD: ttychars.h,v 1.3 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: ttychars.h,v 1.6 1994/06/29 06:45:54 cgd Exp $	*/
+/*	$NetBSD: ttychars.h,v 1.9 2005/12/11 12:25:21 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -56,7 +55,8 @@ struct ttychars {
 	char	tc_werasc;	/* word erase */
 	char	tc_lnextc;	/* literal next character */
 };
+#endif /* !_SYS_TTYCHARS_H_ */
+
 #ifdef USE_OLD_TTY
 #include <sys/ttydefaults.h>	/* to pick up character defaults */
 #endif
-#endif /* !_SYS_TTYCHARS_H_ */

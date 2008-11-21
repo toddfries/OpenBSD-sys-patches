@@ -1,5 +1,4 @@
-/* $OpenBSD: dec_eb64plus.c,v 1.6 2007/03/21 22:10:57 martin Exp $ */
-/* $NetBSD: dec_eb64plus.c,v 1.25 2001/06/05 04:53:11 thorpej Exp $ */
+/* $NetBSD: dec_eb64plus.c,v 1.36 2007/03/04 15:18:10 yamt Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997 Carnegie-Mellon University.
@@ -31,16 +30,25 @@
  * Additional Copyright (c) 1997 by Matthew Jacob for NASA/Ames Research Center
  */
 
+#include "opt_kgdb.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: dec_eb64plus.c,v 1.36 2007/03/04 15:18:10 yamt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/termios.h>
+#include <sys/conf.h>
 #include <dev/cons.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/rpb.h>
+#include <machine/alpha.h>
 #include <machine/autoconf.h>
 #include <machine/cpuconf.h>
-#include <machine/conf.h>
 
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
@@ -55,9 +63,9 @@
 #include <alpha/pci/apecsreg.h>
 #include <alpha/pci/apecsvar.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-#include <dev/ata/atavar.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include "pckbd.h"
 
@@ -66,9 +74,18 @@
 #endif
 static int comcnrate = CONSPEED;
 
-void dec_eb64plus_init(void);
-static void dec_eb64plus_cons_init(void);
-static void dec_eb64plus_device_register(struct device *, void *);
+void dec_eb64plus_init __P((void));
+static void dec_eb64plus_cons_init __P((void));
+static void dec_eb64plus_device_register __P((struct device *, void *));
+
+#ifdef KGDB
+#include <machine/db_machdep.h>
+
+static const char *kgdb_devlist[] = {
+	"com",
+	NULL,
+};
+#endif /* KGDB */
 
 const struct alpha_variation_table dec_eb64plus_variations[] = {
 	{ 0, "DEC EB64+" },
@@ -92,6 +109,14 @@ dec_eb64plus_init()
 	platform.iobus = "apecs";
 	platform.cons_init = dec_eb64plus_cons_init;
 	platform.device_register = dec_eb64plus_device_register;
+
+	/*
+	 * EB64+ systems can have 512K, 1M, or 2M secondary
+	 * caches.  Default to middle-of-the-road.
+	 *
+	 * XXX Need to dynamically size it!
+	 */
+	uvmexp.ncolors = atop(1 * 1024 * 1024);
 }
 
 static void
@@ -104,7 +129,7 @@ dec_eb64plus_cons_init()
 	acp = &apecs_configuration;
 	apecs_init(acp, 0);
 
-	ctb = (struct ctb *)(((caddr_t)hwrpb) + hwrpb->rpb_ctb_off);
+	ctb = (struct ctb *)(((char *)hwrpb) + hwrpb->rpb_ctb_off);
 
 	switch (ctb->ctb_term_type) {
 	case CTB_PRINTERPORT: 
@@ -119,7 +144,7 @@ dec_eb64plus_cons_init()
 			DELAY(160000000 / comcnrate);
 
 			if(comcnattach(&acp->ac_iot, 0x3f8, comcnrate,
-			    COM_FREQ,
+			    COM_FREQ, COM_TYPE_NORMAL,
 			    (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8))
 				panic("can't init serial console");
 
@@ -152,6 +177,10 @@ dec_eb64plus_cons_init()
 		panic("consinit: unknown console type %ld",
 		    ctb->ctb_term_type);
 	}
+#ifdef KGDB
+	/* Attach the KGDB device. */
+	alpha_kgdb_init(kgdb_devlist, &acp->ac_iot);
+#endif /* KGDB */
 }
 
 static void
@@ -162,17 +191,15 @@ dec_eb64plus_device_register(dev, aux)
 	static int found, initted, diskboot, netboot;
 	static struct device *pcidev, *ctrlrdev;
 	struct bootdev_data *b = bootdev_data;
-	struct device *parent = dev->dv_parent;
-	struct cfdata *cf = dev->dv_cfdata;
-	struct cfdriver *cd = cf->cf_driver;
+	struct device *parent = device_parent(dev);
 
 	if (found)
 		return;
 
 	if (!initted) {
-		diskboot = (strncasecmp(b->protocol, "SCSI", 4) == 0);
-		netboot = (strncasecmp(b->protocol, "BOOTP", 5) == 0) ||
-		    (strncasecmp(b->protocol, "MOP", 3) == 0);
+		diskboot = (strcasecmp(b->protocol, "SCSI") == 0);
+		netboot = (strcasecmp(b->protocol, "BOOTP") == 0) ||
+		    (strcasecmp(b->protocol, "MOP") == 0);
 #if 0
 		printf("diskboot = %d, netboot = %d\n", diskboot, netboot);
 #endif
@@ -180,7 +207,7 @@ dec_eb64plus_device_register(dev, aux)
 	}
 
 	if (pcidev == NULL) {
-		if (strcmp(cd->cd_name, "pci"))
+		if (!device_is_a(dev, "pci"))
 			return;
 		else {
 			struct pcibus_attach_args *pba = aux;
@@ -227,17 +254,20 @@ dec_eb64plus_device_register(dev, aux)
 	if (!diskboot)
 		return;
 
-	if (!strcmp(cd->cd_name, "sd") || !strcmp(cd->cd_name, "st") ||
-	    !strcmp(cd->cd_name, "cd")) {
-		struct scsi_attach_args *sa = aux;
-		struct scsi_link *periph = sa->sa_sc_link;
+	if (device_is_a(dev, "sd") ||
+	    device_is_a(dev, "st") ||
+	    device_is_a(dev, "cd")) {
+		struct scsipibus_attach_args *sa = aux;
+		struct scsipi_periph *periph = sa->sa_periph;
 		int unit;
 
-		if (parent->dv_parent != ctrlrdev)
+		if (device_parent(parent) != ctrlrdev)
 			return;
 
-		unit = periph->target * 100 + periph->lun;
+		unit = periph->periph_target * 100 + periph->periph_lun;
 		if (b->unit != unit)
+			return;
+		if (b->channel != periph->periph_channel->chan_channel)
 			return;
 
 		/* we've found it! */

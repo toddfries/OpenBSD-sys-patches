@@ -1,5 +1,4 @@
-/*	$OpenBSD: tc.c,v 1.17 2007/06/25 14:13:40 tom Exp $	*/
-/*	$NetBSD: tc.c,v 1.29 2001/11/13 06:26:10 lukem Exp $	*/
+/*	$NetBSD: tc.c,v 1.48 2008/06/11 16:46:11 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -28,58 +27,56 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tc.c,v 1.48 2008/06/11 16:46:11 tsutsui Exp $");
+
+#include "opt_tcverbose.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
+#include <machine/cpu.h>	/* for badaddr */
+
 #include <dev/tc/tcreg.h>
 #include <dev/tc/tcvar.h>
+#include <dev/tc/tcdevs.h>
 
+#include "locators.h"
 
 /* Definition of the driver for autoconfig. */
-int	tcmatch(struct device *, void *, void *);
-void	tcattach(struct device *, struct device *, void *);
+static int	tcmatch(struct device *, struct cfdata *, void *);
 
-struct cfattach tc_ca = {
-	sizeof(struct tc_softc), tcmatch, tcattach
-};
+CFATTACH_DECL(tc, sizeof(struct tc_softc),
+    tcmatch, tcattach, NULL, NULL);
 
-struct cfdriver tc_cd = {
-	NULL, "tc", DV_DULL
-};
+extern struct cfdriver tc_cd;
 
-int	tcprint(void *, const char *);
-int	tcsubmatch(struct device *, void *, void *);
-int	tc_checkslot(tc_addr_t, char *);
-void	tc_devinfo(const char *, char *, size_t);
+static int	tcprint(void *, const char *);
+static void	tc_devinfo(const char *, char *, size_t);
 
-int
-tcmatch(parent, vcf, aux)
-	struct device *parent;
-	void *vcf, *aux;
+static int
+tcmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct tcbus_attach_args *tba = aux;
-	struct cfdata *cf = vcf;
 
-	if (strcmp(tba->tba_busname, cf->cf_driver->cd_name))
+	if (strcmp(tba->tba_busname, cf->cf_name))
 		return (0);
 
 	return (1);
 }
 
 void
-tcattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+tcattach(struct device *parent, struct device *self, void *aux)
 {
-	struct tc_softc *sc = (struct tc_softc *)self;
+	struct tc_softc *sc = device_private(self);
 	struct tcbus_attach_args *tba = aux;
 	struct tc_attach_args ta;
 	const struct tc_builtin *builtin;
 	struct tc_slotdesc *slot;
 	tc_addr_t tcaddr;
 	int i;
+	int locs[TCCF_NLOCS];
 
 	printf(": %s MHz clock\n",
 	    tba->tba_speed == TC_SPEED_25_MHZ ? "25" : "12.5");
@@ -90,6 +87,7 @@ tcattach(parent, self, aux)
 	sc->sc_speed = tba->tba_speed;
 	sc->sc_nslots = tba->tba_nslots;
 	sc->sc_slots = tba->tba_slots;
+	sc->sc_intr_evcnt = tba->tba_intr_evcnt;
 	sc->sc_intr_establish = tba->tba_intr_establish;
 	sc->sc_intr_disestablish = tba->tba_intr_disestablish;
 	sc->sc_get_dma_tag = tba->tba_get_dma_tag;
@@ -131,10 +129,13 @@ tcattach(parent, self, aux)
 		 */
 		sc->sc_slots[builtin->tcb_slot].tcs_used = 1;
 
+		locs[TCCF_SLOT] = builtin->tcb_slot;
+		locs[TCCF_OFFSET] = builtin->tcb_offset;
 		/*
 		 * Attach the device.
 		 */
-		config_found_sm(self, &ta, tcprint, tcsubmatch);
+		config_found_sm_loc(self, "tc", locs, &ta,
+				    tcprint, config_stdsubmatch);
 	}
 
 	/*
@@ -171,64 +172,45 @@ tcattach(parent, self, aux)
 		 */
 		slot->tcs_used = 1;
 
+		locs[TCCF_SLOT] = i;
+		locs[TCCF_OFFSET] = 0;
 		/*
 		 * Attach the device.
 		 */
-		config_found_sm(self, &ta, tcprint, tcsubmatch);
+		config_found_sm_loc(self, "tc", locs, &ta,
+				    tcprint, config_stdsubmatch);
 	}
 }
 
-int
-tcprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+static int
+tcprint(void *aux, const char *pnp)
 {
 	struct tc_attach_args *ta = aux;
 	char devinfo[256];
 
 	if (pnp) {
-		tc_devinfo(ta->ta_modname, devinfo, sizeof devinfo);
-		printf("%s at %s", devinfo, pnp);
+		tc_devinfo(ta->ta_modname, devinfo, sizeof(devinfo));
+		aprint_normal("%s at %s", devinfo, pnp);
 	}
-	printf(" slot %d offset 0x%lx", ta->ta_slot,
-	    (long)ta->ta_offset);
+	aprint_normal(" slot %d offset 0x%x", ta->ta_slot, ta->ta_offset);
 	return (UNCONF);
 }
 
-int
-tcsubmatch(parent, vcf, aux)
-	struct device *parent;
-	void *vcf, *aux;
-{
-	struct tc_attach_args *d = aux;
-	struct cfdata *cf = vcf;
 
-	if ((cf->tccf_slot != TCCF_SLOT_UNKNOWN) &&
-	    (cf->tccf_slot != d->ta_slot))
-		return 0;
-	if ((cf->tccf_offset != TCCF_SLOT_UNKNOWN) &&
-	    (cf->tccf_offset != d->ta_offset))
-		return 0;
-
-	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
-}
-
-
-#define	NTC_ROMOFFS	2
-static tc_offset_t tc_slot_romoffs[NTC_ROMOFFS] = {
+static const tc_offset_t tc_slot_romoffs[] = {
 	TC_SLOT_ROM,
+#ifndef __vax__
 	TC_SLOT_PROTOROM,
+#endif
 };
 
 int
-tc_checkslot(slotbase, namep)
-	tc_addr_t slotbase;
-	char *namep;
+tc_checkslot(tc_addr_t slotbase, char *namep)
 {
 	struct tc_rommap *romp;
 	int i, j;
 
-	for (i = 0; i < NTC_ROMOFFS; i++) {
+	for (i = 0; i < __arraycount(tc_slot_romoffs); i++) {
 		romp = (struct tc_rommap *)
 		    (slotbase + tc_slot_romoffs[i]);
 
@@ -260,58 +242,74 @@ tc_checkslot(slotbase, namep)
 	return (0);
 }
 
-void
-tc_intr_establish(dev, cookie, level, handler, arg)
-	struct device *dev;
-	void *cookie, *arg;
-	int level;
-	int (*handler)(void *);
+const struct evcnt *
+tc_intr_evcnt(struct device *dev, void *cookie)
 {
-	struct tc_softc *sc = tc_cd.cd_devs[0];
+	struct tc_softc *sc = device_lookup_private(&tc_cd, 0);
+
+	return ((*sc->sc_intr_evcnt)(dev, cookie));
+}
+
+void
+tc_intr_establish(struct device *dev, void *cookie, int level,
+    int (*handler)(void *), void *arg)
+{
+	struct tc_softc *sc = device_lookup_private(&tc_cd, 0);
 
 	(*sc->sc_intr_establish)(dev, cookie, level, handler, arg);
 }
 
 void
-tc_intr_disestablish(dev, cookie)
-	struct device *dev;
-	void *cookie;
+tc_intr_disestablish(struct device *dev, void *cookie)
 {
-	struct tc_softc *sc = tc_cd.cd_devs[0];
+	struct tc_softc *sc = device_lookup_private(&tc_cd, 0);
 
 	(*sc->sc_intr_disestablish)(dev, cookie);
 }
 
 #ifdef TCVERBOSE
 /*
- * Descriptions of known devices.
+ * Descriptions of of known devices.
  */
 struct tc_knowndev {
-	const char *id, *description;
+	const char *id, *driver, *description;
 };
 
 #include <dev/tc/tcdevs_data.h>
 #endif /* TCVERBOSE */
 
-void
-tc_devinfo(const char *id, char *cp, size_t cp_len)
+static void
+tc_devinfo(const char *id, char *cp, size_t l)
 {
+	const char *driver, *description;
 #ifdef TCVERBOSE
-	struct tc_knowndev *tdp;
-	const char *description;
+	const struct tc_knowndev *tdp;
+	int match;
+	const char *unmatched = "unknown ";
+#else
+	const char *unmatched = "";
+#endif
 
+	driver = NULL;
+	description = id;
+
+#ifdef TCVERBOSE
 	/* find the device in the table, if possible. */
-	description = NULL;
-	for (tdp = tc_knowndevs; tdp->id != NULL; tdp++) {
+	tdp = tc_knowndevs;
+	while (tdp->id != NULL) {
 		/* check this entry for a match */
-		if (strcmp(tdp->id, id) == 0) {
+		match = !strcmp(tdp->id, id);
+		if (match) {
+			driver = tdp->driver;
 			description = tdp->description;
 			break;
 		}
+		tdp++;
 	}
-	if (description != NULL)
-		snprintf(cp, cp_len, "\"%s\" (%s)", id, description);
-	else
 #endif
-		snprintf(cp, cp_len, "\"%s\"", id);
+
+	if (driver == NULL)
+		snprintf(cp, l, "%sdevice %s", unmatched, id);
+	else
+		snprintf(cp, l, "%s (%s)", driver, description);
 }

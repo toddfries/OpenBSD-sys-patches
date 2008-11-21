@@ -1,5 +1,4 @@
-/*	$OpenBSD: ioctl_compat.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: ioctl_compat.h,v 1.10 1995/03/31 03:10:15 christos Exp $	*/
+/*	$NetBSD: ioctl_compat.h,v 1.15 2005/12/03 17:10:46 christos Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -93,7 +92,7 @@ struct sgttyb {
 #define		TANDEM		0x00000001	/* send stopc on out q full */
 #define		CBREAK		0x00000002	/* half-cooked mode */
 #define		LCASE		0x00000004	/* simulate lower case */
-#define		ECHO		0x00000008	/* echo input */
+#define		ECHO		0x00000008	/* enable echoing */
 #define		CRMOD		0x00000010	/* map \r to \r\n on output */
 #define		RAW		0x00000020	/* no i/o processing */
 #define		ODDP		0x00000040	/* get/send odd parity */
@@ -125,18 +124,18 @@ struct sgttyb {
 #define		PRTERA		0x00020000	/* \ ... / erase */
 #define		CRTERA		0x00040000	/* " \b " to wipe out char */
 #define		TILDE		0x00080000	/* hazeltine tilde kludge */
-#define		MDMBUF		0x00100000	/*start/stop output on carrier*/
+#define		MDMBUF		0x00100000	/* DTR/DCD hardware flow control */
 #define		LITOUT		0x00200000	/* literal output */
-#define		TOSTOP		0x00400000	/*SIGSTOP on background output*/
-#define		FLUSHO		0x00800000	/* flush output to terminal */
+#define		TOSTOP		0x00400000	/* stop background jobs on output */
+#define		FLUSHO		0x00800000	/* output being flushed (state) */
 #define		NOHANG		0x01000000	/* (no-op) was no SIGHUP on carrier drop */
 #define		L001000		0x02000000
 #define		CRTKIL		0x04000000	/* kill line with " \b " */
 #define		PASS8		0x08000000
 #define		CTLECH		0x10000000	/* echo control chars as ^X */
-#define		PENDIN		0x20000000	/* tp->t_rawq needs reread */
+#define		PENDIN		0x20000000	/* re-echo input buffer at next read */
 #define		DECCTQ		0x40000000	/* only ^Q starts after ^S */
-#define		NOFLSH		0x80000000	/* no output flush on signal */
+#define		NOFLSH		0x80000000	/* don't flush output on signal */
 #define	TIOCLBIS	_IOW('t', 127, int)	/* bis local mode bits */
 #define	TIOCLBIC	_IOW('t', 126, int)	/* bic local mode bits */
 #define	TIOCLSET	_IOW('t', 125, int)	/* set entire local mode word */
@@ -162,24 +161,5 @@ struct sgttyb {
 #define	OTTYDISC	0
 #define	NETLDISC	1
 #define	NTTYDISC	2
-
-#define TIOCGSID	_IOR('t', 99, int)	/* For svr4 -- get session id */
-
-/*
- * Passthrough ioctl commands. These are passed through to devices
- * as they are, it is expected that the device (an LKM, for example),
- * will know how to deal with them. One for each emulation, so that
- * no namespace clashes will occur between them, for devices that
- * may be dealing with specific ioctls for multiple emulations.
- *
- * XXX: Currently only implemented for Linux.
- */
-
-struct ioctl_pt {
-	unsigned long com;
-	void *data;
-};
-
-#define PTIOCLINUX  _IOW('Z', 3, struct ioctl_pt)
 
 #endif /* !_SYS_IOCTL_COMPAT_H_ */

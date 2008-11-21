@@ -1,4 +1,4 @@
-/*	$NetBSD: ixp425_npe.c,v 1.1 2006/12/10 10:01:49 scw Exp $	*/
+/*	$NetBSD: ixp425_npe.c,v 1.3 2008/01/08 02:07:53 matt Exp $	*/
 
 /*-
  * Copyright (c) 2006 Sam Leffler, Errno Consulting
@@ -62,7 +62,7 @@
 #if 0
 __FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_npe.c,v 1.1 2006/11/19 23:55:23 sam Exp $");
 #endif
-__KERNEL_RCSID(0, "$NetBSD: ixp425_npe.c,v 1.1 2006/12/10 10:01:49 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ixp425_npe.c,v 1.3 2008/01/08 02:07:53 matt Exp $");
 
 /*
  * Intel XScale Network Processing Engine (NPE) support.
@@ -86,6 +86,7 @@ __KERNEL_RCSID(0, "$NetBSD: ixp425_npe.c,v 1.1 2006/12/10 10:01:49 scw Exp $");
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/simplelock.h>
 #include <sys/time.h>
 #include <sys/proc.h>
 
@@ -803,7 +804,7 @@ npe_cpu_reset(struct ixpnpe_softc *sc)
 	 regAddr < IX_NPEDL_TOTAL_NUM_PHYS_REG && error == 0;
 	 regAddr++) {
 	/* for each physical register in the NPE reg file, write 0 : */
-	error = npe_physical_reg_write(sc, regAddr, 0, TRUE);
+	error = npe_physical_reg_write(sc, regAddr, 0, true);
 	if (error != 0) {
 	    DPRINTF(sc->sc_dev, "%s: cannot write phy reg, error %u\n",
 		__func__, error);
@@ -821,7 +822,7 @@ npe_cpu_reset(struct ixpnpe_softc *sc)
 	    /* NOTE that there is no STEVT register for Context 0 */
 	    if (!(i == 0 && ctxtReg == IX_NPEDL_CTXT_REG_STEVT)) { 
 		regVal = ixNpeDlCtxtRegResetValues[ctxtReg];
-		error = npe_ctx_reg_write(sc, i, ctxtReg, regVal, TRUE);
+		error = npe_ctx_reg_write(sc, i, ctxtReg, regVal, true);
 		if (error != 0) {
 		    DPRINTF(sc->sc_dev, "%s: cannot write ctx reg, error %u\n",
 			__func__, error);

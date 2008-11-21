@@ -1,4 +1,4 @@
-#	$NetBSD: files.compat,v 1.14 2007/01/05 17:53:53 jmcneill Exp $
+#	$NetBSD: files.compat,v 1.18 2008/01/23 19:46:45 bouyer Exp $
 #	NetBSD: files.x86,v 1.10 2003/10/08 17:30:00 bouyer Exp 
 
 # options for MP configuration through the MP spec
@@ -8,12 +8,13 @@
 # MTRR support
 defflag                 MTRR
 
-defflag opt_xen.h		XEN XEN3
+defflag opt_xen.h		XEN XEN3 PAE
 
 
 # XXX define fake options to make config create the .h files
 defflag	lapic.h			XXXLAPIC
 defflag	apm.h			XXXAPM
+defflag	apmbios.h		XXXAPMBIOS
 defflag	eisa.h			XXXEISA
 defflag	isadma.h		XXXISADMA
 defflag	mca.h			XXXMCA
@@ -29,9 +30,6 @@ defflag	opt_pcifixup.h		XXXOPT_PCIFIXUP
 # VM86 emulation
 defflag	opt_vm86.h			XXXVM86
 defflag	opt_kvm86.h			XXXKVM86
-
-# Floating point emulation
-defflag opt_math_emulate.h		XXXMATH_EMULATE
 
 # User-settable LDT (used by WINE)
 defflag	opt_user_ldt.h			XXXUSER_LDT
@@ -53,3 +51,24 @@ defflag	opt_kstack_dr0.h		XXXKSTACK_CHECK_DR0
 
 # Microsoft Xbox support
 defflag	opt_xbox.h			XXXXBOX
+
+#Pentium 4+ Thermal Monitor ODCM (aka On Demand Clock Modulation)
+defflag opt_intel_odcm.h	XXXINTEL_ONDEMAND_CLOCKMOD
+
+# Intel On Die Temperature sensor
+defflag opt_intel_coretemp.h		XXXINTEL_CORETEMP
+
+# AMD Powernow/Cool`n'Quiet Technology
+defflag opt_powernow_k8.h	XXPOWERNOW_K8
+
+# Intel Enhanced Speedstep
+defflag	opt_enhanced_speedstep.h XXXENHANCED_SPEEDSTEP
+defflag opt_est.h		XXXEST_FREQ_USERWRITE
+
+defflag opt_powernow_k7.h XXXPOWERNOW_K7
+
+# Multiboot support
+defflag 	opt_multiboot.h		XXXMULTIBOOT
+
+# The PHYSMEM_MAX_{SIZE,ADDR} optionms
+defparam opt_physmem.h	XXXPHYSMEM_MAX_ADDR XXXPHYSMEM_MAX_SIZE

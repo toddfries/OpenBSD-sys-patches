@@ -1,4 +1,4 @@
-/*	$NetBSD: ntfs_vnops.c,v 1.31 2006/12/09 16:11:51 chs Exp $	*/
+/*	$NetBSD: ntfs_vnops.c,v 1.41 2008/04/30 14:07:14 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ntfs_vnops.c,v 1.31 2006/12/09 16:11:51 chs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ntfs_vnops.c,v 1.41 2008/04/30 14:07:14 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,15 +50,6 @@ __KERNEL_RCSID(0, "$NetBSD: ntfs_vnops.c,v 1.31 2006/12/09 16:11:51 chs Exp $");
 #include <sys/buf.h>
 #include <sys/dirent.h>
 #include <sys/kauth.h>
-
-#if !defined(__NetBSD__)
-#include <vm/vm.h>
-#endif
-
-#if defined(__FreeBSD__)
-#include <vm/vnode_pager.h>
-#endif
-
 #include <sys/sysctl.h>
 
 
@@ -84,32 +75,10 @@ static int	ntfs_close(void *);
 static int	ntfs_readdir(void *);
 static int	ntfs_lookup(void *);
 static int	ntfs_bmap(void *);
-#if defined(__FreeBSD__)
-static int	ntfs_getpages(struct vop_getpages_args *);
-static int	ntfs_putpages(struct vop_putpages_args *);
-#endif
 static int	ntfs_fsync(void *);
 static int	ntfs_pathconf(void *);
 
 extern int prtactive;
-
-#if defined(__FreeBSD__)
-int
-ntfs_getpages(ap)
-	struct vop_getpages_args *ap;
-{
-	return vnode_pager_generic_getpages(ap->a_vp, ap->a_m, ap->a_count,
-		ap->a_reqpage);
-}
-
-int
-ntfs_putpages(ap)
-	struct vop_putpages_args *ap;
-{
-	return vnode_pager_generic_putpages(ap->a_vp, ap->a_m, ap->a_count,
-		ap->a_sync, ap->a_rtvals);
-}
-#endif
 
 /*
  * This is a noop, simply returning what one has been given.
@@ -132,10 +101,6 @@ ntfs_bmap(void *v)
 		*ap->a_bnp = ap->a_bn;
 	if (ap->a_runp != NULL)
 		*ap->a_runp = 0;
-#if !defined(__NetBSD__)
-	if (ap->a_runb != NULL)
-		*ap->a_runb = 0;
-#endif
 	return (0);
 }
 
@@ -203,7 +168,6 @@ ntfs_getattr(void *v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct fnode *fp = VTOF(vp);
@@ -213,11 +177,7 @@ ntfs_getattr(void *v)
 	dprintf(("ntfs_getattr: %llu, flags: %d\n",
 	    (unsigned long long)ip->i_number, ip->i_flag));
 
-#if defined(__FreeBSD__)
-	vap->va_fsid = dev2udev(ip->i_dev);
-#else /* NetBSD */
 	vap->va_fsid = ip->i_dev;
-#endif
 	vap->va_fileid = ip->i_number;
 	vap->va_mode = ip->i_mp->ntm_mode;
 	vap->va_nlink = ip->i_nlink;
@@ -255,9 +215,6 @@ ntfs_inactive(void *v)
 	dprintf(("ntfs_inactive: vnode: %p, ntnode: %llu\n", vp,
 	    (unsigned long long)ip->i_number));
 
-	if (prtactive && vp->v_usecount != 0)
-		vprint("ntfs_inactive: pushing active", vp);
-
 	VOP_UNLOCK(vp, 0);
 
 	/* XXX since we don't support any filesystem changes
@@ -283,7 +240,7 @@ ntfs_reclaim(void *v)
 	dprintf(("ntfs_reclaim: vnode: %p, ntnode: %llu\n", vp,
 	    (unsigned long long)ip->i_number));
 
-	if (prtactive && vp->v_usecount != 0)
+	if (prtactive && vp->v_usecount > 1)
 		vprint("ntfs_reclaim: pushing active", vp);
 
 	if ((error = ntfs_ntget(ip)) != 0)
@@ -296,6 +253,7 @@ ntfs_reclaim(void *v)
 		ip->i_devvp = NULL;
 	}
 
+	genfs_node_destroy(vp);
 	ntfs_frele(fp);
 	ntfs_ntput(ip);
 	vp->v_data = NULL;
@@ -315,7 +273,6 @@ ntfs_print(void *v)
 	    (unsigned long long)ip->i_number, ip->i_flag, ip->i_usecount,
 	    ip->i_nlink);
 	printf("       ");
-	lockmgr_printinfo(ap->a_vp->v_vnlock);
 	printf("\n");
 	return (0);
 }
@@ -338,15 +295,9 @@ ntfs_strategy(void *v)
 	struct ntfsmount *ntmp = ip->i_mp;
 	int error;
 
-#ifdef __FreeBSD__
-	dprintf(("ntfs_strategy: offset: %d, blkno: %d, lblkno: %d\n",
-		(u_int32_t)bp->b_offset,(u_int32_t)bp->b_blkno,
-		(u_int32_t)bp->b_lblkno));
-#else
 	dprintf(("ntfs_strategy: blkno: %d, lblkno: %d\n",
 		(u_int32_t)bp->b_blkno,
 		(u_int32_t)bp->b_lblkno));
-#endif
 
 	dprintf(("strategy: bcount: %u flags: 0x%x\n",
 		(u_int32_t)bp->b_bcount,bp->b_flags));
@@ -370,10 +321,10 @@ ntfs_strategy(void *v)
 			if (error) {
 				printf("ntfs_strategy: ntfs_readattr failed\n");
 				bp->b_error = error;
-				bp->b_flags |= B_ERROR;
 			}
 
-			bzero(bp->b_data + toread, bp->b_bcount - toread);
+			memset((char *)bp->b_data + toread, 0,
+			    bp->b_bcount - toread);
 		}
 	} else {
 		size_t tmp;
@@ -382,7 +333,6 @@ ntfs_strategy(void *v)
 		if (ntfs_cntob(bp->b_blkno) + bp->b_bcount >= fp->f_size) {
 			printf("ntfs_strategy: CAN'T EXTEND FILE\n");
 			bp->b_error = error = EFBIG;
-			bp->b_flags |= B_ERROR;
 		} else {
 			towrite = MIN(bp->b_bcount,
 				fp->f_size - ntfs_cntob(bp->b_blkno));
@@ -396,7 +346,6 @@ ntfs_strategy(void *v)
 			if (error) {
 				printf("ntfs_strategy: ntfs_writeattr fail\n");
 				bp->b_error = error;
-				bp->b_flags |= B_ERROR;
 			}
 		}
 	}
@@ -453,7 +402,6 @@ ntfs_access(void *v)
 		struct vnode *a_vp;
 		int  a_mode;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct ntnode *ip = VTONT(vp);
@@ -536,7 +484,6 @@ ntfs_open(void *v)
 		struct vnode *a_vp;
 		int  a_mode;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap __unused = v;
 #ifdef NTFS_DEBUG
 	struct vnode *vp = ap->a_vp;
@@ -565,7 +512,6 @@ ntfs_close(void *v)
 		struct vnode *a_vp;
 		int  a_fflag;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap __unused = v;
 #ifdef NTFS_DEBUG
 	struct vnode *vp = ap->a_vp;
@@ -693,30 +639,17 @@ ntfs_readdir(void *v)
 	if (!error && ap->a_ncookies != NULL) {
 		struct dirent* dpStart;
 		struct dirent* dp;
-#if defined(__FreeBSD__)
-		u_long *cookies;
-		u_long *cookiep;
-#else /* defined(__NetBSD__) */
 		off_t *cookies;
 		off_t *cookiep;
-#endif
 
 		dprintf(("ntfs_readdir: %d cookies\n",ncookies));
-		if (!VMSPACE_IS_KERNEL_P(uio->uio_vmspace) ||
-		    uio->uio_iovcnt != 1)
-			panic("ntfs_readdir: unexpected uio from NFS server");
 		dpStart = (struct dirent *)
-		     ((caddr_t)uio->uio_iov->iov_base -
+		     ((char *)uio->uio_iov->iov_base -
 			 (uio->uio_offset - off));
-#if defined(__FreeBSD__)
-		MALLOC(cookies, u_long *, ncookies * sizeof(u_long),
-		       M_TEMP, M_WAITOK);
-#else /* defined(__NetBSD__) */
 		cookies = malloc(ncookies * sizeof(off_t), M_TEMP, M_WAITOK);
-#endif
 		for (dp = dpStart, cookiep = cookies, i=0;
 		     i < ncookies;
-		     dp = (struct dirent *)((caddr_t) dp + dp->d_reclen), i++) {
+		     dp = (struct dirent *)((char *) dp + dp->d_reclen), i++) {
 			off += dp->d_reclen;
 			*cookiep++ = (u_int) off;
 		}
@@ -747,11 +680,11 @@ ntfs_lookup(void *v)
 	kauth_cred_t cred = cnp->cn_cred;
 	int error;
 
-	dprintf(("ntfs_lookup: \"%.*s\" (%ld bytes) in %llu\n",
-	    (int)cnp->cn_namelen, cnp->cn_nameptr, cnp->cn_namelen,
+	dprintf(("ntfs_lookup: \"%.*s\" (%lld bytes) in %llu\n",
+	    (int)cnp->cn_namelen, cnp->cn_nameptr, (long long)cnp->cn_namelen,
 	    (unsigned long long)dip->i_number));
 
-	error = VOP_ACCESS(dvp, VEXEC, cred, cnp->cn_lwp);
+	error = VOP_ACCESS(dvp, VEXEC, cred);
 	if(error)
 		return (error);
 
@@ -760,7 +693,6 @@ ntfs_lookup(void *v)
 	    (cnp->cn_nameiop == DELETE || cnp->cn_nameiop == RENAME))
 		return (EROFS);
 
-#ifdef __NetBSD__
 	/*
 	 * We now have a segment name to search for, and a directory
 	 * to search.
@@ -771,7 +703,6 @@ ntfs_lookup(void *v)
 	 */
 	if ((error = cache_lookup(ap->a_dvp, ap->a_vpp, cnp)) >= 0)
 		return (error);
-#endif
 
 	if(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.') {
 		dprintf(("ntfs_lookup: faking . directory in %llu\n",
@@ -834,7 +765,6 @@ ntfs_fsync(void *v)
 		int a_flags;
 		off_t offlo;
 		off_t offhi;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	int wait;
@@ -893,47 +823,6 @@ ntfs_pathconf(void *v)
  * Global vfs data structures
  */
 vop_t **ntfs_vnodeop_p;
-#if defined(__FreeBSD__)
-static
-struct vnodeopv_entry_desc ntfs_vnodeop_entries[] = {
-	{ &vop_default_desc, (vop_t *)ntfs_bypass },
-
-	{ &vop_getattr_desc, (vop_t *)ntfs_getattr },
-	{ &vop_inactive_desc, (vop_t *)ntfs_inactive },
-	{ &vop_reclaim_desc, (vop_t *)ntfs_reclaim },
-	{ &vop_print_desc, (vop_t *)ntfs_print },
-	{ &vop_pathconf_desc, ntfs_pathconf },
-
-	{ &vop_islocked_desc, (vop_t *)vop_stdislocked },
-	{ &vop_unlock_desc, (vop_t *)vop_stdunlock },
-	{ &vop_lock_desc, (vop_t *)vop_stdlock },
-	{ &vop_cachedlookup_desc, (vop_t *)ntfs_lookup },
-	{ &vop_lookup_desc, (vop_t *)vfs_cache_lookup },
-
-	{ &vop_access_desc, (vop_t *)ntfs_access },
-	{ &vop_close_desc, (vop_t *)ntfs_close },
-	{ &vop_open_desc, (vop_t *)ntfs_open },
-	{ &vop_readdir_desc, (vop_t *)ntfs_readdir },
-	{ &vop_fsync_desc, (vop_t *)ntfs_fsync },
-
-	{ &vop_bmap_desc, (vop_t *)ntfs_bmap },
-	{ &vop_getpages_desc, (vop_t *) ntfs_getpages },
-	{ &vop_putpages_desc, (vop_t *) ntfs_putpages },
-	{ &vop_strategy_desc, (vop_t *)ntfs_strategy },
-	{ &vop_bwrite_desc, (vop_t *)vop_stdbwrite },
-	{ &vop_read_desc, (vop_t *)ntfs_read },
-	{ &vop_write_desc, (vop_t *)ntfs_write },
-
-	{ NULL, NULL }
-};
-
-static
-struct vnodeopv_desc ntfs_vnodeop_opv_desc =
-	{ &ntfs_vnodeop_p, ntfs_vnodeop_entries };
-
-VNODEOP_SET(ntfs_vnodeop_opv_desc);
-
-#else /* !FreeBSD */
 
 const struct vnodeopv_entry_desc ntfs_vnodeop_entries[] = {
 	{ &vop_default_desc, (vop_t *) ntfs_bypass },
@@ -947,7 +836,6 @@ const struct vnodeopv_entry_desc ntfs_vnodeop_entries[] = {
 	{ &vop_setattr_desc, genfs_eopnotsupp },	/* setattr */
 	{ &vop_read_desc, (vop_t *) ntfs_read },	/* read */
 	{ &vop_write_desc, (vop_t *) ntfs_write },	/* write */
-	{ &vop_lease_desc, genfs_lease_check },		/* lease */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, genfs_enoioctl },		/* ioctl */
 	{ &vop_poll_desc, genfs_poll },			/* poll */
@@ -982,5 +870,3 @@ const struct vnodeopv_entry_desc ntfs_vnodeop_entries[] = {
 };
 const struct vnodeopv_desc ntfs_vnodeop_opv_desc =
 	{ &ntfs_vnodeop_p, ntfs_vnodeop_entries };
-
-#endif

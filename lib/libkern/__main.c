@@ -1,4 +1,3 @@
-/*	$OpenBSD: __main.c,v 1.3 2002/03/14 01:27:07 millert Exp $	*/
 /*	$NetBSD: __main.c,v 1.4 1996/03/14 18:52:03 christos Exp $	*/
 
 /*
@@ -33,7 +32,7 @@
 
 #include <sys/types.h>
 
-void __main(void);
+void __main __P((void));
 
 void
 __main()

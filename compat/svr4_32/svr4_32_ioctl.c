@@ -1,7 +1,7 @@
-/*	$NetBSD: svr4_32_ioctl.c,v 1.11 2005/12/11 12:20:26 christos Exp $	 */
+/*	$NetBSD: svr4_32_ioctl.c,v 1.21 2008/04/28 20:23:46 martin Exp $	 */
 
 /*-
- * Copyright (c) 1994 The NetBSD Foundation, Inc.
+ * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_32_ioctl.c,v 1.11 2005/12/11 12:20:26 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_32_ioctl.c,v 1.21 2008/04/28 20:23:46 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -48,12 +41,10 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_ioctl.c,v 1.11 2005/12/11 12:20:26 christos 
 #include <sys/termios.h>
 #include <sys/tty.h>
 #include <sys/socket.h>
-#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <net/if.h>
 #include <sys/malloc.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/sys/socket.h>
@@ -73,7 +64,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_ioctl.c,v 1.11 2005/12/11 12:20:26 christos 
 
 
 #ifdef DEBUG_SVR4
-static void svr4_32_decode_cmd __P((netbsd32_u_long, char *, char *, int *, int *));
+static void svr4_32_decode_cmd(netbsd32_u_long, char *, char *, int *, int *);
 /*
  * Decode an ioctl command symbolically
  */
@@ -101,18 +92,12 @@ svr4_32_decode_cmd(cmd, dir, c, num, argsiz)
 #endif
 
 int
-svr4_32_sys_ioctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_ioctl(struct lwp *l, const struct svr4_32_sys_ioctl_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_ioctl_args *uap = v;
-	struct proc 	*p = l->l_proc;
-	struct file	*fp;
-	struct filedesc	*fdp;
+	file_t		*fp;
 	u_long		 cmd;
-	int (*fun) __P((struct file *, struct lwp *, register_t *,
-			int, u_long, caddr_t));
+	int error;
+	int (*fun)(file_t *, struct lwp *, register_t *, int, u_long, void *);
 #ifdef DEBUG_SVR4
 	char		 dir[4];
 	char		 c;
@@ -124,14 +109,15 @@ svr4_32_sys_ioctl(l, v, retval)
 	uprintf("svr4_32_ioctl(%d, _IO%s(%c, %d, %d), %#x);\n", SCARG(uap, fd),
 	    dir, c, num, argsiz, SCARG(uap, data));
 #endif
-	fdp = p->p_fd;
 	cmd = SCARG(uap, com);
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
 		return EBADF;
 
-	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
+	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
+		fd_putfile(SCARG(uap, fd));
 		return EBADF;
+	}
 
 	switch (cmd & 0xff00) {
 	case SVR4_tIOC:
@@ -156,12 +142,15 @@ svr4_32_sys_ioctl(l, v, retval)
 
 	case SVR4_XIOC:
 		/* We do not support those */
+		fd_putfile(SCARG(uap, fd));
 		return EINVAL;
 
 	default:
 		DPRINTF(("Unimplemented ioctl %lx\n", cmd));
+		fd_putfile(SCARG(uap, fd));
 		return 0;	/* XXX: really ENOSYS */
 	}
-	return (*fun)(fp, l, retval, SCARG(uap, fd), cmd,
-		      (caddr_t)(u_long)SCARG(uap, data));
+	error = (*fun)(fp, l, retval, SCARG(uap, fd), cmd, SCARG_P32(uap, data));
+	fd_putfile(SCARG(uap, fd));
+	return error;
 }

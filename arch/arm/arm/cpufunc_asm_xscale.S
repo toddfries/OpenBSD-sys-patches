@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpufunc_asm_xscale.S,v 1.2 2005/01/02 19:57:57 drahn Exp $ */
-/*	$NetBSD: cpufunc_asm_xscale.S,v 1.16 2002/08/17 16:36:32 thorpej Exp $	*/
+/*	$NetBSD: cpufunc_asm_xscale.S,v 1.18 2007/10/17 19:53:29 garbled Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -80,10 +79,8 @@
  */
 #define	DCACHE_SIZE		0x00008000
 
-#ifndef CACHE_CLEAN_BLOCK_INTR
 .Lblock_userspace_access:
 	.word	_C_LABEL(block_userspace_access)
-#endif
 
 /*
  * CPWAIT -- Canonical method to wait for CP15 update.
@@ -238,13 +235,13 @@ _C_LABEL(xscale_cache_clean_addr):
 _C_LABEL(xscale_cache_clean_size):
 	.word	DCACHE_SIZE
 
-#	.global	_C_LABEL(xscale_minidata_clean_addr)
-#_C_LABEL(xscale_minidata_clean_addr):
-#	.word	0x00000000
+	.global	_C_LABEL(xscale_minidata_clean_addr)
+_C_LABEL(xscale_minidata_clean_addr):
+	.word	0x00000000
 
-#	.global	_C_LABEL(xscale_minidata_clean_size)
-#_C_LABEL(xscale_minidata_clean_size):
-#	.word	0x00000800
+	.global	_C_LABEL(xscale_minidata_clean_size)
+_C_LABEL(xscale_minidata_clean_size):
+	.word	0x00000800
 
 	.text
 
@@ -460,9 +457,6 @@ ENTRY(xscale_cache_flushD_rng)
  *
  * These is the CPU-specific parts of the context switcher cpu_switch()
  * These functions actually perform the TTB reload.
- *
- * NOTE: Special calling convention
- *	r1, r4-r13 must be preserved
  */
 ENTRY(xscale_context_switch)
 	/*

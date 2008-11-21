@@ -1,7 +1,7 @@
-/*	$OpenBSD: limits.h,v 1.4 1997/07/24 14:48:50 deraadt Exp $ */
+/*	$NetBSD: limits.h,v 1.2 1998/01/09 22:23:55 perry Exp $	*/
 
-#ifndef _MACHINE_LIMITS_H_
-#define _MACHINE_LIMITS_H_
+#ifndef	_MACHINE_LIMITS_H_
+#define	_MACHINE_LIMITS_H_
 
 /* Just use the common m68k definition */
 #include <m68k/limits.h>

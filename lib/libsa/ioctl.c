@@ -1,5 +1,4 @@
-/*	$OpenBSD: ioctl.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: ioctl.c,v 1.4 1994/10/30 21:48:24 cgd Exp $	*/
+/*	$NetBSD: ioctl.c,v 1.11 2007/12/02 04:59:25 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -66,18 +65,24 @@
 int
 ioctl(int fd, u_long cmd, char *arg)
 {
+#if !defined(LIBSA_NO_FD_CHECKING) || !defined(LIBSA_NO_RAW_ACCESS)
 	struct open_file *f = &files[fd];
+#endif
 
-	if ((unsigned)fd >= SOPEN_MAX || f->f_flags == 0) {
+#if !defined(LIBSA_NO_FD_CHECKING)
+	if ((unsigned int)fd >= SOPEN_MAX || f->f_flags == 0) {
 		errno = EBADF;
-		return (-1);
+		return -1;
 	}
+#endif
+#if !defined(LIBSA_NO_RAW_ACCESS)
 	if (f->f_flags & F_RAW) {
-		errno = (f->f_dev->dv_ioctl)(f, cmd, arg);
+		errno = DEV_IOCTL(f->f_dev)(f, cmd, arg);
 		if (errno)
-			return (-1);
-		return (0);
+			return -1;
+		return 0;
 	}
+#endif
 	errno = EIO;
-	return (-1);
+	return -1;
 }

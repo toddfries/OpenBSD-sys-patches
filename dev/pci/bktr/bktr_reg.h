@@ -1,6 +1,8 @@
-/*	$OpenBSD: bktr_reg.h,v 1.11 2007/11/26 09:28:34 martynas Exp $	*/
+/* $SourceForge: bktr_reg.h,v 1.3 2003/03/11 23:11:27 thomasklausner Exp $ */
+
+/*	$NetBSD: bktr_reg.h,v 1.19 2008/04/24 15:35:28 ad Exp $	*/
 /*
- * $FreeBSD: src/sys/dev/bktr/bktr_reg.h,v 1.42 2000/10/31 13:09:56 roger Exp $
+ * $FreeBSD: src/sys/dev/bktr/bktr_reg.h,v 1.42 2000/10/31 13:09:56 roger Exp$
  *
  * Copyright (c) 1999 Roger Hardiman
  * Copyright (c) 1998 Amancio Hasty
@@ -18,7 +20,7 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Mark Tinguely and Jim Lowe
- * 4. The name of the author may not be used to endorse or promote products 
+ * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -35,21 +37,30 @@
  *
  */
 
-#include <machine/bus.h>		/* struct device */
-#include <sys/device.h>
-#include <sys/selinfo.h>			/* struct selinfo */
+#ifdef __FreeBSD__
+#  if (__FreeBSD_version >= 310000)
+#    include "smbus.h"
+#  else
+#    define NSMBUS 0		/* FreeBSD before 3.1 does not have SMBUS */
+#  endif
+#  if (NSMBUS > 0)
+#    define BKTR_USE_FREEBSD_SMBUS
+#  endif
+#endif
 
-#ifdef DEBUG
-#  define	bootverbose 1
-#else
-#  define	bootverbose 0
+#ifdef __NetBSD__
+#include <sys/bus.h>		/* struct device */
+#include <sys/device.h>
+#include <sys/select.h>			/* struct selinfo */
+#include <sys/reboot.h>			/* AB_* for bootverbose */
 #endif
 
 /*
  * The kernel options for the driver now all begin with BKTR.
- * Support the older kernel options on OpenBSD.
+ * Support the older kernel options on FreeBSD and OpenBSD.
  *
  */
+#if defined(__FreeBSD__) || defined(__OpenBSD__)
 #if defined(BROOKTREE_ALLOC_PAGES)
 #define BKTR_ALLOC_PAGES BROOKTREE_ALLOC_PAGES
 #endif
@@ -74,6 +85,9 @@
 #define BKTR_OVERRIDE_MSP OVERRIDE_MSP
 #endif
 
+#endif
+
+
 #ifndef PCI_LATENCY_TIMER
 #define	PCI_LATENCY_TIMER		0x0c	/* pci timer register */
 #endif
@@ -81,7 +95,16 @@
 /*
  * Definitions for the Brooktree 848/878 video capture to pci interface.
  */
-#include <dev/pci/pcivar.h>
+#ifndef __NetBSD__
+#define PCI_VENDOR_SHIFT                        0
+#define PCI_VENDOR_MASK                         0xffff
+#define PCI_VENDOR(id) \
+            (((id) >> PCI_VENDOR_SHIFT) & PCI_VENDOR_MASK)
+
+#define PCI_PRODUCT_SHIFT                       16
+#define PCI_PRODUCT_MASK                        0xffff
+#define PCI_PRODUCT(id) \
+            (((id) >> PCI_PRODUCT_SHIFT) & PCI_PRODUCT_MASK)
 
 /* PCI vendor ID */
 #define PCI_VENDOR_BROOKTREE    0x109e                /* Brooktree */
@@ -90,6 +113,7 @@
 #define PCI_PRODUCT_BROOKTREE_BT849     0x0351        /* Bt849 Video Capture */
 #define PCI_PRODUCT_BROOKTREE_BT878     0x036e        /* Bt878 Video Capture */
 #define PCI_PRODUCT_BROOKTREE_BT879     0x036f        /* Bt879 Video Capture */
+#endif
 
 #define BROOKTREE_848                   1
 #define BROOKTREE_848A                  2
@@ -280,11 +304,6 @@ struct bt848_registers {
 #define BT848_INT_HSYNC			(1<<2)
 #define BT848_INT_VSYNC			(1<<1)
 #define BT848_INT_FMTCHG		(1<<0)
-#define	BT848_INT_BITS \
-    ("\020\01FMTCHG\02VSYNC\03HSYNC\04OFLOW\05HLOCK\06VPRES\07RSV0"\
-     "\010RSV1\011I2CDONE\012GPINT\014RISCI\015FBUS\016FTRGT\017FDSR"\
-     "\020PPERR\021RIPERR\022PABORT\023OCERR\024SCERR"\
-     "\030MYSTERYBIT\031FIELD\032RACK\034RISC_EN")
     int		:32;		/* 108, 109,10a,10b */
     BTWORD (gpio_dma_ctl);	/* 10c, 10d,10e,10f */
 #define BT848_DMA_CTL_PL23TP4		(0<<6)	/* planar1 trigger 4 */
@@ -369,8 +388,8 @@ struct bt848_registers {
 #define BKTR_GPIO_DATA			0x200
 #define BKTR_I2C_DATA_CTL		0x110
 #define BKTR_TGCTRL			0x084
-#define BKTR_PLL_F_LO			0x0F0 
-#define BKTR_PLL_F_HI			0x0F4 
+#define BKTR_PLL_F_LO			0x0F0
+#define BKTR_PLL_F_HI			0x0F4
 #define BKTR_PLL_F_XCI			0x0F8
 
 /*
@@ -385,19 +404,16 @@ struct TVTUNER {
 	u_char		band;
 	u_char		afc;
  	u_char		radio_mode;	/* current mode of the radio mode */
-	int		tuner_mode;	/* current tuning mode */
-#define BT848_TUNER_MODE_TV	1
-#define BT848_TUNER_MODE_RADIO	2
 };
 
 /* description of the PHYSICAL tuner */
 struct TUNER {
-	char	       *name;
+	const char*	name;
 	u_char		type;
 	u_char		pllControl[4];
-	u_char		bandLimits[ 2 ];
-	u_char		bandAddrs[ 4 ];        /* 3 first for the 3 TV 
-					       ** bands. Last for radio 
+	u_int		bandLimits[2];
+	u_char		bandAddrs[4];        /* 3 first for the 3 TV
+					       ** bands. Last for radio
 					       ** band (0x00=NoRadio).
 					       */
 
@@ -407,7 +423,7 @@ struct TUNER {
 #define EEPROMBLOCKSIZE		32
 struct CARDTYPE {
 	unsigned int		card_id;	/* card id (from #define's) */
-	char		       *name;
+	const char*		name;
 	const struct TUNER*	tuner;		/* Tuner details */
 	u_char			tuner_pllAddr;	/* Tuner i2c address */
 	u_char			dbx;		/* Has DBX chip? */
@@ -415,7 +431,7 @@ struct CARDTYPE {
 	u_char			dpl3518a;	/* Has dpl3518a chip? */
 	u_char			eepromAddr;
 	u_char			eepromSize;	/* bytes / EEPROMBLOCKSIZE */
-	u_int			audiomuxs[ 5 ];	/* tuner, ext (line-in) */
+	u_int			audiomuxs[5];	/* tuner, ext (line-in) */
 						/* int/unused (radio) */
 						/* mute, present */
 	u_int			gpio_mux_bits;	/* GPIO mask for audio mux */
@@ -438,49 +454,61 @@ struct format_params {
   int vbi_num_lines, vbi_num_samples;
 };
 
+#if defined(BKTR_USE_FREEBSD_SMBUS)
+struct bktr_i2c_softc {
+	device_t iicbus;
+	device_t smbus;
+};
+#endif
+
+
 /* Bt848/878 register access
  * The registers can either be access via a memory mapped structure
  * or accessed via bus_space.
- * bus_0pace access allows cross platform support, where as the
+ * bus_space access allows cross platform support, where as the
  * memory mapped structure method only works on 32 bit processors
  * with the right type of endianness.
  */
-#define INB(sc,o)	(({					\
-	u_int8_t __v;						\
-	__v = bus_space_read_1((sc)->memt, (sc)->memh, (o));	\
-	bus_space_barrier((sc)->memt, (sc)->memh, (o), 1,	\
-	    BUS_SPACE_BARRIER_READ);				\
-	(__v);							\
-}))
-#define INW(sc,o)	(({					\
-	u_int16_t __v;						\
-	__v = bus_space_read_2((sc)->memt, (sc)->memh, (o));	\
-	bus_space_barrier((sc)->memt, (sc)->memh, (o), 4,	\
-	    BUS_SPACE_BARRIER_READ);				\
-	(__v);							\
-}))
-#define INL(sc,o)	(({					\
-	u_int32_t __v;						\
-	__v = bus_space_read_4((sc)->memt, (sc)->memh, (o));	\
-	bus_space_barrier((sc)->memt, (sc)->memh, (o), 4,	\
-	    BUS_SPACE_BARRIER_READ);				\
-	(__v);							\
-}))
-#define OUTB(sc,o,v)	do {					\
-	bus_space_write_1((sc)->memt, (sc)->memh, (o), (v));	\
-	bus_space_barrier((sc)->memt, (sc)->memh, (o), 1,	\
-	    BUS_SPACE_BARRIER_WRITE);				\
-} while (0)
-#define OUTW(sc,o,v)	do {					\
-	bus_space_write_2((sc)->memt, (sc)->memh, (o), (v));	\
-	bus_space_barrier((sc)->memt, (sc)->memh, (o), 2,	\
-	    BUS_SPACE_BARRIER_WRITE);				\
-} while (0)
-#define OUTL(sc,o,v) do {					\
-	bus_space_write_4((sc)->memt, (sc)->memh, (o), (v));	\
-	bus_space_barrier((sc)->memt, (sc)->memh, (o), 4,	\
-	    BUS_SPACE_BARRIER_WRITE);				\
-} while (0)
+#if defined(__NetBSD__) || (defined(__FreeBSD__) && (__FreeBSD_version >=300000))
+
+#if defined(__NetBSD__)
+
+struct bktr_softc;
+
+u_int8_t bktr_INB(struct bktr_softc *, int);
+u_int16_t bktr_INW(struct bktr_softc *, int);
+u_int32_t bktr_INL(struct bktr_softc *, int);
+void bktr_OUTB(struct bktr_softc *, int, u_int8_t);
+void bktr_OUTW(struct bktr_softc *, int, u_int16_t);
+void bktr_OUTL(struct bktr_softc *, int, u_int32_t);
+
+#define INB(bktr,offset)	bktr_INB(bktr,offset)
+#define INW(bktr,offset)	bktr_INW(bktr,offset)
+#define INL(bktr,offset)	bktr_INL(bktr,offset)
+#define OUTB(bktr,offset,value)	bktr_OUTB(bktr,offset,value)
+#define OUTW(bktr,offset,value)	bktr_OUTW(bktr,offset,value)
+#define OUTL(bktr,offset,value)	bktr_OUTL(bktr,offset,value)
+
+#else
+
+#define INB(bktr,offset)	bus_space_read_1((bktr)->memt,(bktr)->memh,(offset))
+#define INW(bktr,offset)	bus_space_read_2((bktr)->memt,(bktr)->memh,(offset))
+#define INL(bktr,offset)	bus_space_read_4((bktr)->memt,(bktr)->memh,(offset))
+#define OUTB(bktr,offset,value) bus_space_write_1((bktr)->memt,(bktr)->memh,(offset),(value))
+#define OUTW(bktr,offset,value) bus_space_write_2((bktr)->memt,(bktr)->memh,(offset),(value))
+#define OUTL(bktr,offset,value) bus_space_write_4((bktr)->memt,(bktr)->memh,(offset),(value))
+
+#endif /* __NetBSD__ */
+
+#else
+#define INB(bktr,offset)	*(volatile unsigned char*) ((int)((bktr)->memh)+(offset))
+#define INW(bktr,offset)	*(volatile unsigned short*)((int)((bktr)->memh)+(offset))
+#define INL(bktr,offset)	*(volatile unsigned int*)  ((int)((bktr)->memh)+(offset))
+#define OUTB(bktr,offset,value)	*(volatile unsigned char*) ((int)((bktr)->memh)+(offset)) = (value)
+#define OUTW(bktr,offset,value)	*(volatile unsigned short*)((int)((bktr)->memh)+(offset)) = (value)
+#define OUTL(bktr,offset,value)	*(volatile unsigned int*)  ((int)((bktr)->memh)+(offset)) = (value)
+#endif
+
 
 typedef struct bktr_clip bktr_clip_t;
 
@@ -488,6 +516,15 @@ typedef struct bktr_clip bktr_clip_t;
  * BrookTree 848  info structure, one per bt848 card installed.
  */
 struct bktr_softc {
+
+#if defined (__bsdi__)
+    struct device bktr_dev;	/* base device */
+    struct isadev bktr_id;	/* ISA device */
+    struct intrhand bktr_ih;	/* interrupt vectoring */
+    #define pcici_t pci_devaddr_t
+#endif
+
+#if defined(__NetBSD__)
     struct device bktr_dev;     /* base device */
     bus_dma_tag_t	dmat;   /* DMA tag */
     bus_space_tag_t	memt;
@@ -499,12 +536,71 @@ struct bktr_softc {
     bus_dmamap_t	dm_mem;
     bus_dmamap_t	dm_vbidata;
     bus_dmamap_t	dm_vbibuffer;
+#endif
 
+#if defined(__OpenBSD__)
+    struct device bktr_dev;     /* base device */
+    bus_dma_tag_t	dmat;   /* DMA tag */
+    bus_space_tag_t	memt;
+    bus_space_handle_t	memh;
+    bus_size_t		obmemsz;        /* size of en card (bytes) */
+    void		*ih;
+    bus_dmamap_t	dm_prog;
+    bus_dmamap_t	dm_oprog;
+    bus_dmamap_t	dm_mem;
+    bus_dmamap_t	dm_vbidata;
+    bus_dmamap_t	dm_vbibuffer;
+    size_t		dm_mapsize;
+    pci_chipset_tag_t	pc;	/* Opaque PCI chipset tag */
+    pcitag_t		tag;	/* PCI tag, for doing PCI commands */
+    vm_offset_t		phys_base;	/* Bt848 register physical address */
+#endif
+
+#if defined (__FreeBSD__)
+    #if (__FreeBSD_version < 400000)
+    vm_offset_t     phys_base;	/* 2.x Bt848 register physical address */
+    pcici_t         tag;	/* 2.x PCI tag, for doing PCI commands */
+    #endif
+    #if (__FreeBSD_version >= 400000)
+    int             mem_rid;	/* 4.x resource id */
+    struct resource *res_mem;	/* 4.x resource descriptor for registers */
+    int             irq_rid;	/* 4.x resource id */
+    struct resource *res_irq;	/* 4.x resource descriptor for interrupt */
+    void            *res_ih;	/* 4.x newbus interrupt handler cookie */
+    dev_t           bktrdev;	/* 4.x device entry for /dev/bktrN */
+    dev_t           tunerdev;	/* 4.x device entry for /dev/tunerN */
+    dev_t           vbidev;	/* 4.x device entry for /dev/vbiN */
+    dev_t           bktrdev_alias;	/* alias /dev/bktr to /dev/bktr0 */
+    dev_t           tunerdev_alias;	/* alias /dev/tuner to /dev/tuner0 */
+    dev_t           vbidev_alias;	/* alias /dev/vbi to /dev/vbi0 */
+    #endif
+    #if (__FreeBSD_version >= 310000)
+    bus_space_tag_t	memt;	/* Bus space register access functions */
+    bus_space_handle_t	memh;	/* Bus space register access functions */
+    bus_size_t		obmemsz;/* Size of card (bytes) */
+    #endif
+    #if (NSMBUS > 0)
+      struct bktr_i2c_softc i2c_sc;	/* bt848_i2c device */
+    #endif
+    char	bktr_xname[7];	/* device name and unit number */
+#endif
+
+
+    /* The following definitions are for the contiguous memory */
+#ifdef __NetBSD__
     vaddr_t bigbuf;          /* buffer that holds the captured image */
     vaddr_t vbidata;         /* RISC program puts VBI data from the current frame here */
     vaddr_t vbibuffer;       /* Circular buffer holding VBI data for the user */
     vaddr_t dma_prog;        /* RISC prog for single and/or even field capture*/
     vaddr_t odd_dma_prog;    /* RISC program for Odd field capture */
+#else
+    vm_offset_t bigbuf;	     /* buffer that holds the captured image */
+    vm_offset_t vbidata;     /* RISC program puts VBI data from the current frame here */
+    vm_offset_t vbibuffer;   /* Circular buffer holding VBI data for the user */
+    vm_offset_t dma_prog;    /* RISC prog for single and/or even field capture*/
+    vm_offset_t odd_dma_prog;/* RISC program for Odd field capture */
+#endif
+
 
     /* the following definitions are common over all platforms */
     int		alloc_pages;	/* number of pages in bigbuf */
@@ -514,7 +610,7 @@ struct bktr_softc {
     u_int	vbi_sequence_number;	/* sequence number for VBI */
     int		vbi_read_blocked;	/* user process blocked on read() from /dev/vbi */
     struct selinfo vbi_select;	/* Data used by select() on /dev/vbi */
-    
+
 
     struct proc	*proc;		/* process to receive raised signal */
     int		signal;		/* signal to send to process */
@@ -548,7 +644,7 @@ struct bktr_softc {
     u_short     bktr_cap_ctl;
     volatile u_int	flags;
 #define	METEOR_INITIALIZED	0x00000001
-#define	METEOR_OPEN		0x00000002 
+#define	METEOR_OPEN		0x00000002
 #define	METEOR_MMAP		0x00000004
 #define	METEOR_INTR		0x00000008
 #define	METEOR_READ		0x00000010	/* XXX never gets referenced */
@@ -585,10 +681,9 @@ struct bktr_softc {
 #define	METEOR_OUTPUT_FMT_MASK	0x040f0000
 #define	METEOR_WANT_TS		0x08000000	/* time-stamp a frame */
 #define METEOR_RGB		0x20000000	/* meteor rgb unit */
-#define METEOR_FIELD_MODE	0x80000000
     u_char	tflags;				/* Tuner flags (/dev/tuner) */
 #define	TUNER_INITIALIZED	0x00000001
-#define	TUNER_OPEN		0x00000002 
+#define	TUNER_OPEN		0x00000002
     u_char      vbiflags;			/* VBI flags (/dev/vbi) */
 #define VBI_INITIALIZED         0x00000001
 #define VBI_OPEN                0x00000002
@@ -600,8 +695,8 @@ struct bktr_softc {
     u_char		audio_mux_select;	/* current mode of the audio */
     u_char		audio_mute_state;	/* mute state of the audio */
     u_char		format_params;
-    u_int		current_sol;
-    u_int		current_col;
+    u_int              current_sol;
+    u_int              current_col;
     int                 clip_start;
     int                 line_length;
     int                 last_y;
@@ -614,7 +709,7 @@ struct bktr_softc {
     int                 reverse_mute;		/* Swap the GPIO values for Mute and TV Audio */
     int                 bt848_tuner;
     int                 bt848_card;
-    u_int		id;
+    u_int              id;
 #define BT848_USE_XTALS 0
 #define BT848_USE_PLL   1
     int			xtal_pll_mode;	/* Use XTAL or PLL mode for PAL/SECAM */
@@ -630,6 +725,7 @@ struct bktr_softc {
     int                 msp_use_mono_source;   /* use Tuner's Mono audio output via the MSP chip */
     int                 audio_mux_present;     /* 1 = has audio mux on GPIO lines, 0 = no audio mux */
     int                 msp_source_selected;   /* 0 = TV source, 1 = Line In source, 2 = FM Radio Source */
+    void		*sih;
 
 };
 
@@ -648,4 +744,19 @@ struct bt848_card_sig {
 /***********************************************************/
 /* ioctl_cmd_t int on old versions, u_long on new versions */
 /***********************************************************/
+
+#if (__FreeBSD__ == 2)
+typedef int ioctl_cmd_t;
+#endif
+
+#if defined(__FreeBSD__)
+#if (__FreeBSD_version >= 300000)
 typedef u_long ioctl_cmd_t;
+#endif
+#endif
+
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+typedef u_long ioctl_cmd_t;
+#endif
+
+

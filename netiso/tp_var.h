@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_var.h,v 1.13 2006/07/23 22:06:14 ad Exp $	*/
+/*	$NetBSD: tp_var.h,v 1.18 2008/08/06 15:01:23 plunky Exp $	*/
 
 /*-
  * Copyright (c) 1995 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,11 +50,7 @@ struct in_addr;
 
 
 /* tp_cons.c */
-int tpcons_pcbconnect (void *, struct mbuf *);
-void *tpcons_ctlinput (int, struct sockaddr *, void *);
-void tpcons_input (struct mbuf *, ...);
 int tpcons_output (struct mbuf *, ...);
-int tpcons_output_dg (struct mbuf *, ...);
 
 /* tp_driver.c */
 int tp_driver   (struct tp_pcb *, struct tp_event *);
@@ -70,12 +59,12 @@ int tp_driver   (struct tp_pcb *, struct tp_event *);
 int tp_emit (int, struct tp_pcb *, SeqNum, u_int, struct mbuf *);
 int tp_error_emit (int, u_long, struct sockaddr_iso *,
 		       struct sockaddr_iso *, struct mbuf *, int,
-		       struct tp_pcb *, caddr_t,
+		       struct tp_pcb *, void *,
 		       int (*) (struct mbuf *, ...));
 
 /* tp_inet.c */
-void in_getsufx  (void *, u_short *, caddr_t, int);
-void in_putsufx (void *, caddr_t, int, int);
+void in_getsufx  (void *, u_short *, void *, int);
+void in_putsufx (void *, void *, int, int);
 void in_recycle_tsuffix (void *);
 void in_putnetaddr (void *, struct sockaddr *, int);
 int in_cmpnetaddr (void *, struct sockaddr *, int);
@@ -85,7 +74,7 @@ int tpip_output (struct mbuf *, ...);
 int tpip_output_dg (struct mbuf *, ...);
 void tpip_input (struct mbuf *, ...);
 void tpin_quench (struct inpcb *, int);
-void *tpip_ctlinput (int, struct sockaddr *, void *);
+void *tpip_ctlinput(int, const struct sockaddr *, void *);
 void tpin_abort (struct inpcb *, int);
 void dump_inaddr (struct sockaddr_in *);
 
@@ -95,8 +84,8 @@ void tp_input   (struct mbuf *, ...);
 int tp_headersize (int, struct tp_pcb *);
 
 /* tp_iso.c */
-void iso_getsufx (void *, u_short *, caddr_t, int);
-void iso_putsufx (void *, caddr_t, int, int);
+void iso_getsufx (void *, u_short *, void *, int);
+void iso_putsufx (void *, void *, int, int);
 void iso_recycle_tsuffix (void *);
 void iso_putnetaddr (void *, struct sockaddr *, int);
 int iso_cmpnetaddr (void *, struct sockaddr *, int);
@@ -108,7 +97,7 @@ void tpclnp_input (struct mbuf *, ...);
 void iso_rtchange (struct isopcb *);
 void tpiso_decbit (struct isopcb *);
 void tpiso_quench (struct isopcb *);
-void *tpclnp_ctlinput (int, struct sockaddr *, void *);
+void *tpclnp_ctlinput(int, const struct sockaddr *, void *);
 void tpclnp_ctlinput1 (int, struct iso_addr *);
 void tpiso_abort (struct isopcb *);
 void tpiso_reset (struct isopcb *);
@@ -118,7 +107,7 @@ void Tpmeas (u_int, u_int, struct timeval *, u_int, u_int, u_int);
 
 /* tp_output.c */
 int tp_consistency (struct tp_pcb *, u_int, struct tp_conn_param *);
-int tp_ctloutput (int, struct socket *, int, int, struct mbuf **);
+int tp_ctloutput (int, struct socket *, struct sockopt *);
 
 /* tp_pcb.c */
 void tp_init    (void);
@@ -129,7 +118,7 @@ u_long tp_getref (struct tp_pcb *);
 int tp_set_npcb (struct tp_pcb *);
 int tp_attach   (struct socket *, int);
 void tp_detach  (struct tp_pcb *);
-int tp_tselinuse (int, caddr_t, struct sockaddr_iso *, int);
+int tp_tselinuse(int, const char *, struct sockaddr_iso *, int);
 int tp_pcbbind  (void *, struct mbuf *, struct lwp *);
 
 /* tp_subr.c */
@@ -155,7 +144,7 @@ void tp_quench  (struct inpcb *, int);
 void tp_netcmd   (struct tp_pcb *, int);
 int tp_mask_to_num (u_char);
 void tp_mss     (struct tp_pcb *, int);
-int tp_route_to (struct mbuf *, struct tp_pcb *, caddr_t);
+int tp_route_to (struct mbuf *, struct tp_pcb *, void *);
 void tp0_stash  (struct tp_pcb *, struct tp_event *);
 void tp0_openflow (struct tp_pcb *);
 int tp_setup_perf (struct tp_pcb *);
@@ -185,18 +174,6 @@ int tp_usrreq   (struct socket *, int, struct mbuf *, struct mbuf *,
 void tp_ltrace   (struct socket *, struct uio *);
 int tp_confirm  (struct tp_pcb *);
 int tp_snd_control (struct mbuf *, struct socket *, struct mbuf **);
-
-#ifdef TPCONS
-/* if_cons.c */
-void nibble_copy (char *, unsigned, char *, unsigned, int);
-int nibble_match (char *, unsigned, char *, unsigned, int);
-void cons_init (void);
-int tp_incoming (struct mbuf *, void *);
-int cons_tpinput (struct mbuf *, void *);
-int cons_connect (struct isopcb *);
-void *cons_ctlinput (int, struct sockaddr *, void *);
-int find_error_reason (struct x25_packet *);
-#endif
 
 #endif
 

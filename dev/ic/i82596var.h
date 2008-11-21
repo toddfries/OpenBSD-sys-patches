@@ -1,12 +1,8 @@
-/*	$OpenBSD: i82596var.h,v 1.11 2003/10/21 18:58:49 jmc Exp $	*/
-/*	$NetBSD: i82586var.h,v 1.10 1998/08/15 04:42:42 mycroft Exp $	*/
+/* $NetBSD: i82596var.h,v 1.10 2008/04/04 17:03:42 tsutsui Exp $ */
 
-/*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+/*
+ * Copyright (c) 2003 Jochen Kunz.
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Paul Kranenburg and Charles M. Hannum.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,18 +12,14 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
+ * 3. The name of Jochen Kunz may not be used to endorse or promote
+ *    products derived from this software without specific prior
+ *    written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * THIS SOFTWARE IS PROVIDED BY JOCHEN KUNZ
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL JOCHEN KUNZ
  * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -37,269 +29,234 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*-
- * Copyright (c) 1992, 1993, University of Vermont and State
- *  Agricultural College.
- * Copyright (c) 1992, 1993, Garrett A. Wollman.
- *
- * Portions:
- * Copyright (c) 1994, 1995, Rafal K. Boni
- * Copyright (c) 1990, 1991, William F. Jolitz
- * Copyright (c) 1990, The Regents of the University of California
- *
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of Vermont
- *	and State Agricultural College and Garrett A. Wollman, by William F.
- *	Jolitz, and by the University of California, Berkeley, Lawrence
- *	Berkeley Laboratory, and its contributors.
- * 4. Neither the names of the Universities nor the names of the authors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE UNIVERSITY OR AUTHORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
-
-/*
- * Intel 82586/82596 Ethernet chip
- * Register, bit, and structure definitions.
- *
- * Original StarLAN driver written by Garrett Wollman with reference to the
- * Clarkson Packet Driver code for this chip written by Russ Nelson and others.
- *
- * BPF support code taken from hpdev/if_le.c, supplied with tcpdump.
- *
- * 3C507 support is loosely based on code donated to NetBSD by Rafal Boni.
- *
- * Majorly cleaned up and 3C507 code merged by Charles Hannum.
- *
- * Converted to SUN ie driver by Charles D. Cranor,
- *		October 1994, January 1995.
- * This sun version based on i386 version 1.30.
- */
-
-/* #define I82596_DEBUG */
-
-/* Debug elements */
-#define	IED_RINT	0x01
-#define	IED_TINT	0x02
-#define	IED_RNR		0x04
-#define	IED_CNA		0x08
-#define	IED_READFRAME	0x10
-#define IED_ENQ		0x20
-#define IED_XMIT	0x40
-#define IED_CMDS	0x80
-#define	IED_ALL		0xff
-
-#define B_PER_F		6		/* recv buffers per frame */
-#define	IE_RBUF_SIZE	256		/* size of each receive buffer;
-						MUST BE POWER OF TWO */
-#define	NTXBUF		4		/* number of transmit commands */
-#define	IE_TBUF_SIZE	ETHER_MAX_LEN	/* length of transmit buffer */
-
-#define IE_MAXMCAST	(IE_TBUF_SIZE/6)/* must fit in transmit buffer */
+/* All definitions are for a Intel 82596 DX/SX / CA in linear 32 bit mode. */
 
 
-#define	IE_INTR_ENRCV	1		/* receive pkt interrupt */
-#define	IE_INTR_ENSND	2		/* send pkt interrupt */
-#define	IE_INTR_LOOP	3		/* a loop for next one*/
-#define	IE_INTR_EXIT	4		/* done w/ interrupts */
 
-#define	IE_CHIP_PROBE	0		/* reset called from chip probe */
-#define	IE_CARD_RESET	1		/* reset called from card reset */
-
-#define	IE_PORT_RESET	0
-#define	IE_PORT_TEST	1
-#define	IE_PORT_SCP	2
-#define	IE_PORT_DUMP	3
-
-/*
- * Ethernet status, per interface.
- *
- * The chip uses two types of pointers: 16 bit and 24 bit
- *   24 bit pointers cover the board's memory.
- *   16 bit pointers are offsets from the ISCP's `ie_base'
- *
- * The board's memory is represented by the bus handle `bh'. The MI
- * i82586/596 driver deals exclusively with offsets relative to the
- * board memory bus handle. The `ie_softc' fields below that are marked
- * `MD' are in the domain of the front-end driver; they opaque to the
- * MI driver part.
- *
- * The front-end is required to manage the SCP and ISCP structures. i.e.
- * allocate room for them on the board's memory, and arrange to point the
- * chip at the SCB structure, the offset of which is passed to the MI
- * driver in `sc_scb'.
- *
- * The following functions provide the glue necessary to deal with
- * host and bus idiosyncracies:
- *
- *	hwreset		- board reset
- *	hwinit		- board initialization
- *	chan_attn	- get chip to look at prepared commands
- *	intrhook	- board dependent interrupt processing
- *
- *	All of the following shared-memory access function use an offset
- *	relative to the bus handle to indicate the shared memory location.
- *	The bus_{read/write}N function take or return offset into the
- *	shared memory in the host's byte-order.
- *
- *	memcopyin	- copy device memory: board to KVA
- *	memcopyout	- copy device memory: KVA to board
- *	bus_read16	- read a 16-bit i82586 pointer
-			  `offset' argument will be 16-bit aligned
- *	bus_write16	- write a 16-bit i82586 pointer
-			  `offset' argument will be 16-bit aligned
- *	bus_write24	- write a 24-bit i82586 pointer
-			  `offset' argument will be 32-bit aligned
- *
- */
-
-struct ie_softc {
-	struct device sc_dev;   /* device structure */
-	void *sc_ih;
-
-	bus_space_tag_t	iot;	/* bus-space tag of card registers */
-	bus_space_handle_t ioh;	/* bus-space handle of card registers */
-
-	bus_space_tag_t	bt;	/* bus-space tag of card memory */
-	bus_space_handle_t bh;	/* bus-space handle of card memory */
-
-	const char *sc_type;	/* (MD) hardware type */
-	int	sc_vers;	/* (MD) hardware version */
-	int	sc_irq;		/* (MD) irq in md format */
-	void	*sc_iobase;	/* (MD) KVA of base of 24 bit addr space */
-	u_long	sc_maddr;	/* (MD) base of chip's RAM (16bit addr space) */
-	u_int	sc_msize;	/* (MD) how much RAM we have/use */
-	u_int	sc_flags;	/* (MI/MD) flags */
-#define	IEMD_FLAG0	0x00010000
-#define	IEMD_FLAG1	0x00020000
-#define	IEMD_FLAG2	0x00040000
-#define	IEMD_FLAG3	0x00080000
-#define	IEMD_FLAG4	0x00100000
-#define	IEMD_FLAG5	0x00200000
-#define	IEMD_FLAG6	0x00400000
-#define	IEMD_FLAG7	0x00800000
-	struct	arpcom sc_arpcom;	/* system ethercom structure */
-	struct	ifmedia sc_media;	/* supported media information */
-
-	/* Bus glue */
-	void	(*hwreset)(struct ie_softc *, int);
-	void	(*hwinit)(struct ie_softc *);
-	void	(*chan_attn)(struct ie_softc *);
-	void	(*port)(struct ie_softc *, u_int);
-	int	(*intrhook)(struct ie_softc *, int where);
-
-	void	(*memcopyin)(struct ie_softc *, void *, int, size_t);
-	void	(*memcopyout)(struct ie_softc *, const void *,
-				   int, size_t);
-	u_int16_t (*ie_bus_read16)(struct ie_softc *, int offset);
-	void	(*ie_bus_write16)(struct ie_softc *, int offset,
-					u_int16_t value);
-	void	(*ie_bus_write24)(struct ie_softc *, int offset,
-					int addr);
-
-	/* Media management */
-        int  (*sc_mediachange)(struct ie_softc *);
-				/* card dependent media change */
-        void (*sc_mediastatus)(struct ie_softc *, struct ifmediareq *);
-				/* card dependent media status */
+/* Supported chip variants */
+extern const char *i82596_typenames[];
+enum i82596_types { I82596_UNKNOWN, I82596_DX, I82596_CA };
 
 
-	/*
-	 * Offsets (relative to bus handle) of the i82586 SYSTEM structures.
-	 */
-	int	scp;		/* Offset to the SCP (set by front-end) */
-	int	iscp;		/* Offset to the ISCP (set by front-end) */
-	int	scb;		/* Offset to SCB (set by front-end) */
 
-	/*
-	 * Offset and size of a block of board memory where the buffers
-	 * are to be allocated from (initialized by front-end).
-	 */
-	int	buf_area;	/* Start of descriptors and buffers */
-	int	buf_area_sz;	/* Size of above */
+/* System Configuration Pointer */
+struct iee_scp {
+	volatile uint16_t scp_pad1;
+	volatile uint16_t scp_sysbus;		/* Sysbus Byte */
+	volatile uint32_t scp_pad2;
+	volatile uint32_t scp_iscp_addr;	/* Int. Sys. Conf. Pointer */
+} __packed;
 
-	/* SYSBUS byte */
-	int	sysbus;
 
-	/*
-	 * The buffers & descriptors (recv and xmit)
-	 */
-	int	rframes;	/* Offset to `nrxbuf' frame descriptors */
-	int	rbds;		/* Offset to `nrxbuf' buffer descriptors */
-	int	rbufs;		/* Offset to `nrxbuf' receive buffers */
-#define IE_RBUF_ADDR(sc, i)	(sc->rbufs + ((i) * IE_RBUF_SIZE))
-        int	rfhead, rftail;
-	int	rbhead, rbtail;
-	int	nframes;	/* number of frames in use */
-	int	nrxbuf;		/* number of recv buffs in use */
-	int	rnr_expect;	/* XXX - expect a RCVR not ready interrupt */
 
-	int	nop_cmds;	/* Offset to NTXBUF no-op commands */
-	int	xmit_cmds;	/* Offset to NTXBUF transmit commands */
-	int	xbds;		/* Offset to NTXBUF buffer descriptors */
-	int	xbufs;		/* Offset to NTXBUF transmit buffers */
-#define IE_XBUF_ADDR(sc, i)	(sc->xbufs + ((i) * IE_TBUF_SIZE))
+/* Intermediate System Configuration Pointer */
+struct iee_iscp {
+	volatile uint16_t iscp_bussy;		/* Even Word, bits 0..15 */
+	volatile uint16_t iscp_pad;		/* Odd Word, bits 16..32 */
+	volatile uint32_t iscp_scb_addr;	/* address of SCB */
+} __packed;
 
-	int	xchead, xctail;
-	int	xmit_busy;
-	int	do_xmitnopchain;	/* Controls use of xmit NOP chains */
 
-	/* Multicast addresses */
-	char	*mcast_addrs;		/* Current MC filter addresses */
-	int	mcast_addrs_size;	/* Current size of MC buffer */
-	int	mcast_count;		/* Current # of addrs in buffer */
-	int	want_mcsetup;		/* run mcsetup at next opportunity */
 
-	int	promisc;		/* are we in promisc mode? */
-	int	async_cmd_inprogress;	/* we didn't wait for 586 to accept
-					   a command */
+/* System Control Block */
+struct iee_scb {
+	volatile uint16_t scb_status;		/* Status Bits */
+	volatile uint16_t scb_cmd;		/* Command Bits */
+	volatile uint32_t scb_cmd_blk_addr;	/* Command Block Address */
+	volatile uint32_t scb_rfa_addr;		/* Receive Frame Area Address */
+	volatile uint32_t scb_crc_err;		/* CRC Errors */
+	volatile uint32_t scb_align_err;	/* Alignment Errors */
+	volatile uint32_t scb_resource_err;	/* Resource Errors [1] */
+	volatile uint32_t scb_overrun_err;	/* Overrun Errors [1] */
+	volatile uint32_t scb_rcvcdt_err;	/* RCVCDT Errors [1] */
+	volatile uint32_t scb_short_fr_err;	/* Short Frame Errors */
+	volatile uint16_t scb_tt_off;		/* Bus Throtle Off Timer */
+	volatile uint16_t scb_tt_on;		/* Bus Throtle On Timer */
+} __packed;
+/* [1] In MONITOR mode these counters change function. */
 
-#ifdef I82596_DEBUG
-	int	sc_debug;
-#endif
+
+
+/* Command Block */
+struct iee_cb {
+	volatile uint16_t cb_status;		/* Status Bits */
+	volatile uint16_t cb_cmd;		/* Command Bits */
+	volatile uint32_t cb_link_addr;		/* Link Address to next CMD */
+	union {
+		volatile uint8_t cb_ind_addr[8];/* Individual Address */
+		volatile uint8_t cb_cf[16];	/* Configuration Bytes */
+		struct {
+			volatile uint16_t mc_size;/* Num bytes of Mcast Addr.*/
+			volatile uint8_t mc_addrs[6]; /* List of Mcast Addr. */
+		} cb_mcast;
+		struct {
+			volatile uint32_t tx_tbd_addr;/* TX Buf. Descr. Addr.*/
+			volatile uint16_t tx_tcb_count; /* Len. of opt. data */
+			volatile uint16_t tx_pad;
+			volatile uint8_t tx_dest_addr[6]; /* Dest. Addr. */
+			volatile uint16_t tx_length; /* Length of data */
+			/* uint8_t data;	 Data to send, optional */
+		} cb_transmit;
+		volatile uint32_t cb_tdr;	/* Time & Flags from TDR CMD */
+		volatile uint32_t cb_dump_addr;	/* Address of Dump buffer */
+	};
+} __packed;
+
+
+
+/* Transmit Buffer Descriptor */
+struct iee_tbd {
+	volatile uint16_t tbd_size;		/* Size of buffer & Flags */
+	volatile uint16_t tbd_pad;
+	volatile uint32_t tbd_link_addr;	/* Link Address to next RFD */
+	volatile uint32_t tbd_tb_addr;		/* Transmit Buffer Address */
+} __packed;
+
+
+
+/* Receive Frame Descriptor */
+struct iee_rfd {
+	volatile uint16_t rfd_status;		/* Status Bits */
+	volatile uint16_t rfd_cmd;		/* Command Bits */
+	volatile uint32_t rfd_link_addr;	/* Link Address to next RFD */
+	volatile uint32_t rfd_rbd_addr;		/* Address of first free RBD */
+	volatile uint16_t rfd_count;		/* Actual Count */
+	volatile uint16_t rfd_size;		/* Size */
+	volatile uint8_t rfd_dest_addr[6];	/* Destination Address */
+	volatile uint8_t rfd_src_addr[6];	/* Source Address */
+	volatile uint16_t rfd_length;		/* Length Field */
+	volatile uint16_t rfd_pad;		/* Optional Data */
+} __packed;
+
+
+
+/* Receive Buffer Descriptor */
+struct iee_rbd {
+	volatile uint16_t rbd_count;		/* Actual Cont of bytes */
+	volatile uint16_t rbd_pad1;
+	volatile uint32_t rbd_next_rbd;		/* Address of Next RBD */
+	volatile uint32_t rbd_rb_addr;		/* Receive Buffer Address */
+	volatile uint16_t rbd_size;		/* Size of Receive Buffer */
+	volatile uint16_t rbd_pad2;
+} __packed;
+
+
+
+#define IEE_NRFD	32	/* Number of RFDs == length of receive queue */
+#define IEE_NCB		32	/* Number of Command Blocks == transmit queue */
+#define IEE_NTBD	16	/* Number of TBDs per CB */
+
+
+
+struct iee_softc {
+	device_t sc_dev;		/* common device data */
+	struct ifmedia sc_ifmedia;	/* media interface */
+	struct ethercom sc_ethercom;	/* ethernet specific stuff */
+	enum i82596_types sc_type;
+	bus_dma_tag_t sc_dmat;
+	bus_dmamap_t sc_shmem_map;
+	bus_dma_segment_t sc_dma_segs;
+	bus_dmamap_t sc_rx_map[IEE_NRFD];
+	bus_dmamap_t sc_tx_map[IEE_NCB];
+	struct mbuf *sc_rx_mbuf[IEE_NRFD];
+	struct mbuf *sc_tx_mbuf[IEE_NCB];
+	uint8_t *sc_shmem_addr;
+	int sc_next_cb;
+	int sc_next_tbd;
+	int sc_rx_done;
+	uint8_t sc_cf[14];
+	int sc_flags;
+	int sc_cl_align;
+	uint32_t sc_crc_err;
+	uint32_t sc_align_err;
+	uint32_t sc_resource_err;
+	uint32_t sc_overrun_err;
+	uint32_t sc_rcvcdt_err;
+	uint32_t sc_short_fr_err;
+	uint32_t sc_receive_err;
+	uint32_t sc_tx_col;
+	uint32_t sc_rx_err;
+	uint32_t sc_cmd_err;
+	uint32_t sc_tx_timeout;
+	uint32_t sc_setup_timeout;
+	int (*sc_iee_cmd)(struct iee_softc *, uint32_t);
+	int (*sc_iee_reset)(struct iee_softc *);
+	void (*sc_mediastatus)(struct ifnet *, struct ifmediareq *);
+	int (*sc_mediachange)(struct ifnet *);
 };
 
-/* Exported functions */
-int 	i82596_intr(void *);
-int 	i82596_probe(struct ie_softc *);
-int 	i82596_proberam(struct ie_softc *);
-void 	i82596_attach(struct ie_softc *, const char *, u_int8_t *, 
-	    int *, int, int);
-int 	i82596_start_cmd(struct ie_softc *, int, int, int, int);
 
-/*
- * Interrupt Acknowledge.
- */
-static __inline__ void
-ie_ack(struct ie_softc *sc, u_int mask) /* in native byte-order */
-{
-	u_int status;
-	int off = IE_SCB_STATUS(sc->scb);
 
-	bus_space_barrier(sc->bt, sc->bh, off, 2, BUS_SPACE_BARRIER_READ);
-	status = (sc->ie_bus_read16)(sc, off);
-	i82596_start_cmd(sc, status & mask, 0, 0, 0);
-}
+/* Flags */
+#define IEE_NEED_SWAP	0x01
+#define	IEE_WANT_MCAST	0x02
+
+#define IEE_SWAP(x)	((sc->sc_flags & IEE_NEED_SWAP) == 0 ? x : 	\
+			(((x) << 16) | ((x) >> 16)))
+#define IEE_PHYS_SHMEM(x) ((uint32_t) (sc->sc_shmem_map->dm_segs[0].ds_addr \
+			+ (x)))
+
+
+/* Offsets in shared memory */
+#define IEE_SCP_SZ	(((sizeof(struct iee_scp) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_SCP_OFF	0
+
+#define IEE_ISCP_SZ	(((sizeof(struct iee_iscp) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_ISCP_OFF	IEE_SCP_SZ
+
+#define IEE_SCB_SZ	(((sizeof(struct iee_scb) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_SCB_OFF	(IEE_SCP_SZ + IEE_ISCP_SZ)
+
+#define IEE_RFD_SZ	(((sizeof(struct iee_rfd) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_RFD_LIST_SZ	(IEE_RFD_SZ * IEE_NRFD)
+#define IEE_RFD_OFF	(IEE_SCP_SZ + IEE_ISCP_SZ + IEE_SCB_SZ)
+
+#define IEE_RBD_SZ	(((sizeof(struct iee_rbd) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_RBD_LIST_SZ	(IEE_RBD_SZ * IEE_NRFD)
+#define IEE_RBD_OFF	(IEE_SCP_SZ + IEE_ISCP_SZ + IEE_SCB_SZ		\
+			+ IEE_RFD_SZ * IEE_NRFD)
+
+#define IEE_CB_SZ	(((sizeof(struct iee_cb) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_CB_LIST_SZ	(IEE_CB_SZ * IEE_NCB)
+#define IEE_CB_OFF	(IEE_SCP_SZ + IEE_ISCP_SZ + IEE_SCB_SZ		\
+			+ IEE_RFD_SZ * IEE_NRFD + IEE_RBD_SZ * IEE_NRFD)
+
+#define IEE_TBD_SZ	(((sizeof(struct iee_tbd) - 1) / (sc)->sc_cl_align + 1)\
+			* (sc)->sc_cl_align)
+#define IEE_TBD_LIST_SZ	(IEE_TBD_SZ * IEE_NTBD * IEE_NCB)
+#define IEE_TBD_OFF	(IEE_SCP_SZ + IEE_ISCP_SZ + IEE_SCB_SZ		\
+			+ IEE_RFD_SZ * IEE_NRFD + IEE_RBD_SZ * IEE_NRFD	\
+			+ IEE_CB_SZ * IEE_NCB)
+
+#define IEE_SHMEM_MAX	(IEE_SCP_SZ + IEE_ISCP_SZ + IEE_SCB_SZ		\
+			+ IEE_RFD_SZ * IEE_NRFD + IEE_RBD_SZ * IEE_NRFD	\
+			+ IEE_CB_SZ * IEE_NCB + IEE_TBD_SZ * IEE_NTBD * IEE_NCB)
+
+
+#define SC_SCP		((struct iee_scp*)((sc)->sc_shmem_addr + IEE_SCP_OFF))
+#define SC_ISCP		((struct iee_iscp*)((sc)->sc_shmem_addr + IEE_ISCP_OFF))
+#define SC_SCB		((struct iee_scb*)((sc)->sc_shmem_addr + IEE_SCB_OFF))
+#define SC_RFD(n)	((struct iee_rfd*)((sc)->sc_shmem_addr + IEE_RFD_OFF \
+				+ (n) * IEE_RFD_SZ))
+#define SC_RBD(n)	((struct iee_rbd*)((sc)->sc_shmem_addr + IEE_RBD_OFF \
+				+ (n) * IEE_RBD_SZ))
+#define SC_CB(n)	((struct iee_cb*)((sc)->sc_shmem_addr + IEE_CB_OFF \
+				+ (n) * IEE_CB_SZ))
+#define SC_TBD(n)	((struct iee_tbd*)((sc)->sc_shmem_addr + IEE_TBD_OFF \
+				+ (n) * IEE_TBD_SZ))
+
+
+
+void iee_attach(struct iee_softc *, uint8_t *, int *, int, int);
+void iee_detach(struct iee_softc *, int);
+int iee_intr(void *);
+
+
+
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: lsi64854var.h,v 1.6 2007/02/28 18:48:35 miod Exp $	*/
-/*	$NetBSD: lsi64854var.h,v 1.4 2001/03/29 02:58:39 petrov Exp $ */
+/*	$NetBSD: lsi64854var.h,v 1.12 2008/04/28 20:23:50 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,13 +30,13 @@
  */
 
 struct lsi64854_softc {
-	struct device		sc_dev;		/* base device */
+	device_t		sc_dev;		/* base device */
 	bus_space_tag_t		sc_bustag;	/* bus tags */
 	bus_dma_tag_t		sc_dmatag;
 
 	bus_space_handle_t	sc_regs;	/* the registers */
 	u_int			sc_rev;		/* revision */
-	int			sc_burst;	/* max supported burst size */
+	int			sc_burst;	/* max suported burst size */
 
 	int			sc_channel;
 #define L64854_CHANNEL_SCSI	1
@@ -54,14 +46,14 @@ struct lsi64854_softc {
 
 	int			sc_active;	/* DMA active ? */
 	bus_dmamap_t		sc_dmamap;	/* DMA map for bus_dma_* */
-	caddr_t			sc_dvmaaddr;	/* DVMA cookie */
+	void *			sc_dvmaaddr;	/* DVMA cookie */
 	size_t			sc_dmasize;
-	caddr_t			*sc_dmaaddr;
+	uint8_t			**sc_dmaaddr;
 	size_t			*sc_dmalen;
 
 	void	(*reset)(struct lsi64854_softc *);/* reset routine */
-	int	(*setup)(struct lsi64854_softc *, caddr_t *, size_t *,
-			      int, size_t *);	/* dma setup */
+	int	(*setup)(struct lsi64854_softc *, uint8_t **, size_t *,
+			      int, size_t *);	/* DMA setup */
 	int	(*intr)(void *);		/* interrupt handler */
 
 	int	(*sc_intrchain)(void *);	/* next handler in intr chain */
@@ -87,20 +79,22 @@ struct lsi64854_softc {
 #define DMA_ISACTIVE(sc)		((sc)->sc_active)
 
 #define DMA_ENINTR(sc) do {			\
-	u_int32_t csr = L64854_GCSR(sc);	\
-	csr |= L64854_INT_EN;			\
-	L64854_SCSR(sc, csr);			\
-} while (0)
+	uint32_t _csr = L64854_GCSR(sc);	\
+	_csr |= L64854_INT_EN;			\
+	L64854_SCSR(sc, _csr);			\
+} while (/*CONSTCOND*/0)
 
 #define DMA_ISINTR(sc)	(L64854_GCSR(sc) & (D_INT_PEND|D_ERR_PEND))
 
 #define DMA_GO(sc) do {				\
-	u_int32_t csr = L64854_GCSR(sc);	\
-	csr |= D_EN_DMA;			\
-	L64854_SCSR(sc, csr);			\
+	uint32_t _csr = L64854_GCSR(sc);	\
+	_csr |= D_EN_DMA;			\
+	L64854_SCSR(sc, _csr);			\
 	sc->sc_active = 1;			\
 } while (0)
 
 
-int	lsi64854_attach(struct lsi64854_softc *);
+void	lsi64854_attach(struct lsi64854_softc *);
+int	lsi64854_scsi_intr(void *);
 int	lsi64854_enet_intr(void *);
+int	lsi64854_pp_intr(void *);

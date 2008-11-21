@@ -1,8 +1,9 @@
-/*	$OpenBSD: aic79xx.reg,v 1.9 2007/11/26 09:28:33 martynas Exp $	*/
+/*	$NetBSD: aic79xx.reg,v 1.12 2006/02/25 00:58:35 wiz Exp $	*/
+
 /*
  * Aic79xx register and scratch ram definitions.
  *
- * Copyright (c) 1994-2001, 2004 Justin T. Gibbs.
+ * Copyright (c) 1994-2001 Justin T. Gibbs.
  * Copyright (c) 2000-2002 Adaptec Inc.
  * All rights reserved.
  *
@@ -38,9 +39,9 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/aic7xxx/aic79xx.reg,v 1.18 2004/08/04 17:55:34 gibbs Exp $
+ * $FreeBSD: src/sys/dev/aic7xxx/aic79xx.reg,v 1.15 2003/06/10 03:25:24 gibbs Exp $
  */
-VERSION = "$Id: aic79xx.reg,v 1.9 2007/11/26 09:28:33 martynas Exp $"
+VERSION = "Id: //depot/aic7xxx/aic7xxx/aic79xx.reg#70 $"
 
 /*
  * This file is processed by the aic7xxx_asm utility for use in assembling
@@ -64,6 +65,13 @@ VERSION = "$Id: aic79xx.reg,v 1.9 2007/11/26 09:28:33 martynas Exp $"
 		mvi	MK_MODE(src, dst) call set_mode_work_around;	\
 	} else {							\
 		mvi	MODE_PTR, MK_MODE(src, dst);			\
+	}
+
+#define TOGGLE_DFF_MODE							\
+	if ((ahd->bugs & AHD_SET_MODE_BUG) != 0) {			\
+		call	toggle_dff_mode_work_around;			\
+	} else {							\
+		xor	MODE_PTR, MK_MODE(M_DFF1, M_DFF1);		\
 	}
 
 #define RESTORE_MODE(mode)						\
@@ -152,7 +160,7 @@ register SEQINTCODE {
 		MKMSG_FAILED,			/*
 						 * Target completed command
 						 * without honoring our ATN
-						 * request to issue a message. 
+						 * request to issue a message.
 						 */
 		MISSED_BUSFREE,			/*
 						 * The sequencer never saw
@@ -1081,7 +1089,7 @@ register SFUNCT {
 }
 
 /*
- * Data FIFO 0 PCI Status 
+ * Data FIFO 0 PCI Status
  */
 register DF0PCISTAT {
 	address			0x0A0
@@ -1098,7 +1106,7 @@ register DF0PCISTAT {
 }
 
 /*
- * Data FIFO 1 PCI Status 
+ * Data FIFO 1 PCI Status
  */
 register DF1PCISTAT {
 	address			0x0A1
@@ -1115,7 +1123,7 @@ register DF1PCISTAT {
 }
 
 /*
- * S/G PCI Status 
+ * S/G PCI Status
  */
 register SGPCISTAT {
 	address			0x0A2
@@ -1131,7 +1139,7 @@ register SGPCISTAT {
 }
 
 /*
- * CMC PCI Status 
+ * CMC PCI Status
  */
 register CMCPCISTAT {
 	address			0x0A3
@@ -1148,7 +1156,7 @@ register CMCPCISTAT {
 }
 
 /*
- * Overlay PCI Status 
+ * Overlay PCI Status
  */
 register OVLYPCISTAT {
 	address			0x0A4
@@ -1193,7 +1201,7 @@ register TARGPCISTAT {
 
 /*
  * LQ Packet In
- * The last LQ Packet received
+ * The last LQ Packet recieved
  */
 register LQIN {
 	address			0x020
@@ -1266,7 +1274,7 @@ register CMDLENPTR {
  * Task Attribute Pointer
  * Scb offset for the byte field specifying the attribute byte
  * to be used in command packets.
- */ 
+ */
 register ATTRPTR {
 	address			0x026
 	access_mode	RW
@@ -1277,7 +1285,7 @@ register ATTRPTR {
  * Task Management Flags Pointer
  * Scb offset for the byte field specifying the attribute flags
  * byte to be used in command packets.
- */ 
+ */
 register FLAGPTR {
 	address			0x027
 	access_mode	RW
@@ -2425,7 +2433,7 @@ register IOPDNCTL {
 }
 
 /*
- * Shadow Host Address.
+ * Shaddow Host Address.
  */
 register SHADDR {
 	address			0x060
@@ -3234,7 +3242,7 @@ register FLAGS {
 
 /*
  * Sequencer Interrupt Control
- */ 
+ */
 register SEQINTCTL {
 	address			0x0D9
 	access_mode RW
@@ -3373,7 +3381,7 @@ register DINDIR	 {
  * Function One
  * 2's complement to bit value conversion.  Write the 2's complement value
  * (0-7 only) to the top nibble and retrieve the bit indexed by that value
- * on the next read of this register. 
+ * on the next read of this register.
  * Example:
  *	Write	0x60
  *	Read	0x40
@@ -3536,32 +3544,8 @@ scratch_ram {
 	COMPLETE_DMA_SCB_HEAD {
 		size		2
 	}
-	/*
-	 * tail of list of SCBs that have
-	 * completed but need to be uploaded
-	 * to the host prior to being completed.
-	 */
-	COMPLETE_DMA_SCB_TAIL {
-		size		2
-	}
-	/*
-	 * head of list of SCBs that have
-	 * been uploaded to the host, but cannot
-	 * be completed until the QFREEZE is in
-	 * full effect (i.e. no selections pending).
-	 */
-	COMPLETE_ON_QFREEZE_HEAD {
-		size		2
-	}
-	/*
-	 * Counting semaphore to prevent new select-outs
-	 * The queue is frozen so long as the sequencer
-	 * and kernel freeze counts differ.
-	 */
+	/* Counting semaphore to prevent new select-outs */
 	QFREEZE_COUNT {
-		size		2
-	}
-	KERNEL_QFREEZE_COUNT {
 		size		2
 	}
 	/*
@@ -3616,7 +3600,7 @@ scratch_ram {
 		size		1
 	}
 	/*
-	 * The last bus phase as seen by the sequencer. 
+	 * The last bus phase as seen by the sequencer.
 	 */
 	LASTPHASE {
 		size		1
@@ -3643,17 +3627,6 @@ scratch_ram {
 		size		1
 	}
 	/*
-	 * Kernel and sequencer offsets into the queue of
-	 * incoming target mode command descriptors.  The
-	 * queue is full when the KERNEL_TQINPOS == TQINPOS.
-	 */
-	KERNEL_TQINPOS {
-		size		1
-	}
-	TQINPOS {                
-		size		1
-	}
-	/*
 	 * Base address of our shared data with the kernel driver in host
 	 * memory.  This includes the qoutfifo and target mode
 	 * incoming command queue.
@@ -3667,6 +3640,17 @@ scratch_ram {
 	 */
 	QOUTFIFO_NEXT_ADDR {
 		size		4
+	}
+	/*
+	 * Kernel and sequencer offsets into the queue of
+	 * incoming target mode command descriptors.  The
+	 * queue is full when the KERNEL_TQINPOS == TQINPOS.
+	 */
+	KERNEL_TQINPOS {
+		size		1
+	}
+	TQINPOS {
+		size		1
 	}
 	ARG_1 {
 		size		1
@@ -3716,9 +3700,8 @@ scratch_ram {
 
 	SEQ_FLAGS2 {
 		size		1
-		field	PENDING_MK_MESSAGE	0x01
-		field	TARGET_MSG_PENDING	0x02
-		field	SELECTOUT_QFROZEN	0x04
+		field	TARGET_MSG_PENDING	  0x02
+		field	SELECTOUT_QFROZEN	  0x04
 	}
 
 	ALLOCFIFO_SCBPTR {
@@ -3727,7 +3710,7 @@ scratch_ram {
 
 	/*
 	 * The maximum amount of time to wait, when interrupt coalescing
-	 * is enabled, before issuing a CMDCMPLT interrupt for a completed
+	 * is enabled, before issueing a CMDCMPLT interrupt for a completed
 	 * command.
 	 */
 	INT_COALESCING_TIMER {
@@ -3778,26 +3761,6 @@ scratch_ram {
 	 */
 	CMDSIZE_TABLE {
 		size		8
-	}
-	/*
-	 * When an SCB with the MK_MESSAGE flag is
-	 * queued to the controller, it cannot enter
-	 * the waiting for selection list until the
-	 * selections for any previously queued
-	 * commands to that target complete.  During
-	 * the wait, the MK_MESSAGE SCB is queued
-	 * here.
-	 */
-	MK_MESSAGE_SCB {
-		size		2
-	}
-	/*
-	 * Saved SCSIID of MK_MESSAGE_SCB to avoid
-	 * an extra SCBPTR operation when deciding
-	 * if the MK_MESSAGE_SCB can be run.
-	 */
-	MK_MESSAGE_SCSIID {
-		size		1
 	}
 }
 
@@ -3865,14 +3828,14 @@ scb {
 	SCB_TASK_ATTRIBUTE {
 		size	1
 		/*
-		 * Overloaded field for non-packetized 
+		 * Overloaded field for non-packetized
 		 * ignore wide residue message handling.
 		 */
 		field	SCB_XFERLEN_ODD	0x01
 	}
 	SCB_CDB_LEN {
 		size	1
-		field	SCB_CDB_LEN_PTR	0x80	/* CDB in host memory */
+		field	SCB_CDB_LEN_PTR 0x80	/* CDB in host memory */
 	}
 	SCB_TASK_MANAGEMENT {
 		size	1
@@ -3891,9 +3854,9 @@ scb {
 	}
 	SCB_SGPTR {
 		size	4
-		field	SG_STATUS_VALID	0x04	/* In the first byte */
-		field	SG_FULL_RESID	0x02	/* In the first byte */
-		field	SG_LIST_NULL	0x01	/* In the first byte */
+		field	SG_STATUS_VALID		0x04	/* In the first byte */
+		field	SG_FULL_RESID		0x02	/* In the first byte */
+		field	SG_LIST_NULL		0x01	/* In the first byte */
 	}
 	SCB_BUSADDR {
 		size	4
@@ -3990,7 +3953,6 @@ const SG_PREFETCH_ADDR_MASK download
 const SG_SIZEOF download
 const PKT_OVERRUN_BUFOFFSET download
 const SCB_TRANSFER_SIZE	download
-const CACHELINE_MASK download
 
 /*
  * BIOS SCB offsets

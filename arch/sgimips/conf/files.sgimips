@@ -1,4 +1,4 @@
-#	$NetBSD: files.sgimips,v 1.41 2006/09/16 08:50:27 gdamore Exp $
+#	$NetBSD: files.sgimips,v 1.47 2008/02/20 21:43:35 drochner Exp $
 
 maxpartitions 16
 
@@ -26,7 +26,6 @@ file arch/sgimips/sgimips/console.c
 file arch/sgimips/sgimips/disksubr.c
 file arch/sgimips/sgimips/machdep.c
 
-file arch/mips/mips/softintr.c
 file arch/mips/mips/mips3_clock.c	mips3
 file arch/mips/mips/mips3_clockintr.c	mips3
 
@@ -37,6 +36,7 @@ file dev/cons.c
 # Machine-dependent drivers
 include "arch/sgimips/ioc/files.ioc"
 include "arch/sgimips/dev/files.dev"
+defflag opt_sgimace.h MACE_NEEDS_DELAYS
 include "arch/sgimips/mace/files.mace"
 
 # Machine-independent drivers.
@@ -49,8 +49,6 @@ include "dev/eisa/files.eisa"
 file	arch/sgimips/eisa/eisa_machdep.c	eisa
 
 include "dev/vme/files.vme"
-include "dev/wscons/files.wscons"
-include "dev/wsfont/files.wsfont"
 include "dev/pckbport/files.pckbport"
 include "dev/usb/files.usb"
 include "dev/scsipi/files.scsipi"

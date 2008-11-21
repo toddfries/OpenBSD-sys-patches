@@ -1,7 +1,7 @@
-/*	$NetBSD: interrupt.c,v 1.12 2006/12/21 15:55:24 yamt Exp $	*/
+/*	$NetBSD: interrupt.c,v 1.15 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
- * Copyright (c) 2001 The NetBSD Foundation, Inc.
+ * Copyright (c) 2001, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,11 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.12 2006/12/21 15:55:24 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.15 2008/04/28 20:23:31 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/proc.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -50,13 +44,6 @@ __KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.12 2006/12/21 15:55:24 yamt Exp $");
 #include <machine/autoconf.h>
 #include <machine/sysconf.h>
 #include <machine/intr.h>
-
-const uint32_t mips_ipl_si_to_sr[SI_NQUEUES] = {
-	[SI_SOFT] = MIPS_SOFT_INT_MASK_0,
-	[SI_SOFTCLOCK] = MIPS_SOFT_INT_MASK_0,
-	[SI_SOFTNET] = MIPS_SOFT_INT_MASK_1,
-	[SI_SOFTSERIAL] = MIPS_SOFT_INT_MASK_1,
-};
 
 struct evcnt pmax_clock_evcnt =
     EVCNT_INITIALIZER(EVCNT_TYPE_INTR, NULL, "clock", "intr");
@@ -96,7 +83,10 @@ intr_init(void)
 void
 cpu_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 {
+	struct cpu_info *ci;
 
+	ci = curcpu();
+	ci->ci_idepth++;
 	uvmexp.intrs++;
 
 	/* device interrupts */
@@ -114,13 +104,16 @@ cpu_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 #endif
 	}
 
+	ci->ci_idepth--;
+
+#ifdef notyet
+	/* For __HAVE_FAST_SOFTINTS */
 	ipending &= (MIPS_SOFT_INT_MASK_1|MIPS_SOFT_INT_MASK_0);
 	if (ipending == 0)
 		return;
-
 	_clrsoftintr(ipending);
-
-	softintr_dispatch(ipending);
+	mips_softint_dispatch(ipending);
+#endif
 
 	return;
 kerneltouchedFPU:

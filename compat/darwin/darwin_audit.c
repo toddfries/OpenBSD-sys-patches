@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_audit.c,v 1.5 2006/11/16 01:32:42 christos Exp $ */
+/*	$NetBSD: darwin_audit.c,v 1.8 2008/04/28 20:23:41 martin Exp $ */
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_audit.c,v 1.5 2006/11/16 01:32:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_audit.c,v 1.8 2008/04/28 20:23:41 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -45,7 +38,6 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_audit.c,v 1.5 2006/11/16 01:32:42 christos Ex
 #include <sys/mount.h>
 #include <sys/proc.h>
 #include <sys/ktrace.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/sys/signal.h>
@@ -57,12 +49,12 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_audit.c,v 1.5 2006/11/16 01:32:42 christos Ex
 #include <compat/darwin/darwin_syscallargs.h>
 
 int
-darwin_sys_audit(struct lwp *l, void *v, register_t *retval)
+darwin_sys_audit(struct lwp *l, const struct darwin_sys_audit_args *uap, register_t *retval)
 {
-	struct darwin_sys_audit_args /* {
+	/* {
 		syscallarg(void *) record;
 		syscallarg(size_t) len;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_audit()\n");
@@ -71,13 +63,13 @@ darwin_sys_audit(struct lwp *l, void *v, register_t *retval)
 }
 
 int
-darwin_sys_auditon(struct lwp *l, void *v, register_t *retval)
+darwin_sys_auditon(struct lwp *l, const struct darwin_sys_auditon_args *uap, register_t *retval)
 {
-	struct darwin_sys_auditon_args /* {
+	/* {
 		syscallarg(int) cmd;
 		syscallarg(void *) data;
 		syscallarg(size_t) len;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_auditon()\n");
@@ -86,11 +78,11 @@ darwin_sys_auditon(struct lwp *l, void *v, register_t *retval)
 }
 
 int
-darwin_sys_getauid(struct lwp *l, void *v, register_t *retval)
+darwin_sys_getauid(struct lwp *l, const struct darwin_sys_getauid_args *uap, register_t *retval)
 {
-	struct darwin_sys_getauid_args /* {
+	/* {
 		syscallarg(darwin_au_id_t *) auid;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_getauid()\n");
@@ -99,11 +91,11 @@ darwin_sys_getauid(struct lwp *l, void *v, register_t *retval)
 }
 
 int
-darwin_sys_setauid(struct lwp *l, void *v, register_t *retval)
+darwin_sys_setauid(struct lwp *l, const struct darwin_sys_setauid_args *uap, register_t *retval)
 {
-	struct darwin_sys_setauid_args /* {
+	/* {
 		syscallarg(darwin_au_id_t *) auid;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_setauid()\n");
@@ -112,12 +104,11 @@ darwin_sys_setauid(struct lwp *l, void *v, register_t *retval)
 }
 
 int
-darwin_sys_getauditinfo(struct lwp *l, void *v,
-    register_t *retval)
+darwin_sys_getauditinfo(struct lwp *l, const struct darwin_sys_getauditinfo_args *uap, register_t *retval)
 {
-	struct darwin_sys_getauditinfo_args /* {
+	/* {
 		syscallarg(struct darwin_auditinfo *) auditinfo;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_getauditinfo()\n");
@@ -126,12 +117,11 @@ darwin_sys_getauditinfo(struct lwp *l, void *v,
 }
 
 int
-darwin_sys_setauditinfo(struct lwp *l, void *v,
-    register_t *retval)
+darwin_sys_setauditinfo(struct lwp *l, const struct darwin_sys_setauditinfo_args *uap, register_t *retval)
 {
-	struct darwin_sys_setauditinfo_args /* {
+	/* {
 		syscallarg(struct darwin_auditinfo *) auditinfo;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_setauditinfo()\n");
@@ -140,13 +130,12 @@ darwin_sys_setauditinfo(struct lwp *l, void *v,
 }
 
 int
-darwin_sys_getaudit_addr(struct lwp *l, void *v,
-    register_t *retval)
+darwin_sys_getaudit_addr(struct lwp *l, const struct darwin_sys_getaudit_addr_args *uap, register_t *retval)
 {
-	struct darwin_sys_getaudit_addr_args /* {
+	/* {
 		syscallarg(struct darwin_audit_addr *) auditinfo_addr;
 		syscallarg(int) len;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_getaudit_addr()\n");
@@ -155,13 +144,12 @@ darwin_sys_getaudit_addr(struct lwp *l, void *v,
 }
 
 int
-darwin_sys_setaudit_addr(struct lwp *l, void *v,
-    register_t *retval)
+darwin_sys_setaudit_addr(struct lwp *l, const struct darwin_sys_setaudit_addr_args *uap, register_t *retval)
 {
-	struct darwin_sys_setaudit_addr_args /* {
+	/* {
 		syscallarg(struct darwin_audit_addr *) auditinfo_addr;
 		syscallarg(int) len;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_setaudit_addr()\n");
@@ -170,12 +158,11 @@ darwin_sys_setaudit_addr(struct lwp *l, void *v,
 }
 
 int
-darwin_sys_auditctl(struct lwp *l, void *v,
-    register_t *retval)
+darwin_sys_auditctl(struct lwp *l, const struct darwin_sys_auditctl_args *uap, register_t *retval)
 {
-	struct darwin_sys_auditctl_args /* {
+	/* {
 		syscallarg(char *) path;
-	} */ *uap = v;
+	} */
 
 	uap = NULL; /* Shut up a warning */
 	printf("unimplemented darwin_sys_auditctl()\n");

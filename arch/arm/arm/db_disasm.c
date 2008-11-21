@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: db_disasm.c,v 1.4 2003/07/15 00:24:38 lukem Exp $	*/
+/*	$NetBSD: db_disasm.c,v 1.6 2007/02/21 22:59:38 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 Mark Brinicombe.
@@ -35,6 +34,9 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.6 2007/02/21 22:59:38 thorpej Exp $");
+
 #include <sys/param.h>
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -46,29 +48,29 @@
 
 /* Glue code to interface db_disasm to the generic ARM disassembler */
 
-static db_expr_t db_disasm_read_word(db_expr_t);
-static void db_disasm_printaddr(db_expr_t);
+static u_int db_disasm_read_word(u_int);
+static void db_disasm_printaddr(u_int);
 
 static const disasm_interface_t db_disasm_interface = {
 	db_disasm_read_word, db_disasm_printaddr, db_printf
 };
 
-static db_expr_t
-db_disasm_read_word(db_expr_t address)
+static u_int
+db_disasm_read_word(u_int address)
 {
 
 	return db_get_value(address, 4, 0);
 }
 
 static void
-db_disasm_printaddr(db_expr_t address)
+db_disasm_printaddr(u_int address)
 {
 
 	db_printsym((db_addr_t)address, DB_STGY_ANY, db_printf);
 }
 
 vaddr_t
-db_disasm(vaddr_t loc, boolean_t altfmt)
+db_disasm(vaddr_t loc, bool altfmt)
 {
 
 	return disasm(&db_disasm_interface, loc, altfmt);

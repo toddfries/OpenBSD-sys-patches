@@ -1,4 +1,4 @@
-/*	$OpenBSD: select.h,v 1.9 2006/03/21 08:17:33 otto Exp $	*/
+/*	$NetBSD: select.h,v 1.33 2008/03/22 18:04:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -35,62 +35,40 @@
 #define	_SYS_SELECT_H_
 
 #include <sys/cdefs.h>
-#include <sys/time.h>		/* for types and struct timeval */
+#include <sys/featuretest.h>
+#include <sys/fd_set.h>
 
-/*
- * Select uses bit masks of file descriptors in longs.  These macros
- * manipulate such bit fields (the filesystem macros use chars).
- * FD_SETSIZE may be defined by the user, but the default here should
- * be enough for most uses.
- */
-#ifndef	FD_SETSIZE
-#define	FD_SETSIZE	1024
-#endif
-
-/*
- * We don't want to pollute the namespace with select(2) internals.
- * Non-underscore versions are exposed later #if __BSD_VISIBLE
- */
-#define	__NBBY	8				/* number of bits in a byte */
-typedef int32_t	__fd_mask;
-#define __NFDBITS ((unsigned)(sizeof(__fd_mask) * __NBBY)) /* bits per mask */
-#define	__howmany(x, y)	(((x) + ((y) - 1)) / (y))
-
-typedef	struct fd_set {
-	__fd_mask fds_bits[__howmany(FD_SETSIZE, __NFDBITS)];
-} fd_set;
-
-#define	FD_SET(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] |= (1 << ((n) % __NFDBITS)))
-#define	FD_CLR(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] &= ~(1 << ((n) % __NFDBITS)))
-#define	FD_ISSET(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] & (1 << ((n) % __NFDBITS)))
 #ifdef _KERNEL
-#define	FD_COPY(f, t)	bcopy(f, t, sizeof(*(f)))
-#define	FD_ZERO(p)	bzero(p, sizeof(*(p)))
-#else
-#define	FD_COPY(f, t)	memcpy(t, f, sizeof(*(f)))
-#define	FD_ZERO(p)	memset(p, 0, sizeof(*(p)))
-#endif
+#include <sys/selinfo.h>		/* for struct selinfo */
+#include <sys/signal.h>			/* for sigset_t */
 
-#if __BSD_VISIBLE
-#define	NBBY	__NBBY
-#define fd_mask	__fd_mask
-#define NFDBITS	__NFDBITS
-#ifndef howmany
-#define howmany(x, y)	__howmany(x, y)
-#endif
-#endif /* __BSD_VISIBLE */
-
-#ifndef _KERNEL
-#ifndef _SELECT_DEFINED_
-#define _SELECT_DEFINED_
-__BEGIN_DECLS
+struct lwp;
+struct proc;
 struct timeval;
-int	select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
+struct cpu_info;
+struct socket;
+
+int	selcommon(struct lwp *, register_t *, int, fd_set *, fd_set *,
+	    fd_set *, struct timeval *, sigset_t *);
+void	selrecord(struct lwp *selector, struct selinfo *);
+void	selnotify(struct selinfo *, int, long);
+void	selsysinit(struct cpu_info *);
+void	selinit(struct selinfo *);
+void	seldestroy(struct selinfo *);
+int	pollsock(struct socket *, const struct timeval *, int);
+
+#else /* _KERNEL */
+
+#include <sys/sigtypes.h>
+#include <time.h>
+
+__BEGIN_DECLS
+int	pselect(int, fd_set * __restrict, fd_set * __restrict,
+	    fd_set * __restrict, const struct timespec * __restrict,
+	    const sigset_t * __restrict);
+int	select(int, fd_set * __restrict, fd_set * __restrict,
+	    fd_set * __restrict, struct timeval * __restrict);
 __END_DECLS
-#endif
-#endif /* !_KERNEL */
+#endif /* _KERNEL */
 
 #endif /* !_SYS_SELECT_H_ */

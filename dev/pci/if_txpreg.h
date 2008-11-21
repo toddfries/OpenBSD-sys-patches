@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txpreg.h,v 1.37 2004/11/16 23:39:56 jason Exp $ */
+/* $NetBSD: if_txpreg.h,v 1.5 2008/04/10 19:13:37 cegger Exp $ */
 
 /*
  * Copyright (c) 2001 Aaron Campbell <aaron@monkey.org>.
@@ -181,15 +181,15 @@
 #define	TXP_TYPE_IPSEC		0x0000
 #define	TXP_TYPE_TCPSEGMENT	0x0001
 
-#define	TXP_PFLAG_NOCRC		0x0001
-#define	TXP_PFLAG_IPCKSUM	0x0002
-#define	TXP_PFLAG_TCPCKSUM	0x0004
-#define	TXP_PFLAG_TCPSEGMENT	0x0008
-#define	TXP_PFLAG_INSERTVLAN	0x0010
-#define	TXP_PFLAG_IPSEC		0x0020
-#define	TXP_PFLAG_PRIORITY	0x0040
-#define	TXP_PFLAG_UDPCKSUM	0x0080
-#define	TXP_PFLAG_PADFRAME	0x0100
+#define	TXP_PFLAG_NOCRC		0x0000
+#define	TXP_PFLAG_IPCKSUM	0x0001
+#define	TXP_PFLAG_TCPCKSUM	0x0002
+#define	TXP_PFLAG_TCPSEGMENT	0x0004
+#define	TXP_PFLAG_INSERTVLAN	0x0008
+#define	TXP_PFLAG_IPSEC		0x0010
+#define	TXP_PFLAG_PRIORITY	0x0020
+#define	TXP_PFLAG_UDPCKSUM	0x0040
+#define	TXP_PFLAG_PADFRAME	0x0080
 
 #define	TXP_MISC_FIRSTDESC	0x0000
 #define	TXP_MISC_LASTDESC	0x0001
@@ -436,6 +436,9 @@ struct txp_tcpseg_desc {
 #define	TXP_RXFILT_PROMISC	0x0008	/* promiscuous mode */
 #define	TXP_RXFILT_HASHMULTI	0x0010	/* use multicast filter */
 
+/* multicast polynomial */
+#define	TXP_POLYNOMIAL		0x04c11db7
+
 /*
  * boot record (pointers to rings)
  */
@@ -523,7 +526,7 @@ struct txp_hostvar {
 
 struct txp_dma_alloc {
 	u_int64_t		dma_paddr;
-	caddr_t			dma_vaddr;
+	void *			dma_vaddr;
 	bus_dmamap_t		dma_map;
 	bus_dma_segment_t	dma_seg;
 	int			dma_nseg;
@@ -563,7 +566,7 @@ struct txp_rx_ring {
 
 struct txp_softc {
 	struct device		sc_dev;		/* base device */
-	struct arpcom		sc_arpcom;	/* ethernet common */
+	struct ethercom		sc_arpcom;	/* ethernet common */
 	struct txp_hostvar	*sc_hostvar;
 	struct txp_boot_record	*sc_boot;
 	bus_space_handle_t	sc_bh;		/* bus handle (regs) */
@@ -573,7 +576,7 @@ struct txp_softc {
 	struct txp_rsp_ring	sc_rspring;
 	struct txp_swdesc	sc_txd[TX_ENTRIES];
 	void *			sc_ih;
-	struct timeout		sc_tick;
+	struct callout		sc_tick;
 	struct ifmedia		sc_ifmedia;
 	struct txp_tx_ring	sc_txhir, sc_txlor;
 	struct txp_rxbuf_desc	*sc_rxbufs;
@@ -587,9 +590,13 @@ struct txp_softc {
 	struct txp_dma_alloc	sc_rxbufring_dma;
 	int			sc_cold;
 	u_int32_t		sc_rx_capability, sc_tx_capability;
+	int			sc_flags;
+#define TXP_USESUBSYSTEM	0x1 /* use PCI subsys reg for detail info */
+#define TXP_SERVERVERSION	0x2
+#define TXP_FIBER		0x4
 };
 
-#define	TXP_DEVNAME(sc)		((sc)->sc_cold ? "" : (sc)->sc_dev.dv_xname)
+#define	TXP_DEVNAME(sc)		((sc)->sc_cold ? "" : device_xname(&(sc)->sc_dev))
 
 struct txp_fw_file_header {
 	u_int8_t	magicid[8];	/* TYPHOON\0 */

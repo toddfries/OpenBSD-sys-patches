@@ -1,5 +1,4 @@
-/*	$OpenBSD: clock.h,v 1.6 2006/08/27 16:55:41 miod Exp $ */
-/*	$NetBSD: clock.h,v 1.4 1999/09/06 19:52:53 ragge Exp $ */
+/*	$NetBSD: clock.h,v 1.6 2006/09/05 19:32:57 matt Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -30,6 +29,10 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#ifndef _VAX_CLOCK_H_
+#define	_VAX_CLOCK_H_
+
+#include <dev/clock_subr.h>
 
 /*
  * Time constants. These are unlikely to change.
@@ -42,11 +45,7 @@
 #define DAYSPERYEAR(y)	(IS_LEAPYEAR(y) ? 366 : 365)
 #define SECPERYEAR(y)	(DAYSPERYEAR(y) * SEC_PER_DAY)
 
-#define CLKREAD_OK	0
-#define CLKREAD_BAD	-1
-#define CLKREAD_WARN	-2
-
-#define TODRBASE	(1 << 28) /* Rumours say it comes from VMS */
+#define TODRBASE	(1 << 28) /* Rumours says it comes from VMS */
 
 #define	SEC_OFF		0
 #define	MIN_OFF		2
@@ -70,9 +69,11 @@ extern	volatile short *clk_page;
 extern	int clk_adrshift, clk_tweak;
 
 /* Prototypes */
-int	generic_clkread(time_t);
-void	generic_clkwrite(void);
-int	chip_clkread(time_t);
-void	chip_clkwrite(void);
-int	missing_clkread(time_t);
-void	missing_clkwrite(void);
+int generic_gettime(volatile struct timeval *);
+void generic_settime(volatile struct timeval *);
+int chip_gettime(volatile struct timeval *);
+void chip_settime(volatile struct timeval *);
+int yeartonum(int);
+int numtoyear(int);
+
+#endif /* _VAX_CLOCK_H_ */

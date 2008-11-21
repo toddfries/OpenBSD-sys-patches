@@ -1,4 +1,4 @@
-/* $NetBSD: cpu.c,v 1.14 2005/12/11 12:18:51 christos Exp $ */
+/* $NetBSD: cpu.c,v 1.18 2008/05/26 15:59:30 tsutsui Exp $ */
 
 /*
  * Copyright 2000, 2001
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.14 2005/12/11 12:18:51 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.18 2008/05/26 15:59:30 tsutsui Exp $");
 
 #include "opt_multiprocessor.h"
 
@@ -41,6 +41,7 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.14 2005/12/11 12:18:51 christos Exp $");
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/cpu.h>
 
 #include <mips/locore.h>
 #include <mips/cache.h>
@@ -116,11 +117,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	curcpu()->ci_cpu_freq = 50000000 * plldiv;
-	/* Compute the delay divisor and reciprical. */
-	curcpu()->ci_divisor_delay = curcpu()->ci_cpu_freq / 1000000;
-	MIPS_SET_CI_RECIPRICAL(curcpu());
+	/* Compute the delay divisor. */
+	curcpu()->ci_divisor_delay = (curcpu()->ci_cpu_freq + 500000) / 1000000;
 	/* Compute clock cycles per hz */
-	curcpu()->ci_cycles_per_hz = curcpu()->ci_cpu_freq / hz;
+	curcpu()->ci_cycles_per_hz = (curcpu()->ci_cpu_freq + hz / 2 ) / hz;
 
 	printf(": %lu.%02luMHz (hz cycles = %lu, delay divisor = %lu)\n",
 	    curcpu()->ci_cpu_freq / 1000000,

@@ -1,4 +1,4 @@
-/*	$NetBSD: ncr5380.c,v 1.52 2006/02/25 02:28:56 wiz Exp $	*/
+/*	$NetBSD: ncr5380.c,v 1.57 2008/11/15 21:35:31 abs Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ncr5380.c,v 1.52 2006/02/25 02:28:56 wiz Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ncr5380.c,v 1.57 2008/11/15 21:35:31 abs Exp $");
 
 /*
  * Bit mask of targets you want debugging to be shown
@@ -162,7 +162,6 @@ extern inline void finish_req(SC_REQ *reqp)
 	free_head  = reqp;
 	splx(sps);
 
-	xs->xs_status |= XS_STS_DONE;
 	if (!(reqp->dr_flag & DRIVER_LINKCHK))
 		scsipi_done(xs);
 }
@@ -1813,15 +1812,21 @@ SC_REQ	*reqp;
 {
 	u_long			phy_buf;
 	u_long			phy_len;
-	caddr_t			req_addr;
+	char			*req_addr;
 	u_long			req_len;
 	struct dma_chain	*dm;
+
+	/*
+	 * To be safe, do not use DMA for Falcon
+	 */
+	if (machineid & ATARI_FALCON)
+		return (0);
 
 	/*
 	 * Initialize locals and requests' DMA-chain.
 	 */
 	req_len        = reqp->xdata_len;
-	req_addr       = (caddr_t)reqp->xdata_ptr;
+	req_addr       = (void *)reqp->xdata_ptr;
 	dm             = reqp->dm_cur = reqp->dm_last = reqp->dm_chain;
 	dm->dm_count   = dm->dm_addr = 0;
 	reqp->dr_flag &= ~DRIVER_BOUNCING;

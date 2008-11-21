@@ -1,8 +1,7 @@
-/*	$OpenBSD: pciide_acard_reg.h,v 1.5 2004/09/24 07:43:03 grange Exp $	*/
-/*	$NetBSD: pciide_acard_reg.h,v 1.1 2001/04/21 16:36:38 tsutsui Exp $	*/
+/*	$NetBSD: pciide_acard_reg.h,v 1.8 2008/05/14 13:29:29 tsutsui Exp $	*/
 
-/*
- * Copyright (c) 2001 Izumi Tsutsui.
+/*-
+ * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -25,11 +22,7 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
-
-#ifndef _DEV_PCI_PCIIDE_ACARD_REG_H_
-#define _DEV_PCI_PCIIDE_ACARD_REG_H_
 
 #define ATP850_IDETIME(channel)	(0x40 + (channel) * 4)
 #define ATP860_IDETIME		0x40
@@ -58,11 +51,10 @@ static const u_int8_t acard_rec_pio[]  = {0x0, 0xa, 0x8, 0x3, 0x1};
 #define	ATP850_UDMA_MASK(channel)	(0xf << ((channel) * 4))
 #define	ATP860_UDMA_MASK(channel)	(0xff << ((channel) * 8))
 
-static const u_int8_t acard_udma_conf[] = {0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7};
+static const u_int8_t acard_udma_conf[] __unused =
+    {0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7};
 
 #define ATP8x0_CTRL		0x48
 #define  ATP8x0_CTRL_EN(chan)	(0x00020000 << (chan))
 #define  ATP860_CTRL_INT	0x00010000
 #define  ATP860_CTRL_80P(chan)	(0x00000100 << (chan))
-
-#endif	/* !_DEV_PCI_PCIIDE_ACARD_REG_H_ */

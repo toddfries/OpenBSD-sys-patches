@@ -1,4 +1,4 @@
-/*	$NetBSD: clnp.h,v 1.21 2005/12/11 12:25:12 christos Exp $	*/
+/*	$NetBSD: clnp.h,v 1.26 2008/08/06 15:01:23 plunky Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -57,6 +57,8 @@ SOFTWARE.
 #ifndef _NETISO_CLNP_H_
 #define _NETISO_CLNP_H_
 
+#include <net/route.h>
+
 /*
  * ARGO Project, Computer Sciences Dept., University of Wisconsin - Madison
  */
@@ -105,7 +107,7 @@ struct clnp_fixed {
 					 * byte */
 	u_char          cnf_cksum_msb;	/* checksum high byte */
 	u_char          cnf_cksum_lsb;	/* checksum low byte */
-} __attribute__((packed));
+} __packed;
 #define CNF_TYPE	0x1f
 #define CNF_ERR_OK	0x20
 #define CNF_MORE_SEGS	0x40
@@ -211,10 +213,10 @@ struct clnp_optidx {
 #define	ER_INVALREAS	0xff	/* code for invalid ER pdu discard reason */
 
 /* given an mbuf and addr of option, return offset from data of mbuf */
-#define CLNP_OPTTOOFF(m, opt) ((u_short) (opt - mtod(m, caddr_t)))
+#define CLNP_OPTTOOFF(m, opt) ((u_short) (opt - mtod(m, char *)))
 
 /* given an mbuf and offset of option, return address of option */
-#define CLNP_OFFTOOPT(m, off) ((caddr_t) (mtod(m, caddr_t) + off))
+#define CLNP_OFFTOOPT(m, off) ((char *) (mtod(m, char *) + off))
 
 /* return true iff src route is valid */
 #define	CLNPSRCRT_VALID(oidx) ((oidx) && (oidx->cni_srcrt_s))
@@ -233,7 +235,7 @@ struct clnp_optidx {
 
 /* return the address of the current address */
 #define CLNPSRCRT_CADDR(oidx, options)\
-	((caddr_t)(CLNP_OFFTOOPT(options, oidx->cni_srcrt_s) + CLNPSRCRT_OFF(oidx, options)))
+	((void *)(CLNP_OFFTOOPT(options, oidx->cni_srcrt_s) + CLNPSRCRT_OFF(oidx, options)))
 
 /*
  * return true if the src route has run out of routes this is true if the
@@ -413,9 +415,9 @@ extern float    troll_random;
 		isoa.isoa_len = (u_char)*hoff;\
 		if ((((++hoff) + isoa.isoa_len) > hend) ||\
 			(isoa.isoa_len > 20) || (isoa.isoa_len == 0)) {\
-			hoff = (caddr_t)0;\
+			hoff = NULL; \
 		} else {\
-			(void) bcopy(hoff, (caddr_t)isoa.isoa_genaddr, \
+			(void)memcpy(isoa.isoa_genaddr, hoff, \
 				     isoa.isoa_len);\
 			hoff += isoa.isoa_len;\
 		}\
@@ -426,7 +428,7 @@ extern float    troll_random;
  */
 #define CLNP_INSERT_ADDR(hoff, isoa)\
 	*hoff++ = (isoa).isoa_len;\
-	(void) bcopy((caddr_t)((isoa).isoa_genaddr), hoff, (isoa).isoa_len);\
+	(void) bcopy((void *)((isoa).isoa_genaddr), hoff, (isoa).isoa_len);\
 	hoff += (isoa).isoa_len;
 
 /*
@@ -446,7 +448,7 @@ struct clnp_cache {
 	int             clc_segoff;	/* offset of seg part of header */
 	struct rtentry *clc_rt;	/* ptr to rtentry (points into the route
 				 * structure) */
-	struct sockaddr *clc_firsthop;	/* first hop of packet */
+	const struct sockaddr *clc_firsthop;	/* first hop of packet */
 	struct ifnet   *clc_ifp;/* ptr to interface structure */
 	struct iso_ifaddr
 	               *clc_ifa;/* ptr to interface address */
@@ -465,12 +467,11 @@ struct clnp_optidx;
 struct isopcb;
 struct snpa_hdr;
 struct iso_ifaddr;
-struct route_iso;
 
 /* clnp_debug.c */
 char *clnp_hexp (const char *, int, char *);
-char *clnp_iso_addrp (struct iso_addr *);
-char *clnp_saddr_isop (struct sockaddr_iso *);
+char *clnp_iso_addrp(const struct iso_addr *);
+char *clnp_saddr_isop(const struct sockaddr_iso *);
 
 /* clnp_er.c */
 void clnp_er_input (struct mbuf *, struct iso_addr *, u_int);
@@ -478,7 +479,7 @@ void clnp_discard (struct mbuf *, u_int);
 void clnp_emit_er (struct mbuf *, u_int);
 int clnp_er_index (u_int);
 
-int clnp_fragment (struct ifnet *, struct mbuf *, struct sockaddr *,
+int clnp_fragment (struct ifnet *, struct mbuf *, const struct sockaddr *,
 		       int, int, int, struct rtentry *);
 struct mbuf *clnp_reass (struct mbuf *, struct iso_addr *,
 			     struct iso_addr *, struct clnp_segment *);
@@ -503,7 +504,7 @@ void clnp_update_srcrt (struct mbuf *, struct clnp_optidx *);
 void clnp_dooptions (struct mbuf *, struct clnp_optidx *, struct ifnet *,
 			 struct iso_addr *);
 int clnp_set_opts (struct mbuf **, struct mbuf **);
-int clnp_opt_sanity (struct mbuf *, caddr_t, int, struct clnp_optidx *);
+int clnp_opt_sanity (struct mbuf *, void *, int, struct clnp_optidx *);
 
 /* clnp_output.c */
 int clnp_output (struct mbuf *, ...);
@@ -512,27 +513,27 @@ void clnp_ctloutput (void);
 /* clnp_raw.c */
 void rclnp_input (struct mbuf *, ...);
 int rclnp_output (struct mbuf *, ...);
-int rclnp_ctloutput (int, struct socket *, int, int, struct mbuf **);
+int rclnp_ctloutput (int, struct socket *, struct sockopt *);
 int clnp_usrreq (struct socket *, int, struct mbuf *, struct mbuf *,
 		     struct mbuf *, struct lwp *);
 
 /* clnp_subr.c */
 struct mbuf    *clnp_data_ck (struct mbuf *, int);
-caddr_t clnp_extract_addr (caddr_t, int, struct iso_addr *,
+void *clnp_extract_addr (void *, int, struct iso_addr *,
 			       struct iso_addr *);
 int clnp_ours   (struct iso_addr *);
 void clnp_forward (struct mbuf *, int, struct iso_addr *,
 		       struct clnp_optidx *, int, struct snpa_hdr *);
-caddr_t clnp_insert_addr (caddr_t, struct iso_addr *, struct iso_addr *);
-int clnp_route  (struct iso_addr *, struct route_iso *, int,
-		     struct sockaddr **, struct iso_ifaddr **);
-int clnp_srcroute (struct mbuf *, struct clnp_optidx *, struct route_iso *,
-		       struct sockaddr **, struct iso_ifaddr **,
+void *clnp_insert_addr (void *, struct iso_addr *, struct iso_addr *);
+int clnp_route  (struct iso_addr *, struct route *, int,
+		     const struct sockaddr **, struct iso_ifaddr **);
+int clnp_srcroute (struct mbuf *, struct clnp_optidx *, struct route *,
+		       const struct sockaddr **, struct iso_ifaddr **,
 		       struct iso_addr *);
 int clnp_echoreply (struct mbuf *, int, struct sockaddr_iso *,
 		        struct sockaddr_iso *, struct clnp_optidx *);
 int clnp_badmtu (struct ifnet *, struct rtentry *, int, const char *);
-void clnp_ypocb  (caddr_t, caddr_t, u_int);
+void clnp_ypocb  (void *, void *, u_int);
 
 /* clnp_timer.c */
 struct clnp_fragl *clnp_freefrags (struct clnp_fragl *);

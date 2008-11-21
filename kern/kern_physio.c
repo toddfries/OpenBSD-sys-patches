@@ -1,8 +1,6 @@
-/*	$OpenBSD: kern_physio.c,v 1.28 2007/05/26 20:26:51 pedro Exp $	*/
-/*	$NetBSD: kern_physio.c,v 1.28 1997/05/19 10:43:28 pk Exp $	*/
+/*	$NetBSD: kern_physio.c,v 1.89 2008/11/09 12:18:07 bouyer Exp $	*/
 
 /*-
- * Copyright (c) 1994 Christopher G. Demetriou
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -38,28 +36,179 @@
  *	@(#)kern_physio.c	8.1 (Berkeley) 6/10/93
  */
 
+/*-
+ * Copyright (c) 1994 Christopher G. Demetriou
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_physio.c	8.1 (Berkeley) 6/10/93
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kern_physio.c,v 1.89 2008/11/09 12:18:07 bouyer Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/conf.h>
 #include <sys/proc.h>
-#include <sys/pool.h>
+#include <sys/once.h>
+#include <sys/workqueue.h>
+#include <sys/kmem.h>
 
 #include <uvm/uvm_extern.h>
+
+ONCE_DECL(physio_initialized);
+struct workqueue *physio_workqueue;
 
 /*
  * The routines implemented in this file are described in:
  *	Leffler, et al.: The Design and Implementation of the 4.3BSD
  *	    UNIX Operating System (Addison Welley, 1989)
  * on pages 231-233.
- *
- * The routines "getphysbuf" and "putphysbuf" steal and return a swap
- * buffer.  Leffler, et al., says that swap buffers are used to do the
- * I/O, so raw I/O requests don't have to be single-threaded.
  */
 
-struct buf *getphysbuf(void);
-void putphysbuf(struct buf *bp);
+/* #define	PHYSIO_DEBUG */
+#if defined(PHYSIO_DEBUG)
+#define	DPRINTF(a)	printf a
+#else /* defined(PHYSIO_DEBUG) */
+#define	DPRINTF(a)	/* nothing */
+#endif /* defined(PHYSIO_DEBUG) */
+
+struct physio_stat {
+	int ps_running;
+	int ps_error;
+	int ps_failed;
+	off_t ps_endoffset;
+	buf_t *ps_orig_bp;
+	kmutex_t ps_lock;
+	kcondvar_t ps_cv;
+};
+
+static void
+physio_done(struct work *wk, void *dummy)
+{
+	struct buf *bp = (void *)wk;
+	size_t todo = bp->b_bufsize;
+	size_t done = bp->b_bcount - bp->b_resid;
+	struct physio_stat *ps = bp->b_private;
+
+	KASSERT(&bp->b_work == wk);
+	KASSERT(bp->b_bcount <= todo);
+	KASSERT(bp->b_resid <= bp->b_bcount);
+	KASSERT((bp->b_flags & B_PHYS) != 0);
+	KASSERT(dummy == NULL);
+
+	vunmapbuf(bp, todo);
+	uvm_vsunlock(bp->b_proc->p_vmspace, bp->b_data, todo);
+
+	mutex_enter(&ps->ps_lock);
+	if (__predict_false(done != todo)) {
+		off_t endoffset = dbtob(bp->b_blkno) + done;
+
+		/*
+		 * we got an error or hit EOM.
+		 *
+		 * we only care about the first one.
+		 * ie. the one at the lowest offset.
+		 */
+
+		KASSERT(ps->ps_endoffset != endoffset);
+		DPRINTF(("%s: error=%d at %" PRIu64 " - %" PRIu64
+		    ", blkno=%" PRIu64 ", bcount=%d, flags=0x%x\n",
+		    __func__, bp->b_error, dbtob(bp->b_blkno), endoffset,
+		    bp->b_blkno, bp->b_bcount, bp->b_flags));
+
+		if (ps->ps_endoffset == -1 || endoffset < ps->ps_endoffset) {
+			DPRINTF(("%s: ps=%p, error %d -> %d, endoff %" PRIu64
+			    " -> %" PRIu64 "\n",
+			    __func__, ps,
+			    ps->ps_error, bp->b_error,
+			    ps->ps_endoffset, endoffset));
+
+			ps->ps_endoffset = endoffset;
+			ps->ps_error = bp->b_error;
+		}
+		ps->ps_failed++;
+	} else {
+		KASSERT(bp->b_error == 0);
+	}
+
+	ps->ps_running--;
+	cv_signal(&ps->ps_cv);
+	mutex_exit(&ps->ps_lock);
+
+	if (bp != ps->ps_orig_bp)
+		putiobuf(bp);
+}
+
+static void
+physio_biodone(struct buf *bp)
+{
+#if defined(DIAGNOSTIC)
+	struct physio_stat *ps = bp->b_private;
+	size_t todo = bp->b_bufsize;
+	size_t done = bp->b_bcount - bp->b_resid;
+
+	KASSERT(ps->ps_running > 0);
+	KASSERT(bp->b_bcount <= todo);
+	KASSERT(bp->b_resid <= bp->b_bcount);
+	if (done == todo)
+		KASSERT(bp->b_error == 0);
+#endif /* defined(DIAGNOSTIC) */
+
+	workqueue_enqueue(physio_workqueue, &bp->b_work, NULL);
+}
+
+static void
+physio_wait(struct physio_stat *ps, int n)
+{
+
+	KASSERT(mutex_owned(&ps->ps_lock));
+
+	while (ps->ps_running > n)
+		cv_wait(&ps->ps_cv, &ps->ps_lock);
+}
+
+static int
+physio_init(void)
+{
+	int error;
+
+	KASSERT(physio_workqueue == NULL);
+
+	error = workqueue_create(&physio_workqueue, "physiod",
+	    physio_done, NULL, PRI_BIO, IPL_BIO, WQ_MPSAFE);
+
+	return error;
+}
+
+#define	PHYSIO_CONCURRENCY	16	/* XXX tune */
 
 /*
  * Do "physical I/O" on behalf of a user.  "Physical I/O" is I/O directly
@@ -68,87 +217,121 @@ void putphysbuf(struct buf *bp);
  * Comments in brackets are from Leffler, et al.'s pseudo-code implementation.
  */
 int
-physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
-    void (*minphys)(struct buf *), struct uio *uio)
+physio(void (*strategy)(struct buf *), struct buf *obp, dev_t dev, int flags,
+    void (*min_phys)(struct buf *), struct uio *uio)
 {
 	struct iovec *iovp;
-	struct proc *p = curproc;
-	int error, done, i, nobuf, s, todo;
+	struct lwp *l = curlwp;
+	struct proc *p = l->l_proc;
+	int i, error;
+	struct buf *bp = NULL;
+	struct physio_stat *ps;
+	int concurrency = PHYSIO_CONCURRENCY - 1;
 
-	error = 0;
-	flags &= B_READ | B_WRITE;
-
-	/* Make sure we have a buffer, creating one if necessary. */
-	if ((nobuf = (bp == NULL)) != 0)
-		bp = getphysbuf();
-
-	/* [raise the processor priority level to splbio;] */
-	s = splbio();
-
-	/* [while the buffer is marked busy] */
-	while (bp->b_flags & B_BUSY) {
-		/* [mark the buffer wanted] */
-		bp->b_flags |= B_WANTED;
-		/* [wait until the buffer is available] */
-		tsleep(bp, PRIBIO+1, "physbuf", 0);
+	error = RUN_ONCE(&physio_initialized, physio_init);
+	if (__predict_false(error != 0)) {
+		return error;
 	}
 
-	/* Mark it busy, so nobody else will use it. */
-	bp->b_flags |= B_BUSY;
+	DPRINTF(("%s: called: off=%" PRIu64 ", resid=%zu\n",
+	    __func__, uio->uio_offset, uio->uio_resid));
 
-	/* [lower the priority level] */
-	splx(s);
+	flags &= B_READ | B_WRITE;
 
-	/* [set up the fixed part of the buffer for a transfer] */
-	bp->b_dev = dev;
-	bp->b_error = 0;
-	bp->b_proc = p;
-	LIST_INIT(&bp->b_dep);
+	if ((ps = kmem_zalloc(sizeof(*ps), KM_SLEEP)) == NULL)
+		return ENOMEM;
+	/* ps->ps_running = 0; */
+	/* ps->ps_error = 0; */
+	/* ps->ps_failed = 0; */
+	ps->ps_orig_bp = obp;
+	ps->ps_endoffset = -1;
+	mutex_init(&ps->ps_lock, MUTEX_DEFAULT, IPL_NONE);
+	cv_init(&ps->ps_cv, "physio");
 
-	/*
-	 * [while there are data to transfer and no I/O error]
-	 * Note that I/O errors are handled with a 'goto' at the bottom
-	 * of the 'while' loop.
-	 */
+	/* Make sure we have a buffer, creating one if necessary. */
+	if (obp != NULL) {
+		/* [raise the processor priority level to splbio;] */
+		mutex_enter(&bufcache_lock);
+		/* Mark it busy, so nobody else will use it. */
+		while (bbusy(obp, false, 0, NULL) == EPASSTHROUGH)
+			;
+		mutex_exit(&bufcache_lock);
+		concurrency = 0; /* see "XXXkludge" comment below */
+	}
+
+	uvm_lwp_hold(l);
+
 	for (i = 0; i < uio->uio_iovcnt; i++) {
+		bool sync = true;
+
 		iovp = &uio->uio_iov[i];
 		while (iovp->iov_len > 0) {
+			size_t todo;
+			vaddr_t endp;
+
+			mutex_enter(&ps->ps_lock);
+			if (ps->ps_failed != 0) {
+				goto done_locked;
+			}
+			physio_wait(ps, sync ? 0 : concurrency);
+			mutex_exit(&ps->ps_lock);
+			if (obp != NULL) {
+				/*
+				 * XXXkludge
+				 * some drivers use "obp" as an identifier.
+				 */
+				bp = obp;
+			} else {
+				bp = getiobuf(NULL, true);
+				bp->b_cflags = BC_BUSY;
+			}
+			bp->b_dev = dev;
+			bp->b_proc = p;
+			bp->b_private = ps;
+
 			/*
 			 * [mark the buffer busy for physical I/O]
 			 * (i.e. set B_PHYS (because it's an I/O to user
-			 * memory), and B_RAW, because B_RAW is to be
+			 * memory, and B_RAW, because B_RAW is to be
 			 * "Set by physio for raw transfers.", in addition
 			 * to the "busy" and read/write flag.)
 			 */
-			bp->b_flags = B_BUSY | B_PHYS | B_RAW | flags;
+			bp->b_oflags = 0;
+			bp->b_cflags = BC_BUSY;
+			bp->b_flags = flags | B_PHYS | B_RAW;
+			bp->b_iodone = physio_biodone;
 
 			/* [set up the buffer for a maximum-sized transfer] */
 			bp->b_blkno = btodb(uio->uio_offset);
+			if (dbtob(bp->b_blkno) != uio->uio_offset) {
+				error = EINVAL;
+				goto done;
+			}
+			bp->b_bcount = MIN(MAXPHYS, iovp->iov_len);
 			bp->b_data = iovp->iov_base;
-
-			/*
-			 * Because iov_len is unsigned but b_bcount is signed,
-			 * an overflow is possible. Therefore bound to MAXPHYS
-			 * before calling minphys.
-			 */
-			if (iovp->iov_len > MAXPHYS)
-				bp->b_bcount = MAXPHYS;
-			else
-				bp->b_bcount = iovp->iov_len;
 
 			/*
 			 * [call minphys to bound the transfer size]
 			 * and remember the amount of data to transfer,
 			 * for later comparison.
 			 */
-			(*minphys)(bp);
-			todo = bp->b_bcount;
-#ifdef DIAGNOSTIC
-			if (todo < 0)
-				panic("todo < 0; minphys broken");
+			(*min_phys)(bp);
+			todo = bp->b_bufsize = bp->b_bcount;
+#if defined(DIAGNOSTIC)
 			if (todo > MAXPHYS)
-				panic("todo > MAXPHYS; minphys broken");
-#endif
+				panic("todo(%zu) > MAXPHYS; minphys broken",
+				    todo);
+#endif /* defined(DIAGNOSTIC) */
+
+			sync = false;
+			endp = (vaddr_t)bp->b_data + todo;
+			if (trunc_page(endp) != endp) {
+				/*
+				 * following requests can overlap.
+				 * note that uvm_vslock does round_page.
+				 */
+				sync = true;
+			}
 
 			/*
 			 * [lock the part of the user address space involved
@@ -157,145 +340,81 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 			 * saves it in b_saveaddr.  However, vunmapbuf()
 			 * restores it.
 			 */
-			error = uvm_vslock(p, bp->b_data, todo,
-			    (flags & B_READ) ?
-			    VM_PROT_READ | VM_PROT_WRITE : VM_PROT_READ);
+			error = uvm_vslock(p->p_vmspace, bp->b_data, todo,
+			    (flags & B_READ) ?  VM_PROT_WRITE : VM_PROT_READ);
 			if (error) {
-				bp->b_flags |= B_ERROR;
-				bp->b_error = error;
-				goto after_unlock;
+				goto done;
 			}
 			vmapbuf(bp, todo);
 
+			BIO_SETPRIO(bp, BPRIO_TIMECRITICAL);
+
+			mutex_enter(&ps->ps_lock);
+			ps->ps_running++;
+			mutex_exit(&ps->ps_lock);
+
 			/* [call strategy to start the transfer] */
 			(*strategy)(bp);
+			bp = NULL;
 
-			/*
-			 * Note that the raise/wait/lower/get error
-			 * steps below would be done by biowait(), but
-			 * we want to unlock the address space before
-			 * we lower the priority.
-			 *
-			 * [raise the priority level to splbio]
-			 */
-			s = splbio();
-
-			/* [wait for the transfer to complete] */
-			while ((bp->b_flags & B_DONE) == 0)
-				tsleep(bp, PRIBIO + 1, "physio", 0);
-
-			/* Mark it busy again, so nobody else will use it. */
-			bp->b_flags |= B_BUSY;
-
-			/* [lower the priority level] */
-			splx(s);
-
-			/*
-			 * [unlock the part of the address space previously
-			 *    locked]
-			 */
-			vunmapbuf(bp, todo);
-			uvm_vsunlock(p, bp->b_data, todo);
-after_unlock:
-
-			/* remember error value (save a splbio/splx pair) */
-			if (bp->b_flags & B_ERROR)
-				error = (bp->b_error ? bp->b_error : EIO);
-
-			/*
-			 * [deduct the transfer size from the total number
-			 *    of data to transfer]
-			 */
-			done = bp->b_bcount - bp->b_resid;
-#ifdef DIAGNOSTIC
-			if (done < 0)
-				panic("done < 0; strategy broken");
-			if (done > todo)
-				panic("done > todo; strategy broken");
-#endif
-			iovp->iov_len -= done;
-			iovp->iov_base = (caddr_t)iovp->iov_base + done;
-			uio->uio_offset += done;
-			uio->uio_resid -= done;
-
-			/*
-			 * Now, check for an error.
-			 * Also, handle weird end-of-disk semantics.
-			 */
-			if (error || done < todo)
-				goto done;
+			iovp->iov_len -= todo;
+			iovp->iov_base = (char *)iovp->iov_base + todo;
+			uio->uio_offset += todo;
+			uio->uio_resid -= todo;
 		}
 	}
 
 done:
+	mutex_enter(&ps->ps_lock);
+done_locked:
+	physio_wait(ps, 0);
+	mutex_exit(&ps->ps_lock);
+
+	if (ps->ps_failed != 0) {
+		off_t delta;
+
+		delta = uio->uio_offset - ps->ps_endoffset;
+		KASSERT(delta > 0);
+		uio->uio_resid += delta;
+		/* uio->uio_offset = ps->ps_endoffset; */
+	} else {
+		KASSERT(ps->ps_endoffset == -1);
+	}
+	if (bp != NULL && bp != obp) {
+		putiobuf(bp);
+	}
+	if (error == 0) {
+		error = ps->ps_error;
+	}
+	mutex_destroy(&ps->ps_lock);
+	cv_destroy(&ps->ps_cv);
+	kmem_free(ps, sizeof(*ps));
+
 	/*
 	 * [clean up the state of the buffer]
 	 * Remember if somebody wants it, so we can wake them up below.
 	 * Also, if we had to steal it, give it back.
 	 */
-	s = splbio();
-	bp->b_flags &= ~(B_BUSY | B_PHYS | B_RAW);
-	if (nobuf)
-		putphysbuf(bp);
-	else {
+	if (obp != NULL) {
+		KASSERT((obp->b_cflags & BC_BUSY) != 0);
+
 		/*
 		 * [if another process is waiting for the raw I/O buffer,
-		 *    wake up processes waiting to do physical I/O]
+		 *    wake up processes waiting to do physical I/O;
 		 */
-		if (bp->b_flags & B_WANTED) {
-			bp->b_flags &= ~B_WANTED;
-			wakeup(bp);
-		}
+		mutex_enter(&bufcache_lock);
+		obp->b_cflags &= ~(BC_BUSY | BC_WANTED);
+		obp->b_flags &= ~(B_PHYS | B_RAW);
+		obp->b_iodone = NULL;
+		cv_broadcast(&obp->b_busy);
+		mutex_exit(&bufcache_lock);
 	}
-	splx(s);
+	uvm_lwp_rele(l);
 
-	return (error);
-}
+	DPRINTF(("%s: done: off=%" PRIu64 ", resid=%zu\n",
+	    __func__, uio->uio_offset, uio->uio_resid));
 
-/*
- * Get a swap buffer structure, for use in physical I/O.
- * Mostly taken from /sys/vm/swap_pager.c, except that it no longer
- * records buffer list-empty conditions, and sleeps at PRIBIO + 1,
- * rather than PSWP + 1 (and on a different wchan).
- */
-struct buf *
-getphysbuf(void)
-{
-	struct buf *bp;
-	int s;
-
-	s = splbio();
-	bp = pool_get(&bufpool, PR_WAITOK);
-	splx(s);
-
-	bzero(bp, sizeof(*bp));
-
-	/* XXXCDC: are the following two lines necessary? */
-	bp->b_vnbufs.le_next = NOLIST;
-
-	return (bp);
-}
-
-/*
- * Get rid of a swap buffer structure which has been used in physical I/O.
- * Mostly taken from /sys/vm/swap_pager.c, except that it now uses
- * wakeup() rather than the VM-internal thread_wakeup(), and that the caller
- * must mask disk interrupts, rather than putphysbuf() itself.
- */
-void
-putphysbuf(struct buf *bp)
-{
-	splassert(IPL_BIO);
-
-	/* XXXCDC: is this necessary? */
-	if (bp->b_vp)
-		brelvp(bp);
-
-#ifdef DIAGNOSTIC
-	if (bp->b_flags & B_WANTED)
-		panic("putphysbuf: private buf B_WANTED");
-#endif
-	pool_put(&bufpool, bp);
+	return error;
 }
 
 /*

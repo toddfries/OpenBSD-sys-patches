@@ -1,5 +1,4 @@
-$OpenBSD: diodevs,v 1.8 2008/05/01 14:29:01 miod Exp $
-/* $NetBSD: diodevs,v 1.7 2003/11/23 01:57:35 tsutsui Exp $ */
+$NetBSD: diodevs,v 1.9 2008/04/28 20:23:19 martin Exp $
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@ $OpenBSD: diodevs,v 1.8 2008/05/01 14:29:01 miod Exp $
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +44,6 @@ device DCM		0x05	1	98642A serial MUX
 device DCMREM		0x85	1	98642A serial MUX
 
 device LAN		0x15	1	98643A LAN
-device LANREM		0x95	1	98643A LAN
 
 device FHPIB		0x08	1	98625A/98625B HP-IB
 device NHPIB		0x01	1	98624A HP-IB
@@ -69,7 +60,7 @@ device FRAMEBUFFER	0x39	1	bitmapped display
 
 framebuffer GATORBOX	0x01	1	98700/98710 (\"gatorbox\") display
 framebuffer TOPCAT	0x02	1	98544/98545/98547 (\"topcat\") display
-framebuffer RENAISSANCE	0x04	2	98720/98721 (\"renaissance\") display
+framebuffer RENASSIANCE	0x04	2	98720/98721 (\"renassiance\") display
 framebuffer LRCATSEYE	0x05	1	low-res catseye display
 framebuffer HRCCATSEYE	0x06	1	high-res color catseye display
 framebuffer HRMCATSEYE	0x07	1	high-res mono catseye display
@@ -80,10 +71,8 @@ framebuffer HYPERION	0x0e	1	A1096A (\"hyperion\") display
 /* Unsupported framebuffers. */
 
 framebuffer XGENESIS	0x0b	1	x-genesis display
-framebuffer TIGERSHARK	0x0c	3	TurboVRX (\"tigershark\") display
+framebuffer TIGER	0x0c	1	tiger display
 framebuffer YGENESIS	0x0d	1	y-genesis display
-framebuffer FB3X2_A	0x10	4	362/382 internal display #1
-framebuffer FB3X2_B	0x11	4	362/382 internal display #2
 
 /* Devices not yet supported.  Descriptions are lacking. */
 

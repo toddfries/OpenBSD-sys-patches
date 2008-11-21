@@ -1,4 +1,4 @@
-/*	$NetBSD: mainbus.c,v 1.36 2006/10/30 16:22:42 skrll Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.45 2008/06/13 09:41:44 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.36 2006/10/30 16:22:42 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.45 2008/06/13 09:41:44 cegger Exp $");
 
 #include "locators.h"
 #include "opt_power_switch.h"
@@ -174,8 +167,8 @@ void mbus_dmamap_unload(void *, bus_dmamap_t);
 void mbus_dmamap_sync(void *, bus_dmamap_t, bus_addr_t, bus_size_t, int);
 int mbus_dmamem_alloc(void *, bus_size_t, bus_size_t, bus_size_t, bus_dma_segment_t *, int, int *, int);
 void mbus_dmamem_free(void *, bus_dma_segment_t *, int);
-int mbus_dmamem_map(void *, bus_dma_segment_t *, int, size_t, caddr_t *, int);
-void mbus_dmamem_unmap(void *, caddr_t, size_t);
+int mbus_dmamem_map(void *, bus_dma_segment_t *, int, size_t, void **, int);
+void mbus_dmamem_unmap(void *, void *, size_t);
 paddr_t mbus_dmamem_mmap(void *, bus_dma_segment_t *, int, off_t, int, int);
 int _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
     bus_size_t buflen, struct vmspace *vm, int flags, paddr_t *lastaddrp, 
@@ -330,7 +323,7 @@ mbus_map(void *v, bus_addr_t bpa, bus_size_t size, int flags,
 	offset = (bpa & PGOFSET);
 	bpa -= offset;
 	size += offset;
-	size = hppa_round_page(size);
+	size = round_page(size);
 
 	/*
 	 * Allocate the region of I/O space.
@@ -368,7 +361,7 @@ mbus_unmap(void *v, bus_space_handle_t bsh, bus_size_t size)
 	offset = bsh & PGOFSET;
 	bsh -= offset;
 	size += offset;
-	size = hppa_round_page(size);
+	size = round_page(size);
 
 	/*
 	 * Unmap the region of I/O space.
@@ -405,7 +398,7 @@ mbus_alloc(void *v, bus_addr_t rstart, bus_addr_t rend, bus_size_t size,
 	 */
 	if (align < PAGE_SIZE)
 		align = PAGE_SIZE;
-	size = hppa_round_page(size);
+	size = round_page(size);
 
 	/*
 	 * Allocate the region of I/O space.
@@ -984,7 +977,7 @@ mbus_dmamap_load_uio(void *v, bus_dmamap_t map, struct uio *uio,
 	int seg, i, error, first;
 	bus_size_t minlen, resid;
 	struct iovec *iov;
-	caddr_t addr;
+	void *addr;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings."
@@ -1004,7 +997,7 @@ mbus_dmamap_load_uio(void *v, bus_dmamap_t map, struct uio *uio,
 		 * until we have exhausted the residual count.
 		 */
 		minlen = MIN(resid, iov[i].iov_len);
-		addr = (caddr_t)iov[i].iov_base;
+		addr = (void *)iov[i].iov_base;
 
 		error = _bus_dmamap_load_buffer(NULL, map, addr, minlen,
 		    uio->uio_vmspace, flags, &lastaddr, &seg, first);
@@ -1045,7 +1038,7 @@ mbus_dmamap_load_raw(void *v, bus_dmamap_t map, bus_dma_segment_t *segs,
 	pa_next = 0;
 	seg = -1;
 	mapsize = size;
-	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq)) {
+	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq.queue)) {
 
 		if (size == 0)
 			panic("mbus_dmamem_load_raw: size botch");
@@ -1223,7 +1216,7 @@ mbus_dmamem_alloc(void *v, bus_size_t size, bus_size_t alignment,
 	 */
 	pa_next = 0;
 	seg = -1;
-	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq)) {
+	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq.queue)) {
 		pa = VM_PAGE_TO_PHYS(m);
 		if (pa != pa_next) {
 			if (++seg >= nsegs) {
@@ -1243,7 +1236,7 @@ mbus_dmamem_alloc(void *v, bus_size_t size, bus_size_t alignment,
 	 * Simply keep a pointer around to the linked list, so
 	 * bus_dmamap_free() can return it.
 	 *
-	 * NOBODY SHOULD TOUCH THE pageq FIELDS WHILE THESE PAGES
+	 * NOBODY SHOULD TOUCH THE pageq.queue FIELDS WHILE THESE PAGES
 	 * ARE IN OUR CUSTODY.
 	 */
 	segs[0]._ds_mlist = mlist;
@@ -1279,7 +1272,7 @@ mbus_dmamem_free(void *v, bus_dma_segment_t *segs, int nsegs)
  */
 int
 mbus_dmamem_map(void *v, bus_dma_segment_t *segs, int nsegs, size_t size,
-    caddr_t *kvap, int flags)
+    void **kvap, int flags)
 {
 	struct vm_page *pg;
 	struct pglist *pglist;
@@ -1294,7 +1287,7 @@ mbus_dmamem_map(void *v, bus_dma_segment_t *segs, int nsegs, size_t size,
 	if (segs[0]._ds_mlist == NULL) {
 		if (size > segs[0].ds_len)
 			panic("mbus_dmamem_map: size botch");
-		*kvap = (caddr_t)segs[0]._ds_va;
+		*kvap = (void *)segs[0]._ds_va;
 		return (0);
 	}
 
@@ -1305,11 +1298,11 @@ mbus_dmamem_map(void *v, bus_dma_segment_t *segs, int nsegs, size_t size,
 
 	/* Stash that in the first segment. */
 	segs[0]._ds_va = va;
-	*kvap = (caddr_t)va;
+	*kvap = (void *)va;
 
 	/* Map the allocated pages into the chunk. */
 	pglist = segs[0]._ds_mlist;
-	TAILQ_FOREACH(pg, pglist, pageq) {
+	TAILQ_FOREACH(pg, pglist, pageq.queue) {
 		KASSERT(size != 0);
 		pa = VM_PAGE_TO_PHYS(pg);
 		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE | PMAP_NC);
@@ -1325,7 +1318,7 @@ mbus_dmamem_map(void *v, bus_dma_segment_t *segs, int nsegs, size_t size,
  * bus-specific DMA memory unmapping functions.
  */
 void
-mbus_dmamem_unmap(void *v, caddr_t kva, size_t size)
+mbus_dmamem_unmap(void *v, void *kva, size_t size)
 {
 
 #ifdef DIAGNOSTIC
@@ -1337,7 +1330,7 @@ mbus_dmamem_unmap(void *v, caddr_t kva, size_t size)
 	 * XXX fredette - this is gross, but it is needed
 	 * to support the 24-bit DMA address stuff.
 	 */
-	if (dma24_ex != NULL && kva < (caddr_t) (1 << 24))
+	if (dma24_ex != NULL && kva < (void *) (1 << 24))
 		return;
 
 	size = round_page(size);
@@ -1395,12 +1388,12 @@ _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	bmask  = ~(map->_dm_boundary - 1);
 
 	for (seg = *segp; buflen > 0; ) {
-		boolean_t ok;
+		bool ok;
 		/*
 		 * Get the physical address for this segment.
 		 */
 		ok = pmap_extract(pmap, vaddr, &curaddr);
-		KASSERT(ok == TRUE);
+		KASSERT(ok == true);
 
 		/*
 		 * Compute the segment size, and adjust counts.
@@ -1491,7 +1484,7 @@ mb_module_callback(struct device *self, struct confargs *ca)
 	if (ca->ca_type.iodc_type == HPPA_TYPE_NPROC ||
 	    ca->ca_type.iodc_type == HPPA_TYPE_MEMORY)
 		return;
-	config_found_sm_loc(self, "mainbus", NULL, ca, mbprint, mbsubmatch);
+	config_found_sm_loc(self, "gedoens", NULL, ca, mbprint, mbsubmatch);
 }
 
 static void
@@ -1500,7 +1493,7 @@ mb_cpu_mem_callback(struct device *self, struct confargs *ca)
 	if ((ca->ca_type.iodc_type == HPPA_TYPE_NPROC ||
 	     ca->ca_type.iodc_type == HPPA_TYPE_MEMORY) &&
 	    ca->ca_hpa != pdc_hpa.hpa)
-		config_found_sm_loc(self, "mainbus", NULL, ca, mbprint,
+		config_found_sm_loc(self, "gedoens", NULL, ca, mbprint,
 				    mbsubmatch);
 }
 
@@ -1555,7 +1548,7 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Scan mainbus for monarch CPU and attach it.
 	 *
-	 * How to do device scaning? Try to use PDC_SYSTEM_MAP.
+	 * How to do device scanning? Try to use PDC_SYSTEM_MAP.
 	 * We are on a "new" system if it succedes, so use PDC_SYSTEM_MAP.
 	 * Otherwise we must be on an "old" system, so use PDC_MEMMAP.
 	 */
@@ -1660,7 +1653,7 @@ cpu_gethpa(int n)
 {
 	struct mainbus_softc *sc;
 
-	sc = mainbus_cd.cd_devs[0];
+	sc = device_lookup_private(&mainbus_cd, 0);
 
 	return sc->sc_hpa;
 }

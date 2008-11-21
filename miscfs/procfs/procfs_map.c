@@ -1,4 +1,4 @@
-/*	$NetBSD: procfs_map.c,v 1.27 2006/11/16 01:33:38 christos Exp $	*/
+/*	$NetBSD: procfs_map.c,v 1.36 2008/07/25 18:36:50 christos Exp $	*/
 
 /*
  * Copyright (c) 1993
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: procfs_map.c,v 1.27 2006/11/16 01:33:38 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: procfs_map.c,v 1.36 2008/07/25 18:36:50 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -84,19 +84,15 @@ __KERNEL_RCSID(0, "$NetBSD: procfs_map.c,v 1.27 2006/11/16 01:33:38 christos Exp
 #include <sys/vnode.h>
 #include <sys/malloc.h>
 #include <sys/namei.h>
+#include <sys/filedesc.h>
 #include <miscfs/procfs/procfs.h>
 
 #include <sys/lock.h>
 
 #include <uvm/uvm.h>
 
-#define MEBUFFERSIZE 256
-
-extern int getcwd_common(struct vnode *, struct vnode *,
-			      char **, char *, int, int, struct lwp *);
-
-static int procfs_vnode_to_path(struct vnode *vp, char *path, int len,
-				struct lwp *curl, struct proc *p);
+#define BUFFERSIZE (64 * 1024)
+#define MAXBUFFERSIZE (256 * 1024)
 
 /*
  * The map entries can *almost* be read with programs like cat.  However,
@@ -112,56 +108,69 @@ int
 procfs_domap(struct lwp *curl, struct proc *p, struct pfsnode *pfs,
 	     struct uio *uio, int linuxmode)
 {
-	size_t len;
 	int error;
-	struct vm_map *map = &p->p_vmspace->vm_map;
+	struct vmspace *vm;
+	struct vm_map *map;
 	struct vm_map_entry *entry;
-	char mebuffer[MEBUFFERSIZE];
+	char *buffer = NULL;
+	size_t bufsize = BUFFERSIZE;
 	char *path;
 	struct vnode *vp;
 	struct vattr va;
 	dev_t dev;
 	long fileid;
+	size_t pos;
 
 	if (uio->uio_rw != UIO_READ)
-		return (EOPNOTSUPP);
+		return EOPNOTSUPP;
 
-	if (uio->uio_offset != 0)
-		return (0);
+	if (uio->uio_offset != 0) {
+		/*
+		 * we return 0 here, so that the second read returns EOF
+		 * we don't support reading from an offset because the
+		 * map could have changed between the two reads.
+		 */
+		return 0;
+	}
 
 	error = 0;
-	if (map != &curl->l_proc->p_vmspace->vm_map)
-		vm_map_lock_read(map);
-	for (entry = map->header.next;
-		((uio->uio_resid > 0) && (entry != &map->header));
-		entry = entry->next) {
+
+	if (linuxmode != 0)
+		path = malloc(MAXPATHLEN * 4, M_TEMP, M_WAITOK);
+	else
+		path = NULL;
+
+	if ((error = proc_vmspace_getref(p, &vm)) != 0)
+		goto out;
+
+	map = &vm->vm_map;
+	vm_map_lock_read(map);
+
+again:
+	buffer = malloc(bufsize, M_TEMP, M_WAITOK);
+	pos = 0;
+	for (entry = map->header.next; entry != &map->header;
+	    entry = entry->next) {
 
 		if (UVM_ET_ISSUBMAP(entry))
 			continue;
 
 		if (linuxmode != 0) {
-			path = (char *)malloc(MAXPATHLEN * 4, M_TEMP, M_WAITOK);
-			if (path == NULL) {
-				error = ENOMEM;
-				break;
-			}
 			*path = 0;
-
 			dev = (dev_t)0;
 			fileid = 0;
 			if (UVM_ET_ISOBJ(entry) &&
 			    UVM_OBJ_IS_VNODE(entry->object.uvm_obj)) {
 				vp = (struct vnode *)entry->object.uvm_obj;
-				error = VOP_GETATTR(vp, &va, curl->l_cred,
-				    curl);
+				error = VOP_GETATTR(vp, &va, curl->l_cred);
 				if (error == 0 && vp != pfs->pfs_vnode) {
 					fileid = va.va_fileid;
 					dev = va.va_fsid;
-					error = procfs_vnode_to_path(vp, path,
-					    MAXPATHLEN * 4, curl, p);
+					error = vnode_to_path(path,
+					    MAXPATHLEN * 4, vp, curl, p);
 				}
 			}
-			snprintf(mebuffer, sizeof(mebuffer),
+			pos += snprintf(buffer + pos, bufsize - pos,
 			    "%0*lx-%0*lx %c%c%c%c %0*lx %02x:%02x %ld     %s\n",
 			    (int)sizeof(void *) * 2,(unsigned long)entry->start,
 			    (int)sizeof(void *) * 2,(unsigned long)entry->end,
@@ -172,9 +181,8 @@ procfs_domap(struct lwp *curl, struct proc *p, struct pfsnode *pfs,
 			    (int)sizeof(void *) * 2,
 			    (unsigned long)entry->offset,
 			    major(dev), minor(dev), fileid, path);
-			free(path, M_TEMP);
 		} else {
-			snprintf(mebuffer, sizeof(mebuffer),
+			pos += snprintf(buffer + pos, bufsize - pos,
 			    "0x%lx 0x%lx %c%c%c %c%c%c %s %s %d %d %d\n",
 			    entry->start, entry->end,
 			    (entry->protection & VM_PROT_READ) ? 'r' : '-',
@@ -190,73 +198,32 @@ procfs_domap(struct lwp *curl, struct proc *p, struct pfsnode *pfs,
 			    entry->inheritance, entry->wired_count,
 			    entry->advice);
 		}
-
-		len = strlen(mebuffer);
-		if (len > uio->uio_resid) {
-			error = EFBIG;
-			break;
+		if (pos >= bufsize) {
+			bufsize <<= 1;
+			if (bufsize > MAXBUFFERSIZE) {
+				error = ENOMEM;
+				goto out;
+			}
+			free(buffer, M_TEMP);
+			goto again;
 		}
-		error = uiomove(mebuffer, len, uio);
-		if (error)
-			break;
 	}
-	if (map != &curl->l_proc->p_vmspace->vm_map)
-		vm_map_unlock_read(map);
+
+	vm_map_unlock_read(map);
+	uvmspace_free(vm);
+
+	error = uiomove(buffer, pos, uio);
+out:
+	if (path != NULL)
+		free(path, M_TEMP);
+	if (buffer != NULL)
+		free(buffer, M_TEMP);
+
 	return error;
 }
 
 int
 procfs_validmap(struct lwp *l, struct mount *mp)
 {
-	return ((l->l_proc->p_flag & P_SYSTEM) == 0);
-}
-
-/*
- * Try to find a pathname for a vnode. Since there is no mapping
- * vnode -> parent directory, this needs the NAMECACHE_ENTER_REVERSE
- * option to work (to make cache_revlookup succeed).
- */
-static int procfs_vnode_to_path(struct vnode *vp, char *path, int len,
-				struct lwp *curl, struct proc *p)
-{
-	struct proc *curp = curl->l_proc;
-	int error, lenused, elen;
-	char *bp, *bend;
-	struct vnode *dvp;
-
-	bp = bend = &path[len];
-	*(--bp) = '\0';
-
-	error = vget(vp, LK_EXCLUSIVE | LK_RETRY);
-	if (error != 0)
-		return error;
-	error = cache_revlookup(vp, &dvp, &bp, path);
-	vput(vp);
-	if (error != 0)
-		return (error == -1 ? ENOENT : error);
-
-	error = vget(dvp, 0);
-	if (error != 0)
-		return error;
-	*(--bp) = '/';
-	/* XXX GETCWD_CHECK_ACCESS == 0x0001 */
-	error = getcwd_common(dvp, NULL, &bp, path, len / 2, 1, curl);
-
-	/*
-	 * Strip off emulation path for emulated processes looking at
-	 * the maps file of a process of the same emulation. (Won't
-	 * work if /emul/xxx is a symlink..)
-	 */
-	if (curp->p_emul == p->p_emul && curp->p_emul->e_path != NULL) {
-		elen = strlen(curp->p_emul->e_path);
-		if (!strncmp(bp, curp->p_emul->e_path, elen))
-			bp = &bp[elen];
-	}
-
-	lenused = bend - bp;
-
-	memcpy(path, bp, lenused);
-	path[lenused] = 0;
-
-	return 0;
+	return ((l->l_flag & LW_SYSTEM) == 0);
 }

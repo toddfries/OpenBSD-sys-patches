@@ -1,8 +1,6 @@
-/*	$OpenBSD: dca.c,v 1.7 2008/01/23 16:37:56 jsing Exp $	*/
-/*	$NetBSD: dca.c,v 1.10 1996/10/06 01:42:48 mycroft Exp $	*/
+/*	$NetBSD: dca.c,v 1.6 2005/12/11 12:17:19 christos Exp $	*/
 
 /*
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -36,14 +34,57 @@
  *
  *	@(#)dca.c	8.1 (Berkeley) 6/10/93
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)dca.c	8.1 (Berkeley) 6/10/93
+ */
 
 #ifdef DCACONSOLE
 #include <sys/param.h>
+#include <dev/cons.h>
 
-#include <hp300/dev/dcareg.h>
+#include <hp300/stand/common/dcareg.h>
+#include <hp300/stand/common/consdefs.h>
+#include <hp300/stand/common/samachdep.h>
 
-#include "samachdep.h"
-#include "consdefs.h"
+/* If not using 4.4 devs */
+#ifndef dca_reset
+#define dca_id dca_irid
+#define dca_reset dca_id
+#endif
 
 struct dcadevice *dcacnaddr = 0;
 
@@ -55,22 +96,30 @@ dcaprobe(struct consdev *cp)
 	struct dcadevice *dca;
 
 	dcacnaddr = (struct dcadevice *) sctoaddr(DCACONSCODE);
-	if (badaddr((char *)dcacnaddr))
+	if (badaddr((char *)dcacnaddr)) {
+		cp->cn_pri = CN_DEAD;
 		return;
-
+	}
+#ifdef FORCEDCACONSOLE
+	cp->cn_pri = CN_REMOTE;
+#else
 	dca = dcacnaddr;
 	switch (dca->dca_id) {
 	case DCAID0:
 	case DCAID1:
-		cp->cn_pri = CN_LOWPRI;
+		cp->cn_pri = CN_NORMAL;
 		break;
-	case DCAID0 | DCACON:
-	case DCAID1 | DCACON:
-		cp->cn_pri = CN_HIGHPRI;
+	case DCAREMID0:
+	case DCAREMID1:
+		cp->cn_pri = CN_REMOTE;
 		break;
 	default:
+		cp->cn_pri = CN_DEAD;
 		break;
 	}
+
+#endif
+	curcons_scode = DCACONSCODE;
 }
 
 void
@@ -91,22 +140,27 @@ dcainit(struct consdev *cp)
 }
 
 /* ARGSUSED */
+#ifndef SMALL
 int
 dcagetchar(dev_t dev)
 {
-#ifndef SMALL
 	struct dcadevice *dca = dcacnaddr;
 	short stat;
 	int c;
 
 	if (((stat = dca->dca_lsr) & LSR_RXRDY) == 0)
-		return(0);
+		return 0;
 	c = dca->dca_data;
-	return(c);
-#else
-	return(0);
-#endif
+	return c;
 }
+#else
+int
+dcagetchar(dev_t dev)
+{
+
+	return 0;
+}
+#endif
 
 /* ARGSUSED */
 void

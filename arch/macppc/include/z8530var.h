@@ -1,7 +1,6 @@
-/*	$NetBSD: z8530var.h,v 1.5 2002/03/17 19:40:45 atatat Exp $	*/
+/*	$NetBSD: z8530var.h,v 1.14 2008/03/29 19:15:34 tsutsui Exp $	*/
 
 /*
- * Copyright (c) 1994 Gordon W. Ross
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -41,7 +40,50 @@
  *	@(#)zsvar.h	8.1 (Berkeley) 6/11/93
  */
 
-#include <macppc/dev/z8530sc.h>
+/*
+ * Copyright (c) 1994 Gordon W. Ross
+ *
+ * This software was developed by the Computer Systems Engineering group
+ * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
+ * contributed to Berkeley.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Lawrence Berkeley Laboratory.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)zsvar.h	8.1 (Berkeley) 6/11/93
+ */
+
+#include <dev/ic/z8530sc.h>
 #include <macppc/dev/dbdma.h>
 
 /*
@@ -91,13 +133,14 @@ struct xzs_chanstate {
 };
 
 struct zsc_softc {
-	struct	device zsc_dev;		/* required first: base device */
+	device_t zsc_dev;		/* required first: base device */
 	struct	zs_chanstate *zsc_cs[2];	/* channel A and B soft state */
 	/* Machine-dependent part follows... */
 	struct xzs_chanstate xzsc_xcs_store[2];
 	dbdma_regmap_t *zsc_txdmareg[2];
 	dbdma_command_t *zsc_txdmacmd[2];
 	/* XXX tx only, for now */
+	void *zsc_si;			/* softintr handler */
 };
 
 /*
@@ -106,29 +149,28 @@ struct zsc_softc {
  * and the Sun3 hardware does NOT take care of this for you.
  * MacII hardware DOES dake care of the delay for us. :-)
  * XXX - Then these should be inline functions! -gwr
- * Some clock-chirped macs lose serial ports. It could be that the
+ * Some clock-chirped macs loose serial ports. It could be that the
  * hardware delay is tied to the CPU speed, and that the minimum delay
  * no longer's respected. For them, ZS_DELAY might help.
  * XXX - no one seems to want to try and check this -wrs
  */
 
-u_char zs_read_reg(struct zs_chanstate *cs, u_char reg);
-u_char zs_read_csr(struct zs_chanstate *cs);
-u_char zs_read_data(struct zs_chanstate *cs);
+uint8_t zs_read_reg(struct zs_chanstate *cs, uint8_t reg);
+uint8_t zs_read_csr(struct zs_chanstate *cs);
+uint8_t zs_read_data(struct zs_chanstate *cs);
 
-void  zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val);
-void  zs_write_csr(struct zs_chanstate *cs, u_char val);
-void  zs_write_data(struct zs_chanstate *cs, u_char val);
+void  zs_write_reg(struct zs_chanstate *cs, uint8_t reg,uint8_t val);
+void  zs_write_csr(struct zs_chanstate *cs, uint8_t val);
+void  zs_write_data(struct zs_chanstate *cs, uint8_t val);
 
 /* XXX - Could define splzs() here instead of in psl.h */
 #define splzs spltty
+#define	IPL_ZS IPL_TTY
 
 /* Hook for MD ioctl support */
-int	zsmdioctl(struct zs_chanstate *cs, u_long cmd, caddr_t data);
+int	zsmdioctl(struct zs_chanstate *cs, u_long cmd, void *data);
 /* XXX - This is a bit gross... */
-/*
 #define ZS_MD_IOCTL(cs, cmd, data) zsmdioctl(cs, cmd, data)
-*/
 
 /* Callback for "external" clock sources */
 void zsmd_setclock(struct zs_chanstate *cs);
@@ -138,14 +180,16 @@ void zsmd_setclock(struct zs_chanstate *cs);
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
-	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
-	u_char		zc_xxx0[15];
-	volatile u_char	zc_data;	/* data */
-	u_char		zc_xxx1[15];
+	volatile uint8_t zc_csr;	/* ctrl,status, and indirect access */
+	uint8_t		zc_xxx0[15];
+	volatile uint8_t zc_data;	/* data */
+	uint8_t		zc_xxx1[15];
 };
-void	zs_kgdb_init (void);
+void	zs_putc(void *, int);
+int	zs_getc(void *);
+void zs_kgdb_init(void);
 
-#ifndef ZSCCF_CHANNEL
-#define ZSCCF_CHANNEL 0
-#define ZSCCF_CHANNEL_DEFAULT -1
+#ifdef ZS_TXDMA
+void zstty_txdma_int(void *);
+void zs_dma_setup(struct zs_chanstate *, void *, int);
 #endif

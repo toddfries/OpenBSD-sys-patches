@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_extern.h,v 1.87 2006/09/01 19:41:28 perseant Exp $	*/
+/*	$NetBSD: lfs_extern.h,v 1.96 2008/06/28 01:34:05 rumble Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -89,7 +82,8 @@ MALLOC_DECLARE(M_SEGMENT);
 #define LFS_STATS	 6
 #define LFS_DO_RFW	 7
 #define LFS_DEBUGLOG	 8
-#define LFS_MAXID	 9
+#define LFS_IGNORE_LAZY_SYNC	9
+#define LFS_MAXID	 10
 
 struct fid;
 struct mount;
@@ -120,8 +114,10 @@ extern int locked_queue_count;
 extern long locked_queue_bytes;
 extern int lfs_subsys_pages;
 extern int lfs_dirvcount;
-extern struct simplelock lfs_subsys_lock;
+extern kmutex_t lfs_lock;
 extern int lfs_debug_log_subsys[];
+extern kcondvar_t lfs_writing_cv;
+extern kcondvar_t locked_queue_cv;
 
 __BEGIN_DECLS
 /* lfs_alloc.c */
@@ -165,7 +161,7 @@ void lfs_debug_log(int, const char *, ...);
 /* lfs_inode.c */
 int lfs_update(struct vnode *, const struct timespec *, const struct timespec *,
     int);
-int lfs_truncate(struct vnode *, off_t, int, kauth_cred_t, struct lwp *);
+int lfs_truncate(struct vnode *, off_t, int, kauth_cred_t);
 struct ufs1_dinode *lfs_ifind(struct lfs *, ino_t, struct buf *);
 void lfs_finalize_ino_seguse(struct lfs *, struct inode *);
 void lfs_finalize_fs_seguse(struct lfs *);
@@ -180,7 +176,7 @@ int lfs_vflush(struct vnode *);
 int lfs_segwrite(struct mount *, int);
 int lfs_writefile(struct lfs *, struct segment *, struct vnode *);
 int lfs_writeinode(struct lfs *, struct segment *, struct inode *);
-int lfs_gatherblock(struct segment *, struct buf *, int *);
+int lfs_gatherblock(struct segment *, struct buf *, kmutex_t *);
 int lfs_gather(struct lfs *, struct segment *, struct vnode *, int (*match )(struct lfs *, struct buf *));
 void lfs_update_single(struct lfs *, struct segment *, struct vnode *,
     daddr_t, int32_t, int);
@@ -216,7 +212,7 @@ void lfs_wakeup_cleaner(struct lfs *);
 
 /* lfs_syscalls.c */
 int lfs_fastvget(struct mount *, ino_t, daddr_t, struct vnode **, struct ufs1_dinode *);
-struct buf *lfs_fakebuf(struct lfs *, struct vnode *, int, size_t, caddr_t);
+struct buf *lfs_fakebuf(struct lfs *, struct vnode *, int, size_t, void *);
 int lfs_do_segclean(struct lfs *, unsigned long);
 int lfs_segwait(fsid_t *, struct timeval *);
 int lfs_bmapv(struct proc *, fsid_t *, struct block_info *, int);
@@ -227,10 +223,10 @@ void lfs_init(void);
 void lfs_reinit(void);
 void lfs_done(void);
 int lfs_mountroot(void);
-int lfs_mount(struct mount *, const char *, void *, struct nameidata *, struct lwp *);
-int lfs_unmount(struct mount *, int, struct lwp *);
-int lfs_statvfs(struct mount *, struct statvfs *, struct lwp *);
-int lfs_sync(struct mount *, int, kauth_cred_t, struct lwp *);
+int lfs_mount(struct mount *, const char *, void *, size_t *);
+int lfs_unmount(struct mount *, int);
+int lfs_statvfs(struct mount *, struct statvfs *);
+int lfs_sync(struct mount *, int, kauth_cred_t);
 int lfs_vget(struct mount *, ino_t, struct vnode **);
 int lfs_fhtovp(struct mount *, struct fid *, struct vnode **);
 int lfs_vptofh(struct vnode *, struct fid *, size_t *);
@@ -271,10 +267,6 @@ int lfs_strategy (void *);
 int lfs_write	 (void *);
 int lfs_getpages (void *);
 int lfs_putpages (void *);
-
-#ifdef SYSCTL_SETUP_PROTO
-SYSCTL_SETUP_PROTO(sysctl_vfs_lfs_setup);
-#endif /* SYSCTL_SETUP_PROTO */
 
 extern int lfs_mount_type;
 extern int (**lfs_vnodeop_p)(void *);

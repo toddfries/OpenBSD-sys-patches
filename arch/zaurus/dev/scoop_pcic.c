@@ -1,3 +1,4 @@
+/*	$NetBSD: scoop_pcic.c,v 1.2 2006/12/17 16:07:11 peter Exp $	*/
 /*	$OpenBSD: scoop_pcic.c,v 1.1 2005/07/01 23:51:55 uwe Exp $	*/
 
 /*
@@ -16,53 +17,60 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: scoop_pcic.c,v 1.2 2006/12/17 16:07:11 peter Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/device.h>
+
 #include <uvm/uvm.h>
 
 #include <arch/arm/xscale/pxa2x0var.h>
-#include <arch/arm/xscale/pxapcicvar.h>
+#include <arch/arm/xscale/pxa2x0_gpio.h>
+#include <arch/arm/xscale/pxa2x0_pcic.h>
 
-#include <machine/zaurus_reg.h>
-#include <machine/zaurus_var.h>
+#include <zaurus/zaurus/zaurus_reg.h>
+#include <zaurus/zaurus/zaurus_var.h>
 
-#include <zaurus/dev/zaurus_scoopreg.h>
+#include <zaurus/dev/scoopreg.h>
 
-int	scoop_pcic_match(struct device *, void *, void *);
-void	scoop_pcic_attach(struct device *, struct device *, void *);
-void	scoop_pcic_socket_setup(struct pxapcic_socket *);
+static int	scoop_pcic_match(struct device *, struct cfdata *, void *);
+static void	scoop_pcic_attach(struct device *, struct device *, void *);
 
-struct cfattach pxapcic_scoop_ca = {
-	sizeof(struct pxapcic_softc), scoop_pcic_match,
-	scoop_pcic_attach
-};
+CFATTACH_DECL(pxapcic_scoop, sizeof(struct pxapcic_softc),
+	scoop_pcic_match, scoop_pcic_attach, NULL, NULL);
 
-u_int	scoop_pcic_read(struct pxapcic_socket *, int);
-void	scoop_pcic_write(struct pxapcic_socket *, int, u_int);
-void	scoop_pcic_set_power(struct pxapcic_socket *, int);
-void	scoop_pcic_clear_intr(struct pxapcic_socket *);
+static void	scoop_pcic_socket_setup(struct pxapcic_socket *);
+static u_int	scoop_pcic_read(struct pxapcic_socket *, int);
+static void	scoop_pcic_write(struct pxapcic_socket *, int, u_int);
+static void	scoop_pcic_set_power(struct pxapcic_socket *, int);
+static void	scoop_pcic_clear_intr(struct pxapcic_socket *);
+static void 	*scoop_pcic_intr_establish(struct pxapcic_socket *, int,
+		    int (*)(void *), void *);
+static void	scoop_pcic_intr_disestablish(struct pxapcic_socket *, void *);
 
 struct pxapcic_tag scoop_pcic_functions = {
 	scoop_pcic_read,
 	scoop_pcic_write,
 	scoop_pcic_set_power,
 	scoop_pcic_clear_intr,
-	0,			/* intr_establish */
-	0,			/* intr_disestablish */
-	0			/* intr_string */
+	scoop_pcic_intr_establish,
+	scoop_pcic_intr_disestablish
 };
 
-int
-scoop_pcic_match(struct device *parent, void *cf, void *aux)
+static int
+scoop_pcic_match(struct device *parent, struct cfdata *cf, void *aux)
 {
+
 	return (ZAURUS_ISC860 || ZAURUS_ISC3000);
 }
 
-void
+static void
 scoop_pcic_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pxapcic_softc *sc = (struct pxapcic_softc *)self;
-	struct pxaip_attach_args *pxa = aux;
+	struct pxaip_attach_args *pxa = (struct pxaip_attach_args *)aux;
 
 	sc->sc_iot = pxa->pxa_iot;
 
@@ -77,11 +85,12 @@ scoop_pcic_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_irqpin[1] = C3000_CF1_IRQ;
 		sc->sc_irqcfpin[1] = C3000_CF1_IRQ_PIN;
 	}
+	sc->sc_flags |= PPF_REVERSE_ORDER;
 
-	pxapcic_attach(sc, &scoop_pcic_socket_setup);
+	pxapcic_attach_common(sc, &scoop_pcic_socket_setup);
 }
 
-void
+static void
 scoop_pcic_socket_setup(struct pxapcic_socket *so)
 {
 	struct pxapcic_softc *sc;
@@ -94,18 +103,21 @@ scoop_pcic_socket_setup(struct pxapcic_socket *so)
 	sc = so->sc;
 	iot = sc->sc_iot;
 
-	if (so->socket == 0)
+	if (so->socket == 0) {
 		pa = C3000_SCOOP0_BASE;
-	else if (so->socket == 1)
+	} else if (so->socket == 1) {
 		pa = C3000_SCOOP1_BASE;
-	else
+	} else {
 		panic("%s: invalid CF slot %d", sc->sc_dev.dv_xname,
 		    so->socket);
+	}
+
 	error = bus_space_map(iot, trunc_page(pa), round_page(size),
 	    0, &scooph);
-	if (error)
+	if (error) {
 		panic("%s: failed to map memory %x for scoop",
-		    sc->sc_dev.dv_xname, pa);
+		    sc->sc_dev.dv_xname, (uint32_t)pa);
+	}
 	scooph += pa - trunc_page(pa);
 	
 	bus_space_write_2(iot, scooph, SCOOP_IMR,
@@ -142,12 +154,12 @@ scoop_pcic_socket_setup(struct pxapcic_socket *so)
 	so->pcictag = &scoop_pcic_functions;
 }
 
-u_int
+static u_int
 scoop_pcic_read(struct pxapcic_socket *so, int reg)
 {
 	bus_space_tag_t iot = so->sc->sc_iot;
 	bus_space_handle_t ioh = (bus_space_handle_t)so->pcictag_cookie;
-	u_int16_t csr;
+	uint16_t csr;
 
 	csr = bus_space_read_2(iot, ioh, SCOOP_CSR);
 
@@ -165,14 +177,15 @@ scoop_pcic_read(struct pxapcic_socket *so, int reg)
 	default:
 		panic("scoop_pcic_read: bogus register");
 	}
+	/*NOTREACHED*/
 }
 
-void
+static void
 scoop_pcic_write(struct pxapcic_socket *so, int reg, u_int val)
 {
 	bus_space_tag_t iot = so->sc->sc_iot;
 	bus_space_handle_t ioh = (bus_space_handle_t)so->pcictag_cookie;
-	u_int16_t newval;
+	uint16_t newval;
 	int s;
 
 	s = splhigh();
@@ -202,7 +215,7 @@ scoop_pcic_write(struct pxapcic_socket *so, int reg, u_int val)
 	splx(s);
 }
 
-void
+static void
 scoop_pcic_set_power(struct pxapcic_socket *so, int pwr)
 {
 	bus_space_tag_t iot = so->sc->sc_iot;
@@ -240,7 +253,7 @@ scoop_pcic_set_power(struct pxapcic_socket *so, int pwr)
 	splx(s);
 }
 
-void
+static void
 scoop_pcic_clear_intr(struct pxapcic_socket *so)
 {
 	bus_space_tag_t iot = so->sc->sc_iot;
@@ -249,4 +262,20 @@ scoop_pcic_clear_intr(struct pxapcic_socket *so)
 	bus_space_write_2(iot, ioh, SCOOP_IRM, 0x00ff);
 	bus_space_write_2(iot, ioh, SCOOP_ISR, 0x0000);
 	bus_space_write_2(iot, ioh, SCOOP_IRM, 0x0000);
+}
+
+static void *
+scoop_pcic_intr_establish(struct pxapcic_socket *so, int ipl,
+    int (*func)(void *), void *arg)
+{
+
+	return (pxa2x0_gpio_intr_establish(so->irqpin, IST_EDGE_FALLING,
+	    ipl, func, arg));
+}
+
+static void
+scoop_pcic_intr_disestablish(struct pxapcic_socket *so, void *ih)
+{
+
+	pxa2x0_gpio_intr_disestablish(ih);
 }

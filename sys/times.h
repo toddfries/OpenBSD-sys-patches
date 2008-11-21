@@ -1,5 +1,4 @@
-/*	$OpenBSD: times.h,v 1.5 2006/01/06 18:53:06 millert Exp $	*/
-/*	$NetBSD: times.h,v 1.8 1995/03/26 20:24:54 jtc Exp $	*/
+/*	$NetBSD: times.h,v 1.13 2005/12/11 12:25:21 christos Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -40,12 +39,11 @@
 #ifndef	_SYS_TIMES_H_
 #define	_SYS_TIMES_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
 
-#ifndef	_CLOCK_T_DEFINED_
-#define	_CLOCK_T_DEFINED_
-typedef	__clock_t	clock_t;
+#ifdef	_BSD_CLOCK_T_
+typedef	_BSD_CLOCK_T_	clock_t;
+#undef	_BSD_CLOCK_T_
 #endif
 
 struct tms {
@@ -56,8 +54,12 @@ struct tms {
 };
 
 #ifndef _KERNEL
+#include <sys/cdefs.h>
+
 __BEGIN_DECLS
-clock_t	times(struct tms *);
+#ifndef __LIBC12_SOURCE__
+clock_t times(struct tms *) __RENAME(__times13);
+#endif
 __END_DECLS
 #endif
 #endif /* !_SYS_TIMES_H_ */

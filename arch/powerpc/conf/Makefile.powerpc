@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.powerpc,v 1.36 2005/11/24 12:54:30 dbj Exp $
+#	$NetBSD: Makefile.powerpc,v 1.41 2008/11/13 10:51:23 ad Exp $
 #
 # Makefile for NetBSD
 #
@@ -48,7 +48,7 @@ AFLAGS+=	${AOPTS}
 ##
 ## (3) libkern and compat
 ##
-.if !empty(IDENT:M-DLKM)
+.if !empty(IDENT:M-DMODULAR)
 KERN_AS=	obj
 .endif
 
@@ -92,7 +92,7 @@ SYSTEM_LD_TAIL_EXTRA+=; \
 # depend on CPU configuration
 locore.o machdep.o: Makefile
 
-setfault.o: assym.h
+lock_stubs.o setfault.o: assym.h
 
 ##
 ## (7) misc settings
@@ -117,6 +117,7 @@ setfault.o: assym.h
 ## (9) port independent kernel machinery
 ##
 .include "$S/conf/Makefile.kern.inc"
+${KERNLIB} ${KERNLIB_PROF} ${KERNLIBLN}: assym.h
 
 ##
 ## (10) Appending make options.

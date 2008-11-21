@@ -1,18 +1,44 @@
-/*	$OpenBSD: cnv_float.h,v 1.9 2003/04/10 17:27:58 mickey Exp $	*/
+/*	$NetBSD: cnv_float.h,v 1.3 2008/04/06 08:03:36 skrll Exp $	*/
+
+/*	$OpenBSD: cnv_float.h,v 1.5 2001/03/29 03:58:17 mickey Exp $	*/
+
 /*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)cnv_float.h: Revision: 2.9.88.1 Date: 93/12/07 15:05:29 */
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
 
 /*
  * Some more constants
@@ -47,7 +73,7 @@
 
 #define Sgl_isinexact_to_fix(sgl_value,exponent)	\
     ((exponent < (SGL_P - 1)) ?				\
-     (Sall(sgl_value) << (SGL_EXP_LENGTH + 1 + exponent)) : FALSE)
+     (Sall(sgl_value) << (SGL_EXP_LENGTH + 1 + exponent)) : false)
 
 #define Int_isinexact_to_sgl(int_value)	(int_value << (33 - SGL_EXP_LENGTH))
 
@@ -69,15 +95,15 @@
 
 #define Dbl_roundnearest_from_dint(dint_opndB,dbl_opndA,dbl_opndB)	\
     if (Dintp2(dint_opndB) & 1<<(DBL_EXP_LENGTH - 2))			\
-       if ((Dintp2(dint_opndB) << (34 - DBL_EXP_LENGTH)) || Dlowp2(dbl_opndB))  \
-          if ((++Dallp2(dbl_opndB))==0) Dallp1(dbl_opndA)++
+       if ((Dintp2(dint_opndB) << (34 -DBL_EXP_LENGTH)) || Dlowp2(dbl_opndB))  \
+	  if ((++Dallp2(dbl_opndB))==0) Dallp1(dbl_opndA)++
 
 #define Sgl_isone_roundbit(sgl_value,exponent)			\
     ((Sall(sgl_value) << (SGL_EXP_LENGTH + 1 + exponent)) >> 31)
 
 #define Sgl_isone_stickybit(sgl_value,exponent)		\
     (exponent < (SGL_P - 2) ?				\
-     Sall(sgl_value) << (SGL_EXP_LENGTH + 2 + exponent) : FALSE)
+     Sall(sgl_value) << (SGL_EXP_LENGTH + 2 + exponent) : false)
 
 
 /*
@@ -96,7 +122,7 @@
 
 #define Dbl_to_sgl_denormalized(srcA,srcB,exp,dest,inexact,guard,sticky,odd,tiny) \
     Deposit_dexponent(srcA,1);						\
-    tiny = TRUE;							\
+    tiny = true;							\
     if (exp >= -2) {							\
 	if (exp == 0) {							\
 	    inexact = Dallp2(srcB) << 3;				\
@@ -110,7 +136,7 @@
 			if (Dbl_iszero_sign(srcA)) {			\
 			    dest++;					\
 			    if (Sgl_isone_hidden(dest))	\
-				tiny = FALSE;				\
+				tiny = false;				\
 			    dest--;					\
 			}						\
 			break;						\
@@ -118,7 +144,7 @@
 			if (Dbl_isone_sign(srcA)) {			\
 			    dest++;					\
 			    if (Sgl_isone_hidden(dest))	\
-				tiny = FALSE;				\
+				tiny = false;				\
 			    dest--;					\
 			}						\
 			break;						\
@@ -126,7 +152,7 @@
 			if (guard && (sticky || odd)) {			\
 			    dest++;					\
 			    if (Sgl_isone_hidden(dest))	\
-				tiny = FALSE;				\
+				tiny = false;				\
 			    dest--;					\
 			}						\
 			break;						\
@@ -138,8 +164,8 @@
 		inexact |= guard;					\
 		dest >>= 1;						\
 		Deposit_dsign(srcA,0);					\
-	        Shiftdouble(Dallp1(srcA),Dallp2(srcB),30,dest);		\
-	        odd = dest << 31;					\
+		Shiftdouble(Dallp1(srcA),Dallp2(srcB),30,dest);		\
+		odd = dest << 31;					\
 	}								\
 	else {								\
 	    inexact = Dallp2(srcB) << (2 + exp);			\
@@ -181,13 +207,13 @@
     (exponent < (DBL_P-33) ?						\
      Dallp2(dbl_valueB) || Dallp1(dbl_valueA) << (DBL_EXP_LENGTH+1+exponent) : \
      (exponent < (DBL_P-1) ? Dallp2(dbl_valueB) << (exponent + (33-DBL_P)) :   \
-      FALSE))
+      false))
 
 #define Dbl_isoverflow_to_int(exponent,dbl_valueA,dbl_valueB)		\
     ((exponent > SGL_FX_MAX_EXP + 1) || Dsign(dbl_valueA)==0 ||		\
      Dmantissap1(dbl_valueA)!=0 || (Dallp2(dbl_valueB)>>21)!=0 )
 
-#define Dbl_isone_roundbit(dbl_valueA,dbl_valueB,exponent)              \
+#define Dbl_isone_roundbit(dbl_valueA,dbl_valueB,exponent)	      \
     ((exponent < (DBL_P - 33) ?						\
       Dallp1(dbl_valueA) >> ((30 - DBL_EXP_LENGTH) - exponent) :	\
       Dallp2(dbl_valueB) >> ((DBL_P - 2) - exponent)) & 1)
@@ -196,7 +222,7 @@
     (exponent < (DBL_P-34) ?						\
      (Dallp2(dbl_valueB) || Dallp1(dbl_valueA)<<(DBL_EXP_LENGTH+2+exponent)) : \
      (exponent<(DBL_P-2) ? (Dallp2(dbl_valueB) << (exponent + (34-DBL_P))) : \
-      FALSE))
+      false))
 
 
 /* Int macros */
@@ -231,26 +257,26 @@
     {if (exponent < 32) {						\
 	Dintp1(destA) = 0;						\
 	if (exponent <= 20)						\
-	    Dintp2(destB) = Dallp1(dbl_valueA) >> (20-exponent);	\
+	    Dintp2(destB) = Dallp1(dbl_valueA) >> (20-(exponent));	\
 	else Variable_shift_double(Dallp1(dbl_valueA),Dallp2(dbl_valueB), \
-	     52-exponent,Dintp2(destB));					\
+	     (52-(exponent)),Dintp2(destB));				\
     }									\
     else {								\
 	if (exponent <= 52) {						\
-	    Dintp1(destA) = Dallp1(dbl_valueA) >> (52-exponent);	\
+	    Dintp1(destA) = Dallp1(dbl_valueA) >> (52-(exponent));	\
 	    if (exponent == 52) Dintp2(destB) = Dallp2(dbl_valueB);	\
 	    else Variable_shift_double(Dallp1(dbl_valueA),Dallp2(dbl_valueB), \
 	    52-exponent,Dintp2(destB));					\
-        }								\
+	}								\
 	else {								\
 	    Variable_shift_double(Dallp1(dbl_valueA),Dallp2(dbl_valueB), \
 	    84-exponent,Dintp1(destA));					\
-	    Dintp2(destB) = Dallp2(dbl_valueB) << (exponent-52);	\
+	    Dintp2(destB) = Dallp2(dbl_valueB) << ((exponent)-52);	\
 	}								\
     }}
 
-#define Dint_setzero(dresultA,dresultB)		\
-    Dintp1(dresultA) = 0;			\
+#define Dint_setzero(dresultA,dresultB)	\
+    Dintp1(dresultA) = 0;	\
     Dintp2(dresultB) = 0
 
 #define Dint_setone_sign(dresultA,dresultB)		\
@@ -286,7 +312,7 @@
 #define Find_ms_one_bit(value, position)	\
     {						\
 	int var;				\
-	for (var = 8; var >= 1; var >>= 1) {	\
+	for (var=8; var >=1; var >>= 1) {	\
 	    if (value >> (32 - position))	\
 		position -= var;		\
 		else position += var;		\
@@ -296,17 +322,114 @@
 	else position -= 2;			\
     }
 
-int sgl_to_sgl_fcnvfx(sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_to_dbl_fcnvfx(sgl_floating_point *, sgl_floating_point *, dbl_integer *, unsigned int *);
-int dbl_to_sgl_fcnvfx(dbl_floating_point *, dbl_floating_point *, int *, unsigned int *);
-int dbl_to_dbl_fcnvfx(dbl_floating_point *, dbl_floating_point *, dbl_integer *, unsigned int *);
+/*
+ * The following 4 functions handle the assignment of a floating point
+ * number to a 32-bit integer in cases where the floating point number
+ * is too large (or small) to fit in the integer field.
+ *
+ * In all these cases, HP-UX would return an UNIMPLEMENTEDEXCEPTION
+ * resulting in a SIGFPE being sent to the process.  For BSD's math
+ * library (and various other applications), this was unacceptable.
+ * As a result, we now return maxint/minint (like most other OS's)
+ * and either return an INEXACTEXCEPTION (SIGFPE) or set the inexact
+ * flag (so that the program may continue execution).
+ *
+ * After discussing this with Jerry Huck @ HP, the one case where we
+ * differ from BSD is for programs that try to convert a NaN to an
+ * integer; in this case, we will return an UNIMPLEMENTEDEXCEPTION
+ * since doing anything else would be completely unreasonable.
+ *
+ *	jef
+ */
 
-int sgl_to_sgl_fcnvfxt(sgl_floating_point *, sgl_floating_point *, int *, unsigned int *);
-int sgl_to_dbl_fcnvfxt(sgl_floating_point *, sgl_floating_point *, dbl_integer *, unsigned int *);
-int dbl_to_sgl_fcnvfxt(dbl_floating_point *, dbl_floating_point *, int *, unsigned int *);
-int dbl_to_dbl_fcnvfxt(dbl_floating_point *, dbl_floating_point *, dbl_integer *, unsigned int *);
+#define	Dbl_return_overflow(srcp1, srcp2, resultp)	\
+    {						\
+	if (Dbl_isnan(srcp1, srcp2))		\
+		return(UNIMPLEMENTEDEXCEPTION);	\
+	if (Dbl_iszero_sign(srcp1))		\
+		*resultp = 0x7fffffff;		\
+	else					\
+		*resultp = 0x80000000;		\
+	if (Is_overflowtrap_enabled()) {	\
+		if (Is_inexacttrap_enabled())	\
+			return(OVERFLOWEXCEPTION|INEXACTEXCEPTION);	\
+		else				\
+			Set_inexactflag();	\
+		return(OVERFLOWEXCEPTION);	\
+	}					\
+	return(NOEXCEPTION);			\
+    }
 
-int sgl_to_sgl_fcnvxf(int *, int *, sgl_floating_point *, unsigned int *);
-int sgl_to_dbl_fcnvxf(int *, int *, dbl_floating_point *, unsigned int *);
-int dbl_to_sgl_fcnvxf(dbl_integer *, dbl_integer *, sgl_floating_point *, unsigned int *);
-int dbl_to_dbl_fcnvxf(dbl_integer *, dbl_integer *, dbl_floating_point *, unsigned int *);
+#define	Dbl_return_overflow_dbl(srcp1, srcp2, resultp)	\
+    {						\
+	if (Dbl_isnan(srcp1, srcp2))		\
+		return(UNIMPLEMENTEDEXCEPTION);	\
+	if (Dbl_iszero_sign(srcp1)) {		\
+		Dint_copytoptr(0x7fffffff,0xffffffff,resultp); \
+	} else {				\
+		Dint_copytoptr(0x80000000,0x00000000,resultp); \
+	}					\
+	if (Is_overflowtrap_enabled()) {	\
+		if (Is_inexacttrap_enabled())	\
+			return(OVERFLOWEXCEPTION|INEXACTEXCEPTION);	\
+		else				\
+			Set_inexactflag();	\
+		return(OVERFLOWEXCEPTION);	\
+	}					\
+	return(NOEXCEPTION);			\
+    }
+
+#define	Sgl_return_overflow(src, resultp)	\
+    {						\
+	if (Sgl_isnan(src))			\
+		return(UNIMPLEMENTEDEXCEPTION);	\
+	if (Sgl_iszero_sign(src))		\
+		*resultp = 0x7fffffff;		\
+	else					\
+		*resultp = 0x80000000;		\
+	if (Is_overflowtrap_enabled()) {	\
+		if (Is_inexacttrap_enabled())	\
+			return(OVERFLOWEXCEPTION|INEXACTEXCEPTION);	\
+		else				\
+			Set_inexactflag();	\
+		return(OVERFLOWEXCEPTION);	\
+	}					\
+	return(NOEXCEPTION);			\
+    }
+
+#define	Sgl_return_overflow_dbl(src, resultp)	\
+    {						\
+	if (Sgl_isnan(src))			\
+		return(UNIMPLEMENTEDEXCEPTION);	\
+	if (Sgl_iszero_sign(src)) {		\
+		Dint_copytoptr(0x7fffffff,0xffffffff,resultp); \
+	} else {				\
+		Dint_copytoptr(0x80000000,0x00000000,resultp); \
+	}					\
+	if (Is_overflowtrap_enabled()) {	\
+		if (Is_inexacttrap_enabled())	\
+			return(OVERFLOWEXCEPTION|INEXACTEXCEPTION);	\
+		else				\
+			Set_inexactflag();	\
+		return(OVERFLOWEXCEPTION);	\
+	}					\
+	return(NOEXCEPTION);			\
+    }
+
+int sgl_to_sgl_fcnvfx(sgl_floating_point *, sgl_floating_point *, unsigned int *);
+int sgl_to_dbl_fcnvfx(sgl_floating_point *, dbl_integer *, unsigned int *);
+int dbl_to_sgl_fcnvfx(dbl_floating_point *, int *, unsigned int *);
+int dbl_to_dbl_fcnvfx(dbl_floating_point *, dbl_integer *, unsigned int *);
+
+int sgl_to_sgl_fcnvfxt(sgl_floating_point *, int *, unsigned int *);
+int sgl_to_dbl_fcnvfxt(sgl_floating_point *, dbl_integer *, unsigned int *);
+int dbl_to_sgl_fcnvfxt(dbl_floating_point *, int *, unsigned int *);
+int dbl_to_dbl_fcnvfxt(dbl_floating_point *, dbl_integer *, unsigned int *);
+
+int sgl_to_sgl_fcnvxf(int *, sgl_floating_point *, unsigned int *);
+int sgl_to_dbl_fcnvxf(int *, dbl_floating_point *, unsigned int *);
+int dbl_to_sgl_fcnvxf(dbl_integer *, sgl_floating_point *, unsigned int *);
+int dbl_to_dbl_fcnvxf(dbl_integer *, dbl_floating_point *, unsigned int *);
+
+
+

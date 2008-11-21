@@ -1,4 +1,4 @@
-/*	$NetBSD: ad1848var.h,v 1.14 2005/12/11 12:21:25 christos Exp $	*/
+/*	$NetBSD: ad1848var.h,v 1.16 2008/04/28 20:23:48 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -171,9 +164,9 @@ void	ad1848_reset(struct ad1848_softc *);
 int	ad1848_open(void *, int);
 void	ad1848_close(void *);
 
-int	ad1848_mixer_get_port(struct ad1848_softc *, ad1848_devmap_t *,
+int	ad1848_mixer_get_port(struct ad1848_softc *, const ad1848_devmap_t *,
 	    int, mixer_ctrl_t *);
-int	ad1848_mixer_set_port(struct ad1848_softc *, ad1848_devmap_t *,
+int	ad1848_mixer_set_port(struct ad1848_softc *, const ad1848_devmap_t *,
 	    int, mixer_ctrl_t *);
 int	ad1848_set_speed(struct ad1848_softc *, u_int *);
 void	ad1848_mute_wave_output(struct ad1848_softc *, int, int);

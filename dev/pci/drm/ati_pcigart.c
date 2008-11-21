@@ -1,3 +1,8 @@
+/*	$NetBSD: ati_pcigart.c,v 1.6 2008/11/09 14:26:14 bjs Exp $	*/
+
+/* ati_pcigart.h -- ATI PCI GART support -*- linux-c -*-
+ * Created: Wed Dec 13 21:52:19 2000 by gareth@valinux.com
+ */
 /*-
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -26,16 +31,17 @@
  *
  */
 
-/** @file ati_pcigart.c
- * Implementation of ATI's PCIGART, which provides an aperture in card virtual
- * address space with addresses remapped to system memory.
- */
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ati_pcigart.c,v 1.6 2008/11/09 14:26:14 bjs Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/ati_pcigart.c,v 1.3 2005/11/28 23:13:52 anholt Exp $");
+*/
 
 #include "drmP.h"
 
 #define ATI_PCIGART_PAGE_SIZE		4096	/* PCI GART page size */
 
-int drm_ati_pcigart_init(drm_device_t *dev, drm_ati_pcigart_info *gart_info)
+int drm_ati_pcigart_init(drm_device_t *dev, struct drm_ati_pcigart_info *gart_info)
 {
 	unsigned long pages;
 	u32 *pci_gart = NULL, page_base;
@@ -67,9 +73,9 @@ int drm_ati_pcigart_init(drm_device_t *dev, drm_ati_pcigart_info *gart_info)
 
 	bzero(pci_gart, gart_info->table_size);
 
-#if defined(__FreeBSD__)
+#ifdef __FreeBSD__
 	KASSERT(PAGE_SIZE >= ATI_PCIGART_PAGE_SIZE, ("page size too small"));
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
+#elif defined(__NetBSD__)
 	KASSERT(PAGE_SIZE >= ATI_PCIGART_PAGE_SIZE);
 #endif
 
@@ -93,12 +99,12 @@ int drm_ati_pcigart_init(drm_device_t *dev, drm_ati_pcigart_info *gart_info)
 		}
 	}
 
-	DRM_MEMORYBARRIER();
+	agp_flush_cache();
 
 	return 1;
 }
 
-int drm_ati_pcigart_cleanup(drm_device_t *dev, drm_ati_pcigart_info *gart_info)
+int drm_ati_pcigart_cleanup(drm_device_t *dev, struct drm_ati_pcigart_info *gart_info)
 {
 	if (dev->sg == NULL) {
 		DRM_ERROR( "no scatter/gather memory!\n" );

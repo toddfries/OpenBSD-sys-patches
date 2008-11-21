@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.34 2007/06/20 18:15:45 deraadt Exp $	*/
+/*	$NetBSD: disklabel.h,v 1.14 2008/10/26 06:57:30 mrg Exp $	*/
 
 /*
  * Copyright (c) 1994 Christopher G. Demetriou
@@ -30,11 +30,44 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _MACHINE_DISKLABEL_H_
-#define _MACHINE_DISKLABEL_H_
+#ifndef _I386_DISKLABEL_H_
+#define _I386_DISKLABEL_H_
 
-#define	LABELSECTOR	1		/* sector containing label */
-#define	LABELOFFSET	0		/* offset of label in sector */
-#define	MAXPARTITIONS	16		/* number of partitions */
+#define	LABELSECTOR		1	/* sector containing label */
+#define	LABELOFFSET		0	/* offset of label in sector */
+#define	MAXPARTITIONS		16	/* number of partitions */
+#define	OLDMAXPARTITIONS 	8	/* number of partitions before 1.6 */
+#define	RAW_PART		3	/* raw partition: XX?d (XXX) */
 
-#endif /* _MACHINE_DISKLABEL_H_ */
+/*
+ * We use the highest bit of the minor number for the partition number.
+ * This maintains backward compatibility with device nodes created before
+ * MAXPARTITIONS was increased.
+ */
+#define __I386_MAXDISKS	((1 << 20) / MAXPARTITIONS)
+#define DISKUNIT(dev)	((minor(dev) / OLDMAXPARTITIONS) % __I386_MAXDISKS)
+#define DISKPART(dev)	((minor(dev) % OLDMAXPARTITIONS) + \
+    ((minor(dev) / (__I386_MAXDISKS * OLDMAXPARTITIONS)) * OLDMAXPARTITIONS))
+#define	DISKMINOR(unit, part) \
+    (((unit) * OLDMAXPARTITIONS) + ((part) % OLDMAXPARTITIONS) + \
+     ((part) / OLDMAXPARTITIONS) * (__I386_MAXDISKS * OLDMAXPARTITIONS))
+
+/* Pull in MBR partition definitions. */
+#if HAVE_NBTOOL_CONFIG_H
+#include <nbinclude/sys/bootblock.h>
+#else
+#include <sys/bootblock.h>
+#endif /* HAVE_NBTOOL_CONFIG_H */
+
+#ifndef __ASSEMBLER__
+#if HAVE_NBTOOL_CONFIG_H
+#include <nbinclude/sys/dkbad.h>
+#else
+#include <sys/dkbad.h>
+#endif /* HAVE_NBTOOL_CONFIG_H */
+struct cpu_disklabel {
+	struct dkbad bad;
+};
+#endif
+
+#endif /* _I386_DISKLABEL_H_ */

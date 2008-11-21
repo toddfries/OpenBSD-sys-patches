@@ -1,5 +1,4 @@
-/*	$OpenBSD: raw_cb.h,v 1.7 2008/05/23 15:51:12 thib Exp $	*/
-/*	$NetBSD: raw_cb.h,v 1.9 1996/02/13 22:00:41 christos Exp $	*/
+/*	$NetBSD: raw_cb.h,v 1.20 2007/02/17 22:34:10 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -56,16 +55,20 @@ struct rawcb {
 #define	RAWRCVQ		8192
 
 #ifdef _KERNEL
-extern LIST_HEAD(rawcbhead, rawcb) rawcb;		/* head of list */
+LIST_HEAD(rawcbhead, rawcb);
+extern	struct	rawcbhead rawcb;		/* head of list */
 
-int	 raw_attach(struct socket *, int);
-void	 *raw_ctlinput(int, struct sockaddr *, void *);
-void	 raw_detach(struct rawcb *);
-void	 raw_disconnect(struct rawcb *);
-void	 raw_init(void);
-void	 raw_input(struct mbuf *, ...);
-int	 raw_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
+int	raw_attach(struct socket *, int);
+void	*raw_ctlinput(int, const struct sockaddr *, void *);
+void	raw_detach(struct rawcb *);
+void	raw_disconnect(struct rawcb *);
+void	raw_init(void);
+void	raw_input(struct mbuf *, ...);
+int	raw_usrreq(struct socket *,
+	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct lwp *);
+void	raw_setsockaddr(struct rawcb *, struct mbuf *);
+void	raw_setpeeraddr(struct rawcb *, struct mbuf *);
 
 #endif /* _KERNEL */
-#endif /* _NET_RAW_CB_H_ */
+
+#endif /* !_NET_RAW_CB_H_ */

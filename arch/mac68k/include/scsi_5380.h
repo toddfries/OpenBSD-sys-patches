@@ -1,5 +1,4 @@
-/*	$OpenBSD: scsi_5380.h,v 1.3 1997/11/30 06:10:34 gene Exp $	*/
-/*	$NetBSD: scsi_5380.h,v 1.3 1994/10/26 08:46:46 cgd Exp $	*/
+/*	$NetBSD: scsi_5380.h,v 1.6 2003/05/03 18:10:51 wiz Exp $	*/
 
 /*
  * Mach Operating System
@@ -12,7 +11,7 @@
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
  * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
  * 
@@ -33,9 +32,6 @@
  *
  *	Defines for the NCR 5380 (SCSI chip), aka Am5380
  */
-
-#ifndef _MAC68K_SCSI5380_H_
-#define _MAC68K_SCSI5380_H_
 
 /*
  * Register map
@@ -60,15 +56,15 @@ typedef struct {
 	PAD(pad4);
 
 	volatile unsigned char sci_csr;		/* r:  Status */
-#define	sci_dma_send sci_csr			/* w:  Start dma send data */
+#define	sci_dma_send sci_csr			/* w:  Start DMA send data */
 	PAD(pad5);
 
 	volatile unsigned char sci_idata;	/* r:  Input data */
-#define	sci_trecv sci_idata			/* w:  Start dma receive, target */
+#define	sci_trecv sci_idata			/* w:  Start DMA receive, target */
 	PAD(pad6);
 
 	volatile unsigned char sci_iack;	/* r:  Interrupt Acknowledge  */
-#define	sci_irecv sci_iack			/* w:  Start dma receive, initiator */
+#define	sci_irecv sci_iack			/* w:  Start DMA receive, initiator */
 } sci_regmap_t;
 
 
@@ -144,4 +140,3 @@ typedef struct {
 #define SCI_CSR_DREQ		0x40		/* r:  DMA request */
 #define SCI_CSR_DONE		0x80		/* r:  DMA count is zero */
 
-#endif	/* _MAC68K_SCSI5380_H_ */

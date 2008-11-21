@@ -1,4 +1,4 @@
-/*	$NetBSD: if_se.c,v 1.69 2007/09/01 17:59:45 dyoung Exp $	*/
+/*	$NetBSD: if_se.c,v 1.73 2008/11/07 00:20:12 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1997 Ian W. Dall <ian.dall@dsto.defence.gov.au>
@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_se.c,v 1.69 2007/09/01 17:59:45 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_se.c,v 1.73 2008/11/07 00:20:12 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "opt_atalk.h"
@@ -344,7 +344,7 @@ seattach(parent, self, aux)
 	se_get_addr(sc, myaddr);
 
 	/* Initialize ifnet structure. */
-	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, sizeof(ifp->if_xname));
+	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), sizeof(ifp->if_xname));
 	ifp->if_softc = sc;
 	ifp->if_start = se_ifstart;
 	ifp->if_ioctl = se_ioctl;
@@ -475,8 +475,7 @@ se_ifstart(ifp)
 	    sc->sc_tbuf, len, SERETRIES,
 	    SETIMEOUT, NULL, XS_CTL_NOSLEEP|XS_CTL_ASYNC|XS_CTL_DATA_OUT);
 	if (error) {
-		printf("%s: not queued, error %d\n",
-		    sc->sc_dev.dv_xname, error);
+		aprint_error_dev(&sc->sc_dev, "not queued, error %d\n", error);
 		ifp->if_oerrors++;
 		ifp->if_flags &= ~IFF_OACTIVE;
 	} else
@@ -665,7 +664,7 @@ se_read(sc, data, datalen)
 		    len > MAX_SNAP) {
 #ifdef SEDEBUG
 			printf("%s: invalid packet size %d; dropping\n",
-			       sc->sc_dev.dv_xname, len);
+			       device_xname(&sc->sc_dev), len);
 #endif
 			ifp->if_ierrors++;
 			goto next_packet;
@@ -713,7 +712,7 @@ sewatchdog(ifp)
 {
 	struct se_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
+	log(LOG_ERR, "%s: device timeout\n", device_xname(&sc->sc_dev));
 	++ifp->if_oerrors;
 
 	se_reset(sc);
@@ -776,7 +775,7 @@ se_get_addr(sc, myaddr)
 	    (void *)&get_addr_cmd, sizeof(get_addr_cmd),
 	    myaddr, ETHER_ADDR_LEN, SERETRIES, SETIMEOUT, NULL,
 	    XS_CTL_DATA_IN | XS_CTL_DATA_ONSTACK);
-	printf("%s: ethernet address %s\n", sc->sc_dev.dv_xname,
+	printf("%s: ethernet address %s\n", device_xname(&sc->sc_dev),
 	    ether_sprintf(myaddr));
 	return (error);
 }
@@ -823,6 +822,7 @@ se_init(sc)
 {
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct scsi_ctron_ether_generic set_addr_cmd;
+	uint8_t enaddr[ETHER_ADDR_LEN];
 	int error;
 
 #if NBPFILTER > 0
@@ -838,9 +838,10 @@ se_init(sc)
 
 	PROTOCMD(ctron_ether_set_addr, set_addr_cmd);
 	_lto2b(ETHER_ADDR_LEN, set_addr_cmd.length);
+	memcpy(enaddr, CLLADDR(ifp->if_sadl), sizeof(enaddr));
 	error = se_scsipi_cmd(sc->sc_periph,
 	    (void *)&set_addr_cmd, sizeof(set_addr_cmd),
-	    LLADDR(ifp->if_sadl), ETHER_ADDR_LEN, SERETRIES, SETIMEOUT, NULL,
+	    enaddr, ETHER_ADDR_LEN, SERETRIES, SETIMEOUT, NULL,
 	    XS_CTL_DATA_OUT);
 	if (error != 0)
 		return (error);
@@ -881,7 +882,7 @@ se_set_multi(sc, addr)
 	int error;
 
 	if (sc->sc_debug)
-		printf("%s: set_set_multi: %s\n", sc->sc_dev.dv_xname,
+		printf("%s: set_set_multi: %s\n", device_xname(&sc->sc_dev),
 		    ether_sprintf(addr));
 
 	PROTOCMD(ctron_ether_set_multi, set_multi_cmd);
@@ -904,7 +905,7 @@ se_remove_multi(sc, addr)
 	int error;
 
 	if (sc->sc_debug)
-		printf("%s: se_remove_multi: %s\n", sc->sc_dev.dv_xname,
+		printf("%s: se_remove_multi: %s\n", device_xname(&sc->sc_dev),
 		    ether_sprintf(addr));
 
 	PROTOCMD(ctron_ether_remove_multi, remove_multi_cmd);
@@ -976,10 +977,7 @@ se_stop(sc)
  * Process an ioctl request.
  */
 static int
-se_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	void *data;
+se_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct se_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -991,7 +989,7 @@ se_ioctl(ifp, cmd, data)
 
 	switch (cmd) {
 
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		if ((error = se_enable(sc)) != 0)
 			break;
 		ifp->if_flags |= IFF_UP;
@@ -1023,8 +1021,11 @@ se_ioctl(ifp, cmd, data)
 
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		/* XXX re-use ether_ioctl() */
+		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
+		case IFF_RUNNING:
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
@@ -1032,8 +1033,8 @@ se_ioctl(ifp, cmd, data)
 			se_stop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
 			se_disable(sc);
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-		    	   (ifp->if_flags & IFF_RUNNING) == 0) {
+			break;
+		case IFF_UP:
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
@@ -1041,12 +1042,15 @@ se_ioctl(ifp, cmd, data)
 			if ((error = se_enable(sc)) != 0)
 				break;
 			error = se_init(sc);
-		} else if (sc->sc_enabled) {
+			break;
+		default:
 			/*
 			 * Reset the interface to pick up changes in any other
 			 * flags that affect hardware registers.
 			 */
-			error = se_init(sc);
+			if (sc->sc_enabled)
+				error = se_init(sc);
+			break;
 		}
 #ifdef SEDEBUG
 		if (ifp->if_flags & IFF_DEBUG)
@@ -1076,7 +1080,7 @@ se_ioctl(ifp, cmd, data)
 
 	default:
 
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 
@@ -1099,8 +1103,7 @@ se_enable(sc)
 	    (error = scsipi_adapter_addref(adapt)) == 0)
 		sc->sc_enabled = 1;
 	else
-		printf("%s: device enable failed\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "device enable failed\n");
 
 	return (error);
 }
@@ -1137,9 +1140,7 @@ seopen(dev, flag, fmt, l)
 	struct scsipi_adapter *adapt;
 
 	unit = SEUNIT(dev);
-	if (unit >= se_cd.cd_ndevs)
-		return (ENXIO);
-	sc = se_cd.cd_devs[unit];
+	sc = device_lookup_private(&se_cd, unit);
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -1169,7 +1170,7 @@ seclose(dev, flag, fmt, l)
 	int flag, fmt;
 	struct lwp *l;
 {
-	struct se_softc *sc = se_cd.cd_devs[SEUNIT(dev)];
+	struct se_softc *sc = device_lookup_private(&se_cd, SEUNIT(dev));
 	struct scsipi_periph *periph = sc->sc_periph;
 	struct scsipi_adapter *adapt = periph->periph_channel->chan_adapter;
 
@@ -1195,7 +1196,7 @@ seioctl(dev, cmd, addr, flag, l)
 	int flag;
 	struct lwp *l;
 {
-	struct se_softc *sc = se_cd.cd_devs[SEUNIT(dev)];
+	struct se_softc *sc = device_lookup_private(&se_cd, SEUNIT(dev));
 
 	return (scsipi_do_ioctl(sc->sc_periph, dev, cmd, addr, flag, l));
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: essreg.h,v 1.3 2001/01/29 06:27:59 mickey Exp $	*/
-/*	$NetBSD: essreg.h,v 1.12 1999/06/18 20:25:23 augustss Exp $	*/
+/*	$NetBSD: essreg.h,v 1.16 2005/12/11 12:22:02 christos Exp $	*/
 /*
  * Copyright 1997
  * Digital Equipment Corporation. All rights reserved.
@@ -34,7 +33,7 @@
  */
 
 /*
-** @(#) $RCSfile: essreg.h,v $ $Revision: 1.3 $ (SHARK) $Date: 2001/01/29 06:27:59 $
+** @(#) $RCSfile: essreg.h,v $ $Revision: 1.16 $ (SHARK) $Date: 2005/12/11 12:22:02 $
 **
 **++
 **
@@ -46,8 +45,8 @@
 **
 **  MODULE DESCRIPTION:
 **
-**	This module contains the constant definitions for the device
-**	registers on the ESS Technologies 1888/1887/888 sound chip.
+**      This module contains the constant definitions for the device
+**      registers on the ESS Technologies 1888/1887/888 sound chip.
 **
 **  AUTHORS:
 **
@@ -165,6 +164,7 @@
  * Macros to detect valid hardware configuration data.
  */
 #define ESS_BASE_VALID(base) ((base) == 0x220 || (base) == 0x230 || (base) == 0x240 || (base) == 0x250)
+
 #define ESS_IRQ1_VALID(irq)  ((irq) == 5 || (irq) == 7 || (irq) == 9 || (irq) == 10)
 
 #define ESS_IRQ2_VALID(irq)  ((irq) == 15)
@@ -175,7 +175,7 @@
 
 #define ESS_DRQ2_VALID(chan) ((chan) == 0 || (chan) == 1 || (chan) == 3 || (chan) == 5)
 
-#define ESS_USE_AUDIO1(model) (((model) == ESS_1788) || ((model) == ESS_1868) || ((model) ==ESS_1878) || ((model) == ESS_1869) || ((model) == ESS_1879))
+#define ESS_USE_AUDIO1(model) ((model) <= ESS_1879)
 
 /*
  * Macros to manipulate gain values
@@ -216,7 +216,7 @@
 #endif
 
 /*****************************************************************************/
-/*  DSP Timeout Definitions						     */
+/*  DSP Timeout Definitions                                                  */
 /*****************************************************************************/
 #define	ESS_READ_TIMEOUT	5000 /* number of times to try a read, 5ms*/
 #define	ESS_WRITE_TIMEOUT	5000 /* number of times to try a write, 5ms */
@@ -231,6 +231,8 @@
 #define ESS_DSP_WRITE		0x0C
 
 #define ESS_CLEAR_INTR		0x0E
+
+#define ESS_FIFO_WRITE		0x0F
 
 #define	ESS_DSP_RW_STATUS	0x0C
 #define	ESS_DSP_WRITE_BUSY	0x80

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ufs_inode.c,v 1.37 2007/06/01 23:47:57 deraadt Exp $	*/
-/*	$NetBSD: ufs_inode.c,v 1.7 1996/05/11 18:27:52 mycroft Exp $	*/
+/*	$NetBSD: ufs_inode.c,v 1.76 2008/07/31 05:38:06 simonb Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -34,8 +33,17 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ufs_inode.c	8.7 (Berkeley) 7/22/94
+ *	@(#)ufs_inode.c	8.9 (Berkeley) 5/14/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ufs_inode.c,v 1.76 2008/07/31 05:38:06 simonb Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_ffs.h"
+#include "opt_quota.h"
+#include "opt_wapbl.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,17 +51,26 @@
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/kernel.h>
-#include <sys/malloc.h>
 #include <sys/namei.h>
+#include <sys/kauth.h>
+#include <sys/wapbl.h>
+#include <sys/fstrans.h>
+#include <sys/kmem.h>
 
-#include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
+#include <ufs/ufs/ufs_wapbl.h>
 #ifdef UFS_DIRHASH
-#include <ufs/ufs/dir.h>
 #include <ufs/ufs/dirhash.h>
 #endif
+#ifdef UFS_EXTATTR
+#include <ufs/ufs/extattr.h>
+#endif
+
+#include <uvm/uvm.h>
+
+extern int prtactive;
 
 /*
  * Last reference to an inode.  If necessary, write or delete it.
@@ -61,67 +78,109 @@
 int
 ufs_inactive(void *v)
 {
-	struct vop_inactive_args *ap = v;
+	struct vop_inactive_args /* {
+		struct vnode *a_vp;
+		struct bool *a_recycle;
+	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
-	struct proc *p = ap->a_p;
+	struct mount *transmp;
 	mode_t mode;
 	int error = 0;
-#ifdef DIAGNOSTIC
-	extern int prtactive;
+	int logged = 0;
 
-	if (prtactive && vp->v_usecount != 0)
-		vprint("ffs_inactive: pushing active", vp);
-#endif
+	UFS_WAPBL_JUNLOCK_ASSERT(vp->v_mount);
 
+	transmp = vp->v_mount;
+	fstrans_start(transmp, FSTRANS_SHARED);
 	/*
 	 * Ignore inodes related to stale file handles.
 	 */
-	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
+	if (ip->i_mode == 0)
 		goto out;
+	if (ip->i_ffs_effnlink == 0 && DOINGSOFTDEP(vp))
+		softdep_releasefile(ip);
 
-	if (DIP(ip, nlink) <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
-		if (getinoquota(ip) == 0)
-			(void)ufs_quota_free_inode(ip, NOCRED);
-
-		error = UFS_TRUNCATE(ip, (off_t)0, 0, NOCRED);
-
+	if (ip->i_nlink <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
+		error = UFS_WAPBL_BEGIN(vp->v_mount);
+		if (error)
+			goto out;
+		logged = 1;
+#ifdef QUOTA
+		(void)chkiq(ip, -1, NOCRED, 0);
+#endif
+#ifdef UFS_EXTATTR
+		ufs_extattr_vnode_inactive(vp, curlwp);
+#endif
+		if (ip->i_size != 0) {
+			/*
+			 * When journaling, only truncate one indirect block
+			 * at a time
+			 */
+			if (vp->v_mount->mnt_wapbl) {
+				uint64_t incr = MNINDIR(ip->i_ump) <<
+				    vp->v_mount->mnt_fs_bshift; /* Power of 2 */
+				uint64_t base = NDADDR <<
+				    vp->v_mount->mnt_fs_bshift;
+				while (!error && ip->i_size > base + incr) {
+					/*
+					 * round down to next full indirect
+					 * block boundary.
+					 */
+					uint64_t nsize = base +
+					    ((ip->i_size - base - 1) &
+					    ~(incr - 1));
+					error = UFS_TRUNCATE(vp, nsize, 0,
+					    NOCRED);
+					if (error)
+						break;
+					UFS_WAPBL_END(vp->v_mount);
+					error = UFS_WAPBL_BEGIN(vp->v_mount);
+					if (error)
+						goto out;
+				}
+			}
+			if (!error)
+				error = UFS_TRUNCATE(vp, (off_t)0, 0, NOCRED);
+		}
+		/*
+		 * Setting the mode to zero needs to wait for the inode
+		 * to be written just as does a change to the link count.
+		 * So, rather than creating a new entry point to do the
+		 * same thing, we just use softdep_change_linkcnt().
+		 */
 		DIP_ASSIGN(ip, rdev, 0);
-		mode = DIP(ip, mode);
+		mode = ip->i_mode;
+		ip->i_mode = 0;
 		DIP_ASSIGN(ip, mode, 0);
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
-
-		/*
-		 * Setting the mode to zero needs to wait for the inode to be
-		 * written just as does a change to the link count. So, rather
-		 * than creating a new entry point to do the same thing, we
-		 * just use softdep_change_linkcnt(). Also, we can't let
-		 * softdep co-opt us to help on its worklist, as we may end up
-		 * trying to recycle vnodes and getting to this same point a
-		 * couple of times, blowing the kernel stack. However, this
-		 * could be optimized by checking if we are coming from
-		 * vrele(), vput() or vclean() (by checking for VXLOCK) and
-		 * just avoiding the co-opt to happen in the last case.
-		 */
+		mutex_enter(&vp->v_interlock);
+		vp->v_iflag |= VI_FREEING;
+		mutex_exit(&vp->v_interlock);
 		if (DOINGSOFTDEP(vp))
-			softdep_change_linkcnt(ip, 1);
-
-		UFS_INODE_FREE(ip, ip->i_number, mode);
+			softdep_change_linkcnt(ip);
+		UFS_VFREE(vp, ip->i_number, mode);
 	}
 
-	if (ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE)) {
-		UFS_UPDATE(ip, 0);
+	if (ip->i_flag & (IN_CHANGE | IN_UPDATE | IN_MODIFIED)) {
+		if (!logged++) {
+			int err;
+			err = UFS_WAPBL_BEGIN(vp->v_mount);
+			if (err)
+				goto out;
+		}
+		UFS_UPDATE(vp, NULL, NULL, 0);
 	}
+	if (logged)
+		UFS_WAPBL_END(vp->v_mount);
 out:
-	VOP_UNLOCK(vp, 0, p);
-
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
-		vrecycle(vp, p);
-
+	*ap->a_recycle = (ip->i_mode == 0);
+	VOP_UNLOCK(vp, 0);
+	fstrans_done(transmp);
 	return (error);
 }
 
@@ -129,33 +188,144 @@ out:
  * Reclaim an inode so that it can be used for other purposes.
  */
 int
-ufs_reclaim(struct vnode *vp, struct proc *p)
+ufs_reclaim(struct vnode *vp)
 {
-	struct inode *ip;
-#ifdef DIAGNOSTIC
-	extern int prtactive;
+	struct inode *ip = VTOI(vp);
 
-	if (prtactive && vp->v_usecount != 0)
+	if (prtactive && vp->v_usecount > 1)
 		vprint("ufs_reclaim: pushing active", vp);
-#endif
+
+	if (!UFS_WAPBL_BEGIN(vp->v_mount)) {
+		UFS_UPDATE(vp, NULL, NULL, UPDATE_CLOSE);
+		UFS_WAPBL_END(vp->v_mount);
+	}
+	UFS_UPDATE(vp, NULL, NULL, UPDATE_CLOSE);
 
 	/*
 	 * Remove the inode from its hash chain.
 	 */
-	ip = VTOI(vp);
 	ufs_ihashrem(ip);
 	/*
 	 * Purge old data structures associated with the inode.
 	 */
 	cache_purge(vp);
-
 	if (ip->i_devvp) {
 		vrele(ip->i_devvp);
+		ip->i_devvp = 0;
 	}
+#ifdef QUOTA
+	ufsquota_free(ip);
+#endif
 #ifdef UFS_DIRHASH
 	if (ip->i_dirhash != NULL)
 		ufsdirhash_free(ip);
 #endif
-	ufs_quota_delete(ip);
 	return (0);
+}
+
+/*
+ * allocate a range of blocks in a file.
+ * after this function returns, any page entirely contained within the range
+ * will map to invalid data and thus must be overwritten before it is made
+ * accessible to others.
+ */
+
+int
+ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
+    int flags)
+{
+	off_t neweof;	/* file size after the operation */
+	off_t neweob;	/* offset next to the last block after the operation */
+	off_t pagestart; /* starting offset of range covered by pgs */
+	off_t eob;	/* offset next to allocated blocks */
+	struct uvm_object *uobj;
+	int i, delta, error, npages;
+	int bshift = vp->v_mount->mnt_fs_bshift;
+	int bsize = 1 << bshift;
+	int ppb = MAX(bsize >> PAGE_SHIFT, 1);
+	struct vm_page **pgs;
+	size_t pgssize;
+	UVMHIST_FUNC("ufs_balloc_range"); UVMHIST_CALLED(ubchist);
+	UVMHIST_LOG(ubchist, "vp %p off 0x%x len 0x%x u_size 0x%x",
+		    vp, off, len, vp->v_size);
+
+	neweof = MAX(vp->v_size, off + len);
+	GOP_SIZE(vp, neweof, &neweob, 0);
+
+	error = 0;
+	uobj = &vp->v_uobj;
+
+	/*
+	 * read or create pages covering the range of the allocation and
+	 * keep them locked until the new block is allocated, so there
+	 * will be no window where the old contents of the new block are
+	 * visible to racing threads.
+	 */
+
+	pagestart = trunc_page(off) & ~(bsize - 1);
+	npages = MIN(ppb, (round_page(neweob) - pagestart) >> PAGE_SHIFT);
+	pgssize = npages * sizeof(struct vm_page *);
+	pgs = kmem_zalloc(pgssize, KM_SLEEP);
+
+	mutex_enter(&uobj->vmobjlock);
+	error = VOP_GETPAGES(vp, pagestart, pgs, &npages, 0,
+	    VM_PROT_WRITE, 0,
+	    PGO_SYNCIO|PGO_PASTEOF|PGO_NOBLOCKALLOC|PGO_NOTIMESTAMP);
+	if (error) {
+		goto out;
+	}
+	mutex_enter(&uobj->vmobjlock);
+	mutex_enter(&uvm_pageqlock);
+	for (i = 0; i < npages; i++) {
+		UVMHIST_LOG(ubchist, "got pgs[%d] %p", i, pgs[i],0,0);
+		KASSERT((pgs[i]->flags & PG_RELEASED) == 0);
+		pgs[i]->flags &= ~PG_CLEAN;
+		uvm_pageactivate(pgs[i]);
+	}
+	mutex_exit(&uvm_pageqlock);
+	mutex_exit(&uobj->vmobjlock);
+
+	/*
+	 * adjust off to be block-aligned.
+	 */
+
+	delta = off & (bsize - 1);
+	off -= delta;
+	len += delta;
+
+	/*
+	 * now allocate the range.
+	 */
+
+	genfs_node_wrlock(vp);
+	error = GOP_ALLOC(vp, off, len, flags, cred);
+	genfs_node_unlock(vp);
+
+	/*
+	 * clear PG_RDONLY on any pages we are holding
+	 * (since they now have backing store) and unbusy them.
+	 */
+
+	GOP_SIZE(vp, off + len, &eob, 0);
+	mutex_enter(&uobj->vmobjlock);
+	for (i = 0; i < npages; i++) {
+		if (error) {
+			pgs[i]->flags |= PG_RELEASED;
+		} else if (off <= pagestart + (i << PAGE_SHIFT) &&
+		    pagestart + ((i + 1) << PAGE_SHIFT) <= eob) {
+			pgs[i]->flags &= ~PG_RDONLY;
+		}
+	}
+	if (error) {
+		mutex_enter(&uvm_pageqlock);
+		uvm_page_unbusy(pgs, npages);
+		mutex_exit(&uvm_pageqlock);
+	} else {
+		uvm_page_unbusy(pgs, npages);
+	}
+	mutex_exit(&uobj->vmobjlock);
+
+ out:
+ 	kmem_free(pgs, pgssize);
+	return error;
 }

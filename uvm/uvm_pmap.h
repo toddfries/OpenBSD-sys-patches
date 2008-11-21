@@ -1,7 +1,6 @@
-/*	$OpenBSD: uvm_pmap.h,v 1.19 2007/09/10 18:49:45 miod Exp $	*/
-/*	$NetBSD: uvm_pmap.h,v 1.1 2000/06/27 09:00:14 mrg Exp $	*/
+/*	$NetBSD: uvm_pmap.h,v 1.23 2008/07/16 14:33:09 matt Exp $	*/
 
-/* 
+/*
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -39,17 +38,17 @@
  * All rights reserved.
  *
  * Author: Avadis Tevanian, Jr.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -69,7 +68,7 @@
 #ifndef	_PMAP_VM_
 #define	_PMAP_VM_
 
-struct proc;		/* for pmap_activate()/pmap_deactivate() proto */
+struct lwp;		/* for pmap_activate()/pmap_deactivate() proto */
 
 /*
  * Each machine dependent implementation is expected to
@@ -83,7 +82,9 @@ struct pmap_statistics {
 };
 typedef struct pmap_statistics	*pmap_statistics_t;
 
+#ifdef _KERNEL
 #include <machine/pmap.h>
+#endif
 
 /*
  * Flags passed to pmap_enter().  Note the bottom 3 bits are VM_PROT_*
@@ -92,82 +93,89 @@ typedef struct pmap_statistics	*pmap_statistics_t;
  */
 #define	PMAP_WIRED	0x00000010	/* wired mapping */
 #define	PMAP_CANFAIL	0x00000020	/* can fail if resource shortage */
+/*
+ * Flags passed to pmap_kenter_pa().  Note the bottom 3 bits are VM_PROT_*
+ * bits, used to indicate the access type.
+ */
+#ifndef PMAP_KMPAGE
+#define	PMAP_KMPAGE	0x00000000	/* this is from the kmem allocator */
+#endif
 
 #ifndef PMAP_EXCLUDE_DECLS	/* Used in Sparc port to virtualize pmap mod */
 #ifdef _KERNEL
 __BEGIN_DECLS
-#ifndef	pmap_activate
-void		 pmap_activate(struct proc *);
-#endif
-#ifndef	pmap_deactivate
-void		 pmap_deactivate(struct proc *);
-#endif
-#ifndef	pmap_unwire
-void		 pmap_unwire(pmap_t, vaddr_t);
+#if !defined(pmap_kernel)
+struct pmap	*pmap_kernel(void);
 #endif
 
+void		pmap_activate(struct lwp *);
+void		pmap_deactivate(struct lwp *);
+void		pmap_unwire(pmap_t, vaddr_t);
+
 #if !defined(pmap_clear_modify)
-boolean_t	 pmap_clear_modify(struct vm_page *);
+bool		pmap_clear_modify(struct vm_page *);
 #endif
 #if !defined(pmap_clear_reference)
-boolean_t	 pmap_clear_reference(struct vm_page *);
+bool		pmap_clear_reference(struct vm_page *);
 #endif
 
 #if !defined(pmap_collect)
-void		 pmap_collect(pmap_t);
+void		pmap_collect(pmap_t);
 #endif
 #if !defined(pmap_copy)
-void		 pmap_copy(pmap_t, pmap_t, vaddr_t, vsize_t, vaddr_t);
+void		pmap_copy(pmap_t, pmap_t, vaddr_t, vsize_t, vaddr_t);
 #endif
 #if !defined(pmap_copy_page)
-void		 pmap_copy_page(struct vm_page *, struct vm_page *);
+void		pmap_copy_page(paddr_t, paddr_t);
 #endif
-struct pmap 	 *pmap_create(void);
-void		 pmap_destroy(pmap_t);
-int		 pmap_enter(pmap_t,
-		    vaddr_t, paddr_t, vm_prot_t, int);
-boolean_t	 pmap_extract(pmap_t, vaddr_t, paddr_t *);
+struct pmap	*pmap_create(void);
+void		pmap_destroy(pmap_t);
+int		pmap_enter(pmap_t, vaddr_t, paddr_t, vm_prot_t, int);
+bool		pmap_extract(pmap_t, vaddr_t, paddr_t *);
 #if defined(PMAP_GROWKERNEL)
-vaddr_t		 pmap_growkernel(vaddr_t);
+vaddr_t		pmap_growkernel(vaddr_t);
 #endif
 
-void		 pmap_init(void);
+void		pmap_init(void);
 
-void		 pmap_kenter_pa(vaddr_t, paddr_t, vm_prot_t);
-void		 pmap_kremove(vaddr_t, vsize_t);
+void		pmap_kenter_pa(vaddr_t, paddr_t, vm_prot_t);
+void		pmap_kremove(vaddr_t, vsize_t);
 #if !defined(pmap_is_modified)
-boolean_t	 pmap_is_modified(struct vm_page *);
+bool		pmap_is_modified(struct vm_page *);
 #endif
 #if !defined(pmap_is_referenced)
-boolean_t	 pmap_is_referenced(struct vm_page *);
+bool		pmap_is_referenced(struct vm_page *);
 #endif
 
-void		 pmap_page_protect(struct vm_page *, vm_prot_t);
+void		pmap_page_protect(struct vm_page *, vm_prot_t);
 
 #if !defined(pmap_phys_address)
-paddr_t		 pmap_phys_address(paddr_t);
+paddr_t		pmap_phys_address(paddr_t);
 #endif
-void		 pmap_protect(pmap_t,
-		    vaddr_t, vaddr_t, vm_prot_t);
+void		pmap_protect(pmap_t, vaddr_t, vaddr_t, vm_prot_t);
 #if !defined(pmap_reference)
-void		 pmap_reference(pmap_t);
+void		pmap_reference(pmap_t);
 #endif
 #if !defined(pmap_remove)
-void		 pmap_remove(pmap_t, vaddr_t, vaddr_t);
+void		pmap_remove(pmap_t, vaddr_t, vaddr_t);
 #endif
-#if !defined(pmap_remove_holes)
-void		pmap_remove_holes(struct vm_map *);
-#endif
+void		pmap_remove_all(struct pmap *);
 #if !defined(pmap_update)
-void		 pmap_update(pmap_t);
+void		pmap_update(pmap_t);
+#endif
+#if !defined(pmap_resident_count)
+long		pmap_resident_count(pmap_t);
+#endif
+#if !defined(pmap_wired_count)
+long		pmap_wired_count(pmap_t);
 #endif
 #if !defined(pmap_zero_page)
-void		 pmap_zero_page(struct vm_page *);
+void		pmap_zero_page(paddr_t);
 #endif
 
-void		 pmap_virtual_space(vaddr_t *, vaddr_t *);
+void		pmap_virtual_space(vaddr_t *, vaddr_t *);
 #if defined(PMAP_STEAL_MEMORY)
-vaddr_t		 pmap_steal_memory(vsize_t, vaddr_t *, vaddr_t *);
+vaddr_t		pmap_steal_memory(vsize_t, vaddr_t *, vaddr_t *);
 #endif
 
 #if defined(PMAP_FORK)

@@ -1,4 +1,4 @@
-/*	$NetBSD: module.h,v 1.2 2008/03/02 11:18:43 jmmv Exp $	*/
+/*	$NetBSD: module.h,v 1.13 2008/11/19 11:08:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,14 +56,21 @@ typedef enum modsrc {
 
 /* Commands passed to module control routine. */
 typedef enum modcmd {
-	MODULE_CMD_INIT,
-	MODULE_CMD_FINI,
-	MODULE_CMD_STAT
+	MODULE_CMD_INIT,		/* mandatory */
+	MODULE_CMD_FINI,		/* mandatory */
+	MODULE_CMD_STAT,		/* optional */
+	MODULE_CMD_AUTOUNLOAD,		/* optional */
 } modcmd_t;
+
+#ifdef _KERNEL
+
+#include <sys/mutex.h>
+
+#include <prop/proplib.h>
 
 /* Module header structure. */
 typedef struct modinfo {
-	u_int		mi_release;
+	u_int		mi_version;
 	modclass_t	mi_class;
 	int		(*mi_modcmd)(modcmd_t, void *);
 	const char	*mi_name;
@@ -86,13 +86,8 @@ typedef struct module {
 	struct module		*mod_required[MAXMODDEPS];
 	u_int			mod_nrequired;
 	modsrc_t		mod_source;
+	time_t			mod_autotime;
 } module_t;
-
-#ifdef _KERNEL
-
-#include <sys/mutex.h>
-
-#include <prop/proplib.h>
 
 /*
  * Per-module linkage.  Loadable modules have a `link_set_modules' section
@@ -103,7 +98,7 @@ typedef struct module {
 #define	MODULE(class, name, required)				\
 static int name##_modcmd(modcmd_t, void *);			\
 static const modinfo_t name##_modinfo = {			\
-	.mi_release = __NetBSD_Version__,			\
+	.mi_version = __NetBSD_Version__,			\
 	.mi_class = (class),					\
 	.mi_modcmd = name##_modcmd,				\
 	.mi_name = #name,					\
@@ -117,16 +112,21 @@ extern struct vm_map	*module_map;
 extern kmutex_t		module_lock;
 extern u_int		module_count;
 extern struct modlist	module_list;
+extern u_int		module_gen;
 
 void	module_init(void);
+void	module_init_md(void);
 void	module_init_class(modclass_t);
 int	module_prime(void *, size_t);
-void	module_jettison(void);
 
-int	module_load(const char *, int, prop_dictionary_t);
+bool	module_compatible(int, int);
+int	module_load(const char *, int, prop_dictionary_t, modclass_t);
+int	module_autoload(const char *, modclass_t);
 int	module_unload(const char *);
 int	module_hold(const char *);
 void	module_rele(const char *);
+int	module_find_section(const char *, void **, size_t *);
+void	module_thread_kick(void);
 
 #else	/* _KERNEL */
 

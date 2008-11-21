@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_egreg.h,v 1.3 2000/06/05 20:56:20 niklas Exp $	*/
-/*	$NetBSD: if_egreg.h,v 1.3 1995/07/23 21:14:35 mycroft Exp $	*/
+/*	$NetBSD: if_egreg.h,v 1.5 2005/12/11 12:22:02 christos Exp $	*/
 
 /*
  * Copyright (c) 1993 Dean Huxley (dean@fsa.ca)
@@ -39,8 +38,6 @@
 #define EG_DATA		0x04
 #define EG_CONTROL	0x06
 
-#define EG_IO_PORTS	8
-
 /*
  * Host Control Register bits
  * EG_CTL_ATTN - does a soft reset
@@ -66,7 +63,7 @@
 
 /*
  * Host Status Register bits
- * EG_STAT_HRDY - Data Register ready 
+ * EG_STAT_HRDY - Data Register ready
  * EG_STAT_HCRE - Host Command Register empty
  * EG_STAT_ACRF - Adapter Command register full
  * EG_STAT_DIR  - Direction flag, 0 = host -> adapter, 1 = adapter -> host
@@ -86,7 +83,7 @@
 #define EG_STAT_ASF1 0x01
 
 #define	EG_PCB_NULL	0x00
-#define EG_PCB_ACCEPT	0x01 
+#define EG_PCB_ACCEPT	0x01
 #define EG_PCB_REJECT	0x02
 #define EG_PCB_DONE	0x03
 #define EG_PCB_STAT	0x03

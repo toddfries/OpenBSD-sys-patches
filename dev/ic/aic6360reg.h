@@ -1,8 +1,7 @@
-/*	$OpenBSD: aic6360reg.h,v 1.2 2003/11/08 19:17:28 jmc Exp $	*/
-/*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
+/*	$NetBSD: aic6360reg.h,v 1.3 2005/12/11 12:21:25 christos Exp $	*/
 
 /*
- * Copyright (c) 1994, 1995, 1996 Charles Hannum.  All rights reserved.
+ * Copyright (c) 1994, 1995, 1996 Charles M. Hannum.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -338,4 +337,3 @@
 #define STCNTL		0x04
 #define SCSIBLK		0x02
 #define DMABLK		0x01
-

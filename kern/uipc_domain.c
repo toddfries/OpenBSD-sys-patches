@@ -1,5 +1,4 @@
-/*	$OpenBSD: uipc_domain.c,v 1.27 2008/04/23 10:55:14 norby Exp $	*/
-/*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
+/*	$NetBSD: uipc_domain.c,v 1.76 2008/04/24 11:38:36 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -29,101 +28,106 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)uipc_domain.c	8.2 (Berkeley) 10/18/93
+ *	@(#)uipc_domain.c	8.3 (Berkeley) 2/14/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uipc_domain.c,v 1.76 2008/04/24 11:38:36 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/socket.h>
+#include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/domain.h>
 #include <sys/mbuf.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/callout.h>
+#include <sys/queue.h>
 #include <sys/proc.h>
-#include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
-#include <sys/timeout.h>
+#include <sys/un.h>
+#include <sys/unpcb.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
+#include <sys/kauth.h>
 
-#include "bluetooth.h"
-#include "bpfilter.h"
+MALLOC_DECLARE(M_SOCKADDR);
 
-struct	domain *domains;
+MALLOC_DEFINE(M_SOCKADDR, "sockaddr", "socket endpoints");
 
-void		pffasttimo(void *);
-void		pfslowtimo(void *);
-struct domain *	pffinddomain(int);
+void	pffasttimo(void *);
+void	pfslowtimo(void *);
 
-#if defined (KEY) || defined (IPSEC) || defined (TCP_SIGNATURE)
-int pfkey_init(void);
-#endif /* KEY || IPSEC || TCP_SIGNATURE */
+struct domainhead domains = STAILQ_HEAD_INITIALIZER(domains);
+static struct domain *domain_array[AF_MAX];
 
-#define	ADDDOMAIN(x)	{ \
-	extern struct domain __CONCAT(x,domain); \
-	__CONCAT(x,domain.dom_next) = domains; \
-	domains = &__CONCAT(x,domain); \
-}
+callout_t pffasttimo_ch, pfslowtimo_ch;
+
+/*
+ * Current time values for fast and slow timeouts.  We can use u_int
+ * relatively safely.  The fast timer will roll over in 27 years and
+ * the slow timer in 68 years.
+ */
+u_int	pfslowtimo_now;
+u_int	pffasttimo_now;
 
 void
 domaininit(void)
 {
-	struct domain *dp;
-	struct protosw *pr;
-	static struct timeout pffast_timeout;
-	static struct timeout pfslow_timeout;
+	__link_set_decl(domains, struct domain);
+	struct domain * const * dpp;
+	struct domain *rt_domain = NULL;
 
-#undef unix
 	/*
-	 * KAME NOTE: ADDDOMAIN(route) is moved to the last part so that
-	 * it will be initialized as the *first* element.  confusing!
+	 * Add all of the domains.  Make sure the PF_ROUTE
+	 * domain is added last.
 	 */
-#ifndef lint
-	ADDDOMAIN(unix);
-#ifdef INET
-	ADDDOMAIN(inet);
-#endif
-#ifdef INET6
-	ADDDOMAIN(inet6);
-#endif /* INET6 */
-#if defined (KEY) || defined (IPSEC) || defined (TCP_SIGNATURE)
-	pfkey_init();
-#endif /* KEY || IPSEC */
-#ifdef NETATALK
-	ADDDOMAIN(atalk);
-#endif
-#ifdef MPLS
-       ADDDOMAIN(mpls);
-#endif
-#ifdef NATM
-	ADDDOMAIN(natm);
-#endif
-#ifdef IPSEC
-#ifdef __KAME__
-	ADDDOMAIN(key);
-#endif
-#endif
-#if NBLUETOOTH > 0
-	ADDDOMAIN(bt);
-#endif
-	ADDDOMAIN(route);
-#endif
+	__link_set_foreach(dpp, domains) {
+		if ((*dpp)->dom_family == PF_ROUTE)
+			rt_domain = *dpp;
+		else
+			domain_attach(*dpp);
+	}
+	if (rt_domain)
+		domain_attach(rt_domain);
 
-	for (dp = domains; dp; dp = dp->dom_next) {
-		if (dp->dom_init)
-			(*dp->dom_init)();
-		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
-			if (pr->pr_init)
-				(*pr->pr_init)();
+	callout_init(&pffasttimo_ch, CALLOUT_MPSAFE);
+	callout_init(&pfslowtimo_ch, CALLOUT_MPSAFE);
+
+	callout_reset(&pffasttimo_ch, 1, pffasttimo, NULL);
+	callout_reset(&pfslowtimo_ch, 1, pfslowtimo, NULL);
+}
+
+void
+domain_attach(struct domain *dp)
+{
+	const struct protosw *pr;
+
+	STAILQ_INSERT_TAIL(&domains, dp, dom_link);
+	if (dp->dom_family < __arraycount(domain_array))
+		domain_array[dp->dom_family] = dp;
+
+	if (dp->dom_init)
+		(*dp->dom_init)();
+
+#ifdef MBUFTRACE
+	if (dp->dom_mowner.mo_name[0] == '\0') {
+		strncpy(dp->dom_mowner.mo_name, dp->dom_name,
+		    sizeof(dp->dom_mowner.mo_name));
+		MOWNER_ATTACH(&dp->dom_mowner);
+	}
+#endif
+	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++) {
+		if (pr->pr_init)
+			(*pr->pr_init)();
 	}
 
 	if (max_linkhdr < 16)		/* XXX */
 		max_linkhdr = 16;
 	max_hdr = max_linkhdr + max_protohdr;
 	max_datalen = MHLEN - max_hdr;
-	timeout_set(&pffast_timeout, pffasttimo, &pffast_timeout);
-	timeout_set(&pfslow_timeout, pfslowtimo, &pfslow_timeout);
-	timeout_add(&pffast_timeout, 1);
-	timeout_add(&pfslow_timeout, 1);
 }
 
 struct domain *
@@ -131,17 +135,20 @@ pffinddomain(int family)
 {
 	struct domain *dp;
 
-	for (dp = domains; dp != NULL; dp = dp->dom_next)
+	if (family < __arraycount(domain_array) && domain_array[family] != NULL)
+		return domain_array[family];
+
+	DOMAIN_FOREACH(dp)
 		if (dp->dom_family == family)
 			return (dp);
 	return (NULL);
 }
 
-struct protosw *
+const struct protosw *
 pffindtype(int family, int type)
 {
 	struct domain *dp;
-	struct protosw *pr;
+	const struct protosw *pr;
 
 	dp = pffinddomain(family);
 	if (dp == NULL)
@@ -150,15 +157,16 @@ pffindtype(int family, int type)
 	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 		if (pr->pr_type && pr->pr_type == type)
 			return (pr);
+
 	return (NULL);
 }
 
-struct protosw *
+const struct protosw *
 pffindproto(int family, int protocol, int type)
 {
 	struct domain *dp;
-	struct protosw *pr;
-	struct protosw *maybe = NULL;
+	const struct protosw *pr;
+	const struct protosw *maybe = NULL;
 
 	if (family == 0)
 		return (NULL);
@@ -178,87 +186,398 @@ pffindproto(int family, int protocol, int type)
 	return (maybe);
 }
 
-int
-net_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
-    size_t newlen, struct proc *p)
+void *
+sockaddr_addr(struct sockaddr *sa, socklen_t *slenp)
 {
-	struct domain *dp;
-	struct protosw *pr;
-	int family, protocol;
+	const struct domain *dom;
 
-	/*
-	 * All sysctl names at this level are nonterminal.
-	 * Usually: next two components are protocol family and protocol
-	 *	number, then at least one addition component.
-	 */
-	if (namelen < 2)
-		return (EISDIR);		/* overloaded */
-	family = name[0];
+	if ((dom = pffinddomain(sa->sa_family)) == NULL ||
+	    dom->dom_sockaddr_addr == NULL)
+		return NULL;
 
-	if (family == 0)
-		return (0);
-#if NBPFILTER > 0
-	if (family == PF_BPF)
-		return (bpf_sysctl(name + 1, namelen - 1, oldp, oldlenp,
-		    newp, newlen));
-#endif
-	dp = pffinddomain(family);
-	if (dp == NULL)
-		return (ENOPROTOOPT);
-#ifdef MPLS
-	/* XXX WARNING: big fat ugly hack */
-	/* stupid net.mpls is special as it does not have a protocol */
-	if (family == PF_MPLS)
-		return (dp->dom_protosw[0].pr_sysctl(name + 1, namelen - 1,
-		    oldp, oldlenp, newp, newlen));
-#endif
+	return (*dom->dom_sockaddr_addr)(sa, slenp);
+}
 
-	if (namelen < 3)
-		return (EISDIR);		/* overloaded */
-	protocol = name[1];
-	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
-		if (pr->pr_protocol == protocol && pr->pr_sysctl)
-			return ((*pr->pr_sysctl)(name + 2, namelen - 2,
-			    oldp, oldlenp, newp, newlen));
-	return (ENOPROTOOPT);
+const void *
+sockaddr_const_addr(const struct sockaddr *sa, socklen_t *slenp)
+{
+	const struct domain *dom;
+	
+	if ((dom = pffinddomain(sa->sa_family)) == NULL ||
+	    dom->dom_sockaddr_const_addr == NULL)
+		return NULL;
+
+	return (*dom->dom_sockaddr_const_addr)(sa, slenp);
+}
+
+const struct sockaddr *
+sockaddr_any(const struct sockaddr *sa)
+{
+	const struct domain *dom;
+	
+	if ((dom = pffinddomain(sa->sa_family)) == NULL)
+		return NULL;
+
+	return dom->dom_sa_any;
+}
+
+const void *
+sockaddr_anyaddr(const struct sockaddr *sa, socklen_t *slenp)
+{
+	const struct sockaddr *any;
+
+	if ((any = sockaddr_any(sa)) == NULL)
+		return NULL;
+
+	return sockaddr_const_addr(any, slenp);
+}
+
+struct sockaddr *
+sockaddr_alloc(sa_family_t af, socklen_t socklen, int flags)
+{
+	struct sockaddr *sa;
+	socklen_t reallen = MAX(socklen, offsetof(struct sockaddr, sa_data[0]));
+
+	if ((sa = malloc(reallen, M_SOCKADDR, flags)) == NULL)
+		return NULL;
+
+	sa->sa_family = af;
+	sa->sa_len = reallen;
+	return sa;
+}
+
+struct sockaddr *
+sockaddr_copy(struct sockaddr *dst, socklen_t socklen,
+    const struct sockaddr *src)
+{
+	if (__predict_false(socklen < src->sa_len)) {
+		panic("%s: source too long, %d < %d bytes", __func__, socklen,
+		    src->sa_len);
+	}
+	return memcpy(dst, src, src->sa_len);
+}
+
+int
+sockaddr_cmp(const struct sockaddr *sa1, const struct sockaddr *sa2)
+{
+	int len, rc;
+	struct domain *dom;
+
+	if (sa1->sa_family != sa2->sa_family)
+		return sa1->sa_family - sa2->sa_family;
+
+	dom = pffinddomain(sa1->sa_family);
+
+	if (dom != NULL && dom->dom_sockaddr_cmp != NULL)
+		return (*dom->dom_sockaddr_cmp)(sa1, sa2);
+
+	len = MIN(sa1->sa_len, sa2->sa_len);
+
+	if (dom == NULL || dom->dom_sa_cmplen == 0) {
+		if ((rc = memcmp(sa1, sa2, len)) != 0)
+			return rc;
+		return sa1->sa_len - sa2->sa_len;
+	}
+
+	if ((rc = memcmp((const char *)sa1 + dom->dom_sa_cmpofs,
+		         (const char *)sa2 + dom->dom_sa_cmpofs,
+			 MIN(dom->dom_sa_cmplen,
+			     len - MIN(len, dom->dom_sa_cmpofs)))) != 0)
+		return rc;
+
+	return MIN(dom->dom_sa_cmplen + dom->dom_sa_cmpofs, sa1->sa_len) -
+	       MIN(dom->dom_sa_cmplen + dom->dom_sa_cmpofs, sa2->sa_len);
+}
+
+struct sockaddr *
+sockaddr_dup(const struct sockaddr *src, int flags)
+{
+	struct sockaddr *dst;
+
+	if ((dst = sockaddr_alloc(src->sa_family, src->sa_len, flags)) == NULL)
+		return NULL;
+
+	return sockaddr_copy(dst, dst->sa_len, src);
 }
 
 void
-pfctlinput(int cmd, struct sockaddr *sa)
+sockaddr_free(struct sockaddr *sa)
+{
+	free(sa, M_SOCKADDR);
+}
+
+/*
+ * sysctl helper to stuff PF_LOCAL pcbs into sysctl structures
+ */
+static void
+sysctl_dounpcb(struct kinfo_pcb *pcb, const struct socket *so)
+{
+	struct unpcb *unp = sotounpcb(so);
+	struct sockaddr_un *un = unp->unp_addr;
+
+	memset(pcb, 0, sizeof(*pcb));
+
+	pcb->ki_family = so->so_proto->pr_domain->dom_family;
+	pcb->ki_type = so->so_proto->pr_type;
+	pcb->ki_protocol = so->so_proto->pr_protocol;
+	pcb->ki_pflags = unp->unp_flags;
+
+	pcb->ki_pcbaddr = PTRTOUINT64(unp);
+	/* pcb->ki_ppcbaddr = unp has no ppcb... */
+	pcb->ki_sockaddr = PTRTOUINT64(so);
+
+	pcb->ki_sostate = so->so_state;
+	/* pcb->ki_prstate = unp has no state... */
+
+	pcb->ki_rcvq = so->so_rcv.sb_cc;
+	pcb->ki_sndq = so->so_snd.sb_cc;
+
+	un = (struct sockaddr_un *)&pcb->ki_src;
+	/*
+	 * local domain sockets may bind without having a local
+	 * endpoint.  bleah!
+	 */
+	if (unp->unp_addr != NULL) {
+		un->sun_len = unp->unp_addr->sun_len;
+		un->sun_family = unp->unp_addr->sun_family;
+		strlcpy(un->sun_path, unp->unp_addr->sun_path,
+		    sizeof(pcb->ki_s));
+	}
+	else {
+		un->sun_len = offsetof(struct sockaddr_un, sun_path);
+		un->sun_family = pcb->ki_family;
+	}
+	if (unp->unp_conn != NULL) {
+		un = (struct sockaddr_un *)&pcb->ki_dst;
+		if (unp->unp_conn->unp_addr != NULL) {
+			un->sun_len = unp->unp_conn->unp_addr->sun_len;
+			un->sun_family = unp->unp_conn->unp_addr->sun_family;
+			un->sun_family = unp->unp_conn->unp_addr->sun_family;
+			strlcpy(un->sun_path, unp->unp_conn->unp_addr->sun_path,
+				sizeof(pcb->ki_d));
+		}
+		else {
+			un->sun_len = offsetof(struct sockaddr_un, sun_path);
+			un->sun_family = pcb->ki_family;
+		}
+	}
+
+	pcb->ki_inode = unp->unp_ino;
+	pcb->ki_vnode = PTRTOUINT64(unp->unp_vnode);
+	pcb->ki_conn = PTRTOUINT64(unp->unp_conn);
+	pcb->ki_refs = PTRTOUINT64(unp->unp_refs);
+	pcb->ki_nextref = PTRTOUINT64(unp->unp_nextref);
+}
+
+static int
+sysctl_unpcblist(SYSCTLFN_ARGS)
+{
+	struct file *fp, *dfp, *np;
+	struct socket *so;
+	struct kinfo_pcb pcb;
+	char *dp;
+	u_int op, arg;
+	size_t len, needed, elem_size, out_size;
+	int error, elem_count, pf, type, pf2;
+
+	if (namelen == 1 && name[0] == CTL_QUERY)
+		return (sysctl_query(SYSCTLFN_CALL(rnode)));
+
+	if (namelen != 4)
+		return (EINVAL);
+
+	if (oldp != NULL) {
+		len = *oldlenp;
+		elem_size = name[2];
+		elem_count = name[3];
+		if (elem_size != sizeof(pcb))
+			return EINVAL;
+	} else {
+		len = 0;
+		elem_size = sizeof(pcb);
+		elem_count = INT_MAX;
+	}
+	error = 0;
+	dp = oldp;
+	op = name[0];
+	arg = name[1];
+	out_size = elem_size;
+	needed = 0;
+
+	if (name - oname != 4)
+		return (EINVAL);
+
+	pf = oname[1];
+	type = oname[2];
+	pf2 = (oldp == NULL) ? 0 : pf;
+
+	/*
+	 * allocate dummy file descriptor to make position in list.
+	 */
+	sysctl_unlock();
+	if ((dfp = fgetdummy()) == NULL) {
+	 	sysctl_relock();
+		return ENOMEM;
+	}
+
+	/*
+	 * there's no "list" of local domain sockets, so we have
+	 * to walk the file list looking for them.  :-/
+	 */
+	mutex_enter(&filelist_lock);
+	LIST_FOREACH(fp, &filehead, f_list) {
+	    	np = LIST_NEXT(fp, f_list);
+		if (fp->f_count == 0 || fp->f_type != DTYPE_SOCKET ||
+		    fp->f_data == NULL)
+			continue;
+		if (kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_CANSEE, fp->f_cred) != 0)
+			continue;
+		so = (struct socket *)fp->f_data;
+		if (so->so_type != type)
+			continue;
+		if (so->so_proto->pr_domain->dom_family != pf)
+			continue;
+		if (len >= elem_size && elem_count > 0) {
+			mutex_enter(&fp->f_lock);
+			fp->f_count++;
+			mutex_exit(&fp->f_lock);
+			LIST_INSERT_AFTER(fp, dfp, f_list);
+			mutex_exit(&filelist_lock);
+			sysctl_dounpcb(&pcb, so);
+			error = copyout(&pcb, dp, out_size);
+			closef(fp);
+			mutex_enter(&filelist_lock);
+			np = LIST_NEXT(dfp, f_list);
+			LIST_REMOVE(dfp, f_list);
+			if (error)
+				break;
+			dp += elem_size;
+			len -= elem_size;
+		}
+		if (elem_count > 0) {
+			needed += elem_size;
+			if (elem_count != INT_MAX)
+				elem_count--;
+		}
+	}
+	mutex_exit(&filelist_lock);
+	fputdummy(dfp);
+ 	*oldlenp = needed;
+	if (oldp == NULL)
+		*oldlenp += PCB_SLOP * sizeof(struct kinfo_pcb);
+ 	sysctl_relock();
+
+	return (error);
+}
+
+SYSCTL_SETUP(sysctl_net_setup, "sysctl net subtree setup")
+{
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "net", NULL,
+		       NULL, 0, NULL, 0,
+		       CTL_NET, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "local",
+		       SYSCTL_DESCR("PF_LOCAL related settings"),
+		       NULL, 0, NULL, 0,
+		       CTL_NET, PF_LOCAL, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "stream",
+		       SYSCTL_DESCR("SOCK_STREAM settings"),
+		       NULL, 0, NULL, 0,
+		       CTL_NET, PF_LOCAL, SOCK_STREAM, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "dgram",
+		       SYSCTL_DESCR("SOCK_DGRAM settings"),
+		       NULL, 0, NULL, 0,
+		       CTL_NET, PF_LOCAL, SOCK_DGRAM, CTL_EOL);
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_STRUCT, "pcblist",
+		       SYSCTL_DESCR("SOCK_STREAM protocol control block list"),
+		       sysctl_unpcblist, 0, NULL, 0,
+		       CTL_NET, PF_LOCAL, SOCK_STREAM, CTL_CREATE, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_STRUCT, "pcblist",
+		       SYSCTL_DESCR("SOCK_DGRAM protocol control block list"),
+		       sysctl_unpcblist, 0, NULL, 0,
+		       CTL_NET, PF_LOCAL, SOCK_DGRAM, CTL_CREATE, CTL_EOL);
+}
+
+void
+pfctlinput(int cmd, const struct sockaddr *sa)
 {
 	struct domain *dp;
-	struct protosw *pr;
+	const struct protosw *pr;
 
-	for (dp = domains; dp; dp = dp->dom_next)
-		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
-			if (pr->pr_ctlinput)
+	DOMAIN_FOREACH(dp) {
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++) {
+			if (pr->pr_ctlinput != NULL)
 				(*pr->pr_ctlinput)(cmd, sa, NULL);
+		}
+	}
+}
+
+void
+pfctlinput2(int cmd, const struct sockaddr *sa, void *ctlparam)
+{
+	struct domain *dp;
+	const struct protosw *pr;
+
+	if (sa == NULL)
+		return;
+
+	DOMAIN_FOREACH(dp) {
+		/*
+		 * the check must be made by xx_ctlinput() anyways, to
+		 * make sure we use data item pointed to by ctlparam in
+		 * correct way.  the following check is made just for safety.
+		 */
+		if (dp->dom_family != sa->sa_family)
+			continue;
+
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++) {
+			if (pr->pr_ctlinput != NULL)
+				(*pr->pr_ctlinput)(cmd, sa, ctlparam);
+		}
+	}
 }
 
 void
 pfslowtimo(void *arg)
 {
-	struct timeout *to = (struct timeout *)arg;
 	struct domain *dp;
-	struct protosw *pr;
+	const struct protosw *pr;
 
-	for (dp = domains; dp; dp = dp->dom_next)
+	pfslowtimo_now++;
+
+	DOMAIN_FOREACH(dp) {
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_slowtimo)
 				(*pr->pr_slowtimo)();
-	timeout_add(to, hz/2);
+	}
+	callout_schedule(&pfslowtimo_ch, hz / 2);
 }
 
 void
 pffasttimo(void *arg)
 {
-	struct timeout *to = (struct timeout *)arg;
 	struct domain *dp;
-	struct protosw *pr;
+	const struct protosw *pr;
 
-	for (dp = domains; dp; dp = dp->dom_next)
+	pffasttimo_now++;
+
+	DOMAIN_FOREACH(dp) {
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_fasttimo)
 				(*pr->pr_fasttimo)();
-	timeout_add(to, hz/5);
+	}
+	callout_schedule(&pffasttimo_ch, hz / 5);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.4 2004/12/31 14:58:53 drahn Exp $	*/
-/*	$NetBSD: param.h,v 1.4 2002/02/12 06:58:19 thorpej Exp $	*/
+/*	$NetBSD: param.h,v 1.1 2006/12/16 05:46:43 ober Exp $	*/
 
 /*
  * Copyright (c) 1994,1995 Mark Brinicombe.
@@ -37,15 +36,12 @@
 #define	_ZAURUS_PARAM_H_
 
 /*
- * 1 page should be enough
+ * Machine dependent constants for ARM6+ processors
  */
-#ifndef MSGBUFSIZE
-#define MSGBUFSIZE	(1*NBPG)
-#endif
-
-#include <arm/param.h>
 
 #define	_MACHINE	zaurus
 #define	MACHINE		"zaurus"
+
+#include <arm/arm32/param.h>
 
 #endif	/* _ZAURUS_PARAM_H_ */

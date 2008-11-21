@@ -1,8 +1,8 @@
 %{
+/*	$NetBSD: aicasm_macro_scan.l,v 1.3 2005/12/11 12:22:18 christos Exp $	*/
+
 /*
-/*	$OpenBSD: aicasm_macro_scan.l,v 1.4 2004/09/18 19:51:53 mickey Exp $	*/
-/*
- * Sub-Lexical Analyzer for macro invokation in 
+ * Sub-Lexical Analyzer for macro invokation in
  * the Aic7xxx SCSI Host adapter sequencer assembler.
  *
  * Copyright (c) 2001 Adaptec Inc.
@@ -40,9 +40,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aicasm_macro_scan.l,v 1.4 2004/09/18 19:51:53 mickey Exp $
- *
- * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm_macro_scan.l,v 1.5 2003/12/16 23:54:07 gibbs Exp $
+ * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm_macro_scan.l,v 1.4 2002/09/27 03:23:02 gibbs Exp $
  */
 
 #include <sys/types.h>
@@ -80,7 +78,6 @@ MCARG		[^(), \t]+
 \n			{
 				++yylineno;
 			}
-\r			;
 <ARGLIST>{SPACE}	;
 <ARGLIST>\(		{
 				parren_count++;
@@ -113,7 +110,7 @@ MCARG		[^(), \t]+
 <ARGLIST>{MCARG}	{
 				char *yptr;
 
-				yptr = mmtext;
+				yptr = yytext;
 				while (*yptr)
 					*string_buf_ptr++ = *yptr++;
 			}
@@ -134,7 +131,7 @@ MCARG		[^(), \t]+
 			}
 {WORD}[(]		{
 				/* May be a symbol or a macro invocation. */
-				mmlval.sym = symtable_get(mmtext);
+				mmlval.sym = symtable_get(yytext);
 				if (mmlval.sym->type != MACRO) {
 					stop("Expecting Macro Name",
 					     EX_DATAERR);
@@ -144,9 +141,9 @@ MCARG		[^(), \t]+
 				BEGIN ARGLIST;
 				return T_SYMBOL;
 			}
-.			{ 
+.			{
 				snprintf(buf, sizeof(buf), "Invalid character "
-					 "'%c'", mmtext[0]);
+					 "'%c'", yytext[0]);
 				stop(buf, EX_DATAERR);
 			}
 %%

@@ -1,68 +1,18 @@
-/*	$OpenBSD: prtvid.c,v 1.7 2007/06/17 00:28:56 deraadt Exp $	*/
-
-/*
- * Copyright (c) 1995 Dale Rahn <drahn@openbsd.org>
- *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-
-#include <sys/types.h>
-#include <sys/disklabel.h>
+/*	$NetBSD: prtvid.c,v 1.3 2008/01/12 09:54:32 tsutsui Exp $	*/
 
 #include <stdio.h>
 #define __DBINTERFACE_PRIVATE
 #include <db.h>
-
-static void
-swabvid(struct mvmedisklabel *cdl)
-{
-	M_32_SWAP(cdl->vid_oss);
-	M_16_SWAP(cdl->vid_osl);
-	M_16_SWAP(cdl->vid_osa_u);
-	M_16_SWAP(cdl->vid_osa_l);
-	M_32_SWAP(cdl->vid_cas);
-}
-
-static void
-swabcfg(struct mvmedisklabel *cdl)
-{
-	printf("swapping cfg\n");
-
-	M_16_SWAP(cdl->cfg_atm);
-	M_16_SWAP(cdl->cfg_prm);
-	M_16_SWAP(cdl->cfg_atm);
-	M_16_SWAP(cdl->cfg_rec);
-	M_16_SWAP(cdl->cfg_trk);
-	M_16_SWAP(cdl->cfg_psm);
-	M_16_SWAP(cdl->cfg_shd);
-	M_16_SWAP(cdl->cfg_pcom);
-	M_16_SWAP(cdl->cfg_rwcc);
-	M_16_SWAP(cdl->cfg_ecc);
-	M_16_SWAP(cdl->cfg_eatm);
-	M_16_SWAP(cdl->cfg_eprm);
-	M_16_SWAP(cdl->cfg_eatw);
-	M_16_SWAP(cdl->cfg_rsvc1);
-	M_16_SWAP(cdl->cfg_rsvc2);
-}
+#include <machine/disklabel.h>
 
 int
 main(int argc, char *argv[])
 {
-	struct mvmedisklabel *cdl;
+	struct cpu_disklabel *cdl;
 
-	cdl = (struct mvmedisklabel *) malloc(sizeof (struct mvmedisklabel));
+	cdl = malloc(sizeof (struct cpu_disklabel));
 
-	fread(cdl, sizeof(struct mvmedisklabel), 1, stdin);
+	fread(cdl, sizeof(struct cpu_disklabel), 1, stdin);
 
 	if (BYTE_ORDER != BIG_ENDIAN)
 		swabvid(cdl);
@@ -141,4 +91,36 @@ main(int argc, char *argv[])
 	    (char *)&(cdl->cfg_rsvc1) - (char *)(cdl));
 	printf("cfg_rsvc2	%x	%x\n", cdl->cfg_rsvc2,
 	    (char *)&(cdl->cfg_rsvc2) - (char *)(cdl));
+}
+
+swabvid(struct cpu_disklabel *cdl)
+{
+
+	M_32_SWAP(cdl->vid_oss);
+	M_16_SWAP(cdl->vid_osl);
+	M_16_SWAP(cdl->vid_osa_u);
+	M_16_SWAP(cdl->vid_osa_l);
+	M_32_SWAP(cdl->vid_cas);
+}
+
+swabcfg(struct cpu_disklabel *cdl)
+{
+
+	printf("swapping cfg\n");
+
+	M_16_SWAP(cdl->cfg_atm);
+	M_16_SWAP(cdl->cfg_prm);
+	M_16_SWAP(cdl->cfg_atm);
+	M_16_SWAP(cdl->cfg_rec);
+	M_16_SWAP(cdl->cfg_trk);
+	M_16_SWAP(cdl->cfg_psm);
+	M_16_SWAP(cdl->cfg_shd);
+	M_16_SWAP(cdl->cfg_pcom);
+	M_16_SWAP(cdl->cfg_rwcc);
+	M_16_SWAP(cdl->cfg_ecc);
+	M_16_SWAP(cdl->cfg_eatm);
+	M_16_SWAP(cdl->cfg_eprm);
+	M_16_SWAP(cdl->cfg_eatw);
+	M_16_SWAP(cdl->cfg_rsvc1);
+	M_16_SWAP(cdl->cfg_rsvc2);
 }

@@ -1,4 +1,4 @@
-/* $NetBSD: bus_dma.h,v 1.6 2005/12/11 12:17:53 christos Exp $ */
+/* $NetBSD: bus_dma.h,v 1.11 2008/04/28 20:23:26 martin Exp $ */
 
 /*
  * This file was extracted from from alpha/include/bus.h
@@ -24,13 +24,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -119,6 +112,7 @@ typedef struct m68k_bus_dmamap *bus_dmamap_t;
 struct m68k_bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
 	bus_size_t	ds_len;		/* length of transfer */
+	u_int		_ds_flags;	/* MD flags */
 };
 typedef struct m68k_bus_dma_segment	bus_dma_segment_t;
 
@@ -166,8 +160,8 @@ struct m68k_bus_dma_tag {
 	void	(*_dmamem_free)(bus_dma_tag_t,
 		    bus_dma_segment_t *, int);
 	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, caddr_t *, int);
-	void	(*_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
+		    int, size_t, void **, int);
+	void	(*_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
@@ -199,6 +193,9 @@ struct m68k_bus_dma_tag {
 #define	bus_dmamem_mmap(t, sg, n, o, p, f)			\
 	(*(t)->_dmamem_mmap)((t), (sg), (n), (o), (p), (f))
 
+#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP       
+#define bus_dmatag_destroy(t)
+
 /*
  *	bus_dmamap_t
  *
@@ -212,7 +209,7 @@ struct m68k_bus_dmamap {
 	int		_dm_segcnt;	/* number of segs this map can map */
 	bus_size_t	_dm_maxmaxsegsz; /* fixed largest possible segment */
 	bus_size_t	_dm_boundary;	/* don't cross this */
-	int		_dm_flags;	/* misc. flags */
+	u_int		_dm_flags;	/* misc. flags */
 
 	/* Machine dependant fields: */
 	bus_size_t  dm_xfer_len;	/* length of successful transfer */
@@ -251,8 +248,8 @@ int	_bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, caddr_t *kvap, int flags);
-void	_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva,
+	    int nsegs, size_t size, void **kvap, int flags);
+void	_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva,
 	    size_t size);
 paddr_t	_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);

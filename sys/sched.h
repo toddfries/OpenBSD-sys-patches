@@ -1,12 +1,12 @@
-/*	$OpenBSD: sched.h,v 1.18 2007/10/11 10:34:08 art Exp $	*/
-/* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
+/*	$NetBSD: sched.h,v 1.65 2008/10/07 09:48:27 rmind Exp $	*/
 
 /*-
- * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1999, 2000, 2001, 2002, 2007, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Ross Harvey.
+ * by Ross Harvey, Jason R. Thorpe, Nathan J. Williams, Andrew Doran and
+ * Daniel Sieger.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,130 +69,207 @@
 #ifndef	_SYS_SCHED_H_
 #define	_SYS_SCHED_H_
 
-#include <sys/queue.h>
+#include <sys/featuretest.h>
+#include <sys/types.h>
+
+#if defined(_KERNEL_OPT)
+#include "opt_multiprocessor.h"
+#include "opt_lockdebug.h"
+#endif
+
+struct sched_param {
+	int	sched_priority;
+};
 
 /*
- * Posix defines a <sched.h> which may want to include <sys/sched.h>
+ * Scheduling policies required by IEEE Std 1003.1-2001
  */
+#define	SCHED_NONE	-1
+#define	SCHED_OTHER	0
+#define	SCHED_FIFO	1
+#define	SCHED_RR	2
+
+#if defined(_NETBSD_SOURCE)
+__BEGIN_DECLS
+
+/*
+ * Interface of CPU-sets.
+ */
+typedef struct _cpuset cpuset_t;
+typedef struct _kcpuset kcpuset_t;	/* XXX: lwp.h included from userland */
+
+#ifdef _KERNEL
+
+kcpuset_t *kcpuset_create(void);
+void	kcpuset_destroy(kcpuset_t *);
+void	kcpuset_copy(kcpuset_t *, const kcpuset_t *);
+void	kcpuset_use(kcpuset_t *);
+void	kcpuset_unuse(kcpuset_t *, kcpuset_t **);
+int	kcpuset_copyin(const cpuset_t *, kcpuset_t *, size_t);
+int	kcpuset_copyout(const kcpuset_t *, cpuset_t *, size_t);
+void	kcpuset_zero(kcpuset_t *);
+int	kcpuset_isset(cpuid_t, const kcpuset_t *);
+
+#else
+
+#define	cpuset_create()		_cpuset_create()
+#define	cpuset_destroy(c)	_cpuset_destroy(c)
+#define	cpuset_size(c)		_cpuset_size(c)
+#define	cpuset_zero(c)		_cpuset_zero(c)
+#define	cpuset_isset(i, c)	_cpuset_isset(i, c)
+#define	cpuset_set(i, c)	_cpuset_set(i, c)
+#define	cpuset_clr(i, c)	_cpuset_clr(i, c)
+
+cpuset_t *_cpuset_create(void);
+void	_cpuset_destroy(cpuset_t *);
+void	_cpuset_zero(cpuset_t *);
+int	_cpuset_set(cpuid_t, cpuset_t *);
+int	_cpuset_clr(cpuid_t, cpuset_t *);
+int	_cpuset_isset(cpuid_t, const cpuset_t *);
+size_t	_cpuset_size(const cpuset_t *);
+
+#endif
+
+/*
+ * Internal affinity and scheduling calls.
+ */
+int	_sched_getaffinity(pid_t, lwpid_t, size_t, cpuset_t *);
+int	_sched_setaffinity(pid_t, lwpid_t, size_t, const cpuset_t *);
+int	_sched_getparam(pid_t, lwpid_t, int *, struct sched_param *);
+int	_sched_setparam(pid_t, lwpid_t, int, const struct sched_param *);
+__END_DECLS
 
 /*
  * CPU states.
  * XXX Not really scheduler state, but no other good place to put
  * it right now, and it really is per-CPU.
  */
-#define CP_USER		0
-#define CP_NICE		1
-#define CP_SYS		2
-#define CP_INTR		3
-#define CP_IDLE		4
-#define CPUSTATES	5
+#define	CP_USER		0
+#define	CP_NICE		1
+#define	CP_SYS		2
+#define	CP_INTR		3
+#define	CP_IDLE		4
+#define	CPUSTATES	5
+
+#if defined(_KERNEL)
+
+#include <sys/mutex.h>
+#include <sys/time.h>
 
 /*
- * Per-CPU scheduler state.
- * XXX - expose to userland for now.
+ * Per-CPU scheduler state.  Field markings and the corresponding locks: 
+ *
+ * s:	splsched, may only be safely accessed by the CPU itself
+ * m:	spc_mutex
+ * (:	unlocked, stable
+ * c:	cpu_lock
  */
 struct schedstate_percpu {
-	struct timeval spc_runtime;	/* time curproc started running */
-	__volatile int spc_schedflags;	/* flags; see below */
-	u_int spc_schedticks;		/* ticks for schedclock() */
-	u_int64_t spc_cp_time[CPUSTATES]; /* CPU state statistics */
-	u_char spc_curpriority;		/* usrpri of curproc */
-	int spc_rrticks;		/* ticks until roundrobin() */
-	int spc_pscnt;			/* prof/stat counter */
-	int spc_psdiv;			/* prof/stat divisor */	
-	struct proc *spc_idleproc;	/* idle proc for this cpu */
-#ifdef notyet
-	struct proc *spc_reaper;	/* dead proc reaper */
-#endif
-	LIST_HEAD(,proc) spc_deadproc;
+	/* First set of data is likely to be accessed by other CPUs. */
+	kmutex_t	*spc_mutex;	/* (: lock on below, runnable LWPs */
+	kmutex_t	*spc_lwplock;	/* (: general purpose lock for LWPs */
+	struct lwp	*spc_migrating;	/* (: migrating LWP */
+	pri_t		spc_curpriority;/* m: usrpri of curlwp */
+	pri_t		spc_maxpriority;/* m: highest priority queued */
+	psetid_t	spc_psid;	/* c: processor-set ID */
+	time_t		spc_lastmod;	/* c: time of last cpu state change */
+
+	/* For the most part, this set of data is CPU-private. */
+	void		*spc_sched_info;/* (: scheduler-specific structure */
+	volatile int	spc_flags;	/* s: flags; see below */
+	u_int		spc_schedticks;	/* s: ticks for schedclock() */
+	uint64_t	spc_cp_time[CPUSTATES];/* s: CPU state statistics */
+	int		spc_ticks;	/* s: ticks until sched_tick() */
+	int		spc_pscnt;	/* s: prof/stat counter */
+	int		spc_psdiv;	/* s: prof/stat divisor */
 };
 
-#ifdef	_KERNEL
-
 /* spc_flags */
-#define SPCF_SEENRR             0x0001  /* process has seen roundrobin() */
-#define SPCF_SHOULDYIELD        0x0002  /* process should yield the CPU */
-#define SPCF_SWITCHCLEAR        (SPCF_SEENRR|SPCF_SHOULDYIELD)
+#define	SPCF_SEENRR		0x0001	/* process has seen roundrobin() */
+#define	SPCF_SHOULDYIELD	0x0002	/* process should yield the CPU */
+#define	SPCF_OFFLINE		0x0004	/* CPU marked offline */
+#define	SPCF_RUNNING		0x0008	/* CPU is running */
 
+#define	SPCF_SWITCHCLEAR	(SPCF_SEENRR|SPCF_SHOULDYIELD)
 
-#define	NQS	32			/* 32 run queues. */
-#define	PPQ	(128 / NQS)		/* priorities per queue */
-#define NICE_WEIGHT 2			/* priorities per nice level */
-#define	ESTCPULIM(e) min((e), NICE_WEIGHT * PRIO_MAX - PPQ)
-
-extern int schedhz;			/* ideally: 16 */
-extern int rrticks_init;		/* ticks per roundrobin() */
-
-struct proc;
-void schedclock(struct proc *);
-struct cpu_info;
-void roundrobin(struct cpu_info *);
-
-void sched_init_cpu(struct cpu_info *);
-void sched_exit(struct proc *);
-void mi_switch(void);
-void cpu_switchto(struct proc *, struct proc *);
-struct proc *sched_chooseproc(void);
-void cpu_idle_enter(void);
-void cpu_idle_cycle(void);
-void cpu_idle_leave(void);
-
-extern volatile int sched_whichqs;
-#define sched_is_idle()	(sched_whichqs == 0)
-
-void sched_init_runqueues(void);
-void setrunqueue(struct proc *);
-void remrunqueue(struct proc *);
-
-/* Inherit the parent's scheduler history */
-#define scheduler_fork_hook(parent, child) do {				\
-	(child)->p_estcpu = (parent)->p_estcpu;				\
-} while (0)
-
-/* Chargeback parents for the sins of their children.  */
-#define scheduler_wait_hook(parent, child) do {				\
-	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
-} while (0)
-
-#ifndef IPL_SCHED
-#define IPL_SCHED IPL_HIGH
-#endif
-
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-#include <sys/lock.h>
+#endif /* defined(_KERNEL) */
 
 /*
- * XXX Instead of using struct lock for the kernel lock and thus requiring us
- * XXX to implement simplelocks, causing all sorts of fine-grained locks all
- * XXX over our tree getting activated consuming both time and potentially
- * XXX introducing locking protocol bugs.
+ * Flags passed to the Linux-compatible __clone(2) system call.
  */
-extern struct __mp_lock sched_lock;
+#define	CLONE_CSIGNAL		0x000000ff	/* signal to be sent at exit */
+#define	CLONE_VM		0x00000100	/* share address space */
+#define	CLONE_FS		0x00000200	/* share "file system" info */
+#define	CLONE_FILES		0x00000400	/* share file descriptors */
+#define	CLONE_SIGHAND		0x00000800	/* share signal actions */
+#define	CLONE_PID		0x00001000	/* share process ID */
+#define	CLONE_PTRACE		0x00002000	/* ptrace(2) continues on
+						   child */
+#define	CLONE_VFORK		0x00004000	/* parent blocks until child
+						   exits */
 
-#define	SCHED_ASSERT_LOCKED()	KASSERT(__mp_lock_held(&sched_lock))
-#define	SCHED_ASSERT_UNLOCKED()	KASSERT(__mp_lock_held(&sched_lock) == 0)
+#endif /* _NETBSD_SOURCE */
 
-#define	SCHED_LOCK(s)							\
-do {									\
-	s = splsched();							\
-	__mp_lock(&sched_lock);						\
-} while (/* CONSTCOND */ 0)
+#ifdef _KERNEL
 
-#define	SCHED_UNLOCK(s)							\
-do {									\
-	__mp_unlock(&sched_lock);					\
-	splx(s);							\
-} while (/* CONSTCOND */ 0)
+extern int schedhz;			/* ideally: 16 */
 
-#else /* ! MULTIPROCESSOR || LOCKDEBUG */
+struct proc;
+struct cpu_info;
 
-#define	SCHED_ASSERT_LOCKED()		splassert(IPL_SCHED);
-#define	SCHED_ASSERT_UNLOCKED()		/* nothing */
+/*
+ * Common Scheduler Interface.
+ */
 
-#define	SCHED_LOCK(s)			s = splsched()
-#define	SCHED_UNLOCK(s)			splx(s)
+/* Scheduler initialization */
+void		runq_init(void);
+void		sched_init(void);
+void		sched_rqinit(void);
+void		sched_cpuattach(struct cpu_info *);
 
-#endif /* MULTIPROCESSOR || LOCKDEBUG */
+/* Time-driven events */
+void		sched_tick(struct cpu_info *);
+void		schedclock(struct lwp *);
+void		sched_schedclock(struct lwp *);
+void		sched_pstats(void *);
+void		sched_lwp_stats(struct lwp *);
+void		sched_pstats_hook(struct lwp *, int);
+
+/* Runqueue-related functions */
+bool		sched_curcpu_runnable_p(void);
+void		sched_dequeue(struct lwp *);
+void		sched_enqueue(struct lwp *, bool);
+struct lwp *	sched_nextlwp(void);
+void		sched_oncpu(struct lwp *);
+void		sched_newts(struct lwp *);
+
+/* Priority adjustment */
+void		sched_nice(struct proc *, int);
+
+/* Handlers of fork and exit */
+void		sched_proc_fork(struct proc *, struct proc *);
+void		sched_proc_exit(struct proc *, struct proc *);
+void		sched_lwp_fork(struct lwp *, struct lwp *);
+void		sched_lwp_collect(struct lwp *);
+
+void		sched_slept(struct lwp *);
+void		sched_wakeup(struct lwp *);
+
+void		setrunnable(struct lwp *);
+void		sched_setrunnable(struct lwp *);
+
+struct cpu_info *sched_takecpu(struct lwp *);
+void		sched_print_runqueue(void (*pr)(const char *, ...));
+
+/* Dispatching */
+bool		kpreempt(uintptr_t);
+void		preempt(void);
+int		mi_switch(struct lwp *);
+void		updatertime(lwp_t *, const struct bintime *);
+void		sched_idle(void);
+
+int		do_sched_setparam(pid_t, lwpid_t, int, const struct sched_param *);
+int		do_sched_getparam(pid_t, lwpid_t, int *, struct sched_param *);
 
 #endif	/* _KERNEL */
 #endif	/* _SYS_SCHED_H_ */

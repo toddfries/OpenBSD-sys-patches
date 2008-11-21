@@ -1,4 +1,4 @@
-/*	$NetBSD: iomd_irq.S,v 1.5 2005/12/11 12:16:47 christos Exp $	*/
+/*	$NetBSD: iomd_irq.S,v 1.12 2008/08/19 19:10:08 matt Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -84,23 +84,23 @@ Lirq_ffs_table:
  * is zero then a pointer to the IRQ frame on the stack is passed instead.
  */
 
+Lcurrent_spl_level:
+	.word	_C_LABEL(cpu_info_store) + CI_CPL
+
 Ldisabled_mask:
 	.word	_C_LABEL(disabled_mask)
 
-Lcurrent_spl_level:	
-	.word	_C_LABEL(current_spl_level)
-
-Lcurrent_intr_depth:
-	.word	_C_LABEL(current_intr_depth)
-
 Lspl_masks:
 	.word	_C_LABEL(spl_masks)
+
+LOCK_CAS_CHECK_LOCALS
 
 AST_ALIGNMENT_FAULT_LOCALS
 
 /*
  * Register usage
  *
+ *  r4  - Address of cpu_info
  *  r5  - Address of ffs table
  *  r6  - Address of current handler
  *  r7  - Pointer to handler pointer list
@@ -160,10 +160,9 @@ irq_entry_continue:
 	 * each time the interrupt handler is nested.
 	 */
 
-	ldr	r0, Lcurrent_intr_depth
-	ldr	r1, [r0]
-	add	r1, r1, #1
-	str	r1, [r0]
+	ldr	r0, [r4, #CI_INTR_DEPTH]
+	add	r0, r0, #1
+	str	r0, [r4, #CI_INTR_DEPTH]
 
 	/* Block the current requested interrupts */
 	ldr	r1, Ldisabled_mask
@@ -184,7 +183,7 @@ irq_entry_continue:
 	 * This would benefit from a special ffs type routine
 	 */
 
-	mov	r9, #(_SPL_LEVELS - 1)
+	mov	r9, #(NIPL - 1)
 	ldr	r7, Lspl_masks
 
 Lfind_highest_ipl:
@@ -201,10 +200,9 @@ Lfind_highest_ipl:
 
 	str	r0, [r1]	
 
-	ldr	r0, Lcurrent_spl_level
-	ldr	r1, [r0]
-	str	r9, [r0]
-	stmfd	sp!, {r1}
+	ldr	r0, [r4, #CI_CPL]
+	str	r9, [r4, #CI_CPL]
+	stmfd	sp!, {r0}
 
 	/* Update the IOMD irq masks */
 	bl	_C_LABEL(irq_setmasks)
@@ -219,24 +217,24 @@ Lfind_highest_ipl:
 	 * take a copy of the IRQ request so that we can strip bits out of it
 	 * note that we only use 24 bits with iomd2 chips
 	 */
-	ldr	r4, Larm7500_ioc_found
-	ldr	r4, [r4]			/* get the flag      */
-	cmp	r4, #0
+	ldr	r5, Larm7500_ioc_found
+	ldr	r5, [r5]			/* get the flag      */
+	cmp	r5, #0
 	movne	r11, r8				/* ARM7500  -> copy all bits   */
 	biceq	r11, r8, #0xff000000		/* !ARM7500 -> only use 24 bit */
 
 	/* ffs routine to find first irq to service */
 	/* standard trick to isolate bottom bit in a0 or 0 if a0 = 0 on entry */
-	rsb	r4, r11, #0
-	ands	r10, r11, r4
+	rsb	r5, r11, #0
+	ands	r10, r11, r5
 
 	/* 
 	 * now r10 has at most 1 set bit, call this X
 	 * if X = 0, branch to exit code
 	 */
 	beq	exitirq
-	adr	r5, Lirq_ffs_table
 irqloop:
+	adr	r5, Lirq_ffs_table
 	/*
 	 * at this point:
 	 *	r5 = address of ffs table
@@ -266,10 +264,10 @@ irqloop:
 	 *	- unsetting of the irq bit in r11
 	 *	- irq stats (if enabled) also get put in the mix
 	 */
-	ldr	r4, Lcnt		/* Stat info A */
+	ldr	r5, Lcnt		/* Stat info A */
 	ldr	r6, [r7, r9, lsl #2]	/* Get address of first handler structure */
 
-	ldr	r1, [r4, #(V_INTR)]	/* Stat info B */
+	ldr	r1, [r5, #(V_INTR)]	/* Stat info B */
 	
 	teq	r6, #0x00000000		/* Do we have a handler */
 	moveq	r0, r8			/* IRQ requests as arg 0 */
@@ -282,7 +280,7 @@ irqloop:
 #endif
 	/* stat info C */
 	add	r1, r1, #0x00000001
-	str	r1, [r4, #(V_INTR)]
+	str	r1, [r5, #(V_INTR)]
 
 #ifdef IRQSTATS
 	ldr	r3, [r2, r3, lsl #2]!
@@ -310,21 +308,22 @@ irqchainloop:
 	bne	irqchainloop
 nextirq:
 	/* Check for next irq */
-	rsb	r4, r11, #0
-	ands	r10, r11, r4
+	rsb	r5, r11, #0
+	ands	r10, r11, r5
 	/* check if there are anymore irq's to service */
 	bne 	irqloop
 
 exitirq:
 	ldmfd	sp!, {r2, r3}
-	ldr	r9, Lcurrent_spl_level
-	ldr	r1, Ldisabled_mask
-	str	r2, [r9]
-	str	r3, [r1]
+	ldr	r0, Ldisabled_mask
+	str	r2, [r4, #CI_CPL]
+	str	r3, [r0]
 
 	bl	_C_LABEL(irq_setmasks)
 
+#if __HAVE_FAST_SOFTINTS
 	bl	_C_LABEL(dosoftints)	/* Handle the soft interrupts */
+#endif
 
 	/* Kill IRQ's in preparation for exit */
         mrs     r0, cpsr_all
@@ -332,19 +331,17 @@ exitirq:
         msr     cpsr_all, r0
 
 	/* Decrement the nest count */
-	ldr	r0, Lcurrent_intr_depth
-	ldr	r1, [r0]
-	sub	r1, r1, #1
-	str	r1, [r0]
+	ldr	r0, [r4, #CI_INTR_DEPTH]
+	sub	r0, r0, #1
+	str	r0, [r4, #CI_INTR_DEPTH]
+
+	LOCK_CAS_CHECK
 
 	DO_AST_AND_RESTORE_ALIGNMENT_FAULTS
 	PULLFRAMEFROMSVCANDEXIT
 
 	/* NOT REACHED */
 	b	. - 8
-
-Lspl_mask:
-	.word	_C_LABEL(spl_mask)	/* irq's allowed at current spl level */
 
 Lcurrent_mask:
 	.word	_C_LABEL(current_mask)	/* irq's that are usable */
@@ -357,9 +354,11 @@ ENTRY(irq_setmasks)
 
 	/* Calculate IOMD interrupt mask */
 	ldr	r1, Lcurrent_mask	/* All the enabled interrupts */
-	ldr	r2, Lspl_mask		/* Block due to current spl level */
 	ldr	r1, [r1]
+	ldr	r0, Lspl_masks		/* Block due to current spl level */
+	ldr	r2, Lcurrent_spl_level
 	ldr	r2, [r2]
+	ldr	r2, [r0, r2, lsl #2]
 	and	r1, r1, r2
 	ldr	r2, Ldisabled_mask	/* Block due to active interrupts */
 	ldr	r2, [r2]

@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_ptrace.c,v 1.10 2006/11/16 01:32:42 christos Exp $ */
+/*	$NetBSD: darwin_ptrace.c,v 1.18 2008/11/12 12:36:09 ad Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,9 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_ptrace.c,v 1.10 2006/11/16 01:32:42 christos Exp $");
-
-#include "opt_ptrace.h"
+__KERNEL_RCSID(0, "$NetBSD: darwin_ptrace.c,v 1.18 2008/11/12 12:36:09 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -47,7 +38,6 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_ptrace.c,v 1.10 2006/11/16 01:32:42 christos 
 #include <sys/mount.h>
 #include <sys/proc.h>
 #include <sys/ptrace.h>
-#include <sys/sa.h>
 
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
@@ -65,153 +55,29 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_ptrace.c,v 1.10 2006/11/16 01:32:42 christos 
 #define ISSET(t, f)     ((t) & (f))
 
 int
-darwin_sys_ptrace(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+darwin_sys_ptrace(struct lwp *l, const struct darwin_sys_ptrace_args *uap, register_t *retval)
 {
-#if defined(PTRACE) || defined(_LKM)
-	struct darwin_sys_ptrace_args /* {
+	/* {
 		syscallarg(int) req;
 		syscallarg(pid_t) pid;
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(int) data;
-	} */ *uap = v;
-	int req = SCARG(uap, req);
-	struct proc *p = l->l_proc;
-	struct darwin_emuldata *ded = NULL;
-	struct proc *t;			/* target process */
-	int error;
+	} */
 
-#ifdef _LKM
-#define sys_ptrace (*sysent[SYS_ptrace].sy_call)
-	if (sys_ptrace == sys_nosys)
-		return ENOSYS;
-#endif
-
-	ded = (struct darwin_emuldata *)p->p_emuldata;
-
-	switch (req) {
-	case DARWIN_PT_ATTACHEXC:
-		if ((t = pfind(SCARG(uap, pid))) == NULL)
-			return ESRCH;
-
-		if (t->p_emul != &emul_darwin)
-			return ESRCH;
-		ded = t->p_emuldata;
-
-		if (ded->ded_flags & DARWIN_DED_SIGEXC)
-			return EBUSY;
-
-		ded->ded_flags |= DARWIN_DED_SIGEXC;
-
-		SCARG(uap, req) = PT_ATTACH;
-		if ((error = sys_ptrace(l, v, retval)) != 0)
-			 ded->ded_flags &= ~DARWIN_DED_SIGEXC;
-
-		return error;
-		break;
-
-	case DARWIN_PT_SIGEXC:
-		if ((p->p_flag & P_TRACED) == 0)
-			return EBUSY;
-
-		ded->ded_flags |= DARWIN_DED_SIGEXC;
-		break;
-
-	case DARWIN_PT_DETACH: {
-		int had_sigexc = 0;
-
-		if ((t = pfind(SCARG(uap, pid))) == NULL)
-			return (ESRCH);
-
-		if ((t->p_emul == &emul_darwin) &&
-		    (t->p_flag & P_TRACED) &&
-		    (t->p_pptr == p)) {
-			ded = t->p_emuldata;
-			if (ded->ded_flags & DARWIN_DED_SIGEXC) {
-				had_sigexc = 1;
-				ded->ded_flags &= ~DARWIN_DED_SIGEXC;
-			}
-		}
-
-		/*
-		 * If the process is not marked as stopped,
-		 * sys_ptrace sanity checks will return EBUSY.
-		 */
-		proc_stop(t, 0);
-
-		if ((error = sys_ptrace(l, v, retval)) != 0) {
-			proc_unstop(t);
-			if (had_sigexc)
-				ded->ded_flags |= DARWIN_DED_SIGEXC;
-		}
-
-		break;
-	}
-
-	case DARWIN_PT_THUPDATE: {
-		int signo = SCARG(uap, data);
-
-		if ((t = pfind(SCARG(uap, pid))) == NULL)
-			return ESRCH;
-
-		/* Checks from native ptrace */
-		if (!ISSET(t->p_flag, P_TRACED))
-			return EPERM;
-
-		if (ISSET(t->p_flag, P_FSTRACE))
-			return EBUSY;
-
-		if (t->p_pptr != p)
-			return EBUSY;
-
-#if 0
-		if (t->p_stat != SSTOP || !ISSET(t->p_flag, P_WAITED))
-			return EBUSY;
-#endif
-		if ((signo < 0) || (signo > NSIG))
-			return EINVAL;
-
-		t->p_xstat = signo;
-		if (signo != 0)
-			sigaddset(&p->p_sigctx.ps_siglist, signo);
-
-		break;
-	}
-
-	case DARWIN_PT_READ_U:
-	case DARWIN_PT_WRITE_U:
-	case DARWIN_PT_STEP:
-	case DARWIN_PT_FORCEQUOTA:
-	case DARWIN_PT_DENY_ATTACH:
-		printf("darwin_sys_ptrace: unimplemented command %d\n", req);
-		break;
-
-	/* The other ptrace commands are the same on NetBSD */
-	default:
-		return sys_ptrace(l, v, retval);
-		break;
-	}
-
-	return 0;
-#else
-	return ENOSYS;
-#endif /* PTRACE || _LKM */
+	return ENOSYS;	/* code was badly broken */
 }
 
 int
-darwin_sys_kdebug_trace(struct lwp *l, void *v,
-    register_t *retval)
+darwin_sys_kdebug_trace(struct lwp *l, const struct darwin_sys_kdebug_trace_args *uap, register_t *retval)
 {
-	struct darwin_sys_kdebug_trace_args /* {
+	/* {
 		syscallarg(int) debugid;
 		syscallarg(int) arg1;
 		syscallarg(int) arg2;
 		syscallarg(int) arg3;
 		syscallarg(int) arg4;
 		syscallarg(int) arg5;
-	} */ *uap = v;
+	} */
 	int args[4];
 	char *str;
 

@@ -1,70 +1,125 @@
-/*	$OpenBSD: bt_proto.c,v 1.4 2007/06/24 20:55:27 uwe Exp $	*/
-/*
- * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
+/*	$NetBSD: bt_proto.c,v 1.10 2008/04/24 11:38:37 ad Exp $	*/
+
+/*-
+ * Copyright (c) 2005 Iain Hibbert.
+ * Copyright (c) 2006 Itronix Inc.
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of Itronix Inc. may not be used to endorse
+ *    or promote products derived from this software without specific
+ *    prior written permission.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THIS SOFTWARE IS PROVIDED BY ITRONIX INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL ITRONIX INC. BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bt_proto.c,v 1.10 2008/04/24 11:38:37 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/domain.h>
+#include <sys/kernel.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
-#include <sys/timeout.h>
+#include <sys/systm.h>
+
+#include <net/route.h>
 
 #include <netbt/bluetooth.h>
-#include <netbt/bt_var.h>
 #include <netbt/hci.h>
 #include <netbt/l2cap.h>
 #include <netbt/rfcomm.h>
 #include <netbt/sco.h>
 
-struct domain btdomain;
+DOMAIN_DEFINE(btdomain);	/* forward declare and add to link set */
 
-struct protosw btsw[] = {
-	{ SOCK_RAW, &btdomain, BTPROTO_HCI,
-	  PR_ATOMIC | PR_ADDR,
-	  NULL/*input*/, NULL/*output*/, NULL/*ctlinput*/,
-	  hci_ctloutput, hci_usrreq, NULL/*init*/,
-	  NULL/*fasttimo*/, NULL/*slowtimo*/, NULL/*drain*/,
-	  NULL/*sysctl*/
+static void	bt_init(void);
+
+PR_WRAP_CTLOUTPUT(hci_ctloutput)
+PR_WRAP_CTLOUTPUT(sco_ctloutput)
+PR_WRAP_CTLOUTPUT(l2cap_ctloutput)
+PR_WRAP_CTLOUTPUT(rfcomm_ctloutput)
+
+#define	hci_ctloutput		hci_ctloutput_wrapper
+#define	sco_ctloutput		sco_ctloutput_wrapper
+#define	l2cap_ctloutput		l2cap_ctloutput_wrapper
+#define	rfcomm_ctloutput	rfcomm_ctloutput_wrapper
+
+PR_WRAP_USRREQ(hci_usrreq)
+PR_WRAP_USRREQ(sco_usrreq)
+PR_WRAP_USRREQ(l2cap_usrreq)
+PR_WRAP_USRREQ(rfcomm_usrreq)
+
+#define	hci_usrreq		hci_usrreq_wrapper
+#define	sco_usrreq		sco_usrreq_wrapper
+#define	l2cap_usrreq		l2cap_usrreq_wrapper
+#define	rfcomm_usrreq		rfcomm_usrreq_wrapper
+
+const struct protosw btsw[] = {
+	{ /* raw HCI commands */
+		.pr_type = SOCK_RAW,
+		.pr_domain = &btdomain,
+		.pr_protocol = BTPROTO_HCI,
+		.pr_flags = (PR_ADDR | PR_ATOMIC),
+		.pr_ctloutput = hci_ctloutput,
+		.pr_usrreq = hci_usrreq,
 	},
-	{ SOCK_SEQPACKET, &btdomain, BTPROTO_SCO,
-	  PR_ATOMIC | PR_CONNREQUIRED,
-	  NULL/*input*/, NULL/*output*/, NULL/*ctlinput*/,
-	  sco_ctloutput, sco_usrreq, NULL/*init*/,
-	  NULL/*fasttimo*/, NULL/*slowtimo*/, NULL/*drain*/,
-	  NULL/*sysctl*/
+	{ /* HCI SCO data (audio) */
+		.pr_type = SOCK_SEQPACKET,
+		.pr_domain = &btdomain,
+		.pr_protocol = BTPROTO_SCO,
+		.pr_flags = (PR_CONNREQUIRED | PR_ATOMIC | PR_LISTEN),
+		.pr_ctloutput = sco_ctloutput,
+		.pr_usrreq = sco_usrreq,
 	},
-	{ SOCK_SEQPACKET, &btdomain, BTPROTO_L2CAP,
-	  PR_ATOMIC | PR_CONNREQUIRED,
-	  NULL/*input*/, NULL/*output*/, NULL/*ctlinput*/,
-	  l2cap_ctloutput, l2cap_usrreq, l2cap_init,
-	  NULL/*fasttimo*/, NULL/*slowtimo*/, NULL/*drain*/,
-	  NULL/*sysctl*/
+	{ /* L2CAP Connection Oriented */
+		.pr_type = SOCK_SEQPACKET,
+		.pr_domain = &btdomain,
+		.pr_protocol = BTPROTO_L2CAP,
+		.pr_flags = (PR_CONNREQUIRED | PR_ATOMIC | PR_LISTEN),
+		.pr_ctloutput = l2cap_ctloutput,
+		.pr_usrreq = l2cap_usrreq,
 	},
-	{ SOCK_STREAM, &btdomain, BTPROTO_RFCOMM,
-	  PR_CONNREQUIRED | PR_WANTRCVD,
-	  NULL/*input*/, NULL/*output*/, NULL/*ctlinput*/,
-	  rfcomm_ctloutput, rfcomm_usrreq, rfcomm_init,
-	  NULL/*fasttimo*/, NULL/*slowtimo*/, NULL/*drain*/,
-	  NULL/*sysctl*/
-	}
+	{ /* RFCOMM */
+		.pr_type = SOCK_STREAM,
+		.pr_domain = &btdomain,
+		.pr_protocol = BTPROTO_RFCOMM,
+		.pr_flags = (PR_CONNREQUIRED | PR_LISTEN | PR_WANTRCVD),
+		.pr_ctloutput = rfcomm_ctloutput,
+		.pr_usrreq = rfcomm_usrreq,
+	},
 };
 
 struct domain btdomain = {
-	AF_BLUETOOTH, "bluetooth",
-	NULL/*init*/, NULL/*externalize*/, NULL/*dispose*/,
-	btsw, &btsw[sizeof(btsw) / sizeof(btsw[0])], NULL,
-	NULL/*rtattach*/, 32, sizeof(struct sockaddr_bt),
-	NULL/*ifattach*/, NULL/*ifdetach*/
+	.dom_family = AF_BLUETOOTH,
+	.dom_name = "bluetooth",
+	.dom_init = bt_init,
+	.dom_protosw = btsw,
+	.dom_protoswNPROTOSW = &btsw[__arraycount(btsw)],
 };
+
+kmutex_t *bt_lock;
+
+static void
+bt_init(void)
+{
+
+	bt_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NONE);
+}

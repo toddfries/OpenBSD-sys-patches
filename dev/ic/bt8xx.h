@@ -1,11 +1,12 @@
-/*	$OpenBSD: bt8xx.h,v 1.3 2005/06/23 14:57:48 robert Exp $	*/
-/*	$NetBSD: bt8xx.h,v 1.4 2000/12/30 16:55:24 wiz Exp $	*/
+/*	$NetBSD: bt8xx.h,v 1.9 2008/01/16 13:08:54 jmcneill Exp $	*/
 
 /* This file is merged from ioctl_meteor.h and ioctl_bt848.h from FreeBSD. */
 /* The copyright below only applies to the ioctl_meteor.h part of this file. */
 
 #ifndef _DEV_IC_BT8XX_H_
 #define _DEV_IC_BT8XX_H_
+/* $SourceForge: ioctl_meteor.h,v 1.4 2003/03/11 23:11:29 thomasklausner Exp $ */
+
 /*
  * Copyright (c) 1995 Mark Tinguely and Jim Lowe
  * All rights reserved.
@@ -21,7 +22,7 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Mark Tinguely and Jim Lowe
- * 4. The name of the author may not be used to endorse or promote products 
+ * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -36,7 +37,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * FreeBSD: src/sys/i386/include/ioctl_meteor.h,v 1.11 1999/12/29 04:33:02 peter Exp
+ * $FreeBSD: src/sys/i386/include/ioctl_meteor.h,v 1.11 1999/12/29 04:33:02 peter Exp $
  */
 /*
  *	ioctl constants for Matrox Meteor Capture card.
@@ -52,7 +53,7 @@ struct meteor_capframe {
 	short	command;	/* see below for valid METEORCAPFRM commands */
 	short	lowat;		/* start transfer if < this number */
 	short	hiwat;		/* stop transfer if > this number */
-} ;
+};
 
 /* structure for METEOR[GS]ETGEO - get/set geometry  */
 struct meteor_geomet {
@@ -60,20 +61,20 @@ struct meteor_geomet {
 	u_short		columns;
 	u_short		frames;
 	u_int		oformat;
-} ;
+};
 
-/* structure for METEORGCOUNT-get count of frames, fifo errors and dma errors */
+/* structure for METEORGCOUNT-get count of frames, fifo errors and DMA errors */
 struct meteor_counts {
 	u_int fifo_errors;	/* count of fifo errors since open */
-	u_int dma_errors;	/* count of dma errors since open */
+	u_int dma_errors;	/* count of DMA errors since open */
 	u_int frames_captured;	/* count of frames captured since open */
 	u_int even_fields_captured; /* count of even fields captured */
 	u_int odd_fields_captured; /* count of odd fields captured */
-} ;
+};
 
 /* structure for getting and setting direct transfers to vram */
 struct meteor_video {
-	u_int	addr;	/* Address of location to dma to */
+	u_int	addr;	/* Address of location to DMA to */
 	u_int	width;	/* Width of memory area */
 	u_int	banksize;	/* Size of Vram bank */
 	u_int	ramsize;	/* Size of Vram */
@@ -86,10 +87,10 @@ struct meteor_video {
 #define METEORSTATUS _IOR('x', 5, unsigned short)	/* get status */
 #define METEORSHUE   _IOW('x', 6, signed char)		/* set hue */
 #define METEORGHUE   _IOR('x', 6, signed char)		/* get hue */
-#define METEORSFMT   _IOW('x', 7, unsigned int)		/* set format */
-#define METEORGFMT   _IOR('x', 7, unsigned int)		/* get format */
-#define METEORSINPUT _IOW('x', 8, unsigned int)		/* set input dev */
-#define METEORGINPUT _IOR('x', 8, unsigned int)		/* get input dev */
+#define METEORSFMT   _IOW('x', 7, unsigned int)	/* set format */
+#define METEORGFMT   _IOR('x', 7, unsigned int)	/* get format */
+#define METEORSINPUT _IOW('x', 8, unsigned int)	/* set input dev */
+#define METEORGINPUT _IOR('x', 8, unsigned int)	/* get input dev */
 #define	METEORSCHCV  _IOW('x', 9, unsigned char)	/* set uv gain */
 #define	METEORGCHCV  _IOR('x', 9, unsigned char)	/* get uv gain */
 #define	METEORSCOUNT _IOW('x',10, struct meteor_counts)
@@ -121,7 +122,7 @@ struct meteor_video {
 #define	METEOR_STATUS_SVP	0x0100	/* State of VRAM Port:inactive/active */
 #define	METEOR_STATUS_STTC	0x0080	/* Time Constant: TV/VCR */
 #define	METEOR_STATUS_HCLK	0x0040	/* Horiz PLL: locked/unlocked */
-#define	METEOR_STATUS_FIDT	0x0020	/* Field detect: 50/60hz */
+#define	METEOR_STATUS_FIDT	0x0020	/* Field detect: 50/60Hz */
 #define	METEOR_STATUS_ALTD	0x0002	/* Line alt: no line alt/line alt */
 #define METEOR_STATUS_CODE	0x0001	/* Colour info: no colour/colour */
 
@@ -172,7 +173,7 @@ struct meteor_video {
 #define	METEOR_SIG_FIELD	0x00010000	/* signal every field */
 
 	/* following structure is used to coordinate the synchronous */
-	   
+
 struct meteor_mem {
 		/* kernel write only  */
 	int	frame_size;	 /* row*columns*depth */
@@ -187,13 +188,15 @@ struct meteor_mem {
 				    kernel increments, user decrements */
 
 		/* reference to mmapped data */
-	caddr_t	buf;		 /* The real space (virtual addr) */
-} ;
+	void *	buf;		 /* The real space (virtual addr) */
+};
+
+/* $SourceForge: ioctl_bt848.h,v 1.4 2003/03/11 23:11:29 thomasklausner Exp $ */
 
 /*
  * extensions to ioctl_meteor.h for the bt848 cards
  *
- * FreeBSD: src/sys/i386/include/ioctl_bt848.h,v 1.27 2000/10/26 16:41:48 roger Exp
+ * $FreeBSD: src/sys/i386/include/ioctl_bt848.h,v 1.27 2000/10/26 16:41:48 roger Exp $
  */
 
 
@@ -281,7 +284,7 @@ struct meteor_mem {
 struct eeProm {
 	short	offset;
 	short	count;
-	u_char	bytes[ 256 ];
+	u_char	bytes[256];
 };
 
 
@@ -296,7 +299,7 @@ struct eeProm {
 #define	TVTUNER_GETSTATUS  _IOR('x', 34, unsigned int)	/* get tuner status */
 #define	TVTUNER_SETFREQ    _IOW('x', 35, unsigned int)	/* set frequency */
 #define	TVTUNER_GETFREQ    _IOR('x', 36, unsigned int)	/* get frequency */
- 
+
 
 #define BT848_SHUE	_IOW('x', 37, int)		/* set hue */
 #define BT848_GHUE	_IOR('x', 37, int)		/* get hue */
@@ -333,9 +336,9 @@ struct eeProm {
 
 /* Read/Write the BT848's I2C bus directly
  * b7-b0:    data (read/write)
- * b15-b8:   internal peripheral register (write)   
+ * b15-b8:   internal peripheral register (write)
  * b23-b16:  i2c addr (write)
- * b31-b24:  1 = write, 0 = read 
+ * b31-b24:  1 = write, 0 = read
  */
 #define BT848_I2CWR     _IOWR('x', 57, u_int)    /* i2c read-write */
 
@@ -407,18 +410,18 @@ struct _bktr_clip {
  * I'm using METEOR_xxx just because that will be common to other interface
  * and less of a surprise
  */
-#define METEORSACTPIXFMT	_IOW('x', 64, int )
-#define METEORGACTPIXFMT	_IOR('x', 64, int )
+#define METEORSACTPIXFMT	_IOW('x', 64, int)
+#define METEORGACTPIXFMT	_IOR('x', 64, int)
 #define METEORGSUPPIXFMT	_IOWR('x', 65, struct meteor_pixfmt)
 
 /* set clip list */
-#define BT848SCLIP     _IOW('x', 66, struct _bktr_clip )
-#define BT848GCLIP     _IOR('x', 66, struct _bktr_clip )
+#define BT848SCLIP     _IOW('x', 66, struct _bktr_clip)
+#define BT848GCLIP     _IOR('x', 66, struct _bktr_clip)
 
 
 /* set input format */
-#define BT848SFMT		_IOW('x', 67, unsigned int )
-#define BT848GFMT		_IOR('x', 67, unsigned int )
+#define BT848SFMT		_IOW('x', 67, unsigned int)
+#define BT848GFMT		_IOR('x', 67, unsigned int)
 
 /* set clear-buffer-on-start */
 #define BT848SCBUF	_IOW('x', 68, int)
@@ -460,10 +463,10 @@ struct bktr_remote {
                                                             /*control receiver*/
                                                             /*returns raw data*/
 
- 
+
 /*
  * Direct access to GPIO pins. You must add BKTR_GPIO_ACCESS to your kernel
- * configuration file to use these 
+ * configuration file to use these
  */
 #define BT848_GPIO_SET_EN      _IOW('x', 72, int)      /* set gpio_out_en */
 #define BT848_GPIO_GET_EN      _IOR('x', 73, int)      /* get gpio_out_en */
@@ -483,15 +486,6 @@ struct bktr_remote {
 # define BT848_IFORM_F_NTSCM            (0x1)
 # define BT848_IFORM_F_AUTO             (0x0)
 
-
-
-/* XXX Silly constants not always defined by the environment.  */
-#ifndef TRUE
-#define TRUE 1
-#endif
-#ifndef FALSE
-#define FALSE 0
-#endif
 
 
 #endif /* _DEV_IC_BT8XX_H_ */

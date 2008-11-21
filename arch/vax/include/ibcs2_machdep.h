@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_machdep.h,v 1.9 2006/03/12 02:04:26 christos Exp $	*/
+/*	$NetBSD: ibcs2_machdep.h,v 1.11 2008/04/28 20:23:39 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -53,7 +46,7 @@ struct exec_vmcmd;
 
 void	ibcs2_setregs (struct lwp *, struct exec_package *, u_long);
 void	ibcs2_sendsig (const ksiginfo_t *, const sigset_t *);
-int	ibcs2_sys_sysmachine (struct proc *, void *, register_t *);
+int	ibcs2_sys_sysmachine (struct lwp *, void *, register_t *);
 
 #endif /* _KERNEL */
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: lebuffer.c,v 1.8 2007/09/11 13:39:34 gilles Exp $	*/
-/*	$NetBSD: lebuffer.c,v 1.12 2002/03/11 16:00:57 pk Exp $ */
+/*	$NetBSD: lebuffer.c,v 1.28 2008/04/28 20:23:57 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,6 +30,8 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: lebuffer.c,v 1.28 2008/04/28 20:23:57 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -45,63 +39,60 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 #include <machine/autoconf.h>
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 
 #include <dev/sbus/sbusvar.h>
 #include <dev/sbus/lebuffervar.h>
 
 int	lebufprint(void *, const char *);
-int	lebufmatch(struct device *, void *, void *);
+int	lebufmatch(struct device *, struct cfdata *, void *);
 void	lebufattach(struct device *, struct device *, void *);
 
-struct cfattach lebuffer_ca = {
-	sizeof(struct lebuf_softc), lebufmatch, lebufattach
-};
+CFATTACH_DECL(lebuffer, sizeof(struct lebuf_softc),
+    lebufmatch, lebufattach, NULL, NULL);
 
 int
-lebufprint(void *aux, const char *busname)
+lebufprint(aux, busname)
+	void *aux;
+	const char *busname;
 {
-	struct sbus_attach_args *sa = aux;
-	bus_space_tag_t t = sa->sa_bustag;
-	struct lebuf_softc *sc = t->cookie;
 
-	sa->sa_bustag = sc->sc_bustag;	/* XXX */
-	sbus_print(aux, busname);	/* XXX */
-	sa->sa_bustag = t;		/* XXX */
+	sbus_print(aux, busname);
 	return (UNCONF);
 }
 
 int
-lebufmatch(struct device *parent, void *vcf, void *aux)
+lebufmatch(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct sbus_attach_args *sa = aux;
-	struct cfdata *cf = vcf;
 
-	return (strcmp(cf->cf_driver->cd_name, sa->sa_name) == 0);
+	return (strcmp(cf->cf_name, sa->sa_name) == 0);
 }
 
 /*
  * Attach all the sub-devices we can find
  */
 void
-lebufattach(struct device *parent, struct device *self, void *aux)
+lebufattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct sbus_attach_args *sa = aux;
 	struct lebuf_softc *sc = (void *)self;
 	int node;
 	int sbusburst;
-	struct sparc_bus_space_tag *sbt;
+	bus_space_tag_t bt = sa->sa_bustag;
+	bus_dma_tag_t	dt = sa->sa_dmatag;
 	bus_space_handle_t bh;
 
-	sc->sc_bustag = sa->sa_bustag;
-	sc->sc_dmatag = sa->sa_dmatag;
-
-	if (sbus_bus_map(sa->sa_bustag,
-	    sa->sa_slot, sa->sa_offset, sa->sa_size,
-	    BUS_SPACE_MAP_LINEAR, 0, &bh) != 0) {
-		printf("%s: attach: cannot map registers\n", self->dv_xname);
+	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset, sa->sa_size,
+			 BUS_SPACE_MAP_LINEAR, &bh) != 0) {
+		aprint_error_dev(self, "attach: cannot map registers\n");
 		return;
 	}
 
@@ -110,7 +101,7 @@ lebufattach(struct device *parent, struct device *self, void *aux)
 	 * Lance ring-buffers can be stored. Note the buffer's location
 	 * and size, so the `le' driver can pick them up.
 	 */
-	sc->sc_buffer = (void *)bus_space_vaddr(sa->sa_bustag, bh);
+	sc->sc_buffer = bus_space_vaddr(bt, bh);
 	sc->sc_bufsiz = sa->sa_size;
 
 	node = sc->sc_node = sa->sa_node;
@@ -122,7 +113,7 @@ lebufattach(struct device *parent, struct device *self, void *aux)
 	if (sbusburst == 0)
 		sbusburst = SBUS_BURST_32 - 1; /* 1->16 */
 
-	sc->sc_burst = getpropint(node, "burst-sizes", -1);
+	sc->sc_burst = prom_getpropint(node, "burst-sizes", -1);
 	if (sc->sc_burst == -1)
 		/* take SBus burst sizes */
 		sc->sc_burst = sbusburst;
@@ -130,26 +121,16 @@ lebufattach(struct device *parent, struct device *self, void *aux)
 	/* Clamp at parent's burst sizes */
 	sc->sc_burst &= sbusburst;
 
-	/* Allocate a bus tag */
-	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sbt == NULL) {
-		printf("%s: attach: out of memory\n", self->dv_xname);
-		return;
-	}
+	sbus_establish(&sc->sc_sd, &sc->sc_dev);
 
 	printf(": %dK memory\n", sc->sc_bufsiz / 1024);
 
-	sbt->cookie = sc;
-	sbt->parent = sc->sc_bustag;
-	sbt->asi = sbt->parent->asi;
-	sbt->sasi = sbt->parent->sasi;
-
 	/* search through children */
 	for (node = firstchild(node); node; node = nextsibling(node)) {
-		struct sbus_attach_args sa;
+		struct sbus_attach_args sax;
 		sbus_setup_attach_args((struct sbus_softc *)parent,
-		    sbt, sc->sc_dmatag, node, &sa);
-		(void)config_found(&sc->sc_dev, (void *)&sa, lebufprint);
-		sbus_destroy_attach_args(&sa);
+				       bt, dt, node, &sax);
+		(void)config_found(&sc->sc_dev, (void *)&sax, lebufprint);
+		sbus_destroy_attach_args(&sax);
 	}
 }

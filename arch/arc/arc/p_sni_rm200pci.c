@@ -1,4 +1,4 @@
-/*	$NetBSD: p_sni_rm200pci.c,v 1.7 2005/12/11 12:16:37 christos Exp $	*/
+/*	$NetBSD: p_sni_rm200pci.c,v 1.12 2007/12/03 15:33:14 ad Exp $	*/
 /*	$OpenBSD: machdep.c,v 1.36 1999/05/22 21:22:19 weingart Exp $	*/
 
 /*
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: p_sni_rm200pci.c,v 1.7 2005/12/11 12:16:37 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: p_sni_rm200pci.c,v 1.12 2007/12/03 15:33:14 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,6 +87,8 @@ __KERNEL_RCSID(0, "$NetBSD: p_sni_rm200pci.c,v 1.7 2005/12/11 12:16:37 christos 
 #include <machine/bus.h>
 #include <machine/pio.h>
 #include <machine/platform.h>
+#include <machine/wired_map.h>
+
 #include <mips/pte.h>
 
 void p_sni_rm200pci_init(void);
@@ -120,53 +122,27 @@ struct platform platform_sni_rm200pci = {
  */
 /* XXX lack of hardware info for sni_rm200pci */
 static const uint32_t sni_rm200pci_ipl_sr_bits[_IPL_N] = {
-	0,					/* IPL_NONE */
-
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFT */
-
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFTCLOCK */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTNET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTSERIAL */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3|
-		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/* XXX IPL_BIO */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3|
-		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/* XXX IPL_NET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3|
-		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/* XXX IPL_{TTY,SERIAL} */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3|
-		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/* XXX IPL_{CLOCK,HIGH} */
+	[IPL_NONE] = 0,
+	[IPL_SOFTCLOCK] =
+	    MIPS_SOFT_INT_MASK_0,
+	[IPL_SOFTNET] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1,
+	[IPL_VM] =	/* XXX */
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3 |
+	    MIPS_INT_MASK_4 |
+	    MIPS_INT_MASK_5,
+	[IPL_SCHED] =	/* XXX */
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3 |
+	    MIPS_INT_MASK_4 |
+	    MIPS_INT_MASK_5,
 };
 
 /*
@@ -177,24 +153,6 @@ p_sni_rm200pci_init(void)
 {
 
 	/*
-	 * XXX - should be enabled, if tested.
-	 *
-	 * We use safe default for now, because this platform is untested.
-	 * In other words, the following may not be needed at all.
-	 */
-	vm_page_zero_enable = FALSE;
-
-	/*
-	 * Initialize I/O address offset
-	 */
-#if 0
-	arc_bus_space_init(&arc_bus_io, "rm200isaio",
-	    RM200_P_ISA_IO, RM200_V_ISA_IO, 0, RM200_S_ISA_IO);
-	arc_bus_space_init(&arc_bus_mem, "rm200isamem",
-	    RM200_P_ISA_MEM, RM200_V_ISA_MEM, 0, RM200_S_ISA_MEM);
-#endif
-
-	/*
 	 * Initialize wired TLB for I/O space which is used on early stage
 	 */
 
@@ -202,6 +160,25 @@ p_sni_rm200pci_init(void)
 	 * Initialize interrupt priority
 	 */
 	ipl_sr_bits = sni_rm200pci_ipl_sr_bits;
+
+	/*
+	 * XXX - should be enabled, if tested.
+	 *
+	 * We use safe default for now, because this platform is untested.
+	 * In other words, the following may not be needed at all.
+	 */
+	vm_page_zero_enable = false;
+
+	/*
+	 * Initialize I/O address offset
+	 */
+	arc_init_wired_map();
+#if 0
+	arc_bus_space_init(&arc_bus_io, "rm200isaio",
+	    RM200_P_ISA_IO, RM200_V_ISA_IO, 0, RM200_S_ISA_IO);
+	arc_bus_space_init(&arc_bus_mem, "rm200isamem",
+	    RM200_P_ISA_MEM, RM200_V_ISA_MEM, 0, RM200_S_ISA_MEM);
+#endif
 }
 
 void

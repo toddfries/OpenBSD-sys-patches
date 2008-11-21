@@ -1,5 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.6 2006/01/08 14:20:17 millert Exp $	*/
-/*	$NetBSD: signal.h,v 1.6 1996/01/08 13:51:43 mycroft Exp $	*/
+/*	$NetBSD: signal.h,v 1.29 2008/11/19 18:35:59 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991 Regents of the University of California.
@@ -35,18 +34,17 @@
 #ifndef _I386_SIGNAL_H_
 #define _I386_SIGNAL_H_
 
-#include <sys/cdefs.h>
+#include <sys/featuretest.h>
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
 /*
  * Get the "code" values
  */
 #include <machine/trap.h>
-#endif
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
+#if defined(_KERNEL)
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -54,7 +52,7 @@ typedef int sig_atomic_t;
  * to the handler to allow it to restore state properly if
  * a non-standard exit is performed.
  */
-struct	sigcontext {
+struct sigcontext13 {
 	int	sc_gs;
 	int	sc_fs;
 	int	sc_es;
@@ -74,16 +72,40 @@ struct	sigcontext {
 	int	sc_ss;
 
 	int	sc_onstack;		/* sigstack state to restore */
-	int	sc_mask;		/* signal mask to restore */
+	int	sc_mask;		/* signal mask to restore (old style) */
 
 	int	sc_trapno;		/* XXX should be above */
 	int	sc_err;
 };
 
-#define sc_sp sc_esp
-#define sc_fp sc_ebp
-#define sc_pc sc_eip
-#define sc_ps sc_eflags
+struct sigcontext {
+	int	sc_gs;
+	int	sc_fs;
+	int	sc_es;
+	int	sc_ds;
+	int	sc_edi;
+	int	sc_esi;
+	int	sc_ebp;
+	int	sc_ebx;
+	int	sc_edx;
+	int	sc_ecx;
+	int	sc_eax;
+	/* XXX */
+	int	sc_eip;
+	int	sc_cs;
+	int	sc_eflags;
+	int	sc_esp;
+	int	sc_ss;
 
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_mask13;		/* signal mask to restore (old style) */
+
+	int	sc_trapno;		/* XXX should be above */
+	int	sc_err;
+
+	sigset_t sc_mask;		/* signal mask to restore (new style) */
+};
+#endif /* _KERNEL */
+
+#endif	/* _NETBSD_SOURCE */
 #endif	/* !_I386_SIGNAL_H_ */

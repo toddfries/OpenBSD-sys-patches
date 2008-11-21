@@ -1,5 +1,4 @@
-/*	$OpenBSD: nexus.h,v 1.13 2006/08/27 16:55:41 miod Exp $	*/
-/*	$NetBSD: nexus.h,v 1.17 2000/06/04 17:58:19 ragge Exp $	*/
+/*	$NetBSD: nexus.h,v 1.25 2008/03/11 05:34:02 matt Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
@@ -37,26 +36,23 @@
 
 #include <machine/bus.h>
 
-struct	mainbus_attach_args {
-	int	maa_bustype;
-};
-
+#ifdef _KERNEL
+#include "opt_cputype.h"
+#endif
 /*
- * Values for bus (or pseudo-bus) types
+ * Different definitions for nicer autoconf probing.
  */
-#define	VAX_SBIBUS	1	/* SBI parent (780) */
-#define	VAX_CMIBUS	2	/* CMI backplane (750) */
-#define	VAX_UNIBUS	3	/* Direct backplane (730) */
-#define	VAX_ABUS	4	/* SBI placeholder (8600) */
-#define	VAX_BIBUS	5	/* BI bus (8200) */
-#define	VAX_NBIBUS	6	/* NBI backplane (8800) */
-#define	VAX_VSBUS	7	/* Virtual vaxstation bus */
-#define	VAX_IBUS	8	/* Internal Microvax bus */
-#define	VAX_XMIBUS	9	/* XMI master bus (6000) */
-#define	VAX_VXTBUS	10	/* Pseudo VXT2000 bus */
-
-#define	VAX_LEDS	0x42	/* pseudo value to attach led0 */
-
+enum bustypes {
+	VAX_SBIBUS,		/* SBI parent (780) */
+	VAX_CMIBUS,		/* CMI backplane (750) */
+	VAX_UNIBUS,		/* Direct backplane (730) */
+	VAX_ABUS,		/* SBI placeholder (8600) */
+	VAX_BIBUS,		/* BI bus (8200) */
+	VAX_NMIBUS,		/* NMI backplane (8800) */
+	VAX_VSBUS,		/* Virtual vaxstation bus */
+	VAX_IBUS,		/* Internal Microvax bus */
+	VAX_XMIBUS,		/* XMI master bus (6000) */
+};
 /*
  * Information about nexus's.
  *
@@ -70,22 +66,22 @@ struct	mainbus_attach_args {
 #define MAXNMCR         1
 
 #define	NNEXSBI		16
-#if VAX8600
+#if VAX8600 || VAXANY
 #define	NNEX8600	NNEXSBI
 #define	NEXA8600	((struct nexus *)(0x20000000))
 #define	NEXB8600	((struct nexus *)(0x22000000))
 #endif
-#if VAX780
+#if VAX780 || VAXANY
 #define	NNEX780	NNEXSBI
 #define	NEX780	((struct nexus *)0x20000000)
 #endif
-#if VAX730
+#if VAX730 || VAXANY
 #define	NNEX730	NNEXSBI
 #define	NEX730	((struct nexus *)0xf20000)
 #endif
 #define	NEXSIZE	0x2000
 
-#if VAX8600
+#if VAX8600 || VAXANY
 #define	MAXNNEXUS (2 * NNEXSBI)
 #else 
 #define	MAXNNEXUS NNEXSBI
@@ -102,27 +98,28 @@ struct	nexus {
 };
 
 struct sbi_attach_args {
-	int sa_nexnum;		/* This nexus TR number */
+	int sa_nexnum; 		/* This nexus TR number */
 	int sa_type;		/* This nexus type */
+	int sa_sbinum;
 	bus_space_tag_t sa_iot;
 	bus_space_handle_t sa_ioh;
+	bus_dma_tag_t sa_dmat;
 };
 
 /* Memory device struct. This should be somewhere else */
 struct mem_softc {
-	struct	device sc_dev;
-	caddr_t	sc_memaddr;
+	struct	device *sc_dev;
+	void *	sc_memaddr;
 	int	sc_memtype;
 	int	sc_memnr;
 };
 
-struct bp_conf {
-	char *type;
-	int num;
-	int partyp;
-	int bp_addr;
+struct ibus_attach_args {
+	const char *ia_type;
+	int ia_num;
+	int ia_partyp;
+	paddr_t ia_addr;
 };
-
 #endif
 
 /*
@@ -138,7 +135,7 @@ struct bp_conf {
 #define	NEX_CFGFLT	(0xfc000000)
 
 #ifndef _LOCORE
-#if VAX780 || VAX8600
+#if VAX780 || VAX8600 || VAXANY
 #define	NEXFLT_BITS \
 "\20\40PARFLT\37WSQFLT\36URDFLT\35ISQFLT\34MXTFLT\33XMTFLT"
 #endif

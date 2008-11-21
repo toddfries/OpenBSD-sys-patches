@@ -1,8 +1,35 @@
-/*	$OpenBSD: asm.h,v 1.8 2007/11/24 20:58:26 deraadt Exp $	*/
-/*	$NetBSD: asm.h,v 1.13 1997/04/24 22:49:39 thorpej Exp $	*/
+/*	$NetBSD: asm.h,v 1.25 2008/04/28 20:23:26 martin Exp $	*/
+
+/*-
+ * Copyright (c) 1997 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
- * Copyright (c) 1997 Jason R. Thorpe.  All rights reserved.
  * Copyright (c) 1994 Allen Briggs
  * All rights reserved.
  *
@@ -22,7 +49,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,31 +70,42 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _ASM_H_
-#define _ASM_H_
+#ifndef _M68K_ASM_H_
+#define _M68K_ASM_H_
 
-#ifdef	__ELF__
-#define	_C_LABEL(name)		name
+#if defined(__ELF__) && defined(PIC)
+#define PIC_PLT(name)	name@PLTPC
 #else
-#ifdef __STDC__
-#define	_C_LABEL(name)		_ ## name
-#else
-#define	_C_LABEL(name)		_/**/name
-#endif /* __STDC__ */
+#define PIC_PLT(name)	name
 #endif
+
+#ifdef __ELF__
+# if __STDC__
+#  define _C_LABEL(name)	name
+# else
+#  define _C_LABEL(name)	name
+#endif /* __STDC__ */
+#else /* __ELF__ */
+# if __STDC__
+#  define _C_LABEL(name)	_ ## name
+# else
+#  define _C_LABEL(name)	_/**/name
+# endif /* __STDC__ */
+#endif /* __ELF__ */
 
 #define	_ASM_LABEL(name)	name
 
-#ifndef _KERNEL
 #define	_ENTRY(name) \
 	.text; .even; .globl name; .type name,@function; name:
+
+#ifdef __ELF__
+#define	MCOUNT_ENTRY	__mcount
 #else
-#define	_ENTRY(name) \
-	.text; .even; .globl name; name:
+#define	MCOUNT_ENTRY	mcount
 #endif
 
 #ifdef GPROF
-#define _PROF_PROLOG	link a6,#0; jbsr mcount; unlk a6
+#define _PROF_PROLOG	link %a6,#0; jbsr MCOUNT_ENTRY; unlk %a6
 #else
 #define _PROF_PROLOG
 #endif
@@ -76,7 +118,7 @@
 
 /*
  * The m68k ALTENTRY macro is very different than the traditional
- * implementation used by other OpenBSD ports.  Usually ALTENTRY 
+ * implementation used by other NetBSD ports.  Usually ALTENTRY 
  * simply provides an alternate function entry point.  The m68k
  * definition takes a second argument and jumps inside the second
  * function when profiling is enabled.
@@ -88,7 +130,7 @@
  * to use it would be a desirable change.
  */
 #ifdef PROF
-#define ALTENTRY(name, rname)	ENTRY(name); jra _C_LABEL(rname)+12
+#define ALTENTRY(name, rname)	ENTRY(name); jra rname+12
 #else
 #define ALTENTRY(name, rname)	_ENTRY(_C_LABEL(name))
 #endif
@@ -96,22 +138,6 @@
 #define RCSID(x)	.text			;	\
 			.asciz x		;	\
 			.even
-
-#ifdef	__ELF__
-#define	WEAK_ALIAS(alias,sym)				\
-	.weak alias;					\
-	alias = sym
-#else
-#ifdef	__STDC__
-#define	WEAK_ALIAS(alias,sym)				\
-	.weak _##alias;				\
-	_##alias = _##sym
-#else
-#define	WEAK_ALIAS(alias,sym)				\
-	.weak _/**/alias;				\
-	_/**/alias = _/**/sym
-#endif
-#endif
 
 /*
  * Global variables of whatever sort.
@@ -153,6 +179,8 @@
 	9:	.asciz	x			;	\
 		.even
 
+#endif /* _KERNEL */
+
 /*
  * Shorthand for defining vectors for the vector table.
  */
@@ -165,8 +193,40 @@
 #define	VECTOR_UNUSED					\
 	.long	0
 
-#define CURPROC	_C_LABEL(cpu_info_store) + CI_CURPROC
+#ifdef __ELF__
+#define	WEAK_ALIAS(alias,sym)						\
+	.weak alias;							\
+	alias = sym
+#endif
+/*
+ * STRONG_ALIAS: create a strong alias.
+ */
+#define STRONG_ALIAS(alias,sym)						\
+	.globl alias;							\
+	alias = sym
 
-#endif /* _KERNEL */
+#ifdef __STDC__
+#define	__STRING(x)			#x
+#define	WARN_REFERENCES(sym,msg)					\
+	.stabs msg ## ,30,0,0,0 ;					\
+	.stabs __STRING(_ ## sym) ## ,1,0,0,0
+#else
+#define	__STRING(x)			"x"
+#define	WARN_REFERENCES(sym,msg)					\
+	.stabs msg,30,0,0,0 ;						\
+	.stabs __STRING(_/**/sym),1,0,0,0
+#endif /* __STDC__ */
 
-#endif /* _ASM_H_ */
+/*
+ * Macros to hide shortcomings in the 68010.
+ */
+#ifndef __mc68010__
+#define	EXTBL(reg)					\
+	extbl	reg
+#else	/* __mc68010__ */
+#define	EXTBL(reg)					\
+	extw	reg		;			\
+	extl	reg
+#endif	/* __mc68010__ */
+
+#endif /* _M68K_ASM_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: atari_init.c,v 1.65 2005/12/24 22:45:34 perry Exp $	*/
+/*	$NetBSD: atari_init.c,v 1.68 2008/11/15 21:30:50 abs Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: atari_init.c,v 1.65 2005/12/24 22:45:34 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: atari_init.c,v 1.68 2008/11/15 21:30:50 abs Exp $");
 
 #include "opt_ddb.h"
 #include "opt_mbtype.h"
@@ -46,7 +46,6 @@ __KERNEL_RCSID(0, "$NetBSD: atari_init.c,v 1.65 2005/12/24 22:45:34 perry Exp $"
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/tty.h>
-#include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/msgbuf.h>
 #include <sys/mbuf.h>
@@ -495,7 +494,7 @@ char	*esym_addr;		/* Address of kernel '_esym' symbol	*/
 	/*
 	 * get the pmap module in sync with reality.
 	 */
-	pmap_bootstrap(vstart, stio_addr, ptextra);
+	pmap_bootstrap(vstart, stio_addr);
 
 	/*
 	 * Prepare to enable the MMU.
@@ -589,7 +588,7 @@ char	*esym_addr;		/* Address of kernel '_esym' symbol	*/
 	 * extents of RAM are allocated from the map.
 	 */
 	iomem_ex = extent_create("iomem", 0x0, 0xffffffff, M_DEVBUF,
-	    (caddr_t)iomem_ex_storage, sizeof(iomem_ex_storage),
+	    (void *)iomem_ex_storage, sizeof(iomem_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
 
 	/*
@@ -622,18 +621,18 @@ set_machtype()
 
 #else
 	stio_addr = 0xff8000;	/* XXX: For TT & Falcon only */
-	if(badbaddr((caddr_t)__UNVOLATILE(&MFP2->mf_gpip), sizeof(char))) {
+	if(badbaddr((void *)__UNVOLATILE(&MFP2->mf_gpip), sizeof(char))) {
 		/*
 		 * Watch out! We can also have a Hades with < 16Mb
 		 * RAM here...
 		 */
-		if(!badbaddr((caddr_t)__UNVOLATILE(&MFP->mf_gpip),
+		if(!badbaddr((void *)__UNVOLATILE(&MFP->mf_gpip),
 		     sizeof(char))) {
 			machineid |= ATARI_FALCON;
 			return;
 		}
 	}
-	if(!badbaddr((caddr_t)(PCI_CONFB_PHYS + PCI_CONFM_PHYS), sizeof(char)))
+	if(!badbaddr((void *)(PCI_CONFB_PHYS + PCI_CONFM_PHYS), sizeof(char)))
 		machineid |= ATARI_HADES;
 	else machineid |= ATARI_TT;
 #endif /* _MILANHW_ */
@@ -814,7 +813,7 @@ cpu_dumpsize()
  * XXX: Assumes that it will all fit in one diskblock.
  */
 int
-cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *p_blkno)
+cpu_dump(int (*dump)(dev_t, daddr_t, void *, size_t), daddr_t *p_blkno)
 {
 	int		buf[MDHDRSIZE/sizeof(int)];
 	int		error;
@@ -834,7 +833,7 @@ cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *p_blkno)
 	 * Add the md header
 	 */
 	*chdr_p = cpu_kcore_hdr;
-	error = dump(dumpdev, *p_blkno, (caddr_t)buf, sizeof(buf));
+	error = dump(dumpdev, *p_blkno, (void *)buf, sizeof(buf));
 	*p_blkno += btodb(sizeof(buf));
 	return (error);
 }

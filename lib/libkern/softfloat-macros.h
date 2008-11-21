@@ -1,5 +1,4 @@
-/*	$OpenBSD: softfloat-macros.h,v 1.3 2007/12/29 17:43:14 miod Exp $	*/
-/*	$NetBSD: softfloat-macros.h,v 1.1 2001/04/26 03:10:47 ross Exp $	*/
+/* $NetBSD: softfloat-macros.h,v 1.1 2001/04/26 03:10:47 ross Exp $ */
 
 /*
 ===============================================================================
@@ -17,15 +16,11 @@ overseen by Profs. Nelson Morgan and John Wawrzynek.  More information
 is available through the Web page `http://HTTP.CS.Berkeley.EDU/~jhauser/
 arithmetic/SoftFloat.html'.
 
-THIS SOFTWARE IS DISTRIBUTED AS IS, FOR FREE.  Although reasonable
-effort has been made to avoid it, THIS SOFTWARE MAY CONTAIN FAULTS THAT
-WILL AT TIMES RESULT IN INCORRECT BEHAVIOR.  USE OF THIS SOFTWARE IS
-RESTRICTED TO PERSONS AND ORGANIZATIONS WHO CAN AND WILL TAKE FULL
-RESPONSIBILITY FOR ALL LOSSES, COSTS, OR OTHER PROBLEMS ARISING FROM
-THEIR OWN USE OF THE SOFTWARE, AND WHO ALSO EFFECTIVELY INDEMNIFY
-(possibly via similar legal warning) JOHN HAUSER AND THE INTERNATIONAL
-COMPUTER SCIENCE INSTITUTE AGAINST ALL LOSSES, COSTS, OR OTHER PROBLEMS
-ARISING FROM THE USE OF THE SOFTWARE BY THEIR CUSTOMERS AND CLIENTS.
+THIS SOFTWARE IS DISTRIBUTED AS IS, FOR FREE.  Although reasonable effort
+has been made to avoid it, THIS SOFTWARE MAY CONTAIN FAULTS THAT WILL AT
+TIMES RESULT IN INCORRECT BEHAVIOR.  USE OF THIS SOFTWARE IS RESTRICTED TO
+PERSONS AND ORGANIZATIONS WHO CAN AND WILL TAKE FULL RESPONSIBILITY FOR ANY
+AND ALL LOSSES, COSTS, OR OTHER PROBLEMS ARISING FROM ITS USE.
 
 Derivative works are acceptable, even for commercial purposes, so long as
 (1) they include prominent notice that the work is derivative, and (2) they
@@ -135,8 +130,6 @@ INLINE void
     *z0Ptr = z0;
 
 }
-
-#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -305,10 +298,6 @@ INLINE void
 
 }
 
-#endif	/* FLOATX80 || FLOAT128 */
-
-#ifdef FLOAT128
-
 /*
 -------------------------------------------------------------------------------
 Shifts the 192-bit value formed by concatenating `a0', `a1', and `a2' left
@@ -346,8 +335,6 @@ INLINE void
 
 }
 
-#endif	/* FLOAT128 */
-
 /*
 -------------------------------------------------------------------------------
 Adds the 128-bit value formed by concatenating `a0' and `a1' to the 128-bit
@@ -367,8 +354,6 @@ INLINE void
     *z0Ptr = a0 + b0 + ( z1 < a1 );
 
 }
-
-#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -409,8 +394,6 @@ INLINE void
 
 }
 
-#endif	/* FLOATX80 || FLOAT128 */
-
 /*
 -------------------------------------------------------------------------------
 Subtracts the 128-bit value formed by concatenating `b0' and `b1' from the
@@ -429,8 +412,6 @@ INLINE void
     *z0Ptr = a0 - b0 - ( a1 < b1 );
 
 }
-
-#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -471,8 +452,6 @@ INLINE void
 
 }
 
-#endif	/* FLOATX80 || FLOAT128 */
-
 /*
 -------------------------------------------------------------------------------
 Multiplies `a' by `b' to obtain a 128-bit product.  The product is broken
@@ -502,8 +481,6 @@ INLINE void mul64To128( bits64 a, bits64 b, bits64 *z0Ptr, bits64 *z1Ptr )
     *z0Ptr = z0;
 
 }
-
-#ifdef FLOAT128
 
 /*
 -------------------------------------------------------------------------------
@@ -571,8 +548,6 @@ INLINE void
     *z0Ptr = z0;
 
 }
-
-#endif	/* FLOAT128 */
 
 /*
 -------------------------------------------------------------------------------
@@ -654,7 +629,6 @@ Returns the number of leading 0 bits before the most-significant 1 bit of
 `a'.  If `a' is zero, 32 is returned.
 -------------------------------------------------------------------------------
 */
-#ifndef SOFTFLOAT_MD_CLZ
 static int8 countLeadingZeros32( bits32 a )
 {
     static const int8 countLeadingZerosHigh[] = {
@@ -690,7 +664,6 @@ static int8 countLeadingZeros32( bits32 a )
     return shiftCount;
 
 }
-#endif
 
 /*
 -------------------------------------------------------------------------------
@@ -713,8 +686,6 @@ static int8 countLeadingZeros64( bits64 a )
     return shiftCount;
 
 }
-
-#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -758,10 +729,6 @@ INLINE flag lt128( bits64 a0, bits64 a1, bits64 b0, bits64 b1 )
 
 }
 
-#endif	/* FLOATX80 || FLOAT128 */
-
-#if 0
-
 /*
 -------------------------------------------------------------------------------
 Returns 1 if the 128-bit value formed by concatenating `a0' and `a1' is
@@ -776,4 +743,3 @@ INLINE flag ne128( bits64 a0, bits64 a1, bits64 b0, bits64 b1 )
 
 }
 
-#endif

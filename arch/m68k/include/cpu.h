@@ -1,8 +1,6 @@
-/*	$OpenBSD: cpu.h,v 1.18 2007/10/10 15:53:52 art Exp $	*/
-/*	$NetBSD: cpu.h,v 1.3 1997/02/02 06:56:57 thorpej Exp $	*/
+/*	$NetBSD: cpu.h,v 1.11 2005/12/11 12:17:53 christos Exp $	*/
 
 /*
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -38,6 +36,45 @@
  *
  *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * from: Utah $Hdr: cpu.h 1.16 91/03/25$
+ *
+ *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
+ */
 
 #ifndef _M68K_CPU_H_
 #define	_M68K_CPU_H_
@@ -54,75 +91,27 @@
  * Individual ports are expected to define the following CPP symbols
  * in <machine/cpu.h> to enable conditional code:
  *
- *	M68K_MMU_MOTOROLA	Machine may have a Motorola MMU (incl.
+ *	M68K_MMU_MOTOROLA	Machine has a Motorola MMU (incl.
  *				68851, 68030, 68040, 68060)
  *
- *	M68K_MMU_HP		Machine may have an HP MMU.
+ *	M68K_MMU_HP		Machine has an HP MMU.
  *
  * Note also that while m68k-generic code conditionalizes on the
  * M68K_MMU_HP CPP symbol, none of the HP MMU definitions are in this
  * file (since none are used in otherwise sharable code).
  */
 
-#ifdef _KERNEL
-#ifndef _LOCORE
-#include <sys/queue.h>
-#include <sys/sched.h>
-
-struct cpu_info {
-	struct proc *ci_curproc;
-
-	struct schedstate_percpu ci_schedstate;
-};
-
-extern struct cpu_info cpu_info_store;
-
-#define	curcpu()	(&cpu_info_store)
-
-#define CPU_IS_PRIMARY(ci)	1
-#define	CPU_INFO_ITERATOR	int
-#define	CPU_INFO_FOREACH(cii, ci) \
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-
-#define cpu_number()	0
-
 /*
- * All m68k ports must provide these globals.
+ * XXX  The remaining contents of this file should be split out
+ * XXX  into separate files (like m68k.h) and then this file
+ * XXX  should go away.  Furthermore, most of the stuff defined
+ * XXX  here does NOT belong in <machine/cpu.h>, and the ports
+ * XXX  using this file should remove <m68k/cpu.h> from there.
  */
-extern	int cputype;		/* CPU on this host */
-extern	int ectype;		/* external cache on this host */
-extern	int fputype;		/* FPU on this host */
-extern	int mmutype;		/* MMU on this host */
 
-#endif /* !_LOCORE */
-#endif /* _KERNEL */
+#include <m68k/m68k.h>
 
-/* values for cputype */
-#define	CPU_68020	0	/* 68020 */
-#define	CPU_68030	1	/* 68030 */
-#define	CPU_68040	2	/* 68040 */
-#define	CPU_68060	3	/* 68060 */
-
-/* values for ectype */
-#define	EC_PHYS		-1	/* external physical address cache */
-#define	EC_NONE		0	/* no external cache */
-#define	EC_VIRT		1	/* external virtual address cache */
-
-/* values for fputype */
-#define	FPU_NONE	0	/* no FPU */
-#define	FPU_68881	1	/* 68881 FPU */
-#define	FPU_68882	2	/* 68882 FPU */
-#define	FPU_68040	3	/* 68040 on-chip FPU */
-#define	FPU_68060	4	/* 68060 on-chip FPU */
-#define	FPU_UNKNOWN	5	/* placeholder; unknown FPU */
-
-/* values for mmutype (assigned for quick testing) */
-#define	MMU_68060	-3	/* 68060 on-chip MMU */
-#define	MMU_68040	-2	/* 68040 on-chip MMU */
-#define	MMU_68030	-1	/* 68030 on-chip subset of 68851 */
-#define	MMU_HP		0	/* HP proprietary */
-#define	MMU_68851	1	/* Motorola 68851 */
-#define	MMU_SUN		2	/* Sun MMU */
+/* XXX - Move this stuff into <m68k/mmu030.h> maybe? */
 
 /*
  * 68851 and 68030 MMU
@@ -135,6 +124,8 @@ extern	int mmutype;		/* MMU on this host */
 #define	PMMU_LV		0x4000
 #define	PMMU_BE		0x8000
 #define	PMMU_FAULT	(PMMU_WP|PMMU_INV)
+
+/* XXX - Move this stuff into <m68k/mmu040.h> maybe? */
 
 /*
  * 68040 MMU
@@ -150,6 +141,8 @@ extern	int mmutype;		/* MMU on this host */
 #define	MMU40_GLB	0x400
 #define	MMU40_BE	0x800
 
+/* XXX - Move this stuff into <m68k/fcode.h> maybe? */
+
 /* 680X0 function codes */
 #define	FC_USERD	1	/* user data space */
 #define	FC_USERP	2	/* user program space */
@@ -157,6 +150,8 @@ extern	int mmutype;		/* MMU on this host */
 #define	FC_SUPERD	5	/* supervisor data space */
 #define	FC_SUPERP	6	/* supervisor program space */
 #define	FC_CPU		7	/* CPU space */
+
+/* XXX - Move this stuff into <m68k/cacr.h> maybe? */
 
 /* fields in the 68020 cache control register */
 #define	IC_ENABLE	0x0001	/* enable instruction cache */
@@ -202,77 +197,13 @@ extern	int mmutype;		/* MMU on this host */
 #define	CACHE60_ON	(CACHE40_ON|IC60_CABC|IC60_EBC|DC60_ESB)
 #define	CACHE60_OFF	(CACHE40_OFF|IC60_CABC)
 
-/* bits in the 68060 Processor Control Register */
-#define	PCR_IDSHIFT	16
-#define	PCR_IDMASK	0xffff
-#define	PCR_68060		0x430
-#define	PCR_68060LC		0x431
-#define	PCR_REVSHIFT	8
-#define	PCR_REVMASK	0xff
-#define	PCR_DEBUG	0x80
-#define	PCR_FPUDIS	0x02
-#define	PCR_SUPERSCALAR	0x01
-
 #ifdef _KERNEL
-struct frame;
-struct fpframe;
-struct pcb;
-struct proc;
-struct trapframe;
-
-void	copypage(void *fromaddr, void *toaddr);
-void	zeropage(void *addr);
-
-/* locore.s */
-void	TBIS(vaddr_t);
-void	TBIAS(void);
-void	TBIAU(void);
-void	ICIA(void);
-void	DCIA(void);
-void	DCIS(void);
-void	DCIU(void);
-#if defined(M68040) || defined(M68060)
-void	ICPA(void);
-void	DCFA(void);
-void	ICPL(paddr_t);
-void	ICPP(paddr_t);
-void	DCPL(paddr_t);
-void	DCPP(paddr_t);
-void	DCFL(paddr_t);
-void	DCFP(paddr_t);
-#endif
-
-u_long	getdfc(void);
-u_long	getsfc(void);
-void	loadustp(int);
-void	m68881_restore(struct fpframe *);
-void	m68881_save(struct fpframe *);
-void	proc_trampoline(void);
-void	savectx(struct pcb *);
-int	suline(caddr_t, caddr_t);
-void	switch_exit(struct proc *);
-
-/* m68k_machdep.c */
-void userret(struct proc *);
-
-/* regdump.c */
-void regdump(struct trapframe *, int);
-
-/* sys_machdep.c */
-int	cachectl(struct proc *, int, vaddr_t, int);
-#define	CC_PURGE	0x00000001
-#define	CC_FLUSH	0x00000002
-#define	CC_IPURGE	0x00000004
-#define	CC_EXTPURGE	0x80000000
-
 /*
- * This is used during profiling to integrate system time.
+ * From m68k/syscall.c
  */
-#define	PROC_PC(p)	(((struct trapframe *)((p)->p_md.md_regs))->tf_pc)
+/* extern void syscall(register_t, struct frame); Only called from locore.s */
 
-#define	cpu_idle_enter()	do { /* nothing */ } while (0)
-#define	cpu_idle_leave()	do { /* nothing */ } while (0)
-
+#define LWP_PC(l)	(((struct trapframe *)((l)->l_md.md_regs))->tf_pc)
 #endif /* _KERNEL */
 
 #endif /* _M68K_CPU_H_ */

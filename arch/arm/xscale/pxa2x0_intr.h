@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_intr.h,v 1.11 2007/05/19 15:47:16 miod Exp $ */
-/*	$NetBSD: pxa2x0_intr.h,v 1.4 2003/07/05 06:53:08 dogcow Exp $ */
+/*	$NetBSD: pxa2x0_intr.h,v 1.12 2008/11/19 06:35:56 matt Exp $ */
 
 /* Derived from i80321_intr.h */
 
@@ -45,48 +44,106 @@
 
 #ifndef _LOCORE
 
+#include <arm/cpu.h>
 #include <arm/armreg.h>
 #include <arm/cpufunc.h>
-#include <arm/softintr.h>
+#include <machine/intr.h>
 
-extern vaddr_t pxaic_base;		/* Shared with pxa2x0_irq.S */
-#define read_icu(offset) (*(volatile uint32_t *)(pxaic_base+(offset)))
+#include <arm/xscale/pxa2x0reg.h>
+
+vaddr_t pxaic_base;		/* Shared with pxa2x0_irq.S */
+#define read_icu(offset) (*(volatile uint32_t *)(pxaic_base + (offset)))
 #define write_icu(offset,value) \
- (*(volatile uint32_t *)(pxaic_base+(offset))=(value))
+ (*(volatile uint32_t *)(pxaic_base + (offset)) = (value))
 
-extern __volatile int current_spl_level;
-extern __volatile int softint_pending;
+extern volatile int intr_mask;
 extern int pxa2x0_imask[];
-void pxa2x0_do_pending(void);
 
-void pxa2x0_setipl(int new);
-void pxa2x0_splx(int new);
-int pxa2x0_splraise(int ipl);
-int pxa2x0_spllower(int ipl);
-void pxa2x0_setsoftintr(int si);
+#ifdef __PROG32
 
+/*
+ * Cotulla's integrated ICU doesn't have IRQ0..7, so
+ * we map software interrupts to bit 0..3
+ */
+static inline void
+pxa2x0_setipl(int new)
+{
+	set_curcpl(new);
+	intr_mask = pxa2x0_imask[new];
+	write_icu(SAIPIC_MR, intr_mask);
+}
+
+
+static inline void
+pxa2x0_splx(int new)
+{
+	int psw;
+
+	psw = disable_interrupts(I32_bit);
+	pxa2x0_setipl(new);
+	restore_interrupts(psw);
+
+#ifdef __HAVE_FAST_SOFTINTS
+	cpu_dosoftints();
+#endif
+}
+
+
+static inline int
+pxa2x0_splraise(int ipl)
+{
+	int old, psw;
+
+	old = curcpl();
+	if (ipl > old) {
+		psw = disable_interrupts(I32_bit);
+		pxa2x0_setipl(ipl);
+		restore_interrupts(psw);
+	}
+
+	return old;
+}
+
+static inline int
+pxa2x0_spllower(int ipl)
+{
+	int old = curcpl();
+	int psw = disable_interrupts(I32_bit);
+
+	pxa2x0_splx(ipl);
+	restore_interrupts(psw);
+	return old;
+}
 
 /*
  * An useful function for interrupt handlers.
  * XXX: This shouldn't be here.
  */
-static __inline int
-find_first_bit( uint32_t bits )
+static inline int
+find_first_bit(uint32_t bits)
 {
-	int count;
-
-	/* since CLZ is available only on ARMv5, this isn't portable
+	/*
+	 * Since CLZ is available only on ARMv5, this isn't portable
 	 * to all ARM CPUs.  This file is for PXA2[15]0 processor. 
 	 */
-	asm( "clz %0, %1" : "=r" (count) : "r" (bits) );
-	return 31-count;
+	return 31 - __builtin_clz(bits);
 }
 
+#endif /* __PROG32 */
 
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
 void	_setsoftintr(int);
+
+#if !defined(EVBARM_SPL_NOINLINE)
+
+#define splx(new)		pxa2x0_splx(new)
+#define	_spllower(ipl)		pxa2x0_spllower(ipl)
+#define	_splraise(ipl)		pxa2x0_splraise(ipl)
+#define	_setsoftintr(si)	pxa2x0_setsoftintr(si)
+
+#endif	/* !EVBARM_SPL_NOINTR */
 
 /*
  * This function *MUST* be called very early on in a port's
@@ -98,27 +155,10 @@ void	_setsoftintr(int);
 void pxa2x0_intr_bootstrap(vaddr_t);
 
 void pxa2x0_irq_handler(void *);
-void *pxa2x0_intr_establish(int irqno, int level, int (*func)(void *),
-    void *cookie, char *name);
+void *pxa2x0_intr_establish(int irqno, int level,
+			    int (*func)(void *), void *cookie);
 void pxa2x0_intr_disestablish(void *cookie);
-const char *pxa2x0_intr_string(void *cookie);
-
-#ifdef DIAGNOSTIC
-/*
- * Although this function is implemented in MI code, it must be in this MD
- * header because we don't want this header to include MI includes.
- */
-void splassert_fail(int, int, const char *);
-extern int splassert_ctl;
-void pxa2x0_splassert_check(int, const char *);
-#define splassert(__wantipl) do {				\
-	if (splassert_ctl > 0) {				\
-		pxa2x0_splassert_check(__wantipl, __func__);	\
-	}							\
-} while (0)
-#else
-#define	splassert(wantipl)	do { /* nothing */ } while (0)
-#endif
+void pxa2x0_update_intr_masks(int irqno, int level);
 
 #endif /* ! _LOCORE */
 

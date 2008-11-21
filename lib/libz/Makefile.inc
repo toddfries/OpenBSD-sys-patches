@@ -1,5 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.7 2002/04/29 01:02:28 hugh Exp $
-#	$NetBSD: Makefile.inc,v 1.2 1997/01/23 22:29:09 cgd Exp $
+#	$NetBSD: Makefile.inc,v 1.13 2005/12/11 12:24:46 christos Exp $
 #
 #	Configuration variables (default values are below):
 #
@@ -9,6 +8,9 @@
 #	Z_AS	may be set to 'obj' to build a object from the library's
 #		object files.  (Otherwise, a library will be built.)
 #		Defaults to 'library'.
+#	ZMISCCPPFLAGS
+#		Miscellaneous cpp flags to be passed to the library's Makefile
+#		when building.
 #	ZMISCMAKEFLAGS
 #		Miscellaneous flags to be passed to the library's Makefile when
 #		building.  See library's Makefile for more details about
@@ -17,8 +19,9 @@
 # Default values:
 ZDST?=		${.OBJDIR}/lib/z
 Z_AS?=		library
+ZDOTDIR?= ../../.
 
-ZDIR=		$S/lib/libz
+ZDIR=		${S:S@^.@${ZDOTDIR}@:Q}/lib/libz
 .if (${Z_AS} == "obj")
 ZLIB=		${ZDST}/libz.o
 ZLIB_PROF=	${ZDST}/libz.po
@@ -28,23 +31,29 @@ ZLIB_PROF=	${ZDST}/libz_p.a
 .endif
 
 ZMAKE= \
-	cd ${ZDIR} && MAKEOBJDIR=${ZDST} ${MAKE} \
-	    CC="${CC}" CFLAGS="${CFLAGS}" \
-	    AS=${AS} AFLAGS="${AFLAGS}" \
-	    LD=${LD} STRIP=${STRIP} \
-	    MACHINE=${MACHINE} MACHINE_ARCH=${MACHINE_ARCH} \
-	    ZCPPFLAGS="${CPPFLAGS:S@^-I.@-I../../.@g}" \
+	cd ${ZDST} && ${MAKE} -f ${ZDIR:Q}/Makefile \
+	    ZDIR=${ZDIR:Q} \
+	    CC=${CC:Q} CFLAGS=${CFLAGS:Q} \
+	    AS=${AS:Q} AFLAGS=${AFLAGS:Q} \
+	    LORDER=${LORDER:Q} \
+	    TSORT=${TSORT:Q} \
+	    LD=${LD:Q} STRIP=${STRIP:Q} \
+	    AR=${AR:Q} NM=${NM:Q} \
+	    RANLIB=${RANLIB:Q} SIZE=${SIZE:Q} \
+	    MACHINE=${MACHINE} MACHINE_ARCH=${MACHINE_ARCH:Q} \
+	    ZCPPFLAGS=${CPPFLAGS:S@^-I.@-I${ZDOTDIR}@g:Q} \
+	    ZMISCCPPFLAGS=${ZMISCCPPFLAGS:Q} \
 	    ${ZMISCMAKEFLAGS}
 
-${ZLIB}:		.NOTMAIN __always_make_zlib
+${ZLIB}:		.NOTMAIN .MAKE __always_make_zlib
 	@echo making sure the z library is up to date...
 .if (${Z_AS} == "library")
-	${ZMAKE} libz.a
+	@${ZMAKE} libz.a
 .else
 	@${ZMAKE} libz.o
 .endif
 
-${ZLIB_PROF}:		.NOTMAIN __always_make_zlib
+${ZLIB_PROF}:		.NOTMAIN .MAKE __always_make_zlib
 	@echo making sure the profiled z library is up to date...
 .if (${Z_AS} == "library")
 	@${ZMAKE} libz_p.a
@@ -52,22 +61,23 @@ ${ZLIB_PROF}:		.NOTMAIN __always_make_zlib
 	@${ZMAKE} libz.po
 .endif
 
-clean::			.NOTMAIN cleanzlib
-cleanzlib:		.NOTMAIN __always_make_zlib
+clean:			.NOTMAIN cleanzlib
+cleanzlib:		.NOTMAIN
 	@echo cleaning the z library objects
-	@${ZMAKE} clean
-	-rmdir -p ${ZDST}
+	@if [ -d "${ZDST}" ]; then ${ZMAKE} clean; fi
 
-cleandir:		.NOTMAIN cleandirzlib
-cleandirzlib:		.NOTMAIN __always_make_zlib
+cleandir distclean:	.NOTMAIN cleandirzlib
+cleandirzlib:		.NOTMAIN
 	@echo cleandiring the z library objects
-	@${ZMAKE} cleandir
-	-rmdir -p ${ZDST}
+	@if [ -d "${ZDST}" ]; then ${ZMAKE} cleandir; fi
 
-depend::		.NOTMAIN dependzlib
-dependzlib:		.NOTMAIN __always_make_zlib
+dependall depend:	.NOTMAIN dependzlib
+dependzlib:		.NOTMAIN .MAKE __always_make_zlib
 	@echo depending the z library objects
 	@${ZMAKE} depend
 
 __always_make_zlib:	.NOTMAIN
-	-mkdir -p ${ZDST}
+	@mkdir -p ${ZDST}
+
+.PHONY: __always_make_zlib
+.PHONY: cleanzlib cleandirzlib dependzlib

@@ -1,8 +1,7 @@
-/*	$OpenBSD: eisa_machdep.c,v 1.10 2006/09/19 11:06:33 jsg Exp $	*/
-/*	$NetBSD: eisa_machdep.c,v 1.10.22.2 2000/06/25 19:36:58 sommerfeld Exp $	*/
+/*	$NetBSD: eisa_machdep.c,v 1.32 2008/06/27 11:12:06 cegger Exp $	*/
 
 /*-
- * Copyright (c) 1997 The NetBSD Foundation, Inc.
+ * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,26 +64,41 @@
  * Machine-specific functions for EISA autoconfiguration.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: eisa_machdep.c,v 1.32 2008/06/27 11:12:06 cegger Exp $");
+
+#include "ioapic.h"
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
+#include <sys/extent.h>
 
-#define _I386_BUS_DMA_PRIVATE
 #include <machine/bus.h>
-#include <machine/i8259.h>
+#include <machine/bus_private.h>
 
+#include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 #include <dev/eisa/eisavar.h>
+
+#if NIOAPIC > 0
+#include <machine/i82093var.h>
+#include <machine/mpbiosvar.h>
+#endif
 
 /*
  * EISA doesn't have any special needs; just use the generic versions
  * of these funcions.
  */
-struct i386_bus_dma_tag eisa_bus_dma_tag = {
-	NULL,			/* _cookie */
+struct x86_bus_dma_tag eisa_bus_dma_tag = {
+	0,			/* _tag_needs_free */
+	0,			/* _bounce_thresh */
+	0,			/* _bounce_alloc_lo */
+	0,			/* _bounce_alloc_hi */
+	NULL,			/* _may_bounce */
 	_bus_dmamap_create,
 	_bus_dmamap_destroy,
 	_bus_dmamap_load,
@@ -105,18 +112,29 @@ struct i386_bus_dma_tag eisa_bus_dma_tag = {
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
 	_bus_dmamem_mmap,
+	_bus_dmatag_subregion,
+	_bus_dmatag_destroy,
 };
 
 void
-eisa_attach_hook(struct device *parent, struct device *self,
+eisa_attach_hook(device_t parent, device_t self,
     struct eisabus_attach_args *eba)
 {
-	/* Nothing to do */
+	extern int eisa_has_been_seen; 
+
+	/*
+	 * Notify others that might need to know that the EISA bus
+	 * has now been attached.
+	 */
+	if (eisa_has_been_seen)
+		panic("eisaattach: EISA bus already seen!");
+	eisa_has_been_seen = 1;
 }
 
 int
 eisa_maxslots(eisa_chipset_tag_t ec)
 {
+
 	/*
 	 * Always try 16 slots.
 	 */
@@ -124,87 +142,153 @@ eisa_maxslots(eisa_chipset_tag_t ec)
 }
 
 int
-eisa_intr_map(eisa_chipset_tag_t ec, u_int irq, eisa_intr_handle_t *ihp)
+eisa_intr_map(eisa_chipset_tag_t ec, u_int irq,
+    eisa_intr_handle_t *ihp)
 {
-#if NIOAPIC > 0
-	struct mp_intr_map *mip;
-#endif
-
-	if (irq >= ICU_LEN) {
-		printf("eisa_intr_map: bad IRQ %d\n", irq);
+	if (irq >= NUM_LEGACY_IRQS) {
+		aprint_error("eisa_intr_map: bad IRQ %d\n", irq);
 		*ihp = -1;
-		return (1);
+		return 1;
 	}
 	if (irq == 2) {
-		printf("eisa_intr_map: changed IRQ 2 to IRQ 9\n");
+		aprint_verbose("eisa_intr_map: changed IRQ 2 to IRQ 9\n");
 		irq = 9;
 	}
 
 #if NIOAPIC > 0
 	if (mp_busses != NULL) {
-		/*
-		 * Assumes 1:1 mapping between PCI bus numbers and
-		 * the numbers given by the MP bios.
-		 * XXX Is this a valid assumption?
-		 */
-		
-		for (mip = mp_busses[bus].mb_intrs; mip != NULL;
-		    mip = mip->next) {
-			if (mip->bus_pin == irq) {
-				*ihp = mip->ioapic_ih | irq;
-				return (0);
-			}
-		}
-		if (mip == NULL)
-			printf("eisa_intr_map: no MP mapping found\n");
+		if (intr_find_mpmapping(mp_eisa_bus, irq, ihp) == 0 ||
+		    intr_find_mpmapping(mp_isa_bus, irq, ihp) == 0) {
+			*ihp |= irq;
+			return 0;
+		} else
+			aprint_verbose("eisa_intr_map: no MP mapping found\n");
 	}
 #endif
 
 	*ihp = irq;
-	return (0);
+	return 0;
 }
 
 const char *
 eisa_intr_string(eisa_chipset_tag_t ec, eisa_intr_handle_t ih)
 {
-	static char irqstr[64];
+	static char irqstr[8];		/* 4 + 2 + NULL + sanity */
 
-	if (ih == 0 || (ih & 0xff) >= ICU_LEN || ih == 2)
+	if (ih == 0 || (ih & 0xff) >= NUM_LEGACY_IRQS || ih == 2)
 		panic("eisa_intr_string: bogus handle 0x%x", ih);
 
 #if NIOAPIC > 0
-	if (ih & APIC_INT_VIA_APIC) {
-		snprintf(irqstr, sizeof irqstr, "apic %d int %d (irq %d)",
-		    APIC_IRQ_APIC(ih), APIC_IRQ_PIN(ih), ih & 0xff);
-		return (irqstr);
-	}
+	if (ih & APIC_INT_VIA_APIC)
+		snprintf(irqstr, sizeof(irqstr), "apic %d int %d (irq %d)",
+		    APIC_IRQ_APIC(ih),
+		    APIC_IRQ_PIN(ih),
+		    ih&0xff);
+	else
+		snprintf(irqstr, sizeof(irqstr), "irq %d", ih&0xff);
+#else
+	snprintf(irqstr, sizeof(irqstr), "irq %d", ih);
 #endif
-
-	snprintf(irqstr, sizeof irqstr, "irq %d", ih);
 	return (irqstr);
 	
 }
 
-void *
-eisa_intr_establish(eisa_chipset_tag_t ec, eisa_intr_handle_t ih, int type,
-    int level, int (*func)(void *), void *arg, char *what)
+const struct evcnt *
+eisa_intr_evcnt(eisa_chipset_tag_t ec, eisa_intr_handle_t ih)
 {
+
+	/* XXX for now, no evcnt parent reported */
+	return NULL;
+}
+
+void *
+eisa_intr_establish(eisa_chipset_tag_t ec, eisa_intr_handle_t ih,
+    int type, int level, int (*func)(void *), void *arg)
+{
+	int pin, irq;
+	struct pic *pic;
+
+	pic = &i8259_pic;
+	pin = irq = ih;
+
 #if NIOAPIC > 0
-	if (ih != -1) {
-		if (ih != -1 && (ih & APIC_INT_VIA_APIC)) {
-			return (apic_intr_establish(ih, type, level, func, arg,
-			    what));
+	if (ih & APIC_INT_VIA_APIC) {
+		pic = (struct pic *)ioapic_find(APIC_IRQ_APIC(ih));
+		if (pic == NULL) {
+			aprint_error("eisa_intr_establish: bad ioapic %d\n",
+			    APIC_IRQ_APIC(ih));
+			return NULL;
 		}
+		pin = APIC_IRQ_PIN(ih);
+		irq = APIC_IRQ_LEGACY_IRQ(ih);
+		if (irq < 0 || irq >= NUM_LEGACY_IRQS)
+			irq = -1;
 	}
 #endif
-	if (ih == 0 || ih >= ICU_LEN || ih == 2)
-		panic("eisa_intr_establish: bogus handle 0x%x", ih);
 
-	return (isa_intr_establish(NULL, ih, type, level, func, arg, what));
+	return intr_establish(irq, pic, pin, type, level, func, arg, false);
 }
 
 void
 eisa_intr_disestablish(eisa_chipset_tag_t ec, void *cookie)
 {
-	return (isa_intr_disestablish(NULL, cookie));
+
+	intr_disestablish(cookie);
+}
+
+int
+eisa_mem_alloc(bus_space_tag_t t, bus_size_t size, bus_size_t align,
+    bus_addr_t boundary, int cacheable,
+    bus_addr_t *addrp, bus_space_handle_t *bahp)
+{
+	extern struct extent *iomem_ex;
+
+	/*
+	 * Allocate physical address space after the ISA hole.
+	 */
+	return bus_space_alloc(t, IOM_END, iomem_ex->ex_end, size, align,
+	    boundary, cacheable, addrp, bahp);
+}
+
+void
+eisa_mem_free(bus_space_tag_t t, bus_space_handle_t bah, bus_size_t size)
+{
+
+	bus_space_free(t, bah, size);
+}
+
+int
+eisa_conf_read_mem(eisa_chipset_tag_t ec, int slot,
+    int func, int entry, struct eisa_cfg_mem *ecm)
+{
+
+	/* XXX XXX XXX */
+	return (ENOENT);
+}
+
+int
+eisa_conf_read_irq(eisa_chipset_tag_t ec, int slot,
+    int func, int entry, struct eisa_cfg_irq *eci)
+{
+
+	/* XXX XXX XXX */
+	return (ENOENT);
+}
+
+int
+eisa_conf_read_dma(eisa_chipset_tag_t ec, int slot,
+    int func, int entry, struct eisa_cfg_dma *ecd)
+{
+
+	/* XXX XXX XXX */
+	return (ENOENT);
+}
+
+int
+eisa_conf_read_io(eisa_chipset_tag_t ec, int slot,
+    int func, int entry, struct eisa_cfg_io *ecio)
+{
+
+	/* XXX XXX XXX */
+	return (ENOENT);
 }

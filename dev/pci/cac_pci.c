@@ -1,5 +1,4 @@
-/*	$OpenBSD: cac_pci.c,v 1.11 2007/09/14 23:17:23 brad Exp $	*/
-/*	$NetBSD: cac_pci.c,v 1.10 2001/01/10 16:48:04 ad Exp $	*/
+/*	$NetBSD: cac_pci.c,v 1.28 2008/04/28 20:23:54 martin Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,6 +33,9 @@
  * PCI front-end for cac(4) driver.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cac_pci.c,v 1.28 2008/04/28 20:23:54 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -48,31 +43,19 @@
 #include <sys/queue.h>
 
 #include <machine/endian.h>
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsi_disk.h>
-#include <scsi/scsiconf.h>
-
 #include <dev/ic/cacreg.h>
 #include <dev/ic/cacvar.h>
 
-void	cac_pci_attach(struct device *, struct device *, void *);
-const struct	cac_pci_type *cac_pci_findtype(struct pci_attach_args *);
-int	cac_pci_match(struct device *, void *, void *);
-
-struct	cac_ccb *cac_pci_l0_completed(struct cac_softc *);
-int	cac_pci_l0_fifo_full(struct cac_softc *);
-void	cac_pci_l0_intr_enable(struct cac_softc *, int);
-int	cac_pci_l0_intr_pending(struct cac_softc *);
-void	cac_pci_l0_submit(struct cac_softc *, struct cac_ccb *);
-
-struct cfattach cac_pci_ca = {
-	sizeof(struct cac_softc), cac_pci_match, cac_pci_attach
-};
+static struct	cac_ccb *cac_pci_l0_completed(struct cac_softc *);
+static int	cac_pci_l0_fifo_full(struct cac_softc *);
+static void	cac_pci_l0_intr_enable(struct cac_softc *, int);
+static int	cac_pci_l0_intr_pending(struct cac_softc *);
+static void	cac_pci_l0_submit(struct cac_softc *, struct cac_ccb *);
 
 static const struct cac_linkage cac_pci_l0 = {
 	cac_pci_l0_completed,
@@ -84,38 +67,35 @@ static const struct cac_linkage cac_pci_l0 = {
 
 #define CT_STARTFW	0x01	/* Need to start controller firmware */
 
-static const
-struct cac_pci_type {
+static struct cac_pci_type {
 	int	ct_subsysid;
 	int	ct_flags;
 	const struct	cac_linkage *ct_linkage;
-	char	*ct_typestr;
-} cac_pci_type[] = {
-	{ 0x40300e11,	0,		&cac_l0,	"SMART-2/P" },
-	{ 0x40310e11,	0,		&cac_l0,	"SMART-2SL" },
-	{ 0x40320e11,	0,		&cac_l0,	"Smart Array 3200" },
-	{ 0x40330e11,	0,		&cac_l0,	"Smart Array 3100ES" },
-	{ 0x40340e11,	0,		&cac_l0,	"Smart Array 221" },
-	{ 0x40400e11,	CT_STARTFW,	&cac_pci_l0,	"Integrated Array" },
+	const char	*ct_typestr;
+} const cac_pci_type[] = {
+	{ 0x40300e11,	0, 		&cac_l0,	"SMART-2/P" },
+	{ 0x40310e11,	0, 		&cac_l0, 	"SMART-2SL" },
+	{ 0x40320e11,	0, 		&cac_l0,	"Smart Array 3200" },
+	{ 0x40330e11,	0, 		&cac_l0,	"Smart Array 3100ES" },
+	{ 0x40340e11,	0, 		&cac_l0,	"Smart Array 221" },
+	{ 0x40400e11,	CT_STARTFW, 	&cac_pci_l0,	"Integrated Array" },
 	{ 0x40480e11,	CT_STARTFW,	&cac_pci_l0,	"RAID LC2" },
-	{ 0x40500e11,	0,		&cac_pci_l0,	"Smart Array 4200" },
-	{ 0x40510e11,	0,		&cac_pci_l0,	"Smart Array 4200ES" },
+	{ 0x40500e11,	0,	 	&cac_pci_l0,	"Smart Array 4200" },
+	{ 0x40510e11,	0, 		&cac_pci_l0,	"Smart Array 4200ES" },
 	{ 0x40580e11,	0,		&cac_pci_l0,	"Smart Array 431" },
 };
 
-static const
-struct cac_pci_product {
+static struct cac_pci_product {
 	u_short	cp_vendor;
 	u_short	cp_product;
-} cac_pci_product[] = {
+} const cac_pci_product[] = {
 	{ PCI_VENDOR_COMPAQ,	PCI_PRODUCT_COMPAQ_SMART2P },
-	{ PCI_VENDOR_DEC,	PCI_PRODUCT_DEC_CPQ42XX },
+	{ PCI_VENDOR_DEC,	PCI_PRODUCT_DEC_21554 },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_1510 },
 };
 
-const struct cac_pci_type *
-cac_pci_findtype(pa)
-	struct pci_attach_args *pa;
+static const struct cac_pci_type *
+cac_pci_findtype(struct pci_attach_args *pa)
 {
 	const struct cac_pci_type *ct;
 	const struct cac_pci_product *cp;
@@ -127,7 +107,7 @@ cac_pci_findtype(pa)
 	while (i < sizeof(cac_pci_product) / sizeof(cac_pci_product[0])) {
 		if (PCI_VENDOR(pa->pa_id) == cp->cp_vendor &&
 		    PCI_PRODUCT(pa->pa_id) == cp->cp_product)
-			break;
+		    	break;
 		cp++;
 		i++;
 	}
@@ -149,20 +129,16 @@ cac_pci_findtype(pa)
 	return (ct);
 }
 
-int
-cac_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+cac_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 
 	return (cac_pci_findtype(aux) != NULL);
 }
 
-void
-cac_pci_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+static void
+cac_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa;
 	const struct cac_pci_type *ct;
@@ -171,8 +147,9 @@ cac_pci_attach(parent, self, aux)
 	pci_intr_handle_t ih;
 	const char *intrstr;
 	pcireg_t reg;
-	bus_size_t size;
 	int memr, ior, i;
+
+	aprint_naive(": RAID controller\n");
 
 	sc = (struct cac_softc *)self;
 	pa = (struct pci_attach_args *)aux;
@@ -199,58 +176,63 @@ cac_pci_attach(parent, self, aux)
 
 	if (memr != -1) {
 		if (pci_mapreg_map(pa, memr, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->sc_iot, &sc->sc_ioh, NULL, &size, 0))
+		    &sc->sc_iot, &sc->sc_ioh, NULL, NULL))
 			memr = -1;
 		else
 			ior = -1;
 	}
 	if (ior != -1)
 		if (pci_mapreg_map(pa, ior, PCI_MAPREG_TYPE_IO, 0,
-		    &sc->sc_iot, &sc->sc_ioh, NULL, &size, 0))
-			ior = -1;
+		    &sc->sc_iot, &sc->sc_ioh, NULL, NULL))
+		    	ior = -1;
 	if (memr == -1 && ior == -1) {
-		printf(": can't map i/o or memory space\n");
+		aprint_error_dev(self, "can't map i/o or memory space\n");
 		return;
 	}
 
 	sc->sc_dmat = pa->pa_dmat;
 
+	/* Enable the device. */
+	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+		       reg | PCI_COMMAND_MASTER_ENABLE);
+
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": can't map interrupt\n");
-		bus_space_unmap(sc->sc_iot, sc->sc_ioh, size);
+		aprint_error("can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, cac_intr,
-	    sc, sc->sc_dv.dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, cac_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf(": can't establish interrupt");
+		aprint_error("can't establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		bus_space_unmap(sc->sc_iot, sc->sc_ioh, size);
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		return;
 	}
 
-	printf(": %s, %s\n", intrstr, ct->ct_typestr);
+	aprint_normal(": Compaq %s\n", ct->ct_typestr);
 
 	/* Now attach to the bus-independent code. */
-	sc->sc_cl = ct->ct_linkage;
-	cac_init(sc, (ct->ct_flags & CT_STARTFW) != 0);
+	memcpy(&sc->sc_cl, ct->ct_linkage, sizeof(sc->sc_cl));
+	cac_init(sc, intrstr, (ct->ct_flags & CT_STARTFW) != 0);
 }
 
-void
+CFATTACH_DECL(cac_pci, sizeof(struct cac_softc),
+    cac_pci_match, cac_pci_attach, NULL, NULL);
+
+static void
 cac_pci_l0_submit(struct cac_softc *sc, struct cac_ccb *ccb)
 {
 
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, 0,
-	    sc->sc_dmamap->dm_mapsize,
-	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap,
+	    (char *)ccb - (char *)sc->sc_ccbs,
+	    sizeof(struct cac_ccb), BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 	cac_outl(sc, CAC_42REG_CMD_FIFO, ccb->ccb_paddr);
 }
 
-struct cac_ccb *
+static struct cac_ccb *
 cac_pci_l0_completed(struct cac_softc *sc)
 {
 	struct cac_ccb *ccb;
@@ -260,31 +242,38 @@ cac_pci_l0_completed(struct cac_softc *sc)
 		return (NULL);
 
 	cac_outl(sc, CAC_42REG_DONE_FIFO, 0);
-	off = (off & ~3) - sc->sc_ccbs_paddr;
-	ccb = (struct cac_ccb *)(sc->sc_ccbs + off);
 
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, 0,
-	    sc->sc_dmamap->dm_mapsize,
-	    BUS_DMASYNC_POSTWRITE | BUS_DMASYNC_POSTREAD);
+	if ((off & 3) != 0)
+		printf("%s: failed command list returned: %lx\n",
+		    device_xname(&sc->sc_dv), (long)off);
+
+	off = (off & ~3) - sc->sc_ccbs_paddr;
+	ccb = (struct cac_ccb *)((char *)sc->sc_ccbs + off);
+
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, off, sizeof(struct cac_ccb),
+	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
+
+	if ((off & 3) != 0 && ccb->ccb_req.error == 0)
+		ccb->ccb_req.error = CAC_RET_CMD_REJECTED;
 
 	return (ccb);
 }
 
-int
+static int
 cac_pci_l0_intr_pending(struct cac_softc *sc)
 {
 
 	return ((cac_inl(sc, CAC_42REG_STATUS) & CAC_42_EXTINT) != 0);
 }
 
-void
+static void
 cac_pci_l0_intr_enable(struct cac_softc *sc, int state)
 {
 
 	cac_outl(sc, CAC_42REG_INTR_MASK, (state ? 0 : 8));	/* XXX */
 }
 
-int
+static int
 cac_pci_l0_fifo_full(struct cac_softc *sc)
 {
 

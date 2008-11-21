@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.3 2006/09/06 12:54:31 cherry Exp $	*/
+/*	$NetBSD: machdep.c,v 1.11 2008/11/12 12:36:02 ad Exp $	*/
 
 /*-
  * Copyright (c) 2003,2004 Marcel Moolenaar
@@ -43,13 +43,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,15 +88,17 @@
 /*__FBSDID("$FreeBSD: src/sys/ia64/ia64/machdep.c,v 1.203 2005/10/14 12:43:45 davidxu Exp $"); */
 
 #include <sys/param.h> 
-#include <sys/user.h>
-#include <sys/systm.h>
-#include <sys/reboot.h>
+#include <sys/cpu.h>
 #include <sys/exec.h>
-#include <sys/proc.h>
+#include <sys/ksyms.h>
 #include <sys/sa.h>
 #include <sys/savar.h>
 #include <sys/msgbuf.h>
-#include <sys/ksyms.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/reboot.h>
+#include <sys/systm.h>
+#include <sys/user.h>
 
 #include <machine/ia64_cpu.h>
 #include <machine/pal.h>
@@ -123,24 +118,21 @@
 
 #include <dev/cons.h>
 
-extern void main __P((void));
-
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 /* start and end of kernel symbol table */
 void	*ksym_start, *ksym_end;
 vaddr_t ia64_unwindtab;
 vsize_t ia64_unwindtablen;
 #endif
 
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
-caddr_t msgbufaddr;
+void *msgbufaddr;
 int	physmem;
 
 char	cpu_model[64];
@@ -284,17 +276,10 @@ cpu_startup()
  	minaddr = 0;
 
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+				   VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -321,9 +306,7 @@ cpu_startup()
 }
 
 void
-cpu_reboot(howto, bootstr)
-	int howto;
-	char *bootstr;
+cpu_reboot(int howto, char *bootstr)
 {
 
 	efi_reset_system();
@@ -332,16 +315,17 @@ cpu_reboot(howto, bootstr)
 	/*NOTREACHED*/
 }
 
-int	cpu_switch (struct lwp *cur, struct lwp *new)
+lwp_t *
+cpu_switchto(lwp_t *cur, lwp_t *new, bool b)
+{
+	return new;
+}
+
+bool
+cpu_intr_p()
 {
 	return 0;
 }
-
-void	cpu_switchto (struct lwp *cur, struct lwp *new)
-{
-	return;
-}
-
 
 /*
  * This is called by main to set dumplo and dumpsize.
@@ -363,7 +347,7 @@ consinit()
 }
 
 void
-map_pal_code(void)
+map_pal_code()
 {
 	pt_entry_t pte;
 	u_int64_t psr;
@@ -392,7 +376,7 @@ map_pal_code(void)
 }
 
 void
-map_gateway_page(void)
+map_gateway_page()
 {
 	pt_entry_t pte;
 	u_int64_t psr;
@@ -455,7 +439,7 @@ calculate_frequencies(void)
 
 
 void
-ia64_init(void)
+ia64_init()
 {
 
 	paddr_t kernstartpfn, kernendpfn, pfn0, pfn1;
@@ -677,7 +661,7 @@ ia64_init(void)
 	/*
 	 * Initialize error message buffer (at end of core).
 	 */
-	msgbufaddr = (caddr_t) uvm_pageboot_alloc(MSGBUFSIZE);
+	msgbufaddr = (void *) uvm_pageboot_alloc(MSGBUFSIZE);
 	initmsgbuf(msgbufaddr, MSGBUFSIZE);
 
 	/*
@@ -722,7 +706,7 @@ ia64_init(void)
 	proc0paddr->u_pcb.pcb_special.bspstore = 
 		(u_int64_t) proc0paddr + sizeof(struct user);
 
-	simple_lock_init(&proc0paddr->u_pcb.pcb_fpcpu_slock);
+	mutex_init(&proc0paddr->u_pcb.pcb_fpcpu_slock, MUTEX_SPIN, 0);
 
 
 	/*
@@ -765,7 +749,7 @@ ia64_init(void)
 	/*
 	 * Initialize debuggers, and break into them if appropriate.
 	 */
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init((int)((u_int64_t)ksym_end - (u_int64_t)ksym_start),
 	    ksym_start, ksym_end);
 #endif
@@ -784,10 +768,7 @@ ia64_init(void)
  * Set registers on exec.
  */
 void
-setregs(l, pack, stack)
-	register struct lwp *l;
-	struct exec_package *pack;
-	u_long stack;
+setregs(register struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	struct trapframe *tf;
 	uint64_t *ksttop, *kst, regstkp;
@@ -847,16 +828,16 @@ setregs(l, pack, stack)
 		 */
 
 		/* in0 = sp */
-		suword((caddr_t)tf->tf_special.bspstore - 32, stack);
+		suword((char *)tf->tf_special.bspstore - 32, stack);
 
 		/* in1 == *cleanup */
-		suword((caddr_t)tf->tf_special.bspstore -  24, 0);
+		suword((char *)tf->tf_special.bspstore -  24, 0);
 
 		/* in2 == *obj */
-		suword((caddr_t)tf->tf_special.bspstore -  16, 0);
+		suword((char *)tf->tf_special.bspstore -  16, 0);
 
 		/* in3 = ps_strings */		
-		suword((caddr_t)tf->tf_special.bspstore - 8, 
+		suword((char *)tf->tf_special.bspstore - 8, 
 		       (u_int64_t)l->l_proc->p_psstr); 
 
 	}
@@ -884,22 +865,13 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted, void *sas, vo
 }
 
 void
-cpu_getmcontext(l, mcp, flags)
-	struct lwp *l;
-	mcontext_t *mcp;
-	unsigned int *flags;
+cpu_getmcontext(struct lwp *l, mcontext_t *mcp, unsigned int *flags)
 {
 	return;
 }
 
 int
-cpu_setmcontext(l, mcp, flags)
-	struct lwp *l;
-	const mcontext_t *mcp;
-	unsigned int flags;
+cpu_setmcontext(struct lwp *l, const mcontext_t *mcp, unsigned int flags)
 {
-	return (EINVAL);
+	return EINVAL;
 }
-
-
-

@@ -1,5 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.3 2005/12/31 23:03:58 drahn Exp $	*/
-/* $NetBSD: mainbus.c,v 1.3 2001/06/13 17:52:43 nathanw Exp $ */
+/* $NetBSD: mainbus.c,v 1.14 2008/04/27 18:58:45 matt Exp $ */
 
 /*
  * Copyright (c) 1994,1995 Mark Brinicombe.
@@ -42,6 +41,9 @@
  * Created      : 15/12/94
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.14 2008/04/27 18:58:45 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -54,9 +56,7 @@
 #endif
 #include <machine/bus.h>
 #include <arm/mainbus/mainbus.h>
-/*
 #include "locators.h"
-*/
 
 /*
  * mainbus is a root device so we a bus space tag to pass to children
@@ -68,20 +68,16 @@ extern struct bus_space mainbus_bs_tag;
 
 /* Prototypes for functions provided */
 
-int  mainbusmatch  (struct device *, void *, void *);
-void mainbusattach (struct device *, struct device *, void *);
-int  mainbusprint  (void *aux, const char *mainbus);
-int mainbussearch (struct device *,  void *, void *);
+static int  mainbusmatch  __P((struct device *, struct cfdata *, void *));
+static void mainbusattach __P((struct device *, struct device *, void *));
+static int  mainbusprint  __P((void *aux, const char *mainbus));
+static int  mainbussearch __P((struct device *, struct cfdata *,
+				const int *, void *));
 
 /* attach and device structures for the device */
 
-struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbusmatch, mainbusattach
-};
-
-struct cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
-};
+CFATTACH_DECL(mainbus, sizeof(struct device),
+    mainbusmatch, mainbusattach, NULL, NULL);
 
 /*
  * int mainbusmatch(struct device *parent, struct cfdata *cf, void *aux)
@@ -89,39 +85,13 @@ struct cfdriver mainbus_cd = {
  * Always match for unit 0
  */
 
-int
-mainbusmatch(struct device *parent, void *cf, void *aux)
+static int
+mainbusmatch(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	return (1);
-}
-
-/*
- * void mainbusattach(struct device *parent, struct device *self, void *aux)
- *
- * probe and attach all children
- */
-
-void
-mainbusattach(struct device *parent, struct device *self, void *aux)
-{
-	printf("\n");
-
-	config_search(mainbussearch, self, self);
-}
-
-int
-mainbussearch(struct device *parent, void *c, void *aux)
-{
-	struct mainbus_attach_args ma;
-	struct cfdata *cf = c;
-
-
-	ma.ma_iot = &mainbus_bs_tag;
-	ma.ma_name = cf->cf_driver->cd_name;
-
-	config_found(parent, &ma, mainbusprint);
-
-	return 1;
 }
 
 /*
@@ -130,9 +100,85 @@ mainbussearch(struct device *parent, void *c, void *aux)
  * print routine used during config of children
  */
 
-int
-mainbusprint(void *aux, const char *mainbus)
+static int
+mainbusprint(aux, mainbus)
+	void *aux;
+	const char *mainbus;
 {
+	struct mainbus_attach_args *mb = aux;
+
+	if (mb->mb_iobase != MAINBUSCF_BASE_DEFAULT)
+		aprint_normal(" base 0x%x", mb->mb_iobase);
+	if (mb->mb_iosize > 1)
+		aprint_normal("-0x%x", mb->mb_iobase + mb->mb_iosize - 1);
+	if (mb->mb_irq != -1)
+		aprint_normal(" irq %d", mb->mb_irq);
+	if (mb->mb_drq != -1)
+		aprint_normal(" drq 0x%08x", mb->mb_drq);
+
 /* XXXX print flags */
 	return (QUIET);
 }
+
+/*
+ * int mainbussearch(struct device *parent, struct device *self, void *aux)
+ *
+ * search routine used during the config of children
+ */
+
+static int
+mainbussearch(parent, cf, ldesc, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	const int *ldesc;
+	void *aux;
+{
+	struct mainbus_attach_args mb;
+	int tryagain;
+
+	do {
+		if (cf->cf_loc[MAINBUSCF_BASE] == MAINBUSCF_BASE_DEFAULT) {
+			mb.mb_iobase = MAINBUSCF_BASE_DEFAULT;
+			mb.mb_iosize = 0;
+			mb.mb_drq = MAINBUSCF_DACK_DEFAULT;
+			mb.mb_irq = MAINBUSCF_IRQ_DEFAULT;
+		} else {    
+			mb.mb_iobase = cf->cf_loc[MAINBUSCF_BASE];
+#if defined(arm32) && !defined(EB7500ATX)
+			mb.mb_iobase += IO_CONF_BASE;
+#endif
+			mb.mb_iosize = cf->cf_loc[MAINBUSCF_SIZE];
+			mb.mb_drq = cf->cf_loc[MAINBUSCF_DACK];
+			mb.mb_irq = cf->cf_loc[MAINBUSCF_IRQ];
+		}
+		mb.mb_iot = &mainbus_bs_tag;
+
+		tryagain = 0;
+		if (config_match(parent, cf, &mb) > 0) {
+			config_attach(parent, cf, &mb, mainbusprint);
+/*			tryagain = (cf->cf_fstate == FSTATE_STAR);*/
+		}
+	} while (tryagain);
+
+	return (0);
+}
+
+/*
+ * void mainbusattach(struct device *parent, struct device *self, void *aux)
+ *
+ * probe and attach all children
+ */
+
+static void
+mainbusattach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
+{
+	aprint_naive("\n");
+	aprint_normal("\n");
+
+	config_search_ia(mainbussearch, self, "mainbus", NULL);
+}
+
+/* End of mainbus.c */

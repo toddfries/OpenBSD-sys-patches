@@ -1,5 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.6 2005/04/03 20:21:44 kettenis Exp $	*/
-/*	$NetBSD: reg.h,v 1.14 1995/10/11 04:20:24 mycroft Exp $	*/
+/*	$NetBSD: reg.h,v 1.19 2008/01/16 09:37:08 ad Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,35 +37,39 @@
 #ifndef _I386_REG_H_
 #define _I386_REG_H_
 
+#include <machine/frame.h>
+
 /*
  * Location of the users' stored
  * registers within appropriate frame of 'trap' and 'syscall', relative to
  * base of stack frame.
- * Normal usage is u.u_ar0[XX] in kernel.
+ *
+ * XXX these should be nuked. They used to be used in the NetBSD/i386 bits
+ * of gdb, but no more.
  */
 
 /* When referenced during a trap/exception, registers are at these offsets */
 
-#define	tES	(0)
-#define	tDS	(1)
-#define	tEDI	(2)
-#define	tESI	(3)
-#define	tEBP	(4)
-#define	tEBX	(5)
-#define	tEDX	(6)
-#define	tECX	(7)
-#define	tEAX	(8)
+#define	tES	(offsetof(struct trapframe, tf_es) / sizeof (int))
+#define	tDS	(offsetof(struct trapframe, tf_ds) / sizeof (int))
+#define	tEDI	(offsetof(struct trapframe, tf_edi) / sizeof (int))
+#define	tESI	(offsetof(struct trapframe, tf_esi) / sizeof (int))
+#define	tEBP	(offsetof(struct trapframe, tf_ebp) / sizeof (int))
+#define	tEBX	(offsetof(struct trapframe, tf_ebx) / sizeof (int))
+#define	tEDX	(offsetof(struct trapframe, tf_edx) / sizeof (int))
+#define	tECX	(offsetof(struct trapframe, tf_ecx) / sizeof (int))
+#define	tEAX	(offsetof(struct trapframe, tf_eax) / sizeof (int))
 
-#define	tEIP	(11)
-#define	tCS	(12)
-#define	tEFLAGS	(13)
-#define	tESP	(14)
-#define	tSS	(15)
+#define	tEIP	(offsetof(struct trapframe, tf_eip) / sizeof (int))
+#define	tCS	(offsetof(struct trapframe, tf_cs) / sizeof (int))
+#define	tEFLAGS	(offsetof(struct trapframe, tf_eflags) / sizeof (int))
+#define	tESP	(offsetof(struct trapframe, tf_esp) / sizeof (int))
+#define	tSS	(offsetof(struct trapframe, tf_ss) / sizeof (int))
 
 /*
  * Registers accessible to ptrace(2) syscall for debugger
  * The machine-dependent code for PT_{SET,GET}REGS needs to
- * use whichever order, defined above, is correct, so that it
+ * use whichver order, defined above, is correct, so that it
  * is all invisible to the user.
  */
 struct reg {
@@ -93,10 +96,14 @@ struct fpreg {
 	 * XXX
 	 * Fill this in with real info.
 	 */
-	char	__data[116];
+	char	__data[108];
 };
 
 struct xmmregs {
+	/*
+	 * XXX
+	 * Fill this in with real info.
+	 */
 	char	__data[512];
 };
 

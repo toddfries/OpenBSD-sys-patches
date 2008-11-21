@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_parityscan.h,v 1.3 2002/12/16 07:01:04 tdeval Exp $	*/
-/*	$NetBSD: rf_parityscan.h,v 1.3 1999/02/05 00:06:14 oster Exp $	*/
-
+/*	$NetBSD: rf_parityscan.h,v 1.7 2005/12/11 12:23:37 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,35 +26,36 @@
  * rights to redistribute these changes.
  */
 
-#ifndef	_RF__RF_PARITYSCAN_H_
-#define	_RF__RF_PARITYSCAN_H_
+#ifndef _RF__RF_PARITYSCAN_H_
+#define _RF__RF_PARITYSCAN_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+
 #include "rf_alloclist.h"
 
-int rf_RewriteParity(RF_Raid_t *);
-int rf_VerifyParityBasic(RF_Raid_t *, RF_RaidAddr_t, RF_PhysDiskAddr_t *, int,
-	RF_RaidAccessFlags_t);
-int rf_VerifyParity(RF_Raid_t *, RF_AccessStripeMap_t *, int,
-	RF_RaidAccessFlags_t);
-int rf_TryToRedirectPDA(RF_Raid_t *, RF_PhysDiskAddr_t *, int);
-int rf_VerifyDegrModeWrite(RF_Raid_t *, RF_AccessStripeMapHeader_t *);
+int     rf_RewriteParity(RF_Raid_t *);
+int 	rf_VerifyParityBasic(RF_Raid_t *, RF_RaidAddr_t, RF_PhysDiskAddr_t *,
+    int, RF_RaidAccessFlags_t);
+int	rf_VerifyParity(RF_Raid_t *, RF_AccessStripeMap_t *, int,
+    RF_RaidAccessFlags_t);
+int     rf_TryToRedirectPDA(RF_Raid_t *, RF_PhysDiskAddr_t *, int);
+int     rf_VerifyDegrModeWrite(RF_Raid_t *, RF_AccessStripeMapHeader_t *);
 RF_DagHeader_t *rf_MakeSimpleDAG(RF_Raid_t *, int, int, char *,
-	int (*) (RF_DagNode_t *), int (*) (RF_DagNode_t *), char *,
-	RF_AllocListElem_t *, RF_RaidAccessFlags_t, int);
+    int (*)(RF_DagNode_t *), int (*) (RF_DagNode_t *), const char *,
+    RF_AllocListElem_t *, RF_RaidAccessFlags_t, int);
 
-#define	RF_DO_CORRECT_PARITY		1
-#define	RF_DONT_CORRECT_PARITY		0
+#define RF_DO_CORRECT_PARITY   1
+#define RF_DONT_CORRECT_PARITY 0
 
 /*
- * Return vals for VerifyParity operation.
+ * Return vals for VerifyParity operation
  *
  * Ordering is important here.
  */
-#define	RF_PARITY_OKAY			0	/* Or no parity information. */
-#define	RF_PARITY_CORRECTED		1
-#define	RF_PARITY_BAD			2
-#define	RF_PARITY_COULD_NOT_CORRECT	3
-#define	RF_PARITY_COULD_NOT_VERIFY	4
+#define RF_PARITY_OKAY               0	/* or no parity information */
+#define RF_PARITY_CORRECTED          1
+#define RF_PARITY_BAD                2
+#define RF_PARITY_COULD_NOT_CORRECT  3
+#define RF_PARITY_COULD_NOT_VERIFY   4
 
-#endif	/* !_RF__RF_PARITYSCAN_H_ */
+#endif				/* !_RF__RF_PARITYSCAN_H_ */

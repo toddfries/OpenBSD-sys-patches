@@ -1,5 +1,4 @@
-/*	$OpenBSD: hp.c,v 1.2 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: hp.c,v 1.5 2000/07/19 00:58:25 matt Exp $ */
+/*	$NetBSD: hp.c,v 1.8 2005/12/11 12:19:30 christos Exp $ */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -31,13 +30,13 @@
  */
 
  /* All bugs are subject to removal without further notice */
-		
 
+#include <sys/param.h>
+#include <sys/disklabel.h>
 
-#include "sys/param.h"
-#include "sys/disklabel.h"
+#include <lib/libsa/stand.h>
 
-#include "lib/libsa/stand.h"
+#include <lib/libkern/libkern.h>
 
 #include "../include/pte.h"
 #include "../include/rpb.h"

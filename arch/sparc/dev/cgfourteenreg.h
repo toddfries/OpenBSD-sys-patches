@@ -1,5 +1,4 @@
-/*	$OpenBSD: cgfourteenreg.h,v 1.4 2005/03/15 18:50:43 miod Exp $	*/
-/*	$NetBSD: cgfourteenreg.h,v 1.1 1996/09/30 22:41:02 abrown Exp $ */
+/*	$NetBSD: cgfourteenreg.h,v 1.6 2007/10/17 19:57:12 garbled Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -38,12 +37,6 @@
  * Register/dac/clut/cursor definitions for cgfourteen frame buffer
  */
 
-/* Control registers */
-#define	CG14_REG_CONTROL	0
-#define	CG14_REG_VRAM		1
-
-#define	CG14_NREG		2
-
 /* Locations of control registers in cg14 register set */
 #define	CG14_OFFSET_CURS	0x1000
 #define CG14_OFFSET_DAC		0x2000
@@ -51,15 +44,32 @@
 #define CG14_OFFSET_CLUT1	0x4000
 #define CG14_OFFSET_CLUT2	0x5000
 #define CG14_OFFSET_CLUT3	0x6000
-#define CG14_OFFSET_AUTOINCR	0xf000
+#define CG14_OFFSET_CLUTINCR	0xf000
+
+/* cursor registers */
+#define CG14_CURSOR_PLANE0	0x1000
+#define CG14_CURSOR_PLANE1	0x1080
+#define CG14_CURSOR_CONTROL	0x1100
+	#define CG14_CRSR_ENABLE	0x04
+	#define CG14_CRSR_DBLBUFFER	0x02
+#define CG14_CURSOR_X		0x1104
+#define CG14_CURSOR_Y		0x1106
+#define CG14_CURSOR_COLOR1	0x1108
+#define CG14_CURSOR_COLOR2	0x110c
+#define CG14_CURSOR_COLOR3	0x1110
+
+/* ranges in framebuffer space */
+#define CG14_FB_VRAM		0x00000000
+#define CG14_FB_CBGR		0x01000000
+#define CG14_FB_PX32		0x03000000
+#define CG14_FB_PG32		0x03800000
 
 /* Main control register set */
 struct cg14ctl {
-	volatile u_int8_t	ctl_mctl;	/* main control register */
+	volatile uint8_t	ctl_mctl;	/* main control register */
+#define CG14_MCTL	0x00000000
 #define CG14_MCTL_ENABLEINTR	0x80		/* interrupts */
-#define CG14_MCTL_R0_ENABLEHW	0x40		/* hardware enable */
-#define	CG14_MCTL_R1_ENABLEHW	0x01
-#define	CG14_MCTL_R1_ENABLEVID	0x40		/* display enable */
+#define CG14_MCTL_ENABLEVID	0x40		/* enable video */
 #define CG14_MCTL_PIXMODE_MASK	0x30
 #define		CG14_MCTL_PIXMODE_8	0x00	/* data is 16 8-bit pixels */
 #define		CG14_MCTL_PIXMODE_16	0x20	/* data is 8 16-bit pixels */
@@ -67,68 +77,65 @@ struct cg14ctl {
 #define CG14_MCTL_PIXMODE_SHIFT	4
 #define	CG14_MCTL_TMR		0x0c
 #define CG14_MCTL_ENABLETMR	0x02
-#define CG14_MCTL_R0_RESET	0x01
-	volatile u_int8_t	ctl_ppr;	/* packed pixel register */
-	volatile u_int8_t	ctl_tmsr0; 	/* test status reg. 0 */
-	volatile u_int8_t	ctl_tmsr1;	/* test status reg. 1 */
-	volatile u_int8_t	ctl_msr;	/* master status register */
-#define	CG14_MSR_PENDING	0x20		/* interrupt pending */
-#define	CG14_MSR_VRETRACE	0x10		/* vertical retrace interrupt */
-#define	CG14_MSR_FAULT		0x01		/* fault interrupt */
-	volatile u_int8_t	ctl_fsr;	/* fault status register */
-	volatile u_int8_t	ctl_rsr;	/* revision status register */
+#define CG14_MCTL_rev0RESET	0x01
+#define CG14_MCTL_POWERCTL	0x01
+
+	volatile uint8_t	ctl_ppr;	/* packed pixel register */
+	volatile uint8_t	ctl_tmsr0; 	/* test status reg. 0 */
+	volatile uint8_t	ctl_tmsr1;	/* test status reg. 1 */
+	volatile uint8_t	ctl_msr;	/* master status register */
+	volatile uint8_t	ctl_fsr;	/* fault status register */
+	volatile uint8_t	ctl_rsr;	/* revision status register */
 #define CG14_RSR_REVMASK	0xf0 		/*  mask to get revision */
-#define CG14_RSR_REVSHIFT	4
 #define CG14_RSR_IMPLMASK	0x0f		/*  mask to get impl. code */
-	volatile u_int8_t	ctl_ccr;	/* clock control register */
+	volatile uint8_t	ctl_ccr;	/* clock control register */
 	/* XXX etc. */
 };
 
 /* Hardware cursor map */
 #define CG14_CURS_SIZE		32
-#define	CG14_CURS_MASK		0x1f
 struct cg14curs {
-	volatile u_int32_t	curs_plane0[CG14_CURS_SIZE];	/* plane 0 */
-	volatile u_int32_t	curs_plane1[CG14_CURS_SIZE];
-	volatile u_int8_t	curs_ctl;	/* control register */
+	volatile uint32_t	curs_plane0[CG14_CURS_SIZE];	/* plane 0 */
+	volatile uint32_t	curs_plane1[CG14_CURS_SIZE];
+	volatile uint8_t	curs_ctl;	/* control register */
 #define CG14_CURS_ENABLE	0x4
 #define CG14_CURS_DOUBLEBUFFER	0x2 		/* use X-channel for curs */
-	volatile u_int8_t	pad0[3];
-	volatile u_int16_t	curs_x;		/* x position */
-	volatile u_int16_t	curs_y;		/* y position */
-	volatile u_int32_t	curs_color1;	/* color register 1 */
-	volatile u_int32_t	curs_color2;	/* color register 2 */
-	volatile u_int32_t	pad[444];	/* pad to 2KB boundary */
-	volatile u_int32_t	curs_plane0incr[CG14_CURS_SIZE]; /* autoincr */
-	volatile u_int32_t	curs_plane1incr[CG14_CURS_SIZE]; /* autoincr */
+	volatile uint8_t	pad0[3];
+	volatile uint16_t	curs_x;		/* x position */
+	volatile uint16_t	curs_y;		/* y position */
+	volatile uint32_t	curs_color1;	/* color register 1 */
+	volatile uint32_t	curs_color2;	/* color register 2 */
+	volatile uint32_t	pad[444];	/* pad to 2KB boundary */
+	volatile uint32_t	curs_plane0incr[CG14_CURS_SIZE]; /* autoincr */
+	volatile uint32_t	curs_plane1incr[CG14_CURS_SIZE]; /* autoincr */
 };
 
 /* DAC */
 struct cg14dac {
-	volatile u_int8_t	dac_addr;	/* address register */
-	volatile u_int8_t	pad0[255];
-	volatile u_int8_t	dac_gammalut;	/* gamma LUT */
-	volatile u_int8_t	pad1[255];
-	volatile u_int8_t	dac_regsel;	/* register select */
-	volatile u_int8_t	pad2[255];
-	volatile u_int8_t	dac_mode;	/* mode register */
+	volatile uint8_t	dac_addr;	/* address register */
+	volatile uint8_t	pad0[255];
+	volatile uint8_t	dac_gammalut;	/* gamma LUT */
+	volatile uint8_t	pad1[255];
+	volatile uint8_t	dac_regsel;	/* register select */
+	volatile uint8_t	pad2[255];
+	volatile uint8_t	dac_mode;	/* mode register */
 };
 
 #define CG14_CLUT_SIZE	256
 
 /* XLUT registers */
 struct cg14xlut {
-	volatile u_int8_t	xlut_lut[CG14_CLUT_SIZE];	/* the LUT */
-	volatile u_int8_t	xlut_lutd[CG14_CLUT_SIZE];	/* ??? */
-	volatile u_int8_t	pad0[0x600];
-	volatile u_int8_t	xlut_lutinc[CG14_CLUT_SIZE];	/* autoincrLUT*/
-	volatile u_int8_t	xlut_lutincd[CG14_CLUT_SIZE];
+	volatile uint8_t	xlut_lut[CG14_CLUT_SIZE];	/* the LUT */
+	volatile uint8_t	xlut_lutd[CG14_CLUT_SIZE];	/* ??? */
+	volatile uint8_t	pad0[0x600];
+	volatile uint8_t	xlut_lutinc[CG14_CLUT_SIZE];	/* autoincrLUT*/
+	volatile uint8_t	xlut_lutincd[CG14_CLUT_SIZE];
 };
 
 /* Color Look-Up Table (CLUT) */
 struct cg14clut {
-	volatile u_int32_t	clut_lut[CG14_CLUT_SIZE];	/* the LUT */
-	volatile u_int32_t	clut_lutd[CG14_CLUT_SIZE];	/* ??? */
-	volatile u_int32_t	clut_lutinc[CG14_CLUT_SIZE];	/* autoincr */
-	volatile u_int32_t	clut_lutincd[CG14_CLUT_SIZE];
+	volatile uint32_t	clut_lut[CG14_CLUT_SIZE];	/* the LUT */
+	volatile uint32_t	clut_lutd[CG14_CLUT_SIZE];	/* ??? */
+	volatile uint32_t	clut_lutinc[CG14_CLUT_SIZE];	/* autoincr */
+	volatile uint32_t	clut_lutincd[CG14_CLUT_SIZE];
 };

@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_dma.c,v 1.19 2006/03/01 12:38:11 yamt Exp $	*/
+/*	$NetBSD: bus_dma.c,v 1.22 2008/06/04 12:41:41 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.19 2006/03/01 12:38:11 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.22 2008/06/04 12:41:41 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -358,7 +351,7 @@ _bus_dmamap_load_uio(t, map, uio, flags)
 	int seg, i, error, first;
 	bus_size_t minlen, resid;
 	struct iovec *iov;
-	caddr_t addr;
+	void *addr;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings."
@@ -379,7 +372,7 @@ _bus_dmamap_load_uio(t, map, uio, flags)
 		 * until we have exhausted the residual count.
 		 */
 		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
-		addr = (caddr_t)iov[i].iov_base;
+		addr = (void *)iov[i].iov_base;
 
 		error = _bus_dmamap_load_buffer(t, map, addr, minlen,
 		    uio->uio_vmspace, flags, &lastaddr, &seg, first);
@@ -596,9 +589,9 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	lastaddr = segs[curseg]._ds_paddr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_addr = segs[curseg]._ds_paddr + t->dma_offset;
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = m->pageq.tqe_next;
+	m = m->pageq.queue.tqe_next;
 
-	for (; m != NULL; m = m->pageq.tqe_next) {
+	for (; m != NULL; m = m->pageq.queue.tqe_next) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < avail_start || curaddr >= high) {
@@ -647,7 +640,7 @@ _bus_dmamem_free(t, segs, nsegs)
 		    addr < (segs[curseg]._ds_paddr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE) {
 			m = PHYS_TO_VM_PAGE(addr);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq);
+			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
 		}
 	}
 
@@ -664,7 +657,7 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	bus_dma_segment_t *segs;
 	int nsegs;
 	size_t size;
-	caddr_t *kvap;
+	void **kvap;
 	int flags;
 {
 	vaddr_t va;
@@ -679,9 +672,9 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	 */
 	if (nsegs == 1) {
 		if (flags & BUS_DMA_COHERENT)
-			*kvap = (caddr_t)MIPS_PHYS_TO_KSEG1(segs[0]._ds_paddr);
+			*kvap = (void *)MIPS_PHYS_TO_KSEG1(segs[0]._ds_paddr);
 		else
-			*kvap = (caddr_t)MIPS_PHYS_TO_KSEG0(segs[0]._ds_paddr);
+			*kvap = (void *)MIPS_PHYS_TO_KSEG0(segs[0]._ds_paddr);
 		return (0);
 	}
 
@@ -692,7 +685,7 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	if (va == 0)
 		return (ENOMEM);
 
-	*kvap = (caddr_t)va;
+	*kvap = (void *)va;
 
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		segs[curseg]._ds_vaddr = va;
@@ -720,7 +713,7 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 void
 _bus_dmamem_unmap(t, kva, size)
 	bus_dma_tag_t t;
-	caddr_t kva;
+	void *kva;
 	size_t size;
 {
 
@@ -733,8 +726,8 @@ _bus_dmamem_unmap(t, kva, size)
 	 * Nothing to do if we mapped it with KSEG0 or KSEG1 (i.e.
 	 * not in KSEG2).
 	 */
-	if (kva >= (caddr_t)MIPS_KSEG0_START &&
-	    kva < (caddr_t)MIPS_KSEG2_START)
+	if (kva >= (void *)MIPS_KSEG0_START &&
+	    kva < (void *)MIPS_KSEG2_START)
 		return;
 
 	pmap_remove(pmap_kernel(), (vaddr_t)kva, (vaddr_t)kva + size);

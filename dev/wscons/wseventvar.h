@@ -1,5 +1,4 @@
-/* $OpenBSD: wseventvar.h,v 1.4 2003/06/02 23:28:04 millert Exp $ */
-/* $NetBSD: wseventvar.h,v 1.1 1998/03/22 14:24:03 drochner Exp $ */
+/* $NetBSD: wseventvar.h,v 1.12 2008/04/24 15:35:28 ad Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -77,38 +76,21 @@
  * i.e., are expected to run off serial ports or similar devices.
  */
 
-/* WSEVENT_QSIZE should be a power of two so that `%' is fast */
-#define	WSEVENT_QSIZE	256	/* may need tuning; this uses 2k */
-
 struct wseventvar {
 	u_int	get;		/* get (read) index (modified synchronously) */
 	volatile u_int put;	/* put (write) index (modified by interrupt) */
 	struct selinfo sel;	/* process selecting */
 	struct proc *io;	/* process that opened queue (can get SIGIO) */
+	void	*sih;		/* soft interrupt handle for signals */
 	int	wanted;		/* wake up on input ready */
 	int	async;		/* send SIGIO on input ready */
 	struct wscons_event *q;	/* circular buffer (queue) of events */
 };
 
-#define	splwsevent()	spltty()
-
-#define	WSEVENT_WAKEUP(ev) { \
-	selwakeup(&(ev)->sel); \
-	if ((ev)->wanted) { \
-		(ev)->wanted = 0; \
-		wakeup((caddr_t)(ev)); \
-	} \
-	if ((ev)->async) \
-		pgsignal((ev)->io->p_pgrp, SIGIO, 0); \
-}
-
-void	wsevent_init(struct wseventvar *);
+void	wsevent_init(struct wseventvar *, struct proc *);
 void	wsevent_fini(struct wseventvar *);
 int	wsevent_read(struct wseventvar *, struct uio *, int);
-int	wsevent_poll(struct wseventvar *, int, struct proc *);
-
-/*
- * PWSEVENT is set just above PSOCK, which is just above TTIPRI, on the
- * theory that mouse and keyboard `user' input should be quick.
- */
-#define	PWSEVENT	23
+int	wsevent_poll(struct wseventvar *, int, struct lwp *);
+int	wsevent_kqfilter(struct wseventvar *, struct knote *);
+void	wsevent_wakeup(struct wseventvar *);
+int	wsevent_inject(struct wseventvar *, struct wscons_event *, size_t);

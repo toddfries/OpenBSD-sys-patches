@@ -1,5 +1,4 @@
-/*	$OpenBSD: udp.h,v 1.5 2003/06/02 23:28:15 millert Exp $	*/
-/*	$NetBSD: udp.h,v 1.6 1995/04/13 06:37:10 cgd Exp $	*/
+/*	$NetBSD: udp.h,v 1.13 2007/12/25 18:33:47 perry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -44,6 +43,19 @@ struct udphdr {
 	u_int16_t uh_dport;		/* destination port */
 	u_int16_t uh_ulen;		/* udp length */
 	u_int16_t uh_sum;		/* udp checksum */
-};
+} __packed;
 
-#endif /* _NETINET_UDP_H_ */
+/* socket options for UDP */
+#define UDP_ENCAP	100
+
+/* Encapsulation types */
+#define UDP_ENCAP_ESPINUDP_NON_IKE 	1 /* draft-ietf-ipsec-nat-t-ike-00/01 */
+#define UDP_ENCAP_ESPINUDP		2 /* draft-ietf-ipsec-udp-encaps-06 */
+
+/* Default encapsulation port */
+#define UDP_ENCAP_ESPINUDP_PORT		500
+
+/* Maximum UDP fragment size for ESP over UDP */
+#define UDP_ENCAP_ESPINUDP_MAXFRAGLEN	552
+
+#endif /* !_NETINET_UDP_H_ */

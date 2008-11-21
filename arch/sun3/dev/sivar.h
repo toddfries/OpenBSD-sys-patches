@@ -1,4 +1,4 @@
-/*	$NetBSD: sivar.h,v 1.8 2005/12/11 12:19:20 christos Exp $	*/
+/*	$NetBSD: sivar.h,v 1.11 2008/04/28 20:23:38 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -62,9 +55,8 @@ struct si_dma_handle {
 	int 		dh_flags;
 #define	SIDH_BUSY	1		/* This DH is in use */
 #define	SIDH_OUT	2		/* DMA does data out (write) */
-	u_char *	dh_addr;	/* KVA of start of buffer */
-	int 		dh_maplen;	/* Length of KVA mapping. */
-	void *		dh_dvma;	/* VA of buffer in DVMA space */
+	vaddr_t		dh_dmaaddr;	/* VA of buffer in DVMA space */
+	vsize_t		dh_dmalen;	/* Length of KVA mapping. */
 };
 
 /*
@@ -73,7 +65,11 @@ struct si_dma_handle {
  */
 struct si_softc {
 	struct ncr5380_softc	ncr_sc;
+	bus_space_tag_t		sc_bst;
+	bus_space_handle_t	sc_bsh;
 	volatile struct si_regs	*sc_regs;
+	bus_dma_tag_t		sc_dmat;
+	bus_dmamap_t		sc_dmap;
 	int		sc_adapter_type;
 	int		sc_adapter_iv_am;	/* int. vec + address modifier */
 	int 	sc_options;			/* options for this instance */

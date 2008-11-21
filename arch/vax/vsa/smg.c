@@ -1,29 +1,4 @@
-/*	$OpenBSD: smg.c,v 1.21 2007/12/28 20:44:39 miod Exp $	*/
-/*	$NetBSD: smg.c,v 1.21 2000/03/23 06:46:44 thorpej Exp $ */
-/*
- * Copyright (c) 2006, Miodrag Vallat
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: smg.c,v 1.48 2008/03/15 00:21:30 matt Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -54,49 +29,15 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * Copyright (c) 1996 Jason R. Thorpe.  All rights reserved.
- * Copyright (c) 1991 University of Utah.
- * Copyright (c) 1990, 1993
- *	The Regents of the University of California.  All rights reserved.
- *
- * This code is derived from software contributed to Berkeley by
- * the Systems Programming Group of the University of Utah Computer
- * Science Department and Mark Davies of the Department of Computer
- * Science, Victoria University of Wellington, New Zealand.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * from: Utah $Hdr: grf_hy.c 1.2 93/08/13$
- *
- *	@(#)grf_hy.c	8.4 (Berkeley) 1/12/94
- */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: smg.c,v 1.48 2008/03/15 00:21:30 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
+#include <sys/callout.h>
+#include <sys/time.h>
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
@@ -105,62 +46,102 @@
 #include <machine/sid.h>
 #include <machine/cpu.h>
 #include <machine/ka420.h>
-#include <machine/scb.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
-#include <dev/ic/dc503reg.h>
+#include <dev/dec/dzreg.h>
+#include <dev/dec/dzvar.h>
+#include <dev/dec/dzkbdvar.h>
 
-#include <vax/qbus/dzreg.h>
-#include <vax/qbus/dzvar.h>
-#include <vax/dec/dzkbdvar.h>
-
-#include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
-#include <dev/rasops/rasops.h>
-#include <dev/rasops/rasops_masks.h>
+#include <dev/wscons/wsconsio.h>
+#include <dev/wscons/wscons_callbacks.h>
+#include <dev/wsfont/wsfont.h>
+
+#include "dzkbd.h"
+#include "opt_wsfont.h"
 
 /* Screen hardware defs */
+#define SM_COLS		128	/* char width of screen */
+#define SM_ROWS		57	/* rows of char on screen */
+#define SM_CHEIGHT	15	/* lines a char consists of */
+#define SM_NEXTROW	(SM_COLS * SM_CHEIGHT)
+#define	SM_YWIDTH	864
 #define SM_XWIDTH	1024
-#define SM_YWIDTH	864
+
+/* Cursor register definitions */
+#define	CUR_CMD		0
+#define	CUR_XPOS	4
+#define CUR_YPOS	8
+#define CUR_XMIN_1	12
+#define CUR_XMAX_1	16
+#define CUR_YMIN_1	20
+#define CUR_YMAX_1	24
+#define CUR_XMIN_2	28
+#define CUR_XMAX_2	32
+#define CUR_YMIN_2	36
+#define CUR_YMAX_2	40
+#define CUR_LOAD	44
+
+#define CUR_CMD_TEST	0x8000
+#define CUR_CMD_HSHI	0x4000
+#define CUR_CMD_VBHI	0x2000
+#define CUR_CMD_LODSA	0x1000
+#define CUR_CMD_FORG2	0x0800
+#define CUR_CMD_ENRG2	0x0400
+#define CUR_CMD_FORG1	0x0200
+#define CUR_CMD_ENRG1	0x0100
+#define CUR_CMD_XHWID	0x0080
+#define CUR_CMD_XHCL1	0x0040
+#define CUR_CMD_XHCLP	0x0020
+#define CUR_CMD_XHAIR	0x0010
+#define CUR_CMD_FOPB	0x0008
+#define CUR_CMD_ENPB	0x0004
+#define CUR_CMD_FOPA	0x0002
+#define CUR_CMD_ENPA	0x0001
 
 #define CUR_XBIAS	216	/* Add to cursor position */
-#define CUR_YBIAS	33
+#define	CUR_YBIAS	33
 
-int	smg_match(struct device *, void *, void *);
-void	smg_attach(struct device *, struct device *, void *);
+#define	WRITECUR(addr, val)	*(volatile uint16_t *)(curaddr + (addr)) = (val)
+static	char *curaddr;
+static	uint16_t curcmd, curx, cury, hotX, hotY;
+static	int bgmask, fgmask; 
 
-struct	smg_screen {
-	struct rasops_info ss_ri;
-	caddr_t		ss_addr;		/* frame buffer address */
-	struct dc503reg	*ss_cursor;		/* cursor registers */
-	u_int16_t	ss_curcmd;
-	struct wsdisplay_curpos ss_curpos, ss_curhot;
-	u_int16_t	ss_curimg[PCC_CURSOR_SIZE];
-	u_int16_t	ss_curmask[PCC_CURSOR_SIZE];
+static	int smg_match(device_t, cfdata_t, void *);
+static	void smg_attach(device_t, device_t, void *);
+
+CFATTACH_DECL_NEW(smg, 0,
+    smg_match, smg_attach, NULL, NULL);
+
+static void	smg_cursor(void *, int, int, int);
+static int	smg_mapchar(void *, int, unsigned int *);
+static void	smg_putchar(void *, int, int, u_int, long);
+static void	smg_copycols(void *, int, int, int,int);
+static void	smg_erasecols(void *, int, int, int, long);
+static void	smg_copyrows(void *, int, int, int);
+static void	smg_eraserows(void *, int, int, long);
+static int	smg_allocattr(void *, int, int, int, long *);
+
+const struct wsdisplay_emulops smg_emulops = {
+	.cursor = smg_cursor,
+	.mapchar = smg_mapchar,
+	.putchar = smg_putchar,
+	.copycols = smg_copycols,
+	.erasecols = smg_erasecols,
+	.copyrows = smg_copyrows,
+	.eraserows = smg_eraserows,
+	.allocattr = smg_allocattr
 };
 
-/* for console */
-struct smg_screen smg_consscr;
-
-struct	smg_softc {
-	struct device sc_dev;
-	struct smg_screen *sc_scr;
-	int	sc_nscreens;
-};
-
-struct cfattach smg_ca = {
-	sizeof(struct smg_softc), smg_match, smg_attach,
-};
-
-struct	cfdriver smg_cd = {
-	NULL, "smg", DV_DULL
-};
-
-struct wsscreen_descr smg_stdscreen = {
-	"std",
+const struct wsscreen_descr smg_stdscreen = {
+	.name = "128x57",
+	.ncols = SM_COLS,
+	.nrows = SM_ROWS,
+	.textops = &smg_emulops,
+	.fontwidth = 8,
+	.fontheight = SM_CHEIGHT,
+	.capabilities = WSSCREEN_UNDERLINE|WSSCREEN_REVERSE,
 };
 
 const struct wsscreen_descr *_smg_scrlist[] = {
@@ -168,216 +149,325 @@ const struct wsscreen_descr *_smg_scrlist[] = {
 };
 
 const struct wsscreen_list smg_screenlist = {
-	sizeof(_smg_scrlist) / sizeof(struct wsscreen_descr *),
-	_smg_scrlist,
+	.nscreens = __arraycount(_smg_scrlist),
+	.screens = _smg_scrlist,
 };
 
-int	smg_ioctl(void *, u_long, caddr_t, int, struct proc *);
-paddr_t	smg_mmap(void *, off_t, int);
-int	smg_alloc_screen(void *, const struct wsscreen_descr *,
-	    void **, int *, int *, long *);
-void	smg_free_screen(void *, void *);
-int	smg_show_screen(void *, void *, int,
-	    void (*) (void *, int, int), void *);
-void	smg_burner(void *, u_int, u_int);
+static	char *sm_addr;
+
+static  u_char *qf;
+
+#define QCHAR(c) (c < 32 ? 32 : (c > 127 ? c - 66 : c - 32))
+#define QFONT(c,line)	qf[QCHAR(c) * 15 + line]
+#define	SM_ADDR(row, col, line) \
+	sm_addr[col + (row * SM_CHEIGHT * SM_COLS) + line * SM_COLS]
+
+
+static int	smg_ioctl(void *, void *, u_long, void *, int, struct lwp *);
+static paddr_t	smg_mmap(void *, void *, off_t, int);
+static int	smg_alloc_screen(void *, const struct wsscreen_descr *,
+				      void **, int *, int *, long *);
+static void	smg_free_screen(void *, void *);
+static int	smg_show_screen(void *, void *, int,
+				     void (*) (void *, int, int), void *);
+static void	smg_crsr_blink(void *);
 
 const struct wsdisplay_accessops smg_accessops = {
-	smg_ioctl,
-	smg_mmap,
-	smg_alloc_screen,
-	smg_free_screen,
-	smg_show_screen,
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	smg_burner
+	.ioctl = smg_ioctl,
+	.mmap = smg_mmap,
+	.alloc_screen = smg_alloc_screen,
+	.free_screen = smg_free_screen,
+	.show_screen = smg_show_screen,
 };
 
-void	smg_blockmove(struct rasops_info *, u_int, u_int, u_int, u_int, u_int,
-	    int);
-void	smg_copycols(void *, int, int, int, int);
-void	smg_erasecols(void *, int, int, int, long);
+struct	smg_screen {
+	int	ss_curx;
+	int	ss_cury;
+	u_char	ss_image[SM_ROWS][SM_COLS];	/* Image of current screen */
+	u_char	ss_attr[SM_ROWS][SM_COLS];	/* Reversed etc... */
+};
 
-int	smg_getcursor(struct smg_screen *, struct wsdisplay_cursor *);
-int	smg_setup_screen(struct smg_screen *);
-int	smg_setcursor(struct smg_screen *, struct wsdisplay_cursor *);
-void	smg_updatecursor(struct smg_screen *, u_int);
+static	struct smg_screen smg_conscreen;
+static	struct smg_screen *curscr;
+
+static	callout_t smg_cursor_ch;
 
 int
-smg_match(struct device *parent, void *vcf, void *aux)
+smg_match(device_t parent, cfdata_t match, void *aux)
 {
-	struct cfdata *cf = vcf;
-	struct vsbus_attach_args *va = aux;
-	volatile short *curcmd;
-	volatile short *cfgtst;
-	short tmp, tmp2;
-	extern struct consdev wsdisplay_cons;
+	struct vsbus_attach_args * const va = aux;
+	volatile uint16_t *ccmd;
+	volatile uint16_t *cfgtst;
+	uint16_t tmp, tmp2;
 
-	switch (vax_boardtype) {
-	default:
-		return (0);
+	if (vax_boardtype == VAX_BTYP_49 || vax_boardtype == VAX_BTYP_53)
+		return 0;
 
-	case VAX_BTYP_410:
-	case VAX_BTYP_420:
-	case VAX_BTYP_43:
-		if (va->va_paddr != KA420_CUR_BASE)
-			return (0);
+	ccmd = (uint16_t *)va->va_addr;
+	cfgtst = (uint16_t *)vax_map_physmem(VS_CFGTST, 1);
+	/*
+	 * Try to find the cursor chip by testing the flip-flop.
+	 * If nonexistent, no glass tty.
+	 */
+	ccmd[0] = CUR_CMD_HSHI|CUR_CMD_FOPB;
+	DELAY(300000);
+	tmp = cfgtst[0];
+	ccmd[0] = CUR_CMD_TEST|CUR_CMD_HSHI;
+	DELAY(300000);
+	tmp2 = cfgtst[0];
+	vax_unmap_physmem((vaddr_t)cfgtst, 1);
 
-		/* not present on microvaxes */
-		if ((vax_confdata & KA420_CFG_MULTU) != 0)
-			return (0);
-
-		/*
-		 * If the color option board is present, do not attach
-		 * unless we are explicitely asked to via device flags.
-		 */
-		if ((vax_confdata & KA420_CFG_VIDOPT) != 0 &&
-		    (cf->cf_flags & 1) == 0)
-			return (0);
-		break;
-	}
-
-	/* when already running as console, always fake things */
-	if ((vax_confdata & (KA420_CFG_L3CON | KA420_CFG_VIDOPT)) == 0 &&
-	    cn_tab == &wsdisplay_cons) {
-		struct vsbus_softc *sc = (void *)parent;
-		extern int oldvsbus;
-
-		sc->sc_mask = 0x08;
-		scb_fake(0x44, oldvsbus ? 0x14 : 0x15);
-		return (20);
-	} else {
-		/*
-		 * Try to find the cursor chip by testing the flip-flop.
-		 * If nonexistent, no glass tty.
-		 */
-		curcmd = (short *)va->va_addr;
-		cfgtst = (short *)vax_map_physmem(VS_CFGTST, 1);
-		curcmd[0] = PCCCMD_HSHI | PCCCMD_FOPB;
-		DELAY(300000);
-		tmp = cfgtst[0];
-		curcmd[0] = PCCCMD_TEST | PCCCMD_HSHI;
-		DELAY(300000);
-		tmp2 = cfgtst[0];
-		vax_unmap_physmem((vaddr_t)cfgtst, 1);
-
-		if (tmp2 != tmp)
-			return (20); /* Using periodic interrupt */
-		else
-			return (0);
-	}
+	if (tmp2 != tmp)
+		return 20; /* Using periodic interrupt */
+	else
+		return 0;
 }
 
 void
-smg_attach(struct device *parent, struct device *self, void *aux)
+smg_attach(device_t parent, device_t self, void *aux)
 {
-	struct smg_softc *sc = (struct smg_softc *)self;
-	struct smg_screen *scr;
 	struct wsemuldisplaydev_attach_args aa;
-	int console;
-	extern struct consdev wsdisplay_cons;
+	struct wsdisplay_font *console_font;
+	int fcookie;
 
-	console = (vax_confdata & (KA420_CFG_L3CON | KA420_CFG_VIDOPT)) == 0 &&
-	    cn_tab == &wsdisplay_cons;
-	if (console) {
-		scr = &smg_consscr;
-		sc->sc_nscreens = 1;
-	} else {
-		scr = malloc(sizeof(*scr), M_DEVBUF, M_NOWAIT | M_ZERO);
-		if (scr == NULL) {
-			printf(": can not allocate memory\n");
-			return;
-		}
-
-		scr->ss_addr =
-		    (caddr_t)vax_map_physmem(SMADDR, SMSIZE / VAX_NBPG);
-		if (scr->ss_addr == NULL) {
-			printf(": can not map frame buffer\n");
-			free(scr, M_DEVBUF);
-			return;
-		}
-
-		scr->ss_cursor =
-		    (struct dc503reg *)vax_map_physmem(KA420_CUR_BASE, 1);
-		if (scr->ss_cursor == NULL) {
-			printf(": can not map cursor chip\n");
-			vax_unmap_physmem((vaddr_t)scr->ss_addr,
-			    SMSIZE / VAX_NBPG);
-			free(scr, M_DEVBUF);
-			return;
-		}
-
-		if (smg_setup_screen(scr) != 0) {
-			printf(": initialization failed\n");
-			vax_unmap_physmem((vaddr_t)scr->ss_cursor, 1);
-			vax_unmap_physmem((vaddr_t)scr->ss_addr,
-			    SMSIZE / VAX_NBPG);
-			free(scr, M_DEVBUF);
-			return;
-		}
+	aprint_normal("\n");
+	sm_addr = (void *)vax_map_physmem(SMADDR, (SMSIZE/VAX_NBPG));
+	curaddr = (void *)vax_map_physmem(KA420_CUR_BASE, 1);
+	if (sm_addr == 0) {
+		aprint_error_dev(self, "Couldn't alloc graphics memory.\n");
+		return;
 	}
-	sc->sc_scr = scr;
+	if (curscr == NULL)
+		callout_init(&smg_cursor_ch, 0);
+	curscr = &smg_conscreen;
+	aa.console = (vax_confdata & (KA420_CFG_L3CON|KA420_CFG_MULTU)) == 0;
 
-	printf("\n%s: %dx%d on-board monochrome framebuffer\n",
-	    self->dv_xname, SM_XWIDTH, SM_YWIDTH);
-
-	aa.console = console;
 	aa.scrdata = &smg_screenlist;
 	aa.accessops = &smg_accessops;
-	aa.accesscookie = sc;
-	aa.defaultscreens = 0;
+	callout_reset(&smg_cursor_ch, hz / 2, smg_crsr_blink, NULL);
+	curcmd = CUR_CMD_HSHI;
+	WRITECUR(CUR_CMD, curcmd);
+	if ((fcookie = wsfont_find(NULL, 8, 15, 0,
+		WSDISPLAY_FONTORDER_R2L, WSDISPLAY_FONTORDER_L2R)) < 0) {
+		aprint_error_dev(self, "could not find 8x15 font\n");
+		return;
+	}
+	if (wsfont_lock(fcookie, &console_font) != 0) {
+		aprint_error_dev(self, "could not lock 8x15 font\n");
+		return;
+	}
+	qf = console_font->data;
 
 	config_found(self, &aa, wsemuldisplaydevprint);
 }
 
-/*
- * Initialize anything necessary for an emulating wsdisplay to work (i.e.
- * pick a font, initialize a rasops structure, setup the accessops callbacks.)
- */
-int
-smg_setup_screen(struct smg_screen *ss)
+static	u_char *cursor;
+static	int cur_on;
+
+static void
+smg_crsr_blink(void *arg)
 {
-	struct rasops_info *ri = &ss->ss_ri;
+	if (cur_on)
+		*cursor ^= 255;
+	callout_reset(&smg_cursor_ch, hz / 2, smg_crsr_blink, NULL);
+}
 
-	bzero(ri, sizeof(*ri));
-	ri->ri_depth = 1;
-	ri->ri_width = SM_XWIDTH;
-	ri->ri_height = SM_YWIDTH;
-	ri->ri_stride = SM_XWIDTH >> 3;
-	ri->ri_flg = RI_CLEAR | RI_CENTER;
-	ri->ri_bits = (void *)ss->ss_addr;
-	ri->ri_hw = ss;
+void
+smg_cursor(void *id, int on, int row, int col)
+{
+	struct smg_screen * const ss = id;
 
-	/*
-	 * Ask for an unholy big display, rasops will trim this to more
-	 * reasonable values.
-	 */
-	if (rasops_init(ri, 160, 160) != 0)
-		return (-1);
-
-	ri->ri_ops.copycols = smg_copycols;
-	ri->ri_ops.erasecols = smg_erasecols;
-
-	smg_stdscreen.ncols = ri->ri_cols;
-	smg_stdscreen.nrows = ri->ri_rows;
-	smg_stdscreen.textops = &ri->ri_ops;
-	smg_stdscreen.fontwidth = ri->ri_font->fontwidth;
-	smg_stdscreen.fontheight = ri->ri_font->fontheight;
-	smg_stdscreen.capabilities = ri->ri_caps;
-
-	ss->ss_curcmd = PCCCMD_HSHI;
-	ss->ss_cursor->cmdr = ss->ss_curcmd;
-
-	return (0);
+	if (ss == curscr) {
+		SM_ADDR(ss->ss_cury, ss->ss_curx, 14) =
+		    QFONT(ss->ss_image[ss->ss_cury][ss->ss_curx], 14);
+		cursor = &SM_ADDR(row, col, 14);
+		if ((cur_on = on))
+			*cursor ^= 255;
+	}
+	ss->ss_curx = col;
+	ss->ss_cury = row;
 }
 
 int
-smg_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
+smg_mapchar(void *id, int uni, unsigned int *index)
 {
-	struct smg_softc *sc = v;
-	struct smg_screen *ss = sc->sc_scr;
-	struct wsdisplay_fbinfo *wdf;
-	struct wsdisplay_curpos *pos;
+	if (uni < 256) {
+		*index = uni;
+		return (5);
+	}
+	*index = ' ';
+	return (0);
+}
+
+static void
+smg_putchar(void *id, int row, int col, u_int c, long attr)
+{
+	struct smg_screen * const ss = id;
+	int i;
+
+	c &= 0xff;
+
+	ss->ss_image[row][col] = c;
+	ss->ss_attr[row][col] = attr;
+	if (ss != curscr)
+		return;
+	for (i = 0; i < 15; i++) {
+		unsigned char ch = QFONT(c, i);
+
+		SM_ADDR(row, col, i) = (attr & WSATTR_REVERSE ? ~ch : ch);
+		
+	}
+	if (attr & WSATTR_UNDERLINE)
+		SM_ADDR(row, col, 14) ^= SM_ADDR(row, col, 14);
+}
+
+/*
+ * copies columns inside a row.
+ */
+static void
+smg_copycols(void *id, int row, int srccol, int dstcol, int ncols)
+{
+	struct smg_screen * const ss = id;
+	int i;
+
+	bcopy(&ss->ss_image[row][srccol], &ss->ss_image[row][dstcol], ncols);
+	bcopy(&ss->ss_attr[row][srccol], &ss->ss_attr[row][dstcol], ncols);
+	if (ss != curscr)
+		return;
+	for (i = 0; i < SM_CHEIGHT; i++)
+		bcopy(&SM_ADDR(row,srccol, i), &SM_ADDR(row, dstcol, i),ncols);
+}
+
+/*
+ * Erases a bunch of chars inside one row.
+ */
+static void
+smg_erasecols(void *id, int row, int startcol, int ncols, long fillattr)
+{
+	struct smg_screen * const ss = id;
+	int i;
+
+	bzero(&ss->ss_image[row][startcol], ncols);
+	bzero(&ss->ss_attr[row][startcol], ncols);
+	if (ss != curscr)
+		return;
+	for (i = 0; i < SM_CHEIGHT; i++)
+		bzero(&SM_ADDR(row, startcol, i), ncols);
+}
+
+static void
+smg_copyrows(void *id, int srcrow, int dstrow, int nrows)
+{
+	struct smg_screen * const ss = id;
+	int frows;
+
+	bcopy(&ss->ss_image[srcrow][0], &ss->ss_image[dstrow][0],
+	    nrows * SM_COLS);
+	bcopy(&ss->ss_attr[srcrow][0], &ss->ss_attr[dstrow][0],
+	    nrows * SM_COLS);
+	if (ss != curscr)
+		return;
+	if (nrows > 25) {
+		frows = nrows >> 1;
+		if (srcrow > dstrow) {
+			bcopy(&sm_addr[(srcrow * SM_NEXTROW)],
+			    &sm_addr[(dstrow * SM_NEXTROW)],
+			    frows * SM_NEXTROW);
+			bcopy(&sm_addr[((srcrow + frows) * SM_NEXTROW)],
+			    &sm_addr[((dstrow + frows) * SM_NEXTROW)],
+			    (nrows - frows) * SM_NEXTROW);
+		} else {
+			bcopy(&sm_addr[((srcrow + frows) * SM_NEXTROW)],
+			    &sm_addr[((dstrow + frows) * SM_NEXTROW)],
+			    (nrows - frows) * SM_NEXTROW);
+			bcopy(&sm_addr[(srcrow * SM_NEXTROW)],
+			    &sm_addr[(dstrow * SM_NEXTROW)],
+			    frows * SM_NEXTROW);
+		}
+	} else
+		bcopy(&sm_addr[(srcrow * SM_NEXTROW)],
+		    &sm_addr[(dstrow * SM_NEXTROW)], nrows * SM_NEXTROW);
+}
+
+static void
+smg_eraserows(void *id, int startrow, int nrows, long fillattr)
+{
+	struct smg_screen * const ss = id;
+	int frows;
+
+	bzero(&ss->ss_image[startrow][0], nrows * SM_COLS);
+	bzero(&ss->ss_attr[startrow][0], nrows * SM_COLS);
+	if (ss != curscr)
+		return;
+	if (nrows > 25) {
+		frows = nrows >> 1;
+		bzero(&sm_addr[(startrow * SM_NEXTROW)], frows * SM_NEXTROW);
+		bzero(&sm_addr[((startrow + frows) * SM_NEXTROW)],
+		    (nrows - frows) * SM_NEXTROW);
+	} else
+		bzero(&sm_addr[(startrow * SM_NEXTROW)], nrows * SM_NEXTROW);
+}
+
+static int
+smg_allocattr(void *id, int fg, int bg, int flags, long *attrp)
+{
+	*attrp = flags;
+	return 0;
+}
+
+static void
+setcursor(struct wsdisplay_cursor *v)
+{
+	uint16_t red, green, blue;
+	uint32_t curfg[16], curmask[16];
+	int i;
+
+	/* Enable cursor */
+	if (v->which & WSDISPLAY_CURSOR_DOCUR) {
+		if (v->enable)
+			curcmd |= CUR_CMD_ENPB|CUR_CMD_ENPA;
+		else
+			curcmd &= ~(CUR_CMD_ENPB|CUR_CMD_ENPA);
+		WRITECUR(CUR_CMD, curcmd);
+	}
+	if (v->which & WSDISPLAY_CURSOR_DOHOT) {
+		hotX = v->hot.x;
+		hotY = v->hot.y;
+	}
+	if (v->which & WSDISPLAY_CURSOR_DOCMAP) {
+		/* First background */
+		red = fusword(v->cmap.red);
+		green = fusword(v->cmap.green);
+		blue = fusword(v->cmap.blue);
+		bgmask = (((30L * red + 59L * green + 11L * blue) >> 8) >=
+		    (((1<<8)-1)*50)) ? ~0 : 0;
+		red = fusword(v->cmap.red+2);
+		green = fusword(v->cmap.green+2);
+		blue = fusword(v->cmap.blue+2);
+		fgmask = (((30L * red + 59L * green + 11L * blue) >> 8) >=
+		    (((1<<8)-1)*50)) ? ~0 : 0;
+	}
+	if (v->which & WSDISPLAY_CURSOR_DOSHAPE) {
+		WRITECUR(CUR_CMD, curcmd | CUR_CMD_LODSA);
+		copyin(v->image, curfg, sizeof(curfg));
+		copyin(v->mask, curmask, sizeof(curmask));
+		for (i = 0; i < sizeof(curfg)/sizeof(curfg[0]); i++) {
+			WRITECUR(CUR_LOAD, ((uint16_t)curfg[i] & fgmask) |
+			    (((uint16_t)curmask[i] & (uint16_t)~curfg[i])
+			    & bgmask));
+		}
+		for (i = 0; i < sizeof(curmask)/sizeof(curmask[0]); i++) {
+			WRITECUR(CUR_LOAD, (uint16_t)curmask[i]);
+		}
+		WRITECUR(CUR_CMD, curcmd);
+	}
+}
+
+int
+smg_ioctl(void *v, void *vs, u_long cmd, void *data, int flag, struct lwp *l)
+{
+	struct wsdisplay_fbinfo *fb = (void *)data;
+	static uint16_t curc;
 
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
@@ -385,56 +475,60 @@ smg_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case WSDISPLAYIO_GINFO:
-		wdf = (struct wsdisplay_fbinfo *)data;
-		wdf->height = ss->ss_ri.ri_height;
-		wdf->width = ss->ss_ri.ri_width;
-		wdf->depth = ss->ss_ri.ri_depth;
-		wdf->cmsize = 0;
+		fb->height = SM_YWIDTH;
+		fb->width = SM_XWIDTH;
+		fb->depth = 1;
+		fb->cmsize = 2;
 		break;
 
-	case WSDISPLAYIO_LINEBYTES:
-		*(u_int *)data = ss->ss_ri.ri_stride;
-		break;
-
-	case WSDISPLAYIO_GETCMAP:
-	case WSDISPLAYIO_PUTCMAP:
-	case WSDISPLAYIO_GVIDEO:
 	case WSDISPLAYIO_SVIDEO:
+		if (*(u_int *)data == WSDISPLAYIO_VIDEO_ON) {
+			curcmd = curc;
+		} else {
+			curc = curcmd;
+			curcmd &= ~(CUR_CMD_FOPA|CUR_CMD_ENPA);
+			curcmd |= CUR_CMD_FOPB;
+		}
+		WRITECUR(CUR_CMD, curcmd);
+		break;
+
+	case WSDISPLAYIO_GVIDEO:
+		*(u_int *)data = (curcmd & CUR_CMD_FOPB ?
+		    WSDISPLAYIO_VIDEO_OFF : WSDISPLAYIO_VIDEO_ON);
+		break;
+
+	case WSDISPLAYIO_SCURSOR:
+		setcursor((struct wsdisplay_cursor *)data);
+		break;
+
+	case WSDISPLAYIO_SCURPOS:
+		curx = ((struct wsdisplay_curpos *)data)->x;
+		cury = ((struct wsdisplay_curpos *)data)->y;
+		WRITECUR(CUR_XPOS, curx + CUR_XBIAS);
+		WRITECUR(CUR_YPOS, cury + CUR_YBIAS);
 		break;
 
 	case WSDISPLAYIO_GCURPOS:
-		pos = (struct wsdisplay_curpos *)data;
-		pos->x = ss->ss_curpos.x;
-		pos->y = ss->ss_curpos.y;
+		((struct wsdisplay_curpos *)data)->x = curx;
+		((struct wsdisplay_curpos *)data)->y = cury;
 		break;
-	case WSDISPLAYIO_SCURPOS:
-		pos = (struct wsdisplay_curpos *)data;
-		ss->ss_curpos.x = pos->x;
-		ss->ss_curpos.y = pos->y;
-		smg_updatecursor(ss, WSDISPLAY_CURSOR_DOPOS);
-		break;
+
 	case WSDISPLAYIO_GCURMAX:
-		pos = (struct wsdisplay_curpos *)data;
-		pos->x = pos->y = PCC_CURSOR_SIZE;
-	case WSDISPLAYIO_GCURSOR:
-		return (smg_getcursor(ss, (struct wsdisplay_cursor *)data));
-	case WSDISPLAYIO_SCURSOR:
-		return (smg_setcursor(ss, (struct wsdisplay_cursor *)data));
+		((struct wsdisplay_curpos *)data)->x = 16;
+		((struct wsdisplay_curpos *)data)->y = 16;
 		break;
 
 	default:
-		return (-1);
+		return EPASSTHROUGH;
 	}
-
-	return (0);
+	return 0;
 }
 
-paddr_t
-smg_mmap(void *v, off_t offset, int prot)
+static paddr_t
+smg_mmap(void *v, void *vs, off_t offset, int prot)
 {
 	if (offset >= SMSIZE || offset < 0)
-		return (-1);
-
+		return -1;
 	return (SMADDR + offset) >> PGSHIFT;
 }
 
@@ -442,428 +536,110 @@ int
 smg_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
     int *curxp, int *curyp, long *defattrp)
 {
-	struct smg_softc *sc = v;
-	struct smg_screen *ss = sc->sc_scr;
-	struct rasops_info *ri = &ss->ss_ri;
-
-	if (sc->sc_nscreens > 0)
-		return (ENOMEM);
-
-	*cookiep = ri;
-	*curxp = *curyp = 0;
-	ri->ri_ops.alloc_attr(ri, 0, 0, 0, defattrp);
-	sc->sc_nscreens++;
-
-	return (0);
+	*cookiep = malloc(sizeof(struct smg_screen), M_DEVBUF, M_WAITOK);
+	bzero(*cookiep, sizeof(struct smg_screen));
+	*curxp = *curyp = *defattrp = 0;
+	return 0;
 }
 
 void
 smg_free_screen(void *v, void *cookie)
 {
-	struct smg_softc *sc = v;
-
-	sc->sc_nscreens--;
 }
 
 int
 smg_show_screen(void *v, void *cookie, int waitok,
     void (*cb)(void *, int, int), void *cbarg)
 {
-	return (0);
-}
+	struct smg_screen *ss = cookie;
+	int row, col, line;
 
-void
-smg_burner(void *v, u_int on, u_int flags)
-{
-	struct smg_softc *sc = v;
-	struct smg_screen *ss = sc->sc_scr;
+	if (ss == curscr)
+		return (0);
 
-	ss->ss_cursor->cmdr = on ? ss->ss_curcmd :
-	    (ss->ss_curcmd & ~(PCCCMD_FOPA | PCCCMD_ENPA)) | PCCCMD_FOPB;
-}
+	for (row = 0; row < SM_ROWS; row++)
+		for (line = 0; line < SM_CHEIGHT; line++) {
+			for (col = 0; col < SM_COLS; col++) {
+				u_char s, c = ss->ss_image[row][col];
 
-int
-smg_getcursor(struct smg_screen *ss, struct wsdisplay_cursor *wdc)
-{
-	int error;
-
-	if (wdc->which & WSDISPLAY_CURSOR_DOCUR)
-		wdc->enable = ss->ss_curcmd & PCCCMD_ENPA ? 1 : 0;
-	if (wdc->which & WSDISPLAY_CURSOR_DOPOS) {
-		wdc->pos.x = ss->ss_curpos.x;
-		wdc->pos.y = ss->ss_curpos.y;
-	}
-	if (wdc->which & WSDISPLAY_CURSOR_DOHOT) {
-		wdc->hot.x = ss->ss_curhot.x;
-		wdc->hot.y = ss->ss_curhot.y;
-	}
-	if (wdc->which & WSDISPLAY_CURSOR_DOCMAP) {
-		wdc->cmap.index = 0;
-		wdc->cmap.count = 0;
-	}
-	if (wdc->which & WSDISPLAY_CURSOR_DOSHAPE) {
-		wdc->size.x = wdc->size.y = PCC_CURSOR_SIZE;
-		error = copyout(ss->ss_curimg, wdc->image,
-		    sizeof(ss->ss_curimg));
-		if (error != 0)
-			return (error);
-		error = copyout(ss->ss_curmask, wdc->mask,
-		    sizeof(ss->ss_curmask));
-		if (error != 0)
-			return (error);
-	}
-
-	return (0);
-}
-
-int
-smg_setcursor(struct smg_screen *ss, struct wsdisplay_cursor *wdc)
-{
-	u_int16_t curfg[PCC_CURSOR_SIZE], curmask[PCC_CURSOR_SIZE];
-	int error;
-
-	if (wdc->which & WSDISPLAY_CURSOR_DOCMAP) {
-		/* No cursor colormap since we are a B&W device. */
-		if (wdc->cmap.count != 0)
-			return (EINVAL);
-	}
-
-	/*
-	 * First, do the userland-kernel data transfers, so that we can fail
-	 * if necessary before altering anything.
-	 */
-	if (wdc->which & WSDISPLAY_CURSOR_DOSHAPE) {
-		if (wdc->size.x != PCC_CURSOR_SIZE ||
-		    wdc->size.y != PCC_CURSOR_SIZE)
-			return (EINVAL);
-		error = copyin(wdc->image, curfg, sizeof(curfg));
-		if (error != 0)
-			return (error);
-		error = copyin(wdc->mask, curmask, sizeof(curmask));
-		if (error != 0)
-			return (error);
-	}
-
-	/*
-	 * Now update our variables...
-	 */
-	if (wdc->which & WSDISPLAY_CURSOR_DOCUR) {
-		if (wdc->enable)
-			ss->ss_curcmd |= PCCCMD_ENPB | PCCCMD_ENPA;
-		else
-			ss->ss_curcmd &= ~(PCCCMD_ENPB | PCCCMD_ENPA);
-	}
-	if (wdc->which & WSDISPLAY_CURSOR_DOPOS) {
-		ss->ss_curpos.x = wdc->pos.x;
-		ss->ss_curpos.y = wdc->pos.y;
-	}
-	if (wdc->which & WSDISPLAY_CURSOR_DOHOT) {
-		ss->ss_curhot.x = wdc->hot.x;
-		ss->ss_curhot.y = wdc->hot.y;
-	}
-	if (wdc->which & WSDISPLAY_CURSOR_DOSHAPE) {
-		bcopy(curfg, ss->ss_curimg, sizeof ss->ss_curimg);
-		bcopy(curmask, ss->ss_curmask, sizeof ss->ss_curmask);
-	}
-
-	/*
-	 * ...and update the cursor
-	 */
-	smg_updatecursor(ss, wdc->which);
-	
-	return (0);
-}
-
-void
-smg_updatecursor(struct smg_screen *ss, u_int which)
-{
-	u_int i;
-
-	if (which & (WSDISPLAY_CURSOR_DOPOS | WSDISPLAY_CURSOR_DOHOT)) {
-		ss->ss_cursor->xpos =
-		    ss->ss_curpos.x - ss->ss_curhot.x + CUR_XBIAS;
-		ss->ss_cursor->ypos =
-		    ss->ss_curpos.y - ss->ss_curhot.y + CUR_YBIAS;
-	}
-	if (which & WSDISPLAY_CURSOR_DOSHAPE) {
-		ss->ss_cursor->cmdr = ss->ss_curcmd | PCCCMD_LODSA;
-		for (i = 0; i < PCC_CURSOR_SIZE; i++)
-			ss->ss_cursor->load = ss->ss_curimg[i];
-		for (i = 0; i < PCC_CURSOR_SIZE; i++)
-			ss->ss_cursor->load = ss->ss_curmask[i];
-		ss->ss_cursor->cmdr = ss->ss_curcmd;
-	} else
-	if (which & WSDISPLAY_CURSOR_DOCUR)
-		ss->ss_cursor->cmdr = ss->ss_curcmd;
-}
-
-/*
- * Faster console operations
- */
-
-#include <vax/vsa/maskbits.h>
-
-void
-smg_blockmove(struct rasops_info *ri, u_int sx, u_int y, u_int dx, u_int cx,
-    u_int cy, int rop)
-{
-	int width;		/* add to get to same position in next line */
-
-	unsigned int *psrcLine, *pdstLine;
-				/* pointers to line with current src and dst */
-	unsigned int *psrc;	/* pointer to current src longword */
-	unsigned int *pdst;	/* pointer to current dst longword */
-
-				/* following used for looping through a line */
-	unsigned int startmask, endmask;  /* masks for writing ends of dst */
-	int nlMiddle;		/* whole longwords in dst */
-	int nl;			/* temp copy of nlMiddle */
-	int xoffSrc;		/* offset (>= 0, < 32) from which to
-				   fetch whole longwords fetched in src */
-	int nstart;		/* number of ragged bits at start of dst */
-	int nend;		/* number of ragged bits at end of dst */
-	int srcStartOver;	/* pulling nstart bits from src
-				   overflows into the next word? */
-
-	width = SM_XWIDTH >> 5;
-
-	/* start at first scanline */
-	psrcLine = pdstLine = ((u_int *)ri->ri_bits) + (y * width);
-
-	/* x direction doesn't matter for < 1 longword */
-	if (cx <= 32) {
-		int srcBit, dstBit;	/* bit offset of src and dst */
-
-		pdstLine += (dx >> 5);
-		psrcLine += (sx >> 5);
-		psrc = psrcLine;
-		pdst = pdstLine;
-
-		srcBit = sx & 0x1f;
-		dstBit = dx & 0x1f;
-
-		while (cy--) {
-			getandputrop(psrc, srcBit, dstBit, cx, pdst, rop);
-			pdst += width;
-			psrc += width;
-		}
-	} else {
-		maskbits(dx, cx, startmask, endmask, nlMiddle);
-		if (startmask)
-			nstart = 32 - (dx & 0x1f);
-		else
-			nstart = 0;
-		if (endmask)
-			nend = (dx + cx) & 0x1f;
-		else
-			nend = 0;
-
-		xoffSrc = ((sx & 0x1f) + nstart) & 0x1f;
-		srcStartOver = ((sx & 0x1f) + nstart) > 31;
-
-		if (sx >= dx) {	/* move left to right */
-			pdstLine += (dx >> 5);
-			psrcLine += (sx >> 5);
-
-			while (cy--) {
-				psrc = psrcLine;
-				pdst = pdstLine;
-
-				if (startmask) {
-					getandputrop(psrc, (sx & 0x1f),
-					    (dx & 0x1f), nstart, pdst, rop);
-					pdst++;
-					if (srcStartOver)
-						psrc++;
-				}
-
-				/* special case for aligned operations */
-				if (xoffSrc == 0) {
-					nl = nlMiddle;
-					while (nl--) {
-						switch (rop) {
-						case RR_CLEAR:
-							*pdst = 0;
-							break;
-						case RR_SET:
-							*pdst = ~0;
-							break;
-						default:
-							*pdst = *psrc;
-							break;
-						}
-						psrc++;
-						pdst++;
-					}
-				} else {
-					nl = nlMiddle + 1;
-					while (--nl) {
-						switch (rop) {
-						case RR_CLEAR:
-							*pdst = 0;
-							break;
-						case RR_SET:
-							*pdst = ~0;
-							break;
-						default:
-							getunalignedword(psrc,
-							    xoffSrc, *pdst);
-							break;
-						}
-						pdst++;
-						psrc++;
-					}
-				}
-
-				if (endmask) {
-					getandputrop(psrc, xoffSrc, 0, nend,
-					    pdst, rop);
-				}
-
-				pdstLine += width;
-				psrcLine += width;
-			}
-		} else {	/* move right to left */
-			pdstLine += ((dx + cx) >> 5);
-			psrcLine += ((sx + cx) >> 5);
-			/*
-			 * If fetch of last partial bits from source crosses
-			 * a longword boundary, start at the previous longword
-			 */
-			if (xoffSrc + nend >= 32)
-				--psrcLine;
-
-			while (cy--) {
-				psrc = psrcLine;
-				pdst = pdstLine;
-
-				if (endmask) {
-					getandputrop(psrc, xoffSrc, 0, nend,
-					    pdst, rop);
-				}
-
-				nl = nlMiddle + 1;
-				while (--nl) {
-					--psrc;
-					--pdst;
-					switch (rop) {
-					case RR_CLEAR:
-						*pdst = 0;
-						break;
-					case RR_SET:
-						*pdst = ~0;
-						break;
-					default:
-						getunalignedword(psrc, xoffSrc,
-						    *pdst);
-						break;
-					}
-				}
-
-				if (startmask) {
-					if (srcStartOver)
-						--psrc;
-					--pdst;
-					getandputrop(psrc, (sx & 0x1f),
-					    (dx & 0x1f), nstart, pdst, rop);
-				}
-
-				pdstLine += width;
-				psrcLine += width;
+				if (c < 32)
+					c = 32;
+				s = QFONT(c, line);
+				if (ss->ss_attr[row][col] & WSATTR_REVERSE)
+					s ^= 255;
+				SM_ADDR(row, col, line) = s;
+				if (ss->ss_attr[row][col] & WSATTR_UNDERLINE)
+					SM_ADDR(row, col, line) = 255;
 			}
 		}
-	}
-}
-
-void
-smg_copycols(void *cookie, int row, int src, int dst, int n)
-{
-	struct rasops_info *ri = cookie;
-
-	n *= ri->ri_font->fontwidth;
-	src *= ri->ri_font->fontwidth;
-	dst *= ri->ri_font->fontwidth;
-	row *= ri->ri_font->fontheight;
-
-	smg_blockmove(ri, src, row, dst, n, ri->ri_font->fontheight,
-	    RR_COPY);
-}
-
-void
-smg_erasecols(void *cookie, int row, int col, int num, long attr)
-{
-	struct rasops_info *ri = cookie;
-	int fg, bg;
-
-	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
-
-	num *= ri->ri_font->fontwidth;
-	col *= ri->ri_font->fontwidth;
-	row *= ri->ri_font->fontheight;
-
-	smg_blockmove(ri, col, row, col, num, ri->ri_font->fontheight,
-	    bg == 0 ? RR_CLEAR : RR_SET);
-}
-
-/*
- * Console support code
- */
-
-int	smgcnprobe(void);
-int	smgcninit(void);
-
-int
-smgcnprobe()
-{
-	switch (vax_boardtype) {
-	case VAX_BTYP_410:
-	case VAX_BTYP_420:
-	case VAX_BTYP_43:
-		if ((vax_confdata & (KA420_CFG_L3CON | KA420_CFG_MULTU)) != 0)
-			break; /* doesn't use graphics console */
-
-		if ((vax_confdata & KA420_CFG_VIDOPT) != 0)
-			break;	/* there is a color option */
-
-		return (1);
-
-	default:
-		break;
-	}
-
+	cursor = &sm_addr[(ss->ss_cury * SM_CHEIGHT * SM_COLS) + ss->ss_curx +
+	    ((SM_CHEIGHT - 1) * SM_COLS)];
+	curscr = ss;
 	return (0);
+}
+
+cons_decl(smg);
+
+void
+smgcninit(struct consdev *cndev)
+{
+	int fcookie;
+	struct wsdisplay_font *console_font;
+	extern void lkccninit(struct consdev *);
+	extern int lkccngetc(dev_t);
+	extern int dz_vsbus_lk201_cnattach(int);
+	/* Clear screen */
+	memset(sm_addr, 0, 128*864);
+
+	callout_init(&smg_cursor_ch, 0);
+
+	curscr = &smg_conscreen;
+	wsdisplay_cnattach(&smg_stdscreen, &smg_conscreen, 0, 0, 0);
+	cn_tab->cn_pri = CN_INTERNAL;
+	if ((fcookie = wsfont_find(NULL, 8, 15, 0,
+		WSDISPLAY_FONTORDER_R2L, WSDISPLAY_FONTORDER_L2R)) < 0)
+	{
+		printf("smg: could not find 8x15 font\n");
+		return;
+	}
+	if (wsfont_lock(fcookie, &console_font) != 0) {
+		printf("smg: could not lock 8x15 font\n");
+		return;
+	}
+	qf = console_font->data;
+
+#if NDZKBD > 0
+	dzkbd_cnattach(0); /* Connect keyboard and screen together */
+#endif
 }
 
 /*
  * Called very early to setup the glass tty as console.
- * Because it's called before the VM system is initialized, virtual memory
+ * Because it's called before the VM system is inited, virtual memory
  * for the framebuffer can be stolen directly without disturbing anything.
  */
-int
-smgcninit()
+void
+smgcnprobe(struct consdev *cndev)
 {
-	struct smg_screen *ss = &smg_consscr;
 	extern vaddr_t virtual_avail;
-	long defattr;
-	struct rasops_info *ri;
+	extern const struct cdevsw wsdisplay_cdevsw;
 
-	ss->ss_addr = (caddr_t)virtual_avail;
-	virtual_avail += SMSIZE;
-	ioaccess((vaddr_t)ss->ss_addr, SMADDR, SMSIZE / VAX_NBPG);
+	switch (vax_boardtype) {
+	case VAX_BTYP_410:
+	case VAX_BTYP_420:
+	case VAX_BTYP_43:
+		if ((vax_confdata & KA420_CFG_L3CON) ||
+		    (vax_confdata & KA420_CFG_MULTU))
+			break; /* doesn't use graphics console */
+		sm_addr = (void *)virtual_avail;
+		virtual_avail += SMSIZE;
+		ioaccess((vaddr_t)sm_addr, SMADDR, (SMSIZE/VAX_NBPG));
+		cndev->cn_pri = CN_INTERNAL;
+		cndev->cn_dev = makedev(cdevsw_lookup_major(&wsdisplay_cdevsw),
+					0);
+		break;
 
-	ss->ss_cursor = (struct dc503reg *)virtual_avail;
-	virtual_avail += VAX_NBPG;
-	ioaccess((vaddr_t)ss->ss_cursor, KA420_CUR_BASE, 1);
-
-	virtual_avail = round_page(virtual_avail);
-
-	/* this had better not fail */
-	if (smg_setup_screen(ss) != 0)
-		return (1);
-
-	ri = &ss->ss_ri;
-	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
-	wsdisplay_cnattach(&smg_stdscreen, ri, 0, 0, defattr);
-
-	return (0);
+	default:
+		break;
+	}
 }

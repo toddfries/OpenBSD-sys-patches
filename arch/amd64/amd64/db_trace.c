@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.4 2007/01/15 23:19:05 jsg Exp $	*/
-/*	$NetBSD: db_trace.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
+/*	$NetBSD: db_trace.c,v 1.14 2008/09/05 13:37:24 tron Exp $	*/
 
 /* 
  * Mach Operating System
@@ -27,6 +26,9 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.14 2008/09/05 13:37:24 tron Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -42,48 +44,44 @@
 #include <ddb/db_output.h>
 #include <ddb/db_interface.h>
 
-#if 1
 #define dbreg(xx) (long *)offsetof(db_regs_t, tf_ ## xx)
-#else
-#define dbreg(xx) (long *)&ddb_regs.tf_ ## xx
-#endif
 
-static int db_x86_64_regop(struct db_variable *, db_expr_t *, int);
+static int db_x86_64_regop(const struct db_variable *, db_expr_t *, int);
 
 /*
  * Machine register set.
  */
-struct db_variable db_regs[] = {
-	{ "ds",		dbreg(ds),     db_x86_64_regop },
-	{ "es",		dbreg(es),     db_x86_64_regop },
-	{ "fs",		dbreg(fs),     db_x86_64_regop },
-	{ "gs",		dbreg(gs),     db_x86_64_regop },
-	{ "rdi",	dbreg(rdi),    db_x86_64_regop },
-	{ "rsi",	dbreg(rsi),    db_x86_64_regop },
-	{ "rbp",	dbreg(rbp),    db_x86_64_regop },
-	{ "rbx",	dbreg(rbx),    db_x86_64_regop },
-	{ "rdx",	dbreg(rdx),    db_x86_64_regop },
-	{ "rcx",	dbreg(rcx),    db_x86_64_regop },
-	{ "rax",	dbreg(rax),    db_x86_64_regop },
-	{ "r8",		dbreg(r8),     db_x86_64_regop },
-	{ "r9",		dbreg(r9),     db_x86_64_regop },
-	{ "r10",	dbreg(r10),    db_x86_64_regop },
-	{ "r11",	dbreg(r11),    db_x86_64_regop },
-	{ "r12",	dbreg(r12),    db_x86_64_regop },
-	{ "r13",	dbreg(r13),    db_x86_64_regop },
-	{ "r14",	dbreg(r14),    db_x86_64_regop },
-	{ "r15",	dbreg(r15),    db_x86_64_regop },
-	{ "rip",	dbreg(rip),    db_x86_64_regop },
-	{ "cs",		dbreg(cs),     db_x86_64_regop },
-	{ "rflags",	dbreg(rflags), db_x86_64_regop },
-	{ "rsp",	dbreg(rsp),    db_x86_64_regop },
-	{ "ss",		dbreg(ss),     db_x86_64_regop },
+const struct db_variable db_regs[] = {
+	{ "ds",		dbreg(ds),     db_x86_64_regop, NULL },
+	{ "es",		dbreg(es),     db_x86_64_regop, NULL },
+	{ "fs",		dbreg(fs),     db_x86_64_regop, NULL },
+	{ "gs",		dbreg(gs),     db_x86_64_regop, NULL },
+	{ "rdi",	dbreg(rdi),    db_x86_64_regop, NULL },
+	{ "rsi",	dbreg(rsi),    db_x86_64_regop, NULL },
+	{ "rbp",	dbreg(rbp),    db_x86_64_regop, NULL },
+	{ "rbx",	dbreg(rbx),    db_x86_64_regop, NULL },
+	{ "rdx",	dbreg(rdx),    db_x86_64_regop, NULL },
+	{ "rcx",	dbreg(rcx),    db_x86_64_regop, NULL },
+	{ "rax",	dbreg(rax),    db_x86_64_regop, NULL },
+	{ "r8",		dbreg(r8),     db_x86_64_regop, NULL },
+	{ "r9",		dbreg(r9),     db_x86_64_regop, NULL },
+	{ "r10",	dbreg(r10),    db_x86_64_regop, NULL },
+	{ "r11",	dbreg(r11),    db_x86_64_regop, NULL },
+	{ "r12",	dbreg(r12),    db_x86_64_regop, NULL },
+	{ "r13",	dbreg(r13),    db_x86_64_regop, NULL },
+	{ "r14",	dbreg(r14),    db_x86_64_regop, NULL },
+	{ "r15",	dbreg(r15),    db_x86_64_regop, NULL },
+	{ "rip",	dbreg(rip),    db_x86_64_regop, NULL },
+	{ "cs",		dbreg(cs),     db_x86_64_regop, NULL },
+	{ "rflags",	dbreg(rflags), db_x86_64_regop, NULL },
+	{ "rsp",	dbreg(rsp),    db_x86_64_regop, NULL },
+	{ "ss",		dbreg(ss),     db_x86_64_regop, NULL },
 };
-struct db_variable * db_eregs =
+const struct db_variable * const db_eregs =
 	db_regs + sizeof(db_regs)/sizeof(db_regs[0]);
 
 static int
-db_x86_64_regop(struct db_variable *vp, db_expr_t *val, int opcode)
+db_x86_64_regop(const struct db_variable *vp, db_expr_t *val, int opcode)
 {
         db_expr_t *regaddr =
             (db_expr_t *)(((uint8_t *)DDB_REGS) + ((size_t)vp->valuep));
@@ -120,15 +118,18 @@ struct x86_64_frame {
 db_addr_t	db_trap_symbol_value = 0;
 db_addr_t	db_syscall_symbol_value = 0;
 db_addr_t	db_kdintr_symbol_value = 0;
-boolean_t	db_trace_symbols_found = FALSE;
+bool		db_trace_symbols_found = false;
 
 void db_find_trace_symbols(void);
-int db_numargs(struct x86_64_frame *);
-void db_nextframe(struct x86_64_frame **, db_addr_t *, long *, int,
-    int (*) (const char *, ...));
+int db_numargs(long *);
+int db_nextframe(long **, long **, long **, db_addr_t *, long *, int,
+    void (*) (const char *, ...));
+db_sym_t db_frame_info(long *, db_addr_t, const char **, db_expr_t *,
+                       int *, int *);
+
 
 void
-db_find_trace_symbols(void)
+db_find_trace_symbols()
 {
 	db_expr_t	value;
 
@@ -138,7 +139,7 @@ db_find_trace_symbols(void)
 		db_kdintr_symbol_value = (db_addr_t) value;
 	if (db_value_of_name("_syscall", &value))
 		db_syscall_symbol_value = (db_addr_t) value;
-	db_trace_symbols_found = TRUE;
+	db_trace_symbols_found = true;
 }
 
 /*
@@ -148,7 +149,7 @@ db_find_trace_symbols(void)
  * reliably determine the values currently, just return 0.
  */
 int
-db_numargs(struct x86_64_frame *fp)
+db_numargs(long *retaddrp)
 {
 	return 0;
 }
@@ -163,24 +164,35 @@ db_numargs(struct x86_64_frame *fp)
  *   It might be possible to dig out from the next frame up the name
  *   of the function that faulted, but that could get hairy.
  */
-void
-db_nextframe(struct x86_64_frame **fp, db_addr_t *ip, long *argp, int is_trap,
-    int (*pr)(const char *, ...))
+int
+db_nextframe(long **nextframe, long **retaddr, long **arg0, db_addr_t *ip,
+	     long *argp, int is_trap, void (*pr)(const char *, ...))
 {
+	struct trapframe *tf;
+	struct x86_64_frame *fp;
+	struct intrframe *ifp;
+	int traptype, trapno, err, i;
 
 	switch (is_trap) {
 	    case NONE:
 		*ip = (db_addr_t)
-			db_get_value((db_addr_t)&(*fp)->f_retaddr, 8, FALSE);
-		*fp = (struct x86_64_frame *)
-			db_get_value((db_addr_t)&(*fp)->f_frame, 8, FALSE);
+			db_get_value((long)*retaddr, 8, false);
+		fp = (struct x86_64_frame *)
+			db_get_value((long)*nextframe, 8, false);
+		if (fp == NULL)
+			return 0;
+		*nextframe = (long *)&fp->f_frame;
+		*retaddr = (long *)&fp->f_retaddr;
+		*arg0 = (long *)&fp->f_arg0;
 		break;
 
-	    default: {
-		struct trapframe *tf;
+	    case TRAP:
+	    case SYSCALL:
+	    case INTERRUPT:
+	    default:
 
 		/* The only argument to trap() or syscall() is the trapframe. */
-		tf = (struct trapframe *)argp;
+		tf = *(struct trapframe **)argp;
 		switch (is_trap) {
 		case TRAP:
 			(*pr)("--- trap (number %d) ---\n", tf->tf_trapno);
@@ -190,25 +202,114 @@ db_nextframe(struct x86_64_frame **fp, db_addr_t *ip, long *argp, int is_trap,
 			break;
 		case INTERRUPT:
 			(*pr)("--- interrupt ---\n");
+			tf = (struct trapframe *)argp;
 			break;
 		}
-		*fp = (struct x86_64_frame *)tf->tf_rbp;
 		*ip = (db_addr_t)tf->tf_rip;
+		fp = (struct x86_64_frame *)tf->tf_rbp;
+		if (fp == NULL)
+			return 0;
+		*nextframe = (long *)&fp->f_frame;
+		*retaddr = (long *)&fp->f_retaddr;
+		*arg0 = (long *)&fp->f_arg0;
 		break;
-	    }
 	}
+
+	/*
+	 * A bit of a hack. Since %rbp may be used in the stub code,
+	 * walk the stack looking for a valid interrupt frame. Such
+	 * a frame can be recognized by always having
+	 * err 0 or IREENT_MAGIC and trapno T_ASTFLT.
+	 */
+	if (db_frame_info(*nextframe, (db_addr_t)*ip, NULL, NULL, &traptype,
+	    NULL) != (db_sym_t)0
+	    && traptype == INTERRUPT) {
+		for (i = 0; i < 4; i++) {
+			ifp = (struct intrframe *)(argp + i);
+			err = db_get_value((long)&ifp->if_tf.tf_err, 8, false);
+			trapno = db_get_value((long)&ifp->if_tf.tf_trapno,
+			    8, false);
+			if ((err == 0 || err == IREENT_MAGIC) && trapno == T_ASTFLT) {
+				*nextframe = (long *)ifp - 1;
+				break;
+			}
+		}
+		if (i == 4) {
+			(*pr)("DDB lost frame for ");
+			db_printsym(*ip, DB_STGY_ANY, pr);
+			(*pr)(", trying %p\n",argp);
+			*nextframe = argp;
+		}
+	}
+	return 1;
 }
 
-void
-db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
-    char *modif, int (*pr)(const char *, ...))
+db_sym_t
+db_frame_info(long *frame, db_addr_t callpc, const char **namep, db_expr_t *offp,
+	      int *is_trap, int *nargp)
 {
-	struct x86_64_frame *frame, *lastframe;
+	db_expr_t	offset;
+	db_sym_t	sym;
+	int narg;
+	const char *name;
+
+	sym = db_search_symbol(callpc, DB_STGY_ANY, &offset);
+	db_symbol_values(sym, &name, NULL);
+	if (sym == (db_sym_t)0)
+		return (db_sym_t)0;
+
+	*is_trap = NONE;
+	narg = 0;
+
+	if (INKERNEL((long)frame) && name) {
+		/*
+		 * XXX traps should be based off of the Xtrap*
+		 * locations rather than on trap, since some traps
+		 * (e.g., npxdna) don't go through trap()
+		 */
+		if (!strcmp(name, "trap")) {
+			*is_trap = TRAP;
+			narg = 0;
+		} else if (!strcmp(name, "syscall_plain") ||
+		           !strcmp(name, "syscall_fancy")) {
+			*is_trap = SYSCALL;
+			narg = 0;
+		} else if (name[0] == 'X') {
+			if (!strncmp(name, "Xintr", 5) ||
+			    !strncmp(name, "Xresume", 7) ||
+			    !strncmp(name, "Xstray", 6) ||
+			    !strncmp(name, "Xhold", 5) ||
+			    !strncmp(name, "Xrecurse", 8) ||
+			    !strcmp(name, "Xdoreti") ||
+			    !strncmp(name, "Xsoft", 5)) {
+				*is_trap = INTERRUPT;
+				narg = 0;
+			}
+		}
+	}
+
+	if (offp != NULL)
+		*offp = offset;
+	if (nargp != NULL)
+		*nargp = narg;
+	if (namep != NULL)
+		*namep = name;
+	return sym;
+}
+
+
+void
+db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
+		     const char *modif, void (*pr)(const char *, ...))
+{
+	long *frame, *lastframe;
+	long *retaddr, *arg0;
 	long		*argp;
 	db_addr_t	callpc;
-	int		is_trap = 0;
-	boolean_t	kernel_only = TRUE;
-	boolean_t	trace_thread = FALSE;
+	int		is_trap;
+	bool		kernel_only = true;
+	bool		trace_thread = false;
+	bool		lwpaddr = false;
 
 #if 0
 	if (!db_trace_symbols_found)
@@ -216,116 +317,99 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 #endif
 
 	{
-		char *cp = modif;
+		const char *cp = modif;
 		char c;
 
 		while ((c = *cp++) != 0) {
+			if (c == 'a') {
+				lwpaddr = true;
+				trace_thread = true;
+			}
 			if (c == 't')
-				trace_thread = TRUE;
+				trace_thread = true;
 			if (c == 'u')
-				kernel_only = FALSE;
+				kernel_only = false;
 		}
 	}
 
 	if (!have_addr) {
-		frame = (struct x86_64_frame *)ddb_regs.tf_rbp;
+		frame = (long *)ddb_regs.tf_rbp;
 		callpc = (db_addr_t)ddb_regs.tf_rip;
 	} else {
-#if 0
 		if (trace_thread) {
 			struct proc *p;
 			struct user *u;
 			struct lwp *l;
-			(*pr)("trace: pid %d ", (int)addr);
-			p = pfind(addr);
-			if (p == NULL) {
-				(*pr)("not found\n");
-				return;
+			if (lwpaddr) {
+				l = (struct lwp *)addr;
+				p = l->l_proc;
+				(*pr)("trace: pid %d ", p->p_pid);
+			} else {
+				(*pr)("trace: pid %d ", (int)addr);
+				p = p_find(addr, PFIND_LOCKED);
+				if (p == NULL) {
+					(*pr)("not found\n");
+					return;
+				}
+				l = LIST_FIRST(&p->p_lwps);
+				KASSERT(l != NULL);
 			}
-			l = proc_representative_lwp(p);
-			if (!(l->l_flag&L_INMEM)) {
+			(*pr)("lid %d ", l->l_lid);
+			if (!(l->l_flag & LW_INMEM)) {
 				(*pr)("swapped out\n");
 				return;
 			}
 			u = l->l_addr;
-			frame = (struct x86_64_frame *) u->u_pcb.pcb_rbp;
-			(*pr)("at %p\n", frame);
-		} else
-#endif
-			frame = (struct x86_64_frame *)addr;
-		callpc = (db_addr_t)
-			 db_get_value((db_addr_t)&frame->f_retaddr, 8, FALSE);
-		frame = (struct x86_64_frame *)frame->f_frame;
+			if (p == curproc && l == curlwp) {
+				frame = (long *)ddb_regs.tf_rbp;
+				callpc = (db_addr_t)ddb_regs.tf_rip;
+				(*pr)("at %p\n", frame);
+			} else {
+				frame = (long *)u->u_pcb.pcb_rbp;
+				callpc = (db_addr_t)
+				    db_get_value((long)(frame + 1), 8, false);
+				(*pr)("at %p\n", frame);
+				frame = (long *)*frame; /* XXXfvdl db_get_value? */
+			}
+		} else {
+			frame = (long *)addr;
+			callpc = (db_addr_t)
+			    db_get_value((long)(frame + 1), 8, false);
+			frame = (long *)*frame; /* XXXfvdl db_get_value? */
+		}
 	}
+	retaddr = frame + 1;
+	arg0 = frame + 2;
 
 	lastframe = 0;
 	while (count && frame != 0) {
 		int		narg;
-		char *	name;
+		const char *	name;
 		db_expr_t	offset;
 		db_sym_t	sym;
-#define MAXNARG	16
-		char	*argnames[MAXNARG], **argnp = NULL;
+		char	*argnames[16], **argnp = NULL;
+		db_addr_t	lastcallpc;
 
-		sym = db_search_symbol(callpc, DB_STGY_ANY, &offset);
-		db_symbol_values(sym, &name, NULL);
+		name = "?";
+		is_trap = NONE;
+		offset = 0;
+		sym = db_frame_info(frame, callpc, &name, &offset, &is_trap,
+				    &narg);
 
-		if (lastframe == 0 && sym == NULL) {
+		if (lastframe == 0 && sym == (db_sym_t)0) {
 			/* Symbol not found, peek at code */
-			long	instr = db_get_value(callpc, 8, FALSE);
+			u_long	instr = db_get_value(callpc, 4, false);
 
 			offset = 1;
-			if ((instr & 0x00ffffff) == 0x00e58955 ||
-					/* enter: pushl %ebp, movl %esp, %ebp */
-			    (instr & 0x0000ffff) == 0x0000e589
-					/* enter+1: movl %esp, %ebp */) {
+			if (instr  == 0xe5894855 ||
+					/* enter: pushq %rbp, movq %rsp, %rbp */
+			    (instr & 0x00ffffff) == 0x0048e589
+					/* enter+1: movq %rsp, %rbp */) {
 				offset = 0;
 			}
 		}
-		if (INKERNEL(frame) && name) {
-#ifdef __ELF__
-			if (!strcmp(name, "trap")) {
-				is_trap = TRAP;
-			} else if (!strcmp(name, "syscall")) {
-				is_trap = SYSCALL;
-			} else if (name[0] == 'X') {
-				if (!strncmp(name, "Xintr", 5) ||
-				    !strncmp(name, "Xresume", 7) ||
-				    !strncmp(name, "Xstray", 6) ||
-				    !strncmp(name, "Xhold", 5) ||
-				    !strncmp(name, "Xrecurse", 8) ||
-				    !strcmp(name, "Xdoreti") ||
-				    !strncmp(name, "Xsoft", 5)) {
-					is_trap = INTERRUPT;
-				} else
-					goto normal;
-			} else
-				goto normal;
-			narg = 0;
-#else
-			if (!strcmp(name, "_trap")) {
-				is_trap = TRAP;
-			} else if (!strcmp(name, "_syscall")) {
-				is_trap = SYSCALL;
-			} else if (name[0] == '_' && name[1] == 'X') {
-				if (!strncmp(name, "_Xintr", 6) ||
-				    !strncmp(name, "_Xresume", 8) ||
-				    !strncmp(name, "_Xstray", 7) ||
-				    !strncmp(name, "_Xhold", 6) ||
-				    !strncmp(name, "_Xrecurse", 9) ||
-				    !strcmp(name, "_Xdoreti") ||
-				    !strncmp(name, "_Xsoft", 6)) {
-					is_trap = INTERRUPT;
-				} else
-					goto normal;
-			} else
-				goto normal;
-			narg = 0;
-#endif /* __ELF__ */
-		} else {
-		normal:
-			is_trap = NONE;
-			narg = MAXNARG;
+
+		if (is_trap == NONE) {
 			if (db_sym_numargs(sym, &narg, argnames))
 				argnp = argnames;
 			else
@@ -337,17 +421,17 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 		if (lastframe == 0 && offset == 0 && !have_addr) {
 			/*
 			 * We have a breakpoint before the frame is set up
-			 * Use %esp instead
+			 * Use %rsp instead
 			 */
 			argp = &((struct x86_64_frame *)(ddb_regs.tf_rsp-8))->f_arg0;
 		} else {
-			argp = &frame->f_arg0;
+			argp = frame + 2;
 		}
 
 		while (narg) {
 			if (argnp)
 				(*pr)("%s=", *argnp++);
-			(*pr)("%lx", db_get_value((db_addr_t)argp, 8, FALSE));
+			(*pr)("%lx", db_get_value((long)argp, 8, false));
 			argp++;
 			if (--narg != 0)
 				(*pr)(",");
@@ -358,32 +442,31 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 
 		if (lastframe == 0 && offset == 0 && !have_addr) {
 			/* Frame really belongs to next callpc */
-			lastframe = (struct x86_64_frame *)(ddb_regs.tf_rsp-8);
+			struct x86_64_frame *fp = (void *)(ddb_regs.tf_rsp-8);
+
+			lastframe = (long *)fp;
 			callpc = (db_addr_t)
-				 db_get_value((db_addr_t)&lastframe->f_retaddr,
-				    8, FALSE);
+			    db_get_value((db_addr_t)&fp->f_retaddr, 8, false);
 			continue;
 		}
 
 		lastframe = frame;
-		db_nextframe(&frame, &callpc, &frame->f_arg0, is_trap, pr);
-
-		if (frame == 0) {
-			/* end of chain */
+		lastcallpc = callpc;
+		if (!db_nextframe(&frame, &retaddr, &arg0,
+		   &callpc, frame + 2, is_trap, pr))
 			break;
-		}
-		if (INKERNEL(frame)) {
+
+		if (INKERNEL((long)frame)) {
 			/* staying in kernel */
-			if (frame <= lastframe) {
+			if (frame < lastframe ||
+			    (frame == lastframe && callpc == lastcallpc)) {
 				(*pr)("Bad frame pointer: %p\n", frame);
 				break;
 			}
-		} else if (INKERNEL(lastframe)) {
+		} else if (INKERNEL((long)lastframe)) {
 			/* switch from user to kernel */
-			if (kernel_only) {
-				(*pr)("end of kernel\n");
+			if (kernel_only)
 				break;	/* kernel stack only */
-			}
 		} else {
 			/* in user */
 			if (frame <= lastframe) {
@@ -394,7 +477,6 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 		}
 		--count;
 	}
-	(*pr)("end trace frame: 0x%lx, count: %d\n", frame, count);
 
 	if (count && is_trap != NONE) {
 		db_printsym(callpc, DB_STGY_XTRN, pr);

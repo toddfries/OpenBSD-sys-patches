@@ -1,5 +1,4 @@
-/*	$OpenBSD: opti82c558.c,v 1.7 2006/09/19 11:06:34 jsg Exp $	*/
-/*	$NetBSD: opti82c558.c,v 1.2 2000/07/18 11:24:09 soda Exp $	*/
+/*	$NetBSD: opti82c558.c,v 1.9 2008/04/28 20:23:25 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,6 +59,9 @@
  * Support for the Opti 82c558 PCI-ISA bridge interrupt controller.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: opti82c558.c,v 1.9 2008/04/28 20:23:25 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -79,7 +74,7 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-#include <i386/pci/pcibiosvar.h>
+#include <i386/pci/pci_intr_fixup.h>
 #include <i386/pci/opti82c558reg.h>
 
 int	opti82c558_getclink(pciintr_icu_handle_t, int, int *);
@@ -125,8 +120,8 @@ static const int viper_pirq_encode[] = {
 };
 
 int
-opti82c558_init(pci_chipset_tag_t pc, bus_space_tag_t iot, pcitag_t tag,
-    pciintr_icu_tag_t *ptagp, pciintr_icu_handle_t *phandp)
+opti82c558_init(pci_chipset_tag_t pc, bus_space_tag_t iot,
+    pcitag_t tag, pciintr_icu_tag_t *ptagp, pciintr_icu_handle_t *phandp)
 {
 	struct opti82c558_handle *ph;
 
@@ -166,7 +161,8 @@ opti82c558_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 
 	reg = pci_conf_read(ph->ph_pc, ph->ph_tag, VIPER_CFG_PIRQ);
 	val = VIPER_PIRQ(reg, clink);
-	*irqp = (val == VIPER_PIRQ_NONE) ? 0xff : viper_pirq_decode[val];
+	*irqp = (val == VIPER_PIRQ_NONE) ?
+	    X86_PCI_INTERRUPT_LINE_NO_CONNECTION : viper_pirq_decode[val];
 
 	return (0);
 }

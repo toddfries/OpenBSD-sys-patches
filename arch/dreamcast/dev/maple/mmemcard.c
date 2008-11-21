@@ -1,4 +1,4 @@
-/*	$NetBSD: mmemcard.c,v 1.8 2006/03/28 17:38:24 thorpej Exp $	*/
+/*	$NetBSD: mmemcard.c,v 1.17 2008/06/11 14:55:30 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mmemcard.c,v 1.8 2006/03/28 17:38:24 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mmemcard.c,v 1.17 2008/06/11 14:55:30 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -320,13 +313,11 @@ mmemdetach(struct device *self, int flags)
 	 */
 	if ((bp = sc->sc_bp) != NULL) {
 		bp->b_error = EIO;
-		bp->b_flags |= B_ERROR;
 		bp->b_resid = bp->b_bcount;
 		biodone(bp);
 	}
 	while ((bp = BUFQ_GET(sc->sc_q)) != NULL) {
 		bp->b_error = EIO;
-		bp->b_flags |= B_ERROR;
 		bp->b_resid = bp->b_bcount;
 		biodone(bp);
 	}
@@ -352,8 +343,10 @@ mmemdetach(struct device *self, int flags)
 		 * detach disks
 		 */
 		for (i = 0; i < sc->sc_npt; i++) {
-			if (sc->sc_pt[i].pt_flags & MMEM_PT_OK)
+			if (sc->sc_pt[i].pt_flags & MMEM_PT_OK) {
 				disk_detach(&sc->sc_pt[i].pt_dk);
+				disk_destroy(&sc->sc_pt[i].pt_dk);
+			}
 		}
 		free(sc->sc_pt, M_DEVBUF);
 	}
@@ -426,8 +419,7 @@ mmem_intr(void *dev, struct maple_response *response, int sz, int flags)
 			    pt->pt_info.icon,
 			    pt->pt_info.datasz);
 
-			pt->pt_dk.dk_driver = &mmemdkdriver;
-			pt->pt_dk.dk_name = pt->pt_name;
+			disk_init(&pt->pt_dk, pt->pt_name, &mmemdkdriver);
 			disk_attach(&pt->pt_dk);
 
 			mmem_defaultlabel(sc, pt, pt->pt_dk.dk_label);
@@ -630,7 +622,7 @@ mmemopen(dev_t dev, int flags, int devtype, struct lwp *l)
 	unit = MMEM_UNIT(diskunit);
 	part = MMEM_PART(diskunit);
 	labelpart = DISKPART(dev);
-	if ((sc = device_lookup(&mmem_cd, unit)) == NULL
+	if ((sc = device_lookup_private(&mmem_cd, unit)) == NULL
 	    || sc->sc_stat == MMEM_INIT
 	    || sc->sc_stat == MMEM_INIT2
 	    || part >= sc->sc_npt || (pt = &sc->sc_pt[part])->pt_flags == 0)
@@ -658,7 +650,7 @@ mmemclose(dev_t dev, int flags, int devtype, struct lwp *l)
 	diskunit = DISKUNIT(dev);
 	unit = MMEM_UNIT(diskunit);
 	part = MMEM_PART(diskunit);
-	sc = mmem_cd.cd_devs[unit];
+	sc = device_lookup_private(&mmem_cd, unit);
 	pt = &sc->sc_pt[part];
 	labelpart = DISKPART(dev);
 
@@ -685,7 +677,7 @@ mmemstrategy(struct buf *bp)
 	diskunit = DISKUNIT(bp->b_dev);
 	unit = MMEM_UNIT(diskunit);
 	part = MMEM_PART(diskunit);
-	if ((sc = device_lookup(&mmem_cd, unit)) == NULL
+	if ((sc = device_lookup_private(&mmem_cd, unit)) == NULL
 	    || sc->sc_stat == MMEM_INIT
 	    || sc->sc_stat == MMEM_INIT2
 	    || part >= sc->sc_npt || (pt = &sc->sc_pt[part])->pt_flags == 0)
@@ -701,7 +693,7 @@ mmemstrategy(struct buf *bp)
 			goto inval;		/* no read */
 	} else if (sc->sc_wacc == 0) {
 		bp->b_error = EROFS;		/* no write */
-		goto bad;
+		goto done;
 	}
 
 	if (bp->b_blkno & ~(~(daddr_t)0 >> (DEV_BSHIFT + 1 /* sign bit */))
@@ -746,7 +738,6 @@ mmemstrategy(struct buf *bp)
 	return;
 
 inval:	bp->b_error = EINVAL;
-bad:	bp->b_flags |= B_ERROR;
 done:	bp->b_resid = bp->b_bcount;
 	biodone(bp);
 }
@@ -869,13 +860,12 @@ mmemdone(struct mmem_softc *sc, struct mmem_pt *pt, int err)
 	KASSERT(bp);
 
 	if (err) {
-		bcnt = sc->sc_iobuf - bp->b_data;
+		bcnt = (char *)sc->sc_iobuf - (char *)bp->b_data;
 		bp->b_resid = bp->b_bcount - bcnt;
 
 		/* raise error if no block is read */
 		if (bcnt == 0) {
 			bp->b_error = err;
-			bp->b_flags |= B_ERROR;
 		}
 		goto term_xfer;
 	}
@@ -886,7 +876,8 @@ mmemdone(struct mmem_softc *sc, struct mmem_pt *pt, int err)
 		/* terminate current transfer */
 		sc->sc_bp = NULL;
 		s = splbio();
-		disk_unbusy(&pt->pt_dk, sc->sc_iobuf - bp->b_data,
+		disk_unbusy(&pt->pt_dk,
+		    (char *)sc->sc_iobuf - (char *)bp->b_data,
 		    sc->sc_stat == MMEM_READ);
 		biodone(bp);
 		splx(s);
@@ -916,7 +907,7 @@ mmemwrite(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-mmemioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+mmemioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	int diskunit, unit, part;
 	struct mmem_softc *sc;
@@ -925,7 +916,7 @@ mmemioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 	diskunit = DISKUNIT(dev);
 	unit = MMEM_UNIT(diskunit);
 	part = MMEM_PART(diskunit);
-	sc = mmem_cd.cd_devs[unit];
+	sc = device_lookup_private(&mmem_cd, unit);
 	pt = &sc->sc_pt[part];
 
 	switch (cmd) {

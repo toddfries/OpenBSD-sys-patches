@@ -1,4 +1,4 @@
-/*	$NetBSD: tx3912video.c,v 1.37 2005/12/11 12:17:34 christos Exp $ */
+/*	$NetBSD: tx3912video.c,v 1.39 2008/04/28 20:23:21 martin Exp $ */
 
 /*-
  * Copyright (c) 1999-2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tx3912video.c,v 1.37 2005/12/11 12:17:34 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tx3912video.c,v 1.39 2008/04/28 20:23:21 martin Exp $");
 
 #define TX3912VIDEO_DEBUG
 
@@ -107,7 +100,7 @@ void	tx3912video_attach(struct device *, struct device *, void *);
 int	tx3912video_print(void *, const char *);
 
 void	tx3912video_hpcfbinit(struct tx3912video_softc *);
-int	tx3912video_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+int	tx3912video_ioctl(void *, u_long, void *, int, struct lwp *);
 paddr_t	tx3912video_mmap(void *, off_t, int);
 
 void	tx3912video_clut_init(struct tx3912video_softc *);
@@ -374,7 +367,7 @@ tx3912video_framebuffer_alloc(struct video_chip *chip, paddr_t fb_start,
 
 	/* extent V-RAM region */
 	ex = extent_create("Frame buffer address", fb_start, *fb_end,
-	    0, (caddr_t)ex_fixed, sizeof ex_fixed,
+	    0, (void *)ex_fixed, sizeof ex_fixed,
 	    EX_NOWAIT);
 	if (ex == 0)
 		return (1);
@@ -505,7 +498,7 @@ tx3912video_reset(struct video_chip *chip)
 }
 
 int
-tx3912video_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
+tx3912video_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct tx3912video_softc *sc = (struct tx3912video_softc *)v;
 	struct hpcfb_fbconf *fbconf;

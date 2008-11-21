@@ -1,4 +1,4 @@
-/*	$NetBSD: cgthree.c,v 1.14 2007/10/19 12:01:19 ad Exp $ */
+/*	$NetBSD: cgthree.c,v 1.16 2008/06/11 21:25:31 drochner Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgthree.c,v 1.14 2007/10/19 12:01:19 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgthree.c,v 1.16 2008/06/11 21:25:31 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -169,7 +162,7 @@ cgthreeopen(dev, flags, mode, l)
 {
 	int unit = minor(dev);
 
-	if (unit >= cgthree_cd.cd_ndevs || cgthree_cd.cd_devs[unit] == NULL)
+	if (device_lookup(&cgthree_cd, unit) == NULL)
 		return (ENXIO);
 	return (0);
 }
@@ -182,7 +175,8 @@ cgthreeioctl(dev, cmd, data, flags, l)
 	int flags;
 	struct lwp *l;
 {
-	struct cgthree_softc *sc = cgthree_cd.cd_devs[minor(dev)];
+	struct cgthree_softc *sc = device_lookup_private(&cgthree_cd,
+							 minor(dev));
 	struct fbgattr *fba;
 	int error;
 
@@ -241,7 +235,7 @@ cgthreeunblank(dev)
 	struct device *dev;
 {
 
-	cgthree_set_video((struct cgthree_softc *)dev, 1);
+	cgthree_set_video(device_private(dev), 1);
 }
 
 static void
@@ -304,7 +298,8 @@ cgthreemmap(dev, off, prot)
 	off_t off;
 	int prot;
 {
-	struct cgthree_softc *sc = cgthree_cd.cd_devs[minor(dev)];
+	struct cgthree_softc *sc = device_lookup_private(&cgthree_cd,
+							 minor(dev));
 
 #define START		(128*1024 + 128*1024)
 #define NOOVERLAY	(0x04000000)

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pci_axppci_33.c,v 1.18 2006/06/15 20:08:29 brad Exp $	*/
-/*	$NetBSD: pci_axppci_33.c,v 1.10 1996/11/13 21:13:29 cgd Exp $	*/
+/* $NetBSD: pci_axppci_33.c,v 1.29 2002/09/27 15:35:38 provos Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,12 +27,17 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: pci_axppci_33.c,v 1.29 2002/09/27 15:35:38 provos Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
+
 #include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
@@ -52,13 +56,12 @@
 
 #include "sio.h"
 
-int     dec_axppci_33_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
-const char *dec_axppci_33_intr_string(void *, pci_intr_handle_t);
-int	dec_axppci_33_intr_line(void *, pci_intr_handle_t);
-void    *dec_axppci_33_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void    dec_axppci_33_intr_disestablish(void *, void *);
+int     dec_axppci_33_intr_map __P((struct pci_attach_args *, pci_intr_handle_t *));
+const char *dec_axppci_33_intr_string __P((void *, pci_intr_handle_t));
+const struct evcnt *dec_axppci_33_intr_evcnt __P((void *, pci_intr_handle_t));
+void    *dec_axppci_33_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *));
+void    dec_axppci_33_intr_disestablish __P((void *, void *));
 
 #define	LCA_SIO_DEVICE	7	/* XXX */
 
@@ -82,13 +85,12 @@ pci_axppci_33_pickintr(lcp)
 	pc->pc_intr_v = lcp;
 	pc->pc_intr_map = dec_axppci_33_intr_map;
 	pc->pc_intr_string = dec_axppci_33_intr_string;
-	pc->pc_intr_line = dec_axppci_33_intr_line;
+	pc->pc_intr_evcnt = dec_axppci_33_intr_evcnt;
 	pc->pc_intr_establish = dec_axppci_33_intr_establish;
 	pc->pc_intr_disestablish = dec_axppci_33_intr_disestablish;
 
-        /* Not supported on AXPpci33. */
-        pc->pc_pciide_compat_intr_establish = NULL;
-        pc->pc_pciide_compat_intr_disestablish = NULL;
+	/* Not supported on AXPpci33. */
+	pc->pc_pciide_compat_intr_establish = NULL;
 
 #if NSIO
 	sio_intr_setup(pc, iot);
@@ -98,26 +100,30 @@ pci_axppci_33_pickintr(lcp)
 }
 
 int
-dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
-	void *lcv;
-	pcitag_t bustag;
-	int buspin, line;
+dec_axppci_33_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
 	pci_intr_handle_t *ihp;
 {
-	struct lca_config *lcp = lcv;
-	pci_chipset_tag_t pc = &lcp->lc_pc;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int device, pirq;
 	pcireg_t pirqreg;
 	u_int8_t pirqline;
 
-        if (buspin == 0) {
-                /* No IRQ used. */
-                return 1;
-        }
-        if (buspin > 4) {
-                printf("pci_map_int: bad interrupt pin %d\n", buspin);
-                return 1;
-        }
+#ifndef DIAGNOSTIC
+	pirq = 0;				/* XXX gcc -Wuninitialized */
+#endif
+
+	if (buspin == 0) {
+		/* No IRQ used. */
+		return 1;
+	}
+	if (buspin > 4) {
+		printf("dec_axppci_33_intr_map: bad interrupt pin %d\n",
+		    buspin);
+		return 1;
+	}
 
 	pci_decompose_tag(pc, bustag, NULL, &device, NULL);
 
@@ -140,7 +146,7 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 			break;
 #ifdef DIAGNOSTIC
 		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_axppci_33_intr_map bogus PCI pin %d",
+			panic("dec_axppci_33_intr_map: bogus PCI pin %d",
 			    buspin);
 #endif
 		};
@@ -160,7 +166,7 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 			break;
 #ifdef DIAGNOSTIC
 		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_axppci_33_intr_map bogus PCI pin %d",
+			panic("dec_axppci_33_intr_map: bogus PCI pin %d",
 			    buspin);
 #endif
 		};
@@ -180,7 +186,7 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 			break;
 #ifdef DIAGNOSTIC
 		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_axppci_33_intr_map bogus PCI pin %d",
+			panic("dec_axppci_33_intr_map bogus: PCI pin %d",
 			    buspin);
 #endif
 		};
@@ -195,7 +201,7 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 	pirqreg = pci_conf_read(pc, pci_make_tag(pc, 0, LCA_SIO_DEVICE, 0),
 	    SIO_PCIREG_PIRQ_RTCTRL);
 #if 0
-	printf("pci_axppci_33_map_int: device %d pin %c: pirq %d, reg = %x\n",
+	printf("dec_axppci_33_intr_map: device %d pin %c: pirq %d, reg = %x\n",
 		device, '@' + buspin, pirq, pirqreg);
 #endif
 	pirqline = (pirqreg >> (pirq * 8)) & 0xff;
@@ -204,7 +210,7 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 	pirqline &= 0xf;
 
 #if 0
-	printf("pci_axppci_33_map_int: device %d pin %c: mapped to line %d\n",
+	printf("dec_axppci_33_intr_map: device %d pin %c: mapped to line %d\n",
 	    device, '@' + buspin, pirqline);
 #endif
 
@@ -217,32 +223,47 @@ dec_axppci_33_intr_string(lcv, ih)
 	void *lcv;
 	pci_intr_handle_t ih;
 {
+#if 0
+	struct lca_config *lcp = lcv;
+#endif
+
 	return sio_intr_string(NULL /*XXX*/, ih);
 }
 
-int
-dec_axppci_33_intr_line(lcv, ih)
+const struct evcnt *
+dec_axppci_33_intr_evcnt(lcv, ih)
 	void *lcv;
 	pci_intr_handle_t ih;
 {
-	return sio_intr_line(NULL /*XXX*/, ih);
+#if 0
+	struct lca_config *lcp = lcv;
+#endif
+
+	return sio_intr_evcnt(NULL /*XXX*/, ih);
 }
 
 void *
-dec_axppci_33_intr_establish(lcv, ih, level, func, arg, name)
+dec_axppci_33_intr_establish(lcv, ih, level, func, arg)
 	void *lcv, *arg;
 	pci_intr_handle_t ih;
 	int level;
-	int (*func)(void *);
-	char *name;
+	int (*func) __P((void *));
 {
+#if 0
+	struct lca_config *lcp = lcv;
+#endif
+
 	return sio_intr_establish(NULL /*XXX*/, ih, IST_LEVEL, level, func,
-	    arg, name);
+	    arg);
 }
 
 void
 dec_axppci_33_intr_disestablish(lcv, cookie)
 	void *lcv, *cookie;
 {
+#if 0
+	struct lca_config *lcp = lcv;
+#endif
+
 	sio_intr_disestablish(NULL /*XXX*/, cookie);
 }

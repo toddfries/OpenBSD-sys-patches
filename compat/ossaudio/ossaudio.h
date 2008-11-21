@@ -1,7 +1,6 @@
-/*	$OpenBSD: ossaudio.h,v 1.3 2002/03/14 01:26:50 millert Exp $	*/
-/*	$NetBSD: ossaudio.h,v 1.5 1997/10/16 16:49:37 augustss Exp $	*/
+/*	$NetBSD: ossaudio.h,v 1.12 2008/04/28 20:23:45 martin Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -13,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,9 +28,9 @@
 
 struct oss_sys_ioctl_args;
 
-int oss_ioctl_audio(struct proc *, struct oss_sys_ioctl_args *,
+int oss_ioctl_audio(struct lwp *, const struct oss_sys_ioctl_args *,
     register_t *);
-int oss_ioctl_mixer(struct proc *, struct oss_sys_ioctl_args *,
+int oss_ioctl_mixer(struct lwp *, const struct oss_sys_ioctl_args *,
     register_t *);
-int oss_ioctl_sequencer(struct proc *, struct oss_sys_ioctl_args *,
+int oss_ioctl_sequencer(struct lwp *, const struct oss_sys_ioctl_args *,
     register_t *);

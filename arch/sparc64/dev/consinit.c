@@ -1,5 +1,4 @@
-/*	$OpenBSD: consinit.c,v 1.13 2008/01/23 16:37:57 jsing Exp $	*/
-/*	$NetBSD: consinit.c,v 1.9 2000/10/20 05:32:35 mrg Exp $	*/
+/*	$NetBSD: consinit.c,v 1.24 2007/10/17 19:57:28 garbled Exp $	*/
 
 /*-
  * Copyright (c) 1999 Eduardo E. Horvath
@@ -29,6 +28,10 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.24 2007/10/17 19:57:28 garbled Exp $");
+
+#include "opt_ddb.h"
 #include "pcons.h"
 #include "ukbd.h"
 
@@ -46,8 +49,9 @@
 
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
-#include <machine/conf.h>
+#include <machine/bsd_openprom.h>
 #include <machine/cpu.h>
+#include <machine/eeprom.h>
 #include <machine/psl.h>
 #include <machine/z8530var.h>
 #include <machine/sparc64.h>
@@ -58,9 +62,11 @@
 
 #include <dev/usb/ukbdvar.h>
 
-cons_decl(prom_);
-
-int stdin = NULL, stdout = NULL;
+static void prom_cnprobe(struct consdev *);
+static void prom_cninit(struct consdev *);
+int  prom_cngetc(dev_t);
+static void prom_cnputc(dev_t, int);
+static void prom_cnpollc(dev_t, int);
 
 /*
  * The console is set to this one initially,
@@ -68,12 +74,11 @@ int stdin = NULL, stdout = NULL;
  * is called to select a real console.
  */
 struct consdev consdev_prom = {
-	prom_cnprobe,
-	prom_cninit,
-	prom_cngetc,
-	prom_cnputc,
-	prom_cnpollc,
-	NULL
+	.cn_probe = prom_cnprobe,
+	.cn_init = prom_cninit,
+	.cn_getc = prom_cngetc,
+	.cn_putc = prom_cnputc,
+	.cn_pollc = prom_cnpollc,
 };
 
 /*
@@ -88,12 +93,11 @@ prom_cnprobe(struct consdev *cd)
 {
 #if NPCONS > 0
 	int maj;
+	extern const struct cdevsw pcons_cdevsw;
 
-	for (maj = 0; maj < nchrdev; maj++)
-		if (cdevsw[maj].d_open == pconsopen)
-			break;
+	maj = cdevsw_lookup_major(&pcons_cdevsw);
 	cd->cn_dev = makedev(maj, 0);
-	cd->cn_pri = CN_MIDPRI;
+	cd->cn_pri = CN_INTERNAL;
 #endif
 }
 
@@ -105,44 +109,35 @@ prom_cngetc(dev_t dev)
 #ifdef DDB
 	static int nplus = 0;
 #endif
-	
-	while ((l = OF_read(stdin, &ch, 1)) != 1)
+
+	while ((l = prom_read(prom_stdin(), &ch, 1)) != 1)
 		/* void */;
 #ifdef DDB
 	if (ch == '+') {
-		if (nplus++ > 3)
-			Debugger();
-	} else
-		nplus = 0;
+		if (nplus++ > 3) Debugger();
+	} else nplus = 0;
 #endif
 	if (ch == '\r')
 		ch = '\n';
-	if (ch == '\b')
-		ch = '\177';
 	return ch;
 }
 
-void
+static void
 prom_cninit(struct consdev *cn)
 {
-	if (!stdin) stdin = OF_stdin();
-	if (!stdout) stdout = OF_stdout();
 }
 
 /*
  * PROM console output putchar.
  */
-void
+static void
 prom_cnputc(dev_t dev, int c)
 {
 	int s;
 	char c0 = (c & 0x7f);
 
-#if 0
-	if (!stdout) stdout = OF_stdout();
-#endif
 	s = splhigh();
-	OF_write(stdout, &c0, 1);
+	prom_write(prom_stdout(), &c0, 1);
 	splx(s);
 }
 
@@ -151,13 +146,15 @@ prom_cnpollc(dev_t dev, int on)
 {
 	if (on) {
                 /* Entering debugger. */
+#if NFB > 0
                 fb_unblank();
+#endif
 	} else {
                 /* Resuming kernel. */
 	}
 #if NPCONS > 0
 	pcons_cnpollc(dev, on);
-#endif  
+#endif
 }
 
 /*****************************************************************/
@@ -168,6 +165,9 @@ prom_cnpollc(dev_t dev, int on)
 #define	DBPRINT(x)
 #endif
 
+int prom_stdin_node;
+int prom_stdout_node;
+
 /*
  * This function replaces sys/dev/cninit.c
  * Determine which device is the console using
@@ -176,48 +176,48 @@ prom_cnpollc(dev_t dev, int on)
 void
 consinit()
 {
-	register int chosen;
+	int chosen;
 	char buffer[128];
-	extern int stdinnode, fbnode;
-	char *consname = "unknown";
-	
+	const char *consname = "unknown";
+
 	DBPRINT(("consinit()\r\n"));
-	if (cn_tab != &consdev_prom) return;
-	
-	DBPRINT(("setting up stdin\r\n"));
-	chosen = OF_finddevice("/chosen");
-	OF_getprop(chosen, "stdin",  &stdin, sizeof(stdin));
-	DBPRINT(("stdin instance = %x\r\n", stdin));
-	
-	if ((stdinnode = OF_instance_to_package(stdin)) == 0) {
+
+	if (cn_tab != &consdev_prom)
+		return;
+
+	chosen = prom_finddevice("/chosen");
+
+	if ((prom_stdin_node = prom_instance_to_package(prom_stdin())) == 0) {
 		printf("WARNING: no PROM stdin\n");
 	}
-#if NUKBD > 0
-	else {
-		if (OF_getprop(stdinnode, "compatible", buffer,
-		    sizeof(buffer)) != -1 && strncmp("usb", buffer, 3) == 0)
-			ukbd_cnattach();
-	}
-#endif
+	DBPRINT(("stdin node = %x\r\n", prom_stdin_node));
 
-	DBPRINT(("setting up stdout\r\n"));
-	OF_getprop(chosen, "stdout", &stdout, sizeof(stdout));
-	
-	DBPRINT(("stdout instance = %x\r\n", stdout));
-	
-	if ((fbnode = OF_instance_to_package(stdout)) == 0)
+	if ((prom_stdout_node = prom_instance_to_package(prom_stdout())) == 0)
 		printf("WARNING: no PROM stdout\n");
-	
-	DBPRINT(("stdout package = %x\r\n", fbnode));
-	
-	if (stdinnode && (OF_getproplen(stdinnode,"keyboard") >= 0)) {
-		consname = "keyboard/display";
-	} else if (fbnode && 
-		   (OF_instance_to_path(stdin, buffer, sizeof(buffer)) >= 0)) {
+	DBPRINT(("stdout package = %x\r\n", prom_stdout_node));
+
+	DBPRINT(("buffer @ %p\r\n", buffer));
+
+	if (prom_stdin_node != 0 &&
+	    (prom_getproplen(prom_stdin_node, "keyboard") >= 0)) {
+#if NUKBD > 0
+		if ((OF_instance_to_path(prom_stdin(), buffer, sizeof(buffer)) >= 0) &&
+		    (strstr(buffer, "/usb@") != NULL)) {
+			/*
+		 	* If we have a USB keyboard, it will show up as (e.g.)
+		 	*   /pci@1f,0/usb@c,3/keyboard@1	(Blade 100)
+		 	*/
+			consname = "usb-keyboard/display";
+			ukbd_cnattach();
+		} else
+#endif
+			consname = "sun-keyboard/display";
+	} else if (prom_stdin_node != 0 &&
+		   (OF_instance_to_path(prom_stdin(), buffer, sizeof(buffer)) >= 0)) {
 		consname = buffer;
 	}
-	printf("console is %s\n", consname);
- 
+	DBPRINT(("console is %s\n", consname));
+
 	/* Initialize PROM console */
 	(*cn_tab->cn_probe)(cn_tab);
 	(*cn_tab->cn_init)(cn_tab);

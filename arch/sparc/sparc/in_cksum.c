@@ -1,12 +1,39 @@
-/*	$OpenBSD: in_cksum.c,v 1.12 2008/02/16 23:02:41 miod Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.7 1996/10/05 23:44:34 mrg Exp $ */
+/*	$NetBSD: in_cksum.c,v 1.20 2008/05/30 02:29:37 mrg Exp $ */
 
 /*
- * Copyright (c) 1995 Zubin Dittia.
  * Copyright (c) 1995 Matthew R. Green.
- * Copyright (c) 1994 Charles Hannum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, and it's contributors.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,10 +62,52 @@
  *	@(#)in_cksum.c	8.1 (Berkeley) 6/11/93
  */
 
+/*
+ * Copyright (c) 1995 Zubin Dittia.
+ * Copyright (c) 1994, 1998 Charles M. Hannum.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, and it's contributors.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)in_cksum.c	8.1 (Berkeley) 6/11/93
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.20 2008/05/30 02:29:37 mrg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/socketvar.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
@@ -75,7 +144,7 @@
  * Zubin Dittia (zubin@dworkin.wustl.edu)
  */
 
-#define Asm	__asm __volatile
+#define Asm	__asm volatile
 #define ADD64		Asm("	ld [%4+ 0],%1;   ld [%4+ 4],%2;		\
 				addcc  %0,%1,%0; addxcc %0,%2,%0;	\
 				ld [%4+ 8],%1;   ld [%4+12],%2;		\
@@ -125,12 +194,13 @@
 				: "0" (sum), "r" (w))
 
 #define REDUCE		{sum = (sum & 0xffff) + (sum >> 16);}
+#define ADDCARRY	{if (sum > 0xffff) sum -= 0xffff;}
 #define ROL		{sum = sum << 8;}	/* depends on recent REDUCE */
 #define ADDBYTE		{ROL; sum += *w; byte_swapped ^= 1;}
 #define ADDSHORT	{sum += *(u_short *)w;}
 #define ADVANCE(n)	{w += n; mlen -= n;}
 
-static __inline__ int
+static inline int
 in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 {
 	u_char *w;
@@ -211,9 +281,8 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 		REDUCE;
 		ROL;
 	}
-	/* Two REDUCEs is faster than REDUCE1; if (sum > 65535) sum -= 65535; */
 	REDUCE;
-	REDUCE;
+	ADDCARRY;
 
 	return (0xffff ^ sum);
 }
@@ -226,7 +295,7 @@ in_cksum(struct mbuf *m, int len)
 }
 
 int
-in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
+in4_cksum(struct mbuf *m, uint8_t nxt, int off, int len)
 {
 	u_char *w;
 	u_int sum = 0;

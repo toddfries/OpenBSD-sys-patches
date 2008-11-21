@@ -1,4 +1,3 @@
-/*	$OpenBSD: i80321_mcu.c,v 1.2 2006/05/29 17:27:31 drahn Exp $	*/
 /*	$NetBSD: i80321_mcu.c,v 1.3 2005/12/11 12:16:51 christos Exp $	*/
 
 /*
@@ -39,6 +38,9 @@
 /*
  * Intel i80321 I/O Processor memory controller support.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i80321_mcu.c,v 1.3 2005/12/11 12:16:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>

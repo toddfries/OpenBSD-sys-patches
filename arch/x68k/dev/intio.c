@@ -1,7 +1,7 @@
-/*	$NetBSD: intio.c,v 1.28 2005/12/11 12:19:37 christos Exp $	*/
+/*	$NetBSD: intio.c,v 1.37 2008/06/25 08:14:59 isaki Exp $	*/
 
 /*-
- * Copyright (c) 1998 NetBSD Foundation, Inc.
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.28 2005/12/11 12:19:37 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.37 2008/06/25 08:14:59 isaki Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -122,14 +115,13 @@ struct x68k_bus_dma intio_bus_dma = {
 /*
  * autoconf stuff
  */
-static int intio_match(struct device *, struct cfdata *, void *);
-static void intio_attach(struct device *, struct device *, void *);
-static int intio_search(struct device *, struct cfdata *cf,
-			const int *, void *);
+static int intio_match(device_t, cfdata_t, void *);
+static void intio_attach(device_t, device_t, void *);
+static int intio_search(device_t, cfdata_t, const int *, void *);
 static int intio_print(void *, const char *);
 static void intio_alloc_system_ports(struct intio_softc*);
 
-CFATTACH_DECL(intio, sizeof(struct intio_softc),
+CFATTACH_DECL_NEW(intio, sizeof(struct intio_softc),
     intio_match, intio_attach, NULL, NULL);
 
 extern struct cfdriver intio_cd;
@@ -139,22 +131,20 @@ static int intio_attached;
 static struct intio_interrupt_vector {
 	intio_intr_handler_t	iiv_handler;
 	void			*iiv_arg;
-	int			iiv_intrcntoff;
+	struct evcnt		*iiv_evcnt;
 } iiv[256] = {{0,},};
 
 /* used in console initialization */
 extern int x68k_realconfig;
 int x68k_config_found(struct cfdata *, struct device *, void *, cfprint_t);
-static struct cfdata *cfdata_intiobus = NULL;
+static cfdata_t cfdata_intiobus = NULL;
 
-/* other static functions */
-static int scan_intrnames(const char *);
 #ifdef DEBUG
 int intio_debug = 0;
 #endif
 
 static int
-intio_match(struct device *parent, struct cfdata *cf, void *aux)
+intio_match(device_t parent, cfdata_t cf, void *aux)
 {
 
 	if (strcmp(aux, intio_cd.cd_name) != 0)
@@ -182,9 +172,9 @@ static struct intio_attach_args initial_ia = {
 };
 
 static void
-intio_attach(struct device *parent, struct device *self, void *aux)
+intio_attach(device_t parent, device_t self, void *aux)
 {
-	struct intio_softc *sc = (struct intio_softc *)self;
+	struct intio_softc *sc = device_private(self);
 	struct intio_attach_args ia;
 
 	if (self == NULL) {
@@ -195,7 +185,7 @@ intio_attach(struct device *parent, struct device *self, void *aux)
 
 	intio_attached = 1;
 
-	printf (" mapped at %8p\n", intiobase);
+	aprint_normal(" mapped at %8p\n", intiobase);
 
 	sc->sc_map = extent_create("intiomap",
 				  PHYS_INTIODEV,
@@ -208,7 +198,7 @@ intio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = &intio_bus_dma;
 	sc->sc_dmac = 0;
 
-	memset(iiv, 0, sizeof (struct intio_interrupt_vector) * 256);
+	memset(iiv, 0, sizeof(struct intio_interrupt_vector) * 256);
 
 	ia.ia_bst = sc->sc_bst;
 	ia.ia_dmat = sc->sc_dmat;
@@ -217,11 +207,10 @@ intio_attach(struct device *parent, struct device *self, void *aux)
 }
 
 static int
-intio_search(struct device *parent, struct cfdata *cf,
-	     const int *ldesc, void *aux)
+intio_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
 {
+	struct intio_softc *sc = device_private(parent);
 	struct intio_attach_args *ia = aux;
-	struct intio_softc *sc = (struct intio_softc *)parent;
 
 	ia->ia_bst = sc->sc_bst;
 	ia->ia_dmat = sc->sc_dmat;
@@ -243,13 +232,13 @@ intio_print(void *aux, const char *name)
 	struct intio_attach_args *ia = aux;
 
 /*	if (ia->ia_addr > 0)	*/
-		aprint_normal (" addr 0x%06x", ia->ia_addr);
+		aprint_normal(" addr 0x%06x", ia->ia_addr);
 	if (ia->ia_intr > 0)
-		aprint_normal (" intr 0x%02x", ia->ia_intr);
+		aprint_normal(" intr 0x%02x", ia->ia_intr);
 	if (ia->ia_dma >= 0) {
-		aprint_normal (" using DMA ch%d", ia->ia_dma);
+		aprint_normal(" using DMA ch%d", ia->ia_dma);
 		if (ia->ia_dmaintr > 0)
-			aprint_normal (" intr 0x%02x and 0x%02x",
+			aprint_normal(" intr 0x%02x and 0x%02x",
 				ia->ia_dmaintr, ia->ia_dmaintr+1);
 	}
 
@@ -261,37 +250,37 @@ intio_print(void *aux, const char *name)
  */
 
 int
-intio_map_allocate_region(struct device *parent, struct intio_attach_args *ia,
+intio_map_allocate_region(device_t parent, struct intio_attach_args *ia,
     enum intio_map_flag flag)
 {
-	struct intio_softc *sc = (struct intio_softc *)parent;
+	struct intio_softc *sc = device_private(parent);
 	struct extent *map = sc->sc_map;
 	int r;
 
-	r = extent_alloc_region (map, ia->ia_addr, ia->ia_size, 0);
+	r = extent_alloc_region(map, ia->ia_addr, ia->ia_size, 0);
 #ifdef DEBUG
 	if (intio_debug)
-		extent_print (map);
+		extent_print(map);
 #endif
 	if (r == 0) {
 		if (flag != INTIO_MAP_ALLOCATE)
-		extent_free (map, ia->ia_addr, ia->ia_size, 0);
+		extent_free(map, ia->ia_addr, ia->ia_size, 0);
 		return 0;
-	} 
+	}
 
 	return -1;
 }
 
 int
-intio_map_free_region(struct device *parent, struct intio_attach_args *ia)
+intio_map_free_region(device_t parent, struct intio_attach_args *ia)
 {
-	struct intio_softc *sc = (struct intio_softc*) parent;
+	struct intio_softc *sc = device_private(parent);
 	struct extent *map = sc->sc_map;
 
-	extent_free (map, ia->ia_addr, ia->ia_size, 0);
+	extent_free(map, ia->ia_addr, ia->ia_size, 0);
 #ifdef DEBUG
 	if (intio_debug)
-		extent_print (map);
+		extent_print(map);
 #endif
 	return 0;
 }
@@ -299,8 +288,8 @@ intio_map_free_region(struct device *parent, struct intio_attach_args *ia)
 void
 intio_alloc_system_ports(struct intio_softc *sc)
 {
-	extent_alloc_region (sc->sc_map, INTIO_SYSPORT, 16, 0);
-	extent_alloc_region (sc->sc_map, INTIO_SICILIAN, 0x2000, 0);
+	extent_alloc_region(sc->sc_map, INTIO_SYSPORT, 16, 0);
+	extent_alloc_region(sc->sc_map, INTIO_SICILIAN, 0x2000, 0);
 }
 
 
@@ -351,39 +340,31 @@ int
 intio_intr_establish(int vector, const char *name, intio_intr_handler_t handler,
     void *arg)
 {
-	if (vector < 16)
-		panic ("Invalid interrupt vector");
-	if (iiv[vector].iiv_handler)
-		return EBUSY;
-	iiv[vector].iiv_handler = handler;
-	iiv[vector].iiv_arg = arg;
-	iiv[vector].iiv_intrcntoff = scan_intrnames(name);
 
-	return 0;
+	return intio_intr_establish_ext(vector, name, "intr", handler, arg);
 }
 
-static int
-scan_intrnames(const char *name)
+int
+intio_intr_establish_ext(int vector, const char *name1, const char *name2,
+	intio_intr_handler_t handler, void *arg)
 {
-	extern char intrnames[];
-	extern char eintrnames[];
-	int r = 0;
-	char *p = &intrnames[0];
+	struct evcnt *evcnt;
 
-	for (;;) {
-		if (*p == 0) {	/* new intr */
-			if (p + strlen(name) >= eintrnames)
-				panic ("Interrupt statics buffer overrun.");
-			strcpy (p, name);
-			break;
-		}
-		if (strcmp(p, name) == 0)
-			break;
-		r++;
-		while (*p++ != 0);
-	}
+	if (vector < 16)
+		panic("Invalid interrupt vector");
+	if (iiv[vector].iiv_handler)
+		return EBUSY;
 
-	return r;
+	evcnt = malloc(sizeof(*evcnt), M_DEVBUF, M_NOWAIT);
+	if (evcnt == NULL)
+		return ENOMEM;
+	evcnt_attach_dynamic(evcnt, EVCNT_TYPE_INTR, NULL, name1, name2);
+
+	iiv[vector].iiv_handler = handler;
+	iiv[vector].iiv_arg = arg;
+	iiv[vector].iiv_evcnt = evcnt;
+
+	return 0;
 }
 
 int
@@ -393,6 +374,8 @@ intio_intr_disestablish(int vector, void *arg)
 		return EINVAL;
 	iiv[vector].iiv_handler = 0;
 	iiv[vector].iiv_arg = 0;
+	evcnt_detach(iiv[vector].iiv_evcnt);
+	free(iiv[vector].iiv_evcnt, M_DEVBUF);
 
 	return 0;
 }
@@ -401,21 +384,20 @@ int
 intio_intr(struct frame *frame)
 {
 	int vector = frame->f_vector / 4;
-	extern int intrcnt[];
 
 #if 0				/* this is not correct now */
 	/* CAUTION: HERE WE ARE IN SPLHIGH() */
 	/* LOWER TO APPROPRIATE IPL AT VERY FIRST IN THE HANDLER!! */
 #endif
 	if (iiv[vector].iiv_handler == 0) {
-		printf ("Stray interrupt: %d type %x, pc %x\n",
+		printf("Stray interrupt: %d type %x, pc %x\n",
 			vector, frame->f_format, frame->f_pc);
 		return 0;
 	}
 
-	intrcnt[iiv[vector].iiv_intrcntoff]++;
+	iiv[vector].iiv_evcnt->ev_count++;
 
-	return (*(iiv[vector].iiv_handler)) (iiv[vector].iiv_arg);
+	return (*(iiv[vector].iiv_handler))(iiv[vector].iiv_arg);
 }
 
 /*
@@ -429,7 +411,7 @@ intio_set_ivec(int vec)
 	vec &= 0xfc;
 
 	if (intio_ivec && intio_ivec != (vec & 0xfc))
-		panic ("Wrong interrupt vector for Sicilian.");
+		panic("Wrong interrupt vector for Sicilian.");
 
 	intio_ivec = vec;
 	intio_set_sicilian_ivec(vec);
@@ -485,7 +467,7 @@ _intio_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	 * DMAC), we may have to bounce it as well.
 	 */
 	if (avail_end <= t->_bounce_thresh)
-		/* Bouncing not necessary due to memory size. */ 
+		/* Bouncing not necessary due to memory size. */
 		map->x68k_dm_bounce_thresh = 0;
 	cookieflags = 0;
 	if (map->x68k_dm_bounce_thresh != 0 ||
@@ -812,7 +794,7 @@ _intio_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 				minlen = len < m->m_len - moff ?
 				    len : m->m_len - moff;
 
-				memcpy(mtod(m, caddr_t) + moff,
+				memcpy(mtod(m, char *) + moff,
 				    (char *)cookie->id_bouncebuf + offset,
 				    minlen);
 
@@ -885,7 +867,7 @@ _intio_dma_alloc_bouncebuf(bus_dma_tag_t t, bus_dmamap_t map, bus_size_t size,
 		goto out;
 	error = x68k_bus_dmamem_map(t, cookie->id_bouncesegs,
 	    cookie->id_nbouncesegs, cookie->id_bouncebuflen,
-	    (caddr_t *)&cookie->id_bouncebuf, flags);
+	    (void **)&cookie->id_bouncebuf, flags);
 
  out:
 	if (error) {

@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_qe.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: if_qe.c,v 1.3 2000/05/20 13:30:03 ragge Exp $ */
+/*	$NetBSD: if_qe.c,v 1.5 2007/03/04 06:00:56 christos Exp $ */
 
 /*
  * Copyright (c) 1998 Roar Thronæs.  All rights reserved.
@@ -41,7 +40,9 @@
 #include <lib/libsa/netif.h>
 #include <lib/libsa/stand.h>
 
-#include <arch/vax/if/if_qereg.h>
+#include "lib/libkern/libkern.h"
+
+#include <dev/qbus/if_qereg.h>
 
 #include "../include/rpb.h"
 
@@ -122,12 +123,12 @@ qe_init(u_char *eaddr)
 		eaddr[i] = QE_RCSR(i * 2);
 	}
 
-	bzero((caddr_t)sc->rring, sizeof(struct qe_ring));
+	bzero((void *)sc->rring, sizeof(struct qe_ring));
 	sc->rring->qe_buf_len = -64;
 	sc->rring->qe_addr_lo = (short)((int)sc->setup_pkt);
 	sc->rring->qe_addr_hi = (short)((int)sc->setup_pkt >> 16);
 
-	bzero((caddr_t)sc->tring, sizeof(struct qe_ring));
+	bzero((void *)sc->tring, sizeof(struct qe_ring));
 	sc->tring->qe_buf_len = -64;
 	sc->tring->qe_addr_lo = (short)((int)sc->setup_pkt);
 	sc->tring->qe_addr_hi = (short)((int)sc->setup_pkt >> 16);
@@ -233,7 +234,7 @@ qe_put(struct iodesc *desc, void *pkt, size_t len) {
 		;
 
 	if ((QE_RCSR(QE_CSR_CSR) & QE_XMIT_INT) == 0) {
-		char eaddr[6];
+		u_char eaddr[6];
 
 		qe_init(eaddr);
 		return -1;
@@ -241,7 +242,7 @@ qe_put(struct iodesc *desc, void *pkt, size_t len) {
 	QE_WCSR(QE_CSR_CSR, QE_RCSR(QE_CSR_CSR) & ~QE_RCV_INT);
 
 	if (sc->tring[0].qe_status1 & 0xc000) {
-		char eaddr[6];
+		u_char eaddr[6];
 
 		qe_init(eaddr);
 		return -1;

@@ -1,5 +1,4 @@
-/*	$OpenBSD: sb.c,v 1.25 2008/04/21 00:32:42 jakemsr Exp $	*/
-/*	$NetBSD: sb.c,v 1.57 1998/01/12 09:43:46 thorpej Exp $	*/
+/*	$NetBSD: sb.c,v 1.88 2008/03/15 21:09:02 cube Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -35,6 +34,9 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sb.c,v 1.88 2008/03/15 21:09:02 cube Exp $");
+
 #include "midi.h"
 
 #include <sys/param.h>
@@ -45,9 +47,9 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 
-#include <machine/cpu.h>
-#include <machine/intr.h>
-#include <machine/bus.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
+#include <sys/bus.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -60,41 +62,15 @@
 #include <dev/isa/sbvar.h>
 #include <dev/isa/sbdspvar.h>
 
-struct cfdriver sb_cd = {
-	NULL, "sb", DV_DULL
-};
-
-#if NMIDI > 0
-int	sb_mpu401_open(void *, int, void (*iintr)(void *, int),
-		       void (*ointr)(void *), void *arg);
-void	sb_mpu401_close(void *);
-int	sb_mpu401_output(void *, int);
-void	sb_mpu401_getinfo(void *, struct midi_info *);
-
-struct midi_hw_if sb_midi_hw_if = {
+#if NMPU > 0
+const struct midi_hw_if sb_midi_hw_if = {
 	sbdsp_midi_open,
 	sbdsp_midi_close,
 	sbdsp_midi_output,
-	0,			/* flush */
 	sbdsp_midi_getinfo,
 	0,			/* ioctl */
 };
-
-struct midi_hw_if sb_mpu401_hw_if = {
-	sb_mpu401_open,
-	sb_mpu401_close,
-	sb_mpu401_output,
-	0,			/* flush */
-	sb_mpu401_getinfo,
-	0,			/* ioctl */
-};
 #endif
-
-struct audio_device sb_device = {
-	"SoundBlaster",
-	"x",
-	"sb"
-};
 
 int	sb_getdev(void *, struct audio_device *);
 
@@ -102,7 +78,7 @@ int	sb_getdev(void *, struct audio_device *);
  * Define our interface to the higher level audio driver.
  */
 
-struct audio_hw_if sb_hw_if = {
+const struct audio_hw_if sb_hw_if = {
 	sbdsp_open,
 	sbdsp_close,
 	0,
@@ -114,8 +90,8 @@ struct audio_hw_if sb_hw_if = {
 	0,
 	0,
 	0,
-	sbdsp_haltdma,
-	sbdsp_haltdma,
+	sbdsp_halt_output,
+	sbdsp_halt_input,
 	sbdsp_speaker_ctl,
 	sb_getdev,
 	0,
@@ -124,20 +100,14 @@ struct audio_hw_if sb_hw_if = {
 	sbdsp_mixer_query_devinfo,
 	sb_malloc,
 	sb_free,
-	sb_round,
-        sb_mappage,
+	sb_round_buffersize,
+	sb_mappage,
 	sbdsp_get_props,
 	sbdsp_trigger_output,
 	sbdsp_trigger_input,
-	NULL
+	NULL,
+	NULL,
 };
-
-#ifdef AUDIO_DEBUG
-#define DPRINTF(x)	if (sbdebug) printf x
-int	sbdebug = 0;
-#else
-#define DPRINTF(x)
-#endif
 
 /*
  * Probe / attach routines.
@@ -145,18 +115,17 @@ int	sbdebug = 0;
 
 
 int
-sbmatch(sc)
-	struct sbdsp_softc *sc;
+sbmatch(struct sbdsp_softc *sc, int probing, cfdata_t match)
 {
-	static u_char drq_conf[8] = {
+	static const u_char drq_conf[8] = {
 		0x01, 0x02, -1, 0x08, -1, 0x20, 0x40, 0x80
 	};
 
-	static u_char irq_conf[11] = {
+	static const u_char irq_conf[11] = {
 		-1, -1, 0x01, -1, -1, 0x02, -1, 0x04, -1, 0x01, 0x08
 	};
 
-	if (sbdsp_probe(sc) == 0)
+	if (sbdsp_probe(sc, match) == 0)
 		return 0;
 
 	/*
@@ -164,88 +133,116 @@ sbmatch(sc)
 	 */
 	if (ISSBPROCLASS(sc)) {
 		if (!SBP_DRQ_VALID(sc->sc_drq8)) {
-			DPRINTF(("%s: configured dma chan %d invalid\n",
-			    sc->sc_dev.dv_xname, sc->sc_drq8));
+			aprint_error("%s: configured DMA chan %d invalid\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_drq8);
 			return 0;
 		}
 	} else {
 		if (!SB_DRQ_VALID(sc->sc_drq8)) {
-			DPRINTF(("%s: configured dma chan %d invalid\n",
-			    sc->sc_dev.dv_xname, sc->sc_drq8));
+			aprint_error("%s: configured DMA chan %d invalid\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_drq8);
 			return 0;
 		}
 	}
 
-        if (0 <= sc->sc_drq16 && sc->sc_drq16 <= 3)
-        	/* 
-                 * XXX Some ViBRA16 cards seem to have two 8 bit DMA 
+	if (0 <= sc->sc_drq16 && sc->sc_drq16 <= 3)
+		/*
+                 * XXX Some ViBRA16 cards seem to have two 8 bit DMA
                  * channels.  I've no clue how to use them, so ignore
-                 * one of them for now.  -- augustss@netbsd.org
+                 * one of them for now.  -- augustss@NetBSD.org
                  */
-        	sc->sc_drq16 = -1;
+		sc->sc_drq16 = -1;
 
 	if (ISSB16CLASS(sc)) {
 		if (sc->sc_drq16 == -1)
 			sc->sc_drq16 = sc->sc_drq8;
 		if (!SB16_DRQ_VALID(sc->sc_drq16)) {
-			DPRINTF(("%s: configured dma chan %d invalid\n",
-			    sc->sc_dev.dv_xname, sc->sc_drq16));
+			aprint_error("%s: configured DMA chan %d invalid\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_drq16);
 			return 0;
 		}
 	} else
 		sc->sc_drq16 = sc->sc_drq8;
-	
+
 	if (ISSBPROCLASS(sc)) {
 		if (!SBP_IRQ_VALID(sc->sc_irq)) {
-			DPRINTF(("%s: configured irq %d invalid\n",
-			    sc->sc_dev.dv_xname, sc->sc_irq));
+			aprint_error("%s: configured irq %d invalid\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_irq);
 			return 0;
 		}
 	} else {
 		if (!SB_IRQ_VALID(sc->sc_irq)) {
-			DPRINTF(("%s: configured irq %d invalid\n",
-			    sc->sc_dev.dv_xname, sc->sc_irq));
+			aprint_error("%s: configured irq %d invalid\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_irq);
 			return 0;
 		}
 	}
 
-	if (ISSB16CLASS(sc)) {
+	if (ISSB16CLASS(sc) && !(sc->sc_quirks & SB_QUIRK_NO_INIT_DRQ)) {
 		int w, r;
+		if (sc->sc_irq >= __arraycount(irq_conf)) {
+			aprint_error("%s: Cannot handle irq %d\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_irq);
+			return 0;
+		}
+		if (sc->sc_drq16 >= __arraycount(drq_conf)) {
+			aprint_error("%s: Cannot handle drq16 %d\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_drq16);
+			return 0;
+		}
+		if (sc->sc_drq8 >= __arraycount(drq_conf)) {
+			aprint_error("%s: Cannot handle drq8 %d\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev),
+			    sc->sc_drq8);
+			return 0;
+		}
 #if 0
-		DPRINTF(("%s: old drq conf %02x\n", sc->sc_dev.dv_xname,
-		    sbdsp_mix_read(sc, SBP_SET_DRQ)));
-		DPRINTF(("%s: try drq conf %02x\n", sc->sc_dev.dv_xname,
-		    drq_conf[sc->sc_drq16] | drq_conf[sc->sc_drq8]));
+		printf("%s: old drq conf %02x\n", device_xname(sc->sc_dev),
+		    sbdsp_mix_read(sc, SBP_SET_DRQ));
+		printf("%s: try drq conf %02x\n", device_xname(sc->sc_dev),
+		    drq_conf[sc->sc_drq16] | drq_conf[sc->sc_drq8]);
 #endif
 		w = drq_conf[sc->sc_drq16] | drq_conf[sc->sc_drq8];
 		sbdsp_mix_write(sc, SBP_SET_DRQ, w);
 		r = sbdsp_mix_read(sc, SBP_SET_DRQ) & 0xeb;
 		if (r != w) {
-			DPRINTF(("%s: setting drq mask %02x failed, got %02x\n", sc->sc_dev.dv_xname, w, r));
+			aprint_error("%s: setting drq mask %02x failed, "
+			    "got %02x\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev), w,
+			    r);
 			return 0;
 		}
 #if 0
-		DPRINTF(("%s: new drq conf %02x\n", sc->sc_dev.dv_xname,
-		    sbdsp_mix_read(sc, SBP_SET_DRQ)));
+		printf("%s: new drq conf %02x\n", device_xname(sc->sc_dev),
+		    sbdsp_mix_read(sc, SBP_SET_DRQ));
 #endif
 
 #if 0
-		DPRINTF(("%s: old irq conf %02x\n", sc->sc_dev.dv_xname,
-		    sbdsp_mix_read(sc, SBP_SET_IRQ)));
-		DPRINTF(("%s: try irq conf %02x\n", sc->sc_dev.dv_xname,
-		    irq_conf[sc->sc_irq]));
+		printf("%s: old irq conf %02x\n", device_xname(sc->sc_dev),
+		    sbdsp_mix_read(sc, SBP_SET_IRQ));
+		printf("%s: try irq conf %02x\n", device_xname(sc->sc_dev),
+		    irq_conf[sc->sc_irq]);
 #endif
 		w = irq_conf[sc->sc_irq];
 		sbdsp_mix_write(sc, SBP_SET_IRQ, w);
 		r = sbdsp_mix_read(sc, SBP_SET_IRQ) & 0x0f;
 		if (r != w) {
-			DPRINTF(("%s: setting irq mask %02x failed, got %02x\n",
-			    sc->sc_dev.dv_xname, w, r));
+			aprint_error("%s: setting irq mask %02x failed, "
+			    "got %02x\n",
+			    probing ? "sbmatch" : device_xname(sc->sc_dev), w,
+			    r);
 			return 0;
 		}
 #if 0
-		DPRINTF(("%s: new irq conf %02x\n", sc->sc_dev.dv_xname,
-		    sbdsp_mix_read(sc, SBP_SET_IRQ)));
+		printf("%s: new irq conf %02x\n", device_xname(sc->sc_dev),
+		    sbdsp_mix_read(sc, SBP_SET_IRQ));
 #endif
 	}
 
@@ -254,37 +251,36 @@ sbmatch(sc)
 
 
 void
-sbattach(sc)
-	struct sbdsp_softc *sc;
+sbattach(struct sbdsp_softc *sc)
 {
 	struct audio_attach_args arg;
-#if NMIDI > 0
-	struct midi_hw_if *mhw = &sb_midi_hw_if;
-#endif
-
-	sc->sc_ih = isa_intr_establish(sc->sc_ic, sc->sc_irq, IST_EDGE,
-	    IPL_AUDIO, sbdsp_intr, sc, sc->sc_dev.dv_xname);
 
 	sbdsp_attach(sc);
 
-#if NMIDI > 0
-	sc->sc_hasmpu = 0;
-	if (ISSB16CLASS(sc) && sc->sc_mpu_sc.iobase != 0) {
-		sc->sc_mpu_sc.iot = sc->sc_iot;
-		if (mpu_find(&sc->sc_mpu_sc)) {
-			sc->sc_hasmpu = 1;
-			mhw = &sb_mpu401_hw_if;
-		}
+	audio_attach_mi(&sb_hw_if, sc, sc->sc_dev);
+
+#if NMPU > 0
+	switch(sc->sc_hasmpu) {
+	default:
+	case SBMPU_NONE:	/* no mpu */
+		break;
+	case SBMPU_INTERNAL:	/* try to attach midi directly */
+		midi_attach_mi(&sb_midi_hw_if, sc, sc->sc_dev);
+		break;
+	case SBMPU_EXTERNAL:	/* search for mpu */
+		arg.type = AUDIODEV_TYPE_MPU;
+		arg.hwif = 0;
+		arg.hdl = 0;
+		sc->sc_mpudev = config_found_ia(sc->sc_dev, "sbdsp", &arg, audioprint);
+		break;
 	}
-	midi_attach_mi(mhw, sc, &sc->sc_dev);
 #endif
-
-	audio_attach_mi(&sb_hw_if, sc, &sc->sc_dev);
-
-	arg.type = AUDIODEV_TYPE_OPL;
-	arg.hwif = 0;
-	arg.hdl = 0;
-	(void)config_found(&sc->sc_dev, &arg, audioprint);
+	if (sc->sc_model >= SB_20) {
+		arg.type = AUDIODEV_TYPE_OPL;
+		arg.hwif = 0;
+		arg.hdl = 0;
+		(void)config_found_ia(sc->sc_dev, "sbdsp", &arg, audioprint);
+	}
 }
 
 /*
@@ -292,66 +288,24 @@ sbattach(sc)
  */
 
 int
-sb_getdev(addr, retp)
-	void *addr;
-	struct audio_device *retp;
+sb_getdev(void *addr, struct audio_device *retp)
 {
-	struct sbdsp_softc *sc = addr;
-	static char *names[] = SB_NAMES;
-	char *config;
+	static const char * const names[] = SB_NAMES;
+	struct sbdsp_softc *sc;
+	const char *config;
 
+	sc = addr;
 	if (sc->sc_model == SB_JAZZ)
-		strlcpy(retp->name, "MV Jazz16", sizeof retp->name);
+		strlcpy(retp->name, "MV Jazz16", sizeof(retp->name));
 	else
-		strlcpy(retp->name, "SoundBlaster", sizeof retp->name);
-	snprintf(retp->version, sizeof retp->version, "%d.%02d", 
-		 SBVER_MAJOR(sc->sc_version),
-		 SBVER_MINOR(sc->sc_version));
-	if (0 <= sc->sc_model && sc->sc_model < sizeof names / sizeof names[0])
+		strlcpy(retp->name, "SoundBlaster", sizeof(retp->name));
+	snprintf(retp->version, sizeof(retp->version), "%d.%02d",
+	    SBVER_MAJOR(sc->sc_version), SBVER_MINOR(sc->sc_version));
+	if (sc->sc_model < sizeof names / sizeof names[0])
 		config = names[sc->sc_model];
 	else
 		config = "??";
-	strlcpy(retp->config, config, sizeof retp->config);
-		
+	strlcpy(retp->config, config, sizeof(retp->config));
+
 	return 0;
 }
-
-#if NMIDI > 0
-
-#define SBMPU(a) (&((struct sbdsp_softc *)addr)->sc_mpu_sc)
-
-int
-sb_mpu401_open(addr, flags, iintr, ointr, arg)
-	void *addr;
-	int flags;
-	void (*iintr)(void *, int);
-	void (*ointr)(void *);
-	void *arg;
-{
-	return mpu_open(SBMPU(addr), flags, iintr, ointr, arg);
-}
-
-int
-sb_mpu401_output(addr, d)
-	void *addr;
-	int d;
-{
-	return mpu_output(SBMPU(addr), d);
-}
-
-void
-sb_mpu401_close(addr)
-	void *addr;
-{
-	mpu_close(SBMPU(addr));
-}
-
-void
-sb_mpu401_getinfo(addr, mi)
-	void *addr;
-	struct midi_info *mi;
-{
-	mi->name = "SB MPU-401 UART";
-	mi->props = 0;
-}
-#endif

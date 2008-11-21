@@ -1,4 +1,4 @@
-/* $NetBSD: aiboost.c,v 1.17 2007/11/05 23:57:32 xtraeme Exp $ */
+/* $NetBSD: aiboost.c,v 1.25 2008/05/20 14:46:31 cegger Exp $ */
 
 /*-
  * Copyright (c) 2007 Juan Romero Pardines
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aiboost.c,v 1.17 2007/11/05 23:57:32 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: aiboost.c,v 1.25 2008/05/20 14:46:31 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -62,7 +62,7 @@ struct aiboost_comp {
 struct aiboost_softc {
 	struct acpi_devnode *sc_node;	/* ACPI devnode */
 	struct aiboost_comp *sc_aitemp, *sc_aivolt, *sc_aifan;
-	struct sysmon_envsys sc_sme;
+	struct sysmon_envsys *sc_sme;
 	envsys_data_t *sc_sensor;
 	kmutex_t sc_mtx;
 };
@@ -74,7 +74,7 @@ static int	aiboost_get_value(ACPI_HANDLE, const char *, UINT32);
 
 /* sysmon_envsys(9) glue */
 static void	aiboost_setup_sensors(struct aiboost_softc *);
-static int	aiboost_refresh_sensors(struct sysmon_envsys *,
+static void	aiboost_refresh_sensors(struct sysmon_envsys *,
 					envsys_data_t *);
 
 /* autoconf(9) glue */
@@ -110,7 +110,8 @@ aiboost_acpi_attach(device_t parent, device_t self, void *aux)
 	struct aiboost_softc *sc = device_private(self);
 	struct acpi_attach_args *aa = aux;
 	ACPI_HANDLE *handl;
-	int i, maxsens;
+	int i, maxsens, error = 0;
+	size_t len;
 
 	sc->sc_node = aa->aa_node;
 	handl = sc->sc_node->ad_handle;
@@ -134,32 +135,49 @@ aiboost_acpi_attach(device_t parent, device_t self, void *aux)
 	maxsens = sc->sc_aivolt->num + sc->sc_aitemp->num + sc->sc_aifan->num;
 	DPRINTF(("%s: maxsens=%d\n", __func__, maxsens));
 
-	sc->sc_sensor = kmem_zalloc(sizeof(envsys_data_t) * maxsens,
-	    KM_NOSLEEP);
+	sc->sc_sme = sysmon_envsys_create();
+	len = sizeof(envsys_data_t) * maxsens;
+	sc->sc_sensor = kmem_zalloc(len, KM_NOSLEEP);
 	if (!sc->sc_sensor)
-		return;
+		goto bad2;
 
-	for (i = 0; i < maxsens; i++) {
-		sc->sc_sensor[i].sensor = i;
-		sc->sc_sensor[i].state = ENVSYS_SVALID;
-	}
-
+	/*
+	 * Set properties in sensors.
+	 */
 	aiboost_setup_sensors(sc);
 
 	/*
-	 * Hook into the system monitor.
+	 * Add the sensors into the sysmon_envsys device.
 	 */
-	sc->sc_sme.sme_name = device_xname(self);
-	sc->sc_sme.sme_sensor_data = sc->sc_sensor;
-	sc->sc_sme.sme_cookie = sc;
-	sc->sc_sme.sme_gtredata = aiboost_refresh_sensors;
-	sc->sc_sme.sme_nsensors = maxsens;
-
-	if (sysmon_envsys_register(&sc->sc_sme)) {
-		aprint_error_dev(self, "unable to register with sysmon\n");
-		kmem_free(sc->sc_sensor, sizeof(*sc->sc_sensor));
-		mutex_destroy(&sc->sc_mtx);
+	for (i = 0; i < maxsens; i++) {
+		if (sysmon_envsys_sensor_attach(sc->sc_sme,
+						&sc->sc_sensor[i]))
+			goto bad;
 	}
+
+	/*
+	 * Register the sysmon_envsys device.
+	 */
+	sc->sc_sme->sme_name = device_xname(self);
+	sc->sc_sme->sme_cookie = sc;
+	sc->sc_sme->sme_refresh = aiboost_refresh_sensors;
+
+	if ((error = sysmon_envsys_register(sc->sc_sme))) {
+		aprint_error_dev(self, "unable to register with sysmon "
+		    "(error=%d)\n", error);
+		goto bad;
+	}
+
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
+
+	return;
+
+bad:
+	kmem_free(sc->sc_sensor, len);
+bad2:
+	sysmon_envsys_destroy(sc->sc_sme);
+	mutex_destroy(&sc->sc_mtx);
 }
 
 #define COPYDESCR(x, y)				\
@@ -204,7 +222,7 @@ aiboost_setup_sensors(struct aiboost_softc *sc)
 	}
 }
 
-static int
+static void
 aiboost_refresh_sensors(struct sysmon_envsys *sme, envsys_data_t *edata)
 {
 	struct aiboost_softc *sc = sme->sme_cookie;
@@ -228,7 +246,7 @@ aiboost_refresh_sensors(struct sysmon_envsys *sme, envsys_data_t *edata)
 		/* Temperatures */
 		val = aiboost_get_value(h, "RTMP", sc->sc_aitemp->elem[i].id);
 		AIBOOST_INVALIDATE_SENSOR();
-		/* envsys(4) wants mK... convert from Celsius. */
+		/* envsys(4) wants uK... convert from Celsius. */
 		edata->value_cur = val * 100000 + 273150000;
 		DPRINTF(("%s: temp[%d] value_cur=%d val=%d j=%d\n", __func__,
 		    i, edata->value_cur, val, j));
@@ -257,7 +275,6 @@ aiboost_refresh_sensors(struct sysmon_envsys *sme, envsys_data_t *edata)
 	edata->state = ENVSYS_SVALID;
 out:
 	mutex_exit(&sc->sc_mtx);
-	return 0;
 }
 
 static int
@@ -292,12 +309,19 @@ aiboost_getcomp(ACPI_HANDLE *h, const char *name, struct aiboost_comp **comp)
 	ACPI_BUFFER buf, buf2;
 	ACPI_OBJECT *o, *elem, *subobj, *myobj;
 	ACPI_STATUS status;
+	ACPI_HANDLE h1;
 	struct aiboost_comp *c = NULL;
-	int i;
+	int i, num;
 	const char *str = NULL;
-	size_t length;
+	size_t length, clen = 0;
 
-	status = acpi_eval_struct(h, name, &buf);
+	status = AcpiGetHandle(h, name, &h1);
+	if (ACPI_FAILURE(status)) {
+		DPRINTF(("%s: AcpiGetHandle\n", __func__));
+		return status;
+	}
+
+	status = acpi_eval_struct(h1, NULL, &buf);
 	if (ACPI_FAILURE(status)) {
 		DPRINTF(("%s: acpi_eval_struct\n", __func__));
 		return status;
@@ -314,40 +338,69 @@ aiboost_getcomp(ACPI_HANDLE *h, const char *name, struct aiboost_comp **comp)
 		DPRINTF(("%s: elem->Type != ACPI_TYPE_INTEGER\n", __func__));
 		goto error;
 	}
+	num = (int)elem[0].Integer.Value;
+	if (num != o->Package.Count - 1) {
+		DPRINTF(("%s: bad Package.Count/element[0].value\n", __func__));
+	}
 
-	c = kmem_zalloc(sizeof(struct aiboost_comp) +
-	    sizeof(struct aiboost_elem) * (elem->Integer.Value - 1),
-	    KM_NOSLEEP);
+	clen = sizeof(struct aiboost_comp) + sizeof(struct aiboost_elem) * num;
+	c = kmem_zalloc(clen, KM_NOSLEEP);
 	if (!c)
 		goto error;
 
 	*comp = c;
-	c->num = elem->Integer.Value;
+	c->num = num;
 
-	for (i = 1; i < o->Package.Count; i++) {
-		elem = &o->Package.Elements[i];
-		if (elem->Type != ACPI_TYPE_ANY) {
-			DPRINTF(("%s: elem->Type != ACPI_TYPE_ANY\n",
+	DPRINTF(("%s, %d subitems\n", acpi_name(h1), num));
+#ifdef AIBOOST_DEBUG
+	for (i = 0; i < num; i++) {
+		elem = &o->Package.Elements[i+1];
+		DPRINTF(("elem[%d]->Type = %x\n", i+1, elem->Type));
+		if (elem->Type == ACPI_TYPE_PACKAGE &&
+			elem->Package.Elements[0].Type == ACPI_TYPE_INTEGER) {
+			DPRINTF((" subelem->Type = %x, %d\n",
+			    elem->Package.Elements[0].Type,
+			    (int)elem->Package.Elements[0].Integer.Value));
+		}
+	}
+#endif
+	for (i = 0; i < num; i++) {
+		elem = &o->Package.Elements[i+1];
+		if (elem->Type == ACPI_TYPE_PACKAGE) {
+			/* information provided directly in package */
+			subobj = elem;
+			buf2.Pointer = NULL;
+		} else if (elem->Type == ACPI_TYPE_LOCAL_REFERENCE) {
+			/* information provided indirectly.  request package */
+			c->elem[i].h = elem->Reference.Handle;
+			status = acpi_eval_struct(c->elem[i].h, NULL, &buf2);
+			if (ACPI_FAILURE(status)) {
+				DPRINTF(("%s: fetching object in buf2\n",
+				    __func__));
+				goto error;
+			}
+			subobj = buf2.Pointer;
+			if (subobj->Type != ACPI_TYPE_PACKAGE) {
+				DPRINTF(("%s: fetched type cannot processed\n",
+				    __func__));
+				goto error;
+			}
+		} else {
+			DPRINTF(("%s: elem->Type cannot be processed\n",
 			    __func__));
 			goto error;
 		}
 
-		c->elem[i - 1].h = elem->Reference.Handle;
-		status = acpi_eval_struct(c->elem[i - 1].h, NULL, &buf2);
-		if (ACPI_FAILURE(status)) {
-			DPRINTF(("%s; fetching object in buf2\n",
-			    __func__));
-			goto error;
-		}
-
-		subobj = buf2.Pointer;
 		myobj = &subobj->Package.Elements[0];
 
 		/* Get UID */
-		if (myobj == NULL || myobj->Type != ACPI_TYPE_INTEGER)
+		if (myobj == NULL || myobj->Type != ACPI_TYPE_INTEGER) {
+			DPRINTF(("%s: wrong type for element %d\n", __func__,
+			    i + 1));
 			goto error;
+		}
 
-		c->elem[i - 1].id = myobj->Integer.Value;
+		c->elem[i].id = myobj->Integer.Value;
 
 		/* Get string */
 		myobj = &subobj->Package.Elements[1];
@@ -370,9 +423,9 @@ aiboost_getcomp(ACPI_HANDLE *h, const char *name, struct aiboost_comp **comp)
 		}
 
 		DPRINTF(("%s: id=%d str=%s\n", __func__,
-		    c->elem[i - 1].id, str));
+		    c->elem[i].id, str));
 
-		(void)memcpy(c->elem[i - 1].desc, str, length);
+		(void)memcpy(c->elem[i].desc, str, length);
 
 		if (buf2.Pointer)
 			AcpiOsFree(buf2.Pointer);
@@ -389,7 +442,7 @@ error:
 	if (buf2.Pointer)
 		AcpiOsFree(buf2.Pointer);
 	if (c)
-		kmem_free(c, sizeof(*c));
+		kmem_free(c, clen);
 
 	return AE_BAD_DATA;
 }

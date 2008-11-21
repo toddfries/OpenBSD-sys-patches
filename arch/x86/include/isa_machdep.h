@@ -1,4 +1,4 @@
-/*	$NetBSD: isa_machdep.h,v 1.4 2005/04/16 07:45:59 yamt Exp $	*/
+/*	$NetBSD: isa_machdep.h,v 1.6 2008/06/27 11:03:13 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -99,13 +92,12 @@ struct x86_isa_chipset {
 
 typedef struct x86_isa_chipset *isa_chipset_tag_t;
 
-struct device;			/* XXX */
 struct isabus_attach_args;	/* XXX */
 
 /*
  * Functions provided to machine-independent ISA code.
  */
-void	isa_attach_hook(struct device *, struct device *,
+void	isa_attach_hook(device_t, device_t,
 	    struct isabus_attach_args *);
 int	isa_intr_alloc(isa_chipset_tag_t, int, int, int *);
 const struct evcnt *isa_intr_evcnt(isa_chipset_tag_t ic, int irq);

@@ -1,5 +1,4 @@
-/*	$OpenBSD: viareg.h,v 1.19 2007/09/10 20:29:48 miod Exp $	*/
-/*	$NetBSD: viareg.h,v 1.6 1997/02/28 07:41:41 scottr Exp $	*/
+/*	$NetBSD: viareg.h,v 1.14 2005/12/11 12:18:03 christos Exp $	*/
 
 /*-
  * Copyright (C) 1993	Allen K. Briggs, Chris P. Caputo,
@@ -34,14 +33,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
 /*
- * Prototype VIA control definitions
- */
-#ifndef _MAC68K_VIAREG_H_
-#define _MAC68K_VIAREG_H_
 
-/* VIA1 data register A */
+	Prototype VIA control definitions
+
+	06/04/92,22:33:57 BG Let's see what I can do.
+
+*/
+
+
+	/* VIA1 data register A */
 #define DA1I_vSCCWrReq	0x80
 #define DA1O_vPage2	0x40
 #define DA1I_CPU_ID1	0x40
@@ -52,11 +53,11 @@
 #define DA1O_RESERVED1	0x02
 #define DA1O_RESERVED0	0x01
 
-/* VIA1 data register B */
+	/* VIA1 data register B */
 #define DB1I_Par_Err	0x80
 #define DB1O_vSndEnb	0x80
 #define DB1O_Par_Enb	0x40
-#define	DB1O_AuxIntEnb	0x40	/* 0 = enabled, 1 = disabled */
+#define DB1O_AuxIntEnb	0x40	/* 0 = enabled, 1 = disabled */
 #define DB1O_vFDesk2	0x20
 #define DB1O_vFDesk1	0x10
 #define DB1I_vFDBInt	0x08
@@ -65,7 +66,7 @@
 #define DB1O_rTCData	0x01
 #define DB1I_rTCData	0x01
 
-/* VIA2 data register A */
+	/* VIA2 data register A */
 #define DA2O_v2Ram1	0x80
 #define DA2O_v2Ram0	0x40
 #define DA2I_v2IRQ0	0x40
@@ -76,7 +77,7 @@
 #define DA2I_v2IRQA	0x02
 #define DA2I_v2IRQ9	0x01
 
-/* VIA2 data register B */
+	/* VIA2 data register B */
 #define DB2O_v2VBL	0x80
 #define DB2O_Par_Test	0x80
 #define DB2I_v2SNDEXT	0x40
@@ -168,7 +169,7 @@ extern int VIA2;
 #define vIFR		0x1a00	/* interrupt flag register */
 #define vIER		0x1c00	/* interrupt enable register */
 
-/* RBV interface registers */
+	/* RBV interface registers */
 #define rBufB		0	/* register B */
 #define rBufA		2	/* register A */
 #define rIFR		0x3	/* interrupt flag register (writes?) */
@@ -176,7 +177,7 @@ extern int VIA2;
 #define rMonitor	0x10	/* Monitor type */
 #define rSlotInt	0x12	/* Slot interrupt */
 
-/* RBV monitor type flags and masks */
+	/* RBV monitor type flags and masks */
 #define RBVDepthMask	0x07	/* Depth in bits */
 #define RBVMonitorMask	0x38	/* Type numbers */
 #define RBVOff		0x40	/* Monitor turned off */
@@ -186,37 +187,25 @@ extern int VIA2;
 #define RBVMonIDStd	0x30	/* 12 inch BW or 13 inch color */
 #define RBVMonIDNone	0x38	/* No monitor connected */
 
-/* OSS registers */
+	/* OSS registers */
 #define OSS_IFR		0x202
-#define OSS_PENDING_IRQ (*(volatile u_short *)(Via2Base + (OSS_IFR)))
+#define OSS_PENDING_IRQ	(*(volatile u_short *)(Via2Base + (OSS_IFR)))
 
 #define OSS_oRCR	0x204
-#define OSS_POWEROFF	0x80
+#define OSS_POWEROFF	 0x80
 
 #define via_reg(v, r) (*(Via1Base+(v)*0x2000+(r)))
 #define via2_reg(r) (*(Via2Base+(r)))
 
 #define vDirA_ADBState	0x30
 
-#ifdef _KERNEL
-/* VIA2 interrupts may be shared */
-struct via2hand {
-	SLIST_ENTRY(via2hand)	v2h_link;
-	struct intrhand 	v2h_ih;
-#define	vh_fn		v2h_ih.ih_fn
-#define	vh_arg		v2h_ih.ih_arg
-#define	vh_ipl		v2h_ih.ih_ipl
-#define	vh_count	v2h_ih.ih_count
-};
-typedef SLIST_HEAD(, via2hand)	via2hand_t;
-
 void	via_init(void);
 void	via_powerdown(void);
 void	via_set_modem(int);
-void	add_nubus_intr(int, int, int (*)(void *), void *, const char *);
+int	add_nubus_intr(int, void (*)(void *), void *);
 void	enable_nubus_intr(void);
-void	via1_register_irq(int, int (*)(void *), void *, const char *);
-int	via2_register_irq(struct via2hand *, const char *);
-#endif	/* _KERNEL */
+void	via1_register_irq(int, void (*)(void *), void *);
+void	via2_register_irq(int, void (*)(void *), void *);
 
-#endif	/* _MAC68K_VIAREG_H_ */
+extern void	(*via1itab[7])(void *);
+extern void	(*via2itab[7])(void *);

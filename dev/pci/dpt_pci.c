@@ -1,8 +1,7 @@
-/*	$OpenBSD: dpt_pci.c,v 1.6 2008/05/13 02:24:08 brad Exp $	*/
-/*	$NetBSD: dpt_pci.c,v 1.2 1999/09/29 17:33:02 ad Exp $	*/
+/*	$NetBSD: dpt_pci.c,v 1.21 2008/04/10 19:13:36 cegger Exp $	*/
 
 /*
- * Copyright (c) 1999 Andy Doran <ad@NetBSD.org>
+ * Copyright (c) 1999, 2000, 2001 Andrew Doran <ad@NetBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,25 +31,19 @@
  * PCI front-end for DPT EATA SCSI driver.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dpt_pci.c,v 1.21 2008/04/10 19:13:36 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/queue.h>
-#include <sys/proc.h>
 
-#include <machine/endian.h>
-#include <machine/bus.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#ifdef __NetBSD__
-#include <dev/scsipi/scsi_all.h>
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-#endif /* __OpenBSD__ */
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -58,94 +51,92 @@
 #include <dev/ic/dptreg.h>
 #include <dev/ic/dptvar.h>
 
+#include <dev/i2o/dptivar.h>
+
 #define	PCI_CBMA	0x14	/* Configuration base memory address */
 #define	PCI_CBIO	0x10	/* Configuration base I/O address */
 
-#ifdef __NetBSD__
-int	dpt_pci_match(struct device *, struct cfdata *, void *);
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-int	dpt_pci_match(struct device *, void *, void *);
-#endif /* __OpenBSD__ */
-void	dpt_pci_attach(struct device *, struct device *, void *);
+static int	dpt_pci_match(struct device *, struct cfdata *, void *);
+static void	dpt_pci_attach(struct device *, struct device *, void *);
 
-struct cfattach dpt_pci_ca = {
-	sizeof(struct dpt_softc), dpt_pci_match, dpt_pci_attach
-};
+CFATTACH_DECL(dpt_pci, sizeof(struct dpt_softc),
+    dpt_pci_match, dpt_pci_attach, NULL, NULL);
 
-int
-dpt_pci_match(parent, match, aux)
-	struct device *parent;
-#ifdef __NetBSD__
-	struct cfdata *match;
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	void *match;
-#endif /* __OpenBSD__ */
-	void *aux;
+static int
+dpt_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
-	struct pci_attach_args *pa = (struct pci_attach_args *) aux;
+	struct pci_attach_args *pa;
 
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_DPT && 
+	pa = (struct pci_attach_args *)aux;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_DPT &&
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DPT_SC_RAID)
 		return (1);
- 
+
 	return (0);
 }
 
-void
-dpt_pci_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+static void
+dpt_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa;
 	struct dpt_softc *sc;
 	pci_chipset_tag_t pc;
 	pci_intr_handle_t ih;
+	bus_space_handle_t ioh;
 	const char *intrstr;
+	pcireg_t csr;
+
+	aprint_naive(": Storage controller\n");
 
 	sc = (struct dpt_softc *)self;
 	pa = (struct pci_attach_args *)aux;
 	pc = pa->pa_pc;
-	printf(": ");
+	aprint_normal(": ");
 
-	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0, &sc->sc_iot, 
-	    &sc->sc_ioh, NULL, NULL, 0)) {
-		printf("can't map i/o space\n");
+	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0, &sc->sc_iot,
+	    &ioh, NULL, NULL)) {
+		aprint_error("can't map i/o space\n");
+		return;
+	}
+
+	/* Need to map in by 16 registers. */
+	if (bus_space_subregion(sc->sc_iot, ioh, 16, 16, &sc->sc_ioh)) {
+		aprint_error("can't map i/o subregion\n");
 		return;
 	}
 
 	sc->sc_dmat = pa->pa_dmat;
 
+	/* Enable the device. */
+	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+		       csr | PCI_COMMAND_MASTER_ENABLE);
+
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
-		printf("can't map interrupt\n");
+		aprint_error("can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
-#ifdef __NetBSD__
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, dpt_intr, sc);
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, dpt_intr, sc,
-				       sc->sc_dv.dv_xname);
-#endif /* __OpenBSD__ */
 	if (sc->sc_ih == NULL) {
-		printf("can't establish interrupt");
+		aprint_error("can't establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		return;
 	}
 
-	/* Read the EATA configuration */
+	/* Read the EATA configuration. */
 	if (dpt_readcfg(sc)) {
-		printf("%s: readcfg failed - see dpt(4)\n", 
-		    sc->sc_dv.dv_xname);
-		return;	
+		aprint_error_dev(&sc->sc_dv, "readcfg failed - see dpt(4)\n");
+		return;
 	}
 
-	/* Now attach to the bus-independant code */
+	sc->sc_bustype = SI_PCI_BUS;
+
+	/* Now attach to the bus-independent code. */
 	dpt_init(sc, intrstr);
 }

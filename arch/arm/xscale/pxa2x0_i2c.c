@@ -1,3 +1,4 @@
+/*	$NetBSD: pxa2x0_i2c.c,v 1.3 2007/10/17 19:53:44 garbled Exp $	*/
 /*	$OpenBSD: pxa2x0_i2c.c,v 1.2 2005/05/26 03:52:07 pascoe Exp $	*/
 
 /*
@@ -16,8 +17,14 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_i2c.c,v 1.3 2007/10/17 19:53:44 garbled Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/device.h>
+
+#include <machine/bus.h>
 
 #include <arm/xscale/pxa2x0reg.h>
 #include <arm/xscale/pxa2x0var.h>
@@ -29,6 +36,7 @@
 int
 pxa2x0_i2c_attach_sub(struct pxa2x0_i2c_softc *sc)
 {
+
 	if (bus_space_map(sc->sc_iot, PXA2X0_I2C_BASE,
 	    PXA2X0_I2C_SIZE, 0, &sc->sc_ioh)) {
 		sc->sc_size = 0;
@@ -36,13 +44,6 @@ pxa2x0_i2c_attach_sub(struct pxa2x0_i2c_softc *sc)
 	}
 	bus_space_barrier(sc->sc_iot, sc->sc_ioh, 0, sc->sc_size,
 	    BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE);
-
-	/*
-	 * Configure the alternate functions.  The _IN is arbitrary, as the
-	 * direction is managed by the I2C unit when comms are in progress.
-	 */
-	pxa2x0_gpio_set_function(117, GPIO_ALT_FN_1_IN);	/* SCL */
-	pxa2x0_gpio_set_function(118, GPIO_ALT_FN_1_IN);	/* SDA */
 
 	pxa2x0_i2c_init(sc);
 
@@ -52,6 +53,7 @@ pxa2x0_i2c_attach_sub(struct pxa2x0_i2c_softc *sc)
 int
 pxa2x0_i2c_detach_sub(struct pxa2x0_i2c_softc *sc)
 {
+
 	if (sc->sc_size) {
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_size);
 		sc->sc_size = 0;
@@ -64,6 +66,7 @@ pxa2x0_i2c_detach_sub(struct pxa2x0_i2c_softc *sc)
 void
 pxa2x0_i2c_init(struct pxa2x0_i2c_softc *sc)
 {
+
 	pxa2x0_i2c_open(sc);
 	pxa2x0_i2c_close(sc);
 }
@@ -71,6 +74,7 @@ pxa2x0_i2c_init(struct pxa2x0_i2c_softc *sc)
 void
 pxa2x0_i2c_open(struct pxa2x0_i2c_softc *sc)
 {
+
 	/* Enable the clock to the standard I2C unit. */
 	pxa2x0_clkman_config(CKEN_I2C, 1);
 }
@@ -78,6 +82,7 @@ pxa2x0_i2c_open(struct pxa2x0_i2c_softc *sc)
 void
 pxa2x0_i2c_close(struct pxa2x0_i2c_softc *sc)
 {
+
 	/* Reset and disable the standard I2C unit. */
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, I2C_ICR, ICR_UR);
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, I2C_ISAR, 0);
@@ -88,11 +93,11 @@ pxa2x0_i2c_close(struct pxa2x0_i2c_softc *sc)
 int
 pxa2x0_i2c_read(struct pxa2x0_i2c_softc *sc, u_char slave, u_char *valuep)
 {
-	u_int32_t rv;
-	int timeout;
-	int tries = I2C_RETRY_COUNT;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
+	int timeout;
+	int tries = I2C_RETRY_COUNT;
+	uint32_t rv;
 
 retry:
 	bus_space_write_4(iot, ioh, I2C_ICR, ICR_UR);
@@ -141,10 +146,10 @@ retry:
 	rv = bus_space_read_4(iot, ioh, I2C_IDBR);
 	*valuep = (u_char)rv;
 	rv = bus_space_read_4(iot, ioh, I2C_ICR);
-	bus_space_write_4(iot, ioh, I2C_ICR, rv &
-	    ~(ICR_STOP | ICR_ACKNAK));
+	bus_space_write_4(iot, ioh, I2C_ICR, rv & ~(ICR_STOP | ICR_ACKNAK));
 
-	return (0);
+	return 0;
+
 err:
 	if (tries-- >= 0)
 		goto retry;
@@ -154,17 +159,17 @@ err:
 	bus_space_write_4(iot, ioh, I2C_ISR, ISR_ITE | ISR_IRF);
 	bus_space_write_4(iot, ioh, I2C_ICR, ICR_IUE | ICR_SCLE);
 
-	return (-EIO);
+	return EIO;
 }
 
 int
 pxa2x0_i2c_write(struct pxa2x0_i2c_softc *sc, u_char slave, u_char value)
 {
-	u_int32_t rv;
-	int timeout;
-	int tries = I2C_RETRY_COUNT;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
+	int timeout;
+	int tries = I2C_RETRY_COUNT;
+	uint32_t rv;
 
 retry:
 	bus_space_write_4(iot, ioh, I2C_ICR, ICR_UR);
@@ -216,7 +221,8 @@ retry:
 	rv = bus_space_read_4(iot, ioh, I2C_ICR);
 	bus_space_write_4(iot, ioh, I2C_ICR, rv & ~ICR_STOP);
 
-	return (0);
+	return 0;
+
 err:
 	if (tries-- >= 0)
 		goto retry;
@@ -226,17 +232,17 @@ err:
 	bus_space_write_4(iot, ioh, I2C_ISR, ISR_ITE);
 	bus_space_write_4(iot, ioh, I2C_ICR, ICR_IUE | ICR_SCLE);
 
-	return (-EIO);
+	return EIO;
 }
 
 int
 pxa2x0_i2c_write_2(struct pxa2x0_i2c_softc *sc, u_char slave, u_short value)
 {
-	u_int32_t rv;
-	int timeout;
-	int tries = I2C_RETRY_COUNT;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
+	int timeout;
+	int tries = I2C_RETRY_COUNT;
+	uint32_t rv;
 
 retry:
 	bus_space_write_4(iot, ioh, I2C_ICR, ICR_UR);
@@ -308,7 +314,8 @@ retry:
 	rv = bus_space_read_4(iot, ioh, I2C_ICR);
 	bus_space_write_4(iot, ioh, I2C_ICR, rv & ~ICR_STOP);
 
-	return (0);
+	return 0;
+
 err:
 	if (tries-- >= 0)
 		goto retry;
@@ -318,5 +325,5 @@ err:
 	bus_space_write_4(iot, ioh, I2C_ISR, ISR_ITE);
 	bus_space_write_4(iot, ioh, I2C_ICR, ICR_IUE | ICR_SCLE);
 
-	return (-EIO);
+	return EIO;
 }

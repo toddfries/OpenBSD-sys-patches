@@ -1,4 +1,4 @@
-/*	$NetBSD: xform_esp.c,v 1.12 2006/11/16 01:33:49 christos Exp $	*/
+/*	$NetBSD: xform_esp.c,v 1.18 2008/04/23 06:09:05 thorpej Exp $	*/
 /*	$FreeBSD: src/sys/netipsec/xform_esp.c,v 1.2.2.1 2003/01/24 05:11:36 sam Exp $	*/
 /*	$OpenBSD: ip_esp.c,v 1.69 2001/06/26 06:18:59 angelos Exp $ */
 
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xform_esp.c,v 1.12 2006/11/16 01:33:49 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xform_esp.c,v 1.18 2008/04/23 06:09:05 thorpej Exp $");
 
 #include "opt_inet.h"
 #ifdef __FreeBSD__
@@ -65,6 +65,7 @@ __KERNEL_RCSID(0, "$NetBSD: xform_esp.c,v 1.12 2006/11/16 01:33:49 christos Exp 
 
 #include <net/route.h>
 #include <netipsec/ipsec.h>
+#include <netipsec/ipsec_private.h>
 #include <netipsec/ah.h>
 #include <netipsec/ah_var.h>
 #include <netipsec/esp.h>
@@ -87,8 +88,9 @@ __KERNEL_RCSID(0, "$NetBSD: xform_esp.c,v 1.12 2006/11/16 01:33:49 christos Exp 
 #include <opencrypto/cryptodev.h>
 #include <opencrypto/xform.h>
 
+percpu_t *espstat_percpu;
+
 int	esp_enable = 1;
-struct	espstat espstat;
 
 #ifdef __FreeBSD__
 SYSCTL_DECL(_net_inet_esp);
@@ -204,7 +206,7 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 	 *      compromise is to force it to zero here.
 	 */
 	sav->ivlen = (txform == &enc_xform_null ? 0 : txform->blocksize);
-	sav->iv = (caddr_t) malloc(sav->ivlen, M_SECA, M_WAITOK);
+	sav->iv = malloc(sav->ivlen, M_SECA, M_WAITOK);
 	if (sav->iv == NULL) {
 		DPRINTF(("esp_init: no memory for IV\n"));
 		return EINVAL;
@@ -231,6 +233,7 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 	crie.cri_key = _KEYBUF(sav->key_enc);
 	/* XXX Rounds ? */
 
+	mutex_spin_enter(&crypto_mtx);
 	if (sav->tdb_authalgxform && sav->tdb_encalgxform) {
 		/* init both auth & enc */
 		crie.cri_next = &cria;
@@ -247,6 +250,7 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 		DPRINTF(("esp_init: no encoding OR authentication xform!\n"));
 		error = EINVAL;
 	}
+	mutex_spin_exit(&crypto_mtx);
 	return error;
 }
 
@@ -323,7 +327,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 		    plen, espx->blocksize,
 		    ipsec_address(&sav->sah->saidx.dst),
 		    (u_long) ntohl(sav->spi)));
-		espstat.esps_badilen++;
+		ESP_STATINC(ESP_STAT_BADILEN);
 		m_freem(m);
 		return EINVAL;
 	}
@@ -334,13 +338,13 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	if (esph && sav->replay && !ipsec_chkreplay(ntohl(esp->esp_seq), sav)) {
 		DPRINTF(("esp_input: packet replay check for %s\n",
 		    ipsec_logsastr(sav)));	/*XXX*/
-		espstat.esps_replay++;
+		ESP_STATINC(ESP_STAT_REPLAY);
 		m_freem(m);
 		return ENOBUFS;		/*XXX*/
 	}
 
 	/* Update the counters */
-	espstat.esps_ibytes += m->m_pkthdr.len - skip - hlen - alen;
+	ESP_STATADD(ESP_STAT_IBYTES, m->m_pkthdr.len - skip - hlen - alen);
 
 	/* Find out if we've already done crypto */
 	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, NULL);
@@ -358,7 +362,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	crp = crypto_getreq(esph && espx ? 2 : 1);
 	if (crp == NULL) {
 		DPRINTF(("esp_input: failed to acquire crypto descriptors\n"));
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		m_freem(m);
 		return ENOBUFS;
 	}
@@ -373,12 +377,12 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	if (tc == NULL) {
 		crypto_freereq(crp);
 		DPRINTF(("esp_input: failed to allocate tdb_crypto\n"));
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		m_freem(m);
 		return ENOBUFS;
 	}
 
-	tc->tc_ptr = (caddr_t) mtag;
+	tc->tc_ptr = mtag;
 
 	if (esph) {
 		struct cryptodesc *crda = crp->crp_desc;
@@ -397,7 +401,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 		/* Copy the authenticator */
 		if (mtag == NULL)
 			m_copydata(m, m->m_pkthdr.len - alen, alen,
-				   (caddr_t) (tc + 1));
+				      (tc + 1));
 
 		/* Chain authentication request */
 		crde = crda->crd_next;
@@ -408,10 +412,10 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	/* Crypto operation descriptor */
 	crp->crp_ilen = m->m_pkthdr.len; /* Total input length */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
+	crp->crp_buf = m;
 	crp->crp_callback = esp_input_cb;
 	crp->crp_sid = sav->tdb_cryptoid;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_opaque = tc;
 
 	/* These are passed as-is to the callback */
 	tc->tc_spi = sav->spi;
@@ -468,7 +472,12 @@ esp_input_cb(struct cryptop *crp)
 	struct m_tag *mtag;
 	struct secasvar *sav;
 	struct secasindex *saidx;
-	caddr_t ptr;
+	void *ptr;
+	u_int16_t dport = 0;
+	u_int16_t sport = 0;
+#ifdef IPSEC_NAT_T
+	struct m_tag * tag = NULL;
+#endif
 
 	crd = crp->crp_desc;
 	IPSEC_ASSERT(crd != NULL, ("esp_input_cb: null crypto descriptor!"));
@@ -480,11 +489,19 @@ esp_input_cb(struct cryptop *crp)
 	mtag = (struct m_tag *) tc->tc_ptr;
 	m = (struct mbuf *) crp->crp_buf;
 
+#ifdef IPSEC_NAT_T
+	/* find the source port for NAT-T */
+	if ((tag = m_tag_find(m, PACKET_TAG_IPSEC_NAT_T_PORTS, NULL))) {
+		sport = ((u_int16_t *)(tag + 1))[0];
+		dport = ((u_int16_t *)(tag + 1))[1];
+	}
+#endif
+
 	s = splsoftnet();
 
-	sav = KEY_ALLOCSA(&tc->tc_dst, tc->tc_proto, tc->tc_spi);
+	sav = KEY_ALLOCSA(&tc->tc_dst, tc->tc_proto, tc->tc_spi, sport, dport);
 	if (sav == NULL) {
-		espstat.esps_notdb++;
+		ESP_STATINC(ESP_STAT_NOTDB);
 		DPRINTF(("esp_input_cb: SA expired while in crypto "
 		    "(SA %s/%08lx proto %u)\n", ipsec_address(&tc->tc_dst),
 		    (u_long) ntohl(tc->tc_spi), tc->tc_proto));
@@ -513,7 +530,7 @@ esp_input_cb(struct cryptop *crp)
 			return crypto_dispatch(crp);
 		}
 
-		espstat.esps_noxform++;
+		ESP_STATINC(ESP_STAT_NOXFORM);
 		DPRINTF(("esp_input_cb: crypto error %d\n", crp->crp_etype));
 		error = crp->crp_etype;
 		goto bad;
@@ -521,12 +538,12 @@ esp_input_cb(struct cryptop *crp)
 
 	/* Shouldn't happen... */
 	if (m == NULL) {
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		DPRINTF(("esp_input_cb: bogus returned buffer from crypto\n"));
 		error = EINVAL;
 		goto bad;
 	}
-	espstat.esps_hist[sav->alg_enc]++;
+	ESP_STATINC(ESP_STAT_HIST + sav->alg_enc);
 
 	/* If authentication was performed, check now. */
 	if (esph != NULL) {
@@ -535,13 +552,13 @@ esp_input_cb(struct cryptop *crp)
 		 * the verification for us.  Otherwise we need to
 		 * check the authentication calculation.
 		 */
-		ahstat.ahs_hist[sav->alg_auth]++;
+		AH_STATINC(AH_STAT_HIST + sav->alg_auth);
 		if (mtag == NULL) {
 			/* Copy the authenticator from the packet */
 			m_copydata(m, m->m_pkthdr.len - esph->authsize,
 				esph->authsize, aalg);
 
-			ptr = (caddr_t) (tc + 1);
+			ptr = (tc + 1);
 
 			/* Verify authenticator */
 			if (bcmp(ptr, aalg, esph->authsize) != 0) {
@@ -549,7 +566,7 @@ esp_input_cb(struct cryptop *crp)
 		    "authentication hash mismatch for packet in SA %s/%08lx\n",
 				    ipsec_address(&saidx->dst),
 				    (u_long) ntohl(sav->spi)));
-				espstat.esps_badauth++;
+				ESP_STATINC(ESP_STAT_BADAUTH);
 				error = EACCES;
 				goto bad;
 			}
@@ -575,11 +592,11 @@ esp_input_cb(struct cryptop *crp)
 		u_int32_t seq;
 
 		m_copydata(m, skip + offsetof(struct newesp, esp_seq),
-		    sizeof (seq), (caddr_t) &seq);
+		    sizeof (seq), &seq);
 		if (ipsec_updatereplay(ntohl(seq), sav)) {
 			DPRINTF(("%s: packet replay check for %s\n", __func__,
 			    ipsec_logsastr(sav)));
-			espstat.esps_replay++;
+			ESP_STATINC(ESP_STAT_REPLAY);
 			error = ENOBUFS;
 			goto bad;
 		}
@@ -594,7 +611,7 @@ esp_input_cb(struct cryptop *crp)
 	/* Remove the ESP header and IV from the mbuf. */
 	error = m_striphdr(m, skip, hlen);
 	if (error) {
-		espstat.esps_hdrops++;
+		ESP_STATINC(ESP_STAT_HDROPS);
 		DPRINTF(("esp_input_cb: bad mbuf chain, SA %s/%08lx\n",
 		    ipsec_address(&sav->sah->saidx.dst),
 		    (u_long) ntohl(sav->spi)));
@@ -606,7 +623,7 @@ esp_input_cb(struct cryptop *crp)
 
 	/* Verify pad length */
 	if (lastthree[1] + 2 > m->m_pkthdr.len - skip) {
-		espstat.esps_badilen++;
+		ESP_STATINC(ESP_STAT_BADILEN);
 		DPRINTF(("esp_input_cb: invalid padding length %d "
 			 "for %u byte packet in SA %s/%08lx\n",
 			 lastthree[1], m->m_pkthdr.len - skip,
@@ -619,7 +636,7 @@ esp_input_cb(struct cryptop *crp)
 	/* Verify correct decryption by checking the last padding bytes */
 	if ((sav->flags & SADB_X_EXT_PMASK) != SADB_X_EXT_PRAND) {
 		if (lastthree[1] != lastthree[0] && lastthree[1] != 0) {
-			espstat.esps_badenc++;
+			ESP_STATINC(ESP_STAT_BADENC);
 			DPRINTF(("esp_input_cb: decryption failed "
 				"for packet in SA %s/%08lx\n",
 				ipsec_address(&sav->sah->saidx.dst),
@@ -638,7 +655,7 @@ DPRINTF(("esp_input_cb: %x %x\n", lastthree[0], lastthree[1]));
 			   M_DONTWAIT);
 
 	if (m == NULL) {
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		DPRINTF(("esp_input_cb: failed to allocate mbuf\n"));
 		error = ENOBUFS;
 		goto bad;
@@ -717,7 +734,7 @@ esp_output(
 	else
 		alen = 0;
 
-	espstat.esps_output++;
+	ESP_STATINC(ESP_STAT_OUTPUT);
 
 	saidx = &sav->sah->saidx;
 	/* Check for maximum packet size violations. */
@@ -737,7 +754,7 @@ esp_output(
 		    "family %d, SA %s/%08lx\n",
 		    saidx->dst.sa.sa_family, ipsec_address(&saidx->dst),
 		    (u_long) ntohl(sav->spi)));
-		espstat.esps_nopf++;
+		ESP_STATINC(ESP_STAT_NOPF);
 		error = EPFNOSUPPORT;
 		goto bad;
 	}
@@ -746,19 +763,19 @@ esp_output(
 		    "(len %u, max len %u)\n",
 		    ipsec_address(&saidx->dst), (u_long) ntohl(sav->spi),
 		    skip + hlen + rlen + padding + alen, maxpacketsize));
-		espstat.esps_toobig++;
+		ESP_STATINC(ESP_STAT_TOOBIG);
 		error = EMSGSIZE;
 		goto bad;
 	}
 
 	/* Update the counters. */
-	espstat.esps_obytes += m->m_pkthdr.len - skip;
+	ESP_STATADD(ESP_STAT_OUTPUT, m->m_pkthdr.len - skip);
 
 	m = m_clone(m);
 	if (m == NULL) {
 		DPRINTF(("esp_output: cannot clone mbuf chain, SA %s/%08lx\n",
 		    ipsec_address(&saidx->dst), (u_long) ntohl(sav->spi)));
-		espstat.esps_hdrops++;
+		ESP_STATINC(ESP_STAT_HDROPS);
 		error = ENOBUFS;
 		goto bad;
 	}
@@ -770,13 +787,13 @@ esp_output(
 		    "%s/%08lx\n",
 		    hlen, ipsec_address(&saidx->dst),
 		    (u_long) ntohl(sav->spi)));
-		espstat.esps_hdrops++;		/* XXX diffs from openbsd */
+		ESP_STATINC(ESP_STAT_HDROPS);	/* XXX diffs from openbsd */
 		error = ENOBUFS;
 		goto bad;
 	}
 
 	/* Initialize ESP header. */
-	bcopy((caddr_t) &sav->spi, mtod(mo, caddr_t) + roff, sizeof(u_int32_t));
+	bcopy(&sav->spi, mtod(mo, char *) + roff, sizeof(u_int32_t));
 	if (sav->replay) {
 		u_int32_t replay;
 
@@ -787,8 +804,8 @@ esp_output(
 			sav->replay->count++;
 
 		replay = htonl(sav->replay->count);
-		bcopy((caddr_t) &replay,
-		    mtod(mo, caddr_t) + roff + sizeof(u_int32_t),
+		bcopy(&replay,
+		    mtod(mo,char *) + roff + sizeof(u_int32_t),
 		    sizeof(u_int32_t));
 	}
 
@@ -834,7 +851,7 @@ esp_output(
 	crp = crypto_getreq(esph && espx ? 2 : 1);
 	if (crp == NULL) {
 		DPRINTF(("esp_output: failed to acquire crypto descriptors\n"));
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		error = ENOBUFS;
 		goto bad;
 	}
@@ -863,7 +880,7 @@ esp_output(
 	if (tc == NULL) {
 		crypto_freereq(crp);
 		DPRINTF(("esp_output: failed to allocate tdb_crypto\n"));
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		error = ENOBUFS;
 		goto bad;
 	}
@@ -877,9 +894,9 @@ esp_output(
 	/* Crypto operation descriptor. */
 	crp->crp_ilen = m->m_pkthdr.len; /* Total input length. */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
+	crp->crp_buf = m;
 	crp->crp_callback = esp_output_cb;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_opaque = tc;
 	crp->crp_sid = sav->tdb_cryptoid;
 
 	if (esph) {
@@ -920,9 +937,9 @@ esp_output_cb(struct cryptop *crp)
 	s = splsoftnet();
 
 	isr = tc->tc_isr;
-	sav = KEY_ALLOCSA(&tc->tc_dst, tc->tc_proto, tc->tc_spi);
+	sav = KEY_ALLOCSA(&tc->tc_dst, tc->tc_proto, tc->tc_spi, 0, 0);
 	if (sav == NULL) {
-		espstat.esps_notdb++;
+		ESP_STATINC(ESP_STAT_NOTDB);
 		DPRINTF(("esp_output_cb: SA expired while in crypto "
 		    "(SA %s/%08lx proto %u)\n", ipsec_address(&tc->tc_dst),
 		    (u_long) ntohl(tc->tc_spi), tc->tc_proto));
@@ -944,7 +961,7 @@ esp_output_cb(struct cryptop *crp)
 			return crypto_dispatch(crp);
 		}
 
-		espstat.esps_noxform++;
+		ESP_STATINC(ESP_STAT_NOXFORM);
 		DPRINTF(("esp_output_cb: crypto error %d\n", crp->crp_etype));
 		error = crp->crp_etype;
 		goto bad;
@@ -952,14 +969,14 @@ esp_output_cb(struct cryptop *crp)
 
 	/* Shouldn't happen... */
 	if (m == NULL) {
-		espstat.esps_crypto++;
+		ESP_STATINC(ESP_STAT_CRYPTO);
 		DPRINTF(("esp_output_cb: bogus returned buffer from crypto\n"));
 		error = EINVAL;
 		goto bad;
 	}
-	espstat.esps_hist[sav->alg_enc]++;
+	ESP_STATINC(ESP_STAT_HIST + sav->alg_enc);
 	if (sav->tdb_authalgxform != NULL)
-		ahstat.ahs_hist[sav->alg_auth]++;
+		AH_STATINC(sav->alg_auth + sav->alg_auth);
 
 	/* Release crypto descriptors. */
 	free(tc, M_XDATA);
@@ -1009,6 +1026,9 @@ static struct xformsw esp_xformsw = {
 INITFN void
 esp_attach(void)
 {
+
+	espstat_percpu = percpu_alloc(sizeof(uint64_t) * ESP_NSTATS);
+
 #define	MAXIV(xform)					\
 	if (xform.blocksize > esp_max_ivlen)		\
 		esp_max_ivlen = xform.blocksize		\

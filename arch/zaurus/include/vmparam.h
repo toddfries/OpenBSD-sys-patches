@@ -1,5 +1,4 @@
-/* 	$OpenBSD: vmparam.h,v 1.4 2006/06/04 17:21:24 miod Exp $	*/
-/*	$NetBSD: vmparam.h,v 1.23 2003/05/22 05:47:07 thorpej Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.2 2007/10/25 13:03:05 yamt Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -30,14 +29,13 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_ARM32_VMPARAM_H_
-#define	_ARM32_VMPARAM_H_
-
-#define	ARM_KERNEL_BASE		0xc0000000
-
-#include <arm/vmparam.h>
+#ifndef	_ZAURUS_VMPARAM_H_
+#define	_ZAURUS_VMPARAM_H_
 
 #ifdef _KERNEL
+
+#include <arm/arm32/vmparam.h>
+
 /*
  * Address space constants
  */
@@ -46,12 +44,12 @@
  * The line between user space and kernel space
  * Mappings >= KERNEL_BASE are constant across all processes
  */
-#define	KERNEL_BASE		ARM_KERNEL_BASE
+#define	KERNEL_BASE		0xc0000000
 
 /*
  * Override the default pager_map size, there's not enough KVA.
  */
-#define PAGER_MAP_SIZE		(4 * 1024 * 1024)
+#define PAGER_MAP_DEFAULT_SIZE		(4 * 1024 * 1024)
 
 /*
  * Size of User Raw I/O map
@@ -67,8 +65,15 @@
  * max number of non-contig chunks of physical RAM you can have
  */
 
-#define	VM_PHYSSEG_MAX		1
-#define	VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
+#define	VM_PHYSSEG_MAX		32
+
+/*
+ * when converting a physical address to a vm_page structure, we
+ * want to use a binary search on the chunks of physical memory
+ * to find our RAM
+ */
+
+#define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
 
 /*
  * this indicates that we can't add RAM to the VM system after the
@@ -77,10 +82,17 @@
 
 #define	VM_PHYSSEG_NOADD
 
+/*
+ * we support 2 free lists:
+ *
+ *	- DEFAULT for all systems
+ *	- ISADMA for the ISA DMA range on Sharks only
+ */
+
+#define	VM_NFREELIST		2
+#define	VM_FREELIST_DEFAULT	0
+#define	VM_FREELIST_ISADMA	1
+
 #endif /* _KERNEL */
 
-#define	VM_NFREELIST		1
-#define	VM_FREELIST_DEFAULT	0
-
-
-#endif	/* _ARM32_VMPARAM_H_ */
+#endif	/* _ZAURUS_VMPARAM_H_ */

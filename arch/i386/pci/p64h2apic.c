@@ -1,4 +1,4 @@
-/* $NetBSD: p64h2apic.c,v 1.11 2006/11/16 01:32:39 christos Exp $ */
+/* $NetBSD: p64h2apic.c,v 1.14 2008/07/09 20:45:33 joerg Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: p64h2apic.c,v 1.11 2006/11/16 01:32:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: p64h2apic.c,v 1.14 2008/07/09 20:45:33 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,19 +53,14 @@ static int	p64h2match(struct device *, struct cfdata *, void *);
 static void	p64h2attach(struct device *, struct device *, void *);
 
 struct p64h2apic_softc {
-	struct device sc_dev;
 	pcitag_t sc_tag;
 };
 
-CFATTACH_DECL(p64h2apic, sizeof(struct p64h2apic_softc),
+CFATTACH_DECL_NEW(p64h2apic, sizeof(struct p64h2apic_softc),
     p64h2match, p64h2attach, NULL, NULL);
 
-int	p64h2print(void *, const char *pnp);
-
-
 static int
-p64h2match(struct device *parent, struct cfdata *match,
-    void *aux)
+p64h2match(device_t parent, cfdata_t match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -84,9 +72,9 @@ p64h2match(struct device *parent, struct cfdata *match,
 }
 
 static void
-p64h2attach(struct device *parent, struct device *self, void *aux)
+p64h2attach(device_t parent, device_t self, void *aux)
 {
-	struct p64h2apic_softc *sc = (void *) self;
+	struct p64h2apic_softc *sc = device_private(self);
 	struct pci_attach_args *pa = aux;
 	char devinfo[256];
 
@@ -94,7 +82,7 @@ p64h2attach(struct device *parent, struct device *self, void *aux)
 	aprint_normal("\n");
 
 	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
-	aprint_normal("%s: %s (rev. 0x%02x)\n", sc->sc_dev.dv_xname, devinfo,
+	aprint_normal_dev(self, "%s (rev. 0x%02x)\n", devinfo,
 	    PCI_REVISION(pa->pa_class));
 
 	sc->sc_tag = pa->pa_tag;

@@ -1,4 +1,4 @@
-/*	$NetBSD: zs_hb.c,v 1.21 2006/03/29 04:16:46 thorpej Exp $	*/
+/*	$NetBSD: zs_hb.c,v 1.25 2008/04/28 20:23:30 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,16 +38,17 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs_hb.c,v 1.21 2006/03/29 04:16:46 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs_hb.c,v 1.25 2008/04/28 20:23:30 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/tty.h>
 #include <sys/conf.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
 
 #include <machine/adrsmap.h>
-#include <machine/cpu.h>
 #include <machine/z8530var.h>
 
 #include <dev/cons.h>
@@ -88,8 +82,8 @@ __KERNEL_RCSID(0, "$NetBSD: zs_hb.c,v 1.21 2006/03/29 04:16:46 thorpej Exp $");
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
-	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
-	volatile u_char	zc_data;	/* data */
+	volatile uint8_t zc_csr;	/* ctrl,status, and indirect access */
+	volatile uint8_t zc_data;	/* data */
 };
 struct zsdevice {
 	/* Yes, they are backwards. */
@@ -107,7 +101,7 @@ static int zs_hwflags[NZS][2];
 /* Default speed for all channels */
 static int zs_defspeed = 9600;
 
-static u_char zs_init_reg[16] = {
+static uint8_t zs_init_reg[16] = {
 	0,	/* 0: CMD (reset, etc.) */
 	0,	/* 1: No interrupts yet. */
 	ZSHARD_PRI,	/* IVECT */
@@ -163,17 +157,17 @@ zs_hb_delay(void)
  ****************************************************************/
 
 /* Definition of the driver for autoconfig. */
-int zs_hb_match(struct device *, struct cfdata *, void *);
-void zs_hb_attach(struct device *, struct device *, void *);
+int zs_hb_match(device_t, cfdata_t, void *);
+void zs_hb_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(zsc_hb, sizeof(struct zsc_softc),
+CFATTACH_DECL_NEW(zsc_hb, sizeof(struct zsc_softc),
     zs_hb_match, zs_hb_attach, NULL, NULL);
 
 /*
  * Is the zs chip present?
  */
 int
-zs_hb_match(struct device *parent, struct cfdata *cf, void *aux)
+zs_hb_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 
@@ -194,9 +188,9 @@ zs_hb_match(struct device *parent, struct cfdata *cf, void *aux)
  * not set up the keyboard as ttya, etc.
  */
 void
-zs_hb_attach(struct device *parent, struct device *self, void *aux)
+zs_hb_attach(device_t parent, device_t self, void *aux)
 {
-	struct zsc_softc *zsc = (void *)self;
+	struct zsc_softc *zsc = device_private(self);
 	struct hb_attach_args *ha = aux;
 	struct zsc_attach_args zsc_args;
 	volatile struct zschan *zc;
@@ -204,21 +198,22 @@ zs_hb_attach(struct device *parent, struct device *self, void *aux)
 	int s, zs_unit, channel, intlevel;
 	static int didintr;
 
-	zs_unit = device_unit(&zsc->zsc_dev);
+	zsc->zsc_dev = self;
+	zs_unit = device_unit(self);
 	intlevel = ha->ha_level;
 	zsaddr[zs_unit] = (void *)ha->ha_addr;
 
 	if (intlevel == -1) {
 #if 0
-		printf(": interrupt level not configured\n");
+		aprint_error(": interrupt level not configured\n");
 		return;
 #else
-		printf(": interrupt level not configured; using");
+		aprint_error(": interrupt level not configured; using");
 		intlevel = 1;
 #endif
 	}
 
-	printf(" level %d\n", intlevel);
+	aprint_error(" level %d\n", intlevel);
 
 	zs_delay = zs_hb_delay;
 
@@ -231,11 +226,11 @@ zs_hb_attach(struct device *parent, struct device *self, void *aux)
 		cs = &zsc->zsc_cs_store[channel];
 		zsc->zsc_cs[channel] = cs;
 
-		simple_lock_init(&cs->cs_lock);
+		zs_lock_init(cs);
 		cs->cs_channel = channel;
 		cs->cs_private = NULL;
 		cs->cs_ops = &zsops_null;
-		if ((device_cfdata(&zsc->zsc_dev)->cf_flags & ZSCFLAG_EX) == 0)
+		if ((device_cfdata(self)->cf_flags & ZSCFLAG_EX) == 0)
 			cs->cs_brg_clk = PCLK / 16;
 		else
 			cs->cs_brg_clk = PCLK_EX / 16;
@@ -276,8 +271,8 @@ zs_hb_attach(struct device *parent, struct device *self, void *aux)
 		 */
 		if (!config_found(self, (void *)&zsc_args, zs_print)) {
 			/* No sub-driver.  Just reset it. */
-			u_char reset = (channel == 0) ?
-				ZSWR9_A_RESET : ZSWR9_B_RESET;
+			uint8_t reset = (channel == 0) ?
+			    ZSWR9_A_RESET : ZSWR9_B_RESET;
 			s = splhigh();
 			zs_write_reg(cs, 9, reset);
 			splx(s);
@@ -292,7 +287,7 @@ zs_hb_attach(struct device *parent, struct device *self, void *aux)
 	if (!didintr) {
 		didintr = 1;
 
-		zsc->zsc_si = softintr_establish(IPL_SOFTSERIAL, zssoft, zsc);
+		zsc->zsc_si = softint_establish(SOFTINT_SERIAL, zssoft, zsc);
 		hb_intr_establish(intlevel, INTST1_SCC, IPL_SERIAL,
 		    zshard_hb, NULL);
 	}

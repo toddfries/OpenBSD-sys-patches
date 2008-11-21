@@ -1,4 +1,4 @@
-/*	$NetBSD: iso_proto.c,v 1.22 2006/12/09 05:33:09 dyoung Exp $	*/
+/*	$NetBSD: iso_proto.c,v 1.28 2008/04/24 11:38:38 ad Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -65,7 +65,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iso_proto.c,v 1.22 2006/12/09 05:33:09 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iso_proto.c,v 1.28 2008/04/24 11:38:38 ad Exp $");
 
 
 #include <sys/param.h>
@@ -97,6 +97,32 @@ const int isoctlerrmap[PRC_NCMDS] = {
 
 DOMAIN_DEFINE(isodomain);	/* forward declare and add to link set */
 
+/* Wrappers to acquire kernel_lock. */
+
+PR_WRAP_USRREQ(cltp_usrreq)
+PR_WRAP_USRREQ(clnp_usrreq)
+PR_WRAP_USRREQ(idrp_usrreq)
+PR_WRAP_USRREQ(tp_usrreq)
+PR_WRAP_USRREQ(esis_usrreq)
+
+#define	cltp_usrreq	cltp_usrreq_wrapper
+#define	clnp_usrreq	clnp_usrreq_wrapper
+#define	idrp_usrreq	idrp_usrreq_wrapper
+#define	tp_usrreq	tp_usrreq_wrapper
+#define	esis_usrreq	esis_usrreq_wrapper
+
+PR_WRAP_CTLOUTPUT(rclnp_ctloutput)
+PR_WRAP_CTLOUTPUT(tp_ctloutput)
+
+#define	rclnp_ctloutput	rclnp_ctloutput_wrapper
+#define	tp_ctloutput	tp_ctloutput_wrapper
+
+PR_WRAP_CTLINPUT(esis_ctlinput)
+PR_WRAP_CTLINPUT(tpclnp_ctlinput)
+
+#define	esis_ctlinput	esis_ctlinput_wrapper
+#define	tpclnp_ctlinput	tpclnp_ctlinput_wrapper
+
 const struct protosw  isosw[] = {
 	/*
 	 *  We need a datagram entry through which net mgmt programs can get
@@ -106,10 +132,19 @@ const struct protosw  isosw[] = {
 	 *  pffindtype, which gets the first entry that matches the type.
 	 *  sigh.
 	 */
-	{SOCK_DGRAM, &isodomain, ISOPROTO_CLTP, PR_ATOMIC | PR_ADDR,
-		0, cltp_output, 0, 0,
-		cltp_usrreq,
-		cltp_init, 0, 0, 0
+	{ .pr_type = SOCK_DGRAM,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_CLTP,
+	  .pr_flags = PR_ATOMIC | PR_ADDR,
+	  .pr_input = 0,
+	  .pr_output = cltp_output,
+	  .pr_ctlinput = 0,
+	  .pr_ctloutput = 0,
+	  .pr_usrreq = cltp_usrreq,
+	  .pr_init = cltp_init,
+	  .pr_fasttimo = 0,
+	  .pr_slowtimo = 0,
+	  .pr_drain = 0
 	},
 
 	/*
@@ -120,55 +155,100 @@ const struct protosw  isosw[] = {
 	 *  New way: let pffindproto work (for x.25, thank you) but create
 	 *  	a clnp_usrreq() that returns error on PRU_ATTACH.
 	 */
-	{SOCK_DGRAM, &isodomain, ISOPROTO_CLNP, 0,
-		0, clnp_output, 0, 0,
-		clnp_usrreq,
-		clnp_init, 0, clnp_slowtimo, clnp_drain,
+	{ .pr_type = SOCK_DGRAM,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_CLNP,
+	  .pr_flags = 0,
+	  .pr_input = 0,
+	  .pr_output = clnp_output,
+	  .pr_ctlinput = 0,
+	  .pr_ctloutput = 0,
+	  .pr_usrreq = clnp_usrreq,
+	  .pr_init = clnp_init,
+	  .pr_fasttimo = 0,
+	  .pr_slowtimo = clnp_slowtimo,
+	  .pr_drain =  clnp_drain,
 	},
 
 	/* raw clnp */
-	{SOCK_RAW, &isodomain, ISOPROTO_RAW, PR_ATOMIC | PR_ADDR,
-		rclnp_input, rclnp_output, 0, rclnp_ctloutput,
-		clnp_usrreq,
-		0, 0, 0, 0
+	{ .pr_type = SOCK_RAW,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_RAW,
+	  .pr_flags = PR_ATOMIC | PR_ADDR,
+	  .pr_input = rclnp_input,
+	  .pr_output = rclnp_output,
+	  .pr_ctlinput = 0,
+	  .pr_ctloutput = rclnp_ctloutput,
+	  .pr_usrreq = clnp_usrreq,
+	  .pr_init = 0,
+	  .pr_fasttimo = 0,
+	  .pr_slowtimo = 0,
+	  .pr_drain = 0
 	},
 
 	/* ES-IS protocol */
-	{SOCK_DGRAM, &isodomain, ISOPROTO_ESIS, PR_ATOMIC | PR_ADDR,
-		esis_input, 0, esis_ctlinput, 0,
-		esis_usrreq,
-		esis_init, 0, 0, 0
+	{ .pr_type = SOCK_DGRAM,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_ESIS,
+	  .pr_flags = PR_ATOMIC | PR_ADDR,
+	  .pr_input = esis_input,
+	  .pr_output = 0,
+	  .pr_ctlinput = esis_ctlinput,
+	  .pr_ctloutput = 0,
+	  .pr_usrreq = esis_usrreq,
+	  .pr_init = esis_init,
+	  .pr_fasttimo = 0,
+	  .pr_slowtimo = 0,
+	  .pr_drain = 0
 	},
 
 	/* ISOPROTO_INTRAISIS */
-	{SOCK_DGRAM, &isodomain, ISOPROTO_INTRAISIS, PR_ATOMIC | PR_ADDR,
-		isis_input, 0, 0, 0,
-		esis_usrreq,
-		0, 0, 0, 0
+	{ .pr_type = SOCK_DGRAM,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_INTRAISIS,
+	  .pr_flags = PR_ATOMIC | PR_ADDR,
+	  .pr_input = isis_input,
+	  .pr_output = 0,
+	  .pr_ctlinput = 0,
+	  .pr_ctloutput = 0,
+	  .pr_usrreq = esis_usrreq,
+	  .pr_init = 0,
+	  .pr_fasttimo = 0,
+	  .pr_slowtimo = 0,
+	  .pr_drain = 0
 	},
 
 	/* ISOPROTO_IDRP */
-	{SOCK_DGRAM, &isodomain, ISOPROTO_IDRP, PR_ATOMIC | PR_ADDR,
-		idrp_input, 0, 0, 0,
-		idrp_usrreq,
-		idrp_init, 0, 0, 0
+	{ .pr_type = SOCK_DGRAM,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_IDRP,
+	  .pr_flags = PR_ATOMIC | PR_ADDR,
+	  .pr_input = idrp_input,
+	  .pr_output = 0,
+	  .pr_ctlinput = 0,
+	  .pr_ctloutput = 0,
+	  .pr_usrreq = idrp_usrreq,
+	  .pr_init = idrp_init,
+	  .pr_fasttimo = 0,
+	  .pr_slowtimo = 0,
+	  .pr_drain = 0
 	},
 
 	/* ISOPROTO_TP */
-	{SOCK_SEQPACKET, &isodomain, ISOPROTO_TP, PR_CONNREQUIRED | PR_WANTRCVD | PR_LISTEN | PR_ABRTACPTDIS,
-		tpclnp_input, 0, tpclnp_ctlinput, tp_ctloutput,
-		tp_usrreq,
-		tp_init, tp_fasttimo, tp_slowtimo, tp_drain,
+	{ .pr_type = SOCK_SEQPACKET,
+	  .pr_domain = &isodomain,
+	  .pr_protocol = ISOPROTO_TP,
+	  .pr_flags = PR_CONNREQUIRED | PR_WANTRCVD | PR_LISTEN | PR_ABRTACPTDIS,
+	  .pr_input = tpclnp_input,
+	  .pr_output = 0,
+	  .pr_ctlinput = tpclnp_ctlinput,
+	  .pr_ctloutput = tp_ctloutput,
+	  .pr_usrreq = tp_usrreq,
+	  .pr_init = tp_init,
+	  .pr_fasttimo = tp_fasttimo,
+	  .pr_slowtimo = tp_slowtimo,
+	  .pr_drain = tp_drain,
 	},
-
-#ifdef TPCONS
-	/* ISOPROTO_TP */
-	{SOCK_SEQPACKET, &isodomain, ISOPROTO_TP0, PR_CONNREQUIRED | PR_WANTRCVD | PR_LISTEN | PR_ABRTACPTDIS,
-		tpcons_input, 0, 0, tp_ctloutput,
-		tp_usrreq,
-		cons_init, 0, 0, 0,
-	},
-#endif
 };
 
 extern struct ifqueue clnlintrq;
@@ -189,7 +269,30 @@ struct domain   isodomain = {
 	.dom_ifqueues = { &clnlintrq, NULL },		/* ifqueues */
 	.dom_link = { NULL },
 	.dom_mowner = MOWNER_INIT("",""),
-	.dom_rtcache = NULL,
-	.dom_rtflush = NULL,
-	.dom_rtflushall = NULL
+	.dom_rtcache = LIST_HEAD_INITIALIZER(isodomain.dom_rtcache),
+	.dom_sockaddr_cmp = sockaddr_iso_cmp
 };
+
+int
+sockaddr_iso_cmp(const struct sockaddr *sa1, const struct sockaddr *sa2)
+{
+	int rc;
+	uint_fast8_t len, nlen;
+	const uint_fast8_t addrofs = offsetof(struct sockaddr_iso, siso_data);
+	const struct sockaddr_iso *siso1, *siso2;
+
+	siso1 = satocsiso(sa1);
+	siso2 = satocsiso(sa2);
+
+	len = MIN(siso1->siso_len, siso2->siso_len);
+	/* No siso_nlen present? */ 
+	if (len < addrofs)
+		return siso1->siso_len - siso2->siso_len;
+
+	nlen = MIN(siso1->siso_nlen, siso2->siso_nlen);
+	if (nlen > addrofs &&
+	    (rc = memcmp(siso1->siso_data, siso2->siso_data, nlen)) != 0)
+		return rc;
+
+	return siso1->siso_nlen - siso2->siso_nlen;
+}

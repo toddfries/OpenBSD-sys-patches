@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_arp.h,v 1.6 2003/06/02 23:28:12 millert Exp $	*/
-/*	$NetBSD: if_arp.h,v 1.8 1995/03/08 02:56:52 cgd Exp $	*/
+/*	$NetBSD: if_arp.h,v 1.29 2008/04/15 15:17:54 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1986, 1993
@@ -45,15 +44,17 @@
  * specified.  Field names used correspond to RFC 826.
  */
 struct	arphdr {
-	u_int16_t ar_hrd;	/* format of hardware address */
+	uint16_t ar_hrd;	/* format of hardware address */
 #define ARPHRD_ETHER 	1	/* ethernet hardware format */
 #define ARPHRD_IEEE802 	6	/* IEEE 802 hardware format */
+#define ARPHRD_ARCNET 	7	/* ethernet hardware format */
 #define ARPHRD_FRELAY 	15	/* frame relay hardware format */
-#define ARPHRD_IEEE1394	24	/* IEEE 1394 (FireWire) hardware format */
-	u_int16_t ar_pro;	/* format of protocol address */
-	u_int8_t  ar_hln;	/* length of hardware address */
-	u_int8_t  ar_pln;	/* length of protocol address */
-	u_int16_t ar_op;	/* one of: */
+#define ARPHRD_STRIP 	23	/* Ricochet Starmode Radio hardware format */
+#define	ARPHRD_IEEE1394	24	/* IEEE 1394 (FireWire) hardware format */
+	uint16_t ar_pro;	/* format of protocol address */
+	uint8_t  ar_hln;	/* length of hardware address */
+	uint8_t  ar_pln;	/* length of protocol address */
+	uint16_t ar_op;		/* one of: */
 #define	ARPOP_REQUEST	1	/* request to resolve address */
 #define	ARPOP_REPLY	2	/* response to previous request */
 #define	ARPOP_REVREQUEST 3	/* request protocol address given hardware */
@@ -65,12 +66,22 @@ struct	arphdr {
  * according to the sizes above.
  */
 #ifdef COMMENT_ONLY
-	u_int8_t  ar_sha[];	/* sender hardware address */
-	u_int8_t  ar_spa[];	/* sender protocol address */
-	u_int8_t  ar_tha[];	/* target hardware address */
-	u_int8_t  ar_tpa[];	/* target protocol address */
+	uint8_t  ar_sha[];	/* sender hardware address */
+	uint8_t  ar_spa[];	/* sender protocol address */
+	uint8_t  ar_tha[];	/* target hardware address */
+	uint8_t  ar_tpa[];	/* target protocol address */
 #endif
-};
+#define ar_sha(ap) (((char *)((ap)+1))+0)
+#define ar_spa(ap) (((char *)((ap)+1))+(ap)->ar_hln)
+#define ar_tha(ap) \
+	(ntohs((ap)->ar_hrd) == ARPHRD_IEEE1394 \
+		? NULL : (((char *)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln))
+#define ar_tpa(ap) \
+	(ntohs((ap)->ar_hrd) == ARPHRD_IEEE1394 \
+		? (((char *)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln) \
+		: (((char *)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln+(ap)->ar_hln))
+} __packed;
+
 
 /*
  * ARP ioctl request
@@ -86,4 +97,34 @@ struct arpreq {
 #define	ATF_PERM	0x04	/* permanent entry */
 #define	ATF_PUBL	0x08	/* publish entry (respond for other host) */
 #define	ATF_USETRAILERS	0x10	/* has requested trailers */
-#endif /* _NET_IF_ARP_H_ */
+
+/*
+ * Kernel statistics about arp
+ */
+#define	ARP_STAT_SNDTOTAL	0	/* total packets sent */
+#define	ARP_STAT_SNDREPLY	1	/* replies sent */
+#define	ARP_STAT_SENDREQUEST	2	/* requests sent */
+#define	ARP_STAT_RCVTOTAL	3	/* total packets received */
+#define	ARP_STAT_RCVREQUEST	4	/* valid requests received */
+#define	ARP_STAT_RCVREPLY	5	/* replies received */
+#define	ARP_STAT_RCVMCAST	6	/* multicast/broadcast received */
+#define	ARP_STAT_RCVBADPROTO	7	/* unknown protocol type received */
+#define	ARP_STAT_RCVBADLEN	8	/* bad (short) length received */
+#define	ARP_STAT_RCVZEROTPA	9	/* received w/ null target ip */
+#define	ARP_STAT_RCVZEROSPA	10	/* received w/ null source ip */
+#define	ARP_STAT_RCVNOINT	11	/* couldn't map to interface */
+#define	ARP_STAT_RCVLOCALSHA	12	/* received from local hw address */
+#define	ARP_STAT_RCVBCASTSHA	13	/* received w/ broadcast src */
+#define	ARP_STAT_RCVLOCALSPA	14	/* received for a local ip [dup!] */
+#define	ARP_STAT_RCVOVERPERM	15	/* attempts to overwrite static info */
+#define	ARP_STAT_RCVOVERINT	16	/* attempts to overwrite wrong if */
+#define	ARP_STAT_RCVOVER	17	/* entries overwritten! */
+#define	ARP_STAT_RCVLENCHG	18	/* changes in hw address len */
+#define	ARP_STAT_DFRTOTAL	19	/* deferred pending ARP resolution */
+#define	ARP_STAT_DFRSENT	20	/* deferred, then sent */
+#define	ARP_STAT_DFRDROPPED	21	/* deferred, then dropped */
+#define	ARP_STAT_ALLOCFAIL	22	/* failures to allocate llinfo */
+
+#define	ARP_NSTATS		23
+
+#endif /* !_NET_IF_ARP_H_ */

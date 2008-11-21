@@ -1,4 +1,4 @@
-/*	$NetBSD: rtclock_var.h,v 1.8 2006/09/14 01:18:11 gdamore Exp $	*/
+/*	$NetBSD: rtclock_var.h,v 1.10 2008/06/25 08:14:59 isaki Exp $	*/
 
 /*
  * Copyright 1993, 1994 Masaru Oki
@@ -38,8 +38,6 @@
 #define _RTCLOCKVAR_H_
 
 struct rtc_softc {
-	struct device		sc_dev;
-
 	bus_space_tag_t		sc_bst;
 	bus_space_handle_t	sc_bht;
 	struct todr_chip_handle	sc_todr;
@@ -97,8 +95,4 @@ struct rtc_softc {
 #define	range_test0(n, h)	if ((unsigned)(n) > (h)) return(0)
 				/* cast to unsigned in case n is signed */
 
-#ifdef _KERNEL
-extern time_t (*gettod)(void);
-extern int (*settod)(long);
-#endif
 #endif /* _RTCLOCKVAR_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: lpt_ebus.c,v 1.8 2003/12/16 15:04:56 jason Exp $	*/
-/*	$NetBSD: lpt_ebus.c,v 1.8 2002/03/01 11:51:00 martin Exp $	*/
+/*	$NetBSD: lpt_ebus.c,v 1.22 2008/05/29 14:51:26 mrg Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Matthew R. Green
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -33,6 +30,9 @@
  * NS Super I/O PC87332VLJ "lpt" to ebus attachment
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: lpt_ebus.c,v 1.22 2008/05/29 14:51:26 mrg Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,70 +41,66 @@
 
 #include <machine/bus.h>
 
-#include <sparc64/dev/ebusreg.h>
-#include <sparc64/dev/ebusvar.h>
+#include <dev/ebus/ebusreg.h>
+#include <dev/ebus/ebusvar.h>
 
 #include <dev/ic/lptvar.h>
 
-struct lpt_ebus_softc {
-	struct lpt_softc sc_lpt;
-	bus_space_handle_t sc_ctrl;
-};
+int	lpt_ebus_match(device_t, cfdata_t , void *);
+void	lpt_ebus_attach(device_t, device_t, void *);
 
-int	lpt_ebus_match(struct device *, void *, void *);
-void	lpt_ebus_attach(struct device *, struct device *, void *);
+CFATTACH_DECL_NEW(lpt_ebus, sizeof(struct lpt_softc),
+    lpt_ebus_match, lpt_ebus_attach, NULL, NULL);
 
-struct cfattach lpt_ebus_ca = {
-	sizeof(struct lpt_ebus_softc), lpt_ebus_match, lpt_ebus_attach
-};
+#define	ROM_LPT_NAME	"ecpp"
 
 int
-lpt_ebus_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+lpt_ebus_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct ebus_attach_args *ea = aux;
 
-	if (!strcmp(ea->ea_name, "ecpp") ||
-	    !strcmp(ea->ea_name, "parallel"))
+	if (strcmp(ea->ea_name, ROM_LPT_NAME) == 0)
 		return (1);
+
 	return (0);
 }
 
 void
-lpt_ebus_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+lpt_ebus_attach(device_t parent, device_t self, void *aux)
 {
-	struct lpt_ebus_softc *sc = (void *)self;
+	struct lpt_softc *sc = device_private(self);
 	struct ebus_attach_args *ea = aux;
+	int i;
 
-
-	if (ebus_bus_map(ea->ea_memtag, 0,
-	    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]), ea->ea_regs[0].size,
-	    0, 0, &sc->sc_lpt.sc_ioh) == 0) {
-		sc->sc_lpt.sc_iot = ea->ea_memtag;
-	} else if (ebus_bus_map(ea->ea_iotag, 0,
-		    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]), ea->ea_regs[0].size,
-		    0, 0, &sc->sc_lpt.sc_ioh) == 0) {
-		sc->sc_lpt.sc_iot = ea->ea_iotag;
-	} else {
-		printf(": can't map register space\n");
-		return;
+	sc->sc_dev = self;
+	sc->sc_iot = ea->ea_bustag;
+	/*
+	 * Addresses that should be supplied by the prom:
+	 *	- normal lpt registers
+	 *	- ns873xx configuration registers
+	 *	- DMA space
+	 * The `lpt' driver does not use DMA accesses, so we can
+	 * ignore that for now.  We should enable the lpt port in
+	 * the ns873xx registers here. XXX
+	 *
+	 * Use the prom address if there.
+	 */
+	if (ea->ea_nvaddr)
+		sparc_promaddr_to_handle(sc->sc_iot, ea->ea_vaddr[0],
+			&sc->sc_ioh);
+	else if (bus_space_map(sc->sc_iot,
+			      EBUS_ADDR_FROM_REG(&ea->ea_reg[0]),
+			      ea->ea_reg[0].size,
+			      0,
+			      &sc->sc_ioh) != 0) {
+		aprint_error(": can't map register space\n");
+                return;
 	}
 
-	if (ebus_bus_map(sc->sc_lpt.sc_iot, 0,
-	    EBUS_PADDR_FROM_REG(&ea->ea_regs[1]), ea->ea_regs[1].size, 0, 0,
-	    &sc->sc_ctrl) != 0) {
-		printf(": can't map control space\n");
-		bus_space_unmap(sc->sc_lpt.sc_iot, sc->sc_lpt.sc_ioh,
-		    ea->ea_regs[0].size);
-		return;
-	}
+	for (i = 0; i < ea->ea_nintr; i++)
+		bus_intr_establish(ea->ea_bustag, ea->ea_intr[i],
+				   IPL_SERIAL, lptintr, sc);
+	aprint_normal("\n");
 
-	sc->sc_lpt.sc_flags |= LPT_POLLED;
-	printf(": polled");
-
-	lpt_attach_common(&sc->sc_lpt);
+	lpt_attach_subr(sc);
 }

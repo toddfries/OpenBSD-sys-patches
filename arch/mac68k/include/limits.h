@@ -1,9 +1,8 @@
-/*	$OpenBSD: limits.h,v 1.4 1997/11/30 06:12:29 gene Exp $	*/
-/*	$NetBSD: limits.h,v 1.6 1994/10/26 08:46:34 cgd Exp $	*/
+/*	$NetBSD: limits.h,v 1.7 1998/01/09 22:23:53 perry Exp $	*/
 
-#ifndef _MAC68K_LIMITS_H_
-#define _MAC68K_LIMITS_H_
+#ifndef	_MACHINE_LIMITS_H_
+#define	_MACHINE_LIMITS_H_
 
 #include <m68k/limits.h>
 
-#endif /* _MAC68K_LIMITS_H_ */
+#endif /* _MACHINE_LIMITS_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_mcvar.h,v 1.5 2006/06/24 13:23:27 miod Exp $	*/
-/*	$NetBSD: if_mcvar.h,v 1.8 2004/03/26 12:15:46 wiz Exp $	*/
+/*	$NetBSD: if_mcvar.h,v 1.15 2007/03/05 21:22:45 he Exp $	*/
 
 /*-
  * Copyright (c) 1997 David Huang <khym@azeotrope.org>
@@ -25,6 +24,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
+
+/* XXX this file depends on opt_ddb.h */
+#ifdef DDB
+#define	integrate
+#define hide
+#else
+#define	integrate	static inline
+#define hide		static
+#endif
 
 #define	MC_REGSPACING	16
 #define	MC_REGSIZE	MACE_NREGS * MC_REGSPACING
@@ -55,8 +63,8 @@ struct mc_rxframe {
 
 struct mc_softc {
 	struct device	sc_dev;		/* base device glue */
-	struct arpcom	sc_ethercom;	/* Ethernet common part */
-#define	sc_if		sc_ethercom.ac_if
+	struct ethercom	sc_ethercom;	/* Ethernet common part */
+#define	sc_if		sc_ethercom.ec_if
 
 	struct mc_rxframe	sc_rxframe;
 	u_int8_t	sc_biucc;
@@ -70,9 +78,12 @@ struct mc_softc {
 
 	bus_space_tag_t		sc_regt;
 	bus_space_handle_t	sc_regh;
+	bus_dma_tag_t	sc_dmat;
+	bus_dmamap_t	sc_dmam_tx, sc_dmam_rx;
+	bus_dma_segment_t	sc_dmasegs_tx, sc_dmasegs_rx;
 
-	u_char		*sc_txbuf, *sc_rxbuf;
-	paddr_t		sc_txbuf_phys, sc_rxbuf_phys;
+	uint8_t		*sc_txbuf, *sc_rxbuf;
+	bus_addr_t	sc_txbuf_phys, sc_rxbuf_phys;
 	int		sc_tail;
 	int		sc_rxset;
 	int		sc_txset, sc_txseti;
@@ -80,6 +91,6 @@ struct mc_softc {
 
 int	mcsetup(struct mc_softc *, u_int8_t *);
 void	mcintr(void *arg);
-void	mc_rint(struct mc_softc *sc);
-u_char	mc_get_enaddr(bus_space_tag_t t, bus_space_handle_t h,
-		bus_size_t o, u_char *dst);
+void	mc_rint(struct mc_softc *);
+u_char	mc_get_enaddr(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+		      u_char *);

@@ -1,61 +1,72 @@
-/*	$OpenBSD: mutex.h,v 1.1 2007/02/03 20:08:50 miod Exp $	*/
+/*	$NetBSD: mutex.h,v 1.10 2008/04/28 20:23:36 martin Exp $	*/
 
-/*
- * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
- * All rights reserved. 
+/*-
+ * Copyright (c) 2002, 2006 The NetBSD Foundation, Inc.
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without 
- * modification, are permitted provided that the following conditions 
- * are met: 
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe and Andrew Doran.
  *
- * 1. Redistributions of source code must retain the above copyright 
- *    notice, this list of conditions and the following disclaimer. 
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission. 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL  DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _MACHINE_MUTEX_H_
-#define _MACHINE_MUTEX_H_
+#ifndef _SPARC_MUTEX_H_
+#define	_SPARC_MUTEX_H_
 
-/*
- * Simple non-mp implementation.
- */
-struct mutex {
-	int mtx_lock;
-	int mtx_wantipl;
-	int mtx_oldipl;
+#ifdef __MUTEX_PRIVATE
+#include "psl.h"
+#endif
+
+struct kmutex {
+	union {
+		volatile uintptr_t	mtxa_owner;
+#ifdef __MUTEX_PRIVATE
+		struct {
+			volatile uint8_t	mtxs_dummy;
+			ipl_cookie_t		mtxs_ipl;
+                        __cpu_simple_lock_t	mtxs_lock;
+			volatile uint8_t	mtxs_unused;
+		} s;
+#endif
+	} u;
 };
 
-void mtx_init(struct mutex *, int);
+#ifdef __MUTEX_PRIVATE
 
-#define MUTEX_INITIALIZER(ipl) { 0, (ipl) << 8, 0 }
+#define	mtx_owner 			u.mtxa_owner
+#define	mtx_ipl 			u.s.mtxs_ipl
+#define	mtx_lock			u.s.mtxs_lock
 
-#ifdef DIAGNOSTIC
-#define MUTEX_ASSERT_LOCKED(mtx) do {					\
-	if ((mtx)->mtx_lock == 0)					\
-		panic("mutex %p not held in %s", (mtx), __func__);	\
-} while (0)
+#define	__HAVE_SIMPLE_MUTEXES		1
 
-#define MUTEX_ASSERT_UNLOCKED(mtx) do {					\
-	if ((mtx)->mtx_lock != 0)					\
-		panic("mutex %p held in %s", (mtx), __func__);		\
-} while (0)
-#else
-#define MUTEX_ASSERT_LOCKED(mtx) do { } while (0)
-#define MUTEX_ASSERT_UNLOCKED(mtx) do { } while (0)
-#endif
+#define	MUTEX_RECEIVE(mtx)		/* nothing */
+#define	MUTEX_GIVE(mtx)			/* nothing */
 
-#define MUTEX_OLDIPL(mtx)	(mtx)->mtx_oldipl
+#define	MUTEX_CAS(p, o, n)		\
+    (_atomic_cas_ulong((volatile unsigned long *)(p), (o), (n)) == (o))
 
-#endif
+unsigned long	_atomic_cas_ulong(volatile unsigned long *,
+    unsigned long, unsigned long);
+
+#endif	/* __MUTEX_PRIVATE */
+
+#endif /* _SPARC_MUTEX_H_ */

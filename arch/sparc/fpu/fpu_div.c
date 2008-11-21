@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_div.c,v 1.3 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: fpu_div.c,v 1.2 1994/11/20 20:52:38 deraadt Exp $ */
+/*	$NetBSD: fpu_div.c,v 1.5 2005/11/16 23:24:44 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -44,6 +43,9 @@
 /*
  * Perform an FPU divide (return x / y).
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_div.c,v 1.5 2005/11/16 23:24:44 uwe Exp $");
 
 #include <sys/types.h>
 
@@ -148,8 +150,7 @@
  */
 
 struct fpn *
-fpu_div(fe)
-	register struct fpemu *fe;
+fpu_div(struct fpemu *fe)
 {
 	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
 	register u_int q, bit;

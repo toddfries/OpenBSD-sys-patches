@@ -1,6 +1,7 @@
-/*	$OpenBSD: sboot.h,v 1.8 2002/03/14 03:15:56 millert Exp $ */
+/*	$NetBSD: sboot.h,v 1.6 2007/03/04 06:00:24 christos Exp $	*/
 
 /*
+ *
  * Copyright (c) 1995 Charles D. Cranor and Seth Widoff
  * All rights reserved.
  *
@@ -35,11 +36,18 @@
  * sboot.h: stuff for MVME147's serial line boot
  */
 
-extern caddr_t end;
+#include <lib/libkern/libkern.h>
+#include <lib/libsa/stand.h>
+
+extern void *end;
+
 
 /* console */
 void puts(char *);
+void putchar(int);
+char cngetc(void);
 char *ngets(char *, int);
+void consinit(void);
 
 /* sboot */
 void callrom(void);
@@ -65,14 +73,17 @@ int do_get_file(void);
 void tftp_file(char *, u_long);
 
 /* clock */
-u_long ttime(void);
+u_long time(void);
 
 /* checksum */
-u_long oc_cksum(void *, u_long, u_long);
+u_long oc_cksum (void *, u_long, u_long);
+
+/* start */
+void go(int, void *, void *);
 
 #define CONS_ZS_ADDR (0xfffe3002)
 #define CLOCK_ADDR (0xfffe07f8)
-#define LOAD_ADDR 0x7000 
+#define LOAD_ADDR 0x8000 
 
 unsigned char myea[6];                /* my ether addr */
 unsigned char myip[4];

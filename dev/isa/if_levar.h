@@ -1,60 +1,56 @@
-/*	$OpenBSD: if_levar.h,v 1.9 2007/06/17 21:20:47 jasper Exp $	*/
-/*	$NetBSD: if_levar.h,v 1.5 1996/05/07 01:50:07 thorpej Exp $	*/
+/*	$NetBSD: if_levar.h,v 1.14 2008/04/28 20:23:52 martin Exp $	*/
 
-/*
- * LANCE Ethernet driver header file
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
  *
- * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
  *
- * Copyright (C) 1993, Paul Richards. This software may be used, modified,
- *   copied, distributed, and sold, in both source and binary form provided
- *   that the above copyright and these terms are retained. Under no
- *   circumstances is the author responsible for the proper functioning
- *   of this software, nor does the author assume any responsibility
- *   for damages incurred with its use.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Board types */
-#define	BICC		1
 #define	BICC_RDP	0xc
 #define	BICC_RAP	0xe
 
-#define	NE2100		2
-#define	PCnet_ISA	4
 #define	NE2100_RDP	0x10
 #define	NE2100_RAP	0x12
 
-#define	DEPCA		3
-#define	DEPCA_CSR	0x0
-#define	DEPCA_CSR_SHE		0x80	/* Shared memory enabled */
-#define	DEPCA_CSR_SWAP32	0x40	/* Byte swapped */
-#define	DEPCA_CSR_DUM		0x08	/* rev E compatibility */
-#define	DEPCA_CSR_IM		0x04	/* Interrupt masked */
-#define	DEPCA_CSR_IEN		0x02	/* Interrupt enabled */
-#define	DEPCA_CSR_NORMAL \
-	(DEPCA_CSR_SHE | DEPCA_CSR_DUM | DEPCA_CSR_IEN)
-#define	DEPCA_RDP	0x4
-#define	DEPCA_RAP	0x6
-#define	DEPCA_ADP	0xc
+#define LANCEISA_FLAG_LOCALBUS	1
 
 /*
  * Ethernet software status per interface.
  *
  * Each interface is referenced by a network interface structure,
- * arpcom.ac_if, which the routing code uses to locate the interface.
+ * ethercom.ec_if, which the routing code uses to locate the interface.
  * This structure contains the output queue for the interface, its address, ...
  */
 struct le_softc {
 	struct	am7990_softc sc_am7990;	/* glue to MI code */
 
 	void	*sc_ih;
-	int	sc_card;
-	int	sc_rap, sc_rdp;		/* offsets to LANCE registers */
-
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
+	bus_dma_tag_t	sc_dmat;	/* DMA glue */
+	bus_dmamap_t	sc_dmam;
+	int	sc_rap, sc_rdp;		/* offsets to LANCE registers */
 };
-
-void		le_isa_wrcsr(struct am7990_softc *, u_int16_t, u_int16_t);
-u_int16_t	le_isa_rdcsr(struct am7990_softc *, u_int16_t);  
-int		le_isa_intredge(void *);

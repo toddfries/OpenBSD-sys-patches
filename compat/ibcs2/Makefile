@@ -1,8 +1,13 @@
-#	$OpenBSD: Makefile,v 1.3 2001/08/26 03:23:44 deraadt Exp $
-#	$NetBSD: Makefile,v 1.1 1996/09/03 03:18:12 mycroft Exp $
+#	$NetBSD: Makefile,v 1.5 2005/12/11 12:20:02 christos Exp $
+
+.include <bsd.sys.mk>		# for HOST_SH
 
 DEP=	syscalls.conf syscalls.master ../../kern/makesyscalls.sh
 OBJS=	ibcs2_sysent.c ibcs2_syscalls.c ibcs2_syscall.h ibcs2_syscallargs.h
 
 ${OBJS}: ${DEP}
-	sh ../../kern/makesyscalls.sh syscalls.conf syscalls.master
+	${HOST_SH} ../../kern/makesyscalls.sh syscalls.conf syscalls.master
+
+all: ${OBJS}
+
+.include <bsd.kinc.mk>

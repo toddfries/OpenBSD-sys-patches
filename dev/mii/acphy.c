@@ -1,5 +1,4 @@
-/*	$OpenBSD: acphy.c,v 1.6 2006/12/27 19:11:08 kettenis Exp $	*/
-/*	$NetBSD: acphy.c,v 1.13 2003/04/29 01:49:33 thorpej Exp $	*/
+/*	$NetBSD: acphy.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -40,6 +39,9 @@
  * Driver for the Altima AC101 PHY.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: acphy.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -56,39 +58,39 @@
 
 #include <dev/mii/acphyreg.h>
 
-int	acphymatch(struct device *, void *, void *);
-void	acphyattach(struct device *, struct device *, void *);
+static int	acphymatch(device_t, cfdata_t, void *);
+static void	acphyattach(device_t, device_t, void *);
 
-struct cfattach acphy_ca = {
-	sizeof(struct mii_softc), acphymatch, acphyattach, mii_phy_detach,
-	    mii_phy_activate
-};
+CFATTACH_DECL_NEW(acphy, sizeof(struct mii_softc),
+    acphymatch, acphyattach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver acphy_cd = {
-	NULL, "acphy", DV_DULL
-};
+static int	acphy_service(struct mii_softc *, struct mii_data *, int);
+static void	acphy_status(struct mii_softc *);
 
-int	acphy_service(struct mii_softc *, struct mii_data *, int);
-void	acphy_status(struct mii_softc *);
-
-const struct mii_phy_funcs acphy_funcs = {
+static const struct mii_phy_funcs acphy_funcs = {
 	acphy_service, acphy_status, mii_phy_reset,
 };
 
 static const struct mii_phydesc acphys[] = {
-	{ MII_OUI_xxALTIMA,		MII_MODEL_xxALTIMA_AC101,
-	  MII_STR_xxALTIMA_AC101 },
-	{ MII_OUI_xxALTIMA,		MII_MODEL_xxALTIMA_AC101L,
-	  MII_STR_xxALTIMA_AC101L },
-	{ MII_OUI_xxALTIMA,		MII_MODEL_xxALTIMA_AC_UNKNOWN,
-	  MII_STR_xxALTIMA_AC_UNKNOWN },
+	{ MII_OUI_ALTIMA,		MII_MODEL_ALTIMA_AC101,
+	  MII_STR_ALTIMA_AC101 },
+	{ MII_OUI_ALTIMA,		MII_MODEL_ALTIMA_AC101L,
+	  MII_STR_ALTIMA_AC101L },
+	{ MII_OUI_ALTIMA,		MII_MODEL_ALTIMA_Am79C874,
+	  MII_STR_ALTIMA_Am79C874 },
+	{ MII_OUI_ALTIMA,		MII_MODEL_ALTIMA_Am79C875,
+	  MII_STR_ALTIMA_Am79C875 },
+
+	/* XXX This is reported to work, but it's not from any data sheet. */
+	{ MII_OUI_ALTIMA,		MII_MODEL_ALTIMA_ACXXX,
+	  MII_STR_ALTIMA_ACXXX },
 
 	{ 0,				0,
 	  NULL },
 };
 
-int
-acphymatch(struct device *parent, void *match, void *aux)
+static int
+acphymatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -98,17 +100,19 @@ acphymatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-void
-acphyattach(struct device *parent, struct device *self, void *aux)
+static void
+acphyattach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
 	mpd = mii_phy_match(ma, acphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	aprint_naive(": Media interface\n");
+	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &acphy_funcs;
@@ -124,21 +128,27 @@ acphyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
+	aprint_normal_dev(sc->mii_dev, "");
 
 #define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
 	if (sc->mii_flags & MIIF_HAVEFIBER) {
 		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_FX, 0, sc->mii_inst),
 		    MII_MEDIA_100_TX);
+		aprint_normal("100baseFX, ");
 		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_FX, IFM_FDX, sc->mii_inst),
 		    MII_MEDIA_100_TX);
+		aprint_normal("100baseFX-FDX, ");
 	}
 #undef ADD
 
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 acphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -197,7 +207,7 @@ acphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 acphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -238,11 +248,8 @@ acphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
-
 		if (dr & DR_DPLX)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

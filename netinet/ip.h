@@ -1,5 +1,4 @@
-/*	$OpenBSD: ip.h,v 1.12 2006/04/27 02:19:32 tedu Exp $	*/
-/*	$NetBSD: ip.h,v 1.9 1995/05/15 01:22:44 cgd Exp $	*/
+/*	$NetBSD: ip.h,v 1.31 2007/12/25 18:33:46 perry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -29,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ip.h	8.1 (Berkeley) 6/10/93
+ *	@(#)ip.h	8.2 (Berkeley) 6/1/94
  */
 
 #ifndef _NETINET_IP_H_
@@ -45,19 +44,20 @@
  * Structure of an internet header, naked of options.
  */
 struct ip {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-	u_int     ip_hl:4,		/* header length */
-		  ip_v:4;		/* version */
+#if BYTE_ORDER == LITTLE_ENDIAN
+	unsigned int ip_hl:4,		/* header length */
+		     ip_v:4;		/* version */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
-	u_int     ip_v:4,		/* version */
-		  ip_hl:4;		/* header length */
+#if BYTE_ORDER == BIG_ENDIAN
+	unsigned int ip_v:4,		/* version */
+		     ip_hl:4;		/* header length */
 #endif
 	u_int8_t  ip_tos;		/* type of service */
 	u_int16_t ip_len;		/* total length */
 	u_int16_t ip_id;		/* identification */
 	u_int16_t ip_off;		/* fragment offset field */
 #define	IP_RF 0x8000			/* reserved fragment flag */
+#define	IP_EF 0x8000			/* evil flag, per RFC 3514 */
 #define	IP_DF 0x4000			/* dont fragment flag */
 #define	IP_MF 0x2000			/* more fragments flag */
 #define	IP_OFFMASK 0x1fff		/* mask for fragmenting bits */
@@ -65,9 +65,10 @@ struct ip {
 	u_int8_t  ip_p;			/* protocol */
 	u_int16_t ip_sum;		/* checksum */
 	struct	  in_addr ip_src, ip_dst; /* source and dest address */
-};
+} __packed;
 
 #define	IP_MAXPACKET	65535		/* maximum packet size */
+#define	IP_MINFRAGSIZE	69		/* minumum size that can be fraged */
 
 /*
  * Definitions for IP type of service (ip_tos)
@@ -76,11 +77,6 @@ struct ip {
 #define	IPTOS_THROUGHPUT	0x08
 #define	IPTOS_RELIABILITY	0x04
 /*	IPTOS_LOWCOST		0x02 XXX */
-#if 1
-/* ECN RFC3168 obsoletes RFC2481, and these will be deprecated soon. */
-#define IPTOS_CE		0x01	/* congestion experienced */
-#define IPTOS_ECT		0x02	/* ECN-capable transport */
-#endif
 
 /*
  * Definitions for IP precedence (also in ip_tos) (hopefully unused)
@@ -141,22 +137,22 @@ struct	ip_timestamp {
 	u_int8_t ipt_code;		/* IPOPT_TS */
 	u_int8_t ipt_len;		/* size of structure (variable) */
 	u_int8_t ipt_ptr;		/* index of current entry */
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-	u_int    ipt_flg:4,		/* flags, see below */
-		 ipt_oflw:4;		/* overflow counter */
+#if BYTE_ORDER == LITTLE_ENDIAN
+	unsigned int ipt_flg:4,		/* flags, see below */
+		     ipt_oflw:4;	/* overflow counter */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
-	u_int    ipt_oflw:4,		/* overflow counter */
-		 ipt_flg:4;		/* flags, see below */
+#if BYTE_ORDER == BIG_ENDIAN
+	unsigned int ipt_oflw:4,	/* overflow counter */
+		     ipt_flg:4;		/* flags, see below */
 #endif
 	union ipt_timestamp {
 		 n_time	ipt_time[1];
 		 struct	ipt_ta {
 			struct in_addr ipt_addr;
 			n_time ipt_time;
-		 } ipt_ta[1];
-	} ipt_timestamp;
-};
+		 } ipt_ta[1] __packed;
+	} ipt_timestamp __packed;
+} __packed;
 
 /* flag bits for ipt_flg */
 #define	IPOPT_TS_TSONLY		0		/* timestamps only */
@@ -188,10 +184,11 @@ struct	ip_timestamp {
  * For stronger checksums, the real thing must be used.
  */
 struct ippseudo {
-	struct    in_addr ippseudo_src;	/* source internet address */
-	struct    in_addr ippseudo_dst;	/* destination internet address */
-	u_int8_t  ippseudo_pad;		/* pad, must be zero */
-	u_int8_t  ippseudo_p;		/* protocol */
-	u_int16_t ippseudo_len;		/* protocol length */
-};
-#endif /* _NETINET_IP_H_ */
+	struct	in_addr	ippseudo_src;	/* source internet address */
+	struct	in_addr	ippseudo_dst;	/* destination internet address */
+	u_int8_t	ippseudo_pad;	/* pad, must be zero */
+	u_int8_t	ippseudo_p;	/* protocol */
+	u_int16_t	ippseudo_len;	/* protocol length */
+} __packed;
+#endif /* !_NETINET_IP_H_ */
+

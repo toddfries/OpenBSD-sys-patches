@@ -1,4 +1,4 @@
-/*	$NetBSD: adlookup.c,v 1.9 2006/12/09 16:11:50 chs Exp $	*/
+/*	$NetBSD: adlookup.c,v 1.11 2007/11/26 19:01:40 pooka Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adlookup.c,v 1.9 2006/12/09 16:11:50 chs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adlookup.c,v 1.11 2007/11/26 19:01:40 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -99,7 +99,7 @@ adosfs_lookup(v)
 	/*
 	 * Check accessiblity of directory.
 	 */
-	if ((error = VOP_ACCESS(vdp, VEXEC, ucp, cnp->cn_lwp)) != 0)
+	if ((error = VOP_ACCESS(vdp, VEXEC, ucp)) != 0)
 		return (error);
 
 	if ((flags & ISLASTCN) && (vdp->v_mount->mnt_flag & MNT_RDONLY) &&
@@ -126,7 +126,7 @@ adosfs_lookup(v)
 	 * fake a ".."
 	 */
 	if (flags & ISDOTDOT) {
-		if (vdp->v_type == VDIR && (vdp->v_flag & VROOT))
+		if (vdp->v_type == VDIR && (vdp->v_vflag & VV_ROOT))
 			panic("adosfs .. attempted through root");
 		/*
 		 * cannot get `..' while `vdp' is locked
@@ -200,7 +200,7 @@ adosfs_lookup(v)
 		if (vdp->v_mount->mnt_flag & MNT_RDONLY)
 			return (EROFS);
 
-		if ((error = VOP_ACCESS(vdp, VWRITE, ucp, cnp->cn_lwp)) != 0) {
+		if ((error = VOP_ACCESS(vdp, VWRITE, ucp)) != 0) {
 #ifdef ADOSFS_DIAGNOSTIC
 			printf("[VOP_ACCESS] %d)", error);
 #endif
@@ -221,7 +221,7 @@ adosfs_lookup(v)
 
 found:
 	if (nameiop == DELETE && last)  {
-		if ((error = VOP_ACCESS(vdp, VWRITE, ucp, cnp->cn_lwp)) != 0) {
+		if ((error = VOP_ACCESS(vdp, VWRITE, ucp)) != 0) {
 			if (vdp != *vpp)
 				vput(*vpp);
 			*vpp = NULL;
@@ -232,7 +232,7 @@ found:
 	if (nameiop == RENAME && last) {
 		if (vdp == *vpp)
 			return(EISDIR);
-		if ((error = VOP_ACCESS(vdp, VWRITE, ucp, cnp->cn_lwp)) != 0) {
+		if ((error = VOP_ACCESS(vdp, VWRITE, ucp)) != 0) {
 			vput(*vpp);
 			*vpp = NULL;
 			return (error);

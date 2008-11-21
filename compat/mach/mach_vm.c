@@ -1,7 +1,7 @@
-/*	$NetBSD: mach_vm.c,v 1.53 2006/11/16 01:32:44 christos Exp $ */
+/*	$NetBSD: mach_vm.c,v 1.60 2008/04/28 20:23:45 martin Exp $ */
 
 /*-
- * Copyright (c) 2002-2003 The NetBSD Foundation, Inc.
+ * Copyright (c) 2002-2003, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,17 +29,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "opt_ktrace.h"
-
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mach_vm.c,v 1.53 2006/11/16 01:32:44 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mach_vm.c,v 1.60 2008/04/28 20:23:45 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
-#include <sys/sa.h>
 #include <sys/mman.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
@@ -70,8 +60,7 @@ __KERNEL_RCSID(0, "$NetBSD: mach_vm.c,v 1.53 2006/11/16 01:32:44 christos Exp $"
 #include <compat/mach/mach_syscallargs.h>
 
 int
-mach_vm_map(args)
-	struct mach_trap_args *args;
+mach_vm_map(struct mach_trap_args *args)
 {
 	mach_vm_map_request_t *req = args->smsg;
 	mach_vm_map_reply_t *rep = args->rmsg;
@@ -159,8 +148,7 @@ mach_vm_map(args)
 }
 
 int
-mach_vm_allocate(args)
-	struct mach_trap_args *args;
+mach_vm_allocate(struct mach_trap_args *args)
 {
 	mach_vm_allocate_request_t *req = args->smsg;
 	mach_vm_allocate_reply_t *rep = args->rmsg;
@@ -207,7 +195,7 @@ mach_vm_allocate(args)
 	if (size == 0)
 		goto out;
 
-	SCARG(&cup, addr) = (caddr_t)addr;
+	SCARG(&cup, addr) = (void *)addr;
 	SCARG(&cup, len) = size;
 	SCARG(&cup, prot) = PROT_READ | PROT_WRITE;
 	SCARG(&cup, flags) = MAP_ANON;
@@ -234,8 +222,7 @@ out:
 }
 
 int
-mach_vm_deallocate(args)
-	struct mach_trap_args *args;
+mach_vm_deallocate(struct mach_trap_args *args)
 {
 	mach_vm_deallocate_request_t *req = args->smsg;
 	mach_vm_deallocate_reply_t *rep = args->rmsg;
@@ -249,7 +236,7 @@ mach_vm_deallocate(args)
 	    (void *)req->req_address, (long)req->req_size);
 #endif
 
-	SCARG(&cup, addr) = (caddr_t)req->req_address;
+	SCARG(&cup, addr) = (void *)req->req_address;
 	SCARG(&cup, len) = req->req_size;
 
 	if ((error = sys_munmap(tl, &cup, &rep->rep_retval)) != 0)
@@ -268,8 +255,7 @@ mach_vm_deallocate(args)
  */
 #if 0
 int
-mach_vm_wire(args)
-	struct mach_trap_args *args;
+mach_vm_wire(struct mach_trap_args *args)
 {
 	mach_vm_wire_request_t *req = args->smsg;
 	mach_vm_wire_reply_t *rep = args->rmsg;
@@ -322,8 +308,7 @@ mach_vm_wire(args)
 #endif
 
 int
-mach_vm_protect(args)
-	struct mach_trap_args *args;
+mach_vm_protect(struct mach_trap_args *args)
 {
 	mach_vm_protect_request_t *req = args->smsg;
 	mach_vm_protect_reply_t *rep = args->rmsg;
@@ -348,17 +333,16 @@ mach_vm_protect(args)
 }
 
 int
-mach_sys_map_fd(struct lwp *l, void *v, register_t *retval)
+mach_sys_map_fd(struct lwp *l, const struct mach_sys_map_fd_args *uap, register_t *retval)
 {
-	struct mach_sys_map_fd_args /* {
+	/* {
 		syscallarg(int) fd;
 		syscallarg(mach_vm_offset_t) offset;
 		syscallarg(mach_vm_offset_t *) va;
 		syscallarg(mach_boolean_t) findspace;
 		syscallarg(mach_vm_size_t) size;
-	} */ *uap = v;
-	struct file *fp;
-	struct filedesc *fdp;
+	} */
+	file_t *fp;
 	struct vnode *vp;
 	struct exec_vmcmd evc;
 	struct vm_map_entry *ret;
@@ -378,13 +362,11 @@ mach_sys_map_fd(struct lwp *l, void *v, register_t *retval)
 		(void)sys_munmap(l, &cup, &dontcare);
 	}
 
-	fdp = p->p_fd;
-	fp = fd_getfile(fdp, SCARG(uap, fd));
+	fp = fd_getfile(SCARG(uap, fd));
 	if (fp == NULL)
 		return EBADF;
 
-	FILE_USE(fp);
-	vp = (struct vnode *)fp->f_data;
+	vp = fp->f_data;
 	vref(vp);
 
 #ifdef DEBUG_MACH_VM
@@ -440,7 +422,7 @@ mach_sys_map_fd(struct lwp *l, void *v, register_t *retval)
 	}
 
 	vput(vp);
-	FILE_UNUSE(fp, l);
+	fd_putfile(SCARG(uap, fd));
 #ifdef DEBUG_MACH_VM
 	printf("mach_sys_map_fd: mapping at %p\n", (void *)evc.ev_addr);
 #endif
@@ -456,7 +438,7 @@ bad1:
 	VOP_UNLOCK(vp, 0);
 bad2:
 	vrele(vp);
-	FILE_UNUSE(fp, l);
+	fd_putfile(SCARG(uap, fd));
 #ifdef DEBUG_MACH_VM
 	printf("mach_sys_map_fd: mapping at %p failed, error = %d\n",
 	    (void *)evc.ev_addr, error);
@@ -465,8 +447,7 @@ bad2:
 }
 
 int
-mach_vm_inherit(args)
-	struct mach_trap_args *args;
+mach_vm_inherit(struct mach_trap_args *args)
 {
 	mach_vm_inherit_request_t *req = args->smsg;
 	mach_vm_inherit_reply_t *rep = args->rmsg;
@@ -492,8 +473,7 @@ mach_vm_inherit(args)
 }
 
 int
-mach_make_memory_entry_64(args)
-	struct mach_trap_args *args;
+mach_make_memory_entry_64(struct mach_trap_args *args)
 {
 	mach_make_memory_entry_64_request_t *req = args->smsg;
 	mach_make_memory_entry_64_reply_t *rep = args->rmsg;
@@ -531,8 +511,7 @@ mach_make_memory_entry_64(args)
 }
 
 int
-mach_vm_region(args)
-	struct mach_trap_args *args;
+mach_vm_region(struct mach_trap_args *args)
 {
 	mach_vm_region_request_t *req = args->smsg;
 	mach_vm_region_reply_t *rep = args->rmsg;
@@ -590,8 +569,7 @@ mach_vm_region(args)
 }
 
 int
-mach_vm_region_64(args)
-	struct mach_trap_args *args;
+mach_vm_region_64(struct mach_trap_args *args)
 {
 	mach_vm_region_64_request_t *req = args->smsg;
 	mach_vm_region_64_reply_t *rep = args->rmsg;
@@ -648,8 +626,7 @@ mach_vm_region_64(args)
 }
 
 int
-mach_vm_msync(args)
-	struct mach_trap_args *args;
+mach_vm_msync(struct mach_trap_args *args)
 {
 	mach_vm_msync_request_t *req = args->smsg;
 	mach_vm_msync_reply_t *rep = args->rmsg;
@@ -683,15 +660,14 @@ mach_vm_msync(args)
 
 /* XXX Do it for remote task */
 int
-mach_vm_copy(args)
-	struct mach_trap_args *args;
+mach_vm_copy(struct mach_trap_args *args)
 {
 	mach_vm_copy_request_t *req = args->smsg;
 	mach_vm_copy_reply_t *rep = args->rmsg;
 	size_t *msglen = args->rsize;
 	char *tmpbuf;
 	int error;
-	caddr_t src, dst;
+	char *src, *dst;
 	size_t size;
 
 #ifdef DEBUG_MACH_VM
@@ -703,8 +679,8 @@ mach_vm_copy(args)
 	    (req->req_size & (PAGE_SIZE - 1)))
 		return mach_msg_error(args, EINVAL);
 
-	src = (caddr_t)req->req_src;
-	dst = (caddr_t)req->req_addr;
+	src = (void *)req->req_src;
+	dst = (void *)req->req_addr;
 	size = (size_t)req->req_size;
 
 	tmpbuf = malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
@@ -738,8 +714,7 @@ out:
 }
 
 int
-mach_vm_read(args)
-	struct mach_trap_args *args;
+mach_vm_read(struct mach_trap_args *args)
 {
 	mach_vm_read_request_t *req = args->smsg;
 	mach_vm_read_reply_t *rep = args->rmsg;
@@ -782,10 +757,8 @@ mach_vm_read(args)
 		return mach_msg_error(args, EFAULT);
 	}
 
-#ifdef KTRACE
-	if (KTRPOINT(l->l_proc, KTR_MOOL) && error == 0)
-		ktrmool(l, tbuf, size, (void *)va);
-#endif
+	if (error == 0)
+		ktrmool(tbuf, size, (void *)va);
 
 	free(tbuf, M_WAITOK);
 
@@ -801,15 +774,11 @@ mach_vm_read(args)
 }
 
 int
-mach_vm_write(args)
-	struct mach_trap_args *args;
+mach_vm_write(struct mach_trap_args *args)
 {
 	mach_vm_write_request_t *req = args->smsg;
 	mach_vm_write_reply_t *rep = args->rmsg;
 	size_t *msglen = args->rsize;
-#ifdef KTRACE
-	struct lwp *l = args->l;
-#endif
 	struct lwp *tl = args->tl;
 	size_t size;
 	void *addr;
@@ -842,10 +811,8 @@ mach_vm_write(args)
 		return mach_msg_error(args, EFAULT);
 	}
 
-#ifdef KTRACE
-	if (KTRPOINT(l->l_proc, KTR_MOOL) && error == 0)
-		ktrmool(l, tbuf, size, (void *)addr);
-#endif
+	if (error == 0)
+		ktrmool(tbuf, size, (void *)addr);
 
 	free(tbuf, M_WAITOK);
 
@@ -860,8 +827,7 @@ mach_vm_write(args)
 }
 
 int
-mach_vm_machine_attribute(args)
-	struct mach_trap_args *args;
+mach_vm_machine_attribute(struct mach_trap_args *args)
 {
 	mach_vm_machine_attribute_request_t *req = args->smsg;
 	mach_vm_machine_attribute_reply_t *rep = args->rmsg;

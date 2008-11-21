@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka46.h,v 1.1 2000/04/26 06:08:27 bjc Exp $	*/
-/*	$NetBSD: ka46.h,v 1.2 1998/08/11 17:52:58 ragge Exp $ */
+/*	$NetBSD: ka46.h,v 1.3 2002/12/01 21:21:45 matt Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -35,6 +34,9 @@
  * KA46 (VS4000/60) specific definitions.
  */
 
+#ifndef _VAX_KA46_H_
+#define _VAX_KA46_H_
+
 
 /* IPR bits definitions */
 #define	PCSTS_FLUSH		 4
@@ -54,3 +56,5 @@
 
 #define	KA46_BWF0	0x20080014
 #define	BWF0_FEN	0x01000000
+
+#endif /* _VAX_KA46_H_ */

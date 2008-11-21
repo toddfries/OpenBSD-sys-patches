@@ -1,5 +1,4 @@
-/* $OpenBSD: aicasm_symbol.c,v 1.9 2003/12/24 23:27:55 krw Exp $ */
-/*	$NetBSD: aicasm_symbol.c,v 1.4 2003/07/14 15:42:40 lukem Exp $	*/
+/*	$NetBSD: aicasm_symbol.c,v 1.5 2005/12/11 12:22:18 christos Exp $	*/
 
 /*
  * Aic7xxx SCSI host adapter firmware asssembler symbol table implementation
@@ -44,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-/* __RCSID("$NetBSD: aicasm_symbol.c,v 1.4 2003/07/14 15:42:40 lukem Exp $"); */
+__RCSID("$NetBSD: aicasm_symbol.c,v 1.5 2005/12/11 12:22:18 christos Exp $");
 
 #include <sys/types.h>
 

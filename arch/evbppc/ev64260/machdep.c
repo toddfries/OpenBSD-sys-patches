@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.19 2005/12/24 20:07:03 perry Exp $	*/
+/*	$NetBSD: machdep.c,v 1.22 2008/11/12 12:36:00 ad Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.19 2005/12/24 20:07:03 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.22 2008/11/12 12:36:00 ad Exp $");
 
 #include "opt_marvell.h"
 #include "opt_ev64260.h"
@@ -127,7 +127,6 @@ void gt_bus_space_init(void);
 void gt_find_memory(bus_space_tag_t, bus_space_handle_t, paddr_t);
 void gt_halt(bus_space_tag_t, bus_space_handle_t);
 void return_to_dink(int);
-void calc_delayconst(void);
 
 void kcomcnputs(dev_t, const char *);
 
@@ -205,8 +204,6 @@ initppc(startkernel, endkernel, args, btinfo)
 	oea_batinit(0xf0000000, BAT_BL_256M);
 	oea_init((void (*)(void))ext_intr);
 
-	calc_delayconst();			/* Set CPU clock */
-
 	DELAY(100000);
 
 	gt_bus_space_init();
@@ -234,7 +231,7 @@ initppc(startkernel, endkernel, args, btinfo)
 	 */
 	pmap_bootstrap(startkernel, endkernel);
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	{
 		extern void *startsym, *endsym;
 		ksyms_init((int)((u_int)endsym - (u_int)startsym),
@@ -383,6 +380,7 @@ cpu_reboot(int howto, char *what)
 	splhigh();
 	if (howto & RB_HALT) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("halted\n\n");
 		cnhalt();
 		while(1);
@@ -390,6 +388,8 @@ cpu_reboot(int howto, char *what)
 	if (!cold && (howto & RB_DUMP))
 		oea_dumpsys();
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 	printf("rebooting\n\n");
 	if (what && *what) {
 		if (strlen(what) > sizeof str - 5)

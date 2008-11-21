@@ -1,3 +1,5 @@
+/* $NetBSD: drm_memory.c,v 1.14 2008/06/29 12:49:08 jmcneill Exp $ */
+
 /* drm_memory.h -- Memory management wrappers for DRM -*- linux-c -*-
  * Created: Thu Feb  4 14:00:34 1999 by faith@valinux.com
  */
@@ -32,21 +34,35 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: drm_memory.c,v 1.14 2008/06/29 12:49:08 jmcneill Exp $");
 /*
 __FBSDID("$FreeBSD: src/sys/dev/drm/drm_memory.c,v 1.2 2005/11/28 23:13:52 anholt Exp $");
 */
 
 #include "drmP.h"
 
+#ifdef DRM_NO_AGP
+#define NAGP_I810 0
+#else
+#if defined(_KERNEL_OPT)
+#include "agp_i810.h"
+#else
+#define NAGP_I810 1	/* XXX */
+#endif
+#if NAGP_I810 > 0 /* XXX hack to borrow agp's register mapping */
+#include <dev/pci/agpvar.h>
+#endif
+#endif
+
+#if !defined(_MODULE)
 MALLOC_DEFINE(M_DRM, "drm", "DRM Data Structures");
+#endif
 
 void drm_mem_init(void)
 {
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 /*
 	malloc_type_attach(M_DRM);
 */
-#endif
 }
 
 void drm_mem_uninit(void)
@@ -84,14 +100,13 @@ void drm_free(void *pt, size_t size, int area)
 
 void *drm_ioremap(drm_device_t *dev, drm_local_map_t *map)
 {
-#ifdef __FreeBSD__
-	return pmap_mapdev(map->offset, map->size);
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 	int i, reg, reason;
 	for(i = 0; i<DRM_MAX_PCI_RESOURCE; i++) {
 		reg = PCI_MAPREG_START + i*4;
-		if (dev->pci_map_data[i].maptype == PCI_MAPREG_TYPE_MEM &&
-		    dev->pci_map_data[i].base == map->offset            &&
+		if ((dev->pci_map_data[i].maptype == PCI_MAPREG_TYPE_MEM ||
+		     dev->pci_map_data[i].maptype ==
+                      (PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT)) &&
+		    dev->pci_map_data[i].base == map->offset             &&
 		    dev->pci_map_data[i].size >= map->size)
 		{
 			map->bst = dev->pa.pa_memt;
@@ -108,6 +123,10 @@ void *drm_ioremap(drm_device_t *dev, drm_local_map_t *map)
 					dev->pci_map_data[i].flags, &map->bsh)))
 			{
 				dev->pci_map_data[i].mapped--;
+#if NAGP_I810 > 0 /* XXX horrible kludge: agp might have mapped it */
+				if (agp_i810_borrow(map->offset, &map->bsh))
+					return bus_space_vaddr(map->bst, map->bsh);
+#endif
 				DRM_DEBUG("ioremap: failed to map (%d)\n",
 					  reason);
 				return NULL;
@@ -164,14 +183,10 @@ void *drm_ioremap(drm_device_t *dev, drm_local_map_t *map)
 	DRM_DEBUG("drm_ioremap failed: offset=%lx size=%lu\n",
 		  map->offset, map->size);
 	return NULL;
-#endif
 }
 
 void drm_ioremapfree(drm_local_map_t *map)
 {
-#ifdef __FreeBSD__
-	pmap_unmapdev((vm_offset_t) map->handle, map->size);
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 	if (map->cnt == NULL) {
 		DRM_INFO("drm_ioremapfree called for unknown map\n");
 		return;
@@ -181,38 +196,8 @@ void drm_ioremapfree(drm_local_map_t *map)
 		if(*(map->cnt) == 0)
 			bus_space_unmap(map->bst, map->bsh, map->mapsize);
 	}
-#endif
 }
 
-#ifdef __FreeBSD__
-int
-drm_mtrr_add(unsigned long offset, size_t size, int flags)
-{
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_UPDATE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
-
-int
-drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
-{
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_REMOVE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 int
 drm_mtrr_add(unsigned long offset, size_t size, int flags)
 {
@@ -248,4 +233,3 @@ drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
 	return 0;
 #endif
 }
-#endif

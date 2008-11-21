@@ -1,4 +1,5 @@
-/*	$OpenBSD: ad1843reg.h,v 1.1 2005/01/02 19:25:41 kettenis Exp $	*/
+/* $NetBSD: ad1843reg.h,v 1.1 2007/04/13 03:35:38 jmcneill Exp $ */
+/* $OpenBSD: ad1843reg.h,v 1.1 2005/01/02 19:25:41 kettenis Exp $ */
 
 /*
  * Copyright (c) 2005 Mark Kettenis

@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.107 2006/11/11 18:47:11 jmmv Exp $
+# $NetBSD: GENERIC,v 1.114 2008/11/12 12:36:04 ad Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,14 +22,13 @@ include 	"arch/next68k/conf/std.next68k"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.107 $"
+#ident 		"GENERIC-$Revision: 1.114 $"
 
 # Needs to be set per system.  i.e change these as you see fit
 maxusers	16
 
 # Standard system options
 options 	KTRACE		# system call tracing
-#options 	SYSTRACE	# system call vetting via systrace(1)
 options 	SYSVMSG		# System V message queues
 options 	SYSVSEM		# System V semaphores
 #options 	SEMMNI=10	# number of semaphore identifiers
@@ -40,7 +39,6 @@ options 	SYSVSHM		# System V shared memory
 options 	P1003_1B_SEMAPHORE	# POSIX semaphore support
 #options 	SHMMAXPGS=1024	# 1024 pages is the default
 
-options 	LKM		# loadable kernel modules
 options 	INSECURE	# disable kernel security level
 options 	USERCONF	# userconf(4) support
 #options	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
@@ -83,7 +81,8 @@ options 	COMPAT_14	# NetBSD 1.4
 options 	COMPAT_15	# NetBSD 1.5
 options 	COMPAT_16	# NetBSD 1.6
 options 	COMPAT_20	# NetBSD 2.0
-options 	COMPAT_30	# NetBSD 3.0 compatibility.
+options 	COMPAT_30	# NetBSD 3.0
+options 	COMPAT_40	# NetBSD 4.0 compatibility.
 
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
 
@@ -119,6 +118,7 @@ file-system	PTYFS		# /dev/pts/N support
 options 	NFSSERVER	# nfs server support
 #options 	QUOTA		# FFS quotas
 #options 	SOFTDEP		# FFS soft updates support.
+options 	WAPBL		# File system journaling support - Experimental
 #options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 #options 	EXT2FS_SYSTEM_FLAGS # makes ext2fs file flags (append and
@@ -231,6 +231,11 @@ uk*	at scsibus? target ? lun ?	# SCSI unknown
 # Memory-disk drivers
 pseudo-device	md		2
 
+#
+# accept filters
+pseudo-device   accf_data		# "dataready" accept filter
+pseudo-device   accf_http		# "httpready" accept filter
+
 # Misc.
 pseudo-device	loop		1	# network loopback
 pseudo-device	bpfilter		# packet filter
@@ -248,6 +253,7 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
+pseudo-device	agr			# IEEE 802.3ad link aggregation
 pseudo-device	rnd			# /dev/random and in-kernel generator
 #pseudo-device	wsmux			# mouse & keyboard multiplexor
 

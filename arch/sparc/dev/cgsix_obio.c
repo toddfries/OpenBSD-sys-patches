@@ -1,4 +1,4 @@
-/*	$NetBSD: cgsix_obio.c,v 1.18 2006/03/29 04:16:47 thorpej Exp $ */
+/*	$NetBSD: cgsix_obio.c,v 1.22 2008/04/28 20:23:35 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgsix_obio.c,v 1.18 2006/03/29 04:16:47 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgsix_obio.c,v 1.22 2008/04/28 20:23:35 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -135,6 +128,8 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 
 	fb_setsize_eeprom(fb, fb->fb_type.fb_depth, 1152, 900);
 
+	sc->sc_ramsize = 1024 * 1024;	/* All our cgsix's are 1MB */
+
 	/*
 	 * Dunno what the PROM has mapped, though obviously it must have
 	 * the video RAM mapped.  Just map what we care about for ourselves
@@ -200,8 +195,8 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 	constype = (fb->fb_flags & FB_PFOUR) ? EE_CONS_P4OPT : EE_CONS_COLOR;
 
 	/*
-	 * Assume this is the console if there's no eeprom info
-	 * to be found.
+	 * Check to see if this is the console if there's no eeprom info
+	 * to be found, or if it's the correct framebuffer type.
 	 */
 	if (eep == NULL || eep->eeConsole == constype)
 		isconsole = fb_is_console(0);
@@ -209,16 +204,15 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 		isconsole = 0;
 
 	if (isconsole && cgsix_use_rasterconsole) {
-		int ramsize = fb->fb_type.fb_height * fb->fb_linebytes;
 		if (bus_space_map(oba->oba_bustag,
 				  oba->oba_paddr + CGSIX_RAM_OFFSET,
-				  ramsize,
+				  sc->sc_ramsize,
 				  BUS_SPACE_MAP_LINEAR,
 				  &bh) != 0) {
 			printf("%s: cannot map pixels\n", self->dv_xname);
 			return;
 		}
-		sc->sc_fb.fb_pixels = (caddr_t)bh;
+		sc->sc_fb.fb_pixels = (void *)bh;
 	}
 
 	cg6attach(sc, name, isconsole);

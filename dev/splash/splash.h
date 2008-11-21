@@ -1,4 +1,4 @@
-/* $NetBSD: splash.h,v 1.1 2006/02/18 19:00:23 jmcneill Exp $ */
+/* $NetBSD: splash.h,v 1.3 2008/05/10 15:31:05 martin Exp $ */
 
 /*-
  * Copyright (c) 2006 Jared D. McNeill <jmcneill@invisible.ca>

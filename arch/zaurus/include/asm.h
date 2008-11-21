@@ -1,4 +1,3 @@
-/*	$OpenBSD: asm.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: asm.h,v 1.3 2001/11/25 15:55:54 thorpej Exp $	*/
+/*	$NetBSD: asm.h,v 1.1 2006/12/16 05:43:00 ober Exp $	*/
 
 #include <arm/asm.h>

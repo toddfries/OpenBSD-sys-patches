@@ -1,12 +1,8 @@
-/*	$OpenBSD: m68k_machdep.c,v 1.12 2007/11/09 17:30:55 miod Exp $	*/
-/*	$NetBSD: m68k_machdep.c,v 1.3 1997/06/12 09:57:04 veego Exp $	*/
+/*	$NetBSD: m68k_machdep.c,v 1.7 2008/04/28 20:23:27 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Bernd Ernesti.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,80 +26,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: m68k_machdep.c,v 1.7 2008/04/28 20:23:27 martin Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/exec.h>
-#include <sys/proc.h>
-#include <sys/syscall.h>
-#include <sys/ktrace.h>
-#include <sys/user.h>
 
-#include <machine/cpu.h>
-#include <machine/frame.h>
-#include <machine/reg.h>
+/* the following is used externally (sysctl_hw) */
+char	machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 
-struct cpu_info cpu_info_store;
-
-/*
- * Set registers on exec.
- */
-void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
-{
-#ifdef COMPAT_SUNOS
-	extern struct emul emul_sunos;
-#endif
-	struct frame *frame = (struct frame *)p->p_md.md_regs;
-
-	frame->f_sr = PSL_USERSET;
-	frame->f_pc = pack->ep_entry & ~1;
-	bzero(frame->f_regs, 15 * sizeof(register_t));
-	frame->f_regs[A2] = (int)PS_STRINGS;
-	frame->f_regs[SP] = stack;
-
-	/* restore a null state frame */
-	p->p_addr->u_pcb.pcb_fpregs.fpf_null = 0;
-	if (fputype != FPU_NONE) {
-		m68881_restore(&p->p_addr->u_pcb.pcb_fpregs);
-	}
-
-#ifdef COMPAT_SUNOS
-	/*
-	 * SunOS' ld.so does self-modifying code without knowing
-	 * about the 040's cache purging needs.  So we need to uncache
-	 * writeable executable pages.
-	 */
-	if (p->p_emul == &emul_sunos)
-		p->p_md.md_flags |= MDP_UNCACHE_WX;
-	else
-		p->p_md.md_flags &= ~MDP_UNCACHE_WX;
-#endif
-
-	retval[1] = 0;
-}
-
-/*
- * Process the tail end of a fork() for the child
- */
-void
-child_return(arg)
-	void *arg;
-{
-	struct proc *p = (struct proc *)arg;
-	struct frame *f = (struct frame *)p->p_md.md_regs;
-
-	f->f_regs[D0] = 0;
-	f->f_sr &= ~PSL_C;	/* carry bit */
-	f->f_format = FMT0;
-
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
-#endif
-}

@@ -1,4 +1,4 @@
-/*	$NetBSD: ucbsnd.c,v 1.16 2005/12/11 12:17:33 christos Exp $ */
+/*	$NetBSD: ucbsnd.c,v 1.19 2008/06/12 16:50:53 tsutsui Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ucbsnd.c,v 1.16 2005/12/11 12:17:33 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ucbsnd.c,v 1.19 2008/06/12 16:50:53 tsutsui Exp $");
 
 #include "opt_use_poll.h"
 
@@ -72,7 +65,6 @@ __KERNEL_RCSID(0, "$NetBSD: ucbsnd.c,v 1.16 2005/12/11 12:17:33 christos Exp $")
 
 #define AUDIOUNIT(x)		(minor(x)&0x0f)
 #define AUDIODEV(x)		(minor(x)&0xf0)
-#define	splaudio	splbio	/* XXX */
 
 #ifdef UCBSNDDEBUG
 int	ucbsnd_debug = 1;
@@ -526,8 +518,8 @@ ucbsndopen(dev_t dev, int flags, int ifmt, struct lwp *l)
 	struct ucbsnd_softc *sc;
 	int s;
 	
-	if (unit >= ucbsnd_cd.cd_ndevs ||
-	    (sc = ucbsnd_cd.cd_devs[unit]) == NULL)
+	sc = device_lookup_private(&ucbsnd_cd, unit);
+	if (sc == NULL)
 		return (ENXIO);
 	
 	s = splaudio();
@@ -543,8 +535,8 @@ ucbsndclose(dev_t dev, int flags, int ifmt, struct lwp *l)
 	int unit = AUDIOUNIT(dev);
 	struct ucbsnd_softc *sc;
 	
-	if (unit >= ucbsnd_cd.cd_ndevs ||
-	    (sc = ucbsnd_cd.cd_devs[unit]) == NULL)
+	sc = device_lookup_private(&ucbsnd_cd, unit);
+	if (sc == NULL)
 		return (ENXIO);
 
 	return (0);
@@ -557,8 +549,8 @@ ucbsndread(dev_t dev, struct uio *uio, int ioflag)
 	struct ucbsnd_softc *sc;
 	int error = 0;
 	
-	if (unit >= ucbsnd_cd.cd_ndevs ||
-	    (sc = ucbsnd_cd.cd_devs[unit]) == NULL)
+	sc = device_lookup_private(&ucbsnd_cd, unit);
+	if (sc == NULL)
 		return (ENXIO);
 	/* not supported yet */
 
@@ -601,8 +593,8 @@ ucbsndwrite(dev_t dev, struct uio *uio, int ioflag)
 	int i, n, s, rest;
 	void *buf;
 	
-	if (unit >= ucbsnd_cd.cd_ndevs ||
-	    (sc = ucbsnd_cd.cd_devs[unit]) == NULL)
+	sc = device_lookup_private(&ucbsnd_cd, unit);
+	if (sc == NULL)
 		return (ENXIO);
 
 	len = uio->uio_resid;

@@ -1,6 +1,5 @@
 %{
-/*	$OpenBSD: aicasm_macro_gram.y,v 1.3 2006/12/23 21:08:01 krw Exp $	*/
-/*	$NetBSD: aicasm_macro_gram.y,v 1.1 2003/04/19 19:26:11 fvdl Exp $	*/
+/*	$NetBSD: aicasm_macro_gram.y,v 1.2 2006/11/25 16:48:32 christos Exp $	*/
 
 /*
  * Sub-parser for macro invocation in the Aic7xxx SCSI
@@ -142,7 +141,7 @@ add_macro_arg(const char *argtext, int argnum)
 	 * in the replace ment text for this call.
 	 */
 	i = 0;
-	TAILQ_FOREACH(marg, &macro_symbol->info.macroinfo->args, links) {
+	STAILQ_FOREACH(marg, &macro_symbol->info.macroinfo->args, links) {
 		i++;
 		if (i == argnum)
 			break;

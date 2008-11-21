@@ -1,5 +1,4 @@
-/*	$OpenBSD: siopvar.h,v 1.13 2005/11/20 22:32:48 krw Exp $ */
-/*	$NetBSD: siopvar.h,v 1.22 2005/11/18 23:10:32 bouyer Exp $	*/
+/*	$NetBSD: siopvar.h,v 1.25 2007/12/25 18:33:39 perry Exp $	*/
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -43,13 +42,12 @@
 struct siop_xfer {
 	struct siop_common_xfer siop_tables;
 	/* u_int32_t resel[sizeof(load_dsa) / sizeof(load_dsa[0])]; */
-	/* Add some entries to make size 384 bytes (256+128) */
-	u_int32_t resel[36];
+	u_int32_t resel[25];
 } __packed;
 
 /*
  * This describes a command handled by the SCSI controller
- * These are chained in either a free list or an active list
+ * These are chained in either a free list or a active list
  * We have one queue per target
  */
 
@@ -79,8 +77,7 @@ struct siop_tag {
 /* per lun struct */
 struct siop_lun {
 	struct siop_tag siop_tag[SIOP_NTAG]; /* tag array */
-	int lun_flags;
-#define SIOP_LUNF_FULL 0x01 /* queue full message */
+	int lun_flags; /* per-lun flags, none currently */
 	u_int reseloff;
 };
 
@@ -101,6 +98,21 @@ struct siop_lunsw {
 	u_int32_t lunsw_size; /* size of this lun sw */
 };
 
+static __inline void siop_table_sync(struct siop_cmd *, int);
+static __inline void
+siop_table_sync(siop_cmd, ops)
+	struct siop_cmd *siop_cmd;
+	int ops;
+{
+	struct siop_common_softc *sc  = siop_cmd->cmd_c.siop_sc;
+	bus_addr_t offset;
+
+	offset = siop_cmd->cmd_c.dsa -
+	    siop_cmd->siop_cbdp->xferdma->dm_segs[0].ds_addr;
+	bus_dmamap_sync(sc->sc_dmat, siop_cmd->siop_cbdp->xferdma, offset,
+	    sizeof(struct siop_xfer), ops);
+}
+
 
 TAILQ_HEAD(cmd_list, siop_cmd);
 TAILQ_HEAD(cbd_list, siop_cbd);
@@ -113,8 +125,6 @@ struct siop_softc {
 	int sc_currschedslot;		/* current scheduler slot */
 	struct cbd_list cmds;		/* list of command block descriptors */
 	struct cmd_list free_list;	/* cmd descr free list */
-	struct cmd_list urgent_list;	/* high priority cmd descr list */
-	struct cmd_list ready_list;	/* cmd descr ready list */
 	struct lunsw_list lunsw_list;	/* lunsw free list */
 	u_int32_t script_free_lo;	/* free ram offset from sc_scriptaddr */
 	u_int32_t script_free_hi;	/* free ram offset from sc_scriptaddr */

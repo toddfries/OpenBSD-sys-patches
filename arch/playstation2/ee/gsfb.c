@@ -1,4 +1,4 @@
-/*	$NetBSD: gsfb.c,v 1.16 2006/04/12 19:38:23 jmmv Exp $	*/
+/*	$NetBSD: gsfb.c,v 1.18 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gsfb.c,v 1.16 2006/04/12 19:38:23 jmmv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gsfb.c,v 1.18 2008/04/28 20:23:31 martin Exp $");
 
 #include "debug_playstation2.h"
 
@@ -208,7 +201,7 @@ STATIC void _gsfb_eraserows(void *, int, int, long);
 STATIC int _gsfb_allocattr(void *, int, int, int, long *);
 
 /* access ops */
-STATIC int _gsfb_ioctl(void *, void *, u_long, caddr_t, int, struct lwp *);
+STATIC int _gsfb_ioctl(void *, void *, u_long, void *, int, struct lwp *);
 STATIC paddr_t _gsfb_mmap(void *, void *, off_t, int);
 STATIC int _gsfb_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -529,7 +522,7 @@ _gsfb_allocattr(void *cookie, int fg, int bg, int flags, long *attr)
 }
 
 int
-_gsfb_ioctl(void *v, void *vs, u_long cmd, caddr_t data, int flag,
+_gsfb_ioctl(void *v, void *vs, u_long cmd, void *data, int flag,
 	struct lwp *l)
 {
 

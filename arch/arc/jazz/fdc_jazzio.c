@@ -1,4 +1,4 @@
-/*	$NetBSD: fdc_jazzio.c,v 1.11 2005/12/11 12:16:39 christos Exp $	*/
+/*	$NetBSD: fdc_jazzio.c,v 1.14 2008/07/05 08:46:25 tsutsui Exp $	*/
 /*	$OpenBSD: fd.c,v 1.6 1998/10/03 21:18:57 millert Exp $	*/
 /*	NetBSD: fd.c,v 1.78 1995/07/04 07:23:09 mycroft Exp 	*/
 
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -73,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fdc_jazzio.c,v 1.11 2005/12/11 12:16:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fdc_jazzio.c,v 1.14 2008/07/05 08:46:25 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,13 +83,13 @@ __KERNEL_RCSID(0, "$NetBSD: fdc_jazzio.c,v 1.11 2005/12/11 12:16:39 christos Exp
 #include <arc/jazz/dma.h>
 
 /* controller driver configuration */
-int fdc_jazzio_probe(struct device *, struct cfdata *, void *);
-void fdc_jazzio_attach(struct device *, struct device *, void *);
+static int fdc_jazzio_probe(device_t, cfdata_t, void *);
+static void fdc_jazzio_attach(device_t, device_t, void *);
 
 /* MD DMA hook functions */
-void fdc_jazzio_dma_start(struct fdc_softc *, caddr_t, size_t, int);
-void fdc_jazzio_dma_abort(struct fdc_softc *);
-void fdc_jazzio_dma_done(struct fdc_softc *);
+static void fdc_jazzio_dma_start(struct fdc_softc *, void *, size_t, int);
+static void fdc_jazzio_dma_abort(struct fdc_softc *);
+static void fdc_jazzio_dma_done(struct fdc_softc *);
 
 /* software state, per controller */
 struct fdc_jazzio_softc {
@@ -110,14 +103,14 @@ struct fdc_jazzio_softc {
 	int sc_datain;			/* data direction */
 };
 
-CFATTACH_DECL(fdc_jazzio, sizeof(struct fdc_jazzio_softc),
+CFATTACH_DECL_NEW(fdc_jazzio, sizeof(struct fdc_jazzio_softc),
     fdc_jazzio_probe, fdc_jazzio_attach, NULL, NULL);
 
 #define FDC_NPORT 6
 #define FDC_OFFSET 2 /* Should we use bus_space_subregion() or not? */
 
-int
-fdc_jazzio_probe(struct device *parent, struct cfdata *match, void *aux)
+static int
+fdc_jazzio_probe(device_t parent, cfdata_t cf, void *aux)
 {
 	struct jazzio_attach_args *ja = aux;
 	bus_space_tag_t iot;
@@ -156,13 +149,14 @@ fdc_jazzio_probe(struct device *parent, struct cfdata *match, void *aux)
 	return rv;
 }
 
-void
-fdc_jazzio_attach(struct device *parent, struct device *self, void *aux)
+static void
+fdc_jazzio_attach(device_t parent, device_t self, void *aux)
 {
-	struct fdc_jazzio_softc *jsc = (struct fdc_jazzio_softc *)self;
+	struct fdc_jazzio_softc *jsc = device_private(self);
 	struct fdc_softc *fdc = &jsc->sc_fdc;
 	struct jazzio_attach_args *ja = aux;
 
+	fdc->sc_dev = self;
 	fdc->sc_iot = ja->ja_bust;
 
 	fdc->sc_maxiosize = MAXPHYS;
@@ -174,29 +168,29 @@ fdc_jazzio_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bus_space_map(fdc->sc_iot, ja->ja_addr,
 	    FDC_OFFSET + FDC_NPORT, 0, &jsc->sc_baseioh)) {
-		printf(": unable to map I/O space\n");
+		aprint_error(": unable to map I/O space\n");
 		return;
 	}
 
 	if (bus_space_subregion(fdc->sc_iot, jsc->sc_baseioh,
 	    FDC_OFFSET, FDC_NPORT, &fdc->sc_ioh)) {
-		printf(": unable to subregion I/O space\n");
+		aprint_error(": unable to subregion I/O space\n");
 		goto out_unmap1;
 	}
 
 	if (bus_space_map(fdc->sc_iot, jazzio_conf->jc_fdcdmareg,
 	    R4030_DMA_RANGE, 0, &jsc->sc_dmaioh)) {
-		printf(": unable to map DMA I/O space\n");
+		aprint_error(": unable to map DMA I/O space\n");
 		goto out_unmap1;
 	}
 
 	if (bus_dmamap_create(jsc->sc_dmat, MAXPHYS, 1, MAXPHYS, 0,
 	    BUS_DMA_ALLOCNOW|BUS_DMA_NOWAIT, &jsc->sc_dmamap)) {
-		printf(": unable to create DMA map\n");
+		aprint_error(": unable to create DMA map\n");
 		goto out_unmap2;
 	}
 
-	printf("\n");
+	aprint_normal("\n");
 
 	jazzio_intr_establish(ja->ja_intr, fdcintr, fdc);
 
@@ -209,11 +203,11 @@ fdc_jazzio_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_unmap(fdc->sc_iot, jsc->sc_baseioh, FDC_OFFSET + FDC_NPORT);
 }
 
-void
-fdc_jazzio_dma_start(struct fdc_softc *fdc, caddr_t addr, size_t size,
+static void
+fdc_jazzio_dma_start(struct fdc_softc *fdc, void *addr, size_t size,
     int datain)
 {
-	struct fdc_jazzio_softc *jsc = (void *)fdc;
+	struct fdc_jazzio_softc *jsc = (struct fdc_jazzio_softc *)fdc;
 
 	/* halt DMA */
 	bus_space_write_4(fdc->sc_iot, jsc->sc_dmaioh, R4030_DMA_ENAB, 0);
@@ -242,20 +236,20 @@ fdc_jazzio_dma_start(struct fdc_softc *fdc, caddr_t addr, size_t size,
 	    (datain ? R4030_DMA_ENAB_READ : R4030_DMA_ENAB_WRITE));
 }
 
-void
+static void
 fdc_jazzio_dma_abort(struct fdc_softc *fdc)
 {
-	struct fdc_jazzio_softc *jsc = (void *)fdc;
+	struct fdc_jazzio_softc *jsc = (struct fdc_jazzio_softc *)fdc;
 
 	/* halt DMA */
 	bus_space_write_4(fdc->sc_iot, jsc->sc_dmaioh, R4030_DMA_ENAB, 0);
 	bus_space_write_4(fdc->sc_iot, jsc->sc_dmaioh, R4030_DMA_MODE, 0);
 }
 
-void
+static void
 fdc_jazzio_dma_done(struct fdc_softc *fdc)
 {
-	struct fdc_jazzio_softc *jsc = (void *)fdc;
+	struct fdc_jazzio_softc *jsc = (struct fdc_jazzio_softc *)fdc;
 
 	/* halt DMA */
 	bus_space_write_4(fdc->sc_iot, jsc->sc_dmaioh, R4030_DMA_COUNT, 0);

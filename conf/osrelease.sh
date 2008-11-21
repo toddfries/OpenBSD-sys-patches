@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#	$NetBSD: osrelease.sh,v 1.111 2006/08/08 07:05:40 riz Exp $
+#	$NetBSD: osrelease.sh,v 1.115 2008/08/05 08:26:05 apb Exp $
 #
 # Copyright (c) 1997 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -16,13 +16,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,13 +33,20 @@
 # We use the number specified in <sys/param.h>
 
 AWK=${AWK:-awk}
-GREP=${GREP:-grep}
+SED=${TOOL_SED:-sed}
 PARAMH="`dirname $0`"/../sys/param.h
 release=`$AWK '/^#define[ 	]*__NetBSD_Version__/ { print $6 }' $PARAMH`
 
+# default: return nn.nn.nn
+# -m: return the major number -- -current is the number of the next release
+# -s: return nnnnnn (no dots)
+
 case $1 in
+-m)
+	echo $release | $AWK -F. '{print int($1+$2/100+0.01)}'
+	;;
 -s)
-	echo $release | sed -e 's,\.,,g'
+	echo $release | $SED -e 's,\.,,g'
 	;;
 *)
 	echo $release

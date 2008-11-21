@@ -1,8 +1,7 @@
-/*	$OpenBSD: iopspvar.h,v 1.2 2001/06/27 02:06:37 mickey Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: iopspvar.h,v 1.8 2008/04/28 20:23:48 martin Exp $	*/
 
 /*-
- * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
+ * Copyright (c) 2000, 2001, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,13 +34,12 @@
 
 #define	IOPSP_MAX_LUN		8
 #define	IOPSP_MAX_SCSI_TARGET	15
-#define	IOPSP_MAX_FCAL_TARGET	127
+#define	IOPSP_MAX_FC_TARGET	127
 
 #define	IOPSP_TIDMAP(map, t, l)	(map[(t) * IOPSP_MAX_LUN + (l)])
 #define	IOPSP_TID_ABSENT	0x0000	/* Device is absent */
 #define	IOPSP_TID_INUSE		0xffff	/* Device in use by another module */
 
-#ifdef I2OVERBOSE
 struct iopsp_target {
 	u_int8_t	it_width;
 	u_int8_t	it_syncrate;
@@ -56,19 +47,16 @@ struct iopsp_target {
 	u_int8_t	it_flags;
 };
 #define	IT_PRESENT		0x01	/* Target is present */
-#endif
 
 struct iopsp_softc {
-	struct device		sc_dv;
-	struct scsi_link	sc_link;
-	struct iop_initiator	sc_ii;
-
-	u_short			*sc_tidmap;	/* Target/LUN -> TID map */
-	u_int			sc_chgind;	/* Last LCT change # */
-	u_int			sc_curqd;	/* Current queue depth */
-#ifdef I2OVERBOSE
-	struct iopsp_target	*sc_targetmap;	/* Target information */
-#endif
+	struct	device sc_dv;			/* Generic device data */
+	struct	scsipi_adapter sc_adapter;	/* scsipi adapter */
+	struct	scsipi_channel sc_channel;	/* Prototype link */
+	struct	iop_initiator sc_ii;		/* I2O initiator state */
+	u_short	*sc_tidmap;			/* Target/LUN -> TID map */
+	u_int	sc_chgind;			/* Last LCT change # */
+	int	sc_openings;			/* # command openings */
+	struct	iopsp_target *sc_targetmap;	/* Target information */
 };
 
 #endif	/* !_I2O_IOPSPVAR_H_ */

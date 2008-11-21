@@ -1,5 +1,4 @@
-/*	$OpenBSD: dkstat.h,v 1.7 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: dkstat.h,v 1.8 1995/12/28 19:16:31 thorpej Exp $	*/
+/*	$NetBSD: dkstat.h,v 1.17 2005/12/26 18:41:36 perry Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,16 +36,14 @@
  *	@(#)dkstat.h	8.2 (Berkeley) 1/21/94
  */
 
-#define	CP_USER		0
-#define	CP_NICE		1
-#define	CP_SYS		2
-#define	CP_INTR		3
-#define	CP_IDLE		4
-#define	CPUSTATES	5
+#ifndef _SYS_DKSTAT_H_
+#define _SYS_DKSTAT_H_
 
-#define	DK_NDRIVE	8
 #ifdef _KERNEL
-extern long cp_time[CPUSTATES];
-
-extern int64_t tk_cancc, tk_nin, tk_nout, tk_rawcc;
+extern uint64_t tk_cancc;
+extern uint64_t tk_nin;
+extern uint64_t tk_nout;
+extern uint64_t tk_rawcc;
 #endif
+
+#endif /* _SYS_DKSTAT_H_ */

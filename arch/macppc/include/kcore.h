@@ -1,3 +1,3 @@
-/*	$OpenBSD: kcore.h,v 1.1 2001/09/01 15:49:06 drahn Exp $	*/
+/*	$NetBSD: kcore.h,v 1.2 1998/05/29 10:32:52 tsubai Exp $	*/
 
 #include <powerpc/kcore.h>

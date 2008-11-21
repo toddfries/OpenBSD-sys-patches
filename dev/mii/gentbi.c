@@ -1,5 +1,4 @@
-/*	$OpenBSD: gentbi.c,v 1.5 2008/05/13 02:24:08 brad Exp $	*/
-/*	$NetBSD: gentbi.c,v 1.12 2004/04/11 15:40:56 thorpej Exp $	*/
+/*	$NetBSD: gentbi.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,6 +66,9 @@
  * All we have to do here is correctly report speed and duplex.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: gentbi.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -88,27 +83,21 @@
 #include <dev/mii/miivar.h>
 #include <dev/mii/miidevs.h>
 
-int	gentbimatch(struct device *, void *, void *);
-void	gentbiattach(struct device *, struct device *, void *);
+static int	gentbimatch(device_t, cfdata_t, void *);
+static void	gentbiattach(device_t, device_t, void *);
 
-struct cfattach gentbi_ca = {
-	sizeof(struct mii_softc), gentbimatch, gentbiattach,
-	    mii_phy_detach, mii_phy_activate
-};
+CFATTACH_DECL_NEW(gentbi, sizeof(struct mii_softc),
+    gentbimatch, gentbiattach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver gentbi_cd = {
-	NULL, "gentbi", DV_DULL
-};
+static int	gentbi_service(struct mii_softc *, struct mii_data *, int);
+static void	gentbi_status(struct mii_softc *);
 
-int	gentbi_service(struct mii_softc *, struct mii_data *, int);
-void	gentbi_status(struct mii_softc *);
-
-const struct mii_phy_funcs gentbi_funcs = {
+static const struct mii_phy_funcs gentbi_funcs = {
 	gentbi_service, gentbi_status, mii_phy_reset,
 };
 
-int
-gentbimatch(struct device *parent, void *match, void *aux)
+static int
+gentbimatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
@@ -140,16 +129,18 @@ gentbimatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-void
-gentbiattach(struct device *parent, struct device *self, void *aux)
+static void
+gentbiattach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 
-	printf(": Generic ten-bit interface, rev. %d\n",
+	aprint_naive(": Media interface\n");
+	aprint_normal(": Generic ten-bit interface, rev. %d\n",
 	    MII_REV(ma->mii_id2));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &gentbi_funcs;
@@ -168,12 +159,16 @@ gentbiattach(struct device *parent, struct device *self, void *aux)
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
 
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
-	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK))
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0 &&
+	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 gentbi_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -232,7 +227,7 @@ gentbi_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 gentbi_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -259,7 +254,7 @@ gentbi_status(struct mii_softc *sc)
 
 	if (bmcr & BMCR_AUTOEN) {
 		/*
-		 * The media status bits are only valid if autonegotiation
+		 * The media status bits are only valid of autonegotiation
 		 * has completed (or it's disabled).
 		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {
@@ -278,7 +273,7 @@ gentbi_status(struct mii_softc *sc)
 		if ((sc->mii_extcapabilities & EXTSR_1000XFDX) != 0 &&
 		    (anlpar & ANLPAR_X_FD) != 0)
 			mii->mii_media_active |=
-			    IFM_FDX;
+			    IFM_FDX | mii_phy_flowstatus(sc);
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

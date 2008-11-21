@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_udavreg.h,v 1.10 2007/11/25 16:40:03 jmc Exp $ */
-/*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
+/*	$NetBSD: if_udavreg.h,v 1.4 2007/12/05 07:15:54 ad Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
 /*
  * Copyright (c) 2003
@@ -40,6 +39,13 @@
 #define	UDAV_TX_TIMEOUT		1000
 #define	UDAV_TIMEOUT		10000
 
+#define	ETHER_ALIGN		2
+
+
+/* Packet length */
+#define	UDAV_MAX_MTU		1536 /* XXX: max frame size is unknown */
+#define	UDAV_MIN_FRAME_LEN	60
+#define	UDAV_BUFSZ		UDAV_MAX_MTU
 
 /* Request */
 #define	UDAV_REQ_REG_READ	0x00 /* Read from register(s) */
@@ -135,7 +141,7 @@
 #define	 UDAV_GPR_GEPIO1	(1<<1) /* General purpose 1 */
 #define	 UDAV_GPR_GEPIO0	(1<<0) /* General purpose 0 */
 
-#define GET_IFP(sc)             (&(sc)->sc_ac.ac_if)
+#define	GET_IFP(sc)		(&(sc)->sc_ec.ec_if)
 #define	GET_MII(sc)		(&(sc)->sc_mii)
 
 struct udav_chain {
@@ -150,7 +156,7 @@ struct udav_cdata {
 	struct udav_chain	udav_tx_chain[UDAV_TX_LIST_CNT];
 	struct udav_chain	udav_rx_chain[UDAV_TX_LIST_CNT];
 #if 0
-	/* XXX: Interrupt Endpoint is not yet supported! */
+	/* XXX: Intrrupt Endpoint is not yet supported! */
 	struct udav_intrpkg	udav_ibuf;
 #endif
 	int			udav_tx_prod;
@@ -160,7 +166,7 @@ struct udav_cdata {
 };
 
 struct udav_softc {
-	struct device		sc_dev;	/* base device */
+	USBBASEDEVICE		sc_dev;	/* base device */
 	usbd_device_handle	sc_udev;
 
 	/* USB */
@@ -172,17 +178,20 @@ struct udav_softc {
 	usbd_pipe_handle	sc_pipe_rx;
 	usbd_pipe_handle	sc_pipe_tx;
 	usbd_pipe_handle	sc_pipe_intr;
-	struct timeout		sc_stat_ch;
+	usb_callout_t		sc_stat_ch;
 	u_int			sc_rx_errs;
 	/* u_int		sc_intr_errs; */
 	struct timeval		sc_rx_notice;
 
 	/* Ethernet */
-        struct arpcom           sc_ac; /* ethernet common */
+	struct ethercom		sc_ec; /* ethernet common */
 	struct mii_data		sc_mii;
-	struct rwlock		sc_mii_lock;
+	kmutex_t		sc_mii_lock;
 	int			sc_link;
 #define	sc_media udav_mii.mii_media
+#if NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
 	struct udav_cdata	sc_cdata;
 
 	int                     sc_attached;
@@ -194,14 +203,3 @@ struct udav_softc {
 
 	u_int16_t		sc_flags;
 };
-
-struct udav_rx_hdr {
-	uByte			pktstat;
-	uWord			length;
-} __packed;
-#define UDAV_RX_HDRLEN		sizeof(struct udav_rx_hdr)
-
-/* Packet length */
-#define	UDAV_MAX_MTU		1536 /* XXX: max frame size is unknown */
-#define	UDAV_MIN_FRAME_LEN	60
-#define	UDAV_BUFSZ		UDAV_MAX_MTU + UDAV_RX_HDRLEN

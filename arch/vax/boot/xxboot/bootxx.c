@@ -1,5 +1,4 @@
-/*	$OpenBSD: bootxx.c,v 1.10 2003/08/15 23:16:30 deraadt Exp $ */
-/* $NetBSD: bootxx.c,v 1.16 2002/03/29 05:45:08 matt Exp $ */
+/* $NetBSD: bootxx.c,v 1.28 2007/03/05 20:53:34 christos Exp $ */
 
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
@@ -32,21 +31,24 @@
  *	@(#)boot.c	7.15 (Berkeley) 5/4/91
  */
 
-#include "sys/param.h"
-#include "sys/reboot.h"
-#include "sys/disklabel.h"
-#include "sys/exec.h"
-#include "sys/exec_elf.h"
+#include <sys/param.h>
+#include <sys/reboot.h>
+#include <sys/disklabel.h>
+#include <sys/exec.h>
+#include <sys/exec_elf.h>
 
-#include "lib/libsa/stand.h"
-#include "lib/libsa/ufs.h"
-#include "lib/libsa/cd9660.h"
+#include <lib/libsa/stand.h>
+#include <lib/libsa/ufs.h>
+#include <lib/libsa/cd9660.h>
+#include <lib/libsa/ustarfs.h>
 
-#include "machine/pte.h"
-#include "machine/sid.h"
-#include "machine/mtpr.h"
-#include "machine/reg.h"
-#include "machine/rpb.h"
+#include <lib/libkern/libkern.h>
+
+#include <machine/pte.h>
+#include <machine/sid.h>
+#include <machine/mtpr.h>
+#include <machine/reg.h>
+#include <machine/rpb.h>
 #include "../vax/gencons.h"
 
 #include "../mba/mbareg.h"
@@ -54,10 +56,9 @@
 
 #define NRSP 1 /* Kludge */
 #define NCMD 1 /* Kludge */
-#define LIBSA_TOO_OLD
 
-#include "arch/vax/mscp/mscp.h"
-#include "arch/vax/mscp/mscpreg.h"
+#include <dev/mscp/mscp.h>
+#include <dev/mscp/mscpreg.h>
 
 #include "../boot/data.h"
 
@@ -91,7 +92,7 @@ extern int from;
  * VS3100/??, VS4000 and VAX6000/???, and only when booting from disk.
  */
 void
-Xmain(void)
+Xmain()
 {
 	union {
 		struct exec aout;
@@ -103,7 +104,7 @@ Xmain(void)
 	vax_cputype = (mfpr(PR_SID) >> 24) & 0xFF;
 	moved = 0;
 	/*
-	 */ 
+	 */
 	rpb = (void *)0xf0000; /* Safe address right now */
 	bqo = (void *)0xf1000;
         if (from == FROMMV) {
@@ -112,10 +113,6 @@ Xmain(void)
 		 */
 		bcopy ((void *)bootregs[11], rpb, sizeof(struct rpb));
 		bcopy ((void*)rpb->iovec, bqo, rpb->iovecsz);
-#if 0
-		if (rpb->devtyp == BDEV_SDN)
-			rpb->devtyp = BDEV_SD;	/* XXX until driver fixed */
-#endif
 	} else {
 		bzero(rpb, sizeof(struct rpb));
 		rpb->devtyp = bootregs[0];
@@ -134,7 +131,7 @@ Xmain(void)
 	if (io < 0)
 		io = open("/boot", 0);
 	if (io < 0)
-		asm("movl $0xbeef1, r0; halt");
+		__asm("halt");
 
 	read(io, (void *)&hdr.aout, sizeof(hdr.aout));
 	if (N_GETMAGIC(hdr.aout) == OMAGIC && N_GETMID(hdr.aout) == MID_VAX) {
@@ -149,14 +146,14 @@ Xmain(void)
 		Elf32_Phdr ph;
 		size_t off = sizeof(hdr.elf);
 		vax_load_failure += 2;
-		read(io, (caddr_t)(&hdr.elf) + sizeof(hdr.aout),
+		read(io, (char *)&hdr.elf + sizeof(hdr.aout),
 		     sizeof(hdr.elf) - sizeof(hdr.aout));
 		if (hdr.elf.e_machine != EM_VAX || hdr.elf.e_type != ET_EXEC
 		    || hdr.elf.e_phnum != 1)
 			goto die;
 		vax_load_failure++;
 		entry = hdr.elf.e_entry;
-		if (hdr.elf.e_phoff != sizeof(hdr.elf)) 
+		if (hdr.elf.e_phoff != sizeof(hdr.elf))
 			goto die;
 		vax_load_failure++;
 		read(io, &ph, sizeof(ph));
@@ -169,15 +166,15 @@ Xmain(void)
 			read(io, &tmp, sizeof(tmp));
 			off += sizeof(tmp);
 		}
-		read(io, (void *) ph.p_paddr, ph.p_filesz);
-		memset((void *) (ph.p_paddr + ph.p_filesz), 0,
+		read(io, (void *) hdr.elf.e_entry, ph.p_filesz);
+		memset((void *) (hdr.elf.e_entry + ph.p_filesz), 0,
 		       ph.p_memsz - ph.p_filesz);
 	} else {
 		goto die;
 	}
 	hoppabort(entry);
 die:
-	asm("movl $0xbeef2, r0; halt");
+	__asm("halt");
 }
 
 /*
@@ -200,43 +197,44 @@ struct fs_ops file_system[] = {
 
 int nfsys = (sizeof(file_system) / sizeof(struct fs_ops));
 
-#ifdef LIBSA_TOO_OLD
-#include "../boot/vaxstand.h"
-
-struct rom_softc {
-       int part;
-       int unit;
-} rom_softc;
-
-int    romstrategy(void *, int, daddr_t, size_t, void *, size_t *);
-int romopen(struct open_file *, int, int, int, int);
-struct devsw   devsw[] = {
-       SADEV("rom", romstrategy, romopen, nullsys, noioctl),
-};
-int    ndevs = (sizeof(devsw)/sizeof(devsw[0]));
+#if 0
+int tar_open(char *path, struct open_file *f);
+ssize_t tar_read(struct open_file *f, void *buf, size_t size, size_t *resid);
 
 int
-romopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
+tar_open(path, f)
+	char *path;
+	struct open_file *f;
 {
-       rom_softc.unit = unit;
-       rom_softc.part = part;
-       
-       f->f_devdata = (void *)&rom_softc;
-       
-       return 0;
+	char *buf = alloc(512);
+
+	bzero(buf, 512);
+	romstrategy(0, 0, 8192, 512, buf, 0);
+	if (bcmp(buf, "boot", 5) || bcmp(&buf[257], "ustar", 5))
+		return EINVAL; /* Not a ustarfs with "boot" first */
+	return 0;
 }
 
+ssize_t
+tar_read(f, buf, size, resid)
+	struct open_file *f;
+	void *buf;
+	size_t size;
+	size_t *resid;
+{
+	romstrategy(0, 0, (8192+512), size, buf, 0);
+	*resid = size;
+	return 0; /* XXX */
+}
 #endif
+
 
 int
-devopen(struct open_file *f, const char *fname, char **file)
+devopen(f, fname, file)
+	struct open_file *f;
+	const char    *fname;
+	char          **file;
 {
-
-#ifdef LIBSA_TOO_OLD
-	int i;
-	struct devsw	*dp;
-	f->f_dev = &devsw[0];
-#endif
 	*file = (char *)fname;
 
 	if (from == FROM750)
@@ -250,7 +248,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 		initfn = rpb->iovec + bqo->unit_init;
 		if (rpb->devtyp == BDEV_UDA || rpb->devtyp == BDEV_TK) {
 			/*
-			 * This reset do not seem to be done in the 
+			 * This reset do not seem to be done in the
 			 * ROM routines, so we have to do it manually.
 			 */
 			csr = (struct udadevice *)rpb->csrphy;
@@ -280,6 +278,9 @@ romstrategy(sc, func, dblk, size, buf, rsize)
 {
 	int	block = dblk;
 	int     nsize = size;
+	char	*cbuf;
+
+	cbuf = (char *)buf;
 
 	if (romlabel.d_magic == DISKMAGIC && romlabel.d_magic2 == DISKMAGIC) {
 		if (romlabel.d_npartitions > 1) {
@@ -291,16 +292,16 @@ romstrategy(sc, func, dblk, size, buf, rsize)
 	}
 
 	if (from == FROMMV) {
-		romread_uvax(block, size, buf, rpb);
+		romread_uvax(block, size, cbuf, rpb);
 	} else /* if (from == FROM750) */ {
 		while (size > 0) {
 			if (rpb->devtyp == BDEV_HP)
 				hpread(block);
 			else
-				read750(block, bootregs);
-			bcopy(0, buf, 512);
+				read750(block, (int *)bootregs);
+			bcopy(0, cbuf, 512);
 			size -= 512;
-			(char *)buf += 512;
+			cbuf += 512;
 			block++;
 		}
 	}
@@ -345,11 +346,11 @@ hpread(int bn)
 	/*
 	 * Avoid four subroutine calls by using hardware division.
 	 */
-	asm("clrl %r1;"
-	    "movl %3,%r0;"
-	    "ediv %4,%r0,%0,%1;"
-	    "movl %1,%r0;"
-	    "ediv %5,%r0,%2,%1"
+	__asm("clrl %%r1;"
+	    "movl %3,%%r0;"
+	    "ediv %4,%%r0,%0,%1;"
+	    "movl %1,%%r0;"
+	    "ediv %5,%%r0,%2,%1"
 	    : "=g"(cn),"=g"(sn),"=g"(tn)
 	    : "g"(bn),"g"(dp->d_secpercyl),"g"(dp->d_nsectors)
 	    : "r0","r1","cc");
@@ -372,7 +373,8 @@ extern char end[];
 static char *top = (char*)end;
 
 void *
-alloc(unsigned int size)
+alloc(size)
+        size_t size;
 {
 	void *ut = top;
 	top += size;
@@ -380,8 +382,17 @@ alloc(unsigned int size)
 }
 
 void
-free(void *ptr, unsigned int size)
+dealloc(ptr, size)
+        void *ptr;
+        size_t size;
 {
+}
+
+int
+romclose(f)
+	struct open_file *f;
+{
+	return 0;
 }
 
 #ifdef USE_PRINTF

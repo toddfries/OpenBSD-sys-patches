@@ -1,6 +1,4 @@
-/*	$OpenBSD: psc.c,v 1.6 2004/12/14 14:50:55 martin Exp $	*/
-/*	$NetBSD: psc.c,v 1.8 2004/03/26 12:15:46 wiz Exp $	*/
-
+/*	$NetBSD: psc.c,v 1.10 2005/12/11 12:18:03 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997 David Huang <khym@azeotrope.org>
@@ -33,6 +31,9 @@
  * Centris/Quadra 660av and the Quadra 840av.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: psc.c,v 1.10 2005/12/11 12:18:03 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 
@@ -54,9 +55,9 @@ void	(*psc3_ihandler)(void *) = psc_lev3_noint;
 void	*psc3_iarg;
 
 int (*psc4_itab[4])(void *) = {
-	psc_lev4_noint,	/* 0 */
-	psc_lev4_noint,	/* 1 */
-	psc_lev4_noint,	/* 2 */
+	psc_lev4_noint, /* 0 */
+	psc_lev4_noint, /* 1 */
+	psc_lev4_noint, /* 2 */
 	psc_lev4_noint  /* 3 */
 };
 
@@ -87,7 +88,7 @@ void *psc6_iarg[3] = {
  * Make excessively sure that all PSC DMA is shut down.
  */
 void
-psc_kill_dma()
+psc_kill_dma(void)
 {
 	int	i;
 
@@ -103,7 +104,7 @@ psc_kill_dma()
  * Setup the interrupt vectors and disable most of the PSC interrupts
  */
 void
-psc_init()
+psc_init(void)
 {
 	int	s, i;
 
@@ -113,10 +114,10 @@ psc_init()
 	if (current_mac_model->class == MACH_CLASSAV) {
 		s = splhigh();
 		psc_kill_dma();
-		intr_establish(psc_lev3_intr, NULL, 3, "psc");
-		intr_establish(psc_lev4_intr, NULL, 4, "psc");
-		intr_establish(psc_lev5_intr, NULL, 5, "psc");
-		intr_establish(psc_lev6_intr, NULL, 6, "psc");
+		intr_establish(psc_lev3_intr, NULL, 3);
+		intr_establish(psc_lev4_intr, NULL, 4);
+		intr_establish(psc_lev5_intr, NULL, 5);
+		intr_establish(psc_lev6_intr, NULL, 6);
 		for (i = 3; i < 7; i++) {
 			/* Clear any flags */
 			psc_reg1(PSC_ISR_BASE + 0x10 * i) = 0x0F;
@@ -129,9 +130,7 @@ psc_init()
 }
 
 int
-add_psc_lev3_intr(handler, arg)
-	void (*handler)(void *);
-	void *arg;
+add_psc_lev3_intr(void (*handler)(void *), void *arg)
 {
 	int s;
 
@@ -146,14 +145,13 @@ add_psc_lev3_intr(handler, arg)
 }
 
 int
-remove_psc_lev3_intr()
+remove_psc_lev3_intr(void)
 {
 	return add_psc_lev3_intr(psc_lev3_noint, (void *)0);
 }
 
 int
-psc_lev3_intr(arg)
-	void *arg;
+psc_lev3_intr(void *arg)
 {
 	u_int8_t intbits;
 
@@ -168,17 +166,13 @@ psc_lev3_intr(arg)
 }
 
 static void
-psc_lev3_noint(arg)
-	void *arg;
+psc_lev3_noint(void *arg)
 {
-#ifdef DEBUG
 	printf("psc_lev3_noint\n");
-#endif
 }
 
 int
-psc_lev4_intr(arg)
-	void * arg;
+psc_lev4_intr(void *arg)
 {
 	u_int8_t intbits, bitnum;
 	u_int mask;
@@ -199,10 +193,7 @@ psc_lev4_intr(arg)
 }
 
 int
-add_psc_lev4_intr(dev, handler, arg)
-	int dev;
-	int (*handler)(void *);
-	void *arg;
+add_psc_lev4_intr(int dev, int (*handler)(void *), void *arg)
 {
 	int s;
 
@@ -220,25 +211,20 @@ add_psc_lev4_intr(dev, handler, arg)
 }
 
 int
-remove_psc_lev4_intr(dev)
-	int dev;
+remove_psc_lev4_intr(int dev)
 {
 	return add_psc_lev4_intr(dev, psc_lev4_noint, (void *)dev);
 }
 
 int
-psc_lev4_noint(arg)
-	void *arg;
+psc_lev4_noint(void *arg)
 {
-#ifdef DEBUG
 	printf("psc_lev4_noint: device %d\n", (int)arg);
-#endif
 	return 0;
 }
 
 int
-psc_lev5_intr(arg)
-	void *arg;
+psc_lev5_intr(void *arg)
 {
 	u_int8_t intbits, bitnum;
 	u_int mask;
@@ -259,10 +245,7 @@ psc_lev5_intr(arg)
 }
 
 int
-add_psc_lev5_intr(dev, handler, arg)
-	int dev;
-	void (*handler)(void *);
-	void *arg;
+add_psc_lev5_intr(int dev, void (*handler)(void *), void *arg)
 {
 	int s;
 
@@ -280,24 +263,19 @@ add_psc_lev5_intr(dev, handler, arg)
 }
 
 int
-remove_psc_lev5_intr(dev)
-	int dev;
+remove_psc_lev5_intr(int dev)
 {
 	return add_psc_lev5_intr(dev, psc_lev5_noint, (void *)dev);
 }
 
 void
-psc_lev5_noint(arg)
-	void *arg;
+psc_lev5_noint(void *arg)
 {
-#ifdef DEBUG
 	printf("psc_lev5_noint: device %d\n", (int)arg);
-#endif
 }
 
 int
-psc_lev6_intr(arg)
-	void *arg;
+psc_lev6_intr(void *arg)
 {
 	u_int8_t intbits, bitnum;
 	u_int mask;
@@ -318,10 +296,7 @@ psc_lev6_intr(arg)
 }
 
 int
-add_psc_lev6_intr(dev, handler, arg)
-	int dev;
-	void (*handler)(void *);
-	void *arg;
+add_psc_lev6_intr(int dev, void (*handler)(void *), void *arg)
 {
 	int s;
 
@@ -339,17 +314,13 @@ add_psc_lev6_intr(dev, handler, arg)
 }
 
 int
-remove_psc_lev6_intr(dev)
-	int dev;
+remove_psc_lev6_intr(int dev)
 {
 	return add_psc_lev6_intr(dev, psc_lev6_noint, (void *)dev);
 }
 
 void
-psc_lev6_noint(arg)
-	void *arg;
+psc_lev6_noint(void *arg)
 {
-#ifdef DEBUG
 	printf("psc_lev6_noint: device %d\n", (int)arg);
-#endif
 }

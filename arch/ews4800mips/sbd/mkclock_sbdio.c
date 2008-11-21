@@ -1,4 +1,4 @@
-/*	$NetBSD: mkclock_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
+/*	$NetBSD: mkclock_sbdio.c,v 1.7 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mkclock_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mkclock_sbdio.c,v 1.7 2008/04/28 20:23:18 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -57,16 +50,16 @@ __KERNEL_RCSID(0, "$NetBSD: mkclock_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Ex
 
 #define MKCLOCK_SBD_STRIDE	2
 
-int  mkclock_sbdio_match(struct device *, struct cfdata  *, void *);
-void mkclock_sbdio_attach(struct device *, struct device *, void *);
+int  mkclock_sbdio_match(device_t, cfdata_t, void *);
+void mkclock_sbdio_attach(device_t, device_t, void *);
 static uint8_t mkclock_sbdio_nvrd(struct mk48txx_softc *, int);
 static void mkclock_sbdio_nvwr(struct mk48txx_softc *, int, uint8_t);
 
-CFATTACH_DECL(mkclock_sbdio, sizeof(struct mk48txx_softc),
+CFATTACH_DECL_NEW(mkclock_sbdio, sizeof(struct mk48txx_softc),
     mkclock_sbdio_match, mkclock_sbdio_attach, NULL, NULL);
 
 int
-mkclock_sbdio_match(struct device *parent, struct cfdata *cf, void *aux)
+mkclock_sbdio_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct sbdio_attach_args *sa = aux;
 
@@ -77,14 +70,13 @@ mkclock_sbdio_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 void
-mkclock_sbdio_attach(struct device *parent, struct device *self, void *aux)
+mkclock_sbdio_attach(device_t parent, device_t self, void *aux)
 {
-	struct mk48txx_softc *sc = (void *)self;
+	struct mk48txx_softc *sc = device_private(self);
 	struct sbdio_attach_args *sa = aux;
 	bus_size_t size;
 
-	printf(" at %p", (void *)sa->sa_addr1);
-
+	sc->sc_dev = self;
 	switch (sa->sa_flags) {
 	case 0x0000:
 		sc->sc_model = "mk48t08";
@@ -97,7 +89,7 @@ mkclock_sbdio_attach(struct device *parent, struct device *self, void *aux)
 		break;
 
 	default:
-		printf(": unknown model, assume");
+		/* assume MK48T18 */
 		sc->sc_model = "mk48t18";
 		size = MK48T18_CLKSZ;
 		break;
@@ -106,7 +98,7 @@ mkclock_sbdio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_bst = sa->sa_bust;
 	if (bus_space_map(sc->sc_bst, sa->sa_addr1, size, 0,
 	    &sc->sc_bsh) != 0) {
-		printf(": can't map device space\n");
+		aprint_error(": can't map device space\n");
 		return;
 	}
 
@@ -116,9 +108,7 @@ mkclock_sbdio_attach(struct device *parent, struct device *self, void *aux)
 
 	mk48txx_attach(sc);
 
-	printf("\n");
-
-	todr_attach(&sc->sc_handle);
+	aprint_normal("\n");
 }
 
 static uint8_t

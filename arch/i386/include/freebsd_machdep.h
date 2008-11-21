@@ -1,5 +1,4 @@
-/*	$OpenBSD: freebsd_machdep.h,v 1.7 2003/06/02 23:27:47 millert Exp $	*/
-/*	$NetBSD: freebsd_machdep.h,v 1.1 1995/10/10 01:22:35 mycroft Exp $	*/
+/*	$NetBSD: freebsd_machdep.h,v 1.9 2005/09/14 15:00:16 he Exp $	*/
 
 /*
  * Copyright (c) 1986, 1989, 1991, 1993
@@ -41,14 +40,16 @@
 #ifndef _FREEBSD_MACHDEP_H
 #define _FREEBSD_MACHDEP_H
 
+#include <compat/sys/sigtypes.h>
+
 /*
  * signal support
  */
 
-struct freebsd_sigcontext {
-	int	sc_onstack;		/* sigstack state to restore */
-	int	sc_mask;		/* signal mask to restore */
-	int	sc_esp;			/* machine state */
+struct freebsd_osigcontext {
+	int	sc_onstack;	/* sigstack state to restore */
+	sigset13_t sc_mask;	/* signal mask to restore */
+	int	sc_esp;		/* machine state */
 	int	sc_ebp;
 	int	sc_isp;
 	int	sc_eip;
@@ -63,6 +64,41 @@ struct freebsd_sigcontext {
 	int	sc_edx;
 	int	sc_ecx;
 	int	sc_eax;
+};
+
+/*
+ * The sequence of the fields/registers in struct sigcontext should match
+ * those in mcontext_t.
+ */
+struct freebsd_sigcontext {
+	sigset_t sc_mask;		/* signal mask to restore */
+	int	sc_onstack;		/* sigstack state to restore */
+	int	sc_gs;			/* machine state (struct trapframe): */
+	int	sc_fs;
+	int	sc_es;
+	int	sc_ds;
+	int	sc_edi;
+	int	sc_esi;
+	int	sc_ebp;
+	int	sc_isp;
+	int	sc_ebx;
+	int	sc_edx;
+	int	sc_ecx;
+	int	sc_eax;
+	int	sc_trapno;
+	int	sc_err;
+	int	sc_eip;
+	int	sc_cs;
+	int	sc_efl;
+	int	sc_esp;
+	int	sc_ss;
+	/*
+	 * XXX FPU state is 27 * 4 bytes h/w, 1 * 4 bytes s/w (probably not
+	 * needed here), or that + 16 * 4 bytes for emulators (probably all
+	 * needed here).  The "spare" bytes are mostly not spare.
+	 */
+	int	sc_fpregs[28];		/* machine state (FPU): */
+	int	sc_spare[17];
 };
 
 struct freebsd_sigframe {
@@ -154,8 +190,6 @@ struct freebsd_ptrace_reg {
 /* sys/i386/include/exec.h */
 #define FREEBSD___LDPGSZ	4096
 
-#ifdef _KERNEL
-void freebsd_sendsig(sig_t, int, int, u_long, int, union sigval);
-#endif
+void freebsd_syscall_intern(struct proc *);
 
 #endif /* _FREEBSD_MACHDEP_H */

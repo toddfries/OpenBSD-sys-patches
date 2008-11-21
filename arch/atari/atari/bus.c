@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.c,v 1.42 2006/03/01 12:38:11 yamt Exp $	*/
+/*	$NetBSD: bus.c,v 1.47 2008/06/04 12:41:40 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus.c,v 1.42 2006/03/01 12:38:11 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus.c,v 1.47 2008/06/04 12:41:40 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -95,7 +88,7 @@ pt_entry_t	*ptep;
 u_long		size;
 {
 	bootm_ex = extent_create("bootmem", va, va + size, M_DEVBUF,
-	    (caddr_t)bootm_ex_storage, sizeof(bootm_ex_storage),
+	    (void *)bootm_ex_storage, sizeof(bootm_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
 	bootm_ptep = ptep;
 }
@@ -259,7 +252,7 @@ bus_space_handle_t	*bshp;
 		va = bootm_alloc(pa, endpa - pa, flags);
 		if (va == 0)
 			return (ENOMEM);
-		*bshp = (caddr_t)(va + (bpa & PGOFSET));
+		*bshp = va + (bpa & PGOFSET);
 		return (0);
 	}
 
@@ -268,7 +261,7 @@ bus_space_handle_t	*bshp;
 	if (va == 0)
 		return (ENOMEM);
 
-	*bshp = (caddr_t)(va + (bpa & PGOFSET));
+	*bshp = va + (bpa & PGOFSET);
 
 	for(; pa < endpa; pa += PAGE_SIZE, va += PAGE_SIZE) {
 		u_int	*ptep, npte;
@@ -301,7 +294,7 @@ bus_size_t		size;
 	paddr_t bpa;
 
 	va = m68k_trunc_page(bsh);
-	endva = m68k_round_page((bsh + size) - 1);
+	endva = m68k_round_page(((char *)bsh + size) - 1);
 #ifdef DIAGNOSTIC
 	if (endva < va)
 		panic("unmap_iospace: overflow");
@@ -528,7 +521,7 @@ _bus_dmamap_load_uio(t, map, uio, flags)
 	int seg, i, error, first;
 	bus_size_t minlen, resid;
 	struct iovec *iov;
-	caddr_t addr;
+	void *addr;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings."
@@ -549,7 +542,7 @@ _bus_dmamap_load_uio(t, map, uio, flags)
 		 * until we have exhausted the residual count.
 		 */
 		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
-		addr = (caddr_t)iov[i].iov_base;
+		addr = (void *)iov[i].iov_base;
 
 		error = _bus_dmamap_load_buffer(t, map, addr, minlen,
 		    uio->uio_vmspace, flags, &lastaddr, &seg, first);
@@ -695,7 +688,7 @@ bus_dmamem_free(t, segs, nsegs)
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE) {
 			m = PHYS_TO_VM_PAGE(addr - offset);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq);
+			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
 		}
 	}
 
@@ -712,7 +705,7 @@ bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	bus_dma_segment_t *segs;
 	int nsegs;
 	size_t size;
-	caddr_t *kvap;
+	void **kvap;
 	int flags;
 {
 	vaddr_t va;
@@ -730,7 +723,7 @@ bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	if (va == 0)
 		return (ENOMEM);
 
-	*kvap = (caddr_t)va;
+	*kvap = (void *)va;
 
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
@@ -755,7 +748,7 @@ bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 void
 bus_dmamem_unmap(t, kva, size)
 	bus_dma_tag_t t;
-	caddr_t kva;
+	void *kva;
 	size_t size;
 {
 
@@ -802,7 +795,7 @@ bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (m68k_btop((caddr_t)segs[i].ds_addr - offset + off));
+		return (m68k_btop((char *)segs[i].ds_addr - offset + off));
 	}
 
 	/* Page not found. */
@@ -950,9 +943,9 @@ bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	lastaddr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_addr = lastaddr + offset;
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = m->pageq.tqe_next;
+	m = m->pageq.queue.tqe_next;
 
-	for (; m != NULL; m = m->pageq.tqe_next) {
+	for (; m != NULL; m = m->pageq.queue.tqe_next) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {

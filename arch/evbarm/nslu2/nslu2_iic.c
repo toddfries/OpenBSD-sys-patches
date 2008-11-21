@@ -1,4 +1,4 @@
-/*	$NetBSD: nslu2_iic.c,v 1.2 2006/06/26 18:21:39 drochner Exp $	*/
+/*	$NetBSD: nslu2_iic.c,v 1.7 2008/06/28 15:00:13 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,9 +33,8 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/lock.h>
-
-#include <machine/bus.h>
+#include <sys/mutex.h>
+#include <sys/bus.h>
 
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/i2c_bitbang.h>
@@ -56,7 +48,7 @@ struct slugiic_softc {
 	struct device sc_dev;
 	struct i2c_controller sc_ic;
 	struct i2c_bitbang_ops sc_ibo;
-	struct lock sc_lock;
+	kmutex_t sc_lock;
 	uint32_t sc_dirout;
 };
 
@@ -68,7 +60,8 @@ slugiic_acquire_bus(void *arg, int flags)
 	if (flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL));
+	mutex_enter(&sc->sc_lock);
+	return (0);
 }
 
 static void
@@ -79,7 +72,7 @@ slugiic_release_bus(void *arg, int flags)
 	if (flags & I2C_F_POLL)
 		return;
 
-	(void) lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	mutex_exit(&sc->sc_lock);
 }
 
 static int
@@ -129,16 +122,27 @@ slugiic_set_dir(void *arg, uint32_t bits)
 	uint32_t reg;
 	int s;
 
-	if (sc->sc_dirout == (bits ^ GPIO_I2C_SDA_BIT))
+	if (sc->sc_dirout == bits)
 		return;
 
 	s = splhigh();
 
-	sc->sc_dirout = bits ^ GPIO_I2C_SDA_BIT;
+	sc->sc_dirout = bits;
 
-	reg = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOER);
-	reg &= ~GPIO_I2C_SDA_BIT;
-	GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOER, reg | bits);
+	if (sc->sc_dirout) {
+		/* SDA is output; enable SDA output if SDA OUTR is low */
+		reg = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOUTR);
+		if ((reg & GPIO_I2C_SDA_BIT) == 0) {
+			reg = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOER);
+			reg &= ~GPIO_I2C_SDA_BIT;
+			GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOER, reg);
+		}
+	} else {
+		/* SDA is input; disable SDA output */
+		reg = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOER);
+		reg |= GPIO_I2C_SDA_BIT;
+		GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOER, reg);
+	}
 
 	splx(s);
 }
@@ -147,17 +151,37 @@ static void
 slugiic_set_bits(void *arg, uint32_t bits)
 {
 	struct slugiic_softc *sc = arg;
-	uint32_t reg;
+	uint32_t oer, outr;
 	int s;
-
-	if (sc->sc_dirout == 0 && !(bits & GPIO_I2C_SDA_BIT))
-		bits |= GPIO_I2C_SDA_BIT;
 
 	s = splhigh();
 
-	reg = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOUTR);
-	reg &= ~(GPIO_I2C_SDA_BIT | GPIO_I2C_SCL_BIT);
-	GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOUTR, reg | bits);
+	/*
+	 * Enable SCL output if the SCL line is to be driven low.
+	 * Enable SDA output if the SDA line is to be driven low and
+	 * SDA direction is output.
+	 * Otherwise switch them to input even if directions are output
+	 * so that we can emulate open collector output with the pullup
+	 * resistors.
+	 * If lines are to be set to high, disable OER first then set OUTR.
+	 * If lines are to be set to low, set OUTR first then enable OER.
+	 */
+	oer = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOER);
+	if ((bits & GPIO_I2C_SCL_BIT) != 0)
+		oer |= GPIO_I2C_SCL_BIT;
+	if ((bits & GPIO_I2C_SDA_BIT) != 0)
+		oer |= GPIO_I2C_SDA_BIT;
+	GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOER, oer);
+
+	outr = GPIO_CONF_READ_4(ixp425_softc, IXP425_GPIO_GPOUTR);
+	outr &= ~(GPIO_I2C_SDA_BIT | GPIO_I2C_SCL_BIT);
+	GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOUTR, outr | bits);
+
+	if ((bits & GPIO_I2C_SCL_BIT) == 0)
+		oer &= ~GPIO_I2C_SCL_BIT;
+	if ((bits & GPIO_I2C_SDA_BIT) == 0 && sc->sc_dirout)
+		oer &= ~GPIO_I2C_SDA_BIT;
+	GPIO_CONF_WRITE_4(ixp425_softc, IXP425_GPIO_GPOER, oer);
 
 	splx(s);
 }
@@ -221,10 +245,10 @@ slugiic_attach(struct device *parent, struct device *self, void *arg)
 	sc->sc_ibo.ibo_read_bits = slugiic_read_bits;
 	sc->sc_ibo.ibo_bits[I2C_BIT_SDA] = GPIO_I2C_SDA_BIT;
 	sc->sc_ibo.ibo_bits[I2C_BIT_SCL] = GPIO_I2C_SCL_BIT;
-	sc->sc_ibo.ibo_bits[I2C_BIT_OUTPUT] = 0;
-	sc->sc_ibo.ibo_bits[I2C_BIT_INPUT] = GPIO_I2C_SDA_BIT;
+	sc->sc_ibo.ibo_bits[I2C_BIT_OUTPUT] = 1;
+	sc->sc_ibo.ibo_bits[I2C_BIT_INPUT] = 0;
 
-	lockinit(&sc->sc_lock, PRIBIO|PCATCH, "slugiiclk", 0, 0);
+	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_NONE);
 
 	sc->sc_dirout = 0;
 

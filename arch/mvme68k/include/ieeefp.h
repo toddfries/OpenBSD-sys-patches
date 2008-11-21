@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieeefp.h,v 1.3 1996/04/28 10:56:20 deraadt Exp $ */
+/*	$NetBSD: ieeefp.h,v 1.1 1996/04/12 18:38:00 chuck Exp $	*/
 
 /* Just use the common m68k definition */
 #include <m68k/ieeefp.h>

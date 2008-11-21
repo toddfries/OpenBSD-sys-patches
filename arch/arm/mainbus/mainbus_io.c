@@ -1,5 +1,4 @@
-/*	$OpenBSD: mainbus_io.c,v 1.3 2007/05/25 16:45:59 krw Exp $ */
-/*	$NetBSD: mainbus_io.c,v 1.14 2003/12/06 22:05:33 bjh21 Exp $	*/
+/*	$NetBSD: mainbus_io.c,v 1.17 2005/11/24 13:08:32 yamt Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -37,6 +36,9 @@
  * bus_space I/O functions for mainbus
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mainbus_io.c,v 1.17 2005/11/24 13:08:32 yamt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/queue.h>
@@ -46,7 +48,7 @@
 #include <machine/bus.h>
 #include <machine/pmap.h>
 
-/* Prototypes for all the bus_space structure functions */
+/* Proto types for all the bus_space structure functions */
 
 bs_protos(mainbus);
 bs_protos(bs_notimpl);
@@ -154,7 +156,8 @@ mainbus_bs_map(t, bpa, size, flags, bshp)
 
 	/* XXX use extent manager to check duplicate mapping */
 
-	va = uvm_km_valloc(kernel_map, endpa - startpa);
+	va = uvm_km_alloc(kernel_map, endpa - startpa, 0,
+	    UVM_KMF_VAONLY | UVM_KMF_NOWAIT);
 	if (! va)
 		return(ENOMEM);
 
@@ -233,7 +236,7 @@ mainbus_bs_mmap(t, paddr, offset, prot, flags)
 	/*
 	 * mmap from address `paddr+offset' for one page
 	 */
-	 return (atop(paddr + offset));
+	 return (arm_btop((paddr + offset)));
 }
 
 void

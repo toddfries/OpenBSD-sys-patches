@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.91 2008/05/31 02:08:14 brad Exp $	*/
+/* $NetBSD: if_txp.c,v 1.27 2008/11/07 00:20:07 dyoung Exp $ */
 
 /*
  * Copyright (c) 2001
@@ -31,8 +31,11 @@
  * Driver for 3c990 (Typhoon) Ethernet ASIC
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_txp.c,v 1.27 2008/11/07 00:20:07 dyoung Exp $");
+
 #include "bpfilter.h"
-#include "vlan.h"
+#include "opt_inet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,18 +45,20 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/device.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/if_ether.h>
+#include <net/if_arp.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#include <netinet/if_ether.h>
+#include <netinet/if_inarp.h>
 #endif
 
 #include <net/if_media.h>
@@ -62,12 +67,8 @@
 #include <net/bpf.h>
 #endif
 
-#if NVLAN > 0
-#include <net/if_types.h>
-#include <net/if_vlan_var.h>
-#endif
-
-#include <machine/bus.h>
+#include <uvm/uvm_extern.h>              /* for PAGE_SIZE */
+#include <sys/bus.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -77,6 +78,8 @@
 
 #include <dev/pci/if_txpreg.h>
 
+#include <dev/microcode/typhoon/3c990img.h>
+
 /*
  * These currently break the 3c990 firmware, hopefully will be resolved
  * at some point.
@@ -84,13 +87,12 @@
 #undef	TRY_TX_UDP_CSUM
 #undef	TRY_TX_TCP_CSUM
 
-int txp_probe(struct device *, void *, void *);
-void txp_attach(struct device *, struct device *, void *);
-void txp_attachhook(void *vsc);
+int txp_probe(device_t, cfdata_t, void *);
+void txp_attach(device_t, device_t, void *);
 int txp_intr(void *);
 void txp_tick(void *);
 void txp_shutdown(void *);
-int txp_ioctl(struct ifnet *, u_long, caddr_t);
+int txp_ioctl(struct ifnet *, u_long, void *);
 void txp_start(struct ifnet *);
 void txp_stop(struct txp_softc *);
 void txp_init(struct txp_softc *);
@@ -101,7 +103,7 @@ int txp_reset_adapter(struct txp_softc *);
 int txp_download_fw(struct txp_softc *);
 int txp_download_fw_wait(struct txp_softc *);
 int txp_download_fw_section(struct txp_softc *,
-    struct txp_fw_section_header *, int, u_char *, size_t);
+    const struct txp_fw_section_header *, int);
 int txp_alloc_rings(struct txp_softc *);
 void txp_dma_free(struct txp_softc *, struct txp_dma_alloc *);
 int txp_dma_malloc(struct txp_softc *, bus_size_t, struct txp_dma_alloc *, int);
@@ -128,138 +130,112 @@ void txp_rxbuf_reclaim(struct txp_softc *);
 void txp_rx_reclaim(struct txp_softc *, struct txp_rx_ring *,
     struct txp_dma_alloc *);
 
-struct cfattach txp_ca = {
-	sizeof(struct txp_softc), txp_probe, txp_attach,
+CFATTACH_DECL(txp, sizeof(struct txp_softc), txp_probe, txp_attach,
+	      NULL, NULL);
+
+const struct txp_pci_match {
+	int vid, did, flags;
+} txp_devices[] = {
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990, 0 },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990TX95, 0 },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990TX97, 0 },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990SVR95, TXP_SERVERVERSION },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990SVR97, TXP_SERVERVERSION },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C990B, TXP_USESUBSYSTEM },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C990BSVR, TXP_SERVERVERSION },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990FX, TXP_USESUBSYSTEM },
 };
 
-struct cfdriver txp_cd = {
-	0, "txp", DV_IFNET
+static const struct txp_pci_match *txp_pcilookup(pcireg_t);
+
+static const struct {
+	u_int16_t mask, value;
+	int flags;
+} txp_subsysinfo[] = {
+	{0xf000, 0x2000, TXP_SERVERVERSION},
+	{0x0100, 0x0100, TXP_FIBER},
+#if 0 /* information from 3com header, unused */
+	{0x0010, 0x0010, /* secured firmware */},
+	{0x0003, 0x0000, /* variable DES */},
+	{0x0003, 0x0001, /* single DES - "95" */},
+	{0x0003, 0x0002, /* triple DES - "97" */},
+#endif
 };
 
-const struct pci_matchid txp_devices[] = {
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990 },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990TX },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990TX95 },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990TX97 },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990SVR95 },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990SVR97 },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C990BTXM },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C990BSVR },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CR990FX },
-};
+static const struct txp_pci_match *
+txp_pcilookup(pcireg_t id)
+{
+	int i;
+
+	for (i = 0; i < __arraycount(txp_devices); i++)
+		if (PCI_VENDOR(id) == txp_devices[i].vid &&
+		    PCI_PRODUCT(id) == txp_devices[i].did)
+			return &txp_devices[i];
+	return (0);
+}
 
 int
-txp_probe(struct device *parent, void *match, void *aux)
+txp_probe(device_t parent, cfdata_t match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, txp_devices,
-	    sizeof(txp_devices)/sizeof(txp_devices[0])));
+	struct pci_attach_args *pa = aux;
+
+	if (txp_pcilookup(pa->pa_id))
+			return (1);
+	return (0);
 }
 
 void
-txp_attachhook(void *vsc)
+txp_attach(device_t parent, device_t self, void *aux)
 {
-	struct txp_softc *sc = vsc;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	u_int16_t p1;
-	u_int32_t p2;
-	int s;
-
-	s = splnet();
-	printf("%s: ", sc->sc_dev.dv_xname);
-
-	if (txp_chip_init(sc)) {
-		printf("failed chip init\n");
-		splx(s);
-		return;
-	}
-
-	if (txp_download_fw(sc)) {
-		splx(s);
-		return;
-	}
-
-	if (txp_alloc_rings(sc)) {
-		splx(s);
-		return;
-	}
-
-	if (txp_command(sc, TXP_CMD_MAX_PKT_SIZE_WRITE, TXP_MAX_PKTLEN, 0, 0,
-	    NULL, NULL, NULL, 1)) {
-		splx(s);
-		return;
-	}
-
-	if (txp_command(sc, TXP_CMD_STATION_ADDRESS_READ, 0, 0, 0,
-	    &p1, &p2, NULL, 1)) {
-		splx(s);
-		return;
-	}
-
-	p1 = htole16(p1);
-	sc->sc_arpcom.ac_enaddr[0] = ((u_int8_t *)&p1)[1];
-	sc->sc_arpcom.ac_enaddr[1] = ((u_int8_t *)&p1)[0];
-	p2 = htole32(p2);
-	sc->sc_arpcom.ac_enaddr[2] = ((u_int8_t *)&p2)[3];
-	sc->sc_arpcom.ac_enaddr[3] = ((u_int8_t *)&p2)[2];
-	sc->sc_arpcom.ac_enaddr[4] = ((u_int8_t *)&p2)[1];
-	sc->sc_arpcom.ac_enaddr[5] = ((u_int8_t *)&p2)[0];
-
-	printf("address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
-	sc->sc_cold = 0;
-
-	ifmedia_init(&sc->sc_ifmedia, 0, txp_ifmedia_upd, txp_ifmedia_sts);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_10_T, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_10_T|IFM_HDX, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_10_T|IFM_FDX, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_TX, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_TX|IFM_HDX, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_TX|IFM_FDX, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_AUTO, 0, NULL);
-
-	sc->sc_xcvr = TXP_XCVR_AUTO;
-	txp_command(sc, TXP_CMD_XCVR_SELECT, TXP_XCVR_AUTO, 0, 0,
-	    NULL, NULL, NULL, 0);
-	ifmedia_set(&sc->sc_ifmedia, IFM_ETHER|IFM_AUTO);
-
-	ifp->if_softc = sc;
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_ioctl = txp_ioctl;
-	ifp->if_start = txp_start;
-	ifp->if_watchdog = txp_watchdog;
-	ifp->if_baudrate = 10000000;
-	IFQ_SET_MAXLEN(&ifp->if_snd, TX_ENTRIES);
-	IFQ_SET_READY(&ifp->if_snd);
-	ifp->if_capabilities = 0;
-	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
-
-	txp_capabilities(sc);
-
-	timeout_set(&sc->sc_tick, txp_tick, sc);
-
-	/*
-	 * Attach us everywhere
-	 */
-	if_attach(ifp);
-	ether_ifattach(ifp);
-
-	shutdownhook_establish(txp_shutdown, sc);
-	splx(s);
-}
-
-void
-txp_attach(struct device *parent, struct device *self, void *aux)
-{
-	struct txp_softc *sc = (struct txp_softc *)self;
+	struct txp_softc *sc = device_private(self);
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
-	bus_size_t iosize;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
+	u_int32_t command;
+	u_int16_t p1;
+	u_int32_t p2;
+	u_char enaddr[6];
+	const struct txp_pci_match *match;
+	u_int16_t subsys;
+	int i, flags;
+	char devinfo[256];
 
 	sc->sc_cold = 1;
 
+	match = txp_pcilookup(pa->pa_id);
+	flags = match->flags;
+	if (match->flags & TXP_USESUBSYSTEM) {
+		subsys = PCI_PRODUCT(pci_conf_read(pc, pa->pa_tag,
+						   PCI_SUBSYS_ID_REG));
+		for (i = 0;
+		     i < sizeof(txp_subsysinfo)/sizeof(txp_subsysinfo[0]);
+		     i++)
+			if ((subsys & txp_subsysinfo[i].mask) ==
+			    txp_subsysinfo[i].value)
+				flags |= txp_subsysinfo[i].flags;
+	}
+	sc->sc_flags = flags;
+
+	pci_devinfo(pa->pa_id, 0, 0, devinfo, sizeof(devinfo));
+#define TXP_EXTRAINFO ((flags & (TXP_USESUBSYSTEM|TXP_SERVERVERSION)) == \
+  (TXP_USESUBSYSTEM|TXP_SERVERVERSION) ? " (SVR)" : "")
+	printf(": %s%s\n%s", devinfo, TXP_EXTRAINFO, device_xname(&sc->sc_dev));
+
+	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+
+	if (!(command & PCI_COMMAND_MASTER_ENABLE)) {
+		printf(": failed to enable bus mastering\n");
+		return;
+	}
+
+	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
+		printf(": failed to enable memory mapping\n");
+		return;
+	}
 	if (pci_mapreg_map(pa, TXP_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
-	    &sc->sc_bt, &sc->sc_bh, NULL, &iosize, 0)) {
+	    &sc->sc_bt, &sc->sc_bh, NULL, NULL)) {
 		printf(": can't map mem space %d\n", 0);
 		return;
 	}
@@ -275,8 +251,7 @@ txp_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	intrstr = pci_intr_string(pc, ih);
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, txp_intr, sc,
-	    self->dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, txp_intr, sc);
 	if (sc->sc_ih == NULL) {
 		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
@@ -284,17 +259,107 @@ txp_attach(struct device *parent, struct device *self, void *aux)
 		printf("\n");
 		return;
 	}
-	printf(": %s\n", intrstr);
+	printf(": interrupting at %s\n", intrstr);
 
-	if (rootvp == NULL)
-		mountroothook_establish(txp_attachhook, sc);
-	else
-		txp_attachhook(sc);
+	if (txp_chip_init(sc))
+		goto cleanupintr;
+
+	if (txp_download_fw(sc))
+		goto cleanupintr;
+
+	if (txp_alloc_rings(sc))
+		goto cleanupintr;
+
+	if (txp_command(sc, TXP_CMD_MAX_PKT_SIZE_WRITE, TXP_MAX_PKTLEN, 0, 0,
+	    NULL, NULL, NULL, 1))
+		goto cleanupintr;
+
+	if (txp_command(sc, TXP_CMD_STATION_ADDRESS_READ, 0, 0, 0,
+	    &p1, &p2, NULL, 1))
+		goto cleanupintr;
+
+	txp_set_filter(sc);
+
+	p1 = htole16(p1);
+	enaddr[0] = ((u_int8_t *)&p1)[1];
+	enaddr[1] = ((u_int8_t *)&p1)[0];
+	p2 = htole32(p2);
+	enaddr[2] = ((u_int8_t *)&p2)[3];
+	enaddr[3] = ((u_int8_t *)&p2)[2];
+	enaddr[4] = ((u_int8_t *)&p2)[1];
+	enaddr[5] = ((u_int8_t *)&p2)[0];
+
+	printf("%s: Ethernet address %s\n", device_xname(&sc->sc_dev),
+	       ether_sprintf(enaddr));
+	sc->sc_cold = 0;
+
+	ifmedia_init(&sc->sc_ifmedia, 0, txp_ifmedia_upd, txp_ifmedia_sts);
+	if (flags & TXP_FIBER) {
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_FX,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_FX|IFM_HDX,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_FX|IFM_FDX,
+			    0, NULL);
+	} else {
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_10_T,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_10_T|IFM_HDX,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_10_T|IFM_FDX,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_TX,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_TX|IFM_HDX,
+			    0, NULL);
+		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_100_TX|IFM_FDX,
+			    0, NULL);
+	}
+	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER|IFM_AUTO, 0, NULL);
+
+	sc->sc_xcvr = TXP_XCVR_AUTO;
+	txp_command(sc, TXP_CMD_XCVR_SELECT, TXP_XCVR_AUTO, 0, 0,
+	    NULL, NULL, NULL, 0);
+	ifmedia_set(&sc->sc_ifmedia, IFM_ETHER|IFM_AUTO);
+
+	ifp->if_softc = sc;
+	ifp->if_mtu = ETHERMTU;
+	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
+	ifp->if_ioctl = txp_ioctl;
+	ifp->if_start = txp_start;
+	ifp->if_watchdog = txp_watchdog;
+	ifp->if_baudrate = 10000000;
+	IFQ_SET_MAXLEN(&ifp->if_snd, TX_ENTRIES);
+	IFQ_SET_READY(&ifp->if_snd);
+	ifp->if_capabilities = 0;
+	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+
+	txp_capabilities(sc);
+
+	callout_init(&sc->sc_tick, 0);
+	callout_setfunc(&sc->sc_tick, txp_tick, sc);
+
+	/*
+	 * Attach us everywhere
+	 */
+	if_attach(ifp);
+	ether_ifattach(ifp, enaddr);
+
+	shutdownhook_establish(txp_shutdown, sc);
+
+
+	return;
+
+cleanupintr:
+	pci_intr_disestablish(pc,sc->sc_ih);
+
+	return;
 
 }
 
 int
-txp_chip_init(struct txp_softc *sc)
+txp_chip_init(sc)
+	struct txp_softc *sc;
 {
 	/* disable interrupts */
 	WRITE_REG(sc, TXP_IER, 0);
@@ -331,7 +396,8 @@ txp_chip_init(struct txp_softc *sc)
 }
 
 int
-txp_reset_adapter(struct txp_softc *sc)
+txp_reset_adapter(sc)
+	struct txp_softc *sc;
 {
 	u_int32_t r;
 	int i;
@@ -357,14 +423,13 @@ txp_reset_adapter(struct txp_softc *sc)
 }
 
 int
-txp_download_fw(struct txp_softc *sc)
+txp_download_fw(sc)
+	struct txp_softc *sc;
 {
-	struct txp_fw_file_header *fileheader;
-	struct txp_fw_section_header *secthead;
+	const struct txp_fw_file_header *fileheader;
+	const struct txp_fw_section_header *secthead;
+	int sect;
 	u_int32_t r, i, ier, imr;
-	size_t buflen;
-	int sect, err;
-	u_char *buf;
 
 	ier = READ_REG(sc, TXP_IER);
 	WRITE_REG(sc, TXP_IER, ier | TXP_INT_A2H_0);
@@ -379,43 +444,37 @@ txp_download_fw(struct txp_softc *sc)
 		DELAY(50);
 	}
 	if (r != STAT_WAITING_FOR_HOST_REQUEST) {
-		printf("not waiting for host request\n");
+		printf(": not waiting for host request\n");
 		return (-1);
 	}
 
 	/* Ack the status */
 	WRITE_REG(sc, TXP_ISR, TXP_INT_A2H_0);
 
-	err = loadfirmware("3c990", &buf, &buflen);
-	if (err) {
-		printf("failed loadfirmware of file 3c990: errno %d\n",
-		    err);
-		return (err);
-	}
-
-	fileheader = (struct txp_fw_file_header *)buf;
+	fileheader = (const struct txp_fw_file_header *)tc990image;
 	if (bcmp("TYPHOON", fileheader->magicid, sizeof(fileheader->magicid))) {
-		printf("firmware invalid magic\n");
-		goto fail;
+		printf(": fw invalid magic\n");
+		return (-1);
 	}
 
 	/* Tell boot firmware to get ready for image */
-	WRITE_REG(sc, TXP_H2A_1, letoh32(fileheader->addr));
+	WRITE_REG(sc, TXP_H2A_1, le32toh(fileheader->addr));
 	WRITE_REG(sc, TXP_H2A_0, TXP_BOOTCMD_RUNTIME_IMAGE);
 
 	if (txp_download_fw_wait(sc)) {
-		printf("fw wait failed, initial\n");
-		goto fail;
+		printf("%s: fw wait failed, initial\n", device_xname(&sc->sc_dev));
+		return (-1);
 	}
 
-	secthead = (struct txp_fw_section_header *)(buf +
-	    sizeof(struct txp_fw_file_header));
+	secthead = (const struct txp_fw_section_header *)
+		(((const u_int8_t *)tc990image) +
+		 sizeof(struct txp_fw_file_header));
 
-	for (sect = 0; sect < letoh32(fileheader->nsections); sect++) {
-		if (txp_download_fw_section(sc, secthead, sect, buf, buflen))
-			goto fail;
-		secthead = (struct txp_fw_section_header *)
-		    (((u_int8_t *)secthead) + letoh32(secthead->nbytes) +
+	for (sect = 0; sect < le32toh(fileheader->nsections); sect++) {
+		if (txp_download_fw_section(sc, secthead, sect))
+			return (-1);
+		secthead = (const struct txp_fw_section_header *)
+		    (((const u_int8_t *)secthead) + le32toh(secthead->nbytes) +
 			sizeof(*secthead));
 	}
 
@@ -428,22 +487,19 @@ txp_download_fw(struct txp_softc *sc)
 		DELAY(50);
 	}
 	if (r != STAT_WAITING_FOR_BOOT) {
-		printf("not waiting for boot\n");
-		goto fail;
+		printf(": not waiting for boot\n");
+		return (-1);
 	}
 
 	WRITE_REG(sc, TXP_IER, ier);
 	WRITE_REG(sc, TXP_IMR, imr);
 
-	free(buf, M_DEVBUF);
 	return (0);
-fail:
-	free(buf, M_DEVBUF);
-	return (-1);
 }
 
 int
-txp_download_fw_wait(struct txp_softc *sc)
+txp_download_fw_wait(sc)
+	struct txp_softc *sc;
 {
 	u_int32_t i, r;
 
@@ -455,7 +511,7 @@ txp_download_fw_wait(struct txp_softc *sc)
 	}
 
 	if (!(r & TXP_INT_A2H_0)) {
-		printf("fw wait failed comm0\n");
+		printf(": fw wait failed comm0\n");
 		return (-1);
 	}
 
@@ -463,92 +519,96 @@ txp_download_fw_wait(struct txp_softc *sc)
 
 	r = READ_REG(sc, TXP_A2H_0);
 	if (r != STAT_WAITING_FOR_SEGMENT) {
-		printf("fw not waiting for segment\n");
+		printf(": fw not waiting for segment\n");
 		return (-1);
 	}
 	return (0);
 }
 
 int
-txp_download_fw_section(struct txp_softc *sc,
-    struct txp_fw_section_header *sect, int sectnum, u_char *buf,
-    size_t buflen)
+txp_download_fw_section(sc, sect, sectnum)
+	struct txp_softc *sc;
+	const struct txp_fw_section_header *sect;
+	int sectnum;
 {
 	struct txp_dma_alloc dma;
 	int rseg, err = 0;
 	struct mbuf m;
+#ifdef INET
 	u_int16_t csum;
+#endif
 
 	/* Skip zero length sections */
 	if (sect->nbytes == 0)
 		return (0);
 
 	/* Make sure we aren't past the end of the image */
-	rseg = ((u_int8_t *)sect) - ((u_int8_t *)buf);
-	if (rseg >= buflen) {
-		printf("fw invalid section address, section %d\n", sectnum);
+	rseg = ((const u_int8_t *)sect) - ((const u_int8_t *)tc990image);
+	if (rseg >= sizeof(tc990image)) {
+		printf(": fw invalid section address, section %d\n", sectnum);
 		return (-1);
 	}
 
 	/* Make sure this section doesn't go past the end */
-	rseg += letoh32(sect->nbytes);
-	if (rseg >= buflen) {
-		printf("fw truncated section %d\n", sectnum);
+	rseg += le32toh(sect->nbytes);
+	if (rseg >= sizeof(tc990image)) {
+		printf(": fw truncated section %d\n", sectnum);
 		return (-1);
 	}
 
 	/* map a buffer, copy segment to it, get physaddr */
-	if (txp_dma_malloc(sc, letoh32(sect->nbytes), &dma, 0)) {
-		printf("fw dma malloc failed, section %d\n", sectnum);
+	if (txp_dma_malloc(sc, le32toh(sect->nbytes), &dma, 0)) {
+		printf(": fw dma malloc failed, section %d\n", sectnum);
 		return (-1);
 	}
 
-	bcopy(((u_int8_t *)sect) + sizeof(*sect), dma.dma_vaddr,
-	    letoh32(sect->nbytes));
+	bcopy(((const u_int8_t *)sect) + sizeof(*sect), dma.dma_vaddr,
+	    le32toh(sect->nbytes));
 
 	/*
 	 * dummy up mbuf and verify section checksum
 	 */
 	m.m_type = MT_DATA;
 	m.m_next = m.m_nextpkt = NULL;
-	m.m_len = letoh32(sect->nbytes);
+	m.m_len = le32toh(sect->nbytes);
 	m.m_data = dma.dma_vaddr;
 	m.m_flags = 0;
-	csum = in_cksum(&m, letoh32(sect->nbytes));
+#ifdef INET
+	csum = in_cksum(&m, le32toh(sect->nbytes));
 	if (csum != sect->cksum) {
-		printf("fw section %d, bad cksum (expected 0x%x got 0x%x)\n",
+		printf(": fw section %d, bad cksum (expected 0x%x got 0x%x)\n",
 		    sectnum, sect->cksum, csum);
-		err = -1;
-		goto bail;
+		txp_dma_free(sc, &dma);
+		return -1;
 	}
+#endif
 
 	bus_dmamap_sync(sc->sc_dmat, dma.dma_map, 0,
 	    dma.dma_map->dm_mapsize, BUS_DMASYNC_PREWRITE);
 
-	WRITE_REG(sc, TXP_H2A_1, letoh32(sect->nbytes));
-	WRITE_REG(sc, TXP_H2A_2, letoh16(sect->cksum));
-	WRITE_REG(sc, TXP_H2A_3, letoh32(sect->addr));
+	WRITE_REG(sc, TXP_H2A_1, le32toh(sect->nbytes));
+	WRITE_REG(sc, TXP_H2A_2, le32toh(sect->cksum));
+	WRITE_REG(sc, TXP_H2A_3, le32toh(sect->addr));
 	WRITE_REG(sc, TXP_H2A_4, dma.dma_paddr >> 32);
 	WRITE_REG(sc, TXP_H2A_5, dma.dma_paddr & 0xffffffff);
 	WRITE_REG(sc, TXP_H2A_0, TXP_BOOTCMD_SEGMENT_AVAILABLE);
 
 	if (txp_download_fw_wait(sc)) {
 		printf("%s: fw wait failed, section %d\n",
-		    sc->sc_dev.dv_xname, sectnum);
+		    device_xname(&sc->sc_dev), sectnum);
 		err = -1;
 	}
 
 	bus_dmamap_sync(sc->sc_dmat, dma.dma_map, 0,
 	    dma.dma_map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 
-bail:
 	txp_dma_free(sc, &dma);
-
 	return (err);
 }
 
 int
-txp_intr(void *vsc)
+txp_intr(vsc)
+	void *vsc;
 {
 	struct txp_softc *sc = vsc;
 	struct txp_hostvar *hv = sc->sc_hostvar;
@@ -579,11 +639,11 @@ txp_intr(void *vsc)
 			txp_rxbuf_reclaim(sc);
 
 		if (sc->sc_txhir.r_cnt && (sc->sc_txhir.r_cons !=
-		    TXP_OFFSET2IDX(letoh32(*(sc->sc_txhir.r_off)))))
+		    TXP_OFFSET2IDX(le32toh(*(sc->sc_txhir.r_off)))))
 			txp_tx_reclaim(sc, &sc->sc_txhir, &sc->sc_txhiring_dma);
 
 		if (sc->sc_txlor.r_cnt && (sc->sc_txlor.r_cons !=
-		    TXP_OFFSET2IDX(letoh32(*(sc->sc_txlor.r_off)))))
+		    TXP_OFFSET2IDX(le32toh(*(sc->sc_txlor.r_off)))))
 			txp_tx_reclaim(sc, &sc->sc_txlor, &sc->sc_txloring_dma);
 
 		isr = READ_REG(sc, TXP_ISR);
@@ -595,24 +655,27 @@ txp_intr(void *vsc)
 	/* unmask all interrupts */
 	WRITE_REG(sc, TXP_IMR, TXP_INT_A2H_3);
 
-	txp_start(&sc->sc_arpcom.ac_if);
+	txp_start(&sc->sc_arpcom.ec_if);
 
 	return (claimed);
 }
 
 void
-txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
-    struct txp_dma_alloc *dma)
+txp_rx_reclaim(sc, r, dma)
+	struct txp_softc *sc;
+	struct txp_rx_ring *r;
+	struct txp_dma_alloc *dma;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
 	struct txp_rx_desc *rxd;
 	struct mbuf *m;
 	struct txp_swdesc *sd;
 	u_int32_t roff, woff;
-	int sumflags = 0, idx;
+	int sumflags = 0;
+	int idx;
 
-	roff = letoh32(*r->r_roff);
-	woff = letoh32(*r->r_woff);
+	roff = le32toh(*r->r_roff);
+	woff = le32toh(*r->r_woff);
 	idx = roff / sizeof(struct txp_rx_desc);
 	rxd = r->r_desc + idx;
 
@@ -623,14 +686,14 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 		    BUS_DMASYNC_POSTREAD);
 
 		if (rxd->rx_flags & RX_FLAGS_ERROR) {
-			printf("%s: error 0x%x\n", sc->sc_dev.dv_xname,
-			    letoh32(rxd->rx_stat));
+			printf("%s: error 0x%x\n", device_xname(&sc->sc_dev),
+			    le32toh(rxd->rx_stat));
 			ifp->if_ierrors++;
 			goto next;
 		}
 
 		/* retrieve stashed pointer */
-		bcopy((u_long *)&rxd->rx_vaddrlo, &sd, sizeof(sd));
+		bcopy(__UNVOLATILE(&rxd->rx_vaddrlo), &sd, sizeof(sd));
 
 		bus_dmamap_sync(sc->sc_dmat, sd->sd_map, 0,
 		    sd->sd_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
@@ -638,32 +701,7 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 		bus_dmamap_destroy(sc->sc_dmat, sd->sd_map);
 		m = sd->sd_mbuf;
 		free(sd, M_DEVBUF);
-		m->m_pkthdr.len = m->m_len = letoh16(rxd->rx_len);
-
-#if NVLAN > 0
-		/*
-		 * XXX Another firmware bug: the vlan encapsulation
-		 * is always removed, even when we tell the card not
-		 * to do that.  Restore the vlan encapsulation below.
-		 */
-		if (rxd->rx_stat & htole32(RX_STAT_VLAN)) {
-			struct ether_vlan_header vh;
-
-			if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-				m_freem(m);
-				goto next;
-			}
-			m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
-			vh.evl_proto = vh.evl_encap_proto;
-			vh.evl_tag = rxd->rx_vlan >> 16;
-			vh.evl_encap_proto = htons(ETHERTYPE_VLAN);
-			m_adj(m, ETHER_HDR_LEN);
-			M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-			if (m == NULL)
-				goto next;
-			m_copyback(m, 0, sizeof(vh), &vh);
-		}
-#endif
+		m->m_pkthdr.len = m->m_len = le16toh(rxd->rx_len);
 
 #ifdef __STRICT_ALIGNMENT
 		{
@@ -702,27 +740,32 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap(ifp->if_bpf, m);
 #endif
 
 		if (rxd->rx_stat & htole32(RX_STAT_IPCKSUMBAD))
-			sumflags |= M_IPV4_CSUM_IN_BAD;
+			sumflags |= (M_CSUM_IPv4|M_CSUM_IPv4_BAD);
 		else if (rxd->rx_stat & htole32(RX_STAT_IPCKSUMGOOD))
-			sumflags |= M_IPV4_CSUM_IN_OK;
+			sumflags |= M_CSUM_IPv4;
 
 		if (rxd->rx_stat & htole32(RX_STAT_TCPCKSUMBAD))
-			sumflags |= M_TCP_CSUM_IN_BAD;
+			sumflags |= (M_CSUM_TCPv4|M_CSUM_TCP_UDP_BAD);
 		else if (rxd->rx_stat & htole32(RX_STAT_TCPCKSUMGOOD))
-			sumflags |= M_TCP_CSUM_IN_OK;
+			sumflags |= M_CSUM_TCPv4;
 
 		if (rxd->rx_stat & htole32(RX_STAT_UDPCKSUMBAD))
-			sumflags |= M_UDP_CSUM_IN_BAD;
+			sumflags |= (M_CSUM_UDPv4|M_CSUM_TCP_UDP_BAD);
 		else if (rxd->rx_stat & htole32(RX_STAT_UDPCKSUMGOOD))
-			sumflags |= M_UDP_CSUM_IN_OK;
+			sumflags |= M_CSUM_UDPv4;
 
 		m->m_pkthdr.csum_flags = sumflags;
 
-		ether_input_mbuf(ifp, m);
+		if (rxd->rx_stat & htole32(RX_STAT_VLAN)) {
+			VLAN_INPUT_TAG(ifp, m, htons(rxd->rx_vlan >> 16),
+			    continue);
+		}
+
+		(*ifp->if_input)(ifp, m);
 
 next:
 		bus_dmamap_sync(sc->sc_dmat, dma->dma_map,
@@ -738,23 +781,24 @@ next:
 			idx++;
 			rxd++;
 		}
-		woff = letoh32(*r->r_woff);
+		woff = le32toh(*r->r_woff);
 	}
 
 	*r->r_roff = htole32(woff);
 }
 
 void
-txp_rxbuf_reclaim(struct txp_softc *sc)
+txp_rxbuf_reclaim(sc)
+	struct txp_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
 	struct txp_hostvar *hv = sc->sc_hostvar;
 	struct txp_rxbuf_desc *rbd;
 	struct txp_swdesc *sd;
 	u_int32_t i, end;
 
-	end = TXP_OFFSET2IDX(letoh32(hv->hv_rx_buf_read_idx));
-	i = TXP_OFFSET2IDX(letoh32(hv->hv_rx_buf_write_idx));
+	end = TXP_OFFSET2IDX(le32toh(hv->hv_rx_buf_read_idx));
+	i = TXP_OFFSET2IDX(le32toh(hv->hv_rx_buf_write_idx));
 
 	if (++i == RXBUF_ENTRIES)
 		i = 0;
@@ -774,10 +818,8 @@ txp_rxbuf_reclaim(struct txp_softc *sc)
 		MCLGET(sd->sd_mbuf, M_DONTWAIT);
 		if ((sd->sd_mbuf->m_flags & M_EXT) == 0)
 			goto err_mbuf;
-		/* reserve some space for a possible VLAN header */
-		sd->sd_mbuf->m_data += 8;
-		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES - 8;
 		sd->sd_mbuf->m_pkthdr.rcvif = ifp;
+		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES;
 		if (bus_dmamap_create(sc->sc_dmat, TXP_MAX_PKTLEN, 1,
 		    TXP_MAX_PKTLEN, 0, BUS_DMA_NOWAIT, &sd->sd_map))
 			goto err_mbuf;
@@ -790,9 +832,9 @@ txp_rxbuf_reclaim(struct txp_softc *sc)
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_rxbufring_dma.dma_map,
 		    i * sizeof(struct txp_rxbuf_desc),
 		    sizeof(struct txp_rxbuf_desc), BUS_DMASYNC_POSTWRITE);
-		    
+
 		/* stash away pointer */
-		bcopy(&sd, (u_long *)&rbd->rb_vaddrlo, sizeof(sd));
+		bcopy(&sd, __UNVOLATILE(&rbd->rb_vaddrlo), sizeof(sd));
 
 		rbd->rb_paddrlo = ((u_int64_t)sd->sd_map->dm_segs[0].ds_addr)
 		    & 0xffffffff;
@@ -826,11 +868,13 @@ err_sd:
  * Reclaim mbufs and entries from a transmit ring.
  */
 void
-txp_tx_reclaim(struct txp_softc *sc, struct txp_tx_ring *r,
-    struct txp_dma_alloc *dma)
+txp_tx_reclaim(sc, r, dma)
+	struct txp_softc *sc;
+	struct txp_tx_ring *r;
+	struct txp_dma_alloc *dma;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	u_int32_t idx = TXP_OFFSET2IDX(letoh32(*(r->r_off)));
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
+	u_int32_t idx = TXP_OFFSET2IDX(le32toh(*(r->r_off)));
 	u_int32_t cons = r->r_cons, cnt = r->r_cnt;
 	struct txp_tx_desc *txd = r->r_desc + cons;
 	struct txp_swdesc *sd = sc->sc_txd + cons;
@@ -879,7 +923,8 @@ txp_tx_reclaim(struct txp_softc *sc, struct txp_tx_ring *r,
 }
 
 void
-txp_shutdown(void *vsc)
+txp_shutdown(vsc)
+	void *vsc;
 {
 	struct txp_softc *sc = (struct txp_softc *)vsc;
 
@@ -895,18 +940,19 @@ txp_shutdown(void *vsc)
 }
 
 int
-txp_alloc_rings(struct txp_softc *sc)
+txp_alloc_rings(sc)
+	struct txp_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
 	struct txp_boot_record *boot;
 	struct txp_swdesc *sd;
 	u_int32_t r;
-	int i, j;
+	int i, j, nb;
 
 	/* boot record */
 	if (txp_dma_malloc(sc, sizeof(struct txp_boot_record), &sc->sc_boot_dma,
 	    BUS_DMA_COHERENT)) {
-		printf("can't allocate boot record\n");
+		printf(": can't allocate boot record\n");
 		return (-1);
 	}
 	boot = (struct txp_boot_record *)sc->sc_boot_dma.dma_vaddr;
@@ -916,7 +962,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* host variables */
 	if (txp_dma_malloc(sc, sizeof(struct txp_hostvar), &sc->sc_host_dma,
 	    BUS_DMA_COHERENT)) {
-		printf("can't allocate host ring\n");
+		printf(": can't allocate host ring\n");
 		goto bail_boot;
 	}
 	bzero(sc->sc_host_dma.dma_vaddr, sizeof(struct txp_hostvar));
@@ -927,7 +973,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* high priority tx ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_tx_desc) * TX_ENTRIES,
 	    &sc->sc_txhiring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate high tx ring\n");
+		printf(": can't allocate high tx ring\n");
 		goto bail_host;
 	}
 	bzero(sc->sc_txhiring_dma.dma_vaddr, sizeof(struct txp_tx_desc) * TX_ENTRIES);
@@ -954,7 +1000,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* low priority tx ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_tx_desc) * TX_ENTRIES,
 	    &sc->sc_txloring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate low tx ring\n");
+		printf(": can't allocate low tx ring\n");
 		goto bail_txhiring;
 	}
 	bzero(sc->sc_txloring_dma.dma_vaddr, sizeof(struct txp_tx_desc) * TX_ENTRIES);
@@ -969,7 +1015,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* high priority rx ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_rx_desc) * RX_ENTRIES,
 	    &sc->sc_rxhiring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate high rx ring\n");
+		printf(": can't allocate high rx ring\n");
 		goto bail_txloring;
 	}
 	bzero(sc->sc_rxhiring_dma.dma_vaddr, sizeof(struct txp_rx_desc) * RX_ENTRIES);
@@ -986,7 +1032,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* low priority ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_rx_desc) * RX_ENTRIES,
 	    &sc->sc_rxloring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate low rx ring\n");
+		printf(": can't allocate low rx ring\n");
 		goto bail_rxhiring;
 	}
 	bzero(sc->sc_rxloring_dma.dma_vaddr, sizeof(struct txp_rx_desc) * RX_ENTRIES);
@@ -1003,7 +1049,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* command ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_cmd_desc) * CMD_ENTRIES,
 	    &sc->sc_cmdring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate command ring\n");
+		printf(": can't allocate command ring\n");
 		goto bail_rxloring;
 	}
 	bzero(sc->sc_cmdring_dma.dma_vaddr, sizeof(struct txp_cmd_desc) * CMD_ENTRIES);
@@ -1017,7 +1063,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* response ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_rsp_desc) * RSP_ENTRIES,
 	    &sc->sc_rspring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate response ring\n");
+		printf(": can't allocate response ring\n");
 		goto bail_cmdring;
 	}
 	bzero(sc->sc_rspring_dma.dma_vaddr, sizeof(struct txp_rsp_desc) * RSP_ENTRIES);
@@ -1031,7 +1077,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* receive buffer ring */
 	if (txp_dma_malloc(sc, sizeof(struct txp_rxbuf_desc) * RXBUF_ENTRIES,
 	    &sc->sc_rxbufring_dma, BUS_DMA_COHERENT)) {
-		printf("can't allocate rx buffer ring\n");
+		printf(": can't allocate rx buffer ring\n");
 		goto bail_rspring;
 	}
 	bzero(sc->sc_rxbufring_dma.dma_vaddr, sizeof(struct txp_rxbuf_desc) * RXBUF_ENTRIES);
@@ -1039,13 +1085,11 @@ txp_alloc_rings(struct txp_softc *sc)
 	boot->br_rxbuf_hi = htole32(sc->sc_rxbufring_dma.dma_paddr >> 32);
 	boot->br_rxbuf_siz = htole32(RXBUF_ENTRIES * sizeof(struct txp_rxbuf_desc));
 	sc->sc_rxbufs = (struct txp_rxbuf_desc *)sc->sc_rxbufring_dma.dma_vaddr;
-	for (i = 0; i < RXBUF_ENTRIES; i++) {
+	for (nb = 0; nb < RXBUF_ENTRIES; nb++) {
 		sd = (struct txp_swdesc *)malloc(sizeof(struct txp_swdesc),
 		    M_DEVBUF, M_NOWAIT);
-
 		/* stash away pointer */
-		bcopy(&sd, (u_long *)&sc->sc_rxbufs[i].rb_vaddrlo, sizeof(sd));
-
+		bcopy(&sd, __UNVOLATILE(&sc->sc_rxbufs[nb].rb_vaddrlo), sizeof(sd));
 		if (sd == NULL)
 			break;
 
@@ -1058,9 +1102,7 @@ txp_alloc_rings(struct txp_softc *sc)
 		if ((sd->sd_mbuf->m_flags & M_EXT) == 0) {
 			goto bail_rxbufring;
 		}
-		/* reserve some space for a possible VLAN header */
-		sd->sd_mbuf->m_data += 8;
-		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES - 8;
+		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES;
 		sd->sd_mbuf->m_pkthdr.rcvif = ifp;
 		if (bus_dmamap_create(sc->sc_dmat, TXP_MAX_PKTLEN, 1,
 		    TXP_MAX_PKTLEN, 0, BUS_DMA_NOWAIT, &sd->sd_map)) {
@@ -1074,9 +1116,10 @@ txp_alloc_rings(struct txp_softc *sc)
 		bus_dmamap_sync(sc->sc_dmat, sd->sd_map, 0,
 		    sd->sd_map->dm_mapsize, BUS_DMASYNC_PREREAD);
 
-		sc->sc_rxbufs[i].rb_paddrlo =
+
+		sc->sc_rxbufs[nb].rb_paddrlo =
 		    ((u_int64_t)sd->sd_map->dm_segs[0].ds_addr) & 0xffffffff;
-		sc->sc_rxbufs[i].rb_paddrhi =
+		sc->sc_rxbufs[nb].rb_paddrhi =
 		    ((u_int64_t)sd->sd_map->dm_segs[0].ds_addr) >> 32;
 	}
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_rxbufring_dma.dma_map,
@@ -1088,7 +1131,7 @@ txp_alloc_rings(struct txp_softc *sc)
 	/* zero dma */
 	if (txp_dma_malloc(sc, sizeof(u_int32_t), &sc->sc_zero_dma,
 	    BUS_DMA_COHERENT)) {
-		printf("can't allocate response ring\n");
+		printf(": can't allocate response ring\n");
 		goto bail_rxbufring;
 	}
 	bzero(sc->sc_zero_dma.dma_vaddr, sizeof(u_int32_t));
@@ -1103,7 +1146,7 @@ txp_alloc_rings(struct txp_softc *sc)
 		DELAY(50);
 	}
 	if (r != STAT_WAITING_FOR_BOOT) {
-		printf("not waiting for boot\n");
+		printf(": not waiting for boot\n");
 		goto bail;
 	}
 	WRITE_REG(sc, TXP_H2A_2, sc->sc_boot_dma.dma_paddr >> 32);
@@ -1118,7 +1161,7 @@ txp_alloc_rings(struct txp_softc *sc)
 		DELAY(50);
 	}
 	if (r != STAT_RUNNING) {
-		printf("fw not running\n");
+		printf(": fw not running\n");
 		goto bail;
 	}
 
@@ -1133,8 +1176,11 @@ txp_alloc_rings(struct txp_softc *sc)
 bail:
 	txp_dma_free(sc, &sc->sc_zero_dma);
 bail_rxbufring:
-	for (i = 0; i < RXBUF_ENTRIES; i++) {
-		bcopy((u_long *)&sc->sc_rxbufs[i].rb_vaddrlo, &sd, sizeof(sd));
+	if (nb == RXBUF_ENTRIES)
+		nb--;
+	for (i = 0; i <= nb; i++) {
+		bcopy(__UNVOLATILE(&sc->sc_rxbufs[i].rb_vaddrlo), &sd,
+		    sizeof(sd));
 		if (sd)
 			free(sd, M_DEVBUF);
 	}
@@ -1159,8 +1205,11 @@ bail_boot:
 }
 
 int
-txp_dma_malloc(struct txp_softc *sc, bus_size_t size,
-    struct txp_dma_alloc *dma, int mapflags)
+txp_dma_malloc(sc, size, dma, mapflags)
+	struct txp_softc *sc;
+	bus_size_t size;
+	struct txp_dma_alloc *dma;
+	int mapflags;
 {
 	int r;
 
@@ -1194,7 +1243,9 @@ fail_0:
 }
 
 void
-txp_dma_free(struct txp_softc *sc, struct txp_dma_alloc *dma)
+txp_dma_free(sc, dma)
+	struct txp_softc *sc;
+	struct txp_dma_alloc *dma;
 {
 	bus_dmamap_unload(sc->sc_dmat, dma->dma_map);
 	bus_dmamem_unmap(sc->sc_dmat, dma->dma_vaddr, dma->dma_map->dm_mapsize);
@@ -1203,7 +1254,7 @@ txp_dma_free(struct txp_softc *sc, struct txp_dma_alloc *dma)
 }
 
 int
-txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
+txp_ioctl(struct ifnet *ifp, u_long command, void *data)
 {
 	struct txp_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -1212,27 +1263,30 @@ txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
+#if 0
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
 		splx(s);
 		return error;
 	}
+#endif
 
 	switch(command) {
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
+		txp_init(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-			txp_init(sc);
-			arp_ifinit(&sc->sc_arpcom, ifa);
+			arp_ifinit(ifp, ifa);
 			break;
 #endif /* INET */
 		default:
-			txp_init(sc);
 			break;
 		}
 		break;
 	case SIOCSIFFLAGS:
+		if ((error = ifioctl_common(ifp, command, data)) != 0)
+			break;
 		if (ifp->if_flags & IFF_UP) {
 			txp_init(sc);
 		} else {
@@ -1242,18 +1296,19 @@ txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
+		if ((error = ether_ioctl(ifp, command, data)) != ENETRESET)
+			break;
 
-		if (error == ENETRESET) {
+		error = 0;
+
+		if (command != SIOCADDMULTI && command != SIOCDELMULTI)
+			;
+		else if (ifp->if_flags & IFF_RUNNING) {
 			/*
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				txp_set_filter(sc);
-			error = 0;
+			txp_set_filter(sc);
 		}
 		break;
 	case SIOCGIFMEDIA:
@@ -1261,7 +1316,7 @@ txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, command);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, command, data);
 		break;
 	}
 
@@ -1271,9 +1326,10 @@ txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 }
 
 void
-txp_init(struct txp_softc *sc)
+txp_init(sc)
+	struct txp_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
 	int s;
 
 	txp_stop(sc);
@@ -1294,18 +1350,20 @@ txp_init(struct txp_softc *sc)
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
+	ifp->if_timer = 0;
 
-	if (!timeout_pending(&sc->sc_tick))
-		timeout_add(&sc->sc_tick, hz);
+	if (!callout_pending(&sc->sc_tick))
+		callout_schedule(&sc->sc_tick, hz);
 
 	splx(s);
 }
 
 void
-txp_tick(void *vsc)
+txp_tick(vsc)
+	void *vsc;
 {
 	struct txp_softc *sc = vsc;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
 	struct txp_rsp_desc *rsp = NULL;
 	struct txp_ext_desc *ext;
 	int s;
@@ -1337,11 +1395,12 @@ out:
 		free(rsp, M_DEVBUF);
 
 	splx(s);
-	timeout_add(&sc->sc_tick, hz);
+	callout_schedule(&sc->sc_tick, hz);
 }
 
 void
-txp_start(struct ifnet *ifp)
+txp_start(ifp)
+	struct ifnet *ifp;
 {
 	struct txp_softc *sc = ifp->if_softc;
 	struct txp_tx_ring *r = &sc->sc_txhir;
@@ -1351,9 +1410,7 @@ txp_start(struct ifnet *ifp)
 	struct mbuf *m, *mnew;
 	struct txp_swdesc *sd;
 	u_int32_t firstprod, firstcnt, prod, cnt, i;
-#if NVLAN > 0
-	struct ifvlan		*ifv;
-#endif
+	struct m_tag *mtag;
 
 	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1385,7 +1442,7 @@ txp_start(struct ifnet *ifp)
 					goto oactive1;
 				}
 			}
-			m_copydata(m, 0, m->m_pkthdr.len, mtod(mnew, caddr_t));
+			m_copydata(m, 0, m->m_pkthdr.len, mtod(mnew, void *));
 			mnew->m_pkthdr.len = mnew->m_len = m->m_pkthdr.len;
 			IFQ_DEQUEUE(&ifp->if_snd, m);
 			m_freem(m);
@@ -1414,23 +1471,18 @@ txp_start(struct ifnet *ifp)
 		if (++cnt >= (TX_ENTRIES - 4))
 			goto oactive;
 
-#if NVLAN > 0
-		if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-		    m->m_pkthdr.rcvif != NULL) {
-			ifv = m->m_pkthdr.rcvif->if_softc;
+		if ((mtag = VLAN_OUTPUT_TAG(&sc->sc_arpcom, m)))
 			txd->tx_pflags = TX_PFLAGS_VLAN |
-			    (htons(ifv->ifv_tag) << TX_PFLAGS_VLANTAG_S);
-		}
-#endif
+			  (htons(VLAN_TAG_VALUE(mtag)) << TX_PFLAGS_VLANTAG_S);
 
-		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+		if (m->m_pkthdr.csum_flags & M_CSUM_IPv4)
 			txd->tx_pflags |= TX_PFLAGS_IPCKSUM;
 #ifdef TRY_TX_TCP_CSUM
-		if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+		if (m->m_pkthdr.csum_flags & M_CSUM_TCPv4)
 			txd->tx_pflags |= TX_PFLAGS_TCPCKSUM;
 #endif
 #ifdef TRY_TX_UDP_CSUM
-		if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+		if (m->m_pkthdr.csum_flags & M_CSUM_UDPv4)
 			txd->tx_pflags |= TX_PFLAGS_UDPCKSUM;
 #endif
 
@@ -1482,7 +1534,7 @@ txp_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap(ifp->if_bpf, m);
 #endif
 
 		txd->tx_flags |= TX_FLAGS_VALID;
@@ -1527,9 +1579,11 @@ oactive1:
  * Handle simple commands sent to the typhoon
  */
 int
-txp_command(struct txp_softc *sc, u_int16_t id, u_int16_t in1,
-    u_int32_t in2, u_int32_t in3, u_int16_t *out1, u_int32_t *out2,
-    u_int32_t *out3, int wait)
+txp_command(sc, id, in1, in2, in3, out1, out2, out3, wait)
+	struct txp_softc *sc;
+	u_int16_t id, in1, *out1;
+	u_int32_t in2, in3, *out2, *out3;
+	int wait;
 {
 	struct txp_rsp_desc *rsp = NULL;
 
@@ -1540,19 +1594,24 @@ txp_command(struct txp_softc *sc, u_int16_t id, u_int16_t in1,
 		return (0);
 
 	if (out1 != NULL)
-		*out1 = letoh16(rsp->rsp_par1);
+		*out1 = le16toh(rsp->rsp_par1);
 	if (out2 != NULL)
-		*out2 = letoh32(rsp->rsp_par2);
+		*out2 = le32toh(rsp->rsp_par2);
 	if (out3 != NULL)
-		*out3 = letoh32(rsp->rsp_par3);
+		*out3 = le32toh(rsp->rsp_par3);
 	free(rsp, M_DEVBUF);
 	return (0);
 }
 
 int
-txp_command2(struct txp_softc *sc, u_int16_t id, u_int16_t in1,
-    u_int32_t in2, u_int32_t in3, struct txp_ext_desc *in_extp,
-    u_int8_t in_extn,struct txp_rsp_desc **rspp, int wait)
+txp_command2(sc, id, in1, in2, in3, in_extp, in_extn, rspp, wait)
+	struct txp_softc *sc;
+	u_int16_t id, in1;
+	u_int32_t in2, in3;
+	struct txp_ext_desc *in_extp;
+	u_int8_t in_extn;
+	struct txp_rsp_desc **rspp;
+	int wait;
 {
 	struct txp_hostvar *hv = sc->sc_hostvar;
 	struct txp_cmd_desc *cmd;
@@ -1604,8 +1663,8 @@ txp_command2(struct txp_softc *sc, u_int16_t id, u_int16_t in1,
 	for (i = 0; i < 10000; i++) {
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_host_dma.dma_map, 0,
 		    sizeof(struct txp_hostvar), BUS_DMASYNC_POSTREAD);
-		idx = letoh32(hv->hv_resp_read_idx);
-		if (idx != letoh32(hv->hv_resp_write_idx)) {
+		idx = le32toh(hv->hv_resp_read_idx);
+		if (idx != le32toh(hv->hv_resp_write_idx)) {
 			*rspp = NULL;
 			if (txp_response(sc, idx, id, seq, rspp))
 				return (-1);
@@ -1625,16 +1684,20 @@ txp_command2(struct txp_softc *sc, u_int16_t id, u_int16_t in1,
 }
 
 int
-txp_response(struct txp_softc *sc, u_int32_t ridx, u_int16_t id,
-    u_int16_t seq, struct txp_rsp_desc **rspp)
+txp_response(sc, ridx, id, seq, rspp)
+	struct txp_softc *sc;
+	u_int32_t ridx;
+	u_int16_t id;
+	u_int16_t seq;
+	struct txp_rsp_desc **rspp;
 {
 	struct txp_hostvar *hv = sc->sc_hostvar;
 	struct txp_rsp_desc *rsp;
 
-	while (ridx != letoh32(hv->hv_resp_write_idx)) {
+	while (ridx != le32toh(hv->hv_resp_write_idx)) {
 		rsp = (struct txp_rsp_desc *)(((u_int8_t *)sc->sc_rspring.base) + ridx);
 
-		if (id == letoh16(rsp->rsp_id) && letoh16(rsp->rsp_seq) == seq) {
+		if (id == le16toh(rsp->rsp_id) && le16toh(rsp->rsp_seq) == seq) {
 			*rspp = (struct txp_rsp_desc *)malloc(
 			    sizeof(struct txp_rsp_desc) * (rsp->rsp_numdesc + 1),
 			    M_DEVBUF, M_NOWAIT);
@@ -1646,13 +1709,13 @@ txp_response(struct txp_softc *sc, u_int32_t ridx, u_int16_t id,
 
 		if (rsp->rsp_flags & RSP_FLAGS_ERROR) {
 			printf("%s: response error: id 0x%x\n",
-			    TXP_DEVNAME(sc), letoh16(rsp->rsp_id));
+			    TXP_DEVNAME(sc), le16toh(rsp->rsp_id));
 			txp_rsp_fixup(sc, rsp, NULL);
-			ridx = letoh32(hv->hv_resp_read_idx);
+			ridx = le32toh(hv->hv_resp_read_idx);
 			continue;
 		}
 
-		switch (letoh16(rsp->rsp_id)) {
+		switch (le16toh(rsp->rsp_id)) {
 		case TXP_CMD_CYCLE_STATISTICS:
 		case TXP_CMD_MEDIA_STATUS_READ:
 			break;
@@ -1661,26 +1724,27 @@ txp_response(struct txp_softc *sc, u_int32_t ridx, u_int16_t id,
 			break;
 		default:
 			printf("%s: unknown id(0x%x)\n", TXP_DEVNAME(sc),
-			    letoh16(rsp->rsp_id));
+			    le16toh(rsp->rsp_id));
 		}
 
 		txp_rsp_fixup(sc, rsp, NULL);
-		ridx = letoh32(hv->hv_resp_read_idx);
-		hv->hv_resp_read_idx = letoh32(ridx);
+		ridx = le32toh(hv->hv_resp_read_idx);
+		hv->hv_resp_read_idx = le32toh(ridx);
 	}
 
 	return (0);
 }
 
 void
-txp_rsp_fixup(struct txp_softc *sc, struct txp_rsp_desc *rsp,
-    struct txp_rsp_desc *dst)
+txp_rsp_fixup(sc, rsp, dst)
+	struct txp_softc *sc;
+	struct txp_rsp_desc *rsp, *dst;
 {
 	struct txp_rsp_desc *src = rsp;
 	struct txp_hostvar *hv = sc->sc_hostvar;
 	u_int32_t i, ridx;
 
-	ridx = letoh32(hv->hv_resp_read_idx);
+	ridx = le32toh(hv->hv_resp_read_idx);
 
 	for (i = 0; i < rsp->rsp_numdesc + 1; i++) {
 		if (dst != NULL)
@@ -1694,26 +1758,27 @@ txp_rsp_fixup(struct txp_softc *sc, struct txp_rsp_desc *rsp,
 		sc->sc_rspring.lastwrite = ridx;
 		hv->hv_resp_read_idx = htole32(ridx);
 	}
-	
+
 	hv->hv_resp_read_idx = htole32(ridx);
 }
 
 int
-txp_cmd_desc_numfree(struct txp_softc *sc)
+txp_cmd_desc_numfree(sc)
+	struct txp_softc *sc;
 {
 	struct txp_hostvar *hv = sc->sc_hostvar;
 	struct txp_boot_record *br = sc->sc_boot;
 	u_int32_t widx, ridx, nfree;
 
 	widx = sc->sc_cmdring.lastwrite;
-	ridx = letoh32(hv->hv_cmd_read_idx);
+	ridx = le32toh(hv->hv_cmd_read_idx);
 
 	if (widx == ridx) {
 		/* Ring is completely free */
-		nfree = letoh32(br->br_cmd_siz) - sizeof(struct txp_cmd_desc);
+		nfree = le32toh(br->br_cmd_siz) - sizeof(struct txp_cmd_desc);
 	} else {
 		if (widx > ridx)
-			nfree = letoh32(br->br_cmd_siz) -
+			nfree = le32toh(br->br_cmd_siz) -
 			    (widx - ridx + sizeof(struct txp_cmd_desc));
 		else
 			nfree = ridx - widx - sizeof(struct txp_cmd_desc);
@@ -1723,18 +1788,14 @@ txp_cmd_desc_numfree(struct txp_softc *sc)
 }
 
 void
-txp_stop(struct txp_softc *sc)
+txp_stop(sc)
+	struct txp_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	timeout_del(&sc->sc_tick);
-
-	/* Mark the interface as down and cancel the watchdog timer. */
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-	ifp->if_timer = 0;
-
 	txp_command(sc, TXP_CMD_TX_DISABLE, 0, 0, 0, NULL, NULL, NULL, 1);
 	txp_command(sc, TXP_CMD_RX_DISABLE, 0, 0, 0, NULL, NULL, NULL, 1);
+
+	if (callout_pending(&sc->sc_tick))
+		callout_stop(&sc->sc_tick);
 }
 
 void
@@ -1743,7 +1804,8 @@ txp_watchdog(struct ifnet *ifp)
 }
 
 int
-txp_ifmedia_upd(struct ifnet *ifp)
+txp_ifmedia_upd(ifp)
+	struct ifnet *ifp;
 {
 	struct txp_softc *sc = ifp->if_softc;
 	struct ifmedia *ifm = &sc->sc_ifmedia;
@@ -1757,7 +1819,8 @@ txp_ifmedia_upd(struct ifnet *ifp)
 			new_xcvr = TXP_XCVR_10_FDX;
 		else
 			new_xcvr = TXP_XCVR_10_HDX;
-	} else if (IFM_SUBTYPE(ifm->ifm_media) == IFM_100_TX) {
+	} else if ((IFM_SUBTYPE(ifm->ifm_media) == IFM_100_TX) ||
+		   (IFM_SUBTYPE(ifm->ifm_media) == IFM_100_FX)) {
 		if ((ifm->ifm_media & IFM_GMASK) == IFM_FDX)
 			new_xcvr = TXP_XCVR_100_FDX;
 		else
@@ -1779,11 +1842,13 @@ txp_ifmedia_upd(struct ifnet *ifp)
 }
 
 void
-txp_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
+txp_ifmedia_sts(ifp, ifmr)
+	struct ifnet *ifp;
+	struct ifmediareq *ifmr;
 {
 	struct txp_softc *sc = ifp->if_softc;
 	struct ifmedia *ifm = &sc->sc_ifmedia;
-	u_int16_t bmsr, bmcr, anar, anlpar;
+	u_int16_t bmsr, bmcr, anlpar;
 
 	ifmr->ifm_status = IFM_AVALID;
 	ifmr->ifm_active = IFM_ETHER;
@@ -1797,10 +1862,6 @@ txp_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 
 	if (txp_command(sc, TXP_CMD_PHY_MGMT_READ, 0, MII_BMCR, 0,
 	    &bmcr, NULL, NULL, 1))
-		goto bail;
-
-	if (txp_command(sc, TXP_CMD_PHY_MGMT_READ, 0, MII_ANAR, 0,
-	    &anar, NULL, NULL, 1))
 		goto bail;
 
 	if (txp_command(sc, TXP_CMD_PHY_MGMT_READ, 0, MII_ANLPAR, 0,
@@ -1819,23 +1880,22 @@ txp_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 	if (bmcr & BMCR_LOOP)
 		ifmr->ifm_active |= IFM_LOOP;
 
-	if (bmcr & BMCR_AUTOEN) {
+	if (!(sc->sc_flags & TXP_FIBER) && (bmcr & BMCR_AUTOEN)) {
 		if ((bmsr & BMSR_ACOMP) == 0) {
 			ifmr->ifm_active |= IFM_NONE;
 			return;
 		}
 
-		anlpar &= anar;
 		if (anlpar & ANLPAR_T4)
-			ifmr->ifm_active |= IFM_100_T4|IFM_HDX;
+			ifmr->ifm_active |= IFM_100_T4;
 		else if (anlpar & ANLPAR_TX_FD)
 			ifmr->ifm_active |= IFM_100_TX|IFM_FDX;
 		else if (anlpar & ANLPAR_TX)
-			ifmr->ifm_active |= IFM_100_TX|IFM_HDX;
+			ifmr->ifm_active |= IFM_100_TX;
 		else if (anlpar & ANLPAR_10_FD)
 			ifmr->ifm_active |= IFM_10_T|IFM_FDX;
 		else if (anlpar & ANLPAR_10)
-			ifmr->ifm_active |= IFM_10_T|IFM_HDX;
+			ifmr->ifm_active |= IFM_10_T;
 		else
 			ifmr->ifm_active |= IFM_NONE;
 	} else
@@ -1848,7 +1908,8 @@ bail:
 }
 
 void
-txp_show_descriptor(void *d)
+txp_show_descriptor(d)
+	void *d;
 {
 	struct txp_cmd_desc *cmd = d;
 	struct txp_rsp_desc *rsp = d;
@@ -1859,16 +1920,16 @@ txp_show_descriptor(void *d)
 	case CMD_FLAGS_TYPE_CMD:
 		/* command descriptor */
 		printf("[cmd flags 0x%x num %d id %d seq %d par1 0x%x par2 0x%x par3 0x%x]\n",
-		    cmd->cmd_flags, cmd->cmd_numdesc, letoh16(cmd->cmd_id),
-		    letoh16(cmd->cmd_seq), letoh16(cmd->cmd_par1),
-		    letoh32(cmd->cmd_par2), letoh32(cmd->cmd_par3));
+		    cmd->cmd_flags, cmd->cmd_numdesc, le16toh(cmd->cmd_id),
+		    le16toh(cmd->cmd_seq), le16toh(cmd->cmd_par1),
+		    le32toh(cmd->cmd_par2), le32toh(cmd->cmd_par3));
 		break;
 	case CMD_FLAGS_TYPE_RESP:
 		/* response descriptor */
 		printf("[rsp flags 0x%x num %d id %d seq %d par1 0x%x par2 0x%x par3 0x%x]\n",
-		    rsp->rsp_flags, rsp->rsp_numdesc, letoh16(rsp->rsp_id),
-		    letoh16(rsp->rsp_seq), letoh16(rsp->rsp_par1),
-		    letoh32(rsp->rsp_par2), letoh32(rsp->rsp_par3));
+		    rsp->rsp_flags, rsp->rsp_numdesc, le16toh(rsp->rsp_id),
+		    le16toh(rsp->rsp_seq), le16toh(rsp->rsp_par1),
+		    le32toh(rsp->rsp_par2), le32toh(rsp->rsp_par3));
 		break;
 	case CMD_FLAGS_TYPE_DATA:
 		/* data header (assuming tx for now) */
@@ -1885,21 +1946,23 @@ txp_show_descriptor(void *d)
 	default:
 		printf("[unknown(%x) flags 0x%x num %d id %d seq %d par1 0x%x par2 0x%x par3 0x%x]\n",
 		    cmd->cmd_flags & CMD_FLAGS_TYPE_M,
-		    cmd->cmd_flags, cmd->cmd_numdesc, letoh16(cmd->cmd_id),
-		    letoh16(cmd->cmd_seq), letoh16(cmd->cmd_par1),
-		    letoh32(cmd->cmd_par2), letoh32(cmd->cmd_par3));
+		    cmd->cmd_flags, cmd->cmd_numdesc, le16toh(cmd->cmd_id),
+		    le16toh(cmd->cmd_seq), le16toh(cmd->cmd_par1),
+		    le32toh(cmd->cmd_par2), le32toh(cmd->cmd_par3));
 		break;
 	}
 }
 
 void
-txp_set_filter(struct txp_softc *sc)
+txp_set_filter(sc)
+	struct txp_softc *sc;
 {
-	struct arpcom *ac = &sc->sc_arpcom;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	u_int32_t hashbit, hash[2];
+	struct ethercom *ac = &sc->sc_arpcom;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
+	u_int32_t crc, carry, hashbit, hash[2];
 	u_int16_t filter;
-	int mcnt = 0;
+	u_int8_t octet;
+	int i, j, mcnt = 0;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 
@@ -1937,8 +2000,21 @@ again:
 			}
 
 			mcnt++;
-			hashbit = (u_int16_t)(ether_crc32_be(enm->enm_addrlo,
-			    ETHER_ADDR_LEN) & (64 - 1));
+			crc = 0xffffffff;
+
+			for (i = 0; i < ETHER_ADDR_LEN; i++) {
+				octet = enm->enm_addrlo[i];
+				for (j = 0; j < 8; j++) {
+					carry = ((crc & 0x80000000) ? 1 : 0) ^
+					    (octet & 1);
+					crc <<= 1;
+					octet >>= 1;
+					if (carry)
+						crc = (crc ^ TXP_POLYNOMIAL) |
+						    carry;
+				}
+			}
+			hashbit = (u_int16_t)(crc & (64 - 1));
 			hash[hashbit / 32] |= (1 << hashbit % 32);
 			ETHER_NEXT_MULTI(step, enm);
 		}
@@ -1956,9 +2032,10 @@ setit:
 }
 
 void
-txp_capabilities(struct txp_softc *sc)
+txp_capabilities(sc)
+	struct txp_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ec_if;
 	struct txp_rsp_desc *rsp = NULL;
 	struct txp_ext_desc *ext;
 
@@ -1972,14 +2049,12 @@ txp_capabilities(struct txp_softc *sc)
 	sc->sc_tx_capability = ext->ext_1 & OFFLOAD_MASK;
 	sc->sc_rx_capability = ext->ext_2 & OFFLOAD_MASK;
 
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
-
-#if NVLAN > 0
+	sc->sc_arpcom.ec_capabilities |= ETHERCAP_VLAN_MTU;
 	if (rsp->rsp_par2 & rsp->rsp_par3 & OFFLOAD_VLAN) {
 		sc->sc_tx_capability |= OFFLOAD_VLAN;
-		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+		sc->sc_rx_capability |= OFFLOAD_VLAN;
+		sc->sc_arpcom.ec_capabilities |= ETHERCAP_VLAN_HWTAGGING;
 	}
-#endif
 
 #if 0
 	/* not ready yet */
@@ -1993,14 +2068,15 @@ txp_capabilities(struct txp_softc *sc)
 	if (rsp->rsp_par2 & rsp->rsp_par3 & OFFLOAD_IPCKSUM) {
 		sc->sc_tx_capability |= OFFLOAD_IPCKSUM;
 		sc->sc_rx_capability |= OFFLOAD_IPCKSUM;
-		ifp->if_capabilities |= IFCAP_CSUM_IPv4;
+		ifp->if_capabilities |= IFCAP_CSUM_IPv4_Tx | IFCAP_CSUM_IPv4_Rx;
 	}
 
 	if (rsp->rsp_par2 & rsp->rsp_par3 & OFFLOAD_TCPCKSUM) {
 		sc->sc_rx_capability |= OFFLOAD_TCPCKSUM;
 #ifdef TRY_TX_TCP_CSUM
 		sc->sc_tx_capability |= OFFLOAD_TCPCKSUM;
-		ifp->if_capabilities |= IFCAP_CSUM_TCPv4;
+		ifp->if_capabilities |=
+		    IFCAP_CSUM_TCPv4_Tx | IFCAP_CSUM_TCPv4_Rx;
 #endif
 	}
 
@@ -2008,7 +2084,8 @@ txp_capabilities(struct txp_softc *sc)
 		sc->sc_rx_capability |= OFFLOAD_UDPCKSUM;
 #ifdef TRY_TX_UDP_CSUM
 		sc->sc_tx_capability |= OFFLOAD_UDPCKSUM;
-		ifp->if_capabilities |= IFCAP_CSUM_UDPv4;
+		ifp->if_capabilities |=
+		    IFCAP_CSUM_UDPv4_Tx | IFCAP_CSUM_UDPv4_Rx;
 #endif
 	}
 

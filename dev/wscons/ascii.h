@@ -1,4 +1,3 @@
-/* $OpenBSD: ascii.h,v 1.4 2000/05/16 23:49:09 mickey Exp $ */
 /* $NetBSD: ascii.h,v 1.3 1998/06/20 19:11:04 drochner Exp $ */
 
 #define ASCII_NUL	0x00		/* nul */

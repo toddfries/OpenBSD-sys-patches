@@ -1,8 +1,6 @@
-/* $OpenBSD: mem.c,v 1.22 2007/09/22 16:21:32 krw Exp $ */
-/* $NetBSD: mem.c,v 1.26 2000/03/29 03:48:20 simonb Exp $ */
+/* $NetBSD: mem.c,v 1.39 2007/10/17 19:52:56 garbled Exp $ */
 
 /*
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -36,10 +34,51 @@
  *
  *	@(#)mem.c	8.3 (Berkeley) 1/12/94
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)mem.c	8.3 (Berkeley) 1/12/94
+ */
 
 /*
  * Memory special file
  */
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.39 2007/10/17 19:52:56 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -49,72 +88,25 @@
 #include <sys/msgbuf.h>
 #include <sys/mman.h>
 #include <sys/conf.h>
+#include <sys/event.h>
 
 #include <machine/cpu.h>
+#include <machine/alpha.h>
 
 #include <uvm/uvm_extern.h>
 
-#define mmread  mmrw
-#define mmwrite mmrw
-cdev_decl(mm);
+void *zeropage;
+extern int firstusablepage, lastusablepage;
+extern void *msgbufaddr;
 
-caddr_t zeropage;
+dev_type_read(mmrw);
+dev_type_ioctl(mmioctl);
+dev_type_mmap(mmmmap);
 
-/* open counter for aperture */
-#ifdef APERTURE
-static int ap_open_count = 0;
-static pid_t ap_open_pid = -1;
-extern int allowaperture;
-#endif
-
-/*ARGSUSED*/
-int
-mmopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
-{
-
-	switch (minor(dev)) {
-	case 0:
-	case 1:
-	case 2:
-		return (0);
-#ifdef APERTURE
-	case 4:
-	        if (suser(p, 0) != 0 || !allowaperture)
-			return (EPERM);
-
-		/* authorize only one simultaneous open() from the same pid */
-		if (ap_open_count > 0 && p->p_pid != ap_open_pid)
-			return(EPERM);
-		ap_open_count++;
-		ap_open_pid = p->p_pid;
-		return (0);
-#endif
-	case 12:
-		return (0);
-	default:
-		return (ENXIO);
-	}
-}
-
-/*ARGSUSED*/
-int
-mmclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
-{
-
-#ifdef APERTURE
-	if (minor(dev) == 4) {
-		ap_open_count--;
-		ap_open_pid = -1;
-	}
-#endif
-	return (0);
-}
+const struct cdevsw mem_cdevsw = {
+	nullopen, nullclose, mmrw, mmrw, mmioctl,
+	nostop, notty, nopoll, mmmmap, nokqfilter,
+};
 
 /*ARGSUSED*/
 int
@@ -127,7 +119,6 @@ mmrw(dev, uio, flags)
 	register int c;
 	register struct iovec *iov;
 	int error = 0, rw;
-	extern int msgbufmapped;
 
 	while (uio->uio_resid > 0 && !error) {
 		iov = uio->uio_iov;
@@ -140,11 +131,10 @@ mmrw(dev, uio, flags)
 		}
 		switch (minor(dev)) {
 
-/* minor device 0 is physical memory */
-		case 0:
+		case DEV_MEM:
 			v = uio->uio_offset;
 kmemphys:
-			if (v >= ALPHA_K0SEG_TO_PHYS((vaddr_t)msgbufp)) {
+			if (v >= ALPHA_K0SEG_TO_PHYS((vaddr_t)msgbufaddr)) {
 				if (msgbufmapped == 0) {
 					printf("Message Buf not Mapped\n");
 					error = EFAULT;
@@ -162,11 +152,10 @@ kmemphys:
 			o = uio->uio_offset & PGOFSET;
 			c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
 			error =
-			    uiomove((caddr_t)ALPHA_PHYS_TO_K0SEG(v), c, uio);
+			    uiomove((void *)ALPHA_PHYS_TO_K0SEG(v), c, uio);
 			break;
 
-/* minor device 1 is kernel memory */
-		case 1:
+		case DEV_KMEM:
 			v = uio->uio_offset;
 
 			if (v >= ALPHA_K0SEG_BASE && v <= ALPHA_K0SEG_END) {
@@ -175,20 +164,18 @@ kmemphys:
 			}
 
 			c = min(iov->iov_len, MAXPHYS);
-			if (!uvm_kernacc((caddr_t)v, c,
+			if (!uvm_kernacc((void *)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
-			error = uiomove((caddr_t)v, c, uio);
+			error = uiomove((void *)v, c, uio);
 			break;
 
-/* minor device 2 is EOF/rathole */
-		case 2:
+		case DEV_NULL:
 			if (uio->uio_rw == UIO_WRITE)
 				uio->uio_resid = 0;
 			return (0);
 
-/* minor device 12 (/dev/zero) is source of nulls on read, rathole on write */
-		case 12:
+		case DEV_ZERO:
 			if (uio->uio_rw == UIO_WRITE) {
 				uio->uio_resid = 0;
 				return (0);
@@ -197,9 +184,11 @@ kmemphys:
 			 * On the first call, allocate and zero a page
 			 * of memory for use with /dev/zero.
 			 */
-			if (zeropage == NULL)
-				zeropage = malloc(PAGE_SIZE, M_TEMP,
-				    M_WAITOK | M_ZERO);
+			if (zeropage == NULL) {
+				zeropage = (void *)
+				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
+				memset(zeropage, 0, PAGE_SIZE);
+			}
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			break;
@@ -217,8 +206,6 @@ mmmmap(dev, off, prot)
 	off_t off;
 	int prot;
 {
-	switch (minor(dev)) {
-	case 0:
 	/*
 	 * /dev/mem is the only one that makes sense through this
 	 * interface.  For /dev/kmem any physaddr we return here
@@ -227,38 +214,13 @@ mmmmap(dev, off, prot)
 	 * and /dev/zero is a hack that is handled via the default
 	 * pager in mmap().
 	 */
+	if (minor(dev) != DEV_MEM)
+		return (-1);
 
 	/*
 	 * Allow access only in RAM.
 	 */
-		if ((prot & alpha_pa_access(atop(off))) != prot)
-			return (-1);
-		return (atop(off));
-		
-#ifdef APERTURE
-	case 4:
-		/* minor device 4 is aperture driver */
-		switch (allowaperture) {
-		case 1:
-			if ((prot & alpha_pa_access(atop(off))) != prot)
-				return (-1);
-			return atop(off);
-		default:
-			return -1;
-		}
-#endif
-	default:
-		return -1;
-	}
-}
-
-int
-mmioctl(dev, cmd, data, flags, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flags;
-	struct proc *p;
-{
-	return (EOPNOTSUPP);
+	if ((prot & alpha_pa_access(off)) != prot)
+		return (-1);
+	return (alpha_btop(off));
 }

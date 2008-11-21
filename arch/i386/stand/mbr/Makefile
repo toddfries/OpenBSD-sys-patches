@@ -1,29 +1,5 @@
-#	$OpenBSD: Makefile,v 1.14 2003/04/17 03:43:19 drahn Exp $
-#
+#	$NetBSD: Makefile,v 1.2 2008/01/19 21:01:34 dsl Exp $
 
-PROG=	mbr
-SRCS=	mbr.S
-AFLAGS+=-I${.CURDIR} -I${.CURDIR}/../../.. #-Wa,-a
-LD=ld
-LDFLAGS=-nostdlib -Ttext 0 -x -N -s -Bstatic -e start
+SUBDIR=		mbr mbr_bootsel mbr_ext mbr_com0 mbr_com0_9600
 
-NOMAN=
-#MAN+=	mbr.8
-
-INSTALL_STRIP=
-SADIR=${.CURDIR}/..
-S=	${.CURDIR}/../../../..
-
-# Uncomment this to make mbr talk to a serial port.
-#CPPFLAGS+=-DSERIAL=0
-
-${PROG}: $(OBJS) $(DPADD)
-	$(LD) $(LDFLAGS) -o $(PROG) $(OBJS) $(LDADD)
-	@size $(PROG)
-	@if [ -x ${.OBJDIR}/${PROG} ]; then \
-		objcopy -O binary ${PROG} ${.OBJDIR}/.tmp;\
-		mv -f ${.OBJDIR}/.tmp ${.OBJDIR}/${PROG}; \
-		ls -l ${.OBJDIR}/${PROG}; \
-	fi
-
-.include <bsd.prog.mk>
+.include <bsd.subdir.mk>

@@ -1,7 +1,7 @@
-/*	$NetBSD: svr4_32_net.c,v 1.13 2006/10/16 20:18:55 martin Exp $	 */
+/*	$NetBSD: svr4_32_net.c,v 1.18 2008/04/28 20:23:46 martin Exp $	 */
 
 /*-
- * Copyright (c) 1994 The NetBSD Foundation, Inc.
+ * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_32_net.c,v 1.13 2006/10/16 20:18:55 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_32_net.c,v 1.18 2008/04/28 20:23:46 martin Exp $");
 
 #define COMPAT_SVR4 1
 
@@ -68,7 +61,6 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_net.c,v 1.13 2006/10/16 20:18:55 martin Exp 
 #include <sys/conf.h>
 #include <sys/mount.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/svr4_32/svr4_32_types.h>
@@ -97,10 +89,10 @@ enum {
 	dev_unix_ord_stream	= 40
 };
 
-int svr4_32_netattach __P((int));
+int svr4_32_netattach(int);
 
-int svr4_soo_close __P((struct file *, struct lwp *));
-int svr4_ptm_alloc __P((struct proc *));
+int svr4_soo_close(file_t *);
+int svr4_ptm_alloc(struct proc *);
 
 static const struct fileops svr4_32_netops = {
 	soo_read, soo_write, soo_ioctl, soo_fcntl, soo_poll,
@@ -112,15 +104,13 @@ static const struct fileops svr4_32_netops = {
  * Used by new config, but we don't need it.
  */
 int
-svr4_32_netattach(n)
-	int n;
+svr4_32_netattach(int n)
 {
 	return 0;
 }
 
 struct svr4_strm *
-svr4_32_stream_get(fp)
-	struct file *fp;
+svr4_32_stream_get(file_t *fp)
 {
 	struct socket *so;
 	struct svr4_strm *st;

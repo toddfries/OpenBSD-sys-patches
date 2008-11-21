@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.16 2006/04/09 01:18:14 tsutsui Exp $	*/
+/*	$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.16 2006/04/09 01:18:14 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kloader.h"
@@ -49,6 +42,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.16 2006/04/09 01:18:14 tsutsui Exp $")
 #include <sys/mount.h>
 #include <sys/kcore.h>
 #include <sys/boot_flag.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -79,7 +73,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.16 2006/04/09 01:18:14 tsutsui Exp $")
 
 struct cpu_info cpu_info_store;
 
-struct vm_map *exec_map;
 struct vm_map *mb_map;
 struct vm_map *phys_map;
 phys_ram_seg_t mem_clusters[VM_PHYSSEG_MAX];
@@ -99,14 +92,14 @@ mach_init()
 {
 	extern char kernel_text[], edata[], end[];
 	extern struct user *proc0paddr;
-	caddr_t kernend, v;
+	void *kernend, *v;
 	paddr_t start;
 	size_t size;
 
 	/*
 	 * Clear the BSS segment.
 	 */
-	kernend = (caddr_t)mips_round_page(end);
+	kernend = (void *)mips_round_page(end);
 	memset(edata, 0, kernend - edata);
 
 	/* disable all interrupt */
@@ -162,13 +155,12 @@ mach_init()
 	/*
 	 * Allocate space for proc0's USPACE.
 	 */
-	v = (caddr_t)uvm_pageboot_alloc(USPACE); 
+	v = (void *)uvm_pageboot_alloc(USPACE); 
 	lwp0.l_addr = proc0paddr = (struct user *) v;
 	lwp0.l_md.md_regs = (struct frame *)(v + USPACE) - 1;
-	curpcb = &lwp0.l_addr->u_pcb;
-	curpcb->pcb_context[11] = PSL_LOWIPL;	/* SR */
+	proc0paddr->u_pcb.pcb_context[11] = PSL_LOWIPL;	/* SR */
 #ifdef IPL_ICU_MASK
-	curpcb->pcb_ppl = 0;
+	proc0paddr->u_pcb.pcb_ppl = 0;
 #endif
 }
 
@@ -191,16 +183,10 @@ cpu_startup()
 
 	minaddr = 0;
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-	/*
 	 * Allocate a submap for physio.
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, FALSE, NULL);
+	    VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * (No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -236,7 +222,7 @@ cpu_reboot(int howto, char *bootstr)
 
 #ifdef KLOADER
 	/* No bootinfo is required. */
-	kloader_bootinfo_set(&kbi, 0, NULL, NULL, TRUE);
+	kloader_bootinfo_set(&kbi, 0, NULL, NULL, true);
 #ifndef KLOADER_KERNEL_PATH
 #define	KLOADER_KERNEL_PATH	"/netbsd"
 #endif
@@ -263,6 +249,8 @@ cpu_reboot(int howto, char *bootstr)
 
  haltsys:
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN)
 		sifbios_halt(0); /* power down */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pim_var.h,v 1.3 2007/12/14 18:33:41 deraadt Exp $	*/
-/*	$NetBSD: pim_var.h,v 1.1 2004/09/04 23:32:29 manu Exp $	*/
+/*	$NetBSD: pim_var.h,v 1.2 2005/12/10 23:36:23 elad Exp $	*/
 
 /*
  * Copyright (c) 1998-2000
@@ -49,17 +48,17 @@
  * PIM statistics kept in the kernel
  */
 struct pimstat {
-	u_int64_t pims_rcv_total_msgs;	   /* total PIM messages received    */
-	u_int64_t pims_rcv_total_bytes;	   /* total PIM bytes received	     */
-	u_int64_t pims_rcv_tooshort;	   /* rcvd with too few bytes	     */
-	u_int64_t pims_rcv_badsum;	   /* rcvd with bad checksum	     */
-	u_int64_t pims_rcv_badversion;	   /* rcvd bad PIM version	     */
-	u_int64_t pims_rcv_registers_msgs;  /* rcvd regs. msgs (data only)    */
-	u_int64_t pims_rcv_registers_bytes; /* rcvd regs. bytes (data only)   */
-	u_int64_t pims_rcv_registers_wrongiif; /* rcvd regs. on wrong iif     */
-	u_int64_t pims_rcv_badregisters;    /* rcvd invalid registers	     */
-	u_int64_t pims_snd_registers_msgs;  /* sent regs. msgs (data only)    */
-	u_int64_t pims_snd_registers_bytes; /* sent regs. bytes (data only)   */
+	u_quad_t pims_rcv_total_msgs;	   /* total PIM messages received    */
+	u_quad_t pims_rcv_total_bytes;	   /* total PIM bytes received	     */
+	u_quad_t pims_rcv_tooshort;	   /* rcvd with too few bytes	     */
+	u_quad_t pims_rcv_badsum;	   /* rcvd with bad checksum	     */
+	u_quad_t pims_rcv_badversion;	   /* rcvd bad PIM version	     */
+	u_quad_t pims_rcv_registers_msgs;  /* rcvd regs. msgs (data only)    */
+	u_quad_t pims_rcv_registers_bytes; /* rcvd regs. bytes (data only)   */
+	u_quad_t pims_rcv_registers_wrongiif; /* rcvd regs. on wrong iif     */
+	u_quad_t pims_rcv_badregisters;	   /* rcvd invalid registers	     */
+	u_quad_t pims_snd_registers_msgs;  /* sent regs. msgs (data only)    */
+	u_quad_t pims_snd_registers_bytes; /* sent regs. bytes (data only)   */
 };
 
 /*
@@ -77,7 +76,6 @@ struct pimstat {
 extern struct pimstat pimstat;
 
 void	pim_input(struct mbuf *, ...);
-int	pim_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 #endif
 
-#endif /* _NETINET_PIM_VAR_H_ */
+#endif /* !_NETINET_PIM_VAR_H_ */

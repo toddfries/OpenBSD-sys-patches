@@ -2,7 +2,7 @@
 /******************************************************************************
  *
  * Module Name: exprep - ACPI AML (p-code) execution - field prep utilities
- *              xRevision: 1.139 $
+ *              $Revision: 1.4 $
  *
  *****************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,9 +115,6 @@
  *
  *****************************************************************************/
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: exprep.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #define __EXPREP_C__
 
 #include "acpi.h"
@@ -185,7 +182,7 @@ AcpiExGenerateAccess (
     UINT32                  Accesses;
 
 
-    ACPI_FUNCTION_TRACE ("ExGenerateAccess");
+    ACPI_FUNCTION_TRACE (ExGenerateAccess);
 
 
     /* Round Field start offset and length to "minimal" byte boundaries */
@@ -319,7 +316,7 @@ AcpiExDecodeFieldAccess (
     UINT32                  BitLength;
 
 
-    ACPI_FUNCTION_TRACE ("ExDecodeFieldAccess");
+    ACPI_FUNCTION_TRACE (ExDecodeFieldAccess);
 
 
     Access = (FieldFlags & AML_FIELD_ACCESS_TYPE_MASK);
@@ -419,7 +416,7 @@ AcpiExPrepCommonFieldObject (
     UINT32                  NearestByteAddress;
 
 
-    ACPI_FUNCTION_TRACE ("ExPrepCommonFieldObject");
+    ACPI_FUNCTION_TRACE (ExPrepCommonFieldObject);
 
 
     /*
@@ -514,11 +511,12 @@ AcpiExPrepFieldValue (
     ACPI_CREATE_FIELD_INFO  *Info)
 {
     ACPI_OPERAND_OBJECT     *ObjDesc;
+    ACPI_OPERAND_OBJECT     *SecondDesc = NULL;
     UINT32                  Type;
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE ("ExPrepFieldValue");
+    ACPI_FUNCTION_TRACE (ExPrepFieldValue);
 
 
     /* Parameter validation */
@@ -600,6 +598,16 @@ AcpiExPrepFieldValue (
             ObjDesc->Field.AccessByteWidth,
             ObjDesc->BankField.RegionObj,
             ObjDesc->BankField.BankObj));
+
+        /*
+         * Remember location in AML stream of the field unit
+         * opcode and operands -- since the BankValue
+         * operands must be evaluated.
+         */
+        SecondDesc                  = ObjDesc->Common.NextObject;
+        SecondDesc->Extra.AmlStart  = ((ACPI_PARSE_OBJECT*) (Info->DataRegisterNode))->Named.Data;
+        SecondDesc->Extra.AmlLength = ((ACPI_PARSE_OBJECT*) (Info->DataRegisterNode))->Named.Length;
+
         break;
 
 
@@ -625,19 +633,25 @@ AcpiExPrepFieldValue (
         AcpiUtAddReference (ObjDesc->IndexField.IndexObj);
 
         /*
-         * February 2006: Changed to match MS behavior
+         * April 2006: Changed to match MS behavior
          *
          * The value written to the Index register is the byte offset of the
-         * target field.
+         * target field in units of the granularity of the IndexField
          *
          * Previously, the value was calculated as an index in terms of the
          * width of the Data register, as below:
          *
-         *   ObjDesc->IndexField.Value = (UINT32)
-         *       (Info->FieldBitPosition / ACPI_MUL_8 (
-         *           ObjDesc->Field.AccessByteWidth));
+         *      ObjDesc->IndexField.Value = (UINT32)
+         *          (Info->FieldBitPosition / ACPI_MUL_8 (
+         *              ObjDesc->Field.AccessByteWidth));
+         *
+         * February 2006: Tried value as a byte offset:
+         *      ObjDesc->IndexField.Value = (UINT32)
+         *          ACPI_DIV_8 (Info->FieldBitPosition);
          */
-        ObjDesc->IndexField.Value = (UINT32) ACPI_DIV_8 (Info->FieldBitPosition);
+        ObjDesc->IndexField.Value = (UINT32) ACPI_ROUND_DOWN (
+            ACPI_DIV_8 (Info->FieldBitPosition),
+            ObjDesc->IndexField.AccessByteWidth);
 
         ACPI_DEBUG_PRINT ((ACPI_DB_BFIELD,
             "IndexField: BitOff %X, Off %X, Value %X, Gran %X, Index %p, Data %p\n",

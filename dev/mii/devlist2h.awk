@@ -1,6 +1,5 @@
 #! /usr/bin/awk -f
-#	$OpenBSD: devlist2h.awk,v 1.1 1998/09/10 17:17:33 jason Exp $
-#	$NetBSD: devlist2h.awk,v 1.2 1998/09/05 14:42:06 christos Exp $
+#	$NetBSD: devlist2h.awk,v 1.7 2008/05/02 18:11:05 martin Exp $
 #
 # Copyright (c) 1998 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -16,13 +15,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +57,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-function collectline(f, line) {
+function collectline(f) {
 	oparen = 0
 	line = ""
 	while (f <= NF) {
@@ -92,14 +84,16 @@ function collectline(f, line) {
 	return line
 }
 BEGIN {
-	nmodels = nouis = 0
+	nmodels = nouis = nuios = blanklines = firstdone = 0
 	hfile="miidevs.h"
+	dfile="miidevs_data.h"
 }
 NR == 1 {
 	VERSION = $0
 	gsub("\\$", "", VERSION)
+	gsub(/ $/, "", VERSION)
 
-	printf("/*\t\$OpenBSD\$\t*/\n\n") > hfile
+	printf("/*\t$NetBSD" "$\t*/\n\n") > hfile
 	printf("/*\n") > hfile
 	printf(" * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.\n") \
 	    > hfile
@@ -108,9 +102,18 @@ NR == 1 {
 	printf(" *\t%s\n", VERSION) > hfile
 	printf(" */\n") > hfile
 
+	printf("/*\t$NetBSD" "$\t*/\n\n") > dfile
+	printf("/*\n") > dfile
+	printf(" * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.\n") \
+	    > dfile
+	printf(" *\n") > dfile
+	printf(" * generated from:\n") > dfile
+	printf(" *\t%s\n", VERSION) > dfile
+	printf(" */\n") > dfile
+
 	next
 }
-$1 == "oui" {
+NF > 0 && $1 == "oui" {
 	nuios++
 
 	ouiindex[$2] = nouis;		# record index for this name, for later.
@@ -119,11 +122,11 @@ $1 == "oui" {
 	ouis[nouis, 2] = $3;		# id
 	printf("#define\tMII_OUI_%s\t%s\t", ouis[nouis, 1],
 	    ouis[nouis, 2]) > hfile
-	ouis[nouis, 3] = collectline(4, line)
+	ouis[nouis, 3] = collectline(4)
 	printf("/* %s */\n", ouis[nouis, 3]) > hfile
 	next
 }
-$1 == "model" {
+NF > 0 && $1 == "model" {
 	nmodels++
 
 	models[nmodels, 1] = $2;		# oui name
@@ -133,14 +136,32 @@ $1 == "model" {
 	printf("#define\tMII_MODEL_%s_%s\t%s\n", models[nmodels, 1],
 	    models[nmodels, 2], models[nmodels, 3]) > hfile
 
-	models[nmodels, 4] = collectline(5, line)
+	models[nmodels, 4] = collectline(5)
 
 	printf("#define\tMII_STR_%s_%s\t\"%s\"\n",
 	    models[nmodels, 1], models[nmodels, 2],
 	    models[nmodels, 4]) > hfile
 
+	if (!firstdone) {
+		printf("struct mii_knowndev mii_knowndevs[] = {\n") > dfile
+		firstdone = 1
+	}
+
+	printf(" { MII_OUI_%s, MII_MODEL_%s_%s, MII_STR_%s_%s },\n",
+	       $2, $2, $3, $2, $3) > dfile
+
 	next
 }
 {
+	if ($0 == "")
+		blanklines++
 	print $0 > hfile
+	if (blanklines < 2)
+		print $0 > dfile
+}
+END {
+	printf(" { 0, 0, NULL }\n") > dfile
+	printf("};\n") > dfile
+	close(dfile)
+	close(hfile)
 }

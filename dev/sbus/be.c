@@ -1,5 +1,4 @@
-/*	$OpenBSD: be.c,v 1.19 2006/06/02 20:00:56 miod Exp $	*/
-/*	$NetBSD: be.c,v 1.26 2001/03/20 15:39:20 pk Exp $	*/
+/*	$NetBSD: be.c,v 1.60 2008/11/07 00:20:12 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,6 +41,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the authors may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -62,11 +56,17 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: be.c,v 1.60 2008/11/07 00:20:12 dyoung Exp $");
+
+#include "opt_ddb.h"
+#include "opt_inet.h"
 #include "bpfilter.h"
+#include "rnd.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
@@ -75,27 +75,33 @@
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/if_media.h>
+#include <net/if_ether.h>
 
 #ifdef INET
 #include <netinet/in.h>
+#include <netinet/if_inarp.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#include <netinet/if_ether.h>
 #endif
+
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#include <net/bpfdesc.h>
 #endif
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 #include <machine/autoconf.h>
 
 #include <dev/sbus/sbusvar.h>
@@ -109,16 +115,17 @@
 
 struct be_softc {
 	struct	device	sc_dev;
-	bus_space_tag_t	sc_bustag;	/* bus & dma tags */
+	struct	sbusdev sc_sd;		/* sbus device */
+	bus_space_tag_t	sc_bustag;	/* bus & DMA tags */
 	bus_dma_tag_t	sc_dmatag;
 	bus_dmamap_t	sc_dmamap;
-	struct	arpcom sc_arpcom;
+	struct	ethercom sc_ethercom;
 	/*struct	ifmedia sc_ifmedia;	-* interface media */
 	struct mii_data	sc_mii;		/* MII media control */
 #define sc_media	sc_mii.mii_media/* shorthand */
 	int		sc_phys[2];	/* MII instance -> phy */
 
-	struct timeout sc_tick_ch;
+	struct callout sc_tick_ch;
 
 	/*
 	 * Some `mii_softc' items we need to emulate MII operation
@@ -144,16 +151,22 @@ struct be_softc {
 	int	sc_burst;
 
 	struct  qec_ring	sc_rb;	/* Packet Ring Buffer */
+
+	/* MAC address */
+	u_int8_t sc_enaddr[6];
+#ifdef BEDEBUG
+	int	sc_debug;
+#endif
 };
 
-int	bematch(struct device *, void *, void *);
+int	bematch(struct device *, struct cfdata *, void *);
 void	beattach(struct device *, struct device *, void *);
 
 void	beinit(struct be_softc *);
 void	bestart(struct ifnet *);
 void	bestop(struct be_softc *);
 void	bewatchdog(struct ifnet *);
-int	beioctl(struct ifnet *, u_long, caddr_t);
+int	beioctl(struct ifnet *, u_long, void *);
 void	bereset(struct be_softc *);
 
 int	beintr(void *);
@@ -192,30 +205,29 @@ void	be_intphy_status(struct be_softc *);
 int	be_intphy_service(struct be_softc *, struct mii_data *, int);
 
 
-struct cfattach be_ca = {
-	sizeof(struct be_softc), bematch, beattach
-};
-
-struct cfdriver be_cd = {
-	NULL, "be", DV_IFNET
-};
+CFATTACH_DECL(be, sizeof(struct be_softc),
+    bematch, beattach, NULL, NULL);
 
 int
-bematch(struct device *parent, void *vcf, void *aux)
+bematch(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
-	struct cfdata *cf = vcf;
 	struct sbus_attach_args *sa = aux;
 
-	return (strcmp(cf->cf_driver->cd_name, sa->sa_name) == 0);
+	return (strcmp(cf->cf_name, sa->sa_name) == 0);
 }
 
 void
-beattach(struct device *parent, struct device *self, void *aux)
+beattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct sbus_attach_args *sa = aux;
 	struct qec_softc *qec = (struct qec_softc *)parent;
 	struct be_softc *sc = (struct be_softc *)self;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct mii_data *mii = &sc->sc_mii;
 	struct mii_softc *child;
 	int node = sa->sa_node;
@@ -225,52 +237,57 @@ beattach(struct device *parent, struct device *self, void *aux)
 	int instance;
 	int rseg, error;
 	u_int32_t v;
-	extern void myetheraddr(u_char *);
-
-	/* Pass on the bus tags */
-	sc->sc_bustag = sa->sa_bustag;
-	sc->sc_dmatag = sa->sa_dmatag;
 
 	if (sa->sa_nreg < 3) {
 		printf("%s: only %d register sets\n",
-		    self->dv_xname, sa->sa_nreg);
+			device_xname(self), sa->sa_nreg);
 		return;
 	}
 
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
-	    (bus_addr_t)sa->sa_reg[0].sbr_offset,
-	    (bus_size_t)sa->sa_reg[0].sbr_size, 0, 0, &sc->sc_cr) != 0) {
+	if (bus_space_map(sa->sa_bustag,
+			  (bus_addr_t)BUS_ADDR(
+				sa->sa_reg[0].oa_space,
+				sa->sa_reg[0].oa_base),
+			  (bus_size_t)sa->sa_reg[0].oa_size,
+			  0, &sc->sc_cr) != 0) {
 		printf("beattach: cannot map registers\n");
 		return;
 	}
 
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[1].sbr_slot,
-	    (bus_addr_t)sa->sa_reg[1].sbr_offset,
-	    (bus_size_t)sa->sa_reg[1].sbr_size, 0, 0, &sc->sc_br) != 0) {
+	if (bus_space_map(sa->sa_bustag,
+			  (bus_addr_t)BUS_ADDR(
+				sa->sa_reg[1].oa_space,
+				sa->sa_reg[1].oa_base),
+			  (bus_size_t)sa->sa_reg[1].oa_size,
+			  0, &sc->sc_br) != 0) {
 		printf("beattach: cannot map registers\n");
 		return;
 	}
 
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[2].sbr_slot,
-	    (bus_addr_t)sa->sa_reg[2].sbr_offset,
-	    (bus_size_t)sa->sa_reg[2].sbr_size, 0, 0, &sc->sc_tr) != 0) {
+	if (bus_space_map(sa->sa_bustag,
+			  (bus_addr_t)BUS_ADDR(
+				sa->sa_reg[2].oa_space,
+				sa->sa_reg[2].oa_base),
+			  (bus_size_t)sa->sa_reg[2].oa_size,
+			  0, &sc->sc_tr) != 0) {
 		printf("beattach: cannot map registers\n");
 		return;
 	}
 
+	sc->sc_bustag = sa->sa_bustag;
 	sc->sc_qec = qec;
 	sc->sc_qr = qec->sc_regs;
 
-	sc->sc_rev = getpropint(node, "board-version", -1);
+	sc->sc_rev = prom_getpropint(node, "board-version", -1);
 	printf(" rev %x", sc->sc_rev);
 
 	bestop(sc);
 
-	sc->sc_channel = getpropint(node, "channel#", -1);
+	sc->sc_channel = prom_getpropint(node, "channel#", -1);
 	if (sc->sc_channel == -1)
 		sc->sc_channel = 0;
 
-	sc->sc_burst = getpropint(node, "burst-sizes", -1);
+	sc->sc_burst = prom_getpropint(node, "burst-sizes", -1);
 	if (sc->sc_burst == -1)
 		sc->sc_burst = qec->sc_burst;
 
@@ -278,14 +295,12 @@ beattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_burst &= qec->sc_burst;
 
 	/* Establish interrupt handler */
-	if (sa->sa_nintr == 0 || bus_intr_establish(sa->sa_bustag, sa->sa_pri,
-	    IPL_NET, 0, beintr, sc, self->dv_xname) == NULL) {
-		printf(": no interrupt established\n");
-		return;
-	}
+	if (sa->sa_nintr)
+		(void)bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_NET,
+					 beintr, sc);
 
-	myetheraddr(sc->sc_arpcom.ac_enaddr);
-	printf(" address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	prom_getether(node, sc->sc_enaddr);
+	printf(" address %s\n", ether_sprintf(sc->sc_enaddr));
 
 	/*
 	 * Allocate descriptor ring and buffers.
@@ -302,33 +317,35 @@ beattach(struct device *parent, struct device *self, void *aux)
 
 	/* Get a DMA handle */
 	if ((error = bus_dmamap_create(dmatag, size, 1, size, 0,
-	    BUS_DMA_NOWAIT, &sc->sc_dmamap)) != 0) {
-		printf("%s: DMA map create error %d\n", self->dv_xname, error);
+				    BUS_DMA_NOWAIT, &sc->sc_dmamap)) != 0) {
+		aprint_error_dev(self, "DMA map create error %d\n", error);
 		return;
 	}
 
 	/* Allocate DMA buffer */
 	if ((error = bus_dmamem_alloc(sa->sa_dmatag, size, 0, 0,
-	    &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: DMA buffer alloc error %d\n",
-			self->dv_xname, error);
+				      &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+		aprint_error_dev(self, "DMA buffer alloc error %d\n",
+			error);
 		return;
 	}
 
 	/* Map DMA memory in CPU addressable space */
 	if ((error = bus_dmamem_map(sa->sa_dmatag, &seg, rseg, size,
-	    &sc->sc_rb.rb_membase, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		printf("%s: DMA buffer map error %d\n",
-			self->dv_xname, error);
+			            &sc->sc_rb.rb_membase,
+			            BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
+		aprint_error_dev(self, "DMA buffer map error %d\n",
+			error);
 		bus_dmamem_free(sa->sa_dmatag, &seg, rseg);
 		return;
 	}
 
 	/* Load the buffer */
 	if ((error = bus_dmamap_load(dmatag, sc->sc_dmamap,
-	    sc->sc_rb.rb_membase, size, NULL, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: DMA buffer map load error %d\n",
-		    self->dv_xname, error);
+				     sc->sc_rb.rb_membase, size, NULL,
+				     BUS_DMA_NOWAIT)) != 0) {
+		aprint_error_dev(self, "DMA buffer map load error %d\n",
+			error);
 		bus_dmamem_unmap(dmatag, sc->sc_rb.rb_membase, size);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		return;
@@ -345,7 +362,7 @@ beattach(struct device *parent, struct device *self, void *aux)
 
 	ifmedia_init(&mii->mii_media, 0, be_ifmedia_upd, be_ifmedia_sts);
 
-	timeout_set(&sc->sc_tick_ch, be_tick, sc);
+	callout_init(&sc->sc_tick_ch, 0);
 
 	/*
 	 * Initialize transceiver and determine which PHY connection to use.
@@ -364,10 +381,10 @@ beattach(struct device *parent, struct device *self, void *aux)
 		if (child == NULL) {
 			/* No PHY attached */
 			ifmedia_add(&sc->sc_media,
-			    IFM_MAKEWORD(IFM_ETHER,IFM_NONE,0,instance),
-			    0, NULL);
+				    IFM_MAKEWORD(IFM_ETHER,IFM_NONE,0,instance),
+				    0, NULL);
 			ifmedia_set(&sc->sc_media,
-			    IFM_MAKEWORD(IFM_ETHER,IFM_NONE,0,instance));
+				   IFM_MAKEWORD(IFM_ETHER,IFM_NONE,0,instance));
 		} else {
 			/*
 			 * Note: we support just one PHY on the external
@@ -375,18 +392,16 @@ beattach(struct device *parent, struct device *self, void *aux)
 			 */
 #ifdef DIAGNOSTIC
 			if (LIST_NEXT(child, mii_list) != NULL) {
-				printf("%s: spurious MII device %s attached\n",
-				    sc->sc_dev.dv_xname,
-				    child->mii_dev.dv_xname);
+				aprint_error_dev(&sc->sc_dev, "spurious MII device %s attached\n",
+				       device_xname(child->mii_dev));
 			}
 #endif
 			if (child->mii_phy != BE_PHY_EXTERNAL ||
 			    child->mii_inst > 0) {
-				printf("%s: cannot accommodate MII device %s"
-				    " at phy %d, instance %d\n",
-				    sc->sc_dev.dv_xname,
-				    child->mii_dev.dv_xname,
-				    child->mii_phy, child->mii_inst);
+				aprint_error_dev(&sc->sc_dev, "cannot accommodate MII device %s"
+				       " at phy %d, instance %d\n",
+				       device_xname(child->mii_dev),
+				       child->mii_phy, child->mii_inst);
 			} else {
 				sc->sc_phys[instance] = child->mii_phy;
 			}
@@ -396,7 +411,7 @@ beattach(struct device *parent, struct device *self, void *aux)
 			 * phy indeed has the auto negotiation capability!!
 			 */
 			ifmedia_set(&sc->sc_media,
-			    IFM_MAKEWORD(IFM_ETHER,IFM_AUTO,0,instance));
+				   IFM_MAKEWORD(IFM_ETHER,IFM_AUTO,0,instance));
 
 			/* Mark our current media setting */
 			be_pal_gate(sc, BE_PHY_EXTERNAL);
@@ -418,39 +433,44 @@ beattach(struct device *parent, struct device *self, void *aux)
 
 		/* Use `ifm_data' to store BMCR bits */
 		ifmedia_add(&sc->sc_media,
-		    IFM_MAKEWORD(IFM_ETHER,IFM_10_T,0,instance), 0, NULL);
+			    IFM_MAKEWORD(IFM_ETHER,IFM_10_T,0,instance),
+			    0, NULL);
 		ifmedia_add(&sc->sc_media,
-		    IFM_MAKEWORD(IFM_ETHER,IFM_100_TX,0,instance),
-		    BMCR_S100, NULL);
+			    IFM_MAKEWORD(IFM_ETHER,IFM_100_TX,0,instance),
+			    BMCR_S100, NULL);
 		ifmedia_add(&sc->sc_media,
-		    IFM_MAKEWORD(IFM_ETHER,IFM_AUTO,0,instance), 0, NULL);
+			    IFM_MAKEWORD(IFM_ETHER,IFM_AUTO,0,instance),
+			    0, NULL);
 
 		printf("on-board transceiver at %s: 10baseT, 100baseTX, auto\n",
-		    self->dv_xname);
+			device_xname(self));
 
 		be_mii_reset(sc, BE_PHY_INTERNAL);
 		/* Only set default medium here if there's no external PHY */
 		if (instance == 0) {
 			be_pal_gate(sc, BE_PHY_INTERNAL);
 			ifmedia_set(&sc->sc_media,
-			    IFM_MAKEWORD(IFM_ETHER,IFM_AUTO,0,instance));
+				   IFM_MAKEWORD(IFM_ETHER,IFM_AUTO,0,instance));
 		} else
 			be_mii_writereg((void *)sc,
-			    BE_PHY_INTERNAL, MII_BMCR, BMCR_ISO);
+				BE_PHY_INTERNAL, MII_BMCR, BMCR_ISO);
 	}
 
-	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	memcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_start = bestart;
 	ifp->if_ioctl = beioctl;
 	ifp->if_watchdog = bewatchdog;
 	ifp->if_flags =
-	    IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
+		IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
 	IFQ_SET_READY(&ifp->if_snd);
+
+	/* claim 802.1q capability */
+	sc->sc_ethercom.ec_capabilities |= ETHERCAP_VLAN_MTU;
 
 	/* Attach the interface. */
 	if_attach(ifp);
-	ether_ifattach(ifp);
+	ether_ifattach(ifp, sc->sc_enaddr);
 }
 
 
@@ -458,14 +478,17 @@ beattach(struct device *parent, struct device *self, void *aux)
  * Routine to copy from mbuf chain to transmit buffer in
  * network buffer memory.
  */
-static __inline__ int
-be_put(struct be_softc *sc, int idx, struct mbuf *m)
+static inline int
+be_put(sc, idx, m)
+	struct be_softc *sc;
+	int idx;
+	struct mbuf *m;
 {
 	struct mbuf *n;
 	int len, tlen = 0, boff = 0;
-	caddr_t bp;
+	void *bp;
 
-	bp = sc->sc_rb.rb_txbuf + (idx % sc->sc_rb.rb_ntbuf) * BE_PKT_BUF_SZ;
+	bp = (char *)sc->sc_rb.rb_txbuf + (idx % sc->sc_rb.rb_ntbuf) * BE_PKT_BUF_SZ;
 
 	for (; m; m = n) {
 		len = m->m_len;
@@ -473,7 +496,7 @@ be_put(struct be_softc *sc, int idx, struct mbuf *m)
 			MFREE(m, n);
 			continue;
 		}
-		bcopy(mtod(m, caddr_t), bp+boff, len);
+		memcpy((char *)bp + boff, mtod(m, void *), len);
 		boff += len;
 		tlen += len;
 		MFREE(m, n);
@@ -487,16 +510,18 @@ be_put(struct be_softc *sc, int idx, struct mbuf *m)
  * We copy the data into mbufs.  When full cluster sized units are present,
  * we copy into clusters.
  */
-static __inline__ struct mbuf *
-be_get(struct be_softc *sc, int idx, int totlen)
+static inline struct mbuf *
+be_get(sc, idx, totlen)
+	struct be_softc *sc;
+	int idx, totlen;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct mbuf *m;
 	struct mbuf *top, **mp;
 	int len, pad, boff = 0;
-	caddr_t bp;
+	void *bp;
 
-	bp = sc->sc_rb.rb_rxbuf + (idx % sc->sc_rb.rb_nrbuf) * BE_PKT_BUF_SZ;
+	bp = (char *)sc->sc_rb.rb_rxbuf + (idx % sc->sc_rb.rb_nrbuf) * BE_PKT_BUF_SZ;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
@@ -525,7 +550,7 @@ be_get(struct be_softc *sc, int idx, int totlen)
 				len = MCLBYTES;
 		}
 		m->m_len = len = min(totlen, len);
-		bcopy(bp + boff, mtod(m, caddr_t), len);
+		memcpy(mtod(m, void *), (char *)bp + boff, len);
 		boff += len;
 		totlen -= len;
 		*mp = m;
@@ -538,18 +563,21 @@ be_get(struct be_softc *sc, int idx, int totlen)
 /*
  * Pass a packet to the higher levels.
  */
-static __inline__ void
-be_read(struct be_softc *sc, int idx, int len)
+static inline void
+be_read(sc, idx, len)
+	struct be_softc *sc;
+	int idx, len;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct mbuf *m;
 
 	if (len <= sizeof(struct ether_header) ||
-	    len > ETHERMTU + sizeof(struct ether_header)) {
-
-		printf("%s: invalid packet size %d; dropping\n",
-		    ifp->if_xname, len);
-
+	    len > ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN) {
+#ifdef BEDEBUG
+		if (sc->sc_debug)
+			printf("%s: invalid packet size %d; dropping\n",
+				ifp->if_xname, len);
+#endif
 		ifp->if_ierrors++;
 		return;
 	}
@@ -570,10 +598,10 @@ be_read(struct be_softc *sc, int idx, int len)
 	 * If so, hand off the raw packet to BPF.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+		bpf_mtap(ifp->if_bpf, m);
 #endif
 	/* Pass the packet up. */
-	ether_input_mbuf(ifp, m);
+	(*ifp->if_input)(ifp, m);
 }
 
 /*
@@ -586,7 +614,8 @@ be_read(struct be_softc *sc, int idx, int len)
  *     (i.e. that the output part of the interface is idle)
  */
 void
-bestart(struct ifnet *ifp)
+bestart(ifp)
+	struct ifnet *ifp;
 {
 	struct be_softc *sc = (struct be_softc *)ifp->if_softc;
 	struct qec_xd *txd = sc->sc_rb.rb_txd;
@@ -610,7 +639,7 @@ bestart(struct ifnet *ifp)
 		 * packet before we commit it to the wire.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap(ifp->if_bpf, m);
 #endif
 
 		/*
@@ -639,13 +668,14 @@ bestart(struct ifnet *ifp)
 }
 
 void
-bestop(struct be_softc *sc)
+bestop(sc)
+	struct be_softc *sc;
 {
 	int n;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t br = sc->sc_br;
 
-	timeout_del(&sc->sc_tick_ch);
+	callout_stop(&sc->sc_tick_ch);
 
 	/* Down the MII. */
 	mii_down(&sc->sc_mii);
@@ -672,29 +702,33 @@ bestop(struct be_softc *sc)
  * Reset interface.
  */
 void
-bereset(struct be_softc *sc)
+bereset(sc)
+	struct be_softc *sc;
 {
 	int s;
 
 	s = splnet();
 	bestop(sc);
-	if ((sc->sc_arpcom.ac_if.if_flags & IFF_UP) != 0)
+	if ((sc->sc_ethercom.ec_if.if_flags & IFF_UP) != 0)
 		beinit(sc);
 	splx(s);
 }
 
 void
-bewatchdog(struct ifnet *ifp)
+bewatchdog(ifp)
+	struct ifnet *ifp;
 {
 	struct be_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
-	++sc->sc_arpcom.ac_if.if_oerrors;
+	log(LOG_ERR, "%s: device timeout\n", device_xname(&sc->sc_dev));
+	++sc->sc_ethercom.ec_if.if_oerrors;
+
 	bereset(sc);
 }
 
 int
-beintr(void *v)
+beintr(v)
+	void *v;
 {
 	struct be_softc *sc = (struct be_softc *)v;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -725,7 +759,9 @@ beintr(void *v)
  * QEC Interrupt.
  */
 int
-beqint(struct be_softc *sc, u_int32_t why)
+beqint(sc, why)
+	struct be_softc *sc;
+	u_int32_t why;
 {
 	int r = 0, rst = 0;
 
@@ -737,19 +773,19 @@ beqint(struct be_softc *sc, u_int32_t why)
 	if (why & BE_CR_STAT_BERROR) {
 		r |= 1;
 		rst = 1;
-		printf("%s: bigmac error\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "bigmac error\n");
 	}
 
 	if (why & BE_CR_STAT_TXDERR) {
 		r |= 1;
 		rst = 1;
-		printf("%s: bogus tx descriptor\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "bogus tx descriptor\n");
 	}
 
 	if (why & (BE_CR_STAT_TXLERR | BE_CR_STAT_TXPERR | BE_CR_STAT_TXSERR)) {
 		r |= 1;
 		rst = 1;
-		printf("%s: tx dma error ( ", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "tx DMA error ( ");
 		if (why & BE_CR_STAT_TXLERR)
 			printf("Late ");
 		if (why & BE_CR_STAT_TXPERR)
@@ -762,19 +798,19 @@ beqint(struct be_softc *sc, u_int32_t why)
 	if (why & BE_CR_STAT_RXDROP) {
 		r |= 1;
 		rst = 1;
-		printf("%s: out of rx descriptors\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "out of rx descriptors\n");
 	}
 
 	if (why & BE_CR_STAT_RXSMALL) {
 		r |= 1;
 		rst = 1;
-		printf("%s: rx descriptor too small\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "rx descriptor too small\n");
 	}
 
 	if (why & (BE_CR_STAT_RXLERR | BE_CR_STAT_RXPERR | BE_CR_STAT_RXSERR)) {
 		r |= 1;
 		rst = 1;
-		printf("%s: rx dma error ( ", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "rx DMA error ( ");
 		if (why & BE_CR_STAT_RXLERR)
 			printf("Late ");
 		if (why & BE_CR_STAT_RXPERR)
@@ -786,12 +822,12 @@ beqint(struct be_softc *sc, u_int32_t why)
 
 	if (!r) {
 		rst = 1;
-		printf("%s: unexpected error interrupt %08x\n",
-			sc->sc_dev.dv_xname, why);
+		aprint_error_dev(&sc->sc_dev, "unexpected error interrupt %08x\n",
+			why);
 	}
 
 	if (rst) {
-		printf("%s: resetting\n", sc->sc_dev.dv_xname);
+		printf("%s: resetting\n", device_xname(&sc->sc_dev));
 		bereset(sc);
 	}
 
@@ -802,34 +838,36 @@ beqint(struct be_softc *sc, u_int32_t why)
  * Error interrupt.
  */
 int
-beeint(struct be_softc *sc, u_int32_t why)
+beeint(sc, why)
+	struct be_softc *sc;
+	u_int32_t why;
 {
 	int r = 0, rst = 0;
 
 	if (why & BE_BR_STAT_RFIFOVF) {
 		r |= 1;
 		rst = 1;
-		printf("%s: receive fifo overrun\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "receive fifo overrun\n");
 	}
 	if (why & BE_BR_STAT_TFIFO_UND) {
 		r |= 1;
 		rst = 1;
-		printf("%s: transmit fifo underrun\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "transmit fifo underrun\n");
 	}
 	if (why & BE_BR_STAT_MAXPKTERR) {
 		r |= 1;
 		rst = 1;
-		printf("%s: max packet size error\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "max packet size error\n");
 	}
 
 	if (!r) {
 		rst = 1;
-		printf("%s: unexpected error interrupt %08x\n",
-			sc->sc_dev.dv_xname, why);
+		aprint_error_dev(&sc->sc_dev, "unexpected error interrupt %08x\n",
+			why);
 	}
 
 	if (rst) {
-		printf("%s: resetting\n", sc->sc_dev.dv_xname);
+		printf("%s: resetting\n", device_xname(&sc->sc_dev));
 		bereset(sc);
 	}
 
@@ -840,9 +878,10 @@ beeint(struct be_softc *sc, u_int32_t why)
  * Transmit interrupt.
  */
 int
-betint(struct be_softc *sc)
+betint(sc)
+	struct be_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t br = sc->sc_br;
 	unsigned int bix, txflags;
@@ -898,7 +937,8 @@ betint(struct be_softc *sc)
  * Receive interrupt.
  */
 int
-berint(struct be_softc *sc)
+berint(sc)
+	struct be_softc *sc;
 {
 	struct qec_xd *xd = sc->sc_rb.rb_rxd;
 	unsigned int bix, len;
@@ -931,7 +971,7 @@ berint(struct be_softc *sc)
 }
 
 int
-beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+beioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct be_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -940,50 +980,49 @@ beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
+		beinit(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-			beinit(sc);
-			arp_ifinit(&sc->sc_arpcom, ifa);
+			arp_ifinit(ifp, ifa);
 			break;
 #endif /* INET */
 		default:
-			beinit(sc);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		/* XXX re-use ether_ioctl() */
+		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
+		case IFF_RUNNING:
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
 			 */
 			bestop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-		    (ifp->if_flags & IFF_RUNNING) == 0) {
+			break;
+		case IFF_UP:
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			beinit(sc);
-		} else {
+			break;
+		default:
 			/*
 			 * Reset the interface to pick up changes in any other
 			 * flags that affect hardware registers.
 			 */
 			bestop(sc);
 			beinit(sc);
+			break;
 		}
 #ifdef BEDEBUG
 		if (ifp->if_flags & IFF_DEBUG)
@@ -995,11 +1034,7 @@ beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
+		if ((error = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
@@ -1014,7 +1049,7 @@ beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 	splx(s);
@@ -1023,9 +1058,10 @@ beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 
 void
-beinit(struct be_softc *sc)
+beinit(sc)
+	struct be_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t br = sc->sc_br;
 	bus_space_handle_t cr = sc->sc_cr;
@@ -1033,7 +1069,7 @@ beinit(struct be_softc *sc)
 	u_int32_t v;
 	u_int32_t qecaddr;
 	u_int8_t *ea;
-	int s;
+	int rc, s;
 
 	s = splnet();
 
@@ -1041,7 +1077,7 @@ beinit(struct be_softc *sc)
 
 	bestop(sc);
 
-	ea = sc->sc_arpcom.ac_enaddr;
+	ea = sc->sc_enaddr;
 	bus_space_write_4(t, br, BE_BRI_MACADDR0, (ea[0] << 8) | ea[1]);
 	bus_space_write_4(t, br, BE_BRI_MACADDR1, (ea[2] << 8) | ea[3]);
 	bus_space_write_4(t, br, BE_BRI_MACADDR2, (ea[4] << 8) | ea[5]);
@@ -1099,6 +1135,13 @@ beinit(struct be_softc *sc)
 	bus_space_write_4(t, cr, BE_CRI_BMASK, 0);
 	bus_space_write_4(t, cr, BE_CRI_CCNT, 0);
 
+	/* Set max packet length */
+	v = ETHER_MAX_LEN;
+	if (sc->sc_ethercom.ec_capenable & ETHERCAP_VLAN_MTU)
+		v += ETHER_VLAN_ENCAP_LEN;
+	bus_space_write_4(t, br, BE_BRI_RXMAX, v);
+	bus_space_write_4(t, br, BE_BRI_TXMAX, v);
+
 	/* Enable transmitter */
 	bus_space_write_4(t, br, BE_BRI_TXCFG,
 			  BE_BR_TXCFG_FIFO | BE_BR_TXCFG_ENABLE);
@@ -1108,19 +1151,23 @@ beinit(struct be_softc *sc)
 	v |= BE_BR_RXCFG_FIFO | BE_BR_RXCFG_ENABLE;
 	bus_space_write_4(t, br, BE_BRI_RXCFG, v);
 
+	if ((rc = be_ifmedia_upd(ifp)) != 0)
+		goto out;
+
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	be_ifmedia_upd(ifp);
-	timeout_add(&sc->sc_tick_ch, hz);
+	callout_reset(&sc->sc_tick_ch, hz, be_tick, sc);
+out:
 	splx(s);
 }
 
 void
-be_mcreset(struct be_softc *sc)
+be_mcreset(sc)
+	struct be_softc *sc;
 {
-	struct arpcom *ac = &sc->sc_arpcom;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ethercom *ec = &sc->sc_ethercom;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t br = sc->sc_br;
 	u_int32_t crc;
@@ -1145,9 +1192,9 @@ be_mcreset(struct be_softc *sc)
 
 	hash[3] = hash[2] = hash[1] = hash[0] = 0;
 
-	ETHER_FIRST_MULTI(step, ac, enm);
+	ETHER_FIRST_MULTI(step, ec, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
+		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
 			/*
 			 * We must listen to a range of multicast
 			 * addresses.  For now, just accept all
@@ -1203,7 +1250,8 @@ chipit:
  * Set the tcvr to an idle state
  */
 void
-be_mii_sync(struct be_softc *sc)
+be_mii_sync(sc)
+	struct be_softc *sc;
 {
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t tr = sc->sc_tr;
@@ -1211,17 +1259,20 @@ be_mii_sync(struct be_softc *sc)
 
 	while (n--) {
 		bus_space_write_4(t, tr, BE_TRI_MGMTPAL,
-		    MGMT_PAL_INT_MDIO | MGMT_PAL_EXT_MDIO | MGMT_PAL_OENAB);
+				  MGMT_PAL_INT_MDIO | MGMT_PAL_EXT_MDIO |
+				  MGMT_PAL_OENAB);
 		(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
 		bus_space_write_4(t, tr, BE_TRI_MGMTPAL,
-		    MGMT_PAL_INT_MDIO | MGMT_PAL_EXT_MDIO |
-		    MGMT_PAL_OENAB | MGMT_PAL_DCLOCK);
+				  MGMT_PAL_INT_MDIO | MGMT_PAL_EXT_MDIO |
+				  MGMT_PAL_OENAB | MGMT_PAL_DCLOCK);
 		(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
 	}
 }
 
 void
-be_pal_gate(struct be_softc *sc, int phy)
+be_pal_gate(sc, phy)
+	struct be_softc *sc;
+	int phy;
 {
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t tr = sc->sc_tr;
@@ -1238,7 +1289,9 @@ be_pal_gate(struct be_softc *sc, int phy)
 }
 
 static int
-be_tcvr_read_bit(struct be_softc *sc, int phy)
+be_tcvr_read_bit(sc, phy)
+	struct be_softc *sc;
+	int phy;
 {
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t tr = sc->sc_tr;
@@ -1248,7 +1301,7 @@ be_tcvr_read_bit(struct be_softc *sc, int phy)
 		bus_space_write_4(t, tr, BE_TRI_MGMTPAL, MGMT_PAL_EXT_MDIO);
 		(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
 		bus_space_write_4(t, tr, BE_TRI_MGMTPAL,
-		    MGMT_PAL_EXT_MDIO | MGMT_PAL_DCLOCK);
+				  MGMT_PAL_EXT_MDIO | MGMT_PAL_DCLOCK);
 		(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
 		ret = (bus_space_read_4(t, tr, BE_TRI_MGMTPAL) &
 			MGMT_PAL_INT_MDIO) >> MGMT_PAL_INT_MDIO_SHIFT;
@@ -1256,9 +1309,9 @@ be_tcvr_read_bit(struct be_softc *sc, int phy)
 		bus_space_write_4(t, tr, BE_TRI_MGMTPAL, MGMT_PAL_INT_MDIO);
 		(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
 		ret = (bus_space_read_4(t, tr, BE_TRI_MGMTPAL) &
-		    MGMT_PAL_EXT_MDIO) >> MGMT_PAL_EXT_MDIO_SHIFT;
+			MGMT_PAL_EXT_MDIO) >> MGMT_PAL_EXT_MDIO_SHIFT;
 		bus_space_write_4(t, tr, BE_TRI_MGMTPAL,
-		    MGMT_PAL_INT_MDIO | MGMT_PAL_DCLOCK);
+				  MGMT_PAL_INT_MDIO | MGMT_PAL_DCLOCK);
 		(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
 	}
 
@@ -1266,7 +1319,10 @@ be_tcvr_read_bit(struct be_softc *sc, int phy)
 }
 
 static void
-be_tcvr_write_bit(struct be_softc *sc, int phy, int bit)
+be_tcvr_write_bit(sc, phy, bit)
+	struct be_softc *sc;
+	int phy;
+	int bit;
 {
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t tr = sc->sc_tr;
@@ -1274,10 +1330,10 @@ be_tcvr_write_bit(struct be_softc *sc, int phy, int bit)
 
 	if (phy == BE_PHY_INTERNAL) {
 		v = ((bit & 1) << MGMT_PAL_INT_MDIO_SHIFT) |
-		    MGMT_PAL_OENAB | MGMT_PAL_EXT_MDIO;
+			MGMT_PAL_OENAB | MGMT_PAL_EXT_MDIO;
 	} else {
 		v = ((bit & 1) << MGMT_PAL_EXT_MDIO_SHIFT)
-		    | MGMT_PAL_OENAB | MGMT_PAL_INT_MDIO;
+			| MGMT_PAL_OENAB | MGMT_PAL_INT_MDIO;
 	}
 	bus_space_write_4(t, tr, BE_TRI_MGMTPAL, v);
 	(void)bus_space_read_4(t, tr, BE_TRI_MGMTPAL);
@@ -1286,16 +1342,23 @@ be_tcvr_write_bit(struct be_softc *sc, int phy, int bit)
 }
 
 static void
-be_mii_sendbits(struct be_softc *sc, int phy, u_int32_t data, int nbits)
+be_mii_sendbits(sc, phy, data, nbits)
+	struct be_softc *sc;
+	int phy;
+	u_int32_t data;
+	int nbits;
 {
 	int i;
 
-	for (i = 1 << (nbits - 1); i != 0; i >>= 1)
+	for (i = 1 << (nbits - 1); i != 0; i >>= 1) {
 		be_tcvr_write_bit(sc, phy, (data & i) != 0);
+	}
 }
 
 static int
-be_mii_readreg(struct device *self, int phy, int reg)
+be_mii_readreg(self, phy, reg)
+	struct device *self;
+	int phy, reg;
 {
 	struct be_softc *sc = (struct be_softc *)self;
 	int val = 0, i;
@@ -1323,7 +1386,9 @@ be_mii_readreg(struct device *self, int phy, int reg)
 }
 
 void
-be_mii_writereg(struct device *self, int phy, int reg, int val)
+be_mii_writereg(self, phy, reg, val)
+	struct device *self;
+	int phy, reg, val;
 {
 	struct be_softc *sc = (struct be_softc *)self;
 	int i;
@@ -1345,12 +1410,14 @@ be_mii_writereg(struct device *self, int phy, int reg, int val)
 }
 
 int
-be_mii_reset(struct be_softc *sc, int phy)
+be_mii_reset(sc, phy)
+	struct be_softc *sc;
+	int phy;
 {
 	int n;
 
 	be_mii_writereg((struct device *)sc, phy, MII_BMCR,
-	    BMCR_LOOP | BMCR_PDOWN | BMCR_ISO);
+			BMCR_LOOP | BMCR_PDOWN | BMCR_ISO);
 	be_mii_writereg((struct device *)sc, phy, MII_BMCR, BMCR_RESET);
 
 	for (n = 16; n >= 0; n--) {
@@ -1360,7 +1427,7 @@ be_mii_reset(struct be_softc *sc, int phy)
 		DELAY(20);
 	}
 	if (n == 0) {
-		printf("%s: bmcr reset failed\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "bmcr reset failed\n");
 		return (EIO);
 	}
 
@@ -1368,7 +1435,8 @@ be_mii_reset(struct be_softc *sc, int phy)
 }
 
 void
-be_tick(void *arg)
+be_tick(arg)
+	void	*arg;
 {
 	struct be_softc *sc = arg;
 	int s = splnet();
@@ -1376,12 +1444,13 @@ be_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	(void)be_intphy_service(sc, &sc->sc_mii, MII_TICK);
 
-	timeout_add(&sc->sc_tick_ch, hz);
 	splx(s);
+	callout_reset(&sc->sc_tick_ch, hz, be_tick, sc);
 }
 
 void
-be_mii_statchg(struct device *self)
+be_mii_statchg(self)
+	struct device *self;
 {
 	struct be_softc *sc = (struct be_softc *)self;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -1411,7 +1480,9 @@ be_mii_statchg(struct device *self)
  * Get current media settings.
  */
 void
-be_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
+be_ifmedia_sts(ifp, ifmr)
+	struct ifnet *ifp;
+	struct ifmediareq *ifmr;
 {
 	struct be_softc *sc = ifp->if_softc;
 
@@ -1427,13 +1498,16 @@ be_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
  * Set media options.
  */
 int
-be_ifmedia_upd(struct ifnet *ifp)
+be_ifmedia_upd(ifp)
+	struct ifnet *ifp;
 {
 	struct be_softc *sc = ifp->if_softc;
 	int error;
 
-	if ((error = mii_mediachg(&sc->sc_mii)) != 0)
-		return (error);
+	if ((error = mii_mediachg(&sc->sc_mii)) == ENXIO)
+		error = 0;
+	else if (error != 0)
+		return error;
 
 	return (be_intphy_service(sc, &sc->sc_mii, MII_MEDIACHG));
 }
@@ -1442,7 +1516,10 @@ be_ifmedia_upd(struct ifnet *ifp)
  * Service routine for our pseudo-MII internal transceiver.
  */
 int
-be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
+be_intphy_service(sc, mii, cmd)
+	struct be_softc *sc;
+	struct mii_data *mii;
+	int cmd;
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int bmcr, bmsr;
@@ -1466,9 +1543,9 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
 		 */
 		if (IFM_INST(ife->ifm_media) != sc->sc_mii_inst) {
 			bmcr = be_mii_readreg((void *)sc,
-			    BE_PHY_INTERNAL, MII_BMCR);
+				BE_PHY_INTERNAL, MII_BMCR);
 			be_mii_writereg((void *)sc,
-			    BE_PHY_INTERNAL, MII_BMCR, bmcr | BMCR_ISO);
+				BE_PHY_INTERNAL, MII_BMCR, bmcr | BMCR_ISO);
 			sc->sc_mii_flags &= ~MIIF_HAVELINK;
 			sc->sc_intphy_curspeed = 0;
 			return (0);
@@ -1529,16 +1606,16 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
 
 		/* Read twice in case the register is latched */
 		bmsr = be_mii_readreg((void *)sc, BE_PHY_INTERNAL, MII_BMSR) |
-		    be_mii_readreg((void *)sc, BE_PHY_INTERNAL, MII_BMSR);
+		       be_mii_readreg((void *)sc, BE_PHY_INTERNAL, MII_BMSR);
 
 		if ((bmsr & BMSR_LINK) != 0) {
 			/* We have a carrier */
 			bmcr = be_mii_readreg((void *)sc,
-			    BE_PHY_INTERNAL, MII_BMCR);
+					BE_PHY_INTERNAL, MII_BMCR);
 
 			if ((sc->sc_mii_flags & MIIF_DOINGAUTO) != 0) {
 				bmcr = be_mii_readreg((void *)sc,
-				    BE_PHY_INTERNAL, MII_BMCR);
+						BE_PHY_INTERNAL, MII_BMCR);
 
 				sc->sc_mii_flags |= MIIF_HAVELINK;
 				sc->sc_intphy_curspeed = (bmcr & BMCR_S100);
@@ -1546,11 +1623,11 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
 
 				bmcr &= ~BMCR_ISO;
 				be_mii_writereg((void *)sc,
-				    BE_PHY_INTERNAL, MII_BMCR, bmcr);
+					BE_PHY_INTERNAL, MII_BMCR, bmcr);
 
 				printf("%s: link up at %s Mbps\n",
-				    sc->sc_dev.dv_xname,
-				    (bmcr & BMCR_S100) ? "100" : "10");
+					device_xname(&sc->sc_dev),
+					(bmcr & BMCR_S100) ? "100" : "10");
 			}
 			return (0);
 		}
@@ -1559,7 +1636,7 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
 			sc->sc_mii_flags |= MIIF_DOINGAUTO;
 			sc->sc_mii_flags &= ~MIIF_HAVELINK;
 			sc->sc_intphy_curspeed = 0;
-			printf("%s: link down\n", sc->sc_dev.dv_xname);
+			printf("%s: link down\n", device_xname(&sc->sc_dev));
 		}
 
 		/* Only retry autonegotiation every 5 seconds. */
@@ -1578,7 +1655,7 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
 		/* Isolate this phy */
 		bmcr = be_mii_readreg((void *)sc, BE_PHY_INTERNAL, MII_BMCR);
 		be_mii_writereg((void *)sc,
-		    BE_PHY_INTERNAL, MII_BMCR, bmcr | BMCR_ISO);
+				BE_PHY_INTERNAL, MII_BMCR, bmcr | BMCR_ISO);
 		return (0);
 	}
 
@@ -1597,7 +1674,8 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
  * Determine status of internal transceiver
  */
 void
-be_intphy_status(struct be_softc *sc)
+be_intphy_status(sc)
+	struct be_softc *sc;
 {
 	struct mii_data *mii = &sc->sc_mii;
 	int media_active, media_status;

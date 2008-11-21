@@ -1,8 +1,7 @@
-/*	$OpenBSD: tctrl.c,v 1.18 2006/10/27 17:52:38 miod Exp $	*/
-/*	$NetBSD: tctrl.c,v 1.2 1999/08/11 00:46:06 matt Exp $	*/
+/*	$NetBSD: tctrl.c,v 1.49 2008/07/17 14:43:38 cegger Exp $	*/
 
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2005, 2006 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,78 +28,72 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * The /dev/apm{,ctl} interface code falls under the following license
- * terms:
- *
- * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
- * Copyright (c) 1995 John T. Kohl.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tctrl.c,v 1.49 2008/07/17 14:43:38 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/conf.h>
-#include <sys/kernel.h>
-#include <sys/device.h>
-#include <sys/event.h>
-#include <sys/fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
+#include <sys/tty.h>
 #include <sys/proc.h>
-#include <sys/timeout.h>
+#include <sys/user.h>
+#include <sys/conf.h>
+#include <sys/file.h>
+#include <sys/uio.h>
+#include <sys/kernel.h>
+#include <sys/kthread.h>
+#include <sys/syslog.h>
+#include <sys/types.h>
+#include <sys/device.h>
+#include <sys/envsys.h>
+#include <sys/poll.h>
+#include <sys/kauth.h>
 
 #include <machine/apmvar.h>
 #include <machine/autoconf.h>
-#include <machine/conf.h>
-#include <machine/cpu.h>
-
-#include <sparc/sparc/auxioreg.h>
+#include <machine/bus.h>
+#include <machine/intr.h>
+#include <machine/tctrl.h>
 
 #include <sparc/dev/ts102reg.h>
 #include <sparc/dev/tctrlvar.h>
+#include <sparc/sparc/auxiotwo.h>
+#include <sparc/sparc/auxreg.h>
 
-/*
- * Flags to control kernel display
- *	SCFLAG_NOPRINT:		do not output APM power messages due to
- *				a power change event.
- *
- *	SCFLAG_PCTPRINT:	do not output APM power messages due to
- *				to a power change event unless the battery
- *				percentage changes.
- */
+#include <dev/sysmon/sysmonvar.h>
+#include <dev/sysmon/sysmon_taskq.h>
 
-#define SCFLAG_NOPRINT	0x0008000
-#define SCFLAG_PCTPRINT	0x0004000
-#define SCFLAG_PRINT	(SCFLAG_NOPRINT|SCFLAG_PCTPRINT)
+#include "sysmon_envsys.h"
 
-const char *tctrl_ext_status[16] = {
+/*#define TCTRLDEBUG*/
+
+/* disk spinner */
+#include <sys/disk.h>
+#include <dev/scsipi/sdvar.h>
+
+/* ethernet carrier */
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/if_ether.h>
+#include <net/if_media.h>
+#include <dev/ic/lancevar.h>
+
+extern struct cfdriver tctrl_cd;
+
+dev_type_open(tctrlopen);
+dev_type_close(tctrlclose);
+dev_type_ioctl(tctrlioctl);
+dev_type_poll(tctrlpoll);
+dev_type_kqfilter(tctrlkqfilter);
+
+const struct cdevsw tctrl_cdevsw = {
+	tctrlopen, tctrlclose, noread, nowrite, tctrlioctl,
+	nostop, notty, tctrlpoll, nommap, tctrlkqfilter,
+};
+
+static const char *tctrl_ext_statuses[16] = {
 	"main power available",
 	"internal battery attached",
 	"external battery attached",
@@ -121,217 +107,254 @@ const char *tctrl_ext_status[16] = {
 	"external battery discharging",
 };
 
-/* Request "packet" */
-struct tctrl_req {
-	u_int8_t	cmdbuf[16];
-	u_int		cmdlen;
-	u_int8_t	rspbuf[16];
-	u_int		rsplen;
-};
-
 struct tctrl_softc {
-	struct device sc_dev;
-	struct uctrl_regs *sc_regs;
-	struct intrhand sc_ih;
-	u_int	sc_ext_status;
-	u_int	sc_flags;
-#define	TCTRL_SEND_REQUEST		0x0001
-#define	TCTRL_ISXT			0x0002
-	u_int	sc_wantdata;
+	struct	device sc_dev;
+	bus_space_tag_t	sc_memt;
+	bus_space_handle_t	sc_memh;
+	unsigned int	sc_junk;
+	unsigned int	sc_ext_status;
+	unsigned int	sc_flags;
+#define TCTRL_SEND_REQUEST		0x0001
+#define TCTRL_APM_CTLOPEN		0x0002
+	uint32_t	sc_wantdata;
+	uint32_t	sc_ext_pending;
+	volatile uint16_t	sc_lcdstate;
+	uint16_t	sc_lcdwanted;
+	
 	enum { TCTRL_IDLE, TCTRL_ARGS,
 		TCTRL_ACK, TCTRL_DATA } sc_state;
-	u_int8_t sc_cmdbuf[16];
-	u_int8_t sc_rspbuf[16];
-	u_int8_t sc_tft_on;
-	u_int8_t sc_pcmcia_on;
-	u_int8_t sc_brightness;
-	u_int8_t sc_op;
-	u_int	sc_cmdoff;
-	u_int	sc_cmdlen;
-	u_int	sc_rspoff;
-	u_int	sc_rsplen;
-	u_int	sc_rspack;
-	u_int	sc_bellfreq;
-	u_int	sc_bellvol;
+	uint8_t		sc_cmdbuf[16];
+	uint8_t		sc_rspbuf[16];
+	uint8_t		sc_bitport;
+	uint8_t		sc_tft_on;
+	uint8_t		sc_op;
+	uint8_t		sc_cmdoff;
+	uint8_t		sc_cmdlen;
+	uint8_t		sc_rspoff;
+	uint8_t		sc_rsplen;
+	/* APM stuff */
+#define APM_NEVENTS 16
+	struct	apm_event_info sc_event_list[APM_NEVENTS];
+	int	sc_event_count;
+	int	sc_event_ptr;
+	struct	selinfo sc_rsel;
 
-	struct timeout sc_tmo;
+	/* ENVSYS stuff */
+#define ENVSYS_NUMSENSORS 3
+	struct	evcnt sc_intrcnt;	/* interrupt counting */
+	struct	sysmon_envsys *sc_sme;
+	envsys_data_t sc_sensor[ENVSYS_NUMSENSORS];
 
-	/* /dev/apm{,ctl} fields */
-	struct klist sc_note;
-	u_int	sc_apmflags;
-
-	/* external video control callback */
-	void (*sc_evcb)(void *, int);
-	void *sc_evdata;
-};
-
-int	tctrl_match(struct device *, void *, void *);
-void	tctrl_attach(struct device *, struct device *, void *);
-
-void	tctrl_bell(struct tctrl_softc *, int, int);
-void	tctrl_brightness(struct tctrl_softc *, int, int);
-void	tctrl_init_lcd(struct tctrl_softc *);
-int	tctrl_intr(void *);
-void	tctrl_lcd(struct tctrl_softc *, int, int);
-u_int8_t tctrl_read_data(struct tctrl_softc *);
-void	tctrl_read_event_status(void *);
-void	tctrl_read_ext_status(struct tctrl_softc *);
-int	tctrl_request(struct tctrl_softc *, struct tctrl_req *);
-void	tctrl_tft(struct tctrl_softc *);
-void	tctrl_write_data(struct tctrl_softc *, u_int8_t);
-
-int	apm_record_event(struct tctrl_softc *, u_int);
-
-struct cfattach tctrl_ca = {
-	sizeof(struct tctrl_softc), tctrl_match, tctrl_attach
-};
-
-struct cfdriver tctrl_cd = {
-	NULL, "tctrl", DV_DULL
-};
-
-int
-tctrl_match(parent, vcf, aux)
-	struct device *parent;
-	void *vcf;
-	void *aux;
-{
-	struct confargs *ca = aux;
-	struct romaux *ra = &ca->ca_ra;
-
+	struct	sysmon_pswitch sc_sm_pbutton;	/* power button */
+	struct	sysmon_pswitch sc_sm_lid;	/* lid state */
+	struct	sysmon_pswitch sc_sm_ac;	/* AC adaptor presence */
+	int	sc_powerpressed;
+	
+	/* hardware status stuff */
+	int sc_lid;	/* 1 - open, 0 - closed */
+	int sc_power_state;
+	int sc_spl;
+	
 	/*
-	 * Tadpole 3GX/3GS uses "uctrl" for the Tadpole Microcontroller
-	 * (which is really part of the TS102 PCMCIA controller, but there
-	 * exists a distinct OpenProm node for the microcontroller interface).
+	 * we call this when we detect connection or removal of an external
+	 * monitor. 0 for no monitor, !=0 for monitor present
 	 */
-	if (strcmp("uctrl", ra->ra_name))
-		return (0);
+	void (*sc_video_callback)(void *, int);
+	void *sc_video_callback_cookie;
+	int sc_extvga;
+	
+	uint32_t sc_events;
+	lwp_t *sc_thread;			/* event thread */
+	kmutex_t sc_requestlock;
+};
 
-	return (1);
+#define TCTRL_STD_DEV		0
+#define TCTRL_APMCTL_DEV	8
+
+static int tctrl_match(struct device *, struct cfdata *, void *);
+static void tctrl_attach(struct device *, struct device *, void *);
+static void tctrl_write(struct tctrl_softc *, bus_size_t, uint8_t);
+static uint8_t tctrl_read(struct tctrl_softc *, bus_size_t);
+static void tctrl_write_data(struct tctrl_softc *, uint8_t);
+static uint8_t tctrl_read_data(struct tctrl_softc *);
+static int tctrl_intr(void *);
+static void tctrl_setup_bitport(void);
+static void tctrl_setup_bitport_nop(void);
+static void tctrl_read_ext_status(void);
+static void tctrl_read_event_status(struct tctrl_softc *);
+static int tctrl_apm_record_event(struct tctrl_softc *, u_int);
+static void tctrl_init_lcd(void);
+
+static void tctrl_sensor_setup(struct tctrl_softc *);
+static void tctrl_refresh(struct sysmon_envsys *, envsys_data_t *);
+
+static void tctrl_power_button_pressed(void *);
+static void tctrl_lid_state(struct tctrl_softc *);
+static void tctrl_ac_state(struct tctrl_softc *);
+
+static int tctrl_powerfail(void *);
+
+static void tctrl_event_thread(void *);
+void tctrl_update_lcd(struct tctrl_softc *);
+
+static void tctrl_lock(struct tctrl_softc *);
+static void tctrl_unlock(struct tctrl_softc *);
+
+CFATTACH_DECL(tctrl, sizeof(struct tctrl_softc),
+    tctrl_match, tctrl_attach, NULL, NULL);
+
+static int tadpole_request(struct tctrl_req *, int, int);
+
+/* XXX wtf is this? see i386/apm.c */
+int tctrl_apm_evindex;
+
+static int
+tctrl_match(struct device *parent, struct cfdata *cf, void *aux)
+{
+	union obio_attach_args *uoba = aux;
+	struct sbus_attach_args *sa = &uoba->uoba_sbus;
+
+	if (uoba->uoba_isobio4 != 0) {
+		return (0);
+	}
+
+	/* Tadpole 3GX/3GS uses "uctrl" for the Tadpole Microcontroller
+	 * (who's interface is off the TS102 PCMCIA controller but there
+	 * exists a OpenProm for microcontroller interface).
+	 */
+	return strcmp("uctrl", sa->sa_name) == 0;
 }
 
-void
-tctrl_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+tctrl_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct confargs *ca = aux;
-	struct tctrl_softc *sc = (void *)self;
-	u_int i, v;
-	int pri;
+	struct tctrl_softc *sc = device_private(self);
+	union obio_attach_args *uoba = aux;
+	struct sbus_attach_args *sa = &uoba->uoba_sbus;
+	unsigned int i, v;
 
-	if (ca->ca_ra.ra_nintr != 1) {
-		printf(": expected 1 interrupt, got %d\n",
-		    ca->ca_ra.ra_nintr);
-		return;
-	}
-	pri = ca->ca_ra.ra_intr[0].int_pri;
-
-	if (ca->ca_ra.ra_nreg != 1) {
-		printf(": expected 1 register, got %d\n",
-		    ca->ca_ra.ra_nreg);
-		return;
-	}
-	sc->sc_regs = mapiodev(&(ca->ca_ra.ra_reg[0]), 0,
-	    ca->ca_ra.ra_reg[0].rr_len);
-
-	printf(" pri %d\n", pri);
-
-	/*
-	 * We need to check if we are running on the SPARCbook S3XT, which
-	 * needs extra work to control the TFT power.
+	/* We're living on a sbus slot that looks like an obio that
+	 * looks like an sbus slot.
 	 */
-	sc->sc_flags = 0;
-	if (strcmp(mainbus_model, "Tadpole_S3000XT") == 0)
-		sc->sc_flags |= TCTRL_ISXT;
+	sc->sc_memt = sa->sa_bustag;
+	if (sbus_bus_map(sc->sc_memt,
+			 sa->sa_slot,
+			 sa->sa_offset - TS102_REG_UCTRL_INT,
+			 sa->sa_size,
+			 BUS_SPACE_MAP_LINEAR, &sc->sc_memh) != 0) {
+		printf(": can't map registers\n");
+		return;
+	}
+
+	printf("\n");
+
 	sc->sc_tft_on = 1;
 
-	/* clear any pending data */
+	/* clear any pending data.
+	 */
 	for (i = 0; i < 10000; i++) {
-		if ((TS102_UCTRL_STS_RXNE_STA & sc->sc_regs->stat) == 0)
+		if ((TS102_UCTRL_STS_RXNE_STA &
+		    tctrl_read(sc, TS102_REG_UCTRL_STS)) == 0) {
 			break;
-		v = sc->sc_regs->data;
-		sc->sc_regs->stat = TS102_UCTRL_STS_RXNE_STA;
+		}
+		v = tctrl_read(sc, TS102_REG_UCTRL_DATA);
+		tctrl_write(sc, TS102_REG_UCTRL_STS, TS102_UCTRL_STS_RXNE_STA);
 	}
 
-	sc->sc_ih.ih_fun = tctrl_intr;
-	sc->sc_ih.ih_arg = sc;
-	intr_establish(pri, &sc->sc_ih, -1, self->dv_xname);
-
-	timeout_set(&sc->sc_tmo, tctrl_read_event_status, sc);
+	if (sa->sa_nintr != 0) {
+		(void)bus_intr_establish(sc->sc_memt, sa->sa_pri, IPL_NONE,
+					 tctrl_intr, sc);
+		evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
+				     sc->sc_dev.dv_xname, "intr");
+	}
 
 	/* See what the external status is */
-	tctrl_read_ext_status(sc);
+	sc->sc_ext_status = 0;
+	tctrl_read_ext_status();
 	if (sc->sc_ext_status != 0) {
 		const char *sep;
-		u_int len;
 
+		printf("%s: ", sc->sc_dev.dv_xname);
 		v = sc->sc_ext_status;
-		len = 0;
-		sep = "";
-		for (i = 0; v != 0; i++, v >>= 1) {
-			if ((v & 1) == 0)
-				continue;
-			/* wrap to next line if necessary */
-			if (len != 0 && len + strlen(sep) +
-			    strlen(tctrl_ext_status[i]) > 80) {
-				printf("\n");
-				len = 0;
+		for (i = 0, sep = ""; v != 0; i++, v >>= 1) {
+			if (v & 1) {
+				printf("%s%s", sep, tctrl_ext_statuses[i]);
+				sep = ", ";
 			}
-			if (len == 0) {
-				printf("%s: ", sc->sc_dev.dv_xname);
-				len = 2 + strlen(sc->sc_dev.dv_xname);
-				sep = "";
-			}
-			printf("%s%s", sep, tctrl_ext_status[i]);
-			len += strlen(sep) + strlen(tctrl_ext_status[i]);
-			sep = ", ";
 		}
-		if (len != 0)
-			printf("\n");
+		printf("\n");
 	}
 
-	/* Get a few status values */
-	tctrl_bell(sc, 0xff, 0);
-	tctrl_brightness(sc, 0xff, 0);
-
-	/* Blank video if lid is closed during boot */
-	if (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN)
-		tctrl_tft(sc);
-
-	sc->sc_regs->intr = TS102_UCTRL_INT_RXNE_REQ|TS102_UCTRL_INT_RXNE_MSK;
-
+	/* Get a current of the control bitport */
+	tctrl_setup_bitport_nop();
+	tctrl_write(sc, TS102_REG_UCTRL_INT,
+		    TS102_UCTRL_INT_RXNE_REQ|TS102_UCTRL_INT_RXNE_MSK);
+	sc->sc_lid = (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) == 0;
+	sc->sc_power_state = PWR_RESUME;
+	
+	sc->sc_extvga = (sc->sc_ext_status &
+	    TS102_EXT_STATUS_EXTERNAL_VGA_ATTACHED) != 0;
+	sc->sc_video_callback = NULL;
+	
+	
 	sc->sc_wantdata = 0;
+	sc->sc_event_count = 0;
+	sc->sc_ext_pending = 0;
+		sc->sc_ext_pending = 0;
 
-	/* Initialize the LCD icons */
-	tctrl_init_lcd(sc);
+	mutex_init(&sc->sc_requestlock, MUTEX_DEFAULT, IPL_NONE);
+	selinit(&sc->sc_rsel);
+
+	/* setup sensors and register the power button */
+	tctrl_sensor_setup(sc);
+	tctrl_lid_state(sc);
+	tctrl_ac_state(sc);
+
+	/* initialize the LCD */
+	tctrl_init_lcd();
+
+	/* initialize sc_lcdstate */
+	sc->sc_lcdstate = 0;
+	sc->sc_lcdwanted = 0;
+	tadpole_set_lcd(2, 0);
+	
+	/* fire up the LCD event thread */
+	sc->sc_events = 0;
+
+	if (kthread_create(PRI_NONE, 0, NULL, tctrl_event_thread, sc,
+	    &sc->sc_thread, "%s", sc->sc_dev.dv_xname) != 0) {
+		printf("%s: unable to create event kthread",
+		    sc->sc_dev.dv_xname);
+	}
 }
 
-int
+static int
 tctrl_intr(void *arg)
 {
 	struct tctrl_softc *sc = arg;
 	unsigned int v, d;
 	int progress = 0;
 
-again:
+    again:
 	/* find out the cause(s) of the interrupt */
-	v = sc->sc_regs->stat & TS102_UCTRL_STS_MASK;
+	v = tctrl_read(sc, TS102_REG_UCTRL_STS) & TS102_UCTRL_STS_MASK;
 
 	/* clear the cause(s) of the interrupt */
-	sc->sc_regs->stat = v;
+	tctrl_write(sc, TS102_REG_UCTRL_STS, v);
 
 	v &= ~(TS102_UCTRL_STS_RXO_STA|TS102_UCTRL_STS_TXE_STA);
 	if (sc->sc_cmdoff >= sc->sc_cmdlen) {
 		v &= ~TS102_UCTRL_STS_TXNF_STA;
-		if (sc->sc_regs->intr & TS102_UCTRL_INT_TXNF_REQ) {
-			sc->sc_regs->intr = 0;
+		if (tctrl_read(sc, TS102_REG_UCTRL_INT) &
+		    TS102_UCTRL_INT_TXNF_REQ) {
+			tctrl_write(sc, TS102_REG_UCTRL_INT, 0);
 			progress = 1;
 		}
 	}
-	if (v == 0 && ((sc->sc_flags & TCTRL_SEND_REQUEST) == 0 ||
+	if ((v == 0) && ((sc->sc_flags & TCTRL_SEND_REQUEST) == 0 ||
 	    sc->sc_state != TCTRL_IDLE)) {
-		return (progress);
+		wakeup(sc);
+		return progress;
 	}
 
 	progress = 1;
@@ -339,47 +362,37 @@ again:
 		d = tctrl_read_data(sc);
 		switch (sc->sc_state) {
 		case TCTRL_IDLE:
-			if (d == TS102_UCTRL_INTR) {
-				/* external event */
-				timeout_add(&sc->sc_tmo, 1);
+			if (d == 0xfa) {
+				/* 
+				 * external event,
+				 * set a flag and wakeup the event thread 
+				 */
+				sc->sc_ext_pending = 1;
 			} else {
 				printf("%s: (op=0x%02x): unexpected data (0x%02x)\n",
 					sc->sc_dev.dv_xname, sc->sc_op, d);
 			}
 			goto again;
 		case TCTRL_ACK:
+			if (d != 0xfe) {
+				printf("%s: (op=0x%02x): unexpected ack value (0x%02x)\n",
+					sc->sc_dev.dv_xname, sc->sc_op, d);
+			}
 #ifdef TCTRLDEBUG
 			printf(" ack=0x%02x", d);
 #endif
-			switch (d) {
-			case TS102_UCTRL_ACK:
-				sc->sc_rspack = 1;
-				sc->sc_rsplen--;
-				sc->sc_rspoff = 0;
-				sc->sc_state =
-				    sc->sc_rsplen ? TCTRL_DATA : TCTRL_IDLE;
-				sc->sc_wantdata = sc->sc_rsplen ? 1 : 0;
+			sc->sc_rsplen--;
+			sc->sc_rspoff = 0;
+			sc->sc_state = sc->sc_rsplen ? TCTRL_DATA : TCTRL_IDLE;
+			sc->sc_wantdata = sc->sc_rsplen ? 1 : 0;
 #ifdef TCTRLDEBUG
-				if (sc->sc_rsplen > 0) {
-					printf(" [data(%u)]", sc->sc_rsplen);
-				} else {
-					printf(" [idle]\n");
-				}
-#endif
-				goto again;
-			default:
-				printf("%s: (op=0x%02x): unexpected return value (0x%02x)\n",
-					sc->sc_dev.dv_xname, sc->sc_op, d);
-				/* FALLTHROUGH */
-			case TS102_UCTRL_NACK:
-				printf("%s: command %x failed\n",
-				    sc->sc_dev.dv_xname, sc->sc_op);
-				sc->sc_rspack = 0;
-				sc->sc_wantdata = 0;
-				sc->sc_state = TCTRL_IDLE;
-				break;
+			if (sc->sc_rsplen > 0) {
+				printf(" [data(%u)]", sc->sc_rsplen);
+			} else {
+				printf(" [idle]\n");
 			}
-			break;
+#endif
+			goto again;
 		case TCTRL_DATA:
 			sc->sc_rspbuf[sc->sc_rspoff++] = d;
 #ifdef TCTRLDEBUG
@@ -400,16 +413,17 @@ again:
 		}
 	}
 	if ((sc->sc_state == TCTRL_IDLE && sc->sc_wantdata == 0) ||
-	    (sc->sc_flags & TCTRL_SEND_REQUEST)) {
+	    sc->sc_flags & TCTRL_SEND_REQUEST) {
 		if (sc->sc_flags & TCTRL_SEND_REQUEST) {
 			sc->sc_flags &= ~TCTRL_SEND_REQUEST;
 			sc->sc_wantdata = 1;
 		}
 		if (sc->sc_cmdlen > 0) {
-			sc->sc_regs->intr =
-			    sc->sc_regs->intr | TS102_UCTRL_INT_TXNF_MSK
-				|TS102_UCTRL_INT_TXNF_REQ;
-			v = sc->sc_regs->stat;
+			tctrl_write(sc, TS102_REG_UCTRL_INT,
+				tctrl_read(sc, TS102_REG_UCTRL_INT)
+				|TS102_UCTRL_INT_TXNF_MSK
+				|TS102_UCTRL_INT_TXNF_REQ);
+			v = tctrl_read(sc, TS102_REG_UCTRL_STS);
 		}
 	}
 	if ((sc->sc_cmdoff < sc->sc_cmdlen) && (v & TS102_UCTRL_STS_TXNF_STA)) {
@@ -431,9 +445,10 @@ again:
 			if (sc->sc_cmdoff == 1) {
 				sc->sc_op = sc->sc_cmdbuf[0];
 			}
-			sc->sc_regs->intr =
-			    sc->sc_regs->intr & (~TS102_UCTRL_INT_TXNF_MSK
-				   |TS102_UCTRL_INT_TXNF_REQ);
+			tctrl_write(sc, TS102_REG_UCTRL_INT,
+				tctrl_read(sc, TS102_REG_UCTRL_INT)
+				& (~TS102_UCTRL_INT_TXNF_MSK
+				   |TS102_UCTRL_INT_TXNF_REQ));
 		} else if (sc->sc_state == TCTRL_IDLE) {
 			sc->sc_op = sc->sc_cmdbuf[0];
 			sc->sc_state = TCTRL_ARGS;
@@ -445,746 +460,1036 @@ again:
 	goto again;
 }
 
-/*
- * The Tadpole microcontroller is not preprogrammed with icon
- * representations.  The machine boots with the DC-IN light as
- * a blank (all 0x00) and the other lights, as 4 rows of horizontal
- * bars.  The below code initializes the few icons the system will use
- * to sane values.
- *
- * Programming the icons is simple.  It is a 5x8 matrix, with each row a
- * bitfield in the order 0x10 0x08 0x04 0x02 0x01.
- */
-
-static void tctrl_set_glyph(struct tctrl_softc *, u_int, const u_int8_t *);
-
-static const u_int8_t
-    tctrl_glyph_dc[] = { 0x00, 0x00, 0x1f, 0x00, 0x15, 0x00, 0x00, 0x00 },
-#if 0
-    tctrl_glyph_bs[] = { 0x00, 0x10, 0x08, 0x04, 0x02, 0x01, 0x00, 0x00 },
-    tctrl_glyph_w1[] = { 0x0c, 0x16, 0x10, 0x15, 0x10, 0x16, 0x0c, 0x00 },
-    tctrl_glyph_w2[] = { 0x0c, 0x0d, 0x01, 0x15, 0x01, 0x0d, 0x0c, 0x00 },
-    tctrl_glyph_l1[] = { 0x00, 0x04, 0x08, 0x13, 0x08, 0x04, 0x00, 0x00 },
-    tctrl_glyph_l2[] = { 0x00, 0x04, 0x02, 0x19, 0x02, 0x04, 0x00, 0x00 },
-#endif
-    tctrl_glyph_pc[] = { 0x00, 0x0e, 0x0e, 0x1f, 0x1f, 0x1f, 0x1f, 0x00 };
-
-void
-tctrl_init_lcd(struct tctrl_softc *sc)
+static void
+tctrl_setup_bitport_nop(void)
 {
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_DC_GOOD, tctrl_glyph_dc);
-#if 0
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_BACKSLASH, tctrl_glyph_bs);
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_WAN1, tctrl_glyph_w1);
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_WAN2, tctrl_glyph_w2);
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_LAN1, tctrl_glyph_l1);
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_LAN2, tctrl_glyph_l2);
-#endif
-	tctrl_set_glyph(sc, TS102_BLK_OFF_DEF_PCMCIA, tctrl_glyph_pc);
+	struct tctrl_softc *sc;
+	struct tctrl_req req;
+	int s;
+
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	req.cmdbuf[0] = TS102_OP_CTL_BITPORT;
+	req.cmdbuf[1] = 0xff;
+	req.cmdbuf[2] = 0x00;
+	req.cmdlen = 3;
+	req.rsplen = 2;
+	tadpole_request(&req, 1, 0);
+	s = splts102();
+	sc->sc_bitport = (req.rspbuf[0] & req.cmdbuf[1]) ^ req.cmdbuf[2];
+	splx(s);
 }
 
 static void
-tctrl_set_glyph(struct tctrl_softc *sc, u_int glyph, const u_int8_t *data)
+tctrl_setup_bitport(void)
+{
+	struct tctrl_softc *sc;
+	struct tctrl_req req;
+	int s;
+
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	s = splts102();
+	req.cmdbuf[2] = 0;
+	if ((sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN)
+	    || (!sc->sc_tft_on)) {
+		req.cmdbuf[2] = TS102_BITPORT_TFTPWR;
+	}
+	req.cmdbuf[0] = TS102_OP_CTL_BITPORT;
+	req.cmdbuf[1] = ~TS102_BITPORT_TFTPWR;
+	req.cmdlen = 3;
+	req.rsplen = 2;
+	tadpole_request(&req, 1, 0);
+	s = splts102();
+	sc->sc_bitport = (req.rspbuf[0] & req.cmdbuf[1]) ^ req.cmdbuf[2];
+	splx(s);
+}
+
+/*
+ * The tadpole microcontroller is not preprogrammed with icon
+ * representations.  The machine boots with the DC-IN light as
+ * a blank (all 0x00) and the other lights, as 4 rows of horizontal
+ * bars.  The below code initializes the icons in the system to
+ * sane values.  Some of these icons could be used for any purpose
+ * desired, namely the pcmcia, LAN and WAN lights.  For the disk spinner,
+ * only the backslash is unprogrammed.  (sigh)
+ *
+ * programming the icons is simple.  It is a 5x8 matrix, which each row a
+ * bitfield in the order 0x10 0x08 0x04 0x02 0x01.
+ */
+
+static void
+tctrl_init_lcd(void)
 {
 	struct tctrl_req req;
 
 	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
-	req.cmdbuf[1] = 8;
-	req.cmdbuf[2] = glyph;
-	bcopy(data, req.cmdbuf + 3, 8);
-	req.cmdlen = 3 + 8;
+	req.cmdlen = 11;
 	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_DC_GOOD;
+	req.cmdbuf[3] =  0x00;	/* ..... */
+	req.cmdbuf[4] =  0x00;	/* ..... */
+	req.cmdbuf[5] =  0x1f;	/* XXXXX */
+	req.cmdbuf[6] =  0x00;	/* ..... */
+	req.cmdbuf[7] =  0x15;	/* X.X.X */
+	req.cmdbuf[8] =  0x00;	/* ..... */
+	req.cmdbuf[9] =  0x00;	/* ..... */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
 
-	tctrl_request(sc, &req);
+	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
+	req.cmdlen = 11;
+	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_BACKSLASH;
+	req.cmdbuf[3] =  0x00;	/* ..... */
+	req.cmdbuf[4] =  0x10;	/* X.... */
+	req.cmdbuf[5] =  0x08;	/* .X... */
+	req.cmdbuf[6] =  0x04;	/* ..X.. */
+	req.cmdbuf[7] =  0x02;	/* ...X. */
+	req.cmdbuf[8] =  0x01;	/* ....X */
+	req.cmdbuf[9] =  0x00;	/* ..... */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
+
+	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
+	req.cmdlen = 11;
+	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_WAN1;
+	req.cmdbuf[3] =  0x0c;	/* .XXX. */
+	req.cmdbuf[4] =  0x16;	/* X.XX. */
+	req.cmdbuf[5] =  0x10;	/* X.... */
+	req.cmdbuf[6] =  0x15;	/* X.X.X */
+	req.cmdbuf[7] =  0x10;	/* X.... */
+	req.cmdbuf[8] =  0x16;	/* X.XX. */
+	req.cmdbuf[9] =  0x0c;	/* .XXX. */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
+
+	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
+	req.cmdlen = 11;
+	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_WAN2;
+	req.cmdbuf[3] =  0x0c;	/* .XXX. */
+	req.cmdbuf[4] =  0x0d;	/* .XX.X */
+	req.cmdbuf[5] =  0x01;	/* ....X */
+	req.cmdbuf[6] =  0x15;	/* X.X.X */
+	req.cmdbuf[7] =  0x01;	/* ....X */
+	req.cmdbuf[8] =  0x0d;	/* .XX.X */
+	req.cmdbuf[9] =  0x0c;	/* .XXX. */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
+
+	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
+	req.cmdlen = 11;
+	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_LAN1;
+	req.cmdbuf[3] =  0x00;	/* ..... */
+	req.cmdbuf[4] =  0x04;	/* ..X.. */
+	req.cmdbuf[5] =  0x08;	/* .X... */
+	req.cmdbuf[6] =  0x13;	/* X..XX */
+	req.cmdbuf[7] =  0x08;	/* .X... */
+	req.cmdbuf[8] =  0x04;	/* ..X.. */
+	req.cmdbuf[9] =  0x00;	/* ..... */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
+
+	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
+	req.cmdlen = 11;
+	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_LAN2;
+	req.cmdbuf[3] =  0x00;	/* ..... */
+	req.cmdbuf[4] =  0x04;	/* ..X.. */
+	req.cmdbuf[5] =  0x02;	/* ...X. */
+	req.cmdbuf[6] =  0x19;	/* XX..X */
+	req.cmdbuf[7] =  0x02;	/* ...X. */
+	req.cmdbuf[8] =  0x04;	/* ..X.. */
+	req.cmdbuf[9] =  0x00;	/* ..... */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
+
+	req.cmdbuf[0] = TS102_OP_BLK_DEF_SPCL_CHAR;
+	req.cmdlen = 11;
+	req.rsplen = 1;
+	req.cmdbuf[1] = 0x08;	/*len*/
+	req.cmdbuf[2] = TS102_BLK_OFF_DEF_PCMCIA;
+	req.cmdbuf[3] =  0x00;	/* ..... */
+	req.cmdbuf[4] =  0x0c;	/* .XXX. */
+	req.cmdbuf[5] =  0x1f;	/* XXXXX */
+	req.cmdbuf[6] =  0x1f;	/* XXXXX */
+	req.cmdbuf[7] =  0x1f;	/* XXXXX */
+	req.cmdbuf[8] =  0x1f;	/* XXXXX */
+	req.cmdbuf[9] =  0x00;	/* ..... */
+	req.cmdbuf[10] = 0x00;	/* ..... */
+	tadpole_request(&req, 1, 0);
 }
 
+/* sc_lcdwanted -> lcd_state */
 void
-tctrl_read_event_status(void *arg)
+tctrl_update_lcd(struct tctrl_softc *sc)
 {
-	struct tctrl_softc *sc = (struct tctrl_softc *)arg;
 	struct tctrl_req req;
-	unsigned int v;
+	int s;
 
-	req.cmdbuf[0] = TS102_OP_RD_EVENT_STATUS;
-	req.cmdlen = 1;
-	req.rsplen = 3;
-
-	tctrl_request(sc, &req);
-
-	v = req.rspbuf[0] * 256 + req.rspbuf[1];
-
+	s = splhigh();
+	if (sc->sc_lcdwanted == sc->sc_lcdstate) {
+		splx(s);
+		return;
+	}
+	sc->sc_lcdstate = sc->sc_lcdwanted;
+	splx(s);
+	
 	/*
-	 * Read the new external status value if necessary
+	 * the mask setup on this particular command is *very* bizzare
+	 * and totally undocumented.
 	 */
-	if (v & (TS102_EVENT_STATUS_DC_STATUS_CHANGE |
-	    TS102_EVENT_STATUS_LID_STATUS_CHANGE |
-	    TS102_EVENT_STATUS_EXTERNAL_VGA_STATUS_CHANGE))
-		tctrl_read_ext_status(sc);
+	req.cmdbuf[0] = TS102_OP_CTL_LCD;
 
-	if (v & TS102_EVENT_STATUS_SHUTDOWN_REQUEST) {
-		printf("%s: SHUTDOWN REQUEST!\n", sc->sc_dev.dv_xname);
-	}
-#ifdef TCTRLDEBUG
-	/* Obviously status change */
-	if (v & TS102_EVENT_STATUS_VERY_LOW_POWER_WARNING) {
-		if (sc->sc_apmflags & SCFLAG_PCTPRINT)
-			printf("%s: Battery level change\n",
-			    sc->sc_dev.dv_xname);
-	}
+	/* leave caps-lock alone */
+	req.cmdbuf[2] = (u_int8_t)(sc->sc_lcdstate & 0xfe);
+	req.cmdbuf[3] = (u_int8_t)((sc->sc_lcdstate & 0x100)>>8);
+
+	req.cmdbuf[1] = 1;
+	req.cmdbuf[4] = 0;
+	
+
+	/* XXX this thing is weird.... */
+	req.cmdlen = 3;
+	req.rsplen = 2;
+	
+	/* below are the values one would expect but which won't work */
+#if 0
+	req.cmdlen = 5;
+	req.rsplen = 4;
 #endif
-	if (v & TS102_EVENT_STATUS_LOW_POWER_WARNING) {
-		if ((sc->sc_apmflags & SCFLAG_NOPRINT) == 0)
-			printf("%s: LOW POWER WARNING!\n", sc->sc_dev.dv_xname);
-		apm_record_event(sc, APM_BATTERY_LOW);
-	}
-	if (v & TS102_EVENT_STATUS_DC_STATUS_CHANGE) {
-		if ((sc->sc_apmflags & SCFLAG_NOPRINT) == 0)
-			printf("%s: main power %s\n", sc->sc_dev.dv_xname,
-			    (sc->sc_ext_status & TS102_EXT_STATUS_MAIN_POWER_AVAILABLE) ?
-			      "restored" : "removed");
-		apm_record_event(sc, APM_POWER_CHANGE);
-#if 0 /* automatically done for us */
-		tctrl_lcd(sc, ~TS102_LCD_DC_OK,
-		    sc->sc_ext_status & TS102_EXT_STATUS_MAIN_POWER_AVAILABLE ?
-		      TS102_LCD_DC_OK : 0);
-#endif
-	}
-	if (v & TS102_EVENT_STATUS_LID_STATUS_CHANGE) {
-		/* blank or restore video if necessary */
-		if (sc->sc_tft_on)
-			tctrl_tft(sc);
-#ifdef TCTRLDEBUG
-		printf("%s: lid %s\n", sc->sc_dev.dv_xname,
-		    (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) ?
-		      "closed" : "opened");
-#endif
-	}
-	if (v & TS102_EVENT_STATUS_EXTERNAL_VGA_STATUS_CHANGE) {
-		printf("%s: external vga %s\n", sc->sc_dev.dv_xname,
-		    sc->sc_ext_status & TS102_EXT_STATUS_EXTERNAL_VGA_ATTACHED ?
-		      "attached" : "detached");
-#ifdef TCTRLDEBUG
-		req.cmdbuf[0] = TS102_OP_RD_EXT_VGA_PORT;
-		req.cmdlen = 1;
-		req.rsplen = 2;
-		tctrl_request(sc, &req);
-		printf("%s: vga status %x\n", sc->sc_dev.dv_xname,
-		    req.rspbuf[0]);
-#endif
-		if (sc->sc_evcb != NULL)
-			(*sc->sc_evcb)(sc->sc_evdata, sc->sc_ext_status &
-			    TS102_EXT_STATUS_EXTERNAL_VGA_ATTACHED);
-	}
+	tadpole_request(&req, 1, 0);
 }
 
-void
-tctrl_read_ext_status(struct tctrl_softc *sc)
-{
-	struct tctrl_req req;
 
+/*
+ * set the blinken-lights on the lcd.  what:
+ * what = 0 off,  what = 1 on,  what = 2 toggle
+ */
+
+void
+tadpole_set_lcd(int what, unsigned short which)
+{
+	struct tctrl_softc *sc;
+	int s;
+
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+
+	s = splhigh();
+	switch (what) {
+		case 0:
+			sc->sc_lcdwanted &= ~which;
+			break;
+		case 1:
+			sc->sc_lcdwanted |= which;
+			break;
+		case 2:
+			sc->sc_lcdwanted ^= which;
+			break;
+	}
+	splx(s);
+}
+
+static void
+tctrl_read_ext_status(void)
+{
+	struct tctrl_softc *sc;
+	struct tctrl_req req;
+	int s;
+
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
 	req.cmdbuf[0] = TS102_OP_RD_EXT_STATUS;
 	req.cmdlen = 1;
 	req.rsplen = 3;
 #ifdef TCTRLDEBUG
-	printf("tctrl_read_ext_status: before, ext_status = %x\n",
-	    sc->sc_ext_status);
+	printf("pre read: sc->sc_ext_status = 0x%x\n", sc->sc_ext_status);
 #endif
-
-	tctrl_request(sc, &req);
-
-	sc->sc_ext_status = req.rspbuf[0] * 256 + req.rspbuf[1];
-
+	tadpole_request(&req, 1, 0);
+	s = splts102();
+	sc->sc_ext_status = (req.rspbuf[0] << 8) + req.rspbuf[1];
+	splx(s);
 #ifdef TCTRLDEBUG
-	printf("tctrl_read_ext_status: after, ext_status = %x\n",
-	    sc->sc_ext_status);
+	printf("post read: sc->sc_ext_status = 0x%x\n", sc->sc_ext_status);
 #endif
 }
 
-void
-tctrl_bell(struct tctrl_softc *sc, int mask, int value)
+/*
+ * return 0 if the user will notice and handle the event,
+ * return 1 if the kernel driver should do so.
+ */
+static int
+tctrl_apm_record_event(struct tctrl_softc *sc, u_int event_type)
 {
-	struct tctrl_req req;
+	struct apm_event_info *evp;
 
-	req.cmdbuf[0] = TS102_OP_CTL_SPEAKER_VOLUME;
-	req.cmdbuf[1] = mask;
-	req.cmdbuf[2] = value;
-	req.cmdlen = 3;
-	req.rsplen = 2;
-
-	tctrl_request(sc, &req);
-
-	/*
-	 * Note that rspbuf[0] returns the previous value, before any
-	 * adjustment happened.
-	 */
-	if (mask == 0)
-		sc->sc_bellvol = value;
-	else
-		sc->sc_bellvol = req.rspbuf[0];
-}
-
-void
-tctrl_brightness(struct tctrl_softc *sc, int mask, int value)
-{
-	struct tctrl_req req;
-
-	req.cmdbuf[0] = TS102_OP_CTL_TFT_BRIGHTNESS;
-	req.cmdbuf[1] = mask;
-	req.cmdbuf[2] = value;
-	req.cmdlen = 3;
-	req.rsplen = 2;
-
-	tctrl_request(sc, &req);
-
-	/*
-	 * Note that rspbuf[0] returns the previous value, before any
-	 * adjustment happened.
-	 */
-	if (mask == 0)
-		sc->sc_brightness = value;
-	else
-		sc->sc_brightness = req.rspbuf[0];
-}
-
-void
-tctrl_tft(struct tctrl_softc *sc)
-{
-	struct tctrl_req req;
-	int enable;
-
-	enable = (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) == 0 &&
-	    sc->sc_tft_on;
-
-	req.cmdbuf[0] = TS102_OP_CTL_BITPORT;
-	req.cmdbuf[1] = ~TS102_BITPORT_TFTPWR;
-	req.cmdbuf[2] = enable ? 0 : TS102_BITPORT_TFTPWR;
-	req.cmdlen = 3;
-	req.rsplen = 2;
-
-	if ((sc->sc_flags & TCTRL_ISXT) != 0 && enable) {
-		sb_auxregbisc(0, AUXIO_TFT, 0);
-		delay(100000);	/* XXX is such a long delay really necessary? */
+	if ((sc->sc_flags & TCTRL_APM_CTLOPEN) &&
+	    (sc->sc_event_count < APM_NEVENTS)) {
+		evp = &sc->sc_event_list[sc->sc_event_ptr];
+		sc->sc_event_count++;
+		sc->sc_event_ptr++;
+		sc->sc_event_ptr %= APM_NEVENTS;
+		evp->type = event_type;
+		evp->index = ++tctrl_apm_evindex;
+		selnotify(&sc->sc_rsel, 0, 0);
+		return(sc->sc_flags & TCTRL_APM_CTLOPEN) ? 0 : 1;
 	}
-
-	tctrl_request(sc, &req);
-
-	if ((sc->sc_flags & TCTRL_ISXT) != 0 && !enable) {
-		delay(100000);	/* XXX is such a long delay really necessary? */
-		sb_auxregbisc(0, 0, AUXIO_TFT);
-	}
+	return(1);
 }
 
-void
-tctrl_lcd(struct tctrl_softc *sc, int mask, int value)
+static void
+tctrl_read_event_status(struct tctrl_softc *sc)
 {
 	struct tctrl_req req;
+	int s, lid;
+	uint32_t v;
 
-	req.cmdbuf[0] = TS102_OP_CTL_LCD;
+	req.cmdbuf[0] = TS102_OP_RD_EVENT_STATUS;
+	req.cmdlen = 1;
+	req.rsplen = 3;
+	tadpole_request(&req, 1, 0);
+	s = splts102();
+	v = req.rspbuf[0] * 256 + req.rspbuf[1];
+#ifdef TCTRLDEBUG
+	printf("event: %x\n",v);
+#endif
+	if (v & TS102_EVENT_STATUS_POWERON_BTN_PRESSED) {
+		printf("%s: Power button pressed\n",sc->sc_dev.dv_xname);
+		tctrl_powerfail(sc);
+	}
+	if (v & TS102_EVENT_STATUS_SHUTDOWN_REQUEST) {
+		printf("%s: SHUTDOWN REQUEST!\n", sc->sc_dev.dv_xname);
+		tctrl_powerfail(sc);
+	}
+	if (v & TS102_EVENT_STATUS_VERY_LOW_POWER_WARNING) {
+/*printf("%s: VERY LOW POWER WARNING!\n", sc->sc_dev.dv_xname);*/
+/* according to a tadpole header, and observation */
+#ifdef TCTRLDEBUG
+		printf("%s: Battery charge level change\n",
+		    sc->sc_dev.dv_xname);
+#endif
+	}
+	if (v & TS102_EVENT_STATUS_LOW_POWER_WARNING) {
+		if (tctrl_apm_record_event(sc, APM_BATTERY_LOW))
+			printf("%s: LOW POWER WARNING!\n", sc->sc_dev.dv_xname);
+	}
+	if (v & TS102_EVENT_STATUS_DC_STATUS_CHANGE) {
+		splx(s);
+		tctrl_read_ext_status();
+		tctrl_ac_state(sc);
+		s = splts102();
+		if (tctrl_apm_record_event(sc, APM_POWER_CHANGE))
+			printf("%s: main power %s\n", sc->sc_dev.dv_xname,
+			    (sc->sc_ext_status &
+			    TS102_EXT_STATUS_MAIN_POWER_AVAILABLE) ?
+			    "restored" : "removed");
+	}
+	if (v & TS102_EVENT_STATUS_LID_STATUS_CHANGE) {
+		splx(s);
+		tctrl_read_ext_status();
+		tctrl_lid_state(sc);
+		tctrl_setup_bitport();
+#ifdef TCTRLDEBUG
+		printf("%s: lid %s\n", sc->sc_dev.dv_xname,
+		    (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN)
+		    ? "closed" : "opened");
+#endif
+		lid = (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) == 0;
+	}
+	if (v & TS102_EVENT_STATUS_EXTERNAL_VGA_STATUS_CHANGE) {
+		int vga;
+		splx(s);
+		tctrl_read_ext_status();
+		vga = (sc->sc_ext_status &
+		    TS102_EXT_STATUS_EXTERNAL_VGA_ATTACHED) != 0;
+		if (vga != sc->sc_extvga) {
+			sc->sc_extvga = vga;
+			if (sc->sc_video_callback != NULL) {
+				sc->sc_video_callback(
+				    sc->sc_video_callback_cookie,
+				    sc->sc_extvga);
+			}
+		}
+	}
+#ifdef DIAGNOSTIC
+	if (v & TS102_EVENT_STATUS_EXT_MOUSE_STATUS_CHANGE) {
+		splx(s);
+		tctrl_read_ext_status();
+		if (sc->sc_ext_status &
+		    TS102_EXT_STATUS_EXTERNAL_MOUSE_ATTACHED) {
+			printf("tctrl: external mouse detected\n");
+		}
+	}
+#endif
+	sc->sc_ext_pending = 0;
+	splx(s);
+}
 
-	/*
-	 * The mask setup for this particular command is *very* bizarre
-	 * and totally undocumented.
-	 * One would expect the cmdlen and rsplen to be 5 and 3,
-	 * respectively, as well.  Though luck, they are not...
-	 */
+static void
+tctrl_lock(struct tctrl_softc *sc)
+{
 
-	req.cmdbuf[1] = mask & 0xff;
-	req.cmdbuf[4] = (mask >> 8) & 0x01;
+	mutex_enter(&sc->sc_requestlock);
+}
 
-	req.cmdbuf[2] = value & 0xff;
-	req.cmdbuf[3] = (value >> 8 & 0x01);
+static void
+tctrl_unlock(struct tctrl_softc *sc)
+{
 
-	req.cmdlen = 3;
-	req.rsplen = 2;
-
-	tctrl_request(sc, &req);
+	mutex_exit(&sc->sc_requestlock);
 }
 
 int
-tctrl_request(struct tctrl_softc *sc, struct tctrl_req *req)
+tadpole_request(struct tctrl_req *req, int spin, int sleep)
 {
-	int s, rv;
+	struct tctrl_softc *sc;
+	int i, s;
 
-	while (sc->sc_wantdata != 0) {
-		DELAY(1);
-	}
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	if (!sc)
+		return ENODEV;
 
-	s = splhigh();
+	tctrl_lock(sc);
+
+	if (spin)
+		s = splhigh();
+	else
+		s = splts102();
 	sc->sc_flags |= TCTRL_SEND_REQUEST;
-	bcopy(req->cmdbuf, sc->sc_cmdbuf, req->cmdlen);
+	memcpy(sc->sc_cmdbuf, req->cmdbuf, req->cmdlen);
+#ifdef DIAGNOSTIC
+	if (sc->sc_wantdata != 0) {
+		splx(s);
+		printf("tctrl: we lost the race\n");
+		tctrl_unlock(sc);
+		return EAGAIN;
+	}
+#endif
 	sc->sc_wantdata = 1;
 	sc->sc_rsplen = req->rsplen;
 	sc->sc_cmdlen = req->cmdlen;
 	sc->sc_cmdoff = sc->sc_rspoff = 0;
 
-	do {
+	/* we spin for certain commands, like poweroffs */
+	if (spin) {
+/*		for (i = 0; i < 30000; i++) {*/
+		i = 0;
+		while ((sc->sc_wantdata == 1) && (i < 30000)) {
+			tctrl_intr(sc);
+			DELAY(1);
+			i++;
+		}
+#ifdef DIAGNOSTIC
+		if (i >= 30000) {
+			printf("tctrl: timeout busy waiting for micro controller request!\n");
+			sc->sc_wantdata = 0;
+			splx(s);
+			tctrl_unlock(sc);
+			return EAGAIN;
+		}
+#endif
+	} else {
+		int timeout = 5 * (sc->sc_rsplen + sc->sc_cmdlen);
 		tctrl_intr(sc);
-	} while (sc->sc_state != TCTRL_IDLE);
-
-	sc->sc_wantdata = 0;	/* just in case... */
-
-	rv = sc->sc_rspack;
-	if (rv != 0)
-		bcopy(sc->sc_rspbuf, req->rspbuf, sc->sc_rsplen);
-	else
-		bzero(req->rspbuf, req->rsplen);	/* safety */
+		i = 0;
+		while (((sc->sc_rspoff != sc->sc_rsplen) ||
+		    (sc->sc_cmdoff != sc->sc_cmdlen)) &&
+		    (i < timeout))
+			if (sleep) {
+				tsleep(sc, PWAIT, "tctrl_data", 15);
+				i++;
+			} else
+				DELAY(1);
+#ifdef DIAGNOSTIC
+		if (i >= timeout) {
+			printf("tctrl: timeout waiting for microcontroller request\n");
+			sc->sc_wantdata = 0;
+			splx(s);
+			tctrl_unlock(sc);
+			return EAGAIN;
+		}
+#endif
+	}
+	/*
+	 * we give the user a reasonable amount of time for a command
+	 * to complete.  If it doesn't complete in time, we hand them
+	 * garbage.  This is here to stop things like setting the
+	 * rsplen too long, and sleeping forever in a CMD_REQ ioctl.
+	 */
+	sc->sc_wantdata = 0;
+	memcpy(req->rspbuf, sc->sc_rspbuf, req->rsplen);
 	splx(s);
-
-	return (rv);
+	
+	tctrl_unlock(sc);
+	return 0;
 }
-
-void
-tctrl_write_data(sc, v)
-	struct tctrl_softc *sc;
-	u_int8_t v;
-{
-	unsigned int i;
-
-	for (i = 0; i < 100; i++)  {
-		if (sc->sc_regs->stat & TS102_UCTRL_STS_TXNF_STA)
-			break;
-	}
-	sc->sc_regs->data = v;
-}
-
-u_int8_t
-tctrl_read_data(sc)
-	struct tctrl_softc *sc;
-{ 
-	unsigned int i, v;
-
-	for (i = 0; i < 100000; i++) {
-		if (sc->sc_regs->stat & TS102_UCTRL_STS_RXNE_STA)
-			break;
-		DELAY(1);
-	}
-
-	v = sc->sc_regs->data;
-	sc->sc_regs->stat = TS102_UCTRL_STS_RXNE_STA;
-	return v;
-}
-
-/*
- * External interfaces, used by the display and pcmcia drivers, as well
- * as the powerdown code.
- */
 
 void
 tadpole_powerdown(void)
 {
-	struct tctrl_softc *sc;
 	struct tctrl_req req;
 
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
 	req.cmdbuf[0] = TS102_OP_ADMIN_POWER_OFF;
 	req.cmdlen = 1;
 	req.rsplen = 1;
-
-	tctrl_request(sc, &req);
-}
-
-void
-tadpole_set_brightness(int value)
-{
-	struct tctrl_softc *sc;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-	if (value != sc->sc_brightness)
-		tctrl_brightness(sc, 0, value);
-}
-
-int
-tadpole_get_brightness()
-{
-	struct tctrl_softc *sc;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return 0;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-	return sc->sc_brightness;
+	tadpole_request(&req, 1, 0);
 }
 
 void
 tadpole_set_video(int enabled)
 {
 	struct tctrl_softc *sc;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-	if (sc->sc_tft_on ^ enabled) {
-		sc->sc_tft_on = enabled;
-		/* nothing to do if the lid is down */
-		if ((sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) == 0)
-			tctrl_tft(sc);
-	}
-}
-
-u_int
-tadpole_get_video()
-{
-	struct tctrl_softc *sc;
-	unsigned int status;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return 0;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-	status = sc->sc_tft_on ? TV_ON : 0;
-
-	return status;
-}
-
-void
-tadpole_register_extvideo(void (*cb)(void *, int), void *data)
-{
-	struct tctrl_softc *sc;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-	sc->sc_evcb = cb;
-	sc->sc_evdata = data;
-
-	(*cb)(data, sc->sc_ext_status & TS102_EXT_STATUS_EXTERNAL_VGA_ATTACHED);
-}
-
-void
-tadpole_set_pcmcia(int slot, int enabled)
-{
-	struct tctrl_softc *sc;
-	int mask;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return;
-	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-	mask = 1 << slot;
-	enabled = enabled ? mask : 0;
-	if ((sc->sc_pcmcia_on ^ enabled) & mask) {
-		sc->sc_pcmcia_on ^= mask;
-		tctrl_lcd(sc, ~TS102_LCD_PCMCIA_ACTIVE,
-		    sc->sc_pcmcia_on ? TS102_LCD_PCMCIA_ACTIVE : 0);
-	}
-}
-
-int
-tadpole_bell(u_int duration, u_int freq, u_int volume)
-{
-	struct tctrl_softc *sc;
 	struct tctrl_req req;
+	int s;
 
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return (0);
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	while (sc->sc_wantdata != 0)
+		DELAY(1);
+	s = splts102();
+	if ((sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN && !enabled)
+	    || (sc->sc_tft_on)) {
+		req.cmdbuf[2] = TS102_BITPORT_TFTPWR;
+	} else {
+		req.cmdbuf[2] = 0;
 	}
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-
-	/* Adjust frequency if necessary (first time or frequence change) */
-	if (freq > 0 && freq <= 0xffff && freq != sc->sc_bellfreq) {
-		req.cmdbuf[0] = TS102_OP_CMD_SET_BELL_FREQ;
-		req.cmdbuf[1] = (freq >> 8) & 0xff;
-		req.cmdbuf[2] = freq & 0xff;
-		req.cmdlen = 3;
-		req.rsplen = 1;
-
-		tctrl_request(sc, &req);
-
-		sc->sc_bellfreq = freq;
-	}
-
-	/* Adjust volume if necessary */
-	if (volume >= 0 && volume <= 100) {
-		volume = (volume * 255) / 100;
-		if (volume != sc->sc_bellvol)
-			tctrl_bell(sc, 0, volume);
-
-	}
-
-	req.cmdbuf[0] = TS102_OP_CMD_RING_BELL;
-	req.cmdbuf[1] = (duration >> 8) & 0xff;
-	req.cmdbuf[2] = duration & 0xff;
+	req.cmdbuf[0] = TS102_OP_CTL_BITPORT;
+	req.cmdbuf[1] = ~TS102_BITPORT_TFTPWR;
 	req.cmdlen = 3;
-	req.rsplen = 1;
+	req.rsplen = 2;
 
-	tctrl_request(sc, &req);
-
-	return (1);
+	if ((sc->sc_tft_on && !enabled) || (!sc->sc_tft_on && enabled)) {
+		sc->sc_tft_on = enabled;
+		if (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) {
+			splx(s);
+			return;
+		}
+		tadpole_request(&req, 1, 0);
+		sc->sc_bitport =
+		    (req.rspbuf[0] & req.cmdbuf[1]) ^ req.cmdbuf[2];
+	}
+	splx(s);
 }
 
-/*
- * /dev/apm{,ctl} interface code
- */
-
-#define	APMUNIT(dev)	(minor(dev)&0xf0)
-#define	APMDEV(dev)	(minor(dev)&0x0f)
-#define APMDEV_NORMAL	0
-#define APMDEV_CTL	8
-
-int	apmkqfilter(dev_t dev, struct knote *kn);
-void	filt_apmrdetach(struct knote *kn);
-int	filt_apmread(struct knote *kn, long hint);
-
-struct filterops apmread_filtops =
-	{ 1, NULL, filt_apmrdetach, filt_apmread};
-
-#define	SCFLAG_OREAD 	(1 << 0)
-#define	SCFLAG_OWRITE	(1 << 1)
-#define	SCFLAG_OPEN	(SCFLAG_OREAD|SCFLAG_OWRITE)
-
-int
-apmopen(dev_t dev, int flag, int mode, struct proc *p)
+static void
+tctrl_write_data(struct tctrl_softc *sc, uint8_t v)
 {
-	struct tctrl_softc *sc;
-	int error = 0;
+	unsigned int i;
 
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return (ENXIO);
+	for (i = 0; i < 100; i++)  {
+		if (TS102_UCTRL_STS_TXNF_STA &
+		    tctrl_read(sc, TS102_REG_UCTRL_STS))
+			break;
+	}
+	tctrl_write(sc, TS102_REG_UCTRL_DATA, v);
+}
+
+static uint8_t
+tctrl_read_data(struct tctrl_softc *sc)
+{
+	unsigned int i, v;
+
+	for (i = 0; i < 100000; i++) {
+		if (TS102_UCTRL_STS_RXNE_STA &
+		    tctrl_read(sc, TS102_REG_UCTRL_STS))
+			break;
+		DELAY(1);
 	}
 
-	/* apm0 only */
-	if (APMUNIT(dev) != 0)
-		return (ENODEV);
+	v = tctrl_read(sc, TS102_REG_UCTRL_DATA);
+	tctrl_write(sc, TS102_REG_UCTRL_STS, TS102_UCTRL_STS_RXNE_STA);
+	return v;
+}
 
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
+static uint8_t
+tctrl_read(struct tctrl_softc *sc, bus_size_t off)
+{
 
-	switch (APMDEV(dev)) {
-	case APMDEV_CTL:
-		if (!(flag & FWRITE)) {
-			error = EINVAL;
-			break;
-		}
-		if (sc->sc_apmflags & SCFLAG_OWRITE) {
-			error = EBUSY;
-			break;
-		}
-		sc->sc_apmflags |= SCFLAG_OWRITE;
+	sc->sc_junk = bus_space_read_1(sc->sc_memt, sc->sc_memh, off);
+	return sc->sc_junk;
+}
+
+static void
+tctrl_write(struct tctrl_softc *sc, bus_size_t off, uint8_t v)
+{
+
+	sc->sc_junk = v;
+	bus_space_write_1(sc->sc_memt, sc->sc_memh, off, v);
+}
+
+int
+tctrlopen(dev_t dev, int flags, int mode, struct lwp *l)
+{
+	int unit = (minor(dev)&0xf0);
+	int ctl = (minor(dev)&0x0f);
+	struct tctrl_softc *sc;
+
+	if (unit >= tctrl_cd.cd_ndevs)
+		return(ENXIO);
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	if (!sc)
+		return(ENXIO);
+
+	switch (ctl) {
+	case TCTRL_STD_DEV:
 		break;
-	case APMDEV_NORMAL:
-		if (!(flag & FREAD) || (flag & FWRITE)) {
-			error = EINVAL;
-			break;
-		}
-		sc->sc_apmflags |= SCFLAG_OREAD;
+	case TCTRL_APMCTL_DEV:
+		if (!(flags & FWRITE))
+			return(EINVAL);
+		if (sc->sc_flags & TCTRL_APM_CTLOPEN)
+			return(EBUSY);
+		sc->sc_flags |= TCTRL_APM_CTLOPEN;
 		break;
 	default:
-		error = ENXIO;
+		return(ENXIO);
 		break;
 	}
-	return (error);
+
+	return(0);
 }
 
 int
-apmclose(dev_t dev, int flag, int mode, struct proc *p)
+tctrlclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
+	int ctl = (minor(dev)&0x0f);
 	struct tctrl_softc *sc;
 
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return (ENXIO);
-	}
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	if (!sc)
+		return(ENXIO);
 
-	/* apm0 only */
-	if (APMUNIT(dev) != 0)
-		return (ENODEV);
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-
-	switch (APMDEV(dev)) {
-	case APMDEV_CTL:
-		sc->sc_apmflags &= ~SCFLAG_OWRITE;
+	switch (ctl) {
+	case TCTRL_STD_DEV:
 		break;
-	case APMDEV_NORMAL:
-		sc->sc_apmflags &= ~SCFLAG_OREAD;
+	case TCTRL_APMCTL_DEV:
+		sc->sc_flags &= ~TCTRL_APM_CTLOPEN;
 		break;
 	}
-	return (0);
+	return(0);
 }
 
 int
-apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+tctrlioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 {
+	struct tctrl_req req, *reqn;
+	struct tctrl_pwr *pwrreq;
+	struct apm_power_info *powerp;
+	struct apm_event_info *evp;
 	struct tctrl_softc *sc;
-	struct tctrl_req req;
-	struct apm_power_info *power;
-	u_int8_t c;
-	int error = 0;
+	int i;
+	uint8_t c;
 
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return (ENXIO);
-	}
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	if (!sc)
+		return ENXIO;
 
-	/* apm0 only */
-	if (APMUNIT(dev) != 0)
-		return (ENODEV);
+        switch (cmd) {
 
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
-
-	switch (cmd) {
-		/* some ioctl names from linux */
 	case APM_IOC_STANDBY:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else
-			error = EOPNOTSUPP;	/* XXX */
-		break;
+		/* turn off backlight and so on ? */
+		
+		return 0; /* for now */
+
 	case APM_IOC_SUSPEND:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else
-			error = EOPNOTSUPP;	/* XXX */
-		break;
-	case APM_IOC_PRN_CTL:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else {
-			int flag = *(int *)data;
-			switch (flag) {
-			case APM_PRINT_ON:	/* enable printing */
-				sc->sc_apmflags &= ~SCFLAG_PRINT;
-				break;
-			case APM_PRINT_OFF: /* disable printing */
-				sc->sc_apmflags &= ~SCFLAG_PRINT;
-				sc->sc_apmflags |= SCFLAG_NOPRINT;
-				break;
-			case APM_PRINT_PCT: /* disable some printing */
-				sc->sc_apmflags &= ~SCFLAG_PRINT;
-				sc->sc_apmflags |= SCFLAG_PCTPRINT;
-				break;
-			default:
-				error = EINVAL;
-				break;
-			}
-		}
-		break;
+		/* not sure what to do here - we can't really suspend */
+		
+		return 0; /* for now */
+
+	case OAPM_IOC_GETPOWER:
 	case APM_IOC_GETPOWER:
-	        power = (struct apm_power_info *)data;
-
-		if (sc->sc_ext_status &
-		    TS102_EXT_STATUS_INTERNAL_BATTERY_ATTACHED) {
-			req.cmdbuf[0] = TS102_OP_RD_INT_CHARGE_RATE;
-			req.cmdlen = 1;
-			req.rsplen = 2;
-			tctrl_request(sc, &req);
-			if (req.rspbuf[0] != 0)
-				power->battery_state = APM_BATT_CHARGING;
+		powerp = (struct apm_power_info *)data;
+		req.cmdbuf[0] = TS102_OP_RD_INT_CHARGE_RATE;
+		req.cmdlen = 1;
+		req.rsplen = 2;
+		tadpole_request(&req, 0, l->l_proc ? 1 : 0);
+		if (req.rspbuf[0] > 0x00)
+			powerp->battery_state = APM_BATT_CHARGING;
+		req.cmdbuf[0] = TS102_OP_RD_INT_CHARGE_LEVEL;
+		req.cmdlen = 1;
+		req.rsplen = 3;
+		tadpole_request(&req, 0, l->l_proc ? 1 : 0);
+		c = req.rspbuf[0];
+		powerp->battery_life = c;
+		if (c > 0x70)	/* the tadpole sometimes dips below zero, and */
+			c = 0;	/* into the 255 range. */
+		powerp->minutes_left = (45 * c) / 100; /* XXX based on 45 min */
+		if (powerp->battery_state != APM_BATT_CHARGING) {
+			if (c < 0x20)
+				powerp->battery_state = APM_BATT_CRITICAL;
+			else if (c < 0x40)
+				powerp->battery_state = APM_BATT_LOW;
+			else if (c < 0x66)
+				powerp->battery_state = APM_BATT_HIGH;
 			else
-				power->battery_state = APM_BATT_UNKNOWN;
-
-			req.cmdbuf[0] = TS102_OP_RD_INT_CHARGE_LEVEL;
-			req.cmdlen = 1;
-			req.rsplen = 3;
-			tctrl_request(sc, &req);
-
-			c = req.rspbuf[0];
-			if (c >= TS102_CHARGE_UNKNOWN)
-				power->battery_life = 0;
-			else {
-				power->battery_life = c;
-				if (power->battery_state != APM_BATT_CHARGING) {
-					if (c < 0x20)
-						power->battery_state =
-						    APM_BATT_CRITICAL;
-					else if (c < 0x40)
-						power->battery_state =
-						    APM_BATT_HIGH;
-					else if (c < 0x66)
-						power->battery_state =
-						    APM_BATT_HIGH;
-				}
-			}
-		} else {
-			power->battery_state = APM_BATTERY_ABSENT;
-			power->battery_life = 0;
+				powerp->battery_state = APM_BATT_UNKNOWN;
 		}
-		power->minutes_left = (u_int)-1;	/* unknown */
-
+		
 		if (sc->sc_ext_status & TS102_EXT_STATUS_MAIN_POWER_AVAILABLE)
-			power->ac_state = APM_AC_ON;
+			powerp->ac_state = APM_AC_ON;
 		else
-			power->ac_state = APM_AC_OFF;
+			powerp->ac_state = APM_AC_OFF;
 		break;
 
-	default:
-		error = ENOTTY;
+	case APM_IOC_NEXTEVENT:
+		if (!sc->sc_event_count)
+			return EAGAIN;
+
+		evp = (struct apm_event_info *)data;
+		i = sc->sc_event_ptr + APM_NEVENTS - sc->sc_event_count;
+		i %= APM_NEVENTS;
+		*evp = sc->sc_event_list[i];
+		sc->sc_event_count--;
+		return(0);
+
+	/* this ioctl assumes the caller knows exactly what he is doing */
+	case TCTRL_CMD_REQ:
+		reqn = (struct tctrl_req *)data;
+		if ((i = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL)) != 0 &&
+		    (reqn->cmdbuf[0] == TS102_OP_CTL_BITPORT ||
+		    (reqn->cmdbuf[0] >= TS102_OP_CTL_WATCHDOG &&
+		    reqn->cmdbuf[0] <= TS102_OP_CTL_SECURITY_KEY) ||
+		    reqn->cmdbuf[0] == TS102_OP_CTL_TIMEZONE ||
+		    reqn->cmdbuf[0] == TS102_OP_CTL_DIAGNOSTIC_MODE ||
+		    reqn->cmdbuf[0] == TS102_OP_CMD_SOFTWARE_RESET ||
+		    (reqn->cmdbuf[0] >= TS102_OP_CMD_SET_RTC &&
+		    reqn->cmdbuf[0] < TS102_OP_RD_INT_CHARGE_LEVEL) ||
+		    reqn->cmdbuf[0] > TS102_OP_RD_EXT_CHARGE_LEVEL))
+			return(i);
+		tadpole_request(reqn, 0, l->l_proc ? 1 : 0);
+		break;
+	/* serial power mode (via auxiotwo) */
+	case TCTRL_SERIAL_PWR:
+		pwrreq = (struct tctrl_pwr *)data;
+		if (pwrreq->rw)
+			pwrreq->state = auxiotwoserialgetapm();
+		else
+			auxiotwoserialsetapm(pwrreq->state);
+		break;
+
+	/* modem power mode (via auxio) */
+	case TCTRL_MODEM_PWR:
+		return(EOPNOTSUPP); /* for now */
+		break;
+
+
+        default:
+                return (ENOTTY);
+        }
+        return (0);
+}
+
+int
+tctrlpoll(dev_t dev, int events, struct lwp *l)
+{
+	struct tctrl_softc *sc = device_lookup_private(&tctrl_cd,
+						       TCTRL_STD_DEV);
+	int revents = 0;
+
+	if (events & (POLLIN | POLLRDNORM)) {
+		if (sc->sc_event_count)
+			revents |= events & (POLLIN | POLLRDNORM);
+		else
+			selrecord(l, &sc->sc_rsel);
 	}
 
-	return (error);
+	return (revents);
 }
+
+static void
+filt_tctrlrdetach(struct knote *kn)
+{
+	struct tctrl_softc *sc = kn->kn_hook;
+	int s;
+
+	s = splts102();
+	SLIST_REMOVE(&sc->sc_rsel.sel_klist, kn, knote, kn_selnext);
+	splx(s);
+}
+
+static int
+filt_tctrlread(struct knote *kn, long hint)
+{
+	struct tctrl_softc *sc = kn->kn_hook;
+
+	kn->kn_data = sc->sc_event_count;
+	return (kn->kn_data > 0);
+}
+
+static const struct filterops tctrlread_filtops =
+	{ 1, NULL, filt_tctrlrdetach, filt_tctrlread };
 
 int
-apm_record_event(struct tctrl_softc *sc, u_int type)
+tctrlkqfilter(dev_t dev, struct knote *kn)
 {
-	static int apm_evindex;
-
-	/* skip if no user waiting */
-	if ((sc->sc_apmflags & SCFLAG_OPEN) == 0)
-		return (1);
-
-	apm_evindex++;
-	KNOTE(&sc->sc_note, APM_EVENT_COMPOSE(type, apm_evindex));
-
-	return (0);
-}
-
-void
-filt_apmrdetach(struct knote *kn)
-{
-	struct tctrl_softc *sc = (struct tctrl_softc *)kn->kn_hook;
-
-	SLIST_REMOVE(&sc->sc_note, kn, knote, kn_selnext);
-}
-
-int
-filt_apmread(struct knote *kn, long hint)
-{
-	/* XXX weird kqueue_scan() semantics */
-	if (hint && !kn->kn_data)
-		kn->kn_data = (int)hint;
-
-	return (1);
-}
-
-int
-apmkqfilter(dev_t dev, struct knote *kn)
-{
-	struct tctrl_softc *sc;
-
-	if (tctrl_cd.cd_ndevs == 0 || tctrl_cd.cd_devs[0] == NULL) {
-		return (ENXIO);
-	}
-
-	/* apm0 only */
-	if (APMUNIT(dev) != 0)
-		return (ENODEV);
-
-	sc = (struct tctrl_softc *)tctrl_cd.cd_devs[0];
+	struct tctrl_softc *sc = device_lookup_private(&tctrl_cd,
+						       TCTRL_STD_DEV);
+	struct klist *klist;
+	int s;
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
-		kn->kn_fop = &apmread_filtops;
+		klist = &sc->sc_rsel.sel_klist;
+		kn->kn_fop = &tctrlread_filtops;
 		break;
+
 	default:
 		return (1);
 	}
 
-	kn->kn_hook = (caddr_t)sc;
-	SLIST_INSERT_HEAD(&sc->sc_note, kn, kn_selnext);
+	kn->kn_hook = sc;
+
+	s = splts102();
+	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
+	splx(s);
 
 	return (0);
+}
+
+static void
+tctrl_sensor_setup(struct tctrl_softc *sc)
+{
+	int i, error;
+
+	sc->sc_sme = sysmon_envsys_create();
+
+	/* case temperature */
+	(void)strlcpy(sc->sc_sensor[0].desc, "Case temperature",
+	    sizeof(sc->sc_sensor[0].desc));
+	sc->sc_sensor[0].units = ENVSYS_STEMP;
+
+	/* battery voltage */
+	(void)strlcpy(sc->sc_sensor[1].desc, "Internal battery voltage",
+	    sizeof(sc->sc_sensor[1].desc));
+	sc->sc_sensor[1].units = ENVSYS_SVOLTS_DC;
+
+	/* DC voltage */
+	(void)strlcpy(sc->sc_sensor[2].desc, "DC-In voltage",
+	    sizeof(sc->sc_sensor[2].desc));
+	sc->sc_sensor[2].units = ENVSYS_SVOLTS_DC;
+
+	for (i = 0; i < ENVSYS_NUMSENSORS; i++) {
+		if (sysmon_envsys_sensor_attach(sc->sc_sme,
+						&sc->sc_sensor[i])) {
+			sysmon_envsys_destroy(sc->sc_sme);
+			return;
+		}
+	}
+
+	sc->sc_sme->sme_name = sc->sc_dev.dv_xname;
+	sc->sc_sme->sme_cookie = sc;
+	sc->sc_sme->sme_refresh = tctrl_refresh;
+
+	if ((error = sysmon_envsys_register(sc->sc_sme)) != 0) {
+		printf("%s: couldn't register sensors (%d)\n",
+		    sc->sc_dev.dv_xname, error);
+		sysmon_envsys_destroy(sc->sc_sme);
+		return;
+	}
+
+	/* now register the power button */
+
+	sysmon_task_queue_init();
+
+	sc->sc_powerpressed = 0;
+	memset(&sc->sc_sm_pbutton, 0, sizeof(struct sysmon_pswitch));
+	sc->sc_sm_pbutton.smpsw_name = sc->sc_dev.dv_xname;
+	sc->sc_sm_pbutton.smpsw_type = PSWITCH_TYPE_POWER;
+	if (sysmon_pswitch_register(&sc->sc_sm_pbutton) != 0)
+		printf("%s: unable to register power button with sysmon\n",
+		    sc->sc_dev.dv_xname);
+
+	memset(&sc->sc_sm_lid, 0, sizeof(struct sysmon_pswitch));
+	sc->sc_sm_lid.smpsw_name = sc->sc_dev.dv_xname;
+	sc->sc_sm_lid.smpsw_type = PSWITCH_TYPE_LID;
+	if (sysmon_pswitch_register(&sc->sc_sm_lid) != 0)
+		printf("%s: unable to register lid switch with sysmon\n",
+		    sc->sc_dev.dv_xname);
+
+	memset(&sc->sc_sm_ac, 0, sizeof(struct sysmon_pswitch));
+	sc->sc_sm_ac.smpsw_name = sc->sc_dev.dv_xname;
+	sc->sc_sm_ac.smpsw_type = PSWITCH_TYPE_ACADAPTER;
+	if (sysmon_pswitch_register(&sc->sc_sm_ac) != 0)
+		printf("%s: unable to register AC adaptor with sysmon\n",
+		    sc->sc_dev.dv_xname);
+}
+
+static void
+tctrl_power_button_pressed(void *arg)
+{
+	struct tctrl_softc *sc = arg;
+
+	sysmon_pswitch_event(&sc->sc_sm_pbutton, PSWITCH_EVENT_PRESSED);
+	sc->sc_powerpressed = 0;
+}
+
+static void
+tctrl_lid_state(struct tctrl_softc *sc)
+{
+	int state;
+	
+	state = (sc->sc_ext_status & TS102_EXT_STATUS_LID_DOWN) ? 
+	    PSWITCH_EVENT_PRESSED : PSWITCH_EVENT_RELEASED;
+	sysmon_pswitch_event(&sc->sc_sm_lid, state);
+}
+
+static void
+tctrl_ac_state(struct tctrl_softc *sc)
+{
+	int state;
+	
+	state = (sc->sc_ext_status & TS102_EXT_STATUS_MAIN_POWER_AVAILABLE) ? 
+	    PSWITCH_EVENT_PRESSED : PSWITCH_EVENT_RELEASED;
+	sysmon_pswitch_event(&sc->sc_sm_ac, state);
+}
+
+static int
+tctrl_powerfail(void *arg)
+{
+	struct tctrl_softc *sc = (struct tctrl_softc *)arg;
+
+	/*
+	 * We lost power. Queue a callback with thread context to
+	 * handle all the real work.
+	 */
+	if (sc->sc_powerpressed == 0) {
+		sc->sc_powerpressed = 1;
+		sysmon_task_queue_sched(0, tctrl_power_button_pressed, sc);
+	}
+	return (1);
+}
+
+static void
+tctrl_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
+{
+	/*struct tctrl_softc *sc = sme->sme_cookie;*/
+	struct tctrl_req req;
+	int sleepable;
+	int i;
+
+	i = edata->sensor;
+	sleepable = curlwp ? 1 : 0;
+
+	switch (i)
+	{
+		case 0:	/* case temperature */
+			req.cmdbuf[0] = TS102_OP_RD_CURRENT_TEMP;
+			req.cmdlen = 1;
+			req.rsplen = 2;
+			tadpole_request(&req, 0, sleepable);
+			edata->value_cur =             /* 273160? */
+			    (uint32_t)((int)((int)req.rspbuf[0] - 32) * 5000000
+			    / 9 + 273150000);
+			req.cmdbuf[0] = TS102_OP_RD_MAX_TEMP;
+			req.cmdlen = 1;
+			req.rsplen = 2;
+			tadpole_request(&req, 0, sleepable);
+			edata->value_max =
+			    (uint32_t)((int)((int)req.rspbuf[0] - 32) * 5000000
+			    / 9 + 273150000);
+			edata->flags |= ENVSYS_FVALID_MAX;
+			req.cmdbuf[0] = TS102_OP_RD_MIN_TEMP;
+			req.cmdlen = 1;
+			req.rsplen = 2;
+			tadpole_request(&req, 0, sleepable);
+			edata->value_min =
+			    (uint32_t)((int)((int)req.rspbuf[0] - 32) * 5000000
+			    / 9 + 273150000);
+			edata->flags |= ENVSYS_FVALID_MIN;
+			edata->units = ENVSYS_STEMP;
+			break;
+
+		case 1: /* battery voltage */
+			{
+				edata->units = ENVSYS_SVOLTS_DC;
+				req.cmdbuf[0] = TS102_OP_RD_INT_BATT_VLT;
+				req.cmdlen = 1;
+				req.rsplen = 2;
+				tadpole_request(&req, 0, sleepable);
+				edata->value_cur = (int32_t)req.rspbuf[0] *
+				    1000000 / 11;
+			}
+			break;
+		case 2: /* DC voltage */
+			{
+				edata->units = ENVSYS_SVOLTS_DC;
+				req.cmdbuf[0] = TS102_OP_RD_DC_IN_VLT;
+				req.cmdlen = 1;
+				req.rsplen = 2;
+				tadpole_request(&req, 0, sleepable);
+				edata->value_cur = (int32_t)req.rspbuf[0] *
+				    1000000 / 11;
+			}
+			break;
+	}
+	edata->state = ENVSYS_SVALID;
+}
+
+static void
+tctrl_event_thread(void *v)
+{
+	struct tctrl_softc *sc = v;
+	struct device *dv;
+	struct sd_softc *sd = NULL;
+	struct lance_softc *le = NULL;
+	int ticks = hz/2;
+	int rcount, wcount;
+	int s;
+	
+	while (sd == NULL) {
+		dv = device_find_by_xname("sd0");
+		if (dv != NULL)
+			sd = device_private(dv);
+		else
+			tsleep(&sc->sc_events, PWAIT, "probe_disk", hz);
+	}			
+	dv = device_find_by_xname("le0");
+	if (dv != NULL)
+		le = device_private(dv);
+	printf("found %s\n", device_xname(sd->sc_dev));
+	rcount = sd->sc_dk.dk_stats->io_rxfer;
+	wcount = sd->sc_dk.dk_stats->io_wxfer;
+
+	tctrl_read_event_status(sc);
+	
+	while (1) {
+		tsleep(&sc->sc_events, PWAIT, "tctrl_event", ticks);
+		s = splhigh();
+		if ((rcount != sd->sc_dk.dk_stats->io_rxfer) || 
+		    (wcount != sd->sc_dk.dk_stats->io_wxfer)) {
+			rcount = sd->sc_dk.dk_stats->io_rxfer;
+			wcount = sd->sc_dk.dk_stats->io_wxfer;
+			sc->sc_lcdwanted |= TS102_LCD_DISK_ACTIVE;
+		} else
+			sc->sc_lcdwanted &= ~TS102_LCD_DISK_ACTIVE;
+		if (le != NULL) {
+			if (le->sc_havecarrier != 0) {
+				sc->sc_lcdwanted |= TS102_LCD_LAN_ACTIVE;
+			} else
+				sc->sc_lcdwanted &= ~TS102_LCD_LAN_ACTIVE;
+		}
+		splx(s);
+		tctrl_update_lcd(sc);
+		if (sc->sc_ext_pending)
+			tctrl_read_event_status(sc);
+	}
+}
+
+void
+tadpole_register_callback(void (*callback)(void *, int), void *cookie)
+{
+	struct tctrl_softc *sc;
+
+	sc = device_lookup_private(&tctrl_cd, TCTRL_STD_DEV);
+	sc->sc_video_callback = callback;
+	sc->sc_video_callback_cookie = cookie;
+	if (sc->sc_video_callback != NULL) {
+		sc->sc_video_callback(sc->sc_video_callback_cookie,
+		    sc->sc_extvga);
+	}
 }

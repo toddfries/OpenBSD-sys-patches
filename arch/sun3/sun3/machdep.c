@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.178 2006/10/21 05:54:33 mrg Exp $	*/
+/*	$NetBSD: machdep.c,v 1.187 2008/11/12 12:36:08 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -78,7 +78,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.178 2006/10/21 05:54:33 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.187 2008/11/12 12:36:08 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -103,7 +103,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.178 2006/10/21 05:54:33 mrg Exp $");
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/vnode.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/ksyms.h>
 #ifdef	KGDB
@@ -142,13 +141,12 @@ extern char etext[];
 /* Our exported CPU info; we can have only one. */  
 struct cpu_info cpu_info_store;
 
-struct vm_map *exec_map = NULL;  
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
 int	physmem;
 int	fputype;
-caddr_t	msgbufaddr;
+void *	msgbufaddr;
 
 /* Virtual page frame for /dev/mem (see mem.c) */
 vaddr_t vmmap;
@@ -181,7 +179,7 @@ consinit(void)
 	 */
 	cninit();
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	{
 		extern int nsym;
 		extern char *ssym, *esym;
@@ -217,12 +215,9 @@ consinit(void)
 void 
 cpu_startup(void)
 {
-	caddr_t v;
+	char *v;
 	vaddr_t minaddr, maxaddr;
 	char pbuf[9];
-
-	if (fputype != FPU_NONE)
-		m68k_make_fpu_idle_frame();
 
 	/*
 	 * Initialize message buffer (for kernel printf).
@@ -231,8 +226,8 @@ cpu_startup(void)
 	 * Its mapping was prepared in pmap_bootstrap().
 	 * Also, offset some to avoid PROM scribbles.
 	 */
-	v = (caddr_t) KERNBASE;
-	msgbufaddr = (caddr_t)(v + MSGBUFOFF);
+	v = (char *)KERNBASE;
+	msgbufaddr = v + MSGBUFOFF;
 	initmsgbuf(msgbufaddr, MSGBUFSIZE);
 
 	/*
@@ -254,25 +249,19 @@ cpu_startup(void)
 
 
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+				   VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 nmbclusters * mclbytes, VM_MAP_INTRSAFE,
-				 FALSE, NULL);
+				 false, NULL);
 
 	format_bytes(pbuf, sizeof(pbuf), ptoa(uvmexp.free));
 	printf("avail memory = %s\n", pbuf);
@@ -468,6 +457,8 @@ cpu_reboot(int howto, char *user_boot_string)
 
 	/* run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if (howto & RB_HALT) {
 	haltsys:

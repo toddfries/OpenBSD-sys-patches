@@ -1,22 +1,21 @@
-/*	$OpenBSD: divrem.m4,v 1.3 1996/10/31 00:43:17 niklas Exp $	*/
-/*	$NetBSD: divrem.m4,v 1.5 1996/10/17 04:26:25 cgd Exp $	*/
+/*	$NetBSD: divrem.m4,v 1.8 2005/12/11 12:24:42 christos Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -146,7 +145,7 @@ LAloop:
 	and	A, BIT, CC			/* if bit in A is set, done. */
 	bne	CC, Ldodiv
 	subq	I, 1, I				/* decrement I, shift bit */
-	srl     BIT, 1, BIT 
+	srl     BIT, 1, BIT
 	bne	I, LAloop			/* If I != 0, loop again */
 
 Ldodiv:
@@ -160,7 +159,7 @@ Ldivloop:
 	cmoveq	CC, T_0, RESULT
 	subq	A, B, T_0
 	cmoveq	CC, T_0, A
-	srl	BIT, 1, BIT	
+	srl	BIT, 1, BIT
 	srl	B, 1, B
 	beq	A, Lret_result
 	bne	BIT, Ldivloop
@@ -172,7 +171,7 @@ ifelse(OP, `div',
 ifelse(S, `true',
 `
 	/* Check to see if we should negate it. */
-	subqv	zero, RESULT, T_0
+	subq	zero, RESULT, T_0
 	cmovlbs	NEG, T_0, RESULT
 ')
 

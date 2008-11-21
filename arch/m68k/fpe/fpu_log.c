@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_log.c,v 1.6 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_log.c,v 1.8 2003/07/15 02:43:10 lukem Exp $	*/
+/*	$NetBSD: fpu_log.c,v 1.9 2005/12/11 12:17:52 christos Exp $	*/
 
 /*
  * Copyright (c) 1995  Ken Nakata
@@ -32,10 +31,13 @@
  *	@(#)fpu_log.c	10/8/95
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_log.c,v 1.9 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 #include <sys/systm.h>
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
 static u_int logA6[] = { 0x3FC2499A, 0xB5E4040B };
 static u_int logA5[] = { 0xBFC555B5, 0x848CB7DB };
@@ -185,13 +187,13 @@ static struct sfpn {
     { 0x3FFE - 0x3fff, 0xB07197A2U, 0x3C46C654U },
 };
 
-struct fpn *__fpu_logn(struct fpemu *fe);
+static struct fpn *__fpu_logn __P((struct fpemu *fe));
 
 /*
  * natural log - algorithm taken from Motorola FPSP,
  * except this doesn't bother to check for invalid input.
  */
-struct fpn *
+static struct fpn *
 __fpu_logn(fe)
      struct fpemu *fe;
 {

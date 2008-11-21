@@ -1,4 +1,5 @@
-/*	$OpenBSD: if_zydreg.h,v 1.22 2007/11/27 20:30:14 damien Exp $	*/
+/*	$OpenBSD: if_zydreg.h,v 1.19 2006/11/30 19:28:07 damien Exp $	*/
+/*	$NetBSD: if_zydreg.h,v 1.2 2007/06/16 11:18:45 kiyohara Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -1075,16 +1076,14 @@ struct zyd_notif_retry {
 #define ZYD_TX_TIMEOUT		10000
 
 #define ZYD_MAX_TXBUFSZ	\
-	(sizeof (struct zyd_tx_desc) + IEEE80211_MAX_LEN)
+	(sizeof (struct zyd_tx_desc) + MCLBYTES)
 
 #define ZYD_MIN_FRAGSZ							\
 	(sizeof (struct zyd_plcphdr) + IEEE80211_MIN_LEN + 		\
 	 sizeof (struct zyd_rx_stat))
 #define ZYD_MIN_RXBUFSZ	ZYD_MIN_FRAGSZ
-#define ZYX_MAX_RXBUFSZ							\
-	((sizeof (struct zyd_plcphdr) + IEEE80211_MAX_LEN +		\
-	  sizeof (struct zyd_rx_stat)) * ZYD_MAX_RXFRAMECNT + 		\
-	 sizeof (struct zyd_rx_desc))
+#define ZYX_MAX_RXBUFSZ	\
+	(sizeof (struct zyd_plcphdr) + MCLBYTES + sizeof (struct zyd_rx_desc))
 
 #define ZYD_CMD_FLAG_READ	(1 << 0)
 
@@ -1131,8 +1130,7 @@ struct zyd_rx_radiotap_header {
 #define ZYD_RX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_RATE) |				\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_RSSI))
+	 (1 << IEEE80211_RADIOTAP_CHANNEL))
 
 struct zyd_tx_radiotap_header {
 	struct ieee80211_radiotap_header wt_ihdr;
@@ -1160,8 +1158,17 @@ struct zyd_rf {
 	int	width;
 };
 
+struct rq {
+	const uint16_t *idata;
+	struct zyd_pair *odata;
+	int len;
+	SIMPLEQ_ENTRY(rq) rq;
+};
+
 struct zyd_softc {
-	struct device			sc_dev;
+	USBBASEDEVICE			sc_dev;
+	struct ethercom			sc_ec;
+#define sc_if	sc_ec.ec_if
 	struct ieee80211com		sc_ic;
 	int				(*sc_newstate)(struct ieee80211com *,
 					    enum ieee80211_state, int);
@@ -1170,19 +1177,20 @@ struct zyd_softc {
 	struct usb_task			sc_task;
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
+	int				sc_flags;
+#define ZD1211_FWLOADED (1 << 0)
+
 
 	enum ieee80211_state		sc_state;
 	int				sc_arg;
-	int				sc_if_flags;
 	int				attached;
 
-	struct timeout			scan_to;
-	struct timeout			amrr_to;
+	usb_callout_t			sc_scan_ch;
+	usb_callout_t			sc_amrr_ch;
 
 	struct ieee80211_amrr		amrr;
 
-	void				*odata;
-	int				olen;
+	SIMPLEQ_HEAD(rqh, rq) sc_rqh;
 
 	uint16_t			fwbase;
 	uint8_t				regdomain;
@@ -1190,8 +1198,6 @@ struct zyd_softc {
 	uint16_t			fw_rev;
 	uint8_t				rf_rev;
 	uint8_t				pa_rev;
-	uint8_t				fix_cr47;
-	uint8_t				fix_cr157;
 	uint8_t				pwr_cal[14];
 	uint8_t				pwr_int[14];
 	uint8_t				ofdm36_cal[14];
@@ -1213,7 +1219,7 @@ struct zyd_softc {
 	int				tx_timer;
 
 #if NBPFILTER > 0
-	caddr_t				sc_drvbpf;
+	void *				sc_drvbpf;
 
 	union {
 		struct zyd_rx_radiotap_header th;

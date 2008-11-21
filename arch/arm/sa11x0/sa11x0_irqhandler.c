@@ -1,4 +1,4 @@
-/*	$NetBSD: sa11x0_irqhandler.c,v 1.10 2006/06/27 13:58:08 peter Exp $	*/
+/*	$NetBSD: sa11x0_irqhandler.c,v 1.16 2008/06/13 13:24:10 rafal Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2001 The NetBSD Foundation, Inc.
@@ -19,13 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,7 +69,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sa11x0_irqhandler.c,v 1.10 2006/06/27 13:58:08 peter Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sa11x0_irqhandler.c,v 1.16 2008/06/13 13:24:10 rafal Exp $");
 
 #include "opt_irqstats.h"
 
@@ -87,6 +80,7 @@ __KERNEL_RCSID(0, "$NetBSD: sa11x0_irqhandler.c,v 1.10 2006/06/27 13:58:08 peter
 #include <sys/malloc.h>
 #include <uvm/uvm_extern.h>
 
+#include <arm/arm32/machdep.h>
 #include <arm/sa11x0/sa11x0_reg.h>
 #include <arm/sa11x0/sa11x0_var.h>
 
@@ -95,17 +89,9 @@ __KERNEL_RCSID(0, "$NetBSD: sa11x0_irqhandler.c,v 1.10 2006/06/27 13:58:08 peter
 
 irqhandler_t *irqhandlers[NIRQS];
 
-int current_intr_depth;
 u_int actual_mask;
-#ifdef hpcarm
-#define IPL_LEVELS (NIPL+1)
-u_int imask[NIPL];
-#else
-u_int spl_mask;
-u_int irqmasks[IPL_LEVELS];
-#endif
+u_int irqmasks[NIPL];
 
-extern void set_spl_masks(void);
 static int fakeintr(void *);
 #ifdef INTR_DEBUG
 static int dumpirqhandlers(void);
@@ -115,6 +101,9 @@ void intr_calculatemasks(void);
 const struct evcnt *sa11x0_intr_evcnt(sa11x0_chipset_tag_t, int);
 void stray_irqhandler(void *);
 
+#if IPL_NONE > IPL_HIGH	
+#error IPL_NONE must be less than IPL_HIGH
+#endif
 /*
  * Recalculate the interrupt masks from scratch.
  * We could code special registry and deregistry versions of this function that
@@ -124,46 +113,41 @@ void stray_irqhandler(void *);
 void
 intr_calculatemasks(void)
 {
-	int irq, level;
+	int i, irq, ipl;
 	struct irqhandler *q;
 	int intrlevel[ICU_LEN];
 
 	/* First, figure out which levels each IRQ uses. */
 	for (irq = 0; irq < ICU_LEN; irq++) {
-		int levels = 0;
+		int ipls = 0;
 		for (q = irqhandlers[irq]; q; q = q->ih_next)
-			levels |= 1 << q->ih_level;
-		intrlevel[irq] = levels;
+			ipls |= 1 << q->ih_level;
+		intrlevel[irq] = ipls;
 	}
 
 	/* Then figure out which IRQs use each level. */
-#ifdef hpcarm
-	for (level = 0; level < NIPL; level++) {
-#else
-	for (level = 0; level <= IPL_LEVELS; level++) {
-#endif
+	for (ipl = 0; ipl < NIPL; ipl++) {
 		int irqs = 0;
 		for (irq = 0; irq < ICU_LEN; irq++)
-			if (intrlevel[irq] & (1 << level))
+			if (intrlevel[irq] & (1 << ipl))
 				irqs |= 1 << irq;
-#ifdef hpcarm
-		imask[level] = irqs;
-#else
-		irqmasks[level] = irqs;
-#endif
+
+		/* First enable the interrupt(s) at all lower level(s) */
+		for(i = 0; i < ipl; ++i)
+			irqmasks[i] |= irqs;
+
+		/* Then disable the interrupt(s) at all higher level(s) */
+		for( ; i < NIPL-1; ++i)
+			irqmasks[i] &= ~irqs;
+
 	}
 
 	/*
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
-#ifdef hpcarm
-	for (level = NIPL - 1; level > 0; level--)
-		imask[level - 1] |= imask[level];
-#else
-	for (level = IPL_LEVELS; level > 0; level--)
-		irqmasks[level - 1] |= irqmasks[level];
-#endif
+	for (ipl = 0; ipl < NIPL - 1; ipl++)
+		irqmasks[ipl + 1] &= irqmasks[ipl];
 }
 
 
@@ -241,7 +225,6 @@ sa11x0_intr_establish(sa11x0_chipset_tag_t ic, int irq, int type, int level,
 	return ih;
 }
 
-#ifdef hpcarm
 /*
  * Deregister an interrupt handler.
  */
@@ -279,13 +262,12 @@ sa11x0_intr_disestablish(sa11x0_chipset_tag_t ic, void *arg)
 	SetCPSR(I32_bit, saved_cpsr & I32_bit);
 
 }
-#endif
 
 void
 stray_irqhandler(void *p)
 {
-
-	printf("stray interrupt\n");
+	int irq = (int)p;
+	printf("stray interrupt %d\n", irq);
 }
 
 int

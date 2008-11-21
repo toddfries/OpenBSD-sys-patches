@@ -1,5 +1,4 @@
-/*      $OpenBSD: psl.h,v 1.7 2003/06/02 23:27:57 millert Exp $      */
-/*      $NetBSD: psl.h,v 1.6 1997/06/07 12:15:28 ragge Exp $      */
+/*      $NetBSD: psl.h,v 1.11 2008/08/05 15:56:04 matt Exp $      */
 
 /*
  * Rewritten for the VAX port. Based on Berkeley code. /IC
@@ -45,6 +44,9 @@
 #define	PSL_Z		0x00000004     	/* zero bit */
 #define	PSL_N		0x00000008     	/* negative bit */
 #define	PSL_T		0x00000010      /* trace enable bit */
+#define	PSL_IV		0x00000020	/* integer overflow */
+#define	PSL_FU		0x00000040	/* floating underflow */
+#define	PSL_DV		0x00000080	/* decimal overflow */
 #define	PSL_IPL00	0x00000000	/* interrupt priority level 0 */
 #define	PSL_IPL01	0x00010000	/* interrupt priority level 1 */
 #define	PSL_IPL02	0x00020000	/* interrupt priority level 2 */
@@ -101,8 +103,10 @@
  * Macros to decode processor status word.
  */
 #define	CLKF_USERMODE(framep)	((((framep)->ps) & (PSL_U)) == PSL_U)
+#define	CLKF_BASEPRI(framep)	((((framep)->ps) & (PSL_IPL1F)) < PSL_IPL02)
 #define	CLKF_PC(framep)		((framep)->pc)
-#define	CLKF_INTR(framep)	((((framep)->ps) & (PSL_IS)) == PSL_IS)
+#define	CLKF_INTR(framep)	(((((framep)->ps) & (PSL_IS)) == PSL_IS) && \
+				    !CLKF_BASEPRI(framep))
 #define PSL2IPL(ps)             ((ps) >> 16)
 
 #endif

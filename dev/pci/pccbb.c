@@ -1,5 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.60 2008/05/22 19:23:04 mk Exp $	*/
-/*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
+/*	$NetBSD: pccbb.c,v 1.180 2008/10/25 18:46:38 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 and 2000
@@ -31,32 +30,27 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pccbb.c,v 1.180 2008/10/25 18:46:38 christos Exp $");
+
 /*
 #define CBB_DEBUG
 #define SHOW_REGS
-#define PCCBB_PCMCIA_POLL
 */
 
-/*
-#define CB_PCMCIA_POLL
-#define CB_PCMCIA_POLL_ONLY
-#define LEVEL2
-*/
-
-#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/errno.h>
-#include <sys/evcount.h>
 #include <sys/ioctl.h>
+#include <sys/reboot.h>		/* for bootverbose */
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
 
-#include <machine/intr.h>
-#include <machine/bus.h>
+#include <sys/intr.h>
+#include <sys/bus.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -72,7 +66,6 @@
 #include <dev/pcmcia/pcmciavar.h>
 
 #include <dev/ic/i82365reg.h>
-#include <dev/ic/i82365var.h>
 #include <dev/pci/pccbbvar.h>
 
 #ifndef __NetBSD_Version__
@@ -81,144 +74,15 @@ struct cfdriver cbb_cd = {
 };
 #endif
 
-#if defined CBB_DEBUG
+#ifdef CBB_DEBUG
 #define DPRINTF(x) printf x
+#define STATIC
 #else
 #define DPRINTF(x)
+#define STATIC static
 #endif
 
-int	pcicbbmatch(struct device *, void *, void *);
-void	pccbbattach(struct device *, struct device *, void *);
-int	pccbbintr(void *);
-void	pccbb_shutdown(void *);
-void	pci113x_insert(void *);
-int	pccbbintr_function(struct pccbb_softc *);
-
-int	pccbb_detect_card(struct pccbb_softc *);
-
-void	pccbb_pcmcia_write(struct pcic_handle *, int, int);
-u_int8_t pccbb_pcmcia_read(struct pcic_handle *, int);
-#define Pcic_read(ph, reg) ((ph)->ph_read((ph), (reg)))
-#define Pcic_write(ph, reg, val) ((ph)->ph_write((ph), (reg), (val)))
-
-int	cb_reset(struct pccbb_softc *);
-int	cb_detect_voltage(struct pccbb_softc *);
-int	cbbprint(void *, const char *);
-
-int	cb_chipset(u_int32_t, int *);
-void	pccbb_pcmcia_attach_setup(struct pccbb_softc *,
-    struct pcmciabus_attach_args *);
-#if 0
-void	pccbb_pcmcia_attach_card(struct pcic_handle *);
-void	pccbb_pcmcia_detach_card(struct pcic_handle *, int);
-void	pccbb_pcmcia_deactivate_card(struct pcic_handle *);
-#endif
-
-int	pccbb_ctrl(cardbus_chipset_tag_t, int);
-int	pccbb_power(cardbus_chipset_tag_t, int);
-int	pccbb_cardenable(struct pccbb_softc * sc, int function);
-void   *pccbb_intr_establish(struct pccbb_softc *, int irq, int level,
-    int (*ih) (void *), void *sc, const char *);
-void	pccbb_intr_disestablish(struct pccbb_softc *, void *ih);
-
-void   *pccbb_cb_intr_establish(cardbus_chipset_tag_t, int irq, int level,
-    int (*ih) (void *), void *sc, const char *);
-void	pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct, void *ih);
-
-cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t, int, int, int);
-void	pccbb_free_tag(cardbus_chipset_tag_t, cardbustag_t);
-cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t, cardbustag_t, int);
-void	pccbb_conf_write(cardbus_chipset_tag_t, cardbustag_t, int,
-    cardbusreg_t);
-void	pccbb_chipinit(struct pccbb_softc *);
-
-int	pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
-    struct pcmcia_mem_handle *);
-void	pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t,
-    struct pcmcia_mem_handle *);
-int	pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t, int, bus_addr_t,
-    bus_size_t, struct pcmcia_mem_handle *, bus_size_t *, int *);
-void	pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t, int);
-int	pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t, bus_addr_t,
-    bus_size_t, bus_size_t, struct pcmcia_io_handle *);
-void	pccbb_pcmcia_io_free(pcmcia_chipset_handle_t,
-    struct pcmcia_io_handle *);
-int	pccbb_pcmcia_io_map(pcmcia_chipset_handle_t, int, bus_addr_t,
-    bus_size_t, struct pcmcia_io_handle *, int *);
-void	pccbb_pcmcia_io_unmap(pcmcia_chipset_handle_t, int);
-void   *pccbb_pcmcia_intr_establish(pcmcia_chipset_handle_t,
-    struct pcmcia_function *, int, int (*)(void *), void *, char *);
-void	pccbb_pcmcia_intr_disestablish(pcmcia_chipset_handle_t, void *);
-const char *pccbb_pcmcia_intr_string(pcmcia_chipset_handle_t, void *);
-void	pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t);
-void	pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t);
-int	pccbb_pcmcia_card_detect(pcmcia_chipset_handle_t pch);
-
-void	pccbb_pcmcia_do_io_map(struct pcic_handle *, int);
-void	pccbb_pcmcia_wait_ready(struct pcic_handle *);
-void	pccbb_pcmcia_do_mem_map(struct pcic_handle *, int);
-void	pccbb_powerhook(int, void *);
-
-/* bus-space allocation and deallocation functions */
-int	pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t, rbus_tag_t,
-    bus_addr_t addr, bus_size_t size, bus_addr_t mask, bus_size_t align,
-    int flags, bus_addr_t * addrp, bus_space_handle_t * bshp);
-int	pccbb_rbus_cb_space_free(cardbus_chipset_tag_t, rbus_tag_t,
-    bus_space_handle_t, bus_size_t);
-
-int	pccbb_open_win(struct pccbb_softc *, bus_space_tag_t,
-    bus_addr_t, bus_size_t, bus_space_handle_t, int flags);
-int	pccbb_close_win(struct pccbb_softc *, bus_space_tag_t,
-    bus_space_handle_t, bus_size_t);
-int	pccbb_winlist_insert(struct pccbb_win_chain_head *, bus_addr_t,
-    bus_size_t, bus_space_handle_t, int);
-int	pccbb_winlist_delete(struct pccbb_win_chain_head *,
-    bus_space_handle_t, bus_size_t);
-void	pccbb_winset(bus_addr_t align, struct pccbb_softc *,
-    bus_space_tag_t);
-void	pccbb_winlist_show(struct pccbb_win_chain *);
-
-/* for config_defer */
-void	pccbb_pci_callback(struct device *);
-
-#if defined SHOW_REGS
-void	cb_show_regs(pci_chipset_tag_t, pcitag_t, bus_space_tag_t,
-    bus_space_handle_t memh);
-#endif
-
-struct cfattach cbb_pci_ca = {
-	sizeof(struct pccbb_softc), pcicbbmatch, pccbbattach
-};
-
-static struct pcmcia_chip_functions pccbb_pcmcia_funcs = {
-	pccbb_pcmcia_mem_alloc,
-	pccbb_pcmcia_mem_free,
-	pccbb_pcmcia_mem_map,
-	pccbb_pcmcia_mem_unmap,
-	pccbb_pcmcia_io_alloc,
-	pccbb_pcmcia_io_free,
-	pccbb_pcmcia_io_map,
-	pccbb_pcmcia_io_unmap,
-	pccbb_pcmcia_intr_establish,
-	pccbb_pcmcia_intr_disestablish,
-	pccbb_pcmcia_intr_string,
-	pccbb_pcmcia_socket_enable,
-	pccbb_pcmcia_socket_disable,
-	pccbb_pcmcia_card_detect
-};
-
-static struct cardbus_functions pccbb_funcs = {
-	pccbb_rbus_cb_space_alloc,
-	pccbb_rbus_cb_space_free,
-	pccbb_cb_intr_establish,
-	pccbb_cb_intr_disestablish,
-	pccbb_ctrl,
-	pccbb_power,
-	pccbb_make_tag,
-	pccbb_free_tag,
-	pccbb_conf_read,
-	pccbb_conf_write,
-};
+int pccbb_burstup = 1;
 
 /*
  * delay_ms() is wait in milliseconds.  It should be used instead
@@ -233,11 +97,171 @@ delay_ms(int millis, void *param)
 		tsleep(param, PWAIT, "pccbb", MAX(2, hz * millis / 1000));
 }
 
+int pcicbbmatch(device_t, struct cfdata *, void *);
+void pccbbattach(device_t, device_t, void *);
+int pccbbdetach(device_t, int);
+int pccbbintr(void *);
+static void pci113x_insert(void *);
+static int pccbbintr_function(struct pccbb_softc *);
+
+static int pccbb_detect_card(struct pccbb_softc *);
+
+static void pccbb_pcmcia_write(struct pccbb_softc *, int, u_int8_t);
+static u_int8_t pccbb_pcmcia_read(struct pccbb_softc *, int);
+#define Pcic_read(sc, reg) pccbb_pcmcia_read((sc), (reg))
+#define Pcic_write(sc, reg, val) pccbb_pcmcia_write((sc), (reg), (val))
+
+STATIC int cb_reset(struct pccbb_softc *);
+STATIC int cb_detect_voltage(struct pccbb_softc *);
+STATIC int cbbprint(void *, const char *);
+
+static int cb_chipset(u_int32_t, int *);
+STATIC void pccbb_pcmcia_attach_setup(struct pccbb_softc *,
+    struct pcmciabus_attach_args *);
+
+STATIC int pccbb_ctrl(cardbus_chipset_tag_t, int);
+STATIC int pccbb_power(struct pccbb_softc *sc, int);
+STATIC int pccbb_power_ct(cardbus_chipset_tag_t, int);
+STATIC int pccbb_cardenable(struct pccbb_softc * sc, int function);
+#if !rbus
+static int pccbb_io_open(cardbus_chipset_tag_t, int, u_int32_t, u_int32_t);
+static int pccbb_io_close(cardbus_chipset_tag_t, int);
+static int pccbb_mem_open(cardbus_chipset_tag_t, int, u_int32_t, u_int32_t);
+static int pccbb_mem_close(cardbus_chipset_tag_t, int);
+#endif /* !rbus */
+static void *pccbb_intr_establish(struct pccbb_softc *,
+    cardbus_intr_line_t irq, int level, int (*ih) (void *), void *sc);
+static void pccbb_intr_disestablish(struct pccbb_softc *, void *ih);
+
+static void *pccbb_cb_intr_establish(cardbus_chipset_tag_t,
+    cardbus_intr_line_t irq, int level, int (*ih) (void *), void *sc);
+static void pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct, void *ih);
+
+static cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t, int, int);
+static void pccbb_free_tag(cardbus_chipset_tag_t, cardbustag_t);
+static cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t, cardbustag_t, int);
+static void pccbb_conf_write(cardbus_chipset_tag_t, cardbustag_t, int,
+    cardbusreg_t);
+static void pccbb_chipinit(struct pccbb_softc *);
+static void pccbb_intrinit(struct pccbb_softc *);
+
+STATIC int pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
+    struct pcmcia_mem_handle *);
+STATIC void pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t,
+    struct pcmcia_mem_handle *);
+STATIC int pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t, int, bus_addr_t,
+    bus_size_t, struct pcmcia_mem_handle *, bus_addr_t *, int *);
+STATIC void pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t, int);
+STATIC int pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t, bus_addr_t,
+    bus_size_t, bus_size_t, struct pcmcia_io_handle *);
+STATIC void pccbb_pcmcia_io_free(pcmcia_chipset_handle_t,
+    struct pcmcia_io_handle *);
+STATIC int pccbb_pcmcia_io_map(pcmcia_chipset_handle_t, int, bus_addr_t,
+    bus_size_t, struct pcmcia_io_handle *, int *);
+STATIC void pccbb_pcmcia_io_unmap(pcmcia_chipset_handle_t, int);
+STATIC void *pccbb_pcmcia_intr_establish(pcmcia_chipset_handle_t,
+    struct pcmcia_function *, int, int (*)(void *), void *);
+STATIC void pccbb_pcmcia_intr_disestablish(pcmcia_chipset_handle_t, void *);
+STATIC void pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t);
+STATIC void pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t);
+STATIC void pccbb_pcmcia_socket_settype(pcmcia_chipset_handle_t, int);
+STATIC int pccbb_pcmcia_card_detect(pcmcia_chipset_handle_t pch);
+
+static int pccbb_pcmcia_wait_ready(struct pccbb_softc *);
+static void pccbb_pcmcia_delay(struct pccbb_softc *, int, const char *);
+
+static void pccbb_pcmcia_do_io_map(struct pccbb_softc *, int);
+static void pccbb_pcmcia_do_mem_map(struct pccbb_softc *, int);
+
+/* bus-space allocation and deallocation functions */
+#if rbus
+
+static int pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t, rbus_tag_t,
+    bus_addr_t addr, bus_size_t size, bus_addr_t mask, bus_size_t align,
+    int flags, bus_addr_t * addrp, bus_space_handle_t * bshp);
+static int pccbb_rbus_cb_space_free(cardbus_chipset_tag_t, rbus_tag_t,
+    bus_space_handle_t, bus_size_t);
+
+#endif /* rbus */
+
+#if rbus
+
+static int pccbb_open_win(struct pccbb_softc *, bus_space_tag_t,
+    bus_addr_t, bus_size_t, bus_space_handle_t, int flags);
+static int pccbb_close_win(struct pccbb_softc *, bus_space_tag_t,
+    bus_space_handle_t, bus_size_t);
+static int pccbb_winlist_insert(struct pccbb_win_chain_head *, bus_addr_t,
+    bus_size_t, bus_space_handle_t, int);
+static int pccbb_winlist_delete(struct pccbb_win_chain_head *,
+    bus_space_handle_t, bus_size_t);
+static void pccbb_winset(bus_addr_t align, struct pccbb_softc *,
+    bus_space_tag_t);
+void pccbb_winlist_show(struct pccbb_win_chain *);
+
+#endif /* rbus */
+
+/* for config_defer */
+static void pccbb_pci_callback(device_t);
+
+static bool pccbb_suspend(device_t PMF_FN_PROTO);
+static bool pccbb_resume(device_t PMF_FN_PROTO);
+
+#if defined SHOW_REGS
+static void cb_show_regs(pci_chipset_tag_t pc, pcitag_t tag,
+    bus_space_tag_t memt, bus_space_handle_t memh);
+#endif
+
+CFATTACH_DECL_NEW(cbb_pci, sizeof(struct pccbb_softc),
+    pcicbbmatch, pccbbattach, pccbbdetach, NULL);
+
+static const struct pcmcia_chip_functions pccbb_pcmcia_funcs = {
+	pccbb_pcmcia_mem_alloc,
+	pccbb_pcmcia_mem_free,
+	pccbb_pcmcia_mem_map,
+	pccbb_pcmcia_mem_unmap,
+	pccbb_pcmcia_io_alloc,
+	pccbb_pcmcia_io_free,
+	pccbb_pcmcia_io_map,
+	pccbb_pcmcia_io_unmap,
+	pccbb_pcmcia_intr_establish,
+	pccbb_pcmcia_intr_disestablish,
+	pccbb_pcmcia_socket_enable,
+	pccbb_pcmcia_socket_disable,
+	pccbb_pcmcia_socket_settype,
+	pccbb_pcmcia_card_detect
+};
+
+#if rbus
+static const struct cardbus_functions pccbb_funcs = {
+	pccbb_rbus_cb_space_alloc,
+	pccbb_rbus_cb_space_free,
+	pccbb_cb_intr_establish,
+	pccbb_cb_intr_disestablish,
+	pccbb_ctrl,
+	pccbb_power_ct,
+	pccbb_make_tag,
+	pccbb_free_tag,
+	pccbb_conf_read,
+	pccbb_conf_write,
+};
+#else
+static const struct cardbus_functions pccbb_funcs = {
+	pccbb_ctrl,
+	pccbb_power_ct,
+	pccbb_mem_open,
+	pccbb_mem_close,
+	pccbb_io_open,
+	pccbb_io_close,
+	pccbb_cb_intr_establish,
+	pccbb_cb_intr_disestablish,
+	pccbb_make_tag,
+	pccbb_conf_read,
+	pccbb_conf_write,
+};
+#endif
+
 int
-pcicbbmatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+pcicbbmatch(device_t parent, struct cfdata *match, void *aux)
 {
 	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 
@@ -251,9 +275,9 @@ pcicbbmatch(parent, match, aux)
 }
 
 #define MAKEID(vendor, prod) (((vendor) << PCI_VENDOR_SHIFT) \
-				| ((prod) << PCI_PRODUCT_SHIFT))
+                              | ((prod) << PCI_PRODUCT_SHIFT))
 
-struct yenta_chipinfo {
+const struct yenta_chipinfo {
 	pcireg_t yc_id;		       /* vendor tag | product tag */
 	int yc_chiptype;
 	int yc_flags;
@@ -279,27 +303,33 @@ struct yenta_chipinfo {
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1410), CB_TI12XX,
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1420), CB_TI12XX,
+	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1420), CB_TI1420,
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1450), CB_TI125X,
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1451), CB_TI12XX,
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI7XX1), CB_TI12XX,
+	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1520), CB_TI12XX,
+	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI4410YENTA), CB_TI12XX,
+	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI4520YENTA), CB_TI12XX,
+	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI7420YENTA), CB_TI12XX,
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
 
 	/* Ricoh chips */
-	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C475), CB_RX5C47X,
+	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_Rx5C475), CB_RX5C47X,
 	    PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C476), CB_RX5C47X,
+	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RL5C476), CB_RX5C47X,
 	    PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C477), CB_RX5C47X,
+	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_Rx5C477), CB_RX5C47X,
 	    PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C478), CB_RX5C47X,
+	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_Rx5C478), CB_RX5C47X,
 	    PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C465), CB_RX5C46X,
+	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_Rx5C465), CB_RX5C46X,
 	    PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C466), CB_RX5C46X,
+	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_Rx5C466), CB_RX5C46X,
 	    PCCBB_PCMCIA_MEM_32},
 
 	/* Toshiba products */
@@ -318,32 +348,38 @@ struct yenta_chipinfo {
 	{ MAKEID(PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_PD6833),
 	    CB_CIRRUS, PCCBB_PCMCIA_MEM_32},
 
-	/* older O2Micro bridges */
+	/* O2 Micro products */
 	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6729),
-	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6730),
-	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
-	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6872), /* 68[71]2 */
-	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6832),
-	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6836),
-	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6872),
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6922),
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6933),
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6972),
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_7223),
+	  CB_O2MICRO, PCCBB_PCMCIA_MEM_32},
 
 	/* sentinel, or Generic chip */
 	{ 0 /* null id */ , CB_UNKNOWN, PCCBB_PCMCIA_MEM_32},
 };
 
-int
-cb_chipset(pci_id, flagp)
-	u_int32_t pci_id;
-	int *flagp;
+static int
+cb_chipset(u_int32_t pci_id, int *flagp)
 {
-	struct yenta_chipinfo *yc;
+	const struct yenta_chipinfo *yc;
 
 	/* Loop over except the last default entry. */
 	for (yc = yc_chipsets; yc < yc_chipsets +
-	    sizeof(yc_chipsets) / sizeof(yc_chipsets[0]) - 1; yc++)
+	    __arraycount(yc_chipsets) - 1; yc++)
 		if (pci_id == yc->yc_id)
 			break;
 
@@ -354,59 +390,47 @@ cb_chipset(pci_id, flagp)
 }
 
 void
-pccbb_shutdown(void *arg)
+pccbbattach(device_t parent, device_t self, void *aux)
 {
-	struct pccbb_softc *sc = arg;
-	pcireg_t command;
-
-	DPRINTF(("%s: shutdown\n", sc->sc_dev.dv_xname));
-
-	/* Nothing for us to do if we didn't map any registers. */
-	if ((sc->sc_flags & CBB_MEMHMAPPED) == 0)
-		return;
-
-	/* turn off power */
-	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
-
-	bus_space_write_4(sc->sc_base_memt, sc->sc_base_memh, CB_SOCKET_MASK,
-	    0);
-
-	command = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
-
-	command &= ~(PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	    PCI_COMMAND_MASTER_ENABLE);
-	pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG, command);
-}
-
-void
-pccbbattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
-{
-	struct pccbb_softc *sc = (void *)self;
+	struct pccbb_softc *sc = device_private(self);
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcireg_t busreg, reg, sock_base;
-	pci_intr_handle_t ih;
-	const char *intrstr = NULL;
 	bus_addr_t sockbase;
+	char devinfo[256];
 	int flags;
 
+#ifdef __HAVE_PCCBB_ATTACH_HOOK
 	pccbb_attach_hook(parent, self, pa);
+#endif
+
+	sc->sc_dev = self;
+
+	callout_init(&sc->sc_insert_ch, 0);
+	callout_setfunc(&sc->sc_insert_ch, pci113x_insert, sc);
 
 	sc->sc_chipset = cb_chipset(pa->pa_id, &flags);
-	sc->sc_id = pa->pa_id;
 
-#ifdef CBB_DEBUG
-	printf(" (chipflags %x)", flags);
-#endif
+	aprint_naive("\n");
+
+	pci_devinfo(pa->pa_id, 0, 0, devinfo, sizeof(devinfo));
+	aprint_normal(": %s (rev. 0x%02x)", devinfo,
+	    PCI_REVISION(pa->pa_class));
+	DPRINTF((" (chipflags %x)", flags));
+	aprint_normal("\n");
 
 	TAILQ_INIT(&sc->sc_memwindow);
 	TAILQ_INIT(&sc->sc_iowindow);
 
-	sc->sc_rbus_iot = rbus_pccbb_parent_io(self, pa);
-	sc->sc_rbus_memt = rbus_pccbb_parent_mem(self, pa);
+#if rbus
+	sc->sc_rbus_iot = rbus_pccbb_parent_io(pa);
+	sc->sc_rbus_memt = rbus_pccbb_parent_mem(pa);
+
+#if 0
+	printf("pa->pa_memt: %08x vs rbus_mem->rb_bt: %08x\n",
+	       pa->pa_memt, sc->sc_rbus_memt->rb_bt);
+#endif
+#endif /* rbus */
 
 	sc->sc_flags &= ~CBB_MEMHMAPPED;
 
@@ -421,27 +445,29 @@ pccbbattach(parent, self, aux)
 	    PCI_MAPREG_MEM_ADDR(sock_base) != 0xfffffff0) {
 		/* The address must be valid. */
 		if (pci_mapreg_map(pa, PCI_SOCKBASE, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->sc_base_memt, &sc->sc_base_memh, &sockbase, NULL, 0))
-		    {
-			printf("%s: can't map socket base address 0x%x\n",
-			    sc->sc_dev.dv_xname, sock_base);
+		    &sc->sc_base_memt, &sc->sc_base_memh, &sockbase, &sc->sc_base_size)) {
+			aprint_error_dev(self,
+			    "can't map socket base address 0x%lx\n",
+			    (unsigned long)sock_base);
 			/*
 			 * I think it's funny: socket base registers must be
 			 * mapped on memory space, but ...
 			 */
-			if (pci_mapreg_map(pa, PCI_SOCKBASE,
-			    PCI_MAPREG_TYPE_IO, 0, &sc->sc_base_memt,
-			    &sc->sc_base_memh, &sockbase, NULL, 0)) {
-				printf("%s: can't map socket base address"
-				    " 0x%lx: io mode\n", sc->sc_dev.dv_xname,
-				    sockbase);
+			if (pci_mapreg_map(pa, PCI_SOCKBASE, PCI_MAPREG_TYPE_IO,
+			    0, &sc->sc_base_memt, &sc->sc_base_memh, &sockbase,
+			    &sc->sc_base_size)) {
+				aprint_error_dev(self,
+				    "can't map socket base address"
+				    " 0x%lx: io mode\n", 
+				    (unsigned long)sockbase);
 				/* give up... allocate reg space via rbus. */
 				pci_conf_write(pc, pa->pa_tag, PCI_SOCKBASE, 0);
 			} else
 				sc->sc_flags |= CBB_MEMHMAPPED;
 		} else {
 			DPRINTF(("%s: socket base address 0x%lx\n",
-			    sc->sc_dev.dv_xname, sockbase));
+			    device_xname(self),
+			    (unsigned long)sockbase));
 			sc->sc_flags |= CBB_MEMHMAPPED;
 		}
 	}
@@ -455,8 +481,8 @@ pccbbattach(parent, self, aux)
 
 #if defined CBB_DEBUG
 	{
-		static char *intrname[5] = { "NON", "A", "B", "C", "D" };
-		printf(": intrpin %s, line %d\n",
+		static const char *intrname[] = { "NON", "A", "B", "C", "D" };
+		aprint_debug_dev(self, "intrpin %s, intrtag %d\n",
 		    intrname[pa->pa_intrpin], pa->pa_intrline);
 	}
 #endif
@@ -467,52 +493,10 @@ pccbbattach(parent, self, aux)
 	sc->sc_memt = pa->pa_memt;
 	sc->sc_dmat = pa->pa_dmat;
 	sc->sc_tag = pa->pa_tag;
-	sc->sc_function = pa->pa_function;
-	sc->sc_sockbase = sock_base;
-	sc->sc_busnum = busreg;
-	sc->sc_intrtag = pa->pa_intrtag;
-	sc->sc_intrpin = pa->pa_intrpin;
+
+	memcpy(&sc->sc_pa, pa, sizeof(*pa));
 
 	sc->sc_pcmcia_flags = flags;   /* set PCMCIA facility */
-
-	/* Map and establish the interrupt. */
-	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
-		return;
-	}
-	intrstr = pci_intr_string(pc, ih);
-	/* must do this after intr is mapped and established */
-	sc->sc_intrline = pci_intr_line(ih);
-
-	/*
-	 * XXX pccbbintr should be called under the priority lower
-	 * than any other hard interrupts.
-	 */
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, pccbbintr, sc,
-	    sc->sc_dev.dv_xname);
-
-	if (sc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt");
-		if (intrstr != NULL) {
-			printf(" at %s", intrstr);
-		}
-		printf("\n");
-		return;
-	}
-	printf(": %s", intrstr);
-
-	/*
-	 * When bus number isn't set correctly, give up using 32-bit CardBus
-	 * mode.
-	 */
-	if (((busreg >> 8) & 0xff) == 0) {
-		printf(", CardBus support disabled");
-		sc->sc_pcmcia_flags |= PCCBB_PCMCIA_16BITONLY;
-	}
-
-	printf("\n");
-
-	shutdownhook_establish(pccbb_shutdown, sc);
 
 	/* Disable legacy register mapping. */
 	switch (sc->sc_chipset) {
@@ -527,9 +511,9 @@ pccbbattach(parent, self, aux)
 		 * register.  Ricoh CardBus bridges have special bits on Bridge
 		 * control reg (addr 0x3e on PCI config space).
 		 */
-		reg = pci_conf_read(pc, pa->pa_tag, PCI_BCR_INTR);
+		reg = pci_conf_read(pc, pa->pa_tag, PCI_BRIDGE_CONTROL_REG);
 		reg &= ~(CB_BCRI_RL_3E0_ENA | CB_BCRI_RL_3E2_ENA);
-		pci_conf_write(pc, pa->pa_tag, PCI_BCR_INTR, reg);
+		pci_conf_write(pc, pa->pa_tag, PCI_BRIDGE_CONTROL_REG, reg);
 		break;
 
 	default:
@@ -538,40 +522,98 @@ pccbbattach(parent, self, aux)
 		break;
 	}
 
-	timeout_set(&sc->sc_ins_tmo, pci113x_insert, sc);
+	if (!pmf_device_register(self, pccbb_suspend, pccbb_resume))
+		aprint_error_dev(self, "couldn't establish power handler\n");
+
 	config_defer(self, pccbb_pci_callback);
 }
 
+int
+pccbbdetach(device_t self, int flags)
+{
+	struct pccbb_softc *sc = device_private(self);
+	pci_chipset_tag_t pc = sc->sc_pa.pa_pc;
+	bus_space_tag_t bmt = sc->sc_base_memt;
+	bus_space_handle_t bmh = sc->sc_base_memh;
+	uint32_t sockmask;
+	int rc;
+
+	if ((rc = config_detach_children(self, flags)) != 0)
+		return rc;
+
+	if (!LIST_EMPTY(&sc->sc_pil)) {
+		panic("%s: interrupt handlers still registered",
+		    device_xname(self));
+		return EBUSY;
+	}
+
+	if (sc->sc_ih != NULL) {
+		pci_intr_disestablish(pc, sc->sc_ih);
+		sc->sc_ih = NULL;
+	}
+
+	/* CSC Interrupt: turn off card detect and power cycle interrupts */
+	sockmask = bus_space_read_4(bmt, bmh, CB_SOCKET_MASK);
+	sockmask &= ~(CB_SOCKET_MASK_CSTS | CB_SOCKET_MASK_CD |
+		      CB_SOCKET_MASK_POWER);
+	bus_space_write_4(bmt, bmh, CB_SOCKET_MASK, sockmask);
+	/* reset interrupt */
+	bus_space_write_4(bmt, bmh, CB_SOCKET_EVENT,
+	    bus_space_read_4(bmt, bmh, CB_SOCKET_EVENT));
+
+	switch (sc->sc_flags & (CBB_MEMHMAPPED|CBB_SPECMAPPED)) {
+	case CBB_MEMHMAPPED:
+		bus_space_unmap(bmt, bmh, sc->sc_base_size);
+		break;
+	case CBB_MEMHMAPPED|CBB_SPECMAPPED:
+#if rbus
+	{
+		pcireg_t sockbase;
+
+		sockbase = pci_conf_read(pc, sc->sc_tag, PCI_SOCKBASE);
+		rbus_space_free(sc->sc_rbus_memt, bmh, 0x1000,
+		    NULL);
+	}
+#else
+		bus_space_free(bmt, bmh, 0x1000);
+#endif
+	}
+	sc->sc_flags &= ~(CBB_MEMHMAPPED|CBB_SPECMAPPED);
+
+	if (!TAILQ_EMPTY(&sc->sc_iowindow))
+		aprint_error_dev(self, "i/o windows not empty");
+	if (!TAILQ_EMPTY(&sc->sc_memwindow))
+		aprint_error_dev(self, "memory windows not empty");
+
+	callout_stop(&sc->sc_insert_ch);
+	callout_destroy(&sc->sc_insert_ch);
+	return 0;
+}
+
 /*
- * void pccbb_pci_callback(struct device *self)
+ * static void pccbb_pci_callback(device_t self)
  *
  *   The actual attach routine: get memory space for YENTA register
  *   space, setup YENTA register and route interrupt.
  *
  *   This function should be deferred because this device may obtain
  *   memory space dynamically.  This function must avoid obtaining
- *   memory area which has already kept for another device.  Also,
- *   this function MUST be done before ISA attach process because this
- *   function kills pcic compatible port used by ISA pcic.
+ *   memory area which has already kept for another device.
  */
-void
-pccbb_pci_callback(self)
-	struct device *self;
+static void
+pccbb_pci_callback(device_t self)
 {
-	struct pccbb_softc *sc = (void *)self;
+	struct pccbb_softc *sc = device_private(self);
 	pci_chipset_tag_t pc = sc->sc_pc;
-	bus_space_tag_t base_memt;
-	bus_space_handle_t base_memh;
-	u_int32_t maskreg;
 	bus_addr_t sockbase;
 	struct cbslot_attach_args cba;
 	struct pcmciabus_attach_args paa;
 	struct cardslot_attach_args caa;
-	struct cardslot_softc *csc;
-	u_int32_t sockstat;
+	device_t csc;
 
 	if (!(sc->sc_flags & CBB_MEMHMAPPED)) {
 		/* The socket registers aren't mapped correctly. */
+#if rbus
 		if (rbus_space_alloc(sc->sc_rbus_memt, 0, 0x1000, 0x0fff,
 		    (sc->sc_chipset == CB_RX5C47X
 		    || sc->sc_chipset == CB_TI113X) ? 0x10000 : 0x1000,
@@ -580,57 +622,76 @@ pccbb_pci_callback(self)
 		}
 		sc->sc_base_memt = sc->sc_memt;
 		pci_conf_write(pc, sc->sc_tag, PCI_SOCKBASE, sockbase);
-		DPRINTF(("%s: CardBus register address 0x%lx -> 0x%x\n",
-		    sc->sc_dev.dv_xname, sockbase, pci_conf_read(pc, sc->sc_tag,
+		DPRINTF(("%s: CardBus register address 0x%lx -> 0x%lx\n",
+		    device_xname(self), (unsigned long)sockbase,
+		    (unsigned long)pci_conf_read(pc, sc->sc_tag,
 		    PCI_SOCKBASE)));
+#else
+		sc->sc_base_memt = sc->sc_memt;
+#if !defined CBB_PCI_BASE
+#define CBB_PCI_BASE 0x20000000
+#endif
+		if (bus_space_alloc(sc->sc_base_memt, CBB_PCI_BASE, 0xffffffff,
+		    0x1000, 0x1000, 0, 0, &sockbase, &sc->sc_base_memh)) {
+			/* cannot allocate memory space */
+			return;
+		}
+		pci_conf_write(pc, sc->sc_tag, PCI_SOCKBASE, sockbase);
+		DPRINTF(("%s: CardBus register address 0x%lx -> 0x%lx\n",
+		    device_xname(self), (unsigned long)sock_base,
+		    (unsigned long)pci_conf_read(pc,
+		    sc->sc_tag, PCI_SOCKBASE)));
+#endif
 		sc->sc_flags |= CBB_MEMHMAPPED;
 	}
 
-	base_memt = sc->sc_base_memt;  /* socket regs memory tag */
-	base_memh = sc->sc_base_memh;  /* socket regs memory handle */
+	/* clear data structure for child device interrupt handlers */
+	LIST_INIT(&sc->sc_pil);
 
 	/* bus bridge initialization */
 	pccbb_chipinit(sc);
 
-	/* clear data structure for child device interrupt handlers */
-	sc->sc_pil = NULL;
 	sc->sc_pil_intr_enable = 1;
 
-	powerhook_establish(pccbb_powerhook, sc);
+	{
+		u_int32_t sockstat;
 
-	sockstat = bus_space_read_4(base_memt, base_memh, CB_SOCKET_STAT);
-	if ((sockstat & CB_SOCKET_STAT_CD) == 0)
-		sc->sc_flags |= CBB_CARDEXIST;
+		sockstat = bus_space_read_4(sc->sc_base_memt,
+		    sc->sc_base_memh, CB_SOCKET_STAT);
+		if (0 == (sockstat & CB_SOCKET_STAT_CD)) {
+			sc->sc_flags |= CBB_CARDEXIST;
+		}
+	}
 
 	/*
 	 * attach cardbus
 	 */
-	if (!(sc->sc_pcmcia_flags & PCCBB_PCMCIA_16BITONLY)) {
+	{
 		pcireg_t busreg = pci_conf_read(pc, sc->sc_tag, PCI_BUSNUM);
 		pcireg_t bhlc = pci_conf_read(pc, sc->sc_tag, PCI_BHLC_REG);
 
 		/* initialize cbslot_attach */
-		cba.cba_busname = "cardbus";
 		cba.cba_iot = sc->sc_iot;
 		cba.cba_memt = sc->sc_memt;
 		cba.cba_dmat = sc->sc_dmat;
 		cba.cba_bus = (busreg >> 8) & 0x0ff;
 		cba.cba_cc = (void *)sc;
 		cba.cba_cf = &pccbb_funcs;
-		cba.cba_intrline = sc->sc_intrline;
+		cba.cba_intrline = 0; /* XXX dummy */
 
+#if rbus
 		cba.cba_rbus_iot = sc->sc_rbus_iot;
 		cba.cba_rbus_memt = sc->sc_rbus_memt;
+#endif
 
 		cba.cba_cacheline = PCI_CACHELINE(bhlc);
-		cba.cba_lattimer = PCI_CB_LATENCY(busreg);
+		cba.cba_max_lattimer = PCI_LATTIMER(bhlc);
 
-#if defined CBB_DEBUG
-		printf("%s: cacheline 0x%x lattimer 0x%x\n",
-		    sc->sc_dev.dv_xname, cba.cba_cacheline, cba.cba_lattimer);
-		printf("%s: bhlc 0x%x lscp 0x%x\n", sc->sc_dev.dv_xname, bhlc,
-		    busreg);
-#endif
+		aprint_verbose_dev(self,
+		    "cacheline 0x%x lattimer 0x%x\n",
+		    cba.cba_cacheline,
+		    cba.cba_max_lattimer);
+		aprint_verbose_dev(self, "bhlc 0x%x\n", bhlc);
 #if defined SHOW_REGS
 		cb_show_regs(sc->sc_pc, sc->sc_tag, sc->sc_base_memt,
 		    sc->sc_base_memh);
@@ -639,101 +700,143 @@ pccbb_pci_callback(self)
 
 	pccbb_pcmcia_attach_setup(sc, &paa);
 	caa.caa_cb_attach = NULL;
-	if (!(sc->sc_pcmcia_flags & PCCBB_PCMCIA_16BITONLY)) {
+	if (cba.cba_bus == 0)
+		aprint_error_dev(self,
+		    "secondary bus number uninitialized; try PCI_BUS_FIXUP\n");
+	else
 		caa.caa_cb_attach = &cba;
-	}
 	caa.caa_16_attach = &paa;
-	caa.caa_ph = &sc->sc_pcmcia_h;
 
-	if (NULL != (csc = (void *)config_found(self, &caa, cbbprint))) {
-		DPRINTF(("pccbbattach: found cardslot\n"));
-		sc->sc_csc = csc;
+	pccbb_intrinit(sc);
+
+	if (NULL != (csc = config_found_ia(self, "pcmciaslot", &caa,
+					   cbbprint))) {
+		DPRINTF(("%s: found cardslot\n", __func__));
+		sc->sc_csc = device_private(csc);
 	}
-
-	sc->sc_ints_on = 1;
-
-	/* CSC Interrupt: Card detect interrupt on */
-	maskreg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_MASK);
-	maskreg |= CB_SOCKET_MASK_CD;  /* Card detect intr is turned on. */
-	bus_space_write_4(base_memt, base_memh, CB_SOCKET_MASK, maskreg);
-	/* reset interrupt */
-	bus_space_write_4(base_memt, base_memh, CB_SOCKET_EVENT,
-	    bus_space_read_4(base_memt, base_memh, CB_SOCKET_EVENT));
 
 	return;
 }
 
+
+
+
+
 /*
- * void pccbb_chipinit(struct pccbb_softc *sc)
+ * static void pccbb_chipinit(struct pccbb_softc *sc)
  *
  *   This function initialize YENTA chip registers listed below:
  *     1) PCI command reg,
  *     2) PCI and CardBus latency timer,
  *     3) route PCI interrupt,
  *     4) close all memory and io windows.
+ *     5) turn off bus power.
+ *     6) card detect and power cycle interrupts on.
+ *     7) clear interrupt
  */
-void
-pccbb_chipinit(sc)
-	struct pccbb_softc *sc;
+static void
+pccbb_chipinit(struct pccbb_softc *sc)
 {
 	pci_chipset_tag_t pc = sc->sc_pc;
 	pcitag_t tag = sc->sc_tag;
-	pcireg_t reg;
+	bus_space_tag_t bmt = sc->sc_base_memt;
+	bus_space_handle_t bmh = sc->sc_base_memh;
+	pcireg_t bcr, bhlc, cbctl, csr, lscp, mfunc, mrburst, slotctl, sockctl,
+	    sysctrl;
 
 	/*
 	 * Set PCI command reg.
 	 * Some laptop's BIOSes (i.e. TICO) do not enable CardBus chip.
 	 */
-	reg = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
 	/* I believe it is harmless. */
-	reg |= (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
+	csr |= (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
 	    PCI_COMMAND_MASTER_ENABLE);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, reg);
+
+	/* All O2 Micro chips have broken parity-error reporting
+	 * until proven otherwise.  The OZ6933 PCI-CardBus Bridge
+	 * is known to have the defect---see PR kern/38698.
+	 */
+	if (sc->sc_chipset != CB_O2MICRO)
+		csr |= PCI_COMMAND_PARITY_ENABLE;
+
+	csr |= PCI_COMMAND_SERR_ENABLE;
+	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
 
 	/*
 	 * Set CardBus latency timer.
 	 */
-	reg = pci_conf_read(pc, tag, PCI_CB_LSCP_REG);
-	if (PCI_CB_LATENCY(reg) < 0x20) {
-		reg &= ~(PCI_CB_LATENCY_MASK << PCI_CB_LATENCY_SHIFT);
-		reg |= (0x20 << PCI_CB_LATENCY_SHIFT);
-		pci_conf_write(pc, tag, PCI_CB_LSCP_REG, reg);
+	lscp = pci_conf_read(pc, tag, PCI_CB_LSCP_REG);
+	if (PCI_CB_LATENCY(lscp) < 0x20) {
+		lscp &= ~(PCI_CB_LATENCY_MASK << PCI_CB_LATENCY_SHIFT);
+		lscp |= (0x20 << PCI_CB_LATENCY_SHIFT);
+		pci_conf_write(pc, tag, PCI_CB_LSCP_REG, lscp);
 	}
 	DPRINTF(("CardBus latency timer 0x%x (%x)\n",
-	    PCI_CB_LATENCY(reg), pci_conf_read(pc, tag, PCI_CB_LSCP_REG)));
+	    PCI_CB_LATENCY(lscp), pci_conf_read(pc, tag, PCI_CB_LSCP_REG)));
 
 	/*
 	 * Set PCI latency timer.
 	 */
-	reg = pci_conf_read(pc, tag, PCI_BHLC_REG);
-	if (PCI_LATTIMER(reg) < 0x10) {
-		reg &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
-		reg |= (0x10 << PCI_LATTIMER_SHIFT);
-		pci_conf_write(pc, tag, PCI_BHLC_REG, reg);
+	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+	if (PCI_LATTIMER(bhlc) < 0x10) {
+		bhlc &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
+		bhlc |= (0x10 << PCI_LATTIMER_SHIFT);
+		pci_conf_write(pc, tag, PCI_BHLC_REG, bhlc);
 	}
 	DPRINTF(("PCI latency timer 0x%x (%x)\n",
-	    PCI_LATTIMER(reg), pci_conf_read(pc, tag, PCI_BHLC_REG)));
+	    PCI_LATTIMER(bhlc), pci_conf_read(pc, tag, PCI_BHLC_REG)));
+
 
 	/* Route functional interrupts to PCI. */
-	reg = pci_conf_read(pc, tag, PCI_BCR_INTR);
-	reg |= CB_BCR_INTR_IREQ_ENABLE;		/* disable PCI Intr */
-	reg |= CB_BCR_WRITE_POST_ENABLE;	/* enable write post */
-	reg |= CB_BCR_RESET_ENABLE;		/* assert reset */
-	pci_conf_write(pc, tag, PCI_BCR_INTR, reg);
+	bcr = pci_conf_read(pc, tag, PCI_BRIDGE_CONTROL_REG);
+	bcr |= CB_BCR_INTR_IREQ_ENABLE;		/* disable PCI Intr */
+	bcr |= CB_BCR_WRITE_POST_ENABLE;	/* enable write post */
+	/* assert reset */
+	bcr |= PCI_BRIDGE_CONTROL_SECBR	<< PCI_BRIDGE_CONTROL_SHIFT;
+        /* Set master abort mode to 1, forward SERR# from secondary
+         * to primary, and detect parity errors on secondary.
+	 */
+	bcr |= PCI_BRIDGE_CONTROL_MABRT	<< PCI_BRIDGE_CONTROL_SHIFT;
+	bcr |= PCI_BRIDGE_CONTROL_SERR << PCI_BRIDGE_CONTROL_SHIFT;
+	bcr |= PCI_BRIDGE_CONTROL_PERE << PCI_BRIDGE_CONTROL_SHIFT;
+	pci_conf_write(pc, tag, PCI_BRIDGE_CONTROL_REG, bcr);
 
 	switch (sc->sc_chipset) {
 	case CB_TI113X:
-		reg = pci_conf_read(pc, tag, PCI_CBCTRL);
+		cbctl = pci_conf_read(pc, tag, PCI_CBCTRL);
 		/* This bit is shared, but may read as 0 on some chips, so set
 		   it explicitly on both functions. */
-		reg |= PCI113X_CBCTRL_PCI_IRQ_ENA;
+		cbctl |= PCI113X_CBCTRL_PCI_IRQ_ENA;
 		/* CSC intr enable */
-		reg |= PCI113X_CBCTRL_PCI_CSC;
+		cbctl |= PCI113X_CBCTRL_PCI_CSC;
 		/* functional intr prohibit | prohibit ISA routing */
-		reg &= ~(PCI113X_CBCTRL_PCI_INTR | PCI113X_CBCTRL_INT_MASK);
-		pci_conf_write(pc, tag, PCI_CBCTRL, reg);
+		cbctl &= ~(PCI113X_CBCTRL_PCI_INTR | PCI113X_CBCTRL_INT_MASK);
+		pci_conf_write(pc, tag, PCI_CBCTRL, cbctl);
 		break;
 
+	case CB_TI1420:
+		sysctrl = pci_conf_read(pc, tag, PCI_SYSCTRL);
+		mrburst = pccbb_burstup
+		    ? PCI1420_SYSCTRL_MRBURST : PCI1420_SYSCTRL_MRBURSTDN;
+		if ((sysctrl & PCI1420_SYSCTRL_MRBURST) == mrburst) {
+			printf("%s: %swrite bursts enabled\n",
+			    device_xname(sc->sc_dev),
+			    pccbb_burstup ? "read/" : "");
+		} else if (pccbb_burstup) {
+			printf("%s: enabling read/write bursts\n",
+			    device_xname(sc->sc_dev));
+			sysctrl |= PCI1420_SYSCTRL_MRBURST;
+			pci_conf_write(pc, tag, PCI_SYSCTRL, sysctrl);
+		} else {
+			printf("%s: disabling read bursts, "
+			    "enabling write bursts\n",
+			    device_xname(sc->sc_dev));
+			sysctrl |= PCI1420_SYSCTRL_MRBURSTDN;
+			sysctrl &= ~PCI1420_SYSCTRL_MRBURSTUP;
+			pci_conf_write(pc, tag, PCI_SYSCTRL, sysctrl);
+		}
+		/*FALLTHROUGH*/
 	case CB_TI12XX:
 		/*
 		 * Some TI 12xx (and [14][45]xx) based pci cards
@@ -744,18 +847,18 @@ pccbb_chipinit(sc)
 		 *
 		 * The TI125X parts have a different register.
 		 */
-		reg = pci_conf_read(pc, tag, PCI12XX_MFUNC);
-		if (reg == 0) {
-			reg &= ~PCI12XX_MFUNC_PIN0;
-			reg |= PCI12XX_MFUNC_PIN0_INTA;
+		mfunc = pci_conf_read(pc, tag, PCI12XX_MFUNC);
+		if (mfunc == 0) {
+			mfunc &= ~PCI12XX_MFUNC_PIN0;
+			mfunc |= PCI12XX_MFUNC_PIN0_INTA;
 			if ((pci_conf_read(pc, tag, PCI_SYSCTRL) &
 			     PCI12XX_SYSCTRL_INTRTIE) == 0) {
-				reg &= ~PCI12XX_MFUNC_PIN1;
-				reg |= PCI12XX_MFUNC_PIN1_INTB;
+				mfunc &= ~PCI12XX_MFUNC_PIN1;
+				mfunc |= PCI12XX_MFUNC_PIN1_INTB;
 			}
-			pci_conf_write(pc, tag, PCI12XX_MFUNC, reg);
+			pci_conf_write(pc, tag, PCI12XX_MFUNC, mfunc);
 		}
-		/* FALLTHROUGH */
+		/* fallthrough */
 
 	case CB_TI125X:
 		/*
@@ -765,69 +868,44 @@ pccbb_chipinit(sc)
 		 */
 		pci_conf_write(pc, tag, PCI12XX_MMCTRL, 0);
 
-		reg = pci_conf_read(pc, tag, PCI_SYSCTRL);
-		reg |= PCI12XX_SYSCTRL_VCCPROT;
-		pci_conf_write(pc, tag, PCI_SYSCTRL, reg);
-		reg = pci_conf_read(pc, tag, PCI_CBCTRL);
-		reg |= PCI12XX_CBCTRL_CSC;
-		pci_conf_write(pc, tag, PCI_CBCTRL, reg);
+		sysctrl = pci_conf_read(pc, tag, PCI_SYSCTRL);
+		sysctrl |= PCI12XX_SYSCTRL_VCCPROT;
+		pci_conf_write(pc, tag, PCI_SYSCTRL, sysctrl);
+		cbctl = pci_conf_read(pc, tag, PCI_CBCTRL);
+		cbctl |= PCI12XX_CBCTRL_CSC;
+		pci_conf_write(pc, tag, PCI_CBCTRL, cbctl);
 		break;
 
 	case CB_TOPIC95B:
-		reg = pci_conf_read(pc, tag, TOPIC_SOCKET_CTRL);
-		reg |= TOPIC_SOCKET_CTRL_SCR_IRQSEL;
-		pci_conf_write(pc, tag, TOPIC_SOCKET_CTRL, reg);
-
-		reg = pci_conf_read(pc, tag, TOPIC_SLOT_CTRL);
+		sockctl = pci_conf_read(pc, tag, TOPIC_SOCKET_CTRL);
+		sockctl |= TOPIC_SOCKET_CTRL_SCR_IRQSEL;
+		pci_conf_write(pc, tag, TOPIC_SOCKET_CTRL, sockctl);
+		slotctl = pci_conf_read(pc, tag, TOPIC_SLOT_CTRL);
 		DPRINTF(("%s: topic slot ctrl reg 0x%x -> ",
-		    sc->sc_dev.dv_xname, reg));
-		reg |= (TOPIC_SLOT_CTRL_SLOTON | TOPIC_SLOT_CTRL_SLOTEN |
+		    device_xname(sc->sc_dev), slotctl));
+		slotctl |= (TOPIC_SLOT_CTRL_SLOTON | TOPIC_SLOT_CTRL_SLOTEN |
 		    TOPIC_SLOT_CTRL_ID_LOCK | TOPIC_SLOT_CTRL_CARDBUS);
-		reg &= ~TOPIC_SLOT_CTRL_SWDETECT;
-		DPRINTF(("0x%x\n", reg));
-		pci_conf_write(pc, tag, TOPIC_SLOT_CTRL, reg);
+		slotctl &= ~TOPIC_SLOT_CTRL_SWDETECT;
+		DPRINTF(("0x%x\n", slotctl));
+		pci_conf_write(pc, tag, TOPIC_SLOT_CTRL, slotctl);
 		break;
 
 	case CB_TOPIC97:
-		reg = pci_conf_read(pc, tag, TOPIC_SLOT_CTRL);
+		slotctl = pci_conf_read(pc, tag, TOPIC_SLOT_CTRL);
 		DPRINTF(("%s: topic slot ctrl reg 0x%x -> ",
-		    sc->sc_dev.dv_xname, reg));
-		reg |= (TOPIC_SLOT_CTRL_SLOTON | TOPIC_SLOT_CTRL_SLOTEN |
+		    device_xname(sc->sc_dev), slotctl));
+		slotctl |= (TOPIC_SLOT_CTRL_SLOTON | TOPIC_SLOT_CTRL_SLOTEN |
 		    TOPIC_SLOT_CTRL_ID_LOCK | TOPIC_SLOT_CTRL_CARDBUS);
-		reg &= ~TOPIC_SLOT_CTRL_SWDETECT;
-		reg |= TOPIC97_SLOT_CTRL_PCIINT;
-		reg &= ~(TOPIC97_SLOT_CTRL_STSIRQP | TOPIC97_SLOT_CTRL_IRQP);
-		DPRINTF(("0x%x\n", reg));
-		pci_conf_write(pc, tag, TOPIC_SLOT_CTRL, reg);
-
+		slotctl &= ~TOPIC_SLOT_CTRL_SWDETECT;
+		slotctl |= TOPIC97_SLOT_CTRL_PCIINT;
+		slotctl &= ~(TOPIC97_SLOT_CTRL_STSIRQP | TOPIC97_SLOT_CTRL_IRQP);
+		DPRINTF(("0x%x\n", slotctl));
+		pci_conf_write(pc, tag, TOPIC_SLOT_CTRL, slotctl);
 		/* make sure to assert LV card support bits */
 		bus_space_write_1(sc->sc_base_memt, sc->sc_base_memh,
-		    0x800 + 0x3e, bus_space_read_1(sc->sc_base_memt,
-		    sc->sc_base_memh, 0x800 + 0x3e) | 0x03);
-
-		/* Power on the controller if the BIOS didn't */
-		reg = pci_conf_read(pc, tag, TOPIC100_PMCSR);
-		if ((reg & TOPIC100_PMCSR_MASK) != TOPIC100_PMCSR_D0)
-			pci_conf_write(pc, tag, TOPIC100_PMCSR,
-			    (reg & ~TOPIC100_PMCSR_MASK) | TOPIC100_PMCSR_D0);
-		break;
-
-	case CB_OLDO2MICRO:
-		/*
-		 * older bridges have problems with both read prefetch and
-		 * write bursting depending on the combination of the chipset,
-		 * bridge and the cardbus card. so disable them to be on the
-		 * safe side. One example is O2Micro 6812 with Atheros AR5012
-		 * chipsets
-		 */
-		DPRINTF(("%s: old O2Micro bridge found\n",
-		    sc->sc_dev.dv_xname, reg));
-		reg = pci_conf_read(pc, tag, O2MICRO_RESERVED1);
-		pci_conf_write(pc, tag, O2MICRO_RESERVED1, reg &
-		    ~(O2MICRO_RES_READ_PREFETCH | O2MICRO_RES_WRITE_BURST));
-		reg = pci_conf_read(pc, tag, O2MICRO_RESERVED2);
-		pci_conf_write(pc, tag, O2MICRO_RESERVED2, reg &
-		    ~(O2MICRO_RES_READ_PREFETCH | O2MICRO_RES_WRITE_BURST));
+		    0x800 + 0x3e,
+		    bus_space_read_1(sc->sc_base_memt, sc->sc_base_memh,
+			0x800 + 0x3e) | 0x03);
 		break;
 	}
 
@@ -842,44 +920,71 @@ pccbb_chipinit(sc)
 	pci_conf_write(pc, tag, PCI_CB_IOLIMIT1, 0);
 
 	/* reset 16-bit pcmcia bus */
-	bus_space_write_1(sc->sc_base_memt, sc->sc_base_memh,
-	    0x800 + PCIC_INTR,
-	    bus_space_read_1(sc->sc_base_memt, sc->sc_base_memh,
-		0x800 + PCIC_INTR) & ~PCIC_INTR_RESET);
+	bus_space_write_1(bmt, bmh, 0x800 + PCIC_INTR,
+	    bus_space_read_1(bmt, bmh, 0x800 + PCIC_INTR) & ~PCIC_INTR_RESET);
 
 	/* turn off power */
-	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 }
 
+static void
+pccbb_intrinit(struct pccbb_softc *sc)
+{
+	pcireg_t sockmask;
+	const char *intrstr = NULL;
+	pci_intr_handle_t ih;
+	pci_chipset_tag_t pc = sc->sc_pc;
+	bus_space_tag_t bmt = sc->sc_base_memt;
+	bus_space_handle_t bmh = sc->sc_base_memh;
 
+	/* Map and establish the interrupt. */
+	if (pci_intr_map(&sc->sc_pa, &ih)) {
+		aprint_error_dev(sc->sc_dev, "couldn't map interrupt\n");
+		return;
+	}
+	intrstr = pci_intr_string(pc, ih);
 
+	/*
+	 * XXX pccbbintr should be called under the priority lower
+	 * than any other hard interupts.
+	 */
+	KASSERT(sc->sc_ih == NULL);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, pccbbintr, sc);
+
+	if (sc->sc_ih == NULL) {
+		aprint_error_dev(sc->sc_dev, "couldn't establish interrupt");
+		if (intrstr != NULL)
+			aprint_error(" at %s\n", intrstr);
+		else
+			aprint_error("\n");
+		return;
+	}
+
+	aprint_normal_dev(sc->sc_dev, "interrupting at %s\n", intrstr);
+
+	/* CSC Interrupt: Card detect and power cycle interrupts on */
+	sockmask = bus_space_read_4(bmt, bmh, CB_SOCKET_MASK);
+	sockmask |= CB_SOCKET_MASK_CSTS | CB_SOCKET_MASK_CD |
+	    CB_SOCKET_MASK_POWER;
+	bus_space_write_4(bmt, bmh, CB_SOCKET_MASK, sockmask);
+	/* reset interrupt */
+	bus_space_write_4(bmt, bmh, CB_SOCKET_EVENT,
+	    bus_space_read_4(bmt, bmh, CB_SOCKET_EVENT));
+}
 
 /*
- * void pccbb_pcmcia_attach_setup(struct pccbb_softc *sc,
+ * STATIC void pccbb_pcmcia_attach_setup(struct pccbb_softc *sc,
  *					 struct pcmciabus_attach_args *paa)
  *
  *   This function attaches 16-bit PCcard bus.
  */
-void
-pccbb_pcmcia_attach_setup(sc, paa)
-	struct pccbb_softc *sc;
-	struct pcmciabus_attach_args *paa;
+STATIC void
+pccbb_pcmcia_attach_setup(struct pccbb_softc *sc,
+    struct pcmciabus_attach_args *paa)
 {
-	struct pcic_handle *ph = &sc->sc_pcmcia_h;
+#if rbus
 	rbus_tag_t rb;
-
-	/* initialize pcmcia part in pccbb_softc */
-	ph->ph_parent = (struct device *)sc;
-	ph->sock = sc->sc_function;
-	ph->flags = 0;
-	ph->shutdown = 0;
-	ph->ih_irq = sc->sc_intrline;
-	ph->ph_bus_t = sc->sc_base_memt;
-	ph->ph_bus_h = sc->sc_base_memh;
-	ph->ph_read = pccbb_pcmcia_read;
-	ph->ph_write = pccbb_pcmcia_write;
-	sc->sc_pct = &pccbb_pcmcia_funcs;
-
+#endif
 	/*
 	 * We need to do a few things here:
 	 * 1) Disable routing of CSC and functional interrupts to ISA IRQs by
@@ -891,57 +996,28 @@ pccbb_pcmcia_attach_setup(sc, paa)
 	 *    needs that while in PCMCIA mode.
 	 * 4) Clear any pending CSC interrupt.
 	 */
-	Pcic_write(ph, PCIC_INTR, PCIC_INTR_ENABLE | PCIC_INTR_RESET);
+	Pcic_write(sc, PCIC_INTR, PCIC_INTR_ENABLE);
 	if (sc->sc_chipset == CB_TI113X) {
-		Pcic_write(ph, PCIC_CSC_INTR, 0);
+		Pcic_write(sc, PCIC_CSC_INTR, 0);
 	} else {
-		Pcic_write(ph, PCIC_CSC_INTR, PCIC_CSC_INTR_CD_ENABLE);
-		Pcic_read(ph, PCIC_CSC);
+		Pcic_write(sc, PCIC_CSC_INTR, PCIC_CSC_INTR_CD_ENABLE);
+		Pcic_read(sc, PCIC_CSC);
 	}
 
 	/* initialize pcmcia bus attachment */
 	paa->paa_busname = "pcmcia";
-	paa->pct = sc->sc_pct;
-	paa->pch = ph;
+	paa->pct = &pccbb_pcmcia_funcs;
+	paa->pch = sc;
 	paa->iobase = 0;	       /* I don't use them */
 	paa->iosize = 0;
-	rb = ((struct pccbb_softc *)(ph->ph_parent))->sc_rbus_iot;
+#if rbus
+	rb = sc->sc_rbus_iot;
 	paa->iobase = rb->rb_start + rb->rb_offset;
 	paa->iosize = rb->rb_end - rb->rb_start;
+#endif
 
 	return;
 }
-
-#if 0
-void
-pccbb_pcmcia_attach_card(ph)
-	struct pcic_handle *ph;
-{
-	if (ph->flags & PCIC_FLAG_CARDP) {
-		panic("pccbb_pcmcia_attach_card: already attached");
-	}
-
-	/* call the MI attach function */
-	pcmcia_card_attach(ph->pcmcia);
-
-	ph->flags |= PCIC_FLAG_CARDP;
-}
-
-void
-pccbb_pcmcia_detach_card(ph, flags)
-	struct pcic_handle *ph;
-	int flags;
-{
-	if (!(ph->flags & PCIC_FLAG_CARDP)) {
-		panic("pccbb_pcmcia_detach_card: already detached");
-	}
-
-	ph->flags &= ~PCIC_FLAG_CARDP;
-
-	/* call the MI detach function */
-	pcmcia_card_detach(ph->pcmcia, flags);
-}
-#endif
 
 /*
  * int pccbbintr(arg)
@@ -950,23 +1026,38 @@ pccbb_pcmcia_detach_card(ph, flags)
  *   itself.
  */
 int
-pccbbintr(arg)
-	void *arg;
+pccbbintr(void *arg)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)arg;
 	u_int32_t sockevent, sockstate;
 	bus_space_tag_t memt = sc->sc_base_memt;
 	bus_space_handle_t memh = sc->sc_base_memh;
-	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 
-	if (!sc->sc_ints_on)
+	if (!device_has_power(sc->sc_dev))
 		return 0;
 
 	sockevent = bus_space_read_4(memt, memh, CB_SOCKET_EVENT);
 	bus_space_write_4(memt, memh, CB_SOCKET_EVENT, sockevent);
-	Pcic_read(ph, PCIC_CSC);
+	Pcic_read(sc, PCIC_CSC);
 
-	if (sockevent == 0) {
+	if (sockevent != 0) {
+		aprint_debug("%s: enter sockevent %" PRIx32 "\n", __func__,
+		    sockevent);
+	}
+
+	/* Sometimes a change of CSTSCHG# accompanies the first
+	 * interrupt from an Atheros WLAN.  That generates a
+	 * CB_SOCKET_EVENT_CSTS event on the bridge.  The event
+	 * isn't interesting to pccbb(4), so we used to ignore the
+	 * interrupt.  Now, let the child devices try to handle
+	 * the interrupt, instead.  The Atheros NIC produces
+	 * interrupts more reliably, now: used to be that it would
+	 * only interrupt if the driver avoided powering down the
+	 * NIC's cardslot, and then the NIC would only work after
+	 * it was reset a second time.
+	 */
+	if (sockevent == 0 ||
+	    (sockevent & ~(CB_SOCKET_EVENT_POWER|CB_SOCKET_EVENT_CD)) != 0) {
 		/* This intr is not for me: it may be for my child devices. */
 		if (sc->sc_pil_intr_enable) {
 			return pccbbintr_function(sc);
@@ -977,24 +1068,15 @@ pccbbintr(arg)
 
 	if (sockevent & CB_SOCKET_EVENT_CD) {
 		sockstate = bus_space_read_4(memt, memh, CB_SOCKET_STAT);
-		if ((sockstate & CB_SOCKET_STAT_CD) != 0) {
+		if (0x00 != (sockstate & CB_SOCKET_STAT_CD)) {
 			/* A card should be removed. */
 			if (sc->sc_flags & CBB_CARDEXIST) {
-				DPRINTF(("%s: 0x%08x", sc->sc_dev.dv_xname,
-				    sockevent));
+				DPRINTF(("%s: 0x%08x",
+				    device_xname(sc->sc_dev), sockevent));
 				DPRINTF((" card removed, 0x%08x\n", sockstate));
 				sc->sc_flags &= ~CBB_CARDEXIST;
 				if (sc->sc_csc->sc_status &
 				    CARDSLOT_STATUS_CARD_16) {
-#if 0
-					struct pcic_handle *ph =
-					    &sc->sc_pcmcia_h;
-
-					pcmcia_card_deactivate(ph->pcmcia);
-					pccbb_pcmcia_socket_disable(ph);
-					pccbb_pcmcia_detach_card(ph,
-					    DETACH_FORCE);
-#endif
 					cardslot_event_throw(sc->sc_csc,
 					    CARDSLOT_EVENT_REMOVAL_16);
 				} else if (sc->sc_csc->sc_status &
@@ -1003,79 +1085,53 @@ pccbbintr(arg)
 					cardslot_event_throw(sc->sc_csc,
 					    CARDSLOT_EVENT_REMOVAL_CB);
 				}
+			} else if (sc->sc_flags & CBB_INSERTING) {
+				sc->sc_flags &= ~CBB_INSERTING;
+				callout_stop(&sc->sc_insert_ch);
 			}
-		} else if ((sockstate & CB_SOCKET_STAT_CD) == 0 &&
+		} else if (0x00 == (sockstate & CB_SOCKET_STAT_CD) &&
 		    /*
 		     * The pccbbintr may called from powerdown hook when
 		     * the system resumed, to detect the card
 		     * insertion/removal during suspension.
 		     */
 		    (sc->sc_flags & CBB_CARDEXIST) == 0) {
-			timeout_add(&sc->sc_ins_tmo, hz / 10);
+			if (sc->sc_flags & CBB_INSERTING) {
+				callout_stop(&sc->sc_insert_ch);
+			}
+			callout_schedule(&sc->sc_insert_ch, hz / 5);
 			sc->sc_flags |= CBB_INSERTING;
 		}
-		return (1);
 	}
 
-	return (0);
+	/* XXX sockevent == 9 does occur in the wild.  handle it. */
+	if (sockevent & CB_SOCKET_EVENT_POWER) {
+		DPRINTF(("Powercycling because of socket event\n"));
+		/* XXX: Does not happen when attaching a 16-bit card */
+		sc->sc_pwrcycle++;
+		wakeup(&sc->sc_pwrcycle);
+	}
+
+	return (1);
 }
 
 /*
- * int pccbbintr_function(struct pccbb_softc *sc)
+ * static int pccbbintr_function(struct pccbb_softc *sc)
  *
  *    This function calls each interrupt handler registered at the
  *    bridge.  The interrupt handlers are called in registered order.
  */
-int
-pccbbintr_function(sc)
-	struct pccbb_softc *sc;
+static int
+pccbbintr_function(struct pccbb_softc *sc)
 {
 	int retval = 0, val;
 	struct pccbb_intrhand_list *pil;
-	int s, splchanged;
+	int s;
 
-	for (pil = sc->sc_pil; pil != NULL; pil = pil->pil_next) {
-		/*
-		 * XXX priority change.  gross.  I use if-else
-		 * sentense instead of switch-case sentense because of
-		 * avoiding duplicate case value error.  More than one
-		 * IPL_XXX use same value.  It depends on
-		 * implementation.
-		 */
-		splchanged = 1;
-#if 0
-		if (pil->pil_level == IPL_SERIAL) {
-			s = splserial();
-		} else if (pil->pil_level == IPL_HIGH) {
-#endif
-		if (pil->pil_level == IPL_HIGH) {
-			s = splhigh();
-		} else if (pil->pil_level == IPL_CLOCK) {
-			s = splclock();
-		} else if (pil->pil_level == IPL_AUDIO) {
-			s = splaudio();
-		} else if (pil->pil_level == IPL_VM) {
-			s = splvm();
-		} else if (pil->pil_level == IPL_TTY) {
-			s = spltty();
-#if 0
-		} else if (pil->pil_level == IPL_SOFTSERIAL) {
-			s = splsoftserial();
-#endif
-		} else if (pil->pil_level == IPL_NET) {
-			s = splnet();
-		} else {
-			splchanged = 0;
-			/* XXX: ih lower than IPL_BIO runs w/ IPL_BIO. */
-		}
-
+	LIST_FOREACH(pil, &sc->sc_pil, pil_next) {
+		s = splraiseipl(pil->pil_icookie);
 		val = (*pil->pil_func)(pil->pil_arg);
-		if (val != 0)
-			pil->pil_count.ec_count++;
-
-		if (splchanged != 0) {
-			splx(s);
-		}
+		splx(s);
 
 		retval = retval == 1 ? 1 :
 		    retval == 0 ? val : val != 0 ? val : retval;
@@ -1084,12 +1140,17 @@ pccbbintr_function(sc)
 	return retval;
 }
 
-void
-pci113x_insert(arg)
-	void *arg;
+static void
+pci113x_insert(void *arg)
 {
-	struct pccbb_softc *sc = (struct pccbb_softc *)arg;
+	struct pccbb_softc *sc = arg;
 	u_int32_t sockevent, sockstate;
+
+	if (!(sc->sc_flags & CBB_INSERTING)) {
+		/* We add a card only under inserting state. */
+		return;
+	}
+	sc->sc_flags &= ~CBB_INSERTING;
 
 	sockevent = bus_space_read_4(sc->sc_base_memt, sc->sc_base_memh,
 	    CB_SOCKET_EVENT);
@@ -1097,61 +1158,52 @@ pci113x_insert(arg)
 	    CB_SOCKET_STAT);
 
 	if (0 == (sockstate & CB_SOCKET_STAT_CD)) {	/* card exist */
-		DPRINTF(("%s: 0x%08x", sc->sc_dev.dv_xname, sockevent));
+		DPRINTF(("%s: 0x%08x", device_xname(sc->sc_dev), sockevent));
 		DPRINTF((" card inserted, 0x%08x\n", sockstate));
 		sc->sc_flags |= CBB_CARDEXIST;
 		/* call pccard interrupt handler here */
 		if (sockstate & CB_SOCKET_STAT_16BIT) {
 			/* 16-bit card found */
-/*      pccbb_pcmcia_attach_card(&sc->sc_pcmcia_h); */
 			cardslot_event_throw(sc->sc_csc,
 			    CARDSLOT_EVENT_INSERTION_16);
 		} else if (sockstate & CB_SOCKET_STAT_CB) {
 			/* cardbus card found */
-/*      cardbus_attach_card(sc->sc_csc); */
 			cardslot_event_throw(sc->sc_csc,
 			    CARDSLOT_EVENT_INSERTION_CB);
 		} else {
 			/* who are you? */
 		}
 	} else {
-		timeout_add(&sc->sc_ins_tmo, hz / 10);
+		callout_schedule(&sc->sc_insert_ch, hz / 10);
 	}
 }
 
 #define PCCBB_PCMCIA_OFFSET 0x800
-u_int8_t
-pccbb_pcmcia_read(ph, reg)
-	struct pcic_handle *ph;
-	int reg;
+static u_int8_t
+pccbb_pcmcia_read(struct pccbb_softc *sc, int reg)
 {
-	bus_space_barrier(ph->ph_bus_t, ph->ph_bus_h,
+	bus_space_barrier(sc->sc_base_memt, sc->sc_base_memh,
 	    PCCBB_PCMCIA_OFFSET + reg, 1, BUS_SPACE_BARRIER_READ);
 
-	return bus_space_read_1(ph->ph_bus_t, ph->ph_bus_h,
+	return bus_space_read_1(sc->sc_base_memt, sc->sc_base_memh,
 	    PCCBB_PCMCIA_OFFSET + reg);
 }
 
-void
-pccbb_pcmcia_write(ph, reg, val)
-	struct pcic_handle *ph;
-	int reg;
-	u_int8_t val;
+static void
+pccbb_pcmcia_write(struct pccbb_softc *sc, int reg, u_int8_t val)
 {
-	bus_space_barrier(ph->ph_bus_t, ph->ph_bus_h,
-	    PCCBB_PCMCIA_OFFSET + reg, 1, BUS_SPACE_BARRIER_WRITE);
+	bus_space_write_1(sc->sc_base_memt, sc->sc_base_memh,
+			  PCCBB_PCMCIA_OFFSET + reg, val);
 
-	bus_space_write_1(ph->ph_bus_t, ph->ph_bus_h, PCCBB_PCMCIA_OFFSET + reg,
-	    val);
+	bus_space_barrier(sc->sc_base_memt, sc->sc_base_memh,
+	    PCCBB_PCMCIA_OFFSET + reg, 1, BUS_SPACE_BARRIER_WRITE);
 }
 
 /*
- * int pccbb_ctrl(cardbus_chipset_tag_t, int)
+ * STATIC int pccbb_ctrl(cardbus_chipset_tag_t, int)
  */
-int
-pccbb_ctrl(ct, command)
-	cardbus_chipset_tag_t ct;
-	int command;
+STATIC int
+pccbb_ctrl(cardbus_chipset_tag_t ct, int command)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
 
@@ -1176,40 +1228,44 @@ pccbb_ctrl(ct, command)
 		} else {
 			return 0;
 		}
-		break;
 	case CARDBUS_RESET:
 		return cb_reset(sc);
-		break;
 	case CARDBUS_IO_ENABLE:       /* fallthrough */
 	case CARDBUS_IO_DISABLE:      /* fallthrough */
 	case CARDBUS_MEM_ENABLE:      /* fallthrough */
 	case CARDBUS_MEM_DISABLE:     /* fallthrough */
 	case CARDBUS_BM_ENABLE:       /* fallthrough */
 	case CARDBUS_BM_DISABLE:      /* fallthrough */
+		/* XXX: I think we don't need to call this function below. */
 		return pccbb_cardenable(sc, command);
-		break;
 	}
 
 	return 0;
 }
 
-/*
- * int pccbb_power(cardbus_chipset_tag_t, int)
- *   This function returns true when it succeeds and returns false when
- *   it fails.
- */
-int
-pccbb_power(ct, command)
-	cardbus_chipset_tag_t ct;
-	int command;
+STATIC int
+pccbb_power_ct(cardbus_chipset_tag_t ct, int command)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
 
-	u_int32_t status, sock_ctrl;
+	return pccbb_power(sc, command);
+}
+
+/*
+ * STATIC int pccbb_power(cardbus_chipset_tag_t, int)
+ *   This function returns true when it succeeds and returns false when
+ *   it fails.
+ */
+STATIC int
+pccbb_power(struct pccbb_softc *sc, int command)
+{
+	u_int32_t status, osock_ctrl, sock_ctrl, reg_ctrl;
 	bus_space_tag_t memt = sc->sc_base_memt;
 	bus_space_handle_t memh = sc->sc_base_memh;
+	int on = 0, pwrcycle, s, times;
+	struct timeval before, after, diff;
 
-	DPRINTF(("pccbb_power: %s and %s [%x]\n",
+	DPRINTF(("pccbb_power: %s and %s [0x%x]\n",
 	    (command & CARDBUS_VCCMASK) == CARDBUS_VCC_UC ? "CARDBUS_VCC_UC" :
 	    (command & CARDBUS_VCCMASK) == CARDBUS_VCC_5V ? "CARDBUS_VCC_5V" :
 	    (command & CARDBUS_VCCMASK) == CARDBUS_VCC_3V ? "CARDBUS_VCC_3V" :
@@ -1224,27 +1280,31 @@ pccbb_power(ct, command)
 	    "UNKNOWN", command));
 
 	status = bus_space_read_4(memt, memh, CB_SOCKET_STAT);
-	sock_ctrl = bus_space_read_4(memt, memh, CB_SOCKET_CTRL);
+	osock_ctrl = sock_ctrl = bus_space_read_4(memt, memh, CB_SOCKET_CTRL);
 
 	switch (command & CARDBUS_VCCMASK) {
 	case CARDBUS_VCC_UC:
 		break;
 	case CARDBUS_VCC_5V:
+		on++;
 		if (CB_SOCKET_STAT_5VCARD & status) {	/* check 5 V card */
 			sock_ctrl &= ~CB_SOCKET_CTRL_VCCMASK;
 			sock_ctrl |= CB_SOCKET_CTRL_VCC_5V;
 		} else {
-			printf("%s: BAD voltage request: no 5 V card\n",
-			    sc->sc_dev.dv_xname);
+			aprint_error_dev(sc->sc_dev,
+			    "BAD voltage request: no 5 V card\n");
+			return 0;
 		}
 		break;
 	case CARDBUS_VCC_3V:
+		on++;
 		if (CB_SOCKET_STAT_3VCARD & status) {
 			sock_ctrl &= ~CB_SOCKET_CTRL_VCCMASK;
 			sock_ctrl |= CB_SOCKET_CTRL_VCC_3V;
 		} else {
-			printf("%s: BAD voltage request: no 3.3 V card\n",
-			    sc->sc_dev.dv_xname);
+			aprint_error_dev(sc->sc_dev,
+			    "BAD voltage request: no 3.3 V card\n");
+			return 0;
 		}
 		break;
 	case CARDBUS_VCC_0V:
@@ -1252,7 +1312,6 @@ pccbb_power(ct, command)
 		break;
 	default:
 		return 0;	       /* power NEVER changed */
-		break;
 	}
 
 	switch (command & CARDBUS_VPPMASK) {
@@ -1271,147 +1330,105 @@ pccbb_power(ct, command)
 		break;
 	}
 
-#if 0
-	DPRINTF(("sock_ctrl: %x\n", sock_ctrl));
-#endif
+	pwrcycle = sc->sc_pwrcycle;
+	aprint_debug_dev(sc->sc_dev, "osock_ctrl %#" PRIx32
+	    " sock_ctrl %#" PRIx32 "\n", osock_ctrl, sock_ctrl);
+
+	microtime(&before);
+	s = splbio();
 	bus_space_write_4(memt, memh, CB_SOCKET_CTRL, sock_ctrl);
+
+	/*
+	 * Wait as long as 200ms for a power-cycle interrupt.  If
+	 * interrupts are enabled, but the socket has already
+	 * changed to the desired status, keep waiting for the
+	 * interrupt.  "Consuming" the interrupt in this way keeps
+	 * the interrupt from prematurely waking some subsequent
+	 * pccbb_power call.
+	 *
+	 * XXX Not every bridge interrupts on the ->OFF transition.
+	 * XXX That's ok, we will time-out after 200ms.
+	 *
+	 * XXX The power cycle event will never happen when attaching
+	 * XXX a 16-bit card.  That's ok, we will time-out after
+	 * XXX 200ms.
+	 */
+	for (times = 5; --times >= 0; ) {
+		if (cold)
+			DELAY(40 * 1000);
+		else {
+			(void)tsleep(&sc->sc_pwrcycle, PWAIT, "pccpwr",
+			    hz / 25);
+			if (pwrcycle == sc->sc_pwrcycle)
+				continue;
+		}
+		status = bus_space_read_4(memt, memh, CB_SOCKET_STAT);
+		if ((status & CB_SOCKET_STAT_PWRCYCLE) != 0 && on)
+			break;
+		if ((status & CB_SOCKET_STAT_PWRCYCLE) == 0 && !on)
+			break;
+	}
+	splx(s);
+	microtime(&after);
+	timersub(&after, &before, &diff);
+	aprint_debug_dev(sc->sc_dev, "wait took%s %ld.%06lds\n",
+	    (on && times < 0) ? " too long" : "", diff.tv_sec, diff.tv_usec);
+
+	/*
+	 * Ok, wait a bit longer for things to settle.
+	 */
+	if (on && sc->sc_chipset == CB_TOPIC95B)
+		delay_ms(100, sc);
+
 	status = bus_space_read_4(memt, memh, CB_SOCKET_STAT);
 
+	if (on && sc->sc_chipset != CB_TOPIC95B) {
+		if ((status & CB_SOCKET_STAT_PWRCYCLE) == 0)
+			aprint_error_dev(sc->sc_dev, "power on failed?\n");
+	}
+
 	if (status & CB_SOCKET_STAT_BADVCC) {	/* bad Vcc request */
-		printf
-		    ("%s: bad Vcc request. sock_ctrl 0x%x, sock_status 0x%x\n",
-		    sc->sc_dev.dv_xname, sock_ctrl, status);
-		DPRINTF(("pccbb_power: %s and %s [%x]\n",
-		    (command & CARDBUS_VCCMASK) ==
-		    CARDBUS_VCC_UC ? "CARDBUS_VCC_UC" : (command &
-		    CARDBUS_VCCMASK) ==
-		    CARDBUS_VCC_5V ? "CARDBUS_VCC_5V" : (command &
-		    CARDBUS_VCCMASK) ==
-		    CARDBUS_VCC_3V ? "CARDBUS_VCC_3V" : (command &
-		    CARDBUS_VCCMASK) ==
-		    CARDBUS_VCC_XV ? "CARDBUS_VCC_XV" : (command &
-		    CARDBUS_VCCMASK) ==
-		    CARDBUS_VCC_YV ? "CARDBUS_VCC_YV" : (command &
-		    CARDBUS_VCCMASK) ==
-		    CARDBUS_VCC_0V ? "CARDBUS_VCC_0V" : "UNKNOWN",
-		    (command & CARDBUS_VPPMASK) ==
-		    CARDBUS_VPP_UC ? "CARDBUS_VPP_UC" : (command &
-		    CARDBUS_VPPMASK) ==
-		    CARDBUS_VPP_12V ? "CARDBUS_VPP_12V" : (command &
-		    CARDBUS_VPPMASK) ==
-		    CARDBUS_VPP_VCC ? "CARDBUS_VPP_VCC" : (command &
-		    CARDBUS_VPPMASK) ==
-		    CARDBUS_VPP_0V ? "CARDBUS_VPP_0V" : "UNKNOWN", command));
-#if 0
-		if (command == (CARDBUS_VCC_0V | CARDBUS_VPP_0V)) {
-			u_int32_t force =
-			    bus_space_read_4(memt, memh, CB_SOCKET_FORCE);
-			/* Reset Bad Vcc request */
-			force &= ~CB_SOCKET_FORCE_BADVCC;
-			bus_space_write_4(memt, memh, CB_SOCKET_FORCE, force);
-			printf("new status 0x%x\n", bus_space_read_4(memt, memh,
-			    CB_SOCKET_STAT));
-			return 1;
-		}
-#endif
+		aprint_error_dev(sc->sc_dev,
+		    "bad Vcc request. sock_ctrl 0x%x, sock_status 0x%x\n",
+		    sock_ctrl, status);
+		aprint_error_dev(sc->sc_dev, "disabling socket\n");
+		sock_ctrl &= ~CB_SOCKET_CTRL_VCCMASK;
+		sock_ctrl &= ~CB_SOCKET_CTRL_VPPMASK;
+		bus_space_write_4(memt, memh, CB_SOCKET_CTRL, sock_ctrl);
+		status &= ~CB_SOCKET_STAT_BADVCC;
+		bus_space_write_4(memt, memh, CB_SOCKET_FORCE, status);
+		printf("new status 0x%x\n", bus_space_read_4(memt, memh,
+		    CB_SOCKET_STAT));
 		return 0;
 	}
 
-	/*
-	 * XXX delay 300 ms: though the standard defines that the Vcc set-up
-	 * time is 20 ms, some PC-Card bridge requires longer duration.
-	 */
-	delay(300 * 1000);
+	if (sc->sc_chipset == CB_TOPIC97) {
+		reg_ctrl = pci_conf_read(sc->sc_pc, sc->sc_tag, TOPIC_REG_CTRL);
+		reg_ctrl &= ~TOPIC97_REG_CTRL_TESTMODE;
+		if ((command & CARDBUS_VCCMASK) == CARDBUS_VCC_0V)
+			reg_ctrl &= ~TOPIC97_REG_CTRL_CLKRUN_ENA;
+		else
+			reg_ctrl |= TOPIC97_REG_CTRL_CLKRUN_ENA;
+		pci_conf_write(sc->sc_pc, sc->sc_tag, TOPIC_REG_CTRL, reg_ctrl);
+	}
 
 	return 1;		       /* power changed correctly */
 }
 
-#if defined CB_PCMCIA_POLL
-struct cb_poll_str {
-	void *arg;
-	int (*func)(void *);
-	int level;
-	pccard_chipset_tag_t ct;
-	int count;
-};
-
-static struct cb_poll_str cb_poll[10];
-static int cb_poll_n = 0;
-static struct timeout cb_poll_timeout;
-
-void cb_pcmcia_poll(void *arg);
-
-void
-cb_pcmcia_poll(arg)
-	void *arg;
-{
-	struct cb_poll_str *poll = arg;
-	struct cbb_pcmcia_softc *psc = (void *)poll->ct->v;
-	struct pccbb_softc *sc = psc->cpc_parent;
-	int s;
-	u_int32_t spsr;		       /* socket present-state reg */
-
-	timeout_set(&cb_poll_timeout, cb_pcmcia_poll, arg);
-	timeout_add(&cb_poll_timeout, hz / 10);
-	switch (poll->level) {
-	case IPL_NET:
-		s = splnet();
-		break;
-	case IPL_BIO:
-		s = splbio();
-		break;
-	case IPL_TTY:		       /* fallthrough */
-	default:
-		s = spltty();
-		break;
-	}
-
-	spsr =
-	    bus_space_read_4(sc->sc_base_memt, sc->sc_base_memh,
-	    CB_SOCKET_STAT);
-
-#if defined CB_PCMCIA_POLL_ONLY && defined LEVEL2
-	if (!(spsr & 0x40)) {	       /* CINT low */
-#else
-	if (1) {
-#endif
-		if ((*poll->func) (poll->arg) == 1) {
-			++poll->count;
-			printf("intr: reported from poller, 0x%x\n", spsr);
-#if defined LEVEL2
-		} else {
-			printf("intr: miss! 0x%x\n", spsr);
-#endif
-		}
-	}
-	splx(s);
-}
-#endif /* defined CB_PCMCIA_POLL */
-
 /*
- * int pccbb_detect_card(struct pccbb_softc *sc)
+ * static int pccbb_detect_card(struct pccbb_softc *sc)
  *   return value:  0 if no card exists.
  *                  1 if 16-bit card exists.
  *                  2 if cardbus card exists.
  */
-int
-pccbb_detect_card(sc)
-	struct pccbb_softc *sc;
+static int
+pccbb_detect_card(struct pccbb_softc *sc)
 {
 	bus_space_handle_t base_memh = sc->sc_base_memh;
 	bus_space_tag_t base_memt = sc->sc_base_memt;
 	u_int32_t sockstat =
 	    bus_space_read_4(base_memt, base_memh, CB_SOCKET_STAT);
 	int retval = 0;
-
-	/*
-	 * The SCM Microsystems TI1225-based PCI-CardBus dock card that
-	 * ships with some Lucent WaveLAN cards has only one physical slot
-	 * but OpenBSD probes two. The phantom card in the second slot can
-	 * be ignored by punting on unsupported voltages.
-	 */
-	if (sockstat & CB_SOCKET_STAT_XVCARD)
-		return 0;
 
 	/* CD1 and CD2 asserted */
 	if (0x00 == (sockstat & CB_SOCKET_STAT_CD)) {
@@ -1431,42 +1448,46 @@ pccbb_detect_card(sc)
 }
 
 /*
- * int cb_reset(struct pccbb_softc *sc)
+ * STATIC int cb_reset(struct pccbb_softc *sc)
  *   This function resets CardBus card.
  */
-int
-cb_reset(sc)
-	struct pccbb_softc *sc;
+STATIC int
+cb_reset(struct pccbb_softc *sc)
 {
 	/*
 	 * Reset Assert at least 20 ms
 	 * Some machines request longer duration.
 	 */
-	int reset_duration = (sc->sc_chipset == CB_RX5C47X ? 400 : 50);
-	u_int32_t bcr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR);
+	int reset_duration =
+	    (sc->sc_chipset == CB_RX5C47X ? 400 : 50);
+	u_int32_t bcr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG);
+	aprint_debug("%s: enter bcr %" PRIx32 "\n", __func__, bcr);
 
 	/* Reset bit Assert (bit 6 at 0x3E) */
-	bcr |= CB_BCR_RESET_ENABLE;
-	pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR, bcr);
+	bcr |= PCI_BRIDGE_CONTROL_SECBR << PCI_BRIDGE_CONTROL_SHIFT;
+	pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG, bcr);
+	aprint_debug("%s: wrote bcr %" PRIx32 "\n", __func__, bcr);
 	delay_ms(reset_duration, sc);
 
 	if (CBB_CARDEXIST & sc->sc_flags) {	/* A card exists.  Reset it! */
 		/* Reset bit Deassert (bit 6 at 0x3E) */
-		bcr &= ~CB_BCR_RESET_ENABLE;
-		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR, bcr);
+		bcr &= ~(PCI_BRIDGE_CONTROL_SECBR << PCI_BRIDGE_CONTROL_SHIFT);
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG,
+		    bcr);
+		aprint_debug("%s: wrote bcr %" PRIx32 "\n", __func__, bcr);
 		delay_ms(reset_duration, sc);
+		aprint_debug("%s: end of delay\n", __func__);
 	}
 	/* No card found on the slot. Keep Reset. */
 	return 1;
 }
 
 /*
- * int cb_detect_voltage(struct pccbb_softc *sc)
+ * STATIC int cb_detect_voltage(struct pccbb_softc *sc)
  *  This function detect card Voltage.
  */
-int
-cb_detect_voltage(sc)
-	struct pccbb_softc *sc;
+STATIC int
+cb_detect_voltage(struct pccbb_softc *sc)
 {
 	u_int32_t psr;		       /* socket present-state reg */
 	bus_space_tag_t iot = sc->sc_base_memt;
@@ -1485,29 +1506,25 @@ cb_detect_voltage(sc)
 	return vol;
 }
 
-int
-cbbprint(aux, pcic)
-	void *aux;
-	const char *pcic;
+STATIC int
+cbbprint(void *aux, const char *pcic)
 {
-/*
-  struct cbslot_attach_args *cba = aux;
+#if 0
+	struct cbslot_attach_args *cba = aux;
 
-  if (cba->cba_slot >= 0) {
-    printf(" slot %d", cba->cba_slot);
-  }
-*/
+	if (cba->cba_slot >= 0) {
+		aprint_normal(" slot %d", cba->cba_slot);
+	}
+#endif
 	return UNCONF;
 }
 
 /*
- * int pccbb_cardenable(struct pccbb_softc *sc, int function)
+ * STATIC int pccbb_cardenable(struct pccbb_softc *sc, int function)
  *   This function enables and disables the card
  */
-int
-pccbb_cardenable(sc, function)
-	struct pccbb_softc *sc;
-	int function;
+STATIC int
+pccbb_cardenable(struct pccbb_softc *sc, int function)
 {
 	u_int32_t command =
 	    pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
@@ -1541,58 +1558,108 @@ pccbb_cardenable(sc, function)
 	return 1;
 }
 
+#if !rbus
+static int
+pccbb_io_open(cardbus_chipset_tag_t ct, int win, uint32_t start, uint32_t end)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
+	int basereg;
+	int limitreg;
+
+	if ((win < 0) || (win > 2)) {
+#if defined DIAGNOSTIC
+		printf("cardbus_io_open: window out of range %d\n", win);
+#endif
+		return 0;
+	}
+
+	basereg = win * 8 + PCI_CB_IOBASE0;
+	limitreg = win * 8 + PCI_CB_IOLIMIT0;
+
+	DPRINTF(("pccbb_io_open: 0x%x[0x%x] - 0x%x[0x%x]\n",
+	    start, basereg, end, limitreg));
+
+	pci_conf_write(sc->sc_pc, sc->sc_tag, basereg, start);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, limitreg, end);
+	return 1;
+}
+
 /*
- * void *pccbb_cb_intr_establish(cardbus_chipset_tag_t ct,
+ * int pccbb_io_close(cardbus_chipset_tag_t, int)
+ */
+static int
+pccbb_io_close(cardbus_chipset_tag_t ct, int win)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
+	int basereg;
+	int limitreg;
+
+	if ((win < 0) || (win > 2)) {
+#if defined DIAGNOSTIC
+		printf("cardbus_io_close: window out of range %d\n", win);
+#endif
+		return 0;
+	}
+
+	basereg = win * 8 + PCI_CB_IOBASE0;
+	limitreg = win * 8 + PCI_CB_IOLIMIT0;
+
+	pci_conf_write(sc->sc_pc, sc->sc_tag, basereg, 0);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, limitreg, 0);
+	return 1;
+}
+
+static int
+pccbb_mem_open(cardbus_chipset_tag_t ct, int win, uint32_t start, uint32_t end)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
+	int basereg;
+	int limitreg;
+
+	if ((win < 0) || (win > 2)) {
+#if defined DIAGNOSTIC
+		printf("cardbus_mem_open: window out of range %d\n", win);
+#endif
+		return 0;
+	}
+
+	basereg = win * 8 + PCI_CB_MEMBASE0;
+	limitreg = win * 8 + PCI_CB_MEMLIMIT0;
+
+	pci_conf_write(sc->sc_pc, sc->sc_tag, basereg, start);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, limitreg, end);
+	return 1;
+}
+
+static int
+pccbb_mem_close(cardbus_chipset_tag_t ct, int win)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
+	int basereg;
+	int limitreg;
+
+	if ((win < 0) || (win > 2)) {
+#if defined DIAGNOSTIC
+		printf("cardbus_mem_close: window out of range %d\n", win);
+#endif
+		return 0;
+	}
+
+	basereg = win * 8 + PCI_CB_MEMBASE0;
+	limitreg = win * 8 + PCI_CB_MEMLIMIT0;
+
+	pci_conf_write(sc->sc_pc, sc->sc_tag, basereg, 0);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, limitreg, 0);
+	return 1;
+}
+#endif
+
+/*
+ * static void *pccbb_cb_intr_establish(cardbus_chipset_tag_t ct,
  *					int irq,
  *					int level,
  *					int (* func)(void *),
- *					void *arg,
- *					const char *name)
- *
- *   This function registers an interrupt handler at the bridge, in
- *   order not to call the interrupt handlers of child devices when
- *   a card-deletion interrupt occurs.
- *
- *   The arguments irq is not used because pccbb selects intr vector.
- */
-void *
-pccbb_cb_intr_establish(ct, irq, level, func, arg, name)
-	cardbus_chipset_tag_t ct;
-	int irq, level;
-	int (*func)(void *);
-	void *arg;
-	const char *name;
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
-
-	return pccbb_intr_establish(sc, irq, level, func, arg, name);
-}
-
-
-/*
- * void *pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct,
- *					   void *ih)
- *
- *   This function removes an interrupt handler pointed by ih.
- */
-void
-pccbb_cb_intr_disestablish(ct, ih)
-	cardbus_chipset_tag_t ct;
-	void *ih;
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
-
-	pccbb_intr_disestablish(sc, ih);
-}
-
-
-/*
- * void *pccbb_intr_establish(struct pccbb_softc *sc,
- *				     int irq,
- *				     int level,
- *				     int (* func)(void *),
- *				     void *arg,
- *				     const char *name)
+ *					void *arg)
  *
  *   This function registers an interrupt handler at the bridge, in
  *   order not to call the interrupt handlers of child devices when
@@ -1600,101 +1667,159 @@ pccbb_cb_intr_disestablish(ct, ih)
  *
  *   The arguments irq and level are not used.
  */
-void *
-pccbb_intr_establish(sc, irq, level, func, arg, name)
-	struct pccbb_softc *sc;
-	int irq, level;
-	int (*func)(void *);
-	void *arg;
-	const char *name;
+static void *
+pccbb_cb_intr_establish(cardbus_chipset_tag_t ct, cardbus_intr_line_t irq,
+    int level, int (*func)(void *), void *arg)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
+
+	return pccbb_intr_establish(sc, irq, level, func, arg);
+}
+
+
+/*
+ * static void *pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct,
+ *					   void *ih)
+ *
+ *   This function removes an interrupt handler pointed by ih.
+ */
+static void
+pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct, void *ih)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
+
+	pccbb_intr_disestablish(sc, ih);
+}
+
+
+void
+pccbb_intr_route(struct pccbb_softc *sc)
+{
+	pcireg_t bcr, cbctrl;
+
+	/* initialize bridge intr routing */
+	bcr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG);
+	bcr &= ~CB_BCR_INTR_IREQ_ENABLE;
+	pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG, bcr);
+
+	switch (sc->sc_chipset) {
+	case CB_TI113X:
+		cbctrl = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_CBCTRL);
+		/* functional intr enabled */
+		cbctrl |= PCI113X_CBCTRL_PCI_INTR;
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_CBCTRL, cbctrl);
+		break;
+	default:
+		break;
+	}
+}
+
+/*
+ * static void *pccbb_intr_establish(struct pccbb_softc *sc,
+ *				     int irq,
+ *				     int level,
+ *				     int (* func)(void *),
+ *				     void *arg)
+ *
+ *   This function registers an interrupt handler at the bridge, in
+ *   order not to call the interrupt handlers of child devices when
+ *   a card-deletion interrupt occurs.
+ *
+ *   The arguments irq is not used because pccbb selects intr vector.
+ */
+static void *
+pccbb_intr_establish(struct pccbb_softc *sc, cardbus_intr_line_t irq,
+    int level, int (*func)(void *), void *arg)
 {
 	struct pccbb_intrhand_list *pil, *newpil;
-	pcireg_t reg;
 
-	DPRINTF(("pccbb_intr_establish start. %p\n", sc->sc_pil));
+	DPRINTF(("pccbb_intr_establish start. %p\n", LIST_FIRST(&sc->sc_pil)));
 
-	if (sc->sc_pil == NULL) {
-		/* initialize bridge intr routing */
-		reg = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR);
-		reg &= ~CB_BCR_INTR_IREQ_ENABLE;
-		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR, reg);
-
-		switch (sc->sc_chipset) {
-		case CB_TI113X:
-			reg = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_CBCTRL);
-			/* functional intr enabled */
-			reg |= PCI113X_CBCTRL_PCI_INTR;
-			pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_CBCTRL, reg);
-			break;
-		default:
-			break;
-		}
+	if (LIST_EMPTY(&sc->sc_pil)) {
+		pccbb_intr_route(sc);
 	}
 
 	/*
 	 * Allocate a room for interrupt handler structure.
 	 */
-	newpil = (struct pccbb_intrhand_list *)
-		malloc(sizeof(struct pccbb_intrhand_list), M_DEVBUF, M_WAITOK);
+	if (NULL == (newpil =
+	    (struct pccbb_intrhand_list *)malloc(sizeof(struct
+	    pccbb_intrhand_list), M_DEVBUF, M_WAITOK))) {
+		return NULL;
+	}
 
 	newpil->pil_func = func;
 	newpil->pil_arg = arg;
-	newpil->pil_level = level;
-	evcount_attach(&newpil->pil_count, name, &sc->sc_intrline,
-	    &evcount_intr);
-	newpil->pil_next = NULL;
+	newpil->pil_icookie = makeiplcookie(level);
 
-	if (sc->sc_pil == NULL) {
-		sc->sc_pil = newpil;
+	if (LIST_EMPTY(&sc->sc_pil)) {
+		LIST_INSERT_HEAD(&sc->sc_pil, newpil, pil_next);
 	} else {
-		for (pil = sc->sc_pil; pil->pil_next != NULL;
-		    pil = pil->pil_next);
-		pil->pil_next = newpil;
+		for (pil = LIST_FIRST(&sc->sc_pil);
+		     LIST_NEXT(pil, pil_next) != NULL;
+		     pil = LIST_NEXT(pil, pil_next));
+		LIST_INSERT_AFTER(pil, newpil, pil_next);
 	}
 
-	DPRINTF(("pccbb_intr_establish add pil. %p\n", sc->sc_pil));
+	DPRINTF(("pccbb_intr_establish add pil. %p\n",
+	    LIST_FIRST(&sc->sc_pil)));
 
 	return newpil;
 }
 
 /*
- * void *pccbb_intr_disestablish(struct pccbb_softc *sc,
+ * static void *pccbb_intr_disestablish(struct pccbb_softc *sc,
  *					void *ih)
  *
- *   This function removes an interrupt handler pointed by ih.
+ *	This function removes an interrupt handler pointed by ih.  ih
+ *	should be the value returned by cardbus_intr_establish() or
+ *	NULL.
+ *
+ *	When ih is NULL, this function will do nothing.
  */
-void
-pccbb_intr_disestablish(sc, ih)
-	struct pccbb_softc *sc;
-	void *ih;
+static void
+pccbb_intr_disestablish(struct pccbb_softc *sc, void *ih)
 {
-	struct pccbb_intrhand_list *pil, **pil_prev;
+	struct pccbb_intrhand_list *pil;
 	pcireg_t reg;
 
-	DPRINTF(("pccbb_intr_disestablish start. %p\n", sc->sc_pil));
+	DPRINTF(("pccbb_intr_disestablish start. %p\n",
+	    LIST_FIRST(&sc->sc_pil)));
 
-	pil_prev = &sc->sc_pil;
+	if (ih == NULL) {
+		/* intr handler is not set */
+		DPRINTF(("pccbb_intr_disestablish: no ih\n"));
+		return;
+	}
 
-	for (pil = sc->sc_pil; pil != NULL; pil = pil->pil_next) {
+#ifdef DIAGNOSTIC
+	LIST_FOREACH(pil, &sc->sc_pil, pil_next) {
+		DPRINTF(("pccbb_intr_disestablish: pil %p\n", pil));
 		if (pil == ih) {
-			evcount_detach(&pil->pil_count);
-			*pil_prev = pil->pil_next;
-			free(pil, M_DEVBUF);
 			DPRINTF(("pccbb_intr_disestablish frees one pil\n"));
 			break;
 		}
-		pil_prev = &pil->pil_next;
 	}
+	if (pil == NULL) {
+		panic("pccbb_intr_disestablish: %s cannot find pil %p",
+		    device_xname(sc->sc_dev), ih);
+	}
+#endif
 
-	if (sc->sc_pil == NULL) {
+	pil = (struct pccbb_intrhand_list *)ih;
+	LIST_REMOVE(pil, pil_next);
+	free(pil, M_DEVBUF);
+	DPRINTF(("pccbb_intr_disestablish frees one pil\n"));
+
+	if (LIST_EMPTY(&sc->sc_pil)) {
 		/* No interrupt handlers */
 
 		DPRINTF(("pccbb_intr_disestablish: no interrupt handler\n"));
 
 		/* stop routing PCI intr */
-		reg = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR);
+		reg = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG);
 		reg |= CB_BCR_INTR_IREQ_ENABLE;
-		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BCR_INTR, reg);
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_BRIDGE_CONTROL_REG, reg);
 
 		switch (sc->sc_chipset) {
 		case CB_TI113X:
@@ -1710,25 +1835,20 @@ pccbb_intr_disestablish(sc, ih)
 }
 
 #if defined SHOW_REGS
-void
-cb_show_regs(pc, tag, memt, memh)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	bus_space_tag_t memt;
-	bus_space_handle_t memh;
+static void
+cb_show_regs(pci_chipset_tag_t pc, pcitag_t tag, bus_space_tag_t memt,
+    bus_space_handle_t memh)
 {
 	int i;
 	printf("PCI config regs:");
 	for (i = 0; i < 0x50; i += 4) {
-		if (i % 16 == 0) {
+		if (i % 16 == 0)
 			printf("\n 0x%02x:", i);
-		}
 		printf(" %08x", pci_conf_read(pc, tag, i));
 	}
 	for (i = 0x80; i < 0xb0; i += 4) {
-		if (i % 16 == 0) {
+		if (i % 16 == 0)
 			printf("\n 0x%02x:", i);
-		}
 		printf(" %08x", pci_conf_read(pc, tag, i));
 	}
 
@@ -1738,70 +1858,71 @@ cb_show_regs(pc, tag, memt, memh)
 	}
 
 	printf("\nsocket regs:");
-	for (i = 0; i <= 0x10; i += 0x04) {
+	for (i = 0; i <= 0x10; i += 0x04)
 		printf(" %08x", bus_space_read_4(memt, memh, i));
-	}
 	printf("\nExCA regs:");
-	for (i = 0; i < 0x08; ++i) {
+	for (i = 0; i < 0x08; ++i)
 		printf(" %02x", bus_space_read_1(memt, memh, 0x800 + i));
-	}
 	printf("\n");
 	return;
 }
 #endif
 
 /*
- * cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t cc,
- *                                    int busno, int devno, int function)
+ * static cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t cc,
+ *                                    int busno, int function)
  *   This is the function to make a tag to access config space of
  *  a CardBus Card.  It works same as pci_conf_read.
  */
-cardbustag_t
-pccbb_make_tag(cc, busno, devno, function)
-	cardbus_chipset_tag_t cc;
-	int busno, devno, function;
+static cardbustag_t
+pccbb_make_tag(cardbus_chipset_tag_t cc, int busno, int function)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
 
-	return pci_make_tag(sc->sc_pc, busno, devno, function);
+	return pci_make_tag(sc->sc_pc, busno, 0, function);
 }
 
-void
-pccbb_free_tag(cc, tag)
-	cardbus_chipset_tag_t cc;
-	cardbustag_t tag;
+static void
+pccbb_free_tag(cardbus_chipset_tag_t cc, cardbustag_t tag)
 {
 }
 
 /*
- * cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t cc,
- *                                     cardbustag_t tag, int offset)
- *   This is the function to read the config space of a CardBus Card.
- *  It works same as pci_conf_read.
+ * pccbb_conf_read
+ *
+ * This is the function to read the config space of a CardBus card.
+ * It works the same as pci_conf_read(9).
  */
-cardbusreg_t
-pccbb_conf_read(cc, tag, offset)
-	cardbus_chipset_tag_t cc;
-	cardbustag_t tag;
-	int offset;		       /* register offset */
+static cardbusreg_t
+pccbb_conf_read(cardbus_chipset_tag_t cc, cardbustag_t tag, int offset)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
+	pcitag_t brtag = sc->sc_tag;
+	cardbusreg_t reg;
 
-	return pci_conf_read(sc->sc_pc, tag, offset);
+	/*
+	 * clear cardbus master abort status; it is OK to write without
+	 * reading before because all bits are r/o or w1tc
+	 */
+	pci_conf_write(sc->sc_pc, brtag, PCI_CBB_SECSTATUS,
+		       CBB_SECSTATUS_CBMABORT);
+	reg = pci_conf_read(sc->sc_pc, tag, offset);
+	/* check cardbus master abort status */
+	if (pci_conf_read(sc->sc_pc, brtag, PCI_CBB_SECSTATUS)
+			  & CBB_SECSTATUS_CBMABORT)
+		return (0xffffffff);
+	return reg;
 }
 
 /*
- * void pccbb_conf_write(cardbus_chipset_tag_t cc, cardbustag_t tag,
- *                              int offs, cardbusreg_t val)
- *   This is the function to write the config space of a CardBus Card.
- *  It works same as pci_conf_write.
+ * pccbb_conf_write
+ *
+ * This is the function to write the config space of a CardBus
+ * card.  It works the same as pci_conf_write(9).
  */
-void
-pccbb_conf_write(cc, tag, reg, val)
-	cardbus_chipset_tag_t cc;
-	cardbustag_t tag;
-	int reg;		       /* register offset */
-	cardbusreg_t val;
+static void
+pccbb_conf_write(cardbus_chipset_tag_t cc, cardbustag_t tag, int reg,
+    cardbusreg_t val)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
 
@@ -1809,14 +1930,14 @@ pccbb_conf_write(cc, tag, reg, val)
 }
 
 #if 0
-int
+STATIC int
 pccbb_new_pcmcia_io_alloc(pcmcia_chipset_handle_t pch,
     bus_addr_t start, bus_size_t size, bus_size_t align, bus_addr_t mask,
     int speed, int flags,
     bus_space_handle_t * iohp)
 #endif
 /*
- * int pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t pch,
+ * STATIC int pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t pch,
  *                                  bus_addr_t start, bus_size_t size,
  *                                  bus_size_t align,
  *                                  struct pcmcia_io_handle *pcihp
@@ -1826,22 +1947,19 @@ pccbb_new_pcmcia_io_alloc(pcmcia_chipset_handle_t pch,
  *
  * XXX: The interface of this function is not very good, I believe.
  */
-int
-pccbb_pcmcia_io_alloc(pch, start, size, align, pcihp)
-	pcmcia_chipset_handle_t pch;
-	bus_addr_t start;	       /* start address */
-	bus_size_t size;
-	bus_size_t align;
-	struct pcmcia_io_handle *pcihp;
+STATIC int
+pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t pch, bus_addr_t start,
+    bus_size_t size, bus_size_t align, struct pcmcia_io_handle *pcihp)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 	bus_addr_t ioaddr;
 	int flags = 0;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	bus_addr_t mask;
+#if rbus
 	rbus_tag_t rb;
-
+#endif
 	if (align == 0) {
 		align = size;	       /* XXX: funny??? */
 	}
@@ -1871,19 +1989,42 @@ pccbb_pcmcia_io_alloc(pch, start, size, align, pcihp)
 		if (mask < size) {
 			mask <<= 1;
 		}
-		mask--;
+		--mask;
 	}
 
 	/*
 	 * Allocate some arbitrary I/O space.
 	 */
 
-	iot = ((struct pccbb_softc *)(ph->ph_parent))->sc_iot;
+	iot = sc->sc_iot;
 
-	rb = ((struct pccbb_softc *)(ph->ph_parent))->sc_rbus_iot;
+#if rbus
+	rb = sc->sc_rbus_iot;
 	if (rbus_space_alloc(rb, start, size, mask, align, 0, &ioaddr, &ioh)) {
 		return 1;
 	}
+	DPRINTF(("pccbb_pcmcia_io_alloc alloc port 0x%lx+0x%lx\n",
+	    (u_long) ioaddr, (u_long) size));
+#else
+	if (start) {
+		ioaddr = start;
+		if (bus_space_map(iot, start, size, 0, &ioh)) {
+			return 1;
+		}
+		DPRINTF(("pccbb_pcmcia_io_alloc map port 0x%lx+0x%lx\n",
+		    (u_long) ioaddr, (u_long) size));
+	} else {
+		flags |= PCMCIA_IO_ALLOCATED;
+		if (bus_space_alloc(iot, 0x700 /* ph->sc->sc_iobase */ ,
+		    0x800,	/* ph->sc->sc_iobase + ph->sc->sc_iosize */
+		    size, align, 0, 0, &ioaddr, &ioh)) {
+			/* No room be able to be get. */
+			return 1;
+		}
+		DPRINTF(("pccbb_pcmmcia_io_alloc alloc port 0x%lx+0x%lx\n",
+		    (u_long) ioaddr, (u_long) size));
+	}
+#endif
 
 	pcihp->iot = iot;
 	pcihp->ioh = ioh;
@@ -1895,7 +2036,7 @@ pccbb_pcmcia_io_alloc(pch, start, size, align, pcihp)
 }
 
 /*
- * int pccbb_pcmcia_io_free(pcmcia_chipset_handle_t pch,
+ * STATIC int pccbb_pcmcia_io_free(pcmcia_chipset_handle_t pch,
  *                                 struct pcmcia_io_handle *pcihp)
  *
  * This function only frees I/O region for pccard.
@@ -1903,22 +2044,30 @@ pccbb_pcmcia_io_alloc(pch, start, size, align, pcihp)
  * XXX: The interface of this function is not very good, I believe.
  */
 void
-pccbb_pcmcia_io_free(pch, pcihp)
-	pcmcia_chipset_handle_t pch;
-	struct pcmcia_io_handle *pcihp;
+pccbb_pcmcia_io_free(pcmcia_chipset_handle_t pch,
+    struct pcmcia_io_handle *pcihp)
 {
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+#if !rbus
+	bus_space_tag_t iot = pcihp->iot;
+#endif
 	bus_space_handle_t ioh = pcihp->ioh;
 	bus_size_t size = pcihp->size;
 
-	struct pccbb_softc *sc =
-	    (struct pccbb_softc *)((struct pcic_handle *)pch)->ph_parent;
+#if rbus
 	rbus_tag_t rb = sc->sc_rbus_iot;
 
 	rbus_space_free(rb, ioh, size, NULL);
+#else
+	if (pcihp->flags & PCMCIA_IO_ALLOCATED)
+		bus_space_free(iot, ioh, size);
+	else
+		bus_space_unmap(iot, ioh, size);
+#endif
 }
 
 /*
- * int pccbb_pcmcia_io_map(pcmcia_chipset_handle_t pch, int width,
+ * STATIC int pccbb_pcmcia_io_map(pcmcia_chipset_handle_t pch, int width,
  *                                bus_addr_t offset, bus_size_t size,
  *                                struct pcmcia_io_handle *pcihp,
  *                                int *windowp)
@@ -1931,24 +2080,20 @@ pccbb_pcmcia_io_free(pch, pcihp)
  * XXX: no wait timing control?
  */
 int
-pccbb_pcmcia_io_map(pch, width, offset, size, pcihp, windowp)
-	pcmcia_chipset_handle_t pch;
-	int width;
-	bus_addr_t offset;
-	bus_size_t size;
-	struct pcmcia_io_handle *pcihp;
-	int *windowp;
+pccbb_pcmcia_io_map(pcmcia_chipset_handle_t pch, int width, bus_addr_t offset,
+    bus_size_t size, struct pcmcia_io_handle *pcihp, int *windowp)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 	bus_addr_t ioaddr = pcihp->addr + offset;
 	int i, win;
 #if defined CBB_DEBUG
-	static char *width_names[] = { "dynamic", "io8", "io16" };
+	static const char *width_names[] = { "dynamic", "io8", "io16" };
 #endif
 
 	/* Sanity check I/O handle. */
 
-	if (((struct pccbb_softc *)ph->ph_parent)->sc_iot != pcihp->iot) {
+	if (sc->sc_iot != pcihp->iot) {
 		panic("pccbb_pcmcia_io_map iot is bogus");
 	}
 
@@ -1988,20 +2133,18 @@ pccbb_pcmcia_io_map(pch, width, offset, size, pcihp, windowp)
 	ph->io[win].width = width;
 
 	/* actual dirty register-value changing in the function below. */
-	pccbb_pcmcia_do_io_map(ph, win);
+	pccbb_pcmcia_do_io_map(sc, win);
 
 	return 0;
 }
 
 /*
- * void pccbb_pcmcia_do_io_map(struct pcic_handle *h, int win)
+ * STATIC void pccbb_pcmcia_do_io_map(struct pcic_handle *h, int win)
  *
  * This function changes register-value to map I/O region for pccard.
  */
-void
-pccbb_pcmcia_do_io_map(ph, win)
-	struct pcic_handle *ph;
-	int win;
+static void
+pccbb_pcmcia_do_io_map(struct pccbb_softc *sc, int win)
 {
 	static u_int8_t pcic_iowidth[3] = {
 		PCIC_IOCTL_IO0_IOCS16SRC_CARD,
@@ -2018,24 +2161,24 @@ pccbb_pcmcia_do_io_map(ph, win)
 
 	int regbase_win = 0x8 + win * 0x04;
 	u_int8_t ioctl, enable;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 
-	DPRINTF(
-	    ("pccbb_pcmcia_do_io_map win %d addr 0x%lx size 0x%lx width %d\n",
-	    win, (long)ph->io[win].addr, (long)ph->io[win].size,
-	    ph->io[win].width * 8));
+	DPRINTF(("pccbb_pcmcia_do_io_map win %d addr 0x%lx size 0x%lx "
+	    "width %d\n", win, (unsigned long)ph->io[win].addr,
+	    (unsigned long)ph->io[win].size, ph->io[win].width * 8));
 
-	Pcic_write(ph, regbase_win + PCIC_SIA_START_LOW,
+	Pcic_write(sc, regbase_win + PCIC_SIA_START_LOW,
 	    ph->io[win].addr & 0xff);
-	Pcic_write(ph, regbase_win + PCIC_SIA_START_HIGH,
+	Pcic_write(sc, regbase_win + PCIC_SIA_START_HIGH,
 	    (ph->io[win].addr >> 8) & 0xff);
 
-	Pcic_write(ph, regbase_win + PCIC_SIA_STOP_LOW,
+	Pcic_write(sc, regbase_win + PCIC_SIA_STOP_LOW,
 	    (ph->io[win].addr + ph->io[win].size - 1) & 0xff);
-	Pcic_write(ph, regbase_win + PCIC_SIA_STOP_HIGH,
+	Pcic_write(sc, regbase_win + PCIC_SIA_STOP_HIGH,
 	    ((ph->io[win].addr + ph->io[win].size - 1) >> 8) & 0xff);
 
-	ioctl = Pcic_read(ph, PCIC_IOCTL);
-	enable = Pcic_read(ph, PCIC_ADDRWIN_ENABLE);
+	ioctl = Pcic_read(sc, PCIC_IOCTL);
+	enable = Pcic_read(sc, PCIC_ADDRWIN_ENABLE);
 	switch (win) {
 	case 0:
 		ioctl &= ~(PCIC_IOCTL_IO0_WAITSTATE | PCIC_IOCTL_IO0_ZEROWAIT |
@@ -2052,43 +2195,42 @@ pccbb_pcmcia_do_io_map(ph, win)
 		enable |= PCIC_ADDRWIN_ENABLE_IO1;
 		break;
 	}
-	Pcic_write(ph, PCIC_IOCTL, ioctl);
-	Pcic_write(ph, PCIC_ADDRWIN_ENABLE, enable);
-#if defined CBB_DEBUG
+	Pcic_write(sc, PCIC_IOCTL, ioctl);
+	Pcic_write(sc, PCIC_ADDRWIN_ENABLE, enable);
+#if defined(CBB_DEBUG)
 	{
 		u_int8_t start_low =
-		    Pcic_read(ph, regbase_win + PCIC_SIA_START_LOW);
+		    Pcic_read(sc, regbase_win + PCIC_SIA_START_LOW);
 		u_int8_t start_high =
-		    Pcic_read(ph, regbase_win + PCIC_SIA_START_HIGH);
+		    Pcic_read(sc, regbase_win + PCIC_SIA_START_HIGH);
 		u_int8_t stop_low =
-		    Pcic_read(ph, regbase_win + PCIC_SIA_STOP_LOW);
+		    Pcic_read(sc, regbase_win + PCIC_SIA_STOP_LOW);
 		u_int8_t stop_high =
-		    Pcic_read(ph, regbase_win + PCIC_SIA_STOP_HIGH);
-		printf
-		    (" start %02x %02x, stop %02x %02x, ioctl %02x enable %02x\n",
+		    Pcic_read(sc, regbase_win + PCIC_SIA_STOP_HIGH);
+		printf("pccbb_pcmcia_do_io_map start %02x %02x, "
+		    "stop %02x %02x, ioctl %02x enable %02x\n",
 		    start_low, start_high, stop_low, stop_high, ioctl, enable);
 	}
 #endif
 }
 
 /*
- * void pccbb_pcmcia_io_unmap(pcmcia_chipset_handle_t *h, int win)
+ * STATIC void pccbb_pcmcia_io_unmap(pcmcia_chipset_handle_t *h, int win)
  *
  * This function unmaps I/O region.  No return value.
  */
-void
-pccbb_pcmcia_io_unmap(pch, win)
-	pcmcia_chipset_handle_t pch;
-	int win;
+STATIC void
+pccbb_pcmcia_io_unmap(pcmcia_chipset_handle_t pch, int win)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 	int reg;
 
 	if (win >= PCIC_IO_WINS || win < 0) {
 		panic("pccbb_pcmcia_io_unmap: window out of range");
 	}
 
-	reg = Pcic_read(ph, PCIC_ADDRWIN_ENABLE);
+	reg = Pcic_read(sc, PCIC_ADDRWIN_ENABLE);
 	switch (win) {
 	case 0:
 		reg &= ~PCIC_ADDRWIN_ENABLE_IO0;
@@ -2097,66 +2239,77 @@ pccbb_pcmcia_io_unmap(pch, win)
 		reg &= ~PCIC_ADDRWIN_ENABLE_IO1;
 		break;
 	}
-	Pcic_write(ph, PCIC_ADDRWIN_ENABLE, reg);
+	Pcic_write(sc, PCIC_ADDRWIN_ENABLE, reg);
 
 	ph->ioalloc &= ~(1 << win);
 }
 
-/*
- * void pccbb_pcmcia_wait_ready(struct pcic_handle *ph)
- *
- * This function enables the card.  All information is stored in
- * the first argument, pcmcia_chipset_handle_t.
- */
-void
-pccbb_pcmcia_wait_ready(ph)
-	struct pcic_handle *ph;
+static int
+pccbb_pcmcia_wait_ready(struct pccbb_softc *sc)
 {
+	u_int8_t stat;
 	int i;
 
-	DPRINTF(("pccbb_pcmcia_wait_ready: status 0x%02x\n",
-	    Pcic_read(ph, PCIC_IF_STATUS)));
-
-	for (i = 0; i < 10000; i++) {
-		if (Pcic_read(ph, PCIC_IF_STATUS) & PCIC_IF_STATUS_READY) {
-			return;
-		}
-		delay(500);
-#ifdef CBB_DEBUG
-		if ((i > 5000) && (i % 100 == 99))
-			printf(".");
-#endif
+	/* wait an initial 10ms for quick cards */
+	stat = Pcic_read(sc, PCIC_IF_STATUS);
+	if (stat & PCIC_IF_STATUS_READY)
+		return (0);
+	pccbb_pcmcia_delay(sc, 10, "pccwr0");
+	for (i = 0; i < 50; i++) {
+		stat = Pcic_read(sc, PCIC_IF_STATUS);
+		if (stat & PCIC_IF_STATUS_READY)
+			return (0);
+		if ((stat & PCIC_IF_STATUS_CARDDETECT_MASK) !=
+		    PCIC_IF_STATUS_CARDDETECT_PRESENT)
+			return (ENXIO);
+		/* wait .1s (100ms) each iteration now */
+		pccbb_pcmcia_delay(sc, 100, "pccwr1");
 	}
 
-#ifdef DIAGNOSTIC
-	printf("pcic_wait_ready: ready never happened, status = %02x\n",
-	    Pcic_read(ph, PCIC_IF_STATUS));
-#endif
+	printf("pccbb_pcmcia_wait_ready: ready never happened, status=%02x\n", stat);
+	return (EWOULDBLOCK);
 }
 
 /*
- * void pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
+ * Perform long (msec order) delay.  timo is in milliseconds.
+ */
+static void
+pccbb_pcmcia_delay(struct pccbb_softc *sc, int timo, const char *wmesg)
+{
+#ifdef DIAGNOSTIC
+	if (timo <= 0)
+		panic("pccbb_pcmcia_delay: called with timeout %d", timo);
+	if (!curlwp)
+		panic("pccbb_pcmcia_delay: called in interrupt context");
+#endif
+	DPRINTF(("pccbb_pcmcia_delay: \"%s\", sleep %d ms\n", wmesg, timo));
+	tsleep(pccbb_pcmcia_delay, PWAIT, wmesg, roundup(timo * hz, 1000) / 1000);
+}
+
+/*
+ * STATIC void pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
  *
  * This function enables the card.  All information is stored in
  * the first argument, pcmcia_chipset_handle_t.
  */
-void
-pccbb_pcmcia_socket_enable(pch)
-	pcmcia_chipset_handle_t pch;
+STATIC void
+pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
-	int cardtype, win;
-	u_int8_t power, intr;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 	pcireg_t spsr;
 	int voltage;
+	int win;
+	u_int8_t power, intr;
+#ifdef DIAGNOSTIC
+	int reg;
+#endif
 
 	/* this bit is mostly stolen from pcic_attach_card */
 
 	DPRINTF(("pccbb_pcmcia_socket_enable: "));
 
 	/* get card Vcc info */
-
 	spsr =
 	    bus_space_read_4(sc->sc_base_memt, sc->sc_base_memh,
 	    CB_SOCKET_STAT);
@@ -2171,145 +2324,150 @@ pccbb_pcmcia_socket_enable(pch)
 		return;
 	}
 
-	/* disable socket i/o: negate output enable bit */
-
-	power = 0;
-	Pcic_write(ph, PCIC_PWRCTL, power);
-
-	/* power down the socket to reset it, clear the card reset pin */
-
-	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
-
-	/*
-	 * wait 200ms until power fails (Tpf).  Then, wait 100ms since
-	 * we are changing Vcc (Toff).
-	 */
-	/* delay(300*1000); too much */
-
-	/* assert reset bit */
-	intr = Pcic_read(ph, PCIC_INTR);
-	intr &= ~(PCIC_INTR_RESET | PCIC_INTR_CARDTYPE_MASK);
-	Pcic_write(ph, PCIC_INTR, intr);
-
-	/* Power up the socket. */
-	power = Pcic_read(ph, PCIC_PWRCTL);
-	Pcic_write(ph, PCIC_PWRCTL, (power & ~PCIC_PWRCTL_OE));
-	pccbb_power(sc, voltage);
-
-	/* Now output enable */
-	power = Pcic_read(ph, PCIC_PWRCTL);
-	Pcic_write(ph, PCIC_PWRCTL, power | PCIC_PWRCTL_OE);
-
-	/*
-	 * hold RESET at least 10us.
-	 */
-	delay(10);
-	delay(2 * 1000);	       /* XXX: TI1130 requires it. */
-	delay(20 * 1000);	       /* XXX: TI1130 requires it. */
-
-	/* clear the reset flag */
-
-	intr |= PCIC_INTR_RESET;
-	Pcic_write(ph, PCIC_INTR, intr);
-
-	/* wait 20ms as per pc card standard (r2.01) section 4.3.6 */
-
-	delay(20000);
-
-	/* wait for the chip to finish initializing */
-
-	pccbb_pcmcia_wait_ready(ph);
+	/* disable interrupts; assert RESET */
+	intr = Pcic_read(sc, PCIC_INTR);
+	intr &= PCIC_INTR_ENABLE;
+	Pcic_write(sc, PCIC_INTR, intr);
 
 	/* zero out the address windows */
+	Pcic_write(sc, PCIC_ADDRWIN_ENABLE, 0);
 
-	Pcic_write(ph, PCIC_ADDRWIN_ENABLE, 0);
+	/* power down the socket to reset it, clear the card reset pin */
+	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 
-	/* set the card type */
+	/* power off; assert output enable bit */
+	power = PCIC_PWRCTL_OE;
+	Pcic_write(sc, PCIC_PWRCTL, power);
 
-	cardtype = pcmcia_card_gettype(ph->pcmcia);
+	/* power up the socket */
+	if (pccbb_power(sc, voltage) == 0)
+		return;
 
-	intr |= ((cardtype == PCMCIA_IFTYPE_IO) ?
-	    PCIC_INTR_CARDTYPE_IO : PCIC_INTR_CARDTYPE_MEM);
-	Pcic_write(ph, PCIC_INTR, intr);
+	/*
+	 * Table 4-18 and figure 4-6 of the PC Card specifiction say:
+	 * Vcc Rising Time (Tpr) = 100ms (handled in pccbb_power() above)
+	 * RESET Width (Th (Hi-z RESET)) = 1ms
+	 * RESET Width (Tw (RESET)) = 10us
+	 *      
+	 * some machines require some more time to be settled
+	 * for example old toshiba topic bridges!
+	 * (100ms is added here).
+	 */             
+	pccbb_pcmcia_delay(sc, 200 + 1, "pccen1");
 
-	DPRINTF(("%s: pccbb_pcmcia_socket_enable %02x cardtype %s %02x\n",
-	    ph->ph_parent->dv_xname, ph->sock,
-	    ((cardtype == PCMCIA_IFTYPE_IO) ? "io" : "mem"), intr));
+	/* negate RESET */
+	intr |= PCIC_INTR_RESET;
+	Pcic_write(sc, PCIC_INTR, intr);
+
+	/*
+	 * RESET Setup Time (Tsu (RESET)) = 20ms
+	 */
+	pccbb_pcmcia_delay(sc, 20, "pccen2");
+
+#ifdef DIAGNOSTIC
+	reg = Pcic_read(sc, PCIC_IF_STATUS);
+	if ((reg & PCIC_IF_STATUS_POWERACTIVE) == 0)
+		printf("pccbb_pcmcia_socket_enable: no power, status=%x\n", reg);
+#endif
+
+	/* wait for the chip to finish initializing */
+	if (pccbb_pcmcia_wait_ready(sc)) {
+#ifdef DIAGNOSTIC
+		printf("pccbb_pcmcia_socket_enable: never became ready\n");
+#endif
+		/* XXX return a failure status?? */
+		pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+		Pcic_write(sc, PCIC_PWRCTL, 0);
+		return;
+	}
 
 	/* reinstall all the memory and io mappings */
-
-	for (win = 0; win < PCIC_MEM_WINS; ++win) {
-		if (ph->memalloc & (1 << win)) {
-			pccbb_pcmcia_do_mem_map(ph, win);
-		}
-	}
-
-	for (win = 0; win < PCIC_IO_WINS; ++win) {
-		if (ph->ioalloc & (1 << win)) {
-			pccbb_pcmcia_do_io_map(ph, win);
-		}
-	}
+	for (win = 0; win < PCIC_MEM_WINS; ++win)
+		if (ph->memalloc & (1 << win))
+			pccbb_pcmcia_do_mem_map(sc, win);
+	for (win = 0; win < PCIC_IO_WINS; ++win)
+		if (ph->ioalloc & (1 << win))
+			pccbb_pcmcia_do_io_map(sc, win);
 }
 
 /*
- * void pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t *ph)
+ * STATIC void pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t *ph)
  *
  * This function disables the card.  All information is stored in
  * the first argument, pcmcia_chipset_handle_t.
  */
-void
-pccbb_pcmcia_socket_disable(pch)
-	pcmcia_chipset_handle_t pch;
+STATIC void
+pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t pch)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
-	u_int8_t power, intr;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	u_int8_t intr;
 
 	DPRINTF(("pccbb_pcmcia_socket_disable\n"));
 
-	/* reset signal asserting... */
+	/* disable interrupts; assert RESET */
+	intr = Pcic_read(sc, PCIC_INTR);
+	intr &= PCIC_INTR_ENABLE;
+	Pcic_write(sc, PCIC_INTR, intr);
 
-	intr = Pcic_read(ph, PCIC_INTR);
-	intr &= ~(PCIC_INTR_CARDTYPE_MASK);
-	Pcic_write(ph, PCIC_INTR, intr);
-	delay(2 * 1000);
+	/* zero out the address windows */
+	Pcic_write(sc, PCIC_ADDRWIN_ENABLE, 0);
 
-	/* power down the socket */
-	power = Pcic_read(ph, PCIC_PWRCTL);
-	power &= ~PCIC_PWRCTL_OE;
-	Pcic_write(ph, PCIC_PWRCTL, power);
+	/* power down the socket to reset it, clear the card reset pin */
 	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+
+	/* disable socket: negate output enable bit and power off */
+	Pcic_write(sc, PCIC_PWRCTL, 0);
+
 	/*
-	 * wait 300ms until power fails (Tpf).
+	 * Vcc Falling Time (Tpf) = 300ms
 	 */
-	delay(300 * 1000);
+	pccbb_pcmcia_delay(sc, 300, "pccwr1");
+}
+
+STATIC void
+pccbb_pcmcia_socket_settype(pcmcia_chipset_handle_t pch, int type)
+{
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	u_int8_t intr;
+
+	/* set the card type */
+
+	intr = Pcic_read(sc, PCIC_INTR);
+	intr &= ~(PCIC_INTR_IRQ_MASK | PCIC_INTR_CARDTYPE_MASK);
+	if (type == PCMCIA_IFTYPE_IO)
+		intr |= PCIC_INTR_CARDTYPE_IO;
+	else
+		intr |= PCIC_INTR_CARDTYPE_MEM;
+	Pcic_write(sc, PCIC_INTR, intr);
+
+	DPRINTF(("%s: pccbb_pcmcia_socket_settype type %s %02x\n",
+	    device_xname(sc->sc_dev),
+	    ((type == PCMCIA_IFTYPE_IO) ? "io" : "mem"), intr));
 }
 
 /*
- * int pccbb_pcmcia_card_detect(pcmcia_chipset_handle_t *ph)
+ * STATIC int pccbb_pcmcia_card_detect(pcmcia_chipset_handle_t *ph)
  *
  * This function detects whether a card is in the slot or not.
  * If a card is inserted, return 1.  Otherwise, return 0.
  */
-int
-pccbb_pcmcia_card_detect(pch)
-	pcmcia_chipset_handle_t pch;
+STATIC int
+pccbb_pcmcia_card_detect(pcmcia_chipset_handle_t pch)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 
 	DPRINTF(("pccbb_pcmcia_card_detect\n"));
 	return pccbb_detect_card(sc) == 1 ? 1 : 0;
 }
 
 #if 0
-int
+STATIC int
 pccbb_new_pcmcia_mem_alloc(pcmcia_chipset_handle_t pch,
     bus_addr_t start, bus_size_t size, bus_size_t align, int speed, int flags,
     bus_space_tag_t * memtp bus_space_handle_t * memhp)
 #endif
 /*
- * int pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t pch,
+ * STATIC int pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t pch,
  *                                   bus_size_t size,
  *                                   struct pcmcia_mem_handle *pcmhp)
  *
@@ -2318,18 +2476,22 @@ pccbb_new_pcmcia_mem_alloc(pcmcia_chipset_handle_t pch,
  *
  * XXX: Why the argument of start address is not in?
  */
-int
-pccbb_pcmcia_mem_alloc(pch, size, pcmhp)
-	pcmcia_chipset_handle_t pch;
-	bus_size_t size;
-	struct pcmcia_mem_handle *pcmhp;
+STATIC int
+pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t pch, bus_size_t size,
+    struct pcmcia_mem_handle *pcmhp)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 	bus_space_handle_t memh;
 	bus_addr_t addr;
 	bus_size_t sizepg;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
+#if rbus
 	rbus_tag_t rb;
+#endif
+
+	/* Check that the card is still there. */
+	if ((Pcic_read(sc, PCIC_IF_STATUS) & PCIC_IF_STATUS_CARDDETECT_MASK) !=
+		    PCIC_IF_STATUS_CARDDETECT_PRESENT)
+		return 1;
 
 	/* out of sc->memh, allocate as many pages as necessary */
 
@@ -2351,16 +2513,26 @@ pccbb_pcmcia_mem_alloc(pch, size, pcmhp)
 
 	addr = 0;		       /* XXX gcc -Wuninitialized */
 
+#if rbus
 	rb = sc->sc_rbus_memt;
 	if (rbus_space_alloc(rb, 0, sizepg * PCIC_MEM_PAGESIZE,
 	    sizepg * PCIC_MEM_PAGESIZE - 1, PCIC_MEM_PAGESIZE, 0,
 	    &addr, &memh)) {
 		return 1;
 	}
+#else
+	if (bus_space_alloc(sc->sc_memt, sc->sc_mem_start, sc->sc_mem_end,
+	    sizepg * PCIC_MEM_PAGESIZE, PCIC_MEM_PAGESIZE,
+	    0, /* boundary */
+	    0,	/* flags */
+	    &addr, &memh)) {
+		return 1;
+	}
+#endif
 
-	DPRINTF(
-	    ("pccbb_pcmcia_alloc_mem: addr 0x%lx size 0x%lx, realsize 0x%lx\n",
-	    addr, size, sizepg * PCIC_MEM_PAGESIZE));
+	DPRINTF(("pccbb_pcmcia_alloc_mem: addr 0x%lx size 0x%lx, "
+	    "realsize 0x%lx\n", (unsigned long)addr, (unsigned long)size,
+	    (unsigned long)sizepg * PCIC_MEM_PAGESIZE));
 
 	pcmhp->memt = sc->sc_memt;
 	pcmhp->memh = memh;
@@ -2375,37 +2547,38 @@ pccbb_pcmcia_mem_alloc(pch, size, pcmhp)
 }
 
 /*
- * void pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t pch,
+ * STATIC void pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t pch,
  *                                   struct pcmcia_mem_handle *pcmhp)
  *
  * This function release the memory space allocated by the function
  * pccbb_pcmcia_mem_alloc().
  */
-void
-pccbb_pcmcia_mem_free(pch, pcmhp)
-	pcmcia_chipset_handle_t pch;
-	struct pcmcia_mem_handle *pcmhp;
+STATIC void
+pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t pch,
+    struct pcmcia_mem_handle *pcmhp)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
+#if rbus
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 
 	rbus_space_free(sc->sc_rbus_memt, pcmhp->memh, pcmhp->realsize, NULL);
+#else
+	bus_space_free(pcmhp->memt, pcmhp->memh, pcmhp->realsize);
+#endif
 }
 
 /*
- * void pccbb_pcmcia_do_mem_map(struct pcic_handle *ph, int win)
+ * STATIC void pccbb_pcmcia_do_mem_map(struct pcic_handle *ph, int win)
  *
  * This function release the memory space allocated by the function
  * pccbb_pcmcia_mem_alloc().
  */
-void
-pccbb_pcmcia_do_mem_map(ph, win)
-	struct pcic_handle *ph;
-	int win;
+STATIC void
+pccbb_pcmcia_do_mem_map(struct pccbb_softc *sc, int win)
 {
 	int regbase_win;
 	bus_addr_t phys_addr;
 	bus_addr_t phys_end;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 
 #define PCIC_SMM_START_LOW 0
 #define PCIC_SMM_START_HIGH 1
@@ -2420,13 +2593,19 @@ pccbb_pcmcia_do_mem_map(ph, win)
 	u_int8_t mem_window;
 	int reg;
 
+	int kind = ph->mem[win].kind & ~PCMCIA_WIDTH_MEM_MASK;
+	int mem8 =
+	    (ph->mem[win].kind & PCMCIA_WIDTH_MEM_MASK) == PCMCIA_WIDTH_MEM8
+	    || (kind == PCMCIA_MEM_ATTR);
+
 	regbase_win = 0x10 + win * 0x08;
 
 	phys_addr = ph->mem[win].addr;
 	phys_end = phys_addr + ph->mem[win].size;
 
 	DPRINTF(("pccbb_pcmcia_do_mem_map: start 0x%lx end 0x%lx off 0x%lx\n",
-	    phys_addr, phys_end, ph->mem[win].offset));
+	    (unsigned long)phys_addr, (unsigned long)phys_end,
+	    (unsigned long)ph->mem[win].offset));
 
 #define PCIC_MEMREG_LSB_SHIFT PCIC_SYSMEM_ADDRX_SHIFT
 #define PCIC_MEMREG_MSB_SHIFT (PCIC_SYSMEM_ADDRX_SHIFT + 8)
@@ -2436,16 +2615,15 @@ pccbb_pcmcia_do_mem_map(ph, win)
 	start_low = (phys_addr >> PCIC_MEMREG_LSB_SHIFT) & 0xff;
 	/* bit 23:20 and bit 7 on */
 	start_high = ((phys_addr >> PCIC_MEMREG_MSB_SHIFT) & 0x0f)
-	    | PCIC_SYSMEM_ADDRX_START_MSB_DATASIZE_16BIT; /* bit 7 on */
+	    |(mem8 ? 0 : PCIC_SYSMEM_ADDRX_START_MSB_DATASIZE_16BIT);
 	/* bit 31:24, for 32-bit address */
 	mem_window = (phys_addr >> PCIC_MEMREG_WIN_SHIFT) & 0xff;
 
-	Pcic_write(ph, regbase_win + PCIC_SMM_START_LOW, start_low);
-	Pcic_write(ph, regbase_win + PCIC_SMM_START_HIGH, start_high);
+	Pcic_write(sc, regbase_win + PCIC_SMM_START_LOW, start_low);
+	Pcic_write(sc, regbase_win + PCIC_SMM_START_HIGH, start_high);
 
-	if (((struct pccbb_softc *)ph->
-	    ph_parent)->sc_pcmcia_flags & PCCBB_PCMCIA_MEM_32) {
-		Pcic_write(ph, 0x40 + win, mem_window);
+	if (sc->sc_pcmcia_flags & PCCBB_PCMCIA_MEM_32) {
+		Pcic_write(sc, 0x40 + win, mem_window);
 	}
 
 	stop_low = (phys_end >> PCIC_MEMREG_LSB_SHIFT) & 0xff;
@@ -2453,71 +2631,70 @@ pccbb_pcmcia_do_mem_map(ph, win)
 	    | PCIC_SYSMEM_ADDRX_STOP_MSB_WAIT2;	/* wait 2 cycles */
 	/* XXX Geee, WAIT2!! Crazy!!  I must rewrite this routine. */
 
-	Pcic_write(ph, regbase_win + PCIC_SMM_STOP_LOW, stop_low);
-	Pcic_write(ph, regbase_win + PCIC_SMM_STOP_HIGH, stop_high);
+	Pcic_write(sc, regbase_win + PCIC_SMM_STOP_LOW, stop_low);
+	Pcic_write(sc, regbase_win + PCIC_SMM_STOP_HIGH, stop_high);
 
 	off_low = (ph->mem[win].offset >> PCIC_CARDMEM_ADDRX_SHIFT) & 0xff;
 	off_high = ((ph->mem[win].offset >> (PCIC_CARDMEM_ADDRX_SHIFT + 8))
 	    & PCIC_CARDMEM_ADDRX_MSB_ADDR_MASK)
-	    | ((ph->mem[win].kind == PCMCIA_MEM_ATTR) ?
+	    | ((kind == PCMCIA_MEM_ATTR) ?
 	    PCIC_CARDMEM_ADDRX_MSB_REGACTIVE_ATTR : 0);
 
-	Pcic_write(ph, regbase_win + PCIC_CMA_LOW, off_low);
-	Pcic_write(ph, regbase_win + PCIC_CMA_HIGH, off_high);
+	Pcic_write(sc, regbase_win + PCIC_CMA_LOW, off_low);
+	Pcic_write(sc, regbase_win + PCIC_CMA_HIGH, off_high);
 
-	reg = Pcic_read(ph, PCIC_ADDRWIN_ENABLE);
+	reg = Pcic_read(sc, PCIC_ADDRWIN_ENABLE);
 	reg |= ((1 << win) | PCIC_ADDRWIN_ENABLE_MEMCS16);
-	Pcic_write(ph, PCIC_ADDRWIN_ENABLE, reg);
+	Pcic_write(sc, PCIC_ADDRWIN_ENABLE, reg);
 
-#if defined CBB_DEBUG
+#if defined(CBB_DEBUG)
 	{
 		int r1, r2, r3, r4, r5, r6, r7 = 0;
 
-		r1 = Pcic_read(ph, regbase_win + PCIC_SMM_START_LOW);
-		r2 = Pcic_read(ph, regbase_win + PCIC_SMM_START_HIGH);
-		r3 = Pcic_read(ph, regbase_win + PCIC_SMM_STOP_LOW);
-		r4 = Pcic_read(ph, regbase_win + PCIC_SMM_STOP_HIGH);
-		r5 = Pcic_read(ph, regbase_win + PCIC_CMA_LOW);
-		r6 = Pcic_read(ph, regbase_win + PCIC_CMA_HIGH);
-		if (((struct pccbb_softc *)(ph->
-		    ph_parent))->sc_pcmcia_flags & PCCBB_PCMCIA_MEM_32) {
-			r7 = Pcic_read(ph, 0x40 + win);
+		r1 = Pcic_read(sc, regbase_win + PCIC_SMM_START_LOW);
+		r2 = Pcic_read(sc, regbase_win + PCIC_SMM_START_HIGH);
+		r3 = Pcic_read(sc, regbase_win + PCIC_SMM_STOP_LOW);
+		r4 = Pcic_read(sc, regbase_win + PCIC_SMM_STOP_HIGH);
+		r5 = Pcic_read(sc, regbase_win + PCIC_CMA_LOW);
+		r6 = Pcic_read(sc, regbase_win + PCIC_CMA_HIGH);
+		if (sc->sc_pcmcia_flags & PCCBB_PCMCIA_MEM_32) {
+			r7 = Pcic_read(sc, 0x40 + win);
 		}
 
-		DPRINTF(("pccbb_pcmcia_do_mem_map window %d: %02x%02x %02x%02x "
-		    "%02x%02x", win, r1, r2, r3, r4, r5, r6));
-		if (((struct pccbb_softc *)(ph->
-		    ph_parent))->sc_pcmcia_flags & PCCBB_PCMCIA_MEM_32) {
-			DPRINTF((" %02x", r7));
+		printf("pccbb_pcmcia_do_mem_map window %d: %02x%02x %02x%02x "
+		    "%02x%02x", win, r1, r2, r3, r4, r5, r6);
+		if (sc->sc_pcmcia_flags & PCCBB_PCMCIA_MEM_32) {
+			printf(" %02x", r7);
 		}
-		DPRINTF(("\n"));
+		printf("\n");
 	}
 #endif
 }
 
 /*
- * int pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t pch, int kind,
+ * STATIC int pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t pch, int kind,
  *                                 bus_addr_t card_addr, bus_size_t size,
  *                                 struct pcmcia_mem_handle *pcmhp,
- *                                 bus_size_t *offsetp, int *windowp)
+ *                                 bus_addr_t *offsetp, int *windowp)
  *
  * This function maps memory space allocated by the function
  * pccbb_pcmcia_mem_alloc().
  */
-int
-pccbb_pcmcia_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
-	pcmcia_chipset_handle_t pch;
-	int kind;
-	bus_addr_t card_addr;
-	bus_size_t size;
-	struct pcmcia_mem_handle *pcmhp;
-	bus_size_t *offsetp;
-	int *windowp;
+STATIC int
+pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t pch, int kind,
+    bus_addr_t card_addr, bus_size_t size, struct pcmcia_mem_handle *pcmhp,
+    bus_addr_t *offsetp, int *windowp)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 	bus_addr_t busaddr;
 	long card_offset;
 	int win;
+
+	/* Check that the card is still there. */
+	if ((Pcic_read(sc, PCIC_IF_STATUS) & PCIC_IF_STATUS_CARDDETECT_MASK) !=
+		    PCIC_IF_STATUS_CARDDETECT_PRESENT)
+		return 1;
 
 	for (win = 0; win < PCIC_MEM_WINS; ++win) {
 		if ((ph->memalloc & (1 << win)) == 0) {
@@ -2534,7 +2711,7 @@ pccbb_pcmcia_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
 
 	/* XXX this is pretty gross */
 
-	if (((struct pccbb_softc *)ph->ph_parent)->sc_memt != pcmhp->memt) {
+	if (sc->sc_memt != pcmhp->memt) {
 		panic("pccbb_pcmcia_mem_map memt is bogus");
 	}
 
@@ -2567,103 +2744,38 @@ pccbb_pcmcia_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
 	ph->mem[win].offset = card_offset;
 	ph->mem[win].kind = kind;
 
-	pccbb_pcmcia_do_mem_map(ph, win);
+	pccbb_pcmcia_do_mem_map(sc, win);
 
 	return 0;
 }
 
 /*
- * int pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t pch,
+ * STATIC int pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t pch,
  *                                   int window)
  *
  * This function unmaps memory space which mapped by the function
  * pccbb_pcmcia_mem_map().
  */
-void
-pccbb_pcmcia_mem_unmap(pch, window)
-	pcmcia_chipset_handle_t pch;
-	int window;
+STATIC void
+pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t pch, int window)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
+	struct pcic_handle *ph = &sc->sc_pcmcia_h;
 	int reg;
 
 	if (window >= PCIC_MEM_WINS) {
 		panic("pccbb_pcmcia_mem_unmap: window out of range");
 	}
 
-	reg = Pcic_read(ph, PCIC_ADDRWIN_ENABLE);
+	reg = Pcic_read(sc, PCIC_ADDRWIN_ENABLE);
 	reg &= ~(1 << window);
-	Pcic_write(ph, PCIC_ADDRWIN_ENABLE, reg);
+	Pcic_write(sc, PCIC_ADDRWIN_ENABLE, reg);
 
 	ph->memalloc &= ~(1 << window);
 }
 
-#if defined PCCBB_PCMCIA_POLL
-struct pccbb_poll_str {
-	void *arg;
-	int (*func)(void *);
-	int level;
-	struct pcic_handle *ph;
-	int count;
-	int num;
-};
-
-static struct pccbb_poll_str pccbb_poll[10];
-static int pccbb_poll_n = 0;
-static struct timeout pccbb_poll_timeout;
-
-void pccbb_pcmcia_poll(void *arg);
-
-void
-pccbb_pcmcia_poll(arg)
-	void *arg;
-{
-	struct pccbb_poll_str *poll = arg;
-	struct pcic_handle *ph = poll->ph;
-	struct pccbb_softc *sc = ph->sc;
-	int s;
-	u_int32_t spsr;		       /* socket present-state reg */
-
-	timeout_set(&pccbb_poll_timeout, pccbb_pcmcia_poll, arg);
-	timeout_add(&pccbb_poll_timeout, hz * 2);
-	switch (poll->level) {
-	case IPL_NET:
-		s = splnet();
-		break;
-	case IPL_BIO:
-		s = splbio();
-		break;
-	case IPL_TTY:		       /* fallthrough */
-	default:
-		s = spltty();
-		break;
-	}
-
-	spsr =
-	    bus_space_read_4(sc->sc_base_memt, sc->sc_base_memh,
-	    CB_SOCKET_STAT);
-
-#if defined PCCBB_PCMCIA_POLL_ONLY && defined LEVEL2
-	if (!(spsr & 0x40))	       /* CINT low */
-#else
-	if (1)
-#endif
-	{
-		if ((*poll->func) (poll->arg) > 0) {
-			++poll->count;
-	/* printf("intr: reported from poller, 0x%x\n", spsr); */
-#if defined LEVEL2
-		} else {
-			printf("intr: miss! 0x%x\n", spsr);
-#endif
-		}
-	}
-	splx(s);
-}
-#endif /* defined CB_PCMCIA_POLL */
-
 /*
- * void *pccbb_pcmcia_intr_establish(pcmcia_chipset_handle_t pch,
+ * STATIC void *pccbb_pcmcia_intr_establish(pcmcia_chipset_handle_t pch,
  *                                          struct pcmcia_function *pf,
  *                                          int ipl,
  *                                          int (*func)(void *),
@@ -2671,24 +2783,17 @@ pccbb_pcmcia_poll(arg)
  *
  * This function enables PC-Card interrupt.  PCCBB uses PCI interrupt line.
  */
-void *
-pccbb_pcmcia_intr_establish(pch, pf, ipl, func, arg, xname)
-	pcmcia_chipset_handle_t pch;
-	struct pcmcia_function *pf;
-	int ipl;
-	int (*func)(void *);
-	void *arg;
-	char *xname;
+STATIC void *
+pccbb_pcmcia_intr_establish(pcmcia_chipset_handle_t pch,
+    struct pcmcia_function *pf, int ipl, int (*func)(void *), void *arg)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 
 	if (!(pf->cfe->flags & PCMCIA_CFE_IRQLEVEL)) {
 		/* what should I do? */
 		if ((pf->cfe->flags & PCMCIA_CFE_IRQLEVEL)) {
-			DPRINTF(
-			    ("%s does not provide edge nor pulse interrupt\n",
-			    sc->sc_dev.dv_xname));
+			DPRINTF(("%s does not provide edge nor pulse "
+			    "interrupt\n", device_xname(sc->sc_dev)));
 			return NULL;
 		}
 		/*
@@ -2697,39 +2802,26 @@ pccbb_pcmcia_intr_establish(pch, pf, ipl, func, arg, xname)
 		 */
 	}
 
-	return pccbb_intr_establish(sc, -1, ipl, func, arg, xname);
+	return pccbb_intr_establish(sc, 0, ipl, func, arg);
 }
 
 /*
- * void pccbb_pcmcia_intr_disestablish(pcmcia_chipset_handle_t pch,
+ * STATIC void pccbb_pcmcia_intr_disestablish(pcmcia_chipset_handle_t pch,
  *                                            void *ih)
  *
  * This function disables PC-Card interrupt.
  */
-void
-pccbb_pcmcia_intr_disestablish(pch, ih)
-	pcmcia_chipset_handle_t pch;
-	void *ih;
+STATIC void
+pccbb_pcmcia_intr_disestablish(pcmcia_chipset_handle_t pch, void *ih)
 {
-	struct pcic_handle *ph = (struct pcic_handle *)pch;
-	struct pccbb_softc *sc = (struct pccbb_softc *)ph->ph_parent;
+	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 
 	pccbb_intr_disestablish(sc, ih);
 }
 
-const char *
-pccbb_pcmcia_intr_string(pch, ih)
-	pcmcia_chipset_handle_t pch;
-	void *ih;
-{
-	if (ih == NULL)
-		return "couldn't establish interrupt";
-	else
-		return "";	/* card shares interrupt of the bridge */
-}
-
+#if rbus
 /*
- * int
+ * static int
  * pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t ct, rbus_tag_t rb,
  *			    bus_addr_t addr, bus_size_t size,
  *			    bus_addr_t mask, bus_size_t align,
@@ -2739,23 +2831,16 @@ pccbb_pcmcia_intr_string(pch, ih)
  *   This function allocates a portion of memory or io space for
  *   clients.  This function is called from CardBus card drivers.
  */
-int
-pccbb_rbus_cb_space_alloc(ct, rb, addr, size, mask, align, flags, addrp, bshp)
-	cardbus_chipset_tag_t ct;
-	rbus_tag_t rb;
-	bus_addr_t addr;
-	bus_size_t size;
-	bus_addr_t mask;
-	bus_size_t align;
-	int flags;
-	bus_addr_t *addrp;
-	bus_space_handle_t *bshp;
+static int
+pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t ct, rbus_tag_t rb,
+    bus_addr_t addr, bus_size_t size, bus_addr_t mask, bus_size_t align,
+    int flags, bus_addr_t *addrp, bus_space_handle_t *bshp)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
 
-	DPRINTF(
-	    ("pccbb_rbus_cb_space_alloc: adr %lx, size %lx, mask %lx, align %lx\n",
-	    addr, size, mask, align));
+	DPRINTF(("pccbb_rbus_cb_space_alloc: addr 0x%lx, size 0x%lx, "
+	    "mask 0x%lx, align 0x%lx\n", (unsigned long)addr,
+	    (unsigned long)size, (unsigned long)mask, (unsigned long)align));
 
 	if (align == 0) {
 		align = size;
@@ -2764,6 +2849,20 @@ pccbb_rbus_cb_space_alloc(ct, rb, addr, size, mask, align, flags, addrp, bshp)
 	if (rb->rb_bt == sc->sc_memt) {
 		if (align < 16) {
 			return 1;
+		}
+		/*
+		 * XXX: align more than 0x1000 to avoid overwrapping
+		 * memory windows for two or more devices.  0x1000
+		 * means memory window's granularity.
+		 *
+		 * Two or more devices should be able to share same
+		 * memory window region.  However, overrapping memory
+		 * window is not good because some devices, such as
+		 * 3Com 3C575[BC], have a broken address decoder and
+		 * intrude other's memory region.
+		 */
+		if (align < 0x1000) {
+			align = 0x1000;
 		}
 	} else if (rb->rb_bt == sc->sc_iot) {
 		if (align < 4) {
@@ -2776,15 +2875,16 @@ pccbb_rbus_cb_space_alloc(ct, rb, addr, size, mask, align, flags, addrp, bshp)
 		}
 
 	} else {
-		DPRINTF(
-		    ("pccbb_rbus_cb_space_alloc: Bus space tag %x is NOT used.\n",
-		    rb->rb_bt));
+		DPRINTF(("pccbb_rbus_cb_space_alloc: Bus space tag 0x%lx is "
+		    "NOT used. io: 0x%lx, mem: 0x%lx\n",
+		    (unsigned long)rb->rb_bt, (unsigned long)sc->sc_iot,
+		    (unsigned long)sc->sc_memt));
 		return 1;
 		/* XXX: panic here? */
 	}
 
 	if (rbus_space_alloc(rb, addr, size, mask, align, flags, addrp, bshp)) {
-		printf("%s: <rbus> no bus space\n", sc->sc_dev.dv_xname);
+		aprint_normal_dev(sc->sc_dev, "<rbus> no bus space\n");
 		return 1;
 	}
 
@@ -2794,18 +2894,15 @@ pccbb_rbus_cb_space_alloc(ct, rb, addr, size, mask, align, flags, addrp, bshp)
 }
 
 /*
- * int
+ * static int
  * pccbb_rbus_cb_space_free(cardbus_chipset_tag_t *ct, rbus_tag_t rb,
  *			   bus_space_handle_t *bshp, bus_size_t size);
  *
  *   This function is called from CardBus card drivers.
  */
-int
-pccbb_rbus_cb_space_free(ct, rb, bsh, size)
-	cardbus_chipset_tag_t ct;
-	rbus_tag_t rb;
-	bus_space_handle_t bsh;
-	bus_size_t size;
+static int
+pccbb_rbus_cb_space_free(cardbus_chipset_tag_t ct, rbus_tag_t rb,
+    bus_space_handle_t bsh, bus_size_t size)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)ct;
 	bus_space_tag_t bt = rb->rb_bt;
@@ -2821,15 +2918,13 @@ pccbb_rbus_cb_space_free(ct, rb, bsh, size)
 
 	return rbus_space_free(rb, bsh, size, NULL);
 }
+#endif /* rbus */
 
-int
-pccbb_open_win(sc, bst, addr, size, bsh, flags)
-	struct pccbb_softc *sc;
-	bus_space_tag_t bst;
-	bus_addr_t addr;
-	bus_size_t size;
-	bus_space_handle_t bsh;
-	int flags;
+#if rbus
+
+static int
+pccbb_open_win(struct pccbb_softc *sc, bus_space_tag_t bst, bus_addr_t addr,
+    bus_size_t size, bus_space_handle_t bsh, int flags)
 {
 	struct pccbb_win_chain_head *head;
 	bus_addr_t align;
@@ -2839,13 +2934,14 @@ pccbb_open_win(sc, bst, addr, size, bsh, flags)
 	if (sc->sc_memt == bst) {
 		head = &sc->sc_memwindow;
 		align = 0x1000;
-		DPRINTF(("using memory window, %x %x %x\n\n",
-		    sc->sc_iot, sc->sc_memt, bst));
+		DPRINTF(("using memory window, 0x%lx 0x%lx 0x%lx\n\n",
+		    (unsigned long)sc->sc_iot, (unsigned long)sc->sc_memt,
+		    (unsigned long)bst));
 	}
 
 	if (pccbb_winlist_insert(head, addr, size, bsh, flags)) {
-		printf("%s: pccbb_open_win: %s winlist insert failed\n",
-		    sc->sc_dev.dv_xname,
+		aprint_error_dev(sc->sc_dev,
+		    "pccbb_open_win: %s winlist insert failed\n",
 		    (head == &sc->sc_memwindow) ? "mem" : "io");
 	}
 	pccbb_winset(align, sc, bst);
@@ -2853,12 +2949,9 @@ pccbb_open_win(sc, bst, addr, size, bsh, flags)
 	return 0;
 }
 
-int
-pccbb_close_win(sc, bst, bsh, size)
-	struct pccbb_softc *sc;
-	bus_space_tag_t bst;
-	bus_space_handle_t bsh;
-	bus_size_t size;
+static int
+pccbb_close_win(struct pccbb_softc *sc, bus_space_tag_t bst,
+    bus_space_handle_t bsh, bus_size_t size)
 {
 	struct pccbb_win_chain_head *head;
 	bus_addr_t align;
@@ -2871,8 +2964,8 @@ pccbb_close_win(sc, bst, bsh, size)
 	}
 
 	if (pccbb_winlist_delete(head, bsh, size)) {
-		printf("%s: pccbb_close_win: %s winlist delete failed\n",
-		    sc->sc_dev.dv_xname,
+		aprint_error_dev(sc->sc_dev,
+		    "pccbb_close_win: %s winlist delete failed\n",
 		    (head == &sc->sc_memwindow) ? "mem" : "io");
 	}
 	pccbb_winset(align, sc, bst);
@@ -2880,13 +2973,9 @@ pccbb_close_win(sc, bst, bsh, size)
 	return 0;
 }
 
-int
-pccbb_winlist_insert(head, start, size, bsh, flags)
-	struct pccbb_win_chain_head *head;
-	bus_addr_t start;
-	bus_size_t size;
-	bus_space_handle_t bsh;
-	int flags;
+static int
+pccbb_winlist_insert(struct pccbb_win_chain_head *head, bus_addr_t start,
+    bus_size_t size, bus_space_handle_t bsh, int flags)
 {
 	struct pccbb_win_chain *chainp, *elem;
 
@@ -2899,53 +2988,47 @@ pccbb_winlist_insert(head, start, size, bsh, flags)
 	elem->wc_handle = bsh;
 	elem->wc_flags = flags;
 
-	for (chainp = TAILQ_FIRST(head); chainp != NULL;
-	    chainp = TAILQ_NEXT(chainp, wc_list)) {
-		if (chainp->wc_end < start)
-			continue;
-		TAILQ_INSERT_AFTER(head, chainp, elem, wc_list);
-		return (0);
+	TAILQ_FOREACH(chainp, head, wc_list) {
+		if (chainp->wc_end >= start)
+			break;
 	}
-
-	TAILQ_INSERT_TAIL(head, elem, wc_list);
+	if (chainp != NULL)
+		TAILQ_INSERT_AFTER(head, chainp, elem, wc_list);
+	else
+		TAILQ_INSERT_TAIL(head, elem, wc_list);
 	return (0);
 }
 
-int
-pccbb_winlist_delete(head, bsh, size)
-	struct pccbb_win_chain_head *head;
-	bus_space_handle_t bsh;
-	bus_size_t size;
+static int
+pccbb_winlist_delete(struct pccbb_win_chain_head *head, bus_space_handle_t bsh,
+    bus_size_t size)
 {
 	struct pccbb_win_chain *chainp;
 
-	for (chainp = TAILQ_FIRST(head); chainp != NULL;
-	     chainp = TAILQ_NEXT(chainp, wc_list)) {
-		if (memcmp(&chainp->wc_handle, &bsh, sizeof(bsh)))
-			continue;
-		if ((chainp->wc_end - chainp->wc_start) != (size - 1)) {
-			printf("pccbb_winlist_delete: window 0x%lx size "
-			    "inconsistent: 0x%lx, 0x%lx\n",
-			    chainp->wc_start,
-			    chainp->wc_end - chainp->wc_start,
-			    size - 1);
-			return 1;
-		}
+	TAILQ_FOREACH(chainp, head, wc_list) {
+		if (memcmp(&chainp->wc_handle, &bsh, sizeof(bsh)) == 0)
+			break;
+	}
+	if (chainp == NULL)
+		return 1;	       /* fail: no candidate to remove */
 
-		TAILQ_REMOVE(head, chainp, wc_list);
-		free(chainp, M_DEVBUF);
-
-		return 0;
+	if ((chainp->wc_end - chainp->wc_start) != (size - 1)) {
+		printf("pccbb_winlist_delete: window 0x%lx size "
+		    "inconsistent: 0x%lx, 0x%lx\n",
+		    (unsigned long)chainp->wc_start,
+		    (unsigned long)(chainp->wc_end - chainp->wc_start),
+		    (unsigned long)(size - 1));
+		return 1;
 	}
 
-	return 1;	       /* fail: no candidate to remove */
+	TAILQ_REMOVE(head, chainp, wc_list);
+	free(chainp, M_DEVBUF);
+
+	return 0;
 }
 
-void
-pccbb_winset(align, sc, bst)
-	bus_addr_t align;
-	struct pccbb_softc *sc;
-	bus_space_tag_t bst;
+static void
+pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 {
 	pci_chipset_tag_t pc;
 	pcitag_t tag;
@@ -2963,10 +3046,10 @@ pccbb_winset(align, sc, bst)
 	win[0].win_flags = win[1].win_flags = 0;
 
 	chainp = TAILQ_FIRST(&sc->sc_iowindow);
-	offs = 0x2c;
+	offs = PCI_CB_IOBASE0;
 	if (sc->sc_memt == bst) {
 		chainp = TAILQ_FIRST(&sc->sc_memwindow);
-		offs = 0x1c;
+		offs = PCI_CB_MEMBASE0;
 	}
 
 	if (chainp != NULL) {
@@ -3033,8 +3116,8 @@ pccbb_winset(align, sc, bst)
 				 * what should the poor bridge do if one is
 				 * cachable, and the other is not?
 				 */
-				printf("%s: overlapping windows\n",
-				    sc->sc_dev.dv_xname);
+				aprint_error_dev(sc->sc_dev,
+				    "overlapping windows\n");
 			} else {
 				win[1].win_limit = chainp->wc_end & mask;
 			}
@@ -3047,77 +3130,92 @@ pccbb_winset(align, sc, bst)
 	pci_conf_write(pc, tag, offs + 4, win[0].win_limit);
 	pci_conf_write(pc, tag, offs + 8, win[1].win_start);
 	pci_conf_write(pc, tag, offs + 12, win[1].win_limit);
-	DPRINTF(("--pccbb_winset: win0 [%x, %lx), win1 [%x, %lx)\n",
-	    pci_conf_read(pc, tag, offs),
-	    pci_conf_read(pc, tag, offs + 4) + align,
-	    pci_conf_read(pc, tag, offs + 8),
-	    pci_conf_read(pc, tag, offs + 12) + align));
+	DPRINTF(("--pccbb_winset: win0 [0x%lx, 0x%lx), win1 [0x%lx, 0x%lx)\n",
+	    (unsigned long)pci_conf_read(pc, tag, offs),
+	    (unsigned long)pci_conf_read(pc, tag, offs + 4) + align,
+	    (unsigned long)pci_conf_read(pc, tag, offs + 8),
+	    (unsigned long)pci_conf_read(pc, tag, offs + 12) + align));
 
 	if (bst == sc->sc_memt) {
-		pcireg_t bcr = pci_conf_read(pc, tag, PCI_BCR_INTR);
+		pcireg_t bcr = pci_conf_read(pc, tag, PCI_BRIDGE_CONTROL_REG);
 
 		bcr &= ~(CB_BCR_PREFETCH_MEMWIN0 | CB_BCR_PREFETCH_MEMWIN1);
 		if (win[0].win_flags & PCCBB_MEM_CACHABLE)
 			bcr |= CB_BCR_PREFETCH_MEMWIN0;
 		if (win[1].win_flags & PCCBB_MEM_CACHABLE)
 			bcr |= CB_BCR_PREFETCH_MEMWIN1;
-		pci_conf_write(pc, tag, PCI_BCR_INTR, bcr);
+		pci_conf_write(pc, tag, PCI_BRIDGE_CONTROL_REG, bcr);
 	}
 }
 
-void
-pccbb_powerhook(why, arg)
-	int why;
-	void *arg;
+#endif /* rbus */
+
+static bool
+pccbb_suspend(device_t dv PMF_FN_ARGS)
 {
-	struct pccbb_softc *sc = arg;
-	u_int32_t reg;
+	struct pccbb_softc *sc = device_private(dv);
 	bus_space_tag_t base_memt = sc->sc_base_memt;	/* socket regs memory */
 	bus_space_handle_t base_memh = sc->sc_base_memh;
+	pcireg_t reg;
 
-	DPRINTF(("%s: power: why %d\n", sc->sc_dev.dv_xname, why));
+	if (sc->sc_pil_intr_enable)
+		(void)pccbbintr_function(sc);
+	sc->sc_pil_intr_enable = 0;
 
-	if (why == PWR_SUSPEND || why == PWR_STANDBY) {
-		DPRINTF(("%s: power: why %d stopping intr\n",
-		    sc->sc_dev.dv_xname, why));
-		if (sc->sc_pil_intr_enable) {
-			(void)pccbbintr_function(sc);
-		}
-		sc->sc_pil_intr_enable = 0;
+	reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_MASK);
+	/* Disable interrupts. */
+	reg &= ~(CB_SOCKET_MASK_CSTS | CB_SOCKET_MASK_CD | CB_SOCKET_MASK_POWER);
+	bus_space_write_4(base_memt, base_memh, CB_SOCKET_MASK, reg);
+	/* XXX joerg Disable power to the socket? */
 
-		/* ToDo: deactivate or suspend child devices */
+	/* XXX flush PCI write */
+	bus_space_read_4(base_memt, base_memh, CB_SOCKET_EVENT);
 
+	/* reset interrupt */
+	bus_space_write_4(base_memt, base_memh, CB_SOCKET_EVENT,
+	    bus_space_read_4(base_memt, base_memh, CB_SOCKET_EVENT));
+	/* XXX flush PCI write */
+	bus_space_read_4(base_memt, base_memh, CB_SOCKET_EVENT);
+
+	if (sc->sc_ih != NULL) {
+		pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
+		sc->sc_ih = NULL;
 	}
 
-	if (why == PWR_RESUME) {
-		if (pci_conf_read (sc->sc_pc, sc->sc_tag, PCI_SOCKBASE) == 0)
-			/* BIOS did not recover this register */
-			pci_conf_write (sc->sc_pc, sc->sc_tag,
-					PCI_SOCKBASE, sc->sc_sockbase);
-		if (pci_conf_read (sc->sc_pc, sc->sc_tag, PCI_BUSNUM) == 0)
-			/* BIOS did not recover this register */
-			pci_conf_write (sc->sc_pc, sc->sc_tag,
-					PCI_BUSNUM, sc->sc_busnum);
-		/* CSC Interrupt: Card detect interrupt on */
-		reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_MASK);
-		/* Card detect intr is turned on. */
-		reg |= CB_SOCKET_MASK_CD;
-		bus_space_write_4(base_memt, base_memh, CB_SOCKET_MASK, reg);
-		/* reset interrupt */
-		reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_EVENT);
-		bus_space_write_4(base_memt, base_memh, CB_SOCKET_EVENT, reg);
+	return true;
+}
 
-		/*
-		 * check for card insertion or removal during suspend period.
-		 * XXX: the code can't cope with card swap (remove then
-		 * insert).  how can we detect such situation?
-		 */
-		(void)pccbbintr(sc);
+static bool
+pccbb_resume(device_t dv PMF_FN_ARGS)
+{
+	struct pccbb_softc *sc = device_private(dv);
+	bus_space_tag_t base_memt = sc->sc_base_memt;	/* socket regs memory */
+	bus_space_handle_t base_memh = sc->sc_base_memh;
+	pcireg_t reg;
 
-		sc->sc_pil_intr_enable = 1;
-		DPRINTF(("%s: power: RESUME enabling intr\n",
-		    sc->sc_dev.dv_xname));
+	pccbb_chipinit(sc);
+	pccbb_intrinit(sc);
+	/* setup memory and io space window for CB */
+	pccbb_winset(0x1000, sc, sc->sc_memt);
+	pccbb_winset(0x04, sc, sc->sc_iot);
 
-		/* ToDo: activate or wakeup child devices */
-	}
+	/* CSC Interrupt: Card detect interrupt on */
+	reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_MASK);
+	/* Card detect intr is turned on. */
+	reg |= CB_SOCKET_MASK_CSTS | CB_SOCKET_MASK_CD | CB_SOCKET_MASK_POWER;
+	bus_space_write_4(base_memt, base_memh, CB_SOCKET_MASK, reg);
+	/* reset interrupt */
+	reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_EVENT);
+	bus_space_write_4(base_memt, base_memh, CB_SOCKET_EVENT, reg);
+
+	/*
+	 * check for card insertion or removal during suspend period.
+	 * XXX: the code can't cope with card swap (remove then
+	 * insert).  how can we detect such situation?
+	 */
+	(void)pccbbintr(sc);
+
+	sc->sc_pil_intr_enable = 1;
+
+	return true;
 }

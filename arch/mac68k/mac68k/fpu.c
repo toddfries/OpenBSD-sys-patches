@@ -1,4 +1,4 @@
-/*	$NetBSD: fpu.c,v 1.35 2005/12/24 22:45:35 perry Exp $	*/
+/*	$NetBSD: fpu.c,v 1.38 2008/04/28 20:23:27 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.35 2005/12/24 22:45:35 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.38 2008/04/28 20:23:27 martin Exp $");
 
 #include "opt_fpu_emulate.h"
 
@@ -47,12 +40,7 @@ __KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.35 2005/12/24 22:45:35 perry Exp $");
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/time.h>
-#include <sys/kernel.h>
-#include <sys/device.h>
 
-#include <machine/psl.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
 
@@ -62,18 +50,7 @@ __KERNEL_RCSID(0, "$NetBSD: fpu.c,v 1.35 2005/12/24 22:45:35 perry Exp $");
 
 extern label_t *nofault;
 
-static int  fpu_match(struct device *, struct cfdata *, void *);
-static void fpu_attach(struct device *, struct device *, void *);
 static int  fpu_probe(void);
-
-CFATTACH_DECL(fpu, sizeof(struct device),
-    fpu_match, fpu_attach, NULL, NULL);
-
-static int
-fpu_match(struct device *parent, struct cfdata *cf, void *aux)
-{
-	return 1;
-}
 
 static const char *fpu_descr[] = {
 #ifdef	FPU_EMULATE
@@ -87,8 +64,8 @@ static const char *fpu_descr[] = {
 	"mc68060",			/* 4 */
 	"unknown" };
 
-static void
-fpu_attach(struct device *parent, struct device *self, void *args)
+void
+initfpu(void)
 {
 	const char *descr;
 
@@ -103,7 +80,7 @@ fpu_attach(struct device *parent, struct device *self, void *args)
 	else
 		descr = "unknown type";
 
-	printf(" (%s)\n", descr);
+	printf("fpu: %s\n", descr);
 }
 
 static int

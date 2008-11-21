@@ -1,5 +1,4 @@
-/* $OpenBSD: pal.s,v 1.7 2008/01/13 20:59:52 kettenis Exp $ */
-/* $NetBSD: pal.s,v 1.14 1999/12/02 22:08:04 thorpej Exp $ */
+/* $NetBSD: pal.s,v 1.15 2002/05/13 21:38:30 thorpej Exp $ */
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -28,9 +27,6 @@
  * rights to redistribute these changes.
  */
 
-.file	3 __FILE__
-.loc	3 __LINE__
-
 /*
  * The various OSF PALcode routines.
  *
@@ -43,6 +39,9 @@
  * and Richard T. Witek.
  */
 
+__KERNEL_RCSID(1, "$NetBSD: pal.s,v 1.15 2002/05/13 21:38:30 thorpej Exp $");
+
+inc2:	.stabs	__FILE__,132,0,0,inc2; .loc	1 __LINE__
 /*
  * alpha_amask: read architecture features (XXX INSTRUCTION, NOT PALcode OP)
  *
@@ -93,7 +92,7 @@ LEAF(alpha_pal_cflush,1)
  * alpha_pal_halt: Halt the processor. [PRIVILEGED]
  */
 	.text
-LEAF(alpha_pal_halt,0)
+LEAF_NOPROFILE(alpha_pal_halt,0)
 	call_pal PAL_halt
 	br	zero,alpha_pal_halt	/* Just in case */
 	RET
@@ -140,7 +139,7 @@ LEAF_NOPROFILE(_alpha_pal_swpipl,1)
  *	a1	vector selector
  */
 	.text
-LEAF(alpha_pal_wrent,2)
+LEAF_NOPROFILE(alpha_pal_wrent,2)
 	call_pal PAL_OSF1_wrent
 	RET
 	END(alpha_pal_wrent)
@@ -152,7 +151,7 @@ LEAF(alpha_pal_wrent,2)
  *	a0	new virtual page table pointer
  */
 	.text
-LEAF(alpha_pal_wrvptptr,1)
+LEAF_NOPROFILE(alpha_pal_wrvptptr,1)
 	call_pal PAL_OSF1_wrvptptr
 	RET
 	END(alpha_pal_wrvptptr)

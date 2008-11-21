@@ -1,4 +1,4 @@
-/*	$NetBSD: hfs_nhash.c,v 1.7 2008/01/30 09:50:20 ad Exp $	*/
+/*	$NetBSD: hfs_nhash.c,v 1.9 2008/09/03 22:57:46 gmcgarry Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2007 The NetBSD Foundation, Inc.
@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hfs_nhash.c,v 1.7 2008/01/30 09:50:20 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hfs_nhash.c,v 1.9 2008/09/03 22:57:46 gmcgarry Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -68,7 +68,6 @@ __KERNEL_RCSID(0, "$NetBSD: hfs_nhash.c,v 1.7 2008/01/30 09:50:20 ad Exp $");
 #include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
-#include <sys/malloc.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
@@ -93,8 +92,7 @@ void
 hfs_nhashinit(void)
 {
 
-	nhashtbl =
-	    hashinit(desiredvnodes, HASH_LIST, M_HFSMNT, M_WAITOK, &nhash);
+	nhashtbl = hashinit(desiredvnodes, HASH_LIST, true, &nhash);
 	mutex_init(&hfs_nhash_lock, MUTEX_DEFAULT, IPL_NONE);
 	mutex_init(&hfs_hashlock, MUTEX_DEFAULT, IPL_NONE);
 }
@@ -106,7 +104,7 @@ void
 hfs_nhashdone(void)
 {
 
-	hashdone(nhashtbl, M_HFSMNT);
+	hashdone(nhashtbl, HASH_LIST, nhash);
 	mutex_destroy(&hfs_nhash_lock);
 	mutex_destroy(&hfs_hashlock);
 }
@@ -126,7 +124,7 @@ loop:
 	mutex_enter(&hfs_nhash_lock);
 	hpp = &nhashtbl[HNOHASH(dev, cnid, fork)];
 	LIST_FOREACH(hp, hpp, h_hash) {
-		if (cnid == hp->h_rec.cnid && dev == hp->h_dev) {
+		if (cnid == hp->h_rec.u.cnid && dev == hp->h_dev) {
 			vp = HTOV(hp);
 			if (flags == 0) {
 				mutex_exit(&hfs_nhash_lock);
@@ -155,7 +153,7 @@ hfs_nhashinsert(struct hfsnode *hp)
 	vlockmgr(&hp->h_vnode->v_lock, LK_EXCLUSIVE);
 
 	mutex_enter(&hfs_nhash_lock);
-	hpp = &nhashtbl[HNOHASH(hp->h_dev, hp->h_rec.cnid, hp->h_fork)];
+	hpp = &nhashtbl[HNOHASH(hp->h_dev, hp->h_rec.u.cnid, hp->h_fork)];
 	LIST_INSERT_HEAD(hpp, hp, h_hash);
 	mutex_exit(&hfs_nhash_lock);
 }

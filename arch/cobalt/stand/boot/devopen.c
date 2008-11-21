@@ -1,4 +1,4 @@
-/*	$NetBSD: devopen.c,v 1.1 2003/06/25 17:24:22 cdi Exp $	*/
+/*	$NetBSD: devopen.c,v 1.7 2008/05/13 14:26:20 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,6 +34,8 @@
 
 #include "boot.h"
 
+extern const struct fs_ops file_system_nfs;
+
 /*
  * Parse a device spec.
  *
@@ -48,8 +43,8 @@
  *  [device:][filename]
  */
 int
-devparse(const char *fname, int *dev, u_int8_t *unit,
-		u_int8_t *part, const char **file)
+devparse(const char *fname, int *dev, uint8_t *unit, uint8_t *part,
+    const char **file)
 {
 	const char *col;
 
@@ -59,17 +54,17 @@ devparse(const char *fname, int *dev, u_int8_t *unit,
 	*file = DEFKERNELNAME;
 
 	if (fname == NULL)
-		return (0);
+		return 0;
 
-	if ( (col = strchr(fname, ':')) != NULL) {
+	if ((col = strchr(fname, ':')) != NULL) {
 		int devlen;
-		u_int8_t i, u, p;
+		uint8_t i, u, p;
 		struct devsw *dp;
 		char devname[MAXDEVNAME];
 
 		devlen = col - fname;
 		if (devlen > MAXDEVNAME)
-			return (EINVAL);
+			return EINVAL;
 
 #define isnum(c)	(((c) >= '0') && ((c) <= '9'))
 #define isalpha(c)	(((c) >= 'a') && ((c) <= 'z'))
@@ -77,24 +72,34 @@ devparse(const char *fname, int *dev, u_int8_t *unit,
 		/* extract device name */
 		for (i = 0; isalpha(fname[i]) && (i < devlen); i++)
 			devname[i] = fname[i];
-		devname[i] = 0;
+		devname[i] = '\0';
 
-		if (!isnum(fname[i]))
-			return (EUNIT);
+		if (strcmp(devname, "nfs") == 0) {
+			/* no unit number or partition suffix on netboot */
+			u = 0;
+			p = 0;
+			nfsys = 1;
+			file_system[0] = file_system_nfs;
+		} else {
+			/* parse [disk][unit][part] (ex. wd0a) strings */	
+			if (!isnum(fname[i]))
+				return EUNIT;
 
-		/* device number */
-		for (u = 0; isnum(fname[i]) && (i < devlen); i++)
-			u = u * 10 + (fname[i] - '0');
+			/* device number */
+			for (u = 0; isnum(fname[i]) && (i < devlen); i++)
+				u = u * 10 + (fname[i] - '0');
 
-		if (!isalpha(fname[i]))
-			return (EPART);
+			if (!isalpha(fname[i]))
+				return EPART;
 
-		/* partition number */
-		if (i < devlen)
-			p = fname[i++] - 'a';
+			/* partition number */
+			p = 0;
+			if (i < devlen)
+				p = fname[i++] - 'a';
 
-		if (i != devlen)
-			return (ENXIO);
+			if (i != devlen)
+				return ENXIO;
+		}
 
 		/* check device name */
 		for (dp = devsw, i = 0; i < ndevs; dp++, i++) {
@@ -103,7 +108,7 @@ devparse(const char *fname, int *dev, u_int8_t *unit,
 		}
 
 		if (i >= ndevs)
-			return (ENXIO);
+			return ENXIO;
 
 		*unit = u;
 		*part = p;
@@ -114,31 +119,31 @@ devparse(const char *fname, int *dev, u_int8_t *unit,
 	if (*fname)
 		*file = fname;
 
-	return (0);
+	return 0;
 }
 
 int
 devopen(struct open_file *f, const char *fname, char **file)
 {
-    struct devsw *dp;
-    u_int8_t unit, part;
-    int dev, error;
+	struct devsw *dp;
+	uint8_t unit, part;
+	int dev, error;
 
-    DPRINTF(("devopen(%s)\n", fname));
+	DPRINTF(("devopen(%s)\n", fname));
 
-    if ( (error = devparse(fname, &dev, &unit, &part,
-				    (const char **)file)) != 0)
-	    return error;
+	if ((error = devparse(fname, &dev, &unit, &part,
+	    (const char **)file)) != 0)
+		return error;
 
-    dp = &devsw[dev];
-    if ((void *)dp->dv_open == (void *)nodev)
-	return ENXIO;
+	dp = &devsw[dev];
+	if ((void *)dp->dv_open == (void *)nodev)
+		return ENXIO;
 
-    f->f_dev = dp;
+	f->f_dev = dp;
     
-    if ( (error = (*dp->dv_open)(f, unit, part)) != 0)
+	if ((error = (*dp->dv_open)(f, unit, part)) != 0)
 	printf("%s%d%c: %d = %s\n", devsw[dev].dv_name,
-	       unit, 'a' + part, error, strerror(error));
+	    unit, 'a' + part, error, strerror(error));
 
-    return error;
+	return error;
 }

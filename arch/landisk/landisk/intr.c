@@ -1,5 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.5 2007/04/09 13:23:25 miod Exp $	*/
-/*	$NetBSD: intr.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
+/*	$NetBSD: intr.c,v 1.3 2008/05/16 16:24:17 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2005 NONAKA Kimihiro
@@ -27,14 +26,16 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.3 2008/05/16 16:24:17 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/evcount.h>
 
-#include <sh/trap.h>
+#include <sh3/exception.h>
 
 #include <machine/intr.h>
 
@@ -50,8 +51,7 @@ struct intrhand {
 	int	ih_enable;
 	int	ih_level;
 	int	ih_irq;
-	struct evcount	ih_count;
-	const char	*ih_name;
+	struct evcnt ih_evcnt;
 };
 
 struct extintr_handler {
@@ -62,6 +62,11 @@ struct extintr_handler {
 };
 
 static struct extintr_handler extintr_handler[_N_EXTINTR];
+
+static const char *extintr_names[_N_EXTINTR] = {
+	"irq5", "irq6", "irq7", "irq8",
+	"irq9", "irq10", "irq11", "irq12"
+};
 
 static int fakeintr(void *arg);
 static int extintr_intr_handler(void *arg);
@@ -94,16 +99,14 @@ intc_intr(int ssr, int spc, int ssp)
 		if (level < ssr)
 			level = ssr;
 		(void)_cpu_intr_resume(level);
-		if ((*ih->ih_func)(ih->ih_arg) != 0)
-			ih->ih_count.ec_count++;
+		(*ih->ih_func)(ih->ih_arg);
 		_reg_write_1(LANDISK_INTEN, inten);
 		break;
 	}
 #endif
 	default:
 		(void)_cpu_intr_resume(ih->ih_level);
-		if ((*ih->ih_func)(ih->ih_arg) != 0)
-			ih->ih_count.ec_count++;
+		(*ih->ih_func)(ih->ih_arg);
 		break;
 
 	case SH_INTEVT_TMU0_TUNI0:
@@ -111,8 +114,7 @@ intc_intr(int ssr, int spc, int ssp)
 		cf.spc = spc;
 		cf.ssr = ssr;
 		cf.ssp = ssp;
-		if ((*ih->ih_func)(&cf) != 0)
-			ih->ih_count.ec_count++;
+		(*ih->ih_func)(&cf);
 		break;
 
 	case SH_INTEVT_NMI:
@@ -124,20 +126,21 @@ intc_intr(int ssr, int spc, int ssp)
 void
 intr_init(void)
 {
+
 	_reg_write_1(LANDISK_INTEN, INTEN_ALL_MASK);
 }
 
 void *
-extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
-    const char *ih_name)
+extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg)
 {
 	static struct intrhand fakehand = {fakeintr};
 	struct extintr_handler *eih;
 	struct intrhand **p, *q, *ih;
+	const char *name;
 	int evtcode;
 	int s;
 
-	KDASSERT(irq >= 5 && irq < 13);
+	KDASSERT(irq >= 5 && irq <= 12);
 
 	ih = malloc(sizeof(*ih), M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
 	if (ih == NULL)
@@ -151,9 +154,7 @@ extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
 		panic("extintr_establish: unknown level %d", level);
 		/*NOTREACHED*/
 #endif
-	case IPL_BIO:
-	case IPL_NET:
-	case IPL_TTY:
+	case IPL_VM:
 		break;
 	}
 
@@ -161,7 +162,7 @@ extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
 	if (eih->eih_func == NULL) {
 		evtcode = 0x200 + (irq << 5);
 		eih->eih_func = intc_intr_establish(evtcode, IST_LEVEL, level,
-		    extintr_intr_handler, eih, NULL);
+		    extintr_intr_handler, eih);
 	}
 
 	/*
@@ -189,12 +190,10 @@ extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
 	ih->ih_next = NULL;
 	ih->ih_enable = 1;
 	ih->ih_level = level;
-	ih->ih_irq = irq;
-	ih->ih_name = ih_name;
-
-	if (ih_name != NULL)
-		evcount_attach(&ih->ih_count, ih_name, (void *)&ih->ih_irq,
-		    &evcount_intr);
+	ih->ih_irq = irq - 5;
+	name = extintr_names[irq - 5];
+	evcnt_attach_dynamic(&ih->ih_evcnt, EVCNT_TYPE_INTR,
+	    NULL, "ext", name);
 	*p = ih;
 
 	if (++eih->eih_nih == 1) {
@@ -202,7 +201,7 @@ extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg,
 		_reg_bset_1(LANDISK_INTEN, (1 << (irq - 5)));
 	}
 
-	_cpu_intr_resume(s);
+	splx(s);
 
 	return (ih);
 }
@@ -220,8 +219,9 @@ extintr_disestablish(void *aux)
 
 	s = _cpu_intr_suspend();
 
-	irq = ih->ih_irq - 5;
+	irq = ih->ih_irq;
 	eih = &extintr_handler[irq];
+
 	/*
 	 * Remove the handler from the chain.
 	 * This is O(n^2), too.
@@ -233,10 +233,7 @@ extintr_disestablish(void *aux)
 
 	*p = q->ih_next;
 
-#if 0
-	if (ih->ih_name != NULL)
-		evcount_detach(&ih->ih_count);
-#endif
+	evcnt_detach(&ih->ih_evcnt);
 
 	free((void *)ih, M_DEVBUF);
 
@@ -247,7 +244,7 @@ extintr_disestablish(void *aux)
 		_reg_bclr_1(LANDISK_INTEN, (1 << irq));
 	}
 
-	_cpu_intr_resume(s);
+	splx(s);
 }
 
 void
@@ -264,7 +261,7 @@ extintr_enable(void *aux)
 
 	s = _cpu_intr_suspend();
 
-	irq = ih->ih_irq - 5;
+	irq = ih->ih_irq;
 	KDASSERT(irq >= 0 && irq < 8);
 	eih = &extintr_handler[irq];
 	for (cnt = 0, p = eih->eih_ih, q = NULL; p != NULL; p = p->ih_next) {
@@ -283,7 +280,7 @@ extintr_enable(void *aux)
 		_reg_bset_1(LANDISK_INTEN, (1 << irq));
 	}
 
-	_cpu_intr_resume(s);
+	splx(s);
 }
 
 void
@@ -300,7 +297,7 @@ extintr_disable(void *aux)
 
 	s = _cpu_intr_suspend();
 
-	irq = ih->ih_irq - 5;
+	irq = ih->ih_irq;
 	KDASSERT(irq >= 0 && irq < 8);
 	eih = &extintr_handler[irq];
 	for (cnt = 0, p = eih->eih_ih, q = NULL; p != NULL; p = p->ih_next) {
@@ -319,7 +316,7 @@ extintr_disable(void *aux)
 		_reg_bclr_1(LANDISK_INTEN, (1 << irq));
 	}
 
-	_cpu_intr_resume(s);
+	splx(s);
 }
 
 void
@@ -329,22 +326,22 @@ extintr_disable_by_num(int irq)
 	struct intrhand *ih;
 	int s;
 
-	irq -= 5;
-	KDASSERT(irq >= 0 && irq < 8);
+	KDASSERT(irq >= 5 && irq <= 12);
 
 	s = _cpu_intr_suspend();
-	eih = &extintr_handler[irq];
+	eih = &extintr_handler[irq - 5];
 	for (ih = eih->eih_ih; ih != NULL; ih = ih->ih_next) {
 		ih->ih_enable = 0;
 	}
 	/* Mask interrupt */
 	_reg_bclr_1(LANDISK_INTEN, (1 << irq));
-	_cpu_intr_resume(s);
+	splx(s);
 }
 
 static int
 fakeintr(void *arg)
 {
+
 	return 0;
 }
 
@@ -360,7 +357,7 @@ extintr_intr_handler(void *arg)
 			if (__predict_true(ih->ih_enable)) {
 				r = (*ih->ih_fun)(ih->ih_arg);
 				if (__predict_true(r != 0)) {
-					ih->ih_count.ec_count++;
+					ih->ih_evcnt.ev_count++;
 				}
 			}
 		}
@@ -368,24 +365,3 @@ extintr_intr_handler(void *arg)
 	}
 	return 0;
 }
-
-#ifdef DIAGNOSTIC
-void
-splassert_check(int wantipl, const char *func)
-{
-	register_t sr;
-        int oldipl;
-
-	__asm__ __volatile__ ("stc sr,%0" : "=r" (sr));
-
-	oldipl = (sr & 0xf0) >> 4;
-        if (oldipl < wantipl) {
-                splassert_fail(wantipl, oldipl, func);
-                /*
-                 * If the splassert_ctl is set to not panic, raise the ipl
-                 * in a feeble attempt to reduce damage.
-                 */
-		_cpu_intr_raise(wantipl << 4);
-        }
-}
-#endif

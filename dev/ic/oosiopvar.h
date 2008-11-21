@@ -1,5 +1,4 @@
-/* $OpenBSD: oosiopvar.h,v 1.3 2007/09/22 09:57:40 martin Exp $ */
-/* $NetBSD: oosiopvar.h,v 1.2 2003/05/03 18:11:23 wiz Exp $ */
+/* $NetBSD: oosiopvar.h,v 1.6 2008/03/29 09:11:35 tsutsui Exp $ */
 
 /*
  * Copyright (c) 2001 Shuichiro URATA.  All rights reserved.
@@ -27,22 +26,20 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <uvm/uvm_extern.h>
-
 #define	OOSIOP_NTGT	8		/* Max targets */
 #define	OOSIOP_NCB	32		/* Initial command buffers */
-#define	OOSIOP_NSG	(MIN(atop(MAXPHYS) + 1, 32)) /* Max S/G operation */
-#define	OOSIOP_MAX_XFER	ptoa(OOSIOP_NSG - 1)
+#define	OOSIOP_NSG	(MIN(btoc(MAXPHYS) + 1, 32)) /* Max S/G operation */
+#define	OOSIOP_MAX_XFER	ctob(OOSIOP_NSG - 1)
 
 struct oosiop_xfer {
 	/* script for scatter/gather DMA (move*nsg+jump) */
-	u_int32_t datain_scr[(OOSIOP_NSG + 1) * 2];
-	u_int32_t dataout_scr[(OOSIOP_NSG + 1) * 2];
+	uint32_t datain_scr[(OOSIOP_NSG + 1) * 2];
+	uint32_t dataout_scr[(OOSIOP_NSG + 1) * 2];
 
-	u_int8_t msgin[8];
-	u_int8_t msgout[8];
-	u_int8_t status;
-	u_int8_t pad[7];
+	uint8_t msgin[8];
+	uint8_t msgout[8];
+	uint8_t status;
+	uint8_t pad[7];
 } __packed;
 
 #define	SCSI_OOSIOP_NOSTATUS	0xff	/* device didn't report status */
@@ -73,7 +70,7 @@ struct oosiop_xfer {
 struct oosiop_cb {
 	TAILQ_ENTRY(oosiop_cb) chain;
 
-	struct scsi_xfer *xs;		/* SCSI xfer ctrl block from above */
+	struct scsipi_xfer *xs;		/* SCSI xfer ctrl block from above */
 	int flags;
 	int id;				/* target scsi id */
 	int lun;			/* target lun */
@@ -86,23 +83,20 @@ struct oosiop_cb {
 	int savedp;			/* saved data pointer */
 	int msgoutlen;
 
-	int xsflags;			/* copy of xs->flags */
-	int datalen;			/* copy of xs->datalen */
-	int cmdlen;			/* copy of xs->cmdlen */
-
 	struct oosiop_xfer *xfer;	/* DMA xfer block */
 };
 
 /* oosiop_cb flags */
 #define	CBF_SELTOUT	0x01	/* Selection timeout */
 #define	CBF_TIMEOUT	0x02	/* Command timeout */
-#define	CBF_AUTOSENSE	0x04	/* Request sense due to SCSI_CHECK */
+
+TAILQ_HEAD(oosiop_cb_queue, oosiop_cb);
 
 struct oosiop_target {
 	struct oosiop_cb *nexus;
 	int flags;
-	u_int8_t scf;		/* synchronous clock divisor */
-	u_int8_t sxfer;		/* synchronous period and offset */
+	uint8_t scf;		/* synchronous clock divisor */
+	uint8_t sxfer;		/* synchronous period and offset */
 };
 
 /* target flags */
@@ -110,7 +104,7 @@ struct oosiop_target {
 #define	TGTF_WAITSDTR	0x02	/* Waiting SDTR from target */
 
 struct oosiop_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 
 	bus_space_tag_t	sc_bst;		/* bus space tag */
 	bus_space_handle_t sc_bsh;	/* bus space handle */
@@ -119,7 +113,7 @@ struct oosiop_softc {
 	bus_dmamap_t sc_scrdma;		/* script DMA map */
 
 	bus_addr_t sc_scrbase;		/* script DMA base address */
-	u_int32_t *sc_scr;		/* ptr to script memory */
+	uint32_t *sc_scr;		/* ptr to script memory */
 
 	int sc_chip;			/* 700 or 700-66 */
 #define	OOSIOP_700	0
@@ -128,17 +122,17 @@ struct oosiop_softc {
 	int		sc_id;		/* SCSI ID of this interface */
 	int		sc_freq;	/* SCLK frequency */
 	int		sc_ccf;		/* asynchronous divisor (*10) */
-	u_int8_t	sc_dcntl;
-	u_int8_t	sc_minperiod;
+	uint8_t		sc_dcntl;
+	uint8_t		sc_minperiod;
 
 	struct oosiop_target sc_tgt[OOSIOP_NTGT];
 
-	struct scsi_link sc_link;
+	struct scsipi_adapter sc_adapter;
+	struct scsipi_channel sc_channel;
 
 	/* Lists of command blocks */
-	TAILQ_HEAD(oosiop_cb_queue, oosiop_cb) sc_free_cb,
-					       sc_cbq;
-
+	struct oosiop_cb_queue sc_free_cb;
+	struct oosiop_cb_queue sc_cbq;	/* command issue queue */
 	struct oosiop_cb *sc_curcb;	/* current command */
 	struct oosiop_cb *sc_lastcb;	/* last activated command */
 
@@ -155,7 +149,7 @@ struct oosiop_softc {
     bus_space_write_1((sc)->sc_bst, (sc)->sc_bsh, (addr), (data))
 /* XXX byte swapping should be handled by MD bus_space(9)? */
 #define	oosiop_read_4(sc, addr)						\
-    letoh32(bus_space_read_4((sc)->sc_bst, (sc)->sc_bsh, (addr)))
+    le32toh(bus_space_read_4((sc)->sc_bst, (sc)->sc_bsh, (addr)))
 #define	oosiop_write_4(sc, addr, data)					\
     bus_space_write_4((sc)->sc_bst, (sc)->sc_bsh, (addr), htole32(data))
 

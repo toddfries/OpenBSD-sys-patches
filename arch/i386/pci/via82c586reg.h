@@ -1,5 +1,4 @@
-/*	$OpenBSD: via82c586reg.h,v 1.5 2001/06/08 03:18:04 mickey Exp $	*/
-/*	$NetBSD: via82c586reg.h,v 1.2 2000/04/22 15:00:41 uch Exp $	*/
+/*	$NetBSD: via82c586reg.h,v 1.3 2006/06/18 09:55:11 xtraeme Exp $	*/
 
 /*
  * Copyright (c) 1999, by UCHIYAMA Yasushi

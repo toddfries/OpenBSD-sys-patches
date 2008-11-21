@@ -1,3 +1,3 @@
-#	$OpenBSD: Makefile.inc,v 1.2 2005/11/04 01:02:31 uwe Exp $
+#	$NetBSD: Makefile.inc,v 1.1 2007/08/09 16:08:59 nonaka Exp $
 
-BINDIR=	/usr/mdec
+BINDIR=		/usr/mdec

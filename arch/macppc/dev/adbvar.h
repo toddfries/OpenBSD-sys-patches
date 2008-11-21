@@ -1,5 +1,4 @@
-/*	$OpenBSD: adbvar.h,v 1.8 2006/01/18 23:21:17 miod Exp $	*/
-/*	$NetBSD: adbvar.h,v 1.3 2000/06/08 22:10:46 tsubai Exp $	*/
+/*	$NetBSD: adbvar.h,v 1.12 2007/03/04 06:00:10 christos Exp $	*/
 
 /*-
  * Copyright (C) 1994	Bradley A. Grantham
@@ -31,19 +30,84 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <machine/adbsys.h>
+
+/*
+ * Arguments used to attach a device to the Apple Desktop Bus
+ */
+struct adb_attach_args {
+	int	origaddr;
+	int	adbaddr;
+	int	handler_id;
+};
+
+typedef struct adb_trace_xlate_s {
+	int     params;
+	char   *string;
+}       adb_trace_xlate_t;
+
+extern adb_trace_xlate_t adb_trace_xlations[];
+
+#ifdef DEBUG
+#ifndef ADB_DEBUG
+#define ADB_DEBUG
+#endif
+#endif
+
+#ifdef ADB_DEBUG
+extern int	adb_debug;
+#endif
+
+typedef void *Ptr;
+typedef void **Handle;
+
+/* ADB Manager */
+typedef struct {
+	Ptr siServiceRtPtr;
+	Ptr siDataAreaAddr;
+} ADBSetInfoBlock;
+typedef struct {
+	unsigned char	devType;
+	unsigned char	origADBAddr;
+	Ptr		dbServiceRtPtr;
+	Ptr		dbDataAreaAddr;
+} ADBDataBlock;
+
 struct adb_softc {
 	struct device sc_dev;
 	char *sc_regbase;
 };
 
+typedef void (adbComp)(void *, volatile int *, int);
+
+/* adb_direct.c */
 extern int adbHardware;
 
-/* types of adb hardware that we support */
+/* types of adb hardware that we (will eventually) support */
 #define ADB_HW_UNKNOWN		0x01	/* don't know */
+#define ADB_HW_II		0x02	/* Mac II series */
+#define ADB_HW_IISI		0x03	/* Mac IIsi series */
 #define ADB_HW_PMU		0x04	/* PowerBook series */
 #define ADB_HW_CUDA		0x05	/* Machines with a Cuda chip */
 
-int	adb_poweroff(void);
-void	adb_restart(void);
-int	adb_read_date_time(time_t *t);
-int	adb_set_date_time(time_t t);
+#define ADB_CMDADDR(cmd)	((u_int8_t)((cmd) & 0xf0) >> 4)
+#define ADBFLUSH(dev)		((((u_int8_t)(dev) & 0x0f) << 4) | 0x01)
+#define ADBLISTEN(dev, reg)	((((u_int8_t)(dev) & 0x0f) << 4) | 0x08 | (reg))
+#define ADBTALK(dev, reg)	((((u_int8_t)(dev) & 0x0f) << 4) | 0x0c | (reg))
+
+int	adb_intr __P((void *));
+int	adb_poweroff __P((void));
+void	adb_restart __P((void));
+void	adb_cuda_autopoll __P((void));
+int	adb_intr_cuda __P((void *));
+int	CountADBs __P((void));
+void	ADBReInit __P((void));
+int	GetIndADB __P((ADBDataBlock * info, int index));
+int	GetADBInfo __P((ADBDataBlock * info, int adbAddr));
+int	SetADBInfo __P((ADBSetInfoBlock * info, int adbAddr));
+int	ADBOp __P((Ptr buffer, adbComp *compRout, Ptr data, short commandNum));
+int	adb_read_date_time __P((unsigned long *t));
+int	adb_set_date_time __P((unsigned long t));
+
+int	adb_op_sync __P((Ptr, adbComp *, Ptr, short));
+void	adb_op_comprout __P((void *, volatile int *, int));

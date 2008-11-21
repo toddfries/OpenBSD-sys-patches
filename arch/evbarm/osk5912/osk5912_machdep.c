@@ -1,4 +1,4 @@
-/*	$NetBSD: osk5912_machdep.c,v 1.2 2008/01/19 13:11:16 chris Exp $ */
+/*	$NetBSD: osk5912_machdep.c,v 1.4 2008/11/11 06:46:41 dyoung Exp $ */
 
 /*
  * Machine dependent functions for kernel setup for TI OSK5912 board.
@@ -99,7 +99,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osk5912_machdep.c,v 1.2 2008/01/19 13:11:16 chris Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osk5912_machdep.c,v 1.4 2008/11/11 06:46:41 dyoung Exp $");
 
 #include "opt_machdep.h"
 #include "opt_ddb.h"
@@ -180,12 +180,10 @@ static paddr_t physical_freestart, physical_freeend;
 static u_int free_pages;
 
 /* Physical and virtual addresses for some global pages */
-pv_addr_t systempage;		/* exception vectors */
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
 pv_addr_t kernelstack;	/* stack for SVC mode */
-static pv_addr_t kernel_l1pt;	/* First level page table. */
 
 /* Physical address of the message buffer. */
 paddr_t msgbufphys;
@@ -258,6 +256,7 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -288,6 +287,8 @@ cpu_reboot(int howto, char *bootstr)
 
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -483,8 +484,7 @@ initarm(void *arg)
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
-	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 #ifdef VERBOSE_INIT_ARM
 	printf("done.\n");

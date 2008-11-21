@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.17 2006/11/11 18:47:09 jmmv Exp $
+# $NetBSD: GENERIC,v 1.26 2008/11/12 12:36:00 ad Exp $
 #
 # GENERIC machine description file
 # This machine description file is used to generate the default NetBSD
@@ -25,12 +25,14 @@ include 	"arch/ews4800mips/conf/std.ews4800mips"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident		"GENERIC-$Revision: 1.17 $"
+#ident		"GENERIC-$Revision: 1.26 $"
 
 maxusers	16
 
 #options 	MIPS1			# R2000/R3000
 options 	MIPS3			# R4000/R4400
+
+makeoptions	CPUFLAGS="-march=r4400 -mabi=32" # optimize for R4400
 
 # MIPS3 on-chip timer interrupt is not used on EWS4800,
 # but the external timer interrupt line is connected to CPU INT5.
@@ -44,19 +46,13 @@ options 	EWS4800_TR2A		# 360,360AD,360ADII,360SX,360EX
 options 	NTP			# NTP phase/frequency locked loop
 
 options 	KTRACE			# system call tracing ktrace(1)
-#options 	SYSTRACE		# system call vetting via systrace(1)
 
 options 	SYSVMSG			# System V-like message queues
 options 	SYSVSEM			# System V-like semaphores
 options 	SEMMNI=10		# number of semaphore identifiers
-#options 	SEMMNS=60		# number of semaphores in system
-#options 	SEMUME=10		# max number of undo entries per process
-#options 	SEMMNU=30		# number of undo structures in system
 options 	SYSVSHM			# System V shared memory
-#options 	SHMMAXPGS=1024		# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE	# p1003.1b semaphore support
 
-options 	LKM			# loadable kernel modules
 
 options 	USERCONF		# userconf(4) support
 #options 	PIPE_SOCKETPAIR		# smaller, but slower pipe(2)
@@ -86,6 +82,7 @@ options 	COMPAT_15	# NetBSD 1.5
 options 	COMPAT_16	# NetBSD 1.6
 options 	COMPAT_20	# NetBSD 2.0
 options 	COMPAT_30	# NetBSD 3.0
+options 	COMPAT_40	# NetBSD 4.0
 options 	COMPAT_43	# 4.3BSD
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
 
@@ -120,6 +117,7 @@ file-system	PTYFS		# /dev/pts/N support
 options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Indpendent support
 options 	SOFTDEP		# FFS soft updates support.
+options 	WAPBL		# File system journaling support - Experimental
 #options 	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	NFSSERVER	# Network File System server
 #options 	FFS_NO_SNAPSHOT	# no FFS snapshot support
@@ -264,8 +262,14 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options 	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
+pseudo-device	agr			# IEEE 802.3ad link aggregation
 #pseudo-device	pf			# PF packet filter
 #pseudo-device	pflog			# PF log if
+
+#
+# accept filters
+pseudo-device   accf_data		# "dataready" accept filter
+pseudo-device   accf_http		# "httpready" accept filter
 
 # miscellaneous pseudo-devices
 pseudo-device	pty			# pseudo-terminals

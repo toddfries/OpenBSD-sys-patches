@@ -1,5 +1,4 @@
-/*	$OpenBSD: copy.S,v 1.3 2007/05/29 23:03:20 tom Exp $	*/
-/*	$NetBSD: copy.S,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
+/*	$NetBSD: copy.S,v 1.12 2008/09/18 21:35:17 dsl Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -42,42 +41,87 @@
 #include <sys/syscall.h>
 
 #include <machine/asm.h>
+#include <machine/frameasm.h>
+
+#define GET_CURPCB(reg)	\
+	movq	CPUVAR(CURLWP), reg; \
+	movq	L_ADDR(reg), reg
+
+/*
+ * These are arranged so that the abnormal case is a forwards
+ * conditional branch - which will be predicted not-taken by
+ * both Intel and AMD processors.
+ */
+#define DEFERRED_SWITCH_CHECK \
+	CHECK_DEFERRED_SWITCH			; \
+	jnz	99f				; \
+    98:
+
+#define DEFERRED_SWITCH_CALL \
+    99:						; \
+	call	_C_LABEL(do_pmap_load)		; \
+	jmp	98b
+
+	.text
+
+x86_copyfunc_start:	.globl	x86_copyfunc_start
+
+/*
+ * Handle deferred pmap switch.  We must re-enable preemption without
+ * making a function call, so that the program counter is visible to
+ * cpu_kpreempt_exit().  It can then know if it needs to restore the
+ * pmap on returning, because a preemption occurred within one of the
+ * copy functions.
+ */
+ENTRY(do_pmap_load)
+	pushq	%rbp
+	movq	%rsp,%rbp
+	pushq	%rdi
+	pushq	%rsi
+	pushq	%rdx
+	pushq	%rcx
+	pushq	%rbx
+	movq	CPUVAR(CURLWP), %rbx
+1:
+	incl	L_NOPREEMPT(%rbx)
+	call	_C_LABEL(pmap_load)
+	decl	L_NOPREEMPT(%rbx)
+	jnz	2f
+	cmpl	$0, L_DOPREEMPT(%rbx)
+	jz	2f
+	xorq	%rdi, %rdi
+	call	_C_LABEL(kpreempt)
+2:
+	cmpl	$0, CPUVAR(WANT_PMAPLOAD)
+	jnz	1b
+	popq	%rbx
+	popq	%rcx
+	popq	%rdx
+	popq	%rsi
+	popq	%rdi
+	leaveq
+	ret
 
 /*
  * Copy routines from and to userland, plus a few more. See the
  * section 9 manpages for info. Some cases can be optimized more.
  *
- * I wonder if it's worthwhile to make these use SSE2 registers.
- */
-
-/*
- * XXXfvdl appears only to be used by pccons.
+ * I wonder if it's worthwhile to make these use SSE2 registers?
+ * (dsl) Not from info I've read from the AMD guides.
  *
- * fillw(short pattern, caddr_t addr, size_t len);
- * Write len copies of pattern at addr.
- * appears to be used by pccons.
+ * Also note that the setup time for 'rep movs' is horrid - especially on P4
+ * netburst - but on my AMD X2 it manages one copy (read+write) per clock
+ * which can be achieved with a code loop, but is probably impossible to beat.
+ * Howver the use of 'rep movsb' for the final bytes should be killed.
+ *
+ * Newer Intel cpus have a much lower setup time, and may (someday)
+ * be ably to do cache-line size copies....
  */
-ENTRY(fillw)
-	movl	%edi,%eax
-	movq	%rsi,%rdi
-	movw	%ax,%cx
-	rorl	$16,%eax
-	movw	%cx,%ax
-	cld
-	movq	%rdx,%rcx
-	shrq	%rcx
-	rep
-	stosl
-	movq	%rdx,%rcx
-	andq	$1,%rcx
-	rep
-	stosw
-	ret
 
 ENTRY(kcopy)
-	movq	CPUVAR(CURPCB),%rax
+	GET_CURPCB(%rax)
 	pushq	PCB_ONFAULT(%rax)
-	leaq	_C_LABEL(copy_fault)(%rip),%r11
+	leaq	_C_LABEL(kcopy_fault)(%rip),%r11
 	movq	%r11, PCB_ONFAULT(%rax)
 
 	xchgq	%rdi,%rsi
@@ -87,7 +131,7 @@ ENTRY(kcopy)
 	subq	%rsi,%rax
 	cmpq	%rcx,%rax		# overlapping?
 	jb	1f
-	cld				# nope, copy forward
+	# nope, copy forward
 	shrq	$3,%rcx			# copy by 64-bit words
 	rep
 	movsq
@@ -97,10 +141,15 @@ ENTRY(kcopy)
 	rep
 	movsb
 
-	movq	CPUVAR(CURPCB),%rdx
+	GET_CURPCB(%rdx)
 	popq	PCB_ONFAULT(%rdx)
 	xorq	%rax,%rax
 	ret
+
+# Using 'rep movs' to copy backwards is not as fast as for forwards copies
+# and ought not be done when the copy doesn't acually overlap.
+# However kcopy() isn't used any that looks even vaguely used often.
+# I'm also not sure it is ever asked to do overlapping copies!
 
 1:	addq	%rcx,%rdi		# copy backward
 	addq	%rcx,%rsi
@@ -118,44 +167,45 @@ ENTRY(kcopy)
 	movsq
 	cld
 
-	movq	CPUVAR(CURPCB),%rdx
+	GET_CURPCB(%rdx)
 	popq	PCB_ONFAULT(%rdx)
 	xorq	%rax,%rax
 	ret
 
 ENTRY(copyout)
-	pushq	$0
+	DEFERRED_SWITCH_CHECK
+	pushq	$0			# Restored to PCB_ONFAULT(%rdx)
 
-	xchgq	%rdi,%rsi
-	movq	%rdx,%rax
+	xchgq	%rdi,%rsi		# kernel address to %rsi, user to %rdi
+	movq	%rdx,%rax		# save transfer length (bytes)
 	
-	movq	%rdi,%rdx
-	addq	%rax,%rdx
-	jc	_C_LABEL(copy_efault)
+	addq	%rdi,%rdx		# end address to %rdx
+	jc	_C_LABEL(copy_efault)	# jump if wraps
 	movq	$VM_MAXUSER_ADDRESS,%r8
 	cmpq	%r8,%rdx
-	ja	_C_LABEL(copy_efault)
+	ja	_C_LABEL(copy_efault)	# jump if end in kernel space
 
-	movq	CPUVAR(CURPCB),%rdx
+	GET_CURPCB(%rdx)
 	leaq	_C_LABEL(copy_fault)(%rip),%r11
-	movq	%r11,PCB_ONFAULT(%rdx)
+	movq	%r11,PCB_ONFAULT(%rdx)	# prime fault handler
 
-	cld
-	movq	%rax,%rcx
-	shrq	$3,%rcx
+	movq	%rax,%rcx		# length
+	shrq	$3,%rcx			# count of 8-byte words
 	rep
-	movsq
+	movsq				# copy from %rsi to %rdi
 	movb	%al,%cl
-	andb	$7,%cl
+	andb	$7,%cl			# remaining number of bytes
 	rep
-	movsb
+	movsb				# copy remaining bytes
 
 	popq	PCB_ONFAULT(%rdx)
 	xorl	%eax,%eax
 	ret
+	DEFERRED_SWITCH_CALL
 
 ENTRY(copyin)
-	movq	CPUVAR(CURPCB),%rax
+	DEFERRED_SWITCH_CHECK
+	GET_CURPCB(%rax)
 	pushq	$0
 	leaq	_C_LABEL(copy_fault)(%rip),%r11
 	movq	%r11,PCB_ONFAULT(%rax)
@@ -163,15 +213,13 @@ ENTRY(copyin)
 	xchgq	%rdi,%rsi
 	movq	%rdx,%rax
 
-	movq	%rsi,%rdx
-	addq	%rax,%rdx
+	addq	%rsi,%rdx		# Check source address not wrapped
 	jc	_C_LABEL(copy_efault)
-	movq	$VM_MAXUSER_ADDRESS,%r8
+	movq	$VM_MAXUSER_ADDRESS,%r8	
 	cmpq	%r8,%rdx
-	ja	_C_LABEL(copy_efault)
+	ja	_C_LABEL(copy_efault)	# j if end in kernel space
 
 3:	/* bcopy(%rsi, %rdi, %rax); */
-	cld
 	movq	%rax,%rcx
 	shrq	$3,%rcx
 	rep
@@ -181,25 +229,38 @@ ENTRY(copyin)
 	rep
 	movsb
 
-	movq	CPUVAR(CURPCB),%rdx
+	GET_CURPCB(%rdx)
 	popq	PCB_ONFAULT(%rdx)
 	xorl	%eax,%eax
 	ret
+	DEFERRED_SWITCH_CALL
 
 NENTRY(copy_efault)
 	movq	$EFAULT,%rax
 
+/*
+ * kcopy_fault is used by kcopy and copy_fault is used by copyin/out.
+ *
+ * they're distinguished for lazy pmap switching.  see trap().
+ */
+
+NENTRY(kcopy_fault)
+	GET_CURPCB(%rdx)
+	popq	PCB_ONFAULT(%rdx)
+	ret
+
 NENTRY(copy_fault)
-	movq	CPUVAR(CURPCB),%rdx
+	GET_CURPCB(%rdx)
 	popq	PCB_ONFAULT(%rdx)
 	ret
 
 ENTRY(copyoutstr)
+	DEFERRED_SWITCH_CHECK
 	xchgq	%rdi,%rsi
 	movq	%rdx,%r8
 	movq	%rcx,%r9
 
-5:	movq	CPUVAR(CURPCB),%rax
+5:	GET_CURPCB(%rax)
 	leaq	_C_LABEL(copystr_fault)(%rip),%r11
 	movq	%r11,PCB_ONFAULT(%rax)
 	/*
@@ -207,14 +268,13 @@ ENTRY(copyoutstr)
 	 */
 	movq	$VM_MAXUSER_ADDRESS,%rax
 	subq	%rdi,%rax
-	jbe	_C_LABEL(copystr_efault)	/* die if CF == 1 || ZF == 1 */
+	jc	_C_LABEL(copystr_efault)
 	cmpq	%rdx,%rax
 	jae	1f
 	movq	%rax,%rdx
 	movq	%rax,%r8
 
 1:	incq	%rdx
-	cld
 
 1:	decq	%rdx
 	jz	2f
@@ -234,13 +294,15 @@ ENTRY(copyoutstr)
 	jae	_C_LABEL(copystr_efault)
 	movq	$ENAMETOOLONG,%rax
 	jmp	copystr_return
+	DEFERRED_SWITCH_CALL
 
 ENTRY(copyinstr)
+	DEFERRED_SWITCH_CHECK
 	xchgq	%rdi,%rsi
 	movq	%rdx,%r8
 	movq	%rcx,%r9
 
-	movq	CPUVAR(CURPCB),%rcx
+	GET_CURPCB(%rcx)
 	leaq	_C_LABEL(copystr_fault)(%rip),%r11
 	movq	%r11,PCB_ONFAULT(%rcx)
 
@@ -249,14 +311,13 @@ ENTRY(copyinstr)
 	 */
 	movq	$VM_MAXUSER_ADDRESS,%rax
 	subq	%rsi,%rax
-	jbe	_C_LABEL(copystr_efault)	/* die if CF == 1 || ZF == 1 */
+	jc	_C_LABEL(copystr_efault)
 	cmpq	%rdx,%rax
 	jae	1f
 	movq	%rax,%rdx
 	movq	%rax,%r8
 
 1:	incq	%rdx
-	cld
 
 1:	decq	%rdx
 	jz	2f
@@ -276,6 +337,7 @@ ENTRY(copyinstr)
 	jae	_C_LABEL(copystr_efault)
 	movq	$ENAMETOOLONG,%rax
 	jmp	copystr_return
+	DEFERRED_SWITCH_CALL
 
 ENTRY(copystr_efault)
 	movl	$EFAULT,%eax
@@ -283,7 +345,7 @@ ENTRY(copystr_efault)
 ENTRY(copystr_fault)
 copystr_return:
 	/* Set *lencopied and return %eax. */
-	movq	CPUVAR(CURPCB),%rcx
+	GET_CURPCB(%rcx)
 	movq	$0,PCB_ONFAULT(%rcx)
 	testq	%r9,%r9
 	jz	8f
@@ -297,7 +359,6 @@ ENTRY(copystr)
 	movq	%rdx,%r8
 
 	incq	%rdx
-	cld
 
 1:	decq	%rdx
 	jz	4f
@@ -321,3 +382,137 @@ ENTRY(copystr)
 	movq	%r8,(%rcx)
 
 7:	ret
+
+ENTRY(fuword)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-4,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+	movl	(%rdi),%eax
+	movq	$0,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+	
+ENTRY(fusword)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-2,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+	movzwl	(%rdi),%eax
+	movq	$0,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+	
+ENTRY(fuswintr)
+	cmpq	$TLBSTATE_VALID, CPUVAR(TLBSTATE)
+	jnz	_C_LABEL(fusuaddrfault)
+	movq	$VM_MAXUSER_ADDRESS-2,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusuintrfailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+	movzwl	(%rdi),%eax
+	movq	$0,PCB_ONFAULT(%rcx)
+	ret
+	
+ENTRY(fubyte)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-1,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+	movzbl	(%rdi),%eax
+	movq	$0,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+
+ENTRY(suword)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-4,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+
+	movq	%rsi,(%rdi)
+	xorq	%rax,%rax
+	movq	%rax,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+	
+ENTRY(susword)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-2,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+
+	movw	%si,(%rdi)
+	xorq	%rax,%rax
+	movq	%rax,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+
+ENTRY(suswintr)
+	cmpq	$TLBSTATE_VALID, CPUVAR(TLBSTATE)
+	jnz	_C_LABEL(fusuaddrfault)
+	movq	$VM_MAXUSER_ADDRESS-2,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusuintrfailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+	movw	%si,(%rdi)
+	xorq	%rax,%rax
+	movq	%rax,PCB_ONFAULT(%rcx)
+	ret
+
+ENTRY(subyte)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-1,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+
+	movb	%sil,(%rdi)
+	xorq	%rax,%rax
+	movq	%rax,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+
+/*
+ * These are the same, but must reside at different addresses,
+ * because trap.c checks for them.
+ */
+ENTRY(fusuintrfailure)
+	movq	$0,PCB_ONFAULT(%rcx)
+	movl	$-1,%eax
+	ret
+
+ENTRY(fusufailure)
+	movq	$0,PCB_ONFAULT(%rcx)
+	movl	$-1,%eax
+	ret
+
+ENTRY(fusuaddrfault)
+	movl	$-1,%eax
+	ret
+
+x86_copyfunc_end:	.globl	x86_copyfunc_end

@@ -1,8 +1,11 @@
-/*	$OpenBSD: apcdmareg.h,v 1.2 2003/06/02 18:53:18 jason Exp $	*/
+/*	$NetBSD: apcdmareg.h,v 1.6 2008/04/28 20:23:49 martin Exp $	*/
 
-/*
- * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
+/*-
+ * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Paul Kranenburg.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,101 +16,101 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
- * Definitions for Sun APC DMA controller.
+ * APC DMA hardware; from SunOS header
+ * Thanks to Derrick J. Brashear for additional info on the
+ * meaning of some of these bits.
  */
+#ifndef _DEV_IC_APCDMAREG_H_
+#define _DEV_IC_APCDMAREG_H_
 
-/* APC DMA registers */
-#define	APC_CSR		0x0010		/* control/status */
-#define	APC_CVA		0x0020		/* capture virtual address */
-#define	APC_CC		0x0024		/* capture count */
-#define	APC_CNVA	0x0028		/* capture next virtual address */
-#define	APC_CNC		0x002c		/* capture next count */
-#define	APC_PVA		0x0030		/* playback virtual address */
-#define	APC_PC		0x0034		/* playback count */
-#define	APC_PNVA	0x0038		/* playback next virtual address */
-#define	APC_PNC		0x003c		/* playback next count */
+struct apc_dma {
+	volatile u_int32_t dmacsr;	/* APC CSR */
+	volatile u_int32_t lpad[3];	/* */
+	volatile u_int32_t dmacva;	/* Capture Virtual Address */
+	volatile u_int32_t dmacc;	/* Capture Count */
+	volatile u_int32_t dmacnva;	/* Capture Next Virtual Address */
+	volatile u_int32_t dmacnc;	/* Capture next count */
+	volatile u_int32_t dmapva;	/* Playback Virtual Address */
+	volatile u_int32_t dmapc;	/* Playback Count */
+	volatile u_int32_t dmapnva;	/* Playback Next VAddress */
+	volatile u_int32_t dmapnc;	/* Playback Next Count */
+};
+
+/* same as above but as offsets for bus_space ops */
+#define APC_DMA_CSR	0
+#define APC_DMA_CVA	16
+#define APC_DMA_CC	20
+#define APC_DMA_CNVA	24
+#define APC_DMA_CNC	28
+#define APC_DMA_PVA	32
+#define APC_DMA_PC	36
+#define APC_DMA_PNVA	40
+#define APC_DMA_PNC	44
+
+#define APC_DMA_SIZE	48
 
 /*
- * APC DMA Register definitions
+ * APC CSR Register bit definitions
  */
-#define	APC_CSR_RESET		0x00000001	/* reset */
-#define	APC_CSR_CDMA_GO		0x00000004	/* capture dma go */
-#define	APC_CSR_PDMA_GO		0x00000008	/* playback dma go */
-#define	APC_CSR_CODEC_RESET	0x00000020	/* codec reset */
-#define	APC_CSR_CPAUSE		0x00000040	/* capture dma pause */
-#define	APC_CSR_PPAUSE		0x00000080	/* playback dma pause */
-#define	APC_CSR_CMIE		0x00000100	/* capture pipe empty enb */
-#define	APC_CSR_CMI		0x00000200	/* capture pipe empty intr */
-#define	APC_CSR_CD		0x00000400	/* capture nva dirty */
-#define	APC_CSR_CM		0x00000800	/* capture data lost */
-#define	APC_CSR_PMIE		0x00001000	/* pb pipe empty intr enable */
-#define	APC_CSR_PD		0x00002000	/* pb nva dirty */
-#define	APC_CSR_PM		0x00004000	/* pb pipe empty */
-#define	APC_CSR_PMI		0x00008000	/* pb pipe empty interrupt */
-#define	APC_CSR_EIE		0x00010000	/* error interrupt enable */
-#define	APC_CSR_CIE		0x00020000	/* capture intr enable */
-#define	APC_CSR_PIE		0x00040000	/* playback intr enable */
-#define	APC_CSR_GIE		0x00080000	/* general intr enable */
-#define	APC_CSR_EI		0x00100000	/* error interrupt */
-#define	APC_CSR_CI		0x00200000	/* capture interrupt */
-#define	APC_CSR_PI		0x00400000	/* playback interrupt */
-#define	APC_CSR_GI		0x00800000	/* general interrupt */
+#define	APC_IP		0x00800000	/* Interrupt Pending */
+#define	APC_PI		0x00400000	/* Playback interrupt */
+#define	APC_CI		0x00200000	/* Capture interrupt */
+#define	APC_EI		0x00100000	/* General interrupt */
+#define	APC_IE		0x00080000	/* General ext int. enable */
+#define	APC_PIE		0x00040000	/* Playback ext intr */
+#define	APC_CIE		0x00020000	/* Capture ext intr */
+#define	APC_EIE		0x00010000	/* Error ext intr */
+#define	APC_PMI		0x00008000	/* Pipe empty interrupt */
+#define	APC_PM		0x00004000	/* Play pipe empty */
+#define	APC_PD		0x00002000	/* Playback NVA dirty */
+#define	APC_PMIE	0x00001000	/* play pipe empty Int enable */
+#define	APC_CM		0x00000800	/* Cap data dropped on floor */
+#define	APC_CD		0x00000400	/* Capture NVA dirty */
+#define	APC_CMI		0x00000200	/* Capture pipe empty interrupt */
+#define	APC_CMIE	0x00000100	/* Cap. pipe empty int enable */
+#define	APC_PPAUSE	0x00000080	/* Pause the play DMA */
+#define	APC_CPAUSE	0x00000040	/* Pause the capture DMA */
+#define	APC_CODEC_PDN   0x00000020	/* CODEC RESET */
+#define	PDMA_GO		0x00000008
+#define	CDMA_GO		0x00000004	/* bit 2 of the csr */
+#define	APC_RESET	0x00000001	/* Reset the chip */
 
-#define	APC_CSR_PLAY			( \
-		APC_CSR_EI		| \
-	 	APC_CSR_GIE		| \
-		APC_CSR_PIE		| \
-		APC_CSR_EIE		| \
-		APC_CSR_PDMA_GO		| \
-		APC_CSR_PMIE		)
+#define APC_BITS					\
+	"\20\30IP\27PI\26CI\25EI\24IE"			\
+	"\23PIE\22CIE\21EIE\20PMI\17PM\16PD\15PMIE"	\
+	"\14CM\13CD\12CMI\11CMIE\10PPAUSE\7CPAUSE\6PDN\4PGO\3CGO"
 
-#define	APC_CSR_CAPTURE			( \
-		APC_CSR_EI		| \
-	 	APC_CSR_GIE		| \
-		APC_CSR_CIE		| \
-		APC_CSR_EIE		| \
-		APC_CSR_CDMA_GO	)
+/*
+ * Note that when we program CSR, we should be careful to not
+ * accidentally clear any pending interrupt bits (a pending interrupt
+ * reads as 1 and writing back 1 will clear), so instead of
+ *
+ *     dma->dmacsr |= bits;
+ *
+ * we should do
+ *
+ *     temp = dma->dmacsr & ~APC_INTR_MASK;
+ *     temp |= bits;
+ *     dma->dmacsr = temp;
+ *
+ * When clearing bits, always add APC_INTR_MASK, i.e.
+ *
+ *     dma->dmacsr &= ~(bits | APC_INTR_MASK);
+ */
+#define APC_INTR_MASK	(APC_IP|APC_PI|APC_CI|APC_EI|APC_PMI|APC_CMI)
 
-#define	APC_CSR_PLAY_PAUSE		(~( \
-		APC_CSR_PPAUSE		| \
-		APC_CSR_GI		| \
-		APC_CSR_PI		| \
-		APC_CSR_CI		| \
-		APC_CSR_EI		| \
-		APC_CSR_PMI		| \
-		APC_CSR_PMIE		| \
-		APC_CSR_CMI		| \
-		APC_CSR_CMIE		) )
-
-#define	APC_CSR_CAPTURE_PAUSE		(~( \
-		APC_CSR_PPAUSE		| \
-		APC_CSR_GI		| \
-		APC_CSR_PI		| \
-		APC_CSR_CI		| \
-		APC_CSR_EI		| \
-		APC_CSR_PMI		| \
-		APC_CSR_PMIE		| \
-		APC_CSR_CMI		| \
-		APC_CSR_CMIE		) )
-
-#define	APC_CSR_INTR_MASK		( \
-		APC_CSR_GI		| \
-		APC_CSR_PI		| \
-		APC_CSR_CI		| \
-		APC_CSR_EI		| \
-		APC_CSR_PMI		| \
-		APC_CSR_CMI		)
+#endif /* _DEV_IC_APCDMAREG_H_ */

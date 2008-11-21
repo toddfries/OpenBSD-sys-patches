@@ -1,5 +1,4 @@
-/*	$OpenBSD: m68k4k_exec.c,v 1.6 2002/03/14 01:26:50 millert Exp $	*/
-/*	$NetBSD: m68k4k_exec.c,v 1.1 1996/09/10 22:01:20 thorpej Exp $	*/
+/*	$NetBSD: m68k4k_exec.c,v 1.20 2008/11/19 18:36:04 ad Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Christopher G. Demetriou
@@ -32,8 +31,7 @@
  */
 
 /*
- * Exec glue to provide compatibility with older {Net,Open}BSD m68k4k
- * exectuables.
+ * Exec glue to provide compatibility with older NetBSD m68k4k exectuables.
  *
  * Taken directly from kern/exec_aout.c and frobbed to map text and
  * data as m68k4k executables expect.
@@ -41,6 +39,9 @@
  * This module only works on machines with PAGE_SIZE == 4096.  It's not clear
  * that making it work on other machines is worth the trouble.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: m68k4k_exec.c,v 1.20 2008/11/19 18:36:04 ad Exp $");
 
 #if !defined(__m68k__)
 #error YOU GOTTA BE KIDDING!
@@ -54,13 +55,50 @@
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <compat/m68k4k/m68k4k_exec.h>
 
-int	exec_m68k4k_prep_zmagic(struct proc *, struct exec_package *);
-int	exec_m68k4k_prep_nmagic(struct proc *, struct exec_package *);
-int	exec_m68k4k_prep_omagic(struct proc *, struct exec_package *);
+#ifdef COREDUMP
+#define	DEP	"coredump"
+#else
+#define	DEP	NULL
+#endif
+
+MODULE(MODULE_CLASS_MISC, exec_m68k4k, DEP);
+
+static struct execsw exec_m68k4k_execsw[] = {
+	{ sizeof(struct exec),
+	  exec_m68k4k_makecmds,
+	  { NULL },
+	  &emul_netbsd,
+	  EXECSW_PRIO_ANY,
+	  0,
+	  copyargs,
+	  NULL,
+	  coredump_netbsd,
+	  exec_setup_stack },
+};
+
+static int
+exec_m68k4k_modcmd(modcmd_t cmd, void *arg)
+{
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		return exec_add(exec_m68k4k_execsw,
+		    __arraycount(exec_m68k4k_execsw));
+
+	case MODULE_CMD_FINI:
+		return exec_remove(exec_m68k4k_execsw,
+		    __arraycount(exec_m68k4k_execsw));
+
+	default:
+		return ENOTTY;
+        }
+}
+
+int	exec_m68k4k_prep_zmagic(struct lwp *, struct exec_package *);
+int	exec_m68k4k_prep_nmagic(struct lwp *, struct exec_package *);
+int	exec_m68k4k_prep_omagic(struct lwp *, struct exec_package *);
 
 /*
  * exec_m68k4k_makecmds(): Check if it's an a.out-format executable
@@ -76,9 +114,7 @@ int	exec_m68k4k_prep_omagic(struct proc *, struct exec_package *);
  */
 
 int
-exec_m68k4k_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+exec_m68k4k_makecmds(struct lwp *l, struct exec_package *epp)
 {
 	u_long midmag, magic;
 	u_short mid;
@@ -100,13 +136,13 @@ exec_m68k4k_makecmds(p, epp)
 
 	switch (midmag) {
 	case (MID_M68K4K << 16) | ZMAGIC:
-		error = exec_m68k4k_prep_zmagic(p, epp);
+		error = exec_m68k4k_prep_zmagic(l, epp);
 		break;
 	case (MID_M68K4K << 16) | NMAGIC:
-		error = exec_m68k4k_prep_nmagic(p, epp);
+		error = exec_m68k4k_prep_nmagic(l, epp);
 		break;
 	case (MID_M68K4K << 16) | OMAGIC:
-		error = exec_m68k4k_prep_omagic(p, epp);
+		error = exec_m68k4k_prep_omagic(l, epp);
 		break;
 	default:
 		error = ENOEXEC;
@@ -129,11 +165,10 @@ exec_m68k4k_makecmds(p, epp)
  */
 
 int
-exec_m68k4k_prep_zmagic(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+exec_m68k4k_prep_zmagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
+	int error;
 
 	epp->ep_taddr = M68K4K_USRTEXT;
 	epp->ep_tsize = execp->a_text;
@@ -141,20 +176,9 @@ exec_m68k4k_prep_zmagic(p, epp)
 	epp->ep_dsize = execp->a_data + execp->a_bss;
 	epp->ep_entry = execp->a_entry;
 
-	/*
-	 * check if vnode is in open for writing, because we want to
-	 * demand-page out of it.  if it is, don't do it, for various
-	 * reasons
-	 */
-	if ((execp->a_text != 0 || execp->a_data != 0) &&
-	    epp->ep_vp->v_writecount != 0) {
-#ifdef DIAGNOSTIC
-		if (epp->ep_vp->v_flag & VTEXT)
-			panic("exec: a VTEXT vnode has writecount != 0");
-#endif
-		return ETXTBSY;
-	}
-	vn_marktext(epp->ep_vp);
+	error = vn_marktext(epp->ep_vp);
+	if (error)
+		return (error);
 
 	/* set up command for text segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, execp->a_text,
@@ -166,11 +190,12 @@ exec_m68k4k_prep_zmagic(p, epp)
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, execp->a_bss,
-	    epp->ep_daddr + execp->a_data, NULLVP, 0,
-	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
+	if (execp->a_bss)
+		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, execp->a_bss,
+		    epp->ep_daddr + execp->a_data, NULLVP, 0,
+		    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return (*epp->ep_esch->es_setup_stack)(l, epp);
 }
 
 /*
@@ -178,9 +203,7 @@ exec_m68k4k_prep_zmagic(p, epp)
  */
 
 int
-exec_m68k4k_prep_nmagic(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+exec_m68k4k_prep_nmagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
 	long bsize, baddr;
@@ -203,13 +226,13 @@ exec_m68k4k_prep_nmagic(p, epp)
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, PAGE_SIZE);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
 		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return (*epp->ep_esch->es_setup_stack)(l, epp);
 }
 
 /*
@@ -217,9 +240,7 @@ exec_m68k4k_prep_nmagic(p, epp)
  */
 
 int
-exec_m68k4k_prep_omagic(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+exec_m68k4k_prep_omagic(struct lwp *l, struct exec_package *epp)
 {
 	struct exec *execp = epp->ep_hdr;
 	long dsize, bsize, baddr;
@@ -236,7 +257,7 @@ exec_m68k4k_prep_omagic(p, epp)
 	    sizeof(struct exec), VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, PAGE_SIZE);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
@@ -248,9 +269,10 @@ exec_m68k4k_prep_omagic(p, epp)
 	 * computed (in execve(2)) by rounding *up* `ep_tsize' and `ep_dsize'
 	 * respectively to page boundaries.
 	 * Compensate `ep_dsize' for the amount of data covered by the last
-	 * text page. 
+	 * text page.
 	 */
-	dsize = epp->ep_dsize + execp->a_text - round_page(execp->a_text);
+	dsize = epp->ep_dsize + execp->a_text - roundup(execp->a_text,
+							PAGE_SIZE);
 	epp->ep_dsize = (dsize > 0) ? dsize : 0;
-	return exec_setup_stack(p, epp);
+	return (*epp->ep_esch->es_setup_stack)(l, epp);
 }

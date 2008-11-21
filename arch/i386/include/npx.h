@@ -1,5 +1,4 @@
-/*	$OpenBSD: npx.h,v 1.10 2006/10/01 18:07:56 kettenis Exp $	*/
-/*	$NetBSD: npx.h,v 1.11 1994/10/27 04:16:11 cgd Exp $	*/
+/*	$NetBSD: npx.h,v 1.22 2006/05/02 19:03:24 drochner Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -44,7 +43,7 @@
 #define	_I386_NPX_H_
 
 /* Environment information of floating point unit */
-struct	env87 {
+struct env87 {
 	long	en_cw;		/* control word (16bits) */
 	long	en_sw;		/* status word (16bits) */
 	long	en_tw;		/* tag word (16bits) */
@@ -55,15 +54,8 @@ struct	env87 {
 	long	en_fos;		/* floating operand segment selector */
 };
 
-#define EN_SW_IE	0x0001	/* invalid operation */
-#define EN_SW_DE	0x0002	/* denormal */
-#define EN_SW_ZE	0x0004	/* divide by zero */
-#define EN_SW_OE	0x0008	/* overflow */
-#define EN_SW_UE	0x0010	/* underflow */
-#define EN_SW_PE	0x0020	/* loss of precision */
-
 /* Contents of each floating point accumulator */
-struct	fpacc87 {
+struct fpacc87 {
 #ifdef dontdef	/* too unportable */
 	u_long	fp_mantlo;	/* mantissa low (31:0) */
 	u_long	fp_manthi;	/* mantissa high (63:32) */
@@ -74,20 +66,23 @@ struct	fpacc87 {
 #endif
 };
 
-/* Floating point and emulator context */
-struct	save87 {
+/* Floating point context */
+struct save87 {
 	struct	env87 sv_env;		/* floating point control/status */
-	struct	fpacc87 sv_ac[8];	/* accumulator contents, 0-7 */
-	u_long	sv_ex_sw;		/* status word for last exception */
-	u_long	sv_ex_tw;		/* tag word for last exception */
+	struct	fpacc87	sv_ac[8];	/* accumulator contents, 0-7 */
+#ifndef dontdef
+	u_long	sv_ex_sw;	/* status word for last exception (was pad) */
+	u_long	sv_ex_tw;	/* tag word for last exception (was pad) */
+	u_char	sv_pad[8 * 2 - 2 * 4];	/* bogus historical padding */
+#endif
 };
 
 /* Environment of FPU/MMX/SSE/SSE2. */
 struct envxmm {
 /*0*/	uint16_t en_cw;		/* FPU Control Word */
 	uint16_t en_sw;		/* FPU Status Word */
-	uint8_t  en_tw;		/* FPU Tag Word (abridged) */
 	uint8_t  en_rsvd0;
+	uint8_t  en_tw;		/* FPU Tag Word (abridged) */
 	uint16_t en_opcode;	/* FPU Opcode */
 	uint32_t en_fip;	/* FPU Instruction Pointer */
 	uint16_t en_fcs;	/* FPU IP selector */
@@ -101,8 +96,8 @@ struct envxmm {
 
 /* FPU regsters in the extended save format. */
 struct fpaccxmm {
-	uint8_t	fp_bytes[10];
-	uint8_t	fp_rsvd[6];
+	uint8_t fp_bytes[10];
+	uint8_t fp_rsvd[6];
 };
 
 /* SSE/SSE2 registers. */
@@ -119,36 +114,65 @@ struct savexmm {
 	/* 512-bytes --- end of hardware portion of save area */
 	uint32_t sv_ex_sw;		/* saved SW from last exception */
 	uint32_t sv_ex_tw;		/* saved TW from last exception */
-};
+} __aligned(16);
 
 union savefpu {
 	struct save87 sv_87;
 	struct savexmm sv_xmm;
 };
 
-/* Cyrix EMC memory - mapped coprocessor context switch information */
-struct	emcsts {
-	long	em_msw;		/* memory mapped status register when swtched */
-	long	em_tar;		/* memory mapped temp A register when swtched */
-	long	em_dl;		/* memory mapped D low register when swtched */
-};
-
-/* Intel prefers long real (53 bit) precision */
-#define	__iBCS_NPXCW__		0x262
-#define __BDE_NPXCW__		0x1272		/* FreeBSD */
-#define	__OpenBSD_NPXCW__	0x37f
+/*
+ * The i387 defaults to Intel extended precision mode and round to nearest,
+ * with all exceptions masked.
+ */
+#define	__INITIAL_NPXCW__	0x037f
+/* NetBSD uses IEEE double precision. */
+#define	__NetBSD_NPXCW__	0x127f
+/* FreeBSD leaves some exceptions unmasked as well. */
+#define	__FreeBSD_NPXCW__	0x1272
+/* iBCS2 goes a bit further and leaves the underflow exception unmasked. */
+#define	__iBCS2_NPXCW__		0x0262
+/* Linux just uses the default control word. */
+#define	__Linux_NPXCW__		0x037f
+/* SVR4 uses the same control word as iBCS2. */
+#define	__SVR4_NPXCW__		0x0262
 
 /*
  * The default MXCSR value at reset is 0x1f80, IA-32 Instruction
  * Set Reference, pg. 3-369.
  */
-#define __INITIAL_MXCSR__       0x1f80
+#define	__INITIAL_MXCSR__	0x1f80
+
+
+/*
+ * 80387 control word bits
+ */
+#define EN_SW_INVOP	0x0001  /* Invalid operation */
+#define EN_SW_DENORM	0x0002  /* Denormalized operand */
+#define EN_SW_ZERODIV	0x0004  /* Divide by zero */
+#define EN_SW_OVERFLOW	0x0008  /* Overflow */
+#define EN_SW_UNDERFLOW	0x0010  /* Underflow */
+#define EN_SW_PRECLOSS	0x0020  /* Loss of precision */
+#define EN_SW_DATACHAIN	0x0080	/* Data chain exception */
+#define EN_SW_CTL_PREC	0x0300	/* Precision control */
+#define EN_SW_CTL_ROUND	0x0c00	/* Rounding control */
+#define EN_SW_CTL_INF	0x1000	/* Infinity control */
 
 /*
  * The standard control word from finit is 0x37F, giving:
  *	round to nearest
  *	64-bit precision
  *	all exceptions masked.
+ *
+ * Now we want:
+ *	affine mode (if we decide to support 287's)
+ *	round to nearest
+ *	53-bit precision
+ *	all exceptions masked.
+ *
+ * 64-bit precision often gives bad results with high level languages
+ * because it makes the results of calculations depend on whether
+ * intermediate values are stored in memory or in FPU registers.
  *
  * The iBCS control word has underflow, overflow, zero divide, and invalid
  * operation exceptions unmasked.  But that causes an unexpected exception
@@ -157,12 +181,15 @@ struct	emcsts {
  * trapping denormals.
  */
 
-#define	__INITIAL_NPXCW__	__OpenBSD_NPXCW__
+#ifdef _KERNEL
 
-void    process_xmm_to_s87(const struct savexmm *, struct save87 *);
-void    process_s87_to_xmm(const struct save87 *, struct savexmm *);
-struct cpu_info;
+void	probeintr(void);
+void	probetrap(void);
+int	npx586bug1(int, int);
+void 	npxinit(struct cpu_info *);
+void	process_xmm_to_s87(const struct savexmm *, struct save87 *);
+void	process_s87_to_xmm(const struct save87 *, struct savexmm *);
 
-void	npxinit(struct cpu_info *);
+#endif
 
 #endif /* !_I386_NPX_H_ */

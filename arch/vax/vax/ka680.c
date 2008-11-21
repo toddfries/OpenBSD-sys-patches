@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka680.c,v 1.10 2002/09/21 13:42:43 hugh Exp $	*/
-/*	$NetBSD: ka680.c,v 1.3 2001/01/28 21:01:53 ragge Exp $	*/
+/*	$NetBSD: ka680.c,v 1.16 2008/03/11 05:34:03 matt Exp $	*/
 /*
  * Copyright (c) 2002 Hugh Graham.
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden.
@@ -35,6 +34,9 @@
 /* Done by Michael Kukat (michael@unixiron.org) */
 /* minor modifications for KA690 cache support by isildur@vaxpower.org */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ka680.c,v 1.16 2008/03/11 05:34:03 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/device.h>
@@ -52,12 +54,13 @@
 #include <machine/scb.h>
 
 static void	ka680_conf(void);
+static void	ka680_attach_cpu(device_t);
 static void	ka680_cache_enable(void);
 static void	ka680_softmem(void *);
 static void	ka680_hardmem(void *);
 static void	ka680_steal_pages(void);
 static void	ka680_memerr(void);
-static int	ka680_mchk(caddr_t);
+static int	ka680_mchk(void *);
  
 /*
  * KA680-specific IPRs. KA680 has the funny habit to control all caches
@@ -83,27 +86,31 @@ static int	ka680_mchk(caddr_t);
 #define PCCTL_D_EN	0x01
 
  
+static const char * const ka680_devs[] = { "cpu", "sgec", "shac", "uba", NULL };
+
 /* 
  * Declaration of KA680-specific calls.
  */
-struct cpu_dep ka680_calls = {
-	ka680_steal_pages,
-	ka680_mchk,
-	ka680_memerr, 
-	ka680_conf,
-	generic_clkread,
-	generic_clkwrite,
-	24,	 /* ~VUPS */
-	2,	/* SCB pages */
-	generic_halt,
-	generic_reboot,
+const struct cpu_dep ka680_calls = {
+	.cpu_steal_pages = ka680_steal_pages,
+	.cpu_mchk	= ka680_mchk,
+	.cpu_memerr	= ka680_memerr, 
+	.cpu_conf	= ka680_conf,
+	.cpu_gettime	= generic_gettime,
+	.cpu_settime	= generic_settime,
+	.cpu_vups	= 24,	 /* ~VUPS */
+	.cpu_scbsz	= 2,	/* SCB pages */
+	.cpu_halt	= generic_halt,
+	.cpu_reboot	= generic_reboot,
+	.cpu_flags	= CPU_RAISEIPL,
+	.cpu_devs	= ka680_devs,
+	.cpu_attach_cpu	= ka680_attach_cpu,
 };
 
-void
-ka680_conf()
-{
-	char *cpuname;
 
+void
+ka680_conf(void)
+{
 	/* Don't ask why, but we seem to need this... */
 
 	volatile int *hej = (void *)mfpr(PR_ISP);
@@ -112,45 +119,39 @@ ka680_conf()
 
 	cpmbx = (struct cpmbx *)vax_map_physmem(0x20140400, 1);
 
-	switch(vax_boardtype) {
-	case VAX_BTYP_1301:
-		switch((vax_siedata & 0xff00) >> 8) {
-		case VAX_STYP_675:
-			cpuname = "KA675";
-			break;
-		case VAX_STYP_680:
-			cpuname = "KA680";
-			break;
-		case VAX_STYP_690:
-			cpuname = "KA690";
-			break;
-		default:
-			cpuname = "unknown NVAX 1301";
-		}
-		break;
-	case VAX_BTYP_1305:
-		switch((vax_siedata & 0xff00) >> 8) {
-		case VAX_STYP_681:
-			cpuname = "KA681";
-			break;
-		case VAX_STYP_691:
-			cpuname = "KA691";
-			break;
-		case VAX_STYP_694:
-			if (vax_cpudata & 0x1000)
-				cpuname = "KA694";
-			else
-				cpuname = "KA692";
-			break;
-		default:
-			cpuname = "unknown NVAX 1305";
-		}
-	}
-	printf("cpu0: %s, ucode rev %d\n", cpuname, vax_cpudata & 0xff);
 }
 
 void
-ka680_cache_enable()
+ka680_attach_cpu(device_t self)
+{
+	const char *cpuname;
+
+	switch (vax_boardtype) {
+		case VAX_BTYP_680:
+			switch((vax_siedata & 0xff00) >> 8) {
+			case VAX_STYP_675: cpuname = "KA675"; break;
+			case VAX_STYP_680: cpuname = "KA680"; break;
+			case VAX_STYP_690: cpuname = "KA690"; break;
+			default: cpuname = "unknown KA680-class";
+			}
+			break;
+		case VAX_BTYP_681:
+			switch ((vax_siedata & 0xff00) >> 8) {
+			case VAX_STYP_681: cpuname = "KA681"; break;
+			case VAX_STYP_691: cpuname = "KA691"; break;
+			case VAX_STYP_694: cpuname = (vax_cpudata & 0x1000) ?
+				"KA694" : "KA692"; break;
+			default: cpuname = "unknown KA681-class";
+			}
+			break;
+		default: cpuname = "unknown class"; break;
+	}
+
+	aprint_normal("%s, NVAX (ucode rev %d)\n", cpuname, vax_cpudata & 0xff);
+}
+
+void
+ka680_cache_enable(void)
 {
 	int start, pslut, fslut, cslut, havevic;
 
@@ -169,37 +170,51 @@ ka680_cache_enable()
 	mtpr(mfpr(PR_BCEDSTS), PR_BCEDSTS);	/* Clear error bits */
 	mtpr(mfpr(PR_NESTS), PR_NESTS);	 /* Clear error bits */
 
-	switch((vax_siedata & 0xff00) >> 8) {
-	case VAX_STYP_680:
-	case VAX_STYP_681:	/* XXX untested */
-		fslut = 0x01420000;
-		cslut = 0x01020000;
-		havevic = 1;
-		break;
-	case VAX_STYP_690:
-		fslut = 0x01440000;
-		cslut = 0x01040000;
-		havevic = 1;
-		break;
-	case VAX_STYP_691:	/* XXX untested */
-		fslut = 0x01420000;
-		cslut = 0x01020000;
-		havevic = 1;
-		break;
-	case VAX_STYP_694:	/* XXX untested */
-		fslut = 0x01440000;
-		cslut = 0x01040000;
-		havevic = 1;
-		break;
-	case VAX_STYP_675:
-	default:		/* unknown cpu; cross fingers */
-		fslut = 0x01420000;
-		cslut = 0x01020000;
-		havevic = 0;
-		break;
-	}
 
 	start = 0x01400000;
+	/* fallback, use smallest known cache on unknown models */
+	fslut = 0x01420000;
+	cslut = 0x01020000;
+	havevic = 0;
+  
+	switch(vax_boardtype) {
+		case VAX_BTYP_680:
+			switch((vax_siedata & 0xff00) >> 8) {
+			case VAX_STYP_675:
+				fslut = 0x01420000;
+				cslut = 0x01020000;
+				havevic = 0;
+				break;
+			case VAX_STYP_680:
+				fslut = 0x01420000;
+				cslut = 0x01020000;
+				havevic = 1;
+				break;
+			case VAX_STYP_690:
+				fslut = 0x01440000;
+				cslut = 0x01040000;
+				havevic = 1;
+				break;
+		}
+		case VAX_BTYP_681:
+			switch((vax_siedata & 0xff00) >> 8) {
+			case VAX_STYP_681:
+				fslut = 0x01420000;
+				cslut = 0x01020000;
+				havevic = 1;
+				break;
+			case VAX_STYP_691:
+				fslut = 0x01420000;
+				cslut = 0x01020000;
+				havevic = 1;
+				break;
+			case VAX_STYP_694:
+				fslut = 0x01440000;
+				cslut = 0x01040000;
+				havevic = 1;
+				break;
+		}
+	}
 
 	/* Flush cache lines */
 	for (; start < fslut; start += 0x20)
@@ -217,14 +232,14 @@ ka680_cache_enable()
 	mtpr(mfpr(PR_CCTL) | 6 | CCTL_ENABLE, PR_CCTL); /* enab. bcache */
 
 	start = 0x01800000;
-	pslut = 0x01802000;
+	pslut  = 0x01802000;
 
 	/* Clear primary cache */
 	for (; start < pslut; start += 0x20)
 		mtpr(0, start);
 
 	/* Flush the pipes (via REI) */
-	asm("movpsl -(sp); movab 1f,-(sp); rei; 1:;");
+	__asm("movpsl -(%sp); movab 1f,-(%sp); rei; 1:;");
 
 	/* Enable primary cache */
 	mtpr(PCCTL_P_EN|PCCTL_I_EN|PCCTL_D_EN, PR_PCCTL);
@@ -264,7 +279,7 @@ ka680_softmem(void *arg)
 }
 
 void
-ka680_steal_pages()
+ka680_steal_pages(void)
 {
 	/*
 	 * Get the soft and hard memory error vectors now.
@@ -277,13 +292,13 @@ ka680_steal_pages()
 }
 
 void
-ka680_memerr()
+ka680_memerr(void)
 {
 	printf("Memory err!\n");
 }
 
 int
-ka680_mchk(caddr_t addr)
+ka680_mchk(void *addr)
 {
 	panic("Machine check");
 	return 0;

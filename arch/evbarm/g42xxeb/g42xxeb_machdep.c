@@ -1,4 +1,4 @@
-/*	$NetBSD: g42xxeb_machdep.c,v 1.10 2006/11/24 22:04:22 wiz Exp $ */
+/*	$NetBSD: g42xxeb_machdep.c,v 1.15 2008/11/11 06:46:41 dyoung Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004, 2005  Genetec Corporation.  
@@ -109,7 +109,6 @@
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_ipkdb.h"
 #include "opt_pmap_debug.h"
 #include "opt_md.h"
 #include "opt_com.h"
@@ -138,10 +137,6 @@
 #include <ddb/db_extern.h>
 #ifdef KGDB
 #include <sys/kgdb.h>
-#endif
-#ifdef IPKDB
-#include <ipkdb/ipkdb.h>		/* for prototypes */
-#include <machine/ipkdb.h>
 #endif
 
 #include <machine/bootconfig.h>
@@ -180,11 +175,7 @@ u_int cpu_reset_address = 0;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -204,7 +195,6 @@ int max_processes = 64;			/* Default number */
 #endif	/* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
-pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -261,6 +251,23 @@ bs_protos(bs_notimpl);
 int comcnspeed = CONSPEED;
 int comcnmode = CONMODE;
 
+static struct pxa2x0_gpioconf boarddep_gpioconf[] = {
+	{ 44, GPIO_ALT_FN_1_IN },	/* BTCST */
+	{ 45, GPIO_ALT_FN_2_OUT },	/* BTRST */
+
+	{ -1 }
+};
+static struct pxa2x0_gpioconf *g42xxeb_gpioconf[] = {
+	pxa25x_com_btuart_gpioconf,
+	pxa25x_com_ffuart_gpioconf,
+#if 0
+	pxa25x_com_stuart_gpioconf,
+	pxa25x_pxaacu_gpioconf,
+#endif
+	boarddep_gpioconf,
+	NULL
+};
+
 /*
  * void cpu_reboot(int howto, char *bootstr)
  *
@@ -283,6 +290,7 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -313,6 +321,8 @@ cpu_reboot(int howto, char *bootstr)
 	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -422,7 +432,6 @@ initarm(void *arg)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
-	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
 	int led_data = 1;
@@ -498,10 +507,7 @@ initarm(void *arg)
 
 	/* setup GPIO for BTUART, in case bootloader doesn't take care of it */
 	pxa2x0_gpio_bootstrap(G42XXEB_GPIO_VBASE);
-	pxa2x0_gpio_set_function(42, GPIO_ALT_FN_1_IN);
-	pxa2x0_gpio_set_function(43, GPIO_ALT_FN_2_OUT);
-	pxa2x0_gpio_set_function(44, GPIO_ALT_FN_1_IN);
-	pxa2x0_gpio_set_function(45, GPIO_ALT_FN_2_OUT);
+	pxa2x0_gpio_config(g42xxeb_gpioconf);
 
 	LEDSTEP();
 
@@ -604,8 +610,6 @@ initarm(void *arg)
 	memset((char *)(var), 0, ((np) * PAGE_SIZE));
 
 	loop1 = 0;
-	kernel_l1pt.pv_pa = 0;
-	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if (((physical_freeend - L1_TABLE_SIZE) & (L1_TABLE_SIZE - 1)) == 0
@@ -862,8 +866,7 @@ initarm(void *arg)
 	printf("pmap ");
 #endif
 	LEDSTEP();
-	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
-	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
 	LEDSTEP();
 
 #ifdef __HAVE_MEMORY_DISK__
@@ -884,13 +887,6 @@ initarm(void *arg)
 	}
 
 	LEDSTEP();
-
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif
 
 #ifdef KGDB
 	if (boothowto & RB_KDB) {

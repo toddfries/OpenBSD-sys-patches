@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_wpivar.h,v 1.15 2007/11/19 19:34:25 damien Exp $	*/
+/*  $NetBSD: if_wpivar.h,v 1.13 2008/11/12 18:23:08 joerg Exp $    */
 
 /*-
- * Copyright (c) 2006, 2007
+ * Copyright (c) 2006
  *	Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -27,7 +27,7 @@ struct wpi_rx_radiotap_header {
 	int8_t		wr_dbm_antsignal;
 	int8_t		wr_dbm_antnoise;
 	uint8_t		wr_antenna;
-} __packed;
+};
 
 #define WPI_RX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_TSFT) |				\
@@ -45,20 +45,19 @@ struct wpi_tx_radiotap_header {
 	uint16_t	wt_chan_freq;
 	uint16_t	wt_chan_flags;
 	uint8_t		wt_hwqueue;
-} __packed;
+};
 
 #define WPI_TX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_RATE) |				\
-	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_HWQUEUE))
+	 (1 << IEEE80211_RADIOTAP_CHANNEL))
 
 struct wpi_dma_info {
 	bus_dma_tag_t		tag;
 	bus_dmamap_t		map;
 	bus_dma_segment_t	seg;
 	bus_addr_t		paddr;
-	caddr_t			vaddr;
+	void *			vaddr;
 	bus_size_t		size;
 };
 
@@ -73,19 +72,21 @@ struct wpi_tx_ring {
 	struct wpi_dma_info	cmd_dma;
 	struct wpi_tx_desc	*desc;
 	struct wpi_tx_cmd	*cmd;
-	struct wpi_tx_data	data[WPI_TX_RING_COUNT];
+	struct wpi_tx_data	*data;
 	int			qid;
+	int			count;
 	int			queued;
 	int			cur;
 };
 
-#define WPI_RBUF_COUNT	(WPI_RX_RING_COUNT + 32)
+#define WPI_RBUF_COUNT	(WPI_RX_RING_COUNT + 16)
+#define WPI_RBUF_LOW_LIMIT	8
 
 struct wpi_softc;
 
 struct wpi_rbuf {
 	struct wpi_softc	*sc;
-	caddr_t			vaddr;
+	void *			vaddr;
 	bus_addr_t		paddr;
 	SLIST_ENTRY(wpi_rbuf)	next;
 };
@@ -101,11 +102,13 @@ struct wpi_rx_ring {
 	struct wpi_rx_data	data[WPI_RX_RING_COUNT];
 	struct wpi_rbuf		rbuf[WPI_RBUF_COUNT];
 	SLIST_HEAD(, wpi_rbuf)	freelist;
+	kmutex_t		freelist_mtx;
+	int			nb_free_entries;
 	int			cur;
 };
 
 struct wpi_node {
-	struct	ieee80211_node		ni;	/* must be the first */
+	struct	ieee80211_node ni;	/* must be the first */
 	struct	ieee80211_amrr_node	amn;
 };
 
@@ -123,11 +126,12 @@ struct wpi_power_group {
 };
 
 struct wpi_softc {
-	struct device		sc_dev;
-
+	device_t			sc_dev;
+	struct ethercom	 	sc_ec;
 	struct ieee80211com	sc_ic;
 	int			(*sc_newstate)(struct ieee80211com *,
-				    enum ieee80211_state, int);
+					enum ieee80211_state, int);
+
 	struct ieee80211_amrr	amrr;
 
 	bus_dma_tag_t		sc_dmat;
@@ -138,9 +142,10 @@ struct wpi_softc {
 
 	/* firmware DMA transfer */
 	struct wpi_dma_info	fw_dma;
+	bool			fw_used;
 
-	/* rings */
-	struct wpi_tx_ring	txq[WPI_NTXQUEUES];
+	struct wpi_tx_ring	txq[4];
+	struct wpi_tx_ring	cmdq;
 	struct wpi_rx_ring	rxq;
 
 	bus_space_tag_t		sc_st;
@@ -150,10 +155,8 @@ struct wpi_softc {
 	pcitag_t		sc_pcitag;
 	bus_size_t		sc_sz;
 
-	struct ksensordev	sensordev;
-	struct ksensor		sensor;
-	struct timeout		calib_to;
-	int			calib_cnt;
+	struct callout		calib_to;
+	int			calib_cnt;	
 
 	struct wpi_config	config;
 	int			temp;
@@ -165,14 +168,13 @@ struct wpi_softc {
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
 
 	int			sc_tx_timer;
-	void			*powerhook;
 
 #if NBPFILTER > 0
-	caddr_t			sc_drvbpf;
+	void *			sc_drvbpf;
 
 	union {
 		struct wpi_rx_radiotap_header th;
-		uint8_t	pad[IEEE80211_RADIOTAP_HDRLEN];
+		uint8_t pad[IEEE80211_RADIOTAP_HDRLEN];
 	} sc_rxtapu;
 #define sc_rxtap	sc_rxtapu.th
 	int			sc_rxtap_len;
@@ -184,4 +186,8 @@ struct wpi_softc {
 #define sc_txtap	sc_txtapu.th
 	int			sc_txtap_len;
 #endif
+
+	bool		is_scanning;
+
+	struct sysctllog	*sc_sysctllog;
 };

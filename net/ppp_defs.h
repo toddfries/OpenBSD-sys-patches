@@ -1,5 +1,5 @@
-/*	$OpenBSD: ppp_defs.h,v 1.13 2002/09/13 00:12:07 deraadt Exp $	*/
-/*	$NetBSD: ppp_defs.h,v 1.1 1995/07/04 06:28:26 paulus Exp $	*/
+/*	$NetBSD: ppp_defs.h,v 1.13 2008/02/20 17:05:53 matt Exp $	*/
+/*	Id: ppp_defs.h,v 1.11 1997/04/30 05:46:24 paulus Exp 	*/
 
 /*
  * ppp_defs.h - PPP definitions.
@@ -36,50 +36,68 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _PPP_DEFS_H_
-#define _PPP_DEFS_H_
+#ifndef _NET_PPP_DEFS_H_
+#define _NET_PPP_DEFS_H_
 
 /*
  * The basic PPP frame.
  */
 #define PPP_HDRLEN	4	/* octets for standard ppp header */
 #define PPP_FCSLEN	2	/* octets for FCS */
-#define PPP_MRU		1500	/* default MRU = max length of info field */
 
-#define PPP_ADDRESS(p)	(((u_char *)(p))[0])
-#define PPP_CONTROL(p)	(((u_char *)(p))[1])
-#define PPP_PROTOCOL(p)	((((u_char *)(p))[2] << 8) + ((u_char *)(p))[3])
+/*
+ * Packet sizes
+ *
+ * Note - lcp shouldn't be allowed to negotiate stuff outside these
+ *	  limits.  See lcp.h in the pppd directory.
+ * (XXX - these constants should simply be shared by lcp.c instead
+ *	  of living in lcp.h)
+ */
+#define	PPP_MTU		1500	/* Default MTU (size of Info field) */
+#define PPP_MAXMTU	65535 - (PPP_HDRLEN + PPP_FCSLEN)
+#define PPP_MINMTU	64
+#define PPP_MRU		1500	/* default MRU = max length of info field */
+#define PPP_MAXMRU	65000	/* Largest MRU we allow */
+#define PPP_MINMRU	128
+
+#define PPP_ADDRESS(p)	(((const u_char *)(p))[0])
+#define PPP_CONTROL(p)	(((const u_char *)(p))[1])
+#define PPP_PROTOCOL(p)	\
+    ((((const u_char *)(p))[2] << 8) + ((const u_char *)(p))[3])
 
 /*
  * Significant octet values.
  */
-#define PPP_ALLSTATIONS	0xff	/* All-Stations broadcast address */
-#define PPP_UI		0x03	/* Unnumbered Information */
-#define PPP_FLAG	0x7e	/* Flag Sequence */
-#define PPP_ESCAPE	0x7d	/* Asynchronous Control Escape */
-#define PPP_TRANS	0x20	/* Asynchronous transparency modifier */
+#define	PPP_ALLSTATIONS	0xff	/* All-Stations broadcast address */
+#define	PPP_UI		0x03	/* Unnumbered Information */
+#define	PPP_FLAG	0x7e	/* Flag Sequence */
+#define	PPP_ESCAPE	0x7d	/* Asynchronous Control Escape */
+#define	PPP_TRANS	0x20	/* Asynchronous transparency modifier */
 
 /*
  * Protocol field values.
  */
-#define PPP_IP		0x21	/* Internet Protocol */
-#define PPP_XNS		0x25	/* Xerox NS */
-#define PPP_AT		0x29	/* AppleTalk Protocol */
-#define PPP_IPX		0x2b	/* Internetwork Packet Exchange */
-#define PPP_VJC_COMP	0x2d	/* VJ compressed TCP */
-#define PPP_VJC_UNCOMP	0x2f	/* VJ uncompressed TCP */
-#define PPP_IPV6	0x57	/* Internet Protocol Version 6 */
-#define PPP_COMP	0xfd	/* compressed packet */
-#define PPP_IPCP	0x8021	/* IP Control Protocol */
-#define PPP_ATCP	0x8029	/* AppleTalk Control Protocol */
-#define PPP_IPXCP	0x802b	/* IPX Control Protocol */
-#define PPP_IPV6CP	0x8057	/* IPv6 Control Protocol */
-#define PPP_CCP		0x80fd	/* Compression Control Protocol */
-#define PPP_LCP		0xc021	/* Link Control Protocol */
-#define PPP_PAP		0xc023	/* Password Authentication Protocol */
-#define PPP_LQR		0xc025	/* Link Quality Report protocol */
-#define PPP_CHAP	0xc223	/* Cryptographic Handshake Auth. Protocol */
-#define PPP_CBCP	0xc029	/* Callback Control Protocol */
+#define PPP_IP		0x0021		/* Internet Protocol */
+#define PPP_ISO		0x0023		/* ISO OSI Protocol */
+#define PPP_XNS		0x0025		/* Xerox NS Protocol */
+#define PPP_AT		0x0029		/* AppleTalk Protocol */
+#define PPP_IPX		0x002b		/* IPX protocol */
+#define	PPP_VJC_COMP	0x002d		/* VJ compressed TCP */
+#define	PPP_VJC_UNCOMP	0x002f		/* VJ uncompressed TCP */
+#define PPP_IPV6	0x0057		/* Internet Protocol Version 6 */
+#define PPP_COMP	0x00fd		/* compressed packet */
+#define PPP_IPCP	0x8021		/* IP Control Protocol */
+#define PPP_ATCP	0x8029		/* AppleTalk Control Protocol */
+#define PPP_IPXCP	0x802b		/* IPX Control Protocol */
+#define PPP_IPV6CP	0x8057		/* IPv6 Control Protocol */
+#define PPP_CCP		0x80fd		/* Compression Control Protocol */
+#define PPP_ECP		0x8053		/* Encryption Control Protocol */
+#define PPP_LCP		0xc021		/* Link Control Protocol */
+#define PPP_PAP		0xc023		/* Password Authentication Protocol */
+#define PPP_LQR		0xc025		/* Link Quality Report protocol */
+#define PPP_CHAP	0xc223		/* Crypto Handshake Auth. Protocol */
+#define PPP_CBCP	0xc029		/* Callback Control Protocol */
+#define PPP_EAP		0xc227		/* Extensible Authentication Protocol */
 
 /*
  * Values for FCS calculations.
@@ -89,21 +107,9 @@
 #define PPP_FCS(fcs, c)	(((fcs) >> 8) ^ fcstab[((fcs) ^ (c)) & 0xff])
 
 /*
- * A 32-bit unsigned integral type.
- */
-#ifndef __BIT_TYPES_DEFINED__
-#ifdef	UINT32_T
-typedef UINT32_T	u_int32_t;
-#else
-typedef unsigned int	u_int32_t;
-typedef unsigned short	u_int16_t;
-#endif
-#endif
-
-/*
  * Extended asyncmap - allows any character to be escaped.
  */
-typedef u_int32_t	ext_accm[8];
+typedef uint32_t	ext_accm[8];
 
 /*
  * What to do with network protocol (NP) packets.
@@ -119,43 +125,43 @@ enum NPmode {
  * Statistics.
  */
 struct pppstat	{
-    u_int	ppp_ibytes;	/* bytes received */
-    u_int	ppp_ipackets;	/* packets received */
-    u_int	ppp_ierrors;	/* receive errors */
-    u_int	ppp_obytes;	/* bytes sent */
-    u_int	ppp_opackets;	/* packets sent */
-    u_int	ppp_oerrors;	/* transmit errors */
+    unsigned int ppp_ibytes;	/* bytes received */
+    unsigned int ppp_ipackets;	/* packets received */
+    unsigned int ppp_ierrors;	/* receive errors */
+    unsigned int ppp_obytes;	/* bytes sent */
+    unsigned int ppp_opackets;	/* packets sent */
+    unsigned int ppp_oerrors;	/* transmit errors */
 };
 
 struct vjstat {
-    u_int	vjs_packets;	/* outbound packets */
-    u_int	vjs_compressed;	/* outbound compressed packets */
-    u_int	vjs_searches;	/* searches for connection state */
-    u_int	vjs_misses;	/* times couldn't find conn. state */
-    u_int	vjs_uncompressedin; /* inbound uncompressed packets */
-    u_int	vjs_compressedin;   /* inbound compressed packets */
-    u_int	vjs_errorin;	/* inbound unknown type packets */
-    u_int	vjs_tossed;	/* inbound packets tossed because of error */
+    unsigned int vjs_packets;	/* outbound packets */
+    unsigned int vjs_compressed; /* outbound compressed packets */
+    unsigned int vjs_searches;	/* searches for connection state */
+    unsigned int vjs_misses;	/* times couldn't find conn. state */
+    unsigned int vjs_uncompressedin; /* inbound uncompressed packets */
+    unsigned int vjs_compressedin; /* inbound compressed packets */
+    unsigned int vjs_errorin;	/* inbound unknown type packets */
+    unsigned int vjs_tossed;	/* inbound packets tossed because of error */
 };
 
 struct ppp_stats {
-    struct pppstat	p;	/* basic PPP statistics */
-    struct vjstat	vj;	/* VJ header compression statistics */
+    struct pppstat p;		/* basic PPP statistics */
+    struct vjstat vj;		/* VJ header compression statistics */
 };
 
 struct compstat {
-    u_int	unc_bytes;	/* total uncompressed bytes */
-    u_int	unc_packets;	/* total uncompressed packets */
-    u_int	comp_bytes;	/* compressed bytes */
-    u_int	comp_packets;	/* compressed packets */
-    u_int	inc_bytes;	/* incompressible bytes */
-    u_int	inc_packets;	/* incompressible packets */
-    u_int	ratio;		/* recent compression ratio << 8 */
+    unsigned int unc_bytes;	/* total uncompressed bytes */
+    unsigned int unc_packets;	/* total uncompressed packets */
+    unsigned int comp_bytes;	/* compressed bytes */
+    unsigned int comp_packets;	/* compressed packets */
+    unsigned int inc_bytes;	/* incompressible bytes */
+    unsigned int inc_packets;	/* incompressible packets */
+    unsigned int ratio;		/* recent compression ratio << 8 */
 };
 
 struct ppp_comp_stats {
-    struct compstat	c;	/* packet compression statistics */
-    struct compstat	d;	/* packet decompression statistics */
+    struct compstat c;		/* packet compression statistics */
+    struct compstat d;		/* packet decompression statistics */
 };
 
 /*
@@ -167,4 +173,4 @@ struct ppp_idle {
     time_t recv_idle;		/* time since last NP packet received */
 };
 
-#endif /* _PPP_DEFS_H_ */
+#endif /* !_NET_PPP_DEFS_H_ */

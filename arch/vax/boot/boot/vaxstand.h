@@ -1,5 +1,4 @@
-/*	$OpenBSD: vaxstand.h,v 1.1 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: vaxstand.h,v 1.5 2000/06/15 19:53:23 ragge Exp $ */
+/*	$NetBSD: vaxstand.h,v 1.8 2005/12/11 12:19:30 christos Exp $ */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -47,13 +46,10 @@ extern int csrbase, nexaddr;
 /*
  * Easy-to-use definitions
  */
-#ifndef min
 #define min(x,y) (x < y ? x : y)
-#endif /* min */
 
 struct netif_driver;
 
-char *index(char *, int);
 int net_devinit(struct open_file *f, struct netif_driver *drv, u_char *eaddr);
 
 /* device calls */

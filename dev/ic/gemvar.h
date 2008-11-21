@@ -1,5 +1,4 @@
-/*	$OpenBSD: gemvar.h,v 1.17 2007/04/19 19:00:01 kettenis Exp $	*/
-/*	$NetBSD: gemvar.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
+/*	$NetBSD: gemvar.h,v 1.18 2008/02/01 10:53:25 jdc Exp $ */
 
 /*
  *
@@ -33,8 +32,15 @@
 #ifndef	_IF_GEMVAR_H
 #define	_IF_GEMVAR_H
 
+
+#include "rnd.h"
+
 #include <sys/queue.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
+
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
 
 /*
  * Misc. definitions for the Sun ``Gem'' Ethernet controller family driver.
@@ -52,17 +58,13 @@
 #define	GEM_NTXDESC_MASK	(GEM_NTXDESC - 1)
 #define	GEM_NEXTTX(x)		((x + 1) & GEM_NTXDESC_MASK)
 
-struct gem_sxd {
-	struct mbuf *sd_mbuf;
-	bus_dmamap_t sd_map;
-};
-
 /*
  * Receive descriptor list size.  We have one Rx buffer per incoming
  * packet, so this logic is a little simpler.
  */
 #define	GEM_NRXDESC		128
 #define	GEM_NRXDESC_MASK	(GEM_NRXDESC - 1)
+#define	GEM_PREVRX(x)		((x - 1) & GEM_NRXDESC_MASK)
 #define	GEM_NEXTRX(x)		((x + 1) & GEM_NRXDESC_MASK)
 
 /*
@@ -87,6 +89,20 @@ struct gem_control_data {
 #define	GEM_CDRXOFF(x)		GEM_CDOFF(gcd_rxdescs[(x)])
 
 /*
+ * Software state for transmit jobs.
+ */
+struct gem_txsoft {
+	struct mbuf *txs_mbuf;		/* head of our mbuf chain */
+	bus_dmamap_t txs_dmamap;	/* our DMA map */
+	int txs_firstdesc;		/* first descriptor in packet */
+	int txs_lastdesc;		/* last descriptor in packet */
+	int txs_ndescs;			/* number of descriptors */
+	SIMPLEQ_ENTRY(gem_txsoft) txs_q;
+};
+
+SIMPLEQ_HEAD(gem_txsq, gem_txsoft);
+
+/*
  * Software state for receive jobs.
  */
 struct gem_rxsoft {
@@ -94,36 +110,14 @@ struct gem_rxsoft {
 	bus_dmamap_t rxs_dmamap;	/* our DMA map */
 };
 
-
-/*
- * Table which describes the transmit threshold mode.  We generally
- * start at index 0.  Whenever we get a transmit underrun, we increment
- * our index, falling back if we encounter the NULL terminator.
- */
-struct gem_txthresh_tab {
-	u_int32_t txth_opmode;		/* OPMODE bits */
-	const char *txth_name;		/* name of mode */
-};
-
-/*
- * Some misc. statics, useful for debugging.
- */
-struct gem_stats {
-	u_long		ts_tx_uf;	/* transmit underflow errors */
-	u_long		ts_tx_to;	/* transmit jabber timeouts */
-	u_long		ts_tx_ec;	/* excessive collision count */
-	u_long		ts_tx_lc;	/* late collision count */
-};
-
 /*
  * Software state per device.
  */
 struct gem_softc {
 	struct device	sc_dev;		/* generic device information */
-	struct arpcom	sc_arpcom;	/* ethernet common data */
+	struct ethercom sc_ethercom;	/* ethernet common data */
 	struct mii_data	sc_mii;		/* MII media control */
-#define sc_media	sc_mii.mii_media/* shorthand */
-	struct timeout	sc_tick_ch;	/* tick callout */
+	struct callout	sc_tick_ch;	/* tick callout */
 
 	/* The following bus handles are to be provided by the bus front-end */
 	bus_space_tag_t	sc_bustag;	/* bus tag */
@@ -131,36 +125,39 @@ struct gem_softc {
 	bus_dmamap_t	sc_dmamap;	/* bus dma handle */
 	bus_space_handle_t sc_h1;	/* bus space handle for bank 1 regs */
 	bus_space_handle_t sc_h2;	/* bus space handle for bank 2 regs */
-#if 0
-	/* The following may be needed for SBus */
-	bus_space_handle_t sc_seb;	/* HME Global registers */
-	bus_space_handle_t sc_erx;	/* HME ERX registers */
-	bus_space_handle_t sc_etx;	/* HME ETX registers */
-	bus_space_handle_t sc_mac;	/* HME MAC registers */
-	bus_space_handle_t sc_mif;	/* HME MIF registers */
-#endif
-	int		sc_burst;	/* DVMA burst size in effect */
 
-	int		sc_if_flags;
+	int		sc_phys[2];	/* MII instance -> PHY map */
 
 	int		sc_mif_config;	/* Selected MII reg setting */
+	uint32_t	sc_mii_anar;	/* copy of PCS GEM_MII_ANAR register */
+	int		sc_mii_media;	/* Media selected for PCS MII */
 
-	int		sc_pci;		/* XXXXX -- PCI buses are LE. */
 	u_int		sc_variant;	/* which GEM are we dealing with? */
-#define GEM_UNKNOWN			0	/* don't know */
-#define GEM_SUN_GEM			1	/* Sun GEM */
-#define GEM_SUN_ERI			2	/* Sun ERI */
-#define GEM_APPLE_GMAC			3	/* Apple GMAC */
-#define GEM_APPLE_K2_GMAC		4	/* Apple K2 GMAC */
+#define	GEM_UNKNOWN		0	/* don't know */
+#define	GEM_SUN_GEM		1	/* Sun GEM variant */
+#define	GEM_SUN_ERI		2	/* Sun ERI variant */
+#define	GEM_APPLE_GMAC		3	/* Apple GMAC variant */
+#define GEM_APPLE_K2_GMAC	4	/* Apple K2 GMAC */
+
+#define GEM_IS_SUN(sc) \
+	((sc)->sc_variant == GEM_SUN_GEM || \
+	(sc)->sc_variant == GEM_SUN_ERI)
+#define	GEM_IS_APPLE(sc) \
+	((sc)->sc_variant == GEM_APPLE_GMAC || \
+	(sc)->sc_variant == GEM_APPLE_K2_GMAC)
+
+	int		sc_chiprev;	/* hardware revision */
 
 	u_int		sc_flags;	/* */
+	short		sc_if_flags;	/* copy of ifp->if_flags */
 #define	GEM_GIGABIT		0x0001	/* has a gigabit PHY */
-
+#define GEM_LINK		0x0002	/* link is up */
+#define	GEM_PCI			0x0004	/* XXX PCI busses are little-endian */
+#define	GEM_SERDES		0x0008	/* use the SERDES */
+#define	GEM_SERIAL		0x0010	/* use the serial link */
 
 	void *sc_sdhook;		/* shutdown hook */
 	void *sc_powerhook;		/* power management hook */
-
-	struct gem_stats sc_stats;	/* debugging stats */
 
 	/*
 	 * Ring buffer DMA stuff.
@@ -170,12 +167,12 @@ struct gem_softc {
 	bus_dmamap_t sc_cddmamap;	/* control data DMA map */
 #define	sc_cddma	sc_cddmamap->dm_segs[0].ds_addr
 
+	bus_dmamap_t sc_nulldmamap;	/* for small packets padding */
+
 	/*
 	 * Software state for transmit and receive descriptors.
 	 */
-	struct gem_sxd sc_txd[GEM_NTXDESC];
-	u_int32_t sc_tx_cnt, sc_tx_prod, sc_tx_cons;
-
+	struct gem_txsoft sc_txsoft[GEM_TXQUEUELEN];
 	struct gem_rxsoft sc_rxsoft[GEM_NRXDESC];
 
 	/*
@@ -185,49 +182,56 @@ struct gem_softc {
 #define	sc_txdescs	sc_control_data->gcd_txdescs
 #define	sc_rxdescs	sc_control_data->gcd_rxdescs
 
-	int			sc_txfree;		/* number of free Tx descriptors */
-	int			sc_txnext;		/* next ready Tx descriptor */
+	int		sc_txfree;	/* number of free Tx descriptors */
+	int		sc_txnext;	/* next ready Tx descriptor */
+	int		sc_txwin;	/* Tx descriptors since last Tx int */
 
-	u_int32_t		sc_tdctl_ch;		/* conditional desc chaining */
-	u_int32_t		sc_tdctl_er;		/* conditional desc end-of-ring */
+	struct gem_txsq	sc_txfreeq;	/* free Tx descsofts */
+	struct gem_txsq	sc_txdirtyq;	/* dirty Tx descsofts */
 
-	u_int32_t		sc_setup_fsls;	/* FS|LS on setup descriptor */
-
-	int			sc_rxptr;		/* next ready RX descriptor/descsoft */
-	int			sc_rxfifosize;
+	int		sc_rxptr;	/* next ready RX descriptor/descsoft */
+	int		sc_rxfifosize;	/* Rx FIFO size (bytes) */
 
 	/* ========== */
-	int			sc_inited;
-	int			sc_debug;
-	void			*sc_sh;		/* shutdownhook cookie */
+	int		sc_inited;
+	int		sc_meminited;
+	int		sc_debug;
+	void		*sc_sh;		/* shutdownhook cookie */
 
 	/* Special hardware hooks */
 	void	(*sc_hwreset)(struct gem_softc *);
 	void	(*sc_hwinit)(struct gem_softc *);
+
+#if NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
+
+	struct evcnt sc_ev_intr;
+#ifdef GEM_COUNTERS
+	struct evcnt sc_ev_txint;
+	struct evcnt sc_ev_rxint;
+	struct evcnt sc_ev_rxnobuf;
+	struct evcnt sc_ev_rxfull;
+	struct evcnt sc_ev_rxhist[9];
+#endif
 };
 
-#define	GEM_DMA_READ(sc, v)	(((sc)->sc_pci) ? letoh64(v) : betoh64(v))
-#define	GEM_DMA_WRITE(sc, v)	(((sc)->sc_pci) ? htole64(v) : htobe64(v))
+#ifdef GEM_COUNTERS
+#define	GEM_COUNTER_INCR(sc, ctr)	((void) (sc->ctr.ev_count++))
+#else
+#define	GEM_COUNTER_INCR(sc, ctr)	((void) sc)
+#endif
 
-/*
- * This macro returns the current media entry for *non-MII* media.
- */
-#define	GEM_CURRENT_MEDIA(sc)						\
-	(IFM_SUBTYPE((sc)->sc_mii.mii_media.ifm_cur->ifm_media) != IFM_AUTO ? \
-	 (sc)->sc_mii.mii_media.ifm_cur : (sc)->sc_nway_active)
 
-/*
- * This macro determines if a change to media-related OPMODE bits requires
- * a chip reset.
- */
-#define	GEM_MEDIA_NEEDSRESET(sc, newbits)				\
-	(((sc)->sc_opmode & OPMODE_MEDIA_BITS) !=			\
-	 ((newbits) & OPMODE_MEDIA_BITS))
+#define	GEM_DMA_READ(sc, v)						\
+	(((sc)->sc_flags & GEM_PCI) ? le64toh(v) : be64toh(v))
+#define	GEM_DMA_WRITE(sc, v)						\
+	(((sc)->sc_flags & GEM_PCI) ? htole64(v) : htobe64(v))
 
 #define	GEM_CDTXADDR(sc, x)	((sc)->sc_cddma + GEM_CDTXOFF((x)))
 #define	GEM_CDRXADDR(sc, x)	((sc)->sc_cddma + GEM_CDRXOFF((x)))
 
-#define	GEM_CDSPADDR(sc)	((sc)->sc_cddma + GEM_CDSPOFF)
+#define	GEM_CDADDR(sc)	((sc)->sc_cddma + GEM_CDOFF)
 
 #define	GEM_CDTXSYNC(sc, x, n, ops)					\
 do {									\
@@ -254,9 +258,9 @@ do {									\
 	bus_dmamap_sync((sc)->sc_dmatag, (sc)->sc_cddmamap,		\
 	    GEM_CDRXOFF((x)), sizeof(struct gem_desc), (ops))
 
-#define	GEM_CDSPSYNC(sc, ops)						\
+#define	GEM_CDSYNC(sc, ops)						\
 	bus_dmamap_sync((sc)->sc_dmatag, (sc)->sc_cddmamap,		\
-	    GEM_CDSPOFF, GEM_SETUP_PACKET_LEN, (ops))
+	    0, sizeof(struct gem_control_data), (ops))
 
 #define	GEM_INIT_RXDESC(sc, x)						\
 do {									\
@@ -269,32 +273,28 @@ do {									\
 	    GEM_DMA_WRITE((sc), __rxs->rxs_dmamap->dm_segs[0].ds_addr);	\
 	__rxd->gd_flags =						\
 	    GEM_DMA_WRITE((sc),						\
-		(((__m->m_ext.ext_size)<<GEM_RD_BUFSHIFT)		\
-	    & GEM_RD_BUFSIZE) | GEM_RD_OWN);				\
+			(((__m->m_ext.ext_size)<<GEM_RD_BUFSHIFT)	\
+				& GEM_RD_BUFSIZE) | GEM_RD_OWN);	\
 	GEM_CDRXSYNC((sc), (x), BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE); \
 } while (0)
 
-#define GEM_IS_APPLE(sc)	\
-    ((sc)->sc_variant >= GEM_APPLE_INTREPID2_GMAC &&	\
-    (sc)->sc_variant <= GEM_APPLE_UNINORTH2GMAC)
+#define GEM_UPDATE_RXDESC(sc, x)					\
+do {									\
+	struct gem_rxsoft *__rxs = &sc->sc_rxsoft[(x)];			\
+	struct gem_desc *__rxd = &sc->sc_rxdescs[(x)];			\
+	struct mbuf *__m = __rxs->rxs_mbuf;				\
+									\
+	__rxd->gd_flags =						\
+	    GEM_DMA_WRITE((sc),						\
+			(((__m->m_ext.ext_size)<<GEM_RD_BUFSHIFT)	\
+				& GEM_RD_BUFSIZE) | GEM_RD_OWN);	\
+} while (0)
 
 #ifdef _KERNEL
-void	gem_attach(struct gem_softc *, const u_int8_t *);
-int	gem_activate(struct device *, enum devact);
-int	gem_detach(struct gem_softc *);
+void	gem_attach(struct gem_softc *, const uint8_t *);
 int	gem_intr(void *);
-int	gem_read_srom(struct gem_softc *);
-int	gem_srom_crcok(const u_int8_t *);
-int	gem_isv_srom(const u_int8_t *);
-int	gem_isv_srom_enaddr(struct gem_softc *, u_int8_t *);
-int	gem_parse_old_srom(struct gem_softc *, u_int8_t *);
 
-int	gem_mediachange(struct ifnet *);
-void	gem_mediastatus(struct ifnet *, struct ifmediareq *);
-
-void	gem_config(struct gem_softc *);
 void	gem_reset(struct gem_softc *);
-int	gem_intr(void *);
 #endif /* _KERNEL */
 
 

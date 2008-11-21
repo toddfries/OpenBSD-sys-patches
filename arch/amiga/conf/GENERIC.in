@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC.in,v 1.58 2006/11/11 18:47:09 jmmv Exp $
+# $NetBSD: GENERIC.in,v 1.70 2008/11/12 12:35:56 ad Exp $
 #
 # GENERIC machine description file
 #
@@ -56,7 +56,7 @@ include "arch/amiga/conf/std.amiga"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.58 $"
+#ident 		"GENERIC-$Revision: 1.70 $"
 
 m4_ifdef(`INSTALL_CONFIGURATION', `m4_dnl
 makeoptions	COPTS="-Os"
@@ -108,7 +108,7 @@ options 	INET6		# IPV6
 m4_ifdef(`INSTALL_CONFIGURATION', `', `m4_dnl
 #options 	MROUTING	# Multicast routing
 #options 	PIM		# Protocol Independent Multicast
-options 	ISO,TPIP	# OSI
+#options 	ISO,TPIP	# OSI
 #options 	EON		# OSI tunneling over IP
 options 	NETATALK	# AppleTalk networking protocols
 #options 	TCP_DEBUG	# Record last TCP_NDEBUG packets with SO_DEBUG
@@ -168,6 +168,7 @@ file-system	PTYFS		# /dev/pts/N support
 # Filesystem options
 
 #options 	FFS_EI		# FFS Endian Independant support
+options 	WAPBL		# File system journaling support - Experimental
 
 m4_ifdef(`INSTALL_CONFIGURATION', `', `m4_dnl
 options 	QUOTA		# User and group quotas in FFS
@@ -196,6 +197,7 @@ options 	COMPAT_15	# compatibility with NetBSD 1.5
 options 	COMPAT_16	# compatibility with NetBSD 1.6
 options 	COMPAT_20	# compatibility with NetBSD 2.0
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
+options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options 	COMPAT_SUNOS	# Support to run Sun (m68k) executables
 options 	COMPAT_SVR4	# Support to run SVR4 (m68k) executables
 options 	COMPAT_NOMID	# allow nonvalid machine id executables
@@ -213,10 +215,6 @@ m4_ifdef(`INSTALL_CONFIGURATION', `', `m4_dnl
 options 	SYSVSHM		# System V-like shared memory
 options 	SYSVMSG		# System V-like messages
 options 	SYSVSEM		# System V-like semaphores
-#options 	SEMMNI=10	# number of semaphore identifiers
-#options 	SEMMNS=60	# number of semaphores in system
-#options 	SEMUME=10	# max number of undo entries per process
-#options 	SEMMNU=30	# number of undo structures in system
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
 ')m4_dnl
 
@@ -226,9 +224,7 @@ options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
 
 m4_ifdef(`INSTALL_CONFIGURATION', `', `m4_dnl
 options 	KTRACE		# system call tracing support
-options 	LKM		# Loadable kernel modules
 ')m4_dnl
-#options 	SYSTRACE	# system call vetting via systrace(1)
 #options 	INSECURE	# disable kernel security levels
 options 	SCSIVERBOSE	# human readable SCSI error messages
 options 	USERCONF	# userconf(4) support
@@ -527,6 +523,8 @@ empsc0		at zbus0		# Emplant scsi
 scsibus*	at empsc0
 
 wdc0		at mainbus0		# A4000 & A1200 IDE bus
+wdc*		at zbus0		# Buddha / Catweasel
+
 atabus* 	at wdc? channel ?	# ATA bus
 wd*		at atabus? drive ?	#  + drives
 atapibus*	at atabus?		# ATAPI bus
@@ -567,6 +565,13 @@ ss*	at scsibus? target ? lun ?	# scsi scanner
 uk*	at scsibus? target ? lun ?	# scsi unknown
 ')m4_dnl
 
+m4_ifdef(`INSTALL_CONFIGURATION', `', `m4_dnl
+#
+# accept filters
+pseudo-device	accf_data		# "dataready" accept filter
+pseudo-device	accf_http		# "httpready" accept filter
+')m4_dnl
+
 pseudo-device	loop			# loopback network interface
 pseudo-device	sl			# SLIP network interfaces
 pseudo-device	ppp			# PPP network interfaces
@@ -583,12 +588,13 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
+pseudo-device	agr			# IEEE 802.3ad link aggregation
 #pseudo-device	pf			# PF packet filter
 #pseudo-device	pflog			# PF log if
-m4_ifdef(`GENERIC_CONFIGURATION', `m4_dnl
-pseudo-device	fss		4	# file system snapshot device
-', `m4_dnl
+m4_ifdef(`INSTALL_CONFIGURATION', `m4_dnl
 #pseudo-device	fss		4	# file system snapshot device
+', `m4_dnl
+pseudo-device	fss		4	# file system snapshot device
 ')m4_dnl
 
 pseudo-device	view		4	# views (needed for grfcc)

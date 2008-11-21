@@ -1,5 +1,4 @@
-/*	$OpenBSD: umassvar.h,v 1.12 2007/06/13 06:25:03 mbalmer Exp $ */
-/*	$NetBSD: umassvar.h,v 1.20 2003/09/08 19:31:01 mycroft Exp $	*/
+/*	$NetBSD: umassvar.h,v 1.27 2008/09/06 21:49:00 rmind Exp $	*/
 /*-
  * Copyright (c) 1999 MAEKAWA Masahide <bishop@rr.iij4u.or.jp>,
  *		      Nick Hibma <n_hibma@freebsd.org>
@@ -31,7 +30,7 @@
 
 #ifdef UMASS_DEBUG
 #define DIF(m, x)	if (umassdebug & (m)) do { x ; } while (0)
-#define DPRINTF(m, x)	do { if (umassdebug & (m)) printf x; } while (0)
+#define DPRINTF(m, x)	if (umassdebug & (m)) logprintf x
 #define UDMASS_UPPER	0x00008000	/* upper layer */
 #define UDMASS_GEN	0x00010000	/* general */
 #define UDMASS_SCSI	0x00020000	/* scsi */
@@ -146,12 +145,12 @@ struct umass_wire_methods {
 };
 
 struct umassbus_softc {
-	struct device		*sc_child;	/* child device, for detach */
+	device_ptr_t		sc_child;	/* child device, for detach */
 };
 
 /* the per device structure */
 struct umass_softc {
-	struct device		sc_dev;		/* base device */
+	USBBASEDEVICE		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;	/* device */
 	usbd_interface_handle	sc_iface;	/* interface */
 	int			sc_ifaceno;	/* interface number */
@@ -177,8 +176,12 @@ struct umass_softc {
 #define UMASS_CPROTO_ISD_ATA	5
 
 	u_int32_t		sc_quirks;
-#define UMASS_QUIRK_WRONG_CSWSIG	0x00000001
-#define UMASS_QUIRK_WRONG_CSWTAG	0x00000002
+#define	UMASS_QUIRK_WRONG_CSWSIG	0x00000001
+#define	UMASS_QUIRK_WRONG_CSWTAG	0x00000002
+#define	UMASS_QUIRK_RBC_PAD_TO_12	0x00000004
+#define	UMASS_QUIRK_NOGETMAXLUN		0x00000008
+
+#define UMASS_QUIRK_USE_DEFAULTMATCH	-1
 
 	u_int32_t		sc_busquirks;
 
@@ -264,11 +267,6 @@ struct umass_softc {
 	int			sc_sense;
 
 	struct umassbus_softc	*bus;		 /* bus dependent data */
-
-	/* For polled transfers */
-	int			polling_depth;
-	usbd_status		polled_xfer_status;
-	usbd_xfer_handle	next_polled_xfer;
 };
 
-#define UMASS_MAX_TRANSFER_SIZE	MAXBSIZE
+#define UMASS_MAX_TRANSFER_SIZE	MAXPHYS

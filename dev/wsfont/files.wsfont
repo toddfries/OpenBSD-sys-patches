@@ -1,10 +1,24 @@
-#	$OpenBSD: files.wsfont,v 1.3 2005/09/15 20:23:10 miod Exp $
-# 	$NetBSD: files.wsfont,v 1.7 2000/11/21 11:44:45 tsutsui Exp $
+# 	$NetBSD: files.wsfont,v 1.15 2007/02/02 02:10:24 ober Exp $
+
+defpseudo wsfont
 
 # Note: `wsfont_glue' is only here to force the header file's name
-#	hence it must be mentioned first.
-#	This is similar to what rasops does - actually we are only interested
-#	in getting the rasops_rotation attribute, without having to depend
-#	on rasops being configured.
-file	dev/wsfont/wsfont.c	((wsfont_glue & rasops_rotation) | wsdisplay)
-				needs-flag
+#	hence it must be mentioned first  (shudder...)
+file	dev/wsfont/wsfont.c	(wsfont_glue & rasops_rotation) |
+    rasterconsole | wsdisplay | wsfont		needs-flag
+
+defflag	opt_wsfont.h		FONT_BOLD8x16
+				FONT_GALLANT12x22
+				FONT_QVSS8x15
+				FONT_LUCIDA16x29
+				FONT_VT220L8x8
+				FONT_VT220L8x10
+				FONT_VT220L8x16
+				FONT_VT220ISO8x16
+				FONT_VT220KOI8x10_KOI8_R
+				FONT_VT220KOI8x10_KOI8_U
+				FONT_SONY8x16
+				FONT_SONY12x24
+				FONT_OMRON12x20
+
+file	dev/wsfont/wsfontdev.c	wsfont needs-flag

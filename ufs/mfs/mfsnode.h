@@ -1,5 +1,4 @@
-/*	$OpenBSD: mfsnode.h,v 1.12 2008/04/24 17:39:45 thib Exp $	*/
-/*	$NetBSD: mfsnode.h,v 1.3 1996/02/09 22:31:31 christos Exp $	*/
+/*	$NetBSD: mfsnode.h,v 1.21 2008/03/26 14:19:43 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -29,24 +28,64 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)mfsnode.h	8.2 (Berkeley) 8/11/93
+ *	@(#)mfsnode.h	8.3 (Berkeley) 5/19/95
  */
+
+#ifndef _UFS_MFS_MFSNODE_H_
+#define _UFS_MFS_MFSNODE_H_
 
 /*
  * This structure defines the control data for the memory based file system.
  */
 
 struct mfsnode {
-	struct	vnode *mfs_vnode;	/* vnode associated with this mfsnode */
-	caddr_t	mfs_baseoff;		/* base of file system in memory */
+	struct vnode *mfs_vnode;	/* vnode associated with this mfsnode */
+	void 	*mfs_baseoff;		/* base of file system in memory */
 	long	mfs_size;		/* size of memory file system */
-	pid_t	mfs_pid;		/* supporting process pid */
-	struct	buf *mfs_buflist;	/* list of I/O requests */
-	long	mfs_spare[4];
+	struct proc *mfs_proc;		/* supporting process */
+	int	mfs_shutdown;		/* shutdown this mfsnode */
+#if defined(_KERNEL)
+	kcondvar_t mfs_cv;		/* notifier */
+	int	mfs_refcnt;		/* number of references */
+	struct	bufq_state *mfs_buflist;/* list of I/O requests */
+#endif /* defined(_KERNEL) */
 };
 
+#if defined(_KERNEL)
 /*
  * Convert between mfsnode pointers and vnode pointers
  */
 #define VTOMFS(vp)	((struct mfsnode *)(vp)->v_data)
 #define MFSTOV(mfsp)	((mfsp)->mfs_vnode)
+
+/* Prototypes for MFS operations on vnodes. */
+#define	mfs_lookup	genfs_badop
+#define	mfs_create	genfs_badop
+#define	mfs_mknod	genfs_badop
+#define	mfs_access	genfs_badop
+#define	mfs_getattr	genfs_badop
+#define	mfs_setattr	genfs_badop
+#define	mfs_read	genfs_badop
+#define	mfs_write	genfs_badop
+#define	mfs_poll	genfs_badop
+#define	mfs_mmap	genfs_badop
+#define	mfs_seek	genfs_badop
+#define	mfs_remove	genfs_badop
+#define	mfs_link	genfs_badop
+#define	mfs_rename	genfs_badop
+#define	mfs_mkdir	genfs_badop
+#define	mfs_rmdir	genfs_badop
+#define	mfs_symlink	genfs_badop
+#define	mfs_readdir	genfs_badop
+#define	mfs_readlink	genfs_badop
+#define	mfs_abortop	genfs_badop
+#define	mfs_islocked	genfs_noislocked
+#define	mfs_pathconf	genfs_badop
+#define	mfs_advlock	genfs_badop
+#define	mfs_bwrite	vn_bwrite
+#define	mfs_revoke	genfs_revoke
+#define	mfs_putpages	genfs_null_putpages
+
+#endif /* defined(_KERNEL) */
+
+#endif /* !_UFS_MFS_MFSNODE_H_ */

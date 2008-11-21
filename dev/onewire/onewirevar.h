@@ -1,4 +1,5 @@
-/*	$OpenBSD: onewirevar.h,v 1.5 2008/04/07 22:50:41 miod Exp $	*/
+/* $NetBSD: onewirevar.h,v 1.5 2007/09/05 15:39:22 xtraeme Exp $ */
+/*	$OpenBSD: onewirevar.h,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -31,35 +32,24 @@ struct onewire_bus {
 	int	(*bus_bit)(void *, int);
 	int	(*bus_read_byte)(void *);
 	void	(*bus_write_byte)(void *, int);
-	void	(*bus_read_block)(void *, void *, int);
-	void	(*bus_write_block)(void *, const void *, int);
 	int	(*bus_triplet)(void *, int);
-	void	(*bus_matchrom)(void *, u_int64_t);
-	int	(*bus_search)(void *, u_int64_t *, int, u_int64_t);
 };
 
 /* Bus methods */
-int		onewire_lock(void *, int);
+void		onewire_lock(void *);
 void		onewire_unlock(void *);
-
 int		onewire_reset(void *);
 int		onewire_bit(void *, int);
 int		onewire_read_byte(void *);
 void		onewire_write_byte(void *, int);
+int		onewire_triplet(void *, int);
 void		onewire_read_block(void *, void *, int);
 void		onewire_write_block(void *, const void *, int);
-int		onewire_triplet(void *, int);
 void		onewire_matchrom(void *, u_int64_t);
-int		onewire_search(void *, u_int64_t *, int, u_int64_t);
-
-#define ONEWIRE_NOWAIT		0x0001
 
 /* Bus attachment */
 struct onewirebus_attach_args {
 	struct onewire_bus *	oba_bus;
-	int			oba_flags;
-#define	ONEWIRE_SCAN_NOW		0x0001
-#define	ONEWIRE_NO_PERIODIC_SCAN	0x0002
 };
 
 int	onewirebus_print(void *, const char *);

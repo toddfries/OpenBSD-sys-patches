@@ -1,5 +1,4 @@
-/*	$OpenBSD: net.c,v 1.2 2003/08/14 17:13:57 deraadt Exp $	*/
-/*	$NetBSD: net.c,v 1.2 1997/07/22 17:41:07 drochner Exp $	*/
+/*	$NetBSD: net.c,v 1.8 2006/07/13 20:03:34 uwe Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -59,13 +58,20 @@
 #include <lib/libsa/net.h>
 #include <lib/libsa/netif.h>
 #include <lib/libsa/bootparam.h>
+#include <lib/libsa/bootp.h>
+#include <lib/libsa/nfs.h>
 
-#include "promdev.h"
+#include <lib/libkern/libkern.h>
+
+#include <sparc/stand/common/promdev.h>
 
 char		rootpath[FNAME_SIZE];
 
 int	netdev_sock = -1;
 static	int open_count;
+
+static int net_mountroot_bootparams(void);
+static int net_mountroot_bootp(void);
 
 /*
  * Called by devopen after it sets f->f_dev to our devsw entry.
@@ -95,14 +101,66 @@ int
 net_close(struct promdata *pd)
 {
 	/* On last close, do netif close, etc. */
-	if (open_count > 0)
-		if (--open_count == 0)
-			netif_close(netdev_sock);
+	if (open_count <= 0)
+		return (0);
+
+	if (--open_count == 0)
+		return (netif_close(netdev_sock));
+
+	return (0);
+}
+
+int
+net_mountroot_bootparams(void)
+{
+	printf("Trying BOOTPARAMS protocol... ");
+
+	/* Get our IP address.  (rarp.c) */
+	if (rarp_getipaddress(netdev_sock) == -1)
+		return (errno);
+
+	printf("ip address: %s", inet_ntoa(myip));
+
+	/* Get our hostname, server IP address. */
+	if (bp_whoami(netdev_sock))
+		return (errno);
+
+	printf(", hostname: %s\n", hostname);
+
+	/* Get the root pathname. */
+	if (bp_getfile(netdev_sock, "root", &rootip, rootpath))
+		return (errno);
+
+	return (0);
+}
+
+int
+net_mountroot_bootp(void)
+{
+	printf("Trying BOOTP protocol... ");
+
+	bootp(netdev_sock);
+
+	if (myip.s_addr == 0)
+		return(ENOENT);
+
+	printf("ip address: %s", inet_ntoa(myip));
+
+	if (hostname[0])
+		printf(", hostname: %s", hostname);
+	if (netmask)
+		printf(", netmask: %s", intoa(netmask));
+	if (gateip.s_addr)
+		printf(", gateway: %s", inet_ntoa(gateip));
+	printf("\n");
+
+	return (0);
 }
 
 int
 net_mountroot(void)
 {
+	int error;
 
 #ifdef DEBUG
 	printf("net_mountroot\n");
@@ -115,45 +173,19 @@ net_mountroot(void)
 	 * and the more modern, BOOTP way. (RFC951, RFC1048)
 	 */
 
-#ifdef	SUN_BOOTPARAMS
-	/* Get boot info using RARP and Sun bootparams. */
-
-	/* Get our IP address.  (rarp.c) */
-	if (rarp_getipaddress(netdev_sock) == -1)
-		return errno;
-
-	printf("boot: client IP address: %s\n", inet_ntoa(myip));
-
-	/* Get our hostname, server IP address. */
-	if (bp_whoami(netdev_sock))
-		return (errno);
-
-	printf("boot: client name: %s\n", hostname);
-
-	/* Get the root pathname. */
-	if (bp_getfile(netdev_sock, "root", &rootip, rootpath))
-		return (errno);
-
-#else
-
-	/* Get boot info using BOOTP way. (RFC951, RFC1048) */
-	bootp(netdev_sock);
-
-	printf("Using IP address: %s\n", inet_ntoa(myip));
-
-	printf("myip: %s (%s)", hostname, inet_ntoa(myip));
-	if (gateip)
-		printf(", gateip: %s", inet_ntoa(gateip));
-	if (netmask)
-		printf(", netmask: %s", intoa(netmask));
-	printf("\n");
-
-#endif
+	/* Try BOOTP first */
+	error = net_mountroot_bootp();
+	/* Historically, we've used BOOTPARAMS, so try that next */
+	if (error != 0)
+		error = net_mountroot_bootparams();
+	if (error != 0)
+		return (error);
 
 	printf("root addr=%s path=%s\n", inet_ntoa(rootip), rootpath);
 
 	/* Get the NFS file handle (mount). */
 	if (nfs_mount(netdev_sock, rootip, rootpath) != 0)
 		return (errno);
-	return 0;
+
+	return (0);
 }

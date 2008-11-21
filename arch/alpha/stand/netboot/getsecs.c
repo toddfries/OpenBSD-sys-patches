@@ -1,15 +1,22 @@
-/*	$OpenBSD: getsecs.c,v 1.2 1996/11/27 19:54:55 niklas Exp $	*/
+/*	$NetBSD: getsecs.c,v 1.6 2002/11/09 06:34:38 thorpej Exp $	*/
 
 #include <sys/param.h>
-#include "include/rpb.h"
+
+#include <netinet/in.h>
+#include <netinet/in_systm.h>
+  
+#include <lib/libsa/stand.h> 
+#include <lib/libsa/net.h>
+
 #include "include/prom.h"
+#include "include/rpb.h"
 
 int
-getsecs()
+getsecs(void)
 {
 	static long tnsec;
 	static long lastpcc, wrapsecs;
-	long curpcc, pccdiff;
+	long curpcc;
 
 	if (tnsec == 0) {
 		tnsec = 1;

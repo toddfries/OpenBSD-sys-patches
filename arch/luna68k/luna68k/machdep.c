@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.47 2006/10/21 05:54:32 mrg Exp $ */
+/* $NetBSD: machdep.c,v 1.57 2008/11/12 12:36:02 ad Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.47 2006/10/21 05:54:32 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.57 2008/11/12 12:36:02 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -65,7 +58,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.47 2006/10/21 05:54:32 mrg Exp $");
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/vnode.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/ksyms.h>
 #ifdef	KGDB
@@ -102,11 +94,9 @@ char	cpu_model[60];
 /* Our exported CPU info; we can have only one. */  
 struct cpu_info cpu_info_store;
 
-struct vm_map *exec_map = NULL;  
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
-caddr_t	msgbufaddr;
 int	maxmem;			/* max memory per process */
 int	physmem;		/* set by locore */
 /*
@@ -123,7 +113,7 @@ void straytrap __P((int, u_short));
 void nmihand __P((struct frame));
 
 int  cpu_dumpsize __P((void));
-int  cpu_dump __P((int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *));
+int  cpu_dump __P((int (*)(dev_t, daddr_t, void *, size_t), daddr_t *));
 void cpu_init_kcore_hdr __P((void));
 
 /*
@@ -224,7 +214,7 @@ consinit()
 		ws_cnattach();
 	}
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	{
 		extern char end[];
 		extern int *esym;
@@ -266,25 +256,19 @@ cpu_startup()
 	printf("total memory = %s\n", pbuf);
 
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+				   VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 nmbclusters * mclbytes, VM_MAP_INTRSAFE,
-				 FALSE, NULL);
+				 false, NULL);
 
 	format_bytes(pbuf, sizeof(pbuf), ptoa(uvmexp.free));
 	printf("avail memory = %s\n", pbuf);
@@ -389,7 +373,7 @@ cpu_reboot(howto, bootstr)
 	extern void doboot __P((void));
 
 	/* take a snap shot before clobbering any registers */
-	if (curlwp && curlwp->l_addr)
+	if (curlwp->l_addr)
 		savectx(&curlwp->l_addr->u_pcb);
 
 	/* If system is hold, just halt. */
@@ -419,6 +403,8 @@ cpu_reboot(howto, bootstr)
 haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Finally, halt/reboot the system. */
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
@@ -526,7 +512,7 @@ cpu_dumpsize()
  */
 int
 cpu_dump(dump, blknop)
-	int (*dump) __P((dev_t, daddr_t, caddr_t, size_t)); 
+	int (*dump) __P((dev_t, daddr_t, void *, size_t)); 
 	daddr_t *blknop;
 {
 	int buf[MDHDRSIZE / sizeof(int)]; 
@@ -543,7 +529,7 @@ cpu_dump(dump, blknop)
 	kseg->c_size = MDHDRSIZE - ALIGN(sizeof(kcore_seg_t));
 
 	bcopy(&cpu_kcore_hdr, chdr, sizeof(cpu_kcore_hdr_t));
-	error = (*dump)(dumpdev, *blknop, (caddr_t)buf, sizeof(buf));
+	error = (*dump)(dumpdev, *blknop, (void *)buf, sizeof(buf));
 	*blknop += btodb(sizeof(buf));
 	return (error);
 }
@@ -608,7 +594,7 @@ dumpsys()
 	const struct bdevsw *bdev;
 	daddr_t blkno;		/* current block to write */
 				/* dump routine */
-	int (*dump) __P((dev_t, daddr_t, caddr_t, size_t));
+	int (*dump) __P((dev_t, daddr_t, void *, size_t));
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -705,7 +691,7 @@ int	*nofault;
 
 int
 badaddr(addr, nbytes)
-	register caddr_t addr;
+	register void *addr;
 	int nbytes;
 {
 	register int i;

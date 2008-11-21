@@ -1,4 +1,5 @@
-/*	$OpenBSD: ip_carp.h,v 1.26 2008/02/05 22:57:31 mpf Exp $	*/
+/*	$NetBSD: ip_carp.h,v 1.5 2008/04/16 20:58:35 dyoung Exp $	*/
+/*	$OpenBSD: ip_carp.h,v 1.18 2005/04/20 23:00:41 mpf Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -37,7 +38,7 @@
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *    |Version| Type  | VirtualHostID |    AdvSkew    |    Auth Len   |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *    |    Demotion   |     AdvBase   |          Checksum             |
+ *    |   Reserved    |     AdvBase   |          Checksum             |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *    |                         Counter (1)                           |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -57,18 +58,18 @@
  */
 
 struct carp_header {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-	u_int		carp_type:4,
+#if BYTE_ORDER == LITTLE_ENDIAN
+	unsigned int	carp_type:4,
 			carp_version:4;
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
-	u_int		carp_version:4,
+#if BYTE_ORDER == BIG_ENDIAN
+	unsigned int	carp_version:4,
 			carp_type:4;
 #endif
 	u_int8_t	carp_vhid;	/* virtual host id */
 	u_int8_t	carp_advskew;	/* advertisement skew */
 	u_int8_t	carp_authlen;   /* size of counter+md, 32bit chunks */
-	u_int8_t	carp_demote;	/* demotion indicator */
+	u_int8_t	carp_pad1;	/* reserved */
 	u_int8_t	carp_advbase;	/* advertisement interval */
 	u_int16_t	carp_cksum;
 	u_int32_t	carp_counter[2];
@@ -91,26 +92,24 @@ struct carp_header {
 /*
  * Statistics.
  */
-struct carpstats {
-	u_int64_t	carps_ipackets;		/* total input packets, IPv4 */
-	u_int64_t	carps_ipackets6;	/* total input packets, IPv6 */
-	u_int64_t	carps_badif;		/* wrong interface */
-	u_int64_t	carps_badttl;		/* TTL is not CARP_DFLTTL */
-	u_int64_t	carps_hdrops;		/* packets shorter than hdr */
-	u_int64_t	carps_badsum;		/* bad checksum */
-	u_int64_t	carps_badver;		/* bad (incl unsupp) version */
-	u_int64_t	carps_badlen;		/* data length does not match */
-	u_int64_t	carps_badauth;		/* bad authentication */
-	u_int64_t	carps_badvhid;		/* bad VHID */
-	u_int64_t	carps_badaddrs;		/* bad address list */
+#define	CARP_STAT_IPACKETS	0	/* total input packets, IPv4 */
+#define	CARP_STAT_IPACKETS6	1	/* total input packets, IPv6 */
+#define	CARP_STAT_BADIF		2	/* wrong interface */
+#define	CARP_STAT_BADTTL	3	/* TTL is not CARP_DFLTTL */
+#define	CARP_STAT_HDROPS	4	/* packets shorter than hdr */
+#define	CARP_STAT_BADSUM	5	/* bad checksum */
+#define	CARP_STAT_BADVER	6	/* bad (incl unsupported) version */
+#define	CARP_STAT_BADLEN	7	/* data length does not match */
+#define	CARP_STAT_BADAUTH	8	/* bad authentication */
+#define	CARP_STAT_BADVHID	9	/* bad VHID */
+#define	CARP_STAT_BADADDRS	10	/* bad address list */
+#define	CARP_STAT_OPACKETS	11	/* total output packets, IPv4 */
+#define	CARP_STAT_OPACKETS6	12	/* total output packets, IPv6 */
+#define	CARP_STAT_ONOMEM	13	/* no memory for an mbuf */
+#define	CARP_STAT_OSTATES	14	/* total state updates sent */
+#define	CARP_STAT_PREEMPT	15	/* in enabled, preemptions */
 
-	u_int64_t	carps_opackets;		/* total output packets, IPv4 */
-	u_int64_t	carps_opackets6;	/* total output packets, IPv6 */
-	u_int64_t	carps_onomem;		/* no memory for an mbuf */
-	u_int64_t	carps_ostates;		/* total state updates sent */
-
-	u_int64_t	carps_preempt;		/* transitions to master */
-};
+#define	CARP_NSTATS		16
 
 #define CARPDEVNAMSIZ	16
 #ifdef IFNAMSIZ
@@ -126,20 +125,10 @@ struct carpreq {
 	int		carpr_state;
 #define	CARP_STATES	"INIT", "BACKUP", "MASTER"
 #define	CARP_MAXSTATE	2
-#define	CARP_MAXNODES	32
 
 	char		carpr_carpdev[CARPDEVNAMSIZ];
-	u_int8_t	carpr_vhids[CARP_MAXNODES];
-	u_int8_t	carpr_advskews[CARP_MAXNODES];
-	u_int8_t	carpr_states[CARP_MAXNODES];
-#define	CARP_BAL_MODES	"none", "arp", "ip", "ip-stealth", "ip-unicast"
-#define CARP_BAL_NONE		0
-#define CARP_BAL_ARP		1
-#define CARP_BAL_IP		2
-#define CARP_BAL_IPSTEALTH	3
-#define CARP_BAL_IPUNICAST	4
-#define CARP_BAL_MAXID		4
-	u_int8_t	carpr_balancing;
+	int		carpr_vhid;
+	int		carpr_advskew;
 	int		carpr_advbase;
 	unsigned char	carpr_key[CARP_KEY_LEN];
 };
@@ -150,33 +139,29 @@ struct carpreq {
 #define	CARPCTL_ALLOW		1	/* accept incoming CARP packets */
 #define	CARPCTL_PREEMPT		2	/* high-pri backup preemption mode */
 #define	CARPCTL_LOG		3	/* log bad packets */
-#define	CARPCTL_STATS		4	/* CARP stats */
-#define	CARPCTL_MAXID		5
+#define	CARPCTL_ARPBALANCE	4	/* balance arp responses */
+#define CARPCTL_STATS		5	/* carp statistics */
+#define	CARPCTL_MAXID		6
 
 #define	CARPCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "allow", CTLTYPE_INT }, \
 	{ "preempt", CTLTYPE_INT }, \
 	{ "log", CTLTYPE_INT }, \
-	{ "stats", CTLTYPE_STRUCT }, \
+	{ "arpbalance", CTLTYPE_INT }, \
 }
 
 #ifdef _KERNEL
 void		 carp_ifdetach (struct ifnet *);
 void		 carp_proto_input (struct mbuf *, ...);
 void		 carp_carpdev_state(void *);
-void		 carp_group_demote_adj(struct ifnet *, int);
 int		 carp6_proto_input(struct mbuf **, int *, int);
-int		 carp_iamatch(struct in_ifaddr *, u_char *, u_int8_t **,
-		     u_int8_t **);
-int		 carp_iamatch6(struct ifnet *, u_char *, struct sockaddr_dl **);
+int		 carp_iamatch(struct in_ifaddr *, u_char *,
+		     u_int32_t *, u_int32_t);
+struct ifaddr	*carp_iamatch6(void *, struct in6_addr *);
 struct ifnet	*carp_ourether(void *, struct ether_header *, u_char, int);
 int		 carp_input(struct mbuf *, u_int8_t *, u_int8_t *, u_int16_t);
-int		 carp_output(struct ifnet *, struct mbuf *, struct sockaddr *,
-		     struct rtentry *);
-int		 carp_sysctl(int *, u_int,  void *, size_t *, void *, size_t);
-int		 carp_lsdrop(struct mbuf *, sa_family_t, u_int32_t *, u_int32_t *);
-void		 carp_rewrite_lladdr(struct ifnet *, u_int8_t *);
-int		 carp_our_mcastaddr(struct ifnet *, u_int8_t *);
+int		 carp_output(struct ifnet *, struct mbuf *,
+		     const struct sockaddr *, struct rtentry *);
 #endif /* _KERNEL */
 #endif /* _NETINET_IP_CARP_H_ */

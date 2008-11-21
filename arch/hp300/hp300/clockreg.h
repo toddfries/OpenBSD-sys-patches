@@ -1,8 +1,6 @@
-/*	$OpenBSD: clockreg.h,v 1.5 2005/01/14 22:39:27 miod Exp $	*/
-/*	$NetBSD: clockreg.h,v 1.5 1994/10/26 07:25:26 cgd Exp $	*/
+/*	$NetBSD: clockreg.h,v 1.10 2006/03/08 23:46:23 lukem Exp $	*/
 
 /*
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -38,9 +36,48 @@
  *
  *	@(#)clockreg.h	8.2 (Berkeley) 1/12/94
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * from: Utah $Hdr: clockreg.h 1.14 91/01/18$
+ *
+ *	@(#)clockreg.h	8.2 (Berkeley) 1/12/94
+ */
 
 /*
- * HP300 "real time clock" (MC6840) registers
+ * MC6840 PTM registers
  */
 
 struct clkreg {
@@ -87,43 +124,8 @@ struct clkreg {
 #define CLK_INT3	0x04	/* interrupt flag for timer 3 (SR only) */
 #define	CLK_INTR	0x80	/* composite interrupt flag (SR only) */
 
-#define CLK_RESOLUTION	4	/* 4 usec resolution (250KHz) */
-#define	CLK_INTERVAL	2500	/* 10msec interval at 250KHz */
+#define CLK_RESOLUTION	4	/* 4 usec resolution (250 kHz) */
+#define	CLK_INTERVAL	2500	/* 10msec interval at 250 kHz */
 #ifdef NOTDEF
-#define CLK_INTERVAL	5000	/* 20msec interval at 250KHz */
+#define CLK_INTERVAL	5000	/* 20msec interval at 250 kHz */
 #endif
-
-/*
- * HP300 battery-backed clock
- */
-
-#define	BBCADDR		(u_int8_t *)(IIOV(0x420000))
-
-struct bbc_tm {
-	int	tm_sec;
-	int	tm_min;
-	int	tm_hour;
-	int	tm_mday;
-	int	tm_mon;
-	int	tm_year;
-};
-
-#define FEBRUARY	2
-#define	STARTOFTIME	1970
-#define SECDAY		86400L
-#define SECYR		(SECDAY * 365)
-
-#define BBC_SET_REG 	0xe0
-#define BBC_WRITE_REG	0xc2
-#define BBC_READ_REG	0xc3
-#define NUM_BBC_REGS	12
-
-#define	leapyear(year)		((year) % 4 == 0)
-#define	range_test(n, l, h)	if ((n) < (l) || (n) > (h)) return(0)
-#define	days_in_year(a) 	(leapyear(a) ? 366 : 365)
-#define	days_in_month(a) 	(month_days[(a) - 1])
-#define	bbc_to_decimal(a,b) 	(bbc_registers[a] * 10 + bbc_registers[b])
-#define	decimal_to_bbc(a,b,n) 	{ \
-	bbc_registers[a] = (n) % 10; \
-	bbc_registers[b] = (n) / 10; \
-}

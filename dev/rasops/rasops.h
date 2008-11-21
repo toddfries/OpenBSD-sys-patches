@@ -1,5 +1,4 @@
-/*	$OpenBSD: rasops.h,v 1.8 2006/11/29 19:08:22 miod Exp $ */
-/* 	$NetBSD: rasops.h,v 1.13 2000/06/13 13:36:54 ad Exp $ */
+/* 	$NetBSD: rasops.h,v 1.22 2008/04/28 20:23:56 martin Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,25 +32,18 @@
 #ifndef _RASOPS_H_
 #define _RASOPS_H_ 1
 
-#ifdef	SMALL_KERNEL
-#define	RASOPS_SMALL
-#endif
-
-#include "rasops_glue.h"
-
 struct wsdisplay_font;
 
 /* For rasops_info::ri_flg */
-#define RI_FULLCLEAR	0x0001	/* eraserows() hack to clear full screen */
-#define RI_FORCEMONO	0x0002	/* monochrome output even if we can do color */
-#define RI_BSWAP	0x0004	/* framebuffer endianness doesn't match CPU */
-#define RI_CURSOR	0x0008	/* cursor is switched on */
-#define RI_CLEAR	0x0010	/* clear display on startup */
-#define	RI_CLEARMARGINS	0x0020	/* clear display margins on startup */
-#define RI_CENTER	0x0040	/* center onscreen output */
-#define RI_CURSORCLIP	0x0080	/* cursor is currently clipped */
-#define	RI_ROTATE_CW	0x0100	/* display is rotated, quarter clockwise */
-#define RI_CFGDONE	0x0200	/* rasops_reconfig() completed successfully */
+#define RI_FULLCLEAR	0x01	/* eraserows() hack to clear full screen */
+#define RI_FORCEMONO	0x02	/* monochrome output even if we can do color */
+#define RI_BSWAP	0x04	/* framebuffer endianness doesn't match CPU */
+#define RI_CURSOR	0x08	/* cursor is switched on */
+#define RI_CLEAR	0x10	/* clear display on startup */
+#define RI_CENTER	0x20	/* center onscreen output */
+#define RI_CURSORCLIP	0x40	/* cursor is currently clipped */
+#define RI_CFGDONE	0x80	/* rasops_reconfig() completed successfully */
+#define RI_ROTATE_CW	0x100	/* display is rotated, quarter clockwise */
 
 struct rasops_info {
 	/* These must be filled in by the caller */
@@ -67,6 +52,12 @@ struct rasops_info {
 	int	ri_width;	/* width (pels) */
 	int	ri_height;	/* height (pels) */
 	int	ri_stride;	/* stride in bytes */
+
+	/*
+	 * If you want shadow framebuffer support, point ri_hwbits
+	 * to the real framebuffer, and ri_bits to the shadow framebuffer
+	 */
+	u_char	*ri_hwbits;
 
 	/*
 	 * These can optionally be left zeroed out. If you fill ri_font,
@@ -113,7 +104,6 @@ struct rasops_info {
 
 	/* Callbacks so we can share some code */
 	void	(*ri_do_cursor)(struct rasops_info *);
-	void	(*ri_updatecursor)(struct rasops_info *);
 
 #if NRASOPS_ROTATION > 0
 	/* Used to intercept putchar to permit display rotation */
@@ -121,7 +111,11 @@ struct rasops_info {
 #endif
 };
 
-#define DELTA(p, d, cast) ((p) = (cast)((caddr_t)(p) + (d)))
+#define DELTA(p, d, cast) ((p) = (cast)((char *)(p) + (d)))
+
+#define CHAR_IN_FONT(c,font) 					\
+       ((c) >= (font)->firstchar && 				\
+	((c) - (font)->firstchar) < (font)->numchars)
 
 /*
  * rasops_init().
@@ -152,8 +146,10 @@ void	rasops32_init(struct rasops_info *);
 /* rasops.c */
 int	rasops_init(struct rasops_info *, int, int);
 int	rasops_reconfig(struct rasops_info *, int, int);
+void	rasops_unpack_attr(long, int *, int *, int *);
 void	rasops_eraserows(void *, int, int, long);
 void	rasops_erasecols(void *, int, int, int, long);
+void	rasops_copycols(void *, int, int, int, int);
 
 extern const u_char	rasops_isgray[16];
 extern const u_char	rasops_cmap[256*3];

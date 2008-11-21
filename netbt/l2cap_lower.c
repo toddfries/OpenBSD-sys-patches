@@ -1,5 +1,4 @@
-/*	$OpenBSD: l2cap_lower.c,v 1.2 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: l2cap_lower.c,v 1.7 2007/11/10 23:12:23 plunky Exp $	*/
+/*	$NetBSD: l2cap_lower.c,v 1.9 2008/08/05 13:08:31 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -30,6 +29,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: l2cap_lower.c,v 1.9 2008/08/05 13:08:31 plunky Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -110,11 +112,11 @@ l2cap_recv_frame(struct mbuf *m, struct hci_link *link)
 	struct l2cap_channel *chan;
 	l2cap_hdr_t hdr;
 
-	m_copydata(m, 0, sizeof(hdr), (caddr_t)&hdr);
+	m_copydata(m, 0, sizeof(hdr), &hdr);
 	m_adj(m, sizeof(hdr));
 
-	hdr.length = letoh16(hdr.length);
-	hdr.dcid = letoh16(hdr.dcid);
+	hdr.length = le16toh(hdr.length);
+	hdr.dcid = le16toh(hdr.dcid);
 
 	DPRINTFN(5, "(%s) received packet (%d bytes)\n",
 		    device_xname(link->hl_unit->hci_dev), hdr.length);
@@ -134,13 +136,14 @@ l2cap_recv_frame(struct mbuf *m, struct hci_link *link)
 
 	chan = l2cap_cid_lookup(hdr.dcid);
 	if (chan != NULL && chan->lc_link == link
+	    && chan->lc_imtu >= hdr.length
 	    && chan->lc_state == L2CAP_OPEN) {
 		(*chan->lc_proto->input)(chan->lc_upper, m);
 		return;
 	}
 
-	DPRINTF("(%s) dropping %d L2CAP data bytes for unknown CID #%d\n",
-		device_xname(link->hl_unit->hci_dev), hdr.length, hdr.dcid);
+	DPRINTF("(%s) invalid L2CAP packet dropped, CID #%d, length %d\n",
+		device_xname(link->hl_unit->hci_dev), hdr.dcid, hdr.length);
 
 failed:
 	m_freem(m);
@@ -161,7 +164,7 @@ l2cap_start(struct l2cap_channel *chan)
 	if (chan->lc_state != L2CAP_OPEN)
 		return 0;
 
-	if (IF_IS_EMPTY(&chan->lc_txq)) {
+	if (MBUFQ_FIRST(&chan->lc_txq) == NULL) {
 		DPRINTFN(5, "no data, pending = %d\n", chan->lc_pending);
 		/*
 		 * If we are just waiting for the queue to flush
@@ -189,7 +192,7 @@ l2cap_start(struct l2cap_channel *chan)
 	 * and get it back when its completed). Hm.
 	 */
 
-	IF_DEQUEUE(&chan->lc_txq, m);
+	MBUFQ_DEQUEUE(&chan->lc_txq, m);
 
 	KASSERT(chan->lc_link != NULL);
 	KASSERT(m != NULL);

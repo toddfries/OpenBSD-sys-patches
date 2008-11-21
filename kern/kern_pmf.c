@@ -1,4 +1,4 @@
-/* $NetBSD: kern_pmf.c,v 1.18 2008/03/31 15:28:47 xtraeme Exp $ */
+/* $NetBSD: kern_pmf.c,v 1.20 2008/06/17 16:17:21 tsutsui Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by Jared D. McNeill.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_pmf.c,v 1.18 2008/03/31 15:28:47 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_pmf.c,v 1.20 2008/06/17 16:17:21 tsutsui Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -44,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_pmf.c,v 1.18 2008/03/31 15:28:47 xtraeme Exp $"
 #include <sys/device.h>
 #include <sys/pmf.h>
 #include <sys/queue.h>
+#include <sys/sched.h>
 #include <sys/syscallargs.h> /* for sys_sync */
 #include <sys/workqueue.h>
 #include <prop/proplib.h>
@@ -552,7 +547,8 @@ pmf_class_network_resume(device_t dev PMF_FN_ARGS)
 	s = splnet();
 	if (ifp->if_flags & IFF_UP) {
 		ifp->if_flags &= ~IFF_RUNNING;
-		(*ifp->if_init)(ifp);
+		if ((*ifp->if_init)(ifp) != 0)
+			aprint_normal_ifnet(ifp, "resume failed\n");
 		(*ifp->if_start)(ifp);
 	}
 	splx(s);

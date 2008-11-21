@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_machdep.h,v 1.15 2006/08/23 19:49:09 manu Exp $	*/
+/*	$NetBSD: linux_machdep.h,v 1.18 2008/04/28 20:23:43 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,15 +50,19 @@
 #error Undefined linux_machdep.h machine type.
 #endif
 
+#ifndef LINUX_UNAME_ARCH
+#define LINUX_UNAME_ARCH machine
+#endif
+
 #ifdef _KERNEL
 __BEGIN_DECLS
-void linux_sendsig __P((const ksiginfo_t *, const sigset_t *));
-dev_t linux_fakedev __P((dev_t, int));
+void linux_sendsig(const ksiginfo_t *, const sigset_t *);
+dev_t linux_fakedev(dev_t, int);
 __END_DECLS
 #ifdef LINUX_NPTL
 __BEGIN_DECLS
-void *linux_get_newtls __P((struct lwp *));
-int linux_set_newtls __P((struct lwp *, void *));
+void *linux_get_newtls(struct lwp *);
+int linux_set_newtls(struct lwp *, void *);
 __END_DECLS
 #endif /* !LINUX_NPTL */
 #endif /* !_KERNEL */

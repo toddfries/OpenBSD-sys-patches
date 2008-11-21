@@ -1,5 +1,4 @@
-/*	$OpenBSD: trap.h,v 1.7 2007/04/26 21:36:32 kettenis Exp $	*/
-/*	$NetBSD: trap.h,v 1.1 1996/09/30 16:34:35 ws Exp $	*/
+/*	$NetBSD: trap.h,v 1.11 2008/05/24 21:39:01 phx Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -35,7 +34,7 @@
 #define	_POWERPC_TRAP_H_
 
 #define	EXC_RSVD	0x0000		/* Reserved */
-#define	EXC_RST		0x0100		/* Reset */
+#define	EXC_RST		0x0100		/* Reset; all but IBM4xx */
 #define	EXC_MCHK	0x0200		/* Machine Check */
 #define	EXC_DSI		0x0300		/* Data Storage Interrupt */
 #define	EXC_ISI		0x0400		/* Instruction Storage Interrupt */
@@ -47,16 +46,42 @@
 #define	EXC_SC		0x0c00		/* System Call */
 #define	EXC_TRC		0x0d00		/* Trace */
 #define	EXC_FPA		0x0e00		/* Floating-point Assist */
-#define	EXC_PERF	0x0f00		/* Performance Monitoring */
+
+/* The following is only available on the 601: */
+#define	EXC_RUNMODETRC	0x2000		/* Run Mode/Trace Exception */
+
+/* The following are only available on 7400(G4): */
 #define	EXC_VEC		0x0f20		/* AltiVec Unavailable */
+#define	EXC_VECAST	0x1600		/* AltiVec Assist */
+
+/* The following are only available on 604/750/7400: */
+#define	EXC_PERF	0x0f00		/* Performance Monitoring */
 #define	EXC_BPT		0x1300		/* Instruction Breakpoint */
 #define	EXC_SMI		0x1400		/* System Management Interrupt */
-#define	EXC_VECAST	0x1600		/* AltiVec Assist */
+
+/* The following are only available on 750/7400: */
+#define	EXC_THRM	0x1700		/* Thermal Management Interrupt */
 
 /* And these are only on the 603: */
 #define	EXC_IMISS	0x1000		/* Instruction translation miss */
 #define	EXC_DLMISS	0x1100		/* Data load translation miss */
 #define	EXC_DSMISS	0x1200		/* Data store translation miss */
+
+/* The following are only available on 405 (and 403?) */
+#define	EXC_CII		0x0100		/* Critical Input Interrupt */
+#define	EXC_PIT		0x1000		/* Programmable Interval Timer */
+#define	EXC_FIT		0x1010		/* Fixed Interval Timer */
+#define	EXC_WDOG	0x1020		/* Watchdog Timer */
+#define	EXC_DTMISS	0x1100		/* Data TLB Miss */
+#define	EXC_ITMISS	0x1200		/* Instruction TLB Miss */
+#define	EXC_DEBUG	0x2000		/* Debug trap */
+
+/* The following are only present on 64 bit PPC implementations */
+#define EXC_DSEG	0x380
+#define EXC_ISEG	0x480
+
+/* The IBM 970x define the VMX assist exection to be 0x1700 */
+#define EXC_970_VECAST	0x1700
 
 #define	EXC_LAST	0x2f00		/* Last possible exception vector */
 
@@ -64,6 +89,9 @@
 
 /* Trap was in user mode */
 #define	EXC_USER	0x10000
+
+/* Exception vector base address when MSR[IP] is set */
+#define EXC_HIGHVEC	0xfff00000
 
 /*
  * EXC_ALI sets bits in the DSISR and DAR to provide enough

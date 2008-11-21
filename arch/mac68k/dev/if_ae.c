@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_ae.c,v 1.34 2007/01/22 13:17:45 martin Exp $	*/
-/*	$NetBSD: if_ae.c,v 1.78 2006/09/09 06:25:08 tsutsui Exp $	*/
+/*	$NetBSD: if_ae.c,v 1.79 2007/01/06 13:25:19 martin Exp $	*/
 
 /*
  * Device driver for National Semiconductor DS8390/WD83C690 based ethernet
@@ -14,6 +13,9 @@
  * the author assume any responsibility for damages incurred with its use.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_ae.c,v 1.79 2007/01/06 13:25:19 martin Exp $");
+
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -23,30 +25,14 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
-#include <net/if_types.h>
-
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/in_var.h>
-#include <netinet/ip.h>
-#include <netinet/if_ether.h>
-
 #include <net/if_media.h>
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
+#include <net/if_ether.h>
 
 #include <machine/bus.h>
 
 #include <dev/ic/dp8390reg.h>
 #include <dev/ic/dp8390var.h>
 #include <mac68k/dev/if_aevar.h>
-
-struct cfdriver ae_cd = {
-	NULL, "ae", DV_IFNET
-};
 
 #define ETHER_PAD_LEN	(ETHER_MIN_LEN - ETHER_CRC_LEN)
 
@@ -63,6 +49,7 @@ ae_size_card_memory(bus_space_tag_t bst, bus_space_handle_t bsh, int ofs)
 	i2 = (8192 * 1);
 	i3 = (8192 * 2);
 	i4 = (8192 * 3);
+
 	i8 = (8192 * 4);
 
 	bus_space_write_2(bst, bsh, ofs + i8, 0x8888);
@@ -72,13 +59,13 @@ ae_size_card_memory(bus_space_tag_t bst, bus_space_handle_t bsh, int ofs)
 	bus_space_write_2(bst, bsh, ofs + i1, 0x1111);
 
 	/*
-	 * 1) If the memory range is decoded completely, it does not
-	 *    matter what we write first: High tags written into
-	 *    the void are lost.
-	 * 2) If the memory range is not decoded completely (banks are
-	 *    mirrored), high tags are overwritten by lower ones.
-	 * 3) Lazy implementation of pathological cases - none found yet.
-	 */
+	* 1) If the memory range is decoded completely, it does not
+	*    matter what we write first: High tags written into
+	*    the void are lost.
+	* 2) If the memory range is not decoded completely (banks are
+	*    mirrored), high tags are overwritten by lower ones.
+	* 3) Lazy implementation of pathological cases - none found yet.
+	*/
 
 	if (bus_space_read_2(bst, bsh, ofs + i1) == 0x1111 &&
 	    bus_space_read_2(bst, bsh, ofs + i2) == 0x2222 &&
@@ -186,8 +173,7 @@ ae_write_mbuf(struct dp8390_softc *sc, struct mbuf *m, int buf)
 		bus_space_write_region_2(sc->sc_buft, sc->sc_bufh,
 		    buf, (u_int16_t *)savebyte, 1);
 		buf += 2;
-		if (len > 0)
-			totlen++;
+		totlen++;
 		len--;
 	}
 	/* if sent data is shorter than EHTER_PAD_LEN, put 0 to padding */

@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.acorn26,v 1.8 2006/09/28 22:10:53 bjh21 Exp $
+#	$NetBSD: Makefile.acorn26,v 1.10 2008/02/13 23:37:17 joerg Exp $
 
 # Makefile for NetBSD
 #
@@ -55,11 +55,24 @@ locore.o: ${ACORN26}/acorn26/locore.S assym.h
 vectors.o: ${ARM}/arm/vectors.S assym.h
 	${NORMAL_S}
 
+bcopyinout.o copyinout.o copystr.o cpu_in_cksum.o fiq_subr.o: assym.h
+sigcode.o: assym.h
+
 ##
 ## (5) link settings
 ##
 TEXTADDR?=	0x02098000
 LINKFORMAT=	-N
+# Strip ARM mapping symbols from the kernel image, as they interfere
+# with ddb. Do it differently if 'makeoptions DEBUG="-g"' was specified.
+.if !defined(DEBUG) || empty(DEBUG:M-g*)
+SYSTEM_LD_TAIL?=	@${OBJCOPY} --strip-symbol='$$a'	 \
+				    --strip-symbol='$$t'	 \
+				    --strip-symbol='$$d' $@	;\
+			${SIZE} $@; chmod 755 $@
+.else
+STRIPFLAGS=-g --strip-symbol='$$a' --strip-symbol='$$t' --strip-symbol='$$d'
+.endif
 
 ##
 ## (6) port specific target dependencies

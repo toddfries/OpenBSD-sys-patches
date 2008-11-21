@@ -1,5 +1,4 @@
-/*	$OpenBSD: power.c,v 1.10 2007/07/01 19:07:45 miod Exp $	*/
-/*	$NetBSD: power.c,v 1.2 1996/05/16 15:56:56 abrown Exp $ */
+/*	$NetBSD: power.c,v 1.17 2005/11/16 00:49:03 uwe Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -38,8 +37,10 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: power.c,v 1.17 2005/11/16 00:49:03 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -50,19 +51,11 @@
 
 #include <sparc/dev/power.h>
 
-void	powerattach(struct device *, struct device *, void *);
-int	powermatch(struct device *, void *, void *);
+static int powermatch(struct device *, struct cfdata *, void *);
+static void powerattach(struct device *, struct device *, void *);
 
-struct cfattach power_ca = {
-	sizeof(struct device), powermatch, powerattach
-};
-
-struct cfdriver power_cd = {
-	NULL, "power", DV_DULL
-};
-
-static char power_attached = 0;
-volatile u_char *power_reg;
+CFATTACH_DECL(power, sizeof(struct device),
+    powermatch, powerattach, NULL, NULL);
 
 /*
  * This is the driver for the "power" register available on some Sun4m
@@ -70,38 +63,48 @@ volatile u_char *power_reg;
  * shutdown or halted or whatever.
  */
 
-int
-powermatch(struct device *parent, void *vcf, void *aux)
+static int
+powermatch(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct confargs *ca = aux;
+	union obio_attach_args *uoba = aux;
+	struct sbus_attach_args *sa = &uoba->uoba_sbus;
 
-	if (CPU_ISSUN4M) {
-		if (strcmp("power", ca->ca_ra.ra_name) == 0)
-			return (1);
-	}
+	if (uoba->uoba_isobio4 != 0)
+		return (0);
 
-	return (0);
+	return (strcmp("power", sa->sa_name) == 0);
 }
 
 /* ARGSUSED */
-void
+static void
 powerattach(struct device *parent, struct device *self, void *aux)
 {
-	struct confargs *ca = aux;
-	struct romaux *ra = &ca->ca_ra;
+	union obio_attach_args *uoba = aux;
+	struct sbus_attach_args *sa = &uoba->uoba_sbus;
+	bus_space_handle_t bh;
 
-	power_reg = mapiodev(ra->ra_reg, 0, sizeof(long));
-
-	power_attached = 1;
+	/* Map the power configuration register. */
+	if (sbus_bus_map(sa->sa_bustag,
+			 sa->sa_slot, sa->sa_offset, sizeof(uint8_t),
+			 BUS_SPACE_MAP_LINEAR, &bh) != 0) {
+		printf("%s: cannot map register\n", self->dv_xname);
+		return;
+	}
+	power_reg = (volatile uint8_t *)bh;
 
 	printf("\n");
 }
 
 void
-auxio_powerdown()
+powerdown(void)
 {
-	if (power_attached) {
+	/* Only try if the power node was attached. */
+	if (power_reg != NULL)
 		*POWER_REG |= POWER_OFF;
-		DELAY(1000000);
-	}
+
+	/*
+	 * don't return too quickly; the PROMs on some sparcs
+	 * report the powerdown as failed if we do.
+	 */
+	DELAY(1000000);
 }

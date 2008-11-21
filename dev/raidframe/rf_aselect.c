@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_aselect.c,v 1.3 2002/12/16 07:01:03 tdeval Exp $	*/
-/*	$NetBSD: rf_aselect.c,v 1.3 1999/02/05 00:06:06 oster Exp $	*/
-
+/*	$NetBSD: rf_aselect.c,v 1.25 2007/03/04 06:02:36 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,15 +26,18 @@
  * rights to redistribute these changes.
  */
 
-/****************************************************************************
+/*****************************************************************************
  *
  * aselect.c -- algorithm selection code
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rf_aselect.c,v 1.25 2007/03/04 06:02:36 christos Exp $");
+
+#include <dev/raidframe/raidframevar.h>
 
 #include "rf_archs.h"
-#include "rf_types.h"
 #include "rf_raid.h"
 #include "rf_dag.h"
 #include "rf_dagutils.h"
@@ -45,143 +46,34 @@
 #include "rf_desc.h"
 #include "rf_map.h"
 
-#if (defined(__NetBSD__) || defined(__OpenBSD__)) && defined(_KERNEL)
-/* The function below is not used... so don't define it! */
-#else
-void rf_TransferDagMemory(RF_DagHeader_t *, RF_DagHeader_t *);
-#endif
+static void InitHdrNode(RF_DagHeader_t **, RF_Raid_t *, RF_RaidAccessDesc_t *);
+int     rf_SelectAlgorithm(RF_RaidAccessDesc_t *, RF_RaidAccessFlags_t);
 
-int  rf_InitHdrNode(RF_DagHeader_t **, RF_Raid_t *, int);
-void rf_UpdateNodeHdrPtr(RF_DagHeader_t *, RF_DagNode_t *);
-int  rf_SelectAlgorithm(RF_RaidAccessDesc_t *, RF_RaidAccessFlags_t);
-
-
-/*****************************************************************************
+/******************************************************************************
  *
- * Create and Initialize a dag header and termination node.
+ * Create and Initialiaze a dag header and termination node
  *
  *****************************************************************************/
-int
-rf_InitHdrNode(RF_DagHeader_t **hdr, RF_Raid_t *raidPtr, int memChunkEnable)
+static void
+InitHdrNode(RF_DagHeader_t **hdr, RF_Raid_t *raidPtr, RF_RaidAccessDesc_t *desc)
 {
-	/* Create and initialize dag hdr. */
+	/* create and initialize dag hdr */
 	*hdr = rf_AllocDAGHeader();
 	rf_MakeAllocList((*hdr)->allocList);
-	if ((*hdr)->allocList == NULL) {
-		rf_FreeDAGHeader(*hdr);
-		return (ENOMEM);
-	}
 	(*hdr)->status = rf_enable;
 	(*hdr)->numSuccedents = 0;
+	(*hdr)->nodes = NULL;
 	(*hdr)->raidPtr = raidPtr;
 	(*hdr)->next = NULL;
-	return (0);
+	(*hdr)->desc = desc;
 }
 
-
-/*****************************************************************************
- *
- * Transfer allocation list and mem chunks from one dag to another.
- *
- *****************************************************************************/
-#if (defined(__NetBSD__) || defined(__OpenBSD__)) && defined(_KERNEL)
-/* The function below is not used... so don't define it! */
-#else
-void
-rf_TransferDagMemory(RF_DagHeader_t *daga, RF_DagHeader_t *dagb)
-{
-	RF_AccessStripeMapHeader_t *end;
-	RF_AllocListElem_t *p;
-	int i, memChunksXfrd = 0, xtraChunksXfrd = 0;
-
-	/* Transfer allocList from dagb to daga. */
-	for (p = dagb->allocList; p; p = p->next) {
-		for (i = 0; i < p->numPointers; i++) {
-			rf_AddToAllocList(daga->allocList, p->pointers[i],
-			    p->sizes[i]);
-			p->pointers[i] = NULL;
-			p->sizes[i] = 0;
-		}
-		p->numPointers = 0;
-	}
-
-	/* Transfer chunks from dagb to daga. */
-	while ((memChunksXfrd + xtraChunksXfrd <
-	    dagb->chunkIndex + dagb->xtraChunkIndex) &&
-	    (daga->chunkIndex < RF_MAXCHUNKS)) {
-		/* Stuff chunks into daga's memChunk array. */
-		if (memChunksXfrd < dagb->chunkIndex) {
-			daga->memChunk[daga->chunkIndex++] =
-			    dagb->memChunk[memChunksXfrd];
-			dagb->memChunk[memChunksXfrd++] = NULL;
-		} else {
-			daga->memChunk[daga->xtraChunkIndex++] =
-			    dagb->xtraMemChunk[xtraChunksXfrd];
-			dagb->xtraMemChunk[xtraChunksXfrd++] = NULL;
-		}
-	}
-	/* Use escape hatch to hold excess chunks. */
-	while (memChunksXfrd + xtraChunksXfrd <
-	    dagb->chunkIndex + dagb->xtraChunkIndex) {
-		if (memChunksXfrd < dagb->chunkIndex) {
-			daga->xtraMemChunk[daga->xtraChunkIndex++] =
-			    dagb->memChunk[memChunksXfrd];
-			dagb->memChunk[memChunksXfrd++] = NULL;
-		} else {
-			daga->xtraMemChunk[daga->xtraChunkIndex++] =
-			    dagb->xtraMemChunk[xtraChunksXfrd];
-			dagb->xtraMemChunk[xtraChunksXfrd++] = NULL;
-		}
-	}
-	RF_ASSERT((memChunksXfrd == dagb->chunkIndex) &&
-	    (xtraChunksXfrd == dagb->xtraChunkIndex));
-	RF_ASSERT(daga->chunkIndex <= RF_MAXCHUNKS);
-	RF_ASSERT(daga->xtraChunkIndex <= daga->xtraChunkCnt);
-	dagb->chunkIndex = 0;
-	dagb->xtraChunkIndex = 0;
-
-	/* Transfer asmList from dagb to daga. */
-	if (dagb->asmList) {
-		if (daga->asmList) {
-			end = daga->asmList;
-			while (end->next)
-				end = end->next;
-			end->next = dagb->asmList;
-		} else
-			daga->asmList = dagb->asmList;
-		dagb->asmList = NULL;
-	}
-}
-#endif	/* __NetBSD__ || __OpenBSD__ */
-
-
-/*****************************************************************************
- *
- * Ensure that all node->dagHdr fields in a dag are consistent.
- *
- * IMPORTANT: This routine recursively searches all succedents of the node.
- * If a succedent is encountered whose dagHdr ptr does not require adjusting,
- * that node's succedents WILL NOT BE EXAMINED.
- *
- *****************************************************************************/
-void
-rf_UpdateNodeHdrPtr(RF_DagHeader_t *hdr, RF_DagNode_t *node)
-{
-	int i;
-	RF_ASSERT(hdr != NULL && node != NULL);
-	for (i = 0; i < node->numSuccedents; i++)
-		if (node->succedents[i]->dagHdr != hdr)
-			rf_UpdateNodeHdrPtr(hdr, node->succedents[i]);
-	node->dagHdr = hdr;
-}
-
-
-/*****************************************************************************
+/******************************************************************************
  *
  * Create a DAG to do a read or write operation.
  *
- * Create an array of dagLists, one list per parity stripe.
- * Return the lists in the array desc->dagArray.
+ * create a list of dagLists, one list per parity stripe.
+ * return the lists in the desc->dagList (which is a list of lists).
  *
  * Normally, each list contains one dag for the entire stripe.  In some
  * tricky cases, we break this into multiple dags, either one per stripe
@@ -189,7 +81,7 @@ rf_UpdateNodeHdrPtr(RF_DagHeader_t *hdr, RF_DagNode_t *node)
  * as a linked list (dagList) which is executed sequentially (to preserve
  * atomic parity updates in the stripe).
  *
- * Dags that operate on independent parity goups (stripes) are returned in
+ * dags which operate on independent parity goups (stripes) are returned in
  * independent dagLists (distinct elements in desc->dagArray) and may be
  * executed concurrently.
  *
@@ -201,14 +93,14 @@ rf_UpdateNodeHdrPtr(RF_DagHeader_t *hdr, RF_DagNode_t *node)
  *   2) create dags and concatenate/merge to form the final dag.
  *
  * Because dag's are basic blocks (single entry, single exit, unconditional
- * control flow), we can add the following optimizations (future work):
+ * control flow, we can add the following optimizations (future work):
  *   first-pass optimizer to allow max concurrency (need all data dependencies)
  *   second-pass optimizer to eliminate common subexpressions (need true
- *       data dependencies)
+ *                         data dependencies)
  *   third-pass optimizer to eliminate dead code (need true data dependencies)
  *****************************************************************************/
 
-#define	MAXNSTRIPES	50
+#define MAXNSTRIPES 50
 
 int
 rf_SelectAlgorithm(RF_RaidAccessDesc_t *desc, RF_RaidAccessFlags_t flags)
@@ -216,203 +108,168 @@ rf_SelectAlgorithm(RF_RaidAccessDesc_t *desc, RF_RaidAccessFlags_t flags)
 	RF_AccessStripeMapHeader_t *asm_h = desc->asmap;
 	RF_IoType_t type = desc->type;
 	RF_Raid_t *raidPtr = desc->raidPtr;
-	void *bp = desc->bp;
+	void   *bp = desc->bp;
 
 	RF_AccessStripeMap_t *asmap = asm_h->stripeMap;
 	RF_AccessStripeMap_t *asm_p;
 	RF_DagHeader_t *dag_h = NULL, *tempdag_h, *lastdag_h;
-	int i, j, k;
-	RF_VoidFuncPtr *stripeFuncs, normalStripeFuncs[MAXNSTRIPES];
+	RF_DagList_t *dagList, *dagListend;
+	int     i, j, k;
+	RF_FuncList_t *stripeFuncsList, *stripeFuncs, *stripeFuncsEnd, *temp;
 	RF_AccessStripeMap_t *asm_up, *asm_bp;
 	RF_AccessStripeMapHeader_t ***asmh_u, *endASMList;
 	RF_AccessStripeMapHeader_t ***asmh_b;
+	RF_ASMHeaderListElem_t *asmhle, *tmpasmhle;
+	RF_VoidFunctionPointerListElem_t *vfple, *tmpvfple;
+	RF_FailedStripe_t *failed_stripes_list, *failed_stripes_list_end;
+	RF_FailedStripe_t *tmpfailed_stripe, *failed_stripe = NULL;
+	RF_ASMHeaderListElem_t *failed_stripes_asmh_u_end = NULL;
+	RF_ASMHeaderListElem_t *failed_stripes_asmh_b_end = NULL;
+	RF_VoidFunctionPointerListElem_t *failed_stripes_vfple_end = NULL;
+	RF_VoidFunctionPointerListElem_t *failed_stripes_bvfple_end = NULL;
 	RF_VoidFuncPtr **stripeUnitFuncs, uFunc;
 	RF_VoidFuncPtr **blockFuncs, bFunc;
-	int numStripesBailed = 0, cantCreateDAGs = RF_FALSE;
-	int numStripeUnitsBailed = 0;
-	int stripeNum, numUnitDags = 0, stripeUnitNum, numBlockDags = 0;
+	int     numStripesBailed = 0, cantCreateDAGs = RF_FALSE;
+	int     numStripeUnitsBailed = 0;
+	int     stripeNum, numUnitDags = 0, stripeUnitNum, numBlockDags = 0;
 	RF_StripeNum_t numStripeUnits;
 	RF_SectorNum_t numBlocks;
 	RF_RaidAddr_t address;
-	int length;
+	int     length;
 	RF_PhysDiskAddr_t *physPtr;
-	caddr_t buffer;
+	void *buffer;
 
 	lastdag_h = NULL;
 	asmh_u = asmh_b = NULL;
 	stripeUnitFuncs = NULL;
 	blockFuncs = NULL;
 
-	/*
-	 * Get an array of dag-function creation pointers.
-	 * Try to avoid calling malloc.
-	 */
-	if (asm_h->numStripes <= MAXNSTRIPES)
-		stripeFuncs = normalStripeFuncs;
-	else
-		RF_Calloc(stripeFuncs, asm_h->numStripes,
-		    sizeof(RF_VoidFuncPtr), (RF_VoidFuncPtr *));
+	stripeFuncsList = NULL;
+	stripeFuncsEnd = NULL;
 
-	/*
-	 * Walk through the asm list once collecting information.
-	 * Attempt to find a single creation function for each stripe.
-	 */
+	failed_stripes_list = NULL;
+	failed_stripes_list_end = NULL;
+
+	/* walk through the asm list once collecting information */
+	/* attempt to find a single creation function for each stripe */
 	desc->numStripes = 0;
 	for (i = 0, asm_p = asmap; asm_p; asm_p = asm_p->next, i++) {
 		desc->numStripes++;
-		(raidPtr->Layout.map->SelectionFunc) (raidPtr, type, asm_p,
-		    &stripeFuncs[i]);
-		/* Check to see if we found a creation func for this stripe. */
-		if (stripeFuncs[i] == (RF_VoidFuncPtr) NULL) {
-			/*
-			 * Could not find creation function for entire stripe.
-			 * So, let's see if we can find one for each stripe
-			 * unit in the stripe.
-			 */
+		stripeFuncs = rf_AllocFuncList();
 
-			if (numStripesBailed == 0) {
-				/*
-				 * One stripe map header for each stripe we
-				 * bail on.
-				 */
-				RF_Malloc(asmh_u,
-				    sizeof(RF_AccessStripeMapHeader_t **) *
-				    asm_h->numStripes,
-				    (RF_AccessStripeMapHeader_t ***));
-				/*
-				 * Create an array of ptrs to arrays of
-				 * stripeFuncs.
-				 */
-				RF_Calloc(stripeUnitFuncs, asm_h->numStripes,
-				    sizeof(RF_VoidFuncPtr),
-				    (RF_VoidFuncPtr **));
+		if (stripeFuncsEnd == NULL) {
+			stripeFuncsList = stripeFuncs;
+		} else {
+			stripeFuncsEnd->next = stripeFuncs;
+		}
+		stripeFuncsEnd = stripeFuncs;
+
+		(raidPtr->Layout.map->SelectionFunc) (raidPtr, type, asm_p, &(stripeFuncs->fp));
+		/* check to see if we found a creation func for this stripe */
+		if (stripeFuncs->fp == NULL) {
+			/* could not find creation function for entire stripe
+			 * so, let's see if we can find one for each stripe
+			 * unit in the stripe */
+
+			/* create a failed stripe structure to attempt to deal with the failure */
+			failed_stripe = rf_AllocFailedStripeStruct();
+			if (failed_stripes_list == NULL) {
+				failed_stripes_list = failed_stripe;
+				failed_stripes_list_end = failed_stripe;
+			} else {
+				failed_stripes_list_end->next = failed_stripe;
+				failed_stripes_list_end = failed_stripe;
 			}
-			/*
-			 * Create an array of creation funcs (called
-			 * stripeFuncs) for this stripe.
-			 */
-			numStripeUnits = asm_p->numStripeUnitsAccessed;
-			RF_Calloc(stripeUnitFuncs[numStripesBailed],
-			    numStripeUnits, sizeof(RF_VoidFuncPtr),
-			    (RF_VoidFuncPtr *));
-			RF_Malloc(asmh_u[numStripesBailed], numStripeUnits *
-			    sizeof(RF_AccessStripeMapHeader_t *),
-			    (RF_AccessStripeMapHeader_t **));
 
-			/* Lookup array of stripeUnitFuncs for this stripe. */
-			for (j = 0, physPtr = asm_p->physInfo; physPtr;
-			    physPtr = physPtr->next, j++) {
-				/*
-				 * Remap for series of single stripe-unit
-				 * accesses.
-				 */
+			/* create an array of creation funcs (called
+			 * stripeFuncs) for this stripe */
+			numStripeUnits = asm_p->numStripeUnitsAccessed;
+
+			/* lookup array of stripeUnitFuncs for this stripe */
+			failed_stripes_asmh_u_end = NULL;
+			failed_stripes_vfple_end = NULL;
+			for (j = 0, physPtr = asm_p->physInfo; physPtr; physPtr = physPtr->next, j++) {
+				/* remap for series of single stripe-unit
+				 * accesses */
 				address = physPtr->raidAddress;
 				length = physPtr->numSector;
 				buffer = physPtr->bufPtr;
 
-				asmh_u[numStripesBailed][j] =
-				    rf_MapAccess(raidPtr, address, length,
-				        buffer, RF_DONT_REMAP);
-				asm_up = asmh_u[numStripesBailed][j]->stripeMap;
+				asmhle = rf_AllocASMHeaderListElem();
+				if (failed_stripe->asmh_u == NULL) {
+					failed_stripe->asmh_u = asmhle;      /* we're the head... */
+					failed_stripes_asmh_u_end = asmhle;  /* and the tail      */
+				} else {
+					/* tack us onto the end of the list */
+					failed_stripes_asmh_u_end->next = asmhle;
+					failed_stripes_asmh_u_end = asmhle;
+				}
 
-				/*
-				 * Get the creation func for this
-				 * stripe unit.
-				 */
-				(raidPtr->Layout.map->SelectionFunc) (raidPtr,
-				    type, asm_up,
-				    &(stripeUnitFuncs[numStripesBailed][j]));
 
-				/*
-				 * Check to see if we found a creation func
-				 * for this stripe unit.
-				 */
-				if (stripeUnitFuncs[numStripesBailed][j] ==
-				    (RF_VoidFuncPtr) NULL) {
-					/*
-					 * Could not find creation function
-					 * for stripe unit.  So, let's see if
-					 * we can find one for each block in
-					 * the stripe unit.
-					 */
-					if (numStripeUnitsBailed == 0) {
-						/*
-						 * one stripe map header for
-						 * each stripe unit we bail on.
-						 */
-						RF_Malloc(asmh_b,
-				    sizeof(RF_AccessStripeMapHeader_t **) *
-				    asm_h->numStripes *
-				    raidPtr->Layout.numDataCol,
-				    (RF_AccessStripeMapHeader_t ***));
-						/*
-						 * Create an array of ptrs to
-						 * arrays of blockFuncs.
-						 */
-						RF_Calloc(blockFuncs,
-						    asm_h->numStripes *
-						    raidPtr->Layout.numDataCol,
-						    sizeof(RF_VoidFuncPtr),
-						    (RF_VoidFuncPtr **));
-					}
-					/*
-					 * Create an array of creation funcs
-					 * (called blockFuncs) for this stripe
-					 * unit.
-					 */
+				asmhle->asmh = rf_MapAccess(raidPtr, address, length, buffer, RF_DONT_REMAP);
+				asm_up = asmhle->asmh->stripeMap;
+
+				vfple = rf_AllocVFPListElem();
+				if (failed_stripe->vfple == NULL) {
+					failed_stripe->vfple = vfple;
+					failed_stripes_vfple_end = vfple;
+				} else {
+					failed_stripes_vfple_end->next = vfple;
+					failed_stripes_vfple_end = vfple;
+				}
+
+				/* get the creation func for this stripe unit */
+				(raidPtr->Layout.map->SelectionFunc) (raidPtr, type, asm_up, &(vfple->fn));
+
+				/* check to see if we found a creation func
+				 * for this stripe unit */
+
+				if (vfple->fn == (RF_VoidFuncPtr) NULL) {
+					/* could not find creation function
+					 * for stripe unit so, let's see if we
+					 * can find one for each block in the
+					 * stripe unit */
+
 					numBlocks = physPtr->numSector;
 					numBlockDags += numBlocks;
-					RF_Calloc(
-					    blockFuncs[numStripeUnitsBailed], 
-					    numBlocks, sizeof(RF_VoidFuncPtr), 
-					    (RF_VoidFuncPtr *));
-					RF_Malloc(asmh_b[numStripeUnitsBailed], 
-				    numBlocks * 
-				    sizeof(RF_AccessStripeMapHeader_t *), 
-				    (RF_AccessStripeMapHeader_t **));
 
-					/*
-					 * Lookup array of blockFuncs for this
-					 * stripe unit.
-					 */
+					/* lookup array of blockFuncs for this
+					 * stripe unit */
 					for (k = 0; k < numBlocks; k++) {
-						/*
-						 * Remap for series of single
-						 * stripe-unit accesses.
-						 */
-						address = physPtr->raidAddress
-						    + k;
+						/* remap for series of single
+						 * stripe-unit accesses */
+						address = physPtr->raidAddress + k;
 						length = 1;
-						buffer = physPtr->bufPtr +
-					    (k * (1 <<
-					    raidPtr->logBytesPerSector));
+						buffer = (char *)physPtr->bufPtr + (k * (1 << raidPtr->logBytesPerSector));
 
-						asmh_b[numStripeUnitsBailed][k]
-						    = rf_MapAccess(raidPtr,
-						    address, length, buffer,
-						    RF_DONT_REMAP);
-						asm_bp =
-				    asmh_b[numStripeUnitsBailed][k]->stripeMap;
+						asmhle = rf_AllocASMHeaderListElem();
+						if (failed_stripe->asmh_b == NULL) {
+							failed_stripe->asmh_b = asmhle;
+							failed_stripes_asmh_b_end = asmhle;
+						} else {
+							failed_stripes_asmh_b_end->next = asmhle;
+							failed_stripes_asmh_b_end = asmhle;
+						}
 
-						/*
-						 * Get the creation func for
-						 * this stripe unit.
-						 */
-						(raidPtr->Layout.map->
-				    SelectionFunc) (raidPtr,
-				        type, asm_bp,
-				        &(blockFuncs[numStripeUnitsBailed][k]));
+						asmhle->asmh = rf_MapAccess(raidPtr, address, length, buffer, RF_DONT_REMAP);
+						asm_bp = asmhle->asmh->stripeMap;
 
-						/*
-						 * Check to see if we found a
+						vfple = rf_AllocVFPListElem();
+						if (failed_stripe->bvfple == NULL) {
+							failed_stripe->bvfple = vfple;
+							failed_stripes_bvfple_end = vfple;
+						} else {
+							failed_stripes_bvfple_end->next = vfple;
+							failed_stripes_bvfple_end = vfple;
+						}
+						(raidPtr->Layout.map->SelectionFunc) (raidPtr, type, asm_bp, &(vfple->fn));
+
+						/* check to see if we found a
 						 * creation func for this
-						 * stripe unit.
-						 */
-						if (blockFuncs
-						    [numStripeUnitsBailed][k]
-						    == NULL)
-							cantCreateDAGs =
-							    RF_TRUE;
+						 * stripe unit */
+
+						if (vfple->fn == NULL)
+							cantCreateDAGs = RF_TRUE;
 					}
 					numStripeUnitsBailed++;
 				} else {
@@ -425,233 +282,269 @@ rf_SelectAlgorithm(RF_RaidAccessDesc_t *desc, RF_RaidAccessFlags_t flags)
 	}
 
 	if (cantCreateDAGs) {
-		/* Free memory and punt. */
-		if (asm_h->numStripes > MAXNSTRIPES)
-			RF_Free(stripeFuncs, asm_h->numStripes *
-			    sizeof(RF_VoidFuncPtr));
+		/* free memory and punt */
 		if (numStripesBailed > 0) {
 			stripeNum = 0;
-			for (i = 0, asm_p = asmap; asm_p;
-			    asm_p = asm_p->next, i++)
-				if (stripeFuncs[i] == NULL) {
-					numStripeUnits =
-					    asm_p->numStripeUnitsAccessed;
-					for (j = 0; j < numStripeUnits; j++)
-						rf_FreeAccessStripeMap(
-						    asmh_u[stripeNum][j]);
-					RF_Free(asmh_u[stripeNum],
-				    numStripeUnits *
-				    sizeof(RF_AccessStripeMapHeader_t *));
-					RF_Free(stripeUnitFuncs[stripeNum],
-					    numStripeUnits *
-					    sizeof(RF_VoidFuncPtr));
+			stripeFuncs = stripeFuncsList;
+			failed_stripe = failed_stripes_list;
+			for (i = 0, asm_p = asmap; asm_p; asm_p = asm_p->next, i++) {
+				if (stripeFuncs->fp == NULL) {
+
+					asmhle = failed_stripe->asmh_u;
+					while (asmhle) {
+						tmpasmhle= asmhle;
+						asmhle = tmpasmhle->next;
+						rf_FreeAccessStripeMap(tmpasmhle->asmh);
+						rf_FreeASMHeaderListElem(tmpasmhle);
+					}
+
+					asmhle = failed_stripe->asmh_b;
+					while (asmhle) {
+						tmpasmhle= asmhle;
+						asmhle = tmpasmhle->next;
+						rf_FreeAccessStripeMap(tmpasmhle->asmh);
+						rf_FreeASMHeaderListElem(tmpasmhle);
+					}
+
+					vfple = failed_stripe->vfple;
+					while (vfple) {
+						tmpvfple = vfple;
+						vfple = tmpvfple->next;
+						rf_FreeVFPListElem(tmpvfple);
+					}
+
+					vfple = failed_stripe->bvfple;
+					while (vfple) {
+						tmpvfple = vfple;
+						vfple = tmpvfple->next;
+						rf_FreeVFPListElem(tmpvfple);
+					}
+
 					stripeNum++;
+					/* only move to the next failed stripe slot if the current one was used */
+					tmpfailed_stripe = failed_stripe;
+					failed_stripe = failed_stripe->next;
+					rf_FreeFailedStripeStruct(tmpfailed_stripe);
 				}
+				stripeFuncs = stripeFuncs->next;
+			}
 			RF_ASSERT(stripeNum == numStripesBailed);
-			RF_Free(stripeUnitFuncs, asm_h->numStripes *
-			    sizeof(RF_VoidFuncPtr));
-			RF_Free(asmh_u, asm_h->numStripes *
-			    sizeof(RF_AccessStripeMapHeader_t **));
 		}
+		while (stripeFuncsList != NULL) {
+			temp = stripeFuncsList;
+			stripeFuncsList = stripeFuncsList->next;
+			rf_FreeFuncList(temp);
+		}
+		desc->numStripes = 0;
 		return (1);
 	} else {
-		/* Begin dag creation. */
+		/* begin dag creation */
 		stripeNum = 0;
 		stripeUnitNum = 0;
 
-		/* Create an array of dagLists and fill them in. */
-		RF_CallocAndAdd(desc->dagArray, desc->numStripes,
-		    sizeof(RF_DagList_t), (RF_DagList_t *), desc->cleanupList);
+		/* create a list of dagLists and fill them in */
 
+		dagListend = NULL;
+
+		stripeFuncs = stripeFuncsList;
+		failed_stripe = failed_stripes_list;
 		for (i = 0, asm_p = asmap; asm_p; asm_p = asm_p->next, i++) {
-			/* Grab dag header for this stripe. */
+			/* grab dag header for this stripe */
 			dag_h = NULL;
-			desc->dagArray[i].desc = desc;
 
-			if (stripeFuncs[i] == (RF_VoidFuncPtr) NULL) {
-				/* Use bailout functions for this stripe. */
-				for (j = 0, physPtr = asm_p->physInfo; physPtr;
-				    physPtr = physPtr->next, j++) {
-					uFunc = stripeUnitFuncs[stripeNum][j];
+			dagList = rf_AllocDAGList();
+
+			/* always tack the new dagList onto the end of the list... */
+			if (dagListend == NULL) {
+				desc->dagList = dagList;
+			} else {
+				dagListend->next = dagList;
+			}
+			dagListend = dagList;
+
+			dagList->desc = desc;
+
+			if (stripeFuncs->fp == NULL) {
+				/* use bailout functions for this stripe */
+				asmhle = failed_stripe->asmh_u;
+				vfple = failed_stripe->vfple;
+				/* the following two may contain asm headers and
+				   block function pointers for multiple asm within
+				   this access.  We initialize tmpasmhle and tmpvfple
+				   here in order to allow for that, and for correct
+				   operation below */
+				tmpasmhle = failed_stripe->asmh_b;
+				tmpvfple = failed_stripe->bvfple;
+				for (j = 0, physPtr = asm_p->physInfo; physPtr; physPtr = physPtr->next, j++) {
+					uFunc = vfple->fn; /* stripeUnitFuncs[stripeNum][j]; */
 					if (uFunc == (RF_VoidFuncPtr) NULL) {
-						/*
-						 * Use bailout functions for
-						 * this stripe unit.
-						 */
-						for (k = 0; k <
-						    physPtr->numSector; k++) {
-							/*
-							 * Create a dag for
-							 * this block.
-							 */
-							rf_InitHdrNode(
-							    &tempdag_h,
-							    raidPtr,
-							    rf_useMemChunks);
-							desc->dagArray[i].
-							    numDags++;
+						/* use bailout functions for
+						 * this stripe unit */
+						for (k = 0; k < physPtr->numSector; k++) {
+							/* create a dag for
+							 * this block */
+							InitHdrNode(&tempdag_h, raidPtr, desc);
+							dagList->numDags++;
 							if (dag_h == NULL) {
-								dag_h =
-								    tempdag_h;
+								dag_h = tempdag_h;
 							} else {
-								lastdag_h->next
-								    = tempdag_h;
+								lastdag_h->next = tempdag_h;
 							}
 							lastdag_h = tempdag_h;
 
-							bFunc = blockFuncs
-							    [stripeUnitNum][k];
+							bFunc = tmpvfple->fn; /* blockFuncs[stripeUnitNum][k]; */
 							RF_ASSERT(bFunc);
-							asm_bp = asmh_b
-							    [stripeUnitNum][k]
-							    ->stripeMap;
-							(*bFunc) (raidPtr,
-							    asm_bp, tempdag_h,
-							    bp, flags,
-							    tempdag_h
-							    ->allocList);
+							asm_bp = tmpasmhle->asmh->stripeMap; /* asmh_b[stripeUnitNum][k]->stripeMap; */
+							(*bFunc) (raidPtr, asm_bp, tempdag_h, bp, flags, tempdag_h->allocList);
+
+							tmpasmhle = tmpasmhle->next;
+							tmpvfple = tmpvfple->next;
 						}
 						stripeUnitNum++;
 					} else {
-						/*
-						 * Create a dag for this unit.
-						 */
-						rf_InitHdrNode(&tempdag_h,
-						    raidPtr, rf_useMemChunks);
-						desc->dagArray[i].numDags++;
+						/* create a dag for this unit */
+						InitHdrNode(&tempdag_h, raidPtr, desc);
+						dagList->numDags++;
 						if (dag_h == NULL) {
 							dag_h = tempdag_h;
 						} else {
-							lastdag_h->next =
-							    tempdag_h;
+							lastdag_h->next = tempdag_h;
 						}
 						lastdag_h = tempdag_h;
 
-						asm_up = asmh_u[stripeNum][j]
-						    ->stripeMap;
-						(*uFunc) (raidPtr, asm_up,
-						    tempdag_h, bp, flags,
-						    tempdag_h->allocList);
+						asm_up = asmhle->asmh->stripeMap; /* asmh_u[stripeNum][j]->stripeMap; */
+						(*uFunc) (raidPtr, asm_up, tempdag_h, bp, flags, tempdag_h->allocList);
 					}
+					asmhle = asmhle->next;
+					vfple = vfple->next;
 				}
 				RF_ASSERT(j == asm_p->numStripeUnitsAccessed);
-				/*
-				 * Merge linked bailout dag to existing dag
-				 * collection.
-				 */
+				/* merge linked bailout dag to existing dag
+				 * collection */
 				stripeNum++;
+				failed_stripe = failed_stripe->next;
 			} else {
-				/* Create a dag for this parity stripe. */
-				rf_InitHdrNode(&tempdag_h, raidPtr,
-				    rf_useMemChunks);
-				desc->dagArray[i].numDags++;
-				if (dag_h == NULL) {
-					dag_h = tempdag_h;
-				} else {
-					lastdag_h->next = tempdag_h;
-				}
+				/* Create a dag for this parity stripe */
+				InitHdrNode(&tempdag_h, raidPtr, desc);
+				dagList->numDags++;
+				dag_h = tempdag_h;
 				lastdag_h = tempdag_h;
 
-				(stripeFuncs[i]) (raidPtr, asm_p, tempdag_h,
-				    bp, flags, tempdag_h->allocList);
+				(stripeFuncs->fp) (raidPtr, asm_p, tempdag_h, bp, flags, tempdag_h->allocList);
 			}
-			desc->dagArray[i].dags = dag_h;
+			dagList->dags = dag_h;
+			stripeFuncs = stripeFuncs->next;
 		}
 		RF_ASSERT(i == desc->numStripes);
 
-		/* Free memory. */
-		if (asm_h->numStripes > MAXNSTRIPES)
-			RF_Free(stripeFuncs, asm_h->numStripes *
-			    sizeof(RF_VoidFuncPtr));
+		/* free memory */
 		if ((numStripesBailed > 0) || (numStripeUnitsBailed > 0)) {
 			stripeNum = 0;
 			stripeUnitNum = 0;
-			if (dag_h->asmList) {
-				endASMList = dag_h->asmList;
-				while (endASMList->next)
-					endASMList = endASMList->next;
-			} else
-				endASMList = NULL;
-			/* Walk through io, stripe by stripe. */
-			for (i = 0, asm_p = asmap; asm_p;
-			    asm_p = asm_p->next, i++)
-				if (stripeFuncs[i] == NULL) {
-					numStripeUnits =
-					    asm_p->numStripeUnitsAccessed;
-					/*
-					 * Walk through stripe, stripe unit by
-					 * stripe unit.
-					 */
-					for (j = 0, physPtr = asm_p->physInfo;
-					    physPtr;
-					    physPtr = physPtr->next, j++) {
-						if (stripeUnitFuncs[stripeNum]
-						    [j] == NULL) {
-							numBlocks =
-							    physPtr->numSector;
-							/*
-							 * Walk through stripe
-							 * unit, block by
-							 * block.
-							 */
-							for (k = 0; k <
-							    numBlocks; k++)
-								if (dag_h
-								    ->asmList 
-								    == NULL) {
-						dag_h->asmList = 
-						    asmh_b[stripeUnitNum][k];
-						endASMList = dag_h->asmList;
-								} else {
-						endASMList->next =
-						    asmh_b[stripeUnitNum][k];
+			/* walk through io, stripe by stripe */
+			/* here we build up dag_h->asmList for this dag...
+			   we need all of these asm's to do the IO, and
+			   want them in a convenient place for freeing at a
+			   later time */
+			stripeFuncs = stripeFuncsList;
+			failed_stripe = failed_stripes_list;
+			dagList = desc->dagList;
+
+			for (i = 0, asm_p = asmap; asm_p; asm_p = asm_p->next, i++) {
+
+				dag_h = dagList->dags;
+				if (dag_h->asmList) {
+					endASMList = dag_h->asmList;
+					while (endASMList->next)
 						endASMList = endASMList->next;
+				} else
+					endASMList = NULL;
+
+				if (stripeFuncs->fp == NULL) {					
+					numStripeUnits = asm_p->numStripeUnitsAccessed;
+					/* walk through stripe, stripe unit by
+					 * stripe unit */
+					asmhle = failed_stripe->asmh_u;
+					vfple = failed_stripe->vfple;
+					/* this contains all of the asm headers for block funcs,
+					   so we have to initialize this here instead of below.*/
+					tmpasmhle = failed_stripe->asmh_b;
+					for (j = 0, physPtr = asm_p->physInfo; physPtr; physPtr = physPtr->next, j++) {
+						if (vfple->fn == NULL) {
+							numBlocks = physPtr->numSector;
+							/* walk through stripe
+							 * unit, block by
+							 * block */
+							for (k = 0; k < numBlocks; k++) {
+								if (dag_h->asmList == NULL) {
+									dag_h->asmList = tmpasmhle->asmh; /* asmh_b[stripeUnitNum][k];*/
+									endASMList = dag_h->asmList;
+								} else {
+									endASMList->next = tmpasmhle->asmh;
+									endASMList = endASMList->next;
 								}
-							RF_Free(asmh_b
-				    [stripeUnitNum], numBlocks *
-				    sizeof(RF_AccessStripeMapHeader_t *));
-							RF_Free(blockFuncs
-						    [stripeUnitNum], numBlocks *
-						    sizeof(RF_VoidFuncPtr));
+								tmpasmhle = tmpasmhle->next;
+							}
 							stripeUnitNum++;
 						}
 						if (dag_h->asmList == NULL) {
-							dag_h->asmList = asmh_u
-							    [stripeNum][j];
-							endASMList = dag_h
-							    ->asmList;
+							dag_h->asmList = asmhle->asmh;
+							endASMList = dag_h->asmList;
 						} else {
-							endASMList->next =
-							    asmh_u[stripeNum]
-							    [j];
-							endASMList = endASMList
-							    ->next;
+							endASMList->next = asmhle->asmh;
+							endASMList = endASMList->next;
 						}
+						asmhle = asmhle->next;
+						vfple = vfple->next;
 					}
-					RF_Free(asmh_u[stripeNum],
-					    numStripeUnits *
-					    sizeof(
-					        RF_AccessStripeMapHeader_t *));
-					RF_Free(stripeUnitFuncs[stripeNum],
-					    numStripeUnits *
-					    sizeof(RF_VoidFuncPtr));
 					stripeNum++;
+					failed_stripe = failed_stripe->next;
 				}
-			RF_ASSERT(stripeNum == numStripesBailed);
-			RF_Free(stripeUnitFuncs, asm_h->numStripes *
-			    sizeof(RF_VoidFuncPtr));
-			RF_Free(asmh_u, asm_h->numStripes *
-			    sizeof(RF_AccessStripeMapHeader_t **));
-			if (numStripeUnitsBailed > 0) {
-				RF_ASSERT(stripeUnitNum ==
-				    numStripeUnitsBailed);
-				RF_Free(blockFuncs, raidPtr->Layout.numDataCol
-				    * asm_h->numStripes *
-				    sizeof(RF_VoidFuncPtr));
-				RF_Free(asmh_b, raidPtr->Layout.numDataCol *
-				    asm_h->numStripes *
-				    sizeof(RF_AccessStripeMapHeader_t **));
+				dagList = dagList->next; /* need to move in stride with stripeFuncs */
+				stripeFuncs = stripeFuncs->next;
 			}
+			RF_ASSERT(stripeNum == numStripesBailed);
+			RF_ASSERT(stripeUnitNum == numStripeUnitsBailed);
+
+			failed_stripe = failed_stripes_list;
+			while (failed_stripe) {
+
+				asmhle = failed_stripe->asmh_u;
+				while (asmhle) {
+					tmpasmhle= asmhle;
+					asmhle = tmpasmhle->next;
+					rf_FreeASMHeaderListElem(tmpasmhle);
+				}
+
+				asmhle = failed_stripe->asmh_b;
+				while (asmhle) {
+					tmpasmhle= asmhle;
+					asmhle = tmpasmhle->next;
+					rf_FreeASMHeaderListElem(tmpasmhle);
+				}
+				vfple = failed_stripe->vfple;
+				while (vfple) {
+					tmpvfple = vfple;
+					vfple = tmpvfple->next;
+					rf_FreeVFPListElem(tmpvfple);
+				}
+
+				vfple = failed_stripe->bvfple;
+				while (vfple) {
+					tmpvfple = vfple;
+					vfple = tmpvfple->next;
+					rf_FreeVFPListElem(tmpvfple);
+				}
+
+				tmpfailed_stripe = failed_stripe;
+				failed_stripe = tmpfailed_stripe->next;
+				rf_FreeFailedStripeStruct(tmpfailed_stripe);
+			}
+		}
+		while (stripeFuncsList != NULL) {
+			temp = stripeFuncsList;
+			stripeFuncsList = stripeFuncsList->next;
+			rf_FreeFuncList(temp);
 		}
 		return (0);
 	}

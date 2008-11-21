@@ -1,4 +1,4 @@
-/*	$NetBSD: kernfs_vfsops.c,v 1.75 2006/12/09 16:11:52 chs Exp $	*/
+/*	$NetBSD: kernfs_vfsops.c,v 1.86 2008/06/28 01:34:06 rumble Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993, 1995
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kernfs_vfsops.c,v 1.75 2006/12/09 16:11:52 chs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kernfs_vfsops.c,v 1.86 2008/06/28 01:34:06 rumble Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -57,34 +57,29 @@ __KERNEL_RCSID(0, "$NetBSD: kernfs_vfsops.c,v 1.75 2006/12/09 16:11:52 chs Exp $
 #include <sys/malloc.h>
 #include <sys/syslog.h>
 #include <sys/kauth.h>
+#include <sys/module.h>
 
+#include <miscfs/genfs/genfs.h>
 #include <miscfs/specfs/specdev.h>
 #include <miscfs/kernfs/kernfs.h>
 
-MALLOC_DEFINE(M_KERNFSMNT, "kernfs mount", "kernfs mount structures");
+MODULE(MODULE_CLASS_VFS, kernfs, NULL);
+
+MALLOC_JUSTDEFINE(M_KERNFSMNT, "kernfs mount", "kernfs mount structures");
 
 dev_t rrootdev = NODEV;
 
-void	kernfs_init(void);
-void	kernfs_reinit(void);
-void	kernfs_done(void);
+VFS_PROTOS(kernfs);
+
 void	kernfs_get_rrootdev(void);
-int	kernfs_mount(struct mount *, const char *, void *,
-	    struct nameidata *, struct lwp *);
-int	kernfs_start(struct mount *, int, struct lwp *);
-int	kernfs_unmount(struct mount *, int, struct lwp *);
-int	kernfs_statvfs(struct mount *, struct statvfs *, struct lwp *);
-int	kernfs_quotactl(struct mount *, int, uid_t, void *,
-			     struct lwp *);
-int	kernfs_sync(struct mount *, int, kauth_cred_t, struct lwp *);
-int	kernfs_vget(struct mount *, ino_t, struct vnode **);
+
+static struct sysctllog *kernfs_sysctl_log;
 
 void
 kernfs_init()
 {
-#ifdef _LKM
+
 	malloc_type_attach(M_KERNFSMNT);
-#endif
 	kernfs_hashinit();
 }
 
@@ -97,10 +92,9 @@ kernfs_reinit()
 void
 kernfs_done()
 {
-#ifdef _LKM
-	malloc_type_detach(M_KERNFSMNT);
-#endif
+
 	kernfs_hashdone();
+	malloc_type_detach(M_KERNFSMNT);
 }
 
 void
@@ -127,9 +121,9 @@ kernfs_get_rrootdev()
  * Mount the Kernel params filesystem
  */
 int
-kernfs_mount(struct mount *mp, const char *path, void *data,
-    struct nameidata *ndp, struct lwp *l)
+kernfs_mount(struct mount *mp, const char *path, void *data, size_t *data_len)
 {
+	struct lwp *l = curlwp;
 	int error = 0;
 	struct kernfs_mount *fmp;
 
@@ -138,8 +132,10 @@ kernfs_mount(struct mount *mp, const char *path, void *data,
 		return (EINVAL);
 	}
 
-	if (mp->mnt_flag & MNT_GETARGS)
+	if (mp->mnt_flag & MNT_GETARGS) {
+		*data_len = 0;
 		return 0;
+	}
 	/*
 	 * Update is a no-op
 	 */
@@ -157,7 +153,7 @@ kernfs_mount(struct mount *mp, const char *path, void *data,
 	vfs_getnewfsid(mp);
 
 	if ((error = set_statvfs_info(path, UIO_USERSPACE, "kernfs",
-	    UIO_SYSSPACE, mp, l)) != 0) {
+	    UIO_SYSSPACE, mp->mnt_op->vfs_name, mp, l)) != 0) {
 		free(fmp, M_KERNFSMNT);
 		return error;
 	}
@@ -167,15 +163,14 @@ kernfs_mount(struct mount *mp, const char *path, void *data,
 }
 
 int
-kernfs_start(struct mount *mp, int flags,
-    struct lwp *l)
+kernfs_start(struct mount *mp, int flags)
 {
 
 	return (0);
 }
 
 int
-kernfs_unmount(struct mount *mp, int mntflags, struct lwp *l)
+kernfs_unmount(struct mount *mp, int mntflags)
 {
 	int error;
 	int flags = 0;
@@ -205,15 +200,7 @@ kernfs_root(mp, vpp)
 }
 
 int
-kernfs_quotactl(struct mount *mp, int cmd, uid_t uid,
-    void *arg, struct lwp *l)
-{
-
-	return (EOPNOTSUPP);
-}
-
-int
-kernfs_statvfs(struct mount *mp, struct statvfs *sbp, struct lwp *l)
+kernfs_statvfs(struct mount *mp, struct statvfs *sbp)
 {
 
 	sbp->f_bsize = DEV_BSIZE;
@@ -234,7 +221,7 @@ kernfs_statvfs(struct mount *mp, struct statvfs *sbp, struct lwp *l)
 /*ARGSUSED*/
 int
 kernfs_sync(struct mount *mp, int waitfor,
-    kauth_cred_t uc, struct lwp *l)
+    kauth_cred_t uc)
 {
 
 	return (0);
@@ -252,27 +239,6 @@ kernfs_vget(struct mount *mp, ino_t ino,
 	return (EOPNOTSUPP);
 }
 
-SYSCTL_SETUP(sysctl_vfs_kernfs_setup, "sysctl vfs.kern subtree setup")
-{
-
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "vfs", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_VFS, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "kernfs",
-		       SYSCTL_DESCR("/kern file system"),
-		       NULL, 0, NULL, 0,
-		       CTL_VFS, 11, CTL_EOL);
-	/*
-	 * XXX the "11" above could be dynamic, thereby eliminating one
-	 * more instance of the "number to vfs" mapping problem, but
-	 * "11" is the order as taken from sys/mount.h
-	 */
-}
-
 extern const struct vnodeopv_desc kernfs_vnodeop_opv_desc;
 
 const struct vnodeopv_desc * const kernfs_vnodeopv_descs[] = {
@@ -282,11 +248,12 @@ const struct vnodeopv_desc * const kernfs_vnodeopv_descs[] = {
 
 struct vfsops kernfs_vfsops = {
 	MOUNT_KERNFS,
+	0,
 	kernfs_mount,
 	kernfs_start,
 	kernfs_unmount,
 	kernfs_root,
-	kernfs_quotactl,
+	(void *)eopnotsupp,		/* vfs_quotactl */
 	kernfs_statvfs,
 	kernfs_sync,
 	kernfs_vget,
@@ -298,8 +265,52 @@ struct vfsops kernfs_vfsops = {
 	NULL,				/* vfs_mountroot */
 	(int (*)(struct mount *, struct vnode *, struct timespec *)) eopnotsupp,
 	vfs_stdextattrctl,
+	(void *)eopnotsupp,		/* vfs_suspendctl */
+	genfs_renamelock_enter,
+	genfs_renamelock_exit,
+	(void *)eopnotsupp,
 	kernfs_vnodeopv_descs,
 	0,
 	{ NULL, NULL },
 };
-VFS_ATTACH(kernfs_vfsops);
+
+static int
+kernfs_modcmd(modcmd_t cmd, void *arg)
+{
+	int error;
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		error = vfs_attach(&kernfs_vfsops);
+		if (error != 0)
+			break;
+		sysctl_createv(&kernfs_sysctl_log, 0, NULL, NULL,
+			       CTLFLAG_PERMANENT,
+			       CTLTYPE_NODE, "vfs", NULL,
+			       NULL, 0, NULL, 0,
+			       CTL_VFS, CTL_EOL);
+		sysctl_createv(&kernfs_sysctl_log, 0, NULL, NULL,
+			       CTLFLAG_PERMANENT,
+			       CTLTYPE_NODE, "kernfs",
+			       SYSCTL_DESCR("/kern file system"),
+			       NULL, 0, NULL, 0,
+			       CTL_VFS, 11, CTL_EOL);
+		/*
+		 * XXX the "11" above could be dynamic, thereby eliminating one
+		 * more instance of the "number to vfs" mapping problem, but
+		 * "11" is the order as taken from sys/mount.h
+		 */
+		break;
+	case MODULE_CMD_FINI:
+		error = vfs_detach(&kernfs_vfsops);
+		if (error != 0)
+			break;
+		sysctl_teardown(&kernfs_sysctl_log);
+		break;
+	default:
+		error = ENOTTY;
+		break;
+	}
+
+	return (error);
+}

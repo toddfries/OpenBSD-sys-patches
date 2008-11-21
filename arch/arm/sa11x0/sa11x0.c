@@ -1,4 +1,4 @@
-/*	$NetBSD: sa11x0.c,v 1.21 2006/06/27 13:58:08 peter Exp $	*/
+/*	$NetBSD: sa11x0.c,v 1.23 2008/06/13 13:24:10 rafal Exp $	*/
 
 /*-
  * Copyright (c) 2001, The NetBSD Foundation, Inc.  All rights reserved.
@@ -14,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sa11x0.c,v 1.21 2006/06/27 13:58:08 peter Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sa11x0.c,v 1.23 2008/06/13 13:24:10 rafal Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,6 +75,8 @@ __KERNEL_RCSID(0, "$NetBSD: sa11x0.c,v 1.21 2006/06/27 13:58:08 peter Exp $");
 #include <machine/cpu.h>
 #include <machine/bus.h>
 
+#include <arm/arm32/psl.h>
+#include <arm/arm32/machdep.h>
 #include <arm/mainbus/mainbus.h>
 #include <arm/sa11x0/sa11x0_reg.h>
 #include <arm/sa11x0/sa11x0_var.h>
@@ -190,11 +185,9 @@ sa11x0_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_4(sc->sc_iot, sc->sc_dmach, SADMAC_DCR4_CLR, 1);
 	bus_space_write_4(sc->sc_iot, sc->sc_dmach, SADMAC_DCR5_CLR, 1);
 
-	/*
-	 * XXX this is probably a bad place, but intr bit shouldn't be
-	 * XXX enabled before intr mask is set.
-	 * XXX Having sane imask[] suffice??
-	 */
+	/* Make sure to init spl masks, note we set the mask to 0 above */
+	set_spl_masks();
+
 	SetCPSR(I32_bit, 0);
 
 	/*

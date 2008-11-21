@@ -1,4 +1,4 @@
-/*	$NetBSD: pcib.c,v 1.3 2008/02/22 23:32:24 dyoung Exp $	*/
+/*	$NetBSD: pcib.c,v 1.7 2008/08/04 06:01:18 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pcib.c,v 1.3 2008/02/22 23:32:24 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pcib.c,v 1.7 2008/08/04 06:01:18 cegger Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -54,13 +47,9 @@ __KERNEL_RCSID(0, "$NetBSD: pcib.c,v 1.3 2008/02/22 23:32:24 dyoung Exp $");
 #include <dev/pci/pcidevs.h>
 
 #include "isa.h"
+#include "pcibvar.h"
 
-struct pcib_softc {
-	pci_chipset_tag_t	sc_pc;
-	pcitag_t		sc_tag;
-};
-
-int	pcibmatch(device_t, struct cfdata *, void *);
+int	pcibmatch(device_t, cfdata_t, void *);
 void	pcibattach(device_t, device_t, void *);
 int	pcibdetach(device_t, int);
 void	pcibchilddet(device_t, device_t);
@@ -71,7 +60,7 @@ CFATTACH_DECL2_NEW(pcib, sizeof(struct pcib_softc),
 void	pcib_callback(device_t);
 
 int
-pcibmatch(device_t parent, struct cfdata *match, void *aux)
+pcibmatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -173,11 +162,13 @@ pcibmatch(device_t parent, struct cfdata *match, void *aux)
 	case PCI_VENDOR_CYRIX:
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_CYRIX_CX5530_PCIB:
+#if !defined(XEN)
 			{
 				extern int clock_broken_latch;
 
 				clock_broken_latch = 0;
 			}
+#endif
 			return(1);
 		}
 		break;

@@ -1,5 +1,4 @@
-/* $OpenBSD: pci_eb64plus_intr.s,v 1.2 2003/01/08 17:26:21 miod Exp $ */
-/* $NetBSD: pci_eb64plus_intr.s,v 1.2 1997/09/02 13:19:43 thorpej Exp $ */
+/* $NetBSD: pci_eb64plus_intr.s,v 1.4 2005/12/11 12:16:17 christos Exp $ */
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -44,6 +43,8 @@
  */
 
 #include <machine/asm.h>
+
+__KERNEL_RCSID(0, "$NetBSD: pci_eb64plus_intr.s,v 1.4 2005/12/11 12:16:17 christos Exp $");
 
 	.text
 LEAF(eb64plus_intr_enable,1)

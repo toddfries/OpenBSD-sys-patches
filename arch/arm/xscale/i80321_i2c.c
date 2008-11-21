@@ -1,5 +1,4 @@
-/*	$OpenBSD: i80321_i2c.c,v 1.2 2006/07/10 15:39:56 drahn Exp $	*/
-/*	$NetBSD: i80321_i2c.c,v 1.2 2005/12/11 12:16:51 christos Exp $	*/
+/*	$NetBSD: i80321_i2c.c,v 1.3 2007/12/06 17:00:32 ad Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -40,8 +39,11 @@
  * Intel i80321 I/O Processor I2C Controller Unit support.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i80321_i2c.c,v 1.3 2007/12/06 17:00:32 ad Exp $");
+
 #include <sys/param.h>
-#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
@@ -57,60 +59,45 @@
 #include <arm/xscale/iopi2creg.h>
 #include <arm/xscale/iopi2cvar.h>
 
-int i80321_i2c_match(struct device *parent, void *v, void *aux);
-void i80321_i2c_attach(struct device *parent, struct device *self, void *aux);
-
-struct cfattach i80321_i2c_ca = {
-	sizeof(struct iopiic_softc), i80321_i2c_match, i80321_i2c_attach
-};
-        
-int
-i80321_i2c_match(struct device *parent, void *v, void *aux)
+static int
+iic321_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct cfdata *cf = v;
 	struct iopxs_attach_args *ia = aux;
 
-	/* XXX thecus will reboot if iopiic1 attaches */
-	if (ia->ia_offset == VERDE_I2C_BASE1)
-		return 0;
-
-	if (strcmp(cf->cf_driver->cd_name, ia->ia_name) == 0)
+	if (strcmp(cf->cf_name, ia->ia_name) == 0)
 		return (1);
 
 	return (0);
 }
 
-void
-i80321_i2c_attach(struct device *parent, struct device *self, void *aux)
+static void
+iic321_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct iopiic_softc *sc = (void *) self;
 	struct iopxs_attach_args *ia = aux;
 	int error;
-#ifdef LATER
 	uint8_t gpio_bits;
-#endif
 
-	printf(": I2C controller\n");
+	aprint_naive(": I2C controller\n");
+	aprint_normal(": I2C controller\n");
 
 	sc->sc_st = ia->ia_st;
 	if ((error = bus_space_subregion(sc->sc_st, ia->ia_sh,
 					 ia->ia_offset, ia->ia_size,
 					 &sc->sc_sh)) != 0) {
-		printf("%s: unable to subregion registers, error = %d\n",
+		aprint_error("%s: unable to subregion registers, error = %d\n",
 		    sc->sc_dev.dv_xname, error);
 		return;
 	}
 
-#ifdef LATER
 	gpio_bits = (ia->ia_offset == VERDE_I2C_BASE0) ?
 	    (1U << 7) | (1U << 6) : (1U << 5) | (1U << 4);
 	i80321_gpio_set_val(gpio_bits, 0);
 	i80321_gpio_set_direction(gpio_bits, 0);
-#endif
 
 	/* XXX Reset the I2C unit? */
 
-	lockinit(&sc->sc_buslock, PRIBIO|PCATCH, "iopiiclk", 0, 0);
+	mutex_init(&sc->sc_buslock, MUTEX_DEFAULT, IPL_NONE);
 
 	/* XXX We don't currently use interrupts.  Fix this some day. */
 #if 0
@@ -134,3 +121,6 @@ i80321_i2c_attach(struct device *parent, struct device *self, void *aux)
 
 	iopiic_attach(sc);
 }
+
+CFATTACH_DECL(iopiic, sizeof(struct iopiic_softc),
+    iic321_match, iic321_attach, NULL, NULL);

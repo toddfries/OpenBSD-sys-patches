@@ -1,4 +1,4 @@
-/*	$NetBSD: apmbios.c,v 1.7 2006/12/10 04:38:55 uwe Exp $ */
+/*	$NetBSD: apmbios.c,v 1.11 2008/04/28 20:23:24 martin Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: apmbios.c,v 1.7 2006/12/10 04:38:55 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: apmbios.c,v 1.11 2008/04/28 20:23:24 martin Exp $");
 
 #include "opt_apm.h"
 #include "opt_compat_mach.h"	/* Needed to get the right segment def */
@@ -56,7 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: apmbios.c,v 1.7 2006/12/10 04:38:55 uwe Exp $");
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
-#include <sys/lock.h>
 #include <sys/user.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
@@ -65,12 +57,12 @@ __KERNEL_RCSID(0, "$NetBSD: apmbios.c,v 1.7 2006/12/10 04:38:55 uwe Exp $");
 #include <sys/select.h>
 #include <sys/poll.h>
 #include <sys/conf.h>
+#include <sys/bus.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/bus.h>
 #include <machine/stdarg.h>
-#include <machine/cpu.h>
 #include <machine/cpufunc.h>
 #include <machine/gdt.h>
 #include <machine/psl.h>
@@ -137,7 +129,7 @@ static void	apm_powmgt_enable(int);
 static void	apm_powmgt_engage(int, u_int);
 static int	apm_get_ver(struct apm_softc *);
 
-CFATTACH_DECL(apmbios, sizeof(struct apm_softc),
+CFATTACH_DECL_NEW(apmbios, sizeof(struct apm_softc),
     apmbiosmatch, apmbiosattach, NULL, NULL);
 
 #ifdef APMDEBUG
@@ -471,7 +463,7 @@ static void
 apmbiosattach(struct device *parent, struct device *self,
 	      void *aux)
 {
-	struct apm_softc *apmsc = (void *)self;
+	struct apm_softc *apmsc = device_private(self);
 	struct bioscallregs regs;
 	int apm_data_seg_ok;
 	u_int okbases[] = { 0, biosbasemem*1024 };
@@ -488,21 +480,23 @@ apmbiosattach(struct device *parent, struct device *self,
 	aprint_naive(": Power management\n");
 	aprint_normal(": Advanced Power Management BIOS");
 
+	apmsc->sc_dev = self;
+
 	memset(&regs, 0, sizeof(struct bioscallregs));
 	regs.AX = APM_BIOS_FN(APM_INSTALLATION_CHECK);
 	regs.BX = APM_DEV_APM_BIOS;
 #ifdef APM_USE_KVM86
 	res = kvm86_bioscall_simple(APM_SYSTEM_BIOS, &regs);
 	if (res) {
-		aprint_error("%s: kvm86 error (APM_INSTALLATION_CHECK)\n",
-		    apmsc->sc_dev.dv_xname);
+		aprint_error_dev(self,
+		    "kvm86 error (APM_INSTALLATION_CHECK)\n");
 		goto bail_disconnected;
 	}
 #else
 	bioscall(APM_SYSTEM_BIOS, &regs);
 #endif
 	DPRINTF_BIOSRETURN(regs, bits);
-	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", apmsc->sc_dev.dv_xname));
+	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", device_xname(self)));
 
 	apminfo.apm_detail = (u_int)regs.AX | ((u_int)regs.CX << 16);
 
@@ -516,19 +510,17 @@ apmbiosattach(struct device *parent, struct device *self,
 #ifdef APM_USE_KVM86
 	res = kvm86_bioscall_simple(APM_SYSTEM_BIOS, &regs);
 	if (res) {
-		aprint_error("%s: kvm86 error (APM_DISCONNECT)\n",
-		    apmsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "kvm86 error (APM_DISCONNECT)\n");
 		goto bail_disconnected;
 	}
 #else
 	bioscall(APM_SYSTEM_BIOS, &regs);
 #endif
 	DPRINTF_BIOSRETURN(regs, bits);
-	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", apmsc->sc_dev.dv_xname));
+	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", device_xname(self)));
 
 	if ((apminfo.apm_detail & APM_32BIT_SUPPORTED) == 0) {
-		aprint_error("%s: no 32-bit APM support\n",
-		    apmsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "no 32-bit APM support\n");
 		goto bail_disconnected;
 	}
 
@@ -541,15 +533,15 @@ apmbiosattach(struct device *parent, struct device *self,
 #ifdef APM_USE_KVM86
 	res = kvm86_bioscall_simple(APM_SYSTEM_BIOS, &regs);
 	if (res) {
-		aprint_error("%s: kvm86 error (APM_32BIT_CONNECT)\n",
-		    apmsc->sc_dev.dv_xname);
+		aprint_error_dev(self,
+		    "kvm86 error (APM_32BIT_CONNECT)\n");
 		goto bail_disconnected;
 	}
 #else
 	bioscall(APM_SYSTEM_BIOS, &regs);
 #endif
 	DPRINTF_BIOSRETURN(regs, bits);
-	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", apmsc->sc_dev.dv_xname));
+	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", device_xname(self)));
 
 	apminfo.apm_code32_seg_base = regs.AX << 4;
 	apminfo.apm_entrypt = regs.BX; /* spec says EBX, can't map >=64k */
@@ -591,7 +583,7 @@ apmbiosattach(struct device *parent, struct device *self,
 				    ("lame v%d.%d bios gave zero len code32, pegged to 64k\n%s: ",
 				    APM_MAJOR_VERS(apminfo.apm_detail),
 				    APM_MINOR_VERS(apminfo.apm_detail),
-				    apmsc->sc_dev.dv_xname));
+				    device_xname(self)));
 			}
 			if (apminfo.apm_code16_seg_len == 0) {
 				/*
@@ -604,7 +596,7 @@ apmbiosattach(struct device *parent, struct device *self,
 				    ("lame v%d.%d bios gave zero len code16, pegged to 64k\n%s: ",
 				    APM_MAJOR_VERS(apminfo.apm_detail),
 				    APM_MINOR_VERS(apminfo.apm_detail),
-				    apmsc->sc_dev.dv_xname));
+				    device_xname(self)));
 			}
 			if (apminfo.apm_data_seg_len == 0) {
 				/*
@@ -622,7 +614,7 @@ apmbiosattach(struct device *parent, struct device *self,
 				    ("lame v%d.%d bios gave zero len data, tentative 64k\n%s: ",
 				    APM_MAJOR_VERS(apminfo.apm_detail),
 				    APM_MINOR_VERS(apminfo.apm_detail),
-				    apmsc->sc_dev.dv_xname));
+				    device_xname(self)));
 			}
 			break;
 		}
@@ -632,15 +624,15 @@ apmbiosattach(struct device *parent, struct device *self,
 		    ("nonsensical BIOS code length %d ignored (entry point offset is %d)\n%s: ",
 		    apminfo.apm_code32_seg_len,
 		    apminfo.apm_entrypt,
-		    apmsc->sc_dev.dv_xname));
+		    device_xname(self)));
 		apminfo.apm_code32_seg_len = 65536;
 	}
 	if (apminfo.apm_code32_seg_base < IOM_BEGIN ||
 	    apminfo.apm_code32_seg_base >= IOM_END) {
 		DPRINTF(APMDEBUG_ATTACH, ("code32 segment starts outside ISA hole [%x]\n%s: ",
-		    apminfo.apm_code32_seg_base, apmsc->sc_dev.dv_xname));
-		aprint_error("%s: bogus 32-bit code segment start\n",
-		    apmsc->sc_dev.dv_xname);
+		    apminfo.apm_code32_seg_base, device_xname(self)));
+		aprint_error_dev(self,
+		    "bogus 32-bit code segment start\n");
 		goto bail;
 	} 
 	if (apminfo.apm_code32_seg_base +
@@ -648,10 +640,9 @@ apmbiosattach(struct device *parent, struct device *self,
 		DPRINTF(APMDEBUG_ATTACH, ("code32 segment oversized: [%x,%x)\n%s: ",
 		    apminfo.apm_code32_seg_base,
 		    apminfo.apm_code32_seg_base + apminfo.apm_code32_seg_len - 1,
-		    apmsc->sc_dev.dv_xname));
+		    device_xname(self)));
 #if 0
-		aprint_error("%s: bogus 32-bit code segment size\n",
-		    apmsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "bogus 32-bit code segment size\n");
 		goto bail;
 #else
 		apminfo.apm_code32_seg_len =
@@ -661,9 +652,9 @@ apmbiosattach(struct device *parent, struct device *self,
 	if (apminfo.apm_code16_seg_base < IOM_BEGIN ||
 	    apminfo.apm_code16_seg_base >= IOM_END) {
 		DPRINTF(APMDEBUG_ATTACH, ("code16 segment starts outside ISA hole [%x]\n%s: ",
-		    apminfo.apm_code16_seg_base, apmsc->sc_dev.dv_xname));
-		aprint_error("%s: bogus 16-bit code segment start\n",
-		    apmsc->sc_dev.dv_xname);
+		    apminfo.apm_code16_seg_base, device_xname(self)));
+		aprint_error_dev(self,
+		    "bogus 16-bit code segment start\n");
 		goto bail;
 	}
 	if (apminfo.apm_code16_seg_base +
@@ -672,13 +663,12 @@ apmbiosattach(struct device *parent, struct device *self,
 		    ("code16 segment oversized: [%x,%x), giving up\n%s: ",
 		    apminfo.apm_code16_seg_base,
 		    apminfo.apm_code16_seg_base + apminfo.apm_code16_seg_len - 1,
-		    apmsc->sc_dev.dv_xname));
+		    device_xname(self)));
 		/*
 		 * give up since we may have to trash the
 		 * 32bit segment length otherwise.
 		 */
-		aprint_error("%s: bogus 16-bit code segment size\n",
-		    apmsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "bogus 16-bit code segment size\n");
 		goto bail;
 	}
 	/*
@@ -706,13 +696,13 @@ apmbiosattach(struct device *parent, struct device *self,
 				    ("; resized to [%x,%x)\n%s: ",
 				    apminfo.apm_data_seg_base,
 				    apminfo.apm_data_seg_base + apminfo.apm_data_seg_len,
-				    apmsc->sc_dev.dv_xname));
+				    device_xname(self)));
 			} else {
 				DPRINTF(APMDEBUG_ATTACH,
 				    ("data segment fine: [%x,%x)\n%s: ",
 				    apminfo.apm_data_seg_base,
 				    apminfo.apm_data_seg_base + apminfo.apm_data_seg_len,
-				    apmsc->sc_dev.dv_xname));
+				    device_xname(self)));
 			}
 			apm_data_seg_ok = 1;
 			break;
@@ -722,11 +712,11 @@ apmbiosattach(struct device *parent, struct device *self,
 		if (apm_allow_bogus_segments) {
 			DPRINTF(APMDEBUG_ATTACH,
 			    ("bogus bios data seg location, continuing\n%s: ",
-			    apmsc->sc_dev.dv_xname));
+			    device_xname(self)));
 		} else {
 			DPRINTF(APMDEBUG_ATTACH,
 			    ("bogus bios data seg location, ignoring\n%s: ",
-			    apmsc->sc_dev.dv_xname));
+			    device_xname(self)));
 			apminfo.apm_data_seg_base = 0;
 			apminfo.apm_data_seg_len = 0;
 		}
@@ -737,9 +727,8 @@ apmbiosattach(struct device *parent, struct device *self,
 		    ("data segment [%x,%x) not in an available location\n%s: ",
 		    apminfo.apm_data_seg_base,
 		    apminfo.apm_data_seg_base + apminfo.apm_data_seg_len,
-		    apmsc->sc_dev.dv_xname));
-		aprint_error("%s: data segment unavailable\n",
-		    apmsc->sc_dev.dv_xname);
+		    device_xname(self)));
+		aprint_error_dev(self, "data segment unavailable\n");
 		goto bail;
 	}
 
@@ -759,7 +748,7 @@ apmbiosattach(struct device *parent, struct device *self,
 	DPRINTF(APMDEBUG_ATTACH, ("code32len=%x, datalen=%x\n%s: ",
 	    apminfo.apm_code32_seg_len,
 	    apminfo.apm_data_seg_len,
-	    apmsc->sc_dev.dv_xname));
+	    device_xname(self)));
 	setgdt(GAPM32CODE_SEL, ISA_HOLE_VADDR(apminfo.apm_code32_seg_base),
 	    apminfo.apm_code32_seg_len - 1,
 	    SDT_MEMERA, SEL_KPL, 1, 0);
@@ -790,14 +779,14 @@ apmbiosattach(struct device *parent, struct device *self,
 		if (_x86_memio_map(X86_BUS_SPACE_MEM,
 		    apminfo.apm_data_seg_base,
 		    apminfo.apm_data_seg_len, 0, &memh)) {
-			aprint_error("%s: couldn't map data segment\n",
-			    apmsc->sc_dev.dv_xname);
+			aprint_error_dev(self,
+			    "couldn't map data segment\n");
 			goto bail;
 		}
 		DPRINTF(APMDEBUG_ATTACH,
 		    ("mapping bios data area %x @ 0x%lx\n%s: ",
 		    apminfo.apm_data_seg_base, memh,
-		    apmsc->sc_dev.dv_xname));
+		    device_xname(self)));
 		setgdt(GAPMDATA_SEL, (void *)memh,
 		    apminfo.apm_data_seg_len - 1,
 		    SDT_MEMRWA, SEL_KPL, 1, 0);
@@ -823,7 +812,7 @@ apmbiosattach(struct device *parent, struct device *self,
 	    apminfo.apm_entrypt +
 	     (char *)ISA_HOLE_VADDR(apminfo.apm_code32_seg_base),
 	    &apminfo.apm_segsel,
-	    apmsc->sc_dev.dv_xname));
+	    device_xname(self)));
 
 	apmsc->sc_ops = &apm_accessops;
 	apmsc->sc_cookie = apmsc;
@@ -840,8 +829,7 @@ bail:
 	 */
 	apm_disconnect(apmsc);
 bail_disconnected:
-	aprint_normal("%s: kernel APM support disabled\n",
-	    apmsc->sc_dev.dv_xname);
+	aprint_normal_dev(self, "kernel APM support disabled\n");
 }
 
 static void
@@ -883,10 +871,10 @@ apm_disconnect(void *arg)
 #endif
 	if (sc == NULL)
 		return;
-	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", sc->sc_dev.dv_xname));
+	DPRINTF(APMDEBUG_ATTACH, ("\n%s: ", device_xname(sc->sc_dev)));
 	DPRINTF_BIOSRETURN(regs, bits);
-	printf("%s: unable to create thread, kernel APM support disabled\n",
-	    sc->sc_dev.dv_xname);
+	aprint_error_dev(sc->sc_dev,
+	    "unable to create thread, kernel APM support disabled\n");
 }
 
 static int

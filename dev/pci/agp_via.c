@@ -1,5 +1,4 @@
-/*	$OpenBSD: agp_via.c,v 1.8 2007/12/07 17:35:22 oga Exp $	*/
-/*	$NetBSD: agp_via.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
+/*	$NetBSD: agp_via.c,v 1.17 2008/06/09 06:49:54 freza Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -29,32 +28,35 @@
  *	$FreeBSD: src/sys/pci/agp_via.c,v 1.3 2001/07/05 21:28:47 jhb Exp $
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: agp_via.c,v 1.17 2008/06/09 06:49:54 freza Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/lock.h>
 #include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/agpio.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
-#include <dev/pci/vga_pcivar.h>
 #include <dev/pci/agpvar.h>
 #include <dev/pci/agpreg.h>
+#include <dev/pci/pcidevs.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
-u_int32_t agp_via_get_aperture(struct agp_softc *);
-int	agp_via_set_aperture(struct agp_softc *, u_int32_t);
-int	agp_via_bind_page(struct agp_softc *, off_t, bus_addr_t);
-int	agp_via_unbind_page(struct agp_softc *, off_t);
-void	agp_via_flush_tlb(struct agp_softc *);
+static u_int32_t agp_via_get_aperture(struct agp_softc *);
+static int agp_via_set_aperture(struct agp_softc *, u_int32_t);
+static int agp_via_bind_page(struct agp_softc *, off_t, bus_addr_t);
+static int agp_via_unbind_page(struct agp_softc *, off_t);
+static void agp_via_flush_tlb(struct agp_softc *);
 
-struct agp_methods agp_via_methods = {
+static struct agp_methods agp_via_methods = {
 	agp_via_get_aperture,
 	agp_via_set_aperture,
 	agp_via_bind_page,
@@ -77,46 +79,48 @@ struct agp_via_softc {
 #define REG_APSIZE	1
 #define REG_ATTBASE	2
 
-int via_v2_regs[] =
+static int via_v2_regs[] =
 	{ AGP_VIA_GARTCTRL, AGP_VIA_APSIZE, AGP_VIA_ATTBASE };
-int via_v3_regs[] =
+static int via_v3_regs[] =
 	{ AGP3_VIA_GARTCTRL, AGP3_VIA_APSIZE, AGP3_VIA_ATTBASE };
 
 int
-agp_via_attach(struct agp_softc *sc, struct pci_attach_args *pa)
+agp_via_attach(device_t parent, device_t self, void *aux)
 {
+	struct pci_attach_args *pa = aux;
+	struct agp_softc *sc = device_private(self);
 	struct agp_via_softc *asc;
 	struct agp_gatt *gatt;
 	pcireg_t agpsel, capval;
 
-	asc = malloc(sizeof *asc, M_AGP, M_NOWAIT | M_ZERO);
+	asc = malloc(sizeof *asc, M_AGP, M_NOWAIT|M_ZERO);
 	if (asc == NULL) {
-		printf("can't allocate chipset-specific softc\n");
-		return (ENOMEM);
+		aprint_error(": can't allocate chipset-specific softc\n");
+		return ENOMEM;
 	}
-	sc->sc_chipc = asc;
-	sc->sc_methods = &agp_via_methods;
-	pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP, &sc->sc_capoff,
+	sc->as_chipc = asc;
+	sc->as_methods = &agp_via_methods;
+	pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP, &sc->as_capoff,
 	    &capval);
 
-	if (AGP_CAPID_GET_MAJOR(capval) >= 3) {
+	if (PCI_CAP_AGP_MAJOR(capval) >= 3) {
 		agpsel = pci_conf_read(pa->pa_pc, pa->pa_tag, AGP_VIA_AGPSEL);
-		if ((agpsel & (1 << 1)) == 0) {
+		if ((agpsel & (1 << 9)) == 0) {
 			asc->regs = via_v3_regs;
-			printf("v3, ");
+			printf(" (v3)");
 		} else {
 			asc->regs = via_v2_regs;
-			printf("v2 compat mode, ");
+			printf(" (v2 compat mode)");
 		}
 	} else {
 		asc->regs = via_v2_regs;
-		printf("v2, ");
+		printf(" (v2)");
 	}
 
-	if (agp_map_aperture(pa ,sc, AGP_APBASE, PCI_MAPREG_TYPE_MEM) != 0) {
-		printf("can't map aperture\n");
+	if (agp_map_aperture(pa, sc, AGP_APBASE) != 0) {
+		aprint_error(": can't map aperture\n");
 		free(asc, M_AGP);
-		return (ENXIO);
+		return ENXIO;
 	}
 
 	asc->initial_aperture = AGP_GET_APERTURE(sc);
@@ -132,8 +136,8 @@ agp_via_attach(struct agp_softc *sc, struct pci_attach_args *pa)
 		 */
 		if (AGP_SET_APERTURE(sc, AGP_GET_APERTURE(sc) / 2)) {
 			agp_generic_detach(sc);
-			printf("can't set aperture size\n");
-			return (ENOMEM);
+			aprint_error(": can't set aperture size\n");
+			return ENOMEM;
 		}
 	}
 	asc->gatt = gatt;
@@ -141,53 +145,53 @@ agp_via_attach(struct agp_softc *sc, struct pci_attach_args *pa)
 	if (asc->regs == via_v2_regs) {
 		/* Install the gatt. */
 		pci_conf_write(pa->pa_pc, pa->pa_tag, asc->regs[REG_ATTBASE],
-		    gatt->ag_physical | 3);
+				 gatt->ag_physical | 3);
 		/* Enable the aperture. */
 		pci_conf_write(pa->pa_pc, pa->pa_tag, asc->regs[REG_GARTCTRL],
-		    0x0000000f);
+				 0x0000000f);
 	} else {
 		pcireg_t gartctrl;
 		/* Install the gatt. */
 		pci_conf_write(pa->pa_pc, pa->pa_tag, asc->regs[REG_ATTBASE],
-		    gatt->ag_physical);
+				 gatt->ag_physical);
 		/* Enable the aperture. */
 		gartctrl = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    asc->regs[REG_ATTBASE]);
+				 asc->regs[REG_ATTBASE]);
 		pci_conf_write(pa->pa_pc, pa->pa_tag, asc->regs[REG_GARTCTRL],
-		    gartctrl | (3 << 7));
+				 gartctrl | (3 << 7));
 	}
 
-	return (0);
+	return 0;
 }
 
 #if 0
-int
+static int
 agp_via_detach(struct agp_softc *sc)
 {
-	struct agp_via_softc *asc = sc->sc_chipc;
+	struct agp_via_softc *asc = sc->as_chipc;
 	int error;
 
 	error = agp_generic_detach(sc);
 	if (error)
-		return (error);
+		return error;
 
 	pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_GARTCTRL], 0);
 	pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_ATTBASE], 0);
 	AGP_SET_APERTURE(sc, asc->initial_aperture);
 	agp_free_gatt(sc, asc->gatt);
 
-	return (0);
+	return 0;
 }
 #endif
 
-u_int32_t
+static u_int32_t
 agp_via_get_aperture(struct agp_softc *sc)
 {
-	struct agp_via_softc *asc = sc->sc_chipc;
+	struct agp_via_softc *asc = sc->as_chipc;
 	u_int32_t apsize;
 
-	apsize = pci_conf_read(sc->sc_pc, sc->sc_pcitag, 
-	    asc->regs[REG_APSIZE]) & 0x1f;
+	apsize = pci_conf_read(sc->as_pc, sc->as_tag, asc->regs[REG_APSIZE])
+				& 0x1f;
 
 	/*
 	 * The size is determined by the number of low bits of
@@ -196,13 +200,13 @@ agp_via_get_aperture(struct agp_softc *sc)
 	 * field just read forces the corresponding bit in the 27:20
 	 * to be zero. We calculate the aperture size accordingly.
 	 */
-	return ((((apsize ^ 0xff) << 20) | ((1 << 20) - 1)) + 1);
+	return (((apsize ^ 0xff) << 20) | ((1 << 20) - 1)) + 1;
 }
 
-int
+static int
 agp_via_set_aperture(struct agp_softc *sc, u_int32_t aperture)
 {
-	struct agp_via_softc *asc = sc->sc_chipc;
+	struct agp_via_softc *asc = sc->as_chipc;
 	u_int32_t apsize;
 	pcireg_t reg;
 
@@ -215,57 +219,57 @@ agp_via_set_aperture(struct agp_softc *sc, u_int32_t aperture)
 	 * Double check for sanity.
 	 */
 	if ((((apsize ^ 0xff) << 20) | ((1 << 20) - 1)) + 1 != aperture)
-		return (EINVAL);
+		return EINVAL;
 
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, asc->regs[REG_APSIZE]);
+	reg = pci_conf_read(sc->as_pc, sc->as_tag, asc->regs[REG_APSIZE]);
 	reg &= ~0xff;
 	reg |= apsize;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, asc->regs[REG_APSIZE], reg);
+	pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_APSIZE], reg);
 
-	return (0);
+	return 0;
 }
 
-int
+static int
 agp_via_bind_page(struct agp_softc *sc, off_t offset, bus_addr_t physical)
 {
-	struct agp_via_softc *asc = sc->sc_chipc;
+	struct agp_via_softc *asc = sc->as_chipc;
 
 	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
+		return EINVAL;
 
 	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical;
-	return (0);
+	return 0;
 }
 
-int
+static int
 agp_via_unbind_page(struct agp_softc *sc, off_t offset)
 {
-	struct agp_via_softc *asc = sc->sc_chipc;
+	struct agp_via_softc *asc = sc->as_chipc;
 
 	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
+		return EINVAL;
 
 	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	return 0;
 }
 
-void
+static void
 agp_via_flush_tlb(struct agp_softc *sc)
 {
-	struct agp_via_softc *asc = sc->sc_chipc;
+	struct agp_via_softc *asc = sc->as_chipc;
 	pcireg_t gartctrl;
 
 	if (asc->regs == via_v2_regs) {
-		pci_conf_write(sc->sc_pc, sc->sc_pcitag, asc->regs[REG_GARTCTRL],
-		    0x8f);
-		pci_conf_write(sc->sc_pc, sc->sc_pcitag, asc->regs[REG_GARTCTRL],
-		    0x0f);
+		pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_GARTCTRL],
+				0x8f);
+		pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_GARTCTRL],
+				0x0f);
 	} else {
-		gartctrl = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
-		    asc->regs[REG_GARTCTRL]);
-		pci_conf_write(sc->sc_pc, sc->sc_pcitag, asc->regs[REG_GARTCTRL],
-		    gartctrl & ~(1 << 7));
-		pci_conf_write(sc->sc_pc, sc->sc_pcitag, asc->regs[REG_GARTCTRL],
-		    gartctrl);
+		gartctrl = pci_conf_read(sc->as_pc, sc->as_tag,
+					 asc->regs[REG_GARTCTRL]);
+		pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_GARTCTRL],
+			       gartctrl & ~(1 << 7));
+		pci_conf_write(sc->as_pc, sc->as_tag, asc->regs[REG_GARTCTRL],
+			       gartctrl);
 	}
 }

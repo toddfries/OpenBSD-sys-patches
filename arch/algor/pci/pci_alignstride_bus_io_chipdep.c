@@ -1,4 +1,4 @@
-/*	$NetBSD: pci_alignstride_bus_io_chipdep.c,v 1.6 2005/12/11 12:16:08 christos Exp $	*/
+/*	$NetBSD: pci_alignstride_bus_io_chipdep.c,v 1.8 2008/04/28 20:23:10 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -83,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(1, "$NetBSD: pci_alignstride_bus_io_chipdep.c,v 1.6 2005/12/11 12:16:08 christos Exp $");
+__KERNEL_RCSID(1, "$NetBSD: pci_alignstride_bus_io_chipdep.c,v 1.8 2008/04/28 20:23:10 martin Exp $");
 
 #include <sys/extent.h>
 
@@ -317,7 +310,7 @@ __C(CHIP,_bus_io_init)(t, v)
 #ifdef CHIP_IO_EXTENT
 	/* XXX WE WANT EXTENT_NOCOALESCE, BUT WE CAN'T USE IT. XXX */
 	ex = extent_create(__S(__C(CHIP,_bus_io)), 0x0UL, 0xffffffffUL,
-	    M_DEVBUF, (caddr_t)CHIP_IO_EX_STORE(v), CHIP_IO_EX_STORE_SIZE(v),
+	    M_DEVBUF, (void *)CHIP_IO_EX_STORE(v), CHIP_IO_EX_STORE_SIZE(v),
 	    EX_NOWAIT);
 	extent_alloc_region(ex, 0, 0xffffffffUL, EX_NOWAIT);
 

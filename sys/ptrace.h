@@ -1,5 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.10 2005/12/11 21:30:31 miod Exp $	*/
-/*	$NetBSD: ptrace.h,v 1.21 1996/02/09 18:25:26 christos Exp $	*/
+/*	$NetBSD: ptrace.h,v 1.40 2008/01/05 12:41:43 dsl Exp $	*/
 
 /*-
  * Copyright (c) 1984, 1993
@@ -44,70 +43,104 @@
 #define	PT_KILL		8	/* kill the child process */
 #define	PT_ATTACH	9	/* attach to running process */
 #define	PT_DETACH	10	/* detach from running process */
-#define PT_IO		11	/* do I/O to/from the stopped process. */
-
-struct ptrace_io_desc {
-	int	piod_op;	/* I/O operation */
-	void	*piod_offs;	/* child offset */
-	void	*piod_addr;	/* parent offset */
-	size_t	piod_len;	/* request length */
-};
-
-/*
- * Operations in piod_op.
- */
-#define PIOD_READ_D	1	/* Read from D space */
-#define PIOD_WRITE_D	2	/* Write to D space */
-#define PIOD_READ_I	3	/* Read from I space */
-#define PIOD_WRITE_I	4	/* Write to I space */
-
-#define PT_SET_EVENT_MASK	12
-#define PT_GET_EVENT_MASK	13
-
-typedef struct ptrace_event {
-	int	pe_set_event;
-} ptrace_event_t;
-
-#define PTRACE_FORK	0x0002	/* Report forks */
-
-#define PT_GET_PROCESS_STATE	14
-
-typedef struct ptrace_state {
-	int	pe_report_event;
-	pid_t	pe_other_pid;
-} ptrace_state_t;
-
+#define	PT_IO		11	/* do I/O to/from the stopped process */
+#define	PT_DUMPCORE	12	/* make the child generate a core dump */
+#define	PT_LWPINFO	13	/* get info about the LWP */
+#define	PT_SYSCALL	14	/* stop on syscall entry/exit */
 #define	PT_FIRSTMACH	32	/* for machine-specific requests */
 #include <machine/ptrace.h>	/* machine-specific requests, if any */
 
-#ifdef _KERNEL
+/*
+ * Argument structure for PT_IO.
+ */
+struct ptrace_io_desc {
+	int	piod_op;	/* I/O operation (see below) */
+	void	*piod_offs;	/* child offset */
+	void	*piod_addr;	/* parent offset */
+	size_t	piod_len;	/* request length (in)/actual count (out) */
+};
+
+/* piod_op */
+#define	PIOD_READ_D	1	/* read from D space */
+#define	PIOD_WRITE_D	2	/* write to D spcae */
+#define	PIOD_READ_I	3	/* read from I space */
+#define	PIOD_WRITE_I	4	/* write to I space */
 
 /*
- * There is a bunch of PT_ requests that are machine dependent, but not
- * optional. Check if they were defined by MD code here.
+ * Argument structure for PT_LWPINFO.
  */
-#if !defined(PT_GETREGS) || !defined(PT_SETREGS)
-#error Machine dependent ptrace not complete.
-#endif
+struct ptrace_lwpinfo {
+	lwpid_t	pl_lwpid;	/* LWP described */
+	int	pl_event;	/* Event that stopped the LWP */
+	/* Add fields at the end */
+};
 
+#define PL_EVENT_NONE	0
+#define PL_EVENT_SIGNAL	1
+
+#ifdef _KERNEL
+
+#if defined(PT_GETREGS) || defined(PT_SETREGS)
 struct reg;
+#ifndef process_reg32
+#define process_reg32 struct reg
+#endif
+#ifndef process_reg64
+#define process_reg64 struct reg
+#endif
+#endif
 #if defined(PT_GETFPREGS) || defined(PT_SETFPREGS)
 struct fpreg;
+#ifndef process_fpreg32
+#define process_fpreg32 struct fpreg
+#endif
+#ifndef process_fpreg64
+#define process_fpreg64 struct fpreg
+#endif
 #endif
 
-void	proc_reparent(struct proc *child, struct proc *newparent);
+int	process_doregs(struct lwp *, struct lwp *, struct uio *);
+int	process_validregs(struct lwp *);
+
+int	process_dofpregs(struct lwp *, struct lwp *, struct uio *);
+int	process_validfpregs(struct lwp *);
+
+int	process_domem(struct lwp *, struct lwp *, struct uio *);
+
+void	process_stoptrace(void);
+
+void	proc_reparent(struct proc *, struct proc *);
 #ifdef PT_GETFPREGS
-int	process_read_fpregs(struct proc *p, struct fpreg *regs);
+int	process_read_fpregs(struct lwp *, struct fpreg *);
+#ifndef process_read_fpregs32
+#define process_read_fpregs32	process_read_fpregs
 #endif
-int	process_read_regs(struct proc *p, struct reg *regs);
-int	process_set_pc(struct proc *p, caddr_t addr);
-int	process_sstep(struct proc *p, int sstep);
+#ifndef process_read_fpregs64
+#define process_read_fpregs64	process_read_fpregs
+#endif
+#endif
+#ifdef PT_GETREGS
+int	process_read_regs(struct lwp *, struct reg *);
+#ifndef process_read_regs32
+#define process_read_regs32	process_read_regs
+#endif
+#ifndef process_read_regs64
+#define process_read_regs64	process_read_regs
+#endif
+#endif
+int	process_set_pc(struct lwp *, void *);
+int	process_sstep(struct lwp *, int);
 #ifdef PT_SETFPREGS
-int	process_write_fpregs(struct proc *p, struct fpreg *regs);
+int	process_write_fpregs(struct lwp *, const struct fpreg *);
 #endif
-int	process_write_regs(struct proc *p, struct reg *regs);
-int	process_checkioperm(struct proc *, struct proc *);
-int	process_domem(struct proc *, struct proc *, struct uio *, int);
+#ifdef PT_SETREGS
+int	process_write_regs(struct lwp *, const struct reg *);
+#endif
+
+#ifdef __HAVE_PROCFS_MACHDEP
+int	ptrace_machdep_dorequest(struct lwp *, struct lwp *, int,
+	    void *, int);
+#endif
 
 #ifndef FIX_SSTEP
 #define FIX_SSTEP(p)
@@ -118,7 +151,7 @@ int	process_domem(struct proc *, struct proc *, struct uio *, int);
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int	ptrace(int _request, pid_t _pid, caddr_t _addr, int _data);
+int	ptrace(int _request, pid_t _pid, void *_addr, int _data);
 __END_DECLS
 
 #endif /* !_KERNEL */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka43.h,v 1.5 2006/07/25 21:11:08 miod Exp $ */
-/*	$NetBSD: ka43.h,v 1.2 1997/04/18 18:53:40 ragge Exp $ */
+/*	$NetBSD: ka43.h,v 1.7 2005/12/11 12:19:34 christos Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -33,6 +32,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _VAX_KA43_H_
+#define _VAX_KA43_H_
+
 /*
  * Definitions for I/O addresses of
  *
@@ -65,8 +67,8 @@
 #define KA43_IVN_SIZE	      0x20
 
 #define KA43_HLTCOD	0x20080000	/* Halt Code Register */
-/* #define KA43_MSER	0x20080004 */	/* Memory System Error register */
-/* #define KA43_MEAR	0x20080008 */	/* Memory Error Address register */
+/* #define KA43_MSER	0x20080004*/	/* Memory System Error register */
+/* #define KA43_MEAR	0x20080008*/	/* Memory Error Address register */
 #define KA43_INTMSK	0x2008000C	/* Interrupt Mask register */
 #define KA43_VDCORG	0x2008000D	/* Video Controller Origin Register */
 #define KA43_VDCSEL	0x2008000E	/* Video Controller Select Register */
@@ -184,6 +186,20 @@
 #define KA43_SC2_DCNT	0x200C01C0
 #define KA43_SC2_DDIR	0x200C01C4
 
+#define KA43_CUR_CMD	0x200F0000	/* Cursor Command Register */
+#define KA43_CUR_XPOS	0x200F0004	/* Cursor X position */
+#define KA43_CUR_YPOS	0x200F0008	/* Cursor Y position */
+
+#define KA43_CUR_XMIN1	0x200F000C	/* Region 1 left edge */
+#define KA43_CUR_XMAX1	0x200F0010	/* Region 1 right edge */
+#define KA43_CUR_YMIN1	0x200F0014	/* Region 1 top edge */
+#define KA43_CUR_YMAX1	0x200F0018	/* Region 1 bottom edge */
+
+#define KA43_CUR_XMIN2	0x200F002C	/* Region 2 left edge */
+#define KA43_CUR_XMAX2	0x200F0030	/* Region 2 right edge */
+#define KA43_CUR_YMIN2	0x200F0034	/* Region 2 top edge */
+#define KA43_CUR_YMAX2	0x200F0038	/* Region 2 bottom edge */
+
 /*
  * Clock-Chip data in NVRAM
  */
@@ -229,5 +245,8 @@ struct ka43_clock {
 	u_long  :2;	u_long	csr1	:8;	u_long  :22;
 	u_long  :2;	u_long	csr2	:8;	u_long  :22;
 	u_long  :2;	u_long	csr3	:8;	u_long  :22;
-	u_long  :2;	u_long	cpmbx	:8;	u_long  :22;
+	u_long  :2;	u_long	req	:4;
+	u_long	halt	:4;	u_long  :22;
 };
+
+#endif /* _VAX_KA43_H_ */

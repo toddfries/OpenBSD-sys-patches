@@ -1,5 +1,5 @@
-/*	$OpenBSD: in_gif.h,v 1.5 2007/02/10 15:34:22 claudio Exp $	*/
-/*	$KAME: in_gif.h,v 1.5 2000/04/14 08:36:02 itojun Exp $	*/
+/*	$NetBSD: in_gif.h,v 1.14 2006/11/23 04:07:07 rpaulo Exp $	*/
+/*	$KAME: in_gif.h,v 1.6 2001/07/25 00:55:48 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -33,7 +33,17 @@
 #ifndef _NETINET_IN_GIF_H_
 #define _NETINET_IN_GIF_H_
 
+#define GIF_TTL		30
+
+extern int ip_gif_ttl;
+
+struct gif_softc;
 void in_gif_input(struct mbuf *, ...);
 int in_gif_output(struct ifnet *, int, struct mbuf *);
+#ifdef GIF_ENCAPCHECK
+int gif_encapcheck4(struct mbuf *, int, int, void *);
+#endif
+int in_gif_attach(struct gif_softc *);
+int in_gif_detach(struct gif_softc *);
 
-#endif /*_NETINET_IN_GIF_H_*/
+#endif /* !_NETINET_IN_GIF_H_ */

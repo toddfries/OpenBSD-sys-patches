@@ -1,4 +1,4 @@
-#	$NetBSD: majors.acorn32,v 1.22 2006/11/24 22:04:21 wiz Exp $
+#	$NetBSD: majors.acorn32,v 1.24 2008/11/12 12:35:55 ad Exp $
 #
 # Device majors for acorn32
 #
@@ -33,7 +33,6 @@ device-major	ss		char 29			ss
 device-major	bpf		char 32			bpfilter
 device-major	tun		char 33			tun
 device-major	filedesc	char 34
-device-major	lkm		char 35			lkm
 device-major	audio		char 36			audio
 
 device-major	ipl		char 46			ipfilter
@@ -59,7 +58,6 @@ device-major	isdnbchan	char 81			isdnbchan
 device-major	isdntrc		char 82			isdntrc
 device-major	isdntel		char 83			isdntel
 device-major	clockctl	char 84			clockctl
-device-major	systrace	char 85			systrace
 device-major	ksyms		char 86			ksyms
 device-major	wsfont		char 87			wsfont
 device-major	nsmb		char 88			nsmb

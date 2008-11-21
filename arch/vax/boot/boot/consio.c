@@ -1,5 +1,4 @@
-/*	$OpenBSD: consio.c,v 1.7 2006/08/30 20:02:13 miod Exp $ */
-/*	$NetBSD: consio.c,v 1.13 2002/05/24 21:40:59 ragge Exp $ */
+/*	$NetBSD: consio.c,v 1.14 2006/07/01 05:55:34 mrg Exp $ */
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -45,33 +44,33 @@
 
 #include "data.h"
 
-void setup(void);
+void setup __P((void));
 
-static void (*put_fp)(int)  = NULL;
-static int (*get_fp)(void) = NULL;
-static int (*test_fp)(void) = NULL;
+static void (*put_fp) __P((int))  = NULL;
+static int (*get_fp) __P((void)) = NULL;
+static int (*test_fp) __P((void)) = NULL;
 
-void pr_putchar(int c);	/* putchar() using mtpr/mfpr */
-int pr_getchar(void);
-int pr_testchar(void);
+void pr_putchar __P((int c));	/* putchar() using mtpr/mfpr */
+int pr_getchar __P((void));
+int pr_testchar __P((void));
 
-void rom_putchar(int c);	/* putchar() using ROM routines */
-int rom_getchar(void);
-int rom_testchar(void);
+void rom_putchar __P((int c));	/* putchar() using ROM routines */
+int rom_getchar __P((void));
+int rom_testchar __P((void));
 
 int rom_putc;		/* ROM-address of put-routine */
 int rom_getc;		/* ROM-address of get-routine */
 
 /* Pointer to KA630 console page, initialized by ka630_consinit */
-unsigned char	*ka630_conspage;
+unsigned char  *ka630_conspage; 
 
 /* Function that initializes things for KA630 ROM console I/O */
-void ka630_consinit(void);
+void ka630_consinit __P((void));
 
 /* Functions that use KA630 ROM for console I/O */
-void ka630_rom_putchar(int c);
-int ka630_rom_getchar(void);
-int ka630_rom_testchar(void);
+void ka630_rom_putchar __P((int c));
+int ka630_rom_getchar __P((void));
+int ka630_rom_testchar __P((void));
 
 /* Also added such a thing for KA53 - MK-991208 */
 unsigned char  *ka53_conspage;
@@ -151,11 +150,9 @@ consinit(void)
 		break;
 
 	case VAX_BTYP_VXT:
-		put_fp = rom_putchar;
+		put_fp = vxt_putchar;
 		get_fp = vxt_getchar;
 		test_fp = vxt_testchar;
-		rom_putc = 0x20040058;		/* 537133144 */
-		rom_getc = 0x20040044;		/* 537133124 */
 		break;
 
 	case VAX_BTYP_630:
@@ -172,7 +169,7 @@ consinit(void)
 		rom_getc = 0x20040054;
 		break;
 
-	case VAX_BTYP_1303:
+	case VAX_BTYP_53:
 		ka53_consinit();
 		break;
 
@@ -254,7 +251,7 @@ void ka630_consinit(void)
 	i |= (*NVR++ & 0xFF) << 16;
 	i |= (*NVR++ & 0xFF) << 24;
 
-	ka630_conspage = (char *) i;
+	ka630_conspage = (unsigned char *) i;
 
 	/* Go to last row to minimize confusion */
 	ka630_conspage[KA630_ROW] = ka630_conspage[KA630_MAXROW];
@@ -265,81 +262,47 @@ void ka630_consinit(void)
 	get_fp = ka630_rom_getchar;
 	test_fp = ka630_rom_testchar;
 }
-
+	
 
 /*
  * void ka53_consinit (void)  ==> initialize KA53 ROM console I/O
  */
 void ka53_consinit(void)
 {
-	ka53_conspage = (char *) 0x2014044b;
+	ka53_conspage = (unsigned char *) 0x2014044b;
 
 	put_fp = ka53_rom_putchar;
 	get_fp = ka53_rom_getchar;
 	test_fp = ka53_rom_testchar;
 }
 
-/*
- * VXT2000 console routines.
- *
- * While we can use the rom putchar routine, the rom getchar routine
- * will happily return the last key pressed, even if it is not pressed
- * anymore.
- *
- * To guard against this, we monitor the keyboard serial port and will
- * only invoke the rom function (which will do the keyboard layout
- * translation for us) if there is indeed a new keyboard event (we still
- * need to guard against dead keys, hence the while() condition in
- * vxt_getchar). This still unfortunately causes phantom characters to
- * appear when playing with the shift keys, but nothing backspace can't
- * erase, so this will be a minor annoyance.
- *
- * If console is on the serial port, we do not use the prom routines at
- * all.
- */
 static volatile int *vxtregs = (int *)0x200A0000;
 
-#define	CH_SRA		0x01
-#define	CH_CRA		0x02
-#define	CH_DATA		0x03
-#define	CH_SRC		0x11
-#define	CH_CRC		0x12
-#define	CH_DATC		0x13
-
-#define	CR_RX_ENA	0x01
-#define	CR_TX_ENA	0x04
-#define SR_RX_RDY	0x01
+#define	CH_SR		1
+#define	CH_DAT		3
 #define SR_TX_RDY	0x04
+#define SR_RX_RDY	0x01
+
+void
+vxt_putchar(int c)
+{
+	while ((vxtregs[CH_SR] & SR_TX_RDY) == 0)
+		;
+	vxtregs[CH_DAT] = c;
+}
 
 int
 vxt_getchar(void)
 {
-	if (vax_confdata & 2) {
-		vxtregs[CH_CRC] = CR_RX_ENA;
-		while ((vxtregs[CH_SRC] & SR_RX_RDY) == 0 ||
-		    rom_testchar() == 0)
-			;
-		return rom_getchar();
-	} else {
-		vxtregs[CH_CRA] = CR_RX_ENA;
-		while ((vxtregs[CH_SRA] & SR_RX_RDY) == 0)
-			;
-		return vxtregs[CH_DATA];
-	}
+	while ((vxtregs[CH_SR] & SR_RX_RDY) == 0)
+		;
+	return vxtregs[CH_DAT];
 }
 
 int
 vxt_testchar(void)
 {
-	if (vax_confdata & 2) {
-		vxtregs[CH_CRC] = CR_RX_ENA;
-		if ((vxtregs[CH_SRC] & SR_RX_RDY) == 0)
-			return 0;
-		return rom_testchar();
-	} else {
-		vxtregs[CH_CRA] = CR_RX_ENA;
-		if ((vxtregs[CH_SRA] & SR_RX_RDY) == 0)
-			return 0;
-		return vxtregs[CH_DATA];
-	}
+	if ((vxtregs[CH_SR] & SR_RX_RDY) == 0)
+		return 0;
+	return vxtregs[CH_DAT];
 }

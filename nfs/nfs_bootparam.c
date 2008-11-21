@@ -1,4 +1,4 @@
-/*	$NetBSD: nfs_bootparam.c,v 1.29 2006/04/15 02:49:25 christos Exp $	*/
+/*	$NetBSD: nfs_bootparam.c,v 1.35 2008/11/19 18:36:09 ad Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,10 +34,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfs_bootparam.c,v 1.29 2006/04/15 02:49:25 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfs_bootparam.c,v 1.35 2008/11/19 18:36:09 ad Exp $");
 
+#ifdef _KERNEL_OPT
 #include "opt_nfs_boot.h"
-#include "opt_inet.h"
+#include "arp.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,8 +70,6 @@ __KERNEL_RCSID(0, "$NetBSD: nfs_bootparam.c,v 1.29 2006/04/15 02:49:25 christos 
 #include <nfs/nfsdiskless.h>
 #include <nfs/nfs_var.h>
 
-#include "arp.h"
-
 /*
  * There are two implementations of NFS diskless boot.
  * This implementation uses Sun RPC/bootparams, and the
@@ -93,10 +86,10 @@ __KERNEL_RCSID(0, "$NetBSD: nfs_bootparam.c,v 1.29 2006/04/15 02:49:25 christos 
  */
 
 /* bootparam RPC */
-static int bp_whoami __P((struct sockaddr_in *bpsin,
-	struct in_addr *my_ip, struct in_addr *gw_ip, struct lwp *l));
-static int bp_getfile __P((struct sockaddr_in *bpsin, const char *key,
-	struct nfs_dlmount *ndm, struct lwp *l));
+static int bp_whoami (struct sockaddr_in *bpsin,
+	struct in_addr *my_ip, struct in_addr *gw_ip, struct lwp *l);
+static int bp_getfile (struct sockaddr_in *bpsin, const char *key,
+	struct nfs_dlmount *ndm, struct lwp *l);
 
 
 /*
@@ -110,9 +103,7 @@ static int bp_getfile __P((struct sockaddr_in *bpsin, const char *key,
  * is used for all subsequent booptaram RPCs.
  */
 int
-nfs_bootparam(nd, lwp)
-	struct nfs_diskless *nd;
-	struct lwp *lwp;
+nfs_bootparam(struct nfs_diskless *nd, struct lwp *lwp, int *flags)
 {
 	struct ifnet *ifp = nd->nd_ifp;
 	struct in_addr my_ip, arps_ip, gw_ip;
@@ -135,7 +126,6 @@ nfs_bootparam(nd, lwp)
 	}
 
 	error = EADDRNOTAVAIL;
-#ifdef INET
 #if NARP > 0
 	if (ifp->if_type == IFT_ETHER || ifp->if_type == IFT_FDDI) {
 		/*
@@ -144,15 +134,17 @@ nfs_bootparam(nd, lwp)
 		error = revarpwhoarewe(ifp, &arps_ip, &my_ip);
 	}
 #endif
-#endif
 	if (error) {
 		printf("revarp failed, error=%d\n", error);
 		goto out;
 	}
 
-	nd->nd_myip.s_addr = my_ip.s_addr;
-	printf("nfs_boot: client_addr=%s", inet_ntoa(my_ip));
-	printf(" (RARP from %s)\n", inet_ntoa(arps_ip));
+	if (!(*flags & NFS_BOOT_HAS_MYIP)) {
+		nd->nd_myip.s_addr = my_ip.s_addr;
+		printf("nfs_boot: client_addr=%s", inet_ntoa(my_ip));
+		printf(" (RARP from %s)\n", inet_ntoa(arps_ip));
+		*flags |= NFS_BOOT_HAS_MYIP;
+	}
 
 	/*
 	 * Do enough of ifconfig(8) so that the chosen interface
@@ -174,7 +166,7 @@ nfs_bootparam(nd, lwp)
 	 * is used for all subsequent booptaram RPCs.
 	 */
 	sin = &bp_sin;
-	memset((caddr_t)sin, 0, sizeof(*sin));
+	memset((void *)sin, 0, sizeof(*sin));
 	sin->sin_len = sizeof(*sin);
 	sin->sin_family = AF_INET;
 	sin->sin_addr.s_addr = INADDR_BROADCAST;
@@ -199,8 +191,8 @@ nfs_bootparam(nd, lwp)
 	}
 
 #ifndef NFS_BOOTPARAM_NOGATEWAY
-	gw_ndm = malloc(sizeof(*gw_ndm), M_NFSMNT, M_WAITOK);
-	memset((caddr_t)gw_ndm, 0, sizeof(*gw_ndm));
+	gw_ndm = kmem_alloc(sizeof(*gw_ndm), KM_SLEEP);
+	memset((void *)gw_ndm, 0, sizeof(*gw_ndm));
 	error = bp_getfile(sin, "gateway", gw_ndm, lwp);
 	if (error) {
 		/* No gateway supplied. No error, but try fallback. */
@@ -269,8 +261,11 @@ out:
 #ifndef NFS_BOOTPARAM_NOGATEWAY
 gwok:
 	if (gw_ndm)
-		free(gw_ndm, M_NFSMNT);
+		kmem_free(gw_ndm, sizeof(*gw_ndm));
 #endif
+	if ((*flags & NFS_BOOT_ALLINFO) != NFS_BOOT_ALLINFO)
+		return error ? error : EADDRNOTAVAIL;
+
 	return (error);
 }
 
@@ -291,11 +286,8 @@ gwok:
  * know about us (don't want to broadcast a getport call).
  */
 static int
-bp_whoami(bpsin, my_ip, gw_ip, l)
-	struct sockaddr_in *bpsin;
-	struct in_addr *my_ip;
-	struct in_addr *gw_ip;
-	struct lwp *l;
+bp_whoami(struct sockaddr_in *bpsin, struct in_addr *my_ip,
+	struct in_addr *gw_ip, struct lwp *l)
 {
 	/* RPC structures for PMAPPROC_CALLIT */
 	struct whoami_call {
@@ -399,11 +391,8 @@ out:
  *	server pathname
  */
 static int
-bp_getfile(bpsin, key, ndm, l)
-	struct sockaddr_in *bpsin;
-	const char *key;
-	struct nfs_dlmount *ndm;
-	struct lwp *l;
+bp_getfile(struct sockaddr_in *bpsin, const char *key,
+	struct nfs_dlmount *ndm, struct lwp *l)
 {
 	char pathname[MNAMELEN];
 	struct in_addr inaddr;
@@ -460,7 +449,7 @@ bp_getfile(bpsin, key, ndm, l)
 	 * The strings become "server:pathname"
 	 */
 	sin = (struct sockaddr_in *) &ndm->ndm_saddr;
-	memset((caddr_t)sin, 0, sizeof(*sin));
+	memset((void *)sin, 0, sizeof(*sin));
 	sin->sin_len = sizeof(*sin);
 	sin->sin_family = AF_INET;
 	sin->sin_addr = inaddr;

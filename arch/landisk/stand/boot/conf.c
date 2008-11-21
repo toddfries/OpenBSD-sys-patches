@@ -1,52 +1,59 @@
-/*	$OpenBSD: conf.c,v 1.3 2008/04/19 23:20:22 weingart Exp $	*/
+/*	$NetBSD: conf.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
- * Copyright (c) 2006 Michael Shalayeff
- * All rights reserved.
+ * Copyright (c) 1996
+ *	Matthias Drochner.  All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed for the NetBSD Project
+ *	by Matthias Drochner.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF MIND, USE, DATA OR PROFITS, WHETHER IN
- * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
- * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
  */
 
 #include <sys/types.h>
-#include <libsa.h>
-#include <lib/libsa/ufs.h>
-#ifdef notdef
-#include <lib/libsa/cd9660.h>
-#include <lib/libsa/fat.h>
-#include <lib/libsa/nfs.h>
-#include <lib/libsa/tftp.h>
-#include <lib/libsa/netif.h>
-#endif
-#include <dev/cons.h>
 
-const char version[] = "1.01";
-int	debug = 1;
+#include <lib/libsa/stand.h>
+
+#include <lib/libsa/ufs.h>
+#include <lib/libsa/dosfs.h>
+
+#include "biosdisk.h"
+
+struct devsw devsw[] = {
+#if defined(SUPPORT_UFS)
+{ "hd", biosdisk_strategy, biosdisk_open, biosdisk_close, biosdisk_ioctl},
+#endif
+};
+int ndevs = sizeof(devsw) / sizeof(devsw[0]);
 
 struct fs_ops file_system[] = {
-	{ ufs_open,    ufs_close,    ufs_read,    ufs_write,    ufs_seek,
-	  ufs_stat,    ufs_readdir    },
-#ifdef notdef
-	{ fat_open,    fat_close,    fat_read,    fat_write,    fat_seek,
-	  fat_stat,    fat_readdir    },
-	{ nfs_open,    nfs_close,    nfs_read,    nfs_write,    nfs_seek,
-	  nfs_stat,    nfs_readdir    },
-	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write, cd9660_seek,
-	  cd9660_stat, cd9660_readdir },
+#ifdef SUPPORT_UFS
+{ ufs_open, ufs_close, ufs_read, ufs_write, ufs_seek, ufs_stat },
+#endif
+#ifdef SUPPORT_DOSFS
+{ dosfs_open, dosfs_close, dosfs_read, dosfs_write, dosfs_seek, dosfs_stat },
 #endif
 };
-int nfsys = NENTS(file_system);
-
-struct devsw	devsw[] = {
-	{ "dk", blkdevstrategy, blkdevopen, blkdevclose, noioctl },
-};
-int ndevs = NENTS(devsw);
+int nfsys = sizeof(file_system) / sizeof(file_system[0]);

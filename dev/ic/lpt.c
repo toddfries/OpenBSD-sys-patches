@@ -1,8 +1,7 @@
-/*	$OpenBSD: lpt.c,v 1.5 2002/03/14 01:26:54 millert Exp $ */
-/*	$NetBSD: lpt.c,v 1.42 1996/10/21 22:41:14 thorpej Exp $	*/
+/*	$NetBSD: lpt.c,v 1.75 2008/06/10 22:53:08 cegger Exp $	*/
 
 /*
- * Copyright (c) 1993, 1994 Charles Hannum.
+ * Copyright (c) 1993, 1994 Charles M. Hannum.
  * Copyright (c) 1990 William F. Jolitz, TeleMuse
  * All rights reserved.
  *
@@ -16,25 +15,25 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This software is a component of "386BSD" developed by 
+ *	This software is a component of "386BSD" developed by
  *	William F. Jolitz, TeleMuse.
  * 4. Neither the name of the developer nor the name "386BSD"
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
- * THIS SOFTWARE IS A COMPONENT OF 386BSD DEVELOPED BY WILLIAM F. JOLITZ 
- * AND IS INTENDED FOR RESEARCH AND EDUCATIONAL PURPOSES ONLY. THIS 
- * SOFTWARE SHOULD NOT BE CONSIDERED TO BE A COMMERCIAL PRODUCT. 
- * THE DEVELOPER URGES THAT USERS WHO REQUIRE A COMMERCIAL PRODUCT 
+ * THIS SOFTWARE IS A COMPONENT OF 386BSD DEVELOPED BY WILLIAM F. JOLITZ
+ * AND IS INTENDED FOR RESEARCH AND EDUCATIONAL PURPOSES ONLY. THIS
+ * SOFTWARE SHOULD NOT BE CONSIDERED TO BE A COMMERCIAL PRODUCT.
+ * THE DEVELOPER URGES THAT USERS WHO REQUIRE A COMMERCIAL PRODUCT
  * NOT MAKE USE OF THIS WORK.
  *
  * FOR USERS WHO WISH TO UNDERSTAND THE 386BSD SYSTEM DEVELOPED
- * BY WILLIAM F. JOLITZ, WE RECOMMEND THE USER STUDY WRITTEN 
- * REFERENCES SUCH AS THE  "PORTING UNIX TO THE 386" SERIES 
- * (BEGINNING JANUARY 1991 "DR. DOBBS JOURNAL", USA AND BEGINNING 
- * JUNE 1991 "UNIX MAGAZIN", GERMANY) BY WILLIAM F. JOLITZ AND 
- * LYNNE GREER JOLITZ, AS WELL AS OTHER BOOKS ON UNIX AND THE 
- * ON-LINE 386BSD USER MANUAL BEFORE USE. A BOOK DISCUSSING THE INTERNALS 
+ * BY WILLIAM F. JOLITZ, WE RECOMMEND THE USER STUDY WRITTEN
+ * REFERENCES SUCH AS THE  "PORTING UNIX TO THE 386" SERIES
+ * (BEGINNING JANUARY 1991 "DR. DOBBS JOURNAL", USA AND BEGINNING
+ * JUNE 1991 "UNIX MAGAZIN", GERMANY) BY WILLIAM F. JOLITZ AND
+ * LYNNE GREER JOLITZ, AS WELL AS OTHER BOOKS ON UNIX AND THE
+ * ON-LINE 386BSD USER MANUAL BEFORE USE. A BOOK DISCUSSING THE INTERNALS
  * OF 386BSD ENTITLED "386BSD FROM THE INSIDE OUT" WILL BE AVAILABLE LATE 1992.
  *
  * THIS SOFTWARE IS PROVIDED BY THE DEVELOPER ``AS IS'' AND
@@ -51,28 +50,29 @@
  */
 
 /*
- * Device Driver for AT parallel printer port
+ * Device Driver for AT style parallel printer port
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: lpt.c,v 1.75 2008/06/10 22:53:08 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/user.h>
-#include <sys/buf.h>
+#include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/syslog.h>
+#include <sys/intr.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
 
 #include <dev/ic/lptreg.h>
 #include <dev/ic/lptvar.h>
-
-#include "lpt.h"
 
 #define	TIMEOUT		hz*16	/* wait up to 16 seconds for a ready */
 #define	STEP		hz/4
@@ -80,103 +80,89 @@
 #define	LPTPRI		(PZERO+8)
 #define	LPT_BSIZE	1024
 
-#if !defined(DEBUG) || !defined(notdef)
+#define LPTDEBUG
+
+#ifndef LPTDEBUG
 #define LPRINTF(a)
 #else
 #define LPRINTF(a)	if (lptdebug) printf a
-int lptdebug = 1;
+int lptdebug = 0;
 #endif
 
-/* XXX does not belong here */
-cdev_decl(lpt);
+extern struct cfdriver lpt_cd;
 
-struct cfdriver lpt_cd = {
-	NULL, "lpt", DV_TTY
+dev_type_open(lptopen);
+dev_type_close(lptclose);
+dev_type_write(lptwrite);
+dev_type_ioctl(lptioctl);
+
+const struct cdevsw lpt_cdevsw = {
+	lptopen, lptclose, noread, lptwrite, lptioctl,
+	nostop, notty, nopoll, nommap, nokqfilter, D_OTHER,
 };
 
 #define	LPTUNIT(s)	(minor(s) & 0x1f)
 #define	LPTFLAGS(s)	(minor(s) & 0xe0)
 
-#define	LPS_INVERT	(LPS_SELECT|LPS_NERR|LPS_NBSY|LPS_NACK)
-#define	LPS_MASK	(LPS_SELECT|LPS_NERR|LPS_NBSY|LPS_NACK|LPS_NOPAPER)
-#define	NOT_READY() \
-    ((bus_space_read_1(iot, ioh, lpt_status) ^ LPS_INVERT) & LPS_MASK)
-#define	NOT_READY_ERR() \
-    lpt_not_ready(bus_space_read_1(iot, ioh, lpt_status), sc)
-
-int	lpt_not_ready(u_int8_t, struct lpt_softc *);
-void	lptwakeup(void *arg);
-int	lptpushbytes(struct lpt_softc *);
-
-/*
- * Internal routine to lptprobe to do port tests of one byte value.
- */
-int
-lpt_port_test(iot, ioh, base, off, data, mask)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	bus_addr_t base;
-	bus_size_t off;
-	u_int8_t data, mask;
-{
-	int timeout;
-	u_int8_t temp;
-
-	data &= mask;
-	bus_space_write_1(iot, ioh, off, data);
-	timeout = 1000;
-	do {
-		delay(10);
-		temp = bus_space_read_1(iot, ioh, off) & mask;
-	} while (temp != data && --timeout);
-	LPRINTF(("lpt: port=0x%x out=0x%x in=0x%x timeout=%d\n", base + off,
-	    data, temp, timeout));
-	return (temp == data);
-}
+static void	lptsoftintr(void *);
 
 void
-lpt_attach_common(sc)
+lpt_attach_subr(sc)
 	struct lpt_softc *sc;
 {
-	printf("\n");
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
 
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, lpt_control, LPC_NINIT);
+	sc->sc_state = 0;
 
-	timeout_set(&sc->sc_wakeup_tmo, lptwakeup, sc);
+	iot = sc->sc_iot;
+	ioh = sc->sc_ioh;
+
+	bus_space_write_1(iot, ioh, lpt_control, LPC_NINIT);
+
+	callout_init(&sc->sc_wakeup_ch, 0);
+	sc->sc_sih = softint_establish(SOFTINT_SERIAL, lptsoftintr, sc);
+
+	sc->sc_dev_ok = 1;
+}
+
+int
+lpt_detach_subr(device_t self, int flags)
+{
+	struct lpt_softc *sc = device_private(self);
+
+	sc->sc_dev_ok = 0;
+	softint_disestablish(sc->sc_sih);
+	callout_destroy(&sc->sc_wakeup_ch);
+	return 0;
 }
 
 /*
  * Reset the printer, then wait until it's selected and not busy.
  */
 int
-lptopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
+lptopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	int unit = LPTUNIT(dev);
-	u_int8_t flags = LPTFLAGS(dev);
+	u_char flags = LPTFLAGS(dev);
 	struct lpt_softc *sc;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
-	u_int8_t control;
+	u_char control;
 	int error;
 	int spin;
 
-	if (unit >= lpt_cd.cd_ndevs)
-		return ENXIO;
-	sc = lpt_cd.cd_devs[unit];
-	if (!sc)
+	sc = device_lookup_private(&lpt_cd, LPTUNIT(dev));
+	if (!sc || !sc->sc_dev_ok)
 		return ENXIO;
 
-	sc->sc_flags = (sc->sc_flags & LPT_POLLED) | flags;
-	if ((sc->sc_flags & (LPT_POLLED|LPT_NOINTR)) == LPT_POLLED)
+#if 0	/* XXX what to do? */
+	if (sc->sc_irq == IRQUNK && (flags & LPT_NOINTR) == 0)
 		return ENXIO;
+#endif
 
 #ifdef DIAGNOSTIC
 	if (sc->sc_state)
-		printf("%s: stat=0x%x not zero\n", sc->sc_dev.dv_xname,
+		aprint_verbose_dev(sc->sc_dev, "stat=0x%x not zero\n",
 		    sc->sc_state);
 #endif
 
@@ -184,7 +170,9 @@ lptopen(dev, flag, mode, p)
 		return EBUSY;
 
 	sc->sc_state = LPT_INIT;
-	LPRINTF(("%s: open: flags=0x%x\n", sc->sc_dev.dv_xname, flags));
+	sc->sc_flags = flags;
+	LPRINTF(("%s: open: flags=0x%x\n", device_xname(sc->sc_dev),
+	    (unsigned)flags));
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
 
@@ -205,7 +193,7 @@ lptopen(dev, flag, mode, p)
 		}
 
 		/* wait 1/4 second, give up if we get a signal */
-		error = tsleep((caddr_t)sc, LPTPRI | PCATCH, "lptopen", STEP);
+		error = tsleep((void *)sc, LPTPRI | PCATCH, "lptopen", STEP);
 		if (error != EWOULDBLOCK) {
 			sc->sc_state = 0;
 			return error;
@@ -219,34 +207,39 @@ lptopen(dev, flag, mode, p)
 	sc->sc_control = control;
 	bus_space_write_1(iot, ioh, lpt_control, control);
 
-	sc->sc_inbuf = geteblk(LPT_BSIZE);
+	sc->sc_inbuf = malloc(LPT_BSIZE, M_DEVBUF, M_WAITOK);
 	sc->sc_count = 0;
 	sc->sc_state = LPT_OPEN;
 
 	if ((sc->sc_flags & LPT_NOINTR) == 0)
 		lptwakeup(sc);
 
-	LPRINTF(("%s: opened\n", sc->sc_dev.dv_xname));
+	LPRINTF(("%s: opened\n", device_xname(sc->sc_dev)));
 	return 0;
 }
 
 int
-lpt_not_ready(status, sc)
-	u_int8_t status;
+lptnotready(status, sc)
+	u_char status;
 	struct lpt_softc *sc;
 {
-	u_int8_t new;
+	u_char new;
 
 	status = (status ^ LPS_INVERT) & LPS_MASK;
 	new = status & ~sc->sc_laststatus;
 	sc->sc_laststatus = status;
 
-	if (new & LPS_SELECT)
-		log(LOG_NOTICE, "%s: offline\n", sc->sc_dev.dv_xname);
-	else if (new & LPS_NOPAPER)
-		log(LOG_NOTICE, "%s: out of paper\n", sc->sc_dev.dv_xname);
-	else if (new & LPS_NERR)
-		log(LOG_NOTICE, "%s: output error\n", sc->sc_dev.dv_xname);
+	if (sc->sc_state & LPT_OPEN) {
+		if (new & LPS_SELECT)
+			log(LOG_NOTICE,
+			    "%s: offline\n", device_xname(sc->sc_dev));
+		else if (new & LPS_NOPAPER)
+			log(LOG_NOTICE,
+			    "%s: out of paper\n", device_xname(sc->sc_dev));
+		else if (new & LPS_NERR)
+			log(LOG_NOTICE,
+			    "%s: output error\n", device_xname(sc->sc_dev));
+	}
 
 	return status;
 }
@@ -258,25 +251,22 @@ lptwakeup(arg)
 	struct lpt_softc *sc = arg;
 	int s;
 
-	s = spltty();
+	s = spllpt();
 	lptintr(sc);
 	splx(s);
 
-	timeout_add(&sc->sc_wakeup_tmo, STEP);
+	callout_reset(&sc->sc_wakeup_ch, STEP, lptwakeup, sc);
 }
 
 /*
  * Close the device, and free the local line buffer.
  */
 int
-lptclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
+lptclose(dev_t dev, int flag, int mode,
+    struct lwp *l)
 {
-	int unit = LPTUNIT(dev);
-	struct lpt_softc *sc = lpt_cd.cd_devs[unit];
+	struct lpt_softc *sc =
+	    device_lookup_private(&lpt_cd, LPTUNIT(dev));
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 
@@ -284,14 +274,14 @@ lptclose(dev, flag, mode, p)
 		(void) lptpushbytes(sc);
 
 	if ((sc->sc_flags & LPT_NOINTR) == 0)
-		timeout_del(&sc->sc_wakeup_tmo);
+		callout_stop(&sc->sc_wakeup_ch);
 
 	bus_space_write_1(iot, ioh, lpt_control, LPC_NINIT);
 	sc->sc_state = 0;
 	bus_space_write_1(iot, ioh, lpt_control, LPC_NINIT);
-	brelse(sc->sc_inbuf);
+	free(sc->sc_inbuf, M_DEVBUF);
 
-	LPRINTF(("%s: closed\n", sc->sc_dev.dv_xname));
+	LPRINTF(("%s: closed\n", device_xname(sc->sc_dev)));
 	return 0;
 }
 
@@ -305,7 +295,7 @@ lptpushbytes(sc)
 
 	if (sc->sc_flags & LPT_NOINTR) {
 		int spin, tic;
-		u_int8_t control = sc->sc_control;
+		u_char control = sc->sc_control;
 
 		while (sc->sc_count > 0) {
 			spin = 0;
@@ -320,7 +310,7 @@ lptpushbytes(sc)
 					tic = tic + tic + 1;
 					if (tic > TIMEOUT)
 						tic = TIMEOUT;
-					error = tsleep((caddr_t)sc,
+					error = tsleep((void *)sc,
 					    LPTPRI | PCATCH, "lptpsh", tic);
 					if (error != EWOULDBLOCK)
 						return error;
@@ -329,10 +319,13 @@ lptpushbytes(sc)
 			}
 
 			bus_space_write_1(iot, ioh, lpt_data, *sc->sc_cp++);
+			DELAY(1);
 			bus_space_write_1(iot, ioh, lpt_control,
 			    control | LPC_STROBE);
+			DELAY(1);
 			sc->sc_count--;
 			bus_space_write_1(iot, ioh, lpt_control, control);
+			DELAY(1);
 
 			/* adapt busy-wait algorithm */
 			if (spin*2 + 16 < sc->sc_spinmax)
@@ -344,13 +337,14 @@ lptpushbytes(sc)
 		while (sc->sc_count > 0) {
 			/* if the printer is ready for a char, give it one */
 			if ((sc->sc_state & LPT_OBUSY) == 0) {
-				LPRINTF(("%s: write %d\n", sc->sc_dev.dv_xname,
-				    sc->sc_count));
-				s = spltty();
+				LPRINTF(("%s: write %lu\n",
+				    device_xname(sc->sc_dev),
+				    (u_long)sc->sc_count));
+				s = spllpt();
 				(void) lptintr(sc);
 				splx(s);
 			}
-			error = tsleep((caddr_t)sc, LPTPRI | PCATCH,
+			error = tsleep((void *)sc, LPTPRI | PCATCH,
 			    "lptwrite2", 0);
 			if (error)
 				return error;
@@ -359,22 +353,20 @@ lptpushbytes(sc)
 	return 0;
 }
 
-/* 
+/*
  * Copy a line from user space to a local buffer, then call putc to get the
  * chars moved to the output queue.
  */
 int
-lptwrite(dev, uio, flags)
-	dev_t dev;
-	struct uio *uio;
-	int flags;
+lptwrite(dev_t dev, struct uio *uio, int flags)
 {
-	struct lpt_softc *sc = lpt_cd.cd_devs[LPTUNIT(dev)];
+	struct lpt_softc *sc =
+	    device_lookup_private(&lpt_cd, LPTUNIT(dev));
 	size_t n;
 	int error = 0;
 
 	while ((n = min(LPT_BSIZE, uio->uio_resid)) != 0) {
-		uiomove(sc->sc_cp = sc->sc_inbuf->b_data, n, uio);
+		uiomove(sc->sc_cp = sc->sc_inbuf, n, uio);
 		sc->sc_count = n;
 		error = lptpushbytes(sc);
 		if (error) {
@@ -402,48 +394,47 @@ lptintr(arg)
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 
-	if (((sc->sc_state & LPT_OPEN) == 0 && sc->sc_count == 0) ||
-	    (sc->sc_flags & LPT_NOINTR))
+#if 0
+	if ((sc->sc_state & LPT_OPEN) == 0)
 		return 0;
+#endif
 
 	/* is printer online and ready for output */
 	if (NOT_READY() && NOT_READY_ERR())
-		return -1;
+		return 0;
 
 	if (sc->sc_count) {
-		u_int8_t control = sc->sc_control;
+		u_char control = sc->sc_control;
 		/* send char */
 		bus_space_write_1(iot, ioh, lpt_data, *sc->sc_cp++);
-		delay (50);
+		DELAY(1);
 		bus_space_write_1(iot, ioh, lpt_control, control | LPC_STROBE);
+		DELAY(1);
 		sc->sc_count--;
 		bus_space_write_1(iot, ioh, lpt_control, control);
+		DELAY(1);
 		sc->sc_state |= LPT_OBUSY;
 	} else
 		sc->sc_state &= ~LPT_OBUSY;
 
 	if (sc->sc_count == 0) {
 		/* none, wake up the top half to get more */
-		wakeup((caddr_t)sc);
+		softint_schedule(sc->sc_sih);
 	}
 
 	return 1;
 }
 
-int
-lptioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+static void
+lptsoftintr(void *cookie)
 {
-	int error = 0;
 
-	switch (cmd) {
-	default:
-		error = ENODEV;
-	}
+	wakeup(cookie);
+}
 
-	return error;
+int
+lptioctl(dev_t dev, u_long cmd, void *data,
+    int flag, struct lwp *l)
+{
+	return ENODEV;
 }

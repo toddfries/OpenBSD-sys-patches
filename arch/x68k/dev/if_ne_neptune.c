@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ne_neptune.c,v 1.11 2005/12/11 12:19:37 christos Exp $	*/
+/*	$NetBSD: if_ne_neptune.c,v 1.16 2008/05/09 10:09:27 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ne_neptune.c,v 1.11 2005/12/11 12:19:37 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ne_neptune.c,v 1.16 2008/05/09 10:09:27 tsutsui Exp $");
 
 #include "opt_inet.h"
 #include "opt_ns.h"
@@ -86,21 +79,21 @@ __KERNEL_RCSID(0, "$NetBSD: if_ne_neptune.c,v 1.11 2005/12/11 12:19:37 christos 
 #include <dev/ic/ne2000var.h>
 
 #include <dev/ic/rtl80x9reg.h>
-#include <dev/ic/rtl80x9var.h>          
+#include <dev/ic/rtl80x9var.h>
 
 #include <arch/x68k/dev/neptunevar.h>
 
-static int ne_neptune_match(struct device *, struct cfdata *, void *);
-static void ne_neptune_attach(struct device *, struct device *, void *);
+static int ne_neptune_match(device_t, cfdata_t, void *);
+static void ne_neptune_attach(device_t, device_t, void *);
 static int ne_neptune_intr(void *);
 
 #define ne_neptune_softc ne2000_softc
 
-CFATTACH_DECL(ne_neptune, sizeof(struct ne_neptune_softc),
+CFATTACH_DECL_NEW(ne_neptune, sizeof(struct ne_neptune_softc),
     ne_neptune_match, ne_neptune_attach, NULL, NULL);
 
 int
-ne_neptune_match(struct device *parent, struct cfdata *match, void *aux)
+ne_neptune_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct neptune_attach_args *na = aux;
 	bus_space_tag_t nict = na->na_bst;
@@ -134,9 +127,9 @@ ne_neptune_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 void
-ne_neptune_attach(struct device *parent, struct device *self, void *aux)
+ne_neptune_attach(device_t parent, device_t self, void *aux)
 {
-	struct ne_neptune_softc *nsc = (struct ne_neptune_softc *)self;
+	struct ne_neptune_softc *nsc = device_private(self);
 	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	struct neptune_attach_args *na = aux;
 	bus_space_tag_t nict = na->na_bst;
@@ -146,17 +139,18 @@ ne_neptune_attach(struct device *parent, struct device *self, void *aux)
 	const char *typestr;
 	int netype;
 
-	printf("\n");
+	dsc->sc_dev = self;
+	aprint_normal("\n");
 
 	/* Map i/o space. */
 	if (bus_space_map(nict, na->na_addr, NE2000_NPORTS*2, 0, &nich)) {
-		printf("%s: can't map i/o space\n", dsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "can't map i/o space\n");
 		return;
 	}
 
 	if (bus_space_subregion(nict, nich, NE2000_ASIC_OFFSET,
 	    NE2000_ASIC_NPORTS*2, &asich)) {
-		printf("%s: can't subregion i/o space\n", dsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "can't subregion i/o space\n");
 		return;
 	}
 
@@ -196,11 +190,11 @@ ne_neptune_attach(struct device *parent, struct device *self, void *aux)
 		break;
 
 	default:
-		printf("%s: where did the card go?!\n", dsc->sc_dev.dv_xname);
+		aprint_error_dev(self, "where did the card go?!\n");
 		return;
 	}
 
-	printf("%s: %s Ethernet\n", dsc->sc_dev.dv_xname, typestr);
+	aprint_normal_dev(self, "%s Ethernet\n", typestr);
 
 	/* This interface is always enabled. */
 	dsc->sc_enabled = 1;
@@ -213,8 +207,8 @@ ne_neptune_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Establish the interrupt handler. */
 	if (neptune_intr_establish(na->na_intr, "ne", ne_neptune_intr, dsc))
-		printf("%s: couldn't establish interrupt handler\n",
-		    dsc->sc_dev.dv_xname);
+		aprint_error_dev(self,
+		    "couldn't establish interrupt handler\n");
 }
 
 static int

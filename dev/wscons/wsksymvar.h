@@ -1,5 +1,4 @@
-/*	$OpenBSD: wsksymvar.h,v 1.6 2007/05/31 22:23:13 tedu Exp $	*/
-/*	$NetBSD: wsksymvar.h,v 1.8.4.1 2000/07/07 09:50:21 hannken Exp $ */
+/*	$NetBSD: wsksymvar.h,v 1.11 2008/04/28 20:24:01 martin Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -53,6 +45,7 @@ struct wscons_keymap {
 	keysym_t group2[2];
 };
 
+#ifdef _KERNEL
 struct wscons_keydesc {
 	kbd_t	name;				/* name of this map */
 	kbd_t	base;				/* map this one is based on */
@@ -60,7 +53,6 @@ struct wscons_keydesc {
 	const keysym_t *map;			/* the map itself */
 };
 
-#ifdef _KERNEL
 struct wskbd_mapdata {
 	const struct wscons_keydesc *keydesc;
 	kbd_t layout;
@@ -73,10 +65,10 @@ struct wskbd_mapdata {
  * Utility functions.
  */
 void	wskbd_get_mapentry(const struct wskbd_mapdata *, int,
-                                struct wscons_keymap *);
+			   struct wscons_keymap *);
 void	wskbd_init_keymap(int, struct wscons_keymap **, int *);
 int	wskbd_load_keymap(const struct wskbd_mapdata *,
-                               struct wscons_keymap **, int *);
+                          struct wscons_keymap **, int *);
 keysym_t wskbd_compose_value(keysym_t *);
 
 #endif

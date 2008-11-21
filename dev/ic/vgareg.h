@@ -1,5 +1,4 @@
-/* $OpenBSD: vgareg.h,v 1.3 2004/04/02 04:39:50 deraadt Exp $ */
-/* $NetBSD: vgareg.h,v 1.2 1998/05/28 16:48:41 drochner Exp $ */
+/* $NetBSD: vgareg.h,v 1.9 2005/12/11 12:21:29 christos Exp $ */
 
 /*
  * Copyright (c) 1998
@@ -27,29 +26,46 @@
  *
  */
 
-#pragma pack(1)
-
 struct reg_vgaattr { /* indexed via port 0x3c0 */
 	u_int8_t palette[16];
 	u_int8_t mode, overscan, colplen, horpixpan;
 	u_int8_t colreset, misc;
 };
-#define VGA_ATC_INDEX 0
-#define VGA_ATC_DATAW 0
-#define VGA_ATC_DATAR 1
+#define VGA_ATC_NREGS	21
+#define VGA_ATC_INDEX	0x0
+#define VGA_ATC_DATAW	0x0
+#define VGA_ATC_DATAR	0x1
+#define VGA_ATC_OVERSCAN	0x11
 
 struct reg_vgats { /* indexed via port 0x3c4 */
 	u_int8_t syncreset, mode, wrplmask, fontsel, memmode;
 };
-#define VGA_TS_INDEX 4
-#define VGA_TS_DATA 5
+#define VGA_TS_MODE_BLANK	0x20
+
+#define VGA_TS_NREGS	5
+#define VGA_TS_INDEX 	0x4
+#define VGA_TS_DATA	0x5
 
 struct reg_vgagdc { /* indexed via port 0x3ce */
 	u_int8_t setres, ensetres, colorcomp, rotfunc;
 	u_int8_t rdplanesel, mode, misc, colorcare;
 	u_int8_t bitmask;
 };
-#define VGA_GDC_INDEX 0xe
-#define VGA_GDC_DATA 0xf
+#define VGA_GDC_NREGS	9
+#define VGA_GDC_INDEX	0xe
+#define VGA_GDC_DATA	0xf
 
-#pragma pack()
+/*
+ * CRTC registers are defined in sys/dev/ic/mc6845reg.h
+ */
+
+/* video DAC palette registers */
+#define VGA_DAC_PELMASK	0x6
+#define VGA_DAC_STATE	0x7
+#define VGA_DAC_ADDRR	0x7
+#define VGA_DAC_ADDRW	0x8
+#define VGA_DAC_PALETTE	0x9
+
+/* misc output register */
+#define VGA_MISC_DATAR	0xc
+#define VGA_MISC_DATAW	0x2

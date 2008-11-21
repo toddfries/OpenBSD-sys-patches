@@ -1,5 +1,4 @@
-/*	$OpenBSD: fiq_subr.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: fiq_subr.S,v 1.3 2002/04/12 18:50:31 thorpej Exp $	*/
+/*	$NetBSD: fiq_subr.S,v 1.4 2008/04/27 18:58:43 matt Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -88,7 +87,7 @@ ENTRY(fiq_getregs)
 	stmia	r0, {r8-r13}
 
 	BACK_TO_SVC_MODE
-	mov	pc, lr
+	RET
 
 /*
  * fiq_setregs:
@@ -102,7 +101,7 @@ ENTRY(fiq_setregs)
 	ldmia	r0, {r8-r13}
 
 	BACK_TO_SVC_MODE
-	mov	pc, lr
+	RET
 
 /*
  * fiq_nullhandler:

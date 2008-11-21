@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_prf2.c,v 1.1 2007/08/15 20:34:48 ad Exp $	*/
+/*	$NetBSD: subr_prf2.c,v 1.3 2008/09/23 22:20:24 pooka Exp $	*/
 
 /*-
  * Copyright (c) 1986, 1988, 1991, 1993
@@ -37,16 +37,33 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_prf2.c,v 1.1 2007/08/15 20:34:48 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_prf2.c,v 1.3 2008/09/23 22:20:24 pooka Exp $");
 
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/kprintf.h>
+#include <sys/syslog.h>
+#include <sys/systm.h>
 
 /*
  * This function is in its own separate module to permit easier
  * standalone compilation without pulling in kprintf(), panic(), etcetc.
  */
+
+const char hexdigits[] = "0123456789abcdef";
+const char HEXDIGITS[] = "0123456789ABCDEF";
+
+/*
+ * tablefull: warn that a system table is full
+ */
+
+void
+tablefull(const char *tab, const char *hint)
+{
+	if (hint)
+		log(LOG_ERR, "%s: table is full - %s\n", tab, hint);
+	else
+		log(LOG_ERR, "%s: table is full\n", tab);
+}
 
 /*
  * bitmask_snprintf: print an interpreted bitmask to a buffer

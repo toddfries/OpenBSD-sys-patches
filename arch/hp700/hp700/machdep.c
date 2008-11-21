@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.32 2006/10/18 14:00:31 skrll Exp $	*/
+/*	$NetBSD: machdep.c,v 1.50 2008/11/12 12:36:00 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,12 +63,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.32 2006/10/18 14:00:31 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.50 2008/11/12 12:36:00 ad Exp $");
 
 #include "opt_cputype.h"
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_compat_hpux.h"
 #include "opt_useleds.h"
 #include "opt_power_switch.h"
 
@@ -102,9 +94,8 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.32 2006/10/18 14:00:31 skrll Exp $");
 #include <sys/kcore.h>
 #include <sys/extent.h>
 #include <sys/ksyms.h>
-
 #include <sys/mount.h>
-#include <sys/sa.h>
+#include <sys/mutex.h>
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_page.h>
@@ -118,11 +109,8 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.32 2006/10/18 14:00:31 skrll Exp $");
 #include <machine/reg.h>
 #include <machine/cpufunc.h>
 #include <machine/autoconf.h>
+#include <machine/bootinfo.h>
 #include <machine/kcore.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-#endif
 
 #ifdef	KGDB
 #include "com.h"
@@ -150,12 +138,12 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.32 2006/10/18 14:00:31 skrll Exp $");
 /*
  * Different kinds of flags used throughout the kernel.
  */
-caddr_t msgbufaddr;
+void *msgbufaddr;
 
 /*
  * cache configuration, for most machines is the same
  * numbers, so it makes sense to do defines w/ numbers depending
- * on cofigured CPU types in the kernel
+ * on configured CPU types in the kernel
  */
 int icache_stride, icache_line_mask;
 int dcache_stride, dcache_line_mask;
@@ -214,9 +202,6 @@ u_int	cpu_ticksnum, cpu_ticksdenom, cpu_hzticks;
 char	machine[] = MACHINE;
 char	cpu_model[128];
 const struct hppa_cpu_info *hppa_cpu_info;
-#ifdef COMPAT_HPUX
-int	cpu_model_hpux;	/* contains HPUX_SYSCONF_CPU* kind of value */
-#endif
 
 /*
  * exported methods for cpus
@@ -226,6 +211,12 @@ int (*cpu_hpt_init)(vaddr_t, vsize_t);
 
 dev_t	bootdev;
 int	totalphysmem, physmem, esym;
+
+/*
+ * Our copy of the bootinfo struct passed to us by the boot loader.
+ */
+struct bootinfo bootinfo;
+
 /*
  * XXX note that 0x12000 is the old kernel text start
  * address.  Memory below this is assumed to belong
@@ -259,7 +250,6 @@ long dma24_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
 /* Our exported CPU info; we can have only one. */
 struct cpu_info cpu_info_store;
 
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -423,8 +413,10 @@ const struct hppa_cpu_info hppa_cpu_pa8600 = {
 #endif /* !HP8600_CPU */
 };
 
+extern kmutex_t vmmap_lock;
+
 void
-hppa_init(paddr_t start)
+hppa_init(paddr_t start, void *bi)
 {
 	vaddr_t vstart, vend;
 	int error;
@@ -434,10 +426,15 @@ hppa_init(paddr_t start)
 	const char *model;
 	struct btlb_slot *btlb_slot;
 	int btlb_slot_i;
+	struct btinfo_symtab *bi_sym;
 
 #ifdef KGDB
 	boothowto |= RB_KDB;	/* go to kgdb early if compiled in. */
 #endif
+
+	/* Copy bootinfo */
+	if (bi != NULL)
+		memcpy(&bootinfo, bi, sizeof(struct bootinfo));
 
 	pdc_init();	/* init PDC iface, so we can call em easy */
 
@@ -473,7 +470,7 @@ hppa_init(paddr_t start)
 	p = &os_hpmc;
 	if (pdc_call((iodcio_t)pdc, 0, PDC_INSTR, PDC_INSTR_DFLT, p))
 		*p = 0x08000240;
-	p[7] = ((caddr_t) &os_hpmc_cont_end) - ((caddr_t) &os_hpmc_cont);
+	p[7] = ((char *) &os_hpmc_cont_end) - ((char *) &os_hpmc_cont);
 	p[6] = (u_int) &os_hpmc_cont;
 	p[5] = -(p[0] + p[1] + p[2] + p[3] + p[4] + p[6] + p[7]);
 	p = &os_hpmc_cont;
@@ -484,7 +481,7 @@ hppa_init(paddr_t start)
 	if ((error = pdc_call((iodcio_t)pdc, 0, PDC_BLOCK_TLB,
 	    PDC_BTLB_DEFAULT, &pdc_btlb)) < 0) {
 #ifdef DEBUG
-		printf("WARNING: PDC_BTLB error %d", error);
+		printf("WARNING: PDC_BTLB error %d\n", error);
 #endif
 	} else {
 #define BTLBDEBUG 1
@@ -517,9 +514,7 @@ hppa_init(paddr_t start)
 	resvmem = resvmem / PAGE_SIZE;
 
 	/* calculate HPT size */
-	/* for (hptsize = 256; hptsize < totalphysmem; hptsize *= 2); */
-	hptsize = 256;	/* XXX one page for now */
-	hptsize *= 16;	/* sizeof(hpt_entry) */
+	for (hptsize = 256; hptsize < totalphysmem; hptsize *= 2);
 
 	error = pdc_call((iodcio_t)pdc, 0, PDC_TLB, PDC_TLB_INFO, &pdc_hwtlb);
 	if (error) {
@@ -687,24 +682,13 @@ hppa_init(paddr_t start)
 	LDILDO(trap_ep_T_ITLBMISSNA, hppa_cpu_info->itlbh);
 #undef LDILDO
 
-#ifdef COMPAT_HPUX
-	if (hppa_cpu_info->hppa_cpu_info_pa_spec >= 
-	    HPPA_PA_SPEC_MAKE(2, 0, ' '))
-		cpu_model_hpux = HPUX_SYSCONF_CPUPA20;
-	else if (hppa_cpu_info->hppa_cpu_info_pa_spec >= 
-	    HPPA_PA_SPEC_MAKE(1, 1, ' '))
-		cpu_model_hpux = HPUX_SYSCONF_CPUPA11;
-	else 
-		cpu_model_hpux = HPUX_SYSCONF_CPUPA10;
-#endif
-
 	/* we hope this won't fail */
 	hp700_io_extent = extent_create("io",
 	    HPPA_IOSPACE, 0xffffffff, M_DEVBUF,
-	    (caddr_t)hp700_io_extent_store, sizeof(hp700_io_extent_store),
+	    (void *)hp700_io_extent_store, sizeof(hp700_io_extent_store),
 	    EX_NOCOALESCE|EX_NOWAIT);
 
-	vstart = hppa_round_page(start);
+	vstart = round_page(start);
 	vend = VM_MAX_KERNEL_ADDRESS;
 
 	/*
@@ -714,16 +698,16 @@ hppa_init(paddr_t start)
 	physmem = totalphysmem;
 
 	/* Allocate the msgbuf. */
-	msgbufaddr = (caddr_t) vstart;
+	msgbufaddr = (void *) vstart;
 	vstart += MSGBUFSIZE;
-	vstart = hppa_round_page(vstart);
+	vstart = round_page(vstart);
 
 	/* Allocate the 24-bit DMA region. */
 	dma24_ex = extent_create("dma24", vstart, vstart + DMA24_SIZE, M_DEVBUF,
-	    (caddr_t)dma24_ex_storage, sizeof(dma24_ex_storage),
+	    (void *)dma24_ex_storage, sizeof(dma24_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
 	vstart += DMA24_SIZE;
-	vstart = hppa_round_page(vstart);
+	vstart = round_page(vstart);
 
 	/* Allocate and initialize the BTLB slots array. */
 	btlb_slots = (struct btlb_slot *) ALIGN(vstart);
@@ -747,7 +731,7 @@ do {									\
 	BTLB_SLOTS(vinfo.num_c, BTLB_SLOT_CBTLB | BTLB_SLOT_VARIABLE_RANGE);
 #undef BTLB_SLOTS
 	btlb_slots_count = (btlb_slot - btlb_slots);
-	vstart = hppa_round_page((vaddr_t) btlb_slot);
+	vstart = round_page((vaddr_t) btlb_slot);
 	
 	/* Calculate the OS_TOC handler checksum. */
 	p = (u_int *) &os_toc;
@@ -756,7 +740,7 @@ do {									\
 
 	/* Install the OS_TOC handler. */
 	PAGE0->ivec_toc = os_toc;
-	PAGE0->ivec_toclen = ((caddr_t) &os_toc_end) - ((caddr_t) &os_toc);
+	PAGE0->ivec_toclen = ((char *) &os_toc_end) - ((char *) &os_toc);
 
 	pmap_bootstrap(&vstart, &vend);
 
@@ -821,17 +805,21 @@ do {									\
 	 * works because, currently, the mainbus.c bus_space 
 	 * implementation directly-maps things in I/O space.
 	 */
-	hp700_kgdb_attached = FALSE;
+	hp700_kgdb_attached = false;
 #if NCOM > 0
 	if (!strcmp(KGDB_DEVNAME, "com")) {
 		int com_gsc_kgdb_attach(void);
 		if (com_gsc_kgdb_attach() == 0)
-			hp700_kgdb_attached = TRUE;
+			hp700_kgdb_attached = true;
 	}
 #endif /* NCOM > 0 */
 #endif /* KGDB */
-#if NKSYMS || defined(DDB) || defined(LKM)
-	{
+
+#if NKSYMS || defined(DDB) || defined(MODULAR)
+	if ((bi_sym = lookup_bootinfo(BTINFO_SYMTAB)) != NULL)
+                ksyms_init(bi_sym->nsym, (int *)bi_sym->ssym,
+                    (int *)bi_sym->esym);
+        else {
 		extern int end;
 
 		ksyms_init(esym - (int)&end, &end, (int*)esym);
@@ -876,21 +864,15 @@ cpu_startup(void)
 	    pbuf[0], pbuf[1], pbuf[2]);
 
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, FALSE, NULL);
+	    VM_PHYS_SIZE, 0, false, NULL);
 
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    nmbclusters * mclbytes, VM_MAP_INTRSAFE, FALSE, NULL);
+	    nmbclusters * mclbytes, VM_MAP_INTRSAFE, false, NULL);
 
 #ifdef PMAPDEBUG
 	pmapdebug = opmapdebug;
@@ -905,6 +887,8 @@ cpu_startup(void)
 	 */
 	vmmap = uvm_km_alloc(kernel_map, PAGE_SIZE, 0,
 	    UVM_KMF_VAONLY | UVM_KMF_WAITVA);
+
+	mutex_init(&vmmap_lock, MUTEX_DEFAULT, IPL_NONE);
 }
 
 /*
@@ -1110,15 +1094,15 @@ hppa_btlb_insert(pa_space_t space, vaddr_t va, paddr_t pa, vsize_t *sizep,
 	case TLB_AR_KRW:
 	case TLB_AR_UR:
 	case TLB_AR_URW:
-		need_dbtlb = TRUE;
-		need_ibtlb = FALSE;
+		need_dbtlb = true;
+		need_ibtlb = false;
 		break;
 	case TLB_AR_KRX:
 	case TLB_AR_KRWX:
 	case TLB_AR_URX:
 	case TLB_AR_URWX:
-		need_dbtlb = TRUE;
-		need_ibtlb = TRUE;
+		need_dbtlb = true;
+		need_ibtlb = true;
 		break;
 	default:
 		panic("btlb_insert: bad tlbprot");
@@ -1231,9 +1215,9 @@ hppa_btlb_insert(pa_space_t space, vaddr_t va, paddr_t pa, vsize_t *sizep,
 		 * Note what slots we no longer need.
 		 */
 		if (btlb_slot->btlb_slot_flags & BTLB_SLOT_DBTLB)
-			need_dbtlb = FALSE;
+			need_dbtlb = false;
 		if (btlb_slot->btlb_slot_flags & BTLB_SLOT_IBTLB)
-			need_ibtlb = FALSE;
+			need_ibtlb = false;
 	}
 
 	/* Success. */
@@ -1380,6 +1364,8 @@ cpu_reboot(int howto, char *user_boot_string)
 
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 #ifdef POWER_SWITCH
 	if (pwr_sw_state == 0 &&
@@ -1591,7 +1577,7 @@ cpu_dump(void)
 	if (bdev == NULL)
 		return (-1);
 
-	return (*bdev->d_dump)(dumpdev, dumplo, (caddr_t)buf, dbtob(1));
+	return (*bdev->d_dump)(dumpdev, dumplo, (void *)buf, dbtob(1));
 }
 
 /*
@@ -1604,9 +1590,9 @@ dumpsys(void)
 {
 	const struct bdevsw *bdev;
 	int psize, bytes, i, n;
-	caddr_t maddr;
+	char *maddr;
 	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, void *, size_t);
 	int error;
 
 	if (dumpdev == NODEV)
@@ -1692,6 +1678,8 @@ setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	struct proc *p = l->l_proc;
 	struct trapframe *tf = l->l_md.md_regs;
+	pmap_t pmap = p->p_vmspace->vm_map.pmap;
+	pa_space_t space = pmap->pmap_space;
 	struct pcb *pcb = &l->l_addr->u_pcb;
 
 	tf->tf_flags = TFF_SYS|TFF_LAST;
@@ -1700,6 +1688,17 @@ setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 	tf->tf_rp = 0;
 	tf->tf_arg0 = (u_long)p->p_psstr;
 	tf->tf_arg1 = tf->tf_arg2 = 0; /* XXX dynload stuff */
+
+	tf->tf_sr7 = HPPA_SID_KERNEL;
+
+	/* Load all of the user's space registers. */
+	tf->tf_sr0 = tf->tf_sr1 = tf->tf_sr2 = tf->tf_sr3 =
+	tf->tf_sr4 = tf->tf_sr5 = tf->tf_sr6 = space;
+
+	tf->tf_iisq_head = tf->tf_iisq_tail = space;
+
+	/* Load the protection regsiters. */
+	tf->tf_pidr1 = tf->tf_pidr2 = pmap->pmap_pid;
 
 	/* reset any of the pending FPU exceptions */
 	hppa_fpu_flush(l);
@@ -1712,10 +1711,39 @@ setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 	/* setup terminal stack frame */
 	stack = (u_long)STACK_ALIGN(stack, 63);
 	tf->tf_r3 = stack;
-	suword((caddr_t)(stack), 0);
+	suword((void *)(stack), 0);
 	stack += HPPA_FRAME_SIZE;
-	suword((caddr_t)(stack + HPPA_FRAME_PSP), 0);
+	suword((void *)(stack + HPPA_FRAME_PSP), 0);
 	tf->tf_sp = stack;
+}
+
+/*
+ * machine dependent system variables.
+ */
+static int
+sysctl_machdep_boot(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node = *rnode;
+	struct btinfo_kernelfile *bi_file;
+	const char *cp = NULL;
+
+	switch (node.sysctl_num) {
+	case CPU_BOOTED_KERNEL:
+		if ((bi_file = lookup_bootinfo(BTINFO_KERNELFILE)) != NULL)
+			cp = bi_file->name;
+		if (cp != NULL && cp[0] == '\0')
+			cp = "netbsd";
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	if (cp == NULL || cp[0] == '\0')
+		return (ENOENT);
+
+	node.sysctl_data = __UNCONST(cp);
+	node.sysctl_size = strlen(cp) + 1;
+	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
 }
 
 /*
@@ -1735,6 +1763,35 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 		       CTLTYPE_STRUCT, "console_device", NULL,
 		       sysctl_consdev, 0, NULL, sizeof(dev_t),
 		       CTL_MACHDEP, CPU_CONSDEV, CTL_EOL);
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_STRING, "booted_kernel", NULL,
+		       sysctl_machdep_boot, 0, NULL, 0,
+		       CTL_MACHDEP, CPU_BOOTED_KERNEL, CTL_EOL);
+}
+
+/*
+ * Given the type of a bootinfo entry, looks for a matching item inside
+ * the bootinfo structure.  If found, returns a pointer to it (which must
+ * then be casted to the appropriate bootinfo_* type); otherwise, returns
+ * NULL.
+ */
+void *
+lookup_bootinfo(int type)
+{
+	struct btinfo_common *bic;
+	int i;
+
+	bic = (struct btinfo_common *)(&bootinfo.bi_data[0]);
+	for (i = 0; i < bootinfo.bi_nentries; i++)
+		if (bic->type == type)
+			return bic;
+		else
+			bic = (struct btinfo_common *)
+			    ((uint8_t *)bic + bic->len);
+
+	return NULL;
 }
 
 /*

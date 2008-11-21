@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.75 2006/10/21 05:54:32 mrg Exp $	*/
+/*	$NetBSD: machdep.c,v 1.87 2008/11/12 12:36:05 ad Exp $	*/
 
 /*
  * Copyright (c) 1998 Darrin B. Jewell
@@ -79,11 +79,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.75 2006/10/21 05:54:32 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.87 2008/11/12 12:36:05 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_compat_hpux.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -106,7 +105,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.75 2006/10/21 05:54:32 mrg Exp $");
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/vnode.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/ksyms.h>
 #ifdef KGDB
@@ -124,8 +122,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.75 2006/10/21 05:54:32 mrg Exp $");
 #endif
 
 #ifdef KGDB
-#include <sys/kgdb.h>
-
 /* Is zs configured in? */
 #include "zsc.h"
 #if (NZSC > 0)
@@ -163,11 +159,9 @@ char	machine[] = MACHINE;	/* from <machine/param.h> */
 /* Our exported CPU info; we can have only one. */  
 struct cpu_info cpu_info_store;
 
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
-caddr_t	msgbufaddr;		/* KVA of message buffer */
 paddr_t msgbufpa;		/* PA of message buffer */
 
 int	maxmem;			/* max memory per process */
@@ -182,17 +176,13 @@ int	safepri = PSL_LOWIPL;
 extern	u_int lowram;
 extern	short exframesize[];
 
-#ifdef COMPAT_HPUX
-extern struct emul emul_hpux;
-#endif
-
 /* prototypes for local functions */
 void	identifycpu(void);
 void	initcpu(void);
 void	dumpsys(void);
 
 int	cpu_dumpsize(void);
-int	cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
+int	cpu_dump(int (*)(dev_t, daddr_t, void *, size_t), daddr_t *);
 void	cpu_init_kcore_hdr(void);
 
 /* functions called from locore.s */
@@ -296,7 +286,7 @@ consinit(void)
 #if defined(KGDB) && (NZSC > 0)
 		zs_kgdb_init();
 #endif
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 		/* Initialize kernel symbol table, if compiled in. */
 		ksyms_init(nsym, ssym, esym);
 #endif
@@ -348,23 +338,17 @@ cpu_startup(void)
 
 	minaddr = 0;
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, 0, FALSE, NULL);
+				 VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 nmbclusters * mclbytes, VM_MAP_INTRSAFE,
-				 FALSE, NULL);
+				 false, NULL);
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -536,11 +520,8 @@ void
 cpu_reboot(int howto, char *bootstr)
 {
 
-#if __GNUC__	/* XXX work around lame compiler problem (gcc 2.7.2) */
-	(void)&howto;
-#endif
 	/* take a snap shot before clobbering any registers */
-	if (curlwp && curlwp->l_addr)
+	if (curlwp->l_addr)
 		savectx(&curlwp->l_addr->u_pcb);
 
 	/* If system is cold, just halt. */
@@ -570,6 +551,8 @@ cpu_reboot(int howto, char *bootstr)
  haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 #if defined(PANICWAIT) && !defined(DDB)
 	if ((howto & RB_HALT) == 0 && panicstr) {
@@ -677,7 +660,7 @@ cpu_dumpsize(void)
  * Called by dumpsys() to dump the machine-dependent header.
  */
 int
-cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *blknop)
+cpu_dump(int (*dump)(dev_t, daddr_t, void *, size_t), daddr_t *blknop)
 {
 	int buf[MDHDRSIZE / sizeof(int)];
 	cpu_kcore_hdr_t *chdr;
@@ -693,7 +676,7 @@ cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *blknop)
 	kseg->c_size = MDHDRSIZE - ALIGN(sizeof(kcore_seg_t));
 
 	bcopy(&cpu_kcore_hdr, chdr, sizeof(cpu_kcore_hdr_t));
-	error = (*dump)(dumpdev, *blknop, (caddr_t)buf, sizeof(buf));
+	error = (*dump)(dumpdev, *blknop, (void *)buf, sizeof(buf));
 	*blknop += btodb(sizeof(buf));
 	return (error);
 }
@@ -758,7 +741,7 @@ dumpsys(void)
 	const struct bdevsw *bdev;
 	daddr_t blkno;		/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, void *, size_t);
 	int pg;			/* page being dumped */
 	vm_offset_t maddr;	/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -872,7 +855,7 @@ int	*nofault;
 
 #if 0
 int
-badaddr(caddr_t addr, int nbytes)
+badaddr(void *addr, int nbytes)
 {
 	int i;
 	label_t faultbuf;

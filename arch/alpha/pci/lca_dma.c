@@ -1,5 +1,4 @@
-/*	$OpenBSD: lca_dma.c,v 1.7 2006/04/04 21:20:40 brad Exp $	*/
-/* $NetBSD: lca_dma.c,v 1.13 2000/06/29 08:58:47 mrg Exp $ */
+/* $NetBSD: lca_dma.c,v 1.18 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,11 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * XXX - We should define this before including bus.h, but since other stuff
- *       pulls in bus.h we must do this here.
- */
-#define _ALPHA_BUS_DMA_PRIVATE
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: lca_dma.c,v 1.18 2008/04/28 20:23:11 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,6 +42,7 @@
 
 #include <uvm/uvm_extern.h>
 
+#define _ALPHA_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/pci/pcireg.h>
@@ -59,21 +50,21 @@
 #include <alpha/pci/lcareg.h>
 #include <alpha/pci/lcavar.h>
 
-bus_dma_tag_t lca_dma_get_tag(bus_dma_tag_t, alpha_bus_t);
+bus_dma_tag_t lca_dma_get_tag __P((bus_dma_tag_t, alpha_bus_t));
 
-int	lca_bus_dmamap_load_sgmap(bus_dma_tag_t, bus_dmamap_t, void *,
-	    bus_size_t, struct proc *, int);
+int	lca_bus_dmamap_load_sgmap __P((bus_dma_tag_t, bus_dmamap_t, void *,
+	    bus_size_t, struct proc *, int));
 
-int	lca_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t, bus_dmamap_t,
-	    struct mbuf *, int);
+int	lca_bus_dmamap_load_mbuf_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    struct mbuf *, int));
 
-int	lca_bus_dmamap_load_uio_sgmap(bus_dma_tag_t, bus_dmamap_t,
-	    struct uio *, int);
+int	lca_bus_dmamap_load_uio_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    struct uio *, int));
 
-int	lca_bus_dmamap_load_raw_sgmap(bus_dma_tag_t, bus_dmamap_t,
-	    bus_dma_segment_t *, int, bus_size_t, int);
+int	lca_bus_dmamap_load_raw_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    bus_dma_segment_t *, int, bus_size_t, int));
 
-void	lca_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
+void	lca_bus_dmamap_unload_sgmap __P((bus_dma_tag_t, bus_dmamap_t));
 
 /*
  * Direct-mapped window: 1G at 1G
@@ -148,7 +139,6 @@ lca_dma_init(lcp)
 	t->_pfthresh = LCA_SGMAP_PFTHRESH;
 	t->_get_tag = lca_dma_get_tag;
 	t->_dmamap_create = alpha_sgmap_dmamap_create;
-
 	t->_dmamap_destroy = alpha_sgmap_dmamap_destroy;
 	t->_dmamap_load = lca_bus_dmamap_load_sgmap;
 	t->_dmamap_load_mbuf = lca_bus_dmamap_load_mbuf_sgmap;
@@ -163,11 +153,12 @@ lca_dma_init(lcp)
 	t->_dmamem_unmap = _bus_dmamem_unmap;
 	t->_dmamem_mmap = _bus_dmamem_mmap;
 
-	/*
-	 * The firmware has set up window 1 as a 1G direct-mapped DMA
-	 * window beginning at 1G.  We leave it alone.  Disable
-	 * window 0.
-	 */
+	/* Initialize window 1 as a direct-mapped window. */
+	REGVAL64(LCA_IOC_W_BASE1) = LCA_DIRECT_MAPPED_BASE | IOC_W_BASE_WEN;
+	REGVAL64(LCA_IOC_W_MASK1) = IOC_W_MASK_1G;
+	alpha_mb();
+
+	/* Disable window 0 while we set it up. */
 	REGVAL64(LCA_IOC_W_BASE0) = 0;
 	alpha_mb();
 
@@ -184,8 +175,6 @@ lca_dma_init(lcp)
 	 */
 	REGVAL64(LCA_IOC_W_BASE0) = LCA_SGMAP_MAPPED_BASE |
 	    IOC_W_BASE_SG | IOC_W_BASE_WEN;
-	alpha_mb();
-
 	REGVAL64(LCA_IOC_W_MASK0) = IOC_W_MASK_8M;
 	alpha_mb();
 
@@ -195,7 +184,7 @@ lca_dma_init(lcp)
 	REGVAL64(LCA_IOC_W_T_BASE0) = lcp->lc_sgmap.aps_ptpa;
 	alpha_mb();
 
-	/* Enable the scatter/gather TLB. */
+	/* Enble the scatter/gather TLB. */
 	REGVAL64(LCA_IOC_TB_ENA) = IOC_TB_ENA_TEN;
 	alpha_mb();
 

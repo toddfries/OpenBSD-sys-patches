@@ -1,7 +1,15 @@
-/*	$OpenBSD: dinode.h,v 1.17 2007/06/02 01:32:04 pedro Exp $	*/
-/*	$NetBSD: dinode.h,v 1.7 1995/06/15 23:22:48 cgd Exp $	*/
+/*	$NetBSD: dinode.h,v 1.19 2005/12/11 12:25:28 christos Exp $	*/
 
 /*
+ * Copyright (c) 2002 Networks Associates Technology, Inc.
+ * All rights reserved.
+ *
+ * This software was developed for the FreeBSD Project by Marshall
+ * Kirk McKusick and Network Associates Laboratories, the Security
+ * Research Division of Network Associates, Inc. under DARPA/SPAWAR
+ * contract N66001-01-C-8035 ("CBOSS"), as part of the DARPA CHATS
+ * research program
+ *
  * Copyright (c) 1982, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -37,8 +45,8 @@
  *	@(#)dinode.h	8.9 (Berkeley) 3/29/95
  */
 
-#ifndef _UFS_DINODE_H_
-#define _UFS_DINODE_H_
+#ifndef	_UFS_UFS_DINODE_H_
+#define	_UFS_UFS_DINODE_H_
 
 /*
  * The root inode is the root of the file system.  Inode 0 can't be used for
@@ -49,16 +57,25 @@
 #define	ROOTINO	((ino_t)2)
 
 /*
+ * The Whiteout inode# is a dummy non-zero inode number which will
+ * never be allocated to a real file.  It is used as a place holder
+ * in the directory entry which has been tagged as a DT_W entry.
+ * See the comments about ROOTINO above.
+ */
+#define	WINO	((ino_t)1)
+
+/*
  * A dinode contains all the meta-data associated with a UFS file.
  * This structure defines the on-disk format of a dinode. Since
  * this structure describes an on-disk structure, all its fields
  * are defined by types with precise widths.
  */
-#define	NXADDR	2			/* External addresses in inode */
+
+#define NXADDR	2
 #define	NDADDR	12			/* Direct addresses in inode. */
 #define	NIADDR	3			/* Indirect addresses in inode. */
 
-struct	ufs1_dinode {
+struct ufs1_dinode {
 	u_int16_t	di_mode;	/*   0: IFMT, permissions; see below. */
 	int16_t		di_nlink;	/*   2: File link count. */
 	union {
@@ -75,7 +92,7 @@ struct	ufs1_dinode {
 	int32_t		di_db[NDADDR];	/*  40: Direct disk blocks. */
 	int32_t		di_ib[NIADDR];	/*  88: Indirect disk blocks. */
 	u_int32_t	di_flags;	/* 100: Status flags (chflags). */
-	int32_t		di_blocks;	/* 104: Blocks actually held. */
+	u_int32_t	di_blocks;	/* 104: Blocks actually held. */
 	int32_t		di_gen;		/* 108: Generation number. */
 	u_int32_t	di_uid;		/* 112: File owner. */
 	u_int32_t	di_gid;		/* 116: File group. */
@@ -119,18 +136,22 @@ struct ufs2_dinode {
 #define	di_ogid		di_u.oldids[1]
 #define	di_ouid		di_u.oldids[0]
 #define	di_rdev		di_db[0]
-#define	di_shortlink	di_db
-
 #define MAXSYMLINKLEN_UFS1	((NDADDR + NIADDR) * sizeof(int32_t))
 #define MAXSYMLINKLEN_UFS2	((NDADDR + NIADDR) * sizeof(int64_t))
 
 #define MAXSYMLINKLEN(ip) \
-	((ip)->i_ump->um_fstype == UM_UFS1) ? \
+	((ip)->i_ump->um_fstype == UFS1) ? \
 	MAXSYMLINKLEN_UFS1 : MAXSYMLINKLEN_UFS2
+
+/* NeXT used to keep short symlinks in the inode even when using
+ * FS_42INODEFMT.  In that case fs->fs_maxsymlinklen is probably -1,
+ * but short symlinks were stored in inodes shorter than this:
+ */
+#define	APPLEUFS_MAXSYMLINKLEN 60
 
 /* File permissions. */
 #define	IEXEC		0000100		/* Executable. */
-#define	IWRITE		0000200		/* Writeable. */
+#define	IWRITE		0000200		/* Writable. */
 #define	IREAD		0000400		/* Readable. */
 #define	ISVTX		0001000		/* Sticky bit. */
 #define	ISGID		0002000		/* Set-gid. */
@@ -147,4 +168,8 @@ struct ufs2_dinode {
 #define	IFSOCK		0140000		/* UNIX domain socket. */
 #define	IFWHT		0160000		/* Whiteout. */
 
-#endif /* _UFS_DINODE_H_ */
+/* Size of the on-disk inode. */
+#define	DINODE1_SIZE	(sizeof(struct ufs1_dinode))		/* 128 */
+#define	DINODE2_SIZE	(sizeof(struct ufs2_dinode))
+
+#endif /* !_UFS_UFS_DINODE_H_ */

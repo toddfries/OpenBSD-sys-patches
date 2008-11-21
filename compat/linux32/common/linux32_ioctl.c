@@ -1,4 +1,4 @@
-/*	$NetBSD: linux32_ioctl.c,v 1.4 2006/09/13 19:55:49 manu Exp $ */
+/*	$NetBSD: linux32_ioctl.c,v 1.12 2008/11/19 18:36:04 ad Exp $ */
 
 /*-
  * Copyright (c) 2006 Emmanuel Dreyfus, all rights reserved.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux32_ioctl.c,v 1.4 2006/09/13 19:55:49 manu Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux32_ioctl.c,v 1.12 2008/11/19 18:36:04 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -44,6 +44,8 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_ioctl.c,v 1.4 2006/09/13 19:55:49 manu Exp $
 
 #include <compat/linux/common/linux_types.h>
 #include <compat/linux/common/linux_signal.h>
+#include <compat/linux/common/linux_ipc.h>
+#include <compat/linux/common/linux_sem.h>
 #include <compat/linux/linux_syscallargs.h>
 
 #include <compat/linux32/common/linux32_types.h>
@@ -53,20 +55,18 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_ioctl.c,v 1.4 2006/09/13 19:55:49 manu Exp $
 #include <compat/linux32/common/linux32_sysctl.h>
 #include <compat/linux32/linux32_syscallargs.h>
 
-extern int linux_ioctl_socket(struct lwp *, 
-    struct linux_sys_ioctl_args *, register_t *);
+#include <compat/ossaudio/ossaudio.h>
+#include <compat/ossaudio/ossaudiovar.h>
 
 int
-linux32_sys_ioctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_ioctl(struct lwp *l, const struct linux32_sys_ioctl_args *uap, register_t *retval)
 {
-	struct linux32_sys_ioctl_args /* {
+	/* {
 		syscallarg(int) fd;
 		syscallarg(netbsd32_u_long) com;
 		syscallarg(netbsd32_charp) data;
-	} */ *uap = v;
+	} */
+	struct oss_sys_ioctl_args ossuap;
 	int group;
 	int error;
 
@@ -74,22 +74,37 @@ linux32_sys_ioctl(l, v, retval)
 
 #ifdef DEBUG_LINUX
 	printf("linux32_sys_ioctl(%d, 0x%x/\'%c\', %p)\n", SCARG(uap, fd),
-	    SCARG(uap, com), (char)group, NETBSD32PTR64(SCARG(uap, data)));
+	    SCARG(uap, com), (char)group, SCARG_P32(uap, data));
 #endif
 
 	switch(group) {
 	case 'T':
 		error = linux32_ioctl_termios(l, uap, retval);
 		break;
-	case 0x89: {
-		struct linux_sys_ioctl_args cup;
-
-		SCARG(&cup, fd) = SCARG(uap, fd);
-		SCARG(&cup, com) = (u_long)SCARG(uap, com);
-		SCARG(&cup, data) = (caddr_t)(u_long)SCARG(uap, data);
-		error = linux_ioctl_socket(l, &cup, retval);
+	case 'M':
+	case 'Q':
+	case 'P':
+		SCARG(&ossuap, fd) = SCARG(uap, fd);
+		SCARG(&ossuap, com) = (u_long)SCARG(uap, com);
+		SCARG(&ossuap, data) = SCARG_P32(uap, data);
+		switch (group) {
+		case 'M':
+			error = oss_ioctl_mixer(l, &ossuap, retval);
+			break;
+		case 'Q':
+			error = oss_ioctl_sequencer(l, &ossuap, retval);
+			break;
+		case 'P':
+			error = oss_ioctl_audio(l, &ossuap, retval);
+			break;
+		default:
+			error = EINVAL; /* shutup gcc */
+			break;
+		}
 		break;
-	}
+	case 0x89:
+		error = linux32_ioctl_socket(l, uap, retval);
+		break;
 	default:
 		printf("Not yet implemented ioctl group \'%c\'\n", group);
 		error = EINVAL;

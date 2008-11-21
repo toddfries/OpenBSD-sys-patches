@@ -1,4 +1,4 @@
-/*	$NetBSD: mptramp.S,v 1.8 2005/12/11 12:17:41 christos Exp $	*/
+/*	$NetBSD: mptramp.S,v 1.18 2008/08/26 13:07:48 drochner Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -81,11 +74,13 @@
  *        2)   halt the processors waiting for them to be enabled
  *              by a idle-thread 
  */
+
+#include <machine/asm.h>
+__KERNEL_RCSID(0, "$NetBSD: mptramp.S,v 1.18 2008/08/26 13:07:48 drochner Exp $");
 	
 #include "opt_mpbios.h"		/* for MPDEBUG */
 		
 #include "assym.h"
-#include <machine/asm.h>
 #include <machine/specialreg.h>
 #include <machine/segments.h>
 #include <machine/mpbiosvar.h>
@@ -116,15 +111,9 @@
 #define HALTT(x,y) /**/
 #endif
 
-        .globl  _C_LABEL(cpu),_C_LABEL(cpu_id),_C_LABEL(cpu_vendor)
-	.globl  _C_LABEL(cpuid_level)
-	.globl	_C_LABEL(mpidle)
-
 	.global _C_LABEL(cpu_spinup_trampoline)
 	.global _C_LABEL(cpu_spinup_trampoline_end)
-	.global _C_LABEL(cpu_hatch)
 	.global _C_LABEL(mp_pdirpa)
-	.global _C_LABEL(gdt), _C_LABEL(local_apic)
 
 	.text
 	.align 4,0x0
@@ -163,6 +152,14 @@ _TRMP_LABEL(mp_startup)
 	pushl   $PSL_MBO
 	popfl
 	
+	movl	RELOC(pmap_largepages),%eax
+	orl	%eax,%eax
+	jz	1f
+	movl	%cr4,%eax
+	orl	$CR4_PSE,%eax
+	movl	%eax,%cr4
+1:
+
 	movl	RELOC(mp_pdirpa),%ecx
 	HALTT(0x5,%ecx)
 	
@@ -171,24 +168,29 @@ _TRMP_LABEL(mp_startup)
         movl    %cr0,%eax               # get control word
                                         # enable paging & NPX emulation
         orl     $(CR0_PE|CR0_PG|CR0_NE|CR0_TS|CR0_EM|CR0_MP|CR0_WP),%eax
-        movl    %eax,%cr0               # and let's page NOW!
+        movl    %eax,%cr0               # and page NOW!
 
 #ifdef MPDEBUG
 	leal    _C_LABEL(cpu_trace),%edi
 #endif
 	HALT(0x6)
 
-# ok, we're now running with paging enabled and sharing page tables with cpu0.
-# figure out which processor we really are, what stack we should be on, etc.
+/*
+ * ok, we are now running with paging enabled and sharing page tables
+ * with cpu0.  figure out which processor we really are, what stack we
+ * should be on, etc.
+ */
 
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	leal	0(,%ecx,4),%ecx
-	movl	_C_LABEL(cpu_info)(%ecx),%ecx
+	/* Don't touch lapic until BP has done init sequence. */
+1:
+	movl	_C_LABEL(cpu_starting),%ecx
+	pause
+	testl	%ecx, %ecx
+	jz	1b
 	
 	HALTT(0x7, %ecx)
 
-# %ecx points at our cpu_info structure..
+	/* %ecx points at our cpu_info structure. */
 
 	movw    $((MAXGDTSIZ*8) - 1), 6(%esp)	# prepare segment descriptor
 	movl    CPU_INFO_GDT(%ecx), %eax	# for our real gdt
@@ -210,7 +212,7 @@ _TRMP_LABEL(mp_startup)
 	lret
 	.align 4,0x0
 _TRMP_LABEL(gdt_table)   
-	.word   0x0,0x0,0x0,0x0  # null GDTE
+	.word   0x0,0x0,0x0,0x0  # null gdte
 	 GDTE(0x9f,0xcf)         # Kernel text
 	 GDTE(0x93,0xcf)         # Kernel data
 _TRMP_LABEL(gdt_desc)	
@@ -221,9 +223,10 @@ _C_LABEL(cpu_spinup_trampoline_end):	#end of code copied to MP_TRAMPOLINE
 mp_cont:
 	HALT(0x15)
 
-	movl	CPU_INFO_IDLE_PCB(%ecx),%esi
+	movl	CPU_INFO_IDLELWP(%ecx),%esi
+	movl	L_ADDR(%esi),%esi
 	
-# %esi now points at our PCB.
+	/* %esi now points at our PCB. */
 		
 	HALTT(0x19, %esi)
 	
@@ -250,8 +253,7 @@ mp_cont:
 	pushl	%ecx
 	call	_C_LABEL(cpu_hatch)
 	HALT(0x33)
-	xorl	%esi,%esi
-	jmp	_C_LABEL(mpidle)
+	jmp	_C_LABEL(idle_loop)
 	
 	.data
 _C_LABEL(mp_pdirpa):

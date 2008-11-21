@@ -1,5 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.51 2007/11/28 16:33:20 martin Exp $	*/
-/*	$NetBSD: vm_machdep.c,v 1.30 1997/03/10 23:55:40 pk Exp $ */
+/*	$NetBSD: vm_machdep.c,v 1.96 2008/11/19 18:36:01 ad Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -49,17 +48,21 @@
  *	@(#)vm_machdep.c	8.2 (Berkeley) 9/23/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: vm_machdep.c,v 1.96 2008/11/19 18:36:01 ad Exp $");
+
+#include "opt_multiprocessor.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/signalvar.h>
 #include <sys/user.h>
 #include <sys/core.h>
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/exec.h>
 #include <sys/vnode.h>
-#include <sys/extent.h>
+#include <sys/simplelock.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -70,272 +73,89 @@
 #include <sparc/sparc/cpuvar.h>
 
 /*
- * Wrapper for dvma_mapin() in kernel space,
- * so drivers need not include VM goo to get at kernel_map.
- */
-caddr_t
-kdvma_mapin(va, len, canwait)
-	caddr_t	va;
-	int	len, canwait;
-{
-	return ((caddr_t)dvma_mapin(kernel_map, (vaddr_t)va, len, canwait));
-}
-
-#if defined(SUN4M)
-extern int has_iocache;
-#endif
-
-caddr_t
-dvma_malloc_space(len, kaddr, flags, space)
-	size_t	len;
-	void	*kaddr;
-	int	flags;
-{
-	vaddr_t	kva;
-	vaddr_t	dva;
-
-	len = round_page(len);
-	kva = (vaddr_t)malloc(len, M_DEVBUF, flags);
-	if (kva == NULL)
-		return (NULL);
-
-#if defined(SUN4M)
-	if (!has_iocache)
-#endif
-		kvm_uncache((caddr_t)kva, atop(len));
-
-	*(vaddr_t *)kaddr = kva;
-	dva = dvma_mapin_space(kernel_map, kva, len, (flags & M_NOWAIT) ? 0 : 1, space);
-	if (dva == NULL) {
-		free((void *)kva, M_DEVBUF);
-		return (NULL);
-	}
-	return (caddr_t)dva;
-}
-
-void
-dvma_free(dva, len, kaddr)
-	caddr_t	dva;
-	size_t	len;
-	void	*kaddr;
-{
-	vaddr_t	kva = *(vaddr_t *)kaddr;
-
-	len = round_page(len);
-
-	dvma_mapout((vaddr_t)dva, kva, len);
-	/*
-	 * Even if we're freeing memory here, we can't be sure that it will
-	 * be unmapped, so we must recache the memory range to avoid impact
-	 * on other kernel subsystems.
-	 */
-#if defined(SUN4M)
-	if (!has_iocache)
-#endif
-		kvm_recache(kaddr, atop(len));
-	free((void *)kva, M_DEVBUF);
-}
-
-u_long dvma_cachealign = 0;
-
-/*
- * Map a range [va, va+len] of wired virtual addresses in the given map
- * to a kernel address in DVMA space.
- */
-vaddr_t
-dvma_mapin_space(map, va, len, canwait, space)
-	struct vm_map	*map;
-	vaddr_t	va;
-	int		len, canwait, space;
-{
-	vaddr_t	kva, tva;
-	int npf, s;
-	paddr_t pa;
-	vaddr_t off;
-	vaddr_t ova;
-	int olen;
-	int error;
-
-	if (dvma_cachealign == 0)
-	        dvma_cachealign = PAGE_SIZE;
-
-	ova = va;
-	olen = len;
-
-	off = va & PAGE_MASK;
-	va &= ~PAGE_MASK;
-	len = round_page(len + off);
-	npf = atop(len);
-
-	s = splhigh();
-	if (space & M_SPACE_D24)
-		error = extent_alloc_subregion(dvmamap_extent,
-		    DVMA_D24_BASE, DVMA_D24_END, len, dvma_cachealign,
-		    va & (dvma_cachealign - 1), 0,
-		    canwait ? EX_WAITSPACE : EX_NOWAIT, &tva);
-	else
-		error = extent_alloc(dvmamap_extent, len, dvma_cachealign, 
-		    va & (dvma_cachealign - 1), 0,
-		    canwait ? EX_WAITSPACE : EX_NOWAIT, &tva);
-	splx(s);
-	if (error)
-		return NULL;
-	kva = tva;
-
-	while (npf--) {
-		if (pmap_extract(vm_map_pmap(map), va, &pa) == FALSE)
-			panic("dvma_mapin: null page frame");
-		pa = trunc_page(pa);
-
-#if defined(SUN4M)
-		if (CPU_ISSUN4M) {
-			iommu_enter(tva, pa);
-		} else
-#endif
-		{
-			/*
-			 * pmap_enter distributes this mapping to all
-			 * contexts... maybe we should avoid this extra work
-			 */
-#ifdef notyet
-#if defined(SUN4)
-			if (have_iocache)
-				pa |= PG_IOC;
-#endif
-#endif
-			/* XXX - this should probably be pmap_kenter */
-			pmap_enter(pmap_kernel(), tva, pa | PMAP_NC,
-				   VM_PROT_READ | VM_PROT_WRITE, PMAP_WIRED);
-		}
-
-		tva += PAGE_SIZE;
-		va += PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-
-	/*
-	 * XXX Only have to do this on write.
-	 */
-	if (CACHEINFO.c_vactype == VAC_WRITEBACK)	/* XXX */
-		cpuinfo.cache_flush((caddr_t)ova, olen);	/* XXX */
-
-	return kva + off;
-}
-
-/*
- * Remove double map of `va' in DVMA space at `kva'.
+ * Map a user I/O request into kernel virtual address space.
+ * Note: the pages are already locked by uvm_vslock(), so we
+ * do not need to pass an access_type to pmap_enter().
  */
 void
-dvma_mapout(kva, va, len)
-	vaddr_t	kva, va;
-	int		len;
+vmapbuf(struct buf *bp, vsize_t len)
 {
-	int s, off;
-	int error;
-	int klen;
+	struct pmap *upmap, *kpmap;
+	vaddr_t uva;	/* User VA (map from) */
+	vaddr_t kva;	/* Kernel VA (new to) */
+	paddr_t pa; 	/* physical address */
+	vsize_t off;
 
-	off = (int)kva & PGOFSET;
-	kva -= off;
-	klen = round_page(len + off);
-
-#if defined(SUN4M)
-	if (CPU_ISSUN4M)
-		iommu_remove(kva, klen);
-	else
-#endif
-	{
-		pmap_remove(pmap_kernel(), kva, kva + klen);
-		pmap_update(pmap_kernel());
-	}
-
-	s = splhigh();
-	error = extent_free(dvmamap_extent, kva, klen, EX_NOWAIT);
-	if (error)
-		printf("dvma_mapout: extent_free failed\n");
-	splx(s);
-
-	if (CACHEINFO.c_vactype != VAC_NONE)
-		cpuinfo.cache_flush((caddr_t)va, len);
-}
-
-/*
- * Map an IO request into kernel virtual address space.
- */
-void
-vmapbuf(struct buf *bp, vsize_t sz)
-{
-	vaddr_t uva, kva;
-	vsize_t size, off;
-	struct pmap *pmap;
-	paddr_t pa;
-
-#ifdef DIAGNOSTIC
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vmapbuf");
-#endif
-	pmap = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
 
+	/*
+	 * XXX:  It might be better to round/trunc to a
+	 * segment boundary to avoid VAC problems!
+	 */
 	bp->b_saveaddr = bp->b_data;
 	uva = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - uva;
-	size = round_page(off + sz);
+	len = round_page(off + len);
+	kva = uvm_km_alloc(kernel_map, len, 0, UVM_KMF_VAONLY | UVM_KMF_WAITVA);
+	bp->b_data = (void *)(kva + off);
+
 	/*
-	 * Note that this is an expanded version of:
-	 *   kva = uvm_km_valloc_wait(kernel_map, size);
-	 * We do it on our own here to be able to specify an offset to uvm_map
-	 * so that we can get all benefits of PMAP_PREFER.
+	 * We have to flush any write-back cache on the
+	 * user-space mappings so our new mappings will
+	 * have the correct contents.
 	 */
-	kva = uvm_km_valloc_prefer_wait(kernel_map, size, uva);
-	bp->b_data = (caddr_t)(kva + off);
+	if (CACHEINFO.c_vactype != VAC_NONE)
+		cache_flush((void *)uva, len);
 
-	while (size > 0) {
-		if (pmap_extract(pmap, uva, &pa) == FALSE)
+	upmap = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
+	kpmap = vm_map_pmap(kernel_map);
+	do {
+		if (pmap_extract(upmap, uva, &pa) == false)
 			panic("vmapbuf: null page frame");
-
-		/*
-		 * Don't enter uncached if cache is mandatory.
-		 *
-		 * XXX - there are probably other cases where we don't need
-		 *       to uncache, but for now we're conservative.
-		 */
-		if (!(cpuinfo.flags & CPUFLG_CACHE_MANDATORY))
-			pa |= PMAP_NC;
-
-		pmap_enter(pmap_kernel(), kva, pa,
-			   VM_PROT_READ | VM_PROT_WRITE, PMAP_WIRED);
-
+		/* Now map the page into kernel space. */
+		pmap_enter(kpmap, kva, pa,
+		    VM_PROT_READ|VM_PROT_WRITE, PMAP_WIRED);
 		uva += PAGE_SIZE;
 		kva += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
+		len -= PAGE_SIZE;
+	} while (len);
+	pmap_update(kpmap);
 }
 
 /*
- * Free the io map addresses associated with this IO operation.
+ * Unmap a previously-mapped user I/O request.
  */
 void
-vunmapbuf(bp, sz)
-	register struct buf *bp;
-	vsize_t sz;
+vunmapbuf(struct buf *bp, vsize_t len)
 {
-	register vaddr_t kva;
-	register vsize_t size, off;
+	vaddr_t kva;
+	vsize_t off;
 
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vunmapbuf");
 
 	kva = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - kva;
-	size = round_page(sz + off);
-
-	pmap_remove(pmap_kernel(), kva, kva + size);
-	pmap_update(pmap_kernel());
-	uvm_km_free_wakeup(kernel_map, kva, size);
+	len = round_page(off + len);
+	pmap_remove(vm_map_pmap(kernel_map), kva, kva + len);
+	pmap_update(vm_map_pmap(kernel_map));
+	uvm_km_free(kernel_map, kva, len, UVM_KMF_VAONLY);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
+
+#if 0	/* XXX: The flush above is sufficient, right? */
 	if (CACHEINFO.c_vactype != VAC_NONE)
-		cpuinfo.cache_flush(bp->b_data, bp->b_bcount - bp->b_resid);
+		cpuinfo.cache_flush(bp->b_data, len);
+#endif
+}
+
+
+void
+cpu_proc_fork(struct proc *p1, struct proc *p2)
+{
+
+	p2->p_md.md_flags = p1->p_md.md_flags;
 }
 
 
@@ -345,63 +165,84 @@ vunmapbuf(bp, sz)
 #define	TOPFRAMEOFF (USPACE-sizeof(struct trapframe)-sizeof(struct frame))
 
 /*
- * Finish a fork operation, with process p2 nearly set up.
- * Copy and update the pcb, making the child ready to run, and marking
- * it so that it can return differently than the parent.
+ * Finish a fork operation, with process l2 nearly set up.
+ * Copy and update the pcb and trap frame, making the child ready to run.
  *
- * This function relies on the fact that the pcb is
- * the first element in struct user.
+ * Rig the child's kernel stack so that it will start out in
+ * lwp_trampoline() and call child_return() with l2 as an
+ * argument. This causes the newly-created child process to go
+ * directly to user level with an apparent return value of 0 from
+ * fork(), while the parent process returns normally.
+ *
+ * l1 is the process being forked; if l1 == &lwp0, we are creating
+ * a kernel thread, and the return path and argument are specified with
+ * `func' and `arg'.
+ *
+ * If an alternate user-level stack is requested (with non-zero values
+ * in both the stack and stacksize args), set up the user stack pointer
+ * accordingly.
  */
 void
-cpu_fork(p1, p2, stack, stacksize, func, arg)
-	struct proc *p1, *p2;
-	void *stack;
-	size_t stacksize;
-	void (*func)(void *);
-	void *arg;
+cpu_lwp_fork(struct lwp *l1, struct lwp *l2,
+	     void *stack, size_t stacksize,
+	     void (*func)(void *), void *arg)
 {
-	struct pcb *opcb = &p1->p_addr->u_pcb;
-	struct pcb *npcb = &p2->p_addr->u_pcb;
+	struct pcb *opcb = &l1->l_addr->u_pcb;
+	struct pcb *npcb = &l2->l_addr->u_pcb;
 	struct trapframe *tf2;
 	struct rwindow *rp;
 
 	/*
-	 * Save all user registers to p1's stack or, in the case of
+	 * Save all user registers to l1's stack or, in the case of
 	 * user registers and invalid stack pointers, to opcb.
-	 * We then copy the whole pcb to p2; when switch() selects p2
-	 * to run, it will run at the `proc_trampoline' stub, rather
+	 * We then copy the whole pcb to l2; when switch() selects l2
+	 * to run, it will run at the `lwp_trampoline' stub, rather
 	 * than returning at the copying code below.
 	 *
-	 * If process p1 has an FPU state, we must copy it.  If it is
+	 * If process l1 has an FPU state, we must copy it.  If it is
 	 * the FPU user, we must save the FPU state first.
 	 */
 
-	if (p1 == curproc) {
+	if (l1 == curlwp) {
 		write_user_windows();
 		opcb->pcb_psr = getpsr();
 	}
-#ifdef DIAGNOSTIC
-	else if (p1 != &proc0)
-		panic("cpu_fork: curproc");
-#endif
 
-	bcopy((caddr_t)opcb, (caddr_t)npcb, sizeof(struct pcb));
-	if (p1->p_md.md_fpstate) {
-		if (p1 == cpuinfo.fpproc)
-			savefpstate(p1->p_md.md_fpstate);
-		p2->p_md.md_fpstate = malloc(sizeof(struct fpstate),
+	bcopy((void *)opcb, (void *)npcb, sizeof(struct pcb));
+	if (l1->l_md.md_fpstate != NULL) {
+		struct cpu_info *cpi;
+		int s;
+
+		l2->l_md.md_fpstate = malloc(sizeof(struct fpstate),
 		    M_SUBPROC, M_WAITOK);
-		bcopy(p1->p_md.md_fpstate, p2->p_md.md_fpstate,
+
+		FPU_LOCK(s);
+		if ((cpi = l1->l_md.md_fpu) != NULL) {
+			if (cpi->fplwp != l1)
+				panic("FPU(%d): fplwp %p",
+					cpi->ci_cpuid, cpi->fplwp);
+			if (l1 == cpuinfo.fplwp)
+				savefpstate(l1->l_md.md_fpstate);
+#if defined(MULTIPROCESSOR)
+			else
+				XCALL1(savefpstate, l1->l_md.md_fpstate,
+					1 << cpi->ci_cpuid);
+#endif
+		}
+		bcopy(l1->l_md.md_fpstate, l2->l_md.md_fpstate,
 		    sizeof(struct fpstate));
+		FPU_UNLOCK(s);
 	} else
-		p2->p_md.md_fpstate = NULL;
+		l2->l_md.md_fpstate = NULL;
+
+	l2->l_md.md_fpu = NULL;
 
 	/*
 	 * Setup (kernel) stack frame that will by-pass the child
 	 * out of the kernel. (The trap frame invariably resides at
 	 * the tippity-top of the u. area.)
 	 */
-	tf2 = p2->p_md.md_tf = (struct trapframe *)
+	tf2 = l2->l_md.md_tf = (struct trapframe *)
 			((int)npcb + USPACE - sizeof(*tf2));
 
 	/* Copy parent's trapframe */
@@ -413,107 +254,87 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	if (stack != NULL)
 		tf2->tf_out[6] = (u_int)stack + stacksize;
 
-	/* Duplicate efforts of syscall(), but slightly differently */
-	if (tf2->tf_global[1] & SYSCALL_G2RFLAG) {
-		/* jmp %g2 (or %g7, deprecated) on success */
-		tf2->tf_npc = tf2->tf_global[2];
-	} else {
-		/*
-		 * old system call convention: clear C on success
-		 * note: proc_trampoline() sets a fresh psr when
-		 * returning to user mode.
-		 */
-		/*tf2->tf_psr &= ~PSR_C;   -* success */
-	}
+	/*
+	 * The fork system call always uses the old system call
+	 * convention; clear carry and skip trap instruction as
+	 * in syscall().
+	 * note: lwp_trampoline() sets a fresh psr when returning
+	 * to user mode.
+	 */
+	/*tf2->tf_psr &= ~PSR_C;   -* success */
+	tf2->tf_pc = tf2->tf_npc;
+	tf2->tf_npc = tf2->tf_pc + 4;
 
 	/* Set return values in child mode */
 	tf2->tf_out[0] = 0;
 	tf2->tf_out[1] = 1;
 
-	/* Skip trap instruction. */
-	tf2->tf_pc = tf2->tf_npc;
-	tf2->tf_npc += 4;
-
 	/* Construct kernel frame to return to in cpu_switch() */
 	rp = (struct rwindow *)((u_int)npcb + TOPFRAMEOFF);
 	rp->rw_local[0] = (int)func;		/* Function to call */
 	rp->rw_local[1] = (int)arg;		/* and its argument */
+	rp->rw_local[2] = (int)l2;		/* the new LWP */
 
-	npcb->pcb_pc = (int)proc_trampoline - 8;
+	npcb->pcb_pc = (int)lwp_trampoline - 8;
 	npcb->pcb_sp = (int)rp;
 	npcb->pcb_psr &= ~PSR_CWP;	/* Run in window #0 */
 	npcb->pcb_wim = 1;		/* Fence at window #1 */
-
 }
 
 /*
- * cpu_exit is called as the last action during exit.
- *
- * We clean up a little and then call sched_exit() with the old proc
- * as an argument.  sched_exit() schedules the old vmspace and stack
- * to be freed, then selects a new process to run.
+ * Cleanup FPU state.
  */
 void
-cpu_exit(p)
-	struct proc *p;
+cpu_lwp_free(struct lwp *l, int proc)
 {
-	register struct fpstate *fs;
+	struct fpstate *fs;
 
-	if ((fs = p->p_md.md_fpstate) != NULL) {
-		if (p == cpuinfo.fpproc) {
-			savefpstate(fs);
-			cpuinfo.fpproc = NULL;
+	if ((fs = l->l_md.md_fpstate) != NULL) {
+		struct cpu_info *cpi;
+		int s;
+
+		FPU_LOCK(s);
+		if ((cpi = l->l_md.md_fpu) != NULL) {
+			if (cpi->fplwp != l)
+				panic("FPU(%d): fplwp %p",
+					cpi->ci_cpuid, cpi->fplwp);
+			if (l == cpuinfo.fplwp)
+				savefpstate(fs);
+#if defined(MULTIPROCESSOR)
+			else
+				XCALL1(savefpstate, fs, 1 << cpi->ci_cpuid);
+#endif
+			cpi->fplwp = NULL;
 		}
-		free((void *)fs, M_SUBPROC);
+		l->l_md.md_fpu = NULL;
+		FPU_UNLOCK(s);
 	}
-
-	pmap_deactivate(p);
-	sched_exit(p);
 }
 
-/*
- * cpu_coredump is called to write a core dump header.
- * (should this be defined elsewhere?  machdep.c?)
- */
-int
-cpu_coredump(p, vp, cred, chdr)
-	struct proc *p;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct core *chdr;
+void
+cpu_lwp_free2(struct lwp *l)
 {
-	int error;
-	struct md_coredump md_core;
-	struct coreseg cseg;
+	struct fpstate *fs;
 
-	CORE_SETMAGIC(*chdr, COREMAGIC, MID_SPARC, 0);
-	chdr->c_hdrsize = ALIGN(sizeof(*chdr));
-	chdr->c_seghdrsize = ALIGN(sizeof(cseg));
-	chdr->c_cpusize = sizeof(md_core);
+	if ((fs = l->l_md.md_fpstate) != NULL)
+		free((void *)fs, M_SUBPROC);
+}
 
-	md_core.md_tf = *p->p_md.md_tf;
-	md_core.md_wcookie = p->p_addr->u_pcb.pcb_wcookie;
-	if (p->p_md.md_fpstate) {
-		if (p == cpuinfo.fpproc)
-			savefpstate(p->p_md.md_fpstate);
-		md_core.md_fpstate = *p->p_md.md_fpstate;
-	} else
-		bzero((caddr_t)&md_core.md_fpstate, sizeof(struct fpstate));
+void
+cpu_setfunc(struct lwp *l, void (*func)(void *), void *arg)
+{
+	struct pcb *pcb = &l->l_addr->u_pcb;
+	/*struct trapframe *tf = l->l_md.md_tf;*/
+	struct rwindow *rp;
 
-	CORE_SETMAGIC(cseg, CORESEGMAGIC, MID_SPARC, CORE_CPU);
-	cseg.c_addr = 0;
-	cseg.c_size = chdr->c_cpusize;
-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
-	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
-	if (error)
-		return error;
+	/* Construct kernel frame to return to in cpu_switch() */
+	rp = (struct rwindow *)((u_int)pcb + TOPFRAMEOFF);
+	rp->rw_local[0] = (int)func;		/* Function to call */
+	rp->rw_local[1] = (int)arg;		/* and its argument */
+	rp->rw_local[2] = (int)l;		/* new lwp */
 
-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&md_core, sizeof(md_core),
-	    (off_t)(chdr->c_hdrsize + chdr->c_seghdrsize), UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
-	if (!error)
-		chdr->c_nseg++;
-
-	return error;
+	pcb->pcb_pc = (int)lwp_trampoline - 8;
+	pcb->pcb_sp = (int)rp;
+	pcb->pcb_psr &= ~PSR_CWP;	/* Run in window #0 */
+	pcb->pcb_wim = 1;		/* Fence at window #1 */
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: lca.c,v 1.19 2006/12/14 17:36:12 kettenis Exp $	*/
-/*	$NetBSD: lca.c,v 1.14 1996/12/05 01:39:35 cgd Exp $	*/
+/* $NetBSD: lca.c,v 1.44 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,6 +56,14 @@
  * rights to redistribute these changes.
  */
 
+#include "opt_dec_axppci_33.h"
+#include "opt_dec_alphabook1.h"
+#include "opt_dec_eb66.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: lca.c,v 1.44 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -74,6 +74,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/rpb.h>
+#include <machine/sysarch.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -92,23 +93,16 @@
 #include <alpha/pci/pci_eb66.h>
 #endif
 
-int	lcamatch(struct device *, void *, void *);
-void	lcaattach(struct device *, struct device *, void *);
+int	lcamatch __P((struct device *, struct cfdata *, void *));
+void	lcaattach __P((struct device *, struct device *, void *));
 
-struct cfattach lca_ca = {
-	sizeof(struct device), lcamatch, lcaattach,
-};
+CFATTACH_DECL(lca, sizeof(struct lca_softc),
+    lcamatch, lcaattach, NULL, NULL);
 
-struct cfdriver lca_cd = {
-	NULL, "lca", DV_DULL,
-};
+extern struct cfdriver lca_cd;
 
-int	lcaprint(void *, const char *pnp);
-
-#if 0
-int	lca_bus_get_window(int, int,
-	    struct alpha_bus_space_translation *);
-#endif
+int	lca_bus_get_window __P((int, int,
+	    struct alpha_bus_space_translation *));
 
 /* There can be only one. */
 int lcafound;
@@ -117,7 +111,7 @@ struct lca_config lca_configuration;
 int
 lcamatch(parent, match, aux)
 	struct device *parent;
-	void *match;
+	struct cfdata *match;
 	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
@@ -154,25 +148,17 @@ lca_init(lcp, mallocsafe)
 		lca_bus_io_init(&lcp->lc_iot, lcp);
 		lca_bus_mem_init(&lcp->lc_memt, lcp);
 
-#if 0
 		/*
 		 * We have 1 I/O window and 3 MEM windows.
 		 */
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_IO] = 1;
 		alpha_bus_window_count[ALPHA_BUS_TYPE_PCI_MEM] = 3;
 		alpha_bus_get_window = lca_bus_get_window;
-#endif
 	}
 	lcp->lc_mallocsafe = mallocsafe;
 
 	lca_pci_init(&lcp->lc_pc, lcp);
 	alpha_pci_chipset = &lcp->lc_pc;
-	alpha_pci_chipset->pc_name = "lca";
-	alpha_pci_chipset->pc_mem = LCA_PCI_SPARSE;
-	alpha_pci_chipset->pc_ports = LCA_PCI_SIO;
-	alpha_pci_chipset->pc_hae_mask = IOC_HAE_ADDREXT;
-	alpha_pci_chipset->pc_dense = LCA_PCI_DENSE;
-	alpha_pci_chipset->pc_bwx = 0;
 
 	/*
 	 * Refer to ``DECchip 21066 and DECchip 21068 Alpha AXP Microprocessors
@@ -207,6 +193,7 @@ lcaattach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
+	struct lca_softc *sc = (struct lca_softc *)self;
 	struct lca_config *lcp;
 	struct pcibus_attach_args pba;
 
@@ -219,7 +206,7 @@ lcaattach(parent, self, aux)
 	 * (maybe), but we must do it twice to take care of things
 	 * that need to use memory allocation.
 	 */
-	lcp = &lca_configuration;
+	lcp = sc->sc_lcp = &lca_configuration;
 	lca_init(lcp, 1);
 
 	/* XXX print chipset information */
@@ -248,37 +235,19 @@ lcaattach(parent, self, aux)
 		panic("lcaattach: shouldn't be here, really...");
 	}
 
-	pba.pba_busname = "pci";
 	pba.pba_iot = &lcp->lc_iot;
 	pba.pba_memt = &lcp->lc_memt;
 	pba.pba_dmat =
 	    alphabus_dma_get_tag(&lcp->lc_dmat_direct, ALPHA_BUS_PCI);
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &lcp->lc_pc;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
-#ifdef notyet
 	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED |
 	    PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY | PCI_FLAGS_MWI_OKAY;
-#endif
-	config_found(self, &pba, lcaprint);
+	config_found_ia(self, "pcibus", &pba, pcibusprint);
 }
 
-int
-lcaprint(aux, pnp)
-	void *aux;
-	const char *pnp;
-{
-	register struct pcibus_attach_args *pba = aux;
-
-	/* only PCIs can attach to LCAes; easy. */
-	if (pnp)
-		printf("%s at %s", pba->pba_busname, pnp);
-	printf(" bus %d", pba->pba_bus);
-	return (UNCONF);
-}
-
-#if 0
 int
 lca_bus_get_window(type, window, abst)
 	int type, window;
@@ -302,4 +271,3 @@ lca_bus_get_window(type, window, abst)
 
 	return (alpha_bus_space_get_window(st, window, abst));
 }
-#endif

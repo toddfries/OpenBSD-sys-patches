@@ -1,8 +1,12 @@
-/*	$OpenBSD: bmtphy.c,v 1.16 2006/12/27 19:11:08 kettenis Exp $	*/
-/*	$NetBSD: bmtphy.c,v 1.17 2005/01/17 13:17:45 scw Exp $	*/
+/*	$NetBSD: bmtphy.c,v 1.28 2008/11/17 03:04:27 dyoung Exp $	*/
 
 /*-
- * Copyright (c) 2001 Theo de Raadt
+ * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
+ * NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,24 +17,56 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
- * Driver for Broadcom BCM5201/BCM5202 "Mini-Theta" PHYs.  This also
+ * Copyright (c) 1997 Manuel Bouyer.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * Driver for the Broadcom BCM5201/BCM5202 "Mini-Theta" PHYs.  This also
  * drives the PHY on the 3Com 3c905C.  The 3c905C's PHY is described in
  * the 3c905C data sheet.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bmtphy.c,v 1.28 2008/11/17 03:04:27 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,50 +84,42 @@
 
 #include <dev/mii/bmtphyreg.h>
 
-int	bmtphymatch(struct device *, void *, void *);
-void	bmtphyattach(struct device *, struct device *, void *);
+static int	bmtphymatch(device_t, cfdata_t, void *);
+static void	bmtphyattach(device_t, device_t, void *);
 
-struct cfattach bmtphy_ca = {
-	sizeof(struct mii_softc), bmtphymatch, bmtphyattach, mii_phy_detach,
-	    mii_phy_activate
-};
+CFATTACH_DECL_NEW(bmtphy, sizeof(struct mii_softc),
+    bmtphymatch, bmtphyattach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver bmtphy_cd = {
-	NULL, "bmtphy", DV_DULL
-};
+static int	bmtphy_service(struct mii_softc *, struct mii_data *, int);
+static void	bmtphy_status(struct mii_softc *);
+static void	bmtphy_reset(struct mii_softc *);
 
-int	bmtphy_service(struct mii_softc *, struct mii_data *, int);
-void	bmtphy_status(struct mii_softc *);
-void	bmtphy_reset(struct mii_softc *);
-
-const struct mii_phy_funcs bmtphy_funcs = {
+static const struct mii_phy_funcs bmtphy_funcs = {
 	bmtphy_service, bmtphy_status, bmtphy_reset,
 };
 
 static const struct mii_phydesc bmtphys[] = {
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_3C905B,
-	  MII_STR_BROADCOM_3C905B },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_3C905C,
-	  MII_STR_BROADCOM_3C905C },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM4401,
-	  MII_STR_BROADCOM_BCM4401 },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5201,
-	  MII_STR_BROADCOM_BCM5201 },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5214,
-	  MII_STR_BROADCOM_BCM5214 },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5220,
-	  MII_STR_BROADCOM_BCM5220 },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5221,
-	  MII_STR_BROADCOM_BCM5221 },
-	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5222,
-	  MII_STR_BROADCOM_BCM5222 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_3C905B,
+	  MII_STR_xxBROADCOM_3C905B },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_3C905C,
+	  MII_STR_xxBROADCOM_3C905C },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5201,
+	  MII_STR_xxBROADCOM_BCM5201 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5214,
+	  MII_STR_xxBROADCOM_BCM5214 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5221,
+	  MII_STR_xxBROADCOM_BCM5221 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5222,
+	  MII_STR_xxBROADCOM_BCM5222 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM4401,
+	  MII_STR_xxBROADCOM_BCM4401 },
 
 	{ 0,				0,
 	  NULL },
 };
 
-int
-bmtphymatch(struct device *parent, void *match, void *aux)
+static int
+bmtphymatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -101,18 +129,20 @@ bmtphymatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-void
-bmtphyattach(struct device *parent, struct device *self, void *aux)
+static void
+bmtphyattach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
 	mpd = mii_phy_match(ma, bmtphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	aprint_naive(": Media interface\n");
+	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_model = MII_MODEL(ma->mii_id2);
+	sc->mii_dev = self;
+	sc->mii_mpd_model = MII_MODEL(ma->mii_id2);
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &bmtphy_funcs;
@@ -128,18 +158,19 @@ bmtphyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 bmtphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -194,7 +225,7 @@ bmtphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 bmtphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -205,6 +236,7 @@ bmtphy_status(struct mii_softc *sc)
 	mii->mii_media_active = IFM_ETHER;
 
 	bmsr = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
+
 	if (bmsr & BMSR_LINK)
 		mii->mii_media_status |= IFM_ACTIVE;
 
@@ -220,7 +252,7 @@ bmtphy_status(struct mii_softc *sc)
 
 	if (bmcr & BMCR_AUTOEN) {
 		/*
-		 * The later are only valid if autonegotiation
+		 * The media status bits are only valid of autonegotiation
 		 * has completed (or it's disabled).
 		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {
@@ -234,7 +266,6 @@ bmtphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
-
 		if (aux_csr & AUX_CSR_FDX)
 			mii->mii_media_active |= IFM_FDX;
 		else
@@ -243,14 +274,14 @@ bmtphy_status(struct mii_softc *sc)
 		mii->mii_media_active = ife->ifm_media;
 }
 
-void
+static void   
 bmtphy_reset(struct mii_softc *sc)
 {
 	u_int16_t data;
 
 	mii_phy_reset(sc);
 
-	if (sc->mii_model == MII_MODEL_BROADCOM_BCM5221) {
+	if (sc->mii_mpd_model == MII_MODEL_xxBROADCOM_BCM5221) {
 		/* Enable shadow register mode */
 		data = PHY_READ(sc, 0x1f);
 		PHY_WRITE(sc, 0x1f, data | 0x0080);
@@ -268,4 +299,4 @@ bmtphy_reset(struct mii_softc *sc)
 		data = PHY_READ(sc, 0x1f);
 		PHY_WRITE(sc, 0x1f, data & ~0x0080);
 	}
-}
+}      

@@ -1,4 +1,4 @@
-/*	$NetBSD: linux32_wait.c,v 1.1 2006/02/09 19:18:57 manu Exp $ */
+/*	$NetBSD: linux32_wait.c,v 1.9 2008/11/19 18:36:04 ad Exp $ */
 
 /*-
  * Copyright (c) 2006 Emmanuel Dreyfus, all rights reserved.
@@ -33,7 +33,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: linux32_wait.c,v 1.1 2006/02/09 19:18:57 manu Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux32_wait.c,v 1.9 2008/11/19 18:36:04 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -43,10 +43,10 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_wait.c,v 1.1 2006/02/09 19:18:57 manu Exp $"
 #include <sys/kernel.h>
 #include <sys/fcntl.h>
 #include <sys/select.h>
-#include <sys/sa.h>
 #include <sys/proc.h>
 #include <sys/ucred.h>
 #include <sys/swap.h>
+#include <sys/wait.h>
 
 #include <machine/types.h>
 
@@ -61,6 +61,8 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_wait.c,v 1.1 2006/02/09 19:18:57 manu Exp $"
 #include <compat/linux/common/linux_machdep.h>
 #include <compat/linux/common/linux_misc.h>
 #include <compat/linux/common/linux_oldolduname.h>
+#include <compat/linux/common/linux_ipc.h>
+#include <compat/linux/common/linux_sem.h>
 #include <compat/linux/linux_syscallargs.h>
 
 #include <compat/linux32/common/linux32_types.h>
@@ -71,44 +73,73 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_wait.c,v 1.1 2006/02/09 19:18:57 manu Exp $"
 #include <compat/linux32/linux32_syscallargs.h>
 
 int
-linux32_sys_waitpid(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_waitpid(struct lwp *l, const struct linux32_sys_waitpid_args *uap, register_t *retval)
 {
-	struct linux32_sys_waitpid_args /* {
+	/* {
 		syscallarg(int) pid;
 		syscallarg(netbsd32_intp) status;
 		syscallarg(int) options;
-	} */ *uap = v;
-	struct linux_sys_wait4_args ua;
+	} */
+	struct linux32_sys_wait4_args ua;
 
 	SCARG(&ua, pid) = SCARG(uap, pid);
-	SCARG(&ua, status) = NETBSD32PTR64(SCARG(uap, status));
+	SCARG(&ua, status) = SCARG(uap, status);
 	SCARG(&ua, options) = SCARG(uap, options);
-	SCARG(&ua, rusage) = NULL;
+	NETBSD32PTR32(SCARG(&ua, rusage), NULL);
 
-	return linux_sys_wait4(l, &ua, retval);	
+	return linux32_sys_wait4(l, &ua, retval);	
 }
 
 int
-linux32_sys_wait4(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux32_sys_wait4(struct lwp *l, const struct linux32_sys_wait4_args *uap, register_t *retval)
 {
-	struct linux32_sys_wait4_args /* {
+	/* {
 		syscallarg(int) pid;
 		syscallarg(netbsd32_intp) status;
 		syscallarg(int) options;
 		syscallarg(netbsd32_rusagep_t) rusage;
-	} */ *uap = v;
-	struct linux_sys_wait4_args ua;
+	} */
+	int error, status, linux_options, options, was_zombie;
+	struct rusage ru;
+	struct netbsd32_rusage ru32;
+	proc_t *p;
+	int pid;
 
-	NETBSD32TO64_UAP(pid);
-	NETBSD32TOP_UAP(status, int);
-	NETBSD32TO64_UAP(options);
-	NETBSD32TOP_UAP(rusage, struct rusage);
+	linux_options = SCARG(uap, options);
+	options = WOPTSCHECKED;
+	if (linux_options & ~(LINUX_WAIT4_KNOWNFLAGS))
+		return EINVAL;
 
-	return linux_sys_wait4(l, &ua, retval);	
+	if (linux_options & LINUX_WAIT4_WNOHANG)
+		options |= WNOHANG;
+	if (linux_options & LINUX_WAIT4_WUNTRACED)
+		options |= WUNTRACED;
+	if (linux_options & LINUX_WAIT4_WALL)
+		options |= WALLSIG;
+	if (linux_options & LINUX_WAIT4_WCLONE)
+		options |= WALTSIG;
+
+	pid = SCARG(uap, pid);
+	error = do_sys_wait(l, &pid, &status, options,
+	    SCARG_P32(uap, rusage) != NULL ? &ru : NULL, &was_zombie);
+	retval[0] = pid;
+	if (pid == 0)
+		return error;
+
+	p = curproc;
+	mutex_enter(p->p_lock);
+	sigdelset(&p->p_sigpend.sp_set, SIGCHLD);	/* XXXAD ksiginfo leak */
+	mutex_exit(p->p_lock);
+
+	if (SCARG_P32(uap, rusage) != NULL) {
+		netbsd32_from_rusage(&ru, &ru32);
+		error = copyout(&ru32, SCARG_P32(uap, rusage), sizeof(ru32));
+	}
+
+	if (error == 0 && SCARG_P32(uap, status) != NULL) {
+		status = bsd_to_linux_wstat(status);
+		error = copyout(&status, SCARG_P32(uap, status), sizeof(status));
+	}
+
+	return error;
 }

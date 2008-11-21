@@ -1,5 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.13 2007/09/09 20:49:18 kettenis Exp $	*/
-/*	$NetBSD: process_machdep.c,v 1.1 1996/09/30 16:34:53 ws Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.26 2007/10/17 19:56:48 garbled Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -31,84 +30,110 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.26 2007/10/17 19:56:48 garbled Exp $");
+
+#include "opt_altivec.h"
+
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/ptrace.h>
 #include <sys/user.h>
+#include <sys/systm.h>
+#include <sys/ptrace.h>
 
 #include <machine/fpu.h>
 #include <machine/pcb.h>
-#include <machine/psl.h>
 #include <machine/reg.h>
 
+#include <uvm/uvm_extern.h>
+
+#ifdef ALTIVEC
+#include <powerpc/altivec.h>
+#endif
+
 int
-process_read_regs(struct proc *p, struct reg *regs)
+process_read_regs(struct lwp *l, struct reg *regs)
 {
-	struct cpu_info *ci = curcpu();
-	struct trapframe *tf = trapframe(p);
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct trapframe * const tf = trapframe(l);
 
-	bcopy(tf->fixreg, regs->gpr, sizeof(regs->gpr));
-
-	if (!(pcb->pcb_flags & PCB_FPU)) {
-		bzero(regs->fpr, sizeof(regs->fpr));
-	} else {
-		/* XXX What if the state is on the other cpu? */
-		if (p == ci->ci_fpuproc)
-			save_fpu();
-		bcopy(pcb->pcb_fpu.fpr, regs->fpr, sizeof(regs->fpr));
-	}
-
-	regs->pc  = tf->srr0;
-	regs->ps  = tf->srr1; /* is this the correct value for this ? */
-	regs->cnd = tf->cr;
-	regs->lr  = tf->lr;
-	regs->cnt = tf->ctr;
+	memcpy(regs->fixreg, tf->fixreg, sizeof(regs->fixreg));
+	regs->lr = tf->lr;
+	regs->cr = tf->cr;
 	regs->xer = tf->xer;
-	regs->mq  = 0; /*  what should this really be? */
+	regs->ctr = tf->ctr;
+	regs->pc = tf->srr0;
 
-	return (0);
+	return 0;
 }
 
 int
-process_read_fpregs(struct proc *p, struct fpreg *regs)
+process_write_regs(struct lwp *l, const struct reg *regs)
 {
-	struct cpu_info *ci = curcpu();
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct trapframe * const tf = trapframe(l);
 
-	if (!(pcb->pcb_flags & PCB_FPU)) {
-		bzero(regs->fpr, sizeof(regs->fpr));
-		regs->fpscr = 0;
-	} else {
-		/* XXX What if the state is on the other cpu? */
-		if (p == ci->ci_fpuproc)
-			save_fpu();
-		bcopy(pcb->pcb_fpu.fpr, regs->fpr, sizeof(regs->fpr));
-		regs->fpscr = *(u_int64_t *)&pcb->pcb_fpu.fpcsr;
-	}
+	memcpy(tf->fixreg, regs->fixreg, sizeof(regs->fixreg));
+	tf->lr = regs->lr;
+	tf->cr = regs->cr;
+	tf->xer = regs->xer;
+	tf->ctr = regs->ctr;
+	tf->srr0 = regs->pc;
 
-	return (0);
+	return 0;
 }
 
-#ifdef PTRACE
+int
+process_read_fpregs(struct lwp *l, struct fpreg *fpregs)
+{
+	struct pcb * const pcb = &l->l_addr->u_pcb;
+
+	/* Is the process using the fpu? */
+	if ((pcb->pcb_flags & PCB_FPU) == 0) {
+		memset(fpregs, 0, sizeof (*fpregs));
+		return 0;
+	}
+
+#ifdef PPC_HAVE_FPU
+	save_fpu_lwp(l, FPU_SAVE);
+#endif
+	*fpregs = pcb->pcb_fpu;
+
+	return 0;
+}
+
+int
+process_write_fpregs(struct lwp *l, const struct fpreg *fpregs)
+{
+	struct pcb * const pcb = &l->l_addr->u_pcb;
+
+#ifdef PPC_HAVE_FPU
+	save_fpu_lwp(l, FPU_DISCARD);
+#endif
+
+	pcb->pcb_fpu = *fpregs;
+
+	/* pcb_fpu is initialized now. */
+	pcb->pcb_flags |= PCB_FPU;
+
+	return 0;
+}
 
 /*
  * Set the process's program counter.
  */
 int
-process_set_pc(struct proc *p, caddr_t addr)
+process_set_pc(struct lwp *l, void *addr)
 {
-	struct trapframe *tf = trapframe(p);
+	struct trapframe * const tf = trapframe(l);
 	
-	tf->srr0 = (u_int32_t)addr;
+	tf->srr0 = (register_t)addr;
 	return 0;
 }
 
 int
-process_sstep(struct proc *p, int sstep)
+process_sstep(struct lwp *l, int sstep)
 {
-	struct trapframe *tf = trapframe(p);
+	struct trapframe *tf = trapframe(l);
 	
 	if (sstep)
 		tf->srr1 |= PSL_SE;
@@ -117,59 +142,124 @@ process_sstep(struct proc *p, int sstep)
 	return 0;
 }
 
-int
-process_write_regs(struct proc *p, struct reg *regs)
+
+#ifdef __HAVE_PTRACE_MACHDEP
+static int
+process_machdep_read_vecregs(struct lwp *l, struct vreg *vregs)
 {
-	struct cpu_info *ci = curcpu();
-	struct trapframe *tf = trapframe(p);
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct pcb * const pcb = &l->l_addr->u_pcb;
 
-	if ((regs->ps ^ tf->srr1) & PSL_USERSTATIC)
-		return EINVAL;
+	if (cpu_altivec == 0)
+		return (EINVAL);
 
-	bcopy(regs->gpr, tf->fixreg, sizeof(regs->gpr));
-
-	/* XXX What if the state is on the other cpu? */
-	if (p == ci->ci_fpuproc) {	/* release the fpu */
-		save_fpu();
-		ci->ci_fpuproc = NULL;
+	/* Is the process using AltiVEC? */
+	if ((pcb->pcb_flags & PCB_ALTIVEC) == 0) {
+		memset(vregs, 0, sizeof (*vregs));
+		return 0;
 	}
+	save_vec_lwp(l, ALTIVEC_SAVE);
+	*vregs = pcb->pcb_vr;
 
-	bcopy(regs->fpr, pcb->pcb_fpu.fpr, sizeof(regs->fpr));
-	if (!(pcb->pcb_flags & PCB_FPU)) {
-		pcb->pcb_fpu.fpcsr = 0;
-		pcb->pcb_flags |= PCB_FPU;
-	}
+	return (0);
+}
 
-	tf->srr0 = regs->pc;
-	tf->srr1 = regs->ps;  /* is this the correct value for this ? */
-	tf->cr   = regs->cnd;
-	tf->lr   = regs->lr;
-	tf->ctr  = regs->cnt;
-	tf->xer  = regs->xer;
-	/*  regs->mq = 0; what should this really be? */
+static int
+process_machdep_write_vecregs(struct lwp *l, struct vreg *vregs)
+{
+	struct pcb * const pcb = &l->l_addr->u_pcb;
+
+	if (cpu_altivec == 0)
+		return (EINVAL);
+
+	save_vec_lwp(l, ALTIVEC_DISCARD);
+
+	pcb->pcb_vr = *vregs;
+	pcb->pcb_flags |= PCB_ALTIVEC;	/* pcb_vr is initialized now. */
 
 	return (0);
 }
 
 int
-process_write_fpregs(struct proc *p, struct fpreg *regs)
+ptrace_machdep_dorequest(struct lwp *l, struct lwp *lt,
+	int req, void *addr, int data)
 {
-	struct cpu_info *ci = curcpu();
-	struct pcb *pcb = &p->p_addr->u_pcb;
-	u_int64_t fpscr = regs->fpscr;
+	struct uio uio;
+	struct iovec iov;
+	int write = 0;
 
-	/* XXX What if the state is on the other cpu? */
-	if (p == ci->ci_fpuproc) {	/* release the fpu */
-		save_fpu();
-		ci->ci_fpuproc = NULL;
+	switch (req) {
+	case PT_SETVECREGS:
+		write = 1;
+
+	case PT_GETVECREGS:
+		/* write = 0 done above. */
+		if (!process_machdep_validvecregs(lt->l_proc))
+			return (EINVAL);
+		iov.iov_base = addr;
+		iov.iov_len = sizeof(struct vreg);
+		uio.uio_iov = &iov;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = sizeof(struct vreg);
+		uio.uio_rw = write ? UIO_WRITE : UIO_READ;
+		uio.uio_vmspace = l->l_proc->p_vmspace;
+		return process_machdep_dovecregs(l, lt, &uio);
 	}
 
-	bcopy(regs->fpr, pcb->pcb_fpu.fpr, sizeof(regs->fpr));
-	pcb->pcb_fpu.fpcsr = *(double *)&fpscr;
-	pcb->pcb_flags |= PCB_FPU;
+#ifdef DIAGNOSTIC
+	panic("ptrace_machdep: impossible");
+#endif
 
 	return (0);
 }
 
-#endif	/* PTRACE */
+/*
+ * The following functions are used by both ptrace(2) and procfs.
+ */
+
+int
+process_machdep_dovecregs(struct lwp *curl, struct lwp *l, struct uio *uio)
+{
+	struct vreg r;
+	int error;
+	char *kv;
+	int kl;
+
+	kl = sizeof(r);
+	kv = (char *) &r;
+
+	kv += uio->uio_offset;
+	kl -= uio->uio_offset;
+	if (kl > uio->uio_resid)
+		kl = uio->uio_resid;
+
+	uvm_lwp_hold(l);
+
+	if (kl < 0)
+		error = EINVAL;
+	else
+		error = process_machdep_read_vecregs(l, &r);
+	if (error == 0)
+		error = uiomove(kv, kl, uio);
+	if (error == 0 && uio->uio_rw == UIO_WRITE) {
+		if (l->l_proc->p_stat != SSTOP)
+			error = EBUSY;
+		else
+			error = process_machdep_write_vecregs(l, &r);
+	}
+
+	uvm_lwp_rele(l);
+
+	uio->uio_offset = 0;
+	return (error);
+}
+
+int
+process_machdep_validvecregs(struct proc *p)
+{
+	if (p->p_flag & PK_SYSTEM)
+		return (0);
+
+	return (cpu_altivec);
+}
+#endif /* __HAVE_PTRACE_MACHDEP */

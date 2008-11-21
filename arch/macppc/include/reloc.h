@@ -1,3 +1,3 @@
-/*	$OpenBSD: reloc.h,v 1.1 2001/09/01 15:49:06 drahn Exp $	*/
+/*	$NetBSD: reloc.h,v 1.2 1999/02/16 17:53:42 tsubai Exp $	*/
 
 #include <powerpc/reloc.h>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: bootp.c,v 1.12 2006/02/06 17:37:28 jmc Exp $	*/
-/*	$NetBSD: bootp.c,v 1.10 1996/10/13 02:28:59 christos Exp $	*/
+/*	$NetBSD: bootp.c,v 1.32 2008/03/25 21:23:50 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -40,28 +39,55 @@
  * @(#) Header: bootp.c,v 1.4 93/09/11 03:13:51 leres Exp  (LBL)
  */
 
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 
+#ifdef _STANDALONE
+#include <lib/libkern/libkern.h>
+#else
+#include <string.h>
+#endif
+
 #include "stand.h"
 #include "net.h"
-#include "netif.h"
 #include "bootp.h"
+
+struct in_addr servip;
+#ifdef SUPPORT_LINUX
+char linuxcmdline[256];
+#ifndef TAG_LINUX_CMDLINE
+#define TAG_LINUX_CMDLINE 123
+#endif
+#endif
 
 static n_long	nmask, smask;
 
 static time_t	bot;
 
 static	char vm_rfc1048[4] = VM_RFC1048;
+#ifdef BOOTP_VEND_CMU
 static	char vm_cmu[4] = VM_CMU;
+#endif
 
 /* Local forwards */
-static	ssize_t bootpsend(struct iodesc *, void *, size_t);
-static	ssize_t bootprecv(struct iodesc *, void *, size_t, time_t);
-static	void vend_cmu(u_char *);
-static	void vend_rfc1048(u_char *, u_int);
+static	ssize_t bootpsend __P((struct iodesc *, void *, size_t));
+static	ssize_t bootprecv __P((struct iodesc *, void *, size_t, time_t));
+static	int vend_rfc1048 __P((u_char *, u_int));
+#ifdef BOOTP_VEND_CMU
+static	void vend_cmu __P((u_char *));
+#endif
+
+#ifdef SUPPORT_DHCP
+static char expected_dhcpmsgtype = -1, dhcp_ok;
+struct in_addr dhcp_serverip;
+#endif
+
+/*
+ * Boot programs can patch this at run-time to change the behavior
+ * of bootp/dhcp.
+ */
+int bootp_flags;
 
 /* Fetch required bootp information */
 void
@@ -77,9 +103,13 @@ bootp(int sock)
 		u_char header[HEADER_SIZE];
 		struct bootp rbootp;
 	} rbuf;
+#ifdef SUPPORT_DHCP
+	char vci[64];
+	int vcilen;
+#endif
 
 #ifdef BOOTP_DEBUG
-	if (debug)
+ 	if (debug)
 		printf("bootp: socket=%d\n", sock);
 #endif
 	if (!bot)
@@ -90,29 +120,149 @@ bootp(int sock)
 		return;
 	}
 #ifdef BOOTP_DEBUG
-	if (debug)
-		printf("bootp: d=%x\n", (u_int)d);
+ 	if (debug)
+		printf("bootp: d=%lx\n", (long)d);
 #endif
 
 	bp = &wbuf.wbootp;
-	bzero(bp, sizeof(*bp));
+	(void)memset(bp, 0, sizeof(*bp));
 
 	bp->bp_op = BOOTREQUEST;
-	bp->bp_htype = HTYPE_ETHERNET;	/* 10Mb Ethernet (48 bits) */
+	bp->bp_htype = 1;		/* 10Mb Ethernet (48 bits) */
 	bp->bp_hlen = 6;
 	bp->bp_xid = htonl(d->xid);
 	MACPY(d->myea, bp->bp_chaddr);
-	bzero(bp->bp_file, sizeof(bp->bp_file));
-	bcopy(vm_rfc1048, bp->bp_vend, sizeof(vm_rfc1048));
+	(void)strncpy((char *)bp->bp_file, bootfile, sizeof(bp->bp_file));
+	(void)memcpy(bp->bp_vend, vm_rfc1048, sizeof(vm_rfc1048));
+#ifdef SUPPORT_DHCP
+	bp->bp_vend[4] = TAG_DHCP_MSGTYPE;
+	bp->bp_vend[5] = 1;
+	bp->bp_vend[6] = DHCPDISCOVER;
+	/*
+	 * Insert a NetBSD Vendor Class Identifier option.
+	 */
+	sprintf(vci, "NetBSD:%s:libsa", MACHINE);
+	vcilen = strlen(vci);
+	bp->bp_vend[7] = TAG_CLASSID;
+	bp->bp_vend[8] = vcilen;
+	(void)memcpy(&bp->bp_vend[9], vci, vcilen);
+	bp->bp_vend[9 + vcilen] = TAG_END;
+#else
+	bp->bp_vend[4] = TAG_END;
+#endif
 
-	d->myip = myip;
+	d->myip.s_addr = INADDR_ANY;
 	d->myport = htons(IPPORT_BOOTPC);
 	d->destip.s_addr = INADDR_BROADCAST;
 	d->destport = htons(IPPORT_BOOTPS);
 
-	(void)sendrecv(d,
-	    bootpsend, bp, sizeof(*bp),
-	    bootprecv, &rbuf.rbootp, sizeof(rbuf.rbootp));
+#ifdef SUPPORT_DHCP
+	expected_dhcpmsgtype = DHCPOFFER;
+	dhcp_ok = 0;
+#endif
+
+	if (sendrecv(d,
+		    bootpsend, bp, sizeof(*bp),
+		    bootprecv, &rbuf.rbootp, sizeof(rbuf.rbootp))
+	   == -1) {
+		printf("bootp: no reply\n");
+		return;
+	}
+
+#ifdef SUPPORT_DHCP
+	if (dhcp_ok) {
+		u_int32_t leasetime;
+		bp->bp_vend[6] = DHCPREQUEST;
+		bp->bp_vend[7] = TAG_REQ_ADDR;
+		bp->bp_vend[8] = 4;
+		(void)memcpy(&bp->bp_vend[9], &rbuf.rbootp.bp_yiaddr, 4);
+		bp->bp_vend[13] = TAG_SERVERID;
+		bp->bp_vend[14] = 4;
+		(void)memcpy(&bp->bp_vend[15], &dhcp_serverip.s_addr, 4);
+		bp->bp_vend[19] = TAG_LEASETIME;
+		bp->bp_vend[20] = 4;
+		leasetime = htonl(300);
+		(void)memcpy(&bp->bp_vend[21], &leasetime, 4);
+		/*
+		 * Insert a NetBSD Vendor Class Identifier option.
+		 */
+		sprintf(vci, "NetBSD:%s:libsa", MACHINE);
+		vcilen = strlen(vci);
+		bp->bp_vend[25] = TAG_CLASSID;
+		bp->bp_vend[26] = vcilen;
+		(void)memcpy(&bp->bp_vend[27], vci, vcilen);
+		bp->bp_vend[27 + vcilen] = TAG_END;
+
+		expected_dhcpmsgtype = DHCPACK;
+
+		if (sendrecv(d,
+			    bootpsend, bp, sizeof(*bp),
+			    bootprecv, &rbuf.rbootp, sizeof(rbuf.rbootp))
+		   == -1) {
+			printf("DHCPREQUEST failed\n");
+			return;
+		}
+	}
+#endif
+
+	myip = d->myip = rbuf.rbootp.bp_yiaddr;
+	servip = rbuf.rbootp.bp_siaddr;
+	if (rootip.s_addr == INADDR_ANY)
+		rootip = servip;
+	(void)memcpy(bootfile, rbuf.rbootp.bp_file, sizeof(bootfile));
+	bootfile[sizeof(bootfile) - 1] = '\0';
+
+	if (IN_CLASSA(myip.s_addr))
+		nmask = IN_CLASSA_NET;
+	else if (IN_CLASSB(myip.s_addr))
+		nmask = IN_CLASSB_NET;
+	else
+		nmask = IN_CLASSC_NET;
+#ifdef BOOTP_DEBUG
+	if (debug)
+		printf("'native netmask' is %s\n", intoa(nmask));
+#endif
+
+	/* Get subnet (or natural net) mask */
+	netmask = nmask;
+	if (smask)
+		netmask = smask;
+#ifdef BOOTP_DEBUG
+	if (debug)
+		printf("mask: %s\n", intoa(netmask));
+#endif
+
+	/* We need a gateway if root is on a different net */
+	if (!SAMENET(myip, rootip, netmask)) {
+#ifdef BOOTP_DEBUG
+		if (debug)
+			printf("need gateway for root ip\n");
+#endif
+	}
+
+	/* Toss gateway if on a different net */
+	if (!SAMENET(myip, gateip, netmask)) {
+#ifdef BOOTP_DEBUG
+		if (debug)
+			printf("gateway ip (%s) bad\n", inet_ntoa(gateip));
+#endif
+		gateip.s_addr = 0;
+	}
+
+#ifdef BOOTP_DEBUG
+	if (debug) {
+		printf("client addr: %s\n", inet_ntoa(myip));
+		if (smask)
+			printf("subnet mask: %s\n", intoa(smask));
+		if (gateip.s_addr != 0)
+			printf("net gateway: %s\n", inet_ntoa(gateip));
+		printf("server addr: %s\n", inet_ntoa(rootip));
+		if (rootpath[0] != '\0')
+			printf("server path: %s\n", rootpath);
+		if (bootfile[0] != '\0')
+			printf("file name: %s\n", bootfile);
+	}
+#endif
 
 	/* Bump xid so next request will be unique. */
 	++d->xid;
@@ -126,7 +276,7 @@ bootpsend(struct iodesc *d, void *pkt, size_t len)
 
 #ifdef BOOTP_DEBUG
 	if (debug)
-		printf("bootpsend: d=%x called.\n", (u_int)d);
+		printf("bootpsend: d=%lx called.\n", (long)d);
 #endif
 
 	bp = pkt;
@@ -137,147 +287,70 @@ bootpsend(struct iodesc *d, void *pkt, size_t len)
 		printf("bootpsend: calling sendudp\n");
 #endif
 
-	return (sendudp(d, pkt, len));
+	return sendudp(d, pkt, len);
 }
 
-/* Returns 0 if this is the packet we're waiting for else -1 (and errno == 0) */
 static ssize_t
 bootprecv(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 {
 	ssize_t n;
 	struct bootp *bp;
 
-#ifdef BOOTP_DEBUG
+#ifdef BOOTP_DEBUGx
 	if (debug)
-		printf("bootprecv: called\n");
+		printf("bootp_recvoffer: called\n");
 #endif
 
 	n = readudp(d, pkt, len, tleft);
-	if (n < 0 || (size_t)n < sizeof(struct bootp))
+	if (n == -1 || (size_t)n < sizeof(struct bootp) - BOOTP_VENDSIZE)
 		goto bad;
 
 	bp = (struct bootp *)pkt;
 
 #ifdef BOOTP_DEBUG
 	if (debug)
-		printf("bootprecv: checked.  bp = 0x%x, n = %d\n",
-		    (unsigned)bp, n);
+		printf("bootprecv: checked.  bp = 0x%lx, n = %d\n",
+		    (long)bp, (int)n);
 #endif
 	if (bp->bp_xid != htonl(d->xid)) {
 #ifdef BOOTP_DEBUG
 		if (debug) {
-			printf("bootprecv: expected xid 0x%lx, got 0x%lx\n",
+			printf("bootprecv: expected xid 0x%lx, got 0x%x\n",
 			    d->xid, ntohl(bp->bp_xid));
 		}
 #endif
 		goto bad;
 	}
 
+	/* protect against bogus addresses sent by DHCP servers */
+	if (bp->bp_yiaddr.s_addr == INADDR_ANY ||
+	    bp->bp_yiaddr.s_addr == INADDR_BROADCAST)
+		goto bad;
+
 #ifdef BOOTP_DEBUG
 	if (debug)
 		printf("bootprecv: got one!\n");
 #endif
 
-	/* Pick up our ip address (and natural netmask) */
-	myip = d->myip = bp->bp_yiaddr;
-#ifdef BOOTP_DEBUG
-	if (debug)
-		printf("our ip address is %s\n", inet_ntoa(d->myip));
-#endif
-	if (IN_CLASSA(d->myip.s_addr))
-		nmask = IN_CLASSA_NET;
-	else if (IN_CLASSB(d->myip.s_addr))
-		nmask = IN_CLASSB_NET;
-	else
-		nmask = IN_CLASSC_NET;
-#ifdef BOOTP_DEBUG
-	if (debug)
-		printf("'native netmask' is %s\n", intoa(nmask));
-#endif
-
-	/* Pick up root or swap server address and file spec. */
-	if (bp->bp_siaddr.s_addr != 0)
-		rootip = bp->bp_siaddr;
-	if (bp->bp_file[0] != '\0') {
-		strncpy(bootfile, (char *)bp->bp_file, sizeof(bootfile));
-		bootfile[sizeof(bootfile) - 1] = '\0';
-	}
-
 	/* Suck out vendor info */
-	if (bcmp(vm_cmu, bp->bp_vend, sizeof(vm_cmu)) == 0)
+	if (memcmp(vm_rfc1048, bp->bp_vend, sizeof(vm_rfc1048)) == 0) {
+		if (vend_rfc1048(bp->bp_vend, sizeof(bp->bp_vend)) != 0)
+			goto bad;
+	}
+#ifdef BOOTP_VEND_CMU
+	else if (memcmp(vm_cmu, bp->bp_vend, sizeof(vm_cmu)) == 0)
 		vend_cmu(bp->bp_vend);
-	else if (bcmp(vm_rfc1048, bp->bp_vend, sizeof(vm_rfc1048)) == 0)
-		vend_rfc1048(bp->bp_vend, sizeof(bp->bp_vend));
+#endif
 	else
 		printf("bootprecv: unknown vendor 0x%lx\n", (long)bp->bp_vend);
 
-	/* Check subnet mask against net mask; toss if bogus */
-	if ((nmask & smask) != nmask) {
-#ifdef BOOTP_DEBUG
-		if (debug)
-			printf("subnet mask (%s) bad\n", intoa(smask));
-#endif
-		smask = 0;
-	}
-
-	/* Get subnet (or natural net) mask */
-	netmask = nmask;
-	if (smask)
-		netmask = smask;
-#ifdef BOOTP_DEBUG
-	if (debug)
-		printf("mask: %s\n", intoa(netmask));
-#endif
-
-	/* We need a gateway if root or swap is on a different net */
-	if (!SAMENET(d->myip, rootip, netmask)) {
-#ifdef BOOTP_DEBUG
-		if (debug)
-			printf("need gateway for root ip\n");
-#endif
-	}
-
-	if (!SAMENET(d->myip, swapip, netmask)) {
-#ifdef BOOTP_DEBUG
-		if (debug)
-			printf("need gateway for swap ip\n");
-#endif
-	}
-
-	/* Toss gateway if on a different net */
-	if (!SAMENET(d->myip, gateip, netmask)) {
-#ifdef BOOTP_DEBUG
-		if (debug)
-			printf("gateway ip (%s) bad\n", inet_ntoa(gateip));
-#endif
-		gateip.s_addr = 0;
-	}
-
-	return (n);
-
+	return n;
 bad:
 	errno = 0;
-	return (-1);
+	return -1;
 }
 
-static void
-vend_cmu(u_char *cp)
-{
-	struct cmu_vend *vp;
-
-#ifdef BOOTP_DEBUG
-	if (debug)
-		printf("vend_cmu bootp info.\n");
-#endif
-	vp = (struct cmu_vend *)cp;
-
-	if (vp->v_smask.s_addr != 0)
-		smask = vp->v_smask.s_addr;
-	if (vp->v_dgate.s_addr != 0)
-		gateip = vp->v_dgate;
-}
-
-static void
+static int
 vend_rfc1048(u_char *cp, u_int len)
 {
 	u_char *ep;
@@ -299,14 +372,16 @@ vend_rfc1048(u_char *cp, u_int len)
 		if (tag == TAG_END)
 			break;
 
-		if (tag == TAG_SUBNET_MASK)
-			bcopy(cp, &smask, sizeof(smask));
-		if (tag == TAG_GATEWAY)
-			bcopy(cp, &gateip.s_addr, sizeof(gateip.s_addr));
-		if (tag == TAG_SWAPSERVER)
-			bcopy(cp, &swapip.s_addr, sizeof(swapip.s_addr));
-		if (tag == TAG_DOMAIN_SERVER)
-			bcopy(cp, &nameip.s_addr, sizeof(nameip.s_addr));
+		if (tag == TAG_SUBNET_MASK) {
+			(void)memcpy(&smask, cp, sizeof(smask));
+		}
+		if (tag == TAG_GATEWAY) {
+			(void)memcpy(&gateip.s_addr, cp, sizeof(gateip.s_addr));
+		}
+		if (tag == TAG_SWAPSERVER) {
+			/* let it override bp_siaddr */
+			(void)memcpy(&rootip.s_addr, cp, sizeof(rootip.s_addr));
+		}
 		if (tag == TAG_ROOTPATH) {
 			strncpy(rootpath, (char *)cp, sizeof(rootpath));
 			rootpath[size] = '\0';
@@ -315,10 +390,45 @@ vend_rfc1048(u_char *cp, u_int len)
 			strncpy(hostname, (char *)cp, sizeof(hostname));
 			hostname[size] = '\0';
 		}
-		if (tag == TAG_DOMAINNAME) {
-			strncpy(domainname, (char *)cp, sizeof(domainname));
-			domainname[size] = '\0';
+#ifdef SUPPORT_DHCP
+		if (tag == TAG_DHCP_MSGTYPE) {
+			if (*cp != expected_dhcpmsgtype)
+				return -1;
+			dhcp_ok = 1;
 		}
+		if (tag == TAG_SERVERID) {
+			(void)memcpy(&dhcp_serverip.s_addr, cp, 
+			      sizeof(dhcp_serverip.s_addr));
+		}
+#endif
+#ifdef SUPPORT_LINUX
+		if (tag == TAG_LINUX_CMDLINE) {
+			strncpy(linuxcmdline, (char *)cp, sizeof(linuxcmdline));
+			linuxcmdline[size] = '\0';
+		}
+#endif
 		cp += size;
 	}
+	return 0;
 }
+
+#ifdef BOOTP_VEND_CMU
+static void
+vend_cmu(u_char *cp)
+{
+	struct cmu_vend *vp;
+
+#ifdef BOOTP_DEBUG
+	if (debug)
+		printf("vend_cmu bootp info.\n");
+#endif
+	vp = (struct cmu_vend *)cp;
+
+	if (vp->v_smask.s_addr != 0) {
+		smask = vp->v_smask.s_addr;
+	}
+	if (vp->v_dgate.s_addr != 0) {
+		gateip = vp->v_dgate;
+	}
+}
+#endif

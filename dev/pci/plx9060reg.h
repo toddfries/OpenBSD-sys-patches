@@ -1,5 +1,4 @@
-/*	$OpenBSD: plx9060reg.h,v 1.2 2005/11/21 21:52:47 miod Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: plx9060reg.h,v 1.1 2000/05/17 17:47:00 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2000 Zembu Labs, Inc.
@@ -170,7 +169,7 @@
 #define	CONTROL_PCIMRC		0x00000f00
 #define	CONTROL_PCIMRC_SHIFT	8
 #define	CONTROL_PCIMWC		0x0000f000
-#define	CONTROL_PCIMWC_SHIFT	12
+#define	CONTORL_PCIMWC_SHIFT	12
 #define	CONTROL_GPO		0x00010000
 #define	CONTROL_GPI		0x00020000
 #define	CONTROL_EESK		0x01000000

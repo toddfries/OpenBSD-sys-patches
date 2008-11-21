@@ -1,5 +1,4 @@
-/*	$OpenBSD: kern_info_09.c,v 1.13 2007/11/28 14:04:44 deraadt Exp $	*/
-/*	$NetBSD: kern_info_09.c,v 1.5 1996/02/21 00:10:59 cgd Exp $	*/
+/*	$NetBSD: kern_info_09.c,v 1.20 2007/12/20 23:02:44 dsl Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -32,6 +31,9 @@
  *	@(#)subr_xxx.c	8.1 (Berkeley) 6/10/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kern_info_09.c,v 1.20 2007/12/20 23:02:44 dsl Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/filedesc.h>
@@ -45,48 +47,74 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-/*
- * Note that while we no longer have a COMPAT_09 kernel option,
- * there are other COMPAT_* options that need these old functions.
- */
-
 /* ARGSUSED */
 int
-compat_09_sys_getdomainname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+compat_09_sys_getdomainname(struct lwp *l, const struct compat_09_sys_getdomainname_args *uap, register_t *retval)
 {
-	struct compat_09_sys_getdomainname_args /* {
+	/* {
 		syscallarg(char *) domainname;
 		syscallarg(int) len;
-	} */ *uap = v;
-	int name;
+	} */
+	int name[2];
 	size_t sz;
 
-	name = KERN_DOMAINNAME;
+	name[0] = CTL_KERN;
+	name[1] = KERN_DOMAINNAME;
 	sz = SCARG(uap,len);
-	return (kern_sysctl(&name, 1, SCARG(uap, domainname), &sz, 0, 0, p));
+	return (old_sysctl(&name[0], 2, SCARG(uap, domainname), &sz, 0, 0, l));
 }
 
 
 /* ARGSUSED */
 int
-compat_09_sys_setdomainname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+compat_09_sys_setdomainname(struct lwp *l, const struct compat_09_sys_setdomainname_args *uap, register_t *retval)
 {
-	struct compat_09_sys_setdomainname_args /* {
+	/* {
 		syscallarg(char *) domainname;
 		syscallarg(int) len;
-	} */ *uap = v;
-	int name;
-	int error;
+	} */
+	int name[2];
 
-	if ((error = suser(p, 0)) != 0)
-		return (error);
-	name = KERN_DOMAINNAME;
-	return (kern_sysctl(&name, 1, 0, 0, SCARG(uap, domainname),
-			    SCARG(uap, len), p));
+	name[0] = CTL_KERN;
+	name[1] = KERN_DOMAINNAME;
+	return (old_sysctl(&name[0], 2, 0, 0, SCARG(uap, domainname),
+			   SCARG(uap, len), l));
+}
+
+struct outsname {
+	char	sysname[32];
+	char	nodename[32];
+	char	release[32];
+	char	version[32];
+	char	machine[32];
+};
+
+/* ARGSUSED */
+int
+compat_09_sys_uname(struct lwp *l, const struct compat_09_sys_uname_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(struct outsname *) name;
+	} */
+	struct outsname outsname;
+	const char *cp;
+	char *dp, *ep;
+
+	strncpy(outsname.sysname, ostype, sizeof(outsname.sysname));
+	strncpy(outsname.nodename, hostname, sizeof(outsname.nodename));
+	strncpy(outsname.release, osrelease, sizeof(outsname.release));
+	dp = outsname.version;
+	ep = &outsname.version[sizeof(outsname.version) - 1];
+	for (cp = version; *cp && *cp != '('; cp++)
+		;
+	for (cp++; *cp && *cp != ')' && dp < ep; cp++)
+		*dp++ = *cp;
+	for (; *cp && *cp != '#'; cp++)
+		;
+	for (; *cp && *cp != ':' && dp < ep; cp++)
+		*dp++ = *cp;
+	*dp = '\0';
+	strncpy(outsname.machine, MACHINE, sizeof(outsname.machine));
+	return (copyout((void *)&outsname, (void *)SCARG(uap, name),
+			sizeof(struct outsname)));
 }

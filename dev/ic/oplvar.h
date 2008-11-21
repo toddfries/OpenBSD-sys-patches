@@ -1,12 +1,11 @@
-/*	$OpenBSD: oplvar.h,v 1.4 2006/07/27 05:55:00 miod Exp $	*/
-/*	$NetBSD: oplvar.h,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
+/*	$NetBSD: oplvar.h,v 1.15 2008/04/28 20:23:51 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson (augustss@netbsd.org).
+ * by Lennart Augustsson (augustss@NetBSD.org).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,13 +49,27 @@ struct opl_softc {
 #define OPL_2 2
 #define OPL_3 3
 	struct	midisyn syn;
+	device_t sc_mididev;
 
 	struct opl_voice voices[OPL3_NVOICE];
-	int volume;
+	u_int8_t pan[MIDI_MAX_CHANS];
+	u_int8_t panl, panr;
 
 	int	(*spkrctl)(void *, int);
-	void    *spkrarg;
+	void	*spkrarg;
+
+#ifndef AUDIO_NO_POWER_CTL
+	int	(*powerctl)(void *, int);
+	void	*powerarg;
+#endif
 };
+
+/* for panpot */
+#define OPL_MIDI_CENTER_MIN	(64 - 20)
+#define OPL_MIDI_CENTER_MAX	(64 + 20)
+
+/* config flags */
+#define OPL_FLAGS_SWAP_LR	0x0001	/* swap L and R channels */
 
 struct opl_attach_arg {
 	bus_space_tag_t iot;
@@ -85,8 +91,13 @@ struct opl_operators {
 };
 
 #define OPL_NINSTR 256
+
+#ifdef _KERNEL
 extern const struct opl_operators opl2_instrs[];
 extern const struct opl_operators opl3_instrs[];
 
-int	opl_find(struct opl_attach_arg *);
+int	opl_find(struct opl_softc *);
+int	opl_match(bus_space_tag_t, bus_space_handle_t, int);
 void	opl_attach(struct opl_softc *);
+int	opl_detach(struct opl_softc *, int);
+#endif

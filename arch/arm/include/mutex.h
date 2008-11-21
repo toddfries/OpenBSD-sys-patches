@@ -1,61 +1,101 @@
-/*	$OpenBSD: mutex.h,v 1.1 2007/12/05 16:08:04 deraadt Exp $	*/
+/*	$NetBSD: mutex.h,v 1.10 2008/04/28 20:23:14 martin Exp $	*/
 
-/*
- * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
- * All rights reserved. 
+/*-
+ * Copyright (c) 2002, 2007 The NetBSD Foundation, Inc.
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without 
- * modification, are permitted provided that the following conditions 
- * are met: 
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe and Andrew Doran.
  *
- * 1. Redistributions of source code must retain the above copyright 
- *    notice, this list of conditions and the following disclaimer. 
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission. 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL  DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _MACHINE_MUTEX_H_
-#define _MACHINE_MUTEX_H_
+#ifndef _ARM_MUTEX_H_
+#define	_ARM_MUTEX_H_
 
 /*
- * Simple non-mp implementation.
+ * The ARM mutex implementation is troublesome, because pre-v6 ARM lacks a
+ * compare-and-swap operation.  However, there aren't any MP pre-v6 ARM
+ * systems to speak of.  We are mostly concerned with atomicity with respect
+ * to interrupts.
+ *
+ * ARMv6, however, does have ldrex/strex, and can thus implement an MP-safe
+ * compare-and-swap.
+ *
+ * So, what we have done is impement simple mutexes using a compare-and-swap.
+ * We support pre-ARMv6 by implementing CAS as a restartable atomic sequence
+ * that is checked by the IRQ vector.  MP-safe ARMv6 support will be added later.
  */
-struct mutex {
-	int mtx_lock;
-	int mtx_wantipl;
-	int mtx_oldipl;
+
+#ifndef __MUTEX_PRIVATE
+
+struct kmutex {
+	uintptr_t	mtx_pad1;
 };
 
-void mtx_init(struct mutex *, int);
+#else	/* __MUTEX_PRIVATE */
 
-#define MUTEX_INITIALIZER(ipl) { 0, ipl, 0 }
+struct kmutex {
+	union {
+		/* Adaptive mutex */
+		volatile uintptr_t	mtxa_owner;	/* 0-3 */
 
-#ifdef DIAGNOSTIC
-#define MUTEX_ASSERT_LOCKED(mtx) do {					\
-	if ((mtx)->mtx_lock == 0)					\
-		panic("mutex %p not held in %s", (mtx), __func__);	\
-} while (0)
+		/* Spin mutex */
+		struct {
+			volatile uint8_t	mtxs_dummy;
+			ipl_cookie_t		mtxs_ipl;
+			__cpu_simple_lock_t	mtxs_lock;
+			volatile uint8_t	mtxs_unused;
+		} s;
+	} u;
+};
 
-#define MUTEX_ASSERT_UNLOCKED(mtx) do {					\
-	if ((mtx)->mtx_lock != 0)					\
-		panic("mutex %p held in %s", (mtx), __func__);		\
-} while (0)
-#else
-#define MUTEX_ASSERT_LOCKED(mtx) do { } while (0)
-#define MUTEX_ASSERT_UNLOCKED(mtx) do { } while (0)
+#define	mtx_owner		u.mtxa_owner
+#define	mtx_ipl			u.s.mtxs_ipl
+#define	mtx_lock		u.s.mtxs_lock
+
+#if 0
+#define	__HAVE_MUTEX_STUBS		1
+#define	__HAVE_SPIN_MUTEX_STUBS		1
 #endif
+#define	__HAVE_SIMPLE_MUTEXES		1
 
-#define MUTEX_OLDIPL(mtx)	(mtx)->mtx_oldipl
+/*
+ * MUTEX_RECEIVE: no memory barrier required; we're synchronizing against
+ * interrupts, not multiple processors.
+ */
+#define	MUTEX_RECEIVE(mtx)		/* nothing */
 
-#endif
+/*
+ * MUTEX_GIVE: no memory barrier required; same reason.
+ */
+#define	MUTEX_GIVE(mtx)			/* nothing */
+
+unsigned long	_lock_cas(volatile unsigned long *,
+    unsigned long, unsigned long);
+
+#define	MUTEX_CAS(p, o, n)		\
+    (_lock_cas((volatile unsigned long *)(p), (o), (n)) == (o))
+
+#endif	/* __MUTEX_PRIVATE */
+
+#endif /* _ARM_MUTEX_H_ */

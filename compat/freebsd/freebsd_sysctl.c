@@ -1,11 +1,8 @@
-/*	$NetBSD: freebsd_sysctl.c,v 1.7 2006/09/24 21:44:58 dbj Exp $	*/
+/*	$NetBSD: freebsd_sysctl.c,v 1.15 2008/11/19 18:36:02 ad Exp $	*/
 
 /*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,11 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: freebsd_sysctl.c,v 1.7 2006/09/24 21:44:58 dbj Exp $");
-
-#if defined(_KERNEL_OPT)
-#include "opt_ktrace.h"
-#endif
+__KERNEL_RCSID(0, "$NetBSD: freebsd_sysctl.c,v 1.15 2008/11/19 18:36:02 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,11 +42,8 @@ __KERNEL_RCSID(0, "$NetBSD: freebsd_sysctl.c,v 1.7 2006/09/24 21:44:58 dbj Exp $
 #include <sys/malloc.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
-#ifdef KTRACE
 #include <sys/ktrace.h>
-#endif
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/freebsd/freebsd_syscallargs.h>
@@ -69,18 +52,22 @@ __KERNEL_RCSID(0, "$NetBSD: freebsd_sysctl.c,v 1.7 2006/09/24 21:44:58 dbj Exp $
 #include <compat/freebsd/freebsd_timex.h>
 #include <compat/freebsd/freebsd_signal.h>
 #include <compat/freebsd/freebsd_mman.h>
+#include <compat/freebsd/freebsd_sysctl.h>
 
 static int freebsd_sysctl_name2oid(char *, int *, int *);
 
-SYSCTL_SETUP_PROTO(freebsd_sysctl_setup);
-SYSCTL_SETUP(freebsd_sysctl_setup, "freebsd emulated sysctl setup")
+static struct sysctllog *freebsd_clog;
+
+void
+freebsd_sysctl_init(void)
 {
-	sysctl_createv(clog, 0, NULL, NULL,
+
+	sysctl_createv(&freebsd_clog, 0, NULL, NULL,
 			CTLFLAG_PERMANENT,
 			CTLTYPE_NODE, "kern", NULL,
 			NULL, 0, NULL, 0,
 			CTL_KERN, CTL_EOL);
-        sysctl_createv(clog, 0, NULL, NULL,
+        sysctl_createv(&freebsd_clog, 0, NULL, NULL,
 			CTLFLAG_PERMANENT|CTLFLAG_IMMEDIATE,
 			CTLTYPE_INT, "osreldate",
 			SYSCTL_DESCR("Operating system revision"),
@@ -88,20 +75,24 @@ SYSCTL_SETUP(freebsd_sysctl_setup, "freebsd emulated sysctl setup")
 			CTL_KERN, CTL_CREATE, CTL_EOL);
 }
 
-int
-freebsd_sys_sysctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+void
+freebsd_sysctl_fini(void)
 {
-	struct freebsd_sys_sysctl_args /* {
+
+	sysctl_teardown(&freebsd_clog);
+}
+
+int
+freebsd_sys_sysctl(struct lwp *l, const struct freebsd_sys_sysctl_args *uap, register_t *retval)
+{
+	/* {
 		syscallarg(int *) name;
 		syscallarg(u_int) namelen;
 		syscallarg(void *) old;
 		syscallarg(size_t *) oldlenp;
 		syscallarg(void *) new;
 		syscallarg(size_t) newlen;
-	} */ *uap = v;
+	} */
 	int error;
 	int name[CTL_MAXNAME];
 	size_t newlen, *oldlenp;
@@ -118,12 +109,9 @@ freebsd_sys_sysctl(l, v, retval)
 		return error;
 
 	if (namelen > 0 && name[0] != 0)
-		return(sys___sysctl(l, v, retval));
+		return(sys___sysctl(l, (const void *)uap, retval));
 
-#ifdef KTRACE
-	if (KTRPOINT(l->l_proc, KTR_MIB))
-		ktrmib(l, name, namelen);
-#endif
+	ktrmib(name, namelen);
 
 	/*
 	 * FreeBSD sysctl uses an undocumented set of special OIDs in it's
@@ -165,23 +153,15 @@ freebsd_sys_sysctl(l, v, retval)
 		     (char *) malloc(newlen + 1, M_TEMP, M_WAITOK)) == NULL)
 			return(ENOMEM);
 
-		if ((error = copyinstr(new, locnew, newlen + 1, NULL)) ||
-		    (error = sysctl_lock(l, old, *oldlenp))) {
+		if ((error = copyinstr(new, locnew, newlen + 1, NULL))) {
 			free(locnew, M_TEMP);
 			return(error);
 		}
-#ifdef KTRACE
-		if (!error && KTRPOINT(l->l_proc, KTR_MIB)) {
-			struct iovec iov;
 
-			iov.iov_base = new;
-			iov.iov_len = newlen + 1;
-			ktrgenio(l, -1, UIO_WRITE, &iov, newlen + 1, 0);
-		}
-#endif
-
+		ktrmibio(-1, UIO_WRITE, new, newlen + 1, error);
+		sysctl_lock(new != NULL);
 		error = freebsd_sysctl_name2oid(locnew, oid, &oidlen);
-		sysctl_unlock(l);
+		sysctl_unlock();
 		free(locnew, M_TEMP);
 		if (error)
 			return(error);
@@ -191,15 +171,9 @@ freebsd_sys_sysctl(l, v, retval)
 				MIN(oidlen, *SCARG(uap, oldlenp)));
 		if (error)
 			return(error);
-#ifdef KTRACE
-		if (KTRPOINT(l->l_proc, KTR_MIB)) {
-			struct iovec iov;
+		ktrmibio(-1, UIO_READ, SCARG(uap, old),
+		    MIN(oidlen, *SCARG(uap, oldlenp)),  0);
 
-			iov.iov_base = SCARG(uap, old);
-			iov.iov_len = MIN(oidlen, *SCARG(uap, oldlenp));
-			ktrgenio(l, -1, UIO_READ, &iov, iov.iov_len, 0);
-		}
-#endif
 		error = copyout(&oidlen, SCARG(uap, oldlenp), sizeof(u_int));
 
 		return(error);

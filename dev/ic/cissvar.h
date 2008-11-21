@@ -1,7 +1,8 @@
-/*	$OpenBSD: cissvar.h,v 1.7 2007/03/22 16:55:31 deraadt Exp $	*/
+/*	$NetBSD: cissvar.h,v 1.3 2008/05/25 20:08:34 mhitch Exp $	*/
+/*	$OpenBSD: cissvar.h,v 1.2 2005/09/07 04:00:16 mickey Exp $	*/
 
 /*
- * Copyright (c) 2005,2006 Michael Shalayeff
+ * Copyright (c) 2005 Michael Shalayeff
  * All rights reserved.
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -17,7 +18,11 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/sensors.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+
+#include <dev/sysmon/sysmonvar.h>
+#include <sys/envsys.h>
 
 struct ciss_ld {
 	struct ciss_blink bling;	/* a copy of blink state */
@@ -27,49 +32,54 @@ struct ciss_ld {
 };
 
 struct ciss_softc {
-	struct device	sc_dev;
-	struct scsi_link sc_link;
-	struct scsi_link *sc_link_raw;
-	struct timeout	sc_hb;
-	void		*sc_ih;
-	void		*sc_sh;
-	struct proc	*sc_thread;
-	int		sc_flush;
-	struct ksensor	*sensors;
-	struct ksensordev sensordev;
+	/* Generic device info. */
+	struct device		sc_dev;
+	kmutex_t		sc_mutex;
+	kmutex_t		sc_mutex_scratch;
+	bus_space_handle_t	sc_ioh;
+	bus_space_tag_t		sc_iot;
+	bus_dma_tag_t		sc_dmat;
+	void			*sc_ih;
+	void			*sc_sh;		/* shutdown hook */
+	struct proc		*sc_thread;
+	int			sc_flush;
+
+	struct scsipi_channel	sc_channel;
+	struct scsipi_channel	*sc_channel_raw;
+	struct scsipi_adapter	sc_adapter;
+	struct scsipi_adapter	*sc_adapter_raw;
+	struct callout		sc_hb;
 
 	u_int	sc_flags;
-#define	CISS_BIO	0x0001
 	int ccblen, maxcmd, maxsg, nbus, ndrives, maxunits;
 	ciss_queue_head	sc_free_ccb, sc_ccbq, sc_ccbdone;
+	kcondvar_t		sc_condvar;
 
-	bus_space_tag_t	iot;
-	bus_space_handle_t ioh, cfg_ioh;
-	bus_dma_tag_t	dmat;
-	bus_dmamap_t	cmdmap;
-	bus_dma_segment_t cmdseg[1];
-	void		*ccbs;
-	void		*scratch;
+	bus_dmamap_t		cmdmap;
+	bus_dma_segment_t	cmdseg[1];
+	void *			ccbs;
+	void			*scratch;
+	u_int			sc_waitflag;
+
+	bus_space_handle_t	cfg_ioh;
 
 	struct ciss_config cfg;
 	int cfgoff;
 	u_int32_t iem;
 	u_int32_t heartbeat;
 	struct ciss_ld **sc_lds;
+
+	/* scsi ioctl from sd device */
+	int			(*sc_ioctl)(struct device *, u_long, void *);
+
+	struct sysmon_envsys    *sc_sme;
+	envsys_data_t		*sc_sensor;
 };
 
 struct ciss_rawsoftc {
-	struct scsi_link sc_link;
 	struct ciss_softc *sc_softc;
 	u_int8_t	sc_channel;
 };
-
-/* XXX These have to become spinlocks in case of fine SMP */
-#define	CISS_LOCK(sc) splbio()
-#define	CISS_UNLOCK(sc, lock) splx(lock)
-#define	CISS_LOCK_SCRATCH(sc) splbio()
-#define	CISS_UNLOCK_SCRATCH(sc, lock) splx(lock)
-typedef	int ciss_lock_t;
 
 int	ciss_attach(struct ciss_softc *sc);
 int	ciss_intr(void *v);

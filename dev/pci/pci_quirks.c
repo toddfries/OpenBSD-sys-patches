@@ -1,5 +1,4 @@
-/*	$OpenBSD: pci_quirks.c,v 1.5 2007/07/02 07:19:54 dlg Exp $	*/
-/*	$NetBSD: pci_quirks.c,v 1.1 1998/05/31 06:03:44 cgd Exp $	*/
+/*	$NetBSD: pci_quirks.c,v 1.8 2007/01/06 00:08:20 jmcneill Exp $	*/
 
 /*
  * Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.
@@ -35,6 +34,9 @@
  * PCI Quirk data table and lookup function.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pci_quirks.c,v 1.8 2007/01/06 00:08:20 jmcneill Exp $");
+
 #include <sys/param.h>
 #include <sys/device.h>
 
@@ -44,7 +46,9 @@
 
 static const struct pci_quirkdata pci_quirks[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371FB_ISA,
-	    PCI_QUIRK_MULTIFUNCTION }
+	    PCI_QUIRK_MULTIFUNCTION },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_XBOX_PCHB,
+	    PCI_QUIRK_SKIP_FUNC1 | PCI_QUIRK_SKIP_FUNC2 },
 };
 
 const struct pci_quirkdata *

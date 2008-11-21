@@ -1,5 +1,4 @@
-/*      $OpenBSD: mtpr.h,v 1.5 2000/04/26 03:08:42 bjc Exp $     */
-/*      $NetBSD: mtpr.h,v 1.12 1999/06/06 19:06:29 ragge Exp $     */
+/*      $NetBSD: mtpr.h,v 1.20 2007/02/16 01:34:03 matt Exp $     */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -130,7 +129,7 @@
 #define	PR_RXDB3  89 /* Serial-Line Unit 3 Receive Data Buffer (KA820) */
 #define	PR_TXCS3  90 /* Serial-Line Unit 3 Transmit CSR (KA820) */
 #define	PR_TXDB3  91 /* Serial-Line Unit 3 Transmit Data Buffer (KA820) */
-#define	PR_RXCD	  92 /* Receive Console Data from another cpu (KA820) */
+#define	PR_RXCD	  92 /* Receive Console Data from another CPU (KA820) */
 #define	PR_CACHEX 93 /* Cache invalidate Register (KA820) */
 #define	PR_BINID  94 /* VAXBI node ID Register (KA820) */
 #define	PR_BISTOP 95 /* VAXBI Stop Register (KA820) */
@@ -152,27 +151,40 @@
 #define PR_PCERR  126 /* primary cache error address (KA43/KA46) */
 #define PR_PCSTS  127 /* primary cache status (KA43/KA46) */
 
+#define PR_VPSR   144 /* Vector processor status register */
+#define PR_VAER   145 /* Vector arithmetic error register */
+#define PR_VMAC   146 /* Vector memory activity register */
+#define PR_VTBIA  147 /* Vector TBIA */
+#define PR_VSAR   148 /* Vector state address register */
+#define PR_VIADR  157 /* Vector indirect address register */
+#define PR_VIDLO  158 /* Vector indirect data low */
+#define PR_VIDHI  159 /* Vector indirect data high */
+
 /* Definitions for AST */
 #define	AST_NO	  4
 #define	AST_OK	  3
 
 #ifndef	_LOCORE
 
-#define mtpr(val,reg)                                   \
-{                                                       \
-        __asm__ __volatile ("mtpr %0,%1"                    \
-                        : /* No output */               \
-                        : "g" (val), "g" (reg));        \
+static inline void
+mtpr(register_t val, int reg)
+{
+	__asm volatile (
+		"mtpr %0,%1"
+	    : /* No output */
+	    : "g" (val), "g" (reg));
 }
 
-#define mfpr(reg)                                       \
-({                                                      \
-        register int val;                               \
-        __asm__ __volatile ("mfpr %1,%0"                    \
-                        : "=g" (val)                    \
-                        : "g" (reg));                   \
-        val;                                            \
-})
+static inline register_t
+mfpr(int reg)
+{
+	register_t __val;
+	__asm volatile (
+		"mfpr %1,%0"
+	    : "=g" (__val)
+	    : "g" (reg));
+	return __val;
+}
 #endif	/* _LOCORE */
 
 #endif /* _VAX_MTPR_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: cz.c,v 1.10 2007/10/06 23:50:54 krw Exp $ */
-/*	$NetBSD: cz.c,v 1.15 2001/01/20 19:10:36 thorpej Exp $	*/
+/*	$NetBSD: cz.c,v 1.49 2008/06/08 12:43:52 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2000 Zembu Labs, Inc.
@@ -41,7 +40,7 @@
  * Some notes:
  *
  *	- The Cyclades-Z has fully automatic hardware (and software!)
- *	  flow control.  We only utilize RTS/CTS flow control here,
+ *	  flow control.  We only use RTS/CTS flow control here,
  *	  and it is implemented in a very simplistic manner.  This
  *	  may be an area of future work.
  *
@@ -73,6 +72,9 @@
  * for FreeBSD 3.2.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cz.c,v 1.49 2008/06/08 12:43:52 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -84,6 +86,9 @@
 #include <sys/kernel.h>
 #include <sys/fcntl.h>
 #include <sys/syslog.h>
+#include <sys/kauth.h>
+
+#include <sys/callout.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -93,7 +98,7 @@
 #include <dev/pci/plx9060reg.h>
 #include <dev/pci/plx9060var.h>
 
-#include <dev/microcode/cyclades/cyzfirm.h>
+#include <dev/microcode/cyclades-z/cyzfirm.h>
 
 #define	CZ_DRIVER_VERSION	0x20000411
 
@@ -115,7 +120,7 @@ struct cztty_softc {
 	struct cz_softc *sc_parent;
 	struct tty *sc_tty;
 
-	struct timeout sc_diag_to;
+	callout_t sc_diag_ch;
 
 	int sc_channel;			/* Also used to flag unattached chan */
 #define CZTTY_CHANNEL_DEAD	-1
@@ -149,7 +154,7 @@ struct cz_softc {
 	struct plx9060_config cz_plx;	/* PLX 9060 config info */
 	bus_space_tag_t cz_win_st;	/* window space tag */
 	bus_space_handle_t cz_win_sh;	/* window space handle */
-	struct timeout cz_timeout;	/* timeout for polling-mode */
+	callout_t cz_callout;		/* callout for polling-mode */
 
 	void *cz_ih;			/* interrupt handle */
 
@@ -161,42 +166,29 @@ struct cz_softc {
 	bus_addr_t cz_fwctl;		/* offset of firmware control */
 };
 
-int	cz_match(struct device *, void *, void *);
-void	cz_attach(struct device *, struct device *, void *);
-int	cz_wait_pci_doorbell(struct cz_softc *, char *);
+static int	cz_wait_pci_doorbell(struct cz_softc *, const char *);
 
-struct cfattach cz_ca = {
-	sizeof(struct cz_softc), cz_match, cz_attach
-};
+static int	cz_load_firmware(struct cz_softc *);
 
-void	cz_reset_board(struct cz_softc *);
-int	cz_load_firmware(struct cz_softc *);
+static int	cz_intr(void *);
+static void	cz_poll(void *);
+static int	cztty_transmit(struct cztty_softc *, struct tty *);
+static int	cztty_receive(struct cztty_softc *, struct tty *);
 
-int	cz_intr(void *);
-void	cz_poll(void *);
-int	cztty_transmit(struct cztty_softc *, struct tty *);
-int	cztty_receive(struct cztty_softc *, struct tty *);
+static struct	cztty_softc *cztty_getttysoftc(dev_t dev);
+static int	cztty_attached_ttys;
+static int	cz_timeout_ticks;
 
-struct	cztty_softc * cztty_getttysoftc(dev_t dev);
-int	cztty_findmajor(void);
-int	cztty_major;
-int	cztty_attached_ttys;
-int	cz_timeout_ticks;
+static void	czttystart(struct tty *tp);
+static int	czttyparam(struct tty *tp, struct termios *t);
+static void	cztty_shutdown(struct cztty_softc *sc);
+static void	cztty_modem(struct cztty_softc *sc, int onoff);
+static void	cztty_break(struct cztty_softc *sc, int onoff);
+static void	tiocm_to_cztty(struct cztty_softc *sc, u_long how, int ttybits);
+static int	cztty_to_tiocm(struct cztty_softc *sc);
+static void	cztty_diag(void *arg);
 
-cdev_decl(cztty);
-
-void    czttystart(struct tty *tp);
-int	czttyparam(struct tty *tp, struct termios *t);
-void    cztty_shutdown(struct cztty_softc *sc);
-void	cztty_modem(struct cztty_softc *sc, int onoff);
-void	cztty_break(struct cztty_softc *sc, int onoff);
-void	tiocm_to_cztty(struct cztty_softc *sc, u_long how, int ttybits);
-int	cztty_to_tiocm(struct cztty_softc *sc);
-void	cztty_diag(void *arg);
-
-struct cfdriver cz_cd = {
-	0, "cz", DV_TTY
-};
+extern struct cfdriver cz_cd;
 
 /*
  * Macros to read and write the PLX.
@@ -268,16 +260,20 @@ do {									\
  *
  *	Determine if the given PCI device is a Cyclades-Z board.
  */
-int
-cz_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+cz_match(struct device *parent,
+    struct cfdata *match,
+    void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_CYCLADES &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_CYCLADES_CYCLOMZ_2)
-		return (1);
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_CYCLADES) {
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_CYCLADES_CYCLOMZ_2:
+			return (1);
+		}
+	}
+
 	return (0);
 }
 
@@ -286,33 +282,36 @@ cz_match(parent, match, aux)
  *
  *	A Cyclades-Z board was found; attach it.
  */
-void
-cz_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+cz_attach(struct device *parent,
+    struct device *self,
+    void *aux)
 {
+	extern const struct cdevsw cz_cdevsw;	/* XXX */
 	struct cz_softc *cz = (void *) self;
 	struct pci_attach_args *pa = aux;
-	pci_chipset_tag_t pc = pa->pa_pc;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	struct cztty_softc *sc;
 	struct tty *tp;
 	int i;
 
+	aprint_naive(": Multi-port serial controller\n");
+	aprint_normal(": Cyclades-Z multiport serial\n");
+
 	cz->cz_plx.plx_pc = pa->pa_pc;
 	cz->cz_plx.plx_tag = pa->pa_tag;
 
 	if (pci_mapreg_map(pa, PLX_PCI_RUNTIME_MEMADDR,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &cz->cz_plx.plx_st, &cz->cz_plx.plx_sh, NULL, NULL, 0) != 0) {
-		printf(": unable to map PLX registers\n");
+	    &cz->cz_plx.plx_st, &cz->cz_plx.plx_sh, NULL, NULL) != 0) {
+		aprint_error_dev(&cz->cz_dev, "unable to map PLX registers\n");
 		return;
 	}
 	if (pci_mapreg_map(pa, PLX_PCI_LOCAL_ADDR0,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &cz->cz_win_st, &cz->cz_win_sh, NULL, NULL, 0) != 0) {
-		printf(": unable to map device window\n");
+	    &cz->cz_win_st, &cz->cz_win_sh, NULL, NULL) != 0) {
+		aprint_error_dev(&cz->cz_dev, "unable to map device window\n");
 		return;
 	}
 
@@ -347,30 +346,29 @@ cz_attach(parent, self, aux)
 		goto polling_mode;
 	} else {
 		intrstr = pci_intr_string(pa->pa_pc, ih);
-		cz->cz_ih = pci_intr_establish(pc, ih, IPL_TTY,
-			    cz_intr, cz, cz->cz_dev.dv_xname);
+		cz->cz_ih = pci_intr_establish(pa->pa_pc, ih, IPL_TTY,
+		    cz_intr, cz);
 	}
 	if (cz->cz_ih == NULL) {
-		printf(": unable to establish interrupt");
+		aprint_error_dev(&cz->cz_dev, "unable to establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		/* We will fall-back on polling mode. */
 	} else
-		printf(": %s\n", intrstr);
+		aprint_normal_dev(&cz->cz_dev, "interrupting at %s\n",
+		    intrstr);
 
  polling_mode:
 	if (cz->cz_ih == NULL) {
-		timeout_set(&cz->cz_timeout, cz_poll, cz);
+		callout_init(&cz->cz_callout, 0);
 		if (cz_timeout_ticks == 0)
 			cz_timeout_ticks = max(1, hz * CZ_POLL_MS / 1000);
-		printf("%s: polling mode, %d ms interval (%d tick%s)\n",
-		    cz->cz_dev.dv_xname, CZ_POLL_MS, cz_timeout_ticks,
+		aprint_normal_dev(&cz->cz_dev, "polling mode, %d ms interval (%d tick%s)\n",
+		    CZ_POLL_MS, cz_timeout_ticks,
 		    cz_timeout_ticks == 1 ? "" : "s");
 	}
 
-	if (cztty_major == 0)
-		cztty_major = cztty_findmajor();
 	/*
 	 * Allocate sufficient pointers for the children and
 	 * attach them.  Set all ports to a reasonable initial
@@ -389,7 +387,7 @@ cz_attach(parent, self, aux)
 	}
 
 	cz->cz_ports = malloc(sizeof(struct cztty_softc) * cz->cz_nchannels,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
+	    M_DEVBUF, M_WAITOK|M_ZERO);
 	cztty_attached_ttys += cz->cz_nchannels;
 
 	for (i = 0; i < cz->cz_nchannels; i++) {
@@ -402,27 +400,28 @@ cz_attach(parent, self, aux)
 		if (bus_space_subregion(cz->cz_win_st, cz->cz_win_sh,
 		    cz->cz_fwctl + ZFIRM_CHNCTL_OFF(i, 0),
 		    ZFIRM_CHNCTL_SIZE, &sc->sc_chan_sh)) {
-			printf("%s: unable to subregion channel %d control\n",
-			    cz->cz_dev.dv_xname, i);
+			aprint_error_dev(&cz->cz_dev,
+			    "unable to subregion channel %d control\n", i);
 			sc->sc_channel = CZTTY_CHANNEL_DEAD;
 			continue;
 		}
 		if (bus_space_subregion(cz->cz_win_st, cz->cz_win_sh,
 		    cz->cz_fwctl + ZFIRM_BUFCTL_OFF(i, 0),
 		    ZFIRM_BUFCTL_SIZE, &sc->sc_buf_sh)) {
-			printf("%s: unable to subregion channel %d buffer\n",
-			    cz->cz_dev.dv_xname, i);
+			aprint_error_dev(&cz->cz_dev,
+			    "unable to subregion channel %d buffer\n", i);
 			sc->sc_channel = CZTTY_CHANNEL_DEAD;
 			continue;
 		}
 
-		timeout_set(&sc->sc_diag_to, cztty_diag, sc);
+		callout_init(&sc->sc_diag_ch, 0);
 
 		tp = ttymalloc();
-		tp->t_dev = makedev(cztty_major,
-		    (cz->cz_dev.dv_unit * ZFIRM_MAX_CHANNELS) + i);
+		tp->t_dev = makedev(cdevsw_lookup_major(&cz_cdevsw),
+		    (device_unit(&cz->cz_dev) * ZFIRM_MAX_CHANNELS) + i);
 		tp->t_oproc = czttystart;
 		tp->t_param = czttyparam;
+		tty_attach(tp);
 
 		sc->sc_tty = tp;
 
@@ -440,12 +439,16 @@ cz_attach(parent, self, aux)
 	}
 }
 
+CFATTACH_DECL(cz, sizeof(struct cz_softc),
+    cz_match, cz_attach, NULL, NULL);
+
+#if 0
 /*
  * cz_reset_board:
  *
  *	Reset the board via the PLX.
  */
-void
+static void
 cz_reset_board(struct cz_softc *cz)
 {
 	u_int32_t reg;
@@ -463,6 +466,7 @@ cz_reset_board(struct cz_softc *cz)
 	delay(1000);
 	CZ_PLX_WRITE(cz, PLX_CONTROL, reg);
 }
+#endif
 
 /*
  * cz_load_firmware:
@@ -470,44 +474,43 @@ cz_reset_board(struct cz_softc *cz)
  *	Load the ZFIRM firmware into the board's RAM and start it
  *	running.
  */
-int
+static int
 cz_load_firmware(struct cz_softc *cz)
 {
-	struct zfirm_header *zfh;
-	struct zfirm_config *zfc;
-	struct zfirm_block *zfb, *zblocks;
+	const struct zfirm_header *zfh;
+	const struct zfirm_config *zfc;
+	const struct zfirm_block *zfb, *zblocks;
 	const u_int8_t *cp;
 	const char *board;
 	u_int32_t fid;
 	int i, j, nconfigs, nblocks, nbytes;
 
-	zfh = (struct zfirm_header *) cycladesz_firmware;
+	zfh = (const struct zfirm_header *) cycladesz_firmware;
 
 	/* Find the config header. */
-	if (letoh32(zfh->zfh_configoff) & (sizeof(u_int32_t) - 1)) {
-		printf("%s: bad ZFIRM config offset: 0x%x\n",
-		    cz->cz_dev.dv_xname, letoh32(zfh->zfh_configoff));
+	if (le32toh(zfh->zfh_configoff) & (sizeof(u_int32_t) - 1)) {
+		aprint_error_dev(&cz->cz_dev, "bad ZFIRM config offset: 0x%x\n",
+		    le32toh(zfh->zfh_configoff));
 		return (EIO);
 	}
-	zfc = (struct zfirm_config *)(cycladesz_firmware +
-	    letoh32(zfh->zfh_configoff));
-	nconfigs = letoh32(zfh->zfh_nconfig);
+	zfc = (const struct zfirm_config *)(cycladesz_firmware +
+	    le32toh(zfh->zfh_configoff));
+	nconfigs = le32toh(zfh->zfh_nconfig);
 
 	/* Locate the correct configuration for our board. */
 	for (i = 0; i < nconfigs; i++, zfc++) {
-		if (letoh32(zfc->zfc_mailbox) == cz->cz_mailbox0 &&
-		    letoh32(zfc->zfc_function) == ZFC_FUNCTION_NORMAL)
+		if (le32toh(zfc->zfc_mailbox) == cz->cz_mailbox0 &&
+		    le32toh(zfc->zfc_function) == ZFC_FUNCTION_NORMAL)
 			break;
 	}
 	if (i == nconfigs) {
-		printf("%s: unable to locate config header\n",
-		    cz->cz_dev.dv_xname);
+		aprint_error_dev(&cz->cz_dev, "unable to locate config header\n");
 		return (EIO);
 	}
 
-	nblocks = letoh32(zfc->zfc_nblocks);
-	zblocks = (struct zfirm_block *)(cycladesz_firmware +
-	    letoh32(zfh->zfh_blockoff));
+	nblocks = le32toh(zfc->zfc_nblocks);
+	zblocks = (const struct zfirm_block *)(cycladesz_firmware +
+	    le32toh(zfh->zfh_blockoff));
 
 	/*
 	 * 8Zo ver. 1 doesn't have an FPGA.  Load it on all others if
@@ -519,16 +522,16 @@ cz_load_firmware(struct cz_softc *cz)
 #endif
 								) {
 #ifdef CZ_DEBUG
-		printf("%s: Loading FPGA...", cz->cz_dev.dv_xname);
+		aprint_debug_dev(&cz->cz_dev, "Loading FPGA...");
 #endif
 		CZ_WIN_FPGA(cz);
 		for (i = 0; i < nblocks; i++) {
-			/* zfb = zblocks + letoh32(zfc->zfc_blocklist[i]) ?? */
-			zfb = &zblocks[letoh32(zfc->zfc_blocklist[i])];
-			if (letoh32(zfb->zfb_type) == ZFB_TYPE_FPGA) {
-				nbytes = letoh32(zfb->zfb_size);
+			/* zfb = zblocks + le32toh(zfc->zfc_blocklist[i]) ?? */
+			zfb = &zblocks[le32toh(zfc->zfc_blocklist[i])];
+			if (le32toh(zfb->zfb_type) == ZFB_TYPE_FPGA) {
+				nbytes = le32toh(zfb->zfb_size);
 				cp = &cycladesz_firmware[
-				    letoh32(zfb->zfb_fileoff)];
+				    le32toh(zfb->zfb_fileoff)];
 				for (j = 0; j < nbytes; j++, cp++) {
 					bus_space_write_1(cz->cz_win_st,
 					    cz->cz_win_sh, 0, *cp);
@@ -538,7 +541,7 @@ cz_load_firmware(struct cz_softc *cz)
 			}
 		}
 #ifdef CZ_DEBUG
-		printf("done\n");
+		aprint_debug("done\n");
 #endif
 	}
 
@@ -546,17 +549,17 @@ cz_load_firmware(struct cz_softc *cz)
 	CZ_WIN_RAM(cz);
 
 	for (i = 0; i < nblocks; i++) {
-		/* zfb = zblocks + letoh32(zfc->zfc_blocklist[i]) ?? */
-		zfb = &zblocks[letoh32(zfc->zfc_blocklist[i])];
-		if (letoh32(zfb->zfb_type) == ZFB_TYPE_FIRMWARE) {
+		/* zfb = zblocks + le32toh(zfc->zfc_blocklist[i]) ?? */
+		zfb = &zblocks[le32toh(zfc->zfc_blocklist[i])];
+		if (le32toh(zfb->zfb_type) == ZFB_TYPE_FIRMWARE) {
 			const u_int32_t *lp;
-			u_int32_t ro = letoh32(zfb->zfb_ramoff);
-			nbytes = letoh32(zfb->zfb_size);
+			u_int32_t ro = le32toh(zfb->zfb_ramoff);
+			nbytes = le32toh(zfb->zfb_size);
 			lp = (const u_int32_t *)
-			    &cycladesz_firmware[letoh32(zfb->zfb_fileoff)];
+			    &cycladesz_firmware[le32toh(zfb->zfb_fileoff)];
 			for (j = 0; j < nbytes; j += 4, lp++) {
 				bus_space_write_4(cz->cz_win_st, cz->cz_win_sh,
-				    ro + j, letoh32(*lp));
+				    ro + j, le32toh(*lp));
 				delay(10);
 			}
 		}
@@ -570,7 +573,7 @@ cz_load_firmware(struct cz_softc *cz)
 	CZ_WIN_RAM(cz);
 
 #ifdef CZ_DEBUG
-	printf("%s: waiting for MIPS to start", cz->cz_dev.dv_xname);
+	aprint_debug_dev(&cz->cz_dev, "waiting for MIPS to start");
 #endif
 	for (i = 0; i < 100; i++) {
 		fid = bus_space_read_4(cz->cz_win_st, cz->cz_win_sh,
@@ -583,26 +586,27 @@ cz_load_firmware(struct cz_softc *cz)
 			 * The MIPS has halted, usually due to a power
 			 * shortage on the expansion module.
 			 */
-			printf("%s: MIPS halted; possible power supply "
-			    "problem\n", cz->cz_dev.dv_xname);
+			aprint_error_dev(&cz->cz_dev, "MIPS halted; possible power supply "
+			    "problem\n");
 			return (EIO);
 		} else {
 #ifdef CZ_DEBUG
 			if ((i % 8) == 0)
-				printf(".");
+				aprint_debug(".");
 #endif
 			delay(250000);
 		}
 	}
 #ifdef CZ_DEBUG
-	printf("\n");
+	aprint_debug("\n");
 #endif
 	if (i == 100) {
 		CZ_WIN_FPGA(cz);
-		printf("%s: MIPS failed to start; wanted 0x%08x got 0x%08x\n",
-		    cz->cz_dev.dv_xname, ZFIRM_SIG, fid);
-		printf("%s: FPGA ID 0x%08x, FPGA version 0x%08x\n",
-		    cz->cz_dev.dv_xname, CZ_FPGA_READ(cz, FPGA_ID),
+		aprint_error_dev(&cz->cz_dev,
+		    "MIPS failed to start; wanted 0x%08x got 0x%08x\n",
+		    ZFIRM_SIG, fid);
+		aprint_error_dev(&cz->cz_dev, "FPGA ID 0x%08x, FPGA version 0x%08x\n",
+		    CZ_FPGA_READ(cz, FPGA_ID),
 		    CZ_FPGA_READ(cz, FPGA_VERSION));
 		return (EIO);
 	}
@@ -613,8 +617,8 @@ cz_load_firmware(struct cz_softc *cz)
 	cz->cz_fwctl = bus_space_read_4(cz->cz_win_st, cz->cz_win_sh,
 	    ZFIRM_CTRLADDR_OFF);
 #ifdef CZ_DEBUG
-	printf("%s: FWCTL structure at offset 0x%08lx\n",
-	    cz->cz_dev.dv_xname, cz->cz_fwctl);
+	aprint_debug_dev(&cz->cz_dev, "FWCTL structure at offset 0x%08lx\n",
+	    cz->cz_fwctl);
 #endif
 
 	CZ_FWCTL_WRITE(cz, BRDCTL_C_OS, C_OS_BSD);
@@ -641,14 +645,14 @@ cz_load_firmware(struct cz_softc *cz)
 	}
 
 	fid = CZ_FWCTL_READ(cz, BRDCTL_FWVERSION);
-	printf("%s: %s, ", cz->cz_dev.dv_xname, board);
+	aprint_normal_dev(&cz->cz_dev, "%s, ", board);
 	if (cz->cz_nchannels == 0)
-		printf("no channels attached, ");
+		aprint_normal("no channels attached, ");
 	else
-		printf("%d channels (ttyCZ%04d..ttyCZ%04d), ",
+		aprint_normal("%d channels (ttyCZ%04d..ttyCZ%04d), ",
 		    cz->cz_nchannels, cztty_attached_ttys,
 		    cztty_attached_ttys + (cz->cz_nchannels - 1));
-	printf("firmware %x.%x.%x\n",
+	aprint_normal("firmware %x.%x.%x\n",
 	    (fid >> 8) & 0xf, (fid >> 4) & 0xf, fid & 0xf);
 
 	return (0);
@@ -660,14 +664,14 @@ cz_load_firmware(struct cz_softc *cz)
  * This card doesn't do interrupts, so scan it for activity every CZ_POLL_MS
  * ms.
  */
-void
+static void
 cz_poll(void *arg)
 {
 	int s = spltty();
 	struct cz_softc *cz = arg;
 
 	cz_intr(cz);
-	timeout_add(&cz->cz_timeout, cz_timeout_ticks);
+	callout_reset(&cz->cz_callout, cz_timeout_ticks, cz_poll, cz);
 
 	splx(s);
 }
@@ -680,7 +684,7 @@ cz_poll(void *arg)
  * We either are receiving an interrupt directly from the board, or we are
  * in polling mode and it's time to poll.
  */
-int
+static int
 cz_intr(void *arg)
 {
 	int	rval = 0;
@@ -700,7 +704,7 @@ cz_intr(void *arg)
 		if (cz->cz_ports == NULL) {
 #ifdef CZ_DEBUG
 			printf("%s: interrupt on channel %d, but no channels\n",
-			    cz->cz_dev.dv_xname, channel);
+			    device_xname(&cz->cz_dev), channel);
 #endif
 			continue;
 		}
@@ -720,7 +724,7 @@ cz_intr(void *arg)
 			if (!ISSET(tp->t_state, TS_ISOPEN)) {
 #ifdef CZ_DEBUG
 				printf("%s: tx intr on closed channel %d\n",
-				    cz->cz_dev.dv_xname, channel);
+				    device_xname(&cz->cz_dev), channel);
 #endif
 				break;
 			}
@@ -729,7 +733,9 @@ cz_intr(void *arg)
 				/*
 				 * Do wakeup stuff here.
 				 */
+				mutex_spin_enter(&tty_lock); /* XXX */
 				ttwakeup(tp);
+				mutex_spin_exit(&tty_lock); /* XXX */
 				wakeup(tp);
 			}
 			break;
@@ -750,7 +756,9 @@ cz_intr(void *arg)
 				/*
 				 * Do wakeup stuff here.
 				 */
+				mutex_spin_enter(&tty_lock); /* XXX */
 				ttwakeup(tp);
+				mutex_spin_exit(&tty_lock); /* XXX */
 				wakeup(tp);
 			}
 			break;
@@ -759,7 +767,7 @@ cz_intr(void *arg)
 			if (!ISSET(tp->t_state, TS_ISOPEN))
 				break;
 
-			(void) (*linesw[tp->t_line].l_modem)(tp,
+			(void) (*tp->t_linesw->l_modem)(tp,
 			    ISSET(C_RS_DCD, CZTTY_CHAN_READ(sc,
 			    CHNCTL_RS_STATUS)));
 			break;
@@ -785,7 +793,8 @@ cz_intr(void *arg)
 			sc->sc_overflows++;
  error_common:
 			if (sc->sc_errors++ == 0)
-				timeout_add(&sc->sc_diag_to, 60 * hz);
+				callout_reset(&sc->sc_diag_ch, 60 * hz,
+				    cztty_diag, sc);
 			break;
 
 		case C_CM_RXBRK:
@@ -796,15 +805,17 @@ cz_intr(void *arg)
 			 * A break is a \000 character with TTY_FE error
 			 * flags set. So TTY_FE by itself works.
 			 */
-			(*linesw[tp->t_line].l_rint)(TTY_FE, tp);
+			(*tp->t_linesw->l_rint)(TTY_FE, tp);
+			mutex_spin_enter(&tty_lock); /* XXX */
 			ttwakeup(tp);
+			mutex_spin_exit(&tty_lock); /* XXX */
 			wakeup(tp);
 			break;
 
 		default:
 #ifdef CZ_DEBUG
 			printf("%s: channel %d: Unknown interrupt 0x%x\n",
-			    cz->cz_dev.dv_xname, sc->sc_channel, command);
+			    device_xname(&cz->cz_dev), sc->sc_channel, command);
 #endif
 			break;
 		}
@@ -819,8 +830,8 @@ cz_intr(void *arg)
  *	Wait for the pci doorbell to be clear - wait for pending
  *	activity to drain.
  */
-int
-cz_wait_pci_doorbell(struct cz_softc *cz, char *wstring)
+static int
+cz_wait_pci_doorbell(struct cz_softc *cz, const char *wstring)
 {
 	int	error;
 
@@ -836,22 +847,22 @@ cz_wait_pci_doorbell(struct cz_softc *cz, char *wstring)
  * Cyclades-Z TTY code starts here...
  *****************************************************************************/
 
-#define CZTTYDIALOUT_MASK	0x80
+#define CZTTYDIALOUT_MASK	0x80000
 
 #define	CZTTY_DIALOUT(dev)	(minor((dev)) & CZTTYDIALOUT_MASK)
 #define	CZTTY_CZ(sc)		((sc)->sc_parent)
 
 #define	CZTTY_SOFTC(dev)	cztty_getttysoftc(dev)
 
-struct cztty_softc *
+static struct cztty_softc *
 cztty_getttysoftc(dev_t dev)
 {
-	int i, j, k, u = minor(dev) & ~CZTTYDIALOUT_MASK;
-	struct cz_softc *cz;
+	int i, j, k = 0, u = minor(dev) & ~CZTTYDIALOUT_MASK;
+	struct cz_softc *cz = NULL;
 
 	for (i = 0, j = 0; i < cz_cd.cd_ndevs; i++) {
 		k = j;
-		cz = (struct cz_softc *)device_lookup(&cz_cd, i);
+		cz = device_lookup_private(&cz_cd, i);
 		if (cz == NULL)
 			continue;
 		if (cz->cz_ports == NULL)
@@ -867,25 +878,12 @@ cztty_getttysoftc(dev_t dev)
 		return (&cz->cz_ports[u - k]);
 }
 
-int
-cztty_findmajor(void)
-{
-	int	maj;
-
-	for (maj = 0; maj < nchrdev; maj++) {
-		if (cdevsw[maj].d_open == czttyopen)
-			break;
-	}
-
-	return (maj == nchrdev) ? 0 : maj;
-}
-
 /*
  * czttytty:
  *
  *	Return a pointer to our tty.
  */
-struct tty *
+static struct tty *
 czttytty(dev_t dev)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
@@ -903,7 +901,7 @@ czttytty(dev_t dev)
  *
  *	Shut down a port.
  */
-void
+static void
 cztty_shutdown(struct cztty_softc *sc)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -932,9 +930,9 @@ cztty_shutdown(struct cztty_softc *sc)
 
 	if ((--cz->cz_nopenchan == 0) && (cz->cz_ih == NULL)) {
 #ifdef CZ_DEBUG
-		printf("%s: Disabling polling\n", cz->cz_dev.dv_xname);
+		printf("%s: Disabling polling\n", device_xname(&cz->cz_dev));
 #endif
-		timeout_del(&cz->cz_timeout);
+		callout_stop(&cz->cz_callout);
 	}
 
 	splx(s);
@@ -945,8 +943,8 @@ cztty_shutdown(struct cztty_softc *sc)
  *
  *	Open a Cyclades-Z serial port.
  */
-int
-czttyopen(dev_t dev, int flags, int mode, struct proc *p)
+static int
+czttyopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct cz_softc *cz;
@@ -962,9 +960,7 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 	cz = CZTTY_CZ(sc);
 	tp = sc->sc_tty;
 
-	if (ISSET(tp->t_state, TS_ISOPEN) &&
-	    ISSET(tp->t_state, TS_XCLUDE) &&
-	    p->p_ucred->cr_uid != 0)
+	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN, tp))
 		return (EBUSY);
 
 	s = spltty();
@@ -972,7 +968,7 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 	/*
 	 * Do the following iff this is a first open.
 	 */
-	if (!ISSET(tp->t_state, TS_ISOPEN)) {
+	if (!ISSET(tp->t_state, TS_ISOPEN) && (tp->t_wopen == 0)) {
 		struct termios t;
 
 		tp->t_dev = dev;
@@ -981,9 +977,10 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 		if ((cz->cz_nopenchan++ == 0) && (cz->cz_ih == NULL)) {
 #ifdef CZ_DEBUG
 			printf("%s: Enabling polling.\n",
-			    cz->cz_dev.dv_xname);
+			    device_xname(&cz->cz_dev));
 #endif
-			timeout_add(&cz->cz_timeout, cz_timeout_ticks);
+			callout_reset(&cz->cz_callout, cz_timeout_ticks,
+			    cz_poll, cz);
 		}
 
 		/*
@@ -1037,18 +1034,18 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	splx(s);
 
-	error = ttyopen(CZTTY_DIALOUT(dev), tp);
+	error = ttyopen(tp, CZTTY_DIALOUT(dev), ISSET(flags, O_NONBLOCK));
 	if (error)
 		goto bad;
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*tp->t_linesw->l_open)(dev, tp);
 	if (error)
 		goto bad;
 
 	return (0);
 
  bad:
-	if (!ISSET(tp->t_state, TS_ISOPEN)) {
+	if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0) {
 		/*
 		 * We failed to open the device, and nobody else had it opened.
 		 * Clean up the state as appropriate.
@@ -1064,8 +1061,8 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
  *
  *	Close a Cyclades-Z serial port.
  */
-int
-czttyclose(dev_t dev, int flags, int mode, struct proc *p)
+static int
+czttyclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;
@@ -1074,10 +1071,10 @@ czttyclose(dev_t dev, int flags, int mode, struct proc *p)
 	if (!ISSET(tp->t_state, TS_ISOPEN))
 		return (0);
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*tp->t_linesw->l_close)(tp, flags);
 	ttyclose(tp);
 
-	if (!ISSET(tp->t_state, TS_ISOPEN)) {
+	if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0) {
 		/*
 		 * Although we got a last close, the device may still be in
 		 * use; e.g. if this was the dialout node, and there are still
@@ -1094,13 +1091,13 @@ czttyclose(dev_t dev, int flags, int mode, struct proc *p)
  *
  *	Read from a Cyclades-Z serial port.
  */
-int
+static int
 czttyread(dev_t dev, struct uio *uio, int flags)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;
 
-	return ((*linesw[tp->t_line].l_read)(tp, uio, flags));
+	return ((*tp->t_linesw->l_read)(tp, uio, flags));
 }
 
 /*
@@ -1108,49 +1105,47 @@ czttyread(dev_t dev, struct uio *uio, int flags)
  *
  *	Write to a Cyclades-Z serial port.
  */
-int
+static int
 czttywrite(dev_t dev, struct uio *uio, int flags)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;
 
-	return ((*linesw[tp->t_line].l_write)(tp, uio, flags));
+	return ((*tp->t_linesw->l_write)(tp, uio, flags));
 }
 
-#if 0
 /*
  * czttypoll:
  *
  *	Poll a Cyclades-Z serial port.
  */
-int
-czttypoll(dev_t dev, int events, struct proc p)
+static int
+czttypoll(dev_t dev, int events, struct lwp *l)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;
- 
-	return ((*linesw[tp->t_line].l_poll)(tp, events, p));
+
+	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
-#endif
 
 /*
  * czttyioctl:
  *
  *	Perform a control operation on a Cyclades-Z serial port.
  */
-int
-czttyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+static int
+czttyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;
 	int s, error;
 
-	error = (*linesw[tp->t_line].l_ioctl)(tp, cmd, data, flag, p);
-	if (error >= 0)
+	error = (*tp->t_linesw->l_ioctl)(tp, cmd, data, flag, l);
+	if (error != EPASSTHROUGH)
 		return (error);
 
-	error = ttioctl(tp, cmd, data, flag, p);
-	if (error >= 0)
+	error = ttioctl(tp, cmd, data, flag, l);
+	if (error != EPASSTHROUGH)
 		return (error);
 
 	error = 0;
@@ -1171,7 +1166,8 @@ czttyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case TIOCSFLAGS:
-		error = suser(p, 0);
+		error = kauth_authorize_device_tty(l->l_cred,
+		    KAUTH_DEVICE_TTY_PRIVSET, tp);
 		if (error)
 			break;
 		sc->sc_swflags = *(int *)data;
@@ -1196,7 +1192,7 @@ czttyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = EPASSTHROUGH;
 		break;
 	}
 
@@ -1210,7 +1206,7 @@ czttyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
  *
  *	Set or clear BREAK on a port.
  */
-void
+static void
 cztty_break(struct cztty_softc *sc, int onoff)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -1227,7 +1223,7 @@ cztty_break(struct cztty_softc *sc, int onoff)
  *
  *	Set or clear DTR on a port.
  */
-void
+static void
 cztty_modem(struct cztty_softc *sc, int onoff)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -1252,7 +1248,7 @@ cztty_modem(struct cztty_softc *sc, int onoff)
  *
  *	Process TIOCM* ioctls.
  */
-void
+static void
 tiocm_to_cztty(struct cztty_softc *sc, u_long how, int ttybits)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -1292,7 +1288,7 @@ tiocm_to_cztty(struct cztty_softc *sc, u_long how, int ttybits)
  *
  *	Process the TIOCMGET ioctl.
  */
-int
+static int
 cztty_to_tiocm(struct cztty_softc *sc)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -1331,7 +1327,7 @@ cztty_to_tiocm(struct cztty_softc *sc)
  *	XXX Should just copy the whole termios after making
  *	XXX sure all the changes could be done.
  */
-int
+static int
 czttyparam(struct tty *tp, struct termios *t)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(tp->t_dev);
@@ -1460,7 +1456,7 @@ czttyparam(struct tty *tp, struct termios *t)
 	 * request.
 	 */
 	rs_status = CZTTY_CHAN_READ(sc, CHNCTL_RS_STATUS);
-	(void) (*linesw[tp->t_line].l_modem)(tp, ISSET(rs_status, C_RS_DCD));
+	(void) (*tp->t_linesw->l_modem)(tp, ISSET(rs_status, C_RS_DCD));
 
 	return (0);
 }
@@ -1470,7 +1466,7 @@ czttyparam(struct tty *tp, struct termios *t)
  *
  *	Start or restart transmission.
  */
-void
+static void
 czttystart(struct tty *tp)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(tp->t_dev);
@@ -1479,17 +1475,8 @@ czttystart(struct tty *tp)
 	s = spltty();
 	if (ISSET(tp->t_state, TS_BUSY | TS_TIMEOUT | TS_TTSTOP))
 		goto out;
-
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
-
+	if (!ttypull(tp))
+		goto out;
 	cztty_transmit(sc, tp);
  out:
 	splx(s);
@@ -1500,7 +1487,7 @@ czttystart(struct tty *tp)
  *
  *	Stop output, e.g., for ^S or output flush.
  */
-int
+static void
 czttystop(struct tty *tp, int flag)
 {
 
@@ -1511,7 +1498,6 @@ czttystop(struct tty *tp, int flag)
 	 * XXX and I don't know how we request the MIPS to stop sending
 	 * XXX the data.  So, punt for now.  --thorpej
 	 */
-	return (0);
 }
 
 /*
@@ -1519,7 +1505,7 @@ czttystop(struct tty *tp, int flag)
  *
  *	Issue a scheduled diagnostic message.
  */
-void
+static void
 cztty_diag(void *arg)
 {
 	struct cztty_softc *sc = arg;
@@ -1544,11 +1530,16 @@ cztty_diag(void *arg)
 
 	log(LOG_WARNING,
 	    "%s: channel %d: %u overflow%s, %u parity, %u framing error%s\n",
-	    cz->cz_dev.dv_xname, sc->sc_channel,
+	    device_xname(&cz->cz_dev), sc->sc_channel,
 	    overflows, overflows == 1 ? "" : "s",
 	    parity_errors,
 	    framing_errors, framing_errors == 1 ? "" : "s");
 }
+
+const struct cdevsw cz_cdevsw = {
+	czttyopen, czttyclose, czttyread, czttywrite, czttyioctl,
+	    czttystop, czttytty, czttypoll, nommap, ttykqfilter, D_TTY
+};
 
 /*
  * tx and rx ring buffer size macros:
@@ -1571,7 +1562,7 @@ cztty_diag(void *arg)
  *
  * Look at the tty for this port and start sending.
  */
-int
+static int
 cztty_transmit(struct cztty_softc *sc, struct tty *tp)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -1594,7 +1585,7 @@ cztty_transmit(struct cztty_softc *sc, struct tty *tp)
 			error = q_to_b(&tp->t_outq, 0, move);
 			if (error != move) {
 				printf("%s: channel %d: error moving to "
-				    "transmit buf\n", cz->cz_dev.dv_xname,
+				    "transmit buf\n", device_xname(&cz->cz_dev),
 				    sc->sc_channel);
 				move = error;
 			}
@@ -1617,7 +1608,7 @@ cztty_transmit(struct cztty_softc *sc, struct tty *tp)
 	return (done);
 }
 
-int
+static int
 cztty_receive(struct cztty_softc *sc, struct tty *tp)
 {
 	struct cz_softc *cz = CZTTY_CZ(sc);
@@ -1631,7 +1622,7 @@ cztty_receive(struct cztty_softc *sc, struct tty *tp)
 
 	while ((get != put) && ((tp->t_canq.c_cc + tp->t_rawq.c_cc) < tp->t_hiwat)) {
 #ifdef HOSTRAMCODE
-		if (hostram)
+		if (hostram) {
 			ch = ((char *)fifoaddr)[get];
 		} else {
 #endif
@@ -1640,7 +1631,7 @@ cztty_receive(struct cztty_softc *sc, struct tty *tp)
 #ifdef HOSTRAMCODE
 		}
 #endif
-		(*linesw[tp->t_line].l_rint)(ch, tp);
+		(*tp->t_linesw->l_rint)(ch, tp);
 		get = (get + 1) % size;
 		done = 1;
 	}

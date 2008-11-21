@@ -1,5 +1,4 @@
-/*	$OpenBSD: cons.h,v 1.3 2007/03/07 06:23:04 miod Exp $	*/
-/*	$NetBSD: cons.h,v 1.3 2000/05/19 05:26:17 eeh Exp $	*/
+/*	$NetBSD: cons.h,v 1.8 2006/10/16 22:07:11 martin Exp $	*/
 
 /*-
  * Copyright (c) 2000 Eduardo E. Horvath
@@ -29,9 +28,24 @@
  * SUCH DAMAGE.
  */
 
-/* These are shared with the consinit OBP console */
-extern int stdin, stdout;
-void pcons_cnpollc(dev_t dev, int on);
+/*
+ * PROM console driver.
+ *
+ * This is the default fallback console driver if nothing else attaches.
+ */
+
+struct pconssoftc {
+	struct device of_dev;
+	struct tty *of_tty;
+	struct callout sc_poll_ch;
+	int of_flags;
+};
+/* flags: */
+#define	OFPOLL		1
+
+#define	OFBURSTLEN	128	/* max number of bytes to write in one chunk */
+
+void pcons_cnpollc(dev_t, int);
 
 struct consdev;
 struct zs_chanstate;
@@ -43,10 +57,12 @@ extern void nullcnprobe(struct consdev *);
 extern int  zs_getc(void *arg);
 extern void zs_putc(void *arg, int c);
 
-struct zschan *
-zs_get_chan_addr(int zsc_unit, int channel);
+/*
+ * PROM I/O nodes and arguments are prepared by consinit().
+ * Drivers can examine these when looking for a console device match.
+ */
+extern int prom_stdin_node;
+extern int prom_stdout_node;
+extern char prom_stdin_args[];	/* not used on sun4u */
+extern char prom_stdout_args[];	/* not used on sun4u */
 
-#ifdef	KGDB
-void zs_kgdb_init(void);
-void zskgdb(struct zs_chanstate *);
-#endif

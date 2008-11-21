@@ -1,5 +1,4 @@
-/*	$OpenBSD: instr.h,v 1.4 2003/07/14 00:45:20 jason Exp $	*/
-/*	$NetBSD: instr.h,v 1.3 1997/03/14 23:54:07 christos Exp $ */
+/*	$NetBSD: instr.h,v 1.8 2005/12/11 12:19:05 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -43,8 +42,8 @@
 
 /* see also Appendix F of the SPARC version 8 document */
 enum IOP { IOP_OP2, IOP_CALL, IOP_reg, IOP_mem };
-enum IOP2 { IOP2_UNIMP, IOP2_err1, IOP2_Bicc, IOP2_err3,
-	IOP2_SETHI, IOP2_err5, IOP2_FBfcc, IOP2_CBccc };
+enum IOP2 { IOP2_UNIMP, IOP2_BPcc, IOP2_Bicc, IOP2_BPr,
+	IOP2_SETHI, IOP2_FBPfcc, IOP2_FBfcc, IOP2_CBccc };
 enum IOP3_reg {
 	IOP3_ADD, IOP3_AND, IOP3_OR, IOP3_XOR,
 	IOP3_SUB, IOP3_ANDN, IOP3_ORN, IOP3_XNOR,
@@ -190,6 +189,31 @@ union instr {
 		int	i_disp:22;	/* branch displacement */
 	} i_branch;
 
+	/* more branches: BPcc, FBPfcc */
+	struct {
+		u_int	:2;		/* 00 */
+		u_int	i_annul:1;	/* annul bit */
+		u_int	i_cond:4;	/* condition codes */
+		u_int	i_op2:3;	/* opcode: {BP,FBPf}cc */
+		u_int	i_cc:2;		/* condition code selector */
+		u_int	i_pred:1;	/* branch prediction bit */
+		int	i_disp:19;	/* branch displacement */
+	} i_branch_p;
+
+	/* one last branch: BPr */
+	struct {
+		u_int	:2;		/* 00 */
+		u_int	i_annul:1;	/* annul bit */
+		u_int	:1;		/* 0 */
+		u_int	i_rcond:4;	/* register condition */
+		u_int	:3;		/* 011 */
+		int	i_disphi:2;	/* branch displacement, hi bits */
+		u_int   i_pred:1;	/* branch prediction bit */
+		u_int   i_rs1:1;	/* source register 1 */
+		u_int	i_displo:16;	/* branch displacement, lo bits */
+	} i_branch_pr;
+
+
 	/*
 	 * Format 3 instructions (memory reference; arithmetic, logical,
 	 * shift, and other miscellaneous operations).  The second-level
@@ -254,6 +278,52 @@ union instr {
 		u_int	i_opf:9;	/* coprocessor 3rd-level decode */
 		u_int	i_rs2:5;	/* source register 2 */
 	} i_opf;
+
+	/* 
+	 * Format 4 instructions (movcc, fmovr, fmovcc, and tcc).  The
+	 * second-level decode almost always makes use of an `rd' and either
+	 * `rs1' or `cond'.
+	 *
+	 * Beyond that, the low 14 bits may be broken up in one of three
+	 * different ways, if at all:
+	 *	1 bit of imm=0 + 8 bits of asi + 5 bits of rs2 [reg & mem]
+	 *	1 bit of imm=1 + 13 bits of signed immediate [reg & mem]
+	 * 9 bits of copressor `opf' opcode + 5 bits of rs2 [reg only] */
+	struct {
+		u_int	:2;		/* 10 */
+		u_int	i_rd:5;		/* destination register */
+		u_int	i_op3:6;	/* second-level decode */
+		u_int	i_rs1:5;	/* source register 1 */
+		u_int	i_low14:14;	/* varies */
+	} i_op4;
+	
+	/*
+	 * Move fp register on condition codes.
+	 */
+	struct {
+		u_int	:2;		/* 10 */
+		u_int	i_rd:5;		/* destination register */
+		u_int	i_op3:6;	/* second-level decode */
+		u_int	:1;
+		u_int	i_cond:4;	/* condition */
+		u_int	i_opf_cc:3;	/* condition code register */
+		u_int	i_opf_low:6;	/* third level decode */
+		u_int	i_rs2:5;	/* source register */
+	} i_fmovcc;
+
+	/*
+	 * Move fp register on integer register.
+	 */
+	struct {
+		u_int	:2;		/* 10 */
+		u_int	i_rd:5;		/* destination register */
+		u_int	i_op3:6;	/* second-level decode */
+		u_int	i_rs1:5;	/* source register 1 */
+		u_int	:1;
+		u_int	i_rcond:3;	/* register condition */
+		u_int	i_opf_low:6;
+		u_int	i_rs2:5;	/* source register 2 */
+	} i_fmovr;
 
 };
 
@@ -345,14 +415,33 @@ union instr {
 #define	FCMPE	0x54
 #define	FSMULD	0x68
 #define	FDMULX	0x6c
+#define FTOX	0x80
+#define FXTOS	0x84
+#define FXTOD	0x88
+#define FXTOQ	0x8c
 #define	FTOS	0xc4
 #define	FTOD	0xc8
-#define	FTOX	0xcc
+#define	FTOQ	0xcc
 #define	FTOI	0xd0
+
+/* These are in FPop2 space */
+#define FMVFC0	0x00
+#define FMVRZ	0x24
+#define FMVFC1	0x40
+#define FMVRLEZ	0x44
+#define FMVRLZ	0x64
+#define FMVFC2	0x80
+#define FMVRNZ	0xa4
+#define FMVFC3	0xc0
+#define FMVRGZ	0xc4
+#define FMVRGEZ	0xe4
+#define FMVIC	0x100
+#define FMVXC	0x180
 
 /*
  * FPU data types.
  */
+#define FTYPE_LNG	-1	/* data = 64-bit signed long integer */		
 #define	FTYPE_INT	0	/* data = 32-bit signed integer */
 #define	FTYPE_SNG	1	/* data = 32-bit float */
 #define	FTYPE_DBL	2	/* data = 64-bit double */

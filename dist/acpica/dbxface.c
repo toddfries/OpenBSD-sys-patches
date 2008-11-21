@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dbxface - AML Debugger external interfaces
- *              xRevision: 1.76 $
+ *              $Revision: 1.4 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,9 +114,6 @@
  *
  *****************************************************************************/
 
-
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dbxface.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
 
 #include "acpi.h"
 #include "amlcode.h"
@@ -531,7 +528,7 @@ AcpiDbInitialize (
 
         /* Create the debug execution thread to execute commands */
 
-        Status = AcpiOsQueueForExecution (0, AcpiDbExecuteThread, NULL);
+        Status = AcpiOsExecute (OSL_DEBUGGER_THREAD, AcpiDbExecuteThread, NULL);
         if (ACPI_FAILURE (Status))
         {
             AcpiOsPrintf ("Could not start debugger thread\n");

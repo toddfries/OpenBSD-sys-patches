@@ -1,4 +1,4 @@
-#	$NetBSD: majors.pmax,v 1.18 2006/11/24 22:04:24 wiz Exp $
+#	$NetBSD: majors.pmax,v 1.20 2008/11/12 12:36:05 ad Exp $
 #
 # Device majors for pmax
 #
@@ -40,7 +40,6 @@ device-major	wsmouse		char 90			wsmouse
 device-major	ipl		char 91			ipfilter
 device-major	rnd		char 92			rnd
 device-major	tun		char 93			tun
-device-major	lkm		char 94			lkm
 device-major	scsibus		char 95			scsibus
 device-major	raid		char 96  block 32	raid
 device-major	md		char 97  block 17	md
@@ -49,7 +48,6 @@ device-major	audio		char 99			audio
 device-major	clockctl	char 100		clockctl
 device-major	wsmux		char 101		wsmux
 device-major	wsfont		char 102		wsfont
-device-major	systrace	char 103		systrace
 device-major	cgd		char 104  block 33	cgd
 device-major	ksyms		char 105		ksyms
 device-major	nsmb		char 106		nsmb

@@ -1,5 +1,4 @@
-/*	$OpenBSD: vm86.h,v 1.8 2002/03/14 01:26:33 millert Exp $	*/
-/*	$NetBSD: vm86.h,v 1.8 1996/05/03 19:26:32 christos Exp $	*/
+/*	$NetBSD: vm86.h,v 1.17 2008/11/14 12:53:18 ad Exp $	*/
 
 #undef	VM86_USE_VIF
 
@@ -18,19 +17,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -52,12 +44,8 @@
 #define	VM86_REALFLAGS	(~PSL_USERSTATIC)
 #define	VM86_VIRTFLAGS	(PSL_USERSTATIC & ~(PSL_MBO | PSL_MBZ))
 
-struct vm86_regs {
-	struct sigcontext vmsc;
-};
-
 struct vm86_kern {			/* kernel uses this stuff */
-	struct vm86_regs regs;
+	__gregset_t regs;
 	unsigned long ss_cpu_type;
 };
 #define cpu_type substr.ss_cpu_type
@@ -81,21 +69,22 @@ struct vm86_struct {
 #define VCPU_586		5
 
 #ifdef _KERNEL
-int i386_vm86(struct proc *, char *, register_t *);
-void vm86_gpfault(struct proc *, int);
-void vm86_return(struct proc *, int);
-static __inline void clr_vif(struct proc *);
-static __inline void set_vif(struct proc *);
-static __inline void set_vflags(struct proc *, int);
-static __inline int get_vflags(struct proc *);
-static __inline void set_vflags_short(struct proc *, int);
-static __inline int get_vflags_short(struct proc *);
+int x86_vm86(struct lwp *, char *, register_t *);
+int compat_16_x86_vm86(struct lwp *, char *, register_t *);
+void vm86_gpfault(struct lwp *, int);
+void vm86_return(struct lwp *, int);
+static __inline void clr_vif(struct lwp *);
+static __inline void set_vif(struct lwp *);
+static __inline void set_vflags(struct lwp *, int);
+static __inline int get_vflags(struct lwp *);
+static __inline void set_vflags_short(struct lwp *, int);
+static __inline int get_vflags_short(struct lwp *);
 
 static __inline void
-clr_vif(p)
-	struct proc *p;
+clr_vif(l)
+	struct lwp *l;
 {
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct pcb *pcb = &l->l_addr->u_pcb;
 
 #ifndef VM86_USE_VIF
 	pcb->vm86_eflags &= ~PSL_I;
@@ -105,10 +94,10 @@ clr_vif(p)
 }
 
 static __inline void
-set_vif(p)
-	struct proc *p;
+set_vif(l)
+	struct lwp *l;
 {
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct pcb *pcb = &l->l_addr->u_pcb;
 
 #ifndef VM86_USE_VIF
 	pcb->vm86_eflags |= PSL_I;
@@ -117,16 +106,16 @@ set_vif(p)
 	pcb->vm86_eflags |= PSL_VIF;
 	if ((pcb->vm86_eflags & (PSL_VIF|PSL_VIP)) == (PSL_VIF|PSL_VIP))
 #endif
-		vm86_return(p, VM86_STI);
+		vm86_return(l, VM86_STI);
 }
 
 static __inline void
-set_vflags(p, flags)
-	struct proc *p;
+set_vflags(l, flags)
+	struct lwp *l;
 	int flags;
 {
-	struct trapframe *tf = p->p_md.md_regs;
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct trapframe *tf = l->l_md.md_regs;
+	struct pcb *pcb = &l->l_addr->u_pcb;
 
 	flags &= ~pcb->vm86_flagmask;
 	SETFLAGS(pcb->vm86_eflags, flags, VM86_VIRTFLAGS);
@@ -136,15 +125,15 @@ set_vflags(p, flags)
 #else
 	if ((pcb->vm86_eflags & (PSL_VIF|PSL_VIP)) == (PSL_VIF|PSL_VIP))
 #endif
-		vm86_return(p, VM86_STI);
+		vm86_return(l, VM86_STI);
 }
 
 static __inline int
-get_vflags(p)
-	struct proc *p;
+get_vflags(l)
+	struct lwp *l;
 {
-	struct trapframe *tf = p->p_md.md_regs;
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct trapframe *tf = l->l_md.md_regs;
+	struct pcb *pcb = &l->l_addr->u_pcb;
 	int flags = PSL_MBO;
 
 	SETFLAGS(flags, pcb->vm86_eflags, VM86_VIRTFLAGS);
@@ -153,28 +142,28 @@ get_vflags(p)
 }
 
 static __inline void
-set_vflags_short(p, flags)
-	struct proc *p;
+set_vflags_short(l, flags)
+	struct lwp *l;
 	int flags;
 {
-	struct trapframe *tf = p->p_md.md_regs;
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct trapframe *tf = l->l_md.md_regs;
+	struct pcb *pcb = &l->l_addr->u_pcb;
 
 	flags &= ~pcb->vm86_flagmask;
 	SETFLAGS(pcb->vm86_eflags, flags, VM86_VIRTFLAGS & 0xffff);
 	SETFLAGS(tf->tf_eflags, flags, VM86_REALFLAGS & 0xffff);
 #ifndef VM86_USE_VIF
 	if ((pcb->vm86_eflags & (PSL_I|PSL_VIP)) == (PSL_I|PSL_VIP))
-		vm86_return(p, VM86_STI);
+		vm86_return(l, VM86_STI);
 #endif
 }
 
 static __inline int
-get_vflags_short(p)
-	struct proc *p;
+get_vflags_short(l)
+	struct lwp *l;
 {
-	struct trapframe *tf = p->p_md.md_regs;
-	struct pcb *pcb = &p->p_addr->u_pcb;
+	struct trapframe *tf = l->l_md.md_regs;
+	struct pcb *pcb = &l->l_addr->u_pcb;
 	int flags = PSL_MBO;
 
 	SETFLAGS(flags, pcb->vm86_eflags, VM86_VIRTFLAGS & 0xffff);

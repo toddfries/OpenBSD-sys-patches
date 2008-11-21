@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcmcia_cis_quirks.c,v 1.8 2005/10/27 16:42:19 deraadt Exp $	*/
-/*	$NetBSD: pcmcia_cis_quirks.c,v 1.3 1998/12/29 09:00:28 marc Exp $	*/
+/*	$NetBSD: pcmcia_cis_quirks.c,v 1.33 2008/09/06 22:07:11 rmind Exp $	*/
 
 /*
  * Copyright (c) 1998 Marc Horowitz.  All rights reserved.
@@ -30,10 +29,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pcmcia_cis_quirks.c,v 1.33 2008/09/06 22:07:11 rmind Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/kernel.h>
 #include <sys/mbuf.h>
 
 #include <dev/pcmcia/pcmciadevs.h>
@@ -47,245 +49,306 @@
 /* these structures are just static templates which are then copied
    into "live" allocated structures */
 
-struct pcmcia_function pcmcia_3cxem556_func0 = {
-	0,			/* function number */
-	PCMCIA_FUNCTION_NETWORK,
-	0x07,			/* last cfe number */
-	0x800,			/* ccr_base */
-	0x63,			/* ccr_mask */
+static const struct pcmcia_function pcmcia_3cxem556_func0 = {
+	.number = 0,				/* function number */
+	.function = PCMCIA_FUNCTION_NETWORK,
+	.last_config_index = 0x07,		/* last cfe number */
+	.ccr_base = 0x800,			/* ccr_base */
+	.ccr_mask = 0x63,			/* ccr_mask */
 };
 
-struct pcmcia_config_entry pcmcia_3cxem556_func0_cfe0 = {
-	0x07,			/* cfe number */
-	PCMCIA_CFE_IO8 | PCMCIA_CFE_IO16 | PCMCIA_CFE_IRQLEVEL,
-	PCMCIA_IFTYPE_IO,
-	1,			/* num_iospace */
-	4,			/* iomask */
-	{ { 0x0010, 0 } },	/* iospace */
-	0xffff,			/* irqmask */
-	0,			/* num_memspace */
-	{ },			/* memspace */
-	0,			/* maxtwins */
+static const struct pcmcia_config_entry pcmcia_3cxem556_func0_cfe0 = {
+	.number = 0x07,			/* cfe number */
+	.flags = PCMCIA_CFE_IO8 | PCMCIA_CFE_IO16 | PCMCIA_CFE_IRQLEVEL,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,		/* num_iospace */
+	.iomask = 4,			/* iomask */
+	.iospace = { { .length = 0x0010, .start = 0 } },	/* iospace */
+	.irqmask = 0xffff,		/* irqmask */
 };
 
-static struct pcmcia_function pcmcia_3cxem556_func1 = {
-	1,			/* function number */
-	PCMCIA_FUNCTION_SERIAL,
-	0x27,			/* last cfe number */
-	0x900,			/* ccr_base */
-	0x63,			/* ccr_mask */
+static const struct pcmcia_function pcmcia_3cxem556_func1 = {
+	.number = 1,			/* function number */
+	.function = PCMCIA_FUNCTION_SERIAL,
+	.last_config_index = 0x27,	/* last cfe number */
+	.ccr_base = 0x900,		/* ccr_base */
+	.ccr_mask = 0x63,		/* ccr_mask */
 };
 
-static struct pcmcia_config_entry pcmcia_3cxem556_func1_cfe0 = {
-	0x27,			/* cfe number */
-	PCMCIA_CFE_IO8 | PCMCIA_CFE_IRQLEVEL,
-	PCMCIA_IFTYPE_IO,
-	1,			/* num_iospace */
-	3,			/* iomask */
-	{ { 0x0008, 0 } },	/* iospace */
-	0xffff,			/* irqmask */
-	0,			/* num_memspace */
-	{ },			/* memspace */
-	0,			/* maxtwins */
+static const struct pcmcia_config_entry pcmcia_3cxem556_func1_cfe0 = {
+	.number = 0x27,			/* cfe number */
+	.flags = PCMCIA_CFE_IO8 | PCMCIA_CFE_IRQLEVEL,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,		/* num_iospace */
+	.iomask = 3,			/* iomask */
+	.iospace = { { .length = 0x0008, .start = 0 } },	/* iospace */
+	.irqmask = 0xffff,		/* irqmask */
 };
 
-struct pcmcia_function pcmcia_megahertz_xjem1144_func0 = {
-	0,			/* function number */
-	PCMCIA_FUNCTION_NETWORK,
-	0x07,			/* last cfe number */
-	0x200,			/* ccr_base */
-	0x63,			/* ccr_mask */
+static const struct pcmcia_function pcmcia_3ccfem556bi_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_NETWORK,
+	.last_config_index = 0x07,	/* last cfe number */
+	.ccr_base = 0x1000,		/* ccr_base */
+	.ccr_mask = 0x267,		/* ccr_mask */
 };
 
-struct pcmcia_config_entry pcmcia_megahertz_xjem1144_func0_cfe0 = {
-	0x07,			/* cfe number */
-	PCMCIA_CFE_IO8 | PCMCIA_CFE_IO16 | PCMCIA_CFE_IRQLEVEL,
-	PCMCIA_IFTYPE_IO,
-	1,			/* num_iospace */
-	4,			/* iomask */
-	{ { 0x0010, 0 } },	/* iospace */
-	0xffff,			/* irqmask */
-	0,			/* num_memspace */
-	{ },			/* memspace */
-	0,			/* maxtwins */
+static const struct pcmcia_config_entry pcmcia_3ccfem556bi_func0_cfe0 = {
+	.number = 0x07,		/* cfe number */
+	.flags = PCMCIA_CFE_IO8 | PCMCIA_CFE_IO16 | PCMCIA_CFE_IRQLEVEL,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,	/* num_iospace */
+	.iomask = 5,			/* iomask */
+	.iospace = { { .length = 0x0020, .start = 0 } },	/* iospace */
 };
 
-static struct pcmcia_function pcmcia_megahertz_xjem1144_func1 = {
-	1,			/* function number */
-	PCMCIA_FUNCTION_SERIAL,
-	0x35,			/* last cfe number */
-	0x300,			/* ccr_base */
-	0x3,			/* ccr_mask */
+static const struct pcmcia_function pcmcia_3ccfem556bi_func1 = {
+	.number = 1,			/* function number */
+	.function = PCMCIA_FUNCTION_SERIAL,
+	.last_config_index = 0x27,	/* last cfe number */
+	.ccr_base = 0x1100,		/* ccr_base */
+	.ccr_mask = 0x277,		/* ccr_mask */
 };
 
-static struct pcmcia_config_entry pcmcia_megahertz_xjem1144_func1_cfe0 = {
-	0x35,			/* cfe number */
-	PCMCIA_CFE_IO8 | PCMCIA_CFE_IRQLEVEL, PCMCIA_IFTYPE_IO,
-	1,			/* num_iospace */
-	0,			/* iomask */
-	{ { 0x0008, 0x2f8 } },	/* iospace */
-	0xffff,			/* irqmask */
-	0,			/* num_memspace */
-	{ },			/* memspace */
-	0,			/* maxtwins */
+static const struct pcmcia_config_entry pcmcia_3ccfem556bi_func1_cfe0 = {
+	.number = 0x27,		/* cfe number */
+	.flags = PCMCIA_CFE_IO8 | PCMCIA_CFE_IRQLEVEL,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,	/* num_iospace */
+	.iomask = 3,		/* iomask */
+	.iospace = { { .length = 0x0008, .start = 0 } },	/* iospace */
+	.irqmask = 0xffff,	/* irqmask */
 };
 
-static struct pcmcia_function pcmcia_sierra_a555_func1 = {
-	1,			/* function number */
-	PCMCIA_FUNCTION_SERIAL,
-	0x24,			/* last cfe number */
-	0x700,			/* ccr_base */
-	0x73,			/* ccr_mask */
+static const struct pcmcia_function pcmcia_sveclancard_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_NETWORK,
+	.last_config_index = 0x1,	/* last cfe number */
+	.ccr_base = 0x100,		/* ccr_base */
+	.ccr_mask = 0x1,		/* ccr_mask */
 };
 
-static struct pcmcia_config_entry pcmcia_sierra_a555_func1_cfe0 = {
-	0x20,			/* cfe number */
-	PCMCIA_CFE_IO8 | PCMCIA_CFE_IRQLEVEL, PCMCIA_IFTYPE_IO,
-	1,			/* num_iospace */
-	0,			/* iomask */
-	{ { 0x0008, 0x3f8 } },	/* iospace */
-	0x3fbc,			/* irqmask */
-	0,			/* num_memspace */
-	{ },			/* memspace */
-	0,			/* maxtwins */
+static const struct pcmcia_config_entry pcmcia_sveclancard_func0_cfe0 = {
+	.number = 0x1,		/* cfe number */
+	.flags = PCMCIA_CFE_MWAIT_REQUIRED | PCMCIA_CFE_RDYBSY_ACTIVE |
+	    PCMCIA_CFE_WP_ACTIVE | PCMCIA_CFE_BVD_ACTIVE | PCMCIA_CFE_IO16,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,	/* num_iospace */
+	.iomask = 5,		/* iomask */
+	.iospace = { { .length = 0x20, .start = 0x300 } },	/* iospace */
+	.irqmask = 0xdeb8,	/* irqmask */
 };
 
-static struct pcmcia_function pcmcia_sveclancard_func0 = {
-	0,			/* function number */
-	PCMCIA_FUNCTION_NETWORK,
-	0x1,			/* last cfe number */
-	0x100,			/* ccr_base */
-	0x1,			/* ccr_mask */
+static const struct pcmcia_function pcmcia_ndc_nd5100_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_NETWORK,
+	.last_config_index = 0x23,	/* last cfe number */
+	.ccr_base = 0x3f8,		/* ccr_base */
+	.ccr_mask = 0x3,		/* ccr_mask */
 };
 
-static struct pcmcia_config_entry pcmcia_sveclancard_func0_cfe0 = {
-	0x1,			/* cfe number */
-	PCMCIA_CFE_MWAIT_REQUIRED | PCMCIA_CFE_RDYBSY_ACTIVE |
-	PCMCIA_CFE_WP_ACTIVE | PCMCIA_CFE_BVD_ACTIVE | PCMCIA_CFE_IO16,
-	PCMCIA_IFTYPE_IO,
-	1,			/* num_iospace */
-	5,			/* iomask */
-	{ { 0x20, 0x300 } },	/* iospace */
-	0xdeb8,			/* irqmask */
-	0,			/* num_memspace */
-	{ },			/* memspace */
-	0,			/* maxtwins */
+static const struct pcmcia_config_entry pcmcia_ndc_nd5100_func0_cfe0 = {
+	.number = 0x20,			/* cfe number */
+	.flags = PCMCIA_CFE_MWAIT_REQUIRED | PCMCIA_CFE_IO16 |
+	    PCMCIA_CFE_IRQLEVEL,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,		/* num_iospace */
+	.iomask = 5,			/* iomask */
+	.iospace = { { .length = 0x20, .start = 0x300 } },	/* iospace */
+	.irqmask = 0xdeb8,		/* irqmask */
 };
 
-static struct pcmcia_cis_quirk pcmcia_cis_quirks[] = {
-	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556, PCMCIA_CIS_INVALID,
-	  &pcmcia_3cxem556_func0, &pcmcia_3cxem556_func0_cfe0 },
-	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556, PCMCIA_CIS_INVALID,
-	  &pcmcia_3cxem556_func1, &pcmcia_3cxem556_func1_cfe0 },
-	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556B,
+static const struct pcmcia_function pcmcia_emtac_a2424i_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_NETWORK,
+	.last_config_index = 0x21,	/* last cfe number */
+	.ccr_base = 0x3e0,		/* ccr_base */
+	.ccr_mask = 0x1,		/* ccr_mask */
+};
+
+static const struct pcmcia_config_entry pcmcia_emtac_a2424i_func0_cfe0 = {
+	.number = 0x21,		/* cfe number */
+	.flags = PCMCIA_CFE_IO16 | PCMCIA_CFE_IRQLEVEL | PCMCIA_CFE_IRQPULSE,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,	/* num_iospace */
+	.iomask = 6,		/* iomask */
+	.iospace = { { .length = 0x40, .start = 0x100 } },	/* iospace */
+	.irqmask = 0xffff,	/* irqmask */
+};
+
+static const struct pcmcia_function pcmcia_fujitsu_j181_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_NETWORK,
+	.last_config_index = 0x21,	/* last cfe number */
+	.ccr_base = 0xfe0,		/* ccr_base */
+	.ccr_mask = 0xf,		/* ccr_mask */
+};
+
+static const struct pcmcia_config_entry pcmcia_fujitsu_j181_func0_cfe0 = {
+	.number = 0xc,			/* cfe number */
+	.flags = PCMCIA_CFE_MWAIT_REQUIRED | PCMCIA_CFE_WP_ACTIVE |
+	    PCMCIA_CFE_IO8 | PCMCIA_CFE_IO16 | PCMCIA_CFE_IRQLEVEL |
+	    PCMCIA_CFE_IRQPULSE,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,		/* num_iospace */
+	.iomask = 10,			/* iomask */
+	.iospace = { { .length = 0x20, .start = 0x140 } },	/* iospace */
+	.irqmask = 0xffff,		/* irqmask */
+};
+
+static const struct pcmcia_function pcmcia_necinfrontia_ax420n_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_SERIAL,
+	.last_config_index = 0x38,	/* last cfe number */
+	.ccr_base = 0x200,		/* ccr_base */
+	.ccr_mask = 0x1f,		/* ccr_mask */
+};
+
+static const struct pcmcia_config_entry pcmcia_necinfrontia_ax420n_func0_cfe0 = {
+	.number = 0x25,			/* cfe number */
+	.flags = PCMCIA_CFE_RDYBSY_ACTIVE | PCMCIA_CFE_IO8 |
+		 PCMCIA_CFE_IRQLEVEL | PCMCIA_CFE_POWERDOWN |
+		 PCMCIA_CFE_AUDIO,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,		/* num_iospace */
+	.iomask = 10,			/* iomask */
+	.iospace = { { .length = 0x8, .start = 0x3f8 } },	/* iospace */
+	.irqmask = 0x86bc,		/* irqmask */
+};
+
+static const struct pcmcia_function pcmcia_sierra_ac850_func0 = {
+	.number = 0,			/* function number */
+	.function = PCMCIA_FUNCTION_SERIAL,
+	.last_config_index = 0x24,	/* last cfe number */
+	.ccr_base = 0x700,		/* ccr_base */
+	.ccr_mask = 0x73,		/* ccr_mask */
+};
+
+static const struct pcmcia_config_entry pcmcia_sierra_ac850_cfe0 = {
+	.number = 0x22,			/* cfe number */
+	.flags = PCMCIA_CFE_IO8 | PCMCIA_CFE_IRQLEVEL,
+	.iftype = PCMCIA_IFTYPE_IO,
+	.num_iospace = 1,		/* num_iospace */
+	.iomask = 0,			/* iomask */
+	.iospace = { { .length = 0x0008, .start = 0x3e8 } },	/* iospace */
+	.irqmask = 0x3fbc,		/* irqmask */
+};
+
+static const struct pcmcia_cis_quirk pcmcia_cis_quirks[] = {
+	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556,
 	  PCMCIA_CIS_INVALID,
 	  &pcmcia_3cxem556_func0, &pcmcia_3cxem556_func0_cfe0 },
-	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556B,
+	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556,
 	  PCMCIA_CIS_INVALID,
 	  &pcmcia_3cxem556_func1, &pcmcia_3cxem556_func1_cfe0 },
-	{ PCMCIA_VENDOR_MEGAHERTZ2, PCMCIA_PRODUCT_MEGAHERTZ2_XJEM1144,
-	  PCMCIA_CIS_INVALID, 
-	  &pcmcia_megahertz_xjem1144_func0,
-	  &pcmcia_megahertz_xjem1144_func0_cfe0 },
-	{ PCMCIA_VENDOR_MEGAHERTZ2, PCMCIA_PRODUCT_MEGAHERTZ2_XJEM1144,
-	  PCMCIA_CIS_INVALID, 
-	  &pcmcia_megahertz_xjem1144_func1,
-	  &pcmcia_megahertz_xjem1144_func1_cfe0 },
-	{ PCMCIA_VENDOR_SIERRA, PCMCIA_PRODUCT_SIERRA_A550,
-	  PCMCIA_CIS_INVALID, 
-	  &pcmcia_sierra_a555_func1, &pcmcia_sierra_a555_func1_cfe0 },
-	{ PCMCIA_VENDOR_SIERRA, PCMCIA_PRODUCT_SIERRA_A555,
-	  PCMCIA_CIS_INVALID, 
-	  &pcmcia_sierra_a555_func1, &pcmcia_sierra_a555_func1_cfe0 },
-	{ PCMCIA_VENDOR_SIERRA, PCMCIA_PRODUCT_SIERRA_A710,
-	  PCMCIA_CIS_INVALID, 
-	  &pcmcia_sierra_a555_func1, &pcmcia_sierra_a555_func1_cfe0 },
-	{ PCMCIA_VENDOR_SIERRA, PCMCIA_PRODUCT_SIERRA_AC710,
-	  PCMCIA_CIS_INVALID, 
-	  &pcmcia_sierra_a555_func1, &pcmcia_sierra_a555_func1_cfe0 },
+	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556INT,
+	  PCMCIA_CIS_INVALID,
+	  &pcmcia_3cxem556_func0, &pcmcia_3cxem556_func0_cfe0 },
+	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556INT,
+	  PCMCIA_CIS_INVALID,
+	  &pcmcia_3cxem556_func1, &pcmcia_3cxem556_func1_cfe0 },
+	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CCFEM556BI,
+	  PCMCIA_CIS_INVALID,
+	  &pcmcia_3ccfem556bi_func0, &pcmcia_3ccfem556bi_func0_cfe0 },
+	{ PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CCFEM556BI,
+	  PCMCIA_CIS_INVALID,
+	  &pcmcia_3ccfem556bi_func1, &pcmcia_3ccfem556bi_func1_cfe0 },
 	{ PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
 	  PCMCIA_CIS_SVEC_LANCARD,
 	  &pcmcia_sveclancard_func0, &pcmcia_sveclancard_func0_cfe0 },
+	{ PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+	  PCMCIA_CIS_NDC_ND5100_E,
+	  &pcmcia_ndc_nd5100_func0, &pcmcia_ndc_nd5100_func0_cfe0 },
+	{ PCMCIA_VENDOR_EMTAC, PCMCIA_PRODUCT_EMTAC_WLAN,
+	  PCMCIA_CIS_INVALID,
+	  &pcmcia_emtac_a2424i_func0, &pcmcia_emtac_a2424i_func0_cfe0 },
+	{ PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+	  PCMCIA_CIS_FUJITSU_FMV_J181,
+	  &pcmcia_fujitsu_j181_func0, &pcmcia_fujitsu_j181_func0_cfe0 },
+	{ PCMCIA_VENDOR_NECINFRONTIA, PCMCIA_PRODUCT_NECINFRONTIA_AX420N,
+	  PCMCIA_CIS_INVALID,
+	  &pcmcia_necinfrontia_ax420n_func0,
+	  &pcmcia_necinfrontia_ax420n_func0_cfe0 },
 };
 
-void pcmcia_check_cis_quirks(sc)
+static const int pcmcia_cis_nquirks =
+   sizeof(pcmcia_cis_quirks) / sizeof(pcmcia_cis_quirks[0]);
+
+void
+pcmcia_check_cis_quirks(sc)
 	struct pcmcia_softc *sc;
 {
 	int wiped = 0;
-	int i, j;
-	struct pcmcia_function *pf, *pf_next, *pf_last;
-	struct pcmcia_config_entry *cfe, *cfe_next;
+	size_t i, j;
+	struct pcmcia_function *pf;
+	const struct pcmcia_function *pf_last;
+	struct pcmcia_config_entry *cfe;
+	struct pcmcia_card *card = &sc->card;
+	const struct pcmcia_cis_quirk *quirk;
 
 	pf = NULL;
 	pf_last = NULL;
 
-	
-	for (i = 0; i < sizeof(pcmcia_cis_quirks)/sizeof(pcmcia_cis_quirks[0]);
-	    i++) {
-		if ((sc->card.manufacturer == pcmcia_cis_quirks[i].manufacturer) &&
-			(sc->card.product == pcmcia_cis_quirks[i].product) &&
-			(((sc->card.manufacturer != PCMCIA_VENDOR_INVALID) &&
-			  (sc->card.product != PCMCIA_PRODUCT_INVALID)) ||
-			 ((sc->card.manufacturer == PCMCIA_VENDOR_INVALID) &&
-			  (sc->card.product == PCMCIA_PRODUCT_INVALID) &&
-			  sc->card.cis1_info[0] &&
-			  (strcmp(sc->card.cis1_info[0],
-					  pcmcia_cis_quirks[i].cis1_info[0]) == 0) &&
-			  sc->card.cis1_info[1] &&
-			  (strcmp(sc->card.cis1_info[1],
-					  pcmcia_cis_quirks[i].cis1_info[1]) == 0)))) {
-			if (!wiped) {
-				if (pcmcia_verbose) {
-					printf("%s: using CIS quirks for ", sc->dev.dv_xname);
-					for (j = 0; j < 4; j++) {
-						if (sc->card.cis1_info[j] == NULL)
-							break;
-						if (j)
-							printf(", ");
-						printf("%s", sc->card.cis1_info[j]);
-					}
-					printf("\n");
+	for (i = 0; i < pcmcia_cis_nquirks; i++) {
+		quirk = &pcmcia_cis_quirks[i];
+
+		if (card->manufacturer == quirk->manufacturer &&
+		    card->manufacturer != PCMCIA_VENDOR_INVALID &&
+		    card->product == quirk->product &&
+		    card->product != PCMCIA_PRODUCT_INVALID)
+			goto match;
+
+		for (j = 0; j < 2; j++)
+			if (card->cis1_info[j] == NULL ||
+			    quirk->cis1_info[j] == NULL ||
+			    strcmp(card->cis1_info[j],
+			    quirk->cis1_info[j]) != 0)
+				goto nomatch;
+
+match:
+		if (!wiped) {
+			if (pcmcia_verbose) {
+				printf("%s: using CIS quirks for ",
+				    device_xname(sc->dev));
+				for (j = 0; j < 4; j++) {
+					if (card->cis1_info[j] == NULL)
+						break;
+					if (j)
+						printf(", ");
+					printf("%s", card->cis1_info[j]);
 				}
-
-				for (pf = SIMPLEQ_FIRST(&sc->card.pf_head); pf != NULL;
-				     pf = pf_next) {
-					for (cfe = SIMPLEQ_FIRST(&pf->cfe_head); cfe != NULL;
-					     cfe = cfe_next) {
-						cfe_next = SIMPLEQ_NEXT(cfe, cfe_list);
-						free(cfe, M_DEVBUF);
-					}
-					pf_next = SIMPLEQ_NEXT(pf, pf_list);
-					free(pf, M_DEVBUF);
-				}
-
-				SIMPLEQ_INIT(&sc->card.pf_head);
-				wiped = 1;
+				printf("\n");
 			}
-
-			if (pf_last == pcmcia_cis_quirks[i].pf) {
-				cfe = malloc(sizeof(*cfe), M_DEVBUF, M_NOWAIT);
-				if (cfe == NULL)
-					return;
-				*cfe = *pcmcia_cis_quirks[i].cfe;
-
-				SIMPLEQ_INSERT_TAIL(&pf->cfe_head, cfe, cfe_list);
-			} else {
-				pf = malloc(sizeof(*pf), M_DEVBUF, M_NOWAIT);
-				if (pf == NULL)
-					return;
-				*pf = *pcmcia_cis_quirks[i].pf;
-				SIMPLEQ_INIT(&pf->cfe_head);
-
-				cfe = malloc(sizeof(*cfe), M_DEVBUF, M_NOWAIT);
-				if (cfe == NULL)
-					return;
-				*cfe = *pcmcia_cis_quirks[i].cfe;
-
-				SIMPLEQ_INSERT_TAIL(&pf->cfe_head, cfe, cfe_list);
-				SIMPLEQ_INSERT_TAIL(&sc->card.pf_head, pf, pf_list);
-
-				pf_last = pcmcia_cis_quirks[i].pf;
-			}
+			pcmcia_free_pf(&card->pf_head);
+			wiped = 1;
 		}
+
+		if (pf_last != quirk->pf) {
+			/*
+			 * XXX: a driver which still calls pcmcia_card_attach
+			 * very early attach stage should be fixed instead.
+			 */
+			pf = malloc(sizeof(*pf), M_DEVBUF,
+			    cold ? M_NOWAIT : M_WAITOK);
+			if (pf == NULL)
+				panic("pcmcia_check_cis_quirks: malloc pf");
+			*pf = *quirk->pf;
+			SIMPLEQ_INIT(&pf->cfe_head);
+			SIMPLEQ_INSERT_TAIL(&card->pf_head, pf, pf_list);
+			pf_last = quirk->pf;
+		}
+
+		/*
+		 * XXX: see above.
+		 */
+		cfe = malloc(sizeof(*cfe), M_DEVBUF,
+		    cold ? M_NOWAIT : M_WAITOK);
+		if (cfe == NULL)
+			panic("pcmcia_check_cis_quirks: malloc cfe");
+		*cfe = *quirk->cfe;
+		KASSERT(pf != NULL);
+		SIMPLEQ_INSERT_TAIL(&pf->cfe_head, cfe, cfe_list);
+
+nomatch:;
 	}
 }

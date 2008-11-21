@@ -1,5 +1,4 @@
-/*	$OpenBSD: ibcs2_signal.h,v 1.5 2002/03/14 01:26:50 millert Exp $	*/
-/*	$NetBSD: ibcs2_signal.h,v 1.8 1996/05/03 17:05:28 christos Exp $	*/
+/*	$NetBSD: ibcs2_signal.h,v 1.20 2007/12/05 00:31:01 dsl Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -55,6 +54,7 @@
 #define IBCS2_SIGCLD		18
 #define IBCS2_SIGPWR		19
 #define IBCS2_SIGWINCH		20
+/*#define IBCS2_SIGPHONE	21*/
 #define IBCS2_SIGPOLL		22
 #define IBCS2_NSIG		32
 
@@ -68,6 +68,8 @@
 #define IBCS2_SIGTTOU		27
 #define IBCS2_SIGVTALRM		28
 #define IBCS2_SIGPROF		29
+#define IBCS2_SIGXCPU		30
+#define IBCS2_SIGXFSZ		31
 
 #define IBCS2_SIGNO_MASK	0x00FF
 #define IBCS2_SIGNAL_MASK	0x0000
@@ -81,7 +83,7 @@
 #define IBCS2_SIGCALL(x)	((x) & ~IBCS2_SIGNO_MASK)
 
 #define IBCS2_SIG_DFL		(void(*)(int))	0
-#define IBCS2_SIG_ERR		(void(*)(int))	-1
+#define IBCS2_SIG_ERR		(void(*)(int))	(-1)
 #define IBCS2_SIG_IGN		(void(*)(int))	1
 #define IBCS2_SIG_HOLD		(void(*)(int))	2
 
@@ -93,14 +95,36 @@ typedef long	ibcs2_sigset_t;
 typedef void	(*ibcs2_sig_t)(int);
 
 struct ibcs2_sigaction {
-	ibcs2_sig_t	sa__handler;
-	ibcs2_sigset_t	sa_mask;
-	int		sa_flags;
+	ibcs2_sig_t	ibcs2_sa_handler;
+	ibcs2_sigset_t	ibcs2_sa_mask;
+	int		ibcs2_sa_flags;
 };
 
 /* sa_flags */
-#define IBCS2_SA_NOCLDSTOP	1
+#define IBCS2_SA_NOCLDSTOP	0x00000001
+#define IBCS2_SA_RESETHAND	0x00000002
+#define IBCS2_SA_RESTART	0x00000004
+#define IBCS2_SA_SIGINFO	0x00000008
+#define IBCS2_SA_NODEFER	0x00000010
+#define IBCS2_SA_ONSTACK	0x00000200
+#define IBCS2_SA_NOCLDWAIT	0x00010000
+#define	IBCS2_SA_ALLBITS	0x0001021f
 
-extern int bsd_to_ibcs2_sig[];
+struct ibcs2_sigaltstack {
+	void		*ss_sp;
+	ibcs2_size_t	ss_size;
+	int		ss_flags;
+};
+
+/* ss_flags */
+#define	IBCS2_SS_ONSTACK	0x00000001
+#define	IBCS2_SS_DISABLE	0x00000002
+#define	IBCS2_SS_ALLBITS	0x00000003
+
+extern const int native_to_ibcs2_signo[];
+void ibcs2_to_native_sigset(const ibcs2_sigset_t *, sigset_t *);
+void native_to_ibcs2_sigset(const sigset_t *, ibcs2_sigset_t *);
+
+void	ibcs2_sendsig(const struct ksiginfo *, const sigset_t *);
 
 #endif /* _IBCS2_SIGNAL_H */

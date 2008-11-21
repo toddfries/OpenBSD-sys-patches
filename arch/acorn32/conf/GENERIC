@@ -1,4 +1,4 @@
-# 	$NetBSD: GENERIC,v 1.78 2006/11/11 18:47:09 jmmv Exp $
+# 	$NetBSD: GENERIC,v 1.89 2008/11/12 12:35:55 ad Exp $
 #
 #	GENERIC --- NetBSD/acorn32 complete configuration
 #
@@ -22,7 +22,7 @@ include		"arch/acorn32/conf/std.acorn32"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident		"GENERIC-$Revision: 1.78 $"
+#ident		"GENERIC-$Revision: 1.89 $"
 
 # estimated number of users
 maxusers	32
@@ -72,6 +72,7 @@ file-system	PTYFS		# /dev/pts/N support
 options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
 options 	SOFTDEP		# FFS soft updates support.
+options 	WAPBL		# File system journaling support - Experimental
 #options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	NFSSERVER
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
@@ -87,7 +88,7 @@ options 	INET6		# IPV6
 #options 	IPSEC_DEBUG	# debug for IP security
 #options 	MROUTING	# IP multicast routing
 #options 	PIM		# Protocol Independent Multicast
-options 	ISO,TPIP	# OSI
+#options 	ISO,TPIP	# OSI
 #options 	EON		# OSI tunneling over IP
 options 	NETATALK	# AppleTalk networking
 options 	PFIL_HOOKS	# pfil(9) packet filter hooks
@@ -112,6 +113,7 @@ options 	PPP_FILTER	# Active filter support for PPP (requires bpf)
 # Compatibility options
 
 options 	COMPAT_43	# 4.3BSD compatibility.
+options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
 options		COMPAT_20	# NetBSD 2.0 compatibility.
 options 	COMPAT_16	# NetBSD 1.6 compatibility.
@@ -129,10 +131,6 @@ options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 options 	SYSVMSG		# System V-like message queues
 options 	SYSVSEM		# System V-like semaphores
-#options 	SEMMNI=10	# number of semaphore identifiers
-#options 	SEMMNS=60	# number of semaphores in system
-#options 	SEMUME=10	# max number of undo entries per process
-#options 	SEMMNU=30	# number of undo structures in system
 options 	SYSVSHM		# System V-like memory sharing
 options 	SHMMAXPGS=1024	# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
@@ -145,9 +143,7 @@ options 	MEMORY_DISK_HOOKS	# boottime setup of ramdisk
 
 # Miscellaneous kernel options
 options 	KTRACE		# system call tracing, a la ktrace(1)
-#options 	SYSTRACE	# system call vetting via systrace(1)
 options 	IRQSTATS	# manage IRQ statistics
-options 	LKM		# loadable kernel modules
 options 	KMEMSTATS	# kernel memory statistics
 #options 	SCSIVERBOSE	# Verbose SCSI errors
 options 	USERCONF	# userconf(4) support
@@ -165,7 +161,6 @@ options 	SYSCTL_INCLUDE_DESCR	# Include sysctl descriptions in kernel
 #options 	PORTMASTER	# Enable PortMaster only options
 #options 	DIAGNOSTIC	# internal consistency checks
 #options 	PMAP_DEBUG	# Enable pmap_debug_level code
-#options 	IPKDB		# remote kernel debugging
 options 	DDB		# in-kernel debugger
 #options 	DDB_HISTORY_SIZE=100	# Enable history editing in DDB
 #makeoptions	DEBUG="-g"	# compile full symbol table
@@ -204,19 +199,11 @@ vidc0		at mainbus?
 #options 	WSEMUL_SUN
 options 	WSEMUL_VT100
 
-#options 	WSDISPLAY_COMPAT_RAWKBD
+options         WS_KERNEL_FG=WSCOL_GREEN
 
-#options 	FONT_BOLD8x16
-#options 	FONT_GALLANT12x22	# Very nice font
-#options 	FONT_LUCIDA16x29
-#options 	FONT_OMRON12x20		# looks funny
-#options 	FONT_QVSS8x15		# broken ?
-options 	FONT_SONY12x25		# looks like VT220 font
-options 	FONT_SONY8x16		# not tested
-#options 	FONT_VT220L8x8		# 8x8 font as in Arch. cons
-#options 	FONT_VT220L8x16		# 8x(2x8) font as in Arch. cons
-#options 	FONT_VT220L8x10		# not tested
-#options 	FONT_VT220L8x20		# not tested
+#options 	WSDISPLAY_COMPAT_RAWKBD
+options		WSDISPLAY_COMPAT_USL
+options		WSDISPLAY_SCROLLSUPPORT
 
 vidcvideo0	at vidc?		# wscons driver for VIDC
 wsdisplay*	at vidcvideo? console ?	# display itself
@@ -333,6 +320,7 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
+pseudo-device	agr			# IEEE 802.3ad link aggregation
 pseudo-device	pty			# pseudo-terminals
 pseudo-device	vnd			# disk-like interface to files
 #options 	VND_COMPRESSION		# compressed vnd(4)
@@ -355,6 +343,11 @@ pseudo-device	clockctl		# user control of clock subsystem
 pseudo-device	ksyms			# /dev/ksyms
 #pseudo-device	pf			# PF packet filter
 #pseudo-device	pflog			# PF log if
+
+#
+# accept filters
+pseudo-device   accf_data		# "dataready" accept filter
+pseudo-device   accf_http		# "httpready" accept filter
 
 # Veriexec
 #

@@ -1,6 +1,4 @@
-/*	$OpenBSD: usbdi_util.c,v 1.24 2007/06/18 11:53:11 mbalmer Exp $ */
-/*	$NetBSD: usbdi_util.c,v 1.40 2002/07/11 21:14:36 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usbdi_util.c,v 1.14 1999/11/17 22:33:50 n_hibma Exp $	*/
+/*	$NetBSD: usbdi_util.c,v 1.51 2008/05/26 18:00:33 drochner Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -18,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,6 +29,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: usbdi_util.c,v 1.51 2008/05/26 18:00:33 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,8 +47,8 @@
 #include <dev/usb/usbdi_util.h>
 
 #ifdef USB_DEBUG
-#define DPRINTF(x)	do { if (usbdebug) printf x; } while (0)
-#define DPRINTFN(n,x)	do { if (usbdebug>(n)) printf x; } while (0)
+#define DPRINTF(x)	if (usbdebug) logprintf x
+#define DPRINTFN(n,x)	if (usbdebug>(n)) logprintf x
 extern int usbdebug;
 #else
 #define DPRINTF(x)
@@ -66,8 +60,8 @@ usbd_get_desc(usbd_device_handle dev, int type, int index, int len, void *desc)
 {
 	usb_device_request_t req;
 
-	DPRINTFN(3,("usbd_get_desc: type=%d, index=%d, len=%d\n", type, index,
-	    len));
+	DPRINTFN(3,("usbd_get_desc: type=%d, index=%d, len=%d\n",
+		    type, index, len));
 
 	req.bmRequestType = UT_READ_DEVICE;
 	req.bRequest = UR_GET_DESCRIPTOR;
@@ -79,19 +73,19 @@ usbd_get_desc(usbd_device_handle dev, int type, int index, int len, void *desc)
 
 usbd_status
 usbd_get_config_desc(usbd_device_handle dev, int confidx,
-    usb_config_descriptor_t *d)
+		     usb_config_descriptor_t *d)
 {
 	usbd_status err;
 
 	DPRINTFN(3,("usbd_get_config_desc: confidx=%d\n", confidx));
 	err = usbd_get_desc(dev, UDESC_CONFIG, confidx,
-	    USB_CONFIG_DESCRIPTOR_SIZE, d);
+			    USB_CONFIG_DESCRIPTOR_SIZE, d);
 	if (err)
 		return (err);
 	if (d->bDescriptorType != UDESC_CONFIG) {
 		DPRINTFN(-1,("usbd_get_config_desc: confidx=%d, bad desc "
-		    "len=%d type=%d\n", confidx, d->bLength,
-		    d->bDescriptorType));
+			     "len=%d type=%d\n",
+			     confidx, d->bLength, d->bDescriptorType));
 		return (USBD_INVAL);
 	}
 	return (USBD_NORMAL_COMPLETION);
@@ -108,8 +102,8 @@ usbd_status
 usbd_get_device_desc(usbd_device_handle dev, usb_device_descriptor_t *d)
 {
 	DPRINTFN(3,("usbd_get_device_desc:\n"));
-	return (usbd_get_desc(dev, UDESC_DEVICE, 0, USB_DEVICE_DESCRIPTOR_SIZE,
-	    d));
+	return (usbd_get_desc(dev, UDESC_DEVICE,
+			     0, USB_DEVICE_DESCRIPTOR_SIZE, d));
 }
 
 usbd_status
@@ -223,8 +217,8 @@ usbd_get_protocol(usbd_interface_handle iface, u_int8_t *report)
 	usbd_device_handle dev;
 	usb_device_request_t req;
 
-	DPRINTFN(4, ("usbd_get_protocol: iface=%p, endpt=%d\n", iface,
-	    id->bInterfaceNumber));
+	DPRINTFN(4, ("usbd_get_protocol: iface=%p, endpt=%d\n",
+		     iface, id->bInterfaceNumber));
 	if (id == NULL)
 		return (USBD_IOERROR);
 	usbd_interface2device_handle(iface, &dev);
@@ -244,7 +238,7 @@ usbd_set_protocol(usbd_interface_handle iface, int report)
 	usb_device_request_t req;
 
 	DPRINTFN(4, ("usbd_set_protocol: iface=%p, report=%d, endpt=%d\n",
-	    iface, report, id->bInterfaceNumber));
+		     iface, report, id->bInterfaceNumber));
 	if (id == NULL)
 		return (USBD_IOERROR);
 	usbd_interface2device_handle(iface, &dev);
@@ -258,7 +252,7 @@ usbd_set_protocol(usbd_interface_handle iface, int report)
 
 usbd_status
 usbd_set_report(usbd_interface_handle iface, int type, int id, void *data,
-    int len)
+		int len)
 {
 	usb_interface_descriptor_t *ifd = usbd_get_interface_descriptor(iface);
 	usbd_device_handle dev;
@@ -277,8 +271,8 @@ usbd_set_report(usbd_interface_handle iface, int type, int id, void *data,
 }
 
 usbd_status
-usbd_set_report_async(usbd_interface_handle iface, int type, int id,
-    void *data, int len)
+usbd_set_report_async(usbd_interface_handle iface, int type, int id, void *data,
+		      int len)
 {
 	usb_interface_descriptor_t *ifd = usbd_get_interface_descriptor(iface);
 	usbd_device_handle dev;
@@ -298,7 +292,7 @@ usbd_set_report_async(usbd_interface_handle iface, int type, int id,
 
 usbd_status
 usbd_get_report(usbd_interface_handle iface, int type, int id, void *data,
-    int len)
+		int len)
 {
 	usb_interface_descriptor_t *ifd = usbd_get_interface_descriptor(iface);
 	usbd_device_handle dev;
@@ -336,8 +330,8 @@ usbd_set_idle(usbd_interface_handle iface, int duration, int id)
 }
 
 usbd_status
-usbd_get_report_descriptor(usbd_device_handle dev, int ifcno, int size,
-    void *d)
+usbd_get_report_descriptor(usbd_device_handle dev, int ifcno,
+			   int size, void *d)
 {
 	usb_device_request_t req;
 
@@ -359,7 +353,7 @@ usbd_get_hid_descriptor(usbd_interface_handle ifc)
 	char *p, *end;
 
 	if (idesc == NULL)
-		return (0);
+		return (NULL);
 	usbd_interface2device_handle(ifc, &dev);
 	cdesc = usbd_get_config_descriptor(dev);
 
@@ -373,12 +367,12 @@ usbd_get_hid_descriptor(usbd_interface_handle ifc)
 		if (hd->bDescriptorType == UDESC_INTERFACE)
 			break;
 	}
-	return (0);
+	return (NULL);
 }
 
 usbd_status
 usbd_read_report_desc(usbd_interface_handle ifc, void **descp, int *sizep,
-    int mem)
+		       usb_malloc_type mem)
 {
 	usb_interface_descriptor_t *id;
 	usb_hid_descriptor_t *hid;
@@ -396,8 +390,8 @@ usbd_read_report_desc(usbd_interface_handle ifc, void **descp, int *sizep,
 	*descp = malloc(*sizep, mem, M_NOWAIT);
 	if (*descp == NULL)
 		return (USBD_NOMEM);
-	err = usbd_get_report_descriptor(dev, id->bInterfaceNumber, *sizep,
-	    *descp);
+	err = usbd_get_report_descriptor(dev, id->bInterfaceNumber,
+					 *sizep, *descp);
 	if (err) {
 		free(*descp, mem);
 		*descp = NULL;
@@ -419,24 +413,25 @@ usbd_get_config(usbd_device_handle dev, u_int8_t *conf)
 	return (usbd_do_request(dev, &req, conf));
 }
 
-void usbd_bulk_transfer_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status);
-void
+Static void usbd_bulk_transfer_cb(usbd_xfer_handle xfer,
+				  usbd_private_handle priv, usbd_status status);
+Static void
 usbd_bulk_transfer_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+		      usbd_status status)
 {
 	wakeup(xfer);
 }
 
 usbd_status
 usbd_bulk_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
-    u_int16_t flags, u_int32_t timeout, void *buf, u_int32_t *size, char *lbl)
+		   u_int16_t flags, u_int32_t timeout, void *buf,
+		   u_int32_t *size, const char *lbl)
 {
 	usbd_status err;
 	int s, error;
 
-	usbd_setup_xfer(xfer, pipe, 0, buf, *size, flags, timeout,
-	    usbd_bulk_transfer_cb);
+	usbd_setup_xfer(xfer, pipe, 0, buf, *size,
+			flags, timeout, usbd_bulk_transfer_cb);
 	DPRINTFN(1, ("usbd_bulk_transfer: start transfer %d bytes\n", *size));
 	s = splusb();		/* don't want callback until tsleep() */
 	err = usbd_transfer(xfer);
@@ -444,7 +439,7 @@ usbd_bulk_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
 		splx(s);
 		return (err);
 	}
-	error = tsleep((caddr_t)xfer, PZERO | PCATCH, lbl, 0);
+	error = tsleep((void *)xfer, PZERO | PCATCH, lbl, 0);
 	splx(s);
 	if (error) {
 		DPRINTF(("usbd_bulk_transfer: tsleep=%d\n", error));
@@ -460,24 +455,25 @@ usbd_bulk_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
 	return (err);
 }
 
-void usbd_intr_transfer_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status);
-void
+Static void usbd_intr_transfer_cb(usbd_xfer_handle xfer,
+				  usbd_private_handle priv, usbd_status status);
+Static void
 usbd_intr_transfer_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+		      usbd_status status)
 {
 	wakeup(xfer);
 }
 
 usbd_status
 usbd_intr_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
-    u_int16_t flags, u_int32_t timeout, void *buf, u_int32_t *size, char *lbl)
+		   u_int16_t flags, u_int32_t timeout, void *buf,
+		   u_int32_t *size, const char *lbl)
 {
 	usbd_status err;
 	int s, error;
 
-	usbd_setup_xfer(xfer, pipe, 0, buf, *size, flags, timeout,
-	    usbd_intr_transfer_cb);
+	usbd_setup_xfer(xfer, pipe, 0, buf, *size,
+			flags, timeout, usbd_intr_transfer_cb);
 	DPRINTFN(1, ("usbd_intr_transfer: start transfer %d bytes\n", *size));
 	s = splusb();		/* don't want callback until tsleep() */
 	err = usbd_transfer(xfer);
@@ -502,35 +498,62 @@ usbd_intr_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
 }
 
 void
-usb_detach_wait(struct device *dv)
+usb_detach_wait(device_ptr_t dv)
 {
-	DPRINTF(("usb_detach_wait: waiting for %s\n", dv->dv_xname));
+	DPRINTF(("usb_detach_wait: waiting for %s\n", USBDEVPTRNAME(dv)));
 	if (tsleep(dv, PZERO, "usbdet", hz * 60))
-		printf("usb_detach_wait: %s didn't detach\n", dv->dv_xname);
-	DPRINTF(("usb_detach_wait: %s done\n", dv->dv_xname));
+		printf("usb_detach_wait: %s didn't detach\n",
+		        USBDEVPTRNAME(dv));
+	DPRINTF(("usb_detach_wait: %s done\n", USBDEVPTRNAME(dv)));
 }
 
 void
-usb_detach_wakeup(struct device *dv)
+usb_detach_wakeup(device_ptr_t dv)
 {
-	DPRINTF(("usb_detach_wakeup: for %s\n", dv->dv_xname));
+	DPRINTF(("usb_detach_wakeup: for %s\n", USBDEVPTRNAME(dv)));
 	wakeup(dv);
 }
 
-usb_descriptor_t *
-usb_find_desc(usbd_device_handle dev, int type)
+const usb_cdc_descriptor_t *
+usb_find_desc(usbd_device_handle dev, int type, int subtype)
 {
-	usb_descriptor_t *desc;
-	usb_config_descriptor_t *cd = usbd_get_config_descriptor(dev);
-        uByte *p = (uByte *)cd;
-        uByte *end = p + UGETW(cd->wTotalLength);
+	usbd_desc_iter_t iter;
+	const usb_cdc_descriptor_t *desc;
 
-	while (p < end) {
-		desc = (usb_descriptor_t *)p;
-		if (desc->bDescriptorType == type)
-			return (desc);
-		p += desc->bLength;
+	usb_desc_iter_init(dev, &iter);
+	for (;;) {
+		desc = (const usb_cdc_descriptor_t *)usb_desc_iter_next(&iter);
+		if (!desc || (desc->bDescriptorType == type &&
+			      (subtype == USBD_CDCSUBTYPE_ANY ||
+			       subtype == desc->bDescriptorSubtype)))
+			break;
 	}
+	return desc;
+}
 
-	return (NULL);
+/* same as usb_find_desc(), but searches only in the specified interface. */
+const usb_cdc_descriptor_t *
+usb_find_desc_if(usbd_device_handle dev, int type, int subtype,
+		 usb_interface_descriptor_t *id)
+{
+	usbd_desc_iter_t iter;
+	const usb_cdc_descriptor_t *desc;
+
+	usb_desc_iter_init(dev, &iter);
+
+	iter.cur = (void *)id;		/* start from the interface desc */
+	usb_desc_iter_next(&iter);	/* and skip it */
+
+	while ((desc = (const usb_cdc_descriptor_t *)usb_desc_iter_next(&iter))
+	       != NULL) {
+		if (desc->bDescriptorType == UDESC_INTERFACE) {
+			/* we ran into the next interface --- not found */
+			return NULL;
+		}
+		if (desc->bDescriptorType == type &&
+		    (subtype == USBD_CDCSUBTYPE_ANY ||
+		     subtype == desc->bDescriptorSubtype))
+			break;
+	}
+	return desc;
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: sgsmix.c,v 1.2 2007/09/02 01:41:29 macallan Exp $	*/
+/*	$NetBSD: sgsmix.c,v 1.6 2008/08/01 19:33:07 macallan Exp $	*/
 
 /*-
  * Copyright (C) 2005 Michael Lorenz.
@@ -11,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -33,7 +31,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sgsmix.c,v 1.2 2007/09/02 01:41:29 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sgsmix.c,v 1.6 2008/08/01 19:33:07 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,9 +54,9 @@ __KERNEL_RCSID(0, "$NetBSD: sgsmix.c,v 1.2 2007/09/02 01:41:29 macallan Exp $");
 #endif
 
 struct sgsmix_softc {
-	struct device sc_dev;
-	struct device *sc_parent;
-	struct i2c_controller *sc_i2c;
+	device_t sc_dev;
+	device_t sc_parent;
+	i2c_tag_t sc_i2c;
 	int sc_node, sc_address;
 	uint8_t sc_regs[7];
 };
@@ -71,16 +69,16 @@ struct sgsmix_softc {
 #define SGSREG_SPEAKER_R	5
 #define SGSREG_HEADPHONES_R	6
 
-static void sgsmix_attach(struct device *, struct device *, void *);
-static int sgsmix_match(struct device *, struct cfdata *, void *);
+static void sgsmix_attach(device_t, device_t, void *);
+static int sgsmix_match(device_t, cfdata_t, void *);
 static void sgsmix_setup(struct sgsmix_softc *);
 static void sgsmix_writereg(struct sgsmix_softc *, int, uint8_t);
 
-CFATTACH_DECL(sgsmix, sizeof(struct sgsmix_softc),
+CFATTACH_DECL_NEW(sgsmix, sizeof(struct sgsmix_softc),
     sgsmix_match, sgsmix_attach, NULL, NULL);
 
 static int
-sgsmix_match(struct device *parent, struct cfdata *cf, void *aux)
+sgsmix_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct i2c_attach_args *args = aux;
 	int ret = -1;
@@ -97,15 +95,16 @@ sgsmix_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 static void
-sgsmix_attach(struct device *parent, struct device *self, void *aux)
+sgsmix_attach(device_t parent, device_t self, void *aux)
 {
 	struct sgsmix_softc *sc = device_private(self);
 	struct i2c_attach_args *args = aux;
 
+	sc->sc_dev = self;
 	sc->sc_parent = parent;
 	sc->sc_address = args->ia_addr;
-	printf(": SGS TDA7433 Basic Audio Processor\n");
-	sc->sc_i2c = (struct i2c_controller *)args->ia_tag;
+	aprint_normal(": SGS TDA7433 Basic Audio Processor\n");
+	sc->sc_i2c = args->ia_tag;
 	sgsmix_setup(sc);
 }
 
@@ -155,9 +154,9 @@ sgsmix_writereg(struct sgsmix_softc *sc, int reg, uint8_t val)
 void
 sgsmix_set_speaker_vol(void *cookie, int left, int right)
 {
-	struct sgsmix_softc *sc = cookie;
+	struct sgsmix_softc *sc = device_private((device_t)cookie);
 
-	DPRINTF("%s: speaker %d %d\n", sc->sc_dev.dv_xname, left, right);
+	DPRINTF("%s: speaker %d %d\n", device_xname(sc->sc_dev), left, right);
 	if (left == 0) {
 		sgsmix_writereg(sc, SGSREG_SPEAKER_L, 0x20);
 	} else {
@@ -176,9 +175,9 @@ sgsmix_set_speaker_vol(void *cookie, int left, int right)
 void
 sgsmix_set_headphone_vol(void *cookie, int left, int right)
 {
-	struct sgsmix_softc *sc = cookie;
+	struct sgsmix_softc *sc = device_private((device_t)cookie);
 
-	DPRINTF("%s: headphones %d %d\n", sc->sc_dev.dv_xname, left, right);
+	DPRINTF("%s: headphones %d %d\n", device_xname(sc->sc_dev), left, right);
 	if (left == 0) {
 		sgsmix_writereg(sc, SGSREG_HEADPHONES_L, 0x20);
 	} else {
@@ -197,7 +196,7 @@ sgsmix_set_headphone_vol(void *cookie, int left, int right)
 void
 sgsmix_set_bass_treble(void *cookie, int bass, int treble)
 {
-	struct sgsmix_softc *sc = cookie;
+	struct sgsmix_softc *sc = device_private((device_t)cookie);
 	uint8_t b, t;
 
 	t = (treble >> 4) & 0xf;
@@ -206,6 +205,6 @@ sgsmix_set_bass_treble(void *cookie, int bass, int treble)
 	b = bass & 0xf0;
 	if (b & 0x80)
 		b ^= 0x70;
-	DPRINTF("%s: bass/treble %02x %02x\n", sc->sc_dev.dv_xname, b, t);
+	DPRINTF("%s: bass/treble %02x %02x\n", device_xname(sc->sc_dev), b, t);
 	sgsmix_writereg(sc, SGSREG_BASS_TREBLE, b | t);
 }

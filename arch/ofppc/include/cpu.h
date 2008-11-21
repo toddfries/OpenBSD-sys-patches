@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.19 2002/09/18 01:44:13 chs Exp $	*/
+/*	$NetBSD: cpu.h,v 1.23 2008/04/08 02:33:03 garbled Exp $	*/
 
 /*
  * Copyright (C) 1995-1997 Wolfgang Solfrank.
@@ -33,17 +33,10 @@
 #ifndef	_MACHINE_CPU_H_
 #define	_MACHINE_CPU_H_
 
-#include <sys/device.h>
-
-struct cpu_softc {
-	struct device sc_dev;
-	int sc_ofnode;
-};
-
 #if defined(_KERNEL)
-#define	CPU_MAXNUM	1
-extern struct cfdriver cpu_cd;
-#endif
+#define	CPU_MAXNUM	16
+extern char bootpath[];
+#endif /* _KERNEL */
 
 #include <powerpc/cpu.h>
 

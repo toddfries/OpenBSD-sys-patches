@@ -1,4 +1,4 @@
-/* $NetBSD: cgdvar.h,v 1.9 2007/03/04 06:01:41 christos Exp $ */
+/* $NetBSD: cgdvar.h,v 1.12 2008/09/12 16:51:55 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,6 +31,8 @@
 
 #ifndef _DEV_CGDVAR_H_
 #define	_DEV_CGDVAR_H_
+
+#include <sys/simplelock.h>
 
 /* ioctl(2) code */
 struct cgd_ioctl {
@@ -64,7 +59,12 @@ struct cgd_ioctl {
 struct cryptdata {
 	size_t		 cf_blocksize;	/* block size (in bytes) */
 	int		 cf_mode;	/* Cipher Mode and IV Gen method */
-#define CGD_CIPHER_CBC_ENCBLKNO 1	/* CBC Mode w/ Enc Block Number */
+#define CGD_CIPHER_CBC_ENCBLKNO8 1	/* CBC Mode w/ Enc Block Number 
+					 * 8 passes (compat only)
+					 */
+#define CGD_CIPHER_CBC_ENCBLKNO1 2	/* CBC Mode w/ Enc Block Number
+					 * 1 pass (default)
+					 */
 	void		*cf_priv;	/* enc alg private data */
 };
 

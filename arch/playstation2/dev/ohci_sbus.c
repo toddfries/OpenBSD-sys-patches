@@ -1,4 +1,4 @@
-/*	$NetBSD: ohci_sbus.c,v 1.6 2005/12/11 12:18:35 christos Exp $	*/
+/*	$NetBSD: ohci_sbus.c,v 1.9 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ohci_sbus.c,v 1.6 2005/12/11 12:18:35 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ohci_sbus.c,v 1.9 2008/04/28 20:23:31 martin Exp $");
 
 #include <sys/param.h>
 
@@ -79,8 +72,8 @@ STATIC int _ohci_sbus_mem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t,
     bus_size_t, bus_dma_segment_t *, int, int *, int);
 STATIC void _ohci_sbus_mem_free(bus_dma_tag_t, bus_dma_segment_t *, int);
 STATIC int _ohci_sbus_mem_map(bus_dma_tag_t, bus_dma_segment_t *, int, size_t,
-    caddr_t *, int);
-STATIC void _ohci_sbus_mem_unmap(bus_dma_tag_t, caddr_t, size_t);
+    void **, int);
+STATIC void _ohci_sbus_mem_unmap(bus_dma_tag_t, void *, size_t);
 
 struct playstation2_bus_dma_tag ohci_bus_dma_tag = {
 	_bus_dmamap_create,
@@ -110,7 +103,7 @@ struct ohci_sbus_softc {
 	LIST_HEAD(, ohci_dma_segment) sc_dmaseg_head;
 };
 
-CFATTACH_DECL(ohci_sbus, sizeof(struct ohci_sbus_softc),
+CFATTACH_DECL_NEW(ohci_sbus, sizeof(struct ohci_sbus_softc),
     ohci_sbus_match, ohci_sbus_attach, NULL, NULL);
 
 int
@@ -123,10 +116,13 @@ ohci_sbus_match(struct device *parent, struct cfdata *cf, void *aux)
 void
 ohci_sbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ohci_sbus_softc *sc = (void *)self;
+	struct ohci_sbus_softc *sc = device_private(self);
 	usbd_status result;
 
 	printf("\n");
+
+	sc->sc.sc_dev = self;
+	sc->sc.sc_bus.hci_private = sc;
 
 	sc->sc.iot = bus_space_create(0, "OHCI I/O space", SBUS_OHCI_REGBASE,
 	    SBUS_OHCI_REGSIZE);
@@ -152,8 +148,7 @@ ohci_sbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Attach usb device. */
-	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
-	    usbctlprint);
+	sc->sc.sc_child = config_found(self, &sc->sc.sc_bus, usbctlprint);
 }
 
 void
@@ -224,7 +219,7 @@ _ohci_sbus_mem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 
 int
 _ohci_sbus_mem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
-    caddr_t *kvap, int flags)
+    void **kvap, int flags)
 {
 	struct ohci_sbus_softc *sc = t->_dmachip_cookie;
 	struct ohci_dma_segment *ds;
@@ -234,7 +229,7 @@ _ohci_sbus_mem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t s
 	    ds = LIST_NEXT(ds, ds_link)) {
 		if (ds->ds_iopdma_seg.iop_paddr == addr) {
 
-			*kvap = (caddr_t)ds->ds_iopdma_seg.ee_vaddr;
+			*kvap = (void *)ds->ds_iopdma_seg.ee_vaddr;
 
 			return (0);
 		}
@@ -244,7 +239,7 @@ _ohci_sbus_mem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t s
 }
 
 void
-_ohci_sbus_mem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
+_ohci_sbus_mem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 {
 	/* nothing to do */
 }

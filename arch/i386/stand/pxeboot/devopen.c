@@ -1,9 +1,10 @@
-/*	$OpenBSD: devopen.c,v 1.4 2007/07/27 17:46:57 tom Exp $	*/
+/*	$NetBSD: devopen.c,v 1.7 2005/12/11 12:17:49 christos Exp $	*/
 
 /*
- * Copyright (c) 2004 Tom Cosgrove
- * Copyright (c) 1996-1999 Michael Shalayeff
+ * Copyright 2001, 2002 Wasabi Systems, Inc.
  * All rights reserved.
+ *
+ * Written by Jason R. Thorpe for Wasabi Systems, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,217 +14,133 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed for the NetBSD Project by
+ *	Wasabi Systems, Inc.
+ * 4. The name of Wasabi Systems, Inc. may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "libsa.h"
-#include "biosdev.h"
 #include <sys/param.h>
-#include <dev/cons.h>
+#include <lib/libsa/stand.h>
+#include <netinet/in.h>
+#include <netinet/in_systm.h>
+#include <net.h>
 
-extern int debug;
+#include <libi386.h>
+#ifdef _STANDALONE
+#include <lib/libkern/libkern.h>
+#include <bootinfo.h>
+#else
+#include <string.h>
+#endif
 
-extern char *fs_name[];
-extern int nfsname;
-extern struct devsw netsw[];
+#include "pxeboot.h"
 
-extern char *bootmac;		/* Gets passed to kernel for network boot */
+#ifdef _STANDALONE
+struct btinfo_bootpath bibp;
+#endif
 
-/* XXX use slot for 'rd' for 'hd' pseudo-device */
-const char bdevs[][4] = {
-	"wd", "", "fd", "", "sd", "st", "cd", "mcd",
-	"", "", "", "", "", "", "", "scd", "", "hd", ""
-};
-const int nbdevs = NENTS(bdevs);
-
-const char cdevs[][4] = {
-	"cn", "", "", "", "", "", "", "",
-	"com", "", "", "", "pc"
-};
-const int ncdevs = NENTS(cdevs);
-
-/* pass dev_t to the open routines */
+/*
+ * Open the "device" named by the combined file system/file name
+ * given as the fname arg.  Format is:
+ *
+ *	nfs:netbsd
+ *	tftp:netbsd
+ *	netbsd
+ *
+ * If no file system is specified, we default to the first in the
+ * file system table (which ought to be NFS).
+ *
+ * We always open just one device (the PXE netif).
+ */
 int
 devopen(struct open_file *f, const char *fname, char **file)
 {
-	struct devsw *dp = devsw;
-	char *p;
-	char *stripdev;
-	int i, l;
-	int rc = 1;
+	struct devsw *dp;
+	char *filename;
+	size_t fsnamelen;
+	int i, error;
 
-	*file = (char *)fname;
+	dp = &devsw[0];
 
-#ifdef DEBUG
-	if (debug)
-		printf("devopen(%s):", fname);
-#endif
+	/* Set the default boot file system. */
+	bcopy(pxeboot_fstab[0].fst_ops, file_system, sizeof(struct fs_ops));
 
-	/* Make sure we have a prefix, e.g. hd0a: or tftp:. */
-	for (p = (char *)fname; *p != ':' && *p != '\0'; ) p++;
-	if (*p != ':')
-		return 1;
-	stripdev = p + 1;
+	/* if we got passed a filename, pass it to the BOOTP server */
+	if (fname)
+		strncpy(bootfile, fname, FNAME_SIZE);
 
-	l = p - fname;			/* Length of device prefix. */
-	for (i = 0; i < nfsname; i++) {
-		if ((fs_name[i] != NULL) &&
-		    (strncmp(fname, fs_name[i], l) == 0)) {
+	/* Open the device; this might give us a boot file name. */
+	error = (*dp->dv_open)(f, NULL);
+	if (error)
+		return (error);
 
-			/* Force oopen() etc to use this filesystem. */
-			f->f_ops = &file_system[i];
-			f->f_dev = dp = &netsw[0];
-
-			rc = (*dp->dv_open)(f, NULL);
-			if (rc == 0)
-				*file = stripdev;
-			else
-				f->f_dev = NULL;
-#ifdef DEBUG
-			if (debug)
-				putchar('\n');
-#endif
-			return rc;
-		}
-	}
+	f->f_dev = dp;
 
 	/*
-	 * Assume that any network filesystems would be caught by the
-	 * code above, so that the next phase of devopen() is only for
-	 * local devices.
-	 *
-	 * Clear bootmac, to signal that we loaded this file from a
-	 * non-network device.
+	 * If the DHCP server provided a file name:
+	 * - If it contains a ":", assume it points to a NetBSD kernel.
+	 * - If not, assume that the DHCP server was not able to pass
+	 *   a separate filename for the kernel. (The name probably
+	 *   was the same as used to load "pxeboot".) Ignore it and
+	 *   use the default in this case.
+	 * So we cater to simple DHCP servers while being able to
+	 * use the power of conditional behaviour in modern ones.
 	 */
-	bootmac = NULL;
+	if (strchr(bootfile, ':'))
+		fname = bootfile;
 
-	for (i = 0; i < ndevs && rc != 0; dp++, i++) {
-#ifdef DEBUG
-		if (debug)
-			printf(" %s: ", dp->dv_name);
-#endif
-		if ((rc = (*dp->dv_open)(f, file)) == 0) {
-			f->f_dev = dp;
-			return 0;
+	filename = (fname ? strchr(fname, ':') : NULL);
+	if (filename != NULL) {
+		fsnamelen = (size_t)((const char *)filename - fname);
+		for (i = 0; i < npxeboot_fstab; i++) {
+			if (strncmp(fname, pxeboot_fstab[i].fst_name,
+			    fsnamelen) == 0) {
+				bcopy(pxeboot_fstab[i].fst_ops, file_system,
+				    sizeof(struct fs_ops));
+				break;
+			}
 		}
-#ifdef DEBUG
-		else if (debug)
-			printf("%d", rc);
+		if (i == npxeboot_fstab) {
+			printf("Invalid file system type specified in %s\n",
+			    fname);
+			error = EINVAL;
+			goto bad;
+		}
+		filename++;
+		if (filename[0] == '\0') {
+			printf("No file specified in %s\n", fname);
+			error = EINVAL;
+			goto bad;
+		}
+	} else
+		filename = (char *)fname;
+
+	*file = filename;
+
+#ifdef _STANDALONE
+	strncpy(bibp.bootpath, filename, sizeof(bibp.bootpath));
+	BI_ADD(&bibp, BTINFO_BOOTPATH, sizeof(bibp));
 #endif
 
-	}
-#ifdef DEBUG
-	if (debug)
-		putchar('\n');
-#endif
-
-	if ((f->f_flags & F_NODEV) == 0)
-		f->f_dev = dp;
-
-	return rc;
-}
-
-void
-devboot(dev_t bootdev, char *p)
-{
-	*p++ = 't';
-	*p++ = 'f';
-	*p++ = 't';
-	*p++ = 'p';
-	*p = '\0';
-}
-
-int pch_pos = 0;
-
-void
-putchar(int c)
-{
-	switch (c) {
-	case '\177':	/* DEL erases */
-		cnputc('\b');
-		cnputc(' ');
-	case '\b':
-		cnputc('\b');
-		if (pch_pos)
-			pch_pos--;
-		break;
-	case '\t':
-		do
-			cnputc(' ');
-		while (++pch_pos % 8);
-		break;
-	case '\n':
-	case '\r':
-		cnputc(c);
-		pch_pos=0;
-		break;
-	default:
-		cnputc(c);
-		pch_pos++;
-		break;
-	}
-}
-
-int
-getchar(void)
-{
-	register int c = cngetc();
-
-	if (c == '\r')
-		c = '\n';
-
-	if ((c < ' ' && c != '\n') || c == '\177')
-		return c;
-
-	putchar(c);
-
-	return c;
-}
-
-char ttyname_buf[8];
-
-char *
-ttyname(int fd)
-{
-	snprintf(ttyname_buf, sizeof ttyname_buf, "%s%d",
-	    cdevs[major(cn_tab->cn_dev)], minor(cn_tab->cn_dev));
-
-	return ttyname_buf;
-}
-
-dev_t
-ttydev(char *name)
-{
-	int i, unit = -1;
-	char *no = name + strlen(name) - 1;
-
-	while (no >= name && *no >= '0' && *no <= '9')
-		unit = (unit < 0 ? 0 : (unit * 10)) + *no-- - '0';
-	if (no < name || unit < 0)
-		return NODEV;
-	for (i = 0; i < ncdevs; i++)
-		if (strncmp(name, cdevs[i], no - name + 1) == 0)
-			return (makedev(i, unit));
-	return NODEV;
-}
-
-int
-cnspeed(dev_t dev, int sp)
-{
-	if (major(dev) == 8)	/* comN */
-		return (comspeed(dev, sp));
-
-	/* pc0 and anything else */
-	return 9600;
+	return (0);
+ bad:
+	(*dp->dv_close)(f);
+	f->f_dev = NULL;
+	return (error);
 }

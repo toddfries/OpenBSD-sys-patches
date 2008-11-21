@@ -1,4 +1,4 @@
-/* $NetBSD: sgmap_common.c,v 1.22 2005/12/11 12:16:16 christos Exp $ */
+/* $NetBSD: sgmap_common.c,v 1.24 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998, 2001 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +32,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: sgmap_common.c,v 1.22 2005/12/11 12:16:16 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sgmap_common.c,v 1.24 2008/04/28 20:23:11 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -106,7 +99,7 @@ alpha_sgmap_init(bus_dma_tag_t t, struct alpha_sgmap *sgmap, const char *name,
 			goto die;
 		}
 		sgmap->aps_ptpa = seg.ds_addr;
-		sgmap->aps_pt = (caddr_t)ALPHA_PHYS_TO_K0SEG(sgmap->aps_ptpa);
+		sgmap->aps_pt = (void *)ALPHA_PHYS_TO_K0SEG(sgmap->aps_ptpa);
 	}
 
 	/*
@@ -134,7 +127,7 @@ alpha_sgmap_init(bus_dma_tag_t t, struct alpha_sgmap *sgmap, const char *name,
 		alpha_sgmap_prefetch_spill_page_pa = seg.ds_addr;
 		alpha_sgmap_prefetch_spill_page_va =
 		    ALPHA_PHYS_TO_K0SEG(alpha_sgmap_prefetch_spill_page_pa);
-		memset((caddr_t)alpha_sgmap_prefetch_spill_page_va, 0,
+		memset((void *)alpha_sgmap_prefetch_spill_page_va, 0,
 		    PAGE_SIZE);
 	}
 	

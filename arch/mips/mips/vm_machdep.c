@@ -1,4 +1,4 @@
-/*	$NetBSD: vm_machdep.c,v 1.112 2006/08/31 16:49:21 matt Exp $	*/
+/*	$NetBSD: vm_machdep.c,v 1.122 2008/11/19 18:36:00 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -76,11 +76,10 @@
  *	@(#)vm_machdep.c	8.3 (Berkeley) 1/4/94
  */
 
-#include "opt_ddb.h"
-#include "opt_coredump.h"
-
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-__KERNEL_RCSID(0, "$NetBSD: vm_machdep.c,v 1.112 2006/08/31 16:49:21 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vm_machdep.c,v 1.122 2008/11/19 18:36:00 ad Exp $");
+
+#include "opt_ddb.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,7 +109,7 @@ paddr_t kvtophys(vaddr_t);	/* XXX */
  * Copy and update the pcb and trap frame, making the child ready to run.
  *
  * Rig the child's kernel stack so that it will start out in
- * proc_trampoline() and call child_return() with p2 as an
+ * lwp_trampoline() and call child_return() with p2 as an
  * argument. This causes the newly-created child process to go
  * directly to user level with an apparent return value of 0 from
  * fork(), while the parent process returns normally.
@@ -132,6 +131,10 @@ cpu_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	pt_entry_t *pte;
 	int i, x;
 
+	l2->l_md.md_ss_addr = 0;
+	l2->l_md.md_ss_instr = 0;
+	l2->l_md.md_astpending = 0;
+
 #ifdef DIAGNOSTIC
 	/*
 	 * If l1 != curlwp && l1 == &lwp0, we're creating a kernel thread.
@@ -148,7 +151,7 @@ cpu_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	 * will be to right address, with correct registers.
 	 */
 	memcpy(&l2->l_addr->u_pcb, &l1->l_addr->u_pcb, sizeof(struct pcb));
-	f = (struct frame *)((caddr_t)l2->l_addr + USPACE) - 1;
+	f = (struct frame *)((char *)l2->l_addr + USPACE) - 1;
 	memcpy(f, l1->l_md.md_regs, sizeof(struct frame));
 
 	/*
@@ -169,9 +172,9 @@ cpu_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	pcb = &l2->l_addr->u_pcb;
 	pcb->pcb_context[0] = (intptr_t)func;		/* S0 */
 	pcb->pcb_context[1] = (intptr_t)arg;		/* S1 */
+	pcb->pcb_context[MIPS_CURLWP_CARD - 16] = (intptr_t)l2;/* S? */
 	pcb->pcb_context[8] = (intptr_t)f;		/* SP */
-	pcb->pcb_context[10] = (intptr_t)proc_trampoline;	/* RA */
-	pcb->pcb_context[11] |= PSL_LOWIPL;		/* SR */
+	pcb->pcb_context[10] = (intptr_t)lwp_trampoline;/* RA */
 #ifdef IPL_ICU_MASK
 	pcb->pcb_ppl = 0;	/* machine dependent interrupt mask */
 #endif
@@ -179,7 +182,7 @@ cpu_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 
 /*
  * Set the given LWP to start at the given function via the
- * proc_trampoline.
+ * lwp_trampoline.
  */
 void
 cpu_setfunc(struct lwp *l, void (*func)(void *), void *arg)
@@ -187,15 +190,15 @@ cpu_setfunc(struct lwp *l, void (*func)(void *), void *arg)
 	struct pcb *pcb;
 	struct frame *f;
 
-	f = (struct frame *)((caddr_t)l->l_addr + USPACE) - 1;
+	f = (struct frame *)((char *)l->l_addr + USPACE) - 1;
 	KASSERT(l->l_md.md_regs == f);
 
 	pcb = &l->l_addr->u_pcb;
 	pcb->pcb_context[0] = (intptr_t)func;			/* S0 */
 	pcb->pcb_context[1] = (intptr_t)arg;			/* S1 */
+	pcb->pcb_context[MIPS_CURLWP_CARD - 16] = (intptr_t)l;	/* S? */
 	pcb->pcb_context[8] = (intptr_t)f;			/* SP */
-	pcb->pcb_context[10] = (intptr_t)proc_trampoline;	/* RA */
-	pcb->pcb_context[11] |= PSL_LOWIPL;			/* SR */
+	pcb->pcb_context[10] = (intptr_t)lwp_trampoline;	/* RA */
 #ifdef IPL_ICU_MASK
 	pcb->pcb_ppl = 0;	/* machine depenedend interrupt mask */
 #endif
@@ -214,8 +217,8 @@ cpu_swapin(struct lwp *l)
 
 	/*
 	 * Cache the PTEs for the user area in the machine dependent
-	 * part of the proc struct so cpu_switch() can quickly map in
-	 * the user struct and kernel stack.
+	 * part of the proc struct so cpu_switchto() can quickly map
+	 * in the user struct and kernel stack.
 	 */
 	x = (MIPS_HAS_R4K_MMU) ?
 	    (MIPS3_PG_G | MIPS3_PG_RO | MIPS3_PG_WIRED) :
@@ -233,65 +236,12 @@ cpu_lwp_free(struct lwp *l, int proc)
 		fpcurlwp = NULL;
 }
 
-/*
- * cpu_exit is called as the last action during exit.
- *
- * We clean up a little and then call switch_exit() with the old proc as an
- * argument.  switch_exit() first switches to proc0's PCB and stack,
- * schedules the dead proc's vmspace and stack to be freed, then jumps
- * into the middle of cpu_switch(), as if it were switching from proc0.
- */
 void
-cpu_exit(struct lwp *l)
+cpu_lwp_free2(struct lwp *l)
 {
-	void switch_exit(struct lwp *, void (*)(struct lwp *));
 
-	(void)splhigh();
-	switch_exit(l, lwp_exit2);
-	/* NOTREACHED */
+	(void)l;
 }
-
-#ifdef COREDUMP
-/*
- * Dump the machine specific segment at the start of a core dump.
- */
-int
-cpu_coredump(struct lwp *l, void *iocookie, struct core *chdr)
-{
-	int error;
-	struct coreseg cseg;
-	struct cpustate {
-		struct frame frame;
-		struct fpreg fpregs;
-	} cpustate;
-
-	if (iocookie == NULL) {
-		CORE_SETMAGIC(*chdr, COREMAGIC, MID_MACHINE, 0);
-		chdr->c_hdrsize = ALIGN(sizeof(struct core));
-		chdr->c_seghdrsize = ALIGN(sizeof(struct coreseg));
-		chdr->c_cpusize = sizeof(struct cpustate);
-		chdr->c_nseg++;
-		return 0;
-	}
-
-	if ((l->l_md.md_flags & MDP_FPUSED) && l == fpcurlwp)
-		savefpregs(l);
-	cpustate.frame = *(struct frame *)l->l_md.md_regs;
-	cpustate.fpregs = l->l_addr->u_pcb.pcb_fpregs;
-
-	CORE_SETMAGIC(cseg, CORESEGMAGIC, MID_MACHINE, CORE_CPU);
-	cseg.c_addr = 0;
-	cseg.c_size = chdr->c_cpusize;
-
-	error = coredump_write(iocookie, UIO_SYSSPACE, &cseg,
-	    chdr->c_seghdrsize);
-	if (error)
-		return error;
-
-	return coredump_write(iocookie, UIO_SYSSPACE, &cpustate,
-	    chdr->c_cpusize);
-}
-#endif
 
 /*
  * Map a user I/O request into kernel virtual address space.
@@ -312,10 +262,10 @@ vmapbuf(struct buf *bp, vsize_t len)
 	off = (vaddr_t)bp->b_data - uva;
 	len = mips_round_page(off + len);
 	kva = uvm_km_alloc(phys_map, len, 0, UVM_KMF_VAONLY | UVM_KMF_WAITVA);
-	bp->b_data = (caddr_t)(kva + off);
+	bp->b_data = (void *)(kva + off);
 	upmap = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
 	do {
-		if (pmap_extract(upmap, uva, &pa) == FALSE)
+		if (pmap_extract(upmap, uva, &pa) == false)
 			panic("vmapbuf: null page frame");
 		pmap_enter(vm_map_pmap(phys_map), kva, pa,
 		    VM_PROT_READ | VM_PROT_WRITE, PMAP_WIRED);

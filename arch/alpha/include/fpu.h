@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu.h,v 1.1 2002/04/28 20:55:14 pvalchev Exp $	*/
-/*	$NetBSD: fpu.h,v 1.4 2001/04/26 03:10:46 ross Exp $	*/
+/* $NetBSD: fpu.h,v 1.6 2008/05/10 15:31:04 martin Exp $ */
 
 /*-
  * Copyright (c) 2001 Ross Harvey
@@ -107,14 +106,14 @@
 #define	FLD_INSERT(obj, origin, len, value)	\
 		(FLD_CLEAR(obj, origin, len) | (value) << origin)
 
-#define	FP_C_TO_OPENBSD_MASK(fp_c) 	((fp_c) >> 1 & 0x3f)
-#define	FP_C_TO_OPENBSD_FLAG(fp_c) 	((fp_c) >> 17 & 0x3f)
-#define OPENBSD_MASK_TO_FP_C(m)		(((m) & 0x3f) << 1)
-#define OPENBSD_FLAG_TO_FP_C(s)		(((s) & 0x3f) << 17)
+#define	FP_C_TO_NETBSD_MASK(fp_c) 	((fp_c) >> 1 & 0x3f)
+#define	FP_C_TO_NETBSD_FLAG(fp_c) 	((fp_c) >> 17 & 0x3f)
+#define NETBSD_MASK_TO_FP_C(m)		(((m) & 0x3f) << 1)
+#define NETBSD_FLAG_TO_FP_C(s)		(((s) & 0x3f) << 17)
 #define	CLEAR_FP_C_MASK(fp_c)		((fp_c) & ~(0x3f << 1))
 #define	CLEAR_FP_C_FLAG(fp_c)		((fp_c) & ~(0x3f << 17))
-#define	SET_FP_C_MASK(fp_c, m) (CLEAR_FP_C_MASK(fp_c) | OPENBSD_MASK_TO_FP_C(m))
-#define	SET_FP_C_FLAG(fp_c, m) (CLEAR_FP_C_FLAG(fp_c) | OPENBSD_FLAG_TO_FP_C(m))
+#define	SET_FP_C_MASK(fp_c, m) (CLEAR_FP_C_MASK(fp_c) | NETBSD_MASK_TO_FP_C(m))
+#define	SET_FP_C_FLAG(fp_c, m) (CLEAR_FP_C_FLAG(fp_c) | NETBSD_FLAG_TO_FP_C(m))
 
 #endif
 

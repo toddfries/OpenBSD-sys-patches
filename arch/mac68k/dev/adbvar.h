@@ -1,5 +1,4 @@
-/*	$OpenBSD: adbvar.h,v 1.13 2006/01/22 15:25:30 miod Exp $	*/
-/*	$NetBSD: adbvar.h,v 1.22 2005/01/15 16:00:59 chs Exp $	*/
+/*	$NetBSD: adbvar.h,v 1.25 2008/04/03 05:03:23 scottr Exp $	*/
 
 /*
  * Copyright (C) 1994	Bradley A. Grantham
@@ -31,16 +30,74 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-extern int adbHardware;
+#include <machine/adbsys.h>
+
+/*
+ * Arguments used to attach a device to the Apple Desktop Bus
+ */
+struct adb_attach_args {
+	int	origaddr;
+	int	adbaddr;
+	int	handler_id;
+};
+
+typedef struct adb_trace_xlate_s {
+	int     params;
+	char   *string;
+}       adb_trace_xlate_t;
+
+extern adb_trace_xlate_t adb_trace_xlations[];
+
+extern int	adb_polling;
+
+extern void	*adb_softintr_cookie;
+
+#ifdef DEBUG
+#ifndef ADB_DEBUG
+#define ADB_DEBUG
+#endif
+#endif
+
+#ifdef ADB_DEBUG
+extern int	adb_debug;
+#endif
+
+/* adb.c */
+void	adb_enqevent(adb_event_t *);
+
+int	adb_op_sync(Ptr, Ptr, Ptr, short);
+void	adb_spin(volatile int *);
+void	adb_op_comprout(void);
+
+/* adbsysasm.s */
+void	adb_kbd_asmcomplete(void);
+void	adb_ms_asmcomplete(void);
+void	extdms_complete(void);
 
 /* types of adb hardware that we (will eventually) support */
-#define ADB_HW_UNKNOWN		0	/* don't know */
-#define ADB_HW_II		1	/* Mac II series */
-#define ADB_HW_IISI		2	/* Mac IIsi series */
-#define ADB_HW_PB		3	/* PowerBook series */
-#define ADB_HW_CUDA		4	/* Machines with a Cuda chip */
-#define	ADB_HW_IOP		5	/* Machines with an IOP */
+#define ADB_HW_UNKNOWN		0x0	/* don't know */
+#define ADB_HW_II		0x1	/* Mac II series */
+#define ADB_HW_IISI		0x2	/* Mac IIsi series */
+#define ADB_HW_PB		0x3	/* PowerBook series */
+#define ADB_HW_CUDA		0x4	/* Machines with a Cuda chip */
+#define ADB_HW_IOP		0x5	/* Machines with an IOP */
+#define	MAX_ADB_HW		5	/* Number of ADB hardware types */
 
+#define	ADB_CMDADDR(cmd)	((u_int8_t)(cmd & 0xf0) >> 4)
+#define	ADBFLUSH(dev)		((((u_int8_t)dev & 0x0f) << 4) | 0x01)
+#define	ADBLISTEN(dev, reg)	((((u_int8_t)dev & 0x0f) << 4) | 0x08 | reg)
+#define	ADBTALK(dev, reg)	((((u_int8_t)dev & 0x0f) << 4) | 0x0c | reg)
+
+#ifndef MRG_ADB
+/* adb_direct.c */
 int	adb_poweroff(void);
+int	CountADBs(void);
+void	ADBReInit(void);
+int	GetIndADB(ADBDataBlock *, int);
+int	GetADBInfo(ADBDataBlock *, int);
+int	SetADBInfo(ADBSetInfoBlock *, int);
+int	ADBOp(Ptr, Ptr, Ptr, short);
 int	adb_read_date_time(unsigned long *);
 int	adb_set_date_time(unsigned long);
+#endif /* !MRG_ADB */
+void	adb_soft_intr(void);

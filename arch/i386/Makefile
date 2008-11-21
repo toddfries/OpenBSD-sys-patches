@@ -1,35 +1,47 @@
-#	$OpenBSD: Makefile,v 1.17 2007/10/22 01:26:31 deraadt Exp $
-#	$NetBSD: Makefile,v 1.6 1996/02/01 22:31:28 mycroft Exp $
-#	@(#)Makefile	7.3 (Berkeley) 6/9/91
+#	$NetBSD: Makefile,v 1.36 2008/11/06 00:41:52 dyoung Exp $
 
 # Makefile for i386 tags file and boot blocks
 
-S=${.CURDIR}/../..
-.include "$S/kern/Make.tags.inc"
+TI386=	${SYSDIR}/arch/i386/tags
+SI386=	${SYSDIR}/arch/i386/acpi/*.[ch] \
+	${SYSDIR}/arch/i386/eisa/*.[ch] \
+	${SYSDIR}/arch/i386/i386/*.[ch] \
+	${SYSDIR}/arch/i386/include/*.h \
+	${SYSDIR}/arch/i386/isa/*.[ch] \
+	${SYSDIR}/arch/i386/mca/*.[ch] \
+	${SYSDIR}/arch/i386/pci/*.[ch] \
+	${SYSDIR}/arch/i386/pnpbios/*.[ch] \
+	${SYSDIR}/contrib/dev/ath/*.[ch] \
+	${SYSDIR}/contrib/dev/ath/netbsd/*.[ch] \
+	${SYSDIR}/contrib/dev/ath/public/*.[ch] \
+	${SYSDIR}/dist/acpica/*.[ch]
+SI386+=	${SYSDIR}/arch/x86/x86/*.[ch] \
+	${SYSDIR}/arch/x86/acpi/*.[ch] \
+	${SYSDIR}/arch/x86/include/*.h \
+	${SYSDIR}/arch/x86/isa/*.[ch] \
+	${SYSDIR}/arch/x86/pci/*.[ch]
+AI386=	${SYSDIR}/arch/i386/i386/*.[sS]
 
-SUBDIR=	stand
+# Directories in which to place tags links
+DI386=	i386 eisa isa include pci
 
-TI386=	$S/arch/i386/tags
-SI386=	$S/arch/i386/eisa/*.[ch] $S/arch/i386/i386/*.[ch] \
-	$S/arch/i386/include/*.h $S/arch/i386/include/pc/*.h \
-	$S/arch/i386/isa/*.[ch] $S/arch/i386/pci/*.[ch]
-AI386=	$S/arch/i386/i386/*.[sS] $S/arch/i386/isa/*.[sS] \
-	$S/lib/libkern/arch/i386/*.[sS]
-
-# Directories in which to place i386 tags links
-DI386=	conf eisa i386 include isa pci
+.include "../../kern/Make.tags.inc"
 
 tags:
-	-ctags -wdtf ${TI386} ${COMM} ${SI386}
+	-rm -f ${TI386}
+	-echo ${SI386} | xargs ctags -wadtf ${TI386}
+	-${FINDCOMM} | xargs ctags -wadtf ${TI386}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AI386} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
+	    ${TOOL_SED} -e \
+	"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
 		>> ${TI386}
 	sort -o ${TI386} ${TI386}
 
 links:
 	-for i in ${DI386}; do \
-	    (cd $$i && rm -f tags; ln -s ${TI386} tags); done
+	    (cd $$i && rm -f tags; ln -s ../tags tags); done
 
-obj:	_SUBDIRUSE
+
+SUBDIR=	compile include stand ../x86/include ../xen/include
 
 .include <bsd.subdir.mk>

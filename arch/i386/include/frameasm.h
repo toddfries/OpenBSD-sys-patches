@@ -1,10 +1,30 @@
-/*	$NetBSD: frameasm.h,v 1.6 2006/12/08 15:05:18 yamt Exp $	*/
+/*	$NetBSD: frameasm.h,v 1.14 2008/07/07 13:01:16 gmcgarry Exp $	*/
 
 #ifndef _I386_FRAMEASM_H_
 #define _I386_FRAMEASM_H_
 
 #ifdef _KERNEL_OPT
 #include "opt_multiprocessor.h"
+#include "opt_xen.h"
+#endif
+
+#if !defined(XEN)
+#define CLI(reg)        cli
+#define STI(reg)        sti
+#else
+/* XXX assym.h */
+#define TRAP_INSTR      int $0x82
+#define XEN_BLOCK_EVENTS(reg)   movb $1,EVTCHN_UPCALL_MASK(reg)
+#define XEN_UNBLOCK_EVENTS(reg) movb $0,EVTCHN_UPCALL_MASK(reg)
+#define XEN_TEST_PENDING(reg)   testb $0xFF,EVTCHN_UPCALL_PENDING(reg)
+
+#define CLI(reg)        movl    CPUVAR(VCPU),reg ;  \
+                        XEN_BLOCK_EVENTS(reg)
+#define STI(reg)        movl    CPUVAR(VCPU),reg ;  \
+			XEN_UNBLOCK_EVENTS(reg)
+#define STIC(reg)       movl    CPUVAR(VCPU),reg ;  \
+			XEN_UNBLOCK_EVENTS(reg)  ; \
+			testb $0xff,EVTCHN_UPCALL_PENDING(reg)
 #endif
 
 #ifndef TRAPLOG
@@ -46,33 +66,34 @@
  */
 #define	INTRENTRY \
 	subl	$TF_PUSHSIZE,%esp	; \
-	movl	%gs,TF_GS(%esp)	; \
-	movl	%fs,TF_FS(%esp) ; \
+	movw	%gs,TF_GS(%esp)	; \
+	movw	%fs,TF_FS(%esp) ; \
 	movl	%eax,TF_EAX(%esp)	; \
-	movl	%es,TF_ES(%esp) ; \
-	movl	%ds,TF_DS(%esp) ; \
+	movw	%es,TF_ES(%esp) ; \
+	movw	%ds,TF_DS(%esp) ; \
 	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax	; \
 	movl	%edi,TF_EDI(%esp)	; \
 	movl	%esi,TF_ESI(%esp)	; \
-	movl	%eax,%ds	; \
+	movw	%ax,%ds	; \
 	movl	%ebp,TF_EBP(%esp)	; \
-	movl	%eax,%es	; \
+	movw	%ax,%es	; \
 	movl	%ebx,TF_EBX(%esp)	; \
-	movl	%eax,%gs	; \
+	movw	%ax,%gs	; \
 	movl	%edx,TF_EDX(%esp)	; \
 	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax	; \
 	movl	%ecx,TF_ECX(%esp)	; \
 	movl	%eax,%fs	; \
+	cld			; \
 	TLOG
 
 /*
  * INTRFASTEXIT should be in sync with trap(), resume_iret and friends.
  */
 #define	INTRFASTEXIT \
-	movl	TF_GS(%esp),%gs	; \
-	movl	TF_FS(%esp),%fs	; \
-	movl	TF_ES(%esp),%es	; \
-	movl	TF_DS(%esp),%ds	; \
+	movw	TF_GS(%esp),%gs	; \
+	movw	TF_FS(%esp),%fs	; \
+	movw	TF_ES(%esp),%es	; \
+	movw	TF_DS(%esp),%ds	; \
 	movl	TF_EDI(%esp),%edi	; \
 	movl	TF_ESI(%esp),%esi	; \
 	movl	TF_EBP(%esp),%ebp	; \
@@ -83,22 +104,26 @@
 	addl	$(TF_PUSHSIZE+8),%esp	; \
 	iret
 
-#define	DO_DEFERRED_SWITCH(reg) \
+#define	DO_DEFERRED_SWITCH \
 	cmpl	$0, CPUVAR(WANT_PMAPLOAD)		; \
 	jz	1f					; \
 	call	_C_LABEL(pmap_load)			; \
 	1:
 
-#define	CHECK_DEFERRED_SWITCH(reg) \
+#define	DO_DEFERRED_SWITCH_RETRY \
+	1:						; \
+	cmpl	$0, CPUVAR(WANT_PMAPLOAD)		; \
+	jz	1f					; \
+	call	_C_LABEL(pmap_load)			; \
+	jmp	1b					; \
+	1:
+
+#define	CHECK_DEFERRED_SWITCH \
 	cmpl	$0, CPUVAR(WANT_PMAPLOAD)
 
 #define	CHECK_ASTPENDING(reg)	movl	CPUVAR(CURLWP),reg	; \
-				cmpl	$0, reg			; \
-				je	1f			; \
-				movl	L_PROC(reg),reg		; \
-				cmpl	$0, P_MD_ASTPENDING(reg); \
-				1:
-#define	CLEAR_ASTPENDING(reg)	movl	$0, P_MD_ASTPENDING(reg)
+				cmpl	$0, L_MD_ASTPENDING(reg)
+#define	CLEAR_ASTPENDING(reg)	movl	$0, L_MD_ASTPENDING(reg)
 
 /*
  * IDEPTH_INCR:

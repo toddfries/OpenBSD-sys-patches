@@ -1,8 +1,7 @@
-/* $OpenBSD: esavar.h,v 1.1 2002/04/08 01:47:33 frantzen Exp $ */
-/* $NetBSD: esavar.h,v 1.4 2002/03/16 14:34:01 jmcneill Exp $ */
+/* $NetBSD: esavar.h,v 1.10 2008/03/27 14:13:34 jmcneill Exp $ */
 
 /*
- * Copyright (c) 2001, 2002 Jared D. McNeill <jmcneill@invisible.yi.org>
+ * Copyright (c) 2001, 2002 Jared D. McNeill <jmcneill@invisible.ca>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,7 +27,7 @@
 
 /*
  * ESS Allegro-1 / Maestro3 Audio Driver
- * 
+ *
  * Based on the FreeBSD maestro3 driver
  *
  */
@@ -62,7 +61,7 @@ struct esa_list {
 
 struct esa_dma {
 	bus_dmamap_t		map;
-	caddr_t			addr;
+	void *			addr;
 	bus_dma_segment_t	segs[1];
 	int			nsegs;
 	size_t			size;
@@ -77,18 +76,18 @@ struct esa_channel {
 	int			blksize;
 	int			pos;
 	void			*buf;
-	u_int32_t		start;
-	u_int32_t		count;
+	uint32_t		start;
+	uint32_t		count;
 
 	/* mode settings */
 	struct audio_params	mode;
-	
+
 	void			(*intr)(void *);
 	void			*arg;
 };
 
 struct esa_voice {
-	struct device		*parent;	/* pointer to our parent */
+	device_t		parent;	/* pointer to our parent */
 	struct esa_channel	play;
 	struct esa_channel	rec;
 	struct esa_dma		*dma;
@@ -98,7 +97,7 @@ struct esa_voice {
 
 struct esa_softc
 {
-	struct device		sc_dev;
+	device_t		sc_dev;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 	bus_addr_t		sc_iob;
@@ -133,6 +132,5 @@ struct esa_softc
 	int			type;		/* Allegro-1 or Maestro 3? */
 	int			delay1, delay2;
 
-	void			*powerhook;
-	u_int16_t		*savemem;
+	uint16_t		*savemem;
 };

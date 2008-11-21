@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.8 2005/12/11 12:16:03 christos Exp $	*/
+/*	$NetBSD: mem.c,v 1.11 2008/11/15 11:06:49 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -72,10 +72,8 @@
  * Memory special file
  */
 
-#include "opt_compat_netbsd.h"
-
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.8 2005/12/11 12:16:03 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.11 2008/11/15 11:06:49 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -91,7 +89,7 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.8 2005/12/11 12:16:03 christos Exp $");
 
 #include <uvm/uvm_extern.h>
 
-caddr_t zeropage;
+void *zeropage;
 int physlock;
 
 dev_type_read(mmrw);
@@ -137,9 +135,10 @@ mmrw(dev, uio, flags)
 			c = min(iov->iov_len, MAXPHYS);
 			/* XXX Should use pmap_find(). */
 			if (v < 0 ||
-			    (caddr_t)v + c > MEMC_PHYS_BASE + ptoa(physmem))
+			    (char *)v + c > 
+			    		(char*)MEMC_PHYS_BASE + ptoa(physmem))
 				return EFAULT;
-			error = uiomove(MEMC_PHYS_BASE + uio->uio_offset,
+			error = uiomove((char*)MEMC_PHYS_BASE + uio->uio_offset,
 					uio->uio_resid, uio);
 			continue;
 
@@ -147,13 +146,13 @@ mmrw(dev, uio, flags)
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
 			/* Allow reading from physically mapped space. */
-			if (((caddr_t)v >= MEMC_PHYS_BASE &&
-			     (caddr_t)v + c <
-			                     MEMC_PHYS_BASE + ptoa(physmem)) ||
-			    uvm_kernacc((caddr_t)v, c,
+			if (((void *)v >= MEMC_PHYS_BASE &&
+			     (char *)v + c <
+			     	(char*)MEMC_PHYS_BASE + ptoa(physmem)) ||
+			    uvm_kernacc((void *)v, c,
 					uio->uio_rw == UIO_READ ?
 					B_READ : B_WRITE))
-				error = uiomove((caddr_t)v, c, uio);
+				error = uiomove((void *)v, c, uio);
 			else
 				return (EFAULT);
 			break;
@@ -163,16 +162,14 @@ mmrw(dev, uio, flags)
 				uio->uio_resid = 0;
 			return (0);
 
-#ifdef COMPAT_16
 		case _DEV_ZERO_oARM:
-#endif
 		case DEV_ZERO:
 			if (uio->uio_rw == UIO_WRITE) {
 				uio->uio_resid = 0;
 				return (0);
 			}
 			if (zeropage == NULL) {
-				zeropage = (caddr_t)
+				zeropage = (void *)
 				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
 				bzero(zeropage, PAGE_SIZE);
 			}
@@ -187,7 +184,7 @@ mmrw(dev, uio, flags)
 	if (minor(dev) == DEV_MEM) {
 /*unlock:*/
 		if (physlock > 1)
-			wakeup((caddr_t)&physlock);
+			wakeup((void *)&physlock);
 		physlock = 0;
 	}
 	return (error);

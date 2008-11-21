@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac_tables.h,v 1.4 2006/07/21 19:11:11 mickey Exp $	*/
+/*	$NetBSD: aac_tables.h,v 1.5 2007/06/05 04:04:14 briggs Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -27,14 +27,18 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: /c/ncvs/src/sys/dev/aac/aac_tables.h,v 1.1 2000/09/13 03:20:34 msmith Exp $
+ * from FreeBSD: aac_tables.h,v 1.1 2000/09/13 03:20:34 msmith Exp
+ * via OpenBSD: aac_tables.h,v 1.1 2000/11/10 09:39:35 niklas Exp
  */
+
+#ifndef _DEV_IC_AAC_TABLES_H_
+#define	_DEV_IC_AAC_TABLES_H_
 
 /*
  * Status codes for block read/write commands, etc.
  *
- * XXX many of these would not normally be returned, as they are
- * relevant only to FSA operations.
+ * XXX Many of these would not normally be returned, as they are relevant
+ * only to FSA operations.
  */
 const struct aac_code_lookup aac_command_status_table[] = {
 	{ "OK",					0 },
@@ -77,21 +81,24 @@ const struct aac_code_lookup aac_command_status_table[] = {
 
 #define AAC_COMMAND_STATUS(x)	aac_describe_code(aac_command_status_table, x)
 
-static struct aac_code_lookup aac_cpu_variant[] = {
+static const struct aac_code_lookup aac_cpu_variant[] = {
 	{ "i960JX",			CPUI960_JX },
 	{ "i960CX",			CPUI960_CX },
 	{ "i960HX",			CPUI960_HX },
 	{ "i960RX",			CPUI960_RX },
+	{ "i80303",			CPUI80303 },
 	{ "StrongARM SA110",		CPUARM_SA110 },
-	{ "MPC824x",			CPUMPC_824x },
+	{ "PowerPC 603e",		CPUPPC_603e },
+	{ "XScale 80321",		CPU_XSCALE_80321 },
+	{ "MIPS 4KC",			CPU_MIPS_4KC },
+	{ "MIPS 5KC",			CPU_MIPS_5KC },
 	{ "Unknown StrongARM",		CPUARM_xxx },
 	{ "Unknown PowerPC",		CPUPPC_xxx },
-	{ "Intel GC80302 IOP",		CPUI960_302},
 	{ NULL, 			0 },
 	{ "Unknown processor",		0 }
 };
 
-static struct aac_code_lookup aac_battery_platform[] = {
+static const struct aac_code_lookup aac_battery_platform[] = {
 	{ "required battery present",		PLATFORM_BAT_REQ_PRESENT },
 	{ "REQUIRED BATTERY NOT PRESENT",	PLATFORM_BAT_REQ_NOTPRESENT },
 	{ "optional battery present",		PLATFORM_BAT_OPT_PRESENT },
@@ -101,8 +108,7 @@ static struct aac_code_lookup aac_battery_platform[] = {
 	{ "unknown battery platform",		0 }
 };
 
-#if 0
-static struct aac_code_lookup aac_container_types[] = {
+const struct aac_code_lookup aac_container_types[] = {
 	{ "Volume",		CT_VOLUME },
 	{ "RAID 1 (Mirror)",	CT_MIRROR },
 	{ "RAID 0 (Stripe)",	CT_STRIPE },
@@ -116,7 +122,14 @@ static struct aac_code_lookup aac_container_types[] = {
 	{ "RAID 00",		CT_RAID00 },
 	{ "Volume of Mirrors",	CT_VOLUME_OF_MIRRORS },
 	{ "Pseudo RAID 3",	CT_PSEUDO_RAID3 },
+	{ "RAID 0/5",		CT_RAID50 },
+	{ "RAID 5D",		CT_RAID5D },
+	{ "RAID 0/5D",		CT_RAID5D0 },
+	{ "RAID 1E",		CT_RAID1E },
+	{ "RAID 6",		CT_RAID6 },
+	{ "RAID 60",		CT_RAID60 },
 	{ NULL,			0 },
 	{ "unknown",		0 }
 };
-#endif
+
+#endif /* _DEV_IC_AAC_TABLES_H_ */

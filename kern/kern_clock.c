@@ -1,5 +1,36 @@
-/*	$OpenBSD: kern_clock.c,v 1.66 2008/03/15 21:21:09 miod Exp $	*/
-/*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
+/*	$NetBSD: kern_clock.c,v 1.126 2008/10/05 21:57:20 pooka Exp $	*/
+
+/*-
+ * Copyright (c) 2000, 2004, 2006, 2007, 2008 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
+ * NASA Ames Research Center.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -37,24 +68,28 @@
  *	@(#)kern_clock.c	8.5 (Berkeley) 1/21/94
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kern_clock.c,v 1.126 2008/10/05 21:57:20 pooka Exp $");
+
+#include "opt_ntp.h"
+#include "opt_perfctrs.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/dkstat.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 #include <sys/kernel.h>
-#include <sys/limits.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
-#include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
+#include <sys/timex.h>
 #include <sys/sched.h>
-#ifdef __HAVE_TIMECOUNTER
+#include <sys/time.h>
 #include <sys/timetc.h>
-#endif
+#include <sys/cpu.h>
+#include <sys/atomic.h>
 
-#include <machine/cpu.h>
+#include <uvm/uvm_extern.h>
 
 #ifdef GPROF
 #include <sys/gmon.h>
@@ -68,9 +103,9 @@
  * track of real time.  The second timer handles kernel and user profiling,
  * and does resource use estimation.  If the second timer is programmable,
  * it is randomized to avoid aliasing between the two clocks.  For example,
- * the randomization prevents an adversary from always giving up the cpu
+ * the randomization prevents an adversary from always giving up the CPU
  * just before its quantum expires.  Otherwise, it would never accumulate
- * cpu ticks.  The mean frequency of the second timer is stathz.
+ * CPU ticks.  The mean frequency of the second timer is stathz.
  *
  * If no second timer exists, stathz will be zero; in this case we drive
  * profiling and statistics off the main clock.  This WILL NOT be accurate;
@@ -84,56 +119,35 @@
  * profhz/stathz for statistics.  (For profiling, every tick counts.)
  */
 
-/*
- * Bump a timeval by a small number of usec's.
- */
-#define BUMPTIME(t, usec) { \
-	volatile struct timeval *tp = (t); \
-	long us; \
- \
-	tp->tv_usec = us = tp->tv_usec + (usec); \
-	if (us >= 1000000) { \
-		tp->tv_usec = us - 1000000; \
-		tp->tv_sec++; \
-	} \
-}
-
 int	stathz;
-int	schedhz;
 int	profhz;
+int	profsrc;
+int	schedhz;
 int	profprocs;
-int	ticks;
-static int psdiv, pscnt;		/* prof => stat divider */
+int	hardclock_ticks;
+static int hardscheddiv; /* hard => sched divider (used if schedhz == 0) */
+static int psdiv;			/* prof => stat divider */
 int	psratio;			/* ratio: prof / stat */
 
-long cp_time[CPUSTATES];
+static u_int get_intr_timecount(struct timecounter *);
 
-#ifndef __HAVE_TIMECOUNTER
-int	tickfix, tickfixinterval;	/* used if tick not really integral */
-static int tickfixcnt;			/* accumulated fractional error */
+static struct timecounter intr_timecounter = {
+	get_intr_timecount,	/* get_timecount */
+	0,			/* no poll_pps */
+	~0u,			/* counter_mask */
+	0,		        /* frequency */
+	"clockinterrupt",	/* name */
+	0,			/* quality - minimum implementation level for a clock */
+	NULL,			/* prev */
+	NULL,			/* next */
+};
 
-volatile time_t time_second;
-volatile time_t time_uptime;
-
-volatile struct	timeval time
-	__attribute__((__aligned__(__alignof__(quad_t))));
-volatile struct	timeval mono_time;
-#endif
-
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-void	*softclock_si;
-void	generic_softclock(void *);
-
-void
-generic_softclock(void *ignore)
+static u_int
+get_intr_timecount(struct timecounter *tc)
 {
-	/*
-	 * XXX - don't commit, just a dummy wrapper until we learn everyone
-	 *       deal with a changed proto for softclock().
-	 */
-	softclock();
+
+	return (u_int)hardclock_ticks;
 }
-#endif
 
 /*
  * Initialize clock frequencies and start both clocks running.
@@ -142,74 +156,34 @@ void
 initclocks(void)
 {
 	int i;
-#ifdef __HAVE_TIMECOUNTER
-	extern void inittimecounter(void);
-#endif
-
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-	softclock_si = softintr_establish(IPL_SOFTCLOCK, generic_softclock, NULL);
-	if (softclock_si == NULL)
-		panic("initclocks: unable to register softclock intr");
-#endif
 
 	/*
 	 * Set divisors to 1 (normal case) and let the machine-specific
 	 * code do its bit.
 	 */
-	psdiv = pscnt = 1;
+	psdiv = 1;
+	/*
+	 * provide minimum default time counter
+	 * will only run at interrupt resolution
+	 */
+	intr_timecounter.tc_frequency = hz;
+	tc_init(&intr_timecounter);
 	cpu_initclocks();
 
 	/*
-	 * Compute profhz/stathz, and fix profhz if needed.
+	 * Compute profhz and stathz, fix profhz if needed.
 	 */
 	i = stathz ? stathz : hz;
 	if (profhz == 0)
 		profhz = i;
 	psratio = profhz / i;
-#ifdef __HAVE_TIMECOUNTER
-	inittimecounter();
-#endif
-}
+	if (schedhz == 0) {
+		/* 16Hz is best */
+		hardscheddiv = hz / 16;
+		if (hardscheddiv <= 0)
+			panic("hardscheddiv");
+	}
 
-/*
- * hardclock does the accounting needed for ITIMER_PROF and ITIMER_VIRTUAL.
- * We don't want to send signals with psignal from hardclock because it makes
- * MULTIPROCESSOR locking very complicated. Instead we use a small trick
- * to send the signals safely and without blocking too many interrupts
- * while doing that (signal handling can be heavy).
- *
- * hardclock detects that the itimer has expired, and schedules a timeout
- * to deliver the signal. This works because of the following reasons:
- *  - The timeout structures can be in struct pstats because the timers
- *    can be only activated on curproc (never swapped). Swapout can
- *    only happen from a kernel thread and softclock runs before threads
- *    are scheduled.
- *  - The timeout can be scheduled with a 1 tick time because we're
- *    doing it before the timeout processing in hardclock. So it will
- *    be scheduled to run as soon as possible.
- *  - The timeout will be run in softclock which will run before we
- *    return to userland and process pending signals.
- *  - If the system is so busy that several VIRTUAL/PROF ticks are
- *    sent before softclock processing, we'll send only one signal.
- *    But if we'd send the signal from hardclock only one signal would
- *    be delivered to the user process. So userland will only see one
- *    signal anyway.
- */
-
-void
-virttimer_trampoline(void *v)
-{
-	struct proc *p = v;
-
-	psignal(p, SIGVTALRM);
-}
-
-void
-proftimer_trampoline(void *v)
-{
-	struct proc *p = v;
-
-	psignal(p, SIGPROF);
 }
 
 /*
@@ -218,212 +192,41 @@ proftimer_trampoline(void *v)
 void
 hardclock(struct clockframe *frame)
 {
-	struct proc *p;
-#ifndef __HAVE_TIMECOUNTER
-	int delta;
-	extern int tickdelta;
-	extern long timedelta;
-	extern int64_t ntp_tick_permanent;
-	extern int64_t ntp_tick_acc;
-#endif
-	struct cpu_info *ci = curcpu();
+	struct lwp *l;
+	struct cpu_info *ci;
 
-	p = curproc;
-	if (p && ((p->p_flag & (P_SYSTEM | P_WEXIT)) == 0)) {
-		struct pstats *pstats;
+	ci = curcpu();
+	l = ci->ci_data.cpu_onproc;
 
-		/*
-		 * Run current process's virtual and profile time, as needed.
-		 */
-		pstats = p->p_stats;
-		if (CLKF_USERMODE(frame) &&
-		    timerisset(&pstats->p_timer[ITIMER_VIRTUAL].it_value) &&
-		    itimerdecr(&pstats->p_timer[ITIMER_VIRTUAL], tick) == 0)
-			timeout_add(&pstats->p_virt_to, 1);
-		if (timerisset(&pstats->p_timer[ITIMER_PROF].it_value) &&
-		    itimerdecr(&pstats->p_timer[ITIMER_PROF], tick) == 0)
-			timeout_add(&pstats->p_prof_to, 1);
-	}
+	timer_tick(l, CLKF_USERMODE(frame));
 
 	/*
 	 * If no separate statistics clock is available, run it from here.
 	 */
 	if (stathz == 0)
 		statclock(frame);
-
-	if (--ci->ci_schedstate.spc_rrticks <= 0)
-		roundrobin(ci);
-
 	/*
-	 * If we are not the primary CPU, we're not allowed to do
-	 * any more work.
+	 * If no separate schedclock is provided, call it here
+	 * at about 16 Hz.
 	 */
-	if (CPU_IS_PRIMARY(ci) == 0)
-		return;
-
-#ifndef __HAVE_TIMECOUNTER
-	/*
-	 * Increment the time-of-day.  The increment is normally just
-	 * ``tick''.  If the machine is one which has a clock frequency
-	 * such that ``hz'' would not divide the second evenly into
-	 * milliseconds, a periodic adjustment must be applied.  Finally,
-	 * if we are still adjusting the time (see adjtime()),
-	 * ``tickdelta'' may also be added in.
-	 */
-
-	delta = tick;
-
-	if (tickfix) {
-		tickfixcnt += tickfix;
-		if (tickfixcnt >= tickfixinterval) {
-			delta++;
-			tickfixcnt -= tickfixinterval;
+	if (schedhz == 0) {
+		if ((int)(--ci->ci_schedstate.spc_schedticks) <= 0) {
+			schedclock(l);
+			ci->ci_schedstate.spc_schedticks = hardscheddiv;
 		}
 	}
-	/* Imprecise 4bsd adjtime() handling */
-	if (timedelta != 0) {
-		delta += tickdelta;
-		timedelta -= tickdelta;
-	}
+	if ((--ci->ci_schedstate.spc_ticks) <= 0)
+		sched_tick(ci);
 
-	/*
-	 * ntp_tick_permanent accumulates the clock correction each
-	 * tick. The unit is ns per tick shifted left 32 bits. If we have
-	 * accumulated more than 1us, we bump delta in the right
-	 * direction. Use a loop to avoid long long div; typicallly
-	 * the loops will be executed 0 or 1 iteration.
-	 */
-	if (ntp_tick_permanent != 0) {
-		ntp_tick_acc += ntp_tick_permanent;
-		while (ntp_tick_acc >= (1000LL << 32)) {
-			delta++;
-			ntp_tick_acc -= (1000LL << 32);
-		}
-		while (ntp_tick_acc <= -(1000LL << 32)) {
-			delta--;
-			ntp_tick_acc += (1000LL << 32);
-		}
+	if (CPU_IS_PRIMARY(ci)) {
+		hardclock_ticks++;
+		tc_ticktock();
 	}
-
-	BUMPTIME(&time, delta);
-	BUMPTIME(&mono_time, delta);
-	time_second = time.tv_sec;
-	time_uptime = mono_time.tv_sec;
-#else
-	tc_ticktock();
-#endif
 
 	/*
 	 * Update real-time timeout queue.
-	 * Process callouts at a very low cpu priority, so we don't keep the
-	 * relatively high clock interrupt priority any longer than necessary.
 	 */
-	if (timeout_hardclock_update()) {
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-		softintr_schedule(softclock_si);
-#else
-		setsoftclock();
-#endif
-	}
-}
-
-/*
- * Compute number of hz until specified time.  Used to
- * compute the second argument to timeout_add() from an absolute time.
- */
-int
-hzto(struct timeval *tv)
-{
-	struct timeval now;
-	unsigned long ticks;
-	long sec, usec;
-
-	/*
-	 * If the number of usecs in the whole seconds part of the time
-	 * difference fits in a long, then the total number of usecs will
-	 * fit in an unsigned long.  Compute the total and convert it to
-	 * ticks, rounding up and adding 1 to allow for the current tick
-	 * to expire.  Rounding also depends on unsigned long arithmetic
-	 * to avoid overflow.
-	 *
-	 * Otherwise, if the number of ticks in the whole seconds part of
-	 * the time difference fits in a long, then convert the parts to
-	 * ticks separately and add, using similar rounding methods and
-	 * overflow avoidance.  This method would work in the previous
-	 * case but it is slightly slower and assumes that hz is integral.
-	 *
-	 * Otherwise, round the time difference down to the maximum
-	 * representable value.
-	 *
-	 * If ints have 32 bits, then the maximum value for any timeout in
-	 * 10ms ticks is 248 days.
-	 */
-	getmicrotime(&now);
-	sec = tv->tv_sec - now.tv_sec;
-	usec = tv->tv_usec - now.tv_usec;
-	if (usec < 0) {
-		sec--;
-		usec += 1000000;
-	}
-	if (sec < 0 || (sec == 0 && usec <= 0)) {
-		ticks = 0;
-	} else if (sec <= LONG_MAX / 1000000)
-		ticks = (sec * 1000000 + (unsigned long)usec + (tick - 1))
-		    / tick + 1;
-	else if (sec <= LONG_MAX / hz)
-		ticks = sec * hz
-		    + ((unsigned long)usec + (tick - 1)) / tick + 1;
-	else
-		ticks = LONG_MAX;
-	if (ticks > INT_MAX)
-		ticks = INT_MAX;
-	return ((int)ticks);
-}
-
-/*
- * Compute number of hz in the specified amount of time.
- */
-int
-tvtohz(struct timeval *tv)
-{
-	unsigned long ticks;
-	long sec, usec;
-
-	/*
-	 * If the number of usecs in the whole seconds part of the time
-	 * fits in a long, then the total number of usecs will
-	 * fit in an unsigned long.  Compute the total and convert it to
-	 * ticks, rounding up and adding 1 to allow for the current tick
-	 * to expire.  Rounding also depends on unsigned long arithmetic
-	 * to avoid overflow.
-	 *
-	 * Otherwise, if the number of ticks in the whole seconds part of
-	 * the time fits in a long, then convert the parts to
-	 * ticks separately and add, using similar rounding methods and
-	 * overflow avoidance.  This method would work in the previous
-	 * case but it is slightly slower and assumes that hz is integral.
-	 *
-	 * Otherwise, round the time down to the maximum
-	 * representable value.
-	 *
-	 * If ints have 32 bits, then the maximum value for any timeout in
-	 * 10ms ticks is 248 days.
-	 */
-	sec = tv->tv_sec;
-	usec = tv->tv_usec;
-	if (sec < 0 || (sec == 0 && usec <= 0))
-		ticks = 0;
-	else if (sec <= LONG_MAX / 1000000)
-		ticks = (sec * 1000000 + (unsigned long)usec + (tick - 1))
-		    / tick + 1;
-	else if (sec <= LONG_MAX / hz)
-		ticks = sec * hz
-		    + ((unsigned long)usec + (tick - 1)) / tick + 1;
-	else
-		ticks = LONG_MAX;
-	if (ticks > INT_MAX)
-		ticks = INT_MAX;
-	return ((int)ticks);
+	callout_hardclock();
 }
 
 /*
@@ -435,16 +238,17 @@ tvtohz(struct timeval *tv)
 void
 startprofclock(struct proc *p)
 {
-	int s;
 
-	if ((p->p_flag & P_PROFIL) == 0) {
-		atomic_setbits_int(&p->p_flag, P_PROFIL);
-		if (++profprocs == 1 && stathz != 0) {
-			s = splstatclock();
-			psdiv = pscnt = psratio;
-			setstatclockrate(profhz);
-			splx(s);
-		}
+	KASSERT(mutex_owned(&p->p_stmutex));
+
+	if ((p->p_stflag & PST_PROFIL) == 0) {
+		p->p_stflag |= PST_PROFIL;
+		/*
+		 * This is only necessary if using the clock as the
+		 * profiling source.
+		 */
+		if (++profprocs == 1 && stathz != 0)
+			psdiv = psratio;
 	}
 }
 
@@ -454,17 +258,81 @@ startprofclock(struct proc *p)
 void
 stopprofclock(struct proc *p)
 {
-	int s;
 
-	if (p->p_flag & P_PROFIL) {
-		atomic_clearbits_int(&p->p_flag, P_PROFIL);
-		if (--profprocs == 0 && stathz != 0) {
-			s = splstatclock();
-			psdiv = pscnt = 1;
-			setstatclockrate(stathz);
-			splx(s);
-		}
+	KASSERT(mutex_owned(&p->p_stmutex));
+
+	if (p->p_stflag & PST_PROFIL) {
+		p->p_stflag &= ~PST_PROFIL;
+		/*
+		 * This is only necessary if using the clock as the
+		 * profiling source.
+		 */
+		if (--profprocs == 0 && stathz != 0)
+			psdiv = 1;
 	}
+}
+
+#if defined(PERFCTRS)
+/*
+ * Independent profiling "tick" in case we're using a separate
+ * clock or profiling event source.  Currently, that's just
+ * performance counters--hence the wrapper.
+ */
+void
+proftick(struct clockframe *frame)
+{
+#ifdef GPROF
+        struct gmonparam *g;
+        intptr_t i;
+#endif
+	struct lwp *l;
+	struct proc *p;
+
+	l = curcpu()->ci_data.cpu_onproc;
+	p = (l ? l->l_proc : NULL);
+	if (CLKF_USERMODE(frame)) {
+		mutex_spin_enter(&p->p_stmutex);
+		if (p->p_stflag & PST_PROFIL)
+			addupc_intr(l, CLKF_PC(frame));
+		mutex_spin_exit(&p->p_stmutex);
+	} else {
+#ifdef GPROF
+		g = &_gmonparam;
+		if (g->state == GMON_PROF_ON) {
+			i = CLKF_PC(frame) - g->lowpc;
+			if (i < g->textsize) {
+				i /= HISTFRACTION * sizeof(*g->kcount);
+				g->kcount[i]++;
+			}
+		}
+#endif
+#ifdef LWP_PC
+		if (p != NULL && (p->p_stflag & PST_PROFIL) != 0)
+			addupc_intr(l, LWP_PC(l));
+#endif
+	}
+}
+#endif
+
+void
+schedclock(struct lwp *l)
+{
+	struct cpu_info *ci;
+
+	ci = l->l_cpu;
+
+	/* Accumulate syscall and context switch counts. */
+	atomic_add_int((unsigned *)&uvmexp.swtch, ci->ci_data.cpu_nswtch);
+	ci->ci_data.cpu_nswtch = 0;
+	atomic_add_int((unsigned *)&uvmexp.syscalls, ci->ci_data.cpu_nsyscall);
+	ci->ci_data.cpu_nsyscall = 0;
+	atomic_add_int((unsigned *)&uvmexp.traps, ci->ci_data.cpu_ntrap);
+	ci->ci_data.cpu_ntrap = 0;
+
+	if ((l->l_flag & LW_IDLE) != 0)
+		return;
+
+	sched_schedclock(l);
 }
 
 /*
@@ -476,11 +344,12 @@ statclock(struct clockframe *frame)
 {
 #ifdef GPROF
 	struct gmonparam *g;
-	u_long i;
+	intptr_t i;
 #endif
 	struct cpu_info *ci = curcpu();
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
-	struct proc *p = curproc;
+	struct proc *p;
+	struct lwp *l;
 
 	/*
 	 * Notice changes in divisor frequency, and adjust clock
@@ -492,15 +361,28 @@ statclock(struct clockframe *frame)
 		if (psdiv == 1) {
 			setstatclockrate(stathz);
 		} else {
-			setstatclockrate(profhz);			
+			setstatclockrate(profhz);
 		}
+	}
+	l = ci->ci_data.cpu_onproc;
+	if ((l->l_flag & LW_IDLE) != 0) {
+		/*
+		 * don't account idle lwps as swapper.
+		 */
+		p = NULL;
+	} else {
+		p = l->l_proc;
+		mutex_spin_enter(&p->p_stmutex);
 	}
 
 	if (CLKF_USERMODE(frame)) {
-		if (p->p_flag & P_PROFIL)
-			addupc_intr(p, CLKF_PC(frame));
-		if (--spc->spc_pscnt > 0)
+		if ((p->p_stflag & PST_PROFIL) && profsrc == PROFSRC_CLOCK)
+			addupc_intr(l, CLKF_PC(frame));
+		if (--spc->spc_pscnt > 0) {
+			mutex_spin_exit(&p->p_stmutex);
 			return;
+		}
+
 		/*
 		 * Came from user mode; CPU was in user state.
 		 * If this process is being profiled record the tick.
@@ -516,7 +398,7 @@ statclock(struct clockframe *frame)
 		 * Kernel statistics are just like addupc_intr, only easier.
 		 */
 		g = &_gmonparam;
-		if (g->state == GMON_PROF_ON) {
+		if (profsrc == PROFSRC_CLOCK && g->state == GMON_PROF_ON) {
 			i = CLKF_PC(frame) - g->lowpc;
 			if (i < g->textsize) {
 				i /= HISTFRACTION * sizeof(*g->kcount);
@@ -524,12 +406,17 @@ statclock(struct clockframe *frame)
 			}
 		}
 #endif
-#if defined(PROC_PC)
-		if (p != NULL && p->p_flag & P_PROFIL)
-			addupc_intr(p, PROC_PC(p));
+#ifdef LWP_PC
+		if (p != NULL && profsrc == PROFSRC_CLOCK &&
+		    (p->p_stflag & PST_PROFIL)) {
+			addupc_intr(l, LWP_PC(l));
+		}
 #endif
-		if (--spc->spc_pscnt > 0)
+		if (--spc->spc_pscnt > 0) {
+			if (p != NULL)
+				mutex_spin_exit(&p->p_stmutex);
 			return;
+		}
 		/*
 		 * Came from kernel mode, so we were:
 		 * - handling an interrupt,
@@ -542,120 +429,22 @@ statclock(struct clockframe *frame)
 		 * so that we know how much of its real time was spent
 		 * in ``non-process'' (i.e., interrupt) work.
 		 */
-		if (CLKF_INTR(frame)) {
-			if (p != NULL)
+		if (CLKF_INTR(frame) || (curlwp->l_pflag & LP_INTR) != 0) {
+			if (p != NULL) {
 				p->p_iticks++;
+			}
 			spc->spc_cp_time[CP_INTR]++;
-		} else if (p != NULL && p != spc->spc_idleproc) {
+		} else if (p != NULL) {
 			p->p_sticks++;
 			spc->spc_cp_time[CP_SYS]++;
-		} else
+		} else {
 			spc->spc_cp_time[CP_IDLE]++;
+		}
 	}
 	spc->spc_pscnt = psdiv;
 
 	if (p != NULL) {
-		p->p_cpticks++;
-		/*
-		 * If no schedclock is provided, call it here at ~~12-25 Hz;
-		 * ~~16 Hz is best
-		 */
-		if (schedhz == 0) {
-			if ((++curcpu()->ci_schedstate.spc_schedticks & 3) ==
-			    0)
-				schedclock(p);
-		}
+		atomic_inc_uint(&l->l_cpticks);
+		mutex_spin_exit(&p->p_stmutex);
 	}
 }
-
-/*
- * Return information about system clocks.
- */
-int
-sysctl_clockrate(char *where, size_t *sizep)
-{
-	struct clockinfo clkinfo;
-
-	/*
-	 * Construct clockinfo structure.
-	 */
-	clkinfo.tick = tick;
-	clkinfo.tickadj = tickadj;
-	clkinfo.hz = hz;
-	clkinfo.profhz = profhz;
-	clkinfo.stathz = stathz ? stathz : hz;
-	return (sysctl_rdstruct(where, sizep, NULL, &clkinfo, sizeof(clkinfo)));
-}
-
-#ifndef __HAVE_TIMECOUNTER
-/*
- * Placeholders until everyone uses the timecounters code.
- * Won't improve anything except maybe removing a bunch of bugs in fixed code.
- */
-
-void
-getmicrotime(struct timeval *tvp)
-{
-	int s;
-
-	s = splhigh();
-	*tvp = time;
-	splx(s);
-}
-
-void
-nanotime(struct timespec *tsp)
-{
-	struct timeval tv;
-
-	microtime(&tv);
-	TIMEVAL_TO_TIMESPEC(&tv, tsp);
-}
-
-void
-getnanotime(struct timespec *tsp)
-{
-	struct timeval tv;
-
-	getmicrotime(&tv);
-	TIMEVAL_TO_TIMESPEC(&tv, tsp);
-}
-
-void
-nanouptime(struct timespec *tsp)
-{
-	struct timeval tv;
-
-	microuptime(&tv);
-	TIMEVAL_TO_TIMESPEC(&tv, tsp);
-}
-
-
-void
-getnanouptime(struct timespec *tsp)
-{
-	struct timeval tv;
-
-	getmicrouptime(&tv);
-	TIMEVAL_TO_TIMESPEC(&tv, tsp);
-}
-
-void
-microuptime(struct timeval *tvp)
-{
-	struct timeval tv;
-
-	microtime(&tv);
-	timersub(&tv, &boottime, tvp);
-}
-
-void
-getmicrouptime(struct timeval *tvp)
-{
-	int s;
-
-	s = splhigh();
-	*tvp = mono_time;
-	splx(s);
-}
-#endif /* __HAVE_TIMECOUNTER */

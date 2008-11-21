@@ -1,5 +1,4 @@
-/*	$OpenBSD: eisareg.h,v 1.4 1996/05/05 12:42:24 deraadt Exp $	*/
-/*	$NetBSD: eisareg.h,v 1.3 1996/04/09 22:46:13 cgd Exp $	*/
+/*	$NetBSD: eisareg.h,v 1.7 2005/12/11 12:21:20 christos Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -37,7 +36,7 @@
 
 /*
  * Register (etc.) descriptions for the EISA bus.
-
+ *
  * Mostly culled from EISA chipset descriptions in:
  *	Intel Peripheral Components Databook (1992)
  */
@@ -56,14 +55,6 @@
 #define	EISA_SLOTOFF_PID	0xc82		/* offset of product id regs */
 #define	EISA_NPIDREGS		2
 
-#ifdef AHA284X_HACK
-/*
- * AHA-284x (VL bus) requires priming a register with the following values.
- */
-#define	EISA_SLOTOFF_PRIMING	EISA_SLOTOFF_VID	/* offset */
-#define	EISA_PRIMING_VID(index)	(0x80 + (index))	/* value for vendor */
-#define	EISA_PRIMING_PID(index)	(0x82 + (index))	/* value for product */
-#endif
 
 /*
  * EISA ID functions, used to manipulate and decode EISA ID registers.
@@ -96,14 +87,13 @@
  *
  * EISA_PRIDID_n returns the "n"th hex digit of the product ID.
  */
-#define	__EISA_HEX_MAP	"0123456789ABCDEF"
 #define	EISA_PRODID_0(pid)						\
-	    (__EISA_HEX_MAP[(((pid)[0] >> 4) & 0xf)])
+	    (HEXDIGITS[(((pid)[0] >> 4) & 0xf)])
 #define	EISA_PRODID_1(pid)						\
-	    (__EISA_HEX_MAP[(((pid)[0] >> 0) & 0xf)])
+	    (HEXDIGITS[(((pid)[0] >> 0) & 0xf)])
 #define	EISA_PRODID_2(pid)						\
-	    (__EISA_HEX_MAP[(((pid)[1] >> 4) & 0xf)])
+	    (HEXDIGITS[(((pid)[1] >> 4) & 0xf)])
 #define	EISA_PRODID_3(pid)						\
-	    (__EISA_HEX_MAP[(((pid)[1] >> 0) & 0xf)])
+	    (HEXDIGITS[(((pid)[1] >> 0) & 0xf)])
 
 #endif /* !__DEV_EISA_EISAREG_H__ */

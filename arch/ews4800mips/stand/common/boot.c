@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.c,v 1.3 2006/02/25 02:28:56 wiz Exp $	*/
+/*	$NetBSD: boot.c,v 1.7 2008/07/16 14:45:17 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,8 +45,7 @@
 
 extern const char bootprog_name[];
 extern const char bootprog_rev[];
-extern const char bootprog_date[];
-extern const char bootprog_maker[];
+extern const char bootprog_kernrev[];
 
 struct cmd_batch_tab cmd_batch_tab[] = {
 	/* func    argc   argp... */
@@ -69,7 +61,7 @@ struct cmd_batch_tab cmd_batch_tab[] = {
 struct ipl_args ipl_args;
 struct device_capability DEVICE_CAPABILITY;
 void set_device_capability(void);
-boolean_t guess_boot_kernel(char *, size_t, int);
+bool guess_boot_kernel(char *, size_t, int);
 extern int kernel_binary_size;
 
 void
@@ -89,8 +81,8 @@ main(int a0, int v0, int v1)
 	console_init();
 
 	printf("\n");
-	printf("%s boot, Revision %s\n", bootprog_name, bootprog_rev);
-	printf("(%s, %s)\n", bootprog_date, bootprog_maker);
+	printf("%s boot, Revision %s (from NetBSD %s)\n",
+	    bootprog_name, bootprog_rev, bootprog_kernrev);
 
 
 	/* Inquire IPL activated device */
@@ -118,16 +110,16 @@ main(int a0, int v0, int v1)
 	printf("\n[non-interactive mode]\n");
 	args[0] = "boot";
 	args[1] = boot_kernel;
-	cmd_boot(2, args, FALSE);
+	cmd_boot(2, args, false);
  prompt:
 
 	printf("\ntype \"help\" for help.\n");
-	console_cursor(TRUE);
+	console_cursor(true);
 	prompt();
 	/* NOTREACHED */
 }
 
-boolean_t
+bool
 guess_boot_kernel(char *name, size_t len, int pri)
 {
 	extern struct vtoc_sector vtoc;
@@ -135,21 +127,21 @@ guess_boot_kernel(char *name, size_t len, int pri)
 	int i, unit;
 
 	if (!DEVICE_CAPABILITY.active)
-		return FALSE;
+		return false;
 
 	unit = DEVICE_CAPABILITY.booted_unit;
 
 	switch (DEVICE_CAPABILITY.booted_device) {
 	default:
-		return FALSE;
+		return false;
 	case NVSRAM_BOOTDEV_FLOPPYDISK:
 		strncpy(name, "fd:netbsd", len);	/* ustarfs */
-		return TRUE;
+		return true;
 
 	case NVSRAM_BOOTDEV_HARDDISK:
 		snprintf(name, len, "sd%d:netbsd", unit); /* ustarfs */
 		if (!read_vtoc())
-			return TRUE;
+			return true;
 
 		partition = vtoc.partition;
 		for (i = 0; i < VTOC_MAXPARTITIONS; i++, partition++) {
@@ -157,9 +149,9 @@ guess_boot_kernel(char *name, size_t len, int pri)
 				continue;
 			/* ffs */
 			snprintf(name, len, "sd%d%c:netbsd", unit, 'a' + i);
-			return TRUE;
+			return true;
 		}
-		return TRUE;
+		return true;
 
 	case NVSRAM_BOOTDEV_CGMT:
 		break;
@@ -168,16 +160,16 @@ guess_boot_kernel(char *name, size_t len, int pri)
 	case NVSRAM_BOOTDEV_NETWORK_T_AND_D:
 		if (kernel_binary_size) {
 			strncpy(name, "mem:", len);	/* datafs */
-			return TRUE;
+			return true;
 		}
 		if (DEVICE_CAPABILITY.network_enabled) {
 			strncpy(name, "nfs:netbsd", len);	/* nfs */
-			return TRUE;
+			return true;
 		}
 		break;
 	}
 
-	return FALSE;
+	return false;
 }
 
 int
@@ -189,8 +181,8 @@ cmd_info(int argc, char *argp[], int interactive)
 	int i, size, total;
 	struct sbdinfo *sbd = SBD_INFO;
 
-	printf("\n>> %s boot, rev. %s [%s, %s] <<\n", bootprog_name,
-	    bootprog_rev, bootprog_date, bootprog_maker);
+	printf("\n>> %s boot, Revision %s (from NetBSD %s) <<\n",
+	    bootprog_name, bootprog_rev, bootprog_kernrev);
 
 	printf("IPL args: 0x%x 0x%x 0x%x\n", ipl_args.a0, ipl_args.v0,
 	    ipl_args.v1);
@@ -295,26 +287,26 @@ set_device_capability(void)
 
 	switch (SBD_INFO->machine) {
 	case MACHINE_TR2A:
-		DEVICE_CAPABILITY.active = TRUE;
+		DEVICE_CAPABILITY.active = true;
 		/* boot has LANCE driver */
-		DEVICE_CAPABILITY.network_enabled = TRUE;
+		DEVICE_CAPABILITY.network_enabled = true;
 		break;
 	case MACHINE_TR2:
-		DEVICE_CAPABILITY.active = TRUE;
+		DEVICE_CAPABILITY.active = true;
 		break;
 	default:
-		DEVICE_CAPABILITY.active = FALSE;
+		DEVICE_CAPABILITY.active = false;
 		break;
 	}
 
-	DEVICE_CAPABILITY.fd_enabled = TRUE;	/* always enabled */
+	DEVICE_CAPABILITY.fd_enabled = true;	/* always enabled */
 
 	if (DEVICE_CAPABILITY.active) {
 		/*
 		 * When NETWORK IPL, FD IPL doesn't activate ROM DISK routine.
 		 */
 		if (DEVICE_CAPABILITY.booted_device == NVSRAM_BOOTDEV_HARDDISK)
-			DEVICE_CAPABILITY.disk_enabled = TRUE;
+			DEVICE_CAPABILITY.disk_enabled = true;
 	}
 
 	printf("FD[%c] DISK[%c] NETWORK[%c] COMPILED[%c]\n",

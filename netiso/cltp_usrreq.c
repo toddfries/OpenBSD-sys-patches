@@ -1,4 +1,4 @@
-/*	$NetBSD: cltp_usrreq.c,v 1.30 2006/11/16 01:33:51 christos Exp $	*/
+/*	$NetBSD: cltp_usrreq.c,v 1.34 2008/04/28 13:24:38 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cltp_usrreq.c,v 1.30 2006/11/16 01:33:51 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cltp_usrreq.c,v 1.34 2008/04/28 13:24:38 ad Exp $");
 
 #ifndef CLTPOVAL_SRC		/* XXX -- till files gets changed */
 #include <sys/param.h>
@@ -91,7 +91,7 @@ cltp_input(struct mbuf *m0, ...)
 	struct sockaddr_iso *src;
 	int             len, hdrlen = *up + 1, dlen = 0;
 	u_char         *uplim = up + hdrlen;
-	caddr_t         dtsap = NULL;
+	void *        dtsap = NULL;
 	va_list ap;
 
 	va_start(ap, m0);
@@ -108,7 +108,8 @@ cltp_input(struct mbuf *m0, ...)
 		switch (*up) {	/* process options */
 		case CLTPOVAL_SRC:
 			src->siso_tlen = up[1];
-			src->siso_len = up[1] + TSEL(src) - (caddr_t) src;
+			src->siso_len = up[1] +
+			    ((const char *)TSEL(src) - (const char *)src);
 			if (src->siso_len < sizeof(*src))
 				src->siso_len = sizeof(*src);
 			else if (src->siso_len > sizeof(*src)) {
@@ -117,14 +118,14 @@ cltp_input(struct mbuf *m0, ...)
 					goto bad;
 				m_src->m_len = src->siso_len;
 				src = mtod(m_src, struct sockaddr_iso *);
-				bcopy((caddr_t) srcsa, (caddr_t) src, srcsa->sa_len);
+				bcopy((void *) srcsa, (void *) src, srcsa->sa_len);
 			}
-			bcopy((caddr_t) up + 2, TSEL(src), up[1]);
+			memcpy(WRITABLE_TSEL(src), (char *)up + 2, up[1]);
 			up += 2 + src->siso_tlen;
 			continue;
 
 		case CLTPOVAL_DST:
-			dtsap = 2 + (caddr_t) up;
+			dtsap = 2 + (char *)up;
 			dlen = up[1];
 			up += 2 + dlen;
 			continue;
@@ -185,16 +186,16 @@ cltp_notify(isop)
 void
 cltp_ctlinput(
     int cmd,
-    struct sockaddr *sa,
+    const struct sockaddr *sa,
     void *dummy)
 {
-	struct sockaddr_iso *siso;
+	const struct sockaddr_iso *siso;
 
 	if ((unsigned)cmd >= PRC_NCMDS)
 		return;
 	if (sa->sa_family != AF_ISO && sa->sa_family != AF_CCITT)
 		return;
-	siso = satosiso(sa);
+	siso = satocsiso(sa);
 	if (siso == 0 || siso->siso_nlen == 0)
 		return;
 
@@ -253,12 +254,12 @@ cltp_output(struct mbuf *m, ...)
 	up[2] = CLTPOVAL_SRC;
 	up[3] = (siso = isop->isop_laddr)->siso_tlen;
 	up += 4;
-	bcopy(TSEL(siso), (caddr_t) up, siso->siso_tlen);
+	bcopy(TSEL(siso), (void *) up, siso->siso_tlen);
 	up += siso->siso_tlen;
 	up[0] = CLTPOVAL_DST;
 	up[1] = (siso = isop->isop_faddr)->siso_tlen;
 	up += 2;
-	bcopy(TSEL(siso), (caddr_t) up, siso->siso_tlen);
+	bcopy(TSEL(siso), (void *) up, siso->siso_tlen);
 	/*
 	 * Stuff checksum and output datagram.
 	 */
@@ -293,11 +294,13 @@ cltp_usrreq(so, req, m, nam, control, l)
 	int error = 0;
 
 	if (req == PRU_CONTROL)
-		return (iso_control(so, (long)m, (caddr_t)nam,
+		return (iso_control(so, (long)m, (void *)nam,
 		    (struct ifnet *)control, l));
 
 	if (req == PRU_PURGEIF) {
+		mutex_enter(softnet_lock);
 		iso_purgeif((struct ifnet *)control);
+		mutex_exit(softnet_lock);
 		return (0);
 	}
 
@@ -315,6 +318,7 @@ cltp_usrreq(so, req, m, nam, control, l)
 	switch (req) {
 
 	case PRU_ATTACH:
+		sosetlock(so);
 		if (isop != 0) {
 			error = EISCONN;
 			break;

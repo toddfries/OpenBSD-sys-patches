@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_gpio.h,v 1.5 2005/04/08 21:50:37 uwe Exp $ */
-/*	$wasabi$	*/
+/*	$NetBSD: pxa2x0_gpio.h,v 1.4 2008/06/24 20:19:05 chris Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -45,27 +44,54 @@
  * call this function with the virtual address of the
  * GPIO controller's registers
  */
-void pxa2x0_gpio_bootstrap(vaddr_t);
+extern void pxa2x0_gpio_bootstrap(vaddr_t);
 
 /*
  * GPIO pin function query/manipulation functions
  */
-u_int pxa2x0_gpio_get_function(u_int);
-u_int pxa2x0_gpio_set_function(u_int, u_int);
-int pxa2x0_gpio_get_bit(u_int gpio);
-void pxa2x0_gpio_set_bit(u_int gpio);
-void pxa2x0_gpio_clear_bit(u_int gpio);
-void pxa2x0_gpio_set_dir(u_int gpio, int dir);
-void pxa2x0_gpio_clear_intr(u_int gpio);
+extern u_int pxa2x0_gpio_get_function(u_int);
+extern u_int pxa2x0_gpio_set_function(u_int, u_int);
+extern int pxa2x0_gpio_get_bit(u_int);
+extern void pxa2x0_gpio_set_bit(u_int);
+extern void pxa2x0_gpio_clear_bit(u_int);
+extern void pxa2x0_gpio_set_dir(u_int, int);
+extern void pxa2x0_gpio_clear_intr(u_int);
 
 /*
  * Establish/Disestablish interrupt handlers for GPIO pins
  */
-void *pxa2x0_gpio_intr_establish(u_int, int, int, int (*)(void *), void *,
-    char *);
-void pxa2x0_gpio_intr_disestablish(void *);
-const char *pxa2x0_gpio_intr_string(void *);
-void pxa2x0_gpio_intr_mask(void *);
-void pxa2x0_gpio_intr_unmask(void *);
+extern void *pxa2x0_gpio_intr_establish(u_int, int, int,
+		int (*)(void *), void *);
+extern void pxa2x0_gpio_intr_disestablish(void *);
+extern void pxa2x0_gpio_intr_mask(void *);
+extern void pxa2x0_gpio_intr_unmask(void *);
+extern void pxa2x0_gpio_set_intr_level(u_int, int);
+
+
+struct pxa2x0_gpioconf {
+	int pin;
+	u_int value;
+};
+void pxa2x0_gpio_config(struct pxa2x0_gpioconf **);
+
+extern struct pxa2x0_gpioconf pxa25x_com_ffuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_com_stuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_com_btuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_com_hwuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_i2c_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_i2s_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_pcic_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_pxaacu_gpioconf[];
+extern struct pxa2x0_gpioconf pxa25x_pxamci_gpioconf[];
+
+extern struct pxa2x0_gpioconf pxa27x_com_ffuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_com_stuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_com_btuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_com_hwuart_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_i2c_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_i2s_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_pcic_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_pxaacu_gpioconf[];
+extern struct pxa2x0_gpioconf pxa27x_pxamci_gpioconf[];
 
 #endif /* _PXA2X0_GPIO_H */

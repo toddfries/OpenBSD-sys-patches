@@ -1,4 +1,4 @@
-/*	$NetBSD: iq80310_timer.c,v 1.19 2005/12/24 20:06:59 perry Exp $	*/
+/*	$NetBSD: iq80310_timer.c,v 1.21 2008/01/20 16:28:24 joerg Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -47,12 +47,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iq80310_timer.c,v 1.19 2005/12/24 20:06:59 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iq80310_timer.c,v 1.21 2008/01/20 16:28:24 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/atomic.h>
 #include <sys/time.h>
+#include <sys/timetc.h>
 
 #include <dev/clock_subr.h>
 
@@ -79,6 +81,21 @@ __KERNEL_RCSID(0, "$NetBSD: iq80310_timer.c,v 1.19 2005/12/24 20:06:59 perry Exp
 static void *clock_ih;
 
 static uint32_t counts_per_hz;
+
+static u_int	iq80310_get_timecount(struct timecounter *);
+
+static struct timecounter iq80310_timecounter = {
+	iq80310_get_timecount,	/* get_timecount */
+	0,			/* no poll_pps */
+	0xffffffff,		/* counter_mask */
+	COUNTS_PER_SEC,		/* frequency */
+	"iq80310",		/* name */
+	100,			/* quality */
+	NULL,			/* prev */
+	NULL,			/* next */
+};
+
+static volatile uint32_t iq80310_base;
 
 int	clockhandler(void *);
 
@@ -177,15 +194,6 @@ cpu_initclocks(void)
 		printf("Cannot get %d Hz clock; using 100 Hz\n", hz);
 		hz = 100;
 	}
-	tick = 1000000 / hz;	/* number of microseconds between interrupts */
-	tickfix = 1000000 - (hz * tick);
-	if (tickfix) {
-		int ftp;
-
-		ftp = min(ffs(tickfix), ffs(hz));
-		tickfix >>= (ftp - 1);
-		tickfixinterval = hz >> (ftp - 1);
-	}
 
 	/*
 	 * We only have one timer available; stathz and profhz are
@@ -221,6 +229,8 @@ cpu_initclocks(void)
 	timer_enable(TIMER_ENABLE_EN);
 
 	restore_interrupts(oldirqstate);
+
+	tc_init(&iq80310_timecounter);
 }
 
 /*
@@ -242,46 +252,17 @@ setstatclockrate(int newhz)
 	 */
 }
 
-/*
- * microtime:
- *
- *	Fill in the specified timeval struct with the current time
- *	accurate to the microsecond.
- */
-void
-microtime(struct timeval *tvp)
+static u_int
+iq80310_get_timecount(struct timecounter *tc)
 {
-	static struct timeval lasttv;
-	u_int oldirqstate;
-	uint32_t counts;
+	u_int oldirqstate, base, counter;
 
 	oldirqstate = disable_interrupts(I32_bit);
-
-	counts = timer_read();
-
-	/* Fill in the timeval struct. */
-	*tvp = time;
-	tvp->tv_usec += (counts / COUNTS_PER_USEC);
-
-	/* Make sure microseconds doesn't overflow. */
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_usec -= 1000000;
-		tvp->tv_sec++;
-	}
-
-	/* Make sure the time has advanced. */
-	if (tvp->tv_sec == lasttv.tv_sec &&
-	    tvp->tv_usec <= lasttv.tv_usec) {
-		tvp->tv_usec = lasttv.tv_usec + 1;
-		if (tvp->tv_usec >= 1000000) {
-			tvp->tv_usec -= 1000000;
-			tvp->tv_sec++;
-		}
-	}
-
-	lasttv = *tvp;
-
+	base = iq80310_base;
+	counter = timer_read();
 	restore_interrupts(oldirqstate);
+
+	return base + counter;
 }
 
 /*
@@ -319,93 +300,6 @@ delay(u_int n)
 	}
 }
 
-todr_chip_handle_t todr_handle;
-
-/*
- * todr_attach:
- *
- *	Set the specified time-of-day register as the system real-time clock.
- */
-void
-todr_attach(todr_chip_handle_t todr)
-{
-
-	if (todr_handle)
-		panic("todr_attach: rtc already configured");
-	todr_handle = todr;
-}
-
-/*
- * inittodr:
- *
- *	Initialize time from the time-of-day register.
- */
-#define	MINYEAR		2003	/* minimum plausible year */
-void
-inittodr(time_t base)
-{
-	time_t deltat;
-	int badbase;
-
-	if (base < (MINYEAR - 1970) * SECYR) {
-		printf("WARNING: preposterous time in file system");
-		/* read the system clock anyway */
-		base = (MINYEAR - 1970) * SECYR;
-		badbase = 1;
-	} else
-		badbase = 0;
-
-	if (todr_handle == NULL ||
-	    todr_gettime(todr_handle, &time) != 0 ||
-	    time.tv_sec == 0) {
-		/*
-		 * Believe the time in the file system for lack of
-		 * anything better, resetting the TODR.
-		 */
-		time.tv_sec = base;
-		time.tv_usec = 0;
-		if (todr_handle != NULL && !badbase) {
-			printf("WARNING: preposterous clock chip time\n");
-			resettodr();
-		}
-		goto bad;
-	}
-
-	if (!badbase) {
-		/*
-		 * See if we gained/lost two or more days; if
-		 * so, assume something is amiss.
-		 */
-		deltat = time.tv_sec - base;
-		if (deltat < 0)
-			deltat = -deltat;
-		if (deltat < 2 * SECDAY)
-			return;		/* all is well */
-		printf("WARNING: clock %s %ld days\n",
-		    time.tv_sec < base ? "lost" : "gained",
-		    (long)deltat / SECDAY);
-	}
- bad:
-	printf("WARNING: CHECK AND RESET THE DATE!\n");
-}
-
-/*
- * resettodr:
- *
- *	Reset the time-of-day register with the current time.
- */
-void
-resettodr(void)
-{
-
-	if (time.tv_sec == 0)
-		return;
-
-	if (todr_handle != NULL &&
-	    todr_settime(todr_handle, &time) != 0)
-		printf("resettodr: failed to set time\n");
-}
-
 /*
  * clockhandler:
  *
@@ -418,6 +312,8 @@ clockhandler(void *arg)
 
 	timer_disable(TIMER_ENABLE_INTEN);
 	timer_enable(TIMER_ENABLE_INTEN);
+
+	atomic_add_32(&iq80310_base, counts_per_hz);
 
 	hardclock(frame);
 

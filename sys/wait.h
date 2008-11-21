@@ -1,5 +1,4 @@
-/*	$OpenBSD: wait.h,v 1.14 2006/04/27 02:17:21 tedu Exp $	*/
-/*	$NetBSD: wait.h,v 1.11 1996/04/09 20:55:51 cgd Exp $	*/
+/*	$NetBSD: wait.h,v 1.25 2007/05/07 16:53:17 dsl Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993, 1994
@@ -35,7 +34,7 @@
 #ifndef _SYS_WAIT_H_
 #define _SYS_WAIT_H_
 
-#include <sys/cdefs.h>
+#include <sys/featuretest.h>
 
 /*
  * This file holds definitions relevent to the wait4 system call
@@ -46,23 +45,21 @@
  * Macros to test the exit status returned by wait
  * and extract the relevant values.
  */
-#if __BSD_VISIBLE
-#define	_W_INT(w)	(*(int *)&(w))	/* convert union wait to int */
-#else
+#if !( defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE) ) || defined(_KERNEL)
 #define	_W_INT(i)	(i)
+#else
+#define	_W_INT(w)	(*(int *)(void *)&(w))	/* convert union wait to int */
 #endif
 
 #define	_WSTATUS(x)	(_W_INT(x) & 0177)
 #define	_WSTOPPED	0177		/* _WSTATUS if process is stopped */
-#define	_WCONTINUED	0177777		/* process has continued */
-#define WIFSTOPPED(x)	((_W_INT(x) & 0xff) == _WSTOPPED)
-#define WSTOPSIG(x)	(int)(((unsigned)_W_INT(x) >> 8) & 0xff)
+#define WIFSTOPPED(x)	(_WSTATUS(x) == _WSTOPPED)
+#define WSTOPSIG(x)	((int)(((unsigned int)_W_INT(x)) >> 8) & 0xff)
 #define WIFSIGNALED(x)	(_WSTATUS(x) != _WSTOPPED && _WSTATUS(x) != 0)
 #define WTERMSIG(x)	(_WSTATUS(x))
 #define WIFEXITED(x)	(_WSTATUS(x) == 0)
-#define WEXITSTATUS(x)	(int)(((unsigned)_W_INT(x) >> 8) & 0xff)
-#define WIFCONTINUED(x)	((_W_INT(x) & _WCONTINUED) == _WCONTINUED)
-#if __XPG_VISIBLE
+#define WEXITSTATUS(x)	((int)(((unsigned int)_W_INT(x)) >> 8) & 0xff)
+#if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE) || defined(_KERNEL)
 #define	WCOREFLAG	0200
 #define WCOREDUMP(x)	(_W_INT(x) & WCOREFLAG)
 
@@ -79,14 +76,36 @@
  * this option is done, it is as though they were still running... nothing
  * about them is returned.
  */
-#define WNOHANG		1	/* don't hang in wait */
-#define WUNTRACED	2	/* tell about stopped, untraced children */
-#if __XPG_VISIBLE
-#define	WALTSIG		4	/* wait for child with alternate exit signal */
-#endif
-#define	WCONTINUED	8	/* report a job control continued process */
+#define WNOHANG		0x00000001	/* don't hang in wait */
+#define WUNTRACED	0x00000002	/* tell about stopped,
+					   untraced children */
+#if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
+#define	WALTSIG		0x00000004	/* wait for processes that exit
+					   with an alternate signal (i.e.
+					   not SIGCHLD) */
+#define	WALLSIG		0x00000008	/* wait for processes that exit
+					   with any signal, i.e. SIGCHLD
+					   and alternates */
 
-#if __BSD_VISIBLE
+/*
+ * These are the Linux names of some of the above flags, for compatibility
+ * with Linux's clone(2) API.
+ */
+#define	__WCLONE	WALTSIG
+#define	__WALL		WALLSIG
+
+/*
+ * These bits are used in order to support SVR4 (etc) functionality
+ * without replicating sys_wait4 5 times.
+ */
+#define	WNOWAIT		0x00010000	/* Don't mark child 'P_WAITED' */
+#define	WNOZOMBIE	0x00020000	/* Ignore zombies */
+#define	WOPTSCHECKED	0x00040000	/* Compat call, options verified */
+#endif /* _XOPEN_SOURCE || _NETBSD_SOURCE */
+
+#if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
+/* POSIX extensions and 4.2/4.3 compatibility: */
+
 /*
  * Tokens for special values of the "pid" parameter to wait4.
  */
@@ -107,13 +126,13 @@ union wait {
 	 * Terminated process status.
 	 */
 	struct {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 		unsigned int	w_Termsig:7,	/* termination signal */
 				w_Coredump:1,	/* core dump indicator */
 				w_Retcode:8,	/* exit code if w_termsig==0 */
 				w_Filler:16;	/* upper bits filler */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		unsigned int	w_Filler:16,	/* upper bits filler */
 				w_Retcode:8,	/* exit code if w_termsig==0 */
 				w_Coredump:1,	/* core dump indicator */
@@ -126,12 +145,12 @@ union wait {
 	 * with the WUNTRACED option bit.
 	 */
 	struct {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 		unsigned int	w_Stopval:8,	/* == W_STOPPED if stopped */
 				w_Stopsig:8,	/* signal that stopped us */
 				w_Filler:16;	/* upper bits filler */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		unsigned int	w_Filler:16,	/* upper bits filler */
 				w_Stopsig:8,	/* signal that stopped us */
 				w_Stopval:8;	/* == W_STOPPED if stopped */
@@ -145,17 +164,17 @@ union wait {
 #define w_stopsig	w_S.w_Stopsig
 
 #define	WSTOPPED	_WSTOPPED
-#endif /* __BSD_VISIBLE */
+#endif /* _XOPEN_SOURCE || _NETBSD_SOURCE */
 
 #ifndef _KERNEL
-#include <sys/types.h>
+#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 struct rusage;	/* forward declaration */
 
 pid_t	wait(int *);
 pid_t	waitpid(pid_t, int *, int);
-#if __BSD_VISIBLE
+#if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
 pid_t	wait3(int *, int, struct rusage *);
 pid_t	wait4(pid_t, int *, int, struct rusage *);
 #endif

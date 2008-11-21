@@ -1,5 +1,4 @@
-/*	$OpenBSD: ppiioctl.h,v 1.3 2003/06/02 23:27:45 millert Exp $	*/
-/*	$NetBSD: ppiioctl.h,v 1.4 1994/10/26 07:24:48 cgd Exp $	*/
+/*	$NetBSD: ppiioctl.h,v 1.6 2005/12/11 12:17:14 christos Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993

@@ -1,4 +1,3 @@
-/*	$OpenBSD: fiq.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /*	$NetBSD: fiq.h,v 1.1 2001/12/20 01:20:23 thorpej Exp $	*/
 
 /*

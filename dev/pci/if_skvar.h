@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_skvar.h,v 1.2 2005/12/22 20:54:47 brad Exp $	*/
-/*	$NetBSD: if_skvar.h,v 1.6 2005/05/30 04:35:22 christos Exp $	*/
+/* $NetBSD: if_skvar.h,v 1.15 2008/09/08 21:20:03 christos Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -13,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,7 +25,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-/*	$OpenBSD: if_skvar.h,v 1.2 2005/12/22 20:54:47 brad Exp $	*/
+/*	$OpenBSD: if_skreg.h,v 1.10 2003/08/12 05:23:06 nate Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -88,6 +80,12 @@
 #ifndef _DEV_PCI_IF_SKVAR_H_
 #define _DEV_PCI_IF_SKVAR_H_
 
+#include "rnd.h"
+
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
+
 struct sk_jpool_entry {
 	int                             slot;
 	LIST_ENTRY(sk_jpool_entry)	jpool_entries;
@@ -126,7 +124,7 @@ struct sk_chain_data {
 	int			sk_rx_cons;
 	int			sk_rx_cnt;
 	/* Stick the jumbo mem management stuff here too. */
-	caddr_t			sk_jslots[SK_JSLOTS];
+	void *			sk_jslots[SK_JSLOTS];
 	void			*sk_jumbo_buf;
 
 };
@@ -188,54 +186,60 @@ struct sk_if_softc;
 
 /* Softc for the GEnesis controller. */
 struct sk_softc {
-	struct device		sk_dev;		/* generic device */
+	device_t		sk_dev;		/* generic device */
 	bus_space_handle_t	sk_bhandle;	/* bus space handle */
 	bus_space_tag_t		sk_btag;	/* bus space tag */
 	void			*sk_intrhand;	/* irq handler handle */
-	u_int8_t		sk_coppertype;
-	u_int8_t		sk_pmd;		/* physical media type */
 	u_int8_t		sk_type;
 	u_int8_t		sk_rev;
-	u_int8_t		sk_macs;	/* # of MACs */
-	char			*sk_name;
+  	const char		*sk_name;
+	char			*sk_vpd_prodname;
+	char			*sk_vpd_readonly;
 	u_int32_t		sk_rboff;	/* RAMbuffer offset */
 	u_int32_t		sk_ramsize;	/* amount of RAM on NIC */
+	u_int32_t		sk_pmd;		/* physical media type */
 	u_int32_t		sk_intrmask;
+	struct sysctllog	*sk_clog;
+	int			sk_int_mod;
+	int			sk_int_mod_pending;
 	bus_dma_tag_t		sc_dmatag;
 	struct sk_if_softc	*sk_if[2];
+#if NRND > 0
+	rndsource_element_t     rnd_source;
+#endif
 };
 
 /* Softc for each logical interface */
 struct sk_if_softc {
-	struct device		sk_dev;		/* generic device */
-	struct arpcom		arpcom;		/* interface info */
+	device_t		sk_dev;		/* generic device */
+	struct ethercom		sk_ethercom;	/* interface info */
 	struct mii_data		sk_mii;
+	u_int8_t                sk_enaddr[ETHER_ADDR_LEN]; /* station addr */
 	u_int8_t		sk_port;	/* port # on controller */
 	u_int8_t		sk_xmac_rev;	/* XMAC chip rev (B2 or C1) */
 	u_int32_t		sk_rx_ramstart;
 	u_int32_t		sk_rx_ramend;
 	u_int32_t		sk_tx_ramstart;
 	u_int32_t		sk_tx_ramend;
-	u_int8_t		sk_phytype;
+	int			sk_phytype;
 	int			sk_phyaddr;
 	int			sk_cnt;
 	int			sk_link;
-	struct timeout		sk_tick_ch;
+	struct callout		sk_tick_ch;
 	struct sk_chain_data	sk_cdata;
 	struct sk_ring_data	*sk_rdata;
 	bus_dmamap_t		sk_ring_map;
 	struct sk_softc		*sk_softc;	/* parent controller */
 	int			sk_tx_bmu;	/* TX BMU register */
 	int			sk_if_flags;
+	kmutex_t		sk_jpool_mtx;
 	LIST_HEAD(__sk_jfreehead, sk_jpool_entry)	sk_jfree_listhead;
 	LIST_HEAD(__sk_jinusehead, sk_jpool_entry)	sk_jinuse_listhead;
-	SIMPLEQ_HEAD(__sk_txmaphead, sk_txmap_entry)	sk_txmap_head;
+	SIMPLEQ_HEAD(__sk_txmaphead, sk_txmap_entry) sk_txmap_head;
 };
 
 struct skc_attach_args {
 	u_int16_t	skc_port;
-	u_int8_t	skc_type;
-	u_int8_t	skc_rev;
 };
 
 #endif /* _DEV_PCI_IF_SKVAR_H_ */

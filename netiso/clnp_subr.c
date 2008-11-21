@@ -1,4 +1,4 @@
-/*	$NetBSD: clnp_subr.c,v 1.24 2006/12/15 21:18:56 joerg Exp $	*/
+/*	$NetBSD: clnp_subr.c,v 1.31 2008/01/14 04:17:35 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -59,7 +59,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clnp_subr.c,v 1.24 2006/12/15 21:18:56 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clnp_subr.c,v 1.31 2008/01/14 04:17:35 dyoung Exp $");
 
 #include "opt_iso.h"
 
@@ -149,35 +149,35 @@ clnp_data_ck(
  *
  * NOTES:
  */
-caddr_t
+void *
 clnp_extract_addr(
-	caddr_t         bufp,	/* ptr to buffer containing addresses */
+	void *        bufp,	/* ptr to buffer containing addresses */
 	int             buflen,	/* length of buffer */
 	struct iso_addr *srcp,	/* ptr to source address buffer */
 	struct iso_addr *destp)	/* ptr to destination address
 						 * buffer */
 {
-	int             len;	/* argument to bcopy */
+	size_t             len;	/* argument to memcpy */
 
 	/*
 	 * check that we have enough data. Plus1 is for length octet
 	 */
-	if ((u_char) * bufp + 1 > buflen) {
-		return ((caddr_t) 0);
-	}
-	len = destp->isoa_len = (u_char) * bufp++;
-	(void) bcopy(bufp, (caddr_t) destp, len);
+	len = (u_char)*bufp++;
+	if (len > buflen)
+		return NULL;
+	destp->isoa_len = len;
+	(void)memcpy(destp, bufp, len);
 	buflen -= len;
 	bufp += len;
 
 	/*
 	 * check that we have enough data. Plus1 is for length octet
 	 */
-	if ((u_char) * bufp + 1 > buflen) {
-		return ((caddr_t) 0);
-	}
-	len = srcp->isoa_len = (u_char) * bufp++;
-	(void) bcopy(bufp, (caddr_t) srcp, len);
+	len = (u_char)*bufp++;
+	if (len > buflen)
+		return NULL;
+	srcp->isoa_len = len;
+	(void)memcpy(srcp, bufp, len);
 	bufp += len;
 
 	/*
@@ -186,7 +186,7 @@ clnp_extract_addr(
 	if (iso_ck_addr(srcp) && iso_ck_addr(destp))
 		return bufp;
 	else
-		return (caddr_t) 0;
+		return NULL;
 }
 #endif				/* notdef */
 
@@ -221,8 +221,8 @@ clnp_ours(
 		 * We are overloading siso_tlen in the if's address, as an nsel length.
 		 */
 		if (dst->isoa_len == ia->ia_addr.siso_nlen &&
-		    bcmp((caddr_t) ia->ia_addr.siso_addr.isoa_genaddr,
-			 (caddr_t) dst->isoa_genaddr,
+		    bcmp((void *) ia->ia_addr.siso_addr.isoa_genaddr,
+			 (void *) dst->isoa_genaddr,
 			 ia->ia_addr.siso_nlen - ia->ia_addr.siso_tlen) == 0)
 			return 1;
 	}
@@ -259,14 +259,15 @@ clnp_forward(
 {
 	struct clnp_fixed *clnp;	/* ptr to fixed part of header */
 	int             error;		/* return value of route function */
-	struct sockaddr *next_hop;	/* next hop for dgram */
+	const struct sockaddr *next_hop;	/* next hop for dgram */
 	struct ifnet   *ifp;		/* ptr to outgoing interface */
 	struct iso_ifaddr *ia = 0;	/* ptr to iso name for ifp */
-	struct route_iso route;		/* filled in by clnp_route */
+	struct route route;		/* filled in by clnp_route */
+	struct rtentry *rt;
 	extern int      iso_systype;
 
 	clnp = mtod(m, struct clnp_fixed *);
-	bzero((caddr_t) & route, sizeof(route));	/* MUST be done before
+	bzero((void *) & route, sizeof(route));	/* MUST be done before
 							 * "bad:" */
 
 	/*
@@ -332,7 +333,7 @@ clnp_forward(
 #ifdef ARGO_DEBUG
 	if (argo_debug[D_FORWARD]) {
 		printf("clnp_forward: packet routed to %s\n",
-		       clnp_iso_addrp(&satosiso(next_hop)->siso_addr));
+		       clnp_iso_addrp(&satocsiso(next_hop)->siso_addr));
 	}
 #endif
 
@@ -346,7 +347,7 @@ clnp_forward(
 	 */
 	if ((iso_systype & SNPA_IS) && (inbound_shp) &&
 	    (ifp == inbound_shp->snh_ifp))
-		esis_rdoutput(inbound_shp, m, oidx, dst, route.ro_rt);
+		esis_rdoutput(inbound_shp, m, oidx, dst, rtcache_validate(&route));
 	/*
 	 *	If options are present, update them
 	 */
@@ -372,7 +373,7 @@ clnp_forward(
 		}
 #endif
 		if ((oidx) && (oidx->cni_qos_formatp)) {
-			caddr_t         qosp = CLNP_OFFTOOPT(m, oidx->cni_qos_formatp);
+			char *         qosp = CLNP_OFFTOOPT(m, oidx->cni_qos_formatp);
 			u_char          qos = *qosp;
 #ifdef ARGO_DEBUG
 			if (argo_debug[D_FORWARD]) {
@@ -391,18 +392,20 @@ clnp_forward(
 	/*
 	 *	Dispatch the datagram if it is small enough, otherwise fragment
 	 */
-	if (len <= SN_MTU(ifp, route.ro_rt)) {
+	if ((rt = rtcache_validate(&route)) == NULL)
+		;
+	else if (len <= SN_MTU(ifp, rt)) {
 		iso_gen_csum(m, CLNP_CKSUM_OFF, (int) clnp->cnf_hdr_len);
-		(void) (*ifp->if_output) (ifp, m, next_hop, route.ro_rt);
+		(void) (*ifp->if_output) (ifp, m, next_hop, rt);
 	} else {
-		(void) clnp_fragment(ifp, m, next_hop, len, seg_off, /* flags */ 0, route.ro_rt);
+		(void) clnp_fragment(ifp, m, next_hop, len, seg_off, /* flags */ 0, rt);
 	}
 
 done:
 	/*
 	 *	Free route
 	 */
-	rtcache_free((struct route *)&route);
+	rtcache_free(&route);
 }
 
 #ifdef	notdef
@@ -417,18 +420,18 @@ done:
  *
  * NOTES:			Assume that there is enough space for the address part.
  */
-caddr_t
+void *
 clnp_insert_addr(
-	caddr_t         bufp,	/* address of where addr part goes */
+	void *        bufp,	/* address of where addr part goes */
 	struct iso_addr *srcp,	/* ptr to src addr */
 	struct iso_addr *dstp)	/* ptr to dst addr */
 {
 	*bufp++ = dstp->isoa_len;
-	(void) bcopy((caddr_t) dstp, bufp, dstp->isoa_len);
+	(void)memcpy(bufp, dstp, dstp->isoa_len);
 	bufp += dstp->isoa_len;
 
 	*bufp++ = srcp->isoa_len;
-	(void) bcopy((caddr_t) srcp, bufp, srcp->isoa_len);
+	(void)memcpy(bufp, srcp, srcp->isoa_len);
 	bufp += srcp->isoa_len;
 
 	return bufp;
@@ -458,64 +461,56 @@ clnp_insert_addr(
 int
 clnp_route(
 	struct iso_addr *dst,		/* ptr to datagram destination */
-	struct route_iso *ro,		/* existing route structure */
+	struct route *ro,		/* existing route structure */
 	int             flags,		/* flags for routing */
-	struct sockaddr **first_hop,	/* result: fill in with ptr to
-					 * firsthop */
+	const struct sockaddr **first_hop,	/* result: fill in with ptr to
+					 	 * firsthop */
 	struct iso_ifaddr **ifa)	/* result: fill in with ptr to ifa */
 {
+	struct rtentry *rt;
+	int rc;
+	union {
+		struct sockaddr		dst;
+		struct sockaddr_iso	dsti;
+	} u;
+
 	if (flags & SO_DONTROUTE) {
 		struct iso_ifaddr *ia;
 
-		rtcache_free((struct route *)ro);
-		bzero((caddr_t) & ro->ro_dst, sizeof(ro->ro_dst));
-		bcopy((caddr_t) dst, (caddr_t) & ro->ro_dst.siso_addr,
-		      1 + (unsigned) dst->isoa_len);
-		ro->ro_dst.siso_family = AF_ISO;
-		ro->ro_dst.siso_len = sizeof(ro->ro_dst);
-		ia = iso_localifa(&ro->ro_dst);
-		if (ia == 0)
+		if ((rc = sockaddr_iso_init(&u.dsti, dst)) != 0)
+			return rc;
+		rtcache_setdst(ro, &u.dst);
+
+		if (rtcache_getdst(ro) == NULL)
 			return EADDRNOTAVAIL;
-		if (ifa)
+		ia = iso_localifa(satocsiso(rtcache_getdst(ro)));
+		if (ia == NULL)
+			return EADDRNOTAVAIL;
+		if (ifa != NULL)
 			*ifa = ia;
-		if (first_hop)
-			*first_hop = sisotosa(&ro->ro_dst);
+		if (first_hop != NULL)
+			*first_hop = rtcache_getdst(ro);
 		return 0;
 	}
 
-	if (bcmp(ro->ro_dst.siso_data, dst->isoa_genaddr, dst->isoa_len) != 0)
-		rtcache_free((struct route *)ro);
-	else
-		rtcache_check((struct route *)ro);
-
-	if (ro->ro_rt == NULL) {
-		/* set up new route structure */
-		bzero((caddr_t) & ro->ro_dst, sizeof(ro->ro_dst));
-		ro->ro_dst.siso_len = sizeof(ro->ro_dst);
-		ro->ro_dst.siso_family = AF_ISO;
-		Bcopy(dst, &ro->ro_dst.siso_addr, 1 + dst->isoa_len);
-		/* allocate new route */
-#ifdef ARGO_DEBUG
-		if (argo_debug[D_ROUTE]) {
-			printf("clnp_route: allocating new route to %s\n",
-			    clnp_iso_addrp(dst));
-		}
-#endif
-		rtcache_init((struct route *)ro);
-		if (ro->ro_rt == NULL)
-			return (ENETUNREACH);
+	/* set up new route structure */
+	if ((rc = sockaddr_iso_init(&u.dsti, dst)) != 0)
+		return rc;
+	if ((rt = rtcache_lookup(ro, &u.dst)) == NULL) {
+		rtcache_free(ro);
+		return ENETUNREACH;
 	}
-	ro->ro_rt->rt_use++;
-	if (ifa)
-		if ((*ifa = (struct iso_ifaddr *)ro->ro_rt->rt_ifa) == 0)
+	rt->rt_use++;
+	if (ifa != NULL)
+		if ((*ifa = (struct iso_ifaddr *)rt->rt_ifa) == NULL)
 			panic("clnp_route");
-	if (first_hop) {
-		if (ro->ro_rt->rt_flags & RTF_GATEWAY)
-			*first_hop = ro->ro_rt->rt_gateway;
+	if (first_hop != NULL) {
+		if (rt->rt_flags & RTF_GATEWAY)
+			*first_hop = rt->rt_gateway;
 		else
-			*first_hop = sisotosa(&ro->ro_dst);
+			*first_hop = rtcache_getdst(ro);
 	}
-	return (0);
+	return 0;
 }
 
 /*
@@ -539,9 +534,9 @@ int
 clnp_srcroute(
 	struct mbuf *options,		/* ptr to options */
 	struct clnp_optidx *oidx,	/* index to options */
-	struct route_iso *ro,		/* route structure */
-	struct sockaddr **first_hop,	/* RETURN: fill in with ptr to
-					 * firsthop */
+	struct route *ro,		/* route structure */
+	const struct sockaddr **first_hop,	/* RETURN: fill in with ptr to
+						 * firsthop */
 	struct iso_ifaddr **ifa,	/* RETURN: fill in with ptr to ifa */
 	struct iso_addr *final_dst)	/* final destination */
 {
@@ -555,13 +550,19 @@ clnp_srcroute(
 	if CLNPSRCRT_TERM
 		(oidx, options) {
 		dst.isoa_len = final_dst->isoa_len;
-		bcopy(final_dst->isoa_genaddr, dst.isoa_genaddr, dst.isoa_len);
+		if (sizeof(dst.isoa_genaddr) < (size_t)dst.isoa_len)
+			return EINVAL;
+		(void)memcpy(dst.isoa_genaddr, final_dst->isoa_genaddr,
+		    (size_t)dst.isoa_len);
 	} else {
 		/*
 		 * setup dst based on src rt specified
 		 */
 		dst.isoa_len = CLNPSRCRT_CLEN(oidx, options);
-		bcopy(CLNPSRCRT_CADDR(oidx, options), dst.isoa_genaddr, dst.isoa_len);
+		if (sizeof(dst.isoa_genaddr) < (unsigned)dst.isoa_len)
+			return EINVAL;
+		(void)memcpy(dst.isoa_genaddr, CLNPSRCRT_CADDR(oidx, options),
+		    (size_t)dst.isoa_len);
 	}
 
 	/*
@@ -575,7 +576,7 @@ clnp_srcroute(
 	 *	If complete src rt, first hop must be equal to dst
 	 */
 	if ((CLNPSRCRT_TYPE(oidx, options) == CLNPOVAL_COMPRT) &&
-	    (!iso_addrmatch1(&satosiso(*first_hop)->siso_addr, &dst))) {
+	    (!iso_addrmatch1(&satocsiso(*first_hop)->siso_addr, &dst))) {
 #ifdef ARGO_DEBUG
 		if (argo_debug[D_OPTIONS]) {
 			printf("clnp_srcroute: complete src route failed\n");
@@ -647,7 +648,7 @@ clnp_badmtu(
 	    rt, line, file);
 #ifdef ARGO_DEBUG
 	printf("route dst is ");
-	dump_isoaddr((struct sockaddr_iso *) rt_key(rt));
+	dump_isoaddr(satocsiso(rt_getkey(rt)));
 #endif
 	return ifp->if_mtu;
 }
@@ -665,11 +666,11 @@ clnp_badmtu(
  */
 void
 clnp_ypocb(
-	caddr_t         from,	/* src buffer */
-	caddr_t         to,	/* dst buffer */
+	void *        from,	/* src buffer */
+	void *        to,	/* dst buffer */
 	u_int           len)	/* number of bytes */
 {
 	while (len--)
-		*(to + len) = *(from + len);
+		*((char *)to + len) = *((char *)from + len);
 }
 #endif				/* ISO */

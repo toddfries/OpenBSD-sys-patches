@@ -1,4 +1,4 @@
-/*	$NetBSD: clmpcc.c,v 1.35 2007/10/19 11:59:49 ad Exp $ */
+/*	$NetBSD: clmpcc.c,v 1.40 2008/06/17 16:27:30 he Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clmpcc.c,v 1.35 2007/10/19 11:59:49 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clmpcc.c,v 1.40 2008/06/17 16:27:30 he Exp $");
 
 #include "opt_ddb.h"
 
@@ -246,7 +239,7 @@ clmpcc_channel_cmd(sc, chan, cmd)
 
 	if ( i == 0 )
 		printf("%s: channel %d command timeout (idle)\n",
-			sc->sc_dev.dv_xname, chan);
+			device_xname(&sc->sc_dev), chan);
 
 	clmpcc_wrreg(sc, CLMPCC_REG_CCR, cmd);
 }
@@ -327,8 +320,8 @@ clmpcc_attach(sc)
 
 		ch->ch_ibuf = malloc(clmpcc_ibuf_size * 2, M_DEVBUF, M_NOWAIT);
 		if ( ch->ch_ibuf == NULL ) {
-			printf("%s(%d): unable to allocate ring buffer\n",
-		    		sc->sc_dev.dv_xname, chan);
+			aprint_error_dev(&sc->sc_dev, "(%d): unable to allocate ring buffer\n",
+		    		chan);
 			return;
 		}
 
@@ -338,7 +331,7 @@ clmpcc_attach(sc)
 		tty_attach(tp);
 	}
 
-	printf("%s: %d channels available", sc->sc_dev.dv_xname,
+	aprint_error_dev(&sc->sc_dev, "%d channels available",
 					    CLMPCC_NUM_CHANS);
 	if ( cons_sc == sc ) {
 		printf(", console on channel %d.\n", cons_chan);
@@ -400,7 +393,7 @@ clmpcc_init(sc)
 		 * Watch out... If this chip is console, the message
 		 * probably won't be sent since we just reset it!
 		 */
-		printf("%s: Failed to reset chip\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "Failed to reset chip\n");
 		return -1;
 	}
 
@@ -498,10 +491,7 @@ clmpcc_shutdown(ch)
 }
 
 int
-clmpccopen(dev, flag, mode, l)
-	dev_t dev;
-	int flag, mode;
-	struct lwp *l;
+clmpccopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct clmpcc_softc *sc;
 	struct clmpcc_chan *ch;
@@ -509,7 +499,7 @@ clmpccopen(dev, flag, mode, l)
 	int oldch;
 	int error;
 
-	sc = device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+	sc = device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -602,13 +592,10 @@ bad:
 }
 
 int
-clmpccclose(dev, flag, mode, l)
-	dev_t dev;
-	int flag, mode;
-	struct lwp *l;
+clmpccclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct clmpcc_softc	*sc =
-		device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+		device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 	struct clmpcc_chan	*ch = &sc->sc_chans[CLMPCCCHAN(dev)];
 	struct tty		*tp = ch->ch_tty;
 	int s;
@@ -637,59 +624,44 @@ clmpccclose(dev, flag, mode, l)
 }
 
 int
-clmpccread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+clmpccread(dev_t dev, struct uio *uio, int flag)
 {
-	struct clmpcc_softc *sc = device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+	struct clmpcc_softc *sc = device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 	struct tty *tp = sc->sc_chans[CLMPCCCHAN(dev)].ch_tty;
 
 	return ((*tp->t_linesw->l_read)(tp, uio, flag));
 }
 
 int
-clmpccwrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+clmpccwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct clmpcc_softc *sc = device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+	struct clmpcc_softc *sc = device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 	struct tty *tp = sc->sc_chans[CLMPCCCHAN(dev)].ch_tty;
 
 	return ((*tp->t_linesw->l_write)(tp, uio, flag));
 }
 
 int
-clmpccpoll(dev, events, l)
-	dev_t dev;
-	int events;
-	struct lwp *l;
+clmpccpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct clmpcc_softc *sc = device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+	struct clmpcc_softc *sc = device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 	struct tty *tp = sc->sc_chans[CLMPCCCHAN(dev)].ch_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
 
 struct tty *
-clmpcctty(dev)
-	dev_t dev;
+clmpcctty(dev_t dev)
 {
-	struct clmpcc_softc *sc = device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+	struct clmpcc_softc *sc = device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 
 	return (sc->sc_chans[CLMPCCCHAN(dev)].ch_tty);
 }
 
 int
-clmpccioctl(dev, cmd, data, flag, l)
-	dev_t dev;
-	u_long cmd;
-	void *data;
-	int flag;
-	struct lwp *l;
+clmpccioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
-	struct clmpcc_softc *sc = device_lookup(&clmpcc_cd, CLMPCCUNIT(dev));
+	struct clmpcc_softc *sc = device_lookup_private(&clmpcc_cd, CLMPCCUNIT(dev));
 	struct clmpcc_chan *ch = &sc->sc_chans[CLMPCCCHAN(dev)];
 	struct tty *tp = ch->ch_tty;
 	int error;
@@ -845,12 +817,10 @@ clmpcc_modem_control(ch, bits, howto)
 }
 
 static int
-clmpcc_param(tp, t)
-	struct tty *tp;
-	struct termios *t;
+clmpcc_param(struct tty *tp, struct termios *t)
 {
 	struct clmpcc_softc *sc =
-	    device_lookup(&clmpcc_cd, CLMPCCUNIT(tp->t_dev));
+	    device_lookup_private(&clmpcc_cd, CLMPCCUNIT(tp->t_dev));
 	struct clmpcc_chan *ch = &sc->sc_chans[CLMPCCCHAN(tp->t_dev)];
 	u_char cor;
 	u_char oldch;
@@ -1038,11 +1008,10 @@ clmpcc_set_params(ch)
 }
 
 static void
-clmpcc_start(tp)
-	struct tty *tp;
+clmpcc_start(struct tty *tp)
 {
 	struct clmpcc_softc *sc =
-	    device_lookup(&clmpcc_cd, CLMPCCUNIT(tp->t_dev));
+	    device_lookup_private(&clmpcc_cd, CLMPCCUNIT(tp->t_dev));
 	struct clmpcc_chan *ch = &sc->sc_chans[CLMPCCCHAN(tp->t_dev)];
 	u_int oldch;
 	int s;
@@ -1050,14 +1019,7 @@ clmpcc_start(tp)
 	s = spltty();
 
 	if ( ISCLR(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY) ) {
-		if ( tp->t_outq.c_cc <= tp->t_lowat ) {
-			if ( ISSET(tp->t_state, TS_ASLEEP) ) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
-
+		ttypull(tp);
 		if ( ISSET(ch->ch_flags, CLMPCC_FLG_START_BREAK |
 					 CLMPCC_FLG_END_BREAK) ||
 		     tp->t_outq.c_cc > 0 ) {
@@ -1085,12 +1047,10 @@ clmpcc_start(tp)
  * Stop output on a line.
  */
 void
-clmpccstop(tp, flag)
-	struct tty *tp;
-	int flag;
+clmpccstop(struct tty *tp, int flag)
 {
 	struct clmpcc_softc *sc =
-	    device_lookup(&clmpcc_cd, CLMPCCUNIT(tp->t_dev));
+	    device_lookup_private(&clmpcc_cd, CLMPCCUNIT(tp->t_dev));
 	struct clmpcc_chan *ch = &sc->sc_chans[CLMPCCCHAN(tp->t_dev)];
 	int s;
 

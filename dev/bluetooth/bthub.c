@@ -1,228 +1,263 @@
-/*	$OpenBSD: bthub.c,v 1.4 2008/02/24 21:46:19 uwe Exp $	*/
+/*	$NetBSD: bthub.c,v 1.14 2008/06/12 21:47:11 cegger Exp $	*/
 
-/*
- * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
+/*-
+ * Copyright (c) 2006 Itronix Inc.
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Written by Iain Hibbert for Itronix Inc.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of Itronix Inc. may not be used to endorse
+ *    or promote products derived from this software without specific
+ *    prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY ITRONIX INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL ITRONIX INC. BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bthub.c,v 1.14 2008/06/12 21:47:11 cegger Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/ioctl.h>
-#include <sys/vnode.h>
+#include <sys/fcntl.h>
+#include <sys/kernel.h>
+#include <sys/queue.h>
+#include <sys/malloc.h>
+#include <sys/mbuf.h>
+#include <sys/proc.h>
+#include <sys/systm.h>
+
+#include <prop/proplib.h>
 
 #include <netbt/bluetooth.h>
 
 #include <dev/bluetooth/btdev.h>
 
-struct bthub_softc {
-	struct device sc_dev;
-	int sc_open;
-	bdaddr_t sc_laddr;
-	LIST_HEAD(, btdev) sc_list;
+#include "ioconf.h"
+
+/*****************************************************************************
+ *
+ *	Bluetooth Device Hub
+ */
+
+/* autoconf(9) glue */
+static int	bthub_match(device_t, struct cfdata *, void *);
+static void	bthub_attach(device_t, device_t, void *);
+static int	bthub_detach(device_t, int);
+
+CFATTACH_DECL_NEW(bthub, 0,
+    bthub_match, bthub_attach, bthub_detach, NULL);
+
+/* control file */
+dev_type_ioctl(bthubioctl);
+
+const struct cdevsw bthub_cdevsw = {
+	nullopen, nullclose, noread, nowrite, bthubioctl,
+	nostop, notty, nopoll, nommap, nokqfilter, D_OTHER,
 };
 
-int	bthub_match(struct device *, void *, void *);
-void	bthub_attach(struct device *, struct device *, void *);
-int	bthub_detach(struct device *, int);
-int	bthub_print(void *, const char *);
-int	bthub_devioctl(dev_t, u_long, struct btdev_attach_args *);
+/* bthub functions */
+static int	bthub_print(void *, const char *);
+static int	bthub_pioctl(dev_t, unsigned long, prop_dictionary_t, int, struct lwp *);
 
-struct cfattach bthub_ca = {
-	sizeof(struct bthub_softc), bthub_match, bthub_attach, bthub_detach
-};
+/*****************************************************************************
+ *
+ *	bthub autoconf(9) routines
+ *
+ *	A Hub is attached to each Bluetooth Controller as it is enabled
+ */
 
-struct cfdriver bthub_cd = {
-	NULL, "bthub", DV_DULL
-};
-
-int
-bthub_match(struct device *parent, void *match, void *aux)
+static int
+bthub_match(device_t self, struct cfdata *cfdata, void *arg)
 {
-	return (1);
+
+	return 1;
 }
 
-void
-bthub_attach(struct device *parent, struct device *self, void *aux)
+static void
+bthub_attach(device_t parent, device_t self, void *aux)
 {
-	struct bthub_softc *sc = (struct bthub_softc *)self;
 	bdaddr_t *addr = aux;
+	prop_dictionary_t dict;
+	prop_object_t obj;
 
-	sc->sc_open = 0;
-	bdaddr_copy(&sc->sc_laddr, addr);
+	dict = device_properties(self);
+	obj = prop_data_create_data(addr, sizeof(*addr));
+	prop_dictionary_set(dict, BTDEVladdr, obj);
+	prop_object_release(obj);
 
-	printf(" %02x:%02x:%02x:%02x:%02x:%02x\n",
-	    addr->b[5], addr->b[4], addr->b[3],
-	    addr->b[2], addr->b[1], addr->b[0]);
+	aprint_verbose(" %s %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x",
+			BTDEVladdr,
+			addr->b[5], addr->b[4], addr->b[3],
+			addr->b[2], addr->b[1], addr->b[0]);
+
+	aprint_normal("\n");
 }
 
-int
-bthub_detach(struct device *self, int flags)
+static int
+bthub_detach(device_t self, int flags)
 {
-	struct bthub_softc *sc = (struct bthub_softc *)self;
-	struct btdev *btdev;
-	int maj, mn;
+
+	return config_detach_children(self, flags);
+}
+
+/*****************************************************************************
+ *
+ *	bthub access functions to control device
+ */
+
+int
+bthubioctl(dev_t devno, unsigned long cmd, void *data, int flag, struct lwp *l)
+{
+	prop_dictionary_t dict;
 	int err;
 
-	/* Locate the major number */
-	for (maj = 0; maj < nchrdev; maj++)
-		if (cdevsw[maj].d_open == bthubopen)
-			break;
-
-	/* Nuke the vnodes for any open instances (calls close) */
-	mn = self->dv_unit;
-	vdevgone(maj, mn, mn, VCHR);
-
-	/* Detach all child devices. */
-	while (!LIST_EMPTY(&sc->sc_list)) {
-		btdev = LIST_FIRST(&sc->sc_list);
-		LIST_REMOVE(btdev, sc_next);
-
-		err = config_detach(&btdev->sc_dev, flags);
-		if (err && (flags & DETACH_FORCE) == 0) {
-			LIST_INSERT_HEAD(&sc->sc_list, btdev, sc_next);
-			return err;
-		}
-	}
-
-	return (0);
-}
-
-int
-bthub_print(void *aux, const char *parentname)
-{
-	struct btdev_attach_args *bd = aux;
-	bdaddr_t *raddr = &bd->bd_raddr;
-
-	if (parentname != NULL)
-		return QUIET;
-
-	printf(" %02x:%02x:%02x:%02x:%02x:%02x",
-	    raddr->b[5], raddr->b[4], raddr->b[3], raddr->b[2],
-	    raddr->b[1], raddr->b[0]);
-	return QUIET;
-}
-
-int
-bthubopen(dev_t dev, int flag, int mode, struct proc *p)
-{
-	struct device *dv;
-	struct bthub_softc *sc;
-
-	dv = device_lookup(&bthub_cd, minor(dev));
-	if (dv == NULL)
-		return (ENXIO);
-
-	sc = (struct bthub_softc *)dv;
-	if (sc->sc_open) {
-		device_unref(dv);
-		return (EBUSY);
-	}
-
-	sc->sc_open = 1;
-	device_unref(dv);
-
-	return (0);
-}
-
-int
-bthubclose(dev_t dev, int flag, int mode, struct proc *p)
-{
-	struct device *dv;
-	struct bthub_softc *sc;
-
-	dv = device_lookup(&bthub_cd, minor(dev));
-	sc = (struct bthub_softc *)dv;
-	sc->sc_open = 0;
-	device_unref(dv);
-
-	return (0);
-}
-
-int
-bthubioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
-{
-	struct btdev_attach_args *bd;
-	int err;
-
-	switch (cmd) {
+	switch(cmd) {
 	case BTDEV_ATTACH:
 	case BTDEV_DETACH:
-		bd = (struct btdev_attach_args *)data;
-		err = bthub_devioctl(dev, cmd, bd);
+		/* load dictionary */
+		err = prop_dictionary_copyin_ioctl(data, cmd, &dict);
+		if (err == 0) {
+			err = bthub_pioctl(devno, cmd, dict, flag, l);
+			prop_object_release(dict);
+		}
 		break;
+
 	default:
-		err = ENOTTY;
+		err = EPASSTHROUGH;
+		break;
 	}
 
 	return err;
 }
 
-int
-bthub_devioctl(dev_t dev, u_long cmd, struct btdev_attach_args *bd)
+static int
+bthub_pioctl(dev_t devno, unsigned long cmd, prop_dictionary_t dict,
+    int flag, struct lwp *l)
 {
-	struct device *dv;
-	struct bthub_softc *sc;
-	struct btdev *btdev;
+	prop_data_t laddr, raddr;
+	prop_string_t service;
+	prop_dictionary_t prop;
+	prop_object_t obj;
+	device_t dev, self;
+	deviter_t di;
 	int unit;
 
-	/* Locate the relevant bthub. */
-	for (unit = 0; unit < bthub_cd.cd_ndevs; unit++) {
-		if ((dv = bthub_cd.cd_devs[unit]) == NULL)
+	/* validate local address */
+	laddr = prop_dictionary_get(dict, BTDEVladdr);
+	if (prop_data_size(laddr) != sizeof(bdaddr_t))
+		return EINVAL;
+
+	/* locate the relevant bthub */
+	for (unit = 0 ; ; unit++) {
+		if (unit == bthub_cd.cd_ndevs)
+			return ENXIO;
+
+		self = device_lookup(&bthub_cd, unit);
+		if (self == NULL)
 			continue;
 
-		sc = (struct bthub_softc *)dv;
-		if (bdaddr_same(&sc->sc_laddr, &bd->bd_laddr))
+		prop = device_properties(self);
+		obj = prop_dictionary_get(prop, BTDEVladdr);
+		if (prop_data_equals(laddr, obj))
 			break;
 	}
-	if (unit == bthub_cd.cd_ndevs)
-		return (ENXIO);
 
-	/* Locate matching child device, if any. */
-	LIST_FOREACH(btdev, &sc->sc_list, sc_next) {
-		if (!bdaddr_same(&btdev->sc_addr, &bd->bd_raddr))
+	/* validate remote address */
+	raddr = prop_dictionary_get(dict, BTDEVraddr);
+	if (prop_data_size(raddr) != sizeof(bdaddr_t)
+	    || bdaddr_any(prop_data_data_nocopy(raddr)))
+		return EINVAL;
+
+	/* validate service name */
+	service = prop_dictionary_get(dict, BTDEVservice);
+	if (prop_object_type(service) != PROP_TYPE_STRING)
+		return EINVAL;
+
+	/* locate matching child device, if any */
+	deviter_init(&di, 0);
+	while ((dev = deviter_next(&di)) != NULL) {
+		if (device_parent(dev) != self)
 			continue;
-		if (btdev->sc_type != bd->bd_type)
+
+		prop = device_properties(dev);
+
+		obj = prop_dictionary_get(prop, BTDEVraddr);
+		if (!prop_object_equals(raddr, obj))
 			continue;
+
+		obj = prop_dictionary_get(prop, BTDEVservice);
+		if (!prop_object_equals(service, obj))
+			continue;
+
 		break;
 	}
+	deviter_release(&di);
 
 	switch (cmd) {
-	case BTDEV_ATTACH:
-		if (btdev != NULL)
+	case BTDEV_ATTACH:	/* attach BTDEV */
+		if (dev != NULL)
 			return EADDRINUSE;
 
-		dv = config_found(&sc->sc_dev, bd, bthub_print);
-		if (dv == NULL)
+		dev = config_found(self, dict, bthub_print);
+		if (dev == NULL)
 			return ENXIO;
 
-		btdev = (struct btdev *)dv;
-		bdaddr_copy(&btdev->sc_addr, &bd->bd_raddr);
-		btdev->sc_type = bd->bd_type;
-		LIST_INSERT_HEAD(&sc->sc_list, btdev, sc_next);
+		prop = device_properties(dev);
+		prop_dictionary_set(prop, BTDEVladdr, laddr);
+		prop_dictionary_set(prop, BTDEVraddr, raddr);
+		prop_dictionary_set(prop, BTDEVservice, service);
 		break;
 
-	case BTDEV_DETACH:
-		if (btdev == NULL)
+	case BTDEV_DETACH:	/* detach BTDEV */
+		if (dev == NULL)
 			return ENXIO;
 
-		LIST_REMOVE(btdev, sc_next);
-		config_detach(&btdev->sc_dev, DETACH_FORCE);
+		config_detach(dev, DETACH_FORCE);
 		break;
 	}
 
 	return 0;
 }
 
+static int
+bthub_print(void *aux, const char *pnp)
+{
+	prop_dictionary_t dict = aux;
+	prop_object_t obj;
+	const bdaddr_t *raddr;
+
+	if (pnp != NULL) {
+		obj = prop_dictionary_get(dict, BTDEVtype);
+		aprint_normal("%s: %s '%s',", pnp, BTDEVtype,
+					prop_string_cstring_nocopy(obj));
+	}
+
+	obj = prop_dictionary_get(dict, BTDEVraddr);
+	raddr = prop_data_data_nocopy(obj);
+
+	aprint_verbose(" %s %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x",
+			BTDEVraddr,
+			raddr->b[5], raddr->b[4], raddr->b[3],
+			raddr->b[2], raddr->b[1], raddr->b[0]);
+
+	return UNCONF;
+}

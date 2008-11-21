@@ -1,5 +1,4 @@
-/*	$OpenBSD: krpc_subr.c,v 1.15 2008/05/23 15:51:12 thib Exp $	*/
-/*	$NetBSD: krpc_subr.c,v 1.12.4.1 1996/06/07 00:52:26 cgd Exp $	*/
+/*	$NetBSD: krpc_subr.c,v 1.33 2008/04/24 11:38:39 ad Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon Ross, Adam Glass
@@ -43,9 +42,11 @@
  *               @(#) Header: rpc.c,v 1.12 93/09/28 08:31:56 leres Exp  (LBL)
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: krpc_subr.c,v 1.33 2008/04/24 11:38:39 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
@@ -54,13 +55,15 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 
-#include <net/if.h>
 #include <netinet/in.h>
 
 #include <nfs/rpcv2.h>
 #include <nfs/krpc.h>
 #include <nfs/xdr_subs.h>
-#include <dev/rndvar.h>
+#include <nfs/nfsproto.h> /* XXX NFSX_V3FHMAX for next */
+#include <nfs/nfs.h>
+#include <nfs/nfsmount.h>
+#include <nfs/nfsdiskless.h> /* XXX decl nfs_boot_sendrecv */
 
 /*
  * Kernel support for Sun RPC
@@ -99,39 +102,40 @@ struct rpc_call {
 
 struct rpc_reply {
 	u_int32_t rp_xid;		/* request transaction id */
-	int32_t   rp_direction;		/* call direction (1) */
-	int32_t   rp_astatus;		/* accept status (0: accepted) */
+	int32_t  rp_direction;		/* call direction (1) */
+	int32_t  rp_astatus;		/* accept status (0: accepted) */
 	union {
-		u_int32_t rpu_errno;
+		/* rejected */
+		struct {
+			u_int32_t rej_stat;
+			u_int32_t rej_val1;
+			u_int32_t rej_val2;
+		} rpu_rej;
+		/* accepted */
 		struct {
 			struct auth_info rok_auth;
 			u_int32_t	rok_status;
 		} rpu_rok;
 	} rp_u;
 };
-#define rp_errno  rp_u.rpu_errno
+#define rp_rstat  rp_u.rpu_rej.rej_stat
 #define rp_auth   rp_u.rpu_rok.rok_auth
 #define rp_status rp_u.rpu_rok.rok_status
 
 #define MIN_REPLY_HDR 16	/* xid, dir, astat, errno */
 
-/*
- * What is the longest we will wait before re-sending a request?
- * Note this is also the frequency of "RPC timeout" messages.
- * The re-send loop count sup linearly to this maximum, so the
- * first complaint will happen after (1+2+3+4+5)=15 seconds.
- */
-#define	MAX_RESEND_DELAY 5	/* seconds */
+static int krpccheck __P((struct mbuf*, void*));
 
 /*
  * Call portmap to lookup a port number for a particular rpc program
  * Returns non-zero error on failure.
  */
 int
-krpc_portmap(sin,  prog, vers, portp)
+krpc_portmap(sin,  prog, vers, proto, portp, l)
 	struct sockaddr_in *sin;		/* server address */
-	u_int prog, vers;	/* host order */
+	u_int prog, vers, proto;	/* host order */
 	u_int16_t *portp;	/* network order */
+	struct lwp *l;
 {
 	struct sdata {
 		u_int32_t prog;		/* call program */
@@ -159,13 +163,13 @@ krpc_portmap(sin,  prog, vers, portp)
 	/* Do the RPC to get it. */
 	sdata->prog = txdr_unsigned(prog);
 	sdata->vers = txdr_unsigned(vers);
-	sdata->proto = txdr_unsigned(IPPROTO_UDP);
+	sdata->proto = txdr_unsigned(proto);
 	sdata->port = 0;
 
 	sin->sin_port = htons(PMAPPORT);
 	error = krpc_call(sin, PMAPPROG, PMAPVERS,
-	    PMAPPROC_GETPORT, &m, NULL, -1);
-	if (error) 
+					  PMAPPROC_GETPORT, &m, NULL, l);
+	if (error)
 		return error;
 
 	if (m->m_len < sizeof(*rdata)) {
@@ -180,30 +184,53 @@ krpc_portmap(sin,  prog, vers, portp)
 	return 0;
 }
 
+static int krpccheck(m, context)
+struct mbuf *m;
+void *context;
+{
+	struct rpc_reply *reply;
+
+	/* Does the reply contain at least a header? */
+	if (m->m_pkthdr.len < MIN_REPLY_HDR)
+		return(-1);
+	if (m->m_len < sizeof(struct rpc_reply)) {
+		m = m_pullup(m, sizeof(struct rpc_reply));
+		if (m == NULL)
+			return(-1);
+	}
+	reply = mtod(m, struct rpc_reply *);
+
+	/* Is it the right reply? */
+	if (reply->rp_direction != txdr_unsigned(RPC_REPLY))
+		return(-1);
+
+	if (reply->rp_xid != txdr_unsigned(*(u_int32_t*)context))
+		return(-1);
+
+	return(0);
+}
+
 /*
  * Do a remote procedure call (RPC) and wait for its reply.
  * If from_p is non-null, then we are doing broadcast, and
  * the address from whence the response came is saved there.
  */
 int
-krpc_call(sa, prog, vers, func, data, from_p, retries)
+krpc_call(sa, prog, vers, func, data, from_p, l)
 	struct sockaddr_in *sa;
 	u_int prog, vers, func;
 	struct mbuf **data;	/* input/output */
 	struct mbuf **from_p;	/* output */
-	int retries;
+	struct lwp *l;
 {
 	struct socket *so;
 	struct sockaddr_in *sin;
-	struct mbuf *m, *nam, *mhead, *from, *mopt;
+	struct mbuf *m, *nam, *mhead, *from;
 	struct rpc_call *call;
 	struct rpc_reply *reply;
-	struct uio auio;
-	int error, rcvflg, timo, secs, len;
-	static u_int32_t xid = 0;
-	u_int32_t newxid;
-	int *ip;
-	struct timeval *tv;
+	int error, len;
+	static u_int32_t xid = ~0xFF;
+	u_int16_t tport;
 
 	/*
 	 * Validate address family.
@@ -219,27 +246,17 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	/*
 	 * Create socket and set its receive timeout.
 	 */
-	if ((error = socreate(AF_INET, &so, SOCK_DGRAM, 0)))
+	if ((error = socreate(AF_INET, &so, SOCK_DGRAM, 0, l, NULL)))
 		goto out;
 
-	m = m_get(M_WAIT, MT_SOOPTS);
-	tv = mtod(m, struct timeval *);
-	m->m_len = sizeof(*tv);
-	tv->tv_sec = 1;
-	tv->tv_usec = 0;
-	if ((error = sosetopt(so, SOL_SOCKET, SO_RCVTIMEO, m)))
+	if ((error = nfs_boot_setrecvtimo(so)))
 		goto out;
 
 	/*
 	 * Enable broadcast if necessary.
 	 */
 	if (from_p) {
-		int32_t *on;
-		m = m_get(M_WAIT, MT_SOOPTS);
-		on = mtod(m, int32_t *);
-		m->m_len = sizeof(*on);
-		*on = 1;
-		if ((error = sosetopt(so, SOL_SOCKET, SO_BROADCAST, m)))
+		if ((error = nfs_boot_enbroadcast(so)))
 			goto out;
 	}
 
@@ -248,47 +265,24 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	 * because some NFS servers refuse requests from
 	 * non-reserved (non-privileged) ports.
 	 */
-	m = m_getclr(M_WAIT, MT_SONAME);
-	sin = mtod(m, struct sockaddr_in *);
-	sin->sin_len = m->m_len = sizeof(*sin);
-	sin->sin_family = AF_INET;
-	sin->sin_addr.s_addr = INADDR_ANY;
-
-	MGET(mopt, M_WAIT, MT_SOOPTS);
-	mopt->m_len = sizeof(int);
-	ip = mtod(mopt, int *);
-	*ip = IP_PORTRANGE_LOW;
-	error = sosetopt(so, IPPROTO_IP, IP_PORTRANGE, mopt);
-	if (error)
-		goto out;
-
-	MGET(m, M_WAIT, MT_SONAME);
-	sin = mtod(m, struct sockaddr_in *);
-	sin->sin_len = m->m_len = sizeof (struct sockaddr_in);
-	sin->sin_family = AF_INET;
-	sin->sin_addr.s_addr = INADDR_ANY;
-	sin->sin_port = htons(0);
-	error = sobind(so, m, &proc0);
-	m_freem(m);
+	tport = IPPORT_RESERVED;
+	do {
+		tport--;
+		error = nfs_boot_sobind_ipport(so, tport, l);
+	} while (error == EADDRINUSE &&
+			 tport > IPPORT_RESERVED / 2);
 	if (error) {
 		printf("bind failed\n");
 		goto out;
 	}
-
-	MGET(mopt, M_WAIT, MT_SOOPTS);
-	mopt->m_len = sizeof(int);
-	ip = mtod(mopt, int *);
-	*ip = IP_PORTRANGE_DEFAULT;
-	error = sosetopt(so, IPPROTO_IP, IP_PORTRANGE, mopt);
-	if (error)
-		goto out;
 
 	/*
 	 * Setup socket address for the server.
 	 */
 	nam = m_get(M_WAIT, MT_SONAME);
 	sin = mtod(nam, struct sockaddr_in *);
-	bcopy((caddr_t)sa, (caddr_t)sin, (nam->m_len = sa->sin_len));
+	memcpy((void *)sin, (void *)sa,
+		  (nam->m_len = sa->sin_len));
 
 	/*
 	 * Prepend RPC message header.
@@ -297,10 +291,9 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	mhead->m_next = *data;
 	call = mtod(mhead, struct rpc_call *);
 	mhead->m_len = sizeof(*call);
-	bzero((caddr_t)call, sizeof(*call));
+	memset((void *)call, 0, sizeof(*call));
 	/* rpc_call part */
-	while ((newxid = arc4random()) == xid);
-	xid = newxid;
+	xid++;
 	call->rp_xid = txdr_unsigned(xid);
 	/* call->rp_direction = 0; */
 	call->rp_rpcvers = txdr_unsigned(2);
@@ -326,110 +319,61 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	mhead->m_pkthdr.len = len;
 	mhead->m_pkthdr.rcvif = NULL;
 
-	/*
-	 * Send it, repeatedly, until a reply is received,
-	 * but delay each re-send by an increasing amount.
-	 * If the delay hits the maximum, start complaining.
-	 */
-	for (timo = 0; retries; retries--) {
-		/* Send RPC request (or re-send). */
-		m = m_copym(mhead, 0, M_COPYALL, M_WAIT);
-		if (m == NULL) {
-			error = ENOBUFS;
-			goto out;
+	error = nfs_boot_sendrecv(so, nam, 0, mhead, krpccheck, &m, &from,
+	    &xid, l);
+	if (error)
+		goto out;
+
+	/* m_pullup() was done in krpccheck() */
+	reply = mtod(m, struct rpc_reply *);
+
+	/* Was RPC accepted? (authorization OK) */
+	if (reply->rp_astatus != 0) {
+		/* Note: This is NOT an error code! */
+		error = fxdr_unsigned(u_int32_t, reply->rp_rstat);
+		switch (error) {
+		    case RPC_MISMATCH:
+			/* .re_status = RPC_VERSMISMATCH; */
+			error = ERPCMISMATCH;
+			break;
+		    case RPC_AUTHERR:
+			/* .re_status = RPC_AUTHERROR; */
+			error = EAUTH;
+			break;
+		    default:
+			/* unexpected */
+			error = EBADRPC;
+			break;
 		}
-		error = sosend(so, nam, NULL, m, NULL, 0);
-		if (error) {
-			printf("krpc_call: sosend: %d\n", error);
-			goto out;
+		goto out;
+	}
+
+	/* Did the call succeed? */
+	if (reply->rp_status != 0) {
+		/* Note: This is NOT an error code! */
+		error = fxdr_unsigned(u_int32_t, reply->rp_status);
+		switch (error) {
+		    case RPC_PROGUNAVAIL:
+			error = EPROGUNAVAIL;
+			break;
+		    case RPC_PROGMISMATCH:
+			error = EPROGMISMATCH;
+			break;
+		    case RPC_PROCUNAVAIL:
+			error = EPROCUNAVAIL;
+			break;
+		    case RPC_GARBAGE:
+		    default:
+			error = EBADRPC;
 		}
-		m = NULL;
-
-		/* Determine new timeout. */
-		if (timo < MAX_RESEND_DELAY)
-			timo++;
-		else
-			printf("RPC timeout for server %s (0x%x) prog %u\n",
-			    inet_ntoa(sin->sin_addr),
-			    ntohl(sin->sin_addr.s_addr), prog);
-
-		/*
-		 * Wait for up to timo seconds for a reply.
-		 * The socket receive timeout was set to 1 second.
-		 */
-		secs = timo;
-		while (secs > 0) {
-			if (from) {
-				m_freem(from);
-				from = NULL;
-			}
-			if (m) {
-				m_freem(m);
-				m = NULL;
-			}
-			auio.uio_resid = len = 1<<16;
-			auio.uio_procp = NULL;
-			rcvflg = 0;
-			error = soreceive(so, &from, &auio, &m, NULL, &rcvflg);
-			if (error == EWOULDBLOCK) {
-				secs--;
-				continue;
-			}
-			if (error)
-				goto out;
-			len -= auio.uio_resid;
-
-			/* Does the reply contain at least a header? */
-			if (len < MIN_REPLY_HDR)
-				continue;
-			if (m->m_len < MIN_REPLY_HDR)
-				continue;
-			reply = mtod(m, struct rpc_reply *);
-
-			/* Is it the right reply? */
-			if (reply->rp_direction != txdr_unsigned(RPC_REPLY))
-				continue;
-
-			if (reply->rp_xid != txdr_unsigned(xid))
-				continue;
-
-			/* Was RPC accepted? (authorization OK) */
-			if (reply->rp_astatus != 0) {
-				error = fxdr_unsigned(u_int32_t, reply->rp_errno);
-				printf("rpc denied, error=%d\n", error);
-				continue;
-			}
-
-			/* Did the call succeed? */
-			if (reply->rp_status != 0) {
-				error = fxdr_unsigned(u_int32_t, reply->rp_status);
-				printf("rpc denied, status=%d\n", error);
-				continue;
-			}
-
-			goto gotreply;	/* break two levels */
-
-		} /* while secs */
-	} /* forever send/receive */
-
-	error = ETIMEDOUT;
-	goto out;
-
- gotreply:
+		goto out;
+	}
 
 	/*
-	 * Get RPC reply header into first mbuf,
-	 * get its length, then strip it off.
+	 * OK, we have received a good reply!
+	 * Get its length, then strip it off.
 	 */
 	len = sizeof(*reply);
-	if (m->m_len < len) {
-		m = m_pullup(m, len);
-		if (m == NULL) {
-			error = ENOBUFS;
-			goto out;
-		}
-	}
-	reply = mtod(m, struct rpc_reply *);
 	if (reply->rp_auth.authtype != 0) {
 		len += fxdr_unsigned(u_int32_t, reply->rp_auth.authlen);
 		len = (len + 3) & ~3; /* XXX? */
@@ -438,7 +382,7 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 
 	/* result */
 	*data = m;
-	if (from_p) {
+	if (from_p && error == 0) {
 		*from_p = from;
 		from = NULL;
 	}
@@ -483,7 +427,7 @@ xdr_string_encode(str, len)
 
 	m = m_get(M_WAIT, MT_DATA);
 	if (mlen > MLEN) {
-		MCLGET(m, M_WAIT);
+		m_clget(m, M_WAIT);
 		if ((m->m_flags & M_EXT) == 0) {
 			(void) m_free(m);	/* There can be only one. */
 			return (NULL);
@@ -492,7 +436,7 @@ xdr_string_encode(str, len)
 	xs = mtod(m, struct xdr_string *);
 	m->m_len = mlen;
 	xs->len = txdr_unsigned(len);
-	bcopy(str, xs->data, len);
+	memcpy(xs->data, str, len);
 	return (m);
 }
 
@@ -517,10 +461,6 @@ xdr_string_decode(m, str, len_p)
 
 	if (slen > *len_p)
 		slen = *len_p;
-	if (slen > m->m_pkthdr.len) {
-		m_freem(m);
-		return (NULL);
-	}
 	m_copydata(m, 4, slen, str);
 	m_adj(m, mlen);
 

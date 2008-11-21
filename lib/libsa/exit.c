@@ -1,5 +1,4 @@
-/*	$OpenBSD: exit.c,v 1.9 2004/01/03 14:08:53 espie Exp $	*/
-/*	$NetBSD: exit.c,v 1.11 1996/12/01 20:22:19 pk Exp $	*/
+/*	$NetBSD: exit.c,v 1.17 2007/11/24 13:20:55 isaki Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
@@ -29,32 +28,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/stdarg.h>
-
 #include "stand.h"
 
-__dead void
-panic(const char *fmt, ...)
-{
-	extern void closeall(void);
-	va_list ap;
-	static int paniced;
-
-	if (!paniced) {
-		paniced = 1;
-		closeall();
-	}
-
-	va_start(ap, fmt);
-	vprintf(fmt, ap);
-	printf("\n");
-	va_end(ap);
-	_rtt();
-	/*NOTREACHED*/
-}
-
 void
-exit(void)
+exit(int arg)
 {
 	panic("exit");
 	/*NOTREACHED*/

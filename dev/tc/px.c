@@ -1,4 +1,4 @@
-/* 	$NetBSD: px.c,v 1.31 2007/10/19 12:01:19 ad Exp $	*/
+/* 	$NetBSD: px.c,v 1.34 2008/07/09 13:19:33 joerg Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: px.c,v 1.31 2007/10/19 12:01:19 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: px.c,v 1.34 2008/07/09 13:19:33 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,16 +103,16 @@ static int	px_pbuf_post(struct stic_info *, u_int32_t *);
 void	px_cnattach(tc_addr_t);
 
 struct px_softc {
-	struct	device px_dv;
+	device_t px_dev;
 	struct	stic_info *px_si;
 	volatile u_int32_t	*px_qpoll[PX_BUF_COUNT];
 };
 
-CFATTACH_DECL(px, sizeof(struct px_softc),
+CFATTACH_DECL_NEW(px, sizeof(struct px_softc),
     px_match, px_attach, NULL, NULL);
 
 static int
-px_match(struct device *parent, struct cfdata *match, void *aux)
+px_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct tc_attach_args *ta;
 
@@ -129,7 +122,7 @@ px_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 static void
-px_attach(struct device *parent, struct device *self, void *aux)
+px_attach(device_t parent, device_t self, void *aux)
 {
 	struct stic_info *si;
 	struct tc_attach_args *ta;
@@ -139,6 +132,8 @@ px_attach(struct device *parent, struct device *self, void *aux)
 
 	px = device_private(self);
 	ta = (struct tc_attach_args *)aux;
+
+	px->px_dev = self;
 
 	if (ta->ta_addr == stic_consinfo.si_slotbase) {
 		si = &stic_consinfo;
@@ -268,7 +263,7 @@ px_intr(void *cookie)
 	 * Simply clear the flag and report the error.
 	 */
 	if ((state & STIC_INT_E) != 0) {
-		printf("%s: error intr, %x %x %x %x %x", px->px_dv.dv_xname,
+		aprint_error_dev(px->px_dev, "error intr, %x %x %x %x %x",
 		    sr->sr_ipdvint, sr->sr_sticsr, sr->sr_buscsr,
 		    sr->sr_busadr, sr->sr_busdat);
 		sr->sr_ipdvint = STIC_INT_E_WE | STIC_INT_E_EN;

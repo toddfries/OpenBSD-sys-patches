@@ -1,4 +1,4 @@
-/*	$NetBSD: acpi_wakeup.c,v 1.4 2008/04/03 10:20:18 jmcneill Exp $	*/
+/*	$NetBSD: acpi_wakeup.c,v 1.11 2008/11/17 23:29:49 joerg Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: acpi_wakeup.c,v 1.4 2008/04/03 10:20:18 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: acpi_wakeup.c,v 1.11 2008/11/17 23:29:49 joerg Exp $");
 
 /*-
  * Copyright (c) 2001 Takanori Watanabe <takawata@jp.freebsd.org>
@@ -116,7 +109,7 @@ static paddr_t acpi_wakeup_paddr = 3 * PAGE_SIZE;
 static vaddr_t acpi_wakeup_vaddr;
 
 static int acpi_md_node = CTL_EOL;
-static int acpi_md_vbios_reset = 1;
+int acpi_md_vbios_reset = 1; /* Referenced by dev/pci/vga_pci.c */
 static int acpi_md_beep_on_reset = 0;
 
 static int	sysctl_md_acpi_vbios_reset(SYSCTLFN_ARGS);
@@ -166,7 +159,7 @@ acpi_md_sleep_patch(struct cpu_info *ci)
 #ifdef __i386__
 	WAKECODE_FIXUP(WAKEUP_r_cr4, uint32_t, ci->ci_suspend_cr4);
 #else
-	WAKECODE_FIXUP(WAKEUP_msr_efer, uint32_t, ci->ci_suspend_msr_efer);
+	WAKECODE_FIXUP(WAKEUP_efer, uint32_t, ci->ci_suspend_efer);
 #endif
 
 	WAKECODE_FIXUP(WAKEUP_curcpu, void *, ci);
@@ -376,7 +369,14 @@ acpi_md_sleep(int state)
 	initrtclock(TIMER_FREQ);
 	inittodr(time_second);
 
+	AcpiClearEvent(ACPI_EVENT_PMTIMER);
+	AcpiClearEvent(ACPI_EVENT_GLOBAL);
 	AcpiClearEvent(ACPI_EVENT_POWER_BUTTON);
+	AcpiClearEvent(ACPI_EVENT_SLEEP_BUTTON);
+	AcpiClearEvent(ACPI_EVENT_RTC);
+	AcpiHwDisableAllGpes ();
+
+	acpi_pci_link_resume();
 
 out:
 
@@ -453,7 +453,7 @@ sysctl_md_acpi_vbios_reset(SYSCTLFN_ARGS)
 	if (error || newp == NULL)
 		return error;
 
-	if (t < 0 || t > 1)
+	if (t < 0 || t > 2)
 		return EINVAL;
 
 	acpi_md_vbios_reset = t;

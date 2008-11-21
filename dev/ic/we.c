@@ -1,4 +1,4 @@
-/*	$NetBSD: we.c,v 1.13 2007/10/19 12:00:05 ad Exp $	*/
+/*	$NetBSD: we.c,v 1.15 2008/04/28 20:23:51 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -56,7 +49,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: we.c,v 1.13 2007/10/19 12:00:05 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: we.c,v 1.15 2008/04/28 20:23:51 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -138,10 +131,7 @@ if (((wsc)->sc_flags & WE_16BIT_NOTOGGLE) == 0) {			\
 }
 
 int
-we_config(self, wsc, typestr)
-	struct device *self;
-	struct we_softc *wsc;
-	const char *typestr;
+we_config(device_t self, struct we_softc *wsc, const char *typestr)
 {
 	struct dp8390_softc *sc = &wsc->sc_dp8390;
 	u_int8_t x;
@@ -163,7 +153,7 @@ we_config(self, wsc, typestr)
 
 	/* Now we can use the NIC_{GET,PUT}() macros. */
 
-	printf("%s: %s Ethernet (%s-bit)\n", sc->sc_dev.dv_xname,
+	aprint_normal_dev(self, "%s Ethernet (%s-bit)\n",
 	    typestr, wsc->sc_flags & WE_16BIT_ENABLE ? "16" : "8");
 
 	/* Get station address from EEPROM. */
@@ -263,7 +253,7 @@ we_config(self, wsc, typestr)
 	else
 		sc->sc_media_init = dp8390_media_init;
 	if (dp8390_config(sc)) {
-		printf("%s: configuration failed\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "configuration failed\n");
 		return (1);
 	}
 
@@ -285,8 +275,7 @@ we_config(self, wsc, typestr)
 }
 
 static int
-we_test_mem(sc)
-	struct dp8390_softc *sc;
+we_test_mem(struct dp8390_softc *sc)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	bus_space_tag_t memt = sc->sc_buft;
@@ -314,8 +303,8 @@ we_test_mem(sc)
 	return (0);
 
  fail:
-	printf("%s: failed to clear shared memory at offset 0x%x\n",
-	    sc->sc_dev.dv_xname, i);
+	aprint_error_dev(sc->sc_dev,
+	    "failed to clear shared memory at offset 0x%x\n", i);
 	WE_MEM_DISABLE(wsc);
 	return (1);
 }
@@ -326,11 +315,7 @@ we_test_mem(sc)
  * up to a word - ok as long as mbufs are word-sized.
  */
 static inline void
-we_readmem(wsc, from, to, len)
-	struct we_softc *wsc;
-	int from;
-	u_int8_t *to;
-	int len;
+we_readmem(struct we_softc *wsc, int from, u_int8_t *to, int len)
 {
 	bus_space_tag_t memt = wsc->sc_dp8390.sc_buft;
 	bus_space_handle_t memh = wsc->sc_dp8390.sc_bufh;
@@ -347,10 +332,7 @@ we_readmem(wsc, from, to, len)
 }
 
 static int
-we_write_mbuf(sc, m, buf)
-	struct dp8390_softc *sc;
-	struct mbuf *m;
-	int buf;
+we_write_mbuf(struct dp8390_softc *sc, struct mbuf *m, int buf)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	bus_space_tag_t memt = wsc->sc_dp8390.sc_buft;
@@ -456,11 +438,7 @@ we_write_mbuf(sc, m, buf)
 }
 
 static int
-we_ring_copy(sc, src, dstv, amount)
-	struct dp8390_softc *sc;
-	int src;
-	void *dstv;
-	u_short amount;
+we_ring_copy(struct dp8390_softc *sc, int src, void *dstv, u_short amount)
 {
 	char *dst = dstv;
 	struct we_softc *wsc = (struct we_softc *)sc;
@@ -484,10 +462,8 @@ we_ring_copy(sc, src, dstv, amount)
 }
 
 static void
-we_read_hdr(sc, packet_ptr, packet_hdrp)
-	struct dp8390_softc *sc;
-	int packet_ptr;
-	struct dp8390_ring *packet_hdrp;
+we_read_hdr(struct dp8390_softc *sc, int packet_ptr,
+    struct dp8390_ring *packet_hdrp)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 
@@ -499,8 +475,7 @@ we_read_hdr(sc, packet_ptr, packet_hdrp)
 }
 
 static void
-we_recv_int(sc)
-	struct dp8390_softc *sc;
+we_recv_int(struct dp8390_softc *sc)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 
@@ -542,8 +517,7 @@ we_media_init(struct dp8390_softc *sc)
 }
 
 static int
-we_mediachange(sc)
-	struct dp8390_softc *sc;
+we_mediachange(struct dp8390_softc *sc)
 {
 
 	/*
@@ -556,9 +530,7 @@ we_mediachange(sc)
 }
 
 static void
-we_mediastatus(sc, ifmr)
-	struct dp8390_softc *sc;
-	struct ifmediareq *ifmr;
+we_mediastatus(struct dp8390_softc *sc, struct ifmediareq *ifmr)
 {
 	struct ifmedia *ifm = &sc->sc_media;
 
@@ -569,8 +541,7 @@ we_mediastatus(sc, ifmr)
 }
 
 static void
-we_init_card(sc)
-	struct dp8390_softc *sc;
+we_init_card(struct dp8390_softc *sc)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	struct ifmedia *ifm = &sc->sc_media;
@@ -582,9 +553,7 @@ we_init_card(sc)
 }
 
 static void
-we_set_media(wsc, media)
-	struct we_softc *wsc;
-	int media;
+we_set_media(struct we_softc *wsc, int media)
 {
 	struct dp8390_softc *sc = &wsc->sc_dp8390;
 	bus_space_tag_t asict = wsc->sc_asict;

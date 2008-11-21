@@ -1,4 +1,4 @@
-/*	$NetBSD: adb_bus.c,v 1.6 2007/10/19 11:59:36 ad Exp $ */
+/*	$NetBSD: adb_bus.c,v 1.8 2008/04/29 06:53:02 martin Exp $ */
 
 /*-
  * Copyright (c) 2006 Michael Lorenz
@@ -12,9 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adb_bus.c,v 1.6 2007/10/19 11:59:36 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adb_bus.c,v 1.8 2008/04/29 06:53:02 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,11 +47,11 @@ __KERNEL_RCSID(0, "$NetBSD: adb_bus.c,v 1.6 2007/10/19 11:59:36 ad Exp $");
 #define DPRINTF while (0) printf
 #endif
 
-static int nadb_match(struct device *, struct cfdata *, void *);
-static void nadb_attach(struct device *, struct device *, void *);
+static int nadb_match(device_t, cfdata_t, void *);
+static void nadb_attach(device_t, device_t, void *);
 
 struct nadb_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 	struct adb_bus_accessops *sc_ops;
 	uint32_t sc_msg;
 	uint32_t sc_event;
@@ -64,10 +61,10 @@ struct nadb_softc {
 	uint8_t sc_data[16];
 };
 
-CFATTACH_DECL(nadb, sizeof(struct nadb_softc),
+CFATTACH_DECL_NEW(nadb, sizeof(struct nadb_softc),
     nadb_match, nadb_attach, NULL, NULL);
 
-static void nadb_init(struct device *);
+static void nadb_init(device_t );
 static void nadb_handler(void *, int, uint8_t *);
 static void nadb_send_sync(void *, int, int, uint8_t *);
 static int nadb_register(struct nadb_softc *, int, int, int);
@@ -75,28 +72,29 @@ static void nadb_remove(struct nadb_softc *, int);
 static int nadb_devprint(void *, const char *);
 
 static int
-nadb_match(struct device *parent, struct cfdata *cf, void *aux)
+nadb_match(device_t parent, cfdata_t cf, void *aux)
 {
 
 	return 1;
 }
 
 static void
-nadb_attach(struct device *parent, struct device *us, void *aux)
+nadb_attach(device_t parent, device_t self, void *aux)
 {
-	struct nadb_softc *sc = (struct nadb_softc *)us;
+	struct nadb_softc *sc = device_private(self);
 	struct adb_bus_accessops *ops = aux;
 
+	sc->sc_dev = self;
 	sc->sc_ops = ops;
 	sc->sc_ops->set_handler(sc->sc_ops->cookie, nadb_handler, sc);
 
-	config_interrupts(us, nadb_init);
+	config_interrupts(self, nadb_init);
 }
 
 static void
-nadb_init(struct device *dev)
+nadb_init(device_t dev)
 {
-	struct nadb_softc *sc = (struct nadb_softc *)dev;
+	struct nadb_softc *sc = device_private(dev);
 	struct adb_attach_args aaa;
 	int i, last_moved_up, devmask = 0;
 	uint8_t cmd[2];
@@ -170,7 +168,7 @@ nadb_init(struct device *dev)
 			    sc->sc_devtable[i].original_addr,
 			    sc->sc_devtable[i].handler_id);
 			aaa.dev = &sc->sc_devtable[i];
-			if (config_found(&sc->sc_dev, &aaa, nadb_devprint)) {
+			if (config_found(sc->sc_dev, &aaa, nadb_devprint)) {
 				devmask |= (1 << i);
 			} else {
 				printf(" not configured\n");
@@ -185,7 +183,6 @@ nadb_init(struct device *dev)
 int
 nadb_print(void *aux, const char *what)
 {
-
 	printf(": Apple Desktop Bus\n");
 	return 0;
 }

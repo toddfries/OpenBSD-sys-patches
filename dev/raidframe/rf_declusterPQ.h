@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_declusterPQ.h,v 1.3 2002/12/16 07:01:03 tdeval Exp $	*/
-/*	$NetBSD: rf_declusterPQ.h,v 1.3 1999/02/05 00:06:09 oster Exp $	*/
-
+/*	$NetBSD: rf_declusterPQ.h,v 1.7 2006/04/26 17:08:48 oster Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,21 +26,26 @@
  * rights to redistribute these changes.
  */
 
-#ifndef	_RF__RF_DECLUSTERPQ_H_
-#define	_RF__RF_DECLUSTERPQ_H_
+#ifndef _RF__RF_DECLUSTERPQ_H_
+#define _RF__RF_DECLUSTERPQ_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
 
-int  rf_ConfigureDeclusteredPQ(RF_ShutdownList_t **, RF_Raid_t *,
-	RF_Config_t *);
-int  rf_GetDefaultNumFloatingReconBuffersPQ(RF_Raid_t *);
-void rf_MapSectorDeclusteredPQ(RF_Raid_t *, RF_RaidAddr_t, RF_RowCol_t *,
-	RF_RowCol_t *, RF_SectorNum_t *, int);
-void rf_MapParityDeclusteredPQ(RF_Raid_t *, RF_RaidAddr_t, RF_RowCol_t *,
-	RF_RowCol_t *, RF_SectorNum_t *, int);
-void rf_MapQDeclusteredPQ(RF_Raid_t *, RF_RaidAddr_t, RF_RowCol_t *,
-	RF_RowCol_t *, RF_SectorNum_t *, int);
-void rf_IdentifyStripeDeclusteredPQ(RF_Raid_t *, RF_RaidAddr_t, RF_RowCol_t **,
-	RF_RowCol_t *);
+int
+rf_ConfigureDeclusteredPQ(RF_ShutdownList_t ** listp, RF_Raid_t * raidPtr,
+    RF_Config_t * cfgPtr);
+int     rf_GetDefaultNumFloatingReconBuffersPQ(RF_Raid_t * raidPtr);
+void
+rf_MapSectorDeclusteredPQ(RF_Raid_t * raidPtr, RF_RaidAddr_t raidSector,
+    RF_RowCol_t * col, RF_SectorNum_t * diskSector, int remap);
+void
+rf_MapParityDeclusteredPQ(RF_Raid_t * raidPtr, RF_RaidAddr_t raidSector,
+    RF_RowCol_t * col, RF_SectorNum_t * diskSector, int remap);
+void
+rf_MapQDeclusteredPQ(RF_Raid_t * raidPtr, RF_RaidAddr_t raidSector,
+    RF_RowCol_t * col, RF_SectorNum_t * diskSector, int remap);
+void
+rf_IdentifyStripeDeclusteredPQ(RF_Raid_t * raidPtr, RF_RaidAddr_t addr,
+    RF_RowCol_t ** diskids);
 
-#endif	/* ! _RF__RF_DECLUSTERPQ_H_ */
+#endif				/* !_RF__RF_DECLUSTERPQ_H_ */

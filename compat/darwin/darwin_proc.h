@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_proc.h,v 1.5 2005/12/11 12:19:56 christos Exp $ */
+/*	$NetBSD: darwin_proc.h,v 1.7 2008/04/28 20:23:41 martin Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -75,15 +68,15 @@ struct darwin_pcred {
 
 struct darwin_vmspace {
 	int     vm_refcnt;
-	caddr_t vm_shm;
+	void *vm_shm;
 	segsz_t vm_rssize;
 	segsz_t vm_swrss;
 	segsz_t vm_tsize;
 	segsz_t vm_dsize;
 	segsz_t vm_ssize;
-	caddr_t vm_taddr;
-	caddr_t vm_daddr;
-	caddr_t vm_maxsaddr;
+	void *vm_taddr;
+	void *vm_daddr;
+	void *vm_maxsaddr;
 };
 
 struct darwin_extern_proc {
@@ -101,7 +94,7 @@ struct darwin_extern_proc {
 	pid_t	p_pid;
 	pid_t	p_oppid;
 	int	p_dupfd;
-	caddr_t user_stack;
+	void *user_stack;
 	void	*exit_thread;
 	int	p_debugger;
 	mach_boolean_t	sigwait;

@@ -1,4 +1,4 @@
-/* $NetBSD: pmap.c,v 1.12 2005/12/08 22:41:44 yamt Exp $ */
+/* $NetBSD: pmap.c,v 1.19 2007/10/17 19:52:52 garbled Exp $ */
 /*-
  * Copyright (c) 1997, 1998, 2000 Ben Harris
  * All rights reserved.
@@ -102,7 +102,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.12 2005/12/08 22:41:44 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.19 2007/10/17 19:52:52 garbled Exp $");
 
 #include <sys/kernel.h> /* for cold */
 #include <sys/malloc.h>
@@ -182,7 +182,7 @@ struct pv_entry *pv_table;
 struct pmap kernel_pmap_store;
 struct pv_entry *kernel_pmap_entries[PM_NENTRIES];
 
-static boolean_t pmap_initialised = FALSE;
+static bool pmap_initialised = false;
 
 static struct pool pmap_pool;
 
@@ -203,7 +203,7 @@ static void pv_release(pmap_t pmap, int ppn, int lpn);
 
 static int pmap_enter1(pmap_t, vaddr_t, paddr_t, vm_prot_t, int, int);
 
-static caddr_t pmap_find(paddr_t);
+static void *pmap_find(paddr_t);
 
 static void pmap_update_page(int);
 
@@ -300,7 +300,8 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 	for (i = 0; i < vm_nphysseg; i++) {
 		if (vm_physmem[i].avail_start < vm_physmem[i].avail_end) {
 			addr = (vaddr_t)
-			    (MEMC_PHYS_BASE + ptoa(vm_physmem[i].avail_start));
+			    ((char*)MEMC_PHYS_BASE +
+				ptoa(vm_physmem[i].avail_start));
 			vm_physmem[i].avail_start++;
 			break;
 		}
@@ -361,7 +362,7 @@ pmap_init2()
 
 	/* Create pmap pool */
 	pool_init(&pmap_pool, sizeof(struct pmap), 0, 0, 0,
-	    "pmappool", NULL);
+	    "pmappool", NULL, IPL_NONE);
 	pmap_initialised = 1;
 }
 
@@ -739,7 +740,7 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 	splx(s);
 }
 
-boolean_t
+bool
 pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *ppa)
 {
 	struct pv_entry *pv;
@@ -748,9 +749,9 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *ppa)
 	UVMHIST_CALLED(pmaphist);
 	pv = pmap->pm_entries[atop(va)];
 	if (pv == NULL)
-		return FALSE;
+		return false;
 	*ppa = ptoa(pv->pv_ppn);
-	return TRUE;
+	return true;
 }
 
 void
@@ -771,12 +772,12 @@ pmap_kremove(vaddr_t va, vsize_t len)
 	pmap_remove(pmap_kernel(), va, va+len);
 }
 
-inline boolean_t
+inline bool
 pmap_is_modified(page)
 	struct vm_page *page;
 {
 	int ppn;
-	boolean_t rv;
+	bool rv;
 #ifdef PMAP_DEBUG_MODIFIED
 	unsigned char digest[16];
 #endif
@@ -805,7 +806,7 @@ pmap_is_modified(page)
 	return rv;
 }
 
-inline boolean_t
+inline bool
 pmap_is_referenced(page)
 	struct vm_page *page;
 {
@@ -836,11 +837,11 @@ pmap_update_page(int ppn)
 		}
 }
 
-boolean_t
+bool
 pmap_clear_modify(struct vm_page *page)
 {
 	int ppn;
-	boolean_t rv;
+	bool rv;
 	struct pv_entry *pv;
 	UVMHIST_FUNC("pmap_clear_modify");
 
@@ -861,11 +862,11 @@ pmap_clear_modify(struct vm_page *page)
 	return rv;
 }
 
-boolean_t
+bool
 pmap_clear_reference(struct vm_page *page)
 {
 	int ppn;
-	boolean_t rv;
+	bool rv;
 	UVMHIST_FUNC("pmap_clear_reference");
 
 	UVMHIST_CALLED(pmaphist);
@@ -881,9 +882,9 @@ pmap_clear_reference(struct vm_page *page)
 /*
  * Work out if a given page fault was our fault (e.g. through
  * referenced/modified emulation).  If it was, handle it and return
- * TRUE.  Otherwise, return FALSE.
+ * true.  Otherwise, return false.
  */
-boolean_t
+bool
 pmap_fault(struct pmap *pmap, vaddr_t va, vm_prot_t atype)
 {
 	int lpn, ppn;
@@ -894,7 +895,7 @@ pmap_fault(struct pmap *pmap, vaddr_t va, vm_prot_t atype)
 	lpn = atop(va);
 	pv = pmap->pm_entries[lpn];
 	if (pv == NULL)
-		return FALSE;
+		return false;
 	ppn = pv->pv_ppn;
 	ppv = &pv_table[ppn];
  	UVMHIST_LOG(pmaphist,
@@ -904,13 +905,13 @@ pmap_fault(struct pmap *pmap, vaddr_t va, vm_prot_t atype)
 		if ((ppv->pv_pflags & PV_REFERENCED) == 0) {
 			ppv->pv_pflags |= PV_REFERENCED;
 			pmap_update_page(ppn);
-			return TRUE;
+			return true;
 		}
 		if ((atype & VM_PROT_WRITE) && (pv->pv_prot & VM_PROT_WRITE) &&
 		    (ppv->pv_pflags & PV_MODIFIED) == 0) {
 			ppv->pv_pflags |= PV_MODIFIED;
 			pmap_update_page(ppn);
-			return TRUE;
+			return true;
 		}
 	}
 	/*
@@ -928,9 +929,9 @@ pmap_fault(struct pmap *pmap, vaddr_t va, vm_prot_t atype)
 		 */
 		if (pv->pv_prot & VM_PROT_WRITE)
 			cpu_cache_flush();
-		return TRUE;
+		return true;
 	}
-	return FALSE;
+	return false;
 }
 
 /*
@@ -981,7 +982,7 @@ pmap_page_protect(struct vm_page *page, vm_prot_t prot)
 
 paddr_t
 pmap_phys_address(ppn)
-	int ppn;
+	paddr_t ppn;
 {
 	panic("pmap_phys_address not implemented");
 }
@@ -1048,7 +1049,7 @@ pmap_update(struct pmap *pmap)
  * physical space.  This means that we can safely write here without
  * flushing the cache.  Only necessary on ARM3.
  */
-static caddr_t
+static void *
 pmap_find(paddr_t pa)
 {
 #ifdef CPU_ARM3
@@ -1060,9 +1061,9 @@ pmap_find(paddr_t pa)
 #ifdef CPU_ARM3
 	for (pv = &pv_table[atop(pa)]; pv != NULL; pv = pv->pv_next)
 		if (pv->pv_pmap != NULL && (pv->pv_pmap->pm_flags & PM_ACTIVE))
-			return (caddr_t)ptoa(pv->pv_lpn);
+			return (void *)ptoa(pv->pv_lpn);
 #endif
-	return MEMC_PHYS_BASE + pa;
+	return (char*)MEMC_PHYS_BASE + pa;
 }
 
 void

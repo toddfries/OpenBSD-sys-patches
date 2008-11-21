@@ -1,5 +1,4 @@
-/*	$OpenBSD: ulmax.c,v 1.4 2004/08/07 00:38:33 deraadt Exp $	*/
-/*	$NetBSD: ulmax.c,v 1.3 1996/03/14 18:52:23 christos Exp $	*/
+/*	$NetBSD: ulmax.c,v 1.5 2005/12/11 12:24:37 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1991 Regents of the University of California.
@@ -36,7 +35,8 @@
 #include <lib/libkern/libkern.h>
 
 unsigned long
-ulmax(unsigned long a, unsigned long b)
+ulmax(a, b)
+	unsigned long a, b;
 {
 	return (a > b ? a : b);
 }

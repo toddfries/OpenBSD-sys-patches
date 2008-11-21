@@ -1,5 +1,4 @@
-/*	$OpenBSD: siopvar_common.h,v 1.25 2007/08/05 19:05:09 kettenis Exp $ */
-/*	$NetBSD: siopvar_common.h,v 1.33 2005/11/18 23:10:32 bouyer Exp $ */
+/*	$NetBSD: siopvar_common.h,v 1.36 2008/06/11 02:09:16 kiyohara Exp $	*/
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -31,6 +30,8 @@
  *
  */
 
+#include "opt_siop.h"
+
 /* common struct and routines used by siop and esiop */
 
 #ifndef SIOP_DEFAULT_TARGET
@@ -41,32 +42,30 @@
 typedef struct scr_table {
 	u_int32_t count;
 	u_int32_t addr;
-} scr_table_t __packed;
+} __packed scr_table_t;
 
 /* Number of scatter/gather entries */
-/* XXX Ensure alignment of siop_xfer's. */
-#define SIOP_NSG	17	/* XXX (MAXPHYS/PAGE_SIZE + 1) */
-#define SIOP_MAXFER	((SIOP_NSG - 1) * PAGE_SIZE)
+#define SIOP_NSG	(MAXPHYS/PAGE_SIZE + 1)	/* XXX PAGE_SIZE */
 
 /*
  * This structure interfaces the SCRIPT with the driver; it describes a full
- * transfer. If you change something here, don't forget to update offsets in
- * {s,es}iop.ss
+ * transfer.
+ * If you change something here, don't forget to update offsets in {s,es}iop.ss
  */
 struct siop_common_xfer {
-	u_int8_t msg_out[16];		/*   0 */
-	u_int8_t msg_in[16];		/*  16 */
-	u_int32_t status;		/*  32 */
-	u_int32_t pad1;			/*  36 */
-	u_int32_t id;			/*  40 */
-	struct scsi_generic xscmd; 	/*  44 */
-	scr_table_t t_msgin;		/*  60 */
-	scr_table_t t_extmsgin;		/*  68 */
-	scr_table_t t_extmsgdata; 	/*  76 */
-	scr_table_t t_msgout;		/*  84 */
-	scr_table_t cmd;		/*  92 */
-	scr_table_t t_status;		/* 100 */
-	scr_table_t data[SIOP_NSG]; 	/* 108 */
+	u_int8_t msg_out[16];	/* 0 */
+	u_int8_t msg_in[16];	/* 16 */
+	u_int32_t status;	/* 32 */
+	u_int32_t pad1; 	/* 36 */
+	u_int32_t id;		/* 40 */
+	u_int32_t pad2;		/* 44 */
+	scr_table_t t_msgin;	/* 48 */
+	scr_table_t t_extmsgin;	/* 56 */
+	scr_table_t t_extmsgdata; /* 64 */
+	scr_table_t t_msgout;	/* 72 */
+	scr_table_t cmd;	/* 80 */
+	scr_table_t t_status;	/* 88 */
+	scr_table_t data[SIOP_NSG]; /* 96 */
 } __packed;
 
 /* status can hold the SCSI_* status values, and 2 additional values: */
@@ -82,9 +81,10 @@ struct siop_common_xfer {
 struct siop_common_cmd {
 	struct siop_common_softc *siop_sc; /* points back to our adapter */
 	struct siop_common_target *siop_target; /* pointer to our target def */
-	struct scsi_xfer *xs; /* xfer from the upper level */
+	struct scsipi_xfer *xs; /* xfer from the upper level */
 	struct siop_common_xfer *siop_tables; /* tables for this cmd */
 	bus_addr_t	dsa; /* DSA value to load */
+	bus_dmamap_t	dmamap_cmd;
 	bus_dmamap_t	dmamap_data;
 	int status;
 	int flags;
@@ -96,10 +96,7 @@ struct siop_common_cmd {
 #define CMDST_FREE		0 /* cmd slot is free */
 #define CMDST_READY		1 /* cmd slot is waiting for processing */
 #define CMDST_ACTIVE		2 /* cmd slot is being processed */
-#define CMDST_SENSE		3 /* cmd slot is requesting sense */
-#define CMDST_SENSE_ACTIVE	4 /* request sense active */
-#define CMDST_SENSE_DONE 	5 /* request sense done */
-#define CMDST_DONE		6 /* cmd slot has been processed */
+#define CMDST_DONE		3 /* cmd slot has been processed */
 /* flags defs */
 #define CMDFL_TIMEOUT	0x0001 /* cmd timed out */
 #define CMDFL_TAG	0x0002 /* tagged cmd */
@@ -133,7 +130,8 @@ struct siop_common_target {
 /* Driver internal state */
 struct siop_common_softc {
 	struct device sc_dev;
-	struct scsi_link sc_link;	/* link to upper level */
+	struct scsipi_channel sc_chan;
+	struct scsipi_adapter sc_adapt;
 	int features;			/* chip's features */
 	int ram_size;
 	int maxburst;
@@ -179,6 +177,7 @@ struct siop_common_softc {
 #define SF_CHIP_GEBUG	0x00080000 /* SCSI gross error bug */
 #define SF_CHIP_AAIP	0x00100000 /* Always generate AIP regardless of SNCTL4*/
 #define SF_CHIP_BE	0x00200000 /* big-endian */
+#define SF_CHIP_USEPCIC	0x00400000 /* use PCI clock */
 
 #define SF_PCI_RL	0x01000000 /* PCI read line */
 #define SF_PCI_RM	0x02000000 /* PCI read multiple */
@@ -193,19 +192,21 @@ int	siop_modechange(struct siop_common_softc *);
 
 int	siop_wdtr_neg(struct siop_common_cmd *);
 int	siop_sdtr_neg(struct siop_common_cmd *);
-int     siop_ppr_neg(struct siop_common_cmd *);
+int	siop_ppr_neg(struct siop_common_cmd *);
 void	siop_sdtr_msg(struct siop_common_cmd *, int, int, int);
 void	siop_wdtr_msg(struct siop_common_cmd *, int, int);
-void    siop_ppr_msg(struct siop_common_cmd *, int, int, int);
+void	siop_ppr_msg(struct siop_common_cmd *, int, int, int);
 void	siop_update_xfer_mode(struct siop_common_softc *, int);
 int	siop_iwr(struct siop_common_cmd *);
-/* actions to take at return of siop_wdtr_neg() and siop_sdtr_neg() */
+/* actions to take at return of siop_wdtr_neg(), siop_sdtr_neg() and siop_iwr */
 #define SIOP_NEG_NOP	0x0
 #define SIOP_NEG_MSGOUT	0x1
 #define SIOP_NEG_ACK	0x2
 
 void	siop_minphys(struct buf *);
-void 	siop_ma(struct siop_common_cmd *);
+int	siop_ioctl(struct scsipi_channel *, u_long,
+		void *, int, struct proc *);
+void 	siop_ma (struct siop_common_cmd *);
 void 	siop_sdp(struct siop_common_cmd *, int);
 void 	siop_update_resid(struct siop_common_cmd *, int);
 void	siop_clearfifo(struct siop_common_softc *);
@@ -215,4 +216,4 @@ void	siop_resetbus(struct siop_common_softc *);
   (((sc)->features & SF_CHIP_BE) ? htobe32((x)) : htole32((x)))
 
 #define siop_ctoh32(sc, x) \
-  (((sc)->features & SF_CHIP_BE) ? betoh32((x)) : letoh32((x)))
+  (((sc)->features & SF_CHIP_BE) ? be32toh((x)) : le32toh((x)))

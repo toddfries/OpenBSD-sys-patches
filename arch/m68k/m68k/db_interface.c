@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.13 2005/05/01 09:55:49 miod Exp $	*/
-/*	$NetBSD: db_interface.c,v 1.24 1997/02/18 22:27:32 gwr Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.34 2007/02/22 17:09:44 thorpej Exp $	*/
 
 /* 
  * Mach Operating System
@@ -30,6 +29,12 @@
 /*
  * Interface to the "ddb" kernel debugger.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.34 2007/02/22 17:09:44 thorpej Exp $");
+
+#include "opt_ddb.h"
+
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
@@ -43,12 +48,9 @@
 #include <machine/db_machdep.h>
 
 #include <ddb/db_command.h>
-#include <ddb/db_var.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 
-
-extern label_t	*db_recover;
 
 int	db_active = 0;
 db_regs_t	ddb_regs;
@@ -59,9 +61,9 @@ static void kdbprinttrap(int, int);
  * Received keyboard interrupt sequence.
  */
 void
-kdb_kintr(regs)
-	register db_regs_t *regs;
+kdb_kintr(db_regs_t *regs)
 {
+
 	if (db_active == 0 && (boothowto & RB_KDB)) {
 		printf("\n\nkernel: keyboard interrupt\n");
 		kdb_trap(-1, regs);
@@ -73,9 +75,7 @@ kdb_kintr(regs)
  * Return non-zero if we "handled" the trap.
  */
 int
-kdb_trap(type, regs)
-	int	type;
-	register db_regs_t *regs;
+kdb_trap(int type, db_regs_t *regs)
 {
 
 	switch (type) {
@@ -86,9 +86,6 @@ kdb_trap(type, regs)
 	case -1:
 		break;
 	default:
-		if (!db_panic)
-			return (0);
-
 		kdbprinttrap(type, 0);
 		if (db_recover != 0) {
 			/* This will longjmp back to db_command_loop */
@@ -99,7 +96,7 @@ kdb_trap(type, regs)
 		 * Tell caller "We did NOT handle the trap."
 		 * Caller should panic or whatever.
 		 */
-		return (0);
+		return 0;
 	}
 
 	/*
@@ -111,11 +108,11 @@ kdb_trap(type, regs)
 	ddb_regs = *regs;
 
 	db_active++;
-	cnpollc(TRUE);	/* set polling mode, unblank video */
+	cnpollc(true);	/* set polling mode, unblank video */
 
 	db_trap(type, 0);	/* where the work happens */
 
-	cnpollc(FALSE);	/* resume interrupt mode */
+	cnpollc(false);	/* resume interrupt mode */
 	db_active--;
 
 	*regs = ddb_regs;
@@ -125,13 +122,13 @@ kdb_trap(type, regs)
 	 * But lock out interrupts to prevent TRACE_KDB from setting the
 	 * trace bit in the current SR (and trapping while exiting KDB).
 	 */
-	(void) splhigh();
+	(void)spl7();
 
 	/*
 	 * Tell caller "We HAVE handled the trap."
 	 * Caller will return to locore and rte.
 	 */
-	return(1);
+	return 1;
 }
 
 extern char *trap_type[];
@@ -141,9 +138,9 @@ extern int trap_types;
  * Print trap reason.
  */
 static void
-kdbprinttrap(type, code)
-	int	type, code;
+kdbprinttrap(int type, int code)
 {
+
 	printf("kernel: ");
 	if (type >= trap_types || type < 0)
 		printf("type %d", type);
@@ -153,8 +150,8 @@ kdbprinttrap(type, code)
 }
 
 void
-Debugger()
+cpu_Debugger(void)
 {
+
 	__asm ("trap #15");
 }
-

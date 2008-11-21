@@ -1,4 +1,4 @@
-/*	$NetBSD: byte_swap.h,v 1.10 2006/01/30 22:46:36 dsl Exp $	*/
+/*	$NetBSD: byte_swap.h,v 1.15 2008/04/28 20:23:24 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,12 +34,7 @@
 
 #include <sys/types.h>
 
-#if defined(_KERNEL_OPT)
-#include "opt_cputype.h"
-#endif
-
 #ifdef  __GNUC__
-#include <sys/types.h>
 __BEGIN_DECLS
 
 #define	__BYTE_SWAP_U32_VARIABLE __byte_swap_u32_variable
@@ -55,11 +43,7 @@ static __inline uint32_t
 __byte_swap_u32_variable(uint32_t x)
 {
 	__asm volatile (
-#if defined(_KERNEL) && !defined(_LKM) && !defined(I386_CPU)
 	    "bswap %1"
-#else
-	    "rorw $8, %w1\n\trorl $16, %1\n\trorw $8, %w1"
-#endif
 	    : "=r" (x) : "0" (x));
 	return (x);
 }
@@ -74,6 +58,11 @@ __byte_swap_u16_variable(uint16_t x)
 }
 
 __END_DECLS
+#elif defined(_KERNEL) || defined(_LKM)
+#define	__BYTE_SWAP_U32_VARIABLE __byte_swap_u32_variable
+#define	__BYTE_SWAP_U16_VARIABLE __byte_swap_u16_variable
+uint32_t	__byte_swap_u32_variable(uint32_t);
+uint16_t	__byte_swap_u16_variable(uint16_t);
 #endif
 
 #endif /* !_I386_BYTE_SWAP_H_ */

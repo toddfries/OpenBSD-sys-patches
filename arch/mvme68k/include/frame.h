@@ -1,3 +1,3 @@
-/*	$OpenBSD: frame.h,v 1.3 1996/04/28 10:56:19 deraadt Exp $ */
+/*	$NetBSD: frame.h,v 1.1.1.1 1995/07/25 23:12:15 chuck Exp $	*/
 
 #include <m68k/frame.h>

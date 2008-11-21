@@ -1,4 +1,4 @@
-/*	$NetBSD: plumohci.c,v 1.10 2005/12/11 12:17:33 christos Exp $ */
+/*	$NetBSD: plumohci.c,v 1.12 2008/04/03 17:04:40 drochner Exp $ */
 
 /*-
  * Copyright (c) 2000 UCHIYAMA Yasushi
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: plumohci.c,v 1.10 2005/12/11 12:17:33 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: plumohci.c,v 1.12 2008/04/03 17:04:40 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,8 +75,8 @@ int __plumohci_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t,
     bus_size_t, bus_dma_segment_t *, int, int *, int);
 void __plumohci_dmamem_free(bus_dma_tag_t, bus_dma_segment_t *, int);
 int __plumohci_dmamem_map(bus_dma_tag_t, bus_dma_segment_t *,
-    int, size_t, caddr_t *, int);
-void __plumohci_dmamem_unmap(bus_dma_tag_t, caddr_t, size_t);
+    int, size_t, void **, int);
+void __plumohci_dmamem_unmap(bus_dma_tag_t, void *, size_t);
 
 struct bus_dma_tag_hpcmips plumohci_bus_dma_tag = {
 	{
@@ -103,7 +103,7 @@ struct bus_dma_tag_hpcmips plumohci_bus_dma_tag = {
 struct plumohci_shm {
 	bus_space_handle_t ps_bsh;
 	paddr_t	ps_paddr;
-	caddr_t	ps_caddr;
+	void *	ps_caddr;
 	size_t	ps_size;
 	LIST_ENTRY(plumohci_shm) ps_link;
 };
@@ -116,7 +116,7 @@ struct plumohci_softc {
 	LIST_HEAD(, plumohci_shm) sc_shm_head;
 };
 
-CFATTACH_DECL(plumohci, sizeof(struct plumohci_softc),
+CFATTACH_DECL_NEW(plumohci, sizeof(struct plumohci_softc),
     plumohci_match, plumohci_attach, NULL, NULL);
 
 int
@@ -130,9 +130,12 @@ plumohci_match(struct device *parent, struct cfdata *match, void *aux)
 void
 plumohci_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct plumohci_softc *sc = (struct plumohci_softc *)self;
+	struct plumohci_softc *sc = device_private(self);
 	struct plum_attach_args *pa = aux;
 	usbd_status r;
+
+	sc->sc.sc_dev = self;
+	sc->sc.sc_bus.hci_private = sc;
 
 	sc->sc.iot = pa->pa_iot;
 	sc->sc.sc_bus.dmatag = &plumohci_bus_dma_tag.bdt;
@@ -188,8 +191,7 @@ plumohci_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Attach usb device. */
-	sc->sc.sc_child = config_found((void *) sc, &sc->sc.sc_bus,
-	    usbctlprint);
+	sc->sc.sc_child = config_found(self, &sc->sc.sc_bus, usbctlprint);
 }
 
 int
@@ -229,7 +231,7 @@ __plumohci_dmamem_alloc(bus_dma_tag_t tx, bus_size_t size,
 	struct plumohci_shm *ps;
 	bus_space_handle_t bsh;
 	paddr_t paddr;
-	caddr_t caddr;
+	void *caddr;
 	int error;
 
 	size = round_page(size);
@@ -287,7 +289,7 @@ __plumohci_dmamem_free(bus_dma_tag_t tx, bus_dma_segment_t *segs, int nsegs)
 
 int
 __plumohci_dmamem_map(bus_dma_tag_t tx, bus_dma_segment_t *segs, int nsegs,
-    size_t size, caddr_t *kvap, int flags)
+    size_t size, void **kvap, int flags)
 {
 	struct bus_dma_tag_hpcmips *t = (struct bus_dma_tag_hpcmips *)tx;
 	struct plumohci_softc *sc = t->_dmamap_chipset_v;
@@ -307,7 +309,7 @@ __plumohci_dmamem_map(bus_dma_tag_t tx, bus_dma_segment_t *segs, int nsegs,
 }
 
 void
-__plumohci_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
+__plumohci_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 {
 	/* nothing to do */
 }

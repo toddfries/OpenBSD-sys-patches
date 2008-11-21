@@ -1,5 +1,4 @@
-/*	$OpenBSD: profile.h,v 1.3 2006/10/28 16:20:04 kettenis Exp $	*/
-/*	$NetBSD: profile.h,v 1.3 2003/11/28 23:22:45 fvdl Exp $	*/
+/*	$NetBSD: profile.h,v 1.15 2008/10/26 00:08:15 mrg Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -32,7 +31,20 @@
  *	@(#)profile.h	8.1 (Berkeley) 6/11/93
  */
 
+#ifdef __x86_64__
+
+#ifdef _KERNEL_OPT
+#include "opt_multiprocessor.h"
+#include "opt_xen.h"
+#endif
+
+#ifdef _KERNEL
+#include <machine/lock.h>
+#endif
+
 #define	_MCOUNT_DECL void _mcount
+
+#define EPROL_EXPORT	__asm(".globl _eprol")
 
 #ifdef PIC
 #define __MCPLT	"@PLT"
@@ -41,6 +53,7 @@
 #endif
 
 #define	MCOUNT						\
+__weak_alias(mcount, __mcount)				\
 __asm(" .globl __mcount		\n"			\
 "	.type __mcount,@function\n"			\
 "__mcount:			\n"			\
@@ -57,7 +70,7 @@ __asm(" .globl __mcount		\n"			\
 "	movq	0(%rbp),%r11	\n"			\
 "	movq	8(%r11),%rdi	\n"			\
 "	movq	8(%rbp),%rsi	\n"			\
-"	call	_mcount"__MCPLT"\n"			\
+"	call	_mcount"__MCPLT "	\n"			\
 "	movq	0(%rsp),%rdi	\n"			\
 "	movq	8(%rsp),%rsi	\n"			\
 "	movq	16(%rsp),%rdx	\n"			\
@@ -71,6 +84,85 @@ __asm(" .globl __mcount		\n"			\
 
 
 #ifdef _KERNEL
-#define MCOUNT_ENTER	(void)&s; __asm__("cli");
-#define MCOUNT_EXIT	__asm__("sti");
+#ifdef MULTIPROCESSOR
+__cpu_simple_lock_t __mcount_lock;
+
+static inline void
+MCOUNT_ENTER_MP(void)
+{
+	__cpu_simple_lock(&__mcount_lock);
+	__insn_barrier();
+}
+
+static inline void
+MCOUNT_EXIT_MP(void)
+{
+	__insn_barrier();
+	__mcount_lock = __SIMPLELOCK_UNLOCKED;
+}
+#else
+#define MCOUNT_ENTER_MP()
+#define MCOUNT_EXIT_MP()
+#endif
+
+#ifdef XEN
+static inline void
+mcount_disable_intr(void)
+{
+	/* works because __cli is a macro */
+	__cli();
+}
+
+static inline u_long
+mcount_read_psl(void)
+{
+	return (curcpu()->ci_vcpu->evtchn_upcall_mask);
+}
+
+static inline void
+mcount_write_psl(u_long psl)
+{
+	curcpu()->ci_vcpu->evtchn_upcall_mask = psl;
+	x86_lfence();
+	/* XXX can't call hypervisor_force_callback() because we're in mcount*/ 
+}
+
+#else /* XEN */
+static inline void
+mcount_disable_intr(void)
+{
+	__asm volatile("cli");
+}
+
+static inline u_long
+mcount_read_psl(void)
+{
+	u_long	ef;
+
+	__asm volatile("pushfq; popq %0" : "=r" (ef));
+	return (ef);
+}
+
+static inline void
+mcount_write_psl(u_long ef)
+{
+	__asm volatile("pushq %0; popfq" : : "r" (ef));
+}
+
+#endif /* XEN */
+#define	MCOUNT_ENTER							\
+	s = (int)mcount_read_psl();					\
+	mcount_disable_intr();						\
+	MCOUNT_ENTER_MP();
+
+#define	MCOUNT_EXIT							\
+	MCOUNT_EXIT_MP();						\
+	mcount_write_psl(s);
+
 #endif /* _KERNEL */
+
+#else	/*	__x86_64__	*/
+
+#include <i386/profile.h>
+
+#endif	/*	__x86_64__	*/

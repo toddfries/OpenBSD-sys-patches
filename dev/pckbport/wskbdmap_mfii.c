@@ -1,4 +1,4 @@
-/*	$NetBSD: wskbdmap_mfii.c,v 1.11 2006/04/01 23:02:32 christos Exp $	*/
+/*	$NetBSD: wskbdmap_mfii.c,v 1.15 2008/05/21 07:39:24 ghen Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,8 +30,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wskbdmap_mfii.c,v 1.11 2006/04/01 23:02:32 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wskbdmap_mfii.c,v 1.15 2008/05/21 07:39:24 ghen Exp $");
 
+#include "opt_wskbdmap.h"
 #include <sys/types.h>
 #include <dev/wscons/wsksymdef.h>
 #include <dev/wscons/wsksymvar.h>
@@ -136,7 +130,10 @@ static const keysym_t pckbd_keydesc_us[] = {
     KC(127),			KS_Pause, /* Break */
     KC(156),			KS_KP_Enter,
     KC(157),			KS_Control_R,
+    KC(160),			KS_Cmd_VolumeToggle,
     KC(170),			KS_Print_Screen,
+    KC(174),			KS_Cmd_VolumeDown,
+    KC(176),			KS_Cmd_VolumeUp,
     KC(181),			KS_KP_Divide,
     KC(183),			KS_Print_Screen,
     KC(184),			KS_Alt_R,	KS_Multi_key,
@@ -522,6 +519,38 @@ static const keysym_t pckbd_keydesc_us_dvorak[] = {
     KC(53), 			KS_z,
 };
 
+static const keysym_t pckbd_keydesc_us_colemak[] = {
+/*  pos      command		normal		shifted */
+    KC(16), 			KS_q,
+    KC(17), 			KS_w,
+    KC(18), 			KS_f,
+    KC(19), 			KS_p,
+    KC(20), 			KS_g,
+    KC(21), 			KS_j,
+    KC(22), 			KS_l,
+    KC(23), 			KS_u,
+    KC(24), 			KS_y,
+    KC(25), 			KS_semicolon,	KS_colon,
+    KC(30), 			KS_a,
+    KC(31), 			KS_r,
+    KC(32), 			KS_s,
+    KC(33), 			KS_t,
+    KC(34), 			KS_d,
+    KC(35), 			KS_h,
+    KC(36), 			KS_n,
+    KC(37), 			KS_e,
+    KC(38), 			KS_i,
+    KC(39), 			KS_o,
+    KC(44), 			KS_z,
+    KC(45), 			KS_x,
+    KC(46), 			KS_c,
+    KC(47), 			KS_v,
+    KC(48), 			KS_b,
+    KC(49), 			KS_k,
+    KC(50), 			KS_m,
+    KC(58),			KS_BackSpace,
+};
+
 static const keysym_t pckbd_keydesc_swapctrlcaps[] = {
 /*  pos      command		normal		shifted */
     KC(29), 			KS_Caps_Lock,
@@ -568,6 +597,7 @@ const struct wscons_keydesc pckbd_keydesctab[] = {
 	KBD_MAP(KB_NO | KB_NODEAD,	KB_NO,	pckbd_keydesc_no_nodead),
 	KBD_MAP(KB_US | KB_DECLK,	KB_US,	pckbd_keydesc_us_declk),
 	KBD_MAP(KB_US | KB_DVORAK,	KB_US,	pckbd_keydesc_us_dvorak),
+	KBD_MAP(KB_US | KB_COLEMAK,	KB_US,	pckbd_keydesc_us_colemak),
 	KBD_MAP(KB_US | KB_SWAPCTRLCAPS, KB_US,	pckbd_keydesc_swapctrlcaps),
 	KBD_MAP(KB_US | KB_IOPENER, KB_US,	pckbd_keydesc_iopener),
 	KBD_MAP(KB_JP | KB_SWAPCTRLCAPS, KB_JP, pckbd_keydesc_swapctrlcaps),

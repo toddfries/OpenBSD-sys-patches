@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_signal.h,v 1.5 2002/03/14 01:26:51 millert Exp $	 */
-/*	$NetBSD: svr4_signal.h,v 1.14 1995/10/14 20:24:41 christos Exp $	 */
+/*	$NetBSD: svr4_signal.h,v 1.31 2008/04/28 20:23:45 martin Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,19 +15,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef	_SVR4_SIGNAL_H_
@@ -67,7 +68,10 @@
 #define	SVR4_SIGPROF	29
 #define	SVR4_SIGXCPU	30
 #define	SVR4_SIGXFSZ	31
-#define SVR4_NSIG	32
+
+#define SVR4_SIGRTMIN	32
+#define SVR4_SIGRTMAX	63
+#define SVR4_NSIG	64
 
 #define	SVR4_SIGNO_MASK		0x00FF
 #define	SVR4_SIGNAL_MASK	0x0000
@@ -95,16 +99,10 @@ typedef struct {
 } svr4_sigset_t;
 
 struct svr4_sigaction {
-	int		sa_flags;
-	svr4_sig_t	sa__handler;
-	svr4_sigset_t	sa_mask;
-	int 		sa_reserved[2];
-};
-
-struct svr4_sigaltstack {
-	char		*ss_sp;
-	int		ss_size;
-	int		ss_flags;
+	int		svr4_sa_flags;
+	svr4_sig_t	svr4_sa_handler;
+	svr4_sigset_t	svr4_sa_mask;
+	int 		svr4_sa_reserved[2];
 };
 
 /* sa_flags */
@@ -115,15 +113,29 @@ struct svr4_sigaltstack {
 #define SVR4_SA_NODEFER		0x00000010
 #define SVR4_SA_NOCLDWAIT	0x00010000	/* No zombies 	*/
 #define SVR4_SA_NOCLDSTOP	0x00020000	/* No jcl	*/
+#define	SVR4_SA_ALLBITS		0x0003001f
+
+struct svr4_sigaltstack {
+	char		*ss_sp;
+	int		ss_size;
+	int		ss_flags;
+};
 
 /* ss_flags */
 #define SVR4_SS_ONSTACK		0x00000001
 #define SVR4_SS_DISABLE		0x00000002
+#define SVR4_SS_ALLBITS		0x00000003
 
-extern int bsd_to_svr4_sig[];
-void bsd_to_svr4_sigaltstack(const struct sigaltstack *, struct svr4_sigaltstack *);
-void bsd_to_svr4_sigset(const sigset_t *, svr4_sigset_t *);
-void svr4_to_bsd_sigaltstack(const struct svr4_sigaltstack *, struct sigaltstack *);
-void svr4_to_bsd_sigset(const svr4_sigset_t *, sigset_t *);
+extern const int native_to_svr4_signo[];
+extern const int svr4_to_native_signo[];
+void native_to_svr4_sigset(const sigset_t *, svr4_sigset_t *);
+void svr4_to_native_sigset(const svr4_sigset_t *, sigset_t *);
+void native_to_svr4_sigaltstack(const struct sigaltstack *, struct svr4_sigaltstack *);
+void svr4_to_native_sigaltstack(const struct svr4_sigaltstack *, struct sigaltstack *);
+void svr4_sendsig(const struct ksiginfo *, const sigset_t *);
+
+/* sys_context() function codes */
+#define	SVR4_GETCONTEXT		0
+#define	SVR4_SETCONTEXT		1
 
 #endif /* !_SVR4_SIGNAL_H_ */

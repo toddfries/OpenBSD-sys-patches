@@ -1,4 +1,3 @@
-/*	$OpenBSD: trap.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: trap.h,v 1.3 2001/11/25 15:55:58 thorpej Exp $	*/
+/*	$NetBSD: trap.h,v 1.1 2006/12/16 05:48:26 ober Exp $	*/
 
 #include <arm/trap.h>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_aobj.h,v 1.8 2002/03/14 01:27:18 millert Exp $	*/
-/*	$NetBSD: uvm_aobj.h,v 1.10 2000/01/11 06:57:49 chs Exp $	*/
+/*	$NetBSD: uvm_aobj.h,v 1.20 2007/12/01 10:40:03 yamt Exp $	*/
 
 /*
  * Copyright (c) 1998 Chuck Silvers, Charles D. Cranor and
@@ -55,11 +54,12 @@
 #define UAO_FLAG_KERNSWAP	0x2	/* enable kernel swap */
 
 /* internal flags */
-#define UAO_FLAG_KILLME		0x4	/* aobj should die when last released
-					 * page is no longer PG_BUSY ... */
 #define UAO_FLAG_NOSWAP		0x8	/* aobj can't swap (kernel obj only!) */
 
 #ifdef _KERNEL
+#if defined(_KERNEL_OPT)
+#include "opt_vmswap.h"
+#endif
 
 /*
  * prototypes
@@ -67,14 +67,16 @@
 
 void uao_init(void);
 int uao_set_swslot(struct uvm_object *, int, int);
+#if defined(VMSWAP)
+int uao_find_swslot(struct uvm_object *, int);
 void uao_dropswap(struct uvm_object *, int);
-int uao_swap_off(int, int);
-
-/*
- * globals
- */
-
-extern struct uvm_pagerops aobj_pager;
+bool uao_swap_off(int, int);
+void uao_dropswap_range(struct uvm_object *, voff_t, voff_t);
+#else /* defined(VMSWAP) */
+#define	uao_find_swslot(obj, off)	0
+#define	uao_dropswap(obj, off)		/* nothing */
+#define	uao_dropswap_range(obj, lo, hi)	/* nothing */
+#endif /* defined(VMSWAP) */
 
 #endif /* _KERNEL */
 

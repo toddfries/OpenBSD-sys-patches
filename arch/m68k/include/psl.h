@@ -1,5 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.7 2007/11/09 17:28:29 miod Exp $	*/
-/*	$NetBSD: psl.h,v 1.5 1994/10/26 07:50:50 cgd Exp $	*/
+/*	$NetBSD: psl.h,v 1.13 2006/02/16 20:17:13 perry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -32,11 +31,9 @@
  *	@(#)psl.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef	_M68K_PSL_H_
-#define	_M68K_PSL_H_
-
+#ifndef PSL_C
 /*
- * MC680x0 program status word
+ * MC68000 program status word
  */
 
 #define	PSL_C		0x0001		/* carry bit */
@@ -70,67 +67,53 @@
 
 #define	USERMODE(ps)	(((ps) & PSL_S) == 0)
 
-#ifdef	_KERNEL
+#if defined(_KERNEL) && !defined(_LOCORE)
 
-/* SPL asserts */
-#ifdef DIAGNOSTIC
 /*
- * Although this function is implemented in MI code, it must be in this MD
- * header because we don't want this header to include MI includes.
+ * spl functions; platform-specific code must define spl0 and splx().
  */
-void splassert_fail(int, int, const char *);
-extern int splassert_ctl;
-void splassert_check(int, const char *);
-#define splassert(__wantipl)						\
-do {									\
-	if (splassert_ctl > 0) {					\
-		splassert_check(__wantipl, __func__);			\
-	}								\
-} while (0)
-#else
-#define	splassert(wantipl)	do { /* nothing */ } while (0)
+
+static __inline int
+_spl(int s)
+{
+	int sr;
+
+	__asm volatile ("movew %%sr,%0; movew %1,%%sr" :
+	    "=&d" (sr) : "di" (s));
+
+	return sr;
+}
+
+static __inline int
+_splraise(int level)
+{
+	int sr;
+
+	__asm volatile("movw %%sr,%0" : "=d" (sr));
+
+	if ((u_int16_t)level >= PSL_HIGHIPL || (u_int16_t)level > (u_int16_t)sr)
+		__asm volatile("movw %0,%%sr" :: "di" (level));
+
+	return sr;
+}
+
+/* spl0 may require checking for software interrupts */
+#define	_spl0()		_spl(PSL_S|PSL_IPL0)
+#define	spl1()		_spl(PSL_S|PSL_IPL1)
+#define	spl2()		_spl(PSL_S|PSL_IPL2)
+#define	spl3()		_spl(PSL_S|PSL_IPL3)
+#define	spl4()		_spl(PSL_S|PSL_IPL4)
+#define	spl5()		_spl(PSL_S|PSL_IPL5)
+#define	spl6()		_spl(PSL_S|PSL_IPL6)
+#define	spl7()		_spl(PSL_S|PSL_IPL7)
+
+#define	splraise1()	_splraise(PSL_S|PSL_IPL1)
+#define	splraise2()	_splraise(PSL_S|PSL_IPL2)
+#define	splraise3()	_splraise(PSL_S|PSL_IPL3)
+#define	splraise4()	_splraise(PSL_S|PSL_IPL4)
+#define	splraise5()	_splraise(PSL_S|PSL_IPL5)
+#define	splraise6()	_splraise(PSL_S|PSL_IPL6)
+#define	splraise7()	_splraise(PSL_S|PSL_IPL7)
+
+#endif /* _KERNEL && ! _LOCORE */
 #endif
-
-/*
- * Convert PSL values to CPU IPLs and vice-versa.
- */
-#define	PSLTOIPL(x)		(((x) >> 8) & 0x7)
-#define	IPLTOPSL(x)		((((x) & 0x7) << 8) | PSL_S)
-
-/*
- * spl functions; all but spl0 are done in-line
- */
-
-#define	_spl(s)								\
-({									\
-	register int _spl_r;						\
-									\
-	__asm __volatile ("clrl %0; movew sr,%0; movew %1,sr" :		\
-	    "=&d" (_spl_r) : "di" (s));					\
-	_spl_r;								\
-})
-
-#define	_splraise(s)							\
-({									\
-	register int _spl_r;						\
-									\
-	__asm __volatile ("						\
-		clrl	d0					;	\
-		movw	sr,d0					;	\
-		movl	d0,%0					;	\
-		andw	#0x700,d0				;	\
-		movw	%1,d1					;	\
-		andw	#0x700,d1				;	\
-		cmpw	d0,d1					;	\
-		jle	1f					;	\
-		movw	%1,sr					;	\
-	    1:"							:	\
-		    "=&d" (_spl_r)				:	\
-		    "di" (s)					:	\
-		    "d0", "d1");					\
-	_spl_r;								\
-})
-
-#endif	/* _KERNEL */
-
-#endif	/* _M68K_PSL_H_ */

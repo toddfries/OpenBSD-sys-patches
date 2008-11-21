@@ -1,5 +1,4 @@
-/*	$OpenBSD: i2c_bitbang.c,v 1.3 2006/01/13 23:56:46 grange Exp $	*/
-/*	$NetBSD: i2c_bitbang.c,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
+/*	$NetBSD: i2c_bitbang.c,v 1.12 2008/07/12 02:11:32 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -40,35 +39,64 @@
  * Common module for bit-bang'ing an I2C bus.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i2c_bitbang.c,v 1.12 2008/07/12 02:11:32 tsutsui Exp $");
+
 #include <sys/param.h>
 
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/i2c_bitbang.h>
 
-#define	BB_SET(x)	ops->ibo_set_bits(v, (x))
-#define	BB_DIR(x)	ops->ibo_set_dir(v, (x))
-#define	BB_READ		ops->ibo_read_bits(v)
+#define	SETBITS(x)	ops->ibo_set_bits(v, (x))
+#define	DIR(x)		ops->ibo_set_dir(v, (x))
+#define	READ		ops->ibo_read_bits(v)
 
 #define	SDA		ops->ibo_bits[I2C_BIT_SDA]	/* i2c signal */
 #define	SCL		ops->ibo_bits[I2C_BIT_SCL]	/* i2c signal */
 #define	OUTPUT		ops->ibo_bits[I2C_BIT_OUTPUT]	/* SDA is output */
 #define	INPUT		ops->ibo_bits[I2C_BIT_INPUT]	/* SDA is input */
 
+#ifndef SCL_BAIL_COUNT
+#define SCL_BAIL_COUNT 1000
+#endif
+
+static inline int i2c_wait_for_scl(void *, i2c_bitbang_ops_t);
+
+static inline int
+i2c_wait_for_scl(void *v, i2c_bitbang_ops_t ops)
+{
+	int bail = 0;
+
+	while (((READ & SCL) == 0) && (bail < SCL_BAIL_COUNT)) {
+		delay(1);
+		bail++;
+	}
+	if (bail == SCL_BAIL_COUNT) {
+		i2c_bitbang_send_stop(v, 0, ops);
+		return EIO;
+	}
+	return 0;
+}
+
 /*ARGSUSED*/
 int
 i2c_bitbang_send_start(void *v, int flags, i2c_bitbang_ops_t ops)
 {
 
-	BB_DIR(OUTPUT);
+	/* start condition: put SDL H->L edge during SCL=H */
 
-	BB_SET(SDA | SCL);
-	delay(5);		/* bus free time (4.7 uS) */
-	BB_SET(      SCL);
-	delay(4);		/* start hold time (4.0 uS) */
-	BB_SET(        0);
-	delay(5);		/* clock low time (4.7 uS) */
+	DIR(OUTPUT);
+	SETBITS(SDA | SCL);
+	delay(5);		/* bus free time (4.7 us) */
+	SETBITS(  0 | SCL);
+	if (i2c_wait_for_scl(v, ops) != 0)
+		return EIO;
+	delay(4);		/* start hold time (4.0 us) */
 
-	return (0);
+	/* leave SCL=L and SDL=L to avoid unexpected start/stop condition */
+	SETBITS(  0 |   0);
+
+	return 0;
 }
 
 /*ARGSUSED*/
@@ -76,104 +104,160 @@ int
 i2c_bitbang_send_stop(void *v, int flags, i2c_bitbang_ops_t ops)
 {
 
-	BB_DIR(OUTPUT);
+	/* stop condition: put SDL L->H edge during SCL=H */
 
-	BB_SET(      SCL);
-	delay(4);		/* stop setup time (4.0 uS) */
-	BB_SET(SDA | SCL);
+	/* assume SCL=L, SDL=L here */
+	DIR(OUTPUT);
+	SETBITS(  0 | SCL);
+	delay(4);		/* stop setup time (4.0 us) */
+	SETBITS(SDA | SCL);
 
-	return (0);
+	return 0;
 }
 
 int
 i2c_bitbang_initiate_xfer(void *v, i2c_addr_t addr, int flags,
     i2c_bitbang_ops_t ops)
 {
-	int i2caddr;
 
-	/* XXX Only support 7-bit addressing for now. */
-	if ((addr & 0x78) == 0x78)
-		return (EINVAL);
+	if (addr < 0x80) {
+		uint8_t i2caddr;
 
-	i2caddr = (addr << 1) | ((flags & I2C_F_READ) ? 1 : 0);
+		/* disallow the 10-bit address prefix */
+		if ((addr & 0x78) == 0x78)
+			return EINVAL;
+		i2caddr = (addr << 1) | ((flags & I2C_F_READ) ? 1 : 0);
+		(void) i2c_bitbang_send_start(v, flags, ops);
 
-	(void) i2c_bitbang_send_start(v, flags, ops);
-	return (i2c_bitbang_write_byte(v, i2caddr, flags & ~I2C_F_STOP, ops));
+		return (i2c_bitbang_write_byte(v, i2caddr,
+			    flags & ~I2C_F_STOP, ops));
+
+	} else if (addr < 0x400) {
+		uint16_t	i2caddr;
+		int		rv;
+
+		i2caddr = (addr << 1) | ((flags & I2C_F_READ) ? 1 : 0) |
+		    0xf000;
+
+		(void) i2c_bitbang_send_start(v, flags, ops);
+		rv = i2c_bitbang_write_byte(v, i2caddr >> 8,
+		    flags & ~I2C_F_STOP, ops);
+		/* did a slave ack the 10-bit prefix? */
+		if (rv != 0)
+			return rv;
+
+		/* send the lower 7-bits (+ read/write mode) */
+		return (i2c_bitbang_write_byte(v, i2caddr & 0xff,
+			    flags & ~I2C_F_STOP, ops));
+
+	} else
+		return EINVAL;
 }
 
 int
-i2c_bitbang_read_byte(void *v, uint8_t *valp, int flags,
-    i2c_bitbang_ops_t ops)
+i2c_bitbang_read_byte(void *v, uint8_t *valp, int flags, i2c_bitbang_ops_t ops)
 {
 	int i;
 	uint8_t val = 0;
 	uint32_t bit;
 
-	BB_DIR(INPUT);
-	BB_SET(SDA      );
+	/* assume SCL=L, SDA=L here */
+
+	DIR(INPUT);
 
 	for (i = 0; i < 8; i++) {
 		val <<= 1;
-		BB_SET(SDA | SCL);
-		delay(4);	/* clock high time (4.0 uS) */
-		if (BB_READ & SDA)
+
+		/* data is set at SCL H->L edge */
+		/* SDA is set here because DIR() is INPUT */
+		SETBITS(SDA |   0);
+		delay(5);	/* clock low time (4.7 us) */
+
+		/* read data at SCL L->H edge */
+		SETBITS(SDA | SCL);
+		if (i2c_wait_for_scl(v, ops) != 0)
+			return EIO;
+		if (READ & SDA)
 			val |= 1;
-		BB_SET(SDA      );
-		delay(5);	/* clock low time (4.7 uS) */
+		delay(4);	/* clock high time (4.0 us) */
 	}
+	/* set SCL H->L before set SDA direction OUTPUT */
+	SETBITS(SDA |   0);
 
+	/* set ack after SCL H->L edge */
 	bit = (flags & I2C_F_LAST) ? SDA : 0;
-	BB_DIR(OUTPUT);
-	BB_SET(bit      );
-	delay(1);	/* data setup time (250 nS) */
-	BB_SET(bit | SCL);
-	delay(4);	/* clock high time (4.0 uS) */
-	BB_SET(bit      );
-	delay(5);	/* clock low time (4.7 uS) */
+	DIR(OUTPUT);
+	SETBITS(bit |   0);
+	delay(5);	/* clock low time (4.7 us) */
 
-	BB_DIR(INPUT);
-	BB_SET(SDA      );
-	delay(5);
+	/* ack is checked at SCL L->H edge */
+	SETBITS(bit | SCL);
+	if (i2c_wait_for_scl(v, ops) != 0)
+		return EIO;
+	delay(4);	/* clock high time (4.0 us) */
+
+	/* set SCL H->L for next data; don't change SDA here */
+	SETBITS(bit |   0);
+
+	/* leave SCL=L and SDL=L to avoid unexpected start/stop condition */
+	SETBITS(  0 |   0);
+
 
 	if ((flags & (I2C_F_STOP | I2C_F_LAST)) == (I2C_F_STOP | I2C_F_LAST))
 		(void) i2c_bitbang_send_stop(v, flags, ops);
 
 	*valp = val;
-	return (0);
+	return 0;
 }
 
 int
-i2c_bitbang_write_byte(void *v, uint8_t val, int flags,
-    i2c_bitbang_ops_t ops)
+i2c_bitbang_write_byte(void *v, uint8_t val, int flags, i2c_bitbang_ops_t ops)
 {
 	uint32_t bit;
 	uint8_t mask;
 	int error;
 
-	BB_DIR(OUTPUT);
+	/* assume at SCL=L, SDA=L here */
+
+	DIR(OUTPUT);
 
 	for (mask = 0x80; mask != 0; mask >>= 1) {
 		bit = (val & mask) ? SDA : 0;
-		BB_SET(bit      );
-		delay(1);	/* data setup time (250 nS) */
-		BB_SET(bit | SCL);
-		delay(4);	/* clock high time (4.0 uS) */
-		BB_SET(bit      );
-		delay(5);	/* clock low time (4.7 uS) */
+
+		/* set data after SCL H->L edge */
+		SETBITS(bit |   0);
+		delay(5);	/* clock low time (4.7 us) */
+
+		/* data is fetched at SCL L->H edge */
+		SETBITS(bit | SCL);
+		if (i2c_wait_for_scl(v, ops))
+			return EIO;
+		delay(4);	/* clock high time (4.0 us) */
+
+		/* put SCL H->L edge; don't change SDA here */
+		SETBITS(bit |   0);
 	}
 
-	BB_DIR(INPUT);
+	/* ack is set at H->L edge */
+	DIR(INPUT);
+	delay(5);	/* clock low time (4.7 us) */
 
-	BB_SET(SDA      );
-	delay(5);
-	BB_SET(SDA | SCL);
-	delay(4);
-	error = (BB_READ & SDA) ? EIO : 0;
-	BB_SET(SDA      );
-	delay(5);
+	/* read ack at L->H edge */
+	/* SDA is set here because DIR() is INPUT */
+	SETBITS(SDA | SCL);
+	if (i2c_wait_for_scl(v, ops) != 0)
+		return EIO;
+	error = (READ & SDA) ? EIO : 0;
+	delay(4);	/* clock high time (4.0 us) */
+
+	/* set SCL H->L before set SDA direction OUTPUT */
+	SETBITS(SDA |   0);
+	DIR(OUTPUT);
+	/* leave SCL=L and SDL=L to avoid unexpected start/stop condition */
+	SETBITS(  0 |   0);
 
 	if (flags & I2C_F_STOP)
 		(void) i2c_bitbang_send_stop(v, flags, ops);
 
-	return (error);
+	return error;
 }

@@ -35,7 +35,7 @@
 __FBSDID("$FreeBSD: src/sys/compat/ndis/subr_ntoskrnl.c,v 1.43.2.5 2005/03/31 04:24:36 wpaul Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: subr_ntoskrnl.c,v 1.6 2006/11/24 19:38:55 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_ntoskrnl.c,v 1.13 2008/11/13 12:09:52 ad Exp $");
 #endif
 
 #ifdef __FreeBSD__
@@ -59,20 +59,14 @@ __KERNEL_RCSID(0, "$NetBSD: subr_ntoskrnl.c,v 1.6 2006/11/24 19:38:55 christos E
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
-#ifdef __FreeBSD__
 #include <sys/module.h>
-#else
-#include <sys/lkm.h>
-#include <sys/callout.h>
-#endif
-
-#include <machine/atomic.h>
+#include <sys/atomic.h>
 #ifdef __FreeBSD__
 #include <machine/clock.h>
 #include <machine/bus_memio.h>
 #include <machine/bus_pio.h>
 #endif
-#include <machine/bus.h>
+#include <sys/bus.h>
 #include <machine/stdarg.h>
 
 #ifdef __FreeBSD__
@@ -275,7 +269,8 @@ ntoskrnl_libinit()
 	mdl_zone = uma_zcreate("Windows MDL", MDL_ZONE_SIZE,
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 #else
-	pool_init(&mdl_pool, MDL_ZONE_SIZE, 0, 0, 0, "Windows MDL", NULL);
+	pool_init(&mdl_pool, MDL_ZONE_SIZE, 0, 0, 0, "winmdl", NULL,
+	    IPL_VM);
 #endif
 
 	return(0);
@@ -294,11 +289,11 @@ ntoskrnl_libfini()
 
 #ifdef __FreeBSD__
 	uma_zdestroy(mdl_zone);
+	mtx_destroy(&ntoskrnl_dispatchlock);
 #else
 	pool_destroy(&mdl_pool);
+	/* XXX destroy lock */
 #endif
-
-	mtx_destroy(&ntoskrnl_dispatchlock);
 
 	return(0);
 }
@@ -2002,7 +1997,7 @@ KeAcquireSpinLockRaiseToDpc(kspin_lock *lock)
 __stdcall void
 KeAcquireSpinLockAtDpcLevel(kspin_lock *lock)
 {
-	while (atomic_cmpset_acq_int((volatile u_int *)lock, 0, 1) == 0)
+	while (atomic_swap_uint((volatile u_int *)lock, 1) == 1)
 		/* sit and spin */;
 
 	return;
@@ -2011,7 +2006,7 @@ KeAcquireSpinLockAtDpcLevel(kspin_lock *lock)
 __stdcall void
 KeReleaseSpinLockFromDpcLevel(kspin_lock *lock)
 {
-	atomic_store_rel_int((volatile u_int *)lock, 0);
+	*(volatile u_int *)lock = 0;
 
 	return;
 }
@@ -2034,14 +2029,14 @@ InterlockedExchange(REGARGS2(volatile uint32_t *dst, uintptr_t val))
 __fastcall static uint32_t
 InterlockedIncrement(REGARGS1(volatile uint32_t *addend))
 {
-	atomic_add_long((volatile u_long *)addend, 1);
+	atomic_inc_32(addend);
 	return(*addend);
 }
 
 __fastcall static uint32_t
 InterlockedDecrement(REGARGS1(volatile uint32_t *addend))
 {
-	atomic_subtract_long((volatile u_long *)addend, 1);
+	atomic_dec_32(addend);
 	return(*addend);
 }
 
@@ -2860,7 +2855,7 @@ KeInitializeTimerEx(timer, type)
 #ifdef __FreeBSD__
 	callout_handle_init(&timer->k_handle);
 #else
-	callout_init(timer->k_handle);
+	callout_init(timer->k_handle, 0);
 #endif
 
 	return;

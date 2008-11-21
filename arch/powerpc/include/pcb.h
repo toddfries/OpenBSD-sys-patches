@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.12 2008/04/27 16:01:47 drahn Exp $	*/
-/*	$NetBSD: pcb.h,v 1.1 1996/09/30 16:34:29 ws Exp $	*/
+/*	$NetBSD: pcb.h,v 1.21 2005/12/24 20:07:28 perry Exp $	*/
 
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -34,39 +33,43 @@
 #ifndef	_POWERPC_PCB_H_
 #define	_POWERPC_PCB_H_
 
-#include <machine/reg.h>
+#include <powerpc/reg.h>
 
-
-typedef struct __faultbuf {
-	int	pc;
-	int	sr;
-	int	sp;
-	int	cr;
-	int	regs[20];
-} faultbuf;
+struct faultbuf {
+	register_t fb_pc;		/* PC */
+	register_t fb_sp;		/* R1 */
+	register_t fb_r2;		/* R2 (why?) */
+	register_t fb_cr;		/* CR */
+	register_t fb_fixreg[19];	/* R13-R31 */
+};
 
 struct pcb {
 	struct pmap *pcb_pm;	/* pmap of our vmspace */
-	struct pmap *pcb_pmreal; /* real address of above */
 	register_t pcb_sp;	/* saved SP */
-	faultbuf *pcb_onfault;	/* For use during copyin/copyout */
 	int pcb_flags;
-#define	PCB_FPU		1	/* Process had FPU initialized */
-	struct fpu {
-		double fpr[32];
-		double fpcsr;	/* FPCSR stored as double for easier access */
-	} pcb_fpu;		/* Floating point processor */
-	struct vreg *pcb_vr;    /* Vector unit */
-	struct cpu_info *pcb_fpcpu;
-	struct cpu_info *pcb_veccpu;
+#define	PCB_OWNFPU	1	/* Process owns FPU resources */
+#define	PCB_OWNALTIVEC	2	/* Process owns AltiVec resources */
+#define	PCB_FPU		4	/* Process had FPU initialized */
+#define	PCB_ALTIVEC	8	/* Process had AltiVec initialized */
+#define	PCB_FE1		PSL_FE1	/* 0x100 */
+#define	PCB_FE0		PSL_FE0	/* 0x800 */
+	struct cpu_info * volatile pcb_fpcpu; /* CPU with our FP state */
+	struct cpu_info * volatile pcb_veccpu;/* CPU with our VECTOR state */
+	struct faultbuf *pcb_onfault;	/* For use during copyin/copyout */
+	vaddr_t pcb_kmapsr;	/* where to map user segment in kernel */
+	vaddr_t pcb_umapsr;	/* the user segment mapped in kernel */
+	struct fpreg pcb_fpu;	/* Floating point processor */
+	struct vreg pcb_vr __attribute__((aligned(16)));
 };
 
 struct md_coredump {
-	struct reg regs;
+	struct trapframe frame;
+	struct fpreg fpstate;
+	struct vreg vstate;
 };
 
-#ifdef	_KERNEL
-extern struct proc *fpuproc;
-int  setfault(faultbuf *env);
+#ifdef _KERNEL
+int setfault(struct faultbuf *);
 #endif
+
 #endif	/* _POWERPC_PCB_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: clock.c,v 1.24 2006/09/19 10:13:10 gdamore Exp $	*/
+/*	$NetBSD: clock.c,v 1.28 2008/06/25 08:14:59 isaki Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.24 2006/09/19 10:13:10 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.28 2008/06/25 08:14:59 isaki Exp $");
 
 #include "clock.h"
 
@@ -98,15 +98,10 @@ __KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.24 2006/09/19 10:13:10 gdamore Exp $");
 #include <arch/x68k/dev/mfp.h>
 #include <arch/x68k/dev/rtclock_var.h>
 
+static int clock_match(device_t, cfdata_t, void *);
+static void clock_attach(device_t, device_t, void *);
 
-struct clock_softc {
-	struct device		sc_dev;
-};
-
-static int clock_match(struct device *, struct cfdata *, void *);
-static void clock_attach(struct device *, struct device *, void *);
-
-CFATTACH_DECL(clock, sizeof(struct clock_softc),
+CFATTACH_DECL_NEW(clock, 0,
     clock_match, clock_attach, NULL, NULL);
 
 static int clock_attached;
@@ -114,7 +109,7 @@ static int clock_attached;
 static unsigned mfp_get_timecount(struct timecounter *);
 
 static int
-clock_match(struct device *parent, struct cfdata *cf, void *aux)
+clock_match(device_t parent, cfdata_t cf, void *aux)
 {
 
 	if (strcmp (aux, "clock") != 0)
@@ -126,12 +121,12 @@ clock_match(struct device *parent, struct cfdata *cf, void *aux)
 
 
 static void
-clock_attach(struct device *parent, struct device *self, void *aux)
+clock_attach(device_t parent, device_t self, void *aux)
 {
 
 	clock_attached = 1;
 
-	printf(": MFP timer C\n");
+	aprint_normal(": MFP timer C\n");
 }
 
 
@@ -230,7 +225,7 @@ DELAY(mic)
 	 */
 
 	/*
-	 * this function uses HSync pulses as base units. The custom chips 
+	 * this function uses HSync pulses as base units. The custom chips
 	 * display only deals with 31.6kHz/2 refresh, this gives us a
 	 * resolution of 1/15800 s, which is ~63us (add some fuzz so we really
 	 * wait awhile, even if using small timeouts)
@@ -318,18 +313,18 @@ clockclose(dev_t dev, int flags)
 
 /*ARGSUSED*/
 int
-clockioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+clockioctl(dev_t dev, u_long cmd, void *data, int flag, struct proc *p)
 {
 	int error = 0;
 	
 	switch (cmd) {
 
 	case CLOCKMAP:
-		error = clockmmap(dev, (caddr_t *)data, p);
+		error = clockmmap(dev, (void **)data, p);
 		break;
 
 	case CLOCKUNMAP:
-		error = clockunmmap(dev, *(caddr_t *)data, p);
+		error = clockunmmap(dev, *(void **)data, p);
 		break;
 
 	case CLOCKGETRES:
@@ -351,7 +346,7 @@ clockmap(dev_t dev, off_t off, int prot)
 }
 
 int
-clockmmap(dev_t dev, caddr_t *addrp, struct proc *p)
+clockmmap(dev_t dev, void **addrp, struct proc *p)
 {
 	int error;
 	struct vnode vn;
@@ -362,17 +357,17 @@ clockmmap(dev_t dev, caddr_t *addrp, struct proc *p)
 	if (*addrp)
 		flags |= MAP_FIXED;
 	else
-		*addrp = (caddr_t)0x1000000;	/* XXX */
+		*addrp = (void *)0x1000000;	/* XXX */
 	vn.v_type = VCHR;			/* XXX */
 	vn.v_specinfo = &si;			/* XXX */
 	vn.v_rdev = dev;			/* XXX */
 	error = vm_mmap(&p->p_vmspace->vm_map, (vaddr_t *)addrp,
-			PAGE_SIZE, VM_PROT_ALL, flags, (caddr_t)&vn, 0);
+			PAGE_SIZE, VM_PROT_ALL, flags, (void *)&vn, 0);
 	return(error);
 }
 
 int
-clockunmmap(dev_t dev, caddr_t addr, struct proc *p)
+clockunmmap(dev_t dev, void *addr, struct proc *p)
 {
 	int rv;
 
@@ -422,7 +417,7 @@ stopclock(void)
  * locore has been changed to turn the profile clock on/off when switching
  * into/out of a process that is profiling (startprofclock/stopprofclock).
  * This reduces the impact of the profiling clock on other users, and might
- * possibly increase the accuracy of the profiling. 
+ * possibly increase the accuracy of the profiling.
  */
 int  profint   = PRF_INTERVAL;	/* Clock ticks between interrupts */
 int  profscale = 0;		/* Scale factor from sys clock to prof clock */
@@ -487,7 +482,7 @@ stopprofclock(void)
  * Assumes it is called with clock interrupts blocked.
  */
 void
-profclock(caddr_t pc, int ps)
+profclock(void *pc, int ps)
 {
 
 	/*

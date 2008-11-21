@@ -1,4 +1,4 @@
-/*	$NetBSD: oclock.c,v 1.14 2006/10/04 15:04:43 tsutsui Exp $ */
+/*	$NetBSD: oclock.c,v 1.18 2008/04/28 20:23:36 martin Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: oclock.c,v 1.14 2006/10/04 15:04:43 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: oclock.c,v 1.18 2008/04/28 20:23:36 martin Exp $");
 
 #include "opt_sparc_arch.h"
 
@@ -67,10 +60,10 @@ extern int timerblurb;
 extern void (*timer_init)(void);
 
 
-static int oclockmatch(struct device *, struct cfdata *, void *);
-static void oclockattach(struct device *, struct device *, void *);
+static int oclockmatch(device_t, cfdata_t, void *);
+static void oclockattach(device_t, device_t, void *);
 
-CFATTACH_DECL(oclock, sizeof(struct intersil7170_softc),
+CFATTACH_DECL_NEW(oclock, sizeof(struct intersil7170_softc),
     oclockmatch, oclockattach, NULL, NULL);
 
 #if defined(SUN4)
@@ -96,7 +89,7 @@ void oclock_init(void);
  * old clock match routine
  */
 static int
-oclockmatch(struct device *parent, struct cfdata *cf, void *aux)
+oclockmatch(device_t parent, cfdata_t cf, void *aux)
 {
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba;
@@ -121,22 +114,23 @@ oclockmatch(struct device *parent, struct cfdata *cf, void *aux)
 
 /* ARGSUSED */
 static void
-oclockattach(struct device *parent, struct device *self, void *aux)
+oclockattach(device_t parent, device_t self, void *aux)
 {
 #if defined(SUN4)
+	struct intersil7170_softc *sc = device_private(self);
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba = &uoba->uoba_oba4;
-	struct intersil7170_softc *sc = (void *)self;
 
 	oldclk = 1;  /* we've got an oldie! */
 
+	sc->sc_dev = self;
 	sc->sc_bst = oba->oba_bustag;
 	if (bus_space_map(sc->sc_bst,
 			  oba->oba_paddr,
 			  sizeof(struct intersil7170),
 			  BUS_SPACE_MAP_LINEAR,	/* flags */
 			  &sc->sc_bsh) != 0) {
-		printf("%s: can't map register\n", self->dv_xname);
+		aprint_error(": can't map register\n");
 		return;
 	}
 	i7_bt = sc->sc_bst;
@@ -171,13 +165,14 @@ oclockattach(struct device *parent, struct device *self, void *aux)
 		intersil_disable();
 
 		if ((ival & INTERSIL_INTER_PENDING) != 0) {
-			printf(" delay constant %d%s\n", timerblurb,
+			aprint_normal(" delay constant %d%s\n", timerblurb,
 				(timerblurb == 1) ? " [TOO SMALL?]" : "");
 			break;
 		}
 		if (timerblurb > 10) {
-			printf("\noclock: calibration failing; clamped at %d\n",
-			       timerblurb);
+			aprint_normal("\n");
+			aprint_error_dev(self, "calibration failing; "
+			    "clamped at %d\n", timerblurb);
 			break;
 		}
 	}
@@ -191,8 +186,7 @@ oclockattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_year0 = 1968;
 	intersil7170_attach(sc);
 
-	printf("\n");
-	todr_attach(&sc->sc_handle);
+	aprint_normal("\n");
 #endif /* SUN4 */
 }
 

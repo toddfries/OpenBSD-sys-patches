@@ -1,6 +1,8 @@
+/*	$NetBSD: mga_irq.c,v 1.6 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* mga_irq.c -- IRQ handling for radeon -*- linux-c -*-
  */
-/*
+/*-
  * Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
  *
  * The Weather Channel (TM) funded Tungsten Graphics to develop the
@@ -31,6 +33,12 @@
  *    Eric Anholt <anholt@FreeBSD.org>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mga_irq.c,v 1.6 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mga_irq.c,v 1.6 2005/11/28 23:13:53 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "mga_drm.h"
@@ -38,7 +46,7 @@
 
 irqreturn_t mga_driver_irq_handler(DRM_IRQ_ARGS)
 {
-	struct drm_device *dev = (struct drm_device *) arg;
+	drm_device_t *dev = (drm_device_t *) arg;
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 	int status;
 	int handled = 0;
@@ -80,7 +88,7 @@ irqreturn_t mga_driver_irq_handler(DRM_IRQ_ARGS)
 	return IRQ_NONE;
 }
 
-int mga_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence)
+int mga_driver_vblank_wait(drm_device_t * dev, unsigned int *sequence)
 {
 	unsigned int cur_vblank;
 	int ret = 0;
@@ -98,7 +106,7 @@ int mga_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence)
 	return ret;
 }
 
-int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence)
+int mga_driver_fence_wait(drm_device_t * dev, unsigned int *sequence)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 	unsigned int cur_fence;
@@ -117,7 +125,7 @@ int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence)
 	return ret;
 }
 
-void mga_driver_irq_preinstall(struct drm_device * dev)
+void mga_driver_irq_preinstall(drm_device_t * dev)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 
@@ -127,7 +135,7 @@ void mga_driver_irq_preinstall(struct drm_device * dev)
 	MGA_WRITE(MGA_ICLEAR, ~0);
 }
 
-void mga_driver_irq_postinstall(struct drm_device * dev)
+void mga_driver_irq_postinstall(drm_device_t * dev)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 
@@ -137,7 +145,7 @@ void mga_driver_irq_postinstall(struct drm_device * dev)
 	MGA_WRITE(MGA_IEN, MGA_VLINEIEN | MGA_SOFTRAPEN);
 }
 
-void mga_driver_irq_uninstall(struct drm_device * dev)
+void mga_driver_irq_uninstall(drm_device_t * dev)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 	if (!dev_priv)
@@ -145,6 +153,6 @@ void mga_driver_irq_uninstall(struct drm_device * dev)
 
 	/* Disable *all* interrupts */
 	MGA_WRITE(MGA_IEN, 0);
-
+	
 	dev->irq_enabled = 0;
 }

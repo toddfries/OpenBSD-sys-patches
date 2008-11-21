@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.c,v 1.10 2008/05/27 19:57:45 thib Exp $	*/
+/*	$NetBSD: natm.c,v 1.17 2008/11/07 00:20:18 dyoung Exp $	*/
 
 /*
  *
@@ -36,6 +36,9 @@
  * natm.c: native mode ATM access (both aal0 and aal5).
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: natm.c,v 1.17 2008/11/07 00:20:18 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -67,8 +70,23 @@ u_long natm0_recvspace = 16*1024;
  * user requests
  */
 
-int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control, struct proc *p)
+#if defined(__NetBSD__)
+int natm_usrreq(so, req, m, nam, control, l)
+#elif defined(__OpenBSD__)
+int natm_usrreq(so, req, m, nam, control, p)
+#elif defined(__FreeBSD__)
+int natm_usrreq(so, req, m, nam, control)
+#endif
+
+struct socket *so;
+int req;
+struct mbuf *m, *nam, *control;
+#if defined(__NetBSD__)
+struct lwp *l;
+#elif deifned(__OpenBSD__)
+struct proc *p;
+#endif
+
 {
   int error = 0, s, s2;
   struct natmpcb *npcb;
@@ -87,7 +105,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
     error = EINVAL;
     goto done;
   }
-    
+
 
   switch (req) {
     case PRU_ATTACH:			/* attach protocol to up */
@@ -98,7 +116,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
       }
 
       if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
-	if (proto == PROTO_NATMAAL5) 
+	if (proto == PROTO_NATMAAL5)
           error = soreserve(so, natm5_sendspace, natm5_recvspace);
 	else
           error = soreserve(so, natm0_sendspace, natm0_recvspace);
@@ -106,7 +124,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
           break;
       }
 
-      so->so_pcb = (caddr_t) (npcb = npcb_alloc(M_WAITOK));
+      so->so_pcb = (void *) (npcb = npcb_alloc(M_WAITOK));
       npcb->npcb_socket = so;
 
       break;
@@ -119,7 +137,9 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 
       npcb_free(npcb, NPCB_DESTROY);	/* drain */
       so->so_pcb = NULL;
+      /* sofree drops the lock */
       sofree(so);
+      mutex_enter(softnet_lock);
 
       break;
 
@@ -180,8 +200,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
       ATM_PH_SETVCI(&api.aph, npcb->npcb_vci);
       api.rxhand = npcb;
       s2 = splnet();
-      if (ifp->if_ioctl == NULL || 
-	  ifp->if_ioctl(ifp, SIOCATMENA, (caddr_t) &api) != 0) {
+      if (ifp->if_ioctl(ifp, SIOCATMENA, &api) != 0) {
 	splx(s2);
 	npcb_free(npcb, NPCB_REMOVE);
         error = EIO;
@@ -211,8 +230,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
       ATM_PH_SETVCI(&api.aph, npcb->npcb_vci);
       api.rxhand = npcb;
       s2 = splnet();
-      if (ifp->if_ioctl != NULL)
-	  ifp->if_ioctl(ifp, SIOCATMDIS, (caddr_t) &api);
+      ifp->if_ioctl(ifp, SIOCATMDIS, &api);
       splx(s);
 
       npcb_free(npcb, NPCB_REMOVE);
@@ -237,6 +255,10 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
        */
 
       M_PREPEND(m, sizeof(*aph), M_WAITOK);
+      if (m == NULL) {
+        error = ENOBUFS;
+	break;
+      }
       aph = mtod(m, struct atm_pseudohdr *);
       ATM_PH_VPI(aph) = npcb->npcb_vpi;
       ATM_PH_SETVCI(aph, npcb->npcb_vci);
@@ -258,8 +280,8 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 #if defined(__NetBSD__) || defined(__OpenBSD__)
       bcopy(npcb->npcb_ifp->if_xname, snatm->snatm_if, sizeof(snatm->snatm_if));
 #elif defined(__FreeBSD__)
-      sprintf(snatm->snatm_if, "%s%d", npcb->npcb_ifp->if_name,
-	npcb->npcb_ifp->if_unit);
+      snprintf(snatm->snatm_if, sizeof(snatm->snatm_if), "%s%d",
+          npcb->npcb_ifp->if_name, npcb->npcb_ifp->if_unit);
 #endif
       snatm->snatm_vci = npcb->npcb_vci;
       snatm->snatm_vpi = npcb->npcb_vpi;
@@ -277,10 +299,9 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
         }
         ario.npcb = npcb;
         ario.rawvalue = *((int *)nam);
-        error = npcb->npcb_ifp->if_ioctl(npcb->npcb_ifp, 
-				SIOCXRAWATM, (caddr_t) &ario);
+        error = npcb->npcb_ifp->if_ioctl(npcb->npcb_ifp, SIOCXRAWATM, &ario);
 	if (!error) {
-          if (ario.rawvalue) 
+          if (ario.rawvalue)
 	    npcb->npcb_flags |= NPCB_RAW;
 	  else
 	    npcb->npcb_flags &= ~(NPCB_RAW);
@@ -296,7 +317,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
     case PRU_LISTEN:			/* listen for connection */
     case PRU_ACCEPT:			/* accept connection from peer */
     case PRU_CONNECT2:			/* connect two sockets */
-    case PRU_ABORT:			/* abort (fast DISCONNECT, DETACH) */
+    case PRU_ABORT:			/* abort (fast DISCONNECT, DETATCH) */
 					/* (only happens if LISTEN socket) */
     case PRU_RCVD:			/* have taken data; more room now */
     case PRU_FASTTIMO:			/* 200ms timeout */
@@ -311,7 +332,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 #endif
       error = EOPNOTSUPP;
       break;
-   
+
     default: panic("natm usrreq");
   }
 
@@ -337,12 +358,15 @@ natmintr()
   struct socket *so;
   struct natmpcb *npcb;
 
+  mutex_enter(softnet_lock);
 next:
   s = splnet();
   IF_DEQUEUE(&natmintrq, m);
   splx(s);
-  if (m == NULL)
+  if (m == NULL) {
+    mutex_exit(softnet_lock);
     return;
+  }
 
 #ifdef DIAGNOSTIC
   if ((m->m_flags & M_PKTHDR) == 0)
@@ -359,7 +383,7 @@ next:
   if (npcb->npcb_flags & NPCB_DRAIN) {
     m_freem(m);
     if (npcb->npcb_inq == 0)
-      free(npcb, M_PCB);			/* done! */
+      FREE(npcb, M_PCB);			/* done! */
     goto next;
   }
 
@@ -400,7 +424,8 @@ NETISR_SET(NETISR_NATM, natmintr);
 #endif
 
 
-/* 
+#ifdef notyet
+/*
  * natm0_sysctl: not used, but here in case we want to add something
  * later...
  */
@@ -421,7 +446,7 @@ size_t newlen;
   return (ENOPROTOOPT);
 }
 
-/* 
+/*
  * natm5_sysctl: not used, but here in case we want to add something
  * later...
  */
@@ -441,3 +466,4 @@ size_t newlen;
     return (ENOTDIR);
   return (ENOPROTOOPT);
 }
+#endif

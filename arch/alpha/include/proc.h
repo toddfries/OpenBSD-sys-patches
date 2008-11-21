@@ -1,5 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.10 2006/03/17 21:43:29 miod Exp $	*/
-/*	$NetBSD: proc.h,v 1.2 1995/03/24 15:01:36 cgd Exp $	*/
+/* $NetBSD: proc.h,v 1.17 2007/02/09 21:55:01 ad Exp $ */
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -28,44 +27,49 @@
  * rights to redistribute these changes.
  */
 
-#include <machine/cpu.h>
+#ifndef _ALPHA_PROC_H
+#define _ALPHA_PROC_H
+
+#include <machine/frame.h>
+
 /*
- * Machine-dependent part of the proc struct for the Alpha.
+ * Machine-dependent part of the lwp struct for the Alpha.
  */
-
-struct mdbpt {
-	vaddr_t	addr;
-	u_int32_t contents;
-};
-
-struct mdproc {
-	u_long md_flags;
-	struct trapframe *md_tf;	/* trap/syscall registers */
+struct mdlwp {
+	u_long	md_flags;
+	struct	trapframe *md_tf;	/* trap/syscall registers */
 	struct pcb *md_pcbpaddr;	/* phys addr of the pcb */
-	struct mdbpt md_sstep[2];	/* two breakpoints for sstep */
+	volatile int md_astpending;	/* AST pending for this process */
 };
-
 /*
  * md_flags usage
  * --------------
  * MDP_FPUSED
- *      A largely unused bit indicating the presence of FPU history.
- *      Cleared on exec. Set but not used by the fpu context switcher
- *      itself.
+ * 	A largely unused bit indicating the presence of FPU history.
+ * 	Cleared on exec. Set but not used by the fpu context switcher
+ * 	itself.
  * 
  * MDP_FP_C
- *      The architected FP Control word. It should forever begin at bit 1,
- *      as the bits are AARM specified and this way it doesn't need to be
- *      shifted.
+ * 	The architected FP Control word. It should forever begin at bit 1,
+ * 	as the bits are AARM specified and this way it doesn't need to be
+ * 	shifted.
  * 
- *      Until C99 there was never an IEEE 754 API, making most of the
- *      standard useless.  Because of overlapping AARM, OSF/1, NetBSD, and
- *      C99 API's, the use of the MDP_FP_C bits is defined variously in
- *      ieeefp.h and fpu.h.
+ * 	Until C99 there was never an IEEE 754 API, making most of the
+ * 	standard useless.  Because of overlapping AARM, OSF/1, NetBSD, and
+ * 	C99 API's, the use of the MDP_FP_C bits is defined variously in
+ * 	ieeefp.h and fpu.h.
  */
-#define	MDP_FPUSED	0x00000001		/* Process used the FPU */
-#ifndef NO_IEEE
+#define	MDP_FPUSED	0x00000001	/* Process used the FPU */
 #define	MDP_FP_C	0x007ffffe	/* Extended FP_C Quadword bits */
-#endif
-#define MDP_STEP1	0x00800000	/* Single step normal */
-#define MDP_STEP2	0x01800000	/* Single step branch */
+
+/*
+ * Machine-dependent part of the proc struct for the Alpha.
+ */
+struct lwp;
+struct mdproc {
+					/* this process's syscall vector */
+	void	(*md_syscall)(struct lwp *, u_int64_t, struct trapframe *);
+};
+
+
+#endif /* !_ALPHA_PROC_H_ */

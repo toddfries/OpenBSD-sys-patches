@@ -1,5 +1,4 @@
-/*	$OpenBSD: cmi.c,v 1.4 2006/07/20 19:08:15 miod Exp $	*/
-/*	$NetBSD: cmi.c,v 1.2 1999/08/14 11:30:48 ragge Exp $ */
+/*	$NetBSD: cmi.c,v 1.11 2008/03/11 05:34:03 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -31,103 +30,98 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cmi.c,v 1.11 2008/03/11 05:34:03 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
 
+#include <machine/bus.h>
 #include <machine/nexus.h>
 #include <machine/cpu.h>
 #include <machine/sid.h>
 #include <machine/ka750.h>
+#include <machine/mainbus.h>
 
 static	int cmi_print(void *, const char *);
-static	int cmi_match(struct device *, struct cfdata *, void *);
-static	void cmi_attach(struct device *, struct device *, void *);
+static	int cmi_match(device_t, cfdata_t, void *);
+static	void cmi_attach(device_t, device_t, void*);
 
-struct	cfattach cmi_ca = {
-	sizeof(struct device), cmi_match, cmi_attach
-};
+CFATTACH_DECL_NEW(cmi, 0,
+    cmi_match, cmi_attach, NULL, NULL);
 
 int
-cmi_print(aux, name)
-	void *aux;
-	const char *name;
+cmi_print(void *aux, const char *name)
 {
-	struct sbi_attach_args *sa = (struct sbi_attach_args *)aux;
+	struct sbi_attach_args * const sa = aux;
 
 	if (name)
-		printf("unknown device 0x%x at %s", sa->type, name);
+		aprint_normal("unknown device 0x%x at %s", sa->sa_type, name);
 
-	printf(" tr%d", sa->nexnum);
+	aprint_normal(" tr%d", sa->sa_nexnum);
 	return (UNCONF);
 }
 
 
 int
-cmi_match(parent, cf, aux)
-	struct	device	*parent;
-	struct cfdata *cf;
-	void	*aux;
+cmi_match(device_t parent, cfdata_t cf, void *aux)
 {
-	struct mainbus_attach_args *maa = aux;
+	struct mainbus_attach_args * const ma = aux;
 
-	if (maa->maa_bustype == VAX_CMIBUS)
-		return 1;
-	return 0;
+	return !strcmp("cmi", ma->ma_type);
 }
 
 void
-cmi_attach(parent, self, aux)
-	struct	device	*parent, *self;
-	void	*aux;
+cmi_attach(device_t parent, device_t self, void *aux)
 {
-	struct	sbi_attach_args sa;
+	struct sbi_attach_args sa;
 
-	printf("\n");
+	aprint_normal("\n");
 	/*
 	 * Probe for memory, can be in the first 4 slots.
 	 */
 #define NEXPAGES (sizeof(struct nexus) / VAX_NBPG)
-	for (sa.nexnum = 0; sa.nexnum < 4; sa.nexnum++) {
-		sa.nexaddr = (struct nexus *)vax_map_physmem(NEX750 +
-		    sizeof(struct nexus) * sa.nexnum, NEXPAGES);
-		if (badaddr((caddr_t)sa.nexaddr, 4)) {
-			vax_unmap_physmem((vaddr_t)sa.nexaddr, NEXPAGES);
+	for (sa.sa_nexnum = 0; sa.sa_nexnum < 4; sa.sa_nexnum++) {
+		sa.sa_ioh = vax_map_physmem(NEX750 +
+		    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
+		if (badaddr((void *)sa.sa_ioh, 4)) {
+			vax_unmap_physmem((vaddr_t)sa.sa_ioh, NEXPAGES);
 		} else {
-			sa.type = NEX_MEM16;
-			config_found(self, (void *)&sa, cmi_print);
+			sa.sa_type = NEX_MEM16;
+			config_found(self, (void*)&sa, cmi_print);
 		}
 	}
 
 	/*
 	 * Probe for mba's, can be in slot 4 - 7.
 	 */
-	for (sa.nexnum = 4; sa.nexnum < 7; sa.nexnum++) {
-		sa.nexaddr = (struct nexus *)vax_map_physmem(NEX750 +
-		    sizeof(struct nexus) * sa.nexnum, NEXPAGES);
-		if (badaddr((caddr_t)sa.nexaddr, 4)) {
-			vax_unmap_physmem((vaddr_t)sa.nexaddr, NEXPAGES);
+	for (sa.sa_nexnum = 4; sa.sa_nexnum < 7; sa.sa_nexnum++) {
+		sa.sa_ioh = vax_map_physmem(NEX750 +
+		    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
+		if (badaddr((void *)sa.sa_ioh, 4)) {
+			vax_unmap_physmem((vaddr_t)sa.sa_ioh, NEXPAGES);
 		} else {
-			sa.type = NEX_MBA;
-			config_found(self, (void *)&sa, cmi_print);
+			sa.sa_type = NEX_MBA;
+			config_found(self, (void*)&sa, cmi_print);
 		}
 	}
 
 	/*
 	 * There are always one generic UBA, and maybe an optional.
 	 */
-	sa.nexnum = 8;
-	sa.nexaddr = (struct nexus *)vax_map_physmem(NEX750 +
-	    sizeof(struct nexus) * sa.nexnum, NEXPAGES);
-	sa.type = NEX_UBA0;
-	config_found(self, (void *)&sa, cmi_print);
+	sa.sa_nexnum = 8;
+	sa.sa_ioh = vax_map_physmem(NEX750 +
+	    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
+	sa.sa_type = NEX_UBA0;
+	config_found(self, (void*)&sa, cmi_print);
 
-	sa.nexnum = 9;
-	sa.nexaddr = (struct nexus *)vax_map_physmem(NEX750 +
-	    sizeof(struct nexus) * sa.nexnum, NEXPAGES);
-	sa.type = NEX_UBA1;
-	if (badaddr((caddr_t)sa.nexaddr, 4))
-		vax_unmap_physmem((vaddr_t)sa.nexaddr, NEXPAGES);
+	sa.sa_nexnum = 9;
+	sa.sa_ioh = vax_map_physmem(NEX750 +
+	    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
+	sa.sa_type = NEX_UBA1;
+	if (badaddr((void *)sa.sa_ioh, 4))
+		vax_unmap_physmem((vaddr_t)sa.sa_ioh, NEXPAGES);
 	else
-		config_found(self, (void *)&sa, cmi_print);
+		config_found(self, (void*)&sa, cmi_print);
 }

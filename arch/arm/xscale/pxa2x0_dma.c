@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_dma.c,v 1.4 2008/05/15 22:17:08 brad Exp $ */
-/*	$NetBSD: pxa2x0_dma.c,v 1.3 2003/08/07 16:58:35 bsh Exp $ */
+/*	$NetBSD: pxa2x0_dma.c,v 1.4 2005/12/11 12:16:51 christos Exp $ */
 
 /*
  * Copyright (c) 2002  Genetec Corporation.  All rights reserved.
@@ -36,7 +35,11 @@
 
 /*
  * bus dma tag for PXA2[15]0 processor.
+ * (Currently used only for LCD frame buffer)
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_dma.c,v 1.4 2005/12/11 12:16:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,8 +55,8 @@
 struct arm32_bus_dma_tag pxa2x0_bus_dma_tag = {
 	0,
 	0,
-	NULL,
-	_bus_dmamap_create, 
+	NULL,			/* _cookie */
+	_bus_dmamap_create,
 	_bus_dmamap_destroy,
 	_bus_dmamap_load,
 	_bus_dmamap_load_mbuf,
@@ -61,10 +64,11 @@ struct arm32_bus_dma_tag pxa2x0_bus_dma_tag = {
 	_bus_dmamap_load_raw,
 	_bus_dmamap_unload,
 	_bus_dmamap_sync,
+	NULL,			/* sync_post */
 	_bus_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
-	_bus_dmamem_mmap,
+	_bus_dmamem_mmap
 };
 

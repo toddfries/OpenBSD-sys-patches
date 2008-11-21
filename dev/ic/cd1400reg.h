@@ -1,5 +1,4 @@
-/*	$OpenBSD: cd1400reg.h,v 1.4 1998/05/20 19:29:23 deraadt Exp $	*/
-/*	$NetBSD: cd1400reg.h,v 1.3 1996/09/24 18:02:33 christos Exp $	*/
+/*	$NetBSD: cd1400reg.h,v 1.6 2005/12/11 12:21:26 christos Exp $	*/
 
 /*-
  * cyclades cyclom-y serial driver
@@ -29,6 +28,8 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	Id: cd1400.h,v 1.1.4.1 1995/09/14 07:09:41 davidg Exp
  */
 
 /*

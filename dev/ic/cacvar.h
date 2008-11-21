@@ -1,5 +1,4 @@
-/*	$OpenBSD: cacvar.h,v 1.3 2003/03/06 22:31:21 mickey Exp $	*/
-/*	$NetBSD: cacvar.h,v 1.7 2000/10/19 14:28:47 ad Exp $	*/
+/*	$NetBSD: cacvar.h,v 1.18 2008/04/28 20:23:49 martin Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,10 +32,15 @@
 #ifndef _IC_CACVAR_H_
 #define	_IC_CACVAR_H_
 
-#define	CAC_MAX_CCBS	128
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+
+#include <dev/sysmon/sysmonvar.h>
+#include <sys/envsys.h>
+
+#define	CAC_MAX_CCBS	256
 #define	CAC_MAX_XFER	(0xffff * 512)
 #define	CAC_SG_SIZE	32
-#define	CAC_SECTOR_SIZE	512
 
 #define	cac_inb(sc, port) \
 	bus_space_read_1((sc)->sc_iot, (sc)->sc_ioh, port)
@@ -68,7 +65,16 @@
 	(((u_char *)&(x))[0] | (((u_char *)&(x))[1] << 8))
 #define	CAC_GET4(x)							\
 	((((u_char *)&(x))[0] | (((u_char *)&(x))[1] << 8)) |		\
-	(((u_char *)&(x))[0] << 16 | (((u_char *)&(x))[1] << 24)))
+	(((u_char *)&(x))[2] << 16 | (((u_char *)&(x))[3] << 24)))
+
+struct cac_softc;
+struct cac_ccb;
+
+struct cac_context {
+	void		(*cc_handler)(struct device *, void *, int);
+	struct device	*cc_dv;
+	void 		*cc_context;
+};
 
 struct cac_ccb {
 	/* Data the controller will touch - 276 bytes */
@@ -82,14 +88,12 @@ struct cac_ccb {
 	paddr_t		ccb_paddr;
 	bus_dmamap_t	ccb_dmamap_xfer;
 	SIMPLEQ_ENTRY(cac_ccb) ccb_chain;
-	struct scsi_xfer *ccb_xs;
+	struct cac_context ccb_context;
 };
 
 #define	CAC_CCB_DATA_IN		0x0001	/* Map describes inbound xfer */
 #define	CAC_CCB_DATA_OUT	0x0002	/* Map describes outbound xfer */
 #define	CAC_CCB_ACTIVE		0x0004	/* Command submitted to controller */
-
-struct cac_softc;
 
 struct cac_linkage {
 	struct	cac_ccb *(*cl_completed)(struct cac_softc *);
@@ -101,22 +105,39 @@ struct cac_linkage {
 
 struct cac_softc {
 	struct device		sc_dv;
+	kmutex_t		sc_mutex;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 	bus_dma_tag_t		sc_dmat;
 	bus_dmamap_t		sc_dmamap;
 	int			sc_nunits;
 	void			*sc_ih;
-	struct scsi_link	sc_link;
-	const struct cac_linkage	*sc_cl;
-	caddr_t			sc_ccbs;
+	void *			sc_ccbs;
 	paddr_t			sc_ccbs_paddr;
-	SIMPLEQ_HEAD(, cac_ccb)	sc_ccb_free;	
+	SIMPLEQ_HEAD(, cac_ccb)	sc_ccb_free;
 	SIMPLEQ_HEAD(, cac_ccb)	sc_ccb_queue;
-	struct cac_drive_info	*sc_dinfos;
+	kcondvar_t		sc_ccb_cv;
+	struct cac_linkage	sc_cl;
+
+	/* scsi ioctl from sd device */
+	int			(*sc_ioctl)(struct device *, u_long, void *);
+
+	struct sysmon_envsys    *sc_sme;
+	envsys_data_t		*sc_sensor;
 };
 
-int	cac_init(struct cac_softc *, int);
+/* XXX These have to become spinlocks in case of fine SMP */
+#define	CAC_LOCK(sc) splbio()
+#define	CAC_UNLOCK(sc, lock) splx(lock)
+typedef	int cac_lock_t;
+
+struct cac_attach_args {
+	int		caca_unit;
+};
+
+int	cac_cmd(struct cac_softc *, int, void *, int, int, int, int,
+		struct cac_context *);
+int	cac_init(struct cac_softc *, const char *, int);
 int	cac_intr(void *);
 
 extern const struct	cac_linkage cac_l0;

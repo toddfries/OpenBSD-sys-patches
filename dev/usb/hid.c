@@ -1,5 +1,4 @@
-/*	$OpenBSD: hid.c,v 1.20 2007/09/11 13:39:34 gilles Exp $ */
-/*	$NetBSD: hid.c,v 1.23 2002/07/11 21:14:25 augustss Exp $	*/
+/*	$NetBSD: hid.c,v 1.28 2008/04/28 20:23:59 martin Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/hid.c,v 1.11 1999/11/17 22:33:39 n_hibma Exp $ */
 
 /*
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,8 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hid.c,v 1.28 2008/04/28 20:23:59 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#if defined(__NetBSD__)
+#include <sys/kernel.h>
+#endif
 #include <sys/malloc.h>
 
 #include <dev/usb/usb.h>
@@ -49,21 +47,21 @@
 #include <dev/usb/hid.h>
 
 #ifdef UHIDEV_DEBUG
-#define DPRINTF(x)	do { if (uhidevdebug) printf x; } while (0)
-#define DPRINTFN(n,x)	do { if (uhidevdebug>(n)) printf x; } while (0)
+#define DPRINTF(x)	if (uhidevdebug) logprintf x
+#define DPRINTFN(n,x)	if (uhidevdebug>(n)) logprintf x
 extern int uhidevdebug;
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
 #endif
 
-void hid_clear_local(struct hid_item *);
+Static void hid_clear_local(struct hid_item *);
 
 #define MAXUSAGE 256
 struct hid_data {
-	u_char *start;
-	u_char *end;
-	u_char *p;
+	const u_char *start;
+	const u_char *end;
+	const u_char *p;
 	struct hid_item cur;
 	int32_t usages[MAXUSAGE];
 	int nu;
@@ -73,7 +71,7 @@ struct hid_data {
 	enum hid_kind kind;
 };
 
-void
+Static void
 hid_clear_local(struct hid_item *c)
 {
 
@@ -91,16 +89,13 @@ hid_clear_local(struct hid_item *c)
 }
 
 struct hid_data *
-hid_start_parse(void *d, int len, enum hid_kind kind)
+hid_start_parse(const void *d, int len, enum hid_kind kind)
 {
 	struct hid_data *s;
 
-	s = malloc(sizeof *s, M_TEMP, M_WAITOK | M_ZERO);
-	if (s == NULL)
-		panic("hid_start_parse");
-
+	s = malloc(sizeof *s, M_TEMP, M_WAITOK|M_ZERO);
 	s->start = s->p = d;
-	s->end = (char *)d + len;
+	s->end = (const char *)d + len;
 	s->kind = kind;
 	return (s);
 }
@@ -123,9 +118,9 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 	struct hid_item *c = &s->cur;
 	unsigned int bTag, bType, bSize;
 	u_int32_t oldpos;
-	u_char *data;
+	const u_char *data;
 	int32_t dval;
-	u_char *p;
+	const u_char *p;
 	struct hid_item *hi;
 	int i;
 	enum hid_kind retkind;
@@ -298,13 +293,13 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 				break;
 			case 10: /* Push */
 				hi = malloc(sizeof *hi, M_TEMP, M_WAITOK);
-				*hi = s->cur;
+				*hi = *c;
 				c->next = hi;
 				break;
 			case 11: /* Pop */
 				hi = c->next;
 				oldpos = c->loc.pos;
-				s->cur = *hi;
+				*c = *hi;
 				c->loc.pos = oldpos;
 				free(hi, M_TEMP);
 				break;
@@ -374,7 +369,7 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 }
 
 int
-hid_report_size(void *buf, int len, enum hid_kind k, u_int8_t id)
+hid_report_size(const void *buf, int len, enum hid_kind k, u_int8_t id)
 {
 	struct hid_data *d;
 	struct hid_item h;
@@ -406,7 +401,7 @@ hid_report_size(void *buf, int len, enum hid_kind k, u_int8_t id)
 }
 
 int
-hid_locate(void *desc, int size, u_int32_t u, u_int8_t id, enum hid_kind k,
+hid_locate(const void *desc, int size, u_int32_t u, u_int8_t id, enum hid_kind k,
 	   struct hid_location *loc, u_int32_t *flags)
 {
 	struct hid_data *d;
@@ -459,14 +454,33 @@ hid_get_data(u_char *buf, struct hid_location *loc)
 	return (data);
 }
 
+/*
+ * hid_is_collection(desc, size, id, usage)
+ *
+ * This function is broken in the following way.
+ *
+ * It is used to discover if the given 'id' is part of 'usage' collection
+ * in the descriptor in order to match report id against device type.
+ *
+ * The semantics of hid_start_parse() means though, that only a single
+ * kind of report is considered. The current HID code that uses this for
+ * matching is actually only looking for input reports, so this works
+ * for now.
+ * 
+ * This function could try all report kinds (input, output and feature)
+ * consecutively if necessary, but it may be better to integrate the
+ * libusbhid code which can consider multiple report kinds simultaneously
+ *
+ * Needs some thought.
+ */
 int
-hid_is_collection(void *desc, int size, u_int8_t id, u_int32_t usage)
+hid_is_collection(const void *desc, int size, u_int8_t id, u_int32_t usage)
 {
 	struct hid_data *hd;
 	struct hid_item hi;
 	u_int32_t coll_usage = ~0;
 
-	hd = hid_start_parse(desc, size, hid_none);
+	hd = hid_start_parse(desc, size, hid_input);
 	if (hd == NULL)
 		return (0);
 
@@ -475,10 +489,15 @@ hid_is_collection(void *desc, int size, u_int8_t id, u_int32_t usage)
 		DPRINTFN(2,("hid_is_collection: kind=%d id=%d usage=0x%x"
 			    "(0x%x)\n",
 			    hi.kind, hi.report_ID, hi.usage, coll_usage));
+
 		if (hi.kind == hid_collection &&
 		    hi.collection == HCOLL_APPLICATION)
 			coll_usage = hi.usage;
-		if (hi.kind == hid_endcollection &&
+
+		if (hi.kind == hid_endcollection)
+			coll_usage = ~0;
+
+		if (hi.kind == hid_input &&
 		    coll_usage == usage &&
 		    hi.report_ID == id) {
 			DPRINTFN(2,("hid_is_collection: found\n"));

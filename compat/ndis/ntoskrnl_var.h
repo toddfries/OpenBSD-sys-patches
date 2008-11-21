@@ -461,7 +461,7 @@ struct npaged_lookaside_list {
 typedef struct npaged_lookaside_list npaged_lookaside_list;
 typedef struct npaged_lookaside_list paged_lookaside_list;
 
-typedef void * (*lookaside_alloc_func)(uint32_t, size_t, uint32_t);
+typedef void *(*lookaside_alloc_func)(uint32_t, size_t, uint32_t);
 typedef void (*lookaside_free_func)(void *);
 
 struct irp;
@@ -881,7 +881,7 @@ struct io_stack_location {
 			void			*isl_arg3;
 			void			*isl_arg4;
 		} isl_others;
-	} isl_parameters __attribute__((packed));
+	} isl_parameters __packed;
 
 	void			*isl_devobj;
 	void			*isl_fileobj;

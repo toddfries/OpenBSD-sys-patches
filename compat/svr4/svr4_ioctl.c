@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_ioctl.c,v 1.12 2002/11/06 09:57:18 niklas Exp $	 */
-/*	$NetBSD: svr4_ioctl.c,v 1.16 1996/04/11 12:54:41 christos Exp $	 */
+/*	$NetBSD: svr4_ioctl.c,v 1.35 2008/04/28 20:23:45 martin Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,20 +15,22 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: svr4_ioctl.c,v 1.35 2008/04/28 20:23:45 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -43,13 +47,16 @@
 
 #include <sys/syscallargs.h>
 
+#include <compat/sys/socket.h>
+
 #include <compat/svr4/svr4_types.h>
 #include <compat/svr4/svr4_util.h>
 #include <compat/svr4/svr4_signal.h>
+#include <compat/svr4/svr4_lwp.h>
+#include <compat/svr4/svr4_ucontext.h>
 #include <compat/svr4/svr4_syscallargs.h>
 #include <compat/svr4/svr4_stropts.h>
 #include <compat/svr4/svr4_ioctl.h>
-#include <compat/svr4/svr4_jioctl.h>
 #include <compat/svr4/svr4_termios.h>
 #include <compat/svr4/svr4_ttold.h>
 #include <compat/svr4/svr4_filio.h>
@@ -84,18 +91,12 @@ svr4_decode_cmd(cmd, dir, c, num, argsiz)
 #endif
 
 int
-svr4_sys_ioctl(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_ioctl(struct lwp *l, const struct svr4_sys_ioctl_args *uap, register_t *retval)
 {
-	struct svr4_sys_ioctl_args *uap = v;
-	struct file	*fp;
-	struct filedesc	*fdp;
+	file_t		*fp;
 	u_long		 cmd;
-	int (*fun)(struct file *, struct proc *, register_t *,
-			int, u_long, caddr_t);
-	int error = 0;
+	int		 error;
+	int (*fun)(file_t *, struct lwp *, register_t *, int, u_long, void *);
 #ifdef DEBUG_SVR4
 	char		 dir[4];
 	char		 c;
@@ -107,14 +108,15 @@ svr4_sys_ioctl(p, v, retval)
 	uprintf("svr4_ioctl(%d, _IO%s(%c, %d, %d), %p);\n", SCARG(uap, fd),
 	    dir, c, num, argsiz, SCARG(uap, data));
 #endif
-	fdp = p->p_fd;
 	cmd = SCARG(uap, com);
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
 		return EBADF;
 
-	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
-		return EBADF;
+	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
+		error = EBADF;
+		goto out;
+	}
 
 	switch (cmd & 0xff00) {
 	case SVR4_tIOC:
@@ -137,10 +139,6 @@ svr4_sys_ioctl(p, v, retval)
 		fun = svr4_sock_ioctl;
 		break;
 
-	case SVR4_jIOC:
-		fun = svr4_jerq_ioctl;
-		break;
-
 	case SVR4_XIOC:
 		/* We do not support those */
 		error = EINVAL;
@@ -151,9 +149,9 @@ svr4_sys_ioctl(p, v, retval)
 		error = 0;	/* XXX: really ENOSYS */
 		goto out;
 	}
-	FREF(fp);
-	error = (*fun)(fp, p, retval, SCARG(uap, fd), cmd, SCARG(uap, data));
-	FRELE(fp);
+
+	error = (*fun)(fp, l, retval, SCARG(uap, fd), cmd, SCARG(uap, data));
 out:
+	fd_putfile(SCARG(uap, fd));
 	return (error);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.56 2008/04/09 16:58:10 deraadt Exp $	*/
-/*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
+/*	$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,353 +31,131 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $");
+
+#include "opt_compat_netbsd.h"
+#include "opt_mvmetype.h"
+#include "opt_ddb.h"
+
 #include <sys/param.h>
 #include <sys/buf.h>
-#include <sys/timeout.h>
+#include <sys/conf.h>
+#include <sys/device.h>
 #include <sys/exec.h>
+#include <sys/extent.h>
+#include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
-#include <sys/signalvar.h>
 #include <sys/reboot.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/syslog.h>
-#include <sys/extent.h>
 #include <sys/systm.h>
 #include <sys/user.h>
 
+#include <uvm/uvm_extern.h>
+
+#include <sys/sysctl.h>
+
 #include <net/netisr.h>
 
-#include <machine/bat.h>
-#include <machine/bugio.h>
+#include <machine/autoconf.h>
+#include <machine/bootinfo.h>
+#include <machine/bus.h>
+#include <machine/intr.h>
 #include <machine/pmap.h>
+#include <machine/platform.h>
 #include <machine/powerpc.h>
 #include <machine/trap.h>
-#include <machine/autoconf.h>
-#include <machine/bus.h>
-#include <machine/conf.h>
-#include <machine/pio.h>
-#include <machine/prom.h>
+
+#include <powerpc/oea/bat.h>
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
-
-#ifdef DDB
-#include <machine/db_machdep.h>
-#include <ddb/db_access.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_extern.h>
+#if 0
+#include "vga.h"
+#if (NVGA > 0)
+#include <dev/ic/mc6845reg.h>
+#include <dev/ic/pcdisplayvar.h>
+#include <dev/ic/vgareg.h>
+#include <dev/ic/vgavar.h>
 #endif
 
-void initppc(u_int, u_int, char *);
-void dumpsys(void);
-int lcsplx(int);
-void myetheraddr(u_char *);
+#include "pckbc.h"
+#if (NPCKBC > 0)
+#include <dev/isa/isareg.h>
+#include <dev/ic/i8042reg.h>
+#include <dev/ic/pckbcvar.h>
+#endif
+#endif
+
+#include "com.h"
+#if (NCOM > 0)
+#include <sys/termios.h>
+#include <dev/ic/comreg.h>
+#include <dev/ic/comvar.h>
+#endif
+
+void initppc(u_long, u_long, void *);
 
 /*
  * Global variables used here and there
  */
-struct pcb *curpcb;
-struct pmap *curpm;
-struct proc *fpuproc;
-
-extern struct user *proc0paddr;
-
-/* 
- * This is to fake out the console routines, while booting.
- */
-cons_decl(boot);
-#define bootcnpollc nullcnpollc
-
-static struct consdev bootcons = {
-	NULL, 
-	NULL, 
-	bootcngetc, 
-	bootcnputc,
-	bootcnpollc,
-	NULL,
-	makedev(14, 0), 
-	CN_LOWPRI,
-};
-
-/* 
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
-
-struct bat battable[16];
-
-struct vm_map *exec_map = NULL;
-struct vm_map *phys_map = NULL;
-
-int ppc_malloc_ok;
-
-#ifndef SYS_TYPE
-/* XXX Hardwire it for now */
-#define SYS_TYPE MVME
-#endif
-
-int system_type = SYS_TYPE;	/* XXX Hardwire it for now */
-
-struct firmware *fw = NULL;
-extern struct firmware ppc1_firmware;
-
-caddr_t allocsys(caddr_t);
-
-/*
- * Extent maps to manage I/O. Allocate storage for 8 regions in each,
- * initially. Later devio_malloc_safe will indicate that it's safe to
- * use malloc() to dynamically allocate region descriptors.
- */
-static long devio_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof (long)];
-struct extent *devio_ex;
-static int devio_malloc_safe = 0;
+struct mvmeppc_bootinfo bootinfo;
+vaddr_t prep_intr_reg;	/* PReP-compatible  interrupt vector register */
+uint32_t prep_intr_reg_off = INTR_VECTOR_REG;
+struct mem_region physmemr[2], availmemr[2];
+paddr_t avail_end;			/* XXX temporary */
+struct pic_ops *isa_pic;
 
 void
-initppc(startkernel, endkernel, args)
-	u_int startkernel, endkernel;
-	char *args;
+initppc(u_long startkernel, u_long endkernel, void *btinfo)
 {
-	extern void *trapcode; extern int trapsize;
-	extern void *dsitrap; extern int dsisize;
-	extern void *isitrap; extern int isisize;
-	extern void *alitrap; extern int alisize;
-	extern void *decrint; extern int decrsize;
-	extern void *tlbimiss; extern int tlbimsize;
-	extern void *tlbdlmiss; extern int tlbdlmsize;
-	extern void *tlbdsmiss; extern int tlbdsmsize;
-#ifdef DDB
-	extern void *ddblow; extern int ddbsize;
-#endif 
-	extern void consinit(void);
-	extern void *msgbuf_addr;
-	int exc, scratch;
-
-	proc0.p_addr = proc0paddr;
-	bzero(proc0.p_addr, sizeof *proc0.p_addr);
-		
-	fw = &ppc1_firmware; /*  Just PPC1-Bug for now... */
-	buginit();
-
-	curpcb = &proc0paddr->u_pcb;
-	
-	curpm = curpcb->pcb_pmreal = curpcb->pcb_pm = pmap_kernel();
-
-	/* startup fake console driver.  It will be replaced by consinit() */
-	cn_tab = &bootcons;
+	/*
+	 * Copy bootinfo.
+	 */
+	memcpy(&bootinfo, btinfo, sizeof(bootinfo));
 
 	/*
-	 * Initialize BAT registers to unmapped to not generate
-	 * overlapping mappings below.
+	 * Figure out the board family/type.
 	 */
-	ppc_mtibat0u(0);
-	ppc_mtibat1u(0);
-	ppc_mtibat2u(0);
-	ppc_mtibat3u(0);
-	ppc_mtdbat0u(0);
-	ppc_mtdbat1u(0);
-	ppc_mtdbat2u(0);
-	ppc_mtdbat3u(0);
-	
-	/*
-	 * Set up initial BAT table
-	 */
-	battable[0].batl = BATL(0x00000000, BAT_M);
-	battable[0].batu = BATU(0x00000000);
-	
-	/*
-	 * Now setup fixed bat registers
-	 *
-	 * Note that we still run in real mode, and the BAT
-	 * registers were cleared above.
-	 */
-	/* IBAT0 used for initial 256 MB segment */
-	ppc_mtibat0l(battable[0].batl);
-	ppc_mtibat0u(battable[0].batu);
+	ident_platform();
 
-	/* DBAT0 used similar */
-	ppc_mtdbat0l(battable[0].batl);
-	ppc_mtdbat0u(battable[0].batu);
+	if (platform == NULL) {
+		extern void _mvmeppc_unsup_board(const char *, const char *);
+		char msg[80];
 
-	/*
-	 * Set up trap vectors
-	 */
-	for (exc = EXC_RSVD; exc <= EXC_LAST; exc += 0x100) {
-		switch (exc) {
-		default:
-			bcopy(&trapcode, (void *)exc, (size_t)&trapsize);
-			break;
-		case EXC_EXI:
-			/*
-			 * This one is (potentially) installed during autoconf
-			 */
-			break;
-
-		case EXC_DSI:
-			bcopy(&dsitrap, (void *)exc, (size_t)&dsisize);
-			break;
-		case EXC_ISI:
-			bcopy(&isitrap, (void *)exc, (size_t)&isisize);
-			break;
-		case EXC_ALI:
-			bcopy(&alitrap, (void *)exc, (size_t)&alisize);
-			break;
-		case EXC_DECR:
-			bcopy(&decrint, (void *)exc, (size_t)&decrsize);
-			break;
-		case EXC_IMISS:
-			bcopy(&tlbimiss, (void *)exc, (size_t)&tlbimsize);
-			break;
-		case EXC_DLMISS:
-			bcopy(&tlbdlmiss, (void *)exc, (size_t)&tlbdlmsize);
-			break;
-		case EXC_DSMISS:
-			bcopy(&tlbdsmiss, (void *)exc, (size_t)&tlbdsmsize);
-			break;
-#ifdef DDB
-		case EXC_PGM:
-		case EXC_TRC:
-		case EXC_BPT:
-			bcopy(&ddblow, (void *)exc, (size_t)&ddbsize);
-			break;
-#endif
-		}
+		sprintf(msg, "Unsupported model: MVME%04x",
+		    bootinfo.bi_modelnumber);
+		_mvmeppc_unsup_board(msg, &msg[strlen(msg)]);
+		/* NOTREACHED */
 	}
 
-	/* Grr, ALTIVEC_UNAVAIL is a vector not ~0xff aligned: 0x0f20 */
-	bcopy(&trapcode, (void *)0xf20, (size_t)&trapsize);
+	/*
+	 * Set memory region
+	 */
+	physmemr[0].start = 0;
+	physmemr[0].size = bootinfo.bi_memsize & ~PGOFSET;
+	availmemr[0].start = (endkernel + PGOFSET) & ~PGOFSET;
+	availmemr[0].size = bootinfo.bi_memsize - availmemr[0].start;
+	avail_end = physmemr[0].start + physmemr[0].size;    /* XXX temporary */
 
 	/*
-	 * since trapsize is > 0x20, we just overwrote the EXC_PERF handler
-	 * since we do not use it, we will "share" it with the EXC_VEC,
-	 * we dont support EXC_VEC either.
-	 * should be a 'ba 0xf20 written' at address 0xf00, but we
-	 * do not generate EXC_PERF exceptions...
+	 * Set CPU clock
 	 */
+	{
+		extern u_long ticks_per_sec, ns_per_tick;
 
-	syncicache((void *)EXC_RST, EXC_LAST - EXC_RST + 0x100);
-	
-	/*
-	 * Initialize pmap module.
-	 */
-	uvmexp.pagesize = 4096;
-	uvm_setpagesize();
-	pmap_bootstrap(startkernel, endkernel);
-
-#if 1
-	/* MVME2[67]00 max out at 256MB, and we need BAT2 for now. */
-#else
-	/* use BATs to map 1GB memory, no pageable BATs now */
-	if (physmem > atop(0x10000000)) {
-		ppc_mtdbat1l(BATL(0x10000000, BAT_M));
-		ppc_mtdbat1u(BATU(0x10000000));
-	}
-	if (physmem > atop(0x20000000)) {
-		ppc_mtdbat2l(BATL(0x20000000, BAT_M));
-		ppc_mtdbat2u(BATU(0x20000000));
-	}
-	if (physmem > atop(0x30000000)) {
-		ppc_mtdbat3l(BATL(0x30000000, BAT_M));
-		ppc_mtdbat3u(BATU(0x30000000));
-	}
-#endif
-
-	/*
-	 * Now enable translation (and machine checks/recoverable interrupts).
-	 * This will also start using the exception vector prefix of 0x000.
-	 */
-	(fw->vmon)();
-
-	__asm__ volatile ("eieio; mfmsr %0; ori %0,%0,%1; mtmsr %0; sync;isync"
-		      : "=r"(scratch) : "K"(PSL_IR|PSL_DR|PSL_ME|PSL_RI));
-
-	/*
-	 * use the memory provided by pmap_bootstrap for message buffer
-	 */
-	initmsgbuf(msgbuf_addr, MSGBUFSIZE);
-
-#ifdef DDB
-#ifdef notyet
-	db_machine_init();
-#endif
-	ddb_init();
-#endif
-	
-	/*
-	 * Set up extents for pci mappings
-	 * Is this too late?
-	 * 
-	 * what are good start and end values here??
-	 * 0x0 - 0x80000000 mcu bus
-	 * MAP A				MAP B
-	 * 0x80000000 - 0xbfffffff io		0x80000000 - 0xefffffff mem
-	 * 0xc0000000 - 0xffffffff mem		0xf0000000 - 0xffffffff io
-	 * 
-	 * of course bsd uses 0xe and 0xf
-	 * So the BSD PPC memory map will look like this
-	 * 0x0 - 0x80000000 memory (whatever is filled)
-	 * 0x80000000 - 0xdfffffff (pci space, memory or io)
-	 * 0xe0000000 - kernel vm segment
-	 * 0xf0000000 - kernel map segment (user space mapped here)
-	 */
-
-	devio_ex = extent_create("devio", 0x80000000, 0xffffffff, M_DEVBUF,
-		(caddr_t)devio_ex_storage, sizeof(devio_ex_storage),
-		EX_NOCOALESCE|EX_NOWAIT);
-
-	/*
-	 * Now we can set up the console as mapping is enabled.
-	 */
-	consinit();
-	
-	if (boothowto & RB_CONFIG) {
-#ifdef BOOT_CONFIG
-		user_config();
-#else
-		printf("kernel does not support -c; continuing..\n");
-#endif
+		ticks_per_sec = bootinfo.bi_clocktps;
+		ns_per_tick = 1000000000 / ticks_per_sec;
 	}
 
-#ifdef DDB
-	if (boothowto & RB_KDB)
-		Debugger();
-#endif
-}
+	prep_initppc(startkernel, endkernel, boothowto);
 
-void
-install_extint(handler)
-	void (*handler)(void);
-{
-	extern caddr_t extint, extsize;
-	extern u_long extint_call;
-	u_long offset = (u_long)handler - (u_long)&extint_call;
-	int msr;
-	
-#ifdef	DIAGNOSTIC
-	if (offset > 0x1ffffff)
-		panic("install_extint: too far away");
-#endif
-	msr = ppc_intr_disable();
-	extint_call = (extint_call & 0xfc000003) | offset;
-	bcopy(&extint, (void *)EXC_EXI, (size_t)&extsize);
-	syncicache((void *)&extint_call, sizeof extint_call);
-	syncicache((void *)EXC_EXI, (int)&extsize);
-	ppc_intr_enable(msr);
+	(*platform->pic_setup)();
 }
 
 /*
@@ -387,89 +164,33 @@ install_extint(handler)
 void
 cpu_startup()
 {
-	int sz;
-	caddr_t v;
-	vaddr_t minaddr, maxaddr;
-
-	proc0.p_addr = proc0paddr;
-
-	printf("%s", version);
-	
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
-	    ptoa(physmem)/1024/1024);
+	char modelbuf[256];
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
+	 * Mapping PReP-compatible interrput vector register.
 	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
+	prep_intr_reg = (vaddr_t) mapiodev(MVMEPPC_INTR_REG, PAGE_SIZE);
+	if (!prep_intr_reg)
+		panic("startup: no room for interrupt register");
+
+	sprintf(modelbuf, "%s\nCore Speed: %dMHz, Bus Speed: %dMHz\n",
+	    platform->model,
+	    bootinfo.bi_mpuspeed/1000000,
+	    bootinfo.bi_busspeed/1000000);
+	oea_startup(modelbuf);
 
 	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
+	 * Now allow hardware interrupts.
 	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
+	{
+		int msr;
 
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
+		splraise(-1);
+		__asm volatile ("mfmsr %0; ori %0,%0,%1; mtmsr %0"
+			      : "=r"(msr) : "K"(PSL_EE));
+	}
 
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	minaddr = vm_map_min(kernel_map);
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr, 16 * NCARGS,
-	    VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
-	 * Allocate a submap for physio
-	 */
-	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, FALSE, NULL);
-	ppc_malloc_ok = 1;
-	
-	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free) / 1024 / 1024);
-
-	/*
-	 * Set up the buffers.
-	 */
-	bufinit();
-
-	/*
-	 * Set up early mappings
-	 */
-	devio_malloc_safe = 1;
-	nvram_map();
-	prep_bus_space_init();	
-}
-
-/*
- * Allocate space for system data structures.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-#define	valloc(name, type, num) \
-	v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef	SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
+	bus_space_mallocok();
 }
 
 /*
@@ -479,398 +200,112 @@ allocsys(v)
 void
 consinit()
 {
-	static int cons_initted = 0;
+	static int initted = 0;
 
-	if (cons_initted)
+	if (initted)
 		return;
-	cn_tab = NULL;
-	cninit();
-	cons_initted = 1;
-}
+	initted = 1;
 
-/*
- * Clear registers on exec
- */
-void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
-{
-	u_int32_t newstack;
-	u_int32_t pargs;
-	u_int32_t args[4];
+#if 0
 
-	struct trapframe *tf = trapframe(p);
-	pargs = -roundup(-stack + 8, 16);
-	newstack = (u_int32_t)(pargs - 32);
-
-	copyin ((void *)(VM_MAX_ADDRESS-0x10), &args, 0x10);
-	
-	bzero(tf, sizeof *tf);
-	tf->fixreg[1] = newstack;
-	tf->fixreg[3] = retval[0] = args[1];	/* XXX */
-	tf->fixreg[4] = retval[1] = args[0];	/* XXX */
-	tf->fixreg[5] = args[2];		/* XXX */
-	tf->fixreg[6] = args[3];		/* XXX */
-	tf->srr0 = pack->ep_entry;
-	tf->srr1 = PSL_MBO | PSL_USERSET | PSL_FE_DFLT;
-	p->p_addr->u_pcb.pcb_flags = 0;
-}
-
-/*
- * Send a signal to process.
- */
-void
-sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
-{
-	struct proc *p = curproc;
-	struct trapframe *tf;
-	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
-	int oldonstack;
-	
-	frame.sf_signum = sig;
-	
-	tf = trapframe(p);
-	oldonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
-	
-	/*
-	 * Allocate stack space for signal handler.
-	 */
-	if ((psp->ps_flags & SAS_ALTSTACK)
-	    && !oldonstack
-	    && (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)(psp->ps_sigstk.ss_sp
-					 + psp->ps_sigstk.ss_size);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
-	} else
-		fp = (struct sigframe *)tf->fixreg[1];
-
-	fp = (struct sigframe *)((int)(fp - 1) & ~0xf);
-	
-	/*
-	 * Generate signal context for SYS_sigreturn.
-	 */
-	frame.sf_sc.sc_onstack = oldonstack;
-	frame.sf_sc.sc_mask = mask;
-	frame.sf_sip = NULL;
-	bcopy(tf, &frame.sf_sc.sc_frame, sizeof *tf);
-	if (psp->ps_siginfo & sigmask(sig)) {
-		frame.sf_sip = &fp->sf_si;
-		initsiginfo(&frame.sf_si, sig, code, type, val);
-	}
-	if (copyout(&frame, fp, sizeof frame) != 0)
-		sigexit(p, SIGILL);
-	
-
-	tf->fixreg[1] = (int)fp;
-	tf->lr = (int)catcher;
-	tf->fixreg[3] = (int)sig;
-	tf->fixreg[4] = (psp->ps_siginfo & sigmask(sig)) ? (int)&fp->sf_si : 0;
-	tf->fixreg[5] = (int)&fp->sf_sc;
-	tf->srr0 = p->p_sigcode;
-
-#if WHEN_WE_ONLY_FLUSH_DATA_WHEN_DOING_PMAP_ENTER
-	pmap_extract(vm_map_pmap(&p->p_vmspace->vm_map),tf->srr0, &pa);
-	syncicache(pa, (p->p_emul->e_esigcode - p->p_emul->e_sigcode));
+#if (NPFB > 0)
+	if (!strcmp(consinfo->devname, "fb")) {
+		pfb_cnattach(consinfo->addr);
+#if (NPCKBC > 0)
+		pckbc_cnattach(&mvmeppc_isa_io_space_tag, IO_KBD, KBCMDP,
+		    PCKBC_KBD_SLOT);
 #endif
-}
-
-/*
- * System call to cleanup state after a signal handler returns.
- */
-int
-sys_sigreturn(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sys_sigreturn_args /* {
-		syscallarg(struct sigcontext *) sigcntxp;
-	} */ *uap = v;
-	struct sigcontext sc;
-	struct trapframe *tf;
-	int error;
-	
-	if ((error = copyin(SCARG(uap, sigcntxp), &sc, sizeof sc)) != 0)
-		return error;
-	tf = trapframe(p);
-	if ((sc.sc_frame.srr1 & PSL_USERSTATIC) != (tf->srr1 & PSL_USERSTATIC))
-		return EINVAL;
-	bcopy(&sc.sc_frame, tf, sizeof *tf);
-	if (sc.sc_onstack & 1)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
-	p->p_sigmask = sc.sc_mask & ~sigcantmask;
-	return EJUSTRETURN;
-}
-
-/*
- * Machine dependent system variables.
- * None for now.
- */
-int
-cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
-{
-	/* all sysctl names at this level are terminal */
-	if (namelen != 1)
-		return ENOTDIR;
-	switch (name[0]) {
-	default:
-		return EOPNOTSUPP;
+		return;
 	}
-}
+#endif
 
-void
-dumpsys()
-{
-	printf("dumpsys: TBD\n");
-}
+#if (NVGA > 0) || (NGTEN > 0)
+	if (!strcmp(consinfo->devname, "vga")) {
+#if (NGTEN > 0)
+		if (!gten_cnattach(&mvmeppc_mem_space_tag))
+			goto dokbd;
+#endif
+#if (NVGA > 0)
+		if (!vga_cnattach(&mvmeppc_io_space_tag, &mvmeppc_mem_space_tag,
+				-1, 1))
+			goto dokbd;
+#endif
+dokbd:
+#if (NPCKBC > 0)
+		pckbc_cnattach(&mvmeppc_isa_io_space_tag, IO_KBD, KBCMDP,
+		    PCKBC_KBD_SLOT);
+#endif
+		return;
+	}
+#endif /* PC | VGA */
 
-volatile int cpl, ipending, astpending;
-int imask[IPL_NUM];
-int netisr;
+#endif
 
-/*
- * Soft networking interrupts.
- */
-void
-softnet(isr)
-	int isr;
-{
-#define	DONETISR(flag, func) \
-	if (isr & (1 << (flag))) \
-		(func)();
+#if (NCOM > 0)
+	if (!strcmp(bootinfo.bi_consoledev, "PC16550")) {
+		bus_space_tag_t tag = &genppc_isa_io_space_tag;
+		static const bus_addr_t caddr[2] = {0x3f8, 0x2f8};
+		int rv;
+		rv = comcnattach(tag, caddr[bootinfo.bi_consolechan],
+		    bootinfo.bi_consolespeed, COM_FREQ, COM_TYPE_NORMAL,
+		    bootinfo.bi_consolecflag);
+		if (rv)
+			panic("can't init serial console");
 
-#include <net/netisr_dispatch.h>
-#undef	DONETISR
-}
-
-int
-lcsplx(ipl)
-	int ipl;
-{
-	int oldcpl;
-
-	oldcpl = cpl;
-	splx(ipl);
-	return oldcpl;
+		return;
+	}
+#endif
+	panic("invalid console device %s", bootinfo.bi_consoledev);
 }
 
 /*
  * Halt or reboot the machine after syncing/dumping according to howto.
  */
 void
-boot(howto)
-	int howto;
+cpu_reboot(int howto, char *what)
 {
 	static int syncing;
-	static char str[256];
+
+	if (cold) {
+		howto |= RB_HALT;
+		goto halt_sys;
+	}
 
 	boothowto = howto;
-	if (!cold && !(howto & RB_NOSYNC) && !syncing) {
+	if ((howto & RB_NOSYNC) == 0 && syncing == 0) {
 		syncing = 1;
 		vfs_shutdown();		/* sync */
-		
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
-		if ((howto & RB_TIMEBAD) == 0) {
-			resettodr();
-		} else {
-			printf("WARNING: not updating battery clock\n");
-		}
+		resettodr();		/* set wall clock */
 	}
 
-	uvm_shutdown();
+	/* Disable intr */
 	splhigh();
-	if (howto & RB_HALT) {
-		doshutdownhooks();
-		printf("halted\n\n");
-		(fw->exit)();
-	}
-	if (!cold && (howto & RB_DUMP))
-		dumpsys();
+
+	/* Do dump if requested */
+	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
+		oea_dumpsys();
+
+halt_sys:
 	doshutdownhooks();
-	printf("rebooting\n\n");
 
-	(fw->boot)(str);
-	for (;;) ;	/* spinning */
-}
+	pmf_system_shutdown(boothowto);
 
-/*
- *  Get Ethernet address for the onboard ethernet chip.
- */
-void
-myetheraddr(cp)
-	u_char *cp;
-{
-	struct mvmeprom_brdid brdid;
-
-	mvmeprom_brdid(&brdid);
-	bcopy(&brdid.etheraddr, cp, 6);
-}
-
-typedef void  (void_f) (void);
-void_f *pending_int_f = NULL;
-
-/* call the bus/interrupt controller specific pending interrupt handler
- * would be nice if the offlevel interrupt code was handled here
- * instead of being in each of the specific handler code
- */
-void
-do_pending_int()
-{
-	if (pending_int_f != NULL) {
-		(*pending_int_f)();
-	}
-}
-
-/* 
- * one attempt at interrupt stuff..
- *
- */
-#include <dev/pci/pcivar.h>
-typedef void     *(intr_establish_t)(void *, pci_intr_handle_t,
-            int, int, int (*func)(void *), void *, char *);
-typedef void     (intr_disestablish_t)(void *, void *);
-
-int ppc_configed_intr_cnt = 0;
-struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
-
-void *ppc_intr_establish(void *, pci_intr_handle_t, int, int, int (*)(void *),
-    void *, char *);
-void ppc_intr_setup(intr_establish_t *, intr_disestablish_t *);
-void ppc_intr_enable(int);
-int ppc_intr_disable(void);
-
-void *
-ppc_intr_establish(lcv, ih, type, level, func, arg, name)
-	void *lcv;
-	pci_intr_handle_t ih;
-	int type;
-	int level;
-	int (*func)(void *);
-	void *arg;
-	char *name;
-{
-	if (ppc_configed_intr_cnt < MAX_PRECONF_INTR) {
-		ppc_configed_intr[ppc_configed_intr_cnt].ih_fun = func;
-		ppc_configed_intr[ppc_configed_intr_cnt].ih_arg = arg;
-		ppc_configed_intr[ppc_configed_intr_cnt].ih_level = level;
-		ppc_configed_intr[ppc_configed_intr_cnt].ih_irq = ih;
-		ppc_configed_intr[ppc_configed_intr_cnt].ih_what = name;
-		ppc_configed_intr_cnt++;
-	} else {
-		panic("ppc_intr_establish called before interrupt controller"
-			" configured: driver %s has too many interrupts", name);
-	}
-	/* disestablish is going to be tricky to supported for these :-) */
-	return (void *)ppc_configed_intr_cnt;
-}
-
-intr_establish_t *intr_establish_func = ppc_intr_establish;
-intr_disestablish_t *intr_disestablish_func;
-
-void
-ppc_intr_setup(intr_establish_t *establish, intr_disestablish_t *disestablish)
-{
-	intr_establish_func = establish;
-	intr_disestablish_func = disestablish;
-}
-
-vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
-
-void *
-mapiodev(pa, len)
-	paddr_t pa;
-	psize_t len;
-{
-	paddr_t spa;
-	vaddr_t vaddr, va;
-	int off;
-	int size;
-
-	spa = trunc_page(pa);
-	off = pa - spa;
-	size = round_page(off+len);
-
-	if (ppc_malloc_ok == 0) {
-		/* need to steal vm space before kernel vm is initialized */
-		va = VM_MIN_KERNEL_ADDRESS + ppc_kvm_stolen;
-		ppc_kvm_stolen += size;
-		if (ppc_kvm_stolen > PPC_SEGMENT_LENGTH) {
-			panic("ppc_kvm_stolen: out of space");
-		}
-	} else {
-		va = uvm_km_valloc_wait(phys_map, size);
+	if (howto & RB_HALT) {
+                printf("\n");
+                printf("The operating system has halted.\n");
+                printf("Please press any key to reboot.\n\n");
+                cnpollc(1);	/* for proper keyboard command handling */
+                cngetc();
+                cnpollc(0);
 	}
 
-	if (va == 0) 
-		return NULL;
+	printf("rebooting...\n\n");
 
-	for (vaddr = va; size > 0; size -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa,
-			VM_PROT_READ | VM_PROT_WRITE, PMAP_CACHE_DEFAULT);
-		spa += PAGE_SIZE;
-		vaddr += PAGE_SIZE;
-	}
-	return (void *) (va+off);
-}
-void 
-unmapiodev(kva, p_size)
-	void *kva;
-	psize_t p_size;
-{
-	vaddr_t vaddr;
-	int size;
+	(*platform->reset)();
 
-	size = p_size;
+	printf("Oops! Board reset failed!\n");
 
-	vaddr = trunc_page((vaddr_t)kva);
-
-	uvm_km_free_wakeup(phys_map, vaddr, size);
-
-	for (; size > 0; size -= PAGE_SIZE) {
-		pmap_remove(pmap_kernel(), vaddr,  vaddr+PAGE_SIZE-1);
-		vaddr += PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
-
-/* bcopy(), error on fault */
-int
-kcopy(from, to, size)
-	const void *from;
-	void *to;
-	size_t size;
-{
-	faultbuf env;
-	void *oldh = curproc->p_addr->u_pcb.pcb_onfault;
-
-	if (setfault(&env)) {
-		curproc->p_addr->u_pcb.pcb_onfault = oldh;
-		return EFAULT;
-	}
-	bcopy(from, to, size);
-	curproc->p_addr->u_pcb.pcb_onfault = oldh;
-
-	return 0;
+	for (;;)
+		continue;
+	/* NOTREACHED */
 }

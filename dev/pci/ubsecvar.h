@@ -1,3 +1,4 @@
+/*	$NetBSD: ubsecvar.h,v 1.3 2007/03/04 06:02:26 christos Exp $	*/
 /*	$OpenBSD: ubsecvar.h,v 1.36 2003/06/04 16:02:41 jason Exp $	*/
 
 /*
@@ -52,7 +53,7 @@
 
 struct ubsec_dma_alloc {
 	u_int32_t		dma_paddr;
-	caddr_t			dma_vaddr;
+	void *			dma_vaddr;
 	bus_dmamap_t		dma_map;
 	bus_dma_segment_t	dma_seg;
 	bus_size_t		dma_size;
@@ -152,18 +153,21 @@ struct ubsec_softc {
 	bus_space_tag_t		sc_st;		/* memory tag */
 	bus_dma_tag_t		sc_dmat;	/* dma tag */
 	int			sc_flags;	/* device specific flags */
+	int			sc_suspended;
+	int			sc_needwakeup;	/* notify crypto layer */
 	u_int32_t		sc_statmask;	/* interrupt status mask */
 	int32_t			sc_cid;		/* crypto tag */
 	SIMPLEQ_HEAD(,ubsec_q)	sc_queue;	/* packet queue, mcr1 */
 	int			sc_nqueue;	/* count enqueued, mcr1 */
 	SIMPLEQ_HEAD(,ubsec_q)	sc_qchip;	/* on chip, mcr1 */
+	int			sc_nqchip;	/* count on chip, mcr1 */
 	SIMPLEQ_HEAD(,ubsec_q)	sc_freequeue;	/* list of free queue elements */
 	SIMPLEQ_HEAD(,ubsec_q2)	sc_queue2;	/* packet queue, mcr2 */
 	int			sc_nqueue2;	/* count enqueued, mcr2 */
 	SIMPLEQ_HEAD(,ubsec_q2)	sc_qchip2;	/* on chip, mcr2 */
 	int			sc_nsessions;	/* # of sessions */
 	struct ubsec_session	*sc_sessions;	/* sessions */
-	struct timeout		sc_rngto;	/* rng timeout */
+	struct callout		sc_rngto;	/* rng timeout */
 	int			sc_rnghz;	/* rng poll time */
 	struct ubsec_q2_rng	sc_rng;
 	struct ubsec_dma	sc_dmaa[UBS_MAX_NQUEUE];
@@ -186,10 +190,33 @@ struct ubsec_stats {
 	u_int64_t hst_obytes;
 	u_int32_t hst_ipackets;
 	u_int32_t hst_opackets;
-	u_int32_t hst_invalid;
+	u_int32_t hst_invalid;		/* invalid argument */
+	u_int32_t hst_badsession;	/* invalid session id */
+	u_int32_t hst_badflags;		/* flags indicate !(mbuf | uio) */
+	u_int32_t hst_nodesc;		/* op submitted w/o descriptors */
+	u_int32_t hst_badalg;		/* unsupported algorithm */
+
 	u_int32_t hst_nomem;
 	u_int32_t hst_queuefull;
 	u_int32_t hst_dmaerr;
 	u_int32_t hst_mcrerr;
 	u_int32_t hst_nodmafree;
+
+	u_int32_t hst_lenmismatch;	/* enc/auth lengths different */
+	u_int32_t hst_skipmismatch;	/* enc part begins before auth part */
+	u_int32_t hst_iovmisaligned;	/* iov op not aligned */
+	u_int32_t hst_noirq;		/* IRQ for no reason */
+	u_int32_t hst_unaligned;	/* unaligned src caused copy */
+	u_int32_t hst_nomap;		/* bus_dmamap_create failed */
+	u_int32_t hst_noload;		/* bus_dmamap_load_* failed */
+	u_int32_t hst_nombuf;		/* MGET* failed */
+	u_int32_t hst_nomcl;		/* MCLGET* failed */
+	u_int32_t hst_totbatch;		/* ops submitted w/o interrupt */
+	u_int32_t hst_maxbatch;		/* max ops submitted together */
+	u_int32_t hst_maxqueue;		/* max ops queued for submission */
+	u_int32_t hst_maxqchip;		/* max mcr1 ops out for processing */
+	u_int32_t hst_mcr1full;		/* MCR1 too busy to take ops */
+	u_int32_t hst_rng;		/* RNG requests */
+	u_int32_t hst_modexp;		/* MOD EXP requests */
+	u_int32_t hst_modexpcrt;	/* MOD EXP CRT requests */
 };

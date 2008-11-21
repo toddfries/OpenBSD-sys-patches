@@ -1,6 +1,6 @@
-/* $NetBSD: osiop_jazzio.c,v 1.7 2005/12/11 12:16:39 christos Exp $ */
+/* $NetBSD: osiop_jazzio.c,v 1.9 2008/05/14 13:29:27 tsutsui Exp $ */
 
-/*
+/*-
  * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osiop_jazzio.c,v 1.7 2005/12/11 12:16:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osiop_jazzio.c,v 1.9 2008/05/14 13:29:27 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,15 +46,15 @@ __KERNEL_RCSID(0, "$NetBSD: osiop_jazzio.c,v 1.7 2005/12/11 12:16:39 christos Ex
 
 #include <arc/jazz/jazziovar.h>
 
-int osiop_jazzio_match(struct device *, struct cfdata *, void *);
-void osiop_jazzio_attach(struct device *, struct device *, void *);
+int osiop_jazzio_match(device_t, cfdata_t, void *);
+void osiop_jazzio_attach(device_t, device_t, void *);
 int osiop_jazzio_intr(void *);
 
-CFATTACH_DECL(osiop_jazzio, sizeof(struct osiop_softc),
+CFATTACH_DECL_NEW(osiop_jazzio, sizeof(struct osiop_softc),
     osiop_jazzio_match, osiop_jazzio_attach, NULL, NULL);
 
 int
-osiop_jazzio_match(struct device *parent, struct cfdata *match, void *aux)
+osiop_jazzio_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct jazzio_attach_args *ja = aux;
 
@@ -67,12 +65,13 @@ osiop_jazzio_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 void
-osiop_jazzio_attach(struct device *parent, struct device *self, void *aux)
+osiop_jazzio_attach(device_t parent, device_t self, void *aux)
 {
+	struct osiop_softc *sc = device_private(self);
 	struct jazzio_attach_args *ja = aux;
-	struct osiop_softc *sc = (void *)self;
 	int err, scid;
 
+	sc->sc_dev = self;
 	sc->sc_bst = ja->ja_bust;
 	sc->sc_dmat = ja->ja_dmat;
 
@@ -82,8 +81,7 @@ osiop_jazzio_attach(struct device *parent, struct device *self, void *aux)
 	err = bus_space_map(sc->sc_bst, ja->ja_addr,
 	    OSIOP_NREGS, 0, &sc->sc_reg);
 	if (err) {
-		printf("%s: failed to map registers, err=%d\n",
-		    sc->sc_dev.dv_xname, err);
+		aprint_error(": failed to map registers, err=%d\n", err);
 		return;
 	}
 

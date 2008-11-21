@@ -1,5 +1,4 @@
-/* $OpenBSD: bt463.c,v 1.11 2007/11/26 09:28:33 martynas Exp $ */
-/* $NetBSD: bt463.c,v 1.2 2000/06/13 17:21:06 nathanw Exp $ */
+/* $NetBSD: bt463.c,v 1.13 2008/04/28 20:23:49 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,8 +58,11 @@
  */
 
  /* This code was derived from and originally located in sys/dev/pci/
-  *	 NetBSD: tga_bt463.c,v 1.5 2000/03/04 10:27:59 elric Exp 
+  *	 NetBSD: tga_bt463.c,v 1.5 2000/03/04 10:27:59 elric Exp
   */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bt463.c,v 1.13 2008/04/28 20:23:49 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,20 +85,13 @@
  * Functions exported via the RAMDAC configuration table.
  */
 void	bt463_init(struct ramdac_cookie *);
-int	bt463_set_cmap(struct ramdac_cookie *,
-	    struct wsdisplay_cmap *);
-int	bt463_get_cmap(struct ramdac_cookie *,
-	    struct wsdisplay_cmap *);
-int	bt463_set_cursor(struct ramdac_cookie *,
-	    struct wsdisplay_cursor *);
-int	bt463_get_cursor(struct ramdac_cookie *,
-	    struct wsdisplay_cursor *);
-int	bt463_set_curpos(struct ramdac_cookie *,
-	    struct wsdisplay_curpos *);
-int	bt463_get_curpos(struct ramdac_cookie *,
-	    struct wsdisplay_curpos *);
-int	bt463_get_curmax(struct ramdac_cookie *,
-	    struct wsdisplay_curpos *);
+int	bt463_set_cmap(struct ramdac_cookie *, struct wsdisplay_cmap *);
+int	bt463_get_cmap(struct ramdac_cookie *, struct wsdisplay_cmap *);
+int	bt463_set_cursor(struct ramdac_cookie *, struct wsdisplay_cursor *);
+int	bt463_get_cursor(struct ramdac_cookie *, struct wsdisplay_cursor *);
+int	bt463_set_curpos(struct ramdac_cookie *, struct wsdisplay_curpos *);
+int	bt463_get_curpos(struct ramdac_cookie *, struct wsdisplay_curpos *);
+int	bt463_get_curmax(struct ramdac_cookie *, struct wsdisplay_curpos *);
 int	bt463_check_curcmap(struct ramdac_cookie *,
 	    struct wsdisplay_cursor *cursorp);
 void	bt463_set_curcmap(struct ramdac_cookie *,
@@ -143,7 +131,7 @@ struct bt463data {
 					 * around, and is probably
 					 * struct tga_devconfig *
 					 */
-	
+
 	int             (*ramdac_sched_update)(void *, void (*)(void *));
 	void            (*ramdac_wr)(void *, u_int, u_int8_t);
 	u_int8_t        (*ramdac_rd)(void *, u_int);
@@ -152,6 +140,9 @@ struct bt463data {
 	char curcmap_r[2];			/* cursor colormap */
 	char curcmap_g[2];
 	char curcmap_b[2];
+	char tmpcurcmap_r[2];			/* tmp cursor colormap */
+	char tmpcurcmap_g[2];
+	char tmpcurcmap_b[2];
 	char cmap_r[BT463_NCMAP_ENTRIES];	/* colormap */
 	char cmap_g[BT463_NCMAP_ENTRIES];
 	char cmap_b[BT463_NCMAP_ENTRIES];
@@ -160,7 +151,7 @@ struct bt463data {
 
 /* When we're doing console initialization, there's no
  * way to get our cookie back to the video card's softc
- * before we call sched_update. So we stash it here, 
+ * before we call sched_update. So we stash it here,
  * and bt463_update will look for it here first.
  */
 static struct bt463data *console_data;
@@ -186,7 +177,7 @@ inline void bt463_wraddr(struct bt463data *, u_int16_t);
 
 void	bt463_update(void *);
 
- 
+
 /*****************************************************************************/
 
 /*
@@ -263,15 +254,15 @@ bt463_init(rc)
 	/*
 	 * Setup:
 	 * reg 0: 4:1 multiplexing, 25/75 blink.
-	 * reg 1: Overlay mapping: mapped to common palette, 
+	 * reg 1: Overlay mapping: mapped to common palette,
 	 *        14 window type entries, 24-plane configuration mode,
-	 *        4 overlay planes, underlays disabled, no cursor. 
+	 *        4 overlay planes, underlays disabled, no cursor.
 	 * reg 2: sync-on-green enabled, pedestal enabled.
 	 */
 
 	BTWREG(data, BT463_IREG_COMMAND_0, 0x40);
 	BTWREG(data, BT463_IREG_COMMAND_1, 0x48);
-	BTWREG(data, BT463_IREG_COMMAND_2, 0xC0);
+	BTWREG(data, BT463_IREG_COMMAND_2, 0x40);
 
 	/*
 	 * Initialize the read mask.
@@ -305,18 +296,16 @@ bt463_init(rc)
 
 	/* Initial colormap: 0 is black, everything else is white */
 	data->cmap_r[0] = data->cmap_g[0] = data->cmap_b[0] = 0;
-	for (i = 1; i < 256; i++) {
-		data->cmap_r[i] = rasops_cmap[3*i + 0];
-		data->cmap_g[i] = rasops_cmap[3*i + 1];
-		data->cmap_b[i] = rasops_cmap[3*i + 2];
-	}
+	for (i = 1; i < 256; i++)
+		data->cmap_r[i] = data->cmap_g[i] = data->cmap_b[i] = 255;
+
 
 	/* Initialize the window type table:
 	 *
 	 * Entry 0: 24-plane truecolor, overlays enabled, bypassed.
 	 *
 	 *  Lookup table bypass:      yes (    1 << 23 & 0x800000)  800000
-	 *  Colormap address:       0x000 (0x000 << 17 & 0x7e0000)       0 
+	 *  Colormap address:       0x000 (0x000 << 17 & 0x7e0000)       0
 	 *  Overlay mask:             0xf (  0xf << 13 & 0x01e000)   1e000
 	 *  Overlay location:    P<27:24> (    0 << 12 & 0x001000)       0
 	 *  Display mode:       Truecolor (    0 <<  9 & 0x000e00)     000
@@ -324,14 +313,14 @@ bt463_init(rc)
 	 *  Plane shift:                0 (    0 <<  0 & 0x00001f)       0
 	 *                                                        --------
 	 *                                                        0x81e100
-	 */	  
+	 */
 	data->window_type[0] = 0x81e100;
 
-	/* Entry 1: 8-plane pseudocolor in the bottom 8 bits, 
-	 *          overlays enabled, colormap starting at 0. 
+	/* Entry 1: 8-plane pseudocolor in the bottom 8 bits,
+	 *          overlays enabled, colormap starting at 0.
 	 *
 	 *  Lookup table bypass:       no (    0 << 23 & 0x800000)       0
-	 *  Colormap address:       0x000 (0x000 << 17 & 0x7e0000)       0 
+	 *  Colormap address:       0x000 (0x000 << 17 & 0x7e0000)       0
 	 *  Overlay mask:             0xf (  0xf << 13 & 0x01e000) 0x1e000
 	 *  Overlay location:    P<27:24> (    0 << 12 & 0x001000)       0
 	 *  Display mode:     Pseudocolor (    1 <<  9 & 0x000e00)   0x200
@@ -339,15 +328,15 @@ bt463_init(rc)
 	 *  Plane shift:               16 ( 0x10 <<  0 & 0x00001f)      10
 	 *                                                        --------
 	 *                                                        0x01e310
-	 */	  
+	 */
 	data->window_type[1] = 0x01e310;
 
-	/* The colormap interface to the world only supports one colormap, 
-	 * so having an entry for the 'alternate' colormap in the bt463 
+	/* The colormap interface to the world only supports one colormap,
+	 * so having an entry for the 'alternate' colormap in the bt463
 	 * probably isn't useful.
 	 */
 
-	/* Fill the remaining table entries with clones of entry 0 until we 
+	/* Fill the remaining table entries with clones of entry 0 until we
 	 * figure out a better use for them.
 	 */
 
@@ -366,34 +355,33 @@ bt463_set_cmap(rc, cmapp)
 {
 	struct bt463data *data = (struct bt463data *)rc;
 	u_int count, index;
+	uint8_t r[BT463_NCMAP_ENTRIES];
+	uint8_t g[BT463_NCMAP_ENTRIES];
+	uint8_t b[BT463_NCMAP_ENTRIES];
 	int s, error;
+
+	if (cmapp->index >= BT463_NCMAP_ENTRIES ||
+	    cmapp->count > BT463_NCMAP_ENTRIES - cmapp->index)
+		return (EINVAL);
 
 	index = cmapp->index;
 	count = cmapp->count;
-
-	if (index >= BT463_NCMAP_ENTRIES || count > BT463_NCMAP_ENTRIES - index)
-		return (EINVAL);
-
+	error = copyin(cmapp->red, &r[index], count);
+	if (error)
+		return error;
+	error = copyin(cmapp->green, &g[index], count);
+	if (error)
+		return error;
+	error = copyin(cmapp->blue, &b[index], count);
+	if (error)
+		return error;
 	s = spltty();
-
-	if ((error = copyin(cmapp->red, &data->cmap_r[index], count)) != 0) {
-		splx(s);
-		return (error);
-	}
-	if ((error = copyin(cmapp->green, &data->cmap_g[index], count)) != 0) {
-		splx(s);
-		return (error);
-	}
-	if ((error = copyin(cmapp->blue, &data->cmap_b[index], count)) != 0) {
-		splx(s);
-		return (error);
-	}
-
-	data->changed |= DATA_CMAP_CHANGED;
-
+	memcpy(&data->cmap_r[index], &r[index], count);
+	memcpy(&data->cmap_g[index], &g[index], count);
+	memcpy(&data->cmap_b[index], &b[index], count);
+ 	data->changed |= DATA_CMAP_CHANGED;
 	data->ramdac_sched_update(data->cookie, bt463_update);
 	splx(s);
-
 	return (0);
 }
 
@@ -406,11 +394,12 @@ bt463_get_cmap(rc, cmapp)
 	u_int count, index;
 	int error;
 
+	if (cmapp->index >= BT463_NCMAP_ENTRIES ||
+	    cmapp->count > BT463_NCMAP_ENTRIES - cmapp->index)
+		return (EINVAL);
+
 	count = cmapp->count;
 	index = cmapp->index;
-
-	if (index >= BT463_NCMAP_ENTRIES || count > BT463_NCMAP_ENTRIES - index)
-		return (EINVAL);
 
 	error = copyout(&data->cmap_r[index], cmapp->red, count);
 	if (error)
@@ -427,23 +416,23 @@ bt463_check_curcmap(rc, cursorp)
 	struct ramdac_cookie *rc;
 	struct wsdisplay_cursor *cursorp;
 {
-	u_int index, count;
-	u_int8_t spare[2];
-	int error;
+	struct bt463data *data = (struct bt463data *)rc;
+	int count, index, error;
 
-	index = cursorp->cmap.index;
-	count = cursorp->cmap.count;
-
-	if (index >= 2 || count > 2 - index)
+	if (cursorp->cmap.index > 2 ||
+	    (cursorp->cmap.index + cursorp->cmap.count) > 2)
 		return (EINVAL);
-
-	if ((error = copyin(&cursorp->cmap.red, &spare, count)) != 0)
-		return (error);
-	if ((error = copyin(&cursorp->cmap.green, &spare, count)) != 0)
-		return (error);
-	if ((error = copyin(&cursorp->cmap.blue, &spare, count)) != 0)
-		return (error);
-
+	count = cursorp->cmap.count;
+	index = cursorp->cmap.index;
+	error = copyin(cursorp->cmap.red, &data->tmpcurcmap_r[index], count);
+	if (error)
+		return error;
+	error = copyin(cursorp->cmap.green, &data->tmpcurcmap_g[index], count);
+	if (error)
+		return error;
+	error = copyin(cursorp->cmap.blue, &data->tmpcurcmap_b[index], count);
+	if (error)
+		return error;
 	return (0);
 }
 
@@ -455,12 +444,11 @@ bt463_set_curcmap(rc, cursorp)
 	struct bt463data *data = (struct bt463data *)rc;
 	int count, index;
 
-	/* can't fail; parameters have already been checked. */
 	count = cursorp->cmap.count;
 	index = cursorp->cmap.index;
-	copyin(cursorp->cmap.red, &data->curcmap_r[index], count);
-	copyin(cursorp->cmap.green, &data->curcmap_g[index], count);
-	copyin(cursorp->cmap.blue, &data->curcmap_b[index], count);
+	memcpy(&data->curcmap_r[index], &data->tmpcurcmap_r[index], count);
+	memcpy(&data->curcmap_g[index], &data->tmpcurcmap_g[index], count);
+	memcpy(&data->curcmap_b[index], &data->tmpcurcmap_b[index], count);
 	data->changed |= DATA_CURCMAP_CHANGED;
 	data->ramdac_sched_update(data->cookie, bt463_update);
 }
@@ -503,7 +491,7 @@ bt463_get_curcmap(rc, cursorp)
 #ifdef BT463_DEBUG
 int bt463_store(void *v)
 {
-	struct bt463data *data = (struct bt463data *)v;	
+	struct bt463data *data = (struct bt463data *)v;
 
 	data->changed = DATA_ALL_CHANGED;
 	data->ramdac_sched_update(data->cookie, bt463_update);
@@ -515,7 +503,7 @@ int bt463_store(void *v)
 
 int bt463_readback(void *v)
 {
-	struct bt463data *data = (struct bt463data *)v;	
+	struct bt463data *data = (struct bt463data *)v;
 
 	data->ramdac_sched_update(data->cookie, bt463_copyback);
 	printf("Scheduled bt463 copyback\n");
@@ -549,7 +537,7 @@ bt463_debug(v)
 	return 0;
 }
 
-void 
+void
 bt463_copyback(p)
 	 void *p;
 {
@@ -592,7 +580,7 @@ bt463_update(p)
 
 	/* The Bt463 won't accept window type data except during a blanking
 	 * interval, so we do this early in the interrupt.
-	 * Blanking the screen might also be a good idea, but it can cause 
+	 * Blanking the screen might also be a good idea, but it can cause
 	 * unpleasant flashing and is hard to do from this side of the
 	 * ramdac interface.
 	 */
@@ -605,7 +593,7 @@ bt463_update(p)
 			BTWNREG(data, (data->window_type[i] >> 16) & 0xff); /* B16-23  */
 		}
 	}
-	
+
 	if (v & DATA_CURCMAP_CHANGED) {
 		bt463_wraddr(data, BT463_IREG_CURSOR_COLOR_0);
 		/* spit out the cursor data */
@@ -615,16 +603,16 @@ bt463_update(p)
 			BTWNREG(data, data->curcmap_b[i]);
 		}
 	}
-	
+
 	if (v & DATA_CMAP_CHANGED) {
 		bt463_wraddr(data, BT463_IREG_CPALETTE_RAM);
 		/* spit out the colormap data */
 		for (i = 0; i < BT463_NCMAP_ENTRIES; i++) {
-			data->ramdac_wr(data->cookie, BT463_REG_CMAP_DATA, 
+			data->ramdac_wr(data->cookie, BT463_REG_CMAP_DATA,
 				data->cmap_r[i]);
-			data->ramdac_wr(data->cookie, BT463_REG_CMAP_DATA, 
+			data->ramdac_wr(data->cookie, BT463_REG_CMAP_DATA,
 				data->cmap_g[i]);
-			data->ramdac_wr(data->cookie, BT463_REG_CMAP_DATA, 
+			data->ramdac_wr(data->cookie, BT463_REG_CMAP_DATA,
 				data->cmap_b[i]);
 		}
 	}

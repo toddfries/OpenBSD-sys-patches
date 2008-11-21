@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.6 2002/05/18 09:49:17 art Exp $	*/
-/*	$NetBSD: db_trace.c,v 1.9 1997/07/29 09:42:00 fair Exp $ */
+/*	$NetBSD: db_trace.c,v 1.30 2008/07/02 19:49:58 rmind Exp $ */
 
 /*
  * Mach Operating System
@@ -12,7 +11,7 @@
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
  *
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
  *
@@ -27,8 +26,12 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.30 2008/07/02 19:49:58 rmind Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
+#include <sys/user.h>
 #include <machine/db_machdep.h>
 
 #include <ddb/db_access.h>
@@ -37,65 +40,123 @@
 #include <ddb/db_output.h>
 
 #define INKERNEL(va)	(((vaddr_t)(va)) >= USRSTACK)
+#define ONINTSTACK(fr)	(						\
+	(u_int)(fr) <  (u_int)ddb_cpuinfo->eintstack &&		 	\
+	(u_int)(fr) >= (u_int)ddb_cpuinfo->eintstack - INT_STACK_SIZE	\
+)
 
 void
-db_stack_trace_print(addr, have_addr, count, modif, pr)
-	db_expr_t       addr;
-	int             have_addr;
-	db_expr_t       count;
-	char            *modif;
-	int		(*pr)(const char *, ...);
+db_stack_trace_print(db_expr_t addr, bool have_addr,
+		     db_expr_t count, const char *modif,
+		     void (*pr)(const char *, ...))
 {
-	struct frame	*frame;
-	boolean_t	kernel_only = TRUE;
+	struct frame	*frame, *prevframe;
+	db_addr_t	pc;
+	bool		kernel_only = true;
+	bool		trace_thread = false;
+	bool		lwpaddr = false;
+	const char	*cp = modif;
+	char		c;
 
-	{
-		char c, *cp = modif;
-		while ((c = *cp++) != 0)
-			if (c == 'u')
-				kernel_only = FALSE;
+	if (ddb_cpuinfo == NULL)
+		ddb_cpuinfo = curcpu();
+
+	while ((c = *cp++) != 0) {
+		if (c == 'a') {
+			lwpaddr = true;
+			trace_thread = true;
+		}
+		if (c == 't')
+			trace_thread = true;
+		if (c == 'u')
+			kernel_only = false;
 	}
 
-	if (count == -1)
-		count = 65535;
-
-	if (!have_addr)
+	if (!have_addr) {
 		frame = (struct frame *)DDB_TF->tf_out[6];
-	else
-		frame = (struct frame *)addr;
+		pc = DDB_TF->tf_pc;
+	} else {
+		if (trace_thread) {
+			struct proc *p;
+			struct user *u;
+			struct lwp *l;
+			if (lwpaddr) {
+				l = (struct lwp *)addr;
+				p = l->l_proc;
+				(*pr)("trace: pid %d ", p->p_pid);
+			} else {
+				(*pr)("trace: pid %d ", (int)addr);
+				p = p_find(addr, PFIND_LOCKED);
+				if (p == NULL) {
+					(*pr)("not found\n");
+					return;
+				}
+				l = LIST_FIRST(&p->p_lwps);
+				KASSERT(l != NULL);
+			}
+			(*pr)("lid %d ", l->l_lid);
+			if ((l->l_flag & LW_INMEM) == 0) {
+				(*pr)("swapped out\n");
+				return;
+			}
+			u = l->l_addr;
+			frame = (struct frame *)u->u_pcb.pcb_sp;
+			pc = u->u_pcb.pcb_pc;
+			(*pr)("at %p\n", frame);
+		} else {
+			frame = (struct frame *)addr;
+			pc = 0;
+		}
+	}
 
 	while (count--) {
 		int		i;
 		db_expr_t	offset;
-		char		*name;
-		db_addr_t	pc;
+		const char	*name;
+		db_addr_t	prevpc;
 
-		pc = frame->fr_pc;
-		if (!INKERNEL(pc))
-			break;
+#define FR(framep,field) (INKERNEL(framep)			\
+				? (u_int)(framep)->field	\
+				: fuword(&(framep)->field))
+
+		/* Fetch return address and arguments frame */
+		prevpc = (db_addr_t)FR(frame, fr_pc);
+		prevframe = (struct frame *)FR(frame, fr_fp);
 
 		/*
 		 * Switch to frame that contains arguments
 		 */
-		frame = frame->fr_fp;
-		if (!INKERNEL(frame))
-			break;
+		if (prevframe == NULL || (!INKERNEL(prevframe) && kernel_only))
+			return;
 
-		db_find_sym_and_offset(pc, &name, &offset);
+		if ((ONINTSTACK(frame) && !ONINTSTACK(prevframe)) ||
+		    (INKERNEL(frame) && !INKERNEL(prevframe))) {
+			/* We're crossing a trap frame; pc = %l1 */
+			prevpc = (db_addr_t)FR(frame, fr_local[1]);
+		}
+
+		name = NULL;
+		if (INKERNEL(pc))
+			db_find_sym_and_offset(pc, &name, &offset);
 		if (name == NULL)
-			name = "?";
-
-		(*pr)("%s(", name);
+			(*pr)("0x%lx(", pc);
+		else
+			(*pr)("%s(", name);
 
 		/*
 		 * Print %i0..%i5, hope these still reflect the
 		 * actual arguments somewhat...
 		 */
-		for (i=0; i < 5; i++)
-			(*pr)("0x%x, ", frame->fr_arg[i]);
-		(*pr)("0x%x) at ", frame->fr_arg[i]);
-		db_printsym(pc, DB_STGY_PROC, pr);
+		for (i = 0; i < 6; i++)
+			(*pr)("0x%x%s", FR(frame, fr_arg[i]),
+				(i < 5) ? ", " : ") at ");
+		if (INKERNEL(prevpc))
+			db_printsym(prevpc, DB_STGY_PROC, pr);
+		else
+			(*pr)("0x%lx", prevpc);
 		(*pr)("\n");
 
+		pc = prevpc;
+		frame = prevframe;
 	}
 }

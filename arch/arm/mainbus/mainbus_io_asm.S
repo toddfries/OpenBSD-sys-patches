@@ -1,4 +1,3 @@
-/*	$OpenBSD: mainbus_io_asm.S,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /*	$NetBSD: mainbus_io_asm.S,v 1.1 2001/02/24 19:38:02 reinoud Exp $	*/
 
 /*

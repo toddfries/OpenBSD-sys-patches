@@ -1,4 +1,4 @@
-/*	$NetBSD: dz_ibus.c,v 1.3 2005/12/11 12:18:36 christos Exp $	*/
+/*	$NetBSD: dz_ibus.c,v 1.9 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dz_ibus.c,v 1.3 2005/12/11 12:18:36 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dz_ibus.c,v 1.9 2008/04/28 20:23:31 martin Exp $");
 
 #include "dzkbd.h"
 #include "dzms.h"
@@ -102,8 +95,8 @@ __KERNEL_RCSID(0, "$NetBSD: dz_ibus.c,v 1.3 2005/12/11 12:18:36 christos Exp $")
 #define	DZ_LINE_CONSOLE	2
 #define	DZ_LINE_AUX	3
 
-int	dz_ibus_match(struct device *, struct cfdata *, void *);
-void	dz_ibus_attach(struct device *, struct device *, void *);
+int	dz_ibus_match(device_t, cfdata_t, void *);
+void	dz_ibus_attach(device_t, device_t, void *);
 int	dz_ibus_intr(void *);
 void	dz_ibus_cnsetup(paddr_t);
 int	dz_ibus_cngetc(dev_t);
@@ -115,7 +108,7 @@ int	dz_ibus_print(void *, const char *);
 int	dzgetc(struct dz_linestate *);
 void	dzputc(struct dz_linestate *, int);
 
-CFATTACH_DECL(dz_ibus, sizeof(struct dz_softc),
+CFATTACH_DECL_NEW(dz_ibus, sizeof(struct dz_softc),
     dz_ibus_match, dz_ibus_attach, NULL, NULL);
 
 struct consdev dz_ibus_consdev = {
@@ -141,7 +134,7 @@ int	dz_ibus_iscn;
 int	dz_ibus_consln = -1;
 
 int
-dz_ibus_match(struct device *parent, struct cfdata *cf, void *aux)
+dz_ibus_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct ibus_attach_args *iba;
 
@@ -152,25 +145,25 @@ dz_ibus_match(struct device *parent, struct cfdata *cf, void *aux)
 	    strcmp(iba->ia_name, "dc7085") != 0)
 		return (0);
 
-	if (badaddr((caddr_t)iba->ia_addr, 2))
+	if (badaddr((void *)iba->ia_addr, 2))
 		return (0);
 
 	return (1);
 }
 
 void
-dz_ibus_attach(struct device *parent, struct device *self, void *aux)
+dz_ibus_attach(device_t parent, device_t self, void *aux)
 {
-	struct ibus_attach_args *iba;
-	struct dz_softc *sc;
+	struct ibus_attach_args *iba = aux;
+	struct dz_softc *sc = device_private(self);
 	volatile struct dzregs *dz;
 	struct dzkm_attach_args daa;
 	int i;
 
-	iba = aux;
-	sc = (struct dz_softc *)self;
 
 	DELAY(100000);
+
+	sc->sc_dev = self;
 
 	/* 
 	 * XXX - This is evil and ugly, but... due to the nature of how
@@ -206,7 +199,7 @@ dz_ibus_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_dsr = 0x0f; /* XXX check if VS has modem ctrl bits */
 
-	printf(": DC-7085, 4 lines");
+	aprint_normal(": DC-7085, 4 lines");
 	ibus_intr_establish(parent, (void *)iba->ia_cookie, IPL_TTY,
 	    dz_ibus_intr, sc);
 	dzattach(sc, NULL, dz_ibus_consln);
@@ -293,14 +286,17 @@ dz_ibus_cnattach(int line)
 	/* Disable scanning until init is done. */
 	dzcn->csr = 0;
 	wbflush();
+	DELAY(1000);
 
 	/* Turn on transmitter for the console. */
 	dzcn->tcr = (1 << line);
 	wbflush();
+	DELAY(1000);
 
 	/* Turn scanning back on. */
 	dzcn->csr = 0x20;
 	wbflush();
+	DELAY(1000);
 
 	/*
 	 * Point the console at the DZ-11.
@@ -323,6 +319,7 @@ dz_ibus_cngetc(dev_t dev)
 	do {
 		while ((dzcn->csr & DZ_CSR_RX_DONE) == 0)
 			DELAY(10);
+		DELAY(10);
 		rbuf = dzcn->rbuf;
 		if (((rbuf >> 8) & 3) != line)
 			continue;
@@ -350,24 +347,29 @@ dz_ibus_cnputc(dev_t dev, int ch)
 	tcr = dzcn->tcr;
 	dzcn->tcr = (1 << minor(dev));
 	wbflush();
+	DELAY(10);
 
 	/* Wait until ready */
 	while ((dzcn->csr & 0x8000) == 0)
 		if (--timeout < 0)
 			break;
+	DELAY(10);
 
 	/* Put the character */
 	dzcn->tdr = ch;
 	timeout = 1 << 15;
 	wbflush();
+	DELAY(10);
 
 	/* Wait until ready */
 	while ((dzcn->csr & 0x8000) == 0)
 		if (--timeout < 0)
 			break;
 
+	DELAY(10);
 	dzcn->tcr = tcr;
 	wbflush();
+	DELAY(10);
 	splx(s);
 }
 
@@ -385,8 +387,8 @@ dz_ibus_print(void *aux, const char *pnp)
 
 	daa = aux;
 	if (pnp != NULL)
-		printf("lkkbd/vsms at %s", pnp);
-	printf(" line %d", daa->daa_line);
+		aprint_normal("lkkbd/vsms at %s", pnp);
+	aprint_normal(" line %d", daa->daa_line);
 	return (UNCONF);
 }
 
@@ -412,7 +414,9 @@ dzgetc(struct dz_linestate *ls)
 	for (;;) {
 		while ((dzr->csr & DZ_CSR_RX_DONE) == 0)
 			DELAY(10);
+		DELAY(10);
 		rbuf = dzr->rbuf;
+		DELAY(10);
 		if (((rbuf >> 8) & 3) == line)
 			return (rbuf & 0xff);
 	}
@@ -440,6 +444,7 @@ dzputc(struct dz_linestate *ls, int ch)
 		if ((tcr & (1 << line)) == 0) {
 			dzr->tcr = tcr | (1 << line);
 			wbflush();
+			DELAY(10);
 		}
 		dzxint(ls->dz_sc);
 		splx(s);

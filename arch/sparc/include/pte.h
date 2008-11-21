@@ -1,5 +1,4 @@
-/*	$OpenBSD: pte.h,v 1.6 2007/05/29 09:54:21 sobrado Exp $	*/
-/*	$NetBSD: pte.h,v 1.19 1997/08/05 11:00:10 pk Exp $ */
+/*	$NetBSD: pte.h,v 1.31 2006/02/16 20:17:15 perry Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -48,6 +47,13 @@
  *
  *	@(#)pte.h	8.1 (Berkeley) 6/11/93
  */
+
+#ifndef	_SPARC_PTE_H_
+#define _SPARC_PTE_H_
+
+#if defined(_KERNEL_OPT)
+#include "opt_sparc_arch.h"
+#endif
 
 /*
  * Sun-4 (sort of), 4c (SparcStation), and 4m Page Table Entries
@@ -145,7 +151,7 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
  *  2-dim arrays, but are sparsely allocated as needed, and point to each
  *  other.)
  *
- *	if (cputyp==CPU_SUN4M) 		// SPARC Reference MMU
+ *	if (cputyp==CPU_SUN4M || cputyp==CPU_SUN4D) // SPARC Reference MMU
  *		regptp = s4m_ctxmap[curr_ctx];
  *		if (!(regptp & SRMMU_TEPTD)) TRAP();
  *		segptp = *(u_int *)(((regptp & ~0x3) << 4) | va.va_reg);
@@ -157,8 +163,8 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
  * 		if (usermode && PTE_PROT_LEVEL(pte) > 0x5) TRAP();
  *		if (writing && !PTE_PROT_LEVEL_ALLOWS_WRITING(pte)) TRAP();
  *		if (!(pte & SRMMU_PG_C)) DO_NOT_USE_CACHE_FOR_THIS_ACCESS();
- *		pte |= SRMMU_PG_R;
- * 		if (writing) pte |= SRMMU_PG_M;
+ *		pte |= SRMMU_PG_U;
+ * 		if (writing) pte |= PG_M;
  * 		physaddr = ((pte & SRMMU_PG_PFNUM) << SRMMU_PGSHIFT)|va.va_off;
  *		return;
  *	if (mmu_3l)
@@ -191,7 +197,7 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
 #define	SGOFSET	(NBPSG - 1)	/* mask for segment offset */
 
 /* number of PTEs that map one segment (not number that fit in one segment!) */
-#if defined(SUN4) && (defined(SUN4C) || defined(SUN4M))
+#if defined(SUN4) && (defined(SUN4C) || defined(SUN4M) || defined(SUN4D))
 extern int nptesg;
 #define	NPTESG	nptesg		/* (which someone will have to initialize) */
 #else
@@ -208,11 +214,16 @@ extern int nptesg;
 #define	VA_SUN4_VPG(va)		(((int)(va) >> 13) & 31)
 #define	VA_SUN4C_VPG(va)	(((int)(va) >> 12) & 63)
 #define VA_SUN4M_VPG(va)	(((int)(va) >> 12) & 63)
+#define VA_VPG(va)	\
+	(PGSHIFT==SUN4_PGSHIFT ? VA_SUN4_VPG(va) : VA_SUN4C_VPG(va))
 
 /* virtual address to offset within page */
 #define VA_SUN4_OFF(va)       	(((int)(va)) & 0x1FFF)
 #define VA_SUN4C_OFF(va)     	(((int)(va)) & 0xFFF)
 #define VA_SUN4M_OFF(va)	(((int)(va)) & 0xFFF)
+#define VA_OFF(va)	\
+	(PGSHIFT==SUN4_PGSHIFT ? VA_SUN4_OFF(va) : VA_SUN4C_OFF(va))
+
 
 /* truncate virtual address to region base */
 #define	VA_ROUNDDOWNTOREG(va)	((int)(va) & ~RGOFSET)
@@ -221,10 +232,10 @@ extern int nptesg;
 #define	VA_ROUNDDOWNTOSEG(va)	((int)(va) & ~SGOFSET)
 
 /* virtual segment to virtual address (must sign extend on holy MMUs!) */
-#define	VRTOVA(vr)	((CPU_ISSUN4M || HASSUN4_MMU3L)	\
-	? ((int)(vr) << RGSHIFT)			\
+#define	VRTOVA(vr)	((CPU_HAS_SRMMU || HASSUN4_MMU3L)	\
+	? ((int)(vr) << RGSHIFT)				\
 	: (((int)(vr) << (RGSHIFT+2)) >> 2))
-#define	VSTOVA(vr,vs)	((CPU_ISSUN4M || HASSUN4_MMU3L)	\
+#define	VSTOVA(vr,vs)	((CPU_HAS_SRMMU || HASSUN4_MMU3L)	\
 	? (((int)(vr) << RGSHIFT) + ((int)(vs) << SGSHIFT))	\
 	: ((((int)(vr) << (RGSHIFT+2)) >> 2) + ((int)(vs) << SGSHIFT)))
 
@@ -237,29 +248,6 @@ extern int mmu_has_hole;
 #define MMU_HOLE_START	0x20000000
 #define MMU_HOLE_END	0xe0000000
 
-#if defined(SUN4M)		/* Optimization: sun4m, sun4c have same page */
-#if defined(SUN4)		/* size, so they're used interchangeably */
-#define VA_VPG(va)	(cputyp==CPU_SUN4 ? VA_SUN4_VPG(va) : VA_SUN4C_VPG(va))
-#define VA_OFF(va)	(cputyp==CPU_SUN4 ? VA_SUN4_OFF(va) : VA_SUN4C_OFF(va))
-#else
-#define VA_VPG(va)	VA_SUN4M_VPG(va)
-#define VA_OFF(va)	VA_SUN4M_OFF(va)
-#endif /* defined SUN4 */
-#else /* 4m not defined */
-#if defined(SUN4) && defined(SUN4C)
-#define VA_VPG(va)	(cputyp==CPU_SUN4C ? VA_SUN4C_VPG(va) : VA_SUN4_VPG(va))
-#define VA_OFF(va)	(cputyp==CPU_SUN4C ? VA_SUN4C_OFF(va) : VA_SUN4_OFF(va))
-#endif
-#if defined(SUN4C) && !defined(SUN4)
-#define VA_VPG(va)	VA_SUN4C_VPG(va)
-#define VA_OFF(va)	VA_SUN4C_OFF(va)
-#endif
-#if !defined(SUN4C) && defined(SUN4)
-#define	VA_VPG(va)	VA_SUN4_VPG(va)
-#define VA_OFF(va)	VA_SUN4_OFF(va)
-#endif
-#endif /* defined 4m */
-
 /* there is no `struct pte'; we just use `int'; this is for non-4M only */
 #define	PG_V		0x80000000
 #define	PG_PROT		0x60000000	/* both protection bits */
@@ -269,10 +257,10 @@ extern int mmu_has_hole;
 #define	PG_TYPE		0x0c000000	/* both type bits */
 
 #define	PG_OBMEM	0x00000000	/* on board memory */
-#define	PG_OBIO		0x04000000	/* on board I/O (incl. SBus on 4c) */
+#define	PG_OBIO		0x04000000	/* on board I/O (incl. Sbus on 4c) */
 #define	PG_VME16	0x08000000	/* 16-bit-data VME space */
 #define	PG_VME32	0x0c000000	/* 32-bit-data VME space */
-#if defined(SUN4M)
+#if defined(SUN4M) || defined(SUN4D)
 #define PG_SUN4M_OBMEM	0x0	       	/* No type bits=>obmem on 4m */
 #define PG_SUN4M_OBIO	0xf		/* obio maps to 0xf on 4M */
 #define SRMMU_PGTYPE	0xf0000000	/* Top 4 bits of pte PPN give type */
@@ -283,6 +271,7 @@ extern int mmu_has_hole;
 #define PG_IOC		0x00800000
 #define	PG_MBZ		0x00780000	/* unused; must be zero (oh really?) */
 #define	PG_PFNUM	0x0007ffff	/* n.b.: only 16 bits on sun4c */
+#define PG_WIRED	0x00400000	/* S/W only; in MBZ area */
 
 #define	PG_TNC_SHIFT	26		/* shift to get PG_TYPE + PG_NC */
 #define	PG_M_SHIFT	24		/* shift to get PG_M, PG_U */
@@ -306,7 +295,7 @@ struct pte {
 		pg_mbz:5,
 		pg_pfnum:19;
 };
-#if defined(SUN4M)
+#if defined(SUN4M) || defined(SUN4D)
 struct srmmu_pte {
 	u_int	pg_pfnum:20,
 		pg_c:1,
@@ -381,6 +370,12 @@ struct srmmu_pte {
 #define SRMMU_L2SIZE 	0x40
 #define SRMMU_L3SIZE	0x40
 
+#define SRMMU_PTE_BITS	"\177\020"					\
+	"f\0\2TYPE\0=\1PTD\0=\2PTE\0f\2\3PROT\0"			\
+	"=\0R_R\0=\4RW_RW\0=\10RX_RX\0=\14RWX_RWX\0=\20X_X\0=\24R_RW\0"	\
+	"=\30N_RX\0=\34N_RWX\0"						\
+	"b\5R\0b\6M\0b\7C\0f\10\30PFN\0"
+
 /*
  * IOMMU PTE bits.
  */
@@ -389,3 +384,32 @@ struct srmmu_pte {
 #define IOPTE_RSVD      0x000000f1
 #define IOPTE_WRITE     0x00000004
 #define IOPTE_VALID     0x00000002
+
+#define IOMMU_PTE_BITS	"\177\020"					\
+	"f\10\23PPN\0b\2W\0b\1V\0"
+
+
+#if defined(_KERNEL) || defined(_STANDALONE)
+/*
+ * Macros to get and set the processor context.
+ */
+#define getcontext4()		lduba(AC_CONTEXT, ASI_CONTROL)
+#define getcontext4m()		lda(SRMMU_CXR, ASI_SRMMU)
+#define getcontext()		(CPU_HAS_SRMMU ? getcontext4m()		\
+					       : getcontext4())
+
+#define setcontext4(c)		stba(AC_CONTEXT, ASI_CONTROL, c)
+#define setcontext4m(c)		sta(SRMMU_CXR, ASI_SRMMU, c)
+#define setcontext(c)		(CPU_HAS_SRMMU ? setcontext4m(c)	\
+					       : setcontext4(c))
+
+/* sun4/sun4c access to MMU-resident PTEs */
+#define	getpte4(va)		lda(va, ASI_PTE)
+#define	setpte4(va, pte)	sta(va, ASI_PTE, pte)
+
+/* sun4m TLB probe */
+#define getpte4m(va)		lda((va & 0xFFFFF000) | ASI_SRMMUFP_L3, \
+				    ASI_SRMMUFP)
+
+#endif /* _KERNEL || _STANDALONE */
+#endif /* _SPARC_PTE_H_ */

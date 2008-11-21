@@ -1,5 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.39 2007/06/01 18:57:02 miod Exp $	*/
-/*	$NetBSD: vmparam.h,v 1.15 1994/10/27 04:16:34 cgd Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.68 2008/01/23 19:46:44 bouyer Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -35,24 +34,30 @@
  *	@(#)vmparam.h	5.9 (Berkeley) 5/12/91
  */
 
-#ifndef _MACHINE_VM_PARAM_H_
-#define _MACHINE_VM_PARAM_H_
+#ifndef _VMPARAM_H_
+#define _VMPARAM_H_
+
+#include <sys/tree.h>
+#include <sys/mutex.h>
+
 /*
  * Machine dependent constants for 386.
  */
 
 /*
+ * Page size on the IA-32 is not variable in the traditional sense.
+ * We override the PAGE_* definitions to compile-time constants.
+ */
+#define	PAGE_SHIFT	12
+#define	PAGE_SIZE	(1 << PAGE_SHIFT)
+#define	PAGE_MASK	(PAGE_SIZE - 1)
+
+/*
  * Virtual address space arrangement. On 386, both user and kernel
  * share the address space, not unlike the vax.
- * USRTEXT is the start of the user text/data space, while USRSTACK
- * is the top (end) of the user stack. Immediately above the user stack
- * resides the user structure, which is UPAGES long and contains the
- * kernel stack.
- *
- * Immediately after the user structure is the page table map, and then
- * kernel address space.
+ * USRSTACK is the top (end) of the user stack. Immediately above the
+ * user stack is the page table map, and then kernel address space.
  */
-#define	USRTEXT		PAGE_SIZE
 #define	USRSTACK	VM_MAXUSER_ADDRESS
 
 /*
@@ -60,28 +65,31 @@
  */
 #define	MAXTSIZ		(64*1024*1024)		/* max text size */
 #ifndef DFLDSIZ
-#define	DFLDSIZ		(64*1024*1024)		/* initial data size limit */
+#define	DFLDSIZ		(256*1024*1024)		/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
-#define	MAXDSIZ		(1024*1024*1024)	/* max data size */
+#define	MAXDSIZ		(3U*1024*1024*1024)	/* max data size */
 #endif
 #ifndef	DFLSSIZ
-#define	DFLSSIZ		(4*1024*1024)		/* initial stack size limit */
+#define	DFLSSIZ		(2*1024*1024)		/* initial stack size limit */
 #endif
 #ifndef	MAXSSIZ
-#define	MAXSSIZ		(32*1024*1024)		/* max stack size */
+#define	MAXSSIZ		(64*1024*1024)		/* max stack size */
 #endif
 
-#define STACKGAP_RANDOM	256*1024
-
-/* I386 has a line where all code is executable: 0 - I386_MAX_EXE_ADDR */
-#define I386_MAX_EXE_ADDR 0x20000000		/* exec line */
+/*
+ * IA-32 can't do per-page execute permission, so instead we implement
+ * two executable segments for %cs, one that covers everything and one
+ * that excludes some of the address space (currently just the stack).
+ * I386_MAX_EXE_ADDR is the upper boundary for the smaller segment.
+ */
+#define I386_MAX_EXE_ADDR	(USRSTACK - MAXSSIZ)
 
 /*
  * Size of shared memory map
  */
 #ifndef SHMMAXPGS
-#define SHMMAXPGS	8192
+#define SHMMAXPGS	2048
 #endif
 
 /*
@@ -90,38 +98,58 @@
 #define	USRIOSIZE 	300
 
 /*
- * Specific addresses being unmapped and used as fillers for free memory.
+ * Mach derived constants
  */
-#define	DEADBEEF0	0xefffeecc	/* malloc's filler */
-#define	DEADBEEF1	0xefffaabb	/* pool's filler */
 
 /* user/kernel map constants */
 #define VM_MIN_ADDRESS		((vaddr_t)0)
-#define VM_MAXUSER_ADDRESS	((vaddr_t)((PDSLOT_PTE<<PDSHIFT) - USPACE))
-#define VM_MAX_ADDRESS		((vaddr_t)((PDSLOT_PTE<<PDSHIFT) + \
-				    (PDSLOT_PTE<<PGSHIFT)))
-#define VM_MIN_KERNEL_ADDRESS	((vaddr_t)KERNBASE)
-#define VM_MAX_KERNEL_ADDRESS	((vaddr_t)(PDSLOT_APTE<<PDSHIFT))
+#define	VM_MAXUSER_ADDRESS	((vaddr_t)(PDIR_SLOT_PTE << L2_SHIFT))
+#define	VM_MAX_ADDRESS		\
+	((vaddr_t)((PDIR_SLOT_PTE << L2_SHIFT) + (PDIR_SLOT_PTE << L1_SHIFT)))
+#define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)(PDIR_SLOT_KERN << L2_SHIFT))
+#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)(PDIR_SLOT_APTE << L2_SHIFT))
+
+/*
+ * The address to which unspecified mapping requests default
+ */
+#ifdef _KERNEL_OPT
+#include "opt_uvm.h"
+#include "opt_xen.h"
+#endif
+#define __USE_TOPDOWN_VM
+#define VM_DEFAULT_ADDRESS(da, sz) \
+	trunc_page(USRSTACK - MAXSSIZ - (sz))
+
+/* XXX max. amount of KVM to be used by buffers. */
+#ifndef VM_MAX_KERNEL_BUF
+#define VM_MAX_KERNEL_BUF	(384 * 1024 * 1024)
+#endif
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
-#define	VM_PHYSSEG_MAX	16	/* actually we could have this many segments */
-#define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
-#define	VM_PHYSSEG_NOADD	/* can't add RAM after vm_mem_init */
+#define VM_PHYSSEG_STRAT	VM_PSTRAT_BIGFIRST
+#define VM_PHYSSEG_NOADD		/* can't add RAM after vm_mem_init */
 
-#define VM_NFREELIST		2
-#define VM_FREELIST_DEFAULT	0
-#define VM_FREELIST_FIRST16	1
+#ifdef XEN
+#define	VM_PHYSSEG_MAX		1
+#define	VM_NFREELIST		1
+#else
+#define	VM_PHYSSEG_MAX		10	/* 1 "hole" + 9 free lists */
+#define	VM_NFREELIST		2
+#define	VM_FREELIST_FIRST16	1
+#endif /* XEN */
+#define	VM_FREELIST_DEFAULT	0
 
-#define __HAVE_VM_PAGE_MD
-struct pv_entry;
+#include <x86/pmap_pv.h>
+
+#define	__HAVE_VM_PAGE_MD
+#define	VM_MDPAGE_INIT(pg) \
+	memset(&(pg)->mdpage, 0, sizeof((pg)->mdpage)); \
+	PMAP_PAGE_INIT(&(pg)->mdpage.mp_pp)
+
 struct vm_page_md {
-	struct pv_entry *pv_list;
+	struct pmap_page mp_pp;
 };
 
-#define VM_MDPAGE_INIT(pg) do {			\
-	(pg)->mdpage.pv_list = NULL;	\
-} while (0)
-
-#endif /* _MACHINE_VM_PARAM_H_ */
+#endif /* _VMPARAM_H_ */

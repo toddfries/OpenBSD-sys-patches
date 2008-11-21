@@ -1,4 +1,4 @@
-/*	$NetBSD: afsc.c,v 1.37 2006/03/08 23:46:22 lukem Exp $ */
+/*	$NetBSD: afsc.c,v 1.42 2008/06/13 08:13:37 cegger Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: afsc.c,v 1.37 2006/03/08 23:46:22 lukem Exp $");
+__KERNEL_RCSID(0, "$NetBSD: afsc.c,v 1.42 2008/06/13 08:13:37 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,6 +78,10 @@ __KERNEL_RCSID(0, "$NetBSD: afsc.c,v 1.37 2006/03/08 23:46:22 lukem Exp $");
 #include <amiga/dev/siopreg.h>
 #include <amiga/dev/siopvar.h>
 #include <amiga/dev/zbusvar.h>
+
+#ifdef __powerpc__
+#define badaddr(a)      badaddr_read(a, 2, NULL)
+#endif
 
 void afscattach(struct device *, struct device *, void *);
 int afscmatch(struct device *, struct cfdata *, void *);
@@ -112,8 +116,8 @@ afscmatch(struct device *pdp, struct cfdata *cfp, void *auxp)
 	if (!is_a4000() || !matchname("afsc", auxp))
 		return(0);		/* Not on an A4000 or not A4000T SCSI */
 	rp = ztwomap(0xdd0040);
-	if (badaddr((caddr_t)__UNVOLATILE(&rp->siop_scratch)) || 
-	    badaddr((caddr_t)__UNVOLATILE(&rp->siop_temp))) {
+	if (badaddr((void *)__UNVOLATILE(&rp->siop_scratch)) || 
+	    badaddr((void *)__UNVOLATILE(&rp->siop_temp))) {
 		return(0);
 	}
 	scratch = rp->siop_scratch;
@@ -143,7 +147,7 @@ afscattach(struct device *pdp, struct device *dp, void *auxp)
 	zap = auxp;
 
 	if (zap->manid == 514 && zap->prodid == 84)
-		sc->sc_siopp = rp = (siop_regmap_p)((caddr_t)zap->va +
+		sc->sc_siopp = rp = (siop_regmap_p)((char *)zap->va +
 						    0x00800000);
 	else
 		sc->sc_siopp = rp = ztwomap(0xdd0040);
@@ -219,10 +223,13 @@ void
 afsc_dump(void)
 {
 	extern struct cfdriver afsc_cd;
+	struct siop_softc *sc;
 	int i;
 
-	for (i = 0; i < afsc_cd.cd_ndevs; ++i)
-		if (afsc_cd.cd_devs[i])
-			siop_dump(afsc_cd.cd_devs[i]);
+	for (i = 0; i < afsc_cd.cd_ndevs; ++i) {
+		sc = device_lookup_private(&afsc_cd, i);
+		if (sc != NULL)
+			siop_dump(sc);
+	}
 }
 #endif

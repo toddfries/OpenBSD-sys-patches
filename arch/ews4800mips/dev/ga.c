@@ -1,4 +1,4 @@
-/*	$NetBSD: ga.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
+/*	$NetBSD: ga.c,v 1.4 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +32,7 @@
 /* Graphic Adaptor  (350, 360) */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ga.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ga.c,v 1.4 2008/04/28 20:23:18 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,7 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: ga.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
 #include <machine/gareg.h>
 #include <machine/gavar.h>
 
-boolean_t ga_map(struct ga *);
+bool ga_map(struct ga *);
 void ga_clut_init(struct ga *);
 void ga_vblank_start(const struct ga *);
 void ga_bt463_reg(const struct ga *, int);
@@ -75,14 +68,14 @@ void ga_plane_mask_test(const struct ga *);
 #define	ga_reg_read(ga, ofs)						\
 	(*(volatile uint32_t *)((ga)->reg_addr + (ofs)))
 
-boolean_t
+bool
 ga_init(struct ga *ga)
 {
 	int i;
 
 	/* Map GA register and buffers */
 	if (ga->reg_addr == 0 && ga_map(ga) != 0)
-		return FALSE;
+		return false;
 
 	/* This is 350 GA-ROM initialization sequence. */
 	if (ga->flags == 0x0000) {
@@ -160,10 +153,10 @@ ga_init(struct ga *ga)
 		ga_reg_write(ga, 0xca8, 0);
 	}
 
-	return TRUE;
+	return true;
 }
 
-boolean_t
+bool
 ga_map(struct ga *ga)
 {
 #ifdef _STANDALONE
@@ -179,7 +172,7 @@ ga_map(struct ga *ga)
 
 	if (!(va = uvm_km_alloc(kernel_map, epa - pa, 0, UVM_KMF_VAONLY))) {
 		printf("can't map GA register.\n");
-		return FALSE;
+		return false;
 	}
 
 	for (tva = va; pa < epa; pa += PAGE_SIZE, tva += PAGE_SIZE)
@@ -190,7 +183,7 @@ ga_map(struct ga *ga)
 	ga->reg_addr = (uint32_t)va;
 #endif
 
-	return TRUE;
+	return true;
 }
 
 void

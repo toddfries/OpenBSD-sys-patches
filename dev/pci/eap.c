@@ -1,12 +1,13 @@
-/*      $OpenBSD: eap.c,v 1.33 2008/05/29 02:10:01 jakemsr Exp $ */
-/*	$NetBSD: eap.c,v 1.46 2001/09/03 15:07:37 reinoud Exp $ */
+/*	$NetBSD: eap.c,v 1.92 2008/04/28 20:23:54 martin Exp $	*/
+/*      $OpenBSD: eap.c,v 1.6 1999/10/05 19:24:42 csapuntz Exp $ */
 
 /*
- * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson <augustss@netbsd.org> and Charles M. Hannum.
+ * by Lennart Augustsson <augustss@NetBSD.org>, Charles M. Hannum, and
+ * Antti Kantee <pooka@NetBSD.org>.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,16 +39,22 @@
  * ES1371/AC97:	Ezra Story         <ezy@panix.com>
  */
 
-/* 
+/*
  * Ensoniq ES1370 + AK4531 and ES1371/ES1373 + AC97
  *
  * Documentation links:
- * 
- * ftp://ftp.alsa-project.org/pub/manuals/ensoniq/
+ *
+ * ftp://ftp.alsa-project.org/pub/manuals/ensoniq/ (ES1370 and 1371 datasheets)
+ * http://web.archive.org/web/20040622012936/http://www.corbac.com/Data/Misc/es1373.ps.gz
  * ftp://ftp.alsa-project.org/pub/manuals/asahi_kasei/4531.pdf
+ * ftp://download.intel.com/ial/scalableplatforms/audio/ac97r21.pdf
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: eap.c,v 1.92 2008/04/28 20:23:54 martin Exp $");
+
 #include "midi.h"
+#include "joy_eap.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,6 +63,7 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/proc.h>
+#include <sys/select.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -70,17 +71,15 @@
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
 #include <dev/midi_if.h>
+#include <dev/audiovar.h>
 #include <dev/mulaw.h>
 #include <dev/auconv.h>
-#include <dev/ic/ac97.h>
+#include <dev/ic/ac97var.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <dev/pci/eapreg.h>
-
-struct        cfdriver eap_cd = {
-      NULL, "eap", DV_DULL
-};
+#include <dev/pci/eapvar.h>
 
 #define	PCI_CBIO		0x10
 
@@ -88,19 +87,20 @@ struct        cfdriver eap_cd = {
 #ifdef AUDIO_DEBUG
 #define DPRINTF(x)	if (eapdebug) printf x
 #define DPRINTFN(n,x)	if (eapdebug>(n)) printf x
-int	eapdebug = 20;
+int	eapdebug = 0;
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
 #endif
 
-int	eap_match(struct device *, void *, void *);
-void	eap_attach(struct device *, struct device *, void *);
-int	eap_intr(void *);
+static int	eap_match(device_t, cfdata_t, void *);
+static void	eap_attach(device_t, device_t, void *);
+static int	eap_detach(device_t, int);
+static int	eap_intr(void *);
 
 struct eap_dma {
 	bus_dmamap_t map;
-	caddr_t addr;
+	void *addr;
 	bus_dma_segment_t segs[1];
 	int nsegs;
 	size_t size;
@@ -110,22 +110,37 @@ struct eap_dma {
 #define DMAADDR(p) ((p)->map->dm_segs[0].ds_addr)
 #define KERNADDR(p) ((void *)((p)->addr))
 
+/*
+ * The card has two DACs. Using them is a bit twisted: we use DAC2
+ * as default and DAC1 as the optional secondary DAC.
+ */
+#define EAP_DAC1 1
+#define EAP_DAC2 0
+#define EAP_I1 EAP_DAC2
+#define EAP_I2 EAP_DAC1
+struct eap_instance {
+	device_t parent;
+	int index;
+
+	void	(*ei_pintr)(void *);	/* DMA completion intr handler */
+	void	*ei_parg;		/* arg for ei_intr() */
+	device_t ei_audiodev;		/* audio device, for detach */
+#ifdef DIAGNOSTIC
+	char	ei_prun;
+#endif
+};
+
 struct eap_softc {
-	struct device sc_dev;		/* base device */
+	device_t sc_dev;		/* base device */
 	void *sc_ih;			/* interrupt vectoring */
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
+	bus_size_t iosz;
 	bus_dma_tag_t sc_dmatag;	/* DMA tag */
 
 	struct eap_dma *sc_dmas;
 
-	void	(*sc_pintr)(void *);	/* dma completion intr handler */
-	void	*sc_parg;		/* arg for sc_intr() */
-#ifdef DIAGNOSTIC
-	char	sc_prun;
-#endif
-
-	void	(*sc_rintr)(void *);	/* dma completion intr handler */
+	void	(*sc_rintr)(void *);	/* DMA completion intr handler */
 	void	*sc_rarg;		/* arg for sc_intr() */
 #ifdef DIAGNOSTIC
 	char	sc_rrun;
@@ -135,7 +150,10 @@ struct eap_softc {
 	void	(*sc_iintr)(void *, int); /* midi input ready handler */
 	void	(*sc_ointr)(void *);	/* midi output ready handler */
 	void	*sc_arg;
-	struct device *sc_mididev;
+	device_t sc_mididev;
+#endif
+#if NJOY_EAP > 0
+	device_t sc_gameport;
 #endif
 
 	u_short	sc_port[AK_NPORTS];	/* mirror of the hardware setting */
@@ -147,12 +165,14 @@ struct eap_softc {
 	struct ac97_codec_if *codec_if;
 	struct ac97_host_if host_if;
 
-	int flags;
+	struct eap_instance sc_ei[2];
+
+	pci_chipset_tag_t sc_pc;	/* For detach */
 };
 
-enum	ac97_host_flags eap_flags_codec(void *);
-int	eap_allocmem(struct eap_softc *, size_t, size_t, struct eap_dma *);
-int	eap_freemem(struct eap_softc *, struct eap_dma *);
+static int	eap_allocmem(struct eap_softc *, size_t, size_t,
+			     struct eap_dma *);
+static int	eap_freemem(struct eap_softc *, struct eap_dma *);
 
 #define EWRITE1(sc, r, x) bus_space_write_1((sc)->iot, (sc)->ioh, (r), (x))
 #define EWRITE2(sc, r, x) bus_space_write_2((sc)->iot, (sc)->ioh, (r), (x))
@@ -161,56 +181,59 @@ int	eap_freemem(struct eap_softc *, struct eap_dma *);
 #define EREAD2(sc, r) bus_space_read_2((sc)->iot, (sc)->ioh, (r))
 #define EREAD4(sc, r) bus_space_read_4((sc)->iot, (sc)->ioh, (r))
 
-struct cfattach eap_ca = {
-	sizeof(struct eap_softc), eap_match, eap_attach
-};
+CFATTACH_DECL_NEW(eap, sizeof(struct eap_softc),
+    eap_match, eap_attach, eap_detach, NULL);
 
-int	eap_open(void *, int);
-void	eap_close(void *);
-int	eap_query_encoding(void *, struct audio_encoding *);
-int	eap_set_params(void *, int, int, struct audio_params *, struct audio_params *);
-int	eap_round_blocksize(void *, int);
-int	eap_trigger_output(void *, void *, void *, int, void (*)(void *),
-	    void *, struct audio_params *);
-int	eap_trigger_input(void *, void *, void *, int, void (*)(void *),
-	    void *, struct audio_params *);
-int	eap_halt_output(void *);
-int	eap_halt_input(void *);
-void	eap_get_default_params(void *, int, struct audio_params *);
-void    eap1370_write_codec(struct eap_softc *, int, int);
-int	eap_getdev(void *, struct audio_device *);
-int	eap1370_mixer_set_port(void *, mixer_ctrl_t *);
-int	eap1370_mixer_get_port(void *, mixer_ctrl_t *);
-int	eap1371_mixer_set_port(void *, mixer_ctrl_t *);
-int	eap1371_mixer_get_port(void *, mixer_ctrl_t *);
-int	eap1370_query_devinfo(void *, mixer_devinfo_t *);
-void   *eap_malloc(void *, int, size_t, int, int);
-void	eap_free(void *, void *, int);
-paddr_t	eap_mappage(void *, void *, off_t, int);
-int	eap_get_props(void *);
-void	eap1370_set_mixer(struct eap_softc *sc, int a, int d);
-u_int32_t eap1371_src_wait(struct eap_softc *sc);
-void 	eap1371_set_adc_rate(struct eap_softc *sc, int rate);
-void 	eap1371_set_dac_rate(struct eap_softc *sc, int rate, int which);
-int	eap1371_src_read(struct eap_softc *sc, int a);
-void	eap1371_src_write(struct eap_softc *sc, int a, int d);
-int	eap1371_query_devinfo(void *addr, mixer_devinfo_t *dip);
+static int	eap_open(void *, int);
+static int	eap_query_encoding(void *, struct audio_encoding *);
+static int	eap_set_params(void *, int, int, audio_params_t *,
+			       audio_params_t *, stream_filter_list_t *,
+			       stream_filter_list_t *);
+static int	eap_round_blocksize(void *, int, int, const audio_params_t *);
+static int	eap_trigger_output(void *, void *, void *, int,
+				   void (*)(void *), void *,
+				   const audio_params_t *);
+static int	eap_trigger_input(void *, void *, void *, int,
+				  void (*)(void *), void *,
+				  const audio_params_t *);
+static int	eap_halt_output(void *);
+static int	eap_halt_input(void *);
+static void	eap1370_write_codec(struct eap_softc *, int, int);
+static int	eap_getdev(void *, struct audio_device *);
+static int	eap1370_mixer_set_port(void *, mixer_ctrl_t *);
+static int	eap1370_mixer_get_port(void *, mixer_ctrl_t *);
+static int	eap1371_mixer_set_port(void *, mixer_ctrl_t *);
+static int	eap1371_mixer_get_port(void *, mixer_ctrl_t *);
+static int	eap1370_query_devinfo(void *, mixer_devinfo_t *);
+static void	*eap_malloc(void *, int, size_t, struct malloc_type *, int);
+static void	eap_free(void *, void *, struct malloc_type *);
+static size_t	eap_round_buffersize(void *, int, size_t);
+static paddr_t	eap_mappage(void *, void *, off_t, int);
+static int	eap_get_props(void *);
+static void	eap1370_set_mixer(struct eap_softc *, int, int);
+static uint32_t eap1371_src_wait(struct eap_softc *);
+static void	eap1371_set_adc_rate(struct eap_softc *, int);
+static void	eap1371_set_dac_rate(struct eap_instance *, int);
+static int	eap1371_src_read(struct eap_softc *, int);
+static void	eap1371_src_write(struct eap_softc *, int, int);
+static int	eap1371_query_devinfo(void *, mixer_devinfo_t *);
 
-int     eap1371_attach_codec(void *sc, struct ac97_codec_if *);
-int	eap1371_read_codec(void *sc, u_int8_t a, u_int16_t *d);
-int	eap1371_write_codec(void *sc, u_int8_t a, u_int16_t d);
-void    eap1371_reset_codec(void *sc);
+static int	eap1371_attach_codec(void *, struct ac97_codec_if *);
+static int	eap1371_read_codec(void *, uint8_t, uint16_t *);
+static int	eap1371_write_codec(void *, uint8_t, uint16_t );
+static int	eap1371_reset_codec(void *);
 #if NMIDI > 0
-void	eap_midi_close(void *);
-void	eap_midi_getinfo(void *, struct midi_info *);
-int	eap_midi_open(void *, int, void (*)(void *, int),
-	    void (*)(void *), void *);
-int	eap_midi_output(void *, int);
+static void	eap_midi_close(void *);
+static void	eap_midi_getinfo(void *, struct midi_info *);
+static int	eap_midi_open(void *, int, void (*)(void *, int),
+			      void (*)(void *), void *);
+static int	eap_midi_output(void *, int);
+static void	eap_uart_txrdy(struct eap_softc *);
 #endif
 
-struct audio_hw_if eap1370_hw_if = {
+static const struct audio_hw_if eap1370_hw_if = {
 	eap_open,
-	eap_close,
+	NULL,			/* close */
 	NULL,
 	eap_query_encoding,
 	eap_set_params,
@@ -230,17 +253,18 @@ struct audio_hw_if eap1370_hw_if = {
 	eap1370_query_devinfo,
 	eap_malloc,
 	eap_free,
-	NULL,
+	eap_round_buffersize,
 	eap_mappage,
 	eap_get_props,
 	eap_trigger_output,
 	eap_trigger_input,
-	eap_get_default_params
+	NULL,
+	NULL,
 };
 
-struct audio_hw_if eap1371_hw_if = {
+static const struct audio_hw_if eap1371_hw_if = {
 	eap_open,
-	eap_close,
+	NULL,			/* close */
 	NULL,
 	eap_query_encoding,
 	eap_set_params,
@@ -260,46 +284,70 @@ struct audio_hw_if eap1371_hw_if = {
 	eap1371_query_devinfo,
 	eap_malloc,
 	eap_free,
-	NULL,
+	eap_round_buffersize,
 	eap_mappage,
 	eap_get_props,
 	eap_trigger_output,
 	eap_trigger_input,
-	eap_get_default_params
+	NULL,
+	NULL,
 };
 
 #if NMIDI > 0
-struct midi_hw_if eap_midi_hw_if = {
+static const struct midi_hw_if eap_midi_hw_if = {
 	eap_midi_open,
 	eap_midi_close,
 	eap_midi_output,
-	0,				/* flush */
 	eap_midi_getinfo,
 	0,				/* ioctl */
 };
 #endif
 
-struct audio_device eap_device = {
+static struct audio_device eap_device = {
 	"Ensoniq AudioPCI",
 	"",
 	"eap"
 };
 
-const struct pci_matchid eap_devices[] = {
-	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_EV1938 },
-	{ PCI_VENDOR_ENSONIQ, PCI_PRODUCT_ENSONIQ_AUDIOPCI },
-	{ PCI_VENDOR_ENSONIQ, PCI_PRODUCT_ENSONIQ_AUDIOPCI97 },
-	{ PCI_VENDOR_ENSONIQ, PCI_PRODUCT_ENSONIQ_CT5880 },
+#define EAP_NFORMATS	4
+static const struct audio_format eap_formats[EAP_NFORMATS] = {
+	{NULL, AUMODE_PLAY | AUMODE_RECORD, AUDIO_ENCODING_SLINEAR_LE, 16, 16,
+	 2, AUFMT_STEREO, 0, {4000, 48000}},
+	{NULL, AUMODE_PLAY | AUMODE_RECORD, AUDIO_ENCODING_SLINEAR_LE, 16, 16,
+	 1, AUFMT_MONAURAL, 0, {4000, 48000}},
+	{NULL, AUMODE_PLAY | AUMODE_RECORD, AUDIO_ENCODING_ULINEAR_LE, 8, 8,
+	 2, AUFMT_STEREO, 0, {4000, 48000}},
+	{NULL, AUMODE_PLAY | AUMODE_RECORD, AUDIO_ENCODING_ULINEAR_LE, 8, 8,
+	 1, AUFMT_MONAURAL, 0, {4000, 48000}},
 };
 
-int
-eap_match(struct device *parent, void *match, void *aux)
+static int
+eap_match(device_t parent, cfdata_t match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, eap_devices,
-	    sizeof(eap_devices)/sizeof(eap_devices[0])));
+	struct pci_attach_args *pa;
+
+	pa = (struct pci_attach_args *)aux;
+	switch (PCI_VENDOR(pa->pa_id)) {
+	case PCI_VENDOR_CREATIVELABS:
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_CREATIVELABS_EV1938:
+			return 1;
+		}
+		break;
+	case PCI_VENDOR_ENSONIQ:
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_ENSONIQ_AUDIOPCI:
+		case PCI_PRODUCT_ENSONIQ_AUDIOPCI97:
+		case PCI_PRODUCT_ENSONIQ_CT5880:
+			return 1;
+		}
+		break;
+	}
+
+	return 0;
 }
 
-void
+static void
 eap1370_write_codec(struct eap_softc *sc, int a, int d)
 {
 	int icss, to;
@@ -309,11 +357,10 @@ eap1370_write_codec(struct eap_softc *sc, int a, int d)
 		icss = EREAD4(sc, EAP_ICSS);
 		DPRINTFN(5,("eap: codec %d prog: icss=0x%08x\n", a, icss));
 		if (!to--) {
-			printf("%s: timeout writing to codec\n",
-			    sc->sc_dev.dv_xname);
+			printf("eap: timeout writing to codec\n");
 			return;
 		}
-	} while (icss & EAP_CWRIP);  /* XXX could use CSTAT here */
+	} while(icss & EAP_CWRIP);  /* XXX could use CSTAT here */
 	EWRITE4(sc, EAP_CODEC, EAP_SET_CODEC(a, d));
 }
 
@@ -322,20 +369,20 @@ eap1370_write_codec(struct eap_softc *sc, int a, int d)
  * FreeBSD and Linux drivers.
  */
 
-static __inline void
-eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
+static inline void
+eap1371_ready_codec(struct eap_softc *sc, uint8_t a, uint32_t wd)
 {
 	int to, s;
-	u_int32_t src, t;
+	uint32_t src, t;
 
 	for (to = 0; to < EAP_WRITE_TIMEOUT; to++) {
 		if (!(EREAD4(sc, E1371_CODEC) & E1371_CODEC_WIP))
 			break;
 		delay(1);
 	}
-	if (to == EAP_WRITE_TIMEOUT)
-		printf("%s: eap1371_ready_codec timeout 1\n",
-		    sc->sc_dev.dv_xname);
+	if (to >= EAP_WRITE_TIMEOUT)
+		aprint_error_dev(sc->sc_dev,
+		    "eap1371_ready_codec timeout 1\n");
 
 	s = splaudio();
 	src = eap1371_src_wait(sc) & E1371_SRC_CTLMASK;
@@ -347,9 +394,9 @@ eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
 			break;
 		delay(1);
 	}
-	if (to == EAP_READ_TIMEOUT)
-		printf("%s: eap1371_ready_codec timeout 2\n",
-		    sc->sc_dev.dv_xname);
+	if (to >= EAP_READ_TIMEOUT)
+		aprint_error_dev(sc->sc_dev,
+		    "eap1371_ready_codec timeout 2\n");
 
 	for (to = 0; to < EAP_READ_TIMEOUT; to++) {
 		t = EREAD4(sc, E1371_SRC);
@@ -357,9 +404,9 @@ eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
 			break;
 		delay(1);
 	}
-	if (to == EAP_READ_TIMEOUT)
-		printf("%s: eap1371_ready_codec timeout 3\n",
-		    sc->sc_dev.dv_xname);
+	if (to >= EAP_READ_TIMEOUT)
+		aprint_error_dev(sc->sc_dev,
+		    "eap1371_ready_codec timeout 3\n");
 
 	EWRITE4(sc, E1371_CODEC, wd);
 
@@ -369,80 +416,80 @@ eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
 	splx(s);
 }
 
-int
-eap1371_read_codec(void *sc_, u_int8_t a, u_int16_t *d)
+static int
+eap1371_read_codec(void *sc_, uint8_t a, uint16_t *d)
 {
-	struct eap_softc *sc = sc_;
+	struct eap_softc *sc;
 	int to;
-	u_int32_t t;
+	uint32_t t;
 
+	sc = sc_;
 	eap1371_ready_codec(sc, a, E1371_SET_CODEC(a, 0) | E1371_CODEC_READ);
 
 	for (to = 0; to < EAP_WRITE_TIMEOUT; to++) {
 		if (!(EREAD4(sc, E1371_CODEC) & E1371_CODEC_WIP))
 			break;
-		delay(1);
 	}
-	if (to == EAP_WRITE_TIMEOUT)
-		printf("%s: eap1371_read_codec timeout 1\n",
-		    sc->sc_dev.dv_xname);
+	if (to > EAP_WRITE_TIMEOUT)
+		aprint_error_dev(sc->sc_dev,
+		    "eap1371_read_codec timeout 1\n");
 
 	for (to = 0; to < EAP_WRITE_TIMEOUT; to++) {
 		t = EREAD4(sc, E1371_CODEC);
 		if (t & E1371_CODEC_VALID)
 			break;
-		delay(1);
 	}
-	if (to == EAP_WRITE_TIMEOUT)
-		printf("%s: eap1371_read_codec timeout 2\n",
-		    sc->sc_dev.dv_xname);
+	if (to > EAP_WRITE_TIMEOUT)
+		aprint_error_dev(sc->sc_dev, "eap1371_read_codec timeout 2\n");
 
-	*d = (u_int16_t)t;
+	*d = (uint16_t)t;
 
 	DPRINTFN(10, ("eap1371: reading codec (%x) = %x\n", a, *d));
 
-	return (0);
+	return 0;
 }
 
-int
-eap1371_write_codec(void *sc_, u_int8_t a, u_int16_t d)
+static int
+eap1371_write_codec(void *sc_, uint8_t a, uint16_t d)
 {
-	struct eap_softc *sc = sc_;
+	struct eap_softc *sc;
 
+	sc = sc_;
 	eap1371_ready_codec(sc, a, E1371_SET_CODEC(a, d));
 
-        DPRINTFN(10, ("eap1371: writing codec %x --> %x\n", d, a));
+	DPRINTFN(10, ("eap1371: writing codec %x --> %x\n", d, a));
 
-	return (0);
+	return 0;
 }
 
-u_int32_t
+static uint32_t
 eap1371_src_wait(struct eap_softc *sc)
 {
 	int to;
 	u_int32_t src;
-	
+
 	for (to = 0; to < EAP_READ_TIMEOUT; to++) {
 		src = EREAD4(sc, E1371_SRC);
 		if (!(src & E1371_SRC_RBUSY))
-			return (src);
+			return src;
 		delay(1);
 	}
-	printf("%s: eap1371_src_wait timeout\n", sc->sc_dev.dv_xname);
-	return (src);
+	aprint_error_dev(sc->sc_dev, "eap1371_src_wait timeout\n");
+	return src;
 }
 
-int
+static int
 eap1371_src_read(struct eap_softc *sc, int a)
 {
 	int to;
-	u_int32_t src, t;
+	uint32_t src, t;
 
 	src = eap1371_src_wait(sc) & E1371_SRC_CTLMASK;
 	src |= E1371_SRC_ADDR(a);
 	EWRITE4(sc, E1371_SRC, src | E1371_SRC_STATE_OK);
 
-	if ((eap1371_src_wait(sc) & E1371_SRC_STATE_MASK) != E1371_SRC_STATE_OK) {
+	t = eap1371_src_wait(sc);
+	if ((t & E1371_SRC_STATE_MASK) != E1371_SRC_STATE_OK) {
 		for (to = 0; to < EAP_READ_TIMEOUT; to++) {
 			t = EREAD4(sc, E1371_SRC);
 			if ((t & E1371_SRC_STATE_MASK) == E1371_SRC_STATE_OK)
@@ -456,17 +503,17 @@ eap1371_src_read(struct eap_softc *sc, int a)
 	return t & E1371_SRC_DATAMASK;
 }
 
-void
+static void
 eap1371_src_write(struct eap_softc *sc, int a, int d)
 {
-	u_int32_t r;
+	uint32_t r;
 
 	r = eap1371_src_wait(sc) & E1371_SRC_CTLMASK;
 	r |= E1371_SRC_RAMWE | E1371_SRC_ADDR(a) | E1371_SRC_DATA(d);
 	EWRITE4(sc, E1371_SRC, r);
 }
-	
-void
+
+static void
 eap1371_set_adc_rate(struct eap_softc *sc, int rate)
 {
 	int freq, n, truncm;
@@ -493,27 +540,31 @@ eap1371_set_adc_rate(struct eap_softc *sc, int rate)
 			truncm = 119;
 		out = ESRC_SMF | ESRC_SET_TRUNC((119 - truncm) / 2);
 	}
- 	out |= ESRC_SET_N(n);
+	out |= ESRC_SET_N(n);
 	s = splaudio();
 	eap1371_src_write(sc, ESRC_ADC+ESRC_TRUNC_N, out);
 
-      
 	out = eap1371_src_read(sc, ESRC_ADC+ESRC_IREGS) & 0xff;
 	eap1371_src_write(sc, ESRC_ADC+ESRC_IREGS, out |
-	    ESRC_SET_VFI(freq >> 15));
+			  ESRC_SET_VFI(freq >> 15));
 	eap1371_src_write(sc, ESRC_ADC+ESRC_VFF, freq & 0x7fff);
 	eap1371_src_write(sc, ESRC_ADC_VOLL, ESRC_SET_ADC_VOL(n));
 	eap1371_src_write(sc, ESRC_ADC_VOLR, ESRC_SET_ADC_VOL(n));
 	splx(s);
 }
 
-void
-eap1371_set_dac_rate(struct eap_softc *sc, int rate, int which)
+static void
+eap1371_set_dac_rate(struct eap_instance *ei, int rate)
 {
-	int dac = which == 1 ? ESRC_DAC1 : ESRC_DAC2;
+	struct eap_softc *sc;
+	int dac;
 	int freq, r;
 	int s;
- 
+
+	DPRINTFN(2, ("eap1371_set_dac_date: set rate for %d\n", ei->index));
+	sc = device_private(ei->parent);
+	dac = ei->index == EAP_DAC1 ? ESRC_DAC1 : ESRC_DAC2;
+
 	/* Whatever, it works, so I'll leave it :) */
 
 	if (rate > 48000)
@@ -521,75 +572,119 @@ eap1371_set_dac_rate(struct eap_softc *sc, int rate, int which)
 	if (rate < 4000)
 	    rate = 4000;
 	freq = ((rate << 15) + 1500) / 3000;
-	
+
 	s = splaudio();
 	eap1371_src_wait(sc);
 	r = EREAD4(sc, E1371_SRC) & (E1371_SRC_DISABLE |
 	    E1371_SRC_DISP2 | E1371_SRC_DISP1 | E1371_SRC_DISREC);
-	r |= (which == 1) ? E1371_SRC_DISP1 : E1371_SRC_DISP2;
+	r |= ei->index == EAP_DAC1 ? E1371_SRC_DISP1 : E1371_SRC_DISP2;
 	EWRITE4(sc, E1371_SRC, r);
 	r = eap1371_src_read(sc, dac + ESRC_IREGS) & 0x00ff;
 	eap1371_src_write(sc, dac + ESRC_IREGS, r | ((freq >> 5) & 0xfc00));
 	eap1371_src_write(sc, dac + ESRC_VFF, freq & 0x7fff);
 	r = EREAD4(sc, E1371_SRC) & (E1371_SRC_DISABLE |
 	    E1371_SRC_DISP2 | E1371_SRC_DISP1 | E1371_SRC_DISREC);
-	r &= ~(which == 1 ? E1371_SRC_DISP1 : E1371_SRC_DISP2);
+	r &= ~(ei->index == EAP_DAC1 ? E1371_SRC_DISP1 : E1371_SRC_DISP2);
 	EWRITE4(sc, E1371_SRC, r);
 	splx(s);
 }
 
-void
-eap_attach(struct device *parent, struct device *self, void *aux)
+static void
+eap_attach(device_t parent, device_t self, void *aux)
 {
-	struct eap_softc *sc = (struct eap_softc *)self;
-	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	struct audio_hw_if *eap_hw_if;
+	struct eap_softc *sc;
+	struct pci_attach_args *pa;
+	pci_chipset_tag_t pc;
+	const struct audio_hw_if *eap_hw_if;
 	char const *intrstr;
 	pci_intr_handle_t ih;
+	pcireg_t csr;
+	char devinfo[256];
 	mixer_ctrl_t ctl;
 	int i;
 	int revision, ct5880;
+	const char *revstr;
+#if NJOY_EAP > 0
+	struct eap_gameport_args gpargs;
+#endif
+
+	sc = device_private(self);
+	sc->sc_dev = self;
+	pa = (struct pci_attach_args *)aux;
+	pc = pa->pa_pc;
+	revstr = "";
+	aprint_naive(": Audio controller\n");
+
+	/* Stash this away for detach */
+	sc->sc_pc = pc;
 
 	/* Flag if we're "creative" */
 	sc->sc_1371 = !(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ENSONIQ &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENSONIQ_AUDIOPCI);
+			PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENSONIQ_AUDIOPCI);
 
+	/*
+	 * The vendor and product ID's are quite "interesting". Just
+	 * trust the following and be happy.
+	 */
+	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
 	revision = PCI_REVISION(pa->pa_class);
+	ct5880 = 0;
 	if (sc->sc_1371) {
 		if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ENSONIQ &&
-		    ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENSONIQ_AUDIOPCI97 &&
-		    (revision == EAP_ES1373_8 || revision == EAP_CT5880_A)) ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENSONIQ_CT5880))
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENSONIQ_CT5880) {
 			ct5880 = 1;
-		else
-			ct5880 = 0;
+			switch (revision) {
+			case EAP_CT5880_C: revstr = "CT5880-C "; break;
+			case EAP_CT5880_D: revstr = "CT5880-D "; break;
+			case EAP_CT5880_E: revstr = "CT5880-E "; break;
+			}
+		} else {
+			switch (revision) {
+			case EAP_EV1938_A: revstr = "EV1938-A "; break;
+			case EAP_ES1373_A: revstr = "ES1373-A "; break;
+			case EAP_ES1373_B: revstr = "ES1373-B "; break;
+			case EAP_CT5880_A: revstr = "CT5880-A "; ct5880=1;break;
+			case EAP_ES1373_8: revstr = "ES1373-8" ; ct5880=1;break;
+			case EAP_ES1371_B: revstr = "ES1371-B "; break;
+			}
+		}
 	}
+	aprint_normal(": %s %s(rev. 0x%02x)\n", devinfo, revstr, revision);
 
 	/* Map I/O register */
 	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0,
-	    &sc->iot, &sc->ioh, NULL, NULL, 0)) {
+	      &sc->iot, &sc->ioh, NULL, &sc->iosz)) {
+		aprint_error_dev(sc->sc_dev, "can't map i/o space\n");
 		return;
 	}
 
 	sc->sc_dmatag = pa->pa_dmat;
 
+	/* Enable the device. */
+	csr = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+		       csr | PCI_COMMAND_MASTER_ENABLE);
+
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
+		aprint_error_dev(sc->sc_dev, "couldn't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_AUDIO, eap_intr, sc,
-	    sc->sc_dev.dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_AUDIO, eap_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt");
+		aprint_error_dev(sc->sc_dev, "couldn't establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_error(" at %s", intrstr);
+		aprint_error("\n");
 		return;
 	}
-	printf(": %s\n", intrstr);
+	aprint_normal_dev(self, "interrupting at %s\n", intrstr);
+
+	sc->sc_ei[EAP_I1].parent = self;
+	sc->sc_ei[EAP_I1].index = EAP_DAC2;
+	sc->sc_ei[EAP_I2].parent = self;
+	sc->sc_ei[EAP_I2].index = EAP_DAC1;
 
 	if (!sc->sc_1371) {
 		/* Enable interrupts and looping mode. */
@@ -610,31 +705,31 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		ctl.dev = EAP_INPUT_SOURCE;
 		ctl.type = AUDIO_MIXER_SET;
 		ctl.un.mask = 1 << EAP_VOICE_VOL | 1 << EAP_FM_VOL |
-		    1 << EAP_CD_VOL | 1 << EAP_LINE_VOL | 1 << EAP_AUX_VOL |
-		    1 << EAP_MIC_VOL;
-		eap_hw_if->set_port(sc, &ctl);
+			1 << EAP_CD_VOL | 1 << EAP_LINE_VOL | 1 << EAP_AUX_VOL |
+			1 << EAP_MIC_VOL;
+		eap_hw_if->set_port(&sc->sc_ei[EAP_I1], &ctl);
 
 		ctl.type = AUDIO_MIXER_VALUE;
 		ctl.un.value.num_channels = 1;
 		for (ctl.dev = EAP_MASTER_VOL; ctl.dev < EAP_MIC_VOL;
 		     ctl.dev++) {
 			ctl.un.value.level[AUDIO_MIXER_LEVEL_MONO] = VOL_0DB;
-			eap_hw_if->set_port(sc, &ctl);
+			eap_hw_if->set_port(&sc->sc_ei[EAP_I1], &ctl);
 		}
 		ctl.un.value.level[AUDIO_MIXER_LEVEL_MONO] = 0;
-		eap_hw_if->set_port(sc, &ctl);
+		eap_hw_if->set_port(&sc->sc_ei[EAP_I1], &ctl);
 		ctl.dev = EAP_MIC_PREAMP;
 		ctl.type = AUDIO_MIXER_ENUM;
 		ctl.un.ord = 0;
-		eap_hw_if->set_port(sc, &ctl);
+		eap_hw_if->set_port(&sc->sc_ei[EAP_I1], &ctl);
 		ctl.dev = EAP_RECORD_SOURCE;
 		ctl.type = AUDIO_MIXER_SET;
 		ctl.un.mask = 1 << EAP_MIC_VOL;
-		eap_hw_if->set_port(sc, &ctl);
+		eap_hw_if->set_port(&sc->sc_ei[EAP_I1], &ctl);
 	} else {
 		/* clean slate */
 
-                EWRITE4(sc, EAP_SIC, 0);
+		EWRITE4(sc, EAP_SIC, 0);
 		EWRITE4(sc, EAP_ICSC, 0);
 		EWRITE4(sc, E1371_LEGACY, 0);
 
@@ -644,10 +739,10 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 			delay(20000);
 		}
 
-                /* Reset from es1371's perspective */
-                EWRITE4(sc, EAP_ICSC, E1371_SYNC_RES);
-                delay(20);
-                EWRITE4(sc, EAP_ICSC, 0);
+		/* Reset from es1371's perspective */
+		EWRITE4(sc, EAP_ICSC, E1371_SYNC_RES);
+		delay(20);
+		EWRITE4(sc, EAP_ICSC, 0);
 
 		/*
 		 * Must properly reprogram sample rate converter,
@@ -668,9 +763,9 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		eap1371_src_write(sc, ESRC_DAC2_VOLL, ESRC_SET_DAC_VOLI(1));
 		eap1371_src_write(sc, ESRC_DAC2_VOLR, ESRC_SET_DAC_VOLI(1));
 		eap1371_set_adc_rate(sc, 22050);
-		eap1371_set_dac_rate(sc, 22050, 1);
-		eap1371_set_dac_rate(sc, 22050, 2);
-	     
+		eap1371_set_dac_rate(&sc->sc_ei[0], 22050);
+		eap1371_set_dac_rate(&sc->sc_ei[1], 22050);
+
 		EWRITE4(sc, E1371_SRC, 0);
 
 		/* Reset codec */
@@ -681,10 +776,8 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		sc->host_if.read = eap1371_read_codec;
 		sc->host_if.write = eap1371_write_codec;
 		sc->host_if.reset = eap1371_reset_codec;
-		sc->host_if.flags = eap_flags_codec;
-		sc->flags = AC97_HOST_DONT_READ;
-	
-		if (ac97_attach(&sc->host_if) == 0) {
+
+		if (ac97_attach(&sc->host_if, self) == 0) {
 			/* Interrupt enable */
 			EWRITE4(sc, EAP_SIC, EAP_P2_INTR_EN | EAP_R1_INTR_EN);
 		} else
@@ -693,28 +786,91 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		eap_hw_if = &eap1371_hw_if;
 	}
 
-	audio_attach_mi(eap_hw_if, sc, &sc->sc_dev);
+	sc->sc_ei[EAP_I1].ei_audiodev =
+	    audio_attach_mi(eap_hw_if, &sc->sc_ei[EAP_I1], sc->sc_dev);
+
+#ifdef EAP_USE_BOTH_DACS
+	aprint_normal_dev(self, "attaching secondary DAC\n");
+	sc->sc_ei[EAP_I2].ei_audiodev =
+	    audio_attach_mi(eap_hw_if, &sc->sc_ei[EAP_I2], sc->sc_dev);
+#endif
+
 #if NMIDI > 0
-	sc->sc_mididev = midi_attach_mi(&eap_midi_hw_if, sc, &sc->sc_dev);
+	sc->sc_mididev = midi_attach_mi(&eap_midi_hw_if, sc, sc->sc_dev);
+#endif
+
+#if NJOY_EAP > 0
+	if (sc->sc_1371) {
+		gpargs.gpa_iot = sc->iot;
+		gpargs.gpa_ioh = sc->ioh;
+		sc->sc_gameport = eap_joy_attach(sc->sc_dev, &gpargs);
+	}
 #endif
 }
 
-int
-eap1371_attach_codec(void *sc_, struct ac97_codec_if *codec_if)
+static int
+eap_detach(device_t self, int flags)
 {
-	struct eap_softc *sc = sc_;
-	
-	sc->codec_if = codec_if;
-	return (0);
+	struct eap_softc *sc;
+	int res;
+#if NJOY_EAP > 0
+	struct eap_gameport_args gpargs;
+
+	sc = device_private(self);
+	if (sc->sc_gameport) {
+		gpargs.gpa_iot = sc->iot;
+		gpargs.gpa_ioh = sc->ioh;
+		res = eap_joy_detach(sc->sc_gameport, &gpargs);
+		if (res)
+			return res;
+	}
+#else
+	sc = device_private(self);
+#endif
+#if NMIDI > 0
+	if (sc->sc_mididev != NULL) {
+		res = config_detach(sc->sc_mididev, 0);
+		if (res)
+			return res;
+	}
+#endif
+#ifdef EAP_USE_BOTH_DACS
+	if (sc->sc_ei[EAP_I2].ei_audiodev != NULL) {
+		res = config_detach(sc->sc_ei[EAP_I2].ei_audiodev, 0);
+		if (res)
+			return res;
+	}
+#endif
+	if (sc->sc_ei[EAP_I1].ei_audiodev != NULL) {
+		res = config_detach(sc->sc_ei[EAP_I1].ei_audiodev, 0);
+		if (res)
+			return res;
+	}
+
+	bus_space_unmap(sc->iot, sc->ioh, sc->iosz);
+	pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
+
+	return 0;
 }
 
-void
+static int
+eap1371_attach_codec(void *sc_, struct ac97_codec_if *codec_if)
+{
+	struct eap_softc *sc;
+
+	sc = sc_;
+	sc->codec_if = codec_if;
+	return 0;
+}
+
+static int
 eap1371_reset_codec(void *sc_)
 {
-	struct eap_softc *sc = sc_;
-	u_int32_t icsc;
+	struct eap_softc *sc;
+	uint32_t icsc;
 	int s;
 
+	sc = sc_;
 	s = splaudio();
 	icsc = EREAD4(sc, EAP_ICSC);
 	EWRITE4(sc, EAP_ICSC, icsc | E1371_SYNC_RES);
@@ -723,18 +879,19 @@ eap1371_reset_codec(void *sc_)
 	delay(1);
 	splx(s);
 
-	return;
+	return 0;
 }
 
-int
+static int
 eap_intr(void *p)
 {
-	struct eap_softc *sc = p;
-	u_int32_t intr, sic;
+	struct eap_softc *sc;
+	uint32_t intr, sic;
 
+	sc = p;
 	intr = EREAD4(sc, EAP_ICSS);
 	if (!(intr & EAP_INTR))
-		return (0);
+		return 0;
 	sic = EREAD4(sc, EAP_SIC);
 	DPRINTFN(5, ("eap_intr: ICSS=0x%08x, SIC=0x%08x\n", intr, sic));
 	if (intr & EAP_I_ADC) {
@@ -747,7 +904,6 @@ eap_intr(void *p)
 		 * The transfer we are waiting for is 8 longwords.
 		 */
 		int s, nw, n;
-
 		EWRITE4(sc, EAP_MEMPAGE, EAP_ADC_PAGE);
 		s = EREAD4(sc, EAP_ADC_CSR);
 		nw = ((s & 0xffff) + 1) >> 2; /* # of words in DMA */
@@ -755,7 +911,7 @@ eap_intr(void *p)
 		while (((EREAD4(sc, EAP_ADC_SIZE) >> 16) + 8) % nw == 0) {
 			delay(10);
 			if (++n > 100) {
-				printf("eapintr: dma fix timeout");
+				printf("eapintr: DMA fix timeout");
 				break;
 			}
 		}
@@ -766,51 +922,68 @@ eap_intr(void *p)
 		if (sc->sc_rintr)
 			sc->sc_rintr(sc->sc_rarg);
 	}
+
 	if (intr & EAP_I_DAC2) {
 		EWRITE4(sc, EAP_SIC, sic & ~EAP_P2_INTR_EN);
 		EWRITE4(sc, EAP_SIC, sic | EAP_P2_INTR_EN);
-		if (sc->sc_pintr)
-			sc->sc_pintr(sc->sc_parg);
+		if (sc->sc_ei[EAP_DAC2].ei_pintr)
+			sc->sc_ei[EAP_DAC2].ei_pintr(sc->sc_ei[EAP_DAC2].ei_parg);
 	}
-#if NMIDI > 0
-	if ((intr & EAP_I_UART) && sc->sc_iintr != NULL) {
-		u_int32_t data;
 
-		if (EREAD1(sc, EAP_UART_STATUS) & EAP_US_RXINT) {
+	if (intr & EAP_I_DAC1) {
+		EWRITE4(sc, EAP_SIC, sic & ~EAP_P1_INTR_EN);
+		EWRITE4(sc, EAP_SIC, sic | EAP_P1_INTR_EN);
+		if (sc->sc_ei[EAP_DAC1].ei_pintr)
+			sc->sc_ei[EAP_DAC1].ei_pintr(sc->sc_ei[EAP_DAC1].ei_parg);
+	}
+
+	if (intr & EAP_I_MCCB)
+		panic("eap_intr: unexpected MCCB interrupt");
+#if NMIDI > 0
+	if (intr & EAP_I_UART) {
+		uint8_t ustat;
+		uint32_t data;
+		
+		ustat = EREAD1(sc, EAP_UART_STATUS);
+
+		if (ustat & EAP_US_RXINT) {
 			while (EREAD1(sc, EAP_UART_STATUS) & EAP_US_RXRDY) {
 				data = EREAD1(sc, EAP_UART_DATA);
 				sc->sc_iintr(sc->sc_arg, data);
 			}
 		}
+		
+		if (ustat & EAP_US_TXINT)
+			eap_uart_txrdy(sc);
 	}
 #endif
-	return (1);
+	return 1;
 }
 
-int
+static int
 eap_allocmem(struct eap_softc *sc, size_t size, size_t align, struct eap_dma *p)
 {
 	int error;
 
 	p->size = size;
 	error = bus_dmamem_alloc(sc->sc_dmatag, p->size, align, 0,
-	    p->segs, sizeof(p->segs)/sizeof(p->segs[0]),
-	    &p->nsegs, BUS_DMA_NOWAIT);
+				 p->segs, sizeof(p->segs)/sizeof(p->segs[0]),
+				 &p->nsegs, BUS_DMA_NOWAIT);
 	if (error)
-		return (error);
+		return error;
 
 	error = bus_dmamem_map(sc->sc_dmatag, p->segs, p->nsegs, p->size,
-	    &p->addr, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
+			       &p->addr, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
 	if (error)
 		goto free;
 
 	error = bus_dmamap_create(sc->sc_dmatag, p->size, 1, p->size,
-	    0, BUS_DMA_NOWAIT, &p->map);
+				  0, BUS_DMA_NOWAIT, &p->map);
 	if (error)
 		goto unmap;
 
 	error = bus_dmamap_load(sc->sc_dmatag, p->map, p->addr, p->size, NULL,
-	    BUS_DMA_NOWAIT);
+				BUS_DMA_NOWAIT);
 	if (error)
 		goto destroy;
 	return (0);
@@ -821,116 +994,110 @@ unmap:
 	bus_dmamem_unmap(sc->sc_dmatag, p->addr, p->size);
 free:
 	bus_dmamem_free(sc->sc_dmatag, p->segs, p->nsegs);
-	return (error);
+	return error;
 }
 
-int
+static int
 eap_freemem(struct eap_softc *sc, struct eap_dma *p)
 {
+
 	bus_dmamap_unload(sc->sc_dmatag, p->map);
 	bus_dmamap_destroy(sc->sc_dmatag, p->map);
 	bus_dmamem_unmap(sc->sc_dmatag, p->addr, p->size);
 	bus_dmamem_free(sc->sc_dmatag, p->segs, p->nsegs);
-	return (0);
+	return 0;
 }
 
-int
+static int
 eap_open(void *addr, int flags)
 {
-	return (0);
+	struct eap_instance *ei;
+
+	ei = addr;
+	/* there is only one ADC */
+	if (ei->index == EAP_I2 && flags & FREAD)
+		return EOPNOTSUPP;
+
+	return 0;
 }
 
-/*
- * Close function is called at splaudio().
- */
-void
-eap_close(void *addr)
-{
-	struct eap_softc *sc = addr;
-    
-	eap_halt_output(sc);
-	eap_halt_input(sc);
-
-	sc->sc_pintr = 0;
-	sc->sc_rintr = 0;
-}
-
-int
+static int
 eap_query_encoding(void *addr, struct audio_encoding *fp)
 {
+
 	switch (fp->index) {
 	case 0:
-		strlcpy(fp->name, AudioEulinear, sizeof fp->name);
+		strcpy(fp->name, AudioEulinear);
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return (0);
+		return 0;
 	case 1:
-		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
+		strcpy(fp->name, AudioEmulaw);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		return 0;
 	case 2:
-		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
+		strcpy(fp->name, AudioEalaw);
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		return 0;
 	case 3:
-		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
+		strcpy(fp->name, AudioEslinear);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		return 0;
 	case 4:
-		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
+		strcpy(fp->name, AudioEslinear_le);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		return 0;
 	case 5:
-		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
+		strcpy(fp->name, AudioEulinear_le);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		return 0;
 	case 6:
-		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
+		strcpy(fp->name, AudioEslinear_be);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		return 0;
 	case 7:
-		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
+		strcpy(fp->name, AudioEulinear_be);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		return 0;
 	default:
-		return (EINVAL);
+		return EINVAL;
 	}
 }
 
-void
-eap_get_default_params(void *addr, int mode, struct audio_params *params)
-{
-	ac97_get_default_params(params);
-}
-
-int
+static int
 eap_set_params(void *addr, int setmode, int usemode,
-    struct audio_params *play, struct audio_params *rec)
+	       audio_params_t *play, audio_params_t *rec,
+	       stream_filter_list_t *pfil, stream_filter_list_t *rfil)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	struct audio_params *p;
-	int mode;
-	u_int32_t div;
+	stream_filter_list_t *fil;
+	int mode, i;
+	uint32_t div;
 
+	ei = addr;
+	sc = device_private(ei->parent);
 	/*
 	 * The es1370 only has one clock, so make the sample rates match.
+	 * This only applies for ADC/DAC2. The FM DAC is handled below.
 	 */
-	if (!sc->sc_1371) {
+	if (!sc->sc_1371 && ei->index == EAP_DAC2) {
 		if (play->sample_rate != rec->sample_rate &&
 		    usemode == (AUMODE_PLAY | AUMODE_RECORD)) {
 			if (setmode == AUMODE_PLAY) {
@@ -940,12 +1107,12 @@ eap_set_params(void *addr, int setmode, int usemode,
 				play->sample_rate = rec->sample_rate;
 				setmode |= AUMODE_PLAY;
 			} else
-				return (EINVAL);
+				return EINVAL;
 		}
 	}
 
 	for (mode = AUMODE_RECORD; mode != -1;
-	    mode = mode == AUMODE_RECORD ? AUMODE_PLAY : -1) {
+	     mode = mode == AUMODE_RECORD ? AUMODE_PLAY : -1) {
 		if ((setmode & mode) == 0)
 			continue;
 
@@ -954,60 +1121,22 @@ eap_set_params(void *addr, int setmode, int usemode,
 		if (p->sample_rate < 4000 || p->sample_rate > 48000 ||
 		    (p->precision != 8 && p->precision != 16) ||
 		    (p->channels != 1 && p->channels != 2))
-			return (EINVAL);
+			return EINVAL;
 
-		p->factor = 1;
-		p->sw_code = 0;
-		switch (p->encoding) {
-		case AUDIO_ENCODING_SLINEAR_BE:
-			if (p->precision == 16)
-				p->sw_code = swap_bytes;
-			else
-				p->sw_code = change_sign8;
-			break;
-		case AUDIO_ENCODING_SLINEAR_LE:
-			if (p->precision != 16)
-				p->sw_code = change_sign8;
-			break;
-		case AUDIO_ENCODING_ULINEAR_BE:
-			if (p->precision == 16) {
-				if (mode == AUMODE_PLAY)
-					p->sw_code = swap_bytes_change_sign16_le;
-				else
-					p->sw_code = change_sign16_swap_bytes_le;
-			}
-			break;
-		case AUDIO_ENCODING_ULINEAR_LE:
-			if (p->precision == 16)
-				p->sw_code = change_sign16_le;
-			break;
-		case AUDIO_ENCODING_ULAW:
-			if (mode == AUMODE_PLAY) {
-				p->factor = 2;
-				p->sw_code = mulaw_to_slinear16_le;
-			} else
-				p->sw_code = ulinear8_to_mulaw;
-			break;
-		case AUDIO_ENCODING_ALAW:
-			if (mode == AUMODE_PLAY) {
-				p->factor = 2;
-				p->sw_code = alaw_to_slinear16_le;
-			} else
-				p->sw_code = ulinear8_to_alaw;
-			break;
-		default:
-			return (EINVAL);
-		}
+		fil = mode == AUMODE_PLAY ? pfil : rfil;
+		i = auconv_set_converter(eap_formats, EAP_NFORMATS,
+					 mode, p, FALSE, fil);
+		if (i < 0)
+			return EINVAL;
 	}
 
 	if (sc->sc_1371) {
-		eap1371_set_dac_rate(sc, play->sample_rate, 1);
-		eap1371_set_dac_rate(sc, play->sample_rate, 2);
+		eap1371_set_dac_rate(ei, play->sample_rate);
 		eap1371_set_adc_rate(sc, rec->sample_rate);
-	} else {
+	} else if (ei->index == EAP_DAC2) {
 		/* Set the speed */
 		DPRINTFN(2, ("eap_set_params: old ICSC = 0x%08x\n",
-		    EREAD4(sc, EAP_ICSC)));
+			     EREAD4(sc, EAP_ICSC)));
 		div = EREAD4(sc, EAP_ICSC) & ~EAP_PCLKBITS;
 		/*
 		 * XXX
@@ -1017,25 +1146,54 @@ eap_set_params(void *addr, int setmode, int usemode,
 		 */
 		if (usemode == AUMODE_RECORD)
 			div |= EAP_SET_PCLKDIV(EAP_XTAL_FREQ /
-			    rec->sample_rate - 2);
+				rec->sample_rate - 2);
 		else
 			div |= EAP_SET_PCLKDIV(EAP_XTAL_FREQ /
-			    play->sample_rate - 2);
+				play->sample_rate - 2);
+#if 0
 		div |= EAP_CCB_INTRM;
+#else
+		/*
+		 * It is not obvious how to acknowledge MCCB interrupts, so
+		 * we had better not enable them.
+		 */
+#endif
+		EWRITE4(sc, EAP_ICSC, div);
+		DPRINTFN(2, ("eap_set_params: set ICSC = 0x%08x\n", div));
+	} else {
+		/*
+		 * The FM DAC has only a few fixed-frequency choises, so
+		 * pick out the best candidate.
+		 */
+		div = EREAD4(sc, EAP_ICSC);
+		DPRINTFN(2, ("eap_set_params: old ICSC = 0x%08x\n", div));
+
+		div &= ~EAP_WTSRSEL;
+		if (play->sample_rate < 8268)
+			div |= EAP_WTSRSEL_5;
+		else if (play->sample_rate < 16537)
+			div |= EAP_WTSRSEL_11;
+		else if (play->sample_rate < 33075)
+			div |= EAP_WTSRSEL_22;
+		else
+			div |= EAP_WTSRSEL_44;
+
 		EWRITE4(sc, EAP_ICSC, div);
 		DPRINTFN(2, ("eap_set_params: set ICSC = 0x%08x\n", div));
 	}
 
-	return (0);
+	return 0;
 }
 
-int
-eap_round_blocksize(void *addr, int blk)
+static int
+eap_round_blocksize(void *addr, int blk, int mode,
+    const audio_params_t *param)
 {
-	return ((blk + 31) & -32);	/* keep good alignment */
+
+	return blk & -32;	/* keep good alignment */
 }
 
-int
+static int
 eap_trigger_output(
 	void *addr,
 	void *start,
@@ -1043,68 +1201,94 @@ eap_trigger_output(
 	int blksize,
 	void (*intr)(void *),
 	void *arg,
-	struct audio_params *param)
+	const audio_params_t *param)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	struct eap_dma *p;
-	u_int32_t icsc, sic;
+	uint32_t icsc, sic;
 	int sampshift;
 
+	ei = addr;
+	sc = device_private(ei->parent);
 #ifdef DIAGNOSTIC
-	if (sc->sc_prun)
+	if (ei->ei_prun)
 		panic("eap_trigger_output: already running");
-	sc->sc_prun = 1;
+	ei->ei_prun = 1;
 #endif
 
 	DPRINTFN(1, ("eap_trigger_output: sc=%p start=%p end=%p "
 	    "blksize=%d intr=%p(%p)\n", addr, start, end, blksize, intr, arg));
-	sc->sc_pintr = intr;
-	sc->sc_parg = arg;
+	ei->ei_pintr = intr;
+	ei->ei_parg = arg;
 
 	sic = EREAD4(sc, EAP_SIC);
-	sic &= ~(EAP_P2_S_EB | EAP_P2_S_MB | EAP_INC_BITS);
-	sic |= EAP_SET_P2_ST_INC(0) | EAP_SET_P2_END_INC(param->precision * param->factor / 8);
+	sic &= ~(EAP_S_EB(ei->index) | EAP_S_MB(ei->index) | EAP_INC_BITS);
+
+	if (ei->index == EAP_DAC2)
+		sic |= EAP_SET_P2_ST_INC(0)
+		    | EAP_SET_P2_END_INC(param->precision / 8);
+
 	sampshift = 0;
-	if (param->precision * param->factor == 16) {
-		sic |= EAP_P2_S_EB;
+	if (param->precision == 16) {
+		sic |= EAP_S_EB(ei->index);
 		sampshift++;
 	}
 	if (param->channels == 2) {
-		sic |= EAP_P2_S_MB;
+		sic |= EAP_S_MB(ei->index);
 		sampshift++;
 	}
-	EWRITE4(sc, EAP_SIC, sic & ~EAP_P2_INTR_EN);
-	EWRITE4(sc, EAP_SIC, sic | EAP_P2_INTR_EN);
+	EWRITE4(sc, EAP_SIC, sic & ~EAP_P_INTR_EN(ei->index));
+	EWRITE4(sc, EAP_SIC, sic | EAP_P_INTR_EN(ei->index));
 
 	for (p = sc->sc_dmas; p && KERNADDR(p) != start; p = p->next)
-		;
+		continue;
 	if (!p) {
 		printf("eap_trigger_output: bad addr %p\n", start);
-		return (EINVAL);
+		return EINVAL;
 	}
 
-	DPRINTF(("eap_trigger_output: DAC2_ADDR=0x%x, DAC2_SIZE=0x%x\n",
-	    (int)DMAADDR(p),
-	    (int)EAP_SET_SIZE(0, (((char *)end - (char *)start) >> 2) - 1)));
-	EWRITE4(sc, EAP_MEMPAGE, EAP_DAC_PAGE);
-	EWRITE4(sc, EAP_DAC2_ADDR, DMAADDR(p));
-	EWRITE4(sc, EAP_DAC2_SIZE,
-	    EAP_SET_SIZE(0, (((char *)end - (char *)start) >> 2) - 1));
-
-	EWRITE4(sc, EAP_DAC2_CSR, (blksize >> sampshift) - 1);
+	if (ei->index == EAP_DAC2) {
+		DPRINTF(("eap_trigger_output: DAC2_ADDR=0x%x, DAC2_SIZE=0x%x\n",
+			 (int)DMAADDR(p),
+			 (int)EAP_SET_SIZE(0,
+			 (((char *)end - (char *)start) >> 2) - 1)));
+		EWRITE4(sc, EAP_MEMPAGE, EAP_DAC_PAGE);
+		EWRITE4(sc, EAP_DAC2_ADDR, DMAADDR(p));
+		EWRITE4(sc, EAP_DAC2_SIZE,
+			EAP_SET_SIZE(0,
+			((char *)end - (char *)start) >> 2) - 1);
+		EWRITE4(sc, EAP_DAC2_CSR, (blksize >> sampshift) - 1);
+	} else if (ei->index == EAP_DAC1) {
+		DPRINTF(("eap_trigger_output: DAC1_ADDR=0x%x, DAC1_SIZE=0x%x\n",
+			 (int)DMAADDR(p),
+			 (int)EAP_SET_SIZE(0,
+			 (((char *)end - (char *)start) >> 2) - 1)));
+		EWRITE4(sc, EAP_MEMPAGE, EAP_DAC_PAGE);
+		EWRITE4(sc, EAP_DAC1_ADDR, DMAADDR(p));
+		EWRITE4(sc, EAP_DAC1_SIZE,
+			EAP_SET_SIZE(0,
+			((char *)end - (char *)start) >> 2) - 1);
+		EWRITE4(sc, EAP_DAC1_CSR, (blksize >> sampshift) - 1);
+	}
+#ifdef DIAGNOSTIC
+	else
+		panic("eap_trigger_output: impossible instance %d", ei->index);
+#endif
 
 	if (sc->sc_1371)
 		EWRITE4(sc, E1371_SRC, 0);
 
 	icsc = EREAD4(sc, EAP_ICSC);
-	EWRITE4(sc, EAP_ICSC, icsc | EAP_DAC2_EN);
+	icsc |= EAP_DAC_EN(ei->index);
+	EWRITE4(sc, EAP_ICSC, icsc);
 
 	DPRINTFN(1, ("eap_trigger_output: set ICSC = 0x%08x\n", icsc));
 
-	return (0);
+	return 0;
 }
 
-int
+static int
 eap_trigger_input(
 	void *addr,
 	void *start,
@@ -1112,20 +1296,23 @@ eap_trigger_input(
 	int blksize,
 	void (*intr)(void *),
 	void *arg,
-	struct audio_params *param)
+	const audio_params_t *param)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	struct eap_dma *p;
-	u_int32_t icsc, sic;
+	uint32_t icsc, sic;
 	int sampshift;
 
+	ei = addr;
+	sc = device_private(ei->parent);
 #ifdef DIAGNOSTIC
 	if (sc->sc_rrun)
 		panic("eap_trigger_input: already running");
 	sc->sc_rrun = 1;
 #endif
 
-	DPRINTFN(1, ("eap_trigger_input: sc=%p start=%p end=%p blksize=%d intr=%p(%p)\n",
+	DPRINTFN(1, ("eap_trigger_input: ei=%p start=%p end=%p blksize=%d intr=%p(%p)\n",
 	    addr, start, end, blksize, intr, arg));
 	sc->sc_rintr = intr;
 	sc->sc_rarg = arg;
@@ -1133,7 +1320,7 @@ eap_trigger_input(
 	sic = EREAD4(sc, EAP_SIC);
 	sic &= ~(EAP_R1_S_EB | EAP_R1_S_MB);
 	sampshift = 0;
-	if (param->precision * param->factor == 16) {
+	if (param->precision == 16) {
 		sic |= EAP_R1_S_EB;
 		sampshift++;
 	}
@@ -1145,19 +1332,19 @@ eap_trigger_input(
 	EWRITE4(sc, EAP_SIC, sic | EAP_R1_INTR_EN);
 
 	for (p = sc->sc_dmas; p && KERNADDR(p) != start; p = p->next)
-		;
+		continue;
 	if (!p) {
 		printf("eap_trigger_input: bad addr %p\n", start);
 		return (EINVAL);
 	}
 
 	DPRINTF(("eap_trigger_input: ADC_ADDR=0x%x, ADC_SIZE=0x%x\n",
-	    (int)DMAADDR(p),
-	    (int)EAP_SET_SIZE(0, (((char *)end - (char *)start) >> 2) - 1)));
+		 (int)DMAADDR(p),
+		 (int)EAP_SET_SIZE(0, (((char *)end - (char *)start) >> 2) - 1)));
 	EWRITE4(sc, EAP_MEMPAGE, EAP_ADC_PAGE);
 	EWRITE4(sc, EAP_ADC_ADDR, DMAADDR(p));
 	EWRITE4(sc, EAP_ADC_SIZE,
-	    EAP_SET_SIZE(0, (((char *)end - (char *)start) >> 2) - 1));
+		EAP_SET_SIZE(0, (((char *)end - (char *)start) >> 2) - 1));
 
 	EWRITE4(sc, EAP_ADC_CSR, (blksize >> sampshift) - 1);
 
@@ -1165,75 +1352,97 @@ eap_trigger_input(
 		EWRITE4(sc, E1371_SRC, 0);
 
 	icsc = EREAD4(sc, EAP_ICSC);
-	EWRITE4(sc, EAP_ICSC, icsc | EAP_ADC_EN);
+	icsc |= EAP_ADC_EN;
+	EWRITE4(sc, EAP_ICSC, icsc);
 
 	DPRINTFN(1, ("eap_trigger_input: set ICSC = 0x%08x\n", icsc));
 
-	return (0);
+	return 0;
 }
 
-int
+static int
 eap_halt_output(void *addr)
 {
-	struct eap_softc *sc = addr;
-	u_int32_t icsc;
-	
+	struct eap_instance *ei;
+	struct eap_softc *sc;
+	uint32_t icsc;
+
 	DPRINTF(("eap: eap_halt_output\n"));
+	ei = addr;
+	sc = device_private(ei->parent);
 	icsc = EREAD4(sc, EAP_ICSC);
-	EWRITE4(sc, EAP_ICSC, icsc & ~EAP_DAC2_EN);
+	EWRITE4(sc, EAP_ICSC, icsc & ~(EAP_DAC_EN(ei->index)));
+	ei->ei_pintr = 0;
 #ifdef DIAGNOSTIC
-	sc->sc_prun = 0;
+	ei->ei_prun = 0;
 #endif
-	return (0);
+
+	return 0;
 }
 
-int
+static int
 eap_halt_input(void *addr)
 {
-	struct eap_softc *sc = addr;
-	u_int32_t icsc;
-    
+	struct eap_instance *ei;
+	struct eap_softc *sc;
+	uint32_t icsc;
+
+#define EAP_USE_FMDAC_ALSO
 	DPRINTF(("eap: eap_halt_input\n"));
+	ei = addr;
+	sc = device_private(ei->parent);
 	icsc = EREAD4(sc, EAP_ICSC);
 	EWRITE4(sc, EAP_ICSC, icsc & ~EAP_ADC_EN);
+	sc->sc_rintr = 0;
 #ifdef DIAGNOSTIC
 	sc->sc_rrun = 0;
 #endif
-	return (0);
+
+	return 0;
 }
 
-int
+static int
 eap_getdev(void *addr, struct audio_device *retp)
 {
+
 	*retp = eap_device;
-	return (0);
+	return 0;
 }
 
-int
+static int
 eap1371_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 
-	return (sc->codec_if->vtbl->mixer_set_port(sc->codec_if, cp));
+	ei = addr;
+	sc = device_private(ei->parent);
+	return sc->codec_if->vtbl->mixer_set_port(sc->codec_if, cp);
 }
 
-int
+static int
 eap1371_mixer_get_port(void *addr, mixer_ctrl_t *cp)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 
-	return (sc->codec_if->vtbl->mixer_get_port(sc->codec_if, cp));
+	ei = addr;
+	sc = device_private(ei->parent);
+	return sc->codec_if->vtbl->mixer_get_port(sc->codec_if, cp);
 }
 
-int
+static int
 eap1371_query_devinfo(void *addr, mixer_devinfo_t *dip)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 
-	return (sc->codec_if->vtbl->query_devinfo(sc->codec_if, dip));
+	ei = addr;
+	sc = device_private(ei->parent);
+	return sc->codec_if->vtbl->query_devinfo(sc->codec_if, dip);
 }
 
-void
+static void
 eap1370_set_mixer(struct eap_softc *sc, int a, int d)
 {
 	eap1370_write_codec(sc, a, d);
@@ -1242,16 +1451,19 @@ eap1370_set_mixer(struct eap_softc *sc, int a, int d)
 	DPRINTFN(1, ("eap1370_mixer_set_port port 0x%02x = 0x%02x\n", a, d));
 }
 
-int
+static int
 eap1370_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	int lval, rval, l, r, la, ra;
 	int l1, r1, l2, r2, m, o1, o2;
 
+	ei = addr;
+	sc = device_private(ei->parent);
 	if (cp->dev == EAP_RECORD_SOURCE) {
 		if (cp->type != AUDIO_MIXER_SET)
-			return (EINVAL);
+			return EINVAL;
 		m = sc->sc_record_source = cp->un.mask;
 		l1 = l2 = r1 = r2 = 0;
 		if (m & (1 << EAP_VOICE_VOL))
@@ -1270,11 +1482,11 @@ eap1370_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 		eap1370_set_mixer(sc, AK_IN_MIXER1_R, r1);
 		eap1370_set_mixer(sc, AK_IN_MIXER2_L, l2);
 		eap1370_set_mixer(sc, AK_IN_MIXER2_R, r2);
-		return (0);
+		return 0;
 	}
 	if (cp->dev == EAP_INPUT_SOURCE) {
 		if (cp->type != AUDIO_MIXER_SET)
-			return (EINVAL);
+			return EINVAL;
 		m = sc->sc_input_source = cp->un.mask;
 		o1 = o2 = 0;
 		if (m & (1 << EAP_VOICE_VOL))
@@ -1291,26 +1503,26 @@ eap1370_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 			o1 |= AK_M_MIC;
 		eap1370_set_mixer(sc, AK_OUT_MIXER1, o1);
 		eap1370_set_mixer(sc, AK_OUT_MIXER2, o2);
-		return (0);
+		return 0;
 	}
 	if (cp->dev == EAP_MIC_PREAMP) {
 		if (cp->type != AUDIO_MIXER_ENUM)
-			return (EINVAL);
+			return EINVAL;
 		if (cp->un.ord != 0 && cp->un.ord != 1)
-			return (EINVAL);
+			return EINVAL;
 		sc->sc_mic_preamp = cp->un.ord;
 		eap1370_set_mixer(sc, AK_MGAIN, cp->un.ord);
-		return (0);
+		return 0;
 	}
 	if (cp->type != AUDIO_MIXER_VALUE)
-		return (EINVAL);
+		return EINVAL;
 	if (cp->un.value.num_channels == 1)
 		lval = rval = cp->un.value.level[AUDIO_MIXER_LEVEL_MONO];
 	else if (cp->un.value.num_channels == 2) {
 		lval = cp->un.value.level[AUDIO_MIXER_LEVEL_LEFT];
 		rval = cp->un.value.level[AUDIO_MIXER_LEVEL_RIGHT];
 	} else
-		return (EINVAL);
+		return EINVAL;
 	ra = -1;
 	switch (cp->dev) {
 	case EAP_MASTER_VOL:
@@ -1321,7 +1533,7 @@ eap1370_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 		break;
 	case EAP_MIC_VOL:
 		if (cp->un.value.num_channels != 1)
-			return (EINVAL);
+			return EINVAL;
 		la = AK_MIC;
 		goto lr;
 	case EAP_VOICE_VOL:
@@ -1348,44 +1560,47 @@ eap1370_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 		r = VOL_TO_GAIN5(rval);
 		break;
 	default:
-		return (EINVAL);
+		return EINVAL;
 	}
 	eap1370_set_mixer(sc, la, l);
 	if (ra >= 0) {
 		eap1370_set_mixer(sc, ra, r);
 	}
-	return (0);
+	return 0;
 }
 
-int
+static int
 eap1370_mixer_get_port(void *addr, mixer_ctrl_t *cp)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	int la, ra, l, r;
 
+	ei = addr;
+	sc = device_private(ei->parent);
 	switch (cp->dev) {
 	case EAP_RECORD_SOURCE:
 		if (cp->type != AUDIO_MIXER_SET)
-			return (EINVAL);
+			return EINVAL;
 		cp->un.mask = sc->sc_record_source;
-		return (0);
+		return 0;
 	case EAP_INPUT_SOURCE:
 		if (cp->type != AUDIO_MIXER_SET)
-			return (EINVAL);
+			return EINVAL;
 		cp->un.mask = sc->sc_input_source;
-		return (0);
+		return 0;
 	case EAP_MIC_PREAMP:
 		if (cp->type != AUDIO_MIXER_ENUM)
-			return (EINVAL);
+			return EINVAL;
 		cp->un.ord = sc->sc_mic_preamp;
-		return (0);
+		return 0;
 	case EAP_MASTER_VOL:
 		l = ATT5_TO_VOL(sc->sc_port[AK_MASTER_L]);
 		r = ATT5_TO_VOL(sc->sc_port[AK_MASTER_R]);
 		break;
 	case EAP_MIC_VOL:
 		if (cp->un.value.num_channels != 1)
-			return (EINVAL);
+			return EINVAL;
 		la = ra = AK_MIC;
 		goto lr;
 	case EAP_VOICE_VOL:
@@ -1412,7 +1627,7 @@ eap1370_mixer_get_port(void *addr, mixer_ctrl_t *cp)
 		r = GAIN5_TO_VOL(sc->sc_port[ra]);
 		break;
 	default:
-		return (EINVAL);
+		return EINVAL;
 	}
 	if (cp->un.value.num_channels == 1)
 		cp->un.value.level[AUDIO_MIXER_LEVEL_MONO] = (l+r) / 2;
@@ -1420,198 +1635,189 @@ eap1370_mixer_get_port(void *addr, mixer_ctrl_t *cp)
 		cp->un.value.level[AUDIO_MIXER_LEVEL_LEFT]  = l;
 		cp->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = r;
 	} else
-		return (EINVAL);
-	return (0);
+		return EINVAL;
+	return 0;
 }
 
-int
+static int
 eap1370_query_devinfo(void *addr, mixer_devinfo_t *dip)
 {
+
 	switch (dip->index) {
 	case EAP_MASTER_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_OUTPUT_CLASS;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNmaster, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNmaster);
 		dip->un.v.num_channels = 2;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_VOICE_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = AUDIO_MIXER_LAST;
 		dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNdac, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNdac);
 		dip->un.v.num_channels = 2;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_FM_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = AUDIO_MIXER_LAST;
 		dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNfmsynth,
-		    sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNfmsynth);
 		dip->un.v.num_channels = 2;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_CD_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = AUDIO_MIXER_LAST;
 		dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNcd, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNcd);
 		dip->un.v.num_channels = 2;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_LINE_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = AUDIO_MIXER_LAST;
 		dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNline, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNline);
 		dip->un.v.num_channels = 2;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_AUX_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = AUDIO_MIXER_LAST;
 		dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNaux, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNaux);
 		dip->un.v.num_channels = 2;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_MIC_VOL:
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = AUDIO_MIXER_LAST;
 		dip->next = EAP_MIC_PREAMP;
-		strlcpy(dip->label.name, AudioNmicrophone,
-		    sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNmicrophone);
 		dip->un.v.num_channels = 1;
-		strlcpy(dip->un.v.units.name, AudioNvolume,
-		    sizeof dip->un.v.units.name);
-		return (0);
+		dip->un.v.delta = 8;
+		strcpy(dip->un.v.units.name, AudioNvolume);
+		return 0;
 	case EAP_RECORD_SOURCE:
 		dip->mixer_class = EAP_RECORD_CLASS;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNsource, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNsource);
 		dip->type = AUDIO_MIXER_SET;
 		dip->un.s.num_mem = 6;
-		strlcpy(dip->un.s.member[0].label.name, AudioNmicrophone,
-		    sizeof dip->un.s.member[0].label.name);
+		strcpy(dip->un.s.member[0].label.name, AudioNmicrophone);
 		dip->un.s.member[0].mask = 1 << EAP_MIC_VOL;
-		strlcpy(dip->un.s.member[1].label.name, AudioNcd,
-		    sizeof dip->un.s.member[1].label.name);
+		strcpy(dip->un.s.member[1].label.name, AudioNcd);
 		dip->un.s.member[1].mask = 1 << EAP_CD_VOL;
-		strlcpy(dip->un.s.member[2].label.name, AudioNline,
-		    sizeof dip->un.s.member[2].label.name);
+		strcpy(dip->un.s.member[2].label.name, AudioNline);
 		dip->un.s.member[2].mask = 1 << EAP_LINE_VOL;
-		strlcpy(dip->un.s.member[3].label.name, AudioNfmsynth,
-		    sizeof dip->un.s.member[3].label.name);
+		strcpy(dip->un.s.member[3].label.name, AudioNfmsynth);
 		dip->un.s.member[3].mask = 1 << EAP_FM_VOL;
-		strlcpy(dip->un.s.member[4].label.name, AudioNaux,
-		    sizeof dip->un.s.member[4].label.name);
+		strcpy(dip->un.s.member[4].label.name, AudioNaux);
 		dip->un.s.member[4].mask = 1 << EAP_AUX_VOL;
-		strlcpy(dip->un.s.member[5].label.name, AudioNdac,
-		    sizeof dip->un.s.member[5].label.name);
+		strcpy(dip->un.s.member[5].label.name, AudioNdac);
 		dip->un.s.member[5].mask = 1 << EAP_VOICE_VOL;
-		return (0);
+		return 0;
 	case EAP_INPUT_SOURCE:
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNsource, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNsource);
 		dip->type = AUDIO_MIXER_SET;
 		dip->un.s.num_mem = 6;
-		strlcpy(dip->un.s.member[0].label.name, AudioNmicrophone,
-		    sizeof dip->un.s.member[0].label.name);
+		strcpy(dip->un.s.member[0].label.name, AudioNmicrophone);
 		dip->un.s.member[0].mask = 1 << EAP_MIC_VOL;
-		strlcpy(dip->un.s.member[1].label.name, AudioNcd,
-		    sizeof dip->un.s.member[1].label.name);
+		strcpy(dip->un.s.member[1].label.name, AudioNcd);
 		dip->un.s.member[1].mask = 1 << EAP_CD_VOL;
-		strlcpy(dip->un.s.member[2].label.name, AudioNline,
-		    sizeof dip->un.s.member[2].label.name);
+		strcpy(dip->un.s.member[2].label.name, AudioNline);
 		dip->un.s.member[2].mask = 1 << EAP_LINE_VOL;
-		strlcpy(dip->un.s.member[3].label.name, AudioNfmsynth,
-		    sizeof dip->un.s.member[3].label.name);
+		strcpy(dip->un.s.member[3].label.name, AudioNfmsynth);
 		dip->un.s.member[3].mask = 1 << EAP_FM_VOL;
-		strlcpy(dip->un.s.member[4].label.name, AudioNaux,
-		    sizeof dip->un.s.member[4].label.name);
+		strcpy(dip->un.s.member[4].label.name, AudioNaux);
 		dip->un.s.member[4].mask = 1 << EAP_AUX_VOL;
-		strlcpy(dip->un.s.member[5].label.name, AudioNdac,
-		    sizeof dip->un.s.member[5].label.name);
+		strcpy(dip->un.s.member[5].label.name, AudioNdac);
 		dip->un.s.member[5].mask = 1 << EAP_VOICE_VOL;
-		return (0);
+		return 0;
 	case EAP_MIC_PREAMP:
 		dip->type = AUDIO_MIXER_ENUM;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->prev = EAP_MIC_VOL;
 		dip->next = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioNpreamp, sizeof dip->label.name);
+		strcpy(dip->label.name, AudioNpreamp);
 		dip->un.e.num_mem = 2;
-		strlcpy(dip->un.e.member[0].label.name, AudioNoff,
-		    sizeof dip->un.e.member[0].label.name);
+		strcpy(dip->un.e.member[0].label.name, AudioNoff);
 		dip->un.e.member[0].ord = 0;
-		strlcpy(dip->un.e.member[1].label.name, AudioNon,
-		    sizeof dip->un.e.member[1].label.name);
+		strcpy(dip->un.e.member[1].label.name, AudioNon);
 		dip->un.e.member[1].ord = 1;
-		return (0);
+		return 0;
 	case EAP_OUTPUT_CLASS:
 		dip->type = AUDIO_MIXER_CLASS;
 		dip->mixer_class = EAP_OUTPUT_CLASS;
 		dip->next = dip->prev = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioCoutputs,
-		    sizeof dip->label.name);
-		return (0);
+		strcpy(dip->label.name, AudioCoutputs);
+		return 0;
 	case EAP_RECORD_CLASS:
 		dip->type = AUDIO_MIXER_CLASS;
 		dip->mixer_class = EAP_RECORD_CLASS;
 		dip->next = dip->prev = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioCrecord, sizeof dip->label.name);
-		return (0);
+		strcpy(dip->label.name, AudioCrecord);
+		return 0;
 	case EAP_INPUT_CLASS:
 		dip->type = AUDIO_MIXER_CLASS;
 		dip->mixer_class = EAP_INPUT_CLASS;
 		dip->next = dip->prev = AUDIO_MIXER_LAST;
-		strlcpy(dip->label.name, AudioCinputs, sizeof dip->label.name);
-		return (0);
+		strcpy(dip->label.name, AudioCinputs);
+		return 0;
 	}
-	return (ENXIO);
+	return ENXIO;
 }
 
-void *
-eap_malloc(void *addr, int direction, size_t size, int pool, int flags)
+static void *
+eap_malloc(void *addr, int direction, size_t size,
+    struct malloc_type *pool, int flags)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	struct eap_dma *p;
 	int error;
 
 	p = malloc(sizeof(*p), pool, flags);
 	if (!p)
-		return (0);
+		return NULL;
+	ei = addr;
+	sc = device_private(ei->parent);
 	error = eap_allocmem(sc, size, 16, p);
 	if (error) {
 		free(p, pool);
-		return (0);
+		return NULL;
 	}
 	p->next = sc->sc_dmas;
 	sc->sc_dmas = p;
-	return (KERNADDR(p));
+	return KERNADDR(p);
 }
 
-void
-eap_free(void *addr, void *ptr, int pool)
+static void
+eap_free(void *addr, void *ptr, struct malloc_type *pool)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	struct eap_dma **pp, *p;
 
+	ei = addr;
+	sc = device_private(ei->parent);
 	for (pp = &sc->sc_dmas; (p = *pp) != NULL; pp = &p->next) {
 		if (KERNADDR(p) == ptr) {
 			eap_freemem(sc, p);
@@ -1622,69 +1828,72 @@ eap_free(void *addr, void *ptr, int pool)
 	}
 }
 
-paddr_t
+static size_t
+eap_round_buffersize(void *addr, int direction, size_t size)
+{
+
+	return size;
+}
+
+static paddr_t
 eap_mappage(void *addr, void *mem, off_t off, int prot)
 {
-	struct eap_softc *sc = addr;
+	struct eap_instance *ei;
+	struct eap_softc *sc;
 	struct eap_dma *p;
 
 	if (off < 0)
-		return (-1);
+		return -1;
+	ei = addr;
+	sc = device_private(ei->parent);
 	for (p = sc->sc_dmas; p && KERNADDR(p) != mem; p = p->next)
-		;
+		continue;
 	if (!p)
-		return (-1);
-	return (bus_dmamem_mmap(sc->sc_dmatag, p->segs, p->nsegs,
-	    off, prot, BUS_DMA_WAITOK));
+		return -1;
+	return bus_dmamem_mmap(sc->sc_dmatag, p->segs, p->nsegs,
+			       off, prot, BUS_DMA_WAITOK);
 }
 
-int
+static int
 eap_get_props(void *addr)
 {
-	return (AUDIO_PROP_MMAP | AUDIO_PROP_INDEPENDENT |
-	    AUDIO_PROP_FULLDUPLEX);
+
+	return AUDIO_PROP_MMAP | AUDIO_PROP_INDEPENDENT |
+	    AUDIO_PROP_FULLDUPLEX;
 }
 
-enum ac97_host_flags
-eap_flags_codec(void *v)
-{
-      struct eap_softc *sc = v;
-
-      return (sc->flags);
-}
 #if NMIDI > 0
-int
+static int
 eap_midi_open(void *addr, int flags,
-    void (*iintr)(void *, int),
-    void (*ointr)(void *),
-    void *arg)
+	      void (*iintr)(void *, int),
+	      void (*ointr)(void *),
+	      void *arg)
 {
-	struct eap_softc *sc = addr;
-	u_int32_t uctrl;
+	struct eap_softc *sc;
+	uint8_t uctrl;
 
-	sc->sc_iintr = iintr;
-	sc->sc_ointr = ointr;
+	sc = addr;
 	sc->sc_arg = arg;
 
 	EWRITE4(sc, EAP_ICSC, EREAD4(sc, EAP_ICSC) | EAP_UART_EN);
 	uctrl = 0;
-	if (flags & FREAD)
+	if (flags & FREAD) {
 		uctrl |= EAP_UC_RXINTEN;
-#if 0
-	/* I don't understand ../midi.c well enough to use output interrupts */
+		sc->sc_iintr = iintr;
+	}
 	if (flags & FWRITE)
-		uctrl |= EAP_UC_TXINTEN; */
-#endif
+		sc->sc_ointr = ointr;
 	EWRITE1(sc, EAP_UART_CONTROL, uctrl);
 
-	return (0);
+	return 0;
 }
 
-void
+static void
 eap_midi_close(void *addr)
 {
-	struct eap_softc *sc = addr;
+	struct eap_softc *sc;
 
+	sc = addr;
 	tsleep(sc, PWAIT, "eapclm", hz/10); /* give uart a chance to drain */
 	EWRITE1(sc, EAP_UART_CONTROL, 0);
 	EWRITE4(sc, EAP_ICSC, EREAD4(sc, EAP_ICSC) & ~EAP_UART_EN);
@@ -1693,27 +1902,46 @@ eap_midi_close(void *addr)
 	sc->sc_ointr = 0;
 }
 
-int
+static int
 eap_midi_output(void *addr, int d)
 {
-	struct eap_softc *sc = addr;
-	int x;
+	struct eap_softc *sc;
+	uint8_t uctrl;
 
-	for (x = 0; x != MIDI_BUSY_WAIT; x++) {
-		if (EREAD1(sc, EAP_UART_STATUS) & EAP_US_TXRDY) {
-			EWRITE1(sc, EAP_UART_DATA, d);
-			return (0);
-		}
-		delay(MIDI_BUSY_DELAY);
-	}
-	return (EIO);
+	sc = addr;
+	EWRITE1(sc, EAP_UART_DATA, d);
+	
+	uctrl = EAP_UC_TXINTEN;
+	if (sc->sc_iintr)
+		uctrl |= EAP_UC_RXINTEN;
+	/*
+	 * This is a write-only register, so we have to remember the right
+	 * value of RXINTEN as well as setting TXINTEN. But if we are open
+	 * for reading, it will always be correct to set RXINTEN here; only
+	 * during service of a receive interrupt could it be momentarily
+	 * toggled off, and whether we got here from the top half or from
+	 * an interrupt, that won't be the current state.
+	 */
+	EWRITE1(sc, EAP_UART_CONTROL, uctrl);
+	return 0;
 }
 
-void
+static void
 eap_midi_getinfo(void *addr, struct midi_info *mi)
 {
 	mi->name = "AudioPCI MIDI UART";
-	mi->props = MIDI_PROP_CAN_INPUT;
+	mi->props = MIDI_PROP_CAN_INPUT | MIDI_PROP_OUT_INTR;
+}
+
+static void
+eap_uart_txrdy(struct eap_softc *sc)
+{
+	uint8_t uctrl;
+	uctrl = 0;
+	if (sc->sc_iintr)
+		uctrl = EAP_UC_RXINTEN;
+	EWRITE1(sc, EAP_UART_CONTROL, uctrl);
+	sc->sc_ointr(sc->sc_arg);
 }
 
 #endif

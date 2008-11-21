@@ -1,5 +1,4 @@
-/*	$OpenBSD: user.h,v 1.6 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: user.h,v 1.10 1996/04/09 20:55:49 cgd Exp $	*/
+/*	$NetBSD: user.h,v 1.17 2006/05/11 11:54:37 yamt Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
@@ -32,53 +31,20 @@
  *	@(#)user.h	8.2 (Berkeley) 9/23/93
  */
 
-#include <machine/pcb.h>
-#ifndef _KERNEL
-/* stuff that *used* to be included by user.h, or is now needed */
-#include <errno.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <sys/ucred.h>
-#include <sys/uio.h>
-#endif
-#include <sys/resourcevar.h>
-#include <uvm/uvm_extern.h>		/* XXX */
-#include <sys/sysctl.h>
+#ifndef _SYS_USER_H_
+#define _SYS_USER_H_
 
+#include <machine/pcb.h>
 
 /*
- * Per process structure containing data that isn't needed in core
- * when the process isn't running (esp. when swapped out).
+ * Per lwp structure containing data that isn't needed in core
+ * when the lwp isn't running (esp. when swapped out).
  * This structure may or may not be at the same kernel address
  * in all processes.
  */
 
-struct	user {
-	struct	pcb u_pcb;
-
-	struct	pstats u_stats;		/* p_stats points here (use it!) */
-
-	/*
-	 * Remaining fields only for core dump and/or ptrace--
-	 * not valid at other times!
-	 */
-	struct	kinfo_proc u_kproc;	/* proc + eproc */
-	struct	md_coredump u_md;	/* machine dependent glop */
+struct user {
+	struct pcb u_pcb;
 };
 
-/*
- * Redefinitions to make the debuggers happy for now...  This subterfuge
- * brought to you by coredump() and trace_req().  These fields are *only*
- * valid at those times!
- */
-#define	U_ar0	u_kproc.kp_proc.p_md.md_regs /* copy of curproc->p_md.md_regs */
-#define	U_tsize	u_kproc.kp_eproc.e_vm.vm_tsize
-#define	U_dsize	u_kproc.kp_eproc.e_vm.vm_dsize
-#define	U_ssize	u_kproc.kp_eproc.e_vm.vm_ssize
-
-#ifndef _KERNEL
-#define	u_ar0	U_ar0
-#define	u_tsize	U_tsize
-#define	u_dsize	U_dsize
-#define	u_ssize	U_ssize
-#endif /* _KERNEL */
+#endif /* !_SYS_USER_H_ */

@@ -1,4 +1,3 @@
-/*	$OpenBSD: uftdireg.h,v 1.11 2006/06/16 06:28:25 deraadt Exp $ 	*/
 /*	$NetBSD: uftdireg.h,v 1.6 2002/07/11 21:14:28 augustss Exp $ */
 
 /*
@@ -8,8 +7,8 @@
  * The device is based on the FTDI FT8U100AX chip. It has a DB25 on one side,
  * USB on the other.
  *
- * Thanks to FTDI (http://www.ftdi.co.uk) for so kindly providing details
- * of the protocol required to talk to the device and ongoing assistance
+ * Thanx to FTDI (http://www.ftdi.co.uk) for so kindly providing details
+ * of the protocol required to talk to the device and ongoing assistence
  * during development.
  *
  * Bill Ryder - bryder@sgi.com of Silicon Graphics, Inc. is the original
@@ -91,11 +90,21 @@ enum {
 	ftdi_sio_b115200 = 9
 };
 
-#define FTDI_8U232AM_FREQ 3000000
-
-/* Bounds for normal divisors as 4-bit fixed precision ints. */
-#define FTDI_8U232AM_MIN_DIV 0x20
-#define FTDI_8U232AM_MAX_DIV 0x3fff8
+enum {
+	ftdi_8u232am_b300 = 0x2710,
+	ftdi_8u232am_b600 = 0x1388,
+	ftdi_8u232am_b1200 = 0x09c4,
+	ftdi_8u232am_b2400 = 0x04e2,
+	ftdi_8u232am_b4800 = 0x0271,
+	ftdi_8u232am_b9600 = 0x4138,
+	ftdi_8u232am_b19200 = 0x809c,
+	ftdi_8u232am_b38400 = 0xc04e,
+	ftdi_8u232am_b57600 = 0x0034,
+	ftdi_8u232am_b115200 = 0x001a,
+	ftdi_8u232am_b230400 = 0x000d,
+	ftdi_8u232am_b460800 = 0x4006,
+	ftdi_8u232am_b921600 = 0x8003
+};
 
 /*
  * BmRequestType:  0100 0000B
@@ -175,7 +184,7 @@ enum {
  *   BmRequestType:  0100 0000b
  *   bRequest:       FTDI_SIO_SET_FLOW_CTRL
  *   wValue:         Xoff/Xon
- *   wIndex:         Protocol/Port - hIndex is protocol / lIndex is port
+ *   wIndex:         Protocol/Port - hIndex is protocl / lIndex is port
  *   wLength:        0
  *   Data:           None
  *

@@ -1,4 +1,3 @@
-/* $OpenBSD: dec_kn300.c,v 1.2 2007/03/21 22:10:57 martin Exp $ */
 /* $NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $ */
 
 /*
@@ -31,7 +30,12 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_kgdb.h"
+
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -40,6 +44,7 @@
 #include <dev/cons.h>
 
 #include <machine/rpb.h>
+#include <machine/alpha.h>
 #include <machine/autoconf.h>
 #include <machine/frame.h>
 #include <machine/cpuconf.h>
@@ -54,14 +59,19 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <alpha/mcbus/mcbusreg.h>
 #include <alpha/mcbus/mcbusvar.h>
 #include <alpha/pci/mcpciareg.h>
 #include <alpha/pci/mcpciavar.h>
 #include <alpha/pci/pci_kn300.h>
+#include <machine/logout.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
+
 
 #include "pckbd.h"
 
@@ -70,16 +80,11 @@
 #endif
 static int comcnrate = CONSPEED;
 
-#ifdef DEBUG
-int bootdev_debug;
-#define DPRINTF(x)	if (bootdev_debug) printf x
-#else
-#define DPRINTF(x)
-#endif
-
-void dec_kn300_init (void);
-void dec_kn300_cons_init (void);
-static void dec_kn300_device_register (struct device *, void *);
+void dec_kn300_init __P((void));
+void dec_kn300_cons_init __P((void));
+static void dec_kn300_device_register __P((struct device *, void *));
+static void dec_kn300_mcheck_handler
+	__P((unsigned long, struct trapframe *, unsigned long, unsigned long));
 
 #ifdef KGDB
 #include <machine/db_machdep.h>
@@ -115,6 +120,7 @@ dec_kn300_init()
 	platform.iobus = "mcbus";
 	platform.cons_init = dec_kn300_cons_init;
 	platform.device_register = dec_kn300_device_register;
+	platform.mcheck_handler = dec_kn300_mcheck_handler;
 
 	/*
 	 * Determine B-cache size by looking at the primary (console)
@@ -145,6 +151,8 @@ dec_kn300_init()
 		/* Default to 1MB. */
 		cachesize = (1 * 1024 * 1024);
 	}
+
+	uvmexp.ncolors = atop(cachesize);
 }
 
 void
@@ -169,7 +177,7 @@ dec_kn300_cons_init()
 		 */
 		DELAY(160000000 / comcnrate);
 		if (comcnattach(&ccp->cc_iot, 0x3f8, comcnrate,
-		    COM_FREQ,
+		    COM_FREQ, COM_TYPE_NORMAL,
 		    (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8)) {
 			panic("can't init serial console");
 
@@ -208,6 +216,7 @@ dec_kn300_cons_init()
 #endif /* KGDB */
 }
 
+/* #define	BDEBUG	1 */
 static void
 dec_kn300_device_register(dev, aux)
 	struct device *dev;
@@ -216,33 +225,32 @@ dec_kn300_device_register(dev, aux)
 	static int found, initted, diskboot, netboot;
 	static struct device *primarydev, *pcidev, *ctrlrdev;
 	struct bootdev_data *b = bootdev_data;
-	struct device *parent = dev->dv_parent; 
-	struct cfdata *cf = dev->dv_cfdata;
-	struct cfdriver *cd = cf->cf_driver;
+	struct device *parent = device_parent(dev);
 
 	if (found)
 		return;
 
 	if (!initted) {
-		diskboot = (strncasecmp(b->protocol, "SCSI", 4) == 0);
-		netboot = (strncasecmp(b->protocol, "BOOTP", 5) == 0) ||
-		    (strncasecmp(b->protocol, "MOP", 3) == 0);
-
-		DPRINTF(("proto:%s bus:%d slot:%d chan:%d", b->protocol,
-		    b->bus, b->slot, b->channel));
+		diskboot = (strcasecmp(b->protocol, "SCSI") == 0);
+		netboot = (strcasecmp(b->protocol, "BOOTP") == 0) ||
+		    (strcasecmp(b->protocol, "MOP") == 0);
+#ifdef BDEBUG
+		printf("proto:%s bus:%d slot:%d chan:%d", b->protocol,
+		    b->bus, b->slot, b->channel);
 		if (b->remote_address)
 			printf(" remote_addr:%s", b->remote_address);
-		DPRINTF((" un:%d bdt:%d", b->unit, b->boot_dev_type));
+		printf(" un:%d bdt:%d", b->unit, b->boot_dev_type);
 		if (b->ctrl_dev_type)
-			DPRINTF((" cdt:%s\n", b->ctrl_dev_type));
+			printf(" cdt:%s\n", b->ctrl_dev_type);
 		else
-			DPRINTF(("\n"));
-		DPRINTF(("diskboot = %d, netboot = %d\n", diskboot, netboot));
+			printf("\n");
+		printf("diskboot = %d, netboot = %d\n", diskboot, netboot);
+#endif
 		initted = 1;
 	}
 
 	if (primarydev == NULL) {
-		if (strcmp(cd->cd_name, "mcpcia"))
+		if (!device_is_a(dev, "mcpcia"))
 			return;
 		else {
 			struct mcbus_dev_attach_args *ma = aux;
@@ -250,18 +258,27 @@ dec_kn300_device_register(dev, aux)
 			if (b->bus != ma->ma_mid - 4)
 				return;
 			primarydev = dev;
-			DPRINTF(("\nprimarydev = %s\n", dev->dv_xname));
+#ifdef BDEBUG
+			printf("\nprimarydev = %s\n", dev->dv_xname);
+#endif
 			return;
 		}
 	}
 
 	if (pcidev == NULL) {
-		if (strcmp(cd->cd_name, "pci"))
+		if (!device_is_a(dev, "pci"))
 			return;
 		/*
 		 * Try to find primarydev anywhere in the ancestry.  This is
 		 * necessary if the PCI bus is hidden behind a bridge.
 		 */
+		while (parent) {
+			if (parent == primarydev)
+				break;
+			parent = device_parent(parent);
+		}
+		if (!parent)
+			return;
 		else {
 			struct pcibus_attach_args *pba = aux;
 
@@ -269,7 +286,9 @@ dec_kn300_device_register(dev, aux)
 				return;
 	
 			pcidev = dev;
-			DPRINTF(("\npcidev = %s\n", dev->dv_xname));
+#ifdef BDEBUG
+			printf("\npcidev = %s\n", dev->dv_xname);
+#endif
 			return;
 		}
 	}
@@ -288,11 +307,15 @@ dec_kn300_device_register(dev, aux)
 	
 			if (netboot) {
 				booted_device = dev;
-				DPRINTF(("\nbooted_device = %s\n", dev->dv_xname));
+#ifdef BDEBUG
+				printf("\nbooted_device = %s\n", dev->dv_xname);
+#endif
 				found = 1;
 			} else {
 				ctrlrdev = dev;
-				DPRINTF(("\nctrlrdev = %s\n", dev->dv_xname));
+#ifdef BDEBUG
+				printf("\nctrlrdev = %s\n", dev->dv_xname);
+#endif
 			}
 			return;
 		}
@@ -301,23 +324,226 @@ dec_kn300_device_register(dev, aux)
 	if (!diskboot)
 		return;
 
-	if (strcmp(cd->cd_name, "sd") ||
-	    strcmp(cd->cd_name, "st") ||
-	    strcmp(cd->cd_name, "cd")) {
-		struct scsi_attach_args *sa = aux;
-		struct scsi_link *periph = sa->sa_sc_link;
+	if (device_is_a(dev, "sd") ||
+	    device_is_a(dev, "st") ||
+	    device_is_a(dev, "cd")) {
+		struct scsipibus_attach_args *sa = aux;
+		struct scsipi_periph *periph = sa->sa_periph;
 		int unit;
 
-		if (parent->dv_parent != ctrlrdev)
+		if (device_parent(parent) != ctrlrdev)
 			return;
 
-		unit = periph->target * 100 + periph->lun;
+		unit = periph->periph_target * 100 + periph->periph_lun;
 		if (b->unit != unit)
+			return;
+		if (b->channel != periph->periph_channel->chan_channel)
 			return;
 
 		/* we've found it! */
 		booted_device = dev;
-		DPRINTF(("\nbooted_device = %s\n", dev->dv_xname));
+#ifdef BDEBUG
+		printf("\nbooted_device = %s\n", dev->dv_xname);
+#endif
 		found = 1;
+	}
+}
+
+
+/*
+ * KN300 Machine Check Handlers.
+ */
+static void kn300_softerr __P((unsigned long, unsigned long,
+    unsigned long, struct trapframe *));
+
+static void kn300_mcheck __P((unsigned long, unsigned long,
+    unsigned long, struct trapframe *));
+
+/*
+ * "soft" error structure in system area for KN300 processor.
+ * It differs from the EV5 'common' structure in a minor but
+ * exceedingly stupid and annoying fashion.
+ */
+
+typedef struct {
+	/*
+	 * Should be mc_cc_ev5 structure. Contents are the same,
+	 * just in different places.
+	 */
+	u_int64_t	ei_stat;
+	u_int64_t	ei_addr;
+	u_int64_t	fill_syndrome;
+	u_int64_t	isr;
+	/*
+	 * Platform Specific Area
+	 */
+	u_int32_t	whami;
+	u_int32_t	sys_env;
+	u_int64_t	mcpcia_regs;
+	u_int32_t	pci_rev;
+	u_int32_t	mc_err0;
+	u_int32_t	mc_err1;
+	u_int32_t	cap_err;
+	u_int32_t	mdpa_stat;
+	u_int32_t	mdpa_syn;
+	u_int32_t	mdpb_stat;
+	u_int32_t	mdpb_syn;
+	u_int64_t	end_rsvd;
+} mc_soft300;
+#define	CAP_ERR_CRDX	204
+
+static void
+kn300_softerr(mces, type, logout, framep)
+	unsigned long mces;
+	unsigned long type;
+	unsigned long logout;
+	struct trapframe *framep;
+{
+	static const char *sys = "system";
+	static const char *proc = "processor";
+	int whami;
+	mc_hdr_ev5 *hdr;
+	mc_soft300 *ptr;
+	static const char *fmt1 = "        %-25s = 0x%l016x\n";
+
+	hdr = (mc_hdr_ev5 *) logout;
+	ptr = (mc_soft300 *) (logout + sizeof (*hdr));
+	whami = alpha_pal_whami();
+
+	printf("kn300: CPU ID %d %s correctable error corrected by %s\n", whami,
+	    (type == ALPHA_SYS_ERROR)?  sys : proc,
+	    ((hdr->mcheck_code & 0xff00) == (EV5_CORRECTED << 16))? proc :
+	    (((hdr->mcheck_code & 0xff00) == (CAP_ERR_CRDX << 16)) ?
+		"I/O Bridge Module" : sys));
+
+	printf("    Machine Check Code 0x%lx\n", hdr->mcheck_code);
+	printf("    Physical Address of Error 0x%lx\n", ptr->ei_addr);
+	if (ptr->ei_stat & 0x80000000L)
+		printf("    Corrected ECC Error ");
+	else
+		printf("    Other Error");
+	if (ptr->ei_stat & 0x40000000L)
+		printf("in Memory ");
+	else
+		printf("in B-Cache ");
+	if (ptr->ei_stat & 0x400000000L)
+		printf("during I-Cache fill\n");
+	else
+		printf("during D-Cache fill\n");
+
+	printf(fmt1, "EI Status", ptr->ei_stat);
+	printf(fmt1, "Fill Syndrome", ptr->fill_syndrome);
+	printf(fmt1, "Interrupt Status Reg.", ptr->isr);
+	printf("\n");
+	printf(fmt1, "Whami Reg.", ptr->whami);
+	printf(fmt1, "Sys. Env. Reg.", ptr->sys_env);
+	printf(fmt1, "MCPCIA Regs.", ptr->mcpcia_regs);
+	printf(fmt1, "PCI Rev. Reg.", ptr->pci_rev);
+	printf(fmt1, "MC_ERR0 Reg.", ptr->mc_err0);
+	printf(fmt1, "MC_ERR1 Reg.", ptr->mc_err1);
+	printf(fmt1, "CAP_ERR Reg.", ptr->cap_err);
+	printf(fmt1, "MDPA_STAT Reg.", ptr->mdpa_stat);
+	printf(fmt1, "MDPA_SYN Reg.", ptr->mdpa_syn);
+	printf(fmt1, "MDPB_STAT Reg.", ptr->mdpb_stat);
+	printf(fmt1, "MDPB_SYN Reg.", ptr->mdpb_syn);
+
+	/*
+	 * Clear error by rewriting register.
+	 */
+	alpha_pal_wrmces(mces);
+}
+
+/*
+ * KN300 specific machine check handler
+ */
+
+static void
+kn300_mcheck(mces, type, logout, framep)
+	unsigned long mces;
+	unsigned long type;
+	unsigned long logout;
+	struct trapframe *framep;
+{
+	struct mchkinfo *mcp;
+	static const char *fmt1 = "        %-25s = 0x%l016x\n";
+	int i;	
+	mc_hdr_ev5 *hdr;
+	mc_uc_ev5 *ptr;
+	struct mcpcia_iodsnap *iodsnp;
+
+	/*
+	 * If we expected a machine check, just go handle it in common code.
+	 */
+	mcp = &curcpu()->ci_mcinfo;
+	if (mcp->mc_expected) {
+		machine_check(mces, framep, type, logout);
+		return;
+	}
+
+	hdr = (mc_hdr_ev5 *) logout;
+	ptr = (mc_uc_ev5 *) (logout + sizeof (*hdr));
+	ev5_logout_print(hdr, ptr);
+
+	iodsnp = (struct mcpcia_iodsnap *) ((unsigned long) hdr +
+	    (unsigned long) hdr->la_system_offset);
+	for (i = 0; i < MCPCIA_PER_MCBUS; i++, iodsnp++) {
+		if (!IS_MCPCIA_MAGIC(iodsnp->pci_rev)) {
+			continue;
+		}
+		printf("        IOD %d register dump:\n", i);
+		printf(fmt1, "Base Addr of PCI bridge", iodsnp->base_addr);
+		printf(fmt1, "Whami Reg.", iodsnp->whami);
+		printf(fmt1, "Sys. Env. Reg.", iodsnp->sys_env);
+		printf(fmt1, "PCI Rev. Reg.", iodsnp->pci_rev);
+		printf(fmt1, "CAP_CTL Reg.", iodsnp->cap_ctrl);
+		printf(fmt1, "HAE_MEM Reg.", iodsnp->hae_mem);
+		printf(fmt1, "HAE_IO Reg.", iodsnp->hae_io);
+		printf(fmt1, "INT_CTL Reg.", iodsnp->int_ctl);
+		printf(fmt1, "INT_REG Reg.", iodsnp->int_reg);
+		printf(fmt1, "INT_MASK0 Reg.", iodsnp->int_mask0);
+		printf(fmt1, "INT_MASK1 Reg.", iodsnp->int_mask1);
+		printf(fmt1, "MC_ERR0 Reg.", iodsnp->mc_err0);
+		printf(fmt1, "MC_ERR1 Reg.", iodsnp->mc_err1);
+		printf(fmt1, "CAP_ERR Reg.", iodsnp->cap_err);
+		printf(fmt1, "PCI_ERR1 Reg.", iodsnp->pci_err1);
+		printf(fmt1, "MDPA_STAT Reg.", iodsnp->mdpa_stat);
+		printf(fmt1, "MDPA_SYN Reg.", iodsnp->mdpa_syn);
+		printf(fmt1, "MDPB_STAT Reg.", iodsnp->mdpb_stat);
+		printf(fmt1, "MDPB_SYN Reg.", iodsnp->mdpb_syn);
+
+	}
+	/*
+	 * Now that we've printed all sorts of useful information
+	 * and have decided that we really can't do any more to
+	 * respond to the error, go on to the common code for
+	 * final disposition. Usually this means that we die.
+	 */
+	/*
+	 * XXX: HANDLE PCI ERRORS HERE?
+	 */
+	machine_check(mces, framep, type, logout);
+}
+
+static void
+dec_kn300_mcheck_handler(mces, framep, vector, param)
+	unsigned long mces;
+	struct trapframe *framep;
+	unsigned long vector;
+	unsigned long param;
+{
+	switch (vector) {
+	case ALPHA_SYS_ERROR:
+	case ALPHA_PROC_ERROR:
+		kn300_softerr(mces, vector, param, framep);
+		break;
+
+	case ALPHA_SYS_MCHECK:
+	case ALPHA_PROC_MCHECK:
+		kn300_mcheck(mces, vector, param, framep);
+		break;
+	default:
+		printf("KN300_MCHECK: unknown check vector 0x%lx\n", vector);
+		machine_check(mces, framep, vector, param);
+		break;
 	}
 }

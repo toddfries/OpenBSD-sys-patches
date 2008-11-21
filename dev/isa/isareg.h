@@ -1,5 +1,4 @@
-/*	$OpenBSD: isareg.h,v 1.3 2003/06/02 23:28:03 millert Exp $	*/
-/*	$NetBSD: isareg.h,v 1.5 1995/04/17 12:09:13 cgd Exp $	*/
+/*	$NetBSD: isareg.h,v 1.9 2005/12/11 12:22:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -139,7 +138,7 @@
 #define	IO_WDCSIZE	8	/* WD compatible disk controller */
 #define	IO_GAMSIZE	16	/* AT compatible game controller */
 #define	IO_ICUSIZE	16	/* 8259A interrupt controllers */
-#define	IO_KBDSIZE	16	/* 8042 Keyboard controllers */
+#define	IO_KBDSIZE	5	/* 8042 Keyboard controllers */
 #define	IO_LPTSIZE	8	/* LPT controllers, some use onl */
 #define	IO_MDASIZE	16	/* Monochrome display controller */
 #define	IO_RTCSIZE	16	/* CMOS real time clock, NMI con */
@@ -157,4 +156,10 @@
 #define	IOM_BEGIN	0x0a0000		/* Start of I/O Memory "hole" */
 #define	IOM_END		0x100000		/* End of I/O Memory "hole" */
 #define	IOM_SIZE	(IOM_END - IOM_BEGIN)
+
+/*
+ * ISA DMA works < 16M (24 address lines).
+ */
+#define ISA_DMA_BOUNCE_THRESHOLD	(16 * 1024 * 1024)
+
 #endif /* !IOM_BEGIN */

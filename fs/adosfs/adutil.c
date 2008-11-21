@@ -1,4 +1,4 @@
-/*	$NetBSD: adutil.c,v 1.4 2005/12/11 12:24:25 christos Exp $	*/
+/*	$NetBSD: adutil.c,v 1.8 2008/01/30 09:50:19 ad Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adutil.c,v 1.4 2005/12/11 12:24:25 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adutil.c,v 1.8 2008/01/30 09:50:19 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/vnode.h>
@@ -43,6 +43,7 @@ __KERNEL_RCSID(0, "$NetBSD: adutil.c,v 1.4 2005/12/11 12:24:25 christos Exp $");
 #include <sys/time.h>
 #include <sys/queue.h>
 #include <sys/buf.h>
+#include <sys/simplelock.h>
 #include <fs/adosfs/adosfs.h>
 
 /*
@@ -69,7 +70,7 @@ start_over:
 	for (ap = hp->lh_first; ap != NULL; ap = ap->link.le_next) {
 		if (ap->block == an) {
 			vp = ATOV(ap);
-			simple_lock(&vp->v_interlock);
+			mutex_enter(&vp->v_interlock);
 			simple_unlock(&adosfs_hashlock);
 			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK))
 				goto start_over;
@@ -90,7 +91,7 @@ adosfs_ainshash(amp, ap)
 	struct adosfsmount *amp;
 	struct anode *ap;
 {
-	lockmgr(&ap->vp->v_lock, LK_EXCLUSIVE, (struct simplelock *)0);
+	vlockmgr(&ap->vp->v_lock, LK_EXCLUSIVE);
 
 	simple_lock(&adosfs_hashlock);
 	LIST_INSERT_HEAD(&amp->anodetab[AHASH(ap->block)], ap, link);

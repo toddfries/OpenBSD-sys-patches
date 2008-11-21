@@ -1,3 +1,3 @@
-/*	$OpenBSD: stdarg.h,v 1.3 2001/09/02 19:40:25 miod Exp $	*/
+/*	$NetBSD: stdarg.h,v 1.1 2002/02/27 21:02:21 scw Exp $	*/
 
 #include <powerpc/stdarg.h>

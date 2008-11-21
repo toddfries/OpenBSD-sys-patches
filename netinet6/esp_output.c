@@ -1,4 +1,4 @@
-/*	$NetBSD: esp_output.c,v 1.26 2006/11/24 19:47:00 christos Exp $	*/
+/*	$NetBSD: esp_output.c,v 1.32 2008/04/23 06:09:05 thorpej Exp $	*/
 /*	$KAME: esp_output.c,v 1.44 2001/07/26 06:53:15 jinmei Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: esp_output.c,v 1.26 2006/11/24 19:47:00 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: esp_output.c,v 1.32 2008/04/23 06:09:05 thorpej Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -71,6 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: esp_output.c,v 1.26 2006/11/24 19:47:00 christos Exp
 #endif
 
 #include <netinet6/ipsec.h>
+#include <netinet6/ipsec_private.h>
 #include <netinet6/ah.h>
 #include <netinet6/esp.h>
 #include <netkey/key.h>
@@ -85,8 +86,7 @@ static int esp_output __P((struct mbuf *, u_char *, struct mbuf *,
  * compute ESP header size.
  */
 size_t
-esp_hdrsiz(isr)
-	struct ipsecrequest *isr;
+esp_hdrsiz(struct ipsecrequest *isr)
 {
 	struct secasvar *sav;
 	const struct esp_algorithm *algo;
@@ -196,12 +196,8 @@ esp_hdrsiz(isr)
  *	<-----------------> espoff
  */
 static int
-esp_output(m, nexthdrp, md, isr, af)
-	struct mbuf *m;
-	u_char *nexthdrp;
-	struct mbuf *md;
-	struct ipsecrequest *isr;
-	int af;
+esp_output(struct mbuf *m, u_char *nexthdrp, struct mbuf *md, 
+	struct ipsecrequest *isr, int af)
 {
 	struct mbuf *n;
 	struct mbuf *mprev;
@@ -217,7 +213,7 @@ esp_output(m, nexthdrp, md, isr, af)
 	int afnumber;
 	size_t extendsiz;
 	int error = 0;
-	struct ipsecstat *stat;
+	percpu_t *stat;
 #ifdef IPSEC_NAT_T
 	struct udphdr *udp = NULL;
 #endif
@@ -226,13 +222,13 @@ esp_output(m, nexthdrp, md, isr, af)
 #ifdef INET
 	case AF_INET:
 		afnumber = 4;
-		stat = &ipsecstat;
+		stat = ipsecstat_percpu;
 		break;
 #endif
 #ifdef INET6
 	case AF_INET6:
 		afnumber = 6;
-		stat = &ipsec6stat;
+		stat = ipsec6stat_percpu;
 		break;
 #endif
 	default:
@@ -254,7 +250,7 @@ esp_output(m, nexthdrp, md, isr, af)
 				(u_int32_t)ntohl(ip->ip_src.s_addr),
 				(u_int32_t)ntohl(ip->ip_dst.s_addr),
 				(u_int32_t)ntohl(sav->spi)));
-			ipsecstat.out_inval++;
+			IPSEC_STATINC(IPSEC_STAT_OUT_INVAL);
 			break;
 		    }
 #endif /* INET */
@@ -263,22 +259,22 @@ esp_output(m, nexthdrp, md, isr, af)
 			ipseclog((LOG_DEBUG, "esp6_output: internal error: "
 				"sav->replay is null: SPI=%u\n",
 				(u_int32_t)ntohl(sav->spi)));
-			ipsec6stat.out_inval++;
+			IPSEC6_STATINC(IPSEC_STAT_OUT_INVAL);
 			break;
 #endif /* INET6 */
 		default:
 			panic("esp_output: should not reach here");
 		}
-		m_freem(m);
-		return EINVAL;
+		error = EINVAL;
+		goto fail;
 	}
 
 	algo = esp_algorithm_lookup(sav->alg_enc);
 	if (!algo) {
 		ipseclog((LOG_ERR, "esp_output: unsupported algorithm: "
 		    "SPI=%u\n", (u_int32_t)ntohl(sav->spi)));
-		m_freem(m);
-		return EINVAL;
+		error = EINVAL;
+		goto fail;
 	}
 	spi = sav->spi;
 	ivlen = sav->ivlen;
@@ -321,8 +317,8 @@ esp_output(m, nexthdrp, md, isr, af)
 	if (mprev == NULL || mprev->m_next != md) {
 		ipseclog((LOG_DEBUG, "esp%d_output: md is not in chain\n",
 		    afnumber));
-		m_freem(m);
-		return EINVAL;
+		error = EINVAL;
+		goto fail;
 	}
 
 	plen = 0;
@@ -347,7 +343,6 @@ esp_output(m, nexthdrp, md, isr, af)
 	/* make the packet over-writable */
 	mprev->m_next = NULL;
 	if ((md = ipsec_copypkt(md)) == NULL) {
-		m_freem(m);
 		error = ENOBUFS;
 		goto fail;
 	}
@@ -378,7 +373,6 @@ esp_output(m, nexthdrp, md, isr, af)
 	if (M_LEADINGSPACE(md) < esphlen || (md->m_flags & M_EXT) != 0) {
 		MGET(n, M_DONTWAIT, MT_DATA);
 		if (!n) {
-			m_freem(m);
 			error = ENOBUFS;
 			goto fail;
 		}
@@ -419,8 +413,7 @@ esp_output(m, nexthdrp, md, isr, af)
 		else {
 			ipseclog((LOG_ERR,
 			    "IPv4 ESP output: size exceeds limit\n"));
-			ipsecstat.out_inval++;
-			m_freem(m);
+			IPSEC_STATINC(IPSEC_STAT_OUT_INVAL);
 			error = EMSGSIZE;
 			goto fail;
 		}
@@ -445,9 +438,9 @@ esp_output(m, nexthdrp, md, isr, af)
 				ipseclog((LOG_WARNING,
 				    "replay counter overflowed. %s\n",
 				    ipsec_logsastr(sav)));
-				stat->out_inval++;
-				m_freem(m);
-				return EINVAL;
+				_NET_STATINC(stat, IPSEC_STAT_OUT_INVAL);
+				error = EINVAL;
+				goto fail;
 			}
 		}
 		sav->replay->count++;
@@ -501,7 +494,6 @@ esp_output(m, nexthdrp, md, isr, af)
 		if (!nn) {
 			ipseclog((LOG_DEBUG, "esp%d_output: can't alloc mbuf",
 			    afnumber));
-			m_freem(m);
 			error = ENOBUFS;
 			goto fail;
 		}
@@ -562,8 +554,7 @@ esp_output(m, nexthdrp, md, isr, af)
 		else {
 			ipseclog((LOG_ERR,
 			    "IPv4 ESP output: size exceeds limit\n"));
-			ipsecstat.out_inval++;
-			m_freem(m);
+			IPSEC_STATINC(IPSEC_STAT_OUT_INVAL);
 			error = EMSGSIZE;
 			goto fail;
 		}
@@ -582,8 +573,7 @@ esp_output(m, nexthdrp, md, isr, af)
 	 */
 	error = esp_schedule(algo, sav);
 	if (error) {
-		m_freem(m);
-		stat->out_inval++;
+		_NET_STATINC(stat, IPSEC_STAT_OUT_INVAL);
 		goto fail;
 	}
 
@@ -595,8 +585,9 @@ esp_output(m, nexthdrp, md, isr, af)
 		panic("internal error: no encrypt function");
 	if ((*algo->encrypt)(m, espoff, plen + extendsiz, sav, algo, ivlen)) {
 		/* m is already freed */
+		m = NULL;
 		ipseclog((LOG_ERR, "packet encryption failure\n"));
-		stat->out_inval++;
+		_NET_STATINC(stat, IPSEC_STAT_OUT_INVAL);
 		error = EINVAL;
 		goto fail;
 	}
@@ -629,9 +620,8 @@ esp_output(m, nexthdrp, md, isr, af)
 
 	if (esp_auth(m, espoff, m->m_pkthdr.len - espoff, sav, authbuf)) {
 		ipseclog((LOG_ERR, "ESP checksum generation failure\n"));
-		m_freem(m);
 		error = EINVAL;
-		stat->out_inval++;
+		_NET_STATINC(stat, IPSEC_STAT_OUT_INVAL);
 		goto fail;
 	}
 
@@ -650,7 +640,6 @@ esp_output(m, nexthdrp, md, isr, af)
 		if (!nn) {
 			ipseclog((LOG_DEBUG, "can't alloc mbuf in esp%d_output",
 			    afnumber));
-			m_freem(m);
 			error = ENOBUFS;
 			goto fail;
 		}
@@ -673,8 +662,7 @@ esp_output(m, nexthdrp, md, isr, af)
 		else {
 			ipseclog((LOG_ERR,
 			    "IPv4 ESP output: size exceeds limit\n"));
-			ipsecstat.out_inval++;
-			m_freem(m);
+			IPSEC_STATINC(IPSEC_STAT_OUT_INVAL);
 			error = EMSGSIZE;
 			goto fail;
 		}
@@ -688,31 +676,27 @@ esp_output(m, nexthdrp, md, isr, af)
 	}
     }
 
+noantireplay:
 #ifdef IPSEC_NAT_T
 	if (sav->natt_type != 0) {
 		struct ip *ip;
 		ip = mtod(m, struct ip *);
-#ifdef _IP_VHL
-		udp->uh_ulen =
-		    htons(ntohs(ip->ip_len) - (IP_VHL_HL(ip->ip_vhl) << 2));
-#else
 		udp->uh_ulen = htons(ntohs(ip->ip_len) - (ip->ip_hl << 2));
-#endif
 
 	}
 #endif /* IPSEC_NAT_T */
 
-noantireplay:
 	if (!m) {
 		ipseclog((LOG_ERR,
 		    "NULL mbuf after encryption in esp%d_output", afnumber));
 	} else
-		stat->out_success++;
-	stat->out_esphist[sav->alg_enc]++;
+		_NET_STATINC(stat, IPSEC_STAT_OUT_SUCCESS);
+	_NET_STATINC(stat, IPSEC_STAT_OUT_ESPHIST + sav->alg_enc);
 	key_sa_recordxfer(sav, m);
 	return 0;
 
 fail:
+	m_freem(m);
 #if 1
 	return error;
 #else
@@ -722,15 +706,13 @@ fail:
 
 #ifdef INET
 int
-esp4_output(m, isr)
-	struct mbuf *m;
-	struct ipsecrequest *isr;
+esp4_output(struct mbuf *m, struct ipsecrequest *isr)
 {
 	struct ip *ip;
 	if (m->m_len < sizeof(struct ip)) {
 		ipseclog((LOG_DEBUG, "esp4_output: first mbuf too short\n"));
 		m_freem(m);
-		return 0;
+		return EINVAL;
 	}
 	ip = mtod(m, struct ip *);
 	/* XXX assumes that m->m_next points to payload */
@@ -740,16 +722,13 @@ esp4_output(m, isr)
 
 #ifdef INET6
 int
-esp6_output(m, nexthdrp, md, isr)
-	struct mbuf *m;
-	u_char *nexthdrp;
-	struct mbuf *md;
-	struct ipsecrequest *isr;
+esp6_output(struct mbuf *m, u_char *nexthdrp, 
+	struct mbuf *md, struct ipsecrequest *isr)
 {
 	if (m->m_len < sizeof(struct ip6_hdr)) {
 		ipseclog((LOG_DEBUG, "esp6_output: first mbuf too short\n"));
 		m_freem(m);
-		return 0;
+		return EINVAL;
 	}
 	return esp_output(m, nexthdrp, md, isr, AF_INET6);
 }

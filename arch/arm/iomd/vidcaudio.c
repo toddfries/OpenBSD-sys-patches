@@ -1,4 +1,4 @@
-/*	$NetBSD: vidcaudio.c,v 1.44 2006/08/14 22:04:30 bjh21 Exp $	*/
+/*	$NetBSD: vidcaudio.c,v 1.46 2008/03/01 16:17:47 chris Exp $	*/
 
 /*
  * Copyright (c) 1995 Melvin Tang-Richardson
@@ -65,7 +65,7 @@
 
 #include <sys/param.h>	/* proc.h */
 
-__KERNEL_RCSID(0, "$NetBSD: vidcaudio.c,v 1.44 2006/08/14 22:04:30 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vidcaudio.c,v 1.46 2008/03/01 16:17:47 chris Exp $");
 
 #include <sys/audioio.h>
 #include <sys/conf.h>   /* autoconfig functions */
@@ -227,7 +227,7 @@ vidcaudio_attach(struct device *parent, struct device *self, void *aux)
 #endif
 	case ARM7500_IOC_ID:
 	case ARM7500FE_IOC_ID:
-		sc->sc_is16bit = TRUE;
+		sc->sc_is16bit = true;
 		sc->sc_dma_intr = IRQ_SDMA;
 		break;
 	default:
@@ -394,7 +394,7 @@ vidcaudio_set_params(void *addr, int setmode, int usemode,
 		vidcaudio_ctrl(SCR_SERIAL);
 		hw.sample_rate = 705600 / 4 / sample_period;
 		hw.channels = 2;
-		pfil->append(pfil, aurateconv, &hw);
+		pfil->prepend(pfil, aurateconv, &hw);
 	} else {
 		/* VIDC20ish, u-law, 8-channel */
 		if (p->encoding != AUDIO_ENCODING_ULAW || p->precision != 8)

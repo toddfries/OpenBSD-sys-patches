@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.h,v 1.11 2006/01/23 22:32:50 uwe Exp $	*/
+/*	$NetBSD: locore.h,v 1.19 2008/06/01 00:46:01 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,6 +25,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifdef _LOCORE
 
 #if defined(SH3) && defined(SH4)
 #define	MOV(x, r)	mov.l .L_/**/x, r; mov.l @r, r
@@ -48,13 +43,13 @@
 #endif /* SH3 && SH4 */
 
 /*
- * BANK1 r7 contains kernel stack top address.
- * BANK1 r6 conatins current frame pointer. (per process)
+ * BANK1 r6 contains current trapframe pointer.
+ * BANK1 r7 contains bottom address of lwp's kernel stack.
  */
 /*
  * __EXCEPTION_ENTRY:
  *	+ setup stack pointer
- *	+ save all register to frame. (struct trapframe)
+ *	+ save all registers to trapframe.
  *	+ setup kernel stack.
  *	+ change bank from 1 to 0
  *	+ set BANK0 (r4, r5, r6) = (ssr, spc, ssp)
@@ -95,6 +90,7 @@
 	sts.l	pr,	@-r14	/* tf_pr  */				;\
 	sts.l	mach,	@-r14	/* tf_mach*/				;\
 	sts.l	macl,	@-r14	/* tf_macl*/				;\
+	stc.l	gbr,	@-r14	/* tf_gbr */				;\
 	mov.l	r2,	@-r14	/* tf_ssr */				;\
 	stc.l	spc,	@-r14	/* tf_spc */				;\
 	add	#-8,	r14	/* skip tf_ubc, tf_expevt */		;\
@@ -105,14 +101,14 @@
 	not	r3,	r3						;\
 	and	r1,	r3						;\
 	ldc	r3,	sr	/* SR.RB = 0 */				;\
-	/* Set up argument. r4 = ssr, r5 = spc */			;\
+	/* Set up arguments. r4 = ssr, r5 = spc */			;\
 	stc	r2_bank,r4						;\
 	stc	spc,	r5
 
 /*
  * __EXCEPTION_RETURN:
- *	+ block exception
- *	+ restore all register from stack.
+ *	+ block exceptions
+ *	+ restore all registers from stack.
  *	+ rte.
  */
 #define	__EXCEPTION_RETURN						;\
@@ -127,10 +123,9 @@
 	add	#TF_SIZE, r0						;\
 	ldc	r0,	r6_bank	/* roll up frame pointer */		;\
 	add	#8,	r14	/* skip tf_expevt, tf_ubc */		;\
-	mov.l	@r14+,	r0	/* tf_spc */				;\
-	ldc	r0,	spc						;\
-	mov.l	@r14+,	r0	/* tf_ssr */				;\
-	ldc	r0,	ssr						;\
+	ldc.l	@r14+,	spc	/* tf_spc */				;\
+	ldc.l	@r14+,	ssr	/* tf_ssr */				;\
+	ldc.l	@r14+,	gbr	/* tf_gbr */				;\
 	lds.l	@r14+,	macl	/* tf_macl*/				;\
 	lds.l	@r14+,	mach	/* tf_mach*/				;\
 	lds.l	@r14+,	pr	/* tf_pr  */				;\
@@ -158,22 +153,19 @@
  * Macros to disable and enable exceptions (including interrupts).
  * This modifies SR.BL
  */
-#define	__0x10	#0x10
-#define	__0x78	#0x78
 
 #define	__EXCEPTION_BLOCK(Rn, Rm)					;\
-	mov	__0x10,	Rn						;\
+	mov	#0x10,	Rn						;\
 	swap.b	Rn,	Rn						;\
 	swap.w	Rn,	Rn	/* Rn = 0x10000000 */			;\
 	stc	sr,	Rm						;\
-	or	Rn,	Rm						;\
-	ldc	Rm,	sr	/* block exceptions */
+	or	Rm,	Rn						;\
+	ldc	Rn,	sr	/* block exceptions */
 
 #define	__EXCEPTION_UNBLOCK(Rn, Rm)					;\
-	mov	__0x10,	Rn						;\
+	mov	#0xef,	Rn	/* ~0x10 */				;\
 	swap.b	Rn,	Rn						;\
-	swap.w	Rn,	Rn	/* Rn = 0x10000000 */			;\
-	not	Rn,	Rn						;\
+	swap.w	Rn,	Rn	/* Rn = ~0x10000000 */			;\
 	stc	sr,	Rm						;\
 	and	Rn,	Rm						;\
 	ldc	Rm,	sr	/* unblock exceptions */
@@ -183,24 +175,26 @@
  * This modifies SR.I[0-3]
  */
 #define	__INTR_MASK(Rn, Rm)						;\
-	mov	__0x78,	Rn						;\
+	mov	#0x78,	Rn						;\
 	shll	Rn		/* Rn = 0x000000f0 */			;\
 	stc	sr,	Rm						;\
 	or	Rn,	Rm						;\
-	ldc	Rm,	sr	/* mask all interrupt */
+	ldc	Rm,	sr	/* mask all interrupts */
 
 #define	__INTR_UNMASK(Rn, Rm)						;\
-	mov	__0x78,	Rn						;\
+	mov	#0x78,	Rn						;\
 	shll	Rn		/* Rn = 0x000000f0 */			;\
 	not	Rn,	Rn						;\
 	stc	sr,	Rm						;\
 	and	Rn,	Rm						;\
-	ldc	Rm,	sr	/* unmask all interrupt */
+	ldc	Rm,	sr	/* unmask all interrupts */
 
-#ifndef _LOCORE
+#else /* !_LOCORE */
+
 void sh3_switch_setup(struct lwp *);
 void sh4_switch_setup(struct lwp *);
 void sh3_switch_resume(struct lwp *);
 void sh4_switch_resume(struct lwp *);
 extern void (*__sh_switch_resume)(struct lwp *);
+
 #endif /* !_LOCORE */

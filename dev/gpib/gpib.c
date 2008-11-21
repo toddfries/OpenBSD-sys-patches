@@ -1,4 +1,4 @@
-/*	$NetBSD: gpib.c,v 1.10 2007/03/04 06:01:46 christos Exp $	*/
+/*	$NetBSD: gpib.c,v 1.13 2008/06/11 18:46:24 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gpib.c,v 1.10 2007/03/04 06:01:46 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gpib.c,v 1.13 2008/06/11 18:46:24 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -326,7 +319,7 @@ _gpibswait(sc, slave)
 	pptest = sc->sc_ic->pptest;
 	while ((*pptest)(sc->sc_ic->cookie, slave) == 0) {
 		if (--timo == 0) {
-			printf("%s: swait timeout\n", sc->sc_dev.dv_xname);
+			aprint_error_dev(&sc->sc_dev, "swait timeout\n");
 			return(-1);
 		}
 	}
@@ -452,7 +445,7 @@ senderror:
 	(*sc->sc_ic->ifc)(sc->sc_ic->cookie);
 	DPRINTF(DBG_FAIL,
 	    ("%s: _gpibsend failed: slave %d, sec %x, sent %d of %d bytes\n",
-	    sc->sc_dev.dv_xname, slave, sec, cnt, origcnt));
+	    device_xname(&sc->sc_dev), slave, sec, cnt, origcnt));
 	return (cnt);
 }
 
@@ -525,14 +518,11 @@ recverror:
  */
 
 int
-gpibopen(dev, flags, mode, l)
-	dev_t dev;
-	int flags, mode;
-	struct lwp *l;
+gpibopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct gpib_softc *sc;
 
-	sc = device_lookup(&gpib_cd, GPIBUNIT(dev));
+	sc = device_lookup_private(&gpib_cd, GPIBUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -546,14 +536,11 @@ gpibopen(dev, flags, mode, l)
 }
 
 int
-gpibclose(dev, flag, mode, l)
-	dev_t dev;
-	int flag, mode;
-	struct lwp *l;
+gpibclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct gpib_softc *sc;
 
-	sc = device_lookup(&gpib_cd, GPIBUNIT(dev));
+	sc = device_lookup_private(&gpib_cd, GPIBUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -565,14 +552,11 @@ gpibclose(dev, flag, mode, l)
 }
 
 int
-gpibread(dev, uio, flags)
-	dev_t dev;
-	struct uio *uio;
-	int flags;
+gpibread(dev_t dev, struct uio *uio, int flags)
 {
 	struct gpib_softc *sc;
 
-	sc = device_lookup(&gpib_cd, GPIBUNIT(dev));
+	sc = device_lookup_private(&gpib_cd, GPIBUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -582,14 +566,11 @@ gpibread(dev, uio, flags)
 }
 
 int
-gpibwrite(dev, uio, flags)
-	dev_t dev;
-	struct uio *uio;
-	int flags;
+gpibwrite(dev_t dev, struct uio *uio, int flags)
 {
 	struct gpib_softc *sc;
 
-	sc = device_lookup(&gpib_cd, GPIBUNIT(dev));
+	sc = device_lookup_private(&gpib_cd, GPIBUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -599,16 +580,11 @@ gpibwrite(dev, uio, flags)
 }
 
 int
-gpibioctl(dev, cmd, data, flag, l)
-	dev_t dev;
-	u_long cmd;
-	void *data;
-	int flag;
-	struct lwp *l;
+gpibioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct gpib_softc *sc;
 
-	sc = device_lookup(&gpib_cd, GPIBUNIT(dev));
+	sc = device_lookup_private(&gpib_cd, GPIBUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -625,14 +601,11 @@ gpibioctl(dev, cmd, data, flag, l)
 }
 
 int
-gpibpoll(dev, events, l)
-	dev_t dev;
-	int events;
-	struct lwp *l;
+gpibpoll(dev_t dev, int events, struct lwp *l)
 {
 	struct gpib_softc *sc;
 
-	sc = device_lookup(&gpib_cd, GPIBUNIT(dev));
+	sc = device_lookup_private(&gpib_cd, GPIBUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 

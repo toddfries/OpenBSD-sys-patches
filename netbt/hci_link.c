@@ -1,5 +1,4 @@
-/*	$OpenBSD: hci_link.c,v 1.7 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: hci_link.c,v 1.16 2007/11/10 23:12:22 plunky Exp $	*/
+/*	$NetBSD: hci_link.c,v 1.20 2008/04/24 11:38:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -30,6 +29,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hci_link.c,v 1.20 2008/04/24 11:38:37 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -75,12 +77,9 @@ hci_acl_open(struct hci_unit *unit, bdaddr_t *bdaddr)
 
 	link = hci_link_lookup_bdaddr(unit, bdaddr, HCI_LINK_ACL);
 	if (link == NULL) {
-		link = hci_link_alloc(unit);
+		link = hci_link_alloc(unit, bdaddr, HCI_LINK_ACL);
 		if (link == NULL)
 			return NULL;
-
-		link->hl_type = HCI_LINK_ACL;
-		bdaddr_copy(&link->hl_bdaddr, bdaddr);
 	}
 
 	switch(link->hl_state) {
@@ -108,6 +107,7 @@ hci_acl_open(struct hci_unit *unit, bdaddr_t *bdaddr)
 			return NULL;
 		}
 
+		link->hl_flags |= HCI_LINK_CREATE_CON;
 		link->hl_state = HCI_LINK_WAIT_CONNECT;
 		break;
 
@@ -127,7 +127,7 @@ hci_acl_open(struct hci_unit *unit, bdaddr_t *bdaddr)
 		 * to care about already invoking timeouts since refcnt >0
 		 * will keep the link alive.
 		 */
-		timeout_del(&link->hl_expire);
+		callout_stop(&link->hl_expire);
 		break;
 
 	default:
@@ -155,7 +155,7 @@ hci_acl_close(struct hci_link *link, int err)
 		if (link->hl_state == HCI_LINK_CLOSED)
 			hci_link_free(link, err);
 		else if (hci_acl_expiry > 0)
-			timeout_add(&link->hl_expire, hci_acl_expiry * hz);
+			callout_schedule(&link->hl_expire, hci_acl_expiry * hz);
 	}
 }
 
@@ -178,14 +178,12 @@ hci_acl_newconn(struct hci_unit *unit, bdaddr_t *bdaddr)
 	if (link != NULL)
 		return NULL;
 
-	link = hci_link_alloc(unit);
+	link = hci_link_alloc(unit, bdaddr, HCI_LINK_ACL);
 	if (link != NULL) {
 		link->hl_state = HCI_LINK_WAIT_CONNECT;
-		link->hl_type = HCI_LINK_ACL;
-		bdaddr_copy(&link->hl_bdaddr, bdaddr);
 
 		if (hci_acl_expiry > 0)
-			timeout_add(&link->hl_expire, hci_acl_expiry * hz);
+			callout_schedule(&link->hl_expire, hci_acl_expiry * hz);
 	}
 
 	return link;
@@ -196,9 +194,10 @@ hci_acl_timeout(void *arg)
 {
 	struct hci_link *link = arg;
 	hci_discon_cp cp;
-	int s, err;
+	int err;
 
-	s = splsoftnet();
+	mutex_enter(bt_lock);
+	callout_ack(&link->hl_expire);
 
 	if (link->hl_refcnt > 0)
 		goto out;
@@ -234,7 +233,7 @@ hci_acl_timeout(void *arg)
 	}
 
 out:
-	splx(s);
+	mutex_exit(bt_lock);
 }
 
 /*
@@ -255,8 +254,8 @@ hci_acl_setmode(struct hci_link *link)
 	    && !(link->hl_flags & HCI_LINK_AUTH)) {
 		hci_auth_req_cp cp;
 
-		DPRINTF("(%s) requesting auth for handle #%d\n",
-		    device_xname(link->hl_unit->hci_dev), link->hl_handle);
+		DPRINTF("requesting auth for handle #%d\n",
+			link->hl_handle);
 
 		link->hl_state = HCI_LINK_WAIT_AUTH;
 		cp.con_handle = htole16(link->hl_handle);
@@ -272,8 +271,8 @@ hci_acl_setmode(struct hci_link *link)
 
 		/* XXX we should check features for encryption capability */
 
-		DPRINTF("(%s) requesting encryption for handle #%d\n",
-		    device_xname(link->hl_unit->hci_dev), link->hl_handle);
+		DPRINTF("requesting encryption for handle #%d\n",
+			link->hl_handle);
 
 		link->hl_state = HCI_LINK_WAIT_ENCRYPT;
 		cp.con_handle = htole16(link->hl_handle);
@@ -291,8 +290,8 @@ hci_acl_setmode(struct hci_link *link)
 		/* always change link key for SECURE requests */
 		link->hl_flags &= ~HCI_LINK_SECURE;
 
-		DPRINTF("(%s) changing link key for handle #%d\n",
-		    device_xname(link->hl_unit->hci_dev), link->hl_handle);
+		DPRINTF("changing link key for handle #%d\n",
+			link->hl_handle);
 
 		link->hl_state = HCI_LINK_WAIT_SECURE;
 		cp.con_handle = htole16(link->hl_handle);
@@ -318,11 +317,11 @@ hci_acl_linkmode(struct hci_link *link)
 	struct l2cap_channel *chan, *next;
 	int err, mode = 0;
 
-	DPRINTF("(%s) handle #%d, auth %s, encrypt %s, secure %s\n",
-	    device_xname(link->hl_unit->hci_dev), link->hl_handle,
-	    (link->hl_flags & HCI_LINK_AUTH ? "on" : "off"),
-	    (link->hl_flags & HCI_LINK_ENCRYPT ? "on" : "off"),
-	    (link->hl_flags & HCI_LINK_SECURE ? "on" : "off"));
+	DPRINTF("handle #%d, auth %s, encrypt %s, secure %s\n",
+		link->hl_handle,
+		(link->hl_flags & HCI_LINK_AUTH ? "on" : "off"),
+		(link->hl_flags & HCI_LINK_ENCRYPT ? "on" : "off"),
+		(link->hl_flags & HCI_LINK_SECURE ? "on" : "off"));
 
 	if (link->hl_flags & HCI_LINK_AUTH)
 		mode |= L2CAP_LM_AUTH;
@@ -417,26 +416,25 @@ hci_acl_recv(struct mbuf *m, struct hci_unit *unit)
 	KASSERT(unit != NULL);
 
 	KASSERT(m->m_pkthdr.len >= sizeof(hdr));
-	m_copydata(m, 0, sizeof(hdr), (caddr_t)&hdr);
+	m_copydata(m, 0, sizeof(hdr), &hdr);
 	m_adj(m, sizeof(hdr));
 
 #ifdef DIAGNOSTIC
 	if (hdr.type != HCI_ACL_DATA_PKT) {
-		printf("%s: bad ACL packet type\n",
-		    device_xname(unit->hci_dev));
+		aprint_error_dev(unit->hci_dev, "bad ACL packet type\n");
 		goto bad;
 	}
 
-	if (m->m_pkthdr.len != letoh16(hdr.length)) {
-		printf("%s: bad ACL packet length (%d != %d)\n",
-		    device_xname(unit->hci_dev), m->m_pkthdr.len,
-		    letoh16(hdr.length));
+	if (m->m_pkthdr.len != le16toh(hdr.length)) {
+		aprint_error_dev(unit->hci_dev,
+		    "bad ACL packet length (%d != %d)\n",
+		    m->m_pkthdr.len, le16toh(hdr.length));
 		goto bad;
 	}
 #endif
 
-	hdr.length = letoh16(hdr.length);
-	hdr.con_handle = letoh16(hdr.con_handle);
+	hdr.length = le16toh(hdr.length);
+	hdr.con_handle = le16toh(hdr.con_handle);
 	handle = HCI_CON_HANDLE(hdr.con_handle);
 	pb = HCI_PB_FLAG(hdr.con_handle);
 
@@ -462,13 +460,11 @@ hci_acl_recv(struct mbuf *m, struct hci_unit *unit)
 	switch (pb) {
 	case HCI_PACKET_START:
 		if (link->hl_rxp != NULL)
-			printf("%s: dropped incomplete ACL packet\n",
-			    device_xname(unit->hci_dev));
+			aprint_error_dev(unit->hci_dev,
+			    "dropped incomplete ACL packet\n");
 
 		if (m->m_pkthdr.len < sizeof(l2cap_hdr_t)) {
-			printf("%s: short ACL packet\n",
-			    device_xname(unit->hci_dev));
-
+			aprint_error_dev(unit->hci_dev, "short ACL packet\n");
 			goto bad;
 		}
 
@@ -478,8 +474,8 @@ hci_acl_recv(struct mbuf *m, struct hci_unit *unit)
 
 	case HCI_PACKET_FRAGMENT:
 		if (link->hl_rxp == NULL) {
-			printf("%s: unexpected packet fragment\n",
-			    device_xname(unit->hci_dev));
+			aprint_error_dev(unit->hci_dev,
+			    "unexpected packet fragment\n");
 
 			goto bad;
 		}
@@ -491,14 +487,12 @@ hci_acl_recv(struct mbuf *m, struct hci_unit *unit)
 		break;
 
 	default:
-		printf("%s: unknown packet type\n",
-		    device_xname(unit->hci_dev));
-
+		aprint_error_dev(unit->hci_dev, "unknown packet type\n");
 		goto bad;
 	}
 
-	m_copydata(m, 0, sizeof(want), (caddr_t)&want);
-	want = letoh16(want) + sizeof(l2cap_hdr_t) - got;
+	m_copydata(m, 0, sizeof(want), &want);
+	want = le16toh(want) + sizeof(l2cap_hdr_t) - got;
 
 	if (want > 0)
 		return;
@@ -544,9 +538,9 @@ hci_acl_send(struct mbuf *m, struct hci_link *link,
 	if (pdu == NULL)
 		goto nomem;
 
-	bzero(pdu, sizeof *pdu);
 	pdu->lp_chan = chan;
 	pdu->lp_pending = 0;
+	MBUFQ_INIT(&pdu->lp_data);
 
 	plen = m->m_pkthdr.len;
 	mlen = link->hl_unit->hci_max_acl_size;
@@ -566,9 +560,8 @@ hci_acl_send(struct mbuf *m, struct hci_link *link,
 		if (num++ == 0)
 			m->m_flags |= M_PROTO1;	/* tag first fragment */
 
-		DPRINTFN(10, "(%s) chunk of %d (plen = %d) bytes\n",
-		    device_xname(link->hl_unit->hci_dev), mlen, plen);
-		IF_ENQUEUE(&pdu->lp_data, m);
+		DPRINTFN(10, "chunk of %d (plen = %d) bytes\n", mlen, plen);
+		MBUFQ_ENQUEUE(&pdu->lp_data, m);
 		m = n;
 		plen -= mlen;
 	}
@@ -583,7 +576,7 @@ hci_acl_send(struct mbuf *m, struct hci_link *link,
 nomem:
 	if (m) m_freem(m);
 	if (pdu) {
-		IF_PURGE(&pdu->lp_data);
+		MBUFQ_DRAIN(&pdu->lp_data);
 		pool_put(&l2cap_pdu_pool, pdu);
 	}
 
@@ -628,14 +621,14 @@ hci_acl_start(struct hci_link *link)
 		if (pdu == NULL)
 			return;
 
-		if (!IF_IS_EMPTY(&pdu->lp_data))
+		if (MBUFQ_FIRST(&pdu->lp_data) != NULL)
 			break;
 
 		pdu = TAILQ_NEXT(pdu, lp_next);
 	}
 
 	while (unit->hci_num_acl_pkts > 0) {
-		IF_DEQUEUE(&pdu->lp_data, m);
+		MBUFQ_DEQUEUE(&pdu->lp_data, m);
 		KASSERT(m != NULL);
 
 		if (m->m_flags & M_PROTO1)
@@ -659,7 +652,7 @@ hci_acl_start(struct hci_link *link)
 
 		hci_output_acl(unit, m);
 
-		if (IF_IS_EMPTY(&pdu->lp_data)) {
+		if (MBUFQ_FIRST(&pdu->lp_data) == NULL) {
 			if (pdu->lp_chan) {
 				/*
 				 * This should enable streaming of PDUs - when
@@ -701,16 +694,15 @@ hci_acl_complete(struct hci_link *link, int num)
 	struct l2cap_pdu *pdu;
 	struct l2cap_channel *chan;
 
-	DPRINTFN(5, "(%s) handle #%d (%d)\n",
-	    device_xname(link->hl_unit->hci_dev), link->hl_handle, num);
+	DPRINTFN(5, "handle #%d (%d)\n", link->hl_handle, num);
 
 	while (num > 0) {
 		pdu = TAILQ_FIRST(&link->hl_txq);
 		if (pdu == NULL) {
-			printf("%s: %d packets completed on handle #%x "
-			    "but none pending!\n",
-			    device_xname(link->hl_unit->hci_dev), num,
-			    link->hl_handle);
+			aprint_error_dev(link->hl_unit->hci_dev,
+			    "%d packets completed on handle #%x but none pending!\n",
+			    num, link->hl_handle);
+
 			return;
 		}
 
@@ -718,7 +710,7 @@ hci_acl_complete(struct hci_link *link, int num)
 			num -= pdu->lp_pending;
 			pdu->lp_pending = 0;
 
-			if (IF_IS_EMPTY(&pdu->lp_data)) {
+			if (MBUFQ_FIRST(&pdu->lp_data) == NULL) {
 				TAILQ_REMOVE(&link->hl_txq, pdu, lp_next);
 				chan = pdu->lp_chan;
 				if (chan != NULL) {
@@ -789,14 +781,11 @@ hci_sco_newconn(struct hci_unit *unit, bdaddr_t *bdaddr)
 		bdaddr_copy(&new->sp_laddr, &unit->hci_bdaddr);
 		bdaddr_copy(&new->sp_raddr, bdaddr);
 
-		sco = hci_link_alloc(unit);
+		sco = hci_link_alloc(unit, bdaddr, HCI_LINK_SCO);
 		if (sco == NULL) {
 			sco_detach(&new);
 			return NULL;
 		}
-
-		sco->hl_type = HCI_LINK_SCO;
-		bdaddr_copy(&sco->hl_bdaddr, bdaddr);
 
 		sco->hl_link = hci_acl_open(unit, bdaddr);
 		KASSERT(sco->hl_link == acl);
@@ -826,24 +815,25 @@ hci_sco_recv(struct mbuf *m, struct hci_unit *unit)
 	KASSERT(unit != NULL);
 
 	KASSERT(m->m_pkthdr.len >= sizeof(hdr));
-	m_copydata(m, 0, sizeof(hdr), (caddr_t)&hdr);
+	m_copydata(m, 0, sizeof(hdr), &hdr);
 	m_adj(m, sizeof(hdr));
 
 #ifdef DIAGNOSTIC
 	if (hdr.type != HCI_SCO_DATA_PKT) {
-		printf("%s: bad SCO packet type\n",
-		    device_xname(unit->hci_dev));
+		aprint_error_dev(unit->hci_dev, "bad SCO packet type\n");
 		goto bad;
 	}
 
 	if (m->m_pkthdr.len != hdr.length) {
-		printf("%s: bad SCO packet length (%d != %d)\n",
-		    device_xname(unit->hci_dev), m->m_pkthdr.len, hdr.length);
+		aprint_error_dev(unit->hci_dev,
+		    "bad SCO packet length (%d != %d)\n",
+		    m->m_pkthdr.len, hdr.length);
+
 		goto bad;
 	}
 #endif
 
-	hdr.con_handle = letoh16(hdr.con_handle);
+	hdr.con_handle = le16toh(hdr.con_handle);
 	handle = HCI_CON_HANDLE(hdr.con_handle);
 
 	link = hci_link_lookup_handle(unit, handle);
@@ -885,21 +875,24 @@ hci_sco_complete(struct hci_link *link, int num)
  */
 
 struct hci_link *
-hci_link_alloc(struct hci_unit *unit)
+hci_link_alloc(struct hci_unit *unit, bdaddr_t *bdaddr, uint8_t type)
 {
 	struct hci_link *link;
 
 	KASSERT(unit != NULL);
 
-	link = malloc(sizeof *link, M_BLUETOOTH, M_NOWAIT | M_ZERO);
+	link = malloc(sizeof(struct hci_link), M_BLUETOOTH, M_NOWAIT | M_ZERO);
 	if (link == NULL)
 		return NULL;
 
 	link->hl_unit = unit;
+	link->hl_type = type;
 	link->hl_state = HCI_LINK_CLOSED;
+	bdaddr_copy(&link->hl_bdaddr, bdaddr);
 
 	/* init ACL portion */
-	timeout_set(&link->hl_expire, hci_acl_timeout, link);
+	callout_init(&link->hl_expire, 0);
+	callout_setfunc(&link->hl_expire, hci_acl_timeout, link);
 
 	TAILQ_INIT(&link->hl_txq);	/* outgoing packets */
 	TAILQ_INIT(&link->hl_reqs);	/* request queue */
@@ -908,10 +901,10 @@ hci_link_alloc(struct hci_unit *unit)
 	link->hl_flush = L2CAP_FLUSH_TIMO_DEFAULT;	/* flush timeout */
 
 	/* init SCO portion */
-	/* &link->hl_data is already zero-initialized. */
+	MBUFQ_INIT(&link->hl_data);
 
 	/* attach to unit */
-	TAILQ_INSERT_HEAD(&unit->hci_links, link, hl_next);
+	TAILQ_INSERT_TAIL(&unit->hci_links, link, hl_next);
 	return link;
 }
 
@@ -924,9 +917,9 @@ hci_link_free(struct hci_link *link, int err)
 
 	KASSERT(link != NULL);
 
-	DPRINTF("(%s) #%d, type = %d, state = %d, refcnt = %d\n",
-	    device_xname(link->hl_unit->hci_dev), link->hl_handle,
-	    link->hl_type, link->hl_state, link->hl_refcnt);
+	DPRINTF("#%d, type = %d, state = %d, refcnt = %d\n",
+		link->hl_handle, link->hl_type,
+		link->hl_state, link->hl_refcnt);
 
 	/* ACL reference count */
 	if (link->hl_refcnt > 0) {
@@ -948,7 +941,7 @@ hci_link_free(struct hci_link *link, int err)
 	/* ACL outgoing data queue */
 	while ((pdu = TAILQ_FIRST(&link->hl_txq)) != NULL) {
 		TAILQ_REMOVE(&link->hl_txq, pdu, lp_next);
-		IF_PURGE(&pdu->lp_data);
+		MBUFQ_DRAIN(&pdu->lp_data);
 		if (pdu->lp_pending)
 			link->hl_unit->hci_num_acl_pkts += pdu->lp_pending;
 
@@ -980,17 +973,19 @@ hci_link_free(struct hci_link *link, int err)
 	}
 
 	/* flush any SCO data */
-	IF_PURGE(&link->hl_data);
+	MBUFQ_DRAIN(&link->hl_data);
 
 	/*
-	 * Halt the timeout - if its already running we cannot free the
+	 * Halt the callout - if its already running we cannot free the
 	 * link structure but the timeout function will call us back in
 	 * any case.
 	 */
 	link->hl_state = HCI_LINK_CLOSED;
-	timeout_del(&link->hl_expire);
-	if (timeout_triggered(&link->hl_expire))
+	callout_stop(&link->hl_expire);
+	if (callout_invoking(&link->hl_expire))
 		return;
+
+	callout_destroy(&link->hl_expire);
 
 	/*
 	 * If we made a note of clock offset, keep it in a memo
@@ -1009,28 +1004,12 @@ hci_link_free(struct hci_link *link, int err)
 }
 
 /*
- * Lookup HCI link by type and state.
- */
-struct hci_link *
-hci_link_lookup_state(struct hci_unit *unit, uint16_t type, uint16_t state)
-{
-	struct hci_link *link;
-
-	TAILQ_FOREACH(link, &unit->hci_links, hl_next) {
-		if (link->hl_type == type && link->hl_state == state)
-			break;
-	}
-
-	return link;
-}
-
-/*
  * Lookup HCI link by address and type. Note that for SCO links there may
  * be more than one link per address, so we only return links with no
  * handle (ie new links)
  */
 struct hci_link *
-hci_link_lookup_bdaddr(struct hci_unit *unit, bdaddr_t *bdaddr, uint16_t type)
+hci_link_lookup_bdaddr(struct hci_unit *unit, bdaddr_t *bdaddr, uint8_t type)
 {
 	struct hci_link *link;
 

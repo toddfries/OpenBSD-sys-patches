@@ -1,5 +1,4 @@
-/*	$OpenBSD: ctlreg.h,v 1.7 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: ctlreg.h,v 1.15 1997/07/20 18:55:03 pk Exp $ */
+/*	$NetBSD: ctlreg.h,v 1.28 2005/12/11 12:19:05 christos Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -25,7 +24,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -93,8 +96,12 @@
 #define ASI_IDCACHELFR	0x12	/* [4m] flush i&d cache line (reg) */
 #define ASI_IDCACHELFC	0x13	/* [4m] flush i&d cache line (ctxt) */
 #define ASI_IDCACHELFU	0x14	/* [4m] flush i&d cache line (user) */
+#define ASI_BLOCKCOPY	0x17	/* [4m] hypersparc: hardware block copy */
+#define ASI_BLOCKFILL	0x1f	/* [4m] hypersparc: hardware block fill */
 #define ASI_BYPASS	0x20	/* [4m] sun ref mmu bypass,
 				        ie. direct phys access */
+#define	ASI_CSR		0x2f	/* [4d] CPU-unit CSR space */
+#define	ASI_ECSR	0x2f	/* [4d] CPU-unit ECSR space */
 #define ASI_HICACHECLR	0x31	/* [4m] hypersparc only: I-cache flash clear */
 #define ASI_ICACHECLR	0x36	/* [4m] ms1 only: I-cache flash clear */
 #define ASI_DCACHECLR	0x37	/* [4m] ms1 only: D-cache flash clear */
@@ -171,10 +178,51 @@
 
 
 /*
- * [4m] Bits in ASI_CONTROL? space, sun4m only.
+ * [4m] Bits in ASI_CONTROL space, sun4m only.
  */
-#define MXCC_ENABLE_ADDR	0x1c00a00	/* Enable register for MXCC */
-#define MXCC_ENABLE_BIT		0x4		/* Enable bit for MXCC */
+#define MXCC_STREAM_DATA	0x1c00000	/* Stream data register */
+#define MXCC_STREAM_SRC		0x1c00100	/* Stream source register */
+#define MXCC_STREAM_DST		0x1c00200	/* Stream dest register */
+#define MXCC_BIST		0x1c00800	/* Builtin self test register */
+#define MXCC_CTRLREG		0x1c00a00	/* Control register for MXCC */
+#define MXCC_STATREG		0x1c00b00	/* Status register for MXCC */
+#define MXCC_MRST		0x1c00c00	/* Module reset register */
+#define MXCC_ERROR		0x1c00e00	/* Error register */
+#define MXCC_MBUSPORT		0x1c00f00	/* MBus port register */
+
+/* Bits in MXCC_CTRLREG */
+#define MXCC_CTRLREG_HC		0x1	/* Half cache (Xbus only) */
+#define MXCC_CTRLREG_CS		0x2	/* E-cache size (Xbus only) */
+#define MXCC_CTRLREG_CE		0x4	/* Enable e-cache */ 
+#define MXCC_CTRLREG_PE		0x8	/* Parity enable */ 
+#define MXCC_CTRLREG_MC		0x10	/* Multiple command enable */
+#define MXCC_CTRLREG_PF		0x20	/* Prefetch enable */
+#define MXCC_CTRLREG_WI		0x40	/* Write invalidate (Xbus only) */
+#define MXCC_CTRLREG_BWC_MASK	0x180	/* Bus watch count (Xbus only) */
+#define MXCC_CTRLREG_RC		0x200	/* Read reference count */
+
+/* Bits in MXCC_MRST */
+#define MXCC_MRST_SI		0x00000002	/* Software Internal reset */
+#define MXCC_MRST_WD		0x00000004	/* Watchdog reset */
+
+/*
+ * Stream register usage:
+ *	To fill a block with some value, load that value into the 64 byte
+ *	stream data register (using double-word access; on Mbus only the
+ *	lower 32 bytes are used), then write the physical address of
+ *	the destination into the stream destination register.
+ *
+ *	To copy a block, write the physical address of the source into
+ *	the stream source register causing the block to be transferred
+ *	into the stream data register, then write the physical address of
+ *	the destination into the stream destination register.
+ *
+ *	In both cases, or in the MXCC_STREAM_CE bit to make the transactions
+ *	cache-coherent. Note that stream operations do not cause cache
+ *	lines to be allocated.
+ */
+#define MXCC_STREAM_BLKSZ	32		/* Unit for stream ops */
+#define MXCC_STREAM_C		0x1000000000ULL	/* Cacheable bit for stream ops */
 
 /*
  * Bits in ASI_SRMMUFP space.
@@ -195,17 +243,23 @@
 #define SRMMU_CXR	0x00000200	/* Context register */
 #define SRMMU_SFSR	0x00000300	/* Synchronous fault status reg */
 #define SRMMU_SFAR	0x00000400	/* Synchronous fault address reg */
-#define SRMMU_AFSR	0x00000500	/* Asynchronous fault status reg (HS)*/
+#define SRMMU_AFSR	0x00000500	/* Asynchronous fault status reg (HS) */
 #define SRMMU_AFAR	0x00000600	/* Asynchronous fault address reg (HS)*/
 #define SRMMU_PCFG	0x00000600	/* Processor configuration reg (TURBO)*/
+#define SRMMU_RST	0x00000700	/* Reset reg */
 #define SRMMU_TLBCTRL	0x00001000	/* TLB replacement control reg */
 
 
 /*
  * [4m] Bits in SRMMU control register. One set per module.
  */
-#define VIKING_PCR_ME	0x00000001	/* MMU Enable */
-#define VIKING_PCR_NF	0x00000002	/* Fault inhibit bit */
+
+/* Bits 0 and 1 are common between implementations */
+#define SRMMU_PCR_ME	0x00000001	/* MMU Enable */
+#define SRMMU_PCR_NF	0x00000002	/* Fault inhibit bit */
+
+#define VIKING_PCR_ME	SRMMU_PCR_ME	/* MMU Enable */
+#define VIKING_PCR_NF	SRMMU_PCR_NF	/* Fault inhibit bit */
 #define VIKING_PCR_PSO	0x00000080	/* Partial Store Ordering enable */
 #define VIKING_PCR_DCE	0x00000100	/* Data cache enable bit */
 #define VIKING_PCR_ICE	0x00000200	/* SuperSPARC instr. cache enable */
@@ -217,8 +271,8 @@
 #define VIKING_PCR_AC	0x00008000	/* 1=cache non-MMU accesses */
 #define	VIKING_PCR_TC	0x00010000	/* 1=cache table walks */
 
-#define HYPERSPARC_PCR_ME	0x00000001	/* MMU Enable */
-#define HYPERSPARC_PCR_NF	0x00000002	/* Fault inhibit bit */
+#define HYPERSPARC_PCR_ME	SRMMU_PCR_ME	/* MMU Enable */
+#define HYPERSPARC_PCR_NF	SRMMU_PCR_NF	/* Fault inhibit bit */
 #define HYPERSPARC_PCR_CE	0x00000100	/* Cache enable bit */
 #define HYPERSPARC_PCR_CM	0x00000400	/* Cache mode: 1=write-back */
 #define	HYPERSPARC_PCR_MR	0x00000800	/* Memory reflection: 1 = on */
@@ -230,8 +284,8 @@
 #define HYPERSPARC_PCR_SE	0x00100000	/* Coherent bus snoop enable */
 #define HYPERSPARC_PCR_CWR	0x00200000	/* Cache wrap enable */
 
-#define CYPRESS_PCR_ME	0x00000001	/* MMU Enable */
-#define CYPRESS_PCR_NF	0x00000002	/* Fault inhibit bit */
+#define CYPRESS_PCR_ME	SRMMU_PCR_ME	/* MMU Enable */
+#define CYPRESS_PCR_NF	SRMMU_PCR_NF	/* Fault inhibit bit */
 #define CYPRESS_PCR_CE	0x00000100	/* Cache enable bit */
 #define CYPRESS_PCR_CL	0x00000200	/* Cache Lock (604 only) */
 #define CYPRESS_PCR_CM	0x00000400	/* Cache mode: 1=write-back */
@@ -243,8 +297,8 @@
 #define CYPRESS_PCR_MCM	0x00300000	/* Multichip Mask */
 #define CYPRESS_PCR_MCA	0x00c00000	/* Multichip Address */
 
-#define MS1_PCR_ME	0x00000001	/* MMU Enable */
-#define MS1_PCR_NF	0x00000002	/* Fault inhibit bit */
+#define MS1_PCR_ME	SRMMU_PCR_ME	/* MMU Enable */
+#define MS1_PCR_NF	SRMMU_PCR_NF	/* Fault inhibit bit */
 #define MS1_PCR_DCE	0x00000100	/* Data cache enable */
 #define MS1_PCR_ICE	0x00000200	/* Instruction cache enable */
 #define MS1_PCR_RC	0x00000c00	/* DRAM Refresh control */
@@ -258,8 +312,9 @@
 #define	MS1_PCR_AV	0x00400000	/* Address View (diag) */
 #define	MS1_PCR_STW	0x00800000	/* Software Tablewalk enable */
 
-#define SWIFT_PCR_ME	0x00000001	/* MMU Enable */
-#define SWIFT_PCR_NF	0x00000002	/* Fault inhibit bit */
+#define SWIFT_PCR_ME	SRMMU_PCR_ME	/* MMU Enable */
+#define SWIFT_PCR_NF	SRMMU_PCR_NF	/* Fault inhibit bit */
+#define SWIFT_PCR_SA	0x00000080	/* Store Allocate */
 #define SWIFT_PCR_DCE	0x00000100	/* Data cache enable */
 #define SWIFT_PCR_ICE	0x00000200	/* Instruction cache enable */
 #define SWIFT_PCR_RC	0x00003c00	/* DRAM Refresh control */
@@ -273,8 +328,8 @@
 #define	SWIFT_PCR_WP	0x00400000	/* Watch point enable */
 #define	SWIFT_PCR_STW	0x00800000	/* Software Tablewalk enable */
 
-#define TURBOSPARC_PCR_ME	0x00000001	/* MMU Enable */
-#define TURBOSPARC_PCR_NF	0x00000002	/* Fault inhibit bit */
+#define TURBOSPARC_PCR_ME	SRMMU_PCR_ME	/* MMU Enable */
+#define TURBOSPARC_PCR_NF	SRMMU_PCR_NF	/* Fault inhibit bit */
 #define TURBOSPARC_PCR_ICS	0x00000004	/* I-cache snoop enable */
 #define TURBOSPARC_PCR_PSO	0x00000008	/* Partial Store order (ro!) */
 #define TURBOSPARC_PCR_DCE	0x00000100	/* Data cache enable */
@@ -306,8 +361,8 @@
 /* [4m] Bits in the Synchronous Fault Status Register */
 #define SFSR_EM		0x00020000	/* Error mode watchdog reset occurred */
 #define SFSR_CS		0x00010000	/* Control Space error */
-#define SFSR_PERR	0x00006000	/* Parity error code */
 #define SFSR_SB		0x00008000	/* SS: Store Buffer Error */
+#define SFSR_PERR	0x00006000	/* Parity error code */
 #define SFSR_P		0x00004000	/* SS: Parity error */
 #define SFSR_UC		0x00001000	/* Uncorrectable error */
 #define SFSR_TO		0x00000800	/* S-Bus timeout */
@@ -318,8 +373,10 @@
 #define SFSR_FAV	0x00000002	/* Fault Address is valid */
 #define SFSR_OW		0x00000001	/* Overwritten with new fault */
 
-#define	SFSR_BITS \
-"\20\21CSERR\17PARITY\16SYSERR\15UNCORR\14TIMEOUT\13BUSERR\2FAV\1OW"
+#define	SFSR_BITS	"\177\020"		\
+	"b\21EM\0b\20CS\0b\17SB\0f\15\2PERR\0"	\
+	"b\14UC\0b\13TO\0b\12BE\0f\10\2LVL\0"	\
+	"f\05\3AT\0f\02\3FT\0b\01FAV\0b\01OW"
 
 /* [4m] Synchronous Fault Types */
 #define SFSR_FT_NONE		(0 << 2) 	/* no fault */
@@ -360,11 +417,16 @@
 #define AFSR_UC		0x00001000	/* Uncorrectable error */
 #define AFSR_SE		0x00002000	/* System error */
 
-#define	AFSR_BITS	"\20\16SYSERR\15UNCORR\14TIMEOUT\13BUSERR\1AFO"
+#define	AFSR_BITS	"\177\020"	\
+	"b\15SE\0b\14UC\0b\13TO\0b\12BE\0f\04\4AFA\0b\0AFO\0"
 
 /* [4m] TLB Replacement Control Register bits */
 #define TLBC_DISABLE	0x00000020	/* Disable replacement counter */
 #define TLBC_RCNTMASK	0x0000001f	/* Replacement counter (0-31) */
+
+/* [4m] SRMMU Reset Register bits */
+#define SRMMU_RST_SI	0x00000002	/* Software Internal reset */
+#define SRMMU_RST_WD	0x00000004	/* Watchdog reset */
 
 /*
  * The Ross Hypersparc has an Instruction Cache Control Register (ICCR)
@@ -373,6 +435,60 @@
  * Flush Trap or just flushes the appropriate instruction cache line.
  * The ICCR register is implemented as Ancillary State register number 31.
  */
-#define	HYPERSPARC_ICCR_ICE	1	/* Instruction cache enable */
-#define	HYPERSPARC_ICCR_FTD	2	/* Unimpl. flush trap disable */
-#define	HYPERSPARC_ASRNUM_ICCR	31	/* ICCR == ASR#31 */
+#define HYPERSPARC_ICCR_ICE	1	/* Instruction cache enable */
+#define HYPERSPARC_ICCR_FTD	2	/* Unimpl. flush trap disable */
+#define HYPERSPARC_ASRNUM_ICCR	31	/* ICCR == ASR#31 */
+
+
+/*
+ * microSPARC-IIep has control space registers in PA[30:28] = 0x1
+ */
+
+/* Asynchronous memory Fault Status/Address Registers */
+#define MSIIEP_AFSR	0x10001000
+#define MSIIEP_AFAR	0x10001004
+
+#define MSIIEP_AFSR_ERR		0x80000000 /* summary bit: LE || TO || BE */
+#define MSIIEP_AFSR_LE		0x40000000 /* late error */
+#define MSIIEP_AFSR_TO		0x20000000 /* time out */
+#define MSIIEP_AFSR_BE		0x10000000 /* bus error */
+#define MSIIEP_AFSR_S		0x01000000 /* supervisor */
+#define MSIIEP_AFSR_ME		0x00080000 /* multiple error */
+#define MSIIEP_AFSR_RD		0x00040000 /* read operation */
+#define MSIIEP_AFSR_FAV		0x00020000 /* fault address valid */
+
+#define MSIIEP_AFSR_BITS	"\177\20"			\
+		"b\37ERR\0" "b\36LE\0" "b\35TO\0" "b\34BE\0"	\
+		"b\30S\0" "b\23ME\0" "b\22RD\0" "b\21FAV\0"
+
+
+/* Memory Fault Status/Address Registers (parity faults) */
+#define MSIIEP_MFSR	0x10001050
+#define MSIIEP_MFAR	0x10001054
+
+#define MSIIEP_MFSR_ERR		0x80000000 /* summary bit */
+#define MSIIEP_MFSR_S		0x01000000 /* supervisor */
+#define MSIIEP_MFSR_CP		0x00800000 /* CPU transaction */
+#define MSIIEP_MFSR_ME		0x00080000 /* multiple error */
+#define MSIIEP_MFSR_ATO		0x00008000 /* PCI local bus timeout */
+#define MSIIEP_MFSR_PERR_1	0x00004000 /* parity error [1] */
+#define MSIIEP_MFSR_PERR_0	0x00002000 /* parity error [0] */
+#define MSIIEP_MFSR_BM		0x00001000 /* boot mode */
+#define MSIIEP_MFSR_C		0x00000800 /* cacheable */
+#define MSIIEP_MFSR_REQ		0x000000f0 /* request type */
+
+#define MSIIEP_MFSR_REQ_NOP		0x00
+#define MSIIEP_MFSR_REQ_RD64		0x10
+#define MSIIEP_MFSR_REQ_RD128		0x20
+#define MSIIEP_MFSR_REQ_RD256		0x40
+#define MSIIEP_MFSR_REQ_WR8		0x90
+#define MSIIEP_MFSR_REQ_WR16		0xa0
+#define MSIIEP_MFSR_REQ_WR32		0xb0
+#define MSIIEP_MFSR_REQ_WR64		0xc0
+
+#define MSIIEP_MFSR_BITS	"\177\20"				   \
+		"b\37ERR\0" "b\30S\0" "b\27CP\0" "b\23ME\0" "b\17ATO\0"	   \
+		"b\16PERR1\0" "b\15PERR0\0" "b\14BM\0" "b\13C\0"	   \
+		"f\4\4REQ\0" ":\0(NOP)\0" ":\1(RD64)\0" ":\2(RD128)\0"	   \
+		":\4(RD256)\0" ":\11(WR8)\0" ":\12(WR16)\0" ":\13(WR32)\0" \
+		":\14(WR64)\0"

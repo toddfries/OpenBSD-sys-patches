@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.10 2007/11/26 09:28:33 martynas Exp $	*/
-/*	$NetBSD: db_disasm.c,v 1.19 1996/10/30 08:22:39 is Exp $	*/
+/*	$NetBSD: db_disasm.c,v 1.38 2007/02/21 22:59:46 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -52,7 +51,7 @@
  * commonly with things like ","'s
  *
  * *dbuf->casm++ = ','; || ADDCHAR(dbuf,','); || addchar(dbuf,',');
- * I chose: 
+ * I chose:
  *	addchar(',');
  *
  * If this is not enough to convince you, please load up you emacs or
@@ -63,7 +62,11 @@
  * (chopps - March 1, 1994)
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.38 2007/02/21 22:59:46 thorpej Exp $");
+
 #include <sys/param.h>
+#include <sys/systm.h>
 
 #include <machine/db_machdep.h>
 
@@ -71,91 +74,100 @@
 #include <ddb/db_output.h>
 #include <m68k/m68k/db_disasm.h>
 
-void get_modregstr(dis_buffer_t *, int, int, int, int);
-void get_immed(dis_buffer_t *, int);
-void get_fpustdGEN(dis_buffer_t *, u_short, const char *);
-void addstr(dis_buffer_t *, const char *s);
-void prints(dis_buffer_t *, int, int);
-void printu(dis_buffer_t *, u_int, int);
-void prints_wb(dis_buffer_t *, int, int, int);
-void printu_wb(dis_buffer_t *, u_int, int, int);
-void prints_bf(dis_buffer_t *, int, int, int);
-void printu_bf(dis_buffer_t *, u_int, int, int);
-void iaddstr(dis_buffer_t *, const char *s);
-void iprints(dis_buffer_t *, int, int);
-void iprintu(dis_buffer_t *, u_int, int);
-void iprints_wb(dis_buffer_t *, int, int, int);
-void iprintu_wb(dis_buffer_t *, u_int, int, int);
-void make_cond(dis_buffer_t *, int , char *);
-void print_fcond(dis_buffer_t *, char);
-void print_mcond(dis_buffer_t *, char);
-void print_disp(dis_buffer_t *, int, int, int);
-void print_addr(dis_buffer_t *, u_long);
-void print_reglist(dis_buffer_t *, int, u_short);
-void print_freglist(dis_buffer_t *, int, u_short, int);
-void print_fcode(dis_buffer_t *, u_short);
+static void	get_modregstr(dis_buffer_t *, int, int, int, int);
+static void	get_modregstr_moto(dis_buffer_t *, int, int, int, int);
+static void	get_modregstr_mit(dis_buffer_t *, int, int, int, int);
+#if 0
+static u_long	get_areg_val(int reg);
+#endif
+static void	get_immed(dis_buffer_t *, int);
+static void	get_fpustdGEN(dis_buffer_t *, u_short, const char *);
+static void	addstr(dis_buffer_t *, const char *s);
+static void	prints(dis_buffer_t *, int, int);
+static void	printu(dis_buffer_t *, u_int, int);
+static void	prints_wb(dis_buffer_t *, int, int, int);
+static void	printu_wb(dis_buffer_t *, u_int, int, int);
+static void	prints_bf(dis_buffer_t *, int, int, int);
+static void	printu_bf(dis_buffer_t *, u_int, int, int);
+static void	iaddstr(dis_buffer_t *, const char *s);
+#if 0
+static void	iprints(dis_buffer_t *, int, int);
+#endif
+static void	iprintu(dis_buffer_t *, u_int, int);
+#if 0
+static void	iprints_wb(dis_buffer_t *, int, int, int);
+#endif
+static void	iprintu_wb(dis_buffer_t *, u_int, int, int);
+static void	make_cond(dis_buffer_t *, int , const char *);
+static void	print_fcond(dis_buffer_t *, char);
+static void	print_mcond(dis_buffer_t *, char);
+static void	print_disp(dis_buffer_t *, int, int, int);
+static void	print_addr(dis_buffer_t *, u_long);
+static void	print_reglist(dis_buffer_t *, int, u_short);
+static void	print_freglist(dis_buffer_t *, int, u_short, int);
+static void	print_fcode(dis_buffer_t *, u_short);
 
 /* groups */
-void opcode_bitmanip(dis_buffer_t *, u_short);
-void opcode_move(dis_buffer_t *, u_short);
-void opcode_misc(dis_buffer_t *, u_short);
-void opcode_branch(dis_buffer_t *, u_short);
-void opcode_coproc(dis_buffer_t *, u_short);
-void opcode_0101(dis_buffer_t *, u_short);
-void opcode_1000(dis_buffer_t *, u_short);
-void opcode_addsub(dis_buffer_t *, u_short);
-void opcode_1010(dis_buffer_t *, u_short);
-void opcode_1011(dis_buffer_t *, u_short);
-void opcode_1100(dis_buffer_t *, u_short);
-void opcode_1110(dis_buffer_t *, u_short);
-void opcode_fpu(dis_buffer_t *, u_short);
-void opcode_mmu(dis_buffer_t *, u_short);
-void opcode_mmu040(dis_buffer_t *, u_short);
-void opcode_move16(dis_buffer_t *, u_short);
+static void	opcode_bitmanip(dis_buffer_t *, u_short);
+static void	opcode_move(dis_buffer_t *, u_short);
+static void	opcode_misc(dis_buffer_t *, u_short);
+static void	opcode_branch(dis_buffer_t *, u_short);
+static void	opcode_coproc(dis_buffer_t *, u_short);
+static void	opcode_0101(dis_buffer_t *, u_short);
+static void	opcode_1000(dis_buffer_t *, u_short);
+static void	opcode_addsub(dis_buffer_t *, u_short);
+static void	opcode_1010(dis_buffer_t *, u_short);
+static void	opcode_1011(dis_buffer_t *, u_short);
+static void	opcode_1100(dis_buffer_t *, u_short);
+static void	opcode_1110(dis_buffer_t *, u_short);
+static void	opcode_fpu(dis_buffer_t *, u_short);
+static void	opcode_mmu(dis_buffer_t *, u_short);
+static void	opcode_mmu040(dis_buffer_t *, u_short);
+static void	opcode_move16(dis_buffer_t *, u_short);
 
 /* subs of groups */
-void opcode_movec(dis_buffer_t *, u_short);
-void opcode_divmul(dis_buffer_t *, u_short);
-void opcode_movem(dis_buffer_t *, u_short);
-void opcode_fmove_ext(dis_buffer_t *, u_short, u_short);
-void opcode_pmove(dis_buffer_t *, u_short, u_short);
-void opcode_pflush(dis_buffer_t *, u_short, u_short);
+static void	opcode_movec(dis_buffer_t *, u_short);
+static void	opcode_divmul(dis_buffer_t *, u_short);
+static void	opcode_movem(dis_buffer_t *, u_short);
+static void	opcode_fmove_ext(dis_buffer_t *, u_short, u_short);
+static void	opcode_pmove(dis_buffer_t *, u_short, u_short);
+static void	opcode_pflush(dis_buffer_t *, u_short, u_short);
 
 #define addchar(ch) (*dbuf->casm++ = ch)
 #define iaddchar(ch) (*dbuf->cinfo++ = ch)
 
 typedef void dis_func_t(dis_buffer_t *, u_short);
 
-dis_func_t *const opcode_map[16] = {
+static dis_func_t *const opcode_map[16] = {
 	opcode_bitmanip, opcode_move, opcode_move, opcode_move,
 	opcode_misc, opcode_0101, opcode_branch, opcode_move,
 	opcode_1000, opcode_addsub, opcode_1010, opcode_1011,
 	opcode_1100, opcode_addsub, opcode_1110, opcode_coproc
 };
 
-const char *const cc_table[16] = {
+static const char *const cc_table[16] = {
 	"t", "f", "hi", "ls",
 	"cc", "cs", "ne", "eq",
 	"vc", "vs", "pl", "mi",
 	"ge", "lt", "gt", "le"
 };
 
-const char *const fpcc_table[32] = {
+static const char *const fpcc_table[32] = {
 	"f", "eq", "ogt", "oge", "olt", "ole", "ogl", "or",
 	"un", "ueq", "ugt", "uge", "ult", "ule", "ne", "t",
 	"sf", "seq", "gt", "ge", "lt", "le", "gl", "gle",
 	"ngle", "ngl", "nle", "nlt", "nge", "ngt", "sne", "st" };
 
-const char *const mmcc_table[16] = {
+static const char *const mmcc_table[16] = {
 	"bs", "bc", "ls", "lc", "ss", "sc", "as", "sc",
 	"ws", "wc", "is", "ic", "gs", "gc", "cs", "cc" };
 
 
-const char *const aregs[8] = {"a0","a1","a2","a3","a4","a5","a6","sp"};
-const char *const dregs[8] = {"d0","d1","d2","d3","d4","d5","d6","d7"};
-const char *const fpregs[8] = {
+static const char *const aregs[8] = {"a0","a1","a2","a3","a4","a5","a6","sp"};
+static const char *const dregs[8] = {"d0","d1","d2","d3","d4","d5","d6","d7"};
+static const char *const fpregs[8] = {
 	"fp0","fp1","fp2","fp3","fp4","fp5","fp6","fp7" };
-const char *const fpcregs[3] = { "fpiar", "fpsr", "fpcr" };
+static const char *const fpcregs[3] = { "fpiar", "fpsr", "fpcr" };
 
 /*
  * Disassemble intruction at location ``loc''.
@@ -165,10 +177,8 @@ const char *const fpcregs[3] = { "fpiar", "fpsr", "fpcr" };
 static char asm_buffer[256];
 static char info_buffer[256];
 
-db_addr_t 
-db_disasm(loc, moto_syntax)
-	db_addr_t loc;
-	boolean_t moto_syntax;
+db_addr_t
+db_disasm(db_addr_t loc, bool moto_syntax)
 {
 	u_short opc;
 	dis_func_t *func;
@@ -179,37 +189,35 @@ db_disasm(loc, moto_syntax)
 	dbuf.used = 0;
 	dbuf.val = (short *)loc;
 	dbuf.mit = moto_syntax ? 0 : 1;
-	
+
 	dbuf.dasm[0] = 0;
 	dbuf.info[0] = 0;
 
 	opc = *dbuf.val;
 	dbuf.used++;
-	
+
 	func = opcode_map[OPCODE_MAP(opc)];
 	func(&dbuf, opc);
 
 	db_printf("%s",asm_buffer);
-	if (info_buffer[0]) 
+	if (info_buffer[0])
 		db_printf("\t[%s]\n",info_buffer);
 	else
 		db_printf("\n");
-	return (loc + sizeof(short)*dbuf.used);
+	return loc + sizeof(short) * dbuf.used;
 }
 /*
  * Bit manipulation/MOVEP/Immediate.
  */
-void
-opcode_bitmanip(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_bitmanip(dis_buffer_t *dbuf, u_short opc)
 {
-	char *tmp;
+	const char *tmp;
 	u_short ext;
 	int sz;
 
 	tmp = NULL;
-	
+
 	switch (opc) {
 	case ANDITOCCR_INST:
 		tmp = "andib\t";
@@ -253,7 +261,7 @@ opcode_bitmanip(dbuf, opc)
 
 	if (IS_INST(MOVEP,opc)) {
 		addstr(dbuf, "movp");
-		if (ISBITSET(opc,6)) 
+		if (ISBITSET(opc,6))
 			addchar('l');
 		else
 			addchar('w');
@@ -326,7 +334,7 @@ opcode_bitmanip(dbuf, opc)
 		ext = *(dbuf->val + 1);
 		ext2 = *(dbuf->val + 2);
 		dbuf->used += 2;
-		
+
 		if (ISBITSET(opc,9))
 			addstr(dbuf, "cas2l\t");
 		else
@@ -336,12 +344,12 @@ opcode_bitmanip(dbuf, opc)
 		addchar(':');
 		PRINT_DREG(dbuf, BITFIELD(ext2,2,0));
 		addchar(',');
-		
+
 		PRINT_DREG(dbuf, BITFIELD(ext,8,6));
 		addchar(':');
 		PRINT_DREG(dbuf, BITFIELD(ext2,8,6));
 		addchar(',');
-		
+
 		if (ISBITSET(ext,15))
 			PRINT_AREG(dbuf, BITFIELD(ext,14,12));
 		else
@@ -385,11 +393,11 @@ opcode_bitmanip(dbuf, opc)
 		ext = *(dbuf->val + 1);
 		dbuf->used++;
 
-		if (ISBITSET(ext,11)) 
+		if (ISBITSET(ext,11))
 			addstr(dbuf,"chk2");
-		else 
+		else
 			addstr(dbuf,"cmp2");
-			
+
 		sz = BITFIELD(opc,10,9);
 		if (sz == 0) {
 			sz = SIZE_BYTE;
@@ -411,7 +419,7 @@ opcode_bitmanip(dbuf, opc)
 			PRINT_DREG(dbuf, BITFIELD(ext, 14, 12));
 		return;
 	}
-	
+
 	switch (ADDI_MASK & opc) {
 	case MOVES_INST:
 		addstr(dbuf, "movs");
@@ -427,12 +435,12 @@ opcode_bitmanip(dbuf, opc)
 			sz = SIZE_LONG;
 		}
 		addchar('\t');
-		
+
 		ext = *(dbuf->val + 1);
 		dbuf->used++;
-		
+
 		if (ISBITSET(ext,11)) {
-			if (ISBITSET(ext,15)) 
+			if (ISBITSET(ext,15))
 				PRINT_AREG(dbuf,BITFIELD(ext,14,12));
 			else
 				PRINT_DREG(dbuf,BITFIELD(ext,14,12));
@@ -441,11 +449,11 @@ opcode_bitmanip(dbuf, opc)
 		} else {
 			get_modregstr(dbuf, 5, GETMOD_BEFORE, sz, 1);
 			addchar(',');
-			if (ISBITSET(ext,15)) 
+			if (ISBITSET(ext,15))
 				PRINT_AREG(dbuf,BITFIELD(ext,14,12));
 			else
 				PRINT_DREG(dbuf,BITFIELD(ext,14,12));
-		}			
+		}
 		return;
 	case ADDI_INST:
 		tmp = "addi";
@@ -499,10 +507,8 @@ opcode_bitmanip(dbuf, opc)
  * move byte/word/long and q
  * 00xx (01==.b 10==.l 11==.w) and 0111(Q)
  */
-void
-opcode_move(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_move(dis_buffer_t *dbuf, u_short opc)
 {
 	int sz, lused;
 
@@ -522,11 +528,11 @@ opcode_move(dbuf, opc)
 		prints_bf(dbuf, opc, 7, 0);
 		addchar(',');
 		PRINT_DREG(dbuf,BITFIELD(opc,11,9));
-		return;	
+		return;
 	}
 	addstr(dbuf, "mov");
 
-	if (BITFIELD(opc,8,6) == AR_DIR) 
+	if (BITFIELD(opc,8,6) == AR_DIR)
 		addchar('a');
 
 	if (sz == SIZE_BYTE)
@@ -546,16 +552,14 @@ opcode_move(dbuf, opc)
 /*
  * misc opcodes.
  */
-void
-opcode_misc(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_misc(dis_buffer_t *dbuf, u_short opc)
 {
-	char *tmp;
+	const char *tmp;
 	int sz;
 
 	tmp = NULL;
-	    
+
 	/* Check against no option instructions */
 	switch (opc) {
 	case BGND_INST:
@@ -631,7 +635,7 @@ opcode_misc(dbuf, opc)
 		addchar(',');
 		if ((LINKW_MASK & opc) == LINKW_INST)
 			get_immed(dbuf, SIZE_WORD);
-		else 
+		else
 			get_immed(dbuf,SIZE_LONG);
 		return;
 	case MOVETOUSP_INST:
@@ -656,7 +660,7 @@ opcode_misc(dbuf, opc)
 		get_modregstr(dbuf, 2, AR_DIR, 0, 0);
 		return;
 	}
-	
+
 	if ((opc & TRAP_MASK) == TRAP_INST) {
 		addstr(dbuf, "trap\t#");
 		printu_bf(dbuf, opc, 3, 0);
@@ -729,8 +733,8 @@ opcode_misc(dbuf, opc)
 		break;
 	}
 	if (tmp) {
-		int sz, msz;
-		
+		int msz;
+
 		addstr(dbuf, tmp);
 
 		msz = BITFIELD(opc,7,6);
@@ -748,7 +752,7 @@ opcode_misc(dbuf, opc)
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, sz, 0);
 		return;
 	}
-	
+
 	if ((opc & LEA_MASK) == LEA_INST) {
 		addstr(dbuf, "lea\t");
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, SIZE_LONG, 0);
@@ -766,16 +770,14 @@ opcode_misc(dbuf, opc)
 		addchar(',');
 		get_modregstr(dbuf, 11, DR_DIR, 0, 0);
 		return;
-	}	
+	}
 }
 
 /*
  * ADDQ/SUBQ/Scc/DBcc/TRAPcc
  */
-void
-opcode_0101(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_0101(dis_buffer_t *dbuf, u_short opc)
 {
 	int data;
 
@@ -811,18 +813,18 @@ opcode_0101(dbuf, opc)
 	} else if (IS_INST(ADDQ, opc) || IS_INST(SUBQ, opc)) {
 		int size = BITFIELD(opc,7,6);
 
-		if (IS_INST(SUBQ, opc)) 
+		if (IS_INST(SUBQ, opc))
 			addstr(dbuf, "subq");
 		else
 			addstr(dbuf, "addq");
-		
-		if (size == 0x1) 
+
+		if (size == 0x1)
 			addchar('w');
 		else if (size == 0x2)
 			addchar('l');
 		else
 			addchar('b');
-		
+
 		addchar('\t');
 		addchar('#');
 		data = BITFIELD(opc,11,9);
@@ -831,7 +833,7 @@ opcode_0101(dbuf, opc)
 		printu(dbuf, data, SIZE_BYTE);
 		addchar(',');
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, 0, 0);
-		
+
 		return;
 	}
 }
@@ -839,19 +841,17 @@ opcode_0101(dbuf, opc)
 /*
  * Bcc/BSR/BRA
  */
-void
-opcode_branch(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_branch(dis_buffer_t *dbuf, u_short opc)
 {
 	int disp, sz;
 
 	if (IS_INST(BRA,opc))
-	    addstr(dbuf, "bra");	    
+		addstr(dbuf, "bra");
 	else if (IS_INST(BSR,opc))
-	    addstr(dbuf, "bsr");	    
-	else 
-	    make_cond(dbuf,11,"b");
+		addstr(dbuf, "bsr");
+	else
+		make_cond(dbuf,11,"b");
 
 	disp = BITFIELD(opc,7,0);
 	if (disp == 0) {
@@ -881,16 +881,14 @@ opcode_branch(dbuf, opc)
 /*
  * ADD/ADDA/ADDX/SUB/SUBA/SUBX
  */
-void
-opcode_addsub(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_addsub(dis_buffer_t *dbuf, u_short opc)
 {
 	int sz, ch, amode;
-	
+
 	sz = BITFIELD(opc,7,6);
 	amode = 0;
-	
+
 	if (sz == 0) {
 		ch = 'b';
 		sz = SIZE_BYTE;
@@ -910,7 +908,7 @@ opcode_addsub(dbuf, opc)
 			ch = 'l';
 		}
 	}
-	
+
 	if (!amode && (IS_INST(ADDX,opc) || IS_INST(SUBX,opc))) {
 		if (IS_INST(ADDX,opc))
 			addstr(dbuf,"addx");
@@ -919,7 +917,7 @@ opcode_addsub(dbuf, opc)
 
 		addchar(ch);
 		addchar('\t');
-		
+
 		if (ISBITSET(opc,3)) {
 			PRINT_AREG(dbuf,BITFIELD(opc,2,0));
 			addchar('@');
@@ -963,17 +961,15 @@ opcode_addsub(dbuf, opc)
 /*
  * Shift/Rotate/Bit Field
  */
-void
-opcode_1110(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_1110(dis_buffer_t *dbuf, u_short opc)
 {
-	char *tmp;
+	const char *tmp;
 	u_short ext;
 	int type, sz;
 
 	tmp = NULL;
-	
+
 	switch (opc & BFCHG_MASK) {
 	case BFCHG_INST:
 		tmp = "bfchg";
@@ -1002,13 +998,13 @@ opcode_1110(dbuf, opc)
 	}
 	if (tmp) {
 		short bf;
-		
+
 		addstr(dbuf, tmp);
 		addchar('\t');
-		
+
 		ext = *(dbuf->val + 1);
 		dbuf->used++;
-		
+
 		if (IS_INST(BFINS,opc)) {
 			PRINT_DREG(dbuf, BITFIELD(ext,14,12));
 			addchar(',');
@@ -1017,11 +1013,11 @@ opcode_1110(dbuf, opc)
 		addchar('{');
 
 		bf = BITFIELD(ext,10,6);
-		if (ISBITSET(ext, 11)) 
+		if (ISBITSET(ext, 11))
 			PRINT_DREG(dbuf, bf);
-		else 			
+		else
 			printu_wb(dbuf, bf, SIZE_BYTE, 10);
-		
+
 		addchar(':');
 
 		bf = BITFIELD(ext, 4, 0);
@@ -1070,7 +1066,7 @@ opcode_1110(dbuf, opc)
 		addchar('l');
 	else
 		addchar('r');
-	
+
 	switch (sz) {
 	case 0:
 		sz = SIZE_BYTE;
@@ -1085,13 +1081,13 @@ opcode_1110(dbuf, opc)
 		sz = SIZE_LONG;
 		addchar('l');
 		break;
-		
+
 	}
 	addchar('\t');
 	if(BITFIELD(opc,7,6) == 0x3) {
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, sz, 0);
 		return;
-	} else if (ISBITSET(opc,5)) 
+	} else if (ISBITSET(opc,5))
 		PRINT_DREG(dbuf, BITFIELD(opc,11,9));
 	else {
 		addchar('#');
@@ -1108,16 +1104,14 @@ opcode_1110(dbuf, opc)
 /*
  * CMP/CMPA/EOR
  */
-void
-opcode_1011(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_1011(dis_buffer_t *dbuf, u_short opc)
 {
 	int sz;
-	
+
 	if (IS_INST(CMPA,opc)) {
 		addstr(dbuf, "cmpa");
-		
+
 		if (ISBITSET(opc, 8)) {
 			addchar('l');
 			sz = SIZE_LONG;
@@ -1168,13 +1162,11 @@ opcode_1011(dbuf, opc)
 /*
  * OR/DIV/SBCD
  */
-void
-opcode_1000(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_1000(dis_buffer_t *dbuf, u_short opc)
 {
 	int sz;
-	
+
 	if (IS_INST(UNPKA,opc)) {
 		addstr(dbuf, "unpk\t");
 		PRINT_AREG(dbuf,BITFIELD(opc,2,0));
@@ -1242,13 +1234,11 @@ opcode_1000(dbuf, opc)
 /*
  * AND/MUL/ABCD/EXG (1100)
  */
-void
-opcode_1100(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_1100(dis_buffer_t *dbuf, u_short opc)
 {
 	int sz;
-	
+
 	if (IS_INST(ABCDA,opc)) {
 		addstr(dbuf, "abcd\t");
 		PRINT_AREG(dbuf,BITFIELD(opc,2,0));
@@ -1302,7 +1292,7 @@ opcode_1100(dbuf, opc)
 			break;
 		}
 		addchar('\t');
-		
+
 		if (ISBITSET(opc,8)) {
 			PRINT_DREG(dbuf, BITFIELD(opc,11,9));
 			addchar(',');
@@ -1318,10 +1308,8 @@ opcode_1100(dbuf, opc)
 /*
  * Coprocessor instruction
  */
-void
-opcode_coproc(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_coproc(dis_buffer_t *dbuf, u_short opc)
 {
 	switch (BITFIELD(*dbuf->val,11,9)) {
 	case 1:
@@ -1352,6 +1340,7 @@ opcode_coproc(dbuf, opc)
 	case 4:
 	case 5:
 	default:
+		/* Nothing */ ;
 	}
 	addstr(dbuf, "UNKNOWN COPROC OPCODE");
 	return;
@@ -1360,19 +1349,15 @@ opcode_coproc(dbuf, opc)
 /*
  * Resvd
  */
-void
-opcode_1010(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_1010(dis_buffer_t *dbuf, u_short opc)
 {
 	addstr(dbuf, "RSVD");
 	dbuf->used++;
 }
 
-void
-opcode_fpu(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_fpu(dis_buffer_t *dbuf, u_short opc)
 {
 	u_short ext;
 	int type, opmode;
@@ -1504,7 +1489,7 @@ opcode_fpu(dbuf, opc)
 		case FTWOTOX:
 			get_fpustdGEN(dbuf,ext,"ftwotox");
 			return;
-			
+
 		}
 	/* cpBcc */
 	case 2:
@@ -1512,7 +1497,7 @@ opcode_fpu(dbuf, opc)
 			dbuf->used++;
 			addstr (dbuf, "fnop");
 			return;
-		}			
+		}
 	case 3:
 		addstr(dbuf, "fb");
 		print_fcond(dbuf, BITFIELD(opc,5,0));
@@ -1582,10 +1567,8 @@ opcode_fpu(dbuf, opc)
 /*
  * XXX - This screws up on:  fmovem  a0@(312),fpcr/fpsr/fpi
  */
-void
-opcode_fmove_ext(dbuf, opc, ext)
-	dis_buffer_t *dbuf;
-	u_short opc, ext;
+static void
+opcode_fmove_ext(dis_buffer_t *dbuf, u_short opc, u_short ext)
 {
 	int sz;
 
@@ -1670,26 +1653,24 @@ opcode_fmove_ext(dbuf, opc, ext)
 		if (!ISBITSET(ext,13)) {
 			addchar(',');
 			PRINT_DREG(dbuf,BITFIELD(ext,6,4));
-		}		
+		}
 	} else {
 		if (ISBITSET(ext,13)) {
 			print_freglist(dbuf, BITFIELD(opc,5,3),
-				       BITFIELD(ext,7,0), 0);
+			    BITFIELD(ext,7,0), 0);
 			addchar(',');
 		}
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, SIZE_EXTENDED, 1);
 		if (!ISBITSET(ext,13)) {
 			addchar(',');
 			print_freglist(dbuf, BITFIELD(opc,5,3),
-				       BITFIELD(ext,7,0), 0);
-		}		
+			    BITFIELD(ext,7,0), 0);
+		}
 	}
 }
 
-void
-opcode_mmu(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_mmu(dis_buffer_t *dbuf, u_short opc)
 {
 	u_short ext;
 	int type;
@@ -1700,7 +1681,7 @@ opcode_mmu(dbuf, opc)
 	case 0:
 		ext = *(dbuf->val + 1);
 		dbuf->used++;
-		
+
 		switch(BITFIELD(ext,15,13)) {
 		case 5:
 		case 1:
@@ -1796,23 +1777,21 @@ opcode_mmu(dbuf, opc)
 	}
 }
 
-void
-opcode_pflush(dbuf, opc, ext)
-	dis_buffer_t *dbuf;
-	u_short opc, ext;
+static void
+opcode_pflush(dis_buffer_t *dbuf, u_short opc, u_short ext)
 {
 	u_short mode, mask, fc;
-	
+
 	mode = BITFIELD(ext,12,10);
 	mask = BITFIELD(ext,8,5);
 	fc = BITFIELD(ext, 5, 0);
-	
+
 	if (ext == 0xa000) {
 		addstr(dbuf,"pflushr\t");
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, SIZE_LONG, 1);
 		return;
 	}
-	
+
 	if (mode == 0) {
 		addstr(dbuf,"pload");
 		if (ISBITSET(ext,9))
@@ -1822,7 +1801,7 @@ opcode_pflush(dbuf, opc, ext)
 		addchar(' ');
 		print_fcode(dbuf, fc);
 	}
-	
+
 	addstr(dbuf,"pflush");
 	switch (mode) {
 	case 1:
@@ -1840,17 +1819,15 @@ opcode_pflush(dbuf, opc, ext)
 		addchar(',');
 		addchar('#');
 		printu(dbuf, mask, SIZE_BYTE);
-		if (!ISBITSET(mode,1)) 
+		if (!ISBITSET(mode,1))
 			break;
 		addchar(',');
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, SIZE_LONG, 1);
 	}
 }
 
-void
-opcode_pmove(dbuf, opc, ext)
-	dis_buffer_t *dbuf;
-	u_short opc, ext;
+static void
+opcode_pmove(dis_buffer_t *dbuf, u_short opc, u_short ext)
 {
 	const char *reg;
 	int rtom, sz, preg;
@@ -1859,7 +1836,7 @@ opcode_pmove(dbuf, opc, ext)
 	sz   = 0;
 	rtom = ISBITSET(ext, 9);
 	preg = BITFIELD(ext, 12, 10);
-	
+
 	addstr(dbuf,"pmov");
 	if (ISBITSET(ext,8)) {
 		addchar('f');
@@ -1943,15 +1920,15 @@ opcode_pmove(dbuf, opc, ext)
 	case SIZE_QUAD:
 		addchar ('d');
 		break;
-	}		
+	}
 	addchar('\t');
-	
+
 	if (!rtom) {
 		get_modregstr(dbuf, 5, GETMOD_BEFORE, sz, 1);
 		addchar(',');
 	}
 	addstr(dbuf, reg);
-	if (BITFIELD(ext, 15, 13) == 3 && preg > 1) 
+	if (BITFIELD(ext, 15, 13) == 3 && preg > 1)
 		printu_bf(dbuf, ext, 4, 2);
 	if (rtom) {
 		addchar(',');
@@ -1960,10 +1937,8 @@ opcode_pmove(dbuf, opc, ext)
 	return;
 }
 
-void
-print_fcode(dbuf, fc)
-	dis_buffer_t *dbuf;
-	u_short fc;
+static void
+print_fcode(dis_buffer_t *dbuf, u_short fc)
 {
 	if (ISBITSET(fc, 4))
 		printu_bf(dbuf, fc, 3, 0);
@@ -1974,10 +1949,9 @@ print_fcode(dbuf, fc)
 	else
 		addstr(dbuf, "dfc");
 }
-void
-opcode_mmu040(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+
+static void
+opcode_mmu040(dis_buffer_t *dbuf, u_short opc)
 {
 	if (ISBITSET(opc, 6)) {
 		addstr(dbuf, "ptest");
@@ -2011,26 +1985,23 @@ opcode_mmu040(dbuf, opc)
 	*dbuf->casm = 0;
 }
 
-
 /*
  * disassemble long format (64b) divs/muls divu/mulu opcode.
  * Note: opcode's dbuf->used already accounted for.
  */
-void
-opcode_divmul(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_divmul(dis_buffer_t *dbuf, u_short opc)
 {
 	u_short ext;
 	int iq, hr;
-	
+
 	ext = *(dbuf->val + 1);
 	dbuf->used++;
 
 	iq = BITFIELD(ext,14,12);
 	hr = BITFIELD(ext,2,0);
-	
-	if (IS_INST(DIVSL,opc)) 
+
+	if (IS_INST(DIVSL,opc))
 		addstr(dbuf, "div");
 	else
 		addstr(dbuf, "mul");
@@ -2050,7 +2021,7 @@ opcode_divmul(dbuf, opc)
 	    (iq != hr && IS_INST(DIVSL,opc))) {
 		/* 64 bit version */
 		PRINT_DREG(dbuf, hr);
-		if (dbuf->mit) 
+		if (dbuf->mit)
 			addchar(',');
 		else
 			addchar(':');
@@ -2058,13 +2029,10 @@ opcode_divmul(dbuf, opc)
 	PRINT_DREG(dbuf, iq);
 }
 
-void
-print_reglist(dbuf, mod, rl)
-	dis_buffer_t *dbuf;
-	int mod;
-	u_short rl;
+static void
+print_reglist(dis_buffer_t *dbuf, int mod, u_short rl)
 {
-	const char *const regs[16] = {
+	static const char *const regs[16] = {
 		"d0","d1","d2","d3","d4","d5","d6","d7",
 		"a0","a1","a2","a3","a4","a5","a6","a7" };
 	int bit, list;
@@ -2074,9 +2042,9 @@ print_reglist(dbuf, mod, rl)
 		rl = 0;
 		/* I am sure there is some trick... */
 		for (bit = 0; bit < 16; bit++)
-			if (list & (1 << bit)) 
+			if (list & (1 << bit))
 				rl |= (0x8000 >> bit);
-	} 
+	}
 	for (bit = 0, list = 0; bit < 16; bit++) {
 		if (ISBITSET(rl,bit) && bit != 8) {
 			if (list == 0) {
@@ -2107,11 +2075,8 @@ print_reglist(dbuf, mod, rl)
 	*dbuf->casm = 0;
 }
 
-void
-print_freglist(dbuf, mod, rl, cntl)
-	dis_buffer_t *dbuf;
-	int mod, cntl;
-	u_short rl;
+static void
+print_freglist(dis_buffer_t *dbuf, int mod, u_short rl, int cntl)
 {
 	const char *const * regs;
 	int bit, list, upper;
@@ -2124,9 +2089,9 @@ print_freglist(dbuf, mod, rl, cntl)
 		rl = 0;
 		/* I am sure there is some trick... */
 		for (bit = 0; bit < upper; bit++)
-			if (list & (1 << bit)) 
+			if (list & (1 << bit))
 				rl |= (0x80 >> bit);
-	} 
+	}
 	for (bit = 0, list = 0; bit < upper; bit++) {
 		if (ISBITSET(rl,bit)) {
 			if (list == 0) {
@@ -2159,16 +2124,14 @@ print_freglist(dbuf, mod, rl, cntl)
 /*
  * disassemble movem opcode.
  */
-void
-opcode_movem(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_movem(dis_buffer_t *dbuf, u_short opc)
 {
 	u_short rl;
-	
+
 	rl = *(dbuf->val + 1);
 	dbuf->used++;
-	
+
 	if (ISBITSET(opc,6))
 		addstr(dbuf, "movml\t");
 	else
@@ -2187,12 +2150,10 @@ opcode_movem(dbuf, opc)
 /*
  * disassemble movec opcode.
  */
-void
-opcode_movec(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+static void
+opcode_movec(dis_buffer_t *dbuf, u_short opc)
 {
-	char *tmp;
+	const char *tmp;
 	u_short ext;
 
 	ext = *(dbuf->val + 1);
@@ -2201,7 +2162,7 @@ opcode_movec(dbuf, opc)
 	addstr(dbuf, "movc\t");
 	if (ISBITSET(opc,0)) {
 		dbuf->val++;
-		if (ISBITSET(ext,15)) 
+		if (ISBITSET(ext,15))
 			get_modregstr(dbuf,14,AR_DIR,0,0);
 		else
 			get_modregstr(dbuf,14,DR_DIR,0,0);
@@ -2279,7 +2240,7 @@ opcode_movec(dbuf, opc)
 	if (!ISBITSET(opc,0)) {
 		dbuf->val++;
 		addchar(',');
-		if (ISBITSET(ext,15)) 
+		if (ISBITSET(ext,15))
 			get_modregstr(dbuf,14,AR_DIR,0,0);
 		else
 			get_modregstr(dbuf,14,DR_DIR,0,0);
@@ -2287,10 +2248,11 @@ opcode_movec(dbuf, opc)
 	}
 }
 
-void
-opcode_move16(dbuf, opc)
-	dis_buffer_t *dbuf;
-	u_short opc;
+/*
+ * disassemble move16 opcode.
+ */
+static void
+opcode_move16(dis_buffer_t *dbuf, u_short opc)
 {
 	u_short ext;
 
@@ -2334,10 +2296,8 @@ opcode_move16(dbuf, opc)
 /*
  * copy const string 's' into ``dbuf''->casm
  */
-void
-addstr(dbuf, s)
-	dis_buffer_t *dbuf;
-	const char *s;
+static void
+addstr(dis_buffer_t *dbuf, const char *s)
 {
 	while ((*dbuf->casm++ = *s++))
 		;
@@ -2347,26 +2307,22 @@ addstr(dbuf, s)
 /*
  * copy const string 's' into ``dbuf''->cinfo
  */
-void
-iaddstr(dbuf, s)
-	dis_buffer_t *dbuf;
-	const char *s;
+static void
+iaddstr(dis_buffer_t *dbuf, const char *s)
 {
 	while ((*dbuf->cinfo++ = *s++))
 		;
 	dbuf->cinfo--;
 }
 
-void
-get_modregstr_moto(dbuf, bit, mod, sz, dd)
-	dis_buffer_t *dbuf;
-	int bit, mod, sz, dd;
+static void
+get_modregstr_moto(dis_buffer_t *dbuf, int bit, int mod, int sz, int dd)
 {
 	u_char scale, idx;
 	const short *nval;
 	u_short ext;
 	int disp, odisp, bd, od, reg;
-	
+
 	odisp = 0;
 
 	/* check to see if we have been given the mod */
@@ -2461,13 +2417,13 @@ get_modregstr_moto(dbuf, bit, mod, sz, dd)
 		}
 		/* standrd PC stuff. */
 		/*FALLTHROUGH*/
-	case AR_IDX: 
+	case AR_IDX:
 		ext = *(dbuf->val + 1 + dd);
 		dbuf->used++;
 		nval = dbuf->val + 2 + dd; /* set to possible displacements */
 		scale = BITFIELD(ext,10,9);
 		idx = BITFIELD(ext,14,12);
-		
+
 		if (ISBITSET(ext,8)) {
 			/* either base disp, or memory indirect */
 			bd = BITFIELD(ext,5,4);
@@ -2479,18 +2435,18 @@ get_modregstr_moto(dbuf, bit, mod, sz, dd)
 				disp = *nval++;
 			} else {
 				dbuf->used += 2;
-				disp = *(long *)nval;
+				disp = *(const long *)nval;
 				nval += 2;
 			}
 
-			if (od == 1) 
+			if (od == 1)
 				odisp = 0;
 			else if (od == 2) {
 				dbuf->used++;
 				odisp = *nval++;
 			} else if (od == 3) {
 				dbuf->used += 2;
-				odisp = *(long *)nval;
+				odisp = *(const long *)nval;
 				nval += 2;
 			}
 		} else {
@@ -2501,7 +2457,7 @@ get_modregstr_moto(dbuf, bit, mod, sz, dd)
 			 * are using on of those modes by checking
 			 * `bd' and `od'.
 			 */
-			od = 0;	
+			od = 0;
 			bd = 0;
 			disp = (char)BITFIELD(ext,7,0);
 		}
@@ -2518,23 +2474,23 @@ get_modregstr_moto(dbuf, bit, mod, sz, dd)
 		addchar(',');
 		if (bd && ISBITSET(ext,7)) {
 			addchar('z');
-			if (mod != MOD_SPECIAL) 
+			if (mod != MOD_SPECIAL)
 				PRINT_AREG(dbuf,reg);
 			else {
 				addchar('p');
 				addchar('c');
-			} 
-		} else if (mod == AR_IDX) 
+			}
+		} else if (mod == AR_IDX)
 			PRINT_AREG(dbuf, reg);
 		else {
 			addchar('p');
 			addchar('c');
 		}
-		
-		if (od && ISBITSET(ext,2)) 
+
+		if (od && ISBITSET(ext,2))
 			addchar(']'); /* post-indexed. */
 		addchar(',');
-		if (bd && ISBITSET(ext,6)) 
+		if (bd && ISBITSET(ext,6))
 			addchar('0');
 		else {
 			if (0x8000 & ext)
@@ -2549,7 +2505,7 @@ get_modregstr_moto(dbuf, bit, mod, sz, dd)
 			}
 		}
 		if (od) {
-			if (!ISBITSET(ext,2)) 
+			if (!ISBITSET(ext,2))
 				addchar(']'); /* pre-indexed */
 			addchar(',');
 			prints(dbuf, odisp,
@@ -2561,19 +2517,17 @@ get_modregstr_moto(dbuf, bit, mod, sz, dd)
 		break;
 	}
 	*dbuf->casm = 0;
-}			
-	
+}
+
 /* mit syntax makes for spaghetti parses */
-void
-get_modregstr_mit(dbuf, bit, mod, sz, dd)
-	dis_buffer_t *dbuf;
-	int bit, mod, sz, dd;
+static void
+get_modregstr_mit(dis_buffer_t *dbuf, int bit, int mod, int sz, int dd)
 {
 	u_char scale, idx;
 	const short *nval;
 	u_short ext;
 	int disp, odisp, bd, od, reg;
-	
+
 	disp = odisp = 0;
 	/* check to see if we have been given the mod */
 	if (mod != GETMOD_BEFORE && mod != GETMOD_AFTER)
@@ -2667,13 +2621,13 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 		}
 		/* standrd PC stuff. */
 		/*FALLTHROUGH*/
-	case AR_IDX: 
+	case AR_IDX:
 		dbuf->used++;	/* indicate use of ext word. */
 		ext = *(dbuf->val + 1 + dd);
 		nval = dbuf->val + 2 + dd; /* set to possible displacements */
 		scale = BITFIELD(ext,10,9);
 		idx = BITFIELD(ext,14,12);
-		
+
 		if (ISBITSET(ext,8)) {
 			/* either base disp, or memory indirect */
 			bd = BITFIELD(ext,5,4);
@@ -2685,18 +2639,18 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 				disp = *nval++;
 			} else {
 				dbuf->used += 2;
-				disp = *(long *)nval;
+				disp = *(const long *)nval;
 				nval += 2;
 			}
 
-			if (od == 1) 
+			if (od == 1)
 				odisp = 0;
 			else if (od == 2) {
 				dbuf->used++;
 				odisp = *nval++;
 			} else if (od == 3) {
 				dbuf->used += 2;
-				odisp = *(long *)nval;
+				odisp = *(const long *)nval;
 				nval += 2;
 			}
 		} else {
@@ -2707,7 +2661,7 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 			 * are using on of those modes by checking
 			 * `bd' and `od'.
 			 */
-			od = 0;	
+			od = 0;
 			bd = 0;
 			disp = (char)BITFIELD(ext,7,0);
 		}
@@ -2727,14 +2681,14 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 		}
 		addchar('@');
 		addchar('(');
-		
+
 		if (bd && bd != 1) {
 			prints(dbuf, disp,
 			    bd == 2 ? SIZE_WORD :
 			    bd == 3 ? SIZE_LONG :
 			    SIZE_BYTE);
-			if (od && !ISBITSET(ext,6) && !ISBITSET(ext,2)) 
-				/* Pre-indexed and not suppressing index */
+			if (od && !ISBITSET(ext,6) && !ISBITSET(ext,2))
+				/* Pre-indexed and not supressing index */
 				addchar(',');
 			else if (od && ISBITSET(ext,2)) {
 				/* Post-indexed */
@@ -2744,14 +2698,14 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 			} else if (!od)
 				addchar(',');
 		} else if (!bd) {
-		       	/* don't forget simple 8 bit displacement. */
+			/* don't forget simple 8 bit displacement. */
 			prints(dbuf, disp,
 			    bd == 2 ? SIZE_WORD :
 			    bd == 3 ? SIZE_LONG :
 			    SIZE_BYTE);
 			addchar(',');
 		}
-		
+
 		/* Post-indexed? */
 		if (od && ISBITSET(ext,2)) {
 			/* have displacement? */
@@ -2762,8 +2716,8 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 				    SIZE_BYTE);
 				addchar(',');
 			}
-		} 
-			
+		}
+
 		if (!bd || !ISBITSET(ext,6)) {
 			if (ISBITSET(ext,15))
 				PRINT_AREG(dbuf,idx);
@@ -2792,7 +2746,7 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
 		break;
 	}
 	*dbuf->casm = 0;
-}		
+}
 
 /*
  * Given a disassembly buffer ``dbuf'' and a starting bit of the
@@ -2800,13 +2754,12 @@ get_modregstr_mit(dbuf, bit, mod, sz, dd)
  * GETMOD_BEFORE or GETMOD_AFTER), disassemble and write into ``dbuf''
  * the mod|reg pair.
  */
-void get_modregstr(dbuf, bit, mod, sz, dispdisp)
-	dis_buffer_t *dbuf;
-	int bit, mod, sz, dispdisp;
+static void
+get_modregstr(dis_buffer_t *dbuf, int bit, int mod, int sz, int dispdisp)
 {
-	if (dbuf->mit) 
+	if (dbuf->mit)
 		get_modregstr_mit(dbuf,bit,mod,sz,dispdisp);
-	else 
+	else
 		get_modregstr_moto(dbuf,bit,mod,sz,dispdisp);
 }
 
@@ -2815,11 +2768,8 @@ void get_modregstr(dbuf, bit, mod, sz, dispdisp)
  * and the ``base'' string of the opcode, append the full
  * opcode name including condition found at ``bit''.
  */
-void
-make_cond(dbuf, bit, base)
-	dis_buffer_t *dbuf;
-	int bit;
-	char *base;
+static void
+make_cond(dis_buffer_t *dbuf, int bit, const char *base)
 {
 	int cc;
 	const char *ccs;
@@ -2831,18 +2781,14 @@ make_cond(dbuf, bit, base)
 	addstr(dbuf, ccs);
 }
 
-void
-print_fcond(dbuf, cp)
-	dis_buffer_t *dbuf;
-	char cp;
+static void
+print_fcond(dis_buffer_t *dbuf, char cp)
 {
 	addstr(dbuf,fpcc_table[cp&31]); 	/* XXX - not 63 ?*/
 }
 
-void
-print_mcond(dbuf, cp)
-	dis_buffer_t *dbuf;
-	char cp;
+static void
+print_mcond(dis_buffer_t *dbuf, char cp)
 {
 	addstr(dbuf,mmcc_table[cp&15]);
 }
@@ -2853,10 +2799,8 @@ print_mcond(dbuf, cp)
  * hash (``#'') sign and the value.  Increment the ``dbuf''->used
  * field accordingly.
  */
-void
-get_immed(dbuf,sz)
-	dis_buffer_t *dbuf;
-	int sz;
+static void
+get_immed(dis_buffer_t *dbuf,int sz)
 {
 	addchar('#');
 	switch (sz) {
@@ -2876,14 +2820,11 @@ get_immed(dbuf,sz)
 	return;
 }
 
-void
-get_fpustdGEN(dbuf,ext,name)
-	dis_buffer_t *dbuf;
-	u_short ext;
-	const char *name;
+static void
+get_fpustdGEN(dis_buffer_t *dbuf, u_short ext, const char *name)
 {
 	int sz;
-	
+
 	/*
 	 * If bit seven is set, its a 040 s/d opcode, then if bit 2 is
 	 * set its "d".  This is not documented, however thats the way
@@ -2958,38 +2899,37 @@ get_fpustdGEN(dbuf,ext,name)
 	}
 }
 
-u_long
-get_areg_val(reg)
-	int reg;
+#if 0
+static u_long
+get_areg_val(int reg)
 {
-	return (0);
+	return 0;
 }
+#endif
 
 /*
  * given value ``disp'' print it to ``dbuf''->buf. ``rel'' is a
  * register number 0-7 (a0-a7), or -1 (pc). Thus possible extra info
  * could be output to the ``dbuf''->info buffer.
  */
-void
-print_disp(dbuf, disp, sz, rel)
-	dis_buffer_t *dbuf;
-	int disp, sz, rel;
+static void
+print_disp(dis_buffer_t *dbuf, int disp, int sz, int rel)
 {
 	db_expr_t diff;
 	db_sym_t sym;
-	char *symname;
+	const char *symname;
 	u_long nv;
-		
+
 	prints(dbuf, disp, sz);
 
-	if (rel == -1) 
+	if (rel == -1)
 		/* XXX This may be wrong for a couple inst. */
 		nv = disp + (u_int)dbuf->val + 2;
 	else
 		return; /* nv = get_areg_val(rel); */
-		
+
 	diff = INT_MAX;
-	symname = NULL;	
+	symname = NULL;
 	sym = db_search_symbol(nv, DB_STGY_PROC, &diff);
 	db_symbol_values(sym, &symname, 0);
 
@@ -3003,15 +2943,13 @@ print_disp(dbuf, disp, sz, rel)
 	}
 }
 
-void
-print_addr(dbuf, addr)
-	dis_buffer_t *dbuf;
-	u_long addr;
+static void
+print_addr(dis_buffer_t *dbuf, u_long addr)
 {
 	db_expr_t diff;
 	db_sym_t sym;
-	char *symname;
-				
+	const char *symname;
+
 	diff = INT_MAX;
 	symname = NULL;
 	sym = db_search_symbol(addr, DB_STGY_ANY, &diff);
@@ -3037,93 +2975,80 @@ print_addr(dbuf, addr)
 	}
 }
 
-void
-prints(dbuf, val, sz)
-	dis_buffer_t *dbuf;
-	int val;
-	int sz;
+static void
+prints(dis_buffer_t *dbuf, int val, int sz)
 {
 	extern int db_radix;
 
 	if (val == 0) {
 		dbuf->casm[0] = '0';
 		dbuf->casm[1] = 0;
-	} else if (sz == SIZE_BYTE) 
+	} else if (sz == SIZE_BYTE)
 		prints_wb(dbuf, (char)val, sz, db_radix);
-	else if (sz == SIZE_WORD) 
+	else if (sz == SIZE_WORD)
 		prints_wb(dbuf, (short)val, sz, db_radix);
-	else 
+	else
 		prints_wb(dbuf, (long)val, sz, db_radix);
-	
+
 	dbuf->casm = &dbuf->casm[strlen(dbuf->casm)];
 }
 
-void
-iprints(dbuf, val, sz)
-	dis_buffer_t *dbuf;
-	int val;
-	int sz;
+#if 0
+static void
+iprints(dis_buffer_t *dbuf, int val, int sz)
 {
 	extern int db_radix;
 
 	if (val == 0) {
 		dbuf->cinfo[0] = '0';
 		dbuf->cinfo[1] = 0;
-	} else if (sz == SIZE_BYTE) 
+	} else if (sz == SIZE_BYTE)
 		iprints_wb(dbuf, (char)val, sz, db_radix);
-	else if (sz == SIZE_WORD) 
+	else if (sz == SIZE_WORD)
 		iprints_wb(dbuf, (short)val, sz, db_radix);
-	else 
+	else
 		iprints_wb(dbuf, (long)val, sz, db_radix);
-	
+
 	dbuf->cinfo = &dbuf->cinfo[strlen(dbuf->cinfo)];
 }
+#endif
 
-void
-printu(dbuf, val, sz)
-	dis_buffer_t *dbuf;
-	u_int val;
-	int sz;
+static void
+printu(dis_buffer_t *dbuf, u_int val, int sz)
 {
 	extern int db_radix;
 
 	if (val == 0) {
 		dbuf->casm[0] = '0';
 		dbuf->casm[1] = 0;
-	} else if (sz == SIZE_BYTE) 
+	} else if (sz == SIZE_BYTE)
 		printu_wb(dbuf, (u_char)val, sz, db_radix);
-	else if (sz == SIZE_WORD) 
+	else if (sz == SIZE_WORD)
 		printu_wb(dbuf, (u_short)val, sz, db_radix);
-	else 
+	else
 		printu_wb(dbuf, (u_long)val, sz, db_radix);
 	dbuf->casm = &dbuf->casm[strlen(dbuf->casm)];
 }
 
-void
-iprintu(dbuf, val, sz)
-	dis_buffer_t *dbuf;
-	u_int val;
-	int sz;
+static void
+iprintu(dis_buffer_t *dbuf, u_int val, int sz)
 {
 	extern int db_radix;
 
 	if (val == 0) {
 		dbuf->cinfo[0] = '0';
 		dbuf->cinfo[1] = 0;
-	} else if (sz == SIZE_BYTE) 
+	} else if (sz == SIZE_BYTE)
 		iprintu_wb(dbuf, (u_char)val, sz, db_radix);
-	else if (sz == SIZE_WORD) 
+	else if (sz == SIZE_WORD)
 		iprintu_wb(dbuf, (u_short)val, sz, db_radix);
-	else 
+	else
 		iprintu_wb(dbuf, (u_long)val, sz, db_radix);
 	dbuf->cinfo = &dbuf->cinfo[strlen(dbuf->cinfo)];
 }
 
-void
-printu_wb(dbuf, val, sz, base)
-	dis_buffer_t *dbuf;
-	u_int val;
-	int sz, base;
+static void
+printu_wb(dis_buffer_t *dbuf, u_int val, int sz, int base)
 {
 	static char buf[sizeof(long) * NBBY / 3 + 2];
 	char *p, ch;
@@ -3138,20 +3063,17 @@ printu_wb(dbuf, val, sz, base)
 
 	p = buf;
 	do {
-		*++p = "0123456789abcdef"[val % base];
+		*++p = hexdigits[val % base];
 	} while (val /= base);
 
 	while ((ch = *p--))
 		addchar(ch);
-	
+
 	*dbuf->casm = 0;
 }
 
-void
-prints_wb(dbuf, val, sz, base)
-	dis_buffer_t *dbuf;
-	int val;
-	int sz, base;
+static void
+prints_wb(dis_buffer_t *dbuf, int val, int sz, int base)
 {
 	if (val < 0) {
 		addchar('-');
@@ -3160,11 +3082,8 @@ prints_wb(dbuf, val, sz, base)
 	printu_wb(dbuf, val, sz, base);
 }
 
-void
-iprintu_wb(dbuf, val, sz, base)
-	dis_buffer_t *dbuf;
-	u_int val;
-	int sz, base;
+static void
+iprintu_wb(dis_buffer_t *dbuf, u_int val, int sz, int base)
 {
 	static char buf[sizeof(long) * NBBY / 3 + 2];
 	char *p, ch;
@@ -3179,20 +3098,18 @@ iprintu_wb(dbuf, val, sz, base)
 
 	p = buf;
 	do {
-		*++p = "0123456789abcdef"[val % base];
+		*++p = hexdigits[val % base];
 	} while (val /= base);
 
 	while ((ch = *p--))
 		iaddchar(ch);
-	
+
 	*dbuf->cinfo = 0;
 }
 
-void
-iprints_wb(dbuf, val, sz, base)
-	dis_buffer_t *dbuf;
-	int val;
-	int sz, base;
+#if 0
+static void
+iprints_wb(dis_buffer_t *dbuf, int val, int sz, int base)
 {
 	if (val < 0) {
 		iaddchar('-');
@@ -3200,26 +3117,21 @@ iprints_wb(dbuf, val, sz, base)
 	}
 	iprintu_wb(dbuf, val, sz, base);
 }
+#endif
 
-
-void
-prints_bf(dbuf, val, sb, eb)
-	dis_buffer_t *dbuf;
-	int val, sb, eb;
+static void
+prints_bf(dis_buffer_t *dbuf, int val, int sb, int eb)
 {
-	if (ISBITSET(val,sb)) 
+	if (ISBITSET(val,sb))
 		val = (~0 & ~BITFIELD(~0, sb, eb)) | BITFIELD(val, sb, eb);
 	else
 		val = BITFIELD(val,sb,eb);
-	
+
 	prints(dbuf, val, SIZE_LONG);
 }
 
-void
-printu_bf(dbuf, val, sb, eb)
-	dis_buffer_t *dbuf;
-	u_int val;
-	int sb, eb;
+static void
+printu_bf(dis_buffer_t *dbuf, u_int val, int sb, int eb)
 {
 	printu(dbuf,BITFIELD(val,sb,eb),SIZE_LONG);
-}	
+}

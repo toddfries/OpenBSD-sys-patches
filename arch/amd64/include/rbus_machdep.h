@@ -1,5 +1,4 @@
-/*	$OpenBSD: rbus_machdep.h,v 1.3 2007/12/20 13:34:48 kettenis Exp $ */
-/*	$NetBSD: rbus_machdep.h,v 1.2 1999/10/15 06:43:05 haya Exp $	*/
+/*	$NetBSD: rbus_machdep.h,v 1.1 2005/12/21 22:35:41 rjs Exp $	*/
 
 /*
  * Copyright (c) 1999
@@ -38,18 +37,13 @@
 struct pci_attach_args;		/* XXX */
 
 #define md_space_map(bt, physaddr, size, flags, bshp) \
-	_bus_space_map((bt), (physaddr), (size), (flags), (bshp))
+	_x86_memio_map((bt), (physaddr), (size), (flags), (bshp))
 
 #define md_space_unmap(bt, bsh, size, adrp) \
-	_bus_space_unmap((bt), (bsh), (size), (adrp))
+	_x86_memio_unmap((bt), (bsh), (size), (adrp))
 
 
-rbus_tag_t rbus_pccbb_parent_io(struct device *self,
-    struct pci_attach_args *pa);
-rbus_tag_t rbus_pccbb_parent_mem(struct device *self,
-    struct pci_attach_args *pa);
-
-void	pccbb_attach_hook(struct device *, struct device *,
-	    struct pci_attach_args *);
+rbus_tag_t rbus_pccbb_parent_io(struct pci_attach_args *);
+rbus_tag_t rbus_pccbb_parent_mem(struct pci_attach_args *);
 
 #endif /* _ARCH_AMD64_AMD64_RBUS_MACHDEP_H_ */

@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_iwivar.h,v 1.18 2006/08/19 12:03:05 damien Exp $	*/
+/*	$NetBSD: if_iwivar.h,v 1.15 2007/12/09 20:28:09 jmcneill Exp $ */
 
 /*-
- * Copyright (c) 2004-2006
+ * Copyright (c) 2004, 2005
  *      Damien Bergamini <damien.bergamini@free.fr>. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,6 +27,15 @@
  * SUCH DAMAGE.
  */
 
+struct iwi_firmware {
+	void	*boot;
+	int	boot_size;
+	void	*ucode;
+	int	ucode_size;
+	void	*main;
+	int	main_size;
+};
+
 struct iwi_rx_radiotap_header {
 	struct ieee80211_radiotap_header wr_ihdr;
 	uint8_t		wr_flags;
@@ -35,7 +44,7 @@ struct iwi_rx_radiotap_header {
 	uint16_t	wr_chan_flags;
 	uint8_t		wr_antsignal;
 	uint8_t		wr_antenna;
-} __packed;
+};
 
 #define IWI_RX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
@@ -49,17 +58,17 @@ struct iwi_tx_radiotap_header {
 	uint8_t		wt_flags;
 	uint16_t	wt_chan_freq;
 	uint16_t	wt_chan_flags;
-} __packed;
+};
 
 #define IWI_TX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL))
 
-
 struct iwi_cmd_ring {
-	bus_dmamap_t		map;
-	bus_dma_segment_t	seg;
-	struct iwi_cmd_desc	desc[IWI_CMD_RING_COUNT];
+	bus_dmamap_t		desc_map;
+	bus_dma_segment_t	desc_seg;
+	struct iwi_cmd_desc	*desc;
+	int			count;
 	int			queued;
 	int			cur;
 	int			next;
@@ -72,48 +81,62 @@ struct iwi_tx_data {
 };
 
 struct iwi_tx_ring {
-	bus_dmamap_t		map;
-	bus_dma_segment_t	seg;
+	bus_dmamap_t		desc_map;
+	bus_dma_segment_t	desc_seg;
 	bus_size_t		csr_ridx;
 	bus_size_t		csr_widx;
 	struct iwi_tx_desc	*desc;
-	struct iwi_tx_data	data[IWI_TX_RING_COUNT];
+	struct iwi_tx_data	*data;
+	int			count;
 	int			queued;
 	int			cur;
 	int			next;
 };
 
 struct iwi_rx_data {
-	bus_dmamap_t		map;
-	struct mbuf		*m;
-	uint32_t		reg;
+	bus_dmamap_t	map;
+	struct mbuf	*m;
 };
 
 struct iwi_rx_ring {
-	struct iwi_rx_data	data[IWI_RX_RING_COUNT];
+	struct iwi_rx_data	*data;
+	int			count;
 	int			cur;
 };
 
-struct iwi_softc {
-	struct device		sc_dev;
+struct iwi_node {
+	struct ieee80211_node	in_node;
+	int			in_station;
+#define IWI_MAX_IBSSNODE	32
+};
 
+struct iwi_softc {
+	device_t		sc_dev;
+	struct ethercom		sc_ec;
 	struct ieee80211com	sc_ic;
 	int			(*sc_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
+	void			(*sc_node_free)(struct ieee80211_node *);
+
+	uint32_t		sc_unr;
+
+	struct iwi_firmware	fw;
+	const char		*sc_fwname;
+	char			*sc_blob;
 
 	uint32_t		flags;
-#define IWI_FLAG_FW_INITED	(1 << 0)
+#define IWI_FLAG_FW_CACHED	(1 << 0)
+#define IWI_FLAG_FW_INITED	(1 << 1)
+#define IWI_FLAG_SCANNING	(1 << 3)
 
 	bus_dma_tag_t		sc_dmat;
 
 	struct iwi_cmd_ring	cmdq;
-	struct iwi_tx_ring	txq[4];
+	struct iwi_tx_ring	txq[WME_NUM_AC];
 	struct iwi_rx_ring	rxq;
 
-#define IWI_MAX_NODE	32
-	uint8_t			sta[IWI_MAX_NODE][IEEE80211_ADDR_LEN];
-	uint8_t			nsta;
-
+	struct resource		*irq;
+	struct resource		*mem;
 	bus_space_tag_t		sc_st;
 	bus_space_handle_t	sc_sh;
 	void 			*sc_ih;
@@ -121,12 +144,17 @@ struct iwi_softc {
 	pcitag_t		sc_pcitag;
 	bus_size_t		sc_sz;
 
+	struct sysctllog	*sc_sysctllog;
+
+	int			antenna;
+	int			dwelltime;
+	int			bluetooth;
+	int			nictype;
+
 	int			sc_tx_timer;
 
-	void			*powerhook;
-
 #if NBPFILTER > 0
-	caddr_t			sc_drvbpf;
+	struct bpf_if		*sc_drvbpf;
 
 	union {
 		struct iwi_rx_radiotap_header th;
@@ -143,3 +171,8 @@ struct iwi_softc {
 	int			sc_txtap_len;
 #endif
 };
+
+#define	sc_if	sc_ec.ec_if
+
+#define SIOCGRADIO	_IOWR('i', 139, struct ifreq)
+#define SIOCGTABLE0	_IOWR('i', 140, struct ifreq)

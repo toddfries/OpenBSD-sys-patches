@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_inode.c,v 1.106 2006/10/14 09:17:26 yamt Exp $	*/
+/*	$NetBSD: lfs_inode.c,v 1.120 2008/04/28 20:24:11 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_inode.c,v 1.106 2006/10/14 09:17:26 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_inode.c,v 1.120 2008/04/28 20:24:11 martin Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_quota.h"
@@ -96,10 +89,9 @@ __KERNEL_RCSID(0, "$NetBSD: lfs_inode.c,v 1.106 2006/10/14 09:17:26 yamt Exp $")
 
 static int lfs_update_seguse(struct lfs *, struct inode *ip, long, size_t);
 static int lfs_indirtrunc (struct inode *, daddr_t, daddr_t,
-			   daddr_t, int, long *, long *, long *, size_t *,
-			   struct lwp *);
+			   daddr_t, int, long *, long *, long *, size_t *);
 static int lfs_blkfree (struct lfs *, struct inode *, daddr_t, size_t, long *, size_t *);
-static int lfs_vtruncbuf(struct vnode *, daddr_t, int, int);
+static int lfs_vtruncbuf(struct vnode *, daddr_t, bool, int);
 
 /* Search a block for a specific dinode. */
 struct ufs1_dinode *
@@ -135,7 +127,6 @@ lfs_update(struct vnode *vp, const struct timespec *acc,
 {
 	struct inode *ip;
 	struct lfs *fs = VFSTOUFS(vp->v_mount)->um_lfs;
-	int s;
 	int flags;
 
 	ASSERT_NO_SEGLOCK(fs);
@@ -150,16 +141,14 @@ lfs_update(struct vnode *vp, const struct timespec *acc,
 	 * will cause a panic.	So, we must wait until any pending write
 	 * for our inode completes, if we are called with UPDATE_WAIT set.
 	 */
-	s = splbio();
-	simple_lock(&vp->v_interlock);
+	mutex_enter(&vp->v_interlock);
 	while ((updflags & (UPDATE_WAIT|UPDATE_DIROP)) == UPDATE_WAIT &&
 	    WRITEINPROG(vp)) {
 		DLOG((DLOG_SEG, "lfs_update: sleeping on ino %d"
 		      " (in progress)\n", ip->i_number));
-		ltsleep(vp, (PRIBIO+1), "lfs_update", 0, &vp->v_interlock);
+		cv_wait(&vp->v_cv, &vp->v_interlock);
 	}
-	simple_unlock(&vp->v_interlock);
-	splx(s);
+	mutex_exit(&vp->v_interlock);
 	LFS_ITIMES(ip, acc, mod, NULL);
 	if (updflags & UPDATE_CLOSE)
 		flags = ip->i_flag & (IN_MODIFIED | IN_ACCESSED | IN_CLEANING);
@@ -170,24 +159,26 @@ lfs_update(struct vnode *vp, const struct timespec *acc,
 
 	/* If sync, push back the vnode and any dirty blocks it may have. */
 	if ((updflags & (UPDATE_WAIT|UPDATE_DIROP)) == UPDATE_WAIT) {
-		/* Avoid flushing VDIROP. */
-		simple_lock(&fs->lfs_interlock);
+		/* Avoid flushing VU_DIROP. */
+		mutex_enter(&lfs_lock);
 		++fs->lfs_diropwait;
-		while (vp->v_flag & VDIROP) {
+		while (vp->v_uflag & VU_DIROP) {
 			DLOG((DLOG_DIROP, "lfs_update: sleeping on inode %d"
 			      " (dirops)\n", ip->i_number));
 			DLOG((DLOG_DIROP, "lfs_update: vflags 0x%x, iflags"
-			      " 0x%x\n", vp->v_flag, ip->i_flag));
+			      " 0x%x\n",
+			      vp->v_iflag | vp->v_vflag | vp->v_uflag,
+			      ip->i_flag));
 			if (fs->lfs_dirops == 0)
 				lfs_flush_fs(fs, SEGM_SYNC);
 			else
-				ltsleep(&fs->lfs_writer, PRIBIO+1, "lfs_fsync",
-					0, &fs->lfs_interlock);
+				mtsleep(&fs->lfs_writer, PRIBIO+1, "lfs_fsync",
+					0, &lfs_lock);
 			/* XXX KS - by falling out here, are we writing the vn
 			twice? */
 		}
 		--fs->lfs_diropwait;
-		simple_unlock(&fs->lfs_interlock);
+		mutex_exit(&lfs_lock);
 		return lfs_vflush(vp);
 	}
 	return 0;
@@ -203,8 +194,7 @@ lfs_update(struct vnode *vp, const struct timespec *acc,
 /* VOP_BWRITE 1 + NIADDR + lfs_balloc == 2 + 2*NIADDR times */
 
 int
-lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
-    kauth_cred_t cred, struct lwp *l)
+lfs_truncate(struct vnode *ovp, off_t length, int ioflag, kauth_cred_t cred)
 {
 	daddr_t lastblock;
 	struct inode *oip = VTOI(ovp);
@@ -256,10 +246,6 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 		oip->i_flag |= IN_CHANGE | IN_UPDATE;
 		return (lfs_update(ovp, NULL, NULL, 0));
 	}
-#ifdef QUOTA
-	if ((error = getinoquota(oip)) != 0)
-		return (error);
-#endif
 	fs = oip->i_lfs;
 	lfs_imtime(fs);
 	osize = oip->i_size;
@@ -284,24 +270,25 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 				off_t eob;
 
 				eob = blkroundup(fs, osize);
+				uvm_vnp_setwritesize(ovp, eob);
 				error = ufs_balloc_range(ovp, osize,
 				    eob - osize, cred, aflags);
 				if (error)
 					return error;
 				if (ioflag & IO_SYNC) {
-					ovp->v_size = eob;
-					simple_lock(&ovp->v_interlock);
+					mutex_enter(&ovp->v_interlock);
 					VOP_PUTPAGES(ovp,
 					    trunc_page(osize & fs->lfs_bmask),
 					    round_page(eob),
 					    PGO_CLEANIT | PGO_SYNCIO);
 				}
 			}
+			uvm_vnp_setwritesize(ovp, length);
 			error = ufs_balloc_range(ovp, length - 1, 1, cred,
 						 aflags);
 			if (error) {
 				(void) lfs_truncate(ovp, osize,
-						    ioflag & IO_SYNC, cred, l);
+						    ioflag & IO_SYNC, cred);
 				return error;
 			}
 			uvm_vnp_setsize(ovp, length);
@@ -368,12 +355,12 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 			memset((char *)bp->b_data + offset, 0,
 			       (u_int)(size - offset));
 		allocbuf(bp, size, 1);
-		if ((bp->b_flags & (B_LOCKED | B_CALL)) == B_LOCKED) {
-			simple_lock(&lfs_subsys_lock);
+		if ((bp->b_flags & B_LOCKED) != 0 && bp->b_iodone == NULL) {
+			mutex_enter(&lfs_lock);
 			locked_queue_bytes -= obufsize - bp->b_bufsize;
-			simple_unlock(&lfs_subsys_lock);
+			mutex_exit(&lfs_lock);
 		}
-		if (bp->b_flags & B_DELWRI)
+		if (bp->b_oflags & BO_DELWRI)
 			fs->lfs_avail += odb - btofsb(fs, size);
 		(void) VOP_BWRITE(bp);
 	} else { /* vp->v_type == VREG && length < osize && offset != 0 */
@@ -403,7 +390,7 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 		eoz = MIN(lblktosize(fs, xlbn) + size, osize);
 		uvm_vnp_zerorange(ovp, length, eoz - length);
 		if (round_page(eoz) > round_page(length)) {
-			simple_lock(&ovp->v_interlock);
+			mutex_enter(&ovp->v_interlock);
 			error = VOP_PUTPAGES(ovp, round_page(length),
 			    round_page(eoz),
 			    PGO_CLEANIT | PGO_DEACTIVATE |
@@ -440,7 +427,7 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 	 * freeing blocks.  lastiblock values are also normalized to -1
 	 * for calls to lfs_indirtrunc below.
 	 */
-	memcpy((caddr_t)newblks, (caddr_t)&oip->i_ffs1_db[0], sizeof newblks);
+	memcpy((void *)newblks, (void *)&oip->i_ffs1_db[0], sizeof newblks);
 	for (level = TRIPLE; level >= SINGLE; level--)
 		if (lastiblock[level] < 0) {
 			newblks[NDADDR+level] = 0;
@@ -450,7 +437,7 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 		newblks[i] = 0;
 
 	oip->i_size = oip->i_ffs1_size = osize;
-	error = lfs_vtruncbuf(ovp, lastblock + 1, 0, 0);
+	error = lfs_vtruncbuf(ovp, lastblock + 1, false, 0);
 	if (error && !allerror)
 		allerror = error;
 
@@ -466,7 +453,7 @@ lfs_truncate(struct vnode *ovp, off_t length, int ioflag,
 			error = lfs_indirtrunc(oip, indir_lbn[level],
 					       bn, lastiblock[level],
 					       level, &count, &rcount,
-					       &lastseg, &bc, l);
+					       &lastseg, &bc);
 			if (error)
 				allerror = error;
 			real_released += rcount;
@@ -568,9 +555,9 @@ done:
 	oip->i_size = oip->i_ffs1_size = length;
 	oip->i_lfs_effnblks -= blocksreleased;
 	oip->i_ffs1_blocks -= real_released;
-	simple_lock(&fs->lfs_interlock);
+	mutex_enter(&lfs_lock);
 	fs->lfs_bfree += blocksreleased;
-	simple_unlock(&fs->lfs_interlock);
+	mutex_exit(&lfs_lock);
 #ifdef DIAGNOSTIC
 	if (oip->i_size == 0 &&
 	    (oip->i_ffs1_blocks != 0 || oip->i_lfs_effnblks != 0)) {
@@ -583,12 +570,12 @@ done:
 	/*
 	 * If we truncated to zero, take us off the paging queue.
 	 */
-	simple_lock(&fs->lfs_interlock);
+	mutex_enter(&lfs_lock);
 	if (oip->i_size == 0 && oip->i_flags & IN_PAGING) {
 		oip->i_flags &= ~IN_PAGING;
 		TAILQ_REMOVE(&fs->lfs_pchainhd, oip, i_lfs_pchain);
 	}
-	simple_unlock(&fs->lfs_interlock);
+	mutex_exit(&lfs_lock);
 
 	oip->i_flag |= IN_CHANGE;
 #ifdef QUOTA
@@ -704,7 +691,7 @@ lfs_finalize_fs_seguse(struct lfs *fs)
 static int
 lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	       daddr_t lastbn, int level, long *countp,
-	       long *rcountp, long *lastsegp, size_t *bcp, struct lwp *l)
+	       long *rcountp, long *lastsegp, size_t *bcp)
 {
 	int i;
 	struct buf *bp;
@@ -740,12 +727,12 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	 */
 	vp = ITOV(ip);
 	bp = getblk(vp, lbn, (int)fs->lfs_bsize, 0, 0);
-	if (bp->b_flags & (B_DONE | B_DELWRI)) {
+	if (bp->b_oflags & (BO_DONE | BO_DELWRI)) {
 		/* Braces must be here in case trace evaluates to nothing. */
 		trace(TR_BREADHIT, pack(vp, fs->lfs_bsize), lbn);
 	} else {
 		trace(TR_BREADMISS, pack(vp, fs->lfs_bsize), lbn);
-		l->l_proc->p_stats->p_ru.ru_inblock++;	/* pay for read */
+		curlwp->l_ru.ru_inblock++; /* pay for read */
 		bp->b_flags |= B_READ;
 		if (bp->b_bcount > bp->b_bufsize)
 			panic("lfs_indirtrunc: bad buffer size");
@@ -754,7 +741,7 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 		error = biowait(bp);
 	}
 	if (error) {
-		brelse(bp);
+		brelse(bp, 0);
 		*countp = *rcountp = 0;
 		return (error);
 	}
@@ -762,8 +749,8 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	bap = (int32_t *)bp->b_data;	/* XXX ondisk32 */
 	if (lastbn >= 0) {
 		copy = (int32_t *)lfs_malloc(fs, fs->lfs_bsize, LFS_NB_IBLOCK);
-		memcpy((caddr_t)copy, (caddr_t)bap, (u_int)fs->lfs_bsize);
-		memset((caddr_t)&bap[last + 1], 0,
+		memcpy((void *)copy, (void *)bap, (u_int)fs->lfs_bsize);
+		memset((void *)&bap[last + 1], 0,
 		/* XXX ondisk32 */
 		  (u_int)(NINDIR(fs) - (last + 1)) * sizeof (int32_t));
 		error = VOP_BWRITE(bp);
@@ -784,7 +771,7 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 			error = lfs_indirtrunc(ip, nlbn, nb,
 					       (daddr_t)-1, level - 1,
 					       &blkcount, &rblkcount,
-					       lastsegp, bcp, l);
+					       lastsegp, bcp);
 			if (error)
 				allerror = error;
 			blocksreleased += blkcount;
@@ -805,7 +792,7 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 		if (nb != 0) {
 			error = lfs_indirtrunc(ip, nlbn, nb,
 					       last, level - 1, &blkcount,
-					       &rblkcount, lastsegp, bcp, l);
+					       &rblkcount, lastsegp, bcp);
 			if (error)
 				allerror = error;
 			real_released += rblkcount;
@@ -816,13 +803,14 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	if (copy != NULL) {
 		lfs_free(fs, copy, LFS_NB_IBLOCK);
 	} else {
-		if (bp->b_flags & B_DELWRI) {
+		mutex_enter(&bufcache_lock);
+		if (bp->b_oflags & BO_DELWRI) {
 			LFS_UNLOCK_BUF(bp);
 			fs->lfs_avail += btofsb(fs, bp->b_bcount);
 			wakeup(&fs->lfs_avail);
 		}
-		bp->b_flags |= B_INVAL;
-		brelse(bp);
+		brelsel(bp, BC_INVAL);
+		mutex_exit(&bufcache_lock);
 	}
 
 	*countp = blocksreleased;
@@ -837,77 +825,69 @@ lfs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
  * invalidating blocks.
  */
 static int
-lfs_vtruncbuf(struct vnode *vp, daddr_t lbn, int slpflag, int slptimeo)
+lfs_vtruncbuf(struct vnode *vp, daddr_t lbn, bool catch, int slptimeo)
 {
 	struct buf *bp, *nbp;
-	int s, error;
+	int error;
 	struct lfs *fs;
 	voff_t off;
 
 	off = round_page((voff_t)lbn << vp->v_mount->mnt_fs_bshift);
-	simple_lock(&vp->v_interlock);
+	mutex_enter(&vp->v_interlock);
 	error = VOP_PUTPAGES(vp, off, 0, PGO_FREE | PGO_SYNCIO);
 	if (error)
 		return error;
 
 	fs = VTOI(vp)->i_lfs;
-	s = splbio();
 
 	ASSERT_SEGLOCK(fs);
-restart:
+
+	mutex_enter(&bufcache_lock);
+restart:	
 	for (bp = LIST_FIRST(&vp->v_cleanblkhd); bp; bp = nbp) {
 		nbp = LIST_NEXT(bp, b_vnbufs);
 		if (bp->b_lblkno < lbn)
 			continue;
-		simple_lock(&bp->b_interlock);
-		if (bp->b_flags & B_BUSY) {
-			bp->b_flags |= B_WANTED;
-			error = ltsleep(bp, slpflag | (PRIBIO + 1) | PNORELOCK,
-			    "lfs_vtruncbuf", slptimeo, &bp->b_interlock);
-			if (error) {
-				splx(s);
-				return (error);
-			}
+		error = bbusy(bp, catch, slptimeo, NULL);
+		if (error == EPASSTHROUGH)
 			goto restart;
+		if (error != 0) {
+			mutex_exit(&bufcache_lock);
+			return (error);
 		}
-		bp->b_flags |= B_BUSY | B_INVAL | B_VFLUSH;
-		if (bp->b_flags & B_DELWRI) {
-			bp->b_flags &= ~B_DELWRI;
+		mutex_enter(bp->b_objlock);
+		if (bp->b_oflags & BO_DELWRI) {
+			bp->b_oflags &= ~BO_DELWRI;
 			fs->lfs_avail += btofsb(fs, bp->b_bcount);
 			wakeup(&fs->lfs_avail);
 		}
+		mutex_exit(bp->b_objlock);
 		LFS_UNLOCK_BUF(bp);
-		simple_unlock(&bp->b_interlock);
-		brelse(bp);
+		brelsel(bp, BC_INVAL | BC_VFLUSH);
 	}
 
 	for (bp = LIST_FIRST(&vp->v_dirtyblkhd); bp; bp = nbp) {
 		nbp = LIST_NEXT(bp, b_vnbufs);
 		if (bp->b_lblkno < lbn)
 			continue;
-		simple_lock(&bp->b_interlock);
-		if (bp->b_flags & B_BUSY) {
-			bp->b_flags |= B_WANTED;
-			error = ltsleep(bp, slpflag | (PRIBIO + 1) | PNORELOCK,
-			    "lfs_vtruncbuf", slptimeo, &bp->b_interlock);
-			if (error) {
-				splx(s);
-				return (error);
-			}
+		error = bbusy(bp, catch, slptimeo, NULL);
+		if (error == EPASSTHROUGH)
 			goto restart;
+		if (error != 0) {
+			mutex_exit(&bufcache_lock);
+			return (error);
 		}
-		bp->b_flags |= B_BUSY | B_INVAL | B_VFLUSH;
-		if (bp->b_flags & B_DELWRI) {
-			bp->b_flags &= ~B_DELWRI;
+		mutex_enter(bp->b_objlock);
+		if (bp->b_oflags & BO_DELWRI) {
+			bp->b_oflags &= ~BO_DELWRI;
 			fs->lfs_avail += btofsb(fs, bp->b_bcount);
 			wakeup(&fs->lfs_avail);
 		}
+		mutex_exit(bp->b_objlock);
 		LFS_UNLOCK_BUF(bp);
-		simple_unlock(&bp->b_interlock);
-		brelse(bp);
+		brelsel(bp, BC_INVAL | BC_VFLUSH);
 	}
-
-	splx(s);
+	mutex_exit(&bufcache_lock);
 
 	return (0);
 }

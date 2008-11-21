@@ -1,5 +1,4 @@
-/*	$OpenBSD: advlib.c,v 1.12 2005/09/06 02:22:37 krw Exp $	*/
-/*      $NetBSD: advlib.c,v 1.7 1998/10/28 20:39:46 dante Exp $        */
+/*      $NetBSD: advlib.c,v 1.26 2007/10/19 11:59:45 ad Exp $        */
 
 /*
  * Low level routines for the Advanced Systems Inc. SCSI controllers chips
@@ -53,7 +52,9 @@
  *
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: advlib.c,v 1.26 2007/10/19 11:59:45 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -61,18 +62,18 @@
 #include <sys/queue.h>
 #include <sys/device.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <dev/ic/adv.h>
 #include <dev/ic/advlib.h>
-
-#include <dev/microcode/adw/advmcode.h>
+#include <dev/ic/adv.h>
+#include <dev/ic/advmcode.h>
 
 
 /* #define ASC_DEBUG */
@@ -83,11 +84,14 @@
 
 /* Initialization routines */
 static u_int32_t AscLoadMicroCode(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t, u_int16_t *, u_int16_t);
+				    u_int16_t, const u_int16_t *, u_int16_t);
 static void AscInitLram(ASC_SOFTC *);
 static void AscInitQLinkVar(ASC_SOFTC *);
 static int AscResetChipAndScsiBus(bus_space_tag_t, bus_space_handle_t);
 static u_int16_t AscGetChipBusType(bus_space_tag_t, bus_space_handle_t);
+#if 0
+static u_int16_t AscGetEisaChipCfg(bus_space_tag_t, bus_space_handle_t);
+#endif
 
 /* Chip register routines */
 static void AscSetBank(bus_space_tag_t, bus_space_handle_t, u_int8_t);
@@ -95,11 +99,8 @@ static void AscSetBank(bus_space_tag_t, bus_space_handle_t, u_int8_t);
 /* RISC Chip routines */
 static int AscStartChip(bus_space_tag_t, bus_space_handle_t);
 static int AscStopChip(bus_space_tag_t, bus_space_handle_t);
-static u_int8_t AscSetChipScsiID(bus_space_tag_t, bus_space_handle_t,
-					u_int8_t);
+static u_int8_t AscSetChipScsiID(bus_space_tag_t, bus_space_handle_t, u_int8_t);
 static u_int8_t AscGetChipScsiCtrl(bus_space_tag_t, bus_space_handle_t);
-static u_int8_t AscGetChipVersion(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t);
 static int AscSetRunChipSynRegAtID(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t, u_int8_t);
 static int AscSetChipSynRegAtID(bus_space_tag_t, bus_space_handle_t,
@@ -109,8 +110,7 @@ static int AscIsChipHalted(bus_space_tag_t, bus_space_handle_t);
 static void AscSetChipIH(bus_space_tag_t, bus_space_handle_t, u_int16_t);
 
 /* Lram routines */
-static u_int8_t AscReadLramByte(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t);
+static u_int8_t AscReadLramByte(bus_space_tag_t, bus_space_handle_t, u_int16_t);
 static void AscWriteLramByte(bus_space_tag_t, bus_space_handle_t,
 					u_int16_t, u_int8_t);
 static u_int16_t AscReadLramWord(bus_space_tag_t, bus_space_handle_t,
@@ -124,7 +124,7 @@ static void AscWriteLramDWord(bus_space_tag_t, bus_space_handle_t,
 static void AscMemWordSetLram(bus_space_tag_t, bus_space_handle_t,
 					u_int16_t, u_int16_t, int);
 static void AscMemWordCopyToLram(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t, u_int16_t *, int);
+					u_int16_t, const u_int16_t *, int);
 static void AscMemWordCopyFromLram(bus_space_tag_t, bus_space_handle_t,
 					u_int16_t, u_int16_t *, int);
 static void AscMemDWordCopyToLram(bus_space_tag_t, bus_space_handle_t,
@@ -135,19 +135,13 @@ static int AscTestExternalLram(bus_space_tag_t, bus_space_handle_t);
 
 /* MicroCode routines */
 static u_int16_t AscInitMicroCodeVar(ASC_SOFTC *);
-static u_int32_t AscGetOnePhyAddr(ASC_SOFTC *, u_int8_t *, u_int32_t);
-static u_int32_t AscGetSGList(ASC_SOFTC *, u_int8_t *, u_int32_t,
-					ASC_SG_HEAD *);
 
 /* EEProm routines */
-static int AscWriteEEPCmdReg(bus_space_tag_t, bus_space_handle_t,
-					u_int8_t);
-static int AscWriteEEPDataReg(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t);
+static int AscWriteEEPCmdReg(bus_space_tag_t, bus_space_handle_t, u_int8_t);
+static int AscWriteEEPDataReg(bus_space_tag_t, bus_space_handle_t, u_int16_t);
 static void AscWaitEEPRead(void);
 static void AscWaitEEPWrite(void);
-static u_int16_t AscReadEEPWord(bus_space_tag_t, bus_space_handle_t,
-					u_int8_t);
+static u_int16_t AscReadEEPWord(bus_space_tag_t, bus_space_handle_t, u_int8_t);
 static u_int16_t AscWriteEEPWord(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t, u_int16_t);
 static u_int16_t AscGetEEPConfig(bus_space_tag_t, bus_space_handle_t,
@@ -166,37 +160,33 @@ static int AscIsrQDone(ASC_SOFTC *);
 static int AscWaitTixISRDone(ASC_SOFTC *, u_int8_t);
 static int AscWaitISRDone(ASC_SOFTC *);
 static u_int8_t _AscCopyLramScsiDoneQ(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t, ASC_QDONE_INFO *,
-					u_int32_t);
+					u_int16_t, ASC_QDONE_INFO *, u_int32_t);
 static void AscGetQDoneInfo(bus_space_tag_t, bus_space_handle_t, u_int16_t,
 					ASC_QDONE_INFO *);
 static void AscToggleIRQAct(bus_space_tag_t, bus_space_handle_t);
 static void AscDisableInterrupt(bus_space_tag_t, bus_space_handle_t);
 static void AscEnableInterrupt(bus_space_tag_t, bus_space_handle_t);
-static u_int8_t AscGetChipIRQ(bus_space_tag_t, bus_space_handle_t,
-					u_int16_t);
 static u_int8_t AscSetChipIRQ(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t, u_int16_t);
 static void AscAckInterrupt(bus_space_tag_t, bus_space_handle_t);
 static u_int32_t AscGetMaxDmaCount(u_int16_t);
-static u_int16_t AscGetIsaDmaChannel(bus_space_tag_t, bus_space_handle_t);
 static u_int16_t AscSetIsaDmaChannel(bus_space_tag_t, bus_space_handle_t,
 					u_int16_t);
 static u_int8_t AscGetIsaDmaSpeed(bus_space_tag_t, bus_space_handle_t);
 static u_int8_t AscSetIsaDmaSpeed(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t);
-		
+
 /* Messages routines */
 static void AscHandleExtMsgIn(ASC_SOFTC *, u_int16_t, u_int8_t,
 					ASC_SCSI_BIT_ID_TYPE, int, u_int8_t);
 static u_int8_t AscMsgOutSDTR(ASC_SOFTC *, u_int8_t, u_int8_t);
-		
+
 /* SDTR routines */
 static void AscSetChipSDTR(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t, u_int8_t);
 static u_int8_t AscCalSDTRData(ASC_SOFTC *, u_int8_t, u_int8_t);
 static u_int8_t AscGetSynPeriodIndex(ASC_SOFTC *, u_int8_t);
-		
+
 /* Queue routines */
 static int AscSendScsiQueue(ASC_SOFTC *, ASC_SCSI_Q *, u_int8_t);
 static int AscSgListToQueue(int);
@@ -207,8 +197,7 @@ static void AscPutSCSIQ(bus_space_tag_t, bus_space_handle_t,
 static int AscPutReadySgListQueue(ASC_SOFTC *, ASC_SCSI_Q *, u_int8_t);
 static u_int8_t AscAllocFreeQueue(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t);
-static u_int8_t AscAllocMultipleFreeQueue(bus_space_tag_t,
-					bus_space_handle_t,
+static u_int8_t AscAllocMultipleFreeQueue(bus_space_tag_t, bus_space_handle_t,
 					u_int8_t, u_int8_t);
 static int AscStopQueueExe(bus_space_tag_t, bus_space_handle_t);
 static void AscStartQueueExe(bus_space_tag_t, bus_space_handle_t);
@@ -216,31 +205,33 @@ static void AscCleanUpBusyQueue(bus_space_tag_t, bus_space_handle_t);
 static int _AscWaitQDone(bus_space_tag_t, bus_space_handle_t,
 					ASC_SCSI_Q *);
 static int AscCleanUpDiscQueue(bus_space_tag_t, bus_space_handle_t);
-		
+
 /* Abort and Reset CCB routines */
-static int AscRiscHaltedAbortCCB(ASC_SOFTC *, u_int32_t);
+static int AscRiscHaltedAbortCCB(ASC_SOFTC *, ADV_CCB *);
 static int AscRiscHaltedAbortTIX(ASC_SOFTC *, u_int8_t);
-		
+
 /* Error Handling routines */
 static int AscSetLibErrorCode(ASC_SOFTC *, u_int16_t);
-		
+
 /* Handle bugged borads routines */
 static int AscTagQueuingSafe(ASC_SCSI_INQUIRY *);
 static void AscAsyncFix(ASC_SOFTC *, u_int8_t, ASC_SCSI_INQUIRY *);
-		
+
 /* Miscellaneous routines */
-static int AscCompareString(u_char *, u_char *, int);
-		
+static int AscCompareString(const u_char *, const u_char *, int);
+
 /* Device oriented routines */
 static int DvcEnterCritical(void);
 static void DvcLeaveCritical(int);
 static void DvcSleepMilliSecond(u_int32_t);
-//static void DvcDelayMicroSecond(u_int32_t);
+#if 0
+static void DvcDelayMicroSecond(u_int32_t);
+#endif
 static void DvcDelayNanoSecond(u_int32_t);
 
 
 /******************************************************************************/
-/*                            Initialization routines                         */
+/*                            Initialization routines                        */
 /******************************************************************************/
 
 /*
@@ -250,13 +241,11 @@ static void DvcDelayNanoSecond(u_int32_t);
  * - keep track of bugged borads.
  */
 void
-AscInitASC_SOFTC(sc)
-	ASC_SOFTC      *sc;
+AscInitASC_SOFTC(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	int             i;
-	u_int8_t        chip_version;
 
 
 	ASC_SET_CHIP_CONTROL(iot, ioh, ASC_CC_HALT);
@@ -285,10 +274,8 @@ AscInitASC_SOFTC(sc)
 	sc->chip_scsi_id = ASC_DEF_CHIP_SCSI_ID;
 	sc->lib_serial_no = ASC_LIB_SERIAL_NUMBER;
 	sc->lib_version = (ASC_LIB_VERSION_MAJOR << 8) | ASC_LIB_VERSION_MINOR;
-	chip_version = AscGetChipVersion(iot, ioh, sc->bus_type);
-	sc->chip_version = chip_version;
 	if ((sc->bus_type & ASC_IS_PCI) &&
-	    (chip_version >= ASC_CHIP_VER_PCI_ULTRA_3150)) {
+	    (sc->chip_version >= ASC_CHIP_VER_PCI_ULTRA_3150)) {
 		sc->bus_type = ASC_IS_PCI_ULTRA;
 		sc->sdtr_period_tbl[0] = SYN_ULTRA_XFER_NS_0;
 		sc->sdtr_period_tbl[1] = SYN_ULTRA_XFER_NS_1;
@@ -307,10 +294,10 @@ AscInitASC_SOFTC(sc)
 		sc->sdtr_period_tbl[14] = SYN_ULTRA_XFER_NS_14;
 		sc->sdtr_period_tbl[15] = SYN_ULTRA_XFER_NS_15;
 		sc->max_sdtr_index = 15;
-		if (chip_version == ASC_CHIP_VER_PCI_ULTRA_3150)
+		if (sc->chip_version == ASC_CHIP_VER_PCI_ULTRA_3150)
 			ASC_SET_EXTRA_CONTROL(iot, ioh,
 				       (SEC_ACTIVE_NEGATE | SEC_SLEW_RATE));
-		else if (chip_version >= ASC_CHIP_VER_PCI_ULTRA_3050)
+		else if (sc->chip_version >= ASC_CHIP_VER_PCI_ULTRA_3050)
 			ASC_SET_EXTRA_CONTROL(iot, ioh,
 				   (SEC_ACTIVE_NEGATE | SEC_ENABLE_FILTER));
 	} else {
@@ -349,9 +336,8 @@ AscInitASC_SOFTC(sc)
  * This function initialize some ASC_SOFTC fields with values read from
  * on-board EEProm.
  */
-u_int16_t
-AscInitFromEEP(sc)
-	ASC_SOFTC      *sc;
+int16_t
+AscInitFromEEP(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -367,6 +353,11 @@ AscInitFromEEP(sc)
 	warn_code = 0;
 	AscWriteLramWord(iot, ioh, ASCV_HALTCODE_W, 0x00FE);
 	AscStopQueueExe(iot, ioh);
+
+	AscStopChip(iot, ioh);
+	AscResetChipAndScsiBus(iot, ioh);
+	DvcSleepMilliSecond(sc->scsi_reset_wait * 1000);
+
 	if ((AscStopChip(iot, ioh) == FALSE) ||
 	    (AscGetChipScsiCtrl(iot, ioh) != 0)) {
 		AscResetChipAndScsiBus(iot, ioh);
@@ -411,8 +402,7 @@ AscInitFromEEP(sc)
 	eep_config->cfg_lsw |= ASC_CFG0_HOST_INT_ON;
 
 	if (chksum != eep_config->chksum) {
-		if (AscGetChipVersion(iot, ioh, sc->bus_type) ==
-		    ASC_CHIP_VER_PCI_ULTRA_3050) {
+		if (sc->chip_version == ASC_CHIP_VER_PCI_ULTRA_3050) {
 			eep_config->init_sdtr = 0xFF;
 			eep_config->disc_enable = 0xFF;
 			eep_config->start_motor = 0xFF;
@@ -520,8 +510,7 @@ AscInitFromEEP(sc)
 
 
 u_int16_t
-AscInitFromASC_SOFTC(sc)
-	ASC_SOFTC      *sc;
+AscInitFromASC_SOFTC(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -560,8 +549,7 @@ AscInitFromASC_SOFTC(sc)
 			}
 		}
 	} else if (sc->bus_type == ASC_IS_ISAPNP) {
-		if (AscGetChipVersion(iot, ioh, sc->bus_type) ==
-		    ASC_CHIP_VER_ASYN_BUG) {
+		if (sc->chip_version ==  ASC_CHIP_VER_ASYN_BUG) {
 			sc->bug_fix_cntl |= ASC_BUG_FIX_ASYN_USE_SYN;
 		}
 	}
@@ -582,8 +570,7 @@ AscInitFromASC_SOFTC(sc)
  * - Enable Interrupts
  */
 int
-AscInitDriver(sc)
-	ASC_SOFTC      *sc;
+AscInitDriver(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -596,7 +583,7 @@ AscInitDriver(sc)
 	AscDisableInterrupt(iot, ioh);
 
 	AscInitLram(sc);
-	chksum = AscLoadMicroCode(iot, ioh, 0, (u_int16_t *) asc_mcode,
+	chksum = AscLoadMicroCode(iot, ioh, 0, (const u_int16_t *) asc_mcode,
 				  asc_mcode_size);
 	if (chksum != asc_mcode_chksum)
 		return (2);
@@ -611,9 +598,7 @@ AscInitDriver(sc)
 
 
 int
-AscFindSignature(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscFindSignature(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int16_t       sig_word;
 
@@ -628,8 +613,7 @@ AscFindSignature(iot, ioh)
 
 
 static void
-AscInitLram(sc)
-	ASC_SOFTC      *sc;
+AscInitLram(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -666,8 +650,7 @@ AscInitLram(sc)
 
 
 void
-AscReInitLram(sc)
-	ASC_SOFTC      *sc;
+AscReInitLram(ASC_SOFTC *sc)
 {
 
 	AscInitLram(sc);
@@ -676,8 +659,7 @@ AscReInitLram(sc)
 
 
 static void
-AscInitQLinkVar(sc)
-	ASC_SOFTC      *sc;
+AscInitQLinkVar(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -705,8 +687,7 @@ AscInitQLinkVar(sc)
 
 
 static int
-AscResetChipAndScsiBus(bus_space_tag_t iot,
-		       bus_space_handle_t ioh)
+AscResetChipAndScsiBus(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	while (ASC_GET_CHIP_STATUS(iot, ioh) & ASC_CSW_SCSI_RESET_ACTIVE);
 
@@ -723,7 +704,7 @@ AscResetChipAndScsiBus(bus_space_tag_t iot,
 	DvcSleepMilliSecond(200);
 
 	ASC_SET_CHIP_STATUS(iot, ioh, ASC_CIW_CLR_SCSI_RESET_INT);
-	AscStartChip(iot, ioh);
+	ASC_SET_CHIP_STATUS(iot, ioh, 0);
 
 	DvcSleepMilliSecond(200);
 
@@ -732,21 +713,22 @@ AscResetChipAndScsiBus(bus_space_tag_t iot,
 
 
 static u_int16_t
-AscGetChipBusType(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscGetChipBusType(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int16_t       chip_ver;
 
 	chip_ver = ASC_GET_CHIP_VER_NO(iot, ioh);
+#if 0
 	if ((chip_ver >= ASC_CHIP_MIN_VER_VL) &&
 	    (chip_ver <= ASC_CHIP_MAX_VER_VL)) {
-		/*
-		 * if(((iop_base & 0x0C30) == 0x0C30) || ((iop_base & 0x0C50)
-		 * == 0x0C50)) return (ASC_IS_EISA);
-		 */
-		return (ASC_IS_VL);
+		if(((ioh & 0x0C30) == 0x0C30) || ((ioh & 0x0C50) == 0x0C50)) {
+			return (ASC_IS_EISA);
+		}
+		else {
+			return (ASC_IS_VL);
+		}
 	}
+#endif
 	if ((chip_ver >= ASC_CHIP_MIN_VER_ISA) &&
 	    (chip_ver <= ASC_CHIP_MAX_VER_ISA)) {
 		if (chip_ver >= ASC_CHIP_MIN_VER_ISA_PNP)
@@ -760,6 +742,16 @@ AscGetChipBusType(iot, ioh)
 	return (0);
 }
 
+/*
+static u_int16_t
+AscGetEisaChipCfg(bus_space_tag_t iot, bus_space_handle_t ioh)
+{
+	int	eisa_cfg_iop;
+
+	eisa_cfg_iop = ASC_GET_EISA_SLOT(ioh) | (ASC_EISA_CFG_IOP_MASK);
+	return (inw(eisa_cfg_iop));
+}
+*/
 
 /******************************************************************************/
 /*                             Chip register routines                         */
@@ -767,10 +759,7 @@ AscGetChipBusType(iot, ioh)
 
 
 static void
-AscSetBank(iot, ioh, bank)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        bank;
+AscSetBank(bus_space_tag_t iot, bus_space_handle_t ioh, u_int8_t bank)
 {
 	u_int8_t        val;
 
@@ -803,9 +792,7 @@ AscSetBank(iot, ioh, bank)
 
 
 static int
-AscStartChip(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscStartChip(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	ASC_SET_CHIP_CONTROL(iot, ioh, 0);
 	if ((ASC_GET_CHIP_STATUS(iot, ioh) & ASC_CSW_HALTED) != 0)
@@ -816,9 +803,7 @@ AscStartChip(iot, ioh)
 
 
 static int
-AscStopChip(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscStopChip(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int8_t        cc_val;
 
@@ -835,29 +820,7 @@ AscStopChip(iot, ioh)
 
 
 static u_int8_t
-AscGetChipVersion(iot, ioh, bus_type)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       bus_type;
-{
-	if (bus_type & ASC_IS_EISA) {
-		/*
-		 * u_int16_t	eisa_iop; u_int8_t	revision;
-		 *
-		 * eisa_iop = ASC_GET_EISA_SLOT(iop_base) |
-		 * ASC_EISA_REV_IOP_MASK; revision = inp(eisa_iop);
-		 * return((ASC_CHIP_MIN_VER_EISA - 1) + revision);
-		 */
-	}
-	return (ASC_GET_CHIP_VER_NO(iot, ioh));
-}
-
-
-static u_int8_t
-AscSetChipScsiID(iot, ioh, new_id)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        new_id;
+AscSetChipScsiID(bus_space_tag_t iot, bus_space_handle_t ioh, u_int8_t new_id)
 {
 	u_int16_t       cfg_lsw;
 
@@ -873,9 +836,7 @@ AscSetChipScsiID(iot, ioh, new_id)
 
 
 static u_int8_t
-AscGetChipScsiCtrl(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscGetChipScsiCtrl(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int8_t        scsi_ctrl;
 
@@ -887,11 +848,8 @@ AscGetChipScsiCtrl(iot, ioh)
 
 
 static int
-AscSetRunChipSynRegAtID(iot, ioh, tid_no, sdtr_data)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        tid_no;
-	u_int8_t        sdtr_data;
+AscSetRunChipSynRegAtID(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t tid_no, u_int8_t sdtr_data)
 {
 	int             retval = FALSE;
 
@@ -904,15 +862,12 @@ AscSetRunChipSynRegAtID(iot, ioh, tid_no, sdtr_data)
 
 
 static int
-AscSetChipSynRegAtID(iot, ioh, id, sdtr_data)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        id;
-	u_int8_t        sdtr_data;
+AscSetChipSynRegAtID(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t id, u_int8_t sdtr_data)
 {
 	ASC_SCSI_BIT_ID_TYPE org_id;
 	int             i;
-	int             sta = TRUE;
+	int             stax = TRUE;
 
 	AscSetBank(iot, ioh, 1);
 	org_id = ASC_READ_CHIP_DVC_ID(iot, ioh);
@@ -926,21 +881,19 @@ AscSetChipSynRegAtID(iot, ioh, id, sdtr_data)
 		AscSetBank(iot, ioh, 0);
 		ASC_SET_CHIP_SYN(iot, ioh, sdtr_data);
 		if (ASC_GET_CHIP_SYN(iot, ioh) != sdtr_data)
-			sta = FALSE;
+			stax = FALSE;
 	} else
-		sta = FALSE;
+		stax = FALSE;
 
 	AscSetBank(iot, ioh, 1);
 	ASC_WRITE_CHIP_DVC_ID(iot, ioh, org_id);
 	AscSetBank(iot, ioh, 0);
-	return (sta);
+	return (stax);
 }
 
 
 static int
-AscHostReqRiscHalt(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscHostReqRiscHalt(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	int             count = 0;
 	int             retval = 0;
@@ -968,9 +921,7 @@ AscHostReqRiscHalt(iot, ioh)
 
 
 static int
-AscIsChipHalted(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscIsChipHalted(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	if ((ASC_GET_CHIP_STATUS(iot, ioh) & ASC_CSW_HALTED) != 0)
 		if ((ASC_GET_CHIP_CONTROL(iot, ioh) & ASC_CC_HALT) != 0)
@@ -981,10 +932,7 @@ AscIsChipHalted(iot, ioh)
 
 
 static void
-AscSetChipIH(iot, ioh, ins_code)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       ins_code;
+AscSetChipIH(bus_space_tag_t iot, bus_space_handle_t ioh, u_int16_t ins_code)
 {
 	AscSetBank(iot, ioh, 1);
 	ASC_WRITE_CHIP_IH(iot, ioh, ins_code);
@@ -1000,10 +948,7 @@ AscSetChipIH(iot, ioh, ins_code)
 
 
 static u_int8_t
-AscReadLramByte(iot, ioh, addr)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       addr;
+AscReadLramByte(bus_space_tag_t iot, bus_space_handle_t ioh, u_int16_t addr)
 {
 	u_int8_t        byte_data;
 	u_int16_t       word_data;
@@ -1025,11 +970,8 @@ AscReadLramByte(iot, ioh, addr)
 
 
 static void
-AscWriteLramByte(iot, ioh, addr, data)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       addr;
-	u_int8_t        data;
+AscWriteLramByte(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t addr, u_int8_t data)
 {
 	u_int16_t       word_data;
 
@@ -1046,15 +988,12 @@ AscWriteLramByte(iot, ioh, addr, data)
 		word_data |= ((u_int16_t) data) & 0x00FF;
 	}
 
-	AscWriteLramWord(iot, ioh, addr, word_data);
+	AscWriteLramWord(iot, ioh, addr & 0xFFFE, word_data);
 }
 
 
 static u_int16_t
-AscReadLramWord(iot, ioh, addr)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       addr;
+AscReadLramWord(bus_space_tag_t iot, bus_space_handle_t ioh, u_int16_t addr)
 {
 
 	ASC_SET_CHIP_LRAM_ADDR(iot, ioh, addr);
@@ -1063,11 +1002,8 @@ AscReadLramWord(iot, ioh, addr)
 
 
 static void
-AscWriteLramWord(iot, ioh, addr, data)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       addr;
-	u_int16_t       data;
+AscWriteLramWord(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t addr, u_int16_t data)
 {
 
 	ASC_SET_CHIP_LRAM_ADDR(iot, ioh, addr);
@@ -1076,10 +1012,7 @@ AscWriteLramWord(iot, ioh, addr, data)
 
 
 static u_int32_t
-AscReadLramDWord(iot, ioh, addr)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       addr;
+AscReadLramDWord(bus_space_tag_t iot, bus_space_handle_t ioh, u_int16_t addr)
 {
 	u_int16_t       low_word, hi_word;
 
@@ -1093,11 +1026,8 @@ AscReadLramDWord(iot, ioh, addr)
 
 
 static void
-AscWriteLramDWord(iot, ioh, addr, data)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       addr;
-	u_int32_t       data;
+AscWriteLramDWord(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t addr, u_int32_t data)
 {
 
 	ASC_SET_CHIP_LRAM_ADDR(iot, ioh, addr);
@@ -1107,12 +1037,8 @@ AscWriteLramDWord(iot, ioh, addr, data)
 
 
 static void
-AscMemWordSetLram(iot, ioh, s_addr, s_words, count)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       s_addr;
-	u_int16_t       s_words;
-	int             count;
+AscMemWordSetLram(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t s_addr, u_int16_t s_words, int count)
 {
 	int             i;
 
@@ -1123,12 +1049,8 @@ AscMemWordSetLram(iot, ioh, s_addr, s_words, count)
 
 
 static void
-AscMemWordCopyToLram(iot, ioh, s_addr, s_buffer, words)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       s_addr;
-	u_int16_t      *s_buffer;
-	int             words;
+AscMemWordCopyToLram(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t s_addr, const u_int16_t *s_buffer, int words)
 {
 	int             i;
 
@@ -1139,12 +1061,8 @@ AscMemWordCopyToLram(iot, ioh, s_addr, s_buffer, words)
 
 
 static void
-AscMemWordCopyFromLram(iot, ioh, s_addr, s_buffer, words)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       s_addr;
-	u_int16_t      *s_buffer;
-	int             words;
+AscMemWordCopyFromLram(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t s_addr, u_int16_t *s_buffer, int words)
 {
 	int             i;
 
@@ -1155,12 +1073,8 @@ AscMemWordCopyFromLram(iot, ioh, s_addr, s_buffer, words)
 
 
 static void
-AscMemDWordCopyToLram(iot, ioh, s_addr, s_buffer, dwords)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       s_addr;
-	u_int32_t      *s_buffer;
-	int             dwords;
+AscMemDWordCopyToLram(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t s_addr, u_int32_t *s_buffer, int dwords)
 {
 	int             i;
 	u_int32_t      *pw;
@@ -1177,11 +1091,8 @@ AscMemDWordCopyToLram(iot, ioh, s_addr, s_buffer, dwords)
 
 
 static u_int32_t
-AscMemSumLramWord(iot, ioh, s_addr, words)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       s_addr;
-	int             words;
+AscMemSumLramWord(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t s_addr, int words)
 {
 	u_int32_t       sum = 0L;
 	u_int16_t       i;
@@ -1195,9 +1106,7 @@ AscMemSumLramWord(iot, ioh, s_addr, words)
 
 
 static int
-AscTestExternalLram(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscTestExternalLram(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int16_t       q_addr;
 	u_int16_t       saved_word;
@@ -1226,8 +1135,7 @@ AscTestExternalLram(iot, ioh)
 
 
 static u_int16_t
-AscInitMicroCodeVar(sc)
-	ASC_SOFTC      *sc;
+AscInitMicroCodeVar(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -1244,15 +1152,10 @@ AscInitMicroCodeVar(sc)
 	AscWriteLramByte(iot, ioh, ASCV_HOSTSCSI_ID_B,
 			 ASC_TID_TO_TARGET_ID(sc->chip_scsi_id));
 
-	if ((phy_addr = AscGetOnePhyAddr(sc, sc->overrun_buf,
-					 ASC_OVERRUN_BSIZE)) == 0L) {
-		return (0);
-	} else {
-		phy_addr = (phy_addr & 0xFFFFFFF8ul) + 8;
-		AscWriteLramDWord(iot, ioh, ASCV_OVERRUN_PADDR_D, phy_addr);
-		AscWriteLramDWord(iot, ioh, ASCV_OVERRUN_BSIZE_D,
-				  ASC_OVERRUN_BSIZE - 8);
-	}
+	phy_addr = (sc->overrun_buf & 0xfffffff8) + 8;
+	AscWriteLramDWord(iot, ioh, ASCV_OVERRUN_PADDR_D, phy_addr);
+	AscWriteLramDWord(iot, ioh, ASCV_OVERRUN_BSIZE_D,
+			  ASC_OVERRUN_BSIZE - 8);
 
 	sc->mcode_date = AscReadLramWord(iot, ioh, ASCV_MC_DATE_W);
 	sc->mcode_version = AscReadLramWord(iot, ioh, ASCV_MC_VER_W);
@@ -1269,12 +1172,8 @@ AscInitMicroCodeVar(sc)
 
 
 static u_int32_t
-AscLoadMicroCode(iot, ioh, s_addr, mcode_buf, mcode_size)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       s_addr;
-	u_int16_t      *mcode_buf;
-	u_int16_t       mcode_size;
+AscLoadMicroCode(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t s_addr, const u_int16_t *mcode_buf, u_int16_t mcode_size)
 {
 	u_int32_t       chksum;
 	u_int16_t       mcode_word_size;
@@ -1295,54 +1194,13 @@ AscLoadMicroCode(iot, ioh, s_addr, mcode_buf, mcode_size)
 }
 
 
-static u_int32_t
-AscGetOnePhyAddr(sc, buf_addr, buf_size)
-	ASC_SOFTC      *sc;
-	u_int8_t       *buf_addr;
-	u_int32_t       buf_size;
-{
-	ASC_MIN_SG_HEAD sg_head;
-
-	sg_head.entry_cnt = ASC_MIN_SG_LIST;
-	if (AscGetSGList(sc, buf_addr, buf_size, (ASC_SG_HEAD *) & sg_head) !=
-	    buf_size) {
-		return (0L);
-	}
-	if (sg_head.entry_cnt > 1) {
-		return (0L);
-	}
-	return (sg_head.sg_list[0].addr);
-}
-
-
-static u_int32_t
-AscGetSGList(sc, buf_addr, buf_len, asc_sg_head_ptr)
-	ASC_SOFTC      *sc;
-	u_int8_t       *buf_addr;
-	u_int32_t       buf_len;
-	ASC_SG_HEAD    *asc_sg_head_ptr;
-{
-	u_int32_t       buf_size;
-
-	buf_size = buf_len;
-	asc_sg_head_ptr->entry_cnt = 1;
-	asc_sg_head_ptr->sg_list[0].addr = (u_int32_t) buf_addr;
-	asc_sg_head_ptr->sg_list[0].bytes = buf_size;
-
-	return (buf_size);
-}
-
-
 /******************************************************************************/
 /*                                 EEProm routines                            */
 /******************************************************************************/
 
 
 static int
-AscWriteEEPCmdReg(iot, ioh, cmd_reg)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        cmd_reg;
+AscWriteEEPCmdReg(bus_space_tag_t iot, bus_space_handle_t ioh, u_int8_t cmd_reg)
 {
 	u_int8_t        read_back;
 	int             retry;
@@ -1363,10 +1221,8 @@ AscWriteEEPCmdReg(iot, ioh, cmd_reg)
 
 
 static int
-AscWriteEEPDataReg(iot, ioh, data_reg)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       data_reg;
+AscWriteEEPDataReg(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t data_reg)
 {
 	u_int16_t       read_back;
 	int             retry;
@@ -1402,10 +1258,7 @@ AscWaitEEPWrite(void)
 
 
 static u_int16_t
-AscReadEEPWord(iot, ioh, addr)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        addr;
+AscReadEEPWord(bus_space_tag_t iot, bus_space_handle_t ioh, u_int8_t addr)
 {
 	u_int16_t       read_wval;
 	u_int8_t        cmd_reg;
@@ -1423,11 +1276,8 @@ AscReadEEPWord(iot, ioh, addr)
 
 
 static u_int16_t
-AscWriteEEPWord(iot, ioh, addr, word_val)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        addr;
-	u_int16_t       word_val;
+AscWriteEEPWord(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t addr, u_int16_t word_val)
 {
 	u_int16_t       read_wval;
 
@@ -1448,11 +1298,8 @@ AscWriteEEPWord(iot, ioh, addr, word_val)
 
 
 static u_int16_t
-AscGetEEPConfig(iot, ioh, cfg_buf, bus_type)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	ASCEEP_CONFIG  *cfg_buf;
-	u_int16_t       bus_type;
+AscGetEEPConfig(bus_space_tag_t iot, bus_space_handle_t ioh,
+	ASCEEP_CONFIG *cfg_buf, u_int16_t bus_type)
 {
 	u_int16_t       wval;
 	u_int16_t       sum;
@@ -1494,11 +1341,8 @@ AscGetEEPConfig(iot, ioh, cfg_buf, bus_type)
 
 
 static int
-AscSetEEPConfig(iot, ioh, cfg_buf, bus_type)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	ASCEEP_CONFIG  *cfg_buf;
-	u_int16_t       bus_type;
+AscSetEEPConfig(bus_space_tag_t iot, bus_space_handle_t ioh,
+	ASCEEP_CONFIG *cfg_buf, u_int16_t bus_type)
 {
 	int             retry;
 	int             n_error;
@@ -1517,11 +1361,8 @@ AscSetEEPConfig(iot, ioh, cfg_buf, bus_type)
 
 
 static int
-AscSetEEPConfigOnce(iot, ioh, cfg_buf, bus_type)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	ASCEEP_CONFIG  *cfg_buf;
-	u_int16_t       bus_type;
+AscSetEEPConfigOnce(bus_space_tag_t iot, bus_space_handle_t ioh,
+	ASCEEP_CONFIG *cfg_buf, u_int16_t bus_type)
 {
 	int             n_error;
 	u_int16_t      *wbuf;
@@ -1575,9 +1416,7 @@ AscSetEEPConfigOnce(iot, ioh, cfg_buf, bus_type)
 
 #ifdef ASC_DEBUG
 static void
-AscPrintEEPConfig(eep_config, chksum)
-	ASCEEP_CONFIG	*eep_config;
-	u_int16_t	chksum;
+AscPrintEEPConfig(ASCEEP_CONFIG *eep_config, u_int16_t chksum)
 {
 	printf("---- ASC EEprom settings ----\n");
 	printf("cfg_lsw = 0x%x\n", eep_config->cfg_lsw);
@@ -1622,8 +1461,7 @@ AscPrintEEPConfig(eep_config, chksum)
 
 
 int
-AscISR(sc)
-	ASC_SOFTC      *sc;
+AscISR(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -1695,8 +1533,7 @@ AscISR(sc)
 
 
 static int
-AscIsrQDone(sc)
-	ASC_SOFTC      *sc;
+AscIsrQDone(ASC_SOFTC *sc)
 {
 	u_int8_t        next_qp;
 	u_int8_t        n_q_used;
@@ -1774,7 +1611,8 @@ AscIsrQDone(sc)
 			panic("AscIsrQDone: Attempting to free more queues than are active");
 		}
 
-		if ((scsiq->d2.ccb_ptr == 0UL) || ((scsiq->q_status & ASC_QS_ABORTED) != 0)) {
+		if ((adv_ccb_phys_kv(sc, scsiq->d2.ccb_ptr) == 0UL) ||
+		   ((scsiq->q_status & ASC_QS_ABORTED) != 0)) {
 			return (0x11);
 		} else if (scsiq->q_status == ASC_QS_DONE) {
 			scsiq->remain_bytes += scsiq->extra_bytes;
@@ -1814,8 +1652,7 @@ AscIsrQDone(sc)
  * waiting us to intervene
  */
 static void
-AscIsrChipHalted(sc)
-	ASC_SOFTC      *sc;
+AscIsrChipHalted(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -1951,9 +1788,7 @@ AscIsrChipHalted(sc)
 
 
 static int
-AscWaitTixISRDone(sc, target_ix)
-	ASC_SOFTC      *sc;
-	u_int8_t        target_ix;
+AscWaitTixISRDone(ASC_SOFTC *sc, u_int8_t target_ix)
 {
 	u_int8_t        cur_req;
 	u_int8_t        tid_no;
@@ -1972,8 +1807,7 @@ AscWaitTixISRDone(sc, target_ix)
 }
 
 static int
-AscWaitISRDone(sc)
-	ASC_SOFTC      *sc;
+AscWaitISRDone(ASC_SOFTC *sc)
 {
 	int             tid;
 
@@ -1985,12 +1819,8 @@ AscWaitISRDone(sc)
 
 
 static u_int8_t
-_AscCopyLramScsiDoneQ(iot, ioh, q_addr, scsiq, max_dma_count)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       q_addr;
-	ASC_QDONE_INFO *scsiq;
-	u_int32_t       max_dma_count;
+_AscCopyLramScsiDoneQ(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t q_addr, ASC_QDONE_INFO *scsiq, u_int32_t max_dma_count)
 {
 	u_int16_t       _val;
 	u_int8_t        sg_queue_cnt;
@@ -2015,11 +1845,8 @@ _AscCopyLramScsiDoneQ(iot, ioh, q_addr, scsiq, max_dma_count)
 
 
 static void
-AscGetQDoneInfo(iot, ioh, addr, scsiq)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t	addr;
-	ASC_QDONE_INFO	*scsiq;
+AscGetQDoneInfo(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t addr, ASC_QDONE_INFO	*scsiq)
 {
 	u_int16_t	val;
 
@@ -2045,9 +1872,7 @@ AscGetQDoneInfo(iot, ioh, addr, scsiq)
 
 
 static void
-AscToggleIRQAct(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscToggleIRQAct(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 
 	ASC_SET_CHIP_STATUS(iot, ioh, ASC_CIW_IRQ_ACT);
@@ -2056,9 +1881,7 @@ AscToggleIRQAct(iot, ioh)
 
 
 static void
-AscDisableInterrupt(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscDisableInterrupt(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int16_t       cfg;
 
@@ -2068,9 +1891,7 @@ AscDisableInterrupt(iot, ioh)
 
 
 static void
-AscEnableInterrupt(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscEnableInterrupt(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int16_t       cfg;
 
@@ -2079,23 +1900,22 @@ AscEnableInterrupt(iot, ioh)
 }
 
 
-static u_int8_t
-AscGetChipIRQ(iot, ioh, bus_type)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       bus_type;
+u_int8_t
+AscGetChipIRQ(bus_space_tag_t iot, bus_space_handle_t ioh, u_int16_t bus_type)
 {
 	u_int16_t       cfg_lsw;
 	u_int8_t        chip_irq;
 
 
+#if 0
 	if (bus_type & ASC_IS_EISA) {
-		/*
-		 * cfg_lsw = AscGetEisaChipCfg(iot, ioh); chip_irq =
-		 * ((cfg_lsw >> 8) & 0x07) + 10; if((chip_irq == 13) ||
-		 * (chip_irq > 15)) return (0); return(chip_irq);
-		 */
+		cfg_lsw = AscGetEisaChipCfg(iot, ioh);
+		chip_irq = ((cfg_lsw >> 8) & 0x07) + 10;
+		if((chip_irq == 13) || (chip_irq > 15))
+			return (0);
+		return(chip_irq);
 	}
+#endif
 	if ((bus_type & ASC_IS_VL) != 0) {
 		cfg_lsw = ASC_GET_CHIP_CFG_LSW(iot, ioh);
 		chip_irq = (cfg_lsw >> 2) & 0x07;
@@ -2115,11 +1935,8 @@ AscGetChipIRQ(iot, ioh, bus_type)
 
 
 static u_int8_t
-AscSetChipIRQ(iot, ioh, irq_no, bus_type)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        irq_no;
-	u_int16_t       bus_type;
+AscSetChipIRQ(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t irq_no, u_int16_t bus_type)
 {
 	u_int16_t       cfg_lsw;
 
@@ -2158,9 +1975,7 @@ AscSetChipIRQ(iot, ioh, irq_no, bus_type)
 
 
 static void
-AscAckInterrupt(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscAckInterrupt(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int8_t        host_flag;
 	u_int8_t        risc_flag;
@@ -2192,8 +2007,7 @@ AscAckInterrupt(iot, ioh)
 
 
 static u_int32_t
-AscGetMaxDmaCount(bus_type)
-	u_int16_t       bus_type;
+AscGetMaxDmaCount(u_int16_t bus_type)
 {
 	if (bus_type & ASC_IS_ISA)
 		return (ASC_MAX_ISA_DMA_COUNT);
@@ -2203,10 +2017,8 @@ AscGetMaxDmaCount(bus_type)
 }
 
 
-static u_int16_t
-AscGetIsaDmaChannel(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+u_int16_t
+AscGetIsaDmaChannel(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int16_t       channel;
 
@@ -2220,10 +2032,8 @@ AscGetIsaDmaChannel(iot, ioh)
 
 
 static u_int16_t
-AscSetIsaDmaChannel(iot, ioh, dma_channel)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int16_t       dma_channel;
+AscSetIsaDmaChannel(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t dma_channel)
 {
 	u_int16_t       cfg_lsw;
 	u_int8_t        value;
@@ -2243,9 +2053,7 @@ AscSetIsaDmaChannel(iot, ioh, dma_channel)
 
 
 static u_int8_t
-AscGetIsaDmaSpeed(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscGetIsaDmaSpeed(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int8_t        speed_value;
 
@@ -2258,10 +2066,8 @@ AscGetIsaDmaSpeed(iot, ioh)
 
 
 static u_int8_t
-AscSetIsaDmaSpeed(iot, ioh, speed_value)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        speed_value;
+AscSetIsaDmaSpeed(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t speed_value)
 {
 	speed_value &= 0x07;
 	AscSetBank(iot, ioh, 1);
@@ -2277,13 +2083,8 @@ AscSetIsaDmaSpeed(iot, ioh, speed_value)
 
 
 static void
-AscHandleExtMsgIn(sc, halt_q_addr, q_cntl, target_id, tid_no, asyn_sdtr)
-	ASC_SOFTC      *sc;
-	u_int16_t       halt_q_addr;
-	u_int8_t        q_cntl;
-	ASC_SCSI_BIT_ID_TYPE target_id;
-	int             tid_no;
-	u_int8_t        asyn_sdtr;
+AscHandleExtMsgIn(ASC_SOFTC *sc, u_int16_t halt_q_addr, u_int8_t q_cntl,
+	ASC_SCSI_BIT_ID_TYPE target_id, int tid_no, u_int8_t asyn_sdtr)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -2355,12 +2156,12 @@ AscHandleExtMsgIn(sc, halt_q_addr, q_cntl, target_id, tid_no, asyn_sdtr)
 		   ext_msg.msg_len == MS_WDTR_LEN) {
 		ext_msg.wdtr_width = 0;
 		AscMemWordCopyToLram(iot, ioh, ASCV_MSGOUT_BEG,
-			     (u_int16_t *) & ext_msg, sizeof(EXT_MSG) >> 1);
+			     (const u_int16_t *) & ext_msg, sizeof(EXT_MSG) >> 1);
 		q_cntl |= ASC_QC_MSG_OUT;
 	} else {
 		ext_msg.msg_type = M1_MSG_REJECT;
 		AscMemWordCopyToLram(iot, ioh, ASCV_MSGOUT_BEG,
-			     (u_int16_t *) & ext_msg, sizeof(EXT_MSG) >> 1);
+			     (const u_int16_t *) & ext_msg, sizeof(EXT_MSG) >> 1);
 		q_cntl |= ASC_QC_MSG_OUT;
 	}
 
@@ -2369,10 +2170,7 @@ AscHandleExtMsgIn(sc, halt_q_addr, q_cntl, target_id, tid_no, asyn_sdtr)
 
 
 static u_int8_t
-AscMsgOutSDTR(sc, sdtr_period, sdtr_offset)
-	ASC_SOFTC      *sc;
-	u_int8_t        sdtr_period;
-	u_int8_t        sdtr_offset;
+AscMsgOutSDTR(ASC_SOFTC *sc, u_int8_t sdtr_period, u_int8_t sdtr_offset)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -2389,12 +2187,12 @@ AscMsgOutSDTR(sc, sdtr_period, sdtr_offset)
 	if ((sdtr_period_index = AscGetSynPeriodIndex(sc, sdtr_period)) <=
 	    sc->max_sdtr_index) {
 		AscMemWordCopyToLram(iot, ioh, ASCV_MSGOUT_BEG,
-			    (u_int16_t *) & sdtr_buf, sizeof(EXT_MSG) >> 1);
+			    (const u_int16_t *) & sdtr_buf, sizeof(EXT_MSG) >> 1);
 		return ((sdtr_period_index << 4) | sdtr_offset);
 	} else {
 		sdtr_buf.req_ack_offset = 0;
 		AscMemWordCopyToLram(iot, ioh, ASCV_MSGOUT_BEG,
-			    (u_int16_t *) & sdtr_buf, sizeof(EXT_MSG) >> 1);
+			    (const u_int16_t *) & sdtr_buf, sizeof(EXT_MSG) >> 1);
 		return (0);
 	}
 }
@@ -2406,11 +2204,8 @@ AscMsgOutSDTR(sc, sdtr_period, sdtr_offset)
 
 
 static void
-AscSetChipSDTR(iot, ioh, sdtr_data, tid_no)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        sdtr_data;
-	u_int8_t        tid_no;
+AscSetChipSDTR(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t sdtr_data, u_int8_t tid_no)
 {
 	AscSetChipSynRegAtID(iot, ioh, tid_no, sdtr_data);
 	AscWriteLramByte(iot, ioh, tid_no + ASCV_SDTR_DONE_BEG, sdtr_data);
@@ -2418,10 +2213,7 @@ AscSetChipSDTR(iot, ioh, sdtr_data, tid_no)
 
 
 static u_int8_t
-AscCalSDTRData(sc, sdtr_period, syn_offset)
-	ASC_SOFTC      *sc;
-	u_int8_t        sdtr_period;
-	u_int8_t        syn_offset;
+AscCalSDTRData(ASC_SOFTC *sc, u_int8_t sdtr_period, u_int8_t syn_offset)
 {
 	u_int8_t        byte;
 	u_int8_t        sdtr_period_ix;
@@ -2436,9 +2228,7 @@ AscCalSDTRData(sc, sdtr_period, syn_offset)
 
 
 static u_int8_t
-AscGetSynPeriodIndex(sc, syn_time)
-	ASC_SOFTC      *sc;
-	u_int8_t        syn_time;
+AscGetSynPeriodIndex(ASC_SOFTC *sc, u_int8_t syn_time)
 {
 	u_int8_t       *period_table;
 	int             max_index;
@@ -2468,9 +2258,7 @@ AscGetSynPeriodIndex(sc, syn_time)
  * Send a command to the board
  */
 int
-AscExeScsiQueue(sc, scsiq)
-	ASC_SOFTC      *sc;
-	ASC_SCSI_Q     *scsiq;
+AscExeScsiQueue(ASC_SOFTC *sc, ASC_SCSI_Q *scsiq)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -2619,10 +2407,7 @@ AscExeScsiQueue(sc, scsiq)
 
 
 static int
-AscSendScsiQueue(sc, scsiq, n_q_required)
-	ASC_SOFTC      *sc;
-	ASC_SCSI_Q     *scsiq;
-	u_int8_t        n_q_required;
+AscSendScsiQueue(ASC_SOFTC *sc, ASC_SCSI_Q *scsiq, u_int8_t n_q_required)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -2657,10 +2442,7 @@ AscSendScsiQueue(sc, scsiq, n_q_required)
 
 
 static int
-AscPutReadySgListQueue(sc, scsiq, q_no)
-	ASC_SOFTC      *sc;
-	ASC_SCSI_Q     *scsiq;
-	u_int8_t        q_no;
+AscPutReadySgListQueue(ASC_SOFTC *sc, ASC_SCSI_Q *scsiq, u_int8_t q_no)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -2725,7 +2507,7 @@ AscPutReadySgListQueue(sc, scsiq, q_no)
 				 * Tell the board how many entries are in the S/G list
 				 */
 				AscMemWordCopyToLram(iot, ioh, q_addr + ASC_SCSIQ_SGHD_CPY_BEG,
-							(u_int16_t *) & scsi_sg_q,
+							(const u_int16_t *) & scsi_sg_q,
 							sizeof(ASC_SG_LIST_Q) >> 1);
 				/*
 				 * Tell the board the addresses of the S/G list segments
@@ -2745,10 +2527,7 @@ AscPutReadySgListQueue(sc, scsiq, q_no)
 
 
 static int
-AscPutReadyQueue(sc, scsiq, q_no)
-	ASC_SOFTC      *sc;
-	ASC_SCSI_Q     *scsiq;
-	u_int8_t        q_no;
+AscPutReadyQueue(ASC_SOFTC *sc, ASC_SCSI_Q *scsiq, u_int8_t q_no)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -2775,7 +2554,7 @@ AscPutReadyQueue(sc, scsiq, q_no)
 	}
 	scsiq->q1.status = ASC_QS_FREE;
 	AscMemWordCopyToLram(iot, ioh, q_addr + ASC_SCSIQ_CDB_BEG,
-		       (u_int16_t *) scsiq->cdbptr, scsiq->q2.cdb_len >> 1);
+		       (const u_int16_t *) scsiq->cdbptr, scsiq->q2.cdb_len >> 1);
 
 	AscPutSCSIQ(iot, ioh, q_addr + ASC_SCSIQ_CPY_BEG, scsiq);
 
@@ -2790,11 +2569,8 @@ AscPutReadyQueue(sc, scsiq, q_no)
 
 
 static void
-AscPutSCSIQ(iot, ioh, addr, scsiq)
-	bus_space_tag_t		iot;
-	bus_space_handle_t	ioh;
-	u_int16_t		addr;
-	ASC_SCSI_Q 		*scsiq;
+AscPutSCSIQ(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int16_t addr, ASC_SCSI_Q *scsiq)
 {
 	u_int16_t	val;
 
@@ -2835,8 +2611,7 @@ AscPutSCSIQ(iot, ioh, addr, scsiq)
 
 
 static int
-AscSgListToQueue(sg_list)
-	int             sg_list;
+AscSgListToQueue(int sg_list)
 {
 	int             n_sg_list_qs;
 
@@ -2849,10 +2624,7 @@ AscSgListToQueue(sg_list)
 
 
 static u_int
-AscGetNumOfFreeQueue(sc, target_ix, n_qs)
-	ASC_SOFTC      *sc;
-	u_int8_t        target_ix;
-	u_int8_t        n_qs;
+AscGetNumOfFreeQueue(ASC_SOFTC *sc, u_int8_t target_ix, u_int8_t n_qs)
 {
 	u_int           cur_used_qs;
 	u_int           cur_free_qs;
@@ -2880,10 +2652,8 @@ AscGetNumOfFreeQueue(sc, target_ix, n_qs)
 
 
 static u_int8_t
-AscAllocFreeQueue(iot, ioh, free_q_head)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        free_q_head;
+AscAllocFreeQueue(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t free_q_head)
 {
 	u_int16_t       q_addr;
 	u_int8_t        next_qp;
@@ -2901,11 +2671,8 @@ AscAllocFreeQueue(iot, ioh, free_q_head)
 
 
 static u_int8_t
-AscAllocMultipleFreeQueue(iot, ioh, free_q_head, n_free_q)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	u_int8_t        free_q_head;
-	u_int8_t        n_free_q;
+AscAllocMultipleFreeQueue(bus_space_tag_t iot, bus_space_handle_t ioh,
+	u_int8_t free_q_head, u_int8_t n_free_q)
 {
 	u_int8_t        i;
 
@@ -2920,9 +2687,7 @@ AscAllocMultipleFreeQueue(iot, ioh, free_q_head, n_free_q)
 
 
 static int
-AscStopQueueExe(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscStopQueueExe(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	int             count = 0;
 
@@ -2941,9 +2706,7 @@ AscStopQueueExe(iot, ioh)
 
 
 static void
-AscStartQueueExe(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscStartQueueExe(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 
 	if (AscReadLramByte(iot, ioh, ASCV_STOP_CODE_B) != 0)
@@ -2952,9 +2715,7 @@ AscStartQueueExe(iot, ioh)
 
 
 static void
-AscCleanUpBusyQueue(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscCleanUpBusyQueue(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	int             count = 0;
 	u_int8_t        stop_code;
@@ -2974,10 +2735,7 @@ AscCleanUpBusyQueue(iot, ioh)
 
 
 static int
-_AscWaitQDone(iot, ioh, scsiq)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	ASC_SCSI_Q     *scsiq;
+_AscWaitQDone(bus_space_tag_t iot, bus_space_handle_t ioh, ASC_SCSI_Q *scsiq)
 {
 	u_int16_t       q_addr;
 	u_int8_t        q_status;
@@ -2999,9 +2757,7 @@ _AscWaitQDone(iot, ioh, scsiq)
 
 
 static int
-AscCleanUpDiscQueue(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+AscCleanUpDiscQueue(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	int             count;
 	u_int8_t        stop_code;
@@ -3027,9 +2783,7 @@ AscCleanUpDiscQueue(iot, ioh)
 
 
 int
-AscAbortCCB(sc, ccb)
-	ASC_SOFTC      *sc;
-	u_int32_t       ccb;
+AscAbortCCB(ASC_SOFTC *sc, ADV_CCB *ccb)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -3058,9 +2812,7 @@ AscAbortCCB(sc, ccb)
 
 
 static int
-AscRiscHaltedAbortCCB(sc, ccb)
-	ASC_SOFTC      *sc;
-	u_int32_t       ccb;
+AscRiscHaltedAbortCCB(ASC_SOFTC *sc, ADV_CCB *ccb)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -3080,7 +2832,7 @@ AscRiscHaltedAbortCCB(sc, ccb)
 		q_addr = ASC_QNO_TO_QADDR(q_no);
 		scsiq->d2.ccb_ptr = AscReadLramDWord(iot, ioh,
 					       q_addr + ASC_SCSIQ_D_CCBPTR);
-		if (scsiq->d2.ccb_ptr == ccb) {
+		if (adv_ccb_phys_kv(sc, scsiq->d2.ccb_ptr) == ccb) {
 			_AscCopyLramScsiDoneQ(iot, ioh, q_addr, scsiq, sc->max_dma_count);
 			if (((scsiq->q_status & ASC_QS_READY) != 0)
 			    && ((scsiq->q_status & ASC_QS_ABORTED) == 0)
@@ -3091,7 +2843,6 @@ AscRiscHaltedAbortCCB(sc, ccb)
 				AscWriteLramByte(iot, ioh, q_addr + ASC_SCSIQ_B_STATUS,
 						 scsiq->q_status);
 				(*asc_isr_callback) (sc, scsiq);
-				DvcLeaveCritical(last_int_level);
 				return (1);
 			}
 		}
@@ -3103,9 +2854,7 @@ AscRiscHaltedAbortCCB(sc, ccb)
 
 
 static int
-AscRiscHaltedAbortTIX(sc, target_ix)
-	ASC_SOFTC      *sc;
-	u_int8_t        target_ix;
+AscRiscHaltedAbortTIX(ASC_SOFTC *sc, u_int8_t target_ix)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -3147,9 +2896,7 @@ AscRiscHaltedAbortTIX(sc, target_ix)
  * because at boot time interrupts are disabled.
  */
 int
-AscResetDevice(sc, target_ix)
-	ASC_SOFTC      *sc;
-	u_char          target_ix;
+AscResetDevice(ASC_SOFTC *sc, u_char target_ix)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -3186,7 +2933,7 @@ AscResetDevice(sc, target_ix)
 			scsiq->q2.tag_code = M2_QTAG_MSG_SIMPLE;
 			scsiq->q1.target_id = target_id;
 			scsiq->q2.target_ix = ASC_TIDLUN_TO_IX(tid_no, 0);
-			scsiq->cdbptr = (u_int8_t *) scsiq->cdb;
+			scsiq->cdbptr = scsiq->cdb;
 			scsiq->q1.cntl = ASC_QC_NO_CALLBACK | ASC_QC_MSG_OUT | ASC_QC_URGENT;
 			AscWriteLramByte(iot, ioh, ASCV_MSGOUT_BEG, M1_BUS_DVC_RESET);
 			sc->unit_not_ready &= ~target_id;
@@ -3217,8 +2964,7 @@ AscResetDevice(sc, target_ix)
 
 
 int
-AscResetBus(sc)
-	ASC_SOFTC      *sc;
+AscResetBus(ASC_SOFTC *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -3261,9 +3007,7 @@ AscResetBus(sc)
 
 
 static int
-AscSetLibErrorCode(sc, err_code)
-	ASC_SOFTC      *sc;
-	u_int16_t       err_code;
+AscSetLibErrorCode(ASC_SOFTC *sc, u_int16_t err_code)
 {
 	/*
 	 * if(sc->err_code == 0) { sc->err_code = err_code;
@@ -3282,16 +3026,12 @@ AscSetLibErrorCode(sc, err_code)
 
 
 void
-AscInquiryHandling(sc, tid_no, inq)
-	ASC_SOFTC      *sc;
-	u_int8_t        tid_no;
-	ASC_SCSI_INQUIRY *inq;
+AscInquiryHandling(ASC_SOFTC *sc, u_int8_t tid_no, ASC_SCSI_INQUIRY *inq)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	ASC_SCSI_BIT_ID_TYPE tid_bit = ASC_TIX_TO_TARGET_ID(tid_no);
 	ASC_SCSI_BIT_ID_TYPE orig_init_sdtr, orig_use_tagged_qng;
-
 
 	orig_init_sdtr = sc->init_sdtr;
 	orig_use_tagged_qng = sc->use_tagged_qng;
@@ -3329,8 +3069,7 @@ AscInquiryHandling(sc, tid_no, inq)
 
 
 static int
-AscTagQueuingSafe(inq)
-	ASC_SCSI_INQUIRY *inq;
+AscTagQueuingSafe(ASC_SCSI_INQUIRY *inq)
 {
 	if ((inq->add_len >= 32) &&
 	    (AscCompareString(inq->vendor_id, "QUANTUM XP34301", 15) == 0) &&
@@ -3342,10 +3081,7 @@ AscTagQueuingSafe(inq)
 
 
 static void
-AscAsyncFix(sc, tid_no, inq)
-	ASC_SOFTC      *sc;
-	u_int8_t        tid_no;
-	ASC_SCSI_INQUIRY *inq;
+AscAsyncFix(ASC_SOFTC *sc, u_int8_t tid_no, ASC_SCSI_INQUIRY *inq)
 {
 	u_int8_t        dvc_type;
 	ASC_SCSI_BIT_ID_TYPE tid_bits;
@@ -3399,10 +3135,7 @@ AscAsyncFix(sc, tid_no, inq)
 
 
 static int
-AscCompareString(str1, str2, len)
-	u_char         *str1;
-	u_char         *str2;
-	int             len;
+AscCompareString(const u_char *str1, const u_char *str2, int len)
 {
 	int             i;
 	int             diff;
@@ -3433,8 +3166,7 @@ DvcEnterCritical(void)
 
 
 static void
-DvcLeaveCritical(s)
-	int             s;
+DvcLeaveCritical(int s)
 {
 
 	splx(s);
@@ -3442,8 +3174,7 @@ DvcLeaveCritical(s)
 
 
 static void
-DvcSleepMilliSecond(n)
-	u_int32_t       n;
+DvcSleepMilliSecond(u_int32_t n)
 {
 
 	DELAY(n * 1000);
@@ -3451,8 +3182,7 @@ DvcSleepMilliSecond(n)
 
 #ifdef UNUSED
 static void
-DvcDelayMicroSecond(n)
-	u_int32_t       n;
+DvcDelayMicroSecond(u_int32_t n)
 {
 
 	DELAY(n);
@@ -3460,8 +3190,7 @@ DvcDelayMicroSecond(n)
 #endif
 
 static void
-DvcDelayNanoSecond(n)
-	u_int32_t       n;
+DvcDelayNanoSecond(u_int32_t n)
 {
 
 	DELAY((n + 999) / 1000);

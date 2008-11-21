@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_reconbuffer.h,v 1.3 2002/12/16 07:01:05 tdeval Exp $	*/
-/*	$NetBSD: rf_reconbuffer.h,v 1.3 1999/02/05 00:06:16 oster Exp $	*/
-
+/*	$NetBSD: rf_reconbuffer.h,v 1.8 2005/12/11 12:23:37 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,27 +26,33 @@
  * rights to redistribute these changes.
  */
 
-/*********************************************************************
+/*******************************************************************
  *
- * rf_reconbuffer.h -- Header file for reconstruction buffer manager.
+ * rf_reconbuffer.h -- header file for reconstruction buffer manager
  *
- *********************************************************************/
+ *******************************************************************/
 
-#ifndef	_RF__RF_RECONBUFFER_H_
-#define	_RF__RF_RECONBUFFER_H_
+#ifndef _RF__RF_RECONBUFFER_H_
+#define _RF__RF_RECONBUFFER_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+
 #include "rf_reconstruct.h"
 
-int  rf_SubmitReconBuffer(RF_ReconBuffer_t *, int, int);
-int  rf_SubmitReconBufferBasic(RF_ReconBuffer_t *, int, int);
-int  rf_MultiWayReconXor(RF_Raid_t *, RF_ReconParityStripeStatus_t *);
-RF_ReconBuffer_t *rf_GetFullReconBuffer(RF_ReconCtrl_t *);
-int  rf_CheckForFullRbuf(RF_Raid_t *, RF_ReconCtrl_t *,
-	RF_ReconParityStripeStatus_t *, int);
-void rf_ReleaseFloatingReconBuffer(RF_Raid_t *, RF_RowCol_t,
-	RF_ReconBuffer_t *);
-void rf_ReleaseBufferWaiters(RF_Raid_t *, RF_ReconParityStripeStatus_t *);
-void rf_ReleaseBufferWaiter(RF_ReconCtrl_t *, RF_ReconBuffer_t *);
+int
+rf_SubmitReconBuffer(RF_ReconBuffer_t * rbuf, int keep_int,
+    int use_committed);
+int
+rf_SubmitReconBufferBasic(RF_ReconBuffer_t * rbuf, int keep_int,
+    int use_committed);
+int
+rf_MultiWayReconXor(RF_Raid_t * raidPtr,
+    RF_ReconParityStripeStatus_t * pssPtr);
+RF_ReconBuffer_t *rf_GetFullReconBuffer(RF_ReconCtrl_t * reconCtrlPtr);
+int
+rf_CheckForFullRbuf(RF_Raid_t * raidPtr, RF_ReconCtrl_t * reconCtrl,
+    RF_ReconParityStripeStatus_t * pssPtr, int numDataCol);
+void
+rf_ReleaseFloatingReconBuffer(RF_Raid_t * raidPtr, RF_ReconBuffer_t * rbuf);
 
-#endif	/* !_RF__RF_RECONBUFFER_H_ */
+#endif				/* !_RF__RF_RECONBUFFER_H_ */

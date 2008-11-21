@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.1 2006/12/02 22:18:47 freza Exp $ */
+/*	$NetBSD: machdep.c,v 1.8 2008/11/12 12:36:00 ad Exp $ */
 
 /*
  * Copyright (c) 2006 Jachym Holecek
@@ -34,12 +34,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.8 2008/11/12 12:36:00 ad Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_ddb.h"
 #include "opt_ipkdb.h"
 #include "opt_virtex.h"
+#include "opt_kgdb.h"
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -50,7 +51,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
@@ -58,6 +58,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
 #include <sys/user.h>
 #include <sys/boot_flag.h>
 #include <sys/ksyms.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -81,11 +82,13 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
 #include <ddb/db_extern.h>
 #endif
 
+#if defined(KGDB)
+#include <sys/kgdb.h>
+#endif
 
 /*
  * Global variables used here and there
  */
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -102,7 +105,7 @@ char bootpath[256];
 paddr_t msgbuf_paddr;
 vaddr_t msgbuf_vaddr;
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 void *startsym, *endsym;
 #endif
 
@@ -243,7 +246,7 @@ initppc(u_int startkernel, u_int endkernel)
 	uvm_setpagesize();
 	pmap_bootstrap(startkernel, endkernel);
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init((int)((u_int)endsym - (u_int)startsym), startsym, endsym);
 #endif
 #ifdef DDB
@@ -258,6 +261,12 @@ initppc(u_int startkernel, u_int endkernel)
 	if (boothowto & RB_KDB)
 		ipkdb_connect(0);
 #endif
+#ifdef KGDB
+	/*
+	 * Now trap to KGDB
+	 */
+	kgdb_connect(1);
+#endif /* KGDB */
 }
 
 /*
@@ -316,7 +325,7 @@ cpu_startup(void)
 	curcpu()->ci_khz = cpuspeed / 1000;
 
 	/* Initialize error message buffer. */
-	initmsgbuf((caddr_t)msgbuf, round_page(MSGBUFSIZE));
+	initmsgbuf((void *)msgbuf, round_page(MSGBUFSIZE));
 
 	printf("%s%s", copyright, version);
 
@@ -325,17 +334,10 @@ cpu_startup(void)
 
 	minaddr = 0;
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, 0, FALSE, NULL);
+				 VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -353,14 +355,14 @@ cpu_startup(void)
 
 	pn = prop_number_create_integer(memsize);
 	KASSERT(pn != NULL);
-	if (prop_dictionary_set(board_properties, "mem-size", pn) == FALSE)
+	if (prop_dictionary_set(board_properties, "mem-size", pn) == false)
 		panic("setting mem-size");
 	prop_object_release(pn);
 
 	pn = prop_number_create_integer(cpuspeed);
 	KASSERT(pn != NULL);
 	if (prop_dictionary_set(board_properties, "processor-frequency",
-	    pn) == FALSE)
+	    pn) == false)
 		panic("setting processor-frequency");
 	prop_object_release(pn);
 
@@ -410,6 +412,8 @@ cpu_reboot(int howto, char *what)
 
 	doshutdownhooks();
 
+	pmf_system_shutdown(boothowto);
+
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 		/* Power off here if we know how...*/
 	}
@@ -423,6 +427,11 @@ cpu_reboot(int howto, char *what)
 		printf("dropping to debugger\n");
 		while(1)
 			Debugger();
+#endif
+#ifdef KGDB
+		printf("dropping to kgdb\n");
+		while(1)
+			kgdb_connect(1);
 #endif
 	}
 
@@ -455,6 +464,10 @@ cpu_reboot(int howto, char *what)
 #ifdef DDB
 	while(1)
 		Debugger();
+#endif
+#ifdef KGDB
+	while(1)
+		kgdb_connect(1);
 #else
 	while (1)
 		/* nothing */;

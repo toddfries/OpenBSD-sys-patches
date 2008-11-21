@@ -1,5 +1,4 @@
-/*	$OpenBSD: i80321_space.c,v 1.4 2006/06/01 03:46:01 drahn Exp $	*/
-/*	$NetBSD: i80321_space.c,v 1.9 2005/11/24 13:08:32 yamt Exp $	*/
+/*	$NetBSD: i80321_space.c,v 1.11 2007/10/17 19:53:43 garbled Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -40,6 +39,9 @@
  * bus_space functions for i80321 I/O Processor.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i80321_space.c,v 1.11 2007/10/17 19:53:43 garbled Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 
@@ -49,6 +51,8 @@
 
 #include <arm/xscale/i80321reg.h>
 #include <arm/xscale/i80321var.h>
+
+#include "opt_i80321.h"
 
 /* Prototypes for all the bus_space structure functions */
 bs_protos(i80321);
@@ -67,8 +71,8 @@ const struct bus_space i80321_bs_tag_template = {
 	(void *) 0,
 
 	/* mapping/unmapping */
-	i80321_bs_map,
-	i80321_bs_unmap,
+	NULL,
+	NULL,
 	i80321_bs_subregion,
 
 	/* allocation/deallocation */
@@ -177,76 +181,13 @@ i80321_mem_bs_init(bus_space_tag_t bs, void *cookie)
 	bs->bs_mmap = i80321_mem_bs_mmap;
 }
 
-int
-i80321_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flag,
-    bus_space_handle_t *bshp)
-{
-	const struct pmap_devmap *pd;
-	paddr_t startpa, endpa, pa, pagecnt;
-	vaddr_t va;
-	pt_entry_t *pte;
-
-	if ((pd = pmap_devmap_find_pa(bpa, size)) != NULL) {
-		/* Device was statically mapped. */
-		*bshp = pd->pd_va + (bpa - pd->pd_pa);
-		return (0);
-	}
-
-#if 0
-printf("i80321_bs_map bpa %x, size %x flag %x\n", bpa, size, flag);
-#endif
-	endpa = round_page(bpa + size);
-	startpa = trunc_page(bpa);
-	pagecnt = endpa - startpa;
-
-	va = uvm_km_valloc(kernel_map, endpa - startpa);
-	if (va == 0)
-		return(ENOMEM);
-#if 0
-printf("i80321_bs_map va %x pa %x, endpa %x, sz %x\n", va, startpa,
-    endpa, endpa-startpa);
-#endif
-
-	*bshp = (bus_space_handle_t)(va + (bpa - startpa));
-
-	for (pa = startpa; pagecnt > 0;
-	    pa += PAGE_SIZE, va += PAGE_SIZE, pagecnt -= PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
-		if ((flag & BUS_SPACE_MAP_CACHEABLE) == 0) {
-			pte = vtopte(va);
-			*pte &= ~L2_S_CACHE_MASK;
-			PTE_SYNC(pte);
-		}
-	}
-	pmap_update(pmap_kernel());
-
-	return (0);
-}
-
-void
-i80321_bs_unmap(void *t, bus_space_handle_t bsh, bus_size_t size)
-{
-	vaddr_t va, endva;
-
-	if (pmap_devmap_find_va(bsh, size) != NULL) {
-		/* Device was statically mapped; nothing to do. */
-		return;
-	}
-
-	endva = round_page(bsh + size);
-	va = trunc_page(bsh);
-
-	pmap_kremove(va, endva - va);
-	uvm_km_free(kernel_map, va, endva - va);
-}
-
-
 /* *** Routines shared by i80321, PCI IO, and PCI MEM. *** */
 
 int
 i80321_bs_subregion(void *t, bus_space_handle_t bsh, bus_size_t offset,
     bus_size_t size, bus_space_handle_t *nbshp)
 {
+
 	*nbshp = bsh + offset;
 	return (0);
 }
@@ -281,12 +222,14 @@ i80321_io_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	struct i80321_softc *sc = t;
+	vaddr_t winvaddr;
 	uint32_t busbase;
 
 	if (bpa >= sc->sc_ioout_xlate &&
 	    bpa < (sc->sc_ioout_xlate + VERDE_OUT_XLATE_IO_WIN_SIZE)) {
 		busbase = sc->sc_ioout_xlate;
-	} else 
+		winvaddr = sc->sc_iow_vaddr;
+	} else
 		return (EINVAL);
 
 	if ((bpa + size) >= (busbase + VERDE_OUT_XLATE_IO_WIN_SIZE))
@@ -297,8 +240,8 @@ i80321_io_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flags,
 	 * virtual address by board-specific code.  Translate the
 	 * bus address to the virtual address.
 	 */
-	bus_space_subregion(sc->sc_st, sc->sc_io_sh, (bpa - busbase), size,
-	    bshp);
+	*bshp = winvaddr + (bpa - busbase);
+
 	return (0);
 }
 
@@ -336,61 +279,59 @@ i80321_io_bs_vaddr(void *t, bus_space_handle_t bsh)
 /* *** Routines for PCI MEM. *** */
 
 int
-i80321_mem_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flag,
+i80321_mem_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 
+#ifndef I80321_USE_DIRECT_WIN
 	struct i80321_softc *sc = t;
+#endif
 	vaddr_t va;
 	uint32_t busbase;
 	paddr_t pa, endpa, physbase;
-	pt_entry_t *pte;
 
-#if 0
-printf("i80321_bs_map bpa %x, size %x flag %x : %x %x \n", bpa, size, flag,
-   sc->sc_owin[0].owin_xlate_lo,
-   sc->sc_owin[0].owin_xlate_lo+ VERDE_OUT_XLATE_MEM_WIN_SIZE);
-#endif
-
+#ifdef I80321_USE_DIRECT_WIN
+	if (bpa >= (VERDE_OUT_DIRECT_WIN_BASE) &&
+	    bpa < (VERDE_OUT_DIRECT_WIN_BASE + VERDE_OUT_DIRECT_WIN_SIZE)) {
+		busbase = VERDE_OUT_DIRECT_WIN_BASE;
+		physbase = VERDE_OUT_DIRECT_WIN_BASE;
+	} else
+		return (EINVAL);
+	if ((bpa + size) >= (VERDE_OUT_DIRECT_WIN_BASE +
+	    VERDE_OUT_DIRECT_WIN_SIZE))
+		return (EINVAL);
+#else
 	if (bpa >= sc->sc_owin[0].owin_xlate_lo &&
 	    bpa < (sc->sc_owin[0].owin_xlate_lo +
 		   VERDE_OUT_XLATE_MEM_WIN_SIZE)) {
-		busbase = sc->sc_iwin[1].iwin_xlate;
-		physbase = sc->sc_owin[0].owin_xlate_lo;
+		busbase = sc->sc_owin[0].owin_xlate_lo;
+		physbase = sc->sc_iwin[1].iwin_xlate;
 	} else
 		return (EINVAL);
 
-	if ((bpa + size) >= ( sc->sc_owin[0].owin_xlate_lo +
-	    VERDE_OUT_XLATE_MEM_WIN_SIZE))
+	if ((bpa + size) >= (busbase + VERDE_OUT_XLATE_MEM_WIN_SIZE))
 		return (EINVAL);
+#endif
 
 	/*
-	 * Found the window -- PCI MEM space is now mapped by allocating
+	 * Found the window -- PCI MEM space is not mapped by allocating
 	 * some kernel VA space and mapping the pages with pmap_enter().
 	 * pmap_enter() will map unmanaged pages as non-cacheable.
 	 */
 	pa = trunc_page((bpa - busbase) + physbase);
 	endpa = round_page(((bpa - busbase) + physbase) + size);
 
-	va = uvm_km_valloc(kernel_map, endpa - pa);
+	va = uvm_km_alloc(kernel_map, endpa - pa, 0,
+	    UVM_KMF_VAONLY | UVM_KMF_NOWAIT);
 	if (va == 0)
 		return (ENOMEM);
-//printf("i80321_mem_bs_map bpa %x pa %x va %x sz %x\n", bpa, pa, va, endpa-pa);
-
-#if 0
-printf("i80321_bs_map va %x pa %x, endpa %x, sz %x\n", va, pa,
-    endpa, endpa-pa);
-#endif
 
 	*bshp = va + (bpa & PAGE_MASK);
 
 	for (; pa < endpa; pa += PAGE_SIZE, va += PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
-		if ((flag & BUS_SPACE_MAP_CACHEABLE) == 0) {
-			pte = vtopte(va);
-			*pte &= ~L2_S_CACHE_MASK;
-			PTE_SYNC(pte);
-		}
+		pmap_enter(pmap_kernel(), va, pa,
+		    VM_PROT_READ | VM_PROT_WRITE,
+		    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
 	}
 	pmap_update(pmap_kernel());
 
@@ -405,11 +346,11 @@ i80321_mem_bs_unmap(void *t, bus_space_handle_t bsh, bus_size_t size)
 	va = trunc_page(bsh);
 	endva = round_page(bsh + size);
 
-	pmap_kremove(va, endva - va);
+	pmap_remove(pmap_kernel(), va, endva - va);
 	pmap_update(pmap_kernel());
 
 	/* Free the kernel virtual mapping. */
-	uvm_km_free(kernel_map, va, endva - va);
+	uvm_km_free(kernel_map, va, endva - va, UVM_KMF_VAONLY);
 }
 
 int

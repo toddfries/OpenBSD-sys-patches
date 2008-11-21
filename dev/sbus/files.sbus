@@ -1,13 +1,23 @@
-#	$OpenBSD: files.sbus,v 1.37 2007/05/31 17:23:14 sobrado Exp $
-#	$NetBSD: files.sbus,v 1.16 2000/12/08 17:29:12 martin Exp $
+#	$NetBSD: files.sbus,v 1.31 2007/08/26 00:39:39 macallan Exp $
 #
 # Config file and device description for machine-independent SBUS code.
 # Included by ports that need it.
 
-device	sbus {[slot = -1], [offset = -1]}
-#notyet:file	dev/sbus/sbus.c		sbus
+device	sbus { slot = -1, offset = -1 }
+#notyet:file	dev/sbus/sbus.c			sbus
 
-# SBus NCR539x SCSI & Lance Ethernet
+# Sbus expander device
+device	xbox {}
+attach	xbox at sbus
+attach	sbus at xbox with sbus_xbox
+file	dev/sbus/xbox.c			xbox
+
+# Qlogic ISP 10x0 (Sbus) family
+# device declaration in sys/conf/files
+attach isp at sbus with isp_sbus
+file	dev/sbus/isp_sbus.c		isp_sbus
+
+# Sbus NCR539x SCSI & Lance Ethernet
 device	dma {}: lsi64854
 attach	dma at sbus with dma_sbus
 device	ledma {}: lsi64854
@@ -19,28 +29,38 @@ attach	lebuffer at sbus
 file	dev/sbus/lebuffer.c		lebuffer
 
 # device definition in sys/conf/files
-attach	le at sbus with le_sbus
-attach	le at lebuffer with le_lebuffer
-attach	le at ledma with le_ledma
+attach	le at sbus with le_sbus: le24
+attach	le at lebuffer with le_lebuffer: le24
+attach	le at ledma with le_ledma: le24
 file	dev/sbus/if_le.c		le_sbus
 file	dev/sbus/if_le_lebuffer.c	le_lebuffer
 file	dev/sbus/if_le_ledma.c		le_ledma
+
+attach	esp at sbus with esp_sbus
+attach	esp at dma with esp_dma
+file	dev/sbus/esp_sbus.c		esp_sbus | esp_dma	needs-flag
+
+# LSI64854 based bi-directional parallel port
+device	bpp {}: lsi64854
+attach	bpp at sbus
+file	dev/sbus/bpp.c			bpp	needs-flag
+
+# Efficient Networks, Inc. ATM interface
+# device declaration in sys/conf/files
+attach	en at sbus with en_sbus
+file	dev/sbus/if_en.c		en_sbus
 
 device	qec {}
 attach	qec at sbus
 file	dev/sbus/qec.c			qec
 
-device	be: ether, ifnet, mii, ifmedia
+device	be: arp, ether, ifnet, mii
 attach	be at qec
 file	dev/sbus/be.c			be
 
-device	qe: ether, ifnet, ifmedia
+device	qe: arp, ether, ifnet
 attach	qe at qec
 file	dev/sbus/qe.c			qe
-
-attach	esp at sbus with esp_sbus
-attach	esp at dma with esp_dma
-file	dev/sbus/esp_sbus.c		esp_sbus | esp_dma	needs-flag
 
 attach	hme at sbus with hme_sbus
 file	dev/sbus/if_hme_sbus.c		hme_sbus
@@ -48,93 +68,81 @@ file	dev/sbus/if_hme_sbus.c		hme_sbus
 attach	gem at sbus with gem_sbus
 file	dev/sbus/if_gem_sbus.c		gem_sbus
 
-device	audiocs: audio, auconv
-attach	audiocs at sbus
-file	dev/sbus/cs4231.c		audiocs
+attach	audiocs at sbus with audiocs_sbus
+file	dev/sbus/cs4231_sbus.c		audiocs_sbus
 
-attach	isp at sbus with isp_sbus
-file	dev/sbus/isp_sbus.c		isp_sbus
-
-device	agten: wsemuldisplaydev, rasops8
-attach	agten at sbus
-file	dev/sbus/agten.c		agten
-
-device	bwtwo: wsemuldisplaydev, rasops1
-attach	bwtwo at sbus
-file	dev/sbus/bwtwo.c		bwtwo
-
-device	cgsix: wsemuldisplaydev, rasops8
-attach	cgsix at sbus
-file	dev/sbus/cgsix.c		cgsix
-
-device	cgthree: wsemuldisplaydev, rasops8
-attach	cgthree at sbus
-file	dev/sbus/cgthree.c		cgthree
-
-device	cgtwelve: wsemuldisplaydev, rasops1
-attach	cgtwelve at sbus
-file	dev/sbus/cgtwelve.c		cgtwelve
-
-device	mgx: wsemuldisplaydev, rasops8
-attach	mgx at sbus
-file	dev/sbus/mgx.c			mgx
-
-device	rfx: wsemuldisplaydev, rasops8
-attach	rfx at sbus
-file	dev/sbus/rfx.c			rfx
-
-device	tvtwo: wsemuldisplaydev, rasops8
-attach	tvtwo at sbus
-file	dev/sbus/tvtwo.c		tvtwo
-
-device	vigra: wsemuldisplaydev, rasops8
-attach	vigra at sbus
-file	dev/sbus/vigra.c		vigra
-
-device	zx: wsemuldisplaydev, rasops8
-attach	zx at sbus
-file	dev/sbus/zx.c			zx
-
+#
+# Magma Serial/Parallel boards
+#
 device	magma {}
 attach	magma at sbus
-device	mtty
+device	mtty: tty
 attach	mtty at magma
 device	mbpp
 attach	mbpp at magma
 file	dev/sbus/magma.c		magma | mtty | mbpp needs-flag
 
-device	spif {}
-attach	spif at sbus
-device	stty
-attach	stty at spif
-device	sbpp
-attach	sbpp at spif
-file	dev/sbus/spif.c			spif | stty | sbpp needs-flag
+# XXX this should use the cd18xx code when it (the cd18xx code) works.
+device spif {}
+attach spif at sbus
+device stty: tty
+attach stty at spif
+device sbpp
+attach sbpp at spif
+file   dev/sbus/spif.c                 spif | stty | sbpp needs-flag
 
-attach	uperf at sbus with uperf_sbus
-file	dev/sbus/uperf_sbus.c		uperf_sbus
+device siosixteen { channel = -1 }
+attach siosixteen at sbus
+device clcd: tty, cd18xx
+attach clcd at siosixteen
+file	dev/sbus/sio16.c		siosixteen | clcd needs-flag
 
-device	asio {}
-attach	asio at sbus
-attach	com at asio with com_asio
-file	dev/sbus/asio.c			asio | com_asio needs-flag
+# STP4020 SBus to PCMCIA bridge (`nell' to her friends)
+device	nell: pcmciabus
+attach	nell at sbus
+file	dev/sbus/stp4020.c		nell
 
-device	apio {}
-attach	apio at sbus
-attach	lpt at apio with lpt_apio
-file	dev/sbus/apio.c			apio | lpt_apio needs-flag
+#
+# Framebuffer devices (requires dev/sun/files.sun)
+#
+attach	bwtwo at sbus with bwtwo_sbus
+file	dev/sbus/bwtwo_sbus.c		bwtwo_sbus
 
-# STP4020 SBus to PCMCIA bridge
-device	stp: pcmciabus
-attach	stp at sbus with stp_sbus
-file	dev/sbus/stp4020.c		stp
+attach	cgsix at sbus with cgsix_sbus
+file	dev/sbus/cgsix_sbus.c		cgsix_sbus
 
-# ``XBox'' SBus Expansion
-device	xbox {}
-attach	xbox at sbus
-file	dev/sbus/xbox.c			xbox
+attach	cgthree at sbus with cgthree_sbus
+file	dev/sbus/cgthree_sbus.c		cgthree_sbus
 
-# LSI64854 based bi-directional parallel port
-device	bpp {}: lsi64854
-attach	bpp at sbus
-file	dev/sbus/bpp.c			bpp	needs-flag
+# framebuffer devices implemented only on SBus
+device	tcx: bt_dac, fb, rasops8, rasops24
+attach	tcx at sbus
+file	dev/sbus/tcx.c			tcx needs-flag
+
+device	zx: fb, rasops32
+attach	zx at sbus
+file	dev/sbus/zx.c			zx
+
+# Tadpole 3GX/3GS (P9100 -- P Nine One Zero Zero -> pnozz)
+defflag	opt_pnozz.h	PNOZZ_DEBUG
+device	pnozz: fb, rasops8, bt_dac, wsemuldisplaydev, vcons
+attach	pnozz at sbus
+file	dev/sbus/p9100.c		pnozz needs-flag
+
+# SUNW,DBRI audio
+defflag	opt_sbus_dbri.h	DBRI_DEBUG
+defflag	opt_sbus_dbri.h	DBRI_BIG_BUFFER DBRI_SPIN
+device	dbri { }: audiobus, auconv, mulaw
+attach	dbri at sbus
+file	dev/sbus/dbri.c			dbri
+
+# an SBus frontend for genfb
+attach genfb at sbus with genfb_sbus : fb
+file	dev/sbus/genfb_sbus.c	genfb_sbus
+
+# Fujitsu AG-10e
+defflag	opt_agten.h	AGTEN_DEBUG
+device	agten: fb, rasops8, bt_dac, wsemuldisplaydev, vcons
+attach	agten at sbus
+file	dev/sbus/agten.c		agten needs-flag
+file	dev/ic/i128.c			agten

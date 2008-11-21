@@ -1,33 +1,33 @@
-#	$OpenBSD: Makefile,v 1.3 2005/05/06 11:16:48 pedro Exp $
+#	$NetBSD: Makefile,v 1.17 2008/10/25 22:27:38 apb Exp $
 
+# Makefile for sparc64 tags file and boot blocks
 
-S=${.CURDIR}/../..
-.include "$S/kern/Make.tags.inc"
+TSPARC64=	${SYSDIR}/arch/sparc64/tags
+SSPARC64=	${SYSDIR}/arch/sparc64/dev/*.[ch] \
+		${SYSDIR}/arch/sparc/fpu/*.[ch] \
+		${SYSDIR}/arch/sparc64/include/*.[ch] \
+		${SYSDIR}/arch/sparc64/sparc64/*.[ch]
+ASPARC64=	${SYSDIR}/arch/sparc64/sparc64/*.[sS]
+# CSPARC64=	../../compat/*/*.[ch]
 
-NOPROG=	noprog
-NOMAN=	noman
+# Directories in which to place tags links
+DSPARC64=	conf dev fpu include sparc64
 
-SUBDIR=	stand
-
-TSPARC64=	$S/arch/sparc64/tags
-SSPARC64=	$S/arch/sparc64/sparc64/*.[ch] $S/arch/sparc64/include/*.h \
-		$S/arch/sparc64/dev/*.[ch] $S/arch/sparc64/fpu/*.[ch]
-ASPARC64=	$S/arch/sparc64/sparc64/*.S $S/lib/libkern/arch/sparc64/*.[sS]
-
-# Directories in which to place sparc64 tags links
-DSPARC64=	sparc64 dev fpu include
+.include "../../kern/Make.tags.inc"
 
 tags:
-	-ctags -wdtf ${TSPARC64} ${COMM} ${SSPARC64}
+	-rm ${TSPARC64}
+	-echo ${SSPARC64} ${COMM} | xargs ctags -wadtf ${TSPARC64}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${ASPARC64} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
-		>> ${TSPARC64}
+	    ${TOOL_SED} -e \
+		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    >> tags
 	sort -o ${TSPARC64} ${TSPARC64}
 
 links:
 	-for i in ${DSPARC64}; do \
-	    (cd $$i && rm -f tags; ln -s ${TSPARC64} tags); done
+	    cd $$i && rm -f tags; ln -s ../tags tags; done
 
-obj: _SUBDIRUSE
+SUBDIR= compile include ../sparc/include stand
 
-.include <bsd.prog.mk>
+.include <bsd.subdir.mk>

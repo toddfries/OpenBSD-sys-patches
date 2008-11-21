@@ -1,8 +1,7 @@
-/*	$OpenBSD: iop_pci.c,v 1.5 2005/08/09 04:10:12 mickey Exp $	*/
-/*	$NetBSD: iop_pci.c,v 1.4 2001/03/20 13:21:00 ad Exp $	*/
+/*	$NetBSD: iop_pci.c,v 1.23 2008/04/28 20:23:55 martin Exp $	*/
 
 /*-
- * Copyright (c) 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 2000, 2001, 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,6 +33,9 @@
  * PCI front-end for `iop' driver.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: iop_pci.c,v 1.23 2008/04/28 20:23:55 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -49,7 +44,7 @@
 #include <sys/proc.h>
 
 #include <machine/endian.h>
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -62,24 +57,23 @@
 #define	PCI_INTERFACE_I2O_POLLED	0x00
 #define	PCI_INTERFACE_I2O_INTRDRIVEN	0x01
 
-void	iop_pci_attach(struct device *, struct device *, void *);
-int	iop_pci_match(struct device *, void *, void *);
+static void	iop_pci_attach(struct device *, struct device *, void *);
+static int	iop_pci_match(struct device *, struct cfdata *, void *);
 
-struct cfattach iop_pci_ca = {
-	sizeof(struct iop_softc), iop_pci_match, iop_pci_attach
-};
+CFATTACH_DECL(iop_pci, sizeof(struct iop_softc),
+    iop_pci_match, iop_pci_attach, NULL, NULL);
 
-int
-iop_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+static int
+iop_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pci_attach_args *pa;
+	u_int product, vendor;
+	pcireg_t reg;
 
 	pa = aux;
 
-	/* 
+	/*
 	 * Look for an "intelligent I/O processor" that adheres to the I2O
 	 * specification.  Ignore the device if it doesn't support interrupt
 	 * driven operation.
@@ -89,10 +83,29 @@ iop_pci_match(parent, match, aux)
 	    PCI_INTERFACE(pa->pa_class) == PCI_INTERFACE_I2O_INTRDRIVEN)
 		return (1);
 
+	/*
+	 * Match boards that don't conform exactly to the spec.
+	 */
+	vendor = PCI_VENDOR(pa->pa_id);
+	product = PCI_PRODUCT(pa->pa_id);
+
+	if (vendor == PCI_VENDOR_DPT &&
+	    (product == PCI_PRODUCT_DPT_RAID_I2O ||
+	    product == PCI_PRODUCT_DPT_RAID_2005S))
+		return (1);
+
+	if (vendor == PCI_VENDOR_INTEL &&
+	    (product == PCI_PRODUCT_INTEL_80960RM_2 ||
+	    product == PCI_PRODUCT_INTEL_80960_RP)) {
+		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+		if (PCI_VENDOR(reg) == PCI_VENDOR_PROMISE)
+			return (1);
+	}
+
 	return (0);
 }
 
-void
+static void
 iop_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa;
@@ -114,8 +127,10 @@ iop_pci_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	for (i = PCI_MAPREG_START; i < PCI_MAPREG_END; i += 4) {
 		reg = pci_conf_read(pc, pa->pa_tag, i);
-		if (PCI_MAPREG_TYPE(reg) == PCI_MAPREG_TYPE_MEM)
+		if (PCI_MAPREG_TYPE(reg) == PCI_MAPREG_TYPE_MEM) {
+			sc->sc_memaddr = PCI_MAPREG_MEM_ADDR(reg);
 			break;
+		}
 	}
 	if (i == PCI_MAPREG_END) {
 		printf("can't find mapping\n");
@@ -124,23 +139,54 @@ iop_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Map the register window. */
 	if (pci_mapreg_map(pa, i, PCI_MAPREG_TYPE_MEM, 0, &sc->sc_iot,
-	    &sc->sc_ioh, NULL, NULL, 0x40000)) {
-		printf("%s: can't map register window\n", sc->sc_dv.dv_xname);
+	    &sc->sc_ioh, NULL, NULL)) {
+		aprint_error_dev(&sc->sc_dv, "can't map register window\n");
 		return;
 	}
 
+	/* Map the 2nd register window. */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_DPT &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DPT_RAID_2005S) {
+		i += 4;	/* next BAR */
+		if (i == PCI_MAPREG_END) {
+			printf("can't find mapping\n");
+			return;
+		}
+
+#if 0
+		/* Should we check it? (see FreeBSD's asr driver) */
+		reg = pci_conf_read(pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+		printf("subid %x, %x\n", PCI_VENDOR(reg), PCI_PRODUCT(reg));
+#endif
+		if (pci_mapreg_map(pa, i, PCI_MAPREG_TYPE_MEM, 0,
+		    &sc->sc_msg_iot, &sc->sc_msg_ioh, NULL, NULL)) {
+			aprint_error_dev(&sc->sc_dv, "can't map 2nd register window\n");
+			return;
+		}
+	} else {
+		/* iop devices other than 2005S */
+		sc->sc_msg_iot = sc->sc_iot;
+		sc->sc_msg_ioh = sc->sc_ioh;
+	}
+
+	sc->sc_pcibus = pa->pa_bus;
+	sc->sc_pcidev = pa->pa_device;
 	sc->sc_dmat = pa->pa_dmat;
 	sc->sc_bus_memt = pa->pa_memt;
 	sc->sc_bus_iot = pa->pa_iot;
 
-	/* Map and establish the interrupt.  XXX IPL_BIO. */
+	/* Enable the device. */
+	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+		       reg | PCI_COMMAND_MASTER_ENABLE);
+
+	/* Map and establish the interrupt.. */
 	if (pci_intr_map(pa, &ih)) {
 		printf("can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, iop_intr, sc,
-	    sc->sc_dv.dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, iop_intr, sc);
 	if (sc->sc_ih == NULL) {
 		printf("can't establish interrupt");
 		if (intrstr != NULL)

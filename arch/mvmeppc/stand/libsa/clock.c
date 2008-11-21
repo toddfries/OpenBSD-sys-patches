@@ -1,23 +1,24 @@
-/*	$OpenBSD: clock.c,v 1.2 2001/07/04 08:31:37 niklas Exp $	*/
+/*	$NetBSD: clock.c,v 1.1 2002/02/27 21:02:27 scw Exp $	*/
 
+/*
+ * This is a slightly modified version of mvme68k's standalone clock.c.
+ * As there was no attribution/copyright header on that file, there's
+ * not going to be one for this file.
+ */
 
 #include <sys/types.h>
-#include <machine/prom.h>
 
 #include "stand.h"
 #include "libsa.h"
+#include "bugsyscalls.h"
 
-/*
- * BCD to decimal and decimal to BCD.
- */
-#define FROMBCD(x)      (((x) >> 4) * 10 + ((x) & 0xf))
-#define TOBCD(x)        (((x) / 10 * 16) + ((x) % 10))
+#define FROMBCD(x)      (int)((((unsigned int)(x)) >> 4) * 10 +\
+			      (((unsigned int)(x)) & 0xf))
 
 #define SECDAY          (24 * 60 * 60)
 #define SECYR           (SECDAY * 365)
 #define LEAPYEAR(y)     (((y) & 3) == 0)
 #define YEAR0		68
-
 
 /*
  * This code is defunct after 2068.
@@ -26,11 +27,10 @@
 const short dayyr[12] =
 {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
 
-static  u_long
-chiptotime(sec, min, hour, day, mon, year)
-	register int sec, min, hour, day, mon, year;
+static u_long
+chiptotime(int sec, int min, int hour, int day, int mon, int year)
 {
-	register int days, yr;
+	int days, yr;
 
 	sec = FROMBCD(sec);
 	min = FROMBCD(min);
@@ -57,9 +57,10 @@ chiptotime(sec, min, hour, day, mon, year)
 time_t
 getsecs()
 {
-	struct mvmeprom_time m;
+	struct bug_rtc_rd rr;
 
-	mvmeprom_rtc_rd(&m);
-	return (chiptotime(m.sec_BCD, m.min_BCD, m.hour_BCD, m.day_BCD, 
-			m.month_BCD, m.year_BCD));
+	bugsys_rtc_rd(&rr);
+
+	return (chiptotime(rr.rr_second, rr.rr_minute, rr.rr_hour,
+	    rr.rr_dayofmonth, rr.rr_month, rr.rr_year));
 }

@@ -1,10 +1,9 @@
-/*	$OpenBSD: i8042reg.h,v 1.5 2001/08/18 15:30:39 mickey Exp $	*/
-/*	$NetBSD: i8042reg.h,v 1.7 1998/01/18 14:41:37 drochner Exp $	*/
+/*	$NetBSD: i8042reg.h,v 1.8 2002/01/31 13:25:20 uwe Exp $	*/
 
 #define	KBSTATP		4	/* kbd controller status port (I) */
 #define	 KBS_DIB	0x01	/* kbd data in buffer */
 #define	 KBS_IBF	0x02	/* kbd input buffer low */
-#define	 KBS_WARM	0x04	/* kbd input buffer low */
+#define	 KBS_WARM	0x04	/* kbd system flag */
 #define	 KBS_OCMD	0x08	/* kbd output buffer has command */
 #define	 KBS_NOSEC	0x10	/* kbd security lock not engaged */
 #define	 KBS_TERR	0x20	/* kbd transmission error */
@@ -17,7 +16,6 @@
 #define	 KBC_AUXDISABLE	0xa7	/* disable auxiliary port */
 #define	 KBC_AUXENABLE	0xa8	/* enable auxiliary port */
 #define	 KBC_AUXTEST	0xa9	/* test auxiliary port */
-#define	 KBC_CMDWOUT	0xd1	/* write output port */
 #define	 KBC_KBDECHO	0xd2	/* echo to keyboard port */
 #define	 KBC_AUXECHO	0xd3	/* echo to auxiliary port */
 #define	 KBC_AUXWRITE	0xd4	/* write to auxiliary port */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.6 2004/04/12 15:28:38 kettenis Exp $	*/
-/*	$NetBSD: process_machdep.c,v 1.17 1996/05/06 20:05:24 gwr Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.27 2007/03/04 06:00:06 christos Exp $	*/
 
 /*
  * Copyright (c) 1993 Christopher G. Demetriou
@@ -53,6 +52,9 @@
  *	Set the process's program counter.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.27 2007/03/04 06:00:06 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -63,46 +65,51 @@
 #include <machine/psl.h>
 #include <machine/reg.h>
 
-#define	process_frame(p)	(struct frame *)((p)->p_md.md_regs)
-#define	process_fpframe(p)	&((p)->p_addr->u_pcb.pcb_fpregs)
-
-int
-process_read_regs(p, regs)
-	struct proc *p;
-	struct reg *regs;
+static inline struct frame *
+process_frame(struct lwp *l)
 {
-	struct frame *frame = process_frame(p);
+	void *ptr;
 
-	bcopy(frame->f_regs, regs->r_regs, sizeof(frame->f_regs));
-	regs->r_sr = frame->f_sr;
-	regs->r_pc = frame->f_pc;
+	ptr = l->l_md.md_regs;
+	return ptr;
+}
 
-	return (0);
+static inline struct fpframe *
+process_fpframe(struct lwp *l)
+{
+
+	return &l->l_addr->u_pcb.pcb_fpregs;
 }
 
 int
-process_read_fpregs(p, regs)
-	struct proc *p;
-	struct fpreg *regs;
+process_read_regs(struct lwp *l, struct reg *regs)
 {
-	struct fpframe *frame = process_fpframe(p);
+	struct frame *frame = process_frame(l);
 
-	bcopy(frame->fpf_regs, regs->r_regs, sizeof(frame->fpf_regs));
+	memcpy(regs->r_regs, frame->f_regs, sizeof(frame->f_regs));
+	regs->r_sr = frame->f_sr;
+	regs->r_pc = frame->f_pc;
+
+	return 0;
+}
+
+int
+process_read_fpregs(struct lwp *l, struct fpreg *regs)
+{
+	struct fpframe *frame = process_fpframe(l);
+
+	memcpy(regs->r_regs, frame->fpf_regs, sizeof(frame->fpf_regs));
 	regs->r_fpcr = frame->fpf_fpcr;
 	regs->r_fpsr = frame->fpf_fpsr;
 	regs->r_fpiar = frame->fpf_fpiar;
 
-	return (0);
+	return 0;
 }
 
-#ifdef PTRACE
-
 int
-process_write_regs(p, regs)
-	struct proc *p;
-	struct reg *regs;
+process_write_regs(struct lwp *l, const struct reg *regs)
 {
-	struct frame *frame = process_frame(p);
+	struct frame *frame = process_frame(l);
 
 	/*
 	 * in the hp300 machdep.c _write_regs, PC alignment wasn't
@@ -123,49 +130,43 @@ process_write_regs(p, regs)
 	    (regs->r_sr & PSL_USERSET) != PSL_USERSET)
 		return EPERM;
 
-	bcopy(regs->r_regs, frame->f_regs, sizeof(frame->f_regs));
+	memcpy(frame->f_regs, regs->r_regs, sizeof(frame->f_regs));
 	frame->f_sr = regs->r_sr;
 	frame->f_pc = regs->r_pc;
 
-	return (0);
+	return 0;
 }
 
 int
-process_write_fpregs(p, regs)
-	struct proc *p;
-	struct fpreg *regs;
+process_write_fpregs(struct lwp *l, const struct fpreg *regs)
 {
-	struct fpframe *frame = process_fpframe(p);
+	struct fpframe *frame = process_fpframe(l);
 
-	bcopy(regs->r_regs, frame->fpf_regs, sizeof(frame->fpf_regs));
+	memcpy(frame->fpf_regs, regs->r_regs, sizeof(frame->fpf_regs));
 	frame->fpf_fpcr = regs->r_fpcr;
 	frame->fpf_fpsr = regs->r_fpsr;
 	frame->fpf_fpiar = regs->r_fpiar;
 
-	return (0);
+	return 0;
 }
 
 int
-process_sstep(p, sstep)
-	struct proc *p;
-	int sstep;
+process_sstep(struct lwp *l, int sstep)
 {
-	struct frame *frame = process_frame(p);
+	struct frame *frame = process_frame(l);
 
 	if (sstep)
 		frame->f_sr |= PSL_T;
 	else
 		frame->f_sr &= ~PSL_T;
 
-	return (0);
+	return 0;
 }
 
 int
-process_set_pc(p, addr)
-	struct proc *p;
-	caddr_t addr;
+process_set_pc(struct lwp *l, void *addr)
 {
-	struct frame *frame = process_frame(p);
+	struct frame *frame = process_frame(l);
 
 	/*
 	 * in the hp300 machdep.c _set_pc, PC alignment is guaranteed
@@ -178,7 +179,5 @@ process_set_pc(p, addr)
 	 */
 	frame->f_pc = (u_int)addr;
 
-	return (0);
+	return 0;
 }
-
-#endif	/* PTRACE */

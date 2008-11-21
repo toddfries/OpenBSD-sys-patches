@@ -1,10 +1,35 @@
-/*	$OpenBSD: cgfour.c,v 1.27 2006/12/03 16:38:12 miod Exp $	*/
-/*	$NetBSD: cgfour.c,v 1.13 1997/05/24 20:16:06 pk Exp $	*/
+/*	$NetBSD: cgfour.c,v 1.45 2008/06/11 21:25:31 drochner Exp $	*/
+
+/*-
+ * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
- * Coyrpight (c) 2002 Miodrag Vallat.  All rights reserved.
- * Copyright (c) 1996 Jason R. Thorpe.  All rights reserved.
- * Copyright (c) 1995 Theo de Raadt.  All rights reserved.
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -45,12 +70,39 @@
  */
 
 /*
+ * Copyright (c) 1995 Theo de Raadt.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
  * color display (cgfour) driver.
  *
  * Does not handle interrupts, even though they can occur.
  *
  * XXX should defer colormap updates to vertical retrace interrupts
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cgfour.c,v 1.45 2008/06/11 21:25:31 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -62,100 +114,136 @@
 #include <sys/tty.h>
 #include <sys/conf.h>
 
-#include <uvm/uvm_extern.h>		/* NBPG */
-
 #include <machine/autoconf.h>
-#include <machine/pmap.h>
 #include <machine/eeprom.h>
-#include <machine/conf.h>
 
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplayvar.h>
-#include <dev/rasops/rasops.h>
-#include <machine/fbvar.h>
-
-#include <sparc/dev/btreg.h>
-#include <sparc/dev/btvar.h>
-#include <sparc/dev/pfourreg.h>
+#include <dev/sun/fbio.h>
+#include <dev/sun/fbvar.h>
+#include <dev/sun/btreg.h>
+#include <dev/sun/btvar.h>
+#include <dev/sun/pfourreg.h>
 
 /* per-display variables */
 struct cgfour_softc {
-	struct	sunfb sc_sunfb;		/* common base part */
-	struct rom_reg	sc_phys;	/* display RAM (phys addr) */
+	struct device	sc_dev;		/* base device */
+	struct fbdevice	sc_fb;		/* frame buffer device */
+	bus_space_tag_t	sc_bustag;
+	bus_addr_t	sc_paddr;	/* phys address for device mmap() */
+
 	volatile struct fbcontrol *sc_fbc;	/* Brooktree registers */
-	union	bt_cmap sc_cmap;	/* Brooktree color map */
+	union bt_cmap	sc_cmap;	/* Brooktree color map */
 };
 
-int	cgfour_ioctl(void *, u_long, caddr_t, int, struct proc *);
-paddr_t	cgfour_mmap(void *, off_t, int);
-void	cgfour_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
+/* autoconfiguration driver */
+static int	cgfourmatch(struct device *, struct cfdata *, void *);
+static void	cgfourattach(struct device *, struct device *, void *);
 
-struct wsdisplay_accessops cgfour_accessops = {
-	cgfour_ioctl,
-	cgfour_mmap,
-	NULL,	/* alloc_screen */
-	NULL,	/* free_screen */
-	NULL,	/* show_screen */
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	fb_pfour_burner,
-	NULL	/* pollc */
+#if defined(SUN4)
+static void	cgfourunblank(struct device *);
+#endif
+
+static int	cg4_pfour_probe(void *, void *);
+
+CFATTACH_DECL(cgfour, sizeof(struct cgfour_softc),
+    cgfourmatch, cgfourattach, NULL, NULL);
+
+extern struct cfdriver cgfour_cd;
+
+dev_type_open(cgfouropen);
+dev_type_ioctl(cgfourioctl);
+dev_type_mmap(cgfourmmap);
+
+const struct cdevsw cgfour_cdevsw = {
+	cgfouropen, nullclose, noread, nowrite, cgfourioctl,
+	nostop, notty, nopoll, cgfourmmap, nokqfilter,
 };
 
-void	cgfourattach(struct device *, struct device *, void *);
-int	cgfourmatch(struct device *, void *, void *);
-
-struct cfattach cgfour_ca = {
-	sizeof(struct cgfour_softc), cgfourmatch, cgfourattach
+#if defined(SUN4)
+/* frame buffer generic driver */
+static struct fbdriver cgfourfbdriver = {
+	cgfourunblank, cgfouropen, nullclose, cgfourioctl, nopoll,
+	cgfourmmap, nokqfilter
 };
 
-struct cfdriver cgfour_cd = {
-	NULL, "cgfour", DV_DULL
-};
+static void cgfourloadcmap(struct cgfour_softc *, int, int);
+static int cgfour_get_video(struct cgfour_softc *);
+static void cgfour_set_video(struct cgfour_softc *, int);
+#endif
 
-int
-cgfourmatch(struct device *parent, void *vcf, void *aux)
+/*
+ * Match a cgfour.
+ */
+static int
+cgfourmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct cfdata *cf = vcf;
-	struct confargs *ca = aux;
-	struct romaux *ra = &ca->ca_ra;
+	union obio_attach_args *uoba = aux;
+	struct obio4_attach_args *oba;
 
-	if (strcmp(cf->cf_driver->cd_name, ra->ra_name))
+	if (uoba->uoba_isobio4 == 0)
 		return (0);
 
-	if (!CPU_ISSUN4 || ca->ca_bustype != BUS_OBIO)
-		return (0);
-
-	if (probeget(ra->ra_vaddr, 4) == -1)
-		return (0);
-
-	/*
-	 * Check the pfour register.
-	 */
-	if (fb_pfour_id(ra->ra_vaddr) == PFOUR_ID_COLOR8P1)
-		return (1);
-
-	return (0);
+	oba = &uoba->uoba_oba4;
+	return (bus_space_probe(oba->oba_bustag, oba->oba_paddr,
+				4,	/* probe size */
+				0,	/* offset */
+				0,	/* flags */
+				cg4_pfour_probe, NULL));
 }
 
-void
-cgfourattach(struct device *parent, struct device *self, void *args)
+static int
+cg4_pfour_probe(void *vaddr, void *arg)
 {
-	struct cgfour_softc *sc = (struct cgfour_softc *)self;
-	struct confargs *ca = args;
-	int node = 0;
-	volatile struct bt_regs *bt;
-	int isconsole = 0;
 
-	printf(": p4");
+	return (fb_pfour_id(vaddr) == PFOUR_ID_COLOR8P1);
+}
+
+/*
+ * Attach a display.  We need to notice if it is the console, too.
+ */
+static void
+cgfourattach(struct device *parent, struct device *self, void *aux)
+{
+#if defined(SUN4)
+	struct cgfour_softc *sc = device_private(self);
+	union obio_attach_args *uoba = aux;
+	struct obio4_attach_args *oba = &uoba->uoba_oba4;
+	bus_space_handle_t bh;
+	volatile struct bt_regs *bt;
+	struct fbdevice *fb = &sc->sc_fb;
+	int ramsize, i, isconsole;
+
+	sc->sc_bustag = oba->oba_bustag;
+	sc->sc_paddr = (bus_addr_t)oba->oba_paddr;
 
 	/* Map the pfour register. */
-	SET(sc->sc_sunfb.sf_flags, FB_PFOUR);
-	sc->sc_sunfb.sf_pfour = (volatile u_int32_t *)
-		mapiodev(ca->ca_ra.ra_reg, 0, sizeof(u_int32_t));
+	if (bus_space_map(oba->oba_bustag, oba->oba_paddr,
+			  sizeof(uint32_t),
+			  BUS_SPACE_MAP_LINEAR,
+			  &bh) != 0) {
+		printf("%s: cannot map control registers\n", self->dv_xname);
+		return;
+	}
+	fb->fb_pfour = (volatile uint32_t *)bh;
 
-	if (cputyp == CPU_SUN4) {
+	fb->fb_driver = &cgfourfbdriver;
+	fb->fb_device = &sc->sc_dev;
+	fb->fb_type.fb_type = FBTYPE_SUN4COLOR;
+	fb->fb_flags = device_cfdata(&sc->sc_dev)->cf_flags & FB_USERMASK;
+	fb->fb_flags |= FB_PFOUR;
+
+	ramsize = PFOUR_COLOR_OFF_END - PFOUR_COLOR_OFF_OVERLAY;
+
+	fb->fb_type.fb_depth = 8;
+	fb_setsize_eeprom(fb, fb->fb_type.fb_depth, 1152, 900);
+
+	fb->fb_type.fb_cmsize = 256;
+	fb->fb_type.fb_size = ramsize;
+	printf(": cgfour/p4, %d x %d",
+		fb->fb_type.fb_width, fb->fb_type.fb_height);
+
+	isconsole = 0;
+
+	if (CPU_ISSUN4) {
 		struct eeprom *eep = (struct eeprom *)eeprom_va;
 
 		/*
@@ -163,8 +251,17 @@ cgfourattach(struct device *parent, struct device *self, void *args)
 		 * to be found.
 		 */
 		if (eep == NULL || eep->eeConsole == EE_CONS_P4OPT)
-			isconsole = 1;
+			isconsole = fb_is_console(0);
 	}
+
+#if 0
+	/*
+	 * We don't do any of the console handling here.  Instead,
+	 * we let the bwtwo driver pick up the overlay plane and
+	 * use it instead.  Rconsole should have better performance
+	 * with the 1-bit depth.
+	 *	-- Jason R. Thorpe <thorpej@NetBSD.org>
+	 */
 
 	/*
 	 * When the ROM has mapped in a cgfour display, the address
@@ -173,113 +270,227 @@ cgfourattach(struct device *parent, struct device *self, void *args)
 	 * going to print characters via rconsole.
 	 */
 
-	sc->sc_phys = ca->ca_ra.ra_reg[0];
+	if (isconsole) {
+		/* XXX this is kind of a waste */
+		fb->fb_pixels = mapiodev(ca->ca_ra.ra_reg,
+					 PFOUR_COLOR_OFF_OVERLAY, ramsize);
+	}
+#endif
 
-	/* enable video */
-	fb_pfour_burner(sc, 1, 0);
+	/* Map the Brooktree. */
+	if (bus_space_map(oba->oba_bustag,
+			  oba->oba_paddr + PFOUR_COLOR_OFF_CMAP,
+			  sizeof(struct fbcontrol),
+			  BUS_SPACE_MAP_LINEAR,
+			  &bh) != 0) {
+		printf("%s: cannot map control registers\n", self->dv_xname);
+		return;
+	}
+	sc->sc_fbc = (volatile struct fbcontrol *)bh;
+
+	/* grab initial (current) color map */
 	bt = &sc->sc_fbc->fbc_dac;
+	bt->bt_addr = 0;
+	for (i = 0; i < 256 * 3 / 4; i++)
+		((char *)&sc->sc_cmap)[i] = bt->bt_cmap >> 24;
+
 	BT_INIT(bt, 24);
 
-	/*
-	 * XXX should initialize the enable plane, instead of expecting the
-	 * PROM to do so for us
-	 */
-
-	fb_setsize(&sc->sc_sunfb, 8, 1152, 900, node, ca->ca_bustype);
-	/*
-	 * XXX this only maps the color plane, not the overlay or the enable
-	 * planes
-	 */
-	sc->sc_sunfb.sf_ro.ri_bits = mapiodev(ca->ca_ra.ra_reg,
-	    PFOUR_COLOR_OFF_COLOR, round_page(sc->sc_sunfb.sf_fbsize));
-	sc->sc_sunfb.sf_ro.ri_hw = sc;
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
-	fbwscons_setcolormap(&sc->sc_sunfb, cgfour_setcolor);
-
-	printf(", %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
-
+#if 0	/* See above. */
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
+		printf(" (console)\n");
+#if defined(RASTERCONSOLE) && 0	/* XXX been told it doesn't work well. */
+		fbrcons_init(fb);
+#endif
+	} else
+#endif /* 0 */
+		printf("\n");
 
-	fbwscons_attach(&sc->sc_sunfb, &cgfour_accessops, isconsole);
+	/*
+	 * Even though we're not using rconsole, we'd still like
+	 * to notice if we're the console framebuffer.
+	 */
+	fb_attach(fb, isconsole);
+#endif /* SUN4 */
 }
 
 int
-cgfour_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
+cgfouropen(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct cgfour_softc *sc = v;
-	struct wsdisplay_fbinfo *wdf;
-	struct wsdisplay_cmap *cm;
+	int unit = minor(dev);
+
+	if (device_lookup(&cgfour_cd, unit) == NULL)
+		return (ENXIO);
+	return (0);
+}
+
+int
+cgfourioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
+{
+#if defined(SUN4)
+	struct cgfour_softc *sc = device_lookup_private(&cgfour_cd, minor(dev));
+	struct fbgattr *fba;
 	int error;
 
 	switch (cmd) {
-	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_SUNCG4;
-		break;
-	case WSDISPLAYIO_GINFO:
-		wdf = (struct wsdisplay_fbinfo *)data;
-		wdf->height = sc->sc_sunfb.sf_height;
-		wdf->width  = sc->sc_sunfb.sf_width;
-		wdf->depth  = sc->sc_sunfb.sf_depth;
-		wdf->cmsize = 256;
-		break;
-	case WSDISPLAYIO_LINEBYTES:
-		*(u_int *)data = sc->sc_sunfb.sf_linebytes;
+
+	case FBIOGTYPE:
+		*(struct fbtype *)data = sc->sc_fb.fb_type;
 		break;
 
-	case WSDISPLAYIO_GETCMAP:
-		cm = (struct wsdisplay_cmap *)data;
-		error = bt_getcmap(&sc->sc_cmap, cm);
+	case FBIOGATTR:
+		fba = (struct fbgattr *)data;
+		fba->real_type = sc->sc_fb.fb_type.fb_type;
+		fba->owner = 0;		/* XXX ??? */
+		fba->fbtype = sc->sc_fb.fb_type;
+		fba->sattr.flags = 0;
+		fba->sattr.emu_type = sc->sc_fb.fb_type.fb_type;
+		fba->sattr.dev_specific[0] = -1;
+		fba->emu_types[0] = sc->sc_fb.fb_type.fb_type;
+		fba->emu_types[1] = -1;
+		break;
+
+	case FBIOGETCMAP:
+#define p ((struct fbcmap *)data)
+		return (bt_getcmap(p, &sc->sc_cmap, 256, 1));
+
+	case FBIOPUTCMAP:
+		/* copy to software map */
+		error = bt_putcmap(p, &sc->sc_cmap, 256, 1);
 		if (error)
 			return (error);
+		/* now blast them into the chip */
+		/* XXX should use retrace interrupt */
+		cgfourloadcmap(sc, p->index, p->count);
+#undef p
 		break;
 
-	case WSDISPLAYIO_PUTCMAP:
-		cm = (struct wsdisplay_cmap *)data;
-		error = bt_putcmap(&sc->sc_cmap, cm);
-		if (error)
-			return (error);
-		bt_loadcmap(&sc->sc_cmap, &sc->sc_fbc->fbc_dac,
-		    cm->index, cm->count, 1);
+	case FBIOGVIDEO:
+		*(int *)data = cgfour_get_video(sc);
 		break;
 
-	case WSDISPLAYIO_SVIDEO:
-	case WSDISPLAYIO_GVIDEO:
+	case FBIOSVIDEO:
+		cgfour_set_video(sc, *(int *)data);
 		break;
 
-	case WSDISPLAYIO_GCURPOS:
-	case WSDISPLAYIO_SCURPOS:
-	case WSDISPLAYIO_GCURMAX:
-	case WSDISPLAYIO_GCURSOR:
-	case WSDISPLAYIO_SCURSOR:
 	default:
-		return (-1);	/* not supported yet */
-        }
+		return (ENOTTY);
+	}
+#endif /* SUN4 */
 
 	return (0);
 }
 
+/*
+ * Return the address that would map the given device at the given
+ * offset, allowing for the given protection, or return -1 for error.
+ *
+ * the cg4 maps it's overlay plane for 128K, followed by the enable
+ * plane for 128K, followed by the colour plane (for as much colour
+ * as their is.)
+ *
+ * As well, mapping at an offset of 0x04000000 causes the cg4 to map
+ * only it's colour plane, at 0.
+ */
 paddr_t
-cgfour_mmap(void *v, off_t offset, int prot)
+cgfourmmap(dev_t dev, off_t off, int prot)
 {
-	struct cgfour_softc *sc = v;
+	struct cgfour_softc *sc = device_lookup_private(&cgfour_cd, minor(dev));
+	off_t poff;
 
-	if (offset & PGOFSET)
+#define START_ENABLE	(128*1024)
+#define START_COLOR	((128*1024) + (128*1024))
+#define COLOR_SIZE	(sc->sc_fb.fb_type.fb_width * \
+			    sc->sc_fb.fb_type.fb_height)
+#define END_COLOR	(START_COLOR + COLOR_SIZE)
+#define NOOVERLAY	(0x04000000)
+
+	if (off & PGOFSET)
+		panic("cgfourmap");
+
+	if (off < 0)
+		return (-1);
+	else if ((u_int)off >= NOOVERLAY) {
+		off -= NOOVERLAY;
+
+		/*
+		 * X11 maps a huge chunk of the frame buffer; far more than
+		 * there really is. We compensate by double-mapping the
+		 * first page for as many other pages as it wants
+		 */
+		while ((u_int)off >= COLOR_SIZE)
+			off -= COLOR_SIZE;	/* XXX thorpej ??? */
+
+		poff = off + PFOUR_COLOR_OFF_COLOR;
+	} else if ((u_int)off < START_ENABLE) {
+		/*
+		 * in overlay plane
+		 */
+		poff = PFOUR_COLOR_OFF_OVERLAY + off;
+	} else if ((u_int)off < START_COLOR) {
+		/*
+		 * in enable plane
+		 */
+		poff = (off - START_ENABLE) + PFOUR_COLOR_OFF_ENABLE;
+	} else if ((u_int)off < sc->sc_fb.fb_type.fb_size) {
+		/*
+		 * in colour plane
+		 */
+		poff = (off - START_COLOR) + PFOUR_COLOR_OFF_COLOR;
+	} else
 		return (-1);
 
-	if (offset >= 0 && offset < sc->sc_sunfb.sf_fbsize) {
-		return (REG2PHYS(&sc->sc_phys,
-		    PFOUR_COLOR_OFF_COLOR + offset) | PMAP_NC);
-	}
-
-	return (-1);
+	return (bus_space_mmap(sc->sc_bustag,
+		sc->sc_paddr, poff,
+		prot, BUS_SPACE_MAP_LINEAR));
 }
 
-void
-cgfour_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
+#if defined(SUN4)
+/*
+ * Undo the effect of an FBIOSVIDEO that turns the video off.
+ */
+static void
+cgfourunblank(struct device *dev)
 {
-	struct cgfour_softc *sc = v;
 
-	bt_setcolor(&sc->sc_cmap, &sc->sc_fbc->fbc_dac, index, r, g, b, 1);
+	cgfour_set_video(device_private(dev), 1);
 }
+
+static int
+cgfour_get_video(struct cgfour_softc *sc)
+{
+
+	return (fb_pfour_get_video(&sc->sc_fb));
+}
+
+static void
+cgfour_set_video(struct cgfour_softc *sc, int enable)
+{
+
+	fb_pfour_set_video(&sc->sc_fb, enable);
+}
+
+/*
+ * Load a subset of the current (new) colormap into the Brooktree DAC.
+ */
+static void
+cgfourloadcmap(struct cgfour_softc *sc, int start, int ncolors)
+{
+	volatile struct bt_regs *bt;
+	u_int *ip, i;
+	int count;
+
+	ip = &sc->sc_cmap.cm_chip[BT_D4M3(start)];	/* start/4 * 3 */
+	count = BT_D4M3(start + ncolors - 1) - BT_D4M3(start) + 3;
+	bt = &sc->sc_fbc->fbc_dac;
+	bt->bt_addr = BT_D4M4(start) << 24;
+	while (--count >= 0) {
+		i = *ip++;
+		/* hardware that makes one want to pound boards with hammers */
+		bt->bt_cmap = i;
+		bt->bt_cmap = i << 8;
+		bt->bt_cmap = i << 16;
+		bt->bt_cmap = i << 24;
+	}
+}
+#endif /* SUN4 */

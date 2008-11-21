@@ -1,5 +1,4 @@
-/*	$OpenBSD: i80321.c,v 1.5 2006/12/14 17:36:12 kettenis Exp $	*/
-/*	$NetBSD: i80321.c,v 1.18 2006/02/25 02:28:56 wiz Exp $	*/
+/*	$NetBSD: i80321.c,v 1.20 2007/10/17 19:53:43 garbled Exp $	*/
 
 /*
  * Copyright (c) 2002 Wasabi Systems, Inc.
@@ -40,6 +39,9 @@
  * Autoconfiguration support for the Intel i80321 I/O Processor.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i80321.c,v 1.20 2007/10/17 19:53:43 garbled Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -49,6 +51,8 @@
 
 #include <arm/xscale/i80321reg.h>
 #include <arm/xscale/i80321var.h>
+
+#include "opt_i80321.h"
 
 /*
  * Statically-allocated bus_space structure used to access the
@@ -84,7 +88,6 @@ static const struct iopxs_device {
 
 static void i80321_pci_dma_init(struct i80321_softc *);
 
-/* XXX - debug */
 /*
  * i80321_attach:
  *
@@ -101,46 +104,89 @@ i80321_attach(struct i80321_softc *sc)
 	i80321_softc = sc;
 
 	/*
+	 * Slice off some useful subregion handles.
+	 */
+
+	if (bus_space_subregion(sc->sc_st, sc->sc_sh, VERDE_ATU_BASE,
+	    VERDE_ATU_SIZE, &sc->sc_atu_sh))
+		panic("%s: unable to subregion ATU registers",
+		    sc->sc_dev.dv_xname);
+
+	/* We expect the Memory Controller to be already sliced off. */
+
+	/*
 	 * Program the Inbound windows.
 	 */
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IALR0,
 	    (0xffffffff - (sc->sc_iwin[0].iwin_size - 1)) & 0xffffffc0);
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IATVR0,
 	    sc->sc_iwin[0].iwin_xlate);
-
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_MAPREG_START, sc->sc_iwin[0].iwin_base_lo);
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_MAPREG_START + 0x04, sc->sc_iwin[0].iwin_base_hi);
+	if (sc->sc_is_host) {
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_MAPREG_START, sc->sc_iwin[0].iwin_base_lo);
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_MAPREG_START + 0x04, sc->sc_iwin[0].iwin_base_hi);
+	} else {
+		sc->sc_iwin[0].iwin_base_lo = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, PCI_MAPREG_START);
+		sc->sc_iwin[0].iwin_base_hi = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, PCI_MAPREG_START + 0x04);
+		sc->sc_iwin[0].iwin_base_lo =
+		    PCI_MAPREG_MEM_ADDR(sc->sc_iwin[0].iwin_base_lo);
+	}
 
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IALR1,
 	    (0xffffffff - (sc->sc_iwin[1].iwin_size - 1)) & 0xffffffc0);
 	/* no xlate for window 1 */
-
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_MAPREG_START + 0x08, sc->sc_iwin[1].iwin_base_lo);
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_MAPREG_START + 0x0c, sc->sc_iwin[1].iwin_base_hi);
+	if (sc->sc_is_host) {
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_MAPREG_START + 0x08, sc->sc_iwin[1].iwin_base_lo);
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_MAPREG_START + 0x0c, sc->sc_iwin[1].iwin_base_hi);
+	} else {
+		sc->sc_iwin[1].iwin_base_lo = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, PCI_MAPREG_START + 0x08);
+		sc->sc_iwin[1].iwin_base_hi = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, PCI_MAPREG_START + 0x0c);
+		sc->sc_iwin[1].iwin_base_lo =
+		    PCI_MAPREG_MEM_ADDR(sc->sc_iwin[1].iwin_base_lo);
+	}
 
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IALR2,
 	    (0xffffffff - (sc->sc_iwin[2].iwin_size - 1)) & 0xffffffc0);
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IATVR2,
 	    sc->sc_iwin[2].iwin_xlate);
-
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_MAPREG_START + 0x10, sc->sc_iwin[2].iwin_base_lo);
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_MAPREG_START + 0x14, sc->sc_iwin[2].iwin_base_hi);
+	if (sc->sc_is_host) {
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_MAPREG_START + 0x10, sc->sc_iwin[2].iwin_base_lo);
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_MAPREG_START + 0x14, sc->sc_iwin[2].iwin_base_hi);
+	} else {
+		sc->sc_iwin[2].iwin_base_lo = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, PCI_MAPREG_START + 0x10);
+		sc->sc_iwin[2].iwin_base_hi = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, PCI_MAPREG_START + 0x14);
+		sc->sc_iwin[2].iwin_base_lo =
+		    PCI_MAPREG_MEM_ADDR(sc->sc_iwin[2].iwin_base_lo);
+	}
 
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IALR3,
 	    (0xffffffff - (sc->sc_iwin[3].iwin_size - 1)) & 0xffffffc0);
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_IATVR3,
 	    sc->sc_iwin[3].iwin_xlate);
-
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    ATU_IABAR3, sc->sc_iwin[3].iwin_base_lo);
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    ATU_IAUBAR3, sc->sc_iwin[3].iwin_base_hi);
+	if (sc->sc_is_host) {
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    ATU_IABAR3, sc->sc_iwin[3].iwin_base_lo);
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    ATU_IAUBAR3, sc->sc_iwin[3].iwin_base_hi);
+	} else {
+		sc->sc_iwin[3].iwin_base_lo = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, ATU_IABAR3);
+		sc->sc_iwin[3].iwin_base_hi = bus_space_read_4(sc->sc_st,
+		    sc->sc_atu_sh, ATU_IAUBAR3);
+		sc->sc_iwin[3].iwin_base_lo =
+		    PCI_MAPREG_MEM_ADDR(sc->sc_iwin[3].iwin_base_lo);
+	}
 
 	/*
 	 * Mask (disable) the ATU interrupt sources.
@@ -159,6 +205,10 @@ i80321_attach(struct i80321_softc *sc)
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
 	    ATU_OIOWTVR, sc->sc_ioout_xlate);
 
+	if (!sc->sc_is_host) {
+		sc->sc_owin[0].owin_xlate_lo = sc->sc_iwin[1].iwin_base_lo;
+		sc->sc_owin[0].owin_xlate_hi = sc->sc_iwin[1].iwin_base_hi;
+	}
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
 	    ATU_OMWTVR0, sc->sc_owin[0].owin_xlate_lo);
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
@@ -173,23 +223,33 @@ i80321_attach(struct i80321_softc *sc)
 	 * Set up the ATU configuration register.  All we do
 	 * right now is enable Outbound Windows.
 	 */
+#ifdef I80321_USE_DIRECT_WIN
+	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_ATUCR,
+	    ATUCR_OUT_EN | ATUCR_DAE);
+#else
 	bus_space_write_4(sc->sc_st, sc->sc_atu_sh, ATU_ATUCR,
 	    ATUCR_OUT_EN);
+#endif
 
 	/*
 	 * Enable bus mastering, memory access, SERR, and parity
 	 * checking on the ATU.
 	 */
-	preg = bus_space_read_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_COMMAND_STATUS_REG);
-	preg |= PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE |
-	    PCI_COMMAND_PARITY_ENABLE | PCI_COMMAND_SERR_ENABLE;
-	bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
-	    PCI_COMMAND_STATUS_REG, preg);
+	if (sc->sc_is_host) {
+		preg = bus_space_read_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_COMMAND_STATUS_REG);
+		preg |= PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE |
+		    PCI_COMMAND_PARITY_ENABLE | PCI_COMMAND_SERR_ENABLE;
+		bus_space_write_4(sc->sc_st, sc->sc_atu_sh,
+		    PCI_COMMAND_STATUS_REG, preg);
+	}
 
 	/* Initialize the bus space tags. */
 	i80321_io_bs_init(&sc->sc_pci_iot, sc);
 	i80321_mem_bs_init(&sc->sc_pci_memt, sc);
+
+	/* Initialize the PCI chipset tag. */
+	i80321_pci_init(&sc->sc_pci_chipset, sc);
 
 	/* Initialize the DMA tags. */
 	i80321_pci_dma_init(sc);
@@ -206,7 +266,8 @@ i80321_attach(struct i80321_softc *sc)
 		ia.ia_offset = id->id_offset;
 		ia.ia_size = id->id_size;
 
-		config_found(&sc->sc_dev, &ia, i80321_iopxs_print);
+		(void) config_found_ia(&sc->sc_dev, "iopxs", &ia,
+				       i80321_iopxs_print);
 	}
 
 	/*
@@ -216,18 +277,18 @@ i80321_attach(struct i80321_softc *sc)
 	preg = PCIXSR_BUSNO(preg);
 	if (preg == 0xff)
 		preg = 0;
-	pba.pba_busname = "pci";
 	pba.pba_iot = &sc->sc_pci_iot;
 	pba.pba_memt = &sc->sc_pci_memt;
 	pba.pba_dmat = &sc->sc_pci_dmat;
+	pba.pba_dmat64 = NULL;
 	pba.pba_pc = &sc->sc_pci_chipset;
-	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = preg;
 	pba.pba_bridgetag = NULL;
 	pba.pba_intrswiz = 0;	/* XXX what if busno != 0? */
 	pba.pba_intrtag = 0;
-
-	config_found((struct device *)sc, &pba, i80321_iopxs_print);
+	pba.pba_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED |
+	    PCI_FLAGS_MRL_OKAY | PCI_FLAGS_MRM_OKAY | PCI_FLAGS_MWI_OKAY;
+	(void) config_found_ia(&sc->sc_dev, "pcibus", &pba, pcibusprint);
 }
 
 /*
@@ -268,7 +329,8 @@ i80321_pci_dma_init(struct i80321_softc *sc)
 	dmat->_dmamap_load_uio = _bus_dmamap_load_uio;
 	dmat->_dmamap_load_raw = _bus_dmamap_load_raw;
 	dmat->_dmamap_unload = _bus_dmamap_unload;
-	dmat->_dmamap_sync = _bus_dmamap_sync;
+	dmat->_dmamap_sync_pre = _bus_dmamap_sync;
+	dmat->_dmamap_sync_post = NULL;
 
 	dmat->_dmamem_alloc = _bus_dmamem_alloc;
 	dmat->_dmamem_free = _bus_dmamem_free;
@@ -297,7 +359,8 @@ i80321_local_dma_init(struct i80321_softc *sc)
 	dmat->_dmamap_load_uio = _bus_dmamap_load_uio;
 	dmat->_dmamap_load_raw = _bus_dmamap_load_raw;
 	dmat->_dmamap_unload = _bus_dmamap_unload;
-	dmat->_dmamap_sync = _bus_dmamap_sync;
+	dmat->_dmamap_sync_pre = _bus_dmamap_sync;
+	dmat->_dmamap_sync_post = NULL;
 
 	dmat->_dmamem_alloc = _bus_dmamem_alloc;
 	dmat->_dmamem_free = _bus_dmamem_free;

@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_evenodd_dags.c,v 1.3 2002/12/16 07:01:04 tdeval Exp $	*/
-/*	$NetBSD: rf_evenodd_dags.c,v 1.2 1999/02/05 00:06:11 oster Exp $	*/
-
+/*	$NetBSD: rf_evenodd_dags.c,v 1.4 2001/11/13 07:11:14 lukem Exp $	*/
 /*
  * rf_evenodd_dags.c
  */
@@ -31,11 +29,15 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rf_evenodd_dags.c,v 1.4 2001/11/13 07:11:14 lukem Exp $");
+
 #include "rf_archs.h"
 
-#if	RF_INCLUDE_EVENODD > 0
+#if RF_INCLUDE_EVENODD > 0
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+
 #include "rf_raid.h"
 #include "rf_dag.h"
 #include "rf_dagfuncs.h"
@@ -58,20 +60,16 @@
  */
 RF_CREATE_DAG_FUNC_DECL(rf_EO_100_CreateReadDAG)
 {
-	rf_CreateDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList,
-	    &rf_eoPRecoveryFuncs);
+	rf_CreateDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList, &rf_eoPRecoveryFuncs);
 }
-
 /*
  * Lost data + E.
  * Use P to reconstruct missing data.
  */
 RF_CREATE_DAG_FUNC_DECL(rf_EO_101_CreateReadDAG)
 {
-	rf_CreateDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList,
-	    &rf_eoPRecoveryFuncs);
+	rf_CreateDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList, &rf_eoPRecoveryFuncs);
 }
-
 /*
  * Lost data + P.
  * Make E look like P, and use Eor for Xor, and we can
@@ -80,14 +78,12 @@ RF_CREATE_DAG_FUNC_DECL(rf_EO_101_CreateReadDAG)
 RF_CREATE_DAG_FUNC_DECL(rf_EO_110_CreateReadDAG)
 {
 	RF_PhysDiskAddr_t *temp;
-	/* Swap P and E pointers to fake out the DegradedReadDAG code. */
+	/* swap P and E pointers to fake out the DegradedReadDAG code */
 	temp = asmap->parityInfo;
 	asmap->parityInfo = asmap->qInfo;
 	asmap->qInfo = temp;
-	rf_CreateDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList,
-	    &rf_eoERecoveryFuncs);
+	rf_CreateDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList, &rf_eoERecoveryFuncs);
 }
-
 /*
  * Lost two data.
  */
@@ -95,45 +91,34 @@ RF_CREATE_DAG_FUNC_DECL(rf_EOCreateDoubleDegradedReadDAG)
 {
 	rf_EO_DoubleDegRead(raidPtr, asmap, dag_h, bp, flags, allocList);
 }
-
 /*
  * Lost two data.
  */
 RF_CREATE_DAG_FUNC_DECL(rf_EO_200_CreateReadDAG)
 {
-	rf_EOCreateDoubleDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList);
+	rf_EOCreateDoubleDegradedReadDAG(raidPtr, asmap, dag_h, bp, flags, allocList);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EO_100_CreateWriteDAG)
 {
 	if (asmap->numStripeUnitsAccessed != 1 &&
-	    asmap->failedPDAs[0]->numSector !=
-	    raidPtr->Layout.sectorsPerStripeUnit)
+	    asmap->failedPDAs[0]->numSector != raidPtr->Layout.sectorsPerStripeUnit)
 		RF_PANIC();
-	rf_CommonCreateSimpleDegradedWriteDAG(raidPtr, asmap, dag_h, bp,
-	    flags, allocList, 2,
-	    (int (*) (RF_DagNode_t *)) rf_Degraded_100_EOFunc, RF_TRUE);
+	rf_CommonCreateSimpleDegradedWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, 2, (int (*) (RF_DagNode_t *)) rf_Degraded_100_EOFunc, RF_TRUE);
 }
-
 /*
  * E is dead. Small write.
  */
 RF_CREATE_DAG_FUNC_DECL(rf_EO_001_CreateSmallWriteDAG)
 {
-	rf_CommonCreateSmallWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, &rf_EOSmallWritePFuncs, NULL);
+	rf_CommonCreateSmallWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, &rf_EOSmallWritePFuncs, NULL);
 }
-
 /*
  * E is dead. Large write.
  */
 RF_CREATE_DAG_FUNC_DECL(rf_EO_001_CreateLargeWriteDAG)
 {
-	rf_CommonCreateLargeWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, 1, rf_RegularPFunc, RF_TRUE);
+	rf_CommonCreateLargeWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, 1, rf_RegularPFunc, RF_TRUE);
 }
-
 /*
  * P is dead. Small write.
  * Swap E + P, use single-degraded stuff.
@@ -141,14 +126,12 @@ RF_CREATE_DAG_FUNC_DECL(rf_EO_001_CreateLargeWriteDAG)
 RF_CREATE_DAG_FUNC_DECL(rf_EO_010_CreateSmallWriteDAG)
 {
 	RF_PhysDiskAddr_t *temp;
-	/* Swap P and E pointers to fake out the DegradedReadDAG code. */
+	/* swap P and E pointers to fake out the DegradedReadDAG code */
 	temp = asmap->parityInfo;
 	asmap->parityInfo = asmap->qInfo;
 	asmap->qInfo = temp;
-	rf_CommonCreateSmallWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, &rf_EOSmallWriteEFuncs, NULL);
+	rf_CommonCreateSmallWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, &rf_EOSmallWriteEFuncs, NULL);
 }
-
 /*
  * P is dead. Large write.
  * Swap E + P, use single-degraded stuff.
@@ -156,71 +139,54 @@ RF_CREATE_DAG_FUNC_DECL(rf_EO_010_CreateSmallWriteDAG)
 RF_CREATE_DAG_FUNC_DECL(rf_EO_010_CreateLargeWriteDAG)
 {
 	RF_PhysDiskAddr_t *temp;
-	/* Swap P and E pointers to fake out the code. */
+	/* swap P and E pointers to fake out the code */
 	temp = asmap->parityInfo;
 	asmap->parityInfo = asmap->qInfo;
 	asmap->qInfo = temp;
-	rf_CommonCreateLargeWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, 1, rf_RegularEFunc, RF_FALSE);
+	rf_CommonCreateLargeWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, 1, rf_RegularEFunc, RF_FALSE);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EO_011_CreateWriteDAG)
 {
-	rf_CreateNonRedundantWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, RF_IO_TYPE_WRITE);
+	rf_CreateNonRedundantWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList,
+	    RF_IO_TYPE_WRITE);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EO_110_CreateWriteDAG)
 {
 	RF_PhysDiskAddr_t *temp;
 
 	if (asmap->numStripeUnitsAccessed != 1 &&
-	    asmap->failedPDAs[0]->numSector !=
-	    raidPtr->Layout.sectorsPerStripeUnit) {
+	    asmap->failedPDAs[0]->numSector != raidPtr->Layout.sectorsPerStripeUnit) {
 		RF_PANIC();
 	}
-	/* Swap P and E to fake out parity code. */
+	/* swap P and E to fake out parity code */
 	temp = asmap->parityInfo;
 	asmap->parityInfo = asmap->qInfo;
 	asmap->qInfo = temp;
-	rf_CommonCreateSimpleDegradedWriteDAG(raidPtr, asmap, dag_h, bp,
-	    flags, allocList, 1,
-	    (int (*) (RF_DagNode_t *)) rf_EO_DegradedWriteEFunc, RF_FALSE);
-	/* Is the regular E func the right one to call ? */
+	rf_CommonCreateSimpleDegradedWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, 1, (int (*) (RF_DagNode_t *)) rf_EO_DegradedWriteEFunc, RF_FALSE);
+	/* is the regular E func the right one to call? */
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EO_101_CreateWriteDAG)
 {
 	if (asmap->numStripeUnitsAccessed != 1 &&
-	    asmap->failedPDAs[0]->numSector !=
-	    raidPtr->Layout.sectorsPerStripeUnit)
+	    asmap->failedPDAs[0]->numSector != raidPtr->Layout.sectorsPerStripeUnit)
 		RF_PANIC();
-	rf_CommonCreateSimpleDegradedWriteDAG(raidPtr, asmap, dag_h, bp,
-	    flags, allocList, 1, rf_RecoveryXorFunc, RF_TRUE);
+	rf_CommonCreateSimpleDegradedWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, 1, rf_RecoveryXorFunc, RF_TRUE);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EO_DoubleDegRead)
 {
 	rf_DoubleDegRead(raidPtr, asmap, dag_h, bp, flags, allocList,
 	    "Re", "EvenOddRecovery", rf_EvenOddDoubleRecoveryFunc);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EOCreateSmallWriteDAG)
 {
-	rf_CommonCreateSmallWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, &rf_pFuncs, &rf_EOSmallWriteEFuncs);
+	rf_CommonCreateSmallWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, &rf_pFuncs, &rf_EOSmallWriteEFuncs);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EOCreateLargeWriteDAG)
 {
-	rf_CommonCreateLargeWriteDAG(raidPtr, asmap, dag_h, bp, flags,
-	    allocList, 2, rf_RegularPEFunc, RF_FALSE);
+	rf_CommonCreateLargeWriteDAG(raidPtr, asmap, dag_h, bp, flags, allocList, 2, rf_RegularPEFunc, RF_FALSE);
 }
-
 RF_CREATE_DAG_FUNC_DECL(rf_EO_200_CreateWriteDAG)
 {
-	rf_DoubleDegSmallWrite(raidPtr, asmap, dag_h, bp, flags, allocList,
-	    "Re", "We", "EOWrDDRecovery", rf_EOWriteDoubleRecoveryFunc);
+	rf_DoubleDegSmallWrite(raidPtr, asmap, dag_h, bp, flags, allocList, "Re", "We", "EOWrDDRecovery", rf_EOWriteDoubleRecoveryFunc);
 }
-
-#endif	/* RF_INCLUDE_EVENODD > 0 */
+#endif				/* RF_INCLUDE_EVENODD > 0 */

@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_machdep.h,v 1.7 2002/03/14 01:26:44 millert Exp $	*/
-/*	$NetBSD: svr4_machdep.h,v 1.4 1996/03/31 22:21:45 pk Exp $	 */
+/*	$NetBSD: svr4_machdep.h,v 1.13 2008/04/28 20:23:36 martin Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,19 +15,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef	_SPARC_SVR4_MACHDEP_H_
@@ -91,38 +92,26 @@ typedef struct {
 } svr4_fregset_t;
 
 typedef struct {
+	u_int		 id;
+	void		*ptr;
+} svr4_xrs_t;
+
+#define SVR4_XRS_ID	(('x' << 24) | ('r' << 16) | ('s' << 8))
+
+typedef struct svr4_mcontext {
 	svr4_gregset_t	 greg;
 	svr4_gwindow_t  *gwin;
 	svr4_fregset_t	 freg;
-	long		 pad[21];
+	svr4_xrs_t	 xrs;
+	long		 pad[19];
 } svr4_mcontext_t;
+
+#define SVR4_UC_MACHINE_PAD	23
 
 struct svr4_ucontext;
 
-void svr4_getcontext(struct proc *, struct svr4_ucontext *,
-			  int, int);
-int svr4_setcontext(struct proc *p, struct svr4_ucontext *);
-void svr4_sendsig(sig_t, int, int, u_long, int, union sigval);
-int svr4_trap(int, struct proc *);
+#define svr4_syscall_intern syscall_intern
 
-/*
- * Processor traps
- */
-#define	SVR4_T_DIVIDE		0
-#define	SVR4_T_TRCTRAP		1
-#define	SVR4_T_NMI		2
-#define	SVR4_T_BPTFLT		3
-#define	SVR4_T_OFLOW		4
-#define	SVR4_T_BOUND		5
-#define	SVR4_T_PRIVINFLT	6
-#define	SVR4_T_DNA		7
-#define	SVR4_T_DOUBLEFLT	8
-#define	SVR4_T_FPOPFLT		9
-#define	SVR4_T_TSSFLT		10
-#define	SVR4_T_SEGNPFLT		11
-#define	SVR4_T_STKFLT		12
-#define	SVR4_T_PROTFLT		13
-#define	SVR4_T_PAGEFLT		14
-#define	SVR4_T_ALIGNFLT		17
+int svr4_trap(int, struct lwp *);
 
 #endif /* !_SPARC_SVR4_MACHDEP_H_ */

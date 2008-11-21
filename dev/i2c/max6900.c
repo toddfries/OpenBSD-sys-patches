@@ -1,4 +1,4 @@
-/*	$NetBSD: max6900.c,v 1.7 2007/01/12 19:33:21 cube Exp $	*/
+/*	$NetBSD: max6900.c,v 1.11 2008/06/08 03:49:26 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -35,6 +35,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: max6900.c,v 1.11 2008/06/08 03:49:26 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -50,17 +53,17 @@
 #include <dev/i2c/max6900reg.h>
 
 struct maxrtc_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 	i2c_tag_t sc_tag;
 	int sc_address;
 	int sc_open;
 	struct todr_chip_handle sc_todr;
 };
 
-static int  maxrtc_match(struct device *, struct cfdata *, void *);
-static void maxrtc_attach(struct device *, struct device *, void *);
+static int  maxrtc_match(device_t, cfdata_t, void *);
+static void maxrtc_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(maxrtc, sizeof(struct maxrtc_softc),
+CFATTACH_DECL_NEW(maxrtc, sizeof(struct maxrtc_softc),
 	maxrtc_match, maxrtc_attach, NULL, NULL);
 extern struct cfdriver maxrtc_cd;
 
@@ -80,7 +83,7 @@ static int maxrtc_gettime(struct todr_chip_handle *, volatile struct timeval *);
 static int maxrtc_settime(struct todr_chip_handle *, volatile struct timeval *);
 
 int
-maxrtc_match(struct device *parent, struct cfdata *cf, void *aux)
+maxrtc_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct i2c_attach_args *ia = aux;
 
@@ -91,13 +94,14 @@ maxrtc_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 void
-maxrtc_attach(struct device *parent, struct device *self, void *aux)
+maxrtc_attach(device_t parent, device_t self, void *aux)
 {
 	struct maxrtc_softc *sc = device_private(self);
 	struct i2c_attach_args *ia = aux;
 
 	sc->sc_tag = ia->ia_tag;
 	sc->sc_address = ia->ia_addr;
+	sc->sc_dev = self;
 
 	aprint_naive(": Real-time Clock/NVRAM\n");
 	aprint_normal(": MAX6900 Real-time Clock/NVRAM\n");
@@ -118,7 +122,7 @@ maxrtc_open(dev_t dev, int flag, int fmt, struct lwp *l)
 {
 	struct maxrtc_softc *sc;
 
-	if ((sc = device_lookup(&maxrtc_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup_private(&maxrtc_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	/* XXX: Locking */
@@ -136,7 +140,7 @@ maxrtc_close(dev_t dev, int flag, int fmt, struct lwp *l)
 {
 	struct maxrtc_softc *sc;
 
-	if ((sc = device_lookup(&maxrtc_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup_private(&maxrtc_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	sc->sc_open = 0;
@@ -151,7 +155,7 @@ maxrtc_read(dev_t dev, struct uio *uio, int flags)
 	u_int8_t ch, cmdbuf[1];
 	int a, error;
 
-	if ((sc = device_lookup(&maxrtc_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup_private(&maxrtc_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	if (uio->uio_offset >= MAX6900_RAM_BYTES)
@@ -167,8 +171,8 @@ maxrtc_read(dev_t dev, struct uio *uio, int flags)
 				      sc->sc_address, cmdbuf, 1,
 				      &ch, 1, 0)) != 0) {
 			iic_release_bus(sc->sc_tag, 0);
-			printf("%s: maxrtc_read: read failed at 0x%x\n",
-			    sc->sc_dev.dv_xname, a);
+			aprint_error_dev(sc->sc_dev,
+			    "maxrtc_read: read failed at 0x%x\n", a);
 			return (error);
 		}
 		if ((error = uiomove(&ch, 1, uio)) != 0) {
@@ -190,7 +194,7 @@ maxrtc_write(dev_t dev, struct uio *uio, int flags)
 	u_int8_t cmdbuf[2];
 	int a, error, sverror;
 
-	if ((sc = device_lookup(&maxrtc_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup_private(&maxrtc_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	if (uio->uio_offset >= MAX6900_RAM_BYTES)
@@ -206,8 +210,8 @@ maxrtc_write(dev_t dev, struct uio *uio, int flags)
 	if ((error = iic_exec(sc->sc_tag, I2C_OP_WRITE, sc->sc_address,
 			      cmdbuf, 1, &cmdbuf[1], 1, 0)) != 0) {
 		iic_release_bus(sc->sc_tag, 0);
-		printf("%s: maxrtc_write: failed to clear WP bit\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_write: failed to clear WP bit\n");
 		return (error);
 	}
 
@@ -220,8 +224,8 @@ maxrtc_write(dev_t dev, struct uio *uio, int flags)
 
 		if ((error = iic_exec(sc->sc_tag, I2C_OP_WRITE, sc->sc_address,
 				      cmdbuf, 1, &cmdbuf[1], 1, 0)) != 0) {
-			printf("%s: maxrtc_write: write failed at 0x%x\n",
-			    sc->sc_dev.dv_xname, a);
+			aprint_error_dev(sc->sc_dev,
+			    "maxrtc_write: write failed at 0x%x\n", a);
 			break;
 		}
 	}
@@ -236,8 +240,8 @@ maxrtc_write(dev_t dev, struct uio *uio, int flags)
 			      &cmdbuf[1], 1, 0)) != 0) {
 		if (sverror != 0)
 			error = sverror;
-		printf("%s: maxrtc_write: failed to set WP bit\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_write: failed to set WP bit\n");
 	}
 
 	iic_release_bus(sc->sc_tag, 0);
@@ -297,8 +301,8 @@ maxrtc_clock_read(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	int i;
 
 	if (iic_acquire_bus(sc->sc_tag, I2C_F_POLL)) {
-		printf("%s: maxrtc_clock_read: failed to acquire I2C bus\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_read: failed to acquire I2C bus\n");
 		return (0);
 	}
 
@@ -310,8 +314,9 @@ maxrtc_clock_read(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 			     sc->sc_address, cmdbuf, 1,
 			     &bcd[i], 1, I2C_F_POLL)) {
 			iic_release_bus(sc->sc_tag, I2C_F_POLL);
-			printf("%s: maxrtc_clock_read: failed to read rtc "
-			    "at 0x%x\n", sc->sc_dev.dv_xname,
+			aprint_error_dev(sc->sc_dev,
+			    "maxrtc_clock_read: failed to read rtc "
+			    "at 0x%x\n",
 			    max6900_rtc_offset[i]);
 			return (0);
 		}
@@ -367,8 +372,8 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	bcd[MAX6900_BURST_CONTROL] = TOBCD(dt->dt_year / 100);
 
 	if (iic_acquire_bus(sc->sc_tag, I2C_F_POLL)) {
-		printf("%s: maxrtc_clock_write: failed to acquire I2C bus\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_write: failed to acquire I2C bus\n");
 		return (0);
 	}
 
@@ -379,8 +384,8 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	if (iic_exec(sc->sc_tag, I2C_OP_WRITE, sc->sc_address,
 		     cmdbuf, 1, &cmdbuf[1], 1, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
-		printf("%s: maxrtc_clock_write: failed to clear WP bit\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_write: failed to clear WP bit\n");
 		return (0);
 	}
 
@@ -401,8 +406,8 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	if (iic_exec(sc->sc_tag, I2C_OP_WRITE, sc->sc_address,
 		     cmdbuf, 1, &bcd[MAX6900_BURST_SECOND], 1, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
-		printf("%s: maxrtc_clock_write: failed to write SECONDS\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_write: failed to write SECONDS\n");
 		return (0);
 	}
 
@@ -410,8 +415,9 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	if (iic_exec(sc->sc_tag, I2C_OP_READ, sc->sc_address,
 		     cmdbuf, 1, &init_seconds, 1, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
-		printf("%s: maxrtc_clock_write: failed to read "
-		    "INITIAL SECONDS\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_write: failed to read "
+		    "INITIAL SECONDS\n");
 		return (0);
 	}
 
@@ -422,8 +428,9 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 			     I2C_OP_WRITE_WITH_STOP, sc->sc_address,
 			     cmdbuf, 1, &bcd[i], 1, I2C_F_POLL)) {
 			iic_release_bus(sc->sc_tag, I2C_F_POLL);
-			printf("%s: maxrtc_clock_write: failed to write rtc "
-			    " at 0x%x\n", sc->sc_dev.dv_xname,
+			aprint_error_dev(sc->sc_dev,
+			    "maxrtc_clock_write: failed to write rtc "
+			    " at 0x%x\n",
 			    max6900_rtc_offset[i]);
 			return (0);
 		}
@@ -433,8 +440,9 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP, sc->sc_address,
 		     cmdbuf, 1, &final_seconds, 1, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
-		printf("%s: maxrtc_clock_write: failed to read "
-		    "FINAL SECONDS\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_write: failed to read "
+		    "FINAL SECONDS\n");
 		return (0);
 	}
 
@@ -442,7 +450,7 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	    (init_seconds != 59 && final_seconds != init_seconds + 1)) {
 #if 1
 		printf("%s: maxrtc_clock_write: init %d, final %d, try again\n",
-		    sc->sc_dev.dv_xname, init_seconds, final_seconds);
+		    device_xname(sc->sc_dev), init_seconds, final_seconds);
 #endif
 		goto again;
 	}
@@ -454,8 +462,8 @@ maxrtc_clock_write(struct maxrtc_softc *sc, struct clock_ymdhms *dt)
 	if (iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP, sc->sc_address,
 		     cmdbuf, 1, &cmdbuf[1], 1, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
-		printf("%s: maxrtc_clock_write: failed to set WP bit\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev,
+		    "maxrtc_clock_write: failed to set WP bit\n");
 		return (0);
 	}
 

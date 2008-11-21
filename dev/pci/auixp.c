@@ -1,5 +1,4 @@
-/* $OpenBSD: auixp.c,v 1.19 2008/05/25 23:59:33 jakemsr Exp $ */
-/* $NetBSD: auixp.c,v 1.9 2005/06/27 21:13:09 thorpej Exp $ */
+/* $NetBSD: auixp.c,v 1.28 2008/04/10 19:13:36 cegger Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Reinoud Zandijk <reinoud@netbsd.org>
@@ -32,8 +31,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
+
 /*
- * Audio driver for ATI IXP-{150,200,...} audio driver hardware.
+ * NetBSD audio driver for ATI IXP-{150,200,...} audio driver hardware.
  *
  * Recording and playback has been tested OK on various sample rates and
  * encodings.
@@ -48,22 +49,24 @@
  *   some cleaning up.
  */
 
-/*#define DEBUG_AUIXP*/
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: auixp.c,v 1.28 2008/04/10 19:13:36 cegger Exp $");
 
 #include <sys/types.h>
 #include <sys/errno.h>
+#include <sys/null.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/exec.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/audioio.h>
 #include <sys/queue.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -71,113 +74,141 @@
 #include <dev/audio_if.h>
 #include <dev/mulaw.h>
 #include <dev/auconv.h>
-#include <dev/ic/ac97.h>
+#include <dev/ic/ac97var.h>
+#include <dev/ic/ac97reg.h>
 
 #include <dev/pci/auixpreg.h>
 #include <dev/pci/auixpvar.h>
 
-/* codec detection constant indicating the interrupt flags */
-#define ALL_CODECS_NOT_READY \
-    (ATI_REG_ISR_CODEC0_NOT_READY | ATI_REG_ISR_CODEC1_NOT_READY |\
-     ATI_REG_ISR_CODEC2_NOT_READY)
-#define CODEC_CHECK_BITS (ALL_CODECS_NOT_READY|ATI_REG_ISR_NEW_FRAME)
+
+/* #define DEBUG_AUIXP */
+
 
 /* why isn't this base address register not in the headerfile? */
 #define PCI_CBIO 0x10
+
 
 /* macro's used */
 #define KERNADDR(p)	((void *)((p)->addr))
 #define	DMAADDR(p)	((p)->map->dm_segs[0].ds_addr)
 
-const struct pci_matchid auixp_pci_devices[] = {
-	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_200 },
-	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_300 },
-	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_400 },
+
+/* the differences might be irrelevant */
+enum {
+	IXP_200,
+	IXP_300,
+	IXP_400
 };
 
-struct cfdriver auixp_cd = {
-	NULL, "auixp", DV_DULL
+
+/* our `cards' */
+static const struct auixp_card_type {
+	uint16_t pci_vendor_id;
+	uint16_t pci_product_id;
+	int type;
+} auixp_card_types[] = {
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_200, IXP_200 },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_300, IXP_300 },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_400, IXP_400 },
+	{ 0, 0, 0 }
 };
 
-int	auixp_match( struct device *, void *, void *);
-void	auixp_attach(struct device *, struct device *, void *);
-int	auixp_detach(struct device *, int);
 
-struct cfattach auixp_ca = {
-	sizeof(struct auixp_softc), auixp_match, auixp_attach
+struct audio_device auixp_device = {
+	"ATI IXP audio",
+	"",
+	"auixp"
 };
 
-int	auixp_open(void *v, int flags);
-void	auixp_close(void *v);
-int	auixp_query_encoding(void *, struct audio_encoding *);
-int	auixp_set_params(void *, int, int, struct audio_params *,
-    struct audio_params *);
-int	auixp_commit_settings(void *);
-int	auixp_round_blocksize(void *, int);
-int	auixp_trigger_output(void *, void *, void *, int,
-    void (*)(void *), void *, struct audio_params *);
-int	auixp_trigger_input(void *, void *, void *, int,
-    void (*)(void *), void *, struct audio_params *);
-int	auixp_halt_output(void *);
-int	auixp_halt_input(void *);
-int	auixp_set_port(void *, mixer_ctrl_t *);
-int	auixp_get_port(void *, mixer_ctrl_t *);
-int	auixp_query_devinfo(void *, mixer_devinfo_t *);
-void *	auixp_malloc(void *, int, size_t, int, int);
-void	auixp_free(void *, void *, int);
-int	auixp_getdev(void *, struct audio_device *);
-size_t	auixp_round_buffersize(void *, int, size_t);
-int	auixp_get_props(void *);
-int	auixp_intr(void *);
-int	auixp_allocmem(struct auixp_softc *, size_t, size_t,
-    struct auixp_dma *);
-int	auixp_freemem(struct auixp_softc *, struct auixp_dma *);
-paddr_t	auixp_mappage(void *, void *, off_t, int);
-void	auixp_get_default_params(void *, int, struct audio_params *);
+
+/* codec detection constant indicating the interrupt flags */
+#define ALL_CODECS_NOT_READY \
+	    (ATI_REG_ISR_CODEC0_NOT_READY |\
+	     ATI_REG_ISR_CODEC1_NOT_READY |\
+	     ATI_REG_ISR_CODEC2_NOT_READY)
+#define CODEC_CHECK_BITS (ALL_CODECS_NOT_READY|ATI_REG_ISR_NEW_FRAME)
 
 
-/* power management (do we support that already?) */
-#if 0
-void	auixp_powerhook(int, void *);
-int	auixp_suspend(struct auixp_softc *);
-int	auixp_resume(struct auixp_softc *);
-#endif
+/* autoconfig */
+static int	auixp_match(device_t, struct cfdata *, void *);
+static void	auixp_attach(device_t, device_t, void *);
+static int	auixp_detach(device_t, int);
 
+
+/* audio(9) function prototypes */
+static int	auixp_query_encoding(void *, struct audio_encoding *);
+static int	auixp_set_params(void *, int, int, audio_params_t *,
+				 audio_params_t *,
+		stream_filter_list_t *, stream_filter_list_t *);
+static int	auixp_commit_settings(void *);
+static int	auixp_round_blocksize(void *, int, int, const audio_params_t *);
+static int	auixp_trigger_output(void *, void *, void *, int,
+				     void (*)(void *),
+		void *, const audio_params_t *);
+static int	auixp_trigger_input(void *, void *, void *, int,
+				    void (*)(void *),
+		void *, const audio_params_t *);
+static int	auixp_halt_output(void *);
+static int	auixp_halt_input(void *);
+static int	auixp_set_port(void *, mixer_ctrl_t *);
+static int	auixp_get_port(void *, mixer_ctrl_t *);
+static int	auixp_query_devinfo(void *, mixer_devinfo_t *);
+static void *	auixp_malloc(void *, int, size_t, struct malloc_type *, int);
+static void	auixp_free(void *, void *, struct malloc_type *);
+static int	auixp_getdev(void *, struct audio_device *);
+static size_t	auixp_round_buffersize(void *, int, size_t);
+static int	auixp_get_props(void *);
+static int	auixp_intr(void *);
+static int	auixp_allocmem(struct auixp_softc *, size_t, size_t,
+		struct auixp_dma *);
+static int	auixp_freemem(struct auixp_softc *, struct auixp_dma *);
+static paddr_t	auixp_mappage(void *, void *, off_t, int);
 
 /* Supporting subroutines */
-int	auixp_init(struct auixp_softc *);
-void	auixp_autodetect_codecs(struct auixp_softc *);
-void	auixp_post_config(void *);
+static int	auixp_init(struct auixp_softc *);
+static void	auixp_autodetect_codecs(struct auixp_softc *);
+static void	auixp_post_config(device_t);
 
-void	auixp_reset_aclink(struct auixp_softc *);
-int	auixp_attach_codec(void *, struct ac97_codec_if *);
-int	auixp_read_codec(void *, u_int8_t, u_int16_t *);
-int	auixp_write_codec(void *, u_int8_t, u_int16_t);
-int	auixp_wait_for_codecs(struct auixp_softc *, const char *);
-void	auixp_reset_codec(void *);
-enum ac97_host_flags	auixp_flags_codec(void *);
+static void	auixp_reset_aclink(struct auixp_softc *);
+static int	auixp_attach_codec(void *, struct ac97_codec_if *);
+static int	auixp_read_codec(void *, uint8_t, uint16_t *);
+static int	auixp_write_codec(void *, uint8_t, uint16_t);
+static int	auixp_wait_for_codecs(struct auixp_softc *, const char *);
+static int	auixp_reset_codec(void *);
+static enum ac97_host_flags	auixp_flags_codec(void *);
 
-void	auixp_enable_dma(struct auixp_softc *, struct auixp_dma *);
-void	auixp_disable_dma(struct auixp_softc *, struct auixp_dma *);
-void	auixp_enable_interrupts(struct auixp_softc *);
-void	auixp_disable_interrupts(struct auixp_softc *);
+static void	auixp_enable_dma(struct auixp_softc *, struct auixp_dma *);
+static void	auixp_disable_dma(struct auixp_softc *, struct auixp_dma *);
+static void	auixp_enable_interrupts(struct auixp_softc *);
+static void	auixp_disable_interrupts(struct auixp_softc *);
 
-void	auixp_link_daisychain(struct auixp_softc *,
-    struct auixp_dma *, struct auixp_dma *, int, int);
-int	auixp_allocate_dma_chain(struct auixp_softc *, struct auixp_dma **);
-void	auixp_program_dma_chain(struct auixp_softc *, struct auixp_dma *);
-void	auixp_dma_update(struct auixp_softc *, struct auixp_dma *);
-void	auixp_update_busbusy(struct auixp_softc *);
+
+/* statics */
+static void	auixp_link_daisychain(struct auixp_softc *,
+				      struct auixp_dma *, struct auixp_dma *,
+				      int, int);
+static int	auixp_allocate_dma_chain(struct auixp_softc *,
+					 struct auixp_dma **);
+static void	auixp_program_dma_chain(struct auixp_softc *,
+					struct auixp_dma *);
+static void	auixp_dma_update(struct auixp_softc *, struct auixp_dma *);
+static void	auixp_update_busbusy(struct auixp_softc *);
+
+static bool	auixp_resume(device_t PMF_FN_PROTO);
+
 
 #ifdef DEBUG_AUIXP
-#define DPRINTF(x)	printf x;
+static struct auixp_softc *static_sc;
+static void auixp_dumpreg(void);
+#	define DPRINTF(x) printf x;
 #else
-#define DPRINTF(x)
+#	define DPRINTF(x)
 #endif
 
-struct audio_hw_if auixp_hw_if = {
-	auixp_open,
-	auixp_close,
+
+static const struct audio_hw_if auixp_hw_if = {
+	NULL,			/* open */
+	NULL,			/* close */
 	NULL,			/* drain */
 	auixp_query_encoding,
 	auixp_set_params,
@@ -202,87 +233,65 @@ struct audio_hw_if auixp_hw_if = {
 	auixp_get_props,
 	auixp_trigger_output,
 	auixp_trigger_input,
-	auixp_get_default_params
+	NULL,			/* dev_ioctl */
+	NULL,			/* powerstate */
 };
 
-int
-auixp_open(void *v, int flags)
-{
 
-	return 0;
+CFATTACH_DECL(auixp, sizeof(struct auixp_softc), auixp_match, auixp_attach,
+    auixp_detach, NULL);
+
+
+/*
+ * audio(9) functions
+ */
+
+static int
+auixp_query_encoding(void *hdl, struct audio_encoding *ae)
+{
+	struct auixp_codec *co;
+	struct auixp_softc *sc;
+
+	co = (struct auixp_codec *) hdl;
+	sc = co->sc;
+	return auconv_query_encoding(sc->sc_encodings, ae);
 }
 
-void
-auixp_close(void *v)
-{
-}
 
-void
-auixp_get_default_params(void *v, int mode, struct audio_params *params)
+static int
+auixp_set_rate(struct auixp_codec *co, int mode, u_int srate)
 {
-	ac97_get_default_params(params);
-}
+	int ret;
+	u_int ratetmp;
 
-int
-auixp_query_encoding(void *hdl, struct audio_encoding *aep)
-{
-	switch (aep->index) {
-	case 0:
-		strlcpy(aep->name, AudioEulinear, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULINEAR;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 1:
-		strlcpy(aep->name, AudioEmulaw, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULAW;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 2:
-		strlcpy(aep->name, AudioEalaw, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ALAW;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 3:
-		strlcpy(aep->name, AudioEslinear, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_SLINEAR;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 4:
-		strlcpy(aep->name, AudioEslinear_le, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
-		aep->precision = 16;
-		aep->flags = 0;
-		return (0);
-	case 5:
-		strlcpy(aep->name, AudioEulinear_le, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULINEAR_LE;
-		aep->precision = 16;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 6:
-		strlcpy(aep->name, AudioEslinear_be, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_SLINEAR_BE;
-		aep->precision = 16;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 7:
-		strlcpy(aep->name, AudioEulinear_be, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULINEAR_BE;
-		aep->precision = 16;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	default:
-		return (EINVAL);
+	ratetmp = srate;
+	if (mode == AUMODE_RECORD) {
+		ret = co->codec_if->vtbl->set_rate(co->codec_if,
+			AC97_REG_PCM_LR_ADC_RATE, &ratetmp);
+		return ret;
 	}
+
+	/* play mode */
+	ret = co->codec_if->vtbl->set_rate(co->codec_if,
+		AC97_REG_PCM_FRONT_DAC_RATE, &ratetmp);
+	if (ret)
+		return ret;
+
+	ratetmp = srate;
+	ret = co->codec_if->vtbl->set_rate(co->codec_if,
+		AC97_REG_PCM_SURR_DAC_RATE, &ratetmp);
+	if (ret)
+		return ret;
+
+	ratetmp = srate;
+	ret = co->codec_if->vtbl->set_rate(co->codec_if,
+		AC97_REG_PCM_LFE_DAC_RATE, &ratetmp);
+	return ret;
 }
 
 
 /* commit setting and program ATI IXP chip */
-int
+static int
 auixp_commit_settings(void *hdl)
 {
 	struct auixp_codec *co;
@@ -290,7 +299,7 @@ auixp_commit_settings(void *hdl)
 	bus_space_tag_t    iot;
 	bus_space_handle_t ioh;
 	struct audio_params *params;
-	u_int32_t value;
+	uint32_t value;
 
 	/* XXX would it be better to stop interrupts first? XXX */
 	co = (struct auixp_codec *) hdl;
@@ -319,11 +328,11 @@ auixp_commit_settings(void *hdl)
 	case 6:
 		value |= ATI_REG_OUT_DMA_SLOT_BIT(7) |
 			 ATI_REG_OUT_DMA_SLOT_BIT(8);
-		/* FALLTHROUGH */
+		/* fallthru */
 	case 4:
 		value |= ATI_REG_OUT_DMA_SLOT_BIT(6) |
 			 ATI_REG_OUT_DMA_SLOT_BIT(9);
-		/* FALLTHROUGH */
+		/* fallthru */
 	default:
 		value |= ATI_REG_OUT_DMA_SLOT_BIT(3) |
 			 ATI_REG_OUT_DMA_SLOT_BIT(4);
@@ -353,7 +362,7 @@ auixp_commit_settings(void *hdl)
 		value &= ~ATI_REG_CMD_SPDF_CONFIG_MASK;
 		value |=  ATI_REG_CMD_SPDF_CONFIG_34; /* NetBSD AC'97 default */
 
-		/* XXX this is probably not necessary unless splitted XXX */
+		/* XXX this prolly is not nessisary unless splitted XXX */
 		value &= ~ATI_REG_CMD_INTERLEAVE_SPDF;
 		if (params->precision <= 16)
 			value |= ATI_REG_CMD_INTERLEAVE_SPDF;
@@ -365,257 +374,82 @@ auixp_commit_settings(void *hdl)
 
 
 /* set audio properties in desired setting */
-int
+static int
 auixp_set_params(void *hdl, int setmode, int usemode,
-    struct audio_params *play, struct audio_params *rec)
+    audio_params_t *play, audio_params_t *rec, stream_filter_list_t *pfil,
+    stream_filter_list_t *rfil)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
-	int error;
-	u_int temprate;
+	audio_params_t *params;
+	stream_filter_list_t *fil;
+	int mode, index;
+
+	/*
+	 * In current NetBSD AC'97 implementation, SPDF is linked to channel 3
+	 * and 4 i.e. stereo output.
+	 */
 
 	co = (struct auixp_codec *) hdl;
 	sc = co->sc;
-	if (setmode & AUMODE_PLAY) {
-		play->factor = 1;
-		play->sw_code = NULL;
-		switch(play->encoding) {
-		case AUDIO_ENCODING_ULAW:
-			switch (play->channels) {
-			case 1:
-				play->factor = 4;
-				play->sw_code = mulaw_to_slinear16_le_mts;
-				break;
-			case 2:
-				play->factor = 2;
-				play->sw_code = mulaw_to_slinear16_le;
-				break;
-			default:
-				return (EINVAL);
-			}
-			break;
-		case AUDIO_ENCODING_SLINEAR_LE:
-			switch (play->precision) {
-			case 8:
-				switch (play->channels) {
-				case 1:
-					play->factor = 4;
-					play->sw_code = linear8_to_linear16_le_mts;
-					break;
-				case 2:
-					play->factor = 2;
-					play->sw_code = linear8_to_linear16_le;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			case 16:
-				switch (play->channels) {
-				case 1:
-					play->factor = 2;
-					play->sw_code = noswap_bytes_mts;
-					break;
-				case 2:
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			default:
-				return (EINVAL);
-			}
-			break;
-		case AUDIO_ENCODING_ULINEAR_LE:
-			switch (play->precision) {
-			case 8:
-				switch (play->channels) {
-				case 1:
-					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_le_mts;
-					break;
-				case 2:
-					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16_le;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			case 16:
-				switch (play->channels) {
-				case 1:
-					play->factor = 2;
-					play->sw_code = change_sign16_le_mts;
-					break;
-				case 2:
-					play->sw_code = change_sign16_le;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			default:
-				return (EINVAL);
-			}
-			break;
-		case AUDIO_ENCODING_ALAW:
-			switch (play->channels) {
-			case 1:
-				play->factor = 4;
-				play->sw_code = alaw_to_slinear16_le_mts;
-				break;
-			case 2:
-				play->factor = 2;
-				play->sw_code = alaw_to_slinear16_le;
-				break;
-			default:
-				return (EINVAL);
-			}
-			break;
-		case AUDIO_ENCODING_SLINEAR_BE:
-			switch (play->precision) {
-			case 8:
-				switch (play->channels) {
-				case 1:
-					play->factor = 4;
-					play->sw_code = linear8_to_linear16_le_mts;
-					break;
-				case 2:
-					play->factor = 2;
-					play->sw_code = linear8_to_linear16_le;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			case 16:
-				switch (play->channels) {
-				case 1:
-					play->factor = 2;
-					play->sw_code = swap_bytes_mts;
-					break;
-				case 2:
-					play->sw_code = swap_bytes;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			default:
-				return (EINVAL);
-			}
-			break;
-		case AUDIO_ENCODING_ULINEAR_BE:
-			switch (play->precision) {
-			case 8:
-				switch (play->channels) {
-				case 1:
-					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_le_mts;
-					break;
-				case 2:
-					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16_le;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			case 16:
-				switch (play->channels) {
-				case 1:
-					play->factor = 2;
-					play->sw_code = swap_bytes_change_sign16_le_mts;
-					break;
-				case 2:
-					play->sw_code = swap_bytes_change_sign16_le;
-					break;
-				default:
-					return (EINVAL);
-				}
-				break;
-			default:
-				return (EINVAL);
-			}
-			break;
-		default:
-			return (EINVAL);
-		}
+	for (mode = AUMODE_RECORD; mode != -1;
+	     mode = (mode == AUMODE_RECORD) ? AUMODE_PLAY : -1) {
+		if ((setmode & mode) == 0)
+			continue;
 
-		temprate = play->sample_rate;
-		error = ac97_set_rate(co->codec_if,
-		    AC97_REG_PCM_LFE_DAC_RATE, &play->sample_rate);
-		if (error)
-			return (error);
+		params = (mode == AUMODE_PLAY) ? play :  rec;
+		fil    = (mode == AUMODE_PLAY) ? pfil : rfil;
+		if (params == NULL)
+			continue;
 
-		play->sample_rate = temprate;
-		error = ac97_set_rate(co->codec_if,
-		    AC97_REG_PCM_SURR_DAC_RATE, &play->sample_rate);
-		if (error)
-			return (error);
+		/* AD1888 settings ... don't know the IXP limits */
+		if (params->sample_rate < AUIXP_MINRATE)
+			return EINVAL;
+		if (params->sample_rate > AUIXP_MAXRATE)
+			return EINVAL;
 
-		play->sample_rate = temprate;
-		error = ac97_set_rate(co->codec_if,
-		    AC97_REG_PCM_FRONT_DAC_RATE, &play->sample_rate);
-		if (error)
-			return (error);
+		index = auconv_set_converter(sc->sc_formats, AUIXP_NFORMATS,
+					     mode, params, TRUE, fil);
 
+		/* nothing found? */
+		if (index < 0)
+			return EINVAL;
+
+		/* not sure yet as to why i have to change params here */
+		if (fil->req_size > 0)
+			params = &fil->filters[0].param;
+
+		/* if variable speed and we can't set the desired rate, fail */
+		if ((sc->sc_formats[index].frequency_type != 1) &&
+		    auixp_set_rate(co, mode, params->sample_rate))
+			return EINVAL;
+
+		/* preserve the settings */
+		if (mode == AUMODE_PLAY)
+			sc->sc_play_params = *params;
+		if (mode == AUMODE_RECORD)
+			sc->sc_rec_params  = *params;
 	}
 
-	if (setmode & AUMODE_RECORD) {
-		rec->factor = 1;
-		rec->sw_code = 0;
-		switch(rec->encoding) {
-		case AUDIO_ENCODING_ULAW:
-			rec->sw_code = ulinear8_to_mulaw;
-			break;
-		case AUDIO_ENCODING_SLINEAR_LE:
-			if (rec->precision == 8)
-				rec->sw_code = change_sign8;
-			break;
-		case AUDIO_ENCODING_ULINEAR_LE:
-			if (rec->precision == 16)
-				rec->sw_code = change_sign16_le;
-			break;
-		case AUDIO_ENCODING_ALAW:
-			rec->sw_code = ulinear8_to_alaw;
-			break;
-		case AUDIO_ENCODING_SLINEAR_BE:
-			if (rec->precision == 16)
-				rec->sw_code = swap_bytes;
-			else
-				rec->sw_code = change_sign8;
-			break;
-		case AUDIO_ENCODING_ULINEAR_BE:
-			if (rec->precision == 16)
-				rec->sw_code = swap_bytes_change_sign16_le;
-			break;
-		default:
-			return (EINVAL);
-		}
-
-		error = ac97_set_rate(co->codec_if, AC97_REG_PCM_LR_ADC_RATE,
-		    &rec->sample_rate);
-		if (error)
-			return (error);
-	}
-
-	return (0);
+	return 0;
 }
 
 
 /* called to translate a requested blocksize to a hw-possible one */
-int
-auixp_round_blocksize(void *v, int blk)
+static int
+auixp_round_blocksize(void *hdl, int bs, int mode,
+    const audio_params_t *param)
 {
+	uint32_t new_bs;
 
-	blk = (blk + 0x1f) & ~0x1f;
+	new_bs = bs;
 	/* Be conservative; align to 32 bytes and maximise it to 64 kb */
-	if (blk > 0x10000)
-		blk = 0x10000;
+	/* 256 kb possible */
+	if (new_bs > 0x10000)
+		bs = 0x10000;			/* 64 kb max */
+	new_bs = (bs & ~0x20);			/* 32 bytes align */
 
-	return blk;
+	return new_bs;
 }
 
 
@@ -624,8 +458,9 @@ auixp_round_blocksize(void *v, int blk)
  * when we program the dma chain itself. The trigger routines passes on the
  * kernel virtual address we return here as a reference to the mapping.
  */
-void *
-auixp_malloc(void *hdl, int direction, size_t size, int pool, int flags)
+static void *
+auixp_malloc(void *hdl, int direction, size_t size,
+	     struct malloc_type *type, int flags)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
@@ -635,34 +470,35 @@ auixp_malloc(void *hdl, int direction, size_t size, int pool, int flags)
 	co = (struct auixp_codec *) hdl;
 	sc = co->sc;
 	/* get us a auixp_dma structure */
-	dma = malloc(sizeof(*dma), pool, flags);
+	dma = malloc(sizeof(*dma), type, flags);
 	if (!dma)
 		return NULL;
 
 	/* get us a dma buffer itself */
 	error = auixp_allocmem(sc, size, 16, dma);
 	if (error) {
-		free(dma, pool);
-		printf("%s: auixp_malloc: not enough memory\n",
-		    sc->sc_dev.dv_xname);
+		free(dma, type);
+		aprint_error_dev(&sc->sc_dev, "auixp_malloc: not enough memory\n");
+
 		return NULL;
 	}
 	SLIST_INSERT_HEAD(&sc->sc_dma_list, dma, dma_chain);
 
 	DPRINTF(("auixp_malloc: returning kern %p,   hw 0x%08x for %d bytes "
-	    "in %d segs\n", KERNADDR(dma), (u_int32_t) DMAADDR(dma), dma->size,
+	    "in %d segs\n", KERNADDR(dma), (uint32_t) DMAADDR(dma), dma->size,
 	    dma->nsegs)
 	);
 
 	return KERNADDR(dma);
 }
 
+
 /*
  * free and release dma capable memory we allocated before and remove its
  * recording
  */
-void
-auixp_free(void *hdl, void *addr, int pool)
+static void
+auixp_free(void *hdl, void *addr, struct malloc_type *type)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
@@ -675,22 +511,24 @@ auixp_free(void *hdl, void *addr, int pool)
 			SLIST_REMOVE(&sc->sc_dma_list, dma, auixp_dma,
 			    dma_chain);
 			auixp_freemem(sc, dma);
-			free(dma, pool);
+			free(dma, type);
 			return;
 		}
 	}
 }
 
-int
-auixp_getdev(void *v, struct audio_device *adp)
+
+static int
+auixp_getdev(void *hdl, struct audio_device *ret)
 {
-	struct auixp_softc *sc = v;
-	*adp = sc->sc_audev;
+
+	*ret = auixp_device;
 	return 0;
 }
 
+
 /* pass request to AC'97 codec code */
-int
+static int
 auixp_set_port(void *hdl, mixer_ctrl_t *mc)
 {
 	struct auixp_codec *co;
@@ -701,7 +539,7 @@ auixp_set_port(void *hdl, mixer_ctrl_t *mc)
 
 
 /* pass request to AC'97 codec code */
-int
+static int
 auixp_get_port(void *hdl, mixer_ctrl_t *mc)
 {
 	struct auixp_codec *co;
@@ -711,7 +549,7 @@ auixp_get_port(void *hdl, mixer_ctrl_t *mc)
 }
 
 /* pass request to AC'97 codec code */
-int
+static int
 auixp_query_devinfo(void *hdl, mixer_devinfo_t *di)
 {
 	struct auixp_codec *co;
@@ -721,8 +559,9 @@ auixp_query_devinfo(void *hdl, mixer_devinfo_t *di)
 }
 
 
-size_t
-auixp_round_buffersize(void *hdl, int direction, size_t bufsize)
+static size_t
+auixp_round_buffersize(void *hdl, int direction,
+    size_t bufsize)
 {
 
 	/* XXX force maximum? i.e. 256 kb? */
@@ -730,7 +569,7 @@ auixp_round_buffersize(void *hdl, int direction, size_t bufsize)
 }
 
 
-int
+static int
 auixp_get_props(void *hdl)
 {
 
@@ -752,13 +591,13 @@ auixp_get_props(void *hdl)
  * Note that _v variables depict kernel virtual addresses, _p variables depict
  * physical addresses.
  */
-void
+static void
 auixp_link_daisychain(struct auixp_softc *sc,
 		struct auixp_dma *c_dma, struct auixp_dma *s_dma,
 		int blksize, int blocks)
 {
 	atiixp_dma_desc_t *caddr_v, *next_caddr_v;
-	u_int32_t caddr_p, next_caddr_p, saddr_p;
+	uint32_t caddr_p, next_caddr_p, saddr_p;
 	int i;
 
 	/* just make sure we are not changing when its running */
@@ -797,7 +636,7 @@ auixp_link_daisychain(struct auixp_softc *sc,
 }
 
 
-int
+static int
 auixp_allocate_dma_chain(struct auixp_softc *sc, struct auixp_dma **dmap)
 {
 	struct auixp_dma *dma;
@@ -805,7 +644,7 @@ auixp_allocate_dma_chain(struct auixp_softc *sc, struct auixp_dma **dmap)
 
 	/* allocate keeper of dma area */
 	*dmap = NULL;
-	dma = malloc(sizeof(*dma), M_DEVBUF, M_NOWAIT | M_ZERO);
+	dma = malloc(sizeof(struct auixp_dma), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!dma)
 		return ENOMEM;
 
@@ -813,8 +652,7 @@ auixp_allocate_dma_chain(struct auixp_softc *sc, struct auixp_dma **dmap)
 	error = auixp_allocmem(sc, DMA_DESC_CHAIN * sizeof(atiixp_dma_desc_t),
 	    16, dma);
 	if (error) {
-		printf("%s: can't malloc dma descriptor chain\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "can't malloc dma descriptor chain\n");
 		free(dma, M_DEVBUF);
 		return ENOMEM;
 	}
@@ -828,13 +666,13 @@ auixp_allocate_dma_chain(struct auixp_softc *sc, struct auixp_dma **dmap)
 }
 
 
-/* program dma chain in its link address descriptor */
-void
+/* program dma chain in it's link address descriptor */
+static void
 auixp_program_dma_chain(struct auixp_softc *sc, struct auixp_dma *dma)
 {
 	bus_space_tag_t    iot;
 	bus_space_handle_t ioh;
-	u_int32_t value;
+	uint32_t value;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
@@ -856,15 +694,15 @@ auixp_program_dma_chain(struct auixp_softc *sc, struct auixp_dma *dma)
 
 
 /* called from interrupt code to signal end of one dma-slot */
-void
+static void
 auixp_dma_update(struct auixp_softc *sc, struct auixp_dma *dma)
 {
 
 	/* be very paranoid */
 	if (!dma)
-		panic("auixp: update: dma = NULL");
+		panic("%s: update: dma = NULL", device_xname(&sc->sc_dev));
 	if (!dma->intr)
-		panic("auixp: update: dma->intr = NULL");
+		panic("%s: update: dma->intr = NULL", device_xname(&sc->sc_dev));
 
 	/* request more input from upper layer */
 	(*dma->intr)(dma->intrarg);
@@ -875,12 +713,12 @@ auixp_dma_update(struct auixp_softc *sc, struct auixp_dma *dma)
  * The magic `busbusy' bit that needs to be set when dma is active; allowing
  * busmastering?
  */
-void
+static void
 auixp_update_busbusy(struct auixp_softc *sc)
 {
 	bus_space_tag_t    iot;
 	bus_space_handle_t ioh;
-	u_int32_t value;
+	uint32_t value;
 	int running;
 
 	iot = sc->sc_iot;
@@ -903,16 +741,16 @@ auixp_update_busbusy(struct auixp_softc *sc)
  * audio is refilled by calling the intr() function when space is available
  * again.
  */
-/* XXX almost literally a copy of trigger-input; could be factorised XXX */
-int
+/* XXX allmost literaly a copy of trigger-input; could be factorised XXX */
+static int
 auixp_trigger_output(void *hdl, void *start, void *end, int blksize,
-    void (*intr)(void *), void *intrarg, struct audio_params *param)
+    void (*intr)(void *), void *intrarg, const audio_params_t *param)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
 	struct auixp_dma   *chain_dma;
 	struct auixp_dma   *sound_dma;
-	u_int32_t blocks;
+	uint32_t blocks;
 
 	co = (struct auixp_codec *) hdl;
 	sc = co->sc;
@@ -928,7 +766,7 @@ auixp_trigger_output(void *hdl, void *start, void *end, int blksize,
 	 * NOTE, we can assume its in one block since we asked for it to be in
 	 * one contiguous blob; XXX change this? XXX
 	 */
-	blocks = (size_t) (((caddr_t) end) - ((caddr_t) start)) / blksize;
+	blocks = (size_t) (((char *) end) - ((char *) start)) / blksize;
 
 	/* lookup `start' address in our list of DMA area's */
 	SLIST_FOREACH(sound_dma, &sc->sc_dma_list, dma_chain) {
@@ -939,7 +777,7 @@ auixp_trigger_output(void *hdl, void *start, void *end, int blksize,
 	/* not ours ? then bail out */
 	if (!sound_dma) {
 		printf("%s: auixp_trigger_output: bad sound addr %p\n",
-		    sc->sc_dev.dv_xname, start);
+		    device_xname(&sc->sc_dev), start);
 		return EINVAL;
 	}
 
@@ -958,8 +796,8 @@ auixp_trigger_output(void *hdl, void *start, void *end, int blksize,
 }
 
 
-/* halt output of audio, just disable its dma and update bus state */
-int
+/* halt output of audio, just disable it's dma and update bus state */
+static int
 auixp_halt_output(void *hdl)
 {
 	struct auixp_codec *co;
@@ -978,16 +816,16 @@ auixp_halt_output(void *hdl)
 }
 
 
-/* XXX almost literally a copy of trigger-output; could be factorised XXX */
-int
+/* XXX allmost literaly a copy of trigger-output; could be factorised XXX */
+static int
 auixp_trigger_input(void *hdl, void *start, void *end, int blksize,
-    void (*intr)(void *), void *intrarg, struct audio_params *param)
+    void (*intr)(void *), void *intrarg, const audio_params_t *param)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
 	struct auixp_dma   *chain_dma;
 	struct auixp_dma   *sound_dma;
-	u_int32_t blocks;
+	uint32_t blocks;
 
 	co = (struct auixp_codec *) hdl;
 	sc = co->sc;
@@ -1003,7 +841,7 @@ auixp_trigger_input(void *hdl, void *start, void *end, int blksize,
 	 * NOTE, we can assume its in one block since we asked for it to be in
 	 * one contiguous blob; XXX change this? XXX
 	 */
-	blocks = (size_t) (((caddr_t) end) - ((caddr_t) start)) / blksize;
+	blocks = (size_t) (((char *) end) - ((char *) start)) / blksize;
 
 	/* lookup `start' address in our list of DMA area's */
 	SLIST_FOREACH(sound_dma, &sc->sc_dma_list, dma_chain) {
@@ -1014,7 +852,7 @@ auixp_trigger_input(void *hdl, void *start, void *end, int blksize,
 	/* not ours ? then bail out */
 	if (!sound_dma) {
 		printf("%s: auixp_trigger_input: bad sound addr %p\n",
-		    sc->sc_dev.dv_xname, start);
+		    device_xname(&sc->sc_dev), start);
 		return EINVAL;
 	}
 
@@ -1033,8 +871,8 @@ auixp_trigger_input(void *hdl, void *start, void *end, int blksize,
 }
 
 
-/* halt sampling audio, just disable its dma and update bus state */
-int
+/* halt sampling audio, just disable it's dma and update bus state */
+static int
 auixp_halt_input(void *hdl)
 {
 	struct auixp_codec *co;
@@ -1057,17 +895,17 @@ auixp_halt_input(void *hdl)
  * IXP audio interrupt handler
  *
  * note that we return the number of bits handled; the return value is not
- * documented but I saw it implemented in other drivers. Probably returning a
- * value > 0 means "I've dealt with it"
+ * documentated but i saw it implemented in other drivers. Prolly returning a
+ * value > 0 means "i've dealt with it"
  *
  */
-int
+static int
 auixp_intr(void *softc)
 {
 	struct auixp_softc *sc;
 	bus_space_tag_t    iot;
 	bus_space_handle_t ioh;
-	u_int32_t status, enable, detected_codecs;
+	uint32_t status, enable, detected_codecs;
 	int ret;
 
 	sc = softc;
@@ -1080,7 +918,7 @@ auixp_intr(void *softc)
 	if (status == 0)
 		return 0;
 
-	DPRINTF(("%s: (status = %x)\n", sc->sc_dev.dv_xname, status));
+	DPRINTF(("%s: (status = %x)\n", device_xname(&sc->sc_dev), status));
 
 	/* check DMA UPDATE flags for input & output */
 	if (status & ATI_REG_ISR_IN_STATUS) {
@@ -1110,7 +948,7 @@ auixp_intr(void *softc)
 		detected_codecs = status & CODEC_CHECK_BITS;
 		sc->sc_codec_not_ready_bits |= detected_codecs;
 
-		/* disable detected interrupt sources */
+		/* disable detected interupt sources */
 		enable  = bus_space_read_4(iot, ioh, ATI_REG_IER);
 		enable &= ~detected_codecs;
 		bus_space_write_4(iot, ioh, ATI_REG_IER, enable);
@@ -1124,7 +962,7 @@ auixp_intr(void *softc)
 
 
 /* allocate memory for dma purposes; on failure of any of the steps, roll back */
-int
+static int
 auixp_allocmem(struct auixp_softc *sc, size_t size,
 	       size_t align, struct auixp_dma *dma)
 {
@@ -1178,7 +1016,7 @@ free:
 
 
 /* undo dma mapping and release memory allocated */
-int
+static int
 auixp_freemem(struct auixp_softc *sc, struct auixp_dma *p)
 {
 
@@ -1192,7 +1030,7 @@ auixp_freemem(struct auixp_softc *sc, struct auixp_dma *p)
 
 
 /* memory map dma memory */
-paddr_t
+static paddr_t
 auixp_mappage(void *hdl, void *mem, off_t off, int prot)
 {
 	struct auixp_codec *co;
@@ -1217,36 +1055,83 @@ auixp_mappage(void *hdl, void *mem, off_t off, int prot)
 
 	/* return mmap'd region */
 	return bus_dmamem_mmap(sc->sc_dmat, p->segs, p->nsegs,
-	    off, prot, BUS_DMA_WAITOK);
+			       off, prot, BUS_DMA_WAITOK);
 }
 
-int
-auixp_match(struct device *dev, void *match, void *aux)
+
+/*
+ * Attachment section
+ */
+
+/* Is it my hardware? */
+static int
+auixp_match(device_t dev, struct cfdata *match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, auixp_pci_devices,
-	    sizeof(auixp_pci_devices)/sizeof(auixp_pci_devices[0])));
+	struct pci_attach_args *pa;
+
+	pa = (struct pci_attach_args *)aux;
+	switch(PCI_VENDOR(pa->pa_id)) {
+	case PCI_VENDOR_ATI:
+		switch(PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_ATI_IXP_AUDIO_200:
+		case PCI_PRODUCT_ATI_IXP_AUDIO_300:
+		case PCI_PRODUCT_ATI_IXP_AUDIO_400:
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
-void
-auixp_attach(struct device *parent, struct device *self, void *aux)
+
+/* it is... now hook up and set up the resources we need */
+static void
+auixp_attach(device_t parent, device_t self, void *aux)
 {
 	struct auixp_softc *sc;
 	struct pci_attach_args *pa;
 	pcitag_t tag;
 	pci_chipset_tag_t pc;
 	pci_intr_handle_t ih;
+	const struct auixp_card_type *card;
 	const char *intrstr;
-	int len;
+	uint32_t data;
+	char devinfo[256];
+	int revision, error;
 
-	sc = (struct auixp_softc *)self;
+	sc = device_private(self);
 	pa = (struct pci_attach_args *)aux;
 	tag = pa->pa_tag;
 	pc = pa->pa_pc;
+#ifdef DEBUG_AUIXP
+	static_sc = sc;
+#endif
+
+	/* print information confirming attachment */
+	aprint_naive(": Audio controller\n");
+
+	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
+	revision = PCI_REVISION(pa->pa_class);
+	aprint_normal(": %s (rev. 0x%02x)\n", devinfo, revision);
+
+	/* set up details from our set of known `cards'/chips */
+	for (card = auixp_card_types; card->pci_vendor_id; card++)
+		if (PCI_VENDOR(pa->pa_id) == card->pci_vendor_id &&
+		    PCI_PRODUCT(pa->pa_id) == card->pci_product_id) {
+			sc->type = card->type;
+			break;
+		}
+
+	/* device only has 32 bit non prefetchable memory		*/
+	/* set MEM space access and enable the card's busmastering	*/
+	data = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+	data |= (PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE);
+	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, data);
 
 	/* map memory; its not sized -> what is the size? max PCI slot size? */
 	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_MEM, 0,
-	    &sc->sc_iot, &sc->sc_ioh, &sc->sc_iob, &sc->sc_ios, 0)) {
-		printf(": can't map memory space\n");
+	    &sc->sc_iot, &sc->sc_ioh, &sc->sc_iob, &sc->sc_ios)) {
+		aprint_error_dev(&sc->sc_dev, "can't map memory space\n");
 		return;
 	}
 
@@ -1270,95 +1155,126 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	auixp_program_dma_chain(sc, sc->sc_input_dma);
 #endif
 
+	/* map interrupt on the pci bus */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": can't map interrupt\n");
+		aprint_error_dev(&sc->sc_dev, "can't map interrupt\n");
 		return;
 	}
-	intrstr = pci_intr_string(pc, ih);
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_AUDIO, auixp_intr, sc,
-	    sc->sc_dev.dv_xname);
-	if (sc->sc_ih == NULL) {
-		printf(": can't establish interrupt");
-		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		return;
-	}
-	printf(": %s\n", intrstr);
 
-	strlcpy(sc->sc_audev.name, "ATI IXP AC97", sizeof sc->sc_audev.name);
-	snprintf(sc->sc_audev.version, sizeof sc->sc_audev.version, "0x%02x",
-	    PCI_REVISION(pa->pa_class));
-	strlcpy(sc->sc_audev.config, sc->sc_dev.dv_xname,
-	    sizeof sc->sc_audev.config);
+	/* where are we connected at ? */
+	intrstr = pci_intr_string(pc, ih);
+
+	/* establish interrupt routine hookup at IPL_AUDIO level */
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_AUDIO, auixp_intr, self);
+	if (sc->sc_ih == NULL) {
+		aprint_error_dev(&sc->sc_dev, "can't establish interrupt");
+		if (intrstr != NULL)
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
+		return;
+	}
+	aprint_normal_dev(&sc->sc_dev, "interrupting at %s\n", intrstr);
 
 	/* power up chip */
-	pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D0);
+	if ((error = pci_activate(pa->pa_pc, pa->pa_tag, self,
+	    pci_activate_null)) && error != EOPNOTSUPP) {
+		aprint_error_dev(&sc->sc_dev, "cannot activate %d\n",
+		    error);
+		return;
+	}
 
 	/* init chip */
 	if (auixp_init(sc) == -1) {
-		printf("%s: auixp_attach: unable to initialize the card\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "auixp_attach: unable to initialize the card\n");
 		return;
 	}
 
-	/* XXX set up power hooks; not implemented yet XXX */
-
-	len = 1;	/* shut up gcc */
-#ifdef notyet
-	/* create suspend save area */
-	len = sizeof(u_int16_t) * (ESA_REV_B_CODE_MEMORY_LENGTH
-	    + ESA_REV_B_DATA_MEMORY_LENGTH + 1);
-	sc->savemem = (u_int16_t *)malloc(len, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sc->savemem == NULL) {
-		printf("%s: unable to allocate suspend buffer\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
-
-	sc->powerhook = powerhook_establish(auixp_powerhook, sc);
-	if (sc->powerhook == NULL)
-		printf("%s: WARNING: unable to establish powerhook\n",
-		    sc->sc_dev.dv_xname);
-
-#endif
+	if (!pmf_device_register(self, NULL, auixp_resume))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 
 	/*
 	 * delay further configuration of codecs and audio after interrupts
 	 * are enabled.
 	 */
-	mountroothook_establish(auixp_post_config, self);
+	config_interrupts(self, auixp_post_config);
 }
 
+
 /* called from autoconfigure system when interrupts are enabled */
-void
-auixp_post_config(void *self)
+static void
+auixp_post_config(device_t self)
 {
 	struct auixp_softc *sc;
 	struct auixp_codec *codec;
 	int codec_nr;
+	int res, i;
 
-	sc = (struct auixp_softc *)self;
+	sc = device_private(self);
 	/* detect the AC97 codecs */
 	auixp_autodetect_codecs(sc);
 
-#if notyet
+	/* setup audio translation formats : following codec0 (!) */
+	codec = &sc->sc_codec[0];
+	if (!codec->present) {
+		/* nothing??? then invalidate all formats */
+		for (i = 0; i < AUIXP_NFORMATS; i++) {
+			AUFMT_INVALIDATE(&sc->sc_formats[i]);
+		}
+		return;
+	}
+
 	/* copy formats and invalidate entries not suitable for codec0 */
+	memcpy(sc->sc_formats, auixp_formats, sizeof(auixp_formats));
 	sc->has_4ch   = AC97_IS_4CH(codec->codec_if);
 	sc->has_6ch   = AC97_IS_6CH(codec->codec_if);
 	sc->is_fixed  = AC97_IS_FIXED_RATE(codec->codec_if);
 	sc->has_spdif = AC97_HAS_SPDIF(codec->codec_if);
-#endif
+
+	for (i = 0; i < AUIXP_NFORMATS; i++) {
+		if (sc->is_fixed) {
+			sc->sc_formats[i].frequency_type = 1;
+			sc->sc_formats[i].frequency[0]   = 48000;
+		}
+		switch (sc->sc_formats[i].channels) {
+		case 4 :
+			if (sc->has_4ch)
+				break;
+			AUFMT_INVALIDATE(&sc->sc_formats[i]);
+			break;
+		case 6 :
+			if (sc->has_6ch)
+				break;
+			AUFMT_INVALIDATE(&sc->sc_formats[i]);
+			break;
+		default :
+			break;
+		}
+	}
+
+	/*
+	 * Create all encodings (and/or -translations) based on the formats
+	 * supported. */
+	res = auconv_create_encodings(sc->sc_formats, AUIXP_NFORMATS,
+	    &sc->sc_encodings);
+	if (res) {
+		printf("%s: auconv_create_encodings failed; "
+		    "no attachments\n", device_xname(&sc->sc_dev));
+		return;
+	}
 
 	/* attach audio devices for all detected codecs */
+	/* XXX wise? look at other multiple-codec able chipsets XXX */
 	for (codec_nr = 0; codec_nr < ATI_IXP_CODECS; codec_nr++) {
 		codec = &sc->sc_codec[codec_nr];
 		if (codec->present)
 			audio_attach_mi(&auixp_hw_if, codec, &sc->sc_dev);
 	}
 
-	if (sc->has_spdif)
+	if (sc->has_spdif) {
+		aprint_normal_dev(&sc->sc_dev, "codec spdif support detected but disabled "
+		    "for now\n");
 		sc->has_spdif = 0;
+	}
 
 	/* fill in the missing details about the dma channels. */
 	/* for output */
@@ -1378,12 +1294,13 @@ auixp_post_config(void *self)
 	auixp_enable_interrupts(sc);
 }
 
-void
+
+static void
 auixp_enable_interrupts(struct auixp_softc *sc)
 {
 	bus_space_tag_t     iot;
 	bus_space_handle_t  ioh;
-	u_int32_t value;
+	uint32_t value;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
@@ -1405,7 +1322,8 @@ auixp_enable_interrupts(struct auixp_softc *sc)
 	bus_space_write_4(iot, ioh, ATI_REG_IER, value);
 }
 
-void
+
+static void
 auixp_disable_interrupts(struct auixp_softc *sc)
 {
 	bus_space_tag_t     iot;
@@ -1420,13 +1338,14 @@ auixp_disable_interrupts(struct auixp_softc *sc)
 	bus_space_write_4(iot, ioh, ATI_REG_ISR, 0xffffffff);
 }
 
+
 /* dismantle what we've set up by undoing setup */
-int
-auixp_detach(struct device *self, int flags)
+static int
+auixp_detach(device_t self, int flags)
 {
 	struct auixp_softc *sc;
 
-	sc = (struct auixp_softc *)self;
+	sc = device_private(self);
 	/* XXX shouldn't we just reset the chip? XXX */
 	/*
 	 * should we explicitly disable interrupt generation and acknowledge
@@ -1442,8 +1361,7 @@ auixp_detach(struct device *self, int flags)
 	if (sc->sc_ios)
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
 
-	if (sc->savemem)
-		free(sc->savemem, M_DEVBUF);
+	pmf_device_deregister(self);
 
 	return 0;
 }
@@ -1458,7 +1376,7 @@ auixp_detach(struct device *self, int flags)
  */
 
 
-int
+static int
 auixp_attach_codec(void *aux, struct ac97_codec_if *codec_if)
 {
 	struct auixp_codec *ixp_codec;
@@ -1470,14 +1388,15 @@ auixp_attach_codec(void *aux, struct ac97_codec_if *codec_if)
 	return 0;
 }
 
-int
-auixp_read_codec(void *aux, u_int8_t reg, u_int16_t *result)
+
+static int
+auixp_read_codec(void *aux, uint8_t reg, uint16_t *result)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
 	bus_space_tag_t     iot;
 	bus_space_handle_t  ioh;
-	u_int32_t data;
+	uint32_t data;
 	int timeout;
 
 	co  = aux;
@@ -1504,7 +1423,8 @@ auixp_read_codec(void *aux, u_int8_t reg, u_int16_t *result)
 		data = bus_space_read_4(iot, ioh, ATI_REG_PHYS_IN_ADDR);
 		if (data & ATI_REG_PHYS_IN_READ_FLAG) {
 			DPRINTF(("read ac'97 codec reg 0x%x = 0x%08x\n",
-				reg, data >> ATI_REG_PHYS_IN_DATA_SHIFT));
+				reg, data >> ATI_REG_PHYS_IN_DATA_SHIFT)
+			);
 			*result = data >> ATI_REG_PHYS_IN_DATA_SHIFT;
 			return 0;
 		}
@@ -1514,19 +1434,20 @@ auixp_read_codec(void *aux, u_int8_t reg, u_int16_t *result)
 
 	if (reg < 0x7c)
 		printf("%s: codec read timeout! (reg %x)\n",
-		    sc->sc_dev.dv_xname, reg);
+		    device_xname(&sc->sc_dev), reg);
 
 	return 0xffff;
 }
 
-int
-auixp_write_codec(void *aux, u_int8_t reg, u_int16_t data)
+
+static int
+auixp_write_codec(void *aux, uint8_t reg, uint16_t data)
 {
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
 	bus_space_tag_t     iot;
 	bus_space_handle_t  ioh;
-	u_int32_t value;
+	uint32_t value;
 
 	DPRINTF(("write ac'97 codec reg 0x%x = 0x%08x\n", reg, data));
 	co  = aux;
@@ -1537,8 +1458,8 @@ auixp_write_codec(void *aux, u_int8_t reg, u_int16_t data)
 		return -1;
 
 	/* build up command for writing codec register */
-	value = (((u_int32_t) data) << ATI_REG_PHYS_OUT_DATA_SHIFT) |
-		(((u_int32_t)  reg) << ATI_REG_PHYS_OUT_ADDR_SHIFT) |
+	value = (((uint32_t) data) << ATI_REG_PHYS_OUT_DATA_SHIFT) |
+		(((uint32_t)  reg) << ATI_REG_PHYS_OUT_ADDR_SHIFT) |
 		ATI_REG_PHYS_OUT_ADDR_EN |
 		co->codec_nr;
 
@@ -1547,14 +1468,17 @@ auixp_write_codec(void *aux, u_int8_t reg, u_int16_t data)
 	return 0;
 }
 
-void
+
+static int
 auixp_reset_codec(void *aux)
 {
 
 	/* nothing to be done? */
+	return 0;
 }
 
-enum ac97_host_flags
+
+static enum ac97_host_flags
 auixp_flags_codec(void *aux)
 {
 	struct auixp_codec *ixp_codec;
@@ -1563,12 +1487,13 @@ auixp_flags_codec(void *aux)
 	return ixp_codec->codec_flags;
 }
 
-int
+
+static int
 auixp_wait_for_codecs(struct auixp_softc *sc, const char *func)
 {
 	bus_space_tag_t      iot;
 	bus_space_handle_t   ioh;
-	u_int32_t value;
+	uint32_t value;
 	int timeout;
 
 	iot = sc->sc_iot;
@@ -1584,23 +1509,22 @@ auixp_wait_for_codecs(struct auixp_softc *sc, const char *func)
 		timeout--;
 	} while (timeout > 0);
 
-	printf("%s: %s: timed out\n", func, sc->sc_dev.dv_xname);
+	printf("%s: %s: timed out\n", func, device_xname(&sc->sc_dev));
 	return -1;
 }
 
-void
+
+
+static void
 auixp_autodetect_codecs(struct auixp_softc *sc)
 {
 	bus_space_tag_t      iot;
 	bus_space_handle_t   ioh;
-	pcireg_t subdev;
 	struct auixp_codec  *codec;
 	int timeout, codec_nr;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
-	subdev = pci_conf_read(sc->sc_pct, sc->sc_tag, PCI_SUBSYS_ID_REG);
-
 	/* ATI IXP can have upto 3 codecs; mark all codecs as not existing */
 	sc->sc_codec_not_ready_bits = 0;
 	sc->sc_num_codecs = 0;
@@ -1621,7 +1545,7 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 	if (timeout == 0)
 		printf("%s: WARNING: timeout during codec detection; "
 			"codecs might be present but haven't interrupted\n",
-			sc->sc_dev.dv_xname);
+			device_xname(&sc->sc_dev));
 
 	/* disable all interrupts for now */
 	auixp_disable_interrupts(sc);
@@ -1641,25 +1565,15 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 		codec->host_if.write  = auixp_write_codec;
 		codec->host_if.reset  = auixp_reset_codec;
 		codec->host_if.flags  = auixp_flags_codec;
-		switch (subdev) {
-		case 0x1311462: /* MSI S270 */
-		case 0x1611462: /* LG K1 Express */
-		case 0x3511462: /* MSI L725 */
-		case 0x4711462: /* MSI L720 */
-		case 0x0611462: /* MSI S250 */
-			codec->codec_flags = AC97_HOST_ALC650_PIN47_IS_EAPD;
-			break;
-		}
 	}
 
 	if (!(sc->sc_codec_not_ready_bits & ATI_REG_ISR_CODEC0_NOT_READY)) {
 		/* codec 0 present */
 		DPRINTF(("auixp : YAY! codec 0 present!\n"));
-		if (ac97_attach(&sc->sc_codec[0].host_if) == 0)
+		if (ac97_attach(&sc->sc_codec[0].host_if, &sc->sc_dev) == 0)
 			sc->sc_num_codecs++;
 	}
 
-#ifdef notyet
 	if (!(sc->sc_codec_not_ready_bits & ATI_REG_ISR_CODEC1_NOT_READY)) {
 		/* codec 1 present */
 		DPRINTF(("auixp : YAY! codec 1 present!\n"));
@@ -1673,25 +1587,30 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 		if (ac97_attach(&sc->sc_codec[2].host_if, &sc->sc_dev) == 0)
 			sc->sc_num_codecs++;
 	}
-#endif
 
 	if (sc->sc_num_codecs == 0) {
-		printf("%s: no codecs detected or initialised\n",
-		    sc->sc_dev.dv_xname);
+		printf("%s: no codecs detected or "
+				"no codecs managed to initialise\n",
+				device_xname(&sc->sc_dev));
 		return;
 	}
+
 }
 
-void
+
+
+/* initialisation routines */
+
+static void
 auixp_disable_dma(struct auixp_softc *sc, struct auixp_dma *dma)
 {
 	bus_space_tag_t      iot;
 	bus_space_handle_t   ioh;
-	u_int32_t value;
+	uint32_t value;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
-	/* lets not stress the DMA engine more than necessary */
+	/* lets not stress the DMA engine more than nessisary */
 	value = bus_space_read_4(iot, ioh, ATI_REG_CMD);
 	if (value & dma->dma_enable_bit) {
 		value &= ~dma->dma_enable_bit;
@@ -1699,16 +1618,17 @@ auixp_disable_dma(struct auixp_softc *sc, struct auixp_dma *dma)
 	}
 }
 
-void
+
+static void
 auixp_enable_dma(struct auixp_softc *sc, struct auixp_dma *dma)
 {
 	bus_space_tag_t      iot;
 	bus_space_handle_t   ioh;
-	u_int32_t value;
+	uint32_t value;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
-	/* lets not stress the DMA engine more than necesssary */
+	/* lets not stress the DMA engine more than nessisary */
 	value = bus_space_read_4(iot, ioh, ATI_REG_CMD);
 	if (!(value & dma->dma_enable_bit)) {
 		value |= dma->dma_enable_bit;
@@ -1716,12 +1636,13 @@ auixp_enable_dma(struct auixp_softc *sc, struct auixp_dma *dma)
 	}
 }
 
-void
+
+static void
 auixp_reset_aclink(struct auixp_softc *sc)
 {
 	bus_space_tag_t      iot;
 	bus_space_handle_t   ioh;
-	u_int32_t value, timeout;
+	uint32_t value, timeout;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
@@ -1729,7 +1650,7 @@ auixp_reset_aclink(struct auixp_softc *sc)
 	/* if power is down, power it up */
 	value = bus_space_read_4(iot, ioh, ATI_REG_CMD);
 	if (value & ATI_REG_CMD_POWERDOWN) {
-		printf("%s: powering up\n", sc->sc_dev.dv_xname);
+		printf("%s: powering up\n", device_xname(&sc->sc_dev));
 
 		/* explicitly enable power */
 		value &= ~ATI_REG_CMD_POWERDOWN;
@@ -1739,7 +1660,7 @@ auixp_reset_aclink(struct auixp_softc *sc)
 		DELAY(20);
 	};
 
-	printf("%s: soft resetting aclink\n", sc->sc_dev.dv_xname);
+	printf("%s: soft resetting aclink\n", device_xname(&sc->sc_dev));
 
 	/* perform a soft reset */
 	value  = bus_space_read_4(iot, ioh, ATI_REG_CMD);
@@ -1760,7 +1681,7 @@ auixp_reset_aclink(struct auixp_softc *sc)
 	value = bus_space_read_4(iot, ioh, ATI_REG_CMD);
 	while (!(value & ATI_REG_CMD_ACLINK_ACTIVE)) {
 		printf("%s: not up; resetting aclink hardware\n",
-				sc->sc_dev.dv_xname);
+			device_xname(&sc->sc_dev));
 
 		/* dip aclink reset but keep the acsync */
 		value &= ~ATI_REG_CMD_AC_RESET;
@@ -1784,11 +1705,11 @@ auixp_reset_aclink(struct auixp_softc *sc)
 	};
 
 	if (timeout == 0) {
-		printf("%s: giving up aclink reset\n", sc->sc_dev.dv_xname);
+		printf("%s: giving up aclink reset\n", device_xname(&sc->sc_dev));
 	};
 	if (timeout != 10) {
 		printf("%s: aclink hardware reset successful\n",
-			sc->sc_dev.dv_xname);
+			device_xname(&sc->sc_dev));
 	};
 
 	/* assert reset and sync for safety */
@@ -1797,13 +1718,14 @@ auixp_reset_aclink(struct auixp_softc *sc)
 	bus_space_write_4(iot, ioh, ATI_REG_CMD, value);
 }
 
+
 /* chip hard init */
-int
+static int
 auixp_init(struct auixp_softc *sc)
 {
 	bus_space_tag_t      iot;
 	bus_space_handle_t   ioh;
-	u_int32_t value;
+	uint32_t value;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
@@ -1830,39 +1752,35 @@ auixp_init(struct auixp_softc *sc)
 	return 0;
 }
 
-#if 0
-void
-auixp_powerhook(int why, void *hdl)
+static bool
+auixp_resume(device_t dv PMF_FN_ARGS)
 {
-	struct auixp_softc *sc;
+	struct auixp_softc *sc = device_private(dv);
 
-	sc = (struct auixp_softc *)hdl;
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		auixp_suspend(sc);
-		break;
-	case PWR_RESUME:
-		auixp_resume(sc);
-/* XXX fix me XXX */
-		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
-		break;
+	auixp_reset_codec(sc);
+	delay(1000);
+	(sc->sc_codec[0].codec_if->vtbl->restore_ports)(sc->sc_codec[0].codec_if);
+
+	return true;
+}
+
+#ifdef DEBUG_AUIXP
+
+static void
+auixp_dumpreg(void)
+{
+	struct auixp_softc  *sc;
+	bus_space_tag_t      iot;
+	bus_space_handle_t   ioh;
+	int i;
+
+	sc  = static_sc;
+	iot = sc->sc_iot;
+	ioh = sc->sc_ioh;
+	printf("%s register dump:\n", device_xname(&sc->sc_dev));
+	for (i = 0; i < 256; i+=4) {
+		printf("\t0x%02x: 0x%08x\n", i, bus_space_read_4(iot, ioh, i));
 	}
+	printf("\n");
 }
-
-int
-auixp_suspend(struct auixp_softc *sc)
-{
-
-	/* XXX no power functions yet XXX */
-	return 0;
-}
-
-int
-auixp_resume(struct auixp_softc *sc)
-{
-
-	/* XXX no power functions yet XXX */
-	return 0;
-}
-#endif /* 0 */
+#endif

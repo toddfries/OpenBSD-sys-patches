@@ -1,5 +1,4 @@
-/*	$OpenBSD: mfm.c,v 1.4 2003/08/15 23:16:30 deraadt Exp $	*/
-/*	$NetBSD: mfm.c,v 1.4 2001/07/26 22:55:13 wiz Exp $	*/
+/*	$NetBSD: mfm.c,v 1.7 2006/06/08 07:03:11 he Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -43,12 +42,14 @@
  * - ???
  */
 
-#include "sys/param.h"
-#include "sys/reboot.h"
-#include "sys/disklabel.h"
+#include <sys/param.h>
+#include <sys/reboot.h>
+#include <sys/disklabel.h>
 
-#include "lib/libsa/stand.h"
-#include "lib/libsa/ufs.h"
+#include <lib/libsa/stand.h>
+#include <lib/libsa/ufs.h>
+
+#include <lib/libkern/libkern.h>
 
 #include "../include/pte.h"
 #include "../include/sid.h"
@@ -99,7 +100,7 @@ static int mfm_rdstrategy(void *f, int func, daddr_t dblk, size_t size, void *bu
  * instruction. Thus the loop-overhead will be enough...
  */
 static void
-sreg_read(void)
+sreg_read()
 {
 	int	i;
 	char    *p;
@@ -111,7 +112,7 @@ sreg_read(void)
 }
 
 static void
-creg_write(void)
+creg_write()
 {
 	int	i;
 	char    *p;
@@ -131,7 +132,7 @@ creg_write(void)
  * ready...
  */
 int
-mfm_rxprepare(void)
+mfm_rxprepare()
 {
 	int	error;
 
@@ -339,7 +340,8 @@ volatile struct mfm_xbn {
 } mfm_xbn;
 
 #ifdef verbose
-display_xbn(struct mfm_xbn *p)
+display_xbn(p)
+	struct mfm_xbn *p;
 {
 	printf("**DiskData**	XBNs: %d, DBNs: %d, LBNs: %d, RBNs: %d\n",
 	    p->xbn_count, p->dbn_count, p->lbn_count, p->rbn_count);
@@ -358,7 +360,9 @@ display_xbn(struct mfm_xbn *p)
 #endif
 
 int
-mfmopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
+mfmopen(f, adapt, ctlr, unit, part)
+	struct open_file *f;
+	int    ctlr, unit, part;
 {
 	char *msg;
 	struct disklabel *lp = &mfmlabel;
@@ -452,11 +456,13 @@ mfmopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 }
 
 int
-mfm_rxstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsize)
-{
+mfm_rxstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsize) {
 	struct mfm_softc *msc = f;
 	struct disklabel *lp;
 	int	block, sect, head, cyl, scount, res;
+	char *cbuf;
+
+	cbuf = (char*)buf;
 
 	lp = &mfmlabel;
 	block = (dblk < 0 ? 0 : dblk + lp->d_partitions[msc->part].p_offset);
@@ -513,7 +519,7 @@ mfm_rxstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *
 
 			mfm_rxprepare();
 			/* copy from buf */
-			bcopy(buf, (void *) 0x200D0000, *rsize);
+			bcopy(cbuf, (void *) 0x200D0000, *rsize);
 			res = mfm_command(DKC_CMD_WRITE_RX33);
 		} else {
 			creg.udc_rtcnt = UDC_RC_RX33READ;
@@ -525,12 +531,12 @@ mfm_rxstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *
 			bzero((void *) 0x200D0000, *rsize);
 			res = mfm_command(DKC_CMD_READ_RX33);
 			/* copy to buf */
-			bcopy((void *) 0x200D0000, buf, *rsize);
+			bcopy((void *) 0x200D0000, cbuf, *rsize);
 		}
 
 		scount -= *rsize / 512;
 		block += *rsize / 512;
-		(char *)buf += *rsize;
+		cbuf += *rsize;
 	}
 
 	*rsize = size;
@@ -538,11 +544,13 @@ mfm_rxstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *
 }
 
 int
-mfm_rdstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsize)
-{
+mfm_rdstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsize) {
 	struct mfm_softc *msc = f;
 	struct disklabel *lp;
 	int	block, sect, head, cyl, scount, cmd, res;
+	char *cbuf;
+
+	cbuf = (char *)buf;
 
 	lp = &mfmlabel;
 	block = (dblk < 0 ? 0 : dblk + lp->d_partitions[msc->part].p_offset);
@@ -602,7 +610,7 @@ mfm_rdstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *
 			creg.udc_term = UDC_TC_HDD;
 			cmd = DKC_CMD_WRITE_HDD;
 
-			bcopy(buf, (void *) 0x200D0000, *rsize);
+			bcopy(cbuf, (void *) 0x200D0000, *rsize);
 			res = mfm_command(cmd);
 		} else {
 			creg.udc_rtcnt = UDC_RC_HDD_READ;
@@ -612,12 +620,12 @@ mfm_rdstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *
 
 			bzero((void *) 0x200D0000, *rsize);
 			res = mfm_command(cmd);
-			bcopy((void *) 0x200D0000, buf, *rsize);
+			bcopy((void *) 0x200D0000, cbuf, *rsize);
 		}
 
 		scount -= *rsize / 512;
 		block += *rsize / 512;
-		(char *)buf += *rsize;
+		cbuf += *rsize;
 	}
 
 	/*
@@ -630,7 +638,12 @@ mfm_rdstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *
 }
 
 int
-mfmstrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsize)
+mfmstrategy(f, func, dblk, size, buf, rsize)
+	void *f;
+	int	func;
+	daddr_t	dblk;
+	void    *buf;
+	size_t	size, *rsize;
 {
 	struct mfm_softc *msc = f;
 	int	res = -1;

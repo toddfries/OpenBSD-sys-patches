@@ -1,4 +1,4 @@
-/*	$NetBSD: misc_stub.c,v 1.8 2008/04/11 15:24:48 ad Exp $	*/
+/*	$NetBSD: misc_stub.c,v 1.14 2008/11/19 12:20:40 ad Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -32,7 +32,6 @@
 #include <sys/sched.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
-#include <sys/module.h>
 #include <sys/cpu.h>
 #include <sys/evcnt.h>
 
@@ -45,9 +44,21 @@ int nbpg = 4096;
 #endif
 
 void
+yield(void)
+{
+
+	/*
+	 * Do nothing - doesn't really make sense as we're being
+	 * scheduled anyway.
+	 */
+	return;
+}
+
+void
 preempt()
 {
 
+	/* see yield */
 	return;
 }
 
@@ -58,64 +69,8 @@ knote(struct klist *list, long hint)
 	return;
 }
 
-/* not tonight, honey */
-int
-sysctl_createv(struct sysctllog **log, int cflags,
-	const struct sysctlnode **rnode, const struct sysctlnode **cnode,
-	int flags, int type, const char *namep, const char *desc,
-	sysctlfn func, u_quad_t qv, void *newp, size_t newlen, ...)
-{
-
-	return 0;
-}
-
-int
-sysctl_notavail(SYSCTLFN_ARGS)
-{
-
-	return EOPNOTSUPP;
-}
-
-int
-sysctl_lookup(SYSCTLFN_ARGS)
-{
-
-	return ENOSYS;
-}
-
-int
-sysctl_query(SYSCTLFN_ARGS)
-{
-
-	return ENOSYS;
-}
-
-void
-sysctl_lock(bool write)
-{
-
-}
-
-void
-sysctl_relock(void)
-{
-
-}
-
-void
-sysctl_unlock(void)
-{
-
-}
-
-void
-module_init_class(modclass_t mc)
-{
-
-}
-
 struct cpu_info *
-cpu_lookup_byindex(u_int index)
+cpu_lookup(u_int index)
 {
 	extern struct cpu_info rump_cpu;
 
@@ -125,6 +80,12 @@ cpu_lookup_byindex(u_int index)
 void
 evcnt_attach_dynamic(struct evcnt *ev, int type, const struct evcnt *parent,
     const char *group, const char *name)
+{
+
+}
+
+void
+evcnt_detach(struct evcnt *ev)
 {
 
 }

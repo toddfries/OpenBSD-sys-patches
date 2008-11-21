@@ -1,8 +1,7 @@
-/*	$OpenBSD: swap.h,v 1.4 2001/06/27 04:51:48 art Exp $	*/
-/*	$NetBSD: swap.h,v 1.2 1998/09/13 14:46:24 christos Exp $	*/
+/*	$NetBSD: swap.h,v 1.7 2008/05/29 14:51:27 mrg Exp $	*/
 
 /*
- * Copyright (c) 1995, 1996, 1998 Matthew R. Green, Tobias Weingartner
+ * Copyright (c) 1995, 1996, 1998 Matthew R. Green
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,36 +25,45 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* NOTE: This is the current swap.h from NetBSD.  Since we are "upgrading"
- * to the new vm_swap code now, we will not keep compatibility with the
- * old vm_swap code that was in NetBSD.  This means that we do not have
- * an oswapent structure, but instead use a "new" swapent structure, with
- * no overlay.
- *
- * --Toby.
- */
-
 #ifndef _SYS_SWAP_H_
 #define _SYS_SWAP_H_
 
 #include <sys/syslimits.h>
 
 /* These structures are used to return swap information for userland */
+
+/*
+ * NetBSD 1.3 swapctl(SWAP_STATS, ...) swapent structure; now used as an
+ * overlay for both the new swapent structure, and the hidden swapdev
+ * structure (see sys/uvm/uvm_swap.c).
+ */
+struct oswapent {
+	dev_t	ose_dev;		/* device id */
+	int	ose_flags;		/* flags */
+	int	ose_nblks;		/* total blocks */
+	int	ose_inuse;		/* blocks in use */
+	int	ose_priority;		/* priority of this device */
+};
+
 struct swapent {
-	dev_t	se_dev;			/* device id */
-	int	se_flags;		/* flags */
-	int	se_nblks;		/* total blocks */
-	int	se_inuse;		/* blocks in use */
-	int	se_priority;		/* priority of this device */
-	char	se_path[MAXPATHLEN];	/* path name */
+	struct oswapent se_ose;
+#define	se_dev		se_ose.ose_dev
+#define	se_flags	se_ose.ose_flags
+#define	se_nblks	se_ose.ose_nblks
+#define	se_inuse	se_ose.ose_inuse
+#define	se_priority	se_ose.ose_priority
+	char	se_path[PATH_MAX+1];	/* path name */
 };
 
 #define SWAP_ON		1		/* begin swapping on device */
-#define SWAP_OFF	2		/* (stop swapping on device) */
+#define SWAP_OFF	2		/* stop swapping on device */
 #define SWAP_NSWAP	3		/* how many swap devices ? */
-#define SWAP_STATS	4		/* get device info */
+#define SWAP_OSTATS	4		/* old SWAP_STATS, no se_path */
 #define SWAP_CTL	5		/* change priority on device */
-#define SWAP_DUMPDEV 	7		/* use this device as dump device */
+#define SWAP_STATS	6		/* get device info */
+#define SWAP_DUMPDEV	7		/* use this device as dump device */
+#define SWAP_GETDUMPDEV	8		/* use this device as dump device */
+#define SWAP_DUMPOFF	9		/* stop using the dump device */
 
 #define SWF_INUSE	0x00000001	/* in use: we have swapped here */
 #define SWF_ENABLE	0x00000002	/* enabled: we can swap here */

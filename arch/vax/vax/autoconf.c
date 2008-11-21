@@ -1,9 +1,6 @@
-/*	$OpenBSD: autoconf.c,v 1.29 2007/06/01 19:25:10 deraadt Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.45 1999/10/23 14:56:05 ragge Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.90 2008/03/11 05:34:03 matt Exp $	*/
 
 /*
- * Copyright (c) 1988 University of Utah.
- * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
  *
@@ -33,13 +30,22 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.90 2008/03/11 05:34:03 matt Exp $");
+
+#include "opt_compat_netbsd.h"
+#include "opt_cputype.h"
+
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/reboot.h>
-#include <sys/disklabel.h>
+#include <sys/disk.h>
+#include <sys/buf.h>
+#include <sys/bufq.h>
 #include <sys/conf.h>
+#include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -54,162 +60,178 @@
 #include <machine/ka650.h>
 #include <machine/clock.h>
 #include <machine/rpb.h>
-
-#include <dev/cons.h>
-
-#include "led.h"
+#include <machine/bus.h>
+#include <machine/mainbus.h>
 
 #include <vax/vax/gencons.h>
 
-#include <vax/bi/bireg.h>
+#include <dev/bi/bireg.h>
 
-void	dumpconf(void);	/* machdep.c */
+#include "locators.h"
+#include "ioconf.h"
+
 void	gencnslask(void);
 
-struct cpu_dep *dep_call;
+const struct cpu_dep *dep_call;
 
-int	mastercpu;	/* chief of the system */
-
-struct device *bootdv;
-int booted_partition;	/* defaults to 0 (aka 'a' partition */
+#define MAINBUS	0
 
 void
-cpu_configure()
+cpu_configure(void)
 {
+
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("mainbus not configured");
 
 	/*
 	 * We're ready to start up. Clear CPU cold start flag.
+	 * Soft cold-start flag will be cleared in configure().
 	 */
-	cold = 0;
-
 	if (dep_call->cpu_clrf) 
 		(*dep_call->cpu_clrf)();
 }
 
 void
-diskconf(void)
+cpu_rootconf(void)
 {
+	/*
+	 * The device we booted from are looked for during autoconfig.
+	 * If there has been a match, it's already been done.
+	 */
+
+#ifdef DEBUG
+	printf("booted from type %d unit %d csr 0x%lx adapter %lx slave %d\n",
+	    rpb.devtyp, rpb.unit, rpb.csrphy, rpb.adpphy, rpb.slave);
+#endif
 	printf("boot device: %s\n",
-	    bootdv ? bootdv->dv_xname : "<unknown>");
+	    booted_device ? device_xname(booted_device) : "<unknown>");
 
-	setroot(bootdv, booted_partition, RB_USERREQ);
-	dumpconf();
+	setroot(booted_device, booted_partition);
 }
 
-int	mainbus_print(void *, const char *);
-int	mainbus_match(struct device *, struct cfdata *, void *);
-void	mainbus_attach(struct device *, struct device *, void *);
+static int	mainbus_print(void *, const char *);
+static int	mainbus_match(device_t, cfdata_t, void *);
+static void	mainbus_attach(device_t, device_t, void *);
+
+extern struct vax_bus_space vax_mem_bus_space;
+extern struct vax_bus_dma_tag vax_bus_dma_tag;
 
 int
-mainbus_print(aux, hej)
-	void *aux;
-	const char *hej;
+mainbus_print(void *aux, const char *name)
 {
-	struct mainbus_attach_args *maa = aux;
-
-	if (maa->maa_bustype == VAX_LEDS)
-		return (QUIET);
-
-	if (hej) {
-		printf("nothing at %s", hej);
-	}
-	return (UNCONF);
+	struct mainbus_attach_args * const ma = aux;
+	if (name)
+		aprint_normal("%s at %s", ma->ma_type, name);
+	return UNCONF;
 }
 
 int
-mainbus_match(parent, cf, aux)
-	struct	device	*parent;
-	struct cfdata *cf;
-	void	*aux;
+mainbus_match(device_t parent, cfdata_t cf, void *aux)
 {
-	if (cf->cf_unit == 0 &&
-	    strcmp(cf->cf_driver->cd_name, "mainbus") == 0)
-		return 1; /* First (and only) mainbus */
-
-	return (0);
+	return 1; /* First (and only) mainbus */
 }
 
 void
-mainbus_attach(parent, self, hej)
-	struct	device	*parent, *self;
-	void	*hej;
+mainbus_attach(device_t parent, device_t self, void *aux)
 {
-	struct mainbus_attach_args maa;
+	struct mainbus_attach_args ma;
+	const char * const * devp;
 
-	printf("\n");
+	aprint_normal("\n");
 
-	maa.maa_bustype = vax_bustype;
-	config_found(self, &maa, mainbus_print);
-
-#if VAX53
-	/* These models have both vsbus and ibus */
-	if (vax_boardtype == VAX_BTYP_1303) {
-		maa.maa_bustype = VAX_VSBUS;
-		config_found(self, &maa, mainbus_print);
+	for (devp = dep_call->cpu_devs; *devp != NULL; devp++) {
+		ma.ma_type = *devp;
+		ma.ma_iot = &vax_mem_bus_space;
+		ma.ma_dmat = &vax_bus_dma_tag;
+		config_found(self, &ma, mainbus_print);
 	}
-#endif
 
-	if (dep_call->cpu_subconf)
-		(*dep_call->cpu_subconf)(self);
+	/*
+	 * Hopefully there a master bus?
+	 * Maybe should have this as master instead of mainbus.
+	 */
 
-#if NLED > 0
-	maa.maa_bustype = VAX_LEDS;
-	config_found(self, &maa, mainbus_print);
-#endif
+	if (dep_call->cpu_subconf != NULL)
+		(*dep_call->cpu_subconf)(self, &ma, mainbus_print);
 
-#if 1 /* boot blocks too old */
-        if (rpb.rpb_base == (void *)-1)
-                printf("\nWARNING: you must update your boot blocks.\n\n");
+
+#if defined(COMPAT_14)
+	if (rpb.rpb_base == (void *)-1)
+		printf("\nWARNING: you must update your boot blocks.\n\n");
 #endif
 
 }
 
-struct	cfattach mainbus_ca = {
-	sizeof(struct device), (cfmatch_t) mainbus_match, mainbus_attach
-};
+CFATTACH_DECL_NEW(mainbus, 0,
+    mainbus_match, mainbus_attach, NULL, NULL);
 
-struct  cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
-};
+static int	cpu_mainbus_match(device_t, cfdata_t, void *);
+static void	cpu_mainbus_attach(device_t, device_t, void *);
+
+int
+cpu_mainbus_match(device_t self, cfdata_t cf, void *aux)
+{
+	struct mainbus_attach_args *ma = aux;
+
+	return strcmp(cpu_cd.cd_name, ma->ma_type) == 0;
+}
+
+void
+cpu_mainbus_attach(device_t parent, device_t self, void *aux)
+{
+	struct cpu_info *ci;
+
+	KASSERT(device_private(self) == NULL);
+	ci = curcpu();
+	self->dv_private = ci;
+	ci->ci_dev = self;
+	ci->ci_cpuid = device_unit(self);
+
+	if (dep_call->cpu_attach_cpu != NULL)
+		(*dep_call->cpu_attach_cpu)(self);
+	else if (ci->ci_cpustr)
+		aprint_normal(": %s\n", ci->ci_cpustr);
+	else
+		aprint_normal("\n");
+}
+
+CFATTACH_DECL_NEW(cpu_mainbus, 0,
+    cpu_mainbus_match, cpu_mainbus_attach, NULL, NULL);
 
 #include "sd.h"
 #include "cd.h"
-#if NRL > 0
 #include "rl.h"
-#endif
 #include "ra.h"
 #include "hp.h"
-#if NRY > 0
 #include "ry.h"
-#endif
 
 static int ubtest(void *);
-static int jmfr(char *, struct device *, int);
-static int booted_qe(struct device *, void *);
-static int booted_le(struct device *, void *);
-static int booted_ze(struct device *, void *);
-static int booted_de(struct device *, void *);
-static int booted_ni(struct device *, void *);
+static int jmfr(const char *, device_t, int);
+static int booted_qe(device_t, void *);
+static int booted_qt(device_t, void *);
+static int booted_le(device_t, void *);
+static int booted_ze(device_t, void *);
+static int booted_de(device_t, void *);
+static int booted_ni(device_t, void *);
 #if NSD > 0 || NCD > 0
-static int booted_sd(struct device *, void *);
+static int booted_sd(device_t, void *);
 #endif
 #if NRL > 0
-static int booted_rl(struct device *, void *);
+static int booted_rl(device_t, void *);
 #endif
 #if NRA
-static int booted_ra(struct device *, void *);
+static int booted_ra(device_t, void *);
 #endif
 #if NHP
-static int booted_hp(struct device *, void *);
+static int booted_hp(device_t, void *);
 #endif
 #if NRD
-static int booted_rd(struct device *, void *);
+static int booted_rd(device_t, void *);
 #endif
 
-int (*devreg[])(struct device *, void *) = {
+int (* const devreg[])(device_t, void *) = {
 	booted_qe,
+	booted_qt,
 	booted_le,
 	booted_ze,
 	booted_de,
@@ -227,7 +249,7 @@ int (*devreg[])(struct device *, void *) = {
 	booted_hp,
 #endif
 #if NRD
-	booted_hd,
+	booted_rd,
 #endif
 	0,
 };
@@ -235,18 +257,17 @@ int (*devreg[])(struct device *, void *) = {
 #define	ubreg(x) ((x) & 017777)
 
 void
-device_register(struct device *dev, void *aux)
+device_register(device_t dev, void *aux)
 {
-	int (**dp)(struct device *, void *) = devreg;
+	int (* const * dp)(device_t, void *) = devreg;
 
 	/* If there's a synthetic RPB, we can't trust it */
 	if (rpb.rpb_base == (void *)-1)
 		return;
 
 	while (*dp) {
-		if ((*dp)(dev, aux)) {
-			if (bootdv == NULL)
-				bootdv = dev;
+		if ((**dp)(dev, aux)) {
+			booted_device = dev;
 			break;
 		}
 		dp++;
@@ -257,14 +278,14 @@ device_register(struct device *dev, void *aux)
  * Simple checks. Return 1 on fail.
  */
 int
-jmfr(char *n, struct device *dev, int nr)
+jmfr(const char *n, device_t dev, int nr)
 {
 	if (rpb.devtyp != nr)
 		return 1;
-	return strcmp(n, dev->dv_cfdata->cf_driver->cd_name);
+	return !device_is_a(dev, n);
 }
 
-#include <arch/vax/qbus/ubavar.h>
+#include <dev/qbus/ubavar.h>
 int
 ubtest(void *aux)
 {
@@ -277,9 +298,9 @@ ubtest(void *aux)
 }
 
 #if 1 /* NNI */
-#include <arch/vax/bi/bivar.h>
+#include <dev/bi/bivar.h>
 int
-booted_ni(struct device *dev, void *aux)
+booted_ni(device_t dev, void *aux)
 {
 	struct bi_attach_args *ba = aux;
 
@@ -292,7 +313,7 @@ booted_ni(struct device *dev, void *aux)
 
 #if 1 /* NDE */
 int
-booted_de(struct device *dev, void *aux)
+booted_de(device_t dev, void *aux)
 {
 
 	if (jmfr("de", dev, BDEV_DE) || ubtest(aux))
@@ -303,7 +324,7 @@ booted_de(struct device *dev, void *aux)
 #endif /* NDE */
 
 int
-booted_le(struct device *dev, void *aux)
+booted_le(device_t dev, void *aux)
 {
 	if (jmfr("le", dev, BDEV_LE))
 		return 0;
@@ -311,16 +332,25 @@ booted_le(struct device *dev, void *aux)
 }
 
 int
-booted_ze(struct device *dev, void *aux)
+booted_ze(device_t dev, void *aux)
 {
 	if (jmfr("ze", dev, BDEV_ZE))
 		return 0;
 	return 1;
 }
 
+int
+booted_qt(device_t dev, void *aux)
+{
+	if (jmfr("qt", dev, BDEV_QE) || ubtest(aux))
+		return 0;
+
+	return 1;
+}
+
 #if 1 /* NQE */
 int
-booted_qe(struct device *dev, void *aux)
+booted_qe(device_t dev, void *aux)
 {
 	if (jmfr("qe", dev, BDEV_QE) || ubtest(aux))
 		return 0;
@@ -330,35 +360,34 @@ booted_qe(struct device *dev, void *aux)
 #endif /* NQE */
 
 #if NSD > 0 || NCD > 0
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsipiconf.h>
 int
-booted_sd(struct device *dev, void *aux)
+booted_sd(device_t dev, void *aux)
 {
-	struct scsi_attach_args *sa = aux;
-	struct device *ppdev;
+	struct scsipibus_attach_args *sa = aux;
+	device_t ppdev;
 
 	/* Is this a SCSI device? */
-	if (jmfr("sd", dev, BDEV_SD) && jmfr("cd", dev, BDEV_SD) &&
-	    jmfr("sd", dev, BDEV_SDN) && jmfr("cd", dev, BDEV_SDN))
+	if (jmfr("sd", dev, BDEV_SD) && jmfr("sd", dev, BDEV_SDN) &&
+	    jmfr("cd", dev, BDEV_SD) && jmfr("cd", dev, BDEV_SDN))
 		return 0;
 
-#ifdef __NetBSD__
 	if (sa->sa_periph->periph_channel->chan_bustype->bustype_type !=
 	    SCSIPI_BUSTYPE_SCSI)
 		return 0; /* ``Cannot happen'' */
-#endif
 
-	if (sa->sa_sc_link->target != rpb.unit)
+	if (sa->sa_periph->periph_target != (rpb.unit/100) ||
+	    sa->sa_periph->periph_lun != (rpb.unit % 100))
 		return 0; /* Wrong unit */
 
-	ppdev = dev->dv_parent->dv_parent;
+	ppdev = device_parent(device_parent(dev));
 
 	/* VS3100 NCR 53C80 (si) & VS4000 NCR 53C94 (asc) */
-	if (((jmfr("ncr",  ppdev, BDEV_SD) == 0) ||	/* old name */
-	    (jmfr("asc", ppdev, BDEV_SD) == 0) ||
-	    (jmfr("asc", ppdev, BDEV_SDN) == 0)) &&
-	    (ppdev->dv_cfdata->cf_loc[0] == rpb.csrphy))
+	if ((jmfr("si",  ppdev, BDEV_SD) == 0 ||	/* new name */
+	     jmfr("asc", ppdev, BDEV_SD) == 0 ||
+	     jmfr("asc", ppdev, BDEV_SDN) == 0) &&
+	    (device_cfdata(ppdev)->cf_loc[VSBUSCF_CSR] == rpb.csrphy))
 			return 1;
 
 	return 0; /* Where did we come from??? */
@@ -367,7 +396,7 @@ booted_sd(struct device *dev, void *aux)
 #if NRL > 0
 #include <dev/qbus/rlvar.h>
 int
-booted_rl(struct device *dev, void *aux)
+booted_rl(device_t dev, void *aux)
 {
 	struct rlc_attach_args *raa = aux;
 	static int ub;
@@ -385,14 +414,14 @@ booted_rl(struct device *dev, void *aux)
 #endif
 
 #if NRA
-#include <arch/vax/mscp/mscp.h>
-#include <arch/vax/mscp/mscpreg.h>
-#include <arch/vax/mscp/mscpvar.h>
+#include <dev/mscp/mscp.h>
+#include <dev/mscp/mscpreg.h>
+#include <dev/mscp/mscpvar.h>
 int
-booted_ra(struct device *dev, void *aux)
+booted_ra(device_t dev, void *aux)
 {
 	struct drive_attach_args *da = aux;
-	struct mscp_softc *pdev = (void *)dev->dv_parent;
+	struct mscp_softc *pdev = (void *)device_parent(dev);
 	paddr_t ioaddr;
 
 	if (jmfr("ra", dev, BDEV_UDA))
@@ -411,7 +440,7 @@ booted_ra(struct device *dev, void *aux)
 #if NHP
 #include <vax/mba/mbavar.h>
 int
-booted_hp(struct device *dev, void *aux)
+booted_hp(device_t dev, void *aux)
 {
 	static int mbaaddr;
 
@@ -435,13 +464,13 @@ booted_hp(struct device *dev, void *aux)
 	return 1;
 }
 #endif
-#if NHD
+#if NRD
 int     
-booted_hd(struct device *dev, void *aux)
+booted_rd(device_t dev, void *aux)
 {
 	int *nr = aux; /* XXX - use the correct attach struct */
 
-	if (jmfr("hd", dev, BDEV_RD))
+	if (jmfr("rd", dev, BDEV_RD))
 		return 0;
 
 	if (*nr != rpb.unit)
@@ -450,22 +479,3 @@ booted_hd(struct device *dev, void *aux)
 	return 1;
 }
 #endif
-
-struct  ngcconf {
-        struct  cfdriver *ng_cf;
-        dev_t   ng_root;
-};
-
-struct nam2blk nam2blk[] = {
-	{ "ra",          9 },
-	{ "rx",         12 },
-#ifdef notyet
-	{ "rl",         14 },
-#endif
-	{ "hd",		19 },
-	{ "sd",         20 },
-	{ "cd",         22 },
-	{ "rd",         23 },
-	{ "raid",       25 },
-	{ NULL,		-1 }
-};

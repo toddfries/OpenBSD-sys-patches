@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.25 2007/11/16 16:16:06 deraadt Exp $	*/
-/*	$NetBSD: db_interface.c,v 1.22 1996/05/03 19:42:00 christos Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.62 2008/10/15 08:13:17 ad Exp $	*/
 
 /*
  * Mach Operating System
@@ -23,8 +22,8 @@
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
  *
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
  *
  *	db_interface.c,v 2.4 1991/02/05 17:11:13 mrt (CMU)
  */
@@ -32,75 +31,157 @@
 /*
  * Interface to new debugger.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.62 2008/10/15 08:13:17 ad Exp $");
+
+#include "opt_ddb.h"
+#include "opt_multiprocessor.h"
+
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/systm.h>
-#include <sys/mutex.h>
+#include <sys/atomic.h>
+#include <sys/simplelock.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
+#include <machine/cpufunc.h>
 #include <machine/db_machdep.h>
+#include <machine/cpuvar.h>
+#include <machine/i82093var.h>
+#include <machine/i82489reg.h>
+#include <machine/i82489var.h>
 
 #include <ddb/db_sym.h>
 #include <ddb/db_command.h>
 #include <ddb/db_extern.h>
 #include <ddb/db_access.h>
 #include <ddb/db_output.h>
-#include <ddb/db_run.h>
-#include <ddb/db_var.h>
+#include <ddb/ddbvar.h>
 
-#include "acpi.h"
-#if NACPI > 0
-#include <dev/acpi/acpidebug.h>
-#endif /* NACPI > 0 */
-
-extern label_t	*db_recover;
 extern char *trap_type[];
 extern int trap_types;
 
-#ifdef MULTIPROCESSOR
-extern volatile int ddb_state;
-boolean_t	 db_switch_cpu;
-long		 db_switch_to_cpu;
-#endif
-
-db_regs_t	ddb_regs;
 int	db_active = 0;
+db_regs_t ddb_regs;	/* register state */
+
+void db_mach_cpu (db_expr_t, bool, db_expr_t, const char *);
+
+const struct db_command db_machine_command_table[] = {
+#ifdef MULTIPROCESSOR
+	{ DDB_ADD_CMD("cpu",	db_mach_cpu,	0, NULL,NULL,NULL) },
+#endif
+		
+	{ DDB_ADD_CMD(NULL, NULL, 0,  NULL,NULL,NULL) },
+};
 
 void kdbprinttrap(int, int);
-void db_sysregs_cmd(db_expr_t, int, db_expr_t, char *);
 #ifdef MULTIPROCESSOR
-void db_cpuinfo_cmd(db_expr_t, int, db_expr_t, char *);
-void db_startproc_cmd(db_expr_t, int, db_expr_t, char *);
-void db_stopproc_cmd(db_expr_t, int, db_expr_t, char *);
-void db_ddbproc_cmd(db_expr_t, int, db_expr_t, char *);
-int db_cpuid2apic(int);
-#endif /* MULTIPROCESSOR */
+extern void ddb_ipi(int, struct trapframe);
+extern void ddb_ipi_tss(struct i386tss *);
+static void ddb_suspend(struct trapframe *);
+int ddb_vec;
+static bool ddb_mp_online;
+#endif
+
+db_regs_t *ddb_regp = 0;
+
+#define NOCPU -1
+
+int ddb_cpu = NOCPU;
+
+typedef void (vector)(void);
+extern vector Xintrddbipi;
+
+void
+db_machine_init()
+{
+
+#ifdef MULTIPROCESSOR
+	ddb_vec = idt_vec_alloc(0xf0, 0xff);
+	idt_vec_set(ddb_vec, &Xintrddbipi);
+#endif
+}
+
+#ifdef MULTIPROCESSOR
+
+__cpu_simple_lock_t db_lock;
+
+static int
+db_suspend_others(void)
+{
+	int cpu_me = cpu_number();
+	int win;
+
+	if (ddb_vec == 0)
+		return 1;
+
+	__cpu_simple_lock(&db_lock);
+	if (ddb_cpu == NOCPU)
+		ddb_cpu = cpu_me;
+	win = (ddb_cpu == cpu_me);
+	__cpu_simple_unlock(&db_lock);
+	if (win) {
+		x86_ipi(ddb_vec, LAPIC_DEST_ALLEXCL, LAPIC_DLMODE_FIXED);
+	}
+	ddb_mp_online = x86_mp_online;
+	x86_mp_online = false;
+	return win;
+}
+
+static void
+db_resume_others(void)
+{
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
+
+	x86_mp_online = ddb_mp_online;
+	__cpu_simple_lock(&db_lock);
+	ddb_cpu = NOCPU;
+	__cpu_simple_unlock(&db_lock);
+
+	for (CPU_INFO_FOREACH(cii, ci)) {
+		if (ci->ci_flags & CPUF_PAUSE)
+			atomic_and_32(&ci->ci_flags, ~CPUF_PAUSE);
+	}
+}
+
+#endif
 
 /*
  * Print trap reason.
  */
 void
-kdbprinttrap(int type, int code)
+kdbprinttrap(type, code)
+	int type, code;
 {
-	db_printf("kernel: ");
+	db_printf("kernel: %s trap ", (type & T_USER) ? "user" : "supervisor");
+	type &= ~T_USER;
 	if (type >= trap_types || type < 0)
 		db_printf("type %d", type);
 	else
 		db_printf("%s", trap_type[type]);
-	db_printf(" trap, code=%x\n", code);
+	db_printf(", code=%x\n", code);
 }
 
 /*
  *  kdb_trap - field a TRACE or BPT trap
  */
 int
-kdb_trap(int type, int code, db_regs_t *regs)
+kdb_trap(type, code, regs)
+	int type, code;
+	db_regs_t *regs;
 {
-	int s;
+	int s, flags;
+	db_regs_t dbreg;
+
+	flags = regs->tf_err & TC_FLAGMASK;
+	regs->tf_err &= ~TC_FLAGMASK;
 
 	switch (type) {
 	case T_BPTFLT:	/* breakpoint */
@@ -109,7 +190,7 @@ kdb_trap(int type, int code, db_regs_t *regs)
 	case -1:	/* keyboard interrupt */
 		break;
 	default:
-		if (!db_panic)
+		if (!db_onpanic && db_recover == 0)
 			return (0);
 
 		kdbprinttrap(type, code);
@@ -120,36 +201,45 @@ kdb_trap(int type, int code, db_regs_t *regs)
 	}
 
 #ifdef MULTIPROCESSOR
-	mtx_enter(&ddb_mp_mutex);
-	if (ddb_state == DDB_STATE_EXITING)
-		ddb_state = DDB_STATE_NOT_RUNNING;
-	mtx_leave(&ddb_mp_mutex);
-	while (db_enter_ddb()) {
-#endif /* MULTIPROCESSOR */
-
-	/* XXX Should switch to kdb`s own stack here. */
-
+	if (!db_suspend_others()) {
+		ddb_suspend(regs);
+	} else {
+	curcpu()->ci_ddb_regs = &dbreg;
+	ddb_regp = &dbreg;
+#endif
+	/* XXX Should switch to kdb's own stack here. */
 	ddb_regs = *regs;
-	if (KERNELMODE(regs->tf_cs, regs->tf_eflags)) {
+	if (!(flags & TC_TSS) && KERNELMODE(regs->tf_cs, regs->tf_eflags)) {
 		/*
 		 * Kernel mode - esp and ss not saved
 		 */
 		ddb_regs.tf_esp = (int)&regs->tf_esp;	/* kernel stack pointer */
-		__asm__("movw %%ss,%w0" : "=r" (ddb_regs.tf_ss));
+		ddb_regs.tf_ss = x86_getss();
 	}
 
+	ddb_regs.tf_cs &= 0xffff;
+	ddb_regs.tf_ds &= 0xffff;
+	ddb_regs.tf_es &= 0xffff;
+	ddb_regs.tf_fs &= 0xffff;
+	ddb_regs.tf_gs &= 0xffff;
+	ddb_regs.tf_ss &= 0xffff;
 	s = splhigh();
 	db_active++;
-	cnpollc(TRUE);
+	cnpollc(true);
 	db_trap(type, code);
-	cnpollc(FALSE);
+	cnpollc(false);
 	db_active--;
 	splx(s);
+#ifdef MULTIPROCESSOR
+	db_resume_others();
+	}
+#endif
+	ddb_regp = &dbreg;
 
-	regs->tf_fs     = ddb_regs.tf_fs & 0xffff;
-	regs->tf_gs     = ddb_regs.tf_gs & 0xffff;
-	regs->tf_es     = ddb_regs.tf_es & 0xffff;
-	regs->tf_ds     = ddb_regs.tf_ds & 0xffff;
+	regs->tf_gs     = ddb_regs.tf_gs;
+	regs->tf_fs     = ddb_regs.tf_fs;
+	regs->tf_es     = ddb_regs.tf_es;
+	regs->tf_ds     = ddb_regs.tf_ds;
 	regs->tf_edi    = ddb_regs.tf_edi;
 	regs->tf_esi    = ddb_regs.tf_esi;
 	regs->tf_ebp    = ddb_regs.tf_ebp;
@@ -158,211 +248,135 @@ kdb_trap(int type, int code, db_regs_t *regs)
 	regs->tf_ecx    = ddb_regs.tf_ecx;
 	regs->tf_eax    = ddb_regs.tf_eax;
 	regs->tf_eip    = ddb_regs.tf_eip;
-	regs->tf_cs     = ddb_regs.tf_cs & 0xffff;
+	regs->tf_cs     = ddb_regs.tf_cs;
 	regs->tf_eflags = ddb_regs.tf_eflags;
-	if (!KERNELMODE(regs->tf_cs, regs->tf_eflags)) {
+	if (!(flags & TC_TSS) && !KERNELMODE(regs->tf_cs, regs->tf_eflags)) {
 		/* ring transit - saved esp and ss valid */
 		regs->tf_esp    = ddb_regs.tf_esp;
-		regs->tf_ss     = ddb_regs.tf_ss & 0xffff;
+		regs->tf_ss     = ddb_regs.tf_ss;
 	}
 
+#ifdef TRAPLOG
+	wrmsr(MSR_DEBUGCTLMSR, 0x1);
+#endif
 
-#ifdef MULTIPROCESSOR
-		if (!db_switch_cpu)
-			ddb_state = DDB_STATE_EXITING;
-	}
-#endif /* MULTIPROCESSOR */
 	return (1);
 }
 
 void
-db_sysregs_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+cpu_Debugger()
 {
-	int64_t idtr, gdtr;
-	uint32_t cr;
-	uint16_t ldtr, tr;
-
-	__asm__ __volatile__("sidt %0" : "=m" (idtr));
-	db_printf("idtr:   0x%08x/%04x\n",
-	    (unsigned int)(idtr >> 16), idtr & 0xffff);
-
-	__asm__ __volatile__("sgdt %0" : "=m" (gdtr));
-	db_printf("gdtr:   0x%08x/%04x\n",
-	    (unsigned int)(gdtr >> 16), gdtr & 0xffff);
-
-	__asm__ __volatile__("sldt %0" : "=g" (ldtr));
-	db_printf("ldtr:   0x%04x\n", ldtr);
-
-	__asm__ __volatile__("str %0" : "=g" (tr));
-	db_printf("tr:     0x%04x\n", tr);
-
-	__asm__ __volatile__("movl %%cr0,%0" : "=r" (cr));
-	db_printf("cr0:    0x%08x\n", cr);
-
-	__asm__ __volatile__("movl %%cr2,%0" : "=r" (cr));
-	db_printf("cr2:    0x%08x\n", cr);
-
-	__asm__ __volatile__("movl %%cr3,%0" : "=r" (cr));
-	db_printf("cr3:    0x%08x\n", cr);
-
-	__asm__ __volatile__("movl %%cr4,%0" : "=r" (cr));
-	db_printf("cr4:    0x%08x\n", cr);
+	breakpoint();
 }
 
 #ifdef MULTIPROCESSOR
-int
-db_cpuid2apic(int id)
-{
-	int apic;
 
-	for (apic = 0; apic < MAXCPUS; apic++) {
-		if (cpu_info[apic] != NULL &&
-		    cpu_info[apic]->ci_dev.dv_unit == id)
-			return (apic);
-	}
-	return (-1);
+/*
+ * Called when we receive a debugger IPI (inter-processor interrupt).
+ * As with trap() in trap.c, this function is called from an assembly
+ * language IDT gate entry routine which prepares a suitable stack frame,
+ * and restores this frame after the exception has been processed. Note
+ * that the effect is as if the arguments were passed call by reference.
+ */
+void
+ddb_ipi(int cpl, struct trapframe frame)
+{
+
+	ddb_suspend(&frame);
 }
 
 void
-db_cpuinfo_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+ddb_ipi_tss(struct i386tss *tss)
 {
-	int i;
+	struct trapframe tf;
 
-	for (i = 0; i < MAXCPUS; i++) {
-		if (cpu_info[i] != NULL) {
-			db_printf("%c%4d: ", (i == cpu_number()) ? '*' : ' ',
-			    cpu_info[i]->ci_dev.dv_unit);
-			switch(cpu_info[i]->ci_ddb_paused) {
-			case CI_DDB_RUNNING:
-				db_printf("running\n");
-				break;
-			case CI_DDB_SHOULDSTOP:
-				db_printf("stopping\n");
-				break;
-			case CI_DDB_STOPPED:
-				db_printf("stopped\n");
-				break;
-			case CI_DDB_ENTERDDB:
-				db_printf("entering ddb\n");
-				break;
-			case CI_DDB_INDDB:
-				db_printf("ddb\n");
-				break;
-			default:
-				db_printf("? (%d)\n",
-				    cpu_info[i]->ci_ddb_paused);
-				break;
-			}
+	tf.tf_gs = tss->tss_gs;
+	tf.tf_fs = tss->tss_fs;
+	tf.tf_es = tss->__tss_es;
+	tf.tf_ds = tss->__tss_ds;
+	tf.tf_edi = tss->__tss_edi;
+	tf.tf_esi = tss->__tss_esi;
+	tf.tf_ebp = tss->tss_ebp;
+	tf.tf_ebx = tss->__tss_ebx;
+	tf.tf_edx = tss->__tss_edx;
+	tf.tf_ecx = tss->__tss_ecx;
+	tf.tf_eax = tss->__tss_eax;
+	tf.tf_trapno = 0;
+	tf.tf_err = TC_TSS;
+	tf.tf_eip = tss->__tss_eip;
+	tf.tf_cs = tss->__tss_cs;
+	tf.tf_eflags = tss->__tss_eflags;
+	tf.tf_esp = tss->tss_esp;
+	tf.tf_ss = tss->__tss_ss;
+
+	ddb_suspend(&tf);
+}
+
+static void
+ddb_suspend(struct trapframe *frame)
+{
+	volatile struct cpu_info *ci = curcpu();
+	db_regs_t regs;
+	int flags;
+
+	regs = *frame;
+	flags = regs.tf_err & TC_FLAGMASK;
+	regs.tf_err &= ~TC_FLAGMASK;
+	if (!(flags & TC_TSS) && KERNELMODE(regs.tf_cs, regs.tf_eflags)) {
+		/*
+		 * Kernel mode - esp and ss not saved
+		 */
+		regs.tf_esp = (int)&frame->tf_esp; /* kernel stack pointer */
+		regs.tf_ss = x86_getss();
+	}
+
+	ci->ci_ddb_regs = &regs;
+
+	atomic_or_32(&ci->ci_flags, CPUF_PAUSE);
+	while (ci->ci_flags & CPUF_PAUSE)
+		;
+	ci->ci_ddb_regs = 0;
+	tlbflushg();
+}
+
+
+extern void cpu_debug_dump(void); /* XXX */
+
+void
+db_mach_cpu(
+	db_expr_t	addr,
+	bool		have_addr,
+	db_expr_t	count,
+	const char *	modif)
+{
+	struct cpu_info *ci;
+	if (!have_addr) {
+		cpu_debug_dump();
+		return;
+	}
+
+	if (addr < 0) {
+		db_printf("%ld: CPU out of range\n", addr);
+		return;
+	}
+	ci = cpu_lookup(addr);
+	if (ci == NULL) {
+		db_printf("CPU %ld not configured\n", addr);
+		return;
+	}
+	if (ci != curcpu()) {
+		if (!(ci->ci_flags & CPUF_PAUSE)) {
+			db_printf("CPU %ld not paused\n", addr);
+			return;
 		}
 	}
-}
-
-void
-db_startproc_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	int apic;
-
-	if (have_addr) {
-		apic = db_cpuid2apic(addr);
-		if (apic >= 0 && apic < MAXCPUS &&
-		    cpu_info[apic] != NULL && apic != cpu_number())
-			db_startcpu(apic);
-		else
-			db_printf("Invalid cpu %d\n", (int)addr);
-	} else {
-		for (apic = 0; apic < MAXCPUS; apic++) {
-			if (cpu_info[apic] != NULL && apic != cpu_number()) {
-				db_startcpu(apic);
-			}
-		}
+	if (ci->ci_ddb_regs == 0) {
+		db_printf("CPU %ld has no saved regs\n", addr);
+		return;
 	}
+	db_printf("using CPU %ld", addr);
+	ddb_regp = ci->ci_ddb_regs;
 }
 
-void
-db_stopproc_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	int apic;
 
-	if (have_addr) {
-		apic = db_cpuid2apic(addr);
-		if (apic >= 0 && apic < MAXCPUS &&
-		    cpu_info[apic] != NULL && apic != cpu_number())
-			db_stopcpu(apic);
-		else
-			db_printf("Invalid cpu %d\n", (int)addr);
-	} else {
-		for (apic = 0; apic < MAXCPUS; apic++) {
-			if (cpu_info[apic] != NULL && apic != cpu_number()) {
-				db_stopcpu(apic);
-			}
-		}
-	}
-}
-
-void
-db_ddbproc_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	int apic;
-
-	if (have_addr) {
-		apic = db_cpuid2apic(addr);
-		if (apic >= 0 && apic < MAXCPUS &&
-		    cpu_info[apic] != NULL && apic != cpu_number()) {
-			db_stopcpu(apic);
-			db_switch_to_cpu = apic;
-			db_switch_cpu = 1;
-			db_cmd_loop_done = 1;
-		} else {
-			db_printf("Invalid cpu %d\n", (int)addr);
-		}
-	} else {
-		db_printf("CPU not specified\n");
-	}
-}
-#endif /* MULTIPROCESSOR */
-
-#if NACPI > 0
-struct db_command db_acpi_cmds[] = {
-	{ "disasm",	db_acpi_disasm,		CS_OWN,	NULL },
-	{ "showval",	db_acpi_showval,	CS_OWN,	NULL },
-	{ "tree",	db_acpi_tree,		0,	NULL },
-	{ "trace",	db_acpi_trace,		0,	NULL },
-	{ NULL,		NULL,			0,	NULL }
-};
-#endif /* NACPI > 0 */
-
-struct db_command db_machine_command_table[] = {
-	{ "sysregs",	db_sysregs_cmd,		0,	0 },
-#ifdef MULTIPROCESSOR
-	{ "cpuinfo",	db_cpuinfo_cmd,		0,	0 },
-	{ "startcpu",	db_startproc_cmd,	0,	0 },
-	{ "stopcpu",	db_stopproc_cmd,	0,	0 },
-	{ "ddbcpu",	db_ddbproc_cmd,		0,	0 },
-#endif /* MULTIPROCESSOR */
-#if NACPI > 0
-	{ "acpi",	NULL,			0,	db_acpi_cmds },
-#endif /* NACPI > 0 */
-	{ (char *)0, }
-};
-
-void
-db_machine_init(void)
-{
-#ifdef MULTIPROCESSOR
-	int i;
-#endif /* MULTIPROCESSOR */
-
-	db_machine_commands_install(db_machine_command_table);
-#ifdef MULTIPROCESSOR
-	for (i = 0; i < MAXCPUS; i++) {
-		if (cpu_info[i] != NULL)
-			cpu_info[i]->ci_ddb_paused = CI_DDB_RUNNING;
-	}
-#endif /* MULTIPROCESSOR */
-}
-
-void
-Debugger(void)
-{
-	__asm__("int $3");
-}
+#endif

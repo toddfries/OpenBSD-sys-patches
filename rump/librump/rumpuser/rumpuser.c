@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser.c,v 1.14 2008/03/11 10:50:16 pooka Exp $	*/
+/*	$NetBSD: rumpuser.c,v 1.22 2008/11/18 12:39:35 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -45,33 +45,23 @@
 
 
 #include <sys/param.h>
-#include <sys/types.h>
 #include <sys/ioctl.h>
-#include <sys/queue.h>
-#include <sys/stat.h>
-#include <sys/time.h>
+#include <sys/uio.h>
 
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
-#include "rumpuser.h"
+#include <rump/rumpuser.h>
 
-#define DOCALL(rvtype, call)						\
-do {									\
-	rvtype rv;							\
-	rv = call;							\
-	if (rv == -1)							\
-		*error = errno;						\
-	else								\
-		*error = 0;						\
-	return rv;							\
-} while (/*CONSTCOND*/0)
+#include "rumpuser_int.h"
 
 int
 rumpuser_stat(const char *path, struct stat *sb, int *error)
@@ -88,10 +78,11 @@ rumpuser_lstat(const char *path, struct stat *sb, int *error)
 }
 
 int
-rumpuser_usleep(unsigned long sec, int *error)
+rumpuser_nanosleep(const struct timespec *rqtp, struct timespec *rmtp, 
+		   int *error)
 {
 
-	DOCALL(int, (usleep(sec)));
+	DOCALL_KLOCK(int, (nanosleep(rqtp, rmtp)));
 }
 
 void *
@@ -144,7 +135,7 @@ int
 rumpuser_ioctl(int fd, u_long cmd, void *data, int *error)
 {
 
-	DOCALL(int, (ioctl(fd, cmd, data)));
+	DOCALL_KLOCK(int, (ioctl(fd, cmd, data)));
 }
 
 int
@@ -158,7 +149,7 @@ int
 rumpuser_fsync(int fd, int *error)
 {
 
-	DOCALL(int, fsync(fd));
+	DOCALL_KLOCK(int, fsync(fd));
 }
 
 ssize_t
@@ -166,7 +157,7 @@ rumpuser_read(int fd, void *data, size_t size, int *error)
 {
 	ssize_t rv;
 
-	rv = read(fd, data, size);
+	KLOCK_WRAP(rv = read(fd, data, size));
 	if (rv == -1)
 		*error = errno;
 
@@ -178,7 +169,19 @@ rumpuser_pread(int fd, void *data, size_t size, off_t offset, int *error)
 {
 	ssize_t rv;
 
-	rv = pread(fd, data, size, offset);
+	KLOCK_WRAP(rv = pread(fd, data, size, offset));
+	if (rv == -1)
+		*error = errno;
+
+	return rv;
+}
+
+ssize_t 
+rumpuser_readv(int fd, const struct iovec *iov, int iovcnt, int *error)
+{
+	ssize_t rv;
+
+	KLOCK_WRAP(rv = readv(fd, iov, iovcnt));
 	if (rv == -1)
 		*error = errno;
 
@@ -187,17 +190,18 @@ rumpuser_pread(int fd, void *data, size_t size, off_t offset, int *error)
 
 void
 rumpuser_read_bio(int fd, void *data, size_t size, off_t offset,
-	void *biodonecookie)
+	rump_biodone_fn biodone, void *biodonecookie)
 {
 	ssize_t rv;
 	int error = 0;
 
-	rv = rumpuser_pread(fd, data, size, offset, &error);
+	KLOCK_WRAP(rv = rumpuser_pread(fd, data, size, offset, &error));
 	/* check against <0 instead of ==-1 to get typing below right */
 	if (rv < 0)
 		rv = 0;
 		
-	rump_biodone(biodonecookie, rv, error);
+	/* LINTED: see above */
+	biodone(biodonecookie, rv, error);
 }
 
 ssize_t
@@ -205,7 +209,7 @@ rumpuser_write(int fd, const void *data, size_t size, int *error)
 {
 	ssize_t rv;
 
-	rv = write(fd, data, size);
+	KLOCK_WRAP(rv = write(fd, data, size));
 	if (rv == -1)
 		*error = errno;
 
@@ -217,7 +221,19 @@ rumpuser_pwrite(int fd, const void *data, size_t size, off_t offset, int *error)
 {
 	ssize_t rv;
 
-	rv = pwrite(fd, data, size, offset);
+	KLOCK_WRAP(rv = pwrite(fd, data, size, offset));
+	if (rv == -1)
+		*error = errno;
+
+	return rv;
+}
+
+ssize_t 
+rumpuser_writev(int fd, const struct iovec *iov, int iovcnt, int *error)
+{
+	ssize_t rv;
+
+	KLOCK_WRAP(rv = writev(fd, iov, iovcnt));
 	if (rv == -1)
 		*error = errno;
 
@@ -226,17 +242,18 @@ rumpuser_pwrite(int fd, const void *data, size_t size, off_t offset, int *error)
 
 void
 rumpuser_write_bio(int fd, const void *data, size_t size, off_t offset,
-	void *biodonecookie)
+	rump_biodone_fn biodone, void *biodonecookie)
 {
 	ssize_t rv;
 	int error = 0;
 
-	rv = rumpuser_pwrite(fd, data, size, offset, &error);
+	KLOCK_WRAP(rv = rumpuser_pwrite(fd, data, size, offset, &error));
 	/* check against <0 instead of ==-1 to get typing below right */
 	if (rv < 0)
 		rv = 0;
 
-	rump_biodone(biodonecookie, rv, error);
+	/* LINTED: see above */
+	biodone(biodonecookie, rv, error);
 }
 
 int
@@ -295,10 +312,11 @@ rumpuser_realpath(const char *path, char resolvedname[MAXPATHLEN], int *error)
 	return rv;
 }
 
-void
-rumpuser_yield(void)
+int
+rumpuser_poll(struct pollfd *fds, int nfds, int timeout, int *error)
 {
 
+	DOCALL_KLOCK(int, (poll(fds, (nfds_t)nfds, timeout)));
 }
 
 #ifdef __linux__

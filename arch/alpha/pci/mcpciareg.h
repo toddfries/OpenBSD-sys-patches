@@ -1,4 +1,3 @@
-/* $OpenBSD: mcpciareg.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcpciareg.h,v 1.7 2006/05/17 21:32:59 drochner Exp $ */
 
 /*

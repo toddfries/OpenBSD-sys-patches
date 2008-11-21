@@ -1,4 +1,4 @@
-/*	$NetBSD: ipsec_mbuf.c,v 1.7 2005/12/11 12:25:05 christos Exp $	*/
+/*	$NetBSD: ipsec_mbuf.c,v 1.11 2008/04/23 06:09:05 thorpej Exp $	*/
 /*-
  * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
  * All rights reserved.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ipsec_mbuf.c,v 1.7 2005/12/11 12:25:05 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ipsec_mbuf.c,v 1.11 2008/04/23 06:09:05 thorpej Exp $");
 
 /*
  * IPsec-specific mbuf routines.
@@ -48,6 +48,7 @@ __KERNEL_RCSID(0, "$NetBSD: ipsec_mbuf.c,v 1.7 2005/12/11 12:25:05 christos Exp 
 
 #include <netipsec/ipsec.h>
 #include <netipsec/ipsec_var.h>
+#include <netipsec/ipsec_private.h>
 
 #include <netipsec/ipsec_osdep.h>
 #include <net/net_osdep.h>
@@ -90,12 +91,12 @@ m_clone(struct mbuf *m0)
 			if (mprev && (mprev->m_flags & M_EXT) &&
 			    m->m_len <= M_TRAILINGSPACE(mprev)) {
 				/* XXX: this ignores mbuf types */
-				memcpy(mtod(mprev, caddr_t) + mprev->m_len,
-				       mtod(m, caddr_t), m->m_len);
+				memcpy(mtod(mprev, char *) + mprev->m_len,
+				       mtod(m, char *), m->m_len);
 				mprev->m_len += m->m_len;
 				mprev->m_next = m->m_next;	/* unlink from chain */
 				m_free(m);			/* reclaim mbuf */
-				newipsecstat.ips_mbcoalesced++;
+				IPSEC_STATINC(IPSEC_STAT_MBCOALESCED);
 			} else {
 				mprev = m;
 			}
@@ -124,12 +125,12 @@ m_clone(struct mbuf *m0)
 		if (mprev != NULL && (mprev->m_flags & M_EXT) &&
 		    m->m_len <= M_TRAILINGSPACE(mprev)) {
 			/* XXX: this ignores mbuf types */
-			memcpy(mtod(mprev, caddr_t) + mprev->m_len,
-			       mtod(m, caddr_t), m->m_len);
+			memcpy(mtod(mprev, char *) + mprev->m_len,
+			       mtod(m, char *), m->m_len);
 			mprev->m_len += m->m_len;
 			mprev->m_next = m->m_next;	/* unlink from chain */
 			m_free(m);			/* reclaim mbuf */
-			newipsecstat.ips_clcoalesced++;
+			IPSEC_STATINC(IPSEC_STAT_CLCOALESCED);
 			continue;
 		}
 
@@ -177,12 +178,12 @@ m_clone(struct mbuf *m0)
 		mlast = NULL;
 		for (;;) {
 			int cc = min(len, MCLBYTES);
-			memcpy(mtod(n, caddr_t), mtod(m, caddr_t) + off, cc);
+			memcpy(mtod(n, char *), mtod(m, char *) + off, cc);
 			n->m_len = cc;
 			if (mlast != NULL)
 				mlast->m_next = n;
 			mlast = n;
-			newipsecstat.ips_clcopied++;
+			IPSEC_STATINC(IPSEC_STAT_CLCOPIED);
 
 			len -= cc;
 			if (len <= 0)
@@ -238,75 +239,76 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 	 */
 	remain = m->m_len - skip;		/* data to move */
 	if (hlen > M_TRAILINGSPACE(m)) {
-		struct mbuf *n;
+		struct mbuf *n0, *n, **np;
+		int todo, len, done, alloc;
 
-		/* XXX code doesn't handle clusters XXX */
-		IPSEC_ASSERT(remain < MLEN,
-			("m_makespace: remainder too big: %u", remain));
-		/*
-		 * Not enough space in m, split the contents
-		 * of m, inserting new mbufs as required.
-		 *
-		 * NB: this ignores mbuf types.
-		 */
-		MGET(n, M_DONTWAIT, MT_DATA);
-		if (n == NULL)
-			return (NULL);
-		n->m_next = m->m_next;		/* splice new mbuf */
-		m->m_next = n;
-		newipsecstat.ips_mbinserted++;
+		n0 = NULL;
+		np = &n0;
+		alloc = 0;
+		done = 0;
+		todo = remain;
+		while (todo > 0) {
+			if (todo > MHLEN) {
+				n = m_getcl(M_DONTWAIT, m->m_type, 0);
+				len = MCLBYTES;
+			}
+			else {
+				n = m_get(M_DONTWAIT, m->m_type);
+				len = MHLEN;
+			}
+			if (n == NULL) {
+				m_freem(n0);
+				return NULL;
+			}
+			*np = n;
+			np = &n->m_next;
+			alloc++;
+			len = min(todo, len);
+			memcpy(n->m_data, mtod(m, char *) + skip + done, len);
+			n->m_len = len;
+			done += len;
+			todo -= len;
+		}
+
 		if (hlen <= M_TRAILINGSPACE(m) + remain) {
-			/*
-			 * New header fits in the old mbuf if we copy
-			 * the remainder; just do the copy to the new
-			 * mbuf and we're good to go.
-			 */
-			memcpy(mtod(n, caddr_t),
-			       mtod(m, caddr_t) + skip, remain);
-			n->m_len = remain;
 			m->m_len = skip + hlen;
 			*off = skip;
-		} else {
-			/*
-			 * No space in the old mbuf for the new header.
-			 * Make space in the new mbuf and check the
-			 * remainder'd data fits too.  If not then we
-			 * must allocate an additional mbuf (yech).
-			 */
-			n->m_len = 0;
-			if (remain + hlen > M_TRAILINGSPACE(n)) {
-				struct mbuf *n2;
-
-				MGET(n2, M_DONTWAIT, MT_DATA);
-				/* NB: new mbuf is on chain, let caller free */
-				if (n2 == NULL)
-					return (NULL);
-				n2->m_len = 0;
-				memcpy(mtod(n2, caddr_t),
-				       mtod(m, caddr_t) + skip, remain);
-				n2->m_len = remain;
-				/* splice in second mbuf */
-				n2->m_next = n->m_next;
-				n->m_next = n2;
-				newipsecstat.ips_mbinserted++;
-			} else {
-				memcpy(mtod(n, caddr_t) + hlen,
-				       mtod(m, caddr_t) + skip, remain);
-				n->m_len += remain;
+			if (n0 != NULL) {
+				*np = m->m_next;
+				m->m_next = n0;
 			}
-			m->m_len -= remain;
-			n->m_len += hlen;
+		}
+		else {
+			n = m_get(M_DONTWAIT, m->m_type);
+			if (n == NULL) {
+				m_freem(n0);
+				return NULL;
+			}
+			alloc++;
+
+			if ((n->m_next = n0) == NULL)
+				np = &n->m_next;
+			n0 = n;
+
+			*np = m->m_next;
+			m->m_next = n0;
+
+			n->m_len = hlen;
+			m->m_len = skip;
+
 			m = n;			/* header is at front ... */
 			*off = 0;		/* ... of new mbuf */
 		}
+
+		IPSEC_STATADD(IPSEC_STAT_MBINSERTED, alloc);
 	} else {
 		/*
 		 * Copy the remainder to the back of the mbuf
 		 * so there's space to write the new header.
 		 */
 		/* XXX can this be memcpy? does it handle overlap? */
-		ovbcopy(mtod(m, caddr_t) + skip,
-			mtod(m, caddr_t) + skip + hlen, remain);
+		ovbcopy(mtod(m, char *) + skip,
+			mtod(m, char *) + skip + hlen, remain);
 		m->m_len += hlen;
 		*off = skip;
 	}
@@ -319,12 +321,12 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
  * length is updated, and a pointer to the first byte of the padding
  * (which is guaranteed to be all in one mbuf) is returned.
  */
-caddr_t
+void *
 m_pad(struct mbuf *m, int n)
 {
 	register struct mbuf *m0, *m1;
 	register int len, pad;
-	caddr_t retval;
+	void *retval;
 
 	if (n <= 0) {  /* No stupid arguments. */
 		DPRINTF(("m_pad: pad length invalid (%d)\n", n));
@@ -405,7 +407,7 @@ m_striphdr(struct mbuf *m, int skip, int hlen)
 	/* Remove the header and associated data from the mbuf. */
 	if (roff == 0) {
 		/* The header was at the beginning of the mbuf */
-		newipsecstat.ips_input_front++;
+		IPSEC_STATINC(IPSEC_STAT_INPUT_FRONT);
 		m_adj(m1, hlen);
 		if ((m1->m_flags & M_PKTHDR) == 0)
 			m->m_pkthdr.len -= hlen;
@@ -417,7 +419,7 @@ m_striphdr(struct mbuf *m, int skip, int hlen)
 		 * so first let's remove the remainder of the header from
 		 * the beginning of the remainder of the mbuf chain, if any.
 		 */
-		newipsecstat.ips_input_end++;
+		IPSEC_STATINC(IPSEC_STAT_INPUT_END);
 		if (roff + hlen > m1->m_len) {
 			/* Adjust the next mbuf by the remainder */
 			m_adj(m1->m_next, roff + hlen - m1->m_len);
@@ -442,7 +444,7 @@ m_striphdr(struct mbuf *m, int skip, int hlen)
 		 * The header lies in the "middle" of the mbuf; copy
 		 * the remainder of the mbuf down over the header.
 		 */
-		newipsecstat.ips_input_middle++;
+		IPSEC_STATINC(IPSEC_STAT_INPUT_MIDDLE);
 		ovbcopy(mtod(m1, u_char *) + roff + hlen,
 		      mtod(m1, u_char *) + roff,
 		      m1->m_len - (roff + hlen));
@@ -461,12 +463,12 @@ m_checkalignment(const char* where, struct mbuf *m0, int off, int len)
 {
 	int roff;
 	struct mbuf *m = m_getptr(m0, off, &roff);
-	caddr_t addr;
+	void *addr;
 
 	if (m == NULL)
 		return;
 	printf("%s (off %u len %u): ", where, off, len);
-	addr = mtod(m, caddr_t) + roff;
+	addr = mtod(m, char *) + roff;
 	do {
 		int mlen;
 
@@ -483,9 +485,9 @@ m_checkalignment(const char* where, struct mbuf *m0, int off, int len)
 			break;
 		}
 		m = m->m_next;
-		addr = m ? mtod(m, caddr_t) : NULL;
+		addr = m ? mtod(m, void *) : NULL;
 	} while (m && len > 0);
 	for (m = m0; m; m = m->m_next)
-		printf(" [%p:%u]", mtod(m, caddr_t), m->m_len);
+		printf(" [%p:%u]", mtod(m, void *), m->m_len);
 	printf("\n");
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.4 2003/06/02 23:27:44 millert Exp $	*/
-/*	$NetBSD: devopen.c,v 1.3 1997/04/06 08:41:25 cgd Exp $	*/
+/* $NetBSD: devopen.c,v 1.6 2005/12/11 12:16:20 christos Exp $ */
 
 /*-
  * Copyright (c) 1992, 1993
@@ -41,6 +40,7 @@
  * Decode the string 'fname', open the device and return the remaining
  * file name if any.
  */
+int
 devopen(f, fname, file)
 	struct open_file *f;
 	const char *fname;
@@ -49,7 +49,9 @@ devopen(f, fname, file)
 	register char *cp;
 	register char *ncp;
 	register struct devsw *dp;
+#if 0
 	register int c, i;
+#endif
 	int ctlr = 0, unit = 0, part = 0;
 	char namebuf[20];
 	int rc;
@@ -86,6 +88,10 @@ devopen(f, fname, file)
 			cp++;
 		}
 		*ncp = '\0';
+	/*
+	 * XXX
+	 * pulling strchr from the C library, should pull from libkern.
+	 */
 	} else if (strchr(cp, '(')) {
 		/* expect a string like 'rz(0,0,0)vmunix' */
 		while ((c = *cp) != '\0') {

@@ -1,3 +1,4 @@
+/*	$NetBSD: if_nfevar.h,v 1.9 2008/04/20 08:57:37 cube Exp $	*/
 /*	$OpenBSD: if_nfevar.h,v 1.13 2007/12/05 08:30:33 jsg Exp $	*/
 
 /*-
@@ -37,7 +38,7 @@ struct nfe_tx_ring {
 };
 
 struct nfe_jbuf {
-	caddr_t			buf;
+	void			*buf;
 	bus_addr_t		physaddr;
 	SLIST_ENTRY(nfe_jbuf)	jnext;
 };
@@ -55,25 +56,27 @@ struct nfe_rx_ring {
 	bus_addr_t		physaddr;
 	struct nfe_desc32	*desc32;
 	struct nfe_desc64	*desc64;
-	caddr_t			jpool;
+	void			*jpool;
 	struct nfe_rx_data	data[NFE_RX_RING_COUNT];
 	struct nfe_jbuf		jbuf[NFE_JPOOL_COUNT];
+	int			jbufmap[NFE_RX_RING_COUNT];
 	SLIST_HEAD(, nfe_jbuf)	jfreelist;
 	int			bufsz;
 	int			cur;
 	int			next;
+	kmutex_t		mtx;
 };
 
 struct nfe_softc {
-	struct device		sc_dev;
-	struct arpcom		sc_arpcom;
+	device_t		sc_dev;
+	struct ethercom		sc_ethercom;
+	uint8_t			sc_enaddr[ETHER_ADDR_LEN];
 	bus_space_handle_t	sc_memh;
 	bus_space_tag_t		sc_memt;
 	void			*sc_ih;
 	bus_dma_tag_t		sc_dmat;
 	struct mii_data		sc_mii;
-	struct timeout		sc_tick_ch;
-	void			*sc_powerhook;
+	struct callout		sc_tick_ch;
 
 	int			sc_if_flags;
 	u_int			sc_flags;

@@ -1,4 +1,4 @@
-/*	$NetBSD: ether_bpf.c,v 1.4 2005/12/11 12:17:49 christos Exp $	*/
+/*	$NetBSD: ether_bpf.c,v 1.9 2007/12/05 22:50:00 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1998
@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <sys/ioctl.h>
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <net/bpf.h>
@@ -125,15 +126,15 @@ int EtherInit(ha)
 	}
 
 	kvm_read(kvm, nl[0].n_value, &ifh, sizeof(struct ifnet_head));
-	ifp = ifh.tqh_first;
+	ifp = TAILQ_FIRST(&ifh);
 	while (ifp) {
 		struct ifnet ifnet;
 		kvm_read(kvm, (u_long)ifp, &ifnet, sizeof(struct ifnet));
 		if (!strcmp(ifnet.if_xname, BPF_IFNAME)) {
-			ifap = ifnet.if_addrlist.tqh_first;
+			ifap = IFADDR_FIRST(&ifnet);
 			break;
 		}
-		ifp = ifnet.if_list.tqe_next;
+		ifp = IFNET_NEXT(&ifnet);
 	}
 	if (!ifp) {
 		warnx("interface not found");
@@ -141,7 +142,7 @@ int EtherInit(ha)
 		return (0);
 	}
 
-#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
+#define _offsetof(t, m) ((int)((void *)&((t *)0)->m))
 	sdllen = _offsetof(struct sockaddr_dl,
 			   sdl_data[0]) + strlen(BPF_IFNAME) + 6;
 	sdlp = malloc(sdllen);
@@ -151,10 +152,10 @@ int EtherInit(ha)
 		kvm_read(kvm, (u_long)ifap, &ifaddr, sizeof(struct ifaddr));
 		kvm_read(kvm, (u_long)ifaddr.ifa_addr, sdlp, sdllen);
 		if (sdlp->sdl_family == AF_LINK) {
-			memcpy(ha, LLADDR(sdlp), 6);
+			memcpy(ha, CLLADDR(sdlp), 6);
 			break;
 		}
-		ifap = ifaddr.ifa_list.tqe_next;
+		ifap = IFADDR_NEXT(&ifaddr);
 	}
 	free(sdlp);
 	kvm_close(kvm);

@@ -1,53 +1,14 @@
-#	$OpenBSD: Makefile,v 1.34 2007/11/25 18:25:31 deraadt Exp $
+# $NetBSD: Makefile,v 1.7 2006/11/14 14:03:12 drochner Exp $
 
-.include "${.CURDIR}/../Makefile.inc"
+SUBDIR= biosboot
 
-MAN=	boot.8
-MLINKS=	boot.8 boot.conf.5
+LIBOBJ= ${.OBJDIR}
+.MAKEOVERRIDES+= LIBOBJ
 
-.if ${MACHINE} == "i386"
-PROG=	boot
-LD?=	ld
-SIZE?=	size
-LDFLAGS+=-nostdlib -Bstatic
+.include <bsd.subdir.mk>
+.include <bsd.obj.mk>
 
-.if defined(DEBUGFLAGS) && !empty(DEBUGFLAGS:M-D_TEST)
-CLEANFILES+=	srt0.o
-SRCS=	crt0.c
-.else
-LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
-CLEANFILES+=	crt0.o
-SRCS=	srt0.S
-.endif
+cleandir distclean: cleanlibdir
 
-SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c
-S	=${.CURDIR}/../../../..
-SADIR=	${.CURDIR}/..
-
-LDADD=	${LIBSA} ${LIBZ}
-DPADD=	${LIBSA} ${LIBZ}
-
-.PATH:	${S}/stand/boot
-
-.PATH:	${S}/lib/libkern/arch/i386 ${S}/lib/libkern
-SRCS+=	strlcpy.c moddi3.c divdi3.c qdivrem.c
-
-boot.bin: boot
-	objcopy -v -O binary ${PROG} boot.bin
-
-${PROG}: $(OBJS) $(DPADD)
-	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS) $(LDADD)
-	@$(SIZE) ${PROG}
-
-.else
-NOPROG=
-.endif
-
-.include <bsd.prog.mk>
-
-CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS}
-CPPFLAGS+=-DLINKADDR=${LINKADDR}
-CFLAGS+=$(SACFLAGS)
-#AFLAGS+=-Wa,-R
-# AFLAGS+=-Wa,-a
-
+cleanlibdir:
+	-rm -rf lib

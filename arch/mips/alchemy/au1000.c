@@ -1,4 +1,4 @@
-/* $NetBSD: au1000.c,v 1.5 2006/07/13 22:56:01 gdamore Exp $ */
+/* $NetBSD: au1000.c,v 1.7 2007/02/28 04:21:52 thorpej Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -201,13 +201,13 @@ static struct au_chipdep au1000_chipdep = {
 	au1000_irqnames,
 };
 
-boolean_t
+bool
 au1000_match(struct au_chipdep **cpp)
 {
 
 	if (MIPS_PRID_COPTS(cpu_id) == MIPS_AU1000) {
 		*cpp = &au1000_chipdep;
-		return TRUE;
+		return true;
 	}
-	return FALSE;
+	return false;
 }

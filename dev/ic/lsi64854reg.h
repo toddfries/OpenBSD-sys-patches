@@ -1,5 +1,4 @@
-/*	$OpenBSD: lsi64854reg.h,v 1.3 2006/05/29 20:40:03 miod Exp $	*/
-/*	$NetBSD: lsi64854reg.h,v 1.5 2001/03/29 02:58:39 petrov Exp $ */
+/*	$NetBSD: lsi64854reg.h,v 1.6 2008/04/28 20:23:50 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -130,13 +122,13 @@
 #define D_ESC_BURST	0x00000800	/* DMA ESC: 16 byte bursts */
 #define D_ESC_AUTODRAIN	0x00040000	/* DMA ESC: Auto-drain */
 
-#define DDMACSR_BITS	"\020"				\
-	"\01INT\02ERR\03DR1\04DR2\05IEN"		\
-	"\07SLVERR\010RST\011WRITE\012ENDMA"		\
-	"\016ENCNT\017TC\021DSBL_CSR_DRN"		\
-	"\022DSBL_SCSI_DRN\026TWOCYCLE"			\
-	"\027FASTER\030TCIDIS\031ENNXT\032DMAON"	\
-	"\033ALOADED\034NALOADED"
+#define DDMACSR_BITS	"\177\020"				\
+	"b\00INT\0b\01ERR\0f\02\02DRAINING\0b\04IEN\0"		\
+	"b\06SLVERR\0b\07RST\0b\10WRITE\0b\11ENDMA\0"		\
+	"b\15ENCNT\0b\16TC\0\b\20DSBL_CSR_DRN\0"		\
+	"b\21DSBL_SCSI_DRN\0f\22\2BURST\0b\25TWOCYCLE\0"	\
+	"b\26FASTER\0b\27TCIDIS\0b\30ENNXT\0b\031DMAON\0"	\
+	"b\32ALOADED\0b\33NALOADED\0"
 
 
 /*
@@ -164,12 +156,12 @@
 #define E_reserved4	0x0c800000	/* */
 #define E_DEV_ID	L64854_DEVID	/* ID bits */
 
-#define EDMACSR_BITS	"\020"				\
-	"\01INT\02ERR\05IEN"				\
-	"\07SLVERR\010RST\011WRITE\013DRAIN"		\
-	"\014DSBL_WR_DRN\015DSBL_RD_DRN\020ILACC"	\
-	"\021DSBL_BUF_WR\022DSBL_WR_INVAL"		\
-	"\026LOOPTEST\027TP"
+#define EDMACSR_BITS	"\177\020"				\
+	"b\00INT\0b\01ERR\0f\02\02DRAINING\0b\04IEN\0"		\
+	"b\06SLVERR\0b\07RST\0b\10WRITE\0b\12DRAIN\0"		\
+	"b\13DSBL_WR_DRN\0b\14DSBL_RD_DRN\0b\17ILACC\0"		\
+	"b\20DSBL_BUF_WR\0b\21DSBL_WR_INVAL\0"			\
+	"b\25LOOPTEST\0b\26TP\0"
 
 /*
  * PP DMA control bits.
@@ -197,8 +189,8 @@
 #define P_NA_LOADED	0x08000000	/* next addr & count valid but not used */
 #define P_DEV_ID	L64854_DEVID	/* ID bits */
 
-#define PDMACSR_BITS	"\020"				\
-	"\01INT\02ERR\05IEN"				\
-	"\07SLVERR\010RST\011WRITE\012ENDMA"		\
-	"\016ENCNT\017TC\025DIAG\030TCIDIS"		\
-	"\031ENNXT\032DMAON\033ALOADED\034NALOADED"
+#define PDMACSR_BITS	"\177\020"				\
+	"b\00INT\0b\01ERR\0f\02\02DRAINING\0b\04IEN\0"		\
+	"b\06SLVERR\0b\07RST\0b\10WRITE\0b\11ENDMA\0"		\
+	"b\15ENCNT\0b\16TC\0\b\24DIAG\0b\27TCIDIS\0"		\
+	"b\30ENNXT\0b\031DMAON\0b\32ALOADED\0b\33NALOADED\0"

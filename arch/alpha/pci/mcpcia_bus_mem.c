@@ -1,4 +1,3 @@
-/* $OpenBSD: mcpcia_bus_mem.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcpcia_bus_mem.c,v 1.3 2000/06/29 08:58:47 mrg Exp $ */
 
 /*
@@ -32,6 +31,9 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(1, "$NetBSD: mcpcia_bus_mem.c,v 1.3 2000/06/29 08:58:47 mrg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -84,9 +86,4 @@
 #define	CHIP_S_MEM_W2_SYS_END(v)					\
 	(CHIP_S_MEM_W1_SYS_START(v) + ((CHIP_S_MEM_W2_BUS_END(v) + 1) << 5) - 1)
 
-#define CHIP_EXTENT_DNAME(v)		((struct mcpcia_config *)(v))->pc_mem_dex_name
-#define CHIP_EXTENT_SNAME(v)		((struct mcpcia_config *)(v))->pc_mem_sex_name
-#define CHIP_EXTENT_DSTORAGE(v)		((struct mcpcia_config *)(v))->pc_mem_dex_storage
-#define CHIP_EXTENT_SSTORAGE(v)		((struct mcpcia_config *)(v))->pc_mem_sex_storage
-
-#include "alpha/pci/pci_swiz_bus_mem_chipdep.c"
+#include <alpha/pci/pci_swiz_bus_mem_chipdep.c>

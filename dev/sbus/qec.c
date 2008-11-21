@@ -1,5 +1,4 @@
-/*	$OpenBSD: qec.c,v 1.12 2007/09/11 13:39:34 gilles Exp $	*/
-/*	$NetBSD: qec.c,v 1.12 2000/12/04 20:12:55 fvdl Exp $ */
+/*	$NetBSD: qec.c,v 1.39 2008/04/28 20:23:57 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +29,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: qec.c,v 1.39 2008/04/28 20:23:57 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -45,43 +39,36 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 #include <machine/autoconf.h>
 
 #include <dev/sbus/sbusvar.h>
 #include <dev/sbus/qecreg.h>
 #include <dev/sbus/qecvar.h>
 
-int	qecprint(void *, const char *);
-int	qecmatch(struct device *, void *, void *);
-void	qecattach(struct device *, struct device *, void *);
-void	qec_init(struct qec_softc *);
+static int	qecprint(void *, const char *);
+static int	qecmatch(struct device *, struct cfdata *, void *);
+static void	qecattach(struct device *, struct device *, void *);
+void		qec_init(struct qec_softc *);
 
-int	qec_bus_map(
+static int qec_bus_map(
 		bus_space_tag_t,
-		bus_space_tag_t,
-		bus_addr_t,		/*offset*/
+		bus_addr_t,		/*coded slot+offset*/
 		bus_size_t,		/*size*/
 		int,			/*flags*/
+		vaddr_t,		/*preferred virtual address */
 		bus_space_handle_t *);
-void *	qec_intr_establish(
-		bus_space_tag_t,
+static void *qec_intr_establish(
 		bus_space_tag_t,
 		int,			/*bus interrupt priority*/
 		int,			/*`device class' interrupt level*/
-		int,			/*flags*/
 		int (*)(void *),	/*handler*/
 		void *,			/*arg*/
-		const char *);		/*what*/
+		void (*)(void));	/*optional fast trap handler*/
 
-struct cfattach qec_ca = {
-	sizeof(struct qec_softc), qecmatch, qecattach
-};
-
-struct cfdriver qec_cd = {
-	NULL, "qec", DV_DULL
-};
+CFATTACH_DECL(qec, sizeof(struct qec_softc),
+    qecmatch, qecattach, NULL, NULL);
 
 int
 qecprint(aux, busname)
@@ -99,15 +86,14 @@ qecprint(aux, busname)
 }
 
 int
-qecmatch(parent, vcf, aux)
+qecmatch(parent, cf, aux)
 	struct device *parent;
-	void *vcf;
+	struct cfdata *cf;
 	void *aux;
 {
-	struct cfdata *cf = vcf;
 	struct sbus_attach_args *sa = aux;
 
-	return (strcmp(cf->cf_driver->cd_name, sa->sa_name) == 0);
+	return (strcmp(cf->cf_name, sa->sa_name) == 0);
 }
 
 /*
@@ -122,7 +108,7 @@ qecattach(parent, self, aux)
 	struct qec_softc *sc = (void *)self;
 	int node;
 	int sbusburst;
-	struct sparc_bus_space_tag *sbt;
+	bus_space_tag_t sbt;
 	bus_space_handle_t bh;
 	int error;
 
@@ -132,14 +118,16 @@ qecattach(parent, self, aux)
 
 	if (sa->sa_nreg < 2) {
 		printf("%s: only %d register sets\n",
-			self->dv_xname, sa->sa_nreg);
+			device_xname(self), sa->sa_nreg);
 		return;
 	}
 
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
-	    sa->sa_reg[0].sbr_offset, sa->sa_reg[0].sbr_size,
-	    0, 0, &sc->sc_regs) != 0) {
-		printf("%s: attach: cannot map registers\n", self->dv_xname);
+	if (sbus_bus_map(sa->sa_bustag,
+			 sa->sa_reg[0].oa_space,
+			 sa->sa_reg[0].oa_base,
+			 sa->sa_reg[0].oa_size,
+			 0, &sc->sc_regs) != 0) {
+		aprint_error_dev(self, "attach: cannot map registers\n");
 		return;
 	}
 
@@ -148,16 +136,19 @@ qecattach(parent, self, aux)
 	 * Lance ring-buffers can be stored. Note the buffer's location
 	 * and size, so the child driver can pick them up.
 	 */
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[1].sbr_slot,
-	    sa->sa_reg[1].sbr_offset, sa->sa_reg[1].sbr_size, 0, 0, &bh) != 0) {
-		printf("%s: attach: cannot map registers\n", self->dv_xname);
+	if (sbus_bus_map(sa->sa_bustag,
+			 sa->sa_reg[1].oa_space,
+			 sa->sa_reg[1].oa_base,
+			 sa->sa_reg[1].oa_size,
+			 BUS_SPACE_MAP_LINEAR, &bh) != 0) {
+		aprint_error_dev(self, "attach: cannot map registers\n");
 		return;
 	}
-	sc->sc_buffer = (caddr_t)bus_space_vaddr(sc->sc_bustag, bh);
-	sc->sc_bufsiz = (bus_size_t)sa->sa_reg[1].sbr_size;
+	sc->sc_buffer = (void *)bus_space_vaddr(sa->sa_bustag, bh);
+	sc->sc_bufsiz = (bus_size_t)sa->sa_reg[1].oa_size;
 
 	/* Get number of on-board channels */
-	sc->sc_nchannels = getpropint(node, "#channels", -1);
+	sc->sc_nchannels = prom_getpropint(node, "#channels", -1);
 	if (sc->sc_nchannels == -1) {
 		printf(": no channels\n");
 		return;
@@ -170,7 +161,7 @@ qecattach(parent, self, aux)
 	if (sbusburst == 0)
 		sbusburst = SBUS_BURST_32 - 1; /* 1->16 */
 
-	sc->sc_burst = getpropint(node, "burst-sizes", -1);
+	sc->sc_burst = prom_getpropint(node, "burst-sizes", -1);
 	if (sc->sc_burst == -1)
 		/* take SBus burst sizes */
 		sc->sc_burst = sbusburst;
@@ -178,33 +169,30 @@ qecattach(parent, self, aux)
 	/* Clamp at parent's burst sizes */
 	sc->sc_burst &= sbusburst;
 
+	sbus_establish(&sc->sc_sd, &sc->sc_dev);
+
+	/* Allocate a bus tag */
+	sbt = bus_space_tag_alloc(sc->sc_bustag, sc);
+	if (sbt == NULL) {
+		aprint_error_dev(self, "attach: out of memory\n");
+		return;
+	}
+
+	sbt->sparc_bus_map = qec_bus_map;
+	sbt->sparc_intr_establish = qec_intr_establish;
+
 	/*
 	 * Collect address translations from the OBP.
 	 */
-	error = getprop(node, "ranges", sizeof(struct sbus_range),
-			 &sc->sc_nrange, (void **)&sc->sc_range);
+	error = prom_getprop(node, "ranges", sizeof(struct openprom_range),
+			 &sbt->nranges, &sbt->ranges);
 	switch (error) {
 	case 0:
 		break;
 	case ENOENT:
 	default:
-		panic("%s: error getting ranges property", self->dv_xname);
+		panic("%s: error getting ranges property", device_xname(self));
 	}
-
-	/* Allocate a bus tag */
-	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sbt == NULL) {
-		printf("%s: attach: out of memory\n", self->dv_xname);
-		return;
-	}
-
-	strlcpy(sbt->name, sc->sc_dev.dv_xname, sizeof(sbt->name));
-	sbt->cookie = sc;
-	sbt->parent = sc->sc_bustag;
-	sbt->asi = sbt->parent->asi;
-	sbt->sasi = sbt->parent->sasi;
-	sbt->sparc_bus_map = qec_bus_map;
-	sbt->sparc_intr_establish = qec_intr_establish;
 
 	/*
 	 * Save interrupt information for use in our qec_intr_establish()
@@ -223,71 +211,40 @@ qecattach(parent, self, aux)
 
 	/* search through children */
 	for (node = firstchild(node); node; node = nextsibling(node)) {
-		struct sbus_attach_args sa;
-
+		struct sbus_attach_args sax;
 		sbus_setup_attach_args((struct sbus_softc *)parent,
-				       sbt, sc->sc_dmatag, node, &sa);
-		(void)config_found(&sc->sc_dev, (void *)&sa, qecprint);
-		sbus_destroy_attach_args(&sa);
+				       sbt, sc->sc_dmatag, node, &sax);
+		(void)config_found(&sc->sc_dev, (void *)&sax, qecprint);
+		sbus_destroy_attach_args(&sax);
 	}
 }
 
 int
-qec_bus_map(t, t0, addr, size, flags, hp)
+qec_bus_map(t, ba, size, flags, va, hp)
 	bus_space_tag_t t;
-	bus_space_tag_t t0;
-	bus_addr_t addr;
+	bus_addr_t ba;
 	bus_size_t size;
 	int	flags;
+	vaddr_t va;	/* Ignored */
 	bus_space_handle_t *hp;
 {
-	struct qec_softc *sc = t->cookie;
-	int slot = BUS_ADDR_IOSPACE(addr);
-	bus_addr_t offset = BUS_ADDR_PADDR(addr);
-	int i;
+	int error;
 
-	for (t = t->parent; t; t = t->parent) {
-		if (t->sparc_bus_map != NULL)
-			break;
-	}
+	if ((error = bus_space_translate_address_generic(
+				t->ranges, t->nranges, &ba)) != 0)
+		return (error);
 
-        if (t == NULL) {
-                printf("\nqec_bus_map: invalid parent");
-                return (EINVAL);
-        }
-
-        if (flags & BUS_SPACE_MAP_PROMADDRESS) {
-                return ((*t->sparc_bus_map)
-                    (t, t0, offset, size, flags, hp));
-        }
-
-	for (i = 0; i < sc->sc_nrange; i++) {
-		bus_addr_t paddr;
-		int iospace;
-
-		if (sc->sc_range[i].cspace != slot)
-			continue;
-
-		/* We've found the connection to the parent bus */
-		paddr = sc->sc_range[i].poffset + offset;
-		iospace = sc->sc_range[i].pspace;
-                return ((*t->sparc_bus_map)
-                    (t, t0, BUS_ADDR(iospace, paddr), size, flags, hp));
-	}
-
-	return (EINVAL);
+	return (bus_space_map(t->parent, ba, size, flags, hp));
 }
 
 void *
-qec_intr_establish(t, t0, pri, level, flags, handler, arg, what)
+qec_intr_establish(t, pri, level, handler, arg, fastvec)
 	bus_space_tag_t t;
-	bus_space_tag_t t0;
 	int pri;
 	int level;
-	int flags;
 	int (*handler)(void *);
 	void *arg;
-	const char *what;
+	void (*fastvec)(void);	/* ignored */
 {
 	struct qec_softc *sc = t->cookie;
 
@@ -298,21 +255,13 @@ qec_intr_establish(t, t0, pri, level, flags, handler, arg, what)
 		 */
 		if (sc->sc_intr == NULL) {
 			printf("%s: warning: no interrupts\n",
-				sc->sc_dev.dv_xname);
+				device_xname(&sc->sc_dev));
 			return (NULL);
 		}
-		pri = sc->sc_intr->sbi_pri;
+		pri = sc->sc_intr->oi_pri;
 	}
 
-	for (t = t->parent; t; t = t->parent) {
-		if (t->sparc_intr_establish != NULL)
-			return ((*t->sparc_intr_establish)
-			    (t, t0, pri, level, flags, handler, arg, what));
-	}
-
-	panic("qec_intr_extablish): no handler found");
-
-	return (NULL);
+	return (bus_intr_establish(t->parent, pri, level, handler, arg));
 }
 
 void
@@ -370,7 +319,7 @@ qec_meminit(qr, pktbufsz)
 {
 	bus_addr_t txbufdma, rxbufdma;
 	bus_addr_t dma;
-	caddr_t p;
+	void *p;
 	unsigned int ntbuf, nrbuf, i;
 
 	p = qr->rb_membase;
@@ -384,7 +333,7 @@ qec_meminit(qr, pktbufsz)
 	 */
 	qr->rb_txd = (struct qec_xd *)p;
 	qr->rb_txddma = dma;
-	p += QEC_XD_RING_MAXSIZE * sizeof(struct qec_xd);
+	p = (char *)p + QEC_XD_RING_MAXSIZE * sizeof(struct qec_xd);
 	dma += QEC_XD_RING_MAXSIZE * sizeof(struct qec_xd);
 
 	/*
@@ -392,7 +341,7 @@ qec_meminit(qr, pktbufsz)
 	 */
 	qr->rb_rxd = (struct qec_xd *)p;
 	qr->rb_rxddma = dma;
-	p += QEC_XD_RING_MAXSIZE * sizeof(struct qec_xd);
+	p = (char *)p + QEC_XD_RING_MAXSIZE * sizeof(struct qec_xd);
 	dma += QEC_XD_RING_MAXSIZE * sizeof(struct qec_xd);
 
 
@@ -401,7 +350,7 @@ qec_meminit(qr, pktbufsz)
 	 */
 	qr->rb_txbuf = p;
 	txbufdma = dma;
-	p += ntbuf * pktbufsz;
+	p = (char *)p + ntbuf * pktbufsz;
 	dma += ntbuf * pktbufsz;
 
 	/*
@@ -409,7 +358,7 @@ qec_meminit(qr, pktbufsz)
 	 */
 	qr->rb_rxbuf = p;
 	rxbufdma = dma;
-	p += nrbuf * pktbufsz;
+	p = (char *)p + nrbuf * pktbufsz;
 	dma += nrbuf * pktbufsz;
 
 	/*

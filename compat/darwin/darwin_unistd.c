@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_unistd.c,v 1.7 2005/12/11 12:19:56 christos Exp $ */
+/*	$NetBSD: darwin_unistd.c,v 1.11 2008/04/28 20:23:41 martin Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,13 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_unistd.c,v 1.7 2005/12/11 12:19:56 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_unistd.c,v 1.11 2008/04/28 20:23:41 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
-#include <sys/sa.h>
 #include <sys/endian.h>
 #include <sys/syscallargs.h>
 
@@ -56,12 +48,8 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_unistd.c,v 1.7 2005/12/11 12:19:56 christos E
 #include <compat/darwin/darwin_syscallargs.h>
 
 int
-darwin_sys_lseek(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+darwin_sys_lseek(struct lwp *l, const struct darwin_sys_lseek_args *uap, register_t *retval)
 {
-	struct darwin_sys_lseek_args *uap = v;
 	struct sys_lseek_args cup;
 	union {
 		off_t o;

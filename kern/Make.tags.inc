@@ -1,4 +1,6 @@
-#	$OpenBSD: Make.tags.inc,v 1.12 2007/06/10 02:27:14 uwe Exp $
+#	$NetBSD: Make.tags.inc,v 1.18 2008/01/28 18:22:36 dyoung Exp $
+#
+#	from: @(#)Make.tags.inc	8.1 (Berkeley) 6/11/93
 
 # Common files for "make tags".
 # Included by the Makefile for each architecture.
@@ -7,25 +9,13 @@
 # there is a struct tag with the same name (eg., vmmeter).  The real
 # solution would probably be for ctags to generate "struct vmmeter" tags.
 
-COMM=	$S/altq/*.[ch] \
-	$S/compat/*/*.[ch] \
-	$S/conf/*.[ch] \
-	$S/crypto/*.[ch] \
-	$S/ddb/*.[ch] \
-	$S/dev/*.[ch] $S/dev/*/*.[ch] $S/dev/*/*/*.[ch] \
-	$S/isofs/*/*.[ch] \
-	$S/kern/*.[ch] \
-	$S/lib/libkern/*.[ch] \
-	$S/miscfs/*/*.[ch] \
-	$S/msdosfs/*.[ch] \
-	$S/net/*.[ch] \
-	$S/netatalk/*.[ch] \
-	$S/netbt/*.[ch] \
-	$S/netinet/*.[ch] \
-	$S/netinet6/*.[ch] \
-	$S/netnatm/*.[ch] \
-	$S/nfs/*.[ch] \
-	$S/scsi/*.[ch] \
-	$S/ufs/*/*.[ch] \
-	$S/uvm/*.[ch] \
-	$S/sys/*.[ch]
+.ifmake tags
+# The invocation below returns every directory that contains sources, excluding
+# the arch directories. Traditionally, COMM would have been an explicit list.
+# This promises to be easier to maintain, considering how often the directory
+# structure of the kernel sources has been changing recently.
+SYSDIR?= ${.CURDIR:H:H}
+FINDCOMM=	find -H ${SYSDIR} \( -path '*/dist/ipf' -o -name arch -o -name rump \) -prune -o -type f -name "*.[ch]" \( \! -name 'altq.h' \! -name 'nbcompat.h' \! -name 'pf_osfp.c' \! -name 'unichromereg.h' \! -name 'usb_port.h' \! -name 'midway*' \! -name 'if_lmc.[ch]' \) -print | \
+    sort -t / -u
+COMM!=	${FINDCOMM}
+.endif

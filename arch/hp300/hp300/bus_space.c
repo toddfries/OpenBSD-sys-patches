@@ -1,5 +1,4 @@
-/*	$OpenBSD: bus_space.c,v 1.5 2007/01/06 20:11:01 miod Exp $	*/
-/*	$NetBSD: bus_space.c,v 1.6 2002/09/27 15:36:02 provos Exp $	*/
+/*	$NetBSD: bus_space.c,v 1.17 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,6 +33,9 @@
  * Implementation of bus_space mapping for the hp300.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bus_space.c,v 1.17 2008/04/28 20:23:19 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/extent.h>
@@ -50,672 +45,159 @@
 
 #include <uvm/uvm_extern.h>
 
-#ifdef DIAGNOSTIC
-extern char *extiobase;
-#endif
-extern struct extent *extio;
+extern int *nofault;
 
-/*
- * Memory mapped devices (intio, dio and sgc)
- */
-
-int	hp300_mem_map(bus_addr_t, bus_size_t, int, bus_space_handle_t *);
-void	hp300_mem_unmap(bus_space_handle_t, bus_size_t);
-int	hp300_mem_subregion(bus_space_handle_t, bus_size_t, bus_size_t,
-	    bus_space_handle_t *);
-void *	hp300_mem_vaddr(bus_space_handle_t);
-
-u_int8_t hp300_mem_bsr1(bus_space_handle_t, bus_size_t);
-u_int16_t hp300_mem_bsr2(bus_space_handle_t, bus_size_t);
-u_int32_t hp300_mem_bsr4(bus_space_handle_t, bus_size_t);
-void	hp300_mem_bsrm1(bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-void	hp300_mem_bsrm2(bus_space_handle_t, bus_size_t, u_int16_t *, size_t);
-void	hp300_mem_bsrm4(bus_space_handle_t, bus_size_t, u_int32_t *, size_t);
-void	hp300_mem_bsrrm2(bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-void	hp300_mem_bsrrm4(bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-void	hp300_mem_bsrr1(bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-void	hp300_mem_bsrr2(bus_space_handle_t, bus_size_t, u_int16_t *, size_t);
-void	hp300_mem_bsrr4(bus_space_handle_t, bus_size_t, u_int32_t *, size_t);
-void	hp300_mem_bsrrr2(bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-void	hp300_mem_bsrrr4(bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-void	hp300_mem_bsw1(bus_space_handle_t, bus_size_t, u_int8_t);
-void	hp300_mem_bsw2(bus_space_handle_t, bus_size_t, u_int16_t);
-void	hp300_mem_bsw4(bus_space_handle_t, bus_size_t, u_int32_t);
-void	hp300_mem_bswm1(bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-void	hp300_mem_bswm2(bus_space_handle_t, bus_size_t, const u_int16_t *, size_t);
-void	hp300_mem_bswm4(bus_space_handle_t, bus_size_t, const u_int32_t *, size_t);
-void	hp300_mem_bswrm2(bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-void	hp300_mem_bswrm4(bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-void	hp300_mem_bswr1(bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-void	hp300_mem_bswr2(bus_space_handle_t, bus_size_t, const u_int16_t *, size_t);
-void	hp300_mem_bswr4(bus_space_handle_t, bus_size_t, const u_int32_t *, size_t);
-void	hp300_mem_bswrr2(bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-void	hp300_mem_bswrr4(bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-void	hp300_mem_bssm1(bus_space_handle_t, bus_size_t, u_int8_t, size_t);
-void	hp300_mem_bssm2(bus_space_handle_t, bus_size_t, u_int16_t, size_t);
-void	hp300_mem_bssm4(bus_space_handle_t, bus_size_t, u_int32_t, size_t);
-void	hp300_mem_bssr1(bus_space_handle_t, bus_size_t, u_int8_t, size_t);
-void	hp300_mem_bssr2(bus_space_handle_t, bus_size_t, u_int16_t, size_t);
-void	hp300_mem_bssr4(bus_space_handle_t, bus_size_t, u_int32_t, size_t);
-
-struct hp300_bus_space_tag hp300_mem_tag = {
-	hp300_mem_map,
-	hp300_mem_unmap,
-	hp300_mem_subregion,
-	hp300_mem_vaddr,
-
-	hp300_mem_bsr1,
-	hp300_mem_bsr2,
-	hp300_mem_bsr4,
-	hp300_mem_bsrm1,
-	hp300_mem_bsrm2,
-	hp300_mem_bsrm4,
-	hp300_mem_bsrrm2,
-	hp300_mem_bsrrm4,
-	hp300_mem_bsrr1,
-	hp300_mem_bsrr2,
-	hp300_mem_bsrr4,
-	hp300_mem_bsrrr2,
-	hp300_mem_bsrrr4,
-	hp300_mem_bsw1,
-	hp300_mem_bsw2,
-	hp300_mem_bsw4,
-	hp300_mem_bswm1,
-	hp300_mem_bswm2,
-	hp300_mem_bswm4,
-	hp300_mem_bswrm2,
-	hp300_mem_bswrm4,
-	hp300_mem_bswr1,
-	hp300_mem_bswr2,
-	hp300_mem_bswr4,
-	hp300_mem_bswrr2,
-	hp300_mem_bswrr4,
-	hp300_mem_bssm1,
-	hp300_mem_bssm2,
-	hp300_mem_bssm4,
-	hp300_mem_bssr1,
-	hp300_mem_bssr2,
-	hp300_mem_bssr4
-};
-
+/* ARGSUSED */
 int
-hp300_mem_map(bus_addr_t bpa, bus_size_t size, int flags,
+bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	u_long kva;
-	pt_entry_t template;
+	vaddr_t kva;
+	vsize_t offset;
 	int error;
 
-	/*
-	 * intio space is direct-mapped in pmap_bootstrap(); just do the
-	 * translation in this case.
-	 */
-	if (bpa >= INTIOBASE && bpa < INTIOTOP) {
-		*bshp = IIOV(bpa);
-		return (0);
+	if (t->bustype == HP300_BUS_SPACE_INTIO) {
+		/*
+		 * Intio space is direct-mapped in pmap_bootstrap(); just
+		 * do the translation.
+		 */
+		*bshp = (bus_space_handle_t)IIOV(INTIOBASE + bpa);
+		return 0;
 	}
+
+	if (t->bustype != HP300_BUS_SPACE_DIO)
+		panic("bus_space_map: bad space tag");
 
 	/*
 	 * Allocate virtual address space from the extio extent map.
 	 */
-	size = round_page(bpa + size) - trunc_page(bpa);
-	error = extent_alloc(extio, size, PAGE_SIZE, 0, EX_NOBOUNDARY,
-	    EX_NOWAIT | EX_MALLOCOK, &kva);
+	offset = m68k_page_offset(bpa);
+	size = m68k_round_page(offset + size);
+	error = extent_alloc(extio_ex, size, PAGE_SIZE, 0,
+	    EX_FAST | EX_NOWAIT | (extio_ex_malloc_safe ? EX_MALLOCOK : 0),
+	    &kva);
 	if (error)
-		return (error);
-
-	*bshp = (bus_space_handle_t)kva + (bpa & PAGE_MASK);
-	bpa = trunc_page(bpa);
+		return error;
 
 	/*
-	 * Map the range.
+	 * Map the range.  The range is always cache-inhibited on the hp300.
 	 */
-	if (flags & BUS_SPACE_MAP_CACHEABLE)
-		template = PG_RW;
-	else
-		template = PG_RW | PG_CI;
-	while (size != 0) {
-		pmap_kenter_cache(kva, bpa, template);
-		size -= PAGE_SIZE;
-		kva += PAGE_SIZE;
-		bpa += PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
+	physaccess((void *)kva, (void *)bpa, size, PG_RW|PG_CI);
 
 	/*
 	 * All done.
 	 */
-	return (0);
-}
-
-void
-hp300_mem_unmap(bus_space_handle_t bsh, bus_size_t size)
-{
-#ifdef DIAGNOSTIC
-	extern int eiomapsize;
-#endif
-	int error;
-
-	/*
-	 * intio space is direct-mapped in pmap_bootstrap(); nothing
-	 * to do.
-	 */
-	if (IIOP(bsh) >= INTIOBASE && IIOP(bsh) < INTIOTOP)
-		return;
-
-#ifdef DIAGNOSTIC
-	if ((caddr_t)bsh < extiobase ||
-	    (caddr_t)bsh >= extiobase + ptoa(eiomapsize)) {
-		printf("bus_space_unmap: bad bus space handle %x\n", bsh);
-		return;
-	}
-#endif
-
-	size = round_page(bsh + size) - trunc_page(bsh);
-	bsh = trunc_page(bsh);
-
-	/*
-	 * Unmap the range.
-	 */
-	pmap_kremove(bsh, size);
-	pmap_update(pmap_kernel());
-
-	/*
-	 * Free it from the extio extent map.
-	 */
-	error = extent_free(extio, (u_long)bsh, size, EX_NOWAIT | EX_MALLOCOK);
-#ifdef DIAGNOSTIC
-	if (error != 0) {
-		printf("bus_space_unmap: kva 0x%lx size 0x%lx: "
-		    "can't free region (%d)\n", (vaddr_t)bsh, size, error);
-	}
-#endif
+	*bshp = (bus_space_handle_t)(kva + offset);
+	return 0;
 }
 
 /* ARGSUSED */
 int
-hp300_mem_subregion(bus_space_handle_t bsh, bus_size_t offset, bus_size_t size,
-    bus_space_handle_t *nbshp)
+bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
+    bus_addr_t *bpap, bus_space_handle_t *bshp)
 {
-	*nbshp = bsh + offset;
-	return (0);
+
+	/*
+	 * Not meaningful on any currently-supported hp300 bus.
+	 */
+	return EINVAL;
 }
 
-#if 0
 /* ARGSUSED */
-paddr_t
-hp300_mem_mmap(bus_addr_t addr, off_t offset, int prot, int flags)
+void
+bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
-	return (((paddr_t)addr + offset) >> PAGE_SHIFT);
+
+	/*
+	 * Not meaningful on any currently-supported hp300 bus.
+	 */
+	panic("bus_space_free: shouldn't be here");
 }
+
+void
+bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
+{
+	vaddr_t kva;
+	vsize_t offset;
+
+	if (t->bustype == HP300_BUS_SPACE_INTIO) {
+		/*
+		 * Intio space is direct-mapped in pmap_bootstrap(); nothing
+		 * to do
+		 */
+		return;
+	}
+
+	if (t->bustype != HP300_BUS_SPACE_DIO)
+		panic("bus_space_map: bad space tag");
+
+	kva = m68k_trunc_page(bsh);
+	offset = m68k_page_offset(bsh);
+	size = m68k_round_page(offset + size);
+
+#ifdef DIAGNOSTIC
+	if (bsh < (vaddr_t)extiobase ||
+	    bsh >= ((vaddr_t)extiobase + ptoa(EIOMAPSIZE)))
+		panic("bus_space_unmap: bad bus space handle");
 #endif
 
-void *
-hp300_mem_vaddr(bus_space_handle_t h)
-{
-	return ((void *)h);
+	/*
+	 * Unmap the range.
+	 */
+	physunaccess((void *)kva, size);
+
+	/*
+	 * Free it from the extio extent map.
+	 */
+	if (extent_free(extio_ex, kva, size,
+	    EX_NOWAIT | (extio_ex_malloc_safe ? EX_MALLOCOK : 0)))
+		printf("bus_space_unmap: kva 0x%lx size 0x%lx: "
+		    "can't free region\n", (u_long) bsh, size);
 }
 
-u_int8_t
-hp300_mem_bsr1(bus_space_handle_t bsh, bus_size_t offset)
+/* ARGSUSED */
+int
+bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
+    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
-	return (*(volatile u_int8_t *) (bsh + offset));
+
+	*nbshp = bsh + offset;
+	return 0;
 }
 
-u_int16_t
-hp300_mem_bsr2(bus_space_handle_t bsh, bus_size_t offset)
+/* ARGSUSED */
+int
+hp300_bus_space_probe(bus_space_tag_t t, bus_space_handle_t bsh,
+    bus_size_t offset, int sz)
 {
-	return (*(volatile u_int16_t *) (bsh + offset));
-}
+	label_t faultbuf;
+	int i;
 
-u_int32_t
-hp300_mem_bsr4(bus_space_handle_t bsh, bus_size_t offset)
-{
-	return (*(volatile u_int32_t *) (bsh + offset));
-}
+	nofault = (int *)&faultbuf;
+	if (setjmp((label_t *)nofault)) {
+		nofault = NULL;
+		return 0;
+	}
 
-void
-hp300_mem_bsrm1(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movb	a0@,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
+	switch (sz) {
+	case 1:
+		i = bus_space_read_1(t, bsh, offset);
+		break;
 
-void
-hp300_mem_bsrm2(bus_space_handle_t h, bus_size_t offset,
-	     u_int16_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a0@,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
+	case 2:
+		i = bus_space_read_2(t, bsh, offset);
+		break;
 
-void
-hp300_mem_bsrm4(bus_space_handle_t h, bus_size_t offset,
-	     u_int32_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,%d0		;"
-	"1:	movl	a0@,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
+	case 4:
+		i = bus_space_read_4(t, bsh, offset);
+		break;
 
-void
-hp300_mem_bsrrm2(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a0@,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
+	default:
+		panic("bus_space_probe: unupported data size %d", sz);
+		/* NOTREACHED */
+	}
 
-void
-hp300_mem_bsrrm4(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,%d0		;"
-	"1:	movl	a0@,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
+	nofault = NULL;
+	return 1;
 }
-
-void
-hp300_mem_bsrr1(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movb	a0@+,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bsrr2(bus_space_handle_t h, bus_size_t offset,
-	     u_int16_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a0@+,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bsrr4(bus_space_handle_t h, bus_size_t offset,
-	     u_int32_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	a0@+,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bsrrr2(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a0@+,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c / 2)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bsrrr4(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	a0@+,a1@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c / 4)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bsw1(bus_space_handle_t h, bus_size_t offset,
-	    u_int8_t v)
-{
-	(*(volatile u_int8_t *)(h + offset)) = v;
-}
-
-void
-hp300_mem_bsw2(bus_space_handle_t h, bus_size_t offset,
-	    u_int16_t v)
-{
-	(*(volatile u_int16_t *)(h + offset)) = v;
-}
-
-void
-hp300_mem_bsw4(bus_space_handle_t h, bus_size_t offset,
-	    u_int32_t v)
-{
-	(*(volatile u_int32_t *)(h + offset)) = v;
-}
-
-void
-hp300_mem_bswm1(bus_space_handle_t h, bus_size_t offset,
-	     const u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movb	a1@+,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswm2(bus_space_handle_t h, bus_size_t offset,
-	     const u_int16_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a1@+,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswm4(bus_space_handle_t h, bus_size_t offset,
-	     const u_int32_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	a1@+,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswrm2(bus_space_handle_t h, bus_size_t offset,
-	     const u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a1@+,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswrm4(bus_space_handle_t h, bus_size_t offset,
-	     const u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	a1@+,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswr1(bus_space_handle_t h, bus_size_t offset,
-	     const u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movb	a1@+,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswr2(bus_space_handle_t h, bus_size_t offset,
-	     const u_int16_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a1@+,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswr4(bus_space_handle_t h, bus_size_t offset,
-	     const u_int32_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	a1@+,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswrr2(bus_space_handle_t h, bus_size_t offset,
-	     const u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	a1@+,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c / 2)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bswrr4(bus_space_handle_t h, bus_size_t offset,
-	     const u_int8_t *a, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,a1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	a1@+,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"					:
-								:
-		    "r" (h + offset), "g" (a), "g" (c / 4)	:
-		    "a0","a1","d0");
-}
-
-void
-hp300_mem_bssm1(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t v, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,d1		;"
-	"	movl	%2,d0		;"
-	"1:	movb	d1,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"						:
-									:
-		    "r" (h + offset), "g" ((u_long)v), "g" (c)	:
-		    "a0","d0","d1");
-}
-
-void
-hp300_mem_bssm2(bus_space_handle_t h, bus_size_t offset,
-	     u_int16_t v, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,d1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	d1,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"						:
-									:
-		    "r" (h + offset), "g" ((u_long)v), "g" (c)	:
-		    "a0","d0","d1");
-}
-
-void
-hp300_mem_bssm4(bus_space_handle_t h, bus_size_t offset,
-	     u_int32_t v, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,d1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	d1,a0@	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"						:
-									:
-		    "r" (h + offset), "g" ((u_long)v), "g" (c)	:
-		    "a0","d0","d1");
-}
-
-void
-hp300_mem_bssr1(bus_space_handle_t h, bus_size_t offset,
-	     u_int8_t v, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,d1		;"
-	"	movl	%2,d0		;"
-	"1:	movb	d1,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"						:
-									:
-		    "r" (h + offset), "g" ((u_long)v), "g" (c)	:
-		    "a0","d0","d1");
-}
-
-void
-hp300_mem_bssr2(bus_space_handle_t h, bus_size_t offset,
-	     u_int16_t v, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,d1		;"
-	"	movl	%2,d0		;"
-	"1:	movw	d1,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"						:
-									:
-		    "r" (h + offset), "g" ((u_long)v), "g" (c)	:
-		    "a0","d0","d1");
-}
-
-void
-hp300_mem_bssr4(bus_space_handle_t h, bus_size_t offset,
-	     u_int32_t v, size_t c)
-{
-	__asm __volatile (
-	"	movl	%0,a0		;"
-	"	movl	%1,d1		;"
-	"	movl	%2,d0		;"
-	"1:	movl	d1,a0@+	;"
-	"	subql	#1,d0		;"
-	"	jne	1b"						:
-									:
-		    "r" (h + offset), "g" ((u_long)v), "g" (c)	:
-		    "a0","d0","d1");
-}
-
-#if 0
-paddr_t
-bus_space_mmap(bus_space_tag_t t, bus_addr_t addr, off_t offset, int prot,
-    int flags)
-{
-	return (((paddr_t)addr + offset) >> PAGE_SHIFT);
-}
-#endif

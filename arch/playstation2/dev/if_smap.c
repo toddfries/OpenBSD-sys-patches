@@ -1,4 +1,4 @@
-/*	$NetBSD: if_smap.c,v 1.8 2005/12/24 23:24:01 perry Exp $	*/
+/*	$NetBSD: if_smap.c,v 1.13 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_smap.c,v 1.8 2005/12/24 23:24:01 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_smap.c,v 1.13 2008/04/28 20:23:31 martin Exp $");
 
 #include "debug_playstation2.h"
 
@@ -89,16 +82,16 @@ __KERNEL_RCSID(0, "$NetBSD: if_smap.c,v 1.8 2005/12/24 23:24:01 perry Exp $");
 int	smap_debug = 0;
 #define	DPRINTF(fmt, args...)						\
 	if (smap_debug)							\
-		printf("%s: " fmt, __FUNCTION__ , ##args) 
+		printf("%s: " fmt, __func__ , ##args) 
 #define	DPRINTFN(n, arg)						\
 	if (smap_debug > (n))						\
-		printf("%s: " fmt, __FUNCTION__ , ##args) 
+		printf("%s: " fmt, __func__ , ##args) 
 #define STATIC
 struct smap_softc *__sc;
 void __smap_status(int);
 void __smap_lock_check(const char *, int);
-#define FUNC_ENTER()	__smap_lock_check(__FUNCTION__, 1)
-#define FUNC_EXIT()	__smap_lock_check(__FUNCTION__, 0)
+#define FUNC_ENTER()	__smap_lock_check(__func__, 1)
+#define FUNC_EXIT()	__smap_lock_check(__func__, 0)
 #else
 #define	DPRINTF(arg...)		((void)0)
 #define DPRINTFN(n, arg...)	((void)0)
@@ -143,7 +136,7 @@ STATIC void smap_rxeof(void *);
 STATIC void smap_txeof(void *);
 STATIC void smap_start(struct ifnet *);
 STATIC void smap_watchdog(struct ifnet *);
-STATIC int smap_ioctl(struct ifnet *, u_long, caddr_t);
+STATIC int smap_ioctl(struct ifnet *, u_long, void *);
 STATIC int smap_init(struct ifnet *);
 STATIC void smap_stop(struct ifnet *, int);
 
@@ -250,7 +243,8 @@ smap_attach(struct device *parent, struct device *self, void *aux)
 	mii->mii_readreg	= emac3_phy_readreg;
 	mii->mii_writereg	= emac3_phy_writereg;
 	mii->mii_statchg	= emac3_phy_statchg;
-	ifmedia_init(&mii->mii_media, 0, emac3_ifmedia_upd, emac3_ifmedia_sts);
+	sc->ethercom.ec_mii = mii;
+	ifmedia_init(&mii->mii_media, 0, ether_mediachange, ether_mediastatus);
 	mii_attach(&emac3->dev, mii, 0xffffffff, MII_PHY_ANY,
 	    MII_OFFSET_ANY, 0);
 	    
@@ -274,7 +268,7 @@ smap_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-smap_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
+smap_ioctl(struct ifnet *ifp, u_long command, void *data)
 {
 	struct smap_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *) data;
@@ -282,22 +276,12 @@ smap_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	switch (command) {
-	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
-		error = ifmedia_ioctl(ifp, ifr, &sc->emac3.mii.mii_media,
-		    command);
-		break;
+	error = ether_ioctl(ifp, command, data);
 
-	default:
-		error = ether_ioctl(ifp, command, data);
-
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				emac3_setmulti(&sc->emac3, &sc->ethercom);
-			error = 0;
-		}
-		break;
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			emac3_setmulti(&sc->emac3, &sc->ethercom);
+		error = 0;
 	}
 
 	splx(s);
@@ -423,7 +407,7 @@ smap_rxeof(void *arg)
 		m->m_data += 2; /* for alignment */
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = sz;
-		memcpy(mtod(m, caddr_t), (caddr_t)sc->rx_buf, sz);
+		memcpy(mtod(m, void *), (void *)sc->rx_buf, sz);
 
 	next_packet:
 		ifp->if_ipackets++;
@@ -548,7 +532,7 @@ smap_start(struct ifnet *ifp)
 		q = p + sz;
 		/* copy to temporary buffer area */
 		for (m = m0; m != 0; m = m->m_next) {
-			memcpy(p, mtod(m, caddr_t), m->m_len);
+			memcpy(p, mtod(m, void *), m->m_len);
 			p += m->m_len;
 		}
 		m_freem(m0);
@@ -615,6 +599,7 @@ smap_init(struct ifnet *ifp)
 {
 	struct smap_softc *sc = ifp->if_softc;
 	u_int16_t r16;
+	int rc;
 
 	smap_fifo_init(sc);
 	emac3_reset(&sc->emac3);
@@ -636,7 +621,10 @@ smap_init(struct ifnet *ifp)
 	emac3_setmulti(&sc->emac3, &sc->ethercom);
 
 	/* Set current media. */
-	mii_mediachg(&sc->emac3.mii);
+	if ((rc = mii_mediachg(&sc->emac3.mii)) == ENXIO)
+		rc = 0;
+	else if (rc != 0)
+		return rc;
 
 	ifp->if_flags |= IFF_RUNNING;
 
@@ -650,10 +638,10 @@ smap_stop(struct ifnet *ifp, int disable)
 
 	mii_down(&sc->emac3.mii);
 
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	if (disable)
 		emac3_disable();
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 /*

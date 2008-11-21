@@ -103,14 +103,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.12 2006/12/08 15:05:18 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.21 2008/09/05 13:37:24 tron Exp $");
 
 #include "opt_multiprocessor.h"
 #include "opt_xen.h"
 #include "isa.h"
 #include "pci.h"
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -119,25 +118,24 @@ __KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.12 2006/12/08 15:05:18 yamt Exp $");
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/errno.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/atomic.h>
 #include <machine/i8259.h>
-#include <machine/cpu.h>
 #include <machine/pio.h>
-#include <machine/evtchn.h>
+#include <xen/evtchn.h>
 
 #ifdef XEN3
 #include "acpi.h"
 #include "ioapic.h"
 #include "opt_mpbios.h"
 /* for x86/i8259.c */
-struct intrstub i8259_stubs[NUM_LEGACY_IRQS] = {{0}};
+struct intrstub i8259_stubs[NUM_LEGACY_IRQS] = {{0,0}};
 #if NIOAPIC > 0
 /* for x86/ioapic.c */
-struct intrstub ioapic_edge_stubs[MAX_INTR_SOURCES] = {{0}};
-struct intrstub ioapic_level_stubs[MAX_INTR_SOURCES] = {{0}};
+struct intrstub ioapic_edge_stubs[MAX_INTR_SOURCES] = {{0,0}};
+struct intrstub ioapic_level_stubs[MAX_INTR_SOURCES] = {{0,0}};
 
 #include <machine/i82093var.h>
 int irq2vect[256] = {0};
@@ -184,21 +182,6 @@ struct intrhand fake_softnet_intrhand;
 struct intrhand fake_softserial_intrhand;
 struct intrhand fake_timer_intrhand;
 struct intrhand fake_ipi_intrhand;
-#if defined(DOM0OPS)
-struct intrhand fake_softxenevt_intrhand;
-
-extern void Xsoftxenevt(void);
-#endif
-
-/*
- * Event counters for the software interrupts.
- */
-struct evcnt softclock_evtcnt;
-struct evcnt softnet_evtcnt;
-struct evcnt softserial_evtcnt;
-#if defined(DOM0OPS)
-struct evcnt softxenevt_evtcnt;
-#endif
 
 /*
  * Initialize all handlers that aren't dynamically allocated, and exist
@@ -207,73 +190,27 @@ struct evcnt softxenevt_evtcnt;
 void
 cpu_intr_init(struct cpu_info *ci)
 {
-	struct iplsource *ipl;
-	char *cp;
 	int i;
+#if defined(INTRSTACKSIZE)
+	char *cp;
+#endif
 
 	ci->ci_iunmask[0] = 0xfffffffe;
 	for (i = 1; i < NIPL; i++)
 		ci->ci_iunmask[i] = ci->ci_iunmask[i - 1] & ~(1 << i);
 
-	MALLOC(ipl, struct iplsource *, sizeof (struct iplsource), M_DEVBUF,
-	    M_WAITOK|M_ZERO);
-	if (ipl == NULL)
-		panic("can't allocate fixed interrupt source");
-	ipl->ipl_recurse = Xsoftclock;
-	ipl->ipl_resume = Xsoftclock;
-	fake_softclock_intrhand.ih_level = IPL_SOFTCLOCK;
-	ipl->ipl_handlers = &fake_softclock_intrhand;
-	ci->ci_isources[SIR_CLOCK] = ipl;
-	evcnt_attach_dynamic(&softclock_evtcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "softclock");
-
-	MALLOC(ipl, struct iplsource *, sizeof (struct iplsource), M_DEVBUF,
-	    M_WAITOK|M_ZERO);
-	if (ipl == NULL)
-		panic("can't allocate fixed interrupt source");
-	ipl->ipl_recurse = Xsoftnet;
-	ipl->ipl_resume = Xsoftnet;
-	fake_softnet_intrhand.ih_level = IPL_SOFTNET;
-	ipl->ipl_handlers = &fake_softnet_intrhand;
-	ci->ci_isources[SIR_NET] = ipl;
-	evcnt_attach_dynamic(&softnet_evtcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "softnet");
-
-	MALLOC(ipl, struct iplsource *, sizeof (struct iplsource), M_DEVBUF,
-	    M_WAITOK|M_ZERO);
-	if (ipl == NULL)
-		panic("can't allocate fixed interrupt source");
-	ipl->ipl_recurse = Xsoftserial;
-	ipl->ipl_resume = Xsoftserial;
-	fake_softserial_intrhand.ih_level = IPL_SOFTSERIAL;
-	ipl->ipl_handlers = &fake_softserial_intrhand;
-	ci->ci_isources[SIR_SERIAL] = ipl;
-	evcnt_attach_dynamic(&softserial_evtcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "softserial");
-
-#if defined(DOM0OPS)
-	MALLOC(ipl, struct iplsource *, sizeof (struct iplsource), M_DEVBUF,
-	    M_WAITOK|M_ZERO);
-	if (ipl == NULL)
-		panic("can't allocate fixed interrupt source");
-	ipl->ipl_recurse = Xsoftxenevt;
-	ipl->ipl_resume = Xsoftxenevt;
-	fake_softxenevt_intrhand.ih_level = IPL_SOFTXENEVT;
-	ipl->ipl_handlers = &fake_softxenevt_intrhand;
-	ci->ci_isources[SIR_XENEVT] = ipl;
-	evcnt_attach_dynamic(&softxenevt_evtcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "xenevt");
-#endif /* defined(DOM0OPS) */
-
+#if defined(INTRSTACKSIZE)
 	cp = (char *)uvm_km_alloc(kernel_map, INTRSTACKSIZE, 0, UVM_KMF_WIRED);
 	ci->ci_intrstack = cp + INTRSTACKSIZE - sizeof(register_t);
+#endif
 	ci->ci_idepth = -1;
 }
 
 #if NPCI > 0 || NISA > 0
 void *
 intr_establish(int legacy_irq, struct pic *pic, int pin,
-    int type, int level, int (*handler)(void *) , void *arg)
+    int type, int level, int (*handler)(void *) , void *arg,
+    bool known_mpsafe)
 {
 	struct pintrhand *ih;
 	int evtchn;
@@ -323,7 +260,7 @@ xen_intr_map(int *pirq, int type)
 	 */
 	static int xen_next_irq = 200;
 	struct ioapic_softc *ioapic = ioapic_find(APIC_IRQ_APIC(*pirq));
-	struct pic *pic = (struct pic *)ioapic;
+	struct pic *pic = &ioapic->sc_pic;
 	int pin = APIC_IRQ_PIN(*pirq);
 	physdev_op_t op;
 
@@ -361,11 +298,11 @@ struct pic *
 intr_findpic(int num)
 {
 #if NIOAPIC > 0
-	struct pic *pic;
+	struct ioapic_softc *pic;
 
-	pic = (struct pic *)ioapic_find_bybase(num);
+	pic = ioapic_find_bybase(num);
 	if (pic != NULL)
-		return pic;
+		return &pic->sc_pic;
 #endif
 	if (num < NUM_LEGACY_IRQS)
 		return &i8259_pic;
@@ -497,17 +434,16 @@ intr_printconfig(void)
 	CPU_INFO_ITERATOR cii;
 
 	for (CPU_INFO_FOREACH(cii, ci)) {
-		printf("cpu%d: interrupt masks:\n", ci->ci_apicid);
+		printf("%s: interrupt masks:\n", device_xname(ci->ci_dev));
 		for (i = 0; i < NIPL; i++)
 			printf("IPL %d mask %lx unmask %lx\n", i,
 			    (u_long)ci->ci_imask[i], (u_long)ci->ci_iunmask[i]);
-		simple_lock(&ci->ci_slock);
 		for (i = 0; i < MAX_INTR_SOURCES; i++) {
 			isp = ci->ci_isources[i];
 			if (isp == NULL)
 				continue;
-			printf("cpu%u source %d is pin %d from pic %s maxlevel %d\n",
-			    ci->ci_apicid, i, isp->is_pin,
+			printf("%s source %d is pin %d from pic %s maxlevel %d\n",
+			    device_xname(ci->ci_dev), i, isp->is_pin,
 			    isp->is_pic->pic_name, isp->is_maxlevel);
 			for (ih = isp->is_handlers; ih != NULL;
 			     ih = ih->ih_next)
@@ -515,7 +451,6 @@ intr_printconfig(void)
 				    ih->ih_fun, ih->ih_level);
 
 		}
-		simple_unlock(&ci->ci_slock);
 	}
 }
 #endif

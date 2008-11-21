@@ -1,4 +1,4 @@
-/* $NetBSD: xenbus_comms.c,v 1.3 2006/05/23 21:07:56 bouyer Exp $ */
+/* $NetBSD: xenbus_comms.c,v 1.10 2008/10/29 13:53:15 cegger Exp $ */
 /******************************************************************************
  * xenbus_comms.c
  *
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xenbus_comms.c,v 1.3 2006/05/23 21:07:56 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xenbus_comms.c,v 1.10 2008/10/29 13:53:15 cegger Exp $");
 
 #include <sys/types.h>
 #include <sys/null.h> 
@@ -39,9 +39,10 @@ __KERNEL_RCSID(0, "$NetBSD: xenbus_comms.c,v 1.3 2006/05/23 21:07:56 bouyer Exp 
 #include <sys/proc.h>
 #include <sys/systm.h>
 
-#include <machine/hypervisor.h>
-#include <machine/evtchn.h>
-#include <machine/xenbus.h>
+#include <xen/xen.h>	/* for xendomain_is_dom0() */
+#include <xen/hypervisor.h>
+#include <xen/evtchn.h>
+#include <xen/xenbus.h>
 #include "xenbus_comms.h"
 
 #undef XENDEBUG
@@ -60,9 +61,9 @@ extern int xenstored_ready;
 
 static int wake_waiting(void *);
 static int check_indexes(XENSTORE_RING_IDX, XENSTORE_RING_IDX);
-static void * get_output_chunk(XENSTORE_RING_IDX, XENSTORE_RING_IDX,
+static void *get_output_chunk(XENSTORE_RING_IDX, XENSTORE_RING_IDX,
     char *, uint32_t *);
-static const void * get_input_chunk(XENSTORE_RING_IDX, XENSTORE_RING_IDX,
+static const void *get_input_chunk(XENSTORE_RING_IDX, XENSTORE_RING_IDX,
     const char *, uint32_t *);
 
 
@@ -75,8 +76,7 @@ xenstore_domain_interface(void)
 static int
 wake_waiting(void *arg)
 {
-	if (__predict_false(xenstored_ready == 0 &&
-	    xen_start_info.flags & SIF_INITDOMAIN)) {
+	if (__predict_false(xenstored_ready == 0 && xendomain_is_dom0())) {
 		xenstored_ready = 1; 
 		wakeup(&xenstored_ready);
 	} 
@@ -215,9 +215,9 @@ xb_read(void *data, unsigned len)
 	return 0;
 }
 
-/* Set up interrupt handler off store event channel. */
+/* Set up interrupt handler of store event channel. */
 int
-xb_init_comms(struct device *dev)
+xb_init_comms(device_t dev)
 {
 	int err;
 
@@ -227,11 +227,11 @@ xb_init_comms(struct device *dev)
 	err = event_set_handler(xen_start_info.store_evtchn, wake_waiting,
 	    NULL, IPL_TTY, "xenbus");
 	if (err) {
-		printf("XENBUS request irq failed %i\n", err);
+		aprint_error_dev(dev, "request irq failed %i\n", err);
 		return err;
 	}
 	xenbus_irq = xen_start_info.store_evtchn;
-	printf("%s: using event channel %d\n", dev->dv_xname, xenbus_irq);
+	aprint_verbose_dev(dev, "using event channel %d\n", xenbus_irq);
 	hypervisor_enable_event(xenbus_irq);
 	return 0;
 }

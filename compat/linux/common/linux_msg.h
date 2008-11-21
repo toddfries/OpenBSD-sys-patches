@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_msg.h,v 1.7 2006/02/09 19:18:56 manu Exp $	*/
+/*	$NetBSD: linux_msg.h,v 1.11 2008/05/21 11:15:57 njoly Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,6 +54,21 @@ struct linux_msqid_ds {
 	ushort			l_msg_lrpid;
 };
 
+struct linux_msqid64_ds {
+	struct linux_ipc64_perm	l_msg_perm;
+	linux_time_t		l_msg_stime;
+	linux_time_t		l_msg_rtime;
+	linux_time_t		l_msg_ctime;
+	ulong			l_msg_cbytes;
+	ulong			l_msg_qnum;
+	ulong			l_msg_qbytes;
+	int			l_msg_lspid;
+	int			l_msg_lrpid;
+	ulong			l___unused4;
+	ulong			l___unused5;
+	
+};
+
 #define LINUX_MSG_NOERROR	0x1000
 #define LINUX_MSG_EXCEPT	0x2000
 
@@ -98,23 +106,21 @@ struct linux_msginfo {
 #define LINUX_MSG_INFO	12
 
 /* Pretend the sys_msgctl syscall is defined */
-#ifndef __amd64__
 struct linux_sys_msgctl_args {
 	syscallarg(int) msqid;
 	syscallarg(int) cmd;
 	syscallarg(struct linux_msqid_ds *) buf;
 };
-#endif
 
 
 #ifdef SYSVMSG
 #ifdef _KERNEL
 __BEGIN_DECLS
-int linux_sys_msgctl __P((struct lwp *, void *, register_t *));
-void linux_to_bsd_msqid_ds __P((struct linux_msqid_ds *,
-				       struct msqid_ds *));
-void bsd_to_linux_msqid_ds __P((struct msqid_ds *,
-				       struct linux_msqid_ds *));
+int linux_sys_msgctl(struct lwp *, const struct linux_sys_msgctl_args *, register_t *);
+void linux_to_bsd_msqid_ds(struct linux_msqid_ds *, struct msqid_ds *);
+void linux_to_bsd_msqid64_ds(struct linux_msqid64_ds *, struct msqid_ds *);
+void bsd_to_linux_msqid_ds(struct msqid_ds *, struct linux_msqid_ds *);
+void bsd_to_linux_msqid64_ds(struct msqid_ds *, struct linux_msqid64_ds *);
 __END_DECLS
 #endif	/* !_KERNEL */
 #endif	/* !SYSVMSG */

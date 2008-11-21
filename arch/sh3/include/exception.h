@@ -1,4 +1,4 @@
-/*	$NetBSD: exception.h,v 1.9 2006/07/22 21:58:29 uwe Exp $	*/
+/*	$NetBSD: exception.h,v 1.11 2008/04/28 20:23:35 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -156,17 +149,17 @@
 #define	SH4_INTEVT_IRQ14	0x3c0
 #define	SH4_INTEVT_IRQ15	0x3e0
 
+#define	SH4_INTEVT_PCISERR	0xa00
+#define	SH4_INTEVT_PCIDMA3	0xa20
+#define	SH4_INTEVT_PCIDMA2	0xa40
+#define	SH4_INTEVT_PCIDMA1	0xa60
+#define	SH4_INTEVT_PCIDMA0	0xa80
+#define	SH4_INTEVT_PCIPWON	0xaa0
+#define	SH4_INTEVT_PCIPWDWN	0xac0
+#define	SH4_INTEVT_PCIERR	0xae0
+
 #define	SH4_INTEVT_TMU3		0xb00
 #define	SH4_INTEVT_TMU4		0xb80
-
-#define	SH4_INTEVT_PCISERR	0xa00
-#define	SH4_INTEVT_PCIERR	0xae0
-#define	SH4_INTEVT_PCIPWDWN	0xac0
-#define	SH4_INTEVT_PCIPWON	0xaa0
-#define	SH4_INTEVT_PCIDMA0	0xa80
-#define	SH4_INTEVT_PCIDMA1	0xa60
-#define	SH4_INTEVT_PCIDMA2	0xa40
-#define	SH4_INTEVT_PCIDMA3	0xa20
 
 #ifndef _LOCORE
 

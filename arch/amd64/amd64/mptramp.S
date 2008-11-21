@@ -1,5 +1,4 @@
-/*	$OpenBSD: mptramp.S,v 1.4 2007/10/10 15:53:51 art Exp $	*/
-/*	$NetBSD: mptramp.S,v 1.1 2003/04/26 18:39:30 fvdl Exp $	*/
+/*	$NetBSD: mptramp.S,v 1.9 2008/05/13 22:39:17 ad Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,9 +74,10 @@
  *        2)   halt the processors waiting for them to be enabled
  *              by a idle-thread 
  */
+	
+#include "opt_mpbios.h"		/* for MPDEBUG */
 		
 #include "assym.h"
-#include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/specialreg.h>
 #include <machine/segments.h>
@@ -97,16 +90,32 @@
 
 #define _TRMP_LABEL(a)  a = . - _C_LABEL(cpu_spinup_trampoline) + MP_TRAMPOLINE
 
-	.globl	_C_LABEL(mpidle)
+#ifdef MPDEBUG
+
+/*
+ * Debug code to stop aux. processors in various stages based on the
+ * value in cpu_trace.
+ *
+ * %edi points at cpu_trace;  cpu_trace[0] is the "hold point";
+ * cpu_trace[1] is the point which the CPU has reached.
+ * cpu_trace[2] is the last value stored by HALTT.
+ */
+
+#define HALT(x)	1: movl (%edi),%ebx;cmpl $ x,%ebx ; jle 1b ; movl $x,4(%edi)
+#define HALTT(x,y)	movl y,8(%edi); HALT(x)
+#else
+#define HALT(x)	/**/
+#define HALTT(x,y) /**/
+#endif
+
+	.globl	_C_LABEL(idle_loop)
 	.global _C_LABEL(cpu_spinup_trampoline)
 	.global _C_LABEL(cpu_spinup_trampoline_end)
 	.global _C_LABEL(cpu_hatch)
-	.global _C_LABEL(local_apic)
 	.global _C_LABEL(mp_pdirpa)
+	.global _C_LABEL(local_apic)
 
-	.global	gdt64
-
-#define HALT	1: jmp 1b
+	.globl	gdt64
 
 	.text
 	.align 4,0x0
@@ -121,7 +130,7 @@ _C_LABEL(cpu_spinup_trampoline):
 	movl    %cr0, %eax       # get cr0
 	orl     $0x1, %eax      # enable protected mode
 	movl    %eax, %cr0      # doit
-	ljmpl	$0x8, $mp_startup
+	ljmpl    $0x8, $mp_startup
 
 _TRMP_LABEL(mp_startup)
 	.code32
@@ -135,37 +144,39 @@ _TRMP_LABEL(mp_startup)
 	
 	movl    $ (MP_TRAMPOLINE+NBPG-16),%esp       # bootstrap stack end,
 						     # with scratch space..
+	
+#ifdef MPDEBUG
+	leal    RELOC(cpu_trace),%edi       
+#endif
 
+	HALT(0x1)
 	/* First, reset the PSL. */
 	pushl   $PSL_MBO
 	popfl
 
 	movl	%cr4,%eax
-	orl	$(CR4_DEFAULT),%eax
+	orl	$(CR4_PAE|CR4_OSFXSR|CR4_OSXMMEXCPT),%eax
+	movl	RELOC(pmap_largepages),%ecx
+	orl	%ecx,%ecx
+	jz	1f
+	orl	$CR4_PSE,%eax
+1:
 	movl	%eax,%cr4
 
 	movl	$MSR_EFER,%ecx
 	rdmsr
-	movl	%edx, %edi		# %edx is needed by wrmsr below
-
-	# Check if we need to enable NXE
-	movl	$0x80000001, %eax
-	cpuid
-	andl	$CPUID_NXE, %edx
 	xorl	%eax,%eax
-	testl	%edx, %edx
-	jz	1f
-	orl	$EFER_NXE, %eax
-1:
-	orl	$(EFER_LME|EFER_SCE), %eax
-
-	movl	%edi, %edx		# Restore saved %edx
-	movl	$MSR_EFER,%ecx
+	orl	$(EFER_LME|EFER_SCE),%eax
 	wrmsr
 
-	movl	$mp_tramp_pdirpa, %ecx
-	movl	(%ecx), %ecx
+	movl	RELOC(mp_pdirpa),%ecx	# guaranteed < 4G
         movl    %ecx,%cr3               # load ptd addr into mmu
+
+        movl    %cr0,%eax               # get control word
+        orl     $(CR0_PE|CR0_PG|CR0_NE|CR0_TS|CR0_MP|CR0_WP),%eax
+        movl    %eax,%cr0
+	jmp	mptramp_compat
+mptramp_compat:
 
 	movl    $GSEL(GDATA_SEL, SEL_KPL),%eax 	#switch to new segment
 	movl    %eax,%ds
@@ -175,11 +186,6 @@ _TRMP_LABEL(mp_startup)
 	movl	$mptramp_gdt64_desc,%eax
 	lgdt	(%eax)
 	movl	$mptramp_jmp64,%eax
-
-	movl    %cr0,%ecx               # get control word
-	orl     $(CR0_PE|CR0_PG|CR0_NE|CR0_TS|CR0_MP|CR0_WP),%ecx
-	movl	%ecx, %cr0
-
 	ljmp	*(%eax)
 
 _TRMP_LABEL(mptramp_jmp64)
@@ -202,25 +208,33 @@ _TRMP_LABEL(mptramp_gdt64_desc)
 	.word 0x17
 	.long mptramp_gdt64
 
-	.global mp_pdirpa
-_TRMP_LABEL(mp_pdirpa)
-_TRMP_LABEL(mp_tramp_pdirpa)
-	.long 0
 
 _TRMP_LABEL(mptramp_longmode)
 	.code64
 	movabsq	$_C_LABEL(cpu_spinup_trampoline_end),%rax
 	jmp	*%rax
-	
 
 	
 _C_LABEL(cpu_spinup_trampoline_end):	#end of code copied to MP_TRAMPOLINE
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	movq	_C_LABEL(cpu_info)(,%rcx,8),%rdi
+1:
+	/* Don't touch lapic until BP has done init sequence. */
+	movq	_C_LABEL(cpu_starting),%rdi
+	pause
+	testq	%rdi, %rdi
+	jz	1b
 
-	movq	CPU_INFO_IDLE_PCB(%rdi),%rsi
+	movl	_C_LABEL(cpu_feature),%eax
+	andl	$CPUID_NOX,%eax
+	jz	1f
+	movl	$MSR_EFER,%ecx
+	rdmsr
+	orl	$EFER_NXE,%eax
+	wrmsr
+1:
 
+	movq	CPU_INFO_IDLELWP(%rdi),%rsi
+	movq	L_ADDR(%rsi),%rsi
+	
 	movq	PCB_RSP(%rsi),%rsp
 	movq	PCB_RBP(%rsi),%rbp
 
@@ -228,11 +242,22 @@ _C_LABEL(cpu_spinup_trampoline_end):	#end of code copied to MP_TRAMPOLINE
 	movw	$(MAXGDTSIZ-1),-10(%rsp)
 	movq	%rax,-8(%rsp)
 	lgdt	-10(%rsp)
-
+	
 	/* Switch address space. */
 	movq	PCB_CR3(%rsi),%rax
 	movq	%rax,%cr3
 	movl    PCB_CR0(%rsi),%eax
 	movq    %rax,%cr0
 	call	_C_LABEL(cpu_hatch)
-	/* NOTREACHED */
+	jmp	_C_LABEL(idle_loop)
+	
+	.data
+_C_LABEL(mp_pdirpa):
+	.quad	0
+#ifdef MPDEBUG
+	.global _C_LABEL(cpu_trace)
+_C_LABEL(cpu_trace):
+	.quad  0x40
+	.quad  0xff
+	.quad  0xff		
+#endif

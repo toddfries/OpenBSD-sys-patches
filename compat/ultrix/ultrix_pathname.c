@@ -1,5 +1,4 @@
-/*	$OpenBSD: ultrix_pathname.c,v 1.9 2003/06/02 23:28:01 millert Exp $	*/
-/*	$NetBSD: ultrix_pathname.c,v 1.2 1996/04/07 17:23:07 jonathan Exp $	*/
+/*	$NetBSD: ultrix_pathname.c,v 1.35 2008/06/24 11:18:15 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,7 +40,7 @@
  *
  *	@(#)sun_misc.c	8.1 (Berkeley) 6/18/93
  *
- * from: Header: sun_misc.c,v 1.16 93/04/07 02:46:27 torek Exp 
+ * from: Header: sun_misc.c,v 1.16 93/04/07 02:46:27 torek Exp
  */
 
 
@@ -59,6 +58,9 @@
  * polluting, or conflicting with, the native filesysten namespace.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ultrix_pathname.c,v 1.35 2008/06/24 11:18:15 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
@@ -69,127 +71,120 @@
 #include <sys/stat.h>
 #include <sys/vnode.h>
 #include <sys/syscallargs.h>
+#include <sys/proc.h>
 
 #include <compat/ultrix/ultrix_syscallargs.h>
-#include <compat/ultrix/ultrix_util.h>
+#include <compat/common/compat_util.h>
 
-const char ultrix_emul_path[] = "/emul/ultrix";
+static int ultrixstatfs(struct statvfs *, void *);
 
 int
-ultrix_sys_creat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_creat(struct lwp *l, const struct ultrix_sys_creat_args *uap, register_t *retval)
 {
-	struct ultrix_sys_creat_args *uap = v;
-	struct sys_open_args ouap;
+	struct sys_open_args ap;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, flags) = O_WRONLY | O_CREAT | O_TRUNC;
+	SCARG(&ap, mode) = SCARG(uap, mode);
 
-	SCARG(&ouap, path) = SCARG(uap, path);
-	SCARG(&ouap, flags) = O_WRONLY | O_CREAT | O_TRUNC;
-	SCARG(&ouap, mode) = SCARG(uap, mode);
-
-	return (sys_open(p, &ouap, retval));
+	return sys_open(l, &ap, retval);
 }
 
 
 int
-ultrix_sys_access(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_access(struct lwp *l, const struct ultrix_sys_access_args *uap, register_t *retval)
 {
-	struct ultrix_sys_access_args *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	return (sys_access(p, uap, retval));
+	return sys_access(l, (const struct sys_access_args *)uap, retval);
 }
 
 int
-ultrix_sys_stat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_stat(struct lwp *l, const struct ultrix_sys_stat_args *uap, register_t *retval)
 {
-	struct ultrix_sys_stat_args *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	return (compat_43_sys_stat(p, uap, retval));
+	return compat_43_sys_stat(l,
+	    (const struct compat_43_sys_stat_args *)uap, retval);
 }
 
 int
-ultrix_sys_lstat(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_lstat(struct lwp *l, const struct ultrix_sys_lstat_args *uap, register_t *retval)
 {
-	struct ultrix_sys_lstat_args *uap = v;
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	return (compat_43_sys_lstat(p, uap, retval));
+	return compat_43_sys_lstat(l,
+	    (const struct compat_43_sys_lstat_args *)uap, retval);
 }
 
 int
-ultrix_sys_execv(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_execv(struct lwp *l, const struct ultrix_sys_execv_args *uap, register_t *retval)
 {
-	struct ultrix_sys_execv_args *uap = v;
-	struct sys_execve_args ouap;
+	/* {
+		syscallarg(const char *) path;
+		syscallarg(char **) argv;
+	} */
+	struct sys_execve_args ap;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, argp) = SCARG(uap, argp);
+	SCARG(&ap, envp) = NULL;
 
-	SCARG(&ouap, path) = SCARG(uap, path);
-	SCARG(&ouap, argp) = SCARG(uap, argp);
-	SCARG(&ouap, envp) = NULL;
-
-	return (sys_execve(p, &ouap, retval));
+	return sys_execve(l, &ap, retval);
 }
 
 int
-ultrix_sys_open(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_execve(struct lwp *l, const struct ultrix_sys_execve_args *uap, register_t *retval)
 {
-	struct ultrix_sys_open_args *uap = v;
-	int l, r;
+	/* {
+		syscallarg(const char *) path;
+		syscallarg(char **) argv;
+		syscallarg(char **) envp;
+	} */
+	struct sys_execve_args ap;
+
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, argp) = SCARG(uap, argp);
+	SCARG(&ap, envp) = SCARG(uap, envp);
+
+	return sys_execve(l, &ap, retval);
+}
+
+int
+ultrix_sys_open(struct lwp *l, const struct ultrix_sys_open_args *uap, register_t *retval)
+{
+	struct proc *p = l->l_proc;
+	int q, r;
 	int noctty;
 	int ret;
-	
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+	struct sys_open_args ap;
 
 	/* convert open flags into NetBSD flags */
-	l = SCARG(uap, flags);
-	noctty = l & 0x8000;
-	r =	(l & (0x0001 | 0x0002 | 0x0008 | 0x0040 | 0x0200 | 0x0400 | 0x0800));
-	r |=	((l & (0x0004 | 0x1000 | 0x4000)) ? O_NONBLOCK : 0);
-	r |=	((l & 0x0080) ? O_SHLOCK : 0);
-	r |=	((l & 0x0100) ? O_EXLOCK : 0);
-	r |=	((l & 0x2000) ? O_SYNC : 0);
 
-	SCARG(uap, flags) = r;
-	ret = sys_open(p, (struct sys_open_args *)uap, retval);
+	q = SCARG(uap, flags);
+	noctty = q & 0x8000;
+	r =	(q & (0x0001 | 0x0002 | 0x0008 | 0x0040 | 0x0200 | 0x0400 | 0x0800));
+	r |=	((q & (0x0004 | 0x1000 | 0x4000)) ? O_NONBLOCK : 0);
+	r |=	((q & 0x0080) ? O_SHLOCK : 0);
+	r |=	((q & 0x0100) ? O_EXLOCK : 0);
+	r |=	((q & 0x2000) ? O_FSYNC : 0);
 
-	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_flag & P_CONTROLT)) {
-		struct filedesc *fdp = p->p_fd;
-		struct file *fp;
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, flags) = r;
+	SCARG(&ap, mode) = SCARG(uap, mode);
+	ret = sys_open(l, &ap, retval);
 
-		if ((fd = fd_getfile(fdp, *retval)) == NULL)
-			return (EBADF);
-		FREF(fp);
+	/* XXXSMP */
+	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
+		file_t *fp;
+		int fd;
+
+		fd = (int)*retval;
+		fp = fd_getfile(fd);
+
 		/* ignore any error, just give it a try */
-		if (fp->f_type == DTYPE_VNODE)
-			(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, (caddr_t)0, p);
-		FRELE(fp);
+		if (fp != NULL) {
+			if (fp->f_type == DTYPE_VNODE)
+				(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, NULL);
+			fd_putfile(fd);
+		}
 	}
 	return ret;
 }
@@ -208,19 +203,17 @@ struct ultrix_statfs {
 };
 
 /*
- * Custruct ultrix statfs result from native. 
+ * Custruct ultrix statfs result from native.
  * XXX should this be the same as returned by Ultrix getmnt(2)?
  * XXX Ultrix predates DEV_BSIZE.  Is  conversion of disk space from 1k
- *  block units to DEV_BSIZE necessary? 
+ *  block units to DEV_BSIZE necessary?
  */
 static int
-ultrixstatfs(sp, buf)
-	struct statfs *sp;
-	caddr_t buf;
+ultrixstatfs(struct statvfs *sp, void *buf)
 {
 	struct ultrix_statfs ssfs;
 
-	bzero(&ssfs, sizeof ssfs);
+	memset(&ssfs, 0, sizeof ssfs);
 	ssfs.f_type = 0;
 	ssfs.f_bsize = sp->f_bsize;
 	ssfs.f_blocks = sp->f_blocks;
@@ -228,82 +221,67 @@ ultrixstatfs(sp, buf)
 	ssfs.f_bavail = sp->f_bavail;
 	ssfs.f_files = sp->f_files;
 	ssfs.f_ffree = sp->f_ffree;
-	ssfs.f_fsid = sp->f_fsid;
-	return copyout((caddr_t)&ssfs, buf, sizeof ssfs);
+	ssfs.f_fsid = sp->f_fsidx;
+	return copyout((void *)&ssfs, buf, sizeof ssfs);
 }
 
 
 int
-ultrix_sys_statfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_statfs(struct lwp *l, const struct ultrix_sys_statfs_args *uap, register_t *retval)
 {
-	struct ultrix_sys_statfs_args *uap = v;
-	register struct mount *mp;
-	register struct statfs *sp;
+	struct mount *mp;
+	struct statvfs *sp;
 	int error;
 	struct nameidata nd;
 
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	NDINIT(&nd, LOOKUP, FOLLOW | TRYEMULROOT, UIO_USERSPACE,
+	    SCARG(uap, path));
 	if ((error = namei(&nd)) != 0)
-		return (error);
+		return error;
 
 	mp = nd.ni_vp->v_mount;
 	sp = &mp->mnt_stat;
 	vrele(nd.ni_vp);
-	if ((error = VFS_STATFS(mp, sp, p)) != 0)
-		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return ultrixstatfs(sp, (caddr_t)SCARG(uap, buf));
+	if ((error = VFS_STATVFS(mp, sp)) != 0)
+		return error;
+	sp->f_flag = mp->mnt_flag & MNT_VISFLAGMASK;
+	return ultrixstatfs(sp, (void *)SCARG(uap, buf));
 }
 
 /*
  * sys_fstatfs() takes an fd, not a path, and so needs no emul
- * pathname processing;  but it's similar enough to sys_statfs() that
+ * pathname processing;  but it's similar enough to sys_statvfs() that
  * it goes here anyway.
  */
 int
-ultrix_sys_fstatfs(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_fstatfs(struct lwp *l, const struct ultrix_sys_fstatfs_args *uap, register_t *retval)
 {
-	struct ultrix_sys_fstatfs_args *uap = v;
-	struct file *fp;
+	file_t *fp;
 	struct mount *mp;
-	register struct statfs *sp;
+	struct statvfs *sp;
 	int error;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
-		return (error);
-
+	/* fd_getvnode() will use the descriptor for us */
+	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+		return error;
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	sp = &mp->mnt_stat;
-	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp);
-	if (error)
-		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return ultrixstatfs(sp, (caddr_t)SCARG(uap, buf));
+	if ((error = VFS_STATVFS(mp, sp)) != 0)
+		goto out;
+	sp->f_flag = mp->mnt_flag & MNT_VISFLAGMASK;
+	error = ultrixstatfs(sp, (void *)SCARG(uap, buf));
+ out:
+ 	fd_putfile(SCARG(uap, fd));
+	return error;
 }
 
 int
-ultrix_sys_mknod(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+ultrix_sys_mknod(struct lwp *l, const struct ultrix_sys_mknod_args *uap, register_t *retval)
 {
-	struct ultrix_sys_mknod_args *uap = v;
-
-	caddr_t sg = stackgap_init(p->p_emul);
-	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
 	if (S_ISFIFO(SCARG(uap, mode)))
-		return sys_mkfifo(p, uap, retval);
+		return sys_mkfifo(l, (const struct sys_mkfifo_args *)uap,
+		    retval);
 
-	return sys_mknod(p, (struct sys_mknod_args *)uap, retval);
+	return sys_mknod(l, (const struct sys_mknod_args *)uap, retval);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: esp.c,v 1.3 2007/04/22 22:31:14 deraadt Exp $ */
+/*	$NetBSD: esp.c,v 1.25 2008/04/28 20:23:27 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,6 +70,7 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: esp.c,v 1.25 2008/04/28 20:23:27 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -93,9 +87,10 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-#include <scsi/scsi_message.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
+#include <dev/scsipi/scsi_message.h>
 
 #include <dev/ofw/openfirm.h>
 
@@ -107,60 +102,25 @@
 #include <dev/ic/ncr53c9xvar.h>
 
 #include <macppc/dev/dbdma.h>
+#include <macppc/dev/espvar.h>
 
-struct esp_softc {
-	struct ncr53c9x_softc sc_ncr53c9x;	/* glue to MI code */
-
-	struct intrhand sc_ih;			/* intr handler */
-
-	volatile u_char *sc_reg;		/* the registers */
-
-	bus_dmamap_t sc_dmamap;
-	bus_dma_tag_t sc_dmat;
-	dbdma_t sc_dbdma;
-	dbdma_regmap_t *sc_dmareg;		/* DMA registers */
-	dbdma_command_t *sc_dmacmd;		/* command area for DMA */
-
-	int sc_node;				/* node ID */
-	int sc_intr;
-
-	size_t	sc_dmasize;
-	caddr_t *sc_dmaaddr;
-	size_t  *sc_dmalen;
-	int sc_dmaactive;
-	int sc_dma_direction;
-};
-
-#define D_WRITE 1
-#define ESP_DMALIST_MAX	20
-
-void espattach(struct device *, struct device *, void *);
-int espmatch(struct device *, void *, void *);
+int	espmatch(device_t, cfdata_t, void *);
+void	espattach(device_t, device_t, void *);
 
 /* Linkup to the rest of the kernel */
-struct cfattach esp_ca = {
-	sizeof(struct esp_softc), espmatch, espattach
-};
-
-struct scsi_adapter esp_switch = {
-	/* no max at this level; handled by DMA code */
-	ncr53c9x_scsi_cmd, minphys, NULL, NULL,
-};
-
-struct scsi_device esp_dev = {
-	NULL, NULL, NULL, NULL,
-};
+CFATTACH_DECL_NEW(esp, sizeof(struct esp_softc),
+    espmatch, espattach, NULL, NULL);
 
 /*
  * Functions and the switch for the MI code.
  */
-u_char	esp_read_reg(struct ncr53c9x_softc *, int);
-void	esp_write_reg(struct ncr53c9x_softc *, int, u_char);
+uint8_t	esp_read_reg(struct ncr53c9x_softc *, int);
+void	esp_write_reg(struct ncr53c9x_softc *, int, uint8_t);
 int	esp_dma_isintr(struct ncr53c9x_softc *);
 void	esp_dma_reset(struct ncr53c9x_softc *);
 int	esp_dma_intr(struct ncr53c9x_softc *);
-int	esp_dma_setup(struct ncr53c9x_softc *, caddr_t *,
-    size_t *, int, size_t *);
+int	esp_dma_setup(struct ncr53c9x_softc *, uint8_t **,
+	    size_t *, int, size_t *);
 void	esp_dma_go(struct ncr53c9x_softc *);
 void	esp_dma_stop(struct ncr53c9x_softc *);
 int	esp_dma_isactive(struct ncr53c9x_softc *);
@@ -182,7 +142,7 @@ static int espdmaintr(struct esp_softc *);
 static void esp_shutdownhook(void *);
 
 int
-espmatch(struct device *parent, void *cf, void *aux)
+espmatch(device_t parent, cfdata_t cf, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -201,51 +161,51 @@ espmatch(struct device *parent, void *cf, void *aux)
  * Attach this instance, and then all the sub-devices
  */
 void
-espattach(struct device *parent, struct device *self, void *aux)
+espattach(device_t parent, device_t self, void *aux)
 {
-	struct confargs *ca = aux;
-	struct esp_softc *esc = (void *)self;
+	struct esp_softc *esc = device_private(self);
 	struct ncr53c9x_softc *sc = &esc->sc_ncr53c9x;
+	struct confargs *ca = aux;
 	u_int *reg;
-	int sz, error;
+	int sz;
 
 	/*
 	 * Set up glue for MI code early; we use some of it here.
 	 */
+	sc->sc_dev = self;
 	sc->sc_glue = &esp_glue;
 
 	esc->sc_node = ca->ca_node;
-	esc->sc_intr = ca->ca_intr[0];
-	printf(" irq %d", esc->sc_intr);
+	esc->sc_pri = ca->ca_intr[0];
+	aprint_normal(" irq %d", esc->sc_pri);
 
 	/*
 	 * Map my registers in.
 	 */
 	reg = ca->ca_reg;
-	esc->sc_reg = mapiodev(ca->ca_baseaddr + reg[0], reg[1]);
+	esc->sc_reg =    mapiodev(ca->ca_baseaddr + reg[0], reg[1]);
 	esc->sc_dmareg = mapiodev(ca->ca_baseaddr + reg[2], reg[3]);
 
-	esc->sc_dmat = ca->ca_dmat;
-	if ((error = bus_dmamap_create(esc->sc_dmat,
-	    ESP_DMALIST_MAX * DBDMA_COUNT_MAX, ESP_DMALIST_MAX,
-	    DBDMA_COUNT_MAX, NBPG, BUS_DMA_NOWAIT, &esc->sc_dmamap)) != 0) {
-		printf(": cannot create dma map, error = %d\n", error);
-		return;
-	}
-
 	/* Allocate 16-byte aligned DMA command space */
-	esc->sc_dbdma = dbdma_alloc(esc->sc_dmat, ESP_DMALIST_MAX);
-	esc->sc_dmacmd = esc->sc_dbdma->d_addr;
+	esc->sc_dmacmd = dbdma_alloc(sizeof(dbdma_command_t) * 20);
 
 	/* Other settings */
 	sc->sc_id = 7;
 	sz = OF_getprop(ca->ca_node, "clock-frequency",
-		&sc->sc_freq, sizeof(int));
+	    &sc->sc_freq, sizeof(int));
 	if (sz != sizeof(int))
 		sc->sc_freq = 25000000;
 
 	/* gimme MHz */
 	sc->sc_freq /= 1000000;
+
+	/* esc->sc_dma->sc_esp = esc;*/
+
+	/*
+	 * XXX More of this should be in ncr53c9x_attach(), but
+	 * XXX should we really poke around the chip that much in
+	 * XXX the MI code?  Think about this more...
+	 */
 
 	/*
 	 * Set up static configuration info.
@@ -254,6 +214,12 @@ espattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_cfg2 = NCRCFG2_SCSI2; /* | NCRCFG2_FE */
 	sc->sc_cfg3 = NCRCFG3_CDB;
 	sc->sc_rev = NCR_VARIANT_NCR53C94;
+
+	/*
+	 * XXX minsync and maxxfer _should_ be set up in MI code,
+	 * XXX but it appears to have some dependency on what sort
+	 * XXX of DMA we're hooked up to, etc.
+	 */
 
 	/*
 	 * This is the value used to start sync negotiations
@@ -269,43 +235,47 @@ espattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_maxxfer = 64 * 1024;
 
 	/* and the interuppts */
-	mac_intr_establish(parent, esc->sc_intr, IST_LEVEL, IPL_BIO,
-	    ncr53c9x_intr, sc, sc->sc_dev.dv_xname);
+	intr_establish(esc->sc_pri, IST_EDGE, IPL_BIO, ncr53c9x_intr, sc);
 
 	/* Reset SCSI bus when halt. */
 	shutdownhook_establish(esp_shutdownhook, sc);
 
+	/* Do the common parts of attachment. */
+	sc->sc_adapter.adapt_minphys = minphys;
+	sc->sc_adapter.adapt_request = ncr53c9x_scsipi_request;
+	ncr53c9x_attach(sc);
+
 	/* Turn on target selection using the `DMA' method */
 	sc->sc_features |= NCR_F_DMASELECT;
-
-	ncr53c9x_attach(sc, &esp_switch, &esp_dev);
-
 }
 
 /*
  * Glue functions.
  */
 
-u_char
+uint8_t
 esp_read_reg(struct ncr53c9x_softc *sc, int reg)
 {
 	struct esp_softc *esc = (struct esp_softc *)sc;
 
 	return in8(&esc->sc_reg[reg * 16]);
+	/*return (esc->sc_reg[reg * 16]);*/
 }
 
 void
-esp_write_reg(struct ncr53c9x_softc *sc, int reg, u_char val)
+esp_write_reg(struct ncr53c9x_softc *sc, int reg, uint8_t val)
 {
 	struct esp_softc *esc = (struct esp_softc *)sc;
-	u_char v = val;
+	uint8_t v = val;
 
 	out8(&esc->sc_reg[reg * 16], v);
+	/*esc->sc_reg[reg * 16] = v;*/
 }
 
 int
 esp_dma_isintr(struct ncr53c9x_softc *sc)
 {
+
 	return esp_read_reg(sc, NCR_STAT) & NCRSTAT_INT;
 }
 
@@ -323,36 +293,63 @@ esp_dma_intr(struct ncr53c9x_softc *sc)
 {
 	struct esp_softc *esc = (struct esp_softc *)sc;
 
-	return (espdmaintr(esc));
+	return espdmaintr(esc);
 }
 
 int
-esp_dma_setup(struct ncr53c9x_softc *sc, caddr_t *addr, size_t *len,
-     int datain, size_t *dmasize)
+esp_dma_setup(struct ncr53c9x_softc *sc, uint8_t **addr, size_t *len,
+    int datain, size_t *dmasize)
 {
 	struct esp_softc *esc = (struct esp_softc *)sc;
 	dbdma_command_t *cmdp;
 	u_int cmd;
-	int i, error;
+	u_int va;
+	int count, offset;
 
 	cmdp = esc->sc_dmacmd;
 	cmd = datain ? DBDMA_CMD_IN_MORE : DBDMA_CMD_OUT_MORE;
 
+	count = *dmasize;
+
+	if (count / PAGE_SIZE > 32)
+		panic("%s: transfer size >= 128k", device_xname(sc->sc_dev));
+
 	esc->sc_dmaaddr = addr;
 	esc->sc_dmalen = len;
-	esc->sc_dmasize = *dmasize;
+	esc->sc_dmasize = count;
 
-	if ((error = bus_dmamap_load(esc->sc_dmat, esc->sc_dmamap, *addr,
-	    *dmasize, NULL, BUS_DMA_NOWAIT)) != 0)
-		return (error);
+	va = (u_int)*esc->sc_dmaaddr;
+	offset = va & PGOFSET;
 
-	for (i = 0; i < esc->sc_dmamap->dm_nsegs; i++, cmdp++) {
-		if (i + 1 == esc->sc_dmamap->dm_nsegs)
-			cmd = datain ? DBDMA_CMD_IN_LAST : DBDMA_CMD_OUT_LAST;
-		DBDMA_BUILD(cmdp, cmd, 0, esc->sc_dmamap->dm_segs[i].ds_len,
-		    esc->sc_dmamap->dm_segs[i].ds_addr, DBDMA_INT_NEVER,
-		    DBDMA_WAIT_NEVER, DBDMA_BRANCH_NEVER);
+	/* if va is not page-aligned, setup the first page */
+	if (offset != 0) {
+		int rest = PAGE_SIZE - offset;	/* the rest of the page */
+
+		if (count > rest) {		/* if continues to next page */
+			DBDMA_BUILD(cmdp, cmd, 0, rest, kvtop((void *)va),
+				DBDMA_INT_NEVER, DBDMA_WAIT_NEVER,
+				DBDMA_BRANCH_NEVER);
+			count -= rest;
+			va += rest;
+			cmdp++;
+		}
 	}
+
+	/* now va is page-aligned */
+	while (count > PAGE_SIZE) {
+		DBDMA_BUILD(cmdp, cmd, 0, PAGE_SIZE, kvtop((void *)va),
+		    DBDMA_INT_NEVER, DBDMA_WAIT_NEVER, DBDMA_BRANCH_NEVER);
+		count -= PAGE_SIZE;
+		va += PAGE_SIZE;
+		cmdp++;
+	}
+
+	/* the last page (count <= PAGE_SIZE here) */
+	cmd = datain ? DBDMA_CMD_IN_LAST : DBDMA_CMD_OUT_LAST;
+	DBDMA_BUILD(cmdp, cmd , 0, count, kvtop((void *)va),
+	    DBDMA_INT_NEVER, DBDMA_WAIT_NEVER, DBDMA_BRANCH_NEVER);
+	cmdp++;
+
 	DBDMA_BUILD(cmdp, DBDMA_CMD_STOP, 0, 0, 0,
 	    DBDMA_INT_NEVER, DBDMA_WAIT_NEVER, DBDMA_BRANCH_NEVER);
 
@@ -366,7 +363,7 @@ esp_dma_go(struct ncr53c9x_softc *sc)
 {
 	struct esp_softc *esc = (struct esp_softc *)sc;
 
-	dbdma_start(esc->sc_dmareg, esc->sc_dbdma);
+	dbdma_start(esc->sc_dmareg, esc->sc_dmacmd);
 	esc->sc_dmaactive = 1;
 }
 
@@ -376,7 +373,6 @@ esp_dma_stop(struct ncr53c9x_softc *sc)
 	struct esp_softc *esc = (struct esp_softc *)sc;
 
 	dbdma_stop(esc->sc_dmareg);
-	bus_dmamap_unload(esc->sc_dmat, esc->sc_dmamap);
 	esc->sc_dmaactive = 0;
 }
 
@@ -385,7 +381,7 @@ esp_dma_isactive(struct ncr53c9x_softc *sc)
 {
 	struct esp_softc *esc = (struct esp_softc *)sc;
 
-	return (esc->sc_dmaactive);
+	return esc->sc_dmaactive;
 }
 
 
@@ -403,22 +399,33 @@ espdmaintr(struct esp_softc *sc)
 	int trans, resid;
 	u_long csr = sc->sc_dma_direction;
 
+#if 0
+	if (csr & D_ERR_PEND) {
+		DMACSR(sc) &= ~D_EN_DMA;	/* Stop DMA */
+		DMACSR(sc) |= D_INVALIDATE;
+		printf("%s: error: csr=%s\n", device_xname(nsc->sc_dev),
+		    bitmask_snprintf(csr, DMACSRBITS, bits, sizeof(bits)));
+		return -1;
+	}
+#endif
+
 	/* This is an "assertion" :) */
 	if (sc->sc_dmaactive == 0)
-		panic("dmaintr: DMA wasn't active");
+		panic("%s: DMA wasn't active", __func__);
+
+	/* dbdma_flush(sc->sc_dmareg); */
 
 	/* DMA has stopped */
 	dbdma_stop(sc->sc_dmareg);
-	bus_dmamap_unload(sc->sc_dmat, sc->sc_dmamap);
 	sc->sc_dmaactive = 0;
 
 	if (sc->sc_dmasize == 0) {
 		/* A "Transfer Pad" operation completed */
 		NCR_DMA(("dmaintr: discarded %d bytes (tcl=%d, tcm=%d)\n",
-		    NCR_READ_REG(nsc, NCR_TCL) |
-		    (NCR_READ_REG(nsc, NCR_TCM) << 8),
-		    NCR_READ_REG(nsc, NCR_TCL),
-		    NCR_READ_REG(nsc, NCR_TCM)));
+			NCR_READ_REG(nsc, NCR_TCL) |
+				(NCR_READ_REG(nsc, NCR_TCM) << 8),
+			NCR_READ_REG(nsc, NCR_TCL),
+			NCR_READ_REG(nsc, NCR_TCM)));
 		return 0;
 	}
 
@@ -440,9 +447,10 @@ espdmaintr(struct esp_softc *sc)
 		 * out of the ESP counter registers.
 		 */
 		resid += (NCR_READ_REG(nsc, NCR_TCL) |
-		    (NCR_READ_REG(nsc, NCR_TCM) << 8) |
-		    ((nsc->sc_cfg2 & NCRCFG2_FE)
-		    ? (NCR_READ_REG(nsc, NCR_TCH) << 16) : 0));
+			  (NCR_READ_REG(nsc, NCR_TCM) << 8) |
+			   ((nsc->sc_cfg2 & NCRCFG2_FE)
+				? (NCR_READ_REG(nsc, NCR_TCH) << 16)
+				: 0));
 
 		if (resid == 0 && sc->sc_dmasize == 65536 &&
 		    (nsc->sc_cfg2 & NCRCFG2_FE) == 0)
@@ -452,18 +460,42 @@ espdmaintr(struct esp_softc *sc)
 
 	trans = sc->sc_dmasize - resid;
 	if (trans < 0) {			/* transferred < 0 ? */
+#if 0
+		/*
+		 * This situation can happen in perfectly normal operation
+		 * if the ESP is reselected while using DMA to select
+		 * another target.  As such, don't print the warning.
+		 */
+		printf("%s: xfer (%d) > req (%d)\n",
+		    device_xname(nsc->sc_dev), trans, sc->sc_dmasize);
+#endif
 		trans = sc->sc_dmasize;
 	}
 
 	NCR_DMA(("dmaintr: tcl=%d, tcm=%d, tch=%d; trans=%d, resid=%d\n",
-	    NCR_READ_REG(nsc, NCR_TCL), NCR_READ_REG(nsc, NCR_TCM),
-	    (nsc->sc_cfg2 & NCRCFG2_FE) ? NCR_READ_REG(nsc, NCR_TCH) : 0,
-	    trans, resid));
+		NCR_READ_REG(nsc, NCR_TCL),
+		NCR_READ_REG(nsc, NCR_TCM),
+		(nsc->sc_cfg2 & NCRCFG2_FE)
+			? NCR_READ_REG(nsc, NCR_TCH) : 0,
+		trans, resid));
 
+#if 0
+	if (csr & D_WRITE)
+		flushcache(*sc->sc_dmaaddr, trans);
+#endif
 
 	*sc->sc_dmalen -= trans;
 	*sc->sc_dmaaddr += trans;
 
+#if 0	/* this is not normal operation just yet */
+	if (*sc->sc_dmalen == 0 ||
+	    nsc->sc_phase != nsc->sc_prevphase)
+		return 0;
+
+	/* and again */
+	dma_start(sc, sc->sc_dmaaddr, sc->sc_dmalen, DMACSR(sc) & D_WRITE);
+	return 1;
+#endif
 	return 0;
 }
 

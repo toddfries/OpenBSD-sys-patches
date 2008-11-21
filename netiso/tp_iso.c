@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_iso.c,v 1.27 2006/12/15 21:18:57 joerg Exp $	*/
+/*	$NetBSD: tp_iso.c,v 1.32 2007/12/20 19:53:35 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -75,7 +75,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tp_iso.c,v 1.27 2006/12/15 21:18:57 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tp_iso.c,v 1.32 2007/12/20 19:53:35 dyoung Exp $");
 
 #include "opt_iso.h"
 #ifdef ISO
@@ -100,7 +100,6 @@ __KERNEL_RCSID(0, "$NetBSD: tp_iso.c,v 1.27 2006/12/15 21:18:57 joerg Exp $");
 #include <netiso/tp_stat.h>
 #include <netiso/tp_pcb.h>
 #include <netiso/tp_trace.h>
-#include <netiso/tp_stat.h>
 #include <netiso/tp_tpdu.h>
 #include <netiso/tp_clnp.h>
 #include <netiso/tp_var.h>
@@ -117,7 +116,7 @@ __KERNEL_RCSID(0, "$NetBSD: tp_iso.c,v 1.27 2006/12/15 21:18:57 joerg Exp $");
  */
 
 void
-iso_getsufx(void *v, u_short *lenp, caddr_t data_out, int which)
+iso_getsufx(void *v, u_short *lenp, void *data_out, int which)
 {
 	struct isopcb  *isop = v;
 	struct sockaddr_iso *addr = 0;
@@ -143,7 +142,7 @@ iso_getsufx(void *v, u_short *lenp, caddr_t data_out, int which)
  * TP_FOREIGN.
  */
 void
-iso_putsufx(void *v, caddr_t sufxloc, int sufxlen, int which)
+iso_putsufx(void *v, void *sufxloc, int sufxlen, int which)
 {
 	struct isopcb  *isop = v;
 	struct sockaddr_iso **dst, *backup;
@@ -183,7 +182,7 @@ iso_putsufx(void *v, caddr_t sufxloc, int sufxlen, int which)
 			m->m_len = len;
 		}
 	}
-	bcopy(sufxloc, TSEL(addr), sufxlen);
+	memcpy(WRITABLE_TSEL(addr), sufxloc, sufxlen);
 	addr->siso_tlen = sufxlen;
 	addr->siso_len = len;
 }
@@ -285,8 +284,8 @@ iso_cmpnetaddr(void *v, struct sockaddr *nm, int which)
 #endif
 	if (name->siso_tlen && bcmp(TSEL(name), TSEL(siso), name->siso_tlen))
 		return (0);
-	return (bcmp((caddr_t) name->siso_data,
-		     (caddr_t) siso->siso_data, name->siso_nlen) == 0);
+	return (bcmp((void *) name->siso_data,
+		     (void *) siso->siso_data, name->siso_nlen) == 0);
 }
 
 /*
@@ -306,7 +305,7 @@ iso_getnetaddr(void *v, struct mbuf *name, int which)
 	struct sockaddr_iso *siso =
 	(which == TP_LOCAL ? isop->isop_laddr : isop->isop_faddr);
 	if (siso)
-		bcopy((caddr_t) siso, mtod(name, caddr_t),
+		bcopy((void *) siso, mtod(name, void *),
 		      (unsigned) (name->m_len = siso->siso_len));
 	else
 		name->m_len = 0;
@@ -340,13 +339,11 @@ tpclnp_mtu(void *v)
 		printf("tpclnp_mtu(tpcb %p)\n", tpcb);
 	}
 #endif
-	tpcb->tp_routep = &isop->isop_route.ro_rt;
+	tpcb->tp_routep = &isop->isop_route;
 	if (tpcb->tp_netservice == ISO_CONS)
 		return 0;
-	else
-		return (sizeof(struct clnp_fixed) + sizeof(struct clnp_segment) +
-			2 * sizeof(struct iso_addr));
-
+	return (sizeof(struct clnp_fixed) + sizeof(struct clnp_segment) +
+		2 * sizeof(struct iso_addr));
 }
 
 /*
@@ -439,7 +436,7 @@ tpclnp_output_dg(struct mbuf *m0, ...)
 	 *	Fill in minimal portion of isopcb so that clnp can send the
 	 *	packet.
 	 */
-	bzero((caddr_t) & tmppcb, sizeof(tmppcb));
+	bzero((void *) & tmppcb, sizeof(tmppcb));
 	tmppcb.isop_laddr = &tmppcb.isop_sladdr;
 	tmppcb.isop_laddr->siso_addr = *laddr;
 	tmppcb.isop_faddr = &tmppcb.isop_sfaddr;
@@ -467,7 +464,7 @@ tpclnp_output_dg(struct mbuf *m0, ...)
 	/*
 	 *	Free route allocated by clnp (if the route was indeed allocated)
 	 */
-	rtcache_free((struct route *)&tmppcb.isop_route);
+	rtcache_free(&tmppcb.isop_route);
 
 	return (err);
 }
@@ -609,9 +606,9 @@ tpiso_quench(struct isopcb *isop)
  * 	(siso) is the address of the guy who sent the ER CLNPDU
  */
 void *
-tpclnp_ctlinput(int cmd, struct sockaddr *saddr, void *dummy)
+tpclnp_ctlinput(int cmd, const struct sockaddr *sa, void *dummy)
 {
-	struct sockaddr_iso *siso = (struct sockaddr_iso *) saddr;
+	const struct sockaddr_iso *siso = (const struct sockaddr_iso *)sa;
 
 #ifdef ARGO_DEBUG
 	if (argo_debug[D_TPINPUT]) {
@@ -679,8 +676,8 @@ static struct sockaddr_iso siso = {
 void
 tpclnp_ctlinput1(int cmd, struct iso_addr *isoa)
 {
-	bzero((caddr_t) & siso.siso_addr, sizeof(siso.siso_addr));
-	bcopy((caddr_t) isoa, (caddr_t) & siso.siso_addr, isoa->isoa_len);
+	bzero((void *) & siso.siso_addr, sizeof(siso.siso_addr));
+	bcopy((void *) isoa, (void *) & siso.siso_addr, isoa->isoa_len);
 	tpclnp_ctlinput(cmd, (struct sockaddr *) &siso, NULL);
 }
 

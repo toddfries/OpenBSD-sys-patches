@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpufunc_asm_armv4.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: cpufunc_asm_armv4.S,v 1.1 2001/11/10 23:14:09 thorpej Exp $	*/
+/*	$NetBSD: cpufunc_asm_armv4.S,v 1.2 2008/10/14 16:01:22 matt Exp $	*/
 
 /*
  * Copyright (c) 2001 ARM Limited
@@ -48,10 +47,12 @@ ENTRY(armv4_tlb_flushID)
 	mov	pc, lr
 
 ENTRY(armv4_tlb_flushI)
+	mov	r0, #0
 	mcr	p15, 0, r0, c8, c5, 0	/* flush I tlb */
 	mov	pc, lr
 
 ENTRY(armv4_tlb_flushD)
+	mov	r0, #0
 	mcr	p15, 0, r0, c8, c6, 0	/* flush D tlb */
 	mov	pc, lr
 

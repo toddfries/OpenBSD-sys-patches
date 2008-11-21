@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_rb.c,v 1.35 2006/07/21 18:40:58 tsutsui Exp $	*/
+/*	$NetBSD: grf_rb.c,v 1.40 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -117,9 +110,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_rb.c,v 1.35 2006/07/21 18:40:58 tsutsui Exp $");
-
-#include "opt_compat_hpux.h"
+__KERNEL_RCSID(0, "$NetBSD: grf_rb.c,v 1.40 2008/04/28 20:23:19 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -152,21 +143,21 @@ __KERNEL_RCSID(0, "$NetBSD: grf_rb.c,v 1.35 2006/07/21 18:40:58 tsutsui Exp $");
 
 #include "ite.h"
 
-static int	rb_init(struct grf_data *gp, int, caddr_t);
-static int	rb_mode(struct grf_data *gp, int, caddr_t);
+static int	rb_init(struct grf_data *gp, int, uint8_t *);
+static int	rb_mode(struct grf_data *gp, int, void *);
 
-static int	rbox_intio_match(struct device *, struct cfdata *, void *);
-static void	rbox_intio_attach(struct device *, struct device *, void *);
+static int	rbox_intio_match(device_t, cfdata_t, void *);
+static void	rbox_intio_attach(device_t, device_t, void *);
 
-static int	rbox_dio_match(struct device *, struct cfdata *, void *);
-static void	rbox_dio_attach(struct device *, struct device *, void *);
+static int	rbox_dio_match(device_t, cfdata_t, void *);
+static void	rbox_dio_attach(device_t, device_t, void *);
 
 int	rboxcnattach(bus_space_tag_t, bus_addr_t, int);
 
-CFATTACH_DECL(rbox_intio, sizeof(struct grfdev_softc),
+CFATTACH_DECL_NEW(rbox_intio, sizeof(struct grfdev_softc),
     rbox_intio_match, rbox_intio_attach, NULL, NULL);
 
-CFATTACH_DECL(rbox_dio, sizeof(struct grfdev_softc),
+CFATTACH_DECL_NEW(rbox_dio, sizeof(struct grfdev_softc),
     rbox_dio_match, rbox_dio_attach, NULL, NULL);
 
 /* Renaissance grf switch */
@@ -175,7 +166,7 @@ static struct grfsw rbox_grfsw = {
 };
 
 static int rbconscode;
-static caddr_t rbconaddr;
+static void *rbconaddr;
 
 #if NITE > 0
 static void	rbox_init(struct ite_data *);
@@ -195,7 +186,7 @@ static struct itesw rbox_itesw = {
 #endif /* NITE > 0 */
 
 static int
-rbox_intio_match(struct device *parent, struct cfdata *match, void *aux)
+rbox_intio_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct intio_attach_args *ia = aux;
 	struct grfreg *grf;
@@ -203,7 +194,7 @@ rbox_intio_match(struct device *parent, struct cfdata *match, void *aux)
 	if (strcmp("fb",ia->ia_modname) != 0)
 		return 0;
 
-	if (badaddr((caddr_t)ia->ia_addr))
+	if (badaddr((void *)ia->ia_addr))
 		return 0;
 
 	grf = (struct grfreg *)ia->ia_addr;
@@ -217,13 +208,15 @@ rbox_intio_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 static void
-rbox_intio_attach(struct device *parent, struct device *self, void *aux)
+rbox_intio_attach(device_t parent, device_t self, void *aux)
 {
-	struct grfdev_softc *sc = (struct grfdev_softc *)self;
+	struct grfdev_softc *sc = device_private(self);
 	struct intio_attach_args *ia = aux;
-	caddr_t grf;
+	void *grf;
 
-	grf = (caddr_t)ia->ia_addr;
+	sc->sc_dev = self;
+
+	grf = (void *)ia->ia_addr;
 	sc->sc_scode = -1;	/* XXX internal i/o */
 
 	sc->sc_isconsole = (sc->sc_scode == rbconscode);
@@ -231,7 +224,7 @@ rbox_intio_attach(struct device *parent, struct device *self, void *aux)
 }
 
 static int
-rbox_dio_match(struct device *parent, struct cfdata *match, void *aux)
+rbox_dio_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -243,21 +236,21 @@ rbox_dio_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 static void
-rbox_dio_attach(struct device *parent, struct device *self, void *aux)
+rbox_dio_attach(device_t parent, device_t self, void *aux)
 {
-	struct grfdev_softc *sc = (struct grfdev_softc *)self;
+	struct grfdev_softc *sc = device_private(self);
 	struct dio_attach_args *da = aux;
 	bus_space_handle_t bsh;
-	caddr_t grf;
+	void *grf;
 
+	sc->sc_dev = self;
 	sc->sc_scode = da->da_scode;
 	if (sc->sc_scode == rbconscode)
 		grf = rbconaddr;
 	else {
 		if (bus_space_map(da->da_bst, da->da_addr, da->da_size,
 		    0, &bsh)) {
-			printf("%s: can't map framebuffer\n",
-			    sc->sc_dev.dv_xname);
+			aprint_error(": can't map framebuffer\n");
 			return;
 		}
 		grf = bus_space_vaddr(da->da_bst, bsh);
@@ -273,7 +266,7 @@ rbox_dio_attach(struct device *parent, struct device *self, void *aux)
  * Returns 0 if hardware not present, non-zero ow.
  */
 static int
-rb_init(struct grf_data *gp, int scode, caddr_t addr)
+rb_init(struct grf_data *gp, int scode, uint8_t *addr)
 {
 	struct rboxfb *rbp;
 	struct grfinfo *gi = &gp->g_display;
@@ -284,9 +277,9 @@ rb_init(struct grf_data *gp, int scode, caddr_t addr)
 	 * no need to repeat this.
 	 */
 	if (scode != rbconscode) {
-		rbp = (struct rboxfb *) addr;
+		rbp = (struct rboxfb *)addr;
 		if (ISIIOVA(addr))
-			gi->gd_regaddr = (caddr_t) IIOP(addr);
+			gi->gd_regaddr = (void *)IIOP(addr);
 		else
 			gi->gd_regaddr = dio_scodetopa(scode);
 		gi->gd_regsize = 0x20000;
@@ -294,16 +287,16 @@ rb_init(struct grf_data *gp, int scode, caddr_t addr)
 		gi->gd_fbheight = (rbp->fbhmsb << 8) | rbp->fbhlsb;
 		gi->gd_fbsize = gi->gd_fbwidth * gi->gd_fbheight;
 		fboff = (rbp->fbomsb << 8) | rbp->fbolsb;
-		gi->gd_fbaddr = (caddr_t) (*((u_char *)addr + fboff) << 16);
-		if (gi->gd_regaddr >= (caddr_t)DIOIIBASE) {
+		gi->gd_fbaddr = (void *)(*(addr + fboff) << 16);
+		if ((vaddr_t)gi->gd_regaddr >= DIOIIBASE) {
 			/*
 			 * For DIO II space the fbaddr just computed is
 			 * the offset from the select code base (regaddr)
 			 * of the framebuffer.  Hence it is also implicitly
 			 * the size of the set.
 			 */
-			gi->gd_regsize = (int) gi->gd_fbaddr;
-			gi->gd_fbaddr += (int) gi->gd_regaddr;
+			gi->gd_regsize = (int)gi->gd_fbaddr;
+			gi->gd_fbaddr += (int)gi->gd_regaddr;
 			gp->g_regkva = addr;
 			gp->g_fbkva = addr + gi->gd_regsize;
 		} else {
@@ -328,7 +321,7 @@ rb_init(struct grf_data *gp, int scode, caddr_t addr)
  * Return a UNIX error number or 0 for success.
  */
 static int
-rb_mode(struct grf_data *gp, int cmd, caddr_t data)
+rb_mode(struct grf_data *gp, int cmd, void *data)
 {
 	struct rboxfb *rbp;
 	int error = 0;
@@ -365,43 +358,6 @@ rb_mode(struct grf_data *gp, int cmd, caddr_t data)
 	case GM_UNMAP:
 		gp->g_data = 0;
 		break;
-
-#ifdef COMPAT_HPUX
-	case GM_DESCRIBE:
-	{
-		struct grf_fbinfo *fi = (struct grf_fbinfo *)data;
-		struct grfinfo *gi = &gp->g_display;
-		int i;
-
-		/* feed it what HP-UX expects */
-		fi->id = gi->gd_id;
-		fi->mapsize = gi->gd_fbsize;
-		fi->dwidth = gi->gd_dwidth;
-		fi->dlength = gi->gd_dheight;
-		fi->width = gi->gd_fbwidth;
-		fi->length = gi->gd_fbheight;
-		fi->bpp = NBBY;
-		fi->xlen = (fi->width * fi->bpp) / NBBY;
-		fi->npl = gi->gd_planes;
-		fi->bppu = fi->npl;
-		fi->nplbytes = fi->xlen * ((fi->length * fi->bpp) / NBBY);
-		memcpy(fi->name, "HP98720", 8);
-		fi->attr = 2;	/* HW block mover */
-		/*
-		 * If mapped, return the UVA where mapped.
-		 */
-		if (gp->g_data) {
-			fi->regbase = gp->g_data;
-			fi->fbbase = fi->regbase + gp->g_display.gd_regsize;
-		} else {
-			fi->fbbase = 0;
-			fi->regbase = 0;
-		}
-		for (i = 0; i < 6; i++)
-			fi->regions[i] = 0;
-		break;
-	}
-#endif
 
 	default:
 		error = EINVAL;
@@ -614,7 +570,7 @@ int
 rboxcnattach(bus_space_tag_t bst, bus_addr_t addr, int scode)
 {
 	bus_space_handle_t bsh;
-	caddr_t va;
+	void *va;
 	struct grfreg *grf;
 	struct grf_data *gp = &grf_cn;
 	int size;

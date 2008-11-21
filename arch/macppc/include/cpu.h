@@ -1,9 +1,8 @@
-/*	$OpenBSD: cpu.h,v 1.9 2005/12/09 22:54:15 kettenis Exp $	*/
-/*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
+/*	$NetBSD: cpu.h,v 1.18 2001/08/26 02:47:37 matt Exp $	*/
 
 /*
- * Copyright (C) 1995, 1996 Wolfgang Solfrank.
- * Copyright (C) 1995, 1996 TooLs GmbH.
+ * Copyright (C) 1995-1997 Wolfgang Solfrank.
+ * Copyright (C) 1995-1997 TooLs GmbH.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,23 +33,11 @@
 #ifndef	_MACHINE_CPU_H_
 #define	_MACHINE_CPU_H_
 
+#if defined(_KERNEL)
+#define	CPU_MAXNUM	2
+extern char bootpath[];
+#endif /* _KERNEL */
+
 #include <powerpc/cpu.h>
-
-/* 
- * CTL_MACHDEP definitions.
- */
-#define CPU_ALLOWAPERTURE	1	/* allow mmap of /dev/xf86 */
-#define CPU_ALTIVEC		2	/* altivec is present */
-#define CPU_MAXID		3	/* number of valid machdep ids */
-
-#define	CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "allowaperture", CTLTYPE_INT }, \
-	{ "altivec", CTLTYPE_INT }, \
-}
-
-extern int ppc_altivec;
-
-extern void (*ppc64_slew_voltage)(u_int);
 
 #endif	/* _MACHINE_CPU_H_ */

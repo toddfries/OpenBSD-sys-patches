@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.c,v 1.10 2005/12/11 12:17:24 christos Exp $	*/
+/*	$NetBSD: intr.c,v 1.15 2008/04/28 20:23:19 martin Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,19 +34,25 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.10 2005/12/11 12:17:24 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.15 2008/04/28 20:23:19 martin Exp $");
+
+#define __MUTEX_PRIVATE
 
 #include <sys/param.h>
 #include <sys/malloc.h>
+#include <sys/cpu.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpufunc.h>
 #include <machine/intr.h>
+#include <machine/reg.h>
 
 #include <hp700/hp700/intr.h>
 #include <hp700/hp700/machdep.h>
 
 #include <uvm/uvm_extern.h>
+
+#include <machine/mutex.h>
 
 /* The priority level masks. */
 int imask[NIPL];
@@ -164,9 +163,6 @@ hp700_intr_bootstrap(void)
 	/* Initialize the CPU interrupt register description. */
 	hp700_intr_reg_establish(&int_reg_cpu);
 	int_reg_cpu.int_reg_dev = "cpu0";	/* XXX */
-
-	/* Bootstrap soft interrupts. */
-	softintr_bootstrap();
 }
 
 /*
@@ -288,9 +284,6 @@ hp700_intr_init(void)
 	struct hp700_int_reg *int_reg;
 	int eiem;
 
-	/* Initialize soft interrupts. */
-	softintr_init();
-
 	/*
 	 * Put together the initial imask for each level.
 	 */
@@ -315,31 +308,12 @@ hp700_intr_init(void)
          * dropping data.
          */
         imask[IPL_SOFTCLOCK] |= imask[IPL_NONE]; 
-        imask[IPL_SOFTNET] |= imask[IPL_SOFTCLOCK];
-        imask[IPL_BIO] |= imask[IPL_SOFTNET];
-        imask[IPL_NET] |= imask[IPL_BIO];
-        imask[IPL_SOFTSERIAL] |= imask[IPL_NET];
-        imask[IPL_TTY] |= imask[IPL_SOFTSERIAL];
-
-        /*
-         * There are tty, network and disk drivers that use free() at interrupt
-         * time, so imp > (tty | net | bio).
-         */
-        imask[IPL_VM] |= imask[IPL_TTY];
-        
-        imask[IPL_AUDIO] |= imask[IPL_VM];
-   
-        /*
-         * Since run queues may be manipulated by both the statclock and tty,
-         * network, and disk drivers, clock > imp.
-         */             
-        imask[IPL_CLOCK] |= imask[IPL_AUDIO];
-        
-        /* 
-         * IPL_HIGH must block everything that can manipulate a run queue.
-         */     
-        imask[IPL_HIGH] |= imask[IPL_CLOCK]; 
-        imask[IPL_SERIAL] |= imask[IPL_HIGH]; 
+        imask[IPL_SOFTBIO] |= imask[IPL_SOFTCLOCK];
+        imask[IPL_SOFTNET] |= imask[IPL_SOFTBIO];
+        imask[IPL_SOFTSERIAL] |= imask[IPL_SOFTNET];
+        imask[IPL_VM] |= imask[IPL_SOFTSERIAL];
+        imask[IPL_SCHED] |= imask[IPL_VM];
+        imask[IPL_HIGH] |= imask[IPL_SCHED];
 
 	/* Now go back and flesh out the spl levels on each bit. */
 	for(bit_pos = 0; bit_pos < HP700_INT_BITS; bit_pos++) {
@@ -350,8 +324,8 @@ hp700_intr_init(void)
 	}
 
 	/* Print out the levels. */
-	printf("biomask %08x netmask %08x ttymask %08x\n",
-	    imask[IPL_BIO], imask[IPL_NET], imask[IPL_TTY]);
+	printf("vmmask %08x schedmask %08x highmask %08x\n",
+	    imask[IPL_VM], imask[IPL_SCHED], imask[IPL_HIGH]);
 #if 0
 	for(bit_pos = 0; bit_pos < NIPL; bit_pos++)
 		printf("imask[%d] == %08x\n", bit_pos, imask[bit_pos]);
@@ -403,6 +377,33 @@ hppa_intr(struct trapframe *frame)
 	int i;
 	struct hp700_int_reg *int_reg;
 	int hp700_intr_ipending_new(struct hp700_int_reg *, int);
+
+#ifndef LOCKDEBUG
+	extern char mutex_enter_crit_start[];
+	extern char mutex_enter_crit_end[];
+
+	extern char _lock_cas_ras_start[];
+	extern char _lock_cas_ras_end[];
+
+	if (frame->tf_iisq_head == HPPA_SID_KERNEL &&
+	    frame->tf_iioq_head >= (u_int)_lock_cas_ras_start &&
+	    frame->tf_iioq_head <= (u_int)_lock_cas_ras_end) {
+		frame->tf_iioq_head = (u_int)_lock_cas_ras_start;
+		frame->tf_iioq_tail = (u_int)_lock_cas_ras_start + 4;
+	}
+
+	/*
+	 * If we interrupted in the middle of mutex_enter(),
+	 * we must patch up the lock owner value quickly if
+	 * we got the interlock.  If any of the interrupt
+	 * handlers need to aquire the mutex, they could
+	 * deadlock if the owner value is left unset.
+	 */
+	if (frame->tf_iioq_head >= (u_int)mutex_enter_crit_start &&
+	    frame->tf_iioq_head <= (u_int)mutex_enter_crit_end &&
+	    frame->tf_ret0 != 0)
+		((kmutex_t *)frame->tf_arg0)->mtx_owner = (uintptr_t)curlwp;
+#endif
 
 	/*
 	 * Read the CPU interrupt register and acknowledge
@@ -515,4 +516,15 @@ hp700_intr_dispatch(int ncpl, int eiem, struct trapframe *frame)
 	/* Interrupts are disabled again, restore cpl and the depth. */
 	cpl = ncpl;
 	hppa_intr_depth = old_hppa_intr_depth;
+}
+
+bool
+cpu_intr_p(void)
+{
+
+#ifdef __HAVE_FAST_SOFTINTS
+#error this should not count fast soft interrupts
+#else
+	return hppa_intr_depth != 0;
+#endif
 }

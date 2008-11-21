@@ -1,5 +1,4 @@
-/*	$OpenBSD: uboot.c,v 1.5 2007/05/29 00:03:09 deraadt Exp $	*/
-/*	$NetBSD: uboot.c,v 1.3 1997/04/27 21:17:13 thorpej Exp $	*/
+/*	$NetBSD: uboot.c,v 1.15 2008/07/16 13:44:51 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -33,13 +32,12 @@
  */
 
 #include <sys/param.h>
-#include <sys/reboot.h>
-#include <machine/exec.h>
-#include <a.out.h>
+#include <sys/boot_flag.h>
 
 #include <lib/libsa/stand.h>
+#include <lib/libkern/libkern.h>
 
-#include "samachdep.h"
+#include <hp300/stand/common/samachdep.h>
 
 /*
  * Boot program... bits in `howto' determine whether boot stops to
@@ -53,28 +51,33 @@ extern	u_int opendev;
 extern	char *lowram;
 extern	int noconsole;
 
-extern	const char version[];
-
 /*
  * XXX UFS accepts a /, NFS doesn't.
  */
 char *name;
 char *names[] = {
-	"bsd"
+	"netbsd",		"netbsd.gz",
+	"netbsd.bak",		"netbsd.bak.gz",
+	"netbsd.old",		"netbsd.old.gz",
+	"onetbsd",		"onetbsd.gz",
+	NULL
 };
 #define NUMNAMES	(sizeof(names) / sizeof(char *))
 
 static int bdev, badapt, bctlr, bunit, bpart;
 
-void	getbootdev(int *);
+void main(void);
+void getbootdev(int *);
 
-int
-main()
+void
+main(void)
 {
 	int currname = 0;
 
-	printf("\n>> OpenBSD [%dKB] UNIFIED BOOT %s HP 9000/%s CPU\n",
-	       (__LDPGSZ / 1024), version, getmachineid());
+	printf("\n");
+	printf(">> %s, Revision %s (from NetBSD %s)\n",
+	    bootprog_name, bootprog_rev, bootprog_kernrev);
+	printf(">> HP 9000/%s SPU\n", getmachineid());
 	printf(">> Enter \"reset\" to reset system.\n");
 
 	bdev   = B_TYPE(bootdev);
@@ -93,11 +96,9 @@ main()
 			getbootdev(&howto);
 		} else
 			printf(": %s\n", name);
-
-		exec(name, lowram, howto);
+		exec_hp300(name, (u_long)lowram, howto);
 		printf("boot: %s\n", strerror(errno));
 	}
-	return (0);
 }
 
 void
@@ -105,14 +106,14 @@ getbootdev(int *howto)
 {
 	char c, *ptr = line;
 
-	printf("Boot: [[[%s%d%c:]%s][-acds]] :- ",
+	printf("Boot: [[[%s%d%c:]%s][-a][-c][-d][-s][-v][-q]] :- ",
 	    devsw[bdev].dv_name, bctlr + (8 * badapt), 'a' + bpart, name);
 
 	if (tgets(line)) {
 		if (strcmp(line, "reset") == 0) {
 			call_req_reboot();      /* reset machine */
 			printf("panic: can't reboot, halting\n");
-			asm("stop #0x2700");
+			__asm("stop #0x2700");
 		}
 		while ((c = *ptr) != '\0') {
 			while (c == ' ')
@@ -121,23 +122,7 @@ getbootdev(int *howto)
 				return;
 			if (c == '-')
 				while ((c = *++ptr) && c != ' ')
-					switch (c) {
-					case 'a':
-						*howto |= RB_ASKNAME;
-						continue;
-					case 'b':
-						*howto |= RB_HALT;
-						continue;
-					case 'c':
-						*howto |= RB_CONFIG;
-						continue;
-					case 'd':
-						*howto |= RB_KDB;
-						continue;
-					case 's':
-						*howto |= RB_SINGLE;
-						continue;
-					}
+					BOOT_FLAG(c, *howto);
 			else {
 				name = ptr;
 				while ((c = *++ptr) && c != ' ');

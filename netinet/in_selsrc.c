@@ -1,4 +1,4 @@
-/*	$NetBSD: in_selsrc.c,v 1.3 2006/11/16 01:33:45 christos Exp $	*/
+/*	$NetBSD: in_selsrc.c,v 1.6 2007/12/04 10:33:11 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2005 David Young.  All rights reserved.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in_selsrc.c,v 1.3 2006/11/16 01:33:45 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in_selsrc.c,v 1.6 2007/12/04 10:33:11 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet_conf.h"
@@ -106,6 +106,7 @@ static struct in_ifselsrc default_iss = { 0, {in_index} };
 
 #ifdef GETIFA_DEBUG
 int in_selsrc_debug = 0;
+#endif /* GETIFA_DEBUG */
 
 SYSCTL_SETUP(sysctl_selectsrc_setup, "sysctl selectsrc subtree setup")
 {
@@ -141,6 +142,7 @@ SYSCTL_SETUP(sysctl_selectsrc_setup, "sysctl selectsrc subtree setup")
 		       "rc = %d\n", __func__, rc);
 		return;
 	}
+#ifdef GETIFA_DEBUG
 	if ((rc = sysctl_createv(clog, 0, &rnode, &cnode,
 	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
 	    SYSCTL_DESCR("enable source-selection debug messages"),
@@ -149,6 +151,7 @@ SYSCTL_SETUP(sysctl_selectsrc_setup, "sysctl selectsrc subtree setup")
 		       "rc = %d\n", __func__, rc);
 		return;
 	}
+#endif /* GETIFA_DEBUG */
 	if ((rc = sysctl_createv(clog, 0, &rnode, &cnode,
 	    CTLFLAG_READWRITE, CTLTYPE_STRING, "default",
 	    SYSCTL_DESCR("default source selection policy"),
@@ -160,17 +163,16 @@ SYSCTL_SETUP(sysctl_selectsrc_setup, "sysctl selectsrc subtree setup")
 		return;
 	}
 }
-#endif /* GETIFA_DEBUG */
 
 /*
- * Score by address preference: prefer addresses with lower preference
+ * Score by address preference: prefer addresses with higher preference
  * number.  Preference numbers are assigned with ioctl SIOCSIFADDRPREF.
  */
 static int
 in_preference(const struct in_addr *src, int preference,
     int idx, const struct in_addr *dst)
 {
-	return -preference;
+	return preference;
 }
 
 /*
@@ -332,7 +334,7 @@ in_getifa(struct ifaddr *ifa, const struct sockaddr *dst0)
 
 	/* Find out the index of this ifaddr. */
 	idx = 0;
-	TAILQ_FOREACH(alt_ifa, &ifa->ifa_ifp->if_addrlist, ifa_list) {
+	IFADDR_FOREACH(alt_ifa, ifa->ifa_ifp) {
 		if (alt_ifa == best_ifa)
 			break;
 		idx++;
@@ -350,7 +352,7 @@ in_getifa(struct ifaddr *ifa, const struct sockaddr *dst0)
 #endif /* GETIFA_DEBUG */
 
 	idx = -1;
-	TAILQ_FOREACH(alt_ifa, &ifa->ifa_ifp->if_addrlist, ifa_list) {
+	IFADDR_FOREACH(alt_ifa, ifa->ifa_ifp) {
 		++idx;
 		src = IA_SIN(alt_ifa);
 

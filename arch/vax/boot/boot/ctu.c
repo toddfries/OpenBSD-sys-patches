@@ -1,4 +1,3 @@
-/*	$OpenBSD: ctu.c,v 1.4 2003/08/15 23:16:30 deraadt Exp $ */
 /*	$NetBSD: ctu.c,v 1.3 2000/05/20 13:30:03 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -63,11 +62,13 @@ volatile struct tu_softc {
 	int	sc_bbytes;	/* Number of xfer'd bytes this block */
 } tu_sc;
 
-void	ctutintr(void);
-void	cturintr(void);
+void	ctutintr __P((void));
+void	cturintr __P((void));
 
 int
-ctuopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
+ctuopen(f, adapt, ctlr, unit, part)
+	struct open_file *f;
+	int ctlr, unit, part;
 {
 
 	tu_sc.sc_state = SC_INIT;
@@ -80,7 +81,12 @@ ctuopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 }
 
 int
-ctustrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsize)
+ctustrategy(f, func, dblk, size, buf, rsize)
+        void *f;
+        int func;
+        daddr_t dblk;
+        void *buf;
+        size_t size, *rsize;
 {
 	struct rsp *rsp = (struct rsp *)tu_sc.sc_rsp;
 
@@ -107,7 +113,7 @@ ctustrategy(void *f, int func, daddr_t dblk, size_t size, void *buf, size_t *rsi
 }
 
 void
-cturintr(void)
+cturintr()
 {
 	int	status;
 
@@ -139,6 +145,7 @@ cturintr(void)
 			break;
 		tu_sc.sc_xfptr[tu_sc.sc_xbytes++] = status;
 		break;
+
 	case SC_READY:
 	case SC_SEND_CMD:
 		break;
@@ -147,7 +154,7 @@ cturintr(void)
 }
 
 void
-ctutintr(void)
+ctutintr()
 {
 	int	c;
 
@@ -163,7 +170,9 @@ ctutintr(void)
 }
 
 short
-ctu_cksum(unsigned short *buf, int words)
+ctu_cksum(buf, words)
+	unsigned short *buf;
+	int words;
 {
 	int i, cksum;
 

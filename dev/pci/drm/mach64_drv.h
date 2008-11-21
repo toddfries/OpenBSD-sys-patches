@@ -1,7 +1,7 @@
 /* mach64_drv.h -- Private header for mach64 driver -*- linux-c -*-
  * Created: Fri Nov 24 22:07:58 2000 by gareth@valinux.com
  */
-/*
+/*-
  * Copyright 2000 Gareth Hughes
  * Copyright 2002 Frank C. Earl
  * Copyright 2002-2003 Leif Delgass
@@ -32,6 +32,11 @@
  *    Jos�Fonseca <j_r_fonseca@yahoo.co.uk>
  */
 
+#include <sys/cdefs.h>
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drv.h,v 1.2 2005/11/28 23:13:53 anholt Exp $");
+*/
+
 #ifndef __MACH64_DRV_H__
 #define __MACH64_DRV_H__
 
@@ -42,9 +47,9 @@
 
 #define DRIVER_NAME		"mach64"
 #define DRIVER_DESC		"DRM module for the ATI Rage Pro"
-#define DRIVER_DATE		"20060718"
+#define DRIVER_DATE		"20020904"
 
-#define DRIVER_MAJOR		2
+#define DRIVER_MAJOR		1
 #define DRIVER_MINOR		0
 #define DRIVER_PATCHLEVEL	0
 
@@ -55,12 +60,13 @@
 
 typedef struct drm_mach64_freelist {
 	struct list_head list;	/* List pointers for free_list, placeholders, or pending list */
-	struct drm_buf *buf;		/* Pointer to the buffer */
+	drm_buf_t *buf;		/* Pointer to the buffer */
 	int discard;		/* This flag is set when we're done (re)using a buffer */
 	u32 ring_ofs;		/* dword offset in ring of last descriptor for this buffer */
 } drm_mach64_freelist_t;
 
 typedef struct drm_mach64_descriptor_ring {
+	drm_dma_handle_t *dmah;	/* Handle to pci dma memory */
 	void *start;		/* write pointer (cpu address) to start of descriptor ring */
 	u32 start_addr;		/* bus address of beginning of descriptor ring */
 	int size;		/* size of ring in bytes */
@@ -108,27 +114,20 @@ typedef struct drm_mach64_private {
 	drm_local_map_t *agp_textures;
 } drm_mach64_private_t;
 
-extern struct drm_ioctl_desc mach64_ioctls[];
+extern drm_ioctl_desc_t mach64_ioctls[];
 extern int mach64_max_ioctl;
 
 				/* mach64_dma.c */
-extern int mach64_dma_init(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-extern int mach64_dma_idle(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-extern int mach64_dma_flush(struct drm_device *dev, void *data,
-			    struct drm_file *file_priv);
-extern int mach64_engine_reset(struct drm_device *dev, void *data,
-			       struct drm_file *file_priv);
-extern int mach64_dma_buffers(struct drm_device *dev, void *data,
-			      struct drm_file *file_priv);
-extern void mach64_driver_lastclose(struct drm_device * dev);
+extern int mach64_dma_init(DRM_IOCTL_ARGS);
+extern int mach64_dma_idle(DRM_IOCTL_ARGS);
+extern int mach64_dma_flush(DRM_IOCTL_ARGS);
+extern int mach64_engine_reset(DRM_IOCTL_ARGS);
+extern int mach64_dma_buffers(DRM_IOCTL_ARGS);
+extern void mach64_driver_lastclose(drm_device_t * dev);
 
-extern int mach64_init_freelist(struct drm_device * dev);
-extern void mach64_destroy_freelist(struct drm_device * dev);
-extern struct drm_buf *mach64_freelist_get(drm_mach64_private_t * dev_priv);
-extern int mach64_freelist_put(drm_mach64_private_t * dev_priv,
-			       struct drm_buf * copy_buf);
+extern int mach64_init_freelist(drm_device_t * dev);
+extern void mach64_destroy_freelist(drm_device_t * dev);
+extern drm_buf_t *mach64_freelist_get(drm_mach64_private_t * dev_priv);
 
 extern int mach64_do_wait_for_fifo(drm_mach64_private_t * dev_priv,
 				   int entries);
@@ -142,26 +141,21 @@ extern int mach64_do_engine_reset(drm_mach64_private_t * dev_priv);
 
 extern int mach64_do_dma_idle(drm_mach64_private_t * dev_priv);
 extern int mach64_do_dma_flush(drm_mach64_private_t * dev_priv);
-extern int mach64_do_cleanup_dma(struct drm_device * dev);
+extern int mach64_do_cleanup_dma(drm_device_t * dev);
 
 				/* mach64_state.c */
-extern int mach64_dma_clear(struct drm_device *dev, void *data,
-			    struct drm_file *file_priv);
-extern int mach64_dma_swap(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-extern int mach64_dma_vertex(struct drm_device *dev, void *data,
-			     struct drm_file *file_priv);
-extern int mach64_dma_blit(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-extern int mach64_get_param(struct drm_device *dev, void *data,
-			    struct drm_file *file_priv);
-extern int mach64_driver_vblank_wait(struct drm_device * dev,
+extern int mach64_dma_clear(DRM_IOCTL_ARGS);
+extern int mach64_dma_swap(DRM_IOCTL_ARGS);
+extern int mach64_dma_vertex(DRM_IOCTL_ARGS);
+extern int mach64_dma_blit(DRM_IOCTL_ARGS);
+extern int mach64_get_param(DRM_IOCTL_ARGS);
+extern int mach64_driver_vblank_wait(drm_device_t * dev,
 				     unsigned int *sequence);
 
 extern irqreturn_t mach64_driver_irq_handler(DRM_IRQ_ARGS);
-extern void mach64_driver_irq_preinstall(struct drm_device * dev);
-extern void mach64_driver_irq_postinstall(struct drm_device * dev);
-extern void mach64_driver_irq_uninstall(struct drm_device * dev);
+extern void mach64_driver_irq_preinstall(drm_device_t * dev);
+extern void mach64_driver_irq_postinstall(drm_device_t * dev);
+extern void mach64_driver_irq_uninstall(drm_device_t * dev);
 
 /* ================================================================
  * Registers
@@ -171,14 +165,14 @@ extern void mach64_driver_irq_uninstall(struct drm_device * dev);
 #define MACH64_AGP_CNTL				0x014c
 #define MACH64_ALPHA_TST_CNTL			0x0550
 
-#define MACH64_DSP_CONFIG			0x0420
-#define MACH64_DSP_ON_OFF			0x0424
-#define MACH64_EXT_MEM_CNTL			0x04ac
-#define MACH64_GEN_TEST_CNTL			0x04d0
-#define MACH64_HW_DEBUG				0x047c
-#define MACH64_MEM_ADDR_CONFIG			0x0434
-#define MACH64_MEM_BUF_CNTL			0x042c
-#define MACH64_MEM_CNTL				0x04b0
+#define MACH64_DSP_CONFIG 			0x0420
+#define MACH64_DSP_ON_OFF 			0x0424
+#define MACH64_EXT_MEM_CNTL 			0x04ac
+#define MACH64_GEN_TEST_CNTL 			0x04d0
+#define MACH64_HW_DEBUG 			0x047c
+#define MACH64_MEM_ADDR_CONFIG 			0x0434
+#define MACH64_MEM_BUF_CNTL 			0x042c
+#define MACH64_MEM_CNTL 			0x04b0
 
 #define MACH64_BM_ADDR				0x0648
 #define MACH64_BM_COMMAND			0x0188
@@ -205,16 +199,16 @@ extern void mach64_driver_irq_uninstall(struct drm_device * dev);
 #define MACH64_CLR_CMP_CLR			0x0700
 #define MACH64_CLR_CMP_CNTL			0x0708
 #define MACH64_CLR_CMP_MASK			0x0704
-#define MACH64_CONFIG_CHIP_ID			0x04e0
-#define MACH64_CONFIG_CNTL			0x04dc
-#define MACH64_CONFIG_STAT0			0x04e4
-#define MACH64_CONFIG_STAT1			0x0494
-#define MACH64_CONFIG_STAT2			0x0498
+#define MACH64_CONFIG_CHIP_ID 			0x04e0
+#define MACH64_CONFIG_CNTL 			0x04dc
+#define MACH64_CONFIG_STAT0 			0x04e4
+#define MACH64_CONFIG_STAT1 			0x0494
+#define MACH64_CONFIG_STAT2 			0x0498
 #define MACH64_CONTEXT_LOAD_CNTL		0x072c
 #define MACH64_CONTEXT_MASK			0x0720
 #define MACH64_COMPOSITE_SHADOW_ID		0x0798
-#define MACH64_CRC_SIG				0x04e8
-#define MACH64_CUSTOM_MACRO_CNTL		0x04d4
+#define MACH64_CRC_SIG 				0x04e8
+#define MACH64_CUSTOM_MACRO_CNTL 		0x04d4
 
 #define MACH64_DP_BKGD_CLR			0x06c0
 #define MACH64_DP_FOG_CLR			0x06c4
@@ -358,7 +352,7 @@ extern void mach64_driver_irq_uninstall(struct drm_device * dev);
 #define MACH64_TEX_0_OFF			0x05c0
 #define MACH64_TEX_CNTL				0x0774
 #define MACH64_TEX_SIZE_PITCH			0x0770
-#define MACH64_TIMER_CONFIG			0x0428
+#define MACH64_TIMER_CONFIG 			0x0428
 
 #define MACH64_VERTEX_1_ARGB			0x0254
 #define MACH64_VERTEX_1_S			0x0240
@@ -498,7 +492,7 @@ extern void mach64_driver_irq_uninstall(struct drm_device * dev);
 #define ISMMREG0(r)	(((r) >= MMREG0) && ((r) <= MMREG0_END))
 #define MMSELECT0(r)	(((r) << 2) + DWMREG0)
 #define MMSELECT1(r)	(((((r) & 0xff) << 2) + DWMREG1))
-#define MMSELECT(r)	(ISMMREG0(r) ? MMSELECT0(r) : MMSELECT1(r))
+#define MMSELECT(r)	(ISMMREG0((r) != 0) ? MMSELECT0(r) : MMSELECT1(r))
 
 /* ================================================================
  * DMA constants
@@ -758,19 +752,19 @@ mach64_update_ring_snapshot(drm_mach64_private_t * dev_priv)
 
 #define RING_WRITE_OFS  _ring_write
 
-#define BEGIN_RING( n )									\
+#define BEGIN_RING( n ) 								\
 do {											\
 	if ( MACH64_VERBOSE ) {								\
 		DRM_INFO( "BEGIN_RING( %d ) in %s\n",					\
 			   (n), __FUNCTION__ );						\
 	}										\
 	if ( dev_priv->ring.space <= (n) * sizeof(u32) ) {				\
-		int ret;								\
-		if ((ret=mach64_wait_ring( dev_priv, (n) * sizeof(u32))) < 0 ) {	\
+		int __ret;								\
+		if ((__ret=mach64_wait_ring( dev_priv, (n) * sizeof(u32))) < 0 ) {	\
 			DRM_ERROR( "wait_ring failed, resetting engine\n");		\
 			mach64_dump_engine_info( dev_priv );				\
 			mach64_do_engine_reset( dev_priv );				\
-			return ret;							\
+			return __ret;							\
 		}									\
 	}										\
 	dev_priv->ring.space -= (n) * sizeof(u32);					\
@@ -789,7 +783,7 @@ do {								\
 	_ring_write &= _ring_mask;				\
 } while (0)
 
-#define ADVANCE_RING()							\
+#define ADVANCE_RING() 							\
 do {									\
 	if ( MACH64_VERBOSE ) {						\
 		DRM_INFO( "ADVANCE_RING() wr=0x%06x tail=0x%06x\n",	\
@@ -808,12 +802,12 @@ do {									\
 
 #define DMALOCALS				\
 	drm_mach64_freelist_t *_entry = NULL;	\
-	struct drm_buf *_buf = NULL;		\
+	drm_buf_t *_buf = NULL; 		\
 	u32 *_buf_wptr; int _outcount
 
 #define GETBUFPTR( __buf )						\
-((dev_priv->is_pci) ?							\
-	((u32 *)(__buf)->address) :					\
+((dev_priv->is_pci) ? 							\
+	((u32 *)(__buf)->address) : 					\
 	((u32 *)((char *)dev_priv->dev_buffers->handle + (__buf)->offset)))
 
 #define GETBUFADDR( __buf ) ((u32)(__buf)->bus_address)
@@ -823,20 +817,20 @@ do {									\
 static __inline__ int mach64_find_pending_buf_entry(drm_mach64_private_t *
 						    dev_priv,
 						    drm_mach64_freelist_t **
-						    entry, struct drm_buf * buf)
+						    entry, drm_buf_t * buf)
 {
 	struct list_head *ptr;
 #if MACH64_EXTRA_CHECKING
 	if (list_empty(&dev_priv->pending)) {
 		DRM_ERROR("Empty pending list in %s\n", __FUNCTION__);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 #endif
 	ptr = dev_priv->pending.prev;
 	*entry = list_entry(ptr, drm_mach64_freelist_t, list);
 	while ((*entry)->buf != buf) {
 		if (ptr == &dev_priv->pending) {
-			return -EFAULT;
+			return DRM_ERR(EFAULT);
 		}
 		ptr = ptr->prev;
 		*entry = list_entry(ptr, drm_mach64_freelist_t, list);
@@ -844,7 +838,7 @@ static __inline__ int mach64_find_pending_buf_entry(drm_mach64_private_t *
 	return 0;
 }
 
-#define DMASETPTR( _p )				\
+#define DMASETPTR( _p ) 			\
 do {						\
 	_buf = (_p);				\
 	_outcount = 0;				\
@@ -852,7 +846,7 @@ do {						\
 } while(0)
 
 /* FIXME: use a private set of smaller buffers for state emits, clears, and swaps? */
-#define DMAGETPTR( file_priv, dev_priv, n )				\
+#define DMAGETPTR( filp, dev_priv, n )					\
 do {									\
 	if ( MACH64_VERBOSE ) {						\
 		DRM_INFO( "DMAGETPTR( %d ) in %s\n",			\
@@ -862,14 +856,14 @@ do {									\
 	if (_buf == NULL) {						\
 		DRM_ERROR("%s: couldn't get buffer in DMAGETPTR\n",	\
 			   __FUNCTION__ );				\
-		return -EAGAIN;					\
+		return DRM_ERR(EAGAIN);					\
 	}								\
 	if (_buf->pending) {						\
 	        DRM_ERROR("%s: pending buf in DMAGETPTR\n",		\
 			   __FUNCTION__ );				\
-		return -EFAULT;					\
+		return DRM_ERR(EFAULT);					\
 	}								\
-	_buf->file_priv = file_priv;					\
+	_buf->filp = filp;						\
 	_outcount = 0;							\
 									\
         _buf_wptr = GETBUFPTR( _buf );					\
@@ -898,26 +892,26 @@ do {											     \
 	if (_buf->used <= 0) {								     \
 		DRM_ERROR( "DMAADVANCE() in %s: sending empty buf %d\n",		     \
 				   __FUNCTION__, _buf->idx );				     \
-		return -EFAULT;							     \
+		return DRM_ERR(EFAULT);							     \
 	}										     \
 	if (_buf->pending) {								     \
                 /* This is a resued buffer, so we need to find it in the pending list */     \
-		int ret;								     \
-		if ( (ret=mach64_find_pending_buf_entry(dev_priv, &_entry, _buf)) ) {	     \
+		int __ret;								     \
+		if ( (__ret=mach64_find_pending_buf_entry(dev_priv, &_entry, _buf)) ) {	     \
 			DRM_ERROR( "DMAADVANCE() in %s: couldn't find pending buf %d\n",     \
 				   __FUNCTION__, _buf->idx );				     \
-			return ret;							     \
+			return __ret;							     \
 		}									     \
 		if (_entry->discard) {							     \
 			DRM_ERROR( "DMAADVANCE() in %s: sending discarded pending buf %d\n", \
 				   __FUNCTION__, _buf->idx );				     \
-			return -EFAULT;						     \
+			return DRM_ERR(EFAULT);						     \
 		}									     \
-	} else {									     \
+     	} else {									     \
 		if (list_empty(&dev_priv->placeholders)) {				     \
 			DRM_ERROR( "DMAADVANCE() in %s: empty placeholder list\n",	     \
-				__FUNCTION__ );						     \
-			return -EFAULT;						     \
+			   	__FUNCTION__ );						     \
+			return DRM_ERR(EFAULT);						     \
 		}									     \
 		ptr = dev_priv->placeholders.next;					     \
 		list_del(ptr);								     \
@@ -933,11 +927,11 @@ do {											     \
 #define DMADISCARDBUF()									\
 do {											\
 	if (_entry == NULL) {								\
-		int ret;								\
-		if ( (ret=mach64_find_pending_buf_entry(dev_priv, &_entry, _buf)) ) {	\
+		int __ret;								\
+		if ( (__ret=mach64_find_pending_buf_entry(dev_priv, &_entry, _buf)) ) {	\
 			DRM_ERROR( "%s: couldn't find pending buf %d\n",		\
 				   __FUNCTION__, _buf->idx );				\
-			return ret;							\
+			return __ret;							\
 		}									\
 	}										\
 	_entry->discard = 1;								\
@@ -947,7 +941,7 @@ do {											\
 do {											\
 	int bytes, pages, remainder;							\
 	u32 address, page;								\
-	int i;										\
+	int __i;										\
 											\
 	bytes = _buf->used;								\
 	address = GETBUFADDR( _buf );							\
@@ -956,8 +950,8 @@ do {											\
 											\
 	BEGIN_RING( pages * 4 );							\
 											\
-	for ( i = 0 ; i < pages-1 ; i++ ) {						\
-		page = address + i * MACH64_DMA_CHUNKSIZE;				\
+	for ( __i = 0 ; __i < pages-1 ; __i++ ) {						\
+		page = address + __i * MACH64_DMA_CHUNKSIZE;				\
 		OUT_RING( MACH64_APERTURE_OFFSET + MACH64_BM_ADDR );			\
 		OUT_RING( page );							\
 		OUT_RING( MACH64_DMA_CHUNKSIZE | MACH64_DMA_HOLD_OFFSET );		\
@@ -965,8 +959,8 @@ do {											\
 	}										\
 											\
 	/* generate the final descriptor for any remaining commands in this buffer */	\
-	page = address + i * MACH64_DMA_CHUNKSIZE;					\
-	remainder = bytes - i * MACH64_DMA_CHUNKSIZE;					\
+	page = address + __i * MACH64_DMA_CHUNKSIZE;					\
+	remainder = bytes - __i * MACH64_DMA_CHUNKSIZE;					\
 											\
 	/* Save dword offset of last descriptor for this buffer.			\
 	 * This is needed to check for completion of the buffer in freelist_get		\
@@ -993,12 +987,12 @@ do {											\
 	if (_buf->used <= 0) {								\
 		DRM_ERROR( "DMAADVANCEHOSTDATA() in %s: sending empty buf %d\n",	\
 				   __FUNCTION__, _buf->idx );				\
-		return -EFAULT;							\
+		return DRM_ERR(EFAULT);							\
 	}										\
 	if (list_empty(&dev_priv->placeholders)) {					\
 		DRM_ERROR( "%s: empty placeholder list in DMAADVANCEHOSTDATA()\n",	\
 			   __FUNCTION__ );						\
-		return -EFAULT;							\
+		return DRM_ERR(EFAULT);							\
 	}										\
 											\
         ptr = dev_priv->placeholders.next;						\

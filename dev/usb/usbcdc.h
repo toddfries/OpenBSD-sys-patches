@@ -1,5 +1,4 @@
-/*	$OpenBSD: usbcdc.h,v 1.7 2007/07/23 16:41:15 mbalmer Exp $ */
-/*	$NetBSD: usbcdc.h,v 1.8 2001/02/16 20:15:57 kenh Exp $	*/
+/*	$NetBSD: usbcdc.h,v 1.11 2008/04/28 20:24:00 martin Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbcdc.h,v 1.7 1999/11/17 22:33:48 n_hibma Exp $	*/
 
 /*
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,20 +44,20 @@
 #define UDESCSUB_CDC_CS		7 /* Country Selection */
 #define UDESCSUB_CDC_TOM	8 /* Telephone Operational Modes */
 #define UDESCSUB_CDC_USBT	9 /* USB Terminal */
-#define UDESCSUB_CDC_NCT	10 /* Network Channel Terminal */
-#define UDESCSUB_CDC_PUF	11 /* Protocol Unit */
-#define UDESCSUB_CDC_EUF	12 /* Extension Unit */
-#define UDESCSUB_CDC_MCMF	13 /* Multi-Channel Management */
-#define UDESCSUB_CDC_CCMF	14 /* CAPI Control Management */
-#define UDESCSUB_CDC_ENF	15 /* Ethernet Networking */
-#define UDESCSUB_CDC_ANF	16 /* ATM Networking */
+#define UDESCSUB_CDC_NCT	10
+#define UDESCSUB_CDC_PUF	11
+#define UDESCSUB_CDC_EUF	12
+#define UDESCSUB_CDC_MCMF	13
+#define UDESCSUB_CDC_CCMF	14
+#define UDESCSUB_CDC_ENF	15
+#define UDESCSUB_CDC_ANF	16
 
 typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
 	uByte		bDescriptorSubtype;
 	uWord		bcdCDC;
-} __packed usb_cdc_header_descriptor_t;
+} UPACKED usb_cdc_header_descriptor_t;
 
 typedef struct {
 	uByte		bLength;
@@ -75,7 +67,7 @@ typedef struct {
 #define USB_CDC_CM_DOES_CM		0x01
 #define USB_CDC_CM_OVER_DATA		0x02
 	uByte		bDataInterface;
-} __packed usb_cdc_cm_descriptor_t;
+} UPACKED usb_cdc_cm_descriptor_t;
 
 typedef struct {
 	uByte		bLength;
@@ -86,7 +78,7 @@ typedef struct {
 #define USB_CDC_ACM_HAS_LINE		0x02
 #define USB_CDC_ACM_HAS_BREAK		0x04
 #define USB_CDC_ACM_HAS_NETWORK_CONN	0x08
-} __packed usb_cdc_acm_descriptor_t;
+} UPACKED usb_cdc_acm_descriptor_t;
 
 typedef struct {
 	uByte		bLength;
@@ -94,7 +86,7 @@ typedef struct {
 	uByte		bDescriptorSubtype;
 	uByte		bMasterInterface;
 	uByte		bSlaveInterface[1];
-} __packed usb_cdc_union_descriptor_t;
+} UPACKED usb_cdc_union_descriptor_t;
 
 typedef struct {
 	uByte		bLength;
@@ -103,9 +95,9 @@ typedef struct {
 	uByte		iMacAddress;
 	uDWord		bmEthernetStatistics;
 	uWord		wMaxSegmentSize;
-	uWord		wNumberMCFilters;
+	uWord		wNumberMCFikters;
 	uByte		bNumberPowerFilters;
-} __packed usb_cdc_ethernet_descriptor_t;
+} UPACKED usb_cdc_ethernet_descriptor_t;
 
 #define UCDC_SEND_ENCAPSULATED_COMMAND	0x00
 #define UCDC_GET_ENCAPSULATED_RESPONSE	0x01
@@ -127,7 +119,7 @@ typedef struct {
 	uWord	wState;
 #define UCDC_IDLE_SETTING		0x0001
 #define UCDC_DATA_MULTIPLEXED		0x0002
-} __packed usb_cdc_abstract_state_t;
+} UPACKED usb_cdc_abstract_state_t;
 #define UCDC_ABSTRACT_STATE_LENGTH 2
 
 typedef struct {
@@ -143,7 +135,7 @@ typedef struct {
 #define UCDC_PARITY_MARK		3
 #define UCDC_PARITY_SPACE		4
 	uByte	bDataBits;
-} __packed usb_cdc_line_state_t;
+} UPACKED usb_cdc_line_state_t;
 #define UCDC_LINE_STATE_LENGTH 7
 
 typedef struct {
@@ -162,14 +154,8 @@ typedef struct {
 	uWord	wIndex;
 	uWord	wLength;
 	uByte	data[16];
-} __packed usb_cdc_notification_t;
+} UPACKED usb_cdc_notification_t;
 #define UCDC_NOTIFICATION_LENGTH 8
-
-typedef struct {
-	uDWord	dwUSBitRate;
-	uDWord	dwDSBitRate;
-} __packed usb_cdc_connection_speed_t;
-#define UCDC_CONNECTION_SPEED_LENGTH 8
 
 /*
  * Bits set in the SERIAL STATE notifcation (first byte of data)

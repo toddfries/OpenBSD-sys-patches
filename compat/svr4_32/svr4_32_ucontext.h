@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_32_ucontext.h,v 1.5 2005/12/11 12:20:26 christos Exp $	 */
+/*	$NetBSD: svr4_32_ucontext.h,v 1.9 2008/04/28 20:23:46 martin Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,12 +65,12 @@ struct svr4_32_sigframe {
 };
 
 
-void *svr4_32_getmcontext __P((struct lwp *, struct svr4_32_mcontext *,
-			       netbsd32_u_long *));
-int svr4_32_setmcontext __P((struct lwp *, struct svr4_32_mcontext *,
-			     netbsd32_u_long));
+void *svr4_32_getmcontext(struct lwp *, struct svr4_32_mcontext *,
+			       netbsd32_u_long *);
+int svr4_32_setmcontext(struct lwp *, struct svr4_32_mcontext *,
+			     netbsd32_u_long);
 
-void svr4_32_getcontext __P((struct lwp *, struct svr4_32_ucontext *, const sigset_t *));
-int svr4_32_setcontext __P((struct lwp *, struct svr4_32_ucontext *));
+void svr4_32_getcontext(struct lwp *, struct svr4_32_ucontext *, const sigset_t *);
+int svr4_32_setcontext(struct lwp *, struct svr4_32_ucontext *);
 
 #endif /* !_SVR4_32_UCONTEXT_H_ */

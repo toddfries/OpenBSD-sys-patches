@@ -1,4 +1,4 @@
-/*      $OpenBSD: neoreg.h,v 1.2 2004/11/22 04:27:14 deraadt Exp $       */
+/*	$NetBSD: neoreg.h,v 1.1 2000/11/05 06:43:46 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1999 Cameron Grant <gandalf@vilnya.demon.co.uk>
@@ -27,11 +27,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THEPOSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD$
+ * OpenBSD: neoreg.h,v 1.1 2000/04/13 00:10:52 csapuntz Exp
  */
 
-#ifndef _NM256_H_
-#define _NM256_H_
+#ifndef _DEV_PCI_NEOREG_H_
+#define _DEV_PCI_NEOREG_H_
 
 /* The BIOS signature. */
 #define NM_SIGNATURE 0x4e4d0000
@@ -112,14 +112,4 @@
 #define NM_PBUFFER_WMARK (NM_PLAYBACK_REG_OFFSET + 0xc)
 #define NM_PBUFFER_CURRP (NM_PLAYBACK_REG_OFFSET + 0x8)
 
-#define NM_TOTAL_COEFF_COUNT 0x3158
-
-#define NM_COEFF_SIZES  2*8
-
-struct neo_firmware {
-	const u_int16_t coefficientSizes[NM_COEFF_SIZES];
-	const char coefficients[NM_TOTAL_COEFF_COUNT*4];
-};
-
-
-#endif
+#endif /* _DEV_PCI_NEOREG_H_ */

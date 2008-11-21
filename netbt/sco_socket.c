@@ -1,5 +1,4 @@
-/*	$OpenBSD: sco_socket.c,v 1.2 2008/05/27 19:41:14 thib Exp $	*/
-/*	$NetBSD: sco_socket.c,v 1.9 2007/04/21 06:15:23 plunky Exp $	*/
+/*	$NetBSD: sco_socket.c,v 1.11 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -31,6 +30,7 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sco_socket.c,v 1.11 2008/08/06 15:01:24 plunky Exp $");
 
 /* load symbolic names */
 #ifdef BLUETOOTH_DEBUG
@@ -96,30 +96,31 @@ int sco_recvspace = 4096;
  */
 int
 sco_usrreq(struct socket *up, int req, struct mbuf *m,
-    struct mbuf *nam, struct mbuf *ctl, struct proc *p)
+    struct mbuf *nam, struct mbuf *ctl, struct lwp *l)
 {
 	struct sco_pcb *pcb = (struct sco_pcb *)up->so_pcb;
 	struct sockaddr_bt *sa;
 	struct mbuf *m0;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "%s\n", prurequests[req]);
-#endif
 
 	switch(req) {
 	case PRU_CONTROL:
 		return EOPNOTSUPP;
 
-#ifdef notyet			/* XXX */
 	case PRU_PURGEIF:
 		return EOPNOTSUPP;
-#endif
 
 	case PRU_ATTACH:
+		if (up->so_lock == NULL) {
+			mutex_obj_hold(bt_lock);
+			up->so_lock = bt_lock;
+			solock(up);
+		}
+		KASSERT(solocked(up));
 		if (pcb)
 			return EINVAL;
-
 		err = soreserve(up, sco_sendspace, sco_recvspace);
 		if (err)
 			return err;
@@ -197,7 +198,7 @@ sco_usrreq(struct socket *up, int req, struct mbuf *m,
 			break;
 		}
 
-		m0 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+		m0 = m_copypacket(m, M_DONTWAIT);
 		if (m0 == NULL) {
 			err = ENOMEM;
 			break;
@@ -250,40 +251,26 @@ release:
  * get/set socket options
  */
 int
-sco_ctloutput(int req, struct socket *so, int level,
-		int optname, struct mbuf **opt)
+sco_ctloutput(int req, struct socket *so, struct sockopt *sopt)
 {
 	struct sco_pcb *pcb = (struct sco_pcb *)so->so_pcb;
-	struct mbuf *m;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "req %s\n", prcorequests[req]);
-#endif
 
 	if (pcb == NULL)
 		return EINVAL;
 
-	if (level != BTPROTO_SCO)
+	if (sopt->sopt_level != BTPROTO_SCO)
 		return ENOPROTOOPT;
 
 	switch(req) {
 	case PRCO_GETOPT:
-		m = m_get(M_WAIT, MT_SOOPTS);
-		m->m_len = sco_getopt(pcb, optname, mtod(m, uint8_t *));
-		if (m->m_len == 0) {
-			m_freem(m);
-			m = NULL;
-			err = ENOPROTOOPT;
-		}
-		*opt = m;
+		err = sco_getopt(pcb, sopt);
 		break;
 
 	case PRCO_SETOPT:
-		m = *opt;
-		KASSERT(m != NULL);
-		err = sco_setopt(pcb, optname, mtod(m, uint8_t *));
-		m_freem(m);
+		err = sco_setopt(pcb, sopt);
 		break;
 
 	default:

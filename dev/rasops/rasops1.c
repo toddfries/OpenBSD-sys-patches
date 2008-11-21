@@ -1,5 +1,4 @@
-/*	$OpenBSD: rasops1.c,v 1.5 2006/08/03 18:42:06 miod Exp $	*/
-/*	$NetBSD: rasops1.c,v 1.11 2000/04/12 14:22:29 pk Exp $	*/
+/* 	$NetBSD: rasops1.c,v 1.18 2008/04/28 20:23:56 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rasops1.c,v 1.18 2008/04/28 20:23:56 martin Exp $");
+
+#include "opt_rasops.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/time.h>
@@ -47,13 +44,13 @@
 #include <dev/rasops/rasops.h>
 #include <dev/rasops/rasops_masks.h>
 
-void	rasops1_copycols(void *, int, int, int, int);
-void	rasops1_erasecols(void *, int, int, int, long);
-void	rasops1_do_cursor(struct rasops_info *);
-void	rasops1_putchar(void *, int, int col, u_int, long);
+static void	rasops1_copycols(void *, int, int, int, int);
+static void	rasops1_erasecols(void *, int, int, int, long);
+static void	rasops1_do_cursor(struct rasops_info *);
+static void	rasops1_putchar(void *, int, int col, u_int, long);
 #ifndef RASOPS_SMALL
-void	rasops1_putchar8(void *, int, int col, u_int, long);
-void	rasops1_putchar16(void *, int, int col, u_int, long);
+static void	rasops1_putchar8(void *, int, int col, u_int, long);
+static void	rasops1_putchar16(void *, int, int col, u_int, long);
 #endif
 
 /*
@@ -63,7 +60,6 @@ void
 rasops1_init(ri)
 	struct rasops_info *ri;
 {
-	rasops_masks_init();
 
 	switch (ri->ri_font->fontwidth) {
 #ifndef RASOPS_SMALL
@@ -89,7 +85,7 @@ rasops1_init(ri)
 /*
  * Paint a single character. This is the generic version, this is ugly.
  */
-void
+static void
 rasops1_putchar(cookie, row, col, uc, attr)
 	void *cookie;
 	int row, col;
@@ -237,7 +233,7 @@ rasops1_putchar(cookie, row, col, uc, attr)
 /*
  * Paint a single character. This is for 8-pixel wide fonts.
  */
-void
+static void
 rasops1_putchar8(cookie, row, col, uc, attr)
 	void *cookie;
 	int row, col;
@@ -302,7 +298,7 @@ rasops1_putchar8(cookie, row, col, uc, attr)
 /*
  * Paint a single character. This is for 16-pixel wide fonts.
  */
-void
+static void
 rasops1_putchar16(cookie, row, col, uc, attr)
 	void *cookie;
 	int row, col;

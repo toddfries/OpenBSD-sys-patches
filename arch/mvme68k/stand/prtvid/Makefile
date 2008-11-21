@@ -1,8 +1,9 @@
-#	$OpenBSD: Makefile,v 1.2 1996/04/28 10:49:28 deraadt Exp $
+#	$NetBSD: Makefile,v 1.4 2001/12/12 01:49:46 tv Exp $
 
 PROG=	prtvid
-NOMAN=
+NOMAN=	# defined
 
-install:
+# only needed during build
+proginstall::
 
 .include <bsd.prog.mk>

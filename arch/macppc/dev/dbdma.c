@@ -1,27 +1,29 @@
-/*	$OpenBSD: dbdma.c,v 1.9 2007/09/17 01:33:33 krw Exp $	*/
-/*	$NetBSD: dbdma.c,v 1.2 1998/08/21 16:13:28 tsubai Exp $	*/
+/*	$NetBSD: dbdma.c,v 1.8 2007/10/17 19:55:18 garbled Exp $	*/
 
 /*
- * Copyright 1991-1998 by Open Software Foundation, Inc.
- *              All Rights Reserved
- *
- * Permission to use, copy, modify, and distribute this software and
- * its documentation for any purpose and without fee is hereby granted,
- * provided that the above copyright notice appears in all copies and
- * that both the copyright notice and this permission notice appear in
- * supporting documentation.
- *
- * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE.
- *
- * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
- * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
- * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- *
+ * Copyright 1991-1998 by Open Software Foundation, Inc. 
+ *              All Rights Reserved 
+ *  
+ * Permission to use, copy, modify, and distribute this software and 
+ * its documentation for any purpose and without fee is hereby granted, 
+ * provided that the above copyright notice appears in all copies and 
+ * that both the copyright notice and this permission notice appear in 
+ * supporting documentation. 
+ *  
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE 
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS 
+ * FOR A PARTICULAR PURPOSE. 
+ *  
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR 
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM 
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT, 
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION 
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. 
+ * 
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dbdma.c,v 1.8 2007/10/17 19:55:18 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -29,129 +31,102 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/bus.h>
+#include <machine/autoconf.h>
+#include <machine/pio.h>
 #include <macppc/dev/dbdma.h>
 
 dbdma_command_t	*dbdma_alloc_commands = NULL;
 
 void
-dbdma_start(dbdma_regmap_t *dmap, dbdma_t dt)
+dbdma_start(dmap, commands)
+	dbdma_regmap_t *dmap;
+	dbdma_command_t *commands;
 {
-	u_int32_t addr = dt->d_paddr;
+	unsigned long addr = vtophys((vaddr_t)commands);
 
-	DBDMA_ST4_ENDIAN(&dmap->d_intselect, DBDMA_CLEAR_CNTRL((0xffff)));
-	DBDMA_ST4_ENDIAN(&dmap->d_control, DBDMA_CLEAR_CNTRL((
-	    DBDMA_CNTRL_ACTIVE |
-	    DBDMA_CNTRL_DEAD |
-	    DBDMA_CNTRL_WAKE |
-	    DBDMA_CNTRL_FLUSH |
-	    DBDMA_CNTRL_PAUSE |
-	    DBDMA_CNTRL_RUN)));
+	if (addr & 0xf)
+		panic("dbdma_start command structure not 16-byte aligned");
 
-	/* XXX time-bind it? */
-	do {
-		delay(10);
-	} while (DBDMA_LD4_ENDIAN(&dmap->d_status) & DBDMA_CNTRL_ACTIVE);
-
-
-	DBDMA_ST4_ENDIAN(&dmap->d_cmdptrhi, 0); /* 64-bit not yet */
-	DBDMA_ST4_ENDIAN(&dmap->d_cmdptrlo, addr);
-
-	DBDMA_ST4_ENDIAN(&dmap->d_control,
-		DBDMA_SET_CNTRL(DBDMA_CNTRL_RUN|DBDMA_CNTRL_WAKE)|
-		DBDMA_CLEAR_CNTRL(DBDMA_CNTRL_PAUSE|DBDMA_CNTRL_DEAD) );
-}
-
-void
-dbdma_stop(dbdma_regmap_t *dmap)
-{
-	DBDMA_ST4_ENDIAN(&dmap->d_control, DBDMA_CLEAR_CNTRL(DBDMA_CNTRL_RUN) |
-			  DBDMA_SET_CNTRL(DBDMA_CNTRL_FLUSH));
-
-	while (DBDMA_LD4_ENDIAN(&dmap->d_status) &
-		(DBDMA_CNTRL_ACTIVE|DBDMA_CNTRL_FLUSH));
-}
-
-void
-dbdma_flush(dbdma_regmap_t *dmap)
-{
-	DBDMA_ST4_ENDIAN(&dmap->d_control, DBDMA_SET_CNTRL(DBDMA_CNTRL_FLUSH));
-
-	/* XXX time-bind it? */
-	while (DBDMA_LD4_ENDIAN(&dmap->d_status) & (DBDMA_CNTRL_FLUSH));
-}
-
-void
-dbdma_reset(dbdma_regmap_t *dmap)
-{
-	DBDMA_ST4_ENDIAN(&dmap->d_control,
+	dmap->d_intselect = 0xff;  /* Endian magic - clear out interrupts */
+	DBDMA_ST4_ENDIAN(&dmap->d_control, 
 			 DBDMA_CLEAR_CNTRL( (DBDMA_CNTRL_ACTIVE	|
 					     DBDMA_CNTRL_DEAD	|
 					     DBDMA_CNTRL_WAKE	|
 					     DBDMA_CNTRL_FLUSH	|
 					     DBDMA_CNTRL_PAUSE	|
-					     DBDMA_CNTRL_RUN      )));
+					     DBDMA_CNTRL_RUN      )));      
+     
+	while (DBDMA_LD4_ENDIAN(&dmap->d_status) & DBDMA_CNTRL_ACTIVE)
+		;
 
-	/* XXX time-bind it? */
-	while (DBDMA_LD4_ENDIAN(&dmap->d_status) & DBDMA_CNTRL_RUN);
+	dmap->d_cmdptrhi = 0;	/* 64-bit not yet */
+	DBDMA_ST4_ENDIAN(&dmap->d_cmdptrlo, addr);
+
+	DBDMA_ST4_ENDIAN(&dmap->d_control, DBDMA_SET_CNTRL(DBDMA_CNTRL_RUN));
 }
 
 void
-dbdma_continue(dbdma_regmap_t *dmap)
+dbdma_stop(dmap)
+	dbdma_regmap_t *dmap;
 {
-	DBDMA_ST4_ENDIAN(&dmap->d_control,
+	out32rb(&dmap->d_control, DBDMA_CLEAR_CNTRL(DBDMA_CNTRL_RUN) |
+			  DBDMA_SET_CNTRL(DBDMA_CNTRL_FLUSH));
+
+	while (in32rb(&dmap->d_status) &
+		(DBDMA_CNTRL_ACTIVE|DBDMA_CNTRL_FLUSH));
+}
+
+void
+dbdma_flush(dmap)
+	dbdma_regmap_t *dmap;
+{
+	out32rb(&dmap->d_control, DBDMA_SET_CNTRL(DBDMA_CNTRL_FLUSH));
+
+	while (in32rb(&dmap->d_status) & (DBDMA_CNTRL_FLUSH));
+}
+
+void
+dbdma_reset(dmap)
+	dbdma_regmap_t *dmap;
+{
+	out32rb(&dmap->d_control, 
+			 DBDMA_CLEAR_CNTRL( (DBDMA_CNTRL_ACTIVE	|
+					     DBDMA_CNTRL_DEAD	|
+					     DBDMA_CNTRL_WAKE	|
+					     DBDMA_CNTRL_FLUSH	|
+					     DBDMA_CNTRL_PAUSE	|
+					     DBDMA_CNTRL_RUN      )));      
+
+	while (in32rb(&dmap->d_status) & DBDMA_CNTRL_RUN);
+}
+
+void
+dbdma_continue(dmap)
+	dbdma_regmap_t *dmap;
+{
+	out32rb(&dmap->d_control,
 		DBDMA_SET_CNTRL(DBDMA_CNTRL_RUN | DBDMA_CNTRL_WAKE) |
 		DBDMA_CLEAR_CNTRL(DBDMA_CNTRL_PAUSE | DBDMA_CNTRL_DEAD));
 }
 
 void
-dbdma_pause(dbdma_regmap_t *dmap)
+dbdma_pause(dmap)
+	dbdma_regmap_t *dmap;
 {
 	DBDMA_ST4_ENDIAN(&dmap->d_control,DBDMA_SET_CNTRL(DBDMA_CNTRL_PAUSE));
 
-	/* XXX time-bind it? */
-	while (DBDMA_LD4_ENDIAN(&dmap->d_status) & DBDMA_CNTRL_ACTIVE);
+	while (DBDMA_LD4_ENDIAN(&dmap->d_status) & DBDMA_CNTRL_ACTIVE)
+		;
 }
 
-dbdma_t
-dbdma_alloc(bus_dma_tag_t dmat, int size)
+dbdma_command_t	*
+dbdma_alloc(size)
+	int size;
 {
-	dbdma_t dt;
-	int error;
+	u_int buf;
 
-	dt = malloc(sizeof *dt, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (!dt)
-		return (dt);
+	buf = (u_int)malloc(size + 0x0f, M_DEVBUF, M_WAITOK);
+	buf = (buf + 0x0f) & ~0x0f;
 
-	dt->d_size = size *= sizeof(dbdma_command_t);
-	dt->d_dmat = dmat;
-	if ((error = bus_dmamem_alloc(dmat, size, NBPG, 0, dt->d_segs,
-	    1, &dt->d_nsegs, BUS_DMA_NOWAIT)) != 0) {
-		printf("dbdma: unable to allocate dma, error = %d\n", error);
-	} else if ((error = bus_dmamem_map(dmat, dt->d_segs, dt->d_nsegs, size,
-	    (caddr_t *)&dt->d_addr, BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
-		printf("dbdma: unable to map dma, error = %d\n", error);
-	} else if ((error = bus_dmamap_create(dmat, dt->d_size, 1,
-	    dt->d_size, 0, BUS_DMA_NOWAIT, &dt->d_map)) != 0) {
-		printf("dbdma: unable to create dma map, error = %d\n", error);
-	} else if ((error = bus_dmamap_load_raw(dmat, dt->d_map,
-	    dt->d_segs, dt->d_nsegs, size, BUS_DMA_NOWAIT)) != 0) {
-		printf("dbdma: unable to load dma map, error = %d\n", error);
-	} else
-		return dt;
-
-	dbdma_free(dt);
-	return (NULL);
-}
-
-void
-dbdma_free(dbdma_t dt)
-{
-	if (dt->d_map)
-		bus_dmamap_destroy(dt->d_dmat, dt->d_map);
-	if (dt->d_addr)
-		bus_dmamem_unmap(dt->d_dmat, (caddr_t)dt->d_addr, dt->d_size);
-	if (dt->d_nsegs)
-		bus_dmamem_free(dt->d_dmat, dt->d_segs, dt->d_nsegs);
-	free(dt, M_DEVBUF);
+	return (dbdma_command_t *)buf;
 }

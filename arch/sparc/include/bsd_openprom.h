@@ -1,5 +1,4 @@
-/*	$OpenBSD: bsd_openprom.h,v 1.11 2003/11/14 19:05:36 miod Exp $	*/
-/*	$NetBSD: bsd_openprom.h,v 1.11 1996/05/18 12:27:43 mrg Exp $ */
+/*	$NetBSD: bsd_openprom.h,v 1.25 2007/12/24 15:46:45 perry Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,6 +40,9 @@
  * All rights reserved.
  */
 
+#ifndef _BSD_OPENPROM_H_
+#define _BSD_OPENPROM_H_
+
 /*
  * This file defines the interface between the kernel and the Openboot PROM.
  * N.B.: this has been tested only on interface versions 0 and 2 (we have
@@ -71,15 +73,15 @@
  * and so forth).
  */
 struct v0devops {
-	int	(*v0_open)(char *dev);
-	int	(*v0_close)(int d);
-	int	(*v0_rbdev)(int d, int nblks, int blkno, void *addr);
-	int	(*v0_wbdev)(int d, int nblks, int blkno, void *addr);
-	int	(*v0_wnet)(int d, int nbytes, void *addr);
-	int	(*v0_rnet)(int d, int nbytes, void *addr);
-	int	(*v0_rcdev)(int d, int nbytes, int, void *addr);
-	int	(*v0_wcdev)(int d, int nbytes, int, void *addr);
-	int	(*v0_seek)(int d, long offset, int whence);
+	int	(*v0_open)(const char *);
+	int	(*v0_close)(int);
+	int	(*v0_rbdev)(int, int, int, void *);
+	int	(*v0_wbdev)(int, int, int, void *);
+	int	(*v0_wnet)(int, int, void *);
+	int	(*v0_rnet)(int, int, void *);
+	int	(*v0_rcdev)(int, int, int, void *);
+	int	(*v0_wcdev)(int, int, int, void *);
+	int	(*v0_seek)(int, long, int);
 };
 
 /*
@@ -97,22 +99,22 @@ struct v2devops {
 	 * Convert an `instance handle' (acquired through v2_open()) to
 	 * a `package handle', a.k.a. a `node'.
 	 */
-	int	(*v2_fd_phandle)(int d);
+	int	(*v2_fd_phandle)(int);
 
 	/* Memory allocation and release. */
-	void	*(*v2_malloc)(caddr_t va, u_int sz);
-	void	(*v2_free)(caddr_t va, u_int sz);
+	void	*(*v2_malloc)(void *, u_int);
+	void	(*v2_free)(void *, u_int);
 
 	/* Device memory mapper. */
-	caddr_t	(*v2_mmap)(caddr_t va, int asi, u_int pa, u_int sz);
-	void	(*v2_munmap)(caddr_t va, u_int sz);
+	void *	(*v2_mmap)(void *, int, u_int, u_int);
+	void	(*v2_munmap)(void *, u_int);
 
 	/* Device open, close, etc. */
-	int	(*v2_open)(char *devpath);
-	void	(*v2_close)(int d);
-	int	(*v2_read)(int d, void *buf, int nbytes);
-	int	(*v2_write)(int d, void *buf, int nbytes);
-	void	(*v2_seek)(int d, int hi, int lo);
+	int	(*v2_open)(const char *);
+	void	(*v2_close)(int);
+	int	(*v2_read)(int, void *, int);
+	int	(*v2_write)(int, const void *, int);
+	void	(*v2_seek)(int, int, int);
 
 	void	(*v2_chain)(void);	/* ??? */
 	void	(*v2_release)(void);	/* ??? */
@@ -125,7 +127,7 @@ struct v2devops {
  */
 struct v0mlist {
 	struct	v0mlist *next;
-	caddr_t	addr;
+	void *	addr;
 	u_int	nbytes;
 };
 
@@ -172,6 +174,37 @@ struct v2bootargs {
 };
 
 /*
+ * The format used by the PROM to describe a physical address.  These
+ * are typically found in a "reg" property.
+ */
+struct openprom_addr {
+	int	oa_space;		/* address space (may be relative) */
+	u_int	oa_base;		/* address within space */
+	u_int	oa_size;		/* extent (number of bytes) */
+};
+
+/*
+ * The format used by the PROM to describe an address space window.  These
+ * are typically found in a "range" property.
+ */
+struct openprom_range {
+	int	or_child_space;		/* address space of child */
+	u_int	or_child_base;		/* offset in child's view of bus */
+	int	or_parent_space;	/* address space of parent */
+	u_int	or_parent_base;		/* offset in parent's view of bus */
+	u_int	or_size;		/* extent (number of bytes) */
+};
+
+/*
+ * The format used by the PROM to describe an interrupt.  These are
+ * typically found in an "intr" property.
+ */
+struct openprom_intr {
+	int	oi_pri;			/* interrupt priority */
+	int	oi_vec;			/* interrupt vector */
+};
+
+/*
  * The following structure defines the primary PROM vector interface.
  * The Boot PROM hands the kernel a pointer to this structure in %o0.
  * There are numerous substructures defined below.
@@ -179,6 +212,7 @@ struct v2bootargs {
 struct promvec {
 	/* Version numbers. */
 	u_int	pv_magic;		/* Magic number */
+#define OBP_MAGIC	0x10010407
 	u_int	pv_romvec_vers;		/* interface version (0, 2) */
 	u_int	pv_plugin_vers;		/* ??? */
 	u_int	pv_printrev;		/* PROM rev # (* 10, e.g 1.9 = 19) */
@@ -206,21 +240,21 @@ struct promvec {
 
 	/* Blocking getchar/putchar.  NOT REENTRANT! (grr) */
 	int	(*pv_getchar)(void);
-	void	(*pv_putchar)(int ch);
+	void	(*pv_putchar)(int);
 
 	/* Non-blocking variants that return -1 on error. */
 	int	(*pv_nbgetchar)(void);
-	int	(*pv_nbputchar)(int ch);
+	int	(*pv_nbputchar)(int);
 
 	/* Put counted string (can be very slow). */
-	void	(*pv_putstr)(char *str, int len);
+	void	(*pv_putstr)(const char *, int);
 
 	/* Miscellany. */
-	void	(*pv_reboot)(char *bootstr);
-	void	(*pv_printf)(const char *fmt, ...);
+	void	(*pv_reboot)(const char *) __attribute__((__noreturn__));
+	void	(*pv_printf)(const char *, ...);
 	void	(*pv_abort)(void);	/* L1-A abort */
 	int	*pv_ticks;		/* Ticks since last reset */
-	void	(*pv_halt)(void) __attribute__((__noreturn__));/* Halt! */
+	__dead void (*pv_halt)(void);	/* Halt! */
 	void	(**pv_synchook)(void);	/* "sync" command hook */
 
 	/*
@@ -228,14 +262,14 @@ struct promvec {
 	 * changed between V0 and V2, which gave us much pain.
 	 */
 	union {
-		void	(*v0_eval)(int len, char *str);
-		void	(*v2_eval)(char *str);
+		void	(*v0_eval)(int, const char *);
+		void	(*v2_eval)(const char *);
 	} pv_fortheval;
 
 	struct	v0bootargs **pv_v0bootargs;	/* V0: Boot args */
 
 	/* Extract Ethernet address from network device. */
-	u_int	(*pv_enaddr)(int d, char *enaddr);
+	u_int	(*pv_enaddr)(int, char *);
 
 	struct	v2bootargs pv_v2bootargs;	/* V2: Boot args + std in/out */
 	struct	v2devops pv_v2devops;	/* V2: device operations */
@@ -253,18 +287,16 @@ struct promvec {
 	 * all memory references go to the PROM, so the PROM can do it
 	 * easily.
 	 */
-	void	(*pv_setctxt)(int ctxt, caddr_t va, int pmeg);
-#if defined(SUN4M) && defined(notyet)
+	void	(*pv_setctxt)(int, void *, int);
+
 	/*
 	 * The following are V3 ROM functions to handle MP machines in the
 	 * Sun4m series. They have undefined results when run on a uniprocessor!
 	 */
-	int	(*pv_v3cpustart)(u_int module, u_int ctxtbl,
-				      int context, caddr_t pc);
-	int 	(*pv_v3cpustop)(u_int module);
-	int	(*pv_v3cpuidle)(u_int module);
-	int 	(*pv_v3cpuresume)(u_int module);
-#endif
+	int	(*pv_v3cpustart)(int, struct openprom_addr *, int, void *);
+	int 	(*pv_v3cpustop)(int);
+	int	(*pv_v3cpuidle)(int);
+	int 	(*pv_v3cpuresume)(int);
 };
 
 /*
@@ -279,11 +311,11 @@ struct promvec {
  * A node property is simply a name/value pair.  The names are C strings
  * (NUL-terminated); the values are arbitrary byte strings (counted strings).
  * Many values are really just C strings.  Sometimes these are NUL-terminated,
- * sometimes not, depending on the interface version; v0 seems to
- * terminate and v2 not.  Many others are simply integers stored as four
- * bytes in machine order: you just get them and go.  The third popular
- * format is an `address', which is made up of one or more sets of three
- * integers as defined below.
+ * sometimes not, depending on the interface version; v0 seems to terminate
+ * and v2 not.  Many others are simply integers stored as four bytes in
+ * machine order: you just get them and go.  The third popular format is
+ * an `physical address', which is made up of one or more sets of three
+ * integers as defined above.
  *
  * N.B.: for the `next' functions, next(0) = first, and next(last) = 0.
  * Whoever designed this part had good taste.  On the other hand, these
@@ -291,32 +323,53 @@ struct promvec {
  * are not in the openprom vectors but rather found by indirection from
  * there.  So the taste balances out.
  */
-struct openprom_addr {
-	int	oa_space;		/* address space (may be relative) */
-	u_int	oa_base;		/* address within space */
-	u_int	oa_size;		/* extent (number of bytes) */
-};
 
 struct nodeops {
 	/*
 	 * Tree traversal.
 	 */
-	int	(*no_nextnode)(int node);	/* next(node) */
-	int	(*no_child)(int node);	/* first child */
+	int	(*no_nextnode)(int);	/* next(node) */
+	int	(*no_child)(int);	/* first child */
 
 	/*
 	 * Property functions.  Proper use of getprop requires calling
 	 * proplen first to make sure it fits.  Kind of a pain, but no
 	 * doubt more convenient for the PROM coder.
 	 */
-	int	(*no_proplen)(int node, caddr_t name);
-	int	(*no_getprop)(int node, caddr_t name, caddr_t val);
-	int	(*no_setprop)(int node, caddr_t name, caddr_t val,
-				   int len);
-	caddr_t	(*no_nextprop)(int node, caddr_t name);
+	int	(*no_proplen)(int, const char *);
+	int	(*no_getprop)(int, const char *, void *);
+	int	(*no_setprop)(int, const char *, const void *, int);
+	char	*(*no_nextprop)(int, const char *);
 };
 
-__dead void	romhalt(void);
-__dead void	romboot(char *);
+/*
+ *  OBP Module mailbox messages for multi processor machines.
+ *
+ *	00..7F	: power-on self test
+ *	80..8F	: active in boot prom (at the "ok" prompt)
+ *	90..EF	: idle in boot prom
+ *	F0	: active in application
+ *	F1..FA	: reserved for future use
+ *
+ *	FB	: pv_v3cpustop(node) was called for this CPU,
+ *		  respond by calling pv_v3cpustop(0).
+ *
+ *	FC	: pv_v3cpuidle(node) was called for this CPU,
+ *		  respond by calling pv_v3cpuidle(0).
+ *
+ *	FD	: One processor hit a BREAKPOINT, call pv_v3cpuidle(0).
+ *		  [According to SunOS4 header; but what breakpoint?]
+ *
+ *	FE	: One processor got a WATCHDOG RESET, call pv_v3cpustop(0).
+ *		  [According to SunOS4 header; never seen this, although
+ *		   I've had plenty of watchdogs already]
+ *
+ *	FF	: This processor is not available.
+ */
 
-extern struct promvec *promvec;
+#define OPENPROM_MBX_STOP	0xfb
+#define OPENPROM_MBX_ABORT	0xfc
+#define OPENPROM_MBX_BPT	0xfd
+#define OPENPROM_MBX_WD		0xfe
+
+#endif /* _BSD_OPENPROM_H_ */

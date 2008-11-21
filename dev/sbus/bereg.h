@@ -1,5 +1,4 @@
-/*	$OpenBSD: bereg.h,v 1.3 2006/05/29 20:40:03 miod Exp $	*/
-/*	$NetBSD: bereg.h,v 1.4 2000/07/24 04:28:51 mycroft Exp $	*/
+/*	$NetBSD: bereg.h,v 1.8 2008/04/28 20:23:57 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,6 +41,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the authors may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -123,12 +117,16 @@ struct be_bregs {
 #define BE_BRI_IMASK	(65*4)
 #define BE_BRI_TXCFG	(131*4)
 #define BE_BRI_JSIZE	(139*4)
+#define BE_BRI_TXMAX	(140*4)
+#define BE_BRI_TXMIN	(141*4)
 #define BE_BRI_NCCNT	(144*4)
 #define BE_BRI_FCCNT	(145*4)
 #define BE_BRI_EXCNT	(146*4)
 #define BE_BRI_LTCNT	(147*4)
 #define BE_BRI_RANDSEED	(148*4)
 #define BE_BRI_RXCFG	(195*4)
+#define BE_BRI_RXMAX	(196*4)
+#define BE_BRI_RXMIN	(197*4)
 #define BE_BRI_MACADDR2	(198*4)
 #define BE_BRI_MACADDR1	(199*4)
 #define BE_BRI_MACADDR0	(200*4)
@@ -159,12 +157,12 @@ struct be_bregs {
 #define BE_BR_STAT_LCCNTEXP	0x00002000	/* late-collision cntr exp */
 #define BE_BR_STAT_FCNTEXP	0x00004000	/* first-collision cntr exp */
 #define BE_BR_STAT_DTIMEXP	0x00008000	/* defer-timer expired */
-#define BE_BR_STAT_BITS		"\020"				\
-			"\01GOTFRAME\02RCNTEXP\03ACNTEXP"		\
-			"\04CCNTEXP\05LCNTEXP\06RFIFOVF"		\
-			"\07CVCNTEXP\011SENTFRAME\012TFIFO_UND"	\
-			"\013MAXPKTERR\014NCNTEXP\015ECNTEXP"	\
-			"\016LCCNTEXP\017FCNTEXP\020DTIMEXP"
+#define BE_BR_STAT_BITS		"\177\020"				\
+			"b\0GOTFRAME\0b\1RCNTEXP\0b\2ACNTEXP\0"		\
+			"b\3CCNTEXP\0b\5LCNTEXP\0b\6RFIFOVF\0"		\
+			"b\7CVCNTEXP\0b\10SENTFRAME\0b\11TFIFO_UND\0"	\
+			"b\12MAXPKTERR\0b\13NCNTEXP\0b\14ECNTEXP\0"	\
+			"b\15LCCNTEXP\0b\16FCNTEXP\0b\17DTIMEXP\0\0"
 
 /* be_bregs.imask: interrupt mask. */
 #define BE_BR_IMASK_GOTFRAME	0x00000001	/* received a frame */
@@ -240,7 +238,7 @@ struct be_cregs {
 #define BE_CRI_CCNT	(12*4)
 
 /* be_cregs.ctrl: control. */
-#define	BE_CR_CTRL_TWAKEUP	0x00000001	/* tx dma wakeup */
+#define	BE_CR_CTRL_TWAKEUP	0x00000001	/* tx DMA wakeup */
 
 /* be_cregs.stat: status. */
 #define BE_CR_STAT_BERROR	0x80000000	/* be error */
@@ -286,9 +284,9 @@ struct be_tregs {
 #define TCVR_PAL_MSENSE		0x00000004	/* media sense */
 #define TCVR_PAL_LTENABLE	0x00000008	/* link test enable */
 #define TCVR_PAL_LTSTATUS	0x00000010	/* link test status: p1 only */
-#define TCVR_PAL_BITS		"\020"				\
-				"\01SERIAL\02EXTLBACK\03MSENSE"	\
-				"\04LTENABLE\05LTSTATUS"
+#define TCVR_PAL_BITS		"\177\020"				\
+				"b\0SERIAL\0b\1EXTLBACK\0b\2MSENSE\0"	\
+				"b\3LTENABLE\0\b4LTSTATUS\0\0"
 
 /* be_tregs.mgmt_pal: management pal */
 #define MGMT_PAL_DCLOCK		0x00000001	/* data clock strobe */
@@ -299,9 +297,9 @@ struct be_tregs {
 #define MGMT_PAL_TIMEO		0x00000008	/* tx enable timeout error */
 #define MGMT_PAL_INT_MDIO	MGMT_PAL_TIMEO	/* internal mdio */
 #define MGMT_PAL_INT_MDIO_SHIFT	3		/* position of int mdio bit */
-#define MGMT_PAL_BITS		"\020"				\
-				"\01DLCLOCK\02ENAB\03EXT_MDIO"	\
-				"\04INT_MDIO"
+#define MGMT_PAL_BITS		"\177\020"				\
+				"b\0DLCLOCK\0b\1OENAB\0b\2EXT_MDIO\0"	\
+				"b\3INT_MDIO\0\0"
 
 /* Packet buffer size */
 #define BE_PKT_BUF_SZ		2048

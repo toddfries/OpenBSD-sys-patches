@@ -1,8 +1,7 @@
-/*	$OpenBSD: dpt_eisa.c,v 1.4 2008/05/13 02:24:08 brad Exp $	*/
-/*	$NetBSD: dpt_eisa.c,v 1.2 1999/10/18 21:59:19 ad Exp $	*/
+/*	$NetBSD: dpt_eisa.c,v 1.18 2008/04/06 08:54:43 cegger Exp $	*/
 
 /*
- * Copyright (c) 1999 Andy Doran <ad@NetBSD.org>
+ * Copyright (c) 1999, 2000, 2001 Andrew Doran <ad@NetBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,49 +31,40 @@
  * EISA front-end for DPT EATA SCSI driver.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dpt_eisa.c,v 1.18 2008/04/06 08:54:43 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/queue.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#ifdef __NetBSD__
-#include <dev/scsipi/scsi_all.h>
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-#endif /* __OpenBSD__ */
 
 #include <dev/eisa/eisavar.h>
-#include <dev/eisa/eisadevs.h>
 
 #include <dev/ic/dptreg.h>
 #include <dev/ic/dptvar.h>
+
+#include <dev/i2o/dptivar.h>
 
 #define DPT_EISA_SLOT_OFFSET		0x0c00
 #define DPT_EISA_IOSIZE			0x0100
 #define DPT_EISA_IOCONF			0x90
 #define DPT_EISA_EATA_REG_OFFSET	0x88
 
-int	dpt_eisa_irq(bus_space_tag_t, bus_space_handle_t, int *);
-#ifdef __NetBSD__
-int	dpt_eisa_match(struct device *, struct cfdata *, void *);
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-int	dpt_eisa_match(struct device *, void *, void *);
-#endif /* __OpenBSD__ */
-void	dpt_eisa_attach(struct device *, struct device *, void *);
+static void	dpt_eisa_attach(struct device *, struct device *, void *);
+static int	dpt_eisa_irq(bus_space_tag_t, bus_space_handle_t, int *);
+static int	dpt_eisa_match(struct device *, struct cfdata *, void *);
 
-struct cfattach dpt_eisa_ca = {
-	sizeof(struct dpt_softc), dpt_eisa_match, dpt_eisa_attach
-};
+CFATTACH_DECL(dpt_eisa, sizeof(struct dpt_softc),
+    dpt_eisa_match, dpt_eisa_attach, NULL, NULL);
 
-const char *dpt_eisa_boards[] = {
+static const char * const dpt_eisa_boards[] = {
 	"DPT2402",
 	"DPTA401",
 	"DPTA402",
@@ -89,13 +79,10 @@ const char *dpt_eisa_boards[] = {
 	"NEC8200",	/* OEM */
 	"ATT2408",	/* OEM */
 	NULL
-}; 
+};
 
-int
-dpt_eisa_irq(iot, ioh, irq)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	int *irq;
+static int
+dpt_eisa_irq(bus_space_tag_t iot, bus_space_handle_t ioh, int *irq)
 {
 
 	switch (bus_space_read_1(iot, ioh, DPT_EISA_IOCONF) & 0x38) {
@@ -115,16 +102,9 @@ dpt_eisa_irq(iot, ioh, irq)
 	return (0);
 }
 
-int
-dpt_eisa_match(parent, match, aux)
-	struct device *parent;
-#ifdef __NetBSD__
-	struct cfdata *match;
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	void *match;
-#endif /* __OpenBSD__ */
-	void *aux;
+static int
+dpt_eisa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct eisa_attach_args *ea;
 	int i;
@@ -138,10 +118,8 @@ dpt_eisa_match(parent, match, aux)
 	return (dpt_eisa_boards[i] != NULL);
 }
 
-void
-dpt_eisa_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+dpt_eisa_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct eisa_attach_args *ea;
 	bus_space_handle_t ioh;
@@ -151,12 +129,12 @@ dpt_eisa_attach(parent, self, aux)
 	bus_space_tag_t iot;
 	const char *intrstr;
 	int irq;
-	
+
 	ea = aux;
-	sc = (struct dpt_softc *)self;
+	sc = device_private(self);
 	iot = ea->ea_iot;
 	ec = ea->ea_ec;
-	
+
 	printf(": ");
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
@@ -171,7 +149,7 @@ dpt_eisa_attach(parent, self, aux)
 
 	/* Map and establish the interrupt. */
 	if (dpt_eisa_irq(iot, ioh, &irq)) {
-		printf("HBA on invalid IRQ (%d)\n", irq);
+		printf("HBA on invalid IRQ\n");
 		return;
 	}
 
@@ -179,16 +157,10 @@ dpt_eisa_attach(parent, self, aux)
 		printf("can't map interrupt (%d)\n", irq);
 		return;
 	}
-	
+
 	intrstr = eisa_intr_string(ec, ih);
-#ifdef __NetBSD__
 	sc->sc_ih = eisa_intr_establish(ec, ih, IST_LEVEL, IPL_BIO,
 	    dpt_intr, sc);
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	sc->sc_ih = eisa_intr_establish(ec, ih, IST_LEVEL, IPL_BIO,
-	    dpt_intr, sc, sc->sc_dv.dv_xname);
-#endif /* __OpenBSD__ */
 	if (sc->sc_ih == NULL) {
 		printf("can't establish interrupt");
 		if (intrstr != NULL)
@@ -197,13 +169,16 @@ dpt_eisa_attach(parent, self, aux)
 		return;
 	}
 
-	/* Read the EATA configuration */
+	/* Read the EATA configuration. */
 	if (dpt_readcfg(sc)) {
-		printf("%s: readcfg failed - see dpt(4)\n", 
-		    sc->sc_dv.dv_xname);
-		return;	
+		aprint_error_dev(&sc->sc_dv, "readcfg failed - see dpt(4)\n");
+		return;
 	}
 
-	/* Now attach to the bus-independent code */
+	sc->sc_bustype = SI_EISA_BUS;
+	sc->sc_isaport =  EISA_SLOT_ADDR(ea->ea_slot) + DPT_EISA_SLOT_OFFSET;
+	sc->sc_isairq = irq;
+
+	/* Now attach to the bus-independent code. */
 	dpt_init(sc, intrstr);
 }

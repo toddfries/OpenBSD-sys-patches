@@ -1,5 +1,4 @@
-/*	$OpenBSD: bsd_fdintr.s,v 1.11 2004/09/29 07:35:13 miod Exp $	*/
-/*	$NetBSD: bsd_fdintr.s,v 1.11 1997/04/07 21:00:36 pk Exp $ */
+/*	$NetBSD: bsd_fdintr.s,v 1.27 2007/10/17 19:57:14 garbled Exp $ */
 
 /*
  * Copyright (c) 1995 Paul Kranenburg
@@ -35,10 +34,11 @@
 #ifndef FDC_C_HANDLER
 #include "assym.h"
 #include <machine/param.h>
-#include <machine/psl.h>
 #include <machine/asm.h>
+#include <machine/intr.h>
+#include <machine/psl.h>
 #include <sparc/sparc/intreg.h>
-#include <sparc/sparc/auxioreg.h>
+#include <sparc/sparc/auxreg.h>
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/dev/fdreg.h>
 #include <sparc/dev/fdvar.h>
@@ -49,9 +49,9 @@
 	or	%l6, IE_L4, %l6;			\
 	stb	%l6, [%l5 + %lo(INTRREG_VA)]
 
-! raise(0,IPL_FDSOFT)	! NOTE: CPU#0 and IPL_FDSOFT=4
+! raise(0,IPL_SOFTFDC)	! NOTE: CPU#0
 #define FD_SET_SWINTR_4M				\
-	sethi	%hi(1 << (16 + 4)), %l5;		\
+	sethi	%hi(PINTR_SINTRLEV(IPL_SOFTFDC)), %l5;	\
 	set	ICR_PI_SET, %l6;			\
 	st	%l5, [%l6]
 
@@ -144,31 +144,30 @@
 #define R_stat	%l3
 #define R_nstat	%l4
 #define R_stcnt	%l5
-/* use %l6 and %l7 as short term temporaries */
+/* use %l6 and %l7 as short-term temporaries */
 
 
 	.seg	"data"
 	.align	8
-	.global _C_LABEL(fdciop)
 /* A save haven for three precious registers */
 save_l:
 	.word	0
 	.word	0
 	.word	0
 /* Pointer to a `struct fdcio', set in fd.c */
+	.global _C_LABEL(fdciop)
 _C_LABEL(fdciop):
 	.word	0
 
 	.seg	"text"
 	.align	4
-	.global _C_LABEL(fdchwintr)
 
-_C_LABEL(fdchwintr):
+_ENTRY(_C_LABEL(fdchwintr))
 	set	save_l, %l7
 	std	%l0, [%l7]
 	st	%l2, [%l7 + 8]
 
-	! tally interrupt
+	! tally interrupt (uvmexp.intrs++)
 	sethi	%hi(_C_LABEL(uvmexp)+V_INTR), %l7
 	ld	[%l7 + %lo(_C_LABEL(uvmexp)+V_INTR)], %l6
 	inc	%l6
@@ -178,16 +177,24 @@ _C_LABEL(fdchwintr):
 	sethi	%hi(_C_LABEL(fdciop)), %l7
 	ld	[%l7 + %lo(_C_LABEL(fdciop))], R_fdc
 
-	! tally interrupt
-	ldd	[R_fdc + FDC_COUNT], %l4
-	inccc	%l4
-	addx	%l4, 0, %l4
-	std	%l4, [R_fdc + FDC_COUNT]
+	! tally interrupt (fdcio_intrcnt.ev_count++)
+	ldd	[R_fdc + FDC_EVCNT], %l6
+	addcc	%l7, 1, %l7
+	addx	%l6, 0, %l6
+	std	%l6, [R_fdc + FDC_EVCNT]
 
-	! load chips register addresses
+	/*
+	 * load chips register addresses
+	 * NOTE: we ignore the bus tag here and assume the bus handle
+	 *	 is the virtual address of the chip's registers.
+	 */
+	ld	[R_fdc + FDC_REG_HANDLE], %l7	! get chip registers bus handle
 	ld	[R_fdc + FDC_REG_MSR], R_msr	! get chip MSR reg addr
+	add	R_msr, %l7, R_msr
 	ld	[R_fdc + FDC_REG_FIFO], R_fifo	! get chip FIFO reg addr
+	add	R_fifo, %l7, R_fifo
 	!!ld	[R_fdc + FDC_REG_DOR], R_dor	! get chip DOR reg addr
+	!!add	R_dor, %l7, R_dor
 
 	! find out what we are supposed to do
 	ld	[R_fdc + FDC_ITASK], %l7	! get task from fdc
@@ -209,7 +216,7 @@ _C_LABEL(fdchwintr):
 nextc:
 	btst	NE7_RQM, %l7			! room in fifo?
 	bnz,a	0f
-	 btst	NE7_NDM, %l7			! overrun?
+	 btst	NE7_NDM, %l7			! execution finished?
 
 	! we filled/emptied the FIFO; update fdc->sc_buf & fdc->sc_tc
 	st	R_tc, [R_fdc + FDC_TC]
@@ -217,8 +224,19 @@ nextc:
 	st	R_buf, [R_fdc + FDC_DATA]
 
 0:
-	bz	resultphase			! overrun/underrun
-	btst	NE7_DIO, %l7			! IO direction
+	bz	resultphase
+
+	tst	R_tc
+	bnz	0f
+	 nop
+
+	!! panic("fdc: overrun")
+	sethi	%hi(.Lpanic_msg), %o0
+	call	_C_LABEL(panic)
+	 or	%lo(.Lpanic_msg), %o0, %o0
+	/* NOTREACHED */
+
+0:	btst	NE7_DIO, %l7			! IO direction
 	bz	1f
 	 deccc	R_tc
 	ldub	[R_fifo], %l7			! reading:
@@ -239,15 +257,10 @@ nextc:
 
 	! flip TC bit in auxreg
 	FD_ASSERT_TC
-
-	! we have some time to kill; anticipate on upcoming
-	! result phase.
-	add	R_fdc, FDC_STATUS, R_stat	! &fdc->sc_status[0]
-	mov	-1, %l7
-	st	%l7, [R_fdc + FDC_NSTAT]	! fdc->sc_nstat = -1;
-
+	nop; nop; nop				! XXX
 	FD_DEASSERT_TC
-	b,a	resultphase1
+	b,a	x
+
 
 sensei:
 	ldub	[R_msr], %l7
@@ -299,6 +312,7 @@ resultphase1:
 ssi:
 	! set software interrupt
 	! enter here with status in %l7
+	! SMP: consider which CPU to ping?
 	st	%l7, [R_fdc + FDC_ISTATUS]
 	FD_SET_SWINTR
 
@@ -313,4 +327,8 @@ x:
 	ld	[%l7 + 8], %l2
 	jmp	%l1
 	rett	%l2
+
+
+.Lpanic_msg:
+	.asciz	"fdc: overrun"
 #endif

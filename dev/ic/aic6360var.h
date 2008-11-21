@@ -1,8 +1,7 @@
-/*	$OpenBSD: aic6360var.h,v 1.6 2006/06/03 01:51:54 martin Exp $	*/
-/*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
+/*	$NetBSD: aic6360var.h,v 1.13 2008/04/08 12:07:25 cegger Exp $	*/
 
 /*
- * Copyright (c) 1994, 1995, 1996 Charles Hannum.  All rights reserved.
+ * Copyright (c) 1994, 1995, 1996 Charles M. Hannum.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,37 +44,36 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _DEV_IC_AIC6360VAR_H_
+#define	_DEV_IC_AIC6360VAR_H_
+
 /*
  * Acknowledgements: Many of the algorithms used in this driver are
  * inspired by the work of Julian Elischer (julian@tfs.com) and
  * Charles Hannum (mycroft@duality.gnu.ai.mit.edu).  Thanks a million!
  */
 
-#define AIC_NPORTS	0x20	/* I/O port space used */
-
 typedef u_long physaddr;
 typedef u_long physlen;
 
-#ifdef notyet
 struct aic_dma_seg {
 	physaddr seg_addr;
 	physlen seg_len;
 };
 
 #define AIC_NSEG	16
-#endif
 
 /*
  * ACB. Holds additional information for each SCSI command Comments: We
  * need a separate scsi command block because we may need to overwrite it
  * with a request sense command.  Basicly, we refrain from fiddling with
- * the scsi_xfer struct (except do the expected updating of return values).
+ * the scsipi_xfer struct (except do the expected updating of return values).
  * We'll generally update: xs->{flags,resid,error,sense,status} and
  * occasionally xs->retries.
  */
 struct aic_acb {
-	struct scsi_generic scsi_cmd;
-	int scsi_cmd_length;
+	struct scsipi_generic scsipi_cmd;
+	int scsipi_cmd_length;
 	u_char *data_addr;		/* Saved data pointer */
 	int data_length;		/* Residue */
 
@@ -86,7 +84,7 @@ struct aic_acb {
 #endif
 
 	TAILQ_ENTRY(aic_acb) chain;
-	struct scsi_xfer *xs;	/* SCSI xfer ctrl block from above */
+	struct scsipi_xfer *xs;	/* SCSI xfer ctrl block from above */
 	int flags;
 #define ACB_ALLOC	0x01
 #define	ACB_NEXUS	0x02
@@ -118,13 +116,12 @@ struct aic_tinfo {
 
 struct aic_softc {
 	struct device sc_dev;
-	void *sc_ih;
 
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
-	int sc_irq, sc_drq;
 
-	struct scsi_link sc_link;	/* prototype for subdevs */
+	struct scsipi_adapter sc_adapter;
+	struct scsipi_channel sc_channel;
 
 	TAILQ_HEAD(, aic_acb) free_list, ready_list, nexus_list;
 	struct aic_acb *sc_nexus;	/* current command */
@@ -154,6 +151,7 @@ struct aic_softc {
 #define	AIC_ABORTING	0x02	/* Bailing out */
 #define AIC_DOINGDMA	0x04	/* The FIFO data path is active! */
 	u_char	sc_selid;	/* Reselection ID */
+	struct device *sc_child;/* Our child */
 
 	/* Message stuff */
 	u_char	sc_msgpriq;	/* Messages we want to send */
@@ -189,21 +187,25 @@ struct aic_softc {
 #define AIC_SHOWTRACE	0x10
 #define AIC_SHOWSTART	0x20
 #define AIC_DOBREAK	0x40
-#define	AIC_PRINT(b, s)	do {if ((aic_debug & (b)) != 0) printf s;} while (0)
-#define	AIC_BREAK() \
-	do { if ((aic_debug & AIC_DOBREAK) != 0) Debugger(); } while (0)
-#define	AIC_ASSERT(x) \
-	do { \
-		if (!x) { \
-			printf("%s at line %d: assertion failed\n", \
-			    sc->sc_dev.dv_xname, __LINE__); \
-			Debugger(); \
-		} \
-	} while (0)
+extern int aic_debug; /* AIC_SHOWSTART|AIC_SHOWMISC|AIC_SHOWTRACE; */
+#define	AIC_PRINT(b, s)	do { \
+				if ((aic_debug & (b)) != 0) \
+					printf s; \
+			} while (/* CONSTCOND */ 0)
+#define	AIC_BREAK()	do { \
+				if ((aic_debug & AIC_DOBREAK) != 0) \
+					Debugger(); \
+		    	} while (/* CONSTCOND */ 0)
+#define	AIC_ASSERT(x)	do { \
+			if (! (x)) { \
+				printf("%s at line %d: assertion failed\n", \
+				    device_xname(&sc->sc_dev), __LINE__); \
+				Debugger(); \
+			} } while (/* CONSTCOND */ 0)
 #else
-#define	AIC_PRINT(b, s)
-#define	AIC_BREAK()
-#define	AIC_ASSERT(x)
+#define	AIC_PRINT(b, s)	/* NOTHING */
+#define	AIC_BREAK()	/* NOTHING */
+#define	AIC_ASSERT(x)	/* NOTHING */
 #endif
 
 #define AIC_ACBS(s)	AIC_PRINT(AIC_SHOWACBS, s)
@@ -213,7 +215,14 @@ struct aic_softc {
 #define AIC_TRACE(s)	AIC_PRINT(AIC_SHOWTRACE, s)
 #define AIC_START(s)	AIC_PRINT(AIC_SHOWSTART, s)
 
+#define AIC_ISA_IOSIZE	0x20	/* XXX */
+
 void	aicattach(struct aic_softc *);
+int	aic_activate(struct device *, enum devact);
 int	aic_detach(struct device *, int);
 int	aicintr(void *);
-int 	aic_find(bus_space_tag_t, bus_space_handle_t);
+int	aic_find(bus_space_tag_t, bus_space_handle_t);
+void	aic_isa_attach(struct device *, struct device *, void *);
+void	aic_init(struct aic_softc *, int);
+
+#endif /* _DEV_IC_AIC6360VAR_H_ */

@@ -1,4 +1,4 @@
-#	$NetBSD: files.iyonix,v 1.2 2005/12/11 12:17:51 christos Exp $
+#	$NetBSD: files.iyonix,v 1.5 2008/02/20 21:43:34 drochner Exp $
 #
 # First try for arm-specific configuration info
 #
@@ -8,11 +8,6 @@ maxusers	2 8 64
 
 # Maintain Interrupt statistics
 defflag			IRQSTATS
-
-# Include WSCONS stuff
-include "dev/wscons/files.wscons"
-include "dev/rasops/files.rasops"
-include "dev/wsfont/files.wsfont"
 
 #
 # Machine-independent ATA drivers
@@ -60,9 +55,6 @@ include "arch/arm/conf/majors.arm32"
 #
 # Machine dependent stuff
 #
-
-# Use the generic ARM soft interrupt code.
-file	arch/arm/arm/softintr.c
 
 file	arch/iyonix/iyonix/iyonix_machdep.c
 file	arch/iyonix/iyonix/iyonix_pci.c

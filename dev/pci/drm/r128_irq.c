@@ -1,5 +1,8 @@
-/* r128_irq.c -- IRQ handling for radeon -*- linux-c -*- */
-/*
+/*	$NetBSD: r128_irq.c,v 1.6 2008/07/08 06:50:23 mrg Exp $	*/
+
+/* r128_irq.c -- IRQ handling for radeon -*- linux-c -*-
+ */
+/*-
  * Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
  *
  * The Weather Channel (TM) funded Tungsten Graphics to develop the
@@ -30,6 +33,12 @@
  *    Eric Anholt <anholt@FreeBSD.org>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: r128_irq.c,v 1.6 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/r128_irq.c,v 1.6 2005/11/28 23:13:53 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "r128_drm.h"
@@ -37,7 +46,7 @@
 
 irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS)
 {
-	struct drm_device *dev = (struct drm_device *) arg;
+	drm_device_t *dev = (drm_device_t *) arg;
 	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
 	int status;
 
@@ -54,7 +63,7 @@ irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS)
 	return IRQ_NONE;
 }
 
-int r128_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence)
+int r128_driver_vblank_wait(drm_device_t * dev, unsigned int *sequence)
 {
 	unsigned int cur_vblank;
 	int ret = 0;
@@ -72,7 +81,7 @@ int r128_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence)
 	return ret;
 }
 
-void r128_driver_irq_preinstall(struct drm_device * dev)
+void r128_driver_irq_preinstall(drm_device_t * dev)
 {
 	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
 
@@ -82,7 +91,7 @@ void r128_driver_irq_preinstall(struct drm_device * dev)
 	R128_WRITE(R128_GEN_INT_STATUS, R128_CRTC_VBLANK_INT_AK);
 }
 
-void r128_driver_irq_postinstall(struct drm_device * dev)
+void r128_driver_irq_postinstall(drm_device_t * dev)
 {
 	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
 
@@ -90,7 +99,7 @@ void r128_driver_irq_postinstall(struct drm_device * dev)
 	R128_WRITE(R128_GEN_INT_CNTL, R128_CRTC_VBLANK_INT_EN);
 }
 
-void r128_driver_irq_uninstall(struct drm_device * dev)
+void r128_driver_irq_uninstall(drm_device_t * dev)
 {
 	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
 	if (!dev_priv)

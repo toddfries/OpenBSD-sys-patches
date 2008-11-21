@@ -1,5 +1,4 @@
-/*	$OpenBSD: ip_mroute.h,v 1.14 2006/04/25 15:49:35 claudio Exp $	*/
-/*	$NetBSD: ip_mroute.h,v 1.23 2004/04/21 17:49:46 itojun Exp $	*/
+/*	$NetBSD: ip_mroute.h,v 1.31 2008/08/07 06:20:14 cegger Exp $	*/
 
 #ifndef _NETINET_IP_MROUTE_H_
 #define _NETINET_IP_MROUTE_H_
@@ -20,7 +19,11 @@
  */
 
 #include <sys/queue.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
+
+#ifdef _KERNEL
+struct sockopt; /* from <sys/socketvar.h> */
+#endif
 
 /*
  * Multicast Routing set/getsockopt commands.
@@ -33,11 +36,11 @@
 #define	MRT_DEL_MFC		105	/* delete forwarding cache entry */
 #define	MRT_VERSION		106	/* get kernel version number */
 #define	MRT_ASSERT		107	/* enable assert processing */
-#define	MRT_PIM			MRT_ASSERT /* enable PIM processing */
-#define	MRT_API_SUPPORT		109	/* supported MRT API */
-#define	MRT_API_CONFIG		110	/* config MRT API */
-#define	MRT_ADD_BW_UPCALL	111	/* create bandwidth monitor */
-#define	MRT_DEL_BW_UPCALL	112	/* delete bandwidth monitor */
+#define MRT_PIM			MRT_ASSERT /* enable PIM processing */
+#define MRT_API_SUPPORT		109	/* supported MRT API */
+#define MRT_API_CONFIG		110	/* config MRT API */
+#define MRT_ADD_BW_UPCALL	111	/* create bandwidth monitor */
+#define MRT_DEL_BW_UPCALL	112	/* delete bandwidth monitor */
 
 
 /*
@@ -57,7 +60,7 @@ typedef u_int16_t vifi_t;		/* type of a vif index */
 
 #define	VIFF_TUNNEL	0x1		/* vif represents a tunnel end-point */
 #define	VIFF_SRCRT	0x2		/* tunnel uses IP src routing */
-#define	VIFF_REGISTER	0x4		/* used for PIM Register encap/decap */
+#define VIFF_REGISTER	0x4		/* used for PIM Register encap/decap */
 
 /*
  * Argument structure for MRT_ADD_VIF.
@@ -65,7 +68,7 @@ typedef u_int16_t vifi_t;		/* type of a vif index */
  */
 struct vifctl {
 	vifi_t	  vifc_vifi;	    	/* the index of the vif to be added */
-	u_int8_t  vifc_flags;     	/* VIFF_ flags defined above */
+	u_int8_t  vifc_flags;     	/* VIFF_ flags defined below */
 	u_int8_t  vifc_threshold; 	/* min ttl required to forward on vif */
 	u_int32_t vifc_rate_limit;	/* max rate */
 	struct	  in_addr vifc_lcl_addr;/* local interface address */
@@ -106,11 +109,11 @@ struct mfcctl2 {
  */
 #define	MRT_MFC_FLAGS_DISABLE_WRONGVIF	(1 << 0) /* disable WRONGVIF signals */
 #define	MRT_MFC_FLAGS_BORDER_VIF	(1 << 1) /* border vif		     */
-#define	MRT_MFC_RP			(1 << 8) /* enable RP address	     */
-#define	MRT_MFC_BW_UPCALL		(1 << 9) /* enable bw upcalls	     */
-#define	MRT_MFC_FLAGS_ALL		(MRT_MFC_FLAGS_DISABLE_WRONGVIF |    \
+#define MRT_MFC_RP			(1 << 8) /* enable RP address	     */
+#define MRT_MFC_BW_UPCALL		(1 << 9) /* enable bw upcalls	     */
+#define MRT_MFC_FLAGS_ALL		(MRT_MFC_FLAGS_DISABLE_WRONGVIF |    \
 					 MRT_MFC_FLAGS_BORDER_VIF)
-#define	MRT_API_FLAGS_ALL		(MRT_MFC_FLAGS_ALL |		     \
+#define MRT_API_FLAGS_ALL		(MRT_MFC_FLAGS_ALL |		     \
 					 MRT_MFC_RP |			     \
 					 MRT_MFC_BW_UPCALL)
 
@@ -131,7 +134,7 @@ struct mfcctl2 {
  *
  * Measurement works as follows:
  *
- * For >= measurements: 
+ * For >= measurements:
  * The first packet marks the start of a measurement interval.
  * During an interval we count packets and bytes, and when we
  * pass the threshold we deliver an upcall and we are done.
@@ -156,20 +159,20 @@ struct bw_upcall {
 	struct in_addr	bu_src;			/* source address            */
 	struct in_addr	bu_dst;			/* destination address       */
 	u_int32_t	bu_flags;		/* misc flags (see below)    */
-#define	BW_UPCALL_UNIT_PACKETS   (1 << 0)	/* threshold (in packets)    */
-#define	BW_UPCALL_UNIT_BYTES     (1 << 1)	/* threshold (in bytes)      */
-#define	BW_UPCALL_GEQ            (1 << 2)	/* upcall if bw >= threshold */
-#define	BW_UPCALL_LEQ            (1 << 3)	/* upcall if bw <= threshold */
-#define	BW_UPCALL_DELETE_ALL     (1 << 4)	/* delete all upcalls for s,d*/
+#define BW_UPCALL_UNIT_PACKETS   (1 << 0)	/* threshold (in packets)    */
+#define BW_UPCALL_UNIT_BYTES     (1 << 1)	/* threshold (in bytes)      */
+#define BW_UPCALL_GEQ            (1 << 2)	/* upcall if bw >= threshold */
+#define BW_UPCALL_LEQ            (1 << 3)	/* upcall if bw <= threshold */
+#define BW_UPCALL_DELETE_ALL     (1 << 4)	/* delete all upcalls for s,d*/
 	struct bw_data	bu_threshold;		/* the bw threshold	     */
 	struct bw_data	bu_measured;		/* the measured bw	     */
 };
 
 /* max. number of upcalls to deliver together */
-#define	BW_UPCALLS_MAX				128
+#define BW_UPCALLS_MAX				128
 /* min. threshold time interval for bandwidth measurement */
-#define	BW_UPCALL_THRESHOLD_INTERVAL_MIN_SEC	3
-#define	BW_UPCALL_THRESHOLD_INTERVAL_MIN_USEC	0
+#define BW_UPCALL_THRESHOLD_INTERVAL_MIN_SEC	3
+#define BW_UPCALL_THRESHOLD_INTERVAL_MIN_USEC	0
 
 /*
  * Argument structure used by mrouted to get src-grp pkt counts.
@@ -219,6 +222,7 @@ struct mrtstat {
 /*
  * The kernel's virtual-interface structure.
  */
+struct encaptab;
 struct vif {
 	struct	  mbuf *tbf_q, **tbf_t;	/* packet queue */
 	struct	  timeval tbf_last_pkt_t; /* arr. time of last pkt */
@@ -237,11 +241,12 @@ struct vif {
 	u_long	  v_bytes_in;		/* # bytes in on interface */
 	u_long	  v_bytes_out;		/* # bytes out on interface */
 	struct	  route v_route;	/* cached route if this is a tunnel */
-	struct	  timeout v_repq_ch;	/* for tbf_reprocess_q() */
+	callout_t v_repq_ch;		/* for tbf_reprocess_q() */
 #ifdef RSVP_ISI
 	int	  v_rsvp_on;		/* # RSVP listening on this vif */
 	struct	  socket *v_rsvpd;	/* # RSVPD daemon */
 #endif /* RSVP_ISI */
+	const struct encaptab *v_encap_cookie;
 };
 
 /*
@@ -262,8 +267,8 @@ struct mfc {
 	struct	 timeval mfc_last_assert;	/* last time I sent an assert */
 	struct	 rtdetq *mfc_stall;		/* pkts waiting for route */
 	u_int8_t mfc_flags[MAXVIFS];		/* the MRT_MFC_FLAGS_* flags */
-	struct in_addr	mfc_rp;			/* the RP address	     */
-	struct bw_meter	*mfc_bw_meter;		/* list of bandwidth meters  */
+	struct	 in_addr mfc_rp;		/* the RP address	     */
+	struct	 bw_meter *mfc_bw_meter;	/* list of bandwidth meters  */
 };
 
 /*
@@ -274,15 +279,15 @@ struct igmpmsg {
 	u_int32_t unused1;
 	u_int32_t unused2;
 	u_int8_t  im_msgtype;		/* what type of message */
-#define	IGMPMSG_NOCACHE		1	/* no MFC in the kernel		    */
-#define	IGMPMSG_WRONGVIF	2	/* packet came from wrong interface */
+#define IGMPMSG_NOCACHE		1	/* no MFC in the kernel		    */
+#define IGMPMSG_WRONGVIF	2	/* packet came from wrong interface */
 #define	IGMPMSG_WHOLEPKT	3	/* PIM pkt for user level encap.    */
 #define	IGMPMSG_BW_UPCALL	4	/* BW monitoring upcall		    */
 	u_int8_t  im_mbz;		/* must be zero */
 	u_int8_t  im_vif;		/* vif rec'd on */
 	u_int8_t  unused3;
 	struct	  in_addr im_src, im_dst;
-};
+} __packed;
 
 /*
  * Argument structure used for pkt info. while upcall is made.
@@ -315,29 +320,28 @@ struct bw_meter {
 	uint32_t	bm_time_hash;		/* the time hash value       */
 	struct mfc	*bm_mfc;		/* the corresponding mfc     */
 	uint32_t	bm_flags;		/* misc flags (see below)    */
-#define	BW_METER_UNIT_PACKETS	(1 << 0)	/* threshold (in packets)    */
-#define	BW_METER_UNIT_BYTES	(1 << 1)	/* threshold (in bytes)      */
-#define	BW_METER_GEQ		(1 << 2)	/* upcall if bw >= threshold */
-#define	BW_METER_LEQ		(1 << 3)	/* upcall if bw <= threshold */
-#define	BW_METER_USER_FLAGS 	(BW_METER_UNIT_PACKETS |		\
+#define BW_METER_UNIT_PACKETS	(1 << 0)	/* threshold (in packets)    */
+#define BW_METER_UNIT_BYTES	(1 << 1)	/* threshold (in bytes)      */
+#define BW_METER_GEQ		(1 << 2)	/* upcall if bw >= threshold */
+#define BW_METER_LEQ		(1 << 3)	/* upcall if bw <= threshold */
+#define BW_METER_USER_FLAGS 	(BW_METER_UNIT_PACKETS |		\
 				 BW_METER_UNIT_BYTES |			\
 				 BW_METER_GEQ |				\
 				 BW_METER_LEQ)
 
-#define	BW_METER_UPCALL_DELIVERED (1 << 24)	/* upcall was delivered      */
+#define BW_METER_UPCALL_DELIVERED (1 << 24)	/* upcall was delivered      */
 
 	struct bw_data	bm_threshold;		/* the upcall threshold	     */
 	struct bw_data	bm_measured;		/* the measured bw	     */
 	struct timeval	bm_start_time;		/* abs. time		     */
 };
 
-int	ip_mrouter_set(struct socket *, int, struct mbuf **);
-int	ip_mrouter_get(struct socket *, int, struct mbuf **);
-int	mrt_ioctl(struct socket *, u_long, caddr_t);
+int	ip_mrouter_set(struct socket *, struct sockopt *);
+int	ip_mrouter_get(struct socket *, struct sockopt *);
+int	mrt_ioctl(struct socket *, u_long, void *);
 int	ip_mrouter_done(void);
 void	ip_mrouter_detach(struct ifnet *);
 void	reset_vif(struct vif *);
-void	vif_delete(struct ifnet *);
 #ifdef RSVP_ISI
 int	ip_mforward(struct mbuf *, struct ifnet *, struct ip_moptions *);
 int	legal_vif_num(int);
@@ -347,7 +351,8 @@ void	ip_rsvp_force_done(struct socket *);
 void	rsvp_input(struct mbuf *, int, int);
 #else
 int	ip_mforward(struct mbuf *, struct ifnet *);
-#endif /* RSVP_ISI */
+#endif
 
 #endif /* _KERNEL */
-#endif /* _NETINET_IP_MROUTE_H_ */
+
+#endif /* !_NETINET_IP_MROUTE_H_ */

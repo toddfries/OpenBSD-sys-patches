@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_exec.c,v 1.43 2006/12/25 18:31:18 wiz Exp $ */
+/*	$NetBSD: irix_exec.c,v 1.53 2008/11/19 18:36:03 ad Exp $ */
 
 /*-
  * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_exec.c,v 1.43 2006/12/25 18:31:18 wiz Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_exec.c,v 1.53 2008/11/19 18:36:03 ad Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_syscall_debug.h"
@@ -46,7 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_exec.c,v 1.43 2006/12/25 18:31:18 wiz Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/exec.h>
 #include <sys/types.h>
 #include <sys/malloc.h>
@@ -65,18 +58,18 @@ __KERNEL_RCSID(0, "$NetBSD: irix_exec.c,v 1.43 2006/12/25 18:31:18 wiz Exp $");
 
 extern const int native_to_svr4_signo[];
 
-static void irix_e_proc_exec __P((struct proc *, struct exec_package *));
-static void irix_e_proc_fork __P((struct proc *, struct proc *, int));
-static void irix_e_proc_exit __P((struct proc *));
-static void irix_e_proc_init __P((struct proc *, struct vmspace *));
+static void irix_e_proc_exec(struct proc *, struct exec_package *);
+static void irix_e_proc_fork(struct proc *, struct proc *, int);
+static void irix_e_proc_exit(struct proc *);
+static void irix_e_proc_init(struct proc *, struct vmspace *);
 
 extern struct sysent irix_sysent[];
 extern const char * const irix_syscallnames[];
 
 #ifndef __HAVE_SYSCALL_INTERN
-void irix_syscall __P((void));
+void irix_syscall(void);
 #else
-void irix_syscall_intern __P((struct proc *));
+void irix_syscall_intern(struct proc *);
 #endif
 
 /*
@@ -87,7 +80,7 @@ void irix_syscall_intern __P((struct proc *));
  */
 char irix_sigcode[] = { 0 };
 
-const struct emul emul_irix = {
+struct emul emul_irix = {
 	"irix",
 	"/emul/irix",
 #ifndef __HAVE_MINIMAL_EMUL
@@ -129,10 +122,7 @@ const struct emul emul_irix = {
  * set registers on exec for N32 applications
  */
 void
-irix_n32_setregs(l, pack, stack)
-	struct lwp *l;
-	struct exec_package *pack;
-	u_long stack;
+irix_n32_setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	struct frame *f = (struct frame *)l->l_md.md_regs;
 
@@ -144,9 +134,7 @@ irix_n32_setregs(l, pack, stack)
  * per-process emuldata allocation
  */
 static void
-irix_e_proc_init(p, vmspace)
-	struct proc *p;
-	struct vmspace *vmspace;
+irix_e_proc_init(struct proc *p, struct vmspace *vmspace)
 {
 	struct irix_emuldata *ied;
 	vaddr_t vm_min;
@@ -169,9 +157,7 @@ irix_e_proc_init(p, vmspace)
  * exec() hook used to allocate per process structures
  */
 static void
-irix_e_proc_exec(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+irix_e_proc_exec(struct proc *p, struct exec_package *epp)
 {
 	int error;
 
@@ -189,8 +175,7 @@ irix_e_proc_exec(p, epp)
  * exit() hook used to free per process data structures
  */
 static void
-irix_e_proc_exit(p)
-	struct proc *p;
+irix_e_proc_exit(struct proc *p)
 {
 	struct proc *pp;
 	struct irix_emuldata *ied;
@@ -200,8 +185,10 @@ irix_e_proc_exit(p)
 	/*
 	 * Send SIGHUP to child process as requested using prctl(2)
 	 */
-	proclist_lock_read();
+	mutex_enter(proc_lock);
 	PROCLIST_FOREACH(pp, &allproc) {
+		if ((pp->p_flag & PK_MARKER) != 0)
+			continue;
 		/* Select IRIX processes */
 		if (irix_check_exec(pp) == 0)
 			continue;
@@ -210,7 +197,7 @@ irix_e_proc_exit(p)
 		if (ied->ied_termchild && pp->p_pptr == p)
 			psignal(pp, native_to_svr4_signo[SIGHUP]);
 	}
-	proclist_unlock_read();
+	mutex_exit(proc_lock);
 
 	/*
 	 * Remove the process from share group processes list, if relevant.
@@ -218,7 +205,7 @@ irix_e_proc_exit(p)
 	ied = (struct irix_emuldata *)(p->p_emuldata);
 
 	if ((isg = ied->ied_share_group) != NULL) {
-		lockmgr(&isg->isg_lock, LK_EXCLUSIVE, NULL);
+		rw_enter(&isg->isg_lock, RW_WRITER);
 		LIST_REMOVE(ied, ied_sglist);
 		isg->isg_refcount--;
 
@@ -234,6 +221,7 @@ irix_e_proc_exit(p)
 			  * Free the share group structure (no need to free
 			  * the lock since we destroy it now).
 			  */
+			rw_destroy(&isg->isg_lock);
 			free(isg, M_EMULDATA);
 			ied->ied_share_group = NULL;
 		} else {
@@ -245,7 +233,7 @@ irix_e_proc_exit(p)
 			 */
 			irix_usema_exit_cleanup(p,
 			    LIST_FIRST(&isg->isg_head)->ied_p);
-			lockmgr(&isg->isg_lock, LK_RELEASE, NULL);
+			rw_exit(&isg->isg_lock);
 		}
 
 	} else {
@@ -288,5 +276,5 @@ irix_e_proc_fork(p, parent, forkflags)
 	ied2 = parent->p_emuldata;
 
 	(void) memcpy(ied1, ied2, (unsigned)
-	    ((caddr_t)&ied1->ied_endcopy - (caddr_t)&ied1->ied_startcopy));
+	    ((char *)&ied1->ied_endcopy - (char *)&ied1->ied_startcopy));
 }

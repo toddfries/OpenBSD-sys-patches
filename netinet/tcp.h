@@ -1,5 +1,4 @@
-/*	$OpenBSD: tcp.h,v 1.17 2006/04/27 02:19:32 tedu Exp $	*/
-/*	$NetBSD: tcp.h,v 1.8 1995/04/17 05:32:58 cgd Exp $	*/
+/*	$NetBSD: tcp.h,v 1.28 2007/12/25 18:33:47 perry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -33,25 +32,31 @@
  */
 
 #ifndef _NETINET_TCP_H_
-#define	_NETINET_TCP_H_
+#define _NETINET_TCP_H_
+
+#include <sys/featuretest.h>
+
+#if defined(_NETBSD_SOURCE)
 
 typedef u_int32_t tcp_seq;
-
 /*
  * TCP header.
  * Per RFC 793, September, 1981.
+ * Updated by RFC 3168, September, 2001.
  */
 struct tcphdr {
 	u_int16_t th_sport;		/* source port */
 	u_int16_t th_dport;		/* destination port */
 	tcp_seq	  th_seq;		/* sequence number */
 	tcp_seq	  th_ack;		/* acknowledgement number */
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-	u_int     th_x2:4,		/* (unused) */
+#if BYTE_ORDER == LITTLE_ENDIAN
+	/*LINTED non-portable bitfields*/
+	u_int8_t  th_x2:4,		/* (unused) */
 		  th_off:4;		/* data offset */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
-	u_int     th_off:4,		/* data offset */
+#if BYTE_ORDER == BIG_ENDIAN
+	/*LINTED non-portable bitfields*/
+	u_int8_t  th_off:4,		/* data offset */
 		  th_x2:4;		/* (unused) */
 #endif
 	u_int8_t  th_flags;
@@ -66,9 +71,7 @@ struct tcphdr {
 	u_int16_t th_win;			/* window */
 	u_int16_t th_sum;			/* checksum */
 	u_int16_t th_urp;			/* urgent pointer */
-};
-#define th_reseqlen th_urp			/* TCP data length for
-						   resequencing/reassembly */
+} __packed;
 
 #define	TCPOPT_EOL		0
 #define	TCPOPT_NOP		1
@@ -79,47 +82,51 @@ struct tcphdr {
 #define	TCPOPT_SACK_PERMITTED	4		/* Experimental */
 #define	   TCPOLEN_SACK_PERMITTED	2
 #define	TCPOPT_SACK		5		/* Experimental */
-#define	TCPOLEN_SACK		8		/* 2*sizeof(tcp_seq) */
 #define	TCPOPT_TIMESTAMP	8
 #define	   TCPOLEN_TIMESTAMP		10
 #define	   TCPOLEN_TSTAMP_APPA		(TCPOLEN_TIMESTAMP+2) /* appendix A */
-#define	TCPOPT_SIGNATURE	19
-#define	   TCPOLEN_SIGNATURE		18
-#define	   TCPOLEN_SIGLEN		(TCPOLEN_SIGNATURE+2) /* padding */
-
-#define	MAX_TCPOPTLEN		40	/* Absolute maximum TCP options len */
 
 #define TCPOPT_TSTAMP_HDR	\
     (TCPOPT_NOP<<24|TCPOPT_NOP<<16|TCPOPT_TIMESTAMP<<8|TCPOLEN_TIMESTAMP)
 
-/* Option definitions */
-#define TCPOPT_SACK_PERMIT_HDR \
-(TCPOPT_NOP<<24|TCPOPT_NOP<<16|TCPOPT_SACK_PERMITTED<<8|TCPOLEN_SACK_PERMITTED)
-#define TCPOPT_SACK_HDR   (TCPOPT_NOP<<24|TCPOPT_NOP<<16|TCPOPT_SACK<<8)
-/* Miscellaneous constants */
-#define MAX_SACK_BLKS	6	/* Max # SACK blocks stored at sender side */
-#define TCP_MAX_SACK	3	/* MAX # SACKs sent in any segment */
+#define	TCPOPT_SIGNATURE	19		/* Keyed MD5: RFC 2385 */
+#define	   TCPOLEN_SIGNATURE		18
+#define    TCPOLEN_SIGLEN		(TCPOLEN_SIGNATURE+2) /* padding */
 
-#define TCP_MAXBURST	4	/* Max # packets after leaving Fast Rxmit */
+#define MAX_TCPOPTLEN	40	/* max # bytes that go in options */
 
 /*
  * Default maximum segment size for TCP.
- * With an IP MSS of 576, this is 536,
- * but 512 is probably more convenient.
- * This should be defined as min(512, IP_MSS - sizeof (struct tcpiphdr)).
+ * This is defined by RFC 1112 Sec 4.2.2.6.
  */
-#define	TCP_MSS		512
+#define	TCP_MSS		536
+
+#define	TCP_MINMSS	216
 
 #define	TCP_MAXWIN	65535	/* largest value for (unscaled) window */
 
 #define	TCP_MAX_WINSHIFT	14	/* maximum window shift */
 
+#define	TCP_MAXBURST	4	/* maximum segments in a burst */
+
+#endif /* _NETBSD_SOURCE */
+
 /*
  * User-settable options (used with setsockopt).
  */
-#define	TCP_NODELAY		0x01   /* don't delay send to coalesce pkts */
-#define	TCP_MAXSEG		0x02   /* set maximum segment size */
-#define	TCP_MD5SIG		0x04   /* enable TCP MD5 signature option */
-#define	TCP_SACK_ENABLE		0x08   /* enable SACKs (if disabled by def.) */
+#define	TCP_NODELAY	1	/* don't delay send to coalesce packets */
+#define	TCP_MAXSEG	2	/* set maximum segment size */
+#define	TCP_KEEPIDLE	3
+#ifdef notyet
+#define	TCP_NOPUSH	4	/* reserved for FreeBSD compat */
+#endif
+#define	TCP_KEEPINTVL	5
+#define	TCP_KEEPCNT	6
+#define	TCP_KEEPINIT	7
+#ifdef notyet
+#define	TCP_NOOPT	8	/* reserved for FreeBSD compat */
+#endif
+#define	TCP_MD5SIG	0x10	/* use MD5 digests (RFC2385) */
+#define	TCP_CONGCTL	0x20	/* selected congestion control */
 
-#endif /* _NETINET_TCP_H_ */
+#endif /* !_NETINET_TCP_H_ */

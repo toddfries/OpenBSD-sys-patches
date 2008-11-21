@@ -1,4 +1,4 @@
-/*	$OpenBSD: dest6.c,v 1.10 2003/05/14 14:24:44 itojun Exp $	*/
+/*	$NetBSD: dest6.c,v 1.17 2008/04/15 03:57:04 thorpej Exp $	*/
 /*	$KAME: dest6.c,v 1.25 2001/02/22 01:39:16 itojun Exp $	*/
 
 /*
@@ -30,6 +30,9 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dest6.c,v 1.17 2008/04/15 03:57:04 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -48,15 +51,14 @@
 #include <netinet/in_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/ip6_private.h>
 #include <netinet/icmp6.h>
 
 /*
  * Destination options header processing.
  */
 int
-dest6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;
+dest6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
 	int off = *offp, dstoptlen, optlen;
@@ -80,7 +82,7 @@ dest6_input(mp, offp, proto)
 	for (optlen = 0; dstoptlen > 0; dstoptlen -= optlen, opt += optlen) {
 		if (*opt != IP6OPT_PAD1 &&
 		    (dstoptlen < IP6OPT_MINLEN || *(opt + 1) + 2 > dstoptlen)) {
-			ip6stat.ip6s_toosmall++;
+			IP6_STATINC(IP6_STAT_TOOSMALL);
 			goto bad;
 		}
 

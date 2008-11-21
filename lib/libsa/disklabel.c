@@ -1,5 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: disklabel.c,v 1.3 1994/10/26 05:44:42 cgd Exp $	*/
+/*	$NetBSD: disklabel.c,v 1.10 2007/11/24 13:20:54 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -36,26 +35,35 @@
 #include <sys/disklabel.h>
 #include "stand.h"
 
+
+#if defined(LIBSA_NO_DISKLABEL_MSGS)
+#define nolabel (char *)1
+#define corruptedlabel (char *)1
+#else
+static char nolabel[] = "no disk label";
+static char corruptedlabel[] = "disk label corrupted";
+#endif
+
 char *
 getdisklabel(const char *buf, struct disklabel *lp)
 {
-	struct disklabel *dlp, *elp;
+	const struct disklabel *dlp, *elp;
 	char *msg = NULL;
 
-	elp = (struct disklabel *)(buf + DEV_BSIZE - sizeof(*dlp));
-	for (dlp = (struct disklabel *)buf; dlp <= elp;
-	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
+	elp = (const void *)(buf + DEV_BSIZE - sizeof(*dlp));
+	for (dlp = (const void *)buf; dlp <= elp;
+	    dlp = (const void *)((const char *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
-				msg = "no disk label";
+				msg = nolabel;
 		} else if (dlp->d_npartitions > MAXPARTITIONS ||
-			   dkcksum(dlp) != 0)
-			msg = "disk label corrupted";
-		else {
-			*lp = *dlp;
+			   dkcksum(dlp) != 0) {
+			msg = corruptedlabel;
+		} else {
+			(void)memcpy(lp, dlp, sizeof *lp);
 			msg = NULL;
 			break;
 		}
 	}
-	return (msg);
+	return msg;
 }

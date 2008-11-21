@@ -1,4 +1,5 @@
-/*	$OpenBSD: apm.c,v 1.13 2007/12/11 15:44:00 tedu Exp $	*/
+/*	$NetBSD: apm.c,v 1.20 2008/06/13 11:54:31 cegger Exp $	*/
+/*	$OpenBSD: apm.c,v 1.5 2002/06/07 07:13:59 miod Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -31,6 +32,9 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: apm.c,v 1.20 2008/06/13 11:54:31 cegger Exp $");
+
 #include "apm.h"
 
 #if NAPM > 1
@@ -44,13 +48,22 @@
 #include <sys/device.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/mutex.h>
+#ifdef __OpenBSD__
 #include <sys/event.h>
+#endif
+#ifdef __NetBSD__
+#include <sys/select.h>
+#include <sys/poll.h>
+#include <sys/conf.h>
+#endif
 
+#ifdef __OpenBSD__
 #include <machine/conf.h>
+#endif
 #include <machine/cpu.h>
 #include <machine/apmvar.h>
 
-#include <dev/adb/adb.h>
 #include <macppc/dev/adbvar.h>
 #include <macppc/dev/pm_direct.h>
 
@@ -60,34 +73,72 @@
 #define	DPRINTF(x)	/**/
 #endif
 
+#define APM_NEVENTS 16
+
 struct apm_softc {
 	struct device sc_dev;
+	struct selinfo sc_rsel;
+#ifdef __OpenBSD__
 	struct klist sc_note;
+#endif
 	int    sc_flags;
+	int	event_count;
+	int	event_ptr;
+	kmutex_t sc_lock;
+	struct	apm_event_info event_list[APM_NEVENTS];
 };
 
-int apmmatch(struct device *, void *, void *);
+/*
+ * A brief note on the locking protocol: it's very simple; we
+ * assert an exclusive lock any time thread context enters the
+ * APM module.  This is both the APM thread itself, as well as
+ * user context.
+ */
+#ifdef __NetBSD__
+#define	APM_LOCK(apmsc)		mutex_enter(&(apmsc)->sc_lock)
+#define	APM_UNLOCK(apmsc)	mutex_exit(&(apmsc)->sc_lock)
+#else
+#define APM_LOCK(apmsc)
+#define APM_UNLOCK(apmsc)
+#endif
+
+int apmmatch(struct device *, struct cfdata *, void *);
 void apmattach(struct device *, struct device *, void *);
 
-struct cfattach apm_ca = {
-	sizeof(struct apm_softc), apmmatch, apmattach
-};
+#ifdef __NetBSD__
+#if 0
+static int	apm_record_event __P((struct apm_softc *, u_int));
+#endif
+#endif
 
+CFATTACH_DECL(apm, sizeof(struct apm_softc),
+    apmmatch, apmattach, NULL, NULL);
+
+#ifdef __OpenBSD__
 struct cfdriver apm_cd = {
 	NULL, "apm", DV_DULL
 };
+#else
+extern struct cfdriver apm_cd;
+
+dev_type_open(apmopen);
+dev_type_close(apmclose);
+dev_type_ioctl(apmioctl);
+dev_type_poll(apmpoll);
+dev_type_kqfilter(apmkqfilter);
+
+const struct cdevsw apm_cdevsw = {
+	apmopen, apmclose, noread, nowrite, apmioctl,
+	nostop, notty, apmpoll, nommap, apmkqfilter,
+};
+#endif
+
+int	apm_evindex;
 
 #define	APMUNIT(dev)	(minor(dev)&0xf0)
 #define	APMDEV(dev)	(minor(dev)&0x0f)
 #define APMDEV_NORMAL	0
 #define APMDEV_CTL	8
-
-void filt_apmrdetach(struct knote *kn);
-int filt_apmread(struct knote *kn, long hint);
-int apmkqfilter(dev_t dev, struct knote *kn);
-
-struct filterops apmread_filtops =
-	{ 1, NULL, filt_apmrdetach, filt_apmread};
 
 /*
  * Flags to control kernel display
@@ -109,9 +160,12 @@ struct filterops apmread_filtops =
 
 
 int
-apmmatch(struct device *parent, void *match, void *aux)
+apmmatch(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
-	struct adb_attach_args *aa = (void *)aux;
+	struct adb_attach_args *aa = (void *)aux;		
 	if (aa->origaddr != ADBADDR_APM ||
 	    aa->handler_id != ADBADDR_APM ||
 	    aa->adbaddr != ADBADDR_APM)
@@ -124,30 +178,40 @@ apmmatch(struct device *parent, void *match, void *aux)
 }
 
 void
-apmattach(struct device *parent, struct device *self, void *aux)
+apmattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
+	struct apm_softc *sc = (struct apm_softc *) self;
 	struct pmu_battery_info info;
 
 	pm_battery_info(0, &info);
 
 	printf(": battery flags 0x%X, ", info.flags);
 	printf("%d%% charged\n", ((info.cur_charge * 100) / info.max_charge));
+
+	sc->sc_flags = 0;
+	sc->event_ptr = 0;
+	sc->event_count = 0;
+	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_NONE);
+	selinit(&sc->sc_rsel);
 }
 
 int
-apmopen(dev_t dev, int flag, int mode, struct proc *p)
+apmopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct apm_softc *sc;
 	int error = 0;
 
 	/* apm0 only */
-	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
+	sc = device_lookup_private(&apm_cd, APMUNIT(dev));
+	if (sc == NULL)
 		return ENXIO;
 
 	DPRINTF(("apmopen: dev %d pid %d flag %x mode %x\n",
-	    APMDEV(dev), p->p_pid, flag, mode));
+	    APMDEV(dev), l->l_proc->p_pid, flag, mode));
 
+	APM_LOCK(sc);
 	switch (APMDEV(dev)) {
 	case APMDEV_CTL:
 		if (!(flag & FWRITE)) {
@@ -171,21 +235,23 @@ apmopen(dev_t dev, int flag, int mode, struct proc *p)
 		error = ENXIO;
 		break;
 	}
+	APM_UNLOCK(sc);
 	return error;
 }
 
 int
-apmclose(dev_t dev, int flag, int mode, struct proc *p)
+apmclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct apm_softc *sc;
 
 	/* apm0 only */
-	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
+	sc = device_lookup_private(&apm_cd, APMUNIT(dev));
+	if (sc == NULL)
 		return ENXIO;
 
-	DPRINTF(("apmclose: pid %d flag %x mode %x\n", p->p_pid, flag, mode));
+	DPRINTF(("apmclose: pid %d flag %x mode %x\n", l->l_proc->p_pid, flag, mode));
 
+	APM_LOCK(sc);
 	switch (APMDEV(dev)) {
 	case APMDEV_CTL:
 		sc->sc_flags &= ~SCFLAG_OWRITE;
@@ -194,11 +260,12 @@ apmclose(dev_t dev, int flag, int mode, struct proc *p)
 		sc->sc_flags &= ~SCFLAG_OREAD;
 		break;
 	}
+	APM_UNLOCK(sc);
 	return 0;
 }
 
 int
-apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+apmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct apm_softc *sc;
 	struct pmu_battery_info batt;
@@ -206,27 +273,27 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	int error = 0;
 
 	/* apm0 only */
-	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
+	sc = device_lookup_private(&apm_cd, APMUNIT(dev));
+	if (sc == NULL)
 		return ENXIO;
 
+	APM_LOCK(sc);
 	switch (cmd) {
 		/* some ioctl names from linux */
 	case APM_IOC_STANDBY:
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
-		break;
 	case APM_IOC_SUSPEND:
 		if ((flag & FWRITE) == 0)
-			error = EBADF;
+			error = EBADF;			
 		break;
 	case APM_IOC_PRN_CTL:
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
 		else {
-			int flag = *(int *)data;
-			DPRINTF(( "APM_IOC_PRN_CTL: %d\n", flag ));
-			switch (flag) {
+			int op = *(int *)data;
+			DPRINTF(( "APM_IOC_PRN_CTL: %d\n", op ));
+			switch (op) {
 			case APM_PRINT_ON:	/* enable printing */
 				sc->sc_flags &= ~SCFLAG_PRINT;
 				break;
@@ -269,69 +336,120 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			power->battery_life = 0;
 		} else if ((power->ac_state == APM_AC_ON) &&
 			   (batt.draw > 0)) {
-			power->minutes_left =
-			    (((batt.max_charge - batt.cur_charge) * 3600) /
-			    batt.draw) / 60;
+			power->minutes_left = batt.secs_remaining / 60;
 			power->battery_state = APM_BATT_CHARGING;
 		} else {
-			power->minutes_left =
-			    ((batt.cur_charge * 3600) / (-batt.draw)) / 60;
+			power->minutes_left = batt.secs_remaining / 60;
 
 			/* XXX - Arbitrary */
-			if (power->battery_life > 60)
+			if (power->battery_life > 60) {
 				power->battery_state = APM_BATT_HIGH;
-			else if (power->battery_life < 10)
+			} else if (power->battery_life < 10) {
 				power->battery_state = APM_BATT_CRITICAL;
-			else
+			} else {
 				power->battery_state = APM_BATT_LOW;
+			}
 		}
-		break;
 
+		break;
+		
 	default:
 		error = ENOTTY;
 	}
+	APM_UNLOCK(sc);
 
 	return error;
 }
 
-void
+#ifdef __NetBSD__
+#if 0
+/*
+ * return 0 if the user will notice and handle the event,
+ * return 1 if the kernel driver should do so.
+ */
+static int
+apm_record_event(struct apm_softc *sc, u_int event_type)
+{
+	struct apm_event_info *evp;
+
+	if ((sc->sc_flags & SCFLAG_OPEN) == 0)
+		return 1;		/* no user waiting */
+	if (sc->event_count == APM_NEVENTS) {
+		DPRINTF(("apm_record_event: queue full!\n"));
+		return 1;			/* overflow */
+	}
+	evp = &sc->event_list[sc->event_ptr];
+	sc->event_count++;
+	sc->event_ptr++;
+	sc->event_ptr %= APM_NEVENTS;
+	evp->type = event_type;
+	evp->index = ++apm_evindex;
+	selnotify(&sc->sc_rsel, 0, 0);
+	return (sc->sc_flags & SCFLAG_OWRITE) ? 0 : 1; /* user may handle */
+}
+#endif
+
+int
+apmpoll(dev_t dev, int events, struct lwp *l)
+{
+	struct apm_softc *sc = device_lookup_private(&apm_cd,APMUNIT(dev));
+	int revents = 0;
+
+	APM_LOCK(sc);
+	if (events & (POLLIN | POLLRDNORM)) {
+		if (sc->event_count)
+			revents |= events & (POLLIN | POLLRDNORM);
+		else
+			selrecord(l, &sc->sc_rsel);
+	}
+	APM_UNLOCK(sc);
+
+	return (revents);
+}
+#endif
+
+static void
 filt_apmrdetach(struct knote *kn)
 {
 	struct apm_softc *sc = (struct apm_softc *)kn->kn_hook;
 
-	SLIST_REMOVE(&sc->sc_note, kn, knote, kn_selnext);
+	APM_LOCK(sc);
+	SLIST_REMOVE(&sc->sc_rsel.sel_klist, kn, knote, kn_selnext);
+	APM_UNLOCK(sc);
 }
 
-int
+static int
 filt_apmread(struct knote *kn, long hint)
 {
-	/* XXX weird kqueue_scan() semantics */
-	if (hint && !kn->kn_data)
-		kn->kn_data = (int)hint;
+	struct apm_softc *sc = kn->kn_hook;
 
-	return (1);
+	kn->kn_data = sc->event_count;
+	return (kn->kn_data > 0);
 }
+
+static struct filterops apmread_filtops =
+	{ 1, NULL, filt_apmrdetach, filt_apmread};
 
 int
 apmkqfilter(dev_t dev, struct knote *kn)
 {
-	struct apm_softc *sc;
-
-	/* apm0 only */
-	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 ||
-	    !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
-		return ENXIO;
+	struct apm_softc *sc = device_lookup_private(&apm_cd,APMUNIT(dev));
+	struct klist *klist;
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
+		klist = &sc->sc_rsel.sel_klist;
 		kn->kn_fop = &apmread_filtops;
 		break;
 	default:
 		return (1);
 	}
 
-	kn->kn_hook = (caddr_t)sc;
-	SLIST_INSERT_HEAD(&sc->sc_note, kn, kn_selnext);
+	kn->kn_hook = sc;
+
+	APM_LOCK(sc);
+	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
+	APM_UNLOCK(sc);
 
 	return (0);
 }

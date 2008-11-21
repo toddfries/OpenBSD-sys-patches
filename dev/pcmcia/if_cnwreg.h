@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnwreg.h,v 1.2 2000/02/01 17:21:48 fgsch Exp $	*/
+/*	$NetBSD: if_cnwreg.h,v 1.6 2008/04/28 20:23:56 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,6 +32,10 @@
 
 /* I/O area */
 #define CNW_IO_SIZE		0x10
+/* I/O area can be accessed via mapped memory too */
+#define CNW_IOM_ADDR		0x28000
+#define CNW_IOM_SIZE		CNW_IO_SIZE
+#define CNW_IOM_OFF		(CNW_IOM_ADDR - CNW_MEM_ADDR)
 
 /* I/O registers */
 #define CNW_REG_COR		0x0
@@ -50,7 +47,7 @@
 #    define CNW_ASR_WOC			0x08	/* Write Operation Complete */
 #    define CNW_ASR_TXDN		0x20	/* Transmit done */
 #    define CNW_ASR_RXERR		0x40	/* Receive error */
-#    define CNW_ASR_RXRDY		0x80	/* Packet received */ 
+#    define CNW_ASR_RXRDY		0x80	/* Packet received */
 #define CNW_REG_IOLOW		0x6
 #define CNW_REG_IOHI		0x7
 #define CNW_REG_IOCONTROL	0x8
@@ -112,7 +109,7 @@
 
 /*
  * Commands used in the extended command buffer
- * CNW_EREG_CB (0x100-0x10f) 
+ * CNW_EREG_CB (0x100-0x10f)
  */
 #define CNW_CMD_NOP		0x00
 #define CNW_CMD_SRC		0x01

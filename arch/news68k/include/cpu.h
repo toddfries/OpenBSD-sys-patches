@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.23 2005/12/11 12:18:23 christos Exp $	*/
+/*	$NetBSD: cpu.h,v 1.33 2008/02/27 18:26:16 xtraeme Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -118,6 +118,10 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
+	cpuid_t	ci_cpuid;
+	int	ci_mtx_count;
+	int	ci_mtx_oldspl;
+	int	ci_want_resched;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -146,14 +150,14 @@ struct clockframe {
 };
 
 #define CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
-#define CLKF_BASEPRI(framep)	(((framep)->sr & PSL_IPL) == 0)
 #define CLKF_PC(framep)		((framep)->pc)
 #if 0
 /* We would like to do it this way... */
 #define CLKF_INTR(framep)	(((framep)->sr & PSL_M) == 0)
 #else
 /* but until we start using PSL_M, we have to do this instead */
-#define CLKF_INTR(framep)	(0)	/* XXX */
+#include <machine/intr.h>
+#define CLKF_INTR(framep)	(idepth > 1)	/* XXX */
 #endif
 
 
@@ -161,25 +165,27 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-extern int want_resched;	/* resched() was called */
-#define need_resched(ci)	do { want_resched++; aston(); } while(0)
+#define cpu_need_resched(ci, flags)	\
+	do { ci->ci_want_resched = 1; aston(); } while (/* CONSTCOND */0)
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the hp300, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define need_proftick(p)	do { (p)->p_flag |= P_OWEUPC; aston(); } while(0)
+#define cpu_need_proftick(l)	\
+	do { (l)->l_flag |= LP_OWEUPC; aston(); } while (/* CONSTCOND */0)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define signotify(p)	aston()
+#define cpu_signotify(l)	aston()
 
 extern int astpending;		/* need to trap before returning to user mode */
 extern volatile u_char *ctrl_ast;
-#define aston()		do { astpending++; *ctrl_ast = 0xff; } while(0)
+#define aston()		\
+	do { astpending++; *ctrl_ast = 0xff; } while (/* CONSTCOND */0)
 
 #endif /* _KERNEL */
 
@@ -188,11 +194,6 @@ extern volatile u_char *ctrl_ast;
  */
 #define CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define CPU_MAXID		2	/* number of valid machdep ids */
-
-#define CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "console_device", CTLTYPE_STRUCT }, \
-}
 
 #ifdef _KERNEL
 
@@ -224,17 +225,12 @@ extern void (*vectab[])(void);
 
 struct frame;
 struct fpframe;
-struct pcb;
 
 /* locore.s functions */
 void m68881_save(struct fpframe *);
 void m68881_restore(struct fpframe *);
 
-int suline(caddr_t, caddr_t);
-void savectx(struct pcb *);
-void switch_exit(struct lwp *);
-void switch_lwp_exit(struct lwp *);
-void proc_trampoline(void);
+int suline(void *, void *);
 void loadustp(int);
 void badtrap(void);
 void intrhand_vectored(void);
@@ -248,16 +244,8 @@ void ecacheon(void);
 void ecacheoff(void);
 
 /* machdep.c functions */
-int badaddr(caddr_t, int);
-int badbaddr(caddr_t);
-
-/* sys_machdep.c functions */
-int cachectl1(unsigned long, vaddr_t, size_t, struct proc *);
-
-/* vm_machdep.c functions */
-void physaccess(caddr_t, caddr_t, int, int);
-void physunaccess(caddr_t, int);
-int kvtop(caddr_t);
+int badaddr(void *, int);
+int badbaddr(void *);
 
 #endif
 

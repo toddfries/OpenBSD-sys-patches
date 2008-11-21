@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_implode.c,v 1.5 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: fpu_implode.c,v 1.3 1996/03/14 19:41:59 christos Exp $ */
+/*	$NetBSD: fpu_implode.c,v 1.13 2005/11/16 23:24:44 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -46,6 +45,13 @@
  * `packed binary' format.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_implode.c,v 1.13 2005/11/16 23:24:44 uwe Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_sparc_arch.h"
+#endif
+
 #include <sys/types.h>
 #include <sys/systm.h>
 
@@ -57,7 +63,7 @@
 #include <sparc/fpu/fpu_emu.h>
 #include <sparc/fpu/fpu_extern.h>
 
-static int round(register struct fpemu *, register struct fpn *);
+static int round(struct fpemu *, struct fpn *);
 static int toinf(struct fpemu *, int);
 
 /*
@@ -73,7 +79,7 @@ static int toinf(struct fpemu *, int);
  * responsibility to fix this if necessary.
  */
 static int
-round(register struct fpemu *fe, register struct fpn *fp)
+round(struct fpemu *fe, struct fpn *fp)
 {
 	register u_int m0, m1, m2, m3;
 	register int gr, s;
@@ -130,15 +136,10 @@ round(register struct fpemu *fe, register struct fpn *fp)
 	}
 
 	/* Bump low bit of mantissa, with carry. */
-#ifdef sparc /* ``cheating'' (left out FPU_DECL_CARRY; know this is faster) */
 	FPU_ADDS(m3, m3, 1);
 	FPU_ADDCS(m2, m2, 0);
 	FPU_ADDCS(m1, m1, 0);
 	FPU_ADDC(m0, m0, 0);
-#else
-	if (++m3 == 0 && ++m2 == 0 && ++m1 == 0)
-		m0++;
-#endif
 	fp->fp_mant[0] = m0;
 	fp->fp_mant[1] = m1;
 	fp->fp_mant[2] = m2;
@@ -193,9 +194,7 @@ toinf(struct fpemu *fe, int sign)
  * of the SPARC instruction set).
  */
 u_int
-fpu_ftoi(fe, fp)
-	struct fpemu *fe;
-	register struct fpn *fp;
+fpu_ftoi(struct fpemu *fe, struct fpn *fp)
 {
 	register u_int i;
 	register int sign, exp;
@@ -235,14 +234,64 @@ fpu_ftoi(fe, fp)
 	return (0x7fffffff + sign);
 }
 
+#ifdef SUN4U
+/*
+ * fpn -> extended int (high bits of int value returned as return value).
+ *
+ * N.B.: this conversion always rounds towards zero (this is a peculiarity
+ * of the SPARC instruction set).
+ */
+u_int
+fpu_ftox(struct fpemu *fe, struct fpn *fp, u_int *res)
+{
+	register uint64_t i;
+	register int sign, exp;
+
+	sign = fp->fp_sign;
+	switch (fp->fp_class) {
+
+	case FPC_ZERO:
+		res[1] = 0;
+		return (0);
+
+	case FPC_NUM:
+		/*
+		 * If exp >= 2^64, overflow.  Otherwise shift value right
+		 * into last mantissa word (this will not exceed 0xffffffffffffffff),
+		 * shifting any guard and round bits out into the sticky
+		 * bit.  Then ``round'' towards zero, i.e., just set an
+		 * inexact exception if sticky is set (see round()).
+		 * If the result is > 0x8000000000000000, or is positive and equals
+		 * 0x8000000000000000, overflow; otherwise the last fraction word
+		 * is the result.
+		 */
+		if ((exp = fp->fp_exp) >= 64)
+			break;
+		/* NB: the following includes exp < 0 cases */
+		if (fpu_shr(fp, FP_NMANT - 1 - exp) != 0)
+			fe->fe_cx |= FSR_NX;
+		i = ((uint64_t)fp->fp_mant[2]<<32)|fp->fp_mant[3];
+		if (i >= ((uint64_t)0x8000000000000000LL + sign))
+			break;
+		if (sign) i = -i;
+		res[1] = (int)i;
+		return (i>>32);
+
+	default:		/* Inf, qNaN, sNaN */
+		break;
+	}
+	/* overflow: replace any inexact exception with invalid */
+	fe->fe_cx = (fe->fe_cx & ~FSR_NX) | FSR_NV;
+	return (0x7fffffffffffffffLL + sign);
+}
+#endif /* SUN4U */
+
 /*
  * fpn -> single (32 bit single returned as return value).
  * We assume <= 29 bits in a single-precision fraction (1.f part).
  */
 u_int
-fpu_ftos(fe, fp)
-	struct fpemu *fe;
-	register struct fpn *fp;
+fpu_ftos(struct fpemu *fe, struct fpn *fp)
 {
 	register u_int sign = fp->fp_sign << 31;
 	register int exp;
@@ -324,10 +373,7 @@ done:
  * This code mimics fpu_ftos; see it for comments.
  */
 u_int
-fpu_ftod(fe, fp, res)
-	struct fpemu *fe;
-	register struct fpn *fp;
-	u_int *res;
+fpu_ftod(struct fpemu *fe, struct fpn *fp, u_int *res)
 {
 	register u_int sign = fp->fp_sign << 31;
 	register int exp;
@@ -385,10 +431,7 @@ done:
  * so we can avoid a small bit of work.
  */
 u_int
-fpu_ftox(fe, fp, res)
-	struct fpemu *fe;
-	register struct fpn *fp;
-	u_int *res;
+fpu_ftoq(struct fpemu *fe, struct fpn *fp, u_int *res)
 {
 	register u_int sign = fp->fp_sign << 31;
 	register int exp;
@@ -445,14 +488,20 @@ done:
  * Implode an fpn, writing the result into the given space.
  */
 void
-fpu_implode(fe, fp, type, space)
-	struct fpemu *fe;
-	register struct fpn *fp;
-	int type;
-	register u_int *space;
+fpu_implode(struct fpemu *fe, struct fpn *fp, int type, u_int *space)
 {
 
+	DPRINTF(FPE_REG, ("\n imploding: "));
+	DUMPFPN(FPE_REG, fp);
+	DPRINTF(FPE_REG, ("\n"));
+
 	switch (type) {
+
+#ifdef SUN4U
+	case FTYPE_LNG:
+		space[0] = fpu_ftox(fe, fp, space);
+		break;
+#endif /* SUN4U */
 
 	case FTYPE_INT:
 		space[0] = fpu_ftoi(fe, fp);
@@ -468,10 +517,17 @@ fpu_implode(fe, fp, type, space)
 
 	case FTYPE_EXT:
 		/* funky rounding precision options ?? */
-		space[0] = fpu_ftox(fe, fp, space);
+		space[0] = fpu_ftoq(fe, fp, space);
 		break;
 
 	default:
 		panic("fpu_implode");
 	}
+#ifdef SUN4U
+	DPRINTF(FPE_REG, ("fpu_implode: %x %x %x %x\n",
+		space[0], space[1], space[2], space[3]));
+#else
+	DPRINTF(FPE_REG, ("fpu_implode: %x %x\n",
+		space[0], space[1]));
+#endif
 }

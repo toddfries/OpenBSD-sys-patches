@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_usema.c,v 1.16 2006/09/01 04:54:45 sekiya Exp $ */
+/*	$NetBSD: irix_usema.c,v 1.33 2008/05/10 12:57:18 tnn Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,14 +30,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_usema.c,v 1.16 2006/09/01 04:54:45 sekiya Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_usema.c,v 1.33 2008/05/10 12:57:18 tnn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/select.h>
 #include <sys/proc.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/vnode.h>
 #include <sys/vnode_if.h>
@@ -78,22 +72,22 @@ const struct cdevsw irix_usema_cdevsw = {
  * semaphore list, and operations on the list
  */
 static LIST_HEAD(irix_usema_reclist, irix_usema_rec) irix_usema_reclist;
-static struct lock irix_usema_reclist_lock;
+static krwlock_t irix_usema_reclist_lock;
 
-static struct irix_usema_rec *iur_lookup_by_vn __P((struct vnode *));
-static struct irix_usema_rec *iur_lookup_by_sem __P((struct irix_semaphore *));
+static struct irix_usema_rec *iur_lookup_by_vn(struct vnode *);
+static struct irix_usema_rec *iur_lookup_by_sem(struct irix_semaphore *);
 static struct irix_usema_rec *iur_insert
-	__P((struct irix_semaphore *, struct vnode *, struct proc *));
-static void iur_remove __P((struct irix_usema_rec *));
+(struct irix_semaphore *, struct vnode *, struct proc *);
+static void iur_remove(struct irix_usema_rec *);
 static struct irix_waiting_proc_rec *iur_proc_queue
-	__P((struct irix_usema_rec *, struct proc *));
+(struct irix_usema_rec *, struct proc *);
 static void iur_proc_dequeue
-	__P((struct irix_usema_rec *, struct irix_waiting_proc_rec *));
+(struct irix_usema_rec *, struct irix_waiting_proc_rec *);
 static void iur_proc_release
-	__P((struct irix_usema_rec *, struct irix_waiting_proc_rec *));
-static int iur_proc_isreleased __P((struct irix_usema_rec *, struct proc *));
+(struct irix_usema_rec *, struct irix_waiting_proc_rec *);
+static int iur_proc_isreleased(struct irix_usema_rec *, struct proc *);
 static struct irix_waiting_proc_rec *iur_proc_getfirst
-	__P((struct irix_usema_rec *));
+(struct irix_usema_rec *);
 
 /*
  * In order to define a custom vnode operation vector for the usemaclone
@@ -103,9 +97,10 @@ static struct irix_waiting_proc_rec *iur_proc_getfirst
  * at driver attach time, in irix_usemaattach().
  */
 struct vfsops irix_usema_dummy_vfsops = {
-	"usema_dummy",
+	"usema_dummy", 0,
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 	NULL, NULL, irix_usema_dummy_vfs_init, NULL, NULL, NULL, NULL, NULL,
+	NULL, NULL, NULL, NULL,
 	irix_usema_vnodeopv_descs,
 };
 void irix_usema_dummy_vfs_init(void) { return; } /* Do nothing */
@@ -115,7 +110,7 @@ const struct vnodeopv_desc * const irix_usema_vnodeopv_descs[] = {
 };
 const struct vnodeopv_desc irix_usema_opv_desc =
 	{ &irix_usema_vnodeop_p, irix_usema_vnodeop_entries };
-int (**irix_usema_vnodeop_p) __P((void *));
+int (**irix_usema_vnodeop_p)(void *);
 
 /*
  * Vnode operations on the usemaclone device
@@ -132,7 +127,6 @@ const struct vnodeopv_entry_desc irix_usema_vnodeop_entries[] = {
 	{ &vop_fcntl_desc, irix_usema_fcntl },
 	{ &vop_poll_desc, irix_usema_poll },
 	{ &vop_abortop_desc, genfs_abortop },
-	{ &vop_lease_desc, genfs_nullop },
 	{ &vop_lock_desc, genfs_lock },
 	{ &vop_unlock_desc, genfs_unlock },
 	{ &vop_islocked_desc, genfs_islocked },
@@ -153,14 +147,11 @@ struct irix_usema_softc {
  * and attach the dummy filesystem we need to use custom vnode operations.
  */
 void
-irix_usemaattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+irix_usemaattach(struct device *parent, struct device *self, void *aux)
 {
 	int error;
 
-	lockinit(&irix_usema_reclist_lock, PZERO|PCATCH, "usema", 0, 0);
+	rw_init(&irix_usema_reclist_lock);
 	LIST_INIT(&irix_usema_reclist);
 	if ((error = vfs_attach(&irix_usema_dummy_vfsops)) != 0)
 		panic("irix_usemaattach: vfs_attach() failed");
@@ -172,50 +163,46 @@ irix_usemaattach(parent, self, aux)
  * vnode operations on the device
  */
 int
-irix_usema_ioctl(v)
-	void *v;
+irix_usema_ioctl(void *v)
 {
 	struct vop_ioctl_args /* {
 		struct vnode *a_vp;
 		u_long a_command;
-		caddr_t  a_data;
+		void * a_data;
 		int  a_fflag;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap = v;
 	u_long cmd = ap->a_command;
-	caddr_t data = ap->a_data;
+	struct irix_ioctl_usrdata *iiu = ap->a_data;
 	struct vnode *vp = ap->a_vp;
 	struct irix_usema_rec *iur;
 	struct irix_waiting_proc_rec *iwpr;
-	struct irix_ioctl_usrdata iiu;
+	void *data;
 	register_t *retval;
 	int error;
+
+	/*
+	 * Some ioctl commands need to set the ioctl return value. In
+	 * irix_sys_ioctl(), we copy the return value address and the
+	 * original data argument to a struct irix_ioctl_usrdata.
+	 * The address of this structure is passed as the data argument
+	 * to the vnode layer. We therefore need to read this structure
+	 * to get the real data argument and the retval address.
+	 */
+	data = iiu->iiu_data;
+	retval = iiu->iiu_retval;
 
 #ifdef DEBUG_IRIX
 	printf("irix_usema_ioctl(): vp = %p, cmd = %lx, data = %p\n",
 	    vp, cmd, data);
 #endif
 
-	/*
-	 * Some ioctl commands need to set the ioctl return value. In
-	 * irix_sys_ioctl(), we copy the return value address and the
-	 * data argument to the stackgap in a struct irix_ioctl_usrdata.
-	 * The address of this structure is passed as the data argument
-	 * to the vnode layer. We therefore need to read this structure
-	 * to get the real data argument and the retval address.
-	 */
-	if ((error = copyin(data, &iiu, sizeof(iiu))) != 0)
-		return error;
-	data = iiu.iiu_data;
-	retval = iiu.iiu_retval;
-
 	switch (cmd) {
 	case IRIX_UIOCABLOCKQ: /* semaphore has been blocked */
 		if ((iur = iur_lookup_by_vn(vp)) == NULL)
 			return EBADF;
 
-		iwpr = iur_proc_queue(iur, ap->a_l->l_proc);
+		iwpr = iur_proc_queue(iur, curlwp->l_proc);
 		break;
 
 	case IRIX_UIOCAUNBLOCKQ: /* semaphore has been unblocked */
@@ -224,7 +211,9 @@ irix_usema_ioctl(v)
 
 		if ((iwpr = iur_proc_getfirst(iur)) != NULL) {
 			iur_proc_release(iur, iwpr);
-			wakeup((void *)&selwait);
+			rw_enter(&iur->iur_lock, RW_READER);
+			selnotify(&iur->iur_si, 0, 0);
+			rw_exit(&iur->iur_lock);
 		}
 		break;
 
@@ -250,7 +239,7 @@ irix_usema_ioctl(v)
 		isp = (struct irix_semaphore *)((u_long)(isp) -
 		    (u_long)(&isp->is_oid) + (u_long)iui.iui_oidp);
 
-		if ((iur_insert(isp, vp, ap->a_l->l_proc)) == NULL)
+		if ((iur_insert(isp, vp, curlwp->l_proc)) == NULL)
 			return EFAULT;
 		break;
 	}
@@ -264,13 +253,11 @@ irix_usema_ioctl(v)
 
 
 int
-irix_usema_poll(v)
-	void *v;
+irix_usema_poll(void *v)
 {
 	struct vop_poll_args /* {
 		struct vnode *a_vp;
 		int a_events;
-		struct lwp *a_l;
 	} */ *ap = v;
 	int events = ap->a_events;
 	struct vnode *vp = ap->a_vp;
@@ -286,21 +273,24 @@ irix_usema_poll(v)
 	if ((iur = iur_lookup_by_vn(vp)) == NULL)
 		return 0;
 
-	if (iur_proc_isreleased(iur, ap->a_l->l_proc) == 0)
+	rw_enter(&iur->iur_lock, RW_READER);
+	if (iur_proc_isreleased(iur, curlwp->l_proc) == 0) {
+		selrecord(curlwp, &iur->iur_si);
+		rw_exit(&iur->iur_lock);
 		return 0;
+	}
+	rw_exit(&iur->iur_lock);
 
 	return (events & check);
 }
 
 int
-irix_usema_close(v)
-	void *v;
+irix_usema_close(void *v)
 {
 	struct vop_close_args /* {
 		struct vnode *a_vp;
 		int  a_fflag;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct vnode *rvp;
@@ -311,7 +301,7 @@ irix_usema_close(v)
 	printf("irix_usema_close() vn = %p\n", vp);
 #endif
 
-	simple_lock(&vp->v_interlock);
+	mutex_enter(&vp->v_interlock);
 
 	/* vp is a vnode duplicated from rvp. eventually also close rvp */
 	rvp = (struct vnode *)(vp->v_data);
@@ -321,13 +311,13 @@ irix_usema_close(v)
 	if (ap->a_fflag & FWRITE)
 		rvp->v_writecount--;
 	vn_lock(rvp, LK_EXCLUSIVE | LK_RETRY);
-	error = VOP_CLOSE(rvp, ap->a_fflag, ap->a_cred, ap->a_l);
+	error = VOP_CLOSE(rvp, ap->a_fflag, ap->a_cred);
 	vput(rvp);
 
 	if ((iur = iur_lookup_by_vn(vp)) != NULL)
 		iur_remove(iur);
 
-	simple_unlock(&vp->v_interlock);
+	mutex_exit(&vp->v_interlock);
 
 	return error;
 }
@@ -337,14 +327,12 @@ irix_usema_close(v)
  * but still return 0 in case of failure (IRIX libc rely on this).
  */
 int
-irix_usema_setattr(v)
-	void *v;
+irix_usema_setattr(void *v)
 {
 	struct vop_setattr_args /* {
 		struct vnode    *a_vp;
 		struct vattr    *a_vap;
 		kauth_cred_t	 a_cred;
-		struct lwp      *a_l;
 	} */ *ap = v;
 	struct vnode *vp = (struct vnode *)(ap->a_vp->v_data);
 	int error;
@@ -352,23 +340,21 @@ irix_usema_setattr(v)
 #ifdef DEBUG_IRIX
 	printf("irix_usema_setattr()\n");
 #endif
-	error = VOP_SETATTR(vp, ap->a_vap, ap->a_cred, ap->a_l);
+	error = VOP_SETATTR(vp, ap->a_vap, ap->a_cred);
 
 	/* Silently ignore any error */
 	return 0;
 }
 
 int
-irix_usema_inactive(v)
-	void *v;
+irix_usema_inactive(void *v)
 {
 	struct vop_inactive_args /* {
 		struct vnode    *a_vp;
-		struct lwp      *a_l;
 	} */ *ap = v;
 
 	VOP_UNLOCK(ap->a_vp, 0);
-	vrecycle(ap->a_vp, NULL, ap->a_l);
+	vrecycle(ap->a_vp, NULL, curlwp);
 
 	return 0;
 }
@@ -405,15 +391,12 @@ IRIX_USEMA_VNOP_WRAP(fcntl)
  * but it is closely related to it.
  */
 int
-irix_sys_usync_cntl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+irix_sys_usync_cntl(struct lwp *l, const struct irix_sys_usync_cntl_args *uap, register_t *retval)
 {
-	struct irix_sys_usync_cntl_args /* {
+	/* {
 		syscallarg(int) cmd;
 		syscallarg(void *) arg;
-	} */ *uap = v;
+	} */
 	struct proc *p = l->l_proc;
 	int error;
 	struct irix_usync_arg iua;
@@ -450,13 +433,13 @@ irix_sys_usync_cntl(l, v, retval)
 		if ((iur = iur_lookup_by_sem(iua.iua_sem)) == 0)
 			return EINVAL;
 
-		(void)lockmgr(&iur->iur_lock, LK_SHARED, NULL);
+		rw_enter(&iur->iur_lock, RW_READER);
 		TAILQ_FOREACH(iwpr, &iur->iur_waiting_p, iwpr_list) {
 			wakeup((void *)iwpr);
 			iur_proc_dequeue(iur, iwpr);
 		}
 		iur_remove(iur);
-		(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
+		rw_exit(&iur->iur_lock);
 		break;
 
 	case IRIX_USYNC_UNBLOCK:
@@ -494,22 +477,20 @@ irix_sys_usync_cntl(l, v, retval)
 
 /* Operations on irix_usema_reclist */
 static struct irix_usema_rec *
-iur_lookup_by_vn(vp)
-	struct vnode *vp;
+iur_lookup_by_vn(struct vnode *vp)
 {
 	struct irix_usema_rec *iur;
 
-	(void)lockmgr(&irix_usema_reclist_lock, LK_SHARED, NULL);
+	rw_enter(&irix_usema_reclist_lock, RW_READER);
 	LIST_FOREACH(iur, &irix_usema_reclist, iur_list)
 		if (iur->iur_vn == vp)
 			break;
-	(void)lockmgr(&irix_usema_reclist_lock, LK_RELEASE, NULL);
+	rw_exit(&irix_usema_reclist_lock);
 	return iur;
 }
 
 static struct irix_usema_rec *
-iur_lookup_by_sem(sem)
-	struct irix_semaphore *sem;
+iur_lookup_by_sem(struct irix_semaphore *sem)
 {
 	struct irix_usema_rec *iur;
 	struct irix_semaphore is;
@@ -518,20 +499,17 @@ iur_lookup_by_sem(sem)
 	if ((error = copyin(sem, &is, sizeof(is))) != 0)
 		return NULL;
 
-	(void)lockmgr(&irix_usema_reclist_lock, LK_SHARED, NULL);
+	rw_enter(&irix_usema_reclist_lock, RW_READER);
 	LIST_FOREACH(iur, &irix_usema_reclist, iur_list)
 		if (iur->iur_sem == sem && iur->iur_shid == is.is_shid)
 			break;
-	(void)lockmgr(&irix_usema_reclist_lock, LK_RELEASE, NULL);
+	rw_exit(&irix_usema_reclist_lock);
 
 	return iur;
 }
 
 static struct irix_usema_rec *
-iur_insert(sem, vp, p)
-	struct irix_semaphore *sem;
-	struct vnode *vp;
-	struct proc *p;
+iur_insert(struct irix_semaphore *sem, struct vnode *vp, struct proc *p)
 {
 	struct irix_usema_rec *iur;
 	struct irix_semaphore is;
@@ -549,22 +527,22 @@ iur_insert(sem, vp, p)
 	iur->iur_shid = is.is_shid;
 	iur->iur_p = p;
 	iur->iur_waiting_count = 0;
-	lockinit(&iur->iur_lock, PZERO|PCATCH, "_usema", 0, 0);
+	rw_init(&iur->iur_lock);
+	selinit(&iur->iur_si);
 	TAILQ_INIT(&iur->iur_waiting_p);
 	TAILQ_INIT(&iur->iur_released_p);
-	(void)lockmgr(&irix_usema_reclist_lock, LK_EXCLUSIVE, NULL);
+	rw_enter(&irix_usema_reclist_lock, RW_WRITER);
 	LIST_INSERT_HEAD(&irix_usema_reclist, iur, iur_list);
-	(void)lockmgr(&irix_usema_reclist_lock, LK_RELEASE, NULL);
+	rw_exit(&irix_usema_reclist_lock);
 	return iur;
 }
 
 static void
-iur_remove(iur)
-	struct irix_usema_rec *iur;
+iur_remove(struct irix_usema_rec *iur)
 {
 	struct irix_waiting_proc_rec *iwpr;
 
-	(void)lockmgr(&iur->iur_lock, LK_EXCLUSIVE, NULL);
+	rw_enter(&iur->iur_lock, RW_WRITER);
 waiting_restart:
 	TAILQ_FOREACH(iwpr, &iur->iur_waiting_p, iwpr_list) {
 		TAILQ_REMOVE(&iur->iur_waiting_p, iwpr, iwpr_list);
@@ -581,27 +559,26 @@ released_restart:
 		goto released_restart;
 	}
 
-	(void)lockmgr(&irix_usema_reclist_lock, LK_EXCLUSIVE, NULL);
+	rw_enter(&irix_usema_reclist_lock, RW_WRITER);
 	LIST_REMOVE(iur, iur_list);
-	(void)lockmgr(&irix_usema_reclist_lock, LK_RELEASE, NULL);
+	rw_exit(&irix_usema_reclist_lock);
 
-	(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
+	seldestroy(&iur->iur_si);
+	rw_exit(&iur->iur_lock);
+	rw_destroy(&iur->iur_lock);
 	free(iur, M_DEVBUF);
 	return;
 }
 
 static struct irix_waiting_proc_rec *
-iur_proc_queue(iur, p)
-	struct irix_usema_rec *iur;
-	struct proc *p;
+iur_proc_queue(struct irix_usema_rec *iur, struct proc *p)
 {
 	struct irix_waiting_proc_rec *iwpr;
 
 	/* Do we have this iwpr on the released list? If we do, reuse it */
-	(void)lockmgr(&iur->iur_lock, LK_SHARED, NULL);
+	rw_enter(&iur->iur_lock, RW_WRITER);
 	TAILQ_FOREACH(iwpr, &iur->iur_released_p, iwpr_list) {
 		if (iwpr->iwpr_p == p) {
-			(void)lockmgr(&iur->iur_lock, LK_UPGRADE, NULL);
 			TAILQ_REMOVE(&iur->iur_released_p, iwpr, iwpr_list);
 			goto got_iwpr;
 		}
@@ -610,70 +587,60 @@ iur_proc_queue(iur, p)
 	/* Otherwise, create a new one */
 	iwpr = malloc(sizeof(struct irix_waiting_proc_rec), M_DEVBUF, M_WAITOK);
 	iwpr->iwpr_p = p;
-
-	(void)lockmgr(&iur->iur_lock, LK_UPGRADE, NULL);
 got_iwpr:
 	TAILQ_INSERT_TAIL(&iur->iur_waiting_p, iwpr, iwpr_list);
 	iur->iur_waiting_count++;
-	(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
+	rw_exit(&iur->iur_lock);
 	return iwpr;
 }
 
 static void
-iur_proc_dequeue(iur, iwpr)
-	struct irix_usema_rec *iur;
-	struct irix_waiting_proc_rec *iwpr;
+iur_proc_dequeue(struct irix_usema_rec *iur, struct irix_waiting_proc_rec *iwpr)
 {
-	(void)lockmgr(&iur->iur_lock, LK_EXCLUSIVE, NULL);
+	rw_enter(&iur->iur_lock, RW_WRITER);
 	iur->iur_waiting_count--;
 	TAILQ_REMOVE(&iur->iur_waiting_p, iwpr, iwpr_list);
-	(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
+	rw_exit(&iur->iur_lock);
 	free(iwpr, M_DEVBUF);
 	return;
 }
 
 static void
-iur_proc_release(iur, iwpr)
-	struct irix_usema_rec *iur;
-	struct irix_waiting_proc_rec *iwpr;
+iur_proc_release(struct irix_usema_rec *iur, struct irix_waiting_proc_rec *iwpr)
 {
-	(void)lockmgr(&iur->iur_lock, LK_EXCLUSIVE, NULL);
+	rw_enter(&iur->iur_lock, RW_WRITER);
 	iur->iur_waiting_count--;
 	TAILQ_REMOVE(&iur->iur_waiting_p, iwpr, iwpr_list);
 	TAILQ_INSERT_TAIL(&iur->iur_released_p, iwpr, iwpr_list);
-	(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
+	rw_exit(&iur->iur_lock);
 	return;
 }
 
 
+/* Should be called with iur_lock RW_READER held */
 static int
-iur_proc_isreleased(iur, p)
-	struct irix_usema_rec *iur;
-	struct proc *p;
+iur_proc_isreleased(struct irix_usema_rec *iur, struct proc *p)
 {
 	struct irix_waiting_proc_rec *iwpr;
 	int res = 0;
 
-	(void)lockmgr(&iur->iur_lock, LK_SHARED, NULL);
 	TAILQ_FOREACH(iwpr, &iur->iur_released_p, iwpr_list) {
 		if (iwpr->iwpr_p == p) {
 			res = 1;
 			break;
 		}
 	}
-	(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
 	return res;
 }
 
 static struct irix_waiting_proc_rec *
-iur_proc_getfirst(iur)
-	struct irix_usema_rec *iur;
+iur_proc_getfirst(struct irix_usema_rec *iur)
 {
 	struct irix_waiting_proc_rec *iwpr;
 
-	(void)lockmgr(&iur->iur_lock, LK_SHARED, NULL);
+	rw_enter(&iur->iur_lock, RW_READER);
 	iwpr = TAILQ_FIRST(&iur->iur_waiting_p);
-	(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
+	rw_exit(&iur->iur_lock);
 	return iwpr;
 }
 
@@ -683,9 +650,7 @@ iur_proc_getfirst(iur)
  * otherwise change ownership of structure allocated for process p to new_p
  */
 void
-irix_usema_exit_cleanup(p, new_p)
-	struct proc *p;
-	struct proc *new_p;
+irix_usema_exit_cleanup(struct proc *p, struct proc *new_p)
 {
 	struct irix_usema_rec *iur;
 
@@ -693,7 +658,7 @@ irix_usema_exit_cleanup(p, new_p)
 	printf("irix_usema_exit_cleanup(): p = %p, new_p = %p\n", p, new_p);
 #endif
 remove_restart:
-	(void)lockmgr(&irix_usema_reclist_lock, LK_SHARED, NULL);
+	rw_enter(&irix_usema_reclist_lock, RW_WRITER);
 	LIST_FOREACH(iur, &irix_usema_reclist, iur_list) {
 		if (iur->iur_p != p)
 			continue;
@@ -702,22 +667,17 @@ remove_restart:
 			 * Release the lock now since iur_remove() needs to
 			 * acquire an exclusive lock.
 			 */
-			(void)lockmgr(&irix_usema_reclist_lock,
-			    LK_RELEASE, NULL);
+			rw_exit(&irix_usema_reclist_lock);
 			iur_remove(iur);
 			/*
 			 * iur is now invalid and we lost the lock, restart
 			 */
 			goto remove_restart;
 		} else {
-			(void)lockmgr(&irix_usema_reclist_lock,
-			    LK_UPGRADE, NULL);
 			iur->iur_p = new_p;
-			(void)lockmgr(&irix_usema_reclist_lock,
-			    LK_DOWNGRADE, NULL);
 		}
 	}
-	(void)lockmgr(&irix_usema_reclist_lock, LK_RELEASE, NULL);
+	rw_exit(&irix_usema_reclist_lock);
 
 	return;
 }
@@ -727,7 +687,6 @@ remove_restart:
  * This dumps all in-kernel information about processes waiting for
  * semaphores and process that have been released by an operation
  * on a semaphore.
- * When called from ddb, curproc is NULL, and this panic lockmgr().
  */
 void
 irix_usema_debug(void)
@@ -735,8 +694,6 @@ irix_usema_debug(void)
 	struct irix_usema_rec *iur;
 	struct irix_waiting_proc_rec *iwpr;
 
-	if (curproc != NULL)
-		(void)lockmgr(&irix_usema_reclist_lock, LK_SHARED, NULL);
 	LIST_FOREACH(iur, &irix_usema_reclist, iur_list) {
 		printf("iur %p\n", iur);
 		printf("  iur->iur_vn = %p\n", iur->iur_vn);
@@ -746,8 +703,6 @@ irix_usema_debug(void)
 		printf("  iur->iur_waiting_count = %d\n",
 		    iur->iur_waiting_count);
 		printf("  Waiting processes\n");
-		if (curproc != NULL)
-			(void)lockmgr(&iur->iur_lock, LK_SHARED, NULL);
 		TAILQ_FOREACH(iwpr, &iur->iur_waiting_p, iwpr_list) {
 			printf("    iwpr %p: iwpr->iwpr_p = %p (pid %d)\n",
 			    iwpr, iwpr->iwpr_p, iwpr->iwpr_p->p_pid);
@@ -757,10 +712,6 @@ irix_usema_debug(void)
 			printf("    iwpr %p: iwpr->iwpr_p = %p (pid %d)\n",
 			    iwpr, iwpr->iwpr_p, iwpr->iwpr_p->p_pid);
 		}
-		if (curproc != NULL)
-			(void)lockmgr(&iur->iur_lock, LK_RELEASE, NULL);
 	}
-	if (curproc != NULL)
-		(void)lockmgr(&irix_usema_reclist_lock, LK_RELEASE, NULL);
 }
 #endif /* DEBUG_IRIX */

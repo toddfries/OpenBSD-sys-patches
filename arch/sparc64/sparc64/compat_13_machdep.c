@@ -1,4 +1,4 @@
-/*	$NetBSD: compat_13_machdep.c,v 1.16 2005/12/11 12:19:14 christos Exp $	*/
+/*	$NetBSD: compat_13_machdep.c,v 1.21 2008/04/28 20:23:37 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.16 2005/12/11 12:19:14 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.21 2008/04/28 20:23:37 martin Exp $");
 
 #include "opt_ddb.h"
 
@@ -51,7 +44,6 @@ __KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.16 2005/12/11 12:19:14 chris
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sparc64/sparc64/sigdebug.h>
 
@@ -68,17 +60,14 @@ __KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.16 2005/12/11 12:19:14 chris
  */
 /* ARGSUSED */
 int
-compat_13_sys_sigreturn(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+compat_13_sys_sigreturn(struct lwp *l, const struct compat_13_sys_sigreturn_args *uap, register_t *retval)
 {
-	struct compat_13_sys_sigreturn_args /* {
+	/* {
 		syscallarg(struct sigcontext13 *) sigcntxp;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
+	} */
 	struct sigcontext13 sc, *scp;
 	struct trapframe64 *tf;
+	struct proc *p = l->l_proc;
 	sigset_t mask;
 
 	/* First ensure consistent stack state (see sendsig). */
@@ -90,6 +79,7 @@ compat_13_sys_sigreturn(l, v, retval)
 		Debugger();
 #endif
 #endif
+		mutex_enter(p->p_lock);
 		sigexit(l, SIGILL);
 	}
 #ifdef DEBUG
@@ -103,7 +93,7 @@ compat_13_sys_sigreturn(l, v, retval)
 #endif
 
 	scp = SCARG(uap, sigcntxp);
-	if ((vaddr_t)scp & 3 || (copyin((caddr_t)scp, &sc, sizeof sc) != 0))
+	if ((vaddr_t)scp & 3 || (copyin((void *)scp, &sc, sizeof sc) != 0))
 #ifdef DEBUG
 	{
 		printf("compat_13_sys_sigreturn: copyin failed: scp=%p\n", scp);
@@ -158,14 +148,16 @@ compat_13_sys_sigreturn(l, v, retval)
 	}
 #endif
 
+	mutex_enter(p->p_lock);
 	if (scp->sc_onstack & SS_ONSTACK)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask */
 	native_sigset13_to_sigset(&scp->sc_mask, &mask);
-	(void) sigprocmask1(p, SIG_SETMASK, &mask, 0);
+	(void) sigprocmask1(l, SIG_SETMASK, &mask, 0);
+	mutex_exit(p->p_lock);
 
 	return (EJUSTRETURN);
 }

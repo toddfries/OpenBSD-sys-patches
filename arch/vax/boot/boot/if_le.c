@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_le.c,v 1.3 2003/11/07 10:16:45 jmc Exp $ */
-/*	$NetBSD: if_le.c,v 1.6 2000/05/20 13:30:03 ragge Exp $ */
+/*	$NetBSD: if_le.c,v 1.11 2008/03/31 06:19:59 he Exp $ */
 /*
  * Copyright (c) 1997, 1999 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -41,10 +40,10 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/if_ether.h>
 
 #include <../include/sid.h>
 #include <../include/rpb.h>
@@ -52,6 +51,7 @@
 #include <lib/libsa/netif.h>
 #include <lib/libsa/stand.h>
 
+#include <dev/ic/lancereg.h>
 #include <dev/ic/am7990reg.h>
 
 #include "vaxstand.h"
@@ -65,9 +65,7 @@
 #define NRBUF   (1 << RLEN)
 #define BUFSIZE 1518
 
-#define ETHER_MIN_LEN   64      /* minimum frame length, including CRC */
-
-#define	QW_ALLOC(x)	(((int)alloc((x) + 7) + 7) & ~7)
+#define	QW_ALLOC(x)	(((uintptr_t)alloc((x) + 7) + 7) & ~7)
 
 static int le_get(struct iodesc *, void *, size_t, time_t);
 static int le_put(struct iodesc *, void *, size_t);
@@ -150,7 +148,7 @@ leopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 		nireg = (void *)0x20084400;
 	} else {
 		*(int *)0x20080014 = 0; /* Be sure we do DMA in low 16MB */
-		ea = (void *)0x20090000; /* XXX Ethernet address */
+		ea = (void *)0x20090000; /* XXX ethernetaddress */
 		nireg = (void *)0x200e0000;
 	}
 	if (askname == 0) /* Override if autoboot */
@@ -171,18 +169,20 @@ igen:
 		eaddr[i] = ea[i] & 0377;
 
 	if (initblock == NULL) {
-		(void *)initblock =
-		    (char *)QW_ALLOC(sizeof(struct initblock)) + addoff;
+		initblock = (struct initblock *)
+			(QW_ALLOC(sizeof(struct initblock)) + addoff);
 		initblock->ib_mode = LE_MODE_NORMAL;
-		bcopy(eaddr, initblock->ib_padr, 6);
+		memcpy(initblock->ib_padr, eaddr, 6);
 		initblock->ib_ladrf1 = 0;
 		initblock->ib_ladrf2 = 0;
 
-		(int)rdesc = QW_ALLOC(sizeof(struct buffdesc) * NRBUF) + addoff;
+		rdesc = (struct buffdesc *)
+			(QW_ALLOC(sizeof(struct buffdesc) * NRBUF) + addoff);
 		initblock->ib_rdr = (RLEN << 29) | (int)rdesc;
 		if (kopiera)
 			initblock->ib_rdr -= (int)initblock;
-		(int)tdesc = QW_ALLOC(sizeof(struct buffdesc) * NTBUF) + addoff;
+		tdesc = (struct buffdesc *)
+			(QW_ALLOC(sizeof(struct buffdesc) * NTBUF) + addoff);
 		initblock->ib_tdr = (TLEN << 29) | (int)tdesc;
 		if (kopiera)
 			initblock->ib_tdr -= (int)initblock;
@@ -267,14 +267,15 @@ retry:
 			copyin((rdesc[next_rdesc].bd_adrflg&0xffffff),
 			    pkt, len);
 		else
-			bcopy((char *)(rdesc[next_rdesc].bd_adrflg&0xffffff) +
-			    addoff, pkt, len);
+			memcpy(pkt,
+			    (char *)(rdesc[next_rdesc].bd_adrflg&0xffffff) +
+			    addoff, len);
 	}
 
 	rdesc[next_rdesc].bd_mcnt = 0;
 	rdesc[next_rdesc].bd_adrflg |= BR_OWN;
 	if (kopiera)
-		copyout((void *)&rdesc[next_rdesc], (int)&rdesc[next_rdesc] -
+		copyout((void *)&rdesc[next_rdesc], (int)&rdesc[next_rdesc] - 
 		    (int)initblock, sizeof(struct buffdesc));
 	if (++next_rdesc >= NRBUF)
 		next_rdesc = 0;
@@ -307,14 +308,14 @@ retry:
 	if (kopiera)
 		copyout(pkt, (tdesc[next_tdesc].bd_adrflg & 0xffffff), len);
 	else
-		bcopy(pkt, (char *)(tdesc[next_tdesc].bd_adrflg & 0xffffff) +
-		    addoff, len);
+		memcpy((char *)(tdesc[next_tdesc].bd_adrflg & 0xffffff) +
+		    addoff, pkt, len);
 	tdesc[next_tdesc].bd_bcnt =
 	    (len < ETHER_MIN_LEN ? -ETHER_MIN_LEN : -len);
 	tdesc[next_tdesc].bd_mcnt = 0;
 	tdesc[next_tdesc].bd_adrflg |= BT_OWN | BT_STP | BT_ENP;
 	if (kopiera)
-		copyout((void *)&tdesc[next_tdesc], (int)&tdesc[next_tdesc] -
+		copyout((void *)&tdesc[next_tdesc], (int)&tdesc[next_tdesc] - 
 		    (int)initblock, sizeof(struct buffdesc));
 
 	LEWRCSR(LE_CSR0, LE_C0_TDMD);

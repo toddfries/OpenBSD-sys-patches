@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6protosw.h,v 1.7 2003/06/02 23:28:16 millert Exp $	*/
+/*	$NetBSD: ip6protosw.h,v 1.21 2008/08/06 15:01:23 plunky Exp $	*/
 /*	$KAME: ip6protosw.h,v 1.22 2001/02/08 18:02:08 itojun Exp $	*/
 
 /*
@@ -112,34 +112,39 @@ struct ip6ctlparam {
 };
 
 struct ip6protosw {
-	short 	pr_type;		/* socket type used for */
+	int 	pr_type;		/* socket type used for */
 	struct	domain *pr_domain;	/* domain protocol a member of */
 	short	pr_protocol;		/* protocol number */
 	short	pr_flags;		/* see below */
 
 /* protocol-protocol hooks */
-					/* input to protocol (from below) */
-	int	(*pr_input)(struct mbuf **, int *, int);
-					/* output to protocol (from above) */
-	int	(*pr_output)(struct mbuf *, ...);
-					/* control input (from below) */
-	void	(*pr_ctlinput)(int, struct sockaddr *, void *);
-					/* control output (from above) */
-	int	(*pr_ctloutput)(int, struct socket *, int, int, struct mbuf **);
+	int	(*pr_input)		/* input to protocol (from below) */
+			(struct mbuf **, int *, int);
+	int	(*pr_output)		/* output to protocol (from above) */
+			(struct mbuf *, struct socket *, struct sockaddr_in6 *,
+			 struct mbuf *);
+	void	*(*pr_ctlinput)		/* control input (from below) */
+			(int, const struct sockaddr *, void *);
+	int	(*pr_ctloutput)		/* control output (from above) */
+			(int, struct socket *, struct sockopt *);
 
 /* user-protocol hook */
-					/* user request: see list below */
-	int	(*pr_usrreq)(struct socket *, int, struct mbuf *,
-		    struct mbuf *, struct mbuf *, struct proc *);
+	int	(*pr_usrreq)		/* user request: see list below */
+			(struct socket *, int, struct mbuf *,
+			     struct mbuf *, struct mbuf *, struct lwp *);
 
 /* utility hooks */
-	void	(*pr_init)(void);	/* initialization hook */
+	void	(*pr_init)		/* initialization hook */
+			(void);
 
-	void	(*pr_fasttimo)(void);	/* fast timeout (200ms) */
-	void	(*pr_slowtimo)(void);	/* slow timeout (500ms) */
-	void	(*pr_drain)(void);	/* flush any excess space possible */
-					/* sysctl for protocol */
-	int	(*pr_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
+	void	(*pr_fasttimo)		/* fast timeout (200ms) */
+			(void);
+	void	(*pr_slowtimo)		/* slow timeout (500ms) */
+			(void);
+	void	(*pr_drain)		/* flush any excess space possible */
+			(void);
 };
+
+extern const struct ip6protosw inet6sw[];
 
 #endif /* !_NETINET6_IP6PROTOSW_H_ */

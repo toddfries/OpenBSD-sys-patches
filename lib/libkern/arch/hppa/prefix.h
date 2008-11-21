@@ -1,3 +1,5 @@
+/*	$NetBSD: prefix.h,v 1.1 2002/06/06 20:03:39 fredette Exp $	*/
+
 /*	$OpenBSD: prefix.h,v 1.2 2001/03/29 04:08:21 mickey Exp $	*/
 
 /*

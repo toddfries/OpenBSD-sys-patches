@@ -1,4 +1,3 @@
-/*	$OpenBSD: bthid.h,v 1.1 2007/07/27 16:52:24 gwk Exp $	*/
 /*	$NetBSD: bthid.h,v 1.1 2006/06/19 15:44:45 gdamore Exp $	*/
 
 /*-

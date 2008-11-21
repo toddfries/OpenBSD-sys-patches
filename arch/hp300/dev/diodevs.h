@@ -1,10 +1,11 @@
+/*	$NetBSD: diodevs.h,v 1.12 2008/04/28 20:23:19 martin Exp $	*/
+
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: diodevs,v 1.8 2008/05/01 14:29:01 miod Exp 
+ *	NetBSD: diodevs,v 1.7 2003/11/23 01:57:35 tsutsui Exp 
  */
-/* $NetBSD: diodevs,v 1.7 2003/11/23 01:57:35 tsutsui Exp $ */
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -21,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,9 +60,6 @@
 #define	DIO_DEVICE_ID_LAN	0x15
 #define	DIO_DEVICE_DESC_LAN	"98643A LAN"
 
-#define	DIO_DEVICE_ID_LANREM	0x95
-#define	DIO_DEVICE_DESC_LANREM	"98643A LAN"
-
 
 #define	DIO_DEVICE_ID_FHPIB	0x08
 #define	DIO_DEVICE_DESC_FHPIB	"98625A/98625B HP-IB"
@@ -105,8 +96,8 @@
 #define	DIO_DEVICE_SECID_TOPCAT	0x02
 #define	DIO_DEVICE_DESC_TOPCAT	"98544/98545/98547 (\"topcat\") display"
 
-#define	DIO_DEVICE_SECID_RENAISSANCE	0x04
-#define	DIO_DEVICE_DESC_RENAISSANCE	"98720/98721 (\"renaissance\") display"
+#define	DIO_DEVICE_SECID_RENASSIANCE	0x04
+#define	DIO_DEVICE_DESC_RENASSIANCE	"98720/98721 (\"renassiance\") display"
 
 #define	DIO_DEVICE_SECID_LRCATSEYE	0x05
 #define	DIO_DEVICE_DESC_LRCATSEYE	"low-res catseye display"
@@ -132,17 +123,11 @@
 #define	DIO_DEVICE_SECID_XGENESIS	0x0b
 #define	DIO_DEVICE_DESC_XGENESIS	"x-genesis display"
 
-#define	DIO_DEVICE_SECID_TIGERSHARK	0x0c
-#define	DIO_DEVICE_DESC_TIGERSHARK	"TurboVRX (\"tigershark\") display"
+#define	DIO_DEVICE_SECID_TIGER	0x0c
+#define	DIO_DEVICE_DESC_TIGER	"tiger display"
 
 #define	DIO_DEVICE_SECID_YGENESIS	0x0d
 #define	DIO_DEVICE_DESC_YGENESIS	"y-genesis display"
-
-#define	DIO_DEVICE_SECID_FB3X2_A	0x10
-#define	DIO_DEVICE_DESC_FB3X2_A	"362/382 internal display #1"
-
-#define	DIO_DEVICE_SECID_FB3X2_B	0x11
-#define	DIO_DEVICE_DESC_FB3X2_B	"362/382 internal display #2"
 
 /* Devices not yet supported.  Descriptions are lacking. */
 

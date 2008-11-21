@@ -1,3 +1,3 @@
-/*	$OpenBSD: profile.h,v 1.3 1996/04/28 10:56:26 deraadt Exp $ */
+/*	$NetBSD: profile.h,v 1.1.1.1 1995/07/25 23:12:17 chuck Exp $	*/
 
 #include <m68k/profile.h>

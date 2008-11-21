@@ -1,12 +1,11 @@
-/*	$OpenBSD: mpuvar.h,v 1.5 2003/05/12 00:48:52 jason Exp $	*/
-/*	$NetBSD: mpu401var.h,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
+/*	$NetBSD: mpuvar.h,v 1.10 2008/04/28 20:23:50 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson (augustss@netbsd.org).
+ * by Lennart Augustsson (augustss@NetBSD.org).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,33 +30,26 @@
  */
 
 struct mpu_softc {
+	device_t sc_dev;		/* base device */
 	bus_space_tag_t iot;		/* tag */
 	bus_space_handle_t ioh;		/* handle */
-	int	iobase;
+	const char *model;
 	int	open;
 	void	(*intr)(void *, int);	/* midi input intr handler */
 	void	*arg;			/* arg for intr() */
+
+#ifndef AUDIO_NO_POWER_CTL
+	int	(*powerctl)(void *, int);
+	void	*powerarg;
+#endif
 };
 
-extern struct midi_hw_if mpu_midi_hw_if;
+#ifdef _KERNEL
+extern const struct midi_hw_if mpu_midi_hw_if;
 
+int	mpu_find(struct mpu_softc *);
+void	mpu_attach(struct mpu_softc *);
 int	mpu_intr(void *);
-int	mpu_find(void *);
-int	mpu_open(void *, int,
-		 void (*iintr)(void *, int),
-		 void (*ointr)(void *), void *arg);
-void	mpu_close(void *);
-int	mpu_output(void *, int);
-void	mpu_getinfo(void *addr, struct midi_info *mi);
+#endif
 
-#define MPU401_NPORT		2
-#define MPU_DATA		0
-#define MPU_COMMAND		1
-#define  MPU_RESET		0xff
-#define  MPU_UART_MODE		0x3f
-#define  MPU_ACK		0xfe
-#define MPU_STATUS		1
-#define  MPU_OUTPUT_BUSY	0x40
-#define  MPU_INPUT_EMPTY	0x80
-
-#define MPU_MAXWAIT	10000	/* usec/10 to wait */
+#define MPU401_NPORT	2

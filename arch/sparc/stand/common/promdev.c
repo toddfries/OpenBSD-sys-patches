@@ -1,5 +1,4 @@
-/*	$OpenBSD: promdev.c,v 1.9 2003/08/14 17:13:57 deraadt Exp $	*/
-/*	$NetBSD: promdev.c,v 1.16 1995/11/14 15:04:01 pk Exp $ */
+/*	$NetBSD: promdev.c,v 1.21 2008/04/05 06:39:08 tsutsui Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -38,157 +37,150 @@
  */
 #include <sys/param.h>
 #include <sys/reboot.h>
-#include <machine/idprom.h>
+#include <sys/systm.h>
 #include <machine/oldmon.h>
+#include <machine/promlib.h>
 #include <machine/ctlreg.h>
+#include <sparc/sparc/asm.h>
+#include <machine/pte.h>
 
 #include <lib/libsa/stand.h>
-
+#include <lib/libkern/libkern.h>
 #include <sparc/stand/common/promdev.h>
 
-/* u_long	_randseed = 1; */
+#ifndef BOOTXX
+#include <sys/disklabel.h>
+#include <dev/sun/disklabel.h>
+#include <dev/raidframe/raidframevar.h>
+#endif
 
+/* OBP V0-3 PROM vector */
+#define obpvec	((struct promvec *)romp)
 
 int	obp_close(struct open_file *);
 int	obp_strategy(void *, int, daddr_t, size_t, void *, size_t *);
-ssize_t	obp_xmit(struct promdata *, void *, size_t);
-ssize_t	obp_recv(struct promdata *, void *, size_t);
-int	prom0_close(struct open_file *);
-int	prom0_strategy(void *, int, daddr_t, size_t, void *, size_t *);
-void	prom0_iclose(struct saioreq *);
-int	prom0_iopen(struct promdata *);
-ssize_t	prom0_xmit(struct promdata *, void *, size_t);
-ssize_t	prom0_recv(struct promdata *, void *, size_t);
+int	obp_v0_strategy(void *, int, daddr_t, size_t, void *, size_t *);
+ssize_t	obp_v0_xmit(struct promdata *, void *, size_t);
+ssize_t	obp_v0_recv(struct promdata *, void *, size_t);
+int	obp_v2_strategy(void *, int, daddr_t, size_t, void *, size_t *);
+ssize_t	obp_v2_xmit(struct promdata *, void *, size_t);
+ssize_t	obp_v2_recv(struct promdata *, void *, size_t);
+int	oldmon_close(struct open_file *);
+int	oldmon_strategy(void *, int, daddr_t, size_t, void *, size_t *);
+void	oldmon_iclose(struct saioreq *);
+int	oldmon_iopen(struct promdata *);
+ssize_t	oldmon_xmit(struct promdata *, void *, size_t);
+ssize_t	oldmon_recv(struct promdata *, void *, size_t);
 
-static char	*prom_mapin(u_long, int, int);
+static char	*oldmon_mapin(u_long, int, int);
+#ifndef BOOTXX
+static char	*mygetpropstring(int, char *);
+static int	getdevtype(int, char *);
+#endif
 
-int	getdevtype(int, char *);
-int	getprop(int, char *, void *, int);
-char	*getpropstring(int, char *);
+extern struct fs_ops file_system_nfs[];
+extern struct fs_ops file_system_ufs[];
 
-static void	prom0_fake(void);
+#define null_devopen	(void *)sparc_noop
+#define null_devioctl	(void *)sparc_noop
 
-extern struct filesystem file_system_nfs[];
-extern struct filesystem file_system_cd9660[];
-extern struct filesystem file_system_ufs[];
-
-int
-prom_open(struct open_file *f, ...)
-{
-	return 0;
-}
-
-int
-prom_ioctl(struct open_file *f, u_long c, void *d)
-{
-	return EIO;
-}
-
-struct devsw devsw[] = {
-	{ "prom0", prom0_strategy, prom_open, prom0_close, prom_ioctl },
-	{ "prom", obp_strategy, prom_open, obp_close, prom_ioctl }
-};
-
+#if 0
+struct devsw devsw[];
 int	ndevs = (sizeof(devsw)/sizeof(devsw[0]));
+#endif
 
-char	*prom_bootdevice;
-char	*prom_bootfile;
-int	prom_boothow;
+struct devsw oldmon_devsw =
+	{ "oldmon", oldmon_strategy, null_devopen, oldmon_close, null_devioctl };
+struct devsw obp_v0_devsw =
+	{ "obp v0", obp_v0_strategy, null_devopen, obp_close, null_devioctl };
+struct devsw obp_v2_devsw =
+	{ "obp v2", obp_v2_strategy, null_devopen, obp_close, null_devioctl };
 
-struct	promvec	*promvec;
+
+char	prom_bootdevice[MAX_PROM_PATH];
 static int	saveecho;
 
+#ifndef BOOTXX
+static daddr_t doffset = 0;
+#endif
+
+
 void
-prom_init()
+putchar(int c)
 {
-	register char	*ap, *cp, *dp;
+ 
+	if (c == '\n')
+		prom_putchar('\r');
+	prom_putchar(c);
+}
 
-	if (cputyp == CPU_SUN4)
-		prom0_fake();
+void
+_rtt(void)
+{
 
-	if (promvec->pv_romvec_vers >= 2) {
-		static char filestore[16];
-
-		prom_bootdevice = *promvec->pv_v2bootargs.v2_bootpath;
-
-#ifndef BOOTXX
-		cp = *promvec->pv_v2bootargs.v2_bootargs;
-		dp = prom_bootfile = filestore;
-		while (*cp && *cp != '-')
-			*dp++ = *cp++;
-		while (dp > prom_bootfile && *--dp == ' ');
-		*++dp = '\0';
-		ap = cp;
-#endif
-	} else {
-		static char bootstore[16];
-		dp = prom_bootdevice = bootstore;
-		cp = (*promvec->pv_v0bootargs)->ba_argv[0];
-		while (*cp) {
-			*dp++ = *cp;
-			if (*cp++ == ')')
-				break;
-		}
-		*dp = '\0';
-#ifndef BOOTXX
-		prom_bootfile = (*promvec->pv_v0bootargs)->ba_kernel;
-		ap = (*promvec->pv_v0bootargs)->ba_argv[1];
-#endif
-	}
-
-#ifndef BOOTXX
-	if (ap == NULL || *ap != '-')
-		return;
-
-	while (*ap) {
-		switch (*ap++) {
-		case 'a':
-			prom_boothow |= RB_ASKNAME;
-			break;
-		case 'c':
-			prom_boothow |= RB_CONFIG;
-			break;
-		case 'd':
-			prom_boothow |= RB_KDB;
-			debug = 1;
-			break;
-		case 's':
-			prom_boothow |= RB_SINGLE;
-			break;
-		}
-	}
-#endif
+	prom_halt();
 }
 
 int
-devopen(f, fname, file)
-	struct open_file *f;
-	const char *fname;
-	char **file;
+devopen(struct open_file *f, const char *fname, char **file)
 {
-	int	error = 0, fd;
+	int	error = 0, fd = 0;
 	struct	promdata *pd;
+#ifndef BOOTXX
+	char *partition;
+	int part = 0;
+	char rawpart[MAX_PROM_PATH];
+	struct promdata *disk_pd;
+	char buf[DEV_BSIZE];
+	struct disklabel *dlp;
+	size_t read;
+#endif
 
 	pd = (struct promdata *)alloc(sizeof *pd);
+	f->f_devdata = (void *)pd;
 
-	if (cputyp == CPU_SUN4) {
-		error = prom0_iopen(pd);
+	switch (prom_version()) {
+	case PROM_OLDMON:
+		error = oldmon_iopen(pd);
 #ifndef BOOTXX
-		pd->xmit = prom0_xmit;
-		pd->recv = prom0_recv;
+		pd->xmit = oldmon_xmit;
+		pd->recv = oldmon_recv;
 #endif
-	} else {
-		fd = (promvec->pv_romvec_vers >= 2)
-			? (*promvec->pv_v2devops.v2_open)(prom_bootdevice)
-			: (*promvec->pv_v0devops.v0_open)(prom_bootdevice);
+		f->f_dev = &oldmon_devsw;
+		saveecho = *romVectorPtr->echo;
+		*romVectorPtr->echo = 0;
+		break;
+
+	case PROM_OBP_V0:
+	case PROM_OBP_V2:
+	case PROM_OBP_V3:
+	case PROM_OPENFIRM:
+		if (*prom_bootdevice == '\0') {
+			error = ENXIO;
+			break;
+		}
+		fd = prom_open(prom_bootdevice);
 		if (fd == 0) {
 			error = ENXIO;
-		} else {
-			pd->fd = fd;
+			break;
+		}
+		pd->fd = fd;
+		switch (prom_version()) {
+		case PROM_OBP_V0:
 #ifndef BOOTXX
-			pd->xmit = obp_xmit;
-			pd->recv = obp_recv;
+			pd->xmit = obp_v0_xmit;
+			pd->recv = obp_v0_recv;
 #endif
+			f->f_dev = &obp_v0_devsw;
+			break;
+		case PROM_OBP_V2:
+		case PROM_OBP_V3:
+		case PROM_OPENFIRM:
+#ifndef BOOTXX
+			pd->xmit = obp_v2_xmit;
+			pd->recv = obp_v2_recv;
+#endif
+			f->f_dev = &obp_v2_devsw;
 		}
 	}
 
@@ -206,74 +198,167 @@ devopen(f, fname, file)
 		*file = (char *)fname;
 
 	if (pd->devtype == DT_NET) {
-		bcopy(file_system_nfs, file_system, sizeof(struct fs_ops));
+		nfsys = 1;
+		memcpy(file_system, file_system_nfs,
+		    sizeof(struct fs_ops) * nfsys);
 		if ((error = net_open(pd)) != 0) {
-			printf("Can't open network device `%s'\n",
+			printf("Can't open NFS network connection on `%s'\n",
 				prom_bootdevice);
-			return error;
+			return (error);
 		}
 	} else {
-		bcopy(file_system_ufs, file_system, sizeof(struct fs_ops));
-		bcopy(&file_system_cd9660, file_system + 1, sizeof file_system[0]);
-		nfsys = 2;
+		memcpy(file_system, file_system_ufs,
+		    sizeof(struct fs_ops) * nfsys);
+
+#ifdef NOTDEF_DEBUG
+	printf("devopen: Checking disklabel for RAID partition\n");
+#endif
+
+		/*
+		 * We need to read from the raw partition (i.e. the
+		 * beginning of the disk in order to check the NetBSD
+		 * disklabel to see if the boot partition is type RAID.
+		 *
+		 * For machines with prom_version() == PROM_OLDMON, we
+		 * only handle boot from RAID for the first disk partition.
+		 */
+		disk_pd = (struct promdata *)alloc(sizeof *disk_pd);
+		memcpy(disk_pd, pd, sizeof(struct promdata));
+		if (prom_version() != PROM_OLDMON) {
+			strcpy(rawpart, prom_bootdevice);
+			if ((partition = strchr(rawpart, ':')) != '\0' &&
+		    	    *++partition >= 'a' &&
+			    *partition <= 'a' +  MAXPARTITIONS) {
+				part = *partition - 'a';
+				*partition = RAW_PART + 'a';
+			} else
+				strcat(rawpart, ":c");
+			if ((disk_pd->fd = prom_open(rawpart)) == 0)
+				return 0;
+		}
+		error = f->f_dev->dv_strategy(disk_pd, F_READ, LABELSECTOR,
+		    DEV_BSIZE, &buf, &read);
+		if (prom_version() != PROM_OLDMON)
+			prom_close(disk_pd->fd);
+		if (error || (read != DEV_BSIZE))
+			return 0;
+#ifdef NOTDEF_DEBUG
+		{
+			int x = 0;
+			char *p = (char *) buf;
+
+			printf("  Sector %d:\n", LABELSECTOR);
+			printf("00000000  ");
+			while (x < DEV_BSIZE) {
+				if (*p >= 0x00 && *p < 0x10)
+					printf("0%x ", *p & 0xff);
+				else
+					printf("%x ", *p & 0xff);
+				x++;
+				if (x && !(x % 8))
+					printf(" ");
+				if (x && !(x % 16)) {
+					if(x < 0x100)
+						printf("\n000000%x  ", x);
+					else
+						printf("\n00000%x  ", x);
+				}
+				p++;
+			}
+			printf("\n");
+		}
+#endif
+		/* Check for NetBSD disk label. */
+		dlp = (struct disklabel *) (buf + LABELOFFSET);
+		if (dlp->d_magic == DISKMAGIC && !dkcksum(dlp) &&
+		    dlp->d_partitions[part].p_fstype == FS_RAID) {
+#ifdef NOTDEF_DEBUG
+			printf("devopen: found RAID partition, "
+			    "adjusting offset to %d\n", RF_PROTECTED_SECTORS);
+#endif
+			doffset = RF_PROTECTED_SECTORS;
+		}
 	}
 #endif /* BOOTXX */
+	return (0);
+}
 
-	f->f_dev = &devsw[cputyp == CPU_SUN4 ? 0 : 1];
-	f->f_devdata = (void *)pd;
-	return 0;
+
+int
+obp_v0_strategy(void *devdata, int flag, daddr_t dblk, size_t size,
+		void *buf, size_t *rsize)
+{
+	int	n, error = 0;
+	struct	promdata *pd = (struct promdata *)devdata;
+	int	fd = pd->fd;
+
+#ifndef BOOTXX
+	dblk += doffset;
+#endif
+#ifdef DEBUG_PROM
+	printf("promstrategy: size=%d dblk=%d\n", size, dblk);
+#endif
+
+#define prom_bread(fd, nblk, dblk, buf) \
+		(*obpvec->pv_v0devops.v0_rbdev)(fd, nblk, dblk, buf)
+#define prom_bwrite(fd, nblk, dblk, buf) \
+		(*obpvec->pv_v0devops.v0_wbdev)(fd, nblk, dblk, buf)
+
+#ifndef BOOTXX	/* We know it's a block device, so save some space */
+	if (pd->devtype != DT_BLOCK) {
+		printf("promstrategy: non-block device not supported\n");
+		error = EINVAL;
+	}
+#endif
+
+	n = (flag == F_READ)
+		? prom_bread(fd, btodb(size), dblk, buf)
+		: prom_bwrite(fd, btodb(size), dblk, buf);
+
+	*rsize = dbtob(n);
+
+#ifdef DEBUG_PROM
+	printf("rsize = %x\n", *rsize);
+#endif
+	return (error);
 }
 
 int
-obp_strategy(devdata, flag, dblk, size, buf, rsize)
-	void	*devdata;
-	int	flag;
-	daddr_t	dblk;
-	size_t	size;
-	void	*buf;
-	size_t	*rsize;
+obp_v2_strategy(void *devdata, int flag, daddr_t dblk, size_t size,
+		void *buf, size_t *rsize)
 {
 	int	error = 0;
 	struct	promdata *pd = (struct promdata *)devdata;
 	int	fd = pd->fd;
 
+#ifndef BOOTXX
+	dblk += doffset;
+#endif
 #ifdef DEBUG_PROM
 	printf("promstrategy: size=%d dblk=%d\n", size, dblk);
 #endif
 
-	if (promvec->pv_romvec_vers >= 2) {
-		if (pd->devtype == DT_BLOCK)
-			(*promvec->pv_v2devops.v2_seek)(fd, 0, dbtob(dblk));
+#ifndef BOOTXX	/* We know it's a block device, so save some space */
+	if (pd->devtype == DT_BLOCK)
+#endif
+		prom_seek(fd, dbtob(dblk));
 
-		*rsize = (*((flag == F_READ) ?
-		    (u_int (*)(int, char *, size_t))promvec->pv_v2devops.v2_read :
-		    (u_int (*)(int, char *, size_t))promvec->pv_v2devops.v2_write))
-		    (fd, buf, size);
-	} else {
-		int n = (*((flag == F_READ) ?
-		    (u_int (*)(int, int, daddr_t, void *))promvec->pv_v0devops.v0_rbdev :
-		    (u_int (*)(int, int, daddr_t, void *))promvec->pv_v0devops.v0_wbdev))
-		    (fd, btodb(size), dblk, buf);
-		*rsize = dbtob(n);
-	}
+	*rsize = (flag == F_READ)
+		? prom_read(fd, buf, size)
+		: prom_write(fd, buf, size);
 
 #ifdef DEBUG_PROM
 	printf("rsize = %x\n", *rsize);
 #endif
-	return error;
+	return (error);
 }
 
 /*
  * On old-monitor machines, things work differently.
  */
 int
-prom0_strategy(devdata, flag, dblk, size, buf, rsize)
-	void	*devdata;
-	int	flag;
-	daddr_t	dblk;
-	size_t	size;
-	void	*buf;
-	size_t	*rsize;
+oldmon_strategy(void *devdata, int flag, daddr_t dblk, size_t size,
+		void *buf, size_t *rsize)
 {
 	struct promdata	*pd = devdata;
 	struct saioreq	*si;
@@ -285,6 +370,9 @@ prom0_strategy(devdata, flag, dblk, size, buf, rsize)
 	si = pd->si;
 	ops = si->si_boottab;
 
+#ifndef BOOTXX
+	dblk += doffset;
+#endif
 #ifdef DEBUG_PROM
 	printf("prom_strategy: size=%d dblk=%d\n", size, dblk);
 #endif
@@ -311,8 +399,7 @@ prom0_strategy(devdata, flag, dblk, size, buf, rsize)
 }
 
 int
-obp_close(f)
-	struct open_file *f;
+obp_close(struct open_file *f)
 {
 	struct promdata *pd = f->f_devdata;
 	register int fd = pd->fd;
@@ -321,16 +408,12 @@ obp_close(f)
 	if (pd->devtype == DT_NET)
 		net_close(pd);
 #endif
-	if (promvec->pv_romvec_vers >= 2)
-		(void)(*promvec->pv_v2devops.v2_close)(fd);
-	else
-		(void)(*promvec->pv_v0devops.v0_close)(fd);
+	prom_close(fd);
 	return 0;
 }
 
 int
-prom0_close(f)
-	struct open_file *f;
+oldmon_close(struct open_file *f)
 {
 	struct promdata *pd = f->f_devdata;
 
@@ -338,43 +421,47 @@ prom0_close(f)
 	if (pd->devtype == DT_NET)
 		net_close(pd);
 #endif
-	prom0_iclose(pd->si);
+	oldmon_iclose(pd->si);
 	pd->si = NULL;
-	*romp->echo = saveecho; /* Hmm, probably must go somewhere else */
+	*romVectorPtr->echo = saveecho; /* Hmm, probably must go somewhere else */
 	return 0;
 }
 
 #ifndef BOOTXX
 ssize_t
-obp_xmit(pd, buf, len)
-	struct	promdata *pd;
-	void	*buf;
-	size_t	len;
+obp_v0_xmit(struct promdata *pd, void *buf, size_t len)
 {
-	return (promvec->pv_romvec_vers >= 2
-		? (*promvec->pv_v2devops.v2_write)(pd->fd, buf, len)
-		: (*promvec->pv_v0devops.v0_wnet)(pd->fd, len, buf));
+
+	return ((*obpvec->pv_v0devops.v0_wnet)(pd->fd, len, buf));
 }
 
 ssize_t
-obp_recv(pd, buf, len)
-	struct	promdata *pd;
-	void	*buf;
-	size_t	len;
+obp_v2_xmit(struct promdata *pd, void *buf, size_t len)
 {
-	int n;
 
-	n = (promvec->pv_romvec_vers >= 2
-		? (*promvec->pv_v2devops.v2_read)(pd->fd, buf, len)
-		: (*promvec->pv_v0devops.v0_rnet)(pd->fd, len, buf));
+	return (prom_write(pd->fd, buf, len));
+}
+
+ssize_t
+obp_v0_recv(struct promdata *pd, void *buf, size_t len)
+{
+
+	return ((*obpvec->pv_v0devops.v0_rnet)(pd->fd, len, buf));
+}
+
+ssize_t
+obp_v2_recv(struct promdata *pd, void *buf, size_t len)
+{
+	int	n;
+
+	n = prom_read(pd->fd, buf, len);
+
+	/* OBP V2 & V3 may return -2 */
 	return (n == -2 ? 0 : n);
 }
 
 ssize_t
-prom0_xmit(pd, buf, len)
-	struct	promdata *pd;
-	void	*buf;
-	size_t	len;
+oldmon_xmit(struct promdata *pd, void *buf, size_t len)
 {
 	struct saioreq	*si;
 	struct saif	*sif;
@@ -395,10 +482,7 @@ prom0_xmit(pd, buf, len)
 }
 
 ssize_t
-prom0_recv(pd, buf, len)
-	struct	promdata *pd;
-	void	*buf;
-	size_t	len;
+oldmon_recv(struct promdata *pd, void *buf, size_t len)
 {
 	struct saioreq	*si;
 	struct saif	*sif;
@@ -415,137 +499,19 @@ prom0_recv(pd, buf, len)
 }
 
 int
-getchar()
+getchar(void)
 {
-	char c;
-	register int n;
- 
-	if (promvec->pv_romvec_vers > 2)
-		while ((n = (*promvec->pv_v2devops.v2_read)
-			(*promvec->pv_v2bootargs.v2_fd0, (caddr_t)&c, 1)) != 1);
-	else {
-                /* SUN4 PROM: must turn off local echo */
-                struct om_vector *oldpvec = (struct om_vector *)PROM_BASE;
-                int saveecho = 0;
 
-                if (CPU_ISSUN4) {
-                        saveecho = *(oldpvec->echo);
-                        *(oldpvec->echo) = 0;
-                }       
-                c = (*promvec->pv_getchar)();
-                if (CPU_ISSUN4)
-                        *(oldpvec->echo) = saveecho;
-	}
-
-	if (c == '\r')
-		c = '\n';
-	return (c);
+	return (prom_getchar());
 }
- 
-int
-cngetc(void)
-{
-	return getchar();
-}
-
-int
-peekchar(void)
-{
-	char c;
-	register int n;
- 
-	if (promvec->pv_romvec_vers > 2) {
-		n = (*promvec->pv_v2devops.v2_read)
-			(*promvec->pv_v2bootargs.v2_fd0, (caddr_t)&c, 1);
-		if (n < 0)
-			return -1;
-	} else
-		c = (*promvec->pv_nbgetchar)();
-
-	if (c == '\r')
-		c = '\n';
-	return (c);
-}
-#endif
-
-static void
-pv_putchar(int c)
-{
-	char c0 = c;
-
-	if (promvec->pv_romvec_vers > 2)
-		(*promvec->pv_v2devops.v2_write)
-			(*promvec->pv_v2bootargs.v2_fd1, &c0, 1);
-	else
-		(*promvec->pv_putchar)(c);
-}
-
-void
-putchar(c)
-	int c;
-{
- 
-	if (c == '\n')
-		pv_putchar('\r');
-	pv_putchar(c);
-}
-
-void
-_rtt()
-{
-	promvec->pv_halt();
-}
-
-#ifndef BOOTXX
-int hz = 1000;
 
 time_t
 getsecs(void)
 {
-	register int ticks = getticks();
-	return ((time_t)(ticks / hz));
+
+	(void)prom_peekchar();
+	return (prom_ticks() / 1000);
 }
-
-int
-getticks(void)
-{
-	if (promvec->pv_romvec_vers >= 2) {
-		char c;
-		(void)(*promvec->pv_v2devops.v2_read)
-			(*promvec->pv_v2bootargs.v2_fd0, (caddr_t)&c, 0);
-	} else {
-		(void)(*promvec->pv_nbgetchar)();
-	}
-	return *(promvec->pv_ticks);
-}
-
-void
-prom_getether(int fd, u_char *ea)
-{
-	if (cputyp == CPU_SUN4) {
-		static struct idprom sun4_idprom;
-		u_char *src, *dst;
-		int len, x;
-
-		if (sun4_idprom.id_format == 0) {
-			dst = (char *)&sun4_idprom;
-			src = (char *)AC_IDPROM;
-			len = sizeof(struct idprom);
-			do {
-				x = lduba(src++, ASI_CONTROL);
-				*dst++ = x;
-			} while (--len > 0);
-		}
-		bcopy(sun4_idprom.id_ether, ea, 6);
-	} else if (promvec->pv_romvec_vers <= 2) {
-		(void)(*promvec->pv_enaddr)(fd, (char *)ea);
-	} else {
-		char buf[64];
-		snprintf(buf, sizeof buf, "%x mac-address drop swap 6 cmove", ea);
-		promvec->pv_fortheval.v2_eval(buf);
-	}
-}
-
 
 /*
  * A number of well-known devices on sun4s.
@@ -565,52 +531,36 @@ static struct dtab {
 };
 
 int
-getdevtype(fd, name)
-	int	fd;
-	char	*name;
+getdevtype(int fd, char *name)
 {
-	if (promvec->pv_romvec_vers >= 2) {
-		int node = (*promvec->pv_v2devops.v2_fd_phandle)(fd);
-		char *cp = getpropstring(node, "device_type");
-		if (strcmp(cp, "block") == 0)
-			return DT_BLOCK;
-		else if (strcmp(cp, "network") == 0)
-			return DT_NET;
-		else if (strcmp(cp, "byte") == 0)
-			return DT_BYTE;
-	} else {
-		struct dtab *dp;
+	struct dtab *dp;
+	int node;
+	char *cp;
+
+	switch (prom_version()) {
+	case PROM_OLDMON:
+	case PROM_OBP_V0:
 		for (dp = dtab; dp->name; dp++) {
 			if (name[0] == dp->name[0] &&
 			    name[1] == dp->name[1])
-				return dp->type;
+				return (dp->type);
 		}
-	}
-	return 0;
-}
+		break;
 
-/*
- * OpenPROM nodes & property routines (from <sparc/autoconf.c>).
- */
-int
-getprop(node, name, buf, bufsiz)
-	int node;
-	char *name;
-	void *buf;
-	register int bufsiz;
-{
-	register struct nodeops *no;
-	register int len;
-
-	no = promvec->pv_nodeops;
-	len = no->no_proplen(node, name);
-	if (len > bufsiz) {
-		printf("node %x property %s length %d > %d\n",
-		    node, name, len, bufsiz);
-		return (0);
+	case PROM_OBP_V2:
+	case PROM_OBP_V3:
+	case PROM_OPENFIRM:
+		node = prom_instance_to_package(fd);
+		cp = mygetpropstring(node, "device_type");
+		if (strcmp(cp, "block") == 0)
+			return (DT_BLOCK);
+		else if (strcmp(cp, "network") == 0)
+			return (DT_NET);
+		else if (strcmp(cp, "byte") == 0)
+			return (DT_BYTE);
+		break;
 	}
-	no->no_getprop(node, name, buf);
-	return (len);
+	return (0);
 }
 
 /*
@@ -619,18 +569,19 @@ getprop(node, name, buf, bufsiz)
  * subsequent calls.
  */
 char *
-getpropstring(node, name)
-	int node;
-	char *name;
+mygetpropstring(int node, char *name)
 {
-	register int len;
-	static char stringbuf[64];
+	int len;
+static	char buf[64];
 
-	len = getprop(node, name, (void *)stringbuf, sizeof stringbuf - 1);
-	if (len == -1)
+	len = prom_proplen(node, name);
+	if (len > 0)
+		_prom_getprop(node, name, buf, len);
+	else
 		len = 0;
-	stringbuf[len] = '\0';	/* usually unnecessary */
-	return (stringbuf);
+
+	buf[len] = '\0';	/* usually unnecessary */
+	return (buf);
 }
 #endif /* BOOTXX */
 
@@ -638,14 +589,11 @@ getpropstring(node, name)
  * Old monitor routines
  */
 
-#include <machine/pte.h>
-
 struct saioreq prom_si;
 static int promdev_inuse;
 
 int
-prom0_iopen(pd)
-	struct promdata	*pd;
+oldmon_iopen(struct promdata *pd)
 {
 	struct om_bootparam *bp;
 	struct om_boottable *ops;
@@ -654,9 +602,9 @@ prom0_iopen(pd)
 	int	error;
 
 	if (promdev_inuse)
-		return(EMFILE);
+		return (EMFILE);
 
-	bp = *romp->bootParam;
+	bp = *romVectorPtr->bootParam;
 	ops = bp->bootTable;
 	dip = ops->b_devinfo;
 
@@ -674,24 +622,22 @@ prom0_iopen(pd)
 	dvma_init();
 
 	si = &prom_si;
-	bzero((caddr_t)si, sizeof(*si));
+	memset(si, 0, sizeof(*si));
 	si->si_boottab = ops;
 	si->si_ctlr = bp->ctlrNum;
 	si->si_unit = bp->unitNum;
 	si->si_boff = bp->partNum;
 
-	if (si->si_ctlr > dip->d_stdcount) {
-		printf("Invalid controller number\n");
-		return(ENXIO);
-	}
+	if (si->si_ctlr > dip->d_stdcount)
+		return (ECTLR);
 
 	if (dip->d_devbytes) {
-		si->si_devaddr = prom_mapin(dip->d_stdaddrs[si->si_ctlr],
+		si->si_devaddr = oldmon_mapin(dip->d_stdaddrs[si->si_ctlr],
 			dip->d_devbytes, dip->d_devtype);
 #ifdef	DEBUG_PROM
 		printf("prom_iopen: devaddr=0x%x pte=0x%x\n",
 			si->si_devaddr,
-			getpte((u_long)si->si_devaddr & ~PGOFSET));
+			getpte4((u_long)si->si_devaddr & ~PGOFSET));
 #endif
 	}
 
@@ -712,8 +658,7 @@ prom0_iopen(pd)
 	/* OK, call the PROM device open routine. */
 	error = (*ops->b_open)(si);
 	if (error != 0) {
-		printf("prom_iopen: \"%s\" error=%d\n",
-			   ops->b_desc, error);
+		printf("prom_iopen: \"%s\" error=%d\n", ops->b_desc, error);
 		return (ENXIO);
 	}
 #ifdef	DEBUG_PROM
@@ -726,8 +671,7 @@ prom0_iopen(pd)
 }
 
 void
-prom0_iclose(si)
-	struct saioreq *si;
+oldmon_iclose(struct saioreq *si)
 {
 	struct om_boottable *ops;
 	struct devinfo *dip;
@@ -752,75 +696,50 @@ static struct mapinfo {
 	int maptype;
 	int pgtype;
 	int base;
-} prom_mapinfo[] = {
-	{ MAP_MAINMEM,   PG_OBMEM, 0 },
-	{ MAP_OBIO,      PG_OBIO,  0 },
-	{ MAP_MBMEM,     PG_VME16, 0xFF000000 },
-	{ MAP_MBIO,      PG_VME16, 0xFFFF0000 }, 
-	{ MAP_VME16A16D, PG_VME16, 0xFFFF0000 },
-	{ MAP_VME16A32D, PG_VME32, 0xFFFF0000 },
-	{ MAP_VME24A16D, PG_VME16, 0xFF000000 },
-	{ MAP_VME24A32D, PG_VME32, 0xFF000000 },
-	{ MAP_VME32A16D, PG_VME16, 0 },
-	{ MAP_VME32A32D, PG_VME32, 0 },
+} oldmon_mapinfo[] = {
+#define PG_COMMON	(PG_V|PG_W|PG_S|PG_NC)
+	{ MAP_MAINMEM,   PG_OBMEM | PG_COMMON, 0 },
+	{ MAP_OBIO,      PG_OBIO  | PG_COMMON, 0 },
+	{ MAP_MBMEM,     PG_VME16 | PG_COMMON, 0xFF000000 },
+	{ MAP_MBIO,      PG_VME16 | PG_COMMON, 0xFFFF0000 }, 
+	{ MAP_VME16A16D, PG_VME16 | PG_COMMON, 0xFFFF0000 },
+	{ MAP_VME16A32D, PG_VME32 | PG_COMMON, 0xFFFF0000 },
+	{ MAP_VME24A16D, PG_VME16 | PG_COMMON, 0xFF000000 },
+	{ MAP_VME24A32D, PG_VME32 | PG_COMMON, 0xFF000000 },
+	{ MAP_VME32A16D, PG_VME16 | PG_COMMON, 0 },
+	{ MAP_VME32A32D, PG_VME32 | PG_COMMON, 0 },
 };
-static prom_mapinfo_cnt = sizeof(prom_mapinfo) / sizeof(prom_mapinfo[0]);
+static int oldmon_mapinfo_cnt =
+	sizeof(oldmon_mapinfo) / sizeof(oldmon_mapinfo[0]);
 
 /* The virtual address we will use for PROM device mappings. */
 static u_long prom_devmap = MONSHORTSEG;
 
 static char *
-prom_mapin(physaddr, length, maptype)
-	u_long physaddr;
-	int length, maptype;
+oldmon_mapin(u_long physaddr, int length, int maptype)
 {
 	int i, pa, pte, va;
 
 	if (length > (4*NBPG))
-		panic("prom_mapin: length=%d", length);
+		panic("oldmon_mapin: length=%d", length);
 
-	for (i = 0; i < prom_mapinfo_cnt; i++)
-		if (prom_mapinfo[i].maptype == maptype)
+	for (i = 0; i < oldmon_mapinfo_cnt; i++)
+		if (oldmon_mapinfo[i].maptype == maptype)
 			goto found;
-	panic("prom_mapin: invalid maptype %d", maptype);
-found:
+	panic("oldmon_mapin: invalid maptype %d", maptype);
 
-	pte = prom_mapinfo[i].pgtype;
-	pte |= (PG_V|PG_W|PG_S|PG_NC);
-	pa = prom_mapinfo[i].base;
+found:
+	pte = oldmon_mapinfo[i].pgtype;
+	pa = oldmon_mapinfo[i].base;
 	pa += physaddr;
-	pte |= ((pa >> PGSHIFT) & PG_PFNUM);
+	pte |= ((pa >> SUN4_PGSHIFT) & PG_PFNUM);
 
 	va = prom_devmap;
 	do {
-		setpte(va, pte);
+		setpte4(va, pte);
 		va += NBPG;
 		pte += 1;
 		length -= NBPG;
 	} while (length > 0);
-	return ((char *)(prom_devmap | (pa & PGOFSET)));
-}
-
-void
-prom0_fake()
-{
-static	struct promvec promvecstore;
-
-	promvec = &promvecstore;
-
-	promvec->pv_stdin = romp->inSource;
-	promvec->pv_stdout = romp->outSink;
-	promvec->pv_putchar = romp->putChar;
-	promvec->pv_putstr = romp->fbWriteStr;
-	promvec->pv_nbgetchar = romp->mayGet;
-	promvec->pv_getchar = romp->getChar;
-	promvec->pv_romvec_vers = 0;            /* eek! */
-	promvec->pv_reboot = romp->reBoot;
-	promvec->pv_abort = romp->abortEntry;
-	promvec->pv_setctxt = romp->setcxsegmap;
-	promvec->pv_v0bootargs = (struct v0bootargs **)(romp->bootParam);
-	promvec->pv_halt = romp->exitToMon;
-	promvec->pv_ticks = romp->nmiClock;
-	saveecho = *romp->echo;
-	*romp->echo = 0;
+	return ((char*)(prom_devmap | (pa & PGOFSET)));
 }

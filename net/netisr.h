@@ -1,5 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.33 2008/05/09 12:54:52 dlg Exp $	*/
-/*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
+/* $NetBSD: netisr.h,v 1.39 2008/11/12 12:36:28 ad Exp $ */
 
 /*
  * Copyright (c) 1980, 1986, 1989, 1993
@@ -33,7 +32,8 @@
  */
 
 #ifndef _NET_NETISR_H_
-#define _NET_NETISR_H_
+#define _NET_NETISR_H_		/* checked by netisr_dispatch.h */
+
 /*
  * The networking code runs off software interrupts.
  *
@@ -46,50 +46,77 @@
  * is defined in the machine-specific include files.
  */
 
+#if defined(_KERNEL)
+
+#if defined(_KERNEL_OPT)
+#include "opt_inet.h"
+#include "opt_atalk.h"
+#include "opt_iso.h"
+#include "opt_natm.h"
+#include "arp.h"
+#endif /* defined(_KERNEL_OPT) */
+
+#if !defined(_LOCORE)
+
+/* XXX struct sockaddr defn for for if.h, if_arp.h */
+#include <sys/socket.h>
+
+/*
+ * XXX IFNAMSIZE for if_ppp.h, natm.h; struct ifnet decl for in6.h, in.h;
+ * XXX struct mbuf decl for in6.h, in.h, route.h (via in_var.h).
+ */
+#include <net/if.h>
+
+#ifdef INET
+#include <netinet/in.h>
+#include <netinet/ip_var.h>
+#if NARP > 0
+#include <netinet/if_inarp.h>
+#endif
+#endif
+#ifdef INET6
+# ifndef INET
+#  include <netinet/in.h>
+# endif
+#include <netinet/ip6.h>
+#include <netinet6/ip6_var.h>
+#endif
+#ifdef ISO
+#include <netiso/iso.h>
+#include <netiso/clnp.h>
+#endif
+#ifdef NATM
+#include <netnatm/natm.h>
+#endif
+#ifdef NETATALK
+#include <netatalk/at_extern.h>
+#endif
+
+#endif /* !defined(_LOCORE) */
+#endif /* defined(_KERNEL) */
+
+
 /*
  * Each ``pup-level-1'' input queue has a bit in a ``netisr'' status
  * word which is used to de-multiplex a single software
  * interrupt used for scheduling the network code to calls
  * on the lowest level routine of each protocol.
  */
-#define	NETISR_RND_DONE	1
 #define	NETISR_IP	2		/* same as AF_INET */
-#define	NETISR_TX	3		/* for if_snd processing */
-#define	NETISR_MPLS	4		/* AF_MPLS would overflow */
+#define	NETISR_NS	6		/* same as AF_NS */
+#define	NETISR_ISO	7		/* same as AF_ISO */
+#define	NETISR_CCITT	10		/* same as AF_CCITT */
 #define	NETISR_ATALK	16		/* same as AF_APPLETALK */
-#define	NETISR_ARP	18		/* same as AF_LINK */
+#define	NETISR_IPX	23		/* same as AF_IPX */
 #define	NETISR_IPV6	24		/* same as AF_INET6 */
 #define	NETISR_ISDN	26		/* same as AF_E164 */
-#define	NETISR_NATM	27		/* same as AF_ATM */
-#define	NETISR_PPP	28		/* for PPP processing */
-#define	NETISR_BRIDGE	29		/* for bridge processing */
-#define	NETISR_PPPOE	30		/* for pppoe processing */
-#define	NETISR_BT	31		/* same as AF_BLUETOOTH */
+#define	NETISR_NATM	27		/* same as AF_NATM */
+#define	NETISR_ARP	28		/* same as AF_ARP */
+#define	NETISR_MAX	AF_MAX
 
-#ifndef _LOCORE
-#ifdef _KERNEL
-extern int	netisr;			/* scheduling bits for network */
-
-void	nettxintr(void);
-void	arpintr(void);
-void	ipintr(void);
-void	ip6intr(void);
-void	atintr(void);
-void	clnlintr(void);
-void	natmintr(void);
-void	pppintr(void);
-void	bridgeintr(void);
-void	pppoeintr(void);
-void	btintr(void);
-void	mplsintr(void);
-
-#include <machine/atomic.h>
-#define	schednetisr(anisr)						\
-do {									\
-	atomic_setbits_int(&netisr, (1 << (anisr)));			\
-	setsoftnet();							\
-} while (0)
-#endif
+#if !defined(_LOCORE) && defined(_KERNEL)
+/* XXX Legacy netisr support. */
+void	schednetisr(int);
 #endif
 
-#endif /* _NET_NETISR_H_ */
+#endif /* !_NET_NETISR_H_ */

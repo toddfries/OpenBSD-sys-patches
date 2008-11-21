@@ -1,5 +1,4 @@
-/*	$OpenBSD: sparc64.h,v 1.9 2008/03/19 20:21:01 kettenis Exp $	*/
-/*	$NetBSD: sparc64.h,v 1.3 2000/10/20 05:47:03 mrg Exp $	*/
+/*	$NetBSD: sparc64.h,v 1.9 2006/02/11 17:57:31 cdi Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -35,28 +34,23 @@
 #define	_MACHINE_SPARC64_H_
 
 struct mem_region {
-	u_int64_t start;
-	u_int64_t size;
+	uint64_t start;
+	uint64_t size;
 };
 
-int prom_set_trap_table(vaddr_t tba, paddr_t mmfsa);
-paddr_t prom_vtop(vaddr_t vaddr);
-vaddr_t prom_claim_virt(vaddr_t vaddr, int len);
-vaddr_t prom_alloc_virt(int len, int align);
-int prom_free_virt(vaddr_t vaddr, int len);
-int prom_unmap_virt(vaddr_t vaddr, int len);
-int prom_map_phys(paddr_t paddr, off_t size, vaddr_t vaddr, int mode);
-paddr_t prom_alloc_phys(int len, int align);
-paddr_t prom_claim_phys(paddr_t phys, int len);
-int prom_free_phys(paddr_t paddr, int len);
-paddr_t prom_get_msgbuf(int len, int align);
-int prom_itlb_load(int index, u_int64_t data, vaddr_t vaddr);
-int prom_dtlb_load(int index, u_int64_t data, vaddr_t vaddr);
-void prom_start_cpu(int cpu, void *func, long arg);
-void prom_start_cpu_by_cpuid(int cpu, void *func, long arg);
+int prom_set_trap_table (vaddr_t);
+uint64_t prom_vtop (vaddr_t);
+vaddr_t prom_claim_virt (vaddr_t, int);
+vaddr_t prom_alloc_virt (int, int);
+int prom_free_virt (vaddr_t, int);
+int prom_unmap_virt (vaddr_t, int);
+int prom_map_phys (uint64_t, off_t, vaddr_t, int);
+uint64_t prom_alloc_phys (int , int);
+uint64_t prom_claim_phys (paddr_t, int);
+int prom_free_phys (paddr_t, int);
+uint64_t prom_get_msgbuf (int, int);
 
-/*
- * Debug
- */
-void prom_printf(const char *, ...);
+void prom_stopself(void);
+void prom_startcpu(u_int, void *, u_long);
+
 #endif	/* _MACHINE_SPARC64_H_ */

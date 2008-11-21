@@ -1,9 +1,10 @@
-/*	$OpenBSD: cpu.h,v 1.37 2008/05/04 20:54:22 drahn Exp $	*/
-/*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
+/*	$NetBSD: cpu.h,v 1.65 2008/04/30 23:21:29 macallan Exp $	*/
 
 /*
- * Copyright (C) 1995, 1996 Wolfgang Solfrank.
- * Copyright (C) 1995, 1996 TooLs GmbH.
+ * Copyright (C) 1999 Wolfgang Solfrank.
+ * Copyright (C) 1999 TooLs GmbH.
+ * Copyright (C) 1995-1997 Wolfgang Solfrank.
+ * Copyright (C) 1995-1997 TooLs GmbH.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,47 +35,135 @@
 #ifndef	_POWERPC_CPU_H_
 #define	_POWERPC_CPU_H_
 
-#include <machine/frame.h>
+struct cache_info {
+	int dcache_size;
+	int dcache_line_size;
+	int icache_size;
+	int icache_line_size;
+};
 
+#ifdef _KERNEL
+#if defined(_KERNEL_OPT)
+#include "opt_lockdebug.h"
+#include "opt_multiprocessor.h"
+#include "opt_ppcarch.h"
+#endif
+
+#include <machine/frame.h>
+#include <machine/psl.h>
+#include <machine/intr.h>
 #include <sys/device.h>
-#include <sys/lock.h>
-#include <sys/sched.h>
+
+#include <sys/cpu_data.h>
 
 struct cpu_info {
-	struct device *ci_dev;		/* our device */
-	struct schedstate_percpu ci_schedstate; /* scheduler state */
-
-	struct proc *ci_curproc;
+	struct cpu_data ci_data;	/* MI per-cpu data */
+	struct device *ci_dev;		/* device of corresponding cpu */
+	struct lwp *ci_curlwp;		/* current owner of the processor */
 
 	struct pcb *ci_curpcb;
 	struct pmap *ci_curpm;
-	struct proc *ci_fpuproc;
-	struct proc *ci_vecproc;
+	struct lwp *ci_fpulwp;
+	struct lwp *ci_veclwp;
 	int ci_cpuid;
 
-	volatile int ci_want_resched;
+	volatile int ci_astpending;
+	int ci_want_resched;
+	volatile u_long ci_lasttb;
+	volatile int ci_tickspending;
 	volatile int ci_cpl;
 	volatile int ci_iactive;
-#define		CI_IACTIVE_PROCESSING_SOFT	1
-#define		CI_IACTIVE_PROCESSING_HARD	2
+	volatile int ci_idepth;
 	volatile int ci_ipending;
-
 	int ci_intrdepth;
+	int ci_mtx_oldspl;
+	int ci_mtx_count;
 	char *ci_intstk;
-#define CPUSAVE_LEN	8
+#define	CPUSAVE_LEN	8
 	register_t ci_tempsave[CPUSAVE_LEN];
 	register_t ci_ddbsave[CPUSAVE_LEN];
-#define DISISAVE_LEN	4
+	register_t ci_ipkdbsave[CPUSAVE_LEN];
+#define	CPUSAVE_R28	0		/* where r28 gets saved */
+#define	CPUSAVE_R29	1		/* where r29 gets saved */
+#define	CPUSAVE_R30	2		/* where r30 gets saved */
+#define	CPUSAVE_R31	3		/* where r31 gets saved */
+#define	CPUSAVE_DAR	4		/* where SPR_DAR gets saved */
+#define	CPUSAVE_DSISR	5		/* where SPR_DSISR gets saved */
+#define	CPUSAVE_SRR0	6		/* where SRR0 gets saved */
+#define	CPUSAVE_SRR1	7		/* where SRR1 gets saved */
+#define	DISISAVE_LEN	4
 	register_t ci_disisave[DISISAVE_LEN];
-
-	volatile u_int64_t ci_nexttimerevent;
-	volatile u_int64_t ci_prevtb;
-	volatile u_int64_t ci_lasttb;
-	volatile u_int64_t ci_nextstatevent;
-	int ci_statspending;
-
-	u_long ci_randseed;
+	struct cache_info ci_ci;		
+	void *ci_sysmon_cookie;
+	void (*ci_idlespin)(void);
+	uint32_t ci_khz;
+	struct evcnt ci_ev_clock;	/* clock intrs */
+	struct evcnt ci_ev_statclock; 	/* stat clock */
+	struct evcnt ci_ev_softclock;	/* softclock intrs */
+	struct evcnt ci_ev_softnet;	/* softnet intrs */
+	struct evcnt ci_ev_softserial;	/* softserial intrs */
+	struct evcnt ci_ev_traps;	/* calls to trap() */
+	struct evcnt ci_ev_kdsi;	/* kernel DSI traps */
+	struct evcnt ci_ev_udsi;	/* user DSI traps */
+	struct evcnt ci_ev_udsi_fatal;	/* user DSI trap failures */
+	struct evcnt ci_ev_kisi;	/* kernel ISI traps */
+	struct evcnt ci_ev_isi;		/* user ISI traps */
+	struct evcnt ci_ev_isi_fatal;	/* user ISI trap failures */
+	struct evcnt ci_ev_pgm;		/* user PGM traps */
+	struct evcnt ci_ev_fpu;		/* FPU traps */
+	struct evcnt ci_ev_fpusw;	/* FPU context switch */
+	struct evcnt ci_ev_ali;		/* Alignment traps */
+	struct evcnt ci_ev_ali_fatal;	/* Alignment fatal trap */
+	struct evcnt ci_ev_scalls;	/* system call traps */
+	struct evcnt ci_ev_vec;		/* Altivec traps */
+	struct evcnt ci_ev_vecsw;	/* Altivec context switches */
+	struct evcnt ci_ev_umchk;	/* user MCHK events */
+	struct evcnt ci_ev_ipi;		/* IPIs received */
 };
+
+#ifdef MULTIPROCESSOR
+
+struct cpu_hatch_data {
+	struct device *self;
+	struct cpu_info *ci;
+	int running;
+	int pir;
+	int asr;
+	int hid0;
+	int sdr1;
+	int sr[16];
+	int batu[4], batl[4];
+	int tbu, tbl;
+};
+
+static __inline int
+cpu_number(void)
+{
+	int pir;
+
+	__asm ("mfspr %0,1023" : "=r"(pir));
+	return pir;
+}
+
+void	cpu_boot_secondary_processors(void);
+
+
+#define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
+#define CPU_INFO_ITERATOR		int
+#define CPU_INFO_FOREACH(cii, ci)					\
+	cii = 0, ci = &cpu_info[0]; cii < ncpu; cii++, ci++
+
+#else
+
+#define cpu_number()		0
+
+#define CPU_INFO_ITERATOR		int
+#define CPU_INFO_FOREACH(cii, ci)					\
+	cii = 0, ci = curcpu(); ci != NULL; ci = NULL
+
+#endif /* MULTIPROCESSOR */
+
+extern struct cpu_info cpu_info[];
 
 static __inline struct cpu_info *
 curcpu(void)
@@ -85,281 +174,224 @@ curcpu(void)
 	return ci;
 }
 
-#define	curpcb			(curcpu()->ci_curpcb)
-#define	curpm			(curcpu()->ci_curpm)
+#define curlwp			(curcpu()->ci_curlwp)
+#define curpcb			(curcpu()->ci_curpcb)
+#define curpm			(curcpu()->ci_curpm)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
-
-#ifdef MULTIPROCESSOR
-
-#define PPC_MAXPROCS		4
-
-static __inline int
-cpu_number(void)
+static __inline register_t
+mfmsr(void)
 {
-	int pir;
+	register_t msr;
 
-	pir = curcpu()->ci_cpuid;
-	return pir;
+	__asm volatile ("mfmsr %0" : "=r"(msr));
+	return msr;
 }
 
-void	cpu_boot_secondary_processors(void);
+static __inline void
+mtmsr(register_t msr)
+{
 
-#define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
-#define CPU_INFO_ITERATOR		int
-#define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = &cpu_info[0]; cii < PPC_MAXPROCS; cii++, ci++)
+	__asm volatile ("mtmsr %0" : : "r"(msr));
+}
 
+static __inline uint32_t
+mftbl(void)
+{
+	uint32_t tbl;
+
+	__asm volatile (
+#ifdef PPC_IBM403
+"	mftblo %0	\n"
 #else
+"	mftbl %0	\n"
+#endif
+	: "=r" (tbl));
 
-#define PPC_MAXPROCS		1
+	return tbl;
+}
 
-#define cpu_number()		0
+static __inline uint64_t
+mftb(void)
+{
+	uint64_t tb;
 
-#define CPU_IS_PRIMARY(ci)	1
-#define CPU_INFO_ITERATOR		int
-#define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+#ifdef _LP64
+	__asm volatile ("mftb %0" : "=r"(tb));
+#else
+	int tmp;
 
+	__asm volatile (
+#ifdef PPC_IBM403
+"1:	mftbhi %0	\n"
+"	mftblo %0+1	\n"
+"	mftbhi %1	\n"
+#else
+"1:	mftbu %0	\n"
+"	mftb %0+1	\n"
+"	mftbu %1	\n"
+#endif
+"	cmplw %0,%1	\n"
+"	bne- 1b		\n"
+	: "=r" (tb), "=r"(tmp) :: "cr0");
 #endif
 
-extern struct cpu_info cpu_info[PPC_MAXPROCS];
-
-#define	CLKF_USERMODE(frame)	(((frame)->srr1 & PSL_PR) != 0)
-#define	CLKF_PC(frame)		((frame)->srr0)
-#define	CLKF_INTR(frame)	((frame)->depth != 0)
-
-/*
- * This is used during profiling to integrate system time.
- */
-#define	PROC_PC(p)		(trapframe(p)->srr0)
-
-#define	cpu_wait(p)		do { /* nothing */ } while (0)
-
-void	delay(unsigned);
-#define	DELAY(n)		delay(n)
-
-#define	aston(p)		((p)->p_md.md_astpending = 1)
-
-/*
- * Preempt the current process if in interrupt from user mode,
- * or after the current trap/syscall if in system mode.
- */
-#define	need_resched(ci) \
-do {									\
-	ci->ci_want_resched = 1;					\
-	if (ci->ci_curproc != NULL)					\
-		aston(ci->ci_curproc);					\
-} while (0)
-
-#define	need_proftick(p)	aston(p)
-
-void	signotify(struct proc *);
-
-extern char *bootpath;
-
-#ifndef	CACHELINESIZE
-#define	CACHELINESIZE	32			/* For now		XXX */
-#endif
-
-static __inline void
-syncicache(void *from, int len)
-{
-	int l;
-	char *p = from;
-
-	len = len + (((u_int32_t) from) & (CACHELINESIZE - 1));
-	l = len;
-
-	do {
-		__asm __volatile ("dcbst 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
-	__asm __volatile ("sync");
-	p = from;
-	l = len;
-	do {
-		__asm __volatile ("icbi 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
-	__asm __volatile ("isync");
-}
-
-static __inline void
-invdcache(void *from, int len)
-{
-	int l;
-	char *p = from;
-
-	len = len + (((u_int32_t) from) & (CACHELINESIZE - 1));
-	l = len;
-
-	do {
-		__asm __volatile ("dcbi 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
-	__asm __volatile ("sync");
-}
-
-#define FUNC_SPR(n, name) \
-static __inline u_int32_t ppc_mf ## name (void)			\
-{								\
-	u_int32_t ret;						\
-	__asm __volatile ("mfspr %0," # n : "=r" (ret));	\
-	return ret;						\
-}								\
-static __inline void ppc_mt ## name (u_int32_t val)		\
-{								\
-	__asm __volatile ("mtspr "# n ",%0" :: "r" (val));	\
-}								\
-
-FUNC_SPR(0, mq)
-FUNC_SPR(1, xer)
-FUNC_SPR(4, rtcu)
-FUNC_SPR(5, rtcl)
-FUNC_SPR(8, lr)
-FUNC_SPR(9, ctr)
-FUNC_SPR(18, dsisr)
-FUNC_SPR(19, dar)
-FUNC_SPR(22, dec)
-FUNC_SPR(25, sdr1)
-FUNC_SPR(26, srr0)
-FUNC_SPR(27, srr1)
-FUNC_SPR(256, vrsave)
-FUNC_SPR(272, sprg0)
-FUNC_SPR(273, sprg1)
-FUNC_SPR(274, sprg2)
-FUNC_SPR(275, sprg3)
-FUNC_SPR(280, asr)
-FUNC_SPR(282, ear)
-FUNC_SPR(287, pvr)
-FUNC_SPR(528, ibat0u)
-FUNC_SPR(529, ibat0l)
-FUNC_SPR(530, ibat1u)
-FUNC_SPR(531, ibat1l)
-FUNC_SPR(532, ibat2u)
-FUNC_SPR(533, ibat2l)
-FUNC_SPR(534, ibat3u)
-FUNC_SPR(535, ibat3l)
-FUNC_SPR(536, dbat0u)
-FUNC_SPR(537, dbat0l)
-FUNC_SPR(538, dbat1u)
-FUNC_SPR(539, dbat1l)
-FUNC_SPR(540, dbat2u)
-FUNC_SPR(541, dbat2l)
-FUNC_SPR(542, dbat3u)
-FUNC_SPR(543, dbat3l)
-FUNC_SPR(1008, hid0)
-FUNC_SPR(1009, hid1)
-FUNC_SPR(1010, iabr)
-FUNC_SPR(1017, l2cr)
-FUNC_SPR(1018, l3cr)
-FUNC_SPR(1013, dabr)
-FUNC_SPR(1023, pir)
-
-static __inline u_int32_t
-ppc_mftbl (void)
-{
-	int ret;
-	__asm __volatile ("mftb %0" : "=r" (ret));
-	return ret;
-}
-
-static __inline u_int64_t
-ppc_mftb(void)
-{
-	u_long scratch;
-	u_int64_t tb;
-
-	__asm __volatile ("1: mftbu %0; mftb %0+1; mftbu %1;"
-	    " cmpw 0,%0,%1; bne 1b" : "=r"(tb), "=r"(scratch));
 	return tb;
 }
 
-static __inline u_int32_t
-ppc_mfmsr (void)
+static __inline uint32_t
+mfrtcl(void)
 {
-	int ret;
-        __asm __volatile ("mfmsr %0" : "=r" (ret));
-	return ret;
+	uint32_t rtcl;
+
+	__asm volatile ("mfrtcl %0" : "=r"(rtcl));
+	return rtcl;
 }
 
 static __inline void
-ppc_mtmsr (u_int32_t val)
+mfrtc(uint32_t *rtcp)
 {
-        __asm __volatile ("mtmsr %0" :: "r" (val));
+	uint32_t tmp;
+
+	__asm volatile (
+"1:	mfrtcu	%0	\n"
+"	mfrtcl	%1	\n"
+"	mfrtcu	%2	\n"
+"	cmplw	%0,%2	\n"
+"	bne-	1b"
+	    : "=r"(*rtcp), "=r"(*(rtcp + 1)), "=r"(tmp) :: "cr0");
 }
 
-static __inline void
-ppc_mtsrin(u_int32_t val, u_int32_t sn_shifted)
+static __inline uint32_t
+mfpvr(void)
 {
-	__asm __volatile ("mtsrin %0,%1" :: "r"(val), "r"(sn_shifted));
-}
+	uint32_t pvr;
 
-u_int64_t ppc64_mfscomc(void);
-void ppc_mtscomc(u_int32_t);
-void ppc64_mtscomc(u_int64_t);
-u_int64_t ppc64_mfscomd(void);
-void ppc_mtscomd(u_int32_t);
-
-#include <machine/psl.h>
-
-/*
- * General functions to enable and disable interrupts
- * without having inlined assembly code in many functions.
- */
-static __inline void
-ppc_intr_enable(int enable)
-{
-	u_int32_t msr;
-	if (enable != 0) {
-		msr = ppc_mfmsr();
-		msr |= PSL_EE;
-		ppc_mtmsr(msr);
-	}
+	__asm volatile ("mfpvr %0" : "=r"(pvr));
+	return (pvr);
 }
 
 static __inline int
-ppc_intr_disable(void)
+cntlzw(uint32_t val)
 {
-	u_int32_t emsr, dmsr;
-	emsr = ppc_mfmsr();
-	dmsr = emsr & ~PSL_EE;
-	ppc_mtmsr(dmsr);
-	return (emsr & PSL_EE);
+	int 			cnt;
+
+	__asm volatile ("cntlzw %0,%1" : "=r"(cnt) : "r"(val));
+	return (cnt);
 }
 
-int ppc_cpuspeed(int *);
-void ppc_check_procid(void);
-extern int ppc_proc_is_64b;
-
+#if defined(PPC_IBM4XX) || defined(PPC_IBM403)
 /*
- * PowerPC CPU types
+ * DCR (Device Control Register) access. These have to be
+ * macros because register address is encoded as immediate
+ * operand.
  */
-#define	PPC_CPU_MPC601		1
-#define	PPC_CPU_MPC603		3
-#define	PPC_CPU_MPC604		4
-#define	PPC_CPU_MPC603e		6
-#define	PPC_CPU_MPC603ev	7
-#define	PPC_CPU_MPC750		8
-#define	PPC_CPU_MPC604ev	9
-#define	PPC_CPU_MPC7400		12
-#define	PPC_CPU_IBM970FX	0x003c
-#define	PPC_CPU_IBM970MP	0x0044
-#define	PPC_CPU_IBM750FX	0x7000
-#define	PPC_CPU_MPC7410		0x800c
-#define	PPC_CPU_MPC7447A	0x8003
-#define	PPC_CPU_MPC7448		0x8004
-#define	PPC_CPU_MPC7450		0x8000
-#define	PPC_CPU_MPC7455		0x8001
-#define	PPC_CPU_MPC7457		0x8002
+#define mtdcr(reg, val) 					\
+	__asm volatile("mtdcr %0,%1" : : "K"(reg), "r"(val))
 
-/*
- * This needs to be included late since it relies on definitions higher
- * up in this file.
- */
-#if defined(MULTIPROCESSOR) && defined(_KERNEL)
-#include <sys/mplock.h>
+#define mfdcr(reg)						\
+({								\
+	uint32_t __val;						\
+								\
+	__asm volatile("mfdcr %0,%1" : "=r"(__val) : "K"(reg)); \
+	__val;							\
+})
+#endif /* PPC_IBM4XX || PPC_IBM403 */
+
+#define	CLKF_USERMODE(frame)	(((frame)->srr1 & PSL_PR) != 0)
+#define	CLKF_PC(frame)		((frame)->srr0)
+#define	CLKF_INTR(frame)	((frame)->depth > 0)
+
+#define	LWP_PC(l)		(trapframe(l)->srr0)
+
+#define	cpu_swapin(p)
+#define	cpu_swapout(p)
+#define	cpu_proc_fork(p1, p2)
+#define	cpu_idle()		(curcpu()->ci_idlespin())
+#define cpu_lwp_free2(l)
+
+extern int powersave;
+extern int cpu_timebase;
+extern int cpu_printfataltraps;
+extern char cpu_model[];
+
+struct cpu_info *cpu_attach_common(struct device *, int);
+void cpu_setup(struct device *, struct cpu_info *);
+void cpu_identify(char *, size_t);
+void delay (unsigned int);
+void cpu_probe_cache(void);
+void dcache_flush_page(vaddr_t);
+void icache_flush_page(vaddr_t);
+void dcache_flush(vaddr_t, vsize_t);
+void icache_flush(vaddr_t, vsize_t);
+void *mapiodev(paddr_t, psize_t);
+void unmapiodev(vaddr_t, vsize_t);
+
+#ifdef MULTIPROCESSOR
+int md_setup_trampoline(volatile struct cpu_hatch_data *, struct cpu_info *);
+void md_presync_timebase(volatile struct cpu_hatch_data *);
+void md_start_timebase(volatile struct cpu_hatch_data *);
+void md_sync_timebase(volatile struct cpu_hatch_data *);
+void md_setup_interrupts(void);
+int cpu_spinup(struct device *, struct cpu_info *);
+register_t cpu_hatch(void);
+void cpu_spinup_trampoline(void);
 #endif
+
+#define	DELAY(n)		delay(n)
+
+#define	cpu_need_resched(ci, v)	(ci->ci_want_resched = ci->ci_astpending = 1)
+#define	cpu_did_resched(l)	((void)(curcpu()->ci_want_resched = 0))
+#define	cpu_need_proftick(l)	((l)->l_pflag |= LP_OWEUPC, curcpu()->ci_astpending = 1)
+#define	cpu_signotify(l)	(curcpu()->ci_astpending = 1)	/* XXXSMP */
+
+#if !defined(PPC_IBM4XX)
+void oea_init(void (*)(void));
+void oea_startup(const char *);
+void oea_dumpsys(void);
+void oea_install_extint(void (*)(void));
+paddr_t kvtop(void *); 
+void softnet(int);
+
+extern paddr_t msgbuf_paddr;
+extern int cpu_altivec;
+#endif
+
+#endif /* _KERNEL */
+
+/* XXX The below breaks unified pmap on ppc32 */
+
+#if defined(_KERNEL) || defined(_STANDALONE)
+#if !defined(CACHELINESIZE)
+#ifdef PPC_IBM403
+#define	CACHELINESIZE		16
+#define MAXCACHELINESIZE	16
+#else
+#if defined (PPC_OEA64_BRIDGE)
+#define	CACHELINESIZE		128
+#define MAXCACHELINESIZE	128
+#else
+#define	CACHELINESIZE		32
+#define MAXCACHELINESIZE	32
+#endif /* PPC_OEA64_BRIDGE */
+#endif
+#endif
+#endif
+
+void __syncicache(void *, size_t);
+
+/*
+ * CTL_MACHDEP definitions.
+ */
+#define	CPU_CACHELINE		1
+#define	CPU_TIMEBASE		2
+#define	CPU_CPUTEMP		3
+#define	CPU_PRINTFATALTRAPS	4
+#define	CPU_CACHEINFO		5
+#define	CPU_ALTIVEC		6
+#define	CPU_MODEL		7
+#define	CPU_POWERSAVE		8	/* int: use CPU powersave mode */
+#define	CPU_BOOTED_DEVICE	9	/* string: device we booted from */
+#define	CPU_BOOTED_KERNEL	10	/* string: kernel we booted */
+#define	CPU_MAXID		11	/* number of valid machdep ids */
 
 #endif	/* _POWERPC_CPU_H_ */

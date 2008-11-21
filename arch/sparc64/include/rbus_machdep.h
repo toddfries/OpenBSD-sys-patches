@@ -1,38 +1,42 @@
-/*	$OpenBSD: rbus_machdep.h,v 1.2 2007/11/25 00:38:49 kettenis Exp $	*/
+/*	$NetBSD: rbus_machdep.h,v 1.3 2008/06/26 15:08:48 nakayama Exp $	*/
 
 /*
- * Copyright (c) 2007 Mark Kettenis
+ * Copyright (c) 2003 Takeshi Nakayama.
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _SPARC64_RBUS_MACHDEP_H_
 #define _SPARC64_RBUS_MACHDEP_H_
 
 struct pci_attach_args;
+rbus_tag_t rbus_pccbb_parent_io(struct pci_attach_args *);
+rbus_tag_t rbus_pccbb_parent_mem(struct pci_attach_args *);
+void pccbb_attach_hook(device_t, device_t, struct pci_attach_args *);
+#define __HAVE_PCCBB_ATTACH_HOOK
 
-rbus_tag_t rbus_pccbb_parent_io(struct device *, struct pci_attach_args *);
-rbus_tag_t rbus_pccbb_parent_mem(struct device *, struct pci_attach_args *);
-
-#define md_space_map(t, addr, size, flags, hp) \
-	bus_space_map((t), (addr), (size), (flags), (hp))
-#define md_space_unmap(t, h, size, addrp) \
-	do { \
-		*addrp = (t)->sparc_bus_addr((t), (t), (h)); \
-		bus_space_unmap((t), (h), (size)); \
-	} while (0)
-
-void pccbb_attach_hook(struct device *, struct device *,
-	struct pci_attach_args *);
+int md_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+		 bus_space_handle_t *);
+void md_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+		    bus_addr_t *);
 
 #endif /* _SPARC64_RBUS_MACHDEP_H_ */

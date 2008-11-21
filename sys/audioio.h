@@ -1,5 +1,4 @@
-/*	$OpenBSD: audioio.h,v 1.19 2008/03/22 11:05:31 ratchov Exp $	*/
-/*	$NetBSD: audioio.h,v 1.24 1998/08/13 06:28:41 mrg Exp $	*/
+/*	$NetBSD: audioio.h,v 1.32 2007/06/11 13:05:47 joerg Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -38,6 +37,13 @@
 #ifndef _SYS_AUDIOIO_H_
 #define _SYS_AUDIOIO_H_
 
+#include <sys/types.h>
+#include <sys/ioccom.h>
+
+#ifndef _KERNEL
+#include <string.h>	/* Required for memset(3) prototype (AUDIO_INITINFO) */
+#endif /* _KERNEL */
+
 /*
  * Audio device
  */
@@ -51,12 +57,12 @@ struct audio_prinfo {
 	u_int	seek;		/* BSD extension */
 	u_int	avail_ports;	/* available I/O ports */
 	u_int	buffer_size;	/* total size audio buffer */
-	u_int	block_size;	/* size a block */
+	u_int	_ispare[1];
 	/* Current state of device: */
 	u_int	samples;	/* number of samples */
 	u_int	eof;		/* End Of File (zero-size writes) counter */
 	u_char	pause;		/* non-zero if paused, zero to resume */
-	u_char	error;		/* non-zero if underflow/overflow occurred */
+	u_char	error;		/* non-zero if underflow/overflow ocurred */
 	u_char	waiting;	/* non-zero if another process hangs in open */
 	u_char	balance;	/* stereo channel balance */
 	u_char	cspare[2];
@@ -74,8 +80,7 @@ struct audio_info {
 	u_int	blocksize;	/* H/W read/write block size */
 	u_int	hiwat;		/* output high water mark */
 	u_int	lowat;		/* output low water mark */
-	u_char	output_muted;	/* toggle play mute */
-	u_char	cspare[3];
+	u_int	_ispare1;
 	u_int	mode;		/* current device mode */
 #define AUMODE_PLAY	0x01
 #define AUMODE_RECORD	0x02
@@ -86,23 +91,15 @@ typedef struct audio_info audio_info_t;
 #define AUDIO_INITINFO(p) \
 	(void)memset((void *)(p), 0xff, sizeof(struct audio_info))
 
-struct audio_bufinfo {
-	u_int	blksize;	/* block size */
-	u_int	hiwat;		/* high water mark */
-	u_int	lowat;		/* low water mark */
-	u_int	seek;		/* current position */
-};
-typedef struct audio_bufinfo audio_bufinfo_t;
-
 /*
  * Parameter for the AUDIO_GETDEV ioctl to determine current
  * audio devices.
  */
-#define MAX_AUDIO_DEV_LEN	16
+#define MAX_AUDIO_DEV_LEN       16
 typedef struct audio_device {
-	char name[MAX_AUDIO_DEV_LEN];
-	char version[MAX_AUDIO_DEV_LEN];
-	char config[MAX_AUDIO_DEV_LEN];
+        char name[MAX_AUDIO_DEV_LEN];
+        char version[MAX_AUDIO_DEV_LEN];
+        char config[MAX_AUDIO_DEV_LEN];
 } audio_device_t;
 
 typedef struct audio_offset {
@@ -135,9 +132,6 @@ typedef struct audio_offset {
 #define AUDIO_ENCODING_MPEG_L2_STREAM	15
 #define AUDIO_ENCODING_MPEG_L2_PACKETS	16
 #define AUDIO_ENCODING_MPEG_L2_SYSTEM	17
-#define AUDIO_ENCODING_MPEG_L3_STREAM	18
-#define AUDIO_ENCODING_MPEG_L3_PACKETS	19
-#define AUDIO_ENCODING_MPEG_L3_SYSTEM	20
 
 typedef struct audio_encoding {
 	int	index;
@@ -191,8 +185,7 @@ typedef struct audio_encoding {
 #define  AUDIO_PROP_FULLDUPLEX	0x01
 #define  AUDIO_PROP_MMAP	0x02
 #define  AUDIO_PROP_INDEPENDENT	0x04
-#define AUDIO_GETPRINFO	_IOR('A', 35, struct audio_bufinfo)
-#define AUDIO_GETRRINFO	_IOR('A', 36, struct audio_bufinfo)
+#define AUDIO_GETBUFINFO	_IOR('A', 35, struct audio_info)
 
 /*
  * Mixer device
@@ -310,15 +303,14 @@ typedef struct mixer_ctrl {
 #define AudioNagc	"agc"
 #define AudioNdelay	"delay"
 #define AudioNselect	"select" /* select destination */
-#define AudioNvideo	"video"
-#define AudioNcenter	"center"
-#define AudioNdepth	"depth"
-#define AudioNlfe	"lfe"
-#define AudioNextamp	"extamp"
+#define AudioNvideo     "video"
+#define AudioNcenter    "center"
+#define AudioNdepth     "depth"
+#define AudioNlfe       "lfe"
 
 #define AudioEmulaw		"mulaw"
 #define AudioEalaw		"alaw"
-#define AudioEadpcm 		"adpcm"
+#define AudioEadpcm		"adpcm"
 #define AudioEslinear		"slinear"
 #define AudioEslinear_le	"slinear_le"
 #define AudioEslinear_be	"slinear_be"
@@ -337,5 +329,6 @@ typedef struct mixer_ctrl {
 #define AudioCrecord	"record"
 #define AudioCmonitor	"monitor"
 #define AudioCequalization	"equalization"
+#define AudioCmodem	"modem"
 
 #endif /* !_SYS_AUDIOIO_H_ */

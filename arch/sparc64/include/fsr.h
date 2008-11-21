@@ -1,5 +1,4 @@
-/*	$OpenBSD: fsr.h,v 1.2 2003/06/02 23:27:56 millert Exp $	*/
-/*	$NetBSD: fsr.h,v 1.1.1.1 1998/06/20 04:58:51 eeh Exp $ */
+/*	$NetBSD: fsr.h,v 1.3 2005/12/11 12:19:10 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993

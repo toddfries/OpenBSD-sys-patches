@@ -1,8 +1,7 @@
-/*	$NetBSD: kb_kbc.c,v 1.6 2005/12/11 12:18:23 christos Exp $	*/
+/*	$NetBSD: kb_kbc.c,v 1.10 2008/05/14 13:29:28 tsutsui Exp $	*/
 
-/*
- * Copyright (c) 2001 Izumi Tsutsui.
- * All rights reserved.
+/*-
+ * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -23,12 +20,12 @@
  * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kb_kbc.c,v 1.6 2005/12/11 12:18:23 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kb_kbc.c,v 1.10 2008/05/14 13:29:28 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,19 +46,19 @@ __KERNEL_RCSID(0, "$NetBSD: kb_kbc.c,v 1.6 2005/12/11 12:18:23 christos Exp $");
 
 #include <news68k/news68k/isr.h>
 
-static int kb_kbc_match(struct device *, struct cfdata *, void *);
-static void kb_kbc_attach(struct device *, struct device *, void *);
+static int kb_kbc_match(device_t, cfdata_t, void *);
+static void kb_kbc_attach(device_t, device_t, void *);
 static void kb_kbc_init(struct kb_softc *);
 int	kb_kbc_intr(void *);
 int	kb_kbc_cnattach(void);
 
-CFATTACH_DECL(kb_kbc, sizeof(struct kb_softc),
+CFATTACH_DECL_NEW(kb_kbc, sizeof(struct kb_softc),
     kb_kbc_match, kb_kbc_attach, NULL, NULL);
 
 struct console_softc kb_kbc_conssc;
 
 static int
-kb_kbc_match(struct device *parent, struct cfdata *cf, void *aux)
+kb_kbc_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct kbc_attach_args *ka = aux;
 
@@ -72,14 +69,15 @@ kb_kbc_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 static void
-kb_kbc_attach(struct device *parent, struct device *self, void *aux)
+kb_kbc_attach(device_t parent, device_t self, void *aux)
 {
-	struct kb_softc *sc = (void *)self;
+	struct kb_softc *sc = device_private(self);
 	struct kbc_attach_args *ka = aux;
 	struct wskbddev_attach_args wsa;
 	int ipl;
 
-	printf("\n");
+	sc->sc_dev = self;
+	aprint_normal("\n");
 
 	sc->sc_bt = ka->ka_bt;
 	sc->sc_bh = ka->ka_bh;
@@ -89,7 +87,7 @@ kb_kbc_attach(struct device *parent, struct device *self, void *aux)
 
 	kb_kbc_init(sc);
 
-	isrlink_autovec(kb_kbc_intr, (void *)sc, ipl, ISRPRI_TTY);
+	isrlink_autovec(kb_kbc_intr, (void *)sc, ipl, IPL_TTY);
 
 	wsa.console = kb_kbc_conssc.cs_isconsole;
 	wsa.keymap = &kb_keymapdata;

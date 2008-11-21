@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0var.h,v 1.5 2005/05/27 21:10:05 uwe Exp $ */
-/* $NetBSD: pxa2x0var.h,v 1.2 2003/06/05 13:48:28 scw Exp $ */
+/* $NetBSD: pxa2x0var.h,v 1.5 2007/02/21 22:59:39 thorpej Exp $ */
 
 /*
  * Copyright (c) 2002  Genetec Corporation.  All rights reserved.
@@ -55,11 +54,6 @@ struct pxaip_attach_args {
 #define pxa_intr	pxa_sa.sa_intr
 };
 
-#define	cf_addr		cf_loc[0]
-#define	cf_size		cf_loc[1]
-#define	cf_intr		cf_loc[2]
-#define	cf_index	cf_loc[3]
-
 
 extern struct bus_space pxa2x0_bs_tag;
 extern struct arm32_bus_dma_tag pxa2x0_bus_dma_tag;
@@ -72,8 +66,8 @@ extern void pxa2x0_turbo_mode(int);
 extern int pxa2x0_i2c_master_tx( int, uint8_t *, int );
 
 /*
- * Probe the memory controller to determine which SDRAM banks
- * are populated, and what size SDRAM is present in each bank.
+ * Probe the memory controller to deterimine which SDRAM are
+ * populated, and what size of SDRAM is present in each bank.
  *
  * This routine should be called from a port's initarm()
  * function, with the first parameter set to the address
@@ -82,16 +76,17 @@ extern int pxa2x0_i2c_master_tx( int, uint8_t *, int );
 extern void pxa2x0_probe_sdram(vaddr_t, paddr_t *, psize_t *);
 
 /*
+ * MEMCTL registers quick access functions.
+ */
+extern void pxa2x0_memctl_bootstrap(vaddr_t);
+extern uint32_t pxa2x0_memctl_read(int);
+extern void pxa2x0_memctl_write(int, uint32_t);
+
+/*
  * Configure one or more clock enables in the Clock Manager's
  * CKEN register.
  */
-extern void pxa2x0_clkman_config(u_int, int);
-
-/*
- * Get/set the Real Time Clock's counter and alarm registers.
- */
-extern void pxa2x0_rtc_setalarm(u_int32_t);
-extern u_int32_t pxa2x0_rtc_getalarm(void);
-extern u_int32_t pxa2x0_rtc_getsecs(void);
+extern void pxa2x0_clkman_bootstrap(vaddr_t);
+extern void pxa2x0_clkman_config(u_int, bool);
 
 #endif /* _ARM_XSCALE_PXA2X0VAR_H_ */

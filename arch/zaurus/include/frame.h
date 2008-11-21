@@ -1,4 +1,3 @@
-/*	$OpenBSD: frame.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/* $NetBSD: frame.h,v 1.1 2001/06/08 22:23:00 chris Exp $ */
+/*	$NetBSD: frame.h,v 1.1 2006/12/16 05:45:04 ober Exp $	*/
 
-#include <arm/frame.h>
+#include <arm/arm32/frame.h>

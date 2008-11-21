@@ -1,4 +1,4 @@
-/*	$NetBSD: oea_machdep.c,v 1.29 2006/09/18 13:25:33 sanjayl Exp $	*/
+/*	$NetBSD: oea_machdep.c,v 1.46 2008/07/02 17:28:56 ad Exp $	*/
 
 /*
  * Copyright (C) 2002 Matt Thomas
@@ -33,8 +33,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: oea_machdep.c,v 1.29 2006/09/18 13:25:33 sanjayl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: oea_machdep.c,v 1.46 2008/07/02 17:28:56 ad Exp $");
 
+#include "opt_ppcarch.h"
 #include "opt_compat_netbsd.h"
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -51,7 +52,6 @@ __KERNEL_RCSID(0, "$NetBSD: oea_machdep.c,v 1.29 2006/09/18 13:25:33 sanjayl Exp
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
@@ -78,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: oea_machdep.c,v 1.29 2006/09/18 13:25:33 sanjayl Exp
 
 #include <powerpc/oea/bat.h>
 #include <powerpc/oea/sr_601.h>
+#include <powerpc/oea/cpufeat.h>
 #include <powerpc/trap.h>
 #include <powerpc/stdarg.h>
 #include <powerpc/spr.h>
@@ -88,7 +89,6 @@ __KERNEL_RCSID(0, "$NetBSD: oea_machdep.c,v 1.29 2006/09/18 13:25:33 sanjayl Exp
 char machine[] = MACHINE;		/* from <machine/param.h> */
 char machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -97,6 +97,7 @@ struct vm_map *phys_map = NULL;
  */
 extern struct user *proc0paddr;
 
+static void trap0(void *);
 
 /* XXXSL: The battable is not initialized to non-zero for PPC_OEA64 and PPC_OEA64_BRIDGE */
 struct bat battable[512];
@@ -107,12 +108,14 @@ paddr_t msgbuf_paddr;
 void
 oea_init(void (*handler)(void))
 {
-	extern int trapstart[], trapend[];
 	extern int trapcode[], trapsize[];
 	extern int sctrap[], scsize[];
 	extern int alitrap[], alisize[];
 	extern int dsitrap[], dsisize[];
+	extern int trapstart[], trapend[];
+#ifdef PPC_OEA601
 	extern int dsi601trap[], dsi601size[];
+#endif
 	extern int decrint[], decrsize[];
 	extern int tlbimiss[], tlbimsize[];
 	extern int tlbdlmiss[], tlbdlmsize[];
@@ -126,12 +129,19 @@ oea_init(void (*handler)(void))
 #ifdef ALTIVEC
 	register_t msr;
 #endif
-	uintptr_t exc;
+	uintptr_t exc, exc_base;
+#if defined(ALTIVEC) || defined(PPC_OEA)
 	register_t scratch;
+#endif
 	unsigned int cpuvers;
 	size_t size;
 	struct cpu_info * const ci = &cpu_info[0];
 
+#ifdef PPC_HIGH_VEC
+	exc_base = EXC_HIGHVEC;
+#else
+	exc_base = 0;
+#endif
 	mtspr(SPR_SPRG0, ci);
 	cpuvers = mfpvr() >> 16;
 
@@ -174,8 +184,8 @@ oea_init(void (*handler)(void))
 	/*
 	 * Set up trap vectors.  Don't assume vectors are on 0x100.
 	 */
-	for (exc = 0x0; exc <= EXC_LAST; exc += 0x100) {
-		switch (exc) {
+	for (exc = exc_base; exc <= exc_base + EXC_LAST; exc += 0x100) {
+		switch (exc - exc_base) {
 		default:
 			size = (size_t)trapsize;
 			memcpy((void *)exc, trapcode, size);
@@ -189,50 +199,61 @@ oea_init(void (*handler)(void))
 #endif
 		case EXC_SC:
 			size = (size_t)scsize;
-			memcpy((void *)EXC_SC, sctrap, size);
+			memcpy((void *)exc, sctrap, size);
 			break;
 		case EXC_ALI:
 			size = (size_t)alisize;
-			memcpy((void *)EXC_ALI, alitrap, size);
+			memcpy((void *)exc, alitrap, size);
 			break;
 		case EXC_DSI:
+#ifdef PPC_OEA601
 			if (cpuvers == MPC601) {
 				size = (size_t)dsi601size;
-				memcpy((void *)EXC_DSI, dsi601trap, size);
+				memcpy((void *)exc, dsi601trap, size);
+				break;
+			} else
+#endif /* PPC_OEA601 */
+			if (oeacpufeat & OEACPU_NOBAT) {
+				size = (size_t)alisize;
+				memcpy((void *)exc, alitrap, size);
 			} else {
 				size = (size_t)dsisize;
-				memcpy((void *)EXC_DSI, dsitrap, size);
+				memcpy((void *)exc, dsitrap, size);
 			}
 			break;
 		case EXC_DECR:
 			size = (size_t)decrsize;
-			memcpy((void *)EXC_DECR, decrint, size);
+			memcpy((void *)exc, decrint, size);
 			break;
 		case EXC_IMISS:
 			size = (size_t)tlbimsize;
-			memcpy((void *)EXC_IMISS, tlbimiss, size);
+			memcpy((void *)exc, tlbimiss, size);
 			break;
 		case EXC_DLMISS:
 			size = (size_t)tlbdlmsize;
-			memcpy((void *)EXC_DLMISS, tlbdlmiss, size);
+			memcpy((void *)exc, tlbdlmiss, size);
 			break;
 		case EXC_DSMISS:
 			size = (size_t)tlbdsmsize;
-			memcpy((void *)EXC_DSMISS, tlbdsmiss, size);
+			memcpy((void *)exc, tlbdsmiss, size);
 			break;
 		case EXC_PERF:
 			size = (size_t)trapsize;
-			memcpy((void *)EXC_PERF, trapcode, size);
-			memcpy((void *)EXC_VEC,  trapcode, size);
+			memcpy((void *)exc, trapcode, size);
+			memcpy((void *)(exc_base + EXC_VEC),  trapcode, size);
 			break;
 #if defined(DDB) || defined(IPKDB) || defined(KGDB)
 		case EXC_RUNMODETRC:
+#ifdef PPC_OEA601
 			if (cpuvers != MPC601) {
+#endif
 				size = (size_t)trapsize;
-				memcpy((void *)EXC_RUNMODETRC, trapcode, size);
+				memcpy((void *)exc, trapcode, size);
 				break;
+#ifdef PPC_OEA601
 			}
 			/* FALLTHROUGH */
+#endif
 		case EXC_PGM:
 		case EXC_TRC:
 		case EXC_BPT:
@@ -252,6 +273,14 @@ oea_init(void (*handler)(void))
 #if 0
 		exc += roundup(size, 32);
 #endif
+	}
+
+	/*
+	 * Install a branch absolute to trap0 to force a panic.
+	 */
+	if ((uintptr_t)trap0 < 0x2000000) {
+		*(uint32_t *) 0 = 0x7c6802a6;
+		*(uint32_t *) 4 = 0x48000002 | (uintptr_t) trap0;
 	}
 
 	/*
@@ -304,6 +333,9 @@ oea_init(void (*handler)(void))
 	}
 #endif
 
+	/* XXX It would seem like this code could be elided ifndef 601, but
+	 * doing so breaks my power3 machine.
+	 */
 	/*
 	 * If we aren't on a MPC601 processor, we need to zap any of the
 	 * sequences we save/restore the MQ SPR into NOPs, and skip over the
@@ -333,6 +365,7 @@ oea_init(void (*handler)(void))
 	 */
 	__syncicache((void *) trapstart,
 	    (uintptr_t) trapend - (uintptr_t) trapstart);
+#ifdef PPC_OEA601
 
 	/*
 	 * If we are on a MPC601 processor, we need to zap any tlbsync
@@ -351,19 +384,25 @@ oea_init(void (*handler)(void))
 				__syncicache(ip, sizeof(*ip));
 		}
 	}
+#endif /* PPC_OEA601 */
 
         /*
 	 * Configure a PSL user mask matching this processor.
  	 */
 	cpu_psluserset = PSL_EE | PSL_PR | PSL_ME | PSL_IR | PSL_DR | PSL_RI;
 	cpu_pslusermod = PSL_FP | PSL_FE0 | PSL_FE1 | PSL_LE | PSL_SE | PSL_BE;
+#ifdef PPC_OEA601
 	if (cpuvers == MPC601) {
 		cpu_psluserset &= PSL_601_MASK;
 		cpu_pslusermod &= PSL_601_MASK;
 	}
+#endif
 #ifdef ALTIVEC
 	if (cpu_altivec)
 		cpu_pslusermod |= PSL_VEC;
+#endif
+#ifdef PPC_HIGH_VEC
+	cpu_psluserset |= PSL_IP;	/* XXX ok? */
 #endif
 
 	/*
@@ -372,7 +411,7 @@ oea_init(void (*handler)(void))
 	if (handler)
 		oea_install_extint(handler);
 
-	__syncicache(0, EXC_LAST + 0x100);
+	__syncicache((void *)exc_base, EXC_LAST + 0x100);
 
 	/*
 	 * Now enable translation (and machine checks/recoverable interrupts).
@@ -386,6 +425,7 @@ oea_init(void (*handler)(void))
 	KASSERT(curcpu() == ci);
 }
 
+#ifdef PPC_OEA601
 void
 mpc601_ioseg_add(paddr_t pa, register_t len)
 {
@@ -403,9 +443,9 @@ mpc601_ioseg_add(paddr_t pa, register_t len)
 	    ::	"r"(iosrtable[i]),
 		"r"(pa));
 }
+#endif /* PPC_OEA601 */
 
-
-#if defined (PPC_OEA) && !defined (PPC_OEA64) && !defined (PPC_OEA64_BRIDGE)
+#if defined (PPC_OEA) || defined (PPC_OEA64_BRIDGE)
 void
 oea_iobat_add(paddr_t pa, register_t len)
 {
@@ -487,7 +527,6 @@ void
 oea_batinit(paddr_t pa, ...)
 {
 	struct mem_region *allmem, *availmem, *mp;
-	int i;
 	unsigned int cpuvers;
 	register_t msr = mfmsr();
 	va_list ap;
@@ -507,12 +546,15 @@ oea_batinit(paddr_t pa, ...)
 	 * supervisor/user mode.
 	 */
 	if ((msr & (PSL_IR|PSL_DR)) == 0) {
+#ifdef PPC_OEA601
 		if (cpuvers == MPC601) {
 			__asm volatile ("mtibatl 0,%0" :: "r"(0));
 			__asm volatile ("mtibatl 1,%0" :: "r"(0));
 			__asm volatile ("mtibatl 2,%0" :: "r"(0));
 			__asm volatile ("mtibatl 3,%0" :: "r"(0));
-		} else {
+		} else
+#endif /* PPC_OEA601 */
+		{
 			__asm volatile ("mtibatu 0,%0" :: "r"(0));
 			__asm volatile ("mtibatu 1,%0" :: "r"(0));
 			__asm volatile ("mtibatu 2,%0" :: "r"(0));
@@ -527,7 +569,10 @@ oea_batinit(paddr_t pa, ...)
 	/*
 	 * Set up BAT to map physical memory
 	 */
+#ifdef PPC_OEA601
 	if (cpuvers == MPC601) {
+		int i;
+		
 		/*
 		 * Set up battable to map the lowest 256 MB area.
 		 * Map the lowest 32 MB area via BAT[0-3];
@@ -551,7 +596,9 @@ oea_batinit(paddr_t pa, ...)
 		__asm volatile ("mtibatu 3,%1; mtibatl 3,%0"
 		    :: "r"(battable[0x01800000 >> 23].batl),
 		       "r"(battable[0x01800000 >> 23].batu));
-	} else {
+	} else
+#endif /* PPC_OEA601 */
+	{
 		/*
 		 * Set up BAT0 to only map the lowest 256 MB area
 		 */
@@ -576,13 +623,16 @@ oea_batinit(paddr_t pa, ...)
 	 * Add any I/O BATs specificed;
 	 * use I/O segments on the BAT-starved 601.
 	 */
+#ifdef PPC_OEA601
 	if (cpuvers == MPC601) {
 		while (pa != 0) {
 			register_t len = va_arg(ap, register_t);
 			mpc601_ioseg_add(pa, len);
 			pa = va_arg(ap, paddr_t);
 		}
-	} else {
+	} else
+#endif
+	{
 		while (pa != 0) {
 			register_t len = va_arg(ap, register_t);
 			oea_iobat_add(pa, len);
@@ -597,6 +647,7 @@ oea_batinit(paddr_t pa, ...)
 	 * This is here because mem_regions() call needs bat0 set up.
 	 */
 	mem_regions(&allmem, &availmem);
+#ifdef PPC_OEA601
 	if (cpuvers == MPC601) {
 		for (mp = allmem; mp->size; mp++) {
 			paddr_t paddr = mp->start & 0xff800000;
@@ -612,7 +663,9 @@ oea_batinit(paddr_t pa, ...)
 				paddr += (1 << 23);
 			} while (paddr < end);
 		}
-	} else {
+	} else
+#endif
+	{
 		for (mp = allmem; mp->size; mp++) {
 			paddr_t paddr = mp->start & 0xf0000000;
 			paddr_t end = mp->start + mp->size;
@@ -629,7 +682,7 @@ oea_batinit(paddr_t pa, ...)
 		}
 	}
 }
-#endif /* (PPC_OEA) && !(PPC_OEA64) && !(PPC_OEA64_BRIDGE) */
+#endif /* PPC_OEA || PPC_OEA64_BRIDGE */
 
 void
 oea_install_extint(void (*handler)(void))
@@ -648,9 +701,14 @@ oea_install_extint(void (*handler)(void))
 	    :	"=r" (omsr), "=r" (msr)
 	    :	"K" ((u_short)~PSL_EE));
 	extint_call[0] = (extint_call[0] & 0xfc000003) | offset;
-	memcpy((void *)EXC_EXI, extint, (size_t)extsize);
 	__syncicache((void *)extint_call, sizeof extint_call[0]);
+#ifdef PPC_HIGH_VEC
+	memcpy((void *)(EXC_HIGHVEC + EXC_EXI), extint, (size_t)extsize);
+	__syncicache((void *)(EXC_HIGHVEC + EXC_EXI), (int)extsize);
+#else
+	memcpy((void *)EXC_EXI, extint, (size_t)extsize);
 	__syncicache((void *)EXC_EXI, (int)extsize);
+#endif
 	__asm volatile ("mtmsr %0" :: "r"(omsr));
 }
 
@@ -661,7 +719,7 @@ void
 oea_startup(const char *model)
 {
 	uintptr_t sz;
-	caddr_t v;
+	void *v;
 	vaddr_t minaddr, maxaddr;
 	char pbuf[9];
 	u_int i;
@@ -676,7 +734,7 @@ oea_startup(const char *model)
 	 * it via mapped pages.  [This prevents unneeded BAT switches.]
 	 */
         sz = round_page(MSGBUFSIZE);
-	v = (caddr_t) msgbuf_paddr;
+	v = (void *) msgbuf_paddr;
 	if (msgbuf_paddr + sz > SEGMENT_LENGTH) {
 		minaddr = 0;
 		if (uvm_map(kernel_map, &minaddr, sz,
@@ -684,7 +742,7 @@ oea_startup(const char *model)
 				UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE,
 				    UVM_INH_NONE, UVM_ADV_NORMAL, 0)) != 0)
 			panic("startup: cannot allocate VM for msgbuf");
-		v = (caddr_t)minaddr;
+		v = (void *)minaddr;
 		for (i = 0; i < sz; i += PAGE_SIZE) {
 			pmap_kenter_pa(minaddr + i, msgbuf_paddr + i,
 			    VM_PROT_READ|VM_PROT_WRITE);
@@ -719,19 +777,12 @@ oea_startup(const char *model)
 	}
  
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time. These
-	 * submaps will be allocated after the dead zone.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, 0, FALSE, NULL);
+				 VM_PHYS_SIZE, 0, false, NULL);
 
 #ifndef PMAP_MAP_POOLPAGE
 	/*
@@ -740,7 +791,7 @@ oea_startup(const char *model)
 	 * pool pages.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    mclbytes*nmbclusters, VM_MAP_INTRSAFE, FALSE, NULL);
+	    mclbytes*nmbclusters, VM_MAP_INTRSAFE, false, NULL);
 #endif
 
 	format_bytes(pbuf, sizeof(pbuf), ptoa(uvmexp.free));
@@ -757,42 +808,24 @@ oea_dumpsys(void)
 	printf("dumpsys: TBD\n");
 }
 
-#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int pendisr)
-{
-#define DONETISR(bit, fn) do {		\
-	if (pendisr & (1 << bit))	\
-		(*fn)();		\
-} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-}
-#endif
-
 /*
  * Convert kernel VA to physical address
  */
 paddr_t
-kvtop(caddr_t addr)
+kvtop(void *addr)
 {
 	vaddr_t va;
 	paddr_t pa;
 	uintptr_t off;
 	extern char end[];
 
-	if (addr < end)
+	if (addr < (void *)end)
 		return (paddr_t)addr;
 
 	va = trunc_page((vaddr_t)addr);
 	off = (uintptr_t)addr - va;
 
-	if (pmap_extract(pmap_kernel(), va, &pa) == FALSE) {
+	if (pmap_extract(pmap_kernel(), va, &pa) == false) {
 		/*printf("kvtop: zero page frame (va=0x%x)\n", addr);*/
 		return (paddr_t)addr;
 	}
@@ -841,4 +874,10 @@ unmapiodev(vaddr_t va, vsize_t len)
 	pmap_kremove(faddr, len);
 	pmap_update(pmap_kernel());
 	uvm_km_free(kernel_map, faddr, len, UVM_KMF_VAONLY);
+}
+
+void
+trap0(void *lr)
+{
+	panic("call to null-ptr from %p", lr);
 }

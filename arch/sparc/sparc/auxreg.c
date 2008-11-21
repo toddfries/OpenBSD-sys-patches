@@ -1,5 +1,4 @@
-/*	$OpenBSD: auxreg.c,v 1.14 2007/07/01 19:07:46 miod Exp $	*/
-/*	$NetBSD: auxreg.c,v 1.21 1997/05/24 20:15:59 pk Exp $ */
+/*	$NetBSD: auxreg.c,v 1.38 2007/10/17 19:57:14 garbled Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,59 +40,44 @@
  *	@(#)auxreg.c	8.1 (Berkeley) 6/11/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: auxreg.c,v 1.38 2007/10/17 19:57:14 garbled Exp $");
+
+#include "opt_blink.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/callout.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/timeout.h>
-
-#include <uvm/uvm_param.h>
 
 #include <machine/autoconf.h>
 
 #include <sparc/sparc/vaddrs.h>
-#include <sparc/sparc/auxioreg.h>
+#include <sparc/sparc/auxreg.h>
 
-static int auxregmatch(struct device *, void *, void *);
-static void auxregattach(struct device *, struct device *, void *);
+static int auxregmatch_mainbus(struct device *, struct cfdata *, void *);
+static int auxregmatch_obio(struct device *, struct cfdata *, void *);
+static void auxregattach_mainbus(struct device *, struct device *, void *);
+static void auxregattach_obio(struct device *, struct device *, void *);
 
-struct cfattach auxreg_ca = {
-	sizeof(struct device), auxregmatch, auxregattach
-};
+static void auxregattach(struct device *);
 
-struct cfdriver auxreg_cd = {
-	0, "auxreg", DV_DULL
-};
+CFATTACH_DECL(auxreg_mainbus, sizeof(struct device),
+    auxregmatch_mainbus, auxregattach_mainbus, NULL, NULL);
 
-volatile u_char *auxio_reg;	/* Copy of AUXIO_REG */
-u_char auxio_regval;
+CFATTACH_DECL(auxreg_obio, sizeof(struct device),
+    auxregmatch_obio, auxregattach_obio, NULL, NULL);
 
-#ifdef SUN4M	/* Tadpole SPARCbook */
-volatile u_char *sb_auxio_reg;
-volatile u_char *sb_auxio2_reg;
-#endif
+#ifdef BLINK
+static callout_t blink_ch;
 
-extern int sparc_led_blink;	/* from machdep */
-struct timeout sparc_led_to;
+static void blink(void *);
 
-void
-led_blink(zero)
-	void *zero;
+static void
+blink(void *zero)
 {
-	int s;
-
-	/* Don't do anything if there's no auxreg, ok? */
-	if (auxio_reg == NULL)
-		return;
-
-	if (!sparc_led_blink) {
-		/* If blink has been disabled, make sure it goes back on... */
-		s = splhigh();
-		LED_ON;
-		splx(s);
-	
-		return;
-	}
+	register int s;
 
 	s = splhigh();
 	LED_FLIP;
@@ -106,81 +90,99 @@ led_blink(zero)
 	 * etc.
 	 */
 	s = (((averunnable.ldavg[0] + FSCALE) * hz) >> (FSHIFT + 1));
-
-	timeout_add(&sparc_led_to, s);
+	callout_reset(&blink_ch, s, blink, NULL);
 }
+#endif
 
 /*
- * The OPENPROM calls this "auxiliary-io".
- * We also need to match the "auxio2" register on Tadpole SPARCbooks.
+ * The OPENPROM calls this "auxiliary-io" (sun4c) or "auxio" (sun4m).
  */
 static int
-auxregmatch(struct device *parent, void *cf, void *aux)
+auxregmatch_mainbus(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *ma = aux;
 
-	switch (cputyp) {
-	case CPU_SUN4:
-	default:
+	return (strcmp("auxiliary-io", ma->ma_name) == 0);
+}
+
+static int
+auxregmatch_obio(struct device *parent, struct cfdata *cf, void *aux)
+{
+	union obio_attach_args *uoba = aux;
+
+	if (uoba->uoba_isobio4 != 0)
 		return (0);
-	case CPU_SUN4C:
-		return (strcmp("auxiliary-io", ca->ca_ra.ra_name) == 0);
-	case CPU_SUN4M:
-		return (strcmp("auxio", ca->ca_ra.ra_name) == 0 ||
-			strcmp("auxio2", ca->ca_ra.ra_name) == 0);
-	}
+
+	return (strcmp("auxio", uoba->uoba_sbus.sa_name) == 0);
 }
 
 /* ARGSUSED */
 static void
-auxregattach(struct device *parent, struct device *self, void *aux)
+auxregattach_mainbus(struct device *parent, struct device *self, void *aux)
 {
-	struct confargs *ca = aux;
-	struct romaux *ra = &ca->ca_ra;
-#ifdef SUN4M
-	volatile u_char **regp;
+	struct mainbus_attach_args *ma = aux;
+	bus_space_handle_t bh;
 
-	if (CPU_ISSUN4M && strncmp("Tadpole", mainbus_model, 7) == 0) {
-		if (strcmp("auxio", ra->ra_name) == 0)
-			regp = &sb_auxio_reg;
-		else
-			regp = &sb_auxio2_reg;
-		if (*regp == NULL)
-			*regp = mapiodev(ra->ra_reg, 0, sizeof(char));
-	} else
-#endif
-	if (auxio_reg == NULL) {
-		(void)mapdev(ra->ra_reg, AUXREG_VA, 0, sizeof(long));
-		if (CPU_ISSUN4M) {
-			auxio_reg = AUXIO4M_REG;
-			auxio_regval = *AUXIO4M_REG | AUXIO4M_MB1;
-		} else {
-			auxio_reg = AUXIO4C_REG;
-			auxio_regval = *AUXIO4C_REG | AUXIO4C_FEJ | AUXIO4C_MB1;
-		}
-
-		timeout_set(&sparc_led_to, led_blink, NULL);
-		/* In case it's initialized to true... */
-		if (sparc_led_blink)
-			led_blink((caddr_t)0);
+	if (bus_space_map2(ma->ma_bustag,
+			  (bus_addr_t)ma->ma_paddr,
+			  sizeof(long),
+			  BUS_SPACE_MAP_LINEAR,
+			  AUXREG_VA,
+			  &bh) != 0) {
+		printf("auxregattach_mainbus: can't map register\n");
+		return;
 	}
 
+	auxio_reg = AUXIO4C_REG;
+	auxio_regval = *AUXIO4C_REG | AUXIO4C_FEJ | AUXIO4C_MB1;
+	auxregattach(self);
+}
+
+static void
+auxregattach_obio(struct device *parent, struct device *self, void *aux)
+{
+	union obio_attach_args *uoba = aux;
+	struct sbus_attach_args *sa = &uoba->uoba_sbus;
+	bus_space_handle_t bh;
+
+	if (bus_space_map2(sa->sa_bustag,
+			  BUS_ADDR(sa->sa_slot, sa->sa_offset),
+			  sizeof(long),
+			  BUS_SPACE_MAP_LINEAR,
+			  AUXREG_VA, &bh) != 0) {
+		printf("auxregattach_obio: can't map register\n");
+		return;
+	}
+
+	auxio_reg = AUXIO4M_REG;
+	auxio_regval = *AUXIO4M_REG | AUXIO4M_MB1;
+	auxregattach(self);
+}
+
+static void
+auxregattach(struct device *self)
+{
+
 	printf("\n");
+#ifdef BLINK
+	callout_init(&blink_ch, 0);
+	blink((void *)0);
+#else
+	LED_ON;
+#endif
 }
 
 unsigned int
 auxregbisc(int bis, int bic)
 {
-	int s;
+	register int s;
 
-#ifdef DIAGNOSTIC
-	if (auxio_reg == NULL)
+	if (auxio_reg == 0)
 		/*
 		 * Not all machines have an `aux' register; devices that
 		 * depend on it should not get configured if it's absent.
 		 */
 		panic("no aux register");
-#endif
 
 	s = splhigh();
 	auxio_regval = (auxio_regval | bis) & ~bic;
@@ -188,23 +190,3 @@ auxregbisc(int bis, int bic)
 	splx(s);
 	return (auxio_regval);
 }
-
-#ifdef SUN4M
-unsigned int
-sb_auxregbisc(int isreg2, int bis, int bic)
-{
-	int s;
-	volatile u_char *auxreg;
-	u_char aux;
-
-	auxreg = isreg2 ? sb_auxio2_reg : sb_auxio_reg;
-	if (auxreg == NULL)
-		return (0);
-
-	s = splhigh();
-	aux = (*auxreg | bis) & ~bic;
-	*auxreg = aux;
-	splx(s);
-	return (aux);
-}
-#endif

@@ -1,4 +1,4 @@
-/*	$NetBSD: kgdb_machdep.c,v 1.16 2006/08/05 21:26:49 sanjayl Exp $	*/
+/*	$NetBSD: kgdb_machdep.c,v 1.20 2008/02/05 22:31:50 garbled Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.16 2006/08/05 21:26:49 sanjayl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.20 2008/02/05 22:31:50 garbled Exp $");
 
 #include "opt_ddb.h"
 
@@ -66,7 +66,9 @@ kgdb_acc(vaddr_t va, size_t len)
 	vaddr_t   last_va;
 	paddr_t   pa;
 	u_int msr;
+#if !defined (PPC_OEA64) && !defined (PPC_IBM4XX)
 	u_int batu, batl;
+#endif
 
 	/* If translation is off, everything is fair game */
 	__asm volatile ("mfmsr %0" : "=r"(msr));
@@ -74,8 +76,9 @@ kgdb_acc(vaddr_t va, size_t len)
 		return 1;
 	}
 
-#if defined (PPC_OEA) && !defined (PPC_OEA64) && !defined (PPC_OEA64_BRIDGE)
+#if !defined (PPC_OEA64) && !defined (PPC_IBM4XX)
 	/* Now check battable registers */
+#ifdef PPC_OEA601
 	if ((mfpvr() >> 16) == MPC601) {
 		__asm volatile ("mfibatl %0,0" : "=r"(batl));
 		__asm volatile ("mfibatu %0,0" : "=r"(batu));
@@ -98,6 +101,7 @@ kgdb_acc(vaddr_t va, size_t len)
 				BAT601_VA_MATCH_P(batu,batl,va))
 			return 1;
 	} else {
+#endif /* PPC_OEA601 */
 		__asm volatile ("mfdbatu %0,0" : "=r"(batu));
 		if (BAT_VALID_P(batu,msr) &&
 				BAT_VA_MATCH_P(batu,va) &&
@@ -121,9 +125,17 @@ kgdb_acc(vaddr_t va, size_t len)
 				BAT_VA_MATCH_P(batu,va) &&
 				(batu & BAT_PP) != BAT_PP_NONE) {
 			return 1;
+#ifdef PPC_OEA601
 		}
+#endif
 	}
-#endif /* (PPC_OEA) && !(PPC_OEA64) && !(PPC_OEA64_BRIDGE) */
+#endif /* !defined (PPC_OEA64) && !defined (PPC_IBM4XX) */
+
+#if defined(PPC_IBM4XX)
+	/* Is it (supposed to be) TLB-reserved mapping? */
+	if (va < VM_MIN_KERNEL_ADDRESS || va > VM_MAX_KERNEL_ADDRESS)
+		return (1);
+#endif
 
 	last_va = va + len;
 	va  &= ~PGOFSET;
@@ -166,7 +178,7 @@ kgdb_signal(int type)
 		return SIGSEGV;
 #endif
 
-#if defined (PPC_OEA) || defined (PPC_OEA64_BRIDGE)
+#if !defined(PPC_OEA64) && !defined (PPC_IBM4XX)
 	case EXC_PERF:		/* 604/750/7400 - Performance monitoring */
 	case EXC_BPT:		/* 604/750/7400 - Instruction breakpoint */
 	case EXC_SMI:		/* 604/750/7400 - System management interrupt */

@@ -1,7 +1,7 @@
-/*	$NetBSD: i82489reg.h,v 1.1 2003/02/26 21:26:10 fvdl Exp $	*/
+/*	$NetBSD: i82489reg.h,v 1.8 2008/05/12 18:36:20 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,7 +36,7 @@
  */
 
 #define	LAPIC_ID		0x020		/* ID. RW */
-#	define LAPIC_ID_MASK		0x0f000000
+#	define LAPIC_ID_MASK		0xff000000
 #	define LAPIC_ID_SHIFT		24
 
 #define LAPIC_VERS		0x030		/* Version. R */
@@ -63,7 +56,11 @@
 #define LAPIC_EOI		0x0b0		/* End Int. W */
 #define LAPIC_RRR		0x0c0		/* Remote read R */
 #define LAPIC_LDR		0x0d0		/* Logical dest. RW */
+
 #define LAPIC_DFR		0x0e0		/* Dest. format RW */
+#	define LAPIC_DFR_MASK		0xf0000000
+#	define LAPIC_DFR_FLAT		0xf0000000
+#	define LAPIC_DFR_CLUSTER	0x00000000
 
 #define LAPIC_SVR		0x0f0		/* Spurious intvec RW */
 #	define LAPIC_SVR_VECTOR_MASK	0x000000ff
@@ -74,9 +71,9 @@
 #	define LAPIC_SVR_FOCUS		0x00000200
 #	define LAPIC_SVR_FDIS		0x00000200
 
-#define LAPIC_ISR	0x100			/* Int. status. R */
-#define LAPIC_TMR	0x180
-#define LAPIC_IRR	0x200
+#define LAPIC_ISR	0x100			/* In-Service Status */
+#define LAPIC_TMR	0x180			/* Trigger Mode */
+#define LAPIC_IRR	0x200			/* Interrupt Req */
 #define LAPIC_ESR	0x280			/* Err status. R */
 
 #define LAPIC_ICRLO	0x300			/* Int. cmd. RW */
@@ -84,35 +81,33 @@
 #	define LAPIC_DLMODE_FIXED	0x00000000
 #	define LAPIC_DLMODE_LOW		0x00000100
 #	define LAPIC_DLMODE_SMI		0x00000200
-#	define LAPIC_DLMODE_RR		0x00000300
 #	define LAPIC_DLMODE_NMI		0x00000400
 #	define LAPIC_DLMODE_INIT	0x00000500
 #	define LAPIC_DLMODE_STARTUP	0x00000600
+#	define LAPIC_DLMODE_EXTINT	0x00000700
 
+#	define LAPIC_DSTMODE_PHYS	0x00000000
 #	define LAPIC_DSTMODE_LOG	0x00000800
 
 #	define LAPIC_DLSTAT_BUSY	0x00001000
+#	define LAPIC_DLSTAT_IDLE	0x00000000
 
-#	define LAPIC_LVL_ASSERT		0x00004000
-#	define LAPIC_LVL_DEASSERT	0x00000000
+#	define LAPIC_LEVEL_MASK		0x00002000
+#	define LAPIC_LEVEL_ASSERT	0x00002000
+#	define LAPIC_LEVEL_DEASSERT	0x00000000
 
-#	define LAPIC_LVL_TRIG		0x00008000
-
-#	define LAPIC_RRSTAT_MASK	0x00030000
-#	define LAPIC_RRSTAT_INPROG	0x00010000
-#	define LAPIC_RRSTAT_VALID	0x00020000
+#	define LAPIC_TRIGGER_MASK	0x00008000
+#	define LAPIC_TRIGGER_EDGE	0x00000000
+#	define LAPIC_TRIGGER_LEVEL	0x00008000
 
 #	define LAPIC_DEST_MASK		0x000c0000
+#	define LAPIC_DEST_DEFAULT	0x00000000
 #	define LAPIC_DEST_SELF		0x00040000
 #	define LAPIC_DEST_ALLINCL	0x00080000
 #	define LAPIC_DEST_ALLEXCL	0x000c0000
 
-#	define LAPIC_RESV2_MASK		0xfff00000
-
 
 #define LAPIC_ICRHI	0x310			/* Int. cmd. RW */
-#	define LAPIC_ID_MASK		0x0f000000
-#	define LAPIC_ID_SHIFT		24
 
 #define LAPIC_LVTT	0x320			/* Loc.vec.(timer) RW */
 #	define LAPIC_LVTT_VEC_MASK	0x000000ff
@@ -120,9 +115,9 @@
 #	define LAPIC_LVTT_M		0x00010000
 #	define LAPIC_LVTT_TM		0x00020000
 
-#define LAPIC_PCINT	0x340
+#define LAPIC_TMINT	0x330			/* Loc.vec (Thermal) */
+#define LAPIC_PCINT	0x340			/* Loc.vec (Perf Mon) */
 #define LAPIC_LVINT0	0x350			/* Loc.vec (LINT0) RW */
-#	define LAPIC_LVT_PERIODIC	0x00020000
 #	define LAPIC_LVT_MASKED		0x00010000
 #	define LAPIC_LVT_LEVTRIG	0x00008000
 #	define LAPIC_LVT_REMOTE_IRR	0x00004000
@@ -147,3 +142,13 @@
 #define LAPIC_BASE		0xfee00000
 
 #define LAPIC_IRQ_MASK(i)	(1 << ((i) + 1))
+
+/*
+ * Model specific registers
+ */
+
+#define	LAPIC_MSR	0x001b
+#	define	LAPIC_MSR_BSP		0x00000100	/* boot processor */
+#	define	LAPIC_MSR_ENABLE	0x00000800	/* software enable */
+#	define	LAPIC_MSR_ADDR		0xfffff000	/* physical address */
+

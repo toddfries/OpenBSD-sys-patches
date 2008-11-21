@@ -1,4 +1,4 @@
-/*	$OpenBSD: agpio.h,v 1.2 2007/11/25 17:44:58 oga Exp $	*/
+/*	$NetBSD: agpio.h,v 1.5 2005/12/26 18:41:36 perry Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -31,8 +31,6 @@
 #ifndef _SYS_AGPIO_H_
 #define _SYS_AGPIO_H_
 
-#define	AGP_DEVICE		"/dev/agp0"
-
 /*
  * The AGP gatt uses 4k pages irrespective of the host page size.
  */
@@ -47,13 +45,13 @@
 #define AGP_MODE_GET_AGP(x)		(((x) & 0x00000100U) >> 8)
 #define AGP_MODE_GET_4G(x)		(((x) & 0x00000020U) >> 5)
 #define AGP_MODE_GET_FW(x)		(((x) & 0x00000010U) >> 4)
-#define AGP_MODE_GET_RATE(x)		((x) & 0x00000003U)
+#define AGP_MODE_GET_RATE(x)		((x) & 0x00000007U)
 #define AGP_MODE_SET_RQ(x,v)		(((x) & ~0xff000000U) | ((v) << 24))
 #define AGP_MODE_SET_SBA(x,v)		(((x) & ~0x00000200U) | ((v) << 9))
 #define AGP_MODE_SET_AGP(x,v)		(((x) & ~0x00000100U) | ((v) << 8))
 #define AGP_MODE_SET_4G(x,v)		(((x) & ~0x00000020U) | ((v) << 5))
 #define AGP_MODE_SET_FW(x,v)		(((x) & ~0x00000010U) | ((v) << 4))
-#define AGP_MODE_SET_RATE(x,v)		(((x) & ~0x00000003U) | (v))
+#define AGP_MODE_SET_RATE(x,v)		(((x) & ~0x00000007U) | (v))
 #define AGP_MODE_RATE_1x		0x00000001
 #define AGP_MODE_RATE_2x		0x00000002
 #define AGP_MODE_RATE_4x		0x00000004
@@ -73,14 +71,14 @@
 #define AGPIOC_UNBIND     _IOW (AGPIOC_BASE, 9, agp_unbind)
 
 typedef struct _agp_version {
-	u_int16_t major;
-	u_int16_t minor;
+	uint16_t major;
+	uint16_t minor;
 } agp_version;
 
 typedef struct _agp_info {
 	agp_version version;	/* version of the driver        */
-	u_int32_t bridge_id;	/* bridge vendor/device         */
-	u_int32_t agp_mode;	/* mode info of bridge          */
+	uint32_t bridge_id;	/* bridge vendor/device         */
+	uint32_t agp_mode;	/* mode info of bridge          */
 	off_t aper_base;	/* base of aperture             */
 	size_t aper_size;	/* size of aperture             */
 	size_t pg_total;	/* max pages (swap + system)    */
@@ -89,7 +87,7 @@ typedef struct _agp_info {
 } agp_info;
 
 typedef struct _agp_setup {
-	u_int32_t agp_mode;		/* mode info of bridge          */
+	uint32_t agp_mode;		/* mode info of bridge          */
 } agp_setup;
 
 #if 0
@@ -112,10 +110,10 @@ typedef struct _agp_region {
 typedef struct _agp_allocate {
 	int key;		/* tag of allocation            */
 	size_t pg_count;	/* number of pages              */
-	u_int32_t type;		/* 0 == normal, other devspec   */
-   	u_int32_t physical;     /* device specific (some devices  
-				 * need a phys address of the     
-				 * actual page behind the gatt    
+	uint32_t type;		/* 0 == normal, other devspec   */
+   	paddr_t physical;	/* device specific (some devices
+				 * need a phys address of the
+				 * actual page behind the gatt
 				 * table)                        */
 } agp_allocate;
 
@@ -126,7 +124,7 @@ typedef struct _agp_bind {
 
 typedef struct _agp_unbind {
 	int key;		/* tag of allocation            */
-	u_int32_t priority;	/* priority for paging out      */
+	uint32_t priority;	/* priority for paging out      */
 } agp_unbind;
 
 #endif /* !_SYS_AGPIO_H_ */

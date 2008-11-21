@@ -1,4 +1,4 @@
-/*      $NetBSD: if_etherip.h,v 1.2 2006/12/15 21:18:52 joerg Exp $        */
+/*      $NetBSD: if_etherip.h,v 1.10 2008/11/12 12:36:28 ad Exp $        */
 
 /*
  *  Copyright (c) 2006, Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
@@ -34,39 +34,28 @@
 
 #include <sys/queue.h>
 
-#if defined(_KERNEL) && !defined(_LKM)
+#ifdef _KERNEL_OPT
 #include "opt_inet.h"
 #endif
 
 #include <netinet/in.h>
 
+struct etherip_softc {
+	struct ifmedia  sc_im;
+	device_t	sc_dev;
+	struct ethercom sc_ec;
+	struct sockaddr *sc_src;                /* tunnel source address      */
+	struct sockaddr *sc_dst;                /* tunnel destination address */
+	struct route     sc_ro;			/* cached inet route          */
+	void *sc_si;                            /* softintr handle            */
+	LIST_ENTRY(etherip_softc) etherip_list; /* list of etherip tunnels    */
+};
+
 LIST_HEAD(, etherip_softc) etherip_softc_list;
 
-struct etherip_softc {
-        struct device   sc_dev;
-        struct ifmedia  sc_im;
-        struct ethercom sc_ec;
-        struct sockaddr *sc_src;                /* tunnel source address      */
-        struct sockaddr *sc_dst;                /* tunnel destination address */
-        union {
-#ifdef INET
-                struct route     scr_ro;        /* cached inet route          */
-#endif
-#ifdef INET6
-                struct route_in6 scr_ro6;       /* cached inet6 route         */
-#endif
-        } sc_scr;
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-        void *sc_si;                            /* softintr handle            */
-#endif
-        LIST_ENTRY(etherip_softc) etherip_list; /* list of etherip tunnels    */
-};
-#define sc_ro  sc_scr.scr_ro
-#define sc_ro6 sc_scr.scr_ro6
-
 struct etherip_header {
-        u_int8_t eip_ver;       /* version/reserved */
-        u_int8_t eip_pad;       /* required padding byte */
+	uint8_t eip_ver;       /* version/reserved */
+	uint8_t eip_pad;       /* required padding byte */
 };
 
 #define ETHERIP_VER_VERS_MASK   0x0f

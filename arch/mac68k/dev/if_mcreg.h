@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_mcreg.h,v 1.2 2004/12/15 06:48:24 martin Exp $	*/
-/*	NetBSD: if_mcreg.h,v 1.3 2004/03/26 12:15:46 wiz Exp $	*/
+/*	$NetBSD: if_mcreg.h,v 1.4 2005/12/11 12:18:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997 David Huang <khym@azeotrope.org>

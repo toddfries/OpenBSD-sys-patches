@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: excreate - Named object creation
- *              xRevision: 1.108 $
+ *              $Revision: 1.4 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,9 +115,6 @@
  *
  *****************************************************************************/
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: excreate.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #define __EXCREATE_C__
 
 #include "acpi.h"
@@ -154,7 +151,7 @@ AcpiExCreateAlias (
     ACPI_STATUS             Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE ("ExCreateAlias");
+    ACPI_FUNCTION_TRACE (ExCreateAlias);
 
 
     /* Get the source/alias operands (both namespace nodes) */
@@ -183,16 +180,28 @@ AcpiExCreateAlias (
      */
     switch (TargetNode->Type)
     {
+
+    /* For these types, the sub-object can change dynamically via a Store */
+
     case ACPI_TYPE_INTEGER:
     case ACPI_TYPE_STRING:
     case ACPI_TYPE_BUFFER:
     case ACPI_TYPE_PACKAGE:
     case ACPI_TYPE_BUFFER_FIELD:
 
+    /*
+     * These types open a new scope, so we need the NS node in order to access
+     * any children.
+     */
+    case ACPI_TYPE_DEVICE:
+    case ACPI_TYPE_POWER:
+    case ACPI_TYPE_PROCESSOR:
+    case ACPI_TYPE_THERMAL:
+    case ACPI_TYPE_LOCAL_SCOPE:
+
         /*
          * The new alias has the type ALIAS and points to the original
-         * NS node, not the object itself.  This is because for these
-         * types, the object can change dynamically via a Store.
+         * NS node, not the object itself.
          */
         AliasNode->Type = ACPI_TYPE_LOCAL_ALIAS;
         AliasNode->Object = ACPI_CAST_PTR (ACPI_OPERAND_OBJECT, TargetNode);
@@ -201,9 +210,7 @@ AcpiExCreateAlias (
     case ACPI_TYPE_METHOD:
 
         /*
-         * The new alias has the type ALIAS and points to the original
-         * NS node, not the object itself.  This is because for these
-         * types, the object can change dynamically via a Store.
+         * Control method aliases need to be differentiated
          */
         AliasNode->Type = ACPI_TYPE_LOCAL_METHOD_ALIAS;
         AliasNode->Object = ACPI_CAST_PTR (ACPI_OPERAND_OBJECT, TargetNode);
@@ -250,7 +257,7 @@ AcpiExCreateEvent (
     ACPI_OPERAND_OBJECT     *ObjDesc;
 
 
-    ACPI_FUNCTION_TRACE ("ExCreateEvent");
+    ACPI_FUNCTION_TRACE (ExCreateEvent);
 
 
     ObjDesc = AcpiUtCreateInternalObject (ACPI_TYPE_EVENT);
@@ -265,7 +272,7 @@ AcpiExCreateEvent (
      * that the event is created in an unsignalled state
      */
     Status = AcpiOsCreateSemaphore (ACPI_NO_UNIT_LIMIT, 0,
-                &ObjDesc->Event.Semaphore);
+                &ObjDesc->Event.OsSemaphore);
     if (ACPI_FAILURE (Status))
     {
         goto Cleanup;
@@ -308,7 +315,7 @@ AcpiExCreateMutex (
     ACPI_OPERAND_OBJECT     *ObjDesc;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("ExCreateMutex", ACPI_WALK_OPERANDS);
+    ACPI_FUNCTION_TRACE_PTR (ExCreateMutex, ACPI_WALK_OPERANDS);
 
 
     /* Create the new mutex object */
@@ -320,12 +327,9 @@ AcpiExCreateMutex (
         goto Cleanup;
     }
 
-    /*
-     * Create the actual OS semaphore.
-     * One unit max to make it a mutex, with one initial unit to allow
-     * the mutex to be acquired.
-     */
-    Status = AcpiOsCreateSemaphore (1, 1, &ObjDesc->Mutex.Semaphore);
+    /* Create the actual OS Mutex */
+
+    Status = AcpiOsCreateMutex (&ObjDesc->Mutex.OsMutex);
     if (ACPI_FAILURE (Status))
     {
         goto Cleanup;
@@ -336,8 +340,7 @@ AcpiExCreateMutex (
     ObjDesc->Mutex.SyncLevel = (UINT8) WalkState->Operands[1]->Integer.Value;
     ObjDesc->Mutex.Node = (ACPI_NAMESPACE_NODE *) WalkState->Operands[0];
 
-    Status = AcpiNsAttachObject (ObjDesc->Mutex.Node,
-                ObjDesc, ACPI_TYPE_MUTEX);
+    Status = AcpiNsAttachObject (ObjDesc->Mutex.Node, ObjDesc, ACPI_TYPE_MUTEX);
 
 
 Cleanup:
@@ -378,7 +381,7 @@ AcpiExCreateRegion (
     ACPI_OPERAND_OBJECT     *RegionObj2;
 
 
-    ACPI_FUNCTION_TRACE ("ExCreateRegion");
+    ACPI_FUNCTION_TRACE (ExCreateRegion);
 
 
     /* Get the Namespace Node */
@@ -421,122 +424,20 @@ AcpiExCreateRegion (
      * Remember location in AML stream of address & length
      * operands since they need to be evaluated at run time.
      */
-    RegionObj2                  = ObjDesc->Common.NextObject;
-    RegionObj2->Extra.AmlStart  = AmlStart;
+    RegionObj2 = ObjDesc->Common.NextObject;
+    RegionObj2->Extra.AmlStart = AmlStart;
     RegionObj2->Extra.AmlLength = AmlLength;
 
     /* Init the region from the operands */
 
     ObjDesc->Region.SpaceId = RegionSpace;
     ObjDesc->Region.Address = 0;
-    ObjDesc->Region.Length  = 0;
-    ObjDesc->Region.Node    = Node;
+    ObjDesc->Region.Length = 0;
+    ObjDesc->Region.Node = Node;
 
     /* Install the new region object in the parent Node */
 
     Status = AcpiNsAttachObject (Node, ObjDesc, ACPI_TYPE_REGION);
-
-
-Cleanup:
-
-    /* Remove local reference to the object */
-
-    AcpiUtRemoveReference (ObjDesc);
-    return_ACPI_STATUS (Status);
-}
-
-
-/*******************************************************************************
- *
- * FUNCTION:    AcpiExCreateTableRegion
- *
- * PARAMETERS:  WalkState           - Current state
- *
- * RETURN:      Status
- *
- * DESCRIPTION: Create a new DataTableRegion object
- *
- ******************************************************************************/
-
-ACPI_STATUS
-AcpiExCreateTableRegion (
-    ACPI_WALK_STATE         *WalkState)
-{
-    ACPI_STATUS             Status;
-    ACPI_OPERAND_OBJECT     **Operand = &WalkState->Operands[0];
-    ACPI_OPERAND_OBJECT     *ObjDesc;
-    ACPI_NAMESPACE_NODE     *Node;
-    ACPI_TABLE_HEADER       *Table;
-    ACPI_OPERAND_OBJECT     *RegionObj2;
-
-
-    ACPI_FUNCTION_TRACE ("ExCreateTableRegion");
-
-
-    /* Get the Node from the object stack  */
-
-    Node = WalkState->Op->Common.Node;
-
-    /*
-     * If the region object is already attached to this node,
-     * just return
-     */
-    if (AcpiNsGetAttachedObject (Node))
-    {
-        return_ACPI_STATUS (AE_OK);
-    }
-
-    /* Find the ACPI table */
-
-    Status = AcpiTbFindTable (Operand[1]->String.Pointer,
-                              Operand[2]->String.Pointer,
-                              Operand[3]->String.Pointer, &Table);
-    if (ACPI_FAILURE (Status))
-    {
-        return_ACPI_STATUS (Status);
-    }
-
-    /* Create the region descriptor */
-
-    ObjDesc = AcpiUtCreateInternalObject (ACPI_TYPE_REGION);
-    if (!ObjDesc)
-    {
-        return_ACPI_STATUS (AE_NO_MEMORY);
-    }
-
-    RegionObj2                      = ObjDesc->Common.NextObject;
-    RegionObj2->Extra.RegionContext = NULL;
-
-    /* Init the region from the operands */
-
-    ObjDesc->Region.SpaceId = REGION_DATA_TABLE;
-    ObjDesc->Region.Address = (ACPI_PHYSICAL_ADDRESS) ACPI_TO_INTEGER (Table);
-    ObjDesc->Region.Length  = Table->Length;
-    ObjDesc->Region.Node    = Node;
-    ObjDesc->Region.Flags   = AOPOBJ_DATA_VALID;
-
-    /* Install the new region object in the parent Node */
-
-    Status = AcpiNsAttachObject (Node, ObjDesc, ACPI_TYPE_REGION);
-    if (ACPI_FAILURE (Status))
-    {
-        goto Cleanup;
-    }
-
-    Status = AcpiEvInitializeRegion (ObjDesc, FALSE);
-    if (ACPI_FAILURE (Status))
-    {
-        if (Status == AE_NOT_EXIST)
-        {
-            Status = AE_OK;
-        }
-        else
-        {
-            goto Cleanup;
-        }
-    }
-
-    ObjDesc->Region.Flags |= AOPOBJ_SETUP_COMPLETE;
 
 
 Cleanup:
@@ -571,7 +472,7 @@ AcpiExCreateProcessor (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("ExCreateProcessor", WalkState);
+    ACPI_FUNCTION_TRACE_PTR (ExCreateProcessor, WalkState);
 
 
     /* Create the processor object */
@@ -584,9 +485,9 @@ AcpiExCreateProcessor (
 
     /* Initialize the processor object from the operands */
 
-    ObjDesc->Processor.ProcId  = (UINT8)           Operand[1]->Integer.Value;
+    ObjDesc->Processor.ProcId = (UINT8) Operand[1]->Integer.Value;
+    ObjDesc->Processor.Length = (UINT8) Operand[3]->Integer.Value;
     ObjDesc->Processor.Address = (ACPI_IO_ADDRESS) Operand[2]->Integer.Value;
-    ObjDesc->Processor.Length  = (UINT8)           Operand[3]->Integer.Value;
 
     /* Install the processor object in the parent Node */
 
@@ -623,7 +524,7 @@ AcpiExCreatePowerResource (
     ACPI_OPERAND_OBJECT     *ObjDesc;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("ExCreatePowerResource", WalkState);
+    ACPI_FUNCTION_TRACE_PTR (ExCreatePowerResource, WalkState);
 
 
     /* Create the power resource object */
@@ -636,7 +537,7 @@ AcpiExCreatePowerResource (
 
     /* Initialize the power object from the operands */
 
-    ObjDesc->PowerResource.SystemLevel   = (UINT8)  Operand[1]->Integer.Value;
+    ObjDesc->PowerResource.SystemLevel = (UINT8) Operand[1]->Integer.Value;
     ObjDesc->PowerResource.ResourceOrder = (UINT16) Operand[2]->Integer.Value;
 
     /* Install the  power resource object in the parent Node */
@@ -678,7 +579,7 @@ AcpiExCreateMethod (
     UINT8                   MethodFlags;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("ExCreateMethod", WalkState);
+    ACPI_FUNCTION_TRACE_PTR (ExCreateMethod, WalkState);
 
 
     /* Create a new method object */
@@ -686,44 +587,36 @@ AcpiExCreateMethod (
     ObjDesc = AcpiUtCreateInternalObject (ACPI_TYPE_METHOD);
     if (!ObjDesc)
     {
-       return_ACPI_STATUS (AE_NO_MEMORY);
+       Status = AE_NO_MEMORY;
+       goto Exit;
     }
 
     /* Save the method's AML pointer and length  */
 
-    ObjDesc->Method.AmlStart  = AmlStart;
+    ObjDesc->Method.AmlStart = AmlStart;
     ObjDesc->Method.AmlLength = AmlLength;
 
     /*
-     * Disassemble the method flags.  Split off the Arg Count
+     * Disassemble the method flags. Split off the Arg Count
      * for efficiency
      */
     MethodFlags = (UINT8) Operand[1]->Integer.Value;
 
     ObjDesc->Method.MethodFlags = (UINT8) (MethodFlags & ~AML_METHOD_ARG_COUNT);
-    ObjDesc->Method.ParamCount  = (UINT8) (MethodFlags & AML_METHOD_ARG_COUNT);
+    ObjDesc->Method.ParamCount = (UINT8) (MethodFlags & AML_METHOD_ARG_COUNT);
 
     /*
-     * Get the concurrency count.  If required, a semaphore will be
+     * Get the SyncLevel. If method is serialized, a mutex will be
      * created for this method when it is parsed.
      */
-    if (AcpiGbl_AllMethodsSerialized)
-    {
-        ObjDesc->Method.Concurrency = 1;
-        ObjDesc->Method.MethodFlags |= AML_METHOD_SERIALIZED;
-    }
-    else if (MethodFlags & AML_METHOD_SERIALIZED)
+    if (MethodFlags & AML_METHOD_SERIALIZED)
     {
         /*
-         * ACPI 1.0: Concurrency = 1
-         * ACPI 2.0: Concurrency = (SyncLevel (in method declaration) + 1)
+         * ACPI 1.0: SyncLevel = 0
+         * ACPI 2.0: SyncLevel = SyncLevel in method declaration
          */
-        ObjDesc->Method.Concurrency = (UINT8)
-                        (((MethodFlags & AML_METHOD_SYNCH_LEVEL) >> 4) + 1);
-    }
-    else
-    {
-        ObjDesc->Method.Concurrency = ACPI_INFINITE_CONCURRENCY;
+        ObjDesc->Method.SyncLevel = (UINT8)
+            ((MethodFlags & AML_METHOD_SYNCH_LEVEL) >> 4);
     }
 
     /* Attach the new object to the method Node */
@@ -735,6 +628,7 @@ AcpiExCreateMethod (
 
     AcpiUtRemoveReference (ObjDesc);
 
+Exit:
     /* Remove a reference to the operand */
 
     AcpiUtRemoveReference (Operand[1]);

@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.3 2006/11/29 12:24:17 miod Exp $	*/
-/*	$NetBSD: db_trace.c,v 1.8 2003/01/17 22:28:48 thorpej Exp $	*/
+/*	$NetBSD: db_trace.c,v 1.17 2008/07/02 19:49:58 rmind Exp $	*/
 
 /* 
  * Copyright (c) 2000, 2001 Ben Harris
@@ -32,6 +31,8 @@
 
 #include <sys/param.h>
 
+__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.17 2008/07/02 19:49:58 rmind Exp $");
+
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <arm/armreg.h>
@@ -42,8 +43,6 @@
 #include <ddb/db_interface.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_output.h>
-
-db_regs_t ddb_regs;
 
 #define INKERNEL(va)	(((vaddr_t)(va)) >= VM_MIN_KERNEL_ADDRESS)
 
@@ -83,22 +82,28 @@ db_regs_t ddb_regs;
 void
 db_stack_trace_print(addr, have_addr, count, modif, pr)
 	db_expr_t       addr;
-	int             have_addr;
+	bool             have_addr;
 	db_expr_t       count;
-	char            *modif;
-	int		(*pr) (const char *, ...);
+	const char      *modif;
+	void		(*pr) __P((const char *, ...));
 {
 	u_int32_t	*frame, *lastframe;
-	char c, *cp = modif;
-	boolean_t	kernel_only = TRUE;
-	boolean_t	trace_thread = FALSE;
-	int	scp_offset;
+	const char	*cp = modif;
+	char c;
+	bool		kernel_only = true;
+	bool		trace_thread = false;
+	bool		lwpaddr = false;
+	int		scp_offset;
 
 	while ((c = *cp++) != 0) {
+		if (c == 'a') {
+			lwpaddr = true;
+			trace_thread = true;
+		}
 		if (c == 'u')
-			kernel_only = FALSE;
+			kernel_only = false;
 		if (c == 't')
-			trace_thread = TRUE;
+			trace_thread = true;
 	}
 
 	if (!have_addr)
@@ -107,13 +112,27 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 		if (trace_thread) {
 			struct proc *p;
 			struct user *u;
-			(*pr) ("trace: pid %d ", (int)addr);
-			p = pfind(addr);
-			if (p == NULL) {
-				(*pr)("not found\n");
+			struct lwp *l;
+			if (lwpaddr) {
+				l = (struct lwp *)addr;
+				p = l->l_proc;
+				(*pr)("trace: pid %d ", p->p_pid);
+			} else {
+				(*pr)("trace: pid %d ", (int)addr);
+				p = p_find(addr, PFIND_LOCKED);
+				if (p == NULL) {
+					(*pr)("not found\n");
+					return;
+				}
+				l = LIST_FIRST(&p->p_lwps);
+				KASSERT(l != NULL);
+			}
+			(*pr)("lid %d ", l->l_lid);
+			if (!(l->l_flag & LW_INMEM)) {
+				(*pr)("swapped out\n");
 				return;
-			}	
-			u = p->p_addr;
+			}
+			u = l->l_addr;
 #ifdef acorn26
 			frame = (u_int32_t *)(u->u_pcb.pcb_sf->sf_r11);
 #else

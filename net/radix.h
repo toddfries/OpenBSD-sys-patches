@@ -1,5 +1,4 @@
-/*	$OpenBSD: radix.h,v 1.14 2008/05/07 05:14:21 claudio Exp $	*/
-/*	$NetBSD: radix.h,v 1.8 1996/02/13 22:00:37 christos Exp $	*/
+/*	$NetBSD: radix.h,v 1.20 2008/05/11 20:22:38 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1993
@@ -50,8 +49,8 @@ struct radix_node {
 #define RNF_ACTIVE	4		/* This node is alive (for rtfree) */
 	union {
 		struct {			/* leaf only data: */
-			caddr_t	rn_Key;		/* object of search */
-			caddr_t	rn_Mask;	/* netmask, if present */
+			const char *rn_Key;	/* object of search */
+			const char *rn_Mask;	/* netmask, if present */
 			struct	radix_node *rn_Dupedkey;
 		} rn_leaf;
 		struct {			/* node only data: */
@@ -78,17 +77,17 @@ struct radix_node {
  * Annotations to tree concerning potential routes applying to subtrees.
  */
 
-extern struct radix_mask {
+struct radix_mask {
 	short	rm_b;			/* bit offset; -1-index(netmask) */
 	char	rm_unused;		/* cf. rn_bmask */
 	u_char	rm_flags;		/* cf. rn_flags */
 	struct	radix_mask *rm_mklist;	/* more masks to try */
 	union	{
-		caddr_t	rmu_mask;		/* the mask */
+		const char *rmu_mask;		/* the mask */
 		struct	radix_node *rmu_leaf;	/* for normal routes */
 	}	rm_rmu;
 	int	rm_refs;		/* # of references to this struct */
-} *rn_mkfreelist;
+};
 
 #define rm_mask rm_rmu.rmu_mask
 #define rm_leaf rm_rmu.rmu_leaf		/* extra field would make 32 bytes */
@@ -106,51 +105,52 @@ struct radix_node_head {
 	struct	radix_node *rnh_treetop;
 	int	rnh_addrsize;		/* permit, but not require fixed keys */
 	int	rnh_pktsize;		/* permit, but not require fixed keys */
-					/* add based on sockaddr */
-	struct	radix_node *(*rnh_addaddr)(void *v, void *mask,
-		     struct radix_node_head *head, struct radix_node nodes[],
-		     u_int8_t prio);
-					/* remove based on sockaddr */
-	struct	radix_node *(*rnh_deladdr)(void *v, void *mask,
-		    struct radix_node_head *head, struct radix_node *rn);
-					/* locate based on sockaddr */
-	struct	radix_node *(*rnh_matchaddr)(void *v,
-		    struct radix_node_head *head);
-					/* locate based on sockaddr */
-	struct	radix_node *(*rnh_lookup)(void *v, void *mask,
-		    struct radix_node_head *head);
-					/* traverse tree */
-	int	(*rnh_walktree)(struct radix_node_head *,
-		     int (*)(struct radix_node *, void *), void *);
-	struct	radix_node rnh_nodes[3];/* empty tree for common case */
-	int	rnh_multipath;		/* multipath? */
+	struct	radix_node *(*rnh_addaddr)	/* add based on sockaddr */
+		(const void *v, const void *mask,
+		     struct radix_node_head *head, struct radix_node nodes[]);
+	struct	radix_node *(*rnh_addpkt)	/* add based on packet hdr */
+		(const void *v, const void *mask,
+		     struct radix_node_head *head, struct radix_node nodes[]);
+	struct	radix_node *(*rnh_deladdr)	/* remove based on sockaddr */
+		(const void *v, const void *mask, struct radix_node_head *head);
+	struct	radix_node *(*rnh_delpkt)	/* remove based on packet hdr */
+		(const void *v, const void *mask, struct radix_node_head *head);
+	struct	radix_node *(*rnh_matchaddr)	/* locate based on sockaddr */
+		(const void *v, struct radix_node_head *head);
+	struct	radix_node *(*rnh_lookup)	/* locate based on sockaddr */
+		(const void *v, const void *mask, struct radix_node_head *head);
+	struct	radix_node *(*rnh_matchpkt)	/* locate based on packet hdr */
+		(const void *v, struct radix_node_head *head);
+	struct	radix_node rnh_nodes[3];	/* empty tree for common case */
 };
 
+
 #ifdef _KERNEL
-#define Bcmp(a, b, n) bcmp(((caddr_t)(a)), ((caddr_t)(b)), (unsigned)(n))
-#define Bcopy(a, b, n) bcopy(((caddr_t)(a)), ((caddr_t)(b)), (unsigned)(n))
-#define Bzero(p, n) bzero((caddr_t)(p), (unsigned)(n));
-#define R_Malloc(p, t, n) (p = (t) malloc((unsigned long)(n), M_RTABLE, M_DONTWAIT))
-#define Free(p) free((caddr_t)p, M_RTABLE);
+extern struct radix_mask *rn_mkfreelist;
 
-void	rn_init(void);
-int	rn_inithead(void **, int);
-int	rn_inithead0(struct radix_node_head *, int);
-int	rn_refines(void *, void *);
-int	rn_walktree(struct radix_node_head *,
-	    int (*)(struct radix_node *, void *), void *);
+#define R_Malloc(p, t, n) (p = (t) malloc((size_t)(n), M_RTABLE, M_NOWAIT))
+#define Free(p) free(p, M_RTABLE);
+#endif /*_KERNEL*/
 
-struct radix_node	*rn_addmask(void *, int, int);
-struct radix_node	*rn_addroute(void *, void *, struct radix_node_head *,
-			    struct radix_node [2], u_int8_t);
-struct radix_node	*rn_delete(void *, void *, struct radix_node_head *,
-			    struct radix_node *);
-struct radix_node	*rn_insert(void *, struct radix_node_head *, int *,
-			    struct radix_node [2]);
-struct radix_node	*rn_lookup(void *, void *, struct radix_node_head *);
-struct radix_node	*rn_match(void *, struct radix_node_head *);
-struct radix_node	*rn_newpair(void *, int, struct radix_node[2]);
-struct radix_node	*rn_search(void *, struct radix_node *);
-struct radix_node	*rn_search_m(void *, struct radix_node *, void *);
-#endif /* _KERNEL */
-#endif /* _NET_RADIX_H_ */
+void	 rn_init(void);
+int	 rn_inithead(void **, int);
+int	 rn_inithead0(struct radix_node_head *, int);
+int	 rn_refines(const void *, const void *);
+int	 rn_walktree(struct radix_node_head *,
+			  int (*)(struct radix_node *, void *), void *);
+struct radix_node
+	 *rn_addmask(const void *, int, int),
+	 *rn_addroute(const void *, const void *, struct radix_node_head *,
+			struct radix_node [2]),
+	 *rn_delete1(const void *, const void *, struct radix_node_head *,
+			struct radix_node *),
+	 *rn_delete(const void *, const void *, struct radix_node_head *),
+	 *rn_insert(const void *, struct radix_node_head *, int *,
+			struct radix_node [2]),
+	 *rn_lookup(const void *, const void *, struct radix_node_head *),
+	 *rn_match(const void *, struct radix_node_head *),
+	 *rn_newpair(const void *, int, struct radix_node[2]),
+	 *rn_search(const void *, struct radix_node *),
+	 *rn_search_m(const void *, struct radix_node *, const void *);
+
+#endif /* !_NET_RADIX_H_ */

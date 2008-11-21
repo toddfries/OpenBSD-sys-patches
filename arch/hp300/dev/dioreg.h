@@ -1,5 +1,4 @@
-/*	$OpenBSD: dioreg.h,v 1.4 2007/01/07 15:12:19 miod Exp $	*/
-/*	$NetBSD: dioreg.h,v 1.3 1997/01/30 09:18:40 thorpej Exp $	*/
+/*	$NetBSD: dioreg.h,v 1.7 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -20,19 +19,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS 
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -68,9 +60,9 @@
  * e.g. a display framebuffer.
  *
  * DIO-II ranges from select codes 132-255 at physical addresses given by:
- *	0x1000000 + (sc - 132) * 0x400000
+ *	0x1000000 + (sc - 132) * 0x400000 
  * The address range of DIO-II space is thus [0x1000000-0x20000000).
- *
+ * 
  * DIO/DIO-II space is too large to map in its entirety, instead devices
  * are mapped into kernel virtual address space allocated from a range
  * of EIOMAPSIZE pages (vmparam.h) starting at ``extiobase''.
@@ -87,11 +79,7 @@
  * Find the highest select code for a given machine; HP320 doesn't
  * have DIO-II.
  */
-#if defined(HP320)
 #define	DIO_SCMAX(machineid)	((machineid) == HP_320 ? 32 : 256)
-#else
-#define	DIO_SCMAX(machineid)	256
-#endif
 
 /*
  * Base of DIO-II select codes.
@@ -102,7 +90,7 @@
  * Macro that returns true if a select code lies within
  * the select code `hole'.
  */
-#define	DIO_INHOLE(scode)	((scode) >= 32 && (scode) < DIOII_SCBASE)
+#define	DIO_INHOLE(scode)	((scode) >= 32 && (scode) < 132)
 
 /*
  * Macros to determine if device is DIO or DIO-II.
@@ -123,23 +111,23 @@
  * the base address of the device.
  */
 #define	DIO_ID(base)			\
-	(*((u_int8_t *)((u_long)(base) + DIO_IDOFF)))
+	(*((uint8_t *)((u_long)(base) + DIO_IDOFF)))
 #define	DIO_SECID(base)			\
-	(*((u_int8_t *)((u_long)(base) + DIO_SECIDOFF)))
+	(*((uint8_t *)((u_long)(base) + DIO_SECIDOFF)))
 
 /*
  * Macro to extract the interrupt level, given the
  * base address of the device.
  */
 #define	DIO_IPL(base)			\
-	((((*((u_int8_t *)((u_long)(base) + DIO_IPLOFF))) >> 4) & 0x03) + 3)
+	((((*((uint8_t *)((u_long)(base) + DIO_IPLOFF))) >> 4) & 0x03) + 3)
 
 /*
  * Macro to compute the size of a DIO-II device's address
  * space, given the base address of the device.
  */
 #define DIOII_SIZE(base)		\
-	((int)((*((u_int8_t *)((u_long)(base) + DIOII_SIZEOFF)) + 1)	\
+	((int)((*((uint8_t *)((u_long)(base) + DIOII_SIZEOFF)) + 1)	\
 	    * 0x100000))
 
 /*

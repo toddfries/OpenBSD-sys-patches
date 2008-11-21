@@ -1,4 +1,4 @@
-/*	$NetBSD: com_frodo.c,v 1.5 2006/07/13 22:56:01 gdamore Exp $	*/
+/*	$NetBSD: com_frodo.c,v 1.8 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_frodo.c,v 1.5 2006/07/13 22:56:01 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_frodo.c,v 1.8 2008/04/28 20:23:19 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -92,10 +85,10 @@ struct com_frodo_softc {
 	struct	com_softc sc_com;	/* real "com" softc */
 };
 
-static int	com_frodo_match(struct device *, struct cfdata *, void *);
-static void	com_frodo_attach(struct device *, struct device *, void *);
+static int	com_frodo_match(device_t, cfdata_t , void *);
+static void	com_frodo_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(com_frodo, sizeof(struct com_frodo_softc),
+CFATTACH_DECL_NEW(com_frodo, sizeof(struct com_frodo_softc),
     com_frodo_match, com_frodo_attach, NULL, NULL);
 
 static int com_frodo_speed = TTYDEF_SPEED;
@@ -105,7 +98,7 @@ static struct bus_space_tag comcntag;
 #define COM_FRODO_FREQ	8006400
 
 static int
-com_frodo_match(struct device *parent, struct cfdata *match, void *aux)
+com_frodo_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct frodo_attach_args *fa = aux;
 
@@ -123,15 +116,16 @@ com_frodo_match(struct device *parent, struct cfdata *match, void *aux)
 }
 
 static void
-com_frodo_attach(struct device *parent, struct device *self, void *aux)
+com_frodo_attach(device_t parent, device_t self, void *aux)
 {
-	struct com_frodo_softc *fsc = (void *)self;
+	struct com_frodo_softc *fsc = device_private(self);
 	struct com_softc *sc = &fsc->sc_com;
 	struct frodo_attach_args *fa = aux;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	int isconsole;
 
+	sc->sc_dev = self;
 	isconsole = com_is_console(&comcntag, fa->fa_base + fa->fa_offset,
 	    &ioh);
 
@@ -143,7 +137,7 @@ com_frodo_attach(struct device *parent, struct device *self, void *aux)
 	if (!isconsole &&
 	    bus_space_map(iot, fa->fa_base + fa->fa_offset, COM_NPORTS << 2,
 	     0, &ioh)) {
-		printf(": can't map i/o space\n");
+		aprint_error(": can't map i/o space\n");
 		return;
 	}
 	COM_INIT_REGS(sc->sc_regs, iot, ioh, fa->fa_base + fa->fa_offset);
@@ -153,8 +147,7 @@ com_frodo_attach(struct device *parent, struct device *self, void *aux)
 
 	com_attach_subr(sc);
 
-	frodo_intr_establish(parent, comintr, sc, fa->fa_line,
-	    ((sc->sc_hwflags & COM_HW_FIFO) != 0) ? IPL_TTY : IPL_TTYNOBUF);
+	frodo_intr_establish(parent, comintr, sc, fa->fa_line, IPL_VM);
 }
 
 int

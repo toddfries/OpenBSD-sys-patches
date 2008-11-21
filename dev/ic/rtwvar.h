@@ -1,6 +1,4 @@
-/*	$OpenBSD: rtwvar.h,v 1.23 2007/06/07 20:20:15 damien Exp $	*/
-/*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
-
+/* $NetBSD: rtwvar.h,v 1.37 2008/03/12 18:02:21 dyoung Exp $ */
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.
  *
@@ -35,9 +33,8 @@
 #ifndef _DEV_IC_RTWVAR_H_
 #define	_DEV_IC_RTWVAR_H_
 
-#include <sys/device.h>
 #include <sys/queue.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 
 #ifdef RTW_DEBUG
 #define	RTW_DEBUG_TUNE		0x0000001
@@ -72,18 +69,15 @@ extern int rtw_debug;
 #define RTW_DPRINTF(__flags, __x)	\
 	if ((rtw_debug & (__flags)) != 0) printf __x
 #define	DPRINTF(__sc, __flags, __x)				\
-	if (((__sc)->sc_ic.ic_if.if_flags & IFF_DEBUG) != 0)	\
+	if (((__sc)->sc_if.if_flags & IFF_DEBUG) != 0)	\
 		RTW_DPRINTF(__flags, __x)
+#define	RTW_PRINT_REGS(__regs, __dvname, __where)	\
+	rtw_print_regs((__regs), (__dvname), (__where))
 #else /* RTW_DEBUG */
 #define RTW_DPRINTF(__flags, __x)
 #define	DPRINTF(__sc, __flags, __x)
+#define	RTW_PRINT_REGS(__regs, __dvname, __where)
 #endif /* RTW_DEBUG */
-
-#define	KASSERT2(__cond, __msg)		\
-	do {				\
-		if (!(__cond))		\
-			panic __msg ;	\
-	} while (0)
 
 enum rtw_locale {
 	RTW_LOCALE_USA = 0,
@@ -92,50 +86,33 @@ enum rtw_locale {
 	RTW_LOCALE_UNKNOWN
 };
 
-#define	RTW_RFCHIPID_RESERVED	0x00
-#define	RTW_RFCHIPID_INTERSIL	0x01
-#define	RTW_RFCHIPID_RFMD2948	0x02
-#define	RTW_RFCHIPID_PHILIPS	0x03
-#define	RTW_RFCHIPID_MAXIM2820	0x04
-#define	RTW_RFCHIPID_GCT	0x05
-#define	RTW_RFCHIPID_RFMD2958	0x06
-#define	RTW_RFCHIPID_MAXIM2822	0x07
-#define	RTW_RFCHIPID_MAXIM2825	0x08
-#define	RTW_RFCHIPID_RTL8225	0x09
-#define	RTW_RFCHIPID_RTL8255	0x0a
-
+enum rtw_rfchipid {
+	RTW_RFCHIPID_RESERVED = 0,
+	RTW_RFCHIPID_INTERSIL = 1,
+	RTW_RFCHIPID_RFMD = 2,
+	RTW_RFCHIPID_PHILIPS = 3,
+	RTW_RFCHIPID_MAXIM = 4,
+	RTW_RFCHIPID_GCT = 5
+};
 /* sc_flags */
-#define RTW_F_ENABLED		0x00000001	/* chip is enabled */
 #define RTW_F_DIGPHY		0x00000002	/* digital PHY */
 #define RTW_F_DFLANTB		0x00000004	/* B antenna is default */
-#define RTW_F_RTL8185		0x00000008	/* RTL8185 or newer */
 #define RTW_F_ANTDIV		0x00000010	/* h/w antenna diversity */
 #define RTW_F_9356SROM		0x00000020	/* 93c56 SROM */
-#define RTW_F_SLEEP		0x00000040	/* chip is asleep */
-#define RTW_F_INVALID		0x00000080	/* chip is absent */
+#define	RTW_F_DK_VALID		0x00000040	/* keys in DK0-DK3 are valid */
+#define	RTW_C_RXWEP_40		0x00000080	/* h/w decrypts 40-bit WEP */
+#define	RTW_C_RXWEP_104		0x00000100	/* h/w decrypts 104-bit WEP */
 	/* all PHY flags */
 #define RTW_F_ALLPHY		(RTW_F_DIGPHY|RTW_F_DFLANTB|RTW_F_ANTDIV)
-
-enum rtw_access {
-	RTW_ACCESS_NONE = 0,
-	RTW_ACCESS_CONFIG = 1,
-	RTW_ACCESS_ANAPARM = 2
-};
+enum rtw_access {RTW_ACCESS_NONE = 0,
+		 RTW_ACCESS_CONFIG = 1,
+		 RTW_ACCESS_ANAPARM = 2};
 
 struct rtw_regs {
 	bus_space_tag_t		r_bt;
 	bus_space_handle_t	r_bh;
+	bus_size_t		r_sz;
 	enum rtw_access		r_access;
-	void			*r_priv;
-
-	/* bus independent I/O callbacks */
-	u_int8_t	(*r_read8)(void *, u_int32_t);
-	u_int16_t	(*r_read16)(void *, u_int32_t);
-	u_int32_t	(*r_read32)(void *, u_int32_t);
-	void		(*r_write8)(void *, u_int32_t, u_int8_t);
-	void		(*r_write16)(void *, u_int32_t, u_int16_t);
-	void		(*r_write32)(void *, u_int32_t, u_int32_t);
-	void		(*r_barrier)(void *, u_int32_t, u_int32_t, int);
 };
 
 #define RTW_SR_GET(sr, ofs) \
@@ -145,20 +122,13 @@ struct rtw_regs {
     (RTW_SR_GET((sr), (ofs)) | (RTW_SR_GET((sr), (ofs) + 1) << 8))
 
 struct rtw_srom {
-	u_int16_t		*sr_content;
-	u_int16_t		sr_size;
+	uint16_t		*sr_content;
+	uint16_t		sr_size;
 };
 
 struct rtw_rxsoft {
 	struct mbuf			*rs_mbuf;
 	bus_dmamap_t			rs_dmamap;
-};
-
-struct rtw_duration {
-	uint16_t	d_rts_dur;
-	uint16_t	d_data_dur;
-	uint16_t	d_plcp_len;
-	uint8_t		d_residue;	/* unused octets in time slot */
 };
 
 struct rtw_txsoft {
@@ -168,8 +138,8 @@ struct rtw_txsoft {
 	struct ieee80211_node		*ts_ni;	/* destination node */
 	u_int				ts_first;	/* 1st hw descriptor */
 	u_int				ts_last;	/* last hw descriptor */
-	struct rtw_duration		ts_d0;
-	struct rtw_duration		ts_dn;
+	struct ieee80211_duration	ts_d0;
+	struct ieee80211_duration	ts_dn;
 };
 
 #define RTW_NTXPRI	4	/* number of Tx priorities */
@@ -178,10 +148,9 @@ struct rtw_txsoft {
 #define RTW_TXPRIHI	2
 #define RTW_TXPRIBCN	3	/* beacon priority */
 
-#define RTW_MAXPKTSEGS		64	/* max 64 segments per Tx packet */
+#define RTW_MAXPKTSEGS		64	/* Max 64 segments per Tx packet */
 
-#define CASSERT(cond, complaint)					\
-	complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
+#define CASSERT(cond, complaint) complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
 
 /* Note well: the descriptor rings must begin on RTW_DESC_ALIGNMENT
  * boundaries.  I allocate them consecutively from one buffer, so
@@ -203,11 +172,11 @@ struct rtw_txsoft {
 #define RTW_RXQLEN	64
 
 struct rtw_rxdesc_blk {
-	struct rtw_rxdesc	*rdb_desc;
-	u_int			rdb_next;
 	u_int			rdb_ndesc;
+	u_int			rdb_next;
 	bus_dma_tag_t		rdb_dmat;
 	bus_dmamap_t		rdb_dmamap;
+	struct rtw_rxdesc	*rdb_desc;
 };
 
 struct rtw_txdesc_blk {
@@ -220,7 +189,6 @@ struct rtw_txdesc_blk {
 	bus_addr_t		tdb_ofs;
 	bus_size_t		tdb_basereg;
 	uint32_t		tdb_base;
-
 	struct rtw_txdesc	*tdb_desc;
 };
 
@@ -239,7 +207,7 @@ struct rtw_txsoft_blk {
 	u_int			tsb_ndesc;
 	int			tsb_tx_timer;
 	struct rtw_txsoft	*tsb_desc;
-	u_int8_t			tsb_poll;
+	uint8_t			tsb_poll;
 };
 
 struct rtw_descs {
@@ -265,48 +233,64 @@ struct rtw_descs {
 	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL)		|	\
 	 0)
 
+#define RTW_PHILIPS_RX_RADIOTAP_PRESENT					\
+	((1 << IEEE80211_RADIOTAP_TSFT)			|	\
+	 (1 << IEEE80211_RADIOTAP_FLAGS)		|	\
+	 (1 << IEEE80211_RADIOTAP_RATE)			|	\
+	 (1 << IEEE80211_RADIOTAP_CHANNEL)		|	\
+	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL)		|	\
+	 0)
+
 struct rtw_rx_radiotap_header {
 	struct ieee80211_radiotap_header	rr_ihdr;
-	u_int64_t				rr_tsft;
-	u_int8_t				rr_flags;
-	u_int8_t				rr_rate;
-	u_int16_t				rr_chan_freq;
-	u_int16_t				rr_chan_flags;
-	u_int16_t				rr_barker_lock;
-	u_int8_t				rr_antsignal;
+	uint64_t				rr_tsft;
+	uint8_t					rr_flags;
+	uint8_t					rr_rate;
+	uint16_t				rr_chan_freq;
+	uint16_t				rr_chan_flags;
+	union {
+		struct {
+			uint16_t		o_barker_lock;
+			uint8_t			o_antsignal;
+		} u_other;
+		struct {
+			uint8_t			p_antsignal;
+		} u_philips;
+	} rr_u;
 } __packed;
 
 #define RTW_TX_RADIOTAP_PRESENT				\
-	((1 << IEEE80211_RADIOTAP_FLAGS)	|	\
-	 (1 << IEEE80211_RADIOTAP_RATE)		|	\
+	((1 << IEEE80211_RADIOTAP_RATE)		|	\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL)	|	\
 	 0)
 
 struct rtw_tx_radiotap_header {
 	struct ieee80211_radiotap_header	rt_ihdr;
-	u_int8_t				rt_flags;
-	u_int8_t				rt_rate;
-	u_int16_t				rt_chan_freq;
-	u_int16_t				rt_chan_flags;
+	uint8_t					rt_rate;
+	uint8_t					rt_pad;
+	uint16_t				rt_chan_freq;
+	uint16_t				rt_chan_flags;
 } __packed;
 
-struct rtw_hooks {
-	void			*rh_shutdown;	/* shutdown hook */
-	void			*rh_power;	/* power management hook */
-};
+enum rtw_attach_state {FINISHED, FINISH_DESCMAP_LOAD, FINISH_DESCMAP_CREATE,
+	FINISH_DESC_MAP, FINISH_DESC_ALLOC, FINISH_RXMAPS_CREATE,
+	FINISH_TXMAPS_CREATE, FINISH_RESET, FINISH_READ_SROM, FINISH_PARSE_SROM,
+	FINISH_RF_ATTACH, FINISH_ID_STA, FINISH_TXDESCBLK_SETUP,
+	FINISH_TXCTLBLK_SETUP, DETACHED};
 
 struct rtw_mtbl {
 	int			(*mt_newstate)(struct ieee80211com *,
 					enum ieee80211_state, int);
 	void			(*mt_recv_mgmt)(struct ieee80211com *,
 				    struct mbuf *, struct ieee80211_node *,
-				    int, int, u_int32_t);
-	struct ieee80211_node	*(*mt_node_alloc)(struct ieee80211com *);
-	void			(*mt_node_free)(struct ieee80211com *,
-					struct ieee80211_node *);
+				    int, int, uint32_t);
+	struct ieee80211_node	*(*mt_node_alloc)(struct ieee80211_node_table*);
+	void			(*mt_node_free)(struct ieee80211_node *);
 };
 
 enum rtw_pwrstate { RTW_OFF = 0, RTW_SLEEP, RTW_ON };
+
+typedef void (*rtw_continuous_tx_cb_t)(void *arg, int);
 
 struct rtw_phy {
 	struct rtw_rf	*p_rf;
@@ -328,14 +312,90 @@ struct rtw_bbpset {
 	u_int	bb_txagc;
 };
 
-typedef int (*rtw_rf_write_t)(struct rtw_regs *, int, u_int,
-    u_int32_t);
+struct rtw_rf {
+	void	(*rf_destroy)(struct rtw_rf *);
+	/* args: frequency, txpower, power state */
+	int	(*rf_init)(struct rtw_rf *, u_int, uint8_t,
+	                  enum rtw_pwrstate);
+	/* arg: power state */
+	int	(*rf_pwrstate)(struct rtw_rf *, enum rtw_pwrstate);
+	/* arg: frequency */
+	int	(*rf_tune)(struct rtw_rf *, u_int);
+	/* arg: txpower */
+	int	(*rf_txpower)(struct rtw_rf *, uint8_t);
+	rtw_continuous_tx_cb_t	rf_continuous_tx_cb;
+	void			*rf_continuous_tx_arg;
+	struct rtw_bbpset	rf_bbpset;
+};
+
+static __inline void
+rtw_rf_destroy(struct rtw_rf *rf)
+{
+	(*rf->rf_destroy)(rf);
+}
+
+static __inline int
+rtw_rf_init(struct rtw_rf *rf, u_int freq, uint8_t opaque_txpower,
+    enum rtw_pwrstate power)
+{
+	return (*rf->rf_init)(rf, freq, opaque_txpower, power);
+}
+
+static __inline int
+rtw_rf_pwrstate(struct rtw_rf *rf, enum rtw_pwrstate power)
+{
+	return (*rf->rf_pwrstate)(rf, power);
+}
+
+static __inline int
+rtw_rf_tune(struct rtw_rf *rf, u_int freq)
+{
+	return (*rf->rf_tune)(rf, freq);
+}
+
+static __inline int
+rtw_rf_txpower(struct rtw_rf *rf, uint8_t opaque_txpower)
+{
+	return (*rf->rf_txpower)(rf, opaque_txpower);
+}
+
+typedef int (*rtw_rf_write_t)(struct rtw_regs *, enum rtw_rfchipid, u_int,
+    uint32_t);
+
+struct rtw_rfbus {
+	struct rtw_regs		*b_regs;
+	rtw_rf_write_t		b_write;
+};
+
+static __inline int
+rtw_rfbus_write(struct rtw_rfbus *bus, enum rtw_rfchipid rfchipid, u_int addr,
+    uint32_t val)
+{
+	return (*bus->b_write)(bus->b_regs, rfchipid, addr, val);
+}
+
+struct rtw_max2820 {
+	struct rtw_rf		mx_rf;
+	struct rtw_rfbus	mx_bus;
+	int			mx_is_a;	/* 1: MAX2820A/MAX2821A */
+};
+
+struct rtw_grf5101 {
+	struct rtw_rf		gr_rf;
+	struct rtw_rfbus	gr_bus;
+};
+
+struct rtw_sa2400 {
+	struct rtw_rf		sa_rf;
+	struct rtw_rfbus	sa_bus;
+	int			sa_digphy;	/* 1: digital PHY */
+};
 
 typedef void (*rtw_pwrstate_t)(struct rtw_regs *, enum rtw_pwrstate, int, int);
 
 union rtw_keys {
-	u_int8_t	rk_keys[4][16];
-	u_int32_t	rk_words[16];
+	uint8_t		rk_keys[4][16];
+	uint32_t	rk_words[16];
 };
 
 #define	RTW_LED_SLOW_TICKS	MAX(1, hz/2)
@@ -344,29 +404,30 @@ union rtw_keys {
 struct rtw_led_state {
 #define	RTW_LED0	0x1
 #define	RTW_LED1	0x2
-	u_int8_t	ls_slowblink:2;
-	u_int8_t	ls_actblink:2;
-	u_int8_t	ls_default:2;
-	u_int8_t	ls_state;
-	u_int8_t	ls_event;
+	uint8_t		ls_slowblink:2;
+	uint8_t		ls_actblink:2;
+	uint8_t		ls_default:2;
+	uint8_t		ls_state;
+	uint8_t		ls_event;
 #define	RTW_LED_S_RX	0x1
 #define	RTW_LED_S_TX	0x2
 #define	RTW_LED_S_SLOW	0x4
-	struct timeout	ls_slow_ch;
-	struct timeout	ls_fast_ch;
+	struct callout	ls_slow_ch;
+	struct callout	ls_fast_ch;
 };
 
 struct rtw_softc {
-	struct device		sc_dev;
+	device_t		sc_dev;
+	struct ethercom		sc_ec;
 	struct ieee80211com	sc_ic;
 	struct rtw_regs		sc_regs;
 	bus_dma_tag_t		sc_dmat;
-	u_int32_t		sc_flags;
+	uint32_t		sc_flags;
 
-	int			sc_rfchipid;
+	enum rtw_attach_state	sc_attach_state;
+	enum rtw_rfchipid	sc_rfchipid;
 	enum rtw_locale		sc_locale;
-	u_int8_t		sc_phydelay;
-	struct rtw_bbpset       sc_bbpset;
+	uint8_t		sc_phydelay;
 
 	/* s/w Tx/Rx descriptors */
 	struct rtw_txsoft_blk	sc_txsoft_blk[RTW_NTXPRI];
@@ -388,60 +449,48 @@ struct rtw_softc {
 
 	rtw_pwrstate_t		sc_pwrstate_cb;
 
-	u_int16_t		sc_inten;
-	int			(*sc_rf_init)(struct rtw_softc *, u_int,
-				    u_int8_t, enum rtw_pwrstate);
-	int			(*sc_rf_pwrstate)(struct rtw_softc *,
-				    enum rtw_pwrstate);
-	int			(*sc_rf_tune)(struct rtw_softc *, u_int);
-	int			(*sc_rf_txpower)(struct rtw_softc *, u_int8_t);
+	struct rtw_rf		*sc_rf;
+
+	uint16_t		sc_inten;
 
 	/* interrupt acknowledge hook */
-	void			(*sc_intr_ack)(struct rtw_regs *);
+	void (*sc_intr_ack)(struct rtw_regs *);
 
-	int			(*sc_enable)(struct rtw_softc *);
-	void			(*sc_disable)(struct rtw_softc *);
-	void			(*sc_power)(struct rtw_softc *, int);
 	struct rtw_mtbl		sc_mtbl;
-	struct rtw_hooks	sc_hooks;
 
-	caddr_t			sc_radiobpf;
+	void *			sc_radiobpf;
 
-	struct timeval		sc_last_beacon;
-	struct timeout		sc_scan_to;
+	struct callout		sc_scan_ch;
 	u_int			sc_cur_chan;
 
-	u_int32_t		sc_tsfth;	/* most significant TSFT bits */
-	u_int32_t		sc_rcr;		/* RTW_RCR */
-	u_int8_t		sc_csthr;	/* carrier-sense threshold */
+	uint32_t		sc_tsfth;	/* most significant TSFT bits */
+	uint32_t		sc_rcr;		/* RTW_RCR */
+	uint8_t		sc_csthr;	/* carrier-sense threshold */
 
 	int			sc_do_tick;	/* indicate 1s ticks */
 	struct timeval		sc_tick0;	/* first tick */
 
-	u_int8_t		sc_rev;		/* PCI/Cardbus revision */
+	uint8_t			sc_rev;		/* PCI/Cardbus revision */
 
-	u_int32_t		sc_anaparm[2];	/* RTW_ANAPARM_? registers */
+	uint32_t		sc_anaparm;	/* register RTW_ANAPARM */
 
 	union {
 		struct rtw_rx_radiotap_header	tap;
-		u_int8_t			pad[64];
+		uint8_t			pad[64];
 	} sc_rxtapu;
 	union {
 		struct rtw_tx_radiotap_header	tap;
-		u_int8_t			pad[64];
+		uint8_t			pad[64];
 	} sc_txtapu;
 	union rtw_keys		sc_keys;
-	int			sc_txkey;
 	struct ifqueue		sc_beaconq;
 	struct rtw_led_state	sc_led_state;
-	u_int			sc_hwverid;
+	int			sc_hwverid;
 };
 
-#define	sc_if		sc_ic.ic_if
+#define	sc_if		sc_ec.ec_if
 #define sc_rxtap	sc_rxtapu.tap
 #define sc_txtap	sc_txtapu.tap
-
-extern int rtw_host_rfio;
 
 void rtw_txdac_enable(struct rtw_softc *, int);
 void rtw_anaparm_enable(struct rtw_regs *, int);
@@ -453,12 +502,10 @@ void rtw_attach(struct rtw_softc *);
 int rtw_detach(struct rtw_softc *);
 int rtw_intr(void *);
 
-void rtw_disable(struct rtw_softc *);
-int rtw_enable(struct rtw_softc *);
+bool rtw_suspend(device_t PMF_FN_PROTO);
+bool rtw_resume(device_t PMF_FN_PROTO);
 
-int rtw_activate(struct device *, enum devact);
-void rtw_power(int, void *);
-void rtw_shutdown(void *);
+int rtw_activate(device_t, enum devact);
 
 const char *rtw_pwrstate_string(enum rtw_pwrstate);
 

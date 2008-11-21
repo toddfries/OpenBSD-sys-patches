@@ -1,5 +1,4 @@
-/*	$OpenBSD: rtl80x9.c,v 1.7 2003/06/25 17:35:36 miod Exp $	*/
-/*	$NetBSD: rtl80x9.c,v 1.1 1998/10/31 00:44:33 thorpej Exp $	*/
+/*	$NetBSD: rtl80x9.c,v 1.14 2008/04/28 20:23:51 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "bpfilter.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rtl80x9.c,v 1.14 2008/04/28 20:23:51 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,14 +41,11 @@
 #include <sys/device.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
-
-#include <machine/bus.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/ic/dp8390reg.h>
 #include <dev/ic/dp8390var.h>
@@ -85,7 +75,7 @@ rtl80x9_mediastatus(sc, ifmr)
 	struct dp8390_softc *sc;
 	struct ifmediareq *ifmr;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ec.ec_if;
 	u_int8_t cr_proto = sc->cr_proto |
 	    ((ifp->if_flags & IFF_RUNNING) ? ED_CR_STA : ED_CR_STP);
 
@@ -116,7 +106,7 @@ rtl80x9_init_card(sc)
 	struct dp8390_softc *sc;
 {
 	struct ifmedia *ifm = &sc->sc_media;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ec.ec_if;
 	u_int8_t cr_proto = sc->cr_proto |
 	    ((ifp->if_flags & IFF_RUNNING) ? ED_CR_STA : ED_CR_STP);
 	u_int8_t reg;
@@ -181,33 +171,40 @@ rtl80x9_media_init(sc)
 	int i, defmedia;
 	u_int8_t conf2, conf3;
 
-	/* Set NIC to page 3 registers. */
+	aprint_normal_dev(sc->sc_dev,
+	    "10base2, 10baseT, 10baseT-FDX, auto, default ");
+
 	bus_space_write_1(sc->sc_regt, sc->sc_regh, ED_P0_CR, ED_CR_PAGE_3);
 
 	conf2 = bus_space_read_1(sc->sc_regt, sc->sc_regh, NERTL_RTL3_CONFIG2);
 	conf3 = bus_space_read_1(sc->sc_regt, sc->sc_regh, NERTL_RTL3_CONFIG3);
+	printf("[0x%02x 0x%02x] ", conf2, conf3);
 
 	conf2 &= RTL3_CONFIG2_PL1|RTL3_CONFIG2_PL0;
 
 	switch (conf2) {
-	case 0:
+	default:
 		defmedia = IFM_ETHER|IFM_AUTO;
+		printf("auto\n");
 		break;
 
 	case RTL3_CONFIG2_PL1|RTL3_CONFIG2_PL0:
 	case RTL3_CONFIG2_PL1:	/* XXX rtl docs sys 10base5, but chip cant do */
 		defmedia = IFM_ETHER|IFM_10_2;
+		printf("10base2\n");
 		break;
 
 	case RTL3_CONFIG2_PL0:
-		if (conf3 & RTL3_CONFIG3_FUDUP)
+		if (conf3 & RTL3_CONFIG3_FUDUP) {
 			defmedia = IFM_ETHER|IFM_10_T|IFM_FDX;
-		else
+			printf("10baseT-FDX\n");
+		} else {
 			defmedia = IFM_ETHER|IFM_10_T;
+			printf("10baseT\n");
+		}
 		break;
 	}
 
-	/* Set NIC to page 0 registers. */
 	bus_space_write_1(sc->sc_regt, sc->sc_regh, ED_P0_CR, ED_CR_PAGE_0);
 
 	ifmedia_init(&sc->sc_media, 0, dp8390_mediachange, dp8390_mediastatus);

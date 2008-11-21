@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_aereg.h,v 1.8 2007/01/22 13:17:45 martin Exp $	*/
 /*	$NetBSD: if_aereg.h,v 1.17 1998/08/12 07:19:09 scottr Exp $	*/
 
 /*

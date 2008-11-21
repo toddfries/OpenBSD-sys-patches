@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_exec.h,v 1.7 2004/04/15 00:22:42 tedu Exp $	*/
+/*	$NetBSD: freebsd_exec.h,v 1.16 2008/11/19 18:36:02 ad Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -35,6 +35,7 @@
 #ifndef	_FREEBSD_EXEC_H
 #define	_FREEBSD_EXEC_H
 
+#ifdef EXEC_AOUT
 #define FREEBSD_N_GETMAGIC(ex) \
 	( (ex).a_midmag & 0xffff )
 #define FREEBSD_N_GETMID(ex) \
@@ -62,7 +63,7 @@
 #define FREEBSD_N_TXTADDR(ex) \
 	((FREEBSD_N_GETMAGIC(ex) == OMAGIC || \
 	  FREEBSD_N_GETMAGIC(ex) == NMAGIC || \
-	  FREEBSD_N_GETMAGIC(ex) == ZMAGIC) ? 0 : __LDPGSZ)
+	  FREEBSD_N_GETMAGIC(ex) == ZMAGIC) ? 0 : AOUT_LDPGSZ)
 
 /* Address of the bottom of the data segment. */
 #define FREEBSD_N_DATADDR(ex) \
@@ -70,8 +71,8 @@
 
 /* Text segment offset. */
 #define	FREEBSD_N_TXTOFF(ex) \
-	(FREEBSD_N_GETMAGIC(ex) == ZMAGIC ? __LDPGSZ : \
-	 FREEBSD_N_GETMAGIC(ex) == QMAGIC ? 0 : sizeof(struct exec)) 
+	(FREEBSD_N_GETMAGIC(ex) == ZMAGIC ? AOUT_LDPGSZ : \
+	 FREEBSD_N_GETMAGIC(ex) == QMAGIC ? 0 : sizeof(struct exec))
 
 /* Data segment offset. */
 #define	FREEBSD_N_DATOFF(ex) \
@@ -88,15 +89,23 @@
 /* String table offset. */
 #define	FREEBSD_N_STROFF(ex) 	(FREEBSD_N_SYMOFF(ex) + (ex).a_syms)
 
-#define FREEBSD_ELF_AUX_ARGSIZ (sizeof(AuxInfo) * 15 / sizeof(char *))
-
 #define	FREEBSD_AOUT_HDR_SIZE	sizeof(struct exec)
 
-int exec_freebsd_aout_makecmds(struct proc *, struct exec_package *);
-int exec_freebsd_elf32_makecmds(struct proc *, struct exec_package *);
-int freebsd_elf_probe(struct proc *, struct exec_package *, char *,
-    u_long *, u_int8_t *);
+int exec_freebsd_aout_makecmds(struct lwp *, struct exec_package *);
+
+#endif /* EXEC_AOUT */
+
+#ifdef EXEC_ELF32
+#define FREEBSD_ELF_BRAND_STRING "FreeBSD"
+#define FREEBSD_ELF_INTERP_PREFIX_STRING "/usr/libexec/ld-elf.so"
+
+int freebsd_elf32_probe(struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *);
+#endif /* EXEC_ELF32 */
+
+void freebsd_setregs(struct lwp *, struct exec_package *, u_long);
 
 extern char freebsd_sigcode[], freebsd_esigcode[];
+extern struct emul emul_freebsd;
 
 #endif /* !_FREEBSD_EXEC_H */

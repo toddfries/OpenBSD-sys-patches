@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.1 2006/04/07 14:21:18 cherry Exp $	*/
+/*	$NetBSD: cpu.h,v 1.6 2008/04/28 20:23:25 martin Exp $	*/
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,7 +75,7 @@
 
 #ifdef _KERNEL
 #include <sys/cpu_data.h>
-#include <sys/cc_microtime.h>
+#include <sys/cctr.h>
 #include <machine/frame.h>
 #include <machine/ia64_cpu.h>
 
@@ -95,8 +88,11 @@ struct cpu_info {
 	 */
 	struct lwp *ci_curlwp;		/* current owner of the processor */
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	struct cc_microtime_state ci_cc;/* cc_microtime state */
+	struct cctr_state ci_cc;	/* cycle counter state */
 	struct cpu_info *ci_next;	/* next cpu_info structure */
+
+	volatile int ci_mtx_count;	/* Negative count of spin mutexes */
+	volatile int ci_mtx_oldspl;	/* Old SPL at this ci_idepth */
 
 	/* XXX: Todo */
 	/*
@@ -117,14 +113,17 @@ struct cpu_info {
 extern struct cpu_info cpu_info_primary;
 
 #ifdef MULTIPROCESSOR
-/* XXX: TODO */
+/*
+ * XXX: TODO use percpu infrastructure that yamt proposed or use KR? for
+ * storing the percpu pointer.
+ */
 #else
 #define	curcpu() (&cpu_info_primary)
 #endif /* MULTIPROCESSOR */
 
 #define cpu_number() 0              /*XXX: FIXME */
 
-#define aston(p)		((p)->p_md.md_astpending = 1)
+#define aston(l) ((l)->l_md.md_astpending = 1)
 
 #define	need_resched(ci)            /*XXX: FIXME */
 
@@ -135,46 +134,47 @@ struct clockframe {
 #define	CLKF_PC(cf)		((cf)->cf_tf.tf_special.iip)
 #define	CLKF_CPL(cf)		((cf)->cf_tf.tf_special.psr & IA64_PSR_CPL)
 #define	CLKF_USERMODE(cf)	(CLKF_CPL(cf) != IA64_PSR_CPL_KERN)
-#define	CLKF_BASEPRI(frame)	(0) /*XXX: CHECKME */
 #define	CLKF_INTR(frame)	(curcpu()->ci_intrdepth)
 
 #define	TRAPF_PC(tf)		((tf)->tf_special.iip)
 #define	TRAPF_CPL(tf)		((tf)->tf_special.psr & IA64_PSR_CPL)
 #define	TRAPF_USERMODE(tf)	(TRAPF_CPL(tf) != IA64_PSR_CPL_KERN)
 
-
-
-
-
-
-
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid. XXX:Fixme.... On the ia64 I haven't yet figured 
  * out what to do about this.. XXX.
  */
-
-
-#define	need_proftick(p)
+/* extern void	cpu_need_proftick(struct lwp *l); */
+#define cpu_need_proftick(l)
 
 /*
- * Notify the current process (p) that it has a signal pending,
- * process as soon as possible.
+ * Notify the LWP l that it has a signal pending, process as soon as possible.
  */
-#define	signotify(p)		aston(p)
+#define	cpu_signotify(l)	aston(l)
+
+// void cpu_need_resched(struct cpu_info *ci, int flags)
+#define cpu_need_resched(ci, f) do { \
+} while(0)
 
 #define setsoftclock()              /*XXX: FIXME */
 
 /* machdep.c */
-int	cpu_maxproc(void); /*XXX: Fill in machdep.c */
+int cpu_maxproc(void); /*XXX: Fill in machdep.c */
 
 #define	cpu_proc_fork(p1, p2) /* XXX: Look into this. */
 
+#define DELAY(x)		/* XXX: FIXME */
 
-/* XXX: TODO: generic microtime support kern/kern_microtime.c 
- * #define microtime(tv)	cc_microtime(tv) 
- */
+static inline void cpu_idle(void);
+static inline
+void cpu_idle()
+{
+	asm ("hint @pause" ::: "memory");
+}
 
+/* XXX: revisit later */
+#define __NO_CPU_LWP_FREE
 
 #endif /* _KERNEL_ */
 #endif /* _IA64_CPU_H */

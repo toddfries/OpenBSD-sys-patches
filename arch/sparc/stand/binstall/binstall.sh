@@ -1,6 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: binstall.sh,v 1.3 1998/02/18 08:17:46 deraadt Exp $
-#	$NetBSD: binstall.sh,v 1.3 1996/04/07 20:00:12 thorpej Exp $
+#	$NetBSD: binstall.sh,v 1.15 2006/07/12 21:34:45 he Exp $
 #
 
 vecho () {
@@ -11,31 +10,55 @@ vecho () {
 	return 0
 }
 
+Options () {
+	echo "Options:"
+	echo "	-h		- display this message"
+	echo "	-u		- install sparc64 (UltraSPARC) boot block"
+	echo "	-U		- install sparc boot block"
+	echo "	-b<bootprog>	- second-stage boot program to install"
+	echo "	-f<pathname>	- path to device/file image for filesystem"
+	echo "	-m<path>	- Look for boot programs in <path> (default: /usr/mdec)"
+	echo "	-i<progname>	- Use the installboot program at <progname>"
+	echo "			  (default: /usr/sbin/installboot)"
+	echo "	-v		- verbose mode"
+	echo "	-t		- test mode (implies -v)"
+}
+
 Usage () {
-	echo "Usage: $0 [-hvt] [-m<path>] net|ffs directory"
+	echo "Usage: $0 [options] <"'"net"|"ffs"'"> <directory>"
+	Options
 	exit 1
 }
 
 Help () {
 	echo "This script copies the boot programs to one of several"
-	echo "commonly used places. It takes care of stripping the"
-	echo "a.out(5) header off the installed boot program on sun4 machines."
+	echo "commonly used places."
 	echo "When installing an \"ffs\" boot program, this script also runs"
 	echo "installboot(8) which installs the default proto bootblocks into"
-	echo "the appropriate filesystem partition."
-	echo "Options:"
-	echo "	-h		- display this message"
-	echo "	-m<path>	- Look for boot programs in <path> (default: /usr/mdec)"
-	echo "	-v		- verbose mode"
-	echo "	-t		- test mode (implies -v)"
+	echo "the appropriate filesystem partition or filesystem image."
+	Options
 	exit 0
 }
 
+Secure () {
+	echo "This script has to be run when the kernel is in 'insecure' mode,"
+	echo "or when applying bootblocks to a file image (ala vnd)."
+	echo "The best way is to run this script in single-user mode."
+	exit 1
+}
 
 PATH=/bin:/usr/bin:/sbin:/usr/sbin
-MDEC=${MDEC:-/usr/mdec}
+: ${MDEC:=/usr/mdec}
+: ${INSTALLBOOT:=/usr/sbin/installboot}
+: ${BOOTPROG:=boot}
+: ${OFWBOOTBLK:=ofwboot}
+if [ "`sysctl -n machdep.cpu_arch`" = 9 ]; then
+	ULTRASPARC=1
+else
+	ULTRASPARC=0
+fi
 
-set -- `getopt "hm:tv" "$@"`
+set -- `getopt "b:hf:i:m:tUuv" "$@"`
 if [ $? -gt 0 ]; then
 	Usage
 fi
@@ -44,17 +67,21 @@ for a in $*
 do
 	case $1 in
 	-h) Help; shift ;;
+	-u) ULTRASPARC=1; shift ;;
+	-U) ULTRASPARC=0; shift ;;
+	-b) BOOTPROG=$2; OFWBOOTBLK=$2; shift 2 ;;
+	-f) DEV=$2; shift 2 ;;
 	-m) MDEC=$2; shift 2 ;;
+	-i) INSTALLBOOT=$2; shift 2 ;;
 	-t) TEST=1; VERBOSE=1; shift ;;
 	-v) VERBOSE=1; shift ;;
 	--) shift; break ;;
 	esac
 done
 
-INSTALLBOOT=${INSTALLBOOT:-$MDEC/installboot}
-if [ ! -x $INSTALLBOOT ]; then
-	INSTALLBOOT=/usr/mdec/installboot;
-fi	   
+if [ "`sysctl -n kern.securelevel`" -gt 0 ] && [ ! -f "$DEV" ]; then
+	Secure
+fi
 
 DOIT=${TEST:+echo "=>"}
 
@@ -70,53 +97,59 @@ if [ ! -d $DEST ]; then
 	Usage
 fi
 
-
-SKIP=0
+if [ "$ULTRASPARC" = "1" ]; then
+	machine=sparc64
+	targ=ofwboot
+	stage2=""
+	netboot=ofwboot
+	BOOTPROG=$OFWBOOTBLK
+	BOOTXX=${MDEC}/bootblk
+else
+	machine=sparc
+	targ=boot
+	stage2=${targ}
+	netboot=boot.net
+	BOOTXX=${MDEC}/bootxx
+fi
 
 case $WHAT in
 "ffs")
-	DEV=`mount | while read line; do
-		set -- $line
-		vecho "Inspecting \"$line\""
-		if [ "$2" = "on" -a "$3" = "$DEST" ]; then
-			if [ ! -b $1 ]; then
-				continue
-			fi
-			RAW=\`echo -n "$1" | sed -e 's;/dev/;/dev/r;'\`
-			if [ ! -c \$RAW ]; then
-				continue
-			fi
-			echo -n $RAW
-			break;
-		fi
-	done`
 	if [ "$DEV" = "" ]; then
-		echo "Cannot find \"$DEST\" in mount table"
-		exit 1
+		# Lookup device mounted on DEST
+		DEV=`mount | while read line; do
+			set -- $line
+			vecho "Inspecting \"$line\""
+			if [ "$2" = "on" -a "$3" = "$DEST" ]; then
+				if [ ! -b $1 ]; then
+					continue
+				fi
+				RAW=\`echo -n "$1" | sed -e 's;/dev/;/dev/r;'\`
+				if [ ! -c \$RAW ]; then
+					continue
+				fi
+				echo -n $RAW
+				break;
+			fi
+		done`
+		if [ "$DEV" = "" ]; then
+			echo "Cannot find \"$DEST\" in mount table"
+			exit 1
+		fi
 	fi
-	TARGET=$DEST/boot
-	DEV=`echo $DEV | sed -e 's/a$/c/'`
+
 	vecho Boot device: $DEV
-	vecho Target: $TARGET
-	$DOIT dd if=${MDEC}/boot of=$TARGET bs=32 skip=$SKIP
+	vecho Primary boot program: $BOOTXX
+	vecho Secondary boot program: $DEST/$targ
+
+	$DOIT cp -p -f ${MDEC}/${BOOTPROG} $DEST/$targ
 	sync; sync; sync
-	vecho $INSTALLBOOT ${VERBOSE:+-v} $TARGET ${MDEC}/bootxx $DEV
-	$DOIT $INSTALLBOOT ${VERBOSE:+-v} $TARGET ${MDEC}/bootxx $DEV
+	vecho ${INSTALLBOOT} ${VERBOSE:+-v} -m $machine $DEV ${BOOTXX} $stage2
+	$DOIT ${INSTALLBOOT} ${VERBOSE:+-v} -m $machine $DEV ${BOOTXX} $stage2
 	;;
 
 "net")
-	TARGET=$DEST/boot.sparc.openbsd
-	TMP=/tmp/boot.$$
-	vecho Target: $TARGET
-	vecho Copying to temporary file.
-	cp ${MDEC}/boot $TMP; chmod +w $TMP
-	vecho Stripping $TMP
-	strip $TMP
-	vecho Creating header magic.
-	printf '\01\03\01\07\060\200\0\07' | dd of=$TARGET bs=32 conv=sync
-	vecho Concatenating boot code.
-	dd if=$TMP of=$TARGET bs=32 skip=1 seek=1
-	rm $TMP
+	vecho Network boot program: $DEST/$boot.${machine}.netbsd
+	$DOIT cp -p -f ${MDEC}/$netboot $DEST/$boot.${machine}.netbsd
 	;;
 
 *)

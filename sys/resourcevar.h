@@ -1,5 +1,4 @@
-/*	$OpenBSD: resourcevar.h,v 1.11 2007/03/15 10:22:30 art Exp $	*/
-/*	$NetBSD: resourcevar.h,v 1.12 1995/11/22 23:01:53 cgd Exp $	*/
+/*	$NetBSD: resourcevar.h,v 1.46 2008/10/11 13:40:58 pooka Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -29,28 +28,28 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)resourcevar.h	8.3 (Berkeley) 2/22/94
+ *	@(#)resourcevar.h	8.4 (Berkeley) 1/9/95
  */
 
 #ifndef	_SYS_RESOURCEVAR_H_
 #define	_SYS_RESOURCEVAR_H_
 
-#include <sys/timeout.h>
+#include <sys/mutex.h>
 
 /*
  * Kernel per-process accounting / statistics
- * (not necessarily resident except when running).
  */
 struct pstats {
 #define	pstat_startzero	p_ru
 	struct	rusage p_ru;		/* stats for this proc */
 	struct	rusage p_cru;		/* sum of stats for reaped children */
-	struct	itimerval p_timer[3];	/* virtual-time timers */
 #define	pstat_endzero	pstat_startcopy
 
-#define	pstat_startcopy	p_prof
+#define	pstat_startcopy	p_timer
+	struct	itimerval p_timer[3];	/* virtual-time timers */
+
 	struct uprof {			/* profile arguments */
-		caddr_t	pr_base;	/* buffer base */
+		char *	pr_base;	/* buffer base */
 		size_t  pr_size;	/* buffer size */
 		u_long	pr_off;		/* pc offset */
 		u_int   pr_scale;	/* pc scaling */
@@ -59,8 +58,6 @@ struct pstats {
 	} p_prof;
 #define	pstat_endcopy	p_start
 	struct	timeval p_start;	/* starting time */
-	struct	timeout p_virt_to;	/* virtual itimer trampoline. */
-	struct	timeout p_prof_to;	/* prof itimer trampoline. */
 };
 
 /*
@@ -70,34 +67,56 @@ struct pstats {
  * ("threads") share modifications, the PL_SHAREMOD flag is set,
  * and a copy must be made for the child of a new fork that isn't
  * sharing modifications to the limits.
+ *
+ * The PL_xxx flags are never cleared, once either is set p->p_limit
+ * will never be changed again.
  */
 struct plimit {
 	struct	rlimit pl_rlimit[RLIM_NLIMITS];
+	char	*pl_corename;
 #define	PL_SHAREMOD	0x01		/* modifications are shared */
-	int	p_lflags;
-	int	p_refcnt;		/* number of references */
+#define	PL_WRITEABLE	0x02		/* private to this process */
+	int	pl_flags;
+	int	pl_refcnt;		/* number of references */
+	kmutex_t pl_lock;		/* mutex for pl_refcnt */
+	struct plimit *pl_sv_limit;	/* saved when PL_WRITEABLE set */
 };
 
-/* add user profiling from AST */
+/* add user profiling from AST XXXSMP */
 #define	ADDUPROF(p)							\
-do {									\
-	atomic_clearbits_int(&(p)->p_flag, P_OWEUPC);			\
-	addupc_task((p), (p)->p_stats->p_prof.pr_addr,			\
-	    (p)->p_stats->p_prof.pr_ticks);				\
-	(p)->p_stats->p_prof.pr_ticks = 0;				\
-} while (0)
+	do {								\
+		struct proc *_p = l->l_proc;				\
+		addupc_task(l,						\
+		    (_p)->p_stats->p_prof.pr_addr,			\
+		    (_p)->p_stats->p_prof.pr_ticks);			\
+		(_p)->p_stats->p_prof.pr_ticks = 0;			\
+	} while (/* CONSTCOND */ 0)
 
 #ifdef _KERNEL
-void	 addupc_intr(struct proc *p, u_long pc);
-void	 addupc_task(struct proc *p, u_long pc, u_int ticks);
-void	 calcru(struct proc *p, struct timeval *up, struct timeval *sp,
-	    struct timeval *ip);
-struct plimit *limcopy(struct plimit *lim);
+extern char defcorename[];
+
+extern int security_setidcore_dump;
+extern char security_setidcore_path[];
+extern uid_t security_setidcore_owner;
+extern gid_t security_setidcore_group;
+extern mode_t security_setidcore_mode;
+
+void	addupc_intr(struct lwp *, u_long);
+void	addupc_task(struct lwp *, u_long, u_int);
+void	calcru(struct proc *, struct timeval *, struct timeval *,
+	    struct timeval *, struct timeval *);
+
+struct plimit *lim_copy(struct plimit *lim);
+void	lim_addref(struct plimit *lim);
+void	lim_privatise(struct proc *p, bool set_shared);
 void	limfree(struct plimit *);
 
-void	 ruadd(struct rusage *ru, struct rusage *ru2);
-
-void	virttimer_trampoline(void *);
-void	proftimer_trampoline(void *);
+void	resource_init(void);
+void	ruadd(struct rusage *, struct rusage *);
+void	rulwps(proc_t *, struct rusage *);
+struct	pstats *pstatscopy(struct pstats *);
+void 	pstatsfree(struct pstats *);
+extern rlim_t maxdmap;
+extern rlim_t maxsmap;
 #endif
 #endif	/* !_SYS_RESOURCEVAR_H_ */

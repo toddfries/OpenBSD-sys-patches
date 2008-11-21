@@ -1,22 +1,21 @@
-/* $OpenBSD: tcdsreg.h,v 1.3 2007/05/26 00:36:03 krw Exp $ */
-/* $NetBSD: tcdsreg.h,v 1.1 2000/07/04 02:22:20 nisimura Exp $ */
+/* $NetBSD: tcdsreg.h,v 1.7 2005/12/11 12:24:00 christos Exp $ */
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
  * All rights reserved.
  *
  * Authors: Keith Bostic, Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -136,9 +135,9 @@ void tcds_scsi_reset(int);
 /*
  * XXX
  * Start of MACH #defines, minimal changes to port to NetBSD.
- * 
+ *
  * The following register is the SCSI control interrupt register.  It
- * starts, stops and resets scsi DMA.  It takes over the SCSI functions
+ * starts, stops and resets scsi DMA.  It takes over the SCSI funtions
  * that were handled by the ASIC on the 3min.
  */
 #define KN15AA_SYS_SCSI		0x1d0000000
@@ -198,14 +197,14 @@ void tcds_scsi_reset(int);
 
 #define KN15AA_REG_SCSI_IMER	(KN15AA_SYS_SCSI + 0x80008)
 
-/* these are the bits that were unaligned at the beginning of the dma */
+/* these are the bits that were unalligned at the beginning of the DMA */
 #define KN15AA_REG_SCSI_DUDB0	(KN15AA_SYS_SCSI + 0x82010)
 #define KN15AA_REG_SCSI_DUDB1	(KN15AA_SYS_SCSI + 0x82210)
 #	define SCSI_DUDB_MASK01	0x00000001 /* Mask bit for byte[01] */
 #	define SCSI_DUDB_MASK10	0x00000002 /* Mask bit for byte[10] */
 #	define SCSI_DUDB_MASK11	0x00000004 /* Mask bit for byte[11] */
 
-/* these are the bits that were unaligned at the end of the dma */
+/* these are the bits that were unalligned at the end of the DMA */
 #define KN15AA_REG_SCSI_DUDE0	(KN15AA_SYS_SCSI + 0x82018)
 #define KN15AA_REG_SCSI_DUDE1	(KN15AA_SYS_SCSI + 0x82218)
 #	define SCSI_DUDE_MASK00	0x1000000 /* Mask bit for byte[00] */

@@ -1,4 +1,6 @@
-/*	$OpenBSD: signal.h,v 1.7 2006/01/08 14:20:17 millert Exp $	*/
+/*	$NetBSD: signal.h,v 1.5 2005/12/11 12:17:37 christos Exp $	*/
+
+/*	$OpenBSD: signal.h,v 1.1 1998/06/23 19:45:27 mickey Exp $	*/
 
 /* 
  * Copyright (c) 1994, The University of Utah and
@@ -23,22 +25,23 @@
  * 	Utah $Hdr: signal.h 1.3 94/12/16$
  */
 
-#ifndef	_HPPA_SIGNAL_H_
-#define	_HPPA_SIGNAL_H_
-
-#include <sys/cdefs.h>
+#ifndef _HPPA_SIGNAL_H__
+#define _HPPA_SIGNAL_H__
 
 /*
  * Machine-dependent signal definitions
  */
 
+#include <sys/featuretest.h>
+
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
-#include <machine/trap.h>
+#define __HAVE_SIGINFO
+
+#if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
+#include <machine/trap.h>	/* codes for SIGILL, SIGFPE */
 #endif
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -47,15 +50,60 @@ typedef int sig_atomic_t;
  * a non-standard exit is performed.
  */
 struct	sigcontext {
-	unsigned	sc_onstack;	/* sigstack state to restore */
-	unsigned	sc_mask;	/* signal mask to restore */
-	unsigned	sc_ps;		/* psl to restore */
-	unsigned	sc_fp;		/* fp to restore */
-	unsigned	sc_pcoqh;	/* pc offset queue (head) to restore */
-	unsigned	sc_pcoqt;	/* pc offset queue (tail) to restore */
-	unsigned	sc_resv[2];
-	unsigned	sc_regs[32];
-	unsigned	sc_fpregs[64];
+	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_mask13;		/* signal mask to restore (old style) */
+	int	sc_sp;			/* sp to restore */
+	int	sc_fp;			/* fp to restore */
+	int	sc_ap;			/* ap to restore */
+	int	sc_pcsqh;		/* pc space queue (head) to restore */
+	int	sc_pcoqh;		/* pc offset queue (head) to restore */
+	int	sc_pcsqt;		/* pc space queue (tail) to restore */
+	int	sc_pcoqt;		/* pc offset queue (tail) to restore */
+	int	sc_ps;			/* psl to restore */
+	sigset_t sc_mask;		/* signal mask to restore (new style) */
 };
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
-#endif  /* !_HPPA_SIGNAL_H_ */
+
+#if defined(_KERNEL)
+#include <hppa/frame.h>
+
+/*
+ * Register state saved while kernel delivers a signal.
+ */
+struct sigstate {
+	int	ss_flags;		/* which of the following are valid */
+	struct trapframe ss_frame;	/* original exception frame */
+};
+
+#define	SS_FPSTATE	0x01
+#define	SS_USERREGS	0x02
+
+/*
+ * Stack frame layout when delivering a signal.
+ */
+struct sigframe {
+	struct sigcontext sf_sc;	/* actual context */
+	struct sigstate sf_state;	/* state of the hardware */
+	/*
+	 * Everything below here must match the calling convention.
+	 * Per that convention, sendsig must initialize very little;
+	 * only sf_psp, sf_clup, sf_sl, and sf_edp must be set.
+	 * Note that this layout matches the HPPA_FRAME_ macros
+	 * in frame.h.
+	 */
+	u_int	sf_arg3;
+	u_int	sf_arg2;
+	u_int	sf_arg1;
+	u_int	sf_arg0;
+	u_int	sf_edp;
+	u_int	sf_esr4;
+	u_int	sf_erp;
+	u_int	sf_crp;
+	u_int	sf_sl;
+	u_int	sf_clup;
+	u_int	sf_ep;
+	u_int	sf_psp;
+};
+
+#endif /* _KERNEL */
+
+#endif /* _HPPA_SIGNAL_H__ */

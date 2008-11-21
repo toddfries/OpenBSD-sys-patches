@@ -1,22 +1,50 @@
-/*	$OpenBSD: float.h,v 1.7 2004/01/02 14:39:01 mickey Exp $	*/
-/*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)float.h: Revision: 2.14.88.2 Date: 93/12/08 13:27:42 */
+/*	$NetBSD: float.h,v 1.3 2005/12/11 12:17:40 christos Exp $	*/
 
+/*	$OpenBSD: float.h,v 1.4 2001/03/29 03:58:18 mickey Exp $	*/
+
+/*
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
+
+#include <sys/types.h>
 #include <machine/float.h>
-#include "fpbits.h"
-#include "hppa.h"
+
+#include "../spmath/fpbits.h"
+#include "../spmath/hppa.h"
 
 /*
  * Declare the basic structures for the 3 different
@@ -305,33 +333,28 @@ typedef struct dint dbl_integer;
  * Define the different precisions' parameters.
  */
 #define SGL_BITLENGTH 32
-#define SGL_EMAX 127
 #define SGL_BIAS 127
 #define SGL_WRAP 192
-#define SGL_INFINITY_EXPONENT (SGL_EMAX+SGL_BIAS+1)
+#define SGL_INFINITY_EXPONENT (FLT_MAX_EXP+SGL_BIAS+1)
 #define SGL_THRESHOLD 32
 #define SGL_EXP_LENGTH 8
 #define SGL_P 24
 
 #define DBL_BITLENGTH 64
-#define DBL_EMAX 1023
 #define DBL_BIAS 1023
 #define DBL_WRAP 1536
-#define DBL_INFINITY_EXPONENT (DBL_EMAX+DBL_BIAS+1)
+#define DBL_INFINITY_EXPONENT (DBL_MAX_EXP+DBL_BIAS+1)
 #define DBL_THRESHOLD 64
 #define DBL_EXP_LENGTH 11
 #define DBL_P 53
 
 #define QUAD_BITLENGTH 128
-#define QUAD_EMAX 16383
 #define QUAD_BIAS 16383
 #define QUAD_WRAP 24576
-#define QUAD_INFINITY_EXPONENT (QUAD_EMAX+QUAD_BIAS+1)
+#define QUAD_INFINITY_EXPONENT (LDBL_MAX_EXP+QUAD_BIAS+1)
 #define QUAD_P 113
 
 /* Boolean Values etc. */
-#define FALSE 0
-#define TRUE (!FALSE)
 #define NOT !
 #define XOR ^
 
@@ -473,3 +496,4 @@ typedef struct dint dbl_integer;
 #define Ext_negate(extent) \
     (int )Extall(extent) = 0 - (int )Extall(extent)
 #define Ext_setone_low(extent) Bitfield_deposit(1,31,1,extent)
+

@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_machdep.c,v 1.31 2005/12/11 12:20:16 christos Exp $ */
+/*	$NetBSD: linux_machdep.c,v 1.39 2008/04/28 20:23:43 martin Exp $ */
 
 /*-
  * Copyright (c) 1995, 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.31 2005/12/11 12:20:16 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.39 2008/04/28 20:23:43 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,7 +50,6 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.31 2005/12/11 12:20:16 christos 
 #include <sys/mount.h>
 #include <sys/vnode.h>
 #include <sys/device.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/filedesc.h>
 #include <sys/exec_elf.h>
@@ -75,7 +67,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.31 2005/12/11 12:20:16 christos 
 
 #include <compat/linux/linux_syscallargs.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/fpu.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
@@ -98,10 +90,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.31 2005/12/11 12:20:16 christos 
  * entry uses NetBSD's native setregs instead of linux_setregs
  */
 void
-linux_setregs(l, pack, stack)
-	struct lwp *l;
-	struct exec_package *pack;
-	u_long stack;
+linux_setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	setregs(l, pack, stack);
 }
@@ -128,7 +117,7 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	struct linux_pt_regs linux_regs;
 	struct linux_sigcontext sc;
 	register_t fp;
-	int onstack;
+	int onstack, error;
 	int i;
 
 	tf = trapframe(l);
@@ -137,7 +126,7 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 * Do we need to jump onto the signal stack?
 	 */
 	onstack =
-	    (p->p_sigctx.ps_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
 	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 
 	/*
@@ -151,8 +140,8 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 */
 	if (onstack) {
 		fp = (register_t)
-		    ((caddr_t)p->p_sigctx.ps_sigstk.ss_sp +
-		    p->p_sigctx.ps_sigstk.ss_size);
+		    ((char *)l->l_sigstk.ss_sp +
+		    l->l_sigstk.ss_size);
 	} else {
 		fp = tf->fixreg[1];
 	}
@@ -212,11 +201,16 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 * binaries. But the Linux kernel seems to do without it, and it
 	 * just skip it when building the stack frame. Hence the LINUX_ABIGAP.
 	 */
-	if (copyout(&frame, (caddr_t)fp, sizeof (frame) - LINUX_ABIGAP) != 0) {
+	sendsig_reset(l, sig);
+	mutex_exit(p->p_lock);
+	error = copyout(&frame, (void *)fp, sizeof (frame) - LINUX_ABIGAP);
+
+	if (error != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
+		mutex_enter(p->p_lock);
 		sigexit(l, SIGILL);
 		/* NOTREACHED */
 	}
@@ -225,7 +219,10 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 * Add a sigcontext on the stack
 	 */
 	fp -= sizeof(struct linux_sigcontext);
-	if (copyout(&sc, (caddr_t)fp, sizeof (struct linux_sigcontext)) != 0) {
+	error = copyout(&sc, (void *)fp, sizeof (struct linux_sigcontext));
+	mutex_enter(p->p_lock);
+
+	if (error != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -251,7 +248,7 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 * Remember that we're now on the signal stack.
 	 */
 	if (onstack)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 #ifdef DEBUG_LINUX
 	printf("linux_sendsig: exitting. fp=0x%lx\n",(long)fp);
 #endif
@@ -270,14 +267,11 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
  * XXX not tested
  */
 int
-linux_sys_rt_sigreturn(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_rt_sigreturn(struct lwp *l, const struct linux_sys_rt_sigreturn_args *uap, register_t *retval)
 {
-	struct linux_sys_rt_sigreturn_args /* {
+	/* {
 		syscallarg(struct linux_rt_sigframe *) sfp;
-	} */ *uap = v;
+	} */
 	struct proc *p = l->l_proc;
 	struct linux_rt_sigframe *scp, sigframe;
 	struct linux_sigregs sregs;
@@ -296,20 +290,19 @@ linux_sys_rt_sigreturn(l, v, retval)
 	/*
 	 * Get the context from user stack
 	 */
-	if (copyin((caddr_t)scp, &sigframe, sizeof(*scp)))
+	if (copyin((void *)scp, &sigframe, sizeof(*scp)))
 		return (EFAULT);
 
 	/*
 	 *  Restore register context.
 	 */
-	if (copyin((caddr_t)sigframe.luc.luc_context.lregs,
+	if (copyin((void *)sigframe.luc.luc_context.lregs,
 		   &sregs, sizeof(sregs)))
 		return (EFAULT);
 	lregs = (struct linux_pt_regs *)&sregs.lgp_regs;
 
 	tf = trapframe(l);
 #ifdef DEBUG_LINUX
-	printf("linux_sys_sigreturn: trapframe=0x%lx scp=0x%lx\n",
 	    (unsigned long)tf, (unsigned long)scp);
 #endif
 
@@ -330,8 +323,10 @@ linux_sys_rt_sigreturn(l, v, retval)
 	 */
 	save_fpu_lwp(curlwp, FPU_DISCARD);
 
-	memcpy(curpcb->pcb_fpu.fpreg, (caddr_t)&sregs.lfp_regs,
+	memcpy(curpcb->pcb_fpu.fpreg, (void *)&sregs.lfp_regs,
 	       sizeof(curpcb->pcb_fpu.fpreg));
+
+	mutex_enter(p->p_lock);
 
 	/*
 	 * Restore signal stack.
@@ -342,15 +337,17 @@ linux_sys_rt_sigreturn(l, v, retval)
 	 * It seems to be supported in libc6...
 	 */
 	/* if (sc.sc_onstack & SS_ONSTACK)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 	else */
-		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/*
 	 * Grab the signal mask
 	 */
 	linux_to_native_sigset(&mask, &sigframe.luc.luc_sigmask);
-	(void) sigprocmask1(p, SIG_SETMASK, &mask, 0);
+	(void) sigprocmask1(l, SIG_SETMASK, &mask, 0);
+
+	mutex_exit(p->p_lock);
 
 	return (EJUSTRETURN);
 }
@@ -360,14 +357,11 @@ linux_sys_rt_sigreturn(l, v, retval)
  * The following needs code review for potential security issues
  */
 int
-linux_sys_sigreturn(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_sigreturn(struct lwp *l, const struct linux_sys_sigreturn_args *uap, register_t *retval)
 {
-	struct linux_sys_sigreturn_args /* {
+	/* {
 		syscallarg(struct linux_sigcontext *) scp;
-	} */ *uap = v;
+	} */
 	struct proc *p = l->l_proc;
 	struct linux_sigcontext *scp, context;
 	struct linux_sigregs sregs;
@@ -392,7 +386,7 @@ linux_sys_sigreturn(l, v, retval)
 	/*
 	 *  Restore register context.
 	 */
-	if (copyin((caddr_t)context.lregs, &sregs, sizeof(sregs)))
+	if (copyin((void *)context.lregs, &sregs, sizeof(sregs)))
 		return (EFAULT);
 	lregs = (struct linux_pt_regs *)&sregs.lgp_regs;
 
@@ -419,8 +413,10 @@ linux_sys_sigreturn(l, v, retval)
 	 */
 	save_fpu_lwp(curlwp, FPU_DISCARD);
 
-	memcpy(curpcb->pcb_fpu.fpreg, (caddr_t)&sregs.lfp_regs,
+	memcpy(curpcb->pcb_fpu.fpreg, (void *)&sregs.lfp_regs,
 	       sizeof(curpcb->pcb_fpu.fpreg));
+
+	mutex_enter(p->p_lock);
 
 	/*
 	 * Restore signal stack.
@@ -430,15 +426,17 @@ linux_sys_sigreturn(l, v, retval)
 	 */
 #if 0
 	if (sc.sc_onstack & SS_ONSTACK)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 	else
 #endif
-		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	linux_old_extra_to_native_sigset(&mask, &context.lmask,
 	    &context._unused[3]);
-	(void) sigprocmask1(p, SIG_SETMASK, &mask, 0);
+	(void) sigprocmask1(l, SIG_SETMASK, &mask, 0);
+
+	mutex_exit(p->p_lock);
 
 	return (EJUSTRETURN);
 }
@@ -446,10 +444,7 @@ linux_sys_sigreturn(l, v, retval)
 
 #if 0
 int
-linux_sys_modify_ldt(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+linux_sys_modify_ldt(struct proc *p, void *v, register_t *retval)
 {
 	/*
 	 * This syscall is not implemented in Linux/PowerPC: we should not
@@ -466,9 +461,7 @@ linux_sys_modify_ldt(p, v, retval)
  * major device numbers remapping
  */
 dev_t
-linux_fakedev(dev, raw)
-	dev_t dev;
-	int raw;
+linux_fakedev(dev_t dev, int raw)
 {
 	/* XXX write me */
 	return dev;
@@ -478,16 +471,13 @@ linux_fakedev(dev, raw)
  * We come here in a last attempt to satisfy a Linux ioctl() call
  */
 int
-linux_machdepioctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_machdepioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, register_t *retval)
 {
-	struct linux_sys_ioctl_args /* {
+	/* {
 		syscallarg(int) fd;
 		syscallarg(u_long) com;
-		syscallarg(caddr_t) data;
-	} */ *uap = v;
+		syscallarg(void *) data;
+	} */
 	struct sys_ioctl_args bia;
 	u_long com;
 
@@ -511,10 +501,7 @@ linux_machdepioctl(l, v, retval)
  * to rely on I/O permission maps, which are not implemented.
  */
 int
-linux_sys_iopl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_iopl(struct lwp *l, const void *v, register_t *retval)
 {
 	/*
 	 * This syscall is not implemented in Linux/PowerPC: we should not be here
@@ -531,10 +518,7 @@ linux_sys_iopl(l, v, retval)
  * just let it have the whole range.
  */
 int
-linux_sys_ioperm(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_ioperm(struct lwp *l, const struct linux_sys_ioperm_args *uap, register_t *retval)
 {
 	/*
 	 * This syscall is not implemented in Linux/PowerPC: we should not be here
@@ -549,24 +533,18 @@ linux_sys_ioperm(l, v, retval)
  * wrapper linux_sys_new_uname() -> linux_sys_uname()
  */
 int
-linux_sys_new_uname(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_new_uname(struct lwp *l, const struct linux_sys_new_uname_args *uap, register_t *retval)
 {
-	return linux_sys_uname(l, v, retval);
+	return linux_sys_uname(l, (const void *)uap, retval);
 }
 
 /*
  * wrapper linux_sys_new_select() -> linux_sys_select()
  */
 int
-linux_sys_new_select(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_new_select(struct lwp *l, const struct linux_sys_new_select_args *uap, register_t *retval)
 {
-	return linux_sys_select(l, v, retval);
+	return linux_sys_select(l, (const void *)uap, retval);
 }
 
 int

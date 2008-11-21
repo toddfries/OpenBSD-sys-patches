@@ -1,4 +1,4 @@
-/*	$OpenBSD: clockreg.h,v 1.4 2003/06/02 23:27:51 millert Exp $ */
+/*	$NetBSD: clockreg.h,v 1.3 2005/12/11 12:18:19 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993

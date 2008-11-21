@@ -1,4 +1,4 @@
-/*	$NetBSD: sysv_sem_14.c,v 1.10 2006/07/23 22:06:08 ad Exp $	*/
+/*	$NetBSD: sysv_sem_14.c,v 1.14 2008/04/28 20:23:41 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysv_sem_14.c,v 1.10 2006/07/23 22:06:08 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysv_sem_14.c,v 1.14 2008/04/28 20:23:41 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,18 +44,12 @@ __KERNEL_RCSID(0, "$NetBSD: sysv_sem_14.c,v 1.10 2006/07/23 22:06:08 ad Exp $");
 #define	SYSVSEM
 #endif
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/sys/sem.h>
 
-static void semid_ds14_to_native __P((struct semid_ds14 *, struct semid_ds *));
-static void native_to_semid_ds14 __P((struct semid_ds *, struct semid_ds14 *));
-
-static void
-semid_ds14_to_native(osembuf, sembuf)
-	struct semid_ds14 *osembuf;
-	struct semid_ds *sembuf;
+void
+semid_ds14_to_native(struct semid_ds14  *osembuf, struct semid_ds *sembuf)
 {
 
 	ipc_perm14_to_native(&osembuf->sem_perm, &sembuf->sem_perm);
@@ -74,12 +61,11 @@ semid_ds14_to_native(osembuf, sembuf)
 #undef CVT
 }
 
-static void
-native_to_semid_ds14(sembuf, osembuf)
-	struct semid_ds *sembuf;
-	struct semid_ds14 *osembuf;
+void
+native_to_semid_ds14(struct semid_ds *sembuf, struct semid_ds14 *osembuf)
 {
 
+	memset(sembuf, 0, sizeof *sembuf);
 	native_to_ipc_perm14(&sembuf->sem_perm, &osembuf->sem_perm);
 
 #define	CVT(x)	osembuf->x = sembuf->x
@@ -90,34 +76,23 @@ native_to_semid_ds14(sembuf, osembuf)
 }
 
 int
-compat_14_sys___semctl(struct lwp *l, void *v, register_t *retval)
+compat_14_sys___semctl(struct lwp *l, const struct compat_14_sys___semctl_args *uap, register_t *retval)
 {
-	struct compat_14_sys___semctl_args /* {
+	/* {
 		syscallarg(int) semid;
 		syscallarg(int) semnum;
 		syscallarg(int) cmd;
 		syscallarg(union __semun *) arg;
-	} */ *uap = v;
+	} */
 	union __semun arg;
 	struct semid_ds sembuf;
 	struct semid_ds14 osembuf;
 	int cmd, error;
-	void *pass_arg = NULL;
+	void *pass_arg;
 
 	cmd = SCARG(uap, cmd);
 
-	switch (cmd) {
-	case IPC_SET:
-	case IPC_STAT:
-		pass_arg = &sembuf;
-		break;
-
-	case GETALL:
-	case SETVAL:
-	case SETALL:
-		pass_arg = &arg;
-		break;
-	}
+	pass_arg = get_semctl_arg(cmd, &sembuf, &arg);
 
 	if (pass_arg != NULL) {
 		error = copyin(SCARG(uap, arg), &arg, sizeof(arg));

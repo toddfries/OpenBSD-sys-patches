@@ -1,5 +1,4 @@
-/*	$OpenBSD: madreg.h,v 1.1 1998/04/26 21:02:37 provos Exp $	*/
-/*	$NetBSD: madreg.h,v 1.4 1998/01/19 22:18:27 augustss Exp $	*/
+/*	$NetBSD: madreg.h,v 1.5 1998/12/08 14:26:57 augustss Exp $	*/
 /*
  * Copyright (c) 1996 Lennart Augustsson
  * Copyright (c) 1995 Hannu Savolainen
@@ -75,7 +74,7 @@
 #define MC1_SECIDE	0x08
 #define MC1_PRIMIDE	0x0a
 
-#define MC2_CDDISABLE	0x03
+#define MC2_NO_CD_DRQ	0x03
 #define MC2_OPL4	0x20
 
 /* Possible WSS emulation ports */

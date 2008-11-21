@@ -1,9 +1,11 @@
-/*	$OpenBSD: elink.c,v 1.7 2007/06/29 15:17:02 jasper Exp $	*/
-/*	$NetBSD: elink.c,v 1.9 1996/05/03 19:06:27 christos Exp $	*/
+/*	$NetBSD: elink.c,v 1.16 2008/04/28 20:23:52 martin Exp $	*/
 
-/*
- * Copyright (c) 1996 Jason R. Thorpe.  All rights reserved.
- * Copyright (c) 1994, 1995 Charles Hannum.  All rights reserved.
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe and Charles M. Hannum.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,34 +15,33 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Charles Hannum.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
  * Common code for dealing with 3COM ethernet cards.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: elink.c,v 1.16 2008/04/28 20:23:52 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #include <dev/isa/elink.h>
 
@@ -62,10 +63,13 @@ static int elink_all_resets_initialized;
  * The "bus" argument here is the unit number of the ISA bus, e.g. "0"
  * if the bus is "isa0".
  *
- * NOTE: the caller MUST provide an i/o handle for ELINK_ID_PORT!
+ * NOTE: the caller MUST provide an access handle for ELINK_ID_PORT!
  */
 void
-elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
+elink_reset(iot, ioh, bus)
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
+	int bus;
 {
 	struct elink_done_reset *er;
 
@@ -77,7 +81,8 @@ elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
 	/*
 	 * Reset these cards if we haven't done so already.
 	 */
-	LIST_FOREACH(er, &elink_all_resets, er_link)
+	for (er = elink_all_resets.lh_first; er != NULL;
+	    er = er->er_link.le_next)
 		if (er->er_bus == bus)
 			goto out;
 
@@ -102,10 +107,13 @@ elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
  * The `ID sequence' is really just snapshots of an 8-bit CRC register as 0
  * bits are shifted in.  Different board types use different polynomials.
  *
- * NOTE: the caller MUST provide an i/o handle for ELINK_ID_PORT!
+ * NOTE: the caller MUST provide an access handle for ELINK_ID_PORT!
  */
 void
-elink_idseq(bus_space_tag_t iot, bus_space_handle_t ioh, u_char p)
+elink_idseq(iot, ioh, p)
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
+	u_char p;
 {
 	int i;
 	u_char c;

@@ -1,5 +1,4 @@
-/*	$OpenBSD: bootp.h,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: bootp.h,v 1.3 1996/09/26 23:22:01 cgd Exp $	*/
+/*	$NetBSD: bootp.h,v 1.8 2007/11/24 13:20:53 isaki Exp $	*/
 
 /*
  * Bootstrap Protocol (BOOTP).  RFC951 and RFC1048.
@@ -21,29 +20,28 @@
  * without express or implied warranty.
  */
 
-#define BP_CHADDR_LEN	16
-#define BP_SNAME_LEN	64
-#define BP_FILE_LEN	128
-#define BP_VEND_LEN	64
-#define BP_MINPKTSZ	300     /* to check sizeof(struct bootp) */
-
 
 struct bootp {
-	u_char		bp_op;			/* packet opcode type */
-	u_char		bp_htype;		/* hardware addr type */
-	u_char		bp_hlen;		/* hardware addr length */
-	u_char		bp_hops;		/* gateway hops */
-	u_int		bp_xid;			/* transaction ID */
-	u_short		bp_secs;		/* seconds since boot began */
-	u_short		bp_flags;		/* RFC1532 broadcast, etc. */
-	struct in_addr	bp_ciaddr;		/* client IP address */
-	struct in_addr	bp_yiaddr;		/* 'your' IP address */
-	struct in_addr	bp_siaddr;		/* server IP address */
-	struct in_addr	bp_giaddr;		/* gateway IP address */
-	u_char		bp_chaddr[BP_CHADDR_LEN];/* client hardware address */
-	u_char		bp_sname[BP_SNAME_LEN];	/* server host name */
-	u_char		bp_file[BP_FILE_LEN];	/* boot file name */
-	u_char		bp_vend[BP_VEND_LEN];	/* vendor-specific area */
+	unsigned char	bp_op;		/* packet opcode type */
+	unsigned char	bp_htype;	/* hardware addr type */
+	unsigned char	bp_hlen;	/* hardware addr length */
+	unsigned char	bp_hops;	/* gateway hops */
+	unsigned int	bp_xid;		/* transaction ID */
+	unsigned short	bp_secs;	/* seconds since boot began */
+	unsigned short	bp_flags;
+	struct in_addr	bp_ciaddr;	/* client IP address */
+	struct in_addr	bp_yiaddr;	/* 'your' IP address */
+	struct in_addr	bp_siaddr;	/* server IP address */
+	struct in_addr	bp_giaddr;	/* gateway IP address */
+	unsigned char	bp_chaddr[16];	/* client hardware address */
+	unsigned char	bp_sname[64];	/* server host name */
+	unsigned char	bp_file[128];	/* boot file name */
+#ifdef SUPPORT_DHCP
+#define BOOTP_VENDSIZE 312
+#else
+#define BOOTP_VENDSIZE 64
+#endif
+	unsigned char	bp_vend[BOOTP_VENDSIZE]; /* vendor-specific area */
 };
 
 /*
@@ -55,16 +53,6 @@ struct bootp {
 #define BOOTREPLY		2
 #define BOOTREQUEST		1
 
-/*
- * Hardware types from Assigned Numbers RFC.
- */
-#define HTYPE_ETHERNET		1
-#define HTYPE_EXP_ETHERNET	2
-#define HTYPE_AX25		3
-#define HTYPE_PRONET		4
-#define HTYPE_CHAOS		5
-#define HTYPE_IEEE802		6
-#define HTYPE_ARCNET		7
 
 /*
  * Vendor magic cookie (v_magic) for CMU
@@ -76,7 +64,6 @@ struct bootp {
  */
 #define VM_RFC1048	{ 99, 130, 83, 99 }
 
-
 
 /*
  * RFC1048 tag values used to specify what information is being supplied in
@@ -101,14 +88,33 @@ struct bootp {
 #define TAG_DOMAINNAME		((unsigned char)  15)
 #define TAG_SWAPSERVER		((unsigned char)  16)
 #define TAG_ROOTPATH		((unsigned char)  17)
-#define TAG_EXTEN_FILE		((unsigned char)  18)
-#define TAG_NIS_DOMAIN		((unsigned char)  40)
-#define TAG_NIS_SERVER		((unsigned char)  41)
-#define TAG_NTP_SERVER		((unsigned char)  42)
-#define TAG_MAX_MSGSZ		((unsigned char)  57)
+
+#ifdef SUPPORT_DHCP
+#define TAG_REQ_ADDR		((unsigned char)  50)
+#define TAG_LEASETIME		((unsigned char)  51)
+#define TAG_OVERLOAD		((unsigned char)  52)
+#define TAG_DHCP_MSGTYPE	((unsigned char)  53)
+#define TAG_SERVERID		((unsigned char)  54)
+#define TAG_PARAM_REQ		((unsigned char)  55)
+#define TAG_MSG			((unsigned char)  56)
+#define TAG_MAXSIZE		((unsigned char)  57)
+#define TAG_T1			((unsigned char)  58)
+#define TAG_T2			((unsigned char)  59)
+#define TAG_CLASSID		((unsigned char)  60)
+#define TAG_CLIENTID		((unsigned char)  61)
+#endif
+
 #define TAG_END			((unsigned char) 255)
 
-
+#ifdef SUPPORT_DHCP
+#define DHCPDISCOVER	1
+#define DHCPOFFER	2
+#define DHCPREQUEST	3
+#define DHCPDECLINE	4
+#define DHCPACK		5
+#define DHCPNAK		6
+#define DHCPRELEASE	7
+#endif
 
 /*
  * "vendor" data permitted for CMU bootp clients.
@@ -125,7 +131,8 @@ struct cmu_vend {
 	unsigned char	v_unused[25];	/* currently unused */
 };
 
+
 /* v_flags values */
 #define VF_SMASK	1	/* Subnet mask field contains valid data */
 
-void	bootp(int);
+extern void	bootp __P((int));

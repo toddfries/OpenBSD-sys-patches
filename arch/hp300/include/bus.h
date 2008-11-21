@@ -1,5 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.5 2007/04/10 18:02:48 miod Exp $	*/
-/*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
+/*	$NetBSD: bus.h,v 1.15 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,6 +60,12 @@
 #define _HP300_BUS_H_
 
 /*
+ * Values for the hp300 bus space tag, not to be used directly by MI code.
+ */
+#define	HP300_BUS_SPACE_INTIO	0	/* space is intio space */
+#define	HP300_BUS_SPACE_DIO	1	/* space is dio space */
+
+/*
  * Bus address and size types
  */
 typedef u_long bus_addr_t;
@@ -76,87 +74,147 @@ typedef u_long bus_size_t;
 /*
  * Access methods for bus resources and address space.
  */
+typedef struct bus_space_tag *bus_space_tag_t;
 typedef u_long bus_space_handle_t;
 
-struct hp300_bus_space_tag {
-	int	(*bs_map)(bus_addr_t, bus_size_t, int, bus_space_handle_t *);
-	void	(*bs_unmap)(bus_space_handle_t, bus_size_t);
-	int	(*bs_subregion)(bus_space_handle_t, bus_size_t, bus_size_t,
-		    bus_space_handle_t *);
-	void *	(*bs_vaddr)(bus_space_handle_t);
+/*
+ * Implementation specific structures.
+ * XXX Don't use outside of bus_space definitions!
+ * XXX maybe this should be encapsuled in a non-global .h file?
+ */
 
-	u_int8_t	(*bsr1)(bus_space_handle_t, bus_size_t);
-	u_int16_t	(*bsr2)(bus_space_handle_t, bus_size_t);
-	u_int32_t	(*bsr4)(bus_space_handle_t, bus_size_t);
-	void		(*bsrm1)(bus_space_handle_t, bus_size_t,
-				u_int8_t *, size_t);
-	void		(*bsrm2)(bus_space_handle_t, bus_size_t,
-				u_int16_t *, size_t);
-	void		(*bsrm4)(bus_space_handle_t, bus_size_t,
-				u_int32_t *, size_t);
-	void		(*bsrrm2)(bus_space_handle_t, bus_size_t,
-				u_int8_t *, size_t);
-	void		(*bsrrm4)(bus_space_handle_t, bus_size_t,
-				u_int8_t *, size_t);
-	void		(*bsrr1)(bus_space_handle_t, bus_size_t,
-				u_int8_t *, size_t);
-	void		(*bsrr2)(bus_space_handle_t, bus_size_t,
-				u_int16_t *, size_t);
-	void		(*bsrr4)(bus_space_handle_t, bus_size_t,
-				u_int32_t *, size_t);
-	void		(*bsrrr2)(bus_space_handle_t, bus_size_t,
-				u_int8_t *, size_t);
-	void		(*bsrrr4)(bus_space_handle_t, bus_size_t,
-				u_int8_t *, size_t);
-	void		(*bsw1)(bus_space_handle_t, bus_size_t, u_int8_t);
-	void		(*bsw2)(bus_space_handle_t, bus_size_t,
-				u_int16_t);
-	void		(*bsw4)(bus_space_handle_t, bus_size_t,
-				u_int32_t);
-	void		(*bswm1)(bus_space_handle_t, bus_size_t,
-				const u_int8_t *, size_t);
-	void		(*bswm2)(bus_space_handle_t, bus_size_t,
-				const u_int16_t *, size_t);
-	void		(*bswm4)(bus_space_handle_t, bus_size_t,
-				const u_int32_t *, size_t);
-	void		(*bswrm2)(bus_space_handle_t, bus_size_t,
-				const u_int8_t *, size_t);
-	void		(*bswrm4)(bus_space_handle_t, bus_size_t,
-				const u_int8_t *, size_t);
-	void		(*bswr1)(bus_space_handle_t, bus_size_t,
-				const u_int8_t *, size_t);
-	void		(*bswr2)(bus_space_handle_t, bus_size_t,
-				const u_int16_t *, size_t);
-	void		(*bswr4)(bus_space_handle_t, bus_size_t,
-				const u_int32_t *, size_t);
-	void		(*bswrr2)(bus_space_handle_t, bus_size_t,
-				const u_int8_t *, size_t);
-	void		(*bswrr4)(bus_space_handle_t, bus_size_t,
-				const u_int8_t *, size_t);
-	void		(*bssm1)(bus_space_handle_t, bus_size_t,
-				u_int8_t v, size_t);
-	void		(*bssm2)(bus_space_handle_t, bus_size_t,
-				u_int16_t v, size_t);
-	void		(*bssm4)(bus_space_handle_t, bus_size_t,
-				u_int32_t v, size_t);
-	void		(*bssr1)(bus_space_handle_t, bus_size_t,
-				u_int8_t v, size_t);
-	void		(*bssr2)(bus_space_handle_t, bus_size_t,
-				u_int16_t v, size_t);
-	void		(*bssr4)(bus_space_handle_t, bus_size_t,
-				u_int32_t v, size_t);	
+struct bus_space_tag {
+	u_int		bustype;
+
+	uint8_t		(*bsr1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t);
+	uint16_t	(*bsr2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t);
+	uint32_t	(*bsr4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t);
+	void		(*bsrm1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint8_t *, bus_size_t);
+	void		(*bsrm2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint16_t *, bus_size_t);
+	void		(*bsrm4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint32_t *, bus_size_t);
+	void		(*bsrr1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint8_t *, bus_size_t);
+	void		(*bsrr2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint16_t *, bus_size_t);
+	void		(*bsrr4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint32_t *, bus_size_t);
+	void		(*bsw1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint8_t);
+	void		(*bsw2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint16_t);
+	void		(*bsw4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint32_t);
+	void		(*bswm1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, const uint8_t *, bus_size_t);
+	void		(*bswm2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, const uint16_t *, bus_size_t);
+	void		(*bswm4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, const uint32_t *, bus_size_t);
+	void		(*bswr1)(bus_space_tag_t, bus_space_handle_t ,
+			    bus_size_t, const uint8_t *, bus_size_t);
+	void		(*bswr2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, const uint16_t *, bus_size_t);
+	void		(*bswr4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, const uint32_t *, bus_size_t);
+	void		(*bssm1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint8_t, bus_size_t);
+	void		(*bssm2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint16_t, bus_size_t);
+	void		(*bssm4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint32_t, bus_size_t);
+	void		(*bssr1)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint8_t, bus_size_t);
+	void		(*bssr2)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint16_t, bus_size_t);
+	void		(*bssr4)(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, uint32_t, bus_size_t);
 };
 
-typedef const struct hp300_bus_space_tag *bus_space_tag_t;
+/*
+ *	int bus_space_map(bus_space_tag_t t, bus_addr_t addr,
+ *	    bus_size_t size, int flags, bus_space_handle_t *bshp);
+ *
+ * Map a region of bus space.
+ */
 
 #define	BUS_SPACE_MAP_CACHEABLE		0x01
 #define	BUS_SPACE_MAP_LINEAR		0x02
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
-#define bus_space_map(t,a,s,f,r)	((t)->bs_map(a,s,f,r))
-#define bus_space_unmap(t,h,s)		((t)->bs_unmap(h,s))
-#define bus_space_subregion(t,h,o,s,r)	((t)->bs_subregion(h,o,s,r))
-#define bus_space_vaddr(t,h)		((t)->bs_vaddr(h))
+int	bus_space_map(bus_space_tag_t, bus_addr_t, bus_size_t,
+	    int, bus_space_handle_t *);
+
+/*
+ *	void bus_space_unmap(bus_space_tag_t t,
+ *	    bus_space_handle_t bsh, bus_size_t size);
+ *
+ * Unmap a region of bus space.
+ */
+
+void	bus_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
+
+/*
+ *	int bus_space_subregion(bus_space_tag_t t,
+ *	    bus_space_handle_t bsh, bus_size_t offset, bus_size_t size,
+ *	    bus_space_handle_t *nbshp);
+ *
+ * Get a new handle for a subregion of an already-mapped area of bus space.
+ */
+
+int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
+	    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp);
+
+/*
+ *	int bus_space_alloc(bus_space_tag_t t, bus_addr_t, rstart,
+ *	    bus_addr_t rend, bus_size_t size, bus_size_t align,
+ *	    bus_size_t boundary, int flags, bus_addr_t *addrp,
+ *	    bus_space_handle_t *bshp);
+ *
+ * Allocate a region of bus space.
+ */
+
+int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
+	    bus_addr_t rend, bus_size_t size, bus_size_t align,
+	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,
+	    bus_space_handle_t *bshp);
+
+/*
+ *	int bus_space_free(bus_space_tag_t t,
+ *	    bus_space_handle_t bsh, bus_size_t size);
+ *
+ * Free a region of bus space.
+ */
+
+void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
+	    bus_size_t size);
+
+/*
+ *	void *bus_space_vaddr(bus_space_tag_t, bus_space_handle_t);
+ *
+ * Get the kernel virtual address for the mapped bus space.
+ * Only allowed for regions mapped with BUS_SPACE_MAP_LINEAR.
+ *  (XXX not enforced)
+ */
+#define bus_space_vaddr(t, h)	(void *)(h)
+
+/*
+ *	int hp300_bus_space_probe(bus_space_tag_t t,
+ *	    bus_space_handle_t bsh, bus_size_t offset, int sz);
+ *
+ * Probe the bus at t/bsh/offset, using sz as the size of the load.
+ *
+ * This is a machine-dependent extension, and is not to be used by
+ * machine-independent code.
+ */
+
+int	hp300_bus_space_probe(bus_space_tag_t t,
+	    bus_space_handle_t bsh, bus_size_t offset, int sz);
 
 /*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
@@ -166,9 +224,21 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * described by tag/handle/offset.
  */
 
-#define	bus_space_read_1(t,h,o) (t)->bsr1(h, o)
-#define	bus_space_read_2(t,h,o) (t)->bsr2(h, o)
-#define	bus_space_read_4(t,h,o) (t)->bsr4(h, o)
+#define	bus_space_read_1(t, h, o)					\
+    (((t)->bsr1 != NULL) ? ((t)->bsr1)(t, h, o) :			\
+    (*(volatile uint8_t *)((h) + (o))))
+
+#define	bus_space_read_2(t, h, o)					\
+    (((t)->bsr2 != NULL) ? ((t)->bsr2)(t, h, o) :			\
+    (*(volatile uint16_t *)((h) + (o))))
+
+#define	bus_space_read_4(t, h, o)					\
+    (((t)->bsr4 != NULL) ? ((t)->bsr4)(t, h, o) :			\
+    (*(volatile uint32_t *)((h) + (o))))
+
+#if 0	/* Cause a link error for bus_space_read_8 */
+#define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
+#endif
 
 /*
  *	void bus_space_read_multi_N(bus_space_tag_t tag,
@@ -179,11 +249,62 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * described by tag/handle/offset and copy into buffer provided.
  */
 
-#define bus_space_read_multi_1(t, h, o, a, c) (t)->bsrm1(h, o, a, c)
-#define bus_space_read_multi_2(t, h, o, a, c) (t)->bsrm2(h, o, a, c)
-#define bus_space_read_multi_4(t, h, o, a, c) (t)->bsrm4(h, o, a, c)
-#define bus_space_read_raw_multi_2(t, h, o, a, c) (t)->bsrrm2(h, o, a, c)
-#define bus_space_read_raw_multi_4(t, h, o, a, c) (t)->bsrrm4(h, o, a, c)
+#define	bus_space_read_multi_1(t, h, o, a, c)				\
+do {									\
+	if ((t)->bsrm1 != NULL)						\
+		((t)->bsrm1)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movb	%%a0@,%%a1@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_read_multi_2(t, h, o, a, c)				\
+do {									\
+	if ((t)->bsrm2 != NULL)						\
+		((t)->bsrm2)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movw	%%a0@,%%a1@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_read_multi_4(t, h, o, a, c) do {			\
+	if ((t)->bsrm4 != NULL)						\
+		((t)->bsrm4)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movl	%%a0@,%%a1@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_read_multi_8 */
+#define	bus_space_read_multi_8	!!! bus_space_read_multi_8 unimplemented !!!
+#endif
 
 /*
  *	void bus_space_read_region_N(bus_space_tag_t tag,
@@ -195,11 +316,63 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * buffer provided.
  */
 
-#define bus_space_read_region_1(t, h, o, a, c) (t)->bsrr1(h,o,a,c)
-#define bus_space_read_region_2(t, h, o, a, c) (t)->bsrr2(h,o,a,c)
-#define bus_space_read_region_4(t, h, o, a, c) (t)->bsrr4(h,o,a,c)
-#define bus_space_read_raw_region_2(t, h, o, a, c) (t)->bsrrr2(h,o,a,c)
-#define bus_space_read_raw_region_4(t, h, o, a, c) (t)->bsrrr4(h,o,a,c)
+#define	bus_space_read_region_1(t, h, o, a, c)				\
+do {									\
+	if ((t)->bsrr1 != NULL)						\
+		((t)->bsrr1)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movb	%%a0@+,%%a1@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_read_region_2(t, h, o, a, c)				\
+do {									\
+	if ((t)->bsrr2 != NULL)						\
+		((t)->bsrr2)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movw	%%a0@+,%%a1@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_read_region_4(t, h, o, a, c)				\
+do {									\
+	if ((t)->bsrr4 != NULL)						\
+		((t)->bsrr4)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movl	%%a0@+,%%a1@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_read_region_8 */
+#define	bus_space_read_region_8	!!! bus_space_read_region_8 unimplemented !!!
+#endif
 
 /*
  *	void bus_space_write_N(bus_space_tag_t tag,
@@ -210,9 +383,33 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * described by tag/handle/offset.
  */
 
-#define bus_space_write_1(t, h, o, v) (t)->bsw1(h, o, v)
-#define bus_space_write_2(t, h, o, v) (t)->bsw2(h, o, v)
-#define bus_space_write_4(t, h, o, v) (t)->bsw4(h, o, v)
+#define	bus_space_write_1(t, h, o, v)					\
+do {									\
+	if ((t)->bsw1 != NULL)						\
+		((t)->bsw1)(t, h, o, v);				\
+	else								\
+		((void)(*(volatile uint8_t *)((h) + (o)) = (v)));	\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_write_2(t, h, o, v)					\
+do {									\
+	if ((t)->bsw2 != NULL)						\
+		((t)->bsw2)(t, h, o, v);				\
+	else								\
+		((void)(*(volatile uint16_t *)((h) + (o)) = (v)));	\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_write_4(t, h, o, v)					\
+do {									\
+	if ((t)->bsw4 != NULL)						\
+		((t)->bsw4)(t, h, o, v);				\
+	else								\
+		((void)(*(volatile uint32_t *)((h) + (o)) = (v)));	\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_write_8 */
+#define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
+#endif
 
 /*
  *	void bus_space_write_multi_N(bus_space_tag_t tag,
@@ -223,11 +420,65 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * provided to bus space described by tag/handle/offset.
  */
 
-#define bus_space_write_multi_1(t, h, o, a, c) (t)->bswm1(h, o, a, c)
-#define bus_space_write_multi_2(t, h, o, a, c) (t)->bswm2(h, o, a, c)
-#define bus_space_write_multi_4(t, h, o, a, c) (t)->bswm4(h, o, a, c)
-#define bus_space_write_raw_multi_2(t, h, o, a, c) (t)->bswrm2(h, o, a, c)
-#define bus_space_write_raw_multi_4(t, h, o, a, c) (t)->bswrm4(h, o, a, c)
+#define	bus_space_write_multi_1(t, h, o, a, c)				\
+do {									\
+	if ((t)->bswm1 != NULL)						\
+		((t)->bswm1)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movb	%%a1@+,%%a0@			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_write_multi_2(t, h, o, a, c)				\
+do {									\
+	if ((t)->bswm2 != NULL)						\
+		((t)->bswm2)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movw	%%a1@+,%%a0@			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_write_multi_4(t, h, o, a, c)				\
+do {									\
+	(void) t;							\
+	if ((t)->bswm4 != NULL)					\
+		((t)->bswm4)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movl	%%a1@+,%%a0@			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_write_8 */
+#define	bus_space_write_multi_8(t, h, o, a, c)				\
+			!!! bus_space_write_multi_8 unimplimented !!!
+#endif
 
 /*
  *	void bus_space_write_region_N(bus_space_tag_t tag,
@@ -238,11 +489,64 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * to bus space described by tag/handle starting at `offset'.
  */
 
-#define bus_space_write_region_1(t, h, o, a, c) (t)->bswr1(h, o, a, c)
-#define bus_space_write_region_2(t, h, o, a, c) (t)->bswr2(h, o, a, c)
-#define bus_space_write_region_4(t, h, o, a, c) (t)->bswr4(h, o, a, c)
-#define bus_space_write_raw_region_2(t, h, o, a, c) (t)->bswrr2(h, o, a, c)
-#define bus_space_write_raw_region_4(t, h, o, a, c) (t)->bswrr4(h, o, a, c)
+#define	bus_space_write_region_1(t, h, o, a, c)				\
+do {									\
+	if ((t)->bswr1 != NULL)					\
+		((t)->bswr1)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movb	%%a1@+,%%a0@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_write_region_2(t, h, o, a, c)				\
+do {									\
+	if ((t)->bswr2) != NULL)					\
+		((t)->bswr2)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movw	%%a1@+,%%a0@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_write_region_4(t, h, o, a, c)				\
+do {									\
+	if ((t)->bswr4) != NULL)					\
+		((t)->bswr4)(t, h, o, a, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%a1				;	\
+			movl	%2,%%d0				;	\
+		1:	movl	%%a1@+,%%a0@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (a), "g" (c)	:	\
+			    "%a0","%a1","%d0");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_write_region_8 */
+#define	bus_space_write_region_8					\
+			!!! bus_space_write_region_8 unimplemented !!!
+#endif
 
 /*
  *	void bus_space_set_multi_N(bus_space_tag_t tag,
@@ -253,9 +557,64 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * by tag/handle/offset `count' times.
  */
 
-#define bus_space_set_multi_1(t, h, o, val, c) (t)->bssm1(h, o, val, c)
-#define bus_space_set_multi_2(t, h, o, val, c) (t)->bssm2(h, o, val, c)
-#define bus_space_set_multi_4(t, h, o, val, c) (t)->bssm4(h, o, val, c)
+#define	bus_space_set_multi_1(t, h, o, val, c)				\
+do {									\
+	if ((t)->bssm1 != NULL)						\
+		((t)->bssm1)(t, h, o, val, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%d1				;	\
+			movl	%2,%%d0				;	\
+		1:	movb	%%d1,%%a0@			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (val), "g" (c)	:	\
+			    "%a0","%d0","%d1");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_set_multi_2(t, h, o, val, c)				\
+do {									\
+	if ((t)->bssm2 != NULL)						\
+		((t)->bssm2)(t, h, o, val, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%d1				;	\
+			movl	%2,%%d0				;	\
+		1:	movw	%%d1,%%a0@			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (val), "g" (c)	:	\
+			    "%a0","%d0","%d1");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_set_multi_4(t, h, o, val, c)				\
+do {									\
+	if ((t)->bssm4 != NULL)						\
+		((t)->bssm4)(t, h, o, val, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%d1				;	\
+			movl	%2,%%d0				;	\
+		1:	movl	%%d1,%%a0@			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (val), "g" (c)	:	\
+			    "%a0","%d0","%d1");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_set_multi_8 */
+#define	bus_space_set_multi_8						\
+			!!! bus_space_set_multi_8 unimplemented !!!
+#endif
 
 /*
  *	void bus_space_set_region_N(bus_space_tag_t tag,
@@ -266,9 +625,105 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
  * by tag/handle starting at `offset'.
  */
 
-#define bus_space_set_region_1(t, h, o, val, c) (t)->bssr1(h, o, val, c)
-#define bus_space_set_region_2(t, h, o, val, c) (t)->bssr2(h, o, val, c)
-#define bus_space_set_region_4(t, h, o, val, c) (t)->bssr4(h, o, val, c)
+#define	bus_space_set_region_1(t, h, o, val, c)				\
+do {									\
+	if ((t)->bssr1 != NULL)						\
+		((t)->bssr1)(t, h, o, val, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%d1				;	\
+			movl	%2,%%d0				;	\
+		1:	movb	%%d1,%%a0@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (val), "g" (c)	:	\
+			    "%a0","%d0","%d1");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_set_region_2(t, h, o, val, c)				\
+do {									\
+	if ((t)->bssr2 != NULL)						\
+		((t)->bssr2)(t, h, o, val, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%d1				;	\
+			movl	%2,%%d0				;	\
+		1:	movw	%%d1,%%a0@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (val), "g" (c)	:	\
+			    "%a0","%d0","%d1");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	bus_space_set_region_4(t, h, o, val, c)				\
+do {									\
+	(void) t;							\
+	if ((t)->bssr4 != NULL)						\
+		((t)->bssr4)(t, h, o, val, c);				\
+	else {								\
+		__asm volatile ("					\
+			movl	%0,%%a0				;	\
+			movl	%1,%%d1				;	\
+			movl	%2,%%d0				;	\
+		1:	movl	%%d1,%%a0@+			;	\
+			subql	#1,%%d0				;	\
+			jne	1b"				:	\
+								:	\
+			    "r" ((h) + (o)), "g" (val), "g" (c)	:	\
+			    "%a0","%d0","%d1");				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#if 0	/* Cause a link error for bus_space_set_region_8 */
+#define	bus_space_set_region_8						\
+			!!! bus_space_set_region_8 unimplemented !!!
+#endif
+
+/*
+ *	void bus_space_copy_region_N(bus_space_tag_t tag,
+ *	    bus_space_handle_t bsh1, bus_size_t off1,
+ *	    bus_space_handle_t bsh2, bus_size_t off2,
+ *	    bus_size_t count);
+ *
+ * Copy `count' 1, 2, 4, or 8 byte values from bus space starting
+ * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
+ */
+
+#define	__HP300_copy_region_N(BYTES)					\
+static __inline void						\
+__CONCAT(bus_space_copy_region_,BYTES)(bus_space_tag_t t,		\
+    bus_space_handle_t h1, bus_size_t o1, bus_space_handle_t h2,	\
+    bus_size_t o2, bus_size_t c)					\
+{									\
+	bus_size_t o;							\
+									\
+	if ((h1 + o1) >= (h2 + o2)) {					\
+		/* src after dest: copy forward */			\
+		for (o = 0; c != 0; c--, o += BYTES)			\
+			__CONCAT(bus_space_write_,BYTES)(t, h2, o2 + o,	\
+			    __CONCAT(bus_space_read_,BYTES)(t, h1, o1 + o)); \
+	} else {							\
+		/* dest after src: copy backwards */			\
+		for (o = (c - 1) * BYTES; c != 0; c--, o -= BYTES)	\
+			__CONCAT(bus_space_write_,BYTES)(t, h2, o2 + o,	\
+			    __CONCAT(bus_space_read_,BYTES)(t, h1, o1 + o)); \
+	}								\
+}
+__HP300_copy_region_N(1)
+__HP300_copy_region_N(2)
+__HP300_copy_region_N(4)
+#if 0	/* Cause a link error for bus_space_copy_region_8 */
+#define	bus_space_copy_region_8						\
+			!!! bus_space_copy_region_8 unimplemented !!!
+#endif
+
+#undef __HP300_copy_region_N
 
 /*
  * Bus read/write barrier methods.
@@ -284,5 +739,7 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
 	((void)((void)(t), (void)(h), (void)(o), (void)(l), (void)(f)))
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
+
+#define BUS_SPACE_ALIGNED_POINTER(p, t) ALIGNED_POINTER(p, t)
 
 #endif /* _HP300_BUS_H_ */

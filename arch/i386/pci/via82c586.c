@@ -1,5 +1,4 @@
-/*	$OpenBSD: via82c586.c,v 1.10 2006/09/19 11:06:34 jsg Exp $	*/
-/*	$NetBSD: via82c586.c,v 1.2 2000/07/18 11:24:09 soda Exp $	*/
+/*	$NetBSD: via82c586.c,v 1.11 2008/04/28 20:23:25 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,6 +59,9 @@
  * Support for the VIA 82c586 PCI-ISA bridge interrupt controller.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via82c586.c,v 1.11 2008/04/28 20:23:25 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -78,7 +73,7 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-#include <i386/pci/pcibiosvar.h>
+#include <i386/pci/pci_intr_fixup.h>
 #include <i386/pci/via82c586reg.h>
 #include <i386/pci/piixvar.h>
 
@@ -166,8 +161,8 @@ via82c586_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 
 	reg = pci_conf_read(ph->ph_pc, ph->ph_tag, VP3_CFG_PIRQ_REG);
 	val = VP3_PIRQ(reg, clink);
-	*irqp = (val == VP3_PIRQ_NONE)?
-	    I386_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
+	*irqp = (val == VP3_PIRQ_NONE) ?
+	    X86_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
 
 	return (0);
 }
@@ -242,9 +237,10 @@ via82c586_set_trigger(pciintr_icu_handle_t v, int irq, int trigger)
 			reg = pci_conf_read(ph->ph_pc, ph->ph_tag,
 			    VP3_CFG_PIRQ_REG);
 			shift = vp3_cfg_trigger_shift[i];
-			/* XXX we only upgrade the trigger here */
 			if (trigger == IST_LEVEL)
 				reg &= ~(VP3_CFG_TRIGGER_MASK << shift);
+			else
+				reg |= (VP3_CFG_TRIGGER_EDGE << shift);
 			pci_conf_write(ph->ph_pc, ph->ph_tag,
 			    VP3_CFG_PIRQ_REG, reg);
 			break;

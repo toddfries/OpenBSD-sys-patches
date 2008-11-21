@@ -1,5 +1,4 @@
-/*	$OpenBSD: i2c_io.h,v 1.1 2004/05/23 17:33:43 grange Exp $	*/
-/*	$NetBSD: i2c_io.h,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
+/*	$NetBSD: i2c_io.h,v 1.2 2005/12/11 12:21:22 christos Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -78,7 +77,6 @@ typedef enum {
  * I2C_OP_WRITE and I2C_OP_READ.
  */
 
-#ifdef notyet
 /*
  * I2C_IOCTL_EXEC:
  *
@@ -96,6 +94,5 @@ typedef struct i2c_ioctl_exec {
 #define	I2C_EXEC_MAX_BUFLEN	32
 
 #define	I2C_IOCTL_EXEC		 _IOW('I', 0, i2c_ioctl_exec_t)
-#endif
 
 #endif /* _DEV_I2C_I2C_IO_H_ */

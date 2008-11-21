@@ -1,5 +1,4 @@
-/*	$OpenBSD: undefined.c,v 1.4 2008/05/19 18:42:11 miod Exp $	*/
-/*	$NetBSD: undefined.c,v 1.22 2003/11/29 22:21:29 bjh21 Exp $	*/
+/*	$NetBSD: undefined.c,v 1.35 2008/11/19 06:29:48 matt Exp $	*/
 
 /*
  * Copyright (c) 2001 Ben Harris.
@@ -45,17 +44,30 @@
  * Created      : 06/01/95
  */
 
+#define FAST_FPE
+
+#include "opt_ddb.h"
+#include "opt_kgdb.h"
+
 #include <sys/param.h>
+#ifdef KGDB
+#include <sys/kgdb.h>
+#endif
+
+__KERNEL_RCSID(0, "$NetBSD: undefined.c,v 1.35 2008/11/19 06:29:48 matt Exp $");
 
 #include <sys/malloc.h>
 #include <sys/queue.h>
 #include <sys/signal.h>
-#include <sys/signalvar.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/syslog.h>
 #include <sys/vmmeter.h>
+#ifdef FAST_FPE
+#include <sys/acct.h>
+#endif
+#include <sys/userret.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -64,6 +76,12 @@
 #include <arm/undefined.h>
 #include <machine/trap.h>
 
+#include <arch/arm/arm/disassem.h>
+
+#ifdef DDB
+#include <ddb/db_output.h>
+#include <machine/db_machdep.h>
+#endif
 
 #ifdef acorn26
 #include <machine/machdep.h>
@@ -71,7 +89,7 @@
 
 static int gdb_trapper(u_int, u_int, struct trapframe *, int);
 
-LIST_HEAD(, undefined_handler) undefined_handlers[MAX_COPROCS];
+LIST_HEAD(, undefined_handler) undefined_handlers[NUM_UNKNOWN_HANDLERS];
 
 
 void *
@@ -79,11 +97,11 @@ install_coproc_handler(int coproc, undef_handler_t handler)
 {
 	struct undefined_handler *uh;
 
-	KASSERT(coproc >= 0 && coproc < MAX_COPROCS);
+	KASSERT(coproc >= 0 && coproc < NUM_UNKNOWN_HANDLERS);
 	KASSERT(handler != NULL); /* Used to be legal. */
 
 	/* XXX: M_TEMP??? */
-	uh = (struct undefined_handler *)malloc(sizeof(*uh), M_TEMP, M_WAITOK);
+	MALLOC(uh, struct undefined_handler *, sizeof(*uh), M_TEMP, M_WAITOK);
 	uh->uh_handler = handler;
 	install_coproc_handler_static(coproc, uh);
 	return uh;
@@ -102,31 +120,51 @@ remove_coproc_handler(void *cookie)
 	struct undefined_handler *uh = cookie;
 
 	LIST_REMOVE(uh, uh_link);
-	free(uh, M_TEMP);
+	FREE(uh, M_TEMP);
 }
 
 
 static int
 gdb_trapper(u_int addr, u_int insn, struct trapframe *frame, int code)
 {
-	union sigval sv;
-	struct proc *p;
-	p = (curproc == NULL) ? &proc0 : curproc;
+	struct lwp *l;
+	l = curlwp;
 
-	if (insn == GDB_BREAKPOINT || insn == GDB5_BREAKPOINT) {
-		if (code == FAULT_USER) {
-			sv.sival_int = addr;
-			trapsignal(p, SIGTRAP, 0, TRAP_BRKPT, sv);
-			return 0;
-		}
-#ifdef KGDB
-		return !kgdb_trap(T_BREAKPOINT, frame);
+#ifdef THUMB_CODE
+	if (frame->tf_spsr & PSR_T_bit) {
+		if (insn == GDB_THUMB_BREAKPOINT)
+			goto bkpt;
+	}
+	else
 #endif
+	{
+		if (insn == GDB_BREAKPOINT || insn == GDB5_BREAKPOINT) {
+#ifdef THUMB_CODE
+		bkpt:
+#endif
+			if (code == FAULT_USER) {
+				ksiginfo_t ksi;
+
+				KSI_INIT_TRAP(&ksi);
+				ksi.ksi_signo = SIGTRAP;
+				ksi.ksi_code = TRAP_BRKPT;
+				ksi.ksi_addr = (u_int32_t *)addr;
+				ksi.ksi_trap = 0;
+				trapsignal(l, &ksi);
+				return 0;
+			}
+#ifdef KGDB
+			return !kgdb_trap(T_BREAKPOINT, frame);
+#endif
+		}
 	}
 	return 1;
 }
 
 static struct undefined_handler gdb_uh;
+#ifdef THUMB_CODE
+static struct undefined_handler gdb_uh_thumb;
+#endif
 
 void
 undefined_init()
@@ -134,40 +172,49 @@ undefined_init()
 	int loop;
 
 	/* Not actually necessary -- the initialiser is just NULL */
-	for (loop = 0; loop < MAX_COPROCS; ++loop)
+	for (loop = 0; loop < NUM_UNKNOWN_HANDLERS; ++loop)
 		LIST_INIT(&undefined_handlers[loop]);
 
 	/* Install handler for GDB breakpoints */
 	gdb_uh.uh_handler = gdb_trapper;
-	install_coproc_handler_static(0, &gdb_uh);
+	install_coproc_handler_static(CORE_UNKNOWN_HANDLER, &gdb_uh);
+#ifdef THUMB_CODE
+	gdb_uh_thumb.uh_handler = gdb_trapper;
+	install_coproc_handler_static(THUMB_UNKNOWN_HANDLER, &gdb_uh_thumb);
+#endif
 }
-
 
 void
 undefinedinstruction(trapframe_t *frame)
 {
-	struct proc *p;
+	struct lwp *l;
 	u_int fault_pc;
 	int fault_instruction;
 	int fault_code;
 	int coprocessor;
+	int user;
 	struct undefined_handler *uh;
 #ifdef VERBOSE_ARM32
 	int s;
 #endif
-	union sigval sv;
 
 	/* Enable interrupts if they were enabled before the exception. */
 #ifdef acorn26
 	if ((frame->tf_r15 & R15_IRQ_DISABLE) == 0)
 		int_on();
 #else
-	if (!(frame->tf_spsr & I32_bit))
-		enable_interrupts(I32_bit);
+	restore_interrupts(frame->tf_spsr & IF32_bits);
 #endif
 
 #ifndef acorn26
-	frame->tf_pc -= INSN_SIZE;
+#ifdef THUMB_CODE
+	if (frame->tf_spsr & PSR_T_bit)
+		frame->tf_pc -= THUMB_INSN_SIZE;
+	else
+#endif
+	{
+		frame->tf_pc -= INSN_SIZE;
+	}
 #endif
 
 #ifdef __PROG26
@@ -176,60 +223,90 @@ undefinedinstruction(trapframe_t *frame)
 	fault_pc = frame->tf_pc;
 #endif
 
-	/* Get the current proc structure or proc0 if there is none. */
-	p = (curproc == NULL) ? &proc0 : curproc;
+	/* Get the current lwp/proc structure or lwp0/proc0 if there is none. */
+	l = curlwp;
 
-	/*
-	 * Make sure the program counter is correctly aligned so we
-	 * don't take an alignment fault trying to read the opcode.
-	 */
-	if (__predict_false((fault_pc & 3) != 0)) {
-		/* Give the user an illegal instruction signal. */
-		sv.sival_int = (u_int32_t) fault_pc;
-		trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);
-		userret(p);
-		return;
+#ifdef __PROG26
+	if ((frame->tf_r15 & R15_MODE) == R15_MODE_USR) {
+#else
+	if ((frame->tf_spsr & PSR_MODE) == PSR_USR32_MODE) {
+#endif
+		user = 1;
+		LWP_CACHE_CREDS(l, l->l_proc);
+	} else
+		user = 0;
+
+
+#ifdef THUMB_CODE
+	if (frame->tf_spsr & PSR_T_bit) {
+		fault_instruction = fusword((void *)(fault_pc & ~1));
 	}
+	else
+#endif
+	{
+		/*
+		 * Make sure the program counter is correctly aligned so we
+		 * don't take an alignment fault trying to read the opcode.
+		 */
+		if (__predict_false((fault_pc & 3) != 0)) {
+			ksiginfo_t ksi;
+			/* Give the user an illegal instruction signal. */
+			KSI_INIT_TRAP(&ksi);
+			ksi.ksi_signo = SIGILL;
+			ksi.ksi_code = ILL_ILLOPC;
+			ksi.ksi_addr = (u_int32_t *)(intptr_t) fault_pc;
+			trapsignal(l, &ksi);
+			userret(l);
+			return;
+		}
+	 	/*
+		 * Should use fuword() here .. but in the interests of
+		 * squeezing every  bit of speed we will just use
+		 * ReadWord(). We know the instruction can be read
+		 * as was just executed so this will never fail unless
+		 * the kernel is screwed up in which case it does
+		 * not really matter does it ?
+		 */
 
-	/*
-	 * Should use fuword() here .. but in the interests of squeezing every
-	 * bit of speed we will just use ReadWord(). We know the instruction
-	 * can be read as was just executed so this will never fail unless the
-	 * kernel is screwed up in which case it does not really matter does
-	 * it ?
-	 */
-
-	fault_instruction = *(u_int32_t *)fault_pc;
+		fault_instruction = *(u_int32_t *)fault_pc;
+	}
 
 	/* Update vmmeter statistics */
 	uvmexp.traps++;
 
-	/* Check for coprocessor instruction */
-
-	/*
-	 * According to the datasheets you only need to look at bit 27 of the
-	 * instruction to tell the difference between and undefined
-	 * instruction and a coprocessor instruction following an undefined
-	 * instruction trap.
-	 */
-
-	if ((fault_instruction & (1 << 27)) != 0)
-		coprocessor = (fault_instruction >> 8) & 0x0f;
+#ifdef THUMB_CODE
+	if (frame->tf_spsr & PSR_T_bit) {
+		coprocessor = THUMB_UNKNOWN_HANDLER;
+	}
 	else
-		coprocessor = 0;
-
-#ifdef __PROG26
-	if ((frame->tf_r15 & R15_MODE) == R15_MODE_USR)
-#else
-	if ((frame->tf_spsr & PSR_MODE) == PSR_USR32_MODE)
 #endif
 	{
+		/* Check for coprocessor instruction */
+
+		/*
+		 * According to the datasheets you only need to look at
+		 * bit 27 of the instruction to tell the difference
+		 * between and undefined instruction and a coprocessor
+		 * instruction following an undefined instruction trap.
+		 *
+		 * ARMv5 adds undefined instructions in the NV space,
+		 * even when bit 27 is set.
+		 */
+
+		if ((fault_instruction & (1 << 27)) != 0
+		    && (fault_instruction & 0xf0000000) != 0xf0000000)
+			coprocessor = (fault_instruction >> 8) & 0x0f;
+		else
+			coprocessor = CORE_UNKNOWN_HANDLER;
+	}
+
+	if (user) {
 		/*
 		 * Modify the fault_code to reflect the USR/SVC state at
 		 * time of fault.
 		 */
 		fault_code = FAULT_USER;
-		p->p_addr->u_pcb.pcb_tf = frame;
+		l->l_addr->u_pcb.pcb_tf = frame;
 	} else
 		fault_code = 0;
 
@@ -241,6 +318,7 @@ undefinedinstruction(trapframe_t *frame)
 
 	if (uh == NULL) {
 		/* Fault has not been handled */
+		ksiginfo_t ksi; 
 		
 #ifdef VERBOSE_ARM32
 		s = spltty();
@@ -264,18 +342,42 @@ undefinedinstruction(trapframe_t *frame)
 #endif
         
 		if ((fault_code & FAULT_USER) == 0) {
-			printf("Undefined instruction in kernel\n");
 #ifdef DDB
-			Debugger();
+			db_printf("Undefined instruction in kernel\n");
+			kdb_trap(T_FAULT, frame);
+#else
+			panic("undefined instruction in kernel");
 #endif
 		}
-
-		sv.sival_int = frame->tf_pc;
-		trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);
+		KSI_INIT_TRAP(&ksi);
+		ksi.ksi_signo = SIGILL;
+		ksi.ksi_code = ILL_ILLOPC;
+		ksi.ksi_addr = (u_int32_t *)fault_pc;
+		ksi.ksi_trap = fault_instruction;
+		trapsignal(l, &ksi);
 	}
 
 	if ((fault_code & FAULT_USER) == 0)
 		return;
 
-	userret(p);
+#ifdef FAST_FPE
+	/* Optimised exit code */
+	{
+		/*
+		 * Check for reschedule request, at the moment there is only
+		 * 1 ast so this code should always be run
+		 */
+		if (curcpu()->ci_want_resched) {
+			/*
+			 * We are being preempted.
+			 */
+			preempt();
+		}
+
+		/* Invoke MI userret code */
+		mi_userret(l);
+	}
+#else
+	userret(l);
+#endif
 }

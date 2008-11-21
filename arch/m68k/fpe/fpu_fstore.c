@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_fstore.c,v 1.6 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_fstore.c,v 1.8 2003/07/15 02:43:10 lukem Exp $	*/
+/*	$NetBSD: fpu_fstore.c,v 1.10 2007/03/09 16:23:01 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1995 Ken Nakata
@@ -26,12 +25,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_fstore.c,v 1.10 2007/03/09 16:23:01 tsutsui Exp $");
+
 #include <sys/types.h>
 #include <sys/signal.h>
 #include <sys/systm.h>
 #include <machine/frame.h>
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
 /*
  * type 0: fmove mem/fpr->fpr
@@ -40,7 +42,9 @@
  *	(word1 & 0xe000) == 0x6000
  */
 int
-fpu_emul_fstore(struct fpemu *fe, struct instruction *insn, int *typ)
+fpu_emul_fstore(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     struct frame *frame = fe->fe_frame;
     u_int *fpregs = fe->fe_fpframe->fpf_regs;
@@ -77,8 +81,7 @@ fpu_emul_fstore(struct fpemu *fe, struct instruction *insn, int *typ)
 #if DEBUG_FPE
 	printf("  fpu_emul_fstore: invalid format %d\n", format);
 #endif
-	*typ = ILL_ILLOPN;
-	sig = SIGILL;
+	sig = SIGFPE;
     }
 #if DEBUG_FPE
     printf("  fpu_emul_fstore: format %d, size %d\n",
@@ -88,7 +91,7 @@ fpu_emul_fstore(struct fpemu *fe, struct instruction *insn, int *typ)
     fe->fe_fpsr &= ~FPSR_EXCP;
 
     /* Get effective address. (modreg=opcode&077) */
-    sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode, typ);
+    sig = fpu_decode_ea(frame, insn, &insn->is_ea, insn->is_opcode);
     if (sig) {
 #if DEBUG_FPE
 	printf("  fpu_emul_fstore: failed in decode_ea sig=%d\n", sig);
@@ -112,7 +115,8 @@ fpu_emul_fstore(struct fpemu *fe, struct instruction *insn, int *typ)
     fpu_explode(fe, &fe->fe_f3, FTYPE_EXT, &fpregs[regnum * 3]);
 #if DEBUG_FPE
     {
-	static char *class_name[] = { "SNAN", "QNAN", "ZERO", "NUM", "INF" };
+	static const char *class_name[] =
+	    { "SNAN", "QNAN", "ZERO", "NUM", "INF" };
 	printf("  fpu_emul_fstore: fpn (%s,%c,%d,%08x,%08x,%08x)\n",
 	       class_name[fe->fe_f3.fp_class + 2],
 	       fe->fe_f3.fp_sign ? '-' : '+', fe->fe_f3.fp_exp,

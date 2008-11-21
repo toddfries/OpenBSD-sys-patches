@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_exec_coff.c,v 1.17 2006/07/23 22:06:08 ad Exp $	*/
+/*	$NetBSD: ibcs2_exec_coff.c,v 1.23 2007/12/08 19:29:38 pooka Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1998 Scott Bartram
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_coff.c,v 1.17 2006/07/23 22:06:08 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_coff.c,v 1.23 2007/12/08 19:29:38 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,7 +51,7 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_coff.c,v 1.17 2006/07/23 22:06:08 ad Exp 
 
 #include <sys/mman.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/reg.h>
 #include <machine/ibcs2_machdep.h>
 
@@ -61,23 +61,23 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_coff.c,v 1.17 2006/07/23 22:06:08 ad Exp 
 #include <compat/ibcs2/ibcs2_util.h>
 
 
-int exec_ibcs2_coff_prep_omagic __P((struct lwp *, struct exec_package *,
+int exec_ibcs2_coff_prep_omagic(struct lwp *, struct exec_package *,
 				     struct coff_filehdr *,
-				     struct coff_aouthdr *));
-int exec_ibcs2_coff_prep_nmagic __P((struct lwp *, struct exec_package *,
+				     struct coff_aouthdr *);
+int exec_ibcs2_coff_prep_nmagic(struct lwp *, struct exec_package *,
 				     struct coff_filehdr *,
-				     struct coff_aouthdr *));
-int exec_ibcs2_coff_prep_zmagic __P((struct lwp *, struct exec_package *,
+				     struct coff_aouthdr *);
+int exec_ibcs2_coff_prep_zmagic(struct lwp *, struct exec_package *,
 				     struct coff_filehdr *,
-				     struct coff_aouthdr *));
-void cpu_exec_ibcs2_coff_setup __P((int, struct proc *, struct exec_package *,
-				    void *));
+				     struct coff_aouthdr *);
+void cpu_exec_ibcs2_coff_setup(int, struct proc *, struct exec_package *,
+				    void *);
 
-static int coff_load_shlib __P((struct lwp *, const char *,
-		struct exec_package *));
-static int coff_find_section __P((struct lwp *, struct vnode *,
+static int coff_load_shlib(struct lwp *, const char *,
+		struct exec_package *);
+static int coff_find_section(struct lwp *, struct vnode *,
 				  struct coff_filehdr *, struct coff_scnhdr *,
-				  int));
+				  int);
 
 /*
  * exec_ibcs2_coff_makecmds(): Check if it's an coff-format executable.
@@ -92,9 +92,7 @@ static int coff_find_section __P((struct lwp *, struct vnode *,
  */
 
 int
-exec_ibcs2_coff_makecmds(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+exec_ibcs2_coff_makecmds(struct lwp *l, struct exec_package *epp)
 {
 	int error;
 	struct coff_filehdr *fp = epp->ep_hdr;
@@ -136,11 +134,7 @@ exec_ibcs2_coff_makecmds(l, epp)
  */
 
 int
-exec_ibcs2_coff_prep_omagic(l, epp, fp, ap)
-	struct lwp *l;
-	struct exec_package *epp;
-	struct coff_filehdr *fp;
-	struct coff_aouthdr *ap;
+exec_ibcs2_coff_prep_omagic(struct lwp *l, struct exec_package *epp, struct coff_filehdr *fp, struct coff_aouthdr *ap)
 {
 	epp->ep_taddr = COFF_SEGMENT_ALIGN(fp, ap, ap->a_tstart);
 	epp->ep_tsize = ap->a_tsize;
@@ -188,11 +182,7 @@ exec_ibcs2_coff_prep_omagic(l, epp, fp, ap)
  */
 
 int
-exec_ibcs2_coff_prep_nmagic(l, epp, fp, ap)
-	struct lwp *l;
-	struct exec_package *epp;
-	struct coff_filehdr *fp;
-	struct coff_aouthdr *ap;
+exec_ibcs2_coff_prep_nmagic(struct lwp *l, struct exec_package *epp, struct coff_filehdr *fp, struct coff_aouthdr *ap)
 {
 	long toverlap, doverlap;
 	u_long tsize, tend;
@@ -318,12 +308,7 @@ exec_ibcs2_coff_prep_nmagic(l, epp, fp, ap)
  */
 
 static int
-coff_find_section(l, vp, fp, sh, s_type)
-	struct lwp *l;
-	struct vnode *vp;
-	struct coff_filehdr *fp;
-	struct coff_scnhdr *sh;
-	int s_type;
+coff_find_section(struct lwp *l, struct vnode *vp, struct coff_filehdr *fp, struct coff_scnhdr *sh, int s_type)
 {
 	int i, pos, siz, error;
 	size_t resid;
@@ -331,7 +316,7 @@ coff_find_section(l, vp, fp, sh, s_type)
 	pos = COFF_HDR_SIZE;
 	for (i = 0; i < fp->f_nscns; i++, pos += sizeof(struct coff_scnhdr)) {
 		siz = sizeof(struct coff_scnhdr);
-		error = vn_rdwr(UIO_READ, vp, (caddr_t) sh,
+		error = vn_rdwr(UIO_READ, vp, (void *) sh,
 		    siz, pos, UIO_SYSSPACE, IO_NODELOCKED, l->l_cred,
 		    &resid, NULL);
 		if (error) {
@@ -363,11 +348,7 @@ coff_find_section(l, vp, fp, sh, s_type)
  */
 
 int
-exec_ibcs2_coff_prep_zmagic(l, epp, fp, ap)
-	struct lwp *l;
-	struct exec_package *epp;
-	struct coff_filehdr *fp;
-	struct coff_aouthdr *ap;
+exec_ibcs2_coff_prep_zmagic(struct lwp *l, struct exec_package *epp, struct coff_filehdr *fp, struct coff_aouthdr *ap)
 {
 	int error;
 	u_long offset;
@@ -523,10 +504,7 @@ exec_ibcs2_coff_prep_zmagic(l, epp, fp, ap)
 }
 
 static int
-coff_load_shlib(l, path, epp)
-	struct lwp *l;
-	const char *path;
-	struct exec_package *epp;
+coff_load_shlib(struct lwp *l, const char *path, struct exec_package *epp)
 {
 	int error, siz;
 	int taddr, tsize, daddr, dsize, offset;
@@ -540,8 +518,7 @@ coff_load_shlib(l, path, epp)
 	 * 2. read filehdr
 	 * 3. map text, data, and bss out of it using VM_*
 	 */
-	CHECK_ALT_EXIST(l, NULL, path);	/* path is on kernel stack */
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, path, l);
+	NDINIT(&nd, LOOKUP, FOLLOW | TRYEMULROOT, UIO_SYSSPACE, path);
 	/* first get the vnode */
 	if ((error = namei(&nd)) != 0) {
 		DPRINTF(("coff_load_shlib: can't find library %s\n", path));
@@ -549,7 +526,7 @@ coff_load_shlib(l, path, epp)
 	}
 
 	siz = sizeof(struct coff_filehdr);
-	error = vn_rdwr(UIO_READ, nd.ni_vp, (caddr_t) fhp, siz, 0,
+	error = vn_rdwr(UIO_READ, nd.ni_vp, (void *) fhp, siz, 0,
 	    UIO_SYSSPACE, IO_NODELOCKED, l->l_cred, &resid, l);
 	if (error) {
 	    DPRINTF(("filehdr read error %d\n", error));

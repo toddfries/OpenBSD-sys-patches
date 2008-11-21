@@ -1,4 +1,4 @@
-/*	$NetBSD: ite_ul.c,v 1.11 2002/01/28 09:57:00 aymeric Exp $ */
+/*	$NetBSD: ite_ul.c,v 1.13 2008/04/28 20:23:12 martin Exp $ */
 
 /*-
  * Copyright (c) 1995 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ite_ul.c,v 1.11 2002/01/28 09:57:00 aymeric Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ite_ul.c,v 1.13 2008/04/28 20:23:12 martin Exp $");
 
 #include "grful.h"
 #if NGRFUL > 0
@@ -146,14 +139,14 @@ grful_iteinit(struct grf_softc *gp)
 void
 ulowell_init(struct ite_softc *ip)
 {
-	struct gspregs *ba;
+	volatile struct gspregs *ba;
 
 	u_int16_t *sp;
 	u_int16_t cmd[8];
 
 	int i;
 
-	ba = (struct gspregs *) ip->grf->g_regkva;
+	ba = (volatile struct gspregs *) ip->grf->g_regkva;
 
 	ip->font     = kernel_font;
 	ip->font_lo  = kernel_font_lo;
@@ -232,10 +225,10 @@ ulowell_init(struct ite_softc *ip)
 
 void ulowell_cursor(struct ite_softc *ip, int flag)
 {
-	struct gspregs *ba;
+	volatile struct gspregs *ba;
 	u_int16_t cmd[7];
 
-	ba = (struct gspregs *)ip->grf->g_regkva;
+	ba = (volatile struct gspregs *)ip->grf->g_regkva;
 
 	if (flag == END_CURSOROPT)
 		--ip->cursor_opt;
@@ -306,11 +299,11 @@ void ulowell_cursor(struct ite_softc *ip, int flag)
 
 static void screen_up(struct ite_softc *ip, int top, int bottom, int lines)
 {
-	struct gspregs *ba;
+	volatile struct gspregs *ba;
 
 	u_int16_t cmd[7];
 
-	ba = (struct gspregs *)ip->grf->g_regkva;
+	ba = (volatile struct gspregs *)ip->grf->g_regkva;
 
 #ifdef DEBUG_UL
 	printf("screen_up %d %d %d ->",top,bottom,lines);
@@ -340,11 +333,11 @@ static void screen_up(struct ite_softc *ip, int top, int bottom, int lines)
 
 static void screen_down(struct ite_softc *ip, int top, int bottom, int lines)
 {
-	struct gspregs *ba;
+	volatile struct gspregs *ba;
 
 	u_int16_t cmd[7];
 
-	ba = (struct gspregs *)ip->grf->g_regkva;
+	ba = (volatile struct gspregs *)ip->grf->g_regkva;
 
 #ifdef DEBUG_UL
 	printf("screen_down %d %d %d ->",top,bottom,lines);
@@ -381,10 +374,10 @@ void ulowell_deinit(struct ite_softc *ip)
 
 void ulowell_putc(struct ite_softc *ip, int c, int dy, int dx, int mode)
 {
-	struct gspregs *ba;
+	volatile struct gspregs *ba;
 	u_int16_t cmd[8];
 
-	ba = (struct gspregs *)ip->grf->g_regkva;
+	ba = (volatile struct gspregs *)ip->grf->g_regkva;
 
 	cmd[0] = GCMD_CHAR;
 	cmd[1] = c & 0xff;
@@ -399,14 +392,14 @@ void ulowell_putc(struct ite_softc *ip, int c, int dy, int dx, int mode)
 void ulowell_clear(struct ite_softc *ip, int sy, int sx, int h, int w)
 {
 	/* XXX TBD */
-	struct gspregs * ba;
+	volatile struct gspregs * ba;
 
 	u_int16_t cmd[7];
 
 #ifdef	DEBUG_UL
 	printf("ulowell_clear %d %d %d %d ->",sy,sx,h,w);
 #endif
-	ba = (struct gspregs *)ip->grf->g_regkva;
+	ba = (volatile struct gspregs *)ip->grf->g_regkva;
 
 	cmd[0] = GCMD_FILL;
 	cmd[1] = 0x0; /* XXX */
@@ -421,10 +414,10 @@ void ulowell_clear(struct ite_softc *ip, int sy, int sx, int h, int w)
 
 void ulowell_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 {
-	struct gspregs *ba;
+	volatile struct gspregs *ba;
 	u_int16_t cmd[7];
 
-	ba = (struct gspregs *)ip->grf->g_regkva;
+	ba = (volatile struct gspregs *)ip->grf->g_regkva;
 
 #ifdef DEBUG_UL
 	printf("ulowell_scroll %d %d %d %d ->",sy,sx,count,dir);

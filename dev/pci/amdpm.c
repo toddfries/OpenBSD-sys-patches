@@ -1,20 +1,4 @@
-/*	$OpenBSD: amdpm.c,v 1.22 2008/05/06 12:39:03 markus Exp $	*/
-
-/*
- * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
- *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
+/*	$NetBSD: amdpm.c,v 1.30 2008/04/28 20:23:54 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -31,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,500 +29,210 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: amdpm.c,v 1.30 2008/04/28 20:23:54 martin Exp $");
+
+#include "opt_amdpm.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/rwlock.h>
-#include <sys/proc.h>
-#include <sys/timeout.h>
-#ifdef __HAVE_TIMECOUNTER
-#include <sys/timetc.h>
-#endif
+#include <sys/device.h>
+#include <sys/callout.h>
+#include <sys/rnd.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
+#include <dev/ic/acpipmtimer.h>
+
+#include <dev/i2c/i2cvar.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-#include <dev/rndvar.h>
-#include <dev/i2c/i2cvar.h>
+#include <dev/pci/amdpmreg.h>
+#include <dev/pci/amdpmvar.h>
+#include <dev/pci/amdpm_smbusreg.h>
 
-#ifdef AMDPM_DEBUG
-#define DPRINTF(x...) printf(x)
-#else
-#define DPRINTF(x...)
+static void	amdpm_rnd_callout(void *);
+
+#ifdef AMDPM_RND_COUNTERS
+#define	AMDPM_RNDCNT_INCR(ev)	(ev)->ev_count++
 #endif
 
-#define AMDPM_SMBUS_DELAY	100
-#define AMDPM_SMBUS_TIMEOUT	1
-
-#ifdef __HAVE_TIMECOUNTER
-u_int amdpm_get_timecount(struct timecounter *tc);
-
-#ifndef AMDPM_FREQUENCY
-#define AMDPM_FREQUENCY 3579545
-#endif
-
-static struct timecounter amdpm_timecounter = {
-	amdpm_get_timecount,	/* get_timecount */
-	0,			/* no poll_pps */
-	0xffffff,		/* counter_mask */
-	AMDPM_FREQUENCY,	/* frequency */
-	"AMDPM",		/* name */
-	1000			/* quality */
-};
-#endif
-
-#define	AMDPM_CONFREG	0x40
-
-/* 0x40: General Configuration 1 Register */
-#define	AMDPM_RNGEN	0x00000080	/* random number generator enable */
-#define	AMDPM_STOPTMR	0x00000040	/* stop free-running timer */
-
-/* 0x41: General Configuration 2 Register */
-#define	AMDPM_PMIOEN	0x00008000	/* system management IO space enable */
-#define	AMDPM_TMRRST	0x00004000	/* reset free-running timer */
-#define	AMDPM_TMR32	0x00000800	/* extended (32 bit) timer enable */
-
-/* 0x42: SCI Interrupt Configuration Register */
-/* 0x43: Previous Power State Register */
-
-#define	AMDPM_PMPTR	0x58		/* PMxx System Management IO space
-					   Pointer */
-#define NFPM_PMPTR	0x14		/* nForce System Management IO space
-					   POinter */
-#define	AMDPM_PMBASE(x)	((x) & 0xff00)	/* PMxx base address */
-#define	AMDPM_PMSIZE	256		/* PMxx space size */
-
-/* Registers in PMxx space */
-#define	AMDPM_TMR	0x08		/* 24/32 bit timer register */
-
-#define	AMDPM_RNGDATA	0xf0		/* 32 bit random data register */
-#define	AMDPM_RNGSTAT	0xf4		/* RNG status register */
-#define	AMDPM_RNGDONE	0x00000001	/* Random number generation complete */
-
-#define AMDPM_SMB_REGS  0xe0		/* offset of SMB register space */
-#define AMDPM_SMB_SIZE  0xf		/* size of SMB register space */ 
-#define AMDPM_SMBSTAT	0x0		/* SMBus status */
-#define AMDPM_SMBSTAT_ABRT	(1 << 0)	/* transfer abort */
-#define AMDPM_SMBSTAT_COL	(1 << 1)	/* collision */
-#define AMDPM_SMBSTAT_PRERR	(1 << 2)	/* protocol error */
-#define AMDPM_SMBSTAT_HBSY	(1 << 3)	/* host controller busy */
-#define AMDPM_SMBSTAT_CYC	(1 << 4)	/* cycle complete */
-#define AMDPM_SMBSTAT_TO	(1 << 5)	/* timeout */
-#define AMDPM_SMBSTAT_SNP	(1 << 8)	/* snoop address match */
-#define AMDPM_SMBSTAT_SLV	(1 << 9)	/* slave address match */
-#define AMDPM_SMBSTAT_SMBA	(1 << 10)	/* SMBALERT# asserted */
-#define AMDPM_SMBSTAT_BSY	(1 << 11)	/* bus busy */
-#define AMDPM_SMBSTAT_BITS	"\020\001ABRT\002COL\003PRERR\004HBSY\005CYC\006TO\011SNP\012SLV\013SMBA\014BSY"
-#define AMDPM_SMBCTL	0x2		/* SMBus control */
-#define AMDPM_SMBCTL_CMD_QUICK	0		/* QUICK command */
-#define AMDPM_SMBCTL_CMD_BYTE	1		/* BYTE command */
-#define AMDPM_SMBCTL_CMD_BDATA	2		/* BYTE DATA command */
-#define AMDPM_SMBCTL_CMD_WDATA	3		/* WORD DATA command */
-#define AMDPM_SMBCTL_CMD_PCALL	4		/* PROCESS CALL command */
-#define AMDPM_SMBCTL_CMD_BLOCK	5		/* BLOCK command */
-#define AMDPM_SMBCTL_START	(1 << 3)	/* start transfer */
-#define AMDPM_SMBCTL_CYCEN	(1 << 4)	/* intr on cycle complete */
-#define AMDPM_SMBCTL_ABORT	(1 << 5)	/* abort transfer */
-#define AMDPM_SMBCTL_SNPEN	(1 << 8)	/* intr on snoop addr match */
-#define AMDPM_SMBCTL_SLVEN	(1 << 9)	/* intr on slave addr match */
-#define AMDPM_SMBCTL_SMBAEN	(1 << 10)	/* intr on SMBALERT# */
-#define AMDPM_SMBADDR	0x4		/* SMBus address */
-#define AMDPM_SMBADDR_READ	(1 << 0)	/* read direction */
-#define AMDPM_SMBADDR_ADDR(x)	(((x) & 0x7f) << 1) /* 7-bit address */
-#define AMDPM_SMBDATA	0x6		/* SMBus data */
-#define AMDPM_SMBCMD	0x8		/* SMBus command */
-
-
-struct amdpm_softc {
-	struct device sc_dev;
-
-	pci_chipset_tag_t sc_pc;
-	pcitag_t sc_tag;
-
-	bus_space_tag_t sc_iot;
-	bus_space_handle_t sc_ioh;		/* PMxx space */
-	bus_space_handle_t sc_i2c_ioh;		/* I2C space */
-	int sc_poll;
-
-	struct timeout sc_rnd_ch;
-
-	struct i2c_controller sc_i2c_tag;
-	struct rwlock sc_i2c_lock;
-	struct {
-		i2c_op_t op;
-		void *buf;
-		size_t len;
-		int flags;
-		volatile int error;
-	} sc_i2c_xfer;
-};
-
-int	amdpm_match(struct device *, void *, void *);
-void	amdpm_attach(struct device *, struct device *, void *);
-void	amdpm_rnd_callout(void *);
-
-int	amdpm_i2c_acquire_bus(void *, int);
-void	amdpm_i2c_release_bus(void *, int);
-int	amdpm_i2c_exec(void *, i2c_op_t, i2c_addr_t, const void *, size_t,
-	    void *, size_t, int);
-
-int	amdpm_intr(void *);
-
-struct cfattach amdpm_ca = {
-	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach
-};
-
-struct cfdriver amdpm_cd = {
-	NULL, "amdpm", DV_DULL
-};
-
-const struct pci_matchid amdpm_ids[] = {
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PBC756_PMC },
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_766_PMC },
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PBC768_PMC },
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_8111_PMC },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_NFORCE_SMB }
-};
-
-int
-amdpm_match(struct device *parent, void *match, void *aux)
+static int
+amdpm_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
-	return (pci_matchbyid(aux, amdpm_ids,
-	    sizeof(amdpm_ids) / sizeof(amdpm_ids[0])));
+	struct pci_attach_args *pa = aux;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_AMD) {
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_AMD_PBC768_PMC:
+		case PCI_PRODUCT_AMD_PBC8111_ACPI:
+			return (1);
+		}
+	}
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_NVIDIA) {
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_NVIDIA_XBOX_SMBUS:
+			return (1);
+		}
+	}
+
+	return (0);
 }
 
-void
+static void
 amdpm_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct amdpm_softc *sc = (struct amdpm_softc *) self;
 	struct pci_attach_args *pa = aux;
-	struct i2cbus_attach_args iba;
-	pcireg_t cfg_reg, reg;
+	char devinfo[256];
+	pcireg_t confreg, pmptrreg;
+	u_int32_t pmreg;
 	int i;
+
+	aprint_naive("\n");
+	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
+	aprint_normal(": %s (rev. 0x%02x)\n", devinfo,
+	    PCI_REVISION(pa->pa_class));
+
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_NVIDIA_XBOX_SMBUS)
+		sc->sc_nforce = 1;
+	else
+		sc->sc_nforce = 0;
 
 	sc->sc_pc = pa->pa_pc;
 	sc->sc_tag = pa->pa_tag;
 	sc->sc_iot = pa->pa_iot;
-	sc->sc_poll = 1; /* XXX */
+	sc->sc_pa = pa;
 
-	
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_AMD)  {
-		cfg_reg = pci_conf_read(pa->pa_pc, pa->pa_tag, AMDPM_CONFREG);
-		if ((cfg_reg & AMDPM_PMIOEN) == 0) {
-			printf(": PMxx space isn't enabled\n");
-			return;
-		}
-
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, AMDPM_PMPTR);
-		if (AMDPM_PMBASE(reg) == 0 ||
-		    bus_space_map(sc->sc_iot, AMDPM_PMBASE(reg), AMDPM_PMSIZE,
-		    0, &sc->sc_ioh)) {
-			printf("\n");
-			return;
-		}
-		if (bus_space_subregion(sc->sc_iot, sc->sc_ioh, AMDPM_SMB_REGS,
-		    AMDPM_SMB_SIZE, &sc->sc_i2c_ioh)) {
-			printf(": failed to map I2C subregion\n");
-			return;	
-		}
-
-#ifdef __HAVE_TIMECOUNTER
-		if ((cfg_reg & AMDPM_TMRRST) == 0 &&
-		    (cfg_reg & AMDPM_STOPTMR) == 0 &&
-		    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC768_PMC ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_8111_PMC)) {
-			printf(": %d-bit timer at %dHz",
-			    (cfg_reg & AMDPM_TMR32) ? 32 : 24,
-			    amdpm_timecounter.tc_frequency);
-
-			amdpm_timecounter.tc_priv = sc;
-			if (cfg_reg & AMDPM_TMR32)
-				amdpm_timecounter.tc_counter_mask = 0xffffffffu;
-			tc_init(&amdpm_timecounter);
-		}	
+#if 0
+	aprint_normal_dev(&sc->sc_dev, "");
+	pci_conf_print(pa->pa_pc, pa->pa_tag, NULL);
 #endif
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC768_PMC ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_8111_PMC) {
-			if ((cfg_reg & AMDPM_RNGEN) ==0) {
-				pci_conf_write(pa->pa_pc, pa->pa_tag, 
-				    AMDPM_CONFREG, cfg_reg | AMDPM_RNGEN);
-				cfg_reg = pci_conf_read(pa->pa_pc, pa->pa_tag,
-				    AMDPM_CONFREG);
-			}
-			if (cfg_reg & AMDPM_RNGEN) {
-			/* Check to see if we can read data from the RNG. */
-				(void) bus_space_read_4(sc->sc_iot, sc->sc_ioh,
-				    AMDPM_RNGDATA);
-				for (i = 1000; i--; ) {
-					if (bus_space_read_1(sc->sc_iot, 
-					    sc->sc_ioh, AMDPM_RNGSTAT) & 
-					    AMDPM_RNGDONE)
-						break;
-					DELAY(10);
-				}
-				if (bus_space_read_1(sc->sc_iot, sc->sc_ioh,
-				    AMDPM_RNGSTAT) & AMDPM_RNGDONE) {
-					printf(": rng active");
-					timeout_set(&sc->sc_rnd_ch, 
-					    amdpm_rnd_callout, sc);
-					amdpm_rnd_callout(sc);
-				}
-			}
+
+	confreg = pci_conf_read(pa->pa_pc, pa->pa_tag, AMDPM_CONFREG);
+	/* enable pm i/o space for AMD-8111 and nForce */
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC8111_ACPI ||
+	    sc->sc_nforce)
+		confreg |= AMDPM_PMIOEN;
+
+	/* Enable random number generation for everyone */
+	pci_conf_write(pa->pa_pc, pa->pa_tag, AMDPM_CONFREG,
+	    confreg | AMDPM_RNGEN);
+	confreg = pci_conf_read(pa->pa_pc, pa->pa_tag, AMDPM_CONFREG);
+
+	if ((confreg & AMDPM_PMIOEN) == 0) {
+		aprint_error_dev(&sc->sc_dev, "PMxx space isn't enabled\n");
+		return;
+	}
+
+	if (sc->sc_nforce) {
+		pmptrreg = pci_conf_read(pa->pa_pc, pa->pa_tag, NFORCE_PMPTR);
+		aprint_normal_dev(&sc->sc_dev, "power management at 0x%04x\n",
+		    NFORCE_PMBASE(pmptrreg));
+		if (bus_space_map(sc->sc_iot, NFORCE_PMBASE(pmptrreg),
+		    AMDPM_PMSIZE, 0, &sc->sc_ioh)) {
+			aprint_error_dev(&sc->sc_dev, "failed to map PMxx space\n");
+			return;
 		}
-	} else if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_NVIDIA) {
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, NFPM_PMPTR);
-		if (AMDPM_PMBASE(reg) == 0 ||
-		    bus_space_map(sc->sc_iot, AMDPM_PMBASE(reg), AMDPM_SMB_SIZE, 0,
-		    &sc->sc_i2c_ioh)) {
-			printf(": failed to map I2C subregion\n");
+	} else {
+		pmptrreg = pci_conf_read(pa->pa_pc, pa->pa_tag, AMDPM_PMPTR);
+		if (bus_space_map(sc->sc_iot, AMDPM_PMBASE(pmptrreg),
+		    AMDPM_PMSIZE, 0, &sc->sc_ioh)) {
+			aprint_error_dev(&sc->sc_dev, "failed to map PMxx space\n");
 			return;
 		}
 	}
-	printf("\n");
 
-	/* Attach I2C bus */
-	rw_init(&sc->sc_i2c_lock, "iiclk");
-	sc->sc_i2c_tag.ic_cookie = sc;
-	sc->sc_i2c_tag.ic_acquire_bus = amdpm_i2c_acquire_bus;
-	sc->sc_i2c_tag.ic_release_bus = amdpm_i2c_release_bus;
-	sc->sc_i2c_tag.ic_exec = amdpm_i2c_exec;
+	/* don't attach a timecounter on nforce boards */
+	if ((confreg & AMDPM_TMRRST) == 0 && (confreg & AMDPM_STOPTMR) == 0 &&
+	    !sc->sc_nforce) {
+		acpipmtimer_attach(&sc->sc_dev, sc->sc_iot, sc->sc_ioh,
+		  AMDPM_TMR, ((confreg & AMDPM_TMR32) ? ACPIPMT_32BIT : 0));
+	}
 
-	bzero(&iba, sizeof(iba));
-	iba.iba_name = "iic";
-	iba.iba_tag = &sc->sc_i2c_tag;
-	config_found(self, &iba, iicbus_print);
+	/* try to attach devices on the smbus */
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC8111_ACPI ||
+	    sc->sc_nforce) {
+		amdpm_smbus_attach(sc);
+	}
+
+	if (confreg & AMDPM_RNGEN) {
+		/* Check to see if we can read data from the RNG. */
+		(void) bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		    AMDPM_RNGDATA);
+		for (i = 0; i < 1000; i++) {
+			pmreg = bus_space_read_4(sc->sc_iot,
+			    sc->sc_ioh, AMDPM_RNGSTAT);
+			if (pmreg & AMDPM_RNGDONE)
+				break;
+			delay(1);
+		}
+		if ((pmreg & AMDPM_RNGDONE) != 0) {
+			aprint_normal_dev(&sc->sc_dev, ""
+			    "random number generator enabled (apprx. %dms)\n",
+			    i);
+			callout_init(&sc->sc_rnd_ch, 0);
+			rnd_attach_source(&sc->sc_rnd_source,
+			    device_xname(&sc->sc_dev), RND_TYPE_RNG,
+			    /*
+			     * XXX Careful!  The use of RND_FLAG_NO_ESTIMATE
+			     * XXX here is unobvious: we later feed raw bits
+			     * XXX into the "entropy pool" with rnd_add_data,
+			     * XXX explicitly supplying an entropy estimate.
+			     * XXX In this context, NO_ESTIMATE serves only
+			     * XXX to prevent rnd_add_data from trying to
+			     * XXX use the *time at which we added the data*
+			     * XXX as entropy, which is not a good idea since
+			     * XXX we add data periodically from a callout.
+			     */
+			    RND_FLAG_NO_ESTIMATE);
+#ifdef AMDPM_RND_COUNTERS
+			evcnt_attach_dynamic(&sc->sc_rnd_hits, EVCNT_TYPE_MISC,
+			    NULL, device_xname(&sc->sc_dev), "rnd hits");
+			evcnt_attach_dynamic(&sc->sc_rnd_miss, EVCNT_TYPE_MISC,
+			    NULL, device_xname(&sc->sc_dev), "rnd miss");
+			for (i = 0; i < 256; i++) {
+				evcnt_attach_dynamic(&sc->sc_rnd_data[i],
+				    EVCNT_TYPE_MISC, NULL, device_xname(&sc->sc_dev),
+				    "rnd data");
+			}
+#endif
+			amdpm_rnd_callout(sc);
+		}
+	}
 }
 
-void
+CFATTACH_DECL(amdpm, sizeof(struct amdpm_softc),
+    amdpm_match, amdpm_attach, NULL, NULL);
+
+static void
 amdpm_rnd_callout(void *v)
 {
 	struct amdpm_softc *sc = v;
-	u_int32_t reg;
+	u_int32_t rngreg;
+#ifdef AMDPM_RND_COUNTERS
+	int i;
+#endif
 
 	if ((bus_space_read_4(sc->sc_iot, sc->sc_ioh, AMDPM_RNGSTAT) &
 	    AMDPM_RNGDONE) != 0) {
-		reg = bus_space_read_4(sc->sc_iot, sc->sc_ioh, AMDPM_RNGDATA);
-		add_true_randomness(reg);
-	}
-	timeout_add(&sc->sc_rnd_ch, 1);
-}
-
-#ifdef __HAVE_TIMECOUNTER
-u_int
-amdpm_get_timecount(struct timecounter *tc)
-{
-	struct amdpm_softc *sc = tc->tc_priv;
-	u_int u2;
-#if 0
-	u_int u1, u3;
+		rngreg = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		    AMDPM_RNGDATA);
+		rnd_add_data(&sc->sc_rnd_source, &rngreg,
+		    sizeof(rngreg), sizeof(rngreg) * NBBY);
+#ifdef AMDPM_RND_COUNTERS
+		AMDPM_RNDCNT_INCR(&sc->sc_rnd_hits);
+		for (i = 0; i < sizeof(rngreg); i++, rngreg >>= NBBY)
+			AMDPM_RNDCNT_INCR(&sc->sc_rnd_data[rngreg & 0xff]);
 #endif
-
-	u2 = bus_space_read_4(sc->sc_iot, sc->sc_ioh, AMDPM_TMR);
-#if 0
-	u3 = bus_space_read_4(sc->sc_iot, sc->sc_ioh, AMDPM_TMR);
-	do {
-		u1 = u2;
-		u2 = u3;
-		u3 = bus_space_read_4(sc->sc_iot, sc->sc_ioh, AMDPM_TMR);
-	} while (u1 > u2 || u2 > u3);
+	}
+#ifdef AMDPM_RND_COUNTERS
+	else
+		AMDPM_RNDCNT_INCR(&sc->sc_rnd_miss);
 #endif
-	return (u2);
-}
-#endif
-
-int
-amdpm_i2c_acquire_bus(void *cookie, int flags)
-{
-	struct amdpm_softc *sc = cookie;
-
-	if (cold || sc->sc_poll || (flags & I2C_F_POLL))
-		return (0);
-
-	return (rw_enter(&sc->sc_i2c_lock, RW_WRITE | RW_INTR));
-}
-
-void
-amdpm_i2c_release_bus(void *cookie, int flags)
-{
-	struct amdpm_softc *sc = cookie;
-
-	if (cold || sc->sc_poll || (flags & I2C_F_POLL))
-		return;
-
-	rw_exit(&sc->sc_i2c_lock);
-}
-
-int
-amdpm_i2c_exec(void *cookie, i2c_op_t op, i2c_addr_t addr,
-    const void *cmdbuf, size_t cmdlen, void *buf, size_t len, int flags)
-{
-	struct amdpm_softc *sc = cookie;
-	u_int8_t *b;
-	u_int16_t st, ctl, data;
-	int retries;
-
-	DPRINTF("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
-	    "flags 0x%02x\n", sc->sc_dev.dv_xname, op, addr, cmdlen,
-	    len, flags);
-
-	/* Wait for bus to be idle */
-	for (retries = 100; retries > 0; retries--) {
-		st = bus_space_read_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBSTAT);
-		if (!(st & AMDPM_SMBSTAT_BSY))
-			break;
-		DELAY(AMDPM_SMBUS_DELAY);
-	}
-	DPRINTF("%s: exec: st 0x%b\n", sc->sc_dev.dv_xname, st,
-	    AMDPM_SMBSTAT_BITS);
-	if (st & AMDPM_SMBSTAT_BSY)
-		return (1);
-
-	if (cold || sc->sc_poll)
-		flags |= I2C_F_POLL;
-
-	if (!I2C_OP_STOP_P(op) || cmdlen > 1 || len > 2)
-		return (1);
-
-	/* Setup transfer */
-	sc->sc_i2c_xfer.op = op;
-	sc->sc_i2c_xfer.buf = buf;
-	sc->sc_i2c_xfer.len = len;
-	sc->sc_i2c_xfer.flags = flags;
-	sc->sc_i2c_xfer.error = 0;
-
-	/* Set slave address and transfer direction */
-	bus_space_write_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBADDR,
-	    AMDPM_SMBADDR_ADDR(addr) |
-	    (I2C_OP_READ_P(op) ? AMDPM_SMBADDR_READ : 0));
-
-	b = (void *)cmdbuf;
-	if (cmdlen > 0)
-		/* Set command byte */
-		bus_space_write_1(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBCMD, b[0]);
-
-	if (I2C_OP_WRITE_P(op)) {
-		/* Write data */
-		data = 0;
-		b = buf;
-		if (len > 0)
-			data = b[0];
-		if (len > 1)
-			data |= ((u_int16_t)b[1] << 8);
-		if (len > 0)
-			bus_space_write_2(sc->sc_iot, sc->sc_i2c_ioh,
-			    AMDPM_SMBDATA, data);
-	}
-
-	/* Set SMBus command */
-	if (len == 0)
-		ctl = AMDPM_SMBCTL_CMD_BYTE;
-	else if (len == 1)
-		ctl = AMDPM_SMBCTL_CMD_BDATA;
-	else if (len == 2)
-		ctl = AMDPM_SMBCTL_CMD_WDATA;
-
-	if ((flags & I2C_F_POLL) == 0)
-		ctl |= AMDPM_SMBCTL_CYCEN;
-
-	/* Start transaction */
-	ctl |= AMDPM_SMBCTL_START;
-	bus_space_write_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBCTL, ctl);
-
-	if (flags & I2C_F_POLL) {
-		/* Poll for completion */
-		DELAY(AMDPM_SMBUS_DELAY);
-		for (retries = 1000; retries > 0; retries--) {
-			st = bus_space_read_2(sc->sc_iot, sc->sc_i2c_ioh,
-			    AMDPM_SMBSTAT);
-			if ((st & AMDPM_SMBSTAT_HBSY) == 0)
-				break;
-			DELAY(AMDPM_SMBUS_DELAY);
-		}
-		if (st & AMDPM_SMBSTAT_HBSY)
-			goto timeout;
-		amdpm_intr(sc);
-	} else {
-		/* Wait for interrupt */
-		if (tsleep(sc, PRIBIO, "iicexec", AMDPM_SMBUS_TIMEOUT * hz))
-			goto timeout;
-	}
-
-	if (sc->sc_i2c_xfer.error)
-		return (1);
-
-	return (0);
-
-timeout:
-	/*
-	 * Transfer timeout. Kill the transaction and clear status bits.
-	 */
-	printf("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
-	    "flags 0x%02x: timeout, status 0x%b\n",
-	    sc->sc_dev.dv_xname, op, addr, cmdlen, len, flags,
-	    st, AMDPM_SMBSTAT_BITS);
-	bus_space_write_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBCTL,
-	    AMDPM_SMBCTL_ABORT);
-	DELAY(AMDPM_SMBUS_DELAY);
-	st = bus_space_read_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBSTAT);
-	if ((st & AMDPM_SMBSTAT_ABRT) == 0)
-		printf("%s: abort failed, status 0x%b\n",
-		    sc->sc_dev.dv_xname, st, AMDPM_SMBSTAT_BITS);
-	bus_space_write_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBSTAT, st);
-	return (1);
-}
-
-int
-amdpm_intr(void *arg)
-{
-	struct amdpm_softc *sc = arg;
-	u_int16_t st, data;
-	u_int8_t *b;
-	size_t len;
-
-	/* Read status */
-	st = bus_space_read_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBSTAT);
-	if ((st & AMDPM_SMBSTAT_HBSY) != 0 || (st & (AMDPM_SMBSTAT_ABRT |
-	    AMDPM_SMBSTAT_COL | AMDPM_SMBSTAT_PRERR | AMDPM_SMBSTAT_CYC |
-	    AMDPM_SMBSTAT_TO | AMDPM_SMBSTAT_SNP | AMDPM_SMBSTAT_SLV |
-	    AMDPM_SMBSTAT_SMBA)) == 0)
-		/* Interrupt was not for us */
-		return (0);
-
-	DPRINTF("%s: intr: st 0x%b\n", sc->sc_dev.dv_xname, st,
-	    AMDPM_SMBSTAT_BITS);
-
-	/* Clear status bits */
-	bus_space_write_2(sc->sc_iot, sc->sc_i2c_ioh, AMDPM_SMBSTAT, st);
-
-	/* Check for errors */
-	if (st & (AMDPM_SMBSTAT_COL | AMDPM_SMBSTAT_PRERR |
-	    AMDPM_SMBSTAT_TO)) {
-		sc->sc_i2c_xfer.error = 1;
-		goto done;
-	}
-
-	if (st & AMDPM_SMBSTAT_CYC) {
-		if (I2C_OP_WRITE_P(sc->sc_i2c_xfer.op))
-			goto done;
-
-		/* Read data */
-		b = sc->sc_i2c_xfer.buf;
-		len = sc->sc_i2c_xfer.len;
-		if (len > 0) {
-			data = bus_space_read_2(sc->sc_iot, sc->sc_i2c_ioh,
-			    AMDPM_SMBDATA);
-			b[0] = data & 0xff;
-		}
-		if (len > 1)
-			b[1] = (data >> 8) & 0xff;
-	}
-
-done:
-	if ((sc->sc_i2c_xfer.flags & I2C_F_POLL) == 0)
-		wakeup(sc);
-	return (1);
+	callout_reset(&sc->sc_rnd_ch, 1, amdpm_rnd_callout, sc);
 }

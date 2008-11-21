@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.S,v 1.14 2005/12/11 12:17:02 christos Exp $	*/
+/*	$NetBSD: locore.S,v 1.17 2008/11/13 10:53:30 ad Exp $	*/
 /*	$OpenBSD: locore.S,v 1.4 1997/01/26 09:06:38 rahnds Exp $	*/
 
 /*
@@ -67,7 +67,10 @@ GLOBAL(endsym)
 	.long	0			/* end symbol table */
 GLOBAL(proc0paddr)
 	.long	0			/* proc0 p_addr */
+GLOBAL(oeacpufeat)
+	.long	0				/* cpu features */
 
+/* XXX All of this should die */
 GLOBAL(intrnames)
 	.asciz	"clock", "irq1", "irq2", "irq3"
 	.asciz	"irq4", "irq5", "irq6", "irq7"
@@ -141,8 +144,8 @@ __start_cpu1_loop:
 	bne	__start_cpu1_loop
 	lis	8, 0x8000
 	ori	8, 8, 0x0c00
-	lis	9,_C_LABEL(cpl)@ha
-	lwz	9,_C_LABEL(cpl)@l(9)
+	lis	9,_C_LABEL(cpu_info)+CI_CPL@ha
+	lwz	9,_C_LABEL(cpu_info)+CI_CPL@l(9)
 	stb	9, 0(8)
 #endif
 	b	__start_cpu1
@@ -150,7 +153,7 @@ __start_cpu1_loop:
 __start_cpu0:
 
 /* compute end of kernel memory */
-#if defined(DDB) || defined(KERNFS) || NKSYMS || defined(LKM)
+#if defined(DDB) || defined(KERNFS) || NKSYMS || defined(MODULAR)
 	lis	7,_C_LABEL(startsym)@ha
 	addi	7,7,_C_LABEL(startsym)@l
 	stw	3,0(7)

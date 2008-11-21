@@ -1,7 +1,9 @@
-/*	$OpenBSD: reg.h,v 1.11 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$NetBSD: reg.h,v 1.6 2008/01/10 21:08:41 skrll Exp $	*/
+
+/*	$OpenBSD: reg.h,v 1.7 2000/06/15 17:00:37 mickey Exp $	*/
 
 /*
- * Copyright (c) 1998-2004 Michael Shalayeff
+ * Copyright (c) 1998 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,18 +14,22 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /* 
  * Copyright (c) 1990,1994 The University of Utah and
@@ -49,8 +55,8 @@
  *	Author: Bob Wheeler, University of Utah CSL
  */
 
-#ifndef _MACHINE_REG_H_
-#define _MACHINE_REG_H_
+#ifndef _HPPA_REG_H_
+#define _HPPA_REG_H_
 
 /*
  * constants for registers for use with the following routines:
@@ -104,6 +110,7 @@
 #define	DR0_PCXT_IHE		18	/* r/w I-cache sid hash enable */
 #define	DR0_PCXT_DHE		20	/* r/w D-cache sid hash enable */
 
+/* Bits in CPU Diagnose Register 0 */
 #define	DR0_PCXL_L2IHPMC	6	/* r/c L2 I-cache error flag */
 #define	DR0_PCXL_L2IHPMC_DIS	7	/* r/w L2 I-cache hpmc disable mask */
 #define	DR0_PCXL_L2DHPMC	8	/* r/c L2 D-cache error flag */
@@ -126,6 +133,9 @@
 #define	DR0_PCXL_L1ICACHE_EN	29	/* r/w L1 I-cache enable */
 #define	DR0_PCXL_HIT		30	/* r   Diag cache read hit indication */
 #define	DR0_PCXL_PARERR		31	/* r   Diag cache read parity error */
+
+/* Bits in CPU Diagnose Register 25 */
+#define	DR25_PCXL_POWFAIL	31	/* r   set to 0 by HW on PWR fail */
 
 #define	DR0_PCXL2_L1DHPMC	8	/* r/c L1 D-cache error flag */
 #define	DR0_PCXL2_L1DHPMC_DIS	9	/* r/w L1 D-cache hpmc disable */
@@ -172,17 +182,34 @@
 #define	HPPA_NREGS	(32)
 #define	HPPA_NFPREGS	(33)	/* 33rd is used for r0 in fpemul */
 
-#ifndef _LOCORE
+#ifndef __ASSEMBLER__
 
 struct reg {
-	u_int32_t r_regs[HPPA_NREGS];	/* r0 is sar */
-	u_int32_t r_pc;
-	u_int32_t r_npc;
+	u_int32_t r_regs[HPPA_NREGS];	/* r0 is psw */
+
+	u_int32_t r_sar;
+
+	u_int32_t r_pcsqh;
+	u_int32_t r_pcsqt;
+	u_int32_t r_pcoqh;
+	u_int32_t r_pcoqt;
+	
+	u_int32_t r_sr0;
+	u_int32_t r_sr1;
+	u_int32_t r_sr2;
+	u_int32_t r_sr3;
+	u_int32_t r_sr4;
+	u_int32_t r_sr5;	/* !mcontext */
+	u_int32_t r_sr6;	/* !mcontext */
+	u_int32_t r_sr7;	/* !mcontext */
+
+	u_int32_t r_cr26;
+	u_int32_t r_cr27;
 };
 
 struct fpreg {
 	u_int64_t fpr_regs[HPPA_NFPREGS];
 };
-#endif /* !_LOCORE */
+#endif /* !__ASSEMBLER__ */
 
-#endif /* _MACHINE_REG_H_ */
+#endif /* _HPPA_REG_H_ */

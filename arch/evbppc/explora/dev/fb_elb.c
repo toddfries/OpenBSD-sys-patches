@@ -1,4 +1,4 @@
-/*	$NetBSD: fb_elb.c,v 1.7 2006/04/13 09:29:05 hannken Exp $	*/
+/*	$NetBSD: fb_elb.c,v 1.9 2008/04/28 20:23:17 martin Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fb_elb.c,v 1.7 2006/04/13 09:29:05 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fb_elb.c,v 1.9 2008/04/28 20:23:17 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -74,7 +67,7 @@ static int	fb_elb_probe(struct device *, struct cfdata *, void *);
 static void	fb_elb_attach(struct device *, struct device *, void *);
 void		fb_cnattach(bus_space_tag_t, bus_addr_t, void *);
 static void	fb_init(struct fb_dev *, int);
-static int	fb_ioctl(void *, void *, u_long, caddr_t, int, struct lwp *);
+static int	fb_ioctl(void *, void *, u_long, void *, int, struct lwp *);
 static paddr_t	fb_mmap(void *, void *, off_t, int);
 static int	fb_alloc_screen(void *, const struct wsscreen_descr *, void **,
                     int *, int *, long *);
@@ -204,7 +197,7 @@ fb_init(struct fb_dev *fb, int full)
 }
 
 static int
-fb_ioctl(void *v, void *vs, u_long cmd, caddr_t data, int flag, struct lwp *l)
+fb_ioctl(void *v, void *vs, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct fb_elb_softc *sc = v;
 	struct rasops_info *ri = &sc->sc_fb->fb_ri;

@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_commpage.c,v 1.10 2005/12/11 12:19:56 christos Exp $ */
+/*	$NetBSD: darwin_commpage.c,v 1.15 2008/04/28 20:23:41 martin Exp $ */
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_commpage.c,v 1.10 2005/12/11 12:19:56 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_commpage.c,v 1.15 2008/04/28 20:23:41 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -48,7 +41,7 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_commpage.c,v 1.10 2005/12/11 12:19:56 christo
 #include <compat/sys/signal.h>
 #include <compat/sys/signalvar.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/darwin_machdep.h>
 
 #include <uvm/uvm_extern.h>
@@ -73,8 +66,7 @@ static struct uvm_object *darwin_commpage_uao = NULL;
 static void darwin_commpage_init(struct darwin_commpage *);
 
 int
-darwin_commpage_map(p)
-	struct proc *p;
+darwin_commpage_map(struct proc *p)
 {
 	int error;
 	vaddr_t kvaddr;
@@ -139,7 +131,7 @@ darwin_commpage_map(p)
 	len = (size_t)darwin_commpage_##x##_size;			\
 									\
 	if (len > sizeof(dcp->dcp_##x)) {				\
-		printf("darwin_commpage: %s too big (%d/%d)\n", #x,	\
+		printf("darwin_commpage: %s too big (%zu/%zu)\n", #x,	\
 			len, sizeof(dcp->dcp_##x));			\
 	} else {							\
 		memcpy(dcp->dcp_##x, (void *)darwin_commpage_##x, len);	\
@@ -147,28 +139,14 @@ darwin_commpage_map(p)
 }
 
 void
-darwin_commpage_init(dcp)
-	struct darwin_commpage *dcp;
+darwin_commpage_init(struct darwin_commpage *dcp)
 {
-	int ncpu, name[2];
-	size_t sz;
-	int error;
-
 	/*
 	 * XXX Only one page is mapped yet (see higher in the file)
 	 */
 	(void)memset(dcp, 0, sizeof(*dcp));
 
 	dcp->dcp_version = DARWIN_COMMPAGE_VERSION;
-
-	name[0] = CTL_HW;
-	name[1] = HW_NCPU;
-	sz = sizeof(ncpu);
-
-	error = old_sysctl(&name[0], 2, &ncpu, &sz, NULL, 0, NULL);
-	if (error != 0)
-		ncpu = 1; /* At least there should be one */
-
 	dcp->dcp_ncpu = ncpu;
 	dcp->dcp_cap |= (ncpu << DARWIN_CAP_NCPUSHIFT);
 

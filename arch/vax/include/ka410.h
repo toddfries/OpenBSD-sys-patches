@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka410.h,v 1.5 2006/07/25 21:11:08 miod Exp $ */
-/*	$NetBSD: ka410.h,v 1.2 1997/02/19 10:06:05 ragge Exp $ */
+/*	$NetBSD: ka410.h,v 1.5 2002/12/01 21:21:45 matt Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -32,6 +31,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef _VAX_KA410_H_
+#define _VAX_KA410_H_
 
 /*
  * Definition for  I/O addresses of
@@ -90,12 +92,26 @@
 #define KA410_LAN_END	0x200E0007
 #define KA410_LAN_SIZE	      0x08
 #define KA410_CUR_BASE	0x200F0000	/* Monochrome video cursor chip */
-#define KA410_CUR_END	0x200F003F
-#define KA410_CUR_SIZE	      0x40
+#define KA410_CUR_END	0x200F0007
+#define KA410_CUR_SIZE	      0x08
 
 #define KA410_SCS_DADR	0x200C00A0	/* Tape(SCSI) DMA address register */
 #define KA410_SCS_DCNT	0x200C00C0	/* Tape(SCSI) DMA byte count reg. */
 #define KA410_SCS_DDIR	0x200C00C4	/* Tape(SCSI) DMA transfer direction */
+
+#define KA410_CUR_CMD	0x200F0000	/* Cursor Command Register */
+#define KA410_CUR_XPOS	0x200F0004	/* Cursor X position */
+#define KA410_CUR_YPOS	0x200F0008	/* Cursor Y position */
+
+#define KA410_CUR_XMIN1	0x200F000C	/* Region 1 left edge */
+#define KA410_CUR_XMAX1	0x200F0010	/* Region 1 right edge */
+#define KA410_CUR_YMIN1	0x200F0014	/* Region 1 top edge */
+#define KA410_CUR_YMAX1	0x200F0018	/* Region 1 bottom edge */
+
+#define KA410_CUR_XMIN2	0x200F002C	/* Region 2 left edge */
+#define KA410_CUR_XMAX2	0x200F0030	/* Region 2 right edge */
+#define KA410_CUR_YMIN2	0x200F0034	/* Region 2 top edge */
+#define KA410_CUR_YMAX2	0x200F0038	/* Region 2 bottom edge */
 
 /*
  * Definitions for the Configuration and Test Register
@@ -179,3 +195,5 @@ struct ka410_clock {
 	u_long  :2;	u_long	csr3	:8;	u_long  :22;
 	u_long  :2;	u_long	cpmbx	:8;	u_long  :22;
 };
+
+#endif /* _VAX_KA410_H_ */

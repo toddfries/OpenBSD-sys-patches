@@ -1,31 +1,6 @@
-/*	$OpenBSD: sig_machdep.c,v 1.19 2007/11/02 19:18:54 martin Exp $	*/
-/*	$NetBSD: sig_machdep.c,v 1.3 1997/04/30 23:28:03 gwr Exp $	*/
+/*	$NetBSD: sig_machdep.c,v 1.40 2008/11/19 18:35:59 ad Exp $	*/
 
 /*
- * Copyright (c) 1997 Theo de Raadt
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -60,52 +35,77 @@
  *	from: Utah Hdr: machdep.c 1.74 92/12/20
  *	from: @(#)machdep.c	8.10 (Berkeley) 4/20/94
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	from: Utah Hdr: machdep.c 1.74 92/12/20
+ *	from: @(#)machdep.c	8.10 (Berkeley) 4/20/94
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sig_machdep.c,v 1.40 2008/11/19 18:35:59 ad Exp $");
+
+#define __M68K_SIGNAL_PRIVATE
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/user.h>
-#include <sys/exec.h>
-#include <sys/ioctl.h>
-#include <sys/mount.h>
+#include <sys/ras.h>
+#include <sys/sa.h>
+#include <sys/savar.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
-#include <sys/malloc.h>
-#include <sys/buf.h>
+#include <sys/ucontext.h>
 
-#include <uvm/uvm_extern.h>
-
+#include <sys/mount.h>
 #include <sys/syscallargs.h>
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
+#include <machine/frame.h>
+
+#include <m68k/m68k.h>
+#include <m68k/saframe.h>
 
 extern short exframesize[];
-
-#define SS_RTEFRAME	1
-#define SS_FPSTATE	2
-#define SS_USERREGS	4
-
-struct sigstate {
-	int	ss_flags;		/* which of the following are valid */
-	struct	frame ss_frame;		/* original exception frame */
-	struct	fpframe ss_fpstate;	/* 68881/68882 state info */
-};
-
-/*
- * WARNING: code in locore.s assumes the layout shown for sf_signum
- * thru sf_handler so... don't screw with them!
- */
-struct sigframe {
-	int	sf_signum;		/* signo for handler */
-	siginfo_t *sf_sip;		/* pointer to siginfo_t */
-	struct	sigcontext *sf_scp;	/* context ptr for handler */
-	sig_t	sf_handler;		/* handler addr for u_sigc */
-	struct	sigstate sf_state;	/* state of the hardware */
-	struct	sigcontext sf_sc;	/* actual context */
-	siginfo_t sf_si;
-};
+struct fpframe m68k_cached_fpu_idle_frame;
+void	m68881_save(struct fpframe *);
+void	m68881_restore(struct fpframe *);
 
 #ifdef DEBUG
 int sigdebug = 0;
@@ -116,288 +116,333 @@ int sigpid = 0;
 #endif
 
 /*
- * Send an interrupt to process.
+ * Test for a null floating point frame given a pointer to the start
+ * of an fsave'd frame.
+ */
+#if defined(M68020) || defined(M68030) || defined(M68040)
+#if defined(M68060)
+#define	FPFRAME_IS_NULL(fp)						    \
+	    ((fputype == FPU_68060 &&					    \
+	      ((struct fpframe060 *)(fp))->fpf6_frmfmt == FPF6_FMT_NULL) || \
+	     (fputype != FPU_68060  &&					    \
+	      ((union FPF_u1 *)(fp))->FPF_nonnull.FPF_version == 0))
+#else
+#define FPFRAME_IS_NULL(fp) \
+	    (((union FPF_u1 *)(fp))->FPF_nonnull.FPF_version == 0)
+#endif
+#else
+#define FPFRAME_IS_NULL(fp) \
+	    (((struct fpframe060 *)(fp))->fpf6_frmfmt == FPF6_FMT_NULL)
+#endif
+
+void *
+getframe(struct lwp *l, int sig, int *onstack)
+{
+	struct frame *tf = (struct frame *)l->l_md.md_regs;
+
+	/* Do we need to jump onto the signal stack? */
+	*onstack =(l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0
+		&& (SIGACTION(l->l_proc, sig).sa_flags & SA_ONSTACK) != 0;
+
+	if (*onstack)
+		return (char *)l->l_sigstk.ss_sp + l->l_sigstk.ss_size;
+	else
+		return (void *)tf->f_regs[SP];
+}
+
+/*
+ * Build context to run handler in.  We invoke the handler
+ * directly, only returning via the trampoline.  Note the
+ * trampoline version numbers are coordinated with machine-
+ * dependent code in libc.
  */
 void
-sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
+buildcontext(struct lwp *l, void *catcher, void *fp)
 {
-	struct proc *p = curproc;
-	struct sigframe *fp, *kfp;
-	struct frame *frame;
-	struct sigacts *psp = p->p_sigacts;
-	short ft;
-	int oonstack, fsize;
-
-	frame = (struct frame *)p->p_md.md_regs;
-	ft = frame->f_format;
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	struct frame *frame = (struct frame *)l->l_md.md_regs;
 
 	/*
-	 * Allocate and validate space for the signal handler
-	 * context. Note that if the stack is in P0 space, the
-	 * call to grow() is a nop, and the useracc() check
-	 * will fail if the process has not already allocated
-	 * the space with a `brk'.
+	 * Set up the registers to return to the signal handler.  The
+	 * handler will then return to the signal trampoline.
 	 */
-	fsize = sizeof(struct sigframe);
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)(psp->ps_sigstk.ss_sp +
-					 psp->ps_sigstk.ss_size - fsize);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
-	} else
-		fp = (struct sigframe *)(frame->f_regs[SP] - fsize);
-	if ((unsigned)fp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize)) 
-		(void)uvm_grow(p, (unsigned)fp);
-#ifdef DEBUG
-	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-		printf("sendsig(%d): sig %d ssp %p usp %p scp %p ft %d\n",
-		       p->p_pid, sig, &oonstack, fp, &fp->sf_sc, ft);
-#endif
-	kfp = (struct sigframe *)malloc((u_long)fsize, M_TEMP,
-	    M_WAITOK | M_CANFAIL);
-	if (kfp == NULL) {
-		/* Better halt the process in its track than panicing */
-		sigexit(p, SIGILL);
-		/* NOTREACHED */
-	}
+	frame->f_regs[SP] = (int)fp;
+	frame->f_pc = (int)catcher;
+}
 
-	/* 
-	 * Build the argument list for the signal handler.
-	 */
-	kfp->sf_signum = sig;
-	kfp->sf_sip = NULL;
-	kfp->sf_scp = &fp->sf_sc;
-	kfp->sf_handler = catcher;
+void
+sendsig_siginfo(const ksiginfo_t *ksi, const sigset_t *mask)
+{
+	struct lwp *l = curlwp;
+	struct proc *p = l->l_proc;
+	struct sigacts *ps = p->p_sigacts;
+	int onstack, error;
+	int sig = ksi->ksi_signo;
+	struct sigframe_siginfo *fp = getframe(l, sig, &onstack), kf;
+	sig_t catcher = SIGACTION(p, sig).sa_handler;
 
-	/*
-	 * Save necessary hardware state.  Currently this includes:
-	 *	- general registers
-	 *	- original exception frame (if not a "normal" frame)
-	 *	- FP coprocessor state
-	 */
-	kfp->sf_state.ss_flags = SS_USERREGS;
-	bcopy((caddr_t)frame->f_regs,
-	      (caddr_t)kfp->sf_state.ss_frame.f_regs, sizeof frame->f_regs);
-	if (ft >= FMT7) {
-#ifdef DEBUG
-		if (ft > 15 || exframesize[ft] < 0)
-			panic("sendsig: bogus frame type");
-#endif
-		kfp->sf_state.ss_flags |= SS_RTEFRAME;
-		kfp->sf_state.ss_frame.f_format = frame->f_format;
-		kfp->sf_state.ss_frame.f_vector = frame->f_vector;
-		bcopy((caddr_t)&frame->F_u,
-		      (caddr_t)&kfp->sf_state.ss_frame.F_u, exframesize[ft]);
-		/*
-		 * Leave an indicator that we need to clean up the kernel
-		 * stack.  We do this by setting the "pad word" above the
-		 * hardware stack frame to the amount the stack must be
-		 * adjusted by.
-		 *
-		 * N.B. we increment rather than just set f_stackadj in
-		 * case we are called from syscall when processing a
-		 * sigreturn.  In that case, f_stackadj may be non-zero.
-		 */
-		frame->f_stackadj += exframesize[ft];
-		frame->f_format = frame->f_vector = 0;
-#ifdef DEBUG
-		if (sigdebug & SDB_FOLLOW)
-			printf("sendsig(%d): copy out %d of frame %d\n",
-			       p->p_pid, exframesize[ft], ft);
-#endif
-	}
+	fp--;
 
-	if (fputype) {
-		kfp->sf_state.ss_flags |= SS_FPSTATE;
-		m68881_save(&kfp->sf_state.ss_fpstate);
-	}
-#ifdef DEBUG
-	if ((sigdebug & SDB_FPSTATE) && *(char *)&kfp->sf_state.ss_fpstate)
-		printf("sendsig(%d): copy out FP state (%x) to %p\n",
-		       p->p_pid, *(u_int *)&kfp->sf_state.ss_fpstate,
-		       &kfp->sf_state.ss_fpstate);
-#endif
-	/*
-	 * Build the signal context to be used by sigreturn.
-	 */
-	kfp->sf_sc.sc_onstack = oonstack;
-	kfp->sf_sc.sc_mask = mask;
-	kfp->sf_sc.sc_sp = frame->f_regs[SP];
-	kfp->sf_sc.sc_fp = frame->f_regs[A6];
-	kfp->sf_sc.sc_ap = (int)&fp->sf_state;
-	kfp->sf_sc.sc_pc = frame->f_pc;
-	kfp->sf_sc.sc_ps = frame->f_sr;
+	kf.sf_ra = (int)ps->sa_sigdesc[sig].sd_tramp;
+	kf.sf_signum = sig;
+	kf.sf_sip = &fp->sf_si;
+	kf.sf_ucp = &fp->sf_uc;
+	kf.sf_si._info = ksi->ksi_info;
+	kf.sf_uc.uc_flags = _UC_SIGMASK;
+	kf.sf_uc.uc_sigmask = *mask;
+	kf.sf_uc.uc_link = l->l_ctxlink;
+	kf.sf_uc.uc_flags |= (l->l_sigstk.ss_flags & SS_ONSTACK)
+	    ? _UC_SETSTACK : _UC_CLRSTACK;
+	memset(&kf.sf_uc.uc_stack, 0, sizeof(kf.sf_uc.uc_stack));
+	sendsig_reset(l, sig);
+	mutex_exit(p->p_lock);
+	cpu_getmcontext(l, &kf.sf_uc.uc_mcontext, &kf.sf_uc.uc_flags);
+	error = copyout(&kf, fp, sizeof(kf));
+	mutex_enter(p->p_lock);
 
-	if (psp->ps_siginfo & sigmask(sig)) {
-		kfp->sf_sip = &fp->sf_si;
-		initsiginfo(&kfp->sf_si, sig, code, type, val);
-	}
-
-	/* XXX do not copy out siginfo if not needed */
-	if (copyout((caddr_t)kfp, (caddr_t)fp, fsize) != 0) {
-#ifdef DEBUG
-		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-			printf("sendsig(%d): copyout failed on sig %d\n",
-			       p->p_pid, sig);
-#endif
+	if (error != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
-		free((caddr_t)kfp, M_TEMP);
-		sigexit(p, SIGILL);
+		sigexit(l, SIGILL);
 		/* NOTREACHED */
 	}
-	frame->f_regs[SP] = (int)fp;
-#ifdef DEBUG
-	if (sigdebug & SDB_FOLLOW)
-		printf("sendsig(%d): sig %d scp %p fp %p sc_sp %x sc_ap %x\n",
-		       p->p_pid, sig, kfp->sf_scp, fp,
-		       kfp->sf_sc.sc_sp, kfp->sf_sc.sc_ap);
-#endif
-	/*
-	 * Signal trampoline code is at base of user stack.
-	 */
-	frame->f_pc = p->p_sigcode;
-#ifdef DEBUG
-	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-		printf("sendsig(%d): sig %d returns\n",
-		       p->p_pid, sig);
-#endif
-	free((caddr_t)kfp, M_TEMP);
+
+	buildcontext(l, catcher, fp);
+
+	/* Remember that we're now on the signal stack. */
+	if (onstack)
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 }
 
-/*
- * System call to cleanup state after a signal
- * has been taken.  Reset signal mask and
- * stack state from context left by sendsig (above).
- * Return to previous pc and psl as specified by
- * context left by sendsig. Check carefully to
- * make sure that the user has not modified the
- * psl to gain improper privileges or to cause
- * a machine fault.
- */
-int
-sys_sigreturn(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+void
+cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted, void *sas,
+    void *ap, void *sp, sa_upcall_t upcall)
 {
-	struct sys_sigreturn_args /* {
-		syscallarg(struct sigcontext *) sigcntxp;
-	} */ *uap = v;
-	register struct sigcontext *scp;
-	register struct frame *frame;
-	register int rf;
-	struct sigcontext tsigc;
-	struct sigstate tstate;
-	int flags;
+	struct saframe *sfp, sf;
+	struct frame *frame;
 
-	scp = SCARG(uap, sigcntxp);
-#ifdef DEBUG
-	if (sigdebug & SDB_FOLLOW)
-		printf("sigreturn: pid %d, scp %p\n", p->p_pid, scp);
-#endif
-	if ((int)scp & 1)
-		return (EINVAL);
+	frame = (struct frame *)l->l_md.md_regs;
 
-	/*
-	 * Test and fetch the context structure.
-	 * We grab it all at once for speed.
-	 */
-	if (copyin((caddr_t)scp, (caddr_t)&tsigc, sizeof tsigc))
-		return (EINVAL);
-	scp = &tsigc;
-	if ((scp->sc_ps & PSL_USERCLR) != 0 ||
-	    (scp->sc_ps & PSL_USERSET) != PSL_USERSET)
-		return (EINVAL);
-	/*
-	 * Restore the user supplied information
-	 */
-	if (scp->sc_onstack & 1)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
-	p->p_sigmask = scp->sc_mask &~ sigcantmask;
-	frame = (struct frame *) p->p_md.md_regs;
-	frame->f_regs[SP] = scp->sc_sp;
-	frame->f_regs[A6] = scp->sc_fp;
-	frame->f_pc = scp->sc_pc;
-	frame->f_sr = scp->sc_ps;
+	/* Finally, copy out the rest of the frame */
+	sf.sa_ra = 0;
+	sf.sa_type = type;
+	sf.sa_sas = sas;
+	sf.sa_events = nevents;
+	sf.sa_interrupted = ninterrupted;
+	sf.sa_arg = ap;
 
-	/*
-	 * Grab pointer to hardware state information.
-	 * If zero, the user is probably doing a longjmp.
-	 */
-	if ((rf = scp->sc_ap) == 0)
-		return (EJUSTRETURN);
-	/*
-	 * See if there is anything to do before we go to the
-	 * expense of copying in close to 1/2K of data
-	 */
-	if (copyin((caddr_t)rf, &flags, sizeof(int)) != 0)
-		return (EINVAL);
-#ifdef DEBUG
-	if (sigdebug & SDB_FOLLOW)
-		printf("sigreturn(%d): sc_ap %x flags %x\n",
-		       p->p_pid, rf, flags);
-#endif
-	if (flags == 0 || copyin((caddr_t)rf, (caddr_t)&tstate, sizeof tstate))
-		return (EJUSTRETURN);
-#ifdef DEBUG
-	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-		printf("sigreturn(%d): ssp %p usp %x scp %p ft %d\n",
-		       p->p_pid, &flags, scp->sc_sp, SCARG(uap, sigcntxp),
-		       (flags&SS_RTEFRAME) ? tstate.ss_frame.f_format : -1);
-#endif
-	/*
-	 * Restore most of the users registers except for A6 and SP
-	 * which were handled above.
-	 */
-	if (flags & SS_USERREGS)
-		bcopy((caddr_t)tstate.ss_frame.f_regs,
-		      (caddr_t)frame->f_regs, sizeof(frame->f_regs)-2*NBPW);
-	/*
-	 * Restore long stack frames.  Note that we do not copy
-	 * back the saved SR or PC, they were picked up above from
-	 * the sigcontext structure.
-	 */
-	if (flags & SS_RTEFRAME) {
-		register int sz;
-		
-		/* grab frame type and validate */
-		sz = tstate.ss_frame.f_format;
-		if (sz > 15 || (sz = exframesize[sz]) < 0)
-			return (EINVAL);
-		frame->f_stackadj -= sz;
-		frame->f_format = tstate.ss_frame.f_format;
-		frame->f_vector = tstate.ss_frame.f_vector;
-		bcopy((caddr_t)&tstate.ss_frame.F_u, (caddr_t)&frame->F_u, sz);
-#ifdef DEBUG
-		if (sigdebug & SDB_FOLLOW)
-			printf("sigreturn(%d): copy in %d of frame type %d\n",
-			       p->p_pid, sz, tstate.ss_frame.f_format);
-#endif
+	sfp = (struct saframe *)sp - 1;
+	if (copyout(&sf, sfp, sizeof(sf)) != 0) {
+		/* Copying onto the stack didn't work. Die. */
+		sigexit(l, SIGILL);
+		/* NOTREACHED */
 	}
-	/*
-	 * Finally we restore the original FP context
-	 */
-	if (fputype && (flags & SS_FPSTATE))
-		m68881_restore(&tstate.ss_fpstate);
-#ifdef DEBUG
-	if ((sigdebug & SDB_FPSTATE) && *(char *)&tstate.ss_fpstate)
-		printf("sigreturn(%d): copied in FP state (%x) at %p\n",
-		       p->p_pid, *(u_int *)&tstate.ss_fpstate,
-		       &tstate.ss_fpstate);
-	if ((sigdebug & SDB_FOLLOW) ||
-	    ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid))
-		printf("sigreturn(%d): returns\n", p->p_pid);
+
+	frame->f_pc = (int)upcall;
+	frame->f_regs[SP] = (int) sfp;
+	frame->f_regs[A6] = 0; /* indicate call-frame-top to debuggers */
+	frame->f_sr &= ~PSL_T;
+}
+
+void
+cpu_getmcontext(struct lwp *l, mcontext_t *mcp, u_int *flags)
+{
+	__greg_t *gr = mcp->__gregs;
+	struct frame *frame = (struct frame *)l->l_md.md_regs;
+	unsigned int format = frame->f_format;
+	__greg_t ras_pc;
+
+	/* Save general registers. */
+	gr[_REG_D0] = frame->f_regs[D0];
+	gr[_REG_D1] = frame->f_regs[D1];
+	gr[_REG_D2] = frame->f_regs[D2];
+	gr[_REG_D3] = frame->f_regs[D3];
+	gr[_REG_D4] = frame->f_regs[D4];
+	gr[_REG_D5] = frame->f_regs[D5];
+	gr[_REG_D6] = frame->f_regs[D6];
+	gr[_REG_D7] = frame->f_regs[D7];
+	gr[_REG_A0] = frame->f_regs[A0];
+	gr[_REG_A1] = frame->f_regs[A1];
+	gr[_REG_A2] = frame->f_regs[A2];
+	gr[_REG_A3] = frame->f_regs[A3];
+	gr[_REG_A4] = frame->f_regs[A4];
+	gr[_REG_A5] = frame->f_regs[A5];
+	gr[_REG_A6] = frame->f_regs[A6];
+	gr[_REG_A7] = frame->f_regs[SP];
+	gr[_REG_PS] = frame->f_sr;
+	gr[_REG_PC] = frame->f_pc;
+
+	if ((ras_pc = (__greg_t)ras_lookup(l->l_proc,
+	    (void *) gr[_REG_PC])) != -1)
+		gr[_REG_PC] = ras_pc;
+
+	*flags |= _UC_CPU;
+
+	/* Save exception frame information. */
+	mcp->__mc_pad.__mc_frame.__mcf_format = format;
+	if (format >= FMT4) {
+		mcp->__mc_pad.__mc_frame.__mcf_vector = frame->f_vector;
+		(void)memcpy(&mcp->__mc_pad.__mc_frame.__mcf_exframe,
+		    &frame->F_u, (size_t)exframesize[format]);
+
+		/* Leave indicators, see above. */
+		frame->f_stackadj += exframesize[format];
+		frame->f_format = frame->f_vector = 0;
+	}
+
+	if (fputype != FPU_NONE) {
+		/* Save FPU context. */
+		struct fpframe *fpf = &l->l_addr->u_pcb.pcb_fpregs;
+
+		/*
+		 * If we're dealing with the current lwp, we need to
+		 * save its FP state. Otherwise, its state is already
+		 * store in its PCB.
+		 */
+		if (l == curlwp)
+			m68881_save(fpf);
+
+		mcp->__mc_pad.__mc_frame.__mcf_fpf_u1 = fpf->FPF_u1;
+
+		/* If it's a null frame there's no need to save/convert. */
+		if (!FPFRAME_IS_NULL(fpf)) {
+			mcp->__mc_pad.__mc_frame.__mcf_fpf_u2 = fpf->FPF_u2;
+			(void)memcpy(mcp->__fpregs.__fp_fpregs,
+			    fpf->fpf_regs, sizeof(fpf->fpf_regs));
+			mcp->__fpregs.__fp_pcr = fpf->fpf_fpcr;
+			mcp->__fpregs.__fp_psr = fpf->fpf_fpsr;
+			mcp->__fpregs.__fp_piaddr = fpf->fpf_fpiar;
+			*flags |= _UC_FPU;
+		}
+	}
+}
+
+int
+cpu_setmcontext(struct lwp *l, const mcontext_t *mcp, u_int flags)
+{
+	const __greg_t *gr = mcp->__gregs;
+	struct frame *frame = (struct frame *)l->l_md.md_regs;
+	unsigned int format = mcp->__mc_pad.__mc_frame.__mcf_format;
+	int sz;
+
+	/* Validate the supplied context */
+	if (((flags & _UC_CPU) != 0 &&
+	     (gr[_REG_PS] & (PSL_MBZ|PSL_IPL|PSL_S)) != 0))
+		return (EINVAL);
+
+	/* Restore exception frame information if necessary. */
+	if ((flags & _UC_M68K_UC_USER) == 0 && format >= FMT4) {
+		if (format > FMTB)
+			return (EINVAL);
+		sz = exframesize[format];
+		if (sz < 0)
+			return (EINVAL);
+
+		if (frame->f_stackadj == 0) {
+			reenter_syscall(frame, sz);
+			/* NOTREACHED */
+		}
+
+#ifdef DIAGNOSTIC
+		if (sz != frame->f_stackadj)
+			panic("cpu_setmcontext: %d != %d",
+			    sz, frame->f_stackadj);
 #endif
-	return (EJUSTRETURN);
+
+		frame->f_format = format;
+		frame->f_vector = mcp->__mc_pad.__mc_frame.__mcf_vector;
+		(void)memcpy(&frame->F_u,
+		    &mcp->__mc_pad.__mc_frame.__mcf_exframe, (size_t)sz);
+		frame->f_stackadj -= sz;
+	}
+
+	if ((flags & _UC_CPU) != 0) {
+		/* Restore general registers. */
+		frame->f_regs[D0] = gr[_REG_D0];
+		frame->f_regs[D1] = gr[_REG_D1];
+		frame->f_regs[D2] = gr[_REG_D2];
+		frame->f_regs[D3] = gr[_REG_D3];
+		frame->f_regs[D4] = gr[_REG_D4];
+		frame->f_regs[D5] = gr[_REG_D5];
+		frame->f_regs[D6] = gr[_REG_D6];
+		frame->f_regs[D7] = gr[_REG_D7];
+		frame->f_regs[A0] = gr[_REG_A0];
+		frame->f_regs[A1] = gr[_REG_A1];
+		frame->f_regs[A2] = gr[_REG_A2];
+		frame->f_regs[A3] = gr[_REG_A3];
+		frame->f_regs[A4] = gr[_REG_A4];
+		frame->f_regs[A5] = gr[_REG_A5];
+		frame->f_regs[A6] = gr[_REG_A6];
+		frame->f_regs[SP] = gr[_REG_A7];
+		frame->f_sr = gr[_REG_PS];
+		frame->f_pc = gr[_REG_PC];
+	}
+
+	if (fputype != FPU_NONE) {
+		const __fpregset_t *fpr = &mcp->__fpregs;
+		struct fpframe *fpf = &l->l_addr->u_pcb.pcb_fpregs;
+
+		switch (flags & (_UC_FPU | _UC_M68K_UC_USER)) {
+		case _UC_FPU:
+			/*
+			 * We're restoring FPU context saved by the above
+			 * cpu_getmcontext(). We can do a full frestore if
+			 * something other than an null frame was saved.
+			 */
+			fpf->FPF_u1 = mcp->__mc_pad.__mc_frame.__mcf_fpf_u1;
+			if (!FPFRAME_IS_NULL(fpf)) {
+				fpf->FPF_u2 =
+				    mcp->__mc_pad.__mc_frame.__mcf_fpf_u2;
+				(void)memcpy(fpf->fpf_regs,
+				    fpr->__fp_fpregs, sizeof(fpf->fpf_regs));
+				fpf->fpf_fpcr = fpr->__fp_pcr;
+				fpf->fpf_fpsr = fpr->__fp_psr;
+				fpf->fpf_fpiar = fpr->__fp_piaddr;
+			}
+			break;
+
+		case _UC_FPU | _UC_M68K_UC_USER:
+			/*
+			 * We're restoring FPU context saved by the
+			 * userland _getcontext_() function. Since there
+			 * is no FPU frame to restore. We assume the FPU was
+			 * "idle" when the frame was created, so use the
+			 * cached idle frame.
+			 */
+			fpf->FPF_u1 = m68k_cached_fpu_idle_frame.FPF_u1;
+			fpf->FPF_u2 = m68k_cached_fpu_idle_frame.FPF_u2;
+			(void)memcpy(fpf->fpf_regs, fpr->__fp_fpregs,
+			    sizeof(fpf->fpf_regs));
+			fpf->fpf_fpcr = fpr->__fp_pcr;
+			fpf->fpf_fpsr = fpr->__fp_psr;
+			fpf->fpf_fpiar = fpr->__fp_piaddr;
+			break;
+
+		default:
+			/*
+			 * The saved context contains no FPU state.
+			 * Restore a NULL frame.
+			 */
+			fpf->FPF_u1.FPF_null = 0;
+			break;
+		}
+
+		/*
+		 * We only need to restore FP state right now if we're
+		 * dealing with curlwp. Otherwise, it'll be restored
+		 * (from the PCB) when this lwp is given the CPU.
+		 */
+		if (l == curlwp)
+			m68881_restore(fpf);
+	}
+
+	mutex_enter(l->l_proc->p_lock);
+	if (flags & _UC_SETSTACK)
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
+	if (flags & _UC_CLRSTACK)
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+	mutex_exit(l->l_proc->p_lock);
+
+	return 0;
 }

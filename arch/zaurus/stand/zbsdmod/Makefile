@@ -1,20 +1,40 @@
-#	$OpenBSD: Makefile,v 1.3 2005/11/04 01:02:31 uwe Exp $
+#	$NetBSD: Makefile,v 1.4 2007/10/17 19:58:41 garbled Exp $
 
-OBJS= zbsdmod.o
-SRCS= zbsdmod.c
-NOMAN=
+S=	${.CURDIR}/../../../..
 
-all: ${OBJS}
+OBJS=	zbsdmod.o
+SRCS=	zbsdmod.c
+NOMAN=	yes
 
-clean:
-	rm -f zbsdmod.o
+realall: ${OBJS}
+
+cleandir:
+	rm -f machine arm
 
 .include <bsd.prog.mk>
 
 afterinstall:
-	${INSTALL} ${INSTALL_COPY} -o root -g wheel -m 644 \
-		${OBJS} ${DESTDIR}${BINDIR}
+	${INSTALL_FILE} ${INSTALL_COPY} -o root -g wheel -m 644 \
+		${OBJS} ${DESTDIR}/${BINDIR}
 
-CFLAGS= -fno-stack-protector -Wall
-CFLAGS+= -DMACHINE=\"${MACHINE}\" -DUTS_RELEASE=\"2.4.20\"
-CPPFLAGS= -I${.CURDIR}/../include
+CFLAGS=		-Wall -Wmissing-prototypes -Wstrict-prototypes
+CFLAGS+=	-DMACHINE=\"${MACHINE}\" -DUTS_RELEASE=\"2.4.20\"
+CPPFLAGS+=      -nostdinc -D_STANDALONE
+CPPFLAGS+=	-I${.OBJDIR} -I${S}
+
+.if !make(obj) && !make(clean) && !make(cleandir) && !make(release)
+.BEGIN: machine arm
+.NOPATH: machine arm
+
+machine::
+	-rm -f $@
+	ln -s ${S}/arch/${MACHINE}/include $@
+
+arm::
+	-rm -f $@
+	ln -s ${S}/arch/arm/include $@
+.endif
+
+release: check_RELEASEDIR
+	${HOST_INSTALL_FILE} -m ${NONBINMODE} ${OBJS} \
+	    ${RELEASEDIR}/${MACHINE}/installation

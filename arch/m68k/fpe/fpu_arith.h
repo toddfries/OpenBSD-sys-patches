@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_arith.h,v 1.4 2006/01/16 22:08:26 miod Exp $	*/
-/*	$NetBSD: fpu_arith.h,v 1.3 2003/08/07 16:28:10 agc Exp $ */
+/*	$NetBSD: fpu_arith.h,v 1.5 2005/12/24 22:45:35 perry Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -111,7 +110,7 @@
 #else
 
 /* set up for extended-precision arithemtic */
-#define	FPU_DECL_CARRY int fpu_tmp;
+#define	FPU_DECL_CARRY register int fpu_tmp;
 
 /*
  * We have three kinds of add:
@@ -131,41 +130,41 @@
  */
 #define	FPU_ADDC(r, x, y)						\
 	{								\
-		asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
-		asm volatile("addxl %1,%0" : "=d"(fpu_tmp) : "d"(y));	\
-		asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
+		__asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
+		__asm volatile("addxl %1,%0" : "=d"(fpu_tmp) : "d"(y));	\
+		__asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
 	}
 #define	FPU_ADDS(r, x, y)						\
 	{								\
-		asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
-		asm volatile("addl %1,%0" : "=d"(fpu_tmp) : "g"(y));	\
-		asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
+		__asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
+		__asm volatile("addl %1,%0" : "=d"(fpu_tmp) : "g"(y));	\
+		__asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
 	}
 #define	FPU_ADDCS(r, x, y) FPU_ADDC(r, x, y)
 
 #define	FPU_SUBC(r, x, y)						\
 	{								\
-		asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
-		asm volatile("subxl %1,%0" : "=d"(fpu_tmp) : "d"(y));	\
-		asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
+		__asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
+		__asm volatile("subxl %1,%0" : "=d"(fpu_tmp) : "d"(y));	\
+		__asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
 	}
 #define	FPU_SUBS(r, x, y)						\
 	{								\
-		asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
-		asm volatile("subl %1,%0" : "=d"(fpu_tmp) : "g"(y));	\
-		asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
+		__asm volatile("movel %1,%0" : "=d"(fpu_tmp) : "g"(x));	\
+		__asm volatile("subl %1,%0" : "=d"(fpu_tmp) : "g"(y));	\
+		__asm volatile("movel %1,%0" : "=g"(r) : "r"(fpu_tmp));	\
 	}
 #define	FPU_SUBCS(r, x, y) FPU_SUBC(r, x, y)
 
 #define	FPU_GET_CARRY(r)				\
 	{						\
-		asm volatile("moveq #0,%0" : "=d"(r));	\
-		asm volatile("addxl %0,%0" : "+d"(r));	\
+		__asm volatile("moveq #0,%0" : "=d"(r));	\
+		__asm volatile("addxl %0,%0" : "+d"(r));	\
 	}
 #define	FPU_SET_CARRY(v)						\
 	{								\
-		asm volatile("moveq #0,%0" : "=d"(fpu_tmp));		\
-		asm volatile("subl %1,%0" : "=d"(fpu_tmp) : "g"(v));	\
+		__asm volatile("moveq #0,%0" : "=d"(fpu_tmp));		\
+		__asm volatile("subl %1,%0" : "=d"(fpu_tmp) : "g"(v));	\
 	}
 
 #endif /* FPE_USE_ASM */

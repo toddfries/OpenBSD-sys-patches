@@ -1,5 +1,5 @@
-/*	$OpenBSD: ts102reg.h,v 1.7 2005/07/08 12:35:15 miod Exp $	*/
-/*	$NetBSD: ts102reg.h,v 1.7 2002/09/29 23:23:58 wiz Exp $ */
+/*	$OpenBSD: ts102reg.h,v 1.3 2003/06/18 17:50:23 miod Exp $	*/
+/*	$NetBSD: ts102reg.h,v 1.12 2008/04/28 20:23:35 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,12 +60,12 @@
 #define	TS102_REG_UCTRL_STS	0x0028	/* Microcontroller Status Register */
 
 struct uctrl_regs {
-	volatile u_int8_t	intr;	/* Microcontroller Interrupt Reg */
-	volatile u_int8_t	filler0[3];
-	volatile u_int8_t	data;	/* Microcontroller Data Reg */
-	volatile u_int8_t	filler1[3];
-	volatile u_int8_t	stat;	/* Microcontroller Status Reg */
-	volatile u_int8_t	filler2[3];
+	volatile uint8_t	intr;	/* Microcontroller Interrupt Reg */
+	volatile uint8_t	filler0[3];
+	volatile uint8_t	data;	/* Microcontroller Data Reg */
+	volatile uint8_t	filler1[3];
+	volatile uint8_t	stat;	/* Microcontroller Status Reg */
+	volatile uint8_t	filler2[3];
 };
 
 /* TS102 Card Interrupt Register definitions.
@@ -174,7 +167,7 @@ struct uctrl_regs {
 #define	TS102_UCTRL_STS_TXNF_STA	0x02	/* transmit FIFO not full */
 #define	TS102_UCTRL_STS_RXNE_STA	0x04	/* receive FIFO not empty */
 #define	TS102_UCTRL_STS_RXO_STA		0x08	/* receive FIFO overflow */
-#define	TS102_UCTRL_STS_MASK		0x0f	/* Only 4 bits significant */
+#define	TS102_UCTRL_STS_MASK		0x0F	/* Only 4 bits significant */
 
 enum ts102_opcode {			/* Argument	Returned */
     TS102_OP_RD_SERIAL_NUM=0x01,	/* none		ack + 4 bytes */
@@ -272,14 +265,14 @@ enum ts102_opcode {			/* Argument	Returned */
 #define	TS102_BITPORT_SYNCINVA		0x02	/* ext. monitor sync (low) */
 #define	TS102_BITPORT_SYNCINVB		0x04	/* ext. monitor sync (low) */
 #define	TS102_BITPORT_BP_DIS		0x08	/* no bootprom from pcmcia (high) */
-						/* boot from pcmcia (low) */
+						/* boot from pcmcia (low */
 #define	TS102_BITPORT_ENCSYNC		0x10	/* enab composite sync (low) */
-#define	TS102_BITPORT_DISK_POWER	0x20	/* internal disk power (low) */
+#define TS102_BITPORT_DISKPOWER		0x20	/* power to internal disk */
     TS102_OP_CTL_DEV=0x22,		/* mask 	ack + 1 byte */
 #define TS102_DEVCTL_CHARGE_DISABLE	0x01	/* dis/en charging */
-#define TS102_DEVCTL_POINTER_DISABLE	0x04	/* dis/en pointer */
-#define TS102_DEVCTL_KEYCLICK		0x08	/* keyclick? */
-#define TS102_DEVCTL_INT_BTNCLICK	0x10	/* internal button click? */
+#define TS102_DEVCTL_POINTER_DISABLE	0x02	/* dis/en pointer */
+#define TS102_DEVCTL_KEYCLICK		0x04	/* keyclick? */
+#define TS102_DEVCTL_INT_BTNCLICK	0x10	/* beep on ext. mouse click */
 #define TS102_DEVCTL_EXT_BTNCLICK	0x20	/* ext. button click?? */
     TS102_OP_CTL_SPEAKER_VOLUME=0x23,	/* mask		ack + 1 byte */
     TS102_OP_CTL_TFT_BRIGHTNESS=0x24,	/* mask		ack + 1 byte */
@@ -347,16 +340,11 @@ enum ts102_opcode {			/* Argument	Returned */
     TS102_OP_ADMIN_VRFY_USER_PASS=0x71,	/* len <pass>   ack + status */
     TS102_OP_ADMIN_GET_SYSTEM_PASS=0x72, /* none	ack + <7bytekey> */
     TS102_OP_ADMIN_VRFY_SYSTEM_PASS=0x73, /* len <pass>   ack + status */
-    TS102_OP_RD_INT_CHARGE_LEVEL=0x7a,	/* ack + 2 byte */
-    TS102_OP_RD_EXT_CHARGE_LEVEL=0x7b,	/* ack + 2 byte */
-#define	TS102_CHARGE_UNKNOWN	0xfa
-    TS102_OP_SLEEP=0x80, 		/* supposedly sleeps, not sure */
-    TS102_OP_ADMIN_POWER_OFF=0x82,	/* len <pass>	none */
-    TS102_OP_ADMIN_POWER_RESTART=0x83,	/* msb,xx,lsb	none */
+    TS102_OP_RD_INT_CHARGE_LEVEL=0x7a, /* ack + 2 byte */
+    TS102_OP_RD_EXT_CHARGE_LEVEL=0x7b, /* ack + 2 byte */
+    TS102_OP_SLEEP=0x80, /* supposedly sleeps, not sure */
+    TS102_OP_ADMIN_POWER_OFF=0x82,	 /* len <pass>	none */
+    TS102_OP_ADMIN_POWER_RESTART=0x83,	 /* msb,xx,lsb	none */
 };
-
-#define	TS102_UCTRL_ACK		0xfe
-#define	TS102_UCTRL_NACK	0xfc
-#define	TS102_UCTRL_INTR	0xfa
 
 #endif /* _SPARC_DEV_TS102REG_H */

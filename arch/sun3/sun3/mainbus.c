@@ -1,4 +1,4 @@
-/*	$NetBSD: mainbus.c,v 1.15 2006/10/01 03:53:27 tsutsui Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.17 2008/06/28 12:13:38 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.15 2006/10/01 03:53:27 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.17 2008/06/28 12:13:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,17 +38,17 @@ __KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.15 2006/10/01 03:53:27 tsutsui Exp $")
 
 #include <machine/autoconf.h>
 
-static int 	main_match(struct device *, struct cfdata *, void *);
-static void	main_attach(struct device *, struct device *, void *);
+static int 	main_match(device_t, cfdata_t, void *);
+static void	main_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(mainbus, sizeof(struct device),
+CFATTACH_DECL_NEW(mainbus, 0,
     main_match, main_attach, NULL, NULL);
 
 /*
  * Probe for the mainbus; always succeeds.
  */
 static int 
-main_match(struct device *parent, struct cfdata *cf, void *aux)
+main_match(device_t parent, cfdata_t cf, void *aux)
 {
 
 	return 1;
@@ -67,12 +60,12 @@ main_match(struct device *parent, struct cfdata *cf, void *aux)
  * used early.  For example, idprom is used by Ether drivers.
  */
 static void 
-main_attach(struct device *parent, struct device *self, void *args)
+main_attach(device_t parent, device_t self, void *args)
 {
 	struct confargs ca;
 	int i;
 
-	printf("\n");
+	aprint_normal("\n");
 
 	ca.ca_bustag = &mainbus_space_tag;
 	ca.ca_dmatag = &mainbus_dma_tag;
@@ -83,6 +76,6 @@ main_attach(struct device *parent, struct device *self, void *args)
 
 	for (i = 0; i < BUS__NTYPES; i++) {
 		ca.ca_bustype = i;
-		(void) config_found(self, &ca, NULL);
+		(void)config_found(self, &ca, NULL);
 	}
 }

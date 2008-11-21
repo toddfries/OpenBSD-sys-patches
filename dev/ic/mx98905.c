@@ -1,4 +1,4 @@
-/*	$NetBSD: mx98905.c,v 1.10 2007/10/19 11:59:57 ad Exp $	*/
+/*	$NetBSD: mx98905.c,v 1.13 2008/04/28 20:23:50 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,7 +59,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: mx98905.c,v 1.10 2007/10/19 11:59:57 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mx98905.c,v 1.13 2008/04/28 20:23:50 martin Exp $");
 
 #include <sys/device.h>
 #include <sys/mbuf.h>
@@ -164,7 +157,7 @@ mx98905_write_wait(sc)
 	if (maxwait == 0) {
 		log(LOG_WARNING,
 		    "%s: remote transmit DMA failed to complete\n",
-		    sc->sc_dev.dv_xname);
+		    device_xname(sc->sc_dev));
 		dp8390_reset(sc);
 	}
 }
@@ -300,13 +293,14 @@ mx98905_write_mbuf(sc, m, buf)
  * ring-wrap.
  */
 int
-mx98905_ring_copy(sc, src, dst, amount)
+mx98905_ring_copy(sc, src, vdst, amount)
 	struct dp8390_softc *sc;
 	int src;
-	void *dst;
+	void *vdst;
 	u_short amount;
 {
 	struct ne2000_softc *nsc = (struct ne2000_softc *)sc;
+	uint8_t *dst = vdst;
 	bus_space_tag_t nict = sc->sc_regt;
 	bus_space_handle_t nich = sc->sc_regh;
 	bus_space_tag_t asict = nsc->sc_asict;
@@ -327,8 +321,7 @@ mx98905_ring_copy(sc, src, dst, amount)
 		dst += tmp_amount;
 	}
 
-	mx98905_readmem(nict, nich, asict, asich, src, (u_int8_t *)dst,
-	    amount, useword);
+	mx98905_readmem(nict, nich, asict, asich, src, dst, amount, useword);
 
 	return (src + amount);
 }

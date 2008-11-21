@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
+/*	$NetBSD: cpu.h,v 1.53 2008/03/22 03:23:27 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc. All rights reserved.
@@ -55,6 +55,11 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
+	cpuid_t	ci_cpuid;
+	int	ci_mtx_count;
+	int	ci_mtx_oldspl;
+	int	ci_want_resched;
+	int	ci_idepth;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -83,10 +88,10 @@ struct clockframe {
 	int	ssp;	/* stack pointer at time of interrupt */
 };
 
+
 #define	CLKF_USERMODE(cf)	(!KERNELMODE((cf)->ssr))
-#define	CLKF_BASEPRI(cf)	(((cf)->ssr & 0xf0) == 0)
 #define	CLKF_PC(cf)		((cf)->spc)
-#define	CLKF_INTR(cf)		0	/* XXX */
+#define	CLKF_INTR(cf)		(curcpu()->ci_idepth > 0)
 
 /*
  * This is used during profiling to integrate system time.  It can safely
@@ -99,11 +104,11 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	need_resched(ci)						\
+#define	cpu_need_resched(ci, flags)					\
 do {									\
-	want_resched = 1;						\
-	if (curproc != NULL)						\
-		aston(curproc);					\
+	ci->ci_want_resched = 1;					\
+	if (curlwp != ci->ci_data.cpu_idlelwp)				\
+		aston(curlwp);						\
 } while (/*CONSTCOND*/0)
 
 /*
@@ -111,21 +116,19 @@ do {									\
  * buffer pages are invalid.  On the MIPS, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)						\
+#define	cpu_need_proftick(l)						\
 do {									\
-	(p)->p_flag |= P_OWEUPC;					\
-	aston(p);							\
+	(l)->l_pflag |= LP_OWEUPC;					\
+	aston(l);							\
 } while (/*CONSTCOND*/0)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	signotify(p)	aston(p)
+#define	cpu_signotify(l)	aston(l)
 
-#define	aston(p)	((p)->p_md.md_astpending = 1)
-
-extern int want_resched;		/* need_resched() was called */
+#define	aston(l)		((l)->l_md.md_astpending = 1)
 
 /*
  * We need a machine-independent name for this.
@@ -158,26 +161,65 @@ extern int want_resched;		/* need_resched() was called */
 
 #ifndef __lint__
 
-/* switch from P1 to P2 */
-#define	RUN_P2 do {							\
-		void *p;						\
-		p = &&P2;						\
-		goto *(void *)SH3_P1SEG_TO_P2SEG(p);			\
-	    P2:	(void)0;						\
+/*
+ * Switch from P1 (cached) to P2 (uncached).  This used to be written
+ * using gcc's assigned goto extension, but gcc4 aggressive optimizations
+ * tend to optimize that away under certain circumstances.
+ */
+#define RUN_P2						\
+	do {						\
+		register uint32_t r0 asm("r0");		\
+		uint32_t pc;				\
+		__asm volatile(				\
+			"	mov.l	1f, %1	;"	\
+			"	mova	2f, %0	;"	\
+			"	or	%0, %1	;"	\
+			"	jmp	@%1	;"	\
+			"	 nop		;"	\
+			"	.align 2	;"	\
+			"1:	.long	0x20000000;"	\
+			"2:;"				\
+			: "=r"(r0), "=r"(pc));		\
 	} while (0)
 
-/* switch from P2 to P1 */
-#define	RUN_P1 do {							\
-		void *p;						\
-		p = &&P1;						\
-		__asm volatile("nop;nop;nop;nop;nop;nop;nop;nop");	\
-		goto *(void *)SH3_P2SEG_TO_P1SEG(p);			\
-	    P1:	(void)0;						\
+/*
+ * Switch from P2 (uncached) back to P1 (cached).  We need to be
+ * running on P2 to access cache control, memory-mapped cache and TLB
+ * arrays, etc. and after touching them at least 8 instructinos are
+ * necessary before jumping to P1, so provide that padding here.
+ */
+#define RUN_P1						\
+	do {						\
+		register uint32_t r0 asm("r0");		\
+		uint32_t pc;				\
+		__asm volatile(				\
+		/*1*/	"	mov.l	1f, %1	;"	\
+		/*2*/	"	mova	2f, %0	;"	\
+		/*3*/	"	nop		;"	\
+		/*4*/	"	and	%0, %1	;"	\
+		/*5*/	"	nop		;"	\
+		/*6*/	"	nop		;"	\
+		/*7*/	"	nop		;"	\
+		/*8*/	"	nop		;"	\
+			"	jmp	@%1	;"	\
+			"	 nop		;"	\
+			"	.align 2	;"	\
+			"1:	.long	~0x20000000;"	\
+			"2:;"				\
+			: "=r"(r0), "=r"(pc));		\
 	} while (0)
+
+/*
+ * If RUN_P1 is the last thing we do in a function we can omit it, b/c
+ * we are going to return to a P1 caller anyway, but we still need to
+ * ensure there's at least 8 instructions before jump to P1.
+ */
+#define PAD_P1_SWITCH	__asm volatile ("nop;nop;nop;nop;nop;nop;nop;nop;")
 
 #else  /* __lint__ */
-#define	RUN_P2	do {} while (/* CONSTCOND */ 0)
-#define	RUN_P1	do {} while (/* CONSTCOND */ 0)
+#define	RUN_P2		do {} while (/* CONSTCOND */ 0)
+#define	RUN_P1		do {} while (/* CONSTCOND */ 0)
+#define	PAD_P1_SWITCH	do {} while (/* CONSTCOND */ 0)
 #endif
 
 #if defined(SH4)
@@ -209,12 +251,6 @@ extern int want_resched;		/* need_resched() was called */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_LOADANDRESET	2	/* load kernel image and reset */
 #define	CPU_MAXID		3	/* number of valid machdep ids */
-
-#define	CTL_MACHDEP_NAMES {						\
-	{ 0, 0 },							\
-	{ "console_device",	CTLTYPE_STRUCT },			\
-	{ "load_and_reset",	CTLTYPE_INT },				\
-}
 
 #ifdef _KERNEL
 void sh_cpu_init(int, int);

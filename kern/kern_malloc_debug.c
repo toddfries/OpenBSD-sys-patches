@@ -1,17 +1,20 @@
-/*	$OpenBSD: kern_malloc_debug.c,v 1.26 2007/04/13 18:57:49 art Exp $	*/
+/*	$NetBSD: kern_malloc_debug.c,v 1.20 2008/08/07 01:40:21 matt Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Artur Grabowski <art@openbsd.org>
- * All rights reserved. 
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without 
- * modification, are permitted provided that the following conditions 
- * are met: 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * 1. Redistributions of source code must retain the above copyright 
- *    notice, this list of conditions and the following disclaimer. 
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission. 
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
  * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
@@ -22,7 +25,9 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * OpenBSD: kern_malloc_debug.c,v 1.10 2001/07/26 13:33:52 art Exp
  */
 
 /*
@@ -50,6 +55,9 @@
  *  - add support to the fault handler to give better diagnostics if we fail.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kern_malloc_debug.c,v 1.20 2008/08/07 01:40:21 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/kernel.h>
@@ -64,7 +72,7 @@
  * memory to be debugged. Use 0 for a wildcard. debug_malloc_size_lo
  * is the lower limit and debug_malloc_size_hi the upper limit of sizes
  * being debugged; 0 will not work as a wildcard for the upper limit.
- * For any debugging to take place, type must be != -1, size must be >= 0,
+ * For any debugging to take place, type must be != NULL, size must be >= 0,
  * and if the limits are being used, size must be set to 0.
  * See /usr/src/sys/sys/malloc.h and malloc(9) for a list of types.
  *
@@ -72,7 +80,7 @@
  * if any memory chunks of this type are used. It's ok to change the size
  * in runtime.
  */
-int debug_malloc_type = -1;
+struct malloc_type *debug_malloc_type = NULL;
 int debug_malloc_size = -1;
 int debug_malloc_size_lo = -1;
 int debug_malloc_size_hi = -1;
@@ -90,33 +98,34 @@ struct debug_malloc_entry {
 	vaddr_t md_va;
 	paddr_t md_pa;
 	size_t md_size;
-	int md_type;
+	struct malloc_type *md_type;
 };
 
-TAILQ_HEAD(,debug_malloc_entry) debug_malloc_freelist;
-TAILQ_HEAD(,debug_malloc_entry) debug_malloc_usedlist;
+TAILQ_HEAD(,debug_malloc_entry) debug_malloc_freelist =
+	TAILQ_HEAD_INITIALIZER(debug_malloc_freelist);
+TAILQ_HEAD(,debug_malloc_entry) debug_malloc_usedlist =
+	TAILQ_HEAD_INITIALIZER(debug_malloc_usedlist);
 
 int debug_malloc_allocs;
 int debug_malloc_frees;
 int debug_malloc_pages;
 int debug_malloc_chunks_on_freelist;
 
-int debug_malloc_initialized;
-
-struct pool debug_malloc_pool;
+POOL_INIT(debug_malloc_pool, sizeof(struct debug_malloc_entry), 0, 0, 0,
+    "mdbepl", NULL, IPL_VM);
 
 int
-debug_malloc(unsigned long size, int type, int flags, void **addr)
+debug_malloc(unsigned long size, struct malloc_type *type, int flags,
+    void **addr)
 {
 	struct debug_malloc_entry *md = NULL;
-	int s, wait = (flags & M_NOWAIT) == 0;
+	int s, wait = !(flags & M_NOWAIT);
 
 	/* Careful not to compare unsigned long to int -1 */
-	if (((type != debug_malloc_type && debug_malloc_type != 0) ||
+	if ((type != debug_malloc_type && debug_malloc_type != 0) ||
 	    (size != debug_malloc_size && debug_malloc_size != 0) ||
 	    (debug_malloc_size_lo != -1 && size < debug_malloc_size_lo) ||
-	    (debug_malloc_size_hi != -1 && size > debug_malloc_size_hi) ||
-	    !debug_malloc_initialized) && type != M_DEBUG)
+	    (debug_malloc_size_hi != -1 && size > debug_malloc_size_hi))
 		return (0);
 
 	/* XXX - fix later */
@@ -139,7 +148,8 @@ debug_malloc(unsigned long size, int type, int flags, void **addr)
 	debug_malloc_allocs++;
 	splx(s);
 
-	pmap_kenter_pa(md->md_va, md->md_pa, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_kenter_pa(md->md_va, md->md_pa,
+	    VM_PROT_READ|VM_PROT_WRITE|PMAP_KMPAGE);
 	pmap_update(pmap_kernel());
 
 	md->md_size = size;
@@ -150,18 +160,19 @@ debug_malloc(unsigned long size, int type, int flags, void **addr)
 	 * ends. roundup to get decent alignment.
 	 */
 	*addr = (void *)(md->md_va + PAGE_SIZE - roundup(size, sizeof(long)));
+	if (*addr != NULL && (flags & M_ZERO))
+		memset(*addr, 0, size);
 	return (1);
 }
 
 int
-debug_free(void *addr, int type)
+debug_free(void *addr, struct malloc_type *type)
 {
 	struct debug_malloc_entry *md;
 	vaddr_t va;
 	int s;
 
-	if (type != debug_malloc_type && debug_malloc_type != 0 &&
-	    type != M_DEBUG)
+	if (type != debug_malloc_type && debug_malloc_type != 0)
 		return (0);
 
 	/*
@@ -204,24 +215,6 @@ debug_free(void *addr, int type)
 	return (1);
 }
 
-void
-debug_malloc_init(void)
-{
-
-	TAILQ_INIT(&debug_malloc_freelist);
-	TAILQ_INIT(&debug_malloc_usedlist);
-
-	debug_malloc_allocs = 0;
-	debug_malloc_frees = 0;
-	debug_malloc_pages = 0;
-	debug_malloc_chunks_on_freelist = 0;
-
-	pool_init(&debug_malloc_pool, sizeof(struct debug_malloc_entry),
-	    0, 0, 0, "mdbepl", NULL);
-
-	debug_malloc_initialized = 1;
-}
-
 /*
  * Add one chunk to the freelist.
  *
@@ -234,14 +227,12 @@ debug_malloc_allocate_free(int wait)
 	struct vm_page *pg;
 	struct debug_malloc_entry *md;
 
-	splassert(IPL_VM);
-
 	md = pool_get(&debug_malloc_pool, wait ? PR_WAITOK : PR_NOWAIT);
 	if (md == NULL)
 		return;
 
-	va = uvm_km_kmemalloc(kmem_map, NULL, PAGE_SIZE * 2,
-	    UVM_KMF_VALLOC | (wait ? 0: UVM_KMF_NOWAIT));
+	va = uvm_km_alloc(kmem_map, PAGE_SIZE * 2, 0,
+	    UVM_KMF_VAONLY | (wait ? UVM_KMF_NOWAIT : 0));
 	if (va == 0) {
 		pool_put(&debug_malloc_pool, md);
 		return;
@@ -249,9 +240,9 @@ debug_malloc_allocate_free(int wait)
 
 	offset = va - vm_map_min(kernel_map);
 	for (;;) {
-		pg = uvm_pagealloc(NULL, 0, NULL, 0);
+		pg = uvm_pagealloc(NULL, offset, NULL, 0);
 		if (pg) {
-			atomic_clearbits_int(&pg->pg_flags, PG_BUSY);
+			pg->flags &= ~PG_BUSY;  /* new page */
 			UVM_PAGE_OWN(pg, NULL);
 		}
 
@@ -259,7 +250,8 @@ debug_malloc_allocate_free(int wait)
 			break;
 
 		if (wait == 0) {
-			uvm_unmap(kmem_map, va, va + PAGE_SIZE * 2);
+			uvm_km_free(kmem_map, va, va + PAGE_SIZE * 2,
+			    UVM_KMF_VAONLY);
 			pool_put(&debug_malloc_pool, md);
 			return;
 		}
@@ -278,29 +270,11 @@ void
 debug_malloc_print(void)
 {
 
-	debug_malloc_printit(printf, NULL);
+	debug_malloc_printit(printf, 0);
 }
 
 void
-debug_malloc_assert_allocated(void *addr, const char *func)
-{
-	struct debug_malloc_entry *md;
-	vaddr_t va = (vaddr_t)addr;
-
-	TAILQ_FOREACH(md, &debug_malloc_freelist, md_list) {
-		if (va >= md->md_va &&
-		    va < md->md_va + 2 * PAGE_SIZE)
-			panic("debug_malloc: (%s): %p - freed", func, addr);
-	}
-	TAILQ_FOREACH(md, &debug_malloc_usedlist, md_list) {
-		if (va >= md->md_va + PAGE_SIZE &&
-		    va < md->md_va + 2 * PAGE_SIZE)
-			panic("debug_malloc: (%s): %p - overflow", func, addr);
-	}
-}
-
-void
-debug_malloc_printit(int (*pr)(const char *, ...), vaddr_t addr)
+debug_malloc_printit(void (*pr)(const char *, ...), vaddr_t addr)
 {
 	struct debug_malloc_entry *md;
 
@@ -309,8 +283,9 @@ debug_malloc_printit(int (*pr)(const char *, ...), vaddr_t addr)
 			if (addr >= md->md_va &&
 			    addr < md->md_va + 2 * PAGE_SIZE) {
 				(*pr)("Memory at address 0x%x is in a freed "
-				      "area. type %d, size: %d\n ",
-				      addr, md->md_type, md->md_size);
+				      "area. type %s, size: %d\n ",
+				      addr, md->md_type->ks_shortdesc,
+				      md->md_size);
 				return;
 			}
 		}
@@ -318,8 +293,9 @@ debug_malloc_printit(int (*pr)(const char *, ...), vaddr_t addr)
 			if (addr >= md->md_va + PAGE_SIZE &&
 			    addr < md->md_va + 2 * PAGE_SIZE) {
 				(*pr)("Memory at address 0x%x is just outside "
-				      "an allocated area. type %d, size: %d\n",
-				      addr, md->md_type, md->md_size);
+				      "an allocated area. type %s, size: %d\n",
+				      addr, md->md_type->ks_shortdesc,
+				      md->md_size);
 				return;
 			}
 		}
@@ -335,10 +311,10 @@ debug_malloc_printit(int (*pr)(const char *, ...), vaddr_t addr)
 	(*pr)("\taddr:\tsize:\n");
 	(*pr)("free chunks:\n");
 	TAILQ_FOREACH(md, &debug_malloc_freelist, md_list)
-		(*pr)("\t0x%x\t0x%x\t%d\n", md->md_va, md->md_size,
-		      md->md_type);
+		(*pr)("\t0x%x\t0x%x\t%s\n", md->md_va, md->md_size,
+		      md->md_type->ks_shortdesc);
 	(*pr)("used chunks:\n");
 	TAILQ_FOREACH(md, &debug_malloc_usedlist, md_list)
-		(*pr)("\t0x%x\t0x%x\t%d\n", md->md_va, md->md_size,
-		      md->md_type);
+		(*pr)("\t0x%x\t0x%x\t%s\n", md->md_va, md->md_size,
+		      md->md_type->ks_shortdesc);
 }

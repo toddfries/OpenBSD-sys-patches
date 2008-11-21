@@ -1,3 +1,3 @@
-/*	$OpenBSD: float.h,v 1.4 1997/03/31 00:24:01 downsj Exp $ */
+/*	$NetBSD: float.h,v 1.2 1998/02/03 01:26:29 mycroft Exp $	*/
 
 #include <m68k/float.h>

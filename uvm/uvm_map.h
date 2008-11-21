@@ -1,9 +1,8 @@
-/*	$OpenBSD: uvm_map.h,v 1.38 2007/04/11 12:10:42 art Exp $	*/
-/*	$NetBSD: uvm_map.h,v 1.24 2001/02/18 21:19:08 chs Exp $	*/
+/*	$NetBSD: uvm_map.h,v 1.62 2008/07/29 00:03:06 matt Exp $	*/
 
-/* 
+/*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
- * Copyright (c) 1991, 1993, The Regents of the University of California.  
+ * Copyright (c) 1991, 1993, The Regents of the University of California.
  *
  * All rights reserved.
  *
@@ -21,7 +20,7 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Charles D. Cranor,
- *      Washington University, the University of California, Berkeley and 
+ *      Washington University, the University of California, Berkeley and
  *      its contributors.
  * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
@@ -45,17 +44,17 @@
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
  * All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -70,19 +69,25 @@
 #ifndef _UVM_UVM_MAP_H_
 #define _UVM_UVM_MAP_H_
 
-#include <sys/rwlock.h>
+/*
+ * uvm_map.h
+ */
 
 #ifdef _KERNEL
 
 /*
+ * macros
+ */
+
+/*
  * UVM_MAP_CLIP_START: ensure that the entry begins at or after
  * the starting address, if it doesn't we split the entry.
- * 
+ *
  * => map must be locked by caller
  */
 
-#define UVM_MAP_CLIP_START(MAP,ENTRY,VA) { \
-	if ((VA) > (ENTRY)->start) uvm_map_clip_start(MAP,ENTRY,VA); }
+#define UVM_MAP_CLIP_START(MAP,ENTRY,VA,UMR) { \
+	if ((VA) > (ENTRY)->start) uvm_map_clip_start(MAP,ENTRY,VA,UMR); }
 
 /*
  * UVM_MAP_CLIP_END: ensure that the entry ends at or before
@@ -91,40 +96,27 @@
  * => map must be locked by caller
  */
 
-#define UVM_MAP_CLIP_END(MAP,ENTRY,VA) { \
-	if ((VA) < (ENTRY)->end) uvm_map_clip_end(MAP,ENTRY,VA); }
+#define UVM_MAP_CLIP_END(MAP,ENTRY,VA,UMR) { \
+	if ((VA) < (ENTRY)->end) uvm_map_clip_end(MAP,ENTRY,VA,UMR); }
 
 /*
  * extract flags
  */
-#define UVM_EXTRACT_REMOVE	0x1	/* remove mapping from old map */
-#define UVM_EXTRACT_CONTIG	0x2	/* try to keep it contig */
-#define UVM_EXTRACT_QREF	0x4	/* use quick refs */
-#define UVM_EXTRACT_FIXPROT	0x8	/* set prot to maxprot as we go */
+#define UVM_EXTRACT_REMOVE	0x01	/* remove mapping from old map */
+#define UVM_EXTRACT_CONTIG	0x02	/* try to keep it contig */
+#define UVM_EXTRACT_QREF	0x04	/* use quick refs */
+#define UVM_EXTRACT_FIXPROT	0x08	/* set prot to maxprot as we go */
+#define UVM_EXTRACT_RESERVED	0x10	/* caller did uvm_map_reserve() */
 
 #endif /* _KERNEL */
 
+#include <sys/rb.h>
+#include <sys/pool.h>
+#include <sys/rwlock.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+
 #include <uvm/uvm_anon.h>
-
-/*
- * types defined:
- *
- *	vm_map_t		the high-level address map data structure.
- *	vm_map_entry_t		an entry in an address map.
- *	vm_map_version_t	a timestamp of a map, for use with vm_map_lookup
- */
-
-/*
- * Objects which live in maps may be either VM objects, or another map
- * (called a "sharing map") which denotes read-write sharing with other maps.
- *
- * XXXCDC: private pager data goes here now
- */
-
-union vm_map_object {
-	struct uvm_object	*uvm_obj;	/* UVM OBJECT */
-	struct vm_map		*sub_map;	/* belongs to another map */
-};
 
 /*
  * Address map entries consist of start and end addresses,
@@ -133,14 +125,17 @@ union vm_map_object {
  * Also included is control information for virtual copy operations.
  */
 struct vm_map_entry {
-	RB_ENTRY(vm_map_entry)	rb_entry;	/* tree information */
-	vaddr_t			ownspace;	/* free space after */
-	vaddr_t			space;		/* space in subtree */
+	struct rb_node		rb_node;	/* tree information */
+	vsize_t			gap;		/* free space after */
+	vsize_t			maxgap;		/* space in subtree */
 	struct vm_map_entry	*prev;		/* previous entry */
 	struct vm_map_entry	*next;		/* next entry */
 	vaddr_t			start;		/* start address */
 	vaddr_t			end;		/* end address */
-	union vm_map_object	object;		/* object I point to */
+	union {
+		struct uvm_object *uvm_obj;	/* uvm object */
+		struct vm_map	*sub_map;	/* belongs to another map */
+	} object;				/* object I point to */
 	voff_t			offset;		/* offset into object */
 	int			etype;		/* entry type */
 	vm_prot_t		protection;	/* protection code */
@@ -152,8 +147,12 @@ struct vm_map_entry {
 #define uvm_map_entry_stop_copy flags
 	u_int8_t		flags;		/* flags */
 
-#define UVM_MAP_STATIC		0x01		/* static map entry */
-#define UVM_MAP_KMEM		0x02		/* from kmem entry pool */
+#define	UVM_MAP_KERNEL		0x01		/* kernel map entry */
+#define	UVM_MAP_KMAPENT		0x02		/* contains map entries */
+#define	UVM_MAP_FIRST		0x04		/* the first special entry */
+#define	UVM_MAP_QUANTUM		0x08		/* allocated with
+						 * UVM_FLAG_QUANTUM */
+#define	UVM_MAP_NOMERGE		0x10		/* this entry is not mergable */
 
 };
 
@@ -200,79 +199,93 @@ struct vm_map_entry {
  *					map is write-locked.  may be tested
  *					without asserting `flags_lock'.
  *
- *		VM_MAP_BUSY		r/w; may only be set when map is
- *					write-locked, may only be cleared by
- *					thread which set it, map read-locked
- *					or write-locked.  must be tested
- *					while `flags_lock' is asserted.
+ *		VM_MAP_DYING		r/o; set when a vmspace is being
+ *					destroyed to indicate that updates
+ *					to the pmap can be skipped.
  *
- *		VM_MAP_WANTLOCK		r/w; may only be set when the map
- *					is busy, and thread is attempting
- *					to write-lock.  must be tested
- *					while `flags_lock' is asserted.
+ *		VM_MAP_TOPDOWN		r/o; set when the vmspace is
+ *					created if the unspecified map
+ *					allocations are to be arranged in
+ *					a "top down" manner.
  */
 struct vm_map {
 	struct pmap *		pmap;		/* Physical map */
-	struct rwlock		lock;		/* Lock for map data */
-	RB_HEAD(uvm_tree, vm_map_entry) rbhead;	/* Tree for entries */
+	krwlock_t		lock;		/* Non-intrsafe lock */
+	struct lwp *		busy;		/* LWP holding map busy */
+	kmutex_t		mutex;		/* INTRSAFE lock */
+	kmutex_t		misc_lock;	/* Lock for ref_count, cv */
+	kcondvar_t		cv;		/* For signalling */
+	int			flags;		/* flags */
+	struct rb_tree		rb_tree;	/* Tree for entries */
 	struct vm_map_entry	header;		/* List of entries */
 	int			nentries;	/* Number of entries */
 	vsize_t			size;		/* virtual size */
 	int			ref_count;	/* Reference count */
-	simple_lock_data_t	ref_lock;	/* Lock for ref_count field */
-	vm_map_entry_t		hint;		/* hint for quick lookups */
-	simple_lock_data_t	hint_lock;	/* lock for hint storage */
-	vm_map_entry_t		first_free;	/* First free space hint */
-	int			flags;		/* flags */
+	struct vm_map_entry *	hint;		/* hint for quick lookups */
+	struct vm_map_entry *	first_free;	/* First free space hint */
 	unsigned int		timestamp;	/* Version number */
-#define	min_offset		header.start
-#define max_offset		header.end
 };
+
+#if defined(_KERNEL)
+
+#include <sys/callback.h>
+
+struct vm_map_kernel {
+	struct vm_map vmk_map;
+	LIST_HEAD(, uvm_kmapent_hdr) vmk_kentry_free;
+			/* Freelist of map entry */
+	struct vm_map_entry	*vmk_merged_entries;
+			/* Merged entries, kept for later splitting */
+
+	struct callback_head vmk_reclaim_callback;
+#if !defined(PMAP_MAP_POOLPAGE)
+	struct pool vmk_vacache; /* kva cache */
+	struct pool_allocator vmk_vacache_allocator; /* ... and its allocator */
+#endif
+};
+#endif /* defined(_KERNEL) */
+
+#define	VM_MAP_IS_KERNEL(map)	(vm_map_pmap(map) == pmap_kernel())
 
 /* vm_map flags */
 #define	VM_MAP_PAGEABLE		0x01		/* ro: entries are pageable */
 #define	VM_MAP_INTRSAFE		0x02		/* ro: interrupt safe map */
 #define	VM_MAP_WIREFUTURE	0x04		/* rw: wire future mappings */
-#define	VM_MAP_BUSY		0x08		/* rw: map is busy */
-#define	VM_MAP_WANTLOCK		0x10		/* rw: want to write-lock */
-
-/* XXX: number of kernel maps and entries to statically allocate */
-
-#if !defined(MAX_KMAPENT)
-#define	MAX_KMAPENT	1024  /* XXXCDC: no crash */
-#endif	/* !defined MAX_KMAPENT */
+#define	VM_MAP_DYING		0x20		/* rw: map is being destroyed */
+#define	VM_MAP_TOPDOWN		0x40		/* ro: arrange map top-down */
+#define	VM_MAP_VACACHE		0x80		/* ro: use kva cache */
+#define	VM_MAP_WANTVA		0x100		/* rw: want va */
 
 #ifdef _KERNEL
-#define	vm_map_modflags(map, set, clear)				\
-do {									\
-	(map)->flags = ((map)->flags | (set)) & ~(clear);		\
-} while (0)
-#endif /* _KERNEL */
-
-/*
- *	Interrupt-safe maps must also be kept on a special list,
- *	to assist uvm_fault() in avoiding locking problems.
- */
-struct vm_map_intrsafe {
-	struct vm_map	vmi_map;
-	LIST_ENTRY(vm_map_intrsafe) vmi_list;
+struct uvm_mapent_reservation {
+	struct vm_map_entry *umr_entries[2];
+	int umr_nentries;
 };
+#define	UMR_EMPTY(umr)		((umr) == NULL || (umr)->umr_nentries == 0)
+#define	UMR_GETENTRY(umr)	((umr)->umr_entries[--(umr)->umr_nentries])
+#define	UMR_PUTENTRY(umr, ent)	\
+	(umr)->umr_entries[(umr)->umr_nentries++] = (ent)
 
-/*
- * handle inline options
- */
+struct uvm_map_args {
+	struct vm_map_entry *uma_prev;
 
-#ifdef UVM_MAP_INLINE
-#define MAP_INLINE static __inline
-#else 
-#define MAP_INLINE /* nothing */
-#endif /* UVM_MAP_INLINE */
+	vaddr_t uma_start;
+	vsize_t uma_size;
+
+	struct uvm_object *uma_uobj;
+	voff_t uma_uoffset;
+
+	uvm_flag_t uma_flags;
+};
+#endif /* _KERNEL */
 
 /*
  * globals:
  */
 
 #ifdef _KERNEL
+
+#include <sys/proc.h>
 
 #ifdef PMAP_GROWKERNEL
 extern vaddr_t	uvm_maxkaddr;
@@ -282,153 +295,86 @@ extern vaddr_t	uvm_maxkaddr;
  * protos: the following prototypes define the interface to vm_map
  */
 
-MAP_INLINE
-void		uvm_map_deallocate(vm_map_t);
+void		uvm_map_deallocate(struct vm_map *);
 
-int		uvm_map_clean(vm_map_t, vaddr_t, vaddr_t, int);
-void		uvm_map_clip_start(vm_map_t, vm_map_entry_t, vaddr_t);
-void		uvm_map_clip_end(vm_map_t, vm_map_entry_t, vaddr_t);
-MAP_INLINE
-vm_map_t	uvm_map_create(pmap_t, vaddr_t, vaddr_t, int);
-int		uvm_map_extract(vm_map_t, vaddr_t, vsize_t, 
-			vm_map_t, vaddr_t *, int);
-vm_map_entry_t	uvm_map_findspace(vm_map_t, vaddr_t, vsize_t, vaddr_t *,
-			struct uvm_object *, voff_t, vsize_t, int);
-vaddr_t		uvm_map_hint(struct proc *, vm_prot_t);
-int		uvm_map_inherit(vm_map_t, vaddr_t, vaddr_t, vm_inherit_t);
-int		uvm_map_advice(vm_map_t, vaddr_t, vaddr_t, int);
+int		uvm_map_clean(struct vm_map *, vaddr_t, vaddr_t, int);
+void		uvm_map_clip_start(struct vm_map *, struct vm_map_entry *,
+		    vaddr_t, struct uvm_mapent_reservation *);
+void		uvm_map_clip_end(struct vm_map *, struct vm_map_entry *,
+		    vaddr_t, struct uvm_mapent_reservation *);
+struct vm_map	*uvm_map_create(pmap_t, vaddr_t, vaddr_t, int);
+int		uvm_map_extract(struct vm_map *, vaddr_t, vsize_t,
+		    struct vm_map *, vaddr_t *, int);
+struct vm_map_entry *
+		uvm_map_findspace(struct vm_map *, vaddr_t, vsize_t,
+		    vaddr_t *, struct uvm_object *, voff_t, vsize_t, int);
+int		uvm_map_inherit(struct vm_map *, vaddr_t, vaddr_t,
+		    vm_inherit_t);
+int		uvm_map_advice(struct vm_map *, vaddr_t, vaddr_t, int);
 void		uvm_map_init(void);
-boolean_t	uvm_map_lookup_entry(vm_map_t, vaddr_t, vm_map_entry_t *);
-MAP_INLINE
-void		uvm_map_reference(vm_map_t);
-int		uvm_map_replace(vm_map_t, vaddr_t, vaddr_t,
-			vm_map_entry_t, int);
-int		uvm_map_reserve(vm_map_t, vsize_t, vaddr_t, vsize_t,
-			vaddr_t *);
-void		uvm_map_setup(vm_map_t, vaddr_t, vaddr_t, int);
-int		uvm_map_submap(vm_map_t, vaddr_t, vaddr_t, vm_map_t);
-#define		uvm_unmap(_m, _s, _e) uvm_unmap_p(_m, _s, _e, 0)
-MAP_INLINE
-void		uvm_unmap_p(vm_map_t, vaddr_t, vaddr_t, struct proc *);
-void		uvm_unmap_detach(vm_map_entry_t,int);
-void		uvm_unmap_remove(vm_map_t, vaddr_t, vaddr_t,
-				      vm_map_entry_t *, struct proc *);
+bool		uvm_map_lookup_entry(struct vm_map *, vaddr_t,
+		    struct vm_map_entry **);
+void		uvm_map_reference(struct vm_map *);
+int		uvm_map_replace(struct vm_map *, vaddr_t, vaddr_t,
+		    struct vm_map_entry *, int, struct vm_map_entry **);
+int		uvm_map_reserve(struct vm_map *, vsize_t, vaddr_t, vsize_t,
+		    vaddr_t *, uvm_flag_t);
+void		uvm_map_setup(struct vm_map *, vaddr_t, vaddr_t, int);
+void		uvm_map_setup_kernel(struct vm_map_kernel *,
+		    vaddr_t, vaddr_t, int);
+struct vm_map_kernel *
+		vm_map_to_kernel(struct vm_map *);
+int		uvm_map_submap(struct vm_map *, vaddr_t, vaddr_t,
+		    struct vm_map *);
+void		uvm_unmap1(struct vm_map *, vaddr_t, vaddr_t, int);
+#define	uvm_unmap(map, s, e)	uvm_unmap1((map), (s), (e), 0)
+void		uvm_unmap_detach(struct vm_map_entry *,int);
+void		uvm_unmap_remove(struct vm_map *, vaddr_t, vaddr_t,
+		    struct vm_map_entry **, struct uvm_mapent_reservation *,
+		    int);
 
-#endif /* _KERNEL */
+int		uvm_map_prepare(struct vm_map *, vaddr_t, vsize_t,
+		    struct uvm_object *, voff_t, vsize_t, uvm_flag_t,
+		    struct uvm_map_args *);
+int		uvm_map_enter(struct vm_map *, const struct uvm_map_args *,
+		    struct vm_map_entry *);
+
+int		uvm_mapent_reserve(struct vm_map *,
+		    struct uvm_mapent_reservation *, int, int);
+void		uvm_mapent_unreserve(struct vm_map *,
+		    struct uvm_mapent_reservation *);
+
+vsize_t		uvm_mapent_overhead(vsize_t, int);
+
+int		uvm_mapent_trymerge(struct vm_map *,
+		    struct vm_map_entry *, int);
+#define	UVM_MERGE_COPYING	1
+
+bool		vm_map_starved_p(struct vm_map *);
 
 /*
- * VM map locking operations:
- *
- *	These operations perform locking on the data portion of the
- *	map.
- *
- *	vm_map_lock_try: try to lock a map, failing if it is already locked.
- *
- *	vm_map_lock: acquire an exclusive (write) lock on a map.
- *
- *	vm_map_lock_read: acquire a shared (read) lock on a map.
- *
- *	vm_map_unlock: release an exclusive lock on a map.
- *
- *	vm_map_unlock_read: release a shared lock on a map.
- *
- *	vm_map_downgrade: downgrade an exclusive lock to a shared lock.
- *
- *	vm_map_upgrade: upgrade a shared lock to an exclusive lock.
- *
- *	vm_map_busy: mark a map as busy.
- *
- *	vm_map_unbusy: clear busy status on a map.
- *
- * Note that "intrsafe" maps use only exclusive, spin locks.  We simply
- * use the sleep lock's interlock for this.
+ * VM map locking operations.
  */
 
-#ifdef _KERNEL
-/* XXX: clean up later */
-#include <sys/time.h>
-#include <sys/proc.h>	/* for tsleep(), wakeup() */
-#include <sys/systm.h>	/* for panic() */
+bool		vm_map_lock_try(struct vm_map *);
+void		vm_map_lock(struct vm_map *);
+void		vm_map_unlock(struct vm_map *);
+void		vm_map_unbusy(struct vm_map *);
+void		vm_map_lock_read(struct vm_map *);
+void		vm_map_unlock_read(struct vm_map *);
+void		vm_map_busy(struct vm_map *);
+bool		vm_map_locked_p(struct vm_map *);
 
-static __inline boolean_t vm_map_lock_try(vm_map_t);
-static __inline void vm_map_lock(vm_map_t);
-extern const char vmmapbsy[];
-
-static __inline boolean_t
-vm_map_lock_try(struct vm_map *map)
-{
-	boolean_t rv;
-
-	if (map->flags & VM_MAP_INTRSAFE) {
-		rv = TRUE;
-	} else {
-		if (map->flags & VM_MAP_BUSY) {
-			return (FALSE);
-		}
-		rv = (rw_enter(&map->lock, RW_WRITE|RW_NOSLEEP) == 0);
-	}
-
-	if (rv)
-		map->timestamp++;
-
-	return (rv);
-}
-
-static __inline void
-vm_map_lock(struct vm_map *map)
-{
-	if (map->flags & VM_MAP_INTRSAFE)
-		return;
-
-	do {
-		while (map->flags & VM_MAP_BUSY) {
-			map->flags |= VM_MAP_WANTLOCK;
-			tsleep(&map->flags, PVM, (char *)vmmapbsy, 0);
-		}
-	} while (rw_enter(&map->lock, RW_WRITE|RW_SLEEPFAIL) != 0);
-
-	map->timestamp++;
-}
-
-#define	vm_map_lock_read(map) rw_enter_read(&(map)->lock)
-
-#define	vm_map_unlock(map)						\
-do {									\
-	if (((map)->flags & VM_MAP_INTRSAFE) == 0)			\
-		rw_exit(&(map)->lock);					\
-} while (0)
-
-#define	vm_map_unlock_read(map)	rw_exit_read(&(map)->lock)
-
-#define	vm_map_downgrade(map) rw_enter(&(map)->lock, RW_DOWNGRADE)
-
-#define	vm_map_upgrade(map)						\
-do {									\
-	rw_exit_read(&(map)->lock);					\
-	rw_enter_write(&(map)->lock);					\
-} while (0)
-
-#define	vm_map_busy(map)						\
-do {									\
-	(map)->flags |= VM_MAP_BUSY;					\
-} while (0)
-
-#define	vm_map_unbusy(map)						\
-do {									\
-	int oflags;							\
-									\
-	oflags = (map)->flags;						\
-	(map)->flags &= ~(VM_MAP_BUSY|VM_MAP_WANTLOCK);			\
-	if (oflags & VM_MAP_WANTLOCK)					\
-		wakeup(&(map)->flags);					\
-} while (0)
 #endif /* _KERNEL */
 
 /*
  *	Functions implemented as macros
  */
-#define		vm_map_min(map)		((map)->min_offset)
-#define		vm_map_max(map)		((map)->max_offset)
+#define		vm_map_min(map)		((map)->header.end)
+#define		vm_map_max(map)		((map)->header.start)
+#define		vm_map_setmin(map, v)	((map)->header.end = (v))
+#define		vm_map_setmax(map, v)	((map)->header.start = (v))
+
 #define		vm_map_pmap(map)	((map)->pmap)
 
 #endif /* _UVM_UVM_MAP_H_ */

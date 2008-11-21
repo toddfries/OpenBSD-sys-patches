@@ -1,8 +1,7 @@
-/*	$NetBSD: kb_hb.c,v 1.8 2005/12/11 12:18:23 christos Exp $	*/
+/*	$NetBSD: kb_hb.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $	*/
 
-/*
- * Copyright (c) 2001 Izumi Tsutsui.
- * All rights reserved.
+/*-
+ * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -23,12 +20,12 @@
  * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kb_hb.c,v 1.8 2005/12/11 12:18:23 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kb_hb.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,19 +50,19 @@ __KERNEL_RCSID(0, "$NetBSD: kb_hb.c,v 1.8 2005/12/11 12:18:23 christos Exp $");
 #define KB_SIZE 0x10 /* XXX */
 #define KB_PRI 5
 
-static int kb_hb_match(struct device *, struct cfdata *, void *);
-static void kb_hb_attach(struct device *, struct device *, void *);
+static int kb_hb_match(device_t, cfdata_t, void *);
+static void kb_hb_attach(device_t, device_t, void *);
 static void kb_hb_init(struct kb_softc *);
 int	kb_hb_intr(void *);
 int	kb_hb_cnattach(void);
 
-CFATTACH_DECL(kb_hb, sizeof(struct kb_softc),
+CFATTACH_DECL_NEW(kb_hb, sizeof(struct kb_softc),
     kb_hb_match, kb_hb_attach, NULL, NULL);
 
 struct console_softc kb_hb_conssc;
 
 static int
-kb_hb_match(struct device *parent, struct cfdata *cf, void *aux)
+kb_hb_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 	u_int addr;
@@ -86,21 +83,23 @@ kb_hb_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 static void
-kb_hb_attach(struct device *parent, struct device *self, void *aux)
+kb_hb_attach(device_t parent, device_t self, void *aux)
 {
-	struct kb_softc *sc = (void *)self;
+	struct kb_softc *sc = device_private(self);
 	struct hb_attach_args *ha = aux;
 	bus_space_tag_t bt = ha->ha_bust;
 	bus_space_handle_t bh;
 	struct wskbddev_attach_args wsa;
 	int ipl;
 
+	sc->sc_dev = self;
+
 	if (bus_space_map(bt, ha->ha_address, KB_SIZE, 0, &bh) != 0) {
-		printf("can't map device space\n");
+		aprint_error(": can't map device space\n");
 		return;
 	}
 
-	printf("\n");
+	aprint_normal("\n");
 
 	sc->sc_bt = bt;
 	sc->sc_bh = bh;
@@ -113,7 +112,7 @@ kb_hb_attach(struct device *parent, struct device *self, void *aux)
 
 	kb_hb_init(sc);
 
-	isrlink_autovec(kb_hb_intr, (void *)sc, ipl, ISRPRI_TTY);
+	isrlink_autovec(kb_hb_intr, (void *)sc, ipl, IPL_TTY);
 
 	wsa.console = kb_hb_conssc.cs_isconsole;
 	wsa.keymap = &kb_keymapdata;

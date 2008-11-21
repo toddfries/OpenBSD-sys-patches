@@ -1,8 +1,10 @@
-#	$OpenBSD: Makefile,v 1.2 2006/03/13 22:00:31 miod Exp $
-#	$NetBSD: Makefile,v 1.1 1996/03/02 01:16:47 cgd Exp $
+#	$NetBSD: Makefile,v 1.12 2001/09/18 19:51:23 ad Exp $
 
-AWK=	awk
+# use 'make -f Makefile.tcdevs' to make tcdevs.h and tcdevs_data.h
 
-tcdevs_data.h: tcdevs devlist2h.awk
-	/bin/rm -f tcdevs_data.h
-	${AWK} -f devlist2h.awk tcdevs
+INCSDIR= /usr/include/dev/tc
+
+# Only install includes which are used by userland
+INCS=	sfbreg.h sticio.h sticreg.h
+
+.include <bsd.kinc.mk>

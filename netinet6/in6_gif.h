@@ -1,5 +1,5 @@
-/*	$OpenBSD: in6_gif.h,v 1.5 2007/02/10 15:34:22 claudio Exp $	*/
-/*	$KAME: in6_gif.h,v 1.5 2000/04/14 08:36:03 itojun Exp $	*/
+/*	$NetBSD: in6_gif.h,v 1.13 2008/04/24 11:38:38 ad Exp $	*/
+/*	$KAME: in6_gif.h,v 1.7 2001/07/26 06:53:16 jinmei Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -33,7 +33,18 @@
 #ifndef _NETINET6_IN6_GIF_H_
 #define _NETINET6_IN6_GIF_H_
 
+#define GIF_HLIM	30
+extern int	ip6_gif_hlim;		/* Hop limit for gif encap packet */
+
+struct gif_softc;
+struct sockaddr;
 int in6_gif_input(struct mbuf **, int *, int);
 int in6_gif_output(struct ifnet *, int, struct mbuf *);
+#ifdef GIF_ENCAPCHECK
+int gif_encapcheck6(struct mbuf *, int, int, void *);
+#endif
+int in6_gif_attach(struct gif_softc *);
+int in6_gif_detach(struct gif_softc *);
+void *in6_gif_ctlinput(int, const struct sockaddr *, void *);
 
-#endif /*_NETINET6_IN6_GIF_H_*/
+#endif /* !_NETINET6_IN6_GIF_H_ */

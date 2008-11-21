@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka630.h,v 1.6 2003/06/02 23:27:57 millert Exp $ */
-/*	$NetBSD: ka630.h,v 1.5 2000/07/19 01:01:58 matt Exp $ */
+/*	$NetBSD: ka630.h,v 1.8 2005/12/11 12:19:34 christos Exp $ */
 /*-
  * Copyright (c) 1986, 1988 The Regents of the University of California.
  * All rights reserved.
@@ -64,8 +63,8 @@ struct uvaxIIcpu {
 #define	UVAXIIDEAR_PG	0x00007fff
 
 /*
- * Definitions specific to the ka630 MicroVAXII Q22 bus cpu card. Includes the
- * tod clock chip and the cpu registers.
+ * Definitions specific to the ka630 MicroVAXII Q22 bus CPU card. Includes the
+ * tod clock chip and the CPU registers.
  */
 #define KA630CLK	((struct ka630clock *)0x200b8000)
 

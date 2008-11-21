@@ -1,7 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.89 2008/03/08 00:00:17 deraadt Exp $
-#	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
+#	$NetBSD: newvers.sh,v 1.52 2007/11/17 08:59:51 skrll Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
 #	The Regents of the University of California.  All rights reserved.
@@ -14,7 +13,11 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of the University nor the names of its contributors
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#	This product includes software developed by the University of
+#	California, Berkeley and its contributors.
+# 4. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
@@ -32,54 +35,71 @@
 #
 #	@(#)newvers.sh	8.1 (Berkeley) 4/20/94
 
-if [ ! -r version -o ! -s version ]
-then
+if [ ! -e version ]; then
 	echo 0 > version
 fi
 
-touch version
-v=`cat version` u=${USER-root} d=`pwd` h=`hostname` t=`date`
-id=`basename ${d}`
+v=$(cat version)
+t=$(date)
+u=${USER-root}
+h=$(hostname)
+d=$(pwd)
+cwd=$(dirname $0)
+copyright=$(awk '{ printf("\"%s\\n\"", $0); }' ${cwd}/copyright)
 
-# additional things which need version number upgrades:
-#	sys/sys/param.h:
-#		OpenBSD symbol
-#		OpenBSD_X_X symbol
-#	share/tmac/mdoc/doc-common
-#		change	.       ds oS OpenBSD X.X
-#		add	.	if "\\$2"X.X"  .as oS \0X.X
-#	share/mk/sys.mk
-#		OSMAJOR
-#		OSMINOR
-#	distrib/miniroot/install.sub
-#		VERSION
-#	etc/root/root.mail
-#		VERSION and other bits
-#	sys/arch/macppc/stand/tbxidata/bsd.tbxi
-#		change	/X.X/macppc/bsd.rd
-#
-# -current and -beta tagging:
-#	For release, select STATUS ""
-#	Right after release unlock, select STATUS "-current"
-#	A month or so before release, select STATUS "-beta"
+if [ -f ident ]; then
+	id="$(cat ident)"
+else
+	id=$(basename ${d})
+fi
 
-ost="OpenBSD"
-osr="4.3"
+osrelcmd=${cwd}/osrelease.sh
 
-cat >vers.c <<eof
-#define STATUS "-current"		/* just after a release */
-#if 0
-#define STATUS "-beta"			/* just before a release */
-#define STATUS ""			/* release */
-#endif
+ost="NetBSD"
+osr=$(sh $osrelcmd)
+
+fullversion="${ost} ${osr} (${id}) #${v}: ${t}\n\t${u}@${h}:${d}\n"
+
+cat << _EOF > vers.c
+/*
+ * Automatically generated file from $0
+ * Do not edit.
+ */
+#include <sys/cdefs.h>
+#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/exec.h>
+#include <sys/exec_elf.h>
 
 const char ostype[] = "${ost}";
 const char osrelease[] = "${osr}";
-const char osversion[] = "${id}#${v}";
-const char sccs[] =
-    "    @(#)${ost} ${osr}" STATUS " (${id}) #${v}: ${t}\n";
-const char version[] =
-    "${ost} ${osr}" STATUS " (${id}) #${v}: ${t}\n    ${u}@${h}:${d}\n";
-eof
+const char sccs[] = "@(#)${fullversion}";
+const char version[] = "${fullversion}";
+const char kernel_ident[] = "${id}";
+const char copyright[] =
+${copyright}
+"\n";
 
-expr ${v} + 1 > version
+/*
+ * NetBSD identity note.
+ */
+#ifdef __arm__
+#define _SHT_NOTE	%note
+#else
+#define _SHT_NOTE	@note
+#endif
+
+#define	_S(TAG)	__STRING(TAG)
+__asm(
+	".section\t\".note.netbsd.ident\", \"\"," _S(_SHT_NOTE) "\n"
+	"\t.p2align\t2\n"
+	"\t.long\t" _S(ELF_NOTE_NETBSD_NAMESZ) "\n"
+	"\t.long\t" _S(ELF_NOTE_NETBSD_DESCSZ) "\n"
+	"\t.long\t" _S(ELF_NOTE_TYPE_NETBSD_TAG) "\n"
+	"\t.ascii\t" _S(ELF_NOTE_NETBSD_NAME) "\n"
+	"\t.long\t" _S(__NetBSD_Version__) "\n"
+	"\t.p2align\t2\n"
+);
+
+_EOF
+echo $(expr ${v} + 1) > version

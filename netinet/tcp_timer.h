@@ -1,5 +1,35 @@
-/*	$OpenBSD: tcp_timer.h,v 1.11 2007/11/24 12:59:28 jmc Exp $	*/
-/*	$NetBSD: tcp_timer.h,v 1.6 1995/03/26 20:32:37 jtc Exp $	*/
+/*	$NetBSD: tcp_timer.h,v 1.26 2008/04/28 20:24:09 martin Exp $	*/
+
+/*-
+ * Copyright (c) 2001, 2005 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe of Wasabi Systems, Inc.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -42,7 +72,7 @@
 #define	TCPT_NTIMERS	4
 
 #define	TCPT_REXMT	0		/* retransmit */
-#define	TCPT_PERSIST	1		/* retransmit persistence */
+#define	TCPT_PERSIST	1		/* retransmit persistance */
 #define	TCPT_KEEP	2		/* keep alive */
 #define	TCPT_2MSL	3		/* 2*msl quiet time timer */
 
@@ -90,7 +120,7 @@
 						   if 0, no idea yet */
 #define	TCPTV_SRTTDFLT	(  3*PR_SLOWHZ)		/* assumed RTT if no info */
 
-#define	TCPTV_PERSMIN	(  5*PR_SLOWHZ)		/* retransmit persistence */
+#define	TCPTV_PERSMIN	(  5*PR_SLOWHZ)		/* retransmit persistance */
 #define	TCPTV_PERSMAX	( 60*PR_SLOWHZ)		/* maximum persist interval */
 
 #define	TCPTV_KEEP_INIT	( 75*PR_SLOWHZ)		/* initial connect keep alive */
@@ -110,22 +140,24 @@
 #ifdef	TCPTIMERS
 const char *tcptimers[] =
     { "REXMT", "PERSIST", "KEEP", "2MSL" };
-#endif /* TCPTIMERS */
+#endif
 
 /*
  * Init, arm, disarm, and test TCP timers.
  */
 #define	TCP_TIMER_INIT(tp, timer)					\
-	timeout_set(&(tp)->t_timer[(timer)], tcp_timer_funcs[(timer)], tp)
+	callout_setfunc(&(tp)->t_timer[(timer)],			\
+	    tcp_timer_funcs[(timer)], (tp))
 
 #define	TCP_TIMER_ARM(tp, timer, nticks)				\
-	timeout_add(&(tp)->t_timer[(timer)], (nticks) * (hz / PR_SLOWHZ))
+	callout_schedule(&(tp)->t_timer[(timer)],			\
+	    (nticks) * (hz / PR_SLOWHZ))
 
 #define	TCP_TIMER_DISARM(tp, timer)					\
-	timeout_del(&(tp)->t_timer[(timer)])
+	callout_stop(&(tp)->t_timer[(timer)])
 
 #define	TCP_TIMER_ISARMED(tp, timer)					\
-	timeout_pending(&(tp)->t_timer[(timer)])
+	callout_active(&(tp)->t_timer[(timer)])
 
 /*
  * Force a time value to be in a certain range.
@@ -134,7 +166,7 @@ const char *tcptimers[] =
 	(tv) = (value); \
 	if ((tv) < (tvmin)) \
 		(tv) = (tvmin); \
-	else if ((tv) > (tvmax)) \
+	if ((tv) > (tvmax)) \
 		(tv) = (tvmax); \
 }
 
@@ -143,13 +175,15 @@ typedef void (*tcp_timer_func_t)(void *);
 
 extern const tcp_timer_func_t tcp_timer_funcs[TCPT_NTIMERS];
 
-extern int tcptv_keep_init;
-extern int tcp_keepidle;		/* time before keepalive probes begin */
-extern int tcp_keepintvl;		/* time between keepalive probes */
-extern int tcp_maxidle;			/* time to drop after starting probes */
+extern u_int tcp_keepinit;		/* time before initial connection times out */
+extern u_int tcp_keepidle;		/* time before keepalive probes begin */
+extern u_int tcp_keepintvl;		/* time between keepalive probes */
+extern u_int tcp_keepcnt;		/* number of keepalives, 0=infty */
+extern int tcp_maxpersistidle;		/* max idle time in persist */
 extern int tcp_ttl;			/* time to live for TCP segs */
-extern int tcp_backoff[];
+extern const int tcp_backoff[];
 
 void	tcp_timer_init(void);
-#endif /* _KERNEL */
-#endif /* _NETINET_TCP_TIMER_H_ */
+#endif
+
+#endif /* !_NETINET_TCP_TIMER_H_ */

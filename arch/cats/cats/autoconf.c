@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.10 2005/12/11 12:17:04 christos Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.15 2008/02/12 17:30:57 joerg Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2005/12/11 12:17:04 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.15 2008/02/12 17:30:57 joerg Exp $");
 
 #include "opt_md.h"
 
@@ -55,6 +55,7 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2005/12/11 12:17:04 christos Exp $
 #include <sys/malloc.h>
 #include <machine/bootconfig.h>
 #include <machine/intr.h>
+#include <dev/pci/pcivar.h>
 
 #include "isa.h"
 
@@ -69,9 +70,9 @@ static void
 get_device(const char *name)
 {
 	int unit, part;
-	char devname[16], buf[32];
+	char devname[16];
 	const char *cp;
-	struct device *dv;
+	device_t dv;
 
 	if (strncmp(name, "/dev/", 5) == 0)
 		name += 5;
@@ -92,13 +93,10 @@ get_device(const char *name)
 		part = *cp - 'a';
 	else if (*cp != '\0' && *cp != ' ')
 		return;
-	sprintf(buf, "%s%d", devname, unit);
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (strcmp(buf, dv->dv_xname) == 0) {
-			booted_device = dv;
-			booted_partition = part;
-			return;
-		}
+
+	if ((dv = device_find_by_driver_unit(devname, unit)) != NULL) {
+		booted_device = dv;
+		booted_partition = part;
 	}
 }
 
@@ -138,7 +136,6 @@ extern int footbridge_imask[NIPL];
 void
 cpu_configure(void)
 {
-	softintr_init();
 	/*
 	 * Since various PCI interrupts could be routed via the ICU
 	 * (for PCI devices in the bridge) we need to set up the ICU
@@ -150,15 +147,15 @@ cpu_configure(void)
 
 	config_rootfound("mainbus", NULL);
 
+#if defined(DEBUG)
 	/* Debugging information */
-#ifndef TERSE
 	printf("ipl_bio=%08x ipl_net=%08x ipl_tty=%08x ipl_vm=%08x\n",
 	    footbridge_imask[IPL_BIO], footbridge_imask[IPL_NET],
 	    footbridge_imask[IPL_TTY], footbridge_imask[IPL_VM]);
 	printf("ipl_audio=%08x ipl_imp=%08x ipl_high=%08x ipl_serial=%08x\n",
 	    footbridge_imask[IPL_AUDIO], footbridge_imask[IPL_CLOCK],
 	    footbridge_imask[IPL_HIGH], footbridge_imask[IPL_SERIAL]);
-#endif
+#endif /* defined(DEBUG) */
 
 	/* Time to start taking interrupts so lets open the flood gates .... */
 	(void)spl0();
@@ -167,5 +164,24 @@ cpu_configure(void)
 void
 device_register(struct device *dev, void *aux)
 {
+	struct device *pdev;
+        if ((pdev = device_parent(dev)) != NULL &&
+    	    device_is_a(pdev, "pci")) {
+		/*
+		 * cats builtin aceride is on 0:16:0
+		 */
+		struct pci_attach_args *pa = aux;
+		if (((pa)->pa_bus == 0
+		    && (pa)->pa_device == 16 
+		    && (pa)->pa_function == 0)) {
+			if (prop_dictionary_set_bool(device_properties(dev),
+						"ali1543-ide-force-compat-mode",
+						true) == false) {
+				printf("WARNING: unable to set "
+					"ali1543-ide-force-compat-mode "
+					"property for %s\n", dev->dv_xname);
+			}
+		}
+	}
 }
 /* End of autoconf.c */

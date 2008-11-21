@@ -1,5 +1,4 @@
-/*	$OpenBSD: adwlib.h,v 1.10 2002/03/14 01:26:53 millert Exp $ */
-/*      $NetBSD: adwlib.h,v 1.14 2000/07/03 18:14:18 dante Exp $        */
+/*      $NetBSD: adwlib.h,v 1.19 2005/12/11 12:21:25 christos Exp $        */
 
 /*
  * Definitions for low level routines and data structures
@@ -43,7 +42,7 @@
  */
 /*
  * advansys.c - Linux Host Driver for AdvanSys SCSI Adapters
- * 
+ *
  * Copyright (c) 1995-2000 Advanced System Products, Inc.
  * All Rights Reserved.
  *
@@ -75,18 +74,18 @@
  * Define Adw Reset Hold Time grater than 25 uSec.
  * See AdwResetSCSIBus() for more info.
  */
-#define ADW_SCSI_RESET_HOLD_TIME_US  60
+#define ASC_SCSI_RESET_HOLD_TIME_US  60
 
 /*
  * Define Adw EEPROM constants.
  */
 
-#define ADW_EEP_DVC_CFG_BEGIN           (0x00)
-#define ADW_EEP_DVC_CFG_END             (0x15)
-#define ADW_EEP_DVC_CTL_BEGIN           (0x16)  /* location of OEM name */
-#define ADW_EEP_MAX_WORD_ADDR           (0x1E)
+#define ASC_EEP_DVC_CFG_BEGIN           (0x00)
+#define ASC_EEP_DVC_CFG_END             (0x15)
+#define ASC_EEP_DVC_CTL_BEGIN           (0x16)  /* location of OEM name */
+#define ASC_EEP_MAX_WORD_ADDR           (0x1E)
 
-#define ADW_EEP_DELAY_MS                100
+#define ASC_EEP_DELAY_MS                100
 
 /*
  * EEPROM bits reference by the RISC after initialization.
@@ -98,7 +97,7 @@
 /*
  * EEPROM configuration format
  *
- * Field naming convention: 
+ * Field naming convention:
  *
  *  *_enable indicates the field enables or disables the feature. The
  *  value is never reset.
@@ -110,15 +109,15 @@
  *
  * Default values are maintained in the structure Default_EEPROM_Config.
  */
-#define ADW_EEPROM_BIG_ENDIAN          0x8000   /* EEPROM Bit 15 */
-#define ADW_EEPROM_BIOS_ENABLE         0x4000   /* EEPROM Bit 14 */
+#define ADV_EEPROM_BIG_ENDIAN          0x8000   /* EEPROM Bit 15 */
+#define ADV_EEPROM_BIOS_ENABLE         0x4000   /* EEPROM Bit 14 */
 /*
  * For the ASC3550 Bit 13 is Termination Polarity control bit.
  * For later ICs Bit 13 controls whether the CIS (Card Information
  * Service Section) is loaded from EEPROM.
  */
-#define ADW_EEPROM_TERM_POL            0x2000   /* EEPROM Bit 13 */
-#define ADW_EEPROM_CIS_LD              0x2000   /* EEPROM Bit 13 */
+#define ADV_EEPROM_TERM_POL            0x2000   /* EEPROM Bit 13 */
+#define ADV_EEPROM_CIS_LD              0x2000   /* EEPROM Bit 13 */
 
 /*
  * ASC38C1600 Bit 11
@@ -134,7 +133,7 @@
 #define ADW_EEPROM_INTAB               0x0800   /* EEPROM Bit 11 */
 
 typedef struct adw_eeprom
-{                              
+{
 						/* Word Offset, Description */
 
 	u_int16_t	cfg_lsw;		/* 00 power up initialization */
@@ -209,11 +208,11 @@ typedef struct adw_eeprom
 	u_int16_t	check_sum;		/* 21 EEP check sum */
 	u_int8_t	oem_name[16];		/* 22 OEM name */
 	u_int16_t	dvc_err_code;		/* 30 last device driver error code */
-	u_int16_t	adw_err_code;		/* 31 last uc and Adw Lib error code */
-	u_int16_t	adw_err_addr;		/* 32 last uc error address */
+	u_int16_t	adv_err_code;		/* 31 last uc and Adw Lib error code */
+	u_int16_t	adv_err_addr;		/* 32 last uc error address */
 	u_int16_t	saved_dvc_err_code;	/* 33 saved last dev. driver error code	*/
-	u_int16_t	saved_adw_err_code;	/* 34 saved last uc and Adw Lib error code */
-	u_int16_t	saved_adw_err_addr;	/* 35 saved last uc error address 	*/
+	u_int16_t	saved_adv_err_code;	/* 34 saved last uc and Adw Lib error code */
+	u_int16_t	saved_adv_err_addr;	/* 35 saved last uc error address 	*/
 	u_int16_t	reserved1[20];		/* 36 - 55 reserved */
 	u_int16_t	cisptr_lsw;		/* 56 CIS PTR LSW */
 	u_int16_t	cisprt_msw;		/* 57 CIS PTR MSW */
@@ -226,13 +225,13 @@ typedef struct adw_eeprom
 /*
  * EEPROM Commands
  */
-#define ADW_EEP_CMD_READ          0x80
-#define ADW_EEP_CMD_WRITE         0x40
-#define ADW_EEP_CMD_WRITE_ABLE    0x30
-#define ADW_EEP_CMD_WRITE_DISABLE 0x00
+#define ASC_EEP_CMD_READ          0x80
+#define ASC_EEP_CMD_WRITE         0x40
+#define ASC_EEP_CMD_WRITE_ABLE    0x30
+#define ASC_EEP_CMD_WRITE_DISABLE 0x00
 
-#define ADW_EEP_CMD_DONE             0x0200
-#define ADW_EEP_CMD_DONE_ERR         0x0001
+#define ASC_EEP_CMD_DONE             0x0200
+#define ASC_EEP_CMD_DONE_ERR         0x0001
 
 /* cfg_word */
 #define EEP_CFG_WORD_BIG_ENDIAN      0x8000
@@ -458,8 +457,8 @@ typedef struct adw_eeprom
 #define ADW_SLEW_RATE       0x1000  /* SCSI output buffer slew rate */
 #define ADW_FILTER_SEL      0x0C00  /* Filter Period Selection */
 #define  ADW_FLTR_DISABLE    0x0000  /* Input Filtering Disabled */
-#define  ADW_FLTR_11_TO_20NS 0x0800  /* Input Filtering 11ns to 20ns */          
-#define  ADW_FLTR_21_TO_39NS 0x0C00  /* Input Filtering 21ns to 39ns */          
+#define  ADW_FLTR_11_TO_20NS 0x0800  /* Input Filtering 11ns to 20ns */
+#define  ADW_FLTR_21_TO_39NS 0x0C00  /* Input Filtering 21ns to 39ns */
 #define ADW_ACTIVE_DBL      0x0200  /* Disable Active Negation */
 #define ADW_DIFF_MODE       0x0100  /* SCSI differential Mode (Read-Only) */
 #define ADW_DIFF_SENSE      0x0080  /* 1: No SE cables, 0: SE cable (Read-Only) */
@@ -524,12 +523,12 @@ typedef struct adw_eeprom
        1 1 1 1  | on  on | No devices are attached
        x 0 0 0  | on  on | Illegal (all 3 connectors are used)
        0 x 0 0  | on  on | Illegal (all 3 connectors are used)
-  
+
        x means don't-care (either '0' or '1')
-  
+
        If term_pol (bit 13) is '0' (active-low terminator enable), then:
            'on' is '0' and 'off' is '1'.
-  
+
        If term_pol bit is '1' (meaning active-hi terminator enable), then:
            'on' is '1' and 'off' is '0'.
  */
@@ -678,7 +677,7 @@ typedef struct adw_eeprom
  * This structure can be discarded after initialization. Don't add
  * fields here needed after initialization.
  *
- * Field naming convention: 
+ * Field naming convention:
  *
  *  *_enable indicates the field enables or disables a feature. The
  *  value of the field is never reset.
@@ -699,7 +698,7 @@ typedef struct adw_dvc_cfg {
 	u_int16_t	serial1;	/* EEPROM serial number word 1 */
 	u_int16_t	serial2;	/* EEPROM serial number word 2 */
 	u_int16_t	serial3;	/* EEPROM serial number word 3 */
-} ADW_DVC_CFG; 
+} ADW_DVC_CFG;
 
 
 #define NO_OF_SG_PER_BLOCK              15
@@ -722,7 +721,7 @@ typedef struct adw_sg_block {
  *
  * One structure is required per host adapter.
  *
- * Field naming convention: 
+ * Field naming convention:
  *
  *  *_able indicates both whether a feature should be enabled or disabled
  *  and whether a device is capable of the feature. At initialization
@@ -751,11 +750,8 @@ typedef struct adw_softc {
 	struct adw_ccb		*sc_ccbhash[CCB_HASH_SIZE];
 	TAILQ_HEAD(, adw_ccb)	sc_free_ccb, sc_waiting_ccb;
 	TAILQ_HEAD(adw_pending_ccb, adw_ccb)	sc_pending_ccb;
-	struct scsi_link	sc_link;     /* prototype for devs */
-	struct scsi_adapter	sc_adapter;
-
-	LIST_HEAD(, scsi_xfer)  sc_queue;
-	struct scsi_xfer	*sc_queuelast;
+	struct scsipi_adapter   sc_adapter;
+	struct scsipi_channel   sc_channel;
 
 	int			sc_freeze_dev[ADW_MAX_TID+1];
 
@@ -791,7 +787,7 @@ typedef struct adw_softc {
   * driver may discard the buffer after initialization is done.
   */
   ADW_DVC_CFG cfg; /* temporary configuration structure  */
-} ADW_SOFTC; 
+} ADW_SOFTC;
 
 
 /*
@@ -821,7 +817,7 @@ typedef struct adw_scsi_req_q {
 	u_int8_t	sg_working_ix;	/* ,uCode working SG variable. */
 	u_int8_t	cdb[12];	/* SCSI CDB bytes 0-11. */
 	u_int32_t	sg_real_addr;	/* SG list physical address. */
-	u_int32_t	scsiq_rptr;	/* Internal pointer to ADW_SCSI_REQ_Q */
+	u_int32_t	scsiq_rptr;	/* Iternal pointer to ADW_SCSI_REQ_Q */
 	u_int8_t	cdb16[4];	/* SCSI CDB bytes 12-15. */
 	u_int32_t	ccb_ptr;	/* CCB Physical Address */
 	u_int32_t	carr_va;	/* Carrier v-address (unused) */
@@ -834,7 +830,7 @@ typedef struct adw_scsi_req_q {
 } ADW_SCSI_REQ_Q;
 
 /*
- * ADW_SCSI_REQ_Q 'done_status' return values.
+ * ASC_SCSI_REQ_Q 'done_status' return values.
  */
 #define QD_NO_STATUS         0x00       /* Request not completed yet. */
 #define QD_NO_ERROR          0x01
@@ -842,7 +838,7 @@ typedef struct adw_scsi_req_q {
 #define QD_WITH_ERROR        0x04
 
 /*
- * ADW_SCSI_REQ_Q 'host_status' return values.
+ * ASC_SCSI_REQ_Q 'host_status' return values.
  */
 #define QHSTA_NO_ERROR              0x00
 #define QHSTA_M_SEL_TIMEOUT         0x11
@@ -874,6 +870,20 @@ typedef struct adw_scsi_req_q {
 #define QHSTA_M_SGBACKUP_ERROR      0x47 /* Scatter-Gather backup error */
 
 /*
+ * ASC_SCSI_REQ_Q 'scsi_status' return values.
+ */
+#define SCSI_STATUS_GOOD		0x00
+#define SCSI_STATUS_CHECK_CONDITION	0x02
+#define SCSI_STATUS_CONDITION_MET	0x04
+#define SCSI_STATUS_TARGET_BUSY		0x08
+#define SCSI_STATUS_INTERMID		0x10
+#define SCSI_STATUS_INTERMID_COND_MET	0x14
+#define SCSI_STATUS_RSERV_CONFLICT	0x18
+#define SCSI_STATUS_CMD_TERMINATED	0x22
+#define SCSI_STATUS_QUEUE_FULL		0x28
+
+
+/*
  * Microcode idle loop commands
  */
 #define IDLE_CMD_COMPLETED           0
@@ -903,11 +913,11 @@ typedef struct adw_scsi_req_q {
 #define SCSI_MS_PER_SEC              1000UL  /* milliseconds per second */
 #define SCSI_MAX_RETRY               10      /* retry count */
 
-#define ADW_ASYNC_RDMA_FAILURE          0x01 /* Fatal RDMA failure. */
-#define ADW_ASYNC_SCSI_BUS_RESET_DET    0x02 /* Detected SCSI Bus Reset. */
-#define ADW_ASYNC_CARRIER_READY_FAILURE 0x03 /* Carrier Ready failure. */
+#define ADV_ASYNC_RDMA_FAILURE          0x01 /* Fatal RDMA failure. */
+#define ADV_ASYNC_SCSI_BUS_RESET_DET    0x02 /* Detected SCSI Bus Reset. */
+#define ADV_ASYNC_CARRIER_READY_FAILURE 0x03 /* Carrier Ready failure. */
 
-#define ADW_HOST_SCSI_BUS_RESET      0x80 /* Host Initiated SCSI Bus Reset. */
+#define ADV_HOST_SCSI_BUS_RESET      0x80 /* Host Initiated SCSI Bus Reset. */
 
 
 /* Read byte from a register. */
@@ -999,16 +1009,16 @@ do {									\
 	ADW_READ_BYTE_REGISTER((iot), (ioh), IOPB_CHIP_TYPE_REV)
 
 /*
- * Abort a CCB in the chip's RISC Memory. The 'ccb_ptr' argument must
- * match the ADW_SCSI_REQ_Q 'ccb_ptr' field.
- * 
+ * Abort an SRB in the chip's RISC Memory. The 'srb_ptr' argument must
+ * match the ASC_SCSI_REQ_Q 'srb_ptr' field.
+ *
  * If the request has not yet been sent to the device it will simply be
  * aborted from RISC memory. If the request is disconnected it will be
  * aborted on reselection by sending an Abort Message to the target ID.
  *
  * Return value:
- *      ADW_TRUE(1) - ccb was successfully aborted.
- *      ADW_FALSE(0) - ccb was not found on the active queue list.
+ *      ADW_TRUE(1) - Queue was successfully aborted.
+ *      ADW_FALSE(0) - Queue was not found on the active queue list.
  */
 #define ADW_ABORT_CCB(sc, ccb_ptr) \
 	AdwSendIdleCmd((sc), (u_int16_t) IDLE_CMD_ABORT, (ccb_ptr)->hashkey)
@@ -1044,61 +1054,7 @@ do {									\
 #define ADW_TID_TO_TIDMASK(tid)   (0x01 << ((tid) & ADW_MAX_TID))
 
 /*
- * SCSI Inquiry structure
- */
-
-#define INQ_CLOCKING_ST_ONLY    0x0
-#define INQ_CLOCKING_DT_ONLY    0x1
-#define INQ_CLOCKING_ST_AND_DT  0x3
-
-typedef struct {
-	u_int8_t	peri_dvc_type	: 5;	/* peripheral device type */
-	u_int8_t	peri_qualifier  : 3;	/* peripheral qualifier */
-	u_int8_t	dvc_type_modifier : 7;	/* device type modifier (for SCSI I) */
-	u_int8_t	rmb	 : 1;		/* RMB - removable medium bit */
-	u_int8_t	ansi_apr_ver : 3;	/* ANSI approved version */
-	u_int8_t	ecma_ver : 3;		/* ECMA version */
-	u_int8_t	iso_ver  : 2;		/* ISO version */
-	u_int8_t	rsp_data_fmt : 4;	/* response data format */
-						/* 0 SCSI 1 */
-						/* 1 CCS */
-						/* 2 SCSI-2 */
-						/* 3-F reserved */
-	u_int8_t	res1	 : 2;	     	/* reserved */
-	u_int8_t	TemIOP   : 1;	     	/* terminate I/O process bit (see 5.6.22) */
-	u_int8_t	aenc	 : 1;	     	/* asynch. event notification (processor) */
-	u_int8_t	add_len;		/* additional length */
-	u_int8_t	res2     : 7;		/* reserved */
-        u_int8_t        SCC      : 1;
-        u_int8_t        Addr16   : 1;
-	u_int8_t	res3     : 2;		/* reserved */
-	u_int8_t        MChngr   : 1;
-        u_int8_t        MultiPort: 1;
-        u_int8_t        res4     : 1;
-	u_int8_t        EncServ  : 1;
-        u_int8_t        BaseQue  : 1;
-	u_int8_t	StfRe	 : 1;	    	/* soft reset implemented */
-	u_int8_t	CmdQue   : 1;	    	/* command queuing */
-	u_int8_t	res5	 : 1;	    	/* reserved */
-	u_int8_t	Linked   : 1;	    	/* linked command for this logical unit */
-	u_int8_t	Sync	 : 1;	    	/* synchronous data transfer */
-	u_int8_t	WBus16   : 1;	    	/* wide bus 16 bit data transfer */
-	u_int8_t	WBus32   : 1;	    	/* wide bus 32 bit data transfer */
-	u_int8_t	RelAdr   : 1;	    	/* relative addressing mode */
-	u_int8_t	vendor_id[8];		/* vendor identification */
-	u_int8_t	product_id[16];		/* product identification */
-	u_int8_t	product_rev_level[4];	/* product revision level */
-	u_int8_t	vendor_specific[20];	/* vendor specific */
-	u_int8_t	IUS	 : 1;		/* information unit supported */
-	u_int8_t	QAS	 : 1;		/* quick arbitrate supported */
-	u_int8_t	Clocking : 2;		/* clocking field */
-	u_int8_t	res6	 : 4;		/* reserved */
-	u_int8_t	res7;			/* reserved */
-	u_int8_t	version_descriptor[8][2];
-} ADW_SCSI_INQUIRY; /* 74 bytes */
-
-/*
- * Adw Library functions available to drivers.
+ * Adv Library functions available to drivers.
  */
 
 int	AdwInitFromEEPROM(ADW_SOFTC *);

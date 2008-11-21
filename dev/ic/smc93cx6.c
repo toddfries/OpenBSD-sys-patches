@@ -1,5 +1,4 @@
-/*	$OpenBSD: smc93cx6.c,v 1.17 2003/09/25 06:43:34 fgsch Exp $	*/
-/*	$NetBSD: smc93cx6.c,v 1.10 2003/05/02 19:12:19 dyoung Exp $	*/
+/*	$NetBSD: smc93cx6.c,v 1.14 2007/10/19 12:00:02 ad Exp $	*/
 
 /*
  * Interface for the 93C66/56/46/26/06 serial eeprom parts.
@@ -58,10 +57,23 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: smc93cx6.c,v 1.14 2007/10/19 12:00:02 ad Exp $");
+
+#ifndef __NetBSD__
+#include "opt_aic7xxx.h"
+#endif
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <machine/bus.h>
+#include <sys/bus.h>
+#ifdef __NetBSD__
 #include <dev/ic/smc93cx6var.h>
+#else
+#include <machine/bus_memio.h>
+#include <machine/bus_pio.h>
+#include <dev/aic7xxx/93cx6.h>
+#endif
 
 /*
  * Right now, we only have to read the SEEPROM.  But we make it easier to
@@ -72,6 +84,7 @@ static struct seeprom_cmd {
  	unsigned char bits[3];
 } seeprom_read = {3, {1, 1, 0}};
 
+/* XXX bus barriers */
 #define CLOCK_PULSE(sd, rdy)	do {					\
 	/*								\
 	 * Wait for the SEERDY to go high; about 800 ns.		\

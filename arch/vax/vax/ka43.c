@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka43.c,v 1.10 2006/06/30 16:14:31 miod Exp $ */
-/*	$NetBSD: ka43.c,v 1.19 1999/09/06 19:52:53 ragge Exp $ */
+/*	$NetBSD: ka43.c,v 1.33 2008/03/11 05:34:03 matt Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -33,6 +32,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ka43.c,v 1.33 2008/03/11 05:34:03 matt Exp $");
+
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/device.h>
@@ -55,7 +57,7 @@
 static	void ka43_conf(void);
 static	void ka43_steal_pages(void);
 
-static	int ka43_mchk(caddr_t);
+static	int ka43_mchk(void *);
 static	void ka43_memerr(void);
 #if 0
 static	void ka43_clear_errors(void);
@@ -69,19 +71,22 @@ static  void ka43_halt(void);
 static  void ka43_reboot(int);
 static  void ka43_clrf(void);
 
+static const char * const ka43_devs[] = { "cpu", "vsbus", NULL };
 
-struct	cpu_dep ka43_calls = {
-	ka43_steal_pages,
-	ka43_mchk,
-	ka43_memerr,
-	ka43_conf,
-	chip_clkread,
-	chip_clkwrite,
-	7,	/* 7.6 VUP */
-	2,	/* SCB pages */
-        ka43_halt,
-        ka43_reboot,
-        ka43_clrf,
+const struct cpu_dep ka43_calls = {
+	.cpu_steal_pages = ka43_steal_pages,
+	.cpu_mchk	= ka43_mchk,
+	.cpu_memerr	= ka43_memerr,
+	.cpu_conf	= ka43_conf,
+	.cpu_gettime	= chip_gettime,
+	.cpu_settime	= chip_settime,
+	.cpu_vups	= 7,	/* 7.6 VUP */
+	.cpu_scbsz	= 2,	/* SCB pages */
+	.cpu_halt	= ka43_halt,
+	.cpu_reboot	= ka43_reboot,
+	.cpu_clrf	= ka43_clrf,
+	.cpu_devs	= ka43_devs,
+	.cpu_flags	= CPU_RAISEIPL,
 };
 
 /*
@@ -89,9 +94,9 @@ struct	cpu_dep ka43_calls = {
  * enabled. Thus we initialize these four pointers with physical addresses,
  * but before leving ka43_steal_pages() we reset them to virtual addresses.
  */
-static	volatile struct	ka43_cpu   *ka43_cpu	= (void *)KA43_CPU_BASE;
-static	volatile u_int	*ka43_creg = (void *)KA43_CH2_CREG;
-static	volatile u_int	*ka43_ctag = (void *)KA43_CT2_BASE;
+static	volatile struct	ka43_cpu   *ka43_cpu	= (void*)KA43_CPU_BASE;
+static	volatile u_int	*ka43_creg = (void*)KA43_CH2_CREG;
+static	volatile u_int	*ka43_ctag = (void*)KA43_CT2_BASE;
 
 #define KA43_MC_RESTART	0x00008000	/* Restart possible*/
 #define KA43_PSL_FPDONE	0x00010000	/* First Part Done */
@@ -108,7 +113,7 @@ struct ka43_mcframe {		/* Format of RigelMAX machine check frame: */
 	int	mc43_psl;	/* trapped PSL */
 };
 
-static char *ka43_mctype[] = {
+static const char * const ka43_mctype[] = {
 	"no error (0)",			/* Code 0: No error */
 	"FPA: protocol error",		/* Code 1-5: FPA errors */
 	"FPA: illegal opcode",
@@ -135,10 +140,9 @@ static char *ka43_mctype[] = {
 static int ka43_error_count = 0;
 
 int
-ka43_mchk(addr)
-	caddr_t addr;
+ka43_mchk(void *addr)
 {
-	register struct ka43_mcframe *mcf = (void *)addr;
+	struct ka43_mcframe *mcf = (void*)addr;
 
 	mtpr(0x00, PR_MCESR);	/* Acknowledge the machine check */
 	printf("machine check %d (0x%x)\n", mcf->mc43_code, mcf->mc43_code);
@@ -173,26 +177,33 @@ ka43_mchk(addr)
 }
 
 void
-ka43_memerr()
+ka43_memerr(void)
 {
+	char sbuf[256];
+
 	/*
 	 * Don\'t know what to do here. So just print some messages
 	 * and try to go on...
 	 */
+
 	printf("memory error!\n");
-	printf("primary cache status: %b\n", mfpr(PR_PCSTS), KA43_PCSTS_BITS);
-	printf("secondary cache status: %b\n", *ka43_creg, KA43_SESR_BITS);
+
+	bitmask_snprintf(mfpr(PR_PCSTS), KA43_PCSTS_BITS, sbuf, sizeof(sbuf));
+	printf("primary cache status: %s\n", sbuf);
+
+	bitmask_snprintf(*ka43_creg, KA43_SESR_BITS, sbuf, sizeof(sbuf));
+	printf("secondary cache status: %s\n", sbuf);
 }
 
 int
-ka43_cache_init()
+ka43_cache_init(void)
 {
 	return (ka43_cache_reset());
 }
 
 #if 0
 void
-ka43_clear_errors()
+ka43_clear_errors(void)
 {
 	int val = *ka43_creg;
 	val |= KA43_SESR_SERR | KA43_SESR_LERR | KA43_SESR_CERR;
@@ -201,8 +212,10 @@ ka43_clear_errors()
 #endif
 
 int
-ka43_cache_reset()
+ka43_cache_reset(void)
 {
+	char sbuf[256];
+
 	/*
 	 * resetting primary and secondary caches is done in three steps:
 	 *	1. disable both caches
@@ -213,14 +226,17 @@ ka43_cache_reset()
 	ka43_cache_invalidate();
 	ka43_cache_enable();
 
-	printf("primary cache status: %b\n", mfpr(PR_PCSTS), KA43_PCSTS_BITS);
-	printf("secondary cache status: %b\n", *ka43_creg, KA43_SESR_BITS);
+	bitmask_snprintf(mfpr(PR_PCSTS), KA43_PCSTS_BITS, sbuf, sizeof(sbuf));
+	printf("primary cache status: %s\n", sbuf);
+
+	bitmask_snprintf(*ka43_creg, KA43_SESR_BITS, sbuf, sizeof(sbuf));
+	printf("secondary cache status: %s\n", sbuf);
 
 	return (0);
 }
 
 int
-ka43_cache_disable()
+ka43_cache_disable(void)
 {
 	int val;
 
@@ -243,7 +259,7 @@ ka43_cache_disable()
 }
 
 int
-ka43_cache_invalidate()
+ka43_cache_invalidate(void)
 {
 	int i, val;
 
@@ -274,9 +290,9 @@ ka43_cache_invalidate()
 
 
 int
-ka43_cache_enable()
+ka43_cache_enable(void)
 {
-	volatile char *membase = (void *)0x80000000;	/* physical 0x00 */
+	volatile char *membase = (void*)0x80000000;	/* physical 0x00 */
 	int i, val;
 
 	val = KA43_PCS_FLUSH | KA43_PCS_REFRESH;
@@ -299,17 +315,17 @@ ka43_cache_enable()
 }
 
 void
-ka43_conf()
+ka43_conf(void)
 {
-	printf("cpu: KA43\n");
-	ka43_cpu = (void *)vax_map_physmem(VS_REGS, 1);
+	curcpu()->ci_cpustr = "Rigel, 2KB L1 cache, 128KB L2 cache";
 
+	ka43_cpu = (void *)vax_map_physmem(VS_REGS, 1);
 	ka43_creg = (void *)vax_map_physmem(KA43_CH2_CREG, 1);
 	ka43_ctag = (void *)vax_map_physmem(KA43_CT2_BASE,
 	    (KA43_CT2_SIZE/VAX_NBPG));
 
 	/*
-	 * ka43_conf() gets called with MMU enabled, now it's safe to
+	 * ka43_conf() gets called with MMU enabled, now it's save to
 	 * init/reset the caches.
 	 */
 	ka43_cache_init();
@@ -327,7 +343,7 @@ ka43_conf()
  */
 
 void
-ka43_steal_pages()
+ka43_steal_pages(void)
 {
 	int	val;
 
@@ -343,29 +359,34 @@ ka43_steal_pages()
 	ka43_cpu->parctl = val;		/* and write new value */
 }
 
-static void
-ka43_clrf()
+void
+ka43_clrf(void)
 {
-        struct ka43_clock *clk = (void *)clk_page;
+        volatile struct ka43_clock *clk = (volatile void *)clk_page;
 
         /*
          * Clear restart and boot in progress flags in the CPMBX.
+	 * The cpmbx is split into two 4-bit fields.
+	 * One for the current restart/boot in progress flags, and
+	 * one for the permanent halt flag.
+	 * The restart/boot in progress flag is also used as the action request
+	 * for the CPU at a halt. /BQT
          */
-        clk->cpmbx = (clk->cpmbx & ~0xf0);
+        clk->req = 0;
 }
 
-static void
-ka43_halt()
+void
+ka43_halt(void)
 {
-        asm("movl $0xc, (%0)"::"r"((int)clk_page + 0x38)); /* Don't ask */
-        asm("halt");
+	volatile struct ka43_clock *clk = (volatile void *)clk_page;
+	clk->req = 3;		/* 3 is halt. */
+	__asm("halt");
 }
 
-static void
-ka43_reboot(arg)
-        int arg;
+void
+ka43_reboot(int arg)
 {
-        asm("movl $0xc, (%0)"::"r"((int)clk_page + 0x38)); /* Don't ask */
-        asm("halt");
+	volatile struct ka43_clock *clk = (volatile void *)clk_page;
+	clk->req = 2;		/* 2 is reboot. */
+	__asm("halt");
 }
-

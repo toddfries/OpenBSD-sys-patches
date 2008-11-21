@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcic_pci_machdep.c,v 1.4 2006/09/19 11:06:34 jsg Exp $ */
-/*	$NetBSD: pcic_pci_machdep.c,v 1.1 1998/12/20 17:53:29 nathanw Exp $	*/
+/*	$NetBSD: pcic_pci_machdep.c,v 1.9 2008/04/28 20:23:25 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -13,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,6 +25,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pcic_pci_machdep.c,v 1.9 2008/04/28 20:23:25 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,6 +43,8 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/i82365_pcivar.h>
 
+extern int pcic_isa_intr_alloc_mask;
+
 void *
 pcic_pci_machdep_intr_est(pci_chipset_tag_t pc)
 {
@@ -57,20 +54,19 @@ pcic_pci_machdep_intr_est(pci_chipset_tag_t pc)
 void *
 pcic_pci_machdep_pcic_intr_establish(struct pcic_softc *sc, int (*fct)(void *))
 {
-	if (isa_intr_alloc(NULL, PCIC_CSC_INTR_IRQ_VALIDMASK & 0xffff,
-			   IST_EDGE, &(sc->irq)))
+	if (isa_intr_alloc(NULL, PCIC_CSC_INTR_IRQ_VALIDMASK &
+			   pcic_isa_intr_alloc_mask, IST_EDGE, &(sc->irq)))
 		return (NULL);
-	printf("%s: interrupting at irq %d\n", sc->dev.dv_xname, sc->irq);
+	aprint_normal_dev(&sc->dev, "interrupting at irq %d\n", sc->irq);
 	return (isa_intr_establish(NULL, sc->irq, IST_EDGE, IPL_TTY,
-				   fct, sc, sc->dev.dv_xname));
+				   fct, sc));
 }
 
 void *
 pcic_pci_machdep_chip_intr_establish(pcmcia_chipset_handle_t pch,
-    struct pcmcia_function *pf, int ipl, int (*fct)(void *), void *arg,
-    char *xname)
+    struct pcmcia_function *pf, int ipl, int (*fct)(void *), void *arg)
 {
-	return (pcic_isa_chip_intr_establish(pch, pf, ipl, fct, arg, xname));
+	return (pcic_isa_chip_intr_establish(pch, pf, ipl, fct, arg));
 }
 
 void

@@ -1,250 +1,114 @@
-/*	$OpenBSD: mainbus.c,v 1.20 2007/10/14 17:29:04 kettenis Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.17 2007/10/17 19:55:33 garbled Exp $	*/
 
 /*
- * Copyright (c) 1994, 1995 Carnegie-Mellon University.
- * All rights reserved.
+ * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
  *
- * Author: Chris G. Demetriou
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Christopher G. Demetriou
+ *	for the NetBSD Project.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
- * Permission to use, copy, modify and distribute this software and
- * its documentation is hereby granted, provided that both the copyright
- * notice and this permission notice appear in all copies of the
- * software, derivative works or modified versions, and any portions
- * thereof, and that both notices appear in supporting documentation.
- *
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
- * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- *
- * Carnegie Mellon requests users of this software to return to
- *
- *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
- *  School of Computer Science
- *  Carnegie Mellon University
- *  Pittsburgh PA 15213-3890
- *
- * any improvements or extensions that they make and grant Carnegie the
- * rights to redistribute these changes.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/device.h>
-#include <sys/malloc.h>
-#include <sys/reboot.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.17 2007/10/17 19:55:33 garbled Exp $");
 
-#include <machine/autoconf.h>
+#include <sys/param.h>
+#include <sys/device.h>
+#include <sys/systm.h>
+
+#include <dev/pci/pcivar.h>
 #include <dev/ofw/openfirm.h>
 
-struct mainbus_softc {
-	struct	device sc_dv;
-	struct	bushook sc_bus;
-};
+#include <machine/autoconf.h>
 
-/* Definition of the mainbus driver. */
-static int	mbmatch(struct device *, void *, void *);
-static void	mbattach(struct device *, struct device *, void *);
-static int	mbprint(void *, const char *);
+#include <powerpc/pic/picvar.h>
 
-struct cfattach mainbus_ca = {
-	sizeof(struct mainbus_softc), mbmatch, mbattach
-};
-struct cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
-};
+int	mainbus_match __P((struct device *, struct cfdata *, void *));
+void	mainbus_attach __P((struct device *, struct device *, void *));
 
-/* hw.product sysctl see sys/kern/kern_sysctl.c */
-extern char *hw_prod, *hw_ver, *hw_vendor;
+CFATTACH_DECL(mainbus, sizeof(struct device),
+    mainbus_match, mainbus_attach, NULL, NULL);
 
-#define HH_REG_CONF 	0x90
-
-void	mb_intr_establish(struct confargs *, int (*)(void *), void *);
-void	mb_intr_disestablish(struct confargs *);
-caddr_t	mb_cvtaddr(struct confargs *);
-int	mb_matchname(struct confargs *, char *);
-
-/*ARGSUSED*/
-static int
-mbmatch(struct device *parent, void *cfdata, void *aux)
+/*
+ * Probe for the mainbus; always succeeds.
+ */
+int
+mainbus_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
-
-	/*
-	 * That one mainbus is always here.
-	 */
-	return(1);
+	return 1;
 }
 
-static void
-mbattach(struct device *parent, struct device *self, void *aux)
+/*
+ * Attach the mainbus.
+ */
+void
+mainbus_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct mainbus_softc *sc = (struct mainbus_softc *)self;
-	struct confargs nca;
-	char name[64], *t = NULL;
-	int reg[4], cpucnt;
-	int node, len, slen;
+	struct ofbus_attach_args oba;
+	struct confargs ca;
+	int node, i;
+	u_int32_t reg[4];
+	char name[32];
+
+	printf("\n");
+
+	for (i = 0; i < 2; i++) {
+		ca.ca_name = "cpu";
+		ca.ca_reg = reg;
+		reg[0] = i;
+		config_found(self, &ca, NULL);
+	}
+
+	pic_finish_setup();
 
 	node = OF_peer(0);
-	len = OF_getprop(node, "model", name, sizeof(name));
-	if (len > 1) {
-		name[len] = '\0';
-		slen = strlen(name)+1;
-		if ((t = malloc(slen, M_DEVBUF, M_NOWAIT)) != NULL)
-			strlcpy(t, name, slen);
-
+	if (node) {
+		oba.oba_busname = "ofw";
+		oba.oba_phandle = node;
+		config_found(self, &oba, NULL);
 	}
 
-	len = OF_getprop(node, "compatible", name, sizeof(name));
-	if (len > 1) {
-		name[len] = '\0';
-		/* Old World Macintosh */
-		if ((strncmp(name, "AAPL", 4)) == 0) {
-			hw_vendor = "Apple Computer, Inc.";
-			slen = strlen(t) + strlen(name) - 3;
-			if ((hw_prod = malloc(slen, M_DEVBUF, M_NOWAIT)) != NULL) {
-				snprintf(hw_prod, slen, "%s %s", t, name + 5);
-				free(t, M_DEVBUF);
-			}
-		} else {
-			/* New World Macintosh or Unknown */
-			hw_vendor = "Apple Computer, Inc.";
-			hw_prod = t;
-		}
-	}
-	printf(": model %s\n", hw_prod);
+	for (node = OF_child(OF_finddevice("/")); node; node = OF_peer(node)) {
+		memset(name, 0, sizeof(name));
+		if (OF_getprop(node, "name", name, sizeof(name)) == -1)
+			continue;
 
-	sc->sc_bus.bh_dv = (struct device *)sc;
-	sc->sc_bus.bh_type = BUS_MAIN;
-	sc->sc_bus.bh_intr_establish = mb_intr_establish;
-	sc->sc_bus.bh_intr_disestablish = mb_intr_disestablish;
-	sc->sc_bus.bh_matchname = mb_matchname;
-
-	/*
-	 * Try to find and attach all of the CPUs in the machine.
-	 */
-
-	cpucnt = 0;
-	node = OF_finddevice("/cpus");
-	if (node != -1) {
-		for (node = OF_child(node); node != 0; node = OF_peer(node)) {
-			u_int32_t cpunum;
-			int len;
-			len = OF_getprop(node, "reg", &cpunum, sizeof cpunum);
-			if (len == 4 && cpucnt == cpunum) {
-				nca.ca_name = "cpu";
-				nca.ca_bus = &sc->sc_bus;
-				nca.ca_reg = reg;
-				reg[0] = cpucnt;
-				config_found(self, &nca, mbprint);
-				cpucnt++;
-			}
-		}
-	}
-	if (cpucnt == 0) {
-		nca.ca_name = "cpu";
-		nca.ca_bus = &sc->sc_bus;
-		nca.ca_reg = reg;
-		reg[0] = 0;
-		config_found(self, &nca, mbprint);
+		ca.ca_name = name;
+		ca.ca_node = node;
+		ca.ca_nreg = OF_getprop(node, "reg", reg, sizeof(reg));
+		ca.ca_reg  = reg;
+		config_found(self, &ca, NULL);
 	}
 
-	/*
-	 * Special hack for SMP old world macs which lack /cpus and only have
-	 * one cpu node.
-	 */
-	node = OF_finddevice("/hammerhead");
-	if (node != -1) {
-		len = OF_getprop(node, "reg", reg, sizeof(reg));
-		if (len >= 2) {
-			u_char *hh_base;
-			int twoway = 0;
+#ifdef MAMBO
+	ca.ca_name="com";
+	config_found(self, &ca, NULL);
+#endif
 
-			if ((hh_base = mapiodev(reg[0], reg[1])) != NULL) {
-				twoway = in32rb(hh_base + HH_REG_CONF) & 0x02;
-				unmapiodev(hh_base, reg[1]);
-			}
-			if (twoway) {
-				nca.ca_name = "cpu";
-				nca.ca_bus = &sc->sc_bus;
-				nca.ca_reg = reg;
-				reg[0] = 1;
-				config_found(self, &nca, mbprint);
-			}
-		}
-	}
-
-	for (node = OF_child(OF_peer(0)); node; node=OF_peer(node)) {
-		bzero (name, sizeof(name));
-		if (OF_getprop(node, "device_type", name,
-		    sizeof(name)) <= 0) {
-			if (OF_getprop(node, "name", name,
-			    sizeof(name)) <= 0)
-				printf ("name not found on node %x\n",
-				    node);
-				continue;
-		}
-		if (strcmp(name, "memory") == 0) {
-			nca.ca_name = "mem";
-			nca.ca_node = node;
-			nca.ca_bus = &sc->sc_bus;
-			config_found(self, &nca, mbprint);
-		}
-		if (strcmp(name, "memory-controller") == 0) {
-			nca.ca_name = "memc";
-			nca.ca_node = node;
-			nca.ca_bus = &sc->sc_bus;
-			config_found(self, &nca, mbprint);
-		}
-		if (strcmp(name, "pci") == 0) {
-			nca.ca_name = "mpcpcibr";
-			nca.ca_node = node;
-			nca.ca_bus = &sc->sc_bus;
-			config_found(self, &nca, mbprint);
-		}
-		if (strcmp(name, "ht") == 0) {
-			nca.ca_name = "ht";
-			nca.ca_node = node;
-			nca.ca_bus = &sc->sc_bus;
-			config_found(self, &nca, mbprint);
-		}
-		if (strcmp(name, "smu") == 0) {
-			nca.ca_name = "smu";
-			nca.ca_node = node;
-			nca.ca_bus = &sc->sc_bus;
-			config_found(self, &nca, mbprint);
-		}
-	}
-}
-
-static int
-mbprint(void *aux, const char *pnp)
-{
-	struct confargs *ca = aux;
-	if (pnp)
-		printf("%s at %s", ca->ca_name, pnp);
-
-	return (UNCONF);
-}
-
-void
-mb_intr_establish(struct confargs *ca, int (*handler)(void *), void *val)
-{
-	panic("can never mb_intr_establish");
-}
-
-void
-mb_intr_disestablish(struct confargs *ca)
-{
-	panic("can never mb_intr_disestablish");
-}
-
-caddr_t
-mb_cvtaddr(struct confargs *ca)
-{
-	return (NULL);
-}
-
-int
-mb_matchname(struct confargs *ca, char *name)
-{
-	return (strcmp(name, ca->ca_name) == 0);
 }

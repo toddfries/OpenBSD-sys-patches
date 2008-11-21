@@ -1,5 +1,4 @@
-/* $OpenBSD: osf1_prot.c,v 1.3 2007/03/15 10:22:30 art Exp $ */
-/* $NetBSD: osf1_prot.c,v 1.2 1999/05/05 01:51:35 cgd Exp $ */
+/* $NetBSD: osf1_prot.c,v 1.13 2007/12/20 23:03:03 dsl Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -36,17 +35,17 @@
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -58,9 +57,13 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: osf1_prot.c,v 1.13 2007/12/20 23:03:03 dsl Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/prot.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
@@ -76,28 +79,15 @@
  * setuid(), you'll get a correct description of setgid().
  */
 int
-osf1_sys_setgid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_setgid(struct lwp *l, const struct osf1_sys_setgid_args *uap, register_t *retval)
 {
-	struct osf1_sys_setgid_args *uap = v;
-	struct pcred *pc = p->p_cred;
 	gid_t gid = SCARG(uap, gid);
 	int error;
 
-	if ((error = suser(p, 0)) != 0 &&
-	    gid != pc->p_rgid && gid != pc->p_svgid)
-		return (error);
-
-	pc->pc_ucred = crcopy(pc->pc_ucred);
-	pc->pc_ucred->cr_gid = gid;
-	if (error == 0) {
-		pc->p_rgid = gid;
-		pc->p_svgid = gid;
-	}
-	atomic_setbits_int(&p->p_flag, P_SUGID);
-	return (0);
+	error = do_setresgid(l, gid, gid, gid, 0);
+	if (error != 0)
+		error = do_setresgid(l, -1, gid, -1, ID_E_EQ_R | ID_E_EQ_S );
+	return error;
 }
 
 /*
@@ -115,28 +105,13 @@ osf1_sys_setgid(p, v, retval)
  *	    this function call.
  */
 int
-osf1_sys_setuid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_setuid(struct lwp *l, const struct osf1_sys_setuid_args *uap, register_t *retval)
 {
-	struct osf1_sys_setuid_args *uap = v;
-	struct pcred *pc = p->p_cred;
 	uid_t uid = SCARG(uap, uid);
 	int error;
 
-	if ((error = suser(p, 0)) != 0 &&
-	    uid != pc->p_ruid && uid != pc->p_svuid)
-		return (error);
-
-	pc->pc_ucred = crcopy(pc->pc_ucred);
-	pc->pc_ucred->cr_uid = uid;
-	if (error == 0) {
-	        (void)chgproccnt(pc->p_ruid, -1);
-	        (void)chgproccnt(uid, 1);
-		pc->p_ruid = uid;
-		pc->p_svuid = uid;
-	}
-	atomic_setbits_int(&p->p_flag, P_SUGID);
-	return (0);
+	error = do_setresuid(l, uid, uid, uid, 0);
+	if (error != 0)
+		error = do_setresuid(l, -1, uid, -1, ID_E_EQ_R | ID_E_EQ_S );
+	return error;
 }

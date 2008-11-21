@@ -1,5 +1,33 @@
-/*	$OpenBSD: eisavar.h,v 1.12 2003/12/12 22:56:46 hshoexer Exp $	*/
-/*	$NetBSD: eisavar.h,v 1.11 1997/06/06 23:30:07 thorpej Exp $	*/
+/*	$NetBSD: eisavar.h,v 1.24 2008/04/28 20:23:48 martin Exp $	*/
+
+/*-
+ * Copyright (c) 2000 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -43,10 +71,15 @@
  * separated into eisa_machdep.h.
  */
 
-#include <machine/bus.h>
+struct eisa_cfg_mem;
+struct eisa_cfg_irq;
+struct eisa_cfg_dma;
+struct eisa_cfg_io;
+
+#include <sys/bus.h>
 #include <dev/eisa/eisareg.h>		/* For ID register & string info. */
 
-/* 
+/*
  * Structures and definitions needed by the machine-dependent header.
  */
 struct eisabus_attach_args;
@@ -54,21 +87,7 @@ struct eisabus_attach_args;
 /*
  * Machine-dependent definitions.
  */
-#if (__alpha__ + __i386__ + __arc__ + __hppa__ != 1)
-#error COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
-#endif
-#if __alpha__
-#include <alpha/eisa/eisa_machdep.h>
-#endif
-#if __i386__
-#include <i386/eisa/eisa_machdep.h>
-#endif
-#if __arc__
-#include <arc/eisa/eisa_machdep.h>
-#endif
-#if __hppa__
-#include <hppa/include/eisa_machdep.h>
-#endif
+#include <machine/eisa_machdep.h>
 
 typedef int	eisa_slot_t;		/* really only needs to be 4 bits */
 
@@ -76,7 +95,7 @@ typedef int	eisa_slot_t;		/* really only needs to be 4 bits */
  * EISA bus attach arguments.
  */
 struct eisabus_attach_args {
-	char	*eba_busname;		/* XXX should be common */
+	const char *_eba_busname;	/* XXX placeholder */
 	bus_space_tag_t eba_iot;	/* eisa i/o space tag */
 	bus_space_tag_t eba_memt;	/* eisa mem space tag */
 	bus_dma_tag_t eba_dmat;		/* DMA tag */
@@ -98,10 +117,45 @@ struct eisa_attach_args {
 	char		ea_idstring[EISA_IDSTRINGLEN];
 };
 
+int	eisabusprint(void *, const char *);
+
 /*
- * Locators for EISA devices, as specified to config.
+ * EISA Configuration entries, set up by an EISA Configuration Utility.
  */
-#define	eisacf_slot		cf_loc[0]
-#define	EISA_UNKNOWN_SLOT	-1		/* wildcarded 'slot' */
+
+struct eisa_cfg_mem {
+	bus_addr_t ecm_addr;
+	bus_size_t ecm_size;
+	int ecm_isram;
+	int ecm_decode;
+	int ecm_unitsize;
+};
+
+struct eisa_cfg_irq {
+	int eci_irq;
+	int eci_ist;
+	int eci_shared;
+};
+
+struct eisa_cfg_dma {
+	int ecd_drq;
+	int ecd_shared;
+	int ecd_size;
+#define	ECD_SIZE_8BIT		0
+#define	ECD_SIZE_16BIT		1
+#define	ECD_SIZE_32BIT		2
+#define	ECD_SIZE_RESERVED	3
+	int ecd_timing;
+#define	ECD_TIMING_ISA		0
+#define	ECD_TIMING_TYPEA	1
+#define	ECD_TIMING_TYPEB	2
+#define	ECD_TIMING_TYPEC	3
+};
+
+struct eisa_cfg_io {
+	bus_addr_t ecio_addr;
+	bus_size_t ecio_size;
+	int ecio_shared;
+};
 
 #endif /* _DEV_EISA_EISAVAR_H_ */

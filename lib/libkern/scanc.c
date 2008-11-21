@@ -1,5 +1,4 @@
-/*	$OpenBSD: scanc.c,v 1.5 2004/08/07 00:38:33 deraadt Exp $	*/
-/*	$NetBSD: scanc.c,v 1.3 1996/03/14 18:52:16 christos Exp $	*/
+/*	$NetBSD: scanc.c,v 1.8 2005/12/11 12:24:37 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989 Regents of the University of California.
@@ -40,7 +39,7 @@ scanc(u_int size, const u_char *cp, const u_char table[], int mask)
 {
 	const u_char *end = &cp[size];
 
-	while (cp < end && (table[*cp] & (u_char)mask) == 0)
+	while (cp < end && (table[*cp] & mask) == 0)
 		cp++;
 	return (end - cp);
 }

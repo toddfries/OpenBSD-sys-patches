@@ -1,5 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.14 2007/10/10 03:39:21 deanna Exp $	*/
-/*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
+/*	$NetBSD: azalia.h,v 1.20 2008/08/14 23:43:27 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -277,11 +269,6 @@
 #define		COP_SUPPORTED_POWER_STATES	0x0f
 #define		COP_PROCESSING_CAPABILITIES	0x10
 #define		COP_GPIO_COUNT			0x11
-#define			COP_GPIO_GPIOS(x)	(x & 0xff)
-#define			COP_GPIO_GPOS(x)	((x >> 8) & 0xff)
-#define			COP_GPIO_GPIS(x)	((x >> 16) & 0xff)
-#define			COP_GPIO_UNSOL		0x40000000
-#define			COP_GPIO_WAKE		0x80000000
 #define		COP_OUTPUT_AMPCAP		0x12
 #define		COP_VOLUME_KNOB_CAPABILITIES	0x13
 #define			COP_VKCAP_DELTA		0x00000080
@@ -319,9 +306,18 @@
 #define		CORB_AGM_OUTPUT		0x8000
 #define CORB_GET_CONVERTER_FORMAT	0xa00
 #define CORB_SET_CONVERTER_FORMAT	0x200
-#define CORB_GET_DIGITAL_CONVERTER_CONTROL	0xf0d
-#define CORB_SET_DIGITAL_CONVERTER_CONTROL_L	0x70d
-#define CORB_SET_DIGITAL_CONVERTER_CONTROL_H	0x70e
+#define CORB_GET_DIGITAL_CONTROL	0xf0d
+#define CORB_SET_DIGITAL_CONTROL_L	0x70d
+#define CORB_SET_DIGITAL_CONTROL_H	0x70e
+#define		CORB_DCC_DIGEN		0x01
+#define		CORB_DCC_V		0x02
+#define		CORB_DCC_VCFG		0x04
+#define		CORB_DCC_PRE		0x08
+#define		CORB_DCC_COPY		0x10
+#define		CORB_DCC_NAUDIO		0x20
+#define		CORB_DCC_PRO		0x40
+#define		CORB_DCC_L		0x80
+#define		CORB_DCC_CC(x)		((x >> 8) & 0x7f)
 #define CORB_GET_POWER_STATE		0xf05
 #define CORB_SET_POWER_STATE		0x705
 #define		CORB_PS_D0		0x0
@@ -413,20 +409,6 @@
 #define			CORB_CD_WHITE	0xe
 #define			CORB_CD_COLOR_OTHER	0xf
 #define		CORB_CD_CONNECTION_MASK	0x000f0000
-#define		CORB_CD_CONNECTION(x)	((x >> 16) & 0xf)
-#define			CORB_CD_CONN_UNKNOWN	0x0
-#define			CORB_CD_18		0x1
-#define			CORB_CD_14		0x2
-#define			CORB_CD_ATAPI		0x3
-#define			CORB_CD_RCA		0x4
-#define			CORB_CD_OPTICAL		0x5
-#define			CORB_CD_OTHER_DIG	0x6
-#define			CORB_CD_OTHER_ANALOG	0x7
-#define			CORB_CD_DIN		0x8
-#define			CORB_CD_XLF		0x9
-#define			CORB_CD_RJ11		0xa
-#define			CORB_CD_CONN_COMB	0xb
-#define			CORB_CD_CONN_OTHER	0xf
 #define		CORB_CD_DEVICE(x)	((x >> 20) & 0xf)
 #define			CORB_CD_LINEOUT		0x0
 #define			CORB_CD_SPEAKER		0x1
@@ -444,34 +426,18 @@
 #define			CORB_CD_DIGITALIN	0xd
 #define			CORB_CD_DEVICE_OTHER	0xf
 #define		CORB_CD_LOCATION_MASK	0x3f000000
-#define		CORB_CD_LOC_GEO(x)	((x >> 24) & 0xf)
-#define			CORB_CD_LOC_GEO_NA	0x0
-#define			CORB_CD_REAR		0x1
-#define			CORB_CD_FRONT		0x2
-#define			CORB_CD_LEFT		0x3
-#define			CORB_CD_RIGHT		0x4
-#define			CORB_CD_TOP		0x5
-#define			CORB_CD_BOTTOM		0x6
-#define			CORB_CD_LOC_SPEC0	0x7
-#define			CORB_CD_LOC_SPEC1	0x8
-#define			CORB_CD_LOC_SPEC2	0x9
-#define		CORB_CD_LOC_CHASS(x)	((x >> 28) & 0x3)
-#define			CORB_CD_EXTERNAL	0x0
-#define			CORB_CD_INTERNAL	0x1
-#define			CORB_CD_SEPARATE	0x2
-#define			CORB_CD_LOC_OTHER	0x3
 #define		CORB_CD_PORT_MASK	0xc0000000
-#define		CORB_CD_PORT(x)		((x >> 30) & 0x3)
-#define			CORB_CD_JACK		0x0
-#define			CORB_CD_NONE		0x1
-#define			CORB_CD_FIXED		0x2
-#define			CORB_CD_BOTH		0x3
 #define CORB_GET_STRIPE_CONTROL		0xf24
 #define CORB_SET_STRIPE_CONTROL		0x720	/* XXX typo in the spec? */
 #define CORB_EXECUTE_FUNCTION_RESET	0x7ff
 
 #define CORB_NID_ROOT		0
 #define HDA_MAX_CHANNELS	16
+
+
+#ifndef PCI_SUBCLASS_MULTIMEDIA_HDAUDIO
+#define PCI_SUBCLASS_MULTIMEDIA_HDAUDIO	0x03
+#endif
 
 /* memory-mapped types */
 typedef struct {
@@ -492,19 +458,20 @@ typedef uint32_t corb_entry_t;
 typedef struct {
 	uint32_t resp;
 	uint32_t resp_ex;
-#define RIRB_UNSOL_TAG(resp)   ((resp) >> 26)
-#define RIRB_RESP_UNSOL                (1 << 4)
-#define RIRB_RESP_CODEC(ex)    ((ex) & 0xf)
+#define RIRB_UNSOL_TAG(resp)	((resp) >> 26)
+#define RIRB_RESP_UNSOL		(1 << 4)
+#define RIRB_RESP_CODEC(ex)	((ex) & 0xf)
 } __packed rirb_entry_t;
 
 
 /* #define AZALIA_DEBUG */
+/* #define AZALIA_DEBUG_DOT */
 #ifdef AZALIA_DEBUG
 # define DPRINTF(x)	do { printf x; } while (0/*CONSTCOND*/)
 #else
 # define DPRINTF(x)	do {} while (0/*CONSTCOND*/)
 #endif
-#define PTR_UPPER32(x)	((uint64_t)(x) >> 32)
+#define PTR_UPPER32(x)	((uint64_t)(uintptr_t)(x) >> 32)
 #define FLAGBUFLEN	256
 #define MAX_VOLUME_255	1
 
@@ -553,12 +520,25 @@ typedef struct {
 #define MI_TARGET_DAC		0x104
 #define MI_TARGET_ADC		0x105
 #define MI_TARGET_VOLUME	0x106
-#define MI_TARGET_EAPD		0x107
+#define MI_TARGET_SPDIF		0x107
+#define MI_TARGET_SPDIF_CC	0x108
+#define MI_TARGET_EAPD		0x109
+#define MI_TARGET_BALANCE	0x10a
+#define MI_TARGET_LRSWAP	0x10b
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
 					 (nid >= (codec)->wstart &&   \
 					  nid < (codec)->wend))
+
+#define PIN_STATUS(wid, conn)						\
+	do {								\
+		if ((wid)->type != COP_AWTYPE_PIN_COMPLEX)		\
+			(conn) = 0;					\
+		else							\
+			(conn) =					\
+			    ((wid)->d.pin.config & CORB_CD_PORT_MASK) >> 30; \
+	} while (0)
 
 typedef struct {
 	int nconv;
@@ -580,7 +560,7 @@ typedef struct codec_t {
 	int (*get_port)(struct codec_t *, mixer_ctrl_t *);
 	int (*unsol_event)(struct codec_t *, int);
 
-	struct azalia_t *az;
+	device_t dev; 		/* parent azalia(4) instance */
 	uint32_t vid;		/* codec vendor/device ID */
 	uint32_t subid;		/* PCI subvendor/device ID */
 	const char *name;
@@ -600,12 +580,11 @@ typedef struct codec_t {
 	int nmixers, maxmixers;
 	mixer_item_t *mixers;
 
-	struct audio_format* formats;
+	struct audio_format *formats;
 	int nformats;
 	struct audio_encoding_set *encodings;
 
 	uint32_t *extra;
-	u_int rate;
 } codec_t;
 
 

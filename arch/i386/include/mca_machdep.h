@@ -1,4 +1,4 @@
-/*	$NetBSD: mca_machdep.h,v 1.10 2005/12/26 19:23:59 perry Exp $	*/
+/*	$NetBSD: mca_machdep.h,v 1.12 2007/04/11 18:33:52 garbled Exp $	*/
 
 /*
  * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
@@ -47,7 +47,7 @@ int	mca_nmi(void);
  * Types provided to machine-independent MCA code.
  */
 struct x86_mca_chipset {
-        void * /*struct mca_dma_state*/ ic_dmastate;
+        void */*struct mca_dma_state*/ ic_dmastate;
 };
 
 typedef struct x86_mca_chipset *mca_chipset_tag_t;
@@ -98,5 +98,7 @@ void	mca_disk_unbusy(void);
 
 #define MCA_ADAP_SET		0x08	/* Adapter setup mode */
 #define MCA_ADAP_CHR		0x80	/* Adapter channel reset */
+
+#define MCA_MAX_SLOTS		8	/* max number of slots per bus */
 
 #endif /* _I386_MCA_MACHDEP_H_ */

@@ -1,7 +1,6 @@
-/*	$OpenBSD: ossaudiovar.h,v 1.4 2008/04/12 22:53:20 jakemsr Exp $	*/
-/*	$NetBSD: ossaudiovar.h,v 1.4 1997/10/16 16:49:40 augustss Exp $	*/
+/*	$NetBSD: ossaudiovar.h,v 1.15 2008/04/28 20:23:45 martin Exp $	*/
 
-/*
+/*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -13,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,19 +29,21 @@
 struct oss_sys_ioctl_args {
 	syscallarg(int) fd;
 	syscallarg(u_long) com;
-	syscallarg(caddr_t) data;
+	syscallarg(void *) data;
 };
 
-#define OSS_IOCPARM_MASK    0x7f            /* parameters must be < 128 bytes */
+#define OSS_IOCPARM_MASK    0xfff           /* parameters must be < 4096 bytes */
 #define OSS_IOC_VOID        0x00000000      /* no parameters */
 #define OSS_IOC_IN          0x40000000      /* copy in parameters */
 #define OSS_IOC_OUT         0x80000000      /* copy out parameters */
 #define OSS_IOC_INOUT       (OSS_IOC_IN | OSS_IOC_OUT)
-#define	_OSS_IOCTL(w,x,y,z) ((u_long)((w)|(((z)&OSS_IOCPARM_MASK)<<16)|((x)<<8)|(y)))
+#define	_OSS_IOCTL(w,x,y,z) ((uint)((w)|(((z)&OSS_IOCPARM_MASK)<<16)|((x)<<8)|(y)))
 #define _OSS_IO(x,y)        _OSS_IOCTL(OSS_IOC_VOID, x, y, 0)
 #define _OSS_IOR(x,y,t)     _OSS_IOCTL(OSS_IOC_OUT, x, y, sizeof(t))
 #define _OSS_IOW(x,y,t)     _OSS_IOCTL(OSS_IOC_IN, x, y, sizeof(t))
 #define _OSS_IOWR(x,y,t)    _OSS_IOCTL(OSS_IOC_INOUT, x, y, sizeof(t))
+
+#define OSS_IOCTL_SIZE(x) (((x) >> 16) & OSS_IOCPARM_MASK)
 
 #define	OSS_SNDCTL_DSP_RESET		_OSS_IO  ('P', 0)
 #define	OSS_SNDCTL_DSP_SYNC		_OSS_IO  ('P', 1)
@@ -88,8 +82,8 @@ struct oss_sys_ioctl_args {
 #define OSS_SNDCTL_DSP_MAPOUTBUF	_OSS_IOR ('P', 20, struct oss_buffmem_desc)
 #define OSS_SNDCTL_DSP_SETSYNCRO	_OSS_IO  ('P', 21)
 #define OSS_SNDCTL_DSP_SETDUPLEX	_OSS_IO  ('P', 22)
+#define OSS_SNDCTL_DSP_GETODELAY	_OSS_IOR ('P', 23, int)
 #define OSS_SNDCTL_DSP_PROFILE		_OSS_IOW ('P', 23, int)
-#define OSS_SNDCTL_DSP_GETODELAY	_OSS_IOR ('P', 24, int)
 #define	  OSS_APF_NORMAL		0	/* Normal applications */
 #define	  OSS_APF_NETWORK		1	/* "external" delays */
 #define   OSS_APF_CPUINTENS		2	/* CPU delays */
@@ -149,6 +143,24 @@ struct oss_sys_ioctl_args {
 #define OSS_SOUND_MIXER_WRITE_RECSRC	OSS_MIXER_WRITE(OSS_SOUND_MIXER_RECSRC)
 #define OSS_SOUND_MIXER_WRITE_R_RECSRC	OSS_MIXER_WRITE_R(OSS_SOUND_MIXER_RECSRC)
 
+struct oss_mixer_info {
+	char id[16];
+	char name[32];
+	int  modify_counter;
+	int  fillers[10];
+};
+
+struct oss_old_mixer_info {
+	char id[16];
+	char name[32];
+};
+
+#define OSS_SOUND_MIXER_INFO		_OSS_IOR('M', 101, struct oss_mixer_info)
+#define OSS_SOUND_OLD_MIXER_INFO	_OSS_IOR('M', 101, struct oss_old_mixer_info)
+
+#define OSS_SOUND_VERSION   0x030000
+#define OSS_GET_VERSION			_OSS_IOR('M', 118, int)
+
 #define OSS_GET_DEV(com) ((com) & 0xff)
 
 struct oss_audio_buf_info {
@@ -168,3 +180,86 @@ struct oss_buffmem_desc {
 	unsigned int *buffer;
 	int size;
 };
+
+/*
+ * MIDI and sequencer I/O.
+ */
+#define OSS_SEQ_RESET			_OSS_IO  ('Q', 0)
+#define OSS_SEQ_SYNC			_OSS_IO  ('Q', 1)
+#define OSS_SYNTH_INFO			_OSS_IOWR('Q', 2, struct oss_synth_info)
+#define OSS_SEQ_CTRLRATE		_OSS_IOWR('Q', 3, int)
+#define OSS_SEQ_GETOUTCOUNT		_OSS_IOR ('Q', 4, int)
+#define OSS_SEQ_GETINCOUNT		_OSS_IOR ('Q', 5, int)
+#define OSS_SEQ_PERCMODE		_OSS_IOW ('Q', 6, int)
+#define OSS_SEQ_TESTMIDI		_OSS_IOW ('Q', 8, int)
+#define OSS_SEQ_RESETSAMPLES		_OSS_IOW ('Q', 9, int)
+#define OSS_SEQ_NRSYNTHS		_OSS_IOR ('Q',10, int)
+#define OSS_SEQ_NRMIDIS			_OSS_IOR ('Q',11, int)
+#define OSS_MIDI_INFO			_OSS_IOWR('Q',12, struct oss_midi_info)
+#define OSS_SEQ_THRESHOLD		_OSS_IOW ('Q',13, int)
+#define OSS_MEMAVL			_OSS_IOWR('Q',14, int)
+#define OSS_FM_4OP_ENABLE		_OSS_IOW ('Q',15, int)
+#define OSS_SEQ_PANIC			_OSS_IO  ('Q',17)
+#define OSS_SEQ_OUTOFBAND		_OSS_IOW ('Q',18, struct oss_seq_event_rec)
+#define OSS_SEQ_GETTIME			_OSS_IOR ('Q',19, int)
+#define OSS_ID				_OSS_IOWR('Q',20, struct oss_synth_info)
+#define OSS_CONTROL			_OSS_IOWR('Q',21, struct oss_synth_control)
+#define OSS_REMOVESAMPLE		_OSS_IOWR('Q',22, struct oss_remove_sample)
+
+struct oss_synth_control {
+	int devno;	/* Synthesizer # */
+	char data[4000]; /* Device specific command/data record */
+};
+
+struct oss_remove_sample {
+	int devno;	/* Synthesizer # */
+	int bankno;	/* MIDI bank # (0=General MIDI) */
+	int instrno;	/* MIDI instrument number */
+};
+
+struct oss_seq_event_rec {
+	u_char arr[8];
+};
+
+struct oss_synth_info {
+	char	name[30];
+	int	device;
+	int	synth_type;
+#define OSS_SYNTH_TYPE_FM		0
+#define OSS_SYNTH_TYPE_SAMPLE		1
+#define OSS_SYNTH_TYPE_MIDI		2
+
+	int	synth_subtype;
+#define OSS_FM_TYPE_ADLIB		0x00
+#define OSS_FM_TYPE_OPL3		0x01
+#define OSS_MIDI_TYPE_MPU401		0x401
+
+#define OSS_SAMPLE_TYPE_BASIC		0x10
+#define OSS_SAMPLE_TYPE_GUS		OSS_SAMPLE_TYPE_BASIC
+
+	int	perc_mode;
+	int	nr_voices;
+	int	nr_drums;
+	int	instr_bank_size;
+	u_int	capabilities;
+#define OSS_SYNTH_CAP_PERCMODE		0x00000001
+#define OSS_SYNTH_CAP_OPL3		0x00000002
+#define OSS_SYNTH_CAP_INPUT		0x00000004
+	int	_unused[19];
+};
+
+#define OSS_TMR_TIMEBASE		_OSS_IOWR('T', 1, int)
+#define OSS_TMR_START			_OSS_IO  ('T', 2)
+#define OSS_TMR_STOP			_OSS_IO  ('T', 3)
+#define OSS_TMR_CONTINUE		_OSS_IO  ('T', 4)
+#define OSS_TMR_TEMPO			_OSS_IOWR('T', 5, int)
+#define OSS_TMR_SOURCE			_OSS_IOWR('T', 6, int)
+#  define OSS_TMR_INTERNAL		0x00000001
+#  define OSS_TMR_EXTERNAL		0x00000002
+#  define OSS_TMR_MODE_MIDI		0x00000010
+#  define OSS_TMR_MODE_FSK		0x00000020
+#  define OSS_TMR_MODE_CLS		0x00000040
+#  define OSS_TMR_MODE_SMPTE		0x00000080
+#define OSS_TMR_METRONOME		_OSS_IOW ('T', 7, int)
+#define OSS_TMR_SELECT			_OSS_IOW ('T', 8, int)
+

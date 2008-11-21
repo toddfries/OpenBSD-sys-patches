@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.27 2006/12/26 10:43:44 elad Exp $ */
+/*	$NetBSD: mem.c,v 1.29 2007/03/04 06:00:38 christos Exp $ */
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.27 2006/12/26 10:43:44 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.29 2007/03/04 06:00:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -86,7 +86,6 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.27 2006/12/26 10:43:44 elad Exp $");
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/conf.h>
 #include <sys/kauth.h>
 
 #include <uvm/uvm_extern.h>
@@ -108,7 +107,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 	u_int c;
 	struct iovec *iov;
 	int error = 0;
-	static caddr_t zeropage;
+	static void *zeropage;
 	
 	while (uio->uio_resid > 0 && !error) {
 		iov = uio->uio_iov;
@@ -124,13 +123,13 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 		case DEV_MEM:
 			v = uio->uio_offset;
 			c = uio->uio_resid;
-			error = uiomove((caddr_t)v, c, uio);
+			error = uiomove((void *)v, c, uio);
 			break;
 
 		case DEV_KMEM:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
-			error = uiomove((caddr_t)v, c, uio);
+			error = uiomove((void *)v, c, uio);
 			break;
 
 		case DEV_NULL:
@@ -144,7 +143,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				return (0);
 			}
 			if (zeropage == NULL) {
-				zeropage = (caddr_t)
+				zeropage = (void *)
 				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
 				memset(zeropage, 0, PAGE_SIZE);
 			}

@@ -1,4 +1,4 @@
-/*	$NetBSD: ixp425_qmgr.c,v 1.1 2006/12/10 10:01:49 scw Exp $	*/
+/*	$NetBSD: ixp425_qmgr.c,v 1.4 2007/10/17 19:53:44 garbled Exp $	*/
 
 /*-
  * Copyright (c) 2006 Sam Leffler, Errno Consulting
@@ -60,7 +60,7 @@
 */
 #include <sys/cdefs.h>
 /*__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_qmgr.c,v 1.1 2006/11/19 23:55:23 sam Exp $");*/
-__KERNEL_RCSID(0, "$NetBSD: ixp425_qmgr.c,v 1.1 2006/12/10 10:01:49 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ixp425_qmgr.c,v 1.4 2007/10/17 19:53:44 garbled Exp $");
 
 /*
  * Intel XScale Queue Manager support.
@@ -250,9 +250,11 @@ ixpqmgr_init(bus_space_tag_t iot)
 	bus_setup_intr(dev, sc->sc_irq, INTR_TYPE_NET | INTR_MPSAFE,
 		ixpqmgr_intr, NULL, &sc->sc_ih);
 #else
+	ixpqmgr_sc = sc;
 	sc->sc_ih[0] = ixp425_intr_establish(IXP425_INT_QUE1_32, IPL_NET,
 	    ixpqmgr_intr, sc);
 	if (sc->sc_ih[0] == NULL) {
+		ixpqmgr_sc = NULL;
 		free(sc, M_DEVBUF);
 		return (NULL);
 	}
@@ -260,11 +262,10 @@ ixpqmgr_init(bus_space_tag_t iot)
 	    ixpqmgr_intr, sc);
 	if (sc->sc_ih[1] == NULL) {
 		ixp425_intr_disestablish(sc->sc_ih[0]);
+		ixpqmgr_sc = NULL;
 		free(sc, M_DEVBUF);
 		return (NULL);
 	}
-
-	ixpqmgr_sc = sc;
 #endif
 
 	/* NB: softc is pre-zero'd */
@@ -392,7 +393,7 @@ ixpqmgr_qconfig(int qId, int qEntries, int ne, int nf, int srcSel,
 	if (cb != NULL)				/* Enable the interrupt */
 	    aqm_int_enable(sc, qId);
 
-	sc->rebuildTable = TRUE;
+	sc->rebuildTable = true;
 
 	return 0;		/* XXX */
 }
@@ -711,7 +712,7 @@ ixpqmgr_rebuild(struct ixpqmgr_softc *sc)
 		}
 	    }
 	}
-	sc->rebuildTable = FALSE;
+	sc->rebuildTable = false;
 }
 
 /*
@@ -804,6 +805,8 @@ ixpqmgr_intr(void *arg)
 		      */
 		     do {
 			 qIndex = sc->priorityTable[priorityTableIndex++];
+			 if (qIndex >= IX_QMGR_MAX_NUM_QUEUES)
+			     break;
 			 qi = &sc->qinfo[qIndex];
 
 			 /* If this queue caused this interrupt to be raised */
@@ -813,7 +816,8 @@ ixpqmgr_intr(void *arg)
 			     /* Clear the interrupt register bit */
 			     intRegVal &= ~qi->intRegCheckMask;
 			 }
-		      } while (intRegVal);
+		      } while (intRegVal &&
+		          priorityTableIndex < IX_QMGR_MAX_NUM_QUEUES);
 		 }
 	 }
 

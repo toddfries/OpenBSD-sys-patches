@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_usema.h,v 1.10 2006/09/01 04:49:48 sekiya Exp $ */
+/*	$NetBSD: irix_usema.h,v 1.14 2008/05/10 12:57:18 tnn Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
 
 #include <sys/param.h>
 #include <sys/device.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/queue.h>
 #include <sys/vnode.h>
 
@@ -49,27 +42,27 @@
 #include <compat/irix/irix_exec.h>
 
 extern struct vfsops irix_usema_dummy_vfsops;
-void irix_usema_dummy_vfs_init __P((void));
+void irix_usema_dummy_vfs_init(void);
 extern const struct vnodeopv_desc * const irix_usema_vnodeopv_descs[];
 extern const struct vnodeopv_desc irix_usema_opv_desc;
-extern int (**irix_usema_vnodeop_p) __P((void *));
+extern int (**irix_usema_vnodeop_p)(void *);
 extern const struct vnodeopv_entry_desc irix_usema_vnodeop_entries[];
 
 
-void	irix_usemaattach __P((struct device *, struct device *, void *));
+void	irix_usemaattach(struct device *, struct device *, void *);
 
-int	irix_usema_close	__P((void *));
-int	irix_usema_access	__P((void *));
-int	irix_usema_getattr	__P((void *));
-int	irix_usema_setattr	__P((void *));
-int	irix_usema_fcntl	__P((void *));
-int	irix_usema_ioctl	__P((void *));
-int	irix_usema_poll		__P((void *));
-int	irix_usema_inactive	__P((void *));
+int	irix_usema_close(void *);
+int	irix_usema_access(void *);
+int	irix_usema_getattr(void *);
+int	irix_usema_setattr(void *);
+int	irix_usema_fcntl(void *);
+int	irix_usema_ioctl(void *);
+int	irix_usema_poll(void *);
+int	irix_usema_inactive(void *);
 
-void	irix_usema_exit_cleanup	__P((struct proc *, struct proc *));
+void	irix_usema_exit_cleanup(struct proc *, struct proc *);
 #ifdef DEBUG_IRIX
-void	irix_usema_debug	__P((void));
+void	irix_usema_debug(void);
 #endif
 
 #define IRIX_USEMADEV_MINOR	1
@@ -111,10 +104,11 @@ struct irix_usema_rec {
 	struct irix_semaphore *iur_sem;
 	int iur_shid;
 	struct proc *iur_p;
+	struct selinfo iur_si;
 	int iur_waiting_count;
 	TAILQ_HEAD(iur_waiting_p, irix_waiting_proc_rec) iur_waiting_p;
 	TAILQ_HEAD(iur_released_p, irix_waiting_proc_rec) iur_released_p;
-	struct lock iur_lock; 		/* lock for both lists */
+	krwlock_t iur_lock; 		/* lock for both lists */
 };
 
 /* From IRIX's <sys/usioctl.h> */

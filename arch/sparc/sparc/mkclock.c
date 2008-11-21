@@ -1,4 +1,4 @@
-/*	$NetBSD: mkclock.c,v 1.14 2006/09/03 22:27:45 gdamore Exp $ */
+/*	$NetBSD: mkclock.c,v 1.18 2008/04/28 20:23:36 martin Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mkclock.c,v 1.14 2006/09/03 22:27:45 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mkclock.c,v 1.18 2008/04/28 20:23:36 martin Exp $");
 
 #include "opt_sparc_arch.h"
 
@@ -71,22 +64,22 @@ static bus_size_t		mk_nvram_size;
 static int	mk_clk_wenable(todr_chip_handle_t, int);
 static int	mk_nvram_wenable(int);
 
-static int	clockmatch_mainbus (struct device *, struct cfdata *, void *);
-static int	clockmatch_obio(struct device *, struct cfdata *, void *);
-static int	clockmatch_bootbus (struct device *, struct cfdata *, void *);
-static void	clockattach_mainbus(struct device *, struct device *, void *);
-static void	clockattach_obio(struct device *, struct device *, void *);
-static void	clockattach_bootbus(struct device *, struct device *, void *);
+static int	clockmatch_mainbus(device_t, cfdata_t, void *);
+static int	clockmatch_obio(device_t, cfdata_t, void *);
+static int	clockmatch_bootbus(device_t, cfdata_t, void *);
+static void	clockattach_mainbus(device_t, device_t, void *);
+static void	clockattach_obio(device_t, device_t, void *);
+static void	clockattach_bootbus(device_t, device_t, void *);
 
 static void	clockattach(struct mk48txx_softc *, int);
 
-CFATTACH_DECL(clock_mainbus, sizeof(struct mk48txx_softc),
+CFATTACH_DECL_NEW(clock_mainbus, sizeof(struct mk48txx_softc),
     clockmatch_mainbus, clockattach_mainbus, NULL, NULL);
 
-CFATTACH_DECL(clock_obio, sizeof(struct mk48txx_softc),
+CFATTACH_DECL_NEW(clock_obio, sizeof(struct mk48txx_softc),
     clockmatch_obio, clockattach_obio, NULL, NULL);
 
-CFATTACH_DECL(clock_bootbus, sizeof(struct mk48txx_softc),
+CFATTACH_DECL_NEW(clock_bootbus, sizeof(struct mk48txx_softc),
     clockmatch_bootbus, clockattach_bootbus, NULL, NULL);
 
 /* Imported from clock.c: */
@@ -98,7 +91,7 @@ extern int (*eeprom_nvram_wenable)(int);
  * own special match function to call it the "clock".
  */
 static int
-clockmatch_mainbus(struct device *parent, struct cfdata *cf, void *aux)
+clockmatch_mainbus(device_t parent, cfdata_t cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -106,7 +99,7 @@ clockmatch_mainbus(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 static int
-clockmatch_obio(struct device *parent, struct cfdata *cf, void *aux)
+clockmatch_obio(device_t parent, cfdata_t cf, void *aux)
 {
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba;
@@ -134,7 +127,7 @@ clockmatch_obio(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 static int
-clockmatch_bootbus(struct device *parent, struct cfdata *cf, void *aux)
+clockmatch_bootbus(device_t parent, cfdata_t cf, void *aux)
 {
         struct bootbus_attach_args *baa = aux;
 
@@ -143,11 +136,12 @@ clockmatch_bootbus(struct device *parent, struct cfdata *cf, void *aux)
 
 /* ARGSUSED */
 static void
-clockattach_mainbus(struct device *parent, struct device *self, void *aux)
+clockattach_mainbus(device_t parent, device_t self, void *aux)
 {
-	struct mk48txx_softc *sc = (void *)self;
+	struct mk48txx_softc *sc = device_private(self);
 	struct mainbus_attach_args *ma = aux;
 
+	sc->sc_dev = self;
 	sc->sc_bst = ma->ma_bustag;
 
 	/*
@@ -163,7 +157,7 @@ clockattach_mainbus(struct device *parent, struct device *self, void *aux)
 			   ma->ma_size,
 			   BUS_SPACE_MAP_LINEAR,
 			   &sc->sc_bsh) != 0) {
-		printf("%s: can't map register\n", self->dv_xname);
+		aprint_error(": can't map register\n");
 		return;
 	}
 
@@ -171,9 +165,9 @@ clockattach_mainbus(struct device *parent, struct device *self, void *aux)
 }
 
 static void
-clockattach_obio(struct device *parent, struct device *self, void *aux)
+clockattach_obio(device_t parent, device_t self, void *aux)
 {
-	struct mk48txx_softc *sc = (void *)self;
+	struct mk48txx_softc *sc = device_private(self);
 	union obio_attach_args *uoba = aux;
 	int node;
 
@@ -186,7 +180,7 @@ clockattach_obio(struct device *parent, struct device *self, void *aux)
 		if (sbus_bus_map(sc->sc_bst,
 			sa->sa_slot, sa->sa_offset, sa->sa_size,
 			BUS_SPACE_MAP_LINEAR, &sc->sc_bsh) != 0) {
-			printf("%s: can't map register\n", self->dv_xname);
+			aprint_error(": can't map register\n");
 			return;
 		}
 	} else {
@@ -204,7 +198,7 @@ clockattach_obio(struct device *parent, struct device *self, void *aux)
 				  2048,			/* size */
 				  BUS_SPACE_MAP_LINEAR,	/* flags */
 				  &sc->sc_bsh) != 0) {
-			printf("%s: can't map register\n", self->dv_xname);
+			aprint_error(": can't map register\n");
 			return;
 		}
 	}
@@ -213,9 +207,9 @@ clockattach_obio(struct device *parent, struct device *self, void *aux)
 }
 
 static void
-clockattach_bootbus(struct device *parent, struct device *self, void *aux)
+clockattach_bootbus(device_t parent, device_t self, void *aux)
 {
-	struct mk48txx_softc *sc = (void *)self;
+	struct mk48txx_softc *sc = device_private(self);
 	struct bootbus_attach_args *baa = aux;
 	sc->sc_bst = baa->ba_bustag;
 
@@ -225,7 +219,7 @@ clockattach_bootbus(struct device *parent, struct device *self, void *aux)
 			  baa->ba_reg[0].oa_size,
 			  BUS_SPACE_MAP_LINEAR,
 			  &sc->sc_bsh) != 0) {
-		printf("%s: can't map register\n", self->dv_xname);
+		aprint_error(": can't map register\n");
 		return;
 	}
 
@@ -247,7 +241,7 @@ clockattach(struct mk48txx_softc *sc, int node)
 	sc->sc_year0 = 1968;
 	mk48txx_attach(sc);
 
-	printf("\n");
+	aprint_normal("\n");
 
 	/*
 	 * Store NVRAM base address and size in globals for use
@@ -259,8 +253,6 @@ clockattach(struct mk48txx_softc *sc, int node)
 
 	/* Establish clock write-enable method */
 	sc->sc_handle.todr_setwen = mk_clk_wenable;
-
-	todr_attach(&sc->sc_handle);
 
 #if defined(SUN4)
 	if (CPU_ISSUN4) {

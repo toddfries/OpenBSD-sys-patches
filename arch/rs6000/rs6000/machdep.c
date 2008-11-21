@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.1 2007/12/17 19:09:43 garbled Exp $	*/
+/*	$NetBSD: machdep.c,v 1.4 2008/11/12 12:36:05 ad Exp $	*/
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.1 2007/12/17 19:09:43 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.4 2008/11/12 12:36:05 ad Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_ddb.h"
@@ -125,7 +118,7 @@ struct mem_region physmemr[OFMEMREGIONS], availmemr[OFMEMREGIONS];
 paddr_t avail_end;			/* XXX temporary */
 extern register_t iosrtable[16];
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 extern void *endsym, *startsym;
 #endif
 
@@ -387,7 +380,7 @@ initppc(u_long startkernel, u_long endkernel, u_int args, void *btinfo)
 	consinit();
 	setled(0x41000000);
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init((int)((u_long)endsym - (u_long)startsym), startsym, endsym);
 #endif
 
@@ -511,6 +504,8 @@ cpu_reboot(int howto, char *what)
 
 halt_sys:
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if (howto & RB_HALT) {
                 printf("\n");

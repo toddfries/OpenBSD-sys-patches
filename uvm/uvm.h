@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.23 2008/05/05 15:37:41 thib Exp $	*/
-/*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
+/*	$NetBSD: uvm.h,v 1.55 2008/06/04 15:06:04 ad Exp $	*/
 
 /*
  *
@@ -38,6 +37,12 @@
 #ifndef _UVM_UVM_H_
 #define _UVM_UVM_H_
 
+#if defined(_KERNEL_OPT)
+#include "opt_lockdebug.h"
+#include "opt_multiprocessor.h"
+#include "opt_uvmhist.h"
+#endif
+
 #include <uvm/uvm_extern.h>
 
 #include <uvm/uvm_stat.h>
@@ -58,14 +63,28 @@
 #include <uvm/uvm_pager.h>
 #include <uvm/uvm_pdaemon.h>
 #include <uvm/uvm_swap.h>
-#ifdef UVM_SWAP_ENCRYPT
-#include <uvm/uvm_swap_encrypt.h>
-#endif
+
+#ifdef _KERNEL
 
 /*
  * pull in VM_NFREELIST
  */
 #include <machine/vmparam.h>
+
+struct workqueue;
+
+/*
+ * per-cpu data
+ */
+
+struct uvm_cpu {
+	struct pgfreelist page_free[VM_NFREELIST]; /* unallocated pages */
+	int page_free_nextcolor;	/* next color to allocate from */
+	int page_idlezero_next;		/* which color to zero next */
+	bool page_idle_zero;		/* TRUE if we should try to zero
+					   pages in the idle loop */
+	int pages[PGFL_NQUEUES];	/* total of pages in page_free */
+};
 
 /*
  * uvm structure (vm global state: collected in one structure for ease
@@ -77,48 +96,44 @@ struct uvm {
 
 		/* vm_page queues */
 	struct pgfreelist page_free[VM_NFREELIST]; /* unallocated pages */
-	struct pglist page_active;	/* allocated pages, in use */
-	struct pglist page_inactive_swp;/* pages inactive (reclaim or free) */
-	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
-	simple_lock_data_t pageqlock;	/* lock for active/inactive page q */
-	struct mutex fpageqlock;	/* lock for free page q */
-	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
-	boolean_t page_idle_zero;	/* TRUE if we should try to zero
-					   pages in the idle loop */
+	bool page_init_done;		/* TRUE if uvm_page_init() finished */
 
 		/* page daemon trigger */
 	int pagedaemon;			/* daemon sleeps on this */
-	struct proc *pagedaemon_proc;	/* daemon's pid */
-	simple_lock_data_t pagedaemon_lock;
+	struct lwp *pagedaemon_lwp;	/* daemon's lid */
 
-		/* aiodone daemon trigger */
-	int aiodoned;			/* daemon sleeps on this */
-	struct proc *aiodoned_proc;	/* daemon's pid */
-	simple_lock_data_t aiodoned_lock;
-
-		/* page hash */
-	struct pglist *page_hash;	/* page hash table (vp/off->page) */
-	int page_nhash;			/* number of buckets */
-	int page_hashmask;		/* hash mask */
-	simple_lock_data_t hashlock;	/* lock on page_hash array */
-
-	/* static kernel map entry pool */
-	vm_map_entry_t kentry_free;	/* free page pool */
-	simple_lock_data_t kentry_lock;
+		/* aiodone daemon */
+	struct workqueue *aiodone_queue;
 
 	/* aio_done is locked by uvm.pagedaemon_lock and splbio! */
 	TAILQ_HEAD(, buf) aio_done;		/* done async i/o reqs */
 
-	/* pager VM area bounds */
-	vaddr_t pager_sva;		/* start of pager VA area */
-	vaddr_t pager_eva;		/* end of pager VA area */
-
 	/* swap-related items */
-	simple_lock_data_t swap_data_lock;
+	bool swap_running;
+	kcondvar_t scheduler_cv;
+	bool scheduler_kicked;
+	int swapout_enabled;
 
-	/* kernel object: to support anonymous pageable kernel memory */
-	struct uvm_object *kernel_object;
+	/* per-cpu data */
+	struct uvm_cpu cpus[MAXCPUS];
 };
+
+/*
+ * kernel object: to support anonymous pageable kernel memory
+ */
+extern struct uvm_object *uvm_kernel_object;
+
+/*
+ * locks (made globals for lockstat).
+ */
+
+extern kmutex_t uvm_pageqlock;		/* lock for active/inactive page q */
+extern kmutex_t uvm_fpageqlock;		/* lock for free page q */
+extern kmutex_t uvm_kentry_lock;
+extern kmutex_t uvm_swap_data_lock;
+extern kmutex_t uvm_scheduler_mutex;
+
+#endif /* _KERNEL */
 
 /*
  * vm_map_entry etype bits:
@@ -144,11 +159,17 @@ extern struct uvm uvm;
 /*
  * historys
  */
+
 #ifdef UVMHIST
-extern UVMHIST_DECL(maphist);
-extern UVMHIST_DECL(pdhist);
-extern UVMHIST_DECL(pghist);
+UVMHIST_DECL(maphist);
+UVMHIST_DECL(pdhist);
+UVMHIST_DECL(ubchist);
+UVMHIST_DECL(loanhist);
 #endif
+
+extern struct evcnt uvm_ra_total;
+extern struct evcnt uvm_ra_hit;
+extern struct evcnt uvm_ra_miss;
 
 /*
  * UVM_UNLOCK_AND_WAIT: atomic unlock+wait... wrapper around the
@@ -157,8 +178,11 @@ extern UVMHIST_DECL(pghist);
 
 #define	UVM_UNLOCK_AND_WAIT(event, slock, intr, msg, timo)		\
 do {									\
-	tsleep(event, PVM|PNORELOCK|(intr ? PCATCH : 0), msg, timo);	\
-} while (0)
+	(void) mtsleep(event, PVM | PNORELOCK | (intr ? PCATCH : 0),	\
+	    msg, timo, slock);						\
+} while (/*CONSTCOND*/ 0)
+
+void uvm_kick_pdaemon(void);
 
 /*
  * UVM_PAGE_OWN: track page ownership (only if UVM_PAGE_TRKOWN)
@@ -170,15 +194,7 @@ do {									\
 #define UVM_PAGE_OWN(PG, TAG) /* nothing */
 #endif /* UVM_PAGE_TRKOWN */
 
-/*
- * pull in inlines
- */
-
-#include <uvm/uvm_amap_i.h>
 #include <uvm/uvm_fault_i.h>
-#include <uvm/uvm_map_i.h>
-#include <uvm/uvm_page_i.h>
-#include <uvm/uvm_pager_i.h>
 
 #endif /* _KERNEL */
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: saerrno.h,v 1.6 2003/06/02 23:28:09 millert Exp $	*/
-/*	$NetBSD: saerrno.h,v 1.6 1995/09/18 21:19:45 pk Exp $	*/
+/*	$NetBSD: saerrno.h,v 1.11 2007/12/03 09:51:31 isaki Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993
@@ -50,5 +49,3 @@ extern int errno;
 #define	EECC	(ELAST+11)	/* uncorrectable ecc error */
 #define	EHER	(ELAST+12)	/* hard error */
 #define	ESALAST	(ELAST+12)	/* */
-
-char	*strerror(int err);

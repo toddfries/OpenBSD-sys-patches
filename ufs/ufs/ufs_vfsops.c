@@ -1,5 +1,4 @@
-/*	$OpenBSD: ufs_vfsops.c,v 1.15 2006/04/04 11:21:40 pedro Exp $	*/
-/*	$NetBSD: ufs_vfsops.c,v 1.4 1996/02/09 22:36:12 christos Exp $	*/
+/*	$NetBSD: ufs_vfsops.c,v 1.39 2008/05/06 18:43:45 ad Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993, 1994
@@ -34,8 +33,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ufs_vfsops.c	8.4 (Berkeley) 4/16/94
+ *	@(#)ufs_vfsops.c	8.8 (Berkeley) 5/20/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ufs_vfsops.c,v 1.39 2008/05/06 18:43:45 ad Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_ffs.h"
+#include "opt_quota.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -44,6 +51,7 @@
 #include <sys/buf.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
+#include <sys/kauth.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -52,9 +60,13 @@
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
 #ifdef UFS_DIRHASH
-#include <ufs/ufs/dir.h>
 #include <ufs/ufs/dirhash.h>
 #endif
+
+/* how many times ufs_init() was called */
+static int ufs_initcount = 0;
+
+pool_cache_t ufs_direct_cache;
 
 /*
  * Make a filesystem operational.
@@ -62,8 +74,9 @@
  */
 /* ARGSUSED */
 int
-ufs_start(struct mount *mp, int flags, struct proc *p)
+ufs_start(struct mount *mp, int flags)
 {
+
 	return (0);
 }
 
@@ -83,46 +96,81 @@ ufs_root(struct mount *mp, struct vnode **vpp)
 }
 
 /*
- * Verify a remote client has export rights and return these rights via.
- * exflagsp and credanonp.
+ * Do operations associated with quotas
  */
 int
-ufs_check_export(struct mount *mp, struct mbuf *nam, int *exflagsp,
-    struct ucred **credanonp) 
+ufs_quotactl(struct mount *mp, int cmds, uid_t uid, void *arg)
 {
-	struct netcred *np;
-	struct ufsmount *ump = VFSTOUFS(mp);
+	struct lwp *l = curlwp;
 
-	/*
-	 * Get the export permission structure for this <mp, client> tuple.
-	 */
-	np = vfs_export_lookup(mp, &ump->um_export, nam);
-	if (np == NULL)
-		return (EACCES);
+#ifndef QUOTA
+	(void) mp;
+	(void) cmds;
+	(void) uid;
+	(void) arg;
+	(void) l;
+	return (EOPNOTSUPP);
+#else
+	int cmd, type, error;
 
-	*exflagsp = np->netc_exflags;
-	*credanonp = &np->netc_anon;
-	return (0);
-}
+	if (uid == -1)
+		uid = kauth_cred_getuid(l->l_cred);
+	cmd = cmds >> SUBCMDSHIFT;
 
-/*
- * Initialize UFS file systems, done only once.
- */
-int
-ufs_init(struct vfsconf *vfsp)
-{
-	static int done;
+	switch (cmd) {
+	case Q_SYNC:
+		break;
+	case Q_GETQUOTA:
+		if (uid == kauth_cred_getuid(l->l_cred))
+			break;
+		/* fall through */
+	default:
+		if ((error = kauth_authorize_generic(l->l_cred, KAUTH_GENERIC_ISSUSER,
+		    NULL)) != 0)
+			return (error);
+	}
 
-	if (done)
-		return (0);
-	done = 1;
-	ufs_ihashinit();
-	ufs_quota_init();
-#ifdef UFS_DIRHASH
-	ufsdirhash_init();
+	type = cmds & SUBCMDMASK;
+	if ((u_int)type >= MAXQUOTAS)
+		return (EINVAL);
+	error = vfs_busy(mp, NULL);
+	if (error != 0)
+		return (error);
+
+	mutex_enter(&mp->mnt_updating);
+	switch (cmd) {
+
+	case Q_QUOTAON:
+		error = quotaon(l, mp, type, arg);
+		break;
+
+	case Q_QUOTAOFF:
+		error = quotaoff(l, mp, type);
+		break;
+
+	case Q_SETQUOTA:
+		error = setquota(mp, uid, type, arg);
+		break;
+
+	case Q_SETUSE:
+		error = setuse(mp, uid, type, arg);
+		break;
+
+	case Q_GETQUOTA:
+		error = getquota(mp, uid, type, arg);
+		break;
+
+	case Q_SYNC:
+		error = qsync(mp);
+		break;
+
+	default:
+		error = EINVAL;
+	}
+	mutex_exit(&mp->mnt_updating);
+	vfs_unbusy(mp, false, NULL);
+	return (error);
 #endif
-
-	return (0);
 }
 
 /*
@@ -132,8 +180,8 @@ ufs_init(struct vfsconf *vfsp)
 int
 ufs_fhtovp(struct mount *mp, struct ufid *ufhp, struct vnode **vpp)
 {
-	struct inode *ip;
 	struct vnode *nvp;
+	struct inode *ip;
 	int error;
 
 	if ((error = VFS_VGET(mp, ufhp->ufid_ino, &nvp)) != 0) {
@@ -141,11 +189,66 @@ ufs_fhtovp(struct mount *mp, struct ufid *ufhp, struct vnode **vpp)
 		return (error);
 	}
 	ip = VTOI(nvp);
-	if (DIP(ip, mode) == 0 || DIP(ip, gen) != ufhp->ufid_gen) {
+	if (ip->i_mode == 0 || ip->i_gen != ufhp->ufid_gen) {
 		vput(nvp);
 		*vpp = NULLVP;
 		return (ESTALE);
 	}
 	*vpp = nvp;
 	return (0);
+}
+
+/*
+ * Initialize UFS filesystems, done only once.
+ */
+void
+ufs_init(void)
+{
+	if (ufs_initcount++ > 0)
+		return;
+
+	ufs_direct_cache = pool_cache_init(sizeof(struct direct), 0, 0, 0,
+	    "ufsdir", NULL, IPL_NONE, NULL, NULL, NULL);
+
+	ufs_ihashinit();
+#ifdef QUOTA
+	dqinit();
+#endif
+#ifdef UFS_DIRHASH
+	ufsdirhash_init();
+#endif
+#ifdef UFS_EXTATTR
+	ufs_extattr_init();
+#endif
+}
+
+void
+ufs_reinit(void)
+{
+	ufs_ihashreinit();
+#ifdef QUOTA
+	dqreinit();
+#endif
+}
+
+/*
+ * Free UFS filesystem resources, done only once.
+ */
+void
+ufs_done(void)
+{
+	if (--ufs_initcount > 0)
+		return;
+
+	ufs_ihashdone();
+#ifdef QUOTA
+	dqdone();
+#endif
+	pool_cache_destroy(ufs_direct_cache);
+#ifdef UFS_DIRHASH
+	ufsdirhash_done();
+#endif
+#ifdef UFS_EXTATTR
+	ufs_extattr_done();
+#endif
 }

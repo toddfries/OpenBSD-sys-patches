@@ -1,5 +1,4 @@
-/*	$OpenBSD: uchcom.c,v 1.5 2008/04/11 11:23:50 jsg Exp $	*/
-/*	$NetBSD: uchcom.c,v 1.1 2007/09/03 17:57:37 tshiozak Exp $	*/
+/*	$NetBSD: uchcom.c,v 1.7 2008/10/22 10:35:50 haad Exp $	*/
 
 /*
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uchcom.c,v 1.7 2008/10/22 10:35:50 haad Exp $");
+
 /*
  * driver for WinChipHead CH341/340, the worst USB-serial chip in the world.
  */
@@ -45,18 +40,28 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/ioctl.h>
 #include <sys/conf.h>
 #include <sys/tty.h>
+#include <sys/file.h>
+#include <sys/select.h>
+#include <sys/proc.h>
 #include <sys/device.h>
+#include <sys/poll.h>
+#include <sys/workqueue.h>
 
 #include <dev/usb/usb.h>
+#include <dev/usb/usbcdc.h>
+
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
+#include <dev/usb/usb_quirks.h>
+
 #include <dev/usb/ucomvar.h>
 
 #ifdef UCHCOM_DEBUG
-#define DPRINTFN(n, x)  do { if (uchcomdebug > (n)) printf x; } while (0)
+#define DPRINTFN(n, x)  if (uchcomdebug > (n)) logprintf x
 int	uchcomdebug = 0;
 #else
 #define DPRINTFN(n, x)
@@ -115,24 +120,24 @@ int	uchcomdebug = 0;
 
 struct uchcom_softc
 {
-	struct device		 sc_dev;
-	usbd_device_handle	 sc_udev;
-	struct device		*sc_subdev;
-	usbd_interface_handle	 sc_iface;
-	int			 sc_dying;
+	USBBASEDEVICE		sc_dev;
+	usbd_device_handle	sc_udev;
+	device_ptr_t		sc_subdev;
+	usbd_interface_handle	sc_iface;
+	int			sc_dying;
 	/* */
-	int			 sc_intr_endpoint;
-	int			 sc_intr_size;
-	usbd_pipe_handle	 sc_intr_pipe;
+	int			sc_intr_endpoint;
+	int			sc_intr_size;
+	usbd_pipe_handle	sc_intr_pipe;
 	u_char			*sc_intr_buf;
 	/* */
-	uint8_t			 sc_version;
-	int			 sc_dtr;
-	int			 sc_rts;
-	u_char			 sc_lsr;
-	u_char			 sc_msr;
-	int			 sc_lcr1;
-	int			 sc_lcr2;
+	uint8_t			sc_version;
+	int			sc_dtr;
+	int			sc_rts;
+	u_char			sc_lsr;
+	u_char			sc_msr;
+	int			sc_lcr1;
+	int			sc_lcr2;
 };
 
 struct uchcom_endpoints
@@ -169,106 +174,81 @@ static const struct uchcom_divider_record dividers[] =
 };
 #define NUM_DIVIDERS	(sizeof (dividers) / sizeof (dividers[0]))
 
-void		uchcom_get_status(void *, int, u_char *, u_char *);
-void		uchcom_set(void *, int, int, int);
-int		uchcom_param(void *, int, struct termios *);
-int		uchcom_open(void *, int);
-void		uchcom_close(void *, int);
-void		uchcom_intr(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
-
-int		uchcom_set_config(struct uchcom_softc *);
-int		uchcom_find_ifaces(struct uchcom_softc *,
-		    usbd_interface_handle *);
-int		uchcom_find_endpoints(struct uchcom_softc *,
-		    struct uchcom_endpoints *);
-void		uchcom_close_intr_pipe(struct uchcom_softc *);
-
-
-usbd_status 	uchcom_generic_control_out(struct uchcom_softc *sc,
-		    uint8_t reqno, uint16_t value, uint16_t index);
-usbd_status	uchcom_generic_control_in(struct uchcom_softc *, uint8_t, 
-		    uint16_t, uint16_t, void *, int, int *);
-usbd_status	uchcom_write_reg(struct uchcom_softc *, uint8_t, uint8_t,
-		    uint8_t, uint8_t);
-usbd_status	uchcom_read_reg(struct uchcom_softc *, uint8_t, uint8_t *,
-		    uint8_t, uint8_t *);
-usbd_status	uchcom_get_version(struct uchcom_softc *, uint8_t *); 
-usbd_status	uchcom_read_status(struct uchcom_softc *, uint8_t *);
-usbd_status	uchcom_set_dtrrts_10(struct uchcom_softc *, uint8_t);
-usbd_status	uchcom_set_dtrrts_20(struct uchcom_softc *, uint8_t);
-int		uchcom_update_version(struct uchcom_softc *);
-void		uchcom_convert_status(struct uchcom_softc *, uint8_t);
-int		uchcom_update_status(struct uchcom_softc *);
-int		uchcom_set_dtrrts(struct uchcom_softc *, int, int);
-int		uchcom_set_break(struct uchcom_softc *, int);
-int		uchcom_calc_divider_settings(struct uchcom_divider *, uint32_t);
-int		uchcom_set_dte_rate(struct uchcom_softc *, uint32_t);
-int		uchcom_set_line_control(struct uchcom_softc *, tcflag_t);
-int		uchcom_clear_chip(struct uchcom_softc *);
-int		uchcom_reset_chip(struct uchcom_softc *);
-int		uchcom_setup_comm(struct uchcom_softc *);
-int		uchcom_setup_intr_pipe(struct uchcom_softc *);
-
-
-int		uchcom_match(struct device *, void *, void *); 
-void		uchcom_attach(struct device *, struct device *, void *); 
-int		uchcom_detach(struct device *, int); 
-int		uchcom_activate(struct device *, enum devact);
-
-struct	ucom_methods uchcom_methods = {
-	uchcom_get_status,
-	uchcom_set,
-	uchcom_param,
-	NULL,
-	uchcom_open,
-	uchcom_close,
-	NULL,
-	NULL,
-};
-
 static const struct usb_devno uchcom_devs[] = {
-	{ USB_VENDOR_WCH, USB_PRODUCT_WCH_CH341 },
+	{ USB_VENDOR_WINCHIPHEAD, USB_PRODUCT_WINCHIPHEAD_CH341SER },
+	{ USB_VENDOR_WINCHIPHEAD2, USB_PRODUCT_WINCHIPHEAD2_CH341 },
 };
 #define uchcom_lookup(v, p)	usb_lookup(uchcom_devs, v, p)
 
-struct cfdriver uchcom_cd = { 
-	NULL, "uchcom", DV_DULL 
-}; 
+Static void	uchcom_get_status(void *, int, u_char *, u_char *);
+Static void	uchcom_set(void *, int, int, int);
+Static int	uchcom_param(void *, int, struct termios *);
+Static int	uchcom_open(void *, int);
+Static void	uchcom_close(void *, int);
+Static void	uchcom_intr(usbd_xfer_handle, usbd_private_handle,
+			    usbd_status);
 
-const struct cfattach uchcom_ca = { 
-	sizeof(struct uchcom_softc), 
-	uchcom_match, 
-	uchcom_attach, 
-	uchcom_detach, 
-	uchcom_activate, 
+static int	set_config(struct uchcom_softc *);
+static int	find_ifaces(struct uchcom_softc *, usbd_interface_handle *);
+static int	find_endpoints(struct uchcom_softc *,
+			       struct uchcom_endpoints *);
+static void	close_intr_pipe(struct uchcom_softc *);
+
+
+struct	ucom_methods uchcom_methods = {
+	.ucom_get_status	= uchcom_get_status,
+	.ucom_set		= uchcom_set,
+	.ucom_param		= uchcom_param,
+	.ucom_ioctl		= NULL,
+	.ucom_open		= uchcom_open,
+	.ucom_close		= uchcom_close,
+	.ucom_read		= NULL,
+	.ucom_write		= NULL,
 };
+
+int uchcom_match(device_t, cfdata_t, void *);
+void uchcom_attach(device_t, device_t, void *);
+void uchcom_childdet(device_t, device_t);
+int uchcom_detach(device_t, int);
+int uchcom_activate(device_t, enum devact);
+
+extern struct cfdriver uchcom_cd;
+
+CFATTACH_DECL2_NEW(uchcom,
+    sizeof(struct uchcom_softc),
+    uchcom_match,
+    uchcom_attach,
+    uchcom_detach,
+    uchcom_activate,
+    NULL,
+    uchcom_childdet);
 
 /* ----------------------------------------------------------------------
  * driver entry points
  */
 
-int
-uchcom_match(struct device *parent, void *match, void *aux)
+USB_MATCH(uchcom)
 {
-	struct usb_attach_arg *uaa = aux;
-
-	if (uaa->iface != NULL)
-		return UMATCH_NONE;
+	USB_MATCH_START(uchcom, uaa);
 
 	return (uchcom_lookup(uaa->vendor, uaa->product) != NULL ?
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
-void
-uchcom_attach(struct device *parent, struct device *self, void *aux)
+USB_ATTACH(uchcom)
 {
-	struct uchcom_softc *sc = (struct uchcom_softc *)self;
-	struct usb_attach_arg *uaa = aux;
-	struct ucom_attach_args uca;
+	USB_ATTACH_START(uchcom, sc, uaa);
 	usbd_device_handle dev = uaa->device;
+	char *devinfop;
 	struct uchcom_endpoints endpoints;
+	struct ucom_attach_args uca;
 
+	devinfop = usbd_devinfo_alloc(dev, 0);
+	USB_ATTACH_SETUP;
+	aprint_normal_dev(self, "%s\n", devinfop);
+	usbd_devinfo_free(devinfop);
+
+	sc->sc_dev = self;
         sc->sc_udev = dev;
 	sc->sc_dying = 0;
 	sc->sc_dtr = sc->sc_rts = -1;
@@ -276,22 +256,22 @@ uchcom_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTF(("\n\nuchcom attach: sc=%p\n", sc));
 
-	if (uchcom_set_config(sc))
+	if (set_config(sc))
 		goto failed;
 
 	switch (uaa->release) {
 	case UCHCOM_REV_CH340:
-		printf("%s: CH340\n", sc->sc_dev.dv_xname);
+		aprint_normal_dev(self, "CH340 detected\n");
 		break;
 	default:
-		printf("%s: CH341\n", sc->sc_dev.dv_xname);
+		aprint_normal_dev(self, "CH341 detected\n");
 		break;
 	}
 
-	if (uchcom_find_ifaces(sc, &sc->sc_iface))
+	if (find_ifaces(sc, &sc->sc_iface))
 		goto failed;
 
-	if (uchcom_find_endpoints(sc, &endpoints))
+	if (find_endpoints(sc, &endpoints))
 		goto failed;
 
 	sc->sc_intr_endpoint = endpoints.ep_intr;
@@ -312,43 +292,51 @@ uchcom_attach(struct device *parent, struct device *self, void *aux)
 	uca.info = NULL;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    &sc->sc_dev);
-	
-	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
+			   USBDEV(sc->sc_dev));
 
-	return;
+	sc->sc_subdev = config_found_sm_loc(self, "ucombus", NULL, &uca,
+					    ucomprint, ucomsubmatch);
+
+	USB_ATTACH_SUCCESS_RETURN;
 
 failed:
 	sc->sc_dying = 1;
+	USB_ATTACH_ERROR_RETURN;
 }
 
-int
-uchcom_detach(struct device *self, int flags)
+void
+uchcom_childdet(device_t self, device_t child)
 {
-	struct uchcom_softc *sc = (struct uchcom_softc *)self;
+	struct uchcom_softc *sc = device_private(self);
+
+	KASSERT(sc->sc_subdev == child);
+	sc->sc_subdev = NULL;
+}
+
+USB_DETACH(uchcom)
+{
+	USB_DETACH_START(uchcom, sc);
 	int rv = 0;
 
 	DPRINTF(("uchcom_detach: sc=%p flags=%d\n", sc, flags));
 
-	uchcom_close_intr_pipe(sc);
+	close_intr_pipe(sc);
 
 	sc->sc_dying = 1;
 
-	if (sc->sc_subdev != NULL) {
+	if (sc->sc_subdev != NULL)
 		rv = config_detach(sc->sc_subdev, flags);
-		sc->sc_subdev = NULL;
-	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
+			   USBDEV(sc->sc_dev));
 
 	return rv;
 }
 
 int
-uchcom_activate(struct device *self, enum devact act)
+uchcom_activate(device_t self, enum devact act)
 {
-	struct uchcom_softc *sc = (struct uchcom_softc *)self;
+	struct uchcom_softc *sc = device_private(self);
 	int rv = 0;
 
 	switch (act) {
@@ -356,7 +344,7 @@ uchcom_activate(struct device *self, enum devact act)
 		rv = EOPNOTSUPP;
 		break;
 	case DVACT_DEACTIVATE:
-		uchcom_close_intr_pipe(sc);
+		close_intr_pipe(sc);
 		sc->sc_dying = 1;
 		if (sc->sc_subdev != NULL)
 			rv = config_deactivate(sc->sc_subdev);
@@ -365,40 +353,39 @@ uchcom_activate(struct device *self, enum devact act)
 	return rv;
 }
 
-int
-uchcom_set_config(struct uchcom_softc *sc)
+static int
+set_config(struct uchcom_softc *sc)
 {
 	usbd_status err;
 
 	err = usbd_set_config_index(sc->sc_udev, UCHCOM_CONFIG_INDEX, 1);
 	if (err) {
-		printf("%s: failed to set configuration: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev,
+		    "failed to set configuration: %s\n", usbd_errstr(err));
 		return -1;
 	}
 
 	return 0;
 }
 
-int
-uchcom_find_ifaces(struct uchcom_softc *sc, usbd_interface_handle *riface)
+static int
+find_ifaces(struct uchcom_softc *sc, usbd_interface_handle *riface)
 {
 	usbd_status err;
 
 	err = usbd_device2interface_handle(sc->sc_udev, UCHCOM_IFACE_INDEX,
 					   riface);
 	if (err) {
-		printf("\n%s: failed to get interface: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error("\n%s: failed to get interface: %s\n",
+			USBDEVNAME(sc->sc_dev), usbd_errstr(err));
 		return -1;
 	}
 
 	return 0;
 }
 
-int
-uchcom_find_endpoints(struct uchcom_softc *sc,
-    struct uchcom_endpoints *endpoints)
+static int
+find_endpoints(struct uchcom_softc *sc, struct uchcom_endpoints *endpoints)
 {
 	int i, bin=-1, bout=-1, intr=-1, isize=0;
 	usb_interface_descriptor_t *id;
@@ -409,8 +396,8 @@ uchcom_find_endpoints(struct uchcom_softc *sc,
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
-			printf("%s: no endpoint descriptor for %d\n",
-				sc->sc_dev.dv_xname, i);
+			aprint_error_dev(sc->sc_dev,
+			    "no endpoint descriptor for %d\n", i);
 			return -1;
 		}
 
@@ -429,26 +416,26 @@ uchcom_find_endpoints(struct uchcom_softc *sc,
 
 	if (intr == -1 || bin == -1 || bout == -1) {
 		if (intr == -1) {
-			printf("%s: no interrupt end point\n",
-			       sc->sc_dev.dv_xname);
+			aprint_error_dev(sc->sc_dev,
+			    "no interrupt end point\n");
 		}
 		if (bin == -1) {
-			printf("%s: no data bulk in end point\n",
-			       sc->sc_dev.dv_xname);
+			aprint_error_dev(sc->sc_dev,
+			    "no data bulk in end point\n");
 		}
 		if (bout == -1) {
-			printf("%s: no data bulk out end point\n",
-			       sc->sc_dev.dv_xname);
+			aprint_error_dev(sc->sc_dev,
+			    "no data bulk out end point\n");
 		}
 		return -1;
 	}
 	if (isize < UCHCOM_INTR_LEAST) {
-		printf("%s: intr pipe is too short", sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev, "intr pipe is too short\n");
 		return -1;
 	}
 
 	DPRINTF(("%s: bulkin=%d, bulkout=%d, intr=%d, isize=%d\n",
-		 sc->sc_dev.dv_xname, bin, bout, intr, isize));
+		 USBDEVNAME(sc->sc_dev), bin, bout, intr, isize));
 
 	endpoints->ep_intr = intr;
 	endpoints->ep_intr_size = isize;
@@ -463,9 +450,9 @@ uchcom_find_endpoints(struct uchcom_softc *sc,
  * low level i/o
  */
 
-usbd_status
-uchcom_generic_control_out(struct uchcom_softc *sc, uint8_t reqno,
-    uint16_t value, uint16_t index)
+static __inline usbd_status
+generic_control_out(struct uchcom_softc *sc, uint8_t reqno,
+		    uint16_t value, uint16_t index)
 {
 	usb_device_request_t req;
 
@@ -478,9 +465,10 @@ uchcom_generic_control_out(struct uchcom_softc *sc, uint8_t reqno,
 	return usbd_do_request(sc->sc_udev, &req, 0);
 }
 
-usbd_status
-uchcom_generic_control_in(struct uchcom_softc *sc, uint8_t reqno,
-    uint16_t value, uint16_t index, void *buf, int buflen, int *actlen)
+static __inline usbd_status
+generic_control_in(struct uchcom_softc *sc, uint8_t reqno,
+		   uint16_t value, uint16_t index, void *buf, int buflen,
+		   int *actlen)
 {
 	usb_device_request_t req;
 
@@ -495,27 +483,27 @@ uchcom_generic_control_in(struct uchcom_softc *sc, uint8_t reqno,
 				     USBD_DEFAULT_TIMEOUT);
 }
 
-usbd_status
-uchcom_write_reg(struct uchcom_softc *sc,
-    uint8_t reg1, uint8_t val1, uint8_t reg2, uint8_t val2)
+static __inline usbd_status
+write_reg(struct uchcom_softc *sc,
+	  uint8_t reg1, uint8_t val1, uint8_t reg2, uint8_t val2)
 {
 	DPRINTF(("uchcom: write reg 0x%02X<-0x%02X, 0x%02X<-0x%02X\n",
 		 (unsigned)reg1, (unsigned)val1,
 		 (unsigned)reg2, (unsigned)val2));
-	return uchcom_generic_control_out(
+	return generic_control_out(
 		sc, UCHCOM_REQ_WRITE_REG,
 		reg1|((uint16_t)reg2<<8), val1|((uint16_t)val2<<8));
 }
 
-usbd_status
-uchcom_read_reg(struct uchcom_softc *sc,
-    uint8_t reg1, uint8_t *rval1, uint8_t reg2, uint8_t *rval2)
+static __inline usbd_status
+read_reg(struct uchcom_softc *sc,
+	 uint8_t reg1, uint8_t *rval1, uint8_t reg2, uint8_t *rval2)
 {
 	uint8_t buf[UCHCOM_INPUT_BUF_SIZE];
 	usbd_status err;
 	int actin;
 
-	err = uchcom_generic_control_in(
+	err = generic_control_in(
 		sc, UCHCOM_REQ_READ_REG,
 		reg1|((uint16_t)reg2<<8), 0, buf, sizeof buf, &actin);
 	if (err)
@@ -531,14 +519,14 @@ uchcom_read_reg(struct uchcom_softc *sc,
 	return USBD_NORMAL_COMPLETION;
 }
 
-usbd_status
-uchcom_get_version(struct uchcom_softc *sc, uint8_t *rver)
+static __inline usbd_status
+get_version(struct uchcom_softc *sc, uint8_t *rver)
 {
 	uint8_t buf[UCHCOM_INPUT_BUF_SIZE];
 	usbd_status err;
 	int actin;
 
-	err = uchcom_generic_control_in(
+	err = generic_control_in(
 		sc, UCHCOM_REQ_GET_VERSION, 0, 0, buf, sizeof buf, &actin);
 	if (err)
 		return err;
@@ -548,24 +536,22 @@ uchcom_get_version(struct uchcom_softc *sc, uint8_t *rver)
 	return USBD_NORMAL_COMPLETION;
 }
 
-usbd_status
-uchcom_read_status(struct uchcom_softc *sc, uint8_t *rval)
+static __inline usbd_status
+get_status(struct uchcom_softc *sc, uint8_t *rval)
 {
-	return uchcom_read_reg(sc, UCHCOM_REG_STAT1, rval, UCHCOM_REG_STAT2,
-	    NULL);
+	return read_reg(sc, UCHCOM_REG_STAT1, rval, UCHCOM_REG_STAT2, NULL);
 }
 
-usbd_status
-uchcom_set_dtrrts_10(struct uchcom_softc *sc, uint8_t val)
+static __inline usbd_status
+set_dtrrts_10(struct uchcom_softc *sc, uint8_t val)
 {
-	return uchcom_write_reg(sc, UCHCOM_REG_STAT1, val, UCHCOM_REG_STAT1,
-	    val);
+	return write_reg(sc, UCHCOM_REG_STAT1, val, UCHCOM_REG_STAT1, val);
 }
 
-usbd_status
-uchcom_set_dtrrts_20(struct uchcom_softc *sc, uint8_t val)
+static __inline usbd_status
+set_dtrrts_20(struct uchcom_softc *sc, uint8_t val)
 {
-	return uchcom_generic_control_out(sc, UCHCOM_REQ_SET_DTRRTS, val, 0);
+	return generic_control_out(sc, UCHCOM_REQ_SET_DTRRTS, val, 0);
 }
 
 
@@ -573,23 +559,23 @@ uchcom_set_dtrrts_20(struct uchcom_softc *sc, uint8_t val)
  * middle layer
  */
 
-int
-uchcom_update_version(struct uchcom_softc *sc)
+static int
+update_version(struct uchcom_softc *sc)
 {
 	usbd_status err;
 
-	err = uchcom_get_version(sc, &sc->sc_version);
+	err = get_version(sc, &sc->sc_version);
 	if (err) {
-		printf("%s: cannot get version: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "cannot get version: %s\n",
+		    usbd_errstr(err));
 		return EIO;
 	}
 
 	return 0;
 }
 
-void
-uchcom_convert_status(struct uchcom_softc *sc, uint8_t cur)
+static void
+convert_status(struct uchcom_softc *sc, uint8_t cur)
 {
 	sc->sc_dtr = !(cur & UCHCOM_DTR_MASK);
 	sc->sc_rts = !(cur & UCHCOM_RTS_MASK);
@@ -598,26 +584,26 @@ uchcom_convert_status(struct uchcom_softc *sc, uint8_t cur)
 	sc->sc_msr = (cur << 4) | ((sc->sc_msr >> 4) ^ cur);
 }
 
-int
-uchcom_update_status(struct uchcom_softc *sc)
+static int
+update_status(struct uchcom_softc *sc)
 {
 	usbd_status err;
 	uint8_t cur;
 
-	err = uchcom_read_status(sc, &cur);
+	err = get_status(sc, &cur);
 	if (err) {
-		printf("%s: cannot update status: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev,
+		    "cannot update status: %s\n", usbd_errstr(err));
 		return EIO;
 	}
-	uchcom_convert_status(sc, cur);
+	convert_status(sc, cur);
 
 	return 0;
 }
 
 
-int
-uchcom_set_dtrrts(struct uchcom_softc *sc, int dtr, int rts)
+static int
+set_dtrrts(struct uchcom_softc *sc, int dtr, int rts)
 {
 	usbd_status err;
 	uint8_t val = 0;
@@ -626,27 +612,26 @@ uchcom_set_dtrrts(struct uchcom_softc *sc, int dtr, int rts)
 	if (rts) val |= UCHCOM_RTS_MASK;
 
 	if (sc->sc_version < UCHCOM_VER_20)
-		err = uchcom_set_dtrrts_10(sc, ~val);
+		err = set_dtrrts_10(sc, ~val);
 	else
-		err = uchcom_set_dtrrts_20(sc, ~val);
+		err = set_dtrrts_20(sc, ~val);
 
 	if (err) {
-		printf("%s: cannot set DTR/RTS: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "cannot set DTR/RTS: %s\n",
+		    usbd_errstr(err));
 		return EIO;
 	}
 
 	return 0;
 }
 
-int
-uchcom_set_break(struct uchcom_softc *sc, int onoff)
+static int
+set_break(struct uchcom_softc *sc, int onoff)
 {
 	usbd_status err;
 	uint8_t brk1, brk2;
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_BREAK1, &brk1, UCHCOM_REG_BREAK2,
-	    &brk2);
+	err = read_reg(sc, UCHCOM_REG_BREAK1, &brk1, UCHCOM_REG_BREAK2, &brk2);
 	if (err)
 		return EIO;
 	if (onoff) {
@@ -658,16 +643,15 @@ uchcom_set_break(struct uchcom_softc *sc, int onoff)
 		brk1 |= UCHCOM_BRK1_MASK;
 		brk2 |= UCHCOM_BRK2_MASK;
 	}
-	err = uchcom_write_reg(sc, UCHCOM_REG_BREAK1, brk1, UCHCOM_REG_BREAK2,
-	    brk2);
+	err = write_reg(sc, UCHCOM_REG_BREAK1, brk1, UCHCOM_REG_BREAK2, brk2);
 	if (err)
 		return EIO;
 
 	return 0;
 }
 
-int
-uchcom_calc_divider_settings(struct uchcom_divider *dp, uint32_t rate)
+static int
+calc_divider_settings(struct uchcom_divider *dp, uint32_t rate)
 {
 	int i;
 	const struct uchcom_divider_record *rp;
@@ -705,45 +689,44 @@ found:
 	return 0;
 }
 
-int
-uchcom_set_dte_rate(struct uchcom_softc *sc, uint32_t rate)
+static int
+set_dte_rate(struct uchcom_softc *sc, uint32_t rate)
 {
 	usbd_status err;
 	struct uchcom_divider dv;
 
-	if (uchcom_calc_divider_settings(&dv, rate))
+	if (calc_divider_settings(&dv, rate))
 		return EINVAL;
 
-	if ((err = uchcom_write_reg(sc,
+	if ((err = write_reg(sc,
 			     UCHCOM_REG_BPS_PRE, dv.dv_prescaler,
 			     UCHCOM_REG_BPS_DIV, dv.dv_div)) ||
-	    (err = uchcom_write_reg(sc,
+	    (err = write_reg(sc,
 			     UCHCOM_REG_BPS_MOD, dv.dv_mod,
 			     UCHCOM_REG_BPS_PAD, 0))) {
-		printf("%s: cannot set DTE rate: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "cannot set DTE rate: %s\n",
+		    usbd_errstr(err));
 		return EIO;
 	}
 
 	return 0;
 }
 
-int
-uchcom_set_line_control(struct uchcom_softc *sc, tcflag_t cflag)
+static int
+set_line_control(struct uchcom_softc *sc, tcflag_t cflag)
 {
 	usbd_status err;
-	uint8_t lcr1 = 0, lcr2 = 0;
+	uint8_t lcr1val = 0, lcr2val = 0;
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_LCR1, &lcr1, UCHCOM_REG_LCR2,
-	    &lcr2);
+	err = read_reg(sc, UCHCOM_REG_LCR1, &lcr1val, UCHCOM_REG_LCR2, &lcr2val);
 	if (err) {
-		printf("%s: cannot get LCR: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "cannot get LCR: %s\n",
+		    usbd_errstr(err));
 		return EIO;
 	}
 
-	lcr1 &= ~UCHCOM_LCR1_MASK;
-	lcr2 &= ~UCHCOM_LCR2_MASK;
+	lcr1val &= ~UCHCOM_LCR1_MASK;
+	lcr2val &= ~UCHCOM_LCR2_MASK;
 
 	/*
 	 * XXX: it is difficult to handle the line control appropriately:
@@ -764,64 +747,61 @@ uchcom_set_line_control(struct uchcom_softc *sc, tcflag_t cflag)
 	}
 
 	if (ISSET(cflag, PARENB)) {
-		lcr1 |= UCHCOM_LCR1_PARENB;
+		lcr1val |= UCHCOM_LCR1_PARENB;
 		if (ISSET(cflag, PARODD))
-			lcr2 |= UCHCOM_LCR2_PARODD;
+			lcr2val |= UCHCOM_LCR2_PARODD;
 		else
-			lcr2 |= UCHCOM_LCR2_PAREVEN;
+			lcr2val |= UCHCOM_LCR2_PAREVEN;
 	}
 
-	err = uchcom_write_reg(sc, UCHCOM_REG_LCR1, lcr1, UCHCOM_REG_LCR2,
-	    lcr2);
+	err = write_reg(sc, UCHCOM_REG_LCR1, lcr1val, UCHCOM_REG_LCR2, lcr2val);
 	if (err) {
-		printf("%s: cannot set LCR: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "cannot set LCR: %s\n",
+		    usbd_errstr(err));
 		return EIO;
 	}
 
 	return 0;
 }
 
-int
-uchcom_clear_chip(struct uchcom_softc *sc)
+static int
+clear_chip(struct uchcom_softc *sc)
 {
 	usbd_status err;
 
-	DPRINTF(("%s: clear\n", sc->sc_dev.dv_xname));
-	err = uchcom_generic_control_out(sc, UCHCOM_REQ_RESET, 0, 0);
+	DPRINTF(("%s: clear\n", USBDEVNAME(sc->sc_dev)));
+	err = generic_control_out(sc, UCHCOM_REQ_RESET, 0, 0);
 	if (err) {
-		printf("%s: cannot clear: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "cannot clear: %s\n",
+		    usbd_errstr(err));
 		return EIO;
 	}
 
 	return 0;
 }
 
-int
-uchcom_reset_chip(struct uchcom_softc *sc)
+static int
+reset_chip(struct uchcom_softc *sc)
 {
 	usbd_status err;
-	uint8_t lcr1, lcr2, pre, div, mod;
+	uint8_t lcr1val, lcr2val, pre, div, mod;
 	uint16_t val=0, idx=0;
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_LCR1, &lcr1, UCHCOM_REG_LCR2, &lcr2);
+	err = read_reg(sc, UCHCOM_REG_LCR1, &lcr1val, UCHCOM_REG_LCR2, &lcr2val);
 	if (err)
 		goto failed;
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_BPS_PRE, &pre, UCHCOM_REG_BPS_DIV,
-	    &div);
+	err = read_reg(sc, UCHCOM_REG_BPS_PRE, &pre, UCHCOM_REG_BPS_DIV, &div);
 	if (err)
 		goto failed;
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_BPS_MOD, &mod, UCHCOM_REG_BPS_PAD,
-	    NULL);
+	err = read_reg(sc, UCHCOM_REG_BPS_MOD, &mod, UCHCOM_REG_BPS_PAD, NULL);
 	if (err)
 		goto failed;
 
-	val |= (uint16_t)(lcr1&0xF0) << 8;
+	val |= (uint16_t)(lcr1val&0xF0) << 8;
 	val |= 0x01;
-	val |= (uint16_t)(lcr2&0x0F) << 8;
+	val |= (uint16_t)(lcr2val&0x0F) << 8;
 	val |= 0x02;
 	idx |= pre & 0x07;
 	val |= 0x04;
@@ -831,9 +811,9 @@ uchcom_reset_chip(struct uchcom_softc *sc)
 	val |= 0x10;
 
 	DPRINTF(("%s: reset v=0x%04X, i=0x%04X\n",
-		 sc->sc_dev.dv_xname, val, idx));
+		 USBDEVNAME(sc->sc_dev), val, idx));
 
-	err = uchcom_generic_control_out(sc, UCHCOM_REQ_RESET, val, idx);
+	err = generic_control_out(sc, UCHCOM_REQ_RESET, val, idx);
 	if (err)
 		goto failed;
 
@@ -841,53 +821,53 @@ uchcom_reset_chip(struct uchcom_softc *sc)
 
 failed:
 	printf("%s: cannot reset: %s\n",
-	       sc->sc_dev.dv_xname, usbd_errstr(err));
+	       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
 	return EIO;
 }
 
-int
-uchcom_setup_comm(struct uchcom_softc *sc)
+static int
+setup_comm(struct uchcom_softc *sc)
 {
 	int ret;
 
-	ret = uchcom_update_version(sc);
+	ret = update_version(sc);
 	if (ret)
 		return ret;
 
-	ret = uchcom_clear_chip(sc);
+	ret = clear_chip(sc);
 	if (ret)
 		return ret;
 
-	ret = uchcom_set_dte_rate(sc, TTYDEF_SPEED);
+	ret = set_dte_rate(sc, TTYDEF_SPEED);
 	if (ret)
 		return ret;
 
-	ret = uchcom_set_line_control(sc, CS8);
+	ret = set_line_control(sc, CS8);
 	if (ret)
 		return ret;
 
-	ret = uchcom_update_status(sc);
+	ret = update_status(sc);
 	if (ret)
 		return ret;
 
-	ret = uchcom_reset_chip(sc);
+	ret = reset_chip(sc);
 	if (ret)
 		return ret;
 
-	ret = uchcom_set_dte_rate(sc, TTYDEF_SPEED); /* XXX */
+	ret = set_dte_rate(sc, TTYDEF_SPEED); /* XXX */
 	if (ret)
 		return ret;
 
 	sc->sc_dtr = sc->sc_rts = 1;
-	ret = uchcom_set_dtrrts(sc, sc->sc_dtr, sc->sc_rts);
+	ret = set_dtrrts(sc, sc->sc_dtr, sc->sc_rts);
 	if (ret)
 		return ret;
 
 	return 0;
 }
 
-int
-uchcom_setup_intr_pipe(struct uchcom_softc *sc)
+static int
+setup_intr_pipe(struct uchcom_softc *sc)
 {
 	usbd_status err;
 
@@ -901,17 +881,17 @@ uchcom_setup_intr_pipe(struct uchcom_softc *sc)
 					  sc->sc_intr_size,
 					  uchcom_intr, USBD_DEFAULT_INTERVAL);
 		if (err) {
-			printf("%s: cannot open interrupt pipe: %s\n",
-			       sc->sc_dev.dv_xname,
-			       usbd_errstr(err));
+			aprint_error_dev(sc->sc_dev,
+			    "cannot open interrupt pipe: %s\n",
+			    usbd_errstr(err));
 			return EIO;
 		}
 	}
 	return 0;
 }
 
-void
-uchcom_close_intr_pipe(struct uchcom_softc *sc)
+static void
+close_intr_pipe(struct uchcom_softc *sc)
 {
 	usbd_status err;
 
@@ -921,12 +901,14 @@ uchcom_close_intr_pipe(struct uchcom_softc *sc)
 	if (sc->sc_intr_pipe != NULL) {
 		err = usbd_abort_pipe(sc->sc_intr_pipe);
 		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+			aprint_error_dev(sc->sc_dev,
+			    "abort interrupt pipe failed: %s\n",
+			    usbd_errstr(err));
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
-			printf("%s: close interrupt pipe failed: %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+			aprint_error_dev(sc->sc_dev,
+			    "close interrupt pipe failed: %s\n",
+			    usbd_errstr(err));
 		free(sc->sc_intr_buf, M_USBDEV);
 		sc->sc_intr_pipe = NULL;
 	}
@@ -959,14 +941,14 @@ uchcom_set(void *arg, int portno, int reg, int onoff)
 	switch (reg) {
 	case UCOM_SET_DTR:
 		sc->sc_dtr = !!onoff;
-		uchcom_set_dtrrts(sc, sc->sc_dtr, sc->sc_rts);
+		set_dtrrts(sc, sc->sc_dtr, sc->sc_rts);
 		break;
 	case UCOM_SET_RTS:
 		sc->sc_rts = !!onoff;
-		uchcom_set_dtrrts(sc, sc->sc_dtr, sc->sc_rts);
+		set_dtrrts(sc, sc->sc_dtr, sc->sc_rts);
 		break;
 	case UCOM_SET_BREAK:
-		uchcom_set_break(sc, onoff);
+		set_break(sc, onoff);
 		break;
 	}
 }
@@ -980,11 +962,11 @@ uchcom_param(void *arg, int portno, struct termios *t)
 	if (sc->sc_dying)
 		return 0;
 
-	ret = uchcom_set_line_control(sc, t->c_cflag);
+	ret = set_line_control(sc, t->c_cflag);
 	if (ret)
 		return ret;
 
-	ret = uchcom_set_dte_rate(sc, t->c_ospeed);
+	ret = set_dte_rate(sc, t->c_ospeed);
 	if (ret)
 		return ret;
 
@@ -1000,11 +982,11 @@ uchcom_open(void *arg, int portno)
 	if (sc->sc_dying)
 		return EIO;
 
-	ret = uchcom_setup_intr_pipe(sc);
+	ret = setup_intr_pipe(sc);
 	if (ret)
 		return ret;
 
-	ret = uchcom_setup_comm(sc);
+	ret = setup_comm(sc);
 	if (ret)
 		return ret;
 
@@ -1019,7 +1001,7 @@ uchcom_close(void *arg, int portno)
 	if (sc->sc_dying)
 		return;
 
-	uchcom_close_intr_pipe(sc);
+	close_intr_pipe(sc);
 }
 
 
@@ -1028,7 +1010,7 @@ uchcom_close(void *arg, int portno)
  */
 void
 uchcom_intr(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+	    usbd_status status)
 {
 	struct uchcom_softc *sc = priv;
 	u_char *buf = sc->sc_intr_buf;
@@ -1041,18 +1023,18 @@ uchcom_intr(usbd_xfer_handle xfer, usbd_private_handle priv,
 			return;
 
 		DPRINTF(("%s: abnormal status: %s\n",
-			 sc->sc_dev.dv_xname, usbd_errstr(status)));
+			 USBDEVNAME(sc->sc_dev), usbd_errstr(status)));
 		usbd_clear_endpoint_stall_async(sc->sc_intr_pipe);
 		return;
 	}
 	DPRINTF(("%s: intr: 0x%02X 0x%02X 0x%02X 0x%02X "
 		 "0x%02X 0x%02X 0x%02X 0x%02X\n",
-		 sc->sc_dev.dv_xname,
+		 USBDEVNAME(sc->sc_dev),
 		 (unsigned)buf[0], (unsigned)buf[1],
 		 (unsigned)buf[2], (unsigned)buf[3],
 		 (unsigned)buf[4], (unsigned)buf[5],
 		 (unsigned)buf[6], (unsigned)buf[7]));
 
-	uchcom_convert_status(sc, buf[UCHCOM_INTR_STAT1]);
-	ucom_status_change((struct ucom_softc *) sc->sc_subdev);
+	convert_status(sc, buf[UCHCOM_INTR_STAT1]);
+	ucom_status_change(device_private(sc->sc_subdev));
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_sqrt.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_sqrt.c,v 1.4 2003/08/07 16:28:12 agc Exp $ */
+/*	$NetBSD: fpu_sqrt.c,v 1.5 2005/12/11 12:17:52 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,12 +44,15 @@
  * Perform an FPU square root (return sqrt(x)).
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_sqrt.c,v 1.5 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_arith.h>
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_arith.h"
+#include "fpu_emulate.h"
 
 /*
  * Our task is to calculate the square root of a floating point number x0.
@@ -187,12 +189,12 @@ struct fpn *
 fpu_sqrt(fe)
 	struct fpemu *fe;
 {
-	struct fpn *x = &fe->fe_f2;
-	u_int bit, q, tt;
-	u_int x0, x1, x2;
-	u_int y0, y1, y2;
-	u_int d0, d1, d2;
-	int e;
+	register struct fpn *x = &fe->fe_f2;
+	register u_int bit, q, tt;
+	register u_int x0, x1, x2;
+	register u_int y0, y1, y2;
+	register u_int d0, d1, d2;
+	register int e;
 	FPU_DECL_CARRY
 
 	/*

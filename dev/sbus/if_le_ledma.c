@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_le_ledma.c,v 1.13 2007/05/31 17:23:14 sobrado Exp $	*/
-/*	$NetBSD: if_le_ledma.c,v 1.14 2001/05/30 11:46:35 mrg Exp $	*/
+/*	$NetBSD: if_le_ledma.c,v 1.30 2008/04/28 20:23:57 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,6 +30,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_le_ledma.c,v 1.30 2008/04/28 20:23:57 martin Exp $");
+
+#include "opt_inet.h"
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -49,15 +45,16 @@
 #include <sys/malloc.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
+#include <netinet/if_inarp.h>
 #endif
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 #include <machine/autoconf.h>
 
 #include <dev/sbus/sbusvar.h>
@@ -65,8 +62,12 @@
 #include <dev/ic/lsi64854reg.h>
 #include <dev/ic/lsi64854var.h>
 
+#include <dev/ic/lancereg.h>
+#include <dev/ic/lancevar.h>
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
+
+#include "ioconf.h"
 
 /*
  * LANCE registers.
@@ -76,6 +77,7 @@
 
 struct	le_softc {
 	struct	am7990_softc	sc_am7990;	/* glue to MI code */
+	struct	sbusdev		sc_sd;		/* sbus device */
 	bus_space_tag_t		sc_bustag;
 	bus_dmamap_t		sc_dmamap;
 	bus_space_handle_t	sc_reg;		/* LANCE registers */
@@ -86,71 +88,74 @@ struct	le_softc {
 #define MEMSIZE		(16*1024)	/* LANCE memory size */
 #define LEDMA_BOUNDARY	(16*1024*1024)	/* must not cross 16MB boundary */
 
-int	lematch_ledma(struct device *, void *, void *);
-void	leattach_ledma(struct device *, struct device *, void *);
+int	lematch_ledma(device_t, cfdata_t, void *);
+void	leattach_ledma(device_t, device_t, void *);
 
 /*
  * Media types supported by the Sun4m.
  */
-
-void	le_ledma_setutp(struct am7990_softc *);
-void	le_ledma_setaui(struct am7990_softc *);
-
-int	lemediachange(struct ifnet *);
-void	lemediastatus(struct ifnet *, struct ifmediareq *);
-
-struct cfattach le_ledma_ca = {
-	sizeof(struct le_softc), lematch_ledma, leattach_ledma
+static int lemedia[] = {
+	IFM_ETHER|IFM_10_T,
+	IFM_ETHER|IFM_10_5,
+	IFM_ETHER|IFM_AUTO,
 };
+#define NLEMEDIA	__arraycount(lemedia)
 
-void le_ledma_wrcsr(struct am7990_softc *, u_int16_t, u_int16_t);
-u_int16_t le_ledma_rdcsr(struct am7990_softc *, u_int16_t);
-void le_ledma_hwreset(struct am7990_softc *);
-void le_ledma_hwinit(struct am7990_softc *);
-void le_ledma_nocarrier(struct am7990_softc *);
+void	lesetutp(struct lance_softc *);
+void	lesetaui(struct lance_softc *);
 
-void
-le_ledma_wrcsr(struct am7990_softc *sc, u_int16_t port, u_int16_t val)
+int	lemediachange(struct lance_softc *);
+void	lemediastatus(struct lance_softc *, struct ifmediareq *);
+
+CFATTACH_DECL_NEW(le_ledma, sizeof(struct le_softc),
+    lematch_ledma, leattach_ledma, NULL, NULL);
+
+#if defined(_KERNEL_OPT)
+#include "opt_ddb.h"
+#endif
+
+static void lewrcsr(struct lance_softc *, uint16_t, uint16_t);
+static uint16_t lerdcsr(struct lance_softc *, uint16_t);
+static void lehwreset(struct lance_softc *);
+static void lehwinit(struct lance_softc *);
+static void lenocarrier(struct lance_softc *);
+
+static void
+lewrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
+	bus_space_tag_t t = lesc->sc_bustag;
+	bus_space_handle_t h = lesc->sc_reg;
 
-	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, port);
-	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, 2,
-	    BUS_SPACE_BARRIER_WRITE);
-	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, val);
-	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, 2,
-	    BUS_SPACE_BARRIER_WRITE);
+	bus_space_write_2(t, h, LEREG1_RAP, port);
+	bus_space_write_2(t, h, LEREG1_RDP, val);
 
 #if defined(SUN4M)
 	/*
-	 * We need to flush the SBus->MBus write buffers. This can most
+	 * We need to flush the Sbus->Mbus write buffers. This can most
 	 * easily be accomplished by reading back the register that we
 	 * just wrote (thanks to Chris Torek for this solution).
 	 */
-	if (CPU_ISSUN4M) {
-		volatile u_int16_t discard;
-		discard = bus_space_read_2(lesc->sc_bustag, lesc->sc_reg,
-					   LEREG1_RDP);
-	}
+	(void)bus_space_read_2(t, h, LEREG1_RDP);
 #endif
 }
 
-u_int16_t
-le_ledma_rdcsr(struct am7990_softc *sc, u_int16_t port)
+static uint16_t
+lerdcsr(struct lance_softc *sc, uint16_t port)
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
+	bus_space_tag_t t = lesc->sc_bustag;
+	bus_space_handle_t h = lesc->sc_reg;
 
-	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, port);
-	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, 2,
-	    BUS_SPACE_BARRIER_WRITE);
-	return (bus_space_read_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP));
+	bus_space_write_2(t, h, LEREG1_RAP, port);
+	return (bus_space_read_2(t, h, LEREG1_RDP));
 }
 
 void
-le_ledma_setutp(struct am7990_softc *sc)
+lesetutp(struct lance_softc *sc)
 {
 	struct lsi64854_softc *dma = ((struct le_softc *)sc)->sc_dma;
-	u_int32_t csr;
+	uint32_t csr;
 
 	csr = L64854_GCSR(dma);
 	csr |= E_TP_AUI;
@@ -159,10 +164,10 @@ le_ledma_setutp(struct am7990_softc *sc)
 }
 
 void
-le_ledma_setaui(struct am7990_softc *sc)
+lesetaui(struct lance_softc *sc)
 {
 	struct lsi64854_softc *dma = ((struct le_softc *)sc)->sc_dma;
-	u_int32_t csr;
+	uint32_t csr;
 
 	csr = L64854_GCSR(dma);
 	csr &= ~E_TP_AUI;
@@ -171,10 +176,9 @@ le_ledma_setaui(struct am7990_softc *sc)
 }
 
 int
-lemediachange(struct ifnet *ifp)
+lemediachange(struct lance_softc *sc)
 {
-	struct am7990_softc *sc = ifp->if_softc;
-	struct ifmedia *ifm = &sc->sc_ifmedia;
+	struct ifmedia *ifm = &sc->sc_media;
 
 	if (IFM_TYPE(ifm->ifm_media) != IFM_ETHER)
 		return (EINVAL);
@@ -187,11 +191,11 @@ lemediachange(struct ifnet *ifp)
 	 */
 	switch (IFM_SUBTYPE(ifm->ifm_media)) {
 	case IFM_10_T:
-		le_ledma_setutp(sc);
+		lesetutp(sc);
 		break;
 
 	case IFM_10_5:
-		le_ledma_setaui(sc);
+		lesetaui(sc);
 		break;
 
 	case IFM_AUTO:
@@ -205,9 +209,8 @@ lemediachange(struct ifnet *ifp)
 }
 
 void
-lemediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
+lemediastatus(struct lance_softc *sc, struct ifmediareq *ifmr)
 {
-	struct am7990_softc *sc = ifp->if_softc;
 	struct lsi64854_softc *dma = ((struct le_softc *)sc)->sc_dma;
 
 	/*
@@ -219,12 +222,12 @@ lemediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
 		ifmr->ifm_active = IFM_ETHER|IFM_10_5;
 }
 
-void
-le_ledma_hwreset(struct am7990_softc *sc)
+static void
+lehwreset(struct lance_softc *sc)
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 	struct lsi64854_softc *dma = lesc->sc_dma;
-	u_int32_t csr;
+	uint32_t csr;
 	u_int aui_bit;
 
 	/*
@@ -250,27 +253,27 @@ le_ledma_hwreset(struct am7990_softc *sc)
 	delay(20000);	/* must not touch le for 20ms */
 }
 
-void
-le_ledma_hwinit(struct am7990_softc *sc)
+static void
+lehwinit(struct lance_softc *sc)
 {
 
 	/*
 	 * Make sure we're using the currently-enabled media type.
 	 * XXX Actually, this is probably unnecessary, now.
 	 */
-	switch (IFM_SUBTYPE(sc->sc_ifmedia.ifm_cur->ifm_media)) {
+	switch (IFM_SUBTYPE(sc->sc_media.ifm_cur->ifm_media)) {
 	case IFM_10_T:
-		le_ledma_setutp(sc);
+		lesetutp(sc);
 		break;
 
 	case IFM_10_5:
-		le_ledma_setaui(sc);
+		lesetaui(sc);
 		break;
 	}
 }
 
-void
-le_ledma_nocarrier(struct am7990_softc *sc)
+static void
+lenocarrier(struct lance_softc *sc)
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 
@@ -278,49 +281,49 @@ le_ledma_nocarrier(struct am7990_softc *sc)
 	 * Check if the user has requested a certain cable type, and
 	 * if so, honor that request.
 	 */
+	printf("%s: lost carrier on ", device_xname(sc->sc_dev));
 
 	if (L64854_GCSR(lesc->sc_dma) & E_TP_AUI) {
-		switch (IFM_SUBTYPE(sc->sc_ifmedia.ifm_media)) {
+		printf("UTP port");
+		switch (IFM_SUBTYPE(sc->sc_media.ifm_media)) {
 		case IFM_10_5:
 		case IFM_AUTO:
-			printf("%s: lost carrier on UTP port"
-			    ", switching to AUI port\n", sc->sc_dev.dv_xname);
-			le_ledma_setaui(sc);
+			printf(", switching to AUI port");
+			lesetaui(sc);
 		}
 	} else {
-		switch (IFM_SUBTYPE(sc->sc_ifmedia.ifm_media)) {
+		printf("AUI port");
+		switch (IFM_SUBTYPE(sc->sc_media.ifm_media)) {
 		case IFM_10_T:
 		case IFM_AUTO:
-			printf("%s: lost carrier on AUI port"
-			    ", switching to UTP port\n", sc->sc_dev.dv_xname);
-			le_ledma_setutp(sc);
+			printf(", switching to UTP port");
+			lesetutp(sc);
 		}
 	}
+	printf("\n");
 }
 
 int
-lematch_ledma(struct device *parent, void *vcf, void *aux)
+lematch_ledma(device_t parent, cfdata_t cf, void *aux)
 {
-	struct cfdata *cf = vcf;
 	struct sbus_attach_args *sa = aux;
 
-	return (strcmp(cf->cf_driver->cd_name, sa->sa_name) == 0);
+	return (strcmp(cf->cf_name, sa->sa_name) == 0);
 }
 
 
 void
-leattach_ledma(struct device *parent, struct device *self, void *aux)
+leattach_ledma(device_t parent, device_t self, void *aux)
 {
+	struct le_softc *lesc = device_private(self);
+	struct lance_softc *sc = &lesc->sc_am7990.lsc;
+	struct lsi64854_softc *lsi = device_private(parent);
 	struct sbus_attach_args *sa = aux;
-	struct le_softc *lesc = (struct le_softc *)self;
-	struct lsi64854_softc *lsi = (struct lsi64854_softc *)parent;
-	struct am7990_softc *sc = &lesc->sc_am7990;
 	bus_dma_tag_t dmatag = sa->sa_dmatag;
 	bus_dma_segment_t seg;
 	int rseg, error;
-	/* XXX the following declarations should be elsewhere */
-	extern void myetheraddr(u_char *);
 
+	sc->sc_dev = self;
 	lesc->sc_bustag = sa->sa_bustag;
 
 	/* Establish link to `ledma' device */
@@ -329,12 +332,11 @@ leattach_ledma(struct device *parent, struct device *self, void *aux)
 
 	/* Map device registers */
 	if (sbus_bus_map(sa->sa_bustag,
-			   sa->sa_slot,
-			   sa->sa_offset,
-			   sa->sa_size,
-			   BUS_SPACE_MAP_LINEAR,
-			   0, &lesc->sc_reg) != 0) {
-		printf("%s @ ledma: cannot map registers\n", self->dv_xname);
+			 sa->sa_slot,
+			 sa->sa_offset,
+			 sa->sa_size,
+			 0, &lesc->sc_reg) != 0) {
+		aprint_error(": cannot map registers\n");
 		return;
 	}
 
@@ -345,24 +347,22 @@ leattach_ledma(struct device *parent, struct device *self, void *aux)
 	if ((error = bus_dmamap_create(dmatag, MEMSIZE, 1, MEMSIZE,
 					LEDMA_BOUNDARY, BUS_DMA_NOWAIT,
 					&lesc->sc_dmamap)) != 0) {
-		printf("%s: DMA map create error %d\n", self->dv_xname, error);
+		aprint_error(": DMA map create error %d\n", error);
 		return;
 	}
 
 	/* Allocate DMA buffer */
 	if ((error = bus_dmamem_alloc(dmatag, MEMSIZE, 0, LEDMA_BOUNDARY,
 				 &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s @ ledma: DMA buffer alloc error %d\n",
-			self->dv_xname, error);
+		aprint_error(": DMA buffer alloc error %d\n",error);
 		return;
 	}
 
 	/* Map DMA buffer into kernel space */
 	if ((error = bus_dmamem_map(dmatag, &seg, rseg, MEMSIZE,
-			       (caddr_t *)&sc->sc_mem,
+			       (void **)&sc->sc_mem,
 			       BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		printf("%s @ ledma: DMA buffer map error %d\n",
-			self->dv_xname, error);
+		aprint_error(": DMA buffer map error %d\n", error);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		return;
 	}
@@ -370,8 +370,7 @@ leattach_ledma(struct device *parent, struct device *self, void *aux)
 	/* Load DMA buffer */
 	if ((error = bus_dmamap_load(dmatag, lesc->sc_dmamap, sc->sc_mem,
 			MEMSIZE, NULL, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		printf("%s: DMA buffer map load error %d\n",
-			self->dv_xname, error);
+		aprint_error(": DMA buffer map load error %d\n", error);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		bus_dmamem_unmap(dmatag, sc->sc_mem, MEMSIZE);
 		return;
@@ -381,34 +380,38 @@ leattach_ledma(struct device *parent, struct device *self, void *aux)
 	sc->sc_addr = lesc->sc_laddr & 0xffffff;
 	sc->sc_conf3 = LE_C3_BSWP | LE_C3_ACON | LE_C3_BCON;
 
-	ifmedia_init(&sc->sc_ifmedia, 0, lemediachange, lemediastatus);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_T, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_5, 0, NULL);
-	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_AUTO, 0, NULL);
-	ifmedia_set(&sc->sc_ifmedia, IFM_ETHER | IFM_AUTO);
-	sc->sc_hasifmedia = 1;
 
-	myetheraddr(sc->sc_arpcom.ac_enaddr);
+	/* Assume SBus is grandparent */
+	lesc->sc_sd.sd_reset = (void *)lance_reset;
+	sbus_establish(&lesc->sc_sd, parent);
 
-	sc->sc_copytodesc = am7990_copytobuf_contig;
-	sc->sc_copyfromdesc = am7990_copyfrombuf_contig;
-	sc->sc_copytobuf = am7990_copytobuf_contig;
-	sc->sc_copyfrombuf = am7990_copyfrombuf_contig;
-	sc->sc_zerobuf = am7990_zerobuf_contig;
+	sc->sc_mediachange = lemediachange;
+	sc->sc_mediastatus = lemediastatus;
+	sc->sc_supmedia = lemedia;
+	sc->sc_nsupmedia = NLEMEDIA;
+	sc->sc_defaultmedia = IFM_ETHER|IFM_AUTO;
 
-	sc->sc_rdcsr = le_ledma_rdcsr;
-	sc->sc_wrcsr = le_ledma_wrcsr;
-	sc->sc_hwinit = le_ledma_hwinit;
-	sc->sc_nocarrier = le_ledma_nocarrier;
-	sc->sc_hwreset = le_ledma_hwreset;
+	prom_getether(sa->sa_node, sc->sc_enaddr);
+
+	sc->sc_copytodesc = lance_copytobuf_contig;
+	sc->sc_copyfromdesc = lance_copyfrombuf_contig;
+	sc->sc_copytobuf = lance_copytobuf_contig;
+	sc->sc_copyfrombuf = lance_copyfrombuf_contig;
+	sc->sc_zerobuf = lance_zerobuf_contig;
+
+	sc->sc_rdcsr = lerdcsr;
+	sc->sc_wrcsr = lewrcsr;
+	sc->sc_hwinit = lehwinit;
+	sc->sc_nocarrier = lenocarrier;
+	sc->sc_hwreset = lehwreset;
 
 	/* Establish interrupt handler */
 	if (sa->sa_nintr != 0)
-		(void)bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_NET, 0,
-					 am7990_intr, sc, self->dv_xname);
+		(void)bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_NET,
+					 am7990_intr, sc);
 
 	am7990_config(&lesc->sc_am7990);
 
 	/* now initialize DMA */
-	le_ledma_hwreset(sc);
+	lehwreset(sc);
 }

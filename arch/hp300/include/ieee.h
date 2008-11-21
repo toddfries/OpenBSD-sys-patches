@@ -1,3 +1,3 @@
-/*	$OpenBSD: ieee.h,v 1.1 2001/09/06 00:07:09 millert Exp $	*/
+/*	$NetBSD: ieee.h,v 1.2 1999/08/30 18:58:02 mycroft Exp $	*/
 
 #include <m68k/ieee.h>

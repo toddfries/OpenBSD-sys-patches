@@ -1,5 +1,4 @@
-/*	$OpenBSD: rfcomm_session.c,v 1.3 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: rfcomm_session.c,v 1.12 2008/01/31 19:30:23 plunky Exp $	*/
+/*	$NetBSD: rfcomm_session.c,v 1.14 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,10 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_session.c,v 1.14 2008/08/06 15:01:24 plunky Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
+#include <sys/socketvar.h>
 #include <sys/systm.h>
 #include <sys/types.h>
 
@@ -92,7 +95,8 @@ struct rfcomm_session_list
 struct rfcomm_session_list
 	rfcomm_session_listen = LIST_HEAD_INITIALIZER(rfcomm_session_listen);
 
-struct pool rfcomm_credit_pool;
+POOL_INIT(rfcomm_credit_pool, sizeof(struct rfcomm_credit),
+		0, 0, 0, "rfcomm_credit", NULL, IPL_SOFTNET);
 
 /*
  * RFCOMM System Parameters (see section 5.3)
@@ -149,17 +153,6 @@ static const uint8_t crctable[256] = {	/* reversed, 8-bit, poly=0x07 */
 #define FCS(f, d)	crctable[(f) ^ (d)]
 
 /*
- * rfcomm_init()
- *
- * initialize the "credit pool".
- */
-void
-rfcomm_init(void)
-{
-	pool_init(&rfcomm_credit_pool, 0, 0, 0, 0, "rfcomm_credit", NULL);
-}
-
-/*
  * rfcomm_session_alloc(list, sockaddr)
  *
  * allocate a new session and fill in the blanks, then
@@ -170,6 +163,7 @@ rfcomm_session_alloc(struct rfcomm_session_list *list,
 			struct sockaddr_bt *laddr)
 {
 	struct rfcomm_session *rs;
+	struct sockopt sopt;
 	int err;
 
 	rs = malloc(sizeof(*rs), M_BLUETOOTH, M_NOWAIT | M_ZERO);
@@ -178,7 +172,8 @@ rfcomm_session_alloc(struct rfcomm_session_list *list,
 
 	rs->rs_state = RFCOMM_SESSION_CLOSED;
 
-	timeout_set(&rs->rs_timeout, rfcomm_session_timeout, rs);
+	callout_init(&rs->rs_timeout, 0);
+	callout_setfunc(&rs->rs_timeout, rfcomm_session_timeout, rs);
 
 	SIMPLEQ_INIT(&rs->rs_credits);
 	LIST_INIT(&rs->rs_dlcs);
@@ -189,7 +184,10 @@ rfcomm_session_alloc(struct rfcomm_session_list *list,
 		return NULL;
 	}
 
-	(void)l2cap_getopt(rs->rs_l2cap, SO_L2CAP_OMTU, &rs->rs_mtu);
+	sockopt_init(&sopt, BTPROTO_L2CAP, SO_L2CAP_OMTU, 0);
+	(void)l2cap_getopt(rs->rs_l2cap, &sopt);
+	(void)sockopt_get(&sopt, &rs->rs_mtu, sizeof(rs->rs_mtu));
+	sockopt_destroy(&sopt);
 
 	if (laddr->bt_psm == L2CAP_PSM_ANY)
 		laddr->bt_psm = L2CAP_PSM_RFCOMM;
@@ -221,8 +219,8 @@ rfcomm_session_free(struct rfcomm_session *rs)
 	 * but it will call us back right away (there are no DLC's) so
 	 * not to worry.
 	 */
-	timeout_del(&rs->rs_timeout);
-	if (timeout_triggered(&rs->rs_timeout))
+	callout_stop(&rs->rs_timeout);
+	if (callout_invoking(&rs->rs_timeout))
 		return;
 
 	/*
@@ -246,6 +244,7 @@ rfcomm_session_free(struct rfcomm_session *rs)
 	/* Goodbye! */
 	LIST_REMOVE(rs, rs_next);
 	l2cap_detach(&rs->rs_l2cap);
+	callout_destroy(&rs->rs_timeout);
 	free(rs, M_BLUETOOTH);
 }
 
@@ -298,11 +297,11 @@ rfcomm_session_timeout(void *arg)
 {
 	struct rfcomm_session *rs = arg;
 	struct rfcomm_dlc *dlc;
-	int s;
 
 	KASSERT(rs != NULL);
 
-	s = splsoftnet();
+	mutex_enter(bt_lock);
+	callout_ack(&rs->rs_timeout);
 
 	if (rs->rs_state != RFCOMM_SESSION_OPEN) {
 		DPRINTF("timeout\n");
@@ -319,7 +318,7 @@ rfcomm_session_timeout(void *arg)
 		DPRINTF("expiring\n");
 		rfcomm_session_free(rs);
 	}
-	splx(s);
+	mutex_exit(bt_lock);
 }
 
 /***********************************************************************
@@ -340,6 +339,7 @@ static void
 rfcomm_session_connected(void *arg)
 {
 	struct rfcomm_session *rs = arg;
+	struct sockopt sopt;
 
 	DPRINTF("Connected\n");
 
@@ -352,7 +352,10 @@ rfcomm_session_connected(void *arg)
 	 * We must take note of the L2CAP MTU because currently
 	 * the L2CAP implementation can only do Basic Mode.
 	 */
-	l2cap_getopt(rs->rs_l2cap, SO_L2CAP_OMTU, &rs->rs_mtu);
+	sockopt_init(&sopt, BTPROTO_L2CAP, SO_L2CAP_OMTU, 0);
+	(void)l2cap_getopt(rs->rs_l2cap, &sopt);
+	(void)sockopt_get(&sopt, &rs->rs_mtu, sizeof(rs->rs_mtu));
+	sockopt_destroy(&sopt);
 
 	rs->rs_mtu -= 6; /* (RFCOMM overhead could be this big) */
 	if (rs->rs_mtu < RFCOMM_MTU_MIN) {
@@ -367,7 +370,7 @@ rfcomm_session_connected(void *arg)
 		if (err)
 			rfcomm_session_disconnected(rs, err);
 
-		timeout_add(&rs->rs_timeout, rfcomm_ack_timeout * hz);
+		callout_schedule(&rs->rs_timeout, rfcomm_ack_timeout * hz);
 	}
 }
 
@@ -419,7 +422,7 @@ rfcomm_session_newconn(void *arg, struct sockaddr_bt *laddr,
 	 * schedule an expiry so that if nothing comes of it we
 	 * can punt.
 	 */
-	timeout_add(&new->rs_timeout, rfcomm_mcc_timeout * hz);
+	callout_schedule(&new->rs_timeout, rfcomm_mcc_timeout * hz);
 
 	return new->rs_l2cap;
 }
@@ -469,8 +472,8 @@ rfcomm_session_complete(void *arg, int count)
 				dlc->rd_state = RFCOMM_DLC_WAIT_DISCONNECT;
 				rfcomm_session_send_frame(rs, RFCOMM_FRAME_DISC,
 							    dlc->rd_dlci);
-				timeout_add(&dlc->rd_timeout,
-				    rfcomm_ack_timeout * hz);
+				callout_schedule(&dlc->rd_timeout,
+						    rfcomm_ack_timeout * hz);
 			}
 		}
 
@@ -529,8 +532,8 @@ rfcomm_session_linkmode(void *arg, int new)
 					rfcomm_dlc_close(dlc, err);
 				} else {
 					dlc->rd_state = RFCOMM_DLC_WAIT_RECV_UA;
-					timeout_add(&dlc->rd_timeout,
-					    rfcomm_ack_timeout * hz);
+					callout_schedule(&dlc->rd_timeout,
+							rfcomm_ack_timeout * hz);
 					break;
 				}
 			}
@@ -544,7 +547,7 @@ rfcomm_session_linkmode(void *arg, int new)
 
 			rs->rs_state = RFCOMM_SESSION_WAIT_DISCONNECT;
 			rfcomm_session_send_frame(rs, RFCOMM_FRAME_DISC, 0);
-			timeout_add(&rs->rs_timeout, rfcomm_ack_timeout * hz);
+			callout_schedule(&rs->rs_timeout, rfcomm_ack_timeout * hz);
 			break;
 
 		case RFCOMM_DLC_WAIT_SEND_UA: /* they are connecting */
@@ -826,7 +829,7 @@ rfcomm_session_recv_ua(struct rfcomm_session *rs, int dlci)
 	if (dlci == 0) {
 		switch (rs->rs_state) {
 		case RFCOMM_SESSION_WAIT_CONNECT:	/* We sent SABM */
-			timeout_del(&rs->rs_timeout);
+			callout_stop(&rs->rs_timeout);
 			rs->rs_state = RFCOMM_SESSION_OPEN;
 			LIST_FOREACH(dlc, &rs->rs_dlcs, rd_next) {
 				if (dlc->rd_state == RFCOMM_DLC_WAIT_SESSION)
@@ -835,7 +838,7 @@ rfcomm_session_recv_ua(struct rfcomm_session *rs, int dlci)
 			break;
 
 		case RFCOMM_SESSION_WAIT_DISCONNECT:	/* We sent DISC */
-			timeout_del(&rs->rs_timeout);
+			callout_stop(&rs->rs_timeout);
 			rs->rs_state = RFCOMM_SESSION_CLOSED;
 			l2cap_disconnect(rs->rs_l2cap, 0);
 			break;
@@ -875,7 +878,7 @@ check:	/* last one out turns out the light */
 	if (LIST_EMPTY(&rs->rs_dlcs)) {
 		rs->rs_state = RFCOMM_SESSION_WAIT_DISCONNECT;
 		rfcomm_session_send_frame(rs, RFCOMM_FRAME_DISC, 0);
-		timeout_add(&rs->rs_timeout, rfcomm_ack_timeout * hz);
+		callout_schedule(&rs->rs_timeout, rfcomm_ack_timeout * hz);
 	}
 }
 
@@ -1160,7 +1163,7 @@ rfcomm_session_recv_mcc_msc(struct rfcomm_session *rs, int cr, struct mbuf *m)
 
 	if (cr == 0) {	/* ignore acks */
 		if (dlc != NULL)
-			timeout_del(&dlc->rd_timeout);
+			callout_stop(&dlc->rd_timeout);
 
 		return;
 	}
@@ -1216,11 +1219,11 @@ rfcomm_session_recv_mcc_rpn(struct rfcomm_session *rs, int cr, struct mbuf *m)
 	rpn.xoff_char = RFCOMM_RPN_XOFF_CHAR;
 
 	if (m->m_pkthdr.len == sizeof(rpn)) {
-		m_copydata(m, 0, sizeof(rpn), (caddr_t)&rpn);
+		m_copydata(m, 0, sizeof(rpn), &rpn);
 		rpn.param_mask = RFCOMM_RPN_PM_ALL;
 	} else if (m->m_pkthdr.len == 1) {
-		m_copydata(m, 0, 1, (caddr_t)&rpn);
-		rpn.param_mask = letoh16(rpn.param_mask);
+		m_copydata(m, 0, 1, &rpn);
+		rpn.param_mask = le16toh(rpn.param_mask);
 	} else {
 		DPRINTF("Bad RPN length (%d)\n", m->m_pkthdr.len);
 		return;
@@ -1276,7 +1279,7 @@ rfcomm_session_recv_mcc_rls(struct rfcomm_session *rs, int cr, struct mbuf *m)
 		return;
 	}
 
-	m_copydata(m, 0, sizeof(rls), (caddr_t)&rls);
+	m_copydata(m, 0, sizeof(rls), &rls);
 
 	/*
 	 * So far as I can tell, we just send back what
@@ -1304,10 +1307,10 @@ rfcomm_session_recv_mcc_pn(struct rfcomm_session *rs, int cr, struct mbuf *m)
 		return;
 	}
 
-	m_copydata(m, 0, sizeof(pn), (caddr_t)&pn);
+	m_copydata(m, 0, sizeof(pn), &pn);
 
 	pn.dlci &= 0x3f;
-	pn.mtu = letoh16(pn.mtu);
+	pn.mtu = le16toh(pn.mtu);
 
 	dlc = rfcomm_dlc_lookup(rs, pn.dlci);
 	if (cr) {	/* Command */
@@ -1360,7 +1363,7 @@ rfcomm_session_recv_mcc_pn(struct rfcomm_session *rs, int cr, struct mbuf *m)
 		if (dlc == NULL)
 			return;
 
-		timeout_del(&dlc->rd_timeout);
+		callout_stop(&dlc->rd_timeout);
 
 		if (pn.mtu > RFCOMM_MTU_MAX || pn.mtu > dlc->rd_mtu) {
 			dlc->rd_state = RFCOMM_DLC_WAIT_DISCONNECT;
@@ -1369,8 +1372,8 @@ rfcomm_session_recv_mcc_pn(struct rfcomm_session *rs, int cr, struct mbuf *m)
 			if (err)
 				goto close;
 
-			timeout_add(&dlc->rd_timeout,
-			    rfcomm_ack_timeout * hz);
+			callout_schedule(&dlc->rd_timeout,
+					    rfcomm_ack_timeout * hz);
 			return;
 		}
 		dlc->rd_mtu = pn.mtu;
@@ -1385,7 +1388,7 @@ rfcomm_session_recv_mcc_pn(struct rfcomm_session *rs, int cr, struct mbuf *m)
 			dlc->rd_txcred = (pn.credits & 0x07);
 		}
 
-		timeout_add(&dlc->rd_timeout, rfcomm_ack_timeout * hz);
+		callout_schedule(&dlc->rd_timeout, rfcomm_ack_timeout * hz);
 
 		/* set link mode */
 		err = rfcomm_dlc_setmode(dlc);

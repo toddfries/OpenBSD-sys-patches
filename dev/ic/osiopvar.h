@@ -1,7 +1,6 @@
-/*	$OpenBSD: osiopvar.h,v 1.10 2007/04/13 18:34:48 krw Exp $	*/
-/*	$NetBSD: osiopvar.h,v 1.3 2002/05/14 02:58:35 matt Exp $	*/
+/*	$NetBSD: osiopvar.h,v 1.13 2008/05/14 13:29:28 tsutsui Exp $	*/
 
-/*
+/*-
  * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,8 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -69,8 +66,8 @@
 #define osiop_read_4(sc, reg)					\
     bus_space_read_4((sc)->sc_bst, (sc)->sc_reg, reg)
 #define osiop_write_4(sc, reg, val)				\
-    bus_space_write_4((sc)->sc_bst, (sc)->sc_reg, reg, val)     
-        
+    bus_space_write_4((sc)->sc_bst, (sc)->sc_reg, reg, val)
+
 /*
  * The largest single request will be MAXPHYS bytes which will require
  * at most MAXPHYS/NBPG+1 chain elements to describe, i.e. if none of
@@ -92,28 +89,27 @@
  * Data Structure for SCRIPTS program
  */
 typedef struct buf_table {
-	u_int32_t count;
-	u_int32_t addr;
+	uint32_t count;
+	uint32_t addr;
 } buf_table_t;
 
 struct osiop_ds {
-	u_int32_t scsi_addr;		/* SCSI ID & sync */
-	u_int32_t pad1;
-	buf_table_t id;			/* Identify message */
-	buf_table_t cmd;		/* SCSI command */
-	buf_table_t status;		/* Status */
-	buf_table_t msg;		/* Message */
-	buf_table_t msgin;		/* Message in */
-	buf_table_t extmsg;		/* Extended message in */
-	buf_table_t synmsg;		/* Sync transfer request */
-	buf_table_t data[OSIOP_NSG];	/* DMA S/G buffers */
-
-	u_int8_t msgout[8];
-	u_int8_t msgbuf[8];
-	u_int8_t stat[8];
-
-	struct scsi_generic scsi_cmd;	/* DMA'able copy of xs->cmd */
-	u_int32_t pad[1+3];		/* pad to 256 bytes */
+	uint32_t scsi_addr;		/*   0: SCSI ID & sync */
+	uint32_t pad1;			/*   4: padding */
+	buf_table_t id;			/*   8: Identify message */
+	buf_table_t cmd;		/*  16: SCSI command */
+	buf_table_t status;		/*  24: Status */
+	buf_table_t msg;		/*  32: Message */
+	buf_table_t msgin;		/*  40: Message in */
+	buf_table_t extmsg;		/*  48: Extended message in */
+	buf_table_t synmsg;		/*  56: Sync transfer request */
+	buf_table_t data[OSIOP_NSG];	/*  64: DMA S/G buffers */
+					/*      (8 * OSIOP_NSG == 136bytes) */
+	uint8_t scsipi_cmd[16];		/* 200: cmd buf */
+	uint8_t msgout[8];		/* 216: message out buf */
+	uint8_t msgbuf[8];		/* 224: message in buf */
+	uint8_t stat[8];		/* 232: stat buf */
+	uint8_t pad2[16];		/* 240: padding to 256bytes */
 } __packed;
 
 /* status can hold the SCSI_* status values, and 2 additional values: */
@@ -123,13 +119,13 @@ struct osiop_ds {
 #define MSG_INVALID		0xff	/* dummy value for message buffer */
 
 #define OSIOP_DSOFF(x)		offsetof(struct osiop_ds, x)
+#define OSIOP_DSCMDOFF		OSIOP_DSOFF(scsipi_cmd[0])
 #define OSIOP_DSIDOFF		OSIOP_DSOFF(msgout[0])
 #define OSIOP_DSMSGOFF		OSIOP_DSOFF(msgbuf[0])
 #define OSIOP_DSMSGINOFF	OSIOP_DSOFF(msgbuf[1])
 #define OSIOP_DSEXTMSGOFF	OSIOP_DSOFF(msgbuf[2])
 #define OSIOP_DSSYNMSGOFF	OSIOP_DSOFF(msgbuf[3])
 #define OSIOP_DSSTATOFF		OSIOP_DSOFF(stat[0])
-#define OSIOP_DSCMDOFF		OSIOP_DSOFF(scsi_cmd)
 
 /*
  * ACB. Holds additional information for each SCSI command Comments:
@@ -140,7 +136,7 @@ struct osiop_ds {
  */
 struct osiop_acb {
 	TAILQ_ENTRY(osiop_acb) chain;
-	struct scsi_xfer *xs;	/* SCSI xfer ctrl block from upper layer */
+	struct scsipi_xfer *xs;	/* SCSI xfer ctrl block from upper layer */
 	struct osiop_softc *sc;	/* points back to our adapter */
 
 	bus_dmamap_t datadma;	/* DMA map for data transfer */
@@ -148,9 +144,11 @@ struct osiop_acb {
 	struct osiop_ds *ds;	/* data structure for this acb */
 	bus_size_t dsoffset;	/* offset of data structure for this acb */
 
-	int	xsflags;	/* copy of xs->flags */
-	int	datalen;
+	bus_size_t cmdlen;	/* command length */
+	bus_size_t datalen;	/* transfer data length */
+#ifdef OSIOP_DEBUG
 	void *data;		/* transfer data buffer ptr */
+#endif
 
 	bus_addr_t curaddr;	/* current transfer data buffer */
 	bus_size_t curlen;	/* current transfer data length */
@@ -164,9 +162,8 @@ struct osiop_acb {
 
 	int flags;		/* cmd slot flags */
 #define ACB_F_TIMEOUT	0x01	/* command timeout */
-#define ACB_F_AUTOSENSE 0x02	/* request sense due to SCSI_CHECK */
 
-	u_int8_t intstat;	/* buffer to save sc_flags on disconnect */
+	uint8_t intstat;	/* buffer to save sc_flags on disconnect */
 };
 
 /*
@@ -176,7 +173,6 @@ struct osiop_acb {
  */
 struct osiop_tinfo {
 	int cmds;		/* number of commands processed */
-	int senses;		/* number of sense requests */
 	int dconns;		/* number of disconnects */
 	int touts;		/* number of timeouts */
 	int perrs;		/* number of parity errors */
@@ -187,12 +183,12 @@ struct osiop_tinfo {
 #define TI_NOSYNC	0x01	/* disable sync xfer on this target */
 #define TI_NODISC	0x02	/* disable disconnect on this target */
 	int state;		/* negotiation state */
-	u_int8_t sxfer;		/* value for SXFER reg */
-	u_int8_t sbcl;		/* value for SBCL reg */
+	uint8_t sxfer;		/* value for SXFER reg */
+	uint8_t sbcl;		/* value for SBCL reg */
 };
 
 struct osiop_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 
 	bus_space_tag_t sc_bst;		/* bus space tag */
 	bus_space_handle_t sc_reg;	/* register I/O handle */
@@ -201,7 +197,7 @@ struct osiop_softc {
 	bus_dmamap_t sc_scrdma;		/* script dma map */
 	bus_dmamap_t sc_dsdma;		/* script data dma map */
 
-	u_int32_t *sc_script;		/* ptr to script memory */
+	uint32_t *sc_script;		/* ptr to script memory */
 	struct osiop_ds *sc_ds;		/* ptr to data structure memory */
 
 	int sc_id;			/* adapter SCSI id */
@@ -215,7 +211,8 @@ struct osiop_softc {
 				        ready_list,
 				        nexus_list;
 
-	struct scsi_link    sc_link;
+	struct scsipi_adapter sc_adapter;
+	struct scsipi_channel sc_channel;
 
 	struct osiop_tinfo sc_tinfo[OSIOP_NTGT];
 
@@ -231,15 +228,15 @@ struct osiop_softc {
 
 	int sc_minsync;
 
-	u_int8_t sc_dstat;
-	u_int8_t sc_sstat0;
-	u_int8_t sc_sstat1;
-	u_int8_t sc_istat;
-	u_int8_t sc_dcntl;
-	u_int8_t sc_ctest7;
-	u_int8_t sc_dmode;
-	u_int8_t sc_sien;
-	u_int8_t sc_dien;
+	uint8_t sc_dstat;
+	uint8_t sc_sstat0;
+	uint8_t sc_sstat1;
+	uint8_t sc_istat;
+	uint8_t sc_dcntl;
+	uint8_t sc_ctest4;
+	uint8_t sc_ctest7;
+	uint8_t sc_sien;
+	uint8_t sc_dien;
 };
 
 /* negotiation states */

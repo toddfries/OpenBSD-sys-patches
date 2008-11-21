@@ -35,7 +35,7 @@
 __FBSDID("$FreeBSD: src/sys/compat/ndis/kern_ndis.c,v 1.60.2.5 2005/04/01 17:14:20 wpaul Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: kern_ndis.c,v 1.7 2006/11/16 01:32:44 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_ndis.c,v 1.15 2008/11/13 12:09:52 ad Exp $");
 #endif
 
 #include <sys/param.h>
@@ -56,22 +56,16 @@ __KERNEL_RCSID(0, "$NetBSD: kern_ndis.c,v 1.7 2006/11/16 01:32:44 christos Exp $
 #include <sys/conf.h>
 
 #include <sys/kernel.h>
-#ifdef __FreeBSD__
 #include <sys/module.h>
-#else
-#include <sys/lkm.h>
 #include <sys/mbuf.h>
-#endif
 #include <sys/kthread.h>
-#include <machine/bus.h>
+#include <sys/bus.h>
 #ifdef __FreeBSD__
 #include <machine/resource.h>
-#include <sys/bus.h>
 #include <sys/rman.h>
 #endif
 
 #ifdef __NetBSD__
-#include <machine/bus.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #endif
@@ -98,6 +92,8 @@ __KERNEL_RCSID(0, "$NetBSD: kern_ndis.c,v 1.7 2006/11/16 01:32:44 christos Exp $
 #include <compat/ndis/usbd_var.h>
 #include <dev/if_ndis/if_ndisvar.h>
 
+MODULE(MODULE_CLASS_MISC, ndis, NULL);
+
 #define NDIS_DUMMY_PATH "\\\\some\\bogus\\path"
 
 __stdcall static void ndis_status_func(ndis_handle, ndis_status,
@@ -110,10 +106,6 @@ __stdcall static void ndis_sendrsrcavail_func(ndis_handle);
 __stdcall static void ndis_intrhand(kdpc *, device_object *,
 	irp *, struct ndis_softc *);
 
-#ifdef __NetBSD__
-extern int ndis_lkmentry(struct lkm_table *lkmtp, int cmd, int ver);
-#endif
-	
 static image_patch_table kernndis_functbl[] = {
 	IMPORT_FUNC(ndis_status_func),
 	IMPORT_FUNC(ndis_statusdone_func),
@@ -148,9 +140,7 @@ struct ndisproc {
 };
 
 static void ndis_return(void *);
-//#ifdef NDIS_LKM
-/*static*/ int ndis_create_kthreads(void);
-//#endif
+static int ndis_create_kthreads(void);
 static void ndis_destroy_kthreads(void);
 static void ndis_stop_thread(int);
 static int ndis_enlarge_thrqueue(int);
@@ -261,30 +251,15 @@ ndis_modevent(module_t mod, int cmd, void *arg)
 DEV_MODULE(ndisapi, ndis_modevent, NULL);
 MODULE_VERSION(ndisapi, 1);
 #endif
-#ifdef __NetBSD__
-MOD_MISC( "ndisapi");
 
-#ifndef NDIS_LKM
-int ndis_lkm_handle(struct lkm_table *lkmtp, int cmd);
-void call_ndis_create_kthreads(void *arg);
-
-/* Just to schedule ndis_create_kthreads() to be called after init
- * has been created.
- */
-void call_ndis_create_kthreads(void *arg)
-{
-	ndis_create_kthreads();
-}
-#endif
-
-/*static*/ int
-ndis_lkm_handle(struct lkm_table *lkmtp, int cmd)
+static int
+ndis_modcmd(modcmd_t cmd, void *arg)
 {
 	int			error = 0;
 	image_patch_table	*patch;
 
 	switch (cmd) {
-	case LKM_E_LOAD:
+	case MODULE_CMD_INIT:
 		/* Initialize subsystems */
 		windrv_libinit();
 		hal_libinit();
@@ -301,17 +276,12 @@ ndis_lkm_handle(struct lkm_table *lkmtp, int cmd)
 			patch++;
 		}
 
-#ifdef NDIS_LKM
-		ndis_create_kthreads();
-#else
-		/* Shedule threads to be created after autoconfiguration */
-		kthread_create(call_ndis_create_kthreads, NULL);
-#endif
-
 		TAILQ_INIT(&ndis_devhead);
 
+		ndis_create_kthreads();
 		break;
-	case LKM_E_UNLOAD:
+
+	case MODULE_CMD_FINI:
 		/* stop kthreads */
 		ndis_destroy_kthreads();
 
@@ -331,23 +301,14 @@ ndis_lkm_handle(struct lkm_table *lkmtp, int cmd)
 		}
 
 		break;
-	case LKM_E_STAT:
-		break;
+
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
 	return(error);
 }
-
-int
-ndis_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
-{
-	DISPATCH(lkmtp, cmd, ver, 
-		 ndis_lkm_handle, ndis_lkm_handle, ndis_lkm_handle);
-}
-#endif /* __NetBSD__ */
 
 /*
  * We create two kthreads for the NDIS subsystem. One of them is a task
@@ -579,7 +540,9 @@ ndis_destroy_kthreads()
 	}
 
 	mtx_destroy(&ndis_req_mtx);
+#ifndef __NetBSD__
 	mtx_destroy(&ndis_thr_mtx);
+#endif
 
 	return;
 }
@@ -939,11 +902,11 @@ ndis_thsuspend(p, m, timo)
  */
 	if (m != NULL) {
 		//mtx_unlock(m);
-		error = ltsleep(&p->p_siglist, curlwp->l_priority, 
+		error = ltsleep(&p->p_sigpend.sp_set, curlwp->l_priority, 
 				"ndissp", timo, m);
 		//mtx_lock(m);
 	} else {
-		error = ltsleep(&p->p_siglist, curlwp->l_priority/*|PNORELOCK*/, 
+		error = ltsleep(&p->p_sigpend.sp_set, curlwp->l_priority/*|PNORELOCK*/, 
 				"ndissp", timo, 0 /*&p->p_lock*/);
 	}
 
@@ -956,7 +919,7 @@ void
 ndis_thresume(p)
 	struct proc		*p;
 {
-	wakeup(&p->p_siglist);
+	wakeup(&p->p_sigpend.sp_set);
 	
 	return;
 }
@@ -1219,7 +1182,7 @@ ndis_create_sysctls(arg)
 		}
 
 		/* See if we already have a sysctl with this name */
-/* TODO: Is something like this nesicary in NetBSD?  I'm guessing this
+/* TODO: Is something like this necessary in NetBSD?  I'm guessing this
    TODO: is just checking if any of the information in the .inf file was
    TODO: already determined by FreeBSD's autoconfiguration which seems to
    TODO: add dev.XXX sysctl's beginning with %.  (NetBSD dosen't seem to do this).
@@ -1410,7 +1373,7 @@ ndis_return_packet(buf, arg)
 	void			*buf;	/* not used */
 	void			*arg;
 #else
-ndis_return_packet(struct mbuf *m, caddr_t buf,
+ndis_return_packet(struct mbuf *m, void *buf,
     size_t size, void *arg)
 #endif
 

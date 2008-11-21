@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_exec_elf32.c,v 1.13 2006/11/16 01:32:42 christos Exp $	*/
+/*	$NetBSD: ibcs2_exec_elf32.c,v 1.17 2007/12/08 18:36:00 dsl Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1998 Scott Bartram
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_elf32.c,v 1.13 2006/11/16 01:32:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_elf32.c,v 1.17 2007/12/08 18:36:00 dsl Exp $");
 
 #define ELFSIZE		32
 
@@ -52,7 +52,7 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_elf32.c,v 1.13 2006/11/16 01:32:42 christ
 
 #include <sys/mman.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/reg.h>
 #include <machine/ibcs2_machdep.h>
 
@@ -61,8 +61,8 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_elf32.c,v 1.13 2006/11/16 01:32:42 christ
 #include <compat/ibcs2/ibcs2_errno.h>
 #include <compat/ibcs2/ibcs2_util.h>
 
-static int ibcs2_elf32_signature __P((struct lwp *l, struct exec_package *,
-				      Elf32_Ehdr *));
+static int ibcs2_elf32_signature(struct lwp *l, struct exec_package *,
+				      Elf32_Ehdr *);
 
 /*
  * The SCO compiler adds the string "SCO" to the .notes section of all
@@ -74,10 +74,7 @@ static int ibcs2_elf32_signature __P((struct lwp *l, struct exec_package *,
 #define SCO_SIGNATURE	"\004\0\0\0\014\0\0\0\001\0\0\0SCO\0"
 
 static int
-ibcs2_elf32_signature(l, epp, eh)
-	struct lwp *l;
-	struct exec_package *epp;
-	Elf32_Ehdr *eh;
+ibcs2_elf32_signature(struct lwp *l, struct exec_package *epp, Elf32_Ehdr *eh)
 {
 	size_t shsize = sizeof(Elf32_Shdr) * eh->e_shnum;
 	size_t i;
@@ -132,7 +129,7 @@ ibcs2_elf32_probe(struct lwp *l, struct exec_package *epp, void *eh, char *itp,
                 return error;
 
 	if (itp) {
-		if ((error = emul_find_interp(l, epp->ep_esch->es_emul->e_path, itp)))
+		if ((error = emul_find_interp(l, epp, itp)))
 			return error;
 	}
 	return 0;

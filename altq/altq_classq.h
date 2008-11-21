@@ -1,5 +1,5 @@
-/*	$OpenBSD: altq_classq.h,v 1.4 2008/04/20 07:05:51 deraadt Exp $	*/
-/*	$KAME: altq_classq.h,v 1.4 2001/02/09 07:20:40 kjc Exp $	*/
+/*	$NetBSD: altq_classq.h,v 1.7 2006/10/12 19:59:08 peter Exp $	*/
+/*	$KAME: altq_classq.h,v 1.6 2003/01/07 07:33:38 kjc Exp $	*/
 
 /*
  * Copyright (c) 1991-1997 Regents of the University of California.
@@ -89,7 +89,7 @@ extern void		_flushq(class_queue_t *);
 /*
  * inlined versions
  */
-static __inline void
+static inline void
 _addq(class_queue_t *q, struct mbuf *m)
 {
         struct mbuf *m0;
@@ -103,7 +103,7 @@ _addq(class_queue_t *q, struct mbuf *m)
 	qlen(q)++;
 }
 
-static __inline struct mbuf *
+static inline struct mbuf *
 _getq(class_queue_t *q)
 {
 	struct mbuf  *m, *m0;
@@ -120,7 +120,7 @@ _getq(class_queue_t *q)
 }
 
 /* drop a packet at the tail of the queue */
-static __inline struct mbuf *
+static inline struct mbuf *
 _getq_tail(class_queue_t *q)
 {
 	struct mbuf *m, *m0, *prev;
@@ -142,7 +142,7 @@ _getq_tail(class_queue_t *q)
 }
 
 /* randomly select a packet in the queue */
-static __inline struct mbuf *
+static inline struct mbuf *
 _getq_random(class_queue_t *q)
 {
 	struct mbuf *m;
@@ -155,7 +155,7 @@ _getq_random(class_queue_t *q)
 	else {
 		struct mbuf *prev = NULL;
 
-		n = arc4random_uniform(qlen(q)) + 1;
+		n = random() % qlen(q) + 1;
 		for (i = 0; i < n; i++) {
 			prev = m;
 			m = m->m_nextpkt;
@@ -169,7 +169,7 @@ _getq_random(class_queue_t *q)
 	return (m);
 }
 
-static __inline void
+static inline void
 _removeq(class_queue_t *q, struct mbuf *m)
 {
 	struct mbuf *m0, *prev;
@@ -187,7 +187,7 @@ _removeq(class_queue_t *q, struct mbuf *m)
 	qlen(q)--;
 }
 
-static __inline void
+static inline void
 _flushq(class_queue_t *q)
 {
 	struct mbuf *m;

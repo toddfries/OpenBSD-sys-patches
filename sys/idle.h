@@ -1,4 +1,4 @@
-/*	$NetBSD: idle.h,v 1.2 2007/05/17 14:51:42 yamt Exp $	*/
+/*	$NetBSD: idle.h,v 1.4 2008/05/27 14:48:52 ad Exp $	*/
 
 /*-
  * Copyright (c)2002, 2006 YAMAMOTO Takashi,

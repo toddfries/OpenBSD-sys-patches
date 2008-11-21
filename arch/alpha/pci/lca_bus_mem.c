@@ -1,5 +1,4 @@
-/* $OpenBSD: lca_bus_mem.c,v 1.5 2001/11/06 19:53:13 miod Exp $ */
-/* $NetBSD: lca_bus_mem.c,v 1.8 1997/09/02 13:19:32 thorpej Exp $ */
+/* $NetBSD: lca_bus_mem.c,v 1.9 2000/06/29 08:58:47 mrg Exp $ */
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -27,6 +26,10 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  */
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(1, "$NetBSD: lca_bus_mem.c,v 1.9 2000/06/29 08:58:47 mrg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>

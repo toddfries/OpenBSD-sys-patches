@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_stat.h,v 1.15 2007/09/07 15:00:20 art Exp $	*/
-/*	$NetBSD: uvm_stat.h,v 1.19 2001/02/04 10:55:58 mrg Exp $	*/
+/*	$NetBSD: uvm_stat.h,v 1.44 2008/08/08 17:09:28 skrll Exp $	*/
 
 /*
  *
@@ -38,60 +37,19 @@
 #ifndef _UVM_UVM_STAT_H_
 #define _UVM_UVM_STAT_H_
 
+#if defined(_KERNEL_OPT)
+#include "opt_uvmhist.h"
+#endif
+
 #include <sys/queue.h>
+#ifdef UVMHIST
+#include <sys/cpu.h>
+#include <sys/malloc.h>
+#endif
 
 /*
  * uvm_stat: monitor what is going on with uvm (or whatever)
  */
-
-/*
- * counters  [XXX: maybe replace event counters with this]
- */
-
-#define UVMCNT_MASK	0xf			/* rest are private */
-#define UVMCNT_CNT	0			/* normal counter */
-#define UVMCNT_DEV	1			/* device event counter */
-
-struct uvm_cnt {
-	int c;					/* the value */
-	int t;					/* type */
-	struct uvm_cnt *next;			/* global list of cnts */
-	char *name;				/* counter name */
-	void *p;				/* private data */
-};
-
-#ifdef _KERNEL
-
-extern struct uvm_cnt *uvm_cnt_head;
-
-/*
- * counter operations.  assume spl is set ok.
- */
-
-#define UVMCNT_INIT(CNT,TYP,VAL,NAM,PRIV) \
-do { \
-	CNT.c = VAL; \
-	CNT.t = TYP; \
-	CNT.next = uvm_cnt_head; \
-	uvm_cnt_head = &CNT; \
-	CNT.name = NAM; \
-	CNT.p = PRIV; \
-} while (0)
-
-#define UVMCNT_SET(C,V) \
-do { \
-	(C).c = (V); \
-} while (0)
-
-#define UVMCNT_ADD(C,V) \
-do { \
-	(C).c += (V); \
-} while (0)
-
-#define UVMCNT_INCR(C) UVMCNT_ADD(C,1)
-#define UVMCNT_DECR(C) UVMCNT_ADD(C,-1)
-
-#endif /* _KERNEL */
 
 /*
  * history/tracing
@@ -99,22 +57,24 @@ do { \
 
 struct uvm_history_ent {
 	struct timeval tv; 		/* time stamp */
-	char *fmt; 			/* printf format */
+	int cpunum;
+	const char *fmt;		/* printf format */
 	size_t fmtlen;			/* length of printf format */
-	char *fn;			/* function name */
+	const char *fn;			/* function name */
 	size_t fnlen;			/* length of function name */
 	u_long call;			/* function call number */
 	u_long v[4];			/* values */
 };
 
 struct uvm_history {
-	const char *name;		/* name of this this history */
+	const char *name;		/* name of this history */
 	size_t namelen;			/* length of name, not including null */
 	LIST_ENTRY(uvm_history) list;	/* link on list of all histories */
 	int n;				/* number of entries */
 	int f; 				/* next free one */
-	simple_lock_data_t l;		/* lock on this history */
+	int unused;			/* old location of lock */
 	struct uvm_history_ent *e;	/* the malloc'd entries */
+	kmutex_t l;			/* lock on this history */
 };
 
 LIST_HEAD(uvm_history_head, uvm_history);
@@ -132,7 +92,7 @@ LIST_HEAD(uvm_history_head, uvm_history);
 #define	UVMHIST_MAPHIST		0x00000001	/* maphist */
 #define	UVMHIST_PDHIST		0x00000002	/* pdhist */
 #define	UVMHIST_UBCHIST		0x00000004	/* ubchist */
-#define	UVMHIST_PGHIST		0x00000008	/* pghist */
+#define	UVMHIST_LOANHIST	0x00000008	/* loanhist */
 
 #ifdef _KERNEL
 
@@ -149,6 +109,8 @@ LIST_HEAD(uvm_history_head, uvm_history);
 #define UVMHIST_FUNC(FNAME)
 #define uvmhist_dump(NAME)
 #else
+#include <sys/kernel.h>		/* for "cold" variable */
+
 extern	struct uvm_history_head uvm_histories;
 
 #define UVMHIST_DECL(NAME) struct uvm_history NAME
@@ -156,88 +118,87 @@ extern	struct uvm_history_head uvm_histories;
 #define UVMHIST_INIT(NAME,N) \
 do { \
 	(NAME).name = __STRING(NAME); \
-	(NAME).namelen = strlen((NAME).name); \
+	(NAME).namelen = strlen(__STRING(NAME)); \
 	(NAME).n = (N); \
 	(NAME).f = 0; \
-	simple_lock_init(&(NAME).l); \
+	mutex_init(&(NAME).l, MUTEX_SPIN, IPL_HIGH); \
 	(NAME).e = (struct uvm_history_ent *) \
 		malloc(sizeof(struct uvm_history_ent) * (N), M_TEMP, \
-		    M_WAITOK|M_ZERO); \
+		    M_WAITOK); \
+	memset((NAME).e, 0, sizeof(struct uvm_history_ent) * (N)); \
 	LIST_INSERT_HEAD(&uvm_histories, &(NAME), list); \
-} while (0)
+} while (/*CONSTCOND*/ 0)
 
 #define UVMHIST_INIT_STATIC(NAME,BUF) \
 do { \
 	(NAME).name = __STRING(NAME); \
-	(NAME).namelen = strlen((NAME).name); \
+	(NAME).namelen = strlen(__STRING(NAME)); \
 	(NAME).n = sizeof(BUF) / sizeof(struct uvm_history_ent); \
 	(NAME).f = 0; \
-	simple_lock_init(&(NAME).l); \
+	mutex_init(&(NAME).l, MUTEX_SPIN, IPL_HIGH); \
 	(NAME).e = (struct uvm_history_ent *) (BUF); \
 	memset((NAME).e, 0, sizeof(struct uvm_history_ent) * (NAME).n); \
 	LIST_INSERT_HEAD(&uvm_histories, &(NAME), list); \
-} while (0)
+} while (/*CONSTCOND*/ 0)
 
 #if defined(UVMHIST_PRINT)
 extern int uvmhist_print_enabled;
 #define UVMHIST_PRINTNOW(E) \
 do { \
 		if (uvmhist_print_enabled) { \
-			uvmhist_print(E); \
+			uvmhist_entry_print(E); \
 			DELAY(100000); \
 		} \
-} while (0)
+} while (/*CONSTCOND*/ 0)
 #else
 #define UVMHIST_PRINTNOW(E) /* nothing */
 #endif
 
 #define UVMHIST_LOG(NAME,FMT,A,B,C,D) \
 do { \
-	int _i_, _s_ = splhigh(); \
-	simple_lock(&(NAME).l); \
+	int _i_; \
+	mutex_enter(&(NAME).l); \
 	_i_ = (NAME).f; \
-	(NAME).f = (_i_ + 1) % (NAME).n; \
-	simple_unlock(&(NAME).l); \
-	splx(_s_); \
+	(NAME).f = (_i_ + 1 < (NAME).n) ? _i_ + 1 : 0; \
+	mutex_exit(&(NAME).l); \
 	if (!cold) \
 		microtime(&(NAME).e[_i_].tv); \
+	(NAME).e[_i_].cpunum = cpu_number(); \
 	(NAME).e[_i_].fmt = (FMT); \
-	(NAME).e[_i_].fmtlen = strlen((NAME).e[_i_].fmt); \
+	(NAME).e[_i_].fmtlen = strlen(FMT); \
 	(NAME).e[_i_].fn = _uvmhist_name; \
-	(NAME).e[_i_].fnlen = strlen((NAME).e[_i_].fn); \
+	(NAME).e[_i_].fnlen = strlen(_uvmhist_name); \
 	(NAME).e[_i_].call = _uvmhist_call; \
 	(NAME).e[_i_].v[0] = (u_long)(A); \
 	(NAME).e[_i_].v[1] = (u_long)(B); \
 	(NAME).e[_i_].v[2] = (u_long)(C); \
 	(NAME).e[_i_].v[3] = (u_long)(D); \
 	UVMHIST_PRINTNOW(&((NAME).e[_i_])); \
-} while (0)
+} while (/*CONSTCOND*/ 0)
 
 #define UVMHIST_CALLED(NAME) \
 do { \
 	{ \
-		int s = splhigh(); \
-		simple_lock(&(NAME).l); \
+		mutex_enter(&(NAME).l); \
 		_uvmhist_call = _uvmhist_cnt++; \
-		simple_unlock(&(NAME).l); \
-		splx(s); \
+		mutex_exit(&(NAME).l); \
 	} \
 	UVMHIST_LOG(NAME,"called!", 0, 0, 0, 0); \
-} while (0)
+} while (/*CONSTCOND*/ 0)
 
 #define UVMHIST_FUNC(FNAME) \
 	static int _uvmhist_cnt = 0; \
-	static char *_uvmhist_name = FNAME; \
-	int _uvmhist_call; 
+	static const char *const _uvmhist_name = FNAME; \
+	int _uvmhist_call;
 
-static __inline void uvmhist_print(struct uvm_history_ent *);
+static __inline void uvmhist_entry_print(struct uvm_history_ent *);
 
 static __inline void
-uvmhist_print(e)
+uvmhist_entry_print(e)
 	struct uvm_history_ent *e;
 {
 	printf("%06ld.%06ld ", e->tv.tv_sec, e->tv.tv_usec);
-	printf("%s#%ld: ", e->fn, e->call);
+	printf("%s#%ld@%d: ", e->fn, e->call, e->cpunum);
 	printf(e->fmt, e->v[0], e->v[1], e->v[2], e->v[3]);
 	printf("\n");
 }

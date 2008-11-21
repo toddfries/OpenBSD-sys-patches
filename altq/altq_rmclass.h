@@ -1,5 +1,5 @@
-/*	$OpenBSD: altq_rmclass.h,v 1.10 2007/06/17 19:58:58 jasper Exp $	*/
-/*	$KAME: altq_rmclass.h,v 1.6 2000/12/09 09:22:44 kjc Exp $	*/
+/*	$NetBSD: altq_rmclass.h,v 1.8 2006/10/28 11:35:17 peter Exp $	*/
+/*	$KAME: altq_rmclass.h,v 1.10 2003/08/20 23:30:23 itojun Exp $	*/
 
 /*
  * Copyright (c) 1991-1997 Regents of the University of California.
@@ -77,7 +77,7 @@ struct red;
 	(((a)->tv_usec < (b)->tv_usec) && ((a)->tv_sec <= (b)->tv_sec)))
 
 #define	TV_DELTA(a, b, delta) { \
-	int	xxs;	\
+	register int	xxs;	\
 							\
 	delta = (a)->tv_usec - (b)->tv_usec; \
 	if ((xxs = (a)->tv_sec - (b)->tv_sec)) { \
@@ -86,10 +86,10 @@ struct red;
 			/* if (xxs < 0) \
 				printf("rm_class: bogus time values\n"); */ \
 			delta = 0; \
-			/* FALLTHROUGH */ \
+			/* fall through */ \
 		case 2: \
 			delta += 1000000; \
-			/* FALLTHROUGH */ \
+			/* fall through */ \
 		case 1: \
 			delta += 1000000; \
 			break; \
@@ -98,7 +98,7 @@ struct red;
 }
 
 #define	TV_ADD_DELTA(a, delta, res) { \
-	int xxus = (a)->tv_usec + (delta); \
+	register int xxus = (a)->tv_usec + (delta); \
 	\
 	(res)->tv_sec = (a)->tv_sec; \
 	while (xxus >= 1000000) { \
@@ -173,7 +173,7 @@ struct rm_class {
 	struct timeval	undertime_;	/* time can next send */
 	struct timeval	last_;		/* time last packet sent */
 	struct timeval	overtime_;
-	struct callout	callout_;	/* for timeout() calls */
+	struct callout	callout_; 	/* for timeout() calls */
 
 	rm_class_stats_t stats_;	/* Class Statistics */
 };
@@ -183,7 +183,7 @@ struct rm_class {
  */
 struct rm_ifdat {
 	int		queued_;	/* # pkts queued downstream */
-	int		efficient_;	/* Link Efficiency bit */
+	int		efficient_;	/* Link Efficency bit */
 	int		wrr_;		/* Enable Weighted Round-Robin */
 	u_long		ns_per_byte_;	/* Link byte speed. */
 	int		maxqueued_;	/* Max packets to queue */
@@ -242,16 +242,15 @@ struct rm_ifdat {
 #define	is_a_parent_class(cl)	((cl)->children_ != NULL)
 
 extern rm_class_t *rmc_newclass(int, struct rm_ifdat *, u_int,
-				     void (*)(struct rm_class *,
-					      struct rm_class *),
-				     int, struct rm_class *, struct rm_class *,
-				     u_int, int, u_int, int, int);
+				void (*)(struct rm_class *, struct rm_class *),
+				int, struct rm_class *, struct rm_class *,
+				u_int, int, u_int, int, int);
 extern void	rmc_delete_class(struct rm_ifdat *, struct rm_class *);
-extern int	rmc_modclass(struct rm_class *, u_int, int,
-				  u_int, int, u_int, int);
-extern void	rmc_init(struct ifaltq *, struct rm_ifdat *, u_int,
-			      void (*)(struct ifaltq *),
-			      int, int, u_int, int, u_int, int);
+extern int 	rmc_modclass(struct rm_class *, u_int, int,
+			     u_int, int, u_int, int);
+extern int	rmc_init(struct ifaltq *, struct rm_ifdat *, u_int,
+			 void (*)(struct ifaltq *),
+			 int, int, u_int, int, u_int, int);
 extern int	rmc_queue_packet(struct rm_class *, mbuf_t *);
 extern mbuf_t	*rmc_dequeue_next(struct rm_ifdat *, int);
 extern void	rmc_update_class_util(struct rm_ifdat *);

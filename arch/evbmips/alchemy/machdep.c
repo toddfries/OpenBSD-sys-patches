@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.31 2006/10/02 08:13:53 gdamore Exp $ */
+/* $NetBSD: machdep.c,v 1.39 2008/11/12 12:35:59 ad Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -107,7 +107,7 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/10/02 08:13:53 gdamore Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.39 2008/11/12 12:35:59 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -126,6 +126,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/10/02 08:13:53 gdamore Exp $")
 #include <sys/boot_flag.h>
 #include <sys/termios.h>
 #include <sys/ksyms.h>
+#include <sys/device.h>
 
 #include <net/if.h>
 #include <net/if_ether.h>
@@ -136,7 +137,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.31 2006/10/02 08:13:53 gdamore Exp $")
 
 #include "ksyms.h"
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #endif
@@ -167,7 +168,6 @@ struct	user *proc0paddr;
 struct cpu_info cpu_info_store;
 
 /* Maps for VM objects. */
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -186,10 +186,10 @@ void
 mach_init(int argc, char **argv, yamon_env_var *envp, u_long memsize)
 {
 	bus_space_handle_t sh;
-	caddr_t kernend;
+	void *kernend;
 	const char *cp;
 	u_long first, last;
-	caddr_t v;
+	void *v;
 	int freqok, howto, i;
 	const struct alchemy_board *board;
 
@@ -199,8 +199,8 @@ mach_init(int argc, char **argv, yamon_env_var *envp, u_long memsize)
 	KASSERT(board != NULL);
 
 	/* clear the BSS segment */
-	kernend = (caddr_t)mips_round_page(end);
-	memset(edata, 0, kernend - (caddr_t)edata);
+	kernend = (void *)mips_round_page(end);
+	memset(edata, 0, (char *)kernend - edata);
 
 	/* set CPU model info for sysctl_hw */
 	strcpy(cpu_model, board->ab_name);
@@ -364,16 +364,16 @@ mach_init(int argc, char **argv, yamon_env_var *envp, u_long memsize)
 	/*
 	 * Init mapping for u page(s) for proc0.
 	 */
-	v = (caddr_t) uvm_pageboot_alloc(USPACE);
+	v = (void *) uvm_pageboot_alloc(USPACE);
 	lwp0.l_addr = proc0paddr = (struct user *)v;
-	lwp0.l_md.md_regs = (struct frame *)(v + USPACE) - 1;
-	curpcb = &lwp0.l_addr->u_pcb;
-	curpcb->pcb_context[11] = MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
+	lwp0.l_md.md_regs = (struct frame *)((char *)v + USPACE) - 1;
+	proc0paddr->u_pcb.pcb_context[11] =
+	    MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
 
 	/*
 	 * Initialize debuggers, and break into them, if appropriate.
 	 */
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init(0, 0, 0);
 #endif
 #ifdef DDB
@@ -413,18 +413,12 @@ cpu_startup(void)
 	printf("total memory = %s\n", pbuf);
 
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, FALSE, NULL);
+	    VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -488,6 +482,8 @@ cpu_reboot(int howto, char *bootstr)
  haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if ((boothowto & RB_POWERDOWN) == RB_POWERDOWN)
 		if (board && board->ab_poweroff)

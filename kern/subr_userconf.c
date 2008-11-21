@@ -1,7 +1,7 @@
-/*	$OpenBSD: subr_userconf.c,v 1.35 2008/03/24 21:35:03 maja Exp $	*/
+/*	$NetBSD: subr_userconf.c,v 1.18 2005/12/11 12:24:30 christos Exp $	*/
 
 /*
- * Copyright (c) 1996-2001 Mats O Jansson <moj@stacken.kth.se>
+ * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Mats O Jansson.
+ * 4. The name of the author may not be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -24,7 +30,14 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	OpenBSD: subr_userconf.c,v 1.19 2000/01/08 23:23:37 d Exp
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: subr_userconf.c,v 1.18 2005/12/11 12:24:30 christos Exp $");
+
+#include "opt_userconf.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,57 +47,25 @@
 
 #include <dev/cons.h>
 
-extern char *locnames[];
-extern short locnamp[];
-extern short cfroots[];
-extern int cfroots_size;
-extern int pv_size;
-extern short pv[];
-extern struct timezone tz;
-extern char *pdevnames[];
-extern int pdevnames_size;
-extern struct pdevinit pdevinit[];
+extern struct cfdata cfdata[];
 
-int userconf_base = 16;				/* Base for "large" numbers */
-int userconf_maxdev = -1;			/* # of used device slots   */
-int userconf_totdev = -1;			/* # of device slots        */
-int userconf_maxlocnames = -1;			/* # of locnames            */
-int userconf_cnt = -1;				/* Line counter for ...     */
-int userconf_lines = 12;			/* ... # of lines per page  */
-int userconf_histlen = 0;
-int userconf_histcur = 0;
-char userconf_history[1024];
-int userconf_histsz = sizeof(userconf_history);
-char userconf_argbuf[40];			/* Additional input         */
-char userconf_cmdbuf[40];			/* Command line             */
-char userconf_histbuf[40];
+static int userconf_base = 16;			/* Base for "large" numbers */
+static int userconf_maxdev = -1;		/* # of used device slots   */
+static int userconf_totdev = -1;		/* # of device slots        */
+#if 0
+static int userconf_maxlocnames = -1;		/* # of locnames            */
+#endif
+static int userconf_cnt = -1;			/* Line counter for ...     */
+static int userconf_lines = 12;			/* ... # of lines per page  */
+static int userconf_histlen = 0;
+static int userconf_histcur = 0;
+static char userconf_history[1024];
+static int userconf_histsz = sizeof(userconf_history);
+static char userconf_argbuf[40];		/* Additional input         */
+static char userconf_cmdbuf[40];		/* Command line             */
+static char userconf_histbuf[40];
 
-void userconf_init(void);
-int userconf_more(void);
-void userconf_modify(char *, int *);
-void userconf_hist_cmd(char);
-void userconf_hist_int(int);
-void userconf_hist_eoc(void);
-void userconf_pnum(int);
-void userconf_pdevnam(short);
-void userconf_pdev(short);
-int userconf_number(char *, int *);
-int userconf_device(char *, int *, short *, short *);
-int userconf_attr(char *, int *);
-void userconf_modify(char *, int *);
-void userconf_change(int);
-void userconf_disable(int);
-void userconf_enable(int);
-void userconf_help(void);
-void userconf_list(void);
-void userconf_show(void);
-void userconf_common_attr_val(short, int *, char);
-void userconf_show_attr(char *);
-void userconf_common_dev(char *, int, short, short, char);
-void userconf_common_attr(char *, int, char);
-void userconf_add_read(char *, char, char *, int, int *);
-void userconf_add(char *, int, short, short);
-int userconf_parse(char *);
+static int getsn(char *, int);
 
 #define UC_CHANGE 'c'
 #define UC_DISABLE 'd'
@@ -92,13 +73,9 @@ int userconf_parse(char *);
 #define UC_FIND 'f'
 #define UC_SHOW 's'
 
-char *userconf_cmds[] = {
-	"add",		"a",
+static const char *userconf_cmds[] = {
 	"base",		"b",
 	"change",	"c",
-#if defined(DDB)
-	"ddb",		"D",
-#endif
 	"disable",	"d",
 	"enable",	"e",
 	"exit",		"q",
@@ -107,42 +84,25 @@ char *userconf_cmds[] = {
 	"list",		"l",
 	"lines",	"L",
 	"quit",		"q",
-	"show",		"s",
-	"timezone",	"t",
-	"verbose",	"v",
 	"?",		"h",
 	"",		 "",
 };
 
-void
+static void
 userconf_init(void)
 {
-	int i = 0;
-	struct cfdata *cd;
-	int   ln;
+	int i;
+	struct cfdata *cf;
 
-	while (cfdata[i].cf_attach != 0) {
-		userconf_maxdev = i;
-		userconf_totdev = i;
-
-		cd = &cfdata[i];
-		ln = cd->cf_locnames;
-		while (locnamp[ln] != -1) {
-			if (locnamp[ln] > userconf_maxlocnames)
-				userconf_maxlocnames = locnamp[ln];
-			ln++;
-		}
+	i = 0;
+	for (cf = cfdata; cf->cf_name; cf++)
 		i++;
-	}
 
-	while (cfdata[i].cf_attach == 0) {
-		userconf_totdev = i;
-		i++;
-	}
-	userconf_totdev = userconf_totdev - 1;
+	userconf_maxdev = i - 1;
+	userconf_totdev = i - 1;
 }
 
-int
+static int
 userconf_more(void)
 {
 	int quit = 0;
@@ -150,7 +110,7 @@ userconf_more(void)
 
 	if (userconf_cnt != -1) {
 		if (userconf_cnt == userconf_lines) {
-			printf("--- more ---");
+			printf("-- more --");
 			c = cngetc();
 			userconf_cnt = 0;
 			printf("\r            \r");
@@ -162,7 +122,7 @@ userconf_more(void)
 	return (quit);
 }
 
-void
+static void
 userconf_hist_cmd(char cmd)
 {
 	userconf_histcur = userconf_histlen;
@@ -172,19 +132,19 @@ userconf_hist_cmd(char cmd)
 	}
 }
 
-void
+static void
 userconf_hist_int(int val)
 {
-	snprintf(userconf_histbuf, sizeof userconf_histbuf, " %d",val);
-	if (userconf_histcur + strlen(userconf_histbuf) < userconf_histsz) {
-		bcopy(userconf_histbuf,
-		    &userconf_history[userconf_histcur],
-		    strlen(userconf_histbuf));
+	snprintf(userconf_histbuf, sizeof(userconf_histbuf), " %d", val);
+	if ((userconf_histcur + strlen(userconf_histbuf)) < userconf_histsz) {
+		memcpy(&userconf_history[userconf_histcur],
+		      userconf_histbuf,
+		      strlen(userconf_histbuf));
 		userconf_histcur = userconf_histcur + strlen(userconf_histbuf);
 	}
 }
 
-void
+static void
 userconf_hist_eoc(void)
 {
 	if (userconf_histcur < userconf_histsz) {
@@ -194,35 +154,34 @@ userconf_hist_eoc(void)
 	}
 }
 
-void
+static void
 userconf_pnum(int val)
 {
 	if (val > -2 && val < 16) {
 		printf("%d",val);
-		return;
-	}
-
-	switch (userconf_base) {
-	case 8:
-		printf("0%o",val);
-		break;
-	case 10:
-		printf("%d",val);
-		break;
-	case 16:
-	default:
-		printf("0x%x",val);
-		break;
+	} else {
+		switch (userconf_base) {
+		case 8:
+			printf("0%o",val);
+			break;
+		case 10:
+			printf("%d",val);
+			break;
+		case 16:
+		default:
+			printf("0x%x",val);
+			break;
+		}
 	}
 }
 
-void
+static void
 userconf_pdevnam(short dev)
 {
 	struct cfdata *cd;
 
 	cd = &cfdata[dev];
-	printf("%s", cd->cf_driver->cd_name);
+	printf("%s", cd->cf_name);
 	switch (cd->cf_fstate) {
 	case FSTATE_NOTFOUND:
 	case FSTATE_DNOTFOUND:
@@ -241,50 +200,34 @@ userconf_pdevnam(short dev)
 	}
 }
 
-void
+static void
 userconf_pdev(short devno)
 {
 	struct cfdata *cd;
-	short *p;
+	const struct cfparent *cfp;
 	int   *l;
-	int   ln;
-	char c;
+	const struct cfiattrdata *ia;
+	const struct cflocdesc *ld;
+	int nld, i;
 
-	if (devno > userconf_maxdev && devno <= userconf_totdev) {
-		printf("%3d free slot (for add)\n", devno);
-		return;
-	}
-
-	if (devno > userconf_totdev &&
-	    devno <= userconf_totdev+pdevnames_size) {
-		printf("%3d %s count %d", devno,
-		    pdevnames[devno-userconf_totdev-1],
-		    abs(pdevinit[devno-userconf_totdev-1].pdev_count));
-		if (pdevinit[devno-userconf_totdev-1].pdev_count < 1)
-			printf(" disable");
-		printf(" (pseudo device)\n");
-		return;
-	}
-
-	if (devno >  userconf_maxdev) {
+	if (devno > userconf_maxdev) {
 		printf("Unknown devno (max is %d)\n", userconf_maxdev);
 		return;
 	}
 
 	cd = &cfdata[devno];
 
-	printf("%3d ", devno);
+	printf("[%3d] ", devno);
 	userconf_pdevnam(devno);
 	printf(" at");
-	c = ' ';
-	p = cd->cf_parents;
-	if (*p == -1)
+	cfp = cd->cf_pspec;
+	if (cfp == NULL)
 		printf(" root");
-	while (*p != -1) {
-		printf("%c", c);
-		userconf_pdevnam(*p++);
-		c = '|';
-	}
+	else if (cfp->cfp_parent != NULL && cfp->cfp_unit != -1)
+		printf(" %s%d", cfp->cfp_parent, cfp->cfp_unit);
+	else
+		printf(" %s?", cfp->cfp_parent != NULL ? cfp->cfp_parent
+						       : cfp->cfp_iattr);
 	switch (cd->cf_fstate) {
 	case FSTATE_NOTFOUND:
 	case FSTATE_FOUND:
@@ -298,17 +241,25 @@ userconf_pdev(short devno)
 		printf(" ???");
 		break;
 	}
-	l = cd->cf_loc;
-	ln = cd->cf_locnames;
-	while (locnamp[ln] != -1) {
-		printf(" %s ", locnames[locnamp[ln]]);
-		ln++;
-		userconf_pnum(*l++);
+	if (cfp) {
+		l = cd->cf_loc;
+		ia = cfiattr_lookup(cfp->cfp_iattr, 0);
+		KASSERT(ia);
+		ld = ia->ci_locdesc;
+		nld = ia->ci_loclen;
+		for (i = 0; i < nld; i++) {
+			printf(" %s ", ld[i].cld_name);
+			if (!ld[i].cld_defaultstr
+			    || (l[i] != ld[i].cld_default))
+				userconf_pnum(l[i]);
+			else
+				printf("?");
+		}
 	}
-	printf(" flags 0x%x\n", cd->cf_flags);
+	printf("\n");
 }
 
-int
+static int
 userconf_number(char *c, int *val)
 {
 	u_int num = 0;
@@ -351,7 +302,7 @@ userconf_number(char *c, int *val)
 	return (0);
 }
 
-int
+static int
 userconf_device(char *cmd, int *len, short *unit, short *state)
 {
 	short u = 0, s = FSTATE_FOUND;
@@ -386,55 +337,34 @@ userconf_device(char *cmd, int *len, short *unit, short *state)
 	return(-1);
 }
 
-int
-userconf_attr(char *cmd, int *val)
-{
-	char *c;
-	short attr = -1, i = 0, l = 0;
-
-	c = cmd;
-	while (*c != ' ' && *c != '\t' && *c != '\n' && *c != '\0') {
-		c++;
-		l++;
-	}
-
-	while (i <= userconf_maxlocnames) {
-		if (strlen(locnames[i]) == l) {
-			if (strncasecmp(cmd, locnames[i], l) == 0)
-				attr = i;
-		}
-		i++;
-	}
-
-	if (attr == -1) {
-		return (-1);
-	}
-
-	*val = attr;
-
-	return(0);
-}
-
-void
-userconf_modify(char *item, int *val)
+static void
+userconf_modify(const struct cflocdesc *item, int *val)
 {
 	int ok = 0;
 	int a;
 	char *c;
-	int i;
 
 	while (!ok) {
-		printf("%s [", item);
-		userconf_pnum(*val);
+		printf("%s [", item->cld_name);
+		if (item->cld_defaultstr && (*val == item->cld_default))
+			printf("?");
+		else
+			userconf_pnum(*val);
 		printf("] ? ");
 
-		i = getsn(userconf_argbuf, sizeof(userconf_argbuf));
+		getsn(userconf_argbuf, sizeof(userconf_argbuf));
 
 		c = userconf_argbuf;
 		while (*c == ' ' || *c == '\t' || *c == '\n') c++;
 
 		if (*c != '\0') {
-			if (userconf_number(c, &a) == 0) {
+			if (*c == '?') {
+				if (item->cld_defaultstr) {
+					*val = item->cld_default;
+					ok = 1;
+				} else
+					printf("No default\n");
+			} else if (userconf_number(c, &a) == 0) {
 				*val = a;
 				ok = 1;
 			} else {
@@ -446,15 +376,19 @@ userconf_modify(char *item, int *val)
 	}
 }
 
-void
+static void
 userconf_change(int devno)
 {
 	struct cfdata *cd;
 	char c = '\0';
 	int   *l;
 	int   ln;
+	const struct cfiattrdata *ia;
+	const struct cflocdesc *ld;
+	int nld;
 
 	if (devno <=  userconf_maxdev) {
+
 		userconf_pdev(devno);
 
 		while (c != 'y' && c != 'Y' && c != 'n' && c != 'N') {
@@ -464,7 +398,6 @@ userconf_change(int devno)
 		}
 
 		if (c == 'y' || c == 'Y') {
-			int share = 0, i, *lk;
 
 			/* XXX add cmd 'c' <devno> */
 			userconf_hist_cmd('c');
@@ -472,92 +405,36 @@ userconf_change(int devno)
 
 			cd = &cfdata[devno];
 			l = cd->cf_loc;
-			ln = cd->cf_locnames;
+			ia = cfiattr_lookup(cd->cf_pspec->cfp_iattr, 0);
+			KASSERT(ia);
+			ld = ia->ci_locdesc;
+			nld = ia->ci_loclen;
 
-			/*
-			 * Search for some other driver sharing this
-			 * locator table. if one does, we may need to
-			 * replace the locators with a malloc'd copy.
-			 */
-			for (i = 0; cfdata[i].cf_driver; i++)
-				if (i != devno && cfdata[i].cf_loc == l)
-					share = 1;
-			if (share) {
-				for (i = 0; locnamp[ln+i] != -1 ; i++)
-					;
-				lk = l = (int *)malloc(sizeof(int) * i,
-				    M_TEMP, M_NOWAIT);
-				if (lk == NULL) {
-					printf("out of memory.\n");
-					return;
-				}
-				bcopy(cd->cf_loc, l, sizeof(int) * i);
-			}
-
-			while (locnamp[ln] != -1) {
-				userconf_modify(locnames[locnamp[ln]], l);
+			for (ln = 0; ln < nld; ln++)
+			{
+				userconf_modify(&ld[ln], l);
 
 				/* XXX add *l */
 				userconf_hist_int(*l);
 
-				ln++;
 				l++;
 			}
-			userconf_modify("flags", &cd->cf_flags);
-			userconf_hist_int(cd->cf_flags);
 
-			if (share) {
-				if (bcmp(cd->cf_loc, lk, sizeof(int) * i))
-					cd->cf_loc = lk;
-				else
-					free(lk, M_TEMP);
-			}
-
-			printf("%3d ", devno);
+			printf("[%3d] ", devno);
 			userconf_pdevnam(devno);
 			printf(" changed\n");
-			userconf_pdev(devno);
-		}
-		return;
-	}
-
-	if (devno > userconf_maxdev && devno <= userconf_totdev) {
-		printf("%3d can't change free slot\n", devno);
-		return;
-	}
-
-	if (devno > userconf_totdev &&
-	    devno <= userconf_totdev+pdevnames_size) {
-		userconf_pdev(devno);
-		while (c != 'y' && c != 'Y' && c != 'n' && c != 'N') {
-			printf("change (y/n) ?");
-			c = cngetc();
-			printf("\n");
-		}
-
-		if (c == 'y' || c == 'Y') {
-			/* XXX add cmd 'c' <devno> */
-			userconf_hist_cmd('c');
-			userconf_hist_int(devno);
-
-			userconf_modify("count",
-			    &pdevinit[devno-userconf_totdev-1].pdev_count);
-			userconf_hist_int(pdevinit[devno-userconf_totdev-1].pdev_count);
-
-			printf("%3d %s changed\n", devno,
-			    pdevnames[devno-userconf_totdev-1]);
 			userconf_pdev(devno);
 
 			/* XXX add eoc */
 			userconf_hist_eoc();
-		}
-		return;
-	}
 
-	printf("Unknown devno (max is %d)\n", userconf_totdev+pdevnames_size);
+		}
+	} else {
+		printf("Unknown devno (max is %d)\n", userconf_maxdev);
+	}
 }
 
-void
+static void
 userconf_disable(int devno)
 {
 	int done = 0;
@@ -579,7 +456,7 @@ userconf_disable(int devno)
 			break;
 		}
 
-		printf("%3d ", devno);
+		printf("[%3d] ", devno);
 		userconf_pdevnam(devno);
 		if (done) {
 			printf(" already");
@@ -590,35 +467,12 @@ userconf_disable(int devno)
 			userconf_hist_eoc();
 		}
 		printf(" disabled\n");
-
-		return;
+	} else {
+		printf("Unknown devno (max is %d)\n", userconf_maxdev);
 	}
-
-	if (devno > userconf_maxdev && devno <= userconf_totdev) {
-		printf("%3d can't disable free slot\n", devno);
-		return;
-	}
-
-	if (devno > userconf_totdev &&
-	    devno <= userconf_totdev+pdevnames_size) {
-		printf("%3d %", devno, pdevnames[devno-userconf_totdev-1]);
-		if (pdevinit[devno-userconf_totdev-1].pdev_count < 1) {
-			printf(" already ");
-		} else {
-			pdevinit[devno-userconf_totdev-1].pdev_count *= -1;
-			/* XXX add cmd 'd' <devno> eoc */
-			userconf_hist_cmd('d');
-			userconf_hist_int(devno);
-			userconf_hist_eoc();
-		}
-		printf(" disabled\n");
-		return;
-	}
-
-	printf("Unknown devno (max is %d)\n", userconf_totdev+pdevnames_size);
 }
 
-void
+static void
 userconf_enable(int devno)
 {
 	int done = 0;
@@ -640,45 +494,23 @@ userconf_enable(int devno)
 			break;
 		}
 
-		printf("%3d ", devno);
+		printf("[%3d] ", devno);
 		userconf_pdevnam(devno);
 		if (done) {
 			printf(" already");
 		} else {
 			/* XXX add cmd 'e' <devno> eoc */
-			userconf_hist_cmd('e');
+			userconf_hist_cmd('d');
 			userconf_hist_int(devno);
 			userconf_hist_eoc();
 		}
 		printf(" enabled\n");
-		return;
+	} else {
+		printf("Unknown devno (max is %d)\n", userconf_maxdev);
 	}
-
-	if (devno > userconf_maxdev && devno <= userconf_totdev) {
-		printf("%3d can't enable free slot\n", devno);
-		return;
-	}
-
-	if (devno > userconf_totdev &&
-	    devno <= userconf_totdev+pdevnames_size) {
-		printf("%3d %", devno, pdevnames[devno-userconf_totdev-1]);
-		if (pdevinit[devno-userconf_totdev-1].pdev_count > 0) {
-			printf(" already");
-		} else {
-			pdevinit[devno-userconf_totdev-1].pdev_count *= -1;
-			/* XXX add cmd 'e' <devno> eoc */
-			userconf_hist_cmd('e');
-			userconf_hist_int(devno);
-			userconf_hist_eoc();
-		}
-		printf(" enabled\n");
-		return;
-	}
-
-	printf("Unknown devno (max is %d)\n", userconf_totdev+pdevnames_size);
 }
 
-void
+static void
 userconf_help(void)
 {
 	int j = 0, k;
@@ -695,25 +527,17 @@ userconf_help(void)
 		case 'L':
 			printf("[count]             number of lines before more");
 			break;
-		case 'a':
-			printf("dev                 add a device");
-			break;
 		case 'b':
 			printf("8|10|16             base on large numbers");
 			break;
 		case 'c':
 			printf("devno|dev           change devices");
 			break;
-#if defined(DDB)
-		case 'D':
-			printf("                    enter ddb");
-			break;
-#endif
 		case 'd':
-			printf("attr val|devno|dev  disable devices");
+			printf("devno|dev           disable devices");
 			break;
 		case 'e':
-			printf("attr val|devno|dev  enable devices");
+			printf("devno|dev           enable devices");
 			break;
 		case 'f':
 			printf("devno|dev           find devices");
@@ -725,17 +549,7 @@ userconf_help(void)
 			printf("                    list configuration");
 			break;
 		case 'q':
-			printf("                    leave UKC");
-			break;
-		case 's':
-			printf("[attr [val]]        "
-			   "show attributes (or devices with an attribute)");
-			break;
-		case 't':
-			printf("[mins [dst]]        set timezone/dst");
-			break;
-		case 'v':
-			printf("                    toggle verbose booting");
+			printf("                    leave userconf");
 			break;
 		default:
 			printf("                    don't know");
@@ -746,14 +560,14 @@ userconf_help(void)
 	}
 }
 
-void
+static void
 userconf_list(void)
 {
 	int i = 0;
 
 	userconf_cnt = 0;
 
-	while (i <= (userconf_totdev+pdevnames_size)) {
+	while (cfdata[i].cf_name != NULL) {
 		if (userconf_more())
 			break;
 		userconf_pdev(i++);
@@ -762,116 +576,7 @@ userconf_list(void)
 	userconf_cnt = -1;
 }
 
-void
-userconf_show(void)
-{
-	int i = 0;
-
-	userconf_cnt = 0;
-
-	while (i <= userconf_maxlocnames) {
-		if (userconf_more())
-			break;
-		printf("%s\n", locnames[i++]);
-	}
-
-	userconf_cnt = -1;
-}
-
-void
-userconf_common_attr_val(short attr, int *val, char routine)
-{
-	struct cfdata *cd;
-	int   *l;
-	int   ln;
-	int i = 0, quit = 0;
-
-	userconf_cnt = 0;
-
-	while (i <= userconf_maxdev) {
-		cd = &cfdata[i];
-		l = cd->cf_loc;
-		ln = cd->cf_locnames;
-		while (locnamp[ln] != -1) {
-			if (locnamp[ln] == attr) {
-				if (val == NULL) {
-					quit = userconf_more();
-					userconf_pdev(i);
-				} else {
-					if (*val == *l) {
-						quit = userconf_more();
-						switch (routine) {
-						case UC_ENABLE:
-							userconf_enable(i);
-							break;
-						case UC_DISABLE:
-							userconf_disable(i);
-							break;
-						case UC_SHOW:
-							userconf_pdev(i);
-							break;
-						default:
-							printf("Unknown routine /%c/\n",
-							    routine);
-							break;
-						}
-					}
-				}
-			}
-			if (quit)
-				break;
-			ln++;
-			l++;
-		}
-		if (quit)
-			break;
-		i++;
-	}
-
-	userconf_cnt = -1;
-}
-
-void
-userconf_show_attr(char *cmd)
-{
-	char *c;
-	short attr = -1, i = 0, l = 0;
-	int a;
-
-	c = cmd;
-	while (*c != ' ' && *c != '\t' && *c != '\n' && *c != '\0') {
-		c++;
-		l++;
-	}
-	while (*c == ' ' || *c == '\t' || *c == '\n') {
-		c++;
-	}
-	while (i <= userconf_maxlocnames) {
-		if (strlen(locnames[i]) == l) {
-			if (strncasecmp(cmd, locnames[i], l) == 0) {
-				attr = i;
-			}
-		}
-		i++;
-	}
-
-	if (attr == -1) {
-		printf("Unknown attribute\n");
-		return;
-	}
-
-	if (*c == '\0') {
-		userconf_common_attr_val(attr, NULL, UC_SHOW);
-	} else {
-		if (userconf_number(c, &a) == 0) {
-			userconf_common_attr_val(attr, &a, UC_SHOW);
-		} else {
-			printf("Unknown argument\n");
-		}
-	}
-}
-
-void
+static void
 userconf_common_dev(char *dev, int len, short unit, short state, char routine)
 {
 	int i = 0;
@@ -884,8 +589,8 @@ userconf_common_dev(char *dev, int len, short unit, short state, char routine)
 		break;
 	}
 
-	while (cfdata[i].cf_attach != 0) {
-		if (strlen(cfdata[i].cf_driver->cd_name) == len) {
+	while (cfdata[i].cf_name != NULL) {
+		if (strlen(cfdata[i].cf_name) == len) {
 
 			/*
 			 * Ok, if device name is correct
@@ -893,7 +598,7 @@ userconf_common_dev(char *dev, int len, short unit, short state, char routine)
 			 *  If state == FSTATE_STAR, look for "dev*"
 			 *  If state == FSTATE_NOTFOUND, look for "dev0"
 			 */
-			if (strncasecmp(dev, cfdata[i].cf_driver->cd_name,
+			if (strncasecmp(dev, cfdata[i].cf_name,
 					len) == 0 &&
 			    (state == FSTATE_FOUND ||
 			     (state == FSTATE_STAR &&
@@ -928,29 +633,6 @@ userconf_common_dev(char *dev, int len, short unit, short state, char routine)
 		i++;
 	}
 
-	for (i = 0; i < pdevnames_size; i++) {
-		if (strncasecmp(dev, pdevnames[i], len) == 0 &&
-		    state == FSTATE_FOUND) {
-			switch(routine) {
-			case UC_CHANGE:
-				userconf_change(userconf_totdev+1+i);
-				break;
-			case UC_ENABLE:
-				userconf_enable(userconf_totdev+1+i);
-				break;
-			case UC_DISABLE:
-				userconf_disable(userconf_totdev+1+i);
-				break;
-			case UC_FIND:
-				userconf_pdev(userconf_totdev+1+i);
-				break;
-			default:
-				printf("Unknown pseudo routine /%c/\n",routine);
-				break;
-			}
-		}
-	}
-
 	switch (routine) {
 	case UC_CHANGE:
 		break;
@@ -960,51 +642,23 @@ userconf_common_dev(char *dev, int len, short unit, short state, char routine)
 	}
 }
 
-void
-userconf_common_attr(char *cmd, int attr, char routine)
-{
-	char *c;
-	short l = 0;
-	int a;
-
-	c = cmd;
-	while (*c != ' ' && *c != '\t' && *c != '\n' && *c != '\0') {
-		c++;
-		l++;
-	}
-	while (*c == ' ' || *c == '\t' || *c == '\n')
-		c++;
-
-	if (*c == '\0') {
-		printf("Value missing for attribute\n");
-		return;
-	}
-
-	if (userconf_number(c, &a) == 0) {
-		userconf_common_attr_val(attr, &a, routine);
-	} else {
-		printf("Unknown argument\n");
-	}
-}
-
-void
+#if 0
+static void
 userconf_add_read(char *prompt, char field, char *dev, int len, int *val)
 {
 	int ok = 0;
 	int a;
 	char *c;
-	int i;
 
 	*val = -1;
 
 	while (!ok) {
 		printf("%s ? ", prompt);
 
-		i = getsn(userconf_argbuf, sizeof(userconf_argbuf));
+		getsn(userconf_argbuf, sizeof(userconf_argbuf));
 
 		c = userconf_argbuf;
-		while (*c == ' ' || *c == '\t' || *c == '\n')
-			c++;
+		while (*c == ' ' || *c == '\t' || *c == '\n') c++;
 
 		if (*c != '\0') {
 			if (userconf_number(c, &a) == 0) {
@@ -1012,8 +666,8 @@ userconf_add_read(char *prompt, char field, char *dev, int len, int *val)
 					printf("Unknown devno (max is %d)\n",
 					    userconf_maxdev);
 				} else if (strncasecmp(dev,
-				    cfdata[a].cf_driver->cd_name, len) != 0 &&
-				    field == 'a') {
+				    cfdata[a].cf_name, len) != 0 &&
+					field == 'a') {
 					printf("Not same device type\n");
 				} else {
 					*val = a;
@@ -1032,151 +686,9 @@ userconf_add_read(char *prompt, char field, char *dev, int len, int *val)
 		}
 	}
 }
+#endif /* 0 */
 
-void
-userconf_add(char *dev, int len, short unit, short state)
-{
-	int i = 0, found = 0;
-	struct cfdata new;
-	int  val, max_unit, star_unit, orig;
-
-	bzero(&new, sizeof(struct cfdata));
-
-	if (userconf_maxdev == userconf_totdev) {
-		printf("No more space for new devices.\n");
-		return;
-	}
-
-	if (state == FSTATE_FOUND) {
-		printf("Device not complete number or * is missing\n");
-		return;
-	}
-
-	for (i = 0; cfdata[i].cf_driver; i++)
-		if (strlen(cfdata[i].cf_driver->cd_name) == len &&
-		    strncasecmp(dev, cfdata[i].cf_driver->cd_name, len) == 0)
-			found = 1;
-
-	if (!found) {
-		printf("No device of this type exists.\n");
-		return;
-	}
-
-	userconf_add_read("Clone Device (DevNo, 'q' or '?')",
-	    'a', dev, len, &val);
-
-	if (val != -1) {
-		orig = val;
-		new = cfdata[val];
-		new.cf_unit = unit;
-		new.cf_fstate = state;
-		userconf_add_read("Insert before Device (DevNo, 'q' or '?')",
-		    'i', dev, len, &val);
-	}
-
-	if (val != -1) {
-		/* XXX add cmd 'a' <orig> <val> eoc */
-		userconf_hist_cmd('a');
-		userconf_hist_int(orig);
-		userconf_hist_int(unit);
-		userconf_hist_int(state);
-		userconf_hist_int(val);
-		userconf_hist_eoc();
-
-		/* Insert the new record */
-		for (i = userconf_maxdev; val <= i; i--)
-			cfdata[i+1] = cfdata[i];
-		cfdata[val] = new;
-
-		/* Fix indexs in pv */
-		for (i = 0; i < pv_size; i++) {
-			if (pv[i] != -1 && pv[i] >= val)
-				pv[i]++;
-		}
-
-		/* Fix indexs in cfroots */
-		for (i = 0; i < cfroots_size; i++) {
-			if (cfroots[i] != -1 && cfroots[i] >= val)
-				cfroots[i]++;
-		}
-
-		userconf_maxdev++;
-
-		max_unit = -1;
-
-		/* Find max unit number of the device type */
-
-		i = 0;
-		while (cfdata[i].cf_attach != 0) {
-			if (strlen(cfdata[i].cf_driver->cd_name) == len &&
-			    strncasecmp(dev, cfdata[i].cf_driver->cd_name,
-			    len) == 0) {
-				switch (cfdata[i].cf_fstate) {
-				case FSTATE_NOTFOUND:
-				case FSTATE_DNOTFOUND:
-					if (cfdata[i].cf_unit > max_unit)
-						max_unit = cfdata[i].cf_unit;
-					break;
-				default:
-					break;
-				}
-			}
-			i++;
-		}
-
-		/*
-		 * For all * entries set unit number to max+1, and update
-		 * cf_starunit1 if necessary.
-		 */
-		max_unit++;
-		star_unit = -1;
-
-		i = 0;
-		while (cfdata[i].cf_attach != 0) {
-			if (strlen(cfdata[i].cf_driver->cd_name) == len &&
-			    strncasecmp(dev, cfdata[i].cf_driver->cd_name,
-			    len) == 0) {
-				switch (cfdata[i].cf_fstate) {
-				case FSTATE_NOTFOUND:
-				case FSTATE_DNOTFOUND:
-					if (cfdata[i].cf_unit > star_unit)
-						star_unit = cfdata[i].cf_unit;
-					break;
-				default:
-					break;
-				}
-			}
-			i++;
-		}
-		star_unit++;
-
-		i = 0;
-		while (cfdata[i].cf_attach != 0) {
-			if (strlen(cfdata[i].cf_driver->cd_name) == len &&
-			    strncasecmp(dev, cfdata[i].cf_driver->cd_name,
-			    len) == 0) {
-				switch (cfdata[i].cf_fstate) {
-				case FSTATE_STAR:
-				case FSTATE_DSTAR:
-					cfdata[i].cf_unit = max_unit;
-					if (cfdata[i].cf_starunit1 < star_unit)
-						cfdata[i].cf_starunit1 =
-						    star_unit;
-					break;
-				default:
-					break;
-				}
-			}
-			i++;
-		}
-		userconf_pdev(val);
-	}
-
-	/* cf_attach, cf_driver, cf_unit, cf_fstate, cf_loc, cf_flags,
-	   cf_parents, cf_locnames, cf_locnames and cf_ivstubs */
-}
-
-int
+static int
 userconf_parse(char *cmd)
 {
 	char *c, *v;
@@ -1217,14 +729,6 @@ userconf_parse(char *cmd)
 			else
 				printf("Unknown argument\n");
 			break;
-		case 'a':
-			if (*c == '\0')
-				printf("Dev expected\n");
-			else if (userconf_device(c, &a, &unit, &state) == 0)
-				userconf_add(c, a, unit, state);
-			else
-				printf("Unknown argument\n");
-			break;
 		case 'b':
 			if (*c == '\0')
 				printf("8|10|16 expected\n");
@@ -1247,16 +751,9 @@ userconf_parse(char *cmd)
 			else
 				printf("Unknown argument\n");
 			break;
-#if defined(DDB)
-		case 'D':
-			Debugger();
-			break;
-#endif
 		case 'd':
 			if (*c == '\0')
 				printf("Attr, DevNo or Dev expected\n");
-			else if (userconf_attr(c, &a) == 0)
-				userconf_common_attr(c, a, UC_DISABLE);
 			else if (userconf_number(c, &a) == 0)
 				userconf_disable(a);
 			else if (userconf_device(c, &a, &unit, &state) == 0)
@@ -1267,8 +764,6 @@ userconf_parse(char *cmd)
 		case 'e':
 			if (*c == '\0')
 				printf("Attr, DevNo or Dev expected\n");
-			else if (userconf_attr(c, &a) == 0)
-				userconf_common_attr(c, a, UC_ENABLE);
 			else if (userconf_number(c, &a) == 0)
 				userconf_enable(a);
 			else if (userconf_device(c, &a, &unit, &state) == 0)
@@ -1300,40 +795,7 @@ userconf_parse(char *cmd)
 			userconf_hist_cmd('q');
 			userconf_hist_eoc();
 			return(-1);
-			break;
 		case 's':
-			if (*c == '\0')
-				userconf_show();
-			else
-				userconf_show_attr(c);
-			break;
-		case 't':
-			if (*c == '\0' || userconf_number(c, &a) == 0) {
-				if (*c != '\0') {
-					tz.tz_minuteswest = a;
-					while (*c != '\n' && *c != '\t' &&
-					    *c != ' ' && *c != '\0')
-						c++;
-					while (*c == '\t' || *c == ' ')
-						c++;
-					if (*c != '\0' &&
-					    userconf_number(c, &a) == 0)
-						tz.tz_dsttime = a;
-					userconf_hist_cmd('t');
-					userconf_hist_int(tz.tz_minuteswest);
-					userconf_hist_int(tz.tz_dsttime);
-					userconf_hist_eoc();
-				}
-				printf("timezone = %d, dst = %d\n",
-				    tz.tz_minuteswest, tz.tz_dsttime);
-			} else
-				printf("Unknown argument\n");
-			break;
-		case 'v':
-			autoconf_verbose = !autoconf_verbose;
-			printf("autoconf verbose %sabled\n",
-			    autoconf_verbose ? "en" : "dis");
-			break;
 		default:
 			printf("Unknown command\n");
 			break;
@@ -1342,17 +804,70 @@ userconf_parse(char *cmd)
 	return(0);
 }
 
+extern void user_config(void);
+
 void
 user_config(void)
 {
+	char prompt[] = "uc> ";
+
 	userconf_init();
-	printf("User Kernel Config\n");
+	printf("userconf: configure system autoconfiguration:\n");
 
 	while (1) {
-		printf("UKC> ");
+		printf(prompt);
 		if (getsn(userconf_cmdbuf, sizeof(userconf_cmdbuf)) > 0 &&
 		    userconf_parse(userconf_cmdbuf))
 			break;
 	}
 	printf("Continuing...\n");
+}
+
+/*
+ * XXX shouldn't this be a common function?
+ */
+static int
+getsn(char *cp, int size)
+{
+	char *lp;
+	int c, len;
+
+	cnpollc(1);
+
+	lp = cp;
+	len = 0;
+	for (;;) {
+		c = cngetc();
+		switch (c) {
+		case '\n':
+		case '\r':
+			printf("\n");
+			*lp++ = '\0';
+			cnpollc(0);
+			return (len);
+		case '\b':
+		case '\177':
+		case '#':
+			if (len) {
+				--len;
+				--lp;
+				printf("\b \b");
+			}
+			continue;
+		case '@':
+		case 'u'&037:
+			len = 0;
+			lp = cp;
+			printf("\n");
+			continue;
+		default:
+			if (len + 1 >= size || c < ' ') {
+				printf("\007");
+				continue;
+			}
+			printf("%c", c);
+			++len;
+			*lp++ = c;
+		}
+	}
 }

@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: aicasm_scan.l,v 1.10 2007/05/28 22:17:21 pyr Exp $	*/
+/*	$NetBSD: aicasm_scan.l,v 1.5 2005/12/11 12:22:18 christos Exp $	*/
 /*
  * Lexical Analyzer for the Aic7xxx SCSI Host adapter sequencer assembler.
  *
@@ -39,9 +39,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aicasm_scan.l,v 1.10 2007/05/28 22:17:21 pyr Exp $
- *
- * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm_scan.l,v 1.22 2003/12/16 23:54:07 gibbs Exp $
+ * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm_scan.l,v 1.21 2002/09/27 03:23:02 gibbs Exp $
  */
 
 #include <sys/types.h>
@@ -88,7 +86,6 @@ MBODY		((\\[^\n])*[^\n\\]*)+
 
 %%
 \n			{ ++yylineno; }
-\r			;
 "/*"			{ BEGIN COMMENT;  /* Enter comment eating state */ }
 <COMMENT>"/*"		{ fprintf(stderr, "Warning! Comment within comment."); }
 <COMMENT>\n		{ ++yylineno; }
@@ -116,7 +113,6 @@ if[ \t]*\(		{
 				}
 			}
 <CEXPR>\n		{ ++yylineno; }
-<CEXPR>\r		;
 <CEXPR>[^()\n]+	{
 				char *yptr;
 
@@ -129,7 +125,7 @@ if[ \t]*\(		{
 					 && string_buf_ptr != string_buf
 					 && string_buf_ptr[-1] == ' ')
 						yptr++;
-					else 
+					else
 						*string_buf_ptr++ = *yptr++;
 				}
 			}
@@ -276,7 +272,7 @@ else			{ return T_ELSE; }
 				BEGIN MACRODEF;
 				return T_DEFINE;
 			}
-<MACRODEF>{WORD}{SPACE}	{ 
+<MACRODEF>{WORD}{SPACE}	{
 				char *yptr;
 
 				/* Strip space and return as a normal symbol */
@@ -362,7 +358,6 @@ else			{ return T_ELSE; }
 				/* Eat escaped newlines. */
 				++yylineno;
 			}
-<MACROBODY>\r		;
 <MACROBODY>\n		{
 				/* Macros end on the first unescaped newline. */
 				BEGIN INITIAL;
@@ -373,17 +368,10 @@ else			{ return T_ELSE; }
 			}
 <MACROBODY>{MBODY}	{
 				char *yptr;
-				char c;
 
 				yptr = yytext;
-				while (c = *yptr++) {
-					/*
-					 * Strip carriage returns.
-					 */
-					if (c == '\r')
-						continue;
-					*string_buf_ptr++ = c;
-				}
+				while (*yptr)
+					*string_buf_ptr++ = *yptr++;
 			}
 {WORD}\(		{
 				char *yptr;
@@ -430,7 +418,7 @@ else			{ return T_ELSE; }
 					return T_SYMBOL;
 				}
 			}
-.			{ 
+.			{
 				snprintf(buf, sizeof(buf), "Invalid character "
 					 "'%c'", yytext[0]);
 				stop(buf, EX_DATAERR);
@@ -459,7 +447,9 @@ include_file(char *file_name, include_type type)
 
 	if (newfile == NULL && type != SOURCE_FILE) {
                 path_entry_t include_dir;
-		SLIST_FOREACH(include_dir, &search_path, links) {
+                for (include_dir = search_path.slh_first;
+                     include_dir != NULL;
+                     include_dir = include_dir->links.sle_next) {
 			char fullname[PATH_MAX];
 
 			if ((include_dir->quoted_includes_only == TRUE)
@@ -544,7 +534,7 @@ expand_macro(struct symbol *macro_symbol)
 	}
 
 	/* Cleanup replacement text. */
-	TAILQ_FOREACH(marg, &macro_symbol->info.macroinfo->args, links) {
+	STAILQ_FOREACH(marg, &macro_symbol->info.macroinfo->args, links) {
 		free(marg->replacement_text);
 	}
 }
@@ -568,7 +558,7 @@ next_substitution(struct symbol *mac_symbol, const char *body_pos,
 	do {
 		search_pos = *next_match;
 
-		TAILQ_FOREACH(marg, &mac_symbol->info.macroinfo->args, links) {
+		STAILQ_FOREACH(marg, &mac_symbol->info.macroinfo->args, links) {
 
 			retval = regexec(&marg->arg_regex, search_pos, 2,
 					 matches, 0);
@@ -593,7 +583,7 @@ yywrap()
 	if (yyfilename != NULL)
 		free(yyfilename);
 	yyfilename = NULL;
-	include = SLIST_FIRST(&include_stack);
+	include = include_stack.slh_first;
 	if (include != NULL) {
 		yy_switch_to_buffer(include->buffer);
 		yylineno = include->lineno;

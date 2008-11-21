@@ -1,4 +1,3 @@
-/* $OpenBSD: tc_3000_500.h,v 1.5 2002/05/02 22:56:06 miod Exp $ */
 /* $NetBSD: tc_3000_500.h,v 1.4 1998/10/22 01:03:09 briggs Exp $ */
 
 /*
@@ -105,4 +104,4 @@
 
 #define TC_3000_500_NCOOKIES	9
 
-extern int	tc_3000_500_fb_cnattach(u_int64_t);
+extern int	tc_3000_500_fb_cnattach __P((u_int64_t));

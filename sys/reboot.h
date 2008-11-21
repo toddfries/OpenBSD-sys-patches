@@ -1,5 +1,4 @@
-/*	$OpenBSD: reboot.h,v 1.13 2004/03/10 23:02:53 tom Exp $	*/
-/*	$NetBSD: reboot.h,v 1.9 1996/04/22 01:23:25 christos Exp $	*/
+/*	$NetBSD: reboot.h,v 1.25 2007/12/25 18:33:48 perry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988, 1993, 1994
@@ -29,8 +28,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)reboot.h	8.2 (Berkeley) 7/10/94
+ *	@(#)reboot.h	8.3 (Berkeley) 12/13/94
  */
+
+#ifndef _SYS_REBOOT_H_
+#define _SYS_REBOOT_H_
 
 /*
  * Arguments to reboot system call.  These are passed to the boot program,
@@ -38,21 +40,39 @@
  */
 #define	RB_AUTOBOOT	0	/* flags for system auto-booting itself */
 
-#define	RB_ASKNAME	0x0001	/* ask for file name to reboot from */
-#define	RB_SINGLE	0x0002	/* reboot to single user only */
-#define	RB_NOSYNC	0x0004	/* dont sync before reboot */
-#define	RB_HALT		0x0008	/* don't reboot, just halt */
-#define	RB_INITNAME	0x0010	/* name given for /etc/init (unused) */
-#define	RB_DFLTROOT	0x0020	/* use compiled-in rootdev */
-#define	RB_KDB		0x0040	/* give control to kernel debugger */
-#define	RB_RDONLY	0x0080	/* mount root fs read-only */
-#define	RB_DUMP		0x0100	/* dump kernel memory before reboot */
-#define	RB_MINIROOT	0x0200	/* mini-root present in memory at boot time */
-#define	RB_CONFIG	0x0400	/* change configured devices */
-#define	RB_TIMEBAD	0x0800	/* don't call resettodr() in boot() */
-#define	RB_POWERDOWN	0x1000	/* attempt to power down machine */
-#define	RB_SERCONS	0x2000	/* use serial console if available */
-#define	RB_USERREQ	0x4000	/* boot() called at user request (e.g. ddb) */
+#define	RB_ASKNAME	0x00000001	/* ask for file name to reboot from */
+#define	RB_SINGLE	0x00000002	/* reboot to single user only */
+#define	RB_NOSYNC	0x00000004	/* dont sync before reboot */
+#define	RB_HALT		0x00000008	/* don't reboot, just halt */
+#define	RB_INITNAME	0x00000010	/* name given for /etc/init (unused) */
+#define	__RB_UNUSED1	0x00000020	/* was RB_DFLTROOT, obsolete */
+#define	RB_KDB		0x00000040	/* give control to kernel debugger */
+#define	RB_RDONLY	0x00000080	/* mount root fs read-only */
+#define	RB_DUMP		0x00000100	/* dump kernel memory before reboot */
+#define	RB_MINIROOT	0x00000200	/* mini-root present in memory */
+#define	RB_STRING	0x00000400	/* use provided bootstr */
+#define	RB_POWERDOWN	(RB_HALT|0x800) /* turn power off (or at least halt) */
+#define RB_USERCONF	0x00001000	/* change configured devices */
+
+/*
+ * Extra autoboot flags (passed by boot prog to kernel). See also
+ * macros bootverbose, bootquiet in <sys/systm.h>.
+ */
+#define	AB_NORMAL	0x00000000	/* boot normally (default) */
+#define	AB_QUIET	0x00010000 	/* boot quietly */
+#define	AB_VERBOSE	0x00020000	/* boot verbosely */
+#define	AB_SILENT	0x00040000	/* boot silently */
+#define	AB_DEBUG	0x00080000	/* boot with debug messages */
+
+/*
+ * The top 4 bits are architecture specific and are used to
+ * pass information between the bootblocks and the machine
+ * initialization code.
+ */
+#define	RB_MD1		0x10000000
+#define	RB_MD2		0x20000000
+#define	RB_MD3		0x40000000
+#define	RB_MD4		0x80000000
 
 /*
  * Constants for converting boot-style device number to type,
@@ -90,13 +110,15 @@
 	((controller) << B_CONTROLLERSHIFT) | ((unit) << B_UNITSHIFT) | \
 	((partition) << B_PARTITIONSHIFT) | B_DEVMAGIC)
 
-#if	defined(_KERNEL) && !defined(_STANDALONE) && !defined(_LOCORE)
+#ifdef _KERNEL
 
 __BEGIN_DECLS
 
-void	boot(int)
-    __attribute__((__noreturn__));
+void	cpu_reboot(int, char *)
+    __dead;
 
 __END_DECLS
 
 #endif /* _KERNEL */
+
+#endif /* !_SYS_REBOOT_H_ */

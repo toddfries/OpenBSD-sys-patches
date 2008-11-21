@@ -1,4 +1,5 @@
-/*	$OpenBSD: hifn7751var.h,v 1.52 2004/01/20 21:01:55 jason Exp $	*/
+/*	$NetBSD: hifn7751var.h,v 1.7 2005/12/11 12:22:49 christos Exp $	*/
+/*	$OpenBSD: hifn7751var.h,v 1.18 2000/06/02 22:36:45 deraadt Exp $	*/
 
 /*
  * Invertex AEON / Hifn 7751 driver
@@ -39,8 +40,8 @@
  *
  */
 
-#ifndef __HIFN7751VAR_H__
-#define __HIFN7751VAR_H__
+#ifndef __DEV_PCI_HIFN7751VAR_H__
+#define __DEV_PCI_HIFN7751VAR_H__
 
 #ifdef _KERNEL
 
@@ -59,8 +60,8 @@
 #define HIFN_3DES_KEY_LENGTH		24
 #define HIFN_MAX_CRYPT_KEY_LENGTH	HIFN_3DES_KEY_LENGTH
 #define HIFN_IV_LENGTH			8
-#define HIFN_AES_IV_LENGTH		16
-#define	HIFN_MAX_IV_LENGTH		HIFN_AES_IV_LENGTH
+#define	HIFN_AES_IV_LENGTH		16
+#define HIFN_MAX_IV_LENGTH		HIFN_AES_IV_LENGTH
 
 /*
  *  Length values for authentication
@@ -95,7 +96,7 @@ struct hifn_dma {
 
 	/*
 	 *  Our current positions for insertion and removal from the descriptor
-	 *  rings. 
+	 *  rings.
 	 */
 	int			cmdi, srci, dsti, resi;
 	volatile int		cmdu, srcu, dstu, resu;
@@ -103,9 +104,15 @@ struct hifn_dma {
 };
 
 struct hifn_session {
-	int hs_used;
+	int hs_state;
+	int hs_prev_op; /* XXX collapse into hs_flags? */
 	u_int8_t hs_iv[HIFN_MAX_IV_LENGTH];
 };
+
+/* We use a state machine on sessions */
+#define	HS_STATE_FREE	0		/* unused session entry */
+#define	HS_STATE_USED	1		/* allocated, but key not on card */
+#define	HS_STATE_KEY	2		/* allocated and key is on card */
 
 #define	HIFN_RING_SYNC(sc, r, i, f)					\
 	bus_dmamap_sync((sc)->sc_dmat, (sc)->sc_dmamap,		\
@@ -145,21 +152,34 @@ struct hifn_softc {
 	int sc_dmansegs;
 	int32_t sc_cid;
 	int sc_maxses;
-	int sc_nsessions;
 	int sc_ramsize;
 	int sc_flags;
-#define	HIFN_HAS_RNG		0x01	/* includes random number generator */
-#define	HIFN_HAS_PUBLIC		0x02	/* includes public key support */
-#define	HIFN_IS_7811		0x04	/* Hifn 7811 part */
-#define	HIFN_NO_BURSTWRITE	0x08	/* can't handle PCI burst writes */
-#define	HIFN_HAS_LEDS		0x10	/* Has LEDs to blink */
-#define	HIFN_HAS_AES		0x20	/* includes AES support */
-#define	HIFN_IS_7956		0x40	/* Hifn 7955/7956 part */
-	struct timeout sc_rngto, sc_tickto;
-	int sc_rngfirst;
-	int sc_rnghz;
-	int sc_c_busy, sc_s_busy, sc_d_busy, sc_r_busy, sc_active;
-	struct hifn_session *sc_sessions;
+#define	HIFN_HAS_RNG		0x01
+#define	HIFN_HAS_PUBLIC		0x02
+#define	HIFN_HAS_AES		0x04	/* includes AES support */
+#define	HIFN_IS_7811		0x08	/* Hifn 7811 part */
+#define	HIFN_IS_7956		0x10	/* Hifn 7956/7955 don't have SDRAM */
+#define	HIFN_NO_BURSTWRITE	0x20
+#define	HIFN_HAS_LEDS		0x40
+
+#define HIFN_RNG_BITSPER	17	/* From Hifn 6500 paper: 0.06 bits
+					   of entropy per RNG register bit
+					   worst-case */
+
+	struct callout		sc_rngto;	/* rng timeout */
+	struct callout		sc_tickto;	/* led-clear timeout */
+	rndsource_element_t	sc_rnd_source;
+	int			sc_rngfirst;
+	int			sc_rnghz;
+	int			sc_c_busy;	/* command ring busy */
+	int			sc_s_busy;	/* source data ring busy */
+	int			sc_d_busy;	/* destination data ring busy */
+	int			sc_r_busy;	/* result ring busy */
+	int			sc_active;	/* for initial countdown */
+	int			sc_needwakeup;	/* ops q'd wating on resources */
+	int			sc_curbatch;	/* # ops submitted w/o int */
+	int			sc_suspended;
+	struct hifn_session sc_sessions[2048];
 	pci_chipset_tag_t sc_pci_pc;
 	pcitag_t sc_pci_tag;
 	bus_size_t sc_waw_lastreg;
@@ -214,7 +234,7 @@ struct hifn_softc {
  *
  *  session_num
  *  -----------
- *  A number between 0 and 2048 (for DRAM models) or a number between 
+ *  A number between 0 and 2048 (for DRAM models) or a number between
  *  0 and 768 (for SRAM models).  Those who don't want to use session
  *  numbers should leave value at zero and send a new crypt key and/or
  *  new MAC key on every command.  If you use session numbers and
@@ -228,7 +248,7 @@ struct hifn_softc {
  *  ----
  *  Either fill in the mbuf pointer and npa=0 or
  *	 fill packp[] and packl[] and set npa to > 0
- * 
+ *
  *  mac_header_skip
  *  ---------------
  *  The number of bytes of the source_buf that are skipped over before
@@ -264,11 +284,13 @@ struct hifn_command {
 	} dstu;
 	bus_dmamap_t dst_map;
 
+	u_short mac_header_skip, mac_process_len;
+	u_short crypt_header_skip, crypt_process_len;
+
 	struct hifn_softc *softc;
 	struct cryptop *crp;
-	struct cryptodesc *enccrd, *maccrd, *compcrd;
-	void (*cmd_callback)(struct hifn_softc *, struct hifn_command *,
-	    u_int8_t *);
+	struct cryptodesc *enccrd, *maccrd,  *compcrd;
+
 };
 
 /*
@@ -277,6 +299,7 @@ struct hifn_command {
 #define HIFN_CRYPTO_SUCCESS	0
 #define HIFN_CRYPTO_BAD_INPUT	(-1)
 #define HIFN_CRYPTO_RINGS_FULL	(-2)
+
 
 /**************************************************************************
  *
@@ -296,7 +319,7 @@ struct hifn_command {
  *  0 for success, negative values on error
  *
  *  Defines for negative error codes are:
- *  
+ *
  *    HIFN_CRYPTO_BAD_INPUT  :  The passed in command had invalid settings.
  *    HIFN_CRYPTO_RINGS_FULL :  All DMA rings were full and non-blocking
  *                              behaviour was requested.
@@ -322,4 +345,4 @@ struct hifn_stats {
 	u_int32_t hst_abort;
 };
 
-#endif /* __HIFN7751VAR_H__ */
+#endif /* __DEV_PCI_HIFN7751VAR_H__ */

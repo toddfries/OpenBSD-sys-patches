@@ -1,4 +1,4 @@
-/*	$NetBSD: sysvbfs.h,v 1.4 2006/10/06 02:40:58 chs Exp $	*/
+/*	$NetBSD: sysvbfs.h,v 1.8 2008/09/04 12:07:30 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,13 +32,10 @@
 #ifndef _FS_SYSVBFS_SYSVBFS_H_
 #define	_FS_SYSVBFS_SYSVBFS_H_
 
-struct sysvbfs_args {
-	char	*fspec;		/* blocks special holding the fs to mount */
-};
-
-#ifdef _KERNEL
 struct bfs;
 struct buf;
+
+#include <fs/sysvbfs/sysvbfs_args.h>
 
 #include <miscfs/genfs/genfs.h>
 #include <miscfs/genfs/genfs_node.h>
@@ -96,20 +86,7 @@ int sysvbfs_advlock(void *);
 int sysvbfs_pathconf(void *);
 
 /* vfs ops. */
-int sysvbfs_mount(struct mount *, const char *, void *, struct nameidata *,
-    struct lwp *);
-int sysvbfs_start(struct mount *, int, struct lwp *);
-int sysvbfs_unmount(struct mount *, int, struct lwp *);
-int sysvbfs_root(struct mount *, struct vnode **);
-int sysvbfs_quotactl(struct mount *, int, uid_t, void *, struct lwp *);
-int sysvbfs_statvfs(struct mount *, struct statvfs *, struct lwp *);
-int sysvbfs_sync(struct mount *, int, kauth_cred_t, struct lwp *);
-int sysvbfs_vget(struct mount *, ino_t, struct vnode **);
-int sysvbfs_fhtovp(struct mount *, struct fid *, struct vnode **);
-int sysvbfs_vptofh(struct vnode *, struct fid *, size_t *);
-void sysvbfs_init(void);
-void sysvbfs_reinit(void);
-void sysvbfs_done(void);
+VFS_PROTOS(sysvbfs);
 
 extern int (**sysvbfs_vnodeop_p)(void *);
 
@@ -121,5 +98,4 @@ extern const struct genfs_ops sysvbfs_genfsops;
 int sysvbfs_update(struct vnode *, const struct timespec *,
     const struct timespec *, int);
 
-#endif /* _KERNEL */
 #endif /* _FS_SYSVBFS_SYSVBFS_H_ */

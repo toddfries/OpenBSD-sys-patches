@@ -1,5 +1,4 @@
-/* $OpenBSD: kvm86call.S,v 1.4 2006/12/11 23:45:13 gwk Exp $ */
-/* $NetBSD: kvm86call.S,v 1.7 2006/04/11 17:14:07 drochner Exp $ */
+/* $NetBSD: kvm86call.S,v 1.9 2008/01/04 15:55:31 yamt Exp $ */
 
 /*-
  * Copyright (c) 1998 Jonathan Lemon
@@ -32,8 +31,10 @@
  */
 
 #include <machine/asm.h>
-#include <machine/param.h>
+
 #include "assym.h"
+
+__KERNEL_RCSID(0, "$NetBSD: kvm86call.S,v 1.9 2008/01/04 15:55:31 yamt Exp $");
 
 	.data
 	.align 4
@@ -43,20 +44,16 @@
 kvm86_incall:		.long	0
 
 /* XXX arguments for kvm86call() */
-	.globl vm86pcb, vm86newptd, vm86frame, vm86pgtableva
-	.globl	vm86tssd0, vm86tssd1
+	.globl vm86newptd, vm86frame, vm86pgtableva
+vm86newptd:		.long	0
+vm86frame:		.long	0
+vm86pgtableva:		.long	0
 
 /* locals */
 SCRARGFRAME:		.long	0
 SCRSTACK:		.long	0
-SCRTSS0:		.long	0
-SCRTSS1:		.long	0
 
 	.text
-
-#if defined MULTIPROCESSOR
-#include <machine/i82489reg.h>
-#endif
 
 /* int kvm86_call(struct trapframe *) */
 ENTRY(kvm86_call)
@@ -74,49 +71,17 @@ ENTRY(kvm86_call)
 	movl	vm86frame,%edi		/* target frame location */
 	movl    SCRARGFRAME,%esi	/* source (set on entry) */
 	movl	$FRAMESIZE/4,%ecx	/* sizeof(struct trapframe)/4 */
-	cld
 	rep
 	movsl				/* copy frame to new stack */
 
-#ifdef MULTIPROCESSOR	
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	leal	0(,%ecx,4),%ecx
-	movl	_C_LABEL(cpu_info)(%ecx),%edx
-	movl	%edx,%ecx
-#else
-	leal	_C_LABEL(cpu_info_primary),%ecx
-#endif
-
-	movl	CPU_INFO_CURPCB(%ecx),%eax
-	pushl	%eax			/* save curpcb */
-	
-	movl	vm86pcb,%eax		
-	movl	%eax,CPU_INFO_CURPCB(%ecx) /* set curpcb to vm86pcb */
-	movl	CPU_INFO_CURPROC(%ecx),%ecx
-	movl	P_MD_TSS_SEL(%ecx),%edi
-
-#ifdef	MULTIPROCESSOR
-	movl	CPU_INFO_GDT(%edx),%eax
-#else
 	movl	_C_LABEL(gdt),%eax
-#endif
+	movl	_C_LABEL(kvm86_tss_sel),%edi
 	andl	$~0x0200,4(%eax,%edi,1)	/* reset "task busy" */
-
-	movl	0(%eax,%edi,1),%edx
-	movl	%edx,SCRTSS0		/* save first word */
-	movl	4(%eax,%edi,1),%edx
-	movl	%edx,SCRTSS1		/* save second word */
-
-	movl	vm86tssd0,%edx		/* vm86 tssd entry */
-	movl	%edx,0(%eax,%edi,1)
-	movl	vm86tssd1,%edx		/* vm86 tssd entry */
-	movl	%edx,4(%eax,%edi,1)
 	ltr	%di
 
 	movl	%cr3,%eax
 	pushl	%eax			/* save address space */
-	movl	PTDpaddr,%ecx
+	movl	PDPpaddr,%ecx
 	movl	%ecx,%ebx
 	addl	$KERNBASE,%ebx		/* va of Idle PDP */
 	movl	0(%ebx),%eax
@@ -157,7 +122,6 @@ ENTRY(kvm86_ret)
 	movl	8(%ebp),%esi		/* source */
 	movl	SCRARGFRAME,%edi	/* destination */
 	movl	$FRAMESIZE/4,%ecx	/* size */
-	cld
 	rep
 	movsl				/* copy frame to original frame */
 
@@ -170,41 +134,16 @@ ENTRY(kvm86_ret)
 
 	movl	$0,kvm86_incall		/* reset trapflag */
 
-	
-#ifdef MULTIPROCESSOR
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	leal	0(,%ecx,4),%ecx
-	movl	_C_LABEL(cpu_info)(%ecx),%ecx
-	movl	CPU_INFO_GDT(%ecx),%eax
-#else
-	leal	_C_LABEL(cpu_info_primary),%ecx
+	popl	%gs
+	popl	%fs
+
 	movl	_C_LABEL(gdt),%eax
-#endif
-	movl	CPU_INFO_CURPROC(%ecx),%ecx
-	movl	P_MD_TSS_SEL(%ecx),%edi
-	movl	SCRTSS0, %edx
-	movl	%edx, 0(%eax,%edi,1)	/* restore first word */
-	movl	SCRTSS1, %edx
-	movl	%edx, 4(%eax,%edi,1)	/* restore second word */
+	movl	CPUVAR(TSS_SEL),%edi
+	andl	$~0x0200,4(%eax,%edi,1)	/* reset "task busy" */
 	ltr	%di
-
-
-#ifdef MULTIPROCESSOR	
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	leal	0(,%ecx,4),%ecx
-	movl	_C_LABEL(cpu_info)(%ecx),%ecx
-#else
-	leal	_C_LABEL(cpu_info_primary),%ecx
-#endif
-	popl	%eax			/* restore curpcb */
-	movl	%eax,CPU_INFO_CURPCB(%ecx)
 
 	movl	12(%ebp), %eax		/* will be kvm86_call()'s retval */
 
-	popl	%gs
-	popl	%fs
 	popl	%ebx
 	popl	%edi
 	popl	%esi

@@ -1,5 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.8 2007/05/16 19:37:06 thib Exp $	*/
-/* 	$NetBSD: intr.h,v 1.1 1998/08/18 23:55:00 matt Exp $	*/
+/* 	$NetBSD: intr.h,v 1.27 2008/02/20 16:37:52 matt Exp $	*/
 
 /*
  * Copyright (c) 1998 Matt Thomas.
@@ -33,90 +32,110 @@
 #ifndef _VAX_INTR_H_
 #define _VAX_INTR_H_
 
+#include <sys/queue.h>
+#include <machine/mtpr.h>
+
 /* Define the various Interrupt Priority Levels */
 
 /* Interrupt Priority Levels are not mutually exclusive. */
 
-#define IPL_NONE	0x00
-#define	IPL_SOFTCLOCK	0x08
-#define	IPL_SOFTNET	0x0c
-#define IPL_BIO		0x15	/* block I/O */
-#define IPL_NET		0x15	/* network */
-#define IPL_TTY		0x15	/* terminal */
+/* Hardware interrupt levels are 16 (0x10) thru 31 (0x1f) */
+#define IPL_HIGH	0x1f	/* high -- blocks all interrupts */
+#define IPL_SCHED	0x18	/* clock */
 #define IPL_VM		0x17	/* memory allocation */
-#define	IPL_AUDIO	0x15	/* audio */
-#define IPL_CLOCK	0x18	/* clock */
-#define IPL_STATCLOCK	0x18	/* statclock */
-#define	IPL_HIGH	0x1f
 
-#define	IST_UNUSABLE	-1	/* interrupt cannot be used */
-#define	IST_NONE	0	/* none (dummy) */
-#define	IST_PULSE	1	/* pulsed */
-#define	IST_EDGE	2	/* edge-triggered */
-#define	IST_LEVEL	3	/* level-triggered */
+/* Software interrupt levels are 0 (0x00) thru 15 (0x0f) */
+#define IPL_SOFTDDB	0x0f	/* used by DDB on VAX */
+#define IPL_SOFTSERIAL	0x0d	/* soft serial */
+#define IPL_SOFTNET	0x0c	/* soft network */
+#define IPL_SOFTBIO	0x0b	/* soft bio */
+#define IPL_SOFTCLOCK	0x08
+#define IPL_NONE	0x00
 
-#ifndef lint
-#define _splset(reg)						\
-({								\
-	register int val;					\
-	__asm __volatile ("mfpr $0x12,%0;mtpr %1,$0x12"		\
-				: "=&g" (val)			\
-				: "g" (reg));			\
-	val;							\
-})
+/* vax weirdness */
+#define IPL_UBA		IPL_VM	/* unibus adapters */
+#define IPL_CONSMEDIA	IPL_VM	/* console media */
 
-#define	_splraise(reg)						\
-({								\
-	register int val;					\
-	__asm __volatile ("mfpr $0x12,%0"			\
-				: "=&g" (val)			\
-				: );				\
-	if ((reg) > val) {					\
-		__asm __volatile ("mtpr %0,$0x12"		\
-				:				\
-				: "g" (reg));			\
-	}							\
-	val;							\
-})
+/* Misc */
+#define IPL_LEVELS	32
 
-#define	splx(reg)						\
-	__asm __volatile ("mtpr %0,$0x12" : : "g" (reg))
-#endif
+#define IST_UNUSABLE	-1	/* interrupt cannot be used */
+#define IST_NONE	0	/* none (dummy) */
+#define IST_PULSE	1	/* pulsed */
+#define IST_EDGE	2	/* edge-triggered */
+#define IST_LEVEL	3	/* level-triggered */
 
-#define	spl0()		_splset(IPL_NONE)
-#define splsoftclock()	_splraise(IPL_SOFTCLOCK)
-#define splsoftnet()	_splraise(IPL_SOFTNET)
-#define splbio()	_splraise(IPL_BIO)
-#define splnet()	_splraise(IPL_NET)
-#define spltty()	_splraise(IPL_TTY)
-#define splvm()		_splraise(IPL_VM)
-#define splclock()	_splraise(IPL_CLOCK)
-#define splstatclock()	_splraise(IPL_STATCLOCK)
-#define splhigh()	_splset(IPL_HIGH)
-#define	splsched()	splhigh()
+
+#ifdef _KERNEL
+typedef int ipl_t;
+
+static inline void
+_splset(ipl_t ipl)
+{
+	mtpr(ipl, PR_IPL);
+}
+
+static inline ipl_t
+_splget(void)
+{
+	return mfpr(PR_IPL);
+}
+
+static inline ipl_t
+splx(ipl_t new_ipl)
+{
+	ipl_t old_ipl = _splget();
+	_splset(new_ipl);
+	return old_ipl;
+}
+
+typedef struct {
+	uint8_t _ipl;
+} ipl_cookie_t;
+
+static inline ipl_cookie_t
+makeiplcookie(ipl_t ipl)
+{
+	return (ipl_cookie_t){._ipl = (uint8_t)ipl};
+}
+
+static inline int
+splraiseipl(ipl_cookie_t icookie)
+{
+	ipl_t newipl = icookie._ipl;
+	ipl_t oldipl;
+
+	oldipl = _splget();
+	if (newipl > oldipl) {
+		_splset(newipl);
+	}
+	return oldipl;
+}
+
+
+#define spl0()		_splset(IPL_NONE)		/* IPL00 */
+#define splddb()	splraiseipl(makeiplcookie(IPL_SOFTDDB)) /* IPL0F */
+#define splconsmedia()	splraiseipl(makeiplcookie(IPL_CONSMEDIA)) /* IPL17 */
+
+#include <sys/spl.h>
 
 /* These are better to use when playing with VAX buses */
-#define	spl4()		_splraise(0x14)
-#define	spl5()		_splraise(0x15)
-#define	spl6()		_splraise(0x16)
-#define	spl7()		_splraise(0x17)
+#define	spluba()	splraiseipl(makeiplcookie(IPL_UBA)) /* IPL17 */
+#define spl7()		splvm()
 
-/* SPL asserts */
-#ifdef DIAGNOSTIC
-/*
- * Although this function is implemented in MI code, it must be in this MD
- * header because we don't want this header to include MI includes.
+/* schedule software interrupts
  */
-void splassert_fail(int, int, const char *);
-extern int splassert_ctl;
-void splassert_check(int, const char *);
-#define splassert(__wantipl) do {			\
-	if (splassert_ctl > 0) {			\
-		splassert_check(__wantipl, __func__);	\
-	}						\
-} while (0)
-#else
-#define	splassert(wantipl)	do { /* nothing */ } while (0)
-#endif
+#define setsoftddb()	((void)mtpr(IPL_SOFTDDB, PR_SIRR))
 
+#if !defined(_LOCORE)
+
+#if defined(__HAVE_FAST_SOFTINTS)
+static inline void
+softint_trigger(uintptr_t machdep)
+{
+	mtpr(machdep, PR_SIRR);
+}
+#endif /* __HAVE_FAST_SOFTINTS */
+#endif /* !_LOCORE */
+#endif /* _KERNEL */
 #endif	/* _VAX_INTR_H */

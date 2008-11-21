@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.18 2007/11/26 10:01:42 deraadt Exp $
-#	$NetBSD: Makefile,v 1.23 1997/02/04 03:51:37 thorpej Exp $
+#	$NetBSD: Makefile,v 1.24 2000/05/31 14:31:23 he Exp $
 
-.if ${MACHINE} == "hp300"
-SUBDIR=	libsa libsaz libz common mkboot uboot cdboot installboot
-.endif
+# mkboot is first; it's needed by the boot programs
+SUBDIR=	mkboot inst uboot installboot
+
+TARGETS += release
 
 .include <bsd.subdir.mk>

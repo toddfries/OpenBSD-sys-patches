@@ -1,4 +1,3 @@
-/*	$OpenBSD: fp.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /*	$NetBSD: fp.h,v 1.1 2001/01/10 19:02:06 bjh21 Exp $	*/
 
 /*

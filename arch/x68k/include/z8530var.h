@@ -1,4 +1,4 @@
-/*    $NetBSD: z8530var.h,v 1.6 2005/12/11 12:19:44 christos Exp $ */
+/*    $NetBSD: z8530var.h,v 1.9 2008/03/29 19:15:36 tsutsui Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -121,10 +121,10 @@
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
-	u_char		zc_xxx0;
-	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
-	u_char		zc_xxx1;
-	volatile u_char	zc_data;	/* data */
+	uint8_t		zc_xxx0;
+	volatile uint8_t zc_csr;	/* ctrl,status, and indirect access */
+	uint8_t		zc_xxx1;
+	volatile uint8_t zc_data;	/* data */
 };
 struct zsdevice {
 	/* Yes, they are backwards. */
@@ -133,11 +133,12 @@ struct zsdevice {
 };
 
 struct zsc_softc {
-	struct	device zsc_dev;		/* required first: base device */
+	device_t zsc_dev;		/* required first: base device */
 	struct	zs_chanstate *zsc_cs[2];	/* channel A and B soft state */
 	/* Machine-dependent part follows... */
 	struct zs_chanstate  zsc_cs_store[2];
 	struct zsdevice *zsc_addr;
+	void *zsc_softintr_cookie;
 };
 
 /*
@@ -148,16 +149,18 @@ struct zsc_softc {
  * These could be inlines, but with the delay, speed is moot.
  */
 
-u_char zs_read_reg(struct zs_chanstate *, u_char);
-u_char zs_read_csr(struct zs_chanstate *);
-u_char zs_read_data(struct zs_chanstate *);
+uint8_t zs_read_reg(struct zs_chanstate *, uint8_t);
+uint8_t zs_read_csr(struct zs_chanstate *);
+uint8_t zs_read_data(struct zs_chanstate *);
 
-void  zs_write_reg(struct zs_chanstate *, u_char, u_char);
-void  zs_write_csr(struct zs_chanstate *, u_char);
-void  zs_write_data(struct zs_chanstate *, u_char);
+void  zs_write_reg(struct zs_chanstate *, uint8_t, uint8_t);
+void  zs_write_csr(struct zs_chanstate *, uint8_t);
+void  zs_write_data(struct zs_chanstate *, uint8_t);
 
 /*
  * Physical address for built-in ZS.
  */
 #define ZSCN_PHYSADDR	0xe98004 /* for serial console */
 #define ZSMS_PHYSADDR	0xe98000 /* for mouse */
+
+#define	IPL_ZS	IPL_SERIAL

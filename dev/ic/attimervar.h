@@ -1,4 +1,4 @@
-/*	$NetBSD: attimervar.h,v 1.3 2007/09/10 10:35:53 cube Exp $	*/
+/*	$NetBSD: attimervar.h,v 1.6 2008/04/29 06:53:02 martin Exp $	*/
 
 /*
  *  Copyright (c) 2005 The NetBSD Foundation.
@@ -12,9 +12,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of The NetBSD Foundation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,14 +27,16 @@
  */
 
 struct attimer_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 	uint32_t sc_flags;
 #define ATT_ATTACHED	0x01
 #define ATT_CONFIGURED	0x02
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
+	bus_size_t sc_size;
 };
 
-void			attimer_attach(struct attimer_softc *);
-struct attimer_softc	*attimer_attach_speaker(void);
-void			attimer_set_pitch(struct attimer_softc *, int);
+void		attimer_attach(struct attimer_softc *);
+int		attimer_detach(device_t, int);
+device_t	attimer_attach_speaker(void);
+void		attimer_set_pitch(device_t, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_mroute.h,v 1.7 2006/07/06 02:56:58 brad Exp $	*/
+/*	$NetBSD: ip6_mroute.h,v 1.15 2008/08/06 15:01:23 plunky Exp $	*/
 /*	$KAME: ip6_mroute.h,v 1.17 2001/02/10 02:05:52 itojun Exp $	*/
 
 /*
@@ -124,19 +124,19 @@ struct mf6cctl {
  * The kernel's multicast routing statistics.
  */
 struct mrt6stat {
-	u_int64_t mrt6s_mfc_lookups;	/* # forw. cache hash table hits   */
-	u_int64_t mrt6s_mfc_misses;	/* # forw. cache hash table misses */
-	u_int64_t mrt6s_upcalls;	/* # calls to mrouted              */
-	u_int64_t mrt6s_no_route;	/* no route for packet's origin    */
-	u_int64_t mrt6s_bad_tunnel;	/* malformed tunnel options        */
-	u_int64_t mrt6s_cant_tunnel;	/* no room for tunnel options      */
-	u_int64_t mrt6s_wrong_if;	/* arrived on wrong interface	   */
-	u_int64_t mrt6s_upq_ovflw;	/* upcall Q overflow		   */
-	u_int64_t mrt6s_cache_cleanups;	/* # entries with no upcalls 	   */
-	u_int64_t mrt6s_drop_sel;     	/* pkts dropped selectively        */
-	u_int64_t mrt6s_q_overflow;    	/* pkts dropped - Q overflow       */
-	u_int64_t mrt6s_pkt2large;     	/* pkts dropped - size > BKT SIZE  */
-	u_int64_t mrt6s_upq_sockfull;	/* upcalls dropped - socket full   */
+	u_quad_t mrt6s_mfc_lookups;	/* # forw. cache hash table hits   */
+	u_quad_t mrt6s_mfc_misses;	/* # forw. cache hash table misses */
+	u_quad_t mrt6s_upcalls;		/* # calls to mrouted              */
+	u_quad_t mrt6s_no_route;	/* no route for packet's origin    */
+	u_quad_t mrt6s_bad_tunnel;	/* malformed tunnel options        */
+	u_quad_t mrt6s_cant_tunnel;	/* no room for tunnel options      */
+	u_quad_t mrt6s_wrong_if;	/* arrived on wrong interface	   */
+	u_quad_t mrt6s_upq_ovflw;	/* upcall Q overflow		   */
+	u_quad_t mrt6s_cache_cleanups;	/* # entries with no upcalls 	   */
+	u_quad_t mrt6s_drop_sel;     	/* pkts dropped selectively        */
+	u_quad_t mrt6s_q_overflow;    	/* pkts dropped - Q overflow       */
+	u_quad_t mrt6s_pkt2large;     	/* pkts dropped - size > BKT SIZE  */
+	u_quad_t mrt6s_upq_sockfull;	/* upcalls dropped - socket full   */
 };
 
 #ifdef MRT6_OINIT
@@ -186,9 +186,9 @@ struct mrt6msg {
 struct sioc_sg_req6 {
 	struct sockaddr_in6 src;
 	struct sockaddr_in6 grp;
-	u_int64_t pktcnt;
-	u_int64_t bytecnt;
-	u_int64_t wrong_if;
+	u_quad_t pktcnt;
+	u_quad_t bytecnt;
+	u_quad_t wrong_if;
 };
 
 /*
@@ -196,13 +196,13 @@ struct sioc_sg_req6 {
  */
 struct sioc_mif_req6 {
 	mifi_t mifi;		/* mif number				*/
-	u_int64_t icount;	/* Input packet count on mif		*/
-	u_int64_t ocount;	/* Output packet count on mif		*/
-	u_int64_t ibytes;	/* Input byte count on mif		*/
-	u_int64_t obytes;	/* Output byte count on mif		*/
+	u_quad_t icount;	/* Input packet count on mif		*/
+	u_quad_t ocount;	/* Output packet count on mif		*/
+	u_quad_t ibytes;	/* Input byte count on mif		*/
+	u_quad_t obytes;	/* Output byte count on mif		*/
 };
 
-#if defined(_KERNEL) || defined(KERNEL)
+#ifdef _KERNEL
 /*
  * The kernel's multicast-interface structure.
  */
@@ -214,11 +214,10 @@ struct mif6 {
 #endif
 	struct in6_addr	m6_lcl_addr;   	/* local interface address           */
 	struct ifnet    *m6_ifp;     	/* pointer to interface              */
-	u_int64_t	m6_pkt_in;	/* # pkts in on interface            */
-	u_int64_t	m6_pkt_out;	/* # pkts out on interface           */
-	u_int64_t	m6_bytes_in;	/* # bytes in on interface	     */
-	u_int64_t	m6_bytes_out;	/* # bytes out on interface	     */
-	struct route_in6 m6_route;/* cached route if this is a tunnel */
+	u_quad_t	m6_pkt_in;	/* # pkts in on interface            */
+	u_quad_t	m6_pkt_out;	/* # pkts out on interface           */
+	u_quad_t	m6_bytes_in;	/* # bytes in on interface	     */
+	u_quad_t	m6_bytes_out;	/* # bytes out on interface	     */
 #ifdef notyet
 	u_int		m6_rsvp_on;	/* RSVP listening on this vif */
 	struct socket   *m6_rsvpd;	/* RSVP daemon socket */
@@ -234,9 +233,9 @@ struct mf6c {
 	mifi_t	    	 mf6c_parent; 		/* incoming IF               */
 	struct if_set	 mf6c_ifset;		/* set of outgoing IFs */
 
-	u_int64_t    	mf6c_pkt_cnt;		/* pkt count for src-grp     */
-	u_int64_t    	mf6c_byte_cnt;		/* byte count for src-grp    */
-	u_int64_t    	mf6c_wrong_if;		/* wrong if for src-grp	     */
+	u_quad_t    	mf6c_pkt_cnt;		/* pkt count for src-grp     */
+	u_quad_t    	mf6c_byte_cnt;		/* byte count for src-grp    */
+	u_quad_t    	mf6c_wrong_if;		/* wrong if for src-grp	     */
 	int	    	mf6c_expire;		/* time to clean entry up    */
 	struct timeval  mf6c_last_assert;	/* last time I sent an assert*/
 	struct rtdetq  *mf6c_stall;		/* pkts waiting for route */
@@ -268,11 +267,11 @@ struct rtdetq {		/* XXX: rtdetq is also defined in ip_mroute.h */
 
 #define MAX_UPQ6	4		/* max. no of pkts in upcall Q */
 
-int	ip6_mrouter_set(int, struct socket *, struct mbuf *);
-int	ip6_mrouter_get(int, struct socket *, struct mbuf **);
+int	ip6_mrouter_set(struct socket *, struct sockopt *);
+int	ip6_mrouter_get(struct socket *, struct sockopt *);
 int	ip6_mrouter_done(void);
 void	ip6_mrouter_detach(struct ifnet *);
-int	mrt6_ioctl(int, caddr_t);
+int	mrt6_ioctl(u_long, void *);
 #endif /* _KERNEL */
 
 #endif /* !_NETINET6_IP6_MROUTE_H_ */

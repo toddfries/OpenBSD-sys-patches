@@ -1,8 +1,11 @@
-/*	$OpenBSD: svr4_socket.c,v 1.5 2006/03/05 21:48:56 miod Exp $	*/
-/*	$NetBSD: svr4_socket.c,v 1.4 1997/07/21 23:02:37 christos Exp $	*/
+/*	$NetBSD: svr4_socket.c,v 1.21 2008/06/18 02:08:36 dogcow Exp $	*/
 
-/*
- * Copyright (c) 1996 Christos Zoulas.  All rights reserved.
+/*-
+ * Copyright (c) 1996, 2008 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,22 +15,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Christos Zoulas.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -41,6 +40,9 @@
  * every time a stat(2) call finds a socket.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: svr4_socket.c,v 1.21 2008/06/18 02:08:36 dogcow Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
@@ -48,6 +50,7 @@
 #include <sys/mbuf.h>
 #include <sys/file.h>
 #include <sys/mount.h>
+#include <sys/sched.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syscallargs.h>
@@ -59,6 +62,8 @@
 #include <compat/svr4/svr4_socket.h>
 #include <compat/svr4/svr4_signal.h>
 #include <compat/svr4/svr4_sockmod.h>
+#include <compat/svr4/svr4_lwp.h>
+#include <compat/svr4/svr4_ucontext.h>
 #include <compat/svr4/svr4_syscallargs.h>
 
 struct svr4_sockcache_entry {
@@ -66,7 +71,7 @@ struct svr4_sockcache_entry {
 	void *cookie;		/* Internal cookie used for matching	*/
 	struct sockaddr_un sock;/* Pathname for the socket		*/
 	dev_t dev;		/* Device where the socket lives on	*/
-	ino_t ino;		/* Inode where the socket lives on	*/
+	svr4_ino_t ino;		/* Inode where the socket lives on	*/
 	TAILQ_ENTRY(svr4_sockcache_entry) entries;
 };
 
@@ -74,17 +79,13 @@ static TAILQ_HEAD(svr4_sockcache_head, svr4_sockcache_entry) svr4_head;
 static int initialized = 0;
 
 struct sockaddr_un *
-svr4_find_socket(p, fp, dev, ino)
-	struct proc *p;
-	struct file *fp;
-	dev_t dev;
-	ino_t ino;
+svr4_find_socket(struct proc *p, struct file *fp, dev_t dev, svr4_ino_t ino)
 {
 	struct svr4_sockcache_entry *e;
 	void *cookie = ((struct socket *) fp->f_data)->so_internal;
 
 	if (!initialized) {
-		DPRINTF(("svr4_find_socket: uninitialized [%p,%d,%d]\n",
+		DPRINTF(("svr4_find_socket: uninitialized [%p,%d,%lu]\n",
 		    p, dev, ino));
 		TAILQ_INIT(&svr4_head);
 		initialized = 1;
@@ -92,8 +93,8 @@ svr4_find_socket(p, fp, dev, ino)
 	}
 
 
-	DPRINTF(("svr4_find_socket: [%p,%d,%d]: ", p, dev, ino));
-	TAILQ_FOREACH(e, &svr4_head, entries)
+	DPRINTF(("svr4_find_socket: [%p,%d,%lu]: ", p, dev, ino));
+	for (e = svr4_head.tqh_first; e != NULL; e = e->entries.tqe_next)
 		if (e->p == p && e->dev == dev && e->ino == ino) {
 #ifdef DIAGNOSTIC
 			if (e->cookie != NULL && e->cookie != cookie)
@@ -110,39 +111,41 @@ svr4_find_socket(p, fp, dev, ino)
 
 
 void
-svr4_delete_socket(p, fp)
-	struct proc *p;
-	struct file *fp;
+svr4_delete_socket(struct proc *p, struct file *fp)
 {
 	struct svr4_sockcache_entry *e;
 	void *cookie = ((struct socket *) fp->f_data)->so_internal;
 
+	KERNEL_LOCK(1, NULL);
+
 	if (!initialized) {
 		TAILQ_INIT(&svr4_head);
 		initialized = 1;
+		KERNEL_UNLOCK_ONE(NULL);
 		return;
 	}
 
-	TAILQ_FOREACH(e, &svr4_head, entries)
+	for (e = svr4_head.tqh_first; e != NULL; e = e->entries.tqe_next)
 		if (e->p == p && e->cookie == cookie) {
 			TAILQ_REMOVE(&svr4_head, e, entries);
-			DPRINTF(("svr4_delete_socket: %s [%p,%d,%d]\n",
+			DPRINTF(("svr4_delete_socket: %s [%p,%d,%lu]\n",
 				 e->sock.sun_path, p, e->dev, e->ino));
 			free(e, M_TEMP);
-			return;
+			break;
 		}
+
+	KERNEL_UNLOCK_ONE(NULL);
 }
 
 
 int
-svr4_add_socket(p, path, st)
-	struct proc *p;
-	const char *path;
-	struct stat *st;
+svr4_add_socket(struct proc *p, const char *path, struct stat *st)
 {
 	struct svr4_sockcache_entry *e;
 	size_t len;
 	int error;
+
+	KERNEL_LOCK(1, NULL);
 
 	if (!initialized) {
 		TAILQ_INIT(&svr4_head);
@@ -159,49 +162,52 @@ svr4_add_socket(p, path, st)
 	    sizeof(e->sock.sun_path), &len)) != 0) {
 		DPRINTF(("svr4_add_socket: copyinstr failed %d\n", error));
 		free(e, M_TEMP);
+		KERNEL_UNLOCK_ONE(NULL);
 		return error;
 	}
 
-	e->sock.sun_family = AF_UNIX;
+	e->sock.sun_family = AF_LOCAL;
 	e->sock.sun_len = len;
 
 	TAILQ_INSERT_HEAD(&svr4_head, e, entries);
-	DPRINTF(("svr4_add_socket: %s [%p,%d,%d]\n", e->sock.sun_path,
+	DPRINTF(("svr4_add_socket: %s [%p,%d,%lu]\n", e->sock.sun_path,
 		 p, e->dev, e->ino));
+
+	KERNEL_UNLOCK_ONE(NULL);
 	return 0;
 }
 
 
 int
-svr4_sys_socket(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_socket(struct lwp *l, const struct svr4_sys_socket_args *uap, register_t *retval)
 {
-	struct svr4_sys_socket_args *uap = v;
+	struct sys___socket30_args bsd_ua;
+
+	SCARG(&bsd_ua, domain) = SCARG(uap, domain);
+	SCARG(&bsd_ua, protocol) = SCARG(uap, protocol);
 
 	switch (SCARG(uap, type)) {
 	case SVR4_SOCK_DGRAM:
-		SCARG(uap, type) = SOCK_DGRAM;
+		SCARG(&bsd_ua, type) = SOCK_DGRAM;
 		break;
 
 	case SVR4_SOCK_STREAM:
-		SCARG(uap, type) = SOCK_STREAM;
+		SCARG(&bsd_ua, type) = SOCK_STREAM;
 		break;
 
 	case SVR4_SOCK_RAW:
-		SCARG(uap, type) = SOCK_RAW;
+		SCARG(&bsd_ua, type) = SOCK_RAW;
 		break;
 
 	case SVR4_SOCK_RDM:
-		SCARG(uap, type) = SOCK_RDM;
+		SCARG(&bsd_ua, type) = SOCK_RDM;
 		break;
 
 	case SVR4_SOCK_SEQPACKET:
-		SCARG(uap, type) = SOCK_SEQPACKET;
+		SCARG(&bsd_ua, type) = SOCK_SEQPACKET;
 		break;
 	default:
 		return EINVAL;
 	}
-	return sys_socket(p, uap, retval);
+	return sys___socket30(l, &bsd_ua, retval);
 }

@@ -1,7 +1,6 @@
-/*	$OpenBSD: mtreg.h,v 1.4 2005/01/15 21:13:08 miod Exp $	*/
-/*	$NetBSD: mtreg.h,v 1.1 1995/10/02 00:28:22 thorpej Exp $	*/
+/*	$NetBSD: mtreg.h,v 1.4 2005/12/11 12:17:14 christos Exp $	*/
 
-/*
+/* 
  * Copyright (c) 1992, The University of Utah and
  * the Computer Systems Laboratory at the University of Utah (CSL).
  * All rights reserved.
@@ -131,7 +130,7 @@ struct	mt_stat {
 #define	MTF_ATEOT	0x0100	/* tape hit EOT - can allow one forward op */
 #define	MTF_PASTEOT	0x0200	/* tape is beyond EOT - force backward motion */
 #define	MTF_DSJTIMEO	0x0400	/* timed out hpibrecv()ing DSJ - continue it */
-#define	MTF_STATTIMEO	0x0800	/* timed out receiving STATUS - continue it */
+#define	MTF_STATTIMEO	0x0800	/* timed out recieving STATUS - continue it */
 #define	MTF_STATCONT	0x1000	/* STATTIMEO is continuable */
 
 /* additional "mtcommand"s */
@@ -156,7 +155,7 @@ struct	mt_stat {
 #define	SR1_EOF		0x80	/* positioned at File Mark */
 #define	SR1_BOT		0x40	/* positioned at Beginning of Tape */
 #define	SR1_EOT		0x20	/* positioned at End of Tape */
-#define	SR1_SOFTERR	0x10	/* Recoverable Error has Occured */
+#define	SR1_SOFTERR	0x10	/* Recoverable Error has Occurred */
 #define	SR1_REJECT	0x08	/* HPIB Cmd rejected - Regs 4 & 5 have info */
 #define	SR1_RO		0x04	/* No Write Ring */
 #define	SR1_ERR		0x02	/* Unrecoverable Data error - Reg 5 has info */

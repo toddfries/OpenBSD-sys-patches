@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_mul.c,v 1.3 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: fpu_mul.c,v 1.2 1994/11/20 20:52:44 deraadt Exp $ */
+/*	$NetBSD: fpu_mul.c,v 1.5 2005/11/16 23:24:44 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -44,6 +43,9 @@
 /*
  * Perform an FPU multiply (return x * y).
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_mul.c,v 1.5 2005/11/16 23:24:44 uwe Exp $");
 
 #include <sys/types.h>
 
@@ -97,8 +99,7 @@
  * until we reach a nonzero word.
  */
 struct fpn *
-fpu_mul(fe)
-	register struct fpemu *fe;
+fpu_mul(struct fpemu *fe)
 {
 	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
 	register u_int a3, a2, a1, a0, x3, x2, x1, x0, bit, m;

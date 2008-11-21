@@ -1,5 +1,4 @@
-/*	$OpenBSD: fmsvar.h,v 1.5 2002/05/29 14:30:21 mickey Exp $ */
-/*	$NetBSD: fmsvar.h,v 1.1 1999/11/01 21:54:12 augustss Exp $	*/
+/*	$NetBSD: fmsvar.h,v 1.4 2008/04/28 20:23:54 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,8 +28,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
- 
- 
+
+
 #ifndef _DEV_PCI_FMSVAR_H_
 #define _DEV_PCI_FMSVAR_H_
 
@@ -47,14 +39,14 @@ struct fms_softc {
 
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
+	bus_addr_t sc_ioaddr;
+	bus_size_t sc_iosize;
 	bus_dma_tag_t sc_dmat;
 
 	bus_space_handle_t sc_opl_ioh;
 
 	bus_space_handle_t sc_mpu_ioh;
 	struct device * sc_mpu_dev;
-
-	void *radio;
 
 	struct ac97_codec_if *codec_if;
 	struct ac97_host_if host_if;
@@ -66,16 +58,14 @@ struct fms_softc {
 	bus_addr_t sc_play_start, sc_play_end, sc_play_nextblk;
 	int sc_play_blksize;
 	int sc_play_flip;
-	u_int16_t sc_play_reg;
+	uint16_t sc_play_reg;
 
 	void (*sc_rintr)(void *);
 	void *sc_rarg;
 	bus_addr_t sc_rec_start, sc_rec_end, sc_rec_nextblk;
 	int sc_rec_blksize;
 	int sc_rec_flip;
-	u_int16_t sc_rec_reg;
+	uint16_t sc_rec_reg;
 };
 
-int	fmsradio_attach(struct fms_softc *);
-
-#endif
+#endif	/* !_DEV_PCI_FMSVAR_H_ */

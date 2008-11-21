@@ -1,5 +1,5 @@
 #
-#	$NetBSD: files.atari,v 1.108 2005/12/11 12:16:54 christos Exp $
+#	$NetBSD: files.atari,v 1.112 2008/02/20 21:43:33 drochner Exp $
 
 maxpartitions 16
 
@@ -243,9 +243,6 @@ include "compat/ossaudio/files.ossaudio"
 
 # network devices MII bus
 
-# Wscons related includes
 include	"dev/pckbport/files.pckbport"
-include "dev/wscons/files.wscons"
-include "dev/wsfont/files.wsfont"
 
 include "arch/atari/conf/majors.atari"

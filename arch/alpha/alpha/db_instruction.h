@@ -1,5 +1,4 @@
-/* $OpenBSD: db_instruction.h,v 1.5 2002/07/10 20:30:14 jsyn Exp $ */
-/* $NetBSD: db_instruction.h,v 1.7 2001/04/26 03:10:44 ross Exp $ */
+/* $NetBSD: db_instruction.h,v 1.8 2001/08/31 04:44:54 simonb Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -141,7 +140,7 @@ typedef union {
 	/*
 	 *	Operate instructions are of two types, with
 	 *	a second source register or with a literal
-	 *	specifier.  Bit 12 says which is which.
+	 *	specifier.  Bit 12 sez which is which.
 	 */
 	struct {
 		unsigned	rc : 5,
@@ -232,8 +231,7 @@ typedef union {
 #define	op_logical	0x11		/* see LOGICAL sub-table */
 #define	op_bit		0x12		/* see BIT sub-table */
 #define	op_mul		0x13		/* see MUL sub-table */
-					/* reserved */
-#define	op_fix_float	0x14		/* if ALPHA_AMASK_FIX */
+#define op_fix_float	0x14		/* if ALPHA_AMASK_FIX */
 #define	op_vax_float	0x15		/* see FLOAT sub-table */
 #define	op_ieee_float	0x16		/* see FLOAT sub-table */
 #define	op_any_float	0x17		/* see FLOAT sub-table */
@@ -425,9 +423,9 @@ typedef union {
 
 		/* src encoding from function, 9..10 */
 #define	op_src_sf	0
-#define op_src_xd	1
-#define op_src_tg	2
-#define op_src_qq	3
+#define	op_src_xd	1
+#define	op_src_tg	2
+#define	op_src_qq	3
 
 		/* any FLOAT, "function" opcodes (bits 5..11)  */
 
@@ -538,7 +536,7 @@ typedef union {
 #define	op_mult_ud	0x1e2
 #define	op_divt_ud	0x1e3
 #define	op_cvtts_ud	0x1ec
-#define	op_cvtst	0x2ac
+#define op_cvtst	0x2ac
 #define	op_adds_suc	0x500
 #define	op_subs_suc	0x501
 #define	op_muls_suc	0x502

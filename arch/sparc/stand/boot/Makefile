@@ -1,42 +1,60 @@
-#	$OpenBSD: Makefile,v 1.16 2007/11/27 21:52:30 martin Exp $
-#	$NetBSD: Makefile,v 1.2 1995/09/30 21:43:38 pk Exp $
+#	$NetBSD: Makefile,v 1.34 2005/12/11 12:19:08 christos Exp $
 
-PROG=	boot
+STRIPFLAG=
+PROGSOURCE=	boot.c net.c netif_sun.c conf.c openfirm.c bootinfo.c \
+		mmu.c prompatch.c vers.c
+NEWVERSWHAT=	"Secondary Boot"
+FILES=		boot.net bootjs.net ${RELOCS:S/^/boot./g}
+CLEANFILES:=	vers.c ${FILES}
+LINKS=		${BINDIR}/boot.${RELOC_DEFAULT} ${BINDIR}/boot
 
-NOMAN=	noman
-INSTALL_STRIP=
-S=	${.CURDIR}/../../../..
+CPPFLAGS+=	-DBOOT_AOUT -DBOOT_ELF32 -DSUPPORT_DHCP
+CFLAGS+=	-freestanding
 
-.PATH:	${.CURDIR}/../common
-SRCS=	srt0.S conf.c dvma.c net.c netif_sun.c promdev.c version.c
+INCLUDE_LIBZ=	yes
+SAMISCMAKEFLAGS= SA_USE_CREAD=yes
 
-SRCS+=	boot.c loadfile.c
+.include "../Makefile.buildboot"
 
-.PATH:	${S}/lib/libkern/arch/sparc ${S}/lib/libkern
-SRCS+=	bzero.S strlen.c mul.S umul.S strcmp.c sdiv.S urem.S udiv.S rem.S
+.if ${MACHINE} == sparc64
+CFLAGS+=	-m32
+LDFLAGS+=	-m elf32_sparc
+AFLAGS+=	-Wa,-32
+.endif
 
-CFLAGS=	-O2 -I${.CURDIR}/../common -I${.CURDIR}/../../../../arch \
-	-I${.CURDIR}/../../../.. -I${.CURDIR}/../../../../lib/libsa ${DEFS} \
-	-DSPARC_BOOT_AOUT -DSPARC_BOOT_ELF
+.include <bsd.own.mk>
 
-CLEANFILES+=${PROG}.aout ${PROG}.elf elfclean
-LIBS=${LIBSA} ${LIBZ}
+OBJS=${SRCS:N*.h:N*.sh:N*.fth:R:S/$/.o/g}
 
-elfclean: clean-elf.c
-	${HOSTCC} -o elfclean ${.ALLSRC}
+LINKFLAGS=-N -e start
 
-${PROG}: ${OBJS} ${LIBS} elfclean
-	${LD} -N -Ttext ${RELOC2} --format a.out-sparc-netbsd -e start ${OBJS} \
-	    ${LIBSA} ${LIBZ} `cc -print-libgcc-file-name` -o ${.TARGET}.elf
-	./elfclean ${.TARGET}.elf
-	objcopy -j .text -j .data -j .bss -O a.out-sparc-netbsd \
-	    ${.TARGET}.elf ${.TARGET}.aout
-	@size ${.TARGET}.aout
-	(echo -n 01 | tr 01 '\01\03'; tail +3c ${.TARGET}.aout) | \
-	    dd obs=512 conv=osync > ${.TARGET}
-	@rm ${.TARGET}.aout ${.TARGET}.elf
+.MAIN: all
+realall: ${FILES}
 
-srt0.o: srt0.S
-	${CC} ${CFLAGS} -D_LOCORE -c ${.IMPSRC}
+.PHONY: vers.c
+vers.c: version
+	${HOST_SH} ${S}/conf/newvers_stand.sh ${.CURDIR}/version "sparc" ${NEWVERSWHAT}
+
+.for RELOC in ${RELOCS}
+boot.${RELOC}: ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN}
+	${LD} -o ${.TARGET}.tmp ${LINKFLAGS} -Ttext ${RELOC} ${OBJS} \
+	    ${LIBSA} ${LIBZ} ${LIBKERN}
+	${SIZE} ${.TARGET}.tmp
+	${OBJCOPY} -O binary ${.TARGET}.tmp ${.TARGET}
+	rm -f ${.TARGET}.tmp
+.endfor
+
+# conjure up a magic header that is accepted by all Sun PROMS;
+# see installboot.c for details.
+
+SUN_MAGIC_HEADER='\01\03\01\07\060\200\0\07\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'
+
+boot.net: boot.${RELOC_DEFAULT}
+	(printf ${SUN_MAGIC_HEADER}; cat ${.ALLSRC} ) > ${.TARGET}
+
+bootjs.net: ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN}
+	${LD} -o ${.TARGET} ${LINKFLAGS} -Ttext 300000 ${OBJS} \
+	    ${LIBSA} ${LIBZ} ${LIBKERN}
+	${SIZE} ${.TARGET}
 
 .include <bsd.prog.mk>

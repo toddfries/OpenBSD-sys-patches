@@ -1,4 +1,4 @@
-/*	$NetBSD: pic_soft.c,v 1.2 2007/10/17 19:56:46 garbled Exp $ */
+/*	$NetBSD: pic_soft.c,v 1.4 2008/05/10 15:31:05 martin Exp $ */
 
 /*-
  * Copyright (c) 2007 Matt Thomas
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pic_soft.c,v 1.2 2007/10/17 19:56:46 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pic_soft.c,v 1.4 2008/05/10 15:31:05 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>

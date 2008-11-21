@@ -1,4 +1,4 @@
-/*	$NetBSD: ofw_irqhandler.c,v 1.6 2006/05/11 12:05:37 yamt Exp $	*/
+/*	$NetBSD: ofw_irqhandler.c,v 1.13 2008/01/06 03:45:27 matt Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -42,9 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofw_irqhandler.c,v 1.6 2006/05/11 12:05:37 yamt Exp $");
-
-#include "opt_irqstats.h"
+__KERNEL_RCSID(0, "$NetBSD: ofw_irqhandler.c,v 1.13 2008/01/06 03:45:27 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,19 +52,16 @@ __KERNEL_RCSID(0, "$NetBSD: ofw_irqhandler.c,v 1.6 2006/05/11 12:05:37 yamt Exp 
 #include <uvm/uvm_extern.h>
 
 #include <machine/intr.h>
+#include <machine/irqhandler.h>
 #include <machine/cpu.h>
 
 irqhandler_t *irqhandlers[NIRQS];
 
-int current_intr_depth;
 u_int current_mask;
 u_int actual_mask;
 u_int disabled_mask;
-u_int spl_mask;
 u_int irqmasks[IPL_LEVELS];
 extern u_int intrcnt[];
-
-extern u_int soft_interrupts;	/* Only so we can initialise it */
 
 extern char *_intrnames;
 
@@ -99,12 +94,9 @@ irq_init()
 	for (loop = 0; loop < IPL_LEVELS; ++loop)
 		irqmasks[loop] = 0;
 
-	current_intr_depth = 0;
 	current_mask = 0x00000000;
 	disabled_mask = 0x00000000;
 	actual_mask = 0x00000000;
-	spl_mask = 0x00000000;
-	soft_interrupts = 0x00000000;
 
 	set_spl_masks();
 
@@ -120,12 +112,13 @@ irq_init()
  */
 
 int
-irq_claim(irq, handler)
+irq_claim(irq, handler, group, name)
 	int irq;
 	irqhandler_t *handler;
+	const char *group;
+	const char *name;
 {
 	int level;
-	int loop;
 
 #ifdef DIAGNOSTIC
 	/* Sanity check */
@@ -150,6 +143,9 @@ irq_claim(irq, handler)
 	if (handler->ih_level < 0 || handler->ih_level >= IPL_LEVELS)
     	        return(-1);
 
+	evcnt_attach_dynamic(&handler->ih_ev, EVCNT_TYPE_INTR, NULL,
+	    group, name);
+
 	/* Attach handler at top of chain */
 	handler->ih_next = irqhandlers[irq];
 	irqhandlers[irq] = handler;
@@ -166,19 +162,6 @@ irq_claim(irq, handler)
 	 * IRQ number though for the moment they are
 	 */
 	handler->ih_num = irq;
-
-#ifdef IRQSTATS
-	/* Get the interrupt name from the head of the list */
-	if (handler->ih_name) {
-		char *ptr = _intrnames + (irq * 14);
-		strcpy(ptr, "             ");
-		strncpy(ptr, handler->ih_name,
-		    min(strlen(handler->ih_name), 13));
-	} else {
-		char *ptr = _intrnames + (irq * 14);
-		sprintf(ptr, "irq %2d     ", irq);
-	}
-#endif	/* IRQSTATS */
 
 	/*
 	 * Update the irq masks.
@@ -235,10 +218,8 @@ irq_release(irq, handler)
 	irqhandler_t *handler;
 {
 	int level;
-	int loop;
 	irqhandler_t *irqhand;
 	irqhandler_t **prehand;
-	extern char *_intrnames;
 
 	/*
 	 * IRQ_INSTRUCT indicates that we should get the irq number
@@ -272,19 +253,6 @@ irq_release(irq, handler)
 	/* Make sure the head of the handler list is active */
 	if (irqhandlers[irq])
 		irqhandlers[irq]->ih_flags |= IRQ_FLAG_ACTIVE;
-
-#ifdef IRQSTATS
-	/* Get the interrupt name from the head of the list */
-	if (irqhandlers[irq] && irqhandlers[irq]->ih_name) {
-		char *ptr = _intrnames + (irq * 14);
-		strcpy(ptr, "             ");
-		strncpy(ptr, irqhandlers[irq]->ih_name,
-		    min(strlen(irqhandlers[irq]->ih_name), 13));
-	} else {
-		char *ptr = _intrnames + (irq * 14);
-		sprintf(ptr, "irq %2d     ", irq);
-	}
-#endif	/* IRQSTATS */
 
 	/*
 	 * Update the irq masks.
@@ -331,26 +299,26 @@ irq_release(irq, handler)
 
 
 void *
-intr_claim(irq, level, name, ih_func, ih_arg)
+intr_claim(irq, level, ih_func, ih_arg, group, name)
 	int irq;
 	int level;
-	const char *name;
 	int (*ih_func) __P((void *));
 	void *ih_arg;
+	const char *group;
+	const char *name;
 {
 	irqhandler_t *ih;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!ih)
 		panic("intr_claim(): Cannot malloc handler memory");
 
 	ih->ih_level = level;
-	ih->ih_name = name;
 	ih->ih_func = ih_func;
 	ih->ih_arg = ih_arg;
 	ih->ih_flags = 0;
 
-	if (irq_claim(irq, ih) != 0)
+	if (irq_claim(irq, ih, group, name) != 0)
 		return(NULL);
 	return(ih);
 }

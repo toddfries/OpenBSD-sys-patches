@@ -1,4 +1,4 @@
-/*	$NetBSD: console.h,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
+/*	$NetBSD: console.h,v 1.3 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -81,15 +74,15 @@ struct cons {
 	void (*cursor)(int, int);
 	int x, y;
 	enum console_type type;
-	boolean_t erace_previous_cursor;
-	boolean_t cursor_enable;
+	bool erace_previous_cursor;
+	bool cursor_enable;
 };
 
 struct fb {
 	uint8_t *fb_addr;
 	uint32_t fb_size;
 	uint8_t *font_addr;
-	boolean_t active;
+	bool active;
 };
 
 struct zskbd {
@@ -118,7 +111,7 @@ void fb_drawfont(int, int, uint16_t *);
 void fb_drawcursor(int, int);
 void fb_clear(int, int, int, int, int);
 void fb_copy(int, int, int, int, int, int);
-void fb_active(boolean_t);
+void fb_active(bool);
 
 void zskbd_set_addr(uint32_t, uint32_t);
 int zskbd_getc(void);
@@ -133,7 +126,7 @@ int rom_scan(void);
 
 enum console_type console_type(void);
 void console_init(void);
-void console_cursor(boolean_t);
+void console_cursor(bool);
 
 int cnscan(void);
 

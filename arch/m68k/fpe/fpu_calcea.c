@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_calcea.c,v 1.11 2006/01/30 21:23:22 miod Exp $	*/
-/*	$NetBSD: fpu_calcea.c,v 1.16 2004/02/13 11:36:14 wiz Exp $	*/
+/*	$NetBSD: fpu_calcea.c,v 1.18 2007/03/09 16:33:27 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -32,23 +31,27 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_calcea.c,v 1.18 2007/03/09 16:33:27 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/signal.h>
 #include <sys/systm.h>
 #include <machine/frame.h>
+#include <m68k/m68k.h>
 
 #include "fpu_emulate.h"
 
 /*
- * Prototypes of local functions
+ * Prototypes of static functions
  */
-int decode_ea6(struct frame *frame, struct instruction *insn,
-			   struct insn_ea *ea, int modreg, int *typ);
-int fetch_immed(struct frame *frame, struct instruction *insn,
-			    int *dst);
-int fetch_disp(struct frame *frame, struct instruction *insn,
-			   int size, int *res);
-int calc_ea(struct insn_ea *ea, char *ptr, char **eaddr);
+static int decode_ea6 __P((struct frame *frame, struct instruction *insn,
+			   struct insn_ea *ea, int modreg));
+static int fetch_immed __P((struct frame *frame, struct instruction *insn,
+			    int *dst));
+static int fetch_disp __P((struct frame *frame, struct instruction *insn,
+			   int size, int *res));
+static int calc_ea __P((struct insn_ea *ea, char *ptr, char **eaddr));
 
 /*
  * Helper routines for dealing with "effective address" values.
@@ -59,8 +62,11 @@ int calc_ea(struct insn_ea *ea, char *ptr, char **eaddr);
  * Returns zero on success, else signal number.
  */
 int
-fpu_decode_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
-    int modreg, int *typ)
+fpu_decode_ea(frame, insn, ea, modreg)
+     struct frame *frame;
+     struct instruction *insn;
+     struct insn_ea *ea;
+     int modreg;
 {
     int sig;
 
@@ -157,7 +163,7 @@ fpu_decode_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 
 	case 060:			/* (d8,An,Xn) */
 	    ea->ea_flags = EA_INDEXED;
-	    sig = decode_ea6(frame, insn, ea, modreg, typ);
+	    sig = decode_ea6(frame, insn, ea, modreg);
 	    break;
 
 	case 070:			/* misc. */
@@ -190,7 +196,7 @@ fpu_decode_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 
 	    case 3:			/* (d8,PC,Xn) */
 		ea->ea_flags = EA_PC_REL | EA_INDEXED;
-		sig = decode_ea6(frame, insn, ea, modreg, typ);
+		sig = decode_ea6(frame, insn, ea, modreg);
 		break;
 
 	    case 4:			/* #data */
@@ -199,7 +205,6 @@ fpu_decode_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 #ifdef DEBUG_FPE
 		printf("decode_ea: invalid addr mode (7,%d)\n", modreg & 7);
 #endif
-		*typ = ILL_ILLADR;
 		return SIGILL;
 	    } /* switch for mode 7 */
 	    break;
@@ -213,18 +218,20 @@ fpu_decode_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 /*
  * Decode Mode=6 address modes
  */
-int
-decode_ea6(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
-    int modreg, int *typ)
+static int
+decode_ea6(frame, insn, ea, modreg)
+     struct frame *frame;
+     struct instruction *insn;
+     struct insn_ea *ea;
+     int modreg;
 {
-    int idx;
+    int extword, idx;
     int basedisp, outerdisp;
     int bd_size, od_size;
     int sig;
-    u_int16_t extword;
 
-    if (copyin((void *)(insn->is_pc + insn->is_advance), &extword,
-	sizeof(extword)) != 0) {
+    extword = fusword((void *) (insn->is_pc + insn->is_advance));
+    if (extword < 0) {
 	return SIGSEGV;
     }
     insn->is_advance += 2;
@@ -240,7 +247,7 @@ decode_ea6(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	}
     }
     /* scale register index */
-    idx <<= ((extword >> 9) & 3);
+    idx <<= ((extword >>9) & 3);
 
     if ((extword & 0x100) == 0) {
 	/* brief extension word - sign-extend the displacement */
@@ -289,10 +296,9 @@ decode_ea6(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	    break;
 	default:
 #ifdef DEBUG
-	    printf("decode_ea6: invalid indirect mode: ext word %02x\n",
+	    printf("decode_ea6: invalid indirect mode: ext word %04x\n",
 		   extword);
 #endif
-	    *typ = ILL_ILLADR;
 	    return SIGILL;
 	    break;
 	}
@@ -313,8 +319,11 @@ decode_ea6(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
  * Returns zero on success, else signal number.
  */
 int
-fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
-    char *dst, int *typ)
+fpu_load_ea(frame, insn, ea, dst)
+     struct frame *frame;
+     struct instruction *insn;
+     struct insn_ea *ea;
+     char *dst;
 {
     int *reg;
     char *src;
@@ -349,8 +358,7 @@ fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	}
 #endif
 	src = (char *)ea->ea_fea;
-	if (copyin(src + ea->ea_moffs, dst, len) != 0)
-	    return (SIGSEGV);
+	copyin(src + ea->ea_moffs, dst, len);
 	if (ea->ea_flags & EA_PREDECR) {
 	    frame->f_regs[ea->ea_regnum] = ea->ea_fea;
 	    ea->ea_fea -= step;
@@ -363,7 +371,9 @@ fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	    ea->ea_moffs += step;
 	}
 	/* That's it, folks */
-    } else if (ea->ea_flags & EA_DIRECT) {
+    } else
+#endif
+    if (ea->ea_flags & EA_DIRECT) {
 	if (len > 4) {
 #ifdef DEBUG
 	    printf("load_ea: operand doesn't fit CPU reg\n");
@@ -388,9 +398,7 @@ fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	printf("load_ea: src %p\n", src);
 #endif
 	memcpy(dst, src, len);
-    } else
-#endif	/* 0 */
-    if (ea->ea_flags & EA_IMMED) {
+    } else if (ea->ea_flags & EA_IMMED) {
 #ifdef DEBUG_FPE
 	printf("load_ea: immed %08x%08x%08x size %d\n",
 	       ea->ea_immed[0], ea->ea_immed[1], ea->ea_immed[2], len);
@@ -408,8 +416,7 @@ fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	printf("load_ea: abs addr %08x\n", ea->ea_absaddr);
 #endif
 	src = (char *)ea->ea_absaddr;
-	if (copyin(src, dst, len) != 0)
-	    return (SIGSEGV);
+	copyin(src, dst, len);
     } else /* register indirect */ { 
 	if (ea->ea_flags & EA_PC_REL) {
 #ifdef DEBUG_FPE
@@ -449,8 +456,7 @@ fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 	if (sig)
 	    return sig;
 
-	if (copyin(src + ea->ea_moffs, dst, len) != 0)
-	    return (SIGSEGV);
+	copyin(src + ea->ea_moffs, dst, len);
 
 	/* do post-increment */
 	if (ea->ea_flags & EA_POSTINCR) {
@@ -458,7 +464,6 @@ fpu_load_ea(struct frame *frame, struct instruction *insn, struct insn_ea *ea,
 #ifdef DEBUG
 		printf("load_ea: tried to postincrement PC\n");
 #endif
-		*typ = ILL_ILLADR;
 		return SIGILL;
 	    }
 	    *reg += step;
@@ -555,7 +560,7 @@ fpu_store_ea(frame, insn, ea, src)
 #endif
 	    return SIGILL;
 	}
-	dst = (char *)&frame->f_regs[ea->ea_regnum];
+	dst = (char*)&frame->f_regs[ea->ea_regnum];
 	/* The destination is an int. */
 	if (len < 4) {
 	    dst += (4 - len);
@@ -612,100 +617,115 @@ fpu_store_ea(frame, insn, ea, src)
 /*
  * fetch_immed: fetch immediate operand
  */
-int
+static int
 fetch_immed(frame, insn, dst)
      struct frame *frame;
      struct instruction *insn;
      int *dst;
 {
-	int data, ext_bytes;
-	u_int16_t tmp;
+    int data, ext_bytes;
 
-	ext_bytes = insn->is_datasize;
-	if (ext_bytes < 0)
-		return (0);
+    ext_bytes = insn->is_datasize;
 
-	if (ext_bytes <= 2) {
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &tmp,
-		    sizeof(tmp)) != 0) {
-			return SIGSEGV;
-		}
-		if (ext_bytes == 1) {
-			/* sign-extend byte to long */
-			data = (char)tmp;
-		} else {
-			/* sign-extend word to long */
-			data = (int)tmp;
-		}
-		insn->is_advance += 2;
-		dst[0] = data;
-		return (0);
+    if (0 < ext_bytes) {
+	data = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (data < 0) {
+	    return SIGSEGV;
 	}
-
-	/* if (ext_bytes > 2) { */
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &dst[0],
-		    sizeof(dst[0])) != 0) {
-			return SIGSEGV;
-		}
-		insn->is_advance += 4;
-	/* } */
-
-	if (ext_bytes > 4) {
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &dst[1],
-		    sizeof(dst[1])) != 0) {
-			return SIGSEGV;
-		}
-		insn->is_advance += 4;
+	if (ext_bytes == 1) {
+	    /* sign-extend byte to long */
+	    data &= 0xff;
+	    if (data & 0x80) {
+		data |= 0xffffff00;
+	    }
+	} else if (ext_bytes == 2) {
+	    /* sign-extend word to long */
+	    data &= 0xffff;
+	    if (data & 0x8000) {
+		data |= 0xffff0000;
+	    }
 	}
-
-	if (ext_bytes > 8) {
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &dst[2],
-		     sizeof(dst[2])) != 0) {
-			return SIGSEGV;
-		}
-		insn->is_advance += 4;
+	insn->is_advance += 2;
+	dst[0] = data;
+    }
+    if (2 < ext_bytes) {
+	data = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (data < 0) {
+	    return SIGSEGV;
 	}
+	insn->is_advance += 2;
+	dst[0] <<= 16;
+	dst[0] |= data;
+    }
+    if (4 < ext_bytes) {
+	data = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (data < 0) {
+	    return SIGSEGV;
+	}
+	dst[1] = data << 16;
+	data = fusword((void *) (insn->is_pc + insn->is_advance + 2));
+	if (data < 0) {
+	    return SIGSEGV;
+	}
+	insn->is_advance += 4;
+	dst[1] |= data;
+    }
+    if (8 < ext_bytes) {
+	data = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (data < 0) {
+	    return SIGSEGV;
+	}
+	dst[2] = data << 16;
+	data = fusword((void *) (insn->is_pc + insn->is_advance + 2));
+	if (data < 0) {
+	    return SIGSEGV;
+	}
+	insn->is_advance += 4;
+	dst[2] |= data;
+    }
 
-	return 0;
+    return 0;
 }
 
 /*
  * fetch_disp: fetch displacement in full extension words
  */
-int
+static int
 fetch_disp(frame, insn, size, res)
      struct frame *frame;
      struct instruction *insn;
      int size, *res;
 {
-	int disp;
-	u_int16_t word;
+    int disp, word;
 
-	switch (size) {
-	case 1:
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &word,
-		    sizeof(word)) != 0) {
-			return SIGSEGV;
-		}
-		/* sign-extend */
-		disp = (int)word;
-		insn->is_advance += 2;
-		break;
-	case 2:
-		if (copyin((void *)(insn->is_pc + insn->is_advance), &disp,
-		    sizeof(disp)) != 0) {
-			return SIGSEGV;
-		}
-		insn->is_advance += 4;
-		break;
-	default:
-		disp = 0;
-		break;
+    if (size == 1) {
+	word = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (word < 0) {
+	    return SIGSEGV;
 	}
-
-	*res = disp;
-
-	return 0;
+	disp = word & 0xffff;
+	if (disp & 0x8000) {
+	    /* sign-extend */
+	    disp |= 0xffff0000;
+	}
+	insn->is_advance += 2;
+    } else if (size == 2) {
+	word = fusword((void *) (insn->is_pc + insn->is_advance));
+	if (word < 0) {
+	    return SIGSEGV;
+	}
+	disp = word << 16;
+	word = fusword((void *) (insn->is_pc + insn->is_advance + 2));
+	if (word < 0) {
+	    return SIGSEGV;
+	}
+	disp |= (word & 0xffff);
+	insn->is_advance += 4;
+    } else {
+	disp = 0;
+    }
+    *res = disp;
+    return 0;
 }
 
 /*
@@ -714,13 +734,13 @@ fetch_disp(frame, insn, size, res)
  * not take care of predecrement/postincrement of register content.
  * Returns a signal value (0 == no error).
  */
-int
+static int
 calc_ea(ea, ptr, eaddr)
      struct insn_ea *ea;
      char *ptr;		/* base address (usually a register content) */
      char **eaddr;	/* pointer to result pointer */
 {
-    int word;
+    int data, word;
 
 #if DEBUG_FPE
     printf("calc_ea: reg indirect (reg) = %p\n", ptr);
@@ -751,9 +771,16 @@ calc_ea(ea, ptr, eaddr)
 	    printf("calc_ea: addr fetched from %p\n", ptr);
 #endif
 	    /* memory indirect modes */
-	    if (copyin(ptr, &word, sizeof(word)) != 0) {
+	    word = fusword(ptr);
+	    if (word < 0) {
 		return SIGSEGV;
 	    }
+	    word <<= 16;
+	    data = fusword(ptr + 2);
+	    if (data < 0) {
+		return SIGSEGV;
+	    }
+	    word |= data;
 #if DEBUG_FPE
 	    printf("calc_ea: fetched ptr 0x%08x\n", word);
 #endif

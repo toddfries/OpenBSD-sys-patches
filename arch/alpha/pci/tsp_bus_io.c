@@ -1,5 +1,4 @@
-/* $OpenBSD: tsp_bus_io.c,v 1.3 2003/09/02 17:25:21 miod Exp $ */
-/* $NetBSD: tsp_bus_io.c,v 1.4 2000/06/26 19:46:24 thorpej Exp $ */
+/* $NetBSD: tsp_bus_io.c,v 1.5 2000/06/29 08:58:50 mrg Exp $ */
 
 /*-
  * Copyright (c) 1999 by Ross Harvey.  All rights reserved.
@@ -32,6 +31,10 @@
  *
  */
 
+#include <sys/cdefs.h>
+
+__KERNEL_RCSID(1, "$NetBSD: tsp_bus_io.c,v 1.5 2000/06/29 08:58:50 mrg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -41,9 +44,13 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
+#include <machine/autoconf.h>
+#include <machine/rpb.h>
 
 #include <alpha/pci/tsreg.h>
 #include <alpha/pci/tsvar.h>
+
+#define tsp_bus_io() { Generate ctags(1) key. }
 
 #define	CHIP	tsp
 
@@ -59,8 +66,5 @@ typedef struct tsp_config *TSPCON;
  * support for the assembler to emit BWX opcodes.
  */
 __asm(".arch ev6");
-
-#define	CHIP_EXTENT_NAME(v)	((struct tsp_config *)(v))->pc_io_ex_name
-#define	CHIP_EXTENT_STORAGE(v)	((struct tsp_config *)(v))->pc_io_ex_storage
 
 #include <alpha/pci/pci_bwx_bus_io_chipdep.c>

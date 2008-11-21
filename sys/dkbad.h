@@ -1,5 +1,4 @@
-/*	$OpenBSD: dkbad.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: dkbad.h,v 1.10 1994/12/25 13:14:21 pk Exp $	*/
+/*	$NetBSD: dkbad.h,v 1.15 2005/12/26 18:41:36 perry Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993, 1994
@@ -54,21 +53,30 @@
  * making sure that it does not overlap the bad sector information or any
  * replacement sectors.
  */
-#define NBT_BAD 126
+#define NBT_BAD	126
 
 struct dkbad {
 	int32_t   bt_csn;		/* cartridge serial number */
-	u_int16_t bt_mbz;		/* unused; should be 0 */
-	u_int16_t bt_flag;		/* -1 => alignment cartridge */
+	uint16_t bt_mbz;		/* unused; should be 0 */
+	uint16_t bt_flag;		/* -1 => alignment cartridge */
 	struct bt_bad {
-		u_int16_t bt_cyl;	/* cylinder number of bad sector */
-		u_int16_t bt_trksec;	/* track and sector number */
+		uint16_t bt_cyl;	/* cylinder number of bad sector */
+		uint16_t bt_trksec;	/* track and sector number */
 	} bt_bad[NBT_BAD];
 };
+
+/*
+ * An indicator that the bad block handling is available. This is used
+ * to conditionally enable code that performs badblock re-mapping.
+ */
+#define	HAS_BAD144_HANDLING
 
 #define	ECC	0
 #define	SSE	1
 #define	BSE	2
 #define	CONT	3
 
+#ifdef _KERNEL
+int isbad(struct dkbad *, int, int, int);
+#endif
 #endif /* _SYS_DKBAD_H_ */

@@ -1,4 +1,3 @@
-/*	$OpenBSD: blockio.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /*	$NetBSD: blockio.h,v 1.2 2001/06/02 10:44:56 bjh21 Exp $	*/
 
 /*-

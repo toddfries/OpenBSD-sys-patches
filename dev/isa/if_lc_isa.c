@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_lc_isa.c,v 1.7 2005/11/21 18:16:40 millert Exp $ */
-/*	$NetBSD: if_lc_isa.c,v 1.10 2001/06/13 10:46:03 wiz Exp $ */
+/*	$NetBSD: if_lc_isa.c,v 1.29 2008/04/08 20:08:50 cegger Exp $ */
 
 /*-
  * Copyright (c) 1994, 1995, 1997 Matt Thomas <matt@3am-software.com>
@@ -33,7 +32,8 @@
  *   This driver supports the LEMAC (DE203, DE204, and DE205) cards.
  */
 
-#include "bpfilter.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_lc_isa.c,v 1.29 2008/04/08 20:08:50 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,29 +42,18 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/syslog.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/device.h>
 #include <sys/queue.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/in_var.h>
-#include <netinet/ip.h>
-#include <netinet/if_ether.h>
-#endif
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
-
-#include <machine/cpu.h>
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/cpu.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/ic/lemacreg.h>
 #include <dev/ic/lemacvar.h>
@@ -73,49 +62,52 @@
 
 extern struct cfdriver lc_cd;
 
-int	lemac_isa_find(struct lemac_softc *, struct isa_attach_args *,
-    int);
-int	lemac_isa_probe(struct device *, void *, void *);
-void	lemac_isa_attach(struct device *, struct device *, void *);
+static int lemac_isa_find(lemac_softc_t *, struct isa_attach_args *, int);
+static int lemac_isa_probe(struct device *, struct cfdata *, void *);
+static void lemac_isa_attach(struct device *, struct device *, void *);
 
-struct cfattach lc_isa_ca = {
-	sizeof(struct lemac_softc), lemac_isa_probe, lemac_isa_attach
-};
+CFATTACH_DECL(lc_isa, sizeof(lemac_softc_t),
+    lemac_isa_probe, lemac_isa_attach, NULL, NULL);
 
-int
+static int
 lemac_isa_find(sc, ia, attach)
-	struct lemac_softc *sc;
+	lemac_softc_t *sc;
 	struct isa_attach_args *ia;
 	int attach;
 {
 	bus_addr_t maddr;
-	bus_size_t msize;
+	bus_addr_t msiz;
 	int rv = 0, irq;
+
+	if (ia->ia_nio < 1)
+		return (0);
+	if (ia->ia_niomem < 1)
+		return (0);
+	if (ia->ia_nirq < 1)
+		return (0);
+
+	if (ISA_DIRECT_CONFIG(ia))
+		return (0);
 
 	/*
 	 * Disallow wildcarded i/o addresses.
 	 */
-	if (ia->ia_iobase == IOBASEUNK)
+	if (ia->ia_io[0].ir_addr == ISA_UNKNOWN_PORT)
 		return 0;
 
 	/*
 	 * Make sure this is a valid LEMAC address.
 	 */
-	if (ia->ia_iobase & (LEMAC_IOSIZE - 1))
+	if (ia->ia_io[0].ir_addr & (LEMAC_IOSIZE - 1))
 		return 0;
 
 	sc->sc_iot = ia->ia_iot;
 
-	/*
-	 * Map the LEMAC's port space for the probe sequence.
-	 */
-	ia->ia_iosize = LEMAC_IOSIZE;
-
-	if (bus_space_map(sc->sc_iot, ia->ia_iobase, ia->ia_iosize, 0,
+	if (bus_space_map(sc->sc_iot, ia->ia_io[0].ir_addr, LEMAC_IOSIZE, 0,
 	    &sc->sc_ioh)) {
 		if (attach)
 			printf(": can't map i/o space\n");
-		return (0);
+		return 0;
 	}
 
 	/*
@@ -129,17 +121,21 @@ lemac_isa_find(sc, ia, attach)
 	/*
 	 * Get information about memory space and attempt to map it.
 	 */
-	lemac_info_get(sc->sc_iot, sc->sc_ioh, &maddr, &msize, &irq);
+	lemac_info_get(sc->sc_iot, sc->sc_ioh, &maddr, &msiz, &irq);
 
-	if (ia->ia_maddr != maddr && ia->ia_maddr != MADDRUNK)
+	if (ia->ia_iomem[0].ir_addr != ISA_UNKNOWN_IOMEM &&
+	    ia->ia_iomem[0].ir_addr != maddr)
 		goto outio;
 
-	if (maddr != 0 && msize != 0) {
+	if (attach) {
+		if (msiz == 0) {
+			printf(": memory configuration is invalid\n");
+			goto outio;
+		}
+
 		sc->sc_memt = ia->ia_memt;
-		if (bus_space_map(ia->ia_memt, maddr, msize, 0,
-		    &sc->sc_memh)) {
-			if (attach)
-				printf(": can't map mem space\n");
+		if (bus_space_map(ia->ia_memt, maddr, msiz, 0, &sc->sc_memh)) {
+			printf(": can't map mem space\n");
 			goto outio;
 		}
 	}
@@ -147,21 +143,22 @@ lemac_isa_find(sc, ia, attach)
 	/*
 	 * Double-check IRQ configuration.
 	 */
-	if (ia->ia_irq != irq && ia->ia_irq != IRQUNK)
-		printf("%s: overriding IRQ %d to %d\n", sc->sc_dv.dv_xname,
-		    ia->ia_irq, irq);
+	if (ia->ia_irq[0].ir_irq != ISA_UNKNOWN_IRQ &&
+	    ia->ia_irq[0].ir_irq != irq)
+		printf("%s: overriding IRQ %d to %d\n", device_xname(&sc->sc_dv),
+		       ia->ia_irq[0].ir_irq, irq);
 
 	if (attach) {
 		sc->sc_ats = shutdownhook_establish(lemac_shutdown, sc);
-		if (sc->sc_ats == NULL)
-			printf(
-			    "\n%s: warning: can't establish shutdown hook\n",
-			    sc->sc_dv.dv_xname);
+		if (sc->sc_ats == NULL) {
+			aprint_normal("\n");
+			aprint_error_dev(&sc->sc_dv, "warning: can't establish shutdown hook\n");
+		}
 
 		lemac_ifattach(sc);
 
 		sc->sc_ih = isa_intr_establish(ia->ia_ic, irq, IST_EDGE,
-		    IPL_NET, lemac_intr, sc, sc->sc_dv.dv_xname);
+		    IPL_NET, lemac_intr, sc);
 	}
 
 	/*
@@ -169,42 +166,41 @@ lemac_isa_find(sc, ia, attach)
 	 */
 	rv = 1;
 
-	ia->ia_maddr = maddr;
-	ia->ia_msize = msize;
-	ia->ia_irq = irq;
+	ia->ia_nio = 1;
+	ia->ia_io[0].ir_size = LEMAC_IOSIZE;
 
-	if (maddr != 0 && msize != 0 && (rv == 0 || !attach))
-		bus_space_unmap(sc->sc_memt, sc->sc_memh, msize);
+	ia->ia_niomem = 1;
+	ia->ia_iomem[0].ir_addr = maddr;
+	ia->ia_iomem[0].ir_size = msiz;
+
+	ia->ia_nirq = 1;
+	ia->ia_irq[0].ir_irq = irq;
+
+	ia->ia_ndrq = 0;
+
 outio:
 	if (rv == 0 || !attach)
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, LEMAC_IOSIZE);
-	return (rv);
+	return rv;
 }
 
-int
-lemac_isa_probe(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+static int
+lemac_isa_probe(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	struct cfdata *cf = match;
-	struct lemac_softc sc;
-
-	snprintf(sc.sc_dv.dv_xname, sizeof sc.sc_dv.dv_xname, "%s%d",
+	lemac_softc_t sc;
+	snprintf(sc.sc_dv.dv_xname, sizeof(sc.sc_dv.dv_xname), "%s%d",
 	    lc_cd.cd_name, cf->cf_unit);
-    
-	return (lemac_isa_find(&sc, ia, 0));
+
+	return lemac_isa_find(&sc, ia, 0);
 }
 
-void
-lemac_isa_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+static void
+lemac_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct lemac_softc *sc = (void *)self;
+	lemac_softc_t *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 
-	lemac_isa_find(sc, ia, 1);
+	(void) lemac_isa_find(sc, ia, 1);
 }

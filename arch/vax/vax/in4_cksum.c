@@ -1,5 +1,4 @@
-/*	$OpenBSD: in4_cksum.c,v 1.4 2008/05/15 22:17:08 brad Exp $	*/
-/*	$NetBSD: in4_cksum.c,v 1.8 2003/09/29 22:54:28 matt Exp $	*/
+/*	$NetBSD: in4_cksum.c,v 1.12 2008/03/11 05:34:03 matt Exp $	*/
 
 /*
  * Copyright (C) 1999 WIDE Project.
@@ -61,17 +60,21 @@
  *	@(#)in_cksum.c	8.1 (Berkeley) 6/10/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: in4_cksum.c,v 1.12 2008/03/11 05:34:03 matt Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/socketvar.h>
+#include <sys/systm.h>
+#include <sys/socket.h>
+#include <net/route.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 
 #ifdef CKSUMDEBUG
-int in4_cksum_md_debug(struct mbuf *m, u_int8_t nxt, int off, int len);
+int in4_cksum_md_debug(struct mbuf *m, uint8_t nxt, int off, int len);
 #define	in4_cksum in4_cksum_md_debug
 #include <netinet/in4_cksum.c>
 #undef in4_cksum
@@ -95,19 +98,19 @@ int in4_cksum_md_debug(struct mbuf *m, u_int8_t nxt, int off, int len);
 #define ADVANCE(n)	{w += n; mlen -= n;}
 #define SWAP		{sum <<= 8;}		/* depends on recent REDUCE */
 
-#define Asm     __asm __volatile
-#define ADDL    Asm("addl2 (%2)+,%0" : "=r" (sum) : "0" (sum), "r" (w))
-#define ADWC    Asm("adwc  (%2)+,%0" : "=r" (sum) : "0" (sum), "r" (w))
+#define Asm     __asm volatile
+#define ADDL	Asm("addl2 (%0)+,%1": "=r" (w), "=r" (sum): "0" (w), "1" (sum))
+#define ADWC	Asm("adwc  (%0)+,%1": "=r" (w), "=r" (sum): "0" (w), "1" (sum))
 #define ADDC    Asm("adwc     $0,%0" : "=r" (sum) : "0" (sum))
 #define UNSWAP  Asm("rotl  $8,%0,%0" : "=r" (sum) : "0" (sum))
 #define ADDBYTE	{sum += *w; SWAP; byte_swapped ^= 1;}
-#define ADDWORD	{sum += *(u_short *)w;}
+#define ADDWORD	{sum += *(uint16_t *)w;}
 
 int
-in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
+in4_cksum(struct mbuf *m, uint8_t nxt, int off, int len)
 {
-	u_int8_t *w;
-	u_int32_t sum = 0;
+	uint8_t *w;
+	uint32_t sum = 0;
 	int mlen = 0;
 	int byte_swapped = 0;
 #ifdef CKSUMDEBUG
@@ -115,22 +118,22 @@ in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
 #endif
 
 	if (nxt != 0) {
-#ifdef DEBUG
+#ifdef DIAGNOSTIC
 		if (off < sizeof(struct ipovly))
 			panic("in4_cksum: offset too short");
 		if (m->m_len < sizeof(struct ip))
 			panic("in4_cksum: bad mbuf chain");
 #endif
 
-		__asm __volatile(
-			"movzwl	%3,%0;"	/* mov len to sum */
-			"addb2	%4,%0;"	/* add proto to sum */
+		__asm volatile(
+			"movzwl	16(%%ap),%0;"	/* mov len to sum */
+			"addb2	8(%%ap),%0;"	/* add proto to sum */
 			"rotl	$8,%0,%0;"	/* htons, carry is preserved */
 			"adwc	12(%2),%0;"	/* add src ip */
 			"adwc	16(%2),%0;"	/* add dst ip */
 			"adwc	$0,%0;"		/* clean up carry */
 			: "=r" (sum)
-			: "0" (sum), "r" (mtod(m, void *)), "r" (len), "r"(nxt));
+			: "0" (sum), "r" (mtod(m, void *)));
 	}
 
 	/* skip unnecessary part */
@@ -144,7 +147,7 @@ in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
 	for (;m && len; m = m->m_next) {
 		if ((mlen = m->m_len) == 0)
 			continue;
-		w = mtod(m, u_int8_t *);
+		w = mtod(m, uint8_t *);
 		if (off) {
 			w += off;
 			mlen -= off;
@@ -159,13 +162,13 @@ in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
 		 * Ensure that we're aligned on a word boundary here so
 		 * that we can do 32 bit operations below.
 		 */
-		if ((3 & (u_long) w) != 0) {
+		if ((3 & (intptr_t) w) != 0) {
 			REDUCE;
-			if ((1 & (u_long) w) != 0) {
+			if ((1 & (intptr_t) w) != 0) {
 				ADDBYTE;
 				ADVANCE(1);
 			}
-			if ((2 & (u_long) w) != 0) {
+			if ((2 & (intptr_t) w) != 0) {
 				ADDWORD;
 				ADVANCE(2);
 			}

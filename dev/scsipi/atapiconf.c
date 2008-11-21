@@ -1,4 +1,4 @@
-/*	$NetBSD: atapiconf.c,v 1.72 2006/11/16 01:33:26 christos Exp $	*/
+/*	$NetBSD: atapiconf.c,v 1.77 2008/03/24 14:44:26 cube Exp $	*/
 
 /*
  * Copyright (c) 1996, 2001 Manuel Bouyer.  All rights reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: atapiconf.c,v 1.72 2006/11/16 01:33:26 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: atapiconf.c,v 1.77 2008/03/24 14:44:26 cube Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,20 +56,21 @@ const struct scsipi_periphsw atapi_probe_periphsw = {
 	NULL,
 };
 
-static int	atapibusmatch(struct device *, struct cfdata *, void *);
-static void	atapibusattach(struct device *, struct device *, void *);
-static int	atapibusactivate(struct device *, enum devact);
-static int	atapibusdetach(struct device *, int flags);
+static int	atapibusmatch(device_t, cfdata_t, void *);
+static void	atapibusattach(device_t, device_t, void *);
+static int	atapibusactivate(device_t, enum devact);
+static int	atapibusdetach(device_t, int flags);
+static void	atapibuschilddet(device_t, device_t);
 
-static int	atapibussubmatch(struct device *, struct cfdata *,
-				 const int *, void *);
+static int	atapibussubmatch(device_t, cfdata_t, const int *, void *);
 
 static int	atapi_probe_bus(struct atapibus_softc *, int);
 
 static int	atapibusprint(void *, const char *);
 
-CFATTACH_DECL(atapibus, sizeof(struct atapibus_softc),
-    atapibusmatch, atapibusattach, atapibusdetach, atapibusactivate);
+CFATTACH_DECL2_NEW(atapibus, sizeof(struct atapibus_softc),
+    atapibusmatch, atapibusattach, atapibusdetach, atapibusactivate, NULL,
+    atapibuschilddet);
 
 extern struct cfdriver atapibus_cd;
 
@@ -115,8 +116,7 @@ atapiprint(void *aux, const char *pnp)
 }
 
 static int
-atapibusmatch(struct device *parent, struct cfdata *cf,
-    void *aux)
+atapibusmatch(device_t parent, cfdata_t cf, void *aux)
 {
 	struct scsipi_channel *chan = aux;
 
@@ -130,8 +130,7 @@ atapibusmatch(struct device *parent, struct cfdata *cf,
 }
 
 static int
-atapibussubmatch(struct device *parent, struct cfdata *cf,
-    const int *ldesc, void *aux)
+atapibussubmatch(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
 {
 	struct scsipibus_attach_args *sa = aux;
 	struct scsipi_periph *periph = sa->sa_periph;
@@ -143,30 +142,35 @@ atapibussubmatch(struct device *parent, struct cfdata *cf,
 }
 
 static void
-atapibusattach(struct device *parent, struct device *self, void *aux)
+atapibusattach(device_t parent, device_t self, void *aux)
 {
 	struct atapibus_softc *sc = device_private(self);
 	struct scsipi_channel *chan = aux;
 
 	sc->sc_channel = chan;
+	sc->sc_dev = self;
 
-	chan->chan_name = sc->sc_dev.dv_xname;
+	chan->chan_name = device_xname(sc->sc_dev);
 
 	/* ATAPI has no LUNs. */
 	chan->chan_nluns = 1;
-	printf(": %d targets\n", chan->chan_ntargets);
+	aprint_naive("\n");
+	aprint_normal(": %d targets\n", chan->chan_ntargets);
 
 	/* Initialize the channel. */
 	chan->chan_init_cb = NULL;
 	chan->chan_init_cb_arg = NULL;
 	scsipi_channel_init(chan);
 
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
+
 	/* Probe the bus for devices. */
 	atapi_probe_bus(sc, -1);
 }
 
 static int
-atapibusactivate(struct device *self, enum devact act)
+atapibusactivate(device_t self, enum devact act)
 {
 	struct atapibus_softc *sc = device_private(self);
 	struct scsipi_channel *chan = sc->sc_channel;
@@ -195,8 +199,26 @@ atapibusactivate(struct device *self, enum devact act)
 	return (error);
 }
 
+static void
+atapibuschilddet(device_t self, device_t child)
+{
+	struct atapibus_softc *sc = device_private(self);
+	struct scsipi_channel *chan = sc->sc_channel;
+	struct scsipi_periph *periph;
+	int target;
+
+	for (target = 0; target < chan->chan_ntargets; target++) {
+		periph = scsipi_lookup_periph(chan, target, 0);
+		if (periph == NULL || periph->periph_dev != child)
+			continue;
+		scsipi_remove_periph(chan, periph);
+		free(periph, M_DEVBUF);
+		break;
+	}
+}
+
 static int
-atapibusdetach(struct device *self, int flags)
+atapibusdetach(device_t self, int flags)
 {
 	struct atapibus_softc *sc = device_private(self);
 	struct scsipi_channel *chan = sc->sc_channel;
@@ -218,9 +240,7 @@ atapibusdetach(struct device *self, int flags)
 		error = config_detach(periph->periph_dev, flags);
 		if (error)
 			return (error);
-
-		scsipi_remove_periph(chan, periph);
-		free(periph, M_DEVBUF);
+		KASSERT(scsipi_lookup_periph(chan, target, 0) == NULL);
 	}
 	return (0);
 }
@@ -276,7 +296,7 @@ atapi_probe_device(struct atapibus_softc *sc, int target,
 	 */
 	periph->periph_quirks |= quirks;
 
-	if ((cf = config_search_ia(atapibussubmatch, &sc->sc_dev,
+	if ((cf = config_search_ia(atapibussubmatch, sc->sc_dev,
 	    "atapibus", sa)) != 0) {
 		scsipi_insert_periph(chan, periph);
 		/*
@@ -284,10 +304,10 @@ atapi_probe_device(struct atapibus_softc *sc, int target,
 		 * XXX need it before config_attach() returns.  Must
 		 * XXX assign it in periph driver.
 		 */
-		return config_attach(&sc->sc_dev, cf, sa,
+		return config_attach(sc->sc_dev, cf, sa,
 		    atapibusprint);
 	} else {
-		atapibusprint(sa, sc->sc_dev.dv_xname);
+		atapibusprint(sa, device_xname(sc->sc_dev));
 		printf(" not configured\n");
 		free(periph, M_DEVBUF);
 		return NULL;

@@ -1,4 +1,4 @@
-/*	$NetBSD: agp_apple.c,v 1.3 2008/01/04 21:18:00 ad Exp $ */
+/*	$NetBSD: agp_apple.c,v 1.5 2008/06/09 06:49:54 freza Exp $ */
 
 /*-
  * Copyright (c) 2007 Michael Lorenz
@@ -12,9 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: agp_apple.c,v 1.3 2008/01/04 21:18:00 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: agp_apple.c,v 1.5 2008/06/09 06:49:54 freza Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -74,10 +71,10 @@ struct agp_apple_softc {
 };
 
 int
-agp_apple_attach(struct device *parent, struct device *self, void *aux)
+agp_apple_attach(device_t parent, device_t self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	struct agp_softc *sc = (void *)self;
+	struct agp_softc *sc = device_private(self);
 	struct agp_apple_softc *asc;
 	struct agp_gatt *gatt;
 

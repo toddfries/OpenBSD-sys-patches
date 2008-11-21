@@ -1,5 +1,4 @@
-/*	$OpenBSD: dp8390reg.h,v 1.9 2003/10/21 18:58:49 jmc Exp $	*/
-/*	$NetBSD: dp8390reg.h,v 1.3 1997/04/29 04:32:08 scottr Exp $	*/
+/*	$NetBSD: dp8390reg.h,v 1.8 2005/12/11 12:21:26 christos Exp $	*/
 
 /*
  * National Semiconductor DS8390 NIC register definitions.
@@ -358,7 +357,7 @@
  * algorithm to allow prioritization of nodes.
  */
 #define ED_TCR_OFST	0x10
- 
+
 /*
  * bits 5, 6, and 7 are unused/reserved
  */
@@ -542,11 +541,20 @@ struct dp8390_ring	{
 	u_int16_t	count;		/* bytes in packet (length + 4) */
 };
 
-/* Some drivers prefer to use byte-constants to get at this structure.  */
-#define ED_RING_RSR		0	/* receiver status */
-#define ED_RING_NEXT_PACKET	1	/* pointer to next packet */
-#define ED_RING_COUNT		2	/* bytes in packet (length + 4) */
-#define ED_RING_HDRSZ		4	/* Header size */
+/*
+ * XXX For compatibility only!  This needs to die when all drivers have
+ * been converted to be front ends to the MI driver.
+ */
+struct ed_ring	{
+#if BYTE_ORDER == BIG_ENDIAN
+	u_char	next_packet;		/* pointer to next packet */
+	u_char	rsr;			/* receiver status */
+#else
+	u_char	rsr;			/* receiver status */
+	u_char	next_packet;		/* pointer to next packet */
+#endif
+	u_short	count;			/* bytes in packet (length + 4) */
+};
 
 /*
  * Common constants

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ffs_tables.c,v 1.5 2003/08/26 16:10:57 mickey Exp $	*/
-/*	$NetBSD: ffs_tables.c,v 1.2 1994/06/29 06:46:35 cgd Exp $	*/
+/*	$NetBSD: ffs_tables.c,v 1.9 2005/12/11 12:25:25 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -32,8 +31,14 @@
  *	@(#)ffs_tables.c	8.1 (Berkeley) 6/11/93
  */
 
+#if HAVE_NBTOOL_CONFIG_H
+#include "nbtool_config.h"
+#endif
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ffs_tables.c,v 1.9 2005/12/11 12:25:25 christos Exp $");
+
 #include <sys/param.h>
-#include <ufs/ffs/fs.h>
 
 /*
  * Bit patterns for identifying fragments in the block map
@@ -131,6 +136,6 @@ const u_char fragtbl8[256] = {
 /*
  * The actual fragtbl array.
  */
-const u_char *fragtbl[MAXFRAG + 1] = {
+const u_char * const fragtbl[MAXFRAG + 1] = {
 	0, fragtbl124, fragtbl124, 0, fragtbl124, 0, 0, 0, fragtbl8,
 };

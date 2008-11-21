@@ -1,4 +1,6 @@
-/*	$OpenBSD: ieee.h,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
+/*	$NetBSD: ieee.h,v 1.10 2007/02/04 00:39:19 christos Exp $	*/
+
+/*	$OpenBSD: ieee.h,v 1.1 1999/04/20 19:44:04 mickey Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -46,65 +48,27 @@
  * mode bits, exceptions, and so forth.
  */
 
-/*
- * Define the number of bits in each fraction and exponent.
- *
- *		     k	         k+1
- * Note that  1.0 x 2  == 0.1 x 2      and that denorms are represented
- *
- *					  (-exp_bias+1)
- * as fractions that look like 0.fffff x 2             .  This means that
- *
- *			 -126
- * the number 0.10000 x 2    , for instance, is the same as the normalized
- *
- *		-127			   -128
- * float 1.0 x 2    .  Thus, to represent 2    , we need one leading zero
- *
- *				  -129
- * in the fraction; to represent 2    , we need two, and so on.  This
- *
- *						     (-exp_bias-fracbits+1)
- * implies that the smallest denormalized number is 2
- *
- * for whichever format we are talking about: for single precision, for
- *
- *						-126		-149
- * instance, we get .00000000000000000000001 x 2    , or 1.0 x 2    , and
- *
- * -149 == -127 - 23 + 1.
- */
-#define	SNG_EXPBITS	8
-#define	SNG_FRACBITS	23
+#include <sys/ieee754.h>
 
-#define	DBL_EXPBITS	11
-#define	DBL_FRACBITS	52
-
-#ifdef notyet
-#define	E80_EXPBITS	15
-#define	E80_FRACBITS	64
-#endif
-
+#ifdef _LP64
 #define	EXT_EXPBITS	15
-#define	EXT_FRACBITS	112
+#define EXT_FRACHBITS	16
+#define	EXT_FRACHMBITS	32
+#define	EXT_FRACLMBITS	32
+#define	EXT_FRACLBITS	32
+#define	EXT_FRACBITS	(EXT_FRACLBITS + EXT_FRACLMBITS + EXT_FRACHMBITS + EXT_FRACHBITS)
 
-struct ieee_single {
-	u_int	sng_sign:1;
-	u_int	sng_exp:8;
-	u_int	sng_frac:23;
-};
-
-struct ieee_double {
-	u_int	dbl_sign:1;
-	u_int	dbl_exp:11;
-	u_int	dbl_frach:20;
-	u_int	dbl_fracl;
-};
+#define	EXT_TO_ARRAY32(u, a) do {			\
+	(a)[0] = (uint32_t)(u).extu_ext.ext_fracl;	\
+	(a)[1] = (uint32_t)(u).extu_ext.ext_fraclm;	\
+	(a)[2] = (uint32_t)(u).extu_ext.ext_frachm;	\
+	(a)[3] = (uint32_t)(u).extu_ext.ext_frach;	\
+} while(/*CONSTCOND*/0)
 
 struct ieee_ext {
 	u_int	ext_sign:1;
-	u_int	ext_exp:15;
-	u_int	ext_frach:16;
+	u_int	ext_exp:EXT_EXPBITS;
+	u_int	ext_frach:EXT_FRACHBITS;
 	u_int	ext_frachm;
 	u_int	ext_fraclm;
 	u_int	ext_fracl;
@@ -116,11 +80,9 @@ struct ieee_ext {
  * Floats whose exponent is zero are either zero (iff all fraction
  * bits are zero) or subnormal values.
  *
- * A NaN is a `signalling NaN' if its QUIETNAN bit is clear in its
- * high fraction; if the bit is set, it is a `quiet NaN'.
+ * A NaN is a `signalling NaN' if its QUIETNAN bit is set in its
+ * high fraction; if the bit is clear, it is a `quiet NaN'.
  */
-#define	SNG_EXP_INFNAN	255
-#define	DBL_EXP_INFNAN	2047
 #define	EXT_EXP_INFNAN	32767
 
 #if 0
@@ -132,6 +94,13 @@ struct ieee_ext {
 /*
  * Exponent biases.
  */
-#define	SNG_EXP_BIAS	127
-#define	DBL_EXP_BIAS	1023
 #define	EXT_EXP_BIAS	16383
+
+/*
+ * Convenience data structures.
+ */
+union ieee_ext_u {
+	long double		extu_ld;
+	struct ieee_ext		extu_ext;
+};
+#endif /* _LP64 */

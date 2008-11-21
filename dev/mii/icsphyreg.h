@@ -1,5 +1,4 @@
-/*	$OpenBSD: icsphyreg.h,v 1.2 1999/03/09 00:02:44 jason Exp $	*/
-/*	$NetBSD: icsphyreg.h,v 1.1 1998/11/02 23:46:20 thorpej Exp $	*/
+/*	$NetBSD: icsphyreg.h,v 1.3 2008/04/28 20:23:53 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,9 +34,25 @@
 #define	_DEV_MII_ICSPHYREG_H_
 
 /*
- * Register definitions for the ICS1890 Ethernet PHY
- * Further documentation can be found at:
- *	http://www.icst.com/products/pinfo/1890.htm
+ * ICS1890 registers.
+ *	http://www.icst.com/pdf/18??.pdf
+ */
+
+/* HEX				1889	1890	1892	1893
+ *--------------------------------------------------------------
+ *  0 Control			*	*	*	*
+ *  1 Status			*	*	*	*
+ *  2 PHY Identifier		*	*	*	*
+ *  3 PHY Identifier		*	*	*	*
+ *  4 Auto-Neg. Advertisement		*	*	*
+ *  5 Auto-Neg. Link Parent Adv		*	*	*
+ *  6 Auto-Neg. Expansion		*	*	*
+ *  7 Auto-Neg. Next Page Tx			*	*
+ *  8 ANg Nxt Page Lnk Parnt Abl		*	*
+ * 10 Extended Control		*	*	*	*
+ * 11 Quick Poll Status		*	*	*	*
+ * 12 10Base-T Operation		*	*	*
+ * 13 Extended Control2			*	*	*
  */
 
 #define	MII_ICSPHY_ECR		0x10	/* Extended Control Register */
@@ -67,6 +75,7 @@
 #define	QPR_HALT		0x0040	/* Halt Symbol Detected */
 #define	QPR_PREEM		0x0020	/* Two Idle Symbols together */
 #define	QPR_ACOMP		0x0010	/* Autonegotiation complete */
+#define	QPR_SDETECT		0x0008	/* signal detect */
 #define	QPR_JABBER		0x0004	/* Jabber detected */
 #define	QPR_RFAULT		0x0002	/* Remote Fault */
 #define	QPR_LINK		0x0001	/* Link */
@@ -81,14 +90,38 @@
 #define	TTR_NOLINK		0x0002	/* Disable Link check */
 #define	TTR_NOSQUELCH		0x0001	/* Disable squelch */
 
+
+/*
+ * Extended Control Register 2
+ *
+ * HEX					1889	1890	1892	1893
+ *-------------------------------------------------------------------
+ * 8000	Node/Repeater Mode			*	*	*
+ * 4000 Hardware/Software Mode			*	*	*
+ * 2000 Link Partner Support Remote Flt		*
+ * 2000 Remote Fault					*	*
+ * 1000
+ * 0800
+ * 0400 Xmitted Remote Fault status		*
+ * 0200
+ * 0100
+ * 0080 Tri-state Enable					*
+ * 0040
+ * 0020
+ * 0010 A-N Powerup Remote Flt			*
+ * 0008
+ * 0004
+ * 0002 Automatic 10Base-T Power Down			*
+ * 0001 Automatic 100Base-TX Power Down		*	*	*
+ */
+
 #define	MII_ICSPHY_ECR2		0x13	/* Extended Control Register 2 */
 #define	ECR2_REPEATER		0x8000	/* Repeater Mode */
 #define	ECR2_HWSW		0x4000	/* hw/sw config priority */
 #define	ECR2_LPRF		0x2000	/* link partner supports rem fault */
 #define	ECR2_FORCERF		0x0400	/* Force transmit of rem fault */
-#define	ECR2_RFPUP		0x0010	/* Rem fault on power up */
-#define	ECR2_Q10T		0x0004	/* Qualified 10baseT data */
-#define	ECR2_10TPROT		0x0002	/* 10baseT protect */
-#define	ECR2_AUTOPWRDN		0x0001	/* automatic power down */
+#define	ECR2_RFPUP		0x0010	/* A-N Powerup Remote fault */
+#define	ECR2_10AUTOPWRDN	0x0002	/* Automatic 10baseT power down */
+#define	ECR2_100AUTOPWRDN	0x0001	/* Automatic 100baseTX power down */
 
 #endif /* _DEV_MII_ICSPHYREG_H_ */

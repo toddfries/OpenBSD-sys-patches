@@ -1,5 +1,4 @@
-/*	$OpenBSD: rasops_bitops.h,v 1.3 2003/02/12 20:53:59 henric Exp $ */
-/* 	$NetBSD: rasops_bitops.h,v 1.6 2000/04/12 14:22:30 pk Exp $	*/
+/* 	$NetBSD: rasops_bitops.h,v 1.10 2008/04/28 20:23:56 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,7 +35,7 @@
 /*
  * Erase columns.
  */
-void
+static void
 NAME(erasecols)(cookie, row, col, num, attr)
 	void *cookie;
 	int row, col, num;
@@ -120,7 +112,7 @@ NAME(erasecols)(cookie, row, col, num, attr)
 /*
  * Actually paint the cursor.
  */
-void
+static void
 NAME(do_cursor)(ri)
 	struct rasops_info *ri;
 {
@@ -161,7 +153,7 @@ NAME(do_cursor)(ri)
 /*
  * Copy columns. Ick!
  */
-void
+static void
 NAME(copycols)(cookie, row, src, dst, num)
 	void *cookie;
 	int row, src, dst, num;
@@ -169,6 +161,8 @@ NAME(copycols)(cookie, row, src, dst, num)
 	int tmp, lmask, rmask, height, lnum, rnum, sb, db, cnt, full;
 	int32_t *sp, *dp, *srp, *drp;
 	struct rasops_info *ri;
+
+	sp = NULL;	/* XXX gcc */
 
 	ri = (struct rasops_info *)cookie;
 

@@ -1,5 +1,4 @@
-	$OpenBSD: syscalls.master,v 1.11 2008/01/05 00:36:13 miod Exp $
-;	$NetBSD: syscalls.master,v 1.29 1999/05/10 03:33:04 cgd Exp $
+	$NetBSD: syscalls.master,v 1.45 2007/03/04 06:01:28 christos Exp $
 
 ;	@(#)syscalls.master	8.1 (Berkeley) 7/19/93
 
@@ -32,6 +31,10 @@
 ; #ifdef's, etc. may be included, and are copied to the output files.
 ; #include's are copied to the syscall names and switch definition files only.
 
+#if defined(_KERNEL_OPT)
+#include "opt_compat_43.h"
+#endif
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/signal.h>
@@ -41,6 +44,8 @@
 
 #include <compat/osf1/osf1.h>
 #include <compat/osf1/osf1_syscallargs.h>
+
+%%
 
 0	NOARGS		{ int sys_nosys(void); } syscall
 1	NOARGS		{ int sys_exit(int rval); }
@@ -58,22 +63,22 @@
 11	UNIMPL		execv
 12	NOARGS		{ int sys_chdir(const char *path); }
 13	NOARGS		{ int sys_fchdir(int fd); }
-14	STD		{ int osf1_sys_mknod(char *path, int mode, \
+14	STD		{ int osf1_sys_mknod(const char *path, int mode, \
 			    int dev); }
 15	NOARGS		{ int sys_chmod(const char *path, int mode); }
-16	NOARGS		{ int sys_chown(const char *path, int uid, \
+16	NOARGS		{ int sys___posix_chown(const char *path, int uid, \
 			    int gid); }
 17	NOARGS		{ int sys_obreak(char *nsize); }
 18	STD		{ int osf1_sys_getfsstat(struct osf1_statfs *buf, \
 			    long bufsize, int flags); }
 19	STD		{ off_t osf1_sys_lseek(int fd, off_t offset, \
 			    int whence); }
-20	NOARGS		{ pid_t sys_getpid(void); }
+20	NOARGS		{ pid_t sys_getpid_with_ppid(void); }
 21	STD		{ int osf1_sys_mount(int type, const char *path, \
-			    int flags, caddr_t data); }
+			    int flags, void *data); }
 22	STD		{ int osf1_sys_unmount(const char *path, int flags); }
 23	STD		{ int osf1_sys_setuid(uid_t uid); }
-24	NOARGS		{ uid_t sys_getuid(void); }
+24	NOARGS		{ uid_t sys_getuid_with_euid(void); }
 25	UNIMPL		exec_with_loader
 26	UNIMPL		ptrace
 27	STD		{ int osf1_sys_recvmsg_xopen(int s, \
@@ -84,7 +89,7 @@
 30	UNIMPL		accept
 31	UNIMPL		getpeername
 32	UNIMPL		getsockname
-33	STD		{ int osf1_sys_access(char *path, int flags); }
+33	STD		{ int osf1_sys_access(const char *path, int flags); }
 34	UNIMPL		chflags
 35	UNIMPL		fchflags
 36	NOARGS		{ int sys_sync(void); }
@@ -95,33 +100,30 @@
 41	NOARGS		{ int sys_dup(u_int fd); }
 42	NOARGS		{ int sys_pipe(void); }
 43	STD		{ int osf1_sys_set_program_attributes( \
-                          caddr_t taddr, unsigned long tsize, \
-                          caddr_t daddr, unsigned long dsize); }  
+                          void *taddr, unsigned long tsize, \
+                          void *daddr, unsigned long dsize); }
 44	UNIMPL		profil
-45	STD		{ int osf1_sys_open(char *path, int flags, \
+45	STD		{ int osf1_sys_open(const char *path, int flags, \
 			    int mode); }
 46	OBSOL		sigaction
-47	NOARGS		{ gid_t sys_getgid(void); }
+47	NOARGS		{ gid_t sys_getgid_with_egid(void); }
 ; XXX
-48	NOARGS		{ int sys_sigprocmask(int how, sigset_t mask); }
-49	NOARGS		{ int sys_getlogin(char *namebuf, u_int namelen); }
-50	NOARGS		{ int sys_setlogin(const char *namebuf); }
-#ifdef	ACCOUNTING
+48	NOARGS		{ int compat_13_sys_sigprocmask(int how, \
+			    sigset13_t mask); }
+49	NOARGS		{ int sys___getlogin(char *namebuf, u_int namelen); }
+50	NOARGS		{ int sys___setlogin(const char *namebuf); }
 51	NOARGS		{ int sys_acct(const char *path); }
-#else
-51	UNIMPL		acct
-#endif
 52	UNIMPL		sigpending
 53	STD		{ int osf1_sys_classcntl(int opcode, int arg1, \
 			    int arg2, int arg3); }
-54	STD		{ int osf1_sys_ioctl(int fd, int com, caddr_t data); }
+54	STD		{ int osf1_sys_ioctl(int fd, int com, void *data); }
 55	STD		{ int osf1_sys_reboot(int opt); }
 56	NOARGS		{ int sys_revoke(const char *path); }
 57	NOARGS		{ int sys_symlink(const char *path, \
 			    const char *link); }
 58	NOARGS		{ int sys_readlink(const char *path, char *buf, \
 			    int count); }
-59	STD		{ int osf1_sys_execve(char *path, \
+59	STD		{ int osf1_sys_execve(const char *path, \
 			    char * const *argp, char * const *envp); }
 60	NOARGS		{ int sys_umask(int newmask); }
 61	NOARGS		{ int sys_chroot(const char *path); }
@@ -130,16 +132,16 @@
 64	NOARGS		{ int compat_43_sys_getpagesize(void); }
 65	UNIMPL		mremap
 66	NOARGS		{ int sys_vfork(void); }
-67	STD		{ int osf1_sys_stat(char *path, \
+67	STD		{ int osf1_sys_stat(const char *path, \
 			    struct osf1_stat *ub); }
-68	STD		{ int osf1_sys_lstat(char *path, \
+68	STD		{ int osf1_sys_lstat(const char *path, \
 			    struct osf1_stat *ub); }
 69	UNIMPL		sbrk
 70	UNIMPL		sstk
-71	STD		{ caddr_t osf1_sys_mmap(caddr_t addr, size_t len, \
+71	STD		{ void *osf1_sys_mmap(void *addr, size_t len, \
 			    int prot, int flags, int fd, off_t pos); }
-72	OBSOL		vadvise
-73	NOARGS		{ int sys_munmap(caddr_t addr, size_t len); }
+72	UNIMPL		ovadvise
+73	NOARGS		{ int sys_munmap(void *addr, size_t len); }
 74	STD		{ int osf1_sys_mprotect(void *addr, size_t len, \
 			    int prot); }
 75	STD		{ int osf1_sys_madvise(void *addr, size_t len, \
@@ -157,7 +159,7 @@
 			    struct osf1_itimerval *oitv); }
 84	UNIMPL		old wait
 85	UNIMPL		table
-86	UNIMPL		getitimer
+86	STD		{ int osf1_sys_getitimer(u_int which, struct osf1_itimerval *itv); }
 87	NOARGS		{ int compat_43_sys_gethostname(char *hostname, \
 			    u_int len); }
 88	NOARGS		{ int compat_43_sys_sethostname(const char *hostname, \
@@ -175,24 +177,25 @@
 96	NOARGS		{ int sys_setpriority(int which, int who, int prio); }
 97	STD		{ int osf1_sys_socket(int domain, int type, \
 			    int protocol); }
-98	NOARGS		{ int sys_connect(int s, caddr_t name, int namelen); }
-99	NOARGS		{ int compat_43_sys_accept(int s, caddr_t name, \
+98	NOARGS		{ int sys_connect(int s, void *name, int namelen); }
+99	NOARGS		{ int compat_43_sys_accept(int s, void *name, \
 			    int *anamelen); }
 100	NOARGS		{ int sys_getpriority(int which, int who); }
-101	NOARGS		{ int compat_43_sys_send(int s, caddr_t buf, int len, \
+101	NOARGS		{ int compat_43_sys_send(int s, void *buf, int len, \
 			    int flags); }
-102	NOARGS		{ int compat_43_sys_recv(int s, caddr_t buf, int len, \
+102	NOARGS		{ int compat_43_sys_recv(int s, void *buf, int len, \
 			    int flags); }
-103	NOARGS		{ int sys_sigreturn(struct sigcontext *sigcntxp); }
-104	NOARGS		{ int sys_bind(int s, caddr_t name, int namelen); }
+103	NOARGS		{ int compat_13_sys_sigreturn(\
+			    struct sigcontext13 *sigcntxp); }
+104	NOARGS		{ int sys_bind(int s, void *name, int namelen); }
 105	NOARGS		{ int sys_setsockopt(int s, int level, int name, \
-			    caddr_t val, int valsize); }
+			    void *val, int valsize); }
 106	NOARGS		{ int sys_listen(int s, int backlog); }
 107	UNIMPL		plock
 108	UNIMPL		old sigvec
 109	UNIMPL		old sigblock
 110	UNIMPL		old sigsetmask
-111	NOARGS		{ int sys_sigsuspend(int mask); }
+111	NOARGS		{ int compat_13_sys_sigsuspend(int mask); }
 112	NOARGS		{ int compat_43_sys_sigstack(struct sigstack *nss, \
 			    struct sigstack *oss); }
 113	UNIMPL		old recvmsg
@@ -204,7 +207,7 @@
 			    struct osf1_rusage *rusage); }
 ; XXX
 118	NOARGS		{ int sys_getsockopt(int s, int level, int name, \
-			    caddr_t val, int *avalsize); }
+			    void *val, int *avalsize); }
 119	UNIMPL
 120	STD		{ int osf1_sys_readv(int fd, \
 			    struct osf1_iovec *iovp, u_int iovcnt); }
@@ -212,33 +215,33 @@
 			    struct osf1_iovec *iovp, u_int iovcnt); }
 122	STD		{ int osf1_sys_settimeofday(struct osf1_timeval *tv, \
 			    struct osf1_timezone *tzp); }
-123	NOARGS		{ int sys_fchown(int fd, int uid, int gid); }
+123	NOARGS		{ int sys___posix_fchown(int fd, int uid, int gid); }
 124	NOARGS		{ int sys_fchmod(int fd, int mode); }
-125	NOARGS		{ int compat_43_sys_recvfrom(int s, caddr_t buf, \
-			    size_t len, int flags, caddr_t from, \
+125	NOARGS		{ int compat_43_sys_recvfrom(int s, void *buf, \
+			    size_t len, int flags, void *from, \
 			    int *fromlenaddr); }
 126	NOARGS		{ int sys_setreuid(uid_t ruid, uid_t euid); }
 127	NOARGS		{ int sys_setregid(gid_t rgid, gid_t egid); }
-128	NOARGS		{ int sys_rename(const char *from, \
+128	NOARGS		{ int sys___posix_rename(const char *from, \
 			    const char *to); }
-129	STD		{ int osf1_sys_truncate(char *path, \
+129	STD		{ int osf1_sys_truncate(const char *path, \
 			    off_t length); }
 130	STD		{ int osf1_sys_ftruncate(int fd, off_t length); }
-131	UNIMPL		flock
+131	NOARGS		{ int sys_flock(int fd, int operation); }
 132	STD		{ int osf1_sys_setgid(gid_t gid); }
-133	STD		{ int osf1_sys_sendto(int s, caddr_t buf, size_t len, \
+133	STD		{ int osf1_sys_sendto(int s, void *buf, size_t len, \
 			    int flags, struct sockaddr *to, int tolen); }
 134	NOARGS		{ int sys_shutdown(int s, int how); }
 135	STD		{ int osf1_sys_socketpair(int domain, int type, \
 			    int protocol, int *rsv); }
 136	NOARGS		{ int sys_mkdir(const char *path, int mode); }
 137	NOARGS		{ int sys_rmdir(const char *path); }
-138	STD		{ int osf1_sys_utimes(char *path, \
+138	STD		{ int osf1_sys_utimes(const char *path, \
 			    const struct osf1_timeval *tptr); }
 139	OBSOL		4.2 sigreturn
 140	UNIMPL		adjtime
 141	NOARGS		{ int compat_43_sys_getpeername(int fdes, \
-			    caddr_t asa, int *alen); }
+			    void *asa, int *alen); }
 142	NOARGS		{ int32_t compat_43_sys_gethostid(void); }
 143	NOARGS		{ int compat_43_sys_sethostid(int32_t hostid); }
 ; XXX
@@ -252,7 +255,7 @@
 148	UNIMPL		quotactl
 149	NOARGS		{ int compat_43_sys_quota(void); }
 150	NOARGS		{ int compat_43_sys_getsockname(int fdec, \
-			    caddr_t asa, int *alen); }
+			    void *asa, int *alen); }
 151	UNIMPL		pread
 152	UNIMPL		pwrite
 153	UNIMPL		pid_block
@@ -317,7 +320,7 @@
 205	UNIMPL		semget
 206	UNIMPL		semop
 207	STD		{ int osf1_sys_uname(struct osf1_uname *name); }
-208	NOARGS		{ int sys_lchown(const char *path, int uid, \
+208	NOARGS		{ int sys___posix_lchown(const char *path, int uid, \
 			    int gid); }
 209	STD		{ void *osf1_sys_shmat(int shmid, \
 			    const void *shmaddr, int shmflg); }
@@ -325,7 +328,7 @@
 			    struct osf1_shmid_ds *buf); }
 211	STD		{ int osf1_sys_shmdt(const void *shmaddr); }
 212	STD		{ int osf1_sys_shmget(osf1_key_t key, size_t size, \
-			    int flags); } 
+			    int flags); }
 213	UNIMPL		mvalid
 214	UNIMPL		getaddressconf
 215	UNIMPL		msleep
@@ -337,12 +340,15 @@
 221	UNIMPL
 222	UNIMPL		security
 223	UNIMPL		kloadcall
-224	UNIMPL
-225	UNIMPL
-226	UNIMPL
-227	UNIMPL
-228	UNIMPL
-229	UNIMPL
+224	STD		{ int osf1_sys_stat2(const char *path, \
+			    struct osf1_stat2 *ub); }
+225	STD		{ int osf1_sys_lstat2(const char *path, \
+			    struct osf1_stat2 *ub); }
+226	STD		{ int osf1_sys_fstat2(int fd, \
+			    struct osf1_stat2 *sb); }
+227	UNIMPL		statfs2
+228	UNIMPL		fstatfs2
+229	UNIMPL		getfsstat2
 230	UNIMPL
 231	UNIMPL
 232	UNIMPL
@@ -362,7 +368,7 @@
 244	UNIMPL		proplist_syscall
 245	UNIMPL		ntp_adjtime
 246	UNIMPL		ntp_gettime
-247	STD		{ long osf1_sys_pathconf(char *path, int name); }
+247	STD		{ long osf1_sys_pathconf(const char *path, int name); }
 248	STD		{ long osf1_sys_fpathconf(int fd, int name); }
 249	UNIMPL
 250	UNIMPL		uswitch
@@ -373,10 +379,16 @@
 253	UNIMPL		audgen
 254	UNIMPL		sysfs
 255	UNIMPL		subsys_info
-256	UNIMPL		getsysinfo
-257	STD		{ int osf1_sys_setsysinfo(u_long op, caddr_t buffer, \
-			    u_long nbytes, caddr_t arg, u_long flag); }
+256	STD		{ int osf1_sys_getsysinfo(u_long op, void *buffer, \
+			    u_long nbytes, void *arg, u_long flag); }
+257	STD		{ int osf1_sys_setsysinfo(u_long op, void *buffer, \
+			    u_long nbytes, void *arg, u_long flag); }
 258	UNIMPL		afs_syscall
 259	UNIMPL		swapctl
 260	UNIMPL		memcntl
 261	UNIMPL		fdatasync
+262	UNIMPL		oflock
+263	UNIMPL		_F64_readv
+264	UNIMPL		_F64_writev
+265	UNIMPL		cdslxlate
+266	UNIMPL		sendfile

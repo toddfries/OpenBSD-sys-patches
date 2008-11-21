@@ -1,8 +1,7 @@
-/*	$OpenBSD: amd756reg.h,v 1.1 2000/11/07 18:21:22 mickey Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: amd756reg.h,v 1.2 2008/04/28 20:23:24 martin Exp $	*/
 
-/*
- * Copyright (c) 1999, by UCHIYAMA Yasushi
+/*-
+ * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,20 +9,21 @@
  * are met:
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the developer may NOT be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -50,26 +50,27 @@
  *   0010: Reserved  0110: IRQ6      1010: IRQ10     1110: IRQ14
  *   0011: IRQ3      0111: IRQ7      1011: IRQ11     1111: IRQ15
  */
-#define AMD756_CFG_PIR		0x54
+#define AMD756_CFG_PIR			0x54
 
-#define AMD756_GET_EDGESEL(ph)						\
-	(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR) & 0xff)
+#define AMD756_GET_EDGESEL(ph)						  \
+		(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR) \
+		 & 0xff)
 
-#define AMD756_GET_PIIRQSEL(ph)						\
-	(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR) >> 16)
+#define AMD756_GET_PIIRQSEL(ph)						  \
+		(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR) \
+		 >> 16)
 
-#define AMD756_SET_EDGESEL(ph, n)					\
-	pci_conf_write((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR,	\
-	(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR)	\
-	    & 0xffff0000) | (n))
+#define AMD756_SET_EDGESEL(ph, n)					  \
+		pci_conf_write((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR, \
+		(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR) \
+		 & 0xffff0000) | (n))
 
-#define AMD756_SET_PIIRQSEL(ph, n)					\
-	pci_conf_write((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR,	\
-	(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR)	\
-	    & 0x000000ff) | ((n) << 16))
+#define AMD756_SET_PIIRQSEL(ph, n)					  \
+		pci_conf_write((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR, \
+		(pci_conf_read((ph)->ph_pc, (ph)->ph_tag, AMD756_CFG_PIR) \
+		 & 0x000000ff) | ((n) << 16))
 
 #define AMD756_PIRQ_MASK	0xdefa
-#define		AMD756_LEGAL_LINK(link) ((link) >= 0 && (link) <= 3)
-#define AMD756_LEGAL_IRQ(irq) \
-	((irq) >= 0 && (irq) <= 15 && ((1 << (irq)) & AMD756_PIRQ_MASK) != 0)
-
+#define	AMD756_LEGAL_LINK(link)	((link) >= 0 && (link) <= 3)
+#define AMD756_LEGAL_IRQ(irq)	((irq) >= 0 && (irq) <= 15 && 		 \
+				 ((1 << (irq)) & AMD756_PIRQ_MASK) != 0)

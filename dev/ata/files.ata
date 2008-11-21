@@ -1,5 +1,4 @@
-#	$OpenBSD: files.ata,v 1.3 2007/02/19 11:44:24 dlg Exp $
-#	$NetBSD: files.ata,v 1.3 1998/10/12 16:09:16 bouyer Exp $
+#	$NetBSD: files.ata,v 1.20 2008/09/16 11:45:30 tron Exp $
 #
 # Config file and device description for machine-independent devices
 # which attach to ATA busses.  Included by ports that need it.  Ports
@@ -8,10 +7,27 @@
 
 # ATA disks
 device	wd: disk
-attach	wd at ata
-file	dev/ata/wd.c				wd needs-flag
-file	dev/ata/ata_wdc.c			wd & wdc_base
+attach	wd at ata_hl
+file	dev/ata/wd.c			wd			needs-flag
+file	dev/ata/ata_wdc.c		wd & atabus & wdc_common
 
-file	dev/ata/ata.c				(ata | atapi) & wdc_base
+defflag	WD_SOFTBADSECT
 
-file	dev/ata/atascsi.c			atascsi
+file	dev/ata/ata.c			(ata_hl | atapi) & atabus
+
+# ATA RAID configuration support
+defpseudodev ataraid {[vendtype = -1], [unit = -1]}
+file	dev/ata/ata_raid.c		ataraid			needs-flag
+file	dev/ata/ata_raid_subr.c		ataraid
+file	dev/ata/ata_raid_promise.c	ataraid
+file	dev/ata/ata_raid_adaptec.c	ataraid
+file	dev/ata/ata_raid_nvidia.c	ataraid
+file	dev/ata/ata_raid_via.c		ataraid
+file	dev/ata/ata_raid_jmicron.c	ataraid
+file	dev/ata/ata_raid_intel.c	ataraid
+
+attach	ld at ataraid with ld_ataraid
+file	dev/ata/ld_ataraid.c		ld_ataraid
+
+# Common SATA subroutines
+file	dev/ata/sata_subr.c		sata			needs-flag

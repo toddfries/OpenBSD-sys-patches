@@ -1,5 +1,4 @@
-/*	$OpenBSD: hid.h,v 1.9 2002/07/25 04:07:32 nate Exp $ */
-/*	$NetBSD: hid.h,v 1.8 2002/07/11 21:14:25 augustss Exp $	*/
+/*	$NetBSD: hid.h,v 1.12 2008/04/28 20:23:59 martin Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/hid.h,v 1.7 1999/11/17 22:33:40 n_hibma Exp $ */
 
 /*
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -86,11 +78,11 @@ struct hid_item {
 	struct hid_item *next;
 };
 
-struct hid_data *hid_start_parse(void *d, int len, enum hid_kind kind);
-void hid_end_parse(struct hid_data *s);
-int hid_get_item(struct hid_data *s, struct hid_item *h);
-int hid_report_size(void *buf, int len, enum hid_kind k, u_int8_t id);
-int hid_locate(void *desc, int size, u_int32_t usage, u_int8_t id,
-	       enum hid_kind kind, struct hid_location *loc, u_int32_t *flags);
-u_long hid_get_data(u_char *buf, struct hid_location *loc);
-int hid_is_collection(void *desc, int size, u_int8_t id, u_int32_t usage);
+struct hid_data *hid_start_parse(const void *, int, enum hid_kind);
+void hid_end_parse(struct hid_data *);
+int hid_get_item(struct hid_data *, struct hid_item *);
+int hid_report_size(const void *, int, enum hid_kind, u_int8_t);
+int hid_locate(const void *, int, u_int32_t, u_int8_t, enum hid_kind,
+    struct hid_location *, u_int32_t *);
+u_long hid_get_data(u_char *, struct hid_location *);
+int hid_is_collection(const void *, int, u_int8_t, u_int32_t);

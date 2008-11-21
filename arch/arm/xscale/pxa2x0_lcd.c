@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_lcd.c,v 1.22 2007/05/27 16:12:11 matthieu Exp $ */
-/* $NetBSD: pxa2x0_lcd.c,v 1.8 2003/10/03 07:24:05 bsh Exp $ */
+/* $NetBSD: pxa2x0_lcd.c,v 1.26 2007/10/17 19:53:44 garbled Exp $ */
 
 /*
  * Copyright (c) 2002  Genetec Corporation.  All rights reserved.
@@ -38,6 +37,9 @@
  * Support PXA2[15]0's integrated LCD controller.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_lcd.c,v 1.26 2007/10/17 19:53:44 garbled Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -48,99 +50,92 @@
 #include <uvm/uvm_extern.h>
 
 #include <dev/cons.h> 
-
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h> 
+#include <dev/wscons/wscons_callbacks.h>
 #include <dev/rasops/rasops.h>
+#include <dev/wsfont/wsfont.h>
 
 #include <machine/bus.h>
 #include <machine/cpu.h>
 #include <arm/cpufunc.h>
 
+#include <arm/xscale/pxa2x0cpu.h>
 #include <arm/xscale/pxa2x0var.h>
 #include <arm/xscale/pxa2x0reg.h>
 #include <arm/xscale/pxa2x0_lcd.h>
 #include <arm/xscale/pxa2x0_gpio.h>
+
+#include "wsdisplay.h"
 
 /*
  * Console variables. These are necessary since console is setup very early,
  * before devices get attached.
  */
 struct {
-	bus_space_tag_t			 iot;
-	bus_space_handle_t		 ioh;
-	bus_dma_tag_t			 dma_tag;
-	const struct lcd_panel_geometry	*geometry;
-	struct pxa2x0_lcd_screen	 scr;
+	int				is_console;
+	struct pxa2x0_wsscreen_descr	*descr;
+	const struct lcd_panel_geometry *geom;
 } pxa2x0_lcd_console;
 
-int	lcdintr(void *);
-void	pxa2x0_lcd_geometry(bus_space_tag_t, bus_space_handle_t,
-	    const struct lcd_panel_geometry *);
-void	pxa2x0_lcd_initialize(bus_space_tag_t, bus_space_handle_t,
-	    const struct lcd_panel_geometry *, void (*)(u_int, int));
-int	pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *,
-	    struct pxa2x0_lcd_screen *, int);
-void	pxa2x0_lcd_setup_console(struct pxa2x0_lcd_softc *,
-	    const struct pxa2x0_wsscreen_descr *);
-void	pxa2x0_lcd_setup_rasops(struct rasops_info *,
-	    struct pxa2x0_wsscreen_descr *,
-	    const struct lcd_panel_geometry *);
-void	pxa2x0_lcd_start_dma(bus_space_tag_t, bus_space_handle_t,
-	    struct pxa2x0_lcd_screen *);
-void	pxa2x0_lcd_stop_dma(bus_space_tag_t, bus_space_handle_t);
+int		lcdintr(void *);
 
-/*
- * Setup display geometry parameters.
- */
+static void	pxa2x0_lcd_initialize(struct pxa2x0_lcd_softc *, 
+		    const struct lcd_panel_geometry *);
+static void	pxa2x0_lcd_setup_rasops(struct pxa2x0_lcd_softc *,
+		    struct rasops_info *, struct pxa2x0_wsscreen_descr *,
+		    const struct lcd_panel_geometry *);
+
 void
-pxa2x0_lcd_geometry(bus_space_tag_t iot, bus_space_handle_t ioh,
+pxa2x0_lcd_geometry(struct pxa2x0_lcd_softc *sc,
     const struct lcd_panel_geometry *info)
 {
-	int lines;
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
 	uint32_t ccr0;
+	int lines;
+
+	iot = sc->iot;
+	ioh = sc->ioh;
+	sc->geometry = info;
 
 	ccr0 = LCCR0_IMASK;
+	if (CPU_IS_PXA270)
+		ccr0 |= LCCR0_CMDIM|LCCR0_RDSTM|LCCR0_LDDALT;
 	if (info->panel_info & LCDPANEL_ACTIVE)
 		ccr0 |= LCCR0_PAS;	/* active mode */
-	if ((info->panel_info & (LCDPANEL_DUAL | LCDPANEL_ACTIVE))
+	if ((info->panel_info & (LCDPANEL_DUAL|LCDPANEL_ACTIVE))
 	    == LCDPANEL_DUAL)
 		ccr0 |= LCCR0_SDS; /* dual panel */
 	if (info->panel_info & LCDPANEL_MONOCHROME)
 		ccr0 |= LCCR0_CMS;
-	/* XXX - Zaurus C3000 */
-	ccr0 |= LCCR0_LDDALT | 
-	    LCCR0_OUC |
-	    LCCR0_CMDIM |
-	    LCCR0_RDSTM;
-
 	bus_space_write_4(iot, ioh, LCDC_LCCR0, ccr0);
 
 	bus_space_write_4(iot, ioh, LCDC_LCCR1,
-	    (info->panel_width - 1)
-	    | ((info->hsync_pulse_width - 1) << 10)
-	    | ((info->end_line_wait - 1) << 16)
-	    | ((info->beg_line_wait - 1) << 24));
+	    (info->panel_width-1)
+	    | ((info->hsync_pulse_width-1)<<10)
+	    | ((info->end_line_wait-1)<<16)
+	    | ((info->beg_line_wait-1)<<24));
 
 	if (info->panel_info & LCDPANEL_DUAL)
-		lines = info->panel_height / 2 + info->extra_lines;
+		lines = info->panel_height/2 + info->extra_lines;
 	else
 		lines = info->panel_height + info->extra_lines;
 
 	bus_space_write_4(iot, ioh, LCDC_LCCR2,
-	    (lines - 1)
-	    | (info->vsync_pulse_width << 10)
-	    | (info->end_frame_wait << 16)
-	    | (info->beg_frame_wait << 24));
+	    (lines-1)
+	    | (info->vsync_pulse_width<<10)
+	    | (info->end_frame_wait<<16)
+	    | (info->beg_frame_wait<<24));
 
 	bus_space_write_4(iot, ioh, LCDC_LCCR3,
-	    (info->pixel_clock_div << 0)
+	    (info->pixel_clock_div<<0)
 	    | (info->ac_bias << 8)
 	    | ((info->panel_info & 
-		(LCDPANEL_VSP | LCDPANEL_HSP | LCDPANEL_PCP | LCDPANEL_OEP))
-		<< 20)
+		(LCDPANEL_VSP|LCDPANEL_HSP|LCDPANEL_PCP|LCDPANEL_OEP))
+		<<20)
 	    | (4 << 24) /* 16bpp */
-	    | ((info->panel_info & LCDPANEL_DPC) ? (1 << 27) : 0)
+	    | ((info->panel_info & LCDPANEL_DPC) ? (1<<27) : 0)
 	    );
 }
 
@@ -148,11 +143,16 @@ pxa2x0_lcd_geometry(bus_space_tag_t iot, bus_space_handle_t ioh,
  * Initialize the LCD controller.
  */
 void
-pxa2x0_lcd_initialize(bus_space_tag_t iot, bus_space_handle_t ioh,
-    const struct lcd_panel_geometry *geom, void (*clkman)(u_int, int))
+pxa2x0_lcd_initialize(struct pxa2x0_lcd_softc *sc, 
+    const struct lcd_panel_geometry *geom)
 {
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
+	uint32_t lccr0, lscr;
 	int nldd;
-	u_int32_t lccr0, lscr;
+
+	iot = sc->iot;
+	ioh = sc->ioh;
 
 	/* Check if LCD is enabled before programming, it should not
 	 * be enabled while it is being reprogrammed, therefore disable
@@ -171,9 +171,12 @@ pxa2x0_lcd_initialize(bus_space_tag_t iot, bus_space_handle_t ioh,
 	}
 
 	/* enable clock */
-	(*clkman)(CKEN_LCD, 1);
+	pxa2x0_clkman_config(CKEN_LCD, 1);
 
-	bus_space_write_4(iot, ioh, LCDC_LCCR0, LCCR0_IMASK);
+	lccr0 = LCCR0_IMASK;
+	if (CPU_IS_PXA270)
+		lccr0 |= LCCR0_CMDIM|LCCR0_RDSTM;
+	bus_space_write_4(iot, ioh, LCDC_LCCR0, lccr0);
 
 	/*
 	 * setup GP[77:58] for LCD
@@ -201,7 +204,7 @@ pxa2x0_lcd_initialize(bus_space_tag_t iot, bus_space_handle_t ioh,
 	while (nldd--)
 		pxa2x0_gpio_set_function(58 + nldd, GPIO_ALT_FN_2_OUT);
 
-	pxa2x0_lcd_geometry(iot, ioh, geom);
+	pxa2x0_lcd_geometry(sc, geom);
 }
 
 /*
@@ -209,57 +212,79 @@ pxa2x0_lcd_initialize(bus_space_tag_t iot, bus_space_handle_t ioh,
  */
 void
 pxa2x0_lcd_attach_sub(struct pxa2x0_lcd_softc *sc, 
-    struct pxaip_attach_args *pxa, struct pxa2x0_wsscreen_descr *descr,
-    const struct lcd_panel_geometry *geom, int console)
+    struct pxaip_attach_args *pxa, const struct lcd_panel_geometry *geom)
 {
-	bus_space_tag_t iot;
+	bus_space_tag_t iot = pxa->pxa_iot;
 	bus_space_handle_t ioh;
 	int error;
 
 	sc->n_screens = 0;
 	LIST_INIT(&sc->screens);
 
-	/* map controller registers if not console */
-	if (console != 0) {
-		iot = pxa2x0_lcd_console.iot;
-		ioh = pxa2x0_lcd_console.ioh;
-	} else {
-		iot = pxa->pxa_iot;
-		error = bus_space_map(iot, PXA2X0_LCDC_BASE, PXA2X0_LCDC_SIZE,
-		    0, &ioh);
-		if (error) {
-			printf(": failed to map registers %d", error);
-			return;
-		}
+	/* map controller registers */
+	error = bus_space_map(iot, PXA2X0_LCDC_BASE,
+			       PXA2X0_LCDC_SIZE, 0, &ioh);
+	if (error) {
+		printf(": failed to map registers (errno=%d)\n", error);
+		return;
 	}
 
 	sc->iot = iot;
 	sc->ioh = ioh;
 	sc->dma_tag = &pxa2x0_bus_dma_tag;
 
-	sc->ih = pxa2x0_intr_establish(17, IPL_BIO, lcdintr, sc,
-	    sc->dev.dv_xname);
-	if (sc->ih == NULL)
-		printf("%s: unable to establish interrupt at irq %d",
-		    sc->dev.dv_xname, 17);
-
-	sc->geometry = geom;
-
-	if (console != 0) {
-		/* complete console attachment */
-		pxa2x0_lcd_setup_console(sc, descr);
-	} else {
-		struct rasops_info dummy;
-
-		pxa2x0_lcd_initialize(iot, ioh, geom, pxa2x0_clkman_config);
-
-		/*
-		 * Initialize a dummy rasops_info to compute fontsize and
-		 * the screen size in chars.
-		 */
-		bzero(&dummy, sizeof(dummy));
-		pxa2x0_lcd_setup_rasops(&dummy, descr, geom);
+	sc->ih = pxa2x0_intr_establish(PXA2X0_INT_LCD, IPL_BIO, lcdintr, sc);
+	if (sc->ih == NULL) {
+		printf(": unable to establish interrupt at irq %d\n",
+		    PXA2X0_INT_LCD);
+		return;
 	}
+
+	printf(": PXA2x0 LCD controller\n");
+
+	pxa2x0_lcd_initialize(sc, geom);
+
+	if (pxa2x0_lcd_console.is_console) {
+		struct pxa2x0_wsscreen_descr *descr = pxa2x0_lcd_console.descr;
+		struct pxa2x0_lcd_screen *scr;
+		struct rasops_info *ri;
+		long defattr;
+
+		error = pxa2x0_lcd_new_screen(sc, descr->depth, &scr);
+		if (error) {
+			printf("%s: unable to create new screen (errno=%d)",
+			    sc->dev.dv_xname, error);
+			return;
+		}
+
+		ri = &scr->rinfo;
+		ri->ri_hw = (void *)scr;
+		ri->ri_bits = scr->buf_va;
+		pxa2x0_lcd_setup_rasops(sc, ri, descr, geom);
+
+		/* assumes 16 bpp */
+		(*ri->ri_ops.allocattr)(ri, 0, 0, 0, &defattr);
+
+		pxa2x0_lcd_start_dma(sc, scr);
+		sc->active = scr;
+
+		wsdisplay_cnattach(&descr->c, ri, ri->ri_ccol, ri->ri_crow,
+		    defattr);
+
+		printf("%s: console\n", sc->dev.dv_xname);
+	}
+}
+
+int
+pxa2x0_lcd_cnattach(struct pxa2x0_wsscreen_descr *descr,
+    const struct lcd_panel_geometry *geom)
+{
+
+	pxa2x0_lcd_console.descr = descr;
+	pxa2x0_lcd_console.geom = geom;
+	pxa2x0_lcd_console.is_console = 1;
+
+	return 0;
 }
 
 /*
@@ -268,14 +293,13 @@ pxa2x0_lcd_attach_sub(struct pxa2x0_lcd_softc *sc,
 int
 lcdintr(void *arg)
 {
-	struct pxa2x0_lcd_softc *sc = arg;
+	struct pxa2x0_lcd_softc *sc = (struct pxa2x0_lcd_softc *)arg;
 	bus_space_tag_t iot = sc->iot;
 	bus_space_handle_t ioh = sc->ioh;
-
-	static uint32_t status;
+	uint32_t status;
 
 	status = bus_space_read_4(iot, ioh, LCDC_LCSR);
-	/* Clear sticky status bits */
+	/* Clear stickey status bits */
 	bus_space_write_4(iot, ioh, LCDC_LCSR, status);
 
 	return 1;
@@ -286,11 +310,16 @@ lcdintr(void *arg)
  * This brings the screen to life...
  */
 void
-pxa2x0_lcd_start_dma(bus_space_tag_t iot, bus_space_handle_t ioh,
+pxa2x0_lcd_start_dma(struct pxa2x0_lcd_softc *sc,
     struct pxa2x0_lcd_screen *scr)
 {
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
 	uint32_t tmp;
 	int val, save;
+
+	iot = sc->iot;
+	ioh = sc->ioh;
 
 	save = disable_interrupts(I32_bit);
 
@@ -299,18 +328,24 @@ pxa2x0_lcd_start_dma(bus_space_tag_t iot, bus_space_handle_t ioh,
 	case 2: val = 1; break;
 	case 4: val = 2; break;
 	case 8: val = 3; break;
-	case 16:
-		/* FALLTHROUGH */
+	case 16: val = 4; break;
+	case 18: val = 5; break;
+	case 24: val = 33; break;
 	default:
 		val = 4; break;		
 	}
 
 	tmp = bus_space_read_4(iot, ioh, LCDC_LCCR3);
-	bus_space_write_4(iot, ioh, LCDC_LCCR3, 
-	    (tmp & ~LCCR3_BPP) | (val << LCCR3_BPP_SHIFT));
+	if (CPU_IS_PXA270) {
+		bus_space_write_4(iot, ioh, LCDC_LCCR3, 
+		  (tmp & ~(LCCR3_BPP|LCCR3_BPP3)) | (val << LCCR3_BPP_SHIFT));
+	} else {
+		bus_space_write_4(iot, ioh, LCDC_LCCR3, 
+		    (tmp & ~LCCR3_BPP) | (val << LCCR3_BPP_SHIFT));
+	}
 
 	bus_space_write_4(iot, ioh, LCDC_FDADR0, 
-	    scr->depth == 16 ? scr->dma_desc_pa :
+	    scr->depth >= 16 ? scr->dma_desc_pa :
 	    scr->dma_desc_pa + 2 * sizeof (struct lcd_dma_descriptor));
 	bus_space_write_4(iot, ioh, LCDC_FDADR1, 
 	    scr->dma_desc_pa + 1 * sizeof (struct lcd_dma_descriptor));
@@ -328,28 +363,30 @@ pxa2x0_lcd_start_dma(bus_space_tag_t iot, bus_space_handle_t ioh,
 	restore_interrupts(save);
 }
 
+#if NWSDISPLAY > 0
 /*
  * Disable screen refresh.
  */
-void
-pxa2x0_lcd_stop_dma(bus_space_tag_t iot, bus_space_handle_t ioh)
+static void
+pxa2x0_lcd_stop_dma(struct pxa2x0_lcd_softc *sc)
 {
 
 	/* Stop LCD DMA after current frame */
-	bus_space_write_4(iot, ioh, LCDC_LCCR0,
+	bus_space_write_4(sc->iot, sc->ioh, LCDC_LCCR0,
 	    LCCR0_DIS |
-	    bus_space_read_4(iot, ioh, LCDC_LCCR0));
+	    bus_space_read_4(sc->iot, sc->ioh, LCDC_LCCR0));
 
 	/* wait for disabling done.
 	   XXX: use interrupt. */
 	while (LCCR0_ENB &
-	    bus_space_read_4(iot, ioh, LCDC_LCCR0))
-		;
+	    bus_space_read_4(sc->iot, sc->ioh, LCDC_LCCR0))
+		continue;
 
-	bus_space_write_4(iot, ioh, LCDC_LCCR0,
+	bus_space_write_4(sc->iot, sc->ioh, LCDC_LCCR0,
 	    ~LCCR0_DIS &
-	    bus_space_read_4(iot, ioh, LCDC_LCCR0));
+	    bus_space_read_4(sc->iot, sc->ioh, LCDC_LCCR0));
 }
+#endif
 
 #define _rgb(r,g,b)	(((r)<<11) | ((g)<<5) | b)
 #define rgb(r,g,b)	_rgb((r)>>1,g,(b)>>1)
@@ -365,7 +402,7 @@ static uint16_t basic_color_map[] = {
 	rgb(	0,   0,   L),		/* blue */
 	rgb(	L,   0,   L),		/* magenta */
 	rgb(	0,   L,   L),		/* cyan */
-	rgb( 0x31,0x31,0x31),		/* white */
+	_rgb(0x1c,0x38,0x1c),		/* white */
 
 	rgb(	L,   L,   L),		/* black */
 	rgb(	H,   0,   0),		/* red */
@@ -390,14 +427,14 @@ init_palette(uint16_t *buf, int depth)
 	case 8:
 	case 4:
 #if 0
-		for (i = 0; i <= 255; ++i) {
-			buf[i] = ((9 * ((i >> 5) & 0x07)) << 11) |
-			    ((9 * ((i >> 2) & 0x07)) << 5) |
-			    ((21 * (i & 0x03)) / 2);
+		for (i=0; i <= 255; ++i) {
+			buf[i] = ((9 * ((i>>5) & 0x07)) <<11) |
+			    ((9 * ((i>>2) & 0x07)) << 5) |
+			    ((21 * (i & 0x03))/2);
 		}
 #else
 		memcpy(buf, basic_color_map, sizeof basic_color_map);
-		for (i = 16; i < (1 << depth); ++i)
+		for (i=16; i < (1<<depth); ++i)
 			buf[i] = 0xffff;
 #endif
 		break;
@@ -414,13 +451,14 @@ init_palette(uint16_t *buf, int depth)
  * Create and initialize a new screen buffer.
  */
 int
-pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *sc,
-    struct pxa2x0_lcd_screen *scr, int depth)
+pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *sc, int depth,
+     struct pxa2x0_lcd_screen **scrpp)
 {
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	bus_dma_tag_t dma_tag;
 	const struct lcd_panel_geometry *geometry;
+	struct pxa2x0_lcd_screen *scr = NULL;
 	int width, height;
 	bus_size_t size;
 	int error, palette_size;
@@ -428,18 +466,10 @@ pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *sc,
 	struct lcd_dma_descriptor *desc;
 	paddr_t buf_pa, desc_pa;
 
-	if (sc != NULL) {
-		iot = sc->iot;
-		ioh = sc->ioh;
-		dma_tag = sc->dma_tag;
-		geometry = sc->geometry;
-	} else {
-		/* We are creating the console screen. */
-		iot = pxa2x0_lcd_console.iot;
-		ioh = pxa2x0_lcd_console.ioh;
-		dma_tag = pxa2x0_lcd_console.dma_tag;
-		geometry = pxa2x0_lcd_console.geometry;
-	}
+	iot = sc->iot;
+	ioh = sc->ioh;
+	dma_tag = sc->dma_tag;
+	geometry = sc->geometry;
 
 	width = geometry->panel_width;
 	height = geometry->panel_height;
@@ -450,61 +480,78 @@ pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *sc,
 	case 2:
 	case 4:
 	case 8:
-		palette_size = (1 << depth) * sizeof (uint16_t);
+		palette_size = (1<<depth) * sizeof (uint16_t);
 		/* FALLTHROUGH */
 	case 16:
-		size = roundup(width, 4) * depth / 8 * height;
+		size = roundup(width,4) * 2 * height;
 		break;
+	case 18:
+	case 24:
+		size = roundup(width,4) * 4 * height;
+		break;
+	case 19:
+	case 25:
+		printf("%s: Not supported depth (%d)\n",
+		    sc->dev.dv_xname, depth);
+		return EINVAL;
 	default:
 		printf("%s: Unknown depth (%d)\n",
-		    sc != NULL ? sc->dev.dv_xname : "console", depth);
-		return (EINVAL);
+		    sc->dev.dv_xname, depth);
+		return EINVAL;
 	}
 
-	bzero(scr, sizeof *scr);
+	scr = malloc(sizeof(*scr), M_DEVBUF, M_NOWAIT);
+	if (scr == NULL)
+		return ENOMEM;
+
+	memset(scr, 0, sizeof(*scr));
 
 	scr->nsegs = 0;
 	scr->depth = depth;
 	scr->buf_size = size;
 	scr->buf_va = NULL;
-	size = roundup(size, 16) + 3 * sizeof (struct lcd_dma_descriptor)
+	size = roundup(size,16) + 3 * sizeof(struct lcd_dma_descriptor)
 	    + palette_size;
 
-	error = bus_dmamem_alloc(dma_tag, size, 16, 0,
-	    scr->segs, 1, &(scr->nsegs), busdma_flag);
-	if (error != 0 || scr->nsegs != 1) {
-		/* XXX: Actually we can handle nsegs > 1 case by means
-		   of multiple DMA descriptors for a panel.  It would
-		    make code here a bit hairy */
+	error = bus_dmamem_alloc(dma_tag, size, 16, 0, scr->segs, 1,
+	    &scr->nsegs, busdma_flag);
+
+	if (error || scr->nsegs != 1) {
+		/* XXX:
+		 * Actually we can handle nsegs>1 case by means
+		 * of multiple DMA descriptors for a panel.  It
+		 * will make code here a bit hairly.
+		 */
 		if (error == 0)
 			error = E2BIG;
 		goto bad;
 	}
 
-	error = bus_dmamem_map(dma_tag, scr->segs, scr->nsegs,
-	    size, (caddr_t *)&(scr->buf_va), busdma_flag | BUS_DMA_COHERENT);
-	if (error != 0)
+	error = bus_dmamem_map(dma_tag, scr->segs, scr->nsegs, size,
+	    (void **)&scr->buf_va, busdma_flag | BUS_DMA_COHERENT);
+	if (error)
 		goto bad;
 
 	memset(scr->buf_va, 0, scr->buf_size);
 
 	/* map memory for DMA */
-	if (bus_dmamap_create(dma_tag, 1024 * 1024 * 2, 1, 
-	    1024 * 1024 * 2, 0,  busdma_flag, &scr->dma))
+	error = bus_dmamap_create(dma_tag, 1024*1024*2, 1, 1024*1024*2, 0,
+	    busdma_flag, &scr->dma);
+	if (error)
 		goto bad;
-	error = bus_dmamap_load(dma_tag, scr->dma,
-	    scr->buf_va, size, NULL, busdma_flag);
-	if (error != 0) {
+
+	error = bus_dmamap_load(dma_tag, scr->dma, scr->buf_va, size,
+	    NULL, busdma_flag);
+	if (error)
 		goto bad;
-	}
 
 	buf_pa = scr->segs[0].ds_addr;
-	desc_pa = buf_pa + roundup(size, PAGE_SIZE) - 3 * sizeof *desc;
+	desc_pa = buf_pa + roundup(size, PAGE_SIZE) - 3 * sizeof(*desc);
 
 	/* make descriptors at the top of mapped memory */
-	desc = (struct lcd_dma_descriptor *)
-	    ((caddr_t)(scr->buf_va) + roundup(size, PAGE_SIZE) -
-	     3 * sizeof *desc);
+	desc = (struct lcd_dma_descriptor *)(
+		(char *)(scr->buf_va) + roundup(size, PAGE_SIZE) -
+			  3 * sizeof(*desc));
 
 	desc[0].fdadr = desc_pa;
 	desc[0].fsadr = buf_pa;
@@ -521,8 +568,8 @@ pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *sc,
 	if (geometry->panel_info & LCDPANEL_DUAL) {
 		/* Dual panel */
 		desc[1].fdadr = desc_pa + sizeof *desc;
-		desc[1].fsadr = buf_pa + scr->buf_size / 2;
-		desc[0].ldcmd = desc[1].ldcmd = scr->buf_size / 2;
+		desc[1].fsadr = buf_pa + scr->buf_size/2;
+		desc[0].ldcmd = desc[1].ldcmd = scr->buf_size/2;
 
 	}
 
@@ -535,27 +582,31 @@ pxa2x0_lcd_new_screen(struct pxa2x0_lcd_softc *sc,
 	scr->dma_desc_pa = desc_pa;
 	scr->map_size = size;		/* used when unmap this. */
 
-	if (sc != NULL) {
-		LIST_INSERT_HEAD(&(sc->screens), scr, link);
-		sc->n_screens++;
-	}
-	
-	return (0);
+	LIST_INSERT_HEAD(&sc->screens, scr, link);
+	sc->n_screens++;
+
+	*scrpp = scr;
+
+	return 0;
 
  bad:
-	if (scr->buf_va)
-		bus_dmamem_unmap(dma_tag, scr->buf_va, size);
-	if (scr->nsegs)
-		bus_dmamem_free(dma_tag, scr->segs, scr->nsegs);
-	return (error);
+	if (scr) {
+		if (scr->buf_va)
+			bus_dmamem_unmap(dma_tag, scr->buf_va, size);
+		if (scr->nsegs)
+			bus_dmamem_free(dma_tag, scr->segs, scr->nsegs);
+		free(scr, M_DEVBUF);
+	}
+	*scrpp = NULL;
+	return error;
 }
 
 /*
  * Initialize rasops for a screen, as well as struct wsscreen_descr if this
  * is the first screen creation.
  */
-void
-pxa2x0_lcd_setup_rasops(struct rasops_info *rinfo,
+static void
+pxa2x0_lcd_setup_rasops(struct pxa2x0_lcd_softc *sc, struct rasops_info *rinfo,
     struct pxa2x0_wsscreen_descr *descr,
     const struct lcd_panel_geometry *geom)
 {
@@ -582,13 +633,9 @@ pxa2x0_lcd_setup_rasops(struct rasops_info *rinfo,
 	if (descr->c.nrows == 0) {
 		/* get rasops to compute screen size the first time */
 		rasops_init(rinfo, 100, 100);
-	} else
-#ifndef __zaurus__
+	} else {
 		rasops_init(rinfo, descr->c.nrows, descr->c.ncols);
-#else
-		/* XXX swap rows/cols for second call because of rotation */
-		rasops_init(rinfo, descr->c.ncols, descr->c.nrows);
-#endif
+	}
 
 	descr->c.nrows = rinfo->ri_rows;
 	descr->c.ncols = rinfo->ri_cols;
@@ -597,238 +644,14 @@ pxa2x0_lcd_setup_rasops(struct rasops_info *rinfo,
 }
 
 /*
- * Early console attachment.
- * This initializes the LCD, then creates and displays a screen buffer.
- * This screen will be accounted for in the softc when the lcd device attaches.
+ * Power management
  */
-int
-pxa2x0_lcd_cnattach(struct pxa2x0_wsscreen_descr *descr,
-    const struct lcd_panel_geometry *geom, void (*clkman)(u_int, int))
-{
-	struct rasops_info *ri;
-	long defattr;
-	int error;
-
-	/* map controller registers */
-	pxa2x0_lcd_console.iot = &pxa2x0_bs_tag;
-	error = bus_space_map(pxa2x0_lcd_console.iot,
-	    PXA2X0_LCDC_BASE, PXA2X0_LCDC_SIZE, 0, &pxa2x0_lcd_console.ioh);
-	if (error != 0)
-		return (error);
-	
-	pxa2x0_lcd_console.dma_tag = &pxa2x0_bus_dma_tag;
-	pxa2x0_lcd_console.geometry = geom;
-
-	pxa2x0_lcd_initialize(pxa2x0_lcd_console.iot, pxa2x0_lcd_console.ioh,
-	    pxa2x0_lcd_console.geometry, clkman);
-
-	error = pxa2x0_lcd_new_screen(NULL, &pxa2x0_lcd_console.scr,
-	    descr->depth);
-	if (error != 0)
-		return (error);
-
-	ri = &pxa2x0_lcd_console.scr.rinfo;
-	ri->ri_hw = (void *)&pxa2x0_lcd_console.scr;
-	ri->ri_bits = pxa2x0_lcd_console.scr.buf_va;
-	pxa2x0_lcd_setup_rasops(ri, descr, pxa2x0_lcd_console.geometry);
-
-	/* assumes 16 bpp */
-	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
-
-	pxa2x0_lcd_start_dma(pxa2x0_lcd_console.iot, pxa2x0_lcd_console.ioh,
-	    &pxa2x0_lcd_console.scr);
-
-	wsdisplay_cnattach(&descr->c, ri, ri->ri_ccol, ri->ri_crow, defattr);
-
-	return (0);
-}
-
-/*
- * Do the necessary accounting to bring the console variables in the softc.
- */
-void
-pxa2x0_lcd_setup_console(struct pxa2x0_lcd_softc *sc,
-    const struct pxa2x0_wsscreen_descr *descr)
-{
-	struct pxa2x0_lcd_screen *scr = &pxa2x0_lcd_console.scr;
-
-	/*
-	 * Register the console screen as if it had been created
-	 * when the lcd device attached.
-	 */
-	LIST_INSERT_HEAD(&(sc->screens), &pxa2x0_lcd_console.scr, link);
-	sc->n_screens++;
-	sc->active = scr;
-}
-
-/*
- * wsdisplay accessops
- */
-
-int
-pxa2x0_lcd_show_screen(void *v, void *cookie, int waitok,
-    void (*cb)(void *, int, int), void *cbarg)
-{
-	struct pxa2x0_lcd_softc *sc = v;
-	struct rasops_info *ri = cookie;
-	struct pxa2x0_lcd_screen *scr = ri->ri_hw, *old;
-	
-	old = sc->active;
-	if (old == scr)
-		return 0;
-
-	if (old)
-		pxa2x0_lcd_stop_dma(sc->iot, sc->ioh);
-	
-	pxa2x0_lcd_start_dma(sc->iot, sc->ioh, scr);
-
-	sc->active = scr;
-	return 0;
-}
-
-int
-pxa2x0_lcd_alloc_screen(void *v, const struct wsscreen_descr *_type,
-    void **cookiep, int *curxp, int *curyp, long *attrp)
-{
-	struct pxa2x0_lcd_softc *sc = v;
-	struct pxa2x0_lcd_screen *scr;
-	struct rasops_info *ri;
-	struct pxa2x0_wsscreen_descr *type =
-	    (struct pxa2x0_wsscreen_descr *)_type;
-	int error;
-
-	scr = malloc(sizeof *scr, M_DEVBUF, (cold ? M_NOWAIT : M_WAITOK));
-	if (scr == NULL)
-		return (ENOMEM);
-
-	error = pxa2x0_lcd_new_screen(sc, scr, type->depth);
-	if (error != 0) {
-		free(scr, M_DEVBUF);
-		return (error);
-	}
-
-	/*
-	 * initialize raster operation for this screen.
-	 */
-	ri = &scr->rinfo;
-	ri->ri_hw = (void *)scr;
-	ri->ri_bits = scr->buf_va;
-	pxa2x0_lcd_setup_rasops(ri, type, sc->geometry);
-
-	/* assumes 16 bpp */
-	ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
-
-	*cookiep = ri;
-	*curxp = 0;
-	*curyp = 0;
-
-	return 0;
-}
-
-void
-pxa2x0_lcd_free_screen(void *v, void *cookie)
-{
-	struct pxa2x0_lcd_softc *sc = v;
-	struct rasops_info *ri = cookie;
-	struct pxa2x0_lcd_screen *scr = ri->ri_hw;
-
-	LIST_REMOVE(scr, link);
-	sc->n_screens--;
-	if (scr == sc->active) {
-		/* at first, we need to stop LCD DMA */
-		sc->active = NULL;
-
-#ifdef DEBUG
-		printf("lcd_free on active screen\n");
-#endif
-
-		pxa2x0_lcd_stop_dma(sc->iot, sc->ioh);
-	}
-
-	if (scr->buf_va)
-		bus_dmamem_unmap(sc->dma_tag, scr->buf_va, scr->map_size);
-
-	if (scr->nsegs > 0)
-		bus_dmamem_free(sc->dma_tag, scr->segs, scr->nsegs);
-
-	free(scr, M_DEVBUF);
-}
-
-int
-pxa2x0_lcd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
-{
-	struct pxa2x0_lcd_softc *sc = v;
-	struct wsdisplay_fbinfo *wsdisp_info;
-	struct pxa2x0_lcd_screen *scr = sc->active;  /* ??? */
-
-	switch (cmd) {
-	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_PXALCD; /* XXX */
-		break;
-
-	case WSDISPLAYIO_GINFO:
-		wsdisp_info = (struct wsdisplay_fbinfo *)data;
-
-		wsdisp_info->height = sc->geometry->panel_height;
-		wsdisp_info->width = sc->geometry->panel_width;
-		wsdisp_info->depth = 16; /* XXX */
-		wsdisp_info->cmsize = 0;
-		break;
-
-	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
-		*(u_int *)data = WSDISPLAYIO_DEPTH_16;
-		break;
-
-	case WSDISPLAYIO_GETCMAP:
-	case WSDISPLAYIO_PUTCMAP:
-		return EINVAL;	/* XXX Colormap */
-
-	case WSDISPLAYIO_SVIDEO:
-	case WSDISPLAYIO_GVIDEO:
-		break;
-
-	case WSDISPLAYIO_GCURPOS:
-	case WSDISPLAYIO_SCURPOS:
-	case WSDISPLAYIO_GCURMAX:
-	case WSDISPLAYIO_GCURSOR:
-	case WSDISPLAYIO_SCURSOR:
-	default:
-		return -1;	/* not implemented */
-
-        case WSDISPLAYIO_LINEBYTES:
-		*(u_int *)data = scr->rinfo.ri_stride;
-		break;
-	}
-	return (0);
-}
-
-paddr_t
-pxa2x0_lcd_mmap(void *v, off_t offset, int prot)
-{
-	struct pxa2x0_lcd_softc *sc = v;
-	struct pxa2x0_lcd_screen *screen = sc->active;  /* ??? */
-
-	if ((offset & PAGE_MASK) != 0)
-		return (-1);
-
-	if (screen == NULL)
-		return (-1);
-
-	if (offset < 0 ||
-	    offset >= screen->rinfo.ri_stride * screen->rinfo.ri_height)
-		return (-1);
-
-	return (bus_dmamem_mmap(sc->dma_tag, screen->segs, screen->nsegs,
-	    offset, prot, BUS_DMA_WAITOK | BUS_DMA_COHERENT));
-}
-
 void
 pxa2x0_lcd_suspend(struct pxa2x0_lcd_softc *sc)
 {
 
-	if (sc->active != NULL) {
-		pxa2x0_lcd_stop_dma(sc->iot, sc->ioh);
-
+	if (sc->active) {
+		pxa2x0_lcd_stop_dma(sc);
 		pxa2x0_clkman_config(CKEN_LCD, 0);
 	}
 }
@@ -837,10 +660,9 @@ void
 pxa2x0_lcd_resume(struct pxa2x0_lcd_softc *sc)
 {
 
-	if (sc->active != NULL) {
-		pxa2x0_lcd_initialize(sc->iot, sc->ioh, sc->geometry,
-		    pxa2x0_clkman_config);
-		pxa2x0_lcd_start_dma(sc->iot, sc->ioh, sc->active);
+	if (sc->active) {
+		pxa2x0_lcd_initialize(sc, sc->geometry);
+		pxa2x0_lcd_start_dma(sc, sc->active);
 	}
 }
 
@@ -860,3 +682,290 @@ pxa2x0_lcd_power(int why, void *v)
 		break;
 	}
 }
+
+#if NWSDISPLAY > 0
+/*
+ * Initialize struct wsscreen_descr based on values calculated by 
+ * raster operation subsystem.
+ */
+int
+pxa2x0_lcd_setup_wsscreen(struct pxa2x0_wsscreen_descr *descr,
+    const struct lcd_panel_geometry *geom,
+    const char *fontname)
+{
+	int width = geom->panel_width;
+	int height = geom->panel_height;
+	int cookie = -1;
+	struct rasops_info rinfo;
+
+	memset(&rinfo, 0, sizeof rinfo);
+
+	if (fontname) {
+		wsfont_init();
+		cookie = wsfont_find(fontname, 0, 0, 0, 
+		    WSDISPLAY_FONTORDER_L2R, WSDISPLAY_FONTORDER_L2R);
+		if (cookie < 0 ||
+		    wsfont_lock(cookie, &rinfo.ri_font))
+			return -1;
+	}
+	else {
+		/* let rasops_init() choose any font */
+	}
+
+	/* let rasops_init calculate # of cols and rows in character */
+	rinfo.ri_flg = 0;
+	rinfo.ri_depth = descr->depth;
+	rinfo.ri_bits = NULL;
+	rinfo.ri_width = width;
+	rinfo.ri_height = height;
+	rinfo.ri_stride = width * rinfo.ri_depth / 8;
+#ifdef	CPU_XSCALE_PXA270
+	if (rinfo.ri_depth > 16)
+		rinfo.ri_stride = width * 4;
+#endif
+	rinfo.ri_wsfcookie = cookie;
+
+	rasops_init(&rinfo, 100, 100);
+
+	descr->c.nrows = rinfo.ri_rows;
+	descr->c.ncols = rinfo.ri_cols;
+	descr->c.capabilities = rinfo.ri_caps;
+
+	return cookie;
+}
+
+int
+pxa2x0_lcd_show_screen(void *v, void *cookie, int waitok,
+    void (*cb)(void *, int, int), void *cbarg)
+{
+	struct pxa2x0_lcd_softc *sc = v;
+	struct pxa2x0_lcd_screen *scr = cookie, *old;
+	
+	old = sc->active;
+	if (old == scr)
+		return 0;
+
+	if (old)
+		pxa2x0_lcd_stop_dma(sc);
+	
+	pxa2x0_lcd_start_dma(sc, scr);
+
+	sc->active = scr;
+	return 0;
+}
+
+int
+pxa2x0_lcd_alloc_screen(void *v, const struct wsscreen_descr *_type,
+    void **cookiep, int *curxp, int *curyp, long *attrp)
+{
+	struct pxa2x0_lcd_softc *sc = v;
+	struct pxa2x0_lcd_screen *scr;
+	const struct pxa2x0_wsscreen_descr *type =
+		(const struct pxa2x0_wsscreen_descr *)_type;
+	int error;
+
+	error = pxa2x0_lcd_new_screen(sc, type->depth, &scr);
+	if (error)
+		return error;
+
+	/*
+	 * initialize raster operation for this screen.
+	 */
+	scr->rinfo.ri_flg = 0;
+	scr->rinfo.ri_depth = type->depth;
+	scr->rinfo.ri_bits = scr->buf_va;
+	scr->rinfo.ri_width = sc->geometry->panel_width;
+	scr->rinfo.ri_height = sc->geometry->panel_height;
+	scr->rinfo.ri_stride = scr->rinfo.ri_width * scr->rinfo.ri_depth / 8;
+#ifdef CPU_XSCALE_PXA270
+	if (scr->rinfo.ri_depth > 16)
+		scr->rinfo.ri_stride = scr->rinfo.ri_width * 4;
+#endif
+	scr->rinfo.ri_wsfcookie = -1;	/* XXX */
+
+	rasops_init(&scr->rinfo, type->c.nrows, type->c.ncols);
+
+	(*scr->rinfo.ri_ops.allocattr)(&scr->rinfo, 0, 0, 0, attrp);
+
+	*cookiep = scr;
+	*curxp = 0;
+	*curyp = 0;
+
+	return 0;
+}
+
+void
+pxa2x0_lcd_free_screen(void *v, void *cookie)
+{
+	struct pxa2x0_lcd_softc *sc = v;
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	LIST_REMOVE(scr, link);
+	sc->n_screens--;
+	if (scr == sc->active) {
+		/* at first, we need to stop LCD DMA */
+		sc->active = NULL;
+
+		printf("lcd_free on active screen\n");
+
+		pxa2x0_lcd_stop_dma(sc);
+	}
+
+	if (scr->buf_va)
+		bus_dmamem_unmap(sc->dma_tag, scr->buf_va, scr->map_size);
+	if (scr->nsegs > 0)
+		bus_dmamem_free(sc->dma_tag, scr->segs, scr->nsegs);
+	free(scr, M_DEVBUF);
+}
+
+int
+pxa2x0_lcd_ioctl(void *v, void *vs, u_long cmd, void *data, int flag,
+	struct lwp *l)
+{
+	struct pxa2x0_lcd_softc *sc = v;
+	struct pxa2x0_lcd_screen *scr = sc->active;  /* ??? */
+	struct wsdisplay_fbinfo *wsdisp_info;
+	uint32_t ccr0;
+
+	switch (cmd) {
+	case WSDISPLAYIO_GTYPE:
+		*(int *)data = WSDISPLAY_TYPE_PXALCD;
+		return 0;
+
+	case WSDISPLAYIO_GINFO:
+		wsdisp_info = (struct wsdisplay_fbinfo *)data;
+		wsdisp_info->height = sc->geometry->panel_height;
+		wsdisp_info->width = sc->geometry->panel_width;
+		wsdisp_info->depth = scr->depth;
+		wsdisp_info->cmsize = 0;
+		return 0;
+
+	case WSDISPLAYIO_LINEBYTES:
+		*(u_int *)data = scr->rinfo.ri_stride;
+		return 0;
+
+	case WSDISPLAYIO_GETCMAP:
+	case WSDISPLAYIO_PUTCMAP:
+		return EPASSTHROUGH;	/* XXX Colormap */
+
+	case WSDISPLAYIO_SVIDEO:
+		if (*(int *)data == WSDISPLAYIO_VIDEO_ON) {
+		  /* turn it on */
+		}
+		else {
+		  /* start LCD shutdown */
+		  /* sleep until interrupt */
+		}
+		return 0;
+
+	case WSDISPLAYIO_GVIDEO:
+		ccr0 = bus_space_read_4(sc->iot, sc->ioh, LCDC_LCCR0);
+		*(u_int *)data = (ccr0 & (LCCR0_ENB|LCCR0_DIS)) == LCCR0_ENB ?
+		    WSDISPLAYIO_VIDEO_ON : WSDISPLAYIO_VIDEO_OFF;
+		return 0;
+
+	case WSDISPLAYIO_GCURPOS:
+	case WSDISPLAYIO_SCURPOS:
+	case WSDISPLAYIO_GCURMAX:
+	case WSDISPLAYIO_GCURSOR:
+	case WSDISPLAYIO_SCURSOR:
+		return EPASSTHROUGH;	/* XXX */
+	}
+
+	return EPASSTHROUGH;
+}
+
+paddr_t
+pxa2x0_lcd_mmap(void *v, void *vs, off_t offset, int prot)
+{
+	struct pxa2x0_lcd_softc *sc = v;
+	struct pxa2x0_lcd_screen *scr = sc->active;  /* ??? */
+
+	if (scr == NULL)
+		return -1;
+
+	if (offset < 0 ||
+	    offset >= scr->rinfo.ri_stride * scr->rinfo.ri_height)
+		return -1;
+
+	return bus_dmamem_mmap(sc->dma_tag, scr->segs, scr->nsegs,
+	    offset, prot, BUS_DMA_WAITOK|BUS_DMA_COHERENT);
+}
+
+
+static void
+pxa2x0_lcd_cursor(void *cookie, int on, int row, int col)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	(*scr->rinfo.ri_ops.cursor)(&scr->rinfo, on, row, col);
+}
+
+static int
+pxa2x0_lcd_mapchar(void *cookie, int c, unsigned int *cp)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	return (*scr->rinfo.ri_ops.mapchar)(&scr->rinfo, c, cp);
+}
+
+static void
+pxa2x0_lcd_putchar(void *cookie, int row, int col, u_int uc, long attr)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	(*scr->rinfo.ri_ops.putchar)(&scr->rinfo, row, col, uc, attr);
+}
+
+static void
+pxa2x0_lcd_copycols(void *cookie, int row, int src, int dst, int num)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	(*scr->rinfo.ri_ops.copycols)(&scr->rinfo, row, src, dst, num);
+}
+
+static void
+pxa2x0_lcd_erasecols(void *cookie, int row, int col, int num, long attr)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	(*scr->rinfo.ri_ops.erasecols)(&scr->rinfo, row, col, num, attr);
+}
+
+static void
+pxa2x0_lcd_copyrows(void *cookie, int src, int dst, int num)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	(*scr->rinfo.ri_ops.copyrows)(&scr->rinfo, src, dst, num);
+}
+
+static void
+pxa2x0_lcd_eraserows(void *cookie, int row, int num, long attr)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	(*scr->rinfo.ri_ops.eraserows)(&scr->rinfo, row, num, attr);
+}
+
+static int
+pxa2x0_lcd_alloc_attr(void *cookie, int fg, int bg, int flg, long *attr)
+{
+	struct pxa2x0_lcd_screen *scr = cookie;
+
+	return (*scr->rinfo.ri_ops.allocattr)(&scr->rinfo, fg, bg, flg, attr);
+}
+
+const struct wsdisplay_emulops pxa2x0_lcd_emulops = {
+	pxa2x0_lcd_cursor,
+	pxa2x0_lcd_mapchar,
+	pxa2x0_lcd_putchar,
+	pxa2x0_lcd_copycols,
+	pxa2x0_lcd_erasecols,
+	pxa2x0_lcd_copyrows,
+	pxa2x0_lcd_eraserows,
+	pxa2x0_lcd_alloc_attr
+};
+
+#endif /* NWSDISPLAY > 0 */

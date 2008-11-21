@@ -1,258 +1,290 @@
-/*	$OpenBSD: lm75.c,v 1.18 2008/04/17 19:01:48 deraadt Exp $	*/
-/*	$NetBSD: lm75.c,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
-/*
- * Copyright (c) 2006 Theo de Raadt <deraadt@openbsd.org>
- * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
- *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
+/*	$NetBSD: lm75.c,v 1.19 2008/04/06 20:25:59 cegger Exp $	*/
 
 /*
- * National Semiconductor LM75/LM76/LM77 temperature sensor.
+ * Copyright (c) 2003 Wasabi Systems, Inc.
+ * All rights reserved.
+ *
+ * Written by Jason R. Thorpe for Wasabi Systems, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed for the NetBSD Project by
+ *      Wasabi Systems, Inc.
+ * 4. The name of Wasabi Systems, Inc. may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: lm75.c,v 1.19 2008/04/06 20:25:59 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/sensors.h>
+
+#include <dev/sysmon/sysmonvar.h>
 
 #include <dev/i2c/i2cvar.h>
-
-#define	LM_MODEL_LM75	1
-#define	LM_MODEL_LM77	2
-#define	LM_MODEL_DS1775	3
-#define	LM_MODEL_LM75A	4
-#define	LM_MODEL_LM76	5
-
-#define LM_POLLTIME	3	/* 3s */
-
-#define	LM75_REG_TEMP			0x00
-#define	LM75_REG_CONFIG			0x01
-#define  LM75_CONFIG_SHUTDOWN		0x01
-#define  LM75_CONFIG_CMPINT		0x02
-#define  LM75_CONFIG_OSPOLARITY		0x04
-#define  LM75_CONFIG_FAULT_QUEUE_MASK	0x18
-#define  LM75_CONFIG_FAULT_QUEUE_1	(0 << 3)
-#define  LM75_CONFIG_FAULT_QUEUE_2	(1 << 3)
-#define  LM75_CONFIG_FAULT_QUEUE_4	(2 << 3)
-#define  LM75_CONFIG_FAULT_QUEUE_6	(3 << 3)
-#define  LM77_CONFIG_INTPOLARITY	0x08
-#define  LM77_CONFIG_FAULT_QUEUE_4	0x10
-#define  DS1755_CONFIG_RESOLUTION(i)	(9 + (((i) >> 5) & 3))
-#define	LM75_REG_THYST_SET_POINT	0x02
-#define	LM75_REG_TOS_SET_POINT		0x03
-#define	LM77_REG_TLOW			0x04
-#define	LM77_REG_THIGH			0x05
+#include <dev/i2c/lm75reg.h>
 
 struct lmtemp_softc {
-	struct device sc_dev;
 	i2c_tag_t sc_tag;
-	int	sc_addr;
-	int	sc_model;
-	int	sc_bits;
-	int	sc_ratio;
+	int sc_address;
 
-	struct ksensor sc_sensor;
-	struct ksensordev sc_sensordev;
+	struct sysmon_envsys *sc_sme;
+	envsys_data_t sc_sensor;
+
+	uint32_t (*sc_lmtemp_decode)(const uint8_t *);
 };
 
-int  lmtemp_match(struct device *, void *, void *);
-void lmtemp_attach(struct device *, struct device *, void *);
+static int  lmtemp_match(device_t, cfdata_t, void *);
+static void lmtemp_attach(device_t, device_t, void *);
 
-struct cfattach lmtemp_ca = {
-	sizeof(struct lmtemp_softc),
-	lmtemp_match,
-	lmtemp_attach
+CFATTACH_DECL_NEW(lmtemp, sizeof(struct lmtemp_softc),
+	lmtemp_match, lmtemp_attach, NULL, NULL);
+
+static void	lmtemp_refresh(struct sysmon_envsys *, envsys_data_t *);
+
+static int	lmtemp_config_write(struct lmtemp_softc *, uint8_t);
+static uint32_t lmtemp_decode_lm75(const uint8_t *);
+static uint32_t lmtemp_decode_ds75(const uint8_t *);
+static uint32_t lmtemp_decode_lm77(const uint8_t *);
+
+enum {
+	lmtemp_lm75 = 0,
+	lmtemp_ds75,
+	lmtemp_lm77,
+};
+static const struct {
+	int lmtemp_type;
+	const char *lmtemp_name;
+	int lmtemp_addrmask;
+	int lmtemp_addr;
+	uint32_t (*lmtemp_decode)(const uint8_t *);
+} lmtemptbl[] = {
+	{ lmtemp_lm75,	"LM75",
+	    LM75_ADDRMASK,	LM75_ADDR,	lmtemp_decode_lm75 },
+	{ lmtemp_ds75,	"DS75",
+	    LM75_ADDRMASK,	LM75_ADDR,	lmtemp_decode_ds75 },
+	{ lmtemp_lm77,	"LM77",
+	    LM77_ADDRMASK,	LM77_ADDR,	lmtemp_decode_lm77 },
+
+	{ -1,		NULL,
+	    0,			0,		NULL }
 };
 
-struct cfdriver lmtemp_cd = {
-	NULL, "lmtemp", DV_DULL
-};
-
-/*
- * Temperature on the LM75 is represented by a 9-bit two's complement
- * integer in steps of 0.5C.  The following examples are taken from
- * the LM75 data sheet:
- *
- *	+125C	0 1111 1010	0x0fa
- *	+25C	0 0011 0010	0x032
- *	+0.5C	0 0000 0001	0x001
- *	0C	0 0000 0000	0x000
- *	-0.5C	1 1111 1111	0x1ff
- *	-25C	1 1100 1110	0x1ce
- *	-55C	1 1001 0010	0x192
- *
- * Temperature on the LM75A is represented by an 11-bit two's complement
- * integer in steps of 0.125C.  The LM75A can be treated like an LM75 if
- * the extra precision is not required.  The following examples are
- * taken from the LM75A data sheet:
- *
- *	+127.000C	011 1111 1000	0x3f8
- *	+126.875C	011 1111 0111	0x3f7
- *	+126.125C	011 1111 0001	0x3f1
- *	+125.000C	011 1110 1000	0x3e8
- *	+25.000C	000 1100 1000	0x0c8
- *	+0.125C		000 0000 0001	0x001
- *	0C		000 0000 0000	0x000
- *	-0.125C		111 1111 1111	0x7ff
- *	-25.000C	111 0011 1000	0x738
- *	-54.875C	110 0100 1001	0x649
- *	-55.000C	110 0100 1000	0x648
- *
- * Temperature on the LM77 is represented by a 13-bit two's complement
- * integer in steps of 0.5C.  The LM76 is similar, but the integer is
- * in steps of 0.065C
- *
- * LM75 temperature word:
- *
- * MSB Bit7 Bit6 Bit5 Bit4 Bit3 Bit2 Bit1 Bit0 X X X X X X X
- * 15  14   13   12   11   10   9    8    7    6 5 4 3 2 1 0
- *
- *
- * LM75A temperature word:
- *
- * MSB Bit9 Bit8 Bit7 Bit6 Bit5 Bit4 Bit3 Bit2 Bit1 Bit0 X X X X X
- * 15  14   13   12   11   10   9    8    7    6    5    4 3 2 1 0
- *
- *
- * LM77 temperature word:
- *
- * Sign Sign Sign Sign MSB Bit7 Bit6 Bit5 Bit4 Bit3 Bit2 Bit1 Bit0 Status bits
- * 15   14   13   12   11  10   9    8    7    6    5    4    3    2 1 0
- */
-
-int  lmtemp_temp_read(struct lmtemp_softc *, uint8_t, int *);
-void lmtemp_refresh_sensor_data(void *);
-
-int
-lmtemp_match(struct device *parent, void *match, void *aux)
+static int
+lmtemp_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct i2c_attach_args *ia = aux;
+	int i;
 
-	if (strcmp(ia->ia_name, "lm75") == 0 ||
-	    strcmp(ia->ia_name, "lm76") == 0 ||
-	    strcmp(ia->ia_name, "lm77") == 0 ||
-	    strcmp(ia->ia_name, "ds1775") == 0 ||
-	    strcmp(ia->ia_name, "lm75a") == 0)
-		return (1);
-	return (0);
+	for (i = 0; lmtemptbl[i].lmtemp_type != -1 ; i++)
+		if (lmtemptbl[i].lmtemp_type == cf->cf_flags)
+			break;
+	if (lmtemptbl[i].lmtemp_type == -1)
+		return 0;
+
+	if ((ia->ia_addr & lmtemptbl[i].lmtemp_addrmask) ==
+	    lmtemptbl[i].lmtemp_addr)
+		return 1;
+
+	return 0;
 }
 
-void
-lmtemp_attach(struct device *parent, struct device *self, void *aux)
+static void
+lmtemp_attach(device_t parent, device_t self, void *aux)
 {
-	struct lmtemp_softc *sc = (struct lmtemp_softc *)self;
+	struct lmtemp_softc *sc = device_private(self);
 	struct i2c_attach_args *ia = aux;
-	u_int8_t cmd, data;
+	int i;
+
+	for (i = 0; lmtemptbl[i].lmtemp_type != -1 ; i++)
+		if (lmtemptbl[i].lmtemp_type ==
+		    device_cfdata(self)->cf_flags)
+			break;
 
 	sc->sc_tag = ia->ia_tag;
-	sc->sc_addr = ia->ia_addr;
+	sc->sc_address = ia->ia_addr;
 
-	printf(": %s", ia->ia_name);
+	aprint_naive(": Temperature Sensor\n");
+	aprint_normal(": %s Temperature Sensor\n", lmtemptbl[i].lmtemp_name);
 
-	/* If in SHUTDOWN mode, wake it up */
-	iic_acquire_bus(sc->sc_tag, 0);
-	cmd = LM75_REG_CONFIG;
-	if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
-	    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0)) {
-		iic_release_bus(sc->sc_tag, 0);
-		printf(", fails to respond\n");
+	/* Set the configuration of the LM75 to defaults. */
+	iic_acquire_bus(sc->sc_tag, I2C_F_POLL);
+	if (lmtemp_config_write(sc, 0) != 0) {
+		aprint_error_dev(self, "unable to write config register\n");
+		iic_release_bus(sc->sc_tag, I2C_F_POLL);
 		return;
 	}
-	if (data & LM75_CONFIG_SHUTDOWN) {
-		data &= ~LM75_CONFIG_SHUTDOWN;
-		if (iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP,
-		    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0)) {
-			printf(", cannot wake up\n");
-			iic_release_bus(sc->sc_tag, 0);
-			return;
-		}
-		printf(", woken up");
-	}
-	iic_release_bus(sc->sc_tag, 0);
+	iic_release_bus(sc->sc_tag, I2C_F_POLL);
 
-	sc->sc_model = LM_MODEL_LM75;
-	sc->sc_bits = 9;
-	sc->sc_ratio = 500000;		/* 0.5 degC for LSB */
-	if (strcmp(ia->ia_name, "lm77") == 0) {
-		sc->sc_model = LM_MODEL_LM77;
-		sc->sc_bits = 13;
-	} else if (strcmp(ia->ia_name, "lm76") == 0) {
-		sc->sc_model = LM_MODEL_LM76;
-		sc->sc_bits = 13;
-		sc->sc_ratio = 62500;	/* 0.0625 degC for LSB */
-	} else if (strcmp(ia->ia_name, "ds1775") == 0) {
-		sc->sc_model = LM_MODEL_DS1775;
-		//sc->sc_bits = DS1755_CONFIG_RESOLUTION(data);
-	} else if (strcmp(ia->ia_name, "lm75a") == 0) {
-		/* For simplicity's sake, treat the LM75A as an LM75 */
-		sc->sc_model = LM_MODEL_LM75A;
+	sc->sc_sme = sysmon_envsys_create();
+	/* Initialize sensor data. */
+	sc->sc_sensor.units =  ENVSYS_STEMP;
+	(void)strlcpy(sc->sc_sensor.desc, device_xname(self),
+	    sizeof(sc->sc_sensor.desc));
+	if (sysmon_envsys_sensor_attach(sc->sc_sme, &sc->sc_sensor)) {
+		sysmon_envsys_destroy(sc->sc_sme);
+		return;
 	}
 
-	printf("\n");
+	sc->sc_lmtemp_decode = lmtemptbl[i].lmtemp_decode;
 
-	/* Initialize sensor data */
-	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
-	    sizeof(sc->sc_sensordev.xname));
-	sc->sc_sensor.type = SENSOR_TEMP;
+	/* Hook into system monitor. */
+	sc->sc_sme->sme_name = device_xname(self);
+	sc->sc_sme->sme_cookie = sc;
+	sc->sc_sme->sme_refresh = lmtemp_refresh;
 
-	/* Hook into the hw.sensors sysctl */
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor);
-	sensordev_install(&sc->sc_sensordev);
-
-	sensor_task_register(sc, lmtemp_refresh_sensor_data, LM_POLLTIME);
+	if (sysmon_envsys_register(sc->sc_sme)) {
+		aprint_error_dev(self, "unable to register with sysmon\n");
+		sysmon_envsys_destroy(sc->sc_sme);
+	}
 }
 
-int
-lmtemp_temp_read(struct lmtemp_softc *sc, uint8_t which, int *valp)
+static int
+lmtemp_config_write(struct lmtemp_softc *sc, uint8_t val)
 {
-	u_int8_t cmd;
-	u_int16_t data = 0x0000;
+	uint8_t cmdbuf[2];
+
+	cmdbuf[0] = LM75_REG_CONFIG;
+	cmdbuf[1] = val;
+
+	return iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP,
+	    sc->sc_address, cmdbuf, 1, &cmdbuf[1], 1, I2C_F_POLL);
+}
+
+static int
+lmtemp_temp_read(struct lmtemp_softc *sc, uint8_t which, uint32_t *valp)
+{
 	int error;
+	uint8_t cmdbuf[1];
+	uint8_t buf[LM75_TEMP_LEN];
 
-	cmd = which;
+	cmdbuf[0] = which;
+
 	error = iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
-	    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0);
+	    sc->sc_address, cmdbuf, 1, buf, LM75_TEMP_LEN, 0);
 	if (error)
-		return (error);
+		return error;
 
-	/* Some chips return transient 0's.. we try next time */
-	if (data == 0x0000)
-		return (1);
-
-	/* convert to half-degrees C */
-	*valp = betoh16(data) / (1 << (16 - sc->sc_bits));
-	return (0);
+	*valp = sc->sc_lmtemp_decode(buf);
+	return 0;
 }
 
-void
-lmtemp_refresh_sensor_data(void *aux)
+static void
+lmtemp_refresh_sensor_data(struct lmtemp_softc *sc)
 {
-	struct lmtemp_softc *sc = aux;
-	int val;
+	uint32_t val;
 	int error;
 
 	error = lmtemp_temp_read(sc, LM75_REG_TEMP, &val);
 	if (error) {
 #if 0
-		printf("%s: unable to read temperature, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
+		aprint_error_dev(&sc->sc_dev, "unable to read temperature, error = %d\n",
+		    error);
 #endif
-		sc->sc_sensor.flags |= SENSOR_FINVALID;
+		sc->sc_sensor.state = ENVSYS_SINVALID;
 		return;
 	}
 
-	sc->sc_sensor.value = val * sc->sc_ratio + 273150000;
-	sc->sc_sensor.flags &= ~SENSOR_FINVALID;
+	sc->sc_sensor.value_cur = val;
+	sc->sc_sensor.state = ENVSYS_SVALID;
 }
+
+static void
+lmtemp_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
+{
+	struct lmtemp_softc *sc = sme->sme_cookie;
+
+	iic_acquire_bus(sc->sc_tag, 0);	/* also locks our instance */
+	lmtemp_refresh_sensor_data(sc);
+	iic_release_bus(sc->sc_tag, 0);	/* also unlocks our instance */
+}
+
+static uint32_t
+lmtemp_decode_lm75(const uint8_t *buf)
+{
+	int neg, temp;
+	uint32_t val;
+
+	if (buf[0] & 1) {
+		/* Below 0C */
+		temp = ~buf[1] + 1;
+		neg = 1;
+	} else {
+		temp = buf[1];
+		neg = 0;
+	}
+
+	/* Temp is given in 1/2 deg. C, we convert to uK. */
+	val = ((neg ? -temp : temp) / 2) * 1000000 + 273150000;
+	if (temp & 1) {
+		if (neg)
+			val -= 500000;
+		else
+			val += 500000;
+	}
+
+	return val;
+}
+
+static uint32_t
+lmtemp_decode_ds75(const uint8_t *buf)
+{
+	int temp;
+
+	/*
+	 * Sign-extend the MSB byte, and add in the fractions of a
+	 * degree contained in the LSB (precision 1/16th DegC).
+	 */
+	temp = (int8_t)buf[0];
+	temp = (temp << 4) | ((buf[1] >> 4) & 0xf);
+
+	/*
+	 * Conversion to uK is simple.
+	 */
+	return (temp * 62500 + 273150000);
+}
+
+static uint32_t
+lmtemp_decode_lm77(const uint8_t *buf)
+{
+	int temp;
+	uint32_t val;
+
+	/*
+	 * Describe each bits of temperature registers on LM77.
+	 *   D15 - D12:	Sign
+	 *   D11 - D3 :	Bit8(MSB) - Bit0
+	 */
+	temp = (int8_t)buf[0];
+	temp = (temp << 5) | ((buf[1] >> 3) & 0x1f);
+
+	/* Temp is given in 1/2 deg. C, we convert to uK. */
+	val = temp * 500000 + 273150000;
+
+	return val;
+}
+

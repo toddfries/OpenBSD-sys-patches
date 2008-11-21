@@ -1,35 +1,7 @@
-/*	$OpenBSD: com_pcmcia.c,v 1.47 2008/05/21 18:49:47 kettenis Exp $	*/
-/*	$NetBSD: com_pcmcia.c,v 1.15 1998/08/22 17:47:58 msaitoh Exp $	*/
+/*	$NetBSD: com_pcmcia.c,v 1.59 2008/08/27 05:39:01 christos Exp $	 */
 
-/*
- * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name(s) of the author(s) nor the name OpenBSD
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR(S) BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2004 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -43,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,10 +60,13 @@
  *	@(#)com.c	7.5 (Berkeley) 5/16/91
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: com_pcmcia.c,v 1.59 2008/08/27 05:39:01 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/ioctl.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/user.h>
@@ -107,72 +75,59 @@
 #include <sys/uio.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/types.h>
 #include <sys/device.h>
 
-#include <machine/intr.h>
-#include <machine/bus.h>
+#include <sys/intr.h>
+#include <sys/bus.h>
 
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciareg.h>
 #include <dev/pcmcia/pcmciadevs.h>
 
-#include "com.h"
-
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
-#include <dev/ic/ns16550reg.h>
 
 #include <dev/isa/isareg.h>
 
-#define	com_lcr		com_cfcr
-
-/* Devices that we need to match by CIS strings */
-struct com_pcmcia_product {
-	char *cis1_info[4];
-} com_pcmcia_prod[] = {
-	{ PCMCIA_CIS_MEGAHERTZ_XJ2288 },
-	{ PCMCIA_CIS_NOVATEL_NRM6831 },
-};
-
-int com_pcmcia_match(struct device *, void *, void *);
-void com_pcmcia_attach(struct device *, struct device *, void *);
-int com_pcmcia_detach(struct device *, int);
-void com_pcmcia_cleanup(void *);
-int com_pcmcia_activate(struct device *, enum devact);
+int com_pcmcia_match(device_t, cfdata_t , void *);
+int com_pcmcia_validate_config(struct pcmcia_config_entry *);
+void com_pcmcia_attach(device_t, device_t, void *);
+int com_pcmcia_detach(device_t, int);
 
 int com_pcmcia_enable(struct com_softc *);
 void com_pcmcia_disable(struct com_softc *);
-int com_pcmcia_enable1(struct com_softc *);
-void com_pcmcia_disable1(struct com_softc *);
 
 struct com_pcmcia_softc {
 	struct com_softc sc_com;		/* real "com" softc */
 
 	/* PCMCIA-specific goo */
-	struct pcmcia_io_handle sc_pcioh;	/* PCMCIA i/o space info */
-	int sc_io_window;			/* our i/o window */
 	struct pcmcia_function *sc_pf;		/* our PCMCIA function */
 	void *sc_ih;				/* interrupt handler */
+	int sc_attached;
 };
 
-struct cfattach com_pcmcia_ca = {
-	sizeof(struct com_pcmcia_softc), com_pcmcia_match, com_pcmcia_attach,
-	com_pcmcia_detach, com_pcmcia_activate
+CFATTACH_DECL_NEW(com_pcmcia, sizeof(struct com_pcmcia_softc),
+    com_pcmcia_match, com_pcmcia_attach, com_pcmcia_detach, com_activate);
+
+static const struct pcmcia_product com_pcmcia_products[] = {
+	{ PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+	  PCMCIA_CIS_MEGAHERTZ_XJ2288 },
+	{ PCMCIA_VENDOR_TDK, PCMCIA_PRODUCT_TDK_BLUETOOTH_PCCARD,
+	  PCMCIA_CIS_INVALID },
 };
+static const size_t com_pcmcia_nproducts =
+    sizeof(com_pcmcia_products) / sizeof(com_pcmcia_products[0]);
 
 int
-com_pcmcia_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+com_pcmcia_match(device_t parent, cfdata_t match, void *aux)
 {
+	int comportmask;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
-	int i, j, comportmask;
 
 	/* 1. Does it claim to be a serial device? */
 	if (pa->pf->function == PCMCIA_FUNCTION_SERIAL)
-	    return 1;
+		return 1;
 
 	/* 2. Does it have all four 'standard' port ranges? */
 	comportmask = 0;
@@ -197,222 +152,135 @@ com_pcmcia_match(parent, match, aux)
 		return 1;
 
 	/* 3. Is this a card we know about? */
-	for (i = 0; i < sizeof(com_pcmcia_prod)/sizeof(com_pcmcia_prod[0]);
-	    i++) {
-		for (j = 0; j < 4; j++)
-			if (com_pcmcia_prod[i].cis1_info[j] &&
-			    pa->card->cis1_info[j] &&
-			    strcmp(pa->card->cis1_info[j],
-			    com_pcmcia_prod[i].cis1_info[j]))
-				break;
-		if (j == 4)
-			return 1;
-	}
+	if (pcmcia_product_lookup(pa, com_pcmcia_products, com_pcmcia_nproducts,
+	    sizeof(com_pcmcia_products[0]), NULL))
+		return 1;
 
 	return 0;
 }
 
 int
-com_pcmcia_activate(dev, act)
-	struct device *dev;
-	enum devact act;
+com_pcmcia_validate_config(struct pcmcia_config_entry *cfe)
 {
-	struct com_pcmcia_softc *sc = (void *) dev;
-	int s;
-
-	s = spltty();
-	switch (act) {
-	case DVACT_ACTIVATE:
-		pcmcia_function_enable(sc->sc_pf);
-		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_TTY,
-		    comintr, sc, sc->sc_com.sc_dev.dv_xname);
-		break;
-
-	case DVACT_DEACTIVATE:
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
-		pcmcia_function_disable(sc->sc_pf);
-		break;
-	}
-	splx(s);
+	if (cfe->iftype != PCMCIA_IFTYPE_IO ||
+	    cfe->num_iospace != 1)
+		return (EINVAL);
+	/* Some cards have a memory space, but we don't use it. */
+	cfe->num_memspace = 0;
 	return (0);
 }
 
 void
-com_pcmcia_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+com_pcmcia_attach(device_t parent, device_t self, void *aux)
 {
-	struct com_pcmcia_softc *psc = (void *) self;
+	struct com_pcmcia_softc *psc = device_private(self);
 	struct com_softc *sc = &psc->sc_com;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
-	const char *intrstr;
-	int autoalloc = 0;
+	int error;
 
+	sc->sc_dev = self;
 	psc->sc_pf = pa->pf;
 
-retry:
-	/* find a cfe we can use */
-
-	for (cfe = SIMPLEQ_FIRST(&pa->pf->cfe_head); cfe;
-	     cfe = SIMPLEQ_NEXT(cfe, cfe_list)) {
-#if 0
-		/*
-		 * Some modem cards (e.g. Xircom CM33) also have
-		 * mem space.  Don't bother with this check.
-		 */
-		if (cfe->num_memspace != 0)
-			continue;
-#endif
-
-		if (cfe->num_iospace != 1)
-			continue;
-
-		if (!pcmcia_io_alloc(pa->pf,
-		    autoalloc ? 0 : cfe->iospace[0].start,
-		    cfe->iospace[0].length, COM_NPORTS, &psc->sc_pcioh)) {
-			goto found;
-		}
-	}
-	if (autoalloc == 0) {
-		autoalloc = 1;
-		goto retry;
-	} else if (!cfe) {
-		printf(": can't allocate i/o space\n");
+	error = pcmcia_function_configure(pa->pf, com_pcmcia_validate_config);
+	if (error) {
+		aprint_error_dev(self, "configure failed, error=%d\n", error);
 		return;
 	}
 
-found:
-	sc->sc_iot = psc->sc_pcioh.iot;
-	sc->sc_ioh = psc->sc_pcioh.ioh;
+	cfe = pa->pf->cfe;
+	COM_INIT_REGS(sc->sc_regs, cfe->iospace[0].handle.iot,
+	    cfe->iospace[0].handle.ioh, -1);
 
-	/* Enable the card. */
-	pcmcia_function_init(pa->pf, cfe);
-	if (com_pcmcia_enable1(sc))
-		printf(": function enable failed\n");
+	error = com_pcmcia_enable(sc);
+	if (error)
+		goto fail;
 
 	sc->enabled = 1;
 
-	/* map in the io space */
-
-	if (pcmcia_io_map(pa->pf, ((cfe->flags & PCMCIA_CFE_IO16) ?
-	    PCMCIA_WIDTH_IO16 : PCMCIA_WIDTH_IO8), 0, psc->sc_pcioh.size,
-	    &psc->sc_pcioh, &psc->sc_io_window)) {
-		printf(": can't map i/o space\n");
-		return;
-	}
-
-	printf(" port 0x%lx/%lu", psc->sc_pcioh.addr,
-	    (u_long)psc->sc_pcioh.size);
-
-	sc->sc_iobase = -1;
-	sc->enable = com_pcmcia_enable;
-	sc->disable = com_pcmcia_disable;
 	sc->sc_frequency = COM_FREQ;
 
-	sc->sc_hwflags = 0;
-	sc->sc_swflags = 0;
+	sc->enable = com_pcmcia_enable;
+	sc->disable = com_pcmcia_disable;
 
-	if (psc->sc_pf->sc->card.manufacturer == PCMCIA_VENDOR_AUDIOVOX &&
-	    psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_AUDIOVOX_RTM8000)
-		sc->sc_fifolen = 16;
+	aprint_normal("%s", device_xname(self));
 
 	com_attach_subr(sc);
 
-	/* establish the interrupt. */
-	psc->sc_ih = pcmcia_intr_establish(pa->pf, IPL_TTY, comintr, sc,
-	    sc->sc_dev.dv_xname);
-	intrstr = pcmcia_intr_string(psc->sc_pf, psc->sc_ih);
-	if (*intrstr)
-		printf(", %s", intrstr);
+	if (!pmf_device_register1(self, com_suspend, com_resume,
+	    com_cleanup))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 
-#ifdef notyet
 	sc->enabled = 0;
 
-	com_pcmcia_disable1(sc);
-#endif
+	psc->sc_attached = 1;
+	com_pcmcia_disable(sc);
+	return;
+
+fail:
+	pcmcia_function_unconfigure(pa->pf);
 }
 
 int
-com_pcmcia_detach(dev, flags)
-	struct device *dev;
-	int flags;
+com_pcmcia_detach(device_t self, int flags)
 {
-	struct com_pcmcia_softc *psc = (struct com_pcmcia_softc *)dev;
+	struct com_pcmcia_softc *psc = device_private(self);
 	int error;
 
-	/* Release all resources.  */
-	error = com_detach(dev, flags);
-	if (error)
-	    return (error);
+	if (!psc->sc_attached)
+		return (0);
 
-	pcmcia_io_unmap(psc->sc_pf, psc->sc_io_window);
-	pcmcia_io_free(psc->sc_pf, &psc->sc_pcioh);
+	pmf_device_deregister(self);
 
+	if ((error = com_detach(self, flags)) != 0)
+		return error;
+
+	pcmcia_function_unconfigure(psc->sc_pf);
 	return (0);
 }
 
 int
-com_pcmcia_enable(sc)
-	struct com_softc *sc;
+com_pcmcia_enable(struct com_softc *sc)
 {
 	struct com_pcmcia_softc *psc = (struct com_pcmcia_softc *) sc;
 	struct pcmcia_function *pf = psc->sc_pf;
+	int error;
 
 	/* establish the interrupt. */
-	psc->sc_ih = pcmcia_intr_establish(pf, IPL_TTY, comintr, sc,
-	    sc->sc_dev.dv_xname);
+	psc->sc_ih = pcmcia_intr_establish(pf, IPL_SERIAL, comintr, sc);
 	if (psc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev, "couldn't establish interrupt\n");
 		return (1);
 	}
-	return com_pcmcia_enable1(sc);
-}
 
-int
-com_pcmcia_enable1(sc)
-	struct com_softc *sc;
-{
-	struct com_pcmcia_softc *psc = (struct com_pcmcia_softc *) sc;
-	struct pcmcia_function *pf = psc->sc_pf;
-	int ret;
-
-	if ((ret = pcmcia_function_enable(pf)))
-	    return(ret);
+	if ((error = pcmcia_function_enable(pf)) != 0) {
+		pcmcia_intr_disestablish(pf, psc->sc_ih);
+		psc->sc_ih = 0;
+		return (error);
+	}
 
 	if ((psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3C562) ||
 	    (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3CXEM556) ||
-	    (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3CXEM556B)) {
+	    (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3CXEM556INT)) {
 		int reg;
 
 		/* turn off the ethernet-disable bit */
-
 		reg = pcmcia_ccr_read(pf, PCMCIA_CCR_OPTION);
 		if (reg & 0x08) {
-		    reg &= ~0x08;
-		    pcmcia_ccr_write(pf, PCMCIA_CCR_OPTION, reg);
+			reg &= ~0x08;
+			pcmcia_ccr_write(pf, PCMCIA_CCR_OPTION, reg);
 		}
 	}
 
-	return(ret);
+	return (0);
 }
 
 void
-com_pcmcia_disable(sc)
-	struct com_softc *sc;
-{
-	struct com_pcmcia_softc *psc = (struct com_pcmcia_softc *) sc;
-
-	pcmcia_intr_disestablish(psc->sc_pf, psc->sc_ih);
-	com_pcmcia_disable1(sc);
-}
-
-void
-com_pcmcia_disable1(sc)
-	struct com_softc *sc;
+com_pcmcia_disable(struct com_softc *sc)
 {
 	struct com_pcmcia_softc *psc = (struct com_pcmcia_softc *) sc;
 
 	pcmcia_function_disable(psc->sc_pf);
+	pcmcia_intr_disestablish(psc->sc_pf, psc->sc_ih);
+	psc->sc_ih = 0;
 }

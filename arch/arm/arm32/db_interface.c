@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.40 2006/04/05 00:38:51 uwe Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.45 2008/03/26 13:01:13 chris Exp $	*/
 
 /* 
  * Copyright (c) 1996 Scott K. Stevens
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.40 2006/04/05 00:38:51 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.45 2008/03/26 13:01:13 chris Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -157,9 +157,9 @@ kdb_trap(int type, db_regs_t *regs)
 
 	s = splhigh();
 	db_active++;
-	cnpollc(TRUE);
+	cnpollc(true);
 	db_trap(type, 0/*code*/);
-	cnpollc(FALSE);
+	cnpollc(false);
 	db_active--;
 	splx(s);
 
@@ -186,7 +186,7 @@ db_validate_address(vaddr_t addr)
 	else
 		pmap = p->p_vmspace->vm_map.pmap;
 
-	return (pmap_extract(pmap, addr, NULL) == FALSE);
+	return (pmap_extract(pmap, addr, NULL) == false);
 }
 
 /*
@@ -244,7 +244,7 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 
 	do {
 		/* Get the PDE of the current VA. */
-		if (pmap_get_pde_pte(pmap, (vaddr_t) dst, &pde, &pte) == FALSE)
+		if (pmap_get_pde_pte(pmap, (vaddr_t) dst, &pde, &pte) == false)
 			goto no_mapping;
 		switch ((oldpde = *pde) & L1_TYPE_MASK) {
 		case L1_TYPE_S:
@@ -365,12 +365,17 @@ cpu_Debugger(void)
 }
 
 const struct db_command db_machine_command_table[] = {
-	{ "frame",	db_show_frame_cmd,	0, NULL },
-	{ "panic",	db_show_panic_cmd,	0, NULL },
+	{ DDB_ADD_CMD("frame",	db_show_frame_cmd,	0,
+			"Displays the contents of a trapframe",
+			"[address]",
+			"   address:\taddress of trapfame to display")},
+	{ DDB_ADD_CMD("panic",	db_show_panic_cmd,	0,
+			"Displays the last panic string",
+		     	NULL,NULL) },
 #ifdef ARM32_DB_COMMANDS
 	ARM32_DB_COMMANDS,
 #endif
-	{ NULL, 	NULL, 			0, NULL }
+	{ DDB_ADD_CMD(NULL,     NULL,           0,NULL,NULL,NULL) }
 };
 
 int
@@ -462,6 +467,10 @@ branch_taken(u_int insn, u_int pc, db_regs_t *regs)
 	case 0x7:	/* ldr pc, [pc, reg, lsl #2] */
 		addr = db_fetch_reg(insn & 0xf, regs);
 		addr = pc + 8 + (addr << 2);
+		db_read_bytes(addr, 4, (char *)&addr);
+		return (addr);
+	case 0x5:	/* ldr pc, [reg] */
+		addr = db_fetch_reg((insn >> 16) & 0xf, regs);
 		db_read_bytes(addr, 4, (char *)&addr);
 		return (addr);
 	case 0x1:	/* mov pc, reg */

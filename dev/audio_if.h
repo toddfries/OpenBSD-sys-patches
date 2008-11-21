@@ -1,5 +1,4 @@
-/*	$OpenBSD: audio_if.h,v 1.26 2008/04/21 00:32:42 jakemsr Exp $	*/
-/*	$NetBSD: audio_if.h,v 1.24 1998/01/10 14:07:25 tv Exp $	*/
+/*	$NetBSD: audio_if.h,v 1.65 2008/03/04 18:23:44 cube Exp $	*/
 
 /*
  * Copyright (c) 1994 Havard Eidnes.
@@ -37,38 +36,146 @@
 
 #ifndef _SYS_DEV_AUDIO_IF_H_
 #define _SYS_DEV_AUDIO_IF_H_
+#include <sys/types.h>
+#include <sys/audioio.h>
+
+/* check we have an audio(4) configured into kernel */
+#if defined(_KERNEL_OPT)
+#include "audio.h"
+
+#if (NAUDIO == 0) && (NMIDI == 0) && (NMIDIBUS == 0)
+#error "No 'audio* at audiobus?' or 'midi* at midibus?' or similar configured"
+#endif
+
+#endif /* _KERNEL_OPT */
 
 /*
- * Generic interface to hardware driver.
+ * Interfaces for hardware drivers and MI audio.
  */
 
 struct audio_softc;
-struct audio_device;
-struct audio_encoding;
-struct mixer_devinfo;
-struct mixer_ctrl;
 
-struct audio_params {
-	u_long	sample_rate;			/* sample rate */
-	u_int	encoding;			/* mu-law, linear, etc */
-	u_int	precision;			/* bits/sample */
-	u_int	channels;			/* mono(1), stereo(2) */
-	/* Software en/decode functions, set if SW coding required by HW */
-	void	(*sw_code)(void *, u_char *, int);
-	int	factor;				/* coding space change */
-};
+/**
+ * audio stream format
+ */
+typedef struct audio_params {
+	u_int	sample_rate;	/* sample rate */
+	u_int	encoding;	/* e.g. mu-law, linear, etc */
+	u_int	precision;	/* bits/subframe */
+	u_int	validbits;	/* valid bits in a subframe */
+	u_int	channels;	/* mono(1), stereo(2) */
+} audio_params_t;
 
 /* The default audio mode: 8 kHz mono mu-law */
-extern struct audio_params audio_default;
+extern const struct audio_params audio_default;
 
+/**
+ * audio stream buffer
+ */
+typedef struct audio_stream {
+	size_t bufsize;		/* allocated memory */
+	uint8_t *start;		/* start of buffer area */
+	uint8_t *end;		/* end of valid buffer area */
+	uint8_t *inp;		/* address to be written next */
+	const uint8_t *outp;	/* address to be read next */
+	int used;		/* valid data size in this stream */
+	audio_params_t param;	/* represents this stream */
+	bool loop;
+} audio_stream_t;
+
+static __inline int
+audio_stream_get_space(const audio_stream_t *s)
+{
+	return (s->end - s->start) - s->used;
+}
+
+static __inline int
+audio_stream_get_used(const audio_stream_t *s)
+{
+	return s->used;
+}
+
+static __inline uint8_t *
+audio_stream_add_inp(audio_stream_t *s, uint8_t *v, int diff)
+{
+	s->used += diff;
+	v += diff;
+	if (v >= s->end)
+		v -= s->end - s->start;
+	return v;
+}
+
+static __inline const uint8_t *
+audio_stream_add_outp(audio_stream_t *s, const uint8_t *v, int diff)
+{
+	s->used -= diff;
+	v += diff;
+	if (v >= s->end)
+		v -= s->end - s->start;
+	return v;
+}
+
+/**
+ * an interface to fill a audio stream buffer
+ */
+typedef struct stream_fetcher {
+	int (*fetch_to)(struct stream_fetcher *, audio_stream_t *, int);
+} stream_fetcher_t;
+
+/**
+ * audio stream filter.
+ * This must be an extension of stream_fetcher_t.
+ */
+typedef struct stream_filter {
+/* public: */
+	stream_fetcher_t base;
+	void (*dtor)(struct stream_filter *);
+	void (*set_fetcher)(struct stream_filter *, stream_fetcher_t *);
+	void (*set_inputbuffer)(struct stream_filter *, audio_stream_t *);
+/* private: */
+	stream_fetcher_t *prev;
+	audio_stream_t *src;
+} stream_filter_t;
+
+/**
+ * factory method for stream_filter_t
+ */
+typedef stream_filter_t *stream_filter_factory_t(struct audio_softc *,
+	const audio_params_t *, const audio_params_t *);
+
+/**
+ * filter pipeline request
+ *
+ * filters[0] is the first filter for playing or the last filter for recording.
+ * The audio_params_t instance for the hardware is filters[0].param.
+ */
+#ifndef AUDIO_MAX_FILTERS
+# define AUDIO_MAX_FILTERS	8
+#endif
+typedef struct stream_filter_list {
+	void (*append)(struct stream_filter_list *, stream_filter_factory_t,
+		       const audio_params_t *);
+	void (*prepend)(struct stream_filter_list *, stream_filter_factory_t,
+			const audio_params_t *);
+	void (*set)(struct stream_filter_list *, int, stream_filter_factory_t,
+		    const audio_params_t *);
+	int req_size;
+	struct stream_filter_req {
+		stream_filter_factory_t *factory;
+		audio_params_t param; /* from-param for recording,
+					 to-param for playing */
+	} filters[AUDIO_MAX_FILTERS];
+} stream_filter_list_t;
+
+struct malloc_type;
 struct audio_hw_if {
 	int	(*open)(void *, int);	/* open hardware */
-	void	(*close)(void *);		/* close hardware */
-	int	(*drain)(void *);		/* Optional: drain buffers */
+	void	(*close)(void *);	/* close hardware */
+	int	(*drain)(void *);	/* Optional: drain buffers */
 
 	/* Encoding. */
 	/* XXX should we have separate in/out? */
-	int	(*query_encoding)(void *, struct audio_encoding *);
+	int	(*query_encoding)(void *, audio_encoding_t *);
 
 	/* Set the audio encoding parameters (record and play).
 	 * Return 0 on success, or an error code if the
@@ -76,11 +183,12 @@ struct audio_hw_if {
 	 * The values in the params struct may be changed (e.g. rounding
 	 * to the nearest sample rate.)
 	 */
-	int	(*set_params)(void *, int, int, struct audio_params *,
-		    struct audio_params *);
+	int	(*set_params)(void *, int, int, audio_params_t *,
+		    audio_params_t *, stream_filter_list_t *,
+		    stream_filter_list_t *);
 
 	/* Hardware may have some say in the blocksize to choose */
-	int	(*round_blocksize)(void *, int);
+	int	(*round_blocksize)(void *, int, int, const audio_params_t *);
 
 	/*
 	 * Changing settings may require taking device out of "data mode",
@@ -95,8 +203,10 @@ struct audio_hw_if {
 	/* Start input/output routines. These usually control DMA. */
 	int	(*init_output)(void *, void *, int);
 	int	(*init_input)(void *, void *, int);
-	int	(*start_output)(void *, void *, int, void (*)(void *), void *);
-	int	(*start_input)(void *, void *, int, void (*)(void *), void *);
+	int	(*start_output)(void *, void *, int,
+				    void (*)(void *), void *);
+	int	(*start_input)(void *, void *, int,
+				   void (*)(void *), void *);
 	int	(*halt_output)(void *);
 	int	(*halt_input)(void *);
 
@@ -108,42 +218,43 @@ struct audio_hw_if {
 	int	(*setfd)(void *, int);
 
 	/* Mixer (in/out ports) */
-	int	(*set_port)(void *, struct mixer_ctrl *);
-	int	(*get_port)(void *, struct mixer_ctrl *);
+	int	(*set_port)(void *, mixer_ctrl_t *);
+	int	(*get_port)(void *, mixer_ctrl_t *);
 
-	int	(*query_devinfo)(void *, struct mixer_devinfo *);
+	int	(*query_devinfo)(void *, mixer_devinfo_t *);
 
 	/* Allocate/free memory for the ring buffer. Usually malloc/free. */
-	/* The _old interfaces have been deprecated and will not be
-	   called in newer kernels if the new interfaces are present */
-	void	*(*allocm)(void *, int, size_t, int, int);
-	void	(*freem)(void *, void *, int);
+	void	*(*allocm)(void *, int, size_t, struct malloc_type *, int);
+	void	(*freem)(void *, void *, struct malloc_type *);
 	size_t	(*round_buffersize)(void *, int, size_t);
 	paddr_t	(*mappage)(void *, void *, off_t, int);
 
 	int	(*get_props)(void *); /* device properties */
 
 	int	(*trigger_output)(void *, void *, void *, int,
-		    void (*)(void *), void *, struct audio_params *);
+		    void (*)(void *), void *, const audio_params_t *);
 	int	(*trigger_input)(void *, void *, void *, int,
-		    void (*)(void *), void *, struct audio_params *);
-	void	(*get_default_params)(void *, int, struct audio_params *);
+		    void (*)(void *), void *, const audio_params_t *);
+	int	(*dev_ioctl)(void *, u_long, void *, int, struct lwp *);
+	int	(*powerstate)(void *, int);
+#define	AUDIOPOWER_ON	1
+#define	AUDIOPOWER_OFF	0
 };
 
 struct audio_attach_args {
 	int	type;
-	void	*hwif;		/* either audio_hw_if * or midi_hw_if * */
+	const void *hwif;	/* either audio_hw_if * or midi_hw_if * */
 	void	*hdl;
 };
 #define	AUDIODEV_TYPE_AUDIO	0
 #define	AUDIODEV_TYPE_MIDI	1
 #define AUDIODEV_TYPE_OPL	2
 #define AUDIODEV_TYPE_MPU	3
-#define AUDIODEV_TYPE_RADIO	4
+#define AUDIODEV_TYPE_AUX	4
 
 /* Attach the MI driver(s) to the MD driver. */
-struct device *audio_attach_mi(struct audio_hw_if *, void *, struct device *);
-int	       audioprint(void *, const char *);
+device_t audio_attach_mi(const struct audio_hw_if *, void *, device_t);
+int	audioprint(void *, const char *);
 
 /* Device identity flags */
 #define SOUND_DEVICE		0

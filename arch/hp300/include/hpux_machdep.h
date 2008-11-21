@@ -1,8 +1,7 @@
-/*	$OpenBSD: hpux_machdep.h,v 1.8 2005/01/15 21:13:09 miod Exp $	*/
-/*	$NetBSD: hpux_machdep.h,v 1.8 1997/04/27 21:38:58 thorpej Exp $	*/
+/*	$NetBSD: hpux_machdep.h,v 1.23 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
- * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,19 +15,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -37,8 +29,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _MACHINE_HPUX_MACHDEP_H_
-#define _MACHINE_HPUX_MACHDEP_H_
+#ifndef _HP300_HPUX_MACHDEP_H_
+#define _HP300_HPUX_MACHDEP_H_
 
 /*
  * Information pushed on stack when a signal is delivered.
@@ -70,14 +62,13 @@ struct hpuxsigcontext {
 struct exec_package;
 struct exec_vmcmd;
 
-int	hpux_cpu_makecmds(struct proc *, struct exec_package *);
-int	hpux_cpu_vmcmd(struct proc *, struct exec_vmcmd *);
+int	hpux_cpu_makecmds(struct lwp *, struct exec_package *);
+int	hpux_cpu_vmcmd(struct lwp *, struct exec_vmcmd *);
 int	hpux_cpu_sysconf_arch(void);
-int	hpux_to_bsd_uoff(int *, int *, struct proc *);
+int	hpux_to_bsd_uoff(int *, int *, struct lwp *);
 
-void	hpux_sendsig(sig_t, int, int, u_long, int, union sigval);
-void	hpux_setregs(struct proc *, struct exec_package *,
-	    u_long, register_t *);
+void	hpux_sendsig(const ksiginfo_t *, const sigset_t *);
+void	hpux_setregs(struct lwp *, struct exec_package *, u_long);
 #endif /* _KERNEL */
 
-#endif /* ! _MACHINE_HPUX_MACHDEP_H_ */
+#endif /* ! _HP300_HPUX_MACHDEP_H_ */

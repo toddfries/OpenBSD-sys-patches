@@ -1,5 +1,4 @@
-/* $OpenBSD: mcpcia_dma.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
-/* $NetBSD: mcpcia_dma.c,v 1.15 2001/07/19 18:55:40 thorpej Exp $ */
+/* $NetBSD: mcpcia_dma.c,v 1.16 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998, 1999 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,9 +30,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define _ALPHA_BUS_DMA_PRIVATE
-
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: mcpcia_dma.c,v 1.16 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -49,8 +42,8 @@
 
 #include <uvm/uvm_extern.h>
 
+#define _ALPHA_BUS_DMA_PRIVATE
 #include <machine/bus.h>
-#include <machine/rpb.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -58,21 +51,21 @@
 #include <alpha/pci/mcpciavar.h>
 #include <alpha/pci/pci_kn300.h>
 
-bus_dma_tag_t mcpcia_dma_get_tag (bus_dma_tag_t, alpha_bus_t);
+bus_dma_tag_t mcpcia_dma_get_tag __P((bus_dma_tag_t, alpha_bus_t));
 
-int	mcpcia_bus_dmamap_load_sgmap (bus_dma_tag_t, bus_dmamap_t, void *,
-	    bus_size_t, struct proc *, int);
+int	mcpcia_bus_dmamap_load_sgmap __P((bus_dma_tag_t, bus_dmamap_t, void *,
+	    bus_size_t, struct proc *, int));
 
-int	mcpcia_bus_dmamap_load_mbuf_sgmap (bus_dma_tag_t, bus_dmamap_t,
-	    struct mbuf *, int);
+int	mcpcia_bus_dmamap_load_mbuf_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    struct mbuf *, int));
 
-int	mcpcia_bus_dmamap_load_uio_sgmap (bus_dma_tag_t, bus_dmamap_t,
-	    struct uio *, int);
+int	mcpcia_bus_dmamap_load_uio_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    struct uio *, int));
 
-int	mcpcia_bus_dmamap_load_raw_sgmap (bus_dma_tag_t, bus_dmamap_t,
-	    bus_dma_segment_t *, int, bus_size_t, int);
+int	mcpcia_bus_dmamap_load_raw_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    bus_dma_segment_t *, int, bus_size_t, int));
 
-void	mcpcia_bus_dmamap_unload_sgmap (bus_dma_tag_t, bus_dmamap_t);
+void	mcpcia_bus_dmamap_unload_sgmap __P((bus_dma_tag_t, bus_dmamap_t));
 
 /*
  * Direct-mapped window: 2G at 2G
@@ -204,6 +197,7 @@ mcpcia_dma_init(ccp)
 	/*
 	 * Disable windows first.
 	 */
+
 	REGVAL(MCPCIA_W0_BASE(ccp)) = 0;
 	REGVAL(MCPCIA_W1_BASE(ccp)) = 0;
 	REGVAL(MCPCIA_W2_BASE(ccp)) = 0;
@@ -230,6 +224,7 @@ mcpcia_dma_init(ccp)
 	/*
 	 * Set up window 1 as a 2 GB Direct-mapped window starting at 2GB.
 	 */
+
 	REGVAL(MCPCIA_W1_MASK(ccp)) = MCPCIA_WMASK_2G;
 	REGVAL(MCPCIA_T1_BASE(ccp)) = 0;
 	alpha_mb();
@@ -240,6 +235,7 @@ mcpcia_dma_init(ccp)
 	/*
 	 * Set up window 2 as a 1G SGMAP-mapped window starting at 1G.
 	 */
+
 	REGVAL(MCPCIA_W2_MASK(ccp)) = MCPCIA_WMASK_1G;
 	REGVAL(MCPCIA_T2_BASE(ccp)) =
 		ccp->cc_pci_sgmap.aps_ptpa >> MCPCIA_TBASEX_SHIFT;

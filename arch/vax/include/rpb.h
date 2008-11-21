@@ -1,5 +1,4 @@
-/*	$OpenBSD: rpb.h,v 1.10 2002/06/11 09:36:24 hugh Exp $ */
-/*	$NetBSD: rpb.h,v 1.6 1998/07/01 09:37:11 ragge Exp $ */
+/*	$NetBSD: rpb.h,v 1.9 2008/03/11 05:34:02 matt Exp $ */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -32,6 +31,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#ifndef _VAX_RPB_H_
+#define _VAX_RPB_H_
 
 /*
  * Look at "VAX/VMS Internals and Data Structures" around page 907
@@ -40,7 +41,7 @@
 
 struct rpb {		/* size		description */
 	struct rpb *rpb_base;	/* 4  physical base address of block */
-	void	(*rpb_restart)(void);/* 4  physical address of restart routine */
+	void  (*rpb_restart)(void);/* 4  physical address of restart routine */
 	long	rpb_chksum;/* 4  checksum of first 31 longwords of restart */
 	long	rpb_rstflg;	/* 4  Restart in progress flag */
 	long	rpb_haltpc;	/* 4  PC at HALT/restart */
@@ -114,7 +115,7 @@ struct rpb {		/* size		description */
 #define	BDEV_RD		36	/* ST506/MFM disk on HDC9224 */
 #define	BDEV_ST		37	/* SCSI tape on NCR5380 */
 #define	BDEV_SD		42	/* SCSI disk on NCR5380 */
-#define BDEV_SDN	46	/* SCSI disk on NCR5394 */
+#define	BDEV_SDN	46	/* SCSI disk on NCR5394 (VS4000) */
 #define	BDEV_CNSL	64
 #define	BDEV_QE		96
 #define	BDEV_DE		97
@@ -122,8 +123,8 @@ struct rpb {		/* size		description */
 #define	BDEV_LE		99
 #define	BDEV_ZE		100
 
-#define	BDEV_NET 	BDEV_QE		/* first network BDEV */
-
 #ifdef _KERNEL
 extern struct rpb rpb;
 #endif
+
+#endif /* _VAX_RPB_H_ */

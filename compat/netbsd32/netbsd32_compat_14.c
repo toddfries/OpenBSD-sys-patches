@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_compat_14.c,v 1.13 2006/07/23 22:06:09 ad Exp $	*/
+/*	$NetBSD: netbsd32_compat_14.c,v 1.21 2007/12/20 23:03:01 dsl Exp $	*/
 
 /*
  * Copyright (c) 1999 Eduardo E. Horvath
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_14.c,v 1.13 2006/07/23 22:06:09 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_14.c,v 1.21 2007/12/20 23:03:01 dsl Exp $");
 
 #include <sys/param.h>
 #include <sys/ipc.h>
@@ -51,7 +51,6 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_14.c,v 1.13 2006/07/23 22:06:09 ad E
 #define	SYSVSHM
 #endif
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <compat/netbsd32/netbsd32.h>
 #include <compat/netbsd32/netbsd32_syscallargs.h>
@@ -75,9 +74,7 @@ static inline void
 native_to_netbsd32_shmid_ds14(struct shmid_ds *, struct netbsd32_shmid_ds14 *);
 
 static inline void
-netbsd32_ipc_perm14_to_native(operm, perm)
-	struct netbsd32_ipc_perm14 *operm;
-	struct ipc_perm *perm;
+netbsd32_ipc_perm14_to_native(struct netbsd32_ipc_perm14 *operm, struct ipc_perm *perm)
 {
 
 #define	CVT(x)	perm->x = operm->x
@@ -90,9 +87,7 @@ netbsd32_ipc_perm14_to_native(operm, perm)
 }
 
 static inline void
-native_to_netbsd32_ipc_perm14(perm, operm)
-	struct ipc_perm *perm;
-	struct netbsd32_ipc_perm14 *operm;
+native_to_netbsd32_ipc_perm14(struct ipc_perm *perm, struct netbsd32_ipc_perm14 *operm)
 {
 
 #define	CVT(x)	operm->x = perm->x
@@ -111,9 +106,7 @@ native_to_netbsd32_ipc_perm14(perm, operm)
 }
 
 static inline void
-netbsd32_msqid_ds14_to_native(omsqbuf, msqbuf)
-	struct netbsd32_msqid_ds14 *omsqbuf;
-	struct msqid_ds *msqbuf;
+netbsd32_msqid_ds14_to_native(struct netbsd32_msqid_ds14 *omsqbuf, struct msqid_ds *msqbuf)
 {
 
 	netbsd32_ipc_perm14_to_native(&omsqbuf->msg_perm, &msqbuf->msg_perm);
@@ -130,9 +123,7 @@ netbsd32_msqid_ds14_to_native(omsqbuf, msqbuf)
 }
 
 static inline void
-native_to_netbsd32_msqid_ds14(msqbuf, omsqbuf)
-	struct msqid_ds *msqbuf;
-	struct netbsd32_msqid_ds14 *omsqbuf;
+native_to_netbsd32_msqid_ds14(struct msqid_ds *msqbuf, struct netbsd32_msqid_ds14 *omsqbuf)
 {
 
 	native_to_netbsd32_ipc_perm14(&msqbuf->msg_perm, &omsqbuf->msg_perm);
@@ -154,9 +145,7 @@ native_to_netbsd32_msqid_ds14(msqbuf, omsqbuf)
 }
 
 static inline void
-netbsd32_semid_ds14_to_native(osembuf, sembuf)
-	struct netbsd32_semid_ds14 *osembuf;
-	struct semid_ds *sembuf;
+netbsd32_semid_ds14_to_native(struct netbsd32_semid_ds14 *osembuf, struct semid_ds *sembuf)
 {
 
 	netbsd32_ipc_perm14_to_native(&osembuf->sem_perm, &sembuf->sem_perm);
@@ -169,9 +158,7 @@ netbsd32_semid_ds14_to_native(osembuf, sembuf)
 }
 
 static inline void
-native_to_netbsd32_semid_ds14(sembuf, osembuf)
-	struct semid_ds *sembuf;
-	struct netbsd32_semid_ds14 *osembuf;
+native_to_netbsd32_semid_ds14(struct semid_ds *sembuf, struct netbsd32_semid_ds14 *osembuf)
 {
 
 	native_to_netbsd32_ipc_perm14(&sembuf->sem_perm, &osembuf->sem_perm);
@@ -184,9 +171,7 @@ native_to_netbsd32_semid_ds14(sembuf, osembuf)
 }
 
 static inline void
-netbsd32_shmid_ds14_to_native(oshmbuf, shmbuf)
-	struct netbsd32_shmid_ds14 *oshmbuf;
-	struct shmid_ds *shmbuf;
+netbsd32_shmid_ds14_to_native(struct netbsd32_shmid_ds14 *oshmbuf, struct shmid_ds *shmbuf)
 {
 
 	netbsd32_ipc_perm14_to_native(&oshmbuf->shm_perm, &shmbuf->shm_perm);
@@ -203,9 +188,7 @@ netbsd32_shmid_ds14_to_native(oshmbuf, shmbuf)
 }
 
 static inline void
-native_to_netbsd32_shmid_ds14(shmbuf, oshmbuf)
-	struct shmid_ds *shmbuf;
-	struct netbsd32_shmid_ds14 *oshmbuf;
+native_to_netbsd32_shmid_ds14(struct shmid_ds *shmbuf, struct netbsd32_shmid_ds14 *oshmbuf)
 {
 
 	native_to_netbsd32_ipc_perm14(&shmbuf->shm_perm, &oshmbuf->shm_perm);
@@ -225,16 +208,13 @@ native_to_netbsd32_shmid_ds14(shmbuf, oshmbuf)
  * the compat_14 system calls
  */
 int
-compat_14_netbsd32_msgctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+compat_14_netbsd32_msgctl(struct lwp *l, const struct compat_14_netbsd32_msgctl_args *uap, register_t *retval)
 {
-	struct compat_14_netbsd32_msgctl_args /* {
+	/* {
 		syscallarg(int) msqid;
 		syscallarg(int) cmd;
 		syscallarg(struct msqid_ds14 *) buf;
-	} */ *uap = v;
+	} */
 	struct msqid_ds msqbuf;
 	struct netbsd32_msqid_ds14 omsqbuf;
 	int cmd, error;
@@ -242,7 +222,7 @@ compat_14_netbsd32_msgctl(l, v, retval)
 	cmd = SCARG(uap, cmd);
 
 	if (cmd == IPC_SET) {
-		error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, buf)),
+		error = copyin(SCARG_P32(uap, buf),
 		    &omsqbuf, sizeof(omsqbuf));
 		if (error)
 			return (error);
@@ -255,24 +235,21 @@ compat_14_netbsd32_msgctl(l, v, retval)
 	if (error == 0 && cmd == IPC_STAT) {
 		native_to_netbsd32_msqid_ds14(&msqbuf, &omsqbuf);
 		error = copyout(&omsqbuf,
-		    (caddr_t)NETBSD32PTR64(SCARG(uap, buf)), sizeof(omsqbuf));
+		    SCARG_P32(uap, buf), sizeof(omsqbuf));
 	}
 
 	return (error);
 }
 
 int
-compat_14_netbsd32___semctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+compat_14_netbsd32___semctl(struct lwp *l, const struct compat_14_netbsd32___semctl_args *uap, register_t *retval)
 {
-	struct compat_14_netbsd32___semctl_args /* {
+	/* {
 		syscallarg(int) semid;
 		syscallarg(int) semnum;
 		syscallarg(int) cmd;
 		syscallarg(union __semun *) arg;
-	} */ *uap = v;
+	} */
 	union __semun arg;
 	struct semid_ds sembuf;
 	struct netbsd32_semid_ds14 osembuf;
@@ -295,7 +272,7 @@ compat_14_netbsd32___semctl(l, v, retval)
 	}
 
 	if (pass_arg != NULL) {
-		error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, arg)), &arg,
+		error = copyin(NETBSD32IPTR64(SCARG(uap, arg)), &arg,
 		    sizeof(arg));
 		if (error)
 			return (error);
@@ -319,16 +296,13 @@ compat_14_netbsd32___semctl(l, v, retval)
 }
 
 int
-compat_14_netbsd32_shmctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+compat_14_netbsd32_shmctl(struct lwp *l, const struct compat_14_netbsd32_shmctl_args *uap, register_t *retval)
 {
-	struct compat_14_netbsd32_shmctl_args /* {
+	/* {
 		syscallarg(int) shmid;
 		syscallarg(int) cmd;
 		syscallarg(struct netbsd32_shmid_ds14 *) buf;
-	} */ *uap = v;
+	} */
 	struct shmid_ds shmbuf;
 	struct netbsd32_shmid_ds14 oshmbuf;
 	int cmd, error;
@@ -336,8 +310,7 @@ compat_14_netbsd32_shmctl(l, v, retval)
 	cmd = SCARG(uap, cmd);
 
 	if (cmd == IPC_SET) {
-		error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, buf)),
-		    &oshmbuf, sizeof(oshmbuf));
+		error = copyin(SCARG_P32(uap, buf), &oshmbuf, sizeof(oshmbuf));
 		if (error)
 			return (error);
 		netbsd32_shmid_ds14_to_native(&oshmbuf, &shmbuf);
@@ -348,8 +321,7 @@ compat_14_netbsd32_shmctl(l, v, retval)
 
 	if (error == 0 && cmd == IPC_STAT) {
 		native_to_netbsd32_shmid_ds14(&shmbuf, &oshmbuf);
-		error = copyout(&oshmbuf,
-		    (caddr_t)NETBSD32PTR64(SCARG(uap, buf)), sizeof(oshmbuf));
+		error = copyout(&oshmbuf, SCARG_P32(uap, buf), sizeof(oshmbuf));
 	}
 
 	return (error);

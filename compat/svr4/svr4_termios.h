@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_termios.h,v 1.4 1998/02/10 15:01:43 niklas Exp $	 */
-/*	$NetBSD: svr4_termios.h,v 1.2 1994/11/18 02:54:21 christos Exp $	 */
+/*	$NetBSD: svr4_termios.h,v 1.7 2008/04/28 20:23:45 martin Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,19 +15,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef	_SVR4_TERMIOS_H_
@@ -52,7 +53,7 @@ struct svr4_termio {
 	u_short		c_oflag;
 	u_short		c_cflag;
 	u_short		c_lflag;
-	char		c_line;	
+	char		c_line;
 	u_char		c_cc[SVR4_NCC];
 };
 
@@ -132,9 +133,9 @@ struct svr4_termio {
 #define	SVR4_CBAUD	00000017
 #define	SVR4_CSIZE	00000060
 #define	SVR4_CS5	00000000
-#define	SVR4_CS6	00000020
+#define	SVR4_CS6	00000200
 #define	SVR4_CS7	00000040
-#define	SVR4_CS8	00000060
+#define	SVR4_CS8	00000006
 #define	SVR4_CSTOPB	00000100
 #define	SVR4_CREAD	00000200
 #define	SVR4_PARENB	00000400
@@ -197,7 +198,6 @@ struct svr4_winsize {
 	u_short	ws_ypixel;
 };
 
-
 #define	SVR4_B0		0
 #define	SVR4_B50	1
 #define	SVR4_B75	2
@@ -214,8 +214,6 @@ struct svr4_winsize {
 #define	SVR4_B9600	13
 #define	SVR4_B19200	14
 #define	SVR4_B38400	15
-#if 0
-/* XXX How do these fit in CBAUD? */
 #define	SVR4_B57600	16
 #define	SVR4_B76800	17
 #define	SVR4_B115200	18
@@ -223,6 +221,5 @@ struct svr4_winsize {
 #define	SVR4_B230400	20
 #define	SVR4_B307200	21
 #define	SVR4_B460800	22
-#endif
 
 #endif /* !_SVR4_TERMIOS_H_ */

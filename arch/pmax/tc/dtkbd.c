@@ -1,4 +1,4 @@
-/*	$NetBSD: dtkbd.c,v 1.6 2005/12/11 12:18:41 christos Exp $	*/
+/*	$NetBSD: dtkbd.c,v 1.8 2008/04/28 20:23:31 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dtkbd.c,v 1.6 2005/12/11 12:18:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dtkbd.c,v 1.8 2008/04/28 20:23:31 martin Exp $");
 
 #include "locators.h"
 
@@ -70,7 +63,7 @@ struct dtkbd_softc {
 int	dtkbd_match(struct device *, struct cfdata *, void *);
 void	dtkbd_attach(struct device *, struct device *, void *);
 int	dtkbd_enable(void *, int);
-int	dtkbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+int	dtkbd_ioctl(void *, u_long, void *, int, struct lwp *);
 void	dtkbd_cngetc(void *, u_int *, int *);
 void	dtkbd_cnpollc(void *, int);
 int	dtkbd_process_msg(struct dt_msg *, u_int *, int *);
@@ -192,7 +185,7 @@ dtkbd_cnpollc(void *v, int on)
 }
 
 int
-dtkbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
+dtkbd_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct dtkbd_softc *sc;
 

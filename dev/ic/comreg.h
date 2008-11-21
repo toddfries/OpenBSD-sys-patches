@@ -1,30 +1,5 @@
-/*	$OpenBSD: comreg.h,v 1.15 2006/07/31 11:06:30 mickey Exp $	*/
-/*	$NetBSD: comreg.h,v 1.8 1996/02/05 23:01:50 scottr Exp $	*/
+/*	$NetBSD: comreg.h,v 1.15 2008/04/28 22:00:01 matt Exp $	*/
 
-/*
- * Copyright (c) 1997 - 1998, Jason Downs.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR(S) BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
  * All rights reserved.
@@ -58,9 +33,7 @@
 
 #include <dev/ic/ns16550reg.h>
 
-#ifndef COM_FREQ		/* allow to be set externally */
 #define	COM_FREQ	1843200	/* 16-bit baud rate divisor */
-#endif
 #define	COM_TOLERANCE	30	/* baud rate tolerance, in 0.1% units */
 
 /* interrupt enable register */
@@ -68,7 +41,8 @@
 #define	IER_ETXRDY	0x2	/* Enable transmitter empty interrupt */
 #define	IER_ERLS	0x4	/* Enable line status interrupt */
 #define	IER_EMSC	0x8	/* Enable modem status interrupt */
-#define IER_SLEEP	0x10	/* Enable sleep mode */
+#define	IER_ERTS	0x40	/* Enable RTS interrupt */
+#define	IER_ECTS	0x80	/* Enable CTS interrupt */
 /* PXA2X0's ns16550 ports have extra bits in this register */
 #define	IER_ERXTOUT	0x10	/* Enable rx timeout interrupt */
 #define	IER_EUART	0x40	/* Enable UART */
@@ -92,28 +66,23 @@
 #define	FIFO_TRIGGER_4	0x40	/* ibid 4 */
 #define	FIFO_TRIGGER_8	0x80	/* ibid 8 */
 #define	FIFO_TRIGGER_14	0xc0	/* ibid 14 */
-/* ST16650 fifo control register */
-#define FIFO_RCV_TRIGGER_8	0x00
-#define FIFO_RCV_TRIGGER_16	0x40
-#define FIFO_RCV_TRIGGER_24	0x80
-#define FIFO_RCV_TRIGGER_28	0xc0
-#define FIFO_XMT_TRIGGER_16	0x00
-#define FIFO_XMT_TRIGGER_8	0x10
-#define FIFO_XMT_TRIGGER_24	0x20
-#define FIFO_XMT_TRIGGER_30	0x30
-/* XR16850 fifo control register */
-#define FIFO_RCV3_TRIGGER_8	FIFO_RCV_TRIGGER_8
-#define FIFO_RCV3_TRIGGER_16	FIFO_RCV_TRIGGER_16
-#define FIFO_RCV3_TRIGGER_56	0x80
-#define FIFO_RCV3_TRIGGER_60	0xc0
-#define FIFO_XMT3_TRIGGER_8	0x00
-#define FIFO_XMT3_TRIGGER_16	0x10
-#define FIFO_XMT3_TRIGGER_32	0x20
-#define FIFO_XMT3_TRIGGER_56	0x30
-/* TI16750 fifo control register */
-#define FIFO_ENABLE_64BYTE	0x20
+
+/* enhanced feature register */
+#define	EFR_AUTOCTS	0x80	/* Automatic CTS flow control */
+#define	EFR_AUTORTS	0x40	/* Automatic RTS flow control */
+#define	EFR_SPECIAL	0x20	/* Special char detect */
+#define	EFR_EFCR	0x10	/* Enhanced function control bit */
+#define	EFR_TXFLOWBOTH	0x0c	/* Automatic transmit XON/XOFF 1 and 2 */
+#define	EFR_TXFLOW1	0x08	/* Automatic transmit XON/XOFF 1 */
+#define	EFR_TXFLOW2	0x04	/* Automatic transmit XON/XOFF 2 */
+#define	EFR_TXFLOWNONE	0x00	/* No automatic XON/XOFF transmit */
+#define	EFR_RXFLOWBOTH	0x03	/* Automatic receive XON/XOFF 1 and 2 */
+#define	EFR_RXFLOW1	0x02	/* Automatic receive XON/XOFF 1 */
+#define	EFR_RXFLOW2	0x01	/* Automatic receive XON/XOFF 2 */
+#define	EFR_RXFLOWNONE	0x00	/* No automatic XON/XOFF receive */
 
 /* line control register */
+#define	LCR_EERS	0xBF	/* Enable access to Enhanced Register Set */
 #define	LCR_DLAB	0x80	/* Divisor latch access enable */
 #define	LCR_SBREAK	0x40	/* Break Control */
 #define	LCR_PZERO	0x38	/* Space parity */
@@ -127,10 +96,10 @@
 #define	LCR_7BITS	0x02	/* 7 bits */
 #define	LCR_6BITS	0x01	/* 6 bits */
 #define	LCR_5BITS	0x00	/* 5 bits */
-#define LCR_EFR		0xbf	/* ST16650/XR16850/OX16C950 EFR access enable */
 
 /* modem control register */
-#define	MCR_AFE		0x20	/* auto flow control */
+#define MCR_TCR_TLR	0x40	/* OMAP: enables access to the TCR & TLR regs */
+#define MCR_XONENABLE	0x20	/* OMAP XON_EN */
 #define	MCR_LOOPBACK	0x10	/* Loop test: echos from TX to RX */
 #define	MCR_IENABLE	0x08	/* Out2: enables UART interrupts */
 #define	MCR_DRS		0x04	/* Out1: resets some internal modems */
@@ -159,42 +128,21 @@
 #define	MSR_DDSR	0x02	/* DSR has changed state */
 #define	MSR_DCTS	0x01	/* CTS has changed state */
 
-/* enhanced features register */
-#define EFR_ECB		0x10	/* enhanced control bit */
-#define EFR_SCD		0x20	/* special character detect */
-#define EFR_RTS		0x40	/* RTS flow control */
-#define EFR_CTS		0x80	/* CTS flow control */
+/* OMAP mode definition register 1 */
+#define MDR1_FRAME_END_MODE		0x80
+#define MDR1_SIP_MODE			0x40
+#define MDR1_SCT			0x20
+#define MDR1_SET_TXIR			0x10
+#define MDR1_IR_SLEEP			0x08
+#define MDR1_MODE_DISABLE		0x07
+#define MDR1_MODE_FIR			0x05
+#define MDR1_MODE_MIR			0x04
+#define MDR1_MODE_UART_13X		0x03
+#define MDR1_MODE_UART_16X_AUTOBAUD	0x02
+#define MDR1_MODE_SIR			0x01
+#define MDR1_MODE_UART_16X		0x00
+#define MDR1_MODE_MASK			0x07
 
-/* enhanced FIFO control register */
-#define FCTL_MODE	0x80
-#define FCTL_SWAP	0x40
-#define FCTL_RS485	0x08
-#define FCTL_IrRxInv	0x04
-#define FCTL_TRIGGER2	0x10
-#define FCTL_TRIGGER3	0x20
 
-/* infrared selection register */
-#define ISR_XMITIR	0x01	/* transmitter SIR enable */
-#define ISR_RCVEIR	0x02	/* receiver SIR enable */
-#define ISR_XMODE	0x04	/* 1.6us transmit pulse width */
-#define ISR_TXPL	0x08	/* negative transmit data polarity */
-#define ISR_RXPL	0x10	/* negative receive data polarity */
-
-#ifdef COM_PXA2X0
-#define	COM_NPORTS	9
-#else
+/* XXX ISA-specific. */
 #define	COM_NPORTS	8
-#endif
-
-/*
- * WARNING: Serial console is assumed to be at COM1 address
- * and CONUNIT must be 0.
- */
-#ifndef CONADDR
-#define	CONADDR	(0x3f8)
-#else
-#define CONADDR_OVERRIDE
-#endif
-#ifndef CONUNIT
-#define	CONUNIT	(0)
-#endif

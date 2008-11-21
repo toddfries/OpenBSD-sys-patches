@@ -1,101 +1,88 @@
-#	$OpenBSD: files.mvmeppc,v 1.9 2005/03/08 20:00:23 tdeval Exp $
-
+#	$NetBSD: files.mvmeppc,v 1.14 2008/02/20 21:43:34 drochner Exp $
 #
-# mvmeppc-specific configuration info
+# Motorola's MVMEPPC boards specific configuration info
 #
-maxpartitions 16
+maxpartitions 8
 
 maxusers 2 8 64
 
-file	dev/cninit.c
-file	arch/mvmeppc/mvmeppc/db_interface.c
+include "arch/powerpc/pic/files.pic"
 
-file	arch/mvmeppc/dev/bugio.c
-file	arch/mvmeppc/dev/clock.c
-file	arch/mvmeppc/dev/mem.c
+defflag	opt_mvmetype.h		SUPPORT_MVME160X
+defflag	opt_mvmetype.h		SUPPORT_MVME210X
+defflag	opt_mvmetype.h		SUPPORT_MVME230X
+defflag	opt_mvmetype.h		SUPPORT_MVME240X
 
 file	arch/mvmeppc/mvmeppc/autoconf.c
-file	arch/mvmeppc/mvmeppc/conf.c
-file	arch/mvmeppc/mvmeppc/disksubr.c		disk
+file	arch/powerpc/powerpc/clock.c
+file	kern/subr_disk_mbr.c			disk
 file	arch/mvmeppc/mvmeppc/machdep.c
-file	arch/mvmeppc/mvmeppc/bus_space.c
-file	arch/mvmeppc/mvmeppc/bus_dma.c
-file	arch/mvmeppc/mvmeppc/ppc1_machdep.c
+file	arch/powerpc/oea/prep_machdep.c
+file	arch/mvmeppc/mvmeppc/platform.c
+file	arch/mvmeppc/mvmeppc/platform_160x.c	support_mvme160x
 
-define	mainbus {}
-device	mainbus
+file	arch/powerpc/powerpc/bus_dma.c
+file	arch/powerpc/powerpc/bus_space.c
+file	arch/powerpc/powerpc/procfs_machdep.c	procfs
+
+# General files
+file	dev/cons.c
+
+#
+# Machine-independent SCSI drivers
+#
+include "dev/scsipi/files.scsipi"
+
+#
+# Memory Disk for install floppy
+#
+file dev/md_root.c	memory_disk_hooks
+
+#
+# System bus types
+#
+define mainbus { }
+device	mainbus: pcibus, mainbus
 attach	mainbus at root
-file	arch/mvmeppc/dev/mainbus.c		mainbus
+file	arch/mvmeppc/mvmeppc/mainbus.c	mainbus
 
 device	cpu
 attach	cpu at mainbus
-file	arch/mvmeppc/dev/cpu.c
-
-device	raven {}
-attach	raven at mainbus
-file	arch/mvmeppc/dev/raven.c
-
-device	openpic
-attach	openpic at raven
-file	arch/mvmeppc/dev/openpic.c
-
-# Various things that need to be included early...
-
-# Media Independent Interface (mii)
-include	"../../../dev/mii/files.mii"
-
-# I2O
-include	"../../../dev/i2o/files.i2o"
+file	arch/mvmeppc/mvmeppc/cpu.c	cpu
 
 #
-# ISA Bus support
+# PCI-only drivers
+# XXX MUST BE INCLUDED BEFORE files.isa, as long as files.isa attaches
+# XXX devices to 'pci'.
 #
-
-include	"dev/isa/files.isa"
-include	"dev/isa/files.isapnp"
-
-file	arch/mvmeppc/isa/isa_machdep.c		isa
-
-#
-# PCI bus support
-#
-
-include	"dev/pci/files.pci"
-
-device	mpcpcibr {} : pcibus
-attach	mpcpcibr at raven
-file	arch/mvmeppc/pci/mpcpcibr.c		mpcpcibr
+include "dev/i2o/files.i2o"
+include "dev/pci/files.pci"
+include "dev/pci/files.agp"
+file	arch/mvmeppc/pci/pci_machdep.c		pci
+file	arch/powerpc/pci/pci_machdep_common.c	pci
+file	arch/powerpc/pci/pciconf_indirect.c	pci
 
 # PCI-Host bridge chipsets
-device	pchb:	pcibus
+device	pchb: pcibus
 attach	pchb at pci
-file	arch/mvmeppc/pci/pchb.c			pchb
+file	arch/powerpc/pci/pchb.c		pchb
 
-# PCI-ISA bridge chipsets
-device	pcib:	isabus
+# PCI-ISA bridges
+device	pcib: isabus
 attach	pcib at pci
-file	arch/mvmeppc/pci/pcib.c			pcib
+file	arch/powerpc/pci/pcib.c		pcib
 
 #
-# Input Devices (not yet)
+# ISA and mixed ISA+PCI drivers
 #
 
-#include "dev/pckbc/files.pckbc"
-#include "dev/wscons/files.wscons"
+include "dev/isa/files.isa"
 
-#
-# Block Devices
-#
+file	arch/powerpc/isa/isa_machdep_common.c	isa
+file	arch/powerpc/isa/isadma_machdep.c	isa
 
-include	"../../../scsi/files.scsi"
-#include "../../../dev/atapiscsi/files.atapiscsi"
-#include "../../../dev/ata/files.ata"
+device	mkclock: mk48txx
+attach	mkclock at isa with mkclock_isa
+file	arch/mvmeppc/isa/mkclock_isa.c	mkclock_isa
 
-device	bugtty: tty
-attach	bugtty at mainbus
-file	arch/mvmeppc/dev/bugtty.c		bugtty needs-flag
-
-#major	{wd = 0}
-major	{sd = 2}
-major	{cd = 3}
-major	{rd = 17}
+include "arch/mvmeppc/conf/majors.mvmeppc"

@@ -1,4 +1,5 @@
-/*	$OpenBSD: via8231.c,v 1.7 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$NetBSD: via8231.c,v 1.3 2008/04/28 20:23:25 martin Exp $	*/
+/*	OpenBSD: via8231.c,v 1.6 2005/10/27 16:41:06 mickey Exp 	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *     This product includes software developed by the NetBSD
- *     Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,12 +58,15 @@
  */
 
 /*
- * Support for the VIA Technologies Inc. VIA8231 PCI to ISA Bridge
+ * Support for the VIA Technologies Inc. VIA VT823[1357] PCI to ISA Bridge
  * Based upon documentation:
  * 1. VIA VT8231 South Bridge, Revision 1.85 (March 11, 2002), pg 73
  * 2. VIA VT8237R South Bridge, Revision 2.06 (December 15, 2004), pg 100
  * Derived from amd756.c
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via8231.c,v 1.3 2008/04/28 20:23:25 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,7 +80,7 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-#include <i386/pci/pcibiosvar.h>
+#include <i386/pci/pci_intr_fixup.h>
 #include <i386/pci/via8231reg.h>
 
 struct via8231_handle {
@@ -155,7 +152,7 @@ via8231_init(pci_chipset_tag_t pc, bus_space_tag_t iot, pcitag_t tag,
 	ph->ph_tag = tag;
 	id = pci_conf_read(pc, tag, PCI_ID_REG);
 	ph->flags = PCI_VENDOR(id) == PCI_VENDOR_VIATECH &&
-	     PCI_PRODUCT(id) == PCI_PRODUCT_VIATECH_VT8231_ISA? 0 : VT8237;
+	     PCI_PRODUCT(id) == PCI_PRODUCT_VIATECH_VT8231? 0 : VT8237;
 
 	*ptagp = &via8231_pci_icu;
 	*phandp = ph;
@@ -200,7 +197,7 @@ via8231_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 	}
 
 	*irqp = (val == VIA8231_ROUTING_CNFG_DISABLED) ?
-	    I386_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
+	    X86_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
 
 	return (0);
 }
@@ -236,13 +233,13 @@ int
 via8231_get_trigger(pciintr_icu_handle_t v, int irq, int *triggerp)
 {
 	struct via8231_handle *ph = v;
-	int reg, clink, max, pciirq;
+	int reg, clink, m, pciirq = 0;	/* XXX: GCC */
 
 	if (VIA8231_PIRQ_LEGAL(irq) == 0)
 		return (1);
 
-	max = ph->flags & VT8237? VIA8237_LINK_MAX : VIA8231_LINK_MAX;
-	for (clink = 0; clink <= max; clink++) {
+	m = ph->flags & VT8237? VIA8237_LINK_MAX : VIA8231_LINK_MAX;
+	for (clink = 0; clink <= m; clink++) {
 		via8231_get_intr(v, clink, &pciirq);
 		if (pciirq == irq) {
 			reg = VIA8231_LINK_LEGAL(clink)?
@@ -261,7 +258,7 @@ int
 via8231_set_trigger(pciintr_icu_handle_t v, int irq, int trigger)
 {
 	struct via8231_handle *ph = v;
-	int reg, clink, max, pciirq;
+	int reg, clink, m, pciirq;
 
 	if (VIA8231_PIRQ_LEGAL(irq) == 0 || VIA8231_TRIG_LEGAL(trigger) == 0)
 		return (1);
@@ -271,7 +268,7 @@ via8231_set_trigger(pciintr_icu_handle_t v, int irq, int trigger)
 	via8231_pir_dump("via8231_set_trig: ", ph);
 #endif
 
-	max = ph->flags & VT8237? VIA8237_LINK_MAX : VIA8231_LINK_MAX;
+	m = ph->flags & VT8237? VIA8237_LINK_MAX : VIA8231_LINK_MAX;
 	for (clink = 0; clink <= VIA8231_LINK_MAX; clink++) {
 		via8231_get_intr(v, clink, &pciirq);
 		if (pciirq == irq) {

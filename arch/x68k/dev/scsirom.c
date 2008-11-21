@@ -1,7 +1,7 @@
-/*	$NetBSD: scsirom.c,v 1.14 2005/12/11 12:19:37 christos Exp $	*/
+/*	$NetBSD: scsirom.c,v 1.18 2008/06/25 08:14:59 isaki Exp $	*/
 
 /*-
- * Copyright (c) 1999 NetBSD Foundation, Inc.
+ * Copyright (c) 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,12 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: scsirom.c,v 1.14 2005/12/11 12:19:37 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: scsirom.c,v 1.18 2008/06/25 08:14:59 isaki Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -68,15 +62,15 @@ struct {
 /*
  * autoconf stuff
  */
-static int scsirom_find(struct device *, struct intio_attach_args *);
-static int scsirom_match(struct device *, struct cfdata *, void *);
-static void scsirom_attach(struct device *, struct device *, void *);
+static int scsirom_find(device_t, struct intio_attach_args *);
+static int scsirom_match(device_t, cfdata_t, void *);
+static void scsirom_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(scsirom, sizeof(struct scsirom_softc),
+CFATTACH_DECL_NEW(scsirom, sizeof(struct scsirom_softc),
     scsirom_match, scsirom_attach, NULL, NULL);
 
-static int 
-scsirom_find(struct device *parent, struct intio_attach_args *ia)
+static int
+scsirom_find(device_t parent, struct intio_attach_args *ia)
 {
 	bus_space_handle_t ioh;
 	char buf[10];
@@ -91,39 +85,39 @@ scsirom_find(struct device *parent, struct intio_attach_args *ia)
 		return -1;
 
 	ia->ia_size = 0x1fe0;
-	if (intio_map_allocate_region (parent, ia, INTIO_MAP_TESTONLY))
+	if (intio_map_allocate_region(parent, ia, INTIO_MAP_TESTONLY))
 		return -1;
 
-	if (bus_space_map (ia->ia_bst, ia->ia_addr, ia->ia_size, 0, &ioh) < 0)
+	if (bus_space_map(ia->ia_bst, ia->ia_addr, ia->ia_size, 0, &ioh) < 0)
 		return -1;
-	if (badaddr (INTIO_ADDR(ia->ia_addr+SCSIROM_ID))) {
-		bus_space_unmap (ia->ia_bst, ioh, ia->ia_size);
+	if (badaddr(INTIO_ADDR(ia->ia_addr+SCSIROM_ID))) {
+		bus_space_unmap(ia->ia_bst, ioh, ia->ia_size);
 		return -1;
 	}
-	bus_space_read_region_1 (ia->ia_bst, ioh, SCSIROM_ID, buf, 6);
+	bus_space_read_region_1(ia->ia_bst, ioh, SCSIROM_ID, buf, 6);
 	if (memcmp(buf, scsirom_descr[which].id, 6) == 0)
 		r = which;
-	bus_space_unmap (ia->ia_bst, ioh, ia->ia_size);
+	bus_space_unmap(ia->ia_bst, ioh, ia->ia_size);
 
 	return r;
 }
 
-static int 
-scsirom_match(struct device *parent, struct cfdata *cf, void *aux)
+static int
+scsirom_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct intio_attach_args *ia = aux;
 	int r;
 
-	if (strcmp (ia->ia_name, "scsirom") != 0)
+	if (strcmp(ia->ia_name, "scsirom") != 0)
 		return 0;
 
 	if (ia->ia_addr == INTIOCF_ADDR_DEFAULT) {
 		ia->ia_addr = scsirom_descr[0].addr;
-		r = scsirom_find (parent, ia);
+		r = scsirom_find(parent, ia);
 		if (r == INTERNAL)
 			return 1;
 		ia->ia_addr = scsirom_descr[1].addr;
-		r = scsirom_find (parent, ia);
+		r = scsirom_find(parent, ia);
 		if (r == EXTERNAL)
 			return 1;
 		return 0;
@@ -133,24 +127,24 @@ scsirom_match(struct device *parent, struct cfdata *cf, void *aux)
 		return 0;
 }
 
-static void 
-scsirom_attach(struct device *parent, struct device *self, void *aux)
+static void
+scsirom_attach(device_t parent, device_t self, void *aux)
 {
-	struct scsirom_softc *sc = (struct scsirom_softc *)self;
+	struct scsirom_softc *sc = device_private(self);
 	struct intio_attach_args *ia = aux;
 	int r;
-	struct cfdata *cf;
+	cfdata_t cf;
 
 	sc->sc_addr = ia->ia_addr;
-	sc->sc_which = scsirom_find (parent, ia);
+	sc->sc_which = scsirom_find(parent, ia);
 #ifdef DIAGNOSTIC
 	if (sc->sc_which < 0)
-		panic ("SCSIROM curruption??");
+		panic("SCSIROM curruption??");
 #endif
-	r = intio_map_allocate_region (parent, ia, INTIO_MAP_ALLOCATE);
+	r = intio_map_allocate_region(parent, ia, INTIO_MAP_ALLOCATE);
 #ifdef DIAGNOSTIC
 	if (r)
-		panic ("IO map for SCSIROM corruption??");
+		panic("IO map for SCSIROM corruption??");
 #endif
 
 	ia->ia_addr = scsirom_descr[sc->sc_which].devaddr;
@@ -158,16 +152,15 @@ scsirom_attach(struct device *parent, struct device *self, void *aux)
 		ia->ia_intr = scsirom_descr[sc->sc_which].intr;
 
 	if (sc->sc_which == INTERNAL)
-		printf (": On-board at %p\n", (void*)ia->ia_addr);
+		aprint_normal(": On-board at %p\n", (void *)ia->ia_addr);
 	else
-		printf (": External at %p\n", (void*)ia->ia_addr);
+		aprint_normal(": External at %p\n", (void *)ia->ia_addr);
 
 	cf = config_search_ia(NULL, self, "scsirom", ia);
 	if (cf) {
 		config_attach(self, cf, ia, NULL);
 	} else {
-		printf ("%s: no matching device; ignored.\n",
-			self->dv_xname);
+		aprint_normal_dev(self, "no matching device; ignored.\n");
 	}
 
 	return;

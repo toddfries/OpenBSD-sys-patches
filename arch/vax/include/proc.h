@@ -1,5 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.5 2006/04/17 20:44:45 miod Exp $	*/
-/*	$NetBSD: proc.h,v 1.2 1994/10/26 08:02:21 cgd Exp $	*/
+/*	$NetBSD: proc.h,v 1.12 2007/12/22 08:29:40 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1991 Regents of the University of California.
@@ -32,8 +31,33 @@
  *	@(#)proc.h	7.1 (Berkeley) 5/15/91
  */
 
+#ifndef _VAX_PROC_H_
+#define _VAX_PROC_H_
+
+/*
+ * Machine-dependent lwp struct for vax,
+ */
+struct mdlwp {
+	int md_dummy;			/* Must be at least one field */
+};
+
+struct trapframe;
 /*
  * Machine-dependent part of the proc structure for vax.
  */
 struct mdproc {
+	/* Syscall handling function */
+	void    (*md_syscall)(struct trapframe *);
+
 };
+
+/* md_flags */
+#define	MDP_AST		0x0001	/* async trap pending */
+
+/* kernel stack params */
+#define	KSTACK_LOWEST_ADDR(l)	\
+	((char *)(l)->l_addr + (REDZONEADDR + VAX_NBPG))
+#define	KSTACK_SIZE	\
+	(USPACE - (REDZONEADDR + VAX_NBPG))
+
+#endif /* _VAX_PROC_H_ */

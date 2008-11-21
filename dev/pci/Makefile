@@ -1,8 +1,12 @@
-#	$OpenBSD: Makefile,v 1.4 1996/10/14 09:01:34 deraadt Exp $
-#	$NetBSD: Makefile,v 1.1 1995/06/18 01:07:04 cgd Exp $
+#	$NetBSD: Makefile,v 1.12 2006/07/23 12:01:26 bouyer Exp $
 
-AWK=	awk
+# use 'make -f Makefile.pcidevs' to make pcidevs.h and pcidevs_data.h
 
-pcidevs.h pcidevs_data.h: pcidevs devlist2h.awk
-	/bin/rm -f pcidevs.h pcidevs_data.h
-	${AWK} -f devlist2h.awk pcidevs
+INCSDIR= /usr/include/dev/pci
+
+# Only install includes which are used by userland
+INCS=	amrreg.h amrio.h if_lmc.h mlyio.h mlyreg.h \
+	pcidevs.h pcidevs_data.h pciio.h pcireg.h \
+	tgareg.h twereg.h tweio.h
+
+.include <bsd.kinc.mk>

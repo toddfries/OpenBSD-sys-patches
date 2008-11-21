@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_hpt_reg.h,v 1.10 2004/09/24 07:38:38 grange Exp $	*/
-/*      $NetBSD: pciide_hpt_reg.h,v 1.4 2001/07/23 14:55:27 bouyer Exp $       */
+/*      $NetBSD: pciide_hpt_reg.h,v 1.15 2007/12/25 18:33:41 perry Exp $       */
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -15,9 +14,9 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *      This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
@@ -31,21 +30,21 @@
  *
  */
 
-#ifndef _DEV_PCI_PCIIDE_HPT_REG_H_
-#define _DEV_PCI_PCIIDE_HPT_REG_H_
 
 /*
- * Register definitions for Highpoint PCI IDE controllers.
+ * Register definitions for the Highpoint HPT366 UDMA/66 * and HPT370 UDMA/100
+ * PCI IDE controller.
  *
  * The HPT366 has 2 PCI IDE functions, each of them has only one channel.
- * The HPT370 and HPT372 has the 2 channels on the same PCI IDE function.
+ * The HPT370 has the 2 channels on the same PCI IDE function.
  */
 
 /*
- * The HPT366, HPT370 and HPT372 have the same vendor/device ID but not the
- * same revision.
+ * The HPT366 and HPT370 have the save vendor/device ID but not the
+ * same revision
  */
 #define HPT366_REV 0x01
+#define HPT368_REV 0x02
 #define HPT370_REV 0x03
 #define HPT370A_REV 0x04
 #define HPT372_REV 0x05
@@ -117,44 +116,44 @@
 #define HPT_CSEL_PCIWR			0x04 /* 370 only */
 #define HPT_CSEL_CBLID(chan)		 (0x01 << (1 - (chan)))
 
-#define HPT_SC2		0x5b
-#define HPT_SC2_OSC_OK	0x80
-#define HPT_SC2_OSC_EN	0x20
-#define HPT_SC2_ECLK	0x10
-#define HPT_SC2_BPIO	0x08
-#define HPT_SC2_DMARQW	0x04
-#define HPT_SC2_SCLK	0x02
-#define HPT_SC2_MAEN	0x01
+#define HPT_SC2			0x5b
+#define HPT_SC2_OSC_OK		0x80
+#define HPT_SC2_OSC_EN		0x20
+#define HPT_SC2_ECLK		0x10
+#define HPT_SC2_BPIO		0x08
+#define HPT_SC2_DMARQW		0x04
+#define HPT_SC2_SCLK		0x02
+#define HPT_SC2_MAEN		0x01
 
-static u_int32_t hpt366_pio[] =
+#define HPT370_FOUT 		0x7c	/* DPLL output frequency */
+
+static const u_int32_t hpt366_pio[] __unused =
 	{0x00d0a7aa, 0x00c8a753, 0x00c8a742, 0x00c8a731};
-static u_int32_t hpt366_dma[] =
+static const u_int32_t hpt366_dma[] __unused =
 	{0x20c8a797, 0x20c8a742, 0x20c8a731};
-static u_int32_t hpt366_udma[] =
+static const u_int32_t hpt366_udma[] __unused =
 	{0x10c8a731, 0x10cba731, 0x10caa731, 0x10cfa731, 0x10c9a731};
 
-static u_int32_t hpt370_pio[] =
+static const u_int32_t hpt370_pio[] __unused =
 	{0x06914e8a, 0x06914e65, 0x06514e33, 0x06514e22, 0x06514e21};
-static u_int32_t hpt370_dma[] =
+static const u_int32_t hpt370_dma[] __unused =
 	{0x26514e97, 0x26514e33, 0x26514e21};
-static u_int32_t hpt370_udma[] =
+static const u_int32_t hpt370_udma[] __unused =
 	{0x16514e31, 0x164d4e31, 0x16494e31, 0x166d4e31, 0x16454e31,
-	 0x16454e31};
+	 0x1a85f442};
 
-static u_int32_t hpt372_pio[] =
+static const u_int32_t hpt372_pio[] __unused =
 	{0x0d029d5e, 0x0d029d26, 0x0c829ca6, 0x0c829c84, 0x0c829c62};
-static u_int32_t hpt372_dma[] =
-	{0x2c82922e, 0x2c829266, 0x2c829262};
-static u_int32_t hpt372_udma[] =
-	{0x1c82dc62, 0x1c9adc62, 0x1c91dc62, 0x1c8edc62, 0x1c8ddc62,
-	 0x1c6ddc62, 0x1c81dc62};
+static const u_int32_t hpt372_dma[] __unused =
+	{0x2c829d2e, 0x2c829c66, 0x2829c62};
+static const u_int32_t hpt372_udma[] __unused =
+	{0x1c829c62, 0x1c9a9c62, 0x1c929c62, 0x1c8e9c62, 0x1c8a9c62,
+	 0x1cae9c62, 0x1c869c62};
 
-static u_int32_t hpt374_pio[] =
+static u_int32_t hpt374_pio[] __unused =
 	{0x0ac1f48a, 0x0ac1f465, 0x0a81f454, 0x0a81f443, 0x0a81f442};
-static u_int32_t hpt374_dma[] =
+static u_int32_t hpt374_dma[] __unused =
 	{0x228082ea, 0x22808254, 0x22808242};
-static u_int32_t hpt374_udma[] =
+static u_int32_t hpt374_udma[] __unused =
 	{0x121882ea, 0x12148254, 0x120c8242, 0x128c8242, 0x12ac8242,
-	 0x12848242, 0x12808242};
-
-#endif	/* !_DEV_PCI_PCIIDE_HPT_REG_H_ */
+	    0x12848242, 0x12808242};

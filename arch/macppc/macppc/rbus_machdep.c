@@ -1,9 +1,8 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.7 2007/12/09 17:02:56 kettenis Exp $ */
-/*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
+/*	$NetBSD: rbus_machdep.c,v 1.14 2007/10/17 19:55:34 garbled Exp $	*/
 
 /*
  * Copyright (c) 1999
- *     HAYAKAWA Koichi.  All rights reserved.
+ *     TSUBAI Masanari.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,10 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -31,83 +27,97 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rbus_machdep.c,v 1.14 2007/10/17 19:55:34 garbled Exp $");
+
 #include <sys/param.h>
+#include <sys/device.h>
 #include <sys/systm.h>
-#include <sys/extent.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <sys/sysctl.h>
-
-#include <sys/device.h>
-
+#include <powerpc/oea/bat.h>
 #include <machine/bus.h>
-#include <dev/cardbus/rbus.h>
 
 #include <dev/pci/pcivar.h>
-#include <arch/macppc/pci/pcibrvar.h>
+#include <dev/pci/pcidevs.h>
+#include <dev/cardbus/rbus.h>
+#include <dev/ofw/openfirm.h>
 
-void macppc_cardbus_init(pci_chipset_tag_t pc, pcitag_t tag);
+static void macppc_cardbus_init __P((pci_chipset_tag_t, pcitag_t));
 
-/**********************************************************************
- * rbus_tag_t rbus_fakeparent_mem(struct pci_attach_args *pa)
- *
- *   This function makes an rbus tag for memory space.  This rbus tag
- *   shares the all memory region of ex_iomem.
- **********************************************************************/
-#define RBUS_MEM_SIZE	0x10000000
+#ifdef DEBUG_ALLOC
+# define DPRINTF printf
+#else
+# define DPRINTF while (0) printf
+#endif
+
+int
+md_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
+    int flags, bus_space_handle_t *bshp)
+{
+	DPRINTF("md_space_map: %p, 0x%x, 0x%x\n", t, bpa, size);
+
+	return bus_space_map(t, bpa, size, flags, bshp);
+}
+
+void
+md_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
+    bus_addr_t *adrp)
+{
+	DPRINTF("md_space_unmap: %p 0x%x\n", t, bsh);
+
+	if (adrp)
+		*adrp = bsh - t->pbs_offset;
+
+	bus_space_unmap(t, bsh, size);
+}
 
 rbus_tag_t
-rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
+rbus_pccbb_parent_mem(pa)
+	struct pci_attach_args *pa;
 {
 	bus_addr_t start;
 	bus_size_t size;
-	struct extent *ex;
+	int node, reg[5];
 
 	macppc_cardbus_init(pa->pa_pc, pa->pa_tag);
 
-	size = RBUS_MEM_SIZE;
-	if ((ex = pciaddr_search(PCIADDR_SEARCH_MEM, self, &start, size)) ==
-	    NULL)
-	{
-		/* XXX */
-		printf("failed\n");
+	node = pcidev_to_ofdev(pa->pa_pc, pa->pa_tag);
+	OF_getprop(node, "assigned-addresses", reg, sizeof(reg));
+
+	start = reg[2];
+	size = reg[4];
+
+	/* XXX PowerBook G3 */
+	if (size < 0x10000) {
+		start = 0x90000000;
+		size  = 0x10000000;
 	}
 
-	return rbus_new_root_share(pa->pa_memt, ex, start, size, 0);
+	battable[start >> 28].batl = BATL(start, BAT_I, BAT_PP_RW);
+	battable[start >> 28].batu = BATU(start, BAT_BL_256M, BAT_Vs);
+
+	return rbus_new_root_delegate(pa->pa_memt, start, size, 0);
 }
-
-
-/**********************************************************************
- * rbus_tag_t rbus_pccbb_parent_io(struct pci_attach_args *pa)
- **********************************************************************/
-#define RBUS_IO_SIZE	0x1000
 
 rbus_tag_t
-rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
+rbus_pccbb_parent_io(pa)
+	struct pci_attach_args *pa;
 {
-	struct extent *ex;
-	bus_addr_t start;
-	bus_size_t size;
+	bus_addr_t start = 0x2000;
+	bus_size_t size  = 0x0800;
 
+	start += pa->pa_function * size;
+	return rbus_new_root_delegate(pa->pa_iot, start, size, 0);
 
-	size = RBUS_IO_SIZE;
-	if ((ex = pciaddr_search(PCIADDR_SEARCH_IO, self, &start, size)) ==
-	    NULL)
-	{
-		/* XXX */
-		printf("failed\n");
-	}
-
-	return rbus_new_root_share(pa->pa_iot, ex, start, size, 0);
+	/* XXX we should use ``offset''? */
 }
 
-
-/*
- * Big ugly hack to enable bridge/fix interrupts
- */
 void
-macppc_cardbus_init(pci_chipset_tag_t pc, pcitag_t tag)
+macppc_cardbus_init(pc, tag)
+	pci_chipset_tag_t pc;
+	pcitag_t tag;
 {
 	u_int x;
 	static int initted = 0;
@@ -139,21 +149,4 @@ macppc_cardbus_init(pci_chipset_tag_t pc, pcitag_t tag)
 			pci_conf_write(pc, tag, 0x40, x);
 		}
 	}
-
-	if (PCI_VENDOR(x) == PCI_VENDOR_TI &&
-	    (PCI_PRODUCT(x) == PCI_PRODUCT_TI_PCI1410 ||
-	    PCI_PRODUCT(x) == PCI_PRODUCT_TI_PCI1510)) {
-		/* dont mess with the bus numbers or latency timer */
-
-		/* Route INTA to MFUNC0 */
-		x = pci_conf_read(pc, tag, 0x8c);
-		x |= 0x02;
-		pci_conf_write(pc, tag, 0x8c, x);
-	}
-}
-
-void
-pccbb_attach_hook(struct device *parent, struct device *self,
-    struct pci_attach_args *pa)
-{
 }

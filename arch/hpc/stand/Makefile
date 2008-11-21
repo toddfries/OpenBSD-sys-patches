@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.21 2006/10/18 02:18:27 uwe Exp $
+#	$NetBSD: Makefile,v 1.24 2008/10/19 22:05:21 apb Exp $
 #
 
 .include <bsd.sys.mk>		# for HOST_SH
@@ -17,11 +17,25 @@ UUDECODE_FILES= binary/ARM/hpcboot.exe \
 evc3:
 	cd dspgen && ${MAKE} evc3 || exit 1
 	for d in ${PROJECT_DIRS}; do					\
-		${HOST_SH} dspgen/config.sh evc3 $$d;			\
+		${HOST_SH} dspgen/config.sh evc3 $$d || exit 1;		\
 	done
 	${HOST_SH} dspgen/gen_workspace.sh evc3 hpc_stand.vcw $(PROJECT_DIRS)
 	cd dspgen && ${MAKE} clean
 
+#
+# Generate project/work files for
+# "eMbedded Visual C++ 4.0"
+# (WCE300 binaries for SH3, SH4, ARMV4)
+#
+evc4:
+	cd dspgen && ${MAKE} evc4 || exit 1
+	for d in ${PROJECT_DIRS}; do					\
+		${HOST_SH} dspgen/config.sh evc4 $$d || exit 1;		\
+	done
+	${HOST_SH} dspgen/gen_workspace.sh evc4 hpc_stand.vcw $(PROJECT_DIRS)
+	cd dspgen && ${MAKE} clean
+
+#
 #
 # Generate project/work files for
 # "Windows CE Toolkit for Visual C++ 6.0"
@@ -29,7 +43,7 @@ evc3:
 vc6:
 	cd dspgen && ${MAKE} vc6 || exit 1
 	for d in ${PROJECT_DIRS}; do					\
-		${HOST_SH} dspgen/config.sh vc6 $$d;			\
+		${HOST_SH} dspgen/config.sh vc6 $$d || exit 1;		\
 	done
 	cd dspgen && ${MAKE} clean
 	${HOST_SH} dspgen/gen_workspace.sh vc6 hpc_stand.dsw $(PROJECT_DIRS)
@@ -42,7 +56,7 @@ vc6:
 vc5:
 	cd dspgen && ${MAKE} vc5 || exit 1
 	for d in ${PROJECT_DIRS}; do					\
-		${HOST_SH} dspgen/config.sh vc5 $$d;			\
+		${HOST_SH} dspgen/config.sh vc5 $$d || exit 1;		\
 	done
 	cd dspgen && ${MAKE} clean
 	${HOST_SH} dspgen/gen_workspace.sh vc5 hpc_stand.dsw $(PROJECT_DIRS)
@@ -62,7 +76,7 @@ clean:
 	rm -f hpc_stand.dsw hpc_stand.ncb hpc_stand.opt
 	rm -f hpcboot/hpcboot.plg
 # compile directory
-	-rm -rf compile/ARMDebug compile/ARMRelease			\
+	-rm -rf compile/ARM*Debug compile/ARM*Release			\
 		compile/SH*Debug compile/SH*Release			\
 		compile/MIPSDebug compile/MIPSRelease
 	find . -name "hpcboot.exe" -print | xargs rm -f
@@ -85,10 +99,10 @@ install101:
 
 uuencode:
 	find binary -name "hpcboot*.exe" -print | \
-	awk '{ print "uuencode", $$1, $$1, ">", $$1".uue ; rm -f", $$1 }' \
+	${TOOL_AWK} '{ print "uuencode", $$1, $$1, ">", $$1".uue ; rm -f", $$1 }' \
 	    | ${HOST_SH}
 	cp binary/build_number.h build_number.h
-	awk '{if (/HPCBOOT_BUILD_NUMBER/)				\
+	${TOOL_AWK} '{if (/HPCBOOT_BUILD_NUMBER/)			\
 		{ i = $$3 + 1;						\
 			printf("#define HPCBOOT_BUILD_NUMBER	%d\n", i);\
 		} else {						\

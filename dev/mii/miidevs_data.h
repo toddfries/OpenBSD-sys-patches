@@ -1,10 +1,10 @@
-/*	$NetBSD: miidevs_data.h,v 1.66 2007/10/12 10:14:04 tsutsui Exp $	*/
+/*	$NetBSD: miidevs_data.h,v 1.71 2008/09/28 18:30:47 bouyer Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	NetBSD: miidevs,v 1.73 2007/10/12 10:13:07 tsutsui Exp
+ *	NetBSD: miidevs,v 1.78 2008/09/28 18:30:11 bouyer Exp
  */
 
 /*-
@@ -23,13 +23,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,8 +65,10 @@ struct mii_knowndev mii_knowndevs[] = {
  { MII_OUI_BROADCOM, MII_MODEL_BROADCOM_BCM5750, MII_STR_BROADCOM_BCM5750 },
  { MII_OUI_BROADCOM, MII_MODEL_BROADCOM_BCM5714, MII_STR_BROADCOM_BCM5714 },
  { MII_OUI_BROADCOM, MII_MODEL_BROADCOM_BCM5780, MII_STR_BROADCOM_BCM5780 },
+ { MII_OUI_BROADCOM, MII_MODEL_BROADCOM_BCM5708C, MII_STR_BROADCOM_BCM5708C },
  { MII_OUI_BROADCOM2, MII_MODEL_BROADCOM2_BCM5755, MII_STR_BROADCOM2_BCM5755 },
  { MII_OUI_BROADCOM2, MII_MODEL_BROADCOM2_BCM5754, MII_STR_BROADCOM2_BCM5754 },
+ { MII_OUI_xxBROADCOM_ALT1, MII_MODEL_xxBROADCOM_ALT1_BCM5906, MII_STR_xxBROADCOM_ALT1_BCM5906 },
  { MII_OUI_CICADA, MII_MODEL_CICADA_CS8201, MII_STR_CICADA_CS8201 },
  { MII_OUI_CICADA, MII_MODEL_CICADA_CS8201A, MII_STR_CICADA_CS8201A },
  { MII_OUI_CICADA, MII_MODEL_CICADA_CS8201B, MII_STR_CICADA_CS8201B },
@@ -95,6 +90,8 @@ struct mii_knowndev mii_knowndevs[] = {
  { MII_OUI_yyINTEL, MII_MODEL_yyINTEL_I82566, MII_STR_yyINTEL_I82566 },
  { MII_OUI_xxMARVELL, MII_MODEL_xxMARVELL_I82563, MII_STR_xxMARVELL_I82563 },
  { MII_OUI_yyINTEL, MII_MODEL_yyINTEL_IGP01E1000, MII_STR_yyINTEL_IGP01E1000 },
+ { MII_OUI_JMICRON, MII_MODEL_JMICRON_JMC250, MII_STR_JMICRON_JMC250 },
+ { MII_OUI_JMICRON, MII_MODEL_JMICRON_JMC260, MII_STR_JMICRON_JMC260 },
  { MII_OUI_xxLEVEL1, MII_MODEL_xxLEVEL1_LXT970, MII_STR_xxLEVEL1_LXT970 },
  { MII_OUI_LEVEL1, MII_MODEL_LEVEL1_LXT971, MII_STR_LEVEL1_LXT971 },
  { MII_OUI_LEVEL1, MII_MODEL_LEVEL1_LXT973, MII_STR_LEVEL1_LXT973 },
@@ -107,6 +104,7 @@ struct mii_knowndev mii_knowndevs[] = {
  { MII_OUI_xxMARVELL, MII_MODEL_xxMARVELL_E1000_5, MII_STR_xxMARVELL_E1000_5 },
  { MII_OUI_xxMARVELL, MII_MODEL_xxMARVELL_E6060, MII_STR_xxMARVELL_E6060 },
  { MII_OUI_xxMARVELL, MII_MODEL_xxMARVELL_E1111, MII_STR_xxMARVELL_E1111 },
+ { MII_OUI_xxMARVELL, MII_MODEL_xxMARVELL_E1116, MII_STR_xxMARVELL_E1116 },
  { MII_OUI_xxMYSON, MII_MODEL_xxMYSON_MTD972, MII_STR_xxMYSON_MTD972 },
  { MII_OUI_MYSON, MII_MODEL_MYSON_MTD803, MII_STR_MYSON_MTD803 },
  { MII_OUI_xxNATSEMI, MII_MODEL_xxNATSEMI_DP83840, MII_STR_xxNATSEMI_DP83840 },

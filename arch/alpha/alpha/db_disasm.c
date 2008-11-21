@@ -1,5 +1,4 @@
-/* $OpenBSD: db_disasm.c,v 1.21 2007/11/05 19:23:22 miod Exp $ */
-/* $NetBSD: db_disasm.c,v 1.8 2000/05/25 19:57:30 jhawk Exp $ */
+/* $NetBSD: db_disasm.c,v 1.14 2007/02/22 04:51:26 thorpej Exp $ */
 
 /* 
  * Mach Operating System
@@ -46,6 +45,10 @@
  *	Digital Press, Burlington, MA 01803
  *	ISBN 1-55558-098-X, Order no. EY-L520E-DP
  */
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.14 2007/02/22 04:51:26 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -121,11 +124,10 @@ typedef union {
 
 } pal_instruction;
 
-
 /*
  * Major opcodes
  */
-static char *op_name[64] = {
+static const char *op_name[64] = {
 /* 0 */	"call_pal", "op1", "op2", "op3", "op4",	"op5",	"op6",	"op7",
 /* 8 */	"lda",	"ldah",	"ldbu",	"ldq_u","ldwu",	"stw",	"stb",	"stq_u",
 /*16 */	"arit",	"logical","bit","mul",	"op20",	"vaxf",	"ieeef","anyf",
@@ -186,13 +188,10 @@ static const struct tbl pal_op_tbl[] = {
 	{ NULL,			-1 },
 };
 
-static const char *pal_opname(int);
-
 static const char *
-pal_opname(op)
-	int op;
+pal_opname(int op)
 {
-	static char unk[11];
+	static char unk[8];
 	int i;
 
 	for (i = 0; pal_op_tbl[i].name != NULL; i++) {
@@ -200,7 +199,7 @@ pal_opname(op)
 			return (pal_op_tbl[i].name);
 	}
 
-	snprintf(unk, sizeof unk, "0x%x", op);
+	sprintf(unk, "0x%x", op);
 	return (unk);
 }
 
@@ -242,10 +241,8 @@ static const char **arit_opname[8] = {
 	arit_c0, arit_c2, 0, 0, arit_c9, arit_cB, arit_cD, arit_cF
 };
 
-static __inline const char *arit_name(int);
-static __inline const char *
-arit_name(op)
-	int op;
+static const char *
+arit_name(int op)
 {
 	static char unk[32];
 	const char *name = NULL;
@@ -256,7 +253,7 @@ arit_name(op)
 	if (name != NULL)
 		return (name);
 
-	snprintf(unk, sizeof unk, "?arit 0x%x?", op);
+	sprintf(unk, "?arit 0x%x?", op);
 	return (unk);
 }
 
@@ -283,10 +280,8 @@ static const char *logical_c8[4] = {
 	"andnot", "ornot", "xornot", 0
 };
 
-static __inline const char *logical_name(int);
-static __inline const char *
-logical_name(op)
-	int op;
+static const char *
+logical_name(int op)
 {
 	static char unk[32];
 	const char *name = NULL;
@@ -306,7 +301,7 @@ logical_name(op)
 	if (name != NULL)
 		return (name);
 
-	snprintf(unk, sizeof unk, "?logical 0x%x?", op);
+	sprintf(unk, "?logical 0x%x?", op);
 	return (unk);
 }
 
@@ -332,10 +327,8 @@ static const char *bitop_c67ab[4][4] = {
 /* 7 */	{ 0, "inswh", "inslh", "insqh" },
 };
 
-static __inline const char *bitop_name(int);
-static __inline const char *
-bitop_name(op)
-	int op;
+static const char *
+bitop_name(int op)
 {
 	static char unk[32];
 	const char *name = NULL;
@@ -351,7 +344,7 @@ bitop_name(op)
 	if (name != NULL)
 		return (name);
 
-	snprintf(unk, sizeof unk, "?bit 0x%x?", op);
+	sprintf(unk, "?bit 0x%x?", op);
 	return (unk);
 }
 
@@ -362,10 +355,8 @@ static const char *mul_opname[4] = {
 	"mull", "mulq", "mull/v", "mulq/v"
 };
 
-static __inline const char *mul_name(int);
-static __inline const char *
-mul_name(op)
-	int op;
+static const char *
+mul_name(int op)
 {
 	static char unk[32];
 	const char *name = NULL;
@@ -375,7 +366,7 @@ mul_name(op)
 	if (name != NULL)
 		return (name);
 
-	snprintf(unk, sizeof unk, "?mul 0x%x?", op);
+	sprintf(unk, "?mul 0x%x?", op);
 	return (unk);
 }
 
@@ -388,10 +379,8 @@ static const char *special_opname[8] = {
 	"trapb", 0, "mb", 0, "fetch", "fetch_m", "rpcc", "rc"
 };
 
-static __inline const char *special_name(int);
-static __inline const char *
-special_name(op)
-	int op;
+static const char *
+special_name(int op)
 {
 	static char unk[32];
 	const char *name;
@@ -409,7 +398,7 @@ special_name(op)
 	if (name != NULL)
 		return (name);
 
-	snprintf(unk, sizeof unk, "?special 0x%x?", op);
+	sprintf(unk, "?special 0x%x?", op);
 	return (unk);
 }
 
@@ -431,10 +420,8 @@ static const char *intmisc_opname_3x[16] = {
 	"maxuw4", "maxsb8", "maxsw4",
 };
 
-static __inline const char *intmisc_name(int);
-static __inline const char *
-intmisc_name(op)
-	int op;
+static const char *
+intmisc_name(int op)
 {
 	static char unk[32];
 
@@ -448,17 +435,12 @@ intmisc_name(op)
 	case op_ftois: return ("ftois");
 	}
 
-	snprintf(unk, sizeof unk, "?intmisc 0x%x?", op);
+	sprintf(unk, "?intmisc 0x%x?", op);
 	return (unk);
 }
 
-static const char *float_name(const struct tbl[], int, const char *type);
-
 static const char *
-float_name(tbl, op, type)
-	const struct tbl tbl[];
-	int op;
-	const char *type;
+float_name(const struct tbl *tbl, int op, const char *type)
 {
 	static char unk[32];
 	int i;
@@ -468,7 +450,7 @@ float_name(tbl, op, type)
 			return (tbl[i].name);
 	}
 
-	snprintf(unk, sizeof unk, "?%s 0x%x?", type, op);
+	sprintf(unk, "?%s 0x%x?", type, op);
 	return (unk);
 }
 
@@ -802,11 +784,8 @@ static const char *name_of_register[32] = {
 static int regcount;		/* how many regs used in this inst */
 static int regnum[3];		/* which regs used in this inst */
 
-static const char *register_name(int);
-
 static const char *
-register_name (ireg)
-	int ireg;
+register_name(int ireg)
 {
 	int	i;
 
@@ -823,36 +802,19 @@ register_name (ireg)
  * (optional) alternate format.  Return address of start of
  * next instruction.
  */
-int	alpha_print_instruction(db_addr_t, alpha_instruction, boolean_t);
 
-db_addr_t
-db_disasm(loc, altfmt)
-	db_addr_t	loc;
-	boolean_t	altfmt;
-{
-	alpha_instruction inst;
-
-	inst.bits = db_get_value(loc, 4, 0);
-
-	loc += alpha_print_instruction(loc, inst, altfmt);
-	return (loc);
-}
-
-int
-alpha_print_instruction(iadr, i, showregs)
-	db_addr_t	iadr;
-	alpha_instruction i;
-	boolean_t	showregs;
+static int
+alpha_print_instruction(db_addr_t iadr, alpha_instruction i,
+    bool showregs)
 {
 	const char	*opcode;
 	int		ireg;
 	long		signed_immediate;
-	boolean_t	fstore;
+	bool		fstore;
 	pal_instruction	p;
-	char		tmpfmt[28];
 
 	regcount = 0;
-	fstore = FALSE;
+	fstore = false;
 	opcode = op_name[i.mem_format.opcode];
 
 	/*
@@ -1021,8 +983,8 @@ foperate:
 	case op_stg:
 	case op_sts:
 	case op_stt:
-		fstore = TRUE;
-		/* FALLTHROUGH */
+		fstore = true;
+		/* fall through */
 	case op_ldl:
 	case op_ldq:
 	case op_ldl_l:
@@ -1042,9 +1004,13 @@ loadstore:
 		        register_name(i.mem_format.ra));
 		signed_immediate = (long)i.mem_format.displacement;
 loadstore_address:
-		db_printf("%s(%s)", db_format(tmpfmt, sizeof tmpfmt,
-		    signed_immediate, DB_FORMAT_Z, 0, 0),
-		    register_name(i.mem_format.rb));
+		{
+			char tbuf[24];
+
+			db_format_hex(tbuf, 24, signed_immediate, false);
+			db_printf("%s(%s)", tbuf,
+				register_name(i.mem_format.rb));
+		}
 		/*
 		 * For convenience, do the address computation
 		 */
@@ -1104,4 +1070,15 @@ branch_displacement:
 	}
 	db_printf("\n");
 	return (sizeof(alpha_instruction));
+}
+
+db_addr_t
+db_disasm(db_addr_t loc, bool altfmt)
+{
+	alpha_instruction inst;
+
+	inst.bits = db_get_value(loc, 4, 0);
+
+	loc += alpha_print_instruction(loc, inst, altfmt);
+	return (loc);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtc.c,v 1.6 2008/04/16 18:33:42 kettenis Exp $	*/
+/*	$NetBSD: rtc.c,v 1.5 2008/03/29 05:42:46 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -50,369 +50,153 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ *	@(#)clock.c	8.1 (Berkeley) 6/11/93
+ * from: NetBSD: clock.c,v 1.80 2006/09/03 22:27:45 gdamore Exp
+ *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rtc.c,v 1.5 2008/03/29 05:42:46 tsutsui Exp $");
+
 /*
- * Driver for rtc device on Blade 1000, Fire V210, etc.
+ * Clock driver for 'rtc' - mc146818 driver.
  */
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/signalvar.h>
-#include <sys/systm.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 
 #include <dev/clock_subr.h>
 #include <dev/ic/mc146818reg.h>
+#include <dev/ic/mc146818var.h>
 
-#include <sparc64/dev/ebusreg.h>
-#include <sparc64/dev/ebusvar.h>
+#include <dev/ebus/ebusreg.h>
+#include <dev/ebus/ebusvar.h>
 
-/*
- * Register definitions for the Texas Instruments bq4802.
- */
+static int	rtc_ebus_match(device_t, cfdata_t, void *);
+static void	rtc_ebus_attach(device_t, device_t, void *);
 
-#define BQ4802_SEC		0x00	/* Seconds. */
-#define BQ4802_MIN		0x02	/* Minutes. */
-#define BQ4802_HOUR		0x04	/* Hours. */
-#define BQ4802_DAY		0x06	/* Day (01-31). */
-#define BQ4802_DOW		0x08	/* Day of week (01-07). */
-#define BQ4802_MONTH		0x09	/* Month (01-12). */
-#define BQ4802_YEAR		0x0a	/* Year (00-99). */
-#define BQ4802_CENTURY		0x0f	/* Century (00-99). */
+CFATTACH_DECL_NEW(rtc_ebus, sizeof(struct mc146818_softc),
+    rtc_ebus_match, rtc_ebus_attach, NULL, NULL);
 
-#define BQ4802_CTRL		0x0e	/* Control. */
-#define   BQ4802_24HR		0x02	/* 24-hour mode. */
-#define   BQ4802_UTI		0x08	/* Update transfer inhibit. */
+u_int rtc_read_reg(struct mc146818_softc *, u_int);
+void rtc_write_reg(struct mc146818_softc *, u_int, u_int);
+u_int rtc_getcent(struct mc146818_softc *);
+void rtc_setcent(struct mc146818_softc *, u_int);
 
-extern todr_chip_handle_t todr_handle;
-
-struct rtc_softc {
-	struct device		sc_dv;
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
-	struct intrhand		*sc_ih;
-};
-
-int	rtc_match(struct device *, void *, void *);
-void	rtc_attach(struct device *, struct device *, void *);
-
-struct cfattach rtc_ca = {
-	sizeof(struct rtc_softc), rtc_match, rtc_attach
-};
-
-struct cfdriver rtc_cd = {
-	NULL, "rtc", DV_DULL
-};
-
-int rtc_intr(void *arg);
-
-u_int8_t rtc_read_reg(struct rtc_softc *, bus_size_t);
-void rtc_write_reg(struct rtc_softc *sc, bus_size_t, u_int8_t);
-
-int rtc_gettime(todr_chip_handle_t, struct timeval *);
-int rtc_settime(todr_chip_handle_t, struct timeval *);
-int rtc_bq4802_gettime(todr_chip_handle_t, struct timeval *);
-int rtc_bq4802_settime(todr_chip_handle_t, struct timeval *);
-int rtc_getcal(todr_chip_handle_t, int *);
-int rtc_setcal(todr_chip_handle_t, int);
-
-int
-rtc_match(struct device *parent, void *cf, void *aux)
+static int
+rtc_ebus_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct ebus_attach_args *ea = aux;
 
-	if (strcmp("rtc", ea->ea_name) == 0)
-		return (1);
-	return (0);
+	return (strcmp("rtc", ea->ea_name) == 0);
 }
 
-void
-rtc_attach(struct device *parent, struct device *self, void *aux)
+/*
+ * `rtc' is a ds1287 on an ebus (actually an isa bus, but we use the
+ * ebus driver for isa.)  So we can use ebus_wenable() but need to do
+ * different attach work and use different todr routines.  It does not
+ * incorporate an IDPROM.
+ */
+
+/*
+ * XXX the stupid ds1287 is not mapped directly but uses an address
+ * and a data reg so we cannot access the stuuupid thing w/o having
+ * write access to the registers.
+ *
+ * XXXX We really need to mutex register access!
+ */
+#define	RTC_ADDR	0
+#define	RTC_DATA	1
+u_int
+rtc_read_reg(struct mc146818_softc *sc, u_int reg)
 {
-	struct rtc_softc *sc = (void *)self;
+
+	bus_space_write_1(sc->sc_bst, sc->sc_bsh, RTC_ADDR, reg);
+	return (bus_space_read_1(sc->sc_bst, sc->sc_bsh, RTC_DATA));
+}
+void 
+rtc_write_reg(struct mc146818_softc *sc, u_int reg, u_int val)
+{
+
+	bus_space_write_1(sc->sc_bst, sc->sc_bsh, RTC_ADDR, reg);
+	bus_space_write_1(sc->sc_bst, sc->sc_bsh, RTC_DATA, val);
+}
+
+/* ARGSUSED */
+static void
+rtc_ebus_attach(device_t parent, device_t self, void *aux)
+{
+	struct mc146818_softc *sc = device_private(self);
 	struct ebus_attach_args *ea = aux;
-	todr_chip_handle_t handle;
 	char *model;
-	u_int8_t csr;
+	int sz;
 
-	if (ebus_bus_map(ea->ea_iotag, 0,
-	    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]),
-	    ea->ea_regs[0].size, 0, 0, &sc->sc_ioh) == 0) {
-		sc->sc_iot = ea->ea_iotag;
-	} else if (ebus_bus_map(ea->ea_memtag, 0,
-	    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]),
-	    ea->ea_regs[0].size, 0, 0, &sc->sc_ioh) == 0) {
-		sc->sc_iot = ea->ea_memtag;
-	} else {
-		printf("%s: can't map register\n", self->dv_xname);
+	sc->sc_dev = self;
+	sc->sc_bst = ea->ea_bustag;
+
+	/* hard code to 8K? */
+	sz = ea->ea_reg[0].size;
+
+	if (bus_space_map(sc->sc_bst,
+			 EBUS_ADDR_FROM_REG(&ea->ea_reg[0]),
+			 sz,
+			 BUS_SPACE_MAP_LINEAR,
+			 &sc->sc_bsh) != 0) {
+		aprint_error(": can't map register\n");
 		return;
 	}
 
-	model = getpropstring(ea->ea_node, "model");
-	if (*model == '\0')
-		model = getpropstring(ea->ea_node, "compatible");
-	printf(": %s\n", *model != '\0' != 0 ? model : "unknown");
+	model = prom_getpropstring(ea->ea_node, "model");
+#ifdef DIAGNOSTIC
+	if (model == NULL)
+		panic("clockattach_rtc: no model property");
+#endif
 
-	/* Setup our todr_handle */
-	handle = malloc(sizeof(struct todr_chip_handle), M_DEVBUF, M_NOWAIT);
-	if (handle == NULL)
-		panic("couldn't allocate todr_handle");
-	handle->cookie = sc;
-	handle->todr_gettime = rtc_gettime;
-	handle->todr_settime = rtc_settime;
-	handle->todr_getcal = rtc_getcal;
-	handle->todr_setcal = rtc_setcal;
+	/* Our TOD clock year 0 is 0 */
+	sc->sc_year0 = 0;
+	sc->sc_flag = MC146818_NO_CENT_ADJUST;
+	sc->sc_mcread = rtc_read_reg;
+	sc->sc_mcwrite = rtc_write_reg;
+	sc->sc_getcent = rtc_getcent;
+	sc->sc_setcent = rtc_setcent;
+	mc146818_attach(sc);
 
-	handle->bus_cookie = NULL;
-	handle->todr_setwen = NULL;
-	todr_handle = handle;
+	aprint_normal(": %s\n", model);
 
-	/* The bq4802 is not compatible with the mc146818. */
-	if (strcmp(model, "bq4802") == 0) {
-		handle->todr_gettime = rtc_bq4802_gettime;
-		handle->todr_settime = rtc_bq4802_settime;
-
-		/* Turn on 24-hour mode. */
-		csr = bus_space_read_1(sc->sc_iot, sc->sc_ioh, BQ4802_CTRL);
-		csr |= BQ4802_24HR;
-		bus_space_write_1(sc->sc_iot, sc->sc_ioh, BQ4802_CTRL, csr);
-		return;
-	}
-
-	/* 
+	/*
 	 * Turn interrupts off, just in case. (Although they shouldn't
 	 * be wired to an interrupt controller on sparcs).
 	 */
 	rtc_write_reg(sc, MC_REGB, MC_REGB_BINARY | MC_REGB_24HR);
 
 	/*
-	 * On ds1287 models (which really are ns87317 chips), the
-	 * interrupt is wired to the powerbutton.
+	 * Apparently on some machines the TOD registers are on the same
+	 * physical page as the COM registers.  So we won't protect them.
 	 */
-	if (strcmp(model, "ds1287") == 0 && ea->ea_nintrs > 0) {
-		sc->sc_ih = bus_intr_establish(sc->sc_iot, ea->ea_intrs[0],
-		    IPL_BIO, 0, rtc_intr, sc, self->dv_xname);
-		if (sc->sc_ih == NULL) {
-			printf("%s: can't establush interrupt\n",
-			    self->dv_xname);
-		}
-	}
-}
-
-int
-rtc_intr(void *arg)
-{
-	extern int kbd_reset;
-
-	if (kbd_reset == 1) {
-		kbd_reset = 0;
-		psignal(initproc, SIGUSR2);
-	}
-	return (1);
+	/*sc->sc_handle.todr_setwen = NULL;*/
 }
 
 /*
- * Register access is indirect, through an address and data port.
+ * MD mc146818 RTC todr routines.
  */
 
-#define	RTC_ADDR	0
-#define	RTC_DATA	1
+/* Loooks like Sun stores the century info somewhere in CMOS RAM */
+#define MC_CENT 0x32
 
-u_int8_t 
-rtc_read_reg(struct rtc_softc *sc, bus_size_t reg)
+u_int
+rtc_getcent(struct mc146818_softc *sc)
 {
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, RTC_ADDR, reg);
-	return (bus_space_read_1(sc->sc_iot, sc->sc_ioh, RTC_DATA));
-}
 
+	return rtc_read_reg(sc, MC_CENT);
+}
 void 
-rtc_write_reg(struct rtc_softc *sc, bus_size_t reg, u_int8_t val)
+rtc_setcent(struct mc146818_softc *sc, u_int cent)
 {
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, RTC_ADDR, reg);
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, RTC_DATA, val);
-}
 
-/*
- * RTC todr routines.
- */
-
-/*
- * Get time-of-day and convert to a `struct timeval'
- * Return 0 on success; an error number otherwise.
- */
-int
-rtc_gettime(todr_chip_handle_t handle, struct timeval *tv)
-{
-	struct rtc_softc *sc = handle->cookie;
-	struct clock_ymdhms dt;
-	int year;
-	u_int8_t csr;
-
-	/* Stop updates. */
-	csr = rtc_read_reg(sc, MC_REGB);
-	csr |= MC_REGB_SET;
-	rtc_write_reg(sc, MC_REGB, csr);
-
-	/* Read time */
-	dt.dt_sec = rtc_read_reg(sc, MC_SEC);
-	dt.dt_min = rtc_read_reg(sc, MC_MIN);
-	dt.dt_hour = rtc_read_reg(sc, MC_HOUR);
-	dt.dt_day = rtc_read_reg(sc, MC_DOM);
-	dt.dt_wday = rtc_read_reg(sc, MC_DOW);
-	dt.dt_mon = rtc_read_reg(sc, MC_MONTH);
-	year = rtc_read_reg(sc, MC_YEAR);
-
-	if ((year += 1900) < POSIX_BASE_YEAR)
-		year += 100;
-
-	dt.dt_year = year;
-
-	/* time wears on */
-	csr = rtc_read_reg(sc, MC_REGB);
-	csr &= ~MC_REGB_SET;
-	rtc_write_reg(sc, MC_REGB, csr);
-
-	/* simple sanity checks */
-	if (dt.dt_mon > 12 || dt.dt_day > 31 ||
-	    dt.dt_hour >= 24 || dt.dt_min >= 60 || dt.dt_sec >= 60)
-		return (1);
-
-	tv->tv_sec = clock_ymdhms_to_secs(&dt);
-	tv->tv_usec = 0;
-	return (0);
-}
-
-/*
- * Set the time-of-day clock based on the value of the `struct timeval' arg.
- * Return 0 on success; an error number otherwise.
- */
-int
-rtc_settime(todr_chip_handle_t handle, struct timeval *tv)
-{
-	struct rtc_softc *sc = handle->cookie;
-	struct clock_ymdhms dt;
-	u_int8_t csr;
-	int year;
-
-	/* Note: we ignore `tv_usec' */
-	clock_secs_to_ymdhms(tv->tv_sec, &dt);
-
-	year = dt.dt_year % 100;
-
-	/* enable write */
-	csr = rtc_read_reg(sc, MC_REGB);
-	csr |= MC_REGB_SET;
-	rtc_write_reg(sc, MC_REGB, csr);
-
-	rtc_write_reg(sc, MC_SEC, dt.dt_sec);
-	rtc_write_reg(sc, MC_MIN, dt.dt_min);
-	rtc_write_reg(sc, MC_HOUR, dt.dt_hour);
-	rtc_write_reg(sc, MC_DOW, dt.dt_wday);
-	rtc_write_reg(sc, MC_DOM, dt.dt_day);
-	rtc_write_reg(sc, MC_MONTH, dt.dt_mon);
-	rtc_write_reg(sc, MC_YEAR, year);
-
-	/* load them up */
-	csr = rtc_read_reg(sc, MC_REGB);
-	csr &= ~MC_REGB_SET;
-	rtc_write_reg(sc, MC_REGB, csr);
-	return (0);
-}
-
-/*
- * Get time-of-day and convert to a `struct timeval'
- * Return 0 on success; an error number otherwise.
- */
-int
-rtc_bq4802_gettime(todr_chip_handle_t handle, struct timeval *tv)
-{
-	struct rtc_softc *sc = handle->cookie;
-	struct clock_ymdhms dt;
-	bus_space_tag_t iot = sc->sc_iot;
-	bus_space_handle_t ioh = sc->sc_ioh;
-	u_int8_t csr;
-
-	/* Stop updates. */
-	csr = bus_space_read_1(iot, ioh, BQ4802_CTRL);
-	csr |= BQ4802_UTI;
-	bus_space_write_1(iot, ioh, BQ4802_CTRL, csr);
-
-	/* Read time */
-	dt.dt_sec = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_SEC));
-	dt.dt_min = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_MIN));
-	dt.dt_hour = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_HOUR)); 
-	dt.dt_day = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_DAY));
-	dt.dt_wday = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_DOW));
-	dt.dt_mon = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_MONTH));
-	dt.dt_year = FROMBCD(bus_space_read_1(iot, ioh, BQ4802_YEAR)) +
-	    FROMBCD(bus_space_read_1(iot, ioh, BQ4802_CENTURY)) * 100;
-
-	/* time wears on */
-	csr = bus_space_read_1(iot, ioh, BQ4802_CTRL);
-	csr &= ~BQ4802_UTI;
-	bus_space_write_1(iot, ioh, BQ4802_CTRL, csr);
-
-	/* simple sanity checks */
-	if (dt.dt_mon > 12 || dt.dt_day > 31 ||
-	    dt.dt_hour >= 24 || dt.dt_min >= 60 || dt.dt_sec >= 60)
-		return (1);
-
-	tv->tv_sec = clock_ymdhms_to_secs(&dt);
-	tv->tv_usec = 0;
-	return (0);
-}
-
-/*
- * Set the time-of-day clock based on the value of the `struct timeval' arg.
- * Return 0 on success; an error number otherwise.
- */
-int
-rtc_bq4802_settime(todr_chip_handle_t handle, struct timeval *tv)
-{
-	struct rtc_softc *sc = handle->cookie;
-	struct clock_ymdhms dt;
-	bus_space_tag_t iot = sc->sc_iot;
-	bus_space_handle_t ioh = sc->sc_ioh;
-	u_int8_t csr;
-
-	/* Note: we ignore `tv_usec' */
-	clock_secs_to_ymdhms(tv->tv_sec, &dt);
-
-	/* enable write */
-	csr = bus_space_read_1(iot, ioh, BQ4802_CTRL);
-	csr |= BQ4802_UTI;
-	bus_space_write_1(iot, ioh, BQ4802_CTRL, csr);
-
-	bus_space_write_1(iot, ioh, BQ4802_SEC, TOBCD(dt.dt_sec));
-	bus_space_write_1(iot, ioh, BQ4802_MIN, TOBCD(dt.dt_min));
-	bus_space_write_1(iot, ioh, BQ4802_HOUR, TOBCD(dt.dt_hour));
-	bus_space_write_1(iot, ioh, BQ4802_DOW, TOBCD(dt.dt_wday));
-	bus_space_write_1(iot, ioh, BQ4802_DAY, TOBCD(dt.dt_day));
-	bus_space_write_1(iot, ioh, BQ4802_MONTH, TOBCD(dt.dt_mon));
-	bus_space_write_1(iot, ioh, BQ4802_YEAR, TOBCD(dt.dt_year % 100));
-	bus_space_write_1(iot, ioh, BQ4802_CENTURY, TOBCD(dt.dt_year / 100));
-
-	/* load them up */
-	csr = bus_space_read_1(iot, ioh, BQ4802_CTRL);
-	csr &= ~BQ4802_UTI;
-	bus_space_write_1(iot, ioh, BQ4802_CTRL, csr);
-	return (0);
-}
-
-int
-rtc_getcal(todr_chip_handle_t handle, int *vp)
-{
-	return (EOPNOTSUPP);
-}
-
-int
-rtc_setcal(todr_chip_handle_t handle, int v)
-{
-	return (EOPNOTSUPP);
+	rtc_write_reg(sc, MC_CENT, cent);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: loadfile_machdep.h,v 1.1 2007/10/01 20:31:41 ad Exp $	 */
+/*	$NetBSD: loadfile_machdep.h,v 1.3 2008/09/25 21:03:22 christos Exp $	 */
 
 /*-
  * Copyright (c) 1998, 2007 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -62,14 +55,21 @@ void pbzero(void *, size_t);
 ssize_t pread(int, void *, size_t);
 
 #else
-
+#ifdef TEST
+#define LOADADDR(a)		offset
+#define READ(f, b, c)		c
+#define BCOPY(s, d, c)	
+#define BZERO(d, c)	
+#define PROGRESS(a)		(void) printf a
+#else
 #define LOADADDR(a)		(((u_long)(a)) + offset)
-#define ALIGNENTRY(a)		((u_long)(a))
 #define READ(f, b, c)		read((f), (void *)LOADADDR(b), (c))
 #define BCOPY(s, d, c)		memcpy((void *)LOADADDR(d), (void *)(s), (c))
 #define BZERO(d, c)		memset((void *)LOADADDR(d), 0, (c))
-#define WARN(a)			warn a
 #define PROGRESS(a)		/* nothing */
+#endif
+#define WARN(a)			warn a
+#define ALIGNENTRY(a)		((u_long)(a))
 #define ALLOC(a)		malloc(a)
 #define DEALLOC(a, b)		free(a)
 #define OKMAGIC(a)		((a) == OMAGIC)

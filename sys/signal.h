@@ -1,5 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.19 2006/01/08 14:20:16 millert Exp $	*/
-/*	$NetBSD: signal.h,v 1.21 1996/02/09 18:25:32 christos Exp $	*/
+/*	$NetBSD: signal.h,v 1.64 2008/02/27 22:18:41 hubertf Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
@@ -34,140 +33,163 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)signal.h	8.2 (Berkeley) 1/21/94
+ *	@(#)signal.h	8.4 (Berkeley) 5/4/95
  */
 
 #ifndef	_SYS_SIGNAL_H_
 #define	_SYS_SIGNAL_H_
 
-#include <sys/cdefs.h>
-#include <machine/signal.h>	/* sigcontext; codes for SIGILL, SIGFPE */
+#include <sys/featuretest.h>
+#include <sys/sigtypes.h>
 
-#define _NSIG	32		/* counting 0; could be 33 (mask is 1-32) */
+#define _NSIG		64
 
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
 #define NSIG _NSIG
+
+#endif /* _NETBSD_SOURCE */
+
+#define	SIGHUP		1	/* hangup */
+#define	SIGINT		2	/* interrupt */
+#define	SIGQUIT		3	/* quit */
+#define	SIGILL		4	/* illegal instruction (not reset when caught) */
+#define	SIGTRAP		5	/* trace trap (not reset when caught) */
+#define	SIGABRT		6	/* abort() */
+#define	SIGIOT		SIGABRT	/* compatibility */
+#define	SIGEMT		7	/* EMT instruction */
+#define	SIGFPE		8	/* floating point exception */
+#define	SIGKILL		9	/* kill (cannot be caught or ignored) */
+#define	SIGBUS		10	/* bus error */
+#define	SIGSEGV		11	/* segmentation violation */
+#define	SIGSYS		12	/* bad argument to system call */
+#define	SIGPIPE		13	/* write on a pipe with no one to read it */
+#define	SIGALRM		14	/* alarm clock */
+#define	SIGTERM		15	/* software termination signal from kill */
+#define	SIGURG		16	/* urgent condition on IO channel */
+#define	SIGSTOP		17	/* sendable stop signal not from tty */
+#define	SIGTSTP		18	/* stop signal from tty */
+#define	SIGCONT		19	/* continue a stopped process */
+#define	SIGCHLD		20	/* to parent on child stop or exit */
+#define	SIGTTIN		21	/* to readers pgrp upon background tty read */
+#define	SIGTTOU		22	/* like TTIN for output if (tp->t_local&LTOSTOP) */
+#define	SIGIO		23	/* input/output possible signal */
+#define	SIGXCPU		24	/* exceeded CPU time limit */
+#define	SIGXFSZ		25	/* exceeded file size limit */
+#define	SIGVTALRM	26	/* virtual time alarm */
+#define	SIGPROF		27	/* profiling time alarm */
+#define	SIGWINCH	28	/* window size changes */
+#define	SIGINFO		29	/* information request */
+#define	SIGUSR1		30	/* user defined signal 1 */
+#define	SIGUSR2		31	/* user defined signal 2 */
+#define	SIGPWR		32	/* power fail/restart (not reset when caught) */
+#ifdef _KERNEL
+#define	SIGRTMIN	33	/* Kernel only; not exposed to userland yet */
+#define	SIGRTMAX	63	/* Kernel only; not exposed to userland yet */
 #endif
 
-#define	SIGHUP	1	/* hangup */
-#define	SIGINT	2	/* interrupt */
-#define	SIGQUIT	3	/* quit */
-#define	SIGILL	4	/* illegal instruction (not reset when caught) */
-#define	SIGTRAP	5	/* trace trap (not reset when caught) */
-#define	SIGABRT	6	/* abort() */
-#if __BSD_VISIBLE
-#define	SIGIOT	SIGABRT	/* compatibility */
-#define	SIGEMT	7	/* EMT instruction */
+#ifndef _KERNEL
+#include <sys/cdefs.h>
 #endif
-#define	SIGFPE	8	/* floating point exception */
-#define	SIGKILL	9	/* kill (cannot be caught or ignored) */
-#define	SIGBUS	10	/* bus error */
-#define	SIGSEGV	11	/* segmentation violation */
-#define	SIGSYS	12	/* bad argument to system call */
-#define	SIGPIPE	13	/* write on a pipe with no one to read it */
-#define	SIGALRM	14	/* alarm clock */
-#define	SIGTERM	15	/* software termination signal from kill */
-#define	SIGURG	16	/* urgent condition on IO channel */
-#define	SIGSTOP	17	/* sendable stop signal not from tty */
-#define	SIGTSTP	18	/* stop signal from tty */
-#define	SIGCONT	19	/* continue a stopped process */
-#define	SIGCHLD	20	/* to parent on child stop or exit */
-#define	SIGTTIN	21	/* to readers pgrp upon background tty read */
-#define	SIGTTOU	22	/* like TTIN for output if (tp->t_local&LTOSTOP) */
-#if __BSD_VISIBLE
-#define	SIGIO	23	/* input/output possible signal */
-#endif
-#define	SIGXCPU	24	/* exceeded CPU time limit */
-#define	SIGXFSZ	25	/* exceeded file size limit */
-#define	SIGVTALRM 26	/* virtual time alarm */
-#define	SIGPROF	27	/* profiling time alarm */
-#if __BSD_VISIBLE
-#define SIGWINCH 28	/* window size changes */
-#define SIGINFO	29	/* information request */
-#endif
-#define SIGUSR1 30	/* user defined signal 1 */
-#define SIGUSR2 31	/* user defined signal 2 */
 
-/*
- * Language spec says we must list exactly one parameter, even though we
- * actually supply three.  Ugh!
- */
-#define	SIG_DFL		(void (*)(int))0
-#define	SIG_IGN		(void (*)(int))1
-#define	SIG_ERR		(void (*)(int))-1
+#define	SIG_DFL		((void (*)(int))  0)
+#define	SIG_IGN		((void (*)(int))  1)
+#define	SIG_ERR		((void (*)(int)) -1)
+#define	SIG_HOLD	((void (*)(int))  3)
 
-#if __POSIX_VISIBLE || __XPG_VISIBLE
-typedef unsigned int sigset_t;
+#if defined(_POSIX_C_SOURCE) || defined(_XOPEN_SOURCE) || \
+    defined(_NETBSD_SOURCE)
 
+#ifdef _KERNEL
+#define	sigaddset(s, n)		__sigaddset(s, n)
+#define	sigdelset(s, n)		__sigdelset(s, n)
+#define	sigismember(s, n)	__sigismember(s, n)
+#define	sigemptyset(s)		__sigemptyset(s)
+#define	sigfillset(s)		__sigfillset(s)
+#define sigplusset(s, t)	__sigplusset(s, t)
+#define sigminusset(s, t)	__sigminusset(s, t)
+#endif /* _KERNEL */
+
+#if (_POSIX_C_SOURCE - 0) >= 199309L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
 #include <sys/siginfo.h>
+#endif
+
+#if (defined(_XOPEN_SOURCE) && defined(_XOPEN_SOURCE_EXTENDED)) || \
+    (_XOPEN_SOURCE - 0) >= 500 || defined(_NETBSD_SOURCE)
+#include <sys/ucontext.h>
+#endif /* _XOPEN_SOURCE_EXTENDED || _XOPEN_SOURCE >= 500 || _NETBSD_SOURCE */
 
 /*
  * Signal vector "template" used in sigaction call.
  */
 struct	sigaction {
-	union {		/* signal handler */
-		void	(*__sa_handler)(int);
-		void	(*__sa_sigaction)(int, siginfo_t *, void *);
-	} __sigaction_u;
+	union {
+		void (*_sa_handler)(int);
+#if (_POSIX_C_SOURCE - 0) >= 199309L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
+		void (*_sa_sigaction)(int, siginfo_t *, void *);
+#endif
+	} _sa_u;	/* signal handler */
 	sigset_t sa_mask;		/* signal mask to apply */
 	int	sa_flags;		/* see signal options below */
 };
 
-/* if SA_SIGINFO is set, sa_sigaction is to be used instead of sa_handler. */
-#define sa_handler      __sigaction_u.__sa_handler
-#define sa_sigaction    __sigaction_u.__sa_sigaction
+#define sa_handler _sa_u._sa_handler
+#if (_POSIX_C_SOURCE - 0) >= 199309L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
+#define sa_sigaction _sa_u._sa_sigaction
+#endif
 
-#if __XPG_VISIBLE >= 500
+#include <machine/signal.h>	/* sigcontext; codes for SIGILL, SIGFPE */
+
+#if (defined(_XOPEN_SOURCE) && defined(_XOPEN_SOURCE_EXTENDED)) || \
+    (_XOPEN_SOURCE - 0) >= 500 || defined(_NETBSD_SOURCE)
 #define SA_ONSTACK	0x0001	/* take signal on signal stack */
-#define SA_RESTART	0x0002	/* restart system on signal return */
+#define SA_RESTART	0x0002	/* restart system call on signal return */
 #define SA_RESETHAND	0x0004	/* reset to SIG_DFL when taking signal */
 #define SA_NODEFER	0x0010	/* don't mask the signal we're delivering */
-#define SA_NOCLDWAIT	0x0020	/* don't create zombies (assign to pid 1) */
-#ifdef COMPAT_SUNOS
-#define	SA_USERTRAMP	0x0100	/* do not bounce off kernel's sigtramp */
-#endif
-#endif /* __XPG_VISIBLE >= 500 */
+#endif /* _XOPEN_SOURCE_EXTENDED || XOPEN_SOURCE >= 500 || _NETBSD_SOURCE */
+/* Only valid for SIGCHLD. */
 #define SA_NOCLDSTOP	0x0008	/* do not generate SIGCHLD on child stop */
-#if __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 500
-#define SA_SIGINFO	0x0040	/* generate siginfo_t */
+#define SA_NOCLDWAIT	0x0020	/* do not generate zombies on unwaited child */
+#if (_POSIX_C_SOURCE - 0) >= 199309L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
+#define SA_SIGINFO	0x0040	/* take sa_sigaction handler */
+#endif /* (_POSIX_C_SOURCE - 0) >= 199309L || ... */
+#if defined(_NETBSD_SOURCE)
+#define	SA_NOKERNINFO	0x0080	/* siginfo does not print kernel info on tty */
+#endif /*_NETBSD_SOURCE */
+#ifdef _KERNEL
+#define	SA_ALLBITS	0x00ff
 #endif
 
 /*
- * Flags for sigprocmask:
+ * Flags for sigprocmask():
  */
 #define	SIG_BLOCK	1	/* block specified signal set */
 #define	SIG_UNBLOCK	2	/* unblock specified signal set */
 #define	SIG_SETMASK	3	/* set specified signal set */
-#endif	/* __POSIX_VISIBLE || __XPG_VISIBLE */
 
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
 typedef	void (*sig_t)(int);	/* type of signal function */
+#endif
 
+#if (defined(_XOPEN_SOURCE) && defined(_XOPEN_SOURCE_EXTENDED)) || \
+    (_XOPEN_SOURCE - 0) >= 500 || defined(_NETBSD_SOURCE)
 /*
- * 4.3 compatibility:
- * Signal vector "template" used in sigvec call.
+ * Flags used with stack_t/struct sigaltstack.
  */
-struct	sigvec {
-	void	(*sv_handler)(int);	/* signal handler */
-	int	sv_mask;		/* signal mask to apply */
-	int	sv_flags;		/* see signal options below */
-};
-#define SV_ONSTACK	SA_ONSTACK
-#define SV_INTERRUPT	SA_RESTART	/* same bit, opposite sense */
-#define SV_RESETHAND	SA_RESETHAND
-#define sv_onstack	sv_flags	/* isn't compatibility wonderful! */
+#define SS_ONSTACK	0x0001	/* take signals on alternate stack */
+#define SS_DISABLE	0x0004	/* disable taking signals on alternate stack */
+#ifdef _KERNEL
+#define	SS_ALLBITS	0x0005
+#endif
+#define	MINSIGSTKSZ	8192			/* minimum allowable stack */
+#define	SIGSTKSZ	(MINSIGSTKSZ + 32768)	/* recommended stack size */
+#endif /* _XOPEN_SOURCE_EXTENDED || _XOPEN_SOURCE >= 500 || _NETBSD_SOURCE */
 
-/*
- * Macro for converting signal number to a mask suitable for
- * sigblock().
- */
-#define sigmask(m)	(1 << ((m)-1))
-
-#define	BADSIG		SIG_ERR
-
-#endif	/* __BSD_VISIBLE */
-
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
+#if (defined(_XOPEN_SOURCE) && defined(_XOPEN_SOURCE_EXTENDED)) || \
+    (_XOPEN_SOURCE - 0) >= 500 || defined(_NETBSD_SOURCE)
 /*
  * Structure used in sigstack call.
  */
@@ -175,30 +197,35 @@ struct	sigstack {
 	void	*ss_sp;			/* signal stack pointer */
 	int	ss_onstack;		/* current status */
 };
+#endif /* _XOPEN_SOURCE_EXTENDED || _XOPEN_SOURCE >= 500 || _NETBSD_SOURCE */
 
+#if defined(_NETBSD_SOURCE) && !defined(_KERNEL)
 /*
- * Structure used in sigaltstack call.
+ * Macro for converting signal number to a mask suitable for
+ * sigblock().
  */
-typedef struct sigaltstack {
-	void	*ss_sp;			/* signal stack base */
-	size_t	ss_size;		/* signal stack length */
-	int	ss_flags;		/* SS_DISABLE and/or SS_ONSTACK */
-} stack_t;
-#define SS_ONSTACK	0x0001	/* take signals on alternate stack */
-#define SS_DISABLE	0x0004	/* disable taking signals on alternate stack */
-#define	MINSIGSTKSZ	8192			/* minimum allowable stack */
-#define	SIGSTKSZ	(MINSIGSTKSZ + 32768)	/* recommended stack size */
+#define sigmask(n)	__sigmask(n)
 
-#ifdef _KERNEL
-struct osigaltstack {
-	void	*ss_sp;			/* signal stack base */
-	int	ss_size;		/* signal stack length */
-	int	ss_flags;		/* SS_DISABLE and/or SS_ONSTACK */
+#define	BADSIG		SIG_ERR
+#endif /* _NETBSD_SOURCE */
+
+#if (_POSIX_C_SOURCE - 0) >= 199309L || (_XOPEN_SOURCE - 0) >= 500 || \
+    defined(_NETBSD_SOURCE)
+struct	sigevent {
+	int	sigev_notify;
+	int	sigev_signo;
+	union sigval	sigev_value;
+	void	(*sigev_notify_function)(union sigval *);
+	void /* pthread_attr_t */	*sigev_notify_attributes;
 };
-#endif
 
-typedef struct sigcontext ucontext_t;
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#define SIGEV_NONE	0
+#define SIGEV_SIGNAL	1
+#define SIGEV_THREAD	2
+#define SIGEV_SA	3
+#endif /* (_POSIX_C_SOURCE - 0) >= 199309L || ... */
+
+#endif	/* _POSIX_C_SOURCE || _XOPEN_SOURCE || _NETBSD_SOURCE */
 
 /*
  * For historical reasons; programs expect signal's return value to be

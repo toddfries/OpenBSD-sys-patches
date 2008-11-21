@@ -1,163 +1,112 @@
-# $OpenBSD: files.i2c,v 1.46 2008/04/21 04:48:25 deraadt Exp $
-#	$NetBSD: files.i2c,v 1.3 2003/10/20 16:24:10 briggs Exp $
+#	$NetBSD: files.i2c,v 1.23 2008/10/30 12:52:46 nakayama Exp $
 
-define	i2c {[addr = -1], [size = -1]}
-define	i2c_bitbang
-device	iic: i2c
+defflag	opt_i2cbus.h				I2C_SCAN
+define	i2cbus { }
+define	i2cexec
+
+device	iic { [addr = -1], [size = -1] }
 attach	iic at i2cbus
 file	dev/i2c/i2c.c				iic | i2cbus
-file	dev/i2c/i2c_exec.c			iic | i2cbus
-file	dev/i2c/i2c_scan.c			iic | i2cbus
+file	dev/i2c/i2c_exec.c			iic | i2cbus | i2cexec
+
+# Common module for bit-bang'ing an I2C bus
+define	i2c_bitbang
 file	dev/i2c/i2c_bitbang.c			i2c_bitbang
 
 #
 # I2C client devices
 #
 
-# National Semiconductor LM75/LM77 temperature sensor
-device	lmtemp
-attach	lmtemp at i2c
+# M41T00 Real Time Clock
+device	m41trtc
+attach	m41trtc at iic
+file	dev/i2c/m41t00.c			m41trtc
+
+# M41ST84 Real Time Clock
+device	strtc
+attach	strtc at iic
+file	dev/i2c/m41st84.c			strtc
+
+# MAX6900 Real Time Clock
+device	maxrtc
+attach	maxrtc at iic
+file	dev/i2c/max6900.c			maxrtc
+
+# Philips PCF8583 Real Time Clock
+device	pcfrtc
+attach	pcfrtc at iic
+file	dev/i2c/pcf8583.c			pcfrtc
+
+# Atmel/Microchip 24Cxx Serial EEPROM
+define	at24cxx_eeprom
+device	seeprom
+attach	seeprom at iic
+file	dev/i2c/at24cxx.c			seeprom | at24cxx_eeprom
+						    needs-flag
+
+# National Semiconductor LM75 temperature sensor
+device	lmtemp: sysmon_envsys
+attach	lmtemp at iic
 file	dev/i2c/lm75.c				lmtemp
 
-# National Semiconductor LM93 sensor
-device	lmn
-attach	lmn at i2c
-file	dev/i2c/lm93.c				lmn
+# National Semiconductor LM78 temp sensor/fan controller
+attach	lm at iic with lm_iic
+file	dev/i2c/lm_i2c.c			lm_iic
 
-# National Semiconductor LM87 sensor
-device	lmenv
-attach	lmenv at i2c
-file	dev/i2c/lm87.c				lmenv
+# Dallas DS1307 Real Time Clock
+device	dsrtc
+attach	dsrtc at iic
+file	dev/i2c/ds1307.c			dsrtc
 
-# Maxim MAX6690 Remote/Local Temperature sensor
-device	maxtmp
-attach	maxtmp at i2c
-file	dev/i2c/maxim6690.c			maxtmp
+# Xicor X1226 Real Time Clock
+device	xrtc
+attach	xrtc at iic
+file	dev/i2c/x1226.c				xrtc
 
-# Analog Devices AD741x Temperature sensor + 4-channel ADC
-device	adc
-attach	adc at i2c
-file	dev/i2c/ad741x.c			adc
-
-# TAOS TSL2560/61 light-to-digital converter
-device	tsl
-attach	tsl at i2c
-file	dev/i2c/tsl2560.c			tsl
-
-# ADM1021
-device	admtemp
-attach	admtemp at i2c
-file	dev/i2c/adm1021.c			admtemp
-
-# ADM1024
-device	admlc
-attach	admlc at i2c
-file	dev/i2c/adm1024.c			admlc
-
-# ADM1025
-device	admtm
-attach	admtm at i2c
-file	dev/i2c/adm1025.c			admtm
-
-# ADM1030
-device	admtmp
-attach	admtmp at i2c
-file	dev/i2c/adm1030.c			admtmp
-
-# ADM1031
-device	admtt
-attach	admtt at i2c
-file	dev/i2c/adm1031.c			admtt
-
-# PCA9554
-device	pcagpio: gpiobus
-attach	pcagpio at i2c
-file	dev/i2c/pca9554.c			pcagpio
-
-# Maxim DS1631
-device	maxds
-attach	maxds at i2c
-file	dev/i2c/ds1631.c			maxds
-
-# Apple FCU
-device	fcu
-attach	fcu at i2c
-file	dev/i2c/fcu.c				fcu
-
-# Apple ADT
-device	adt
-attach	adt at i2c
-file	dev/i2c/adt7460.c			adt
-
-# National Semiconductor LM78/79/81 and compatible hardware monitors
-attach lm at i2c with lm_i2c
-file	dev/i2c/lm78_i2c.c			lm_i2c
-
-# ADM1026
-device	admcts
-attach	admcts at i2c
-file	dev/i2c/adm1026.c			admcts
-
-# ASB100
-device	asbtm
-attach	asbtm at i2c
-file	dev/i2c/asb100.c			asbtm
-
-# Winbond W83L784R/W83L875R/W83L785TS-L
-device	wbenv
-attach	wbenv at i2c
-file	dev/i2c/w83l784r.c			wbenv
-
-# Winbond W83793G
-device	wbng
-attach	wbng at i2c
-file	dev/i2c/w83793g.c			wbng
-
-# Genesys Logic GL518SM
-device	glenv
-attach	glenv at i2c
-file	dev/i2c/gl518sm.c			glenv
+# Analog Devices dBCool family of thermal monitors / fan controllers
+define dbcool {}
+device dbcool: sysmon_envsys
+attach dbcool at iic
+file dev/i2c/dbcool.c			dbcool
 
 # RICOH RS5C372[AB] Real Time Clock
-device	ricohrtc
-attach	ricohrtc at i2c
-file	dev/i2c/rs5c372.c			ricohrtc
+device	rs5c372rtc
+attach	rs5c372rtc at iic
+file	dev/i2c/rs5c372.c		rs5c372rtc
 
-# Fintek F75375
-device	fintek
-attach	fintek at i2c
-file	dev/i2c/fintek.c			fintek
+# RICOH R2025S/D Real Time Clock
+device	r2025rtc
+attach	r2025rtc at iic
+file	dev/i2c/r2025.c			r2025rtc
 
-# Philips Semiconductor PCA9532
-device	pcaled: gpiobus
-attach	pcaled at i2c
-file	dev/i2c/pca9532.c			pcaled
+# VESA Display Data Channel 2
+device	ddc
+define	ddc_read_edid
+attach	ddc at iic
+file	dev/i2c/ddc.c			ddc | ddc_read_edid
 
-# Andigilog aSC7621
-device	adl
-attach	adl at i2c
-file	dev/i2c/asc7621.c			adl
+# SGS TDA7433 audio mixer
+device	sgsmix
+attach	sgsmix at iic
+file	dev/i2c/sgsmix.c		sgsmix needs-flag
+defflag	opt_sgsmix.h	SGSMIX_DEBUG
 
-# Andigilog aSC7611
-device	andl
-attach	andl at i2c
-file	dev/i2c/asc7611.c			andl
+# Xbox PIC16LC System Management Controller
+device	pic16lc: sysmon_envsys
+attach	pic16lc at iic
+file	dev/i2c/pic16lc.c		pic16lc needs-flag
 
-# TI TMHC50 / Analog ADM1022
-device	thmc
-attach	thmc at i2c
-file	dev/i2c/thmc50.c			thmc
+# Xbox Serial EEPROM
+device	xbseeprom
+attach	xbseeprom at iic
+file	dev/i2c/xbseeprom.c		xbseeprom
 
-# SPD Memory EEPROM
+# Memory Serial Presence Detect
 device	spdmem
-attach	spdmem at i2c
-file	dev/i2c/spdmem.c			spdmem
+attach	spdmem at iic
+file	dev/i2c/spdmem.c		spdmem
 
-# SO-DIMM (JC-42.4) temperature sensor
-device	sdtemp
-attach	sdtemp at i2c
-file	dev/i2c/sdtemp.c			sdtemp
-
-device	adtfsm
-attach	adtfsm at i2c
-file	dev/i2c/adt7462.c			adtfsm
+# ADM1021
+device	admtemp: sysmon_envsys
+attach	admtemp at iic
+file	dev/i2c/adm1021.c		admtemp

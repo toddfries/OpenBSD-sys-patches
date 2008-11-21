@@ -1,5 +1,4 @@
-/*	$OpenBSD: fiq.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: fiq.c,v 1.5 2002/04/03 23:33:27 thorpej Exp $	*/
+/*	$NetBSD: fiq.c,v 1.6 2008/11/19 06:29:48 matt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -37,6 +36,7 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fiq.c,v 1.6 2008/11/19 06:29:48 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -173,5 +173,6 @@ fiq_release(struct fiqhandler *fh)
 		oldirqstate |= FIQ_BIT;
 	}
 
+	oldirqstate &= ~FIQ_BIT;
 	restore_interrupts(oldirqstate);
 }

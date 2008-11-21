@@ -1,4 +1,4 @@
-/*	$NetBSD: i82489var.h,v 1.5 2006/02/16 20:17:15 perry Exp $	*/
+/*	$NetBSD: i82489var.h,v 1.12 2008/04/28 20:23:40 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,31 +36,28 @@
  * Software definitions belonging to Local APIC driver.
  */
 
-static __inline u_int32_t i82489_readreg(int);
-static __inline void i82489_writereg(int, u_int32_t);
+static __inline uint32_t i82489_readreg(int);
+static __inline void i82489_writereg(int, uint32_t);
 
 #ifdef _KERNEL
-extern volatile u_int32_t local_apic[];
-extern volatile u_int32_t lapic_tpr;
+extern volatile uint32_t local_apic[];
+extern volatile uint32_t lapic_tpr;
 #endif
 
-static __inline u_int32_t
-i82489_readreg(reg)
-	int reg;
+static __inline uint32_t
+i82489_readreg(int reg)
 {
-	return *((volatile u_int32_t *)(((volatile u_int8_t *)local_apic)
+	return *((volatile uint32_t *)(((volatile uint8_t *)local_apic)
 	    + reg));
 }
 
 static __inline void
-i82489_writereg(reg, val)
-	int reg;
-	u_int32_t val;
+i82489_writereg(int reg, uint32_t val)
 {
-	*((volatile u_int32_t *)(((volatile u_int8_t *)local_apic) + reg)) = val;
+	*((volatile uint32_t *)(((volatile uint8_t *)local_apic) + reg)) = val;
 }
 
-#define lapic_cpu_number() 	(i82489_readreg(LAPIC_ID)>>LAPIC_ID_SHIFT)
+#define lapic_cpu_number() 	(i82489_readreg(LAPIC_ID) >> LAPIC_ID_SHIFT)
 
 /*
  * "spurious interrupt vector"; vector used by interrupt which was
@@ -79,12 +69,18 @@ extern void Xintrspurious(void);
 #define LAPIC_SPURIOUS_VECTOR		0xef
 
 /*
- * Vector used for inter-processor interrupts.
+ * Vectors used for inter-processor interrupts.
  */
 extern void Xintr_lapic_ipi(void);
 extern void Xrecurse_lapic_ipi(void);
 extern void Xresume_lapic_ipi(void);
 #define LAPIC_IPI_VECTOR			0xe0
+
+extern void Xintr_lapic_tlb_bcast(void);
+#define LAPIC_TLB_BCAST_VECTOR			0xe1
+
+extern void Xintr_lapic_tlb_mcast(void);
+#define LAPIC_TLB_MCAST_VECTOR			0xe2
 
 /*
  * Vector used for local apic timer interrupts.
@@ -116,6 +112,8 @@ struct cpu_info;
 extern void lapic_boot_init(paddr_t);
 extern void lapic_set_lvt(void);
 extern void lapic_enable(void);
+extern void lapic_suspend(void);
+extern void lapic_resume(void);
 extern void lapic_calibrate_timer(struct cpu_info *ci);
 extern void lapic_initclocks(void);
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: idprom.c,v 1.13 2006/10/03 13:02:32 tsutsui Exp $	*/
+/*	$NetBSD: idprom.c,v 1.15 2008/04/28 20:23:38 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: idprom.c,v 1.13 2006/10/03 13:02:32 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: idprom.c,v 1.15 2008/04/28 20:23:38 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -151,7 +144,7 @@ idprom_get(u_char *dst)
 
 	/* First, probe for a separate IDPROM (3/470). */
 	find_prom_map(OBIO_IDPROM1, PMAP_OBIO, IDPROM_SIZE, &va);
-	if (peek_byte((caddr_t)va) == -1) {
+	if (peek_byte((void *)va) == -1) {
 		/* IDPROM is in the EEPROM */
 		find_prom_map(OBIO_IDPROM2, PMAP_OBIO, IDPROM_SIZE, &va);
 	}

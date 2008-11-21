@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_32_exec_elf32.c,v 1.16 2006/07/23 22:06:10 ad Exp $	 */
+/*	$NetBSD: svr4_32_exec_elf32.c,v 1.20 2008/04/28 20:23:46 martin Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_32_exec_elf32.c,v 1.16 2006/07/23 22:06:10 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_32_exec_elf32.c,v 1.20 2008/04/28 20:23:46 martin Exp $");
 
 #define	ELFSIZE		32				/* XXX should die */
 
@@ -53,7 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_exec_elf32.c,v 1.16 2006/07/23 22:06:10 ad E
 
 #include <sys/mman.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 #include <machine/reg.h>
 
 #include <compat/svr4_32/svr4_32_types.h>
@@ -76,12 +69,7 @@ int sun_hwcap = (AV_SPARC_HWMUL_32x32|AV_SPARC_HWDIV_32x32|AV_SPARC_HWFSMULD);
 
 #if 0
 int
-svr4_32_copyargs(l, pack, arginfo, stackp, argp)
-	struct lwp *l;
-	struct exec_package *pack;
-	struct ps_strings *arginfo;
-	char **stackp;
-	void *argp;
+svr4_32_copyargs(struct lwp *l, struct exec_package *pack, struct ps_strings *arginfo, char **stackp, void *argp)
 {
 	size_t len;
 	AuxInfo ai[SVR4_32_AUX_ARGSIZ], *a, *platform=NULL, *exec=NULL;
@@ -204,12 +192,7 @@ svr4_32_copyargs(l, pack, arginfo, stackp, argp)
 }
 #else
 int
-svr4_32_copyargs(l, pack, arginfo, stackp, argp)
-	struct lwp *l;
-	struct exec_package *pack;
-	struct ps_strings *arginfo;
-	char **stackp;
-	void *argp;
+svr4_32_copyargs(struct lwp *l, struct exec_package *pack, struct ps_strings *arginfo, char **stackp, void *argp)
 {
 	size_t len;
 	AuxInfo ai[SVR4_32_AUX_ARGSIZ], *a;
@@ -275,18 +258,12 @@ svr4_32_copyargs(l, pack, arginfo, stackp, argp)
 #endif
 
 int
-svr4_32_elf32_probe(l, epp, eh, itp, pos)
-	struct lwp *l;
-	struct exec_package *epp;
-	void *eh;
-	char *itp;
-	vaddr_t *pos;
+svr4_32_elf32_probe(struct lwp *l, struct exec_package *epp, void *eh, char *itp, vaddr_t *pos)
 {
 	int error;
 
 	if (itp) {
-		if ((error = emul_find_interp(l,
-		    epp->ep_esch->es_emul->e_path, itp)))
+		if ((error = emul_find_interp(l, epp, itp)))
 			return error;
 	}
 	epp->ep_flags |= EXEC_32;

@@ -1,6 +1,4 @@
-/*	$OpenBSD: if_vgereg.h,v 1.2 2007/11/26 09:28:33 martynas Exp $	*/
-/*	$FreeBSD: if_vgereg.h,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
-/*
+/*-
  * Copyright (c) 2004
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
  *
@@ -30,6 +28,8 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/vge/if_vgereg.h,v 1.2 2005/01/06 01:43:31 imp Exp $
  */
 
 /*
@@ -44,9 +44,6 @@
 
 #ifndef _IF_VGEREG_H_
 #define _IF_VGEREG_H_
-
-#define VIA_VENDORID		0x1106
-#define VIA_DEVICEID_61XX	0x3119
 
 #define VGE_PAR0		0x00	/* physical address register */
 #define VGE_PAR1		0x02
@@ -72,7 +69,7 @@
 #define VGE_CAM6		0x16
 #define VGE_CAM7		0x17
 #define VGE_TXDESC_HIADDR	0x18	/* Hi part of 64bit txdesc base addr */
-#define VGE_DATABUF_HIADDR	0x1D	/* Hi part of 64bit data buffer addr */
+#define VGE_DATABUF_HIADDR	0x1C	/* Hi part of 64bit data buffer addr */
 #define VGE_INTCTL0		0x20	/* interrupt control register */
 #define VGE_RXSUPPTHR		0x20
 #define VGE_TXSUPPTHR		0x20
@@ -243,8 +240,8 @@
 #define VGE_INTCTL_HC_RELOAD		0x02 /* enable hold timer reload */
 #define VGE_INTCTL_STATUS		0x04 /* interrupt pending status */
 #define VGE_INTCTL_MASK			0x18 /* multilayer int mask */
-#define VGE_INTCTL_RXINTSUP_DISABLE	0x20 /* disable RX int suppression */
-#define VGE_INTCTL_TXINTSUP_DISABLE	0x40 /* disable TX int suppression */
+#define VGE_INTCTL_RXINTSUP_DISABLE	0x20 /* disable RX int supression */
+#define VGE_INTCTL_TXINTSUP_DISABLE	0x40 /* disable TX int supression */
 #define VGE_INTCTL_SOFTINT		0x80 /* request soft interrupt */
 
 #define VGE_INTMASK_LAYER0		0x00
@@ -387,8 +384,8 @@
  *   the multicast hash filter or the CAM table)
  * - The behavior of the interrupt holdoff timer register at offset
  *   0x20 (the page select bits allow you to set the interrupt
- *   holdoff timer, the TX interrupt suppression count or the
- *   RX interrupt suppression count)
+ *   holdoff timer, the TX interrupt supression count or the
+ *   RX interrupt supression count)
  * - The behavior the WOL pattern programming registers at offset
  *   0xC0 (controls which pattern is set)
  */
@@ -584,11 +581,12 @@
  */
 
 #define VGE_TX_FRAGS	7
+#define VGE_TX_MAXLEN	(1 << 14)		/* maximum TX packet size */
 
-struct vge_tx_frag {
-	uint32_t		vge_addrlo;
-	uint16_t		vge_addrhi;
-	uint16_t		vge_buflen;
+struct vge_txfrag {
+	volatile uint32_t	tf_addrlo;
+	volatile uint16_t	tf_addrhi;
+	volatile uint16_t	tf_buflen;
 };
 
 /*
@@ -602,10 +600,10 @@ struct vge_tx_frag {
 
 #define VGE_TXDESC_Q		0x8000
 
-struct vge_tx_desc {
-	uint32_t		vge_sts;
-	uint32_t		vge_ctl;
-	struct vge_tx_frag	vge_frag[VGE_TX_FRAGS];
+struct vge_txdesc {
+	volatile uint32_t	td_sts;
+	volatile uint32_t	td_ctl;
+	struct vge_txfrag	td_frag[VGE_TX_FRAGS];
 };
 
 #define VGE_TDSTS_COLLCNT	0x0000000F	/* TX collision count */
@@ -644,12 +642,12 @@ struct vge_tx_desc {
 
 /* Receive DMA descriptors have a single fragment pointer. */
 
-struct vge_rx_desc {
-	volatile uint32_t	vge_sts;
-	volatile uint32_t	vge_ctl;
-	volatile uint32_t	vge_addrlo;
-	volatile uint16_t	vge_addrhi;
-	volatile uint16_t	vge_buflen;
+struct vge_rxdesc {
+	volatile uint32_t	rd_sts;
+	volatile uint32_t	rd_ctl;
+	volatile uint32_t	rd_addrlo;
+	volatile uint16_t	rd_addrhi;
+	volatile uint16_t	rd_buflen;
 };
 
 /*

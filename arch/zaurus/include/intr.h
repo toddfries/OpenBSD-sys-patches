@@ -1,5 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.7 2007/05/15 05:26:45 miod Exp $	*/
-/*	$NetBSD: intr.h,v 1.12 2003/06/16 20:00:59 thorpej Exp $	*/
+/*	$NetBSD: intr.h,v 1.6 2008/04/27 18:58:47 matt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2003 Wasabi Systems, Inc.
@@ -36,29 +35,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef	_EVBARM_INTR_H_
-#define	_EVBARM_INTR_H_
+#ifndef	_ZAURUS_INTR_H_
+#define	_ZAURUS_INTR_H_
 
 #ifdef _KERNEL
 
-
 /* Interrupt priority "levels". */
 #define	IPL_NONE	0	/* nothing */
-#define	IPL_SOFT	1	/* generic software interrupts */
-#define	IPL_SOFTCLOCK	2	/* software clock interrupt */
+#define	IPL_SOFTCLOCK	1	/* timeouts */
+#define	IPL_SOFTBIO	2	/* block I/O */
 #define	IPL_SOFTNET	3	/* software network interrupt */
-#define	IPL_BIO		4	/* block I/O */
-#define	IPL_NET		5	/* network */
-#define	IPL_SOFTSERIAL	6	/* software serial interrupt */
-#define	IPL_TTY		7	/* terminals */
-#define	IPL_VM		8	/* memory allocation */
-#define	IPL_AUDIO	9	/* audio device */
-#define	IPL_CLOCK	10	/* clock interrupt */
-#define	IPL_STATCLOCK	11	/* statistics clock interrupt */
-#define	IPL_HIGH	12	/* everything */
-#define	IPL_SERIAL	13	/* serial device */
+#define	IPL_SOFTSERIAL	4	/* software serial interrupt */
+#define	IPL_VM		5	/* memory allocation */
+#define	IPL_SCHED	6	/* clock interrupt */
+#define	IPL_HIGH	7	/* everything */
 
-#define	NIPL		14
+#define	NIPL		8
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -72,34 +64,109 @@
 #define IST_EDGE_RISING  5
 #define IST_EDGE_BOTH    6
 
+#ifdef __OLD_INTERRUPT_CODE	/* XXX XXX XXX */
+
+/* Software interrupt priority levels */
+
+#define SOFTIRQ_CLOCK   0
+#define SOFTIRQ_NET     1
+#define SOFTIRQ_SERIAL  2
+
+#define SOFTIRQ_BIT(x)  (1 << x)
+
+#include <arm/arm32/psl.h>
+
+#else /* ! __OLD_INTERRUPT_CODE */
+
+#define	__NEWINTR	/* enables new hooks in cpu_fork()/cpu_switch() */
+
 #ifndef _LOCORE
 
 #include <sys/device.h>
 #include <sys/queue.h>
 
-#define	splhigh()	_splraise(IPL_HIGH)
+#if defined(_LKM)
+
+int	_splraise(int);
+int	_spllower(int);
+void	splx(int);
+
+#else	/* _LKM */
+
+#include "opt_arm_intr_impl.h"
+
+#if defined(ARM_INTR_IMPL)
+
+/*
+ * Each board needs to define the following functions:
+ *
+ * int	_splraise(int);
+ * int	_spllower(int);
+ * void	splx(int);
+ *
+ * These may be defined as functions, static inline functions, or macros,
+ * but there must be a _spllower() and splx() defined as functions callable
+ * from assembly language (for cpu_switch()).  However, since it's quite
+ * useful to be able to inline splx(), you could do something like the
+ * following:
+ *
+ * in <boardtype>_intr.h:
+ * 	static inline int
+ *	boardtype_splx(int spl)
+ *	{...}
+ *
+ *	#define splx(nspl)	boardtype_splx(nspl)
+ *	...
+ * and in boardtype's machdep code:
+ *
+ *	...
+ *	#undef splx
+ *	int
+ *	splx(int spl)
+ *	{
+ *		return boardtype_splx(spl);
+ *	}
+ */
+
+#include ARM_INTR_IMPL
+
+#else /* ARM_INTR_IMPL */
+
+#error ARM_INTR_IMPL not defined.
+
+#endif	/* ARM_INTR_IMPL */
+
+#endif /* _LKM */
+
 #define	splsoft()	_splraise(IPL_SOFT)
-#define	splsoftclock()	_splraise(IPL_SOFTCLOCK)
-#define	splsoftnet()	_splraise(IPL_SOFTNET)
-#define	splbio()	_splraise(IPL_BIO)
-#define	splnet()	_splraise(IPL_NET)
-#define	spltty()	_splraise(IPL_TTY)
-#define	splvm()		_splraise(IPL_VM)
-#define	splaudio()	_splraise(IPL_AUDIO)
-#define	splclock()	_splraise(IPL_CLOCK)
-#define	splstatclock()	_splraise(IPL_STATCLOCK)
-#define	splserial()	_splraise(IPL_SERIAL)
+
+typedef uint8_t ipl_t;
+typedef struct {
+	ipl_t _ipl;
+} ipl_cookie_t;
+
+static inline ipl_cookie_t
+makeiplcookie(ipl_t ipl)
+{
+
+	return (ipl_cookie_t){._ipl = ipl};
+}
+
+static inline int
+splraiseipl(ipl_cookie_t icookie)
+{
+
+	return _splraise(icookie._ipl);
+}
 
 #define	spl0()		_spllower(IPL_NONE)
 
-#define	splsched()	splhigh()
-#define	spllock()	splhigh()
+#include <sys/spl.h>
 
 #endif /* ! _LOCORE */
 
-#include <arm/xscale/pxa2x0_intr.h>
+#endif /* __OLD_INTERRUPT_CODE */
 
 #endif /* _KERNEL */
 
-#endif	/* _EVBARM_INTR_H_ */
-
+#endif	/* _ZAURUS_INTR_H_ */

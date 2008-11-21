@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpufunc_asm_sa1.S,v 1.2 2004/08/04 20:20:18 miod Exp $	*/
-/*	$NetBSD: cpufunc_asm_sa1.S,v 1.8 2002/08/17 16:36:32 thorpej Exp $	*/
+/*	$NetBSD: cpufunc_asm_sa1.S,v 1.10 2007/10/17 19:53:29 garbled Exp $	*/
 
 /*
  * Copyright (c) 1997,1998 Mark Brinicombe.
@@ -39,6 +38,9 @@
 #include <machine/cpu.h>
 #include <machine/asm.h>
 
+.Lblock_userspace_access:
+	.word	_C_LABEL(block_userspace_access)
+
 /*
  * Functions to set the MMU Translation Table Base register
  *
@@ -50,6 +52,11 @@ ENTRY(sa1_setttb)
 	mrs	r3, cpsr_all
 	orr	r1, r3, #(I32_bit | F32_bit)
 	msr	cpsr_all, r1
+#else
+	ldr	r3, .Lblock_userspace_access
+	ldr	r2, [r3]
+	orr	r1, r2, #1 
+	str	r1, [r3]
 #endif
 	stmfd	sp!, {r0-r3, lr}
 	bl	_C_LABEL(sa1_cache_cleanID)
@@ -71,6 +78,8 @@ ENTRY(sa1_setttb)
 	mov	r0, r0
 #ifdef CACHE_CLEAN_BLOCK_INTR
 	msr	cpsr_all, r3
+#else
+	str	r2, [r3]
 #endif
 	mov	pc, lr
 
@@ -141,8 +150,14 @@ _C_LABEL(sa1_cache_clean_size):
 #define	SA1_CACHE_CLEAN_UNBLOCK						\
 	msr	cpsr_all, r3
 #else
-#define	SA1_CACHE_CLEAN_BLOCK
-#define	SA1_CACHE_CLEAN_UNBLOCK
+#define	SA1_CACHE_CLEAN_BLOCK						\
+	ldr	r3, .Lblock_userspace_access			;	\
+	ldr	ip, [r3]					;	\
+	orr	r0, ip, #1					;	\
+	str	r0, [r3]
+
+#define	SA1_CACHE_CLEAN_UNBLOCK						\
+	str	ip, [r3]
 #endif /* CACHE_CLEAN_BLOCK_INTR */
 
 #ifdef DOUBLE_CACHE_CLEAN_BANK
@@ -272,9 +287,6 @@ ENTRY(sa1_cache_syncI_rng)
  *
  * These is the CPU-specific parts of the context switcher cpu_switch()
  * These functions actually perform the TTB reload.
- *
- * NOTE: Special calling convention
- *	r1, r4-r13 must be preserved
  */
 #if defined(CPU_SA110)
 ENTRY(sa110_context_switch)

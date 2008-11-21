@@ -1,5 +1,4 @@
-/*	$OpenBSD: czreg.h,v 1.2 2003/11/16 20:30:06 avsm Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: czreg.h,v 1.2 2007/12/25 18:33:40 perry Exp $	*/
 
 /*-
  * Copyright (c) 2000 Zembu Labs, Inc.

@@ -1,5 +1,4 @@
-/*	$OpenBSD: rpc.c,v 1.13 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: rpc.c,v 1.16 1996/10/13 02:29:06 christos Exp $	*/
+/*	$NetBSD: rpc.c,v 1.27 2008/03/25 21:23:50 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -54,15 +53,22 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 
-#include <nfs/rpcv2.h>
-
+#ifdef _STANDALONE
+#include <lib/libkern/libkern.h>
 #include "stand.h"
+#else
+#include <string.h>
+#include <errno.h>
+#include <stdio.h>
+#endif
+
+#include "rpcv2.h"
+
 #include "net.h"
-#include "netif.h"
 #include "rpc.h"
 
 struct auth_info {
-	int32_t		authtype;	/* auth type */
+	int32_t 	authtype;	/* auth type */
 	u_int32_t	authlen;	/* auth length */
 };
 
@@ -76,7 +82,7 @@ struct auth_unix {
 
 struct rpc_call {
 	u_int32_t	rp_xid;		/* request transaction id */
-	int32_t		rp_direction;	/* call direction (0) */
+	int32_t 	rp_direction;	/* call direction (0) */
 	u_int32_t	rp_rpcvers;	/* rpc version (2) */
 	u_int32_t	rp_prog;	/* program */
 	u_int32_t	rp_vers;	/* version */
@@ -85,8 +91,8 @@ struct rpc_call {
 
 struct rpc_reply {
 	u_int32_t	rp_xid;		/* request transaction id */
-	int32_t		rp_direction;	/* call direction (1) */
-	int32_t		rp_astatus;	/* accept status (0: accepted) */
+	int32_t 	rp_direction;	/* call direction (1) */
+	int32_t 	rp_astatus;	/* accept status (0: accepted) */
 	union {
 		u_int32_t	rpu_errno;
 		struct {
@@ -97,8 +103,7 @@ struct rpc_reply {
 };
 
 /* Local forwards */
-static	ssize_t recvrpc(struct iodesc *, void *, size_t, time_t);
-static	int rpc_getport(struct iodesc *, n_long, n_long);
+static	ssize_t recvrpc __P((struct iodesc *, void *, size_t, time_t));
 
 int rpc_xid;
 int rpc_port = 0x400;	/* predecrement */
@@ -108,8 +113,8 @@ int rpc_port = 0x400;	/* predecrement */
  * Note: Caller must leave room for headers.
  */
 ssize_t
-rpc_call(struct iodesc *d, n_long prog, n_long vers, n_long proc, void *sdata,
-    size_t slen, void *rdata, size_t rlen)
+rpc_call(struct iodesc *d, n_long prog, n_long vers, n_long proc,
+	void *sdata, size_t slen, void *rdata, size_t rlen)
 {
 	ssize_t cc;
 	struct auth_info *auth;
@@ -128,7 +133,7 @@ rpc_call(struct iodesc *d, n_long prog, n_long vers, n_long proc, void *sdata,
 
 	port = rpc_getport(d, prog, vers);
 	if (port == -1)
-		return (-1);
+		return -1;
 
 	d->destport = htons(port);
 
@@ -148,7 +153,7 @@ rpc_call(struct iodesc *d, n_long prog, n_long vers, n_long proc, void *sdata,
 #if 1
 	/* Auth credentials: always auth unix (as root) */
 	send_head -= sizeof(struct auth_unix);
-	bzero(send_head, sizeof(struct auth_unix));
+	(void)memset(send_head, 0, sizeof(struct auth_unix));
 	send_head -= sizeof(*auth);
 	auth = (struct auth_info *)send_head;
 	auth->authtype = htonl(RPCAUTH_UNIX);
@@ -183,14 +188,14 @@ rpc_call(struct iodesc *d, n_long prog, n_long vers, n_long proc, void *sdata,
 
 #ifdef RPC_DEBUG
 	if (debug)
-		printf("callrpc: cc=%d rlen=%d\n", cc, rlen);
+		printf("callrpc: cc=%ld rlen=%lu\n", (long)cc, (u_long)rlen);
 #endif
-	if (cc < -1)
-		return (-1);
+	if (cc == -1)
+		return -1;
 
 	if ((size_t)cc <= sizeof(*reply)) {
 		errno = EBADRPC;
-		return (-1);
+		return -1;
 	}
 
 	recv_tail = recv_head + cc;
@@ -208,13 +213,13 @@ rpc_call(struct iodesc *d, n_long prog, n_long vers, n_long proc, void *sdata,
 			printf("callrpc: reply auth != NULL\n");
 #endif
 		errno = EBADRPC;
-		return(-1);
+		return -1;
 	}
 	x = ntohl(reply->rp_u.rpu_rok.rok_status);
 	if (x != 0) {
 		printf("callrpc: error = %d\n", x);
 		errno = EBADRPC;
-		return(-1);
+		return -1;
 	}
 	recv_head += sizeof(*reply);
 
@@ -236,7 +241,7 @@ recvrpc(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 	errno = 0;
 #ifdef RPC_DEBUG
 	if (debug)
-		printf("recvrpc: called len=%d\n", len);
+		printf("recvrpc: called len=%lu\n", (u_long)len);
 #endif
 
 	n = readudp(d, pkt, len, tleft);
@@ -271,7 +276,7 @@ recvrpc(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 	}
 
 	/* Return data count (thus indicating success) */
-	return (n);
+	return n;
 }
 
 /*
@@ -299,6 +304,11 @@ rpc_fromaddr(void *pkt, struct in_addr *addr, u_short *port)
 	*port = hhdr->uh_sport;
 }
 
+#ifdef NO_PMAP_CACHE
+#define rpc_pmap_getcache(addr, prog, vers) (-1)
+#define rpc_pmap_putcache(addr, prog, vers, port)
+#else
+
 /*
  * RPC Portmapper cache
  */
@@ -309,10 +319,16 @@ struct pmap_list {
 	struct in_addr	addr;	/* server, net order */
 	u_int	prog;		/* host order */
 	u_int	vers;		/* host order */
-	int	port;		/* host order */
+	int 	port;		/* host order */
 } rpc_pmap_list[PMAP_NUM];
 
-/* return port number in host order, or -1 */
+/*
+ * return port number in host order, or -1.
+ * arguments are:
+ *  addr .. server, net order.
+ *  prog .. host order.
+ *  vers .. host order.
+ */
 int
 rpc_pmap_getcache(struct in_addr addr, u_int prog, u_int vers)
 {
@@ -320,12 +336,21 @@ rpc_pmap_getcache(struct in_addr addr, u_int prog, u_int vers)
 
 	for (pl = rpc_pmap_list; pl < &rpc_pmap_list[rpc_pmap_num]; pl++) {
 		if (pl->addr.s_addr == addr.s_addr &&
-		    pl->prog == prog && pl->vers == vers)
-			return (pl->port);
+			pl->prog == prog && pl->vers == vers )
+		{
+			return pl->port;
+		}
 	}
-	return (-1);
+	return -1;
 }
 
+/*
+ * arguments are:
+ *  addr .. server, net order.
+ *  prog .. host order.
+ *  vers .. host order.
+ *  port .. host order.
+ */
 void
 rpc_pmap_putcache(struct in_addr addr, u_int prog, u_int vers, int port)
 {
@@ -349,11 +374,12 @@ rpc_pmap_putcache(struct in_addr addr, u_int prog, u_int vers, int port)
 	pl->vers = vers;
 	pl->port = port;
 }
-
+#endif
 
 /*
  * Request a port number from the port mapper.
  * Returns the port in host order.
+ * prog and vers are host order.
  */
 int
 rpc_getport(struct iodesc *d, n_long prog, n_long vers)
@@ -386,12 +412,12 @@ rpc_getport(struct iodesc *d, n_long prog, n_long vers)
 
 	/* This one is fixed forever. */
 	if (prog == PMAPPROG)
-		return (PMAPPORT);
+		return PMAPPORT;
 
 	/* Try for cached answer first */
 	port = rpc_pmap_getcache(d->destip, prog, vers);
 	if (port != -1)
-		return (port);
+		return port;
 
 	args = &sdata.d;
 	args->prog = htonl(prog);
@@ -402,14 +428,14 @@ rpc_getport(struct iodesc *d, n_long prog, n_long vers)
 
 	cc = rpc_call(d, PMAPPROG, PMAPVERS, PMAPPROC_GETPORT,
 		args, sizeof(*args), res, sizeof(*res));
-	if (cc < 0 || (size_t)cc < sizeof(*res)) {
+	if ((size_t)cc < sizeof(*res)) {
 		printf("getport: %s", strerror(errno));
 		errno = EBADRPC;
-		return (-1);
+		return -1;
 	}
 	port = (int)ntohl(res->port);
 
 	rpc_pmap_putcache(d->destip, prog, vers, port);
 
-	return (port);
+	return port;
 }

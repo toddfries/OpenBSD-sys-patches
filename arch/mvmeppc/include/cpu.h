@@ -1,9 +1,8 @@
-/*	$OpenBSD: cpu.h,v 1.8 2004/01/29 21:28:56 miod Exp $	*/
-/*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
+/*	$NetBSD: cpu.h,v 1.1 2002/02/27 21:02:14 scw Exp $	*/
 
 /*
- * Copyright (C) 1995, 1996 Wolfgang Solfrank.
- * Copyright (C) 1995, 1996 TooLs GmbH.
+ * Copyright (C) 1995-1997 Wolfgang Solfrank.
+ * Copyright (C) 1995-1997 TooLs GmbH.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,35 +33,19 @@
 #ifndef	_MACHINE_CPU_H_
 #define	_MACHINE_CPU_H_
 
+#ifdef _KERNEL
+#define	CPU_MAXNUM	1
+extern char *bootpath;
+#endif
+
 #include <powerpc/cpu.h>
 
-void install_extint(void (*)(void));
-void nvram_map(void);
+#define	MVMEPPC_FAMILY(m)	((m) & 0xfff0)
 
-/*
- * CPU Configuration registers (in ISA space)
- */
-
-#define	MVME_CPUCONF_REG	0x0800
-#define	MVME_FEATURE_REG	0x0802
-#define	MVME_STATUS_REG		0x0803
-#define	MVME_SEVENSEG_REG	0x08c0
-
-/* feature bits */
-#define	MVME_FEATURE_SCC	0x40
-#define	MVME_FEATURE_PMC2	0x20
-#define	MVME_FEATURE_PMC1	0x10
-#define	MVME_FEATURE_VME	0x08
-#define	MVME_FEATURE_GFX	0x04
-#define	MVME_FEATURE_LAN	0x02
-#define	MVME_FEATURE_SCSI	0x01
-
-/* status values */
-#define	MVMETYPE_RESERVED	0xfa
-#define	MVMETYPE_2600_712	0xfb
-#define	MVMETYPE_2600_761	0xfc
-#define	MVMETYPE_3600_712	0xfd
-#define	MVMETYPE_3600_761	0xfe
-#define	MVMETYPE_1600		0xff
+#define	MVMEPPC_FAMILY_160x	0x1600
+#define	MVMEPPC_FAMILY_210x	0x2100
+#define	MVMEPPC_FAMILY_230x	0x2300
+#define	MVMEPPC_FAMILY_240x	0x2400
+#define	MVMEPPC_FAMILY_360x	0x3600
 
 #endif	/* _MACHINE_CPU_H_ */

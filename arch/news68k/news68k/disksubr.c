@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.27 2006/11/25 11:59:57 scw Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.31 2008/01/02 11:48:26 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.27 2006/11/25 11:59:57 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.31 2008/01/02 11:48:26 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,7 +87,8 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	if (biowait(bp))
 		msg = "I/O error";
 	else for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)(bp->b_data + DEV_BSIZE - sizeof(*dlp));
+	    dlp <= (struct disklabel *)((char *)bp->b_data + DEV_BSIZE
+	    - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
@@ -101,7 +102,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 			break;
 		}
 	}
-	brelse(bp);
+	brelse(bp, 0);
 	return msg;
 }
 
@@ -171,13 +172,14 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	if ((error = biowait(bp)) != 0)
 		goto done;
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)
-	      (bp->b_data + lp->d_secsize - sizeof(*dlp));
+	    dlp <= (struct disklabel *)((char *)bp->b_data + lp->d_secsize
+	    - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
 		    dkcksum(dlp) == 0) {
 			*dlp = *lp;
-			bp->b_flags &= ~(B_READ|B_DONE);
+			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_READ);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -186,6 +188,6 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	}
 	error = ESRCH;
  done:
-	brelse(bp);
+	brelse(bp, 0);
 	return error;
 }

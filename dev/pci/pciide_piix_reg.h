@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_piix_reg.h,v 1.11 2006/04/25 09:09:42 jsg Exp $	*/
-/*	$NetBSD: pciide_piix_reg.h,v 1.5 2001/01/05 15:29:40 bouyer Exp $	*/
+/*	$NetBSD: pciide_piix_reg.h,v 1.13 2007/12/25 18:33:42 perry Exp $	*/
 
 /*
  * Copyright (c) 1998 Manuel Bouyer.
@@ -15,9 +14,8 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -32,16 +30,13 @@
  *
  */
 
-#ifndef _DEV_PCI_PCIIDE_PIIX_REG_H_
-#define _DEV_PCI_PCIIDE_PIIX_REG_H_
-
 /*
- * Registers definitions for Intel's PIIX series PCI IDE controllers.
+ * Registers definitions for Intel's PIIX serie PCI IDE controllers.
  * See Intel's
  * "82371FB (PIIX) and 82371SB (PIIX3) PCI ISA IDE XCELERATOR"
  * "82371AB PCI-TO-ISA / IDE XCELERATOR (PIIX4)" and
  * "Intel 82801AA (ICH) and Intel 82801AB (ICH0) I/O Controller Hub"
- * available from http://developer.intel.com/
+ * available from http://developers.intel.com/
  */
 
 /*
@@ -97,6 +92,7 @@
 /* Control register */
 #define PIIX_UDMACTL_DRV_EN(channel, drive) (0x01 << ((channel) * 2 + (drive)))
 /* Ultra DMA/33 timing register (PIIX4 only) */
+#define PIIX_UDMATIM 0x4a
 #define PIIX_UDMATIM_SHIFT 16
 #define PIIX_UDMATIM_SET(x, channel, drive) \
 	(((x) << ((channel * 8) + (drive * 4))) << PIIX_UDMATIM_SHIFT)
@@ -117,11 +113,16 @@
  * ISP and RTC registers for the various PIO and DMA mode
  * (from the PIIX4 doc).
  */
-static int8_t piix_isp_pio[] = {0x00, 0x00, 0x01, 0x02, 0x02};
-static int8_t piix_rtc_pio[] = {0x00, 0x00, 0x00, 0x01, 0x03};
-static int8_t piix_isp_dma[] = {0x00, 0x02, 0x02};
-static int8_t piix_rtc_dma[] = {0x00, 0x02, 0x03};
-static int8_t piix4_sct_udma[] = {0x00, 0x01, 0x02, 0x01, 0x02, 0x01};
+static const int8_t piix_isp_pio[] __unused =
+    {0x00, 0x00, 0x01, 0x02, 0x02};
+static const int8_t piix_rtc_pio[] __unused =
+    {0x00, 0x00, 0x00, 0x01, 0x03};
+static const int8_t piix_isp_dma[] __unused =
+    {0x00, 0x02, 0x02};
+static const int8_t piix_rtc_dma[] __unused =
+    {0x00, 0x02, 0x03};
+static const int8_t piix4_sct_udma[] __unused =
+    {0x00, 0x01, 0x02, 0x01, 0x02, 0x01};
 
 /*
  * ICH5/ICH5R SATA registers definitions
@@ -141,8 +142,8 @@ static int8_t piix4_sct_udma[] = {0x00, 0x01, 0x02, 0x01, 0x02, 0x01};
 #define ICH_SATA_PCS_P1P	0x20 /* Port 1 present */
 
 /*
- * ICH6/ICH7 SATA registers definitions
- */
+ *  * ICH6/ICH7 SATA registers definitions
+ *   */
 #define ICH6_SATA_MAP_CMB_MASK	0x03 /* Combined mode bits */
 #define ICH6_SATA_MAP_CMB_PRI	0x01 /* Combined mode, IDE Primary */
 #define ICH6_SATA_MAP_CMB_SEC	0x02 /* Combined mode, IDE Secondary */
@@ -150,6 +151,3 @@ static int8_t piix4_sct_udma[] = {0x00, 0x01, 0x02, 0x01, 0x02, 0x01};
 #define ICH7_SATA_MAP_SMS_IDE	0x00
 #define ICH7_SATA_MAP_SMS_AHCI	0x40
 #define ICH7_SATA_MAP_SMS_RAID	0x80
-
-
-#endif	/* !_DEV_PCI_PCIIDE_PIIX_REG_H_ */

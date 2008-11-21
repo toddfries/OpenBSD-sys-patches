@@ -1,8 +1,11 @@
+/* $NetBSD: via_drv.c,v 1.4 2008/07/08 06:50:23 mrg Exp $ */
+
 /* via_drv.c -- VIA unichrome driver -*- linux-c -*-
  * Created: Fri Aug 12 2005 by anholt@FreeBSD.org
  */
 /*-
  * Copyright 2005 Eric Anholt
+ * Copyright 2007 Jared D. McNeill
  * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -25,8 +28,12 @@
  *
  * Authors:
  *    Eric Anholt <anholt@FreeBSD.org>
+ *    Jared D. McNeill <jmcneill@NetBSD.org>
  *
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via_drv.c,v 1.4 2008/07/08 06:50:23 mrg Exp $");
 
 #include "drmP.h"
 #include "drm.h"
@@ -34,15 +41,12 @@
 #include "via_drv.h"
 #include "drm_pciids.h"
 
-void	via_configure(drm_device_t *);
-
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t via_pciidlist[] = {
 	viadrv_PCI_IDS
 };
 
-void
-via_configure(drm_device_t *dev)
+static void viadrm_configure(drm_device_t *dev)
 {
 	dev->driver.buf_priv_size	= 1;
 	dev->driver.load		= via_driver_load;
@@ -61,10 +65,10 @@ via_configure(drm_device_t *dev)
 
 	dev->driver.name		= DRIVER_NAME;
 	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
+	dev->driver.date		= VIA_DRM_DRIVER_DATE;
+	dev->driver.major		= VIA_DRM_DRIVER_MAJOR;
+	dev->driver.minor		= VIA_DRM_DRIVER_MINOR;
+	dev->driver.patchlevel		= VIA_DRM_DRIVER_PATCHLEVEL;
 
 	dev->driver.use_agp		= 1;
 	dev->driver.use_mtrr		= 1;
@@ -72,83 +76,22 @@ via_configure(drm_device_t *dev)
 	dev->driver.use_vbl_irq		= 1;
 }
 
-#ifdef __FreeBSD__
 static int
-via_probe(device_t dev)
+viadrm_probe(struct device *parent, struct cfdata *match, void *opaque)
 {
-	return drm_probe(dev, via_pciidlist);
+	struct pci_attach_args *pa = opaque;
+	return drm_probe(pa, via_pciidlist);
 }
 
-static int
-via_attach(device_t nbdev)
-{
-	drm_device_t *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(drm_device_t));
-	via_configure(dev);
-	return drm_attach(nbdev, via_pciidlist);
-}
-
-static device_method_t via_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		via_probe),
-	DEVMETHOD(device_attach,	via_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
-};
-
-static driver_t via_driver = {
-	"drm",
-	via_methods,
-	sizeof(drm_device_t)
-};
-
-extern devclass_t drm_devclass;
-DRIVER_MODULE(via, pci, via_driver, drm_devclass, 0, 0);
-MODULE_DEPEND(via, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-int	viadrm_probe(struct device *, void *, void *);
-void	viadrm_attach(struct device *, struct device *, void *);
-
-int
-#if defined(__OpenBSD__)
-viadrm_probe(struct device *parent, void *match, void *aux)
-#else
-viadrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
-{
-	return drm_probe((struct pci_attach_args *)aux, via_pciidlist);
-}
-
-void
+static void
 viadrm_attach(struct device *parent, struct device *self, void *opaque)
 {
 	struct pci_attach_args *pa = opaque;
-	drm_device_t *dev = (drm_device_t *)self;
+	drm_device_t *dev = device_private(self);
 
 	viadrm_configure(dev);
-	drm_attach(parent, self, pa, via_pciidlist);
+	drm_attach(self, pa, via_pciidlist);
 }
 
-#if defined(__OpenBSD__)
-struct cfattach viadrm_ca = {
-	sizeof(drm_device_t), viadrm_probe, viadrm_attach,
-	drm_detach, drm_activate
-};
-
-struct cfdriver viadrm_cd = {
-	0, "viadrm", DV_DULL
-};
-#else
-#ifdef _LKM
-CFDRIVER_DECL(viadrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(viadrm, sizeof(drm_device_t), viadrm_probe, viadrm_attach,
-	drm_detach, drm_activate);
-#endif
-#endif
-
-#endif
+CFATTACH_DECL_NEW(viadrm, sizeof(drm_device_t), viadrm_probe, viadrm_attach,
+    drm_detach, drm_activate);

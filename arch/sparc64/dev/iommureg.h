@@ -1,5 +1,4 @@
-/*	$OpenBSD: iommureg.h,v 1.15 2007/05/29 09:53:59 sobrado Exp $	*/
-/*	$NetBSD: iommureg.h,v 1.6 2001/07/20 00:07:13 eeh Exp $	*/
+/*	$NetBSD: iommureg.h,v 1.14 2006/02/13 21:47:12 cdi Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -51,24 +50,23 @@
 
 /* iommmu registers */
 struct iommureg {
-	volatile u_int64_t	iommu_cr;	/* IOMMU control register */
-	volatile u_int64_t	iommu_tsb;	/* IOMMU TSB base register */
-	volatile u_int64_t	iommu_flush;	/* IOMMU flush register */
+	uint64_t	iommu_cr;	/* IOMMU control register */
+	uint64_t	iommu_tsb;	/* IOMMU TSB base register */
+	uint64_t	iommu_flush;	/* IOMMU flush register */
 };
 
 /* streaming buffer registers */
 struct iommu_strbuf {
-	volatile u_int64_t	strbuf_ctl;	/* streaming buffer control reg */
-	volatile u_int64_t	strbuf_pgflush;	/* streaming buffer page flush */
-	volatile u_int64_t	strbuf_flushsync;/* streaming buffer flush sync */
+	uint64_t	strbuf_ctl;	/* streaming buffer control reg */
+	uint64_t	strbuf_pgflush;	/* streaming buffer page flush */
+	uint64_t	strbuf_flushsync;/* streaming buffer flush sync */
 };
 
-#define IOMMUREG(x)     (offsetof(struct iommureg, x))
-#define STRBUFREG(x)    (offsetof(struct iommu_strbuf, x))
-
+#define	IOMMUREG(x)	(offsetof(struct iommureg, x))
+#define	STRBUFREG(x)	(offsetof(struct iommu_strbuf, x))
 /* streaming buffer control register */
-#define STRBUF_EN		0x000000000000000001LL
-#define STRBUF_D		0x000000000000000002LL
+#define STRBUF_EN	0x000000000000000001LL
+#define STRBUF_D	0x000000000000000002LL
 
 /* control register bits */
 #define IOMMUCR_TSB1K		0x000000000000000000LL	/* Nummber of entries in IOTSB */
@@ -93,12 +91,9 @@ struct iommu_strbuf {
 #define IOTTE_8K	0x0000000000000000LL
 #define IOTTE_STREAM	0x1000000000000000LL	/* Is page streamable? */
 #define	IOTTE_LOCAL	0x0800000000000000LL	/* Accesses to same bus segment? */
-#define	IOTTE_CONTEXT	0x07ff800000000000LL	/* context number */
-#define IOTTE_PAMASK	0x000007ffffffe000LL	/* Let's assume this is correct (bits 42..13) */
+#define IOTTE_PAMASK	0x000001ffffffe000LL	/* Let's assume this is correct */
 #define IOTTE_C		0x0000000000000010LL	/* Accesses to cacheable space */
-#define IOTTE_W		0x0000000000000002LL	/* Writeable */
-#define IOTTE_SOFTWARE	0x0000000000001f80LL	/* For software use (bits 12..7) */
-
+#define IOTTE_W		0x0000000000000002LL	/* Writable */
 
 /*
  * On sun4u each bus controller has a separate IOMMU.  The IOMMU has 
@@ -128,9 +123,9 @@ struct iommu_strbuf {
  */
 
 
-#define IOTSB_VEND		0xffffffffU
-#define IOTSB_VSTART(sz)	(u_int)(IOTSB_VEND << ((sz)+10+PGSHIFT)) 
-#define IOTSB_VSIZE(sz)		(u_int)(1 << ((sz)+10+PGSHIFT))
+#define IOTSB_VEND		(u_int)(0xffffffffffffffffLL<<PGSHIFT)
+#define IOTSB_VSTART(sz)	(u_int)(IOTSB_VEND << ((sz)+10)) 
+#define	IOTSB_VSIZE(sz)		(u_int)(1 << ((sz)+10+PGSHIFT))
 
 #define MAKEIOTTE(pa,w,c,s)	(((pa)&IOTTE_PAMASK)|((w)?IOTTE_W:0)|((c)?IOTTE_C:0)|((s)?IOTTE_STREAM:0)|(IOTTE_V|IOTTE_8K))
 #define IOTSBSLOT(va,sz)	((u_int)(((vaddr_t)(va))-(is->is_dvmabase))>>PGSHIFT)
@@ -141,11 +136,11 @@ struct iommu_strbuf {
 
 #define INTMAP_V	0x080000000LL	/* Interrupt valid (enabled) */
 #define INTMAP_TID	0x07c000000LL	/* UPA target ID mask */
+#define INTMAP_TID_SHIFT 26
 #define INTMAP_IGN	0x0000007c0LL	/* Interrupt group no (sbus only). */
-#define INTMAP_IGN_SHIFT	6
 #define INTMAP_INO	0x00000003fLL	/* Interrupt number */
 #define INTMAP_INR	(INTMAP_IGN|INTMAP_INO)
-#define INTMAP_SBUSSLOT	0x000000018LL	/* SBus slot # */
+#define INTMAP_SBUSSLOT	0x000000018LL	/* SBUS slot # */
 #define INTMAP_PCIBUS	0x000000010LL	/* PCI bus number (A or B) */
 #define INTMAP_PCISLOT	0x00000000cLL	/* PCI slot # */
 #define INTMAP_PCIINT	0x000000003LL	/* PCI interrupt #A,#B,#C,#D */
@@ -156,15 +151,10 @@ struct iommu_strbuf {
 #define INTVEC(x)	((x)&INTMAP_INR)
 #define INTSLOT(x)	(((x)>>3)&0x7)
 #define	INTPRI(x)	((x)&0x7)
-#define INTIGN(x)	((x)&INTMAP_IGN)
 #define	INTINO(x)	((x)&INTMAP_INO)
-#define INTTID_SHIFT	26
-#define INTTID(x)	(((x) & INTMAP_TID) >> INTTID_SHIFT)
 
 #define	INTPCI_MAXOBINO	0x16		/* maximum OBIO INO value for PCI */
 #define	INTPCIOBINOX(x)	((x)&0x1f)	/* OBIO ino index (for PCI machines) */
 #define	INTPCIINOX(x)	(((x)&0x1c)>>2)	/* PCI ino index */
-
-#define	INTCLR_IDLE	0
 
 #endif /* _SPARC64_DEV_IOMMUREG_H_ */

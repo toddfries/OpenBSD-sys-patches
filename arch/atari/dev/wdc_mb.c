@@ -1,4 +1,4 @@
-/*	$NetBSD: wdc_mb.c,v 1.28 2006/01/29 21:42:41 dsl Exp $	*/
+/*	$NetBSD: wdc_mb.c,v 1.32 2008/04/28 20:23:15 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdc_mb.c,v 1.28 2006/01/29 21:42:41 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdc_mb.c,v 1.32 2008/04/28 20:23:15 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -63,29 +56,17 @@ __KERNEL_RCSID(0, "$NetBSD: wdc_mb.c,v 1.28 2006/01/29 21:42:41 dsl Exp $");
 /* Falcon IDE register locations (base and offsets). */
 #define FALCON_WD_BASE	0xfff00000
 #define FALCON_WD_LEN	0x40
-
-static int falcon_wd_reg[WDC_NREG + WDC_NSHADOWREG] = {
-    0x00,	/* wd_data	*/
-    0x05,	/* wd_error	*/
-    0x09,	/* wd_seccnt	*/
-    0x0d,	/* wd_sector	*/
-    0x11,	/* wd_cyl_lo	*/
-    0x15,	/* wd_cyl_hi	*/
-    0x19,	/* wd_sdh	*/
-    0x1d,	/* wd_command	*/
-    0x39,	/* wd_status	*/
-    0x01	/* wd_features  */
-    };
+#define FALCON_WD_AUX	0x38
 
 /*
  * XXX This code currently doesn't even try to allow 32-bit data port use.
  */
-static int	claim_hw __P((struct ata_channel *, int));
-static void	free_hw __P((struct ata_channel *));
-static void	read_multi_2_swap __P((bus_space_tag_t, bus_space_handle_t,
-				bus_size_t, u_int16_t *, bus_size_t));
-static void	write_multi_2_swap __P((bus_space_tag_t, bus_space_handle_t,
-				bus_size_t, const u_int16_t *, bus_size_t));
+static int	claim_hw (struct ata_channel *, int);
+static void	free_hw (struct ata_channel *);
+static void	read_multi_2_swap (bus_space_tag_t, bus_space_handle_t,
+				bus_size_t, u_int16_t *, bus_size_t);
+static void	write_multi_2_swap (bus_space_tag_t, bus_space_handle_t,
+				bus_size_t, const u_int16_t *, bus_size_t);
 
 struct wdc_mb_softc {
 	struct wdc_softc sc_wdcdev;
@@ -96,17 +77,14 @@ struct wdc_mb_softc {
 	void	*sc_ih;
 };
 
-int	wdc_mb_probe	__P((struct device *, struct cfdata *, void *));
-void	wdc_mb_attach	__P((struct device *, struct device *, void *));
+int	wdc_mb_probe	(device_t, struct cfdata *, void *);
+void	wdc_mb_attach	(device_t, device_t, void *);
 
-CFATTACH_DECL(wdc_mb, sizeof(struct wdc_mb_softc),
+CFATTACH_DECL_NEW(wdc_mb, sizeof(struct wdc_mb_softc),
     wdc_mb_probe, wdc_mb_attach, NULL, NULL);
 
 int
-wdc_mb_probe(parent, cfp, aux)
-	struct device *parent;
-	struct cfdata *cfp;
-	void *aux;
+wdc_mb_probe(device_t parent, cfdata_t cfp, void *aux)
 {
 	static int	wdc_matched = 0;
 	struct ata_channel ch;
@@ -128,19 +106,22 @@ wdc_mb_probe(parent, cfp, aux)
 	wdr.cmd_iot = wdr.ctl_iot = mb_alloc_bus_space_tag();
 	if (wdr.cmd_iot == NULL)
 		return 0;
-	wdr.cmd_iot->stride = 2;
+	wdr.cmd_iot->stride = 0;
 	wdr.cmd_iot->wo_1   = 1;
 
 	if (bus_space_map(wdr.cmd_iot, FALCON_WD_BASE, FALCON_WD_LEN, 0,
 	    &wdr.cmd_baseioh))
-		return 0;
-	for (i = 0; i < (WDC_NREG + WDC_NSHADOWREG); i++)
+		goto out;
+	for (i = 0; i < WDC_NREG; i++) {
 		if (bus_space_subregion(wdr.cmd_iot, wdr.cmd_baseioh,
-		    falcon_wd_reg[i], i == 0 ? 2 : 1, &wdr.cmd_iohs[i]) != 0) {
-			bus_space_unmap(wdr.cmd_iot, wdr.cmd_baseioh,
-			    FALCON_WD_LEN);
-			return 0;
-		}
+		    i * 4, 4, &wdr.cmd_iohs[i]) != 0)
+			goto outunmap;
+	}
+	wdc_init_shadow_regs(&ch);
+
+	if (bus_space_subregion(wdr.cmd_iot, wdr.cmd_baseioh, FALCON_WD_AUX, 4,
+	    &wdr.ctl_ioh))
+		goto outunmap;
 
 	/*
 	 * Make sure IDE interrupts are disabled during probing.
@@ -158,7 +139,9 @@ wdc_mb_probe(parent, cfp, aux)
 
 	MFP->mf_ierb = sv_ierb;
 
+ outunmap:
 	bus_space_unmap(wdr.cmd_iot, wdr.cmd_baseioh, FALCON_WD_LEN);
+ out:
 	mb_free_bus_space_tag(wdr.cmd_iot);
 
 	if (result)
@@ -167,38 +150,44 @@ wdc_mb_probe(parent, cfp, aux)
 }
 
 void
-wdc_mb_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+wdc_mb_attach(device_t parent, device_t self, void *aux)
 {
-	struct wdc_mb_softc *sc = (void *)self;
+	struct wdc_mb_softc *sc = device_private(self);
 	struct wdc_regs *wdr;
 	int i;
 
-	printf("\n");
+	aprint_normal("\n");
 
+	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	sc->sc_wdcdev.regs = wdr = &sc->sc_wdc_regs;
 	wdr->cmd_iot = wdr->ctl_iot =
 	    mb_alloc_bus_space_tag();
-	wdr->cmd_iot->stride = 2;
+	wdr->cmd_iot->stride = 0;
 	wdr->cmd_iot->wo_1   = 1;
 	wdr->cmd_iot->abs_rms_2 = read_multi_2_swap;
 	wdr->cmd_iot->abs_wms_2 = write_multi_2_swap;
 	if (bus_space_map(wdr->cmd_iot, FALCON_WD_BASE, FALCON_WD_LEN, 0,
 			  &wdr->cmd_baseioh)) {
-		printf("%s: couldn't map registers\n",
-		    sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
+		aprint_error_dev(self, "couldn't map registers\n");
 		return;
 	}
-	for (i = 0; i < (WDC_NREG + WDC_NSHADOWREG); i++)
+	for (i = 0; i < WDC_NREG; i++) {
 		if (bus_space_subregion(wdr->cmd_iot, wdr->cmd_baseioh,
-		    falcon_wd_reg[i], i == 0 ? 2 : 1, &wdr->cmd_iohs[i]) != 0) {
-			printf("%s: couldn't subregion cmd reg %i\n",
-			    sc->sc_wdcdev.sc_atac.atac_dev.dv_xname, i);
+		    i * 4, 4, &wdr->cmd_iohs[i]) != 0) {
+			aprint_error_dev(self,
+			    "couldn't subregion cmd reg %i\n", i);
 			bus_space_unmap(wdr->cmd_iot, wdr->cmd_baseioh,
 			    FALCON_WD_LEN);
 			return;
 		}
+	}
+
+	if (bus_space_subregion(wdr->cmd_iot,
+	    wdr->cmd_baseioh, FALCON_WD_AUX, 4, &wdr->ctl_ioh)) {
+		bus_space_unmap(wdr->cmd_iot, wdr->cmd_baseioh, FALCON_WD_LEN);
+		aprint_error_dev(self, "couldn't subregion aux reg\n");
+		return;
+	}
 
 	/*
 	 * Play a nasty trick here. Normally we only manipulate the
@@ -219,6 +208,7 @@ wdc_mb_attach(parent, self, aux)
 	sc->sc_channel.ch_atac = &sc->sc_wdcdev.sc_atac;
 	sc->sc_channel.ch_queue = &sc->sc_chqueue;
 	sc->sc_channel.ch_ndrive = 2;
+	wdc_init_shadow_regs(&sc->sc_channel);
 
 	/*
 	 * Setup & enable disk related interrupts.

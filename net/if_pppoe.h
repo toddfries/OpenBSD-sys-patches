@@ -1,7 +1,6 @@
-/*	$OpenBSD: if_pppoe.h,v 1.3 2004/11/30 11:44:18 markus Exp $ */
-/*	$NetBSD: if_pppoe.h,v 1.5 2003/11/28 08:56:48 keihan Exp $ */
+/* $NetBSD: if_pppoe.h,v 1.11 2008/04/28 20:24:09 martin Exp $ */
 
-/*
+/*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,12 +32,13 @@
 #ifndef _NET_IF_PPPOE_H_
 #define _NET_IF_PPPOE_H_
 
-#define PPPOE_NAMELEN	512		/* should be enough */
 struct pppoediscparms {
 	char	ifname[IFNAMSIZ];	/* pppoe interface name */
 	char	eth_ifname[IFNAMSIZ];	/* external ethernet interface name */
-	char	ac_name[PPPOE_NAMELEN];	/* access concentrator name */
-	char	service_name[PPPOE_NAMELEN]; /* service name */
+	const char *ac_name;		/* access concentrator name (or NULL) */
+	size_t	ac_name_len;		/* on write: length of buffer for ac_name */
+	const char *service_name;	/* service name (or NULL) */
+	size_t	service_name_len;	/* on write: length of buffer for service name */
 };
 
 #define	PPPOESETPARMS	_IOW('i', 110, struct pppoediscparms)
@@ -65,8 +58,6 @@ struct pppoeconnectionstate {
 	u_int	session_id;		/* if state == PPPOE_STATE_SESSION */
 	u_int	padi_retry_no;		/* number of retries already sent */
 	u_int	padr_retry_no;
-
-	struct timeval session_time;	/* time the session was established */
 };
 
 #define PPPOEGETSESSION	_IOWR('i', 112, struct pppoeconnectionstate)
@@ -76,7 +67,8 @@ struct pppoeconnectionstate {
 extern struct ifqueue ppoediscinq;
 extern struct ifqueue ppoeinq;
 
-void pppoeintr(void);
+extern void *pppoe_softintr;			/* softinterrupt cookie */
 
 #endif /* _KERNEL */
-#endif /* _NET_IF_PPPOE_H_ */
+#endif /* !_NET_IF_PPPOE_H_ */
+

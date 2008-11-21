@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr_mbr.c,v 1.7 2005/12/11 12:16:41 christos Exp $	*/
+/*	$NetBSD: disksubr_mbr.c,v 1.10 2007/10/17 19:53:30 garbled Exp $	*/
 
 /*
  * Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr_mbr.c,v 1.7 2005/12/11 12:16:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr_mbr.c,v 1.10 2007/10/17 19:53:30 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -127,13 +127,13 @@ mbr_label_read(dev, strat, lp, osdep, msgp, cylp, netbsd_label_offp)
 		struct mbr_partition *ourmbrp = NULL;
 
 		/* XXX "there has to be a better check than this." */
-		if (bcmp(bp->b_data + MBRSIGOFS, mbrsig, sizeof(mbrsig))) {
+		if (memcmp((char *)bp->b_data + MBRSIGOFS, mbrsig, sizeof(mbrsig))) {
 			rv = 0;
 			goto out;
 		}
 
 		/* XXX how do we check veracity/bounds of this? */
-		bcopy(bp->b_data + MBR_PART_OFFSET, mbrp,
+		memcpy(mbrp, (char *)bp->b_data + MBR_PART_OFFSET,
 		      MBR_PART_COUNT * sizeof(*mbrp));
 
 		/* look for NetBSD partition */
@@ -195,7 +195,7 @@ mbr_label_read(dev, strat, lp, osdep, msgp, cylp, netbsd_label_offp)
 	*netbsd_label_offp = mbrpartoff;
 	*msgp = NULL;
 out:
-        brelse(bp);
+        brelse(bp, 0);
 	return (rv);
 }
 
@@ -235,13 +235,13 @@ mbr_label_locate(dev, strat, lp, osdep, cylp, netbsd_label_offp)
 		goto out;
 	}
 
-	if (bcmp(bp->b_data + MBRSIGOFS, mbrsig, sizeof(mbrsig))) {
+	if (memcmp((char *)bp->b_data + MBRSIGOFS, mbrsig, sizeof(mbrsig))) {
 		rv = 0;
 		goto out;
 	}
 
 	/* XXX how do we check veracity/bounds of this? */
-	bcopy(bp->b_data + MBR_PART_OFFSET, mbrp, MBR_PART_COUNT * sizeof(*mbrp));
+	memcpy(mbrp, (char *)bp->b_data + MBR_PART_OFFSET, MBR_PART_COUNT * sizeof(*mbrp));
 
 	/* look for NetBSD partition */
 	ourmbrp = NULL;
@@ -271,6 +271,6 @@ mbr_label_locate(dev, strat, lp, osdep, cylp, netbsd_label_offp)
 	*netbsd_label_offp = mbrpartoff;
 	rv = 1;
 out:
-        brelse(bp);
+        brelse(bp, 0);
 	return (rv);
 }

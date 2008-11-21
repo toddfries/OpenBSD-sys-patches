@@ -1,5 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.3 2005/12/16 21:36:31 miod Exp $	*/
-/*	$NetBSD: process_machdep.c,v 1.11 2003/08/07 16:26:52 agc Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.19 2008/11/19 06:29:48 matt Exp $	*/
 
 /*
  * Copyright (c) 1993 The Regents of the University of California.
@@ -39,6 +38,35 @@
 /*
  * Copyright (c) 1995 Frank Lancaster.  All rights reserved.
  * Copyright (c) 1995 Tools GmbH.  All rights reserved.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by TooLs GmbH.
+ * 4. The name of TooLs GmbH may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY TOOLS GMBH ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL TOOLS GMBH BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
  * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
  * Copyright (c) 1993 Jan-Simon Pendry
  * All rights reserved.
@@ -101,7 +129,11 @@
  *	Set the process's program counter.
  */
 
+#include "opt_armfpe.h"
+
 #include <sys/param.h>
+
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.19 2008/11/19 06:29:48 matt Exp $");
 
 #include <sys/proc.h>
 #include <sys/ptrace.h>
@@ -118,36 +150,33 @@
 #include <arm/fpe-arm/armfpe.h>
 #endif
 
-static __inline struct trapframe *
-process_frame(struct proc *p)
-{
-
-	return p->p_addr->u_pcb.pcb_tf;
-}
-
 int
-process_read_regs(struct proc *p, struct reg *regs)
+process_read_regs(struct lwp *l, struct reg *regs)
 {
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
 
 	KASSERT(tf != NULL);
-	bcopy((caddr_t)&tf->tf_r0, (caddr_t)regs->r, sizeof(regs->r));
+	bcopy((void *)&tf->tf_r0, (void *)regs->r, sizeof(regs->r));
 	regs->r_sp = tf->tf_usr_sp;
 	regs->r_lr = tf->tf_usr_lr;
 	regs->r_pc = tf->tf_pc;
 	regs->r_cpsr = tf->tf_spsr;
 
+#ifdef THUMB_CODE
+	if (tf->tf_spsr & PSR_T_bit)
+		regs->r_pc |= 1;
+#endif
 #ifdef DIAGNOSTIC
 	if ((tf->tf_spsr & PSR_MODE) == PSR_USR32_MODE
-	    && tf->tf_spsr & I32_bit)
-		panic("process_read_regs: Interrupts blocked in user process");
+	     && (tf->tf_spsr & IF32_bits))
+		panic("process_read_regs: IRQs/FIQs blocked in user process");
 #endif
 
 	return(0);
 }
 
 int
-process_read_fpregs(struct proc *p, struct fpreg *regs)
+process_read_fpregs(struct lwp *l, struct fpreg *regs)
 {
 #ifdef ARMFPE
 	arm_fpe_getcontext(p, regs);
@@ -159,25 +188,27 @@ process_read_fpregs(struct proc *p, struct fpreg *regs)
 #endif	/* ARMFPE */
 }
 
-#ifdef	PTRACE
-
 int
-process_write_regs(struct proc *p, struct reg *regs)
+process_write_regs(struct lwp *l, const struct reg *regs)
 {
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
 
 	KASSERT(tf != NULL);
-	bcopy((caddr_t)regs->r, (caddr_t)&tf->tf_r0, sizeof(regs->r));
+	bcopy(regs->r, &tf->tf_r0, sizeof(regs->r));
 	tf->tf_usr_sp = regs->r_sp;
 	tf->tf_usr_lr = regs->r_lr;
 #ifdef __PROG32
 	tf->tf_pc = regs->r_pc;
-	tf->tf_spsr &=  ~PSR_FLAGS;
+	tf->tf_spsr &=  ~(PSR_FLAGS | PSR_T_bit);
 	tf->tf_spsr |= regs->r_cpsr & PSR_FLAGS;
+#ifdef THUMB_CODE
+	if ((regs->r_pc & 1) || (regs->r_cpsr & PSR_T_bit))
+		tf->tf_spsr |= PSR_T_bit;
+#endif
 #ifdef DIAGNOSTIC
 	if ((tf->tf_spsr & PSR_MODE) == PSR_USR32_MODE
-	    && tf->tf_spsr & I32_bit)
-		panic("process_write_regs: Interrupts blocked in user process");
+	     && (tf->tf_spsr & IF32_bits))
+		panic("process_read_regs: IRQs/FIQs blocked in user process");
 #endif
 #else /* __PROG26 */
 	if ((regs->r_pc & (R15_MODE | R15_IRQ_DISABLE | R15_FIQ_DISABLE)) != 0)
@@ -190,7 +221,7 @@ process_write_regs(struct proc *p, struct reg *regs)
 }
 
 int
-process_write_fpregs(struct proc *p,  struct fpreg *regs)
+process_write_fpregs(struct lwp *l, const struct fpreg *regs)
 {
 #ifdef ARMFPE
 	arm_fpe_setcontext(p, regs);
@@ -202,21 +233,19 @@ process_write_fpregs(struct proc *p,  struct fpreg *regs)
 }
 
 int
-process_sstep(struct proc *p, int sstep)
+process_set_pc(struct lwp *l, void *addr)
 {
-	if (sstep)
-		return (EINVAL);
-	return 0;
-}
-
-int
-process_set_pc(struct proc *p, caddr_t addr)
-{
-	struct trapframe *tf = process_frame(p);
+	struct trapframe *tf = process_frame(l);
 
 	KASSERT(tf != NULL);
 #ifdef __PROG32
 	tf->tf_pc = (int)addr;
+#ifdef THUMB_CODE
+	if (((int)addr) & 1)
+		tf->tf_spsr |= PSR_T_bit;
+	else
+		tf->tf_spsr &= ~PSR_T_bit;
+#endif
 #else /* __PROG26 */
 	/* Only set the PC, not the PSR */
 	if (((register_t)addr & R15_PC) != (register_t)addr)
@@ -226,5 +255,3 @@ process_set_pc(struct proc *p, caddr_t addr)
 
 	return (0);
 }
-
-#endif	/* PTRACE */

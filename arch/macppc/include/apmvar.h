@@ -1,4 +1,5 @@
-/*	$OpenBSD: apmvar.h,v 1.4 2002/09/15 09:01:58 deraadt Exp $	*/
+/*	$NetBSD: apmvar.h,v 1.2 2006/08/29 18:17:33 he Exp $	*/
+/*	$OpenBSD: apmvar.h,v 1.2 2001/10/03 20:06:01 drahn Exp $	*/
 
 /*
  *  Copyright (c) 2001 Alexander Guy
@@ -50,6 +51,7 @@
 #define		APM_BATT_LOW		0x01
 #define		APM_BATT_CRITICAL	0x02
 #define		APM_BATT_CHARGING	0x03
+#define		APM_BATT_ABSENT		0x04 /* Software only--not in spec! */
 #define		APM_BATT_UNKNOWN	0xff
 #define		APM_BATT_LIFE_UNKNOWN	0xff
 
@@ -88,27 +90,23 @@
  * Sep., 1994	Implemented on FreeBSD 1.1.5.1R (Toshiba AVS001WD)
  */
 
+#include <dev/apm/apmio.h>
+
+struct apm_connect_info {
+	u_int apm_code32_seg_base;	/* real-mode style segment selector */
+	u_int apm_code16_seg_base;
+	u_int apm_data_seg_base;
+	u_int apm_entrypt;
+	u_short	apm_segsel;		/* segment selector for APM */
+	u_short _pad1;
+	u_int apm_code32_seg_len;
+	u_int apm_code16_seg_len;
+	u_int apm_data_seg_len;
+	u_int apm_detail;
+};
+
 #define APM_BATTERY_ABSENT 4
 
-struct apm_power_info {
-	u_char battery_state;
-	u_char ac_state;
-	u_char battery_life;
-	u_char spare1;
-	u_int minutes_left;		/* estimate */
-	u_int spare2[6];
-};
-
-struct apm_ctl {
-	u_int dev;
-	u_int mode;
-};
-
-#define	APM_IOC_REJECT	_IOW('A', 0, struct apm_event_info) /* reject request # */
-#define	APM_IOC_STANDBY	_IO('A', 1)	/* put system into standby */
-#define	APM_IOC_SUSPEND	_IO('A', 2)	/* put system into suspend */
-#define	APM_IOC_GETPOWER _IOR('A', 3, struct apm_power_info) /* fetch battery state */
-#define	APM_IOC_DEV_CTL	_IOW('A', 5, struct apm_ctl) /* put device into mode */
 #define APM_IOC_PRN_CTL _IOW('A', 6, int ) /* driver power status msg */
 #define		APM_PRINT_ON	0	/* driver power status displayed */
 #define		APM_PRINT_OFF	1	/* driver power status not displayed */

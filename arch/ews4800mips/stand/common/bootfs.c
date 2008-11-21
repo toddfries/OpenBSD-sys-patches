@@ -1,4 +1,4 @@
-/*	$NetBSD: bootfs.c,v 1.2 2006/01/25 18:28:26 christos Exp $	*/
+/*	$NetBSD: bootfs.c,v 1.4 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,7 +75,7 @@ bfs_open(const char *name, struct open_file *f)
 		return -3;
 	}
 
-	printf("%s: %s %d %d %d\n", __FUNCTION__, name, file->start,
+	printf("%s: %s %d %d %d\n", __func__, name, file->start,
 	    file->end, file->size);
 
 	f->f_fsdata = file;

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ezload.c,v 1.10 2007/09/19 21:59:51 martin Exp $ */
-/*	$NetBSD: ezload.c,v 1.5 2002/07/11 21:14:25 augustss Exp $	*/
+/*	$NetBSD: ezload.c,v 1.12 2008/04/28 20:23:59 martin Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,11 +29,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ezload.c,v 1.12 2008/04/28 20:23:59 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/conf.h>
 
 #include <dev/usb/usb.h>
@@ -107,79 +101,60 @@ ezload_reset(usbd_device_handle dev, int reset)
 }
 
 usbd_status
-ezload_download(usbd_device_handle dev, const char *name, const u_char *buf,
-    size_t buflen)
+ezload_download(usbd_device_handle dev, const struct ezdata *rec)
 {
 	usb_device_request_t req;
-	usbd_status err = 0;
-	u_int8_t length;
-	u_int16_t address;
+	const struct ezdata *ptr;
 	u_int len, offs;
+	int err;
 
-	for (;;) {
-		length = *buf++;
-		if (length == 0)
-			break;
+	DPRINTF(("ezload_down record=%p\n", rec));
 
-		address = UGETW(buf); buf += 2;
+	for (ptr = rec; ptr->length != 0; ptr++) {
+
 #if 0
-		if (address + length > ANCHOR_MAX_INTERNAL_ADDRESS)
+		if (ptr->address + ptr->length > ANCHOR_MAX_INTERNAL_ADDRESS)
 			return (USBD_INVAL);
 #endif
 
 		req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
 		req.bRequest = ANCHOR_LOAD_INTERNAL;
 		USETW(req.wIndex, 0);
-		for (offs = 0; offs < length; offs += ANCHOR_CHUNK) {
-			len = length - offs;
+		for (offs = 0; offs < ptr->length; offs += ANCHOR_CHUNK) {
+			len = ptr->length - offs;
 			if (len > ANCHOR_CHUNK)
 				len = ANCHOR_CHUNK;
-			USETW(req.wValue, address + offs);
+			USETW(req.wValue, ptr->address + offs);
 			USETW(req.wLength, len);
 			DPRINTFN(2,("ezload_download: addr=0x%x len=%d\n",
-				    address + offs, len));
-			err = usbd_do_request(dev, &req, (u_char *)buf);
+				    ptr->address + offs, len));
+			/*XXXUNCONST*/
+			err = usbd_do_request(dev, &req,
+			    __UNCONST(ptr->data + offs));
 			if (err)
-				break;
-
-			buf += len;
+				return (err);
 		}
-		if (err)
-			break;
 	}
 
-	return (err);
+	return (0);
 }
 
 usbd_status
-ezload_downloads_and_reset(usbd_device_handle dev, char **names)
+ezload_downloads_and_reset(usbd_device_handle dev, const struct ezdata **recs)
 {
 	usbd_status err;
-	size_t buflen;
-	u_char *buf;
-	int error;
 
 	/*(void)ezload_reset(dev, 1);*/
 	err = ezload_reset(dev, 1);
 	if (err)
 		return (err);
 	usbd_delay_ms(dev, 250);
-
-	while (*names != NULL) {
-		error = loadfirmware(*names, &buf, &buflen);
-		if (error)
-			return (error);
-
-		err = ezload_download(dev, *names, buf, buflen);
-		free(buf, M_DEVBUF);
+	while (*recs != NULL) {
+		err = ezload_download(dev, *recs++);
 		if (err)
 			return (err);
-		names++;
 	}
-	if (err)
-		return (err);
 	usbd_delay_ms(dev, 250);
-	/*(void)ezload_reset(dev, 0);*/
 	err = ezload_reset(dev, 0);
 	usbd_delay_ms(dev, 250);
 	return (err);

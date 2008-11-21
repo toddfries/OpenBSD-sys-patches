@@ -1,5 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.3 2000/10/09 23:11:57 bjc Exp $	*/
-/*	$NetBSD: reg.h,v 1.3 1995/04/12 15:26:52 ragge Exp $	*/
+/*	$NetBSD: reg.h,v 1.6 2005/12/11 12:19:34 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -54,6 +53,9 @@ struct  reg {
 	int	sp;
 	int	pc;     /* User pc */
 	int	psl;    /* User psl */
+};
+
+struct	fpreg {
 };
 
 #endif /* _VAX_REG_H_ */

@@ -1,4 +1,4 @@
-/* $NetBSD: sbjcn.c,v 1.15 2006/10/01 20:31:50 elad Exp $ */
+/* $NetBSD: sbjcn.c,v 1.21 2008/06/13 12:08:01 cegger Exp $ */
 
 /*
  * Copyright 2000, 2001
@@ -49,13 +49,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -110,7 +103,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbjcn.c,v 1.15 2006/10/01 20:31:50 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sbjcn.c,v 1.21 2008/06/13 12:08:01 cegger Exp $");
 
 #define	SBJCN_DEBUG
 
@@ -296,8 +289,8 @@ sbjcn_attach_channel(struct sbjcn_softc *sc, int chan, int intr)
 	ch->ch_o_rts = ch->ch_o_rts_pin = 0 /* XXXCGD */;
 	ch->ch_o_mask = ch->ch_o_dtr | ch->ch_o_rts;
 
-	callout_init(&ch->ch_diag_callout);
-	callout_init(&ch->ch_callout);
+	callout_init(&ch->ch_diag_callout, 0);
+	callout_init(&ch->ch_callout, 0);
 
 	/* Disable interrupts before configuring the device. */
 	ch->ch_imr = 0;
@@ -492,7 +485,6 @@ sbjcn_shutdown(struct sbjcn_channel *ch)
 int
 sbjcnopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	int unit = SBJCN_UNIT(dev);
 	int chan = SBJCN_CHAN(dev);
 	struct sbjcn_softc *sc;
 	struct sbjcn_channel *ch;
@@ -500,11 +492,10 @@ sbjcnopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int s, s2;
 	int error;
 
-	if (unit >= sbjcn_cd.cd_ndevs)
+	sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(dev));
+	if (sc == NULL)
 		return (ENXIO);
-	sc = sbjcn_cd.cd_devs[unit];
-	if (sc == 0)
-		return (ENXIO);
+
 	ch = &sc->sc_channels[chan];
 	if (!ISSET(ch->ch_hwflags, SBJCN_HW_DEV_OK) || ch->ch_rbuf == NULL)
 		return (ENXIO);
@@ -622,7 +613,7 @@ bad:
 int
 sbjcnclose(dev_t dev, int flag, int mode, struct proc *p)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(dev)];
 	struct tty *tp = ch->ch_tty;
 
@@ -648,7 +639,7 @@ sbjcnclose(dev_t dev, int flag, int mode, struct proc *p)
 int
 sbjcnread(dev_t dev, struct uio *uio, int flag)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(dev)];
 	struct tty *tp = ch->ch_tty;
 
@@ -658,7 +649,7 @@ sbjcnread(dev_t dev, struct uio *uio, int flag)
 int
 sbjcnwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(dev)];
 	struct tty *tp = ch->ch_tty;
 
@@ -668,7 +659,7 @@ sbjcnwrite(dev_t dev, struct uio *uio, int flag)
 struct tty *
 sbjcntty(dev_t dev)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(dev)];
 	struct tty *tp = ch->ch_tty;
 
@@ -676,9 +667,9 @@ sbjcntty(dev_t dev)
 }
 
 int
-sbjcnioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+sbjcnioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(dev)];
 	struct tty *tp = ch->ch_tty;
 	int error;
@@ -897,7 +888,7 @@ cflag2modes(cflag, mode1p, mode2p)
 int
 sbjcn_param(struct tty *tp, struct termios *t)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(tp->t_dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(tp->t_dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(tp->t_dev)];
 	long brc;
 	u_char mode1, mode2;
@@ -1068,7 +1059,7 @@ sbjcn_loadchannelregs(struct sbjcn_channel *ch)
 int
 sbjcn_hwiflow(struct tty *tp, int block)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(tp->t_dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(tp->t_dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(tp->t_dev)];
 	int s;
 
@@ -1117,7 +1108,7 @@ sbjcn_dohwiflow(struct sbjcn_channel *ch)
 void
 sbjcn_start(struct tty *tp)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(tp->t_dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(tp->t_dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(tp->t_dev)];
 	int s;
 
@@ -1126,16 +1117,8 @@ sbjcn_start(struct tty *tp)
 		goto out;
 	if (ch->ch_tx_stopped)
 		goto out;
-
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	if (!ttypull(tp))
+		goto out;
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -1185,7 +1168,7 @@ out:
 void
 sbjcnstop(struct tty *tp, int flag)
 {
-	struct sbjcn_softc *sc = sbjcn_cd.cd_devs[SBJCN_UNIT(tp->t_dev)];
+	struct sbjcn_softc *sc = device_lookup_private(&sbjcn_cd, SBJCN_UNIT(tp->t_dev));
 	struct sbjcn_channel *ch = &sc->sc_channels[SBJCN_CHAN(tp->t_dev)];
 	int s;
 
@@ -1201,8 +1184,7 @@ sbjcnstop(struct tty *tp, int flag)
 }
 
 void
-sbjcn_diag(arg)
-	void *arg;
+sbjcn_diag(void *arg)
 {
 	struct sbjcn_channel *ch = arg;
 	struct sbjcn_softc *sc = ch->ch_sc;

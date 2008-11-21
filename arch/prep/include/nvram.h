@@ -1,4 +1,4 @@
-/* $NetBSD: nvram.h,v 1.2 2006/06/15 18:15:32 garbled Exp $ */
+/* $NetBSD: nvram.h,v 1.6 2008/04/28 20:23:33 martin Exp $ */
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,8 +39,10 @@
 #ifndef _MACHINE_NVRAM_H
 #define _MACHINE_NVRAM_H
 
+#if defined(_KERNEL)
 /* for the motorola machines */
 #include <dev/ic/mk48txxvar.h>
+#endif
 
 #define MAX_PREP_NVRAM 0x8000	/* maxmum size of the nvram */
 
@@ -199,8 +194,12 @@ struct pnviocdesc {
 	int	pnv_num;	/* number of something */
 };
 
+#define DEV_NVRAM	0
+#define DEV_RESIDUAL	1
+
+#if defined(_KERNEL)
 struct prep_mk48txx_softc {
-	struct device   sc_dev;
+	device_t *sc_dev;
 	bus_space_tag_t sc_bst;	 /* bus tag & handle */
 	bus_space_handle_t sc_bsh;      /* */
 
@@ -237,7 +236,11 @@ struct nvram_pnpbus_softc {
 	u_char  sc_open;		/* single use device */
 };
 
+#endif /* _KERNEL */
+
 #define PNVIOCGET	_IOWR('O', 1, struct pnviocdesc) /* get var contents */
 #define PNVIOCGETNEXTNAME _IOWR('O', 2, struct pnviocdesc) /* get next var */
+#define PNVIOCGETNUMGE	_IOWR('O', 3, struct pnviocdesc) /* get nrof vars */
+#define PNVIOCSET	_IOW('O', 4, struct pnviocdesc) /* set nvram var */
 
 #endif /* _MACHINE_NVRAM_H */

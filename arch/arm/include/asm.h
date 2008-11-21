@@ -1,5 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
-/*	$NetBSD: asm.h,v 1.4 2001/07/16 05:43:32 matt Exp $	*/
+/*	$NetBSD: asm.h,v 1.12 2008/08/29 19:00:25 matt Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,15 +37,9 @@
 #ifndef _ARM32_ASM_H_
 #define _ARM32_ASM_H_
 
-#ifdef __ELF__
-# define _C_LABEL(x)	x
-#else
-# ifdef __STDC__
-#  define _C_LABEL(x)	_ ## x
-# else
-#  define _C_LABEL(x)	_/**/x
-# endif
-#endif
+#include <arm/cdefs.h>
+
+#define _C_LABEL(x)	x
 #define	_ASM_LABEL(x)	x
 
 #ifdef __STDC__
@@ -67,64 +60,109 @@
  * We define a couple of macros so that assembly code will not be dependant
  * on one or the other.
  */
-#define _ASM_TYPE_FUNCTION	#function
-#define _ASM_TYPE_OBJECT	#object
+#define _ASM_TYPE_FUNCTION	%function
+#define _ASM_TYPE_OBJECT	%object
+#ifdef __thumb__
+#define _ENTRY(x) \
+	.text; _ALIGN_TEXT; .globl x; .type x,_ASM_TYPE_FUNCTION; .thumb_func; x:
+#else
 #define _ENTRY(x) \
 	.text; _ALIGN_TEXT; .globl x; .type x,_ASM_TYPE_FUNCTION; x:
+#endif
+#define	_END(x)		.size x,.-x
 
 #ifdef GPROF
-# ifdef __ELF__
-#  define _PROF_PROLOGUE	\
+# define _PROF_PROLOGUE	\
 	mov ip, lr; bl __mcount
-# else
-#  define _PROF_PROLOGUE	\
-	mov ip,lr; bl mcount
-# endif
 #else
 # define _PROF_PROLOGUE
 #endif
 
 #define	ENTRY(y)	_ENTRY(_C_LABEL(y)); _PROF_PROLOGUE
 #define	ENTRY_NP(y)	_ENTRY(_C_LABEL(y))
+#define	END(y)		_END(_C_LABEL(y))
 #define	ASENTRY(y)	_ENTRY(_ASM_LABEL(y)); _PROF_PROLOGUE
 #define	ASENTRY_NP(y)	_ENTRY(_ASM_LABEL(y))
+#define	ASEND(y)	_END(_ASM_LABEL(y))
 
 #define	ASMSTR		.asciz
 
-#if defined(__ELF__) && defined(PIC)
+#if defined(PIC)
+#ifdef __thumb__
+#define	PLT_SYM(x)	x
+#define	GOT_SYM(x)	PIC_SYM(x, GOTOFF)
+#define	GOT_GET(x,got,sym)	\
+	ldr	x, sym;		\
+	add	x, got;		\
+	ldr	x, [x]
+#else
+#define	PLT_SYM(x)	PIC_SYM(x, PLT)
+#define	GOT_SYM(x)	PIC_SYM(x, GOT)
+#define	GOT_GET(x,got,sym)	\
+	ldr	x, sym;		\
+	ldr	x, [x, got]
+#endif /* __thumb__ */
+
+#define	GOT_INIT(got,gotsym,pclabel) \
+	ldr	got, gotsym;	\
+	add	got, got, pc;	\
+	pclabel:
+#define	GOT_INITSYM(gotsym,pclabel) \
+	gotsym: .word _C_LABEL(_GLOBAL_OFFSET_TABLE_) + (. - (pclabel+4))
+
 #ifdef __STDC__
 #define	PIC_SYM(x,y)	x ## ( ## y ## )
 #else
 #define	PIC_SYM(x,y)	x/**/(/**/y/**/)
 #endif
+
 #else
+#define	PLT_SYM(x)	x
+#define	GOT_SYM(x)	x
+#define	GOT_GET(x,got,sym)	\
+	ldr	x, sym;
+#define	GOT_INIT(got,gotsym,pclabel)
+#define	GOT_INITSYM(gotsym,pclabel)
 #define	PIC_SYM(x,y)	x
-#endif
+#endif	/* PIC */
 
-#ifdef __ELF__
-#define RCSID(x)	.section ".ident"; .asciz x
-#else
-#define RCSID(x)	.text; .asciz x
-#endif
+#define RCSID(x)	.pushsection ".ident"; .asciz x; .popsection
 
-#ifdef __ELF__
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym
-#endif
 
-#ifdef __STDC__
-#define	WARN_REFERENCES(sym,msg)					\
-	.stabs msg ## ,30,0,0,0 ;					\
-	.stabs __STRING(_C_LABEL(sym)) ## ,1,0,0,0
-#elif defined(__ELF__)
+/*
+ * STRONG_ALIAS: create a strong alias.
+ */
+#define STRONG_ALIAS(alias,sym)						\
+	.globl alias;							\
+	alias = sym
+
 #define	WARN_REFERENCES(sym,msg)					\
 	.stabs msg,30,0,0,0 ;						\
-	.stabs __STRING(sym),1,0,0,0
+	.stabs __STRING(_C_LABEL(sym)),1,0,0,0
+
+#ifdef __thumb__
+# define XPUSH		push
+# define XPOP		pop
+# define XPOPRET	pop	{pc}
 #else
-#define	WARN_REFERENCES(sym,msg)					\
-	.stabs msg,30,0,0,0 ;						\
-	.stabs __STRING(_/**/sym),1,0,0,0
-#endif /* __STDC__ */
+# define XPUSH		stmfd	sp!,
+# define XPOP		ldmfd	sp!,
+# ifdef _ARM_ARCH_5
+#  define XPOPRET	ldmfd	sp!, {pc}
+# else
+#  define XPOPRET	ldmfd	sp!, {lr}; mov pc, lr
+# endif
+#endif
+  
+#if defined (_ARM_ARCH_4T)
+# define RET		bx		lr
+# define RETc(c)	__CONCAT(bx,c)	lr
+#else
+# define RET		mov		pc, lr
+# define RETc(c)	__CONCAT(mov,c)	pc, lr
+#endif
 
 #endif /* !_ARM_ASM_H_ */

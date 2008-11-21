@@ -1,5 +1,4 @@
-/*	$OpenBSD: nfsrvcache.h,v 1.7 2007/10/29 11:16:49 thib Exp $	*/
-/*	$NetBSD: nfsrvcache.h,v 1.10 1996/02/18 11:54:08 fvdl Exp $	*/
+/*	$NetBSD: nfsrvcache.h,v 1.16 2007/12/04 17:42:32 yamt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -35,23 +34,30 @@
  *	@(#)nfsrvcache.h	8.3 (Berkeley) 3/30/95
  */
 
+
 #ifndef _NFS_NFSRVCACHE_H_
 #define _NFS_NFSRVCACHE_H_
+
+/*
+ * Definitions for the server recent request cache
+ */
 
 #define	NFSRVCACHESIZ	64
 
 struct nfsrvcache {
-	TAILQ_ENTRY(nfsrvcache)	rc_lru;		/* LRU chain */
-	LIST_ENTRY(nfsrvcache)	rc_hash;	/* Hash chain */
-	u_int32_t		rc_xid;		/* rpc id number */
+	kcondvar_t rc_cv;
+	TAILQ_ENTRY(nfsrvcache) rc_lru;		/* LRU chain */
+	LIST_ENTRY(nfsrvcache) rc_hash;		/* Hash chain */
+	u_int32_t	rc_xid;				/* rpc id number */
 	union {
-		struct mbuf *ru_repmb;	/* Reply mbuf list OR */
-		int ru_repstat;		/* Reply status */
+		struct mbuf *ru_repmb;		/* Reply mbuf list OR */
+		int ru_repstat;			/* Reply status */
 	} rc_un;
-	union nethostaddr	rc_haddr;	/* Host address */
-	u_int16_t		rc_proc;	/* rpc proc number */
-	u_char			rc_state;	/* Current state of request */
-	u_char			rc_flag;	/* Flag bits */
+	union nethostaddr rc_haddr;		/* Host address */
+	u_int32_t rc_proc;			/* rpc proc number */
+	int rc_state;		/* Current state of request */
+	int rc_gflags;		/* Flag bits */
+	int rc_flags;		/* Flag bits */
 };
 
 #define	rc_reply	rc_un.ru_repmb
@@ -70,9 +76,10 @@ struct nfsrvcache {
 #define	RC_DOIT		2
 #define	RC_CHECKIT	3
 
-/* Flag bits */
-#define	RC_LOCKED	0x01
-#define	RC_WANTED	0x02
+/* rc_gflags */
+#define	RC_G_LOCKED	0x01
+
+/* rc_flags */
 #define	RC_REPSTATUS	0x04
 #define	RC_REPMBUF	0x08
 #define	RC_INETADDR	0x20

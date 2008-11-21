@@ -1,7 +1,11 @@
-/*	$OpenBSD: mpu_isa.c,v 1.3 2003/01/29 20:35:13 mickey Exp $	*/
+/*	$NetBSD: mpu_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $	*/
 
-/*
- * Copyright (c) 2002 Sergey Smitienko. All rights reserved.
+/*-
+ * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Lennart Augustsson.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -11,149 +15,108 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mpu_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/kernel.h>
 #include <sys/errno.h>
-#include <sys/ioctl.h>
-#include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/proc.h>
+#include <sys/conf.h>
+#include <sys/midiio.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
-#include <sys/audioio.h>
-#include <dev/audio_if.h>
 #include <dev/midi_if.h>
 
 #include <dev/isa/isavar.h>
-#include <dev/isa/isadmavar.h>
-
 #include <dev/ic/mpuvar.h>
 
-int	mpu_isa_match(struct device *, void *, void *);
-void	mpu_isa_attach(struct device *, struct device *, void *);
-int	mpu_test(bus_space_tag_t, int);
-
-#ifdef	AUDIO_DEBUG
-#define	DPRINTF(x)	if (mpu_debug) printf x
-int	mpu_debug = 0;
-#else
-#define	DPRINTF(x)
-#endif
-
-#define MPU_GETSTATUS(iot, ioh) (bus_space_read_1(iot, ioh, MPU_STATUS))
-
 struct mpu_isa_softc {
-	struct device sc_dev;
-
-	struct mpu_softc sc_mpu;
+	device_t sc_dev;
+	struct mpu_softc sc_mpu;	/* generic part */
+	void	*sc_ih;			/* ISA interrupt handler */
 };
 
-struct cfattach mpu_isa_ca = {
-	sizeof(struct mpu_isa_softc), mpu_isa_match, mpu_isa_attach
-};
+static int	mpu_isa_match(device_t, cfdata_t, void *);
+static void	mpu_isa_attach(device_t, device_t, void *);
 
-int
-mpu_test (iot, iobase)
-	bus_space_tag_t iot;
-	int iobase;	/* base port number to try */
-{
-	bus_space_handle_t ioh;
-	int	i, rc;
+CFATTACH_DECL_NEW(mpu_isa, sizeof(struct mpu_isa_softc),
+    mpu_isa_match, mpu_isa_attach, NULL, NULL);
 
-	rc = 0;
-	if (bus_space_map(iot, iobase, MPU401_NPORT, 0, &ioh)) {
-		DPRINTF(("mpu_test: can`t map: %x/2\n", iobase));
-		return (0);
-	}
-
-	DPRINTF(("mpu_test: trying: %x\n", iobase));
-
-	/*
-	 * The following code is a shameless copy of mpu401.c
-	 * it is here until a redesign of mpu_find() interface
-	 */
-
-	if (MPU_GETSTATUS(iot, ioh) == 0xff)
-		goto done;
-
-	for (i = 0; i < MPU_MAXWAIT; i++) {
-		if (!(MPU_GETSTATUS(iot, ioh) & MPU_OUTPUT_BUSY)) {
-			rc = 1;
-			break;
-		}
-		delay (10);
-	}
-	
-	if (rc == 1) {	
-		bus_space_write_1(iot, ioh, MPU_COMMAND, MPU_RESET);
-		rc = 0;
-		for (i = 0; i < 2 * MPU_MAXWAIT; i++)
-			if (!(MPU_GETSTATUS(iot, ioh) & MPU_INPUT_EMPTY) &&
-			    bus_space_read_1(iot, ioh, MPU_DATA) == MPU_ACK) {
-				rc = 1;
-				break;
-			}
-	}
-done:
-	bus_space_unmap(iot, ioh, MPU401_NPORT);
-
-	return (rc);
-}
-
-int
-mpu_isa_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+mpu_isa_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
+	struct mpu_isa_softc sc;
+	int r;
 
-        if (mpu_test(ia->ia_iot, ia->ia_iobase)) {
-		ia->ia_iosize = MPU401_NPORT;
-		return (1);
+	if (ia->ia_nio < 1)
+		return 0;
+	if (ia->ia_nirq < 1)
+		return 0;
+
+	if (ISA_DIRECT_CONFIG(ia))
+		return 0;
+
+	if (ia->ia_io[0].ir_addr == ISA_UNKNOWN_PORT)
+		return 0;
+	if (ia->ia_irq[0].ir_irq == ISA_UNKNOWN_IRQ)
+		return 0;
+
+	memset(&sc, 0, sizeof sc);
+	sc.sc_mpu.iot = ia->ia_iot;
+	if (bus_space_map(sc.sc_mpu.iot, ia->ia_io[0].ir_addr, MPU401_NPORT, 0,
+			  &sc.sc_mpu.ioh))
+		return 0;
+	r = mpu_find(&sc.sc_mpu);
+        bus_space_unmap(sc.sc_mpu.iot, sc.sc_mpu.ioh, MPU401_NPORT);
+	if (r) {
+		ia->ia_nio = 1;
+		ia->ia_io[0].ir_size = MPU401_NPORT;
+
+		ia->ia_nirq = 1;
+
+		ia->ia_niomem = 0;
+		ia->ia_ndrq = 0;
 	}
-
-	return (0);
+	return r;
 }
 
-void
-mpu_isa_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+mpu_isa_attach(device_t parent, device_t self, void *aux)
 {
-	struct mpu_isa_softc *sc = (struct mpu_isa_softc *)self;
+	struct mpu_isa_softc *sc = device_private(self);
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_mpu.iot = ia->ia_iot;
+	aprint_normal("\n");
 
-	if (bus_space_map (ia->ia_iot, ia->ia_iobase, MPU401_NPORT,
+	if (bus_space_map(sc->sc_mpu.iot, ia->ia_io[0].ir_addr, MPU401_NPORT,
 	    0, &sc->sc_mpu.ioh)) {
-		printf(": can`t map i/o space\n");
+		printf("mpu_isa_attach: bus_space_map failed\n");
 		return;
 	}
 
-	if (!mpu_find(&sc->sc_mpu)) {
-		printf(": find failed\n");
-		return;
-	}
+	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
+	    IST_EDGE, IPL_AUDIO, mpu_intr, &sc->sc_mpu);
 
-	printf(": generic MPU-401 compatible\n");
-
-	midi_attach_mi(&mpu_midi_hw_if, &sc->sc_mpu, &sc->sc_dev);
+	sc->sc_mpu.model = "Roland MPU-401 MIDI UART";
+	sc->sc_dev = self;
+	mpu_attach(&sc->sc_mpu);
 }

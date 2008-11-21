@@ -1,5 +1,4 @@
-/*	$OpenBSD: ubt.c,v 1.11 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: ubt.c,v 1.30 2007/12/16 19:01:37 christos Exp $	*/
+/*	$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -47,13 +46,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -73,6 +65,9 @@
  * Iain Hibbert for Itronix, Inc using the FreeBSD ng_ubt.c driver as a
  * reference.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -99,9 +94,8 @@
 #undef DPRINTF
 #undef DPRINTFN
 
-#define UBT_DEBUG 0
 #ifdef UBT_DEBUG
-int	ubt_debug = UBT_DEBUG;
+int	ubt_debug = 0;
 
 #define DPRINTF(fmt, args...)		do {		\
 	if (ubt_debug)					\
@@ -113,6 +107,25 @@ int	ubt_debug = UBT_DEBUG;
 		printf("%s: "fmt, __func__ , ##args);	\
 } while (/* CONSTCOND */0)
 
+SYSCTL_SETUP(sysctl_hw_ubt_debug_setup, "sysctl hw.ubt_debug setup")
+{
+
+	sysctl_createv(NULL, 0, NULL, NULL,
+		CTLFLAG_PERMANENT,
+		CTLTYPE_NODE, "hw",
+		NULL,
+		NULL, 0,
+		NULL, 0,
+		CTL_HW, CTL_EOL);
+
+	sysctl_createv(NULL, 0, NULL, NULL,
+		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
+		CTLTYPE_INT, "ubt_debug",
+		SYSCTL_DESCR("ubt debug level"),
+		NULL, 0,
+		&ubt_debug, sizeof(ubt_debug),
+		CTL_HW, CTL_CREATE, CTL_EOL);
+}
 #else
 #define DPRINTF(...)
 #define DPRINTFN(...)
@@ -158,7 +171,7 @@ struct ubt_isoc_xfer {
 };
 
 struct ubt_softc {
-	struct device		 sc_dev;
+	USBBASEDEVICE		 sc_dev;
 	usbd_device_handle	 sc_udev;
 	int			 sc_refcnt;
 	int			 sc_dying;
@@ -171,7 +184,7 @@ struct ubt_softc {
 	usbd_xfer_handle	 sc_cmd_xfer;
 	uint8_t			*sc_cmd_buf;
 	int			 sc_cmd_busy;	/* write active */
-	struct ifqueue		 sc_cmd_queue;	/* output queue */
+	MBUFQ_HEAD()		 sc_cmd_queue;	/* output queue */
 
 	/* Events (interrupt) */
 	int			 sc_evt_addr;	/* endpoint address */
@@ -191,7 +204,7 @@ struct ubt_softc {
 	usbd_xfer_handle	 sc_aclwr_xfer;	/* write xfer */
 	uint8_t			*sc_aclwr_buf;	/* write buffer */
 	int			 sc_aclwr_busy;	/* write active */
-	struct ifqueue		 sc_aclwr_queue;/* output queue */
+	MBUFQ_HEAD()		 sc_aclwr_queue;/* output queue */
 
 	/* ISOC interface */
 	usbd_interface_handle	 sc_iface1;	/* ISOC interface */
@@ -213,7 +226,7 @@ struct ubt_softc {
 	struct ubt_isoc_xfer	 sc_scowr[UBT_NXFERS];
 	struct mbuf		*sc_scowr_mbuf;	/* current packet */
 	int			 sc_scowr_busy;	/* write active */
-	struct ifqueue		 sc_scowr_queue;/* output queue */
+	MBUFQ_HEAD()		 sc_scowr_queue;/* output queue */
 
 	/* Protocol structure */
 	struct hci_unit		*sc_unit;
@@ -223,59 +236,44 @@ struct ubt_softc {
 	int			 sc_ok;
 };
 
-/*
+/*******************************************************************************
+ *
  * Bluetooth unit/USB callback routines
+ *
  */
-int ubt_enable(struct device *);
-void ubt_disable(struct device *);
+static int ubt_enable(device_ptr_t);
+static void ubt_disable(device_ptr_t);
 
-void ubt_xmit_cmd(struct device *, struct mbuf *);
-void ubt_xmit_cmd_start(struct ubt_softc *);
-void ubt_xmit_cmd_complete(usbd_xfer_handle,
+static void ubt_xmit_cmd(device_ptr_t, struct mbuf *);
+static void ubt_xmit_cmd_start(struct ubt_softc *);
+static void ubt_xmit_cmd_complete(usbd_xfer_handle,
 				usbd_private_handle, usbd_status);
 
-void ubt_xmit_acl(struct device *, struct mbuf *);
-void ubt_xmit_acl_start(struct ubt_softc *);
-void ubt_xmit_acl_complete(usbd_xfer_handle,
+static void ubt_xmit_acl(device_ptr_t, struct mbuf *);
+static void ubt_xmit_acl_start(struct ubt_softc *);
+static void ubt_xmit_acl_complete(usbd_xfer_handle,
 				usbd_private_handle, usbd_status);
 
-void ubt_xmit_sco(struct device *, struct mbuf *);
-void ubt_xmit_sco_start(struct ubt_softc *);
-void ubt_xmit_sco_start1(struct ubt_softc *, struct ubt_isoc_xfer *);
-void ubt_xmit_sco_complete(usbd_xfer_handle,
+static void ubt_xmit_sco(device_ptr_t, struct mbuf *);
+static void ubt_xmit_sco_start(struct ubt_softc *);
+static void ubt_xmit_sco_start1(struct ubt_softc *, struct ubt_isoc_xfer *);
+static void ubt_xmit_sco_complete(usbd_xfer_handle,
 				usbd_private_handle, usbd_status);
 
-void ubt_recv_event(usbd_xfer_handle,
+static void ubt_recv_event(usbd_xfer_handle,
 				usbd_private_handle, usbd_status);
 
-void ubt_recv_acl_start(struct ubt_softc *);
-void ubt_recv_acl_complete(usbd_xfer_handle,
+static void ubt_recv_acl_start(struct ubt_softc *);
+static void ubt_recv_acl_complete(usbd_xfer_handle,
 				usbd_private_handle, usbd_status);
 
-void ubt_recv_sco_start1(struct ubt_softc *, struct ubt_isoc_xfer *);
-void ubt_recv_sco_complete(usbd_xfer_handle,
+static void ubt_recv_sco_start1(struct ubt_softc *, struct ubt_isoc_xfer *);
+static void ubt_recv_sco_complete(usbd_xfer_handle,
 				usbd_private_handle, usbd_status);
 
-void ubt_stats(struct device *, struct bt_stats *, int);
+static void ubt_stats(device_ptr_t, struct bt_stats *, int);
 
-int ubt_match(struct device *, void *, void *); 
-void ubt_attach(struct device *, struct device *, void *); 
-int ubt_detach(struct device *, int); 
-int ubt_activate(struct device *, enum devact); 
-
-struct cfdriver ubt_cd = { 
-	NULL, "ubt", DV_DULL 
-}; 
-
-const struct cfattach ubt_ca = { 
-	sizeof(struct ubt_softc), 
-	ubt_match, 
-	ubt_attach, 
-	ubt_detach, 
-	ubt_activate, 
-};
-
-const struct hci_if ubt_hci = {
+static const struct hci_if ubt_hci = {
 	.enable = ubt_enable,
 	.disable = ubt_disable,
 	.output_cmd = ubt_xmit_cmd,
@@ -285,7 +283,16 @@ const struct hci_if ubt_hci = {
 	.ipl = IPL_USB,		/* IPL_SOFTUSB ??? */
 };
 
+/*******************************************************************************
+ *
+ * USB Autoconfig stuff
+ *
+ */
+
+USB_DECLARE_DRIVER(ubt);
+
 static int ubt_set_isoc_config(struct ubt_softc *);
+static int ubt_sysctl_config(SYSCTLFN_PROTO);
 static void ubt_abortdealloc(struct ubt_softc *);
 
 /*
@@ -298,58 +305,58 @@ static void ubt_abortdealloc(struct ubt_softc *);
  */
 static const struct usb_devno ubt_ignore[] = {
 	{ USB_VENDOR_BROADCOM, USB_PRODUCT_BROADCOM_BCM2033NF },
-	{ 0, 0 }	/* end of list */
 };
 
-int
-ubt_match(struct device *parent, void *match, void *aux)
+USB_MATCH(ubt)
 {
-	struct usb_attach_arg *uaa = aux;
-	usb_device_descriptor_t *dd = usbd_get_device_descriptor(uaa->device);
+	USB_MATCH_START(ubt, uaa);
 
 	DPRINTFN(50, "ubt_match\n");
 
 	if (usb_lookup(ubt_ignore, uaa->vendor, uaa->product))
 		return UMATCH_NONE;
 
-	if (dd->bDeviceClass == UDCLASS_WIRELESS
-	    && dd->bDeviceSubClass == UDSUBCLASS_RF
-	    && dd->bDeviceProtocol == UDPROTO_BLUETOOTH)
+	if (uaa->class == UDCLASS_WIRELESS
+	    && uaa->subclass == UDSUBCLASS_RF
+	    && uaa->proto == UDPROTO_BLUETOOTH)
 		return UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO;
 
 	return UMATCH_NONE;
 }
 
-
-void
-ubt_attach(struct device *parent, struct device *self, void *aux)
+USB_ATTACH(ubt)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
-	struct usb_attach_arg *uaa = aux;
+	USB_ATTACH_START(ubt, sc, uaa);
 	usb_config_descriptor_t *cd;
 	usb_endpoint_descriptor_t *ed;
+	const struct sysctlnode *node;
+	char *devinfop;
 	int err;
 	uint8_t count, i;
 
 	DPRINTFN(50, "ubt_attach: sc=%p\n", sc);
 
+	sc->sc_dev = self;
 	sc->sc_udev = uaa->device;
 
-#ifndef __OpenBSD__		/* ??? */
 	MBUFQ_INIT(&sc->sc_cmd_queue);
 	MBUFQ_INIT(&sc->sc_aclwr_queue);
 	MBUFQ_INIT(&sc->sc_scowr_queue);
-#endif
+
+	devinfop = usbd_devinfo_alloc(sc->sc_udev, 0);
+	USB_ATTACH_SETUP;
+	aprint_normal_dev(self, "%s\n", devinfop);
+	usbd_devinfo_free(devinfop);
 
 	/*
 	 * Move the device into the configured state
 	 */
 	err = usbd_set_config_index(sc->sc_udev, 0, 1);
 	if (err) {
-		printf("%s: failed to set configuration idx 0: %s\n",
-		    sc->sc_dev.dv_xname, usbd_errstr(err));
+		aprint_error_dev(self, "failed to set configuration idx 0: %s\n",
+		    usbd_errstr(err));
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	/*
@@ -360,10 +367,10 @@ ubt_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	err = usbd_device2interface_handle(sc->sc_udev, 0, &sc->sc_iface0);
 	if (err) {
-		printf("%s: Could not get interface 0 handle %s (%d)\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err), err);
+		aprint_error_dev(self, "Could not get interface 0 handle %s (%d)\n",
+				usbd_errstr(err), err);
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	sc->sc_evt_addr = -1;
@@ -378,10 +385,10 @@ ubt_attach(struct device *parent, struct device *self, void *aux)
 
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface0, i);
 		if (ed == NULL) {
-			printf("%s: could not read endpoint descriptor %d\n",
-			    sc->sc_dev.dv_xname, i);
+			aprint_error_dev(self,
+			    "could not read endpoint descriptor %d\n", i);
 
-			return;
+			USB_ATTACH_ERROR_RETURN;
 		}
 
 		dir = UE_GET_DIR(ed->bEndpointAddress);
@@ -396,22 +403,22 @@ ubt_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (sc->sc_evt_addr == -1) {
-		printf("%s: missing INTERRUPT endpoint on interface 0\n",
-				sc->sc_dev.dv_xname);
+		aprint_error_dev(self,
+		    "missing INTERRUPT endpoint on interface 0\n");
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 	if (sc->sc_aclrd_addr == -1) {
-		printf("%s: missing BULK IN endpoint on interface 0\n",
-				sc->sc_dev.dv_xname);
+		aprint_error_dev(self,
+		    "missing BULK IN endpoint on interface 0\n");
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 	if (sc->sc_aclwr_addr == -1) {
-		printf("%s: missing BULK OUT endpoint on interface 0\n",
-				sc->sc_dev.dv_xname);
+		aprint_error_dev(self,
+		    "missing BULK OUT endpoint on interface 0\n");
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	/*
@@ -425,18 +432,18 @@ ubt_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	err = usbd_device2interface_handle(sc->sc_udev, 1, &sc->sc_iface1);
 	if (err) {
-		printf("%s: Could not get interface 1 handle %s (%d)\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err), err);
+		aprint_error_dev(self,
+		    "Could not get interface 1 handle %s (%d)\n",
+		    usbd_errstr(err), err);
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	cd = usbd_get_config_descriptor(sc->sc_udev);
 	if (cd == NULL) {
-		printf("%s: could not get config descriptor\n",
-			sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "could not get config descriptor\n");
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	sc->sc_alt_config = usbd_get_no_alts(cd, 1);
@@ -444,33 +451,96 @@ ubt_attach(struct device *parent, struct device *self, void *aux)
 	/* set initial config */
 	err = ubt_set_isoc_config(sc);
 	if (err) {
-		printf("%s: ISOC config failed\n",
-			sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "ISOC config failed\n");
 
-		return;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	/* Attach HCI */
-	sc->sc_unit = hci_attach(&ubt_hci, &sc->sc_dev, 0);
+	sc->sc_unit = hci_attach(&ubt_hci, USBDEV(sc->sc_dev), 0);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   &sc->sc_dev);
+			   USBDEV(sc->sc_dev));
+
+	/* sysctl set-up for alternate configs */
+	sysctl_createv(&sc->sc_log, 0, NULL, NULL,
+		CTLFLAG_PERMANENT,
+		CTLTYPE_NODE, "hw",
+		NULL,
+		NULL, 0,
+		NULL, 0,
+		CTL_HW, CTL_EOL);
+
+	sysctl_createv(&sc->sc_log, 0, NULL, &node,
+		0,
+		CTLTYPE_NODE, USBDEVNAME(sc->sc_dev),
+		SYSCTL_DESCR("ubt driver information"),
+		NULL, 0,
+		NULL, 0,
+		CTL_HW,
+		CTL_CREATE, CTL_EOL);
+
+	if (node != NULL) {
+		sysctl_createv(&sc->sc_log, 0, NULL, NULL,
+			CTLFLAG_READWRITE,
+			CTLTYPE_INT, "config",
+			SYSCTL_DESCR("configuration number"),
+			ubt_sysctl_config, 0,
+			sc, 0,
+			CTL_HW, node->sysctl_num,
+			CTL_CREATE, CTL_EOL);
+
+		sysctl_createv(&sc->sc_log, 0, NULL, NULL,
+			CTLFLAG_READONLY,
+			CTLTYPE_INT, "alt_config",
+			SYSCTL_DESCR("number of alternate configurations"),
+			NULL, 0,
+			&sc->sc_alt_config, sizeof(sc->sc_alt_config),
+			CTL_HW, node->sysctl_num,
+			CTL_CREATE, CTL_EOL);
+
+		sysctl_createv(&sc->sc_log, 0, NULL, NULL,
+			CTLFLAG_READONLY,
+			CTLTYPE_INT, "sco_rxsize",
+			SYSCTL_DESCR("max SCO receive size"),
+			NULL, 0,
+			&sc->sc_scord_size, sizeof(sc->sc_scord_size),
+			CTL_HW, node->sysctl_num,
+			CTL_CREATE, CTL_EOL);
+
+		sysctl_createv(&sc->sc_log, 0, NULL, NULL,
+			CTLFLAG_READONLY,
+			CTLTYPE_INT, "sco_txsize",
+			SYSCTL_DESCR("max SCO transmit size"),
+			NULL, 0,
+			&sc->sc_scowr_size, sizeof(sc->sc_scowr_size),
+			CTL_HW, node->sysctl_num,
+			CTL_CREATE, CTL_EOL);
+	}
 
 	sc->sc_ok = 1;
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
+	USB_ATTACH_SUCCESS_RETURN;
 }
 
-int
-ubt_detach(struct device *self, int flags)
+USB_DETACH(ubt)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	USB_DETACH_START(ubt, sc);
 	int s;
 
 	DPRINTF("sc=%p flags=%d\n", sc, flags);
+
+	if (device_pmf_is_registered(self))
+		pmf_device_deregister(self);
 
 	sc->sc_dying = 1;
 
 	if (!sc->sc_ok)
 		return 0;
+
+	/* delete sysctl nodes */
+	sysctl_teardown(&sc->sc_log);
 
 	/* Detach HCI interface */
 	if (sc->sc_unit) {
@@ -490,12 +560,12 @@ ubt_detach(struct device *self, int flags)
 	/* wait for all processes to finish */
 	s = splusb();
 	if (sc->sc_refcnt-- > 0)
-		usb_detach_wait(&sc->sc_dev);
+		usb_detach_wait(USBDEV(sc->sc_dev));
 
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
+			   USBDEV(sc->sc_dev));
 
 	DPRINTFN(1, "driver detached\n");
 
@@ -503,9 +573,9 @@ ubt_detach(struct device *self, int flags)
 }
 
 int
-ubt_activate(struct device *self, enum devact act)
+ubt_activate(device_ptr_t self, enum devact act)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	int error = 0;
 
 	DPRINTFN(1, "sc=%p, act=%d\n", sc, act);
@@ -527,7 +597,7 @@ ubt_activate(struct device *self, enum devact act)
 }
 
 /* set ISOC configuration */
-int
+static int
 ubt_set_isoc_config(struct ubt_softc *sc)
 {
 	usb_endpoint_descriptor_t *ed;
@@ -537,9 +607,9 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 
 	err = usbd_set_interface(sc->sc_iface1, sc->sc_config);
 	if (err != USBD_NORMAL_COMPLETION) {
-		printf(
-		    "%s: Could not set config %d on ISOC interface. %s (%d)\n",
-		    sc->sc_dev.dv_xname, sc->sc_config, usbd_errstr(err), err);
+		aprint_error_dev(sc->sc_dev, 
+		    "Could not set config %d on ISOC interface. %s (%d)\n",
+		    sc->sc_config, usbd_errstr(err), err);
 
 		return err == USBD_IN_USE ? EBUSY : EIO;
 	}
@@ -563,14 +633,14 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 	for (i = 0 ; i < count ; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface1, i);
 		if (ed == NULL) {
-			printf("%s: could not read endpoint descriptor %d\n",
-			    sc->sc_dev.dv_xname, i);
+			aprint_error_dev(sc->sc_dev,
+			    "could not read endpoint descriptor %d\n", i);
 
 			return EIO;
 		}
 
 		DPRINTFN(5, "%s: endpoint type %02x (%02x) addr %02x (%s)\n",
-			sc->sc_dev.dv_xname,
+			USBDEVNAME(sc->sc_dev),
 			UE_GET_XFERTYPE(ed->bmAttributes),
 			UE_GET_ISO_TYPE(ed->bmAttributes),
 			ed->bEndpointAddress,
@@ -589,31 +659,31 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 	}
 
 	if (rd_addr == -1) {
-		printf(
-		    "%s: missing ISOC IN endpoint on interface config %d\n",
-		    sc->sc_dev.dv_xname, sc->sc_config);
+		aprint_error_dev(sc->sc_dev,
+		    "missing ISOC IN endpoint on interface config %d\n",
+		    sc->sc_config);
 
 		return ENOENT;
 	}
 	if (wr_addr == -1) {
-		printf(
-		    "%s: missing ISOC OUT endpoint on interface config %d\n",
-		    sc->sc_dev.dv_xname, sc->sc_config);
+		aprint_error_dev(sc->sc_dev,
+		    "missing ISOC OUT endpoint on interface config %d\n",
+		    sc->sc_config);
 
 		return ENOENT;
 	}
 
 #ifdef DIAGNOSTIC
 	if (rd_size > MLEN) {
-		printf("%s: rd_size=%d exceeds MLEN\n",
-		    sc->sc_dev.dv_xname, rd_size);
+		aprint_error_dev(sc->sc_dev, "rd_size=%d exceeds MLEN\n",
+		    rd_size);
 
 		return EOVERFLOW;
 	}
 
 	if (wr_size > MLEN) {
-		printf("%s: wr_size=%d exceeds MLEN\n",
-		    sc->sc_dev.dv_xname, wr_size);
+		aprint_error_dev(sc->sc_dev, "wr_size=%d exceeds MLEN\n",
+		    wr_size);
 
 		return EOVERFLOW;
 	}
@@ -628,7 +698,35 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 	return 0;
 }
 
-void
+/* sysctl helper to set alternate configurations */
+static int
+ubt_sysctl_config(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node;
+	struct ubt_softc *sc;
+	int t, error;
+
+	node = *rnode;
+	sc = node.sysctl_data;
+
+	t = sc->sc_config;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return error;
+
+	if (t < 0 || t >= sc->sc_alt_config)
+		return EINVAL;
+
+	/* This may not change when the unit is enabled */
+	if (sc->sc_enabled)
+		return EBUSY;
+
+	sc->sc_config = t;
+	return ubt_set_isoc_config(sc);
+}
+
+static void
 ubt_abortdealloc(struct ubt_softc *sc)
 {
 	int i;
@@ -717,21 +815,20 @@ ubt_abortdealloc(struct ubt_softc *sc)
 	}
 
 	/* Empty mbuf queues */
-	IF_PURGE(&sc->sc_cmd_queue);
-	IF_PURGE(&sc->sc_aclwr_queue);
-	IF_PURGE(&sc->sc_scowr_queue);
+	MBUFQ_DRAIN(&sc->sc_cmd_queue);
+	MBUFQ_DRAIN(&sc->sc_aclwr_queue);
+	MBUFQ_DRAIN(&sc->sc_scowr_queue);
 }
 
 /*******************************************************************************
  *
  * Bluetooth Unit/USB callbacks
  *
- * All of this will be called at the IPL_ we specified above
  */
-int
-ubt_enable(struct device *self)
+static int
+ubt_enable(device_ptr_t self)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	usbd_status err;
 	int s, i, error;
 
@@ -879,10 +976,10 @@ bad:
 	return error;
 }
 
-void
-ubt_disable(struct device *self)
+static void
+ubt_disable(device_ptr_t self)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	int s;
 
 	DPRINTFN(1, "sc=%p\n", sc);
@@ -897,16 +994,16 @@ ubt_disable(struct device *self)
 	splx(s);
 }
 
-void
-ubt_xmit_cmd(struct device *self, struct mbuf *m)
+static void
+ubt_xmit_cmd(device_ptr_t self, struct mbuf *m)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	int s;
 
 	KASSERT(sc->sc_enabled);
 
 	s = splusb();
-	IF_ENQUEUE(&sc->sc_cmd_queue, m);
+	MBUFQ_ENQUEUE(&sc->sc_cmd_queue, m);
 
 	if (sc->sc_cmd_busy == 0)
 		ubt_xmit_cmd_start(sc);
@@ -914,7 +1011,7 @@ ubt_xmit_cmd(struct device *self, struct mbuf *m)
 	splx(s);
 }
 
-void
+static void
 ubt_xmit_cmd_start(struct ubt_softc *sc)
 {
 	usb_device_request_t req;
@@ -925,14 +1022,14 @@ ubt_xmit_cmd_start(struct ubt_softc *sc)
 	if (sc->sc_dying)
 		return;
 
-	if (IF_IS_EMPTY(&sc->sc_cmd_queue))
+	if (MBUFQ_FIRST(&sc->sc_cmd_queue) == NULL)
 		return;
 
-	IF_DEQUEUE(&sc->sc_cmd_queue, m);
+	MBUFQ_DEQUEUE(&sc->sc_cmd_queue, m);
 	KASSERT(m != NULL);
 
 	DPRINTFN(15, "%s: xmit CMD packet (%d bytes)\n",
-	    &sc->sc_dev, m->m_pkthdr.len);
+			USBDEVNAME(sc->sc_dev), m->m_pkthdr.len);
 
 	sc->sc_refcnt++;
 	sc->sc_cmd_busy = 1;
@@ -968,7 +1065,7 @@ ubt_xmit_cmd_start(struct ubt_softc *sc)
 	}
 }
 
-void
+static void
 ubt_xmit_cmd_complete(usbd_xfer_handle xfer,
 			usbd_private_handle h, usbd_status status)
 {
@@ -976,13 +1073,13 @@ ubt_xmit_cmd_complete(usbd_xfer_handle xfer,
 	uint32_t count;
 
 	DPRINTFN(15, "%s: CMD complete status=%s (%d)\n",
-	    sc->sc_dev.dv_xname, usbd_errstr(status), status);
+			USBDEVNAME(sc->sc_dev), usbd_errstr(status), status);
 
 	sc->sc_cmd_busy = 0;
 
 	if (--sc->sc_refcnt < 0) {
 		DPRINTF("sc_refcnt=%d\n", sc->sc_refcnt);
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(USBDEV(sc->sc_dev));
 		return;
 	}
 
@@ -1006,16 +1103,16 @@ ubt_xmit_cmd_complete(usbd_xfer_handle xfer,
 	ubt_xmit_cmd_start(sc);
 }
 
-void
-ubt_xmit_acl(struct device *self, struct mbuf *m)
+static void
+ubt_xmit_acl(device_ptr_t self, struct mbuf *m)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	int s;
 
 	KASSERT(sc->sc_enabled);
 
 	s = splusb();
-	IF_ENQUEUE(&sc->sc_aclwr_queue, m);
+	MBUFQ_ENQUEUE(&sc->sc_aclwr_queue, m);
 
 	if (sc->sc_aclwr_busy == 0)
 		ubt_xmit_acl_start(sc);
@@ -1023,7 +1120,7 @@ ubt_xmit_acl(struct device *self, struct mbuf *m)
 	splx(s);
 }
 
-void
+static void
 ubt_xmit_acl_start(struct ubt_softc *sc)
 {
 	struct mbuf *m;
@@ -1033,22 +1130,22 @@ ubt_xmit_acl_start(struct ubt_softc *sc)
 	if (sc->sc_dying)
 		return;
 
-	if (IF_IS_EMPTY(&sc->sc_aclwr_queue))
+	if (MBUFQ_FIRST(&sc->sc_aclwr_queue) == NULL)
 		return;
 
 	sc->sc_refcnt++;
 	sc->sc_aclwr_busy = 1;
 
-	IF_DEQUEUE(&sc->sc_aclwr_queue, m);
+	MBUFQ_DEQUEUE(&sc->sc_aclwr_queue, m);
 	KASSERT(m != NULL);
 
 	DPRINTFN(15, "%s: xmit ACL packet (%d bytes)\n",
-	    sc->sc_dev.dv_xname, m->m_pkthdr.len);
+			USBDEVNAME(sc->sc_dev), m->m_pkthdr.len);
 
 	len = m->m_pkthdr.len - 1;
 	if (len > UBT_BUFSIZ_ACL) {
 		DPRINTF("%s: truncating ACL packet (%d => %d)!\n",
-		    sc->sc_dev.dv_xname, len, UBT_BUFSIZ_ACL);
+			USBDEVNAME(sc->sc_dev), len, UBT_BUFSIZ_ACL);
 
 		len = UBT_BUFSIZ_ACL;
 	}
@@ -1081,19 +1178,19 @@ ubt_xmit_acl_start(struct ubt_softc *sc)
 	}
 }
 
-void
+static void
 ubt_xmit_acl_complete(usbd_xfer_handle xfer,
 		usbd_private_handle h, usbd_status status)
 {
 	struct ubt_softc *sc = h;
 
 	DPRINTFN(15, "%s: ACL complete status=%s (%d)\n",
-	    sc->sc_dev.dv_xname, usbd_errstr(status), status);
+		USBDEVNAME(sc->sc_dev), usbd_errstr(status), status);
 
 	sc->sc_aclwr_busy = 0;
 
 	if (--sc->sc_refcnt < 0) {
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(USBDEV(sc->sc_dev));
 		return;
 	}
 
@@ -1115,16 +1212,16 @@ ubt_xmit_acl_complete(usbd_xfer_handle xfer,
 	ubt_xmit_acl_start(sc);
 }
 
-void
-ubt_xmit_sco(struct device *self, struct mbuf *m)
+static void
+ubt_xmit_sco(device_ptr_t self, struct mbuf *m)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	int s;
 
 	KASSERT(sc->sc_enabled);
 
 	s = splusb();
-	IF_ENQUEUE(&sc->sc_scowr_queue, m);
+	MBUFQ_ENQUEUE(&sc->sc_scowr_queue, m);
 
 	if (sc->sc_scowr_busy == 0)
 		ubt_xmit_sco_start(sc);
@@ -1132,7 +1229,7 @@ ubt_xmit_sco(struct device *self, struct mbuf *m)
 	splx(s);
 }
 
-void
+static void
 ubt_xmit_sco_start(struct ubt_softc *sc)
 {
 	int i;
@@ -1148,7 +1245,7 @@ ubt_xmit_sco_start(struct ubt_softc *sc)
 	}
 }
 
-void
+static void
 ubt_xmit_sco_start1(struct ubt_softc *sc, struct ubt_isoc_xfer *isoc)
 {
 	struct mbuf *m;
@@ -1171,7 +1268,7 @@ ubt_xmit_sco_start1(struct ubt_softc *sc, struct ubt_isoc_xfer *isoc)
 	m = sc->sc_scowr_mbuf;
 	while (space > 0) {
 		if (m == NULL) {
-			IF_DEQUEUE(&sc->sc_scowr_queue, m);
+			MBUFQ_DEQUEUE(&sc->sc_scowr_queue, m);
 			if (m == NULL)
 				break;
 
@@ -1231,7 +1328,7 @@ ubt_xmit_sco_start1(struct ubt_softc *sc, struct ubt_isoc_xfer *isoc)
 	usbd_transfer(isoc->xfer);
 }
 
-void
+static void
 ubt_xmit_sco_complete(usbd_xfer_handle xfer,
 		usbd_private_handle h, usbd_status status)
 {
@@ -1258,7 +1355,7 @@ ubt_xmit_sco_complete(usbd_xfer_handle xfer,
 	}
 
 	if (--sc->sc_refcnt < 0) {
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(USBDEV(sc->sc_dev));
 		return;
 	}
 
@@ -1307,7 +1404,7 @@ ubt_mbufload(uint8_t *buf, int count, uint8_t type)
 	return m;
 }
 
-void
+static void
 ubt_recv_event(usbd_xfer_handle xfer, usbd_private_handle h, usbd_status status)
 {
 	struct ubt_softc *sc = h;
@@ -1337,7 +1434,7 @@ ubt_recv_event(usbd_xfer_handle xfer, usbd_private_handle h, usbd_status status)
 		sc->sc_stats.err_rx++;
 }
 
-void
+static void
 ubt_recv_acl_start(struct ubt_softc *sc)
 {
 	usbd_status status;
@@ -1377,7 +1474,7 @@ ubt_recv_acl_start(struct ubt_softc *sc)
 	}
 }
 
-void
+static void
 ubt_recv_acl_complete(usbd_xfer_handle xfer,
 		usbd_private_handle h, usbd_status status)
 {
@@ -1393,7 +1490,7 @@ ubt_recv_acl_complete(usbd_xfer_handle xfer,
 
 	if (--sc->sc_refcnt < 0) {
 		DPRINTF("refcnt = %d\n", sc->sc_refcnt);
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(USBDEV(sc->sc_dev));
 		return;
 	}
 
@@ -1432,7 +1529,7 @@ ubt_recv_acl_complete(usbd_xfer_handle xfer,
 	ubt_recv_acl_start(sc);
 }
 
-void
+static void
 ubt_recv_sco_start1(struct ubt_softc *sc, struct ubt_isoc_xfer *isoc)
 {
 	int i;
@@ -1465,7 +1562,7 @@ ubt_recv_sco_start1(struct ubt_softc *sc, struct ubt_isoc_xfer *isoc)
 	usbd_transfer(isoc->xfer);
 }
 
-void
+static void
 ubt_recv_sco_complete(usbd_xfer_handle xfer,
 		usbd_private_handle h, usbd_status status)
 {
@@ -1484,7 +1581,7 @@ ubt_recv_sco_complete(usbd_xfer_handle xfer,
 
 	if (--sc->sc_refcnt < 0) {
 		DPRINTF("refcnt=%d\n", sc->sc_refcnt);
-		usb_detach_wakeup(&sc->sc_dev);
+		usb_detach_wakeup(USBDEV(sc->sc_dev));
 		return;
 	}
 
@@ -1548,8 +1645,8 @@ ubt_recv_sco_complete(usbd_xfer_handle xfer,
 			if (m == NULL) {
 				MGETHDR(m, M_DONTWAIT, MT_DATA);
 				if (m == NULL) {
-					printf("%s: out of memory (xfer halted)\n",
-						sc->sc_dev.dv_xname);
+					aprint_error_dev(sc->sc_dev,
+					    "out of memory (xfer halted)\n");
 
 					sc->sc_stats.err_rx++;
 					return;		/* lost sync */
@@ -1606,9 +1703,9 @@ restart: /* and restart */
 }
 
 void
-ubt_stats(struct device *self, struct bt_stats *dest, int flush)
+ubt_stats(device_ptr_t self, struct bt_stats *dest, int flush)
 {
-	struct ubt_softc *sc = (struct ubt_softc *)self;
+	struct ubt_softc *sc = USBGETSOFTC(self);
 	int s;
 
 	s = splusb();

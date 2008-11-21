@@ -1,5 +1,5 @@
-/*	$OpenBSD: if_ppp.c,v 1.50 2007/09/15 16:43:51 henning Exp $	*/
-/*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
+/*	$NetBSD: if_ppp.c,v 1.124 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	Id: if_ppp.c,v 1.6 1997/03/04 03:33:00 paulus Exp 	*/
 
 /*
  * if_ppp.c - Point-to-Point Protocol (PPP) Asynchronous driver.
@@ -45,32 +45,20 @@
  * Based on:
  *	@(#)if_sl.c	7.6.1.2 (Berkeley) 2/15/89
  *
- * Copyright (c) 1987, 1989, 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1987 Regents of the University of California.
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * Redistribution and use in source and binary forms are permitted
+ * provided that the above copyright notice and this paragraph are
+ * duplicated in all such forms and that any documentation,
+ * advertising materials, and other materials related to such
+ * distribution and use acknowledge that the software was developed
+ * by the University of California, Berkeley.  The name of the
+ * University may not be used to endorse or promote products derived
+ * from this software without specific prior written permission.
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
+ * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
  * Serial Line interface
  *
@@ -103,10 +91,28 @@
 /* from if_sl.c,v 1.11 84/10/04 12:54:47 rick Exp */
 /* from NetBSD: if_ppp.c,v 1.15.2.2 1994/07/28 05:17:58 cgd Exp */
 
-#include "ppp.h"
-#if NPPP > 0
+/*
+ * XXX IMP ME HARDER
+ *
+ * This is an explanation of that comment.  This code used to use
+ * splimp() to block both network and tty interrupts.  However,
+ * that call is deprecated.  So, we have replaced the uses of
+ * splimp() with splhigh() in order to applomplish what it needs
+ * to accomplish, and added that happy little comment.
+ */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_ppp.c,v 1.124 2008/11/07 00:20:13 dyoung Exp $");
+
+#include "ppp.h"
+
+#include "opt_inet.h"
+#include "opt_gateway.h"
+#include "opt_ppp.h"
+
+#ifdef INET
 #define VJC
+#endif
 #define PPP_COMPRESS
 
 #include <sys/param.h>
@@ -118,29 +124,34 @@
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/malloc.h>
+#include <sys/conf.h>
+#include <sys/kauth.h>
+#include <sys/intr.h>
+#include <sys/simplelock.h>
+#include <sys/socketvar.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
+#ifdef PPP_FILTER
 #include <net/bpf.h>
+#endif
 
-#if INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
+#ifdef INET
 #include <netinet/ip.h>
-#else
-#ifdef _KERNEL
-#ifdef VJC
-#error ppp device with VJC assumes INET
-#endif
-#endif
 #endif
 
 #include "bpfilter.h"
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#endif
+
+#if defined(PPP_FILTER) || NBPFILTER > 0
+#include <net/slip.h>
 #endif
 
 #ifdef VJC
@@ -150,14 +161,14 @@
 #include <net/ppp_defs.h>
 #include <net/if_ppp.h>
 #include <net/if_pppvar.h>
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 
 #ifdef PPP_COMPRESS
 #define PACKETPTR	struct mbuf *
 #include <net/ppp-comp.h>
 #endif
 
-static int	pppsioctl(struct ifnet *, u_long, caddr_t);
+static int	pppsioctl(struct ifnet *, u_long, void *);
 static void	ppp_requeue(struct ppp_softc *);
 static void	ppp_ccp(struct ppp_softc *, struct mbuf *m, int rcvd);
 static void	ppp_ccp_closed(struct ppp_softc *);
@@ -166,8 +177,8 @@ static void	pppdumpm(struct mbuf *m0);
 #ifdef ALTQ
 static void	ppp_ifstart(struct ifnet *ifp);
 #endif
-int		ppp_clone_create(struct if_clone *, int);
-int		ppp_clone_destroy(struct ifnet *);
+
+static void	pppintr(void *);
 
 /*
  * Some useful mbuf macros not in mbuf.h.
@@ -183,12 +194,24 @@ int		ppp_clone_destroy(struct ifnet *);
 	    (m)->m_flags & M_PKTHDR ? MHLEN: MLEN)
 
 /*
- * We steal two bits in the mbuf m_flags, to mark high-priority packets
- * for output, and received packets following lost/corrupted packets.
+ * We define two link layer specific mbuf flags, to mark high-priority
+ * packets for output, and received packets following lost/corrupted
+ * packets.
  */
-#define M_HIGHPRI	0x2000	/* output packet for sc_fastq */
-#define M_ERRMARK	0x4000	/* steal a bit in mbuf m_flags */
+#define	M_HIGHPRI	M_LINK0	/* output packet for sc_fastq */
+#define	M_ERRMARK	M_LINK1	/* rx packet following lost/corrupted pkt */
 
+static int		ppp_clone_create(struct if_clone *, int);
+static int		ppp_clone_destroy(struct ifnet *);
+
+static struct ppp_softc *ppp_create(const char *, int);
+
+static LIST_HEAD(, ppp_softc) ppp_softc_list;
+
+struct if_clone ppp_cloner =
+    IF_CLONE_INITIALIZER("ppp", ppp_clone_create, ppp_clone_destroy);
+
+static struct simplelock ppp_list_mutex = SIMPLELOCK_INITIALIZER;
 
 #ifdef PPP_COMPRESS
 /*
@@ -199,7 +222,7 @@ int		ppp_clone_destroy(struct ifnet *);
 extern struct compressor ppp_bsd_compress;
 extern struct compressor ppp_deflate, ppp_deflate_draft;
 
-struct compressor *ppp_compressors[8] = {
+struct compressor *ppp_compressors[PPP_COMPRESSORS_MAX] = {
 #if DO_BSD_COMPRESS && defined(PPP_BSDCOMP)
     &ppp_bsd_compress,
 #endif
@@ -211,109 +234,158 @@ struct compressor *ppp_compressors[8] = {
 };
 #endif /* PPP_COMPRESS */
 
-LIST_HEAD(, ppp_softc) ppp_softc_list;
-struct if_clone ppp_cloner =
-    IF_CLONE_INITIALIZER("ppp", ppp_clone_create, ppp_clone_destroy);
 
 /*
  * Called from boot code to establish ppp interfaces.
  */
 void
-pppattach()
+pppattach(void)
 {
+    extern struct linesw ppp_disc;
+
+    if (ttyldisc_attach(&ppp_disc) != 0)
+    	panic("pppattach");
     LIST_INIT(&ppp_softc_list);
     if_clone_attach(&ppp_cloner);
 }
 
-int
-ppp_clone_create(ifc, unit)
-    struct if_clone *ifc;
-    int unit;
+static struct ppp_softc *
+ppp_create(const char *name, int unit)
 {
-    struct ppp_softc *sc;
-    int s;
+    struct ppp_softc *sc, *sci, *scl = NULL;
 
-    sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
-    if (!sc)
-	return (ENOMEM);
+    MALLOC(sc, struct ppp_softc *, sizeof(*sc), M_DEVBUF, M_WAIT|M_ZERO);
 
-    sc->sc_unit = unit;
-    snprintf(sc->sc_if.if_xname, sizeof sc->sc_if.if_xname, "%s%d",
-	ifc->ifc_name, unit);
+    simple_lock(&ppp_list_mutex);
+    if (unit == -1) {
+	int i = 0;
+	LIST_FOREACH(sci, &ppp_softc_list, sc_iflist) {
+	    scl = sci;
+	    if (i < sci->sc_unit) {
+		unit = i;
+		break;
+	    } else {
+#ifdef DIAGNOSTIC
+		KASSERT(i == sci->sc_unit);
+#endif
+		i++;
+	    }
+	}
+	if (unit == -1)
+	    unit = i;
+    } else {
+	LIST_FOREACH(sci, &ppp_softc_list, sc_iflist) {
+	    scl = sci;
+	    if (unit < sci->sc_unit)
+		break;
+	    else if (unit == sci->sc_unit) {
+		FREE(sc, M_DEVBUF);
+		return NULL;
+	    }
+	}
+    }
+
+    if (sci != NULL)
+	LIST_INSERT_BEFORE(sci, sc, sc_iflist);
+    else if (scl != NULL)
+	LIST_INSERT_AFTER(scl, sc, sc_iflist);
+    else
+	LIST_INSERT_HEAD(&ppp_softc_list, sc, sc_iflist);
+
+    simple_unlock(&ppp_list_mutex);
+
+    if_initname(&sc->sc_if, name, sc->sc_unit = unit);
+    callout_init(&sc->sc_timo_ch, 0);
     sc->sc_if.if_softc = sc;
     sc->sc_if.if_mtu = PPP_MTU;
     sc->sc_if.if_flags = IFF_POINTOPOINT | IFF_MULTICAST;
     sc->sc_if.if_type = IFT_PPP;
     sc->sc_if.if_hdrlen = PPP_HDRLEN;
+    sc->sc_if.if_dlt = DLT_NULL;
     sc->sc_if.if_ioctl = pppsioctl;
     sc->sc_if.if_output = pppoutput;
 #ifdef ALTQ
     sc->sc_if.if_start = ppp_ifstart;
 #endif
-    IFQ_SET_MAXLEN(&sc->sc_if.if_snd, ifqmaxlen);
-    sc->sc_inq.ifq_maxlen = ifqmaxlen;
-    sc->sc_fastq.ifq_maxlen = ifqmaxlen;
-    sc->sc_rawq.ifq_maxlen = ifqmaxlen;
+    IFQ_SET_MAXLEN(&sc->sc_if.if_snd, IFQ_MAXLEN);
+    sc->sc_inq.ifq_maxlen = IFQ_MAXLEN;
+    sc->sc_fastq.ifq_maxlen = IFQ_MAXLEN;
+    sc->sc_rawq.ifq_maxlen = IFQ_MAXLEN;
+    /* Ratio of 1:2 packets between the regular and the fast queue */
+    sc->sc_maxfastq = 2;	
     IFQ_SET_READY(&sc->sc_if.if_snd);
     if_attach(&sc->sc_if);
     if_alloc_sadl(&sc->sc_if);
 #if NBPFILTER > 0
-    bpfattach(&sc->sc_bpf, &sc->sc_if, DLT_PPP, PPP_HDRLEN);
+    bpfattach(&sc->sc_if, DLT_NULL, 0);
 #endif
-    s = splnet();
-    LIST_INSERT_HEAD(&ppp_softc_list, sc, sc_list);
-    splx(s);
-
-    return (0);
+    return sc;
 }
 
-int
-ppp_clone_destroy(ifp)
-    struct ifnet *ifp;
+static int
+ppp_clone_create(struct if_clone *ifc, int unit)
 {
-    struct ppp_softc *sc = ifp->if_softc;
-    int s;
+    return ppp_create(ifc->ifc_name, unit) == NULL ? EEXIST : 0;
+}
+
+static int
+ppp_clone_destroy(struct ifnet *ifp)
+{
+    struct ppp_softc *sc = (struct ppp_softc *)ifp->if_softc;
 
     if (sc->sc_devp != NULL)
-	return (EBUSY);
+	return EBUSY; /* Not removing it */
 
-    s = splnet();
-    LIST_REMOVE(sc, sc_list);
-    splx(s);
+    simple_lock(&ppp_list_mutex);
+    LIST_REMOVE(sc, sc_iflist);
+    simple_unlock(&ppp_list_mutex);
 
+#if NBPFILTER > 0
+    bpfdetach(ifp);
+#endif
     if_detach(ifp);
 
-    free(sc, M_DEVBUF);
-    return (0);
+    FREE(sc, M_DEVBUF);
+    return 0;
 }
 
 /*
  * Allocate a ppp interface unit and initialize it.
  */
 struct ppp_softc *
-pppalloc(pid)
-    pid_t pid;
+pppalloc(pid_t pid)
 {
+    struct ppp_softc *sc = NULL, *scf;
     int i;
-    struct ppp_softc *sc;
 
-    LIST_FOREACH(sc, &ppp_softc_list, sc_list)
-	if (sc->sc_xfer == pid) {
-	    sc->sc_xfer = 0;
-	    return sc;
+    simple_lock(&ppp_list_mutex);
+    for (scf = LIST_FIRST(&ppp_softc_list); scf != NULL;
+	scf = LIST_NEXT(scf, sc_iflist)) {
+	if (scf->sc_xfer == pid) {
+	    scf->sc_xfer = 0;
+	    simple_unlock(&ppp_list_mutex);
+	    return scf;
 	}
-    LIST_FOREACH(sc, &ppp_softc_list, sc_list)
-	if (sc->sc_devp == NULL)
-	    break;
-    if (sc == NULL)
-	return NULL;
+	if (scf->sc_devp == NULL && sc == NULL)
+	    sc = scf;
+    }
+    simple_unlock(&ppp_list_mutex);
 
+    if (sc == NULL)
+	sc = ppp_create(ppp_cloner.ifc_name, -1);
+
+    sc->sc_si = softint_establish(SOFTINT_NET, pppintr, sc);
+    if (sc->sc_si == NULL) {
+	printf("%s: unable to establish softintr\n", sc->sc_if.if_xname);
+	return (NULL);
+    }
     sc->sc_flags = 0;
     sc->sc_mru = PPP_MRU;
     sc->sc_relinq = NULL;
-    bzero((char *)&sc->sc_stats, sizeof(sc->sc_stats));
+    (void)memset(&sc->sc_stats, 0, sizeof(sc->sc_stats));
 #ifdef VJC
-    sc->sc_comp = malloc(sizeof(struct slcompress), M_DEVBUF, M_NOWAIT);
+    MALLOC(sc->sc_comp, struct slcompress *, sizeof(struct slcompress),
+	   M_DEVBUF, M_NOWAIT);
     if (sc->sc_comp)
 	sl_compress_init(sc->sc_comp);
 #endif
@@ -334,13 +406,11 @@ pppalloc(pid)
  * Deallocate a ppp unit.  Must be called at splsoftnet or higher.
  */
 void
-pppdealloc(sc)
-    struct ppp_softc *sc;
+pppdealloc(struct ppp_softc *sc)
 {
     struct mbuf *m;
 
-    splassert(IPL_SOFTNET);
-
+    softint_disestablish(sc->sc_si);
     if_down(&sc->sc_if);
     sc->sc_if.if_flags &= ~(IFF_UP|IFF_RUNNING);
     sc->sc_devp = NULL;
@@ -376,36 +446,43 @@ pppdealloc(sc)
     sc->sc_xc_state = NULL;
     sc->sc_rc_state = NULL;
 #endif /* PPP_COMPRESS */
-#if NBPFILTER > 0
-    if (sc->sc_pass_filt.bf_insns != 0) {
-	free(sc->sc_pass_filt.bf_insns, M_DEVBUF);
-	sc->sc_pass_filt.bf_insns = 0;
-	sc->sc_pass_filt.bf_len = 0;
+#ifdef PPP_FILTER
+    if (sc->sc_pass_filt_in.bf_insns != 0) {
+	FREE(sc->sc_pass_filt_in.bf_insns, M_DEVBUF);
+	sc->sc_pass_filt_in.bf_insns = 0;
+	sc->sc_pass_filt_in.bf_len = 0;
     }
-    if (sc->sc_active_filt.bf_insns != 0) {
-	free(sc->sc_active_filt.bf_insns, M_DEVBUF);
-	sc->sc_active_filt.bf_insns = 0;
-	sc->sc_active_filt.bf_len = 0;
+    if (sc->sc_pass_filt_out.bf_insns != 0) {
+	FREE(sc->sc_pass_filt_out.bf_insns, M_DEVBUF);
+	sc->sc_pass_filt_out.bf_insns = 0;
+	sc->sc_pass_filt_out.bf_len = 0;
     }
-#endif
+    if (sc->sc_active_filt_in.bf_insns != 0) {
+	FREE(sc->sc_active_filt_in.bf_insns, M_DEVBUF);
+	sc->sc_active_filt_in.bf_insns = 0;
+	sc->sc_active_filt_in.bf_len = 0;
+    }
+    if (sc->sc_active_filt_out.bf_insns != 0) {
+	FREE(sc->sc_active_filt_out.bf_insns, M_DEVBUF);
+	sc->sc_active_filt_out.bf_insns = 0;
+	sc->sc_active_filt_out.bf_len = 0;
+    }
+#endif /* PPP_FILTER */
 #ifdef VJC
     if (sc->sc_comp != 0) {
-	free(sc->sc_comp, M_DEVBUF);
+	FREE(sc->sc_comp, M_DEVBUF);
 	sc->sc_comp = 0;
     }
 #endif
+    (void)ppp_clone_destroy(&sc->sc_if);
 }
 
 /*
  * Ioctl routine for generic ppp devices.
  */
 int
-pppioctl(sc, cmd, data, flag, p)
-    struct ppp_softc *sc;
-    u_long cmd;
-    caddr_t data;
-    int flag;
-    struct proc *p;
+pppioctl(struct ppp_softc *sc, u_long cmd, void *data, int flag,
+    struct lwp *l)
 {
     int s, error, flags, mru, npx;
     u_int nb;
@@ -413,14 +490,36 @@ pppioctl(sc, cmd, data, flag, p)
     struct compressor **cp;
     struct npioctl *npi;
     time_t t;
-#if NBPFILTER > 0
+#ifdef PPP_FILTER
     struct bpf_program *bp, *nbp;
     struct bpf_insn *newcode, *oldcode;
     int newcodelen;
-#endif
+#endif /* PPP_FILTER */
 #ifdef	PPP_COMPRESS
     u_char ccp_option[CCP_MAX_OPTION_LENGTH];
 #endif
+
+    switch (cmd) {
+    case PPPIOCSFLAGS:
+    case PPPIOCSMRU:
+    case PPPIOCSMAXCID:
+    case PPPIOCSCOMPRESS:
+    case PPPIOCSNPMODE:
+	if (kauth_authorize_network(l->l_cred, KAUTH_NETWORK_INTERFACE,
+	    KAUTH_REQ_NETWORK_INTERFACE_SETPRIV, &sc->sc_if, (void *)cmd,
+	    NULL) != 0)
+		return (EPERM);
+	break;
+    case PPPIOCXFERUNIT:
+	/* XXX: Why is this privileged?! */
+	if (kauth_authorize_network(l->l_cred, KAUTH_NETWORK_INTERFACE,
+	    KAUTH_REQ_NETWORK_INTERFACE_GETPRIV, &sc->sc_if, (void *)cmd,
+	    NULL) != 0)
+		return (EPERM);
+	break;
+    default:
+	break;
+    }
 
     switch (cmd) {
     case FIONREAD:
@@ -428,32 +527,43 @@ pppioctl(sc, cmd, data, flag, p)
 	break;
 
     case PPPIOCGUNIT:
-	*(int *)data = sc->sc_unit;	/* XXX */
+	*(int *)data = sc->sc_unit;
 	break;
 
     case PPPIOCGFLAGS:
 	*(u_int *)data = sc->sc_flags;
 	break;
 
+    case PPPIOCGRAWIN:
+	{
+	    struct ppp_rawin *rwin = (struct ppp_rawin *)data;
+	    u_char c, q = 0;
+
+	    for (c = sc->sc_rawin_start; c < sizeof(sc->sc_rawin.buf);)
+		rwin->buf[q++] = sc->sc_rawin.buf[c++];
+
+	    for (c = 0; c < sc->sc_rawin_start;)
+		rwin->buf[q++] = sc->sc_rawin.buf[c++];
+
+	    rwin->count = sc->sc_rawin.count;
+	}
+	break;
+
     case PPPIOCSFLAGS:
-	if ((error = suser(p, 0)) != 0)
-	    return (error);
 	flags = *(int *)data & SC_MASK;
 	s = splsoftnet();
 #ifdef PPP_COMPRESS
 	if (sc->sc_flags & SC_CCP_OPEN && !(flags & SC_CCP_OPEN))
 	    ppp_ccp_closed(sc);
 #endif
-	splnet();
+	splhigh();	/* XXX IMP ME HARDER */
 	sc->sc_flags = (sc->sc_flags & ~SC_MASK) | flags;
 	splx(s);
 	break;
 
     case PPPIOCSMRU:
-	if ((error = suser(p, 0)) != 0)
-	    return (error);
 	mru = *(int *)data;
-	if (mru >= PPP_MRU && mru <= PPP_MAXMRU)
+	if (mru >= PPP_MINMRU && mru <= PPP_MAXMRU)
 	    sc->sc_mru = mru;
 	break;
 
@@ -463,8 +573,6 @@ pppioctl(sc, cmd, data, flag, p)
 
 #ifdef VJC
     case PPPIOCSMAXCID:
-	if ((error = suser(p, 0)) != 0)
-	    return (error);
 	if (sc->sc_comp) {
 	    s = splsoftnet();
 	    sl_compress_setup(sc->sc_comp, *(int *)data);
@@ -474,15 +582,11 @@ pppioctl(sc, cmd, data, flag, p)
 #endif
 
     case PPPIOCXFERUNIT:
-	if ((error = suser(p, 0)) != 0)
-	    return (error);
-	sc->sc_xfer = p->p_pid;
+	sc->sc_xfer = l->l_proc->p_pid;
 	break;
 
 #ifdef PPP_COMPRESS
     case PPPIOCSCOMPRESS:
-	if ((error = suser(p, 0)) != 0)
-	    return (error);
 	odp = (struct ppp_option_data *) data;
 	nb = odp->length;
 	if (nb > sizeof(ccp_option))
@@ -510,7 +614,7 @@ pppioctl(sc, cmd, data, flag, p)
 				sc->sc_if.if_xname);
 			error = ENOBUFS;
 		    }
-		    splnet();
+		    splhigh();	/* XXX IMP ME HARDER */
 		    sc->sc_flags &= ~SC_COMP_RUN;
 		    splx(s);
 		} else {
@@ -525,7 +629,7 @@ pppioctl(sc, cmd, data, flag, p)
 				sc->sc_if.if_xname);
 			error = ENOBUFS;
 		    }
-		    splnet();
+		    splhigh();	/* XXX IMP ME HARDER */
 		    sc->sc_flags &= ~SC_DECOMP_RUN;
 		    splx(s);
 		}
@@ -545,20 +649,21 @@ pppioctl(sc, cmd, data, flag, p)
 	case PPP_IP:
 	    npx = NP_IP;
 	    break;
+	case PPP_IPV6:
+	    npx = NP_IPV6;
+	    break;
 	default:
 	    return EINVAL;
 	}
 	if (cmd == PPPIOCGNPMODE) {
 	    npi->mode = sc->sc_npmode[npx];
 	} else {
-	    if ((error = suser(p, 0)) != 0)
-		return (error);
 	    if (npi->mode != sc->sc_npmode[npx]) {
-		s = splsoftnet();
+		s = splnet();
 		sc->sc_npmode[npx] = npi->mode;
 		if (npi->mode != NPMODE_QUEUE) {
 		    ppp_requeue(sc);
-		    (*sc->sc_start)(sc);
+		    ppp_restart(sc);
 		}
 		splx(s);
 	    }
@@ -573,16 +678,24 @@ pppioctl(sc, cmd, data, flag, p)
 	splx(s);
 	break;
 
-#if NBPFILTER > 0
+#ifdef PPP_FILTER
     case PPPIOCSPASS:
     case PPPIOCSACTIVE:
+	/* These are no longer supported. */
+	return EOPNOTSUPP;
+
+    case PPPIOCSIPASS:
+    case PPPIOCSOPASS:
+    case PPPIOCSIACTIVE:
+    case PPPIOCSOACTIVE:
 	nbp = (struct bpf_program *) data;
 	if ((unsigned) nbp->bf_len > BPF_MAXINSNS)
 	    return EINVAL;
 	newcodelen = nbp->bf_len * sizeof(struct bpf_insn);
 	if (newcodelen != 0) {
 	    newcode = malloc(newcodelen, M_DEVBUF, M_WAITOK);
-	    if ((error = copyin((caddr_t)nbp->bf_insns, (caddr_t)newcode,
+	    /* WAITOK -- malloc() never fails. */
+	    if ((error = copyin((void *)nbp->bf_insns, (void *)newcode,
 			       newcodelen)) != 0) {
 		free(newcode, M_DEVBUF);
 		return error;
@@ -593,7 +706,26 @@ pppioctl(sc, cmd, data, flag, p)
 	    }
 	} else
 	    newcode = 0;
-	bp = (cmd == PPPIOCSPASS)? &sc->sc_pass_filt: &sc->sc_active_filt;
+	switch (cmd) {
+	case PPPIOCSIPASS:
+	    bp = &sc->sc_pass_filt_in;
+	    break;
+
+	case PPPIOCSOPASS:
+	    bp = &sc->sc_pass_filt_out;
+	    break;
+
+	case PPPIOCSIACTIVE:
+	    bp = &sc->sc_active_filt_in;
+	    break;
+
+	case PPPIOCSOACTIVE:
+	    bp = &sc->sc_active_filt_out;
+	    break;
+	default:
+	    free(newcode, M_DEVBUF);
+	    return (EPASSTHROUGH);
+	}
 	oldcode = bp->bf_insns;
 	s = splnet();
 	bp->bf_len = nbp->bf_len;
@@ -602,10 +734,10 @@ pppioctl(sc, cmd, data, flag, p)
 	if (oldcode != 0)
 	    free(oldcode, M_DEVBUF);
 	break;
-#endif
+#endif /* PPP_FILTER */
 
     default:
-	return (-1);
+	return (EPASSTHROUGH);
     }
     return (0);
 }
@@ -614,11 +746,9 @@ pppioctl(sc, cmd, data, flag, p)
  * Process an ioctl request to the ppp network interface.
  */
 static int
-pppsioctl(ifp, cmd, data)
-    struct ifnet *ifp;
-    u_long cmd;
-    caddr_t data;
+pppsioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
+    struct lwp *l = curlwp;	/* XXX */
     struct ppp_softc *sc = ifp->if_softc;
     struct ifaddr *ifa = (struct ifaddr *)data;
     struct ifreq *ifr = (struct ifreq *)data;
@@ -630,33 +760,57 @@ pppsioctl(ifp, cmd, data)
 
     switch (cmd) {
     case SIOCSIFFLAGS:
+	if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+		break;
 	if ((ifp->if_flags & IFF_RUNNING) == 0)
 	    ifp->if_flags &= ~IFF_UP;
 	break;
 
-    case SIOCSIFADDR:
-	if (ifa->ifa_addr->sa_family != AF_INET)
+    case SIOCINITIFADDR:
+	switch (ifa->ifa_addr->sa_family) {
+#ifdef INET
+	case AF_INET:
+	    break;
+#endif
+#ifdef INET6
+	case AF_INET6:
+	    break;
+#endif
+	default:
 	    error = EAFNOSUPPORT;
+	    break;
+	}
 	break;
 
     case SIOCSIFDSTADDR:
-	if (ifa->ifa_addr->sa_family != AF_INET)
+	switch (ifa->ifa_addr->sa_family) {
+#ifdef INET
+	case AF_INET:
+	    break;
+#endif
+#ifdef INET6
+	case AF_INET6:
+	    break;
+#endif
+	default:
 	    error = EAFNOSUPPORT;
-	break;
-
-    case SIOCSIFMTU:
-	sc->sc_if.if_mtu = ifr->ifr_mtu;
+	    break;
+	}
 	break;
 
     case SIOCADDMULTI:
     case SIOCDELMULTI:
-	if (ifr == 0) {
+	if (ifr == NULL) {
 	    error = EAFNOSUPPORT;
 	    break;
 	}
-	switch(ifr->ifr_addr.sa_family) {
+	switch (ifreq_getaddr(cmd, ifr)->sa_family) {
 #ifdef INET
 	case AF_INET:
+	    break;
+#endif
+#ifdef INET6
+	case AF_INET6:
 	    break;
 #endif
 	default:
@@ -667,7 +821,7 @@ pppsioctl(ifp, cmd, data)
 
     case SIOCGPPPSTATS:
 	psp = &((struct ifpppstatsreq *) data)->stats;
-	bzero(psp, sizeof(*psp));
+	memset(psp, 0, sizeof(*psp));
 	psp->p = sc->sc_stats;
 #if defined(VJC) && !defined(SL_NO_STATS)
 	if (sc->sc_comp) {
@@ -686,7 +840,7 @@ pppsioctl(ifp, cmd, data)
 #ifdef PPP_COMPRESS
     case SIOCGPPPCSTATS:
 	pcp = &((struct ifpppcstatsreq *) data)->stats;
-	bzero(pcp, sizeof(*pcp));
+	memset(pcp, 0, sizeof(*pcp));
 	if (sc->sc_xc_state != NULL)
 	    (*sc->sc_xcomp->comp_stat)(sc->sc_xc_state, &pcp->c);
 	if (sc->sc_rc_state != NULL)
@@ -694,8 +848,16 @@ pppsioctl(ifp, cmd, data)
 	break;
 #endif /* PPP_COMPRESS */
 
+    case SIOCSIFMTU:
+	if ((error = kauth_authorize_network(l->l_cred,
+	    KAUTH_NETWORK_INTERFACE, KAUTH_REQ_NETWORK_INTERFACE_SETPRIV,
+	    ifp, (void *)cmd, NULL) != 0))
+	    break;
+	/*FALLTHROUGH*/
     default:
-	error = EINVAL;
+	if ((error = ifioctl_common(&sc->sc_if, cmd, data)) == ENETRESET)
+		error = 0;
+	break;
     }
     splx(s);
     return (error);
@@ -706,26 +868,28 @@ pppsioctl(ifp, cmd, data)
  * Packet is placed in Information field of PPP frame.
  */
 int
-pppoutput(ifp, m0, dst, rtp)
-    struct ifnet *ifp;
-    struct mbuf *m0;
-    struct sockaddr *dst;
-    struct rtentry *rtp;
+pppoutput(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
+    struct rtentry *rtp)
 {
     struct ppp_softc *sc = ifp->if_softc;
     int protocol, address, control;
     u_char *cp;
     int s, error;
+#ifdef INET
     struct ip *ip;
+#endif
     struct ifqueue *ifq;
     enum NPmode mode;
     int len;
+    ALTQ_DECL(struct altq_pktattr pktattr;)
 
     if (sc->sc_devp == NULL || (ifp->if_flags & IFF_RUNNING) == 0
 	|| ((ifp->if_flags & IFF_UP) == 0 && dst->sa_family != AF_UNSPEC)) {
 	error = ENETDOWN;	/* sort of */
 	goto bad;
     }
+
+    IFQ_CLASSIFY(&ifp->if_snd, m0, dst->sa_family, &pktattr);
 
     /*
      * Compute PPP header.
@@ -746,6 +910,24 @@ pppoutput(ifp, m0, dst, rtp)
 	ip = mtod(m0, struct ip *);
 	if (ip->ip_tos & IPTOS_LOWDELAY)
 	    m0->m_flags |= M_HIGHPRI;
+	break;
+#endif
+#ifdef INET6
+    case AF_INET6:
+	address = PPP_ALLSTATIONS;	/*XXX*/
+	control = PPP_UI;		/*XXX*/
+	protocol = PPP_IPV6;
+	mode = sc->sc_npmode[NP_IPV6];
+
+#if 0	/* XXX flowinfo/traffic class, maybe? */
+	/*
+	 * If this packet has the "low delay" bit set in the IP header,
+	 * put it on the fastq instead.
+	 */
+	ip = mtod(m0, struct ip *);
+	if (ip->ip_tos & IPTOS_LOWDELAY)
+	    m0->m_flags |= M_HIGHPRI;
+#endif
 	break;
 #endif
     case AF_UNSPEC:
@@ -773,11 +955,10 @@ pppoutput(ifp, m0, dst, rtp)
     }
 
     /*
-     * Add PPP header.  If no space in first mbuf, allocate another.
-     * (This assumes M_LEADINGSPACE is always 0 for a cluster mbuf.)
+     * Add PPP header.
      */
     M_PREPEND(m0, PPP_HDRLEN, M_DONTWAIT);
-    if (m0 == 0) {
+    if (m0 == NULL) {
 	error = ENOBUFS;
 	goto bad;
     }
@@ -788,9 +969,7 @@ pppoutput(ifp, m0, dst, rtp)
     *cp++ = protocol >> 8;
     *cp++ = protocol & 0xff;
 
-    if ((m0->m_flags & M_PKTHDR) == 0)
-	    panic("mbuf packet without packet header!");
-    len = m0->m_pkthdr.len;
+    len = m_length(m0);
 
     if (sc->sc_flags & SC_LOG_OUTPKT) {
 	printf("%s output: ", ifp->if_xname);
@@ -798,14 +977,13 @@ pppoutput(ifp, m0, dst, rtp)
     }
 
     if ((protocol & 0x8000) == 0) {
-#if NBPFILTER > 0
+#ifdef PPP_FILTER
 	/*
 	 * Apply the pass and active filters to the packet,
 	 * but only if it is a data packet.
 	 */
-	*mtod(m0, u_char *) = 1;	/* indicates outbound */
-	if (sc->sc_pass_filt.bf_insns != 0
-	    && bpf_filter(sc->sc_pass_filt.bf_insns, (u_char *) m0,
+	if (sc->sc_pass_filt_out.bf_insns != 0
+	    && bpf_filter(sc->sc_pass_filt_out.bf_insns, (u_char *) m0,
 			  len, 0) == 0) {
 	    error = 0;		/* drop this packet */
 	    goto bad;
@@ -814,61 +992,45 @@ pppoutput(ifp, m0, dst, rtp)
 	/*
 	 * Update the time we sent the most recent packet.
 	 */
-	if (sc->sc_active_filt.bf_insns == 0
-	    || bpf_filter(sc->sc_active_filt.bf_insns, (u_char *) m0, len, 0))
+	if (sc->sc_active_filt_out.bf_insns == 0
+	    || bpf_filter(sc->sc_active_filt_out.bf_insns, (u_char *) m0,
+	    		  len, 0))
 	    sc->sc_last_sent = time_second;
-
-	*mtod(m0, u_char *) = address;
 #else
 	/*
 	 * Update the time we sent the most recent packet.
 	 */
 	sc->sc_last_sent = time_second;
-#endif
+#endif /* PPP_FILTER */
     }
 
 #if NBPFILTER > 0
     /*
      * See if bpf wants to look at the packet.
      */
-    if (sc->sc_bpf)
-	bpf_mtap(sc->sc_bpf, m0, BPF_DIRECTION_OUT);
+    if (sc->sc_if.if_bpf)
+	bpf_mtap(sc->sc_if.if_bpf, m0);
 #endif
 
     /*
      * Put the packet on the appropriate queue.
      */
-    s = splsoftnet();
+    s = splnet();
     if (mode == NPMODE_QUEUE) {
 	/* XXX we should limit the number of packets on this queue */
 	*sc->sc_npqtail = m0;
 	m0->m_nextpkt = NULL;
 	sc->sc_npqtail = &m0->m_nextpkt;
     } else {
-	if ((m0->m_flags & M_HIGHPRI)
-#ifdef ALTQ
-	    && ALTQ_IS_ENABLED(&sc->sc_if.if_snd) == 0
-#endif
-	    ) {
-	    ifq = &sc->sc_fastq;
-	    if (IF_QFULL(ifq) && dst->sa_family != AF_UNSPEC) {
-		IF_DROP(ifq);
-		m_freem(m0);
-		error = ENOBUFS;
-	    }
-	    else {
-		IF_ENQUEUE(ifq, m0);
-		error = 0;
-	    }
-	} else
-	    IFQ_ENQUEUE(&sc->sc_if.if_snd, m0, NULL, error);
-	if (error) {
+	ifq = (m0->m_flags & M_HIGHPRI) ? &sc->sc_fastq : NULL;
+	if ((error = ifq_enqueue2(&sc->sc_if, ifq, m0
+		ALTQ_COMMA ALTQ_DECL(&pktattr))) != 0) {
 	    splx(s);
 	    sc->sc_if.if_oerrors++;
 	    sc->sc_stats.ppp_oerrors++;
 	    return (error);
 	}
-	(*sc->sc_start)(sc);
+	ppp_restart(sc);
     }
     ifp->if_opackets++;
     ifp->if_obytes += len;
@@ -884,23 +1046,23 @@ bad:
 /*
  * After a change in the NPmode for some NP, move packets from the
  * npqueue to the send queue or the fast queue as appropriate.
- * Should be called at splsoftnet.
+ * Should be called at splnet, since we muck with the queues.
  */
 static void
-ppp_requeue(sc)
-    struct ppp_softc *sc;
+ppp_requeue(struct ppp_softc *sc)
 {
     struct mbuf *m, **mpp;
     struct ifqueue *ifq;
     enum NPmode mode;
     int error;
 
-    splassert(IPL_SOFTNET);
-
     for (mpp = &sc->sc_npqueue; (m = *mpp) != NULL; ) {
 	switch (PPP_PROTOCOL(mtod(m, u_char *))) {
 	case PPP_IP:
 	    mode = sc->sc_npmode[NP_IP];
+	    break;
+	case PPP_IPV6:
+	    mode = sc->sc_npmode[NP_IPV6];
 	    break;
 	default:
 	    mode = NPMODE_PASS;
@@ -913,24 +1075,9 @@ ppp_requeue(sc)
 	     */
 	    *mpp = m->m_nextpkt;
 	    m->m_nextpkt = NULL;
-	    if ((m->m_flags & M_HIGHPRI)
-#ifdef ALTQ
-		&& ALTQ_IS_ENABLED(&sc->sc_if.if_snd) == 0
-#endif
-		) {
-		ifq = &sc->sc_fastq;
-		if (IF_QFULL(ifq)) {
-		    IF_DROP(ifq);
-		    m_freem(m);
-		    error = ENOBUFS;
-		}
-		else {
-		    IF_ENQUEUE(ifq, m);
-		    error = 0;
-		}
-	    } else
-		IFQ_ENQUEUE(&sc->sc_if.if_snd, m, NULL, error);
-	    if (error) {
+	    ifq = (m->m_flags & M_HIGHPRI) ? &sc->sc_fastq : NULL;
+	    if ((error = ifq_enqueue2(&sc->sc_if, ifq, m ALTQ_COMMA
+		ALTQ_DECL(NULL))) != 0) {
 		sc->sc_if.if_oerrors++;
 		sc->sc_stats.ppp_oerrors++;
 	    }
@@ -955,13 +1102,12 @@ ppp_requeue(sc)
  * remember to call sc->sc_start later at splsoftnet.
  */
 void
-ppp_restart(sc)
-    struct ppp_softc *sc;
+ppp_restart(struct ppp_softc *sc)
 {
-    int s = splnet();
+    int s = splhigh();	/* XXX IMP ME HARDER */
 
     sc->sc_flags &= ~SC_TBUSY;
-    schednetisr(NETISR_PPP);
+    softint_schedule(sc->sc_si);
     splx(s);
 }
 
@@ -972,22 +1118,37 @@ ppp_restart(sc)
  * protocol field compression to the packet.
  */
 struct mbuf *
-ppp_dequeue(sc)
-    struct ppp_softc *sc;
+ppp_dequeue(struct ppp_softc *sc)
 {
     struct mbuf *m, *mp;
     u_char *cp;
     int address, control, protocol;
+    int s;
 
     /*
      * Grab a packet to send: first try the fast queue, then the
      * normal queue.
      */
-    IF_DEQUEUE(&sc->sc_fastq, m);
-    if (m == NULL)
+    s = splnet();
+    if (sc->sc_nfastq < sc->sc_maxfastq) {
+	IF_DEQUEUE(&sc->sc_fastq, m);
+	if (m != NULL)
+	    sc->sc_nfastq++;
+	else
+	    IFQ_DEQUEUE(&sc->sc_if.if_snd, m);
+    } else {
+	sc->sc_nfastq = 0;
 	IFQ_DEQUEUE(&sc->sc_if.if_snd, m);
+	if (m == NULL) {
+	    IF_DEQUEUE(&sc->sc_fastq, m);
+	    if (m != NULL)
+		sc->sc_nfastq++;
+	}
+    }
+    splx(s);
+
     if (m == NULL)
-      return NULL;
+	return NULL;
 
     ++sc->sc_stats.ppp_opackets;
 
@@ -1051,14 +1212,13 @@ ppp_dequeue(sc)
     if (protocol != PPP_LCP && protocol != PPP_CCP
 	&& sc->sc_xc_state && (sc->sc_flags & SC_COMP_RUN)) {
 	struct mbuf *mcomp = NULL;
-	int slen, clen;
+	int slen;
 
 	slen = 0;
 	for (mp = m; mp != NULL; mp = mp->m_next)
 	    slen += mp->m_len;
-	clen = (*sc->sc_xcomp->compress)
-	    (sc->sc_xc_state, &mcomp, m, slen,
-	     (sc->sc_flags & SC_CCP_UP ? sc->sc_if.if_mtu + PPP_HDRLEN : 0));
+	(*sc->sc_xcomp->compress)
+	    (sc->sc_xc_state, &mcomp, m, slen, sc->sc_if.if_mtu + PPP_HDRLEN);
 	if (mcomp != NULL) {
 	    if (sc->sc_flags & SC_CCP_UP) {
 		/* Send the compressed packet instead of the original. */
@@ -1100,34 +1260,31 @@ ppp_dequeue(sc)
 /*
  * Software interrupt routine, called at splsoftnet.
  */
-void
-pppintr()
+static void
+pppintr(void *arg)
 {
-    struct ppp_softc *sc;
-    int s, s2;
-    struct mbuf *m;
+	struct ppp_softc *sc = arg;
+	struct mbuf *m;
+	int s;
 
-    splassert(IPL_SOFTNET);
-
-    s = splsoftnet();	/* XXX - what's the point of this? see comment above */
-    LIST_FOREACH(sc, &ppp_softc_list, sc_list) {
+	mutex_enter(softnet_lock);
 	if (!(sc->sc_flags & SC_TBUSY)
-	    && (IFQ_IS_EMPTY(&sc->sc_if.if_snd) == 0 || sc->sc_fastq.ifq_head)) {
-	    s2 = splnet();
-	    sc->sc_flags |= SC_TBUSY;
-	    splx(s2);
-	    (*sc->sc_start)(sc);
+	    && (IFQ_IS_EMPTY(&sc->sc_if.if_snd) == 0 || sc->sc_fastq.ifq_head
+		|| sc->sc_outm)) {
+		s = splhigh();	/* XXX IMP ME HARDER */
+		sc->sc_flags |= SC_TBUSY;
+		splx(s);
+		(*sc->sc_start)(sc);
 	}
-	while (sc->sc_rawq.ifq_head) {
-	    s2 = splnet();
-	    IF_DEQUEUE(&sc->sc_rawq, m);
-	    splx(s2);
-	    if (m == NULL)
-		break;
-	    ppp_inproc(sc, m);
+	for (;;) {
+		s = splnet();
+		IF_DEQUEUE(&sc->sc_rawq, m);
+		splx(s);
+		if (m == NULL)
+			break;
+		ppp_inproc(sc, m);
 	}
-    }
-    splx(s);
+	mutex_exit(softnet_lock);
 }
 
 #ifdef PPP_COMPRESS
@@ -1136,10 +1293,7 @@ pppintr()
  * 0 if it is about to be transmitted.
  */
 static void
-ppp_ccp(sc, m, rcvd)
-    struct ppp_softc *sc;
-    struct mbuf *m;
-    int rcvd;
+ppp_ccp(struct ppp_softc *sc, struct mbuf *m, int rcvd)
 {
     u_char *dp, *ep;
     struct mbuf *mp;
@@ -1175,7 +1329,7 @@ ppp_ccp(sc, m, rcvd)
     case CCP_TERMACK:
 	/* CCP must be going down - disable compression */
 	if (sc->sc_flags & SC_CCP_UP) {
-	    s = splnet();
+	    s = splhigh();	/* XXX IMP ME HARDER */
 	    sc->sc_flags &= ~(SC_CCP_UP | SC_COMP_RUN | SC_DECOMP_RUN);
 	    splx(s);
 	}
@@ -1191,7 +1345,7 @@ ppp_ccp(sc, m, rcvd)
 		    && (*sc->sc_xcomp->comp_init)
 			(sc->sc_xc_state, dp + CCP_HDRLEN, slen - CCP_HDRLEN,
 			 sc->sc_unit, 0, sc->sc_flags & SC_DEBUG)) {
-		    s = splnet();
+		    s = splhigh();	/* XXX IMP ME HARDER */
 		    sc->sc_flags |= SC_COMP_RUN;
 		    splx(s);
 		}
@@ -1202,7 +1356,7 @@ ppp_ccp(sc, m, rcvd)
 			(sc->sc_rc_state, dp + CCP_HDRLEN, slen - CCP_HDRLEN,
 			 sc->sc_unit, 0, sc->sc_mru,
 			 sc->sc_flags & SC_DEBUG)) {
-		    s = splnet();
+		    s = splhigh();	/* XXX IMP ME HARDER */
 		    sc->sc_flags |= SC_DECOMP_RUN;
 		    sc->sc_flags &= ~(SC_DC_ERROR | SC_DC_FERROR);
 		    splx(s);
@@ -1219,7 +1373,7 @@ ppp_ccp(sc, m, rcvd)
 	    } else {
 		if (sc->sc_rc_state && (sc->sc_flags & SC_DECOMP_RUN)) {
 		    (*sc->sc_rcomp->decomp_reset)(sc->sc_rc_state);
-		    s = splnet();
+		    s = splhigh();	/* XXX IMP ME HARDER */
 		    sc->sc_flags &= ~SC_DC_ERROR;
 		    splx(s);
 		}
@@ -1233,8 +1387,7 @@ ppp_ccp(sc, m, rcvd)
  * CCP is down; free (de)compressor state if necessary.
  */
 static void
-ppp_ccp_closed(sc)
-    struct ppp_softc *sc;
+ppp_ccp_closed(struct ppp_softc *sc)
 {
     if (sc->sc_xc_state) {
 	(*sc->sc_xcomp->comp_free)(sc->sc_xc_state);
@@ -1254,17 +1407,14 @@ ppp_ccp_closed(sc)
  * were omitted.
  */
 void
-ppppktin(sc, m, lost)
-    struct ppp_softc *sc;
-    struct mbuf *m;
-    int lost;
+ppppktin(struct ppp_softc *sc, struct mbuf *m, int lost)
 {
-    int s = splnet();
+    int s = splhigh();	/* XXX IMP ME HARDER */
 
     if (lost)
 	m->m_flags |= M_ERRMARK;
     IF_ENQUEUE(&sc->sc_rawq, m);
-    schednetisr(NETISR_PPP);
+    softint_schedule(sc->sc_si);
     splx(s);
 }
 
@@ -1276,17 +1426,18 @@ ppppktin(sc, m, lost)
 			 TYPE_UNCOMPRESSED_TCP)
 
 static void
-ppp_inproc(sc, m)
-    struct ppp_softc *sc;
-    struct mbuf *m;
+ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
 {
     struct ifnet *ifp = &sc->sc_if;
     struct ifqueue *inq;
-    int s, ilen, xlen, proto, rv;
+    int s, ilen, proto, rv;
     u_char *cp, adrs, ctrl;
     struct mbuf *mp, *dmp = NULL;
+#ifdef VJC
+    int xlen;
     u_char *iphdr;
     u_int hlen;
+#endif
 
     sc->sc_stats.ppp_ipackets++;
 
@@ -1305,7 +1456,7 @@ ppp_inproc(sc, m)
 
     if (m->m_flags & M_ERRMARK) {
 	m->m_flags &= ~M_ERRMARK;
-	s = splnet();
+	s = splhigh();	/* XXX IMP ME HARDER */
 	sc->sc_flags |= SC_VJ_RESET;
 	splx(s);
     }
@@ -1337,7 +1488,7 @@ ppp_inproc(sc, m)
 	     */
 	    if (sc->sc_flags & SC_DEBUG)
 		printf("%s: decompress failed %d\n", ifp->if_xname, rv);
-	    s = splnet();
+	    s = splhigh();	/* XXX IMP ME HARDER */
 	    sc->sc_flags |= SC_VJ_RESET;
 	    if (rv == DECOMP_ERROR)
 		sc->sc_flags |= SC_DC_ERROR;
@@ -1368,7 +1519,7 @@ ppp_inproc(sc, m)
 	 */
 	if (sc->sc_comp)
 	    sl_uncompress_tcp(NULL, 0, TYPE_ERROR, sc->sc_comp);
-	s = splnet();
+	s = splhigh();	/* XXX IMP ME HARDER */
 	sc->sc_flags &= ~SC_VJ_RESET;
 	splx(s);
     }
@@ -1404,8 +1555,6 @@ ppp_inproc(sc, m)
 		goto bad;	/* lose if big headers and no clusters */
 	    }
 	}
-	if (m->m_flags & M_PKTHDR)
-		M_MOVE_HDR(mp, m);
 	cp = mtod(mp, u_char *);
 	cp[0] = adrs;
 	cp[1] = ctrl;
@@ -1457,7 +1606,7 @@ ppp_inproc(sc, m)
     if (ilen <= MHLEN && M_IS_CLUSTER(m)) {
 	MGETHDR(mp, M_DONTWAIT, MT_DATA);
 	if (mp != NULL) {
-	    m_copydata(m, 0, ilen, mtod(mp, caddr_t));
+	    m_copydata(m, 0, ilen, mtod(mp, void *));
 	    m_freem(m);
 	    m = mp;
 	    m->m_len = ilen;
@@ -1467,37 +1616,34 @@ ppp_inproc(sc, m)
     m->m_pkthdr.rcvif = ifp;
 
     if ((proto & 0x8000) == 0) {
-#if NBPFILTER > 0
+#ifdef PPP_FILTER
 	/*
 	 * See whether we want to pass this packet, and
 	 * if it counts as link activity.
 	 */
-	adrs = *mtod(m, u_char *);	/* save address field */
-	*mtod(m, u_char *) = 0;		/* indicate inbound */
-	if (sc->sc_pass_filt.bf_insns != 0
-	    && bpf_filter(sc->sc_pass_filt.bf_insns, (u_char *) m,
+	if (sc->sc_pass_filt_in.bf_insns != 0
+	    && bpf_filter(sc->sc_pass_filt_in.bf_insns, (u_char *) m,
 			  ilen, 0) == 0) {
 	    /* drop this packet */
 	    m_freem(m);
 	    return;
 	}
-	if (sc->sc_active_filt.bf_insns == 0
-	    || bpf_filter(sc->sc_active_filt.bf_insns, (u_char *) m, ilen, 0))
+	if (sc->sc_active_filt_in.bf_insns == 0
+	    || bpf_filter(sc->sc_active_filt_in.bf_insns, (u_char *) m,
+	    		  ilen, 0))
 	    sc->sc_last_recv = time_second;
-
-	*mtod(m, u_char *) = adrs;
 #else
 	/*
 	 * Record the time that we received this packet.
 	 */
 	sc->sc_last_recv = time_second;
-#endif
+#endif /* PPP_FILTER */
     }
 
 #if NBPFILTER > 0
     /* See if bpf wants to look at the packet. */
-    if (sc->sc_bpf)
-	bpf_mtap(sc->sc_bpf, m, BPF_DIRECTION_IN);
+    if (sc->sc_if.if_bpf)
+	bpf_mtap(sc->sc_if.if_bpf, m);
 #endif
 
     rv = 0;
@@ -1516,8 +1662,35 @@ ppp_inproc(sc, m)
 	m->m_pkthdr.len -= PPP_HDRLEN;
 	m->m_data += PPP_HDRLEN;
 	m->m_len -= PPP_HDRLEN;
+#ifdef GATEWAY
+	if (ipflow_fastforward(m))
+		return;
+#endif
 	schednetisr(NETISR_IP);
 	inq = &ipintrq;
+	break;
+#endif
+
+#ifdef INET6
+    case PPP_IPV6:
+	/*
+	 * IPv6 packet - take off the ppp header and pass it up to IPv6.
+	 */
+	if ((ifp->if_flags & IFF_UP) == 0
+	    || sc->sc_npmode[NP_IPV6] != NPMODE_PASS) {
+	    /* interface is down - drop the packet. */
+	    m_freem(m);
+	    return;
+	}
+	m->m_pkthdr.len -= PPP_HDRLEN;
+	m->m_data += PPP_HDRLEN;
+	m->m_len -= PPP_HDRLEN;
+#ifdef GATEWAY  
+	if (ip6flow_fastforward(m))
+		return;
+#endif
+	schednetisr(NETISR_IPV6);
+	inq = &ip6intrq;
 	break;
 #endif
 
@@ -1540,8 +1713,6 @@ ppp_inproc(sc, m)
 	if (sc->sc_flags & SC_DEBUG)
 	    printf("%s: input queue full\n", ifp->if_xname);
 	ifp->if_iqdrops++;
-	if (!inq->ifq_congestion)
-		if_congestion(inq);
 	goto bad;
     }
     IF_ENQUEUE(inq, m);
@@ -1563,13 +1734,11 @@ ppp_inproc(sc, m)
 #define MAX_DUMP_BYTES	128
 
 static void
-pppdumpm(m0)
-    struct mbuf *m0;
+pppdumpm(struct mbuf *m0)
 {
     char buf[3*MAX_DUMP_BYTES+4];
     char *bp = buf;
     struct mbuf *m;
-    static char digits[] = "0123456789abcdef";
 
     for (m = m0; m; m = m->m_next) {
 	int l = m->m_len;
@@ -1578,8 +1747,8 @@ pppdumpm(m0)
 	while (l--) {
 	    if (bp > buf + sizeof(buf) - 4)
 		goto done;
-	    *bp++ = digits[*rptr >> 4]; /* convert byte to ascii hex */
-	    *bp++ = digits[*rptr++ & 0xf];
+	    *bp++ = hexdigits[*rptr >> 4]; /* convert byte to ascii hex */
+	    *bp++ = hexdigits[*rptr++ & 0xf];
 	}
 
 	if (m->m_next) {
@@ -1602,8 +1771,7 @@ done:
  * if_start to send a packet.
  */
 static void
-ppp_ifstart(ifp)
-	struct ifnet *ifp;
+ppp_ifstart(struct ifnet *ifp)
 {
 	struct ppp_softc *sc;
 
@@ -1611,5 +1779,3 @@ ppp_ifstart(ifp)
 	(*sc->sc_start)(sc);
 }
 #endif
-
-#endif	/* NPPP > 0 */

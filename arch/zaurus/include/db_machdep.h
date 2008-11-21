@@ -1,4 +1,7 @@
-/*	$OpenBSD: db_machdep.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: db_machdep.h,v 1.3 2001/11/25 15:55:55 thorpej Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.1 2006/12/16 05:43:53 ober Exp $	*/
 
 #include <arm/db_machdep.h>
+
+/* zaurus uses ELF for kernel */
+#define DB_ELF_SYMBOLS
+#define DB_ELFSIZE      32

@@ -1,4 +1,4 @@
-/*	$NetBSD: adb_direct.c,v 1.55 2006/11/24 22:04:23 wiz Exp $	*/
+/*	$NetBSD: adb_direct.c,v 1.63 2008/04/04 09:16:59 yamt Exp $	*/
 
 /* From: adb_direct.c 2.02 4/18/97 jpw */
 
@@ -62,20 +62,20 @@
 #ifdef __NetBSD__
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adb_direct.c,v 1.55 2006/11/24 22:04:23 wiz Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adb_direct.c,v 1.63 2008/04/04 09:16:59 yamt Exp $");
 
 #include "opt_adb.h"
 
 #include <sys/param.h>
-#include <sys/cdefs.h>
 #include <sys/pool.h>
 #include <sys/queue.h>
 #include <sys/systm.h>
 #include <sys/callout.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
 
 #include <machine/viareg.h>
 #include <machine/param.h>
-#include <machine/cpu.h>
 #include <machine/adbsys.h>			/* required for adbvar.h */
 #include <machine/iopreg.h>			/* required for IOP support */
 
@@ -271,7 +271,9 @@ int	tickle_count = 0;		/* how many tickles seen for this packet? */
 int	tickle_serial = 0;		/* the last packet tickled */
 int	adb_cuda_serial = 0;		/* the current packet */
 
-struct callout adb_cuda_tickle_ch = CALLOUT_INITIALIZER;
+callout_t adb_cuda_tickle_ch;
+
+void *adb_softintr_cookie;
 
 extern struct mac68k_machine_S mac68k_machine;
 
@@ -1726,7 +1728,7 @@ adb_pass_up(struct adbCommand *in)
 	if (adb_polling)
 		adb_soft_intr();
 	else
-		setsoftadb();
+		softint_schedule(adb_softintr_cookie);
 
 	return;
 }
@@ -1812,6 +1814,7 @@ adb_soft_intr(void)
 				movem.l(a7)+, d0/a2/a1/a0
 			}
 #endif
+
 		}
 
 		s = splhigh();
@@ -2109,6 +2112,12 @@ adb_reinit(void)
 	int saveptr;		/* point to next free relocation address */
 	int device;
 	int nonewtimes;		/* times thru loop w/o any new devices */
+	static bool again;
+
+	if (!again) {
+		callout_init(&adb_cuda_tickle_ch, 0);
+		again = true;
+	}
 
 	adb_setup_hw_type();	/* setup hardware type */
 
@@ -2728,8 +2737,9 @@ adb_read_date_time(unsigned long *curtime)
 		if (result != 0)	/* exit if not sent */
 			return -1;
 
-		while (0 == flag)	/* wait for result */
-			;
+		adb_spin(&flag);	/* wait for result */
+		if (flag == 0)		/* exit it timeout */
+			return -1;
 
 		*curtime = (long)(*(long *)(output + 1));
 		return 0;
@@ -2746,8 +2756,9 @@ adb_read_date_time(unsigned long *curtime)
 		if (result != 0)	/* exit if not sent */
 			return -1;
 
-		while (0 == flag)	/* wait for result */
-			;
+		adb_spin(&flag);	/* wait for result */
+		if (flag == 0)		/* exit it timeout */
+			return -1;
 
 		*curtime = (long)(*(long *)(output + 1));
 		return 0;
@@ -2787,8 +2798,9 @@ adb_set_date_time(unsigned long curtime)
 		if (result != 0)	/* exit if not sent */
 			return -1;
 
-		while (0 == flag)	/* wait for send to finish */
-			;
+		adb_spin(&flag);	/* wait for result */
+		if (flag == 0)		/* exit it timeout */
+			return -1;
 
 		return 0;
 
@@ -2808,8 +2820,9 @@ adb_set_date_time(unsigned long curtime)
 		if (result != 0)	/* exit if not sent */
 			return -1;
 
-		while (0 == flag)	/* wait for send to finish */
-			;
+		adb_spin(&flag);	/* wait for result */
+		if (flag == 0)		/* exit it timeout */
+			return -1;
 
 		return 0;
 
@@ -2887,8 +2900,9 @@ adb_prog_switch_enable(void)
 		if (result != 0)	/* exit if not sent */
 			return -1;
 
-		while (0 == flag)	/* wait for send to finish */
-			;
+		adb_spin(&flag);	/* wait for result */
+		if (flag == 0)		/* exit it timeout */
+			return -1;
 
 		return 0;
 
@@ -2922,8 +2936,9 @@ adb_prog_switch_disable(void)
 		if (result != 0)	/* exit if not sent */
 			return -1;
 
-		while (0 == flag)	/* wait for send to finish */
-			;
+		adb_spin(&flag);	/* wait for result */
+		if (flag == 0)		/* exit it timeout */
+			return -1;
 
 		return 0;
 

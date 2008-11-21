@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.33 2006/10/21 05:54:31 mrg Exp $	*/
+/*	$NetBSD: machdep.c,v 1.44 2008/11/12 12:35:57 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,12 +77,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.33 2006/10/21 05:54:31 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.44 2008/11/12 12:35:57 ad Exp $");
 
 #include "opt_bufcache.h"
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_compat_hpux.h"
 #include "opt_compat_netbsd.h"
 #include "opt_sysv.h"
 #include "opt_panicbutton.h"
@@ -103,7 +102,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.33 2006/10/21 05:54:31 mrg Exp $");
 #include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/signalvar.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/tty.h>
 #include <sys/user.h>
@@ -149,7 +147,6 @@ char machine[] = MACHINE;		/* CPU "architecture" */
 /* Our exported CPU info; we can have only one. */  
 struct cpu_info cpu_info_store;
 
-struct vm_map *exec_map = NULL;  
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -158,7 +155,6 @@ extern vaddr_t virtual_avail;
 /*
  * Declare these as initialized data so we can patch them.
  */
-caddr_t	msgbufaddr;
 /*int	maxmem;*/			/* max memory per process */
 int	physmem = MAXMEM;	/* max supported memory, changes to actual */
 /*
@@ -276,7 +272,7 @@ consinit()
 		zscons.cn_getc = zs_kgdb_cngetc;
 	}
 #endif
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init(0, 0, 0);
 #endif
 #ifdef DDB
@@ -312,25 +308,19 @@ cpu_startup()
 	printf("real mem  = %d\n", ctob(physmem));
 
 	minaddr = 0;
-	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+				   VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 nmbclusters * mclbytes, VM_MAP_INTRSAFE,
-				 FALSE, NULL);
+				 false, NULL);
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -415,11 +405,8 @@ cpu_reboot(howto, bootstr)
 	char *bootstr;
 {
 
-#if __GNUC__	/* XXX work around lame compiler problem (gcc 2.7.2) */
-	(void)&howto;
-#endif
 	/* take a snap shot before clobbering any registers */
-	if (curlwp && curlwp->l_addr)
+	if (curlwp->l_addr)
 		savectx(&curlwp->l_addr->u_pcb);
 
 	/* If system is cold, just halt. */
@@ -449,6 +436,8 @@ cpu_reboot(howto, bootstr)
  haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 #if defined(PANICWAIT) && !defined(DDB)
 	if ((howto & RB_HALT) == 0 && panicstr) {
@@ -529,7 +518,7 @@ dumpsys()
 	const struct bdevsw *bdev;
 	daddr_t blkno;		/* current block to write */
 				/* dump routine */
-	int (*dump) __P((dev_t, daddr_t, caddr_t, size_t));
+	int (*dump) __P((dev_t, daddr_t, void *, size_t));
 	int pg;			/* page being dumped */
 	vm_offset_t maddr;	/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -617,7 +606,7 @@ int	*nofault;
 
 int
 badaddr(addr)
-	caddr_t addr;
+	void *addr;
 {
 	int i;
 	label_t	faultbuf;
@@ -634,7 +623,7 @@ badaddr(addr)
 
 int
 badbaddr(addr)
-	caddr_t addr;
+	void *addr;
 {
 	int i;
 	label_t	faultbuf;

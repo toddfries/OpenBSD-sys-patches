@@ -1,5 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.1 1997/09/17 10:46:17 downsj Exp $	*/
-/*	$NetBSD: conf.c,v 1.2 1995/09/18 21:31:45 pk Exp $ */
+/*	$NetBSD: conf.c,v 1.2 2008/04/05 06:39:08 tsutsui Exp $ */
 
 /*
  * Copyright (c) 1993 Philip A. Nelson.
@@ -35,19 +34,16 @@
 #include <lib/libsa/stand.h>
 #include <lib/libsa/ufs.h>
 #include <netinet/in.h>
-#include <lib/libsa/cd9660.h>
 #include <lib/libsa/nfs.h>
  
 struct fs_ops file_system_ufs[] = {
-	{ ufs_open, ufs_close, ufs_read, ufs_write, ufs_seek, ufs_stat },
+	FS_OPS(ffsv1),
+	FS_OPS(ffsv2)
 };
-struct fs_ops file_system_cd9660[] = {
-	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write, cd9660_seek,
-	  cd9660_stat },
-};
-struct fs_ops file_system_nfs[] = {
-	{ nfs_open, nfs_close, nfs_read, nfs_write, nfs_seek, nfs_stat },
-};
-struct fs_ops file_system[2];
-int nfsys = 1;
 
+struct fs_ops file_system_nfs[] = {
+	FS_OPS(nfs)
+};
+
+struct fs_ops file_system[2];
+int nfsys = __arraycount(file_system);

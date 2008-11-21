@@ -1,4 +1,5 @@
-/*	$OpenBSD: gscpcib.c,v 1.5 2006/12/11 20:57:40 deraadt Exp $	*/
+/*	$NetBSD: gscpcib.c,v 1.11 2008/05/05 11:49:40 xtraeme Exp $	*/
+/*	$OpenBSD: gscpcib.c,v 1.3 2004/10/05 19:02:33 grange Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -21,6 +22,9 @@
  * functionality this driver provides support for the GPIO interface.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: gscpcib.c,v 1.11 2008/05/05 11:49:40 xtraeme Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -38,7 +42,7 @@
 #include <i386/pci/gscpcibreg.h>
 
 struct gscpcib_softc {
-	struct device sc_dev;
+	bool sc_gpio_present;
 
 	/* GPIO interface */
 	bus_space_tag_t sc_gpio_iot;
@@ -47,28 +51,34 @@ struct gscpcib_softc {
 	gpio_pin_t sc_gpio_pins[GSCGPIO_NPINS];
 };
 
-int	gscpcib_match(struct device *, void *, void *);
-void	gscpcib_attach(struct device *, struct device *, void *);
+int	gscpcib_match(device_t, cfdata_t, void *);
+void	gscpcib_attach(device_t, device_t, void *);
+int	gscpcib_detach(device_t, int);
+void	gscpcib_childdetached(device_t, device_t);
 
 int	gscpcib_gpio_pin_read(void *, int);
 void	gscpcib_gpio_pin_write(void *, int, int);
 void	gscpcib_gpio_pin_ctl(void *, int, int);
 
 /* arch/i386/pci/pcib.c */
-void    pcibattach(struct device *, struct device *, void *);
+void    pcibattach(device_t, device_t, void *);
 
-struct cfattach gscpcib_ca = {
-	sizeof (struct gscpcib_softc),
-	gscpcib_match,
-	gscpcib_attach
-};
+CFATTACH_DECL2_NEW(gscpcib, sizeof(struct gscpcib_softc),
+	gscpcib_match, gscpcib_attach, gscpcib_detach, NULL, NULL,
+	gscpcib_childdetached);
 
-struct cfdriver gscpcib_cd = {
-	NULL, "gscpcib", DV_DULL
-};
+extern struct cfdriver gscpcib_cd;
+
+void
+gscpcib_childdetached(device_t self, device_t child)
+{
+	/* We hold no pointers to child devices, so there is nothing
+	 * to do here.
+	 */
+}
 
 int
-gscpcib_match(struct device *parent, void *match, void *aux)
+gscpcib_match(device_t parent, struct cfdata *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -84,21 +94,18 @@ gscpcib_match(struct device *parent, void *match, void *aux)
 }
 
 void
-gscpcib_attach(struct device *parent, struct device *self, void *aux)
+gscpcib_attach(device_t parent, device_t self, void *aux)
 {
-#ifndef SMALL_KERNEL
-	struct gscpcib_softc *sc = (struct gscpcib_softc *)self;
+	struct gscpcib_softc *sc = device_private(self);
 	struct pci_attach_args *pa = aux;
 	struct gpiobus_attach_args gba;
 	pcireg_t gpiobase;
 	int i;
-	int gpio_present = 0;
 
 	/* Map GPIO I/O space */
 	gpiobase = pci_conf_read(pa->pa_pc, pa->pa_tag, GSCGPIO_BASE);
 	sc->sc_gpio_iot = pa->pa_iot;
-	if (PCI_MAPREG_IO_ADDR(gpiobase) == 0 ||
-	    bus_space_map(sc->sc_gpio_iot, PCI_MAPREG_IO_ADDR(gpiobase),
+	if (bus_space_map(sc->sc_gpio_iot, PCI_MAPREG_IO_ADDR(gpiobase),
 	    GSCGPIO_SIZE, 0, &sc->sc_gpio_ioh)) {
 		printf(": failed to map GPIO I/O space");
 		goto corepcib;
@@ -112,9 +119,11 @@ gscpcib_attach(struct device *parent, struct device *self, void *aux)
 		    GPIO_PIN_PUSHPULL | GPIO_PIN_TRISTATE |
 		    GPIO_PIN_PULLUP;
 
-		/* Read initial state */
-		sc->sc_gpio_pins[i].pin_state = gscpcib_gpio_pin_read(sc, i) ?
-		    GPIO_PIN_HIGH : GPIO_PIN_LOW;
+		/* safe defaults */
+		sc->sc_gpio_pins[i].pin_flags = GPIO_PIN_TRISTATE;
+		sc->sc_gpio_pins[i].pin_state = GPIO_PIN_LOW;
+		gscpcib_gpio_pin_ctl(sc, i, sc->sc_gpio_pins[i].pin_flags);
+		gscpcib_gpio_pin_write(sc, i, sc->sc_gpio_pins[i].pin_state);
 	}
 
 	/* Create controller tag */
@@ -123,27 +132,37 @@ gscpcib_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_gpio_gc.gp_pin_write = gscpcib_gpio_pin_write;
 	sc->sc_gpio_gc.gp_pin_ctl = gscpcib_gpio_pin_ctl;
 
-	gba.gba_name = "gpio";
 	gba.gba_gc = &sc->sc_gpio_gc;
 	gba.gba_pins = sc->sc_gpio_pins;
 	gba.gba_npins = GSCGPIO_NPINS;
 
-	gpio_present = 1;
+	sc->sc_gpio_present = true;
 
 corepcib:
-#endif	/* !SMALL_KERNEL */
 	/* Provide core pcib(4) functionality */
 	pcibattach(parent, self, aux);
 
-#ifndef SMALL_KERNEL
 	/* Attach GPIO framework */
-	if (gpio_present)
-		config_found(&sc->sc_dev, &gba, gpiobus_print);
-#endif	/* !SMALL_KERNEL */
+	if (sc->sc_gpio_present)
+		config_found_ia(self, "gpiobus", &gba, gpiobus_print);
 }
 
-#ifndef SMALL_KERNEL
-static __inline void
+int
+gscpcib_detach(device_t self, int flags)
+{
+	int rc;
+	struct gscpcib_softc *sc = device_private(self);
+
+	if ((rc = config_detach_children(self, flags)) != 0)
+		return rc;
+
+	if (sc->sc_gpio_present)
+		bus_space_unmap(sc->sc_gpio_iot, sc->sc_gpio_ioh, GSCGPIO_SIZE);
+
+	return rc;
+}
+
+static inline void
 gscpcib_gpio_pin_select(struct gscpcib_softc *sc, int pin)
 {
 	bus_space_write_4(sc->sc_gpio_iot, sc->sc_gpio_ioh, GSCGPIO_SEL, pin);
@@ -154,7 +173,7 @@ gscpcib_gpio_pin_read(void *arg, int pin)
 {
 	struct gscpcib_softc *sc = arg;
 	int reg, shift;
-	u_int32_t data;
+	uint32_t data;
 
 	reg = (pin < 32 ? GSCGPIO_GPDI0 : GSCGPIO_GPDI1);
 	shift = pin % 32;
@@ -168,7 +187,7 @@ gscpcib_gpio_pin_write(void *arg, int pin, int value)
 {
 	struct gscpcib_softc *sc = arg;
 	int reg, shift;
-	u_int32_t data;
+	uint32_t data;
 
 	reg = (pin < 32 ? GSCGPIO_GPDO0 : GSCGPIO_GPDO1);
 	shift = pin % 32;
@@ -185,7 +204,7 @@ void
 gscpcib_gpio_pin_ctl(void *arg, int pin, int flags)
 {
 	struct gscpcib_softc *sc = arg;
-	u_int32_t conf;
+	uint32_t conf;
 
 	gscpcib_gpio_pin_select(sc, pin);
 	conf = bus_space_read_4(sc->sc_gpio_iot, sc->sc_gpio_ioh,
@@ -202,4 +221,3 @@ gscpcib_gpio_pin_ctl(void *arg, int pin, int flags)
 	bus_space_write_4(sc->sc_gpio_iot, sc->sc_gpio_ioh,
 	    GSCGPIO_CONF, conf);
 }
-#endif	/* !SMALL_KERNEL */

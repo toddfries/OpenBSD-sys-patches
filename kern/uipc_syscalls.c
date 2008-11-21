@@ -1,5 +1,30 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.68 2008/05/23 15:51:12 thib Exp $	*/
-/*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
+/*	$NetBSD: uipc_syscalls.c,v 1.134 2008/08/06 15:01:23 plunky Exp $	*/
+
+/*-
+ * Copyright (c) 2008 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1990, 1993
@@ -29,8 +54,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)uipc_syscalls.c	8.4 (Berkeley) 2/21/94
+ *	@(#)uipc_syscalls.c	8.6 (Berkeley) 2/14/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uipc_syscalls.c,v 1.134 2008/08/06 15:01:23 plunky Exp $");
+
+#include "opt_pipe.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,874 +69,1028 @@
 #include <sys/file.h>
 #include <sys/buf.h>
 #include <sys/malloc.h>
-#include <sys/event.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/signalvar.h>
-#include <sys/unpcb.h>
 #include <sys/un.h>
-#ifdef KTRACE
 #include <sys/ktrace.h>
-#endif
+#include <sys/event.h>
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
+#include <uvm/uvm_extern.h>
+
 /*
  * System call interface to the socket abstraction.
  */
-extern	struct fileops socketops;
+extern const struct fileops socketops;
 
 int
-sys_socket(struct proc *p, void *v, register_t *retval)
+sys___socket30(struct lwp *l, const struct sys___socket30_args *uap, register_t *retval)
 {
-	struct sys_socket_args /* {
-		syscallarg(int) domain;
-		syscallarg(int) type;
-		syscallarg(int) protocol;
-	} */ *uap = v;
-	struct filedesc *fdp = p->p_fd;
-	struct socket *so;
-	struct file *fp;
-	int fd, error;
+	/* {
+		syscallarg(int)	domain;
+		syscallarg(int)	type;
+		syscallarg(int)	protocol;
+	} */
+	int		fd, error;
 
-	fdplock(fdp);
-
-	if ((error = falloc(p, &fp, &fd)) != 0)
-		goto out;
-	fp->f_flag = FREAD|FWRITE;
-	fp->f_type = DTYPE_SOCKET;
-	fp->f_ops = &socketops;
-	error = socreate(SCARG(uap, domain), &so, SCARG(uap, type),
-			 SCARG(uap, protocol));
-	if (error) {
-		fdremove(fdp, fd);
-		closef(fp, p);
-	} else {
-		fp->f_data = so;
-		FILE_SET_MATURE(fp);
+	error = fsocreate(SCARG(uap, domain), NULL, SCARG(uap, type),
+			 SCARG(uap, protocol), l, &fd);
+	if (error == 0)
 		*retval = fd;
-	}
-out:
-	fdpunlock(fdp);
-	return (error);
+	return error;
 }
 
 /* ARGSUSED */
 int
-sys_bind(struct proc *p, void *v, register_t *retval)
+sys_bind(struct lwp *l, const struct sys_bind_args *uap, register_t *retval)
 {
-	struct sys_bind_args /* {
-		syscallarg(int) s;
-		syscallarg(const struct sockaddr *) name;
-		syscallarg(socklen_t) namelen;
-	} */ *uap = v;
-	struct file *fp;
-	struct mbuf *nam;
-	int error;
+	/* {
+		syscallarg(int)				s;
+		syscallarg(const struct sockaddr *)	name;
+		syscallarg(unsigned int)		namelen;
+	} */
+	struct mbuf	*nam;
+	int		error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
-		return (error);
 	error = sockargs(&nam, SCARG(uap, name), SCARG(uap, namelen),
-			 MT_SONAME);
-	if (error == 0) {
-		error = sobind(fp->f_data, nam, p);
+	    MT_SONAME);
+	if (error)
+		return error;
+
+	return do_sys_bind(l, SCARG(uap, s), nam);
+}
+
+int
+do_sys_bind(struct lwp *l, int fd, struct mbuf *nam)
+{
+	struct socket	*so;
+	int		error;
+
+	if ((error = fd_getsock(fd, &so)) != 0) {
 		m_freem(nam);
+		return (error);
 	}
-	FRELE(fp);
-	return (error);
+	MCLAIM(nam, so->so_mowner);
+	error = sobind(so, nam, l);
+	m_freem(nam);
+	fd_putfile(fd);
+	return error;
 }
 
 /* ARGSUSED */
 int
-sys_listen(struct proc *p, void *v, register_t *retval)
+sys_listen(struct lwp *l, const struct sys_listen_args *uap, register_t *retval)
 {
-	struct sys_listen_args /* {
-		syscallarg(int) s;
-		syscallarg(int) backlog;
-	} */ *uap = v;
-	struct file *fp;
-	int error;
+	/* {
+		syscallarg(int)	s;
+		syscallarg(int)	backlog;
+	} */
+	struct socket	*so;
+	int		error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
 		return (error);
-	error = solisten(fp->f_data, SCARG(uap, backlog));
-	FRELE(fp);
-	return (error);
+	error = solisten(so, SCARG(uap, backlog), l);
+	fd_putfile(SCARG(uap, s));
+	return error;
 }
 
 int
-sys_accept(struct proc *p, void *v, register_t *retval)
+do_sys_accept(struct lwp *l, int sock, struct mbuf **name, register_t *new_sock)
 {
-	struct sys_accept_args /* {
-		syscallarg(int) s;
-		syscallarg(struct sockaddr *) name;
-		syscallarg(socklen_t *) anamelen;
-	} */ *uap = v;
-	struct file *fp, *headfp;
-	struct mbuf *nam;
-	socklen_t namelen;
-	int error, s, tmpfd;
-	struct socket *head, *so;
-	int nflag;
+	file_t		*fp, *fp2;
+	struct mbuf	*nam;
+	int		error, fd;
+	struct socket	*so, *so2;
 
-	if (SCARG(uap, name) && (error = copyin(SCARG(uap, anamelen),
-	    &namelen, sizeof (namelen))))
+	if ((fp = fd_getfile(sock)) == NULL)
+		return (EBADF);
+	if (fp->f_type != DTYPE_SOCKET) {
+		fd_putfile(sock);
+		return (ENOTSOCK);
+	}
+	if ((error = fd_allocfile(&fp2, &fd)) != 0) {
+		fd_putfile(sock);
 		return (error);
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
-		return (error);
-	headfp = fp;
-	s = splsoftnet();
-	head = fp->f_data;
-	if ((head->so_options & SO_ACCEPTCONN) == 0) {
+	}
+	nam = m_get(M_WAIT, MT_SONAME);
+	*new_sock = fd;
+	so = fp->f_data;
+	solock(so);
+	if (!(so->so_proto->pr_flags & PR_LISTEN)) {
+		error = EOPNOTSUPP;
+		goto bad;
+	}
+	if ((so->so_options & SO_ACCEPTCONN) == 0) {
 		error = EINVAL;
 		goto bad;
 	}
-	if ((head->so_state & SS_NBIO) && head->so_qlen == 0) {
-		if (head->so_state & SS_CANTRCVMORE)
-			error = ECONNABORTED;
-		else
-			error = EWOULDBLOCK;
+	if (so->so_nbio && so->so_qlen == 0) {
+		error = EWOULDBLOCK;
 		goto bad;
 	}
-	while (head->so_qlen == 0 && head->so_error == 0) {
-		if (head->so_state & SS_CANTRCVMORE) {
-			head->so_error = ECONNABORTED;
+	while (so->so_qlen == 0 && so->so_error == 0) {
+		if (so->so_state & SS_CANTRCVMORE) {
+			so->so_error = ECONNABORTED;
 			break;
 		}
-		error = tsleep(&head->so_timeo, PSOCK | PCATCH, netcon, 0);
+		error = sowait(so, 0);
 		if (error) {
 			goto bad;
 		}
 	}
-	if (head->so_error) {
-		error = head->so_error;
-		head->so_error = 0;
+	if (so->so_error) {
+		error = so->so_error;
+		so->so_error = 0;
 		goto bad;
 	}
-	
-	/*
-	 * At this point we know that there is at least one connection
-	 * ready to be accepted. Remove it from the queue prior to
-	 * allocating the file descriptor for it since falloc() may
-	 * block allowing another process to accept the connection
-	 * instead.
-	 */
-	so = TAILQ_FIRST(&head->so_q);
-	if (soqremque(so, 1) == 0)
-		panic("accept");
-
-	/* Take note if socket was non-blocking. */
-	nflag = (fp->f_flag & FNONBLOCK);
-
-	fdplock(p->p_fd);
-	if ((error = falloc(p, &fp, &tmpfd)) != 0) {
-		/*
-		 * Probably ran out of file descriptors. Put the
-		 * unaccepted connection back onto the queue and
-		 * do another wakeup so some other process might
-		 * have a chance at it.
-		 */
-		so->so_head = head;
-		head->so_qlen++;
-		so->so_onq = &head->so_q;
-		TAILQ_INSERT_HEAD(so->so_onq, so, so_qe);
-		wakeup_one(&head->so_timeo);
-		goto bad;
-	}
-	*retval = tmpfd;
-
 	/* connection has been removed from the listen queue */
-	KNOTE(&head->so_rcv.sb_sel.si_note, 0);
-
-	fp->f_type = DTYPE_SOCKET;
-	fp->f_flag = FREAD | FWRITE | nflag;
-	fp->f_ops = &socketops;
-	fp->f_data = so;
-	nam = m_get(M_WAIT, MT_SONAME);
-	error = soaccept(so, nam);
-	if (!error && SCARG(uap, name)) {
-		if (namelen > nam->m_len)
-			namelen = nam->m_len;
-		/* SHOULD COPY OUT A CHAIN HERE */
-		if ((error = copyout(mtod(nam, caddr_t),
-		    SCARG(uap, name), namelen)) == 0)
-			error = copyout(&namelen, SCARG(uap, anamelen),
-			    sizeof (*SCARG(uap, anamelen)));
-	}
-	/* if an error occurred, free the file descriptor */
+	KNOTE(&so->so_rcv.sb_sel.sel_klist, NOTE_SUBMIT);
+	so2 = TAILQ_FIRST(&so->so_q);
+	if (soqremque(so2, 1) == 0)
+		panic("accept");
+	fp2->f_type = DTYPE_SOCKET;
+	fp2->f_flag = fp->f_flag;
+	fp2->f_ops = &socketops;
+	fp2->f_data = so2;
+	error = soaccept(so2, nam);
+	sounlock(so);
 	if (error) {
-		fdremove(p->p_fd, tmpfd);
-		closef(fp, p);
+		/* an error occurred, free the file descriptor and mbuf */
+		m_freem(nam);
+		mutex_enter(&fp2->f_lock);
+		fp2->f_count++;
+		mutex_exit(&fp2->f_lock);
+		closef(fp2);
+		fd_abort(curproc, NULL, fd);
 	} else {
-		FILE_SET_MATURE(fp);
+		fd_affix(curproc, fp2, fd);
+		*name = nam;
 	}
-	m_freem(nam);
-bad:
-	fdpunlock(p->p_fd);
-	splx(s);
-	FRELE(headfp);
+	fd_putfile(sock);
 	return (error);
+ bad:
+ 	sounlock(so);
+ 	m_freem(nam);
+	fd_putfile(sock);
+ 	fd_abort(curproc, fp2, fd);
+ 	return (error);
+}
+
+int
+sys_accept(struct lwp *l, const struct sys_accept_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(int)			s;
+		syscallarg(struct sockaddr *)	name;
+		syscallarg(unsigned int *)	anamelen;
+	} */
+	int error, fd;
+	struct mbuf *name;
+
+	error = do_sys_accept(l, SCARG(uap, s), &name, retval);
+	if (error != 0)
+		return error;
+	error = copyout_sockname(SCARG(uap, name), SCARG(uap, anamelen),
+	    MSG_LENUSRSPACE, name);
+	if (name != NULL)
+		m_free(name);
+	if (error != 0) {
+		fd = (int)*retval;
+		if (fd_getfile(fd) != NULL)
+			(void)fd_close(fd);
+	}
+	return error;
 }
 
 /* ARGSUSED */
 int
-sys_connect(struct proc *p, void *v, register_t *retval)
+sys_connect(struct lwp *l, const struct sys_connect_args *uap, register_t *retval)
 {
-	struct sys_connect_args /* {
-		syscallarg(int) s;
-		syscallarg(const struct sockaddr *) name;
-		syscallarg(socklen_t) namelen;
-	} */ *uap = v;
-	struct file *fp;
-	struct socket *so;
-	struct mbuf *nam = NULL;
-	int error, s;
+	/* {
+		syscallarg(int)				s;
+		syscallarg(const struct sockaddr *)	name;
+		syscallarg(unsigned int)		namelen;
+	} */
+	int		error;
+	struct mbuf	*nam;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
-		return (error);
-	so = fp->f_data;
-	if ((so->so_state & SS_NBIO) && (so->so_state & SS_ISCONNECTING)) {
-		FRELE(fp);
-		return (EALREADY);
-	}
 	error = sockargs(&nam, SCARG(uap, name), SCARG(uap, namelen),
-			 MT_SONAME);
+	    MT_SONAME);
 	if (error)
-		goto bad;
-	error = soconnect(so, nam);
-	if (error)
-		goto bad;
-	if ((so->so_state & SS_NBIO) && (so->so_state & SS_ISCONNECTING)) {
-		FRELE(fp);
+		return error;
+	return do_sys_connect(l,  SCARG(uap, s), nam);
+}
+
+int
+do_sys_connect(struct lwp *l, int fd, struct mbuf *nam)
+{
+	struct socket	*so;
+	int		error;
+	int		interrupted = 0;
+
+	if ((error = fd_getsock(fd, &so)) != 0) {
 		m_freem(nam);
-		return (EINPROGRESS);
+		return (error);
 	}
-	s = splsoftnet();
+	solock(so);
+	MCLAIM(nam, so->so_mowner);
+	if (so->so_state & SS_ISCONNECTING) {
+		error = EALREADY;
+		goto out;
+	}
+
+	error = soconnect(so, nam, l);
+	if (error)
+		goto bad;
+	if (so->so_nbio && (so->so_state & SS_ISCONNECTING)) {
+		error = EINPROGRESS;
+		goto out;
+	}
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
-		error = tsleep(&so->so_timeo, PSOCK | PCATCH,
-		    netcon, 0);
-		if (error)
+		error = sowait(so, 0);
+		if (error) {
+			if (error == EINTR || error == ERESTART)
+				interrupted = 1;
 			break;
+		}
 	}
 	if (error == 0) {
 		error = so->so_error;
 		so->so_error = 0;
 	}
-	splx(s);
-bad:
-	so->so_state &= ~SS_ISCONNECTING;
-	FRELE(fp);
-	if (nam)
-		m_freem(nam);
+ bad:
+	if (!interrupted)
+		so->so_state &= ~SS_ISCONNECTING;
 	if (error == ERESTART)
 		error = EINTR;
+ out:
+ 	sounlock(so);
+ 	fd_putfile(fd);
+	m_freem(nam);
 	return (error);
 }
 
 int
-sys_socketpair(struct proc *p, void *v, register_t *retval)
+sys_socketpair(struct lwp *l, const struct sys_socketpair_args *uap, register_t *retval)
 {
-	struct sys_socketpair_args /* {
-		syscallarg(int) domain;
-		syscallarg(int) type;
-		syscallarg(int) protocol;
-		syscallarg(int *) rsv;
-	} */ *uap = v;
-	struct filedesc *fdp = p->p_fd;
-	struct file *fp1, *fp2;
-	struct socket *so1, *so2;
-	int fd, error, sv[2];
+	/* {
+		syscallarg(int)		domain;
+		syscallarg(int)		type;
+		syscallarg(int)		protocol;
+		syscallarg(int *)	rsv;
+	} */
+	file_t		*fp1, *fp2;
+	struct socket	*so1, *so2;
+	int		fd, error, sv[2];
+	proc_t		*p;
 
+	p = curproc;
 	error = socreate(SCARG(uap, domain), &so1, SCARG(uap, type),
-			 SCARG(uap, protocol));
+	    SCARG(uap, protocol), l, NULL);
 	if (error)
 		return (error);
 	error = socreate(SCARG(uap, domain), &so2, SCARG(uap, type),
-			 SCARG(uap, protocol));
+	    SCARG(uap, protocol), l, so1);
 	if (error)
 		goto free1;
-
-	fdplock(fdp);
-	if ((error = falloc(p, &fp1, &fd)) != 0)
+	if ((error = fd_allocfile(&fp1, &fd)) != 0)
 		goto free2;
 	sv[0] = fd;
 	fp1->f_flag = FREAD|FWRITE;
 	fp1->f_type = DTYPE_SOCKET;
 	fp1->f_ops = &socketops;
 	fp1->f_data = so1;
-	if ((error = falloc(p, &fp2, &fd)) != 0)
+	if ((error = fd_allocfile(&fp2, &fd)) != 0)
 		goto free3;
 	fp2->f_flag = FREAD|FWRITE;
 	fp2->f_type = DTYPE_SOCKET;
 	fp2->f_ops = &socketops;
 	fp2->f_data = so2;
 	sv[1] = fd;
-	if ((error = soconnect2(so1, so2)) != 0)
-		goto free4;
-	if (SCARG(uap, type) == SOCK_DGRAM) {
+	solock(so1);
+	error = soconnect2(so1, so2);
+	if (error == 0 && SCARG(uap, type) == SOCK_DGRAM) {
 		/*
 		 * Datagram socket connection is asymmetric.
 		 */
-		 if ((error = soconnect2(so2, so1)) != 0)
-			goto free4;
+		error = soconnect2(so2, so1);
 	}
-	error = copyout(sv, SCARG(uap, rsv), 2 * sizeof (int));
+	sounlock(so1);
+	if (error == 0)
+		error = copyout(sv, SCARG(uap, rsv), 2 * sizeof(int));
 	if (error == 0) {
-		FILE_SET_MATURE(fp1);
-		FILE_SET_MATURE(fp2);
-		fdpunlock(fdp);
+		fd_affix(p, fp2, sv[1]);
+		fd_affix(p, fp1, sv[0]);
 		return (0);
 	}
-free4:
-	fdremove(fdp, sv[1]);
-	closef(fp2, p);
-	so2 = NULL;
-free3:
-	fdremove(fdp, sv[0]);
-	closef(fp1, p);
-	so1 = NULL;
-free2:
-	if (so2 != NULL)
-		(void)soclose(so2);
-	fdpunlock(fdp);
-free1:
-	if (so1 != NULL)
-		(void)soclose(so1);
+	fd_abort(p, fp2, sv[1]);
+ free3:
+	fd_abort(p, fp1, sv[0]);
+ free2:
+	(void)soclose(so2);
+ free1:
+	(void)soclose(so1);
 	return (error);
 }
 
 int
-sys_sendto(struct proc *p, void *v, register_t *retval)
+sys_sendto(struct lwp *l, const struct sys_sendto_args *uap, register_t *retval)
 {
-	struct sys_sendto_args /* {
-		syscallarg(int) s;
-		syscallarg(const void *) buf;
-		syscallarg(size_t) len;
-		syscallarg(int) flags;
-		syscallarg(const struct sockaddr *) to;
-		syscallarg(socklen_t) tolen;
-	} */ *uap = v;
-	struct msghdr msg;
-	struct iovec aiov;
+	/* {
+		syscallarg(int)				s;
+		syscallarg(const void *)		buf;
+		syscallarg(size_t)			len;
+		syscallarg(int)				flags;
+		syscallarg(const struct sockaddr *)	to;
+		syscallarg(unsigned int)		tolen;
+	} */
+	struct msghdr	msg;
+	struct iovec	aiov;
 
-	msg.msg_name = (caddr_t)SCARG(uap, to);
+	msg.msg_name = __UNCONST(SCARG(uap, to)); /* XXXUNCONST kills const */
 	msg.msg_namelen = SCARG(uap, tolen);
 	msg.msg_iov = &aiov;
 	msg.msg_iovlen = 1;
-	msg.msg_control = 0;
-#ifdef COMPAT_OLDSOCK
+	msg.msg_control = NULL;
 	msg.msg_flags = 0;
-#endif
-	aiov.iov_base = (char *)SCARG(uap, buf);
+	aiov.iov_base = __UNCONST(SCARG(uap, buf)); /* XXXUNCONST kills const */
 	aiov.iov_len = SCARG(uap, len);
-	return (sendit(p, SCARG(uap, s), &msg, SCARG(uap, flags), retval));
+	return do_sys_sendmsg(l, SCARG(uap, s), &msg, SCARG(uap, flags), retval);
 }
 
 int
-sys_sendmsg(struct proc *p, void *v, register_t *retval)
+sys_sendmsg(struct lwp *l, const struct sys_sendmsg_args *uap, register_t *retval)
 {
-	struct sys_sendmsg_args /* {
-		syscallarg(int) s;
-		syscallarg(const struct msghdr *) msg;
-		syscallarg(int) flags;
-	} */ *uap = v;
-	struct msghdr msg;
-	struct iovec aiov[UIO_SMALLIOV], *iov;
-	int error;
+	/* {
+		syscallarg(int)				s;
+		syscallarg(const struct msghdr *)	msg;
+		syscallarg(int)				flags;
+	} */
+	struct msghdr	msg;
+	int		error;
 
-	error = copyin(SCARG(uap, msg), &msg, sizeof (msg));
+	error = copyin(SCARG(uap, msg), &msg, sizeof(msg));
 	if (error)
 		return (error);
-	if (msg.msg_iovlen > IOV_MAX)
-		return (EMSGSIZE);
-	if (msg.msg_iovlen > UIO_SMALLIOV)
-		iov = malloc(sizeof(struct iovec) * msg.msg_iovlen,
-		    M_IOV, M_WAITOK);
-	else
-		iov = aiov;
-	if (msg.msg_iovlen &&
-	    (error = copyin(msg.msg_iov, iov,
-		    (unsigned)(msg.msg_iovlen * sizeof (struct iovec)))))
-		goto done;
-	msg.msg_iov = iov;
-#ifdef COMPAT_OLDSOCK
-	msg.msg_flags = 0;
-#endif
-	error = sendit(p, SCARG(uap, s), &msg, SCARG(uap, flags), retval);
-done:
-	if (iov != aiov)
-		free(iov, M_IOV);
-	return (error);
+
+	msg.msg_flags = MSG_IOVUSRSPACE;
+	return do_sys_sendmsg(l, SCARG(uap, s), &msg, SCARG(uap, flags), retval);
 }
 
 int
-sendit(struct proc *p, int s, struct msghdr *mp, int flags, register_t *retsize)
+do_sys_sendmsg(struct lwp *l, int s, struct msghdr *mp, int flags,
+		register_t *retsize)
 {
-	struct file *fp;
-	struct uio auio;
-	struct iovec *iov;
-	int i;
-	struct mbuf *to, *control;
-	size_t len;
-	int error;
-#ifdef KTRACE
-	struct iovec *ktriov = NULL;
-#endif
+	struct uio	auio;
+	int		i, len, error, iovlen;
+	struct mbuf	*to, *control;
+	struct socket	*so;
+	struct iovec	*tiov;
+	struct iovec	aiov[UIO_SMALLIOV], *iov = aiov;
+	struct iovec	*ktriov = NULL;
 
-	to = NULL;
+	ktrkuser("msghdr", mp, sizeof *mp);
 
-	if ((error = getsock(p->p_fd, s, &fp)) != 0)
-		return (error);
+	/* If the caller passed us stuff in mbufs, we must free them */
+	if (mp->msg_flags & MSG_NAMEMBUF)
+		to = mp->msg_name;
+	else
+		to = NULL;
+
+	if (mp->msg_flags & MSG_CONTROLMBUF)
+		control = mp->msg_control;
+	else
+		control = NULL;
+
+	if (mp->msg_flags & MSG_IOVUSRSPACE) {
+		if ((unsigned int)mp->msg_iovlen > UIO_SMALLIOV) {
+			if ((unsigned int)mp->msg_iovlen > IOV_MAX) {
+				error = EMSGSIZE;
+				goto bad;
+			}
+			iov = malloc(sizeof(struct iovec) * mp->msg_iovlen,
+			    M_IOV, M_WAITOK);
+		}
+		if (mp->msg_iovlen != 0) {
+			error = copyin(mp->msg_iov, iov,
+			    (size_t)(mp->msg_iovlen * sizeof(struct iovec)));
+			if (error)
+				goto bad;
+		}
+		mp->msg_iov = iov;
+	}
+
 	auio.uio_iov = mp->msg_iov;
 	auio.uio_iovcnt = mp->msg_iovlen;
-	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_rw = UIO_WRITE;
-	auio.uio_procp = p;
 	auio.uio_offset = 0;			/* XXX */
 	auio.uio_resid = 0;
-	iov = mp->msg_iov;
-	for (i = 0; i < mp->msg_iovlen; i++, iov++) {
-		/* Don't allow sum > SSIZE_MAX */
-		if (iov->iov_len > SSIZE_MAX ||
-		    (auio.uio_resid += iov->iov_len) > SSIZE_MAX) {
+	KASSERT(l == curlwp);
+	auio.uio_vmspace = l->l_proc->p_vmspace;
+
+	for (i = 0, tiov = mp->msg_iov; i < mp->msg_iovlen; i++, tiov++) {
+#if 0
+		/* cannot happen; iov_len is unsigned */
+		if (tiov->iov_len < 0) {
+			error = EINVAL;
+			goto bad;
+		}
+#endif
+		/*
+		 * Writes return ssize_t because -1 is returned on error.
+		 * Therefore, we must restrict the length to SSIZE_MAX to
+		 * avoid garbage return values.
+		 */
+		auio.uio_resid += tiov->iov_len;
+		if (tiov->iov_len > SSIZE_MAX || auio.uio_resid > SSIZE_MAX) {
 			error = EINVAL;
 			goto bad;
 		}
 	}
-	if (mp->msg_name) {
+
+	if (mp->msg_name && to == NULL) {
 		error = sockargs(&to, mp->msg_name, mp->msg_namelen,
-				 MT_SONAME);
+		    MT_SONAME);
 		if (error)
 			goto bad;
 	}
+
 	if (mp->msg_control) {
-		if (mp->msg_controllen < CMSG_ALIGN(sizeof(struct cmsghdr))
-#ifdef COMPAT_OLDSOCK
-		    && mp->msg_flags != MSG_COMPAT
-#endif
-		) {
+		if (mp->msg_controllen < CMSG_ALIGN(sizeof(struct cmsghdr))) {
 			error = EINVAL;
 			goto bad;
 		}
-		error = sockargs(&control, mp->msg_control,
-				 mp->msg_controllen, MT_CONTROL);
-		if (error)
-			goto bad;
-#ifdef COMPAT_OLDSOCK
-		if (mp->msg_flags == MSG_COMPAT) {
-			struct cmsghdr *cm;
-
-			M_PREPEND(control, sizeof(*cm), M_WAIT);
-			cm = mtod(control, struct cmsghdr *);
-			cm->cmsg_len = control->m_len;
-			cm->cmsg_level = SOL_SOCKET;
-			cm->cmsg_type = SCM_RIGHTS;
+		if (control == NULL) {
+			error = sockargs(&control, mp->msg_control,
+			    mp->msg_controllen, MT_CONTROL);
+			if (error)
+				goto bad;
 		}
-#endif
-	} else
-		control = 0;
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_GENIO)) {
-		int iovlen = auio.uio_iovcnt * sizeof (struct iovec);
-
-		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
-		bcopy(auio.uio_iov, ktriov, iovlen);
 	}
-#endif
+
+	if (ktrpoint(KTR_GENIO)) {
+		iovlen = auio.uio_iovcnt * sizeof(struct iovec);
+		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
+		memcpy(ktriov, auio.uio_iov, iovlen);
+	}
+
+	if ((error = fd_getsock(s, &so)) != 0)
+		goto bad;
+
+	if (mp->msg_name)
+		MCLAIM(to, so->so_mowner);
+	if (mp->msg_control)
+		MCLAIM(control, so->so_mowner);
+
 	len = auio.uio_resid;
-	error = sosend(fp->f_data, to, &auio, NULL, control, flags);
+	error = (*so->so_send)(so, to, &auio, NULL, control, flags, l);
+	/* Protocol is responsible for freeing 'control' */
+	control = NULL;
+
+	fd_putfile(s);
+
 	if (error) {
 		if (auio.uio_resid != len && (error == ERESTART ||
 		    error == EINTR || error == EWOULDBLOCK))
 			error = 0;
-		if (error == EPIPE)
-			psignal(p, SIGPIPE);
+		if (error == EPIPE && (flags & MSG_NOSIGNAL) == 0) {
+			mutex_enter(proc_lock);
+			psignal(l->l_proc, SIGPIPE);
+			mutex_exit(proc_lock);
+		}
 	}
-	if (error == 0) {
+	if (error == 0)
 		*retsize = len - auio.uio_resid;
-		fp->f_wxfer++;
-		fp->f_wbytes += *retsize;
-	}
-#ifdef KTRACE
+
+bad:
 	if (ktriov != NULL) {
-		if (error == 0)
-			ktrgenio(p, s, UIO_WRITE, ktriov, *retsize, error);
+		ktrgeniov(s, UIO_WRITE, ktriov, *retsize, error);
 		free(ktriov, M_TEMP);
 	}
-#endif
-bad:
-	FRELE(fp);
+
+ 	if (iov != aiov)
+		free(iov, M_IOV);
 	if (to)
 		m_freem(to);
+	if (control)
+		m_freem(control);
+
 	return (error);
 }
 
 int
-sys_recvfrom(struct proc *p, void *v, register_t *retval)
+sys_recvfrom(struct lwp *l, const struct sys_recvfrom_args *uap, register_t *retval)
 {
-	struct sys_recvfrom_args /* {
-		syscallarg(int) s;
-		syscallarg(void *) buf;
-		syscallarg(size_t) len;
-		syscallarg(int) flags;
-		syscallarg(struct sockaddr *) from;
-		syscallarg(socklen_t *) fromlenaddr;
-	} */ *uap = v;
-	struct msghdr msg;
-	struct iovec aiov;
-	int error;
+	/* {
+		syscallarg(int)			s;
+		syscallarg(void *)		buf;
+		syscallarg(size_t)		len;
+		syscallarg(int)			flags;
+		syscallarg(struct sockaddr *)	from;
+		syscallarg(unsigned int *)	fromlenaddr;
+	} */
+	struct msghdr	msg;
+	struct iovec	aiov;
+	int		error;
+	struct mbuf	*from;
 
-	if (SCARG(uap, fromlenaddr)) {
-		error = copyin(SCARG(uap, fromlenaddr),
-		    &msg.msg_namelen, sizeof (msg.msg_namelen));
-		if (error)
-			return (error);
-	} else
-		msg.msg_namelen = 0;
-	msg.msg_name = (caddr_t)SCARG(uap, from);
+	msg.msg_name = NULL;
 	msg.msg_iov = &aiov;
 	msg.msg_iovlen = 1;
 	aiov.iov_base = SCARG(uap, buf);
 	aiov.iov_len = SCARG(uap, len);
-	msg.msg_control = 0;
-	msg.msg_flags = SCARG(uap, flags);
-	return (recvit(p, SCARG(uap, s), &msg,
-	    (caddr_t)SCARG(uap, fromlenaddr), retval));
+	msg.msg_control = NULL;
+	msg.msg_flags = SCARG(uap, flags) & MSG_USERFLAGS;
+
+	error = do_sys_recvmsg(l, SCARG(uap, s), &msg, &from, NULL, retval);
+	if (error != 0)
+		return error;
+
+	error = copyout_sockname(SCARG(uap, from), SCARG(uap, fromlenaddr),
+	    MSG_LENUSRSPACE, from);
+	if (from != NULL)
+		m_free(from);
+	return error;
 }
 
 int
-sys_recvmsg(struct proc *p, void *v, register_t *retval)
+sys_recvmsg(struct lwp *l, const struct sys_recvmsg_args *uap, register_t *retval)
 {
-	struct sys_recvmsg_args /* {
-		syscallarg(int) s;
-		syscallarg(struct msghdr *) msg;
-		syscallarg(int) flags;
-	} */ *uap = v;
-	struct msghdr msg;
-	struct iovec aiov[UIO_SMALLIOV], *uiov, *iov;
-	int error;
+	/* {
+		syscallarg(int)			s;
+		syscallarg(struct msghdr *)	msg;
+		syscallarg(int)			flags;
+	} */
+	struct msghdr	msg;
+	int		error;
+	struct mbuf	*from, *control;
 
-	error = copyin(SCARG(uap, msg), &msg, sizeof (msg));
+	error = copyin(SCARG(uap, msg), &msg, sizeof(msg));
 	if (error)
 		return (error);
-	if (msg.msg_iovlen > IOV_MAX)
-		return (EMSGSIZE);
-	if (msg.msg_iovlen > UIO_SMALLIOV)
-		iov = malloc(sizeof(struct iovec) * msg.msg_iovlen,
-		    M_IOV, M_WAITOK);
-	else
-		iov = aiov;
-#ifdef COMPAT_OLDSOCK
-	msg.msg_flags = SCARG(uap, flags) &~ MSG_COMPAT;
-#else
-	msg.msg_flags = SCARG(uap, flags);
-#endif
-	if (msg.msg_iovlen > 0) {
-		error = copyin(msg.msg_iov, iov,
-		    (unsigned)(msg.msg_iovlen * sizeof (struct iovec)));
-		if (error)
-			goto done;
-	}
-	uiov = msg.msg_iov;
-	msg.msg_iov = iov;
-	if ((error = recvit(p, SCARG(uap, s), &msg, NULL, retval)) == 0) {
-		msg.msg_iov = uiov;
+
+	msg.msg_flags = (SCARG(uap, flags) & MSG_USERFLAGS) | MSG_IOVUSRSPACE;
+
+	error = do_sys_recvmsg(l, SCARG(uap, s), &msg, &from,
+	    msg.msg_control != NULL ? &control : NULL, retval);
+	if (error != 0)
+		return error;
+
+	if (msg.msg_control != NULL)
+		error = copyout_msg_control(l, &msg, control);
+
+	if (error == 0)
+		error = copyout_sockname(msg.msg_name, &msg.msg_namelen, 0,
+			from);
+	if (from != NULL)
+		m_free(from);
+	if (error == 0) {
+		ktrkuser("msghdr", &msg, sizeof msg);
 		error = copyout(&msg, SCARG(uap, msg), sizeof(msg));
 	}
-done:
-	if (iov != aiov)
-		free(iov, M_IOV);
+
 	return (error);
 }
 
-int
-recvit(struct proc *p, int s, struct msghdr *mp, caddr_t namelenp,
-    register_t *retsize)
+/*
+ * Adjust for a truncated SCM_RIGHTS control message.
+ *  This means closing any file descriptors that aren't present
+ *  in the returned buffer.
+ *  m is the mbuf holding the (already externalized) SCM_RIGHTS message.
+ */
+static void
+free_rights(struct mbuf *m)
 {
-	struct file *fp;
-	struct uio auio;
-	struct iovec *iov;
+	int nfd;
 	int i;
-	size_t len;
-	int error;
-	struct mbuf *from = NULL, *control = NULL;
-#ifdef KTRACE
-	struct iovec *ktriov = NULL;
-#endif
+	int *fdv;
 
-	if ((error = getsock(p->p_fd, s, &fp)) != 0)
+	nfd = m->m_len < CMSG_SPACE(sizeof(int)) ? 0
+	    : (m->m_len - CMSG_SPACE(sizeof(int))) / sizeof(int) + 1;
+	fdv = (int *) CMSG_DATA(mtod(m,struct cmsghdr *));
+	for (i = 0; i < nfd; i++) {
+		if (fd_getfile(fdv[i]) != NULL)
+			(void)fd_close(fdv[i]);
+	}
+}
+
+void
+free_control_mbuf(struct lwp *l, struct mbuf *control, struct mbuf *uncopied)
+{
+	struct mbuf *next;
+	struct cmsghdr *cmsg;
+	bool do_free_rights = false;
+
+	while (control != NULL) {
+		cmsg = mtod(control, struct cmsghdr *);
+		if (control == uncopied)
+			do_free_rights = true;
+		if (do_free_rights && cmsg->cmsg_level == SOL_SOCKET
+		    && cmsg->cmsg_type == SCM_RIGHTS)
+			free_rights(control);
+		next = control->m_next;
+		m_free(control);
+		control = next;
+	}
+}
+
+/* Copy socket control/CMSG data to user buffer, frees the mbuf */
+int
+copyout_msg_control(struct lwp *l, struct msghdr *mp, struct mbuf *control)
+{
+	int i, len, error = 0;
+	struct cmsghdr *cmsg;
+	struct mbuf *m;
+	char *q;
+
+	len = mp->msg_controllen;
+	if (len <= 0 || control == 0) {
+		mp->msg_controllen = 0;
+		free_control_mbuf(l, control, control);
+		return 0;
+	}
+
+	q = (char *)mp->msg_control;
+
+	for (m = control; m != NULL; ) {
+		cmsg = mtod(m, struct cmsghdr *);
+		i = m->m_len;
+		if (len < i) {
+			mp->msg_flags |= MSG_CTRUNC;
+			if (cmsg->cmsg_level == SOL_SOCKET
+			    && cmsg->cmsg_type == SCM_RIGHTS)
+				/* Do not truncate me ... */
+				break;
+			i = len;
+		}
+		error = copyout(mtod(m, void *), q, i);
+		ktrkuser("msgcontrol", mtod(m, void *), i);
+		if (error != 0) {
+			/* We must free all the SCM_RIGHTS */
+			m = control;
+			break;
+		}
+		m = m->m_next;
+		if (m)
+			i = ALIGN(i);
+		q += i;
+		len -= i;
+		if (len <= 0)
+			break;
+	}
+
+	free_control_mbuf(l, control, m);
+
+	mp->msg_controllen = q - (char *)mp->msg_control;
+	return error;
+}
+
+int
+do_sys_recvmsg(struct lwp *l, int s, struct msghdr *mp, struct mbuf **from,
+    struct mbuf **control, register_t *retsize)
+{
+	struct uio	auio;
+	struct iovec	aiov[UIO_SMALLIOV], *iov = aiov;
+	struct iovec	*tiov;
+	int		i, len, error, iovlen;
+	struct socket	*so;
+	struct iovec	*ktriov;
+
+	ktrkuser("msghdr", mp, sizeof *mp);
+
+	*from = NULL;
+	if (control != NULL)
+		*control = NULL;
+
+	if ((error = fd_getsock(s, &so)) != 0)
 		return (error);
-	auio.uio_iov = mp->msg_iov;
+
+	if (mp->msg_flags & MSG_IOVUSRSPACE) {
+		if ((unsigned int)mp->msg_iovlen > UIO_SMALLIOV) {
+			if ((unsigned int)mp->msg_iovlen > IOV_MAX) {
+				error = EMSGSIZE;
+				goto out;
+			}
+			iov = malloc(sizeof(struct iovec) * mp->msg_iovlen,
+			    M_IOV, M_WAITOK);
+		}
+		if (mp->msg_iovlen != 0) {
+			error = copyin(mp->msg_iov, iov,
+			    (size_t)(mp->msg_iovlen * sizeof(struct iovec)));
+			if (error)
+				goto out;
+		}
+		auio.uio_iov = iov;
+	} else
+		auio.uio_iov = mp->msg_iov;
 	auio.uio_iovcnt = mp->msg_iovlen;
-	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_rw = UIO_READ;
-	auio.uio_procp = p;
 	auio.uio_offset = 0;			/* XXX */
 	auio.uio_resid = 0;
-	iov = mp->msg_iov;
-	for (i = 0; i < mp->msg_iovlen; i++, iov++) {
-		/* Don't allow sum > SSIZE_MAX */
-		if (iov->iov_len > SSIZE_MAX ||
-		    (auio.uio_resid += iov->iov_len) > SSIZE_MAX) {
+	KASSERT(l == curlwp);
+	auio.uio_vmspace = l->l_proc->p_vmspace;
+
+	tiov = auio.uio_iov;
+	for (i = 0; i < mp->msg_iovlen; i++, tiov++) {
+#if 0
+		/* cannot happen iov_len is unsigned */
+		if (tiov->iov_len < 0) {
+			error = EINVAL;
+			goto out;
+		}
+#endif
+		/*
+		 * Reads return ssize_t because -1 is returned on error.
+		 * Therefore we must restrict the length to SSIZE_MAX to
+		 * avoid garbage return values.
+		 */
+		auio.uio_resid += tiov->iov_len;
+		if (tiov->iov_len > SSIZE_MAX || auio.uio_resid > SSIZE_MAX) {
 			error = EINVAL;
 			goto out;
 		}
 	}
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_GENIO)) {
-		int iovlen = auio.uio_iovcnt * sizeof (struct iovec);
 
+	ktriov = NULL;
+	if (ktrpoint(KTR_GENIO)) {
+		iovlen = auio.uio_iovcnt * sizeof(struct iovec);
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
-		bcopy(auio.uio_iov, ktriov, iovlen);
+		memcpy(ktriov, auio.uio_iov, iovlen);
 	}
-#endif
+
 	len = auio.uio_resid;
-	error = soreceive(fp->f_data, &from, &auio, NULL,
-			  mp->msg_control ? &control : NULL,
-			  &mp->msg_flags);
-	if (error) {
-		if (auio.uio_resid != len && (error == ERESTART ||
-		    error == EINTR || error == EWOULDBLOCK))
-			error = 0;
-	}
-#ifdef KTRACE
+	mp->msg_flags &= MSG_USERFLAGS;
+	error = (*so->so_receive)(so, from, &auio, NULL, control,
+	    &mp->msg_flags);
+	len -= auio.uio_resid;
+	*retsize = len;
+	if (error != 0 && len != 0
+	    && (error == ERESTART || error == EINTR || error == EWOULDBLOCK))
+		/* Some data transferred */
+		error = 0;
+
 	if (ktriov != NULL) {
-		if (error == 0)
-			ktrgenio(p, s, UIO_READ,
-				ktriov, len - auio.uio_resid, error);
+		ktrgeniov(s, UIO_READ, ktriov, len, error);
 		free(ktriov, M_TEMP);
 	}
-#endif
-	if (error)
-		goto out;
-	*retsize = len - auio.uio_resid;
-	if (mp->msg_name) {
-		socklen_t alen;
 
-		if (from == NULL)
-			alen = 0;
-		else {
-			/* save sa_len before it is destroyed by MSG_COMPAT */
-			alen = mp->msg_namelen;
-			if (alen > from->m_len)
-				alen = from->m_len;
-			/* else if alen < from->m_len ??? */
-#ifdef COMPAT_OLDSOCK
-			if (mp->msg_flags & MSG_COMPAT)
-				mtod(from, struct osockaddr *)->sa_family =
-				    mtod(from, struct sockaddr *)->sa_family;
-#endif
-			error = copyout(mtod(from, caddr_t), mp->msg_name, alen);
-			if (error)
-				goto out;
-		}
-		mp->msg_namelen = alen;
-		if (namelenp &&
-		    (error = copyout(&alen, namelenp, sizeof(alen)))) {
-#ifdef COMPAT_OLDSOCK
-			if (mp->msg_flags & MSG_COMPAT)
-				error = 0;	/* old recvfrom didn't check */
-			else
-#endif
-			goto out;
+	if (error != 0) {
+		m_freem(*from);
+		*from = NULL;
+		if (control != NULL) {
+			free_control_mbuf(l, *control, *control);
+			*control = NULL;
 		}
 	}
-	if (mp->msg_control) {
-#ifdef COMPAT_OLDSOCK
-		/*
-		 * We assume that old recvmsg calls won't receive access
-		 * rights and other control info, esp. as control info
-		 * is always optional and those options didn't exist in 4.3.
-		 * If we receive rights, trim the cmsghdr; anything else
-		 * is tossed.
-		 */
-		if (control && mp->msg_flags & MSG_COMPAT) {
-			if (mtod(control, struct cmsghdr *)->cmsg_level !=
-			    SOL_SOCKET ||
-			    mtod(control, struct cmsghdr *)->cmsg_type !=
-			    SCM_RIGHTS) {
-				mp->msg_controllen = 0;
-				goto out;
-			}
-			control->m_len -= sizeof (struct cmsghdr);
-			control->m_data += sizeof (struct cmsghdr);
-		}
-#endif
-		len = mp->msg_controllen;
-		if (len <= 0 || control == NULL)
-			len = 0;
-		else {
-			struct mbuf *m = control;
-			caddr_t p = mp->msg_control;
+ out:
+	if (iov != aiov)
+		free(iov, M_TEMP);
+	fd_putfile(s);
+	return (error);
+}
 
-			do {
-				i = m->m_len;
-				if (len < i) {
-					mp->msg_flags |= MSG_CTRUNC;
-					i = len;
-				}
-				error = copyout(mtod(m, caddr_t), p,
-				    (unsigned)i);
-				if (m->m_next)
-					i = ALIGN(i);
-				p += i;
-				len -= i;
-				if (error != 0 || len <= 0)
-					break;
-			} while ((m = m->m_next) != NULL);
-			len = p - (caddr_t)mp->msg_control;
-		}
-		mp->msg_controllen = len;
-	}
-	if (!error) {
-		fp->f_rxfer++;
-		fp->f_rbytes += *retsize;
-	}
-out:
-	FRELE(fp);
-	if (from)
-		m_freem(from);
-	if (control)
-		m_freem(control);
+
+/* ARGSUSED */
+int
+sys_shutdown(struct lwp *l, const struct sys_shutdown_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(int)	s;
+		syscallarg(int)	how;
+	} */
+	struct socket	*so;
+	int		error;
+
+	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
+		return (error);
+	solock(so);
+	error = soshutdown(so, SCARG(uap, how));
+	sounlock(so);
+	fd_putfile(SCARG(uap, s));
 	return (error);
 }
 
 /* ARGSUSED */
 int
-sys_shutdown(struct proc *p, void *v, register_t *retval)
+sys_setsockopt(struct lwp *l, const struct sys_setsockopt_args *uap, register_t *retval)
 {
-	struct sys_shutdown_args /* {
-		syscallarg(int) s;
-		syscallarg(int) how;
-	} */ *uap = v;
-	struct file *fp;
-	int error;
+	/* {
+		syscallarg(int)			s;
+		syscallarg(int)			level;
+		syscallarg(int)			name;
+		syscallarg(const void *)	val;
+		syscallarg(unsigned int)	valsize;
+	} */
+	struct sockopt	sopt;
+	struct socket	*so;
+	int		error;
+	unsigned int	len;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	len = SCARG(uap, valsize);
+	if (len > 0 && SCARG(uap, val) == NULL)
+		return (EINVAL);
+
+	if (len > MCLBYTES)
+		return (EINVAL);
+
+	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
 		return (error);
-	error = soshutdown(fp->f_data, SCARG(uap, how));
-	FRELE(fp);
-	return (error);
-}
 
-/* ARGSUSED */
-int
-sys_setsockopt(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_setsockopt_args /* {
-		syscallarg(int) s;
-		syscallarg(int) level;
-		syscallarg(int) name;
-		syscallarg(const void *) val;
-		syscallarg(socklen_t) valsize;
-	} */ *uap = v;
-	struct file *fp;
-	struct mbuf *m = NULL;
-	int error;
+	sockopt_init(&sopt, SCARG(uap, level), SCARG(uap, name), len);
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
-		return (error);
-	if (SCARG(uap, valsize) > MCLBYTES) {
-		error = EINVAL;
-		goto bad;
-	}
-	if (SCARG(uap, val)) {
-		m = m_get(M_WAIT, MT_SOOPTS);
-		if (SCARG(uap, valsize) > MLEN) {
-			MCLGET(m, M_DONTWAIT);
-			if ((m->m_flags & M_EXT) == 0) {
-				error = ENOBUFS;
-				goto bad;
-			}
-		}
-		if (m == NULL) {
-			error = ENOBUFS;
-			goto bad;
-		}
-		error = copyin(SCARG(uap, val), mtod(m, caddr_t),
-		    SCARG(uap, valsize));
-		if (error) {
-			goto bad;
-		}
-		m->m_len = SCARG(uap, valsize);
-	}
-	error = sosetopt(fp->f_data, SCARG(uap, level),
-			 SCARG(uap, name), m);
-	m = NULL;
-bad:
-	if (m)
-		m_freem(m);
-	FRELE(fp);
-	return (error);
-}
-
-/* ARGSUSED */
-int
-sys_getsockopt(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_getsockopt_args /* {
-		syscallarg(int) s;
-		syscallarg(int) level;
-		syscallarg(int) name;
-		syscallarg(void *) val;
-		syscallarg(socklen_t *) avalsize;
-	} */ *uap = v;
-	struct file *fp;
-	struct mbuf *m = NULL;
-	socklen_t valsize;
-	int error;
-
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
-		return (error);
-	if (SCARG(uap, val)) {
-		error = copyin(SCARG(uap, avalsize),
-		    &valsize, sizeof (valsize));
+	if (len > 0) {
+		error = copyin(SCARG(uap, val), sopt.sopt_data, len);
 		if (error)
 			goto out;
-	} else
-		valsize = 0;
-	if ((error = sogetopt(fp->f_data, SCARG(uap, level),
-	    SCARG(uap, name), &m)) == 0 && SCARG(uap, val) && valsize &&
-	    m != NULL) {
-		if (valsize > m->m_len)
-			valsize = m->m_len;
-		error = copyout(mtod(m, caddr_t), SCARG(uap, val), valsize);
-		if (error == 0)
-			error = copyout(&valsize,
-			    SCARG(uap, avalsize), sizeof (valsize));
 	}
-out:
-	FRELE(fp);
-	if (m != NULL)
-		(void)m_free(m);
+
+	error = sosetopt(so, &sopt);
+
+ out:
+	sockopt_destroy(&sopt);
+ 	fd_putfile(SCARG(uap, s));
 	return (error);
 }
 
+/* ARGSUSED */
 int
-sys_pipe(struct proc *p, void *v, register_t *retval)
+sys_getsockopt(struct lwp *l, const struct sys_getsockopt_args *uap, register_t *retval)
 {
-	struct sys_pipe_args /* {
-		syscallarg(int *) fdp;
-	} */ *uap = v;
-	int error, fds[2];
-	register_t rval[2];
+	/* {
+		syscallarg(int)			s;
+		syscallarg(int)			level;
+		syscallarg(int)			name;
+		syscallarg(void *)		val;
+		syscallarg(unsigned int *)	avalsize;
+	} */
+	struct sockopt	sopt;
+	struct socket	*so;
+	unsigned int	valsize, len;
+	int		error;
 
-	if ((error = sys_opipe(p, v, rval)) != 0)
+	if (SCARG(uap, val) != NULL) {
+		error = copyin(SCARG(uap, avalsize), &valsize, sizeof(valsize));
+		if (error)
+			return (error);
+	} else
+		valsize = 0;
+
+	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
 		return (error);
 
-	fds[0] = rval[0];
-	fds[1] = rval[1];
-	error = copyout(fds, SCARG(uap, fdp), 2 * sizeof (int));
-	if (error) {
-		fdplock(p->p_fd);
-		fdrelease(p, fds[0]);
-		fdrelease(p, fds[1]);
-		fdpunlock(p->p_fd);
+	sockopt_init(&sopt, SCARG(uap, level), SCARG(uap, name), 0);
+
+	error = sogetopt(so, &sopt);
+	if (error)
+		goto out;
+
+	if (valsize > 0) {
+		len = min(valsize, sopt.sopt_size);
+		error = copyout(sopt.sopt_data, SCARG(uap, val), len);
+		if (error)
+			goto out;
+
+		error = copyout(&len, SCARG(uap, avalsize), sizeof(len));
+		if (error)
+			goto out;
 	}
+
+ out:
+	sockopt_destroy(&sopt);
+ 	fd_putfile(SCARG(uap, s));
 	return (error);
+}
+
+#ifdef PIPE_SOCKETPAIR
+/* ARGSUSED */
+int
+sys_pipe(struct lwp *l, const void *v, register_t *retval)
+{
+	file_t		*rf, *wf;
+	struct socket	*rso, *wso;
+	int		fd, error;
+	proc_t		*p;
+
+	p = curproc;
+	if ((error = socreate(AF_LOCAL, &rso, SOCK_STREAM, 0, l, NULL)) != 0)
+		return (error);
+	if ((error = socreate(AF_LOCAL, &wso, SOCK_STREAM, 0, l, rso)) != 0)
+		goto free1;
+	/* remember this socket pair implements a pipe */
+	wso->so_state |= SS_ISAPIPE;
+	rso->so_state |= SS_ISAPIPE;
+	if ((error = fd_allocfile(&rf, &fd)) != 0)
+		goto free2;
+	retval[0] = fd;
+	rf->f_flag = FREAD;
+	rf->f_type = DTYPE_SOCKET;
+	rf->f_ops = &socketops;
+	rf->f_data = rso;
+	if ((error = fd_allocfile(&wf, &fd)) != 0)
+		goto free3;
+	wf->f_flag = FWRITE;
+	wf->f_type = DTYPE_SOCKET;
+	wf->f_ops = &socketops;
+	wf->f_data = wso;
+	retval[1] = fd;
+	solock(wso);
+	error = unp_connect2(wso, rso, PRU_CONNECT2);
+	sounlock(wso);
+	if (error != 0)
+		goto free4;
+	fd_affix(p, wf, (int)retval[1]);
+	fd_affix(p, rf, (int)retval[0]);
+	return (0);
+ free4:
+	fd_abort(p, wf, (int)retval[1]);
+ free3:
+	fd_abort(p, rf, (int)retval[0]);
+ free2:
+	(void)soclose(wso);
+ free1:
+	(void)soclose(rso);
+	return (error);
+}
+#endif /* PIPE_SOCKETPAIR */
+
+/*
+ * Get socket name.
+ */
+/* ARGSUSED */
+int
+do_sys_getsockname(struct lwp *l, int fd, int which, struct mbuf **nam)
+{
+	struct socket	*so;
+	struct mbuf	*m;
+	int		error;
+
+	if ((error = fd_getsock(fd, &so)) != 0)
+		return error;
+
+	m = m_getclr(M_WAIT, MT_SONAME);
+	MCLAIM(m, so->so_mowner);
+
+	solock(so);
+	if (which == PRU_PEERADDR
+	    && (so->so_state & (SS_ISCONNECTED | SS_ISCONFIRMING)) == 0) {
+		error = ENOTCONN;
+	} else {
+		*nam = m;
+		error = (*so->so_proto->pr_usrreq)(so, which, NULL, m, NULL,
+		    NULL);
+	}
+ 	sounlock(so);
+	if (error != 0)
+		m_free(m);
+ 	fd_putfile(fd);
+	return error;
+}
+
+int
+copyout_sockname(struct sockaddr *asa, unsigned int *alen, int flags,
+    struct mbuf *addr)
+{
+	int len;
+	int error;
+
+	if (asa == NULL)
+		/* Assume application not interested */
+		return 0;
+
+	if (flags & MSG_LENUSRSPACE) {
+		error = copyin(alen, &len, sizeof(len));
+		if (error)
+			return error;
+	} else
+		len = *alen;
+	if (len < 0)
+		return EINVAL;
+
+	if (addr == NULL) {
+		len = 0;
+		error = 0;
+	} else {
+		if (len > addr->m_len)
+			len = addr->m_len;
+		/* Maybe this ought to copy a chain ? */
+		ktrkuser("sockname", mtod(addr, void *), len);
+		error = copyout(mtod(addr, void *), asa, len);
+	}
+
+	if (error == 0) {
+		if (flags & MSG_LENUSRSPACE)
+			error = copyout(&len, alen, sizeof(len));
+		else
+			*alen = len;
+	}
+
+	return error;
 }
 
 /*
@@ -914,39 +1098,25 @@ sys_pipe(struct proc *p, void *v, register_t *retval)
  */
 /* ARGSUSED */
 int
-sys_getsockname(struct proc *p, void *v, register_t *retval)
+sys_getsockname(struct lwp *l, const struct sys_getsockname_args *uap, register_t *retval)
 {
-	struct sys_getsockname_args /* {
-		syscallarg(int) fdes;
-		syscallarg(struct sockaddr *) asa;
-		syscallarg(socklen_t *) alen;
-	} */ *uap = v;
-	struct file *fp;
-	struct socket *so;
-	struct mbuf *m = NULL;
-	socklen_t len;
-	int error;
+	/* {
+		syscallarg(int)			fdes;
+		syscallarg(struct sockaddr *)	asa;
+		syscallarg(unsigned int *)	alen;
+	} */
+	struct mbuf	*m;
+	int		error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
-		return (error);
-	error = copyin(SCARG(uap, alen), &len, sizeof (len));
-	if (error)
-		goto bad;
-	so = fp->f_data;
-	m = m_getclr(M_WAIT, MT_SONAME);
-	error = (*so->so_proto->pr_usrreq)(so, PRU_SOCKADDR, 0, m, 0, p);
-	if (error)
-		goto bad;
-	if (len > m->m_len)
-		len = m->m_len;
-	error = copyout(mtod(m, caddr_t), SCARG(uap, asa), len);
-	if (error == 0)
-		error = copyout(&len, SCARG(uap, alen), sizeof (len));
-bad:
-	FRELE(fp);
-	if (m)
-		m_freem(m);
-	return (error);
+	error = do_sys_getsockname(l, SCARG(uap, fdes), PRU_SOCKADDR, &m);
+	if (error != 0)
+		return error;
+
+	error = copyout_sockname(SCARG(uap, asa), SCARG(uap, alen),
+	    MSG_LENUSRSPACE, m);
+	if (m != NULL)
+		m_free(m);
+	return error;
 }
 
 /*
@@ -954,142 +1124,75 @@ bad:
  */
 /* ARGSUSED */
 int
-sys_getpeername(struct proc *p, void *v, register_t *retval)
+sys_getpeername(struct lwp *l, const struct sys_getpeername_args *uap, register_t *retval)
 {
-	struct sys_getpeername_args /* {
-		syscallarg(int) fdes;
-		syscallarg(struct sockaddr *) asa;
-		syscallarg(socklen_t *) alen;
-	} */ *uap = v;
-	struct file *fp;
-	struct socket *so;
-	struct mbuf *m = NULL;
-	socklen_t len;
-	int error;
+	/* {
+		syscallarg(int)			fdes;
+		syscallarg(struct sockaddr *)	asa;
+		syscallarg(unsigned int *)	alen;
+	} */
+	struct mbuf	*m;
+	int		error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
-		return (error);
-	so = fp->f_data;
-	if ((so->so_state & (SS_ISCONNECTED|SS_ISCONFIRMING)) == 0) {
-		FRELE(fp);
-		return (ENOTCONN);
-	}
-	error = copyin(SCARG(uap, alen), &len, sizeof (len));
-	if (error)
-		goto bad;
-	m = m_getclr(M_WAIT, MT_SONAME);
-	error = (*so->so_proto->pr_usrreq)(so, PRU_PEERADDR, 0, m, 0, p);
-	if (error)
-		goto bad;
-	if (len > m->m_len)
-		len = m->m_len;
-	error = copyout(mtod(m, caddr_t), SCARG(uap, asa), len);
-	if (error == 0)
-		error = copyout(&len, SCARG(uap, alen), sizeof (len));
-bad:
-	FRELE(fp);
-	m_freem(m);
-	return (error);
+	error = do_sys_getsockname(l, SCARG(uap, fdes), PRU_PEERADDR, &m);
+	if (error != 0)
+		return error;
+
+	error = copyout_sockname(SCARG(uap, asa), SCARG(uap, alen),
+	    MSG_LENUSRSPACE, m);
+	if (m != NULL)
+		m_free(m);
+	return error;
 }
 
 /*
- * Get eid of peer for connected socket.
+ * XXX In a perfect world, we wouldn't pass around socket control
+ * XXX arguments in mbufs, and this could go away.
  */
-/* ARGSUSED */
 int
-sys_getpeereid(struct proc *p, void *v, register_t *retval)
+sockargs(struct mbuf **mp, const void *bf, size_t buflen, int type)
 {
-	struct sys_getpeereid_args /* {
-		syscallarg(int) fdes;
-		syscallarg(uid_t *) euid;
-		syscallarg(gid_t *) egid;
-	} */ *uap = v;
-	struct file *fp;
-	struct socket *so;
-	struct mbuf *m = NULL;
-	struct unpcbid *id;
-	int error;
-
-	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
-		return (error);
-	so = fp->f_data;
-	if (so->so_proto != pffindtype(AF_LOCAL, SOCK_STREAM)) {
-		FRELE(fp);
-		return (EOPNOTSUPP);
-	}
-	m = m_getclr(M_WAIT, MT_SONAME);
-	if (m == NULL) {
-		error = ENOBUFS;
-		goto bad;
-	}	
-	error = (*so->so_proto->pr_usrreq)(so, PRU_PEEREID, 0, m, 0, p);
-	if (!error && m->m_len != sizeof(struct unpcbid))
-		error = EOPNOTSUPP;
-	if (error)
-		goto bad;
-	id = mtod(m, struct unpcbid *);
-	error = copyout(&(id->unp_euid), SCARG(uap, euid), sizeof(uid_t));
-	if (error == 0)
-		error = copyout(&(id->unp_egid), SCARG(uap, egid), sizeof(gid_t));
-bad:
-	FRELE(fp);
-	m_freem(m);
-	return (error);
-}
-
-int
-sockargs(struct mbuf **mp, const void *buf, size_t buflen, int type)
-{
-	struct sockaddr *sa;
-	struct mbuf *m;
-	int error;
+	struct sockaddr	*sa;
+	struct mbuf	*m;
+	int		error;
 
 	/*
 	 * We can't allow socket names > UCHAR_MAX in length, since that
-	 * will overflow sa_len. Also, control data more than MCLBYTES in
+	 * will overflow sa_len.  Control data more than a page size in
 	 * length is just too much.
 	 */
-	if (buflen > (type == MT_SONAME ? UCHAR_MAX : MCLBYTES))
+	if (buflen > (type == MT_SONAME ? UCHAR_MAX : PAGE_SIZE))
 		return (EINVAL);
 
 	/* Allocate an mbuf to hold the arguments. */
 	m = m_get(M_WAIT, type);
-	if ((u_int)buflen > MLEN) {
-		MCLGET(m, M_WAITOK);
-		if ((m->m_flags & M_EXT) == 0) {
-			m_free(m);
-			return ENOBUFS;
-		}
+	/* can't claim.  don't who to assign it to. */
+	if (buflen > MLEN) {
+		/*
+		 * Won't fit into a regular mbuf, so we allocate just
+		 * enough external storage to hold the argument.
+		 */
+		MEXTMALLOC(m, buflen, M_WAITOK);
 	}
 	m->m_len = buflen;
-	error = copyin(buf, mtod(m, caddr_t), buflen);
+	error = copyin(bf, mtod(m, void *), buflen);
 	if (error) {
 		(void) m_free(m);
 		return (error);
 	}
+	ktrkuser("sockargs", mtod(m, void *), buflen);
 	*mp = m;
 	if (type == MT_SONAME) {
 		sa = mtod(m, struct sockaddr *);
-#if defined(COMPAT_OLDSOCK) && BYTE_ORDER != BIG_ENDIAN
+#if BYTE_ORDER != BIG_ENDIAN
+		/*
+		 * 4.3BSD compat thing - need to stay, since bind(2),
+		 * connect(2), sendto(2) were not versioned for COMPAT_43.
+		 */
 		if (sa->sa_family == 0 && sa->sa_len < AF_MAX)
 			sa->sa_family = sa->sa_len;
 #endif
 		sa->sa_len = buflen;
 	}
-	return (0);
-}
-
-int
-getsock(struct filedesc *fdp, int fdes, struct file **fpp)
-{
-	struct file *fp;
-
-	if ((fp = fd_getfile(fdp, fdes)) == NULL)
-		return (EBADF);
-	if (fp->f_type != DTYPE_SOCKET)
-		return (ENOTSOCK);
-	*fpp = fp;
-	FREF(fp);
-
 	return (0);
 }

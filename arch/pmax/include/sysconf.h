@@ -1,4 +1,4 @@
-/*	$NetBSD: sysconf.h,v 1.10 2000/06/06 00:08:27 nisimura Exp $	*/
+/*	$NetBSD: sysconf.h,v 1.12 2008/01/03 23:02:24 joerg Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -63,15 +63,15 @@ struct platform {
 	 *	iointr		-	I/O interrupt handler
 	 *	intr_establish	-	establish interrupt handler
 	 *	intr_disestablish -	disestablish interrupt handler
-	 *	clkread		-	interporate HZ with hi-resolution timer
+	 *	tc_init		-	initialize timecounters
 	 */
 	void	(*bus_reset) __P((void));
 	void	(*cons_init) __P((void));
 	void	(*iointr) __P((unsigned, unsigned, unsigned, unsigned));
 	void	(*intr_establish) __P((struct device *, void *, int,
 		    int (*)(void *), void *));
-	int	(*memsize) __P((caddr_t));
-	unsigned (*clkread) __P((void));
+	int	(*memsize) __P((void *));
+	void	(*tc_init)(void);
 };
 
 /*
@@ -89,8 +89,8 @@ extern struct platform platform;
 extern struct sysinit sysinit[];
 extern int nsysinit;
 
-int	memsize_scan __P((caddr_t));
-int	memsize_bitmap __P((caddr_t));
+int	memsize_scan __P((void *));
+int	memsize_bitmap __P((void *));
 void	platform_not_configured __P((void));
 void	platform_not_supported __P((void));
 

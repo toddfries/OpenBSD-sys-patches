@@ -1,4 +1,4 @@
-/*	$NetBSD: filecore_vfsops.c,v 1.30 2007/01/04 15:42:37 elad Exp $	*/
+/*	$NetBSD: filecore_vfsops.c,v 1.55 2008/06/28 01:34:05 rumble Exp $	*/
 
 /*-
  * Copyright (c) 1994 The Regents of the University of California.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: filecore_vfsops.c,v 1.30 2007/01/04 15:42:37 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: filecore_vfsops.c,v 1.55 2008/06/28 01:34:05 rumble Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_netbsd.h"
@@ -77,6 +77,7 @@ __KERNEL_RCSID(0, "$NetBSD: filecore_vfsops.c,v 1.30 2007/01/04 15:42:37 elad Ex
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
+#include <miscfs/genfs/genfs.h>
 #include <miscfs/specfs/specdev.h>
 #include <sys/mount.h>
 #include <sys/buf.h>
@@ -88,13 +89,21 @@ __KERNEL_RCSID(0, "$NetBSD: filecore_vfsops.c,v 1.30 2007/01/04 15:42:37 elad Ex
 #include <sys/conf.h>
 #include <sys/sysctl.h>
 #include <sys/kauth.h>
+#include <sys/module.h>
 
 #include <fs/filecorefs/filecore.h>
 #include <fs/filecorefs/filecore_extern.h>
 #include <fs/filecorefs/filecore_node.h>
 #include <fs/filecorefs/filecore_mount.h>
 
-MALLOC_DEFINE(M_FILECOREMNT, "filecore mount", "Filecore FS mount structures");
+MODULE(MODULE_CLASS_VFS, filecorefs, NULL);
+
+MALLOC_JUSTDEFINE(M_FILECOREMNT,
+    "filecore mount", "Filecore FS mount structures");
+MALLOC_JUSTDEFINE(M_FILECORETMP,
+    "filecore temp", "Filecore FS temporary structures");
+
+static struct sysctllog *filecore_sysctl_log;
 
 extern const struct vnodeopv_desc filecore_vnodeop_opv_desc;
 
@@ -105,11 +114,12 @@ const struct vnodeopv_desc * const filecore_vnodeopv_descs[] = {
 
 struct vfsops filecore_vfsops = {
 	MOUNT_FILECORE,
+	sizeof (struct filecore_args),
 	filecore_mount,
 	filecore_start,
 	filecore_unmount,
 	filecore_root,
-	filecore_quotactl,
+	(void *)eopnotsupp,		/* vfs_quotactl */
 	filecore_statvfs,
 	filecore_sync,
 	filecore_vget,
@@ -121,15 +131,59 @@ struct vfsops filecore_vfsops = {
 	NULL,				/* filecore_mountroot */
 	(int (*)(struct mount *, struct vnode *, struct timespec *)) eopnotsupp,
 	vfs_stdextattrctl,
+	(void *)eopnotsupp,		/* vfs_suspendctl */
+	genfs_renamelock_enter,
+	genfs_renamelock_exit,
+	(void *)eopnotsupp,
 	filecore_vnodeopv_descs,
 	0,
 	{ NULL, NULL }
 };
-VFS_ATTACH(filecore_vfsops);
 
 static const struct genfs_ops filecore_genfsops = {
 	.gop_size = genfs_size,
 };
+
+static int
+filecorefs_modcmd(modcmd_t cmd, void *arg)
+{
+	int error;
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		error = vfs_attach(&filecore_vfsops);
+		if (error != 0)
+			break;
+		sysctl_createv(&filecore_sysctl_log, 0, NULL, NULL,
+			       CTLFLAG_PERMANENT,
+			       CTLTYPE_NODE, "vfs", NULL,
+			       NULL, 0, NULL, 0,
+			       CTL_VFS, CTL_EOL);
+		sysctl_createv(&filecore_sysctl_log, 0, NULL, NULL,
+			       CTLFLAG_PERMANENT,
+			       CTLTYPE_NODE, "filecore",
+			       SYSCTL_DESCR("Acorn FILECORE file system"),
+			       NULL, 0, NULL, 0,
+			       CTL_VFS, 19, CTL_EOL);
+		/*
+		 * XXX the "19" above could be dynamic, thereby eliminating
+		 * one more instance of the "number to vfs" mapping problem,
+		 * but "19" is the order as taken from sys/mount.h
+		 */
+		break;
+	case MODULE_CMD_FINI:
+		error = vfs_detach(&filecore_vfsops);
+		if (error != 0)
+			break;
+		sysctl_teardown(&filecore_sysctl_log);	
+		break;
+	default:
+		error = ENOTTY;
+		break;
+	}
+
+	return (error);
+}
 
 /*
  * Called by vfs_mountroot when iso is going to be mounted as root.
@@ -164,16 +218,15 @@ filecore_mountroot()
 
 	args.flags = FILECOREMNT_ROOT;
 	if ((error = filecore_mountfs(rootvp, mp, p, &args)) != 0) {
-		mp->mnt_op->vfs_refcount--;
-		vfs_unbusy(mp);
-		free(mp, M_MOUNT);
+		vfs_unbusy(mp, false, NULL);
+		vfs_destroy(mp);
 		return (error);
 	}
 	simple_lock(&mountlist_slock);
 	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 	simple_unlock(&mountlist_slock);
 	(void)filecore_statvfs(mp, &mp->mnt_stat, p);
-	vfs_unbusy(mp);
+	vfs_unbusy(mp, false, NULL);
 	return (0);
 }
 #endif
@@ -184,46 +237,48 @@ filecore_mountroot()
  * mount system call
  */
 int
-filecore_mount(mp, path, data, ndp, l)
+filecore_mount(mp, path, data, data_len)
 	struct mount *mp;
 	const char *path;
 	void *data;
-	struct nameidata *ndp;
-	struct lwp *l;
+	size_t *data_len;
 {
+	struct lwp *l = curlwp;
+	struct nameidata nd;
 	struct vnode *devvp;
-	struct filecore_args args;
+	struct filecore_args *args = data;
 	int error;
 	struct filecore_mnt *fcmp = NULL;
+
+	if (*data_len < sizeof *args)
+		return EINVAL;
 
 	if (mp->mnt_flag & MNT_GETARGS) {
 		fcmp = VFSTOFILECORE(mp);
 		if (fcmp == NULL)
 			return EIO;
-		args.flags = fcmp->fc_mntflags;
-		args.uid = fcmp->fc_uid;
-		args.gid = fcmp->fc_gid;
-		args.fspec = NULL;
-		return copyout(&args, data, sizeof(args));
+		args->flags = fcmp->fc_mntflags;
+		args->uid = fcmp->fc_uid;
+		args->gid = fcmp->fc_gid;
+		args->fspec = NULL;
+		*data_len = sizeof *args;
+		return 0;
 	}
-	error = copyin(data, &args, sizeof (struct filecore_args));
-	if (error)
-		return (error);
 
 	if ((mp->mnt_flag & MNT_RDONLY) == 0)
 		return (EROFS);
 
-	if ((mp->mnt_flag & MNT_UPDATE) && args.fspec == NULL)
+	if ((mp->mnt_flag & MNT_UPDATE) && args->fspec == NULL)
 		return EINVAL;
 
 	/*
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, l);
-	if ((error = namei(ndp)) != 0)
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, args->fspec);
+	if ((error = namei(&nd)) != 0)
 		return (error);
-	devvp = ndp->ni_vp;
+	devvp = nd.ni_vp;
 
 	if (devvp->v_type != VBLK) {
 		vrele(devvp);
@@ -239,7 +294,7 @@ filecore_mount(mp, path, data, ndp, l)
 	 */
 	if (kauth_authorize_generic(l->l_cred, KAUTH_GENERIC_ISSUSER, NULL)) {
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
-		error = VOP_ACCESS(devvp, VREAD, l->l_cred, l);
+		error = VOP_ACCESS(devvp, VREAD, l->l_cred);
 		VOP_UNLOCK(devvp, 0);
 		if (error) {
 			vrele(devvp);
@@ -247,7 +302,7 @@ filecore_mount(mp, path, data, ndp, l)
 		}
 	}
 	if ((mp->mnt_flag & MNT_UPDATE) == 0)
-		error = filecore_mountfs(devvp, mp, l, &args);
+		error = filecore_mountfs(devvp, mp, l, args);
 	else {
 		if (devvp != fcmp->fc_devvp)
 			error = EINVAL;	/* needs translation */
@@ -259,8 +314,8 @@ filecore_mount(mp, path, data, ndp, l)
 		return error;
 	}
 	fcmp = VFSTOFILECORE(mp);
-	return set_statvfs_info(path, UIO_USERSPACE, args.fspec, UIO_USERSPACE,
-	    mp, l);
+	return set_statvfs_info(path, UIO_USERSPACE, args->fspec, UIO_USERSPACE,
+	    mp->mnt_op->vfs_name, mp, l);
 }
 
 /*
@@ -278,7 +333,6 @@ filecore_mountfs(devvp, mp, l, argp)
 	dev_t dev = devvp->v_rdev;
 	int error = EINVAL;
 	int ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
-	extern struct vnode *rootvp;
 	struct filecore_disc_record *fcdr;
 	unsigned map;
 	unsigned log2secsize;
@@ -286,27 +340,16 @@ filecore_mountfs(devvp, mp, l, argp)
 	if (!ronly)
 		return EROFS;
 
-	/*
-	 * Disallow multiple mounts of the same device.
-	 * Disallow mounting of a device that is currently in use
-	 * (except for root, which might share swap device for miniroot).
-	 * Flush out any old buffers remaining from a previous use.
-	 */
-	if ((error = vfs_mountedon(devvp)) != 0)
-		return error;
-	if (vcount(devvp) > 1 && devvp != rootvp)
-		return EBUSY;
-	if ((error = vinvalbuf(devvp, V_SAVE, l->l_cred, l, 0, 0))
-	    != 0)
+	if ((error = vinvalbuf(devvp, V_SAVE, l->l_cred, l, 0, 0)) != 0)
 		return (error);
 
-	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED, l);
+	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED);
 	if (error)
 		return error;
 
 	/* Read the filecore boot block to check FS validity and to find the map */
 	error = bread(devvp, FILECORE_BOOTBLOCK_BLKN,
-			   FILECORE_BOOTBLOCK_SIZE, NOCRED, &bp);
+			   FILECORE_BOOTBLOCK_SIZE, NOCRED, 0, &bp);
 #ifdef FILECORE_DEBUG_BR
 		printf("bread(%p, %x, %d, CRED, %p)=%d\n", devvp,
 		       FILECORE_BOOTBLOCK_BLKN, FILECORE_BOOTBLOCK_SIZE,
@@ -320,27 +363,27 @@ filecore_mountfs(devvp, mp, l, argp)
 		error = EINVAL;
 		goto out;
 	}
-	fcdr = (struct filecore_disc_record *)(bp->b_data+FILECORE_BB_DISCREC);
+	fcdr = (struct filecore_disc_record *)((char *)(bp->b_data) +
+	    FILECORE_BB_DISCREC);
 	map = ((((8 << fcdr->log2secsize) - fcdr->zone_spare)
 	    * (fcdr->nzones / 2) - 8 * FILECORE_DISCREC_SIZE)
 	    << fcdr->log2bpmb) >> fcdr->log2secsize;
 	log2secsize = fcdr->log2secsize;
-	bp->b_flags |= B_AGE;
 #ifdef FILECORE_DEBUG_BR
 	printf("brelse(%p) vf1\n", bp);
 #endif
-	brelse(bp);
+	brelse(bp, BC_AGE);
 	bp = NULL;
 
 	/* Read the bootblock in the map */
-	error = bread(devvp, map, 1 << log2secsize, NOCRED, &bp);
+	error = bread(devvp, map, 1 << log2secsize, NOCRED, 0, &bp);
 #ifdef FILECORE_DEBUG_BR
 		printf("bread(%p, %x, %d, CRED, %p)=%d\n", devvp,
 		       map, 1 << log2secsize, bp, error);
 #endif
 	if (error != 0)
 		goto out;
-       	fcdr = (struct filecore_disc_record *)(bp->b_data + 4);
+       	fcdr = (struct filecore_disc_record *)((char *)(bp->b_data) + 4);
 	fcmp = malloc(sizeof *fcmp, M_FILECOREMNT, M_WAITOK);
 	memset(fcmp, 0, sizeof *fcmp);
 	if (fcdr->log2bpmb > fcdr->log2secsize)
@@ -359,11 +402,10 @@ filecore_mountfs(devvp, mp, l, argp)
 		fcmp->nblks=fcdr->disc_size / fcmp->blksize;
 	}
 
-	bp->b_flags |= B_AGE;
 #ifdef FILECORE_DEBUG_BR
 	printf("brelse(%p) vf2\n", bp);
 #endif
-	brelse(bp);
+	brelse(bp, BC_AGE);
 	bp = NULL;
 
 	mp->mnt_data = fcmp;
@@ -393,15 +435,11 @@ out:
 #ifdef FILECORE_DEBUG_BR
 		printf("brelse(%p) vf3\n", bp);
 #endif
-		brelse(bp);
+		brelse(bp, 0);
 	}
 	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
-	(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, l);
+	(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED);
 	VOP_UNLOCK(devvp, 0);
-	if (fcmp) {
-		free(fcmp, M_FILECOREMNT);
-		mp->mnt_data = NULL;
-	}
 	return error;
 }
 
@@ -411,10 +449,9 @@ out:
  */
 /* ARGSUSED */
 int
-filecore_start(mp, flags, l)
+filecore_start(mp, flags)
 	struct mount *mp;
 	int flags;
-	struct lwp *l;
 {
 	return 0;
 }
@@ -423,21 +460,15 @@ filecore_start(mp, flags, l)
  * unmount system call
  */
 int
-filecore_unmount(mp, mntflags, l)
+filecore_unmount(mp, mntflags)
 	struct mount *mp;
 	int mntflags;
-	struct lwp *l;
 {
 	struct filecore_mnt *fcmp;
 	int error, flags = 0;
 
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
-#if 0
-	mntflushbuf(mp, 0);
-	if (mntinvalbuf(mp))
-		return EBUSY;
-#endif
 	if ((error = vflush(mp, NULLVP, flags)) != 0)
 		return (error);
 
@@ -446,7 +477,7 @@ filecore_unmount(mp, mntflags, l)
 	if (fcmp->fc_devvp->v_type != VBAD)
 		fcmp->fc_devvp->v_specmountpoint = NULL;
 	vn_lock(fcmp->fc_devvp, LK_EXCLUSIVE | LK_RETRY);
-	error = VOP_CLOSE(fcmp->fc_devvp, FREAD, NOCRED, l);
+	error = VOP_CLOSE(fcmp->fc_devvp, FREAD, NOCRED);
 	vput(fcmp->fc_devvp);
 	free(fcmp, M_FILECOREMNT);
 	mp->mnt_data = NULL;
@@ -472,29 +503,12 @@ filecore_root(mp, vpp)
 }
 
 /*
- * Do operations associated with quotas, not supported
- */
-/* ARGSUSED */
-int
-filecore_quotactl(mp, cmd, uid, arg, l)
-	struct mount *mp;
-	int cmd;
-	uid_t uid;
-	void *arg;
-	struct lwp *l;
-{
-
-	return (EOPNOTSUPP);
-}
-
-/*
  * Get file system statistics.
  */
 int
-filecore_statvfs(mp, sbp, l)
+filecore_statvfs(mp, sbp)
 	struct mount *mp;
 	struct statvfs *sbp;
-	struct lwp *l;
 {
 	struct filecore_mnt *fcmp = VFSTOFILECORE(mp);
 
@@ -515,11 +529,10 @@ filecore_statvfs(mp, sbp, l)
 
 /* ARGSUSED */
 int
-filecore_sync(mp, waitfor, cred, l)
+filecore_sync(mp, waitfor, cred)
 	struct mount *mp;
 	int waitfor;
 	kauth_cred_t cred;
-	struct lwp *l;
 {
 	return (0);
 }
@@ -610,6 +623,7 @@ filecore_vget(mp, ino, vpp)
 	ip->i_number = ino;
 	ip->i_block = -1;
 	ip->i_parent = -2;
+	genfs_node_init(vp, &filecore_genfsops);
 
 	/*
 	 * Put it onto its hash chain and lock it so that other requests for
@@ -636,7 +650,7 @@ filecore_vget(mp, ino, vpp)
 #ifdef FILECORE_DEBUG_BR
 			printf("brelse(%p) vf4\n", bp);
 #endif
-			brelse(bp);
+			brelse(bp, 0);
 			*vpp = NULL;
 			return (error);
 		}
@@ -647,7 +661,7 @@ filecore_vget(mp, ino, vpp)
 #ifdef FILECORE_DEBUG_BR
 		printf("brelse(%p) vf5\n", bp);
 #endif
-		brelse(bp);
+		brelse(bp, 0);
 	}
 
 	ip->i_mnt = fcmp;
@@ -684,14 +698,13 @@ filecore_vget(mp, ino, vpp)
 	}
 
 	if (ino == FILECORE_ROOTINO)
-		vp->v_flag |= VROOT;
+		vp->v_vflag |= VV_ROOT;
 
 	/*
 	 * XXX need generation number?
 	 */
 
-	genfs_node_init(vp, &filecore_genfsops);
-	vp->v_size = ip->i_size;
+	uvm_vnp_setsize(vp, ip->i_size);
 	*vpp = vp;
 	return (0);
 }
@@ -718,25 +731,4 @@ filecore_vptofh(vp, fhp, fh_size)
 	ifh.ifid_ino = ip->i_number;
 	memcpy(fhp, &ifh, sizeof(ifh));
        	return 0;
-}
-
-SYSCTL_SETUP(sysctl_vfs_filecore_setup, "sysctl vfs.filecore subtree setup")
-{
-
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "vfs", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_VFS, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "filecore",
-		       SYSCTL_DESCR("Acorn FILECORE file system"),
-		       NULL, 0, NULL, 0,
-		       CTL_VFS, 19, CTL_EOL);
-	/*
-	 * XXX the "19" above could be dynamic, thereby eliminating
-	 * one more instance of the "number to vfs" mapping problem,
-	 * but "19" is the order as taken from sys/mount.h
-	 */
 }

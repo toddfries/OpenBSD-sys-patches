@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.h,v 1.33 2005/12/11 12:16:59 christos Exp $	*/
+/*	$NetBSD: bus.h,v 1.37 2008/04/28 20:23:15 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -85,7 +78,7 @@ typedef u_long	bus_size_t;
  * Access methods for bus resources and address space.
  */
 typedef struct atari_bus_space	*bus_space_tag_t;
-typedef caddr_t			bus_space_handle_t;
+typedef u_long			bus_space_handle_t;
 
 #define	BUS_SPACE_MAP_CACHEABLE		0x01
 #define	BUS_SPACE_MAP_LINEAR		0x02
@@ -649,6 +642,8 @@ struct atari_bus_dma_tag {
 	(void)((t)->_dmamap_sync ?				\
 	    (*(t)->_dmamap_sync)((t), (p), (o), (l), (ops)) : (void)0)
 
+#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
+#define bus_dmatag_destroy(t)
 
 /*
  *	bus_dmamap_t
@@ -704,8 +699,8 @@ int	bus_dmamem_alloc_range __P((bus_dma_tag_t tag, bus_size_t size,
 void	bus_dmamem_free __P((bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs));
 int	bus_dmamem_map __P((bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, caddr_t *kvap, int flags));
-void	bus_dmamem_unmap __P((bus_dma_tag_t tag, caddr_t kva,
+	    int nsegs, size_t size, void **kvap, int flags));
+void	bus_dmamem_unmap __P((bus_dma_tag_t tag, void *kva,
 	    size_t size));
 paddr_t	bus_dmamem_mmap __P((bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags));

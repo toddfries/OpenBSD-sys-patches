@@ -1,4 +1,4 @@
-/*	$NetBSD: advnops.c,v 1.21 2006/09/23 22:47:11 aymeric Exp $	*/
+/*	$NetBSD: advnops.c,v 1.29 2008/05/16 09:21:59 hannken Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: advnops.c,v 1.21 2006/09/23 22:47:11 aymeric Exp $");
+__KERNEL_RCSID(0, "$NetBSD: advnops.c,v 1.29 2008/05/16 09:21:59 hannken Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_quota.h"
@@ -83,7 +83,6 @@ int	adosfs_pathconf	__P((void *));
 
 #define adosfs_close 	genfs_nullop
 #define adosfs_fsync 	genfs_nullop
-#define	adosfs_lease_check	genfs_lease_check
 #define adosfs_seek 	genfs_seek
 
 #define adosfs_advlock 	genfs_einval
@@ -110,7 +109,6 @@ const struct vnodeopv_entry_desc adosfs_vnodeop_entries[] = {
 	{ &vop_setattr_desc, adosfs_setattr },		/* setattr */
 	{ &vop_read_desc, adosfs_read },		/* read */
 	{ &vop_write_desc, adosfs_write },		/* write */
-	{ &vop_lease_desc, adosfs_lease_check },	/* lease */
 	{ &vop_fcntl_desc, adosfs_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, adosfs_ioctl },		/* ioctl */
 	{ &vop_poll_desc, adosfs_poll },		/* poll */
@@ -155,7 +153,6 @@ adosfs_getattr(v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *sp = v;
 	struct vattr *vap;
 	struct adosfsmount *amp;
@@ -308,9 +305,9 @@ adosfs_read(v)
 		 * but not much as ados makes little attempt to
 		 * make things contigous
 		 */
-		error = bread(sp->a_vp, lbn, amp->bsize, NOCRED, &bp);
+		error = bread(sp->a_vp, lbn, amp->bsize, NOCRED, 0, &bp);
 		if (error) {
-			brelse(bp);
+			brelse(bp, 0);
 			goto reterr;
 		}
 		if (!IS_FFS(amp)) {
@@ -332,16 +329,16 @@ adosfs_read(v)
 		}
 
 		if (error) {
-			brelse(bp);
+			brelse(bp, 0);
 			goto reterr;
 		}
 #ifdef ADOSFS_DIAGNOSTIC
 		printf(" %" PRId64 "+%ld-%" PRId64 "+%ld", lbn, on, lbn, n);
 #endif
 		n = MIN(n, size - bp->b_resid);
-		error = uiomove(bp->b_data + on +
+		error = uiomove((char *)bp->b_data + on +
 				amp->bsize - amp->dbsize, (int)n, uio);
-		brelse(bp);
+		brelse(bp, 0);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
 
 out:
@@ -390,7 +387,7 @@ adosfs_strategy(v)
 #endif
 	bp = sp->a_bp;
 	if (bp->b_vp == NULL) {
-		bp->b_flags |= B_ERROR;
+		bp->b_error = EIO;
 		biodone(bp);
 		error = EIO;
 		goto reterr;
@@ -400,7 +397,7 @@ adosfs_strategy(v)
 	if (bp->b_blkno == bp->b_lblkno) {
 		error = VOP_BMAP(vp, bp->b_lblkno, NULL, &bp->b_blkno, NULL);
 		if (error) {
-			bp->b_flags |= B_ERROR;
+			bp->b_flags = error;
 			biodone(bp);
 			goto reterr;
 		}
@@ -524,7 +521,7 @@ adosfs_bmap(v)
 	}
 	while (flblk >= 0) {
 		if (flbp)
-			brelse(flbp);
+			brelse(flbp, 0);
 		if (nb == 0) {
 #ifdef DIAGNOSTIC
 			printf("adosfs: bad file list chain.\n");
@@ -533,16 +530,16 @@ adosfs_bmap(v)
 			goto reterr;
 		}
 		error = bread(ap->amp->devvp, nb * ap->amp->bsize / DEV_BSIZE,
-			      ap->amp->bsize, NOCRED, &flbp);
+			      ap->amp->bsize, NOCRED, 0, &flbp);
 		if (error) {
-			brelse(flbp);
+			brelse(flbp, 0);
 			goto reterr;
 		}
 		if (adoscksum(flbp, ap->nwords)) {
 #ifdef DIAGNOSTIC
 			printf("adosfs: blk %ld failed cksum.\n", nb);
 #endif
-			brelse(flbp);
+			brelse(flbp, 0);
 			error = EINVAL;
 			goto reterr;
 		}
@@ -571,7 +568,7 @@ adosfs_bmap(v)
 #endif
 		error = EINVAL;
 	}
-	brelse(flbp);
+	brelse(flbp, 0);
 reterr:
 #ifdef ADOSFS_DIAGNOSTIC
 	if (error == 0 && bnp)
@@ -777,7 +774,6 @@ adosfs_access(v)
 		struct vnode *a_vp;
 		int  a_mode;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *sp = v;
 	struct anode *ap;
 	struct vnode *vp = sp->a_vp;
@@ -849,16 +845,15 @@ adosfs_inactive(v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		struct lwp *a_l;
+		bool *a_recycle;
 	} */ *sp = v;
 	struct vnode *vp = sp->a_vp;
-	struct lwp *l = sp->a_l;
 #ifdef ADOSFS_DIAGNOSTIC
 	advopprint(sp);
 #endif
 	VOP_UNLOCK(vp, 0);
 	/* XXX this needs to check if file was deleted */
-	vrecycle(vp, NULL, l);
+	*sp->a_recycle = true;
 
 #ifdef ADOSFS_DIAGNOSTIC
 	printf(" 0)");
@@ -891,6 +886,7 @@ adosfs_reclaim(v)
 		free(ap->tab, M_ANODE);
 	else if (vp->v_type == VLNK && ap->slinkto)
 		free(ap->slinkto, M_ANODE);
+	genfs_node_destroy(vp);
 	pool_put(&adosfs_node_pool, ap);
 	vp->v_data = NULL;
 	return(0);

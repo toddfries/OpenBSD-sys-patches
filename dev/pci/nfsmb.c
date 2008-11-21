@@ -1,4 +1,4 @@
-/*	$NetBSD: nfsmb.c,v 1.12 2008/03/27 10:47:14 kiyohara Exp $	*/
+/*	$NetBSD: nfsmb.c,v 1.15 2008/10/15 02:21:48 pgoyette Exp $	*/
 /*
  * Copyright (c) 2007 KIYOHARA Takashi
  * All rights reserved.
@@ -26,7 +26,7 @@
  *
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfsmb.c,v 1.12 2008/03/27 10:47:14 kiyohara Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfsmb.c,v 1.15 2008/10/15 02:21:48 pgoyette Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -177,6 +177,12 @@ nfsmbc_attach(device_t parent, device_t self, void *aux)
 	nfsmbca.nfsmb_num = 2;
 	nfsmbca.nfsmb_addr = NFORCE_SMBBASE(reg);
 	sc->sc_nfsmb[1] = config_found(sc->sc_dev, &nfsmbca, nfsmbc_print);
+
+	/* This driver is similar to an ISA bridge that doesn't
+	 * need any special handling. So registering NULL handlers
+	 * are sufficent. */
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
 static int
@@ -243,6 +249,12 @@ nfsmb_attach(device_t parent, device_t self, void *aux)
 	iba.iba_type = I2C_TYPE_SMBUS;
 	iba.iba_tag = &sc->sc_i2c;
 	(void) config_found_ia(sc->sc_dev, "i2cbus", &iba, iicbus_print);
+
+	/* This driver is similar to an ISA bridge that doesn't
+	 * need any special handling. So registering NULL handlers
+	 * are sufficent. */
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
 static int
@@ -290,7 +302,7 @@ nfsmb_exec(void *cookie, i2c_op_t op, i2c_addr_t addr, const void *cmd,
 		rv = nfsmb_read_2(sc, *(const uint8_t*)cmd, addr, op, flags);
 		if (rv == -1)
 			return -1;
-		*p = (uint8_t)rv;
+		*(uint16_t *)p = (uint16_t)rv;
 		return 0;
 	}
 

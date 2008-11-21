@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_pcb.c,v 1.9 2007/10/06 02:18:39 krw Exp $	*/
+/*	$NetBSD: natm_pcb.c,v 1.9 2005/12/11 12:25:16 christos Exp $	*/
 
 /*
  *
@@ -37,6 +37,11 @@
  * from trying to use each other's VCs.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: natm_pcb.c,v 1.9 2005/12/11 12:25:16 christos Exp $");
+
+#include "opt_ddb.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/queue.h>
@@ -65,9 +70,14 @@ int wait;
 {
   struct natmpcb *npcb;
 
-  npcb = malloc(sizeof(*npcb), M_PCB, wait | M_ZERO);
+  MALLOC(npcb, struct natmpcb *, sizeof(*npcb), M_PCB, wait);
+
+#ifdef DIAGNOSTIC
+  if (wait == M_WAITOK && npcb == NULL) panic("npcb_alloc: malloc didn't wait");
+#endif
 
   if (npcb) {
+    bzero(npcb, sizeof(*npcb));
     npcb->npcb_flags = NPCB_FREE;
   }
   return(npcb);
@@ -94,7 +104,7 @@ int op;
     if (npcb->npcb_inq) {
       npcb->npcb_flags = NPCB_DRAIN;	/* flag for distruction */
     } else {
-      free(npcb, M_PCB);		/* kill it! */
+      FREE(npcb, M_PCB);		/* kill it! */
     }
   }
 
@@ -123,7 +133,8 @@ u_int8_t vpi;
    * lookup required
    */
 
-  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
+  for (cpcb = natm_pcbs.lh_first ; cpcb != NULL ;
+					cpcb = cpcb->pcblist.le_next) {
     if (ifp == cpcb->npcb_ifp && vci == cpcb->npcb_vci && vpi == cpcb->npcb_vpi)
       break;
   }
@@ -136,14 +147,14 @@ u_int8_t vpi;
     cpcb = NULL;
     goto done;					/* fail */
   }
-    
+
   /*
    * need to allocate a pcb?
    */
 
   if (npcb == NULL) {
     cpcb = npcb_alloc(M_NOWAIT);	/* could be called from lower half */
-    if (cpcb == NULL) 
+    if (cpcb == NULL)
       goto done;			/* fail */
   } else {
     cpcb = npcb;
@@ -166,7 +177,7 @@ done:
 
 #ifdef DDB
 
-int npcb_dump(void);
+int npcb_dump __P((void));
 
 int npcb_dump()
 
@@ -174,10 +185,11 @@ int npcb_dump()
   struct natmpcb *cpcb;
 
   printf("npcb dump:\n");
-  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
+  for (cpcb = natm_pcbs.lh_first ; cpcb != NULL ;
+					cpcb = cpcb->pcblist.le_next) {
     printf("if=%s, vci=%d, vpi=%d, IP=0x%x, sock=%p, flags=0x%x, inq=%d\n",
 	cpcb->npcb_ifp->if_xname, cpcb->npcb_vci, cpcb->npcb_vpi,
-	cpcb->ipaddr.s_addr, cpcb->npcb_socket, 
+	cpcb->ipaddr.s_addr, cpcb->npcb_socket,
 	cpcb->npcb_flags, cpcb->npcb_inq);
   }
   printf("done\n");

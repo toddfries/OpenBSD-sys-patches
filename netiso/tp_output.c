@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_output.c,v 1.31 2007/01/04 19:07:04 elad Exp $	*/
+/*	$NetBSD: tp_output.c,v 1.35 2008/08/06 15:01:23 plunky Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -62,7 +62,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tp_output.c,v 1.31 2007/01/04 19:07:04 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tp_output.c,v 1.35 2008/08/06 15:01:23 plunky Exp $");
 
 #include "opt_inet.h"
 #include "opt_iso.h"
@@ -104,7 +104,7 @@ __KERNEL_RCSID(0, "$NetBSD: tp_output.c,v 1.31 2007/01/04 19:07:04 elad Exp $");
  *	using the parameters passed in via (param).
  *	(cmd) may be TP_STRICT or TP_FORCE or both.
  *  Force means it will set all the values in (tpcb) to those in
- *  the input arguements iff no errors were encountered.
+ *  the input arguments iff no errors were encountered.
  *  Strict means that no inconsistency will be tolerated.  If it's
  *  not used, checksum and tpdusize inconsistencies will be tolerated.
  *  The reason for this is that in some cases, when we're negotiating down
@@ -350,10 +350,11 @@ done:
 }
 
 /*
- * NAME: 	tp_ctloutput()
+ * NAME: 	tp_ctloutput1()
  *
  * CALLED FROM:
  * 	[sg]etsockopt(), via so[sg]etopt().
+ *	via tp_ctloutput() below
  *
  * FUNCTION and ARGUMENTS:
  * 	Implements the socket options at transport level.
@@ -385,14 +386,14 @@ done:
  *
  * NOTES:
  */
-int
-tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
+static int
+tp_ctloutput1(int cmd, struct socket  *so, int level, int optname,
 	struct mbuf **mp)
 {
 	struct lwp *l = curlwp;		/* XXX */
 	struct tp_pcb  *tpcb = sototpcb(so);
 	int             s = splsoftnet();
-	caddr_t         value;
+	void *        value;
 	unsigned        val_len;
 	int             error = 0;
 
@@ -491,7 +492,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 			goto done;
 		}
 	}
-	value = mtod(*mp, caddr_t);	/* it's aligned, don't worry, but
+	value = mtod(*mp, void *);	/* it's aligned, don't worry, but
 					 * lint complains about it */
 	val_len = (*mp)->m_len;
 
@@ -534,7 +535,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 			tpcb->tp_lsuffixlen = 0;
 			tpcb->tp_state = TP_LISTENING;
 			error = 0;
-			remque(tpcb);
+			iso_remque(tpcb);
 			tpcb->tp_next = tpcb->tp_prev = tpcb;
 			tpcb->tp_nextlisten = tp_listeners;
 			tp_listeners = tpcb;
@@ -544,7 +545,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 	case TPOPT_MY_TSEL:
 		if (cmd == PRCO_GETOPT) {
 			ASSERT(tpcb->tp_lsuffixlen <= MAX_TSAP_SEL_LEN);
-			bcopy((caddr_t) tpcb->tp_lsuffix, value, tpcb->tp_lsuffixlen);
+			bcopy((void *) tpcb->tp_lsuffix, value, tpcb->tp_lsuffixlen);
 			(*mp)->m_len = tpcb->tp_lsuffixlen;
 		} else {	/* cmd == PRCO_SETOPT  */
 			if ((val_len > MAX_TSAP_SEL_LEN) || (val_len <= 0)) {
@@ -552,7 +553,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 				    val_len, (*mp));
 				error = EINVAL;
 			} else {
-				bcopy(value, (caddr_t) tpcb->tp_lsuffix, val_len);
+				bcopy(value, (void *) tpcb->tp_lsuffix, val_len);
 				tpcb->tp_lsuffixlen = val_len;
 			}
 		}
@@ -561,7 +562,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 	case TPOPT_PEER_TSEL:
 		if (cmd == PRCO_GETOPT) {
 			ASSERT(tpcb->tp_fsuffixlen <= MAX_TSAP_SEL_LEN);
-			bcopy((caddr_t) tpcb->tp_fsuffix, value, tpcb->tp_fsuffixlen);
+			bcopy((void *) tpcb->tp_fsuffix, value, tpcb->tp_fsuffixlen);
 			(*mp)->m_len = tpcb->tp_fsuffixlen;
 		} else {	/* cmd == PRCO_SETOPT  */
 			if ((val_len > MAX_TSAP_SEL_LEN) || (val_len <= 0)) {
@@ -569,7 +570,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 				    val_len, (*mp));
 				error = EINVAL;
 			} else {
-				bcopy(value, (caddr_t) tpcb->tp_fsuffix, val_len);
+				bcopy(value, (void *) tpcb->tp_fsuffix, val_len);
 				tpcb->tp_fsuffixlen = val_len;
 			}
 		}
@@ -581,7 +582,7 @@ tp_ctloutput(int cmd, struct socket  *so, int level, int optname,
 			printf("%s TPOPT_FLAGS value %p *value 0x%x, flags 0x%x \n",
 			       cmd == PRCO_GETOPT ? "GET" : "SET",
 			       value,
-			       *value,
+			       *(unsigned char *)value,
 			       tpcb->tp_flags);
 		}
 #endif
@@ -764,4 +765,41 @@ done:
 	}
 	splx(s);
 	return error;
+}
+
+/*
+ * temporary sockopt wrapper, the above needs to be worked through
+ */
+int
+tp_ctloutput(int cmd, struct socket  *so, struct sockopt *sopt)
+{
+	struct mbuf *m;
+	int err;
+
+	switch(cmd) {
+	case PRCO_SETOPT:
+		m = sockopt_getmbuf(sopt);
+		if (m == NULL) {
+			err = ENOMEM;
+			break;
+		}
+
+		err = tp_ctloutput1(cmd, so, sopt->sopt_level, sopt->sopt_name, &m);
+		break;
+
+	case PRCO_GETOPT:
+		m = NULL;
+		err = tp_ctloutput1(cmd, so, sopt->sopt_level, sopt->sopt_name, &m);
+		if (err)
+			break;
+
+		err = sockopt_setmbuf(sopt, m);
+		break;
+
+	default:
+		err = ENOPROTOOPT;
+		break;
+	}
+
+	return err;
 }

@@ -1,30 +1,6 @@
-/*	$OpenBSD: cpu.h,v 1.27 2007/05/30 17:10:44 miod Exp $ */
+/*	$NetBSD: cpu.h,v 1.42 2008/02/27 18:26:16 xtraeme Exp $	*/
 
 /*
- * Copyright (c) 1995 Theo de Raadt
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -60,79 +36,138 @@
  *
  *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
-
-#ifndef _MVME68K_CPU_H_
-#define _MVME68K_CPU_H_
-
 /*
- * Exported definitions unique to mvme68k cpu support.
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * from: Utah $Hdr: cpu.h 1.16 91/03/25$
+ *
+ *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
 
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
+
+#if defined(_KERNEL)
+
 /*
- * Get common m68k CPU definiti÷ns.
+ * Exported definitions unique to mvme68k/68k cpu support.
  */
-#define M68K_MMU_MOTOROLA
+
+#if defined(_KERNEL_OPT)
+#include "opt_lockdebug.h"
+#endif
+
+/*
+ * Get common m68k CPU definitions.
+ */
 #include <m68k/cpu.h>
+#define	M68K_MMU_MOTOROLA
 
-#ifdef _KERNEL
+#include <sys/cpu_data.h>
+struct cpu_info {
+	struct cpu_data ci_data;	/* MI per-cpu data */
+	cpuid_t	ci_cpuid;
+	int	ci_mtx_count;
+	int	ci_mtx_oldspl;
+	int	ci_want_resched;
+};
 
-/*
- * Get interrupt glue.
- */
-#include <machine/intr.h>
+extern struct cpu_info cpu_info_store;
+
+#define	curcpu()			(&cpu_info_store)
 
 /*
  * definitions of cpu-dependent requirements
  * referenced in generic code
  */
-#define	cpu_wait(p)			/* nothing */
+#define	cpu_swapin(p)			/* nothing */
+#define cpu_swapout(p)			/* nothing */
+#define	cpu_number()			0
+
+void	cpu_proc_fork(struct proc *, struct proc *);
 
 /*
  * Arguments to hardclock and gatherstats encapsulate the previous
- * machine state in an opaque clockframe.  One the m68k, we use
+ * machine state in an opaque clockframe.  One the mvme68k, we use
  * what the hardware pushes on an interrupt (frame format 0).
  */
 struct clockframe {
 	u_short	sr;		/* sr at time of interrupt */
 	u_long	pc;		/* pc at time of interrupt */
-	u_short	vo;		/* vector offset (4-word frame) */
-};
+	u_short	fmt:4,
+		vec:12;		/* vector offset (4-word frame) */
+} __attribute__((packed));
 
 #define	CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
-#if 0
-/* We would like to do it this way... */
-#define	CLKF_INTR(framep)	(((framep)->sr & PSL_M) == 0)
-#else
-/* but until we start using PSL_M, we have to do this instead */
-#define	CLKF_INTR(framep)	(0)	/* XXX */
-#endif
+
+/*
+ * The clock interrupt handler can determine if it's a nested
+ * interrupt by checking for interrupt_depth > 1.
+ * (Remember, the clock interrupt handler itself will cause the
+ * depth counter to be incremented).
+ */
+extern volatile unsigned int interrupt_depth;
+#define	CLKF_INTR(framep)	(interrupt_depth > 1)
 
 
 /*
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-extern int want_resched;
-#define	need_resched(ci)	{ want_resched = 1; aston(); }
+#define	cpu_need_resched(ci, flags)	\
+	do { ci->ci_want_resched++; aston(); } while (/* CONSTCOND */0)
 
 /*
  * Give a profiling tick to the current process when the user profiling
- * buffer pages are invalid.  On the m68k, request an ast to send us
+ * buffer pages are invalid.  On the hp300, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	aston()
+#define	cpu_need_proftick(l)	\
+	do { (l)->l_pflag |= LP_OWEUPC; aston(); } while (/* CONSTCOND */0)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	signotify(p)	aston()
+#define	cpu_signotify(l)	aston()
 
-extern int astpending;
-#define aston() (astpending = 1)
+extern int astpending;		/* need to trap before returning to user mode */
+#define aston() (astpending++)
 
-#endif	/* _KERNEL */
+#endif /* _KERNEL */
 
 /*
  * CTL_MACHDEP definitions.
@@ -140,74 +175,68 @@ extern int astpending;
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_MAXID		2	/* number of valid machdep ids */
 
-#define CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "console_device", CTLTYPE_STRUCT }, \
-}
-
 #ifdef _KERNEL
-
-extern	vaddr_t intiobase, intiolimit;
-extern	vaddr_t iiomapbase;
-extern	int iiomapsize;
-
-/* physical memory sections for mvme147 */
-#define	INTIOBASE_147	(0xfffe0000)
-#define	INTIOTOP_147	(0xfffe5000)
-#define	INTIOSIZE_147	((INTIOTOP_147-INTIOBASE_147)/NBPG)
-
-/* physical memory sections for mvme16x */
-#define	INTIOBASE_162	(0xfff00000)
-#define	INTIOTOP_162	(0xfffd0000)		/* was 0xfff50000 */
-#define	INTIOSIZE_162	((INTIOTOP_162-INTIOBASE_162)/NBPG)
+/*
+ * Associate MVME models with CPU types.
+ */
+#define	MVME68K		1	
 
 /*
- * Internal IO space (iiomapsize).
- *
- * Internal IO space is mapped in the kernel from ``intiobase'' to
- * ``intiolimit'' (defined in locore.s).  Since it is always mapped,
- * conversion between physical and kernel virtual addresses is easy.
+ * MVME-147; 68030 CPU
  */
-#define	ISIIOVA(va) \
-	((va) >= intiobase && (va) < intiolimit)
-#define	IIOV(pa)	((pa) - iiomapbase + intiobase)
-#define	IIOP(va)	((va) - intiobase + iiomapbase)
-#define	IIOPOFF(pa)	((pa) - iiomapbase)
+#if defined(MVME147) && !defined(M68030)
+#define M68030
+#endif
 
-extern int	cputyp;
-#define CPU_147			0x147
-#define CPU_162			0x162
-#define CPU_165			0x165
-#define CPU_166			0x166
-#define CPU_167			0x167
-#define CPU_172			0x172
-#define CPU_177			0x177
+/*
+ * MVME-162/166/167; 68040 CPU
+ */
+#if (defined(MVME162) || defined(MVME167)) && !defined(M68040)
+#define M68040
+#endif
 
-#include <sys/evcount.h>
+/*
+ * MVME-172/177; 68060 CPU
+ */
+#if (defined(MVME172) || defined(MVME177)) && !defined(M68060)
+#define M68060
+#endif
+#endif /* _KERNEL */
 
-struct intrhand {
-	SLIST_ENTRY(intrhand) ih_link;
-	int	(*ih_fn)(void *);
-	void	*ih_arg;
-	int	ih_ipl;
-	int	ih_wantframe;
-	struct evcount ih_count;
-};
+/*
+ * Values for machineid; these match the Bug's values.
+ */
+#define	MVME_147	0x147
+#define	MVME_162	0x162
+#define	MVME_166	0x166
+#define	MVME_167	0x167
+#define	MVME_172	0x172
+#define	MVME_177	0x177
 
-int intr_establish(int, struct intrhand *, const char *);
+#ifdef _KERNEL
+extern	int machineid;
+extern	int cpuspeed;
+extern	char *intiobase, *intiolimit;
+extern	u_int intiobase_phys, intiotop_phys;
+extern	u_long ether_data_buff_size;
+extern	u_char mvme_ea[6];
 
-#define	NVMEINTR	256
+void	doboot(int) 
+	__attribute__((__noreturn__));
+int	nmihand(void *);
+void	mvme68k_abort(const char *);
+void	*iomap(u_long, size_t);
+void	iounmap(void *, size_t);
+void	loadustp(paddr_t);
 
-/* locore.s */
-__dead void	doboot(void);
+/* physical memory addresses where mvme147's onboard devices live */
+#define	INTIOBASE147	(0xfffe0000u)
+#define	INTIOTOP147	(0xfffe5000u)
 
-int badpaddr(paddr_t, int);
-int badvaddr(vaddr_t, int);
-void nmihand(void *);
-int intr_findvec(int, int);
+/* ditto for mvme1[67][27] */
+#define	INTIOBASE1xx	(0xfff40000u)
+#define	INTIOTOP1xx	(0xfffd0000u)
 
-void dma_cachectl(caddr_t, int);
-paddr_t kvtop(vaddr_t);
+#endif /* _KERNEL */
 
-#endif	/* _KERNEL */
-#endif	/* _MVME68K_CPU_H_ */
+#endif /* _MACHINE_CPU_H_ */

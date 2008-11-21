@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.57 2006/03/17 16:06:51 uebayasi Exp $	*/
+/*	$NetBSD: machdep.c,v 1.62 2008/11/12 12:36:00 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.57 2006/03/17 16:06:51 uebayasi Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.62 2008/11/12 12:36:00 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -87,6 +80,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.57 2006/03/17 16:06:51 uebayasi Exp $"
 #include <sys/reboot.h>
 #include <sys/sysctl.h>
 #include <sys/ksyms.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -206,6 +200,8 @@ cpu_reboot(howto, bootstr)
 haltsys:
 	doshutdownhooks();
 
+	pmf_system_shutdown(boothowto);
+
 	if (howto & RB_HALT) {
 		printf("\n");
 		printf("The operating system has halted.\n");
@@ -274,7 +270,7 @@ initSH3(void *pc)	/* XXX return address */
 	/* Initialize pmap and start to address translation */
 	pmap_bootstrap();
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	ksyms_init(0, NULL, NULL);
 #endif
 

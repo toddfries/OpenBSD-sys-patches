@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_mul.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_mul.c,v 1.4 2003/08/07 16:28:11 agc Exp $ */
+/*	$NetBSD: fpu_mul.c,v 1.5 2005/12/11 12:17:52 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,12 +44,15 @@
  * Perform an FPU multiply (return x * y).
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_mul.c,v 1.5 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_arith.h>
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_arith.h"
+#include "fpu_emulate.h"
 
 /*
  * The multiplication algorithm for normal numbers is as follows:
@@ -75,7 +77,7 @@
  *
  * Since we do not have efficient multiword arithmetic, we code the
  * accumulator as four separate words, just like any other mantissa.
- * We use local variables in the hope that this may be faster
+ * We use local `register' variables in the hope that this is faster
  * than memory.  We keep x->fp_mant in locals for the same reason.
  *
  * In the algorithm above, the bits in y are inspected one at a time.
@@ -98,11 +100,11 @@
  */
 struct fpn *
 fpu_mul(fe)
-	struct fpemu *fe;
+	register struct fpemu *fe;
 {
-	struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
-	u_int a2, a1, a0, x2, x1, x0, bit, m;
-	int sticky;
+	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
+	register u_int a2, a1, a0, x2, x1, x0, bit, m;
+	register int sticky;
 	FPU_DECL_CARRY
 
 	/*

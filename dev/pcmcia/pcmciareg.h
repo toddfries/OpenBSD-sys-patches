@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcmciareg.h,v 1.6 2003/06/26 00:35:07 mickey Exp $	*/
-/*	$NetBSD: pcmciareg.h,v 1.6 1998/08/13 15:00:02 nathanw Exp $	*/
+/*	$NetBSD: pcmciareg.h,v 1.10 2005/12/11 12:23:23 christos Exp $	*/
 
 /*
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -59,8 +58,16 @@
 #define	PCMCIA_DSPEED_150NS					0x03
 #define	PCMCIA_DSPEED_100NS					0x04
 #define	PCMCIA_DSPEED_EXT					0x07
+
+/*
+ * the 2.1 docs have 0x02-0x07 as reserved, but the linux drivers list the
+ * follwing tuple code values.  I have at least one card (3com 3c562
+ * lan+modem) which has a code 0x06 tuple, so I'm going to assume that these
+ * are for real
+ */
+
 #define	PCMCIA_CISTPL_LONGLINK_CB		0x02
-#define	PCMCIA_CISTPL_INDIRECT			0x03
+#define	PCMCIA_CISTPL_INDIRECT		0x03
 #define	PCMCIA_CISTPL_CONFIG_CB			0x04
 #define	PCMCIA_CISTPL_CFTABLE_ENTRY_CB		0x05
 #define	PCMCIA_CISTPL_LONGLINK_MFC		0x06
@@ -68,8 +75,7 @@
 #define	PCMCIA_MFC_MEM_COMMON				0x01
 #define	PCMCIA_CISTPL_BAR			0x07
 #define	PCMCIA_CISTPL_PWR_MGMNT			0x08
-#define	PCMCIA_CISTPL_EXTDEVICE			0x09
-/* #define	PCMCIA_CISTPL_RESERVED		0x0A-0x0F */
+
 #define	PCMCIA_CISTPL_CHECKSUM			0x10
 #define	PCMCIA_CISTPL_LONGLINK_A		0x11
 #define	PCMCIA_CISTPL_LONGLINK_C		0x12
@@ -165,7 +171,6 @@
 #define	PCMCIA_FUNCTION_SCSI		8
 #define	PCMCIA_FUNCTION_SECURITY	9
 #define	PCMCIA_FUNCTION_INSTRUMENT	10
-#define	PCMCIA_FUNCTION_IOBUS		11
 #define	PCMCIA_CISTPL_FUNCE			0x22
 #define	PCMCIA_TPLFE_TYPE_LAN_TECH			0x01
 #define	PCMCIA_TPLFE_TYPE_LAN_SPEED			0x02
@@ -186,7 +191,7 @@
 #define	PCMCIA_CISTPL_BYTEORDER			0x43
 #define	PCMCIA_CISTPL_DATE			0x44
 #define	PCMCIA_CISTPL_BATTERY			0x45
-#define	PCMCIA_CISTPL_FORMAT_A			0x47
+#define	PCMCIA_CISTPL_FORAMT_A			0x47
 
 /* Layer 3 Data Organization Tuples */
 
@@ -203,14 +208,14 @@
  * Card Configuration Registers
  */
 
-#define	PCMCIA_CCR_OPTION			0x00
+#define	PCMCIA_CCR_OPTION			0
 #define	PCMCIA_CCR_OPTION_SRESET			0x80
 #define	PCMCIA_CCR_OPTION_LEVIREQ			0x40
 #define	PCMCIA_CCR_OPTION_CFINDEX			0x3F
 #define	PCMCIA_CCR_OPTION_IREQ_ENABLE			0x04
 #define	PCMCIA_CCR_OPTION_ADDR_DECODE			0x02
 #define	PCMCIA_CCR_OPTION_FUNC_ENABLE			0x01
-#define	PCMCIA_CCR_STATUS			0x02
+#define	PCMCIA_CCR_STATUS			1
 #define	PCMCIA_CCR_STATUS_PINCHANGED			0x80
 #define	PCMCIA_CCR_STATUS_SIGCHG			0x40
 #define	PCMCIA_CCR_STATUS_IOIS8				0x20
@@ -219,7 +224,7 @@
 #define	PCMCIA_CCR_STATUS_PWRDWN			0x04
 #define	PCMCIA_CCR_STATUS_INTR				0x02
 #define	PCMCIA_CCR_STATUS_INTRACK			0x01
-#define	PCMCIA_CCR_PIN				0x04
+#define	PCMCIA_CCR_PIN				2
 #define	PCMCIA_CCR_PIN_CBVD1				0x80
 #define	PCMCIA_CCR_PIN_CBVD2				0x40
 #define	PCMCIA_CCR_PIN_CRDYBSY				0x20
@@ -228,16 +233,16 @@
 #define	PCMCIA_CCR_PIN_RBVD2				0x04
 #define	PCMCIA_CCR_PIN_RRDYBSY				0x02
 #define	PCMCIA_CCR_PIN_RWPROT				0x01
-#define	PCMCIA_CCR_SOCKETCOPY			0x06
+#define	PCMCIA_CCR_SOCKETCOPY			3
 #define	PCMCIA_CCR_SOCKETCOPY_RESERVED			0x80
 #define	PCMCIA_CCR_SOCKETCOPY_COPY_MASK			0x70
 #define	PCMCIA_CCR_SOCKETCOPY_COPY_SHIFT		4
 #define	PCMCIA_CCR_SOCKETCOPY_SOCKET_MASK		0x0F
-#define	PCMCIA_CCR_EXTSTATUS			0x08
-#define	PCMCIA_CCR_IOBASE0			0x0A
-#define	PCMCIA_CCR_IOBASE1			0x0C
-#define	PCMCIA_CCR_IOBASE2			0x0E
-#define	PCMCIA_CCR_IOBASE3			0x10
-#define	PCMCIA_CCR_IOSIZE			0x12
+#define PCMCIA_CCR_EXTSTATUS			4
+#define	PCMCIA_CCR_IOBASE0			5
+#define	PCMCIA_CCR_IOBASE1			6
+#define	PCMCIA_CCR_IOBASE2			7
+#define	PCMCIA_CCR_IOBASE3			8
+#define	PCMCIA_CCR_IOLIMIT			9
 
 #define	PCMCIA_CCR_SIZE				0x14

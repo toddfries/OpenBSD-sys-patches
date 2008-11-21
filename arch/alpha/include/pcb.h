@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.8 2005/10/30 20:55:50 miod Exp $	*/
-/*	$NetBSD: pcb.h,v 1.5 1996/11/13 22:21:00 cgd Exp $	*/
+/* $NetBSD: pcb.h,v 1.18 2008/01/04 21:47:20 ad Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,7 +28,13 @@
  */
 
 #ifndef _ALPHA_PCB_H_
-#define _ALPHA_PCB_H_
+#define	_ALPHA_PCB_H_
+
+#ifdef _KERNEL_OPT
+#include "opt_multiprocessor.h"
+#endif
+
+#include <sys/simplelock.h>
 
 #include <machine/frame.h>
 #include <machine/reg.h>
@@ -51,11 +56,21 @@
  */
 struct pcb {
 	struct alpha_pcb pcb_hw;		/* PALcode defined */
-	unsigned long	pcb_context[9];		/* s[0-6], ra, ps	[SW] */
+	unsigned long	pcb_context[8];		/* s[0-6], ra		[SW] */
 	struct fpreg	pcb_fp;			/* FP registers		[SW] */
 	unsigned long	pcb_onfault;		/* for copy faults	[SW] */
-	struct cpu_info *__volatile pcb_fpcpu;	/* CPU with our FP state[SW] */
+	unsigned long	pcb_accessaddr;		/* for [fs]uswintr	[SW] */
+	struct cpu_info * volatile pcb_fpcpu;	/* CPU with our FP state[SW] */
+	struct simplelock pcb_fpcpu_slock;	/* simple lock on fpcpu [SW] */
 };
+
+/*
+ * MULTIPROCESSOR:
+ * Need to block IPIs while holding the fpcpu_slock.  That is the
+ * responsibility of the CALLER!
+ */
+#define	FPCPU_LOCK(pcb)		simple_lock(&(pcb)->pcb_fpcpu_slock)
+#define	FPCPU_UNLOCK(pcb)	simple_unlock(&(pcb)->pcb_fpcpu_slock)
 
 /*
  * The pcb is augmented with machine-dependent additional data for
@@ -66,9 +81,4 @@ struct md_coredump {
 	struct	trapframe md_tf;
 	struct	fpreg md_fpstate;
 };
-
-#ifdef _KERNEL
-void savectx(struct pcb *);
-#endif
-
 #endif /* _ALPHA_PCB_H_ */

@@ -1,8 +1,6 @@
-/*	$OpenBSD: ext2fs_dinode.h,v 1.10 2005/10/06 17:51:27 pedro Exp $	*/
-/*	$NetBSD: ext2fs_dinode.h,v 1.6 2000/01/26 16:21:33 bouyer Exp $	*/
+/*	$NetBSD: ext2fs_dinode.h,v 1.16 2007/11/17 08:51:51 tsutsui Exp $	*/
 
 /*
- * Copyright (c) 1997 Manuel Bouyer.
  * Copyright (c) 1982, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -39,6 +37,41 @@
  *  Modified for ext2fs by Manuel Bouyer.
  */
 
+/*
+ * Copyright (c) 1997 Manuel Bouyer.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	@(#)dinode.h	8.6 (Berkeley) 9/13/94
+ *  Modified for ext2fs by Manuel Bouyer.
+ */
+
+#ifndef _UFS_EXT2FS_EXT2FS_DINODE_H_
+#define _UFS_EXT2FS_EXT2FS_DINODE_H_
+
 #include <sys/stat.h>
 
 /*
@@ -47,8 +80,9 @@
  * the root inode is 2.
  * Inode 3 to 10 are reserved in ext2fs.
  */
-#define	EXT2_ROOTINO ((ino_t)2)
-#define EXT2_FIRSTINO ((ino_t)11)
+#define	EXT2_ROOTINO	((ino_t)2)
+#define	EXT2_RESIZEINO	((ino_t)7)
+#define	EXT2_FIRSTINO	((ino_t)11)
 
 /*
  * A dinode contains all the meta-data associated with a UFS file.
@@ -64,13 +98,13 @@
 
 struct ext2fs_dinode {
 	u_int16_t	e2di_mode;	/*   0: IFMT, permissions; see below. */
-	u_int16_t	e2di_uid_low;	/*   2: Owner UID, lowest bits */
+	u_int16_t	e2di_uid;	/*   2: Owner UID */
 	u_int32_t	e2di_size;	/*	 4: Size (in bytes) */
-	u_int32_t	e2di_atime;	/*	 8: Access time */
+	u_int32_t	e2di_atime;	/*	 8: Acces time */
 	u_int32_t	e2di_ctime;	/*	12: Create time */
 	u_int32_t	e2di_mtime;	/*	16: Modification time */
 	u_int32_t	e2di_dtime;	/*	20: Deletion time */
-	u_int16_t	e2di_gid_low;	/*  24: Owner GID, lowest bits */
+	u_int16_t	e2di_gid;	/*  24: Owner GID */
 	u_int16_t	e2di_nlink;	/*  26: File link count */
 	u_int32_t	e2di_nblock;	/*  28: Blocks count */
 	u_int32_t	e2di_flags;	/*  32: Status flags (chflags) */
@@ -83,16 +117,16 @@ struct ext2fs_dinode {
 	u_int8_t	e2di_nfrag;	/* 116: fragment number */
 	u_int8_t	e2di_fsize;	/* 117: fragment size */
 	u_int16_t	e2di_linux_reserved2; /* 118 */
-	u_int16_t	e2di_uid_high;	/* 120: 16 highest bits of uid */
-	u_int16_t	e2di_gid_high;	/* 122: 16 highest bits of gid */
-	u_int32_t	e2di_linux_reserved3; /* 124 */
+	u_int32_t	e2di_linux_reserved3[2]; /* 120 */
 };
+
+
 
 #define	E2MAXSYMLINKLEN	((NDADDR + NIADDR) * sizeof(u_int32_t))
 
 /* File permissions. */
 #define	EXT2_IEXEC		0000100		/* Executable. */
-#define	EXT2_IWRITE		0000200		/* Writeable. */
+#define	EXT2_IWRITE		0000200		/* Writable. */
 #define	EXT2_IREAD		0000400		/* Readable. */
 #define	EXT2_ISVTX		0001000		/* Sticky bit. */
 #define	EXT2_ISGID		0002000		/* Set-gid. */
@@ -113,8 +147,8 @@ struct ext2fs_dinode {
 #define EXT2_UNRM		0x00000002	/* Undelete */
 #define EXT2_COMPR		0x00000004	/* Compress file */
 #define EXT2_SYNC		0x00000008	/* Synchronous updates */
-#define EXT2_IMMUTABLE	0x00000010	/* Immutable file */
-#define EXT2_APPEND		0x00000020	/* writes to file may only append */
+#define EXT2_IMMUTABLE		0x00000010	/* Immutable file */
+#define EXT2_APPEND		0x00000020 /* writes to file may only append */
 #define EXT2_NODUMP		0x00000040	/* do not dump file */
 
 /* Size of on-disk inode. */
@@ -129,14 +163,18 @@ struct ext2fs_dinode {
  */
 
 #define e2di_rdev		e2di_blocks[0]
-#define e2di_shortlink	e2di_blocks
+#define e2di_shortlink		e2di_blocks
 
 /* e2fs needs byte swapping on big-endian systems */
 #if BYTE_ORDER == LITTLE_ENDIAN
-#	define e2fs_iload(old, new) memcpy((new),(old),sizeof(struct ext2fs_dinode))
-#	define e2fs_isave(old, new) memcpy((new),(old),sizeof(struct ext2fs_dinode))
+#	define e2fs_iload(old, new)	\
+		memcpy((new),(old),sizeof(struct ext2fs_dinode))
+#	define e2fs_isave(old, new)	\
+		memcpy((new),(old),sizeof(struct ext2fs_dinode))
 #else
 void e2fs_i_bswap(struct ext2fs_dinode *, struct ext2fs_dinode *);
 #	define e2fs_iload(old, new) e2fs_i_bswap((old), (new))
 #	define e2fs_isave(old, new) e2fs_i_bswap((old), (new))
 #endif
+
+#endif /* !_UFS_EXT2FS_EXT2FS_DINODE_H_ */

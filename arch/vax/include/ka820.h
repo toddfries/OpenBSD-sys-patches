@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka820.h,v 1.5 2003/06/02 23:27:57 millert Exp $	*/
-/*	$NetBSD: ka820.h,v 1.3 2000/01/24 02:40:32 matt Exp $	*/
+/*	$NetBSD: ka820.h,v 1.9 2008/03/11 05:34:02 matt Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.
  * All rights reserved.
@@ -35,8 +34,10 @@
  */
 
 /*
- * Definitions specific to the ka820 cpu.
+ * Definitions specific to the ka820 CPU.
  */
+#ifndef _VAX_KA820_H_
+#define _VAX_KA820_H_
 
 /*
  * Device addresses.
@@ -89,6 +90,7 @@
 
 /* interrupt vectors unique for this CPU */
 #define	KA820_INT_RXCD		0x58
+#define KA820_INT_IPINTR	0x80
 
 /* what the heck */
 #define KA820PORT_BITS \
@@ -137,4 +139,6 @@ struct ka820clock {
 };
 
 void	crxintr(void *arg);
-#endif
+#endif /* _LOCORE */
+
+#endif /* _VAX_KA820_H_ */

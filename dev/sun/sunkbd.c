@@ -1,8 +1,17 @@
-/*	$OpenBSD: sunkbd.c,v 1.21 2005/11/11 16:44:51 miod Exp $	*/
+/*	$NetBSD: sunkbd.c,v 1.27 2008/03/29 19:15:36 tsutsui Exp $	*/
 
 /*
- * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
- * All rights reserved.
+ * Copyright (c) 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This software was developed by the Computer Systems Engineering group
+ * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
+ * contributed to Berkeley.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Lawrence Berkeley Laboratory.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,240 +21,289 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
- * Effort sponsored in part by the Defense Advanced Research Projects
- * Agency (DARPA) and Air Force Research Laboratory, Air Force
- * Materiel Command, USAF, under agreement number F30602-01-2-0537.
+ *	@(#)kbd.c	8.2 (Berkeley) 10/30/93
+ */
+
+/*
+ * /dev/kbd lower layer for sun keyboard off a tty (line discipline).
+ * This driver uses kbdsun middle layer to hook up to /dev/kbd.
+ */
+
+/*
+ * Keyboard interface line discipline.
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sunkbd.c,v 1.27 2008/03/29 19:15:36 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/timeout.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/signalvar.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include <sys/syslog.h>
+#include <sys/fcntl.h>
+#include <sys/tty.h>
 
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wskbdvar.h>
+#include <dev/cons.h>
+#include <machine/vuid_event.h>
+#include <machine/kbd.h>
+#include <dev/sun/event_var.h>
+#include <dev/sun/kbd_xlate.h>
+#include <dev/sun/kbdvar.h>
+#include <dev/sun/kbdsunvar.h>
+#include <dev/sun/kbd_ms_ttyvar.h>
 
-#include <dev/sun/sunkbdreg.h>
-#include <dev/sun/sunkbdvar.h>
+/****************************************************************
+ * Interface to the lower layer (ttycc)
+ ****************************************************************/
 
-#ifdef __sparc64__
-#define	NTCTRL 0
-#else
-#include "tctrl.h"
+static int	sunkbd_match(device_t, cfdata_t, void *);
+static void	sunkbd_attach(device_t, device_t, void *);
+static void	sunkbd_write_data(struct kbd_sun_softc *, int);
+static int	sunkbdiopen(device_t, int mode);
+
+#if NWSKBD > 0
+void kbd_wskbd_attach(struct kbd_softc *k, int isconsole);
 #endif
 
-#if NTCTRL > 0
-#include <sparc/dev/tctrlvar.h>		/* XXX for tadpole_bell() */
-#endif
+int	sunkbdinput(int, struct tty *);
+int	sunkbdstart(struct tty *);
 
-void	sunkbd_bell(struct sunkbd_softc *, u_int, u_int, u_int);
-int	sunkbd_enable(void *, int);
-int	sunkbd_getleds(struct sunkbd_softc *);
-int	sunkbd_ioctl(void *, u_long, caddr_t, int, struct proc *);
-void	sunkbd_setleds(void *, int);
+/* Default keyboard baud rate */
+int	sunkbd_bps = KBD_DEFAULT_BPS;
 
-struct wskbd_accessops sunkbd_accessops = {
-	sunkbd_enable,
-	sunkbd_setleds,
-	sunkbd_ioctl
+CFATTACH_DECL_NEW(kbd_tty, sizeof(struct kbd_sun_softc),
+    sunkbd_match, sunkbd_attach, NULL, NULL);
+
+struct linesw sunkbd_disc = {
+	.l_name = "sunkbd",
+	.l_open = ttylopen,
+	.l_close = ttylclose,
+	.l_read = ttyerrio,
+	.l_write = ttyerrio,
+	.l_ioctl = ttynullioctl,
+	.l_rint = sunkbdinput,
+	.l_start = sunkbdstart,
+	.l_modem = nullmodem,
+	.l_poll = ttpoll
 };
 
-void
-sunkbd_bell(struct sunkbd_softc *sc, u_int period, u_int pitch, u_int volume)
-{
-	int ticks, s;
-	u_int8_t c = SKBD_CMD_BELLON;
 
-#if NTCTRL > 0
-	if (tadpole_bell(period / 10, pitch, volume) != 0)
+/*
+ * sunkbd_match: how is this tty channel configured?
+ */
+int
+sunkbd_match(device_t parent, cfdata_t cf, void *aux)
+{
+	struct kbd_ms_tty_attach_args *args = aux;
+
+	if (strcmp(args->kmta_name, "keyboard") == 0)
+		return 1;
+
+	return 0;
+}
+
+void
+sunkbd_attach(device_t parent, device_t self, void *aux)
+{
+	struct kbd_sun_softc *k = device_private(self);
+	struct kbd_ms_tty_attach_args *args = aux;
+	struct tty *tp = args->kmta_tp;
+	struct cons_channel *cc;
+
+	k->k_kbd.k_dev = self;
+
+	/* Set up the proper line discipline. */
+	if (ttyldisc_attach(&sunkbd_disc) != 0)
+		panic("sunkbd_attach: sunkbd_disc");
+	ttyldisc_release(tp->t_linesw);
+	tp->t_linesw = ttyldisc_lookup(sunkbd_disc.l_name);
+	KASSERT(tp->t_linesw == &sunkbd_disc);
+	tp->t_oflag &= ~OPOST;
+	tp->t_dev = args->kmta_dev;
+
+	/* link the structures together. */
+	k->k_priv = tp;
+	tp->t_sc = k;
+
+	/* provide our middle layer with a link to the lower layer (i.e. us) */
+	k->k_deviopen = sunkbdiopen;
+	k->k_deviclose = NULL;
+	k->k_write_data = sunkbd_write_data;
+
+	/* provide upper layer with a link to our middle layer */
+	k->k_kbd.k_ops = &kbd_ops_sun;
+
+	/* alloc console input channel */
+	if ((cc = kbd_cc_alloc(&k->k_kbd)) == NULL)
 		return;
+
+	if (args->kmta_consdev) {
+		char magic[4];
+
+		/*
+		 * Hookup ourselves as the console input channel
+		 */
+		args->kmta_baud = sunkbd_bps;
+		args->kmta_cflag = CLOCAL|CS8;
+		cons_attach_input(cc, args->kmta_consdev);
+
+		/* Tell our parent what the console should be. */
+		args->kmta_consdev = cn_tab;
+		k->k_kbd.k_isconsole = 1;
+		aprint_normal(" (console input)");
+
+		/* Set magic to "L1-A" */
+		magic[0] = KBD_L1;
+		magic[1] = KBD_A;
+		magic[2] = 0;
+		cn_set_magic(magic);
+	} else {
+		extern void kd_attach_input(struct cons_channel *);
+
+		kd_attach_input(cc);
+	}
+
+
+	aprint_normal("\n");
+
+#if NWSKBD > 0
+	kbd_wskbd_attach(&k->k_kbd, args->kmta_consdev != NULL);
 #endif
 
-	s = spltty();
-	if (sc->sc_bellactive) {
-		if (sc->sc_belltimeout == 0)
-			timeout_del(&sc->sc_bellto);
-	}
-	if (pitch == 0 || period == 0) {
-		sunkbd_bellstop(sc);
-		splx(s);
-		return;
-	}
-	if (sc->sc_bellactive == 0) {
-		ticks = (period * hz) / 1000;
-		if (ticks <= 0)
-			ticks = 1;
+	/* Do this before any calls to kbd_rint(). */
+	kbd_xlate_init(&k->k_kbd.k_state);
 
-		sc->sc_bellactive = 1;
-		sc->sc_belltimeout = 1;
-		(*sc->sc_sendcmd)(sc, &c, 1);
-		timeout_add(&sc->sc_bellto, ticks);
-	}
-	splx(s);
+	/* Magic sequence. */
+	k->k_magic1 = KBD_L1;
+	k->k_magic2 = KBD_A;
 }
 
-void
-sunkbd_bellstop(void *v)
-{
-	struct sunkbd_softc *sc = v;
-	int s;
-	u_int8_t c;
-
-	s = spltty();
-	sc->sc_belltimeout = 0;
-	c = SKBD_CMD_BELLOFF;
-	(*sc->sc_sendcmd)(v, &c, 1);
-	sc->sc_bellactive = 0;
-	splx(s);
-}
-
-void
-sunkbd_decode(u_int8_t c, u_int *type, int *value)
-{
-	switch (c) {
-	case SKBD_RSP_IDLE:
-		*type = WSCONS_EVENT_ALL_KEYS_UP;
-		*value = 0;
-		break;
-	default:
-		*type = (c & 0x80) ?
-		    WSCONS_EVENT_KEY_UP : WSCONS_EVENT_KEY_DOWN;
-		*value = c & 0x7f;
-		break;
-	}
-}
-
+/*
+ * Internal open routine.  This really should be inside com.c
+ * But I'm putting it here until we have a generic internal open
+ * mechanism.
+ */
 int
-sunkbd_enable(void *v, int on)
+sunkbdiopen(device_t dev, int flags)
 {
+	struct kbd_sun_softc *k = device_private(dev);
+	struct tty *tp = k->k_priv;
+	struct lwp *l = curlwp ? curlwp : &lwp0;
+	struct termios t;
+	int error;
+
+	/* Open the lower device */
+	if ((error = cdev_open(tp->t_dev, O_NONBLOCK|flags,
+				     0/* ignored? */, l)) != 0)
+		return (error);
+
+	/* Now configure it for the console. */
+	tp->t_ospeed = 0;
+	t.c_ispeed = sunkbd_bps;
+	t.c_ospeed = sunkbd_bps;
+	t.c_cflag =  CLOCAL|CS8;
+	(*tp->t_param)(tp, &t);
+
 	return (0);
 }
 
+/*
+ * TTY interface to handle input.
+ */
 int
-sunkbd_getleds(struct sunkbd_softc *sc)
+sunkbdinput(int c, struct tty *tp)
 {
-	return (sc->sc_leds);
-}
+	struct kbd_sun_softc *k = tp->t_sc;
+	u_char *cc;
+	int error;
 
-int
-sunkbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
-{
-	struct sunkbd_softc *sc = v;
-	int *d_int = (int *)data;
-	struct wskbd_bell_data *d_bell = (struct wskbd_bell_data *)data;
+	cc = tp->t_cc;
 
-	switch (cmd) {
-	case WSKBDIO_GTYPE:
-		if (ISTYPE5(sc->sc_layout)) {
-			*d_int = WSKBD_TYPE_SUN5;
-		} else {
-			*d_int = WSKBD_TYPE_SUN;
+	/*
+	 * Handle exceptional conditions (break, parity, framing).
+	 */
+	if ((error = ((c & TTY_ERRORMASK))) != 0) {
+		/*
+		 * After garbage, flush pending input, and
+		 * send a reset to resync key translation.
+		 */
+		log(LOG_ERR, "%s: input error (0x%x)\n",
+		    device_xname(k->k_kbd.k_dev), c);
+		c &= TTY_CHARMASK;
+		if (!k->k_txflags & K_TXBUSY) {
+			ttyflush(tp, FREAD | FWRITE);
+			goto send_reset;
 		}
-		return (0);
-	case WSKBDIO_SETLEDS:
-		sunkbd_setleds(sc, *d_int);
-		return (0);
-	case WSKBDIO_GETLEDS:
-		*d_int = sunkbd_getleds(sc);
-		return (0);
-	case WSKBDIO_COMPLEXBELL:
-		sunkbd_bell(sc, d_bell->period, d_bell->pitch, d_bell->volume);
-		return (0);
 	}
 
-	return (-1);
-}
-
-void
-sunkbd_raw(struct sunkbd_softc *sc, u_int8_t c)
-{
-	int claimed = 0;
-
-	if (sc->sc_kbdstate == SKBD_STATE_LAYOUT) {
-		sc->sc_kbdstate = SKBD_STATE_GETKEY;
-		sc->sc_layout = c;
-		return;
+	/*
+	 * Check for input buffer overflow
+	 */
+	if (tp->t_rawq.c_cc + tp->t_canq.c_cc >= TTYHOG) {
+		log(LOG_ERR, "%s: input overrun\n",
+		    device_xname(k->k_kbd.k_dev));
+		goto send_reset;
 	}
 
-	switch (c) {
-	case SKBD_RSP_RESET:
-		sc->sc_kbdstate = SKBD_STATE_RESET;
-		claimed = 1;
-		break;
-	case SKBD_RSP_LAYOUT:
-		sc->sc_kbdstate = SKBD_STATE_LAYOUT;
-		claimed = 1;
-		break;
-	case SKBD_RSP_IDLE:
-		sc->sc_kbdstate = SKBD_STATE_GETKEY;
-		claimed = 1;
-	}
+	/* Pass this up to the "middle" layer. */
+	return(kbd_sun_input(k, c));
 
-	if (claimed)
-		return;
+send_reset:
+	/* Send a reset to resync translation. */
+	kbd_sun_output(k, KBD_CMD_RESET);
+	return (ttstart(tp));
 
-	switch (sc->sc_kbdstate) {
-	case SKBD_STATE_RESET:
-		sc->sc_kbdstate = SKBD_STATE_GETKEY;
-		if (c < KB_SUN2 || c > KB_SUN4)
-			printf("%s: reset: invalid keyboard type 0x%02x\n",
-			    sc->sc_dev.dv_xname, c);
-		else
-			sc->sc_id = c;
-		break;
-	case SKBD_STATE_GETKEY:
-		break;
-	}
 }
 
 int
-sunkbd_setclick(struct sunkbd_softc *sc, int click)
+sunkbdstart(struct tty *tp)
 {
-	u_int8_t c;
+	struct kbd_sun_softc *k = tp->t_sc;
 
-	/* Type 2 keyboards do not support keyclick */
-	if (sc->sc_id == KB_SUN2)
-		return (ENXIO);
-
-	c = click ? SKBD_CMD_CLICKON : SKBD_CMD_CLICKOFF;
-	(*sc->sc_sendcmd)(sc, &c, 1);
+	/*
+	 * Transmit done.  Try to send more, or
+	 * clear busy and wakeup drain waiters.
+	 */
+	k->k_txflags &= ~K_TXBUSY;
+	kbd_sun_start_tx(k);
+	ttstart(tp);
 	return (0);
 }
-
+/*
+ * used by kbd_sun_start_tx();
+ */
 void
-sunkbd_setleds(void *v, int wled)
+sunkbd_write_data(struct kbd_sun_softc *k, int c)
 {
-	struct sunkbd_softc *sc = v;
-	u_int8_t sled = 0;
-	u_int8_t cmd[2];
+	struct tty *tp = k->k_priv;
 
-	sc->sc_leds = wled;
-
-	if (wled & WSKBD_LED_CAPS)
-		sled |= SKBD_LED_CAPSLOCK;
-	if (wled & WSKBD_LED_NUM)
-		sled |= SKBD_LED_NUMLOCK;
-	if (wled & WSKBD_LED_SCROLL)
-		sled |= SKBD_LED_SCROLLLOCK;
-	if (wled & WSKBD_LED_COMPOSE)
-		sled |= SKBD_LED_COMPOSE;
-
-	cmd[0] = SKBD_CMD_SETLED;
-	cmd[1] = sled;
-	(*sc->sc_sendcmd)(sc, cmd, sizeof(cmd));
+	mutex_spin_enter(&tty_lock);
+	ttyoutput(c, tp);
+	ttstart(tp);
+	mutex_spin_exit(&tty_lock);
 }

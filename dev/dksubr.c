@@ -1,7 +1,7 @@
-/* $NetBSD: dksubr.c,v 1.31 2007/07/29 12:50:18 ad Exp $ */
+/* $NetBSD: dksubr.c,v 1.37 2008/04/28 20:23:46 martin Exp $ */
 
 /*-
- * Copyright (c) 1996, 1997, 1998, 1999, 2002 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997, 1998, 1999, 2002, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dksubr.c,v 1.31 2007/07/29 12:50:18 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dksubr.c,v 1.37 2008/04/28 20:23:46 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -77,7 +70,7 @@ int	dkdebug = 0;
 static void	dk_makedisklabel(struct dk_intf *, struct dk_softc *);
 
 void
-dk_sc_init(struct dk_softc *dksc, void *osc, char *xname)
+dk_sc_init(struct dk_softc *dksc, void *osc, const char *xname)
 {
 
 	memset(dksc, 0x0, sizeof(*dksc));
@@ -637,7 +630,7 @@ dk_lookup(const char *path, struct lwp *l, struct vnode **vpp,
 	if (l == NULL)
 		return ESRCH;	/* Is ESRCH the best choice? */
 
-	NDINIT(&nd, LOOKUP, FOLLOW, segflg, path, l);
+	NDINIT(&nd, LOOKUP, FOLLOW, segflg, path);
 	if ((error = vn_open(&nd, FREAD | FWRITE, 0)) != 0) {
 		DPRINTF((DKDB_FOLLOW|DKDB_INIT),
 		    ("dk_lookup: vn_open error = %d\n", error));
@@ -645,7 +638,7 @@ dk_lookup(const char *path, struct lwp *l, struct vnode **vpp,
 	}
 
 	vp = nd.ni_vp;
-	if ((error = VOP_GETATTR(vp, &va, l->l_cred, l)) != 0) {
+	if ((error = VOP_GETATTR(vp, &va, l->l_cred)) != 0) {
 		DPRINTF((DKDB_FOLLOW|DKDB_INIT),
 		    ("dk_lookup: getattr error = %d\n", error));
 		goto out;
@@ -657,12 +650,6 @@ dk_lookup(const char *path, struct lwp *l, struct vnode **vpp,
 		goto out;
 	}
 
-	/* XXX: wedges have a writecount of 1; this is disgusting */
-	if (vp->v_usecount > 1 + (major(va.va_rdev) == 168)) {
-		error = EBUSY;
-		goto out;
-	}
-
 	IFDEBUG(DKDB_VNODE, vprint("dk_lookup: vnode info", vp));
 
 	VOP_UNLOCK(vp, 0);
@@ -670,6 +657,6 @@ dk_lookup(const char *path, struct lwp *l, struct vnode **vpp,
 	return 0;
 out:
 	VOP_UNLOCK(vp, 0);
-	(void) vn_close(vp, FREAD | FWRITE, l->l_cred, l);
+	(void) vn_close(vp, FREAD | FWRITE, l->l_cred);
 	return error;
 }

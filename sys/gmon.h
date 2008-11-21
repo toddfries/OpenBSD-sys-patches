@@ -1,5 +1,4 @@
-/*	$OpenBSD: gmon.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: gmon.h,v 1.5 1996/04/09 20:55:30 cgd Exp $	*/
+/*	$NetBSD: gmon.h,v 1.9 2006/10/04 14:22:58 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1992, 1993
@@ -58,7 +57,9 @@ struct gmonhdr {
 /*
  * fraction of text space to allocate for histogram counters here, 1/2
  */
+#ifndef HISTFRACTION
 #define	HISTFRACTION	2
+#endif	/* HISTFRACTION */
 
 /*
  * Fraction of text space to allocate for from hash buckets.
@@ -113,12 +114,6 @@ struct rawarc {
 	u_long	raw_selfpc;
 	long	raw_count;
 };
-
-/*
- * general rounding functions.
- */
-#define ROUNDDOWN(x,y)	(((x)/(y))*(y))
-#define ROUNDUP(x,y)	((((x)+(y)-1)/(y))*(y))
 
 /*
  * The profiling data structures are housed in this structure.

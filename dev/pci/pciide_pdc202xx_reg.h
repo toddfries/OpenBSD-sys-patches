@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_pdc202xx_reg.h,v 1.14 2006/06/24 07:51:30 jsg Exp $	*/
-/*	$NetBSD: pciide_pdc202xx_reg.h,v 1.5 2001/07/05 08:38:27 toshii Exp $ */
+/*	$NetBSD: pciide_pdc202xx_reg.h,v 1.14 2007/12/25 18:33:42 perry Exp $ */
 
 /*
  * Copyright (c) 1999 Manuel Bouyer.
@@ -15,9 +14,8 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,9 +29,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
-#ifndef _DEV_PCI_PCIIDE_PDC202XX_REG_H_
-#define _DEV_PCI_PCIIDE_PDC202XX_REG_H_
 
 /*
  * Registers definitions for PROMISE PDC20246/PDC20262 PCI IDE controller.
@@ -94,8 +89,9 @@
 #define PDC2xx_SCR_FLOAT	0x08000000
 #define PDC2xx_SCR_RSET		0x10000000
 #define PDC2xx_SCR_TST		0x20000000
-/* Values for "General Purpose Register" (PDC20262 only) */
+/* Values for "General Purpose Register" (PDC2026{2|5} only) */
 #define PDC262_SCR_GEN_LAT	0x20
+#define PDC265_SCR_GEN_LAT	0x03
 
 /* ATAPI port ((PDC20262 only) (4 bytes) */
 #define PDC262_ATAPI(chan) (0x20 + (4 * (chan)))
@@ -108,78 +104,18 @@
 
 /*
  * The timings provided here cmoes from the PDC20262 docs. I hope they are
- * rigth for the PDC20246 too ...
+ * right for the PDC20246 too ...
  */
 
-static int8_t pdc2xx_pa[] = {0x9, 0x5, 0x3, 0x2, 0x1};
-static int8_t pdc2xx_pb[] = {0x13, 0xc, 0x8, 0x6, 0x4};
-static int8_t pdc2xx_dma_mb[] = {0x3, 0x3, 0x3};
-static int8_t pdc2xx_dma_mc[] = {0x5, 0x4, 0x3};
-static int8_t pdc2xx_udma_mb[] = {0x3, 0x2, 0x1, 0x2, 0x1, 0x1};
-static int8_t pdc2xx_udma_mc[] = {0x3, 0x2, 0x1, 0x2, 0x1, 0x1};
-
-/*
- * Registers definitions for Promise PDC20268 and above chips
- */
-#define PDC268_INDEX(chan)	(0x01 + IDEDMA_SCH_OFFSET * (chan))
-#define PDC268_DATA(chan)	(0x03 + IDEDMA_SCH_OFFSET * (chan))
-#define PDC268_CABLE		0x04
-#define PDC268_INTR		0x20
-
-/*
- * PDC203xx register definitions.
- */
-#define PDC203xx_NCHANNELS	4
-#define PDC203xx_BAR_IDEREGS	0x1c
-
-/*
- * PDC205xx register definitions.
- */
-#define PDC40718_NCHANNELS	4
-#define PDC20575_NCHANNELS	3
-
-#define	PDC205_REGADDR(base,ch)	((base)+((ch)<<8))
-#define	PDC205_SSTATUS(ch)	PDC205_REGADDR(0x400,ch)
-#define	PDC205_SERROR(ch)	PDC205_REGADDR(0x404,ch)
-#define	PDC205_SCONTROL(ch)	PDC205_REGADDR(0x408,ch)
-#define	PDC205_MULTIPLIER(ch)	PDC205_REGADDR(0x4e8,ch)
-
-#define	SCONTROL_WRITE(ps,channel,scontrol)	\
-	bus_space_write_4((ps)->ba5_st, (ps)->ba5_sh,	\
-	PDC205_SCONTROL(channel), scontrol)
-
-#define	SSTATUS_READ(sc,channel)	\
-	bus_space_read_4((ps)->ba5_st, (ps)->ba5_sh,	\
-	PDC205_SSTATUS(channel))
-
-
-/* Private data */
-struct pciide_pdcsata {
-	bus_space_tag_t			ba5_st;
-	bus_space_handle_t		ba5_sh;
-
-	struct {
-		bus_space_tag_t		cmd_iot;
-		bus_space_handle_t	cmd_iohs[WDC_NREG+WDC_NSHADOWREG];
-
-		bus_space_tag_t		ctl_iot;
-		bus_space_handle_t	ctl_ioh;
-
-		bus_space_handle_t	dma_iohs[IDEDMA_NREGS];
-	} regs[PDC203xx_NCHANNELS];
-};
-
-u_int8_t pdc203xx_read_reg(struct channel_softc *, enum wdc_regs);
-void     pdc203xx_write_reg(struct channel_softc *, enum wdc_regs, u_int8_t);
-
-struct channel_softc_vtbl wdc_pdc203xx_vtbl = {
-	pdc203xx_read_reg,
-	pdc203xx_write_reg,
-	wdc_default_lba48_write_reg,
-	wdc_default_read_raw_multi_2,
-	wdc_default_write_raw_multi_2,
-	wdc_default_read_raw_multi_4,
-	wdc_default_write_raw_multi_4
-};
-
-#endif	/* !_DEV_PCI_PCIIDE_PDC202XX_REG_H_ */
+static const int8_t pdc2xx_pa[] __unused =
+    {0x9, 0x5, 0x3, 0x2, 0x1};
+static const int8_t pdc2xx_pb[] __unused =
+    {0x13, 0xc, 0x8, 0x6, 0x4};
+static const int8_t pdc2xx_dma_mb[] __unused =
+    {0x3, 0x3, 0x3};
+static const int8_t pdc2xx_dma_mc[] __unused =
+    {0x5, 0x4, 0x3};
+static const int8_t pdc2xx_udma_mb[] __unused =
+    {0x3, 0x2, 0x1, 0x2, 0x1, 0x1};
+static const int8_t pdc2xx_udma_mc[] __unused =
+    {0x3, 0x2, 0x1, 0x2, 0x1, 0x1};

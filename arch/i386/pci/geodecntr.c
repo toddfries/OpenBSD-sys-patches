@@ -1,4 +1,4 @@
-/*	$NetBSD: geodecntr.c,v 1.4 2006/11/16 01:32:39 christos Exp $	*/
+/*	$NetBSD: geodecntr.c,v 1.8 2008/05/10 13:35:56 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: geodecntr.c,v 1.4 2006/11/16 01:32:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: geodecntr.c,v 1.8 2008/05/10 13:35:56 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,7 +43,6 @@ __KERNEL_RCSID(0, "$NetBSD: geodecntr.c,v 1.4 2006/11/16 01:32:39 christos Exp $
 #include <arch/i386/pci/geodereg.h>
 
 struct  geodecntr_softc {
-	struct device           sc_dev;
 	struct geode_gcb_softc *sc_gcb_dev;
 	struct timecounter      sc_tc;
 };
@@ -60,8 +52,7 @@ static unsigned geode_get_timecount(struct timecounter *);
 static int attached = 0;
 
 static int
-geodecntr_match(struct device *parent, struct cfdata *match,
-    void *aux)
+geodecntr_match(device_t parent, cfdata_t match, void *aux)
 {
 	return !attached;
 }
@@ -70,13 +61,14 @@ geodecntr_match(struct device *parent, struct cfdata *match,
  * attach time counter
  */
 static void
-geodecntr_attach(struct device *parent, struct device *self, void *aux)
+geodecntr_attach(device_t parent, device_t self, void *aux)
 {
-	struct geodecntr_softc *sc = (struct geodecntr_softc *) self;
+	struct geodecntr_softc *sc = device_private(self);
 
-	aprint_normal(": AMD Geode SC1100 27Mhz Counter\n");
+	aprint_naive("\n");
+	aprint_normal(": AMD Geode SC1100 27MHz Counter\n");
 
-	sc->sc_gcb_dev = (struct geode_gcb_softc *)parent;
+	sc->sc_gcb_dev = device_private(parent);
 
 	/*
 	 * select 27MHz, no powerdown, no interrupt
@@ -99,6 +91,15 @@ geodecntr_attach(struct device *parent, struct device *self, void *aux)
 	attached = 1;
 }
 
+static int
+geodecntr_detach(device_t self, int flags)
+{
+	struct geodecntr_softc *sc = device_private(self);
+
+	attached = 0;
+	return tc_detach(&sc->sc_tc);
+}
+
 /*
  * read counter
  */
@@ -106,9 +107,10 @@ static unsigned geode_get_timecount(struct timecounter *tc)
 {
 	struct geodecntr_softc *sc = (struct geodecntr_softc *)tc->tc_priv;
 
-	return bus_space_read_4(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_TMVALUE_L);
+	return bus_space_read_4(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
+	    SC1100_GCB_TMVALUE_L);
 }
 
-CFATTACH_DECL(geodecntr, sizeof(struct geodecntr_softc),
-	      geodecntr_match, geodecntr_attach, NULL, NULL);
+CFATTACH_DECL_NEW(geodecntr, sizeof(struct geodecntr_softc),
+	      geodecntr_match, geodecntr_attach, geodecntr_detach, NULL);
 

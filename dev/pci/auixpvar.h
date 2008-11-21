@@ -1,5 +1,4 @@
-/* $OpenBSD: auixpvar.h,v 1.1 2005/08/07 20:08:45 mickey Exp $ */
-/* $NetBSD: auixpvar.h,v 1.3 2005/01/12 15:54:34 kent Exp $*/
+/* $NetBSD: auixpvar.h,v 1.6 2007/12/09 20:28:06 jmcneill Exp $*/
 
 /*
  * Copyright (c) 2004, 2005 Reinoud Zandijk <reinoud@netbsd.org>
@@ -40,34 +39,49 @@
 
 #define DMA_DESC_CHAIN	255
 
+
 /* audio format structure describing our hardware capabilities */
 /* XXX min and max sample rates are for AD1888 codec XXX */
 #define AUIXP_NFORMATS 6
 
+
 #define AUIXP_MINRATE  7000
 #define AUIXP_MAXRATE 48000
+
+
+/* current AC'97 driver only supports SPDIF outputting channel 3&4 i.e. STEREO */
+static const struct audio_format auixp_formats[AUIXP_NFORMATS] = {
+	{NULL, AUMODE_PLAY | AUMODE_RECORD, AUDIO_ENCODING_SLINEAR_LE, 16, 16, 2, AUFMT_STEREO, 0, {7000, 48000}},
+	{NULL, AUMODE_PLAY | AUMODE_RECORD, AUDIO_ENCODING_SLINEAR_LE, 32, 32, 2, AUFMT_STEREO, 0, {7000, 48000}},
+	{NULL, AUMODE_PLAY, AUDIO_ENCODING_SLINEAR_LE, 16, 16, 4, AUFMT_SURROUND4, 0, {7000, 48000}},
+	{NULL, AUMODE_PLAY, AUDIO_ENCODING_SLINEAR_LE, 32, 32, 4, AUFMT_SURROUND4, 0, {7000, 48000}},
+	{NULL, AUMODE_PLAY, AUDIO_ENCODING_SLINEAR_LE, 16, 16, 6, AUFMT_DOLBY_5_1, 0, {7000, 48000}},
+	{NULL, AUMODE_PLAY, AUDIO_ENCODING_SLINEAR_LE, 32, 32, 6, AUFMT_DOLBY_5_1, 0, {7000, 48000}},
+};
+
 
 /* auixp structures; used to record alloced DMA space */
 struct auixp_dma {
 	/* bus mappings */
 	bus_dmamap_t		 map;
-	caddr_t			 addr;
+	void *			 addr;
 	bus_dma_segment_t	 segs[1];
 	int			 nsegs;
 	size_t			 size;
 
 	/* audio feeder */
-	void			 (*intr)(void *);
+	void			 (*intr)(void *);	/* function to call when there is space */
 	void			*intrarg;
 
 	/* status and setup bits */
 	int			 running;
-	u_int32_t		 linkptr;
-	u_int32_t		 dma_enable_bit;
+	uint32_t		 linkptr;
+	uint32_t		 dma_enable_bit;
 
 	/* linked list of all mapped area's */
 	SLIST_ENTRY(auixp_dma)	 dma_chain;
 };
+
 
 struct auixp_codec {
 	struct auixp_softc	*sc;
@@ -80,10 +94,13 @@ struct auixp_codec {
 	enum ac97_host_flags	 codec_flags;
 };
 
+
 struct auixp_softc {
 	struct device		sc_dev;
-	audio_device_t		sc_audev;
-	void			*sc_ih;
+
+	/* card id */
+	int			type;
+	int			delay1, delay2;		/* nessisary? */
 
 	/* card properties */
 	int			has_4ch, has_6ch, is_fixed, has_spdif;
@@ -99,12 +116,19 @@ struct auixp_softc {
 
 	bus_dma_tag_t		sc_dmat;
 
+	/* interrupts */
+	void			*sc_ih;
+
 	/* DMA business */
-	struct auixp_dma	*sc_output_dma;
+	struct auixp_dma	*sc_output_dma;		/* contains dma-safe chain */
 	struct auixp_dma	*sc_input_dma;
 
 	/* list of allocated DMA pieces */
 	SLIST_HEAD(auixp_dma_list, auixp_dma) sc_dma_list;
+
+	/* audio formats supported */
+	struct audio_format sc_formats[AUIXP_NFORMATS];
+	struct audio_encoding_set *sc_encodings;
 
 	/* codecs */
 	int			sc_num_codecs;
@@ -114,8 +138,6 @@ struct auixp_softc {
 	/* last set audio parameters */
 	struct audio_params	sc_play_params;
 	struct audio_params	sc_rec_params;
-
-	/* suspend/resume */
-	void			*powerhook;
-	u_int16_t		*savemem;
 };
+
+

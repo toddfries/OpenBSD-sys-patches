@@ -1,18 +1,46 @@
-/*	$OpenBSD: dbl_float.h,v 1.11 2006/11/29 10:40:44 mickey Exp $	*/
+/*	$NetBSD: dbl_float.h,v 1.2 2008/04/06 08:03:36 skrll Exp $	*/
+
+/*	$OpenBSD: dbl_float.h,v 1.5 2001/03/29 03:58:17 mickey Exp $	*/
+
 /*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)dbl_float.h: Revision: 2.9.88.1 Date: 93/12/07 15:05:32 */
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
+
+#include <sys/cdefs.h>
 
 /**************************************
  * Declare double precision functions *
@@ -315,16 +343,16 @@
     Deposit_dexponent(dbl_value,(exponent op DBL_WRAP))
 
 #define Dbl_setlargestpositive(dbl_valueA,dbl_valueB)			\
-    Dallp1(dbl_valueA) = ((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
+    Dallp1(dbl_valueA) = ((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
 			| ((1<<(32-(1+DBL_EXP_LENGTH))) - 1 );		\
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 #define Dbl_setlargestnegative(dbl_valueA,dbl_valueB)			\
-    Dallp1(dbl_valueA) = ((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
+    Dallp1(dbl_valueA) = ((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
 			| ((1<<(32-(1+DBL_EXP_LENGTH))) - 1 ) | (1<<31); \
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 #define Dbl_setlargest_exponentmantissa(dbl_valueA,dbl_valueB)		\
     Deposit_dexponentmantissap1(dbl_valueA,				\
-	(((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH)))		\
+	(((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH)))		\
 			| ((1<<(32-(1+DBL_EXP_LENGTH))) - 1 )));	\
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 
@@ -334,7 +362,7 @@
     Dallp2(dbl_valueB) = 0
 #define Dbl_setlargest(dbl_valueA,dbl_valueB,sign)			\
     Dallp1(dbl_valueA) = (sign << 31) |					\
-	((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) |		\
+	((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) |		\
 	 ((1 << (32-(1+DBL_EXP_LENGTH))) - 1 );				\
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 
@@ -426,11 +454,11 @@
 
 /* Need to Initialize */
 #define Dbl_makequietnan(desta,destb)					\
-    Dallp1(desta) = ((DBL_EMAX+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
+    Dallp1(desta) = ((DBL_MAX_EXP+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
 		| (1<<(32-(1+DBL_EXP_LENGTH+2)));			\
     Dallp2(destb) = 0
 #define Dbl_makesignalingnan(desta,destb)				\
-    Dallp1(desta) = ((DBL_EMAX+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
+    Dallp1(desta) = ((DBL_MAX_EXP+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
 		| (1<<(32-(1+DBL_EXP_LENGTH+1)));			\
     Dallp2(destb) = 0
 
@@ -526,15 +554,17 @@
     }
 
 
-int dbl_fadd(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_fcmp(dbl_floating_point *, dbl_floating_point *, unsigned int, unsigned int *);
+int dbl_fadd(dbl_floating_point *, dbl_floating_point*, dbl_floating_point*, unsigned int *);
+int dbl_fcmp(dbl_floating_point *, dbl_floating_point*, unsigned int, unsigned int *);
 int dbl_fdiv(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_fmpy(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_frem(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_fsqrt(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_fsub(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
+int dbl_fmpy(dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *);
+int dbl_frem(dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *);
+int dbl_fsqrt(dbl_floating_point *, dbl_floating_point *, unsigned int *);
+int dbl_fsub(dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *);
 
-int sgl_to_dbl_fcnvff(sgl_floating_point *, sgl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_to_sgl_fcnvff(dbl_floating_point *, dbl_floating_point *, sgl_floating_point *, unsigned int *);
+dbl_floating_point dbl_setoverflow(unsigned int);
 
-int dbl_frnd(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
+int sgl_to_dbl_fcnvff(sgl_floating_point *, dbl_floating_point *, unsigned int *);
+int dbl_to_sgl_fcnvff(dbl_floating_point *, sgl_floating_point *, unsigned int *);
+
+int dbl_frnd(dbl_floating_point *, dbl_floating_point *, unsigned int *);

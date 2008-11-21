@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6.h,v 1.18 2006/12/09 01:12:28 itojun Exp $	*/
+/*	$NetBSD: ip6.h,v 1.23 2007/12/25 18:33:46 perry Exp $	*/
 /*	$KAME: ip6.h,v 1.45 2003/06/05 04:46:38 keiichi Exp $	*/
 
 /*
@@ -93,14 +93,14 @@ struct ip6_hdr {
 #define IPV6_VERSION		0x60
 #define IPV6_VERSION_MASK	0xf0
 
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 #define IPV6_FLOWINFO_MASK	0x0fffffff	/* flow info (28 bits) */
 #define IPV6_FLOWLABEL_MASK	0x000fffff	/* flow label (20 bits) */
 #else
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 #define IPV6_FLOWINFO_MASK	0xffffff0f	/* flow info (28 bits) */
 #define IPV6_FLOWLABEL_MASK	0xffff0f00	/* flow label (20 bits) */
-#endif /* _LITTLE_ENDIAN */
+#endif /* LITTLE_ENDIAN */
 #endif
 #if 1
 /* ECN bits proposed by Sally Floyd */
@@ -125,6 +125,7 @@ struct ip6_hdr_pseudo {
 /*
  * Extension Headers
  */
+
 struct	ip6_ext {
 	u_int8_t ip6e_nxt;
 	u_int8_t ip6e_len;
@@ -152,7 +153,8 @@ struct ip6_dest {
 #define IP6OPT_JUMBO		0xC2	/* 11 0 00010 = 194 */
 #define IP6OPT_NSAP_ADDR	0xC3	/* 11 0 00011 */
 #define IP6OPT_TUNNEL_LIMIT	0x04	/* 00 0 00100 */
-#define IP6OPT_ROUTER_ALERT	0x05	/* 00 0 00101 (RFC3542, recommended) */
+#define IP6OPT_RTALERT		0x05	/* 00 0 00101 (KAME definition) */
+#define IP6OPT_ROUTER_ALERT	0x05	/* (RFC3542 def, recommended) */
 
 #define IP6OPT_RTALERT_LEN	4
 #define IP6OPT_RTALERT_MLD	0	/* Datagram contains an MLD message */
@@ -206,16 +208,16 @@ struct ip6_opt_router {
 	u_int8_t ip6or_value[2];
 } __packed;
 /* Router alert values (in network byte order) */
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 #define IP6_ALERT_MLD	0x0000
 #define IP6_ALERT_RSVP	0x0001
 #define IP6_ALERT_AN	0x0002
 #else
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 #define IP6_ALERT_MLD	0x0000
 #define IP6_ALERT_RSVP	0x0100
 #define IP6_ALERT_AN	0x0200
-#endif /* _LITTLE_ENDIAN */
+#endif /* LITTLE_ENDIAN */
 #endif
 
 /* Routing header */
@@ -244,15 +246,15 @@ struct ip6_frag {
 	u_int32_t ip6f_ident;		/* identification */
 } __packed;
 
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 #define IP6F_OFF_MASK		0xfff8	/* mask out offset from _offlg */
 #define IP6F_RESERVED_MASK	0x0006	/* reserved bits in ip6f_offlg */
 #define IP6F_MORE_FRAG		0x0001	/* more-fragments flag */
-#else /* _BYTE_ORDER == _LITTLE_ENDIAN */
+#else /* BYTE_ORDER == LITTLE_ENDIAN */
 #define IP6F_OFF_MASK		0xf8ff	/* mask out offset from _offlg */
 #define IP6F_RESERVED_MASK	0x0600	/* reserved bits in ip6f_offlg */
 #define IP6F_MORE_FRAG		0x0100	/* more-fragments flag */
-#endif /* _BYTE_ORDER == _LITTLE_ENDIAN */
+#endif /* BYTE_ORDER == LITTLE_ENDIAN */
 
 /*
  * Internet implementation parameters.
@@ -273,42 +275,45 @@ struct ip6_frag {
  * with type "typ".
  * IP6_EXTHDR_GET0 does the same, except that it aligns the structure at the
  * very top of mbuf.  GET0 is likely to make memory copy than GET.
+ *
+ * XXX we're now testing this, needs m_pulldown()
  */
 #define IP6_EXTHDR_GET(val, typ, m, off, len) \
 do {									\
-	struct mbuf *t;							\
-	int tmp;							\
+	struct mbuf *_t;						\
+	int _tmp;							\
 	if ((m)->m_len >= (off) + (len))				\
-		(val) = (typ)(mtod((m), caddr_t) + (off));		\
+		(val) = (typ)(mtod((m), char *) + (off));		\
 	else {								\
-		t = m_pulldown((m), (off), (len), &tmp);		\
-		if (t) {						\
-			if (t->m_len < tmp + (len))			\
+		_t = m_pulldown((m), (off), (len), &_tmp);		\
+		if (_t) {						\
+			if (_t->m_len < _tmp + (len))			\
 				panic("m_pulldown malfunction");	\
-			(val) = (typ)(mtod(t, caddr_t) + tmp);		\
+			(val) = (typ)(mtod(_t, char *) + _tmp);	\
 		} else {						\
 			(val) = (typ)NULL;				\
 			(m) = NULL;					\
 		}							\
 	}								\
-} while (0)
+} while (/*CONSTCOND*/ 0)
 
 #define IP6_EXTHDR_GET0(val, typ, m, off, len) \
 do {									\
-	struct mbuf *t;							\
+	struct mbuf *_t;						\
 	if ((off) == 0 && (m)->m_len >= len)				\
-		(val) = (typ)mtod((m), caddr_t);			\
+		(val) = (typ)mtod((m), void *);			\
 	else {								\
-		t = m_pulldown((m), (off), (len), NULL);		\
-		if (t) {						\
-			if (t->m_len < (len))				\
+		_t = m_pulldown((m), (off), (len), NULL);		\
+		if (_t) {						\
+			if (_t->m_len < (len))				\
 				panic("m_pulldown malfunction");	\
-			(val) = (typ)mtod(t, caddr_t);			\
+			(val) = (typ)mtod(_t, void *);			\
 		} else {						\
 			(val) = (typ)NULL;				\
 			(m) = NULL;					\
 		}							\
 	}								\
-} while (0)
-#endif /* _KERNEL */
-#endif /* _NETINET_IP6_H_ */
+} while (/*CONSTCOND*/ 0)
+#endif /*_KERNEL*/
+
+#endif /* !_NETINET_IP6_H_ */

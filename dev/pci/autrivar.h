@@ -1,4 +1,4 @@
-/*	$OpenBSD: autrivar.h,v 1.3 2003/03/09 01:52:14 tedu Exp $	*/
+/*	$NetBSD: autrivar.h,v 1.4 2007/12/09 20:28:06 jmcneill Exp $	*/
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.
@@ -33,7 +33,7 @@
  */
 struct autri_dma {
 	bus_dmamap_t		map;
-	caddr_t			addr;		/* VA */
+	void *			addr;		/* VA */
 	bus_dma_segment_t	segs[1];
 	int			nsegs;
 	size_t			size;
@@ -48,15 +48,14 @@ struct autri_codec_softc {
 	int			status_addr;
 	struct ac97_host_if	host_if;
 	struct ac97_codec_if	*codec_if;
-	int			flags;
 };
 
 struct autri_chstatus {
 	void		(*intr)(void *); /* rint/pint */
 	void		*intr_arg;	/* arg for intr */
-	u_int		offset;		/* filled up to here */
-	u_int		blksize;
-	u_int		factor;		/* byte per sample */
+	u_int	 	offset;		/* filled up to here */
+	u_int	 	blksize;
+	u_int	 	factor;		/* byte per sample */
 	u_int		length;		/* ring buffer length */
 	struct autri_dma *dma;		/* DMA handle for ring buf */
 
@@ -86,8 +85,6 @@ struct autri_softc {
 
 	u_int32_t		sc_class;
 	int			sc_revision;
-
-	int			sc_old_power;
 
 	/*
 	 * Play/record status

@@ -1,137 +1,129 @@
-#	$OpenBSD: files.mvme68k,v 1.29 2006/04/21 22:21:53 miod Exp $
+#	$NetBSD: files.mvme68k,v 1.61 2007/12/03 15:33:58 ad Exp $
 
 # config file for mvme68k
 
-# maxpartitions must be first item in files.${ARCH}
-maxpartitions 16
+defflag	opt_m060sp.h		M060SP
+defflag				PANICBUTTON	# panic on ABORT if not DDB
 
-maxusers 2 8 64
+# maxpartitions must be first item in files.${ARCH}.newconf
+maxpartitions 8
 
-device	mainbus {[addr = -1]}
-attach	mainbus at root
+device mainbus { }
+attach mainbus at root
+file arch/mvme68k/dev/mainbus.c		mainbus
 
-device	pcc {[offset = -1], [ipl = 0]}
-attach	pcc at mainbus
-file	arch/mvme68k/dev/pcc.c			pcc needs-count
+device clock
 
-device	pcctwo {[offset = -1], [ipl = 0]}
-attach	pcctwo at mainbus
-file	arch/mvme68k/dev/pcctwo.c		pcctwo needs-count
+# Grab the MD VMEbus goop
+include "dev/vme/files.vme"
 
-device	mc {[offset = -1], [ipl = 0]}
-attach	mc at mainbus
-file	arch/mvme68k/dev/mc.c			mc needs-count
+# Grab the common MVME glue
+include "dev/mvme/files.mvme"
 
-device	clock
-attach	clock at pcc, mc, pcctwo
-file	arch/mvme68k/dev/clock.c		clock
+# MVME-147 Peripheral Channel Controller
+device pcc { [ ipl = -1 ] }
+attach pcc at mainbus
+file arch/mvme68k/dev/pcc.c			pcc needs-flag
 
-device	zs: tty
-attach	zs at pcc, mc
-file	arch/mvme68k/dev/zs.c			zs needs-count
+# MVME-147 VME controller chip
+device	vmepcc: mvmebus, vmebus
+attach	vmepcc at pcc
+file	arch/mvme68k/dev/vme_pcc.c		vmepcc
 
-device	cl: tty
-attach	cl at pcctwo
-file	arch/mvme68k/dev/cl.c			cl needs-count
+# MVME-147 Clock
+attach clock at pcc with clock_pcc
+file arch/mvme68k/dev/clock_pcc.c		clock_pcc
 
+# ZS Serial ports
+device zsc { channel = -1 }
+file arch/mvme68k/dev/zs.c			zsc
+file dev/ic/z8530sc.c				zsc
 
-device	vme {}
-attach	vme at pcc, mc, pcctwo
-device	vmes {[addr = -1], [vec = -1], [ipl = 0]}
-attach	vmes at vme
-device	vmel {[addr = -1], [vec = -1], [ipl = 0]}
-attach	vmel at vme
-file	arch/mvme68k/dev/vme.c			vme | vmes | vmel
-file	arch/mvme68k/dev/vmes.c			vmes needs-count
-file	arch/mvme68k/dev/vmel.c			vmel needs-count
+# MVME-147 Serial ports
+attach zsc at pcc with zsc_pcc
+file arch/mvme68k/dev/zs_pcc.c			zsc_pcc needs-flag
 
-attach	le at pcc, vmes
-file	arch/mvme68k/dev/if_le.c		le
+# MVME-1[67]2 Serial ports
+attach zsc at pcctwo with zsc_pcctwo
+file arch/mvme68k/dev/zs_pcctwo.c		zsc_pcctwo needs-flag
 
-attach	ie at mc, pcctwo
-file	arch/mvme68k/dev/if_ie.c		ie
+device zstty: tty
+attach zstty at zsc
+file dev/ic/z8530tty.c				zstty needs-flag
 
-include "../../../scsi/files.scsi"
+# MVME-147 Parallel printer
+attach lpt at pcc with lpt_pcc
+file arch/mvme68k/dev/lpt_pcc.c			lpt_pcc
 
-device	wdsc: scsi
-attach	wdsc at pcc
-file	arch/mvme68k/dev/sbic.c			wdsc
-file	arch/mvme68k/dev/wdsc.c			wdsc
+# device defined in sys/conf/files
+attach le at pcc with le_pcc: le24
+file arch/mvme68k/dev/if_le.c			le_pcc
 
-device	ipic {manu = -1, prod = -1, [vec = -1], [ipl = 0]}
-attach	ipic at mc
-file	arch/mvme68k/dev/ipic.c			ipic
+# TimeKeeper NVRAM device
+device timekeeper: mk48txx
+attach timekeeper at mainbus
+file arch/mvme68k/dev/timekeeper.c		timekeeper
 
-device	fooip
-attach	fooip at ipic
-file	arch/mvme68k/dev/fooip.c		fooip
+# Memory disk for boot tape
+file dev/md_root.c				memory_disk_hooks
 
-device	ssh: scsi
-attach	ssh at mc, pcctwo
-file	arch/mvme68k/dev/sshdma.c		ssh
-file	arch/mvme68k/dev/ssh.c			ssh
+include "dev/scsipi/files.scsipi"
 
-device	memc
-attach	memc at mc, pcctwo
-file	arch/mvme68k/dev/memc.c			memc
+# WD33C93 SCSI ...
+define sbic
+file arch/mvme68k/dev/sbic.c			sbic
 
-device	flash
-attach	flash at mainbus
-file	arch/mvme68k/dev/flash.c		flash needs-count
+# ... on the MVME-147
+device wdsc: sbic, scsi
+attach wdsc at pcc with wdsc_pcc
+file arch/mvme68k/dev/wdsc.c			wdsc_pcc
 
-device	sram
-attach	sram at mainbus
-device	nvram
-attach	nvram at pcc, mc, pcctwo
-file	arch/mvme68k/dev/sram.c			sram needs-count
-file	arch/mvme68k/dev/nvram.c		nvram needs-count
-file	arch/mvme68k/dev/memdevs.c		nvram | sram
+file arch/mvme68k/dev/pcctwo_68k.c		pcctwo
+file arch/mvme68k/dev/memc_68k.c		memc
 
-device	lp
-attach	lp at pcc
-file	arch/mvme68k/dev/lp.c			lp needs-count
+# This isn't as odd as it looks. This file is still needed even if
+# no vmetwo device is configured into the kernel.
+file arch/mvme68k/dev/vme_two_68k.c		vmetwo | pcctwo
 
-device	lptwo
-attach	lptwo at pcctwo
-file	arch/mvme68k/dev/lptwo.c		lptwo needs-count
+file arch/mvme68k/mvme68k/autoconf.c
+file arch/mvme68k/mvme68k/bus_dma.c
+file arch/mvme68k/mvme68k/bus_space.c
+file arch/mvme68k/mvme68k/clock.c
+file arch/mvme68k/mvme68k/conf.c
+file arch/mvme68k/mvme68k/disksubr.c
+file arch/mvme68k/mvme68k/isr.c
+file arch/mvme68k/mvme68k/machdep.c
+file arch/mvme68k/mvme68k/mem.c
+file arch/mvme68k/mvme68k/pmap_bootstrap.c	compile-with "${NOPROF_C}"
+file arch/mvme68k/mvme68k/trap.c
+file arch/m68k/m68k/cacheops.c
+file arch/m68k/m68k/db_memrw.c			ddb | kgdb
+file arch/m68k/m68k/pmap_motorola.c
+file arch/m68k/m68k/procfs_machdep.c		procfs
+file arch/m68k/m68k/sys_machdep.c
+file arch/m68k/m68k/vm_machdep.c
+file dev/cons.c
+file dev/cninit.c
 
-#device	xdc {target = -1}
-#attach	xdc at vmes
-#device	xd: disk
-#attach	xd at xdc
-#file	arch/mvme68k/dev/xd.c			xd needs-flag
+# Motorola 68060 support package
+include "arch/m68k/060sp/files.060sp"
 
-major	{sd = 4}
-major	{cd = 6}
-major	{vnd = 8}
-major	{rd = 9}
-#major	{xd = 10}
+# NetBSD m68k a.out Binary Compatibility (COMPAT_AOUT_M68K)
+include "compat/aoutm68k/files.aoutm68k"
 
-file	arch/mvme68k/mvme68k/autoconf.c
-file	arch/mvme68k/mvme68k/conf.c
-file	arch/mvme68k/mvme68k/disksubr.c
-file	arch/mvme68k/mvme68k/machdep.c
-file	arch/mvme68k/mvme68k/mem.c
-file	arch/m68k/m68k/pmap_motorola.c
-file	arch/mvme68k/mvme68k/pmap_bootstrap.c
-file	arch/mvme68k/mvme68k/sys_machdep.c
-file	arch/mvme68k/mvme68k/trap.c
-file	arch/mvme68k/mvme68k/vm_machdep.c
-file	dev/cninit.c
+# SunOS Binary Compatibility (COMPAT_SUNOS)
+include "compat/sunos/files.sunos"
+file	arch/m68k/m68k/sunos_machdep.c		compat_sunos
 
-file	arch/m68k/m68k/db_memrw.c		ddb
+# SVR4 Binary Compatibility (COMPAT_SVR4)
+include "compat/svr4/files.svr4"
 
-# Compatibility modules
+# Linux binary compatibility (COMPAT_LINUX)
+include "compat/linux/files.linux"
+include "compat/linux/arch/m68k/files.linux_m68k"
+file arch/m68k/m68k/linux_trap.c		compat_linux
 
-# HP-UX binary compatibility
-include	"compat/hpux/m68k/files.hpux"
-file	arch/mvme68k/mvme68k/hpux_machdep.c	compat_hpux
+# OSS audio driver compatibility
+include "compat/ossaudio/files.ossaudio"
 
-device	wl: tty
-attach	wl at vmes
-file	arch/mvme68k/dev/wl.c			wl needs-count
-
-device	vs: scsi
-attach	vs at vmes
-file	arch/mvme68k/dev/vs.c			vs
-file	arch/mvme68k/dev/vsdma.c		vs
+include	"arch/mvme68k/conf/majors.mvme68k"

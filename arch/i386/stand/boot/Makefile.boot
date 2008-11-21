@@ -1,4 +1,4 @@
-# $NetBSD: Makefile.boot,v 1.28 2006/06/25 13:36:26 lukem Exp $
+# $NetBSD: Makefile.boot,v 1.36 2008/10/20 03:02:07 christos Exp $
 
 S=	${.CURDIR}/../../../../../
 
@@ -14,6 +14,10 @@ SRCS= ${SOURCES}
 .if !make(depend)
 SRCS+= vers.c
 .endif
+
+PIE_CFLAGS=
+PIE_AFLAGS=
+PIE_LDFLAGS=
 
 .include <bsd.own.mk>
 
@@ -38,18 +42,19 @@ CPPFLAGS+= -I ${.OBJDIR}
 # Make sure we override any optimization options specified by the user
 COPTS=  -Os
 
+.if defined(HAVE_GCC)
 .if ${MACHINE} == "amd64"
 LDFLAGS+=  -Wl,-m,elf_i386
 AFLAGS+=   -m32
 CPUFLAGS=  -m32
 LIBKERN_ARCH=i386
 KERNMISCMAKEFLAGS="LIBKERN_ARCH=i386"
-CPPFLAGS+= -DBOOT_ELF64
 .else
 .if ${HAVE_GCC} == 3
 CPUFLAGS=  -mcpu=i386
 .else
 CPUFLAGS=  -march=i386 -mtune=i386
+.endif
 .endif
 .endif
 
@@ -69,6 +74,7 @@ CPPFLAGS+= -DCONSOLE_KEYMAP=boot_params.bp_keymap
 CPPFLAGS+= -DSUPPORT_CD9660
 CPPFLAGS+= -DSUPPORT_USTARFS
 CPPFLAGS+= -DSUPPORT_DOSFS
+#CPPFLAGS+= -DSUPPORT_EXT2FS
 CPPFLAGS+= -DPASS_BIOSGEOM
 CPPFLAGS+= -DPASS_MEMMAP
 #CPPFLAGS+= -DBOOTPASSWD
@@ -81,7 +87,7 @@ SAMISCCPPFLAGS+= -DHEAP_START=0x20000 -DHEAP_LIMIT=0x50000
 SAMISCMAKEFLAGS+= SA_USE_CREAD=yes	# Read compressed kernels
 SAMISCMAKEFLAGS+= SA_INCLUDE_NET=no	# Netboot via TFTP, NFS
 
-.if ${HAVE_GCC} == 4
+.if (defined(HAVE_GCC) && ${HAVE_GCC} == 4) || defined(HAVE_PCC)
 CPPFLAGS+=	-Wno-pointer-sign
 .endif
 
@@ -134,11 +140,11 @@ LIBLIST= ${LIBI386} ${LIBSA} ${LIBZ} ${LIBKERN} ${LIBI386} ${LIBSA}
 CLEANFILES+= ${PROG}.tmp ${PROG}.map vers.c
 
 vers.c: ${VERSIONFILE} ${SOURCES} ${LIBLIST} ${.CURDIR}/../Makefile.boot
-	${HOST_SH} ${S}conf/newvers_stand.sh ${VERSIONFILE} ${MACHINE} ${NEWVERSWHAT}
+	${HOST_SH} ${S}conf/newvers_stand.sh -DM ${VERSIONFILE} x86 ${NEWVERSWHAT}
 
 # Anything that calls 'real_to_prot' must have a %pc < 0x10000.
 # We link the program, find the callers (all in libi386), then
-# explicitely pull in the required objects before any other library code.
+# explicitly pull in the required objects before any other library code.
 ${PROG}: ${OBJS} ${LIBLIST} ${.CURDIR}/../Makefile.boot
 	${_MKTARGET_LINK}
 	bb="$$( ${CC} -o ${PROG}.tmp ${LDFLAGS} -Wl,-Ttext,0 -Wl,-cref \

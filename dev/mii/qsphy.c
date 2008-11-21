@@ -1,8 +1,7 @@
-/*	$OpenBSD: qsphy.c,v 1.15 2008/03/02 16:05:26 brad Exp $	*/
-/*	$NetBSD: qsphy.c,v 1.19 2000/02/02 23:34:57 thorpej Exp $	*/
+/*	$NetBSD: qsphy.c,v 1.46 2008/11/17 03:04:27 dyoung Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,6 +64,9 @@
  * datasheet from www.qualitysemi.com
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: qsphy.c,v 1.46 2008/11/17 03:04:27 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -87,36 +82,30 @@
 
 #include <dev/mii/qsphyreg.h>
 
-int	qsphymatch(struct device *, void *, void *);
-void	qsphyattach(struct device *, struct device *, void *);
+static int	qsphymatch(device_t, cfdata_t, void *);
+static void	qsphyattach(device_t, device_t, void *);
 
-struct cfattach qsphy_ca = {
-	sizeof(struct mii_softc), qsphymatch, qsphyattach, mii_phy_detach,
-	    mii_phy_activate
-};
+CFATTACH_DECL_NEW(qsphy, sizeof(struct mii_softc),
+    qsphymatch, qsphyattach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver qsphy_cd = {
-	NULL, "qsphy", DV_DULL
-};
+static int	qsphy_service(struct mii_softc *, struct mii_data *, int);
+static void	qsphy_status(struct mii_softc *);
+static void	qsphy_reset(struct mii_softc *);
 
-int	qsphy_service(struct mii_softc *, struct mii_data *, int);
-void	qsphy_reset(struct mii_softc *);
-void	qsphy_status(struct mii_softc *);
-
-const struct mii_phy_funcs qsphy_funcs = {
+static const struct mii_phy_funcs qsphy_funcs = {
 	qsphy_service, qsphy_status, qsphy_reset,
 };
 
 static const struct mii_phydesc qsphys[] = {
-	{ MII_OUI_QUALSEMI,		MII_MODEL_QUALSEMI_QS6612,
-	  MII_STR_QUALSEMI_QS6612 },
+	{ MII_OUI_xxQUALSEMI,		MII_MODEL_xxQUALSEMI_QS6612,
+	  MII_STR_xxQUALSEMI_QS6612 },
 
-	{ 0,			0,
+	{ 0,				0,
 	  NULL },
 };
 
-int
-qsphymatch(struct device *parent, void *match, void *aux)
+static int
+qsphymatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -126,39 +115,43 @@ qsphymatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-void
-qsphyattach(struct device *parent, struct device *self, void *aux)
+static void
+qsphyattach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
 	mpd = mii_phy_match(ma, qsphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	aprint_naive(": Media interface\n");
+	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &qsphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 qsphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -213,7 +206,7 @@ qsphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 qsphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -248,19 +241,19 @@ qsphy_status(struct mii_softc *sc)
 		    PHY_READ(sc, MII_QSPHY_PCTL);
 		switch (pctl & PCTL_OPMASK) {
 		case PCTL_10_T:
-			mii->mii_media_active |= IFM_10_T|IFM_HDX;
+			mii->mii_media_active |= IFM_10_T;
 			break;
 		case PCTL_10_T_FDX:
 			mii->mii_media_active |= IFM_10_T|IFM_FDX;
 			break;
 		case PCTL_100_TX:
-			mii->mii_media_active |= IFM_100_TX|IFM_HDX;
+			mii->mii_media_active |= IFM_100_TX;
 			break;
 		case PCTL_100_TX_FDX:
 			mii->mii_media_active |= IFM_100_TX|IFM_FDX;
 			break;
 		case PCTL_100_T4:
-			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
+			mii->mii_media_active |= IFM_100_T4;
 			break;
 		default:
 			/* Erg... this shouldn't happen. */
@@ -271,9 +264,10 @@ qsphy_status(struct mii_softc *sc)
 		mii->mii_media_active = ife->ifm_media;
 }
 
-void
+static void
 qsphy_reset(struct mii_softc *sc)
 {
+
 	mii_phy_reset(sc);
 	PHY_WRITE(sc, MII_QSPHY_IMASK, 0);
 }

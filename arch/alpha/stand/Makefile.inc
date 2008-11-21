@@ -1,25 +1,11 @@
-#	$OpenBSD: Makefile.inc,v 1.10 2006/09/26 23:14:52 martin Exp $
-#	$NetBSD: Makefile.inc,v 1.8 1997/04/06 08:39:38 cgd Exp $
+# $NetBSD: Makefile.inc,v 1.22 2005/12/11 12:16:20 christos Exp $
 
-.include <bsd.own.mk>			# for ELF_TOOLCHAIN definition
+NOMAN=			# defined
 
-BINDIR=			/usr/mdec
+.include <bsd.own.mk>
 
-# For descriptions of regions available to bootstrap programs, see
-# section 3.4.1.2 (pp. III 3-14 - III 3-18) of the second edition of
-# the Alpha AXP Architecture Reference Manual.
+BINDIR?=		/usr/mdec
+WARNS?=			1
 
-PRIMARY_LOAD_ADDRESS=	20000000	# "Region 1 start"
-SECONDARY_LOAD_ADDRESS=	20004000	# "Region 1 start" + 32k
-HEAP_LIMIT=		20040000	# "Region 1 start" + 256k
-
-CPPFLAGS+=		-DPRIMARY_LOAD_ADDRESS="0x${PRIMARY_LOAD_ADDRESS}"
-CPPFLAGS+=		-DSECONDARY_LOAD_ADDRESS="0x${SECONDARY_LOAD_ADDRESS}"
-
-CPPFLAGS+=		-D_STANDALONE
-
-XCPPFLAGS+=		-DHEAP_LIMIT="0x${HEAP_LIMIT}"
-
-CFLAGS+=		-fno-stack-protector -fno-builtin-printf \
-			-fno-builtin-vprintf -fno-builtin-putchar \
-			-fno-builtin-puts
+CPPFLAGS+=		-I${.CURDIR}/../..
+LDSTATIC=		-static

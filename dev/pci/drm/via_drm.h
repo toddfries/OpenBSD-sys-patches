@@ -49,12 +49,12 @@
 #define VIA_DRM_DRIVER_PATCHLEVEL	1
 #define VIA_DRM_DRIVER_VERSION	  (((VIA_DRM_DRIVER_MAJOR) << 16) | (VIA_DRM_DRIVER_MINOR))
 
-#define VIA_NR_SAREA_CLIPRECTS		8
+#define VIA_NR_SAREA_CLIPRECTS 		8
 #define VIA_NR_XVMC_PORTS	       10
 #define VIA_NR_XVMC_LOCKS	       5
 #define VIA_MAX_CACHELINE_SIZE	  64
 #define XVMCLOCKPTR(saPriv,lockNo)					\
-	((volatile struct drm_hw_lock *)(((((unsigned long) (saPriv)->XvMCLockArea) + \
+	((volatile drm_hw_lock_t *)(((((unsigned long) (saPriv)->XvMCLockArea) + \
 				      (VIA_MAX_CACHELINE_SIZE - 1)) &	\
 				     ~(VIA_MAX_CACHELINE_SIZE - 1)) +	\
 				    VIA_MAX_CACHELINE_SIZE*(lockNo)))
@@ -114,7 +114,7 @@
 
 #define VIA_MEM_VIDEO   0	/* matches drm constant */
 #define VIA_MEM_AGP     1	/* matches drm constant */
-#define VIA_MEM_SYSTEM  2
+#define VIA_MEM_SYSTEM  2		
 #define VIA_MEM_MIXED   3
 #define VIA_MEM_UNKNOWN 4
 
@@ -187,7 +187,7 @@ typedef struct _drm_via_tex_region {
 typedef struct _drm_via_sarea {
 	unsigned int dirty;
 	unsigned int nbox;
-	struct drm_clip_rect boxes[VIA_NR_SAREA_CLIPRECTS];
+	drm_clip_rect_t boxes[VIA_NR_SAREA_CLIPRECTS];
 	drm_via_tex_region_t texList[VIA_NR_TEX_REGIONS + 1];
 	int texAge;		/* last time texture was uploaded */
 	int ctxOwner;		/* last context to upload state */
@@ -203,7 +203,7 @@ typedef struct _drm_via_sarea {
 
 	unsigned int XvMCDisplaying[VIA_NR_XVMC_PORTS];
 	unsigned int XvMCSubPicOn[VIA_NR_XVMC_PORTS];
-	unsigned int XvMCCtxNoGrabbed;	/* Last context to hold decoder */
+	unsigned int XvMCCtxNoGrabbed;	/* Last context to hold decoder */	
 
 	/* Used by the 3d driver only at this point, for pageflipping:
 	 */
@@ -250,14 +250,14 @@ typedef union drm_via_irqwait {
 	struct drm_wait_vblank_reply reply;
 } drm_via_irqwait_t;
 
-typedef struct drm_via_blitsync {
+typedef struct drm_via_blitsync { 
 	uint32_t sync_handle;
 	unsigned engine;
 } drm_via_blitsync_t;
 
-/*
+/* 
  * Below,"flags" is currently unused but will be used for possible future
- * extensions like kernel space bounce buffers for bad alignments and
+ * extensions like kernel space bounce buffers for bad alignments and 
  * blit engine busy-wait polling for better latency in the absence of
  * interrupts.
  */
@@ -271,11 +271,11 @@ typedef struct drm_via_dmablit {
 
 	unsigned char *mem_addr;
 	uint32_t  mem_stride;
-
+       
 	uint32_t  flags;
 	int to_fb;
 
-	drm_via_blitsync_t sync;
+	drm_via_blitsync_t sync;   
 } drm_via_dmablit_t;
 
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: qecvar.h,v 1.3 2006/06/02 20:00:56 miod Exp $	*/
-/*	$NetBSD: qecvar.h,v 1.4 1999/01/17 20:47:50 pk Exp $	*/
+/*	$NetBSD: qecvar.h,v 1.11 2008/04/28 20:23:57 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,16 +31,15 @@
 
 struct qec_softc {
 	struct device sc_dev;		/* us as a device */
-	bus_space_tag_t	sc_bustag;	/* bus & dma tags */
+	struct sbusdev sc_sd;		/* sbus device */
+	bus_space_tag_t	sc_bustag;	/* bus & DMA tags */
 	bus_dma_tag_t	sc_dmatag;
-	struct	sbus_range *sc_range;	/* PROM ranges */
-	int	sc_nrange;		/*	       */
-	struct	sbus_intr *sc_intr;	/* interrupt info */
+	struct	openprom_intr *sc_intr;	/* interrupt info */
 
 	bus_space_handle_t sc_regs;	/* QEC registers */
 	int	sc_nchannels;		/* # of channels on board */
 	int	sc_burst;		/* DVMA burst size in effect */
-	caddr_t	sc_buffer;		/* VA of the buffer we provide */
+	void *	sc_buffer;		/* VA of the buffer we provide */
 	int	sc_bufsiz;		/* Size of buffer */
 
 	u_int	sc_msize;		/* QEC buffer offset per channel */
@@ -57,14 +48,14 @@ struct qec_softc {
 
 struct qec_ring {
 	/* Ring Descriptors */
-	caddr_t		rb_membase;	/* Packet buffer: CPU address */
+	void *		rb_membase;	/* Packet buffer: CPU address */
 	bus_addr_t	rb_dmabase;	/* Packet buffer: DMA address */
 	struct	qec_xd	*rb_txd;	/* Transmit descriptors */
 	bus_addr_t	rb_txddma;	/* DMA address of same */
 	struct	qec_xd	*rb_rxd;	/* Receive descriptors */
 	bus_addr_t	rb_rxddma;	/* DMA address of same */
-	caddr_t		rb_txbuf;	/* Transmit buffers */
-	caddr_t		rb_rxbuf;	/* Receive buffers */
+	void *		rb_txbuf;	/* Transmit buffers */
+	void *		rb_rxbuf;	/* Receive buffers */
 	int		rb_ntbuf;	/* # of transmit buffers */
 	int		rb_nrbuf;	/* # of receive buffers */
 

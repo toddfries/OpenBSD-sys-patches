@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.58 2008/04/20 00:23:28 brad Exp $ */
+/*	$NetBSD: rtl81x9.c,v 1.82 2008/04/25 11:27:19 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -30,6 +30,8 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	FreeBSD Id: if_rl.c,v 1.17 1999/06/19 20:17:37 wpaul Exp
  */
 
 /*
@@ -83,212 +85,183 @@
  * to select which interface to use depending on the chip type.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rtl81x9.c,v 1.82 2008/04/25 11:27:19 tsutsui Exp $");
+
 #include "bpfilter.h"
+#include "rnd.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/callout.h>
+#include <sys/device.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
-#include <sys/device.h>
-#include <sys/timeout.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
+#include <net/if_arp.h>
+#include <net/if_ether.h>
 #include <net/if_dl.h>
-#include <net/if_types.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/in_var.h>
-#include <netinet/ip.h>
-#include <netinet/if_ether.h>
-#endif
-
 #include <net/if_media.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
 
-#include <machine/bus.h>
+#include <sys/bus.h>
+#include <machine/endian.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 
 #include <dev/ic/rtl81x9reg.h>
+#include <dev/ic/rtl81x9var.h>
 
-/*
- * Various supported PHY vendors/types and their names. Note that
- * this driver will work with pretty much any MII-compliant PHY,
- * so failure to positively identify the chip is not a fatal error.
- */
+#if defined(DEBUG)
+#define STATIC
+#else
+#define STATIC static
+#endif
 
-void rl_tick(void *);
-void rl_shutdown(void *);
-void rl_powerhook(int, void *);
+STATIC void rtk_reset(struct rtk_softc *);
+STATIC void rtk_rxeof(struct rtk_softc *);
+STATIC void rtk_txeof(struct rtk_softc *);
+STATIC void rtk_start(struct ifnet *);
+STATIC int rtk_ioctl(struct ifnet *, u_long, void *);
+STATIC int rtk_init(struct ifnet *);
+STATIC void rtk_stop(struct ifnet *, int);
 
-int rl_encap(struct rl_softc *, struct mbuf * );
+STATIC void rtk_watchdog(struct ifnet *);
 
-void rl_rxeof(struct rl_softc *);
-void rl_txeof(struct rl_softc *);
-void rl_start(struct ifnet *);
-int rl_ioctl(struct ifnet *, u_long, caddr_t);
-void rl_init(void *);
-void rl_stop(struct rl_softc *);
-void rl_watchdog(struct ifnet *);
-int rl_ifmedia_upd(struct ifnet *);
-void rl_ifmedia_sts(struct ifnet *, struct ifmediareq *);
+STATIC void rtk_eeprom_putbyte(struct rtk_softc *, int, int);
+STATIC void rtk_mii_sync(struct rtk_softc *);
+STATIC void rtk_mii_send(struct rtk_softc *, uint32_t, int);
+STATIC int rtk_mii_readreg(struct rtk_softc *, struct rtk_mii_frame *);
+STATIC int rtk_mii_writereg(struct rtk_softc *, struct rtk_mii_frame *);
 
-void rl_eeprom_getword(struct rl_softc *, int, int, u_int16_t *);
-void rl_eeprom_putbyte(struct rl_softc *, int, int);
-void rl_read_eeprom(struct rl_softc *, caddr_t, int, int, int, int);
+STATIC int rtk_phy_readreg(device_t, int, int);
+STATIC void rtk_phy_writereg(device_t, int, int, int);
+STATIC void rtk_phy_statchg(device_t);
+STATIC void rtk_tick(void *);
 
-void rl_mii_sync(struct rl_softc *);
-void rl_mii_send(struct rl_softc *, u_int32_t, int);
-int rl_mii_readreg(struct rl_softc *, struct rl_mii_frame *);
-int rl_mii_writereg(struct rl_softc *, struct rl_mii_frame *);
+STATIC int rtk_enable(struct rtk_softc *);
+STATIC void rtk_disable(struct rtk_softc *);
 
-int rl_miibus_readreg(struct device *, int, int);
-void rl_miibus_writereg(struct device *, int, int, int);
-void rl_miibus_statchg(struct device *);
-
-void rl_setmulti(struct rl_softc *);
-void rl_reset(struct rl_softc *);
-int rl_list_tx_init(struct rl_softc *);
+STATIC void rtk_list_tx_init(struct rtk_softc *);
 
 #define EE_SET(x)					\
-	CSR_WRITE_1(sc, RL_EECMD,			\
-		CSR_READ_1(sc, RL_EECMD) | x)
+	CSR_WRITE_1(sc, RTK_EECMD,			\
+		CSR_READ_1(sc, RTK_EECMD) | (x))
 
 #define EE_CLR(x)					\
-	CSR_WRITE_1(sc, RL_EECMD,			\
-		CSR_READ_1(sc, RL_EECMD) & ~x)
+	CSR_WRITE_1(sc, RTK_EECMD,			\
+		CSR_READ_1(sc, RTK_EECMD) & ~(x))
+
+#define EE_DELAY()	DELAY(100)
+
+#define ETHER_PAD_LEN (ETHER_MIN_LEN - ETHER_CRC_LEN)
 
 /*
  * Send a read command and address to the EEPROM, check for ACK.
  */
-void rl_eeprom_putbyte(sc, addr, addr_len)
-	struct rl_softc		*sc;
-	int			addr, addr_len;
+STATIC void
+rtk_eeprom_putbyte(struct rtk_softc *sc, int addr, int addr_len)
 {
-	register int		d, i;
+	int d, i;
 
-	d = (RL_EECMD_READ << addr_len) | addr;
+	d = (RTK_EECMD_READ << addr_len) | addr;
 
 	/*
-	 * Feed in each bit and strobe the clock.
+	 * Feed in each bit and stobe the clock.
 	 */
-	for (i = RL_EECMD_LEN + addr_len; i; i--) {
-		if (d & (1 << (i - 1)))
-			EE_SET(RL_EE_DATAIN);
-		else
-			EE_CLR(RL_EE_DATAIN);
-
-		DELAY(100);
-		EE_SET(RL_EE_CLK);
-		DELAY(150);
-		EE_CLR(RL_EE_CLK);
-		DELAY(100);
+	for (i = RTK_EECMD_LEN + addr_len; i > 0; i--) {
+		if (d & (1 << (i - 1))) {
+			EE_SET(RTK_EE_DATAIN);
+		} else {
+			EE_CLR(RTK_EE_DATAIN);
+		}
+		EE_DELAY();
+		EE_SET(RTK_EE_CLK);
+		EE_DELAY();
+		EE_CLR(RTK_EE_CLK);
+		EE_DELAY();
 	}
 }
 
 /*
  * Read a word of data stored in the EEPROM at address 'addr.'
  */
-void rl_eeprom_getword(sc, addr, addr_len, dest)
-	struct rl_softc		*sc;
-	int			addr, addr_len;
-	u_int16_t		*dest;
+uint16_t
+rtk_read_eeprom(struct rtk_softc *sc, int addr, int addr_len)
 {
-	register int		i;
-	u_int16_t		word = 0;
+	uint16_t word;
+	int i;
 
 	/* Enter EEPROM access mode. */
-	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_PROGRAM|RL_EE_SEL);
+	CSR_WRITE_1(sc, RTK_EECMD, RTK_EEMODE_PROGRAM);
+	EE_DELAY();
+	EE_SET(RTK_EE_SEL);
 
 	/*
 	 * Send address of word we want to read.
 	 */
-	rl_eeprom_putbyte(sc, addr, addr_len);
-
-	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_PROGRAM|RL_EE_SEL);
+	rtk_eeprom_putbyte(sc, addr, addr_len);
 
 	/*
 	 * Start reading bits from EEPROM.
 	 */
+	word = 0;
 	for (i = 16; i > 0; i--) {
-		EE_SET(RL_EE_CLK);
-		DELAY(100);
-		if (CSR_READ_1(sc, RL_EECMD) & RL_EE_DATAOUT)
+		EE_SET(RTK_EE_CLK);
+		EE_DELAY();
+		if (CSR_READ_1(sc, RTK_EECMD) & RTK_EE_DATAOUT)
 			word |= 1 << (i - 1);
-		EE_CLR(RL_EE_CLK);
-		DELAY(100);
+		EE_CLR(RTK_EE_CLK);
+		EE_DELAY();
 	}
 
 	/* Turn off EEPROM access mode. */
-	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
+	CSR_WRITE_1(sc, RTK_EECMD, RTK_EEMODE_OFF);
 
-	*dest = word;
-}
-
-/*
- * Read a sequence of words from the EEPROM.
- */
-void rl_read_eeprom(sc, dest, off, addr_len, cnt, swap)
-	struct rl_softc		*sc;
-	caddr_t			dest;
-	int			off;
-	int			addr_len;
-	int			cnt;
-	int			swap;
-{
-	int			i;
-	u_int16_t		word = 0, *ptr;
-
-	for (i = 0; i < cnt; i++) {
-		rl_eeprom_getword(sc, off + i, addr_len, &word);
-		ptr = (u_int16_t *)(dest + (i * 2));
-		if (swap)
-			*ptr = letoh16(word);
-		else
-			*ptr = word;
-	}
+	return word;
 }
 
 /*
  * MII access routines are provided for the 8129, which
  * doesn't have a built-in PHY. For the 8139, we fake things
- * up by diverting rl_phy_readreg()/rl_phy_writereg() to the
+ * up by diverting rtk_phy_readreg()/rtk_phy_writereg() to the
  * direct access PHY registers.
  */
 #define MII_SET(x)					\
-	CSR_WRITE_1(sc, RL_MII,				\
-		CSR_READ_1(sc, RL_MII) | x)
+	CSR_WRITE_1(sc, RTK_MII,			\
+		CSR_READ_1(sc, RTK_MII) | (x))
 
 #define MII_CLR(x)					\
-	CSR_WRITE_1(sc, RL_MII,				\
-		CSR_READ_1(sc, RL_MII) & ~x)
+	CSR_WRITE_1(sc, RTK_MII,			\
+		CSR_READ_1(sc, RTK_MII) & ~(x))
 
 /*
  * Sync the PHYs by setting data bit and strobing the clock 32 times.
  */
-void rl_mii_sync(sc)
-	struct rl_softc		*sc;
+STATIC void
+rtk_mii_sync(struct rtk_softc *sc)
 {
-	register int		i;
+	int i;
 
-	MII_SET(RL_MII_DIR|RL_MII_DATAOUT);
+	MII_SET(RTK_MII_DIR|RTK_MII_DATAOUT);
 
 	for (i = 0; i < 32; i++) {
-		MII_SET(RL_MII_CLK);
+		MII_SET(RTK_MII_CLK);
 		DELAY(1);
-		MII_CLR(RL_MII_CLK);
+		MII_CLR(RTK_MII_CLK);
 		DELAY(1);
 	}
 }
@@ -296,77 +269,75 @@ void rl_mii_sync(sc)
 /*
  * Clock a series of bits through the MII.
  */
-void rl_mii_send(sc, bits, cnt)
-	struct rl_softc		*sc;
-	u_int32_t		bits;
-	int			cnt;
+STATIC void
+rtk_mii_send(struct rtk_softc *sc, uint32_t bits, int cnt)
 {
-	int			i;
+	int i;
 
-	MII_CLR(RL_MII_CLK);
+	MII_CLR(RTK_MII_CLK);
 
-	for (i = (0x1 << (cnt - 1)); i; i >>= 1) {
-		if (bits & i)
-			MII_SET(RL_MII_DATAOUT);
-		else
-			MII_CLR(RL_MII_DATAOUT);
+	for (i = cnt; i > 0; i--) {
+		if (bits & (1 << (i - 1))) {
+			MII_SET(RTK_MII_DATAOUT);
+		} else {
+			MII_CLR(RTK_MII_DATAOUT);
+		}
 		DELAY(1);
-		MII_CLR(RL_MII_CLK);
+		MII_CLR(RTK_MII_CLK);
 		DELAY(1);
-		MII_SET(RL_MII_CLK);
+		MII_SET(RTK_MII_CLK);
 	}
 }
 
 /*
  * Read an PHY register through the MII.
  */
-int rl_mii_readreg(sc, frame)
-	struct rl_softc		*sc;
-	struct rl_mii_frame	*frame;
+STATIC int
+rtk_mii_readreg(struct rtk_softc *sc, struct rtk_mii_frame *frame)
 {
-	int			i, ack, s;
+	int i, ack, s;
 
 	s = splnet();
 
 	/*
 	 * Set up frame for RX.
 	 */
-	frame->mii_stdelim = RL_MII_STARTDELIM;
-	frame->mii_opcode = RL_MII_READOP;
+	frame->mii_stdelim = RTK_MII_STARTDELIM;
+	frame->mii_opcode = RTK_MII_READOP;
 	frame->mii_turnaround = 0;
 	frame->mii_data = 0;
 
-	CSR_WRITE_2(sc, RL_MII, 0);
+	CSR_WRITE_2(sc, RTK_MII, 0);
 
 	/*
 	 * Turn on data xmit.
 	 */
-	MII_SET(RL_MII_DIR);
+	MII_SET(RTK_MII_DIR);
 
-	rl_mii_sync(sc);
+	rtk_mii_sync(sc);
 
 	/*
 	 * Send command/address info.
 	 */
-	rl_mii_send(sc, frame->mii_stdelim, 2);
-	rl_mii_send(sc, frame->mii_opcode, 2);
-	rl_mii_send(sc, frame->mii_phyaddr, 5);
-	rl_mii_send(sc, frame->mii_regaddr, 5);
+	rtk_mii_send(sc, frame->mii_stdelim, 2);
+	rtk_mii_send(sc, frame->mii_opcode, 2);
+	rtk_mii_send(sc, frame->mii_phyaddr, 5);
+	rtk_mii_send(sc, frame->mii_regaddr, 5);
 
 	/* Idle bit */
-	MII_CLR((RL_MII_CLK|RL_MII_DATAOUT));
+	MII_CLR((RTK_MII_CLK|RTK_MII_DATAOUT));
 	DELAY(1);
-	MII_SET(RL_MII_CLK);
+	MII_SET(RTK_MII_CLK);
 	DELAY(1);
 
 	/* Turn off xmit. */
-	MII_CLR(RL_MII_DIR);
+	MII_CLR(RTK_MII_DIR);
 
 	/* Check for ack */
-	MII_CLR(RL_MII_CLK);
+	MII_CLR(RTK_MII_CLK);
 	DELAY(1);
-	ack = CSR_READ_2(sc, RL_MII) & RL_MII_DATAIN;
-	MII_SET(RL_MII_CLK);
+	ack = CSR_READ_2(sc, RTK_MII) & RTK_MII_DATAIN;
+	MII_SET(RTK_MII_CLK);
 	DELAY(1);
 
 	/*
@@ -374,130 +345,229 @@ int rl_mii_readreg(sc, frame)
 	 * need to clock through 16 cycles to keep the PHY(s) in sync.
 	 */
 	if (ack) {
-		for(i = 0; i < 16; i++) {
-			MII_CLR(RL_MII_CLK);
+		for (i = 0; i < 16; i++) {
+			MII_CLR(RTK_MII_CLK);
 			DELAY(1);
-			MII_SET(RL_MII_CLK);
+			MII_SET(RTK_MII_CLK);
 			DELAY(1);
 		}
 		goto fail;
 	}
 
-	for (i = 0x8000; i; i >>= 1) {
-		MII_CLR(RL_MII_CLK);
+	for (i = 16; i > 0; i--) {
+		MII_CLR(RTK_MII_CLK);
 		DELAY(1);
 		if (!ack) {
-			if (CSR_READ_2(sc, RL_MII) & RL_MII_DATAIN)
-				frame->mii_data |= i;
+			if (CSR_READ_2(sc, RTK_MII) & RTK_MII_DATAIN)
+				frame->mii_data |= 1 << (i - 1);
 			DELAY(1);
 		}
-		MII_SET(RL_MII_CLK);
+		MII_SET(RTK_MII_CLK);
 		DELAY(1);
 	}
 
-fail:
-
-	MII_CLR(RL_MII_CLK);
+ fail:
+	MII_CLR(RTK_MII_CLK);
 	DELAY(1);
-	MII_SET(RL_MII_CLK);
+	MII_SET(RTK_MII_CLK);
 	DELAY(1);
 
 	splx(s);
 
 	if (ack)
-		return(1);
-	return(0);
+		return 1;
+	return 0;
 }
 
 /*
  * Write to a PHY register through the MII.
  */
-int rl_mii_writereg(sc, frame)
-	struct rl_softc		*sc;
-	struct rl_mii_frame	*frame;
+STATIC int
+rtk_mii_writereg(struct rtk_softc *sc, struct rtk_mii_frame *frame)
 {
-	int			s;
+	int s;
 
 	s = splnet();
 	/*
 	 * Set up frame for TX.
 	 */
-
-	frame->mii_stdelim = RL_MII_STARTDELIM;
-	frame->mii_opcode = RL_MII_WRITEOP;
-	frame->mii_turnaround = RL_MII_TURNAROUND;
+	frame->mii_stdelim = RTK_MII_STARTDELIM;
+	frame->mii_opcode = RTK_MII_WRITEOP;
+	frame->mii_turnaround = RTK_MII_TURNAROUND;
 
 	/*
 	 * Turn on data output.
 	 */
-	MII_SET(RL_MII_DIR);
+	MII_SET(RTK_MII_DIR);
 
-	rl_mii_sync(sc);
+	rtk_mii_sync(sc);
 
-	rl_mii_send(sc, frame->mii_stdelim, 2);
-	rl_mii_send(sc, frame->mii_opcode, 2);
-	rl_mii_send(sc, frame->mii_phyaddr, 5);
-	rl_mii_send(sc, frame->mii_regaddr, 5);
-	rl_mii_send(sc, frame->mii_turnaround, 2);
-	rl_mii_send(sc, frame->mii_data, 16);
+	rtk_mii_send(sc, frame->mii_stdelim, 2);
+	rtk_mii_send(sc, frame->mii_opcode, 2);
+	rtk_mii_send(sc, frame->mii_phyaddr, 5);
+	rtk_mii_send(sc, frame->mii_regaddr, 5);
+	rtk_mii_send(sc, frame->mii_turnaround, 2);
+	rtk_mii_send(sc, frame->mii_data, 16);
 
 	/* Idle bit. */
-	MII_SET(RL_MII_CLK);
+	MII_SET(RTK_MII_CLK);
 	DELAY(1);
-	MII_CLR(RL_MII_CLK);
+	MII_CLR(RTK_MII_CLK);
 	DELAY(1);
 
 	/*
 	 * Turn off xmit.
 	 */
-	MII_CLR(RL_MII_DIR);
+	MII_CLR(RTK_MII_DIR);
 
 	splx(s);
 
-	return(0);
+	return 0;
 }
+
+STATIC int
+rtk_phy_readreg(device_t self, int phy, int reg)
+{
+	struct rtk_softc *sc = device_private(self);
+	struct rtk_mii_frame frame;
+	int rval;
+	int rtk8139_reg;
+
+	if ((sc->sc_quirk & RTKQ_8129) == 0) {
+		if (phy != 7)
+			return 0;
+
+		switch (reg) {
+		case MII_BMCR:
+			rtk8139_reg = RTK_BMCR;
+			break;
+		case MII_BMSR:
+			rtk8139_reg = RTK_BMSR;
+			break;
+		case MII_ANAR:
+			rtk8139_reg = RTK_ANAR;
+			break;
+		case MII_ANER:
+			rtk8139_reg = RTK_ANER;
+			break;
+		case MII_ANLPAR:
+			rtk8139_reg = RTK_LPAR;
+			break;
+		default:
+#if 0
+			printf("%s: bad phy register\n", device_xname(self));
+#endif
+			return 0;
+		}
+		rval = CSR_READ_2(sc, rtk8139_reg);
+		return rval;
+	}
+
+	memset((char *)&frame, 0, sizeof(frame));
+
+	frame.mii_phyaddr = phy;
+	frame.mii_regaddr = reg;
+	rtk_mii_readreg(sc, &frame);
+
+	return frame.mii_data;
+}
+
+STATIC void
+rtk_phy_writereg(device_t self, int phy, int reg, int data)
+{
+	struct rtk_softc *sc = device_private(self);
+	struct rtk_mii_frame frame;
+	int rtk8139_reg;
+
+	if ((sc->sc_quirk & RTKQ_8129) == 0) {
+		if (phy != 7)
+			return;
+
+		switch (reg) {
+		case MII_BMCR:
+			rtk8139_reg = RTK_BMCR;
+			break;
+		case MII_BMSR:
+			rtk8139_reg = RTK_BMSR;
+			break;
+		case MII_ANAR:
+			rtk8139_reg = RTK_ANAR;
+			break;
+		case MII_ANER:
+			rtk8139_reg = RTK_ANER;
+			break;
+		case MII_ANLPAR:
+			rtk8139_reg = RTK_LPAR;
+			break;
+		default:
+#if 0
+			printf("%s: bad phy register\n", device_xname(self));
+#endif
+			return;
+		}
+		CSR_WRITE_2(sc, rtk8139_reg, data);
+		return;
+	}
+
+	memset((char *)&frame, 0, sizeof(frame));
+
+	frame.mii_phyaddr = phy;
+	frame.mii_regaddr = reg;
+	frame.mii_data = data;
+
+	rtk_mii_writereg(sc, &frame);
+}
+
+STATIC void
+rtk_phy_statchg(device_t v)
+{
+
+	/* Nothing to do. */
+}
+
+#define	rtk_calchash(addr) \
+	(ether_crc32_be((addr), ETHER_ADDR_LEN) >> 26)
 
 /*
  * Program the 64-bit multicast hash filter.
  */
-void rl_setmulti(sc)
-	struct rl_softc		*sc;
+void
+rtk_setmulti(struct rtk_softc *sc)
 {
-	struct ifnet		*ifp;
-	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
-	struct arpcom		*ac = &sc->sc_arpcom;
-	struct ether_multi	*enm;
-	struct ether_multistep	step;
-	u_int32_t		rxfilt;
-	int			mcnt = 0;
+	struct ifnet *ifp;
+	uint32_t hashes[2] = { 0, 0 };
+	uint32_t rxfilt;
+	struct ether_multi *enm;
+	struct ether_multistep step;
+	int h, mcnt;
 
-	ifp = &sc->sc_arpcom.ac_if;
+	ifp = &sc->ethercom.ec_if;
 
-	rxfilt = CSR_READ_4(sc, RL_RXCFG);
+	rxfilt = CSR_READ_4(sc, RTK_RXCFG);
 
-allmulti:
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-		rxfilt |= RL_RXCFG_RX_MULTI;
-		CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
-		CSR_WRITE_4(sc, RL_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, RL_MAR4, 0xFFFFFFFF);
+	if (ifp->if_flags & IFF_PROMISC) {
+ allmulti:
+		ifp->if_flags |= IFF_ALLMULTI;
+		rxfilt |= RTK_RXCFG_RX_MULTI;
+		CSR_WRITE_4(sc, RTK_RXCFG, rxfilt);
+		CSR_WRITE_4(sc, RTK_MAR0, 0xFFFFFFFF);
+		CSR_WRITE_4(sc, RTK_MAR4, 0xFFFFFFFF);
 		return;
 	}
 
 	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, RL_MAR0, 0);
-	CSR_WRITE_4(sc, RL_MAR4, 0);
+	CSR_WRITE_4(sc, RTK_MAR0, 0);
+	CSR_WRITE_4(sc, RTK_MAR4, 0);
 
 	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
+	ETHER_FIRST_MULTI(step, &sc->ethercom, enm);
+	mcnt = 0;
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
+		if (memcmp(enm->enm_addrlo, enm->enm_addrhi,
+		    ETHER_ADDR_LEN) != 0)
 			goto allmulti;
-		}
-		mcnt++;
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
+
+		h = rtk_calchash(enm->enm_addrlo);
 		if (h < 32)
 			hashes[0] |= (1 << h);
 		else
@@ -506,63 +576,337 @@ allmulti:
 		ETHER_NEXT_MULTI(step, enm);
 	}
 
-	if (mcnt)
-		rxfilt |= RL_RXCFG_RX_MULTI;
-	else
-		rxfilt &= ~RL_RXCFG_RX_MULTI;
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
-	CSR_WRITE_4(sc, RL_MAR0, hashes[0]);
-	CSR_WRITE_4(sc, RL_MAR4, hashes[1]);
+	if (mcnt)
+		rxfilt |= RTK_RXCFG_RX_MULTI;
+	else
+		rxfilt &= ~RTK_RXCFG_RX_MULTI;
+
+	CSR_WRITE_4(sc, RTK_RXCFG, rxfilt);
+
+	/*
+	 * For some unfathomable reason, RealTek decided to reverse
+	 * the order of the multicast hash registers in the PCI Express
+	 * parts. This means we have to write the hash pattern in reverse
+	 * order for those devices.
+	 */
+	if ((sc->sc_quirk & RTKQ_PCIE) != 0) {
+		CSR_WRITE_4(sc, RTK_MAR0, bswap32(hashes[1]));
+		CSR_WRITE_4(sc, RTK_MAR4, bswap32(hashes[0]));
+	} else {
+		CSR_WRITE_4(sc, RTK_MAR0, hashes[0]);
+		CSR_WRITE_4(sc, RTK_MAR4, hashes[1]);
+	}
 }
 
 void
-rl_reset(sc)
-	struct rl_softc		*sc;
+rtk_reset(struct rtk_softc *sc)
 {
-	register int		i;
+	int i;
 
-	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_RESET);
+	CSR_WRITE_1(sc, RTK_COMMAND, RTK_CMD_RESET);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RTK_TIMEOUT; i++) {
 		DELAY(10);
-		if (!(CSR_READ_1(sc, RL_COMMAND) & RL_CMD_RESET))
+		if ((CSR_READ_1(sc, RTK_COMMAND) & RTK_CMD_RESET) == 0)
 			break;
 	}
-	if (i == RL_TIMEOUT)
-		printf("%s: reset never completed!\n", sc->sc_dev.dv_xname);
+	if (i == RTK_TIMEOUT)
+		printf("%s: reset never completed!\n",
+		    device_xname(sc->sc_dev));
+}
 
+/*
+ * Attach the interface. Allocate softc structures, do ifmedia
+ * setup and ethernet/BPF attach.
+ */
+void
+rtk_attach(struct rtk_softc *sc)
+{
+	device_t self = sc->sc_dev;
+	struct ifnet *ifp;
+	struct rtk_tx_desc *txd;
+	uint16_t val;
+	uint8_t eaddr[ETHER_ADDR_LEN];
+	int error;
+	int i, addr_len;
+
+	callout_init(&sc->rtk_tick_ch, 0);
+
+	/*
+	 * Check EEPROM type 9346 or 9356.
+	 */
+	if (rtk_read_eeprom(sc, RTK_EE_ID, RTK_EEADDR_LEN1) == 0x8129)
+		addr_len = RTK_EEADDR_LEN1;
+	else
+		addr_len = RTK_EEADDR_LEN0;
+
+	/*
+	 * Get station address.
+	 */
+	val = rtk_read_eeprom(sc, RTK_EE_EADDR0, addr_len);
+	eaddr[0] = val & 0xff;
+	eaddr[1] = val >> 8;
+	val = rtk_read_eeprom(sc, RTK_EE_EADDR1, addr_len);
+	eaddr[2] = val & 0xff;
+	eaddr[3] = val >> 8;
+	val = rtk_read_eeprom(sc, RTK_EE_EADDR2, addr_len);
+	eaddr[4] = val & 0xff;
+	eaddr[5] = val >> 8;
+
+	if ((error = bus_dmamem_alloc(sc->sc_dmat,
+	    RTK_RXBUFLEN + 16, PAGE_SIZE, 0, &sc->sc_dmaseg, 1, &sc->sc_dmanseg,
+	    BUS_DMA_NOWAIT)) != 0) {
+		aprint_error_dev(self,
+		    "can't allocate recv buffer, error = %d\n", error);
+		goto fail_0;
+	}
+
+	if ((error = bus_dmamem_map(sc->sc_dmat, &sc->sc_dmaseg, sc->sc_dmanseg,
+	    RTK_RXBUFLEN + 16, (void **)&sc->rtk_rx_buf,
+	    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
+		aprint_error_dev(self,
+		    "can't map recv buffer, error = %d\n", error);
+		goto fail_1;
+	}
+
+	if ((error = bus_dmamap_create(sc->sc_dmat,
+	    RTK_RXBUFLEN + 16, 1, RTK_RXBUFLEN + 16, 0, BUS_DMA_NOWAIT,
+	    &sc->recv_dmamap)) != 0) {
+		aprint_error_dev(self,
+		    "can't create recv buffer DMA map, error = %d\n", error);
+		goto fail_2;
+	}
+
+	if ((error = bus_dmamap_load(sc->sc_dmat, sc->recv_dmamap,
+	    sc->rtk_rx_buf, RTK_RXBUFLEN + 16,
+	    NULL, BUS_DMA_READ|BUS_DMA_NOWAIT)) != 0) {
+		aprint_error_dev(self,
+		    "can't load recv buffer DMA map, error = %d\n", error);
+		goto fail_3;
+	}
+
+	for (i = 0; i < RTK_TX_LIST_CNT; i++) {
+		txd = &sc->rtk_tx_descs[i];
+		if ((error = bus_dmamap_create(sc->sc_dmat,
+		    MCLBYTES, 1, MCLBYTES, 0, BUS_DMA_NOWAIT,
+		    &txd->txd_dmamap)) != 0) {
+			aprint_error_dev(self,
+			    "can't create snd buffer DMA map, error = %d\n",
+			    error);
+			goto fail_4;
+		}
+		txd->txd_txaddr = RTK_TXADDR0 + (i * 4);
+		txd->txd_txstat = RTK_TXSTAT0 + (i * 4);
+	}
+	SIMPLEQ_INIT(&sc->rtk_tx_free);
+	SIMPLEQ_INIT(&sc->rtk_tx_dirty);
+
+	/*
+	 * From this point forward, the attachment cannot fail. A failure
+	 * before this releases all resources thar may have been
+	 * allocated.
+	 */
+	sc->sc_flags |= RTK_ATTACHED;
+
+	/* Reset the adapter. */
+	rtk_reset(sc);
+
+	aprint_normal_dev(self, "Ethernet address %s\n", ether_sprintf(eaddr));
+
+	ifp = &sc->ethercom.ec_if;
+	ifp->if_softc = sc;
+	strcpy(ifp->if_xname, device_xname(self));
+	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
+	ifp->if_ioctl = rtk_ioctl;
+	ifp->if_start = rtk_start;
+	ifp->if_watchdog = rtk_watchdog;
+	ifp->if_init = rtk_init;
+	ifp->if_stop = rtk_stop;
+	IFQ_SET_READY(&ifp->if_snd);
+
+	/*
+	 * Do ifmedia setup.
+	 */
+	sc->mii.mii_ifp = ifp;
+	sc->mii.mii_readreg = rtk_phy_readreg;
+	sc->mii.mii_writereg = rtk_phy_writereg;
+	sc->mii.mii_statchg = rtk_phy_statchg;
+	sc->ethercom.ec_mii = &sc->mii;
+	ifmedia_init(&sc->mii.mii_media, IFM_IMASK, ether_mediachange,
+	    ether_mediastatus);
+	mii_attach(self, &sc->mii, 0xffffffff,
+	    MII_PHY_ANY, MII_OFFSET_ANY, 0);
+
+	/* Choose a default media. */
+	if (LIST_FIRST(&sc->mii.mii_phys) == NULL) {
+		ifmedia_add(&sc->mii.mii_media, IFM_ETHER|IFM_NONE, 0, NULL);
+		ifmedia_set(&sc->mii.mii_media, IFM_ETHER|IFM_NONE);
+	} else {
+		ifmedia_set(&sc->mii.mii_media, IFM_ETHER|IFM_AUTO);
+	}
+
+	/*
+	 * Call MI attach routines.
+	 */
+	if_attach(ifp);
+	ether_ifattach(ifp, eaddr);
+
+#if NRND > 0
+	rnd_attach_source(&sc->rnd_source, device_xname(self),
+	    RND_TYPE_NET, 0);
+#endif
+
+	return;
+ fail_4:
+	for (i = 0; i < RTK_TX_LIST_CNT; i++) {
+		txd = &sc->rtk_tx_descs[i];
+		if (txd->txd_dmamap != NULL)
+			bus_dmamap_destroy(sc->sc_dmat, txd->txd_dmamap);
+	}
+ fail_3:
+	bus_dmamap_destroy(sc->sc_dmat, sc->recv_dmamap);
+ fail_2:
+	bus_dmamem_unmap(sc->sc_dmat, (void *)sc->rtk_rx_buf,
+	    RTK_RXBUFLEN + 16);
+ fail_1:
+	bus_dmamem_free(sc->sc_dmat, &sc->sc_dmaseg, sc->sc_dmanseg);
+ fail_0:
+	return;
 }
 
 /*
  * Initialize the transmit descriptors.
  */
-int
-rl_list_tx_init(sc)
-	struct rl_softc		*sc;
+STATIC void
+rtk_list_tx_init(struct rtk_softc *sc)
 {
-	struct rl_chain_data	*cd;
-	int			i;
+	struct rtk_tx_desc *txd;
+	int i;
 
-	cd = &sc->rl_cdata;
-	for (i = 0; i < RL_TX_LIST_CNT; i++) {
-		cd->rl_tx_chain[i] = NULL;
-		CSR_WRITE_4(sc,
-		    RL_TXADDR0 + (i * sizeof(u_int32_t)), 0x0000000);
+	while ((txd = SIMPLEQ_FIRST(&sc->rtk_tx_dirty)) != NULL)
+		SIMPLEQ_REMOVE_HEAD(&sc->rtk_tx_dirty, txd_q);
+	while ((txd = SIMPLEQ_FIRST(&sc->rtk_tx_free)) != NULL)
+		SIMPLEQ_REMOVE_HEAD(&sc->rtk_tx_free, txd_q);
+
+	for (i = 0; i < RTK_TX_LIST_CNT; i++) {
+		txd = &sc->rtk_tx_descs[i];
+		CSR_WRITE_4(sc, txd->txd_txaddr, 0);
+		SIMPLEQ_INSERT_TAIL(&sc->rtk_tx_free, txd, txd_q);
 	}
+}
 
-	sc->rl_cdata.cur_tx = 0;
-	sc->rl_cdata.last_tx = 0;
+/*
+ * rtk_activate:
+ *     Handle device activation/deactivation requests.
+ */
+int
+rtk_activate(device_t self, enum devact act)
+{
+	struct rtk_softc *sc = device_private(self);
+	int s, error;
 
-	return(0);
+	error = 0;
+	s = splnet();
+	switch (act) {
+	case DVACT_ACTIVATE:
+		error = EOPNOTSUPP;
+		break;
+	case DVACT_DEACTIVATE:
+		mii_activate(&sc->mii, act, MII_PHY_ANY, MII_OFFSET_ANY);
+		if_deactivate(&sc->ethercom.ec_if);
+		break;
+	}
+	splx(s);
+
+	return error;
+}
+
+/*
+ * rtk_detach:
+ *     Detach a rtk interface.
+ */
+int
+rtk_detach(struct rtk_softc *sc)
+{
+	struct ifnet *ifp = &sc->ethercom.ec_if;
+	struct rtk_tx_desc *txd;
+	int i;
+
+	/*
+	 * Succeed now if there isn't any work to do.
+	 */
+	if ((sc->sc_flags & RTK_ATTACHED) == 0)
+		return 0;
+
+	/* Unhook our tick handler. */
+	callout_stop(&sc->rtk_tick_ch);
+
+	/* Detach all PHYs. */
+	mii_detach(&sc->mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete all remaining media. */
+	ifmedia_delete_instance(&sc->mii.mii_media, IFM_INST_ANY);
+
+#if NRND > 0
+	rnd_detach_source(&sc->rnd_source);
+#endif
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	for (i = 0; i < RTK_TX_LIST_CNT; i++) {
+		txd = &sc->rtk_tx_descs[i];
+		if (txd->txd_dmamap != NULL)
+			bus_dmamap_destroy(sc->sc_dmat, txd->txd_dmamap);
+	}
+	bus_dmamap_destroy(sc->sc_dmat, sc->recv_dmamap);
+	bus_dmamem_unmap(sc->sc_dmat, (void *)sc->rtk_rx_buf,
+	    RTK_RXBUFLEN + 16);
+	bus_dmamem_free(sc->sc_dmat, &sc->sc_dmaseg, sc->sc_dmanseg);
+
+	return 0;
+}
+
+/*
+ * rtk_enable:
+ *     Enable the RTL81X9 chip.
+ */
+int
+rtk_enable(struct rtk_softc *sc)
+{
+
+	if (RTK_IS_ENABLED(sc) == 0 && sc->sc_enable != NULL) {
+		if ((*sc->sc_enable)(sc) != 0) {
+			printf("%s: device enable failed\n",
+			    device_xname(sc->sc_dev));
+			return EIO;
+		}
+		sc->sc_flags |= RTK_ENABLED;
+	}
+	return 0;
+}
+
+/*
+ * rtk_disable:
+ *     Disable the RTL81X9 chip.
+ */
+void
+rtk_disable(struct rtk_softc *sc)
+{
+
+	if (RTK_IS_ENABLED(sc) && sc->sc_disable != NULL) {
+		(*sc->sc_disable)(sc);
+		sc->sc_flags &= ~RTK_ENABLED;
+	}
 }
 
 /*
  * A frame has been uploaded: pass the resulting mbuf chain up to
  * the higher level protocols.
  *
- * You know there's something wrong with a PCI bus-master chip design
- * when you have to use m_devget().
+ * You know there's something wrong with a PCI bus-master chip design.
  *
  * The receive operation is badly documented in the datasheet, so I'll
  * attempt to document it here. The driver provides a buffer area and
@@ -575,46 +919,41 @@ rl_list_tx_init(sc)
  * the 'rx status register' mentioned in the datasheet.
  *
  * Note: to make the Alpha happy, the frame payload needs to be aligned
- * on a 32-bit boundary. To achieve this, we cheat a bit by copying from
- * the ring buffer starting at an address two bytes before the actual
- * data location. We can then shave off the first two bytes using m_adj().
- * The reason we do this is because m_devget() doesn't let us specify an
- * offset into the mbuf storage space, so we have to artificially create
- * one. The ring is allocated in such a way that there are a few unused
- * bytes of space preceding it so that it will be safe for us to do the
- * 2-byte backstep even if reading from the ring at offset 0.
+ * on a 32-bit boundary. To achieve this, we copy the data to mbuf
+ * shifted forward 2 bytes.
  */
-void
-rl_rxeof(sc)
-	struct rl_softc		*sc;
+STATIC void
+rtk_rxeof(struct rtk_softc *sc)
 {
-	struct mbuf		*m;
-	struct ifnet		*ifp;
-	int			total_len;
-	u_int32_t		rxstat;
-	caddr_t			rxbufpos;
-	int			wrap = 0;
-	u_int16_t		cur_rx;
-	u_int16_t		limit;
-	u_int16_t		rx_bytes = 0, max_bytes;
+	struct mbuf *m;
+	struct ifnet *ifp;
+	char *rxbufpos, *dst;
+	u_int total_len, wrap;
+	uint32_t rxstat;
+	uint16_t cur_rx, new_rx;
+	uint16_t limit;
+	uint16_t rx_bytes, max_bytes;
 
-	ifp = &sc->sc_arpcom.ac_if;
+	ifp = &sc->ethercom.ec_if;
 
-	cur_rx = (CSR_READ_2(sc, RL_CURRXADDR) + 16) % RL_RXBUFLEN;
+	cur_rx = (CSR_READ_2(sc, RTK_CURRXADDR) + 16) % RTK_RXBUFLEN;
 
 	/* Do not try to read past this point. */
-	limit = CSR_READ_2(sc, RL_CURRXBUF) % RL_RXBUFLEN;
+	limit = CSR_READ_2(sc, RTK_CURRXBUF) % RTK_RXBUFLEN;
 
 	if (limit < cur_rx)
-		max_bytes = (RL_RXBUFLEN - cur_rx) + limit;
+		max_bytes = (RTK_RXBUFLEN - cur_rx) + limit;
 	else
 		max_bytes = limit - cur_rx;
+	rx_bytes = 0;
 
-	while((CSR_READ_1(sc, RL_COMMAND) & RL_CMD_EMPTY_RXBUF) == 0) {
-		bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-		    0, sc->sc_rx_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
-		rxbufpos = sc->rl_cdata.rl_rx_buf + cur_rx;
-		rxstat = *(u_int32_t *)rxbufpos;
+	while ((CSR_READ_1(sc, RTK_COMMAND) & RTK_CMD_EMPTY_RXBUF) == 0) {
+		rxbufpos = (char *)sc->rtk_rx_buf + cur_rx;
+		bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap, cur_rx,
+		    RTK_RXSTAT_LEN, BUS_DMASYNC_POSTREAD);
+		rxstat = le32toh(*(uint32_t *)rxbufpos);
+		bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap, cur_rx,
+		    RTK_RXSTAT_LEN, BUS_DMASYNC_PREREAD);
 
 		/*
 		 * Here's a totally undocumented fact for you. When the
@@ -624,108 +963,147 @@ rl_rxeof(sc)
 		 * datasheet makes absolutely no mention of this and
 		 * RealTek should be shot for this.
 		 */
-		rxstat = htole32(rxstat);
 		total_len = rxstat >> 16;
-		if (total_len == RL_RXSTAT_UNFINISHED) {
-			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-			    0, sc->sc_rx_dmamap->dm_mapsize,
-			    BUS_DMASYNC_PREREAD);
+		if (total_len == RTK_RXSTAT_UNFINISHED)
 			break;
-		}
 
-		if (!(rxstat & RL_RXSTAT_RXOK) ||
+		if ((rxstat & RTK_RXSTAT_RXOK) == 0 ||
 		    total_len < ETHER_MIN_LEN ||
-		    total_len > ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN) {
+		    total_len > (MCLBYTES - RTK_ETHER_ALIGN)) {
 			ifp->if_ierrors++;
-			rl_init(sc);
-			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-			    0, sc->sc_rx_dmamap->dm_mapsize,
-			    BUS_DMASYNC_PREREAD);
+
+			/*
+			 * submitted by:[netbsd-pcmcia:00484]
+			 *	Takahiro Kambe <taca@sky.yamashina.kyoto.jp>
+			 * obtain from:
+			 *     FreeBSD if_rl.c rev 1.24->1.25
+			 *
+			 */
+#if 0
+			if (rxstat & (RTK_RXSTAT_BADSYM|RTK_RXSTAT_RUNT|
+			    RTK_RXSTAT_GIANT|RTK_RXSTAT_CRCERR|
+			    RTK_RXSTAT_ALIGNERR)) {
+				CSR_WRITE_2(sc, RTK_COMMAND, RTK_CMD_TX_ENB);
+				CSR_WRITE_2(sc, RTK_COMMAND,
+				    RTK_CMD_TX_ENB|RTK_CMD_RX_ENB);
+				CSR_WRITE_4(sc, RTK_RXCFG, RTK_RXCFG_CONFIG);
+				CSR_WRITE_4(sc, RTK_RXADDR,
+				    sc->recv_dmamap->dm_segs[0].ds_addr);
+				cur_rx = 0;
+			}
+			break;
+#else
+			rtk_init(ifp);
 			return;
+#endif
 		}
 
 		/* No errors; receive the packet. */
-		rx_bytes += total_len + 4;
-
-		/*
-		 * XXX The RealTek chip includes the CRC with every
-		 * received frame, and there's no way to turn this
-		 * behavior off (at least, I can't find anything in
-		 * the manual that explains how to do it) so we have
-		 * to trim off the CRC manually.
-		 */
-		total_len -= ETHER_CRC_LEN;
+		rx_bytes += total_len + RTK_RXSTAT_LEN;
 
 		/*
 		 * Avoid trying to read more bytes than we know
 		 * the chip has prepared for us.
 		 */
-		if (rx_bytes > max_bytes) {
-			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-			    0, sc->sc_rx_dmamap->dm_mapsize,
-			    BUS_DMASYNC_PREREAD);
+		if (rx_bytes > max_bytes)
 			break;
+
+		/*
+		 * Skip the status word, wrapping around to the beginning
+		 * of the Rx area, if necessary.
+		 */
+		cur_rx = (cur_rx + RTK_RXSTAT_LEN) % RTK_RXBUFLEN;
+		rxbufpos = (char *)sc->rtk_rx_buf + cur_rx;
+
+		/*
+		 * Compute the number of bytes at which the packet
+		 * will wrap to the beginning of the ring buffer.
+		 */
+		wrap = RTK_RXBUFLEN - cur_rx;
+
+		/*
+		 * Compute where the next pending packet is.
+		 */
+		if (total_len > wrap)
+			new_rx = total_len - wrap;
+		else
+			new_rx = cur_rx + total_len;
+		/* Round up to 32-bit boundary. */
+		new_rx = ((new_rx + 3) & ~3) % RTK_RXBUFLEN;
+
+		/*
+		 * The RealTek chip includes the CRC with every
+		 * incoming packet; trim it off here.
+		 */
+		total_len -= ETHER_CRC_LEN;
+
+		/*
+		 * Now allocate an mbuf (and possibly a cluster) to hold
+		 * the packet. Note we offset the packet 2 bytes so that
+		 * data after the Ethernet header will be 4-byte aligned.
+		 */
+		MGETHDR(m, M_DONTWAIT, MT_DATA);
+		if (m == NULL) {
+			printf("%s: unable to allocate Rx mbuf\n",
+			    device_xname(sc->sc_dev));
+			ifp->if_ierrors++;
+			goto next_packet;
 		}
-
-		rxbufpos = sc->rl_cdata.rl_rx_buf +
-			((cur_rx + sizeof(u_int32_t)) % RL_RXBUFLEN);
-
-		if (rxbufpos == (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN))
-			rxbufpos = sc->rl_cdata.rl_rx_buf;
-
-		wrap = (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN) - rxbufpos;
-
-		if (total_len > wrap) {
-			m = m_devget(rxbufpos - ETHER_ALIGN,
-			    wrap + ETHER_ALIGN, 0, ifp, NULL);
-			if (m == NULL)
+		if (total_len > (MHLEN - RTK_ETHER_ALIGN)) {
+			MCLGET(m, M_DONTWAIT);
+			if ((m->m_flags & M_EXT) == 0) {
+				printf("%s: unable to allocate Rx cluster\n",
+				    device_xname(sc->sc_dev));
 				ifp->if_ierrors++;
-			else {
-				m_copyback(m, wrap + ETHER_ALIGN,
-				     total_len - wrap, sc->rl_cdata.rl_rx_buf);
-				m = m_pullup(m, sizeof(struct ip) +ETHER_ALIGN);
-				if (m == NULL)
-					ifp->if_ierrors++;
-				else
-					m_adj(m, ETHER_ALIGN);
+				m_freem(m);
+				m = NULL;
+				goto next_packet;
 			}
-			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
-		} else {
-			m = m_devget(rxbufpos - ETHER_ALIGN,
-			    total_len + ETHER_ALIGN, 0, ifp, NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
-			else
-				m_adj(m, ETHER_ALIGN);
-			cur_rx += total_len + 4 + ETHER_CRC_LEN;
+		}
+		m->m_data += RTK_ETHER_ALIGN;	/* for alignment */
+		m->m_pkthdr.rcvif = ifp;
+		m->m_pkthdr.len = m->m_len = total_len;
+		dst = mtod(m, void *);
+
+		/*
+		 * If the packet wraps, copy up to the wrapping point.
+		 */
+		if (total_len > wrap) {
+			bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap,
+			    cur_rx, wrap, BUS_DMASYNC_POSTREAD);
+			memcpy(dst, rxbufpos, wrap);
+			bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap,
+			    cur_rx, wrap, BUS_DMASYNC_PREREAD);
+			cur_rx = 0;
+			rxbufpos = sc->rtk_rx_buf;
+			total_len -= wrap;
+			dst += wrap;
 		}
 
 		/*
-		 * Round up to 32-bit boundary.
+		 * ...and now the rest.
 		 */
-		cur_rx = (cur_rx + 3) & ~3;
-		CSR_WRITE_2(sc, RL_CURRXADDR, cur_rx - 16);
+		bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap,
+		    cur_rx, total_len, BUS_DMASYNC_POSTREAD);
+		memcpy(dst, rxbufpos, total_len);
+		bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap,
+		    cur_rx, total_len, BUS_DMASYNC_PREREAD);
 
-		if (m == NULL) {
-			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-			    0, sc->sc_rx_dmamap->dm_mapsize,
-			    BUS_DMASYNC_PREREAD);
+ next_packet:
+		CSR_WRITE_2(sc, RTK_CURRXADDR, (new_rx - 16) % RTK_RXBUFLEN);
+		cur_rx = new_rx;
+
+		if (m == NULL)
 			continue;
-		}
 
 		ifp->if_ipackets++;
 
 #if NBPFILTER > 0
-		/*
-		 * Handle BPF listeners. Let the BPF user see the packet.
-		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap(ifp->if_bpf, m);
 #endif
-		ether_input_mbuf(ifp, m);
-
-		bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-		    0, sc->sc_rx_dmamap->dm_mapsize, BUS_DMASYNC_PREREAD);
+		/* pass it on. */
+		(*ifp->if_input)(ifp, m);
 	}
 }
 
@@ -733,749 +1111,432 @@ rl_rxeof(sc)
  * A frame was downloaded to the chip. It's safe for us to clean up
  * the list buffers.
  */
-void rl_txeof(sc)
-	struct rl_softc		*sc;
+STATIC void
+rtk_txeof(struct rtk_softc *sc)
 {
-	struct ifnet		*ifp;
-	u_int32_t		txstat;
+	struct ifnet *ifp;
+	struct rtk_tx_desc *txd;
+	uint32_t txstat;
 
-	ifp = &sc->sc_arpcom.ac_if;
+	ifp = &sc->ethercom.ec_if;
 
 	/*
 	 * Go through our tx list and free mbufs for those
 	 * frames that have been uploaded.
 	 */
-	do {
-		if (RL_LAST_TXMBUF(sc) == NULL)
-			break;
-		txstat = CSR_READ_4(sc, RL_LAST_TXSTAT(sc));
-		if (!(txstat & (RL_TXSTAT_TX_OK|
-		    RL_TXSTAT_TX_UNDERRUN|RL_TXSTAT_TXABRT)))
+	while ((txd = SIMPLEQ_FIRST(&sc->rtk_tx_dirty)) != NULL) {
+		txstat = CSR_READ_4(sc, txd->txd_txstat);
+		if ((txstat & (RTK_TXSTAT_TX_OK|
+		    RTK_TXSTAT_TX_UNDERRUN|RTK_TXSTAT_TXABRT)) == 0)
 			break;
 
-		ifp->if_collisions += (txstat & RL_TXSTAT_COLLCNT) >> 24;
+		SIMPLEQ_REMOVE_HEAD(&sc->rtk_tx_dirty, txd_q);
 
-		bus_dmamap_sync(sc->sc_dmat, RL_LAST_TXMAP(sc),
-		    0, RL_LAST_TXMAP(sc)->dm_mapsize,
-		    BUS_DMASYNC_POSTWRITE);
-		bus_dmamap_unload(sc->sc_dmat, RL_LAST_TXMAP(sc));
-		m_freem(RL_LAST_TXMBUF(sc));
-		RL_LAST_TXMBUF(sc) = NULL;
-		/*
-		 * If there was a transmit underrun, bump the TX threshold.
-		 * Make sure not to overflow the 63 * 32byte we can address
-		 * with the 6 available bit.
-		 */
-		if ((txstat & RL_TXSTAT_TX_UNDERRUN) &&
-		    (sc->rl_txthresh < 2016))
-			sc->rl_txthresh += 32;
-		if (txstat & RL_TXSTAT_TX_OK)
+		bus_dmamap_sync(sc->sc_dmat, txd->txd_dmamap, 0,
+		    txd->txd_dmamap->dm_mapsize, BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_unload(sc->sc_dmat, txd->txd_dmamap);
+		m_freem(txd->txd_mbuf);
+		txd->txd_mbuf = NULL;
+
+		ifp->if_collisions += (txstat & RTK_TXSTAT_COLLCNT) >> 24;
+
+		if (txstat & RTK_TXSTAT_TX_OK)
 			ifp->if_opackets++;
 		else {
-			int oldthresh;
-
 			ifp->if_oerrors++;
-			if ((txstat & RL_TXSTAT_TXABRT) ||
-			    (txstat & RL_TXSTAT_OUTOFWIN))
-				CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
-			oldthresh = sc->rl_txthresh;
-			/* error recovery */
-			rl_reset(sc);
-			rl_init(sc);
-			/* restore original threshold */
-			sc->rl_txthresh = oldthresh;
-			return;
-		}
-		RL_INC(sc->rl_cdata.last_tx);
-		ifp->if_flags &= ~IFF_OACTIVE;
-	} while (sc->rl_cdata.last_tx != sc->rl_cdata.cur_tx);
 
-	if (RL_LAST_TXMBUF(sc) == NULL)
+			/*
+			 * Increase Early TX threshold if underrun occurred.
+			 * Increase step 64 bytes.
+			 */
+			if (txstat & RTK_TXSTAT_TX_UNDERRUN) {
+#ifdef DEBUG
+				printf("%s: transmit underrun;",
+				    device_xname(sc->sc_dev));
+#endif
+				if (sc->sc_txthresh < RTK_TXTH_MAX) {
+					sc->sc_txthresh += 2;
+#ifdef DEBUG
+					printf(" new threshold: %d bytes",
+					    sc->sc_txthresh * 32);
+#endif
+				}
+				printf("\n");
+			}
+			if (txstat & (RTK_TXSTAT_TXABRT|RTK_TXSTAT_OUTOFWIN))
+				CSR_WRITE_4(sc, RTK_TXCFG, RTK_TXCFG_CONFIG);
+		}
+		SIMPLEQ_INSERT_TAIL(&sc->rtk_tx_free, txd, txd_q);
+		ifp->if_flags &= ~IFF_OACTIVE;
+	}
+
+	/* Clear the timeout timer if there is no pending packet. */
+	if (SIMPLEQ_EMPTY(&sc->rtk_tx_dirty))
 		ifp->if_timer = 0;
-	else if (ifp->if_timer == 0)
-		ifp->if_timer = 5;
+
 }
 
-int rl_intr(arg)
-	void			*arg;
+int
+rtk_intr(void *arg)
 {
-	struct rl_softc		*sc;
-	struct ifnet		*ifp;
-	int			claimed = 0;
-	u_int16_t		status;
+	struct rtk_softc *sc;
+	struct ifnet *ifp;
+	uint16_t status;
+	int handled;
 
 	sc = arg;
-	ifp = &sc->sc_arpcom.ac_if;
+	ifp = &sc->ethercom.ec_if;
+
+	if (!device_has_power(sc->sc_dev))
+		return 0;
 
 	/* Disable interrupts. */
-	CSR_WRITE_2(sc, RL_IMR, 0x0000);
+	CSR_WRITE_2(sc, RTK_IMR, 0x0000);
 
+	handled = 0;
 	for (;;) {
-		status = CSR_READ_2(sc, RL_ISR);
-		/* If the card has gone away, the read returns 0xffff. */
+
+		status = CSR_READ_2(sc, RTK_ISR);
+
 		if (status == 0xffff)
+			break; /* Card is gone... */
+
+		if (status)
+			CSR_WRITE_2(sc, RTK_ISR, status);
+
+		if ((status & RTK_INTRS) == 0)
 			break;
-		if (status != 0)
-			CSR_WRITE_2(sc, RL_ISR, status);
-		if ((status & RL_INTRS) == 0)
-			break;
-		if ((status & RL_ISR_RX_OK) || (status & RL_ISR_RX_ERR))
-			rl_rxeof(sc);
-		if ((status & RL_ISR_TX_OK) || (status & RL_ISR_TX_ERR))
-			rl_txeof(sc);
-		if (status & RL_ISR_SYSTEM_ERR) {
-			rl_reset(sc);
-			rl_init(sc);
+
+		handled = 1;
+
+		if (status & RTK_ISR_RX_OK)
+			rtk_rxeof(sc);
+
+		if (status & RTK_ISR_RX_ERR)
+			rtk_rxeof(sc);
+
+		if (status & (RTK_ISR_TX_OK|RTK_ISR_TX_ERR))
+			rtk_txeof(sc);
+
+		if (status & RTK_ISR_SYSTEM_ERR) {
+			rtk_reset(sc);
+			rtk_init(ifp);
 		}
-		claimed = 1;
 	}
 
 	/* Re-enable interrupts. */
-	CSR_WRITE_2(sc, RL_IMR, RL_INTRS);
+	CSR_WRITE_2(sc, RTK_IMR, RTK_INTRS);
 
-	if (!IFQ_IS_EMPTY(&ifp->if_snd))
-		rl_start(ifp);
+	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+		rtk_start(ifp);
 
-	return (claimed);
-}
+#if NRND > 0
+	if (RND_ENABLED(&sc->rnd_source))
+		rnd_add_uint32(&sc->rnd_source, status);
+#endif
 
-/*
- * Encapsulate an mbuf chain in a descriptor by coupling the mbuf data
- * pointers to the fragment pointers.
- */
-int rl_encap(sc, m_head)
-	struct rl_softc		*sc;
-	struct mbuf		*m_head;
-{
-	struct mbuf		*m_new;
-
-	/*
-	 * The RealTek is brain damaged and wants longword-aligned
-	 * TX buffers, plus we can only have one fragment buffer
-	 * per packet. We have to copy pretty much all the time.
-	 */
-	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL) {
-		m_freem(m_head);
-		return(1);
-	}
-	if (m_head->m_pkthdr.len > MHLEN) {
-		MCLGET(m_new, M_DONTWAIT);
-		if (!(m_new->m_flags & M_EXT)) {
-			m_freem(m_new);
-			m_freem(m_head);
-			return(1);
-		}
-	}
-	m_copydata(m_head, 0, m_head->m_pkthdr.len, mtod(m_new, caddr_t));
-	m_new->m_pkthdr.len = m_new->m_len = m_head->m_pkthdr.len;
-
-	/* Pad frames to at least 60 bytes. */
-	if (m_new->m_pkthdr.len < RL_MIN_FRAMELEN) {
-		/*
-		 * Make security-conscious people happy: zero out the
-		 * bytes in the pad area, since we don't know what
-		 * this mbuf cluster buffer's previous user might
-		 * have left in it.
-		 */
-		bzero(mtod(m_new, char *) + m_new->m_pkthdr.len,
-		    RL_MIN_FRAMELEN - m_new->m_pkthdr.len);
-		m_new->m_pkthdr.len +=
-		    (RL_MIN_FRAMELEN - m_new->m_pkthdr.len);
-		m_new->m_len = m_new->m_pkthdr.len;
-	}
-
-	if (bus_dmamap_load_mbuf(sc->sc_dmat, RL_CUR_TXMAP(sc),
-	    m_new, BUS_DMA_NOWAIT) != 0) {
-		m_freem(m_new);
-		m_freem(m_head);
-		return (1);
-	}
-	m_freem(m_head);
-
-	RL_CUR_TXMBUF(sc) = m_new;
-	bus_dmamap_sync(sc->sc_dmat, RL_CUR_TXMAP(sc), 0,
-	    RL_CUR_TXMAP(sc)->dm_mapsize, BUS_DMASYNC_PREWRITE);
-	return(0);
+	return handled;
 }
 
 /*
  * Main transmit routine.
  */
 
-void rl_start(ifp)
-	struct ifnet		*ifp;
+STATIC void
+rtk_start(struct ifnet *ifp)
 {
-	struct rl_softc		*sc;
-	struct mbuf		*m_head = NULL;
-	int			pkts = 0;
+	struct rtk_softc *sc;
+	struct rtk_tx_desc *txd;
+	struct mbuf *m_head, *m_new;
+	int error, len;
 
 	sc = ifp->if_softc;
 
-	while(RL_CUR_TXMBUF(sc) == NULL) {
-		IFQ_DEQUEUE(&ifp->if_snd, m_head);
+	while ((txd = SIMPLEQ_FIRST(&sc->rtk_tx_free)) != NULL) {
+		IFQ_POLL(&ifp->if_snd, m_head);
 		if (m_head == NULL)
 			break;
+		m_new = NULL;
 
-		/* Pack the data into the descriptor. */
-		if (rl_encap(sc, m_head))
-			break;
-		pkts++;
-
+		/*
+		 * Load the DMA map.  If this fails, the packet didn't
+		 * fit in one DMA segment, and we need to copy.  Note,
+		 * the packet must also be aligned.
+		 * if the packet is too small, copy it too, so we're sure
+		 * so have enouth room for the pad buffer.
+		 */
+		if ((mtod(m_head, uintptr_t) & 3) != 0 ||
+		    m_head->m_pkthdr.len < ETHER_PAD_LEN ||
+		    bus_dmamap_load_mbuf(sc->sc_dmat, txd->txd_dmamap,
+			m_head, BUS_DMA_WRITE|BUS_DMA_NOWAIT) != 0) {
+			MGETHDR(m_new, M_DONTWAIT, MT_DATA);
+			if (m_new == NULL) {
+				printf("%s: unable to allocate Tx mbuf\n",
+				    device_xname(sc->sc_dev));
+				break;
+			}
+			if (m_head->m_pkthdr.len > MHLEN) {
+				MCLGET(m_new, M_DONTWAIT);
+				if ((m_new->m_flags & M_EXT) == 0) {
+					printf("%s: unable to allocate Tx "
+					    "cluster\n",
+					    device_xname(sc->sc_dev));
+					m_freem(m_new);
+					break;
+				}
+			}
+			m_copydata(m_head, 0, m_head->m_pkthdr.len,
+			    mtod(m_new, void *));
+			m_new->m_pkthdr.len = m_new->m_len =
+			    m_head->m_pkthdr.len;
+			if (m_head->m_pkthdr.len < ETHER_PAD_LEN) {
+				memset(
+				    mtod(m_new, char *) + m_head->m_pkthdr.len,
+				    0, ETHER_PAD_LEN - m_head->m_pkthdr.len);
+				m_new->m_pkthdr.len = m_new->m_len =
+				    ETHER_PAD_LEN;
+			}
+			error = bus_dmamap_load_mbuf(sc->sc_dmat,
+			    txd->txd_dmamap, m_new,
+			    BUS_DMA_WRITE|BUS_DMA_NOWAIT);
+			if (error) {
+				printf("%s: unable to load Tx buffer, "
+				    "error = %d\n",
+				    device_xname(sc->sc_dev), error);
+				break;
+			}
+		}
+		IFQ_DEQUEUE(&ifp->if_snd, m_head);
 #if NBPFILTER > 0
 		/*
 		 * If there's a BPF listener, bounce a copy of this frame
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, RL_CUR_TXMBUF(sc),
-			    BPF_DIRECTION_OUT);
+			bpf_mtap(ifp->if_bpf, m_head);
 #endif
+		if (m_new != NULL) {
+			m_freem(m_head);
+			m_head = m_new;
+		}
+		txd->txd_mbuf = m_head;
+
+		SIMPLEQ_REMOVE_HEAD(&sc->rtk_tx_free, txd_q);
+		SIMPLEQ_INSERT_TAIL(&sc->rtk_tx_dirty, txd, txd_q);
+
 		/*
 		 * Transmit the frame.
 		 */
-		CSR_WRITE_4(sc, RL_CUR_TXADDR(sc),
-		    RL_CUR_TXMAP(sc)->dm_segs[0].ds_addr);
-		CSR_WRITE_4(sc, RL_CUR_TXSTAT(sc),
-		    RL_TXTHRESH(sc->rl_txthresh) |
-		    RL_CUR_TXMAP(sc)->dm_segs[0].ds_len);
+		bus_dmamap_sync(sc->sc_dmat,
+		    txd->txd_dmamap, 0, txd->txd_dmamap->dm_mapsize,
+		    BUS_DMASYNC_PREWRITE);
 
-		RL_INC(sc->rl_cdata.cur_tx);
+		len = txd->txd_dmamap->dm_segs[0].ds_len;
+
+		CSR_WRITE_4(sc, txd->txd_txaddr,
+		    txd->txd_dmamap->dm_segs[0].ds_addr);
+		CSR_WRITE_4(sc, txd->txd_txstat,
+		    RTK_TXSTAT_THRESH(sc->sc_txthresh) | len);
 
 		/*
 		 * Set a timeout in case the chip goes out to lunch.
 		 */
 		ifp->if_timer = 5;
 	}
-	if (pkts == 0)
-		return;
 
 	/*
 	 * We broke out of the loop because all our TX slots are
 	 * full. Mark the NIC as busy until it drains some of the
 	 * packets from the queue.
 	 */
-	if (RL_CUR_TXMBUF(sc) != NULL)
+	if (SIMPLEQ_EMPTY(&sc->rtk_tx_free))
 		ifp->if_flags |= IFF_OACTIVE;
 }
 
-void rl_init(xsc)
-	void			*xsc;
+STATIC int
+rtk_init(struct ifnet *ifp)
 {
-	struct rl_softc		*sc = xsc;
-	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
-	int			s;
-	u_int32_t		rxcfg = 0;
+	struct rtk_softc *sc = ifp->if_softc;
+	int error, i;
+	uint32_t rxcfg;
 
-	s = splnet();
-
-	/*
-	 * Cancel pending I/O and free all RX/TX buffers.
-	 */
-	rl_stop(sc);
+	if ((error = rtk_enable(sc)) != 0)
+		goto out;
 
 	/*
-	 * Init our MAC address.  Even though the chipset
-	 * documentation doesn't mention it, we need to enter "Config
-	 * register write enable" mode to modify the ID registers.
+	 * Cancel pending I/O.
 	 */
-	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_WRITECFG);
-	CSR_WRITE_RAW_4(sc, RL_IDR0,
-	    (u_int8_t *)(&sc->sc_arpcom.ac_enaddr[0]));
-	CSR_WRITE_RAW_4(sc, RL_IDR4,
-	    (u_int8_t *)(&sc->sc_arpcom.ac_enaddr[4]));
-	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
+	rtk_stop(ifp, 0);
+
+	/* Init our MAC address */
+	for (i = 0; i < ETHER_ADDR_LEN; i++) {
+		CSR_WRITE_1(sc, RTK_IDR0 + i, CLLADDR(ifp->if_sadl)[i]);
+	}
 
 	/* Init the RX buffer pointer register. */
-	CSR_WRITE_4(sc, RL_RXADDR, sc->rl_cdata.rl_rx_buf_pa);
+	bus_dmamap_sync(sc->sc_dmat, sc->recv_dmamap, 0,
+	    sc->recv_dmamap->dm_mapsize, BUS_DMASYNC_PREREAD);
+	CSR_WRITE_4(sc, RTK_RXADDR, sc->recv_dmamap->dm_segs[0].ds_addr);
 
 	/* Init TX descriptors. */
-	rl_list_tx_init(sc);
+	rtk_list_tx_init(sc);
 
+	/* Init Early TX threshold. */
+	sc->sc_txthresh = RTK_TXTH_256;
 	/*
 	 * Enable transmit and receive.
 	 */
-	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_TX_ENB|RL_CMD_RX_ENB);
+	CSR_WRITE_1(sc, RTK_COMMAND, RTK_CMD_TX_ENB|RTK_CMD_RX_ENB);
 
 	/*
 	 * Set the initial TX and RX configuration.
 	 */
-	CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
-	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
+	CSR_WRITE_4(sc, RTK_TXCFG, RTK_TXCFG_CONFIG);
+	CSR_WRITE_4(sc, RTK_RXCFG, RTK_RXCFG_CONFIG);
 
 	/* Set the individual bit to receive frames for this host only. */
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	rxcfg |= RL_RXCFG_RX_INDIV;
+	rxcfg = CSR_READ_4(sc, RTK_RXCFG);
+	rxcfg |= RTK_RXCFG_RX_INDIV;
 
 	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		rxcfg |= RL_RXCFG_RX_ALLPHYS;
-	else
-		rxcfg &= ~RL_RXCFG_RX_ALLPHYS;
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
+	if (ifp->if_flags & IFF_PROMISC) {
+		rxcfg |= RTK_RXCFG_RX_ALLPHYS;
+		CSR_WRITE_4(sc, RTK_RXCFG, rxcfg);
+	} else {
+		rxcfg &= ~RTK_RXCFG_RX_ALLPHYS;
+		CSR_WRITE_4(sc, RTK_RXCFG, rxcfg);
+	}
 
 	/*
 	 * Set capture broadcast bit to capture broadcast frames.
 	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		rxcfg |= RL_RXCFG_RX_BROAD;
-	else
-		rxcfg &= ~RL_RXCFG_RX_BROAD;
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
+	if (ifp->if_flags & IFF_BROADCAST) {
+		rxcfg |= RTK_RXCFG_RX_BROAD;
+		CSR_WRITE_4(sc, RTK_RXCFG, rxcfg);
+	} else {
+		rxcfg &= ~RTK_RXCFG_RX_BROAD;
+		CSR_WRITE_4(sc, RTK_RXCFG, rxcfg);
+	}
 
 	/*
 	 * Program the multicast filter, if necessary.
 	 */
-	rl_setmulti(sc);
+	rtk_setmulti(sc);
 
 	/*
 	 * Enable interrupts.
 	 */
-	CSR_WRITE_2(sc, RL_IMR, RL_INTRS);
-
-	/* Set initial TX threshold */
-	sc->rl_txthresh = RL_TX_THRESH_INIT;
+	CSR_WRITE_2(sc, RTK_IMR, RTK_INTRS);
 
 	/* Start RX/TX process. */
-	CSR_WRITE_4(sc, RL_MISSEDPKT, 0);
+	CSR_WRITE_4(sc, RTK_MISSEDPKT, 0);
 
 	/* Enable receiver and transmitter. */
-	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_TX_ENB|RL_CMD_RX_ENB);
+	CSR_WRITE_1(sc, RTK_COMMAND, RTK_CMD_TX_ENB|RTK_CMD_RX_ENB);
 
-	mii_mediachg(&sc->sc_mii);
+	CSR_WRITE_1(sc, RTK_CFG1, RTK_CFG1_DRVLOAD|RTK_CFG1_FULLDUPLEX);
 
-	CSR_WRITE_1(sc, RL_CFG1, RL_CFG1_DRVLOAD|RL_CFG1_FULLDUPLEX);
+	/*
+	 * Set current media.
+	 */
+	if ((error = ether_mediachange(ifp)) != 0)
+		goto out;
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	splx(s);
+	callout_reset(&sc->rtk_tick_ch, hz, rtk_tick, sc);
 
-	timeout_set(&sc->sc_tick_tmo, rl_tick, sc);
-	timeout_add(&sc->sc_tick_tmo, hz);
+ out:
+	if (error) {
+		ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+		ifp->if_timer = 0;
+		printf("%s: interface not running\n", device_xname(sc->sc_dev));
+	}
+	return error;
 }
 
-/*
- * Set media options.
- */
-int rl_ifmedia_upd(ifp)
-	struct ifnet		*ifp;
+STATIC int
+rtk_ioctl(struct ifnet *ifp, u_long command, void *data)
 {
-	struct rl_softc *sc = (struct rl_softc *)ifp->if_softc;
-
-	mii_mediachg(&sc->sc_mii);
-	return (0);
-}
-
-/*
- * Report current media status.
- */
-void rl_ifmedia_sts(ifp, ifmr)
-	struct ifnet		*ifp;
-	struct ifmediareq	*ifmr;
-{
-	struct rl_softc *sc = ifp->if_softc;
-
-	mii_pollstat(&sc->sc_mii);
-	ifmr->ifm_status = sc->sc_mii.mii_media_status;
-	ifmr->ifm_active = sc->sc_mii.mii_media_active;
-}
-
-int rl_ioctl(ifp, command, data)
-	struct ifnet		*ifp;
-	u_long			command;
-	caddr_t			data;
-{
-	struct rl_softc		*sc = ifp->if_softc;
-	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
-	int			s, error = 0;
+	struct rtk_softc *sc = ifp->if_softc;
+	int s, error;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
-	switch(command) {
-	case SIOCSIFADDR:
-		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
-		case AF_INET:
-			rl_init(sc);
-			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
-#endif /* INET */
-		default:
-			rl_init(sc);
-			break;
-		}
-		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
-	case SIOCSIFFLAGS:
-		if (ifp->if_flags & IFF_UP) {
-			rl_init(sc);
-		} else {
-			if (ifp->if_flags & IFF_RUNNING)
-				rl_stop(sc);
+	error = ether_ioctl(ifp, command, data);
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			/*
+			 * Multicast list has changed.  Set the
+			 * hardware filter accordingly.
+			 */
+			rtk_setmulti(sc);
 		}
 		error = 0;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				rl_setmulti(sc);
-			error = 0;
-		}
-		break;
-	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
-		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
-		break;
-	default:
-		error = EINVAL;
-		break;
 	}
-
 	splx(s);
 
-	return(error);
+	return error;
 }
 
-void rl_watchdog(ifp)
-	struct ifnet		*ifp;
+STATIC void
+rtk_watchdog(struct ifnet *ifp)
 {
-	struct rl_softc		*sc;
+	struct rtk_softc *sc;
 
 	sc = ifp->if_softc;
 
-	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
+	printf("%s: watchdog timeout\n", device_xname(sc->sc_dev));
 	ifp->if_oerrors++;
-	rl_txeof(sc);
-	rl_rxeof(sc);
-	rl_init(sc);
+	rtk_txeof(sc);
+	rtk_rxeof(sc);
+	rtk_init(ifp);
 }
 
 /*
  * Stop the adapter and free any mbufs allocated to the
  * RX and TX lists.
  */
-void rl_stop(sc)
-	struct rl_softc		*sc;
+STATIC void
+rtk_stop(struct ifnet *ifp, int disable)
 {
-	register int		i;
-	struct ifnet		*ifp;
+	struct rtk_softc *sc = ifp->if_softc;
+	struct rtk_tx_desc *txd;
 
-	ifp = &sc->sc_arpcom.ac_if;
-	ifp->if_timer = 0;
+	callout_stop(&sc->rtk_tick_ch);
 
-	timeout_del(&sc->sc_tick_tmo);
+	mii_down(&sc->mii);
 
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-
-	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
-	CSR_WRITE_2(sc, RL_IMR, 0x0000);
+	CSR_WRITE_1(sc, RTK_COMMAND, 0x00);
+	CSR_WRITE_2(sc, RTK_IMR, 0x0000);
 
 	/*
 	 * Free the TX list buffers.
 	 */
-	for (i = 0; i < RL_TX_LIST_CNT; i++) {
-		if (sc->rl_cdata.rl_tx_chain[i] != NULL) {
-			bus_dmamap_sync(sc->sc_dmat,
-			    sc->rl_cdata.rl_tx_dmamap[i], 0,
-			    sc->rl_cdata.rl_tx_dmamap[i]->dm_mapsize,
-			    BUS_DMASYNC_POSTWRITE);
-			bus_dmamap_unload(sc->sc_dmat,
-			    sc->rl_cdata.rl_tx_dmamap[i]);
-			m_freem(sc->rl_cdata.rl_tx_chain[i]);
-			sc->rl_cdata.rl_tx_chain[i] = NULL;
-			CSR_WRITE_4(sc, RL_TXADDR0 + (i * sizeof(u_int32_t)),
-				0x00000000);
-		}
+	while ((txd = SIMPLEQ_FIRST(&sc->rtk_tx_dirty)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&sc->rtk_tx_dirty, txd_q);
+		bus_dmamap_unload(sc->sc_dmat, txd->txd_dmamap);
+		m_freem(txd->txd_mbuf);
+		txd->txd_mbuf = NULL;
+		CSR_WRITE_4(sc, txd->txd_txaddr, 0);
 	}
+
+	if (disable)
+		rtk_disable(sc);
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
 }
 
-int
-rl_attach(sc)
-	struct rl_softc *sc;
+STATIC void
+rtk_tick(void *arg)
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	int rseg, i;
-	u_int16_t rl_id, rl_did;
-	caddr_t kva;
-	int addr_len;
-
-	rl_reset(sc);
-
-	/*
-	 * Check EEPROM type 9346 or 9356.
-	 */
-	rl_read_eeprom(sc, (caddr_t)&rl_id, RL_EE_ID, RL_EEADDR_LEN1, 1, 0);
-	if (rl_id == 0x8129)
-		addr_len = RL_EEADDR_LEN1;
-	else
-		addr_len = RL_EEADDR_LEN0;
-
-	/*
-	 * Get station address.
-	 */
-	rl_read_eeprom(sc, (caddr_t)sc->sc_arpcom.ac_enaddr, RL_EE_EADDR,
-	    addr_len, 3, 1);
-
-	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
-
-	rl_read_eeprom(sc, (caddr_t)&rl_did, RL_EE_PCI_DID, addr_len, 1, 0);
-
-	if (rl_did == RT_DEVICEID_8139 || rl_did == ACCTON_DEVICEID_5030 ||
-	    rl_did == DELTA_DEVICEID_8139 || rl_did == ADDTRON_DEVICEID_8139 ||
-	    rl_did == DLINK_DEVICEID_8139 || rl_did == DLINK_DEVICEID_8139_2 ||
-	    rl_did == ABOCOM_DEVICEID_8139)
-		sc->rl_type = RL_8139;
-	else if (rl_did == RT_DEVICEID_8129)
-		sc->rl_type = RL_8129;
-	else
-		sc->rl_type = RL_UNKNOWN;	/* could be 8138 or other */
-
-	if (bus_dmamem_alloc(sc->sc_dmat, RL_RXBUFLEN + 32, PAGE_SIZE, 0,
-	    &sc->sc_rx_seg, 1, &rseg, BUS_DMA_NOWAIT)) {
-		printf("\n%s: can't alloc rx buffers\n", sc->sc_dev.dv_xname);
-		return (1);
-	}
-	if (bus_dmamem_map(sc->sc_dmat, &sc->sc_rx_seg, rseg,
-	    RL_RXBUFLEN + 32, &kva, BUS_DMA_NOWAIT)) {
-		printf("%s: can't map dma buffers (%d bytes)\n",
-		    sc->sc_dev.dv_xname, RL_RXBUFLEN + 32);
-		bus_dmamem_free(sc->sc_dmat, &sc->sc_rx_seg, rseg);
-		return (1);
-	}
-	if (bus_dmamap_create(sc->sc_dmat, RL_RXBUFLEN + 32, 1,
-	    RL_RXBUFLEN + 32, 0, BUS_DMA_NOWAIT, &sc->sc_rx_dmamap)) {
-		printf("%s: can't create dma map\n", sc->sc_dev.dv_xname);
-		bus_dmamem_unmap(sc->sc_dmat, kva, RL_RXBUFLEN + 32);
-		bus_dmamem_free(sc->sc_dmat, &sc->sc_rx_seg, rseg);
-		return (1);
-	}
-	if (bus_dmamap_load(sc->sc_dmat, sc->sc_rx_dmamap, kva,
-	    RL_RXBUFLEN + 32, NULL, BUS_DMA_NOWAIT)) {
-		printf("%s: can't load dma map\n", sc->sc_dev.dv_xname);
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_rx_dmamap);
-		bus_dmamem_unmap(sc->sc_dmat, kva, RL_RXBUFLEN + 32);
-		bus_dmamem_free(sc->sc_dmat, &sc->sc_rx_seg, rseg);
-		return (1);
-	}
-	sc->rl_cdata.rl_rx_buf = kva;
-	sc->rl_cdata.rl_rx_buf_pa = sc->sc_rx_dmamap->dm_segs[0].ds_addr;
-
-	bzero(sc->rl_cdata.rl_rx_buf, RL_RXBUFLEN + 32);
-
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
-	    0, sc->sc_rx_dmamap->dm_mapsize, BUS_DMASYNC_PREREAD);
-
-	for (i = 0; i < RL_TX_LIST_CNT; i++) {
-		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 0,
-		    BUS_DMA_NOWAIT, &sc->rl_cdata.rl_tx_dmamap[i]) != 0) {
-			printf("%s: can't create tx maps\n",
-			    sc->sc_dev.dv_xname);
-			/* XXX free any allocated... */
-			return (1);
-		}
-	}
-
-	/* Leave a few bytes before the start of the RX ring buffer. */
-	sc->rl_cdata.rl_rx_buf_ptr = sc->rl_cdata.rl_rx_buf;
-	sc->rl_cdata.rl_rx_buf += sizeof(u_int64_t);
-	sc->rl_cdata.rl_rx_buf_pa += sizeof(u_int64_t);
-
-	ifp->if_softc = sc;
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_ioctl = rl_ioctl;
-	ifp->if_start = rl_start;
-	ifp->if_watchdog = rl_watchdog;
-	ifp->if_baudrate = 10000000;
-	IFQ_SET_READY(&ifp->if_snd);
-
-	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
-
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
-
-	/*
-	 * Initialize our media structures and probe the MII.
-	 */
-	sc->sc_mii.mii_ifp = ifp;
-	sc->sc_mii.mii_readreg = rl_miibus_readreg;
-	sc->sc_mii.mii_writereg = rl_miibus_writereg;
-	sc->sc_mii.mii_statchg = rl_miibus_statchg;
-	ifmedia_init(&sc->sc_mii.mii_media, 0, rl_ifmedia_upd, rl_ifmedia_sts);
-	mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
-	    MII_OFFSET_ANY, 0);
-	if (LIST_FIRST(&sc->sc_mii.mii_phys) == NULL) {
-		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER|IFM_NONE, 0, NULL);
-		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_NONE);
-	} else
-		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_AUTO);
-
-	/*
-	 * Attach us everywhere
-	 */
-	if_attach(ifp);
-	ether_ifattach(ifp);
-
-	sc->sc_sdhook = shutdownhook_establish(rl_shutdown, sc);
-	sc->sc_pwrhook = powerhook_establish(rl_powerhook, sc);
-
-	return (0);
-}
-
-void
-rl_shutdown(arg)
-	void			*arg;
-{
-	struct rl_softc		*sc = (struct rl_softc *)arg;
-
-	rl_stop(sc);
-}
-
-void
-rl_powerhook(why, arg)
-	int why;
-	void *arg;
-{
-	if (why == PWR_RESUME)
-		rl_init(arg);
-}
-
-int
-rl_miibus_readreg(self, phy, reg)
-	struct device *self;
-	int phy, reg;
-{
-	struct rl_softc *sc = (struct rl_softc *)self;
-	struct rl_mii_frame frame;
-	u_int16_t rl8139_reg;
-
-	if (sc->rl_type == RL_8139) {
-		/*
-		* The RTL8139 PHY is mapped into PCI registers, unfortunately
-		* it has no phyid, or phyaddr, so assume it is phyaddr 0.
-		*/
-		if (phy != 0)
-			return(0);
-
-		switch (reg) {
-		case MII_BMCR:
-			rl8139_reg = RL_BMCR;
-			break;
-		case MII_BMSR:
-			rl8139_reg = RL_BMSR;
-			break;
-		case MII_ANAR:
-			rl8139_reg = RL_ANAR;
-			break;
-		case MII_ANER:
-			rl8139_reg = RL_ANER;
-			break;
-		case MII_ANLPAR:
-			rl8139_reg = RL_LPAR;
-			break;
-		case RL_MEDIASTAT:
-			return (CSR_READ_1(sc, RL_MEDIASTAT));
-		case MII_PHYIDR1:
-		case MII_PHYIDR2:
-		default:
-			return (0);
-		}
-		return (CSR_READ_2(sc, rl8139_reg));
-	}
-
-	bzero((char *)&frame, sizeof(frame));
-
-	frame.mii_phyaddr = phy;
-	frame.mii_regaddr = reg;
-	rl_mii_readreg(sc, &frame);
-
-	return(frame.mii_data);
-}
-
-void
-rl_miibus_writereg(self, phy, reg, val)
-	struct device *self;
-	int phy, reg, val;
-{
-	struct rl_softc *sc = (struct rl_softc *)self;
-	struct rl_mii_frame frame;
-	u_int16_t rl8139_reg = 0;
-
-	if (sc->rl_type == RL_8139) {
-		if (phy)
-			return;
-
-		switch (reg) {
-		case MII_BMCR:
-			rl8139_reg = RL_BMCR;
-			break;
-		case MII_BMSR:
-			rl8139_reg = RL_BMSR;
-			break;
-		case MII_ANAR:
-			rl8139_reg = RL_ANAR;
-			break;
-		case MII_ANER:
-			rl8139_reg = RL_ANER;
-			break;
-		case MII_ANLPAR:
-			rl8139_reg = RL_LPAR;
-			break;
-		case MII_PHYIDR1:
-		case MII_PHYIDR2:
-			return;
-		}
-		CSR_WRITE_2(sc, rl8139_reg, val);
-		return;
-	}
-
-	bzero((char *)&frame, sizeof(frame));
-	frame.mii_phyaddr = phy;
-	frame.mii_regaddr = reg;
-	frame.mii_data = val;
-	rl_mii_writereg(sc, &frame);
-}
-
-void
-rl_miibus_statchg(self)
-	struct device *self;
-{
-}
-
-void
-rl_tick(v)
-	void *v;
-{
-	struct rl_softc *sc = v;
+	struct rtk_softc *sc = arg;
 	int s;
 
 	s = splnet();
-	mii_tick(&sc->sc_mii);
+	mii_tick(&sc->mii);
 	splx(s);
-	timeout_add(&sc->sc_tick_tmo, hz);
-}
 
-struct cfdriver rl_cd = {
-	0, "rl", DV_IFNET
-};
+	callout_reset(&sc->rtk_tick_ch, hz, rtk_tick, sc);
+}

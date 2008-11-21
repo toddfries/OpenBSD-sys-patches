@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_idle.c,v 1.8 2007/11/13 22:14:35 ad Exp $	*/
+/*	$NetBSD: kern_idle.c,v 1.21 2008/06/11 13:42:02 ad Exp $	*/
 
 /*-
  * Copyright (c)2002, 2006, 2007 YAMAMOTO Takashi,
@@ -28,7 +28,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: kern_idle.c,v 1.8 2007/11/13 22:14:35 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_idle.c,v 1.21 2008/06/11 13:42:02 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/cpu.h>
@@ -37,6 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_idle.c,v 1.8 2007/11/13 22:14:35 ad Exp $");
 #include <sys/lockdebug.h>
 #include <sys/kmem.h>
 #include <sys/proc.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
@@ -45,14 +46,25 @@ void
 idle_loop(void *dummy)
 {
 	struct cpu_info *ci = curcpu();
+	struct schedstate_percpu *spc;
 	struct lwp *l = curlwp;
+	int s;
+
+	ci->ci_data.cpu_onproc = l;
 
 	/* Update start time for this thread. */
-	microtime(&l->l_stime);
+	lwp_lock(l);
+	binuptime(&l->l_stime);
+	lwp_unlock(l);
+
+	spc = &ci->ci_schedstate;
+	s = splsched();
+	spc->spc_flags |= SPCF_RUNNING;
+	splx(s);
 
 	KERNEL_UNLOCK_ALL(l, NULL);
 	l->l_stat = LSONPROC;
-	while (1 /* CONSTCOND */) {
+	for (;;) {
 		LOCKDEBUG_BARRIER(NULL, 0);
 		KASSERT((l->l_flag & LW_IDLE) != 0);
 		KASSERT(ci == curcpu());
@@ -60,21 +72,20 @@ idle_loop(void *dummy)
 		KASSERT(CURCPU_IDLE_P());
 		KASSERT(l->l_priority == PRI_IDLE);
 
-		if (uvm.page_idle_zero) {
-			if (sched_curcpu_runnable_p()) {
-				goto schedule;
-			}
-			uvm_pageidlezero();
-		}
+		sched_idle();
 		if (!sched_curcpu_runnable_p()) {
-			cpu_idle();
-			if (!sched_curcpu_runnable_p() &&
-			    !ci->ci_want_resched) {
-				continue;
+			if ((spc->spc_flags & SPCF_OFFLINE) == 0) {
+				uvm_pageidlezero();
+			}
+			if (!sched_curcpu_runnable_p()) {
+				cpu_idle();
+				if (!sched_curcpu_runnable_p() &&
+				    !ci->ci_want_resched) {
+					continue;
+				}
 			}
 		}
-schedule:
-		KASSERT(l->l_mutex == &l->l_cpu->ci_schedstate.spc_lwplock);
+		KASSERT(l->l_mutex == l->l_cpu->ci_schedstate.spc_lwplock);
 		lwp_lock(l);
 		mi_switch(l);
 		KASSERT(curlwp == l);
@@ -90,7 +101,7 @@ create_idle_lwp(struct cpu_info *ci)
 
 	KASSERT(ci->ci_data.cpu_idlelwp == NULL);
 	error = kthread_create(PRI_IDLE, KTHREAD_MPSAFE | KTHREAD_IDLE,
-	    ci, idle_loop, NULL, &l, "idle/%d", (int)ci->ci_cpuid);
+	    ci, idle_loop, NULL, &l, "idle/%u", ci->ci_index);
 	if (error != 0)
 		panic("create_idle_lwp: error %d", error);
 	lwp_lock(l);

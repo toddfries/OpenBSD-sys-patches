@@ -1,5 +1,4 @@
-/*	$OpenBSD: cac_eisa.c,v 1.2 2001/11/05 17:25:58 art Exp $	*/
-/*	$NetBSD: cac_eisa.c,v 1.1 2000/09/01 12:15:20 ad Exp $	*/
+/*	$NetBSD: cac_eisa.c,v 1.19 2008/04/28 20:23:48 martin Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,20 +60,18 @@
  * EISA front-end for cac(4) driver.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cac_eisa.c,v 1.19 2008/04/28 20:23:48 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/eisa/eisavar.h>
 #include <dev/eisa/eisadevs.h>
-
-#include <scsi/scsi_all.h>
-#include <scsi/scsi_disk.h>
-#include <scsi/scsiconf.h>
 
 #include <dev/ic/cacreg.h>
 #include <dev/ic/cacvar.h>
@@ -90,21 +80,19 @@
 #define CAC_EISA_IOSIZE			0x0017
 #define CAC_EISA_IOCONF			0x38
 
-int	cac_eisa_match(struct device *, void *, void *);
-void	cac_eisa_attach(struct device *, struct device *, void *);
+static void	cac_eisa_attach(struct device *, struct device *, void *);
+static int	cac_eisa_match(struct device *, struct cfdata *, void *);
 
-struct	cac_ccb *cac_eisa_l0_completed(struct cac_softc *);
-int	cac_eisa_l0_fifo_full(struct cac_softc *);
-void	cac_eisa_l0_intr_enable(struct cac_softc *, int);
-int	cac_eisa_l0_intr_pending(struct cac_softc *);
-void	cac_eisa_l0_submit(struct cac_softc *, struct cac_ccb *);
+static struct	cac_ccb *cac_eisa_l0_completed(struct cac_softc *);
+static int	cac_eisa_l0_fifo_full(struct cac_softc *);
+static void	cac_eisa_l0_intr_enable(struct cac_softc *, int);
+static int	cac_eisa_l0_intr_pending(struct cac_softc *);
+static void	cac_eisa_l0_submit(struct cac_softc *, struct cac_ccb *);
 
-struct cfattach cac_eisa_ca = {
-	sizeof(struct cac_softc), cac_eisa_match, cac_eisa_attach
-};
+CFATTACH_DECL(cac_eisa, sizeof(struct cac_softc),
+    cac_eisa_match, cac_eisa_attach, NULL, NULL);
 
-static const
-struct cac_linkage cac_eisa_l0 = {
+static const struct cac_linkage cac_eisa_l0 = {
 	cac_eisa_l0_completed,
 	cac_eisa_l0_fifo_full,
 	cac_eisa_l0_intr_enable,
@@ -112,8 +100,7 @@ struct cac_linkage cac_eisa_l0 = {
 	cac_eisa_l0_submit
 };
 
-static const
-struct cac_eisa_type {
+static struct cac_eisa_type {
 	const char	*ct_prodstr;
 	const char	*ct_typestr;
 	const struct	cac_linkage *ct_linkage;
@@ -125,10 +112,9 @@ struct cac_eisa_type {
 	{ "CPQ4030",	"SMART-2/E",	&cac_l0 },
 };
 
-int
-cac_eisa_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+cac_eisa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct eisa_attach_args *ea;
 	int i;
@@ -142,11 +128,8 @@ cac_eisa_match(parent, match, aux)
 	return (0);
 }
 
-void
-cac_eisa_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+static void
+cac_eisa_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct eisa_attach_args *ea;
 	bus_space_handle_t ioh;
@@ -156,15 +139,15 @@ cac_eisa_attach(parent, self, aux)
 	bus_space_tag_t iot;
 	const char *intrstr;
 	int irq, i;
-	
+
 	ea = aux;
-	sc = (struct cac_softc *)self;
+	sc = device_private(self);
 	iot = ea->ea_iot;
 	ec = ea->ea_ec;
-	
+
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
 	    CAC_EISA_SLOT_OFFSET, CAC_EISA_IOSIZE, 0, &ioh)) {
-		printf(": can't map i/o space\n");
+		printf("can't map i/o space\n");
 		return;
 	}
 
@@ -172,7 +155,7 @@ cac_eisa_attach(parent, self, aux)
 	sc->sc_ioh = ioh;
 	sc->sc_dmat = ea->ea_dmat;
 
-	/* 
+	/*
 	 * Map and establish the interrupt.
 	 */
 	switch (bus_space_read_1(iot, ioh, CAC_EISA_IOCONF) & 0xf0) {
@@ -189,19 +172,19 @@ cac_eisa_attach(parent, self, aux)
 		irq = 15;
 		break;
 	default:
-		printf(": controller on invalid IRQ\n");
+		printf("controller on invalid IRQ\n");
 		return;
 	}
 
 	if (eisa_intr_map(ec, irq, &ih)) {
-		printf(": can't map interrupt (%d)\n", irq);
+		printf("can't map interrupt (%d)\n", irq);
 		return;
 	}
-	
+
 	intrstr = eisa_intr_string(ec, ih);
 	if ((sc->sc_ih = eisa_intr_establish(ec, ih, IST_LEVEL, IPL_BIO,
-	    cac_intr, sc, sc->sc_dv.dv_xname)) == NULL) {
-		printf(": can't establish interrupt");
+	    cac_intr, sc)) == NULL) {
+		printf("can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -215,16 +198,16 @@ cac_eisa_attach(parent, self, aux)
 		if (strcmp(ea->ea_idstring, cac_eisa_type[i].ct_prodstr) == 0)
 			break;
 
-	printf(" %s: Compaq %s\n", intrstr, cac_eisa_type[i].ct_typestr);
-	sc->sc_cl = cac_eisa_type[i].ct_linkage;
-	cac_init(sc, 0);
+	printf(": Compaq %s\n", cac_eisa_type[i].ct_typestr);
+	memcpy(&sc->sc_cl, cac_eisa_type[i].ct_linkage, sizeof(sc->sc_cl));
+	cac_init(sc, intrstr, 0);
 }
 
 /*
  * Linkage specific to EISA boards.
  */
 
-int
+static int
 cac_eisa_l0_fifo_full(struct cac_softc *sc)
 {
 
@@ -232,7 +215,7 @@ cac_eisa_l0_fifo_full(struct cac_softc *sc)
 	    CAC_EISA_CHANNEL_CLEAR) == 0);
 }
 
-void
+static void
 cac_eisa_l0_submit(struct cac_softc *sc, struct cac_ccb *ccb)
 {
 	u_int16_t size;
@@ -241,10 +224,11 @@ cac_eisa_l0_submit(struct cac_softc *sc, struct cac_ccb *ccb)
 	 * On these boards, `ccb_hdr.size' is actually for control flags.
 	 * Set it to zero and pass the value by means of an I/O port.
 	 */
-	size = letoh16(ccb->ccb_hdr.size) << 2;
+	size = le16toh(ccb->ccb_hdr.size) << 2;
 	ccb->ccb_hdr.size = 0;
 
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, (caddr_t)ccb - sc->sc_ccbs,
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap,
+	    (char *)ccb - (char *)sc->sc_ccbs,
 	    sizeof(struct cac_ccb), BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 
 	cac_outb(sc, CAC_EISAREG_SYSTEM_DOORBELL, CAC_EISA_CHANNEL_CLEAR);
@@ -253,7 +237,7 @@ cac_eisa_l0_submit(struct cac_softc *sc, struct cac_ccb *ccb)
 	cac_outb(sc, CAC_EISAREG_LOCAL_DOORBELL, CAC_EISA_CHANNEL_BUSY);
 }
 
-struct cac_ccb *
+static struct cac_ccb *
 cac_eisa_l0_completed(struct cac_softc *sc)
 {
 	struct cac_ccb *ccb;
@@ -273,16 +257,20 @@ cac_eisa_l0_completed(struct cac_softc *sc)
 		return (NULL);
 
 	off = (off & ~3) - sc->sc_ccbs_paddr;
-	ccb = (struct cac_ccb *)(sc->sc_ccbs + off);
+	ccb = (struct cac_ccb *)((char *)sc->sc_ccbs + off);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, off, sizeof(struct cac_ccb),
 	    BUS_DMASYNC_POSTWRITE | BUS_DMASYNC_POSTREAD);
 
 	ccb->ccb_req.error = status;
+
+	if ((off & 3) != 0 && ccb->ccb_req.error == 0)
+		ccb->ccb_req.error = CAC_RET_CMD_REJECTED;
+
 	return (ccb);
 }
 
-int
+static int
 cac_eisa_l0_intr_pending(struct cac_softc *sc)
 {
 
@@ -290,7 +278,7 @@ cac_eisa_l0_intr_pending(struct cac_softc *sc)
 	    CAC_EISA_CHANNEL_BUSY);
 }
 
-void
+static void
 cac_eisa_l0_intr_enable(struct cac_softc *sc, int state)
 {
 

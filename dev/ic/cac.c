@@ -1,36 +1,7 @@
-/*	$OpenBSD: cac.c,v 1.25 2007/11/06 03:09:30 krw Exp $	*/
-/*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
+/*	$NetBSD: cac.c,v 1.47 2008/06/08 12:43:51 tsutsui Exp $	*/
 
-/*
- * Copyright (c) 2001,2003 Michael Shalayeff
- * All rights reserved.
- *
- * The SCSI emulation layer is derived from gdt(4) driver,
- * Copyright (c) 1999, 2000 Niklas Hallqvist. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- */
 /*-
- * Copyright (c) 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 2000, 2006, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -44,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +33,10 @@
  * Driver for Compaq array controllers.
  */
 
-/* #define	CAC_DEBUG */
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: cac.c,v 1.47 2008/06/08 12:43:51 tsutsui Exp $");
+
+#include "bio.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,52 +49,44 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 
-#include <machine/bus.h>
+#include <uvm/uvm_extern.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsi_disk.h>
-#include <scsi/scsiconf.h>
+#include <sys/bswap.h>
+#include <sys/bus.h>
 
 #include <dev/ic/cacreg.h>
 #include <dev/ic/cacvar.h>
 
-struct cfdriver cac_cd = {
-	NULL, "cac", DV_DULL
-};
+#if NBIO > 0
+#include <dev/biovar.h>
+#endif /* NBIO > 0 */
 
-int     cac_scsi_cmd(struct scsi_xfer *);
-void	cacminphys(struct buf *bp);
+#include "locators.h"
 
-struct scsi_adapter cac_switch = {
-	cac_scsi_cmd, cacminphys, 0, 0,
-};
+static struct	cac_ccb *cac_ccb_alloc(struct cac_softc *, int);
+static void	cac_ccb_done(struct cac_softc *, struct cac_ccb *);
+static void	cac_ccb_free(struct cac_softc *, struct cac_ccb *);
+static int	cac_ccb_poll(struct cac_softc *, struct cac_ccb *, int);
+static int	cac_ccb_start(struct cac_softc *, struct cac_ccb *);
+static int	cac_print(void *, const char *);
+static void	cac_shutdown(void *);
 
-struct scsi_device cac_dev = {
-	NULL, NULL, NULL, NULL
-};
+static struct	cac_ccb *cac_l0_completed(struct cac_softc *);
+static int	cac_l0_fifo_full(struct cac_softc *);
+static void	cac_l0_intr_enable(struct cac_softc *, int);
+static int	cac_l0_intr_pending(struct cac_softc *);
+static void	cac_l0_submit(struct cac_softc *, struct cac_ccb *);
 
-struct	cac_ccb *cac_ccb_alloc(struct cac_softc *, int);
-void	cac_ccb_done(struct cac_softc *, struct cac_ccb *);
-void	cac_ccb_free(struct cac_softc *, struct cac_ccb *);
-int	cac_ccb_poll(struct cac_softc *, struct cac_ccb *, int);
-int	cac_ccb_start(struct cac_softc *, struct cac_ccb *);
-int	cac_cmd(struct cac_softc *sc, int command, void *data, int datasize,
-	int drive, int blkno, int flags, struct scsi_xfer *xs);
-int	cac_get_dinfo(struct cac_softc *sc, int target);
-int	cac_flush(struct cac_softc *sc);
-void	cac_shutdown(void *);
-void	cac_copy_internal_data(struct scsi_xfer *xs, void *v, size_t size);
+static void	*cac_sdh;	/* shutdown hook */
 
-struct	cac_ccb *cac_l0_completed(struct cac_softc *);
-int	cac_l0_fifo_full(struct cac_softc *);
-void	cac_l0_intr_enable(struct cac_softc *, int);
-int	cac_l0_intr_pending(struct cac_softc *);
-void	cac_l0_submit(struct cac_softc *, struct cac_ccb *);
+#if NBIO > 0
+int		cac_ioctl(struct device *, u_long, void *);
+int		cac_ioctl_vol(struct cac_softc *, struct bioc_vol *);
+int		cac_create_sensors(struct cac_softc *);
+void		cac_sensor_refresh(struct sysmon_envsys *, envsys_data_t *);
+#endif /* NBIO > 0 */
 
-void	*cac_sdh;	/* shutdown hook */
-
-const
-struct cac_linkage cac_l0 = {
+const struct cac_linkage cac_l0 = {
 	cac_l0_completed,
 	cac_l0_fifo_full,
 	cac_l0_intr_enable,
@@ -139,44 +98,53 @@ struct cac_linkage cac_l0 = {
  * Initialise our interface to the controller.
  */
 int
-cac_init(struct cac_softc *sc, int startfw)
+cac_init(struct cac_softc *sc, const char *intrstr, int startfw)
 {
-	struct scsibus_attach_args saa;
 	struct cac_controller_info cinfo;
+	struct cac_attach_args caca;
 	int error, rseg, size, i;
-	bus_dma_segment_t seg[1];
+	bus_dma_segment_t seg;
 	struct cac_ccb *ccb;
+	int locs[CACCF_NLOCS];
+	char firm[8];
+
+	if (intrstr != NULL)
+		aprint_normal_dev(&sc->sc_dv, "interrupting at %s\n",
+		    intrstr);
 
 	SIMPLEQ_INIT(&sc->sc_ccb_free);
 	SIMPLEQ_INIT(&sc->sc_ccb_queue);
+	mutex_init(&sc->sc_mutex, MUTEX_DEFAULT, IPL_VM);
+	cv_init(&sc->sc_ccb_cv, "cacccb");
 
         size = sizeof(struct cac_ccb) * CAC_MAX_CCBS;
 
-	if ((error = bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, seg, 1,
+	if ((error = bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &seg, 1,
 	    &rseg, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: unable to allocate CCBs, error = %d\n",
-		    sc->sc_dv.dv_xname, error);
+		aprint_error_dev(&sc->sc_dv, "unable to allocate CCBs, error = %d\n",
+		    error);
 		return (-1);
 	}
 
-	if ((error = bus_dmamem_map(sc->sc_dmat, seg, rseg, size,
-	    &sc->sc_ccbs, BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
-		printf("%s: unable to map CCBs, error = %d\n",
-		    sc->sc_dv.dv_xname, error);
+	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, rseg, size,
+	    (void **)&sc->sc_ccbs,
+	    BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
+		aprint_error_dev(&sc->sc_dv, "unable to map CCBs, error = %d\n",
+		    error);
 		return (-1);
 	}
 
 	if ((error = bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
 	    BUS_DMA_NOWAIT, &sc->sc_dmamap)) != 0) {
-		printf("%s: unable to create CCB DMA map, error = %d\n",
-		    sc->sc_dv.dv_xname, error);
+		aprint_error_dev(&sc->sc_dv, "unable to create CCB DMA map, error = %d\n",
+		    error);
 		return (-1);
 	}
 
 	if ((error = bus_dmamap_load(sc->sc_dmat, sc->sc_dmamap, sc->sc_ccbs,
 	    size, NULL, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: unable to load CCB DMA map, error = %d\n",
-		    sc->sc_dv.dv_xname, error);
+		aprint_error_dev(&sc->sc_dv, "unable to load CCB DMA map, error = %d\n",
+		    error);
 		return (-1);
 	}
 
@@ -192,11 +160,12 @@ cac_init(struct cac_softc *sc, int startfw)
 		    &ccb->ccb_dmamap_xfer);
 
 		if (error) {
-			printf("%s: can't create ccb dmamap (%d)\n",
-			    sc->sc_dv.dv_xname, error);
+			aprint_error_dev(&sc->sc_dv, "can't create ccb dmamap (%d)\n",
+			    error);
 			break;
 		}
 
+		ccb->ccb_flags = 0;
 		ccb->ccb_paddr = sc->sc_ccbs_paddr + i * sizeof(struct cac_ccb);
 		SIMPLEQ_INSERT_TAIL(&sc->sc_ccb_free, ccb, ccb_chain);
 	}
@@ -205,83 +174,86 @@ cac_init(struct cac_softc *sc, int startfw)
 	if (startfw) {
 		if (cac_cmd(sc, CAC_CMD_START_FIRMWARE, &cinfo, sizeof(cinfo),
 		    0, 0, CAC_CCB_DATA_IN, NULL)) {
-			printf("%s: CAC_CMD_START_FIRMWARE failed\n",
-			    sc->sc_dv.dv_xname);
+			aprint_error_dev(&sc->sc_dv, "CAC_CMD_START_FIRMWARE failed\n");
 			return (-1);
 		}
 	}
 
 	if (cac_cmd(sc, CAC_CMD_GET_CTRL_INFO, &cinfo, sizeof(cinfo), 0, 0,
 	    CAC_CCB_DATA_IN, NULL)) {
-		printf("%s: CAC_CMD_GET_CTRL_INFO failed\n",
-		    sc->sc_dv.dv_xname);
+		aprint_error_dev(&sc->sc_dv, "CAC_CMD_GET_CTRL_INFO failed\n");
 		return (-1);
 	}
 
-	if (!cinfo.num_drvs) {
-		printf("%s: no volumes defined\n", sc->sc_dv.dv_xname);
-		return (-1);
-	}
+	strlcpy(firm, cinfo.firm_rev, 4+1);
+	printf("%s: %d channels, firmware <%s>\n", device_xname(&sc->sc_dv),
+	    cinfo.scsi_chips, firm);
 
 	sc->sc_nunits = cinfo.num_drvs;
-	sc->sc_dinfos = malloc(cinfo.num_drvs * sizeof(struct cac_drive_info),
-	    M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sc->sc_dinfos == NULL) {
-		printf("%s: cannot allocate memory for drive_info\n",
-		    sc->sc_dv.dv_xname);
-		return (-1);
+	for (i = 0; i < cinfo.num_drvs; i++) {
+		caca.caca_unit = i;
+
+		locs[CACCF_UNIT] = i;
+
+		config_found_sm_loc(&sc->sc_dv, "cac", locs, &caca,
+		    cac_print, config_stdsubmatch);
 	}
-
-	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.adapter = &cac_switch;
-	sc->sc_link.adapter_target = cinfo.num_drvs;
-	sc->sc_link.adapter_buswidth = cinfo.num_drvs;
-	sc->sc_link.device = &cac_dev;
-	sc->sc_link.openings = CAC_MAX_CCBS / sc->sc_nunits;
-	if (sc->sc_link.openings < 4 )
-		sc->sc_link.openings = 4;
-
-	bzero(&saa, sizeof(saa));
-	saa.saa_sc_link = &sc->sc_link;
-
-	config_found(&sc->sc_dv, &saa, scsiprint);
 
 	/* Set our `shutdownhook' before we start any device activity. */
 	if (cac_sdh == NULL)
 		cac_sdh = shutdownhook_establish(cac_shutdown, NULL);
 
-	(*sc->sc_cl->cl_intr_enable)(sc, 1);
+	mutex_enter(&sc->sc_mutex);
+	(*sc->sc_cl.cl_intr_enable)(sc, CAC_INTR_ENABLE);
+	mutex_exit(&sc->sc_mutex);
+
+#if NBIO > 0
+	if (bio_register(&sc->sc_dv, cac_ioctl) != 0)
+		aprint_error_dev(&sc->sc_dv, "controller registration failed");
+	else
+		sc->sc_ioctl = cac_ioctl;
+	if (cac_create_sensors(sc) != 0)
+		aprint_error_dev(&sc->sc_dv, "unable to create sensors\n");
+#endif
 
 	return (0);
-}
-
-int
-cac_flush(sc)
-	struct cac_softc *sc;
-{
-	u_int8_t buf[512];
-
-	memset(buf, 0, sizeof(buf));
-	buf[0] = 1;
-	return cac_cmd(sc, CAC_CMD_FLUSH_CACHE, buf, sizeof(buf), 0, 0,
-	    CAC_CCB_DATA_OUT, NULL);
 }
 
 /*
  * Shut down all `cac' controllers.
  */
-void
+static void
 cac_shutdown(void *cookie)
 {
 	extern struct cfdriver cac_cd;
 	struct cac_softc *sc;
+	u_int8_t tbuf[512];
 	int i;
 
 	for (i = 0; i < cac_cd.cd_ndevs; i++) {
-		if ((sc = (struct cac_softc *)device_lookup(&cac_cd, i)) == NULL)
+		if ((sc = device_lookup_private(&cac_cd, i)) == NULL)
 			continue;
-		cac_flush(sc);
+		memset(tbuf, 0, sizeof(tbuf));
+		tbuf[0] = 1;
+		cac_cmd(sc, CAC_CMD_FLUSH_CACHE, tbuf, sizeof(tbuf), 0, 0,
+		    CAC_CCB_DATA_OUT, NULL);
 	}
+}
+
+/*
+ * Print autoconfiguration message for a sub-device.
+ */
+static int
+cac_print(void *aux, const char *pnp)
+{
+	struct cac_attach_args *caca;
+
+	caca = (struct cac_attach_args *)aux;
+
+	if (pnp != NULL)
+		aprint_normal("block device at %s", pnp);
+	aprint_normal(" unit %d", caca->caca_unit);
+	return (UNCONF);
 }
 
 /*
@@ -289,24 +261,28 @@ cac_shutdown(void *cookie)
  * dequeue any waiting CCBs.
  */
 int
-cac_intr(v)
-	void *v;
+cac_intr(void *cookie)
 {
-	struct cac_softc *sc = v;
+	struct cac_softc *sc;
 	struct cac_ccb *ccb;
-	int istat, ret = 0;
+	int rv;
 
-	if (!(istat = (sc->sc_cl->cl_intr_pending)(sc)))
-		return 0;
+	sc = (struct cac_softc *)cookie;
 
-	if (istat & CAC_INTR_FIFO_NEMPTY)
-		while ((ccb = (*sc->sc_cl->cl_completed)(sc)) != NULL) {
-			ret = 1;
+	mutex_enter(&sc->sc_mutex);
+
+	if ((*sc->sc_cl.cl_intr_pending)(sc)) {
+		while ((ccb = (*sc->sc_cl.cl_completed)(sc)) != NULL) {
 			cac_ccb_done(sc, ccb);
+			cac_ccb_start(sc, NULL);
 		}
-	cac_ccb_start(sc, NULL);
+		rv = 1;
+	} else
+		rv = 0;
 
-	return (ret);
+	mutex_exit(&sc->sc_mutex);
+
+	return (rv);
 }
 
 /*
@@ -314,37 +290,32 @@ cac_intr(v)
  */
 int
 cac_cmd(struct cac_softc *sc, int command, void *data, int datasize,
-	int drive, int blkno, int flags, struct scsi_xfer *xs)
+	int drive, int blkno, int flags, struct cac_context *context)
 {
 	struct cac_ccb *ccb;
 	struct cac_sgb *sgb;
 	int i, rv, size, nsegs;
 
-#ifdef CAC_DEBUG
-	printf("cac_cmd op=%x drv=%d blk=%d data=%p[%x] fl=%x xs=%p ",
-	    command, drive, blkno, data, datasize, flags, xs);
-#endif
+	size = 0;
 
-	if ((ccb = cac_ccb_alloc(sc, 0)) == NULL) {
-		printf("%s: unable to alloc CCB\n", sc->sc_dv.dv_xname);
-		return (ENOMEM);
+	if ((ccb = cac_ccb_alloc(sc, 1)) == NULL) {
+		aprint_error_dev(&sc->sc_dv, "unable to alloc CCB");
+		return (EAGAIN);
 	}
 
 	if ((flags & (CAC_CCB_DATA_IN | CAC_CCB_DATA_OUT)) != 0) {
 		bus_dmamap_load(sc->sc_dmat, ccb->ccb_dmamap_xfer,
-		    (void *)data, datasize, NULL, BUS_DMA_NOWAIT);
+		    (void *)data, datasize, NULL, BUS_DMA_NOWAIT |
+		    BUS_DMA_STREAMING | ((flags & CAC_CCB_DATA_IN) ?
+		    BUS_DMA_READ : BUS_DMA_WRITE));
 
-		bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmamap_xfer, 0,
-		    ccb->ccb_dmamap_xfer->dm_mapsize,
+		bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmamap_xfer, 0, datasize,
 		    (flags & CAC_CCB_DATA_IN) != 0 ? BUS_DMASYNC_PREREAD :
 		    BUS_DMASYNC_PREWRITE);
 
 		sgb = ccb->ccb_seg;
-		nsegs = ccb->ccb_dmamap_xfer->dm_nsegs;
-		if (nsegs > CAC_SG_SIZE)
-			panic("cac_cmd: nsegs botch");
+		nsegs = min(ccb->ccb_dmamap_xfer->dm_nsegs, CAC_SG_SIZE);
 
-		size = 0;
 		for (i = 0; i < nsegs; i++, sgb++) {
 			size += ccb->ccb_dmamap_xfer->dm_segs[i].ds_len;
 			sgb->length =
@@ -363,54 +334,68 @@ cac_cmd(struct cac_softc *sc, int command, void *data, int datasize,
 	    sizeof(struct cac_sgb) * CAC_SG_SIZE) >> 2);
 
 	ccb->ccb_req.next = 0;
-	ccb->ccb_req.command = command;
 	ccb->ccb_req.error = 0;
-	ccb->ccb_req.blkno = htole32(blkno);
-	ccb->ccb_req.bcount = htole16(howmany(size, DEV_BSIZE));
-	ccb->ccb_req.sgcount = nsegs;
 	ccb->ccb_req.reserved = 0;
+	ccb->ccb_req.bcount = htole16(howmany(size, DEV_BSIZE));
+	ccb->ccb_req.command = command;
+	ccb->ccb_req.sgcount = nsegs;
+	ccb->ccb_req.blkno = htole32(blkno);
 
 	ccb->ccb_flags = flags;
 	ccb->ccb_datasize = size;
-	ccb->ccb_xs = xs;
 
-	if (!xs || xs->flags & SCSI_POLL) {
+	mutex_enter(&sc->sc_mutex);
+
+	if (context == NULL) {
+		memset(&ccb->ccb_context, 0, sizeof(struct cac_context));
 
 		/* Synchronous commands musn't wait. */
-		if ((*sc->sc_cl->cl_fifo_full)(sc)) {
+		if ((*sc->sc_cl.cl_fifo_full)(sc)) {
 			cac_ccb_free(sc, ccb);
-			rv = -1;
+			rv = EAGAIN;
 		} else {
+#ifdef DIAGNOSTIC
 			ccb->ccb_flags |= CAC_CCB_ACTIVE;
-			(*sc->sc_cl->cl_submit)(sc, ccb);
+#endif
+			(*sc->sc_cl.cl_submit)(sc, ccb);
 			rv = cac_ccb_poll(sc, ccb, 2000);
+			cac_ccb_free(sc, ccb);
 		}
-	} else
-		rv = cac_ccb_start(sc, ccb);
+	} else {
+		memcpy(&ccb->ccb_context, context, sizeof(struct cac_context));
+		(void)cac_ccb_start(sc, ccb);
+		rv = 0;
+	}
 
+	mutex_exit(&sc->sc_mutex);
 	return (rv);
 }
 
 /*
- * Wait for the specified CCB to complete.  Must be called at splbio.
+ * Wait for the specified CCB to complete.
  */
-int
+static int
 cac_ccb_poll(struct cac_softc *sc, struct cac_ccb *wantccb, int timo)
 {
 	struct cac_ccb *ccb;
-	int s, t = timo * 10;
+
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
+	timo *= 1000;
 
 	do {
-		for (; t--; DELAY(100))
-			if ((ccb = (*sc->sc_cl->cl_completed)(sc)) != NULL)
+		for (; timo != 0; timo--) {
+			ccb = (*sc->sc_cl.cl_completed)(sc);
+			if (ccb != NULL)
 				break;
-		if (t < 0) {
-			printf("%s: timeout\n", sc->sc_dv.dv_xname);
+			DELAY(1);
+		}
+
+		if (timo == 0) {
+			printf("%s: timeout\n", device_xname(&sc->sc_dv));
 			return (EBUSY);
 		}
-		s = splbio();
 		cac_ccb_done(sc, ccb);
-		splx(s);
 	} while (ccb != wantccb);
 
 	return (0);
@@ -418,19 +403,25 @@ cac_ccb_poll(struct cac_softc *sc, struct cac_ccb *wantccb, int timo)
 
 /*
  * Enqueue the specified command (if any) and attempt to start all enqueued
- * commands.  Must be called at splbio.
+ * commands.
  */
-int
+static int
 cac_ccb_start(struct cac_softc *sc, struct cac_ccb *ccb)
 {
+
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
 	if (ccb != NULL)
 		SIMPLEQ_INSERT_TAIL(&sc->sc_ccb_queue, ccb, ccb_chain);
 
-	while ((ccb = SIMPLEQ_FIRST(&sc->sc_ccb_queue)) != NULL &&
-	    !(*sc->sc_cl->cl_fifo_full)(sc)) {
+	while ((ccb = SIMPLEQ_FIRST(&sc->sc_ccb_queue)) != NULL) {
+		if ((*sc->sc_cl.cl_fifo_full)(sc))
+			return (EAGAIN);
 		SIMPLEQ_REMOVE_HEAD(&sc->sc_ccb_queue, ccb_chain);
+#ifdef DIAGNOSTIC
 		ccb->ccb_flags |= CAC_CCB_ACTIVE;
-		(*sc->sc_cl->cl_submit)(sc, ccb);
+#endif
+		(*sc->sc_cl.cl_submit)(sc, ccb);
 	}
 
 	return (0);
@@ -439,344 +430,334 @@ cac_ccb_start(struct cac_softc *sc, struct cac_ccb *ccb)
 /*
  * Process a finished CCB.
  */
-void
+static void
 cac_ccb_done(struct cac_softc *sc, struct cac_ccb *ccb)
 {
-	struct scsi_xfer *xs = ccb->ccb_xs;
-	int error = 0;
+	struct device *dv;
+	void *context;
+	int error;
 
-	if ((ccb->ccb_flags & CAC_CCB_ACTIVE) == 0) {
-		printf("%s: CCB not active, xs=%p\n", sc->sc_dv.dv_xname, xs);
-		if (xs) {
-			xs->error = XS_DRIVER_STUFFUP;
-			scsi_done(xs);
-		}
-		return;
-	}
+	error = 0;
+
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
+#ifdef DIAGNOSTIC
+	if ((ccb->ccb_flags & CAC_CCB_ACTIVE) == 0)
+		panic("cac_ccb_done: CCB not active");
+	ccb->ccb_flags &= ~CAC_CCB_ACTIVE;
+#endif
 
 	if ((ccb->ccb_flags & (CAC_CCB_DATA_IN | CAC_CCB_DATA_OUT)) != 0) {
 		bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmamap_xfer, 0,
-		    ccb->ccb_dmamap_xfer->dm_mapsize,
-		    ccb->ccb_flags & CAC_CCB_DATA_IN ?
+		    ccb->ccb_datasize, ccb->ccb_flags & CAC_CCB_DATA_IN ?
 		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap_xfer);
 	}
 
-	if ((ccb->ccb_req.error & CAC_RET_SOFT_ERROR) != 0)
-		printf("%s: soft error; corrected\n", sc->sc_dv.dv_xname);
-	if ((ccb->ccb_req.error & CAC_RET_HARD_ERROR) != 0) {
-		error = 1;
-		printf("%s: hard error\n", sc->sc_dv.dv_xname);
-	}
-	if ((ccb->ccb_req.error & CAC_RET_CMD_REJECTED) != 0) {
-		error = 1;
-		printf("%s: invalid request\n", sc->sc_dv.dv_xname);
-	}
-
-	cac_ccb_free(sc, ccb);
-	if (xs) {
-		if (error)
-			xs->error = XS_DRIVER_STUFFUP;
-		else
-			xs->resid = 0;
-
-		xs->flags |= ITSDONE;
-		scsi_done(xs);
+	error = ccb->ccb_req.error;
+	if (ccb->ccb_context.cc_handler != NULL) {
+		dv = ccb->ccb_context.cc_dv;
+		context = ccb->ccb_context.cc_context;
+		cac_ccb_free(sc, ccb);
+		(*ccb->ccb_context.cc_handler)(dv, context, error);
+	} else {
+		if ((error & CAC_RET_SOFT_ERROR) != 0)
+			aprint_error_dev(&sc->sc_dv, "soft error; array may be degraded\n");
+		if ((error & CAC_RET_HARD_ERROR) != 0)
+			aprint_error_dev(&sc->sc_dv, "hard error\n");
+		if ((error & CAC_RET_CMD_REJECTED) != 0) {
+			error = 1;
+			aprint_error_dev(&sc->sc_dv, "invalid request\n");
+		}
 	}
 }
 
 /*
  * Allocate a CCB.
  */
-struct cac_ccb *
+static struct cac_ccb *
 cac_ccb_alloc(struct cac_softc *sc, int nosleep)
 {
 	struct cac_ccb *ccb;
 
-	if ((ccb = SIMPLEQ_FIRST(&sc->sc_ccb_free)) != NULL)
-		SIMPLEQ_REMOVE_HEAD(&sc->sc_ccb_free, ccb_chain);
-	else
-		ccb = NULL;
+	mutex_enter(&sc->sc_mutex);
+
+	for (;;) {
+		if ((ccb = SIMPLEQ_FIRST(&sc->sc_ccb_free)) != NULL) {
+			SIMPLEQ_REMOVE_HEAD(&sc->sc_ccb_free, ccb_chain);
+			break;
+		}
+		if (nosleep) {
+			ccb = NULL;
+			break;
+		}
+		cv_wait(&sc->sc_ccb_cv, &sc->sc_mutex);
+	}
+
+	mutex_exit(&sc->sc_mutex);
 	return (ccb);
 }
 
 /*
  * Put a CCB onto the freelist.
  */
-void
+static void
 cac_ccb_free(struct cac_softc *sc, struct cac_ccb *ccb)
 {
 
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
 	ccb->ccb_flags = 0;
+	if (SIMPLEQ_EMPTY(&sc->sc_ccb_free))
+		cv_signal(&sc->sc_ccb_cv);
 	SIMPLEQ_INSERT_HEAD(&sc->sc_ccb_free, ccb, ccb_chain);
-}
-
-int
-cac_get_dinfo(sc, target)
-	struct cac_softc *sc;
-	int target;
-{
-	if (sc->sc_dinfos[target].ncylinders)
-		return (0);
-
-	if (cac_cmd(sc, CAC_CMD_GET_LOG_DRV_INFO, &sc->sc_dinfos[target],
-	    sizeof(*sc->sc_dinfos), target, 0, CAC_CCB_DATA_IN, NULL)) {
-		printf("%s: CMD_GET_LOG_DRV_INFO failed\n",
-		    sc->sc_dv.dv_xname);
-		return (-1);
-	}
-
-	return (0);
-}
-
-void
-cacminphys(bp)
-	struct buf *bp;
-{
-	if (bp->b_bcount > CAC_MAX_XFER)
-		bp->b_bcount = CAC_MAX_XFER;
-	minphys(bp);
-}
-
-void
-cac_copy_internal_data(xs, v, size)
-	struct scsi_xfer *xs;
-	void *v;
-	size_t size;
-{
-	size_t copy_cnt;
-
-	if (!xs->datalen)
-		printf("uio move is not yet supported\n");
-	else {
-		copy_cnt = MIN(size, xs->datalen);
-		bcopy(v, xs->data, copy_cnt);
-	}
-}
-
-int
-cac_scsi_cmd(xs)
-	struct scsi_xfer *xs;
-{
-	struct scsi_link *link = xs->sc_link;
-	struct cac_softc *sc = link->adapter_softc;
-	struct cac_drive_info *dinfo;
-	struct scsi_inquiry_data inq;
-	struct scsi_sense_data sd;
-	struct scsi_read_cap_data rcd;
-	u_int8_t target = link->target;
-	u_int32_t blockno, blockcnt, size;
-	struct scsi_rw *rw;
-	struct scsi_rw_big *rwb;
-	int op, flags, s, error, poll;
-	const char *p;
-
-	if (target >= sc->sc_nunits || link->lun != 0) {
-		xs->error = XS_DRIVER_STUFFUP;
-		return (COMPLETE);
-	}
-
-	s = splbio();
-	xs->error = XS_NOERROR;
-	xs->free_list.le_next = NULL;
-	dinfo = &sc->sc_dinfos[target];
-
-	switch (xs->cmd->opcode) {
-	case TEST_UNIT_READY:
-	case START_STOP:
-#if 0
-	case VERIFY:
-#endif
-		break;
-
-	case REQUEST_SENSE:
-		bzero(&sd, sizeof sd);
-		sd.error_code = 0x70;
-		sd.segment = 0;
-		sd.flags = SKEY_NO_SENSE;
-		*(u_int32_t*)sd.info = htole32(0);
-		sd.extra_len = 0;
-		cac_copy_internal_data(xs, &sd, sizeof sd);
-		break;
-
-	case INQUIRY:
-		if (cac_get_dinfo(sc, target)) {
-			xs->error = XS_DRIVER_STUFFUP;
-			break;
-		}
-		bzero(&inq, sizeof inq);
-		inq.device = T_DIRECT;
-		inq.dev_qual2 = 0;
-		inq.version = 2;
-		inq.response_format = 2;
-		inq.additional_length = 32;
-		strlcpy(inq.vendor, "Compaq  ", sizeof inq.vendor);
-		switch (CAC_GET1(dinfo->mirror)) {
-		case 0: p = "RAID0";	break;
-		case 1: p = "RAID4";	break;
-		case 2: p = "RAID1";	break;
-		case 3: p = "RAID5";	break;
-		default:p = "<UNK>";	break;
-		}
-		snprintf(inq.product, sizeof inq.product, "%s vol  #%02d",
-		    p, target);
-		strlcpy(inq.revision, "   ", sizeof inq.revision);
-		cac_copy_internal_data(xs, &inq, sizeof inq);
-		break;
-
-	case READ_CAPACITY:
-		if (cac_get_dinfo(sc, target)) {
-			xs->error = XS_DRIVER_STUFFUP;
-			break;
-		}
-		bzero(&rcd, sizeof rcd);
-		_lto4b( CAC_GET2(dinfo->ncylinders) * CAC_GET1(dinfo->nheads) *
-		    CAC_GET1(dinfo->nsectors) - 1, rcd.addr);
-		_lto4b(CAC_SECTOR_SIZE, rcd.length);
-		cac_copy_internal_data(xs, &rcd, sizeof rcd);
-		break;
-
-	case PREVENT_ALLOW:
-		break;
-
-	case SYNCHRONIZE_CACHE:
-		if (cac_flush(sc))
-			xs->error = XS_DRIVER_STUFFUP;
-		break;
-
-	case READ_COMMAND:
-	case READ_BIG:
-	case WRITE_COMMAND:
-	case WRITE_BIG:
-
-		flags = 0;
-		/* A read or write operation. */
-		if (xs->cmdlen == 6) {
-			rw = (struct scsi_rw *)xs->cmd;
-			blockno = _3btol(rw->addr) &
-			    (SRW_TOPADDR << 16 | 0xffff);
-			blockcnt = rw->length ? rw->length : 0x100;
-		} else {
-			rwb = (struct scsi_rw_big *)xs->cmd;
-			blockno = _4btol(rwb->addr);
-			blockcnt = _2btol(rwb->length);
-		}
-		size = CAC_GET2(dinfo->ncylinders) *
-		    CAC_GET1(dinfo->nheads) * CAC_GET1(dinfo->nsectors);
-		if (blockno >= size || blockno + blockcnt > size) {
-			printf("%s: out of bounds %u-%u >= %u\n",
-			    sc->sc_dv.dv_xname, blockno, blockcnt, size);
-			xs->error = XS_DRIVER_STUFFUP;
-			scsi_done(xs);
-			break;
-		}
-
-		switch (xs->cmd->opcode) {
-		case READ_COMMAND:
-		case READ_BIG:
-			op = CAC_CMD_READ;
-			flags = CAC_CCB_DATA_IN;
-			break;
-		case WRITE_COMMAND:
-		case WRITE_BIG:
-			op = CAC_CMD_WRITE;
-			flags = CAC_CCB_DATA_OUT;
-			break;
-		}
-
-		poll = xs->flags & SCSI_POLL;
-		if ((error = cac_cmd(sc, op, xs->data, blockcnt * DEV_BSIZE,
-		    target, blockno, flags, xs))) {
-
-			if (error == ENOMEM) {
-				splx(s);
-				return (TRY_AGAIN_LATER);
-			} else if (poll) {
-				splx(s);
-				return (TRY_AGAIN_LATER);
-			} else {
-				xs->error = XS_DRIVER_STUFFUP;
-				scsi_done(xs);
-				break;
-			}
-		}
-
-		splx(s);
-
-		if (poll)
-			return (COMPLETE);
-		else
-			return (SUCCESSFULLY_QUEUED);
-
-	default:
-		SC_DEBUG(link, SDEV_DB1, ("unsupported scsi command %#x "
-		    "tgt %d ", xs->cmd->opcode, target));
-		xs->error = XS_DRIVER_STUFFUP;
-	}
-	splx(s);
-
-	return (COMPLETE);
 }
 
 /*
  * Board specific linkage shared between multiple bus types.
  */
 
-int
+static int
 cac_l0_fifo_full(struct cac_softc *sc)
 {
+
+	KASSERT(mutex_owned(&sc->sc_mutex));
 
 	return (cac_inl(sc, CAC_REG_CMD_FIFO) == 0);
 }
 
-void
+static void
 cac_l0_submit(struct cac_softc *sc, struct cac_ccb *ccb)
 {
-#ifdef CAC_DEBUG
-	printf("submit-%x ", ccb->ccb_paddr);
-#endif
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, 0,
-	    sc->sc_dmamap->dm_mapsize,
-	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
+
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap,
+	    (char *)ccb - (char *)sc->sc_ccbs,
+	    sizeof(struct cac_ccb), BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 	cac_outl(sc, CAC_REG_CMD_FIFO, ccb->ccb_paddr);
 }
 
-struct cac_ccb *
-cac_l0_completed(sc)
-	struct cac_softc *sc;
+static struct cac_ccb *
+cac_l0_completed(struct cac_softc *sc)
 {
 	struct cac_ccb *ccb;
 	paddr_t off;
 
-	if (!(off = cac_inl(sc, CAC_REG_DONE_FIFO)))
-		return NULL;
-#ifdef CAC_DEBUG
-	printf("compl-%x ", off);
-#endif
-	if (off & 3 && ccb->ccb_req.error == 0)
-		ccb->ccb_req.error = CAC_RET_CMD_INVALID;
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
+	if ((off = cac_inl(sc, CAC_REG_DONE_FIFO)) == 0)
+		return (NULL);
+
+	if ((off & 3) != 0)
+		aprint_error_dev(&sc->sc_dv, "failed command list returned: %lx\n",
+		    (long)off);
 
 	off = (off & ~3) - sc->sc_ccbs_paddr;
-	ccb = (struct cac_ccb *)(sc->sc_ccbs + off);
+	ccb = (struct cac_ccb *)((char *)sc->sc_ccbs + off);
 
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, 0,
-	    sc->sc_dmamap->dm_mapsize,
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmamap, off, sizeof(struct cac_ccb),
 	    BUS_DMASYNC_POSTWRITE | BUS_DMASYNC_POSTREAD);
+
+	if ((off & 3) != 0 && ccb->ccb_req.error == 0)
+		ccb->ccb_req.error = CAC_RET_CMD_REJECTED;
 
 	return (ccb);
 }
 
-int
+static int
 cac_l0_intr_pending(struct cac_softc *sc)
 {
 
-	return (cac_inl(sc, CAC_REG_INTR_PENDING));
+	KASSERT(mutex_owned(&sc->sc_mutex));
+
+	return (cac_inl(sc, CAC_REG_INTR_PENDING) & CAC_INTR_ENABLE);
 }
 
-void
+static void
 cac_l0_intr_enable(struct cac_softc *sc, int state)
 {
+
+	KASSERT(mutex_owned(&sc->sc_mutex));
 
 	cac_outl(sc, CAC_REG_INTR_MASK,
 	    state ? CAC_INTR_ENABLE : CAC_INTR_DISABLE);
 }
+
+#if NBIO > 0
+const int cac_level[] = { 0, 4, 1, 5, 51, 7 };
+const int cac_stat[] = { BIOC_SVONLINE, BIOC_SVOFFLINE, BIOC_SVOFFLINE,
+    BIOC_SVDEGRADED, BIOC_SVREBUILD, BIOC_SVREBUILD, BIOC_SVDEGRADED,
+    BIOC_SVDEGRADED, BIOC_SVINVALID, BIOC_SVINVALID, BIOC_SVBUILDING,
+    BIOC_SVOFFLINE, BIOC_SVBUILDING };
+
+int
+cac_ioctl(struct device *dev, u_long cmd, void *addr)
+{
+	struct cac_softc	*sc = (struct cac_softc *)dev;
+	struct bioc_inq *bi;
+	struct bioc_disk *bd;
+	cac_lock_t lock;
+	int error = 0;
+
+	lock = CAC_LOCK(sc);
+	switch (cmd) {
+	case BIOCINQ:
+		bi = (struct bioc_inq *)addr;
+		strlcpy(bi->bi_dev, device_xname(&sc->sc_dv), sizeof(bi->bi_dev));
+		bi->bi_novol = sc->sc_nunits;
+		bi->bi_nodisk = 0;
+		break;
+
+	case BIOCVOL:
+		error = cac_ioctl_vol(sc, (struct bioc_vol *)addr);
+		break;
+
+	case BIOCDISK:
+	case BIOCDISK_NOVOL:
+		bd = (struct bioc_disk *)addr;
+		if (bd->bd_volid > sc->sc_nunits) {
+			error = EINVAL;
+			break;
+		}
+		/* No disk information yet */
+		break;
+
+	case BIOCBLINK:
+	case BIOCALARM:
+	case BIOCSETSTATE:
+	default:
+		error = EINVAL;
+	}
+	CAC_UNLOCK(sc, lock);
+
+	return (error);
+}
+
+int
+cac_ioctl_vol(struct cac_softc *sc, struct bioc_vol *bv)
+{
+	struct cac_drive_info dinfo;
+	struct cac_drive_status dstatus;
+	u_int32_t blks;
+
+	if (bv->bv_volid > sc->sc_nunits) {
+		return EINVAL;
+	}
+	if (cac_cmd(sc, CAC_CMD_GET_LOG_DRV_INFO, &dinfo, sizeof(dinfo),
+	    bv->bv_volid, 0, CAC_CCB_DATA_IN, NULL)) {
+		return EIO;
+	}
+	if (cac_cmd(sc, CAC_CMD_SENSE_DRV_STATUS, &dstatus, sizeof(dstatus),
+	    bv->bv_volid, 0, CAC_CCB_DATA_IN, NULL)) {
+		return EIO;
+	}
+	blks = CAC_GET2(dinfo.ncylinders) * CAC_GET1(dinfo.nheads) *
+	    CAC_GET1(dinfo.nsectors);
+	bv->bv_size = (off_t)blks * CAC_GET2(dinfo.secsize);
+	bv->bv_level = cac_level[CAC_GET1(dinfo.mirror)];	/*XXX limit check */
+	bv->bv_nodisk = 0;		/* XXX */
+	bv->bv_status = 0;		/* XXX */
+	bv->bv_percent = -1;
+	bv->bv_seconds = 0;
+	if (dstatus.stat < sizeof(cac_stat)/sizeof(cac_stat[0]))
+		bv->bv_status = cac_stat[dstatus.stat];
+	if (bv->bv_status == BIOC_SVREBUILD ||
+	    bv->bv_status == BIOC_SVBUILDING)
+		bv->bv_percent = ((blks - CAC_GET4(dstatus.prog)) * 1000ULL) /
+		    blks;
+	return 0;
+}
+
+int
+cac_create_sensors(struct cac_softc *sc)
+{
+	int			i;
+	int nsensors = sc->sc_nunits;
+
+	sc->sc_sme = sysmon_envsys_create();
+	sc->sc_sensor = malloc(sizeof(envsys_data_t) * nsensors,
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (sc->sc_sensor == NULL) {
+		aprint_error_dev(&sc->sc_dv, "can't allocate envsys_data_t\n");
+		return(ENOMEM);
+	}
+
+	for (i = 0; i < nsensors; i++) {
+		sc->sc_sensor[i].units = ENVSYS_DRIVE;
+		sc->sc_sensor[i].monitor = true;
+		/* Enable monitoring for drive state changes */
+		sc->sc_sensor[i].flags |= ENVSYS_FMONSTCHANGED;
+		/* logical drives */
+		snprintf(sc->sc_sensor[i].desc,
+		    sizeof(sc->sc_sensor[i].desc), "%s:%d",
+		    device_xname(&sc->sc_dv), i);
+		if (sysmon_envsys_sensor_attach(sc->sc_sme,
+		    &sc->sc_sensor[i]))
+			goto out;
+	}
+	sc->sc_sme->sme_name = device_xname(&sc->sc_dv);
+	sc->sc_sme->sme_cookie = sc;
+	sc->sc_sme->sme_refresh = cac_sensor_refresh;
+	if (sysmon_envsys_register(sc->sc_sme)) {
+		aprint_error_dev(&sc->sc_dv, "unable to register with sysmon\n");
+		return(1);
+	}
+	return (0);
+
+out:
+	free(sc->sc_sensor, M_DEVBUF);
+	sysmon_envsys_destroy(sc->sc_sme);
+	return EINVAL;
+}
+
+void
+cac_sensor_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
+{
+	struct cac_softc	*sc = sme->sme_cookie;
+	struct bioc_vol		bv;
+	int s;
+
+	if (edata->sensor >= sc->sc_nunits)
+		return;
+
+	bzero(&bv, sizeof(bv));
+	bv.bv_volid = edata->sensor;
+	s = splbio();
+	if (cac_ioctl_vol(sc, &bv)) {
+		splx(s);
+		return;
+	}
+	splx(s);
+
+	switch(bv.bv_status) {
+	case BIOC_SVOFFLINE:
+		edata->value_cur = ENVSYS_DRIVE_FAIL;
+		edata->state = ENVSYS_SCRITICAL;
+		break;
+
+	case BIOC_SVDEGRADED:
+		edata->value_cur = ENVSYS_DRIVE_PFAIL;
+		edata->state = ENVSYS_SCRITICAL;
+		break;
+
+	case BIOC_SVSCRUB:
+	case BIOC_SVONLINE:
+		edata->value_cur = ENVSYS_DRIVE_ONLINE;
+		edata->state = ENVSYS_SVALID;
+		break;
+
+	case BIOC_SVREBUILD:
+	case BIOC_SVBUILDING:
+		edata->value_cur = ENVSYS_DRIVE_REBUILD;
+		edata->state = ENVSYS_SVALID;
+		break;
+
+	case BIOC_SVINVALID:
+		/* FALLTRHOUGH */
+	default:
+		edata->value_cur = 0; /* unknown */
+		edata->state = ENVSYS_SINVALID;
+	}
+}
+#endif /* NBIO > 0 */

@@ -1,5 +1,33 @@
-/*	$OpenBSD: sbusvar.h,v 1.9 2007/05/29 09:54:17 sobrado Exp $	*/
-/*	$NetBSD: sbusvar.h,v 1.4 1996/04/22 02:35:05 abrown Exp $ */
+/*	$NetBSD: sbusvar.h,v 1.19 2008/05/17 18:11:32 macallan Exp $ */
+
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Paul Kranenburg.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,27 +69,33 @@
  *	@(#)sbusvar.h	8.1 (Berkeley) 6/11/93
  */
 
-/*
- * S-bus variables.
- */
+#ifndef _SBUS_VAR_SPARC_H
+#define _SBUS_VAR_SPARC_H
 
-/*
- * SBus driver attach arguments.
- */
-struct sbus_attach_args {
-	struct	romaux sa_ra;		/* name, node, addr, etc */
-	int	sa_slot;		/* SBus slot number */
-	int	sa_offset;		/* offset within slot */
-};
 
-/* variables per SBus */
+/* variables per Sbus */
 struct sbus_softc {
-	struct	device sc_dev;		/* base device */
+	device_t sc_dev;		/* base device */
+	bus_space_tag_t	sc_bustag;
+	bus_dma_tag_t	sc_dmatag;
+	bus_space_handle_t sc_bh;	/* SBus control registers */
 	int	sc_clockfreq;		/* clock frequency (in Hz) */
-	struct	rom_range *sc_range;
-	int	sc_nrange;
+	struct	sbusdev *sc_sbdev;	/* list of all children */
 	int	sc_burst;		/* burst transfer sizes supported */
+
+	/* MD fields follow here */
+	int	*sc_intr2ipl;		/* Interrupt level translation */
 };
 
-void	sbus_translate(struct device *, struct confargs *);
-int	sbus_testdma(struct sbus_softc *, struct confargs *);
+/*
+ * Macro to convert a PROM virtual address to a bus_space_handle_t.
+ */
+#define	sbus_promaddr_to_handle(tag, promaddr, hp) sparc_promaddr_to_handle(tag, promaddr, hp)
+
+static inline void
+sparc_promaddr_to_handle(bus_space_tag_t tag, u_int promaddr, bus_space_handle_t *hp)
+{
+	*(hp) = (bus_space_handle_t)(promaddr);
+}
+
+#endif /* _SBUS_VAR_SPARC_H */

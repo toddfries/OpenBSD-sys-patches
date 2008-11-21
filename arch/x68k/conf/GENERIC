@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.132 2006/11/11 18:47:12 jmmv Exp $
+# $NetBSD: GENERIC,v 1.142 2008/11/12 12:36:09 ad Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,7 +22,7 @@ include 	"arch/x68k/conf/std.x68k"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.132 $"
+#ident 		"GENERIC-$Revision: 1.142 $"
 
 maxusers	8
 
@@ -66,7 +66,6 @@ options 	RTC_OFFSET=-540	# hardware clock is this many mins. west of GMT
 
 ## System call tracing (see ktrace(1)).
 options 	KTRACE
-#options 	SYSTRACE	# system call vetting via systrace(1)
 
 ## Collect statistics on kernel malloc's and free's.  This does have a
 ## significant performance hit on slower machines, so it is intended for
@@ -76,19 +75,13 @@ options 	KTRACE
 ## System V compatible IPC subsystem.  (msgctl(2), semctl(2), and shmctl(2))
 options 	SYSVMSG		# System V message queues
 options 	SYSVSEM		# System V semaphores
-#options 	SEMMNI=10	# number of semaphore identifiers
-#options 	SEMMNS=60	# number of semaphores in system
-#options 	SEMUME=10	# max number of undo entries per process
-#options 	SEMMNU=30	# number of undo structures in system
 options 	SYSVSHM		# System V shared memory
-#options 	SHMMAXPGS=1024	# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
 
 ## Loadable kernel module support
-#options 	LKM
 
 options 	USERCONF	# userconf(4) support
-#options	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
+#options 	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
 options 	SYSCTL_INCLUDE_DESCR	# Include sysctl descriptions in kernel
 
 # Enable experimental buffer queue strategy for better responsiveness under 
@@ -165,13 +158,14 @@ options 	COMPAT_15	# NetBSD 1.5 binary compatibility
 options 	COMPAT_16	# NetBSD 1.6 binary compatibility
 options 	COMPAT_20	# NetBSD 2.0 binary compatibility
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
+options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options 	COMPAT_AOUT_M68K # compatibility with NetBSD/m68k a.out
 #options 	COMPAT_M68K4K	# NetBSD/m68k4k binaries
 #options 	COMPAT_SUNOS	# SunOS 4.x binary compatibility; broken
 #options 	COMPAT_SVR4	# SVR4 binary compatibility; broken
 #options 	COMPAT_LINUX	# Linux/m68k binary compatibility
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
-options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
+options 	COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 ## File systems.
 file-system	FFS		# Berkeley Fast Filesystem
@@ -198,7 +192,8 @@ options 	NFSSERVER	# Sun NFS-compatible filesystem server
 #options 	QUOTA		# FFS quotas
 #options 	FFS_EI		# FFS Endian Independent support
 options 	SOFTDEP		# FFS soft updates support.
-#options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
+options 	WAPBL		# File system journaling support - Experimental
+#options 	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 
 ## Network protocol support.  In most environments, INET is required.
@@ -319,14 +314,14 @@ bmd*	at intio0 addr 0xecebf0		# Nereid
 # Nereid USB controllers
 #slhci0	at intio0 addr 0xece380 intr 251
 #slhci1	at intio0 addr 0xeceb80 intr 250
-#options	SLHCI_DEBUG
+#options 	SLHCI_DEBUG
 
 # USB bus support
 #usb*	at slhci?
 
 # USB Hubs
 #uhub*	at usb?
-#uhub*	at uhub? port ? configuration ? interface ?
+#uhub*	at uhub? port ?
 
 # USB HID device
 #uhidev*	at uhub? port ? configuration ? interface ?
@@ -428,6 +423,11 @@ bmd*	at intio0 addr 0xecebf0		# Nereid
 
 #### Pseudo devices
 
+#
+# accept filters
+pseudo-device   accf_data		# "dataready" accept filter
+pseudo-device   accf_http		# "httpready" accept filter
+
 ## A disk-like interface to files.  Can be used to create floppy, CD,
 ## miniroot images, etc.
 
@@ -448,13 +448,13 @@ pseudo-device	vnd
 pseudo-device	raid	8
 options 	RAID_AUTOCONFIG		# auto-configuration of RAID components
 # Options to enable various other RAIDframe RAID types.
-# options	RF_INCLUDE_EVENODD=1
-# options	RF_INCLUDE_RAID5_RS=1
-# options	RF_INCLUDE_PARITYLOGGING=1
-# options	RF_INCLUDE_CHAINDECLUSTER=1
-# options	RF_INCLUDE_INTERDECLUSTER=1
+# options 	RF_INCLUDE_EVENODD=1
+# options 	RF_INCLUDE_RAID5_RS=1
+# options 	RF_INCLUDE_PARITYLOGGING=1
+# options 	RF_INCLUDE_CHAINDECLUSTER=1
+# options 	RF_INCLUDE_INTERDECLUSTER=1
 # options 	RF_INCLUDE_PARITY_DECLUSTERING=1
-# options	RF_INCLUDE_PARITY_DECLUSTERING_DS=1
+# options 	RF_INCLUDE_PARITY_DECLUSTERING_DS=1
 
 
 ## Memory disk device, used on boot floppies with compressed
@@ -502,7 +502,8 @@ pseudo-device	vlan
 
 ## Simple inter-network traffic bridging
 pseudo-device	bridge
-#options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
+#options 	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
+pseudo-device	agr			# IEEE 802.3ad link aggregation
 
 #### Other device configuration
 

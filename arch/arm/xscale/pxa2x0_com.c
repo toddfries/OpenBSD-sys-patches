@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_com.c,v 1.8 2008/05/15 22:17:08 brad Exp $ */
-/*	$NetBSD: pxa2x0_com.c,v 1.4 2003/07/15 00:24:55 lukem Exp $	*/
+/*	$NetBSD: pxa2x0_com.c,v 1.10 2008/03/14 15:09:09 cube Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -36,6 +35,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_com.c,v 1.10 2008/03/14 15:09:09 cube Exp $");
+
+#include "opt_com.h"
+
 #ifndef COM_PXA2X0
 #error "You must use options COM_PXA2X0 to get PXA2x0 serial port support"
 #endif
@@ -43,7 +47,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/tty.h>
+#include <sys/termios.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -51,60 +55,72 @@
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
 
-#define com_isr 8
-#define ISR_RECV	(ISR_RXPL | ISR_XMODE | ISR_RCVEIR)
-
+#include <arm/xscale/pxa2x0cpu.h>
 #include <arm/xscale/pxa2x0reg.h>
 #include <arm/xscale/pxa2x0var.h>
+#include <arm/xscale/pxa2x0_gpio.h>
 
-#ifdef __zaurus__
-#include <zaurus/dev/zaurus_scoopvar.h>
-#endif
+#include "locators.h"
 
-int	pxauart_match(struct device *, void *, void *);
-void	pxauart_attach(struct device *, struct device *, void *);
-void	pxauart_power(int why, void *);
+static int	pxauart_match(device_t, cfdata_t , void *);
+static void	pxauart_attach(device_t, device_t, void *);
 
-struct cfattach com_pxaip_ca = {
-        sizeof (struct com_softc), pxauart_match, pxauart_attach
-};
+CFATTACH_DECL_NEW(pxauart, sizeof(struct com_softc),
+    pxauart_match, pxauart_attach, NULL, NULL);
 
-int
-pxauart_match(struct device *parent, void *cf, void *aux)
+static int
+pxauart_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct pxaip_attach_args *pxa = aux;
 	bus_space_tag_t bt = &pxa2x0_a4x_bs_tag;	/* XXX: This sucks */
 	bus_space_handle_t bh;
-	int rv;
+	struct pxa2x0_gpioconf *gpioconf;
+	u_int gpio;
+	int rv, i;
 
 	switch (pxa->pxa_addr) {
 	case PXA2X0_FFUART_BASE:
 		if (pxa->pxa_intr != PXA2X0_INT_FFUART)
 			return (0);
+		gpioconf = CPU_IS_PXA250 ? pxa25x_com_ffuart_gpioconf :
+			    pxa27x_com_ffuart_gpioconf;
 		break;
 
 	case PXA2X0_STUART_BASE:
 		if (pxa->pxa_intr != PXA2X0_INT_STUART)
 			return (0);
+		gpioconf = CPU_IS_PXA250 ? pxa25x_com_stuart_gpioconf :
+			    pxa27x_com_stuart_gpioconf;
 		break;
 
 	case PXA2X0_BTUART_BASE:	/* XXX: Config file option ... */
 		if (pxa->pxa_intr != PXA2X0_INT_BTUART)
 			return (0);
+		gpioconf = CPU_IS_PXA250 ? pxa25x_com_btuart_gpioconf :
+			    pxa27x_com_btuart_gpioconf;
+		break;
+
+	case PXA2X0_HWUART_BASE:
+		if (pxa->pxa_intr != PXA2X0_INT_HWUART)
+			return (0);
+		gpioconf = CPU_IS_PXA250 ? pxa25x_com_hwuart_gpioconf :
+			    pxa27x_com_hwuart_gpioconf;
 		break;
 
 	default:
 		return (0);
 	}
+	for (i = 0; gpioconf[i].pin != -1; i++) {
+		gpio = pxa2x0_gpio_get_function(gpioconf[i].pin);
+		if (GPIO_FN(gpio) != GPIO_FN(gpioconf[i].value) ||
+		    GPIO_FN_IS_OUT(gpio) != GPIO_FN_IS_OUT(gpioconf[i].value))
+			return (0);
+	}
 
 	pxa->pxa_size = 0x20;
 
-	{
-		extern bus_addr_t comconsaddr;
-
-		if (comconsaddr == pxa->pxa_addr)
-			return (1);
-	}
+	if (com_is_console(bt, pxa->pxa_addr, NULL))
+		return (1);
 
 	if (bus_space_map(bt, pxa->pxa_addr, pxa->pxa_size, 0, &bh))
 		return (0);
@@ -118,61 +134,29 @@ pxauart_match(struct device *parent, void *cf, void *aux)
 	return (rv);
 }
 
-void
-pxauart_attach(struct device *parent, struct device *self, void *aux)
+static void
+pxauart_attach(device_t parent, device_t self, void *aux)
 {
-	struct com_softc *sc = (struct com_softc *)self;
+	struct com_softc *sc = device_private(self);
 	struct pxaip_attach_args *pxa = aux;
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
+	bus_addr_t iobase;
 
-	sc->sc_iot = &pxa2x0_a4x_bs_tag;	/* XXX: This sucks */
-	sc->sc_iobase = pxa->pxa_addr;
+	sc->sc_dev = self;
+	iot = &pxa2x0_a4x_bs_tag;	/* XXX: This sucks */
+	iobase = pxa->pxa_addr;
 	sc->sc_frequency = PXA2X0_COM_FREQ;
-	sc->sc_uarttype = COM_UART_PXA2X0;
+	sc->sc_type = COM_TYPE_PXA2x0;
 
-#if 0
-	if (com_is_console(sc->sc_iot, sc->sc_iobase, &sc->sc_ioh) == 0 &&
-	    bus_space_map(sc->sc_iot, sc->sc_iobase, pxa->pxa_size, 0,
-			  &sc->sc_ioh)) {
-		printf(": can't map registers\n");
+	if (com_is_console(iot, iobase, &ioh) == 0 &&
+	    bus_space_map(iot, iobase, pxa->pxa_size, 0, &ioh)) {
+		aprint_error(": can't map registers\n");
 		return;
 	}
-#endif
-	bus_space_map(sc->sc_iot, sc->sc_iobase, pxa->pxa_size, 0, &sc->sc_ioh);
+	COM_INIT_REGS(sc->sc_regs, iot, ioh, iobase);
 
 	com_attach_subr(sc);
 
-	(void)pxa2x0_intr_establish(pxa->pxa_intr, IPL_TTY, comintr,
-	    sc, sc->sc_dev.dv_xname);
-
-	(void)powerhook_establish(&pxauart_power, sc);
-}
-
-void
-pxauart_power(int why, void *arg)
-{
-	struct com_softc *sc = arg;
-	bus_space_tag_t iot = sc->sc_iot;
-	bus_space_handle_t ioh = sc->sc_ioh;
-	struct tty *tp = sc->sc_tty;
-
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		if (sc->enabled && ISSET(sc->sc_hwflags, COM_HW_SIR))
-			scoop_set_irled(0);
-		break;
-	case PWR_RESUME:
-		if (sc->enabled) {
-			sc->sc_initialize = 1;
-			comparam(tp, &tp->t_termios);
-			bus_space_write_1(iot, ioh, com_ier, sc->sc_ier);
-
-			if (ISSET(sc->sc_hwflags, COM_HW_SIR)) {
-				scoop_set_irled(1);
-				bus_space_write_1(iot, ioh, com_isr,
-				    ISR_RECV);
-			}
-		}
-		break;
-	}
+	pxa2x0_intr_establish(pxa->pxa_intr, IPL_SERIAL, comintr, sc);
 }

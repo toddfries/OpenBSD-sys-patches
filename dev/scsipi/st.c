@@ -1,4 +1,4 @@
-/*	$NetBSD: st.c,v 1.202 2007/10/11 16:42:52 christos Exp $ */
+/*	$NetBSD: st.c,v 1.208 2008/11/17 21:19:03 bouyer Exp $ */
 
 /*-
  * Copyright (c) 1998, 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,7 +50,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: st.c,v 1.202 2007/10/11 16:42:52 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: st.c,v 1.208 2008/11/17 21:19:03 bouyer Exp $");
 
 #include "opt_scsi.h"
 
@@ -393,7 +386,7 @@ stattach(struct device *parent, struct st_softc *st, void *aux)
 	 * Use the subdriver to request information regarding the drive.
 	 */
 	printf("\n");
-	printf("%s: %s", st->sc_dev.dv_xname, st->quirkdata ? "quirks apply, " : "");
+	printf("%s: %s", device_xname(&st->sc_dev), st->quirkdata ? "quirks apply, " : "");
 	if (scsipi_test_unit_ready(periph,
 	    XS_CTL_DISCOVERY | XS_CTL_SILENT | XS_CTL_IGNORE_MEDIA_CHANGE) ||
 	    st->ops(st, ST_OPS_MODESENSE,
@@ -409,10 +402,10 @@ stattach(struct device *parent, struct st_softc *st, void *aux)
 		    (st->flags & ST_READONLY) ? "protected" : "enabled");
 	}
 
-	st->stats = iostat_alloc(IOSTAT_TAPE, parent, st->sc_dev.dv_xname);
+	st->stats = iostat_alloc(IOSTAT_TAPE, parent, device_xname(&st->sc_dev));
 
 #if NRND > 0
-	rnd_attach_source(&st->rnd_source, st->sc_dev.dv_xname,
+	rnd_attach_source(&st->rnd_source, device_xname(&st->sc_dev),
 			  RND_TYPE_TAPE, 0);
 #endif
 }
@@ -545,9 +538,7 @@ stopen(dev_t dev, int flags, int mode, struct lwp *l)
 	struct scsipi_adapter *adapt;
 
 	unit = STUNIT(dev);
-	if (unit >= st_cd.cd_ndevs)
-		return (ENXIO);
-	st = st_cd.cd_devs[unit];
+	st = device_lookup_private(&st_cd, unit);
 	if (st == NULL)
 		return (ENXIO);
 
@@ -565,7 +556,7 @@ stopen(dev_t dev, int flags, int mode, struct lwp *l)
 	 * Only allow one at a time
 	 */
 	if (periph->periph_flags & PERIPH_OPEN) {
-		printf("%s: already open\n", st->sc_dev.dv_xname);
+		aprint_error_dev(&st->sc_dev, "already open\n");
 		return (EBUSY);
 	}
 
@@ -726,7 +717,7 @@ static int
 stclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	int stxx, error = 0;
-	struct st_softc *st = st_cd.cd_devs[STUNIT(dev)];
+	struct st_softc *st = device_lookup_private(&st_cd, STUNIT(dev));
 	struct scsipi_periph *periph = st->sc_periph;
 	struct scsipi_adapter *adapt = periph->periph_channel->chan_adapter;
 
@@ -828,7 +819,7 @@ st_mount_tape(dev_t dev, int flags)
 
 	unit = STUNIT(dev);
 	dsty = STDSTY(dev);
-	st = st_cd.cd_devs[unit];
+	st = device_lookup_private(&st_cd, unit);
 	periph = st->sc_periph;
 
 	if (st->flags & ST_MOUNTED)
@@ -899,8 +890,7 @@ st_mount_tape(dev_t dev, int flags)
 	if ((error = st->ops(st, ST_OPS_MODESELECT, 0)) != 0) {
 		/* ATAPI will return ENODEV for this, and this may be OK */
 		if (error != ENODEV) {
-			printf("%s: cannot set selected mode\n",
-			    st->sc_dev.dv_xname);
+			aprint_error_dev(&st->sc_dev, "cannot set selected mode\n");
 			return (error);
 		}
 	}
@@ -941,8 +931,7 @@ st_unmount(struct st_softc *st, boolean eject)
 	 */
 	st->density = 0;
 	if (st->ops(st, ST_OPS_MODESELECT, 0) != 0) {
-		printf("%s: WARNING: cannot revert to default density\n",
-			st->sc_dev.dv_xname);
+		aprint_error_dev(&st->sc_dev, "WARNING: cannot revert to default density\n");
 	}
 
 	if (eject) {
@@ -1076,21 +1065,21 @@ done:
 static void
 ststrategy(struct buf *bp)
 {
-	struct st_softc *st = st_cd.cd_devs[STUNIT(bp->b_dev)];
+	struct st_softc *st = device_lookup_private(&st_cd, STUNIT(bp->b_dev));
 	int s;
 
 	SC_DEBUG(st->sc_periph, SCSIPI_DB1,
 	    ("ststrategy %d bytes @ blk %" PRId64 "\n", bp->b_bcount, bp->b_blkno));
 	/*
-	 * If it's a null transfer, return immediatly
+	 * If it's a null transfer, return immediately
 	 */
 	if (bp->b_bcount == 0)
-		goto done;
+		goto abort;
 
 	/* If offset is negative, error */
 	if (bp->b_blkno < 0) {
 		bp->b_error = EINVAL;
-		goto done;
+		goto abort;
 	}
 
 	/*
@@ -1098,10 +1087,10 @@ ststrategy(struct buf *bp)
 	 */
 	if (st->flags & ST_FIXEDBLOCKS) {
 		if (bp->b_bcount % st->blksize) {
-			printf("%s: bad request, must be multiple of %d\n",
-			    st->sc_dev.dv_xname, st->blksize);
+			aprint_error_dev(&st->sc_dev, "bad request, must be multiple of %d\n",
+			    st->blksize);
 			bp->b_error = EIO;
-			goto done;
+			goto abort;
 		}
 	}
 	/*
@@ -1109,10 +1098,10 @@ ststrategy(struct buf *bp)
 	 */
 	else if (bp->b_bcount < st->blkmin ||
 	    (st->blkmax && bp->b_bcount > st->blkmax)) {
-		printf("%s: bad request, must be between %d and %d\n",
-		    st->sc_dev.dv_xname, st->blkmin, st->blkmax);
+		aprint_error_dev(&st->sc_dev, "bad request, must be between %d and %d\n",
+		    st->blkmin, st->blkmax);
 		bp->b_error = EIO;
-		goto done;
+		goto abort;
 	}
 	s = splbio();
 
@@ -1132,9 +1121,10 @@ ststrategy(struct buf *bp)
 
 	splx(s);
 	return;
-done:
+abort:
 	/*
-	 * Correctly set the buf to indicate a completed xfer
+	 * Reset the residue because we didn't do anything,
+	 * and send the buffer back as done.
 	 */
 	bp->b_resid = bp->b_bcount;
 	biodone(bp);
@@ -1366,7 +1356,7 @@ stdone(struct scsipi_xfer *xs, int error)
 static int
 stread(dev_t dev, struct uio *uio, int iomode)
 {
-	struct st_softc *st = st_cd.cd_devs[STUNIT(dev)];
+	struct st_softc *st = device_lookup_private(&st_cd, STUNIT(dev));
 
 	return (physio(ststrategy, NULL, dev, B_READ,
 	    st->sc_periph->periph_channel->chan_adapter->adapt_minphys, uio));
@@ -1375,7 +1365,7 @@ stread(dev_t dev, struct uio *uio, int iomode)
 static int
 stwrite(dev_t dev, struct uio *uio, int iomode)
 {
-	struct st_softc *st = st_cd.cd_devs[STUNIT(dev)];
+	struct st_softc *st = device_lookup_private(&st_cd, STUNIT(dev));
 
 	return (physio(ststrategy, NULL, dev, B_WRITE,
 	    st->sc_periph->periph_channel->chan_adapter->adapt_minphys, uio));
@@ -1403,7 +1393,7 @@ stioctl(dev_t dev, u_long cmd, void *arg, int flag, struct lwp *l)
 	flags = 0;		/* give error messages, act on errors etc. */
 	unit = STUNIT(dev);
 	dsty = STDSTY(dev);
-	st = st_cd.cd_devs[unit];
+	st = device_lookup_private(&st_cd, unit);
 	hold_blksize = st->blksize;
 	hold_density = st->density;
 
@@ -1600,7 +1590,7 @@ try_new_value:
 	if ((STMODE(dev) != CTRL_MODE || (st->flags & ST_MOUNTED) != 0) &&
 	    (error = st->ops(st, ST_OPS_MODESELECT, 0)) != 0) {
 		/* put it back as it was */
-		printf("%s: cannot set selected mode\n", st->sc_dev.dv_xname);
+		aprint_error_dev(&st->sc_dev, "cannot set selected mode\n");
 		st->density = hold_density;
 		st->blksize = hold_blksize;
 		if (st->blksize)
@@ -1895,8 +1885,8 @@ st_load(struct st_softc *st, u_int type, int flags)
 
 		error = st_check_eod(st, FALSE, &nmarks, flags);
 		if (error) {
-			printf("%s: failed to write closing filemarks at "
-			    "unload, errno=%d\n", st->sc_dev.dv_xname, error);
+			aprint_error_dev(&st->sc_dev, "failed to write closing filemarks at "
+			    "unload, errno=%d\n", error);
 			return (error);
 		}
 	}
@@ -1919,8 +1909,8 @@ st_load(struct st_softc *st, u_int type, int flags)
 	error = scsipi_command(st->sc_periph, (void *)&cmd, sizeof(cmd), 0, 0,
 	    ST_RETRIES, ST_SPC_TIME, NULL, flags);
 	if (error) {
-		printf("%s: error %d in st_load (op %d)\n",
-		    st->sc_dev.dv_xname, error, type);
+		aprint_error_dev(&st->sc_dev, "error %d in st_load (op %d)\n",
+		    error, type);
 	}
 	return (error);
 }
@@ -1938,8 +1928,8 @@ st_rewind(struct st_softc *st, u_int immediate, int flags)
 
 	error = st_check_eod(st, FALSE, &nmarks, flags);
 	if (error) {
-		printf("%s: failed to write closing filemarks at "
-		    "rewind, errno=%d\n", st->sc_dev.dv_xname, error);
+		aprint_error_dev(&st->sc_dev, "failed to write closing filemarks at "
+		    "rewind, errno=%d\n", error);
 		return (error);
 	}
 	st->flags &= ~ST_PER_ACTION;
@@ -1960,8 +1950,8 @@ st_rewind(struct st_softc *st, u_int immediate, int flags)
 	error = scsipi_command(st->sc_periph, (void *)&cmd, sizeof(cmd), 0, 0,
 	    ST_RETRIES, timeout, NULL, flags);
 	if (error) {
-		printf("%s: error %d trying to rewind\n",
-		    st->sc_dev.dv_xname, error);
+		aprint_error_dev(&st->sc_dev, "error %d trying to rewind\n",
+		    error);
 		/* lost position */
 		st->fileno = st->blkno = -1;
 	} else {
@@ -2156,8 +2146,8 @@ st_interpret_sense(struct scsipi_xfer *xs)
 				bp->b_resid = xs->resid;
 			if (sense->response_code & SSD_RCODE_VALID &&
 			    (xs->xs_control & XS_CTL_SILENT) == 0)
-				printf("%s: block wrong size, %d blocks "
-				    "residual\n", st->sc_dev.dv_xname, info);
+				aprint_error_dev(&st->sc_dev, "block wrong size, %d blocks "
+				    "residual\n", info);
 
 			/*
 			 * This quirk code helps the drive read
@@ -2209,6 +2199,12 @@ st_interpret_sense(struct scsipi_xfer *xs)
 				retval = 0;
 			} else {
 				retval = EIO;
+				/*
+				 * If we return an error we can't claim to
+				 * have transfered all data.
+				 */
+				if (xs->resid == 0)
+					xs->resid = xs->datalen;
 			}
 
 			/*
@@ -2232,9 +2228,9 @@ st_interpret_sense(struct scsipi_xfer *xs)
 				 * we issued.
 				 */
 				if ((xs->xs_control & XS_CTL_SILENT) == 0) {
-					printf("%s: %d-byte tape record too big"
+					aprint_error_dev(&st->sc_dev,
+					    "%d-byte tape record too big"
 					    " for %d-byte user buffer\n",
-					    st->sc_dev.dv_xname,
 					    xs->datalen - info, xs->datalen);
 				}
 				retval = EIO;
@@ -2247,7 +2243,7 @@ st_interpret_sense(struct scsipi_xfer *xs)
 			}
 		}
 		if (bp)
-			bp->b_resid = info;
+			bp->b_resid = xs->resid;
 	}
 
 #ifndef SCSIPI_DEBUG

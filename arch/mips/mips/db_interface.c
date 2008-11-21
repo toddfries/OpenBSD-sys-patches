@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.58 2006/08/26 20:14:51 matt Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.64 2008/05/23 17:01:32 tsutsui Exp $	*/
 
 /*
  * Mach Operating System
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.58 2006/08/26 20:14:51 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.64 2008/05/23 17:01:32 tsutsui Exp $");
 
 #include "opt_cputype.h"	/* which mips CPUs do we support? */
 #include "opt_ddb.h"
@@ -64,9 +64,9 @@ int		db_active = 0;
 db_regs_t	ddb_regs;
 mips_reg_t	kdbaux[11]; /* XXX struct switchframe: better inside curpcb? XXX */
 
-void db_tlbdump_cmd(db_expr_t, int, db_expr_t, const char *);
-void db_kvtophys_cmd(db_expr_t, int, db_expr_t, const char *);
-void db_cp0dump_cmd(db_expr_t, int, db_expr_t, const char *);
+void db_tlbdump_cmd(db_expr_t, bool, db_expr_t, const char *);
+void db_kvtophys_cmd(db_expr_t, bool, db_expr_t, const char *);
+void db_cp0dump_cmd(db_expr_t, bool, db_expr_t, const char *);
 
 static void	kdbpoke_4(vaddr_t addr, int newval);
 static void	kdbpoke_2(vaddr_t addr, short newval);
@@ -324,7 +324,7 @@ db_write_bytes(vaddr_t addr, size_t size, const char *data)
 
 #ifndef KGDB
 void
-db_tlbdump_cmd(db_expr_t addr, int have_addr, db_expr_t count,
+db_tlbdump_cmd(db_expr_t addr, bool have_addr, db_expr_t count,
 	       const char *modif)
 {
 
@@ -387,7 +387,7 @@ db_tlbdump_cmd(db_expr_t addr, int have_addr, db_expr_t count,
 }
 
 void
-db_kvtophys_cmd(db_expr_t addr, int have_addr, db_expr_t count,
+db_kvtophys_cmd(db_expr_t addr, bool have_addr, db_expr_t count,
 		const char *modif)
 {
 
@@ -434,7 +434,7 @@ do {									\
 } while (0)
 
 void
-db_cp0dump_cmd(db_expr_t addr, int have_addr, db_expr_t count,
+db_cp0dump_cmd(db_expr_t addr, bool have_addr, db_expr_t count,
 	       const char *modif)
 {
 
@@ -542,17 +542,24 @@ db_cp0dump_cmd(db_expr_t addr, int have_addr, db_expr_t count,
 }
 
 const struct db_command db_machine_command_table[] = {
-	{ "kvtop",	db_kvtophys_cmd,	0,	0 },
-	{ "tlb",	db_tlbdump_cmd,		0,	0 },
-	{ "cp0",	db_cp0dump_cmd,		0,	0 },
-	{ NULL, }
+	{ DDB_ADD_CMD("cp0",	db_cp0dump_cmd,		0,
+		"Dump CP0 registers.",
+		NULL, NULL) },
+	{ DDB_ADD_CMD("kvtop",	db_kvtophys_cmd,	0,
+		"Print the physical address for a given kernel virtual address",
+		"address", 
+		"   address:\tvirtual address to look up") },
+	{ DDB_ADD_CMD("tlb",	db_tlbdump_cmd,		0,
+		"Print out TLB entries. (only works with options DEBUG)",
+		NULL, NULL) },
+	{ DDB_ADD_CMD(NULL,     NULL,               0,  NULL,NULL,NULL) }
 };
 #endif	/* !KGDB */
 
 /*
  * Determine whether the instruction involves a delay slot.
  */
-boolean_t
+bool
 inst_branch(int inst)
 {
 	InstFmt i;
@@ -595,10 +602,10 @@ inst_branch(int inst)
 /*
  * Determine whether the instruction calls a function.
  */
-boolean_t
+bool
 inst_call(int inst)
 {
-	boolean_t call;
+	bool call;
 	InstFmt i;
 
 	i.word = inst;
@@ -618,7 +625,7 @@ inst_call(int inst)
  * compiler can use this construct for other jumps, but usually will not.
  * This lets the ddb "next" command to work (also need inst_trap_return()).
  */
-boolean_t
+bool
 inst_return(int inst)
 {
 	InstFmt i;
@@ -632,11 +639,11 @@ inst_return(int inst)
 /*
  * Determine whether the instruction makes a jump.
  */
-boolean_t
+bool
 inst_unconditional_flow_transfer(int inst)
 {
 	InstFmt i;
-	boolean_t jump;
+	bool jump;
 
 	i.word = inst;
 	jump = (i.JType.op == OP_J) ||
@@ -647,7 +654,7 @@ inst_unconditional_flow_transfer(int inst)
 /*
  * Determine whether the instruction is a load/store as appropriate.
  */
-boolean_t
+bool
 inst_load(int inst)
 {
 	InstFmt i;
@@ -674,7 +681,7 @@ inst_load(int inst)
 	}
 }
 
-boolean_t
+bool
 inst_store(int inst)
 {
 	InstFmt i;
@@ -717,11 +724,11 @@ branch_taken(int inst, db_addr_t pc, db_regs_t *regs)
  * Return the next pc of an arbitrary instruction.
  */
 db_addr_t
-next_instr_address(db_addr_t pc, boolean_t bd)
+next_instr_address(db_addr_t pc, bool bd)
 {
 	unsigned ins;
 
-	if (bd == FALSE)
+	if (bd == false)
 		return (pc + 4);
 	
 	if (pc < MIPS_KSEG0_START)

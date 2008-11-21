@@ -1,7 +1,5 @@
-/*	$OpenBSD: db_disasm.c,v 1.15 2007/02/14 00:53:47 jsg Exp $ */
-/*	$NetBSD: db_disasm.c,v 1.10 1998/04/13 12:10:27 ragge Exp $ */
+/*	$NetBSD: db_disasm.c,v 1.18 2008/03/11 05:34:03 matt Exp $ */
 /*
- * Copyright (c) 2002, Miodrag Vallat.
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
  *
@@ -35,6 +33,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.18 2008/03/11 05:34:03 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -50,11 +50,11 @@
 #include <vax/vax/db_disasm.h>
 
 #ifdef VMS_MODE
-#define DEFERRED   "@"
-#define LITERAL	   "#"
+#define DEFERRED   '@'
+#define LITERAL	   '#'
 #else
-#define DEFERRED   "*"
-#define LITERAL	   "$"
+#define DEFERRED   '*'
+#define LITERAL	   '$'
 #endif
 /*
  * disassembling vax instructions works as follows:
@@ -75,8 +75,8 @@
 #define BROKEN_DB_REGS
 */
 #ifdef	BROKEN_DB_REGS
-struct {		/* Due to order and contents of db_regs[], we can't */
-	char *name;	/* use this array to extract register-names. */
+const struct {		/* Due to order and contents of db_regs[], we can't */
+	const char *name;	/* use this array to extract register-names. */
 	void *valuep;	/* eg. "psl" vs "pc", "pc" vs "sp" */
 } my_db_regs[16] = {
 	{ "r0",		NULL },
@@ -101,27 +101,36 @@ struct {		/* Due to order and contents of db_regs[], we can't */
 #endif
 
 typedef struct {
-	char		dasm[256];	/* disassembled instruction as text */
+	char		dasm[256];	/* disassebled instruction as text */
+	char	       *curp;	/* pointer into result */
 	char	       *ppc;	/* pseudo PC */
-	u_int		opc;	/* op-code */
-	char	       *argp;	/* pointer into argument-list */
+	int		opc;	/* op-code */
+	const char	*argp;	/* pointer into argument-list */
+	int		itype;	/* instruction-type, eg. branch, call, unspec */
+	int		atype;	/* argument-type, eg. byte, long, address */
 	int		off;	/* offset specified by last argument */
 	int		addr;	/* address specified by last argument */
-} inst_buffer;
+}	inst_buffer;
 
-int get_byte(inst_buffer * ib);
-int get_word(inst_buffer * ib);
-int get_long(inst_buffer * ib);
+#define ITYPE_INVALID  -1
+#define ITYPE_UNSPEC	0
+#define ITYPE_BRANCH	1
+#define ITYPE_CALL	2
 
-int get_opcode(inst_buffer * ib);
-int get_operands(inst_buffer * ib);
-int get_operand(inst_buffer * ib, int size);
+static inline int get_byte(inst_buffer * ib);
+static inline int get_word(inst_buffer * ib);
+static inline int get_long(inst_buffer * ib);
 
-void add_str(inst_buffer * ib, char *s);
-void add_int(inst_buffer * ib, int i);
-void add_xint(inst_buffer * ib, int i);
-void add_sym(inst_buffer * ib, int i);
-void add_off(inst_buffer * ib, int i);
+static int get_opcode(inst_buffer * ib);
+static int get_operands(inst_buffer * ib);
+static int get_operand(inst_buffer * ib, int size);
+
+static inline void add_char(inst_buffer * ib, char c);
+static inline void add_str(inst_buffer * ib, const char *s);
+static void add_int(inst_buffer * ib, int i);
+static void add_xint(inst_buffer * ib, int i);
+static void add_sym(inst_buffer * ib, int i);
+static void add_off(inst_buffer * ib, int i);
 
 #define err_print  printf
 
@@ -135,18 +144,17 @@ void add_off(inst_buffer * ib, int i);
  * be executed but the 'linear' next instruction.
  */
 db_addr_t
-db_disasm(loc, altfmt)
-	db_addr_t	loc;
-	boolean_t	altfmt;
+db_disasm(db_addr_t loc, bool altfmt)
 {
 	db_expr_t	diff;
 	db_sym_t	sym;
-	char	       *symname;
+	const char	*symname;
 
 	inst_buffer	ib;
 
 	bzero(&ib, sizeof(ib));
 	ib.ppc = (void *) loc;
+	ib.curp = ib.dasm;
 
 	if (!altfmt) {		/* ignore potential entry masks in altfmt */
 		diff = INT_MAX;
@@ -168,48 +176,49 @@ db_disasm(loc, altfmt)
 }
 
 int
-get_opcode(ib)
-	inst_buffer    *ib;
+get_opcode(inst_buffer *ib)
 {
 	ib->opc = get_byte(ib);
-	if (ib->opc >= 0xfd) {
-		/* two byte op-code */
+	if (ib->opc >> 2 == 0x3F) {	/* two byte op-code */
 		ib->opc = ib->opc << 8;
 		ib->opc += get_byte(ib);
 	}
-
-	if (ib->opc > 0xffff) {
-		add_str(ib, "invalid opcode ");
+	switch (ib->opc) {
+	case 0xFA:		/* CALLG */
+	case 0xFB:		/* CALLS */
+	case 0xFC:		/* XFC */
+		ib->itype = ITYPE_CALL;
+		break;
+	case 0x16:		/* JSB */
+	case 0x17:		/* JMP */
+		ib->itype = ITYPE_BRANCH;
+		break;
+	default:
+		ib->itype = ITYPE_UNSPEC;
+	}
+	if (ib->opc < 0 || ib->opc > 0xFF) {
+		add_str(ib, "invalid or two-byte opcode ");
 		add_xint(ib, ib->opc);
+		ib->itype = ITYPE_INVALID;
 	} else {
-		if (ib->opc > 0xff)
-			add_str(ib, vax_inst2[INDEX_OPCODE(ib->opc)].mnemonic);
-		else
-			add_str(ib, vax_inst[ib->opc].mnemonic);
-		add_str(ib, "\t");
+		add_str(ib, vax_inst[ib->opc].mnemonic);
+		add_char(ib, '\t');
 	}
 	return (ib->opc);
 }
 
 int
-get_operands(ib)
-	inst_buffer    *ib;
+get_operands(inst_buffer *ib)
 {
 	int		aa = 0; /* absolute address mode ? */
 	int		size;
 
-	if (ib->opc > 0xffff) {
-		/* invalid opcode */
+	if (ib->opc < 0 || ib->opc > 0xFF) {
+		/* invalid or two-byte opcode */
 		ib->argp = NULL;
 		return (-1);
-	} else if (ib->opc > 0xff) {
-		/* two-byte opcode */
-		ib->argp = vax_inst2[INDEX_OPCODE(ib->opc)].argdesc;
-	} else
-		ib->argp = vax_inst[ib->opc].argdesc;
-
-	if (ib->argp == NULL)
-		return (0);
+	}
+	ib->argp = vax_inst[ib->opc].argdesc;
 
 	while (*ib->argp) {
 		switch (*ib->argp) {
@@ -226,8 +235,7 @@ get_operands(ib)
 				ib->off = get_long(ib);
 				break;
 			default:
-				err_print("invalid branch-type %X (%c) found.\n",
-					  *ib->argp, *ib->argp);
+				err_print("XXX eror\n");
 			}
 			/* add_int(ib, ib->off); */
 			ib->addr = (u_int) ib->ppc + ib->off;
@@ -235,8 +243,7 @@ get_operands(ib)
 			break;
 
 		case 'a':	/* absolute addressing mode */
-			aa = 1;
-			/* FALLTHROUGH */
+			aa = 1; /* do not break here ! */
 
 		default:
 			switch (*(++ib->argp)) {
@@ -278,20 +285,21 @@ get_operands(ib)
 		if (!*ib->argp || !*++ib->argp)
 			break;
 		if (*ib->argp++ == ',') {
-			add_str(ib, ", ");
+			add_char(ib, ',');
+			add_char(ib, ' ');
 		} else {
-			err_print("error in opcodes.c\n");
+			err_print("XXX error\n");
+			add_char(ib, '\0');
 			return (-1);
 		}
 	}
 
+	add_char(ib, '\0');
 	return (0);
 }
 
 int
-get_operand(ib, size)
-	inst_buffer    *ib;
-	int		size;
+get_operand(inst_buffer *ib, int size)
 {
 	int		c = get_byte(ib);
 	int		mode = c >> 4;
@@ -305,13 +313,13 @@ get_operand(ib, size)
 	case 1:		/* literal */
 	case 2:		/* literal */
 	case 3:		/* literal */
-		add_str(ib, LITERAL);
+		add_char(ib, LITERAL);
 		add_int(ib, lit);
 		tmp = lit;
 		break;
 
 	case 4:		/* indexed */
-		snprintf(buf, sizeof buf, "[%s]", my_db_regs[reg].name);
+		sprintf(buf, "[%s]", my_db_regs[reg].name);
 		get_operand(ib, 0);
 		add_str(ib, buf);
 		break;
@@ -321,22 +329,23 @@ get_operand(ib, size)
 		break;
 
 	case 6:		/* register deferred */
-		add_str(ib, "(");
+		add_char(ib, '(');
 		add_str(ib, my_db_regs[reg].name);
-		add_str(ib, ")");
+		add_char(ib, ')');
 		break;
 
 	case 7:		/* autodecrement */
-		add_str(ib, "-(");
+		add_char(ib, '-');
+		add_char(ib, '(');
 		add_str(ib, my_db_regs[reg].name);
-		add_str(ib, ")");
+		add_char(ib, ')');
 		if (reg == 0x0F) {	/* pc is not allowed in this mode */
-			err_print("autodecrement not allowed for PC.\n");
+			err_print("autodecrement not allowd for PC.\n");
 		}
 		break;
 
 	case 9:		/* autoincrement deferred */
-		add_str(ib, DEFERRED);
+		add_char(ib, DEFERRED);
 		if (reg == 0x0F) {	/* pc: immediate deferred */
 			/*
 			 * addresses are always longwords!
@@ -345,7 +354,7 @@ get_operand(ib, size)
 			add_off(ib, tmp);
 			break;
 		}
-		/* FALLTHROUGH */
+		/* fall through */
 	case 8:		/* autoincrement */
 		if (reg == 0x0F) {	/* pc: immediate ==> special syntax */
 			switch (size) {
@@ -363,17 +372,18 @@ get_operand(ib, size)
 				tmp = -1;
 			}
 			if (mode == 8)
-				add_str(ib, LITERAL);
+				add_char(ib, LITERAL);
 			add_int(ib, tmp);
 			break;
 		}
-		add_str(ib, "(");
+		add_char(ib, '(');
 		add_str(ib, my_db_regs[reg].name);
-		add_str(ib, ")+");
+		add_char(ib, ')');
+		add_char(ib, '+');
 		break;
 
 	case 11:	/* byte displacement deferred/ relative deferred  */
-		add_str(ib, DEFERRED);
+		add_char(ib, DEFERRED);
 	case 10:	/* byte displacement / relative mode */
 		tmp = (signed char) get_byte(ib);
 		if (reg == 0x0F) {
@@ -382,13 +392,13 @@ get_operand(ib, size)
 		}
 		/* add_str (ib, "b^"); */
 		add_int(ib, tmp);
-		add_str(ib, "(");
+		add_char(ib, '(');
 		add_str(ib, my_db_regs[reg].name);
-		add_str(ib, ")");
+		add_char(ib, ')');
 		break;
 
 	case 13:		/* word displacement deferred */
-		add_str(ib, DEFERRED);
+		add_char(ib, DEFERRED);
 	case 12:		/* word displacement */
 		tmp = (signed short) get_word(ib);
 		if (reg == 0x0F) {
@@ -397,13 +407,13 @@ get_operand(ib, size)
 		}
 		/* add_str (ib, "w^"); */
 		add_int(ib, tmp);
-		add_str(ib, "(");
+		add_char(ib, '(');
 		add_str(ib, my_db_regs[reg].name);
-		add_str(ib, ")");
+		add_char(ib, ')');
 		break;
 
-	case 15:		/* long displacement deferred */
-		add_str(ib, DEFERRED);
+	case 15:		/* long displacement referred */
+		add_char(ib, DEFERRED);
 	case 14:		/* long displacement */
 		tmp = get_long(ib);
 		if (reg == 0x0F) {
@@ -412,9 +422,9 @@ get_operand(ib, size)
 		}
 		/* add_str (ib, "l^"); */
 		add_int(ib, tmp);
-		add_str(ib, "(");
+		add_char(ib, '(');
 		add_str(ib, my_db_regs[reg].name);
-		add_str(ib, ")");
+		add_char(ib, ')');
 		break;
 
 	default:
@@ -426,83 +436,65 @@ get_operand(ib, size)
 }
 
 int
-get_byte(ib)
-	inst_buffer    *ib;
+get_byte(inst_buffer *ib)
 {
 	return ((unsigned char) *(ib->ppc++));
 }
 
 int
-get_word(ib)
-	inst_buffer    *ib;
+get_word(inst_buffer *ib)
 {
-	int		tmp;
-	char	       *p = (void *) &tmp;
-
-	*p++ = get_byte(ib);
-	*p++ = get_byte(ib);
-	return (tmp);
+	int tmp = *(uint16_t *)ib->ppc;
+	ib->ppc += 2;
+	return tmp;
 }
 
 int
-get_long(ib)
-	inst_buffer    *ib;
+get_long(inst_buffer *ib)
 {
-	int		tmp;
-	char	       *p = (void *) &tmp;
-
-	*p++ = get_byte(ib);
-	*p++ = get_byte(ib);
-	*p++ = get_byte(ib);
-	*p++ = get_byte(ib);
+	int tmp = *(int *)ib->ppc;
+	ib->ppc += 4;
 	return (tmp);
 }
 
 void
-add_str(ib, s)
-	inst_buffer    *ib;
-	char	       *s;
+add_char(inst_buffer *ib, char c)
 {
-
-	if (s == NULL)
-		s = "-reserved-";
-
-	strlcat(ib->dasm, s, sizeof(ib->dasm));
+	*ib->curp++ = c;
 }
 
 void
-add_int(ib, i)
-	inst_buffer    *ib;
-	int		i;
+add_str(inst_buffer *ib, const char *s)
 {
-	char		buf[32];
+	while ((*ib->curp++ = *s++));
+	--ib->curp;
+}
 
+void
+add_int(inst_buffer *ib, int i)
+{
+	char buf[32];
 	if (i < 100 && i > -100)
-		snprintf(buf, sizeof buf, "%d", i);
+		sprintf(ib->curp, "%d", i);
 	else
-		snprintf(buf, sizeof buf, "0x%x", i);
+		sprintf(buf, "0x%x", i);
 	add_str(ib, buf);
 }
 
 void
-add_xint(ib, val)
-	inst_buffer    *ib;
-	int		val;
+add_xint(inst_buffer *ib, int val)
 {
-	char		buf[32];
-
-	snprintf(buf, sizeof buf, "0x%x", val);
+	char buf[32];
+	sprintf(buf, "0x%x", val);
 	add_str(ib, buf);
 }
 
 void
-add_sym(ib, loc)
-	inst_buffer    *ib;
-	int		loc;
+add_sym(inst_buffer *ib, int loc)
 {
 	db_expr_t	diff;
 	db_sym_t	sym;
-	char	       *symname;
+	const char	*symname;
 
 	if (!loc)
 		return;
@@ -513,22 +505,19 @@ add_sym(ib, loc)
 	db_symbol_values(sym, &symname, 0);
 
 	if (symname && !diff) {
-		/* add_str(ib, "<"); */
+		/* add_char(ib, '<'); */
 		add_str(ib, symname);
-		/* add_str(ib, ">"); */
-	}
-	else
+		/* add_char(ib, '>'); */
+	} else
 		add_xint(ib, loc);
 }
 
 void
-add_off(ib, loc)
-	inst_buffer    *ib;
-	int		loc;
+add_off(inst_buffer *ib, int loc)
 {
 	db_expr_t	diff;
 	db_sym_t	sym;
-	char	       *symname;
+	const char	*symname;
 
 	if (!loc)
 		return;
@@ -539,14 +528,13 @@ add_off(ib, loc)
 	db_symbol_values(sym, &symname, 0);
 
 	if (symname) {
-		/* add_str(ib, "<"); */
+		/* add_char(ib, '<'); */
 		add_str(ib, symname);
 		if (diff) {
-			add_str(ib, "+");
+			add_char(ib, '+');
 			add_xint(ib, diff);
 		}
-		/* add_str(ib, ">"); */
-	}
-	else
+		/* add_char(ib, '>'); */
+	} else
 		add_xint(ib, loc);
 }

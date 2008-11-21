@@ -1,4 +1,4 @@
-/*	$NetBSD: scsipi_ioctl.c,v 1.63 2007/07/29 12:50:23 ad Exp $	*/
+/*	$NetBSD: scsipi_ioctl.c,v 1.66 2008/07/14 12:36:44 drochner Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: scsipi_ioctl.c,v 1.63 2007/07/29 12:50:23 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: scsipi_ioctl.c,v 1.66 2008/07/14 12:36:44 drochner Exp $");
 
 #include "opt_compat_freebsd.h"
 #include "opt_compat_netbsd.h"
@@ -85,7 +78,7 @@ si_get(void)
 	int s;
 
 	si = malloc(sizeof(struct scsi_ioctl), M_TEMP, M_WAITOK|M_ZERO);
-	simple_lock_init(&si->si_bp.b_interlock);
+	buf_init(&si->si_bp);
 	s = splbio();
 	LIST_INSERT_HEAD(&si_head, si, si_list);
 	splx(s);
@@ -100,6 +93,7 @@ si_free(struct scsi_ioctl *si)
 	s = splbio();
 	LIST_REMOVE(si, si_list);
 	splx(s);
+	buf_destroy(&si->si_bp);
 	free(si, M_TEMP);
 }
 
@@ -283,6 +277,8 @@ scsistrategy(struct buf *bp)
 	    screq->timeout, bp, flags | XS_CTL_USERCMD);
 
 done:
+	if (error)
+		bp->b_resid = bp->b_bcount;
 	bp->b_error = error;
 	biodone(bp);
 	return;

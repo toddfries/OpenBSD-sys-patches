@@ -1,5 +1,7 @@
-/*	$OpenBSD: bktr_os.h,v 1.3 2007/06/11 08:10:22 robert Exp $	*/
-/* $FreeBSD: src/sys/dev/bktr/bktr_os.h,v 1.4 2000/04/16 07:56:58 roger Exp $ */
+/* $SourceForge: bktr_os.h,v 1.3 2003/03/11 23:11:26 thomasklausner Exp $ */
+
+/*	$NetBSD: bktr_os.h,v 1.6 2003/03/12 00:14:41 wiz Exp $	*/
+/* $FreeBSD: src/sys/dev/bktr/bktr_os.h,v 1.4 2000/04/16 07:56:58 roger Exp$ */
 
 /*
  * This is part of the Driver for Video Capture Cards (Frame grabbers)
@@ -12,7 +14,7 @@
  */
 
 /*
- * 1. Redistributions of source code must retain the 
+ * 1. Redistributions of source code must retain the
  * Copyright (c) 1997 Amancio Hasty, 1999 Roger Hardiman
  * All rights reserved.
  *
@@ -28,7 +30,7 @@
  *    must display the following acknowledgement:
  *	This product includes software developed by Amancio Hasty and
  *      Roger Hardiman
- * 4. The name of the author may not be used to endorse or promote products 
+ * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -48,12 +50,23 @@
 /******************************/
 /* *** Memory Allocation  *** */
 /******************************/
-vaddr_t		get_bktr_mem(bktr_ptr_t, bus_dmamap_t *, unsigned size);
+#if (defined(__FreeBSD__) || defined(__bsdi__))
+vm_offset_t     get_bktr_mem(int unit, unsigned size);
+#endif
+
+#if defined(__NetBSD__)
+vaddr_t         get_bktr_mem(bktr_ptr_t, bus_dmamap_t *, unsigned size);
 void            free_bktr_mem(bktr_ptr_t, bus_dmamap_t, vaddr_t);
+#endif
+
+#if defined(__OpenBSD__)
+vm_offset_t     get_bktr_mem(bktr_ptr_t, bus_dmamap_t *, unsigned size);
+void            free_bktr_mem(bktr_ptr_t, bus_dmamap_t, vm_offset_t);
+#endif
 
 /************************************/
 /* *** Interrupt Enable/Disable *** */
 /************************************/
-#define DECLARE_INTR_MASK(s)	intrmask_t s
-#define DISABLE_INTR(s)		s=spltty()
+#define DECLARE_INTR_MASK(s)	int s
+#define DISABLE_INTR(s)		s = spltty()
 #define ENABLE_INTR(s)		splx(s)

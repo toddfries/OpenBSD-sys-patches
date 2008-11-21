@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_sa.h,v 1.1 2006/03/29 23:04:12 cube Exp $	*/
+/*	$NetBSD: netbsd32_sa.h,v 1.5 2008/10/15 06:52:38 wrstuden Exp $	*/
 
 /*
  *  Copyright (c) 2006 The NetBSD Foundation.
@@ -47,5 +47,7 @@ int	netbsd32_sacopyout(int, const void *, void *);
 int	netbsd32_upcallconv(struct lwp *, int, size_t *, void **,
     void (**)(void *));
 void	*netbsd32_sa_ucsp(void *);
+
+void getucontext32_sa(struct lwp *, ucontext32_t *);
 
 #endif /* !_COMPAT_NETBSD32_SA_H_ */

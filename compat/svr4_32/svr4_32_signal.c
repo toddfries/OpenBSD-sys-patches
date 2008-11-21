@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_32_signal.c,v 1.16 2006/10/16 20:18:55 martin Exp $	 */
+/*	$NetBSD: svr4_32_signal.c,v 1.26 2008/04/28 20:23:46 martin Exp $	 */
 
 /*-
  * Copyright (c) 1994, 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_32_signal.c,v 1.16 2006/10/16 20:18:55 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_32_signal.c,v 1.26 2008/04/28 20:23:46 martin Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_svr4.h"
@@ -56,7 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_signal.c,v 1.16 2006/10/16 20:18:55 martin E
 #include <sys/malloc.h>
 #include <sys/wait.h>
 
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/svr4_32/svr4_32_types.h>
@@ -65,7 +57,8 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_signal.c,v 1.16 2006/10/16 20:18:55 martin E
 #include <compat/svr4_32/svr4_32_ucontext.h>
 #include <compat/svr4_32/svr4_32_syscallargs.h>
 #include <compat/svr4_32/svr4_32_util.h>
-#include <compat/svr4_32/svr4_32_ucontext.h>
+
+#include <compat/common/compat_sigaltstack.h>
 
 #define	svr4_sigmask(n)		(1 << (((n) - 1) & 31))
 #define	svr4_sigword(n)		(((n) - 1) >> 5)
@@ -73,11 +66,11 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_signal.c,v 1.16 2006/10/16 20:18:55 martin E
 #define	svr4_sigismember(s, n)	((s)->bits[svr4_sigword(n)] & svr4_sigmask(n))
 #define	svr4_sigaddset(s, n)	((s)->bits[svr4_sigword(n)] |= svr4_sigmask(n))
 
-static inline void svr4_32_sigfillset __P((svr4_32_sigset_t *));
-void svr4_32_to_native_sigaction __P((const struct svr4_32_sigaction *,
-				struct sigaction *));
-void native_to_svr4_32_sigaction __P((const struct sigaction *,
-				struct svr4_32_sigaction *));
+static inline void svr4_32_sigfillset(svr4_32_sigset_t *);
+void svr4_32_to_native_sigaction(const struct svr4_32_sigaction *,
+				struct sigaction *);
+void native_to_svr4_32_sigaction(const struct sigaction *,
+				struct svr4_32_sigaction *);
 
 #ifndef COMPAT_SVR4
 const int native_to_svr4_signo[NSIG] = {
@@ -216,8 +209,7 @@ const int svr4_to_native_signo[SVR4_NSIG] = {
 #endif
 
 static inline void
-svr4_32_sigfillset(s)
-	svr4_32_sigset_t *s;
+svr4_32_sigfillset(svr4_32_sigset_t *s)
 {
 	int i;
 
@@ -228,9 +220,7 @@ svr4_32_sigfillset(s)
 }
 
 void
-svr4_32_to_native_sigset(sss, bss)
-	const svr4_32_sigset_t *sss;
-	sigset_t *bss;
+svr4_32_to_native_sigset(const svr4_32_sigset_t *sss, sigset_t *bss)
 {
 	int i, newsig;
 
@@ -246,9 +236,7 @@ svr4_32_to_native_sigset(sss, bss)
 
 
 void
-native_to_svr4_32_sigset(bss, sss)
-	const sigset_t *bss;
-	svr4_32_sigset_t *sss;
+native_to_svr4_32_sigset(const sigset_t *bss, svr4_32_sigset_t *sss)
 {
 	int i, newsig;
 
@@ -266,12 +254,10 @@ native_to_svr4_32_sigset(bss, sss)
  * XXX: Only a subset of the flags is currently implemented.
  */
 void
-svr4_32_to_native_sigaction(ssa, bsa)
-	const struct svr4_32_sigaction *ssa;
-	struct sigaction *bsa;
+svr4_32_to_native_sigaction(const struct svr4_32_sigaction *ssa, struct sigaction *bsa)
 {
 
-	bsa->sa_handler = (sig_t)(u_long) ssa->svr4_32_sa_handler;
+	bsa->sa_handler = NETBSD32PTR64(ssa->svr4_32_sa_handler);
 	svr4_32_to_native_sigset(&ssa->svr4_32_sa_mask, &bsa->sa_mask);
 	bsa->sa_flags = 0;
 	if ((ssa->svr4_32_sa_flags & SVR4_SA_ONSTACK) != 0)
@@ -296,12 +282,10 @@ svr4_32_to_native_sigaction(ssa, bsa)
 }
 
 void
-native_to_svr4_32_sigaction(bsa, ssa)
-	const struct sigaction *bsa;
-	struct svr4_32_sigaction *ssa;
+native_to_svr4_32_sigaction(const struct sigaction *bsa, struct svr4_32_sigaction *ssa)
 {
 
-	ssa->svr4_32_sa_handler = (svr4_32_sig_t)(u_long) bsa->sa_handler;
+	NETBSD32PTR32(ssa->svr4_32_sa_handler, bsa->sa_handler);
 	native_to_svr4_32_sigset(&bsa->sa_mask, &ssa->svr4_32_sa_mask);
 	ssa->svr4_32_sa_flags = 0;
 	if ((bsa->sa_flags & SA_ONSTACK) != 0)
@@ -316,70 +300,34 @@ native_to_svr4_32_sigaction(bsa, ssa)
 		ssa->svr4_32_sa_flags |= SVR4_SA_NOCLDSTOP;
 }
 
-void
-svr4_32_to_native_sigaltstack(sss, bss)
-	const struct svr4_32_sigaltstack *sss;
-	struct sigaltstack *bss;
-{
-
-	bss->ss_sp = (caddr_t)(u_long)sss->ss_sp;
-	bss->ss_size = sss->ss_size;
-	bss->ss_flags = 0;
-	if ((sss->ss_flags & SVR4_SS_DISABLE) != 0)
-		bss->ss_flags |= SS_DISABLE;
-	if ((sss->ss_flags & SVR4_SS_ONSTACK) != 0)
-		bss->ss_flags |= SS_ONSTACK;
-	if ((sss->ss_flags & ~SVR4_SS_ALLBITS) != 0)
-/*XXX*/		printf("svr4_to_native_sigaltstack: extra bits %x ignored\n",
-		    sss->ss_flags & ~SVR4_SS_ALLBITS);
-}
-
-void
-native_to_svr4_32_sigaltstack(bss, sss)
-	const struct sigaltstack *bss;
-	struct svr4_32_sigaltstack *sss;
-{
-
-	sss->ss_sp = (u_long)bss->ss_sp;
-	sss->ss_size = bss->ss_size;
-	sss->ss_flags = 0;
-	if ((bss->ss_flags & SS_DISABLE) != 0)
-		sss->ss_flags |= SVR4_SS_DISABLE;
-	if ((bss->ss_flags & SS_ONSTACK) != 0)
-		sss->ss_flags |= SVR4_SS_ONSTACK;
-}
-
 int
-svr4_32_sys_sigaction(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_sigaction(struct lwp *l, const struct svr4_32_sys_sigaction_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_sigaction_args /* {
+	/* {
 		syscallarg(int) signum;
 		syscallarg(const struct svr4_32_sigaction *) nsa;
 		syscallarg(struct svr4_32_sigaction *) osa;
-	} */ *uap = v;
+	} */
 	struct svr4_32_sigaction nssa, ossa;
 	struct sigaction nbsa, obsa;
 	int error;
 
-	if (SCARG(uap, nsa)) {
-		error = copyin((caddr_t)(u_long)SCARG(uap, nsa),
+	if (SCARG_P32(uap, nsa)) {
+		error = copyin(SCARG_P32(uap, nsa),
 			       &nssa, sizeof(nssa));
 		if (error)
 			return (error);
 		svr4_32_to_native_sigaction(&nssa, &nbsa);
 	}
-	error = sigaction1(l->l_proc,
+	error = sigaction1(l,
 			   svr4_to_native_signo[SVR4_SIGNO(SCARG(uap, signum))],
-	    SCARG(uap, nsa) ? &nbsa : 0, SCARG(uap, osa) ? &obsa : 0,
+	    SCARG_P32(uap, nsa) ? &nbsa : 0, SCARG_P32(uap, osa) ? &obsa : 0,
 	    NULL, 0);
 	if (error)
 		return (error);
-	if (SCARG(uap, osa)) {
+	if (SCARG_P32(uap, osa)) {
 		native_to_svr4_32_sigaction(&obsa, &ossa);
-		error = copyout(&ossa, (caddr_t)(u_long)SCARG(uap, osa),
+		error = copyout(&ossa, SCARG_P32(uap, osa),
 				sizeof(ossa));
 		if (error)
 			return (error);
@@ -388,53 +336,26 @@ svr4_32_sys_sigaction(l, v, retval)
 }
 
 int
-svr4_32_sys_sigaltstack(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_sigaltstack(struct lwp *l, const struct svr4_32_sys_sigaltstack_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_sigaltstack_args /* {
-		syscallarg(const struct svr4_32_sigaltstack *) nss;
-		syscallarg(struct svr4_32_sigaltstack *) oss;
-	} */ *uap = v;
-	struct svr4_32_sigaltstack nsss, osss;
-	struct sigaltstack nbss, obss;
-	int error;
-
-	if (SCARG(uap, nss)) {
-		error = copyin((caddr_t)(u_long)SCARG(uap, nss),
-			       &nsss, sizeof(nsss));
-		if (error)
-			return (error);
-		svr4_32_to_native_sigaltstack(&nsss, &nbss);
-	}
-	error = sigaltstack1(l->l_proc,
-	    SCARG(uap, nss) ? &nbss : 0, SCARG(uap, oss) ? &obss : 0);
-	if (error)
-		return (error);
-	if (SCARG(uap, oss)) {
-		native_to_svr4_32_sigaltstack(&obss, &osss);
-		error = copyout(&osss, (caddr_t)(u_long)SCARG(uap, oss),
-				sizeof(osss));
-		if (error)
-			return (error);
-	}
-	return (0);
+	/* {
+		syscallarg(const struct svr4_32_sigaltstack_tp) nss;
+		syscallarg(struct svr4_32_sigaltstack_tp) oss;
+	} */
+	compat_sigaltstack(uap, svr4_32_sigaltstack,
+	    SVR4_SS_ONSTACK, SVR4_SS_DISABLE);
 }
 
 /*
  * Stolen from the ibcs2 one
  */
 int
-svr4_32_sys_signal(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_signal(struct lwp *l, const struct svr4_32_sys_signal_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_signal_args /* {
+	/* {
 		syscallarg(int) signum;
 		syscallarg(svr4_32_sig_t) handler;
-	} */ *uap = v;
+	} */
 	struct proc *p = l->l_proc;
 	int signum = svr4_to_native_signo[SVR4_SIGNO(SCARG(uap, signum))];
 	struct sigaction nbsa, obsa;
@@ -454,7 +375,7 @@ svr4_32_sys_signal(l, v, retval)
 		nbsa.sa_handler = (sig_t)SCARG(uap, handler);
 		sigemptyset(&nbsa.sa_mask);
 		nbsa.sa_flags = 0;
-		error = sigaction1(p, signum, &nbsa, &obsa, NULL, 0);
+		error = sigaction1(l, signum, &nbsa, &obsa, NULL, 0);
 		if (error)
 			return (error);
 		*retval = (u_int)(u_long)obsa.sa_handler;
@@ -464,23 +385,31 @@ svr4_32_sys_signal(l, v, retval)
 	sighold:
 		sigemptyset(&ss);
 		sigaddset(&ss, signum);
-		return (sigprocmask1(p, SIG_BLOCK, &ss, 0));
+		mutex_enter(p->p_lock);
+		error = sigprocmask1(l, SIG_BLOCK, &ss, 0);
+		mutex_exit(p->p_lock);
+		return error;
 
 	case SVR4_SIGRELSE_MASK:
 		sigemptyset(&ss);
 		sigaddset(&ss, signum);
-		return (sigprocmask1(p, SIG_UNBLOCK, &ss, 0));
+		mutex_enter(p->p_lock);
+		error = sigprocmask1(l, SIG_UNBLOCK, &ss, 0);
+		mutex_exit(p->p_lock);
+		return error;
 
 	case SVR4_SIGIGNORE_MASK:
 		nbsa.sa_handler = SIG_IGN;
 		sigemptyset(&nbsa.sa_mask);
 		nbsa.sa_flags = 0;
-		return (sigaction1(p, signum, &nbsa, 0, NULL, 0));
+		return (sigaction1(l, signum, &nbsa, 0, NULL, 0));
 
 	case SVR4_SIGPAUSE_MASK:
-		ss = p->p_sigctx.ps_sigmask;
+		mutex_enter(p->p_lock);
+		ss = l->l_sigmask;
+		mutex_exit(p->p_lock);
 		sigdelset(&ss, signum);
-		return (sigsuspend1(p, &ss));
+		return (sigsuspend1(l, &ss));
 
 	default:
 		return (ENOSYS);
@@ -488,16 +417,14 @@ svr4_32_sys_signal(l, v, retval)
 }
 
 int
-svr4_32_sys_sigprocmask(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_sigprocmask(struct lwp *l, const struct svr4_32_sys_sigprocmask_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_sigprocmask_args /* {
+	/* {
 		syscallarg(int) how;
 		syscallarg(const svr4_32_sigset_t *) set;
 		syscallarg(svr4_32_sigset_t *) oset;
-	} */ *uap = v;
+	} */
+	struct proc *p = l->l_proc;
 	svr4_32_sigset_t nsss, osss;
 	sigset_t nbss, obss;
 	int how;
@@ -520,25 +447,27 @@ svr4_32_sys_sigprocmask(l, v, retval)
 		how = SIG_SETMASK;
 		break;
 	default:
-		if (SCARG(uap, set))
+		if (SCARG_P32(uap, set))
 			return EINVAL;
 		break;
 	}
 
-	if (SCARG(uap, set)) {
-		error = copyin((caddr_t)(u_long)SCARG(uap, set),
+	if (SCARG_P32(uap, set)) {
+		error = copyin(SCARG_P32(uap, set),
 			       &nsss, sizeof(nsss));
 		if (error)
 			return error;
 		svr4_32_to_native_sigset(&nsss, &nbss);
 	}
-	error = sigprocmask1(l->l_proc, how,
-	    SCARG(uap, set) ? &nbss : NULL, SCARG(uap, oset) ? &obss : NULL);
+	mutex_enter(p->p_lock);
+	error = sigprocmask1(l, how,
+	    SCARG_P32(uap, set) ? &nbss : NULL, SCARG_P32(uap, oset) ? &obss : NULL);
+	mutex_exit(p->p_lock);
 	if (error)
 		return error;
-	if (SCARG(uap, oset)) {
+	if (SCARG_P32(uap, oset)) {
 		native_to_svr4_32_sigset(&obss, &osss);
-		error = copyout(&osss, (caddr_t)(u_long)SCARG(uap, oset),
+		error = copyout(&osss, SCARG_P32(uap, oset),
 				sizeof(osss));
 		if (error)
 			return error;
@@ -547,21 +476,18 @@ svr4_32_sys_sigprocmask(l, v, retval)
 }
 
 int
-svr4_32_sys_sigpending(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_sigpending(struct lwp *l, const struct svr4_32_sys_sigpending_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_sigpending_args /* {
+	/* {
 		syscallarg(int) what;
 		syscallarg(svr4_sigset_t *) set;
-	} */ *uap = v;
+	} */
 	sigset_t bss;
 	svr4_32_sigset_t sss;
 
 	switch (SCARG(uap, what)) {
 	case 1:	/* sigpending */
-		sigpending1(l->l_proc, &bss);
+		sigpending1(l, &bss);
 		native_to_svr4_32_sigset(&bss, &sss);
 		break;
 
@@ -572,52 +498,43 @@ svr4_32_sys_sigpending(l, v, retval)
 	default:
 		return (EINVAL);
 	}
-	return (copyout(&sss, (caddr_t)(u_long)SCARG(uap, set), sizeof(sss)));
+	return (copyout(&sss, SCARG_P32(uap, set), sizeof(sss)));
 }
 
 int
-svr4_32_sys_sigsuspend(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_sigsuspend(struct lwp *l, const struct svr4_32_sys_sigsuspend_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_sigsuspend_args /* {
+	/* {
 		syscallarg(const svr4_32_sigset_t *) set;
-	} */ *uap = v;
+	} */
 	svr4_32_sigset_t sss;
 	sigset_t bss;
 	int error;
 
-	if (SCARG(uap, set)) {
-		error = copyin((caddr_t)(u_long)SCARG(uap, set), &sss, sizeof(sss));
+	if (SCARG_P32(uap, set)) {
+		error = copyin(SCARG_P32(uap, set), &sss, sizeof(sss));
 		if (error)
 			return (error);
 		svr4_32_to_native_sigset(&sss, &bss);
 	}
 
-	return (sigsuspend1(l->l_proc, SCARG(uap, set) ? &bss : 0));
+	return (sigsuspend1(l, SCARG_P32(uap, set) ? &bss : 0));
 }
 
 int
-svr4_32_sys_pause(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_pause(struct lwp *l, const void *v, register_t *retval)
 {
 
-	return (sigsuspend1(l->l_proc, 0));
+	return (sigsuspend1(l, 0));
 }
 
 int
-svr4_32_sys_kill(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_kill(struct lwp *l, const struct svr4_32_sys_kill_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_kill_args /* {
+	/* {
 		syscallarg(int) pid;
 		syscallarg(int) signum;
-	} */ *uap = v;
+	} */
 	struct sys_kill_args ka;
 
 	SCARG(&ka, pid) = SCARG(uap, pid);
@@ -626,10 +543,7 @@ svr4_32_sys_kill(l, v, retval)
 }
 
 void
-svr4_32_getcontext(l, uc, mask)
-	struct lwp *l;
-	struct svr4_32_ucontext *uc;
-	const sigset_t *mask;
+svr4_32_getcontext(struct lwp *l, struct svr4_32_ucontext *uc, const sigset_t *mask)
 {
 	void *sp;
 	struct svr4_32_sigaltstack *ss = &uc->uc_stack;
@@ -640,27 +554,27 @@ svr4_32_getcontext(l, uc, mask)
 	sp = svr4_32_getmcontext(l, &uc->uc_mcontext, &uc->uc_flags);
 
 	/* get link */
-	uc->uc_link = (u_long)l->l_ctxlink;
+	NETBSD32PTR32(uc->uc_link, l->l_ctxlink);
 
 	/* get stack state. XXX: solaris appears to do this */
 #if 0
 	svr4_32_to_native_sigaltstack(&uc->uc_stack, &p->p_sigacts->ps_sigstk);
 #else
-	ss->ss_sp = (((u_long) sp) & ~(16384 - 1));
+	NETBSD32PTR32(ss->ss_sp, (void *)(((u_long) sp) & ~(16384 - 1)));
 	ss->ss_size = 16384;
 	ss->ss_flags = 0;
 #endif
 	/* get signal mask */
+	mutex_enter(l->l_proc->p_lock);
 	native_to_svr4_32_sigset(mask, &uc->uc_sigmask);
+	mutex_exit(l->l_proc->p_lock);
 
 	uc->uc_flags |= SVR4_UC_STACK|SVR4_UC_SIGMASK;
 }
 
 
 int
-svr4_32_setcontext(l, uc)
-	struct lwp *l;
-	struct svr4_32_ucontext *uc;
+svr4_32_setcontext(struct lwp *l, struct svr4_32_ucontext *uc)
 {
 	int error;
 	struct proc *p = l->l_proc;
@@ -670,12 +584,17 @@ svr4_32_setcontext(l, uc)
 		return error;
 
 	/* set link */
-	l->l_ctxlink = (caddr_t)(u_long)uc->uc_link;
+	l->l_ctxlink = NETBSD32PTR64(uc->uc_link);
+
+	mutex_enter(p->p_lock);
 
 	/* set signal stack */
 	if (uc->uc_flags & SVR4_UC_STACK) {
-		svr4_32_to_native_sigaltstack(&uc->uc_stack,
-		    &p->p_sigctx.ps_sigstk);
+		l->l_sigstk.ss_sp = NETBSD32PTR64(uc->uc_stack.ss_sp);
+		l->l_sigstk.ss_size = uc->uc_stack.ss_size;
+		l->l_sigstk.ss_flags =
+		    (uc->uc_stack.ss_flags & SVR4_SS_ONSTACK ? SS_ONSTACK : 0) |
+		    (uc->uc_stack.ss_flags & SVR4_SS_DISABLE ? SS_DISABLE : 0);
 	}
 
 	/* set signal mask */
@@ -683,23 +602,21 @@ svr4_32_setcontext(l, uc)
 		sigset_t mask;
 
 		svr4_32_to_native_sigset(&uc->uc_sigmask, &mask);
-		(void)sigprocmask1(p, SIG_SETMASK, &mask, 0);
+		(void)sigprocmask1(l, SIG_SETMASK, &mask, 0);
 	}
+
+	mutex_exit(p->p_lock);
 
 	return EJUSTRETURN;
 }
 
 int
-svr4_32_sys_context(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+svr4_32_sys_context(struct lwp *l, const struct svr4_32_sys_context_args *uap, register_t *retval)
 {
-	struct svr4_32_sys_context_args /* {
+	/* {
 		syscallarg(int) func;
 		syscallarg(struct svr4_32_ucontext *) uc;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
+	} */
 	struct svr4_32_ucontext uc;
 	int error;
 	*retval = 0;
@@ -707,14 +624,14 @@ svr4_32_sys_context(l, v, retval)
 	switch (SCARG(uap, func)) {
 	case SVR4_GETCONTEXT:
 		DPRINTF(("getcontext(%p)\n", SCARG(uap, uc)));
-		svr4_32_getcontext(l, &uc, &p->p_sigctx.ps_sigmask);
-		return copyout(&uc, (caddr_t)(u_long)SCARG(uap, uc), sizeof(uc));
+		svr4_32_getcontext(l, &uc, &l->l_sigmask);
+		return copyout(&uc, SCARG_P32(uap, uc), sizeof(uc));
 
 	case SVR4_SETCONTEXT:
 		DPRINTF(("setcontext(%p)\n", SCARG(uap, uc)));
-		if (!SCARG(uap, uc))
+		if (!SCARG_P32(uap, uc))
 			exit1(l, W_EXITCODE(0, 0));
-		else if ((error = copyin((caddr_t)(u_long)SCARG(uap, uc),
+		else if ((error = copyin(SCARG_P32(uap, uc),
 					 &uc, sizeof(uc))) != 0)
 			return error;
 		else

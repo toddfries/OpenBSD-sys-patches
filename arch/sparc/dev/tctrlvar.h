@@ -1,5 +1,4 @@
-/*	$OpenBSD: tctrlvar.h,v 1.6 2005/07/19 09:36:04 miod Exp $	*/
-/*	$NetBSD: tctrlvar.h,v 1.1 1999/08/09 18:39:58 matt Exp $ */
+/*	$NetBSD: tctrlvar.h,v 1.8 2008/04/28 20:23:35 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,16 +31,21 @@
 #ifndef _SPARC_DEV_TCTRLVAR_H
 #define	_SPARC_DEV_TCTRLVAR_H
 
-int	tadpole_bell(u_int, u_int, u_int);
-int	tadpole_get_brightness(void);
-u_int	tadpole_get_video(void);
-void	tadpole_powerdown(void);
-void	tadpole_register_extvideo(void (*)(void *, int), void *);
-void	tadpole_set_brightness(int);
-void	tadpole_set_pcmcia(int, int);
-void	tadpole_set_video(int);
+struct tctlrdriver {
+        int     (*tctrld_open)(dev_t, int, int, struct proc *);
+        int     (*tctrld_close)(dev_t, int, int, struct proc *);
+        int     (*tctrld_ioctl)(dev_t, u_long, void *, int, struct proc *);
+	int	(*tctrld_poll)(dev_t, int, struct proc *);
+};
 
-/* Values for get_video */
-#define	TV_ON		0x01
+struct envsys_sensor {
+	char		desc[33];
+	u_int		units;
+};
+
+extern void tadpole_powerdown(void);
+extern void tadpole_set_video(int);
+extern void tadpole_set_lcd(int, unsigned short);
+extern void tadpole_register_callback(void (*)(void *, int), void *);
 
 #endif /* _SPARC_DEV_TCTRLVAR_H */

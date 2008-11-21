@@ -1,5 +1,4 @@
-/*	$OpenBSD: fhpibreg.h,v 1.3 2003/06/02 23:27:44 millert Exp $	*/
-/*	$NetBSD: fhpibreg.h,v 1.4 1994/10/26 07:23:45 cgd Exp $	*/
+/*	$NetBSD: fhpibreg.h,v 1.6 2005/12/11 12:17:13 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993

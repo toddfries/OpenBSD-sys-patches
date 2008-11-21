@@ -1,5 +1,4 @@
-/*	$OpenBSD: syscall.c,v 1.9 2007/04/27 18:45:00 drahn Exp $	*/
-/*	$NetBSD: syscall.c,v 1.24 2003/11/14 19:03:17 scw Exp $	*/
+/*	$NetBSD: syscall.c,v 1.47 2008/10/23 21:38:39 matt Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2003 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -79,23 +71,24 @@
 
 #include <sys/param.h>
 
+__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.47 2008/10/23 21:38:39 matt Exp $");
+
+#include "opt_sa.h"
+
 #include <sys/device.h>
 #include <sys/errno.h>
 #include <sys/kernel.h>
 #include <sys/reboot.h>
 #include <sys/signalvar.h>
 #include <sys/syscall.h>
+#include <sys/syscallvar.h>
 #include <sys/systm.h>
 #include <sys/user.h>
-#ifdef KTRACE
 #include <sys/ktrace.h>
-#endif
-
-#include "systrace.h"
-#include <dev/systrace.h>
 
 #include <uvm/uvm_extern.h>
 
+#include <sys/savar.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
 #include <machine/pcb.h>
@@ -105,91 +98,207 @@
 #include <machine/machdep.h>
 #endif
 
-#define MAXARGS 8
-
 void
 swi_handler(trapframe_t *frame)
 {
-	struct proc *p = curproc;
-	const struct sysent *callp;
-	int code, error, orig_error;
-	u_int nap = 4, nargs;
-	register_t *ap, *args, copyargs[MAXARGS], rval[2];
+	lwp_t *l = curlwp;
+	uint32_t insn;
+
+	/*
+	 * Enable interrupts if they were enabled before the exception.
+	 * Since all syscalls *should* come from user mode it will always
+	 * be safe to enable them, but check anyway. 
+	 */
+#ifdef acorn26
+	if ((frame->tf_r15 & R15_IRQ_DISABLE) == 0)
+		int_on();
+#else
+	KASSERT((frame->tf_spsr & IF32_bits) == 0);
+	restore_interrupts(frame->tf_spsr & IF32_bits);
+#endif
+
+#ifdef acorn26
+	frame->tf_pc += INSN_SIZE;
+#endif
+
+#ifdef KERN_SA
+	if (__predict_false((l->l_savp)
+            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
+		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
+#endif
+
+#ifndef THUMB_CODE
+	/*
+	 * Make sure the program counter is correctly aligned so we
+	 * don't take an alignment fault trying to read the opcode.
+	 */
+	if (__predict_false(((frame->tf_pc - INSN_SIZE) & 3) != 0)) {
+		ksiginfo_t ksi;
+		/* Give the user an illegal instruction signal. */
+		KSI_INIT_TRAP(&ksi);
+		ksi.ksi_signo = SIGILL;
+		ksi.ksi_code = ILL_ILLOPC;
+		ksi.ksi_addr = (uint32_t *)(intptr_t) (frame->tf_pc-INSN_SIZE);
+#if 0
+		/* maybe one day we'll do emulations */
+		(*l->l_proc->p_emul->e_trapsignal)(l, &ksi);
+#else
+		trapsignal(l, &ksi);
+#endif
+		userret(l);
+		return;
+	}
+#endif
+
+#ifdef THUMB_CODE
+	if (frame->tf_spsr & PSR_T_bit) {
+		/* Map a Thumb SWI onto the bottom 256 ARM SWIs.  */
+		insn = fusword((void *)(frame->tf_pc - THUMB_INSN_SIZE));
+		if (insn & 0x00ff)
+			insn = (insn & 0x00ff) | 0xef000000;
+		else
+			insn = frame->tf_ip | 0xef000000;
+	}
+	else
+#endif
+	{
+	/* XXX fuword? */
+#ifdef __PROG32
+		insn = *(uint32_t *)(frame->tf_pc - INSN_SIZE);
+#else
+		insn = *(uint32_t *)((frame->tf_r15 & R15_PC) - INSN_SIZE);
+#endif
+	}
+
+	l->l_addr->u_pcb.pcb_tf = frame;
+
+#ifdef CPU_ARM7
+	/*
+	 * This code is only needed if we are including support for the ARM7
+	 * core. Other CPUs do not need it but it does not hurt.
+	 */
+
+	/*
+	 * ARM700/ARM710 match sticks and sellotape job ...
+	 *
+	 * I know this affects GPS/VLSI ARM700/ARM710 + various ARM7500.
+	 *
+	 * On occasion data aborts are mishandled and end up calling
+	 * the swi vector.
+	 *
+	 * If the instruction that caused the exception is not a SWI
+	 * then we hit the bug.
+	 */
+	if ((insn & 0x0f000000) != 0x0f000000) {
+		frame->tf_pc -= INSN_SIZE;
+		curcpu()->ci_arm700bugcount.ev_count++;
+		userret(l);
+		return;
+	}
+#endif	/* CPU_ARM7 */
 
 	uvmexp.syscalls++;
 
-	/* Re-enable interrupts if they were enabled previously */
-	if (__predict_true((frame->tf_spsr & I32_bit) == 0))
-		enable_interrupts(I32_bit);
+	LWP_CACHE_CREDS(l, l->l_proc);
+	(*l->l_proc->p_md.md_syscall)(frame, l, insn);
+}
 
-	p->p_addr->u_pcb.pcb_tf = frame;
+void syscall(struct trapframe *, lwp_t *, uint32_t);
 
-	code = frame->tf_r12;
+void
+syscall_intern(struct proc *p)
+{
+	p->p_md.md_syscall = syscall;
+}
 
-	ap = &frame->tf_r0;
-	callp = p->p_emul->e_sysent;
+void
+syscall(struct trapframe *frame, lwp_t *l, uint32_t insn)
+{
+	struct proc * const p = l->l_proc;
+	const struct sysent *callp;
+	int error;
+	u_int nargs;
+	register_t *args;
+	register_t copyargs[2+SYS_MAXSYSARGS];
+	register_t rval[2];
+	ksiginfo_t ksi;
+	const uint32_t os_mask = insn & SWI_OS_MASK;
+	uint32_t code = insn & 0x000fffff;
 
-	switch (code) {	
-	case SYS_syscall:
-		code = *ap++;
-		nap--;
-		break;
-        case SYS___syscall:
-		code = ap[_QUAD_LOWWORD];
-		ap += 2;
-		nap -= 2;
-		break;
+	/* test new official and old unofficial NetBSD ranges */
+	if (__predict_false(os_mask != SWI_OS_NETBSD)
+	    && __predict_false(os_mask != 0)) {
+		if (os_mask == SWI_OS_ARM
+		    && (code == SWI_IMB || code == SWI_IMBrange)) {
+			userret(l);
+			return;
+		}
+
+		/* Undefined so illegal instruction */
+		KSI_INIT_TRAP(&ksi);
+		ksi.ksi_signo = SIGILL;
+		ksi.ksi_code = 0;	/* XXX get an ILL_ILLSYSCALL assigned */
+#ifdef THUMB_CODE
+		if (frame->tf_spsr & PSR_T_bit) 
+			ksi.ksi_addr = (void *)(frame->tf_pc - THUMB_INSN_SIZE);
+		else
+#endif
+			ksi.ksi_addr = (void *)(frame->tf_pc - INSN_SIZE);
+		ksi.ksi_trap = insn;
+		trapsignal(l, &ksi);
+		userret(l);
+		return;
 	}
 
-	if (code < 0 || code >= p->p_emul->e_nsysent) {
-		callp += p->p_emul->e_nosys;
-	} else {
-		callp += code;
-	}
-	nargs = callp->sy_argsize / sizeof(register_t);
-	if (nargs <= nap) {
-		args = ap;
-		error = 0;
-	} else {
-		KASSERT(nargs <= MAXARGS);
-		memcpy(copyargs, ap, nap * sizeof(register_t));
-		error = copyin((void *)frame->tf_usr_sp, copyargs + nap,
-		    (nargs - nap) * sizeof(register_t));
+	code &= (SYS_NSYSENT - 1);
+	callp = p->p_emul->e_sysent + code;
+	nargs = callp->sy_narg;
+	if (nargs > 4) {
 		args = copyargs;
+		memcpy(args, &frame->tf_r0, 4 * sizeof(register_t));
+		error = copyin((void *)frame->tf_usr_sp, args + 4,
+		    (nargs - 4) * sizeof(register_t));
+		if (error)
+			goto bad;
+	} else {
+		args = &frame->tf_r0;
 	}
-	orig_error = error;
-#ifdef SYSCALL_DEBUG
-        scdebug_call(p, code, args);
-#endif
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
-		ktrsyscall(p, code, callp->sy_argsize, args);
-#endif
-	if (error)
-		goto bad;
 
-	rval[0] = 0;
-	rval[1] = frame->tf_r1;
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
-		orig_error = error = systrace_redirect(code, p, args, rval);
-	else 
-#endif
-		orig_error = error = (*callp->sy_call)(p, args, rval);
+	if (!__predict_false(p->p_trace_enabled)
+	    || __predict_false(callp->sy_flags & SYCALL_INDIRECT)
+	    || (error = trace_enter(code, args, nargs)) == 0) {
+		rval[0] = 0;
+		rval[1] = 0;
+		KASSERT(l->l_holdcnt == 0);
+		error = (*callp->sy_call)(l, args, rval);
+	}
+
+	if (__predict_false(p->p_trace_enabled)
+	    || !__predict_false(callp->sy_flags & SYCALL_INDIRECT))
+		trace_exit(code, rval, error);
 
 	switch (error) {
 	case 0:
 		frame->tf_r0 = rval[0];
 		frame->tf_r1 = rval[1];
 
+#ifdef __PROG32
 		frame->tf_spsr &= ~PSR_C_bit;	/* carry bit */
+#else
+		frame->tf_r15 &= ~R15_FLAG_C;	/* carry bit */
+#endif
 		break;
 
 	case ERESTART:
 		/*
 		 * Reconstruct the pc to point at the swi.
 		 */
-		frame->tf_pc -= INSN_SIZE;
+#ifdef THUMB_CODE
+		if (frame->tf_spsr & PSR_T_bit)
+			frame->tf_pc -= THUMB_INSN_SIZE;
+		else
+#endif
+			frame->tf_pc -= INSN_SIZE;
 		break;
 
 	case EJUSTRETURN:
@@ -199,35 +308,30 @@ swi_handler(trapframe_t *frame)
 	default:
 	bad:
 		frame->tf_r0 = error;
+#ifdef __PROG32
 		frame->tf_spsr |= PSR_C_bit;	/* carry bit */
+#else
+		frame->tf_r15 |= R15_FLAG_C;	/* carry bit */
+#endif
 		break;
 	}
-#ifdef SYSCALL_DEBUG
-	scdebug_ret(p, code, orig_error, rval);
-#endif
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, code, orig_error, rval[0]);
-#endif
+
+	userret(l);
 }
 
 void
-child_return(arg)
-	void *arg;
+child_return(void *arg)
 {
-	struct proc *p = arg;
-	struct trapframe *frame = p->p_addr->u_pcb.pcb_tf;
+	lwp_t *l = arg;
+	struct trapframe *frame = l->l_addr->u_pcb.pcb_tf;
 
 	frame->tf_r0 = 0;
+#ifdef __PROG32
 	frame->tf_spsr &= ~PSR_C_bit;	/* carry bit */
-
-	userret(p);
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
-	}
+#else
+	frame->tf_r15 &= ~R15_FLAG_C;	/* carry bit */
 #endif
+
+	userret(l);
+	ktrsysret(SYS_fork, 0, 0);
 }

@@ -1,8 +1,11 @@
-/*	$NetBSD: kobj_machdep.c,v 1.3 2008/01/06 14:33:27 ad Exp $	*/
+/*	$NetBSD: kobj_machdep.c,v 1.6 2008/11/12 12:36:02 ad Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software developed for The NetBSD Foundation
+ * by Andrew Doran.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -59,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kobj_machdep.c,v 1.3 2008/01/06 14:33:27 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kobj_machdep.c,v 1.6 2008/11/12 12:36:02 ad Exp $");
 
 #define	ELFSIZE		ARCH_ELFSIZE
 
@@ -100,15 +96,13 @@ kobj_reloc(kobj_t ko, uintptr_t relocbase, const void *data,
 
 	switch (rtype) {
 	case R_386_NONE:	/* none */
-		break;
+		return 0;
 
 	case R_386_32:		/* S + A */
 		addr = kobj_sym_lookup(ko, symidx);
 		if (addr == 0)
 			return -1;
 		addr += addend;
-		if (*where != addr)
-			*where = addr;
 		break;
 
 	case R_386_PC32:	/* S + A - P */
@@ -116,30 +110,16 @@ kobj_reloc(kobj_t ko, uintptr_t relocbase, const void *data,
 		if (addr == 0)
 			return -1;
 		addr += addend - (Elf_Addr)where;
-		if (*where != addr)
-			*where = addr;
 		break;
-
-	case R_386_COPY:	/* none */
-		/*
-		 * There shouldn't be copy relocations in kernel
-		 * objects.
-		 */
-		printf("kobj_reloc: unexpected R_COPY relocation\n");
-		return -1;
 
 	case R_386_GLOB_DAT:	/* S */
 		addr = kobj_sym_lookup(ko, symidx);
 		if (addr == 0)
 			return -1;
-		if (*where != addr)
-			*where = addr;
 		break;
 
 	case R_386_RELATIVE:
 		addr = relocbase + addend;
-		if (*where != addr)
-			*where = addr;
 		break;
 
 	default:
@@ -147,6 +127,7 @@ kobj_reloc(kobj_t ko, uintptr_t relocbase, const void *data,
 		return -1;
 	}
 
+	*where = addr;
 	return 0;
 }
 

@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_implode.c,v 1.6 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_implode.c,v 1.8 2003/10/23 15:07:30 kleink Exp $ */
+/*	$NetBSD: fpu_implode.c,v 1.9 2005/12/11 12:17:52 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -46,22 +45,23 @@
  * `packed binary' format.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_implode.c,v 1.9 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/types.h>
 #include <sys/systm.h>
 
 #include <machine/ieee.h>
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_emulate.h>
-#include <m68k/fpe/fpu_arith.h>
+#include "fpu_emulate.h"
+#include "fpu_arith.h"
 
 /* Conversion from internal format -- note asymmetry. */
-u_int	fpu_ftoi(struct fpemu *fe, struct fpn *fp);
-u_int	fpu_ftos(struct fpemu *fe, struct fpn *fp);
-u_int	fpu_ftod(struct fpemu *fe, struct fpn *fp, u_int *);
-u_int	fpu_ftox(struct fpemu *fe, struct fpn *fp, u_int *);
-
-int	toinf(struct fpemu *fe, int sign);
+static u_int	fpu_ftoi __P((struct fpemu *fe, struct fpn *fp));
+static u_int	fpu_ftos __P((struct fpemu *fe, struct fpn *fp));
+static u_int	fpu_ftod __P((struct fpemu *fe, struct fpn *fp, u_int *));
+static u_int	fpu_ftox __P((struct fpemu *fe, struct fpn *fp, u_int *));
 
 /*
  * Round a number (algorithm from Motorola MC68882 manual, modified for
@@ -76,10 +76,10 @@ int	toinf(struct fpemu *fe, int sign);
  * responsibility to fix this if necessary.
  */
 int
-fpu_round(struct fpemu *fe, struct fpn *fp)
+fpu_round(register struct fpemu *fe, register struct fpn *fp)
 {
-	u_int m0, m1, m2;
-	int gr, s;
+	register u_int m0, m1, m2;
+	register int gr, s;
 
 	m0 = fp->fp_mant[0];
 	m1 = fp->fp_mant[1];
@@ -152,7 +152,7 @@ rounddown:
  * to the sign of the overflowing result.  If false, overflow is to go
  * to the largest magnitude value instead.
  */
-int
+static int
 toinf(struct fpemu *fe, int sign)
 {
 	int inf;
@@ -186,13 +186,13 @@ toinf(struct fpemu *fe, int sign)
  * N.B.: this conversion always rounds towards zero (this is a peculiarity
  * of the SPARC instruction set).
  */
-u_int
+static u_int
 fpu_ftoi(fe, fp)
 	struct fpemu *fe;
-	struct fpn *fp;
+	register struct fpn *fp;
 {
-	u_int i;
-	int sign, exp;
+	register u_int i;
+	register int sign, exp;
 
 	sign = fp->fp_sign;
 	switch (fp->fp_class) {
@@ -235,13 +235,13 @@ fpu_ftoi(fe, fp)
  * fpn -> single (32 bit single returned as return value).
  * We assume <= 29 bits in a single-precision fraction (1.f part).
  */
-u_int
+static u_int
 fpu_ftos(fe, fp)
 	struct fpemu *fe;
-	struct fpn *fp;
+	register struct fpn *fp;
 {
-	u_int sign = fp->fp_sign << 31;
-	int exp;
+	register u_int sign = fp->fp_sign << 31;
+	register int exp;
 
 #define	SNG_EXP(e)	((e) << SNG_FRACBITS)	/* makes e an exponent */
 #define	SNG_MASK	(SNG_EXP(1) - 1)	/* mask for fraction */
@@ -320,14 +320,14 @@ done:
  *
  * This code mimics fpu_ftos; see it for comments.
  */
-u_int
+static u_int
 fpu_ftod(fe, fp, res)
 	struct fpemu *fe;
-	struct fpn *fp;
+	register struct fpn *fp;
 	u_int *res;
 {
-	u_int sign = fp->fp_sign << 31;
-	int exp;
+	register u_int sign = fp->fp_sign << 31;
+	register int exp;
 
 #define	DBL_EXP(e)	((e) << (DBL_FRACBITS & 31))
 #define	DBL_MASK	(DBL_EXP(1) - 1)
@@ -384,14 +384,14 @@ done:
  *
  * This code mimics fpu_ftos; see it for comments.
  */
-u_int
+static u_int
 fpu_ftox(fe, fp, res)
 	struct fpemu *fe;
-	struct fpn *fp;
+	register struct fpn *fp;
 	u_int *res;
 {
-	u_int sign = fp->fp_sign << 31;
-	int exp;
+	register u_int sign = fp->fp_sign << 31;
+	register int exp;
 
 #define	EXT_EXP(e)	((e) << 16)
 /*
@@ -458,9 +458,9 @@ done:
 void
 fpu_implode(fe, fp, type, space)
 	struct fpemu *fe;
-	struct fpn *fp;
+	register struct fpn *fp;
 	int type;
-	u_int *space;
+	register u_int *space;
 {
 	/* XXX Dont delete exceptions set here: fe->fe_fpsr &= ~FPSR_EXCP; */
 

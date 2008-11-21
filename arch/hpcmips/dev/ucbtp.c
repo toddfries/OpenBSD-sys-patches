@@ -1,4 +1,4 @@
-/*	$NetBSD: ucbtp.c,v 1.16 2006/11/12 19:00:42 plunky Exp $ */
+/*	$NetBSD: ucbtp.c,v 1.18 2008/04/28 20:23:21 martin Exp $ */
 
 /*-
  * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ucbtp.c,v 1.16 2006/11/12 19:00:42 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ucbtp.c,v 1.18 2008/04/28 20:23:21 martin Exp $");
 
 #include "opt_use_poll.h"
 
@@ -171,7 +164,7 @@ int	ucbtp_input(struct ucbtp_softc *);
 int	ucbtp_busy(void *);
 
 int	ucbtp_enable(void *);
-int	ucbtp_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+int	ucbtp_ioctl(void *, u_long, void *, int, struct lwp *);
 void	ucbtp_disable(void *);
 
 CFATTACH_DECL(ucbtp, sizeof(struct ucbtp_softc),
@@ -272,7 +265,7 @@ ucbtp_calibration(struct ucbtp_softc *sc)
 
 	sc->sc_calibrated = 
 	    tpcalib_ioctl(&sc->sc_tpcalib, WSMOUSEIO_SCALIBCOORDS,
-		(caddr_t)cs, 0, 0) == 0 ? 1 : 0;
+		(void *)cs, 0, 0) == 0 ? 1 : 0;
 
 	if (!sc->sc_calibrated)
 		printf("not ");
@@ -716,7 +709,7 @@ ucbtp_disable(void *v)
 }
 
 int
-ucbtp_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
+ucbtp_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct ucbtp_softc *sc = v;
 

@@ -1,4 +1,3 @@
-/*	$OpenBSD: ieee.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: ieee.h,v 1.3 2001/11/25 15:55:56 thorpej Exp $	*/
+/*	$NetBSD: ieee.h,v 1.1 2006/12/16 05:45:10 ober Exp $	*/
 
 #include <arm/ieee.h>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.7 2002/03/14 01:26:36 millert Exp $	*/
-/*	$NetBSD: mainbus.c,v 1.7 1996/12/17 06:47:41 scottr Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.20 2008/04/28 20:23:27 martin Exp $	*/
 
 /*
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -16,19 +15,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -37,27 +29,47 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.20 2008/04/28 20:23:27 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
 
-static int	mainbus_match(struct device *, void *, void *);
+#define _M68K_BUS_DMA_PRIVATE
+#include <machine/autoconf.h>
+
+static int	mainbus_match(struct device *, struct cfdata *, void *);
 static void	mainbus_attach(struct device *, struct device *, void *);
-static int	mainbus_search(struct device *, void *, void *);
+static int	mainbus_search(struct device *, struct cfdata *,
+			       const int *ldesc, void *);
 
-struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach
-};
+CFATTACH_DECL(mainbus, sizeof(struct device),
+    mainbus_match, mainbus_attach, NULL, NULL);
 
-struct cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
+struct m68k_bus_dma_tag mac68k_bus_dma_tag = {
+	NULL,					/* _cookie */
+
+	0,					/* _boundary */
+
+	_bus_dmamap_create,			/* _dmamap_create */
+	_bus_dmamap_destroy,			/* _dmamap_destroy */
+	_bus_dmamap_load_direct,		/* _dmamap_load */
+	_bus_dmamap_load_mbuf_direct,		/* _dmamap_load_mbuf */
+	_bus_dmamap_load_uio_direct,		/* _dmamap_load_uio */
+	_bus_dmamap_load_raw_direct,		/* _dmamap_load_raw */
+	_bus_dmamap_unload,			/* _dmamap_unload */
+	_bus_dmamap_sync,			/* _dmamap_sync */
+  
+	_bus_dmamem_alloc,			/* _dmamem_alloc */
+	_bus_dmamem_free,			/* _dmamem_free */
+	_bus_dmamem_map,			/* _dmamem_map */
+	_bus_dmamem_unmap,			/* _dmamem_unmap */
+	_bus_dmamem_mmap			/* _dmamem_mmap */
 };
 
 static int
-mainbus_match(parent, vcf, aux)
-	struct device *parent;
-	void *vcf;
-	void *aux;
+mainbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	static int mainbus_matched = 0;
 
@@ -70,25 +82,24 @@ mainbus_match(parent, vcf, aux)
 }
 
 static void
-mainbus_attach(parent, self, aux)
-	struct device	*parent, *self;
-	void		*aux;
+mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
+	struct mainbus_attach_args	mba;
+
 	printf("\n");
 
+	mba.mba_bst = MAC68K_BUS_SPACE_MEM;
+	mba.mba_dmat = &mac68k_bus_dma_tag;
+
 	/* Search for and attach children. */
-	config_search(mainbus_search, self, NULL);
+	config_search_ia(mainbus_search, self, "mainbus", &mba);
 }
 
 static int
-mainbus_search(parent, vcf, aux)
-	struct device *parent;
-	void *vcf;
-	void *aux;
+mainbus_search(struct device *parent, struct cfdata *cf,
+	       const int *ldesc, void *aux)
 {
-	struct cfdata *cf = (struct cfdata *) vcf;
-
-	if ((*cf->cf_attach->ca_match)(parent, cf, NULL) > 0)
-		config_attach(parent, cf, NULL, NULL);
+	if (config_match(parent, cf, aux) > 0)
+		config_attach(parent, cf, aux, NULL);
 	return 0;
 }

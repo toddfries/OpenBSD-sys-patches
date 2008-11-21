@@ -1,5 +1,4 @@
-/*	$OpenBSD: zxreg.h,v 1.1 2004/06/20 18:15:25 miod Exp $	*/
-/*	$NetBSD: zxreg.h,v 1.1 2002/09/13 14:03:53 ad Exp $	*/
+/*	$NetBSD: zxreg.h,v 1.5 2008/09/08 23:36:54 gmcgarry Exp $	*/
 
 /*
  *  Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. All advertising materials mentioning features or use of this software
- *     must display the following acknowledgement:
- *         This product includes software developed by the NetBSD
- *         Foundation, Inc. and its contributors.
- *  4. Neither the name of The NetBSD Foundation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -58,7 +50,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  */
- 
+
 #ifndef _DEV_SBUS_ZXREG_H_
 #define _DEV_SBUS_ZXREG_H_
 
@@ -68,7 +60,7 @@
 #define ZX_OFF_LC_SS0_USR	0x00201000
 #define ZX_OFF_LD_SS0		0x00400000
 #define ZX_OFF_LD_GBL		0x00401000
-#define ZX_OFF_LX_CROSS		0x00600000
+#define ZX_OFF_LX_CROSS	0x00600000
 #define ZX_OFF_LX_CURSOR	0x00601000
 #define ZX_OFF_UNK		0x00602000
 #define ZX_OFF_SS0		0x00800000
@@ -79,8 +71,8 @@
 
 /* ROP register */
 #define ZX_ATTR_PICK_DISABLE	0x00000000
-#define ZX_ATTR_PICK_2D		0x80000000
-#define ZX_ATTR_PICK_3D		0xa0000000
+#define ZX_ATTR_PICK_2D	0x80000000
+#define ZX_ATTR_PICK_3D	0xa0000000
 #define ZX_ATTR_PICK_2D_REND	0xc0000000
 #define ZX_ATTR_PICK_3D_REND	0xe0000000
 
@@ -129,7 +121,7 @@
 #define ZX_ATTR_WRITEZ_ENABLE	0x00010000
 
 #define ZX_ATTR_Z_VAR		0x00000000
-#define ZX_ATTR_Z_CONST		0x00008000
+#define ZX_ATTR_Z_CONST	0x00008000
 
 #define ZX_ATTR_WCLIP_DISABLE	0x00000000
 #define ZX_ATTR_WCLIP_ENABLE	0x00004000
@@ -170,7 +162,7 @@
 #define ZX_ATTR_BUFFER_B	0x00000001
 
 /* CSR */
-#define ZX_CSR_BLT_BUSY		0x20000000
+#define ZX_CSR_BLT_BUSY	0x20000000
 
 struct zx_draw {
 	u_int32_t	zd_pad0[896];
@@ -208,16 +200,12 @@ struct zx_draw {
 	u_int32_t	zd_forcecol;	/* SS1 only */
 	u_int32_t	zd_door[8];	/* SS1 only */
 	u_int32_t	zd_pick[5];	/* SS1 only */
-};
-
-/* EXTENT */
-#define	ZX_EXTENT_DIR_FORWARDS	0x00000000
-#define	ZX_EXTENT_DIR_BACKWARDS	0x80000000
+} __packed;
 
 struct zx_draw_ss1 {
 	u_int32_t	zd_pad0[957];
 	u_int32_t	zd_misc;
-};
+} __packed;
 #define	ZX_SS1_MISC_ENABLE	0x00000001
 #define	ZX_SS1_MISC_STEREO	0x00000002
 
@@ -242,7 +230,7 @@ struct zx_command {
 	u_int32_t	zc_dst;
 	u_int32_t	zc_copy;
 	u_int32_t	zc_fill;
-};
+} __packed;
 
 #define ZX_CROSS_TYPE_CLUT0	0x00001000
 #define ZX_CROSS_TYPE_CLUT1	0x00001001
@@ -261,7 +249,7 @@ struct zx_cross {
 	u_int32_t	zx_type;
 	u_int32_t	zx_csr;
 	u_int32_t	zx_value;
-};
+} __packed;
 
 struct zx_cursor {
 	u_int32_t	zcu_pad0[4];
@@ -269,6 +257,6 @@ struct zx_cursor {
 	u_int32_t	zcu_misc;
 	u_int32_t	zcu_sxy;
 	u_int32_t	zcu_data;
-};
+} __packed;
 
 #endif	/* !_DEV_SBUS_ZXREG_H_ */

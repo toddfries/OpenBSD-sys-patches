@@ -1,5 +1,5 @@
-/*	$OpenBSD: altq_hfsc.h,v 1.6 2004/01/14 08:42:23 kjc Exp $	*/
-/*	$KAME: altq_hfsc.h,v 1.8 2002/11/29 04:36:23 kjc Exp $	*/
+/*	$NetBSD: altq_hfsc.h,v 1.8 2006/10/12 19:59:08 peter Exp $	*/
+/*	$KAME: altq_hfsc.h,v 1.12 2003/12/05 05:40:46 kjc Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Carnegie Mellon University. All Rights Reserved.
@@ -106,6 +106,75 @@ struct hfsc_classstats {
 	int			qtype;
 	struct redstats		red[3];
 };
+
+#ifdef ALTQ3_COMPAT
+struct hfsc_interface {
+	char	hfsc_ifname[IFNAMSIZ];  /* interface name (e.g., fxp0) */
+};
+
+struct hfsc_attach {
+	struct hfsc_interface	iface;
+	u_int			bandwidth;  /* link bandwidth in bits/sec */
+};
+
+struct hfsc_add_class {
+	struct hfsc_interface	iface;
+	u_int32_t		parent_handle;
+	struct service_curve	service_curve;
+	int			qlimit;
+	int			flags;
+
+	u_int32_t		class_handle;  /* return value */
+};
+
+struct hfsc_delete_class {
+	struct hfsc_interface	iface;
+	u_int32_t		class_handle;
+};
+
+struct hfsc_modify_class {
+	struct hfsc_interface	iface;
+	u_int32_t		class_handle;
+	struct service_curve	service_curve;
+	int			sctype;
+};
+
+struct hfsc_add_filter {
+	struct hfsc_interface	iface;
+	u_int32_t		class_handle;
+	struct flow_filter	filter;
+
+	u_long			filter_handle;  /* return value */
+};
+
+struct hfsc_delete_filter {
+	struct hfsc_interface	iface;
+	u_long			filter_handle;
+};
+
+struct hfsc_class_stats {
+	struct hfsc_interface	iface;
+	int			nskip;		/* skip # of classes */
+	int			nclasses;	/* # of class stats (WR) */
+	u_int64_t		cur_time;	/* current time */
+	u_int32_t		machclk_freq;	/* machine clock frequency */
+	u_int			hif_classes;	/* # of classes in the tree */
+	u_int			hif_packets;	/* # of packets in the tree */
+	struct hfsc_classstats	*stats;		/* pointer to stats array */
+};
+
+#define	HFSC_IF_ATTACH		_IOW('Q', 1, struct hfsc_attach)
+#define	HFSC_IF_DETACH		_IOW('Q', 2, struct hfsc_interface)
+#define	HFSC_ENABLE		_IOW('Q', 3, struct hfsc_interface)
+#define	HFSC_DISABLE		_IOW('Q', 4, struct hfsc_interface)
+#define	HFSC_CLEAR_HIERARCHY	_IOW('Q', 5, struct hfsc_interface)
+#define	HFSC_ADD_CLASS		_IOWR('Q', 7, struct hfsc_add_class)
+#define	HFSC_DEL_CLASS		_IOW('Q', 8, struct hfsc_delete_class)
+#define	HFSC_MOD_CLASS		_IOW('Q', 9, struct hfsc_modify_class)
+#define	HFSC_ADD_FILTER		_IOWR('Q', 10, struct hfsc_add_filter)
+#define	HFSC_DEL_FILTER		_IOW('Q', 11, struct hfsc_delete_filter)
+#define	HFSC_GETSTATS		_IOWR('Q', 12, struct hfsc_class_stats)
+#endif /* ALTQ3_COMPAT */
 
 #ifdef _KERNEL
 /*
@@ -237,6 +306,10 @@ struct hfsc_if {
 	u_int	hif_classid;			/* class id sequence number */
 
 	ellist_t *hif_eligible;			/* eligible list */
+
+#ifdef ALTQ3_CLFIER_COMPAT
+	struct acc_classifier	hif_classifier;
+#endif
 };
 
 #endif /* _KERNEL */

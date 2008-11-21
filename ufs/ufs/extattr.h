@@ -1,4 +1,4 @@
-/*	$NetBSD: extattr.h,v 1.4 2006/05/14 21:33:39 elad Exp $	*/
+/*	$NetBSD: extattr.h,v 1.8 2008/01/30 14:54:01 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999-2001 Robert N. M. Watson
@@ -96,9 +96,10 @@ struct ufs_extattr_list_entry {
 
 struct lock;
 struct ufs_extattr_per_mount {
-	struct lock			uepm_lock;
+	kmutex_t			uepm_lock;
 	struct ufs_extattr_list_head	uepm_list;
 	kauth_cred_t			uepm_ucred;
+	int				uepm_lockcnt;
 	int				uepm_flags;
 };
 
@@ -106,14 +107,17 @@ void	ufs_extattr_uepm_init(struct ufs_extattr_per_mount *uepm);
 void	ufs_extattr_uepm_destroy(struct ufs_extattr_per_mount *uepm);
 int	ufs_extattr_start(struct mount *mp, struct lwp *l);
 int	ufs_extattr_autostart(struct mount *mp, struct lwp *l);
-int	ufs_extattr_stop(struct mount *mp, struct lwp *l);
+void	ufs_extattr_stop(struct mount *mp, struct lwp *l);
 int	ufs_extattrctl(struct mount *mp, int cmd, struct vnode *filename,
-	    int attrnamespace, const char *attrname, struct lwp *l);
+	    int attrnamespace, const char *attrname);
 int	ufs_getextattr(struct vop_getextattr_args *ap);
 int	ufs_deleteextattr(struct vop_deleteextattr_args *ap);
 int	ufs_setextattr(struct vop_setextattr_args *ap);
 int	ufs_listextattr(struct vop_listextattr_args *ap);
 void	ufs_extattr_vnode_inactive(struct vnode *vp, struct lwp *l);
+
+void	ufs_extattr_init(void);
+void	ufs_extattr_done(void);
 
 #endif /* !_KERNEL */
 

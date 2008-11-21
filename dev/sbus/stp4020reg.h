@@ -1,5 +1,4 @@
-/*	$OpenBSD: stp4020reg.h,v 1.6 2007/08/06 15:13:47 tom Exp $	*/
-/*	$NetBSD: stp4020reg.h,v 1.1 1998/11/22 22:14:35 pk Exp $	*/
+/*	$NetBSD: stp4020reg.h,v 1.4 2008/04/28 20:23:57 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,15 +34,14 @@
 #define	_STP4020_REG_H
 
 /*
- * STP4020: SBus/PCMCIA bridge supporting one Type-3 PCMCIA card, or up to
- * two Type-1 and Type-2 PCMCIA cards..
+ * STP4020: SBus/PCMCIA bridge supporting two Type-3 PCMCIA cards.
  * Programming information source:
  *	- http://www.sun.com/microelectronics/datasheets/stp4020/
  *	- SunOS 5.5 header file
  */
 
 /*
- * General chip attributes.
+ * General chip attibutes.
  */
 #define	STP4020_NSOCK	2	/* number of PCCARD sockets per STP4020 */
 #define	STP4020_NWIN	3	/* number of windows per socket */
@@ -90,8 +81,11 @@
 #define	STP4020_ICR0_IFTYPE	0x0001	/* PC card interface type */
 #define	 STP4020_ICR0_IFTYPE_MEM	0x0000	/* MEMORY only */
 #define	 STP4020_ICR0_IFTYPE_IO		0x0001	/* MEMORY and I/O */
-#define STP4020_ICR0_BITS	"\010\1IFTYPE\2RESET\3SPKREN\4IOILVL\5IOIE" \
-    "\7CTOIE\10WPIE\11RDYIE\12BVD1IE\13BVD2IE\14CDIE\15SCILV\16PROMEN"
+#define STP4020_ICR0_BITS	"\177\010"				\
+				"b\0IFTYPE\0b\1RESET\0b\2SPKREN\0"	\
+				"b\3IOILVL\0b\4IOIE\0b\6CTOIE\0"	\
+				"b\7WPIE\0b\10RDYIE\0b\11BVD1IE\0b\12BVD2IE\0"\
+				"b\13CDIE\0b\14SCILV\0b\15PROMEN\0\0"
 
 /* Shorthand for all status change interrupts enables */
 #define	STP4020_ICR0_ALL_STATUS_IE (	\
@@ -138,8 +132,11 @@
 #define	STP4020_ICR1_MSTPWR	0x0002	/* PC card master power enable */
 #define	STP4020_ICR1_PCIFOE	0x0001	/* PC card interface output enable */
 
-#define STP4020_ICR1_BITS	"\010\1PCIFOE\2MSTPWR\7APWREN\11DIAGEN" \
-    "\12WAITDB\13WPDB\14RDYDB\15BVD1D\16BVD2D\17CD1DB\18LPBKEN"
+#define STP4020_ICR1_BITS	"\177\010"				     \
+				"b\0PCIFOE\0b\1MSTPWR\0f\2\2VPP1EN\0"	     \
+				"f\4\2VPP2EN\0b\6APWREN\0b\10DIAGEN\0"	     \
+				"b\11WAITDB\0b\12WPDB\0b\13RDYDB\0"	     \
+				"b\14BVD1D\0b\15BVD2D\0\16CD1DB\0b\17LPBKEN\0"
 
 /*
  * Socket Interface Status register 0
@@ -161,7 +158,6 @@
 #define	STP4020_ISR0_RDYCHG	0x0400	/* ready/busy status change */
 #define	STP4020_ISR0_WPCHG	0x0200	/* write protect status change */
 #define	STP4020_ISR0_PCTO	0x0100	/* PC card access timeout */
-#define STP4020_ISR0_ALL_STATUS_IRQ	0x7f00
 
 #define	STP4020_ISR0_LIVE	0x00ff	/* live status bit mask */
 #define	STP4020_ISR0_CD2ST	0x0080	/* card detect 2 live status */
@@ -177,12 +173,18 @@
 #define	STP4020_ISR0_WAITST	0x0002	/* wait signal live status */
 #define	STP4020_ISR0_PWRON	0x0001	/* PC card power status */
 
-#define STP4020_ISR0_IOBITS	"\010\1PWRON\2WAITST\3IOIS16\4IOREQ" \
-    "\5STSCHG\6SPKR\7CD1ST\10CD2ST\11PCTO\12WPCHG\13RDYCHG\14BVD1CHG" \
-    "\15BVD2CHG\16CDCHG\17SCINT\20IOINT"
-#define STP4020_ISR0_MOBITS	"\010\1PWRON\2WAITST\3WPST\4RDYST" \
-    "\5BVD1ST\6BVD2ST\7CD1ST\10CD2ST\11PCTO\12WPCHG\13RDYCHG\14BVD1CHG" \
-    "\15BVD2CHG\16CDCHG\17SCINT"
+#define STP4020_ISR0_IOBITS	"\177\010"				     \
+				"b\0PWRON\0b\1WAITST\0b\2IOIS16\0b\3IOREQ\0" \
+				"b\4STSCHG\0b\5SPKR\0b\6CD1ST\0b\7CD2ST\0"   \
+				"b\10PCTO\0b\11WPCHG\0b\12RDYCHG\0"	     \
+				"b\13BVD1CHG\0b\14BVD2CHG\0b\15CDCHG\0"	     \
+				"b\16SCINT\0b\17IOINT\0\0"
+#define STP4020_ISR0_MOBITS	"\177\010"				     \
+				"b\0PWRON\0b\1WAITST\0b\2WPST\0b\3RDYST\0"   \
+				"b\4BVD1ST\0b\5BVD2ST\0b\6CD1ST\0b\7CD2ST\0" \
+				"b\10PCTO\0b\11WPCHG\0b\12RDYCHG\0"	     \
+				"b\13BVD1CHG\0b\14BVD2CHG\0b\15CDCHG\0"	     \
+				"b\16SCINT\0\0"
 
 /*
  * Socket Interface Status register 1
@@ -192,6 +194,8 @@
 #define	STP4020_ISR1_PCTYPE_S	4	/* PC card type(s) supported bit shift */
 #define	STP4020_ISR1_REV_M	0x000f	/* ASIC revision level bit mask */
 #define	STP4020_ISR1_REV_S	0	/* ASIC revision level bit shift */
+#define STP4020_ISR1_BITS	"\177\010"		    \
+				"f\0\4REV\0f\4\2PCTYPE\0\0" \
 
 
 /*
@@ -206,7 +210,7 @@
  *
  *	Each window has two window control registers associated with it to
  *	control the window's PCMCIA bus timing parameters, PC card address
- *	space that the window maps, and the base address in the
+ *	space that that window maps, and the base address in the
  *	selected PC card's address space."
  */
 #define	STP4020_WINDOW_SIZE		(1024*1024) /* 1MB */

@@ -1,6 +1,4 @@
-/*	$OpenBSD: ieee80211_rssadapt.c,v 1.6 2007/06/16 13:17:05 damien Exp $	*/
-/*	$NetBSD: ieee80211_rssadapt.c,v 1.7 2004/05/25 04:33:59 dyoung Exp $	*/
-
+/* $NetBSD: ieee80211_rssadapt.c,v 1.16 2008/11/12 12:36:28 ad Exp $ */
 /*-
  * Copyright (c) 2003, 2004 David Young.  All rights reserved.
  *
@@ -31,28 +29,31 @@
  * OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_rssadapt.c,v 1.16 2008/11/12 12:36:28 ad Exp $");
+#endif
+
 #include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/kernel.h>		/* for hz */
 #include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
+#include <net/if_ether.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
-
+#include <net80211/ieee80211_netbsd.h>
 #include <net80211/ieee80211_var.h>
+#include <net80211/ieee80211.h>
 #include <net80211/ieee80211_rssadapt.h>
 
 #ifdef interpolate
 #undef interpolate
 #endif
-#define interpolate(parm, old, new)				\
-	((parm##_old * (old) +					\
-	(parm##_denom - parm##_old) * (new)) / parm##_denom)
+#define interpolate(parm, old, new) ((parm##_old * (old) + \
+                                     (parm##_denom - parm##_old) * (new)) / \
+				    parm##_denom)
 
 #ifdef IEEE80211_DEBUG
 static	struct timeval lastrateadapt;	/* time of last rate adaptation msg */
@@ -74,18 +75,131 @@ int ieee80211_rssadapt_debug = 0;
 #endif
 
 static struct ieee80211_rssadapt_expavgctl master_expavgctl = {
-	rc_decay_denom : 16,
-	rc_decay_old : 15,
-	rc_thresh_denom : 8,
-	rc_thresh_old : 4,
-	rc_avgrssi_denom : 8,
-	rc_avgrssi_old : 4
+	.rc_decay_denom = 16,
+	.rc_decay_old = 15,
+	.rc_thresh_denom = 8,
+	.rc_thresh_old = 4,
+	.rc_avgrssi_denom = 8,
+	.rc_avgrssi_old = 4
 };
+
+#ifdef __NetBSD__
+#ifdef IEEE80211_DEBUG
+/* TBD factor with sysctl_ath_verify, sysctl_ieee80211_verify. */
+static int
+sysctl_ieee80211_rssadapt_debug(SYSCTLFN_ARGS)
+{
+	int error, t;
+	struct sysctlnode node;
+
+	node = *rnode;
+	t = *(int*)rnode->sysctl_data;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return (error);
+
+	if (t < 0 || t > 2)
+		return (EINVAL);
+	*(int*)rnode->sysctl_data = t;
+
+	return (0);
+}
+#endif /* IEEE80211_DEBUG */
+
+/* TBD factor with sysctl_ath_verify, sysctl_ieee80211_verify. */
+static int
+sysctl_ieee80211_rssadapt_expavgctl(SYSCTLFN_ARGS)
+{
+	struct ieee80211_rssadapt_expavgctl rc;
+	int error;
+	struct sysctlnode node;
+
+	node = *rnode;
+	rc = *(struct ieee80211_rssadapt_expavgctl *)rnode->sysctl_data;
+	node.sysctl_data = &rc;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return (error);
+
+	if (/* rc.rc_decay_old < 0 || */
+	    rc.rc_decay_denom < rc.rc_decay_old)
+		return (EINVAL);
+
+	if (/* rc.rc_thresh_old < 0 || */
+	    rc.rc_thresh_denom < rc.rc_thresh_old)
+		return (EINVAL);
+
+	if (/* rc.rc_avgrssi_old < 0 || */
+	    rc.rc_avgrssi_denom < rc.rc_avgrssi_old)
+		return (EINVAL);
+
+	*(struct ieee80211_rssadapt_expavgctl *)rnode->sysctl_data = rc;
+
+	return (0);
+}
+
+/*
+ * Setup sysctl(3) MIB, net.ieee80211.*
+ *
+ * TBD condition CTLFLAG_PERMANENT on being a module or not
+ */
+SYSCTL_SETUP(sysctl_ieee80211_rssadapt,
+    "sysctl ieee80211 rssadapt subtree setup")
+{
+	int rc;
+	const struct sysctlnode *node;
+
+	if ((rc = sysctl_createv(clog, 0, NULL, &node,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "net", NULL,
+	    NULL, 0, NULL, 0, CTL_NET, CTL_EOL)) != 0)
+		goto err;
+
+	if ((rc = sysctl_createv(clog, 0, &node, &node,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "link", NULL,
+	    NULL, 0, NULL, 0, PF_LINK, CTL_EOL)) != 0)
+		goto err;
+
+	if ((rc = sysctl_createv(clog, 0, &node, &node,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "ieee80211", NULL,
+	    NULL, 0, NULL, 0, CTL_CREATE, CTL_EOL)) != 0)
+		goto err;
+
+	if ((rc = sysctl_createv(clog, 0, &node, &node,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "rssadapt",
+	    SYSCTL_DESCR("Received Signal Strength adaptation controls"),
+	    NULL, 0, NULL, 0, CTL_CREATE, CTL_EOL)) != 0)
+		goto err;
+
+#ifdef IEEE80211_DEBUG
+	/* control debugging printfs */
+	if ((rc = sysctl_createv(clog, 0, &node, NULL,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
+	    SYSCTL_DESCR("Enable RSS adaptation debugging output"),
+	    sysctl_ieee80211_rssadapt_debug, 0, &ieee80211_rssadapt_debug, 0,
+	    CTL_CREATE, CTL_EOL)) != 0)
+		goto err;
+#endif /* IEEE80211_DEBUG */
+
+	/* control rate of decay for exponential averages */
+	if ((rc = sysctl_createv(clog, 0, &node, NULL,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_STRUCT,
+	    "expavgctl", SYSCTL_DESCR("RSS exponential averaging control"),
+	    sysctl_ieee80211_rssadapt_expavgctl, 0,
+	    &master_expavgctl, sizeof(master_expavgctl), CTL_CREATE,
+	    CTL_EOL)) != 0)
+		goto err;
+
+	return;
+err:
+	printf("%s: sysctl_createv failed (rc = %d)\n", __func__, rc);
+}
+#endif /* __NetBSD__ */
 
 int
 ieee80211_rssadapt_choose(struct ieee80211_rssadapt *ra,
-    const struct ieee80211_rateset *rs, const struct ieee80211_frame *wh,
-    u_int len, int fixed_rate, const char *dvname, int do_not_adapt)
+    struct ieee80211_rateset *rs, struct ieee80211_frame *wh, u_int len,
+    int fixed_rate, const char *dvname, int do_not_adapt)
 {
 	u_int16_t (*thrs)[IEEE80211_RATE_SIZE];
 	int flags = 0, i, rateidx = 0, thridx, top;
@@ -127,7 +241,7 @@ out:
 #ifdef IEEE80211_DEBUG
 	if (ieee80211_rssadapt_debug && dvname != NULL) {
 		printf("%s: dst %s threshold[%d, %d.%d] %d < %d\n",
-		    dvname, ether_sprintf((u_int8_t *)wh->i_addr1), len,
+		    dvname, ether_sprintf(wh->i_addr1), len,
 		    (rs->rs_rates[rateidx] & IEEE80211_RATE_VAL) / 2,
 		    (rs->rs_rates[rateidx] & IEEE80211_RATE_VAL) * 5 % 10,
 		    (*thrs)[rateidx], ra->ra_avg_rssi);
@@ -139,7 +253,7 @@ out:
 void
 ieee80211_rssadapt_updatestats(struct ieee80211_rssadapt *ra)
 {
-	long interval;
+	long interval; 
 
 	ra->ra_pktrate =
 	    (ra->ra_pktrate + 10 * (ra->ra_nfail + ra->ra_nok)) / 2;
@@ -154,18 +268,18 @@ ieee80211_rssadapt_updatestats(struct ieee80211_rssadapt *ra)
 }
 
 void
-ieee80211_rssadapt_input(struct ieee80211com *ic,
-    const struct ieee80211_node *ni, struct ieee80211_rssadapt *ra, int rssi)
+ieee80211_rssadapt_input(struct ieee80211com *ic, struct ieee80211_node *ni,
+    struct ieee80211_rssadapt *ra, int rssi)
 {
 #ifdef IEEE80211_DEBUG
 	int last_avg_rssi = ra->ra_avg_rssi;
 #endif
 
 	ra->ra_avg_rssi = interpolate(master_expavgctl.rc_avgrssi,
-	    ra->ra_avg_rssi, (rssi << 8));
+	                              ra->ra_avg_rssi, (rssi << 8));
 
 	RSSADAPT_PRINTF(("%s: src %s rssi %d avg %d -> %d\n",
-	    ic->ic_if.if_xname, ether_sprintf((u_int8_t *)ni->ni_macaddr),
+	    ic->ic_ifp->if_xname, ether_sprintf(ni->ni_macaddr),
 	    rssi, last_avg_rssi, ra->ra_avg_rssi));
 }
 
@@ -177,10 +291,10 @@ ieee80211_rssadapt_input(struct ieee80211com *ic,
  */
 void
 ieee80211_rssadapt_lower_rate(struct ieee80211com *ic,
-    const struct ieee80211_node *ni, struct ieee80211_rssadapt *ra,
-    const struct ieee80211_rssdesc *id)
+    struct ieee80211_node *ni, struct ieee80211_rssadapt *ra,
+    struct ieee80211_rssdesc *id)
 {
-	const struct ieee80211_rateset *rs = &ni->ni_rates;
+	struct ieee80211_rateset *rs = &ni->ni_rates;
 	u_int16_t last_thr;
 	u_int i, thridx, top;
 
@@ -189,8 +303,8 @@ ieee80211_rssadapt_lower_rate(struct ieee80211com *ic,
 	if (id->id_rateidx >= rs->rs_nrates) {
 		RSSADAPT_PRINTF(("ieee80211_rssadapt_lower_rate: "
 		    "%s rate #%d > #%d out of bounds\n",
-		    ether_sprintf((u_int8_t *)ni->ni_macaddr), id->id_rateidx,
-		    rs->rs_nrates - 1));
+		    ether_sprintf(ni->ni_macaddr), id->id_rateidx,
+		        rs->rs_nrates - 1));
 		return;
 	}
 
@@ -205,10 +319,10 @@ ieee80211_rssadapt_lower_rate(struct ieee80211com *ic,
 	last_thr = ra->ra_rate_thresh[thridx][id->id_rateidx];
 	ra->ra_rate_thresh[thridx][id->id_rateidx] =
 	    interpolate(master_expavgctl.rc_thresh, last_thr,
-	    (id->id_rssi << 8));
+	                (id->id_rssi << 8));
 
 	RSSADAPT_PRINTF(("%s: dst %s rssi %d threshold[%d, %d.%d] %d -> %d\n",
-	    ic->ic_if.if_xname, ether_sprintf((u_int8_t *)ni->ni_macaddr),
+	    ic->ic_ifp->if_xname, ether_sprintf(ni->ni_macaddr),
 	    id->id_rssi, id->id_len,
 	    (rs->rs_rates[id->id_rateidx] & IEEE80211_RATE_VAL) / 2,
 	    (rs->rs_rates[id->id_rateidx] & IEEE80211_RATE_VAL) * 5 % 10,
@@ -217,11 +331,11 @@ ieee80211_rssadapt_lower_rate(struct ieee80211com *ic,
 
 void
 ieee80211_rssadapt_raise_rate(struct ieee80211com *ic,
-    struct ieee80211_rssadapt *ra, const struct ieee80211_rssdesc *id)
+    struct ieee80211_rssadapt *ra, struct ieee80211_rssdesc *id)
 {
 	u_int16_t (*thrs)[IEEE80211_RATE_SIZE], newthr, oldthr;
-	const struct ieee80211_node *ni = id->id_node;
-	const struct ieee80211_rateset *rs = &ni->ni_rates;
+	struct ieee80211_node *ni = id->id_node;
+	struct ieee80211_rateset *rs = &ni->ni_rates;
 	int i, rate, top;
 #ifdef IEEE80211_DEBUG
 	int j;
@@ -245,7 +359,7 @@ ieee80211_rssadapt_raise_rate(struct ieee80211com *ic,
 		rate = (rs->rs_rates[id->id_rateidx + 1] & IEEE80211_RATE_VAL);
 
 		RSSADAPT_PRINTF(("%s: threshold[%d, %d.%d] decay %d ",
-		    ic->ic_if.if_xname,
+		    ic->ic_ifp->if_xname,
 		    IEEE80211_RSSADAPT_BKT0 << (IEEE80211_RSSADAPT_BKTPOWER* i),
 		    rate / 2, rate * 5 % 10, (*thrs)[id->id_rateidx + 1]));
 		oldthr = (*thrs)[id->id_rateidx + 1];
@@ -261,11 +375,10 @@ ieee80211_rssadapt_raise_rate(struct ieee80211com *ic,
 
 #ifdef IEEE80211_DEBUG
 	if (RSSADAPT_DO_PRINT()) {
-		printf("%s: dst %s thresholds\n", ic->ic_if.if_xname,
-		    ether_sprintf((u_int8_t *)ni->ni_macaddr));
+		printf("%s: dst %s thresholds\n", ic->ic_ifp->if_xname,
+		    ether_sprintf(ni->ni_macaddr));
 		for (i = 0; i < IEEE80211_RSSADAPT_BKTS; i++) {
-			printf("%d-byte", IEEE80211_RSSADAPT_BKT0 <<
-			    (IEEE80211_RSSADAPT_BKTPOWER * i));
+			printf("%d-byte", IEEE80211_RSSADAPT_BKT0 << (IEEE80211_RSSADAPT_BKTPOWER * i));
 			for (j = 0; j < rs->rs_nrates; j++) {
 				rate = (rs->rs_rates[j] & IEEE80211_RATE_VAL);
 				printf(", T[%d.%d] = %d", rate / 2,

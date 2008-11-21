@@ -1,5 +1,4 @@
-/*	$OpenBSD: sunos_exec.h,v 1.2 2003/06/02 15:54:31 deraadt Exp $	*/
-/*	$NetBSD: exec.h,v 1.4 1994/10/25 23:03:22 deraadt Exp $	*/
+/*	$NetBSD: sunos_exec.h,v 1.11 2008/11/19 18:36:05 ad Exp $	*/
 
 /*
  * Copyright (c) 1993 Theo de Raadt
@@ -13,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -35,13 +36,22 @@ struct sunos_exec {
 	u_char	a_machtype;	/* machine type */
 	u_short	a_magic;	/* magic number */
 };
+#define SUNOS_M_68010	1	/* runs on 68010 and 68020 */
 #define SUNOS_M_68020	2	/* runs only on 68020 */
 #define	SUNOS_M_SPARC	3	/* runs only on SPARC */
 
 #ifdef __sparc__
-#define SUNOS_M_NATIVE	SUNOS_M_SPARC
+#define SUNOS_M_NATIVE(m)	((m) == SUNOS_M_SPARC)
+#elif defined(__mc68010__)
+#define SUNOS_M_NATIVE(m)	((m) == SUNOS_M_68010)
 #else
-#define SUNOS_M_NATIVE	SUNOS_M_68020
+#define SUNOS_M_NATIVE(m)	((m) == SUNOS_M_68010 || (m) == SUNOS_M_68020)
 #endif
+
+#define SUNOS_AOUT_HDR_SIZE (sizeof(struct exec))
+
+extern struct emul emul_sunos;
+
+int exec_sunos_aout_makecmds(struct lwp *, struct exec_package *);
 
 #endif /* !_SUNOS_EXEC_H_ */

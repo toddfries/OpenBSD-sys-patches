@@ -1,4 +1,4 @@
-/*	$NetBSD: spr.h,v 1.40 2006/08/05 21:26:49 sanjayl Exp $	*/
+/*	$NetBSD: spr.h,v 1.44 2008/02/23 19:54:54 matt Exp $	*/
 
 #ifndef _POWERPC_SPR_H_
 #define	_POWERPC_SPR_H_
@@ -44,6 +44,7 @@
 #define	SPR_SDR1		0x019	/* .68 Page table base address register */
 #define	SPR_SRR0		0x01a	/* 468 Save/Restore Register 0 */
 #define	SPR_SRR1		0x01b	/* 468 Save/Restore Register 1 */
+#define	SPR_44XPID		0x030	/* 4.. 440 Process ID */
 #define SPR_EIE			0x050	/* ..8 Exception Interrupt ??? */
 #define SPR_EID			0x051	/* ..8 Exception Interrupt ??? */
 #define SPR_NRI			0x052	/* ..8 Exception Interrupt ??? */
@@ -81,13 +82,39 @@
 #define	  IBM401E2		  0x0025
 #define	  IBM401F2		  0x0026
 #define	  IBM401G2		  0x0027
-#define	  IBMPOWER3		  0x0041
+#define   IBMRS64II		  0x0033
+#define   IBMRS64IIIp		  0x0034
+#define   IBMPOWER4		  0x0035
+#define   IBMRS64IIIi		  0x0036
+#define   IBMRS64IV		  0x0037
+#define   IBMPOWER4II		  0x0038
+#define   IBM970		  0x0039
+#define   IBMPOWER5GR		  0x003a
+#define   IBMPOWER5GS		  0x003b
+#define   IBM970FX		  0x003c
+#define   IBMPOWER6		  0x003e
+#define   IBMPOWER3		  0x0040
+#define	  IBMPOWER3II		  0x0041
+#define   IBM970MP		  0x0044
+#define   IBM970GX		  0x0045
 #define	  MPC860		  0x0050
+#define   IBMCELL		  0x0070
 #define	  MPC8240		  0x0081
+#define   PA6T			  0x0090
+#define   IBMPOWER6P5		  0x0f00
+#define   XILVIRTEX		  0x2001
 #define	  IBM405GP		  0x4011
-#define	  IBM405GPR		  0x5091
+#define   IBMSTB03		  0x4013
+#define   IBMSTB04		  0x4081
+#define   IBM405GS3		  0x40b1
+#define   IBM405H		  0x4141
 #define	  IBM405L		  0x4161
+#define   IBM405LP		  0x41f1
+#define	  IBM405GPR		  0x5091
+#define   IBM405EP		  0x5121
+#define   IBMSTB25		  0x5151
 #define	  IBM750FX		  0x7000
+#define   IBM750GX		  0x7002
 #define	  MPC7450		  0x8000
 #define	  MPC7455		  0x8001
 #define   MPC7457		  0x8002
@@ -96,9 +123,13 @@
 #define MPC745X_P(v)		  ((v & 0xFFF8) == 0x8000)
 #define	  MPC7410		  0x800c
 #define	  MPC5200		  0x8011
+#define   MPCe500		  0x8020
+#define   MPCe500v2		  0x8021
 #define	  MPC8245		  0x8081
-#define	  IBM970		  0x0039
-#define   IBM970FX		  0x003c
+#define   MPCG2			  0x8082
+#define   MPCe300c1		  0x8083
+#define   MPCe300c2		  0x8084
+#define   MPCe300c3		  0x8085
 
 #define	SPR_IBAT0U		0x210	/* .68 Instruction BAT Reg 0 Upper */
 #define	SPR_IBAT0L		0x211	/* .6. Instruction BAT Reg 0 Lower */
@@ -226,6 +257,14 @@
 #define	SPR_PID			0x3b1	/* 4.. Process ID */
 #define	SPR_PMC5		0x3b1	/* .6. Performance Counter Register 5 */
 #define	SPR_PMC6		0x3b2	/* .6. Performance Counter Register 6 */
+#define	SPR_MMUCR		0x3b2	/* 4.. MMU Control Register */
+#define	  MMUCR_SW0A		  0x01000000 /* Store WithOut Allocate */
+#define	  MMUCR_U1TE		  0x00400000 /* U1 Transient Enable */
+#define	  MMUCR_U2SWOAE		  0x00200000 /* U2 SWOA Enab */
+#define	  MMUCR_DULXE		  0x00080000 /* Data Cache Unlock Exc. Ena. */
+#define	  MMUCR_IULXE		  0x00040000 /* Inst. Cache Unlock Exc. Ena. */
+#define	  MMUCR_STS		  0x00010000 /* Search Translation Space [TS] */
+#define	  MMUCR_STID		  0x000000ff /* Search Translation ID */
 #define	SPR_CCR0		0x3b3	/* 4.. Core Configuration Register 0 */
 #define	SPR_IAC3		0x3b4	/* 4.. Instruction Address Compare 3 */
 #define	SPR_IAC4		0x3b5	/* 4.. Instruction Address Compare 4 */

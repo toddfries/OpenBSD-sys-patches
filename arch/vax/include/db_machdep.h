@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.12 2008/03/30 18:24:02 miod Exp $	*/
-/*	$NetBSD: db_machdep.h,v 1.6 1998/08/10 14:33:33 ragge Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.16 2008/08/29 18:25:01 matt Exp $	*/
 
 /* 
  * Mach Operating System
@@ -40,19 +39,19 @@
 #include <machine/trap.h>
 #include <machine/psl.h>
 
-typedef	vaddr_t	db_addr_t;		/* address - unsigned */
+typedef	vaddr_t		db_addr_t;	/* address - unsigned */
 typedef	long		db_expr_t;	/* expression - signed */
 
 typedef struct trapframe db_regs_t;
-extern db_regs_t	ddb_regs;	/* register state */
+extern	db_regs_t	ddb_regs;	/* register state */
 #define	DDB_REGS	(&ddb_regs)
 
-#define	PC_REGS(regs)	((db_addr_t)(regs)->pc)
-#define	SET_PC_REGS(regs, value)	(regs)->pc = (long)(value)
+#define	PC_REGS(regs)	(*(db_addr_t *)&(regs)->pc)
 
+#define	BKPT_ADDR(addr)	(addr)		/* breakpoint address */
 #define	BKPT_INST	0x03		/* breakpoint instruction */
 #define	BKPT_SIZE	(1)		/* size of breakpoint inst */
-#define	BKPT_SET(inst)	(BKPT_INST)
+#define	BKPT_SET(inst, addr)	(BKPT_INST)
 
 #define	FIXUP_PC_AFTER_BREAK(regs)	((regs)->pc -= BKPT_SIZE)
 
@@ -73,12 +72,15 @@ extern db_regs_t	ddb_regs;	/* register state */
 #define inst_load(ins)		0
 #define inst_store(ins)		0
 
+#define DB_MACHINE_COMMANDS
+
 /* Prototypes */
 void	kdb_trap(struct trapframe *);
 
 /*
- * We use a.out symbols in DDB.
+ * We use a.out symbols in DDB (unless we are ELF then we use ELF symbols).
  */
-#define	DB_AOUT_SYMBOLS
+#define	DB_ELF_SYMBOLS
+#define	DB_ELFSIZE		32
 
 #endif	/* _VAX_DB_MACHDEP_H_ */

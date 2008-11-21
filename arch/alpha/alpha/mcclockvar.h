@@ -1,5 +1,4 @@
-/*	$OpenBSD: mcclockvar.h,v 1.4 2002/03/14 01:26:26 millert Exp $	*/
-/*	$NetBSD: mcclockvar.h,v 1.2 1996/04/17 22:22:38 cgd Exp $	*/
+/* $NetBSD: mcclockvar.h,v 1.5 2007/07/21 11:59:56 tsutsui Exp $ */
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -28,15 +27,4 @@
  * rights to redistribute these changes.
  */
 
-struct mcclock_softc {
-	struct device sc_dev;
-	const struct mcclock_busfns *sc_busfns;
-};
-
-struct mcclock_busfns {
-	void    (*mc_bf_write)(struct mcclock_softc *, u_int, u_int);
-	u_int   (*mc_bf_read)(struct mcclock_softc *, u_int);
-};
-
-void	mcclock_attach(struct mcclock_softc *,
-	    const struct mcclock_busfns *);
+void mcclock_attach(struct mc146818_softc *);

@@ -1,5 +1,30 @@
-/*	$OpenBSD: specdev.h,v 1.25 2008/05/03 14:41:29 thib Exp $	*/
-/*	$NetBSD: specdev.h,v 1.12 1996/02/13 13:13:01 mycroft Exp $	*/
+/*	$NetBSD: specdev.h,v 1.36 2008/04/28 20:24:08 martin Exp $	*/
+
+/*-
+ * Copyright (c) 2008 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  * Copyright (c) 1990, 1993
@@ -29,42 +54,39 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)specdev.h	8.3 (Berkeley) 8/10/94
+ *	@(#)specdev.h	8.6 (Berkeley) 5/21/95
  */
 
-/*
- * This structure defines the information maintained about
- * special devices. It is allocated in checkalias and freed
- * in vgone.
- */
-struct specinfo {
-	struct	vnode **si_hashchain;
-	struct	vnode *si_specnext;
-	struct  mount *si_mountpoint;
-	dev_t	si_rdev;
-	struct	lockf *si_lockf;
-	daddr64_t si_lastr;
-	union {
-		struct vnode *ci_parent; /* pointer back to parent device */
-		u_int8_t ci_bitmap[8]; /* bitmap of devices cloned off us */
-	} si_ci;
-};
+#ifndef _MISCFS_SPECFS_SPECDEV_H_
+#define _MISCFS_SPECFS_SPECDEV_H_
 
-struct cloneinfo {
-	struct vnode *ci_vp; /* cloned vnode */
-	void *ci_data; /* original vnode's v_data */
-};
+#include <sys/mutex.h>
+#include <sys/vnode.h>
+
+typedef struct specnode {
+	vnode_t		*sn_next;
+	struct specdev	*sn_dev;
+	u_int		sn_opencnt;
+	dev_t		sn_rdev;
+	bool		sn_gone;
+} specnode_t;
+
+typedef struct specdev {
+	struct mount	*sd_mountpoint;
+	struct lockf	*sd_lockf;
+	vnode_t		*sd_bdevvp;
+	u_int		sd_opencnt;
+	u_int		sd_refcnt;
+	dev_t		sd_rdev;
+} specdev_t;
 
 /*
  * Exported shorthand
  */
-#define v_rdev v_specinfo->si_rdev
-#define v_hashchain v_specinfo->si_hashchain
-#define v_specnext v_specinfo->si_specnext
-#define v_specmountpoint v_specinfo->si_mountpoint
-#define v_speclockf v_specinfo->si_lockf
-#define v_specparent v_specinfo->si_ci.ci_parent
-#define v_specbitmap v_specinfo->si_ci.ci_bitmap
+#define v_specnext	v_specnode->sn_next
+#define v_rdev		v_specnode->sn_rdev
+#define v_speclockf	v_specnode->sn_dev->sd_lockf
+#define v_specmountpoint v_specnode->sn_dev->sd_mountpoint
 
 /*
  * Special device management
@@ -76,7 +98,12 @@ struct cloneinfo {
 #define	SPECHASH(rdev)	(((unsigned)((rdev>>5)+(rdev)))%SPECHSZ)
 #endif
 
-extern struct vnode *speclisth[SPECHSZ];
+extern vnode_t	*specfs_hash[SPECHSZ];
+extern kmutex_t	specfs_lock;
+
+void	spec_node_init(vnode_t *, dev_t);
+void	spec_node_destroy(vnode_t *);
+void	spec_node_revoke(vnode_t *);
 
 /*
  * Prototypes for special file operations on vnodes.
@@ -84,31 +111,49 @@ extern struct vnode *speclisth[SPECHSZ];
 extern	int (**spec_vnodeop_p)(void *);
 struct	nameidata;
 struct	componentname;
-struct	ucred;
 struct	flock;
 struct	buf;
 struct	uio;
 
-int	spec_badop(void *);
-int	spec_getattr(void *);
-int	spec_setattr(void *);
-int	spec_access(void *);
+int	spec_lookup(void *);
+#define	spec_create	genfs_badop
+#define	spec_mknod	genfs_badop
 int	spec_open(void *);
 int	spec_close(void *);
+#define	spec_access	genfs_ebadf
+#define	spec_getattr	genfs_ebadf
+#define	spec_setattr	genfs_ebadf
 int	spec_read(void *);
 int	spec_write(void *);
+#define spec_fcntl	genfs_fcntl
 int	spec_ioctl(void *);
 int	spec_poll(void *);
 int	spec_kqfilter(void *);
+#define spec_revoke	genfs_revoke
+int	spec_mmap(void *);
 int	spec_fsync(void *);
+#define	spec_seek	genfs_nullop		/* XXX should query device */
+#define	spec_remove	genfs_badop
+#define	spec_link	genfs_badop
+#define	spec_rename	genfs_badop
+#define	spec_mkdir	genfs_badop
+#define	spec_rmdir	genfs_badop
+#define	spec_symlink	genfs_badop
+#define	spec_readdir	genfs_badop
+#define	spec_readlink	genfs_badop
+#define	spec_abortop	genfs_badop
+#define	spec_reclaim	genfs_nullop
 int	spec_inactive(void *);
+#define	spec_lock	genfs_nolock
+#define	spec_unlock	genfs_nounlock
+int	spec_bmap(void *);
 int	spec_strategy(void *);
 int	spec_print(void *);
+#define	spec_islocked	genfs_noislocked
 int	spec_pathconf(void *);
 int	spec_advlock(void *);
+#define	spec_bwrite	vn_bwrite
+#define	spec_getpages	genfs_getpages
+#define	spec_putpages	genfs_putpages
 
-int	spec_vnoperate(void *);
-
-/* spec_subr.c */
-int	spec_open_clone(struct vop_open_args *);
-int	spec_close_clone(struct vop_close_args *);
+#endif /* _MISCFS_SPECFS_SPECDEV_H_ */

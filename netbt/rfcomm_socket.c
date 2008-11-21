@@ -1,5 +1,4 @@
-/*	$OpenBSD: rfcomm_socket.c,v 1.3 2008/05/27 19:41:14 thib Exp $	*/
-/*	$NetBSD: rfcomm_socket.c,v 1.8 2007/10/15 18:04:34 plunky Exp $	*/
+/*	$NetBSD: rfcomm_socket.c,v 1.10 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,6 +31,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_socket.c,v 1.10 2008/08/06 15:01:24 plunky Exp $");
+
 /* load symbolic names */
 #ifdef BLUETOOTH_DEBUG
 #define PRUREQUESTS
@@ -49,7 +51,6 @@
 #include <sys/systm.h>
 
 #include <netbt/bluetooth.h>
-#include <netbt/hci.h>		/* XXX for EPASSTHROUGH */
 #include <netbt/rfcomm.h>
 
 /****************************************************************************
@@ -101,30 +102,31 @@ int rfcomm_recvspace = 4096;
  */
 int
 rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
-    struct mbuf *nam, struct mbuf *ctl, struct proc *p)
+		struct mbuf *nam, struct mbuf *ctl, struct lwp *l)
 {
 	struct rfcomm_dlc *pcb = up->so_pcb;
 	struct sockaddr_bt *sa;
 	struct mbuf *m0;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "%s\n", prurequests[req]);
-#endif
 
 	switch (req) {
 	case PRU_CONTROL:
 		return EPASSTHROUGH;
 
-#ifdef notyet			/* XXX */
 	case PRU_PURGEIF:
 		return EOPNOTSUPP;
-#endif
 
 	case PRU_ATTACH:
+		if (up->so_lock == NULL) {
+			mutex_obj_hold(bt_lock);
+			up->so_lock = bt_lock;
+			solock(up);
+		}
+		KASSERT(solocked(up));
 		if (pcb != NULL)
 			return EINVAL;
-
 		/*
 		 * Since we have nothing to add, we attach the DLC
 		 * structure directly to our PCB pointer.
@@ -211,7 +213,7 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		if (ctl)	/* no use for that */
 			m_freem(ctl);
 
-		m0 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+		m0 = m_copypacket(m, M_DONTWAIT);
 		if (m0 == NULL)
 			return ENOMEM;
 
@@ -259,44 +261,30 @@ release:
 }
 
 /*
- * rfcomm_ctloutput(request, socket, level, optname, opt)
+ * rfcomm_ctloutput(req, socket, sockopt)
  *
  */
 int
-rfcomm_ctloutput(int req, struct socket *so, int level,
-		int optname, struct mbuf **opt)
+rfcomm_ctloutput(int req, struct socket *so, struct sockopt *sopt)
 {
 	struct rfcomm_dlc *pcb = so->so_pcb;
-	struct mbuf *m;
 	int err = 0;
 
-#ifdef notyet			/* XXX */
 	DPRINTFN(2, "%s\n", prcorequests[req]);
-#endif
 
 	if (pcb == NULL)
 		return EINVAL;
 
-	if (level != BTPROTO_RFCOMM)
+	if (sopt->sopt_level != BTPROTO_RFCOMM)
 		return ENOPROTOOPT;
 
 	switch(req) {
 	case PRCO_GETOPT:
-		m = m_get(M_WAIT, MT_SOOPTS);
-		m->m_len = rfcomm_getopt(pcb, optname, mtod(m, void *));
-		if (m->m_len == 0) {
-			m_freem(m);
-			m = NULL;
-			err = ENOPROTOOPT;
-		}
-		*opt = m;
+		err = rfcomm_getopt(pcb, sopt);
 		break;
 
 	case PRCO_SETOPT:
-		m = *opt;
-		KASSERT(m != NULL);
-		err = rfcomm_setopt(pcb, optname, mtod(m, void *));
-		m_freem(m);
+		err = rfcomm_setopt(pcb, sopt);
 		break;
 
 	default:
@@ -382,6 +370,7 @@ static void
 rfcomm_linkmode(void *arg, int new)
 {
 	struct socket *so = arg;
+	struct sockopt sopt;
 	int mode;
 
 	DPRINTF("auth %s, encrypt %s, secure %s\n",
@@ -389,7 +378,11 @@ rfcomm_linkmode(void *arg, int new)
 		(new & RFCOMM_LM_ENCRYPT ? "on" : "off"),
 		(new & RFCOMM_LM_SECURE ? "on" : "off"));
 
-	(void)rfcomm_getopt(so->so_pcb, SO_RFCOMM_LM, &mode);
+	sockopt_init(&sopt, BTPROTO_RFCOMM, SO_RFCOMM_LM, 0);
+	(void)rfcomm_getopt(so->so_pcb, &sopt);
+	(void)sockopt_getint(&sopt, &mode);
+	sockopt_destroy(&sopt);
+
 	if (((mode & RFCOMM_LM_AUTH) && !(new & RFCOMM_LM_AUTH))
 	    || ((mode & RFCOMM_LM_ENCRYPT) && !(new & RFCOMM_LM_ENCRYPT))
 	    || ((mode & RFCOMM_LM_SECURE) && !(new & RFCOMM_LM_SECURE)))

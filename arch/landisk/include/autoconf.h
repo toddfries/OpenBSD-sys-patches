@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.1.1.1 2006/10/06 21:16:15 miod Exp $	*/
-/*	$NetBSD: autoconf.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
+/*	$NetBSD: autoconf.h,v 1.2 2008/04/28 20:23:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -13,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,6 +25,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef	_LANDISK_AUTOCONF_H_
+#define	_LANDISK_AUTOCONF_H_
 
 struct mainbus_attach_args {
 	const char	*ma_name;
@@ -50,3 +45,5 @@ struct confargs {
 
 	u_long		ca_baseaddr;
 };
+
+#endif	/* _LANDISK_AUTOCONF_H_ */

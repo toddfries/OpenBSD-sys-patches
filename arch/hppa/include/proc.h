@@ -1,4 +1,6 @@
-/*	$OpenBSD: proc.h,v 1.3 2005/05/26 04:34:52 kettenis Exp $	*/
+/*	$NetBSD: proc.h,v 1.6 2008/01/10 21:08:41 skrll Exp $	*/
+
+/*	$OpenBSD: proc.h,v 1.1 1998/07/07 21:32:44 mickey Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -31,16 +33,23 @@
  *	@(#)proc.h      7.1 (Berkeley) 5/15/91
  */
 
+#ifndef _HPPA_PROC_H_
+#define _HPPA_PROC_H_
+
 /*
- * Machine-dependent part of the proc structure for hppa.
+ * Machine-dependent part of the lwp structure for hppa.
  */
-struct mdproc {
+struct mdlwp {
 	struct	trapframe *md_regs;	/* registers on current frame */
 	int	md_flags;		/* machine-dependent flags */
 
 	vaddr_t md_bpva;
-	u_int	md_bpsave[2];
+	unsigned int md_bpsave[2];
+};
+
+struct mdproc {
 };
 
 /* md_flags */
 
+#endif /* _HPPA_PROC_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.28 2007/04/22 10:05:51 miod Exp $	*/
-/*	$NetBSD: vmparam.h,v 1.32 2000/03/07 00:05:59 matt Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.44 2008/03/11 05:34:02 matt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -44,13 +43,18 @@
  */
 
 /*
- * USRTEXT is the start of the user text/data space, while USRSTACK
- * is the top (end) of the user stack. Immediately above the user stack
- * resides kernel.
- *
+ * We use 4K VM pages on the VAX.  Override the PAGE_* definitions
+ * to be compile-time constants.
+ */
+#define	PAGE_SHIFT	12
+#define	PAGE_SIZE	(1 << PAGE_SHIFT)
+#define	PAGE_MASK	(PAGE_SIZE - 1)
+
+/*
+ * USRSTACK is the top (end) of the user stack. Immediately above the
+ * user stack resides kernel.
  */
 
-#define USRTEXT		NBPG
 #define USRSTACK	KERNBASE
 
 /*
@@ -60,34 +64,30 @@
 #ifndef MAXTSIZ
 #define MAXTSIZ		(8*1024*1024)		/* max text size */
 #endif
-#ifndef MAXDSIZ
-#define MAXDSIZ		(32*1024*1024)		/* max data size */
-#endif
-#ifndef MAXSSIZ
-#define MAXSSIZ		(8*1024*1024)		/* max stack size */
-#endif
 #ifndef DFLDSIZ
-#define DFLDSIZ		(4*1024*1024)		/* initial data size limit */
+#define DFLDSIZ		(128*1024*1024)		/* initial data size limit */
+#endif
+#ifndef MAXDSIZ
+#define MAXDSIZ		(1024*1024*1024)	/* max data size */
 #endif
 #ifndef DFLSSIZ
 #define DFLSSIZ		(512*1024)		/* initial stack size limit */
 #endif
-
-#define STACKGAP_RANDOM	32*1024
-
-#define BRKSIZ		(8*1024*1024)
+#ifndef MAXSSIZ
+#define MAXSSIZ		(8*1024*1024)		/* max stack size */
+#endif
 
 /* 
  * Size of shared memory map
  */
 
 #ifndef SHMMAXPGS
-#define SHMMAXPGS	64		/* XXXX should be 1024 */
+#define SHMMAXPGS	1024
 #endif
 
 #define VM_PHYSSEG_MAX		1
 #define VM_PHYSSEG_NOADD
-#define VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
+#define VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH /* XXX */
 
 #define	VM_NFREELIST		1
 #define	VM_FREELIST_DEFAULT	0
@@ -96,6 +96,10 @@
 #define	vax_round_page(x) (((vaddr_t)(x) + VAX_PGOFSET) & ~VAX_PGOFSET)
 #define	vax_trunc_page(x) ((vaddr_t)(x) & ~VAX_PGOFSET)
 
+/*
+ * Mach derived constants
+ */
+
 /* user/kernel map constants */
 #define VM_MIN_ADDRESS		((vaddr_t)0)
 #define VM_MAXUSER_ADDRESS	((vaddr_t)KERNBASE)
@@ -103,24 +107,25 @@
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)KERNBASE)
 #define VM_MAX_KERNEL_ADDRESS	((vaddr_t)(0xC0000000))
 
+/*
+ * The address to which unspecified mapping requests default
+ */
+#define __USE_TOPDOWN_VM
+#define VM_DEFAULT_ADDRESS(da, sz) \
+	trunc_page(VM_MAXUSER_ADDRESS - MAXSSIZ - (sz))
+
 #define	USRIOSIZE		(8 * VAX_NPTEPG)	/* 512MB */
 #define	VM_PHYS_SIZE		(USRIOSIZE*VAX_NBPG)
 
-/*
- * This should be in <machine/pmap.h>, but needs to be in this file
- * due to include ordering issues.
- */
+#if 0
 #define	__HAVE_VM_PAGE_MD
 
 struct vm_page_md {
-	struct pv_entry *pv_head;
-	int		 pv_attr;	/* write/modified bits */
+	unsigned int md_attrs;
 };
 
-#define	VM_MDPAGE_INIT(pg) \
-	do { \
-		(pg)->mdpage.pv_head = NULL; \
-		(pg)->mdpage.pv_attr = 0; \
-	} while (0)
+#define	VM_MDPAGE_INIT(pg)	((pg)->mdpage.md_attrs = 0)
+#endif
+
 
 #endif

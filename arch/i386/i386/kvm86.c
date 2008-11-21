@@ -1,5 +1,5 @@
-/* $OpenBSD: kvm86.c,v 1.3 2007/02/20 21:15:01 tom Exp $ */
-/* $NetBSD: kvm86.c,v 1.10 2005/12/26 19:23:59 perry Exp $ */
+/* $NetBSD: kvm86.c,v 1.15 2008/04/27 11:37:48 ad Exp $ */
+
 /*
  * Copyright (c) 2002
  * 	Matthias Drochner.  All rights reserved.
@@ -25,7 +25,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kvm86.c,v 1.15 2008/04/27 11:37:48 ad Exp $");
+
+#include "opt_multiprocessor.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -33,33 +37,32 @@
 #include <sys/user.h>
 #include <sys/malloc.h>
 #include <sys/mutex.h>
-#include <sys/simplelock.h>
-#include <uvm/uvm_extern.h>
+
 #include <uvm/uvm.h>
-#include <machine/pcb.h>
+
+#include <machine/tss.h>
+#include <machine/gdt.h>
 #include <machine/pte.h>
 #include <machine/pmap.h>
 #include <machine/kvm86.h>
-#include <machine/cpu.h>
 
 /* assembler functions in kvm86call.s */
 extern int kvm86_call(struct trapframe *);
 extern void kvm86_ret(struct trapframe *, int);
 
-#define PGTABLE_SIZE	((1024 + 64) * 1024 / PAGE_SIZE)
-
 struct kvm86_data {
-	pt_entry_t pgtbl[PGTABLE_SIZE];
+#define PGTABLE_SIZE	((1024 + 64) * 1024 / PAGE_SIZE)
+	pt_entry_t pgtbl[PGTABLE_SIZE]; /* must be aliged */
 
 	struct segment_descriptor sd;
 
-	struct pcb pcb;
-	u_long iomap[0x10000/32];
+	struct i386tss tss;
+	u_long iomap[0x10000/32]; /* full size io permission map */
 };
 
-void kvm86_map(struct kvm86_data *, paddr_t, uint32_t);
-void kvm86_mapbios(struct kvm86_data *);
-void kvm86_prepare(struct kvm86_data *vmd);
+static void kvm86_map(struct kvm86_data *, paddr_t, uint32_t);
+static void kvm86_mapbios(struct kvm86_data *);
+
 /*
  * global VM for BIOS calls
  */
@@ -71,7 +74,9 @@ void *bioscallscratchpage;
 /* a virtual page to map in vm86 memory temporarily */
 vaddr_t bioscalltmpva;
 
-struct mutex kvm86_mp_mutex;
+int kvm86_tss_sel;
+
+kmutex_t kvm86_mp_lock;
 
 #define KVM86_IOPL3 /* not strictly necessary, saves a lot of traps */
 
@@ -81,82 +86,80 @@ kvm86_init()
 	size_t vmdsize;
 	char *buf;
 	struct kvm86_data *vmd;
-	struct pcb *pcb;
-	paddr_t pa;
+	struct i386tss *tss;
 	int i;
+	int slot;
 
 	vmdsize = round_page(sizeof(struct kvm86_data)) + PAGE_SIZE;
 
-	if ((buf = (char *)uvm_km_zalloc(kernel_map, vmdsize)) == NULL)
+	buf = malloc(vmdsize, M_DEVBUF, M_NOWAIT);
+	if ((u_long)buf & (PAGE_SIZE - 1)) {
+		printf("struct kvm86_data unaligned\n");
 		return;
-	
+	}
+	memset(buf, 0, vmdsize);
 	/* first page is stack */
 	vmd = (struct kvm86_data *)(buf + PAGE_SIZE);
-	pcb = &vmd->pcb;
+	tss = &vmd->tss;
 
 	/*
-	 * derive pcb and TSS from proc0
 	 * we want to access all IO ports, so we need a full-size
 	 *  permission bitmap
-	 * XXX do we really need the pcb or just the TSS?
 	 */
-	memcpy(pcb, &proc0.p_addr->u_pcb, sizeof(struct pcb));
-	pcb->pcb_tss.tss_esp0 = (int)vmd;
-	pcb->pcb_tss.tss_ss0 = GSEL(GDATA_SEL, SEL_KPL);
+	memcpy(tss, &curcpu()->ci_tss, sizeof(*tss));
+	tss->tss_esp0 = (int)vmd;
+	tss->tss_ss0 = GSEL(GDATA_SEL, SEL_KPL);
 	for (i = 0; i < sizeof(vmd->iomap) / 4; i++)
 		vmd->iomap[i] = 0;
-	pcb->pcb_tss.tss_ioopt =
-	    ((caddr_t)vmd->iomap - (caddr_t)&pcb->pcb_tss) << 16;
+	tss->tss_iobase = ((char *)vmd->iomap - (char *)tss) << 16;
 
+	slot = gdt_get_slot();
+	kvm86_tss_sel = GSEL(slot, SEL_KPL);
 	/* setup TSS descriptor (including our iomap) */
-	setsegment(&vmd->sd, &pcb->pcb_tss,
-	    sizeof(struct pcb) + sizeof(vmd->iomap) - 1,
+	setgdt(slot, tss, sizeof(*tss) + sizeof(vmd->iomap) - 1,
 	    SDT_SYS386TSS, SEL_KPL, 0, 0);
 
 	/* prepare VM for BIOS calls */
 	kvm86_mapbios(vmd);
-	if ((bioscallscratchpage = (void *)uvm_km_alloc(kernel_map, PAGE_SIZE))
-	    == 0)
-		return;
-
-	pmap_extract(pmap_kernel(), (vaddr_t)bioscallscratchpage, &pa);
-	kvm86_map(vmd, pa, BIOSCALLSCRATCHPAGE_VMVA);
+	bioscallscratchpage = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
+	kvm86_map(vmd, vtophys((vaddr_t)bioscallscratchpage),
+		  BIOSCALLSCRATCHPAGE_VMVA);
 	bioscallvmd = vmd;
-	bioscalltmpva = uvm_km_alloc(kernel_map, PAGE_SIZE);
-	mtx_init(&kvm86_mp_mutex, IPL_IPI);
+	bioscalltmpva = uvm_km_alloc(kernel_map, PAGE_SIZE, 0, UVM_KMF_VAONLY);
+	mutex_init(&kvm86_mp_lock, MUTEX_DEFAULT, IPL_NONE);
 }
 
 /*
  * XXX pass some stuff to the assembler code
  * XXX this should be done cleanly (in call argument to kvm86_call())
  */
-
-volatile struct pcb *vm86pcb;
-volatile int vm86tssd0, vm86tssd1;
-volatile paddr_t vm86newptd;
-volatile struct trapframe *vm86frame;
-volatile pt_entry_t *vm86pgtableva;
-
-void
-kvm86_prepare(struct kvm86_data *vmd)
+static void kvm86_prepare(struct kvm86_data *);
+static void
+kvm86_prepare(vmd)
+	struct kvm86_data *vmd;
 {
+	extern paddr_t vm86newptd;
+	extern struct trapframe *vm86frame;
+	extern pt_entry_t *vm86pgtableva;
+
 	vm86newptd = vtophys((vaddr_t)vmd) | PG_V | PG_RW | PG_U | PG_u;
 	vm86pgtableva = vmd->pgtbl;
 	vm86frame = (struct trapframe *)vmd - 1;
-	vm86pcb = &vmd->pcb;
-	vm86tssd0 = *(int*)&vmd->sd;
-	vm86tssd1 = *((int*)&vmd->sd + 1);
 }
 
-void
-kvm86_map(struct kvm86_data *vmd, paddr_t pa, uint32_t vmva)
+static void
+kvm86_map(vmd, pa, vmva)
+	struct kvm86_data *vmd;
+	paddr_t pa;
+	uint32_t vmva;
 {
 
 	vmd->pgtbl[vmva >> 12] = pa | PG_V | PG_RW | PG_U | PG_u;
 }
 
-void
-kvm86_mapbios(struct kvm86_data *vmd)
+static void
+kvm86_mapbios(vmd)
+	struct kvm86_data *vmd;
 {
 	paddr_t pa;
 
@@ -169,33 +172,39 @@ kvm86_mapbios(struct kvm86_data *vmd)
 }
 
 void *
-kvm86_bios_addpage(uint32_t vmva)
+kvm86_bios_addpage(vmva)
+	uint32_t vmva;
 {
 	void *mem;
-	paddr_t pa;
 
 	if (bioscallvmd->pgtbl[vmva >> 12]) /* allocated? */
-		return (NULL);
+		return (0);
 
-	if ((mem = (void *)uvm_km_alloc(kernel_map, PAGE_SIZE)) == NULL)
-		return (NULL);
-	
-	pmap_extract(pmap_kernel(), (vaddr_t)mem, &pa);	
-	kvm86_map(bioscallvmd, pa, vmva);
+	mem = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
+	if ((u_long)mem & (PAGE_SIZE - 1)) {
+		printf("kvm86_bios_addpage: unaligned");
+		return (0);
+	}
+	kvm86_map(bioscallvmd, vtophys((vaddr_t)mem), vmva);
 
 	return (mem);
 }
 
 void
-kvm86_bios_delpage(uint32_t vmva, void *kva)
+kvm86_bios_delpage(vmva, kva)
+	uint32_t vmva;
+	void *kva;
 {
 
 	bioscallvmd->pgtbl[vmva >> 12] = 0;
-	uvm_km_free(kernel_map, (vaddr_t)kva, PAGE_SIZE);
+	free(kva, M_DEVBUF);
 }
 
 size_t
-kvm86_bios_read(u_int32_t vmva, char *buf, size_t len)
+kvm86_bios_read(vmva, buf, len)
+	uint32_t vmva;
+	char *buf;
+	size_t len;
 {
 	size_t todo, now;
 	paddr_t vmpa;
@@ -220,7 +229,9 @@ kvm86_bios_read(u_int32_t vmva, char *buf, size_t len)
 }
 
 int
-kvm86_bioscall(int intno, struct trapframe *tf)
+kvm86_bioscall(intno, tf)
+	int intno;
+	struct trapframe *tf;
 {
 	static const unsigned char call[] = {
 		0xfa, /* CLI */
@@ -229,7 +240,9 @@ kvm86_bioscall(int intno, struct trapframe *tf)
 		0xfb, /* STI */
 		0xf4  /* HLT */
 	};
+	int ret;
 
+	mutex_enter(&kvm86_mp_lock);
 	memcpy(bioscallscratchpage, call, sizeof(call));
 	*((unsigned char *)bioscallscratchpage + 2) = intno;
 
@@ -244,42 +257,47 @@ kvm86_bioscall(int intno, struct trapframe *tf)
 	tf->tf_ds = tf->tf_es = tf->tf_fs = tf->tf_gs = 0;
 
 	kvm86_prepare(bioscallvmd); /* XXX */
-	return (kvm86_call(tf));
+	kpreempt_disable();
+	ret = kvm86_call(tf);
+	kpreempt_enable();
+	mutex_exit(&kvm86_mp_lock);
+	return ret;
 }
 
 int
-kvm86_simplecall(int no, struct kvm86regs *regs)
+kvm86_bioscall_simple(intno, r)
+	int intno;
+	struct bioscallregs *r;
 {
 	struct trapframe tf;
 	int res;
-	
-	memset(&tf, 0, sizeof(struct trapframe));
-	tf.tf_eax = regs->eax;
-	tf.tf_ebx = regs->ebx;
-	tf.tf_ecx = regs->ecx;
-	tf.tf_edx = regs->edx;
-	tf.tf_esi = regs->esi;
-	tf.tf_edi = regs->edi;
-	tf.tf_vm86_es = regs->es;
-	
-	mtx_enter(&kvm86_mp_mutex);	
-	res = kvm86_bioscall(no, &tf);
-	mtx_leave(&kvm86_mp_mutex);
 
-	regs->eax = tf.tf_eax;
-	regs->ebx = tf.tf_ebx;
-	regs->ecx = tf.tf_ecx;
-	regs->edx = tf.tf_edx;
-	regs->esi = tf.tf_esi;
-	regs->edi = tf.tf_edi;
-	regs->es = tf.tf_vm86_es;
-	regs->eflags = tf.tf_eflags;
-	
+	memset(&tf, 0, sizeof(struct trapframe));
+	tf.tf_eax = r->EAX;
+	tf.tf_ebx = r->EBX;
+	tf.tf_ecx = r->ECX;
+	tf.tf_edx = r->EDX;
+	tf.tf_esi = r->ESI;
+	tf.tf_edi = r->EDI;
+	tf.tf_vm86_es = r->ES;
+
+	res = kvm86_bioscall(intno, &tf);
+
+	r->EAX = tf.tf_eax;
+	r->EBX = tf.tf_ebx;
+	r->ECX = tf.tf_ecx;
+	r->EDX = tf.tf_edx;
+	r->ESI = tf.tf_esi;
+	r->EDI = tf.tf_edi;
+	r->ES = tf.tf_vm86_es;
+	r->EFLAGS = tf.tf_eflags;
+
 	return (res);
 }
 
 void
-kvm86_gpfault(struct trapframe *tf)
+kvm86_gpfault(tf)
+	struct trapframe *tf;
 {
 	unsigned char *kva, insn, trapno;
 	uint16_t *sp;

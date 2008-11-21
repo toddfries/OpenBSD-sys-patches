@@ -1,8 +1,8 @@
-/*	$NetBSD: powernow_k7.c,v 1.21 2006/12/07 22:50:12 xtraeme Exp $ */
+/*	$NetBSD: powernow_k7.c,v 1.32 2008/11/12 12:36:02 ad Exp $ */
 /*	$OpenBSD: powernow-k7.c,v 1.24 2006/06/16 05:58:50 gwk Exp $ */
 
 /*-
- * Copyright (c) 2004 The NetBSD Foundation, Inc.
+ * Copyright (c) 2004, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,7 +59,7 @@
 /* AMD POWERNOW K7 driver */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: powernow_k7.c,v 1.21 2006/12/07 22:50:12 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: powernow_k7.c,v 1.32 2008/11/12 12:36:02 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -83,7 +76,7 @@ __KERNEL_RCSID(0, "$NetBSD: powernow_k7.c,v 1.21 2006/12/07 22:50:12 xtraeme Exp
 #include <x86/include/isa_machdep.h>
 #include <x86/include/powernow.h>
 
-#ifdef _LKM
+#ifdef _MODULE
 static struct sysctllog	*sysctllog;
 #define SYSCTLLOG	&sysctllog
 #else
@@ -122,30 +115,31 @@ static char *freq_names;
 static size_t freq_names_len;
 static uint8_t k7pnow_flag;
 
-static boolean_t pnow_cpu_check(uint32_t, uint32_t);
-int k7_powernow_setperf(unsigned int);
-int k7pnow_sysctl_helper(SYSCTLFN_PROTO);
-int k7pnow_decode_pst(struct powernow_cpu_state *, uint8_t *, int);
-int k7pnow_states(struct powernow_cpu_state *, uint32_t, unsigned int, unsigned int);
+static bool pnow_cpu_check(uint32_t, uint32_t);
+static int k7_powernow_setperf(unsigned int);
+static int k7pnow_sysctl_helper(SYSCTLFN_PROTO);
+static int k7pnow_decode_pst(struct powernow_cpu_state *, uint8_t *, int);
+static int k7pnow_states(struct powernow_cpu_state *, uint32_t,
+			 unsigned int, unsigned int);
 
-static boolean_t
+static bool
 pnow_cpu_check(uint32_t real_cpusig, uint32_t pst_cpusig)
 {
 	int j;
 
 	if (real_cpusig == pst_cpusig)
-		return TRUE;
+		return true;
 
 	for (j = 0; pnow_cpu_quirk[j].rcpusig != 0; j++) {
 		if ((real_cpusig == pnow_cpu_quirk[j].rcpusig) &&
 		    (pst_cpusig == pnow_cpu_quirk[j].pcpusig))
-			return TRUE;
+			return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
-int
+static int
 k7pnow_sysctl_helper(SYSCTLFN_ARGS)
 {
 	struct sysctlnode node;
@@ -177,7 +171,7 @@ k7pnow_sysctl_helper(SYSCTLFN_ARGS)
 	return 0;
 }
 
-int
+static int
 k7_powernow_setperf(unsigned int freq)
 {
 	unsigned int i;
@@ -218,7 +212,7 @@ k7_powernow_setperf(unsigned int freq)
 	ctl |= PN7_CTR_SGTC(cstate->sgtc);
 
 	if (k7pnow_flag & PN7_FLAG_ERRATA_A0)
-		disable_intr();
+		x86_disable_intr();
 
 	if (k7pnow_fid_to_mult[fid] < k7pnow_fid_to_mult[cfid]) {
 		wrmsr(MSR_AMDK7_FIDVID_CTL, ctl | PN7_CTR_FIDC);
@@ -231,7 +225,7 @@ k7_powernow_setperf(unsigned int freq)
 	}
 
 	if (k7pnow_flag & PN7_FLAG_ERRATA_A0)
-		enable_intr();
+		x86_enable_intr();
 
 	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 	cfid = PN7_STA_CFID(status);
@@ -246,7 +240,7 @@ k7_powernow_setperf(unsigned int freq)
  * Given a set of pair of fid/vid, and number of performance states,
  * compute state_table via an insertion sort.
  */
-int
+static int
 k7pnow_decode_pst(struct powernow_cpu_state *cstate, uint8_t *p, int npst)
 {
 	int i, j, n;
@@ -279,7 +273,7 @@ k7pnow_decode_pst(struct powernow_cpu_state *cstate, uint8_t *p, int npst)
 	return 1;
 }
 
-int
+static int
 k7pnow_states(struct powernow_cpu_state *cstate, uint32_t cpusig,
     unsigned int fid, unsigned int vid)
 {
@@ -287,7 +281,7 @@ k7pnow_states(struct powernow_cpu_state *cstate, uint32_t cpusig,
 	struct powernow_psb_s *psb;
 	struct powernow_pst_s *pst;
 	uint8_t *p;
-	boolean_t cpusig_ok;
+	bool cpusig_ok;
 
 	j = 0;
 	/*
@@ -352,7 +346,7 @@ k7_powernow_init(void)
 	const struct sysctlnode *freqnode, *node, *pnownode;
 	struct powernow_cpu_state *cstate;
 	struct cpu_info *ci;
-	char *cpuname;
+	const char *cpuname;
 	const char *techname;
 	size_t len;
 	int i;
@@ -360,7 +354,9 @@ k7_powernow_init(void)
 	ci = curcpu();
 
 	freq_names_len = 0;
-	cpuname = ci->ci_dev->dv_xname;
+	cpuname = device_xname(ci->ci_dev);
+
+	k7pnow_current_state = NULL;
 
 	cstate = malloc(sizeof(struct powernow_cpu_state), M_DEVBUF, M_NOWAIT);
 	if (!cstate) {
@@ -377,7 +373,7 @@ k7_powernow_init(void)
 	startvid = PN7_STA_SVID(status);
 	currentfid = PN7_STA_CFID(status);
 
-	cpu_mhz = ci->ci_tsc_freq / 1000000;
+	cpu_mhz = ci->ci_data.cpu_cc_freq / 1000000;
 	cstate->fsb = cpu_mhz / (k7pnow_fid_to_mult[currentfid]/10);
 	if (k7pnow_states(cstate, ci->ci_signature, maxfid, startvid)) {
 		freq_names_len = cstate->n_states * (sizeof("9999 ")-1) + 1;
@@ -470,7 +466,7 @@ k7_powernow_init(void)
 
 	cur_freq = cstate->state_table[cstate->n_states-1].freq;
 
-	aprint_normal("%s: AMD %s Technology %d (MHz)\n",
+	aprint_normal("%s: AMD %s Technology %d MHz\n",
 	    cpuname, techname, cur_freq);
 	aprint_normal("%s: frequencies available (Mhz): %s\n",
 	    cpuname, freq_names);
@@ -485,10 +481,12 @@ k7_powernow_init(void)
 void
 k7_powernow_destroy(void)
 {
-#ifdef _LKM
+#ifdef _MODULE
 	sysctl_teardown(SYSCTLLOG);
 
 	if (freq_names)
 		free(freq_names, M_SYSCTLDATA);	
+	if (k7pnow_current_state)
+		free(k7pnow_current_state, M_DEVBUF);
 #endif
 }

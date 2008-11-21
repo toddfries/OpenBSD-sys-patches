@@ -1,4 +1,4 @@
-/*	$NetBSD: mpacpi.c,v 1.44 2006/11/16 01:32:39 christos Exp $	*/
+/*	$NetBSD: mpacpi.c,v 1.71 2008/11/09 15:34:14 cegger Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -36,12 +36,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mpacpi.c,v 1.44 2006/11/16 01:32:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mpacpi.c,v 1.71 2008/11/09 15:34:14 cegger Exp $");
 
 #include "acpi.h"
 #include "opt_acpi.h"
 #include "opt_mpbios.h"
 #include "opt_multiprocessor.h"
+#include "pchb.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,6 +79,10 @@ __KERNEL_RCSID(0, "$NetBSD: mpacpi.c,v 1.44 2006/11/16 01:32:39 christos Exp $")
 #include "ioapic.h"
 #include "lapic.h"
 
+#include "locators.h"
+
+#define ACPI_STA_OK (ACPI_STA_DEV_PRESENT|ACPI_STA_DEV_ENABLED|ACPI_STA_DEV_OK)
+
 /* XXX room for PCI-to-PCI bus */
 #define BUS_BUFFER (16)
 
@@ -93,15 +98,14 @@ static TAILQ_HEAD(, mpacpi_pcibus) mpacpi_pcibusses;
 
 #endif
 
-static int mpacpi_print(void *, const char *);
-static int mpacpi_submatch(struct device *, struct cfdata *,
-	const int *, void *);
+static int mpacpi_cpuprint(void *, const char *);
+static int mpacpi_ioapicprint(void *, const char *);
 
 /* acpi_madt_walk callbacks */
-static ACPI_STATUS mpacpi_count(APIC_HEADER *, void *);
-static ACPI_STATUS mpacpi_config_cpu(APIC_HEADER *, void *);
-static ACPI_STATUS mpacpi_config_ioapic(APIC_HEADER *, void *);
-static ACPI_STATUS mpacpi_nonpci_intr(APIC_HEADER *, void *);
+static ACPI_STATUS mpacpi_count(ACPI_SUBTABLE_HEADER *, void *);
+static ACPI_STATUS mpacpi_config_cpu(ACPI_SUBTABLE_HEADER *, void *);
+static ACPI_STATUS mpacpi_config_ioapic(ACPI_SUBTABLE_HEADER *, void *);
+static ACPI_STATUS mpacpi_nonpci_intr(ACPI_SUBTABLE_HEADER *, void *);
 
 #if NPCI > 0
 /* Callbacks for the ACPI namespace walk */
@@ -132,6 +136,8 @@ static int mpacpi_maxpci;
 static int mpacpi_npciroots;
 #endif
 
+struct mp_intr_map *mpacpi_sci_override;
+
 static int mpacpi_intr_index;
 static paddr_t mpacpi_lapic_base = LAPIC_BASE;
 
@@ -139,23 +145,25 @@ int mpacpi_step;
 int mpacpi_force;
 
 static int
-mpacpi_print(void *aux, const char *pnp)
+mpacpi_cpuprint(void *aux, const char *pnp)
 {
-	struct cpu_attach_args * caa = (struct cpu_attach_args *) aux;
+	struct cpu_attach_args *caa = aux;
+
 	if (pnp)
-		printf("%s at %s:",caa->caa_name, pnp);
+		aprint_normal("cpu at %s", pnp);
+	aprint_normal(" apid %d", caa->cpu_number);
 	return (UNCONF);
 }
 
 static int
-mpacpi_submatch(struct device *parent, struct cfdata *cf,
-	const int *ldesc, void *aux)
+mpacpi_ioapicprint(void *aux, const char *pnp)
 {
-	struct cpu_attach_args * caa = (struct cpu_attach_args *) aux;
-	if (strcmp(caa->caa_name, cf->cf_name))
-		return 0;
+	struct apic_attach_args *aaa = aux;
 
-	return (config_match(parent, cf, aux));
+	if (pnp)
+		aprint_normal("ioapic at %s", pnp);
+	aprint_normal(" apid %d", aaa->apic_id);
+	return (UNCONF);
 }
 
 /*
@@ -163,20 +171,20 @@ mpacpi_submatch(struct device *parent, struct cfdata *cf,
  * This is a callback function for acpi_madt_walk().
  */
 static ACPI_STATUS
-mpacpi_nonpci_intr(APIC_HEADER *hdrp, void *aux)
+mpacpi_nonpci_intr(ACPI_SUBTABLE_HEADER *hdrp, void *aux)
 {
 	int *index = aux, pin, lindex;
 	struct mp_intr_map *mpi;
-	MADT_NMI_SOURCE *ioapic_nmi;
-	MADT_LOCAL_APIC_NMI *lapic_nmi;
-	MADT_INTERRUPT_OVERRIDE *isa_ovr;
+	ACPI_MADT_NMI_SOURCE *ioapic_nmi;
+	ACPI_MADT_LOCAL_APIC_NMI *lapic_nmi;
+	ACPI_MADT_INTERRUPT_OVERRIDE *isa_ovr;
 	struct pic *pic;
 	extern struct acpi_softc *acpi_softc;	/* XXX */
 
 	switch (hdrp->Type) {
-	case APIC_NMI:
-		ioapic_nmi = (MADT_NMI_SOURCE *)hdrp;
-		pic = intr_findpic(ioapic_nmi->Interrupt);
+	case ACPI_MADT_TYPE_NMI_SOURCE:
+		ioapic_nmi = (ACPI_MADT_NMI_SOURCE *)hdrp;
+		pic = intr_findpic(ioapic_nmi->GlobalIrq);
 		if (pic == NULL)
 			break;
 #if NIOAPIC == 0
@@ -189,25 +197,24 @@ mpacpi_nonpci_intr(APIC_HEADER *hdrp, void *aux)
 		mpi->bus = NULL;
 		mpi->type = MPS_INTTYPE_NMI;
 		mpi->ioapic = pic;
-		pin = ioapic_nmi->Interrupt - pic->pic_vecbase;
+		pin = ioapic_nmi->GlobalIrq - pic->pic_vecbase;
 		mpi->ioapic_pin = pin;
 		mpi->bus_pin = -1;
 		mpi->redir = (IOAPIC_REDLO_DEL_NMI<<IOAPIC_REDLO_DEL_SHIFT);
 #if NIOAPIC > 0
 		if (pic->pic_type == PIC_IOAPIC) {
-			((struct ioapic_softc *)pic)->sc_pins[pin].ip_map = mpi;
+			pic->pic_ioapic->sc_pins[pin].ip_map = mpi;
 			mpi->ioapic_ih = APIC_INT_VIA_APIC |
 			    (pic->pic_apicid << APIC_INT_APIC_SHIFT) |
 			    (pin << APIC_INT_PIN_SHIFT);
 		} else
 #endif
 			mpi->ioapic_ih = pin;
-		mpi->flags = ioapic_nmi->Polarity |
-		    (ioapic_nmi->TriggerMode << 2);
-		mpi->global_int = ioapic_nmi->Interrupt;
+		mpi->flags = ioapic_nmi->IntiFlags;
+		mpi->global_int = ioapic_nmi->GlobalIrq;
 		break;
-	case APIC_LOCAL_NMI:
-		lapic_nmi = (MADT_LOCAL_APIC_NMI *)hdrp;
+	case ACPI_MADT_TYPE_LOCAL_APIC_NMI:
+		lapic_nmi = (ACPI_MADT_LOCAL_APIC_NMI *)hdrp;
 		mpi = &mp_intrs[*index];
 		(*index)++;
 		mpi->next = NULL;
@@ -219,24 +226,27 @@ mpacpi_nonpci_intr(APIC_HEADER *hdrp, void *aux)
 		mpi->redir = (IOAPIC_REDLO_DEL_NMI<<IOAPIC_REDLO_DEL_SHIFT);
 		mpi->global_int = -1;
 		break;
-	case APIC_XRUPT_OVERRIDE:
-		isa_ovr = (MADT_INTERRUPT_OVERRIDE *)hdrp;
-		if (mp_verbose)
-			printf("mpacpi: ISA interrupt override  %d -> %d\n",
-			    isa_ovr->Source, isa_ovr->Interrupt);
-		if (isa_ovr->Source > 15 || isa_ovr->Source == 2 ||
-		    (isa_ovr->Source == 0 && isa_ovr->Interrupt == 2 &&
+	case ACPI_MADT_TYPE_INTERRUPT_OVERRIDE:
+		isa_ovr = (ACPI_MADT_INTERRUPT_OVERRIDE *)hdrp;
+		if (mp_verbose) {
+			printf("mpacpi: ISA interrupt override %d -> %d (%d/%d)\n",
+			    isa_ovr->SourceIrq, isa_ovr->GlobalIrq,
+			    isa_ovr->IntiFlags & ACPI_MADT_POLARITY_MASK,
+			    (isa_ovr->IntiFlags & ACPI_MADT_TRIGGER_MASK) >> 2);
+		}
+		if (isa_ovr->SourceIrq > 15 || isa_ovr->SourceIrq == 2 ||
+		    (isa_ovr->SourceIrq == 0 && isa_ovr->GlobalIrq == 2 &&
 			(acpi_softc->sc_quirks & ACPI_QUIRK_IRQ0)))
 			break;
-		pic = intr_findpic(isa_ovr->Interrupt);
+		pic = intr_findpic(isa_ovr->GlobalIrq);
 		if (pic == NULL)
 			break;
 #if NIOAPIC == 0
 		if (pic->pic_type == PIC_IOAPIC)
 			break;
 #endif
-		pin = isa_ovr->Interrupt - pic->pic_vecbase;
-		lindex = isa_ovr->Source;
+		pin = isa_ovr->GlobalIrq - pic->pic_vecbase;
+		lindex = isa_ovr->SourceIrq;
 		/*
 		 * IRQ 2 was skipped in the default setup.
 		 */
@@ -251,36 +261,50 @@ mpacpi_nonpci_intr(APIC_HEADER *hdrp, void *aux)
 		} else
 #endif
 			mpi->ioapic_ih = pin;
-		mpi->bus_pin = isa_ovr->Source;
+		mpi->bus_pin = isa_ovr->SourceIrq;
 		mpi->ioapic = (struct pic *)pic;
 		mpi->ioapic_pin = pin;
 		mpi->sflags |= MPI_OVR;
 		mpi->redir = 0;
-		mpi->global_int = isa_ovr->Interrupt;
-		switch (isa_ovr->Polarity) {
-		case MPS_INTPO_ACTHI:
+		mpi->global_int = isa_ovr->GlobalIrq;
+		switch (isa_ovr->IntiFlags & ACPI_MADT_POLARITY_MASK) {
+		case ACPI_MADT_POLARITY_ACTIVE_HIGH:
 			mpi->redir &= ~IOAPIC_REDLO_ACTLO;
 			break;
-		case MPS_INTPO_DEF:
-		case MPS_INTPO_ACTLO:
+		case ACPI_MADT_POLARITY_ACTIVE_LOW:
 			mpi->redir |= IOAPIC_REDLO_ACTLO;
+			break;
+		case ACPI_MADT_POLARITY_CONFORMS:
+			if (isa_ovr->SourceIrq == AcpiGbl_FADT.SciInterrupt)
+				mpi->redir |= IOAPIC_REDLO_ACTLO;
+			else
+				mpi->redir &= ~IOAPIC_REDLO_ACTLO;
 			break;
 		}
 		mpi->redir |= (IOAPIC_REDLO_DEL_FIXED<<IOAPIC_REDLO_DEL_SHIFT);
-		switch (isa_ovr->TriggerMode) {
-		case MPS_INTTR_DEF:
-		case MPS_INTTR_LEVEL:
+		switch (isa_ovr->IntiFlags & ACPI_MADT_TRIGGER_MASK) {
+		case ACPI_MADT_TRIGGER_LEVEL:
 			mpi->redir |= IOAPIC_REDLO_LEVEL;
 			break;
-		case MPS_INTTR_EDGE:
+		case ACPI_MADT_TRIGGER_EDGE:
 			mpi->redir &= ~IOAPIC_REDLO_LEVEL;
 			break;
+		case ACPI_MADT_TRIGGER_CONFORMS:
+			if (isa_ovr->SourceIrq == AcpiGbl_FADT.SciInterrupt)
+				mpi->redir |= IOAPIC_REDLO_LEVEL;
+			else
+				mpi->redir &= ~IOAPIC_REDLO_LEVEL;
+			break;
 		}
-		mpi->flags = isa_ovr->Polarity | (isa_ovr->TriggerMode << 2);
+		mpi->flags = isa_ovr->IntiFlags;
 #if NIOAPIC > 0
 		if (pic->pic_type == PIC_IOAPIC)
-			((struct ioapic_softc *)pic)->sc_pins[pin].ip_map = mpi;
+			pic->pic_ioapic->sc_pins[pin].ip_map = mpi;
 #endif
+		if (isa_ovr->SourceIrq == AcpiGbl_FADT.SciInterrupt)
+			mpacpi_sci_override = mpi;
+
+		break;
 	default:
 		break;
 	}
@@ -292,23 +316,23 @@ mpacpi_nonpci_intr(APIC_HEADER *hdrp, void *aux)
  * This is a callback function for acpi_madt_walk().
  */
 static ACPI_STATUS
-mpacpi_count(APIC_HEADER *hdrp, void *aux)
+mpacpi_count(ACPI_SUBTABLE_HEADER *hdrp, void *aux)
 {
-	MADT_ADDRESS_OVERRIDE *lop;
+	ACPI_MADT_LOCAL_APIC_OVERRIDE *lop;
 
 	switch (hdrp->Type) {
-	case APIC_PROCESSOR:
+	case ACPI_MADT_TYPE_LOCAL_APIC:
 		mpacpi_ncpu++;
 		break;
-	case APIC_IO:
+	case ACPI_MADT_TYPE_IO_APIC:
 		mpacpi_nioapic++;
 		break;
-	case APIC_NMI:
-	case APIC_LOCAL_NMI:
+	case ACPI_MADT_TYPE_NMI_SOURCE:
+	case ACPI_MADT_TYPE_LOCAL_APIC_NMI:
 		mpacpi_nintsrc++;
 		break;
-	case APIC_ADDRESS_OVERRIDE:
-		lop = (MADT_ADDRESS_OVERRIDE *)hdrp;
+	case ACPI_MADT_TYPE_LOCAL_APIC_OVERRIDE:
+		lop = (ACPI_MADT_LOCAL_APIC_OVERRIDE *)hdrp;
 		mpacpi_lapic_base = lop->Address;;
 	default:
 		break;
@@ -317,58 +341,60 @@ mpacpi_count(APIC_HEADER *hdrp, void *aux)
 }
 
 static ACPI_STATUS
-mpacpi_config_cpu(APIC_HEADER *hdrp, void *aux)
+mpacpi_config_cpu(ACPI_SUBTABLE_HEADER *hdrp, void *aux)
 {
-	struct device *parent = aux;
-	MADT_PROCESSOR_APIC *p;
+	device_t parent = aux;
+	ACPI_MADT_LOCAL_APIC *p;
 	struct cpu_attach_args caa;
 	int cpunum = 0;
+	int locs[CPUBUSCF_NLOCS];
 
 #if defined(MULTIPROCESSOR) || defined(IOAPIC)
 	if (mpacpi_ncpu > 1)
 		cpunum = lapic_cpu_number();
 #endif
 
-	if (hdrp->Type == APIC_PROCESSOR) {
-		p = (MADT_PROCESSOR_APIC *)hdrp;
-		if (p->ProcessorEnabled) {
-			if (p->LocalApicId != cpunum)
+	if (hdrp->Type == ACPI_MADT_TYPE_LOCAL_APIC) {
+		p = (ACPI_MADT_LOCAL_APIC *)hdrp;
+		if (p->LapicFlags & ACPI_MADT_ENABLED) {
+			if (p->Id != cpunum)
 				caa.cpu_role = CPU_ROLE_AP;
 			else
 				caa.cpu_role = CPU_ROLE_BP;
-			caa.caa_name = "cpu";
-			caa.cpu_number = p->LocalApicId;
+			caa.cpu_number = p->Id;
 			caa.cpu_func = &mp_cpu_funcs;
-			config_found_sm_loc(parent, "cpubus", NULL,
-				&caa, mpacpi_print, mpacpi_submatch);
+			locs[CPUBUSCF_APID] = caa.cpu_number;
+			config_found_sm_loc(parent, "cpubus", locs,
+				&caa, mpacpi_cpuprint, config_stdsubmatch);
 		}
 	}
 	return AE_OK;
 }
 
 static ACPI_STATUS
-mpacpi_config_ioapic(APIC_HEADER *hdrp, void *aux)
+mpacpi_config_ioapic(ACPI_SUBTABLE_HEADER *hdrp, void *aux)
 {
-	struct device *parent = aux;
+	device_t parent = aux;
 	struct apic_attach_args aaa;
-	MADT_IO_APIC *p;
+	ACPI_MADT_IO_APIC *p;
+	int locs[IOAPICBUSCF_NLOCS];
 
-	if (hdrp->Type == APIC_IO) {
-		p = (MADT_IO_APIC *)hdrp;
-		aaa.aaa_name = "ioapic";
-		aaa.apic_id = p->IoApicId;
+	if (hdrp->Type == ACPI_MADT_TYPE_IO_APIC) {
+		p = (ACPI_MADT_IO_APIC *)hdrp;
+		aaa.apic_id = p->Id;
 		aaa.apic_address = p->Address;
 		aaa.apic_version = -1;
 		aaa.flags = IOAPIC_VWIRE;
-		aaa.apic_vecbase = p->Interrupt;
-		config_found_sm_loc(parent, "cpubus", NULL, &aaa,
-			mpacpi_print, mpacpi_submatch);
+		aaa.apic_vecbase = p->GlobalIrqBase;
+		locs[IOAPICBUSCF_APID] = aaa.apic_id;
+		config_found_sm_loc(parent, "ioapicbus", locs, &aaa,
+			mpacpi_ioapicprint, config_stdsubmatch);
 	}
 	return AE_OK;
 }
 
 int
-mpacpi_scan_apics(struct device *self, int *ncpu, int *napic)
+mpacpi_scan_apics(device_t self, int *ncpup)
 {
 	int rv = 0;
 
@@ -400,8 +426,7 @@ mpacpi_scan_apics(struct device *self, int *ncpu, int *napic)
 #endif
 	rv = 1;
 done:
-	*ncpu = mpacpi_ncpu;
-	*napic = mpacpi_nioapic;
+	*ncpup = mpacpi_ncpu;
 	acpi_madt_unmap();
 	return rv;
 }
@@ -434,8 +459,61 @@ mpacpi_find_pcibusses(struct acpi_softc *acpi)
 
 static const char * const pciroot_hid[] = {
 	"PNP0A03",			/* PCI root bridge */
+	"PNP0A08",			/* PCI-X root bridge */
 	NULL
 };
+
+/*
+ * mpacpi_get_bbn:
+ *
+ * Get or guess the Base Bus Number and sanity check it.
+ */
+static ACPI_STATUS
+mpacpi_get_bbn(struct acpi_softc *acpi, ACPI_HANDLE handle, int *bus)
+{
+	ACPI_STATUS rv;
+	ACPI_INTEGER val;
+	pcireg_t class, dvid;
+	pcitag_t tag;
+
+	rv = acpi_eval_integer(handle, METHOD_NAME__BBN, &val);
+	if (ACPI_SUCCESS(rv))
+		*bus = ACPI_LOWORD(val);
+	else
+		*bus = 0;
+
+	/* If the _BBN is not 0, assume it is valid. */
+	if (*bus != 0)
+		return AE_OK;
+
+	rv = acpi_eval_integer(handle, METHOD_NAME__ADR, &val);
+	if (ACPI_FAILURE(rv) || val == 0xffffffff)
+		return AE_ERROR;
+
+	/* If the _ADR is also 0, assume the _BBN is valid. */
+	if (val == 0)
+		return AE_OK;
+
+#if NPCHB > 0
+	tag = pci_make_tag(acpi->sc_pc, 0,
+	    ACPI_HIWORD(val), ACPI_LOWORD(val));
+
+	dvid = pci_conf_read(acpi->sc_pc, tag, PCI_ID_REG);
+	if (PCI_VENDOR(dvid) == PCI_VENDOR_INVALID || PCI_VENDOR(dvid) == 0)
+		return AE_ERROR;
+
+	/* Check if this is a host bridge device. */
+	class = pci_conf_read(acpi->sc_pc, tag, PCI_CLASS_REG);
+	if (PCI_CLASS(class) != PCI_CLASS_BRIDGE ||
+	    PCI_SUBCLASS(class) != PCI_SUBCLASS_BRIDGE_HOST)
+		return AE_ERROR;
+
+	*bus = pchb_get_bus_number(acpi->sc_pc, tag);
+	return *bus != -1 ? AE_OK : AE_ERROR;
+#else
+	return AE_ERROR;
+#endif
+}
 
 /*
  * mpacpi_derive_bus:
@@ -470,11 +548,25 @@ mpacpi_derive_bus(ACPI_HANDLE handle, struct acpi_softc *acpi)
 
 	/* first, search parent root bus */
 	for (current = handle;; current = parent) {
-		dev = malloc(sizeof(struct ac_dev), M_TEMP, M_WAITOK|M_ZERO);
-		if (dev == NULL)
+		buf.Pointer = NULL;
+		buf.Length = ACPI_ALLOCATE_BUFFER;
+		rv = AcpiGetObjectInfo(current, &buf);
+		if (ACPI_FAILURE(rv))
 			return -1;
-		dev->handle = current;
-		TAILQ_INSERT_HEAD(&dev_list, dev, list);
+
+		devinfo = buf.Pointer;
+		/* add this device to the list only if it's active */
+		if ((devinfo->Valid & ACPI_VALID_STA) == 0 ||
+		    (devinfo->CurrentStatus & ACPI_STA_OK) == ACPI_STA_OK) {
+			AcpiOsFree(buf.Pointer);
+			dev = malloc(sizeof(struct ac_dev), M_TEMP,
+			    M_WAITOK|M_ZERO);
+			if (dev == NULL)
+				return -1;
+			dev->handle = current;
+			TAILQ_INSERT_HEAD(&dev_list, dev, list);
+		} else
+			AcpiOsFree(buf.Pointer);
 
 		rv = AcpiGetParent(current, &parent);
 		if (ACPI_FAILURE(rv))
@@ -487,13 +579,10 @@ mpacpi_derive_bus(ACPI_HANDLE handle, struct acpi_softc *acpi)
 			return -1;
 
 		devinfo = buf.Pointer;
+
 		if (acpi_match_hid(devinfo, pciroot_hid)) {
-			rv = acpi_eval_integer(parent, METHOD_NAME__BBN, &val);
-			AcpiOsFree(buf.Pointer);
-			if (ACPI_SUCCESS(rv))
-				bus = ACPI_LOWORD(val);
-			else
-				/* assume bus = 0 */
+			rv = mpacpi_get_bbn(acpi, parent, &bus);
+			if (ACPI_FAILURE(rv))
 				bus = 0;
 			break;
 		}
@@ -507,7 +596,7 @@ mpacpi_derive_bus(ACPI_HANDLE handle, struct acpi_softc *acpi)
 	 */
 	TAILQ_FOREACH(dev, &dev_list, list) {
 		rv = acpi_eval_integer(dev->handle, METHOD_NAME__ADR, &val);
-		if (ACPI_FAILURE(rv))
+		if (ACPI_FAILURE(rv) || val == 0xffffffff)
 			return -1;
 
 		tag = pci_make_tag(acpi->sc_pc, bus,
@@ -550,7 +639,6 @@ mpacpi_pcibus_cb(ACPI_HANDLE handle, UINT32 level, void *p,
 {
 	ACPI_STATUS rv;
 	ACPI_BUFFER buf;
-	ACPI_INTEGER val;
 	ACPI_DEVICE_INFO *devinfo;
 	struct mpacpi_pcibus *mpr;
 	struct acpi_softc *acpi = p;
@@ -564,8 +652,6 @@ mpacpi_pcibus_cb(ACPI_HANDLE handle, UINT32 level, void *p,
 		return AE_OK;
 
 	devinfo = buf.Pointer;
-
-#define ACPI_STA_OK (ACPI_STA_DEV_PRESENT|ACPI_STA_DEV_ENABLED|ACPI_STA_DEV_OK)
 
 	/* if this device is not active, ignore it */
 	if ((devinfo->Valid & ACPI_VALID_STA) &&
@@ -588,27 +674,14 @@ mpacpi_pcibus_cb(ACPI_HANDLE handle, UINT32 level, void *p,
 	/* check whether this is PCI root bridge or not */
 	if (acpi_match_hid(devinfo, pciroot_hid)) {
 		/* this is PCI root bridge */
-
-		/* get the bus number */
-		rv = acpi_eval_integer(handle, METHOD_NAME__BBN, &val);
-		if (ACPI_SUCCESS(rv)) {
-			mpr->mpr_bus = ACPI_LOWORD(val);
-		} else {
-			/*
-			 * This often happens on systems which have only
-			 * one PCI root bus, assuming 0 will be ok.
-			 *
-			 * If there is a system that have multiple PCI
-			 * root but doesn't describe _BBN for every root,
-			 * the ASL is *broken*.
-			 */
-			if (mpacpi_npciroots != 0)
-				panic("mpacpi: ASL is broken");
-
-			printf("mpacpi: could not get bus number, "
-				    "assuming bus 0\n");
+		rv = mpacpi_get_bbn(acpi, handle, &mpr->mpr_bus);
+		if (ACPI_FAILURE(rv)) {
+			if (mpacpi_npciroots)
+				panic("mpacpi: PCI root bridge with broken _BBN");
+			/* For the first bus we find, assume the BBN is 0. */
 			mpr->mpr_bus = 0;
 		}
+
 		if (mp_verbose)
 			printf("mpacpi: found root PCI bus %d at level %u\n",
 			    mpr->mpr_bus, level);
@@ -652,7 +725,7 @@ mpacpi_pciroute(struct mpacpi_pcibus *mpr)
 	ACPI_PCI_ROUTING_TABLE *ptrp;
         ACPI_HANDLE linkdev;
 	char *p;
-	struct mp_intr_map *mpi;
+	struct mp_intr_map *mpi, *iter;
 	struct mp_bus *mpb;
 	struct pic *pic;
 	unsigned dev;
@@ -676,15 +749,35 @@ mpacpi_pciroute(struct mpacpi_pcibus *mpr)
 			break;
 		dev = ACPI_HIWORD(ptrp->Address);
 
-		mpi = &mp_intrs[mpacpi_intr_index++];
-		mpi->bus_pin = (dev << 2) | ptrp->Pin;
+		if (ptrp->Source[0] == 0 &&
+		    (ptrp->SourceIndex == 14 || ptrp->SourceIndex == 15)) {
+			printf("Skipping PCI routing entry for PCI IDE compat IRQ");
+			continue;
+		}
+
+		mpi = &mp_intrs[mpacpi_intr_index];
+		mpi->bus_pin = (dev << 2) | (ptrp->Pin & 3);
 		mpi->bus = mpb;
 		mpi->type = MPS_INTTYPE_INT;
+
+		/*
+		 * First check if an entry for this device/pin combination
+		 * was already found.  Some DSDTs have more than one entry
+		 * and it seems that the first is generally the right one.
+		 */
+		for (iter = mpb->mb_intrs; iter != NULL; iter = iter->next) {
+			if (iter->bus_pin == mpi->bus_pin)
+				break;
+		}
+		if (iter != NULL)
+			continue;
+
+		++mpacpi_intr_index;
 
 		if (ptrp->Source[0] != 0) {
 			if (mp_verbose > 1)
 				printf("pciroute: dev %d INT%c on lnkdev %s\n",
-				    dev, 'A' + ptrp->Pin, ptrp->Source);
+				    dev, 'A' + (ptrp->Pin & 3), ptrp->Source);
 			mpi->global_int = -1;
 			mpi->sourceindex = ptrp->SourceIndex;
 			if (AcpiGetHandle(ACPI_ROOT_OBJECT, ptrp->Source,
@@ -697,7 +790,7 @@ mpacpi_pciroute(struct mpacpi_pcibus *mpr)
 			mpi->ioapic_pin = -1;
 			mpi->linkdev = acpi_pci_link_devbyhandle(linkdev);
 			acpi_pci_link_add_reference(mpi->linkdev, 0,
-			    mpr->mpr_bus, dev, ptrp->Pin);
+			    mpr->mpr_bus, dev, ptrp->Pin & 3);
 			mpi->ioapic = NULL;
 			mpi->flags = MPS_INTPO_ACTLO | (MPS_INTTR_LEVEL << 2);
 			if (mp_verbose > 1)
@@ -705,7 +798,8 @@ mpacpi_pciroute(struct mpacpi_pcibus *mpr)
 		} else {
 			if (mp_verbose > 1)
 				printf("pciroute: dev %d INT%c on globint %d\n",
-				    dev, 'A' + ptrp->Pin, ptrp->SourceIndex);
+				    dev, 'A' + (ptrp->Pin & 3),
+				    ptrp->SourceIndex);
 			mpi->sourceindex = 0;
 			mpi->global_int = ptrp->SourceIndex;
 			pic = intr_findpic(ptrp->SourceIndex);
@@ -722,7 +816,7 @@ mpacpi_pciroute(struct mpacpi_pcibus *mpr)
 			mpi->ioapic_pin = pin;
 #if NIOAPIC > 0
 			if (pic->pic_type == PIC_IOAPIC) {
-				((struct ioapic_softc *)pic)->sc_pins[pin].ip_map = mpi;
+				pic->pic_ioapic->sc_pins[pin].ip_map = mpi;
 				mpi->ioapic_ih = APIC_INT_VIA_APIC |
 				    (pic->pic_apicid << APIC_INT_APIC_SHIFT) |
 				    (pin << APIC_INT_PIN_SHIFT);
@@ -850,7 +944,7 @@ mpacpi_config_irouting(struct acpi_softc *acpi)
 			    (i << APIC_INT_PIN_SHIFT);
 			mpi->redir =
 			    (IOAPIC_REDLO_DEL_FIXED<<IOAPIC_REDLO_DEL_SHIFT);
-			((struct ioapic_softc *)pic)->sc_pins[i].ip_map = mpi;
+			pic->pic_ioapic->sc_pins[i].ip_map = mpi;
 		} else
 #endif
 			mpi->ioapic_ih = i;
@@ -939,7 +1033,7 @@ mpacpi_print_intr(struct mp_intr_map *mpi)
 		    acpi_pci_link_name(mpi->linkdev), busname);
 	else
 		printf("%s: pin %d attached to %s",
-		    sc ? sc->pic_dev.dv_xname : "local apic",
+		    sc ? sc->pic_name : "local apic",
 		    pin, busname);
 
 	if (mpi->bus != NULL) {
@@ -1013,7 +1107,7 @@ mpacpi_find_interrupts(void *self)
 #if NPCI > 0
 
 int
-mpacpi_pci_attach_hook(struct device *parent, struct device *self,
+mpacpi_pci_attach_hook(device_t parent, device_t self,
 		       struct pcibus_attach_args *pba)
 {
 	struct mp_bus *mpb;
@@ -1056,7 +1150,7 @@ mpacpi_pci_attach_hook(struct device *parent, struct device *self,
 	mpb->mb_pci_chipset_tag = pba->pba_pc;
 
 	if (mp_verbose)
-		printf("%s: added to list as bus %d\n", parent->dv_xname,
+		printf("\n%s: added to list as bus %d", device_xname(parent),
 		    pba->pba_bus);
 
 
@@ -1067,7 +1161,7 @@ mpacpi_pci_attach_hook(struct device *parent, struct device *self,
 }
 
 int
-mpacpi_scan_pci(struct device *self, struct pcibus_attach_args *pba,
+mpacpi_scan_pci(device_t self, struct pcibus_attach_args *pba,
 	        cfprint_t print)
 {
 	int i;
@@ -1101,8 +1195,8 @@ mpacpi_findintr_linkdev(struct mp_intr_map *mip)
 	irq = acpi_pci_link_route_interrupt(mip->linkdev, mip->sourceindex,
 	    &line, &pol, &trig);
 	if (mp_verbose)
-		printf("linkdev %s returned ACPI global int %d\n",
-		    acpi_pci_link_name(mip->linkdev), line);
+		printf("linkdev %s returned ACPI global irq %d, line %d\n",
+		    acpi_pci_link_name(mip->linkdev), irq, line);
 	if (irq == X86_PCI_INTERRUPT_LINE_NO_CONNECTION)
 		return ENOENT;
 	if (irq != line)
@@ -1139,7 +1233,7 @@ mpacpi_findintr_linkdev(struct mp_intr_map *mip)
 		mip->ioapic_ih = APIC_INT_VIA_APIC |
 		    (pic->pic_apicid << APIC_INT_APIC_SHIFT) |
 		    (pin << APIC_INT_PIN_SHIFT);
-		((struct ioapic_softc *)pic)->sc_pins[pin].ip_map = mip;
+		pic->pic_ioapic->sc_pins[pin].ip_map = mip;
 		mip->ioapic_pin = pin;
 #else
 		return ENOENT;

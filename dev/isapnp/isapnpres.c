@@ -1,4 +1,4 @@
-/*	$NetBSD: isapnpres.c,v 1.17 2007/10/19 12:00:32 ad Exp $	*/
+/*	$NetBSD: isapnpres.c,v 1.19 2008/04/28 20:23:53 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isapnpres.c,v 1.17 2007/10/19 12:00:32 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isapnpres.c,v 1.19 2008/04/28 20:23:53 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -479,8 +472,9 @@ isapnp_get_resource(sc, c)
 
 		if (d != sc->sc_id[c][i] && i != ISAPNP_SERIAL_SIZE - 1) {
 			if (!warned) {
-				printf("%s: card %d violates PnP spec; byte %d\n",
-				    sc->sc_dev.dv_xname, c + 1, i);
+				aprint_error_dev(sc->sc_dev,
+				    "card %d violates PnP spec; byte %d\n",
+				    c + 1, i);
 				warned++;
 			}
 			if (i == 0) {
@@ -517,8 +511,9 @@ parse:
 		}
 
 		if (len >= ISAPNP_MAX_TAGSIZE) {
-			printf("%s: Maximum tag size exceeded, card %d\n",
-			    sc->sc_dev.dv_xname, c + 1);
+			aprint_error_dev(sc->sc_dev,
+			    "Maximum tag size exceeded, card %d\n",
+			    c + 1);
 			len = ISAPNP_MAX_TAGSIZE - 1;
 			if (++warned == 10)
 				goto bad;
@@ -526,8 +521,9 @@ parse:
 
 		if (isapnp_process_tag(tag, len, buf, &card, &dev,
 		    &conf) == -1) {
-			printf("%s: No current device for tag, card %d\n",
-			    sc->sc_dev.dv_xname, c + 1);
+			aprint_error_dev(sc->sc_dev,
+			    "No current device for tag, card %d\n",
+			    c + 1);
 			if (++warned == 10)
 				goto bad;
 		}
@@ -541,7 +537,7 @@ bad:
 		ISAPNP_FREE(card);
 		card = dev;
 	}
-	printf("%s: %s, card %d\n", sc->sc_dev.dv_xname,
+	aprint_normal_dev(sc->sc_dev, "%s, card %d\n",
 	    warned >= 10 ? "Too many tag errors" : "Resource timeout", c + 1);
 	return NULL;
 }

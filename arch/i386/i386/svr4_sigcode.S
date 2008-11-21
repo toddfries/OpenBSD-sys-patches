@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_sigcode.S,v 1.9 2005/12/11 12:17:41 christos Exp $	*/
+/*	$NetBSD: svr4_sigcode.S,v 1.13 2008/11/19 18:35:59 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,17 +63,14 @@
  *	@(#)locore.s	7.3 (Berkeley) 5/13/91
  */
 
-#if defined(_KERNEL_OPT)
-#include "opt_vm86.h"
-#include "opt_multiprocessor.h"
-#endif
+#include <machine/asm.h>
+__KERNEL_RCSID(0, "$NetBSD: svr4_sigcode.S,v 1.13 2008/11/19 18:35:59 ad Exp $");
 
 #include "assym.h"
 
 #include <machine/segments.h>
 #include <machine/trap.h>
 #include <compat/svr4/svr4_syscall.h>
-#include <machine/asm.h>
 #include <machine/frameasm.h>
 
 /*
@@ -100,28 +90,3 @@ NENTRY(svr4_sigcode)
 	int	$0x80			# exit if sigreturn fails
 	.globl	_C_LABEL(svr4_esigcode)
 _C_LABEL(svr4_esigcode):
-
-IDTVEC(svr4_fasttrap)
-	pushl	$2		# size of instruction for restart
-	pushl	$T_ASTFLT	# trap # for doing ASTs
-	INTRENTRY
-	call	_C_LABEL(svr4_fasttrap)
-2:	/* Check for ASTs on exit to user mode. */
-	cli
-	CHECK_ASTPENDING(%eax)		
-	je	1f
-	/* Always returning to user mode here. */
-	CLEAR_ASTPENDING(%eax)
-	sti
-	/* Pushed T_ASTFLT into tf_trapno on entry. */
-	pushl	%esp
-	call	_C_LABEL(trap)
-	addl	$4,%esp
-	jmp	2b
-1:	CHECK_DEFERRED_SWITCH(%eax)
-	jnz	9f
-	INTRFASTEXIT
-9:	sti
-	call	_C_LABEL(pmap_load)
-	cli
-	jmp	2b

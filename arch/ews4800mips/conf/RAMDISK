@@ -1,4 +1,4 @@
-# 	$NetBSD: RAMDISK,v 1.5 2006/10/02 03:28:30 chs Exp $
+# 	$NetBSD: RAMDISK,v 1.10 2008/07/16 15:22:50 tsutsui Exp $
 #
 # kernel config file with memory disk for installation
 #
@@ -28,8 +28,15 @@ no options 	SYSVSHM
 no options 	P1003_1B_SEMAPHORE
 no options 	SYSCTL_INCLUDE_DESCR
 
+no options	COMPAT_13
+no options	COMPAT_14
+no options	COMPAT_15
+no options	COMPAT_16
+
 no file-system	EXT2FS
+no file-system	LFS
 no file-system	FDESC
+no file-system	KERNFS
 no file-system	NULLFS
 no file-system	OVERLAY
 no file-system	PORTAL
@@ -38,6 +45,7 @@ no file-system	UNION
 no file-system	PTYFS
 
 no options 	QUOTA
+no options 	NFSSERVER
 no options 	NETATALK
 no options 	PPP_FILTER
 no options 	SCSIVERBOSE
@@ -50,15 +58,21 @@ no ses*	at scsibus?
 no ss*	at scsibus?
 no uk*	at scsibus?
 
+no pseudo-device	raid
 no pseudo-device	vnd
 no pseudo-device	fss
 no pseudo-device	ipfilter
+no pseudo-device	ppp
+no pseudo-device	pppoe
 no pseudo-device	strip
 no pseudo-device	tap
 no pseudo-device	tun
 no pseudo-device	gre
 no pseudo-device	gif
+no pseudo-device	stf
 no pseudo-device	vlan
 no pseudo-device	bridge
+no pseudo-device	agr
 no pseudo-device	clockctl
 no pseudo-device	ksyms
+no pseudo-device	wsmux

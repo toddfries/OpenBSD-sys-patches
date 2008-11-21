@@ -1,12 +1,11 @@
-/*	$OpenBSD: midi_pcppi.c,v 1.5 2006/01/02 05:21:40 brad Exp $	*/
-/*	$NetBSD: midi_pcppi.c,v 1.4 1998/11/25 22:17:06 augustss Exp $	*/
+/*	$NetBSD: midi_pcppi.c,v 1.19 2008/04/28 20:23:52 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson (augustss@netbsd.org).
+ * by Lennart Augustsson (augustss@NetBSD.org).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: midi_pcppi.c,v 1.19 2008/04/28 20:23:52 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -45,9 +40,11 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/conf.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/audioio.h>
 #include <sys/midiio.h>
+
+#include <sys/bus.h>
 
 #include <dev/isa/pcppivar.h>
 
@@ -63,81 +60,69 @@ struct midi_pcppi_softc {
 	midisyn sc_midisyn;
 };
 
-int	midi_pcppi_match(struct device *, void *, void *);
-void	midi_pcppi_attach(struct device *, struct device *, void *);
+int	midi_pcppi_match(device_t, cfdata_t , void *);
+void	midi_pcppi_attach(device_t, device_t, void *);
 
-void	midi_pcppi_on(midisyn *, u_int32_t, u_int32_t, u_int32_t);
-void	midi_pcppi_off(midisyn *, u_int32_t, u_int32_t, u_int32_t);
+void	midi_pcppi_on   (midisyn *, uint_fast16_t, midipitch_t, int16_t);
+void	midi_pcppi_off  (midisyn *, uint_fast16_t, uint_fast8_t);
 void	midi_pcppi_close(midisyn *);
+static void midi_pcppi_repitchv(midisyn *, uint_fast16_t, midipitch_t);
 
-struct cfattach midi_pcppi_ca = {
-	sizeof(struct midi_pcppi_softc), midi_pcppi_match, midi_pcppi_attach
-};
+CFATTACH_DECL_NEW(midi_pcppi, sizeof(struct midi_pcppi_softc),
+    midi_pcppi_match, midi_pcppi_attach, NULL, NULL);
 
 struct midisyn_methods midi_pcppi_hw = {
-	0,			/* open */
-	midi_pcppi_close,
-	0,			/* ioctl */
-	0,			/* allocv */
-	midi_pcppi_on,
-	midi_pcppi_off,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
+	.close    = midi_pcppi_close,
+	.attackv  = midi_pcppi_on,
+	.releasev = midi_pcppi_off,
+	.repitchv = midi_pcppi_repitchv,
 };
 
 int midi_pcppi_attached = 0;	/* Not very nice */
 
 int
-midi_pcppi_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+midi_pcppi_match(device_t parent, cfdata_t match, void *aux)
 {
 	return (!midi_pcppi_attached);
 }
 
 void
-midi_pcppi_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+midi_pcppi_attach(device_t parent, device_t self, void *aux)
 {
-	struct midi_pcppi_softc *sc = (struct midi_pcppi_softc *)self;
+	struct midi_pcppi_softc *sc = device_private(self);
 	struct pcppi_attach_args *pa = (struct pcppi_attach_args *)aux;
 	midisyn *ms;
 
+	sc->sc_mididev.dev = self;
 	ms = &sc->sc_midisyn;
 	ms->mets = &midi_pcppi_hw;
-	strlcpy(ms->name, "PC speaker", sizeof ms->name);
+	strcpy(ms->name, "PC speaker");
 	ms->nvoice = 1;
-	ms->flags = MS_DOALLOC | MS_FREQXLATE;
 	ms->data = pa->pa_cookie;
 
 	midi_pcppi_attached++;
 
 	midisyn_attach(&sc->sc_mididev, ms);
 	midi_attach(&sc->sc_mididev, parent);
+        if (!device_pmf_is_registered(self))
+		if (!pmf_device_register(self, NULL, NULL))
+			aprint_error_dev(self,
+			    "couldn't establish power handler\n"); 
 }
 
 void
-midi_pcppi_on(ms, chan, note, vel)
-	midisyn *ms;
-	u_int32_t chan, note, vel;
+midi_pcppi_on(midisyn *ms,
+    uint_fast16_t voice, midipitch_t mp, int16_t level)
 {
 	pcppi_tag_t t = ms->data;
 
-	/*printf("ON  %p %d\n", t, MIDISYN_FREQ_TO_HZ(note));*/
-	pcppi_bell(t, MIDISYN_FREQ_TO_HZ(note), MAX_DURATION * hz, 0);
+	pcppi_bell(t,
+	           MIDIHZ18_TO_HZ(MIDIPITCH_TO_HZ18(mp)),
+	           MAX_DURATION * hz, 0);
 }
 
 void
-midi_pcppi_off(ms, chan, note, vel)
-	midisyn *ms;
-	u_int32_t chan, note, vel;
+midi_pcppi_off(midisyn *ms, uint_fast16_t voice, uint_fast8_t vel)
 {
 	pcppi_tag_t t = ms->data;
 
@@ -153,4 +138,10 @@ midi_pcppi_close(ms)
 
 	/* Make sure we are quiet. */
 	pcppi_bell(t, 0, 0, 0);
+}
+
+static void
+midi_pcppi_repitchv(midisyn *ms, uint_fast16_t voice, midipitch_t newpitch)
+{
+	midi_pcppi_on(ms, voice, newpitch, 64);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: trap.h,v 1.3 2003/07/09 02:22:48 jason Exp $	*/
-/*	$NetBSD: trap.h,v 1.4 1999/06/07 05:28:04 eeh Exp $ */
+/*	$NetBSD: trap.h,v 1.6 2006/09/19 00:55:35 mrg Exp $ */
 
 /*
  * Copyright (c) 1996-1999 Eduardo Horvath
@@ -44,34 +43,28 @@
 /*	through		0x00f	   unused */
 #define T_ILLINST	0x010	/* (7) illegal instruction */
 #define T_PRIVINST	0x011	/* (6) privileged opcode */
-#define	T_UNIMP_LDD	0x012	/* (6) unimplemented LDD */
-#define	T_UNIMP_STD	0x013	/* (6) unimplemented STD */
-/*			0x014	   unused */
+/*			0x012	   unused */
 /*	through		0x01f	   unused */
 #define T_FPDISABLED	0x020	/* (8) fpu disabled */
 #define T_FP_IEEE_754	0x021	/* (11) ieee 754 exception */
 #define T_FP_OTHER	0x022	/* (11) other fp exception */
 #define T_TAGOF		0x023	/* (14) tag overflow */
 #define T_CLEAN_WINDOW	0x024	/* (10) clean window exception */
-/*			0x025	   unused */
 /*	through		0x027	   unused */
-#define T_DIV0		0x028	/* (15) division routine was handed 0 */
-#define	T_PROCERR	0x029	/* (4) internal processor error */
+#define T_IDIV0		0x028	/* (15) division by 0 */
 /*			0x02a	   unused */
 /*	through		0x02f	   unused */
 #define	T_DATAFAULT	0x030	/* (12) address fault during data fetch */
-#define	T_DATA_MMU_MISS	0x031	/* (12) data access MMU miss */
-#define T_DATA_ERROR	0x032	/* (12) data access error */
-#define T_DATA_PROT	0x033	/* (12) Data protection ??? */
+/*			0x031	   unused */
+#define T_DATA_ERROR	0x032
+#define T_DATA_PROT	0x033	/* Data protection ??? */
 #define	T_ALIGN		0x034	/* (10) address not properly aligned */
 #define	T_LDDF_ALIGN	0x035	/* (10) LDDF address not properly aligned */
 #define	T_STDF_ALIGN	0x036	/* (10) STDF address not properly aligned */
 #define T_PRIVACT	0x037	/* (11) privileged action */
-#define	T_LDQF_ALIGN	0x038	/* (10) LDQF address not properly aligned */
-#define	T_STQF_ALIGN	0x039	/* (10) STQF address not properly aligned */
-/*			0x03a	   unused */
+/*			0x038	   unused */
 /*	through		0x03f	   unused */
-#define T_ASYNC_ERROR	0x040	/* (2) ???? */
+#define T_ASYNC_ERROR	0x040	/* ???? */
 #define	T_L1INT		0x041	/* (31) level 1 interrupt */
 #define	T_L2INT		0x042	/* (30) level 2 interrupt */
 #define	T_L3INT		0x043	/* (29) level 3 interrupt */
@@ -103,16 +96,16 @@
 #define T_SPILL_N_NORM	0x080	/* (9) spill (n=0..7) normal */
 /*	through		0x09f	   unused */
 #define T_SPILL_N_OTHER	0x0a0	/* (9) spill (n=0..7) other */
-/*	through		0x0bf	   unused */
+/*	through		0x0bF	   unused */
 #define T_FILL_N_NORM	0x0c0	/* (9) fill (n=0..7) normal */
-/*	through		0x0df	   unused */
+/*	through		0x0dF	   unused */
 #define T_FILL_N_OTHER	0x0e0	/* (9) fill (n=0..7) other */
-/*	through		0x0ff	   unused */
+/*	through		0x0fF	   unused */
 
 /* beginning of `user' vectors (from trap instructions) - all priority 16 */
 #define	T_SUN_SYSCALL	0x100	/* system call */
 #define	T_BREAKPOINT	0x101	/* breakpoint `instruction' */
-#define	T_UDIV0		0x102	/* division routine was handed 0 */
+#define	T_DIV0		0x102	/* division routine was handed 0 */
 #define	T_FLUSHWIN	0x103	/* flush windows */
 #define	T_CLEANWIN	0x104	/* provide clean windows */
 #define	T_RANGECHECK	0x105	/* ? */
@@ -122,7 +115,7 @@
 #define	T_BSD_SYSCALL	0x109	/* BSD system call */
 #define	T_KGDB_EXEC	0x10a	/* for kernel gdb */
 
-/* 0x10b..0x1ff are currently unallocated, except the following */
+/* 0x10c..0x1ff are currently unallocated, except the following */
 #define T_SVR4_GETCC		0x120
 #define T_SVR4_SETCC		0x121
 #define T_SVR4_GETPSR		0x122
@@ -149,7 +142,8 @@
 
 /*
  * `software trap' macros to keep people happy (sparc v8 manual says not
- * to set the upper bits).
+ * to set the upper bits). Correct mask is 0xff for v9, but all values
+ * here are small enough - so keep it the same as the sparc port.
  */
 #define	ST_BREAKPOINT	(T_BREAKPOINT & 0x7f)
 #define	ST_DIV0		(T_DIV0 & 0x7f)

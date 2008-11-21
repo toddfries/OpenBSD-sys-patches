@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcmciachip.h,v 1.8 2005/11/23 11:39:37 mickey Exp $ */
-/*	$NetBSD: pcmciachip.h,v 1.5 2000/01/13 08:58:51 joda Exp $	*/
+/*	$NetBSD: pcmciachip.h,v 1.15 2008/06/26 12:33:18 drochner Exp $	*/
 
 /*
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -33,7 +32,7 @@
 #ifndef _PCMCIA_PCMCIACHIP_H_
 #define	_PCMCIA_PCMCIACHIP_H_
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 struct pcmcia_function;
 struct pcmcia_mem_handle;
@@ -41,7 +40,7 @@ struct pcmcia_io_handle;
 
 /* interfaces for pcmcia to call the chipset */
 
-typedef struct pcmcia_chip_functions *pcmcia_chipset_tag_t;
+typedef const struct pcmcia_chip_functions *pcmcia_chipset_tag_t;
 typedef void *pcmcia_chipset_handle_t;
 typedef int pcmcia_mem_handle_t;
 
@@ -83,16 +82,16 @@ struct pcmcia_chip_functions {
 
 	/* interrupt glue */
 	void	*(*intr_establish)(pcmcia_chipset_handle_t,
-		    struct pcmcia_function *, int, int (*)(void *), void *, char *);
+		    struct pcmcia_function *, int, int (*)(void *), void *);
 	void	(*intr_disestablish)(pcmcia_chipset_handle_t, void *);
-	const char *(*intr_string)(pcmcia_chipset_handle_t, void *);
 
 	/* card enable/disable */
 	void	(*socket_enable)(pcmcia_chipset_handle_t);
 	void	(*socket_disable)(pcmcia_chipset_handle_t);
+	void	(*socket_settype)(pcmcia_chipset_handle_t, int);
 
 	/* card detection */
-	int (*card_detect)(pcmcia_chipset_handle_t);  
+	int (*card_detect)(pcmcia_chipset_handle_t);
 };
 
 /* Memory space functions. */
@@ -126,23 +125,22 @@ struct pcmcia_chip_functions {
 	((*(tag)->io_unmap)((handle), (window)))
 
 /* Interrupt functions. */
-#define pcmcia_chip_intr_establish(tag, handle, pf, ipl, fct, arg, xname)	\
-	((*(tag)->intr_establish)((handle), (pf), (ipl), (fct), (arg), (xname)))
+#define pcmcia_chip_intr_establish(tag, handle, pf, ipl, fct, arg)	\
+	((*(tag)->intr_establish)((handle), (pf), (ipl), (fct), (arg)))
 
 #define pcmcia_chip_intr_disestablish(tag, handle, ih)			\
 	((*(tag)->intr_disestablish)((handle), (ih)))
-
-#define pcmcia_chip_intr_string(tag, handle, ih)			\
-	((*(tag)->intr_string)((handle), (ih)))
 
 /* Socket functions. */
 #define	pcmcia_chip_socket_enable(tag, handle)				\
 	((*(tag)->socket_enable)((handle)))
 #define	pcmcia_chip_socket_disable(tag, handle)				\
 	((*(tag)->socket_disable)((handle)))
+#define	pcmcia_chip_socket_settype(tag, handle, type)			\
+	((*(tag)->socket_settype)((handle), (type)))
 
 struct pcmciabus_attach_args {
-	char *paa_busname;	/* Bus name */
+	const char *paa_busname;	/* Bus name */
 	pcmcia_chipset_tag_t pct;
 	pcmcia_chipset_handle_t pch;
 	bus_addr_t iobase;		/* start i/o space allocation here */
@@ -154,6 +152,5 @@ struct pcmciabus_attach_args {
 int	pcmcia_card_attach(struct device *);
 void	pcmcia_card_detach(struct device *, int);
 void	pcmcia_card_deactivate(struct device *);
-int	pcmcia_card_gettype(struct device *);
 
 #endif /* _PCMCIA_PCMCIACHIP_H_ */

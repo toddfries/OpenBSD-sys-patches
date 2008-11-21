@@ -1,5 +1,4 @@
-/*	$OpenBSD: advlib.h,v 1.8 2003/10/09 22:13:05 miod Exp $	*/
-/*      $NetBSD: advlib.h,v 1.5 1998/10/28 20:39:46 dante Exp $        */
+/*      $NetBSD: advlib.h,v 1.17 2005/12/11 12:21:25 christos Exp $        */
 
 /*
  * Definitions for low level routines and data structures
@@ -43,10 +42,10 @@
  */
 /*
  * advansys.c - Linux Host Driver for AdvanSys SCSI Adapters
- *     
+ *
  * Copyright (c) 1995-1996 Advanced System Products, Inc.
  * All Rights Reserved.
- *   
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that redistributions of source
  * code retain the above copyright notice and this comment without
@@ -56,7 +55,8 @@
 #ifndef	_ADVANSYS_NARROW_LIBRARY_H_
 #define	_ADVANSYS_NARROW_LIBRARY_H_
 
-#include <dev/ic/adv.h>
+
+struct adv_ccb;
 
 /******************************************************************************/
 
@@ -324,7 +324,7 @@
 
 
 /*
- * SCSI Inquiry structure
+ * SCSI Iquiry structure
  */
 
 typedef struct
@@ -449,7 +449,7 @@ typedef struct asc_scisq_1
 	u_int8_t	sg_queue_cnt;	/* number of SG entries */
 	u_int8_t	target_id;
 	u_int8_t	target_lun;
-	u_int32_t	data_addr; /* physical address of first segment to transfer */
+	u_int32_t	data_addr; /* physical address of first segment to transef */
 	u_int32_t	data_cnt;  /* byte count of first segment to transfer */
 	u_int32_t	sense_addr; /* physical address of the sense buffer */
 	u_int8_t	sense_len; /* length of sense buffer */
@@ -478,7 +478,7 @@ typedef struct asc_scisq_1
 
 typedef struct asc_scisq_2
 {
-	u_int32_t	ccb_ptr;	/* pointer to our CCB */
+	u_int32_t	ccb_ptr;	/* physical pointer to our CCB */
 	u_int8_t	target_ix;	/* combined TID and LUN */
 	u_int8_t	flag;
 	u_int8_t	cdb_len;	/* bytes of Command Descriptor Block */
@@ -829,9 +829,17 @@ typedef struct ext_msg
 #define ASC_MAX_SCSI_RESET_WAIT	30
 
 
+#define	CCB_HASH_SIZE	32	/* hash table size for phystokv */
+#define	CCB_HASH_SHIFT	9
+#define CCB_HASH(x)	((((long)(x))>>CCB_HASH_SHIFT) & (CCB_HASH_SIZE - 1))
+
+typedef int (* ASC_CALLBACK) (int);
+
 typedef struct asc_softc
 {
 	struct device		sc_dev;
+
+	struct device		*sc_child;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -839,14 +847,18 @@ typedef struct asc_softc
 	bus_dmamap_t		sc_dmamap_control; /* maps the control structures */
 	void			*sc_ih;
 
-	struct adv_control	*sc_control; /* control structures */
+	struct adv_control	*sc_control;	/* control structures */
+
+	bus_dma_segment_t	sc_control_seg;
+	int			sc_control_nsegs;
+
+	struct adv_ccb		*sc_ccbhash[CCB_HASH_SIZE];
 	TAILQ_HEAD(, adv_ccb)	sc_free_ccb, sc_waiting_ccb;
-	struct scsi_link	sc_link;     /* prototype for devs */
 
-	LIST_HEAD(, scsi_xfer)	sc_queue;
-	struct scsi_xfer	*sc_queuelast;
+	struct scsipi_adapter	sc_adapter;
+	struct scsipi_channel	sc_channel;
 
-	u_int8_t		*overrun_buf;
+	bus_addr_t		overrun_buf;
 
 	u_int16_t		sc_flags;	/* see below sc_flags values */
 
@@ -854,7 +866,7 @@ typedef struct asc_softc
 	u_int16_t		bug_fix_cntl;
 	u_int16_t		bus_type;
 
-	ulong			isr_callback;
+	ASC_CALLBACK		isr_callback;
 
 	ASC_SCSI_BIT_ID_TYPE	init_sdtr;
 	ASC_SCSI_BIT_ID_TYPE	sdtr_done;
@@ -867,6 +879,7 @@ typedef struct asc_softc
 	ASC_SCSI_BIT_ID_TYPE	cmd_qng_enabled;
 	ASC_SCSI_BIT_ID_TYPE	disc_enable;
 	ASC_SCSI_BIT_ID_TYPE	sdtr_enable;
+	u_int8_t		irq_no;
 	u_int8_t		chip_scsi_id;
 	u_int8_t		isa_dma_speed;
 	u_int8_t		isa_dma_channel;
@@ -883,7 +896,6 @@ typedef struct asc_softc
 	u_int8_t		scsi_reset_wait;
 	u_int8_t		max_total_qng;
 	u_int8_t		cur_total_qng;
-	u_int8_t		irq_no;
 	u_int8_t		last_q_shortage;
 
 	u_int8_t		cur_dvc_qng[ASC_MAX_TID + 1];
@@ -933,10 +945,6 @@ typedef struct asc_softc
 #define SYN_ULTRA_XFER_NS_13	 94
 #define SYN_ULTRA_XFER_NS_14	100
 #define SYN_ULTRA_XFER_NS_15	107
-
-
-/* second level interrupt callback type definition */
-typedef int (* ASC_ISR_CALLBACK) (ASC_SOFTC *, ASC_QDONE_INFO *);
 
 
 #define ASC_MCNTL_NO_SEL_TIMEOUT	0x0001
@@ -1220,7 +1228,7 @@ typedef struct asceep_config
 #define ASC_EISA_PID_IOP_MASK	(0x0C80)
 #define ASC_EISA_CFG_IOP_MASK	(0x0C86)
 
-#define ASC_GET_EISA_SLOT(iop)	((iop) & 0xF000)
+#define ASC_GET_EISA_SLOT(port_base)	((port_base) & 0xF000)
 
 #define ASC_EISA_ID_740	0x01745004UL
 #define ASC_EISA_ID_750	0x01755004UL
@@ -1322,19 +1330,20 @@ typedef struct asceep_config
 
 
 void AscInitASC_SOFTC(ASC_SOFTC *);
-u_int16_t AscInitFromEEP(ASC_SOFTC *);
+int16_t AscInitFromEEP(ASC_SOFTC *);
 u_int16_t AscInitFromASC_SOFTC(ASC_SOFTC *);
 int AscInitDriver(ASC_SOFTC *);
 void AscReInitLram(ASC_SOFTC *);
 int AscFindSignature(bus_space_tag_t, bus_space_handle_t);
+u_int8_t AscGetChipIRQ(bus_space_tag_t, bus_space_handle_t, u_int16_t);
+u_int16_t AscGetIsaDmaChannel(bus_space_tag_t, bus_space_handle_t);
 int AscISR(ASC_SOFTC *);
 int AscExeScsiQueue(ASC_SOFTC *, ASC_SCSI_Q *);
 void AscInquiryHandling(ASC_SOFTC *, u_int8_t, ASC_SCSI_INQUIRY *);
-int AscAbortCCB(ASC_SOFTC *, u_int32_t);
+int AscAbortCCB(ASC_SOFTC *, struct adv_ccb *);
 int AscResetBus(ASC_SOFTC *);
 int AscResetDevice(ASC_SOFTC *, u_char);
 
 
 /******************************************************************************/
-
 #endif	/* _ADVANSYS_NARROW_LIBRARY_H_ */

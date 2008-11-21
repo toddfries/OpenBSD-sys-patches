@@ -1,5 +1,7 @@
-/*	$OpenBSD: bktr_audio.c,v 1.9 2007/06/11 08:10:22 robert Exp $	*/
-/* $FreeBSD: src/sys/dev/bktr/bktr_audio.c,v 1.8 2000/10/31 13:09:56 roger Exp $ */
+/* $SourceForge: bktr_audio.c,v 1.6 2003/03/11 23:11:20 thomasklausner Exp $ */
+
+/*	$NetBSD: bktr_audio.c,v 1.18 2008/01/16 13:08:54 jmcneill Exp $	*/
+/* $FreeBSD: src/sys/dev/bktr/bktr_audio.c,v 1.8 2000/10/31 13:09:56 roger Exp$ */
 /*
  * This is part of the Driver for Video Capture Cards (Frame grabbers)
  * and TV Tuner cards using the Brooktree Bt848, Bt848A, Bt849A, Bt878, Bt879
@@ -9,7 +11,7 @@
  * bktr_audio : This deals with controlling the audio on TV cards,
  *                controlling the Audio Multiplexer (audio source selector).
  *                controlling any MSP34xx stereo audio decoders.
- *                controlling any DPL35xx dolby surround sound audio decoders.    
+ *                controlling any DPL35xx dolby surround sound audio decoders.
  *                initialising TDA98xx audio devices.
  *
  */
@@ -51,21 +53,49 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
-#include <sys/proc.h>
 
-#include <dev/ic/bt8xx.h>	/* OpenBSD location of .h files */
+#ifdef __FreeBSD__
+
+#if (__FreeBSD_version < 500000)
+#include <machine/clock.h>              /* for DELAY */
+#endif
+
+#include <pci/pcivar.h>
+
+#if (__FreeBSD_version >=300000)
+#include <machine/bus_memio.h>		/* for bus space */
+#include <sys/bus.h>
+#include <sys/bus.h>
+#endif
+#endif
+
+#ifdef __NetBSD__
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: bktr_audio.c,v 1.18 2008/01/16 13:08:54 jmcneill Exp $");
+
+#include <sys/proc.h>
+#include <dev/ic/bt8xx.h>	/* NetBSD location of .h files */
 #include <dev/pci/bktr/bktr_reg.h>
 #include <dev/pci/bktr/bktr_core.h>
 #include <dev/pci/bktr/bktr_tuner.h>
 #include <dev/pci/bktr/bktr_card.h>
 #include <dev/pci/bktr/bktr_audio.h>
+#else
+#include <machine/ioctl_meteor.h>	/* Traditional location of .h files */
+#include <machine/ioctl_bt848.h>        /* extensions to ioctl_meteor.h */
+#include <dev/bktr/bktr_reg.h>
+#include <dev/bktr/bktr_core.h>
+#include <dev/bktr/bktr_tuner.h>
+#include <dev/bktr/bktr_card.h>
+#include <dev/bktr/bktr_audio.h>
+#endif
 
 /*
  * Prototypes for the GV_BCTV specific functions.
  */
-void    set_bctv_audio( bktr_ptr_t bktr );
-void    bctv_gpio_write( bktr_ptr_t bktr, int port, int val );
-/*int   bctv_gpio_read( bktr_ptr_t bktr, int port );*/ /* Not used */
+void    set_bctv_audio(bktr_ptr_t bktr);
+void    bctv_gpio_write(bktr_ptr_t bktr, int port, int val);
+/*int   bctv_gpio_read(bktr_ptr_t bktr, int port);*/ /* Not used */
 
 
 
@@ -73,42 +103,42 @@ void    bctv_gpio_write( bktr_ptr_t bktr, int port, int val );
  * init_audio_devices
  * Reset any MSP34xx or TDA98xx audio devices.
  */
-void init_audio_devices( bktr_ptr_t bktr ) {
+void init_audio_devices(bktr_ptr_t bktr) {
 
         /* enable stereo if appropriate on TDA audio chip */
-        if ( bktr->card.dbx )
-                init_BTSC( bktr );
- 
+        if (bktr->card.dbx)
+                init_BTSC(bktr);
+
         /* reset the MSP34xx stereo audio chip */
-        if ( bktr->card.msp3400c )
-                msp_dpl_reset( bktr, bktr->msp_addr );
+        if (bktr->card.msp3400c)
+                msp_dpl_reset(bktr, bktr->msp_addr);
 
         /* reset the DPL35xx dolby audio chip */
-        if ( bktr->card.dpl3518a )
-                msp_dpl_reset( bktr, bktr->dpl_addr );
+        if (bktr->card.dpl3518a)
+                msp_dpl_reset(bktr, bktr->dpl_addr);
 
 }
 
 
 /*
- * 
+ *
  */
 #define AUDIOMUX_DISCOVER_NOT
 int
-set_audio( bktr_ptr_t bktr, int cmd )
+set_audio(bktr_ptr_t bktr, int cmd)
 {
 	u_int		temp;
 	volatile u_char	idx;
 
-#if defined( AUDIOMUX_DISCOVER )
-	if ( cmd >= 200 )
+#if defined(AUDIOMUX_DISCOVER)
+	if (cmd >= 200)
 		cmd -= 200;
 	else
 #endif /* AUDIOMUX_DISCOVER */
 
-	/* check for existance of audio MUXes */
-	if ( !bktr->card.audiomuxs[ 4 ] )
-		return( -1 );
+	/* check for existence of audio MUXes */
+	if (!bktr->card.audiomuxs[4])
+		return(-1);
 
 	switch (cmd) {
 	case AUDIO_TUNER:
@@ -118,9 +148,9 @@ set_audio( bktr_ptr_t bktr, int cmd )
 		bktr->audio_mux_select = 0;
 #endif
 
-		if (bktr->reverse_mute ) 
+		if (bktr->reverse_mute)
 		      bktr->audio_mux_select = 0;
-		else	
+		else
 		    bktr->audio_mux_select = 3;
 
 		break;
@@ -139,7 +169,7 @@ set_audio( bktr_ptr_t bktr, int cmd )
 	default:
 		printf("%s: audio cmd error %02x\n", bktr_name(bktr),
 		       cmd);
-		return( -1 );
+		return(-1);
 	}
 
 
@@ -147,9 +177,9 @@ set_audio( bktr_ptr_t bktr, int cmd )
 	 * audio source. The I/O_GV card has a more advanced multiplexer
 	 * and requires special handling.
 	 */
-        if ( bktr->bt848_card == CARD_IO_GV ) {
-                set_bctv_audio( bktr );
-                return( 0 );
+        if (bktr->bt848_card == CARD_IO_GV) {
+                set_bctv_audio(bktr);
+                return(0);
 	}
 
 	/* Proceed with the simpler audio multiplexer code for the majority
@@ -162,16 +192,16 @@ set_audio( bktr_ptr_t bktr, int cmd )
 	 * success, but follows the rule of least astonishment.
 	 */
 
-	if ( bktr->audio_mute_state == TRUE ) {
+	if (bktr->audio_mute_state == TRUE) {
 #ifdef BKTR_REVERSEMUTE
 		idx = 0;
 #else
 		idx = 3;
 #endif
 
-		if (bktr->reverse_mute )
+		if (bktr->reverse_mute)
 		  idx  = 3;
-		else	
+		else
 		  idx  = 0;
 
 	}
@@ -180,12 +210,12 @@ set_audio( bktr_ptr_t bktr, int cmd )
 
 
 	temp = INL(bktr, BKTR_GPIO_DATA) & ~bktr->card.gpio_mux_bits;
-#if defined( AUDIOMUX_DISCOVER )
+#if defined(AUDIOMUX_DISCOVER)
 	OUTL(bktr, BKTR_GPIO_DATA, temp | (cmd & 0xff));
 	printf("%s: cmd: %d audio mux %x temp %x \n", bktr_name(bktr),
-	  	cmd, bktr->card.audiomuxs[ idx ], temp );
+	  	cmd, bktr->card.audiomuxs[idx], temp);
 #else
-	OUTL(bktr, BKTR_GPIO_DATA, temp | bktr->card.audiomuxs[ idx ]);
+	OUTL(bktr, BKTR_GPIO_DATA, temp | bktr->card.audiomuxs[idx]);
 #endif /* AUDIOMUX_DISCOVER */
 
 
@@ -200,7 +230,7 @@ set_audio( bktr_ptr_t bktr, int cmd )
 
 	if ((bktr->card.msp3400c) && (bktr->audio_mux_present == 0)) {
 
-	  if (bktr->audio_mute_state == TRUE ) {
+	  if (bktr->audio_mute_state == TRUE) {
 		 msp_dpl_write(bktr, bktr->msp_addr, 0x12, 0x0000, 0x0000); /* volume to MUTE */
 	  } else {
 		 if(bktr->audio_mux_select == 0) { /* TV Tuner */
@@ -227,26 +257,26 @@ set_audio( bktr_ptr_t bktr, int cmd )
 	}
 
 
-	return( 0 );
+	return(0);
 }
 
 
 /*
- * 
+ *
  */
 void
-temp_mute( bktr_ptr_t bktr, int flag )
+temp_mute(bktr_ptr_t bktr, int flag)
 {
 	static int	muteState = FALSE;
 
-	if ( flag == TRUE ) {
+	if (flag == TRUE) {
 		muteState = bktr->audio_mute_state;
-		set_audio( bktr, AUDIO_MUTE );		/* prevent 'click' */
+		set_audio(bktr, AUDIO_MUTE);		/* prevent 'click' */
 	}
 	else {
-		tsleep( BKTR_SLEEP, PZERO, "tuning", hz/8 );
-		if ( muteState == FALSE )
-			set_audio( bktr, AUDIO_UNMUTE );
+		tsleep(BKTR_SLEEP, PZERO, "tuning", hz/8);
+		if (muteState == FALSE)
+			set_audio(bktr, AUDIO_UNMUTE);
 	}
 }
 
@@ -258,9 +288,9 @@ temp_mute( bktr_ptr_t bktr, int flag )
 /* registers in the TDA9850 BTSC/dbx chip */
 #define CON1ADDR                0x04
 #define CON2ADDR                0x05
-#define CON3ADDR                0x06 
+#define CON3ADDR                0x06
 #define CON4ADDR                0x07
-#define ALI1ADDR                0x08 
+#define ALI1ADDR                0x08
 #define ALI2ADDR                0x09
 #define ALI3ADDR                0x0a
 
@@ -268,8 +298,8 @@ temp_mute( bktr_ptr_t bktr, int flag )
  * initialise the dbx chip
  * taken from the Linux bttv driver TDA9850 initialisation code
  */
-void 
-init_BTSC( bktr_ptr_t bktr )
+void
+init_BTSC(bktr_ptr_t bktr)
 {
     i2cWrite(bktr, TDA9850_WADDR, CON1ADDR, 0x08); /* noise threshold st */
     i2cWrite(bktr, TDA9850_WADDR, CON2ADDR, 0x08); /* noise threshold sap */
@@ -285,9 +315,9 @@ init_BTSC( bktr_ptr_t bktr )
  * XXX FIXME: alot of work to be done here, this merely unmutes it.
  */
 int
-set_BTSC( bktr_ptr_t bktr, int control )
+set_BTSC(bktr_ptr_t bktr, int control)
 {
-	return( i2cWrite( bktr, TDA9850_WADDR, CON3ADDR, control ) );
+	return(i2cWrite(bktr, TDA9850_WADDR, CON3ADDR, control));
 }
 
 /*
@@ -309,7 +339,7 @@ set_BTSC( bktr_ptr_t bktr, int control )
 #define BCTV_GR0_AUDIO_MONO     8       /* force mono */
 
 void
-set_bctv_audio( bktr_ptr_t bktr )
+set_bctv_audio(bktr_ptr_t bktr)
 {
         int data;
 
@@ -360,7 +390,7 @@ set_bctv_audio( bktr_ptr_t bktr )
 #define BCTV_BITS       100
 
 void
-bctv_gpio_write( bktr_ptr_t bktr, int port, int val )
+bctv_gpio_write(bktr_ptr_t bktr, int port, int val)
 {
         u_int data, outbits;
 
@@ -390,7 +420,7 @@ bctv_gpio_write( bktr_ptr_t bktr, int port, int val )
 
 /* Not yet used
 int
-bctv_gpio_read( bktr_ptr_t bktr, int port )
+bctv_gpio_read(bktr_ptr_t bktr, int port)
 {
         u_int data, outbits, ret;
 
@@ -403,7 +433,7 @@ bctv_gpio_read( bktr_ptr_t bktr, int port )
                 outbits = BCTV_GPIO_OUT_RMASK;
                 break;
         default:
-                return( -1 );
+                return(-1);
         }
         OUTL(bktr, BKTR_GPIO_OUT_EN, 0);
         OUTL(bktr, BKTR_GPIO_DATA, data);
@@ -417,7 +447,7 @@ bctv_gpio_read( bktr_ptr_t bktr, int port )
         DELAY(BCTV_BITS);
         OUTL(bktr, BKTR_GPIO_DATA, ~0);
         OUTL(bktr, BKTR_GPIO_OUT_EN, 0);
-        return( (ret & BCTV_GPIO_VAL_MASK) >> BCTV_GPIO_VAL_SHIFT );
+        return((ret & BCTV_GPIO_VAL_MASK) >> BCTV_GPIO_VAL_SHIFT);
 }
 */
 
@@ -430,14 +460,13 @@ bctv_gpio_read( bktr_ptr_t bktr, int port )
  */
 
 /* Read the MSP version string */
-void msp_read_id( bktr_ptr_t bktr ){
+void msp_read_id(bktr_ptr_t bktr) {
     int rev1=0, rev2=0;
     rev1 = msp_dpl_read(bktr, bktr->msp_addr, 0x12, 0x001e);
     rev2 = msp_dpl_read(bktr, bktr->msp_addr, 0x12, 0x001f);
 
-    snprintf(bktr->msp_version_string, sizeof bktr->msp_version_string,
-      "34%02d%c-%c%d", (rev2>>8)&0xff, (rev1&0xff)+'@', ((rev1>>8)&0xff)+'@',
-      rev2&0x1f);
+    sprintf(bktr->msp_version_string, "34%02d%c-%c%d",
+      (rev2>>8)&0xff, (rev1&0xff)+'@', ((rev1>>8)&0xff)+'@', rev2&0x1f);
 
 }
 
@@ -446,11 +475,11 @@ void msp_read_id( bktr_ptr_t bktr ){
  * For the MSP3430G, we use fast autodetect mode
  * For the MSP3410/3415 there are two schemes for this
  *  a) Fast autodetection - the chip is put into autodetect mode, and the function
- *     returns immediately. This works in most cases and is the Default Mode.
- *  b) Slow mode. The function sets the MSP3410/3415 chip, then waits for feedback from 
+ *     returns immediatly. This works in most cases and is the Default Mode.
+ *  b) Slow mode. The function sets the MSP3410/3415 chip, then waits for feedback from
  *     the chip and re-programs it if needed.
  */
-void msp_autodetect( bktr_ptr_t bktr ) {
+void msp_autodetect(bktr_ptr_t bktr) {
   int auto_detect, loops;
   int stereo;
 
@@ -469,10 +498,10 @@ void msp_autodetect( bktr_ptr_t bktr ) {
 
   /* MSP3415D SPECIAL CASE Use the Tuner's Mono audio output for the MSP */
   /* (for Hauppauge 44xxx card with Tuner Type 0x2a) */
-  else if (  ( (strncmp("3415D", bktr->msp_version_string, 5) == 0)
+  else if (((strncmp("3415D", bktr->msp_version_string, 5) == 0)
                &&(bktr->msp_use_mono_source == 1)
-              )
-           || (bktr->slow_msp_audio == 2) ){
+)
+           || (bktr->slow_msp_audio == 2)) {
     msp_dpl_write(bktr, bktr->msp_addr, 0x12, 0x0000, 0x7300); /* 0 db volume */
     msp_dpl_write(bktr, bktr->msp_addr, 0x12, 0x000d, 0x1900); /* scart prescale */
     msp_dpl_write(bktr, bktr->msp_addr, 0x12, 0x0008, 0x0220); /* SCART | STEREO */
@@ -492,10 +521,10 @@ void msp_autodetect( bktr_ptr_t bktr ) {
 
   /* MSP3410/MSP3415 - European Countries where the fast MSP3410/3415 programming fails */
   /* SLOW sound scheme */
-  else if ( bktr->slow_msp_audio == 1) {
+  else if (bktr->slow_msp_audio == 1) {
     msp_dpl_write(bktr, bktr->msp_addr, 0x12, 0x0000,0x7300);/* Set volume to 0db gain */
     msp_dpl_write(bktr, bktr->msp_addr, 0x10, 0x0020,0x0001);/* Enable Auto format detection */
-    
+
     /* wait for 0.5s max for terrestrial sound autodetection */
     loops = 10;
     do {
@@ -521,8 +550,8 @@ void msp_autodetect( bktr_ptr_t bktr ) {
       DELAY(20000);
       stereo = msp_dpl_read(bktr, bktr->msp_addr, 0x12, 0x0018);
       if (bootverbose)printf ("%s: Stereo reg 0x18 b: %d\n",
-			      bktr_name(bktr), stereo); 
-      DELAY(20000); 
+			      bktr_name(bktr), stereo);
+      DELAY(20000);
       stereo = msp_dpl_read(bktr, bktr->msp_addr, 0x12, 0x0018);
       if (bootverbose)printf ("%s: Stereo reg 0x18 c: %d\n",
 			      bktr_name(bktr), stereo);
@@ -567,30 +596,29 @@ void msp_autodetect( bktr_ptr_t bktr ) {
        break;
      default:
        if (bootverbose) printf ("%s: Unknown autodetection result value: %d\n",
-				bktr_name(bktr), auto_detect); 
+				bktr_name(bktr), auto_detect);
      }
 
   }
 
 
-  /* uncomment the following line to enable the MSP34xx 1KHz Tone Generator */
+  /* uncomment the following line to enable the MSP34xx 1 kHz Tone Generator */
   /* turn your speaker volume down low before trying this */
   /* msp_dpl_write(bktr, bktr->msp_addr, 0x12, 0x0014, 0x7f40); */
 }
 
 /* Read the DPL version string */
-void dpl_read_id( bktr_ptr_t bktr ){
+void dpl_read_id(bktr_ptr_t bktr) {
     int rev1=0, rev2=0;
     rev1 = msp_dpl_read(bktr, bktr->dpl_addr, 0x12, 0x001e);
     rev2 = msp_dpl_read(bktr, bktr->dpl_addr, 0x12, 0x001f);
 
-    snprintf(bktr->dpl_version_string, sizeof bktr->dpl_version_string,
-      "34%02d%c-%c%d", ((rev2>>8)&0xff)-1, (rev1&0xff)+'@',
-      ((rev1>>8)&0xff)+'@', rev2&0x1f);
+    sprintf(bktr->dpl_version_string, "34%02d%c-%c%d",
+      ((rev2>>8)&0xff)-1, (rev1&0xff)+'@', ((rev1>>8)&0xff)+'@', rev2&0x1f);
 }
 
 /* Configure the DPL chip to Auto-detect the audio format */
-void dpl_autodetect( bktr_ptr_t bktr ) {
+void dpl_autodetect(bktr_ptr_t bktr) {
 
     /* The following are empiric values tried from the DPL35xx data sheet */
     msp_dpl_write(bktr, bktr->dpl_addr, 0x12, 0x000c,0x0320);	/* quasi peak detector source dolby

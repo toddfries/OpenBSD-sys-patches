@@ -1,5 +1,4 @@
-/*	$OpenBSD: dc21040reg.h,v 1.15 2005/11/07 00:03:09 brad Exp $	*/
-/*	$NetBSD: dc21040reg.h,v 1.11 1997/06/08 18:44:02 thorpej Exp $	*/
+/*	$NetBSD: dc21040reg.h,v 1.19 2005/12/11 12:21:26 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994, 1995, 1996 Matt Thomas <matt@3am-software.com>
@@ -30,10 +29,6 @@
 #if !defined(_DC21040_H)
 #define _DC21040_H
 
-/* XXX The following only works with 21x4x chips which have
- * the descriptor swap bit. 21040 chips need to have the
- * descriptor in LE order regardles.............
- */
 #if defined(BYTE_ORDER) && BYTE_ORDER == BIG_ENDIAN
 #define	TULIP_BITFIELD2(a, b)		      b, a
 #define	TULIP_BITFIELD3(a, b, c)	   c, b, a
@@ -178,7 +173,7 @@ typedef struct {
 #define	TULIP_CMD_SCRAMBLER	0x01000000L		/* (RW)  Scrambler Mode (21140) */
 #define	TULIP_CMD_PCSFUNCTION	0x00800000L		/* (RW)  PCS Function (21140) */
 #define	TULIP_CMD_TXTHRSHLDCTL	0x00400000L		/* (RW)  Transmit Threshold Mode (21140) */
-#define	TULIP_CMD_STOREFWD	0x00200000L		/* (RW)  Store and Forward (21140) */
+#define	TULIP_CMD_STOREFWD	0x00200000L		/* (RW)  Store and Foward (21140) */
 #define	TULIP_CMD_NOHEARTBEAT	0x00080000L		/* (RW)  No Heartbeat (21140) */
 #define	TULIP_CMD_PORTSELECT	0x00040000L		/* (RW)  Post Select (100Mb) (21140) */
 #define	TULIP_CMD_ENHCAPTEFFCT	0x00040000L		/* (RW)  Enhanced Capture Effect (21041) */
@@ -421,7 +416,7 @@ typedef struct {
 #define	TULIP_GP_ZX346_FULLDUPLEX	0x00000004	/* Full Duplex Sensed */
 #define	TULIP_GP_ZX34X_LB102		0x00000002	/* 100tx twister LB */
 #define	TULIP_GP_ZX34X_NLB101		0x00000001	/* PDT/PDR LB */
-#define	TULIP_GP_ZX34X_INIT		0x00000009	
+#define	TULIP_GP_ZX34X_INIT		0x00000009
 
 /*
  * Compex's OUI.  We need to twiddle a bit on their 21041 card.

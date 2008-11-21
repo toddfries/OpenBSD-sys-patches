@@ -1,4 +1,4 @@
-#	$NetBSD: majors.ibmnws,v 1.11 2006/11/24 22:04:23 wiz Exp $
+#	$NetBSD: majors.ibmnws,v 1.13 2008/11/12 12:36:02 ad Exp $
 #
 # Device majors for ibmnws
 #
@@ -26,7 +26,6 @@ device-major	filedesc	char 22
 device-major	bpf		char 23			bpfilter
 device-major	md		char 24  block 17	md
 
-device-major	lkm		char 28			lkm
 
 device-major	tun		char 40			tun
 device-major	vnd		char 41  block 14	vnd
@@ -54,7 +53,6 @@ device-major	isdntel		char 70			isdntel
 device-major	wsfont		char 71			wsfont
 device-major	pci		char 72			pci
 device-major	clockctl	char 73			clockctl
-device-major	systrace	char 74			systrace
 device-major	cgd		char 75  block 19	cgd
 device-major	ksyms		char 76			ksyms
 

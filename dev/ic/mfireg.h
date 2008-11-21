@@ -1,4 +1,5 @@
-/* $OpenBSD: mfireg.h,v 1.25 2008/02/11 01:07:02 dlg Exp $ */
+/* $NetBSD: mfireg.h,v 1.3 2008/02/25 10:46:02 xtraeme Exp $ */
+/* $OpenBSD: mfireg.h,v 1.24 2006/06/19 19:05:45 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -42,7 +43,7 @@
 #define MFI_IQP					0x40 /* inbound queue port */
 #define MFI_OQP					0x44 /* outbound queue port */
 #define MFI_ODC					0xa0 /* outbound doorbell clr */
-#define MFI_OSP					0xb0 /* outbound scratch pad */
+#define MFI_OSP 				0xb0 /* outbound scratch pad */
 
 /* * firmware states */
 #define MFI_STATE_MASK				0xf0000000

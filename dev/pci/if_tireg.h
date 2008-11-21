@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tireg.h,v 1.25 2006/08/16 02:37:00 brad Exp $	*/
+/* $NetBSD: if_tireg.h,v 1.19 2007/09/07 23:05:27 tnn Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -31,7 +31,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pci/if_tireg.h,v 1.12 2000/01/18 00:26:29 wpaul Exp $
+ *	FreeBSD Id: if_tireg.h,v 1.9 1999/07/27 03:54:48 wpaul Exp
  */
 
 /*
@@ -43,15 +43,6 @@
  * The first group of registers are actually copies of the PCI
  * configuration space registers.
  */
-
-#define TI_PCI_ID			PCI_ID_REG /* PCI device/vendor ID */
-#define TI_PCI_CMDSTAT			PCI_COMMAND_STATUS_REG
-#define TI_PCI_CLASSCODE		PCI_CLASS_REG
-#define TI_PCI_BIST			PCI_BHLC_REG
-#define TI_PCI_LOMEM			PCI_MAPS /* Shared memory base address */
-#define TI_PCI_SUBSYS			PCI_SUBVEND_0
-#define TI_PCI_ROMBASE			0x030
-#define TI_PCI_INT			PCI_INTLINE
 
 /*
  * Tigon configuration and control registers.
@@ -108,6 +99,7 @@
  * Miscelaneous Local Control register.
  */
 #define TI_MLC_EE_WRITE_ENB		0x00000010
+#define TI_MLC_SRAM_BANK_256K		0x00000200
 #define TI_MLC_SRAM_BANK_SIZE		0x00000300 /* Tigon 2 only */
 #define TI_MLC_LOCALADDR_21		0x00004000
 #define TI_MLC_LOCALADDR_22		0x00008000
@@ -116,12 +108,6 @@
 #define TI_MLC_EE_TXEN			0x00200000
 #define TI_MLC_EE_DOUT			0x00400000
 #define TI_MLC_EE_DIN			0x00800000
-
-/* Possible memory sizes. */
-#define TI_MLC_SRAM_BANK_DISA		0x00000000
-#define TI_MLC_SRAM_BANK_1024K		0x00000100
-#define TI_MLC_SRAM_BANK_512K		0x00000200
-#define TI_MLC_SRAM_BANK_256K		0x00000300
 
 /*
  * Offset of MAC address inside EEPROM.
@@ -284,7 +270,7 @@
 #define TI_GCR_RXRETURNCONS_IDX		0x680
 #define TI_GCR_CMDRING			0x700
 
-#define TI_GCR_NIC_ADDR(x)		(x - TI_GCR_BASE)
+#define TI_GCR_NIC_ADDR(x)		(x - TI_GCR_BASE);
 
 /*
  * Local memory window. The local memory window is a 2K shared
@@ -302,7 +288,7 @@
  */
 #define TI_OPMODE_BYTESWAP_BD		0x00000002
 #define TI_OPMODE_WORDSWAP_BD		0x00000004
-#define TI_OPMODE_WARN_ENB		0x00000008 /* not yet implemented */
+#define TI_OPMODE_WARN_ENB		0x00000008 /* not yet implimented */
 #define TI_OPMODE_BYTESWAP_DATA		0x00000010
 #define TI_OPMODE_1_DMA_ACTIVE		0x00000040
 #define TI_OPMODE_SBUS			0x00000100
@@ -312,16 +298,7 @@
 #define TI_OPMODE_NO_EVENT_INTRS	0x00001000
 #define TI_OPMODE_NO_TX_INTRS		0x00002000
 #define TI_OPMODE_NO_RX_INTRS		0x00004000
-#define TI_OPMODE_FATAL_ENB		0x40000000 /* not yet implemented */
-
-#if BYTE_ORDER == BIG_ENDIAN
-#define TI_DMA_SWAP_OPTIONS \
-	TI_OPMODE_BYTESWAP_DATA| \
-	TI_OPMODE_BYTESWAP_BD|TI_OPMODE_WORDSWAP_BD
-#else
-#define TI_DMA_SWAP_OPTIONS \
-	TI_OPMODE_BYTESWAP_DATA
-#endif
+#define TI_OPMODE_FATAL_ENB		0x40000000 /* not yet implimented */
 
 /*
  * DMA configuration thresholds.
@@ -400,16 +377,23 @@
  * Even on the alpha, pci addresses are 32-bit quantities
  */
 
+#ifdef __64_bit_pci_addressing__
+typedef struct {
+	u_int64_t		ti_addr;
+} ti_hostaddr;
+#define TI_HOSTADDR(x)	x.ti_addr
+#else
 typedef struct {
 	u_int32_t		ti_addr_hi;
 	u_int32_t		ti_addr_lo;
 } ti_hostaddr;
 #define TI_HOSTADDR(x)	x.ti_addr_lo
+#endif
 
 /*
  * Ring control block structure. The rules for the max_len field
  * are as follows:
- * 
+ *
  * For the send ring, max_len indicates the number of entries in the
  * ring (128, 256 or 512).
  *
@@ -556,7 +540,7 @@ struct ti_stats {
 	volatile u_int32_t nicInterrupts;			/* 82 */
 	volatile u_int32_t nicAvoidedInterrupts;		/* 83 */
 	/*
-	 * BD Coalessing Thresholds
+	 * BD Coalescing Thresholds
 	 */
 	volatile u_int32_t nicEventThresholdHit;		/* 84 */
 	volatile u_int32_t nicSendThresholdHit;			/* 85 */
@@ -782,8 +766,8 @@ struct ti_tx_desc {
  * boundary.
  */
 
-#define TI_JUMBO_FRAMELEN	9018
-#define TI_JUMBO_MTU		(TI_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
+#define ETHER_ALIGN 2
+
 #define TI_PAGE_SIZE		PAGE_SIZE
 
 /*
@@ -853,9 +837,9 @@ struct ti_cmd_desc {
 	u_int32_t		ti_cmdx;
 };
 
-#define TI_CMD_CMD(cmd) (((((cmd)->ti_cmdx)) >> 24) & 0xff)
-#define TI_CMD_CODE(cmd) (((((cmd)->ti_cmdx)) >> 12) & 0xfff)
-#define TI_CMD_IDX(cmd) ((((cmd)->ti_cmdx)) & 0xfff)
+#define TI_CMD_CMD(cmd)		(((((cmd)->ti_cmdx)) >> 24) & 0xff)
+#define TI_CMD_CODE(cmd)	(((((cmd)->ti_cmdx)) >> 12) & 0xfff)
+#define TI_CMD_IDX(cmd)		((((cmd)->ti_cmdx)) & 0xfff)
 
 #define TI_CMD_HOST_STATE		0x01
 #define TI_CMD_CODE_STACK_UP		0x01
@@ -903,35 +887,37 @@ struct ti_cmd_desc {
  * Utility macros to make issuing commands a little simpler. Assumes
  * that 'sc' and 'cmd' are in local scope.
  */
-#define TI_DO_CMD(x, y, z)		\
-	cmd.ti_cmdx = (((x) << 24) | ((y) << 12) | ((z))); \
-	ti_cmd(sc, &cmd);
+#define TI_DO_CMD(x, y, z)	do {				\
+	cmd.ti_cmdx = (((x) << 24) | ((y) << 12) | ((z)));	\
+	ti_cmd(sc, &cmd);					\
+} while(0)
 
-#define TI_DO_CMD_EXT(x, y, z, v, w)	\
-	cmd.ti_cmdx = (((x) << 24) | ((y) << 12) | ((z))); \
-	ti_cmd_ext(sc, &cmd, v, w);
+#define TI_DO_CMD_EXT(x, y, z, v, w)	do {			\
+	cmd.ti_cmdx = (((x) << 24) | ((y) << 12) | ((z)));	\
+	ti_cmd_ext(sc, &cmd, (v), (w));				\
+} while(0)
 
 /*
  * Other utility macros.
  */
-#define TI_INC(x, y)	(x) = (x + 1) % y
+#define TI_INC(x, y)	do { (x) = ((x) + 1) % (y); } while(0)
 
-#define TI_UPDATE_JUMBOPROD(x, y)					\
-	if (x->ti_hwrev == TI_HWREV_TIGON) {				\
+#define TI_UPDATE_JUMBOPROD(x, y)	do {				\
+	if ((x)->ti_hwrev == TI_HWREV_TIGON)				\
 		TI_DO_CMD(TI_CMD_SET_RX_JUMBO_PROD_IDX, 0, y);	\
-	} else {							\
+	else								\
 		CSR_WRITE_4(x, TI_MB_JUMBORXPROD_IDX, y);		\
-	}
+} while(0)
 
 #define TI_UPDATE_MINIPROD(x, y)					\
-		CSR_WRITE_4(x, TI_MB_MINIRXPROD_IDX, y);
+		CSR_WRITE_4(x, TI_MB_MINIRXPROD_IDX, y)
 
-#define TI_UPDATE_STDPROD(x, y)						\
-	if (x->ti_hwrev == TI_HWREV_TIGON) {				\
+#define TI_UPDATE_STDPROD(x, y)		do {				\
+	if ((x)->ti_hwrev == TI_HWREV_TIGON)				\
 		TI_DO_CMD(TI_CMD_SET_RX_PROD_IDX, 0, y);		\
-	} else {							\
+	else								\
 		CSR_WRITE_4(x, TI_MB_STDRXPROD_IDX, y);			\
-	}
+} while(0)
 
 
 /*
@@ -942,9 +928,9 @@ struct ti_event_desc {
 	u_int32_t		ti_rsvd;
 };
 
-#define TI_EVENT_EVENT(e) (((((e)->ti_eventx)) >> 24) & 0xff)
-#define TI_EVENT_CODE(e) (((((e)->ti_eventx)) >> 12) & 0xfff)
-#define TI_EVENT_IDX(e) (((((e)->ti_eventx))) & 0xfff)
+#define TI_EVENT_EVENT(e)	(((((e)->ti_eventx)) >> 24) & 0xff)
+#define TI_EVENT_CODE(e)	(((((e)->ti_eventx)) >> 12) & 0xfff)
+#define TI_EVENT_IDX(e)		(((((e)->ti_eventx))) & 0xfff)
 
 /*
  * Tigon events.
@@ -970,18 +956,29 @@ struct ti_event_desc {
 /*
  * Register access macros. The Tigon always uses memory mapped register
  * accesses and all registers must be accessed with 32 bit operations.
+ * The Tigon can operate in big-endian mode, so we always write to the
+ * registers in native byte order. We assume that all big-endian hosts
+ * with a PCI bus have __BUS_SPACE_HAS_STREAM_METHODS defined.
  */
 
+#ifdef __BUS_SPACE_HAS_STREAM_METHODS
 #define CSR_WRITE_4(sc, reg, val)	\
-	bus_space_write_4(sc->ti_btag, sc->ti_bhandle, (reg), (val))
+	bus_space_write_stream_4((sc)->ti_btag, (sc)->ti_bhandle, reg, val)
 
 #define CSR_READ_4(sc, reg)		\
-	bus_space_read_4(sc->ti_btag, sc->ti_bhandle, (reg))
+	bus_space_read_stream_4((sc)->ti_btag, (sc)->ti_bhandle, reg)
+#else
+#define CSR_WRITE_4(sc, reg, val)	\
+	bus_space_write_4((sc)->ti_btag, (sc)->ti_bhandle, reg, val)
+
+#define CSR_READ_4(sc, reg)		\
+	bus_space_read_4((sc)->ti_btag, (sc)->ti_bhandle, reg)
+#endif
 
 #define TI_SETBIT(sc, reg, x)	\
-	CSR_WRITE_4(sc, (reg), (CSR_READ_4(sc, (reg)) | (x)))
+	CSR_WRITE_4(sc, reg, (CSR_READ_4(sc, reg) | (x)))
 #define TI_CLRBIT(sc, reg, x)	\
-	CSR_WRITE_4(sc, (reg), (CSR_READ_4(sc, (reg)) & ~(x)))
+	CSR_WRITE_4(sc, reg, (CSR_READ_4(sc, reg) & ~(x)))
 
 /*
  * Memory management stuff. Note: the SSLOTS, MSLOTS and JSLOTS
@@ -989,21 +986,23 @@ struct ti_event_desc {
  * allocated for the standard, mini and jumbo receive rings.
  */
 
+#ifndef TI_SSLOTS
 #define TI_SSLOTS	256
+#endif
+#ifndef TI_MSLOTS
 #define TI_MSLOTS	256
+#endif
+#ifndef TI_JSLOTS
 #define TI_JSLOTS	384
+#endif
+#define TI_RSLOTS	128
 
-#define TI_JRAWLEN	(TI_JUMBO_FRAMELEN + ETHER_ALIGN)
-#define TI_JLEN		(TI_JRAWLEN + (sizeof(u_int64_t) - \
-       (TI_JRAWLEN % sizeof(u_int64_t))))
-#define TI_JPAGESZ	PAGE_SIZE
-#define TI_RESID	(TI_JPAGESZ - (TI_JLEN * TI_JSLOTS) % TI_JPAGESZ)
-#define TI_JMEM		((TI_JLEN * TI_JSLOTS) + TI_RESID)
-
-struct ti_jslot {
-	caddr_t			ti_buf;
-	int			ti_inuse;
-};
+#define TI_JRAWLEN (ETHER_MAX_LEN_JUMBO + ETHER_ALIGN + sizeof(u_int64_t))
+#define TI_JLEN (TI_JRAWLEN + (sizeof(u_int64_t) - \
+	(TI_JRAWLEN % sizeof(u_int64_t))))
+#define TI_JPAGESZ PAGE_SIZE
+#define TI_RESID (TI_JPAGESZ - (TI_JLEN * TI_JSLOTS) % TI_JPAGESZ)
+#define TI_JMEM ((TI_JLEN * TI_JSLOTS) + TI_RESID)
 
 /*
  * Ring structures. Most of these reside in host memory and we tell
@@ -1018,7 +1017,6 @@ struct ti_ring_data {
 	struct ti_rx_desc	ti_rx_return_ring[TI_RETURN_RING_CNT];
 	struct ti_event_desc	ti_event_ring[TI_EVENT_RING_CNT];
 	struct ti_tx_desc	ti_tx_ring[TI_TX_RING_CNT];
-
 	/*
 	 * Make sure producer structures are aligned on 32-byte cache
 	 * line boundaries.
@@ -1032,32 +1030,18 @@ struct ti_ring_data {
 	struct ti_gib		ti_info;
 };
 
-#define TI_RING_DMA_ADDR(sc, offset) \
-	((sc)->ti_ring_map->dm_segs[0].ds_addr + \
-	offsetof(struct ti_ring_data, offset))
-
-#define TI_RING_DMASYNC(sc, offset, op) \
-	bus_dmamap_sync((sc)->sc_dmatag, (sc)->ti_ring_map, \
-			offsetof(struct ti_ring_data, offset), \
-			sizeof(((struct ti_ring_data *)0)->offset), (op))
-
-/*
- * Number of DMA segments in a TxCB. Note that this is carefully
- * chosen to make the total struct size an even power of two. It's
- * critical that no TxCB be split across a page boundry since
- * no attempt is made to allocate physically contiguous memory.
- * 
- */
-#ifdef __LP64__
-#define TI_NTXSEG      30
-#else
-#define TI_NTXSEG      31
-#endif
-
-struct ti_txmap_entry {
-	bus_dmamap_t			dmamap;
-	SLIST_ENTRY(ti_txmap_entry)	link;
-};
+#define	TI_CDOFF(x)		offsetof(struct ti_ring_data, x)
+#define	TI_CDRXSTDOFF(x)	TI_CDOFF(ti_rx_std_ring[(x)])
+#define	TI_CDRXJUMBOOFF(x)	TI_CDOFF(ti_rx_jumbo_ring[(x)])
+#define	TI_CDRXMINIOFF(x)	TI_CDOFF(ti_rx_mini_ring[(x)])
+#define	TI_CDRXRTNOFF(x)	TI_CDOFF(ti_rx_return_ring[(x)])
+#define	TI_CDEVENTOFF(x)	TI_CDOFF(ti_event_ring[(x)])
+#define	TI_CDTXOFF(x)		TI_CDOFF(ti_tx_ring[(x)])
+#define	TI_CDEVPRODOFF		TI_CDOFF(ti_ev_prodidx_r)
+#define	TI_CDRTNPRODOFF		TI_CDOFF(ti_return_prodidx_r)
+#define	TI_CDTXCONSOFF		TI_CDOFF(ti_tx_considx_r)
+#define	TI_CDGIBOFF		TI_CDOFF(ti_info)
+#define	TI_CDSTATSOFF		TI_CDOFF(ti_info.ti_stats)
 
 /*
  * Mbuf pointers. We need these to keep track of the virtual addresses
@@ -1069,25 +1053,15 @@ struct ti_chain_data {
 	struct mbuf		*ti_rx_std_chain[TI_STD_RX_RING_CNT];
 	struct mbuf		*ti_rx_jumbo_chain[TI_JUMBO_RX_RING_CNT];
 	struct mbuf		*ti_rx_mini_chain[TI_MINI_RX_RING_CNT];
-
-	struct ti_txmap_entry	*ti_tx_map[TI_TX_RING_CNT];
-	bus_dmamap_t		ti_rx_std_map[TI_STD_RX_RING_CNT];
-	bus_dmamap_t		ti_rx_jumbo_map;
-	bus_dmamap_t		ti_rx_mini_map[TI_MINI_RX_RING_CNT];
-
 	/* Stick the jumbo mem management stuff here too. */
-	struct ti_jslot		ti_jslots[TI_JSLOTS];
+	void *			ti_jslots[TI_JSLOTS];
 	void			*ti_jumbo_buf;
 };
-
-#define TI_JUMBO_DMA_ADDR(sc, m) \
-	((sc)->ti_cdata.ti_rx_jumbo_map->dm_segs[0].ds_addr + \
-	 (mtod((m), char *) - (char *)(sc)->ti_cdata.ti_jumbo_buf))
 
 struct ti_type {
 	u_int16_t		ti_vid;
 	u_int16_t		ti_did;
-	char			*ti_name;
+	const char		*ti_name;
 };
 
 #define TI_HWREV_TIGON		0x01
@@ -1097,33 +1071,48 @@ struct ti_type {
 
 struct ti_mc_entry {
 	struct ether_addr		mc_addr;
-	SLIST_ENTRY(ti_mc_entry)	mc_entries;
+	SIMPLEQ_ENTRY(ti_mc_entry)	mc_entries;
 };
 
 struct ti_jpool_entry {
 	int                             slot;
-	SLIST_ENTRY(ti_jpool_entry)	jpool_entries;
+	SIMPLEQ_ENTRY(ti_jpool_entry)	jpool_entries;
+};
+
+struct txdmamap_pool_entry {
+	bus_dmamap_t dmamap;
+	SIMPLEQ_ENTRY(txdmamap_pool_entry) link;
 };
 
 struct ti_softc {
-	struct device		sc_dv;
-	struct arpcom		arpcom;		/* interface info */
+	struct device sc_dev;
+	struct ethercom		ethercom;	/* interface info */
 	bus_space_handle_t	ti_bhandle;
+	char			*ti_vhandle;
 	bus_space_tag_t		ti_btag;
-	void *			ti_intrhand;
+	void			*ti_intrhand;
+
 	struct ifmedia		ifmedia;	/* media info */
+
 	u_int8_t		ti_hwrev;	/* Tigon rev (1 or 2) */
-	u_int8_t		ti_copper;	/* 1000baseTX card */
+	u_int8_t		ti_copper;	/* 1000baseT card */
 	u_int8_t		ti_linkstat;	/* Link state */
-	bus_dma_tag_t		sc_dmatag;
 	struct ti_ring_data	*ti_rdata;	/* rings */
-	struct ti_chain_data	ti_cdata;	/* mbufs */
 #define ti_ev_prodidx		ti_rdata->ti_ev_prodidx_r
 #define ti_return_prodidx	ti_rdata->ti_return_prodidx_r
 #define ti_tx_considx		ti_rdata->ti_tx_considx_r
+
 	struct ti_tx_desc	*ti_tx_ring_nic;/* pointer to shared mem */
-	bus_dmamap_t		ti_ring_map;
-	u_int16_t		ti_tx_saved_prodidx;
+
+	struct ti_chain_data	ti_cdata;	/* mbufs */
+
+	/*
+	 * Function pointers to deal with Tigon 1 vs. Tigon 2 differences.
+	 */
+	int			(*sc_tx_encap)(struct ti_softc *,
+				    struct mbuf *, uint32_t *);
+	void			(*sc_tx_eof)(struct ti_softc *);
+
 	u_int16_t		ti_tx_saved_considx;
 	u_int16_t		ti_rx_saved_considx;
 	u_int16_t		ti_ev_saved_considx;
@@ -1131,10 +1120,9 @@ struct ti_softc {
 	u_int16_t		ti_std;		/* current std ring head */
 	u_int16_t		ti_mini;	/* current mini ring head */
 	u_int16_t		ti_jumbo;	/* current jumo ring head */
-	SLIST_HEAD(__ti_mchead, ti_mc_entry)	ti_mc_listhead;
-	SLIST_HEAD(__ti_jfreehead, ti_jpool_entry)	ti_jfree_listhead;
-	SLIST_HEAD(__ti_jinusehead, ti_jpool_entry)	ti_jinuse_listhead;
-	SLIST_HEAD(__ti_txmaphead, ti_txmap_entry)	ti_tx_map_listhead;
+	SIMPLEQ_HEAD(, ti_mc_entry)	ti_mc_listhead;
+	SIMPLEQ_HEAD(, ti_jpool_entry)	ti_jfree_listhead;
+	SIMPLEQ_HEAD(, ti_jpool_entry)	ti_jinuse_listhead;
 	u_int32_t		ti_stat_ticks;
 	u_int32_t		ti_rx_coal_ticks;
 	u_int32_t		ti_tx_coal_ticks;
@@ -1143,7 +1131,90 @@ struct ti_softc {
 	u_int32_t		ti_tx_buf_ratio;
 	int			ti_if_flags;
 	int			ti_txcnt;
+	void *sc_ih;
+	bus_dma_tag_t sc_dmat;
+	bus_dmamap_t info_dmamap; /* holds ti_rdata */
+	u_int32_t info_dmaaddr; /* XXX 64-bit PCI addresses? */
+	bus_dmamap_t jumbo_dmamap;
+	u_int32_t jumbo_dmaaddr; /* XXX 64-bit PCI addresses? */
+	bus_dmamap_t mini_dmamap[TI_MINI_RX_RING_CNT];
+	bus_dmamap_t std_dmamap[TI_STD_RX_RING_CNT];
+	SIMPLEQ_HEAD(, txdmamap_pool_entry) txdma_list;
+	struct txdmamap_pool_entry *txdma[TI_TX_RING_CNT];
 };
+
+#define	TI_CDRXSTDADDR(sc, x)	((sc)->info_dmaaddr + TI_CDRXSTDOFF((x)))
+#define	TI_CDRXJUMBOADDR(sc, x)	((sc)->info_dmaaddr + TI_CDRXJUMBOOFF((x)))
+#define	TI_CDRXMINIADDR(sc, x)	((sc)->info_dmaaddr + TI_CDRXMINIOFF((x)))
+#define	TI_CDRXRTNADDR(sc, x)	((sc)->info_dmaaddr + TI_CDRXRTNOFF((x)))
+#define	TI_CDEVENTADDR(sc, x)	((sc)->info_dmaaddr + TI_CDEVENTOFF((x)))
+#define	TI_CDTXADDR(sc, x)	((sc)->info_dmaaddr + TI_CDTXOFF((x)))
+#define	TI_CDEVPRODADDR(sc)	((sc)->info_dmaaddr + TI_CDEVPRODOFF)
+#define	TI_CDRTNPRODADDR(sc)	((sc)->info_dmaaddr + TI_CDRTNPRODOFF)
+#define	TI_CDTXCONSADDR(sc)	((sc)->info_dmaaddr + TI_CDTXCONSOFF)
+#define	TI_CDGIBADDR(sc)	((sc)->info_dmaaddr + TI_CDGIBOFF)
+#define	TI_CDSTATSADDR(sc)	((sc)->info_dmaaddr + TI_CDSTATSOFF)
+
+#define	TI_CDRXSTDSYNC(sc, x, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDRXSTDOFF((x)), sizeof(struct ti_rx_desc), (ops))
+
+#define	TI_CDRXJUMBOSYNC(sc, x, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDRXJUMBOOFF((x)), sizeof(struct ti_rx_desc), (ops))
+
+#define	TI_CDRXMINISYNC(sc, x, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDRXMINIOFF((x)), sizeof(struct ti_rx_desc), (ops))
+
+#define	TI_CDRXRTNSYNC(sc, x, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDRXRTNOFF((x)), sizeof(struct ti_rx_desc), (ops))
+
+#define	TI_CDEVENTSYNC(sc, x, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDEVENTOFF((x)), sizeof(struct ti_event_desc), (ops))
+
+#define	TI_CDTXSYNC(sc, x, n, ops)					\
+do {									\
+	int __x, __n;							\
+									\
+	__x = (x);							\
+	__n = (n);							\
+									\
+	/* If it will wrap around, sync to the end of the ring. */	\
+	if ((__x + __n) > TI_TX_RING_CNT) {				\
+		bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,	\
+		    TI_CDTXOFF(__x), sizeof(struct ti_tx_desc) *	\
+		    (TI_TX_RING_CNT - __x), (ops));			\
+		__n -= (TI_TX_RING_CNT - __x);				\
+		__x = 0;						\
+	}								\
+									\
+	/* Now sync whatever is left. */				\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDTXOFF(__x), sizeof(struct ti_tx_desc) * (__n), (ops));	\
+} while (/*CONSTCOND*/0)
+
+#define	TI_CEVPRODSYNC(sc, ops)						\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDEVPRODOFF, sizeof(struct ti_producer), (ops))
+
+#define	TI_CDRTNPRODSYNC(sc, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDRTNPRODOFF, sizeof(struct ti_producer), (ops))
+
+#define	TI_CDTXCONSSYNC(sc, ops)					\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDTXCONSOFF, sizeof(struct ti_producer), (ops))
+
+#define	TI_CDGIBSYNC(sc, ops)						\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDGIBOFF, sizeof(struct ti_gib), (ops))
+
+#define	TI_CDSTATSSYNC(sc, ops)						\
+	bus_dmamap_sync((sc)->sc_dmat, (sc)->info_dmamap,		\
+	    TI_CDSTATSOFF, sizeof(struct ti_stats), (ops))
 
 /*
  * Microchip Technology 24Cxx EEPROM control bytes
@@ -1154,22 +1225,24 @@ struct ti_softc {
 /*
  * Note that EEPROM_START leaves transmission enabled.
  */
-#define EEPROM_START							\
+#define EEPROM_START()	do {						\
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock pin high */\
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT); /* Set DATA bit to 1 */	\
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_TXEN); /* Enable xmit to write bit */\
 	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT); /* Pull DATA bit to 0 again */\
-	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock low again */
+	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock low again */	\
+} while(0)
 
 /*
  * EEPROM_STOP ends access to the EEPROM and clears the ETXEN bit so
  * that no further data can be written to the EEPROM I/O pin.
  */
-#define EEPROM_STOP							\
+#define EEPROM_STOP()	do {							\
 	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_TXEN); /* Disable xmit */	\
 	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT); /* Pull DATA to 0 */	\
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock high */	\
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_TXEN); /* Enable xmit */	\
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT); /* Toggle DATA to 1 */	\
 	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_TXEN); /* Disable xmit. */	\
-	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock low again */
+	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock low again */ \
+} while(0)

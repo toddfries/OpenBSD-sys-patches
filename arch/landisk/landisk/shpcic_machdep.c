@@ -1,4 +1,3 @@
-/*	$OpenBSD: shpcic_machdep.c,v 1.3 2006/10/19 03:39:54 drahn Exp $	*/
 /*	$NetBSD: shpcic_machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
@@ -35,6 +34,9 @@
  * Machine-specific functions for PCI autoconfiguration.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: shpcic_machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
@@ -48,12 +50,11 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
-#if 0
 #include <dev/pci/pciconf.h>
-#endif
 
 #include <machine/bus.h>
 #include <machine/intr.h>
+#include <machine/pci_machdep.h>
 
 bus_space_tag_t
 shpcic_get_bus_io_tag(void)
@@ -83,6 +84,7 @@ void
 landisk_pci_attach_hook(struct device *parent, struct device *self,
     struct pcibus_attach_args *pba)
 {
+
 	/* Nothing to do */
 }
 
@@ -91,15 +93,6 @@ landisk_pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
 	int pin = pa->pa_intrpin;
 	int line = pa->pa_intrline;
-
-	{
-		/* HACK */
-		int dev = pa->pa_device;
-		static const int irq[4] = { 5, 6, 7, 8 };
-
-		if ((dev >= 0 && dev <= 3) && (pin >= 1 && pin <= 4))
-			line = irq[(dev + pin - 1) & 3];
-	}
 
 	if (pin == 0) {
 		/* No IRQ used. */
@@ -132,28 +125,37 @@ landisk_pci_intr_string(void *v, pci_intr_handle_t ih)
 	if (ih == 0)
 		panic("pci_intr_string: bogus handle 0x%x", ih);
 
-	snprintf(irqstr, sizeof irqstr, "irq %d", ih);
+	sprintf(irqstr, "irq %d", ih);
 
 	return (irqstr);
 }
 
+const struct evcnt *
+landisk_pci_intr_evcnt(void *v, pci_intr_handle_t ih)
+{
+
+	/* XXX for now, no evcnt parent reported */
+	return (NULL);
+}
+
 void *
 landisk_pci_intr_establish(void *v, pci_intr_handle_t ih, int level,
-    int (*ih_fun)(void *), void *ih_arg, const char *ih_name)
+    int (*ih_fun)(void *), void *ih_arg)
 {
+
 	if (ih == 0)
 		panic("pci_intr_establish: bogus handle 0x%x", ih);
 
-	return extintr_establish(ih, level, ih_fun, ih_arg, ih_name);
+	return extintr_establish(ih, level, ih_fun, ih_arg);
 }
 
 void
 landisk_pci_intr_disestablish(void *v, void *cookie)
 {
+
 	extintr_disestablish(cookie);
 }
 
-#if 0
 void
 landisk_pci_conf_interrupt(void *v, int bus, int dev, int pin, int swiz,
     int *iline)
@@ -172,7 +174,6 @@ landisk_pci_conf_hook(void *v, int bus, int dev, int func, pcireg_t id)
 
 	return (PCI_CONF_ALL & ~PCI_CONF_MAP_ROM);
 }
-#endif
 
 /*
  * shpcic bus space
@@ -196,15 +197,9 @@ struct _bus_space landisk_pci_bus_io =
 	.bs_rm_2 = shpcic_io_read_multi_2,
 	.bs_rm_4 = shpcic_io_read_multi_4,
 
-	.bs_rrm_2 = shpcic_io_read_raw_multi_2,
-	.bs_rrm_4 = shpcic_io_read_raw_multi_4,
-
 	.bs_rr_1 = shpcic_io_read_region_1,
 	.bs_rr_2 = shpcic_io_read_region_2,
 	.bs_rr_4 = shpcic_io_read_region_4,
-
-	.bs_rrr_2 = shpcic_io_read_raw_region_2,
-	.bs_rrr_4 = shpcic_io_read_raw_region_4,
 
 	.bs_w_1 = shpcic_io_write_1,
 	.bs_w_2 = shpcic_io_write_2,
@@ -214,15 +209,9 @@ struct _bus_space landisk_pci_bus_io =
 	.bs_wm_2 = shpcic_io_write_multi_2,
 	.bs_wm_4 = shpcic_io_write_multi_4,
 
-	.bs_wrm_2 = shpcic_io_write_raw_multi_2,
-	.bs_wrm_4 = shpcic_io_write_raw_multi_4,
-
 	.bs_wr_1 = shpcic_io_write_region_1,
 	.bs_wr_2 = shpcic_io_write_region_2,
 	.bs_wr_4 = shpcic_io_write_region_4,
-
-	.bs_wrr_2 = shpcic_io_write_raw_region_2,
-	.bs_wrr_4 = shpcic_io_write_raw_region_4,
 
 	.bs_sm_1 = shpcic_io_set_multi_1,
 	.bs_sm_2 = shpcic_io_set_multi_2,
@@ -256,15 +245,9 @@ struct _bus_space landisk_pci_bus_mem =
 	.bs_rm_2 = shpcic_mem_read_multi_2,
 	.bs_rm_4 = shpcic_mem_read_multi_4,
 
-	.bs_rrm_2 = shpcic_mem_read_raw_multi_2,
-	.bs_rrm_4 = shpcic_mem_read_raw_multi_4,
-
 	.bs_rr_1 = shpcic_mem_read_region_1,
 	.bs_rr_2 = shpcic_mem_read_region_2,
 	.bs_rr_4 = shpcic_mem_read_region_4,
-
-	.bs_rrr_2 = shpcic_mem_read_raw_region_2,
-	.bs_rrr_4 = shpcic_mem_read_raw_region_4,
 
 	.bs_w_1 = shpcic_mem_write_1,
 	.bs_w_2 = shpcic_mem_write_2,
@@ -274,15 +257,9 @@ struct _bus_space landisk_pci_bus_mem =
 	.bs_wm_2 = shpcic_mem_write_multi_2,
 	.bs_wm_4 = shpcic_mem_write_multi_4,
 
-	.bs_wrm_2 = shpcic_mem_write_raw_multi_2,
-	.bs_wrm_4 = shpcic_mem_write_raw_multi_4,
-
 	.bs_wr_1 = shpcic_mem_write_region_1,
 	.bs_wr_2 = shpcic_mem_write_region_2,
 	.bs_wr_4 = shpcic_mem_write_region_4,
-
-	.bs_wrr_2 = shpcic_mem_write_raw_region_2,
-	.bs_wrr_4 = shpcic_mem_write_raw_region_4,
 
 	.bs_sm_1 = shpcic_mem_set_multi_1,
 	.bs_sm_2 = shpcic_mem_set_multi_2,

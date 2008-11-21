@@ -1,8 +1,6 @@
-/*	$OpenBSD: ext2fs_subr.c,v 1.18 2008/01/05 19:49:26 otto Exp $	*/
-/*	$NetBSD: ext2fs_subr.c,v 1.1 1997/06/11 09:34:03 bouyer Exp $	*/
+/*	$NetBSD: ext2fs_subr.c,v 1.26 2008/05/16 09:22:00 hannken Exp $	*/
 
 /*
- * Copyright (c) 1997 Manuel Bouyer.
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -34,42 +32,51 @@
  * Modified for ext2fs by Manuel Bouyer.
  */
 
+/*
+ * Copyright (c) 1997 Manuel Bouyer.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	@(#)ffs_subr.c	8.2 (Berkeley) 9/21/93
+ * Modified for ext2fs by Manuel Bouyer.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_subr.c,v 1.26 2008/05/16 09:22:00 hannken Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/vnode.h>
-#include <sys/mount.h>
 #include <sys/buf.h>
+#include <sys/inttypes.h>
+#include <sys/kauth.h>
 
-#include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
-#include <ufs/ufs/ufsmount.h>
-
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
-
-#include <miscfs/specfs/specdev.h>
-#include <miscfs/fifofs/fifo.h>
-
-union _qcvt {
-	int64_t qcvt;
-	int32_t val[2];
-};
-
-#define SETHIGH(q, h) {			\
-	union _qcvt tmp;		\
-	tmp.qcvt = (q);			\
-	tmp.val[_QUAD_HIGHWORD] = (h);	\
-	(q) = tmp.qcvt;			\
-}
-
-#define SETLOW(q, l) {			\
-	union _qcvt tmp;		\
-	tmp.qcvt = (q);			\
-	tmp.val[_QUAD_LOWWORD] = (l);	\
-	(q) = tmp.qcvt;			\
-}
-
-#ifdef _KERNEL
 
 /*
  * Return buffer with the contents of block "offset" from the beginning of
@@ -77,21 +84,21 @@ union _qcvt {
  * remaining space in the directory.
  */
 int
-ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
+ext2fs_blkatoff(struct vnode *vp, off_t offset, char **res, struct buf **bpp)
 {
-	struct vnode *vp;
+	struct inode *ip;
 	struct m_ext2fs *fs;
 	struct buf *bp;
-	int32_t lbn;
+	daddr_t lbn;
 	int error;
 
-	vp = ITOV(ip);
+	ip = VTOI(vp);
 	fs = ip->i_e2fs;
 	lbn = lblkno(fs, offset);
 
 	*bpp = NULL;
-	if ((error = bread(vp, lbn, fs->e2fs_bsize, NOCRED, &bp)) != 0) {
-		brelse(bp);
+	if ((error = bread(vp, lbn, fs->e2fs_bsize, NOCRED, 0, &bp)) != 0) {
+		brelse(bp, 0);
 		return (error);
 	}
 	if (res)
@@ -99,103 +106,37 @@ ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 	*bpp = bp;
 	return (0);
 }
-#endif
 
-#if defined(_KERNEL) && defined(DIAGNOSTIC)
 void
-ext2fs_checkoverlap(struct buf *bp, struct inode *ip)
+ext2fs_itimes(struct inode *ip, const struct timespec *acc,
+    const struct timespec *mod, const struct timespec *cre)
 {
-	struct buf *ep;
-	int32_t start, last;
-	struct vnode *vp;
+	struct timespec now;
 
-	start = bp->b_blkno;
-	last = start + btodb(bp->b_bcount) - 1;
-	LIST_FOREACH(ep, &bufhead, b_list) {
-		if (ep == bp || (ep->b_flags & B_INVAL) ||
-			ep->b_vp == NULLVP)
-			continue;
-		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, (daddr64_t)0, NULL))
-			continue;
-		if (vp != ip->i_devvp)
-			continue;
-		/* look for overlap */
-		if (ep->b_bcount == 0 || ep->b_blkno > last ||
-			ep->b_blkno + btodb(ep->b_bcount) <= start)
-			continue;
-		vprint("Disk overlap", vp);
-		printf("\tstart %d, end %d overlap start %d, end %ld\n",
-			start, last, ep->b_blkno,
-			ep->b_blkno + btodb(ep->b_bcount) - 1);
-		panic("Disk buffer overlap");
-	}
-}
-#endif /* DIAGNOSTIC */
-
-/*
- * Initialize the vnode associated with a new inode, handle aliased vnodes.
- */
-int
-ext2fs_vinit(struct mount *mp, int (**specops)(void *),
-    int (**fifoops)(void *), struct vnode **vpp)
-{
-	struct inode *ip;
-	struct vnode *vp, *nvp;
-	struct timeval tv;
-
-	vp = *vpp;
-	ip = VTOI(vp);
-	vp->v_type = IFTOVT(ip->i_e2fs_mode);
-
-	switch(vp->v_type) {
-	case VCHR:
-	case VBLK:
-		vp->v_op = specops;
-
-		nvp = checkalias(vp, fs2h32(ip->i_e2din->e2di_rdev), mp);
-		if (nvp != NULL) {
-			/*
-			 * Discard unneeded vnode, but save its inode. Note
-			 * that the lock is carried over in the inode to the
-			 * replacement vnode.
-			 */
-			nvp->v_data = vp->v_data;
-			vp->v_data = NULL;
-			vp->v_op = spec_vnodeop_p;
-#ifdef VFSDEBUG
-			vp->v_flag &= ~VLOCKSWORK;
-#endif
-			vrele(vp);
-			vgone(vp);
-			/* Reinitialize aliased vnode. */
-			vp = nvp;
-			ip->i_vnode = vp;
-		}
-
-		break;
-
-	case VFIFO:
-#ifdef FIFO
-		vp->v_op = fifoops;
-		break;
-#else
-		return (EOPNOTSUPP);
-#endif /* FIFO */
-
-	default:
-
-		break;
+	if (!(ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_UPDATE | IN_MODIFY))) {
+		return;
 	}
 
-	if (ip->i_number == EXT2_ROOTINO)
-		vp->v_flag |= VROOT;
-
-	/* Initialize modrev times */
-	getmicrouptime(&tv);
-	SETHIGH(ip->i_modrev, tv.tv_sec);
-	SETLOW(ip->i_modrev, tv.tv_usec * 4294);
-
-	*vpp = vp;
-
-	return (0);
+	vfs_timestamp(&now);
+	if (ip->i_flag & IN_ACCESS) {
+		if (acc == NULL)
+			acc = &now;
+		ip->i_e2fs_atime = acc->tv_sec;
+	}
+	if (ip->i_flag & (IN_UPDATE | IN_MODIFY)) {
+		if (mod == NULL)
+			mod = &now;
+		ip->i_e2fs_mtime = mod->tv_sec;
+		ip->i_modrev++;
+	}
+	if (ip->i_flag & (IN_CHANGE | IN_MODIFY)) {
+		if (cre == NULL)
+			cre = &now;
+		ip->i_e2fs_ctime = cre->tv_sec;
+	}
+	if (ip->i_flag & (IN_ACCESS | IN_MODIFY))
+		ip->i_flag |= IN_ACCESSED;
+	if (ip->i_flag & (IN_UPDATE | IN_CHANGE))
+		ip->i_flag |= IN_MODIFIED;
+	ip->i_flag &= ~(IN_ACCESS | IN_CHANGE | IN_UPDATE | IN_MODIFY);
 }

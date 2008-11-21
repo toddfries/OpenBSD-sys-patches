@@ -1,4 +1,4 @@
-/*	$NetBSD: mipsX_subr.S,v 1.21 2006/12/12 12:03:45 simonb Exp $	*/
+/*	$NetBSD: mipsX_subr.S,v 1.26 2007/10/17 19:55:39 garbled Exp $	*/
 
 /*
  * Copyright 2002 Wasabi Systems, Inc.
@@ -610,12 +610,24 @@ NESTED_NOPROFILE(MIPSX(KernGenException), KERNFRAME_SIZ, ra)
 	REG_L	a0, TF_BASE+TF_REG_SR(sp)	# ??? why differs ???
 	REG_L	t0, TF_BASE+TF_REG_MULLO(sp)
 	REG_L	t1, TF_BASE+TF_REG_MULHI(sp)
-	REG_L	k0, TF_BASE+TF_REG_EPC(sp)	# might be changed inside trap
+	REG_L	k1, TF_BASE+TF_REG_EPC(sp)	# might be changed inside trap
 	mtc0	a0, MIPS_COP_0_STATUS		# restore the SR, disable intrs
 	COP0_SYNC
 	mtlo	t0
 	mthi	t1
-	_MTC0	k0, MIPS_COP_0_EXC_PC		# set return address
+
+#ifdef notyet
+	/* Check for restartable sequences. */
+	lui	t0, %hi(_C_LABEL(_lock_ras_start))
+	ori	t0, zero, %lo(_C_LABEL(_lock_ras_start))
+	li	t1, -MIPS_LOCK_RAS_SIZE
+	and	t1, t1, k1
+	bne	t1, t0, 1f
+	jal	_C_LABEL(_lock_ras)
+	nop
+#endif
+
+1:	_MTC0	k1, MIPS_COP_0_EXC_PC		# set return address
 	COP0_SYNC
 	REG_L	AT, TF_BASE+TF_REG_AST(sp)
 	REG_L	v0, TF_BASE+TF_REG_V0(sp)
@@ -668,8 +680,8 @@ NESTED_NOPROFILE(MIPSX(UserGenException), CALLFRAME_SIZ, ra)
 /*
  * Save all of the registers except for the kernel temporaries in u_pcb.
  */
-	lw	k1, _C_LABEL(curpcb)
-	#nop					# -slip-
+	lw	k1, CPUVAR(CURLWP)
+	lw	k1, L_ADDR(k1)
 	addu	k1, k1, USPACE - FRAME_SIZ
 	REG_S	AT, FRAME_AST(k1)
 	REG_S	v0, FRAME_V0(k1)
@@ -729,6 +741,7 @@ NESTED_NOPROFILE(MIPSX(UserGenException), CALLFRAME_SIZ, ra)
 /*
  * Call the trap handler.
  */
+	lw	MIPS_CURLWP, CPUVAR(CURLWP)
 	mtc0	t0, MIPS_COP_0_STATUS
 	COP0_SYNC
 	jal	_C_LABEL(trap)
@@ -736,11 +749,7 @@ NESTED_NOPROFILE(MIPSX(UserGenException), CALLFRAME_SIZ, ra)
 /*
  * Check pending asynchronous traps.
  */
-	lw	t0, _C_LABEL(curlwp)		# t0 = curlwp
-	nop
-	lw	t0, L_PROC(t0)			# t0 = curlwp->l_proc
-	nop
-	lw	t0, P_MD_ASTPENDING(t0)
+	lw	t0, L_MD_ASTPENDING(MIPS_CURLWP)
 	beq	t0, zero, 1f
 	nop
 /*
@@ -832,7 +841,8 @@ END(MIPSX(UserGenException))
 NESTED_NOPROFILE(MIPSX(SystemCall), CALLFRAME_SIZ, ra)
 	.set	noat
 	.mask	0x80000000, -4
-	lw	k1, _C_LABEL(curpcb)
+	lw	k1, CPUVAR(CURLWP)
+	lw	k1, L_ADDR(k1)
 	#nop					# -slip-
 	addu	k1, k1, USPACE - FRAME_SIZ
 	#REG_S	AT, FRAME_AST(k1)
@@ -843,7 +853,7 @@ NESTED_NOPROFILE(MIPSX(SystemCall), CALLFRAME_SIZ, ra)
 	REG_S	a1, FRAME_A1(k1)
 	REG_S	a2, FRAME_A2(k1)
 	REG_S	a3, FRAME_A3(k1)
-	lw	a0, _C_LABEL(curlwp)		# 1st arg is curlwp
+	lw	a0, CPUVAR(CURLWP)		# 1st arg is curlwp
 	mfhi	v1
 	#REG_S	t0, FRAME_T0(k1)		# no need to save temp regs
 	#REG_S	t1, FRAME_T1(k1)
@@ -881,6 +891,7 @@ NESTED_NOPROFILE(MIPSX(SystemCall), CALLFRAME_SIZ, ra)
 	.set noat
 #endif
 	lw	t0, L_PROC(a0)			# curlwp->l_proc (used below)
+	move	MIPS_CURLWP, a0			# set curlwp reg
 	addu	sp, k1, -CALLFRAME_SIZ
 #ifdef __GP_SUPPORT__
 	la	gp, _C_LABEL(_gp)		# switch to kernel GP
@@ -906,9 +917,7 @@ NESTED_NOPROFILE(MIPSX(SystemCall), CALLFRAME_SIZ, ra)
 /*
  * Check pending asynchronous traps.
  */
-	lw	t0, _C_LABEL(curlwp)
-	lw	t0, L_PROC(t0)
-	lw	t0, P_MD_ASTPENDING(t0)	# curlwp->l_proc->p_md.md_astpending
+	lw	t0, L_MD_ASTPENDING(MIPS_CURLWP)
 	beq	t0, zero, 1f
 	nop
 /*
@@ -1076,6 +1085,7 @@ NESTED_NOPROFILE(MIPSX(KernIntr), KERNFRAME_SIZ, ra)
 	REG_S	v0, TF_BASE+TF_REG_MULLO(sp)
 	REG_S	v1, TF_BASE+TF_REG_MULHI(sp)
 	REG_S	a2, TF_BASE+TF_REG_EPC(sp)
+	REG_S	MIPS_CURLWP, TF_BASE+TF_PAD(sp)	# XXX Atheros HAL
 /*
  * Call the interrupt handler.
  */
@@ -1091,6 +1101,7 @@ NESTED_NOPROFILE(MIPSX(KernIntr), KERNFRAME_SIZ, ra)
 #endif
 	mtc0	zero, MIPS_COP_0_STATUS		# Reset exl, trap possible.
 	COP0_SYNC
+	lw	MIPS_CURLWP, CPUVAR(CURLWP)	# XXX Atheros HAL
 	jal	_C_LABEL(cpu_intr)
 	and	a3, a0, a1			# 4th is STATUS & CAUSE
 /*
@@ -1109,6 +1120,7 @@ NESTED_NOPROFILE(MIPSX(KernIntr), KERNFRAME_SIZ, ra)
 	nop
 	.set noat
 #endif
+	REG_L	MIPS_CURLWP, TF_BASE+TF_PAD(sp)	# XXX Atheros HAL
 	REG_L	a0, TF_BASE+TF_REG_SR(sp)	# ??? why differs ???
 	DYNAMIC_STATUS_MASK(a0, t0)		# machine dependent masking
 	REG_L	t0, TF_BASE+TF_REG_MULLO(sp)
@@ -1118,7 +1130,21 @@ NESTED_NOPROFILE(MIPSX(KernIntr), KERNFRAME_SIZ, ra)
 	COP0_SYNC
 	mtlo	t0
 	mthi	t1
-	_MTC0	v0, MIPS_COP_0_EXC_PC		# set return address
+
+#ifdef notyet
+	/* Check for restartable sequences. */
+	lui	t0, %hi(_C_LABEL(_lock_ras_start))
+	ori	t0, zero, %lo(_C_LABEL(_lock_ras_start))
+	li	t1, -MIPS_LOCK_RAS_SIZE
+	and	t1, t1, v0
+	bne	t1, t0, 1f
+	move	k1, v0
+	jal	_C_LABEL(_lock_ras)
+	nop
+	mov	v0, k1
+#endif
+
+1:	_MTC0	v0, MIPS_COP_0_EXC_PC		# set return address
 	COP0_SYNC
 
 	REG_L	AT, TF_BASE+TF_REG_AST(sp)
@@ -1170,8 +1196,8 @@ NESTED_NOPROFILE(MIPSX(UserIntr), CALLFRAME_SIZ, ra)
  * Save the relevant user registers into the u_pcb.
  * We don't need to save s0 - s8 because the compiler does it for us.
  */
-	lw	k1, _C_LABEL(curpcb)
-	#nop					# -slip-
+	lw	k1, CPUVAR(CURLWP)
+	lw	k1, L_ADDR(k1)
 	addu	k1, k1, USPACE - FRAME_SIZ
 	REG_S	AT, FRAME_AST(k1)
 	REG_S	v0, FRAME_V0(k1)
@@ -1212,6 +1238,8 @@ NESTED_NOPROFILE(MIPSX(UserIntr), CALLFRAME_SIZ, ra)
 #ifdef __GP_SUPPORT__
 	la	gp, _C_LABEL(_gp)		# switch to kernel GP
 #endif
+	sw	MIPS_CURLWP, MIPS_CURLWP_FRAME(k1)# save curlwp reg
+	lw	MIPS_CURLWP, CPUVAR(CURLWP)	# set curlwp reg
 /*
  * Turn off fpu and enter kernel mode
  */
@@ -1244,17 +1272,16 @@ NESTED_NOPROFILE(MIPSX(UserIntr), CALLFRAME_SIZ, ra)
 	nop					# 3 nop hazard
 	nop
 	nop
-	lw	v0, _C_LABEL(curlwp)
 	addu	a1, sp, CALLFRAME_SIZ
-	lw	v0, L_PROC(v0)
  #	REG_L	a0, FRAME_SR(a1)
-	lw	v0, P_MD_ASTPENDING(v0)		# any pending ast?
+	lw	v0, L_MD_ASTPENDING(MIPS_CURLWP)# any pending ast?
  #	mtc0	a0, MIPS_COP_0_STATUS		# restore the SR, disable intrs
+	nop
 /*
  * Check pending asynchronous traps.
  */
 	beq	v0, zero, 1f			# if no, skip ast processing
-	nop					# -delay slot-
+	lw	MIPS_CURLWP, MIPS_CURLWP_FRAME(a1)# restore curlwp reg
 /*
  * We have pending asynchronous traps; save remaining user state in u_pcb.
  */
@@ -1267,7 +1294,8 @@ NESTED_NOPROFILE(MIPSX(UserIntr), CALLFRAME_SIZ, ra)
 	REG_S	s6, FRAME_S6(a1)
 	REG_S	s7, FRAME_S7(a1)
 	REG_S	s8, FRAME_S8(a1)
-	REG_L	a0, FRAME_EPC(a1)	# argument is interrupted PC
+	REG_L	a0, FRAME_EPC(a1)		# argument is interrupted PC
+	lw	MIPS_CURLWP, CPUVAR(CURLWP)	# set curlwp reg
 #ifdef IPL_ICU_MASK
 	jal	_C_LABEL(spllowersofthigh);
 	nop
@@ -1899,23 +1927,34 @@ END(MIPSX(VCEI))
 #endif /* MIPS3 && !MIPS3_5900 */
 
 /*
- * mipsN_proc_trampoline()
+ * mipsN_lwp_trampoline()
  *
  * Arrange for a function to be invoked neatly, after a cpu_switch().
  * Call the service function with one argument, specified by the s0
  * and s1 respectively.  There is no need register save operation.
  */
-LEAF(MIPSX(proc_trampoline))
+LEAF(MIPSX(lwp_trampoline))
 	addu	sp, sp, -CALLFRAME_SIZ
-	jal	ra, s0
+
+	# Call lwp_startup(), with args from cpu_switchto()/cpu_setfunc()
+	la	t0, _C_LABEL(lwp_startup)
+	move	a0, v0
+	jal	ra, t0
+	move	a1, s7
+
+	# Call the routine specified by cpu_setfunc()
+	jal	ra, s0			
 	move	a0, s1
-	.set	noat
+
+	#
+	# Return to user (won't happen if a kernel thread)
 	#
 	# Make sure to disable interrupts here, as otherwise
 	# we can take an interrupt *after* EXL is set, and
 	# end up returning to a bogus PC since the PC is not
 	# saved if EXL=1.
 	#
+	.set	noat
 	mtc0	zero, MIPS_COP_0_STATUS		# disable int
 	COP0_SYNC
 	nop					# 3 op delay
@@ -1982,7 +2021,7 @@ LEAF(MIPSX(proc_trampoline))
 	nop
 	eret
 	.set	at
-END(MIPSX(proc_trampoline))
+END(MIPSX(lwp_trampoline))
 
 /*
  * void mipsN_cpu_switch_resume(struct lwp *newlwp)
@@ -2247,8 +2286,8 @@ END(MIPSX(pagezero))
 	.globl _C_LABEL(MIPSX(locoresw))
 _C_LABEL(MIPSX(locoresw)):
 	.word _C_LABEL(MIPSX(cpu_switch_resume))
-	.word _C_LABEL(MIPSX(proc_trampoline))
-	.word _C_LABEL(mips_idle)
+	.word _C_LABEL(MIPSX(lwp_trampoline))
+	.word _C_LABEL(nullop)
 
 MIPSX(excpt_sw):
 	####

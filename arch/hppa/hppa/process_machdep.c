@@ -1,7 +1,9 @@
-/*	$OpenBSD: process_machdep.c,v 1.14 2007/07/20 20:52:51 kettenis Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.9 2008/01/10 21:08:40 skrll Exp $	*/
+
+/*	$OpenBSD: process_machdep.c,v 1.3 1999/06/18 05:19:52 mickey Exp $	*/
 
 /*
- * Copyright (c) 1999-2004 Michael Shalayeff
+ * Copyright (c) 1999 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,20 +14,26 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.9 2008/01/10 21:08:40 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -36,14 +44,14 @@
 #include <machine/cpufunc.h>
 #include <machine/frame.h>
 
-int
-process_read_regs(p, regs)
-	struct proc *p;
-	struct reg *regs;
-{
-	struct trapframe *tf = p->p_md.md_regs;
+#include <hppa/hppa/machdep.h>
 
-	regs->r_regs[ 0] = tf->tf_sar;
+int
+process_read_regs(struct lwp *l, struct reg *regs)
+{
+	struct trapframe *tf = l->l_md.md_regs;
+
+	regs->r_regs[ 0] = tf->tf_ipsw;
 	regs->r_regs[ 1] = tf->tf_r1;
 	regs->r_regs[ 2] = tf->tf_rp;
 	regs->r_regs[ 3] = tf->tf_r3;
@@ -75,41 +83,47 @@ process_read_regs(p, regs)
 	regs->r_regs[29] = tf->tf_ret1;
 	regs->r_regs[30] = tf->tf_sp;
 	regs->r_regs[31] = tf->tf_r31;
-	regs->r_pc	 = tf->tf_iioq_head;
-	regs->r_npc	 = tf->tf_iioq_tail;
 
-	return (0);
+	regs->r_sar = tf->tf_sar;
+
+	regs->r_pcsqh = tf->tf_iisq_head;
+	regs->r_pcsqt = tf->tf_iisq_tail;
+	regs->r_pcoqh = tf->tf_iioq_head;
+	regs->r_pcoqt = tf->tf_iioq_tail;
+
+	regs->r_sr0 = tf->tf_sr0;
+	regs->r_sr1 = tf->tf_sr1;
+	regs->r_sr2 = tf->tf_sr2;
+	regs->r_sr3 = tf->tf_sr3;
+	regs->r_sr4 = tf->tf_sr4;
+	regs->r_sr5 = tf->tf_sr5;
+	regs->r_sr6 = tf->tf_sr6;
+	regs->r_sr7 = tf->tf_sr7;
+
+#if 0
+	regs->r_cr26      = tf->tf_xxx;
+	regs->r_cr27      = tf->tf_xxx;
+#endif
+
+	return 0;
 }
 
 int
-process_read_fpregs(p, fpregs)
-	struct proc *p;
-	struct fpreg *fpregs;
+process_read_fpregs(struct lwp *l, struct fpreg *fpregs)
 {
-	extern paddr_t fpu_curpcb;
-	extern u_int fpu_enable;
-
-	if (p->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		mtctl(fpu_enable, CR_CCR);
-		fpu_save((vaddr_t)p->p_addr->u_pcb.pcb_fpregs);
-		mtctl(0, CR_CCR);
-	}
-	bcopy(p->p_addr->u_pcb.pcb_fpregs, fpregs, 32 * 8);
-	pdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
-
-	return (0);
+	hppa_fpu_flush(l);
+	bcopy(l->l_addr->u_pcb.pcb_fpregs, fpregs, sizeof(*fpregs));
+	fdcache(HPPA_SID_KERNEL, (vaddr_t)&l->l_addr->u_pcb.pcb_fpregs,
+		sizeof(*fpregs));
+	return 0;
 }
 
-#ifdef PTRACE
-
 int
-process_write_regs(p, regs)
-	struct proc *p;
-	struct reg *regs;
+process_write_regs(struct lwp *l, const struct reg *regs)
 {
-	struct trapframe *tf = p->p_md.md_regs;
+	struct trapframe *tf = l->l_md.md_regs;
 
-	tf->tf_sar  = regs->r_regs[ 0];
+	tf->tf_ipsw = regs->r_regs[ 0];
 	tf->tf_r1   = regs->r_regs[ 1];
 	tf->tf_rp   = regs->r_regs[ 2];
 	tf->tf_r3   = regs->r_regs[ 3];
@@ -141,41 +155,39 @@ process_write_regs(p, regs)
 	tf->tf_ret1 = regs->r_regs[29];
 	tf->tf_sp   = regs->r_regs[30];
 	tf->tf_r31  = regs->r_regs[31];
-	tf->tf_iioq_head = regs->r_pc | HPPA_PC_PRIV_USER;
-	tf->tf_iioq_tail = regs->r_npc | HPPA_PC_PRIV_USER;
 
-	return (0);
+	tf->tf_sar = regs->r_sar;
+
+	tf->tf_iisq_head = regs->r_pcsqh;
+	tf->tf_iisq_tail = regs->r_pcsqt;
+	tf->tf_iioq_head = regs->r_pcoqh | HPPA_PC_PRIV_USER;
+	tf->tf_iioq_tail = regs->r_pcoqt | HPPA_PC_PRIV_USER;
+
+	tf->tf_sr0 = regs->r_sr0;
+	tf->tf_sr1 = regs->r_sr1;
+	tf->tf_sr2 = regs->r_sr2;
+	tf->tf_sr3 = regs->r_sr3;
+	tf->tf_sr4 = regs->r_sr4;
+
+	return 0;
 }
 
 int
-process_write_fpregs(p, fpregs)
-	struct proc *p;
-	struct fpreg *fpregs;
+process_write_fpregs(struct lwp *l, const struct fpreg *fpregs)
 {
-	extern paddr_t fpu_curpcb;
-
-	if (p->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		fpu_exit();
-		fpu_curpcb = 0;
-	}
-
-	bcopy(fpregs, p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
-	fdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
-
-	return (0);
+	hppa_fpu_flush(l);
+	bcopy(fpregs, l->l_addr->u_pcb.pcb_fpregs, sizeof(*fpregs));
+	fdcache(HPPA_SID_KERNEL, (vaddr_t)&l->l_addr->u_pcb.pcb_fpregs,
+		sizeof(*fpregs));
+	return 0;
 }
-
-/* process_sstep() is in trap.c */
 
 int
-process_set_pc(p, addr)
-	struct proc *p;
-	caddr_t addr;
+process_set_pc(struct lwp *l, void *addr)
 {
-	p->p_md.md_regs->tf_iioq_head = (register_t)addr | HPPA_PC_PRIV_USER;
-	p->p_md.md_regs->tf_iioq_tail = p->p_md.md_regs->tf_iioq_head + 4;
+	l->l_md.md_regs->tf_iioq_head = (register_t)addr | HPPA_PC_PRIV_USER;
+	l->l_md.md_regs->tf_iioq_tail = l->l_md.md_regs->tf_iioq_head + 4;
 
-	return (0);
+	return 0;
 }
 
-#endif	/* PTRACE */

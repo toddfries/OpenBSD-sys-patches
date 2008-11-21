@@ -1,4 +1,4 @@
-/*	$NetBSD: dhu.c,v 1.49 2007/11/07 15:56:21 ad Exp $	*/
+/*	$NetBSD: dhu.c,v 1.55 2008/06/11 17:27:59 drochner Exp $	*/
 /*
  * Copyright (c) 2003, Hugh Graham.
  * Copyright (c) 1992, 1993
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dhu.c,v 1.49 2007/11/07 15:56:21 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dhu.c,v 1.55 2008/06/11 17:27:59 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -100,10 +100,10 @@ __KERNEL_RCSID(0, "$NetBSD: dhu.c,v 1.49 2007/11/07 15:56:21 ad Exp $");
 #define DHU_M2U(c)	((c)>>4)	/* convert minor(dev) to unit # */
 #define DHU_LINE(u)	((u)&0xF)	/* extract line # from minor(dev) */
 
-struct	dhu_softc {
-	struct	device	sc_dev;		/* Device struct used by config */
-	struct	evcnt	sc_rintrcnt;	/* Interrupt statistics */
-	struct	evcnt	sc_tintrcnt;	/* Interrupt statistics */
+struct dhu_softc {
+	device_t	sc_dev;		/* Device struct used by config */
+	struct evcnt	sc_rintrcnt;	/* Interrupt statistics */
+	struct evcnt	sc_tintrcnt;	/* Interrupt statistics */
 	int		sc_type;	/* controller type, DHU or DHV */
 	int		sc_lines;	/* number of lines */
 	bus_space_tag_t	sc_iot;
@@ -171,8 +171,8 @@ static const struct speedtab dhuspeedtab[] = {
   {      -1,	-1		}
 };
 
-static int	dhu_match(struct device *, struct cfdata *, void *);
-static void	dhu_attach(struct device *, struct device *, void *);
+static int	dhu_match(device_t, cfdata_t, void *);
+static void	dhu_attach(device_t, device_t, void *);
 static	void	dhurint(void *);
 static	void	dhuxint(void *);
 static	void	dhustart(struct tty *);
@@ -180,31 +180,37 @@ static	int	dhuparam(struct tty *, struct termios *);
 static	int	dhuiflow(struct tty *, int);
 static unsigned	dhumctl(struct dhu_softc *,int, int, int);
 
-CFATTACH_DECL(dhu, sizeof(struct dhu_softc),
+CFATTACH_DECL_NEW(dhu, sizeof(struct dhu_softc),
     dhu_match, dhu_attach, NULL, NULL);
 
-dev_type_open(dhuopen);
-dev_type_close(dhuclose);
-dev_type_read(dhuread);
-dev_type_write(dhuwrite);
-dev_type_ioctl(dhuioctl);
-dev_type_stop(dhustop);
-dev_type_tty(dhutty);
-dev_type_poll(dhupoll);
+static dev_type_open(dhuopen);
+static dev_type_close(dhuclose);
+static dev_type_read(dhuread);
+static dev_type_write(dhuwrite);
+static dev_type_ioctl(dhuioctl);
+static dev_type_stop(dhustop);
+static dev_type_tty(dhutty);
+static dev_type_poll(dhupoll);
 
 const struct cdevsw dhu_cdevsw = {
-	dhuopen, dhuclose, dhuread, dhuwrite, dhuioctl,
-	dhustop, dhutty, dhupoll, nommap, ttykqfilter, D_TTY
+	.d_open = dhuopen,
+	.d_close = dhuclose,
+	.d_read = dhuread,
+	.d_write = dhuwrite,
+	.d_ioctl = dhuioctl,
+	.d_stop = dhustop,
+	.d_tty = dhutty,
+	.d_poll = dhupoll,
+	.d_mmap = nommap,
+	.d_kqfilter = ttykqfilter,
+	.d_flag = D_TTY
 };
 
 /* Autoconfig handles: setup the controller to interrupt, */
 /* then complete the housecleaning for full operation */
 
 static int
-dhu_match(parent, cf, aux)
-	struct device *parent;
-	struct cfdata *cf;
-	void *aux;
+dhu_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct uba_attach_args *ua = aux;
 	int n;
@@ -240,31 +246,30 @@ dhu_match(parent, cf, aux)
 }
 
 static void
-dhu_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+dhu_attach(device_t parent, device_t self, void *aux)
 {
 	struct dhu_softc *sc = device_private(self);
 	struct uba_attach_args *ua = aux;
 	unsigned c;
 	int n, i;
 
+	sc->sc_dev = self;
 	sc->sc_iot = ua->ua_iot;
 	sc->sc_ioh = ua->ua_ioh;
 	sc->sc_dmat = ua->ua_dmat;
 	/* Process the 8 bytes of diagnostic info put into */
 	/* the FIFO following the master reset operation. */
 
-	printf("\n%s:", self->dv_xname);
+	aprint_normal("\n");
 	for (n = 0; n < 8; n++) {
 		c = DHU_READ_WORD(DHU_UBA_RBUF);
 
 		if ((c&DHU_DIAG_CODE) == DHU_DIAG_CODE) {
 			if ((c&0200) == 0000)
-				printf(" rom(%d) version %d",
+				aprint_error_dev(self, "rom(%d) version %d\n",
 					((c>>1)&01), ((c>>2)&037));
 			else if (((c>>2)&07) != 0)
-				printf(" diag-error(proc%d)=%x",
+				aprint_error_dev(self, "diag-error(proc%d)=%x\n",
 					((c>>1)&01), ((c>>2)&07));
 		}
 	}
@@ -277,7 +282,7 @@ dhu_attach(parent, self, aux)
 	if (sc->sc_type == IS_DHU && (c & DHU_STAT_MDL))
 		sc->sc_lines = 16;
 
-	printf("\n%s: DH%s-11\n", self->dv_xname,
+	aprint_normal_dev(self, "DH%s-11\n",
 	    sc->sc_type == IS_DHU ? "U" : "V");
 
 	for (i = 0; i < sc->sc_lines; i++) {
@@ -299,18 +304,17 @@ dhu_attach(parent, self, aux)
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec + 4,
 		dhuxint, sc, &sc->sc_tintrcnt);
 	evcnt_attach_dynamic(&sc->sc_rintrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-		sc->sc_dev.dv_xname, "rintr");
+		device_xname(sc->sc_dev), "rintr");
 	evcnt_attach_dynamic(&sc->sc_tintrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-		sc->sc_dev.dv_xname, "tintr");
+		device_xname(sc->sc_dev), "tintr");
 }
 
 /* Receiver Interrupt */
 
 static void
-dhurint(arg)
-	void *arg;
+dhurint(void *arg)
 {
-	struct	dhu_softc *sc = arg;
+	struct dhu_softc *sc = arg;
 	struct tty *tp;
 	int cc, line;
 	unsigned c, delta;
@@ -358,13 +362,13 @@ dhurint(arg)
 		}
 
 		if (!(tp->t_state & TS_ISOPEN)) {
-			wakeup((void *)&tp->t_rawq);
+			cv_broadcast(&tp->t_rawcv);
 			continue;
 		}
 
 		if ((c & DHU_RBUF_OVERRUN_ERR) && overrun == 0) {
 			log(LOG_WARNING, "%s: silo overflow, line %d\n",
-				sc->sc_dev.dv_xname, line);
+				device_xname(sc->sc_dev), line);
 			overrun = 1;
 		}
 		/* A BREAK key will appear as a NULL with a framing error */
@@ -380,10 +384,9 @@ dhurint(arg)
 /* Transmitter Interrupt */
 
 static void
-dhuxint(arg)
-	void *arg;
+dhuxint(void *arg)
 {
-	struct	dhu_softc *sc = arg;
+	struct dhu_softc *sc = arg;
 	struct tty *tp;
 	int line, i;
 
@@ -394,10 +397,10 @@ dhuxint(arg)
 
 		if (i & (DHU_CSR_TX_DMA_ERROR >> 8))
 			printf("%s: DMA ERROR on line: %d\n",
-			    sc->sc_dev.dv_xname, line);
+			    device_xname(sc->sc_dev), line);
 		if (i & (DHU_CSR_DIAG_FAIL >> 8))
 			printf("%s: DIAG FAIL on line: %d\n",
-			    sc->sc_dev.dv_xname, line);
+			    device_xname(sc->sc_dev), line);
 
 		tp->t_state &= ~TS_BUSY;
 		if (tp->t_state & TS_FLUSH)
@@ -417,10 +420,7 @@ dhuxint(arg)
 }
 
 int
-dhuopen(dev, flag, mode, l)
-	dev_t dev;
-	int flag, mode;
-	struct lwp *l;
+dhuopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct tty *tp;
 	int unit, line;
@@ -430,16 +430,12 @@ dhuopen(dev, flag, mode, l)
 	unit = DHU_M2U(minor(dev));
 	line = DHU_LINE(minor(dev));
 
-	if (unit >= dhu_cd.cd_ndevs || dhu_cd.cd_devs[unit] == NULL)
+	sc = device_lookup_private(&dhu_cd, unit);
+	if (!sc)
 		return (ENXIO);
-
-	sc = dhu_cd.cd_devs[unit];
 
 	if (line >= sc->sc_lines)
 		return ENXIO;
-
-	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN, tp))
-		return (EBUSY);
 
 	mutex_spin_enter(&tty_lock);
 	if (sc->sc_type == IS_DHU) {
@@ -452,6 +448,10 @@ dhuopen(dev, flag, mode, l)
 	sc->sc_dhu[line].dhu_modem = DHU_READ_WORD(DHU_UBA_STAT);
 
 	tp = sc->sc_dhu[line].dhu_tty;
+
+	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN, tp))
+		return (EBUSY);
+
 	tp->t_oproc   = dhustart;
 	tp->t_param   = dhuparam;
 	tp->t_hwiflow = dhuiflow;
@@ -475,7 +475,7 @@ dhuopen(dev, flag, mode, l)
 	while (!(flag & O_NONBLOCK) && !(tp->t_cflag & CLOCAL) &&
 	    !(tp->t_state & TS_CARR_ON)) {
 		tp->t_wopen++;
-		error = ttysleep(tp, &tp->t_rawq.c_cv, true, 0);
+		error = ttysleep(tp, &tp->t_rawcv, true, 0);
 		tp->t_wopen--;
 		if (error)
 			break;
@@ -488,21 +488,12 @@ dhuopen(dev, flag, mode, l)
 
 /*ARGSUSED*/
 int
-dhuclose(dev, flag, mode, l)
-	dev_t dev;
-	int flag, mode;
-	struct lwp *l;
+dhuclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct tty *tp;
-	int unit, line;
-	struct dhu_softc *sc;
-
-	unit = DHU_M2U(minor(dev));
-	line = DHU_LINE(minor(dev));
-
-	sc = dhu_cd.cd_devs[unit];
-
-	tp = sc->sc_dhu[line].dhu_tty;
+	const int unit = DHU_M2U(minor(dev));
+	const int line = DHU_LINE(minor(dev));
+	struct dhu_softc *sc = device_lookup_private(&dhu_cd, unit);
+	struct tty *tp = sc->sc_dhu[line].dhu_tty;
 
 	(*tp->t_linesw->l_close)(tp, flag);
 
@@ -512,76 +503,48 @@ dhuclose(dev, flag, mode, l)
 
 	/* Do a hangup if so required. */
 
-	if ((tp->t_cflag & HUPCL) || tp->t_wopen ||
-	    !(tp->t_state & TS_ISOPEN))
+	if ((tp->t_cflag & HUPCL) || tp->t_wopen || !(tp->t_state & TS_ISOPEN))
 		(void) dhumctl(sc, line, 0, DMSET);
 
 	return (ttyclose(tp));
 }
 
 int
-dhuread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+dhuread(dev_t dev, struct uio *uio, int flag)
 {
-	struct dhu_softc *sc;
-	struct tty *tp;
+	struct dhu_softc *sc = device_lookup_private(&dhu_cd, DHU_M2U(minor(dev)));
+	struct tty *tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 
-	sc = dhu_cd.cd_devs[DHU_M2U(minor(dev))];
-
-	tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 	return ((*tp->t_linesw->l_read)(tp, uio, flag));
 }
 
 int
-dhuwrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+dhuwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct dhu_softc *sc;
-	struct tty *tp;
+	struct dhu_softc *sc = device_lookup_private(&dhu_cd, DHU_M2U(minor(dev)));
+	struct tty *tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 
-	sc = dhu_cd.cd_devs[DHU_M2U(minor(dev))];
-
-	tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 	return ((*tp->t_linesw->l_write)(tp, uio, flag));
 }
 
 int
-dhupoll(dev, events, l)
-	dev_t dev;
-	int events;
-	struct lwp *l;
+dhupoll(dev_t dev, int events, struct lwp *l)
 {
-	struct dhu_softc *sc;
-	struct tty *tp;
+	struct dhu_softc *sc = device_lookup_private(&dhu_cd, DHU_M2U(minor(dev)));
+	struct tty *tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 
-	sc = dhu_cd.cd_devs[DHU_M2U(minor(dev))];
-
-	tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
 
 /*ARGSUSED*/
 int
-dhuioctl(dev, cmd, data, flag, l)
-	dev_t dev;
-	u_long cmd;
-	void *data;
-	int flag;
-	struct lwp *l;
+dhuioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
-	struct dhu_softc *sc;
-	struct tty *tp;
-	int unit, line;
+	const int unit = DHU_M2U(minor(dev));
+	const int line = DHU_LINE(minor(dev));
+	struct dhu_softc *sc = device_lookup_private(&dhu_cd, unit);
+	struct tty *tp = sc->sc_dhu[line].dhu_tty;
 	int error;
-
-	unit = DHU_M2U(minor(dev));
-	line = DHU_LINE(minor(dev));
-	sc = dhu_cd.cd_devs[unit];
-	tp = sc->sc_dhu[line].dhu_tty;
 
 	error = (*tp->t_linesw->l_ioctl)(tp, cmd, data, flag, l);
 	if (error != EPASSTHROUGH)
@@ -632,30 +595,25 @@ dhuioctl(dev, cmd, data, flag, l)
 }
 
 struct tty *
-dhutty(dev)
-	dev_t dev;
+dhutty(dev_t dev)
 {
-	struct dhu_softc *sc = dhu_cd.cd_devs[DHU_M2U(minor(dev))];
-	struct tty *tp = sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
-	return (tp);
+	struct dhu_softc *sc = device_lookup_private(&dhu_cd, DHU_M2U(minor(dev)));
+
+	return sc->sc_dhu[DHU_LINE(minor(dev))].dhu_tty;
 }
 
 /*ARGSUSED*/
 void
-dhustop(tp, flag)
-	struct tty *tp;
-	int flag;
+dhustop(struct tty *tp, int flag)
 {
-	struct dhu_softc *sc;
-	int line;
 	int s;
 
 	s = spltty();
 
 	if (tp->t_state & TS_BUSY) {
-
-		sc = dhu_cd.cd_devs[DHU_M2U(minor(tp->t_dev))];
-		line = DHU_LINE(minor(tp->t_dev));
+		const int unit = DHU_M2U(minor(tp->t_dev));
+		const int line = DHU_LINE(minor(tp->t_dev));
+		struct dhu_softc *sc = device_lookup_private(&dhu_cd, unit);
 
 		if (sc->sc_dhu[line].dhu_state == STATE_DMA_RUNNING) {
 
@@ -674,8 +632,7 @@ dhustop(tp, flag)
 }
 
 static void
-dhustart(tp)
-	struct tty *tp;
+dhustart(struct tty *tp)
 {
 	struct dhu_softc *sc;
 	int line, cc;
@@ -685,14 +642,7 @@ dhustart(tp)
 	s = spltty();
 	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((void *)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
-	if (tp->t_outq.c_cc == 0)
+	if (!ttypull(tp))
 		goto out;
 	cc = ndqb(&tp->t_outq, 0);
 	if (cc == 0)
@@ -700,7 +650,7 @@ dhustart(tp)
 
 	tp->t_state |= TS_BUSY;
 
-	sc = dhu_cd.cd_devs[DHU_M2U(minor(tp->t_dev))];
+	sc = device_lookup_private(&dhu_cd,DHU_M2U(minor(tp->t_dev)));
 
 	line = DHU_LINE(minor(tp->t_dev));
 
@@ -737,22 +687,18 @@ out:
 }
 
 static int
-dhuparam(tp, t)
-	struct tty *tp;
-	struct termios *t;
+dhuparam(struct tty *tp, struct termios *t)
 {
-	struct dhu_softc *sc;
 	int cflag = t->c_cflag;
 	int ispeed = ttspeedtab(t->c_ispeed, dhuspeedtab);
 	int ospeed = ttspeedtab(t->c_ospeed, dhuspeedtab);
-	unsigned lpr, lnctrl;
-	int unit, line;
+	unsigned int lpr;
+	unsigned int lnctrl;
+	const int unit = DHU_M2U(minor(tp->t_dev));
+	const int line = DHU_LINE(minor(tp->t_dev));
+	struct dhu_softc * const sc = device_lookup_private(&dhu_cd, unit);
 	int s;
 
-	unit = DHU_M2U(minor(tp->t_dev));
-	line = DHU_LINE(minor(tp->t_dev));
-
-	sc = dhu_cd.cd_devs[unit];
 
 	/* check requested parameters */
 	if (ospeed < 0 || ispeed < 0)
@@ -828,25 +774,21 @@ dhuparam(tp, t)
 }
 
 static int
-dhuiflow(tp, flag)
-	struct tty *tp;
-	int flag;
+dhuiflow(struct tty *tp, int flag)
 {
-	struct dhu_softc *sc;
-	int line = DHU_LINE(minor(tp->t_dev));
 
 	if (tp->t_cflag & CRTSCTS) {
-		sc = dhu_cd.cd_devs[DHU_M2U(minor(tp->t_dev))];
+		const int unit = DHU_M2U(minor(tp->t_dev));
+		const int line = DHU_LINE(minor(tp->t_dev));
+		struct dhu_softc * const sc = device_lookup_private(&dhu_cd, unit);
 		(void) dhumctl(sc, line, DML_RTS, ((flag)? DMBIC: DMBIS));
 		return (1);
 	}
 	return (0);
 }
 
-static unsigned
-dhumctl(sc, line, bits, how)
-	struct dhu_softc *sc;
-	int line, bits, how;
+static unsigned int
+dhumctl(struct dhu_softc *sc, int line, int bits, int how)
 {
 	unsigned status;
 	unsigned lnctrl;

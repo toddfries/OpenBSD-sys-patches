@@ -1,8 +1,12 @@
-/*	$OpenBSD: uhareg.h,v 1.4 2003/11/16 20:30:06 avsm Exp $	*/
-/*	$NetBSD: uhareg.h,v 1.2 1996/09/01 00:54:41 mycroft Exp $	*/
+/*	$NetBSD: uhareg.h,v 1.13 2008/04/28 20:23:51 martin Exp $	*/
 
-/*
- * Copyright (c) 1994, 1996 Charles M. Hannum.  All rights reserved.
+/*-
+ * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum and by Jason R. Thorpe of the Numerical Aerospace
+ * Simulation Facility, NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,22 +16,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Charles M. Hannum.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -178,13 +178,14 @@ typedef u_long physlen;
 #define UHA_SBUS_RES_ERR	0xa3	/* scsi bus reset error */
 #define UHA_BAD_SG_LIST		0xff	/* invalid scatter gath list */
 
-#define UHA_NSEG	33	/* number of dma segments supported */
+#define UHA_NSEG	33	/* number of DMA segments supported */
 
 struct uha_dma_seg {
 	physaddr seg_addr;
 	physlen seg_len;
 };
 
+#pragma pack(1)
 struct uha_mscp {
 	u_char opcode:3;
 #define UHA_HAC		0x01	/* host adapter command */
@@ -210,7 +211,7 @@ struct uha_mscp {
 	/*set. starts at 1, 8bytes per */
 	u_char req_sense_length;
 	u_char scsi_cmd_length;
-	struct scsi_generic scsi_cmd;
+	u_char scsi_cmd[12];
 	u_char host_stat;
 	u_char target_stat;
 	physaddr sense_ptr;	/* if 0 no auto sense */
@@ -220,11 +221,18 @@ struct uha_mscp {
 	/*-----------------end of hardware supported fields----------------*/
 	TAILQ_ENTRY(uha_mscp) chain;
 	struct uha_mscp *nexthash;
-	long hashkey;
-	struct scsi_xfer *xs;	/* the scsi_xfer for this cmd */
+	u_long hashkey;
+	struct scsipi_xfer *xs;	/* the scsipi_xfer for this cmd */
 	int flags;
 #define MSCP_ALLOC	0x01
 #define MSCP_ABORT	0x02
 	int timeout;
-} __packed;
 
+	/*
+	 * This DMA map maps the buffer involved in the transfer.
+	 * It's contents are loaded into "uha_dma" above.
+	 */
+	bus_dmamap_t	dmamap_xfer;
+
+};
+#pragma pack()

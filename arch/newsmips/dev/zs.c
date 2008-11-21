@@ -1,4 +1,4 @@
-/*	$NetBSD: zs.c,v 1.21 2005/12/11 12:18:24 christos Exp $	*/
+/*	$NetBSD: zs.c,v 1.25 2008/06/13 12:26:35 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.21 2005/12/11 12:18:24 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.25 2008/06/13 12:26:35 cegger Exp $");
 
 #include "opt_ddb.h"
 
@@ -53,16 +46,17 @@ __KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.21 2005/12/11 12:18:24 christos Exp $");
 #include <sys/device.h>
 #include <sys/tty.h>
 #include <sys/systm.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
 
 #include <machine/adrsmap.h>
-#include <machine/cpu.h>
 #include <machine/z8530var.h>
 
 #include <dev/ic/z8530reg.h>
 
-#define ZS_DELAY() (*zs_delay)()
+#include "ioconf.h"
 
-extern struct cfdriver zsc_cd;
+#define ZS_DELAY() (*zs_delay)()
 
 /*
  * Some warts needed by z8530tty.c -
@@ -97,14 +91,14 @@ zshard(void *arg)
 
 	rval = 0;
 	for (unit = 0; unit < zsc_cd.cd_ndevs; unit++) {
-		zsc = zsc_cd.cd_devs[unit];
+		zsc = device_lookup_private(&zsc_cd, unit);
 		if (zsc == NULL)
 			continue;
 		rval |= zsc_intr_hard(zsc);
 		softreq =  zsc->zsc_cs[0]->cs_softreq;
 		softreq |= zsc->zsc_cs[1]->cs_softreq;
 		if (softreq)
-			softintr_schedule(zsc->zsc_si);
+			softint_schedule(zsc->zsc_si);
 	}
 
 	return rval;
@@ -122,7 +116,7 @@ zssoft(void *arg)
 	/* Make sure we call the tty layer at spltty. */
 	s = spltty();
 	for (unit = 0; unit < zsc_cd.cd_ndevs; unit++) {
-		zsc = zsc_cd.cd_devs[unit];
+		zsc = device_lookup_private(&zsc_cd, unit);
 		if (zsc == NULL)
 			continue;
 		(void)zsc_intr_soft(zsc);
@@ -220,10 +214,10 @@ zs_set_modes(struct zs_chanstate *cs, int cflag)
  * Read or write the chip with suitable delays.
  */
 
-u_char
-zs_read_reg(struct zs_chanstate *cs, u_char reg)
+uint8_t
+zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
 {
-	u_char val;
+	uint8_t val;
 
 	*cs->cs_reg_csr = reg;
 	ZS_DELAY();
@@ -233,7 +227,7 @@ zs_read_reg(struct zs_chanstate *cs, u_char reg)
 }
 
 void
-zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val)
+zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
 {
 
 	*cs->cs_reg_csr = reg;
@@ -242,32 +236,36 @@ zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val)
 	ZS_DELAY();
 }
 
-u_char zs_read_csr(struct zs_chanstate *cs)
+uint8_t
+zs_read_csr(struct zs_chanstate *cs)
 {
-	u_char val;
+	uint8_t val;
 
 	val = *cs->cs_reg_csr;
 	ZS_DELAY();
 	return val;
 }
 
-void  zs_write_csr(struct zs_chanstate *cs, u_char val)
+void
+zs_write_csr(struct zs_chanstate *cs, uint8_t val)
 {
 
 	*cs->cs_reg_csr = val;
 	ZS_DELAY();
 }
 
-u_char zs_read_data(struct zs_chanstate *cs)
+uint8_t
+ zs_read_data(struct zs_chanstate *cs)
 {
-	u_char val;
+	uint8_t val;
 
 	val = *cs->cs_reg_data;
 	ZS_DELAY();
 	return val;
 }
 
-void  zs_write_data(struct zs_chanstate *cs, u_char val)
+void
+zs_write_data(struct zs_chanstate *cs, uint8_t val)
 {
 
 	*cs->cs_reg_data = val;

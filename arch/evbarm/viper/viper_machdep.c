@@ -1,4 +1,4 @@
-/*	$NetBSD: viper_machdep.c,v 1.6 2006/11/24 22:04:22 wiz Exp $	*/
+/*	$NetBSD: viper_machdep.c,v 1.11 2008/11/11 06:46:42 dyoung Exp $ */
 
 /*
  * Startup routines for the Arcom Viper.  Below you can trace the
@@ -112,11 +112,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: viper_machdep.c,v 1.6 2006/11/24 22:04:22 wiz Exp $");
+__KERNEL_RCSID(0, "$NetBSD: viper_machdep.c,v 1.11 2008/11/11 06:46:42 dyoung Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_ipkdb.h"
 #include "opt_pmap_debug.h"
 #include "opt_md.h"
 #include "opt_com.h"
@@ -184,11 +183,7 @@ u_int cpu_reset_address = 0;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -208,7 +203,6 @@ int max_processes = 64;			/* Default number */
 #endif	/* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
-pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -265,6 +259,20 @@ bs_protos(bs_notimpl);
 int comcnspeed = CONSPEED;
 int comcnmode = CONMODE;
 
+static struct pxa2x0_gpioconf boarddep_gpioconf[] = {
+	{ 44, GPIO_ALT_FN_1_IN },	/* BTCST */
+	{ 45, GPIO_ALT_FN_2_OUT },	/* BTRST */
+
+	{ -1 } 
+};
+static struct pxa2x0_gpioconf *viper_gpioconf[] = {
+	pxa25x_com_btuart_gpioconf,
+	pxa25x_com_ffuart_gpioconf,
+	pxa25x_com_stuart_gpioconf,
+	boarddep_gpioconf,
+	NULL
+};
+
 /*
  * void cpu_reboot(int howto, char *bootstr)
  *
@@ -287,6 +295,7 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
+		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -317,6 +326,8 @@ cpu_reboot(int howto, char *bootstr)
 	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -404,7 +415,6 @@ initarm(void *arg)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
-	pv_addr_t kernel_l1pt;
 #ifdef DIAGNOSTIC
 	extern vsize_t xscale_minidata_clean_size; /* used in KASSERT */
 #endif
@@ -429,10 +439,7 @@ initarm(void *arg)
 
 	/* setup GPIO for BTUART, in case bootloader doesn't take care of it */
 	pxa2x0_gpio_bootstrap(VIPER_GPIO_VBASE);
-	pxa2x0_gpio_set_function(42, GPIO_ALT_FN_1_IN);
-	pxa2x0_gpio_set_function(43, GPIO_ALT_FN_2_OUT);
-	pxa2x0_gpio_set_function(44, GPIO_ALT_FN_1_IN);
-	pxa2x0_gpio_set_function(45, GPIO_ALT_FN_2_OUT);
+	pxa2x0_gpio_config(viper_gpioconf);
 
 	/* turn on clock to UART block.
 	   XXX: this should not be done here. */
@@ -532,8 +539,6 @@ initarm(void *arg)
 	memset((char *)(var), 0, ((np) * PAGE_SIZE));
 
 	loop1 = 0;
-	kernel_l1pt.pv_pa = 0;
-	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if (((physical_freeend - L1_TABLE_SIZE) & (L1_TABLE_SIZE - 1)) == 0
@@ -776,18 +781,10 @@ initarm(void *arg)
 
 	/* Boot strap pmap telling it where the kernel page table is */
 	printf("pmap ");
-	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
-	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 #ifdef __HAVE_MEMORY_DISK__
 	md_root_setconf(memory_disk, sizeof memory_disk);
-#endif
-
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
 #endif
 
 #ifdef KGDB

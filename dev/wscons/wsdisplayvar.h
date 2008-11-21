@@ -1,5 +1,4 @@
-/* $OpenBSD: wsdisplayvar.h,v 1.22 2006/12/02 11:25:09 miod Exp $ */
-/* $NetBSD: wsdisplayvar.h,v 1.30 2005/02/04 02:10:49 perry Exp $ */
+/* $NetBSD: wsdisplayvar.h,v 1.47 2008/03/25 00:49:20 cube Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -31,14 +30,14 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-struct device;
+#ifndef _DEV_WSCONS_WSDISPLAYVAR_H
+#define _DEV_WSCONS_WSDISPLAYVAR_H
+
+#include <sys/device.h>
 
 /*
  * WSDISPLAY interfaces
  */
-
-#define WSDISPLAY_MAXSCREEN	12
-#define WSDISPLAY_MAXFONT	8
 
 /*
  * Emulation functions, for displays that can support glass-tty terminal
@@ -53,16 +52,14 @@ struct device;
  * with these functions, which is passed to them when they are invoked.
  */
 struct wsdisplay_emulops {
-	void	(*cursor)(void *c, int on, int row, int col);
+	void	(*cursor)(void *, int, int, int);
 	int	(*mapchar)(void *, int, unsigned int *);
-	void	(*putchar)(void *c, int row, int col, u_int uc, long attr);
-	void	(*copycols)(void *c, int row, int srccol, int dstcol,
-		    int ncols);
-	void	(*erasecols)(void *c, int row, int startcol, int ncols, long);
-	void	(*copyrows)(void *c, int srcrow, int dstrow, int nrows);
-	void	(*eraserows)(void *c, int row, int nrows, long attr);
-	int	(*alloc_attr)(void *c, int fg, int bg, int flags, long *attrp);
-	void	(*unpack_attr)(void *c, long attr, int *fg, int *bg, int *ul);
+	void	(*putchar)(void *, int, int, u_int, long);
+	void	(*copycols)(void *, int, int, int, int);
+	void	(*erasecols)(void *, int, int, int, long);
+	void	(*copyrows)(void *, int, int, int);
+	void	(*eraserows)(void *, int, int, long);
+	int	(*allocattr)(void *, int, int, int, long *);
 /* fg / bg values. Made identical to ANSI terminal color codes. */
 #define WSCOL_BLACK	0
 #define WSCOL_RED	1
@@ -72,6 +69,14 @@ struct wsdisplay_emulops {
 #define WSCOL_MAGENTA	5
 #define WSCOL_CYAN	6
 #define WSCOL_WHITE	7
+#define WSCOL_LIGHT_GREY	(WSCOL_BLACK+8)
+#define WSCOL_LIGHT_RED		(WSCOL_RED+8)
+#define WSCOL_LIGHT_GREEN	(WSCOL_GREEN+8)
+#define WSCOL_LIGHT_BROWN	(WSCOL_BROWN+8)
+#define WSCOL_LIGHT_BLUE	(WSCOL_BLUE+8)
+#define WSCOL_LIGHT_MAGENTA	(WSCOL_MAGENTA+8)
+#define WSCOL_LIGHT_CYAN	(WSCOL_CYAN+8)
+#define WSCOL_LIGHT_WHITE	(WSCOL_WHITE+8)
 /* flag values: */
 #define WSATTR_REVERSE	1
 #define WSATTR_HILIT	2
@@ -79,12 +84,11 @@ struct wsdisplay_emulops {
 #define WSATTR_UNDERLINE 8
 #define WSATTR_WSCOLORS 16
 	/* XXX need a free_attr() ??? */
+	void	(*replaceattr)(void *, long, long);
 };
 
-#define	WSSCREEN_NAME_SIZE	16
-
 struct wsscreen_descr {
-	char name[WSSCREEN_NAME_SIZE];
+	const char *name;
 	int ncols, nrows;
 	const struct wsdisplay_emulops *textops;
 	int fontwidth, fontheight;
@@ -94,17 +98,11 @@ struct wsscreen_descr {
 #define WSSCREEN_HILIT		4	/* can highlight (however) */
 #define WSSCREEN_BLINK		8	/* can blink */
 #define WSSCREEN_UNDERLINE	16	/* can underline */
-};
-
-/*
- * Character cell description (for emulation mode).
- */
-struct wsdisplay_charcell {
-	u_int	uc;
-	long	attr;
+	void *modecookie;
 };
 
 struct wsdisplay_font;
+struct wsdisplay_char;
 /*
  * Display access functions, invoked by user-land programs which require
  * direct device access, such as X11.
@@ -113,19 +111,25 @@ struct wsdisplay_font;
  * with these functions, which is passed to them when they are invoked.
  */
 struct wsdisplay_accessops {
-	int	(*ioctl)(void *v, u_long cmd, caddr_t data, int flag,
-		    struct proc *p);
-	paddr_t	(*mmap)(void *v, off_t off, int prot);
+	int	(*ioctl)(void *, void *, u_long, void *, int, struct lwp *);
+	paddr_t	(*mmap)(void *, void *, off_t, int);
 	int	(*alloc_screen)(void *, const struct wsscreen_descr *,
-				     void **, int *, int *, long *);
+				void **, int *, int *, long *);
 	void	(*free_screen)(void *, void *);
 	int	(*show_screen)(void *, void *, int,
-			       void (*) (void *, int, int), void *);
+			       void (*)(void *, int, int), void *);
 	int	(*load_font)(void *, void *, struct wsdisplay_font *);
-	void	(*scrollback)(void *, void *, int);
-	int	(*getchar)(void *, int, int, struct wsdisplay_charcell *);
-	void	(*burn_screen)(void *, u_int, u_int);
 	void	(*pollc)(void *, int);
+	void	(*scroll)(void *, void *, int);
+};
+
+/*
+ * Attachment information provided by wsdisplaydev devices when attaching
+ * wsdisplay units.
+ */
+struct wsdisplaydev_attach_args {
+	const struct wsdisplay_accessops *accessops;	/* access ops */
+	void	*accesscookie;				/* access cookie */
 };
 
 /* passed to wscons by the video driver to tell about its capabilities */
@@ -143,16 +147,14 @@ struct wsemuldisplaydev_attach_args {
 	const struct wsscreen_list *scrdata;		/* screen cfg info */
 	const struct wsdisplay_accessops *accessops;	/* access ops */
 	void	*accesscookie;				/* access cookie */
-	u_int	defaultscreens;				/* screens to create */
 };
 
-#define	WSEMULDISPLAYDEVCF_CONSOLE	0
+#include "locators.h"
+
 #define	wsemuldisplaydevcf_console	cf_loc[WSEMULDISPLAYDEVCF_CONSOLE]	/* spec'd as console? */
-#define	WSEMULDISPLAYDEVCF_CONSOLE_UNK	-1
-#define	WSDISPLAYDEVCF_MUX		0
-#define	wsdisplaydevcf_mux		cf_loc[WSDISPLAYDEVCF_MUX]
-#define	WSEMULDISPLAYDEVCF_MUX		1
-#define	wsemuldisplaydevcf_mux		cf_loc[WSEMULDISPLAYDEVCF_MUX]
+#define	WSEMULDISPLAYDEVCF_CONSOLE_UNK	(WSEMULDISPLAYDEVCF_CONSOLE_DEFAULT)
+#define	wsemuldisplaydevcf_kbdmux	cf_loc[WSEMULDISPLAYDEVCF_KBDMUX]
+#define	wsdisplaydevcf_kbdmux		cf_loc[WSDISPLAYDEVCF_KBDMUX]
 
 struct wscons_syncops {
 	int (*detach)(void *, int, void (*)(void *, int, int), void *);
@@ -164,14 +166,20 @@ struct wscons_syncops {
 /*
  * Autoconfiguration helper functions.
  */
-void	wsdisplay_cnattach(const struct wsscreen_descr *, void *,
-				int, int, long);
+void	wsdisplay_cnattach(const struct wsscreen_descr *, void *, int, int,
+            long);
+void	wsdisplay_preattach(const struct wsscreen_descr *, void *, int, int,
+            long);
+
+int	wsdisplaydevprint(void *, const char *);
 int	wsemuldisplaydevprint(void *, const char *);
+
+int	wsdisplay_handlex(int);
 
 /*
  * Console interface.
  */
-void	wsdisplay_cnputc(dev_t dev, int i);
+void	wsdisplay_cnputc(dev_t, int);
 
 /*
  * for use by compatibility code
@@ -179,52 +187,85 @@ void	wsdisplay_cnputc(dev_t dev, int i);
 struct wsdisplay_softc;
 struct wsscreen;
 int wsscreen_attach_sync(struct wsscreen *,
-			      const struct wscons_syncops *, void *);
+			 const struct wscons_syncops *, void *);
 int wsscreen_detach_sync(struct wsscreen *);
 int wsscreen_lookup_sync(struct wsscreen *,
-			      const struct wscons_syncops *, void **);
+			 const struct wscons_syncops *, void **);
 
 int wsdisplay_maxscreenidx(struct wsdisplay_softc *);
 int wsdisplay_screenstate(struct wsdisplay_softc *, int);
 int wsdisplay_getactivescreen(struct wsdisplay_softc *);
 int wsscreen_switchwait(struct wsdisplay_softc *, int);
 
-int wsdisplay_internal_ioctl(struct wsdisplay_softc *sc,
-				  struct wsscreen *,
-				  u_long cmd, caddr_t data,
-				  int flag, struct proc *p);
+int wsdisplay_internal_ioctl(struct wsdisplay_softc *, struct wsscreen *,
+			     u_long, void *, int, struct lwp *);
 
-int wsdisplay_usl_ioctl1(struct wsdisplay_softc *,
-			     u_long, caddr_t, int, struct proc *);
+int wsdisplay_usl_ioctl1(device_t, u_long, void *, int, struct lwp *);
 
 int wsdisplay_usl_ioctl2(struct wsdisplay_softc *, struct wsscreen *,
-			     u_long, caddr_t, int, struct proc *);
+			 u_long, void *, int, struct lwp *);
 
-int wsdisplay_cfg_ioctl(struct wsdisplay_softc *sc,
-			     u_long cmd, caddr_t data,
-			     int flag, struct proc *p);
+int wsdisplay_stat_ioctl(struct wsdisplay_softc *, u_long, void *,
+			 int, struct lwp *);
+
+int wsdisplay_cfg_ioctl(struct wsdisplay_softc *, u_long, void *,
+			int, struct lwp *);
+
+#ifdef WSDISPLAY_SCROLLSUPPORT
+void wsdisplay_scroll(void *, int);
+#endif
+
+#define WSDISPLAY_SCROLL_BACKWARD	1
+#define WSDISPLAY_SCROLL_FORWARD	(1 << 1)
+#define WSDISPLAY_SCROLL_RESET		(1 << 2)
+#define WSDISPLAY_SCROLL_LOW		(1 << 3)
+
+int wsdisplay_stat_inject(device_t, u_int, int);
 
 /*
  * for general use
  */
 #define WSDISPLAY_NULLSCREEN	-1
-void wsdisplay_switchtoconsole(void);
-const struct wsscreen_descr *
-    wsdisplay_screentype_pick(const struct wsscreen_list *, const char *);
+const struct wsscreen_descr *wsdisplay_screentype_pick(
+    const struct wsscreen_list *, const char *);
 
-/*
- * for use by wskbd
- */
-void wsdisplay_burn(void *v, u_int flags);
-void wsscrollback(void *v, int op);
+#if defined(_KERNEL)
+#  if defined(_KERNEL_OPT)
+#    include "opt_wsmsgattrs.h"
+#  endif
+#  if !defined(WS_DEFAULT_FG)
+#    define WS_DEFAULT_FG WSCOL_WHITE
+#  endif
+#  if !defined(WS_DEFAULT_BG)
+#    define WS_DEFAULT_BG WSCOL_BLACK
+#  endif
+#  if !defined(WS_DEFAULT_COLATTR)
+#    define WS_DEFAULT_COLATTR 0
+#  endif
+#  if !defined(WS_DEFAULT_MONOATTR)
+#    define WS_DEFAULT_MONOATTR 0
+#  endif
+#  if defined(WS_KERNEL_FG) || defined(WS_KERNEL_BG) || \
+      defined(WS_KERNEL_COLATTR) || defined(WS_KERNEL_MONOATTR)
+#    define WS_KERNEL_CUSTOMIZED
+#  else
+#    undef WS_KERNEL_CUSTOMIZED
+#  endif
+#  if !defined(WS_KERNEL_FG)
+#    define WS_KERNEL_FG WS_DEFAULT_FG
+#  endif
+#  if !defined(WS_KERNEL_BG)
+#    define WS_KERNEL_BG WS_DEFAULT_BG
+#  endif
+#  if !defined(WS_KERNEL_COLATTR)
+#    define WS_KERNEL_COLATTR WS_DEFAULT_COLATTR
+#  endif
+#  if !defined(WS_KERNEL_MONOATTR)
+#    define WS_KERNEL_MONOATTR WS_DEFAULT_MONOATTR
+#  endif
+#  if !defined(WSDISPLAY_BORDER_COLOR)
+#    define WSDISPLAY_BORDER_COLOR WSCOL_BLACK
+#  endif
+#endif /* _KERNEL */
 
-#define WSDISPLAY_SCROLL_BACKWARD	0
-#define WSDISPLAY_SCROLL_FORWARD	1
-#define WSDISPLAY_SCROLL_RESET		2
-
-/*
- * screen burner
- */
-#define	WSDISPLAY_DEFBURNOUT	600000	/* ms */
-#define	WSDISPLAY_DEFBURNIN	250	/* ms */
-
+#endif /* !_DEV_WSCONS_WSDISPLAYVAR_H */

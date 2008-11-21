@@ -1,4 +1,6 @@
-/*	$OpenBSD: stdarg.h,v 1.8 2006/04/09 03:07:52 deraadt Exp $	*/
+/*	$NetBSD: stdarg.h,v 1.5 2005/12/11 12:17:37 christos Exp $	*/
+
+/*	$OpenBSD: stdarg.h,v 1.2 1998/11/23 03:28:23 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -31,33 +33,31 @@
  *	@(#)stdarg.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef _MACHINE_STDARG_H_
-#define	_MACHINE_STDARG_H_
+#ifndef _HPPA_STDARG_H_
+#define	_HPPA_STDARG_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
+#include <sys/featuretest.h>
 
-typedef __va_list va_list;
+typedef _BSD_VA_LIST_	va_list;
 
-#ifdef lint
-#define	va_start(ap,lastarg)	((ap) = (ap))
-#else
-#define	va_start(ap,lastarg)	((ap) = (va_list)__builtin_saveregs())
-#endif /* lint */
+#ifdef __lint__
+#define __builtin_next_arg(t)		((t) ? 0 : 0)
+#define	__builtin_stdarg_start(a, l)	((a) = (va_list)(void *)&(l))
+#define	__builtin_va_arg(a, t)		((a) ? (t) 0 : (t) 0)
+#define	__builtin_va_end(a)		/* nothing */
+#define	__builtin_va_copy(d, s)		((d) = (s))
+#endif /* __lint__ */
 
-#define va_arg(ap,type)							\
-	(sizeof(type) > 8 ?						\
-	    ((ap = (va_list) ((char *)ap - sizeof (int))),		\
-	     (*((type *) (void *) (*((int *) (ap)))))):			\
-	    ((ap = (va_list) ((long)((char *)ap - sizeof (type)) &	\
-	                             (sizeof(type) > 4 ? ~0x7 : ~0x3))),\
-	     (*((type *) (void *) ((char *)ap + ((8 - sizeof(type)) % 4))))))
+#define	va_start(ap, last)	__builtin_stdarg_start((ap), (last))
+#define	va_arg			__builtin_va_arg
+#define	va_end			__builtin_va_end
+#define	__va_copy(dest, src)	__builtin_va_copy((dest), (src))
 
-#if __ISO_C_VISIBLE >= 1999
-#define va_copy(dest, src) \
-	((dest) = (src))
+#if !defined(_ANSI_SOURCE) &&						\
+    (defined(_ISOC99_SOURCE) || (__STDC_VERSION__ - 0) >= 199901L ||	\
+     defined(_NETBSD_SOURCE))
+#define	va_copy(dest, src)	__va_copy((dest), (src))
 #endif
 
-#define	va_end(ap)	
-
-#endif /* !_MACHINE_STDARG_H */
+#endif /* !_HPPA_STDARG_H */

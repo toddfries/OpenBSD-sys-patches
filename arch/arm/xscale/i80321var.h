@@ -1,5 +1,4 @@
-/*	$OpenBSD: i80321var.h,v 1.3 2006/06/15 21:35:30 drahn Exp $	*/
-/*	$NetBSD: i80321var.h,v 1.10 2005/12/15 01:44:00 briggs Exp $	*/
+/*	$NetBSD: i80321var.h,v 1.12 2008/04/27 18:58:45 matt Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Wasabi Systems, Inc.
@@ -40,10 +39,7 @@
 #define	_ARM_XSCALE_I80321VAR_H_
 
 #include <sys/queue.h>
-#include <sys/gpio.h>
-#include <sys/evcount.h>
 #include <dev/pci/pcivar.h>
-#include <dev/gpio/gpiovar.h>
 
 /*
  * There are roughly 32 interrupt sources.
@@ -56,21 +52,16 @@ struct intrhand {
 	void *ih_arg;			/* arg for handler */
 	int ih_ipl;			/* IPL_* */
 	int ih_irq;			/* IRQ number */
-	struct evcount  	ih_count;
-	char *ih_name;
 };
+
+#define	IRQNAMESIZE	sizeof("iop321 irq 31")
 
 struct intrq {
 	TAILQ_HEAD(, intrhand) iq_list;	/* handler list */
-	int iq_irq;			/* IRQ to mask while handling */
+	struct evcnt iq_ev;		/* event counter */
+	int iq_mask;			/* IRQs to mask while handling */
 	int iq_levels;			/* IPL_*'s this IRQ has */
 	int iq_ist;			/* share type */
-};
-
-struct config_bus_space {
-	u_int32_t bus_base;
-	u_int32_t bus_size;
-	int bus_io;
 };
 
 struct i80321_softc {
@@ -91,7 +82,6 @@ struct i80321_softc {
 	bus_space_handle_t sc_atu_sh;
 	bus_space_handle_t sc_mcu_sh;
 
-#ifdef BULLSHIT
 	/*
 	 * We expect the board-specific front-end to have already mapped
 	 * the PCI I/O space .. it is only 64K, and I/O mappings tend to
@@ -99,9 +89,6 @@ struct i80321_softc {
 	 * to map them all into virtual space in one fell swoop.
 	 */
 	vaddr_t	sc_iow_vaddr;		/* I/O window vaddr */
-#else
-	bus_space_handle_t sc_io_sh;
-#endif
 
 	/*
 	 * Variables that define the Inbound windows.  The base address of
@@ -131,7 +118,7 @@ struct i80321_softc {
 
 	/*
 	 * This is the PCI address that the Outbound I/O window maps to.
-         * The offset is to keep the actual used I/O address away from 0,
+	 * The offset is to keep the actual used I/O address away from 0,
 	 * which can be bad if, say, an i8254x gig-e chip gets mapped there.
 	 * The 0 value apparently looks like "unconfigured" to the controller
 	 * and it ignores writes to that region (it doesn't cause a bus fault,
@@ -159,22 +146,8 @@ struct i80321_softc {
 	uint8_t sc_gpio_dir;	/* GPIO pin direction (1 == output) */
 	uint8_t sc_gpio_val;	/* GPIO output pin value */
 
-#define I80219_GPIO_NPINS 8
-	/* GPIO for 80219 -XXX */
-	struct gpio_chipset_tag sc_gpio_gc;
-        struct gpio_pin sc_gpio_pins[I80219_GPIO_NPINS];
-
 	/* DMA tag for local devices. */
 	struct arm32_bus_dma_tag sc_local_dmat;
-
-	/* Structures to do bus fixup */
-	int nbogus;
-	struct extent *extent_mem;
-	struct extent *extent_port;
-	struct config_bus_space sc_membus_space;
-	struct config_bus_space sc_iobus_space;
-
-
 };
 
 /*
@@ -191,6 +164,7 @@ struct iopxs_attach_args {
 
 extern struct bus_space i80321_bs_tag;
 extern struct i80321_softc *i80321_softc;
+extern const char * const i80321_irqnames[];
 
 extern void (*i80321_hardclock_hook)(void);
 
@@ -199,10 +173,10 @@ void	i80321_sdram_bounds(bus_space_tag_t, bus_space_handle_t,
 
 void	i80321_calibrate_delay(void);
 
-void	i80321intc_init(void);
-void	i80321intc_intr_init(void);
-void	*i80321intc_establish(int, int, int (*)(void *), void *, char *);
-void	i80321intc_disestablish(void *);
+void	i80321_icu_init(void);
+void	i80321_intr_init(void);
+void	*i80321_intr_establish(int, int, int (*)(void *), void *);
+void	i80321_intr_disestablish(void *);
 
 void	i80321_gpio_set_direction(uint8_t, uint8_t);
 void	i80321_gpio_set_val(uint8_t, uint8_t);
@@ -217,4 +191,5 @@ void	i80321_local_dma_init(struct i80321_softc *sc);
 void	i80321_pci_init(pci_chipset_tag_t, void *);
 
 void	i80321_attach(struct i80321_softc *);
+
 #endif /* _ARM_XSCALE_I80321VAR_H_ */

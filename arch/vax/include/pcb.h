@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.6 2003/11/10 21:05:06 miod Exp $	*/
-/*	$NetBSD: pcb.h,v 1.10 1996/02/02 18:08:26 mycroft Exp $	*/
+/*	$NetBSD: pcb.h,v 1.12 2008/02/22 08:46:48 matt Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -36,8 +35,7 @@
 #ifndef _VAX_PCB_H_
 #define _VAX_PCB_H_
 
-#include <machine/reg.h>
-#include <machine/pte.h>
+#include <machine/trap.h>
 
 struct pcb {
 
@@ -52,22 +50,25 @@ struct pcb {
 	long	FP;		/*  Frame Pointer             */
 	long	PC;		/*  Program Counter           */
 	long	PSL;		/*  Program Status Longword   */
-	pt_entry_t *P0BR;	/*  Page 0 Base Register      */
+	struct	pte *P0BR;	/*  Page 0 Base Register      */
 	long	P0LR;		/*  Page 0 Length Register    */
-	pt_entry_t *P1BR;	/*  Page 1 Base Register      */
+	struct	pte *P1BR;	/*  Page 1 Base Register      */
 	long	P1LR;		/*  Page 1 Length Register    */
 
 	/* Software registers, only used by kernel software */
 	void   *framep;		/* Pointer to syscall frame */
 	void   *iftrap;		/* Tells whether fault copy */
+	paddr_t pcb_paddr;	/* physical address of PCB */
+	struct pmap *pcb_pm;	/* owning pmap */
+	struct pcb *pcb_pmnext;	/* next pcb that shares this pmap */
 };
 
 #define	AST_MASK 0x07000000
 #define	AST_PCB	 0x04000000
 
-/* machine-specific core dump; save regs */
+/* machine-specific core dump; save trapframe */
 struct	md_coredump {
-	struct reg md_reg;
+	struct trapframe md_tf;
 };
 
 #endif /* _VAX_PCB_H_ */

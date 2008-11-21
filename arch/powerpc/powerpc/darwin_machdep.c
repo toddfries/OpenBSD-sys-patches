@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_machdep.c,v 1.19 2005/12/11 12:18:46 christos Exp $ */
+/*	$NetBSD: darwin_machdep.c,v 1.25 2008/04/28 20:23:32 martin Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_machdep.c,v 1.19 2005/12/11 12:18:46 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_machdep.c,v 1.25 2008/04/28 20:23:32 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,15 +83,15 @@ darwin_sendsig(ksi, mask)
 
 	/* Use an alternate signal stack? */
 	onstack =
-	    (p->p_sigctx.ps_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
 	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 
 	/* Set the new stack pointer sfp */
 	if (onstack) {
 		sfp = (struct darwin_sigframe *)
-		    ((caddr_t)p->p_sigctx.ps_sigstk.ss_sp +
-		    p->p_sigctx.ps_sigstk.ss_size);
-		stack_size = p->p_sigctx.ps_sigstk.ss_size;
+		    ((char *)l->l_sigstk.ss_sp +
+		    l->l_sigstk.ss_size);
+		stack_size = l->l_sigstk.ss_size;
 	} else {
 		sfp = (struct darwin_sigframe *)tf->fixreg[1];
 		stack_size = 0;
@@ -139,7 +132,7 @@ darwin_sendsig(ksi, mask)
 	sf.duc.uctx.uc_stack.ss_size = stack_size;
 	if (onstack)
 		sf.duc.uctx.uc_stack.ss_flags |= SS_ONSTACK;
-	sf.duc.uctx.uc_link = NULL;
+	sf.duc.uctx.uc_link = l->l_ctxlink;
 	sf.duc.uctx.uc_mcsize = sizeof(sf.dmc);
 	sf.duc.uctx.uc_mcontext = (struct darwin_mcontext *)&sfp->dmc;
 
@@ -177,7 +170,7 @@ darwin_sendsig(ksi, mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 
 	return;
 }
@@ -190,12 +183,11 @@ darwin_sendsig(ksi, mask)
  * This is the version for X.2 binaries and older
  */
 int
-darwin_sys_sigreturn_x2(struct lwp *l, void *v, register_t *retval)
+darwin_sys_sigreturn_x2(struct lwp *l, const struct darwin_sys_sigreturn_x2_args *uap, register_t *retval)
 {
-	struct darwin_sys_sigreturn_x2_args /* {
+	/* {
 		syscallarg(struct darwin_ucontext *) uctx;
-	} */ *uap = v;
-	struct proc *p = l->l_proc;
+	} */
 	struct darwin_ucontext uctx;
 	struct darwin_mcontext mctx;
 	struct trapframe *tf;
@@ -242,13 +234,13 @@ darwin_sys_sigreturn_x2(struct lwp *l, void *v, register_t *retval)
 
 	/* Restore signal stack */
 	if (uctx.uc_onstack & SS_ONSTACK)
-		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask */
 	native_sigset13_to_sigset(&uctx.uc_sigmask, &mask);
-	(void)sigprocmask1(p, SIG_SETMASK, &mask, 0);
+	(void)sigprocmask1(l, SIG_SETMASK, &mask, 0);
 
 	return (EJUSTRETURN);
 }
@@ -257,16 +249,16 @@ darwin_sys_sigreturn_x2(struct lwp *l, void *v, register_t *retval)
  * This is the version used starting with X.3 binaries
  */
 int
-darwin_sys_sigreturn(struct lwp *l, void *v, register_t *retval)
+darwin_sys_sigreturn(struct lwp *l, const struct darwin_sys_sigreturn_args *uap, register_t *retval)
 {
-	struct darwin_sys_sigreturn_args /* {
+	/* {
 		syscallarg(struct darwin_ucontext *) uctx;
 		syscallarg(int) ucvers;
-	} */ *uap = v;
+	} */
 
 	switch (SCARG(uap, ucvers)) {
 	case DARWIN_UCVERS_X2:
-		return darwin_sys_sigreturn_x2(l, v, retval);
+		return darwin_sys_sigreturn_x2(l, (const void *)uap, retval);
 		break;
 
 	default:

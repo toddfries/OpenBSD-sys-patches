@@ -1,5 +1,4 @@
-/*	$OpenBSD: isa_machdep.h,v 1.3 2006/02/12 19:55:39 miod Exp $	*/
-/*	$NetBSD: isa_machdep.h,v 1.3 2002/01/07 22:58:07 chris Exp $	*/
+/*	$NetBSD: isa_machdep.h,v 1.5 2008/04/28 20:23:14 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,14 +36,11 @@
 #include <machine/bus.h>
 #include <dev/isa/isadmavar.h>
 
-#define __NO_ISA_INTR_CHECK
 /*
  * Types provided to machine-independent ISA code.
  */
 struct arm32_isa_chipset {
-	/*
 	struct isa_dma_state ic_dmastate;
-	*/
 };
 
 typedef struct arm32_isa_chipset *isa_chipset_tag_t;
@@ -64,11 +53,11 @@ struct isabus_attach_args;	/* XXX */
  */
 void	isa_attach_hook(struct device *, struct device *,
 	    struct isabus_attach_args *);
+const struct evcnt *isa_intr_evcnt(isa_chipset_tag_t ic, int irq);
 void	*isa_intr_establish(isa_chipset_tag_t ic, int irq, int type,
-	    int level, int (*ih_fun)(void *), void *ih_arg, char *name);
+	    int level, int (*ih_fun)(void *), void *ih_arg);
 void	isa_intr_disestablish(isa_chipset_tag_t ic, void *handler);
 
-#if 0
 #define	isa_dmainit(ic, bst, dmat, d)					\
 	_isa_dmainit(&(ic)->ic_dmastate, (bst), (dmat), (d))
 #define	isa_dmacascade(ic, c)						\
@@ -115,7 +104,6 @@ void	isa_intr_disestablish(isa_chipset_tag_t ic, void *handler);
 	_isa_free((a), (p))
 #define	isa_mappage(m, o, p)						\
 	_isa_mappage((m), (o), (p))
-#endif
 
 /*
  * ALL OF THE FOLLOWING ARE MACHINE-DEPENDENT, AND SHOULD NOT BE USED
@@ -186,6 +174,7 @@ void	isa_intr_init(void);
 /*
  * Miscellanous functions.
  */
+void sysbeep(int, int);		/* beep with the system speaker */
 void isa_fillw(u_int val, void *addr, size_t len);
 
 #endif	/* _ARM32_ISA_MACHDEP_H_ XXX */

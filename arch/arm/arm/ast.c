@@ -1,5 +1,4 @@
-/*	$OpenBSD: ast.c,v 1.8 2007/05/14 07:07:09 art Exp $	*/
-/*	$NetBSD: ast.c,v 1.6 2003/10/31 16:44:34 cl Exp $	*/
+/*	$NetBSD: ast.c,v 1.16 2008/11/19 06:29:48 matt Exp $	*/
 
 /*
  * Copyright (c) 1994,1995 Mark Brinicombe
@@ -41,6 +40,11 @@
  * Created      : 11/10/94
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.16 2008/11/19 06:29:48 matt Exp $");
+
+#include "opt_ddb.h"
+
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/user.h>
@@ -48,12 +52,11 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/signal.h>
-#include <sys/signalvar.h>
 #include <sys/vmmeter.h>
+#include <sys/userret.h>
 
 #include <machine/cpu.h>
 #include <machine/frame.h>
-#include <machine/cpu.h>
 
 #include <arm/cpufunc.h>
 
@@ -68,19 +71,15 @@
  */
 void ast(struct trapframe *);
  
-int want_resched;
-extern int astpending;
-
 void
-userret(struct proc *p)
+userret(struct lwp *l)
 {
-	int sig;
+	/* Invoke MI userret code */
+	mi_userret(l);
 
-	/* Take pending signals. */
-	while ((sig = (CURSIG(p))) != 0)
-		postsig(sig);
-
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
+#ifdef __PROG32
+	KASSERT((l->l_addr->u_pcb.pcb_tf->tf_spsr & IF32_bits) == 0);
+#endif
 }
 
 
@@ -93,7 +92,8 @@ userret(struct proc *p)
 void
 ast(struct trapframe *tf)
 {
-	struct proc *p = curproc;
+	struct lwp *l = curlwp;
+	struct proc *p;
 
 #ifdef acorn26
 	/* Enable interrupts if they were enabled before the trap. */
@@ -103,25 +103,32 @@ ast(struct trapframe *tf)
 	/* Interrupts were restored by exception_exit. */
 #endif
 
+#ifdef __PROG32
+	KASSERT((tf->tf_spsr & IF32_bits) == 0);
+#endif
+
+
 	uvmexp.traps++;
 	uvmexp.softs++;
 
 #ifdef DEBUG
-	if (p == NULL)
-		panic("ast: no curproc!");
-	if (&p->p_addr->u_pcb == 0)
+	KDASSERT(curcpu()->ci_cpl == IPL_NONE);
+	if (l == NULL)
+		panic("ast: no curlwp!");
+	if (&l->l_addr->u_pcb == NULL)
 		panic("ast: no pcb!");
 #endif	
 
-	if (p->p_flag & P_OWEUPC) {
+	p = l->l_proc;
+
+	if (l->l_pflag & LP_OWEUPC) {
+		l->l_pflag &= ~LP_OWEUPC;
 		ADDUPROF(p);
 	}
 
 	/* Allow a forced task switch. */
-	if (want_resched)
-		preempt(NULL);
+	if (l->l_cpu->ci_want_resched)
+		preempt();
 
-	userret(p);
+	userret(l);
 }
-
-/* End of ast.c */

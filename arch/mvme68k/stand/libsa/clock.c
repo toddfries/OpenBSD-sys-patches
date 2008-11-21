@@ -1,34 +1,35 @@
-/*	$OpenBSD: clock.c,v 1.4 2003/08/20 00:26:00 deraadt Exp $ */
+/*	$NetBSD: clock.c,v 1.8 2008/01/12 09:54:32 tsutsui Exp $ */
 
 #include <sys/types.h>
 #include <machine/prom.h>
 
-#include "stand.h"
+#include <lib/libsa/stand.h>
 #include "libsa.h"
 
 /*
  * BCD to decimal and decimal to BCD.
  */
-#define FROMBCD(x)      (((x) >> 4) * 10 + ((x) & 0xf))
-#define TOBCD(x)        (((x) / 10 * 16) + ((x) % 10))
+#define FROMBCD(x)      (int)((((unsigned int)(x)) >> 4) * 10 +\
+				(((unsigned int)(x)) & 0xf))
+#define TOBCD(x)        (int)((((unsigned int)(x)) / 10 * 16) +\
+				(((unsigned int)(x)) % 10))
 
 #define SECDAY          (24 * 60 * 60)
 #define SECYR           (SECDAY * 365)
 #define LEAPYEAR(y)     (((y) & 3) == 0)
 #define YEAR0		68
 
-
 /*
  * This code is defunct after 2068.
  * Will Unix still be here then??
  */
 const short dayyr[12] =
-	{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
 
-static u_long
+u_long
 chiptotime(int sec, int min, int hour, int day, int mon, int year)
 {
-	register int days, yr;
+	int days, yr;
 
 	sec = FROMBCD(sec);
 	min = FROMBCD(min);
@@ -49,7 +50,7 @@ chiptotime(int sec, int min, int hour, int day, int mon, int year)
 	if (LEAPYEAR(yr) && mon > 2)
 		days++;
 	/* now have days since Jan 1, 1970; the rest is easy... */
-	return (days * SECDAY + hour * 3600 + min * 60 + sec);
+	return days * SECDAY + hour * 3600 + min * 60 + sec;
 }
 
 time_t
@@ -58,6 +59,6 @@ getsecs(void)
 	struct mvmeprom_time m;
 
 	mvmeprom_rtc_rd(&m);
-	return (chiptotime(m.sec_BCD, m.min_BCD, m.hour_BCD, m.day_BCD,
-	    m.month_BCD, m.year_BCD));
+	return chiptotime(m.sec_BCD, m.min_BCD, m.hour_BCD, m.day_BCD,
+	    m.month_BCD, m.year_BCD);
 }

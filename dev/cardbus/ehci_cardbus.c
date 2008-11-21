@@ -1,5 +1,4 @@
-/*	$OpenBSD: ehci_cardbus.c,v 1.10 2008/02/25 23:10:16 brad Exp $ */
-/*	$NetBSD: ehci_cardbus.c,v 1.6.6.3 2004/09/21 13:27:25 skrll Exp $	*/
+/*	$NetBSD: ehci_cardbus.c,v 1.22 2008/06/24 19:44:52 drochner Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,17 +30,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ehci_cardbus.c,v 1.22 2008/06/24 19:44:52 drochner Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/proc.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
+
+#if defined pciinc
+#include <dev/pci/pcidevs.h>
+#endif
 
 #include <dev/cardbus/cardbusvar.h>
 #include <dev/pci/pcidevs.h>
+
+#include <dev/cardbus/usb_cardbus.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -65,10 +65,9 @@ extern int ehcidebug;
 #define DPRINTF(x)
 #endif
 
-
-int	ehci_cardbus_match(struct device *, void *, void *);
-void	ehci_cardbus_attach(struct device *, struct device *, void *);
-int	ehci_cardbus_detach(struct device *, int);
+int	ehci_cardbus_match(device_t, struct cfdata *, void *);
+void	ehci_cardbus_attach(device_t, device_t, void *);
+int	ehci_cardbus_detach(device_t, int);
 
 struct ehci_cardbus_softc {
 	ehci_softc_t		sc;
@@ -78,17 +77,19 @@ struct ehci_cardbus_softc {
 	void 			*sc_ih;		/* interrupt vectoring */
 };
 
-struct cfattach ehci_cardbus_ca = {
-	sizeof(struct ehci_cardbus_softc), ehci_cardbus_match,
-	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
-};
+CFATTACH_DECL_NEW(ehci_cardbus, sizeof(struct ehci_cardbus_softc),
+    ehci_cardbus_match, ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate);
 
 #define CARDBUS_INTERFACE_EHCI PCI_INTERFACE_EHCI
 #define CARDBUS_CBMEM PCI_CBMEM
 #define cardbus_findvendor pci_findvendor
+#define cardbus_devinfo pci_devinfo
+
+static TAILQ_HEAD(, usb_cardbus) ehci_cardbus_alldevs =
+	TAILQ_HEAD_INITIALIZER(ehci_cardbus_alldevs);
 
 int
-ehci_cardbus_match(struct device *parent, void *match, void *aux)
+ehci_cardbus_match(device_t parent, struct cfdata *match, void *aux)
 {
 	struct cardbus_attach_args *ca = (struct cardbus_attach_args *)aux;
 
@@ -96,27 +97,59 @@ ehci_cardbus_match(struct device *parent, void *match, void *aux)
 	    CARDBUS_SUBCLASS(ca->ca_class) == CARDBUS_SUBCLASS_SERIALBUS_USB &&
 	    CARDBUS_INTERFACE(ca->ca_class) == CARDBUS_INTERFACE_EHCI)
 		return (1);
- 
+
 	return (0);
 }
 
-void
-ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
+static bool
+ehci_cardbus_suspend(device_t dv PMF_FN_ARGS)
 {
-	struct ehci_cardbus_softc *sc = (struct ehci_cardbus_softc *)self;
+	ehci_suspend(dv PMF_FN_CALL);
+#if 0
+	struct ehci_cardbus_softc *sc = device_private(dv);
+	ehci_release_ownership(&sc->sc, sc->sc_pc, sc->sc_tag);
+#endif
+
+	return true;
+}
+
+static bool
+ehci_cardbus_resume(device_t dv PMF_FN_ARGS)
+{
+#if 0
+	struct ehci_cardbus_softc *sc = device_private(dv);
+	ehci_get_ownership(&sc->sc, sc->sc_pc, sc->sc_tag);
+#endif
+	return ehci_resume(dv PMF_FN_CALL);
+}
+
+void
+ehci_cardbus_attach(device_t parent, device_t self, void *aux)
+{
+	struct ehci_cardbus_softc *sc = device_private(self);
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 	cardbusreg_t csr;
+	char devinfo[256];
 	usbd_status r;
 	const char *vendor;
-	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
+	u_int ncomp;
+	const char *devname = device_xname(self);
+	struct usb_cardbus *up;
+
+	sc->sc.sc_dev = self;
+	sc->sc.sc_bus.hci_private = sc;
+
+	cardbus_devinfo(ca->ca_id, ca->ca_class, 0, devinfo, sizeof(devinfo));
+	printf(": %s (rev. 0x%02x)\n", devinfo,
+	       CARDBUS_REVISION(ca->ca_class));
 
 	/* Map I/O registers */
 	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, CARDBUS_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
-		printf(": can't map mem space\n", devname);
+		printf("%s: can't map mem space\n", devname);
 		return;
 	}
 
@@ -125,6 +158,10 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ct = ct;
 	sc->sc.sc_bus.dmatag = ca->ca_dmat;
 
+#if rbus
+#else
+XXX	(ct->ct_cf->cardbus_mem_open)(cc, 0, iob, iob + 0x40);
+#endif
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_MEM_ENABLE);
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
@@ -137,16 +174,15 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Disable interrupts, so we don't get any spurious ones. */
 	sc->sc.sc_offs = EREAD1(&sc->sc, EHCI_CAPLENGTH);
-	DPRINTF((": offs=%d", devname, sc->sc.sc_offs));
+	DPRINTF(("%s: offs=%d\n", devname, sc->sc.sc_offs));
 	EOWRITE2(&sc->sc, EHCI_USBINTR, 0);
 
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline,
-					   IPL_USB, ehci_intr, sc, devname);
+					   IPL_USB, ehci_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf(": unable to establish interrupt\n");
+		printf("%s: couldn't establish interrupt\n", devname);
 		return;
 	}
-	printf(": irq %d\n", ca->ca_intrline);
 
 	/* Figure out vendor for root hub descriptor. */
 	vendor = cardbus_findvendor(ca->ca_id);
@@ -156,7 +192,23 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	else
 		snprintf(sc->sc.sc_vendor, sizeof(sc->sc.sc_vendor),
 		    "vendor 0x%04x", CARDBUS_VENDOR(ca->ca_id));
-	
+
+	/*
+	 * Find companion controllers.  According to the spec they always
+	 * have lower function numbers so they should be enumerated already.
+	 */
+	ncomp = 0;
+	TAILQ_FOREACH(up, &ehci_cardbus_alldevs, next) {
+		if (up->bus == ca->ca_bus) {
+			DPRINTF(("ehci_cardbus_attach: companion %s\n",
+				 device_xname(up->usb)));
+			sc->sc.sc_comps[ncomp++] = up->usb;
+			if (ncomp >= EHCI_COMPANION_MAX)
+				break;
+		}
+	}
+	sc->sc.sc_ncomp = ncomp;
+
 	r = ehci_init(&sc->sc);
 	if (r != USBD_NORMAL_COMPLETION) {
 		printf("%s: init failed, error=%d\n", devname, r);
@@ -168,17 +220,18 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc.sc_shutdownhook = shutdownhook_establish(ehci_shutdown, &sc->sc);
+	if (!pmf_device_register1(self, ehci_cardbus_suspend,
+	                          ehci_cardbus_resume, ehci_shutdown))
+		aprint_error_dev(self, "couldn't establish power handler\n");
 
 	/* Attach usb device. */
-	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
-				       usbctlprint);
+	sc->sc.sc_child = config_found(self, &sc->sc.sc_bus, usbctlprint);
 }
 
 int
-ehci_cardbus_detach(struct device *self, int flags)
+ehci_cardbus_detach(device_t self, int flags)
 {
-	struct ehci_cardbus_softc *sc = (struct ehci_cardbus_softc *)self;
+	struct ehci_cardbus_softc *sc = device_private(self);
 	struct cardbus_devfunc *ct = sc->sc_ct;
 	int rv;
 
@@ -197,3 +250,17 @@ ehci_cardbus_detach(struct device *self, int flags)
 	return (0);
 }
 
+void
+usb_cardbus_add(struct usb_cardbus *up, struct cardbus_attach_args *ca, device_t bu)
+{
+	TAILQ_INSERT_TAIL(&ehci_cardbus_alldevs, up, next);
+	up->bus = ca->ca_bus;
+	up->function = ca->ca_function;
+	up->usb = bu;
+}
+
+void
+usb_cardbus_rem(struct usb_cardbus *up)
+{
+	TAILQ_REMOVE(&ehci_cardbus_alldevs, up, next);
+}

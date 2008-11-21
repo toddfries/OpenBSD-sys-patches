@@ -1,3 +1,9 @@
-#	$OpenBSD: Makefile.inc,v 1.5 2004/12/19 16:27:37 mickey Exp $
+#	$NetBSD: Makefile.inc,v 1.3 2006/06/07 19:54:04 rpaulo Exp $
 
-CFLAGS+=-I${.CURDIR}/../../..
+FIRMPATH!=	basename ${.CURDIR}
+FIRMPATH:=	${FIRMWAREDIR}/${FIRMPATH}
+
+FILESDIR=	${FIRMPATH}
+FILESOWN=	${FIRMWAREOWN}
+FILESGRP=	${FIRMWAREGRP}
+FILESMODE=	${FIRMWAREMODE}

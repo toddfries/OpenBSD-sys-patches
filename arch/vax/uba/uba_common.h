@@ -1,5 +1,4 @@
-/*	$OpenBSD: uba_common.h,v 1.4 2003/11/10 21:05:06 miod Exp $	*/
-/*	$NetBSD: uba_common.h,v 1.2 1999/06/21 16:23:01 ragge Exp $ */
+/*	$NetBSD: uba_common.h,v 1.6 2008/11/19 15:39:10 hans Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
  * All rights reserved.
@@ -42,7 +41,7 @@
 struct uba_regs;
 
 struct	uba_vsoftc {
-	struct	uba_softc uv_sc;/* Common vars from arch/vax/qbus/ubavar.h */
+	struct	uba_softc uv_sc;/* Common vars from dev/qbus/ubavar.h */
 	struct	vax_bus_dma_tag uv_dmat;
 	struct	vax_sgmap uv_sgmap;
 	int	uv_size;	/* Size of UBA addressable memory */
@@ -66,19 +65,19 @@ struct	uba_vsoftc {
  * DW780/DW750 hardware registers
  */
 struct uba_regs {
-	int	uba_cnfgr;		/* configuration register */
-	int	uba_cr;			/* control register */
-	int	uba_sr;			/* status register */
-	int	uba_dcr;		/* diagnostic control register */
-	int	uba_fmer;		/* failed map entry register */
-	int	uba_fubar;		/* failed UNIBUS address register */
-	int	pad1[2];
-	int	uba_brsvr[4];
-	int	uba_brrvr[4];		/* receive vector registers */
-	int	uba_dpr[16];		/* buffered data path register */
-	int	pad2[480];
-	pt_entry_t uba_map[UBAPAGES];	/* unibus map register */
-	int	pad3[UBAIOPAGES];	/* no maps for device address space */
+	volatile int	uba_cnfgr;	/* configuration register */
+	volatile int	uba_cr;		/* control register */
+	volatile int	uba_sr;		/* status register */
+	volatile int	uba_dcr;	/* diagnostic control register */
+	volatile int	uba_fmer;	/* failed map entry register */
+	volatile int	uba_fubar;	/* failed UNIBUS address register */
+	int		pad1[2];
+	volatile int	uba_brsvr[4];
+	volatile int	uba_brrvr[4];	/* receive vector registers */
+	volatile int	uba_dpr[16];	/* buffered data path register */
+	int		pad2[480];
+	struct pte	uba_map[UBAPAGES]; /* unibus map register */
+	int		pad3[UBAIOPAGES]; /* no maps for device address space */
 };
 
 void	uba_dma_init(struct uba_vsoftc *);

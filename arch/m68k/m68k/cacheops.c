@@ -1,4 +1,4 @@
-/*	$NetBSD: cacheops.c,v 1.11 2006/07/22 06:36:06 tsutsui Exp $	*/
+/*	$NetBSD: cacheops.c,v 1.14 2008/04/28 20:23:27 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cacheops.c,v 1.11 2006/07/22 06:36:06 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cacheops.c,v 1.14 2008/04/28 20:23:27 martin Exp $");
 
 #include <sys/types.h>
 #include <machine/cpu.h>
@@ -404,156 +397,3 @@ _DCIAS(paddr_t pa)
 #endif
 	}
 }
-
-#if defined(M68040) || defined(M68060)
-void
-_DCFA(void)
-{
-
-	switch (cputype) {
-#ifdef M68040
-	case CPU_68040:
-		DCFA_40();
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		DCFA_60();
-		break;
-#endif
-	}
-}
-
-void
-_DCPA(void)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		DCPA_40();
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		DCPA_60();
-		break;
-#endif
-	}
-}
-
-void
-_ICPL(paddr_t pa)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		ICPL_40(pa);
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		ICPL_60(pa);
-		break;
-#endif
-	}
-}
-
-void
-_ICPP(paddr_t pa)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		ICPP_40(pa);
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		ICPP_60(pa);
-		break;
-#endif
-	}
-}
-
-void
-_DCPL(paddr_t pa)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		DCPL_40(pa);
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		DCPL_60(pa);
-		break;
-#endif
-	}
-}
-
-void
-_DCPP(paddr_t pa)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		DCPP_40(pa);
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		DCPP_60(pa);
-		break;
-#endif
-	}
-}
-
-void
-_DCFL(paddr_t pa)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		DCFL_40(pa);
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		DCFL_60(pa);
-		break;
-#endif
-	}
-}
-
-void
-_DCFP(paddr_t pa)
-{
-
-	switch (cputype) {
-	default:
-#ifdef M68040
-	case CPU_68040:
-		DCFP_40(pa);
-		break;
-#endif
-#ifdef M68060
-	case CPU_68060:
-		DCFP_60(pa);
-		break;
-#endif
-	}
-}
-#endif /* M68040 || M68060 */

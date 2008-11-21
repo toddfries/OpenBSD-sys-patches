@@ -1,4 +1,4 @@
-/*      $NetBSD: ip6_etherip.c,v 1.3 2006/12/15 21:18:55 joerg Exp $        */
+/*      $NetBSD: ip6_etherip.c,v 1.11 2008/10/19 23:28:31 hans Exp $        */
 
 /*
  *  Copyright (c) 2006, Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
@@ -58,8 +58,10 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ip6_etherip.c,v 1.11 2008/10/19 23:28:31 hans Exp $");
 
 #include "opt_inet.h"
+#include "bpfilter.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -84,6 +86,7 @@
 #ifdef INET6
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/ip6_private.h>
 #include <netinet6/in6_var.h>
 #include <netinet6/ip6_etherip.h>
 #endif
@@ -91,19 +94,26 @@
 #include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_etherip.h>
+#if NBPFILTER > 0
+#include <net/bpf.h>
+#endif
 
 #include <machine/stdarg.h>
 
 int
 ip6_etherip_output(struct ifnet *ifp, struct mbuf *m)
 {
+	struct rtentry *rt;
 	struct etherip_softc *sc = (struct etherip_softc *)ifp->if_softc;
-	struct sockaddr_in6 *dst, *sin6_src, *sin6_dst;
+	struct sockaddr_in6 *sin6_src, *sin6_dst;
 	struct ip6_hdr *ip6;    /* capsule IP header, host byte ordered */
 	struct etherip_header eiphdr;
 	int proto, error;
+	union {
+		struct sockaddr		dst;
+		struct sockaddr_in6	dst6;
+	} u;
 
-	dst = (struct sockaddr_in6 *)&sc->sc_ro.ro_dst;
 	sin6_src = (struct sockaddr_in6 *)sc->sc_src;
 	sin6_dst = (struct sockaddr_in6 *)sc->sc_dst;
 
@@ -158,26 +168,14 @@ ip6_etherip_output(struct ifnet *ifp, struct mbuf *m)
 		return ENETUNREACH;
 	}
 
-	if (dst->sin6_family != sin6_dst->sin6_family ||
-	    !IN6_ARE_ADDR_EQUAL(&dst->sin6_addr, &sin6_dst->sin6_addr))
-		rtcache_free((struct route *)&sc->sc_ro6);
-	else
-		rtcache_check((struct route *)&sc->sc_ro6);
-
-	if (sc->sc_ro6.ro_rt == NULL) {
-		memset(dst, 0, sizeof(*dst));
-		dst->sin6_family = sin6_dst->sin6_family;
-		dst->sin6_len    = sizeof(struct sockaddr_in6);
-		dst->sin6_addr   = sin6_dst->sin6_addr;
-		rtcache_init((struct route *)&sc->sc_ro6);
-		if (sc->sc_ro6.ro_rt == NULL) {
-			m_freem(m);
-			return ENETUNREACH;
-		}
+	sockaddr_in6_init(&u.dst6, &sin6_dst->sin6_addr, 0, 0, 0);
+	if ((rt = rtcache_lookup(&sc->sc_ro, &u.dst)) == NULL) {
+		m_freem(m);
+		return ENETUNREACH;
 	}
 	/* if it constitutes infinite encapsulation, punt. */
-	if (sc->sc_ro.ro_rt->rt_ifp == ifp) {
-		rtcache_free((struct route *)&sc->sc_ro6);
+	if (rt->rt_ifp == ifp) {
+		rtcache_free(&sc->sc_ro);
 		m_freem(m);
 		return ENETUNREACH;     /* XXX */
 	}
@@ -187,8 +185,7 @@ ip6_etherip_output(struct ifnet *ifp, struct mbuf *m)
 	 * it is too painful to ask for resend of inner packet, to achieve
 	 * path MTU discovery for encapsulated packets.
 	 */
-	error = ip6_output(m, 0, &sc->sc_ro6, IPV6_MINMTU,
-			   (struct ip6_moptions *)NULL, (struct socket *)NULL, NULL);
+	error = ip6_output(m, 0, &sc->sc_ro, IPV6_MINMTU, NULL, NULL, NULL);
 
 	return error;
 }
@@ -200,7 +197,7 @@ ip6_etherip_input(struct mbuf *m, ...)
 	const struct ip6_hdr *ip6;
 	struct sockaddr_in6 *src6, *dst6;
 	struct ifnet *ifp = NULL;
-	int off, proto;
+	int off, proto, s;
 	va_list ap;
 
 	va_start(ap, m);
@@ -210,7 +207,7 @@ ip6_etherip_input(struct mbuf *m, ...)
 
 	if (proto != IPPROTO_ETHERIP) {
 		m_freem(m);
-		ip6stat.ip6s_nogif++;
+		IP6_STATINC(IP6_STAT_NOGIF);
 		return IPPROTO_DONE;
 	}
 
@@ -238,7 +235,7 @@ ip6_etherip_input(struct mbuf *m, ...)
 	/* no matching device found */
 	if (!ifp) {
 		m_freem(m);
-		ip6stat.ip6s_odropped++;
+		IP6_STATINC(IP6_STAT_ODROPPED);
 		return IPPROTO_DONE;
 	}
 
@@ -275,7 +272,10 @@ ip6_etherip_input(struct mbuf *m, ...)
 #endif
 
 	ifp->if_ipackets++;
+
+	s = splnet();
 	(ifp->if_input)(ifp, m);
+	splx(s);
 
 	return IPPROTO_DONE;
 }

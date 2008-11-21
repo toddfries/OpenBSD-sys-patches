@@ -1,5 +1,4 @@
-/*	$OpenBSD: bus_space_notimpl.S,v 1.2 2007/05/27 16:10:39 drahn Exp $	*/
-/*	$NetBSD: bus_space_notimpl.S,v 1.2 2001/09/10 02:20:19 reinoud Exp $	*/
+/*	$NetBSD: bus_space_notimpl.S,v 1.4 2005/12/11 12:16:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -57,25 +56,23 @@
 #define NOT_IMPL(func)							\
 	GLOBAL(func)						;	\
 LABEL(func)							;	\
-	adr	r4, LNAME(__C(func,_text))			;	\
+	stmfd	sp!, {r0-r3}					;	\
+	adr	r1, LNAME(__C(func,_funcname))			;	\
+	mov	r2, sp						;	\
 	b	bs_notimpl_panic				;	\
 								;	\
-LLABEL(__C(func,_text))						;	\
-	.asciz	__S(func)                                       ;	\
-	.align	0						;
+LLABEL(__C(func,_funcname))					;	\
+	.asciz	__S(func)					;	\
+	.align	0						;	\
 
 bs_notimpl_message:
-        .asciz  __S(BUS_SPACE) "_%s: args at %p"
+	.ascii	__S(BUS_SPACE)
+	.asciz	"_%s: args at %p"
 
-	.align  2
+	.align	0
 bs_notimpl_panic:
-	stmfd	sp!, {r0-r3}
-	adr     r0, bs_notimpl_message
-	mov	r1, r4
-	mov	r2, sp
-	b       _C_LABEL(panic)
-
-
+	adr	r0, bs_notimpl_message
+	b	_C_LABEL(panic)
 
 /*
  * misc functions

@@ -1,4 +1,4 @@
-/*	$NetBSD: event_var.h,v 1.7 2005/12/11 12:16:28 christos Exp $	*/
+/*	$NetBSD: event_var.h,v 1.9 2008/03/01 14:16:49 rmind Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -64,10 +64,10 @@ struct evvar {
 #define	splev()	spltty()
 
 #define	EV_WAKEUP(ev) { \
-	selnotify(&(ev)->ev_sel, 0); \
+	selnotify(&(ev)->ev_sel, 0, 0); \
 	if ((ev)->ev_wanted) { \
 		(ev)->ev_wanted = 0; \
-		wakeup((caddr_t)(ev)); \
+		wakeup((void *)(ev)); \
 	} \
 	if ((ev)->ev_async) \
 		psignal((ev)->ev_io, SIGIO); \

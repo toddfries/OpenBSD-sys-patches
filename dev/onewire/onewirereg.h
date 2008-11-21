@@ -1,3 +1,4 @@
+/* $NetBSD: onewirereg.h,v 1.3 2006/04/14 18:38:50 riz Exp $ */
 /*	$OpenBSD: onewirereg.h,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
 
 /*

@@ -1,5 +1,4 @@
-/*	$OpenBSD: tftp.c,v 1.2 2004/04/02 04:39:51 deraadt Exp $	*/
-/*	$NetBSD: tftp.c,v 1.15 2003/08/18 15:45:29 dsl Exp $	 */
+/*	$NetBSD: tftp.c,v 1.27 2008/11/19 12:36:41 ad Exp $	 */
 
 /*
  * Copyright (c) 1996
@@ -24,6 +23,7 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
  */
 
 /*
@@ -56,7 +56,6 @@
 
 #include "stand.h"
 #include "net.h"
-#include "netif.h"
 
 #include "tftp.h"
 
@@ -88,17 +87,18 @@ static const int tftperrors[8] = {
 	EINVAL,			/* ??? */
 	EINVAL,			/* ??? */
 	EEXIST,
-	EINVAL			/* ??? */
+	EINVAL,			/* ??? */
 };
 
-ssize_t recvtftp(struct iodesc *, void *, size_t, time_t);
-int tftp_makereq(struct tftp_handle *);
-int tftp_getnextblock(struct tftp_handle *);
+static ssize_t recvtftp __P((struct iodesc *, void *, size_t, time_t));
+static int tftp_makereq __P((struct tftp_handle *));
+static int tftp_getnextblock __P((struct tftp_handle *));
 #ifndef TFTP_NOTERMINATE
-void tftp_terminate(struct tftp_handle *);
+static void tftp_terminate __P((struct tftp_handle *));
 #endif
+static ssize_t tftp_size_of_file __P((struct tftp_handle *tftpfile));
 
-ssize_t
+static ssize_t
 recvtftp(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 {
 	ssize_t n;
@@ -111,7 +111,7 @@ recvtftp(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 	if (n < 4)
 		return -1;
 
-	t = (struct tftphdr *) pkt;
+	t = (struct tftphdr *)pkt;
 	switch (ntohs(t->th_opcode)) {
 	case DATA:
 		if (htons(t->th_block) != d->xid) {
@@ -125,12 +125,12 @@ recvtftp(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 			 * First data packet from new port.
 			 */
 			struct udphdr *uh;
-			uh = (struct udphdr *) pkt - 1;
+			uh = (struct udphdr *)pkt - 1;
 			d->destport = uh->uh_sport;
 		} /* else check uh_sport has not changed??? */
 		return (n - (t->th_data - (char *)t));
 	case ERROR:
-		if ((unsigned) ntohs(t->th_code) >= 8) {
+		if ((unsigned int)ntohs(t->th_code) >= 8) {
 			printf("illegal tftp error %d\n", ntohs(t->th_code));
 			errno = EIO;
 		} else {
@@ -149,12 +149,12 @@ recvtftp(struct iodesc *d, void *pkt, size_t len, time_t tleft)
 }
 
 /* send request, expect first block (or error) */
-int
+static int
 tftp_makereq(struct tftp_handle *h)
 {
 	struct {
 		u_char header[HEADER_SIZE];
-		struct tftphdr  t;
+		struct tftphdr t;
 		u_char space[FNAME_SIZE + 6];
 	} wbuf;
 	char           *wtail;
@@ -162,14 +162,12 @@ tftp_makereq(struct tftp_handle *h)
 	ssize_t         res;
 	struct tftphdr *t;
 
-	bzero(&wbuf, sizeof(wbuf));
-
-	wbuf.t.th_opcode = htons((u_short) RRQ);
+	wbuf.t.th_opcode = htons((u_short)RRQ);
 	wtail = wbuf.t.th_stuff;
 	l = strlen(h->path);
-	bcopy(h->path, wtail, l + 1);
+	(void)memcpy(wtail, h->path, l + 1);
 	wtail += l + 1;
-	bcopy("octet", wtail, 6);
+	(void)memcpy(wtail, "octet", 6);
 	wtail += 6;
 
 	t = &h->lastdata.t;
@@ -179,8 +177,8 @@ tftp_makereq(struct tftp_handle *h)
 	h->iodesc->destport = htons(IPPORT_TFTP);
 	h->iodesc->xid = 1;	/* expected block */
 
-	res = sendrecv(h->iodesc, sendudp, &wbuf.t, wtail - (char *) &wbuf.t,
-	    recvtftp, t, sizeof(*t) + RSPACE);
+	res = sendrecv(h->iodesc, sendudp, &wbuf.t, wtail - (char *)&wbuf.t,
+		       recvtftp, t, sizeof(*t) + RSPACE);
 
 	if (res == -1)
 		return errno;
@@ -194,7 +192,7 @@ tftp_makereq(struct tftp_handle *h)
 }
 
 /* ack block, expect next */
-int
+static int
 tftp_getnextblock(struct tftp_handle *h)
 {
 	struct {
@@ -205,18 +203,16 @@ tftp_getnextblock(struct tftp_handle *h)
 	int             res;
 	struct tftphdr *t;
 
-	bzero(&wbuf, sizeof(wbuf));
-
-	wbuf.t.th_opcode = htons((u_short) ACK);
-	wbuf.t.th_block = htons((u_short) h->currblock);
-	wtail = (char *) &wbuf.t.th_data;
+	wbuf.t.th_opcode = htons((u_short)ACK);
+	wbuf.t.th_block = htons((u_short)h->currblock);
+	wtail = (char *)&wbuf.t.th_data;
 
 	t = &h->lastdata.t;
 
 	h->iodesc->xid = h->currblock + 1;	/* expected block */
 
-	res = sendrecv(h->iodesc, sendudp, &wbuf.t, wtail - (char *) &wbuf.t,
-	    recvtftp, t, sizeof(*t) + RSPACE);
+	res = sendrecv(h->iodesc, sendudp, &wbuf.t, wtail - (char *)&wbuf.t,
+		       recvtftp, t, sizeof(*t) + RSPACE);
 
 	if (res == -1)		/* 0 is OK! */
 		return errno;
@@ -229,7 +225,7 @@ tftp_getnextblock(struct tftp_handle *h)
 }
 
 #ifndef TFTP_NOTERMINATE
-void
+static void
 tftp_terminate(struct tftp_handle *h)
 {
 	struct {
@@ -238,33 +234,31 @@ tftp_terminate(struct tftp_handle *h)
 	} wbuf;
 	char           *wtail;
 
-	bzero(&wbuf, sizeof(wbuf));
-
 	if (h->islastblock) {
-		wbuf.t.th_opcode = htons((u_short) ACK);
-		wbuf.t.th_block = htons((u_short) h->currblock);
+		wbuf.t.th_opcode = htons((u_short)ACK);
+		wbuf.t.th_block = htons((u_short)h->currblock);
 	} else {
-		wbuf.t.th_opcode = htons((u_short) ERROR);
-		wbuf.t.th_code = htons((u_short) ENOSPACE); /* ??? */
+		wbuf.t.th_opcode = htons((u_short)ERROR);
+		wbuf.t.th_code = htons((u_short)ENOSPACE); /* ??? */
 	}
-	wtail = (char *) &wbuf.t.th_data;
+	wtail = (char *)&wbuf.t.th_data;
 
-	(void) sendudp(h->iodesc, &wbuf.t, wtail - (char *) &wbuf.t);
+	(void)sendudp(h->iodesc, &wbuf.t, wtail - (char *)&wbuf.t);
 }
 #endif
 
 int
-tftp_open(char *path, struct open_file *f)
+tftp_open(const char *path, struct open_file *f)
 {
 	struct tftp_handle *tftpfile;
 	struct iodesc  *io;
 	int             res;
 
-	tftpfile = (struct tftp_handle *) alloc(sizeof(*tftpfile));
-	if (tftpfile == NULL)
+	tftpfile = (struct tftp_handle *)alloc(sizeof(*tftpfile));
+	if (!tftpfile)
 		return ENOMEM;
 
-	tftpfile->iodesc = io = socktodesc(*(int *) (f->f_devdata));
+	tftpfile->iodesc = io = socktodesc(*(int *)(f->f_devdata));
 	io->destip = servip;
 	tftpfile->off = 0;
 	tftpfile->path = path;	/* XXXXXXX we hope it's static */
@@ -272,10 +266,11 @@ tftp_open(char *path, struct open_file *f)
 	res = tftp_makereq(tftpfile);
 
 	if (res) {
-		free(tftpfile, sizeof(*tftpfile));
+		dealloc(tftpfile, sizeof(*tftpfile));
 		return res;
 	}
-	f->f_fsdata = (void *) tftpfile;
+	f->f_fsdata = (void *)tftpfile;
+	fsmod = "nfs";
 	return 0;
 }
 
@@ -284,13 +279,18 @@ tftp_read(struct open_file *f, void *addr, size_t size, size_t *resid)
 {
 	struct tftp_handle *tftpfile;
 #if !defined(LIBSA_NO_TWIDDLE)
-	static int tc = 0;
+	static int      tc = 0;
 #endif
-	tftpfile = (struct tftp_handle *) f->f_fsdata;
+	tftpfile = (struct tftp_handle *)f->f_fsdata;
 
 	while (size > 0) {
 		int needblock;
 		size_t count;
+
+#if !defined(LIBSA_NO_TWIDDLE)
+		if (!(tc++ % 16))
+			twiddle();
+#endif
 
 		needblock = tftpfile->off / SEGSIZE + 1;
 
@@ -298,22 +298,18 @@ tftp_read(struct open_file *f, void *addr, size_t size, size_t *resid)
 #ifndef TFTP_NOTERMINATE
 			tftp_terminate(tftpfile);
 #endif
-			/* Don't bother to check retval: it worked for open() */
-			tftp_makereq(tftpfile);
+			tftp_makereq(tftpfile);	/* no error check, it worked
+			                         * for open */
 		}
 
 		while (tftpfile->currblock < needblock) {
 			int res;
 
-#if !defined(LIBSA_NO_TWIDDLE)
-			if ((tc++ % 16) == 0)
-				twiddle();
-#endif
 			res = tftp_getnextblock(tftpfile);
 			if (res) {	/* no answer */
 #ifdef DEBUG
 				printf("tftp: read error (block %d->%d)\n",
-				    tftpfile->currblock, needblock);
+				       tftpfile->currblock, needblock);
 #endif
 				return res;
 			}
@@ -335,10 +331,11 @@ tftp_read(struct open_file *f, void *addr, size_t size, size_t *resid)
 				return EINVAL;
 			}
 			count = (size < inbuffer ? size : inbuffer);
-			bcopy(tftpfile->lastdata.t.th_data + offinblock,
-			    addr, count);
+			(void)memcpy(addr,
+			    tftpfile->lastdata.t.th_data + offinblock,
+			    count);
 
-			addr = (caddr_t)addr + count;
+			addr = (char *)addr + count;
 			tftpfile->off += count;
 			size -= count;
 
@@ -353,7 +350,7 @@ tftp_read(struct open_file *f, void *addr, size_t size, size_t *resid)
 
 	}
 
-	if (resid != NULL)
+	if (resid)
 		*resid = size;
 	return 0;
 }
@@ -362,7 +359,7 @@ int
 tftp_close(struct open_file *f)
 {
 	struct tftp_handle *tftpfile;
-	tftpfile = (struct tftp_handle *) f->f_fsdata;
+	tftpfile = (struct tftp_handle *)f->f_fsdata;
 
 #ifdef TFTP_NOTERMINATE
 	/* let it time out ... */
@@ -370,28 +367,64 @@ tftp_close(struct open_file *f)
 	tftp_terminate(tftpfile);
 #endif
 
-	free(tftpfile, sizeof(*tftpfile));
+	dealloc(tftpfile, sizeof(*tftpfile));
 	return 0;
 }
 
 int
 tftp_write(struct open_file *f, void *start, size_t size, size_t *resid)
 {
+
 	return EROFS;
+}
+
+static ssize_t 
+tftp_size_of_file(struct tftp_handle *tftpfile)
+{
+	ssize_t filesize;
+
+	if (tftpfile->currblock > 1) {	/* move to start of file */
+#ifndef TFTP_NOTERMINATE
+		tftp_terminate(tftpfile);
+#endif
+		tftp_makereq(tftpfile);	/* no error check, it worked
+		      			 * for open */
+	}
+
+	/* start with the size of block 1 */
+	filesize = tftpfile->validsize;
+
+	/* and keep adding the sizes till we hit the last block */
+	while (!tftpfile->islastblock) {
+		int res;
+
+		res = tftp_getnextblock(tftpfile);
+		if (res) {	/* no answer */
+#ifdef DEBUG
+			printf("tftp: read error (block %d)\n",
+					tftpfile->currblock);
+#endif
+			return -1;
+		}
+		filesize += tftpfile->validsize;
+	}
+#ifdef DEBUG
+	printf("tftp_size_of_file: file is %d bytes\n", filesize);
+#endif
+	return filesize;
 }
 
 int
 tftp_stat(struct open_file *f, struct stat *sb)
 {
 	struct tftp_handle *tftpfile;
-	tftpfile = (struct tftp_handle *) f->f_fsdata;
+	tftpfile = (struct tftp_handle *)f->f_fsdata;
 
 	sb->st_mode = 0444;
 	sb->st_nlink = 1;
 	sb->st_uid = 0;
 	sb->st_gid = 0;
-	sb->st_size = -1;
-
+	sb->st_size = tftp_size_of_file(tftpfile);
 	return 0;
 }
 
@@ -399,7 +432,7 @@ off_t
 tftp_seek(struct open_file *f, off_t offset, int where)
 {
 	struct tftp_handle *tftpfile;
-	tftpfile = (struct tftp_handle *) f->f_fsdata;
+	tftpfile = (struct tftp_handle *)f->f_fsdata;
 
 	switch (where) {
 	case SEEK_SET:
@@ -412,17 +445,5 @@ tftp_seek(struct open_file *f, off_t offset, int where)
 		errno = EOFFSET;
 		return -1;
 	}
-
-	return (tftpfile->off);
+	return tftpfile->off;
 }
-
-/*
- * Not implemented.
- */
-#ifndef NO_READDIR
-int
-tftp_readdir(struct open_file *f, char *name)
-{
-	return EROFS;
-}
-#endif

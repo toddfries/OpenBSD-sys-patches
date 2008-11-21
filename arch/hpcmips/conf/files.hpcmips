@@ -1,4 +1,4 @@
-#	$NetBSD: files.hpcmips,v 1.100 2006/02/24 13:06:12 cube Exp $
+#	$NetBSD: files.hpcmips,v 1.102 2008/02/20 21:43:34 drochner Exp $
 
 # maxpartitions must be first item in files.${ARCH}.
 maxpartitions 8
@@ -70,11 +70,6 @@ defflag	debug_kloader.h			KLOADER_DEBUG
 defparam opt_kloader_kernel_path.h	KLOADER_KERNEL_PATH
 
 defparam opt_memsize.h			MEMSIZE
-
-#
-# Workstation Console
-#
-include "dev/wscons/files.wscons"
 
 #
 # H/PC Platform common files.

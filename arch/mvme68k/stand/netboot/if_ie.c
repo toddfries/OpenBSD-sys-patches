@@ -1,8 +1,8 @@
-/*	$OpenBSD: if_ie.c,v 1.12 2003/08/20 00:26:00 deraadt Exp $ */
+/*	$NetBSD: if_ie.c,v 1.12 2008/01/12 09:54:32 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1995 Theo de Raadt
- *
+ * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -27,13 +27,17 @@
 
 #include <sys/param.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 
-#define ETHER_MIN_LEN   64
-#define ETHER_MAX_LEN   1518
-#define ETHER_CRC_LEN	4
+#include <net/if.h>
+#include <net/if_ether.h>
+
+#include <lib/libkern/libkern.h>
+#include <lib/libsa/stand.h>
+#include <lib/libsa/net.h>
 
 #define NTXBUF	1
 #define NRXBUF	16
@@ -41,10 +45,10 @@
 
 #include <machine/prom.h>
 
-#include "stand.h"
 #include "libsa.h"
 #include "netif.h"
 #include "config.h"
+#include "dev_net.h"
 
 #include "i82586.h"
 #include "if_iereg.h"
@@ -61,6 +65,7 @@ int ie_poll(struct iodesc *, void *, int);
 int ie_probe(struct netif *, void *);
 int ie_put(struct iodesc *, void *, size_t);
 void ie_reset(struct netif *, u_char *);
+void ieack(volatile struct iereg *, struct iemem *);
 
 struct netif_stats ie_stats;
 
@@ -91,7 +96,7 @@ struct ie_configuration {
 	{ INTEL_REG_ADDR, 0 }
 };
 
-int     nie_config = sizeof(ie_config) / (sizeof(ie_config[0]));
+int     nie_config = __arraycount(ie_config);
 
 struct {
 	struct iereg *sc_reg;	/* IE registers */
@@ -105,9 +110,9 @@ ie_match(struct netif *nif, void *machdep_hint)
 	int     i, val = 0;
 
 	if (bugargs.cputyp == CPU_147)
-		return (0);
+		return 0;
 	name = machdep_hint;
-	if (name && !bcmp(ie_driver.netif_bname, name, 2))
+	if (name && !memcmp(ie_driver.netif_bname, name, 2))
 		val += 10;
 	for (i = 0; i < nie_config; i++) {
 		if (ie_config[i].used)
@@ -119,7 +124,7 @@ ie_match(struct netif *nif, void *machdep_hint)
 	}
 	if (ie_debug)
 		printf("ie%d: ie_match --> 0\n", i);
-	return (0);
+	return 0;
 }
 
 int
@@ -131,19 +136,21 @@ ie_probe(struct netif *nif, void *machdep_hint)
 		printf("ie%d: ie_probe called\n", nif->nif_unit);
 
 	if (bugargs.cputyp != CPU_147)
-		return (0);
-	return (1);
+		return 0;
+	return 1;
 }
 
 void
 ie_error(struct netif *nif, char *str, volatile struct iereg *ier)
 {
+
 	panic("ie%d: unknown error", nif->nif_unit);
 }
 
-static void
+void
 ieack(volatile struct iereg *ier, struct iemem *iem)
 {
+
 	/* ack the `interrupt' */
 	iem->im_scb.ie_command = iem->im_scb.ie_status & IE_ST_WHENCE;
 	ier->ie_attention = 1;	/* chan attention! */
@@ -156,7 +163,7 @@ ie_reset(struct netif *nif, u_char *myea)
 {
 	volatile struct iereg *ier = ie_softc.sc_reg;
 	struct iemem *iem = ie_softc.sc_mem;
-	int     timo = 10000, stat, i;
+	int     timo = 10000, i;
 	volatile int t;
 	u_int   a;
 
@@ -167,15 +174,15 @@ ie_reset(struct netif *nif, u_char *myea)
 
 	*(u_char *)0xfff4202a = 0x40;
 
-	bzero(iem, sizeof(*iem));
+	memset(iem, 0, sizeof(*iem));
 	iem->im_scp.scp_sysbus = 0;
-	iem->im_scp.scp_iscp_low = (int) &iem->im_iscp & 0xffff;
-	iem->im_scp.scp_iscp_high = (int) &iem->im_iscp >> 16;
+	iem->im_scp.scp_iscp_low = (int)&iem->im_iscp & 0xffff;
+	iem->im_scp.scp_iscp_high = (int)&iem->im_iscp >> 16;
 
-	iem->im_iscp.iscp_scboffset = (int) &iem->im_scb - (int) iem;
+	iem->im_iscp.iscp_scboffset = (int)&iem->im_scb - (int) iem;
 	iem->im_iscp.iscp_busy = 1;
-	iem->im_iscp.iscp_base_low = (int) iem & 0xffff;
-	iem->im_iscp.iscp_base_high = (int) iem >> 16;
+	iem->im_iscp.iscp_base_low = (int)iem & 0xffff;
+	iem->im_iscp.iscp_base_high = (int)iem >> 16;
 
 	/*
 	 * completely and utterly unlike what i expected, the
@@ -234,11 +241,12 @@ ie_reset(struct netif *nif, u_char *myea)
 	/*printf("ic %x\n", &iem->im_ic);*/
 	/* send IASETUP command */
 	iem->im_scb.ie_command = IE_CU_START;
-	iem->im_scb.ie_command_list = (int) &iem->im_ic - (int) iem;
+	iem->im_scb.ie_command_list = (int)&iem->im_ic - (int)iem;
 	iem->im_ic.com.ie_cmd_status = 0;
 	iem->im_ic.com.ie_cmd_cmd = IE_CMD_IASETUP | IE_CMD_LAST;
 	iem->im_ic.com.ie_cmd_link = 0xffff;
-	bcopy(myea, (void *)&iem->im_ic.ie_address, sizeof iem->im_ic.ie_address);
+	memcpy((void *)&iem->im_ic.ie_address, myea,
+	    sizeof(iem->im_ic.ie_address));
 
 	ier->ie_attention = 1;	/* chan attention! */
 	for (t = timo * 10; t--;)
@@ -249,21 +257,23 @@ ie_reset(struct netif *nif, u_char *myea)
 	/* setup buffers */
 
 	for (i = 0; i < NRXBUF; i++) {
-		iem->im_rfd[i].ie_fd_next = (int) &iem->im_rfd[(i+1) % NRXBUF] -
-		    (int) iem;
-		iem->im_rbd[i].ie_rbd_next = (int) &iem->im_rbd[(i+1) % NRXBUF] -
-		    (int) iem;
-		a = (int) &iem->im_rxbuf[i * IE_RBUF_SIZE];
+		iem->im_rfd[i].ie_fd_next = (int)&iem->im_rfd[(i+1) % NRXBUF] -
+		    (int)iem;
+		iem->im_rbd[i].ie_rbd_next = (int)&iem->im_rbd[(i+1) % NRXBUF] -
+		    (int)iem;
+		a = (int)&iem->im_rxbuf[i * IE_RBUF_SIZE];
 		iem->im_rbd[i].ie_rbd_buffer_low = a & 0xffff;
 		iem->im_rbd[i].ie_rbd_buffer_high = a >> 16;
 		iem->im_rbd[i].ie_rbd_length = IE_RBUF_SIZE;
 	}
-	iem->im_rfd[NRXBUF-1].ie_fd_last |= IE_FD_LAST;
-	iem->im_rbd[NRXBUF-1].ie_rbd_length |= IE_RBD_LAST;
-	iem->im_rfd[0].ie_fd_buf_desc = (int) &iem->im_rbd[0] - (int) iem;
+	iem->im_rfd[NRXBUF - 1].ie_fd_last |= IE_FD_LAST;
+	iem->im_rbd[NRXBUF - 1].ie_rbd_length |= IE_RBD_LAST;
+	iem->im_rfd[0].ie_fd_buf_desc = (int)&iem->im_rbd[0] - (int)iem;
 
-	/*printf("rfd[0] %x rbd[0] %x buf[0] %x\n", &iem->im_rfd, &iem->im_rbd,
-	    &iem->im_rxbuf);*/
+#if 0
+	printf("rfd[0] %x rbd[0] %x buf[0] %x\n", &iem->im_rfd, &iem->im_rbd,
+	    &iem->im_rxbuf);
+#endif
 
 	/* send receiver start command */
 	iem->im_scb.ie_command = IE_RU_START;
@@ -281,25 +291,24 @@ ie_poll(struct iodesc *desc, void *pkt, int len)
 {
 	volatile struct iereg *ier = ie_softc.sc_reg;
 	struct iemem *iem = ie_softc.sc_mem;
-	u_char *p = pkt;
 	static int slot;
-	int     length = 0;
-	u_int   a;
+	int length = 0;
 	u_short status;
 
-	asm(".word	0xf518\n");
+	__asm(".word	0xf518\n");
 	status = iem->im_rfd[slot].ie_fd_status;
 	if (status & IE_FD_BUSY)
-		return (0);
+		return 0;
 
 	/* printf("slot %d: %x\n", slot, status); */
-	if ((status & (IE_FD_COMPLETE | IE_FD_OK)) == (IE_FD_COMPLETE | IE_FD_OK)) {
+	if ((status & (IE_FD_COMPLETE | IE_FD_OK)) ==
+	    (IE_FD_COMPLETE | IE_FD_OK)) {
 		if (status & IE_FD_OK) {
 			length = iem->im_rbd[slot].ie_rbd_actual & 0x3fff;
 			if (length > len)
 				length = len;
-			bcopy((void *)&iem->im_rxbuf[slot * IE_RBUF_SIZE],
-			    pkt, length);
+			memcpy(pkt, (void *)&iem->im_rxbuf[slot * IE_RBUF_SIZE],
+			    length);
 
 			iem->im_rfd[slot].ie_fd_status = 0;
 			iem->im_rfd[slot].ie_fd_last |= IE_FD_LAST;
@@ -309,8 +318,9 @@ ie_poll(struct iodesc *desc, void *pkt, int len)
 			iem->im_rbd[slot].ie_rbd_length |= IE_RBD_LAST;
 			iem->im_rbd[(slot+NRXBUF-1)%NRXBUF].ie_rbd_length &=
 			    ~IE_RBD_LAST;
-			/*printf("S%d\n", slot);*/
-
+#if 0
+			printf("S%d\n", slot);
+#endif
 		} else {
 			printf("shit\n");
 		}
@@ -338,7 +348,7 @@ ie_poll(struct iodesc *desc, void *pkt, int len)
 		slot = 0;
 	}
 	slot = slot % NRXBUF;
-	return (length);
+	return length;
 }
 
 int
@@ -347,10 +357,8 @@ ie_put(struct iodesc *desc, void *pkt, size_t len)
 	volatile struct iereg *ier = ie_softc.sc_reg;
 	struct iemem *iem = ie_softc.sc_mem;
 	u_char *p = pkt;
-	int     timo = 10000, stat, i;
-	volatile int t;
-	u_int   a;
-	int     xx = 0;
+	u_int a;
+	int xx = 0;
 
 	/* send transmit command */
 
@@ -358,13 +366,9 @@ ie_put(struct iodesc *desc, void *pkt, size_t len)
 		;
 
 	/* copy data */
-	bcopy(p, (void *)&iem->im_txbuf[xx], len);
+	memcpy((void *)&iem->im_txbuf[xx], p, len);
 
-	if (len < ETHER_MIN_LEN - ETHER_CRC_LEN) {
-		bzero((char *)&iem->im_txbuf[xx] + len,
-		    ETHER_MIN_LEN - ETHER_CRC_LEN - len);
-		len = ETHER_MIN_LEN - ETHER_CRC_LEN;
-	}
+	len = MAX(len, ETHER_MIN_LEN);
 
 	/* build transmit descriptor */
 	iem->im_xd[xx].ie_xmit_flags = len | IE_XMIT_LAST;
@@ -377,22 +381,22 @@ ie_put(struct iodesc *desc, void *pkt, size_t len)
 	iem->im_xc[xx].com.ie_cmd_status = 0;
 	iem->im_xc[xx].com.ie_cmd_cmd = IE_CMD_XMIT | IE_CMD_LAST;
 	iem->im_xc[xx].com.ie_cmd_link = 0xffff;
-	iem->im_xc[xx].ie_xmit_desc = (int) &iem->im_xd[xx] - (int) iem;
+	iem->im_xc[xx].ie_xmit_desc = (int)&iem->im_xd[xx] - (int)iem;
 	iem->im_xc[xx].ie_xmit_length = len;
-	bcopy(p, (void *)&iem->im_xc[xx].ie_xmit_addr,
+	memcpy((void *)&iem->im_xc[xx].ie_xmit_addr, p,
 	    sizeof iem->im_xc[xx].ie_xmit_addr);
 
 	iem->im_scb.ie_command = IE_CU_START;
-	iem->im_scb.ie_command_list = (int) &iem->im_xc[xx] - (int) iem;
+	iem->im_scb.ie_command_list = (int)&iem->im_xc[xx] - (int)iem;
 
 	ier->ie_attention = 1;	/* chan attention! */
 
 	if (ie_debug) {
 		printf("ie%d: send %d to %x:%x:%x:%x:%x:%x\n",
-		    desc->io_netif->nif_unit, len,
+		    ((struct netif *)desc->io_netif)->nif_unit, len,
 		    p[0], p[1], p[2], p[3], p[4], p[5]);
 	}
-	return (len);
+	return len;
 }
 
 int
@@ -406,7 +410,7 @@ ie_get(struct iodesc *desc, void *pkt, size_t len, time_t timeout)
 	while (((getsecs() - t) < timeout) && !cc) {
 		cc = ie_poll(desc, pkt, len);
 	}
-	return (cc);
+	return cc;
 }
 /*
  * init ie device.   return 0 on failure, 1 if ok.
@@ -417,13 +421,12 @@ ie_init(struct iodesc *desc, void *machdep_hint)
 	struct netif *nif = desc->io_netif;
 
 	if (ie_debug)
-		printf("ie%d: ie_init called\n", desc->io_netif->nif_unit);
+		printf("ie%d: ie_init called\n", nif->nif_unit);
 	machdep_common_ether(desc->myea);
-	bzero(&ie_softc, sizeof(ie_softc));
+	memset(&ie_softc, 0, sizeof(ie_softc));
 	ie_softc.sc_reg =
-	    (struct iereg *) ie_config[desc->io_netif->nif_unit].phys_addr;
-	/* printf("buffer @0x%x\n", RELOC - 0x20000);*/
-	ie_softc.sc_mem = (struct iemem *) 0x3e0000;
+	    (struct iereg *)ie_config[nif->nif_unit].phys_addr;
+	ie_softc.sc_mem = (struct iemem *)0x3e0000;
 	ie_reset(desc->io_netif, desc->myea);
 	printf("device: %s%d attached to %s\n", nif->nif_driver->netif_bname,
 	    nif->nif_unit, ether_sprintf(desc->myea));
@@ -434,9 +437,9 @@ ie_stop(struct netif *nif)
 {
 	volatile struct iereg *ier = ie_softc.sc_reg;
 	struct iemem *iem = ie_softc.sc_mem;
-	int     timo = 10000;
+	int timo = 10000;
 	volatile int t;
-	u_int   a;
+	u_int a;
 
 	iem->im_iscp.iscp_busy = 1;
 	/* reset chip */
@@ -457,17 +460,22 @@ ie_stop(struct netif *nif)
 	for (t = timo; t--;)
 		;
 
-	/*printf("status %x busy %x\n", iem->im_scb.ie_status,
-	    iem->im_iscp.iscp_busy);*/
+#if 0
+	printf("status %x busy %x\n", iem->im_scb.ie_status,
+	    iem->im_iscp.iscp_busy);
+#endif
 }
 
 void
 ie_end(struct netif *nif)
 {
+
 	if (ie_debug)
 		printf("ie%d: ie_end called\n", nif->nif_unit);
 
 	ie_stop(nif);
 
-	/* *(u_char *) 0xfff42002 = 0; */
+#if 0
+	*(u_char *)0xfff42002 = 0;
+#endif
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ra.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
-/*	$NetBSD: ra.c,v 1.11 2002/06/04 15:13:55 ragge Exp $ */
+/*	$NetBSD: ra.c,v 1.17 2006/07/01 05:55:34 mrg Exp $ */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -31,23 +30,25 @@
  */
 
  /* All bugs are subject to removal without further notice */
-		
+
 #define NRSP 1 /* Kludge */
 #define NCMD 1 /* Kludge */
 
-#include "sys/param.h"
-#include "sys/disklabel.h"
+#include <sys/param.h>
+#include <sys/disklabel.h>
 
-#include "lib/libsa/stand.h"
+#include <lib/libsa/stand.h>
+
+#include <lib/libkern/libkern.h>
 
 #include "../include/pte.h"
 #include "../include/rpb.h"
 
-#include "arch/vax/mscp/mscp.h"
-#include "arch/vax/mscp/mscpreg.h"
+#include <dev/mscp/mscp.h>
+#include <dev/mscp/mscpreg.h>
 
-#include "arch/vax/bi/bireg.h"
-#include "arch/vax/bi/kdbreg.h"
+#include <dev/bi/bireg.h>
+#include <dev/bi/kdbreg.h>
 
 #include "vaxstand.h"
 
@@ -83,7 +84,7 @@ raopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 	char *msg;
 
 #ifdef DEV_DEBUG
-	printf("raopen: adapter %d ctlr %d unit %d part %d\n", 
+	printf("raopen: adapter %d ctlr %d unit %d part %d\n",
 	    adapt, ctlr, unit, part);
 	printf("raopen: csrbase %x nexaddr %x\n", csrbase, nexaddr);
 #endif
@@ -104,14 +105,14 @@ raopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 			nexaddr = bootrpb.adpphy;
 		} else
 			csrbase += (ctlr ? 000334 : 012150);
-		ra_ip = (short *)csrbase;
-		ra_sa = ra_sw = (short *)csrbase + 1;
+		ra_ip = (u_short *)csrbase;
+		ra_sa = ra_sw = (u_short *)csrbase + 1;
 		if (nexaddr) { /* have map registers */
-			mapregs = (int *)nexaddr + 512;
+			mapregs = (u_int *)nexaddr + 512;
 			mapregs[494] = PG_V | (((u_int)&uda) >> 9);
 			mapregs[495] = mapregs[494] + 1;
-			(char *)ubauda = (char *)0x3dc00 +
-			    (((u_int)(&uda))&0x1ff);
+			ubauda = (struct uda *)((char*)0x3dc00 +
+			    (((u_int)(&uda))&0x1ff));
 		} else
 			ubauda = &uda;
 		johan = (((u_int)ubauda) & 0xffff) + 8;
@@ -132,9 +133,9 @@ raopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 		}
 
 		kdaddr = nexaddr & ~(BI_NODESIZE - 1);
-		ra_ip = (short *)(kdaddr + KDB_IP);
-		ra_sa = (short *)(kdaddr + KDB_SA);
-		ra_sw = (short *)(kdaddr + KDB_SW);
+		ra_ip = (u_short *)(kdaddr + KDB_IP);
+		ra_sa = (u_short *)(kdaddr + KDB_SA);
+		ra_sw = (u_short *)(kdaddr + KDB_SW);
 		johan = ((u_int)&uda.uda_ca.ca_rspdsc) & 0xffff;
 		johan2 = (((u_int)&uda.uda_ca.ca_rspdsc) & 0xffff0000) >> 16;
 		w = (int *)(kdaddr + BIREG_VAXBICSR);
@@ -311,7 +312,7 @@ rastrategy(void *f, int func, daddr_t dblk,
 		uda.uda_cmd.mscp_seq.seq_bytecount = size;
 		uda.uda_cmd.mscp_unit = dunit;
 #ifdef DEV_DEBUG
-		printf("rastrategy: blk 0x%lx count %lx unit %x\n", 
+		printf("rastrategy: blk 0x%lx count %lx unit %x\n",
 		    uda.uda_cmd.mscp_seq.seq_lbn, size, dunit);
 #endif
 #ifdef notdef

@@ -1,4 +1,4 @@
-/* $NetBSD: if_eh.c,v 1.9 2006/01/29 21:42:41 dsl Exp $ */
+/* $NetBSD: if_eh.c,v 1.14 2008/04/28 20:23:09 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 Ben Harris
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +45,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: if_eh.c,v 1.9 2006/01/29 21:42:41 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_eh.c,v 1.14 2008/04/28 20:23:09 martin Exp $");
 
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -69,7 +62,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_eh.c,v 1.9 2006/01/29 21:42:41 dsl Exp $");
 #include <net/if_ether.h>
 
 #include <sys/bswap.h>
-#include <machine/bus.h>
 #include <machine/bus.h>
 #include <machine/irq.h>
 
@@ -110,7 +102,7 @@ struct eh_softc {
 };
 
 int	eh_write_mbuf(struct dp8390_softc *, struct mbuf *, int);
-int	eh_ring_copy(struct dp8390_softc *, int, caddr_t, u_short);
+int	eh_ring_copy(struct dp8390_softc *, int, void *, u_short);
 void	eh_read_hdr(struct dp8390_softc *, int, struct dp8390_ring *);
 int	eh_test_mem(struct dp8390_softc *);
 
@@ -127,14 +119,14 @@ static int eh_mediachange(struct dp8390_softc *);
 static void eh_mediastatus(struct dp8390_softc *, struct ifmediareq *);
 
 /* autoconfiguration glue */
-static int eh_match(struct device *, struct cfdata *, void *);
-static void eh_attach(struct device *, struct device *, void *);
+static int eh_match(device_t, cfdata_t , void *);
+static void eh_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(eh, sizeof(struct eh_softc),
+CFATTACH_DECL_NEW(eh, sizeof(struct eh_softc),
     eh_match, eh_attach, NULL, NULL);
 
 static int
-eh_match(struct device *parent, struct cfdata *cf, void *aux)
+eh_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct podulebus_attach_args *pa = aux;
 
@@ -165,15 +157,17 @@ static const struct {
 };
 
 static void
-eh_attach(struct device *parent, struct device *self, void *aux)
+eh_attach(device_t parent, device_t self, void *aux)
 {
 	struct podulebus_attach_args *pa = aux;
-	struct eh_softc *sc = (struct eh_softc *)self;
+	struct eh_softc *sc = device_private(self);
 	struct dp8390_softc *dsc = &sc->sc_dp;
 	int mediaset, mautype;
 	int i;
 	char *ptr;
 	u_int8_t *myaddr;
+
+	dsc->sc_dev = self;
 
 	/* Canonicalise card type. */
 	switch (pa->pa_product) {
@@ -313,12 +307,12 @@ eh_attach(struct device *parent, struct device *self, void *aux)
 	dp8390_stop(dsc);
 
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-	    self->dv_xname, "intr");
+	    device_xname(self), "intr");
 	sc->sc_ih = podulebus_irq_establish(pa->pa_ih, IPL_NET, dp8390_intr,
 	    self, &sc->sc_intrcnt);
 	if (bootverbose)
-		printf("%s: interrupting at %s\n",
-		       self->dv_xname, irq_string(sc->sc_ih));
+		aprint_verbose_dev(self, "interrupting at %s\n",
+		    irq_string(sc->sc_ih));
 	sc->sc_ctrl |= EH_CTRL_IE;
 	bus_space_write_1(sc->sc_ctlt, sc->sc_ctlh, 0, sc->sc_ctrl);
 }
@@ -513,7 +507,7 @@ eh_write_mbuf(struct dp8390_softc *dsc, struct mbuf *m, int buf)
 		log(LOG_WARNING,
 		    "%s: remote transmit DMA failed to complete "
 		    "(RSAR=0x%04x, RBCR=0x%04x, CRDA=0x%02x%02x)\n",
-		    dsc->sc_dev.dv_xname, buf, savelen,
+		    device_xname(dsc->sc_dev), buf, savelen,
 		    bus_space_read_1(nict, nich, ED_P0_CRDA1),
 		    bus_space_read_1(nict, nich, ED_P0_CRDA0));
 		dp8390_reset(dsc);
@@ -528,24 +522,25 @@ eh_write_mbuf(struct dp8390_softc *dsc, struct mbuf *m, int buf)
  * ring-wrap.
  */
 int
-eh_ring_copy(struct dp8390_softc *dsc, int src, caddr_t dst, u_short amount)
+eh_ring_copy(struct dp8390_softc *dsc, int src, void *dst_arg, u_short amount)
 {
 	struct eh_softc *sc = (struct eh_softc *)dsc;
 	u_short tmp_amount;
+	u_int8_t *dst = dst_arg;
 
 	/* Does copy wrap to lower addr in ring buffer? */
 	if (src + amount > dsc->mem_end) {
 		tmp_amount = dsc->mem_end - src;
 
 		/* Copy amount up to end of NIC memory. */
-		eh_readmem(sc, src, (u_int8_t *)dst, tmp_amount);
+		eh_readmem(sc, src, dst, tmp_amount);
 
 		amount -= tmp_amount;
 		src = dsc->mem_ring;
 		dst += tmp_amount;
 	}
 
-	eh_readmem(sc, src, (u_int8_t *)dst, amount);
+	eh_readmem(sc, src, dst, amount);
 
 	return (src + amount);
 }

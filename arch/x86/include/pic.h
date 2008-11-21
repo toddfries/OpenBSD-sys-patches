@@ -1,10 +1,9 @@
-/*	$NetBSD: pic.h,v 1.2 2006/07/04 00:30:22 christos Exp $	*/
+/*	$NetBSD: pic.h,v 1.5 2008/07/03 14:02:25 drochner Exp $	*/
 
 #ifndef _X86_PIC_H
 #define _X86_PIC_H
 
 #include <sys/device.h>
-#include <sys/lock.h>
 
 struct cpu_info;
 
@@ -12,20 +11,19 @@ struct cpu_info;
  * Structure common to all PIC softcs
  */
 struct pic {
-	struct device pic_dev;
-        int pic_type;
+	const char *pic_name;
+	int pic_type;
 	int pic_vecbase;
 	int pic_apicid;
 	__cpu_simple_lock_t pic_lock;
-        void (*pic_hwmask)(struct pic *, int);
-        void (*pic_hwunmask)(struct pic *, int);
+	void (*pic_hwmask)(struct pic *, int);
+	void (*pic_hwunmask)(struct pic *, int);
 	void (*pic_addroute)(struct pic *, struct cpu_info *, int, int, int);
 	void (*pic_delroute)(struct pic *, struct cpu_info *, int, int, int);
 	struct intrstub *pic_level_stubs;
 	struct intrstub *pic_edge_stubs;
+	struct ioapic_softc *pic_ioapic; /* if pic_type == PIC_IOAPIC */
 };
-
-#define pic_name pic_dev.dv_xname
 
 /*
  * PIC types.

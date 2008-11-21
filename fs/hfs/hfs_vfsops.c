@@ -1,4 +1,4 @@
-/*	$NetBSD: hfs_vfsops.c,v 1.16 2008/01/28 14:31:16 dholland Exp $	*/
+/*	$NetBSD: hfs_vfsops.c,v 1.19 2008/09/03 22:57:46 gmcgarry Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2007 The NetBSD Foundation, Inc.
@@ -99,7 +99,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hfs_vfsops.c,v 1.16 2008/01/28 14:31:16 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hfs_vfsops.c,v 1.19 2008/09/03 22:57:46 gmcgarry Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -127,12 +127,15 @@ __KERNEL_RCSID(0, "$NetBSD: hfs_vfsops.c,v 1.16 2008/01/28 14:31:16 dholland Exp
 #include <sys/conf.h>
 #include <sys/kauth.h>
 #include <sys/stat.h>
+#include <sys/module.h>
 
 #include <miscfs/genfs/genfs.h>
 #include <miscfs/specfs/specdev.h>
 
 #include <fs/hfs/hfs.h>
 #include <fs/hfs/libhfs.h>
+
+MODULE(MODULE_CLASS_VFS, hfs, NULL);
 
 MALLOC_JUSTDEFINE(M_HFSMNT, "hfs mount", "hfs mount structures");
 
@@ -167,15 +170,29 @@ struct vfsops hfs_vfsops = {
 	(void *)eopnotsupp,		/* vfs_suspendctl */
 	genfs_renamelock_enter,
 	genfs_renamelock_exit,
+	(void *)eopnotsupp,
 	hfs_vnodeopv_descs,
 	0,
 	{ NULL, NULL },
 };
-VFS_ATTACH(hfs_vfsops); /* XXX Is this needed? */
 
 static const struct genfs_ops hfs_genfsops = {
         .gop_size = genfs_size,
 };
+
+static int
+hfs_modcmd(modcmd_t cmd, void *arg)
+{
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		return vfs_attach(&hfs_vfsops);
+	case MODULE_CMD_FINI:
+		return vfs_detach(&hfs_vfsops);
+	default:
+		return ENOTTY;
+	}
+}
 
 int
 hfs_mount(struct mount *mp, const char *path, void *data, size_t *data_len)
@@ -562,7 +579,7 @@ hfs_vget_internal(struct mount *mp, ino_t ino, uint8_t fork,
 	 * to read the disk.
 	 */
 	hnode->h_dev = dev;
-	hnode->h_rec.cnid = cnid;
+	hnode->h_rec.u.cnid = cnid;
 	hnode->h_fork = fork;
 
 	hfs_nhashinsert(hnode);
@@ -602,7 +619,7 @@ hfs_vget_internal(struct mount *mp, ino_t ino, uint8_t fork,
 	VREF(hnode->h_devvp);  /* Increment the ref count to the volume's device. */
 
 	/* Make sure UVM has allocated enough memory. (?) */
-	if (hnode->h_rec.rec_type == HFS_REC_FILE) {
+	if (hnode->h_rec.u.rec_type == HFS_REC_FILE) {
 		if (hnode->h_fork == HFS_DATAFORK)
 			uvm_vnp_setsize(vp,
 			    hnode->h_rec.file.data_fork.logical_size);

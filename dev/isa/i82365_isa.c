@@ -1,5 +1,4 @@
-/*	$OpenBSD: i82365_isa.c,v 1.20 2005/03/25 16:41:18 mickey Exp $	*/
-/*	$NetBSD: i82365_isa.c,v 1.11 1998/06/09 07:25:00 thorpej Exp $	*/
+/*	$NetBSD: i82365_isa.c,v 1.29 2008/06/26 12:33:17 drochner Exp $	*/
 
 /*
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -30,16 +29,19 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i82365_isa.c,v 1.29 2008/06/26 12:33:17 drochner Exp $");
+
+#define	PCICISADEBUG
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/extent.h>
 #include <sys/malloc.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -53,19 +55,19 @@
 #include <dev/isa/i82365_isavar.h>
 
 #ifdef PCICISADEBUG
-#define	DPRINTF(arg)	printf arg;
+int	pcicisa_debug = 0;
+#define	DPRINTF(arg) if (pcicisa_debug) printf arg;
 #else
 #define	DPRINTF(arg)
 #endif
 
-int	pcic_isa_probe(struct device *, void *, void *);
+int	pcic_isa_probe(struct device *, struct cfdata *, void *);
 void	pcic_isa_attach(struct device *, struct device *, void *);
 
-struct cfattach pcic_isa_ca = {
-	sizeof(struct pcic_softc), pcic_isa_probe, pcic_isa_attach
-};
+CFATTACH_DECL(pcic_isa, sizeof(struct pcic_isa_softc),
+    pcic_isa_probe, pcic_isa_attach, NULL, NULL);
 
-static struct pcmcia_chip_functions pcic_isa_functions = {
+static const struct pcmcia_chip_functions pcic_isa_functions = {
 	pcic_chip_mem_alloc,
 	pcic_chip_mem_free,
 	pcic_chip_mem_map,
@@ -78,41 +80,50 @@ static struct pcmcia_chip_functions pcic_isa_functions = {
 
 	pcic_isa_chip_intr_establish,
 	pcic_isa_chip_intr_disestablish,
-	pcic_isa_chip_intr_string,
 
 	pcic_chip_socket_enable,
 	pcic_chip_socket_disable,
+	pcic_chip_socket_settype,
+	NULL,
 };
 
 int
-pcic_isa_probe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+pcic_isa_probe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
-	bus_space_tag_t memt = ia->ia_memt, iot = ia->ia_iot;
+	bus_space_tag_t iot = ia->ia_iot;
 	bus_space_handle_t ioh, memh;
-	bus_size_t msize;
-	int val, found;
+	int val, found, msize;
+
+	if (ia->ia_nio < 1)
+		return (0);
+	if (ia->ia_niomem < 1)
+		return (0);
+
+	if (ISA_DIRECT_CONFIG(ia))
+		return (0);
 
 	/* Disallow wildcarded i/o address. */
-	if (ia->ia_iobase == -1 /* ISACF_PORT_DEFAULT */)
+	if (ia->ia_io[0].ir_addr == ISA_UNKNOWN_PORT)
+		return (0);
+	if (ia->ia_iomem[0].ir_addr == ISA_UNKNOWN_IOMEM)
 		return (0);
 
-	if (bus_space_map(iot, ia->ia_iobase, PCIC_IOSIZE, 0, &ioh))
+	if (bus_space_map(iot, ia->ia_io[0].ir_addr, PCIC_IOSIZE, 0, &ioh))
 		return (0);
 
-	if (ia->ia_msize == -1)
-		ia->ia_msize = PCIC_MEMSIZE;
+	if (ia->ia_iomem[0].ir_size == ISA_UNKNOWN_IOSIZ)
+		msize = PCIC_MEMSIZE;
+	else
+		msize = ia->ia_iomem[0].ir_size;
 
-	msize = ia->ia_msize;
-	if (bus_space_map(memt, ia->ia_maddr, ia->ia_msize, 0, &memh)) {
-		if (ia->ia_msize > PCIC_MEMSIZE &&
-		    !bus_space_map(memt, ia->ia_maddr, PCIC_MEMSIZE, 0, &memh))
-			msize = PCIC_MEMSIZE;
-		else
-			return (0);
+	if (bus_space_map(ia->ia_memt, ia->ia_iomem[0].ir_addr,
+	    msize, 0, &memh)) {
+		bus_space_unmap(iot, ioh, PCIC_IOSIZE);
+		return (0);
 	}
+
 	found = 0;
 
 	/*
@@ -121,116 +132,104 @@ pcic_isa_probe(parent, match, aux)
 	 */
 
 	bus_space_write_1(iot, ioh, PCIC_REG_INDEX, C0SA + PCIC_IDENT);
+
 	val = bus_space_read_1(iot, ioh, PCIC_REG_DATA);
+
 	if (pcic_ident_ok(val))
 		found++;
+
 
 	bus_space_write_1(iot, ioh, PCIC_REG_INDEX, C0SB + PCIC_IDENT);
+
 	val = bus_space_read_1(iot, ioh, PCIC_REG_DATA);
+
 	if (pcic_ident_ok(val))
 		found++;
+
 
 	bus_space_write_1(iot, ioh, PCIC_REG_INDEX, C1SA + PCIC_IDENT);
+
 	val = bus_space_read_1(iot, ioh, PCIC_REG_DATA);
+
 	if (pcic_ident_ok(val))
 		found++;
+
 
 	bus_space_write_1(iot, ioh, PCIC_REG_INDEX, C1SB + PCIC_IDENT);
+
 	val = bus_space_read_1(iot, ioh, PCIC_REG_DATA);
+
 	if (pcic_ident_ok(val))
 		found++;
 
+
 	bus_space_unmap(iot, ioh, PCIC_IOSIZE);
-	bus_space_unmap(memt, memh, msize);
+	bus_space_unmap(ia->ia_memt, memh, msize);
 
 	if (!found)
 		return (0);
-	ia->ia_iosize = PCIC_IOSIZE;
-	ia->ia_msize = msize;
+
+	ia->ia_nio = 1;
+	ia->ia_io[0].ir_size = PCIC_IOSIZE;
+
+	ia->ia_niomem = 1;
+	ia->ia_iomem[0].ir_size = msize;
+
+	/* IRQ is special. */
+
+	ia->ia_ndrq = 0;
+
 	return (1);
 }
 
 void
-pcic_isa_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+pcic_isa_attach( struct device *parent, struct device *self,
+    void *aux)
 {
-	struct pcic_softc *sc = (void *)self;
-	struct pcic_handle *h;
+	struct pcic_softc *sc = (void *) self;
+	struct pcic_isa_softc *isc = (void *) self;
 	struct isa_attach_args *ia = aux;
 	isa_chipset_tag_t ic = ia->ia_ic;
 	bus_space_tag_t iot = ia->ia_iot;
 	bus_space_tag_t memt = ia->ia_memt;
 	bus_space_handle_t ioh;
 	bus_space_handle_t memh;
-	int irq, i;
 
 	/* Map i/o space. */
-	if (bus_space_map(iot, ia->ia_iobase, ia->ia_iosize, 0, &ioh)) {
+	if (bus_space_map(iot, ia->ia_io[0].ir_addr, PCIC_IOSIZE, 0, &ioh)) {
 		printf(": can't map i/o space\n");
 		return;
 	}
 
 	/* Map mem space. */
-	if (bus_space_map(memt, ia->ia_maddr, ia->ia_msize, 0, &memh)) {
+	if (bus_space_map(memt, ia->ia_iomem[0].ir_addr,
+	    ia->ia_iomem[0].ir_size, 0, &memh)) {
 		printf(": can't map mem space\n");
 		return;
 	}
 
-	sc->membase = ia->ia_maddr;
-	sc->subregionmask = (1 << (ia->ia_msize / PCIC_MEM_PAGESIZE)) - 1;
+	sc->membase = ia->ia_iomem[0].ir_addr;
+	sc->subregionmask =
+	    (1 << (ia->ia_iomem[0].ir_size / PCIC_MEM_PAGESIZE)) - 1;
 
-	sc->intr_est = ic;
-	sc->pct = (pcmcia_chipset_tag_t)&pcic_isa_functions;
+	isc->sc_ic = ic;
+	sc->pct = (pcmcia_chipset_tag_t) & pcic_isa_functions;
 
 	sc->iot = iot;
 	sc->ioh = ioh;
 	sc->memt = memt;
 	sc->memh = memh;
+	if (ia->ia_nirq > 0)
+		sc->irq = ia->ia_irq[0].ir_irq;
+	else
+		sc->irq = ISA_UNKNOWN_IRQ;
 
 	printf("\n");
 
 	pcic_attach(sc);
-	pcic_isa_bus_width_probe(sc, iot, ioh, ia->ia_iobase, ia->ia_iosize);
+	pcic_isa_bus_width_probe(sc, iot, ioh, ia->ia_io[0].ir_addr,
+	    PCIC_IOSIZE);
 	pcic_attach_sockets(sc);
 
-	/*
-	 * Allocate an irq.  It will be used by both controllers.  I could
-	 * use two different interrupts, but interrupts are relatively
-	 * scarce, shareable, and for PCIC controllers, very infrequent.
-	 */
-	irq = ia->ia_irq;
-	if (irq == IRQUNK)
-		irq = pcic_intr_find(sc, IST_EDGE);
-
-	if (irq) {
-		sc->ih = isa_intr_establish(ic, irq, IST_EDGE, IPL_TTY,
-		    pcic_intr, sc, sc->dev.dv_xname);
-		if (!sc->ih)
-			irq = 0;
-	}
-	sc->irq = irq;
-
-	if (irq) {
-		printf("%s: irq %d, ", sc->dev.dv_xname, irq);
-
-		/* Set up the pcic to interrupt on card detect. */
-		for (i = 0; i < PCIC_NSLOTS; i++) {
-			h = &sc->handle[i];
-			if (h->flags & PCIC_FLAG_SOCKETP) {
-				pcic_write(h, PCIC_CSC_INTR,
-				    (sc->irq << PCIC_CSC_INTR_IRQ_SHIFT) |
-				    PCIC_CSC_INTR_CD_ENABLE);
-				powerhook_establish(pcic_power, h);
-			}
-		}
-	} else
-		printf("%s: no irq, ", sc->dev.dv_xname);
-
-	printf("polling enabled\n");
-	if (sc->poll_established == 0) {
-		timeout_set(&sc->poll_timeout, pcic_poll_intr, sc);
-		timeout_add(&sc->poll_timeout, hz / 2);
-		sc->poll_established = 1;
-	}
+	config_interrupts(self, pcic_isa_config_interrupts);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: hdlg_machdep.c,v 1.4 2006/12/18 13:50:58 nonaka Exp $	*/
+/*	$NetBSD: hdlg_machdep.c,v 1.8 2008/11/12 12:35:59 ad Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002, 2003 Wasabi Systems, Inc.
@@ -73,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hdlg_machdep.c,v 1.4 2006/12/18 13:50:58 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hdlg_machdep.c,v 1.8 2008/11/12 12:35:59 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -115,7 +115,6 @@ __KERNEL_RCSID(0, "$NetBSD: hdlg_machdep.c,v 1.4 2006/12/18 13:50:58 nonaka Exp 
 #include <evbarm/hdl_g/hdlgvar.h>
 #include <evbarm/hdl_g/obiovar.h>
 
-#include "opt_ipkdb.h"
 #include "ksyms.h"
 
 /* Kernel text starts 2MB in from the bottom of the kernel address space. */
@@ -141,11 +140,7 @@ u_int cpu_reset_address = 0x00000000;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -165,7 +160,6 @@ int max_processes = 64;			/* Default number */
 #endif	/* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
-pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -271,7 +265,6 @@ initarm(void *arg)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
-	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
 
@@ -390,8 +383,6 @@ initarm(void *arg)
 	memset((char *)(var), 0, ((np) * PAGE_SIZE));
 
 	loop1 = 0;
-	kernel_l1pt.pv_pa = 0;
-	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if (((physical_freeend - L1_TABLE_SIZE) & (L1_TABLE_SIZE - 1)) == 0
@@ -642,8 +633,7 @@ initarm(void *arg)
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
-	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 	/* Setup the IRQ system */
 #ifdef VERBOSE_INIT_ARM
@@ -659,14 +649,7 @@ initarm(void *arg)
 	boothowto = BOOTHOWTO;
 #endif
 
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif
-
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	/* Firmware doesn't load symbols. */
 	ksyms_init(0, NULL, NULL);
 #endif
@@ -731,6 +714,8 @@ cpu_reboot(int howto, char *bootstr)
 haltsys:
 	/* Run any shutdown hooks */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;

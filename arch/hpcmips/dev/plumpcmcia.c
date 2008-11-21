@@ -1,4 +1,4 @@
-/*	$NetBSD: plumpcmcia.c,v 1.19 2005/12/11 12:17:33 christos Exp $ */
+/*	$NetBSD: plumpcmcia.c,v 1.23 2007/12/15 00:39:17 perry Exp $ */
 
 /*
  * Copyright (c) 1999, 2000 UCHIYAMA Yasushi. All rights reserved.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: plumpcmcia.c,v 1.19 2005/12/11 12:17:33 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: plumpcmcia.c,v 1.23 2007/12/15 00:39:17 perry Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -132,7 +132,7 @@ struct plumpcmcia_softc {
 	void *sc_powerhook;
 
 	/* CSC event */
-	struct proc *sc_event_thread;
+	lwp_t *sc_event_thread;
 	SIMPLEQ_HEAD (, plumpcmcia_event) sc_event_head;
 
 	/* for each slot */
@@ -188,7 +188,6 @@ static void plumpcmcia_event_free(struct plumpcmcia_event *);
 static void plum_csc_intr_setup(struct plumpcmcia_softc *,
     struct plumpcmcia_handle *, int);
 static int plum_csc_intr(void *);
-static void plumpcmcia_create_event_thread(void *);
 static void plumpcmcia_event_thread(void *);
 
 #ifdef PLUMPCMCIA_DEBUG
@@ -214,6 +213,7 @@ plumpcmcia_attach(struct device *parent, struct device *self, void *aux)
 	struct plum_attach_args *pa = aux;
 	struct plumpcmcia_softc *sc = (void*)self;
 	struct plumpcmcia_handle *ph;
+	int error;
 
 	sc->sc_pc	= pa->pa_pc;
 	sc->sc_regt	= pa->pa_regt;
@@ -239,7 +239,9 @@ plumpcmcia_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Slot0/1 CSC event queue */
 	SIMPLEQ_INIT (&sc->sc_event_head);
-	kthread_create(plumpcmcia_create_event_thread, sc);
+	error = kthread_create(PRI_NONE, 0, NULL, plumpcmcia_event_thread,
+	    sc, &sc->sc_event_thread, "%s", sc->sc_dev.dv_xname);
+	KASSERT(error == 0);
 
 	/* Slot 0 */
 	ph = &sc->sc_ph[0];
@@ -874,10 +876,10 @@ plum_csc_intr(void *arg)
 	/* read and clear interrupt status */
 	reg = plum_conf_read(regt, regh, PLUM_PCMCIA_CSCINT_STAT);
 	if (reg & PLUM_PCMCIA_CSCINT_CARD_DETECT) {
-		DPRINTF(("%s: card status change.\n", __FUNCTION__));
+		DPRINTF(("%s: card status change.\n", __func__));
 	} else {
 		DPRINTF(("%s: unhandled csc event. 0x%02x\n",
-		    __FUNCTION__, reg));
+		    __func__, reg));
 		return (0);
 	}
 
@@ -895,7 +897,7 @@ plum_csc_intr(void *arg)
 	/* queue event to event thread and wakeup. */
 	pe = plumpcmcia_event_alloc();
 	if (pe == 0) {
-		printf("%s: event FIFO overflow (%d).\n", __FUNCTION__,
+		printf("%s: event FIFO overflow (%d).\n", __func__,
 		    PLUM_PCMCIA_EVENT_QUEUE_MAX);
 		return (0);
 	}
@@ -918,8 +920,7 @@ plumpcmcia_event_alloc()
 			return (&__event_queue_pool[i]);
 		}
 	}
-
-	return (0);
+	return NULL;
 }
 
 static void
@@ -927,18 +928,6 @@ plumpcmcia_event_free(struct plumpcmcia_event *pe)
 {
 	/* I assume context is already locked */
 	pe->__queued = 0;
-}
-
-static void
-plumpcmcia_create_event_thread(void *arg)
-{
-	struct plumpcmcia_softc *sc = arg;
-	int error;
-
-	error = kthread_create1(plumpcmcia_event_thread, sc,
-	    &sc->sc_event_thread, "%s",
-	    sc->sc_dev.dv_xname);
-	KASSERT(error == 0);
 }
 
 static void
@@ -955,14 +944,14 @@ plumpcmcia_event_thread(void *arg)
 			splx(s);
 			switch (pe->pe_type) {
 			default:
-				printf("%s: unknown event.\n", __FUNCTION__);
+				printf("%s: unknown event.\n", __func__);
 				break;
 			case PLUM_PCMCIA_EVENT_INSERT:
-				DPRINTF(("%s: insert event.\n", __FUNCTION__));
+				DPRINTF(("%s: insert event.\n", __func__));
 				pcmcia_card_attach(pe->pe_ph->ph_pcmcia);
 				break;
 			case PLUM_PCMCIA_EVENT_REMOVE:
-				DPRINTF(("%s: remove event.\n", __FUNCTION__));
+				DPRINTF(("%s: remove event.\n", __func__));
 				pcmcia_card_detach(pe->pe_ph->ph_pcmcia,
 				    DETACH_FORCE);
 				break;

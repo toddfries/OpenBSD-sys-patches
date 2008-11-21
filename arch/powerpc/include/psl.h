@@ -1,5 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.5 2001/11/13 14:31:52 drahn Exp $	*/
-/*	$NetBSD: psl.h,v 1.1 1996/09/30 16:34:32 ws Exp $	*/
+/*	$NetBSD: psl.h,v 1.14 2006/08/05 21:26:49 sanjayl Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -35,33 +34,46 @@
 #define	_POWERPC_PSL_H_
 
 /*
- * Flags in MSR:
+ * Machine State Register (MSR)
+ *
+ * The PowerPC 601 does not implement the following bits:
+ *
+ *	VEC, POW, ILE, BE, RI, LE[*]
+ *
+ * [*] Little-endian mode on the 601 is implemented in the HID0 register.
  */
-#define PSL_VEC		0x02000000	/* AltiVec vector unit available */
-#define	PSL_POW		0x00040000
-#define	PSL_ILE		0x00010000
-#define	PSL_EE		0x00008000
-#define	PSL_PR		0x00004000
-#define	PSL_FP		0x00002000
-#define	PSL_ME		0x00001000
-#define	PSL_FE0		0x00000800
-#define	PSL_SE		0x00000400
-#define	PSL_BE		0x00000200
-#define	PSL_FE1		0x00000100
-#define	PSL_IP		0x00000040
-#define	PSL_IR		0x00000020
-#define	PSL_DR		0x00000010
-#define	PSL_RI		0x00000002
-#define	PSL_LE		0x00000001
+#define	PSL_VEC		0x02000000	/* AltiVec vector unit available */
+#define	PSL_POW		0x00040000	/* power management */
+#define	PSL_TGPR	0x00020000	/* temp. gpr remapping (mpc603e) */
+#define	PSL_ILE		0x00010000	/* interrupt endian mode (1 == le) */
+#define	PSL_EE		0x00008000	/* external interrupt enable */
+#define	PSL_PR		0x00004000	/* privilege mode (1 == user) */
+#define	PSL_FP		0x00002000	/* floating point enable */
+#define	PSL_ME		0x00001000	/* machine check enable */
+#define	PSL_FE0		0x00000800	/* floating point interrupt mode 0 */
+#define	PSL_SE		0x00000400	/* single-step trace enable */
+#define	PSL_BE		0x00000200	/* branch trace enable */
+#define	PSL_FE1		0x00000100	/* floating point interrupt mode 1 */
+#define	PSL_IP		0x00000040	/* interrupt prefix */
+#define	PSL_IR		0x00000020	/* instruction address relocation */
+#define	PSL_DR		0x00000010	/* data address relocation */
+#define	PSL_PM		0x00000008	/* Performance monitor marked mode */
+#define	PSL_RI		0x00000002	/* recoverable interrupt */
+#define	PSL_LE		0x00000001	/* endian mode (1 == le) */
+
+#define	PSL_601_MASK	~(PSL_VEC|PSL_POW|PSL_ILE|PSL_BE|PSL_RI|PSL_LE)
+
+/* The IBM 970 series does not implemnt LE mode */
+#define PSL_970_MASK	~(PSL_ILE|PSL_LE)
 
 /*
  * Floating-point exception modes:
  */
-#define	PSL_FE_DIS	0
-#define	PSL_FE_NONREC	PSL_FE1
-#define	PSL_FE_REC	PSL_FE0
-#define	PSL_FE_PREC	(PSL_FE0 | PSL_FE1)
-#define	PSL_FE_DFLT	PSL_FE_DIS
+#define	PSL_FE_DIS	0		/* none */
+#define	PSL_FE_NONREC	PSL_FE1		/* imprecise non-recoverable */
+#define	PSL_FE_REC	PSL_FE0		/* imprecise recoverable */
+#define	PSL_FE_PREC	(PSL_FE0 | PSL_FE1) /* precise */
+#define	PSL_FE_DFLT	PSL_FE_DIS	/* default == none */
 
 /*
  * Note that PSL_POW and PSL_ILE are not in the saved copy of the MSR
@@ -69,10 +81,29 @@
 #define	PSL_MBO		0
 #define	PSL_MBZ		0
 
-#define	PSL_USERSET	(PSL_EE | PSL_PR | PSL_ME | PSL_IR | PSL_DR | PSL_RI)
+/*
+ * A user is not allowed to change any MSR bits except the following:
+ * We restrict the test to the low 16 bits of the MSR since those are the
+ * only ones preserved in the trap.  Note that this means PSL_VEC needs to
+ * be restored to SRR1 in userret.
+ */
+#if defined(_KERNEL) && !defined(_LOCORE)
+#ifdef _KERNEL_OPT
+#include "opt_ppcarch.h"
+#endif /* _KERNEL_OPT */
 
-#define	PSL_USERSTATIC	(PSL_USERSET | PSL_IP | 0x87c0008c)
+#if defined(PPC_OEA) || defined (PPC_OEA64_BRIDGE)
+extern int cpu_psluserset, cpu_pslusermod;
 
-#include <machine/intr.h>
+#define	PSL_USERSET		cpu_psluserset
+#define	PSL_USERMOD		cpu_pslusermod
+#else /* PPC_IBM4XX */
+#define	PSL_USERSET		(PSL_EE | PSL_PR | PSL_ME | PSL_IR | PSL_DR)
+#define	PSL_USERMOD		(0)
+#endif /* PPC_OEA */
+
+#define	PSL_USERSRR1		((PSL_USERSET|PSL_USERMOD) & 0xFFFF)
+#define	PSL_USEROK_P(psl)	(((psl) & ~PSL_USERMOD) == PSL_USERSET)
+#endif /* !_LOCORE */
 
 #endif	/* _POWERPC_PSL_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: wskbdutil.c,v 1.6 2006/12/17 22:04:04 miod Exp $	*/
-/*	$NetBSD: wskbdutil.c,v 1.7 1999/12/21 11:59:13 drochner Exp $	*/
+/*	$NetBSD: wskbdutil.c,v 1.15 2008/04/28 20:24:01 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,9 +29,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/types.h>
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: wskbdutil.c,v 1.15 2008/04/28 20:24:01 martin Exp $");
+
+#include <sys/param.h>
 #include <sys/errno.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -68,12 +61,10 @@ static struct compose_tab_s {
 	{ { KS_less,			KS_less },		KS_guillemotleft },
 	{ { KS_greater,			KS_greater },		KS_guillemotright },
 	{ { KS_question,		KS_question },		KS_questiondown },
-	{ { KS_dead_acute,		KS_space },		KS_apostrophe },
+	{ { KS_dead_acute,		KS_space },		KS_acute },
 	{ { KS_dead_grave,		KS_space },		KS_grave },
 	{ { KS_dead_tilde,		KS_space },		KS_asciitilde },
 	{ { KS_dead_circumflex,		KS_space },		KS_asciicircum },
-	{ { KS_dead_diaeresis,		KS_space },		KS_quotedbl },
-	{ { KS_dead_cedilla,		KS_space },		KS_comma },
 	{ { KS_dead_circumflex,		KS_A },			KS_Acircumflex },
 	{ { KS_dead_diaeresis,		KS_A },			KS_Adiaeresis },
 	{ { KS_dead_grave,		KS_A },			KS_Agrave },
@@ -178,21 +169,37 @@ static struct compose_tab_s {
 	{ { KS_acute,			KS_u },			KS_uacute },
 	{ { KS_asciicircum,		KS_u },			KS_ucircumflex },
 	{ { KS_grave,			KS_u },			KS_ugrave },
-	{ { KS_acute,			KS_y },			KS_yacute }
+	{ { KS_acute,			KS_y },			KS_yacute },
+	{ { KS_dead_semi,		KS_gr_A },		KS_gr_At  },
+	{ { KS_dead_semi,		KS_gr_E },		KS_gr_Et  },
+	{ { KS_dead_semi,		KS_gr_H },		KS_gr_Ht  },
+	{ { KS_dead_semi,		KS_gr_I },		KS_gr_It  },
+	{ { KS_dead_semi,		KS_gr_O },		KS_gr_Ot  },
+	{ { KS_dead_semi,		KS_gr_Y },		KS_gr_Yt  },
+	{ { KS_dead_semi,		KS_gr_V },		KS_gr_Vt  },
+	{ { KS_dead_colon,		KS_gr_I },		KS_gr_Id  },
+	{ { KS_dead_colon,		KS_gr_Y },		KS_gr_Yd  },
+	{ { KS_dead_semi,		KS_gr_a },		KS_gr_at  },
+	{ { KS_dead_semi,		KS_gr_e },		KS_gr_et  },
+	{ { KS_dead_semi,		KS_gr_h },		KS_gr_ht  },
+	{ { KS_dead_semi,		KS_gr_i },		KS_gr_it  },
+	{ { KS_dead_semi,		KS_gr_o },		KS_gr_ot  },
+	{ { KS_dead_semi,		KS_gr_y },		KS_gr_yt  },
+	{ { KS_dead_semi,		KS_gr_v },		KS_gr_vt  },
+	{ { KS_dead_colon,		KS_gr_i },		KS_gr_id  },
+	{ { KS_dead_colon,		KS_gr_y },		KS_gr_yd  }
 };
 
 #define COMPOSE_SIZE	sizeof(compose_tab)/sizeof(compose_tab[0])
 
 static int compose_tab_inorder = 0;
 
-inline int compose_tab_cmp(struct compose_tab_s *,
-				struct compose_tab_s *);
-keysym_t ksym_upcase(keysym_t);
-void fillmapentry(const keysym_t *, int, struct wscons_keymap *);
+static inline int compose_tab_cmp(struct compose_tab_s *, struct compose_tab_s *);
+static keysym_t ksym_upcase(keysym_t);
+static void fillmapentry(const keysym_t *, int, struct wscons_keymap *);
 
-inline int
-compose_tab_cmp(i, j)
-	struct compose_tab_s *i, *j;
+static inline int
+compose_tab_cmp(struct compose_tab_s *i, struct compose_tab_s *j)
 {
 	if (i->elem[0] == j->elem[0])
 		return(i->elem[1] - j->elem[1]);
@@ -201,8 +208,7 @@ compose_tab_cmp(i, j)
 }
 
 keysym_t
-wskbd_compose_value(compose_buf)
-	keysym_t *compose_buf;
+wskbd_compose_value(keysym_t *compose_buf)
 {
 	int i, j, r;
 	struct compose_tab_s v;
@@ -271,9 +277,8 @@ static const u_char latin1_to_upper[256] = {
 	0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0x00,		/* f */
 };
 
-keysym_t
-ksym_upcase(ksym)
-	keysym_t ksym;
+static keysym_t
+ksym_upcase(keysym_t ksym)
 {
 	if (ksym >= KS_f1 && ksym <= KS_f20)
 		return(KS_F1 - KS_f1 + ksym);
@@ -285,11 +290,8 @@ ksym_upcase(ksym)
 	return(ksym);
 }
 
-void
-fillmapentry(kp, len, mapentry)
-	const keysym_t *kp;
-	int len;
-	struct wscons_keymap *mapentry;
+static void
+fillmapentry(const keysym_t *kp, int len, struct wscons_keymap *mapentry)
 {
 	switch (len) {
 	case 0:
@@ -331,16 +333,13 @@ fillmapentry(kp, len, mapentry)
 }
 
 void
-wskbd_get_mapentry(mapdata, kc, mapentry)
-	const struct wskbd_mapdata *mapdata;
-	int kc;
-	struct wscons_keymap *mapentry;
+wskbd_get_mapentry(const struct wskbd_mapdata *mapdata, int kc,
+	struct wscons_keymap *mapentry)
 {
 	kbd_t cur;
 	const keysym_t *kp;
 	const struct wscons_keydesc *mp;
 	int l;
-	keysym_t ksg;
 
 	mapentry->command = KS_voidSymbol;
 	mapentry->group1[0] = KS_voidSymbol;
@@ -360,9 +359,8 @@ wskbd_get_mapentry(mapdata, kc, mapentry)
 		if (mp->map_size <= 0)
 			return;
 
-		for (kp = mp->map; kp < mp->map + mp->map_size; kp++) {
-			ksg = KS_GROUP(*kp);
-			if (ksg == KS_GROUP_Keycode &&
+		for (kp = mp->map; kp < mp->map + mp->map_size; kp++)
+			if (KS_GROUP(*kp) == KS_GROUP_Keycode &&
 			    KS_VALUE(*kp) == kc) {
 				/* First skip keycode and possible command */
 				kp++;
@@ -370,29 +368,22 @@ wskbd_get_mapentry(mapdata, kc, mapentry)
 				    *kp == KS_Cmd || *kp == KS_Cmd1 || *kp == KS_Cmd2)
 					mapentry->command = *kp++;
 
-				for (l = 0; kp + l < mp->map + mp->map_size;
-				    l++) {
-					ksg = KS_GROUP(kp[l]);
-					if (ksg == KS_GROUP_Keycode)
+				for (l = 0; kp + l < mp->map + mp->map_size; l++)
+					if (KS_GROUP(kp[l]) == KS_GROUP_Keycode)
 						break;
-				}
 				if (l > 4)
 					panic("wskbd_get_mapentry: %d(%d): bad entry",
 					      mp->name, *kp);
 				fillmapentry(kp, l, mapentry);
 				return;
 			}
-		}
 
 		cur = mp->base;
 	}
 }
 
 void
-wskbd_init_keymap(newlen, map, maplen)
-	int newlen;
-	struct wscons_keymap **map;
-	int *maplen;
+wskbd_init_keymap(int newlen, struct wscons_keymap **map, int *maplen)
 {
 	int i;
 
@@ -414,16 +405,13 @@ wskbd_init_keymap(newlen, map, maplen)
 }
 
 int
-wskbd_load_keymap(mapdata, map, maplen)
-	const struct wskbd_mapdata *mapdata;
-	struct wscons_keymap **map;
-	int *maplen;
+wskbd_load_keymap(const struct wskbd_mapdata *mapdata,
+	struct wscons_keymap **map, int *maplen)
 {
 	int i, s, kc, stack_ptr;
 	const keysym_t *kp;
 	const struct wscons_keydesc *mp, *stack[10];
 	kbd_t cur;
-	keysym_t ksg;
 
 	for (cur = mapdata->layout & ~KB_HANDLEDBYWSKBD, stack_ptr = 0;
 	     cur != 0; stack_ptr++) {
@@ -447,11 +435,9 @@ wskbd_load_keymap(mapdata, map, maplen)
 
 	for (i = 0, s = stack_ptr - 1; s >= 0; s--) {
 		mp = stack[s];
-		for (kp = mp->map; kp < mp->map + mp->map_size; kp++) {
-			ksg = KS_GROUP(*kp);
-			if (ksg == KS_GROUP_Keycode && KS_VALUE(*kp) > i)
+		for (kp = mp->map; kp < mp->map + mp->map_size; kp++)
+			if (KS_GROUP(*kp) == KS_GROUP_Keycode && KS_VALUE(*kp) > i)
 				i = KS_VALUE(*kp);
-		}
 	}
 
 	wskbd_init_keymap(i + 1, map, maplen);
@@ -459,8 +445,7 @@ wskbd_load_keymap(mapdata, map, maplen)
 	for (s = stack_ptr - 1; s >= 0; s--) {
 		mp = stack[s];
 		for (kp = mp->map; kp < mp->map + mp->map_size; ) {
-			ksg = KS_GROUP(*kp);
-			if (ksg != KS_GROUP_Keycode)
+			if (KS_GROUP(*kp) != KS_GROUP_Keycode)
 				panic("wskbd_load_keymap: %d(%d): bad entry",
 				      mp->name, *kp);
 
@@ -473,11 +458,9 @@ wskbd_load_keymap(mapdata, map, maplen)
 				kp++;
 			}
 
-			for (i = 0; kp + i < mp->map + mp->map_size; i++) {
-				ksg = KS_GROUP(kp[i]);
-				if (ksg == KS_GROUP_Keycode)
+			for (i = 0; kp + i < mp->map + mp->map_size; i++)
+				if (KS_GROUP(kp[i]) == KS_GROUP_Keycode)
 					break;
-			}
 
 			if (i > 4)
 				panic("wskbd_load_keymap: %d(%d): bad entry",

@@ -1,4 +1,4 @@
-/*	$NetBSD: kernfs_subr.c,v 1.9 2005/12/11 12:24:51 christos Exp $	*/
+/*	$NetBSD: kernfs_subr.c,v 1.16 2008/05/05 17:11:17 ad Exp $	*/
 
 /*
  * Copyright (c) 1993
@@ -73,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kernfs_subr.c,v 1.9 2005/12/11 12:24:51 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kernfs_subr.c,v 1.16 2008/05/05 17:11:17 ad Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ipsec.h"
@@ -111,8 +111,8 @@ static LIST_HEAD(kfs_hashhead, kernfs_node) *kfs_hashtbl;
 static u_long	kfs_ihash;	/* size of hash table - 1 */
 #define KFSVALUEHASH(v)	((v) & kfs_ihash)
 
-static struct lock kfs_hashlock;
-static struct simplelock kfs_hash_slock;
+static kmutex_t kfs_hashlock;
+static kmutex_t kfs_ihash_lock;
 
 #define	ISSET(t, f)	((t) & (f))
 
@@ -155,10 +155,14 @@ kernfs_allocvp(mp, vpp, kfs_type, kt, value)
 	int error;
 	long *cookie;
 
-	do {
-		if ((*vpp = kernfs_hashget(kfs_type, mp, kt, value)) != NULL)
-			return (0);
-	} while (lockmgr(&kfs_hashlock, LK_EXCLUSIVE|LK_SLEEPFAIL, 0));
+	if ((*vpp = kernfs_hashget(kfs_type, mp, kt, value)) != NULL)
+		return (0);
+
+	mutex_enter(&kfs_hashlock);
+	if ((*vpp = kernfs_hashget(kfs_type, mp, kt, value)) != NULL) {
+		mutex_exit(&kfs_hashlock);
+		return (0);
+	}
 
 	if (kfs_type == KFSdevice) {
 			/* /kern/rootdev = look for device and obey */
@@ -173,20 +177,20 @@ kernfs_allocvp(mp, vpp, kfs_type, kt, value)
 		dp = kt->kt_data;
 	loop:
 		if (*dp == NODEV || !vfinddev(*dp, kt->kt_vtype, &fvp)) {
-			lockmgr(&kfs_hashlock, LK_RELEASE, NULL);
+			mutex_exit(&kfs_hashlock);
 			return (ENOENT);
 		}
 		vp = fvp;
 		if (vget(fvp, LK_EXCLUSIVE))
 			goto loop;
 		*vpp = vp;
-		lockmgr(&kfs_hashlock, LK_RELEASE, NULL);
+		mutex_exit(&kfs_hashlock);
 		return (0);
 	}
 
 	if ((error = getnewvnode(VT_KERNFS, mp, kernfs_vnodeop_p, &vp)) != 0) {
 		*vpp = NULL;
-		lockmgr(&kfs_hashlock, LK_RELEASE, NULL);
+		mutex_exit(&kfs_hashlock);
 		return (error);
 	}
 
@@ -229,11 +233,11 @@ again:
 	vp->v_type = kt->kt_vtype;
 
 	if (kfs_type == KFSkern)
-		vp->v_flag = VROOT;
+		vp->v_vflag = VV_ROOT;
 
 	kernfs_hashins(kfs);
 	uvm_vnp_setsize(vp, 0);
-	lockmgr(&kfs_hashlock, LK_RELEASE, NULL);
+	mutex_exit(&kfs_hashlock);
 
 	*vpp = vp;
 	return (0);
@@ -260,10 +264,9 @@ void
 kernfs_hashinit()
 {
 
-	lockinit(&kfs_hashlock, PINOD, "kfs_hashlock", 0, 0);
-	kfs_hashtbl = hashinit(desiredvnodes / 4, HASH_LIST, M_UFSMNT,
-	    M_WAITOK, &kfs_ihash);
-	simple_lock_init(&kfs_hash_slock);
+	mutex_init(&kfs_hashlock, MUTEX_DEFAULT, IPL_NONE);
+	mutex_init(&kfs_ihash_lock, MUTEX_DEFAULT, IPL_NONE);
+	kfs_hashtbl = hashinit(desiredvnodes / 4, HASH_LIST, true, &kfs_ihash);
 }
 
 void
@@ -273,10 +276,9 @@ kernfs_hashreinit()
 	struct kfs_hashhead *oldhash, *hash;
 	u_long i, oldmask, mask, val;
 
-	hash = hashinit(desiredvnodes / 4, HASH_LIST, M_UFSMNT, M_WAITOK,
-	    &mask);
+	hash = hashinit(desiredvnodes / 4, HASH_LIST, true, &mask);
 
-	simple_lock(&kfs_hash_slock);
+	mutex_enter(&kfs_ihash_lock);
 	oldhash = kfs_hashtbl;
 	oldmask = kfs_ihash;
 	kfs_hashtbl = hash;
@@ -288,8 +290,8 @@ kernfs_hashreinit()
 			LIST_INSERT_HEAD(&hash[val], pp, kfs_hash);
 		}
 	}
-	simple_unlock(&kfs_hash_slock);
-	hashdone(oldhash, M_UFSMNT);
+	mutex_exit(&kfs_ihash_lock);
+	hashdone(oldhash, HASH_LIST, oldmask);
 }
 
 /*
@@ -299,7 +301,9 @@ void
 kernfs_hashdone()
 {
 
-	hashdone(kfs_hashtbl, M_UFSMNT);
+	hashdone(kfs_hashtbl, HASH_LIST, kfs_ihash);
+	mutex_destroy(&kfs_hashlock);
+	mutex_destroy(&kfs_ihash_lock);
 }
 
 struct vnode *
@@ -313,21 +317,21 @@ kernfs_hashget(type, mp, kt, value)
 	struct kernfs_node *pp;
 	struct vnode *vp;
 
-loop:
-	simple_lock(&kfs_hash_slock);
+ loop:
+	mutex_enter(&kfs_ihash_lock);
 	ppp = &kfs_hashtbl[KFSVALUEHASH(value)];
 	LIST_FOREACH(pp, ppp, kfs_hash) {
 		vp = KERNFSTOV(pp);
 		if (pp->kfs_type == type && vp->v_mount == mp &&
 		    pp->kfs_kt == kt && pp->kfs_value == value) {
-			simple_lock(&vp->v_interlock);
-			simple_unlock(&kfs_hash_slock);
+			mutex_enter(&vp->v_interlock);
+			mutex_exit(&kfs_ihash_lock);
 			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK))
 				goto loop;
 			return (vp);
 		}
 	}
-	simple_unlock(&kfs_hash_slock);
+	mutex_exit(&kfs_ihash_lock);
 	return (NULL);
 }
 
@@ -341,12 +345,12 @@ kernfs_hashins(pp)
 	struct kfs_hashhead *ppp;
 
 	/* lock the kfsnode, then put it on the appropriate hash list */
-	lockmgr(&pp->kfs_vnode->v_lock, LK_EXCLUSIVE, (struct simplelock *)0);
+	vlockmgr(&pp->kfs_vnode->v_lock, LK_EXCLUSIVE);
 
-	simple_lock(&kfs_hash_slock);
+	mutex_enter(&kfs_ihash_lock);
 	ppp = &kfs_hashtbl[KFSVALUEHASH(pp->kfs_value)];
 	LIST_INSERT_HEAD(ppp, pp, kfs_hash);
-	simple_unlock(&kfs_hash_slock);
+	mutex_exit(&kfs_ihash_lock);
 }
 
 /*
@@ -356,9 +360,9 @@ void
 kernfs_hashrem(pp)
 	struct kernfs_node *pp;
 {
-	simple_lock(&kfs_hash_slock);
+	mutex_enter(&kfs_ihash_lock);
 	LIST_REMOVE(pp, kfs_hash);
-	simple_unlock(&kfs_hash_slock);
+	mutex_exit(&kfs_ihash_lock);
 }
 
 #ifdef IPSEC

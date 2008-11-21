@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_ptrace.c,v 1.6 2006/09/01 21:20:46 matt Exp $	*/
+/*	$NetBSD: linux_ptrace.c,v 1.13 2008/04/28 20:23:42 martin Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_ptrace.c,v 1.6 2006/09/01 21:20:46 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_ptrace.c,v 1.13 2008/04/28 20:23:42 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -46,7 +39,6 @@ __KERNEL_RCSID(0, "$NetBSD: linux_ptrace.c,v 1.6 2006/09/01 21:20:46 matt Exp $"
 #include <sys/proc.h>
 #include <sys/ptrace.h>
 #include <sys/systm.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <uvm/uvm_extern.h>
 
@@ -95,18 +87,17 @@ struct linux_reg {
 #define LINUX_REG_CPSR	16
 #define LINUX_REG_ORIG_R0 17
 
+int linux_ptrace_disabled = 1;	/* bitrotted */
+
 int
-linux_sys_ptrace_arch(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, register_t *retval)
 {
-	struct linux_sys_ptrace_args /* {
+	/* {
 		syscallarg(int) request;
 		syscallarg(int) pid;
 		syscallarg(int) addr;
 		syscallarg(int) data;
-	} */ *uap = v;
+	} */
 	struct proc *p = l->l_proc;
 	int request, error;
 	struct proc *t;				/* target process */
@@ -115,6 +106,9 @@ linux_sys_ptrace_arch(l, v, retval)
 	struct fpreg *fpregs = NULL;
 	struct linux_reg *linux_regs = NULL;
 	struct linux_fpreg *linux_fpregs = NULL;
+
+	if (linux_ptrace_disabled)
+		return ENOSYS;
 
 	request = SCARG(uap, request);
 
@@ -130,14 +124,14 @@ linux_sys_ptrace_arch(l, v, retval)
 	 * You can't do what you want to the process if:
 	 *	(1) It's not being traced at all,
 	 */
-	if (!ISSET(t->p_flag, P_TRACED))
+	if (!ISSET(t->p_slflag, PSL_TRACED))
 		return EPERM;
 
 	/*
 	 *	(2) it's being traced by procfs (which has
 	 *	    different signal delivery semantics),
 	 */
-	if (ISSET(t->p_flag, P_FSTRACE))
+	if (ISSET(t->p_slflag, PSL_FSTRACE))
 		return EBUSY;
 
 	/*
@@ -149,7 +143,7 @@ linux_sys_ptrace_arch(l, v, retval)
 	/*
 	 *	(4) it's not currently stopped.
 	 */
-	if (t->p_stat != SSTOP || !ISSET(t->p_flag, P_WAITED))
+	if (t->p_stat != SSTOP || !t->p_waited)
 		return EBUSY;
 
 	/* XXX NJWLWP
@@ -182,7 +176,7 @@ linux_sys_ptrace_arch(l, v, retval)
 		linux_regs->uregs[LINUX_REG_CPSR] = regs->r_cpsr;
 		linux_regs->uregs[LINUX_REG_ORIG_R0] = regs->r[0];
 
-		error = copyout(linux_regs, (caddr_t)SCARG(uap, data),
+		error = copyout(linux_regs, (void *)SCARG(uap, data),
 		    sizeof(struct linux_reg));
 		goto out;
 
@@ -191,7 +185,7 @@ linux_sys_ptrace_arch(l, v, retval)
 		MALLOC(linux_regs, struct linux_reg *, sizeof(struct linux_reg),
 			M_TEMP, M_WAITOK);
 
-		error = copyin((caddr_t)SCARG(uap, data), linux_regs,
+		error = copyin((void *)SCARG(uap, data), linux_regs,
 		    sizeof(struct linux_reg));
 		if (error != 0)
 			goto out;

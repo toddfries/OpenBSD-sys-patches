@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_time.c,v 1.1 2007/08/09 07:36:19 pooka Exp $	*/
+/*	$NetBSD: subr_time.c,v 1.4 2008/07/15 16:18:08 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -33,21 +33,21 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_time.c,v 1.1 2007/08/09 07:36:19 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_time.c,v 1.4 2008/07/15 16:18:08 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/timex.h>
 #include <sys/time.h>
 #include <sys/timetc.h>
+#include <sys/intr.h>
 
-#ifdef __HAVE_TIMECOUNTER
 /*
  * Compute number of hz until specified time.  Used to compute second
  * argument to callout_reset() from an absolute time.
  */
 int
-hzto(struct timeval *tvp)
+tvhzto(const struct timeval *tvp)
 {
 	struct timeval now, tv;
 
@@ -56,13 +56,12 @@ hzto(struct timeval *tvp)
 	timersub(&tv, &now, &tv);
 	return tvtohz(&tv);
 }
-#endif /* __HAVE_TIMECOUNTER */
 
 /*
  * Compute number of ticks in the specified amount of time.
  */
 int
-tvtohz(struct timeval *tv)
+tvtohz(const struct timeval *tv)
 {
 	unsigned long ticks;
 	long sec, usec;
@@ -98,7 +97,7 @@ tvtohz(struct timeval *tv)
 	if (sec < 0 || (sec == 0 && usec <= 0)) {
 		/*
 		 * Would expire now or in the past.  Return 0 ticks.
-		 * This is different from the legacy hzto() interface,
+		 * This is different from the legacy tvhzto() interface,
 		 * and callers need to check for it.
 		 */
 		ticks = 0;
@@ -117,76 +116,21 @@ tvtohz(struct timeval *tv)
 	return ((int)ticks);
 }
 
-#ifndef __HAVE_TIMECOUNTER
-/*
- * Compute number of hz until specified time.  Used to compute second
- * argument to callout_reset() from an absolute time.
- */
 int
-hzto(struct timeval *tv)
+tshzto(const struct timespec *tsp)
 {
-	unsigned long ticks;
-	long sec, usec;
-	int s;
+	struct timespec now, ts;
 
-	/*
-	 * If the number of usecs in the whole seconds part of the time
-	 * difference fits in a long, then the total number of usecs will
-	 * fit in an unsigned long.  Compute the total and convert it to
-	 * ticks, rounding up and adding 1 to allow for the current tick
-	 * to expire.  Rounding also depends on unsigned long arithmetic
-	 * to avoid overflow.
-	 *
-	 * Otherwise, if the number of ticks in the whole seconds part of
-	 * the time difference fits in a long, then convert the parts to
-	 * ticks separately and add, using similar rounding methods and
-	 * overflow avoidance.  This method would work in the previous
-	 * case, but it is slightly slower and assume that hz is integral.
-	 *
-	 * Otherwise, round the time difference down to the maximum
-	 * representable value.
-	 *
-	 * If ints are 32-bit, then the maximum value for any timeout in
-	 * 10ms ticks is 248 days.
-	 */
-	s = splclock();
-	sec = tv->tv_sec - time.tv_sec;
-	usec = tv->tv_usec - time.tv_usec;
-	splx(s);
-
-	if (usec < 0) {
-		sec--;
-		usec += 1000000;
-	}
-
-	if (sec < 0 || (sec == 0 && usec <= 0)) {
-		/*
-		 * Would expire now or in the past.  Return 0 ticks.
-		 * This is different from the legacy hzto() interface,
-		 * and callers need to check for it.
-		 */
-		ticks = 0;
-	} else if (sec <= (LONG_MAX / 1000000))
-		ticks = (((sec * 1000000) + (unsigned long)usec + (tick - 1))
-		    / tick) + 1;
-	else if (sec <= (LONG_MAX / hz))
-		ticks = (sec * hz) +
-		    (((unsigned long)usec + (tick - 1)) / tick) + 1;
-	else
-		ticks = LONG_MAX;
-
-	if (ticks > INT_MAX)
-		ticks = INT_MAX;
-
-	return ((int)ticks);
+	ts = *tsp;	/* Don't modify original tsp. */
+	getnanotime(&now);
+	timespecsub(&ts, &now, &ts);
+	return tstohz(&ts);
 }
-#endif /* !__HAVE_TIMECOUNTER */
-
 /*
  * Compute number of ticks in the specified amount of time.
  */
 int
-tstohz(struct timespec *ts)
+tstohz(const struct timespec *ts)
 {
 	struct timeval tv;
 

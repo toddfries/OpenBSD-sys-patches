@@ -1,5 +1,4 @@
-/* $OpenBSD: mainbus.c,v 1.13 2005/10/17 18:34:22 miod Exp $ */
-/* $NetBSD: mainbus.c,v 1.27 1998/06/24 01:10:35 ross Exp $ */
+/* $NetBSD: mainbus.c,v 1.32 2008/07/09 20:23:50 joerg Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -28,6 +27,10 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.32 2008/07/09 20:23:50 joerg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -39,26 +42,17 @@
 #include <machine/cpuconf.h>
 
 /* Definition of the mainbus driver. */
-static int	mbmatch(struct device *, void *, void *);
-static void	mbattach(struct device *, struct device *, void *);
+static int	mbmatch(device_t, cfdata_t, void *);
+static void	mbattach(device_t, device_t, void *);
 static int	mbprint(void *, const char *);
 
-struct cfattach mainbus_ca = {
-	sizeof(struct device), mbmatch, mbattach
-};
-
-struct cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
-};
+CFATTACH_DECL_NEW(mainbus, 0, mbmatch, mbattach, NULL, NULL);
 
 /* There can be only one. */
 int	mainbus_found;
 
 static int
-mbmatch(parent, cf, aux)
-	struct device *parent;
-	void *cf;
-	void *aux;
+mbmatch(device_t parent, cfdata_t cf, void *aux)
 {
 
 	if (mainbus_found)
@@ -68,15 +62,12 @@ mbmatch(parent, cf, aux)
 }
 
 static void
-mbattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+mbattach(device_t parent, device_t self, void *aux)
 {
 	struct mainbus_attach_args ma;
 	struct pcs *pcsp;
 	int i, cpuattachcnt;
-	extern int alpha_cpus;
+	extern int ncpus;
 
 	mainbus_found = 1;
 
@@ -96,9 +87,9 @@ mbattach(parent, self, aux)
 		if (config_found(self, &ma, mbprint) != NULL)
 			cpuattachcnt++;
 	}
-	if (alpha_cpus != cpuattachcnt)
+	if (ncpus != cpuattachcnt)
 		printf("WARNING: %d cpus in machine, %d attached\n",
-			alpha_cpus, cpuattachcnt);
+			ncpus, cpuattachcnt);
 
 	if (platform.iobus != NULL) {
 		ma.ma_name = platform.iobus;
@@ -108,14 +99,12 @@ mbattach(parent, self, aux)
 }
 
 static int
-mbprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+mbprint(void *aux, const char *pnp)
 {
 	struct mainbus_attach_args *ma = aux;
 
 	if (pnp)
-		printf("%s at %s", ma->ma_name, pnp);
+		aprint_normal("%s at %s", ma->ma_name, pnp);
 
 	return (UNCONF);
 }

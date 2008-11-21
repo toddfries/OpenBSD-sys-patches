@@ -1,3 +1,5 @@
+/*	$NetBSD: via_verifier.c,v 1.3 2008/07/08 06:50:23 mrg Exp $	*/
+
 /*
  * Copyright 2004 The Unichrome Project. All Rights Reserved.
  * Copyright 2005 Thomas Hellstrom. All Rights Reserved.
@@ -28,9 +30,12 @@
  * be very slow.
  */
 
-#include "via_3d_reg.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: via_verifier.c,v 1.3 2008/07/08 06:50:23 mrg Exp $");
+
 #include "drmP.h"
 #include "drm.h"
+#include "via_3d_reg.h"
 #include "via_drm.h"
 #include "via_verifier.h"
 #include "via_drv.h"
@@ -77,7 +82,7 @@ typedef enum {
 /*
  * Associates each hazard above with a possible multi-command
  * sequence. For example an address that is split over multiple
- * commands and that needs to be checked at the first command
+ * commands and that needs to be checked at the first command 
  * that does not include any part of the address.
  */
 
@@ -252,10 +257,11 @@ eat_words(const uint32_t ** buf, const uint32_t * buf_end, unsigned num_words)
 static __inline__ drm_local_map_t *via_drm_lookup_agp_map(drm_via_state_t * seq,
 							  unsigned long offset,
 							  unsigned long size,
-							  struct drm_device * dev)
+							  drm_device_t * dev)
 {
 #ifdef __linux__
-	struct drm_map_list *r_list;
+	struct list_head *list;
+	drm_map_list_t *r_list;
 #endif
 	drm_local_map_t *map = seq->map_cache;
 
@@ -264,7 +270,8 @@ static __inline__ drm_local_map_t *via_drm_lookup_agp_map(drm_via_state_t * seq,
 		return map;
 	}
 #ifdef __linux__
-	list_for_each_entry(r_list, &dev->maplist, head) {
+	list_for_each(list, &dev->maplist->head) {
+		r_list = (drm_map_list_t *) list;
 		map = r_list->map;
 		if (!map)
 			continue;
@@ -283,10 +290,10 @@ static __inline__ drm_local_map_t *via_drm_lookup_agp_map(drm_via_state_t * seq,
 }
 
 /*
- * Require that all AGP texture levels reside in the same AGP map which should
+ * Require that all AGP texture levels reside in the same AGP map which should 
  * be mappable by the client. This is not a big restriction.
- * FIXME: To actually enforce this security policy strictly, drm_rmmap
- * would have to wait for dma quiescent before removing an AGP map.
+ * FIXME: To actually enforce this security policy strictly, drm_rmmap 
+ * would have to wait for dma quiescent before removing an AGP map. 
  * The via_drm_lookup_agp_map call in reality seems to take
  * very little CPU time.
  */
@@ -349,17 +356,17 @@ static __inline__ int finish_current_sequence(drm_via_state_t * cur_seq)
 }
 
 static __inline__ int
-investigate_hazard(uint32_t cmd, hazard_t hz, drm_via_state_t * cur_seq)
+investigate_hazard(uint32_t cmd, hazard_t haz, drm_via_state_t * cur_seq)
 {
 	register uint32_t tmp, *tmp_addr;
 
-	if (cur_seq->unfinished && (cur_seq->unfinished != seqs[hz])) {
+	if (cur_seq->unfinished && (cur_seq->unfinished != seqs[haz])) {
 		int ret;
 		if ((ret = finish_current_sequence(cur_seq)))
 			return ret;
 	}
 
-	switch (hz) {
+	switch (haz) {
 	case check_for_header2:
 		if (cmd == HALCYON_HEADER2)
 			return 1;
@@ -451,15 +458,15 @@ investigate_hazard(uint32_t cmd, hazard_t hz, drm_via_state_t * cur_seq)
 	case check_texture_addr3:
 		cur_seq->unfinished = tex_address;
 		tmp = ((cmd >> 24) - HC_SubA_HTXnL0Pit);
-		if (tmp == 0 &&
+		if (tmp == 0 && 
 		    (cmd & HC_HTXnEnPit_MASK)) {
-			cur_seq->pitch[cur_seq->texture][tmp] =
+			cur_seq->pitch[cur_seq->texture][tmp] = 
 				(cmd & HC_HTXnLnPit_MASK);
 			cur_seq->tex_npot[cur_seq->texture] = 1;
 		} else {
 			cur_seq->pitch[cur_seq->texture][tmp] =
 				(cmd & HC_HTXnLnPitE_MASK) >> HC_HTXnLnPitE_SHIFT;
-			cur_seq->tex_npot[cur_seq->texture] = 0;
+			cur_seq->tex_npot[cur_seq->texture] = 0;			
 			if (cmd & 0x000FFFFF) {
 				DRM_ERROR
 					("Unimplemented texture level 0 pitch mode.\n");
@@ -631,7 +638,7 @@ via_check_header2(uint32_t const **buffer, const uint32_t * buf_end,
 {
 	uint32_t cmd;
 	int hz_mode;
-	hazard_t hz;
+	hazard_t haz;
 	const uint32_t *buf = *buffer;
 	const hazard_t *hz_table;
 
@@ -698,8 +705,8 @@ via_check_header2(uint32_t const **buffer, const uint32_t * buf_end,
 
 	while (buf < buf_end) {
 		cmd = *buf++;
-		if ((hz = hz_table[cmd >> 24])) {
-			if ((hz_mode = investigate_hazard(cmd, hz, hc_state))) {
+		if ((haz = hz_table[cmd >> 24])) {
+			if ((hz_mode = investigate_hazard(cmd, haz, hc_state))) {
 				if (hz_mode == 1) {
 					buf--;
 					break;
@@ -967,7 +974,7 @@ via_parse_vheader6(drm_via_private_t * dev_priv, uint32_t const **buffer,
 
 int
 via_verify_command_stream(const uint32_t * buf, unsigned int size,
-			  struct drm_device * dev, int agp)
+			  drm_device_t * dev, int agp)
 {
 
 	drm_via_private_t *dev_priv = (drm_via_private_t *) dev->dev_private;
@@ -1007,7 +1014,7 @@ via_verify_command_stream(const uint32_t * buf, unsigned int size,
 			state = via_check_vheader6(&buf, buf_end);
 			break;
 		case state_command:
-			if ((HALCYON_HEADER2 == (cmd = *buf)) &&
+			if ((HALCYON_HEADER2 == (cmd = *buf)) && 
 			    supported_3d)
 				state = state_header2;
 			else if ((cmd & HALCYON_HEADER1MASK) == HALCYON_HEADER1)
@@ -1031,18 +1038,18 @@ via_verify_command_stream(const uint32_t * buf, unsigned int size,
 		case state_error:
 		default:
 			*hc_state = saved_state;
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 	}
 	if (state == state_error) {
 		*hc_state = saved_state;
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 	return 0;
 }
 
 int
-via_parse_command_stream(struct drm_device * dev, const uint32_t * buf,
+via_parse_command_stream(drm_device_t * dev, const uint32_t * buf,
 			 unsigned int size)
 {
 
@@ -1087,11 +1094,11 @@ via_parse_command_stream(struct drm_device * dev, const uint32_t * buf,
 			break;
 		case state_error:
 		default:
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 	}
 	if (state == state_error) {
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 	return 0;
 }

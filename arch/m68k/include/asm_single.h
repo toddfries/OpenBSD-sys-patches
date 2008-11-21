@@ -1,5 +1,4 @@
-/*	$OpenBSD: asm_single.h,v 1.3 2001/01/15 19:50:37 deraadt Exp $	*/
-/*	$NetBSD: asm_single.h,v 1.1 1996/09/16 06:03:58 leo Exp $	*/
+/*	$NetBSD: asm_single.h,v 1.8 2006/08/03 20:32:07 mhitch Exp $	*/
 
 /*
  * Copyright (c) 1996 Leo Weppelman.
@@ -37,23 +36,40 @@
  * Provide bit manipulation macro's that resolve to a single instruction.
  * These can be considered atomic on single processor architectures when
  * no page faults can occur when acessing <var>.
- * Their primary use is to avoid race conditions when manipulating device
+ * There primary use is to avoid race conditions when manipulating device
  * registers.
  */
 
 #define single_inst_bset_b(var, bit)	\
-	__asm__ __volatile__ ("orb %0,%1" : : "di" ((u_char)bit), "g" (var))
+	__asm volatile ("orb %1,%0"	\
+		: "+m" (var)		\
+		: "di" ((u_char)bit))
+
 #define single_inst_bclr_b(var, bit)	\
-	__asm__ __volatile__ ("andb %0,%1" : : "di" ((u_char)~(bit)), "g" (var));
+	__asm volatile ("andb %1,%0"	\
+		: "+m" (var)		\
+		: "di" ((u_char)~(bit)))
+
 
 #define single_inst_bset_w(var, bit)	\
-	__asm__ __volatile__ ("orw %0,%1" : : "di" ((u_short)bit), "g" (var))
+	__asm volatile ("orw %1,%0"	\
+		: "+m" (var)		\
+		: "di" ((u_short)bit))
+
 #define single_inst_bclr_w(var, bit)	\
-	__asm__ __volatile__ ("andw %0,%1" : : "di" ((u_short)~(bit)), "g" (var));
+	__asm volatile ("andw %1,%0"	\
+		: "+m" (var)		\
+		: "di" ((u_short)~(bit)))
+
 
 #define single_inst_bset_l(var, bit)	\
-	__asm__ __volatile__ ("orl %0,%1" : : "di" ((u_long)bit), "g" (var))
+	__asm volatile ("orl %1,%0"	\
+		: "+m" (var)		\
+		: "di" ((u_long)bit))
+
 #define single_inst_bclr_l(var, bit)	\
-	__asm__ __volatile__ ("andl %0,%1" : : "di" ((u_long)~(bit)), "g" (var));
+	__asm volatile ("andl %1,%0"	\
+		: "+m" (var)		\
+		: "di" ((u_long)~(bit)))
 
 #endif /* _M68K_ASM_SINGLE_H */

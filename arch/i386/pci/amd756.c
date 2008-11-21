@@ -1,8 +1,7 @@
-/*	$OpenBSD: amd756.c,v 1.4 2006/09/19 11:06:34 jsg Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: amd756.c,v 1.8 2008/04/28 20:23:24 martin Exp $	*/
 
 /*-
- * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1999, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *     This product includes software developed by the NetBSD
- *     Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,23 +41,26 @@
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the developer may NOT be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND 
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE 
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL 
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS 
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT 
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY 
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF 
+ * SUCH DAMAGE. 
  */
 
 /*
  * Support for the Advanced Micro Devices AMD756 Peripheral Bus Controller.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: amd756.c,v 1.8 2008/04/28 20:23:24 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -79,23 +74,23 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
-#include <i386/pci/pcibiosvar.h>
+#include <i386/pci/pci_intr_fixup.h>
 #include <i386/pci/amd756reg.h>
 
-struct viper_handle {
+struct amd756_handle {
 	bus_space_tag_t ph_iot;
 	bus_space_handle_t ph_regs_ioh;
 	pci_chipset_tag_t ph_pc;
 	pcitag_t ph_tag;
 };
 
-int amd756_getclink(pciintr_icu_handle_t, int, int *);
-int amd756_get_intr(pciintr_icu_handle_t, int, int *);
-int amd756_set_intr(pciintr_icu_handle_t, int, int);
-int amd756_get_trigger(pciintr_icu_handle_t, int, int *);
-int amd756_set_trigger(pciintr_icu_handle_t, int, int);
-#ifdef VIPER_DEBUG
-static void amd756_pir_dump(struct viper_handle *);
+int	amd756_getclink(pciintr_icu_handle_t, int, int *);
+int	amd756_get_intr(pciintr_icu_handle_t, int, int *);
+int	amd756_set_intr(pciintr_icu_handle_t, int, int);
+int	amd756_get_trigger(pciintr_icu_handle_t, int, int *);
+int	amd756_set_trigger(pciintr_icu_handle_t, int, int);
+#ifdef AMD756_DEBUG
+static void	amd756_pir_dump(struct amd756_handle *);
 #endif
 
 const struct pciintr_icu amd756_pci_icu = {
@@ -111,7 +106,7 @@ int
 amd756_init(pci_chipset_tag_t pc, bus_space_tag_t iot, pcitag_t tag,
     pciintr_icu_tag_t *ptagp, pciintr_icu_handle_t *phandp)
 {
-	struct viper_handle *ph;
+	struct amd756_handle *ph;
 
 	ph = malloc(sizeof(*ph), M_DEVBUF, M_NOWAIT);
 	if (ph == NULL)
@@ -124,11 +119,11 @@ amd756_init(pci_chipset_tag_t pc, bus_space_tag_t iot, pcitag_t tag,
 	*ptagp = &amd756_pci_icu;
 	*phandp = ph;
 
-#ifdef VIPER_DEBUG
+#ifdef AMD756_DEBUG
 	amd756_pir_dump(ph);
 #endif
 
-	return 0;
+	return (0);
 }
 
 int
@@ -138,13 +133,14 @@ amd756_getclink(pciintr_icu_handle_t v, int link, int *clinkp)
 		return (1);
 
 	*clinkp = link - 1;
+
 	return (0);
 }
 
 int
 amd756_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 {
-	struct viper_handle *ph = v;
+	struct amd756_handle *ph = v;
 	pcireg_t reg;
 	int val;
 
@@ -152,9 +148,9 @@ amd756_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 		return (1);
 
 	reg = AMD756_GET_PIIRQSEL(ph);
-	val = (reg >> (4*clink)) & 0x0f;
+	val = (reg >> (4 * clink)) & 0x0f;
 	*irqp = (val == 0) ?
-	    I386_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
+	    X86_PCI_INTERRUPT_LINE_NO_CONNECTION : val;
 
 	return (0);
 }
@@ -162,7 +158,7 @@ amd756_get_intr(pciintr_icu_handle_t v, int clink, int *irqp)
 int
 amd756_set_intr(pciintr_icu_handle_t v, int clink, int irq)
 {
-	struct viper_handle *ph = v;
+	struct amd756_handle *ph = v;
 	int val;
 	pcireg_t reg;
 
@@ -171,17 +167,17 @@ amd756_set_intr(pciintr_icu_handle_t v, int clink, int irq)
 
 	reg = AMD756_GET_PIIRQSEL(ph);
 	amd756_get_intr(v, clink, &val);
-	reg &= ~(0x000f << (4*clink));
-	reg |= irq << (4*clink);
+	reg &= ~(0x000f << (4 * clink));
+	reg |= irq << (4 * clink);
 	AMD756_SET_PIIRQSEL(ph, reg);
 
-	return 0;
+	return (0);
 }
 
 int
 amd756_get_trigger(pciintr_icu_handle_t v, int irq, int *triggerp)
 {
-	struct viper_handle *ph = v;
+	struct amd756_handle *ph = v;
 	int i, pciirq;
 	pcireg_t reg;
 
@@ -200,13 +196,13 @@ amd756_get_trigger(pciintr_icu_handle_t v, int irq, int *triggerp)
 		}
 	}
 
-	return 0;
+	return (0);
 }
 
 int
 amd756_set_trigger(pciintr_icu_handle_t v, int irq, int trigger)
 {
-	struct viper_handle *ph = v;
+	struct amd756_handle *ph = v;
 	int i, pciirq;
 	pcireg_t reg;
 
@@ -218,9 +214,9 @@ amd756_set_trigger(pciintr_icu_handle_t v, int irq, int trigger)
 		if (pciirq == irq) {
 			reg = AMD756_GET_PIIRQSEL(ph);
 			if (trigger == IST_LEVEL)
-				reg &= ~(1 << (4*i));
+				reg &= ~(1 << (4 * i));
 			else
-				reg |= 1 << (4*i);
+				reg |= 1 << (4 * i);
 			AMD756_SET_PIIRQSEL(ph, reg);
 			break;
 		}
@@ -229,17 +225,17 @@ amd756_set_trigger(pciintr_icu_handle_t v, int irq, int trigger)
 	return (0);
 }
 
-#ifdef VIPER_DEBUG
+#ifdef AMD756_DEBUG
 static void
-amd756_pir_dump(struct viper_handle *ph)
+amd756_pir_dump(struct amd756_handle *ph)
 {
 	int a, b;
 
-	printf ("VIPER PCI INTERRUPT ROUTING REGISTERS:\n");
+	printf ("AMD756 PCI INTERRUPT ROUTING REGISTERS:\n");
 
 	a = AMD756_GET_EDGESEL(ph);
 	b = AMD756_GET_PIIRQSEL(ph);
-
+	
 	printf ("TRIGGER: %02x, ROUTING: %04x\n", a, b);
 }
 #endif

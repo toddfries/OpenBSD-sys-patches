@@ -1,4 +1,4 @@
-/* $NetBSD: crmfbreg.h,v 1.7 2008/02/17 01:46:46 macallan Exp $ */
+/* $NetBSD: crmfbreg.h,v 1.9 2008/11/06 22:16:03 macallan Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by Jared D. McNeill.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -179,7 +173,8 @@
 #define CRIME_DE_STIPPLE_PAT	0x20c4
 #define CRIME_DE_FG		0x20d0
 #define CRIME_DE_BG		0x20d8
-
+#define CRIME_DE_ALPHA_COLOR	0x21a0	/* constant colour for alpha */
+#define CRIME_DE_ALPHA_FUNC	0x21a8	/* blend function */
 #define CRIME_DE_ROP		0x21b0
 #define CRIME_DE_PLANEMASK	0x21b8
 
@@ -248,8 +243,33 @@
 #define DE_PRIM_TB		0x00020000	/* top to bottom */
 #define DE_PRIM_LINE_WIDTH_MASK	0x0000ffff	/* in half pixels */
 
+/* alpha function register */
+#define DE_ALPHA_ADD		0x00000000
+#define DE_ALPHA_MIN		0x00000100
+#define DE_ALPHA_MAX		0x00000200
+#define DE_ALPHA_SUB		0x00000300
+#define DE_ALPHA_REV_SUB	0x00000400
+
+#define DE_ALPHA_OP_ZERO		0
+#define DE_ALPHA_OP_ONE			1
+#define DE_ALPHA_OP_DST_COLOR		2
+#define DE_ALPHA_OP_1_MINUS_DST_COLOR	3
+#define DE_ALPHA_OP_SRC_ALPHA		4
+#define DE_ALPHA_OP_1_MINUS_SRC_ALPHA	5
+#define DE_ALPHA_OP_DST_ALPHA		6
+#define DE_ALPHA_OP_1_MINUS_DST_APLHA	7
+#define DE_ALPHA_OP_CONSTANT_COLOR	8
+#define DE_ALPHA_OP_1_MINUS_CONST_COLOR	9
+#define DE_ALPHA_OP_CONSTANT_ALPHA	10
+#define DE_ALPHA_OP_1_MINUS_CONST_ALPHA	11
+#define DE_ALPHA_OP_SRC_ALPHA_SATURATE	12
+
+#define DE_ALPHA_OP_SRC_SHIFT 4
+#define DE_ALPHA_OP_DST_SHIFT 0
+
 /* status register */
 #define CRIME_DE_STATUS		0x4000
 #define CRIME_DE_IDLE		0x10000000
+#define CRIME_DE_READY		0x02000000
 
 #endif /* CRMFBREG_H */

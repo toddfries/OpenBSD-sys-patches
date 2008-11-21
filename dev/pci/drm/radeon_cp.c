@@ -1,5 +1,7 @@
+/*	$NetBSD: radeon_cp.c,v 1.11 2008/11/09 02:35:42 christos Exp $	*/
+
 /* radeon_cp.c -- CP support for Radeon -*- linux-c -*- */
-/*
+/*-
  * Copyright 2000 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Fremont, California.
  * All Rights Reserved.
@@ -28,15 +30,21 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: radeon_cp.c,v 1.11 2008/11/09 02:35:42 christos Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_cp.c,v 1.19 2006/09/07 23:04:47 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "radeon_drm.h"
 #include "radeon_drv.h"
 #include "r300_reg.h"
 
-#define RADEON_FIFO_DEBUG	1
+#define RADEON_FIFO_DEBUG	0
 
-static int radeon_do_cleanup_cp(struct drm_device * dev);
+static int radeon_do_cleanup_cp(drm_device_t * dev);
 
 /* CP microcode (from ATI) */
 static const u32 R200_cp_microcode[][2] = {
@@ -695,7 +703,7 @@ static const u32 R300_cp_microcode[][2] = {
 	{ 0x0000e571, 0x00000004 },
 	{ 0x0000e572, 0x0000000c },
 	{ 0x0000a000, 0x00000004 },
-	{ 0x0140a000, 0x00000004 },
+	{ 0x0140a000, 0x00000004 }, 
 	{ 0x0000e568, 0x00000004 },
 	{ 0x000c2000, 0x00000004 },
 	{ 0x00000089, 0x00000018 },
@@ -816,7 +824,267 @@ static const u32 R300_cp_microcode[][2] = {
 	{ 0000000000, 0000000000 },
 };
 
-static int RADEON_READ_PLL(struct drm_device * dev, int addr)
+static const u32 R500_cp_microcode[][2]={
+    { 0x4200e000, 0000000000 },
+    { 0x4000e000, 0000000000 },
+    { 0x00000099, 0x00000008 },
+    { 0x0000009d, 0x00000008 },
+    { 0x4a554b4a, 0000000000 },
+    { 0x4a4a4467, 0000000000 },
+    { 0x55526f75, 0000000000 },
+    { 0x4a7e7d65, 0000000000 },
+    { 0xe0dae6f6, 0000000000 },
+    { 0x4ac54a4a, 0000000000 },
+    { 0xc8828282, 0000000000 },
+    { 0xbf4acfc1, 0000000000 },
+    { 0x87b04ad5, 0000000000 },
+    { 0xb5838383, 0000000000 },
+    { 0x4a0f85ba, 0000000000 },
+    { 0x000ca000, 0x00000004 },
+    { 0x000d0012, 0x00000038 },
+    { 0x0000e8b4, 0x00000004 },
+    { 0x000d0014, 0x00000038 },
+    { 0x0000e8b6, 0x00000004 },
+    { 0x000d0016, 0x00000038 },
+    { 0x0000e854, 0x00000004 },
+    { 0x000d0018, 0x00000038 },
+    { 0x0000e855, 0x00000004 },
+    { 0x000d001a, 0x00000038 },
+    { 0x0000e856, 0x00000004 },
+    { 0x000d001c, 0x00000038 },
+    { 0x0000e857, 0x00000004 },
+    { 0x000d001e, 0x00000038 },
+    { 0x0000e824, 0x00000004 },
+    { 0x000d0020, 0x00000038 },
+    { 0x0000e825, 0x00000004 },
+    { 0x000d0022, 0x00000038 },
+    { 0x0000e830, 0x00000004 },
+    { 0x000d0024, 0x00000038 },
+    { 0x0000f0c0, 0x00000004 },
+    { 0x000d0026, 0x00000038 },
+    { 0x0000f0c1, 0x00000004 },
+    { 0x000d0028, 0x00000038 },
+    { 0x0000e000, 0x00000004 },
+    { 0x000d002a, 0x00000038 },
+    { 0x0000e000, 0x00000004 },
+    { 0x000d002c, 0x00000038 },
+    { 0x0000e000, 0x00000004 },
+    { 0x000d002e, 0x00000038 },
+    { 0x0000e000, 0x00000004 },
+    { 0x000d0030, 0x00000038 },
+    { 0x0000e000, 0x00000004 },
+    { 0x000d0032, 0x00000038 },
+    { 0x0000f180, 0x00000004 },
+    { 0x000d0034, 0x00000038 },
+    { 0x0000f393, 0x00000004 },
+    { 0x000d0036, 0x00000038 },
+    { 0x0000f38a, 0x00000004 },
+    { 0x000d0038, 0x00000038 },
+    { 0x0000f38e, 0x00000004 },
+    { 0x0000e821, 0x00000004 },
+    { 0x0140a000, 0x00000004 },
+    { 0x00000043, 0x00000018 },
+    { 0x00cce800, 0x00000004 },
+    { 0x001b0001, 0x00000004 },
+    { 0x08004800, 0x00000004 },
+    { 0x001b0001, 0x00000004 },
+    { 0x08004800, 0x00000004 },
+    { 0x001b0001, 0x00000004 },
+    { 0x08004800, 0x00000004 },
+    { 0x0000003a, 0x00000008 },
+    { 0x0000a000, 0000000000 },
+    { 0x2000451d, 0x00000004 },
+    { 0x0000e580, 0x00000004 },
+    { 0x000ce581, 0x00000004 },
+    { 0x08004580, 0x00000004 },
+    { 0x000ce581, 0x00000004 },
+    { 0x00000047, 0x00000008 },
+    { 0x0000a000, 0000000000 },
+    { 0x000c2000, 0x00000004 },
+    { 0x0000e50e, 0x00000004 },
+    { 0x00032000, 0x00000004 },
+    { 0x00022051, 0x00000028 },
+    { 0x00000051, 0x00000024 },
+    { 0x0800450f, 0x00000004 },
+    { 0x0000a04b, 0x00000008 },
+    { 0x0000e565, 0x00000004 },
+    { 0x0000e566, 0x00000004 },
+    { 0x00000052, 0x00000008 },
+    { 0x03cca5b4, 0x00000004 },
+    { 0x05432000, 0x00000004 },
+    { 0x00022000, 0x00000004 },
+    { 0x4ccce05e, 0x00000030 },
+    { 0x08274565, 0x00000004 },
+    { 0x0000005e, 0x00000030 },
+    { 0x08004564, 0x00000004 },
+    { 0x0000e566, 0x00000004 },
+    { 0x00000055, 0x00000008 },
+    { 0x00802061, 0x00000010 },
+    { 0x00202000, 0x00000004 },
+    { 0x001b00ff, 0x00000004 },
+    { 0x01000064, 0x00000010 },
+    { 0x001f2000, 0x00000004 },
+    { 0x001c00ff, 0x00000004 },
+    { 0000000000, 0x0000000c },
+    { 0x00000072, 0x00000030 },
+    { 0x00000055, 0x00000008 },
+    { 0x0000e576, 0x00000004 },
+    { 0x0000e577, 0x00000004 },
+    { 0x0000e50e, 0x00000004 },
+    { 0x0000e50f, 0x00000004 },
+    { 0x0140a000, 0x00000004 },
+    { 0x00000069, 0x00000018 },
+    { 0x00c0e5f9, 0x000000c2 },
+    { 0x00000069, 0x00000008 },
+    { 0x0014e50e, 0x00000004 },
+    { 0x0040e50f, 0x00000004 },
+    { 0x00c0006c, 0x00000008 },
+    { 0x0000e570, 0x00000004 },
+    { 0x0000e571, 0x00000004 },
+    { 0x0000e572, 0x0000000c },
+    { 0x0000a000, 0x00000004 },
+    { 0x0140a000, 0x00000004 },
+    { 0x0000e568, 0x00000004 },
+    { 0x000c2000, 0x00000004 },
+    { 0x00000076, 0x00000018 },
+    { 0x000b0000, 0x00000004 },
+    { 0x18c0e562, 0x00000004 },
+    { 0x00000078, 0x00000008 },
+    { 0x00c00077, 0x00000008 },
+    { 0x000700c7, 0x00000004 },
+    { 0x00000080, 0x00000038 },
+    { 0x0000e5bb, 0x00000004 },
+    { 0x0000e5bc, 0000000000 },
+    { 0x0000a000, 0x00000004 },
+    { 0x0000e821, 0x00000004 },
+    { 0x0000e800, 0000000000 },
+    { 0x0000e821, 0x00000004 },
+    { 0x0000e82e, 0000000000 },
+    { 0x02cca000, 0x00000004 },
+    { 0x00140000, 0x00000004 },
+    { 0x000ce1cc, 0x00000004 },
+    { 0x050de1cd, 0x00000004 },
+    { 0x00400000, 0x00000004 },
+    { 0x0000008f, 0x00000018 },
+    { 0x00c0a000, 0x00000004 },
+    { 0x0000008c, 0x00000008 },
+    { 0x00000091, 0x00000020 },
+    { 0x4200e000, 0000000000 },
+    { 0x00000098, 0x00000038 },
+    { 0x000ca000, 0x00000004 },
+    { 0x00140000, 0x00000004 },
+    { 0x000c2000, 0x00000004 },
+    { 0x00160000, 0x00000004 },
+    { 0x700ce000, 0x00000004 },
+    { 0x00140094, 0x00000008 },
+    { 0x4000e000, 0000000000 },
+    { 0x02400000, 0x00000004 },
+    { 0x400ee000, 0x00000004 },
+    { 0x02400000, 0x00000004 },
+    { 0x4000e000, 0000000000 },
+    { 0x000c2000, 0x00000004 },
+    { 0x0240e51b, 0x00000004 },
+    { 0x0080e50a, 0x00000005 },
+    { 0x0080e50b, 0x00000005 },
+    { 0x00220000, 0x00000004 },
+    { 0x000700c7, 0x00000004 },
+    { 0x000000a4, 0x00000038 },
+    { 0x0080e5bd, 0x00000005 },
+    { 0x0000e5bb, 0x00000005 },
+    { 0x0080e5bc, 0x00000005 },
+    { 0x00210000, 0x00000004 },
+    { 0x02800000, 0x00000004 },
+    { 0x00c000ab, 0x00000018 },
+    { 0x4180e000, 0x00000040 },
+    { 0x000000ad, 0x00000024 },
+    { 0x01000000, 0x0000000c },
+    { 0x0100e51d, 0x0000000c },
+    { 0x000045bb, 0x00000004 },
+    { 0x000080a7, 0x00000008 },
+    { 0x0000f3ce, 0x00000004 },
+    { 0x0140a000, 0x00000004 },
+    { 0x00cc2000, 0x00000004 },
+    { 0x08c053cf, 0x00000040 },
+    { 0x00008000, 0000000000 },
+    { 0x0000f3d2, 0x00000004 },
+    { 0x0140a000, 0x00000004 },
+    { 0x00cc2000, 0x00000004 },
+    { 0x08c053d3, 0x00000040 },
+    { 0x00008000, 0000000000 },
+    { 0x0000f39d, 0x00000004 },
+    { 0x0140a000, 0x00000004 },
+    { 0x00cc2000, 0x00000004 },
+    { 0x08c0539e, 0x00000040 },
+    { 0x00008000, 0000000000 },
+    { 0x03c00830, 0x00000004 },
+    { 0x4200e000, 0000000000 },
+    { 0x0000a000, 0x00000004 },
+    { 0x200045e0, 0x00000004 },
+    { 0x0000e5e1, 0000000000 },
+    { 0x00000001, 0000000000 },
+    { 0x000700c4, 0x00000004 },
+    { 0x0800e394, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0x0000e8c4, 0x00000004 },
+    { 0x0000e8c5, 0x00000004 },
+    { 0x0000e8c6, 0x00000004 },
+    { 0x0000e928, 0x00000004 },
+    { 0x0000e929, 0x00000004 },
+    { 0x0000e92a, 0x00000004 },
+    { 0x000000c8, 0x00000008 },
+    { 0x0000e928, 0x00000004 },
+    { 0x0000e929, 0x00000004 },
+    { 0x0000e92a, 0x00000004 },
+    { 0x000000cf, 0x00000008 },
+    { 0xdeadbeef, 0000000000 },
+    { 0x00000116, 0000000000 },
+    { 0x000700d3, 0x00000004 },
+    { 0x080050e7, 0x00000004 },
+    { 0x000700d4, 0x00000004 },
+    { 0x0800401c, 0x00000004 },
+    { 0x0000e01d, 0000000000 },
+    { 0x02c02000, 0x00000004 },
+    { 0x00060000, 0x00000004 },
+    { 0x000000de, 0x00000034 },
+    { 0x000000db, 0x00000008 },
+    { 0x00008000, 0x00000004 },
+    { 0xc000e000, 0000000000 },
+    { 0x0000e1cc, 0x00000004 },
+    { 0x0500e1cd, 0x00000004 },
+    { 0x000ca000, 0x00000004 },
+    { 0x000000e5, 0x00000034 },
+    { 0x000000e1, 0x00000008 },
+    { 0x0000a000, 0000000000 },
+    { 0x0019e1cc, 0x00000004 },
+    { 0x001b0001, 0x00000004 },
+    { 0x0500a000, 0x00000004 },
+    { 0x080041cd, 0x00000004 },
+    { 0x000ca000, 0x00000004 },
+    { 0x000000fb, 0x00000034 },
+    { 0x0000004a, 0x00000008 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0x000c2000, 0x00000004 },
+    { 0x001d0018, 0x00000004 },
+    { 0x001a0001, 0x00000004 },
+    { 0x000000fb, 0x00000034 },
+    { 0x0000004a, 0x00000008 },
+    { 0x0500a04a, 0x00000008 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+    { 0000000000, 0000000000 },
+};
+
+
+static int RADEON_READ_PLL(drm_device_t * dev, int addr)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
@@ -842,22 +1110,22 @@ static u32 RADEON_READ_IGPGART(drm_radeon_private_t *dev_priv, int addr)
 #if RADEON_FIFO_DEBUG
 static void radeon_status(drm_radeon_private_t * dev_priv)
 {
-	printk("%s:\n", __FUNCTION__);
-	printk("RBBM_STATUS = 0x%08x\n",
+	printf("%s:\n", __FUNCTION__);
+	printf("RBBM_STATUS = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_RBBM_STATUS));
-	printk("CP_RB_RTPR = 0x%08x\n",
+	printf("CP_RB_RTPR = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_CP_RB_RPTR));
-	printk("CP_RB_WTPR = 0x%08x\n",
+	printf("CP_RB_WTPR = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_CP_RB_WPTR));
-	printk("AIC_CNTL = 0x%08x\n",
+	printf("AIC_CNTL = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_CNTL));
-	printk("AIC_STAT = 0x%08x\n",
+	printf("AIC_STAT = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_STAT));
-	printk("AIC_PT_BASE = 0x%08x\n",
+	printf("AIC_PT_BASE = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_PT_BASE));
-	printk("TLB_ADDR = 0x%08x\n",
+	printf("TLB_ADDR = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_TLB_ADDR));
-	printk("TLB_DATA = 0x%08x\n",
+	printf("TLB_DATA = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_TLB_DATA));
 }
 #endif
@@ -889,7 +1157,7 @@ static int radeon_do_pixcache_flush(drm_radeon_private_t * dev_priv)
 	DRM_ERROR("failed!\n");
 	radeon_status(dev_priv);
 #endif
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 static int radeon_do_wait_for_fifo(drm_radeon_private_t * dev_priv, int entries)
@@ -910,7 +1178,7 @@ static int radeon_do_wait_for_fifo(drm_radeon_private_t * dev_priv, int entries)
 	DRM_ERROR("failed!\n");
 	radeon_status(dev_priv);
 #endif
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 static int radeon_do_wait_for_idle(drm_radeon_private_t * dev_priv)
@@ -936,7 +1204,7 @@ static int radeon_do_wait_for_idle(drm_radeon_private_t * dev_priv)
 	DRM_ERROR("failed!\n");
 	radeon_status(dev_priv);
 #endif
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 /* ================================================================
@@ -968,6 +1236,14 @@ static void radeon_cp_load_microcode(drm_radeon_private_t * dev_priv)
 				     R300_cp_microcode[i][1]);
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
 				     R300_cp_microcode[i][0]);
+		}
+	} else if (dev_priv->microcode_version == UCODE_R500) {
+		DRM_INFO("Loading R500 Microcode\n");
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				R500_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				R500_cp_microcode[i][0]);
 		}
 	} else {
 		for (i = 0; i < 256; i++) {
@@ -1066,7 +1342,7 @@ static void radeon_do_cp_stop(drm_radeon_private_t * dev_priv)
 
 /* Reset the engine.  This will stop the CP if it is running.
  */
-static int radeon_do_engine_reset(struct drm_device * dev)
+static int radeon_do_engine_reset(drm_device_t * dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	u32 clock_cntl_index, mclk_cntl, rbbm_soft_reset;
@@ -1122,12 +1398,12 @@ static int radeon_do_engine_reset(struct drm_device * dev)
 	return 0;
 }
 
-static void radeon_cp_init_ring_buffer(struct drm_device * dev,
+static void radeon_cp_init_ring_buffer(drm_device_t * dev,
 				       drm_radeon_private_t * dev_priv)
 {
 	u32 ring_start, cur_read_ptr;
 	u32 tmp;
-
+	
 	/* Initialize the memory controller. With new memory map, the fb location
 	 * is not changed, it should have been properly initialized already. Part
 	 * of the problem is that the code below is bogus, assuming the GART is
@@ -1174,7 +1450,7 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 	} else
 #endif
 	{
-		struct drm_sg_mem *entry = dev->sg;
+		drm_sg_mem_t *entry = dev->sg;
 		unsigned long tmp_ofs, page_ofs;
 
 		tmp_ofs = dev_priv->ring_rptr->offset -
@@ -1190,15 +1466,9 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 	/* Set ring buffer size */
 #ifdef __BIG_ENDIAN
 	RADEON_WRITE(RADEON_CP_RB_CNTL,
-		     RADEON_BUF_SWAP_32BIT |
-		     (dev_priv->ring.fetch_size_l2ow << 18) |
-		     (dev_priv->ring.rptr_update_l2qw << 8) |
-		     dev_priv->ring.size_l2qw);
+		     dev_priv->ring.size_l2qw | RADEON_BUF_SWAP_32BIT);
 #else
-	RADEON_WRITE(RADEON_CP_RB_CNTL,
-		     (dev_priv->ring.fetch_size_l2ow << 18) |
-		     (dev_priv->ring.rptr_update_l2qw << 8) |
-		     dev_priv->ring.size_l2qw);
+	RADEON_WRITE(RADEON_CP_RB_CNTL, dev_priv->ring.size_l2qw);
 #endif
 
 	/* Start with assuming that writeback doesn't work */
@@ -1295,7 +1565,7 @@ static void radeon_set_igpgart(drm_radeon_private_t * dev_priv, int on)
 			 dev_priv->gart_size);
 
 		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_18, 0x1000);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_ENABLE, 0x1);
+		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_38, 0x1);
 		RADEON_WRITE_IGPGART(RADEON_IGPGART_CTRL, 0x42040800);
 		RADEON_WRITE_IGPGART(RADEON_IGPGART_BASE_ADDR,
 				     dev_priv->gart_info.bus_addr);
@@ -1310,13 +1580,13 @@ static void radeon_set_igpgart(drm_radeon_private_t * dev_priv, int on)
 			       dev_priv->gart_size) & 0xffff0000) |
 			     (dev_priv->gart_vm_start >> 16)));
 
-		temp = RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_ENABLE);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_ENABLE, temp);
+		temp = RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_38);
+		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_38, temp);
 
-		RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_FLUSH);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_FLUSH, 0x1);
-		RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_FLUSH);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_FLUSH, 0x0);
+		RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_2E);
+		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_2E, 0x1);
+		RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_2E);
+		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_2E, 0x0);
        }
 }
 
@@ -1364,7 +1634,7 @@ static void radeon_set_pcigart(drm_radeon_private_t * dev_priv, int on)
 		return;
 	}
 
-	tmp = RADEON_READ(RADEON_AIC_CNTL);
+ 	tmp = RADEON_READ(RADEON_AIC_CNTL);
 
 	if (on) {
 		RADEON_WRITE(RADEON_AIC_CNTL,
@@ -1390,17 +1660,18 @@ static void radeon_set_pcigart(drm_radeon_private_t * dev_priv, int on)
 	}
 }
 
-static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
+static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
 	DRM_DEBUG("\n");
 
 	/* if we require new memory map but we don't have it fail */
-	if ((dev_priv->flags & RADEON_NEW_MEMMAP) && !dev_priv->new_memmap) {
+	if ((dev_priv->flags & RADEON_NEW_MEMMAP) && !dev_priv->new_memmap)
+	{
 		DRM_ERROR("Cannot initialise DRM on this card\nThis card requires a new X.org DDX for 3D\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	if (init->is_pci && (dev_priv->flags & RADEON_IS_AGP))
@@ -1418,7 +1689,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	if ((!(dev_priv->flags & RADEON_IS_AGP)) && !dev->sg) {
 		DRM_ERROR("PCI GART memory not allocated!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	dev_priv->usec_timeout = init->usec_timeout;
@@ -1426,12 +1697,8 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	    dev_priv->usec_timeout > RADEON_MAX_USEC_TIMEOUT) {
 		DRM_DEBUG("TIMEOUT problem!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
-
-	/* Enable vblank on CRTC1 for older X servers
-	 */
-	dev_priv->vblank_crtc = DRM_RADEON_VBLANK_CRTC1;
 
 	switch(init->func) {
 	case RADEON_INIT_R200_CP:
@@ -1439,6 +1706,9 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		break;
 	case RADEON_INIT_R300_CP:
 		dev_priv->microcode_version = UCODE_R300;
+		break;
+	case RADEON_INIT_R500_CP:
+		dev_priv->microcode_version = UCODE_R500;
 		break;
 	default:
 		dev_priv->microcode_version = UCODE_R100;
@@ -1455,7 +1725,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	    (init->cp_mode != RADEON_CSQ_PRIBM_INDBM)) {
 		DRM_DEBUG("BAD cp_mode (%x)!\n", init->cp_mode);
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	switch (init->fb_bpp) {
@@ -1514,37 +1784,37 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 					 RADEON_ROUND_MODE_TRUNC |
 					 RADEON_ROUND_PREC_8TH_PIX);
 
+	DRM_GETSAREA();
 
 	dev_priv->ring_offset = init->ring_offset;
 	dev_priv->ring_rptr_offset = init->ring_rptr_offset;
 	dev_priv->buffers_offset = init->buffers_offset;
 	dev_priv->gart_textures_offset = init->gart_textures_offset;
 
-	dev_priv->sarea = drm_getsarea(dev);
 	if (!dev_priv->sarea) {
 		DRM_ERROR("could not find sarea!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	dev_priv->cp_ring = drm_core_findmap(dev, init->ring_offset);
 	if (!dev_priv->cp_ring) {
 		DRM_ERROR("could not find cp ring region!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 	dev_priv->ring_rptr = drm_core_findmap(dev, init->ring_rptr_offset);
 	if (!dev_priv->ring_rptr) {
 		DRM_ERROR("could not find ring read pointer!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 	dev->agp_buffer_token = init->buffers_offset;
 	dev->agp_buffer_map = drm_core_findmap(dev, init->buffers_offset);
 	if (!dev->agp_buffer_map) {
 		DRM_ERROR("could not find dma buffer region!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	if (init->gart_textures_offset) {
@@ -1553,7 +1823,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		if (!dev_priv->gart_textures) {
 			DRM_ERROR("could not find GART texture region!\n");
 			radeon_do_cleanup_cp(dev);
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 	}
 
@@ -1571,7 +1841,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		    !dev->agp_buffer_map->handle) {
 			DRM_ERROR("could not find ioremap agp regions!\n");
 			radeon_do_cleanup_cp(dev);
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 	} else
 #endif
@@ -1592,7 +1862,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 
 	dev_priv->fb_location = (RADEON_READ(RADEON_MC_FB_LOCATION)
 				 & 0xffff) << 16;
-	dev_priv->fb_size =
+	dev_priv->fb_size = 
 		((RADEON_READ(RADEON_MC_FB_LOCATION) & 0xffff0000u) + 0x10000)
 		- dev_priv->fb_location;
 
@@ -1624,8 +1894,9 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		if (dev_priv->flags & RADEON_IS_AGP) {
 			base = dev->agp->base;
 			/* Check if valid */
-			if ((base + dev_priv->gart_size - 1) >= dev_priv->fb_location &&
-			    base < (dev_priv->fb_location + dev_priv->fb_size - 1)) {
+		if ((base + dev_priv->gart_size - 1) >= dev_priv->fb_location &&
+      		     + base < (dev_priv->fb_location + dev_priv->fb_size - 1)) {
+
 				DRM_INFO("Can't use AGP base @0x%08lx, won't fit\n",
 					 dev->agp->base);
 				base = 0;
@@ -1635,11 +1906,11 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		/* If not or if AGP is at 0 (Macs), try to put it elsewhere */
 		if (base == 0) {
 			base = dev_priv->fb_location + dev_priv->fb_size;
-			if (base < dev_priv->fb_location ||
-			    ((base + dev_priv->gart_size) & 0xfffffffful) < base)
+		if (base < dev_priv->fb_location ||
+		    + ((base + dev_priv->gart_size) & 0xfffffffful) < base)
 				base = dev_priv->fb_location
 					- dev_priv->gart_size;
-		}
+		}		
 		dev_priv->gart_vm_start = base & 0xffc00000u;
 		if (dev_priv->gart_vm_start != base)
 			DRM_INFO("GART aligned down from 0x%08x to 0x%08x\n",
@@ -1672,12 +1943,6 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	dev_priv->ring.size = init->ring_size;
 	dev_priv->ring.size_l2qw = drm_order(init->ring_size / 8);
 
-	dev_priv->ring.rptr_update = /* init->rptr_update */ 4096;
-	dev_priv->ring.rptr_update_l2qw = drm_order( /* init->rptr_update */ 4096 / 8);
-
-	dev_priv->ring.fetch_size = /* init->fetch_size */ 32;
-	dev_priv->ring.fetch_size_l2ow = drm_order( /* init->fetch_size */ 32 / 16);
-
 	dev_priv->ring.tail_mask = (dev_priv->ring.size / sizeof(u32)) - 1;
 
 	dev_priv->ring.high_mark = RADEON_RING_HIGH_MARK;
@@ -1690,13 +1955,13 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 #endif
 	{
 		/* if we have an offset set from userspace */
-		if (dev_priv->pcigart_offset_set) {
+		if (dev_priv->pcigart_offset) {
 			dev_priv->gart_info.bus_addr =
 			    dev_priv->pcigart_offset + dev_priv->fb_location;
 			dev_priv->gart_info.mapping.offset =
 			    dev_priv->pcigart_offset + dev_priv->fb_aper_offset;
 			dev_priv->gart_info.mapping.size =
-			    dev_priv->gart_info.table_size;
+			    RADEON_PCIGART_TABLE_SIZE;
 
 			drm_core_ioremap(&dev_priv->gart_info.mapping, dev);
 			dev_priv->gart_info.addr =
@@ -1725,14 +1990,14 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 				DRM_ERROR
 				    ("Cannot use PCI Express without GART in FB memory\n");
 				radeon_do_cleanup_cp(dev);
-				return -EINVAL;
+				return DRM_ERR(EINVAL);
 			}
 		}
 
 		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
 			DRM_ERROR("failed to init PCI GART!\n");
 			radeon_do_cleanup_cp(dev);
-			return -ENOMEM;
+			return DRM_ERR(ENOMEM);
 		}
 
 		/* Turn on PCI GART */
@@ -1750,7 +2015,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	return 0;
 }
 
-static int radeon_do_cleanup_cp(struct drm_device * dev)
+static int radeon_do_cleanup_cp(drm_device_t * dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	DRM_DEBUG("\n");
@@ -1806,13 +2071,13 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
  *
  * Charl P. Botha <http://cpbotha.net>
  */
-static int radeon_do_resume_cp(struct drm_device * dev)
+static int radeon_do_resume_cp(drm_device_t * dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
 	if (!dev_priv) {
 		DRM_ERROR("Called with no initialization\n");
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	DRM_DEBUG("Starting radeon_do_resume_cp()\n");
@@ -1838,33 +2103,39 @@ static int radeon_do_resume_cp(struct drm_device * dev)
 	return 0;
 }
 
-int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_init(DRM_IOCTL_ARGS)
 {
-	drm_radeon_init_t *init = data;
+	DRM_DEVICE;
+	drm_radeon_init_t init;
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
-	if (init->func == RADEON_INIT_R300_CP)
+	DRM_COPY_FROM_USER_IOCTL(init, (drm_radeon_init_t __user *) data,
+				 sizeof(init));
+
+	if (init.func == RADEON_INIT_R300_CP)
 		r300_init_reg_flags();
 
-	switch (init->func) {
+	switch (init.func) {
 	case RADEON_INIT_CP:
 	case RADEON_INIT_R200_CP:
 	case RADEON_INIT_R300_CP:
-		return radeon_do_init_cp(dev, init);
+	case RADEON_INIT_R500_CP:
+		return radeon_do_init_cp(dev, &init);
 	case RADEON_CLEANUP_CP:
 		return radeon_do_cleanup_cp(dev);
 	}
 
-	return -EINVAL;
+	return DRM_ERR(EINVAL);
 }
 
-int radeon_cp_start(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_start(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	DRM_DEBUG("\n");
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	if (dev_priv->cp_running) {
 		DRM_DEBUG("%s while CP running\n", __FUNCTION__);
@@ -1884,14 +2155,18 @@ int radeon_cp_start(struct drm_device *dev, void *data, struct drm_file *file_pr
 /* Stop the CP.  The engine must have been idled before calling this
  * routine.
  */
-int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_stop(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-	drm_radeon_cp_stop_t *stop = data;
+	drm_radeon_cp_stop_t stop;
 	int ret;
 	DRM_DEBUG("\n");
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
+
+	DRM_COPY_FROM_USER_IOCTL(stop, (drm_radeon_cp_stop_t __user *) data,
+				 sizeof(stop));
 
 	if (!dev_priv->cp_running)
 		return 0;
@@ -1899,14 +2174,14 @@ int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_pri
 	/* Flush any pending CP commands.  This ensures any outstanding
 	 * commands are exectuted by the engine before we turn it off.
 	 */
-	if (stop->flush) {
+	if (stop.flush) {
 		radeon_do_cp_flush(dev_priv);
 	}
 
 	/* If we fail to make the engine go idle, we return an error
 	 * code so that the DRM ioctl wrapper can try again.
 	 */
-	if (stop->idle) {
+	if (stop.idle) {
 		ret = radeon_do_cp_idle(dev_priv);
 		if (ret)
 			return ret;
@@ -1924,7 +2199,7 @@ int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_pri
 	return 0;
 }
 
-void radeon_do_release(struct drm_device * dev)
+void radeon_do_release(drm_device_t * dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	int i, ret;
@@ -1937,8 +2212,13 @@ void radeon_do_release(struct drm_device * dev)
 #ifdef __linux__
 				schedule();
 #else
-				DRM_SLEEPLOCK(&ret, &dev->dev_lock, PZERO, "rdnrel",
+#if defined(__FreeBSD__) && __FreeBSD_version > 500000
+				msleep(&ret, &dev->dev_lock, PZERO, "rdnrel",
 				       1);
+#else
+				mtsleep(&ret, PZERO, "rdnrel", 1,
+					&dev->dev_lock);
+#endif
 #endif
 			}
 			radeon_do_cp_stop(dev_priv);
@@ -1970,16 +2250,17 @@ void radeon_do_release(struct drm_device * dev)
 
 /* Just reset the CP ring.  Called as part of an X Server engine reset.
  */
-int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_reset(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	DRM_DEBUG("\n");
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	if (!dev_priv) {
 		DRM_DEBUG("%s called before init done\n", __FUNCTION__);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	radeon_do_cp_reset(dev_priv);
@@ -1990,29 +2271,32 @@ int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_pr
 	return 0;
 }
 
-int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_idle(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	DRM_DEBUG("\n");
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	return radeon_do_cp_idle(dev_priv);
 }
 
 /* Added by Charl P. Botha to call radeon_do_resume_cp().
  */
-int radeon_cp_resume(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_resume(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 
 	return radeon_do_resume_cp(dev);
 }
 
-int radeon_engine_reset(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_engine_reset(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	DRM_DEBUG("\n");
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	return radeon_do_engine_reset(dev);
 }
@@ -2023,7 +2307,7 @@ int radeon_engine_reset(struct drm_device *dev, void *data, struct drm_file *fil
 
 /* KW: Deprecated to say the least:
  */
-int radeon_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_fullscreen(DRM_IOCTL_ARGS)
 {
 	return 0;
 }
@@ -2049,12 +2333,12 @@ int radeon_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_
  * they can't get the lock.
  */
 
-struct drm_buf *radeon_freelist_get(struct drm_device * dev)
+drm_buf_t *radeon_freelist_get(drm_device_t * dev)
 {
-	struct drm_device_dma *dma = dev->dma;
+	drm_device_dma_t *dma = dev->dma;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_buf_priv_t *buf_priv;
-	struct drm_buf *buf;
+	drm_buf_t *buf;
 	int i, t;
 	int start;
 
@@ -2069,9 +2353,8 @@ struct drm_buf *radeon_freelist_get(struct drm_device * dev)
 		for (i = start; i < dma->buf_count; i++) {
 			buf = dma->buflist[i];
 			buf_priv = buf->dev_private;
-			if (buf->file_priv == NULL || (buf->pending &&
-						       buf_priv->age <=
-						       done_age)) {
+			if (buf->filp == 0 || (buf->pending &&
+					       buf_priv->age <= done_age)) {
 				dev_priv->stats.requested_bufs++;
 				buf->pending = 0;
 				return buf;
@@ -2090,12 +2373,12 @@ struct drm_buf *radeon_freelist_get(struct drm_device * dev)
 }
 
 #if 0
-struct drm_buf *radeon_freelist_get(struct drm_device * dev)
+drm_buf_t *radeon_freelist_get(drm_device_t * dev)
 {
-	struct drm_device_dma *dma = dev->dma;
+	drm_device_dma_t *dma = dev->dma;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_buf_priv_t *buf_priv;
-	struct drm_buf *buf;
+	drm_buf_t *buf;
 	int i, t;
 	int start;
 	u32 done_age = DRM_READ32(dev_priv->ring_rptr, RADEON_SCRATCHOFF(1));
@@ -2110,9 +2393,8 @@ struct drm_buf *radeon_freelist_get(struct drm_device * dev)
 		for (i = start; i < dma->buf_count; i++) {
 			buf = dma->buflist[i];
 			buf_priv = buf->dev_private;
-			if (buf->file_priv == 0 || (buf->pending &&
-						    buf_priv->age <=
-						    done_age)) {
+			if (buf->filp == 0 || (buf->pending &&
+					       buf_priv->age <= done_age)) {
 				dev_priv->stats.requested_bufs++;
 				buf->pending = 0;
 				return buf;
@@ -2125,15 +2407,15 @@ struct drm_buf *radeon_freelist_get(struct drm_device * dev)
 }
 #endif
 
-void radeon_freelist_reset(struct drm_device * dev)
+void radeon_freelist_reset(drm_device_t * dev)
 {
-	struct drm_device_dma *dma = dev->dma;
+	drm_device_dma_t *dma = dev->dma;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	int i;
 
 	dev_priv->last_buf = 0;
 	for (i = 0; i < dma->buf_count; i++) {
-		struct drm_buf *buf = dma->buflist[i];
+		drm_buf_t *buf = dma->buflist[i];
 		drm_radeon_buf_priv_t *buf_priv = buf->dev_private;
 		buf_priv->age = 0;
 	}
@@ -2172,64 +2454,69 @@ int radeon_wait_ring(drm_radeon_private_t * dev_priv, int n)
 	radeon_status(dev_priv);
 	DRM_ERROR("failed!\n");
 #endif
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
-static int radeon_cp_get_buffers(struct drm_device *dev,
-				 struct drm_file *file_priv,
-				 struct drm_dma * d)
+static int radeon_cp_get_buffers(DRMFILE filp, drm_device_t * dev,
+				 drm_dma_t * d)
 {
 	int i;
-	struct drm_buf *buf;
+	drm_buf_t *buf;
 
 	for (i = d->granted_count; i < d->request_count; i++) {
 		buf = radeon_freelist_get(dev);
 		if (!buf)
-			return -EBUSY;	/* NOTE: broken client */
+			return DRM_ERR(EBUSY);	/* NOTE: broken client */
 
-		buf->file_priv = file_priv;
+		buf->filp = filp;
 
 		if (DRM_COPY_TO_USER(&d->request_indices[i], &buf->idx,
 				     sizeof(buf->idx)))
-			return -EFAULT;
+			return DRM_ERR(EFAULT);
 		if (DRM_COPY_TO_USER(&d->request_sizes[i], &buf->total,
 				     sizeof(buf->total)))
-			return -EFAULT;
+			return DRM_ERR(EFAULT);
 
 		d->granted_count++;
 	}
 	return 0;
 }
 
-int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int radeon_cp_buffers(DRM_IOCTL_ARGS)
 {
-	struct drm_device_dma *dma = dev->dma;
+	DRM_DEVICE;
+	drm_device_dma_t *dma = dev->dma;
 	int ret = 0;
-	struct drm_dma *d = data;
+	drm_dma_t __user *argp = (void __user *)data;
+	drm_dma_t d;
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
+
+	DRM_COPY_FROM_USER_IOCTL(d, argp, sizeof(d));
 
 	/* Please don't send us buffers.
 	 */
-	if (d->send_count != 0) {
+	if (d.send_count != 0) {
 		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return -EINVAL;
+			  DRM_CURRENTPID, d.send_count);
+		return DRM_ERR(EINVAL);
 	}
 
 	/* We'll send you buffers.
 	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
+	if (d.request_count < 0 || d.request_count > dma->buf_count) {
 		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		return -EINVAL;
+			  DRM_CURRENTPID, d.request_count, dma->buf_count);
+		return DRM_ERR(EINVAL);
 	}
 
-	d->granted_count = 0;
+	d.granted_count = 0;
 
-	if (d->request_count) {
-		ret = radeon_cp_get_buffers(dev, file_priv, d);
+	if (d.request_count) {
+		ret = radeon_cp_get_buffers(filp, dev, &d);
 	}
+
+	DRM_COPY_TO_USER_IOCTL(argp, d, sizeof(d));
 
 	return ret;
 }
@@ -2241,7 +2528,7 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 
 	dev_priv = drm_alloc(sizeof(drm_radeon_private_t), DRM_MEM_DRIVER);
 	if (dev_priv == NULL)
-		return -ENOMEM;
+		return DRM_ERR(ENOMEM);
 
 	memset(dev_priv, 0, sizeof(drm_radeon_private_t));
 	dev->dev_private = (void *)dev_priv;
@@ -2282,8 +2569,6 @@ int radeon_driver_firstopen(struct drm_device *dev)
 	int ret;
 	drm_local_map_t *map;
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-
-	dev_priv->gart_info.table_size = RADEON_PCIGART_TABLE_SIZE;
 
 	ret = drm_addmap(dev, drm_get_resource_start(dev, 2),
 			 drm_get_resource_len(dev, 2), _DRM_REGISTERS,

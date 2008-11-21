@@ -1,3 +1,4 @@
+/*	$NetBSD: spifreg.h,v 1.2 2005/12/11 12:23:44 christos Exp $	*/
 /*	$OpenBSD: spifreg.h,v 1.5 2003/06/02 18:32:41 jason Exp $	*/
 
 /*
@@ -62,7 +63,7 @@
 /*
  * The 'stc' is a Cirrus Logic CL-CD180 (either revision B or revision C)
  */
-#define	STC_CCR			0x01		/* channel command */		
+#define	STC_CCR			0x01		/* channel command */
 #define	STC_SRER		0x02		/* service request enable */
 #define	STC_COR1		0x03		/* channel option 1 */
 #define	STC_COR2		0x04		/* channel option 2 */
@@ -378,3 +379,38 @@
 #define	STTYF_STOP		0x20		/* stopped */
 
 #define	STTY_RBUF_SIZE		(2 * 512)
+
+/*
+ * useful macros
+ */
+#define	SET(t, f)	((t) |= (f))
+#define	CLR(t, f)	((t) &= ~(f))
+#define	ISSET(t, f)	((t) & (f))
+
+/*
+ * internal function prototypes
+ */
+int	spif_match(struct device *, struct cfdata *, void *);
+void	spif_attach(struct device *, struct device *, void *);
+
+int	stty_match(struct device *, struct cfdata *, void *);
+void	stty_attach(struct device *, struct device *, void *);
+
+int	spif_stcintr(void *);
+int	spif_stcintr_mx(struct spif_softc *, int *);
+int	spif_stcintr_tx(struct spif_softc *, int *);
+int	spif_stcintr_rx(struct spif_softc *, int *);
+int	spif_stcintr_rxexception(struct spif_softc *, int *);
+void	spif_softintr(void *);
+
+int	stty_param(struct tty *, struct termios *);
+int	stty_modem_control(struct stty_port *, int, int);
+void	stty_write_ccr(struct spif_softc *, u_int8_t);
+int	stty_compute_baud(speed_t, int, u_int8_t *, u_int8_t *);
+void	stty_start(struct tty *);
+
+int	sbpp_match(struct device *, struct cfdata *, void *);
+void	sbpp_attach(struct device *, struct device *, void *);
+
+int	sbpp_rw(dev_t, struct uio *);
+int	spif_ppcintr(void *);

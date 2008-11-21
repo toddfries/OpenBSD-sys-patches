@@ -1,8 +1,7 @@
-/* $OpenBSD: interrupt.c,v 1.24 2007/06/17 10:01:25 miod Exp $ */
-/* $NetBSD: interrupt.c,v 1.46 2000/06/03 20:47:36 thorpej Exp $ */
+/* $NetBSD: interrupt.c,v 1.78 2008/04/28 20:23:10 martin Exp $ */
 
 /*-
- * Copyright (c) 2000 The NetBSD Foundation, Inc.
+ * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,64 +61,39 @@
  * notice.
  */
 
+#include "opt_multiprocessor.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.78 2008/04/28 20:23:10 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/vmmeter.h>
 #include <sys/sched.h>
+#include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/systm.h>
+#include <sys/time.h>
+#include <sys/intr.h>
 #include <sys/device.h>
-#include <sys/mbuf.h>
-#include <sys/socket.h>
-#include <sys/evcount.h>
+#include <sys/cpu.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/atomic.h>
+#include <machine/cpuvar.h>
 #include <machine/autoconf.h>
-#include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/rpb.h>
 #include <machine/frame.h>
 #include <machine/cpuconf.h>
-
-#if defined(MULTIPROCESSOR)
-#include <sys/device.h>
-#endif
-
-#include <net/netisr.h>
-#include <net/if.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#include <netinet/ip_var.h>
-#endif
-
-#ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
-#include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
-#endif
-
-#include "ppp.h"
-#include "bridge.h"
-
-#include "apecs.h"
-#include "cia.h"
-#include "lca.h"
-#include "tcasic.h"
-
-static u_int schedclk2;
-
-extern struct evcount clk_count;
+#include <machine/alpha.h>
 
 struct scbvec scb_iovectab[SCB_VECTOIDX(SCB_SIZE - SCB_IOVECBASE)];
+static bool scb_mpsafe[SCB_VECTOIDX(SCB_SIZE - SCB_IOVECBASE)];
 
-void netintr(void);
+void	netintr(void);
 
 void	scb_stray(void *, u_long);
 
@@ -149,7 +116,7 @@ scb_stray(void *arg, u_long vec)
 }
 
 void
-scb_set(u_long vec, void (*func)(void *, u_long), void *arg)
+scb_set(u_long vec, void (*func)(void *, u_long), void *arg, int level)
 {
 	u_long idx;
 	int s;
@@ -167,6 +134,7 @@ scb_set(u_long vec, void (*func)(void *, u_long), void *arg)
 
 	scb_iovectab[idx].scb_func = func;
 	scb_iovectab[idx].scb_arg = arg;
+	scb_mpsafe[idx] = (level != IPL_VM);
 
 	splx(s);
 }
@@ -227,32 +195,15 @@ void
 interrupt(unsigned long a0, unsigned long a1, unsigned long a2,
     struct trapframe *framep)
 {
-	struct proc *p;
 	struct cpu_info *ci = curcpu();
-	extern int schedhz;
+	struct cpu_softc *sc = ci->ci_softc;
 
 	switch (a0) {
 	case ALPHA_INTR_XPROC:	/* interprocessor interrupt */
 #if defined(MULTIPROCESSOR)
-	    {
-		u_long pending_ipis, bit;
+		atomic_inc_ulong(&ci->ci_intrdepth);
 
-#if 0
-		printf("CPU %lu got IPI\n", cpu_id);
-#endif
-
-#ifdef DIAGNOSTIC
-		if (ci->ci_dev == NULL) {
-			/* XXX panic? */
-			printf("WARNING: no device for ID %lu\n", ci->ci_cpuid);
-			return;
-		}
-#endif
-
-		pending_ipis = atomic_loadlatch_ulong(&ci->ci_ipis, 0);
-		for (bit = 0; bit < ALPHA_NIPIS; bit++)
-			if (pending_ipis & (1UL << bit))
-				(*ipifuncs[bit])();
+		alpha_ipi_process(ci, framep);
 
 		/*
 		 * Handle inter-console messages if we're the primary
@@ -261,20 +212,22 @@ interrupt(unsigned long a0, unsigned long a1, unsigned long a2,
 		if (ci->ci_cpuid == hwrpb->rpb_primary_cpu_id &&
 		    hwrpb->rpb_txrdy != 0)
 			cpu_iccb_receive();
-	    }
+
+		atomic_dec_ulong(&ci->ci_intrdepth);
 #else
 		printf("WARNING: received interprocessor interrupt!\n");
 #endif /* MULTIPROCESSOR */
 		break;
 		
 	case ALPHA_INTR_CLOCK:	/* clock interrupt */
-#if defined(MULTIPROCESSOR)
-		/* XXX XXX XXX */
-		if (CPU_IS_PRIMARY(ci) == 0)
-			return;
-#endif
+		/*
+		 * We don't increment the interrupt depth for the
+		 * clock interrupt, since it is *sampled* from
+		 * the clock interrupt, so if we did, all system
+		 * time would be counted as interrupt time.
+		 */
+		sc->sc_evcnt_clock.ev_count++;
 		uvmexp.intrs++;
-		clk_count.ec_count++;
 		if (platform.clockintr) {
 			/*
 			 * Call hardclock().  This will also call
@@ -287,35 +240,44 @@ interrupt(unsigned long a0, unsigned long a1, unsigned long a2,
 			 * If it's time to call the scheduler clock,
 			 * do so.
 			 */
-			if ((++schedclk2 & 0x3f) == 0 &&
-			    (p = ci->ci_curproc) != NULL && schedhz != 0)
-				schedclock(p);
+			if ((++ci->ci_schedstate.spc_schedticks & 0x3f) == 0 &&
+			    schedhz != 0)
+				schedclock(ci->ci_curlwp);
 		}
 		break;
 
 	case ALPHA_INTR_ERROR:	/* Machine Check or Correctable Error */
+		atomic_inc_ulong(&ci->ci_intrdepth);
 		a0 = alpha_pal_rdmces();
-		if (platform.mcheck_handler)
+		if (platform.mcheck_handler != NULL &&
+		    (void *)framep->tf_regs[FRAME_PC] != XentArith)
 			(*platform.mcheck_handler)(a0, framep, a1, a2);
 		else
 			machine_check(a0, framep, a1, a2);
+		atomic_dec_ulong(&ci->ci_intrdepth);
 		break;
 
 	case ALPHA_INTR_DEVICE:	/* I/O device interrupt */
 	    {
 		struct scbvec *scb;
+		int idx = SCB_VECTOIDX(a1 - SCB_IOVECBASE);
+		bool mpsafe = scb_mpsafe[idx];
 
 		KDASSERT(a1 >= SCB_IOVECBASE && a1 < SCB_SIZE);
 
-#if defined(MULTIPROCESSOR)
-		/* XXX XXX XXX */
-		if (CPU_IS_PRIMARY(ci) == 0)
-			return;
-#endif
-		uvmexp.intrs++;
+		atomic_inc_ulong(&sc->sc_evcnt_device.ev_count);
+		atomic_inc_ulong(&ci->ci_intrdepth);
 
-		scb = &scb_iovectab[SCB_VECTOIDX(a1 - SCB_IOVECBASE)];
+		if (!mpsafe) {
+			KERNEL_LOCK(1, NULL);
+		}
+		uvmexp.intrs++;
+		scb = &scb_iovectab[idx];
 		(*scb->scb_func)(scb->scb_arg, a1);
+		if (!mpsafe)
+			KERNEL_UNLOCK_ONE(NULL);
+
+		atomic_dec_ulong(&ci->ci_intrdepth);
 		break;
 	    }
 
@@ -352,6 +314,7 @@ machine_check(unsigned long mces, struct trapframe *framep,
 {
 	const char *type;
 	struct mchkinfo *mcp;
+	static struct timeval ratelimit[1];
 
 	mcp = &curcpu()->ci_mcinfo;
 	/* Make sure it's an error we know about. */
@@ -384,8 +347,11 @@ machine_check(unsigned long mces, struct trapframe *framep,
 	return;
 
 fatal:
-	/* Clear pending machine checks and correctable errors */
 	alpha_pal_wrmces(mces);
+	if ((void *)framep->tf_regs[FRAME_PC] == XentArith) {
+		rlprintf(ratelimit, "Stray machine check\n");
+		return;
+	}
 
 	printf("\n");
 	printf("%s:\n", type);
@@ -395,20 +361,21 @@ fatal:
 	printf("    param   = 0x%lx\n", param);
 	printf("    pc      = 0x%lx\n", framep->tf_regs[FRAME_PC]);
 	printf("    ra      = 0x%lx\n", framep->tf_regs[FRAME_RA]);
-	printf("    curproc = %p\n", curproc);
-	if (curproc != NULL)
-		printf("        pid = %d, comm = %s\n", curproc->p_pid,
+	printf("    code    = 0x%lx\n", *(unsigned long *)(param + 0x10));
+	printf("    curlwp = %p\n", curlwp);
+	if (curlwp != NULL)
+		printf("        pid = %d.%d, comm = %s\n", 
+		    curproc->p_pid, curlwp->l_lid,
 		    curproc->p_comm);
 	printf("\n");
 	panic("machine check");
 }
 
-#if NAPECS > 0 || NCIA > 0 || NLCA > 0 || NTCASIC > 0
-
 int
 badaddr(void *addr, size_t size)
 {
-	return(badaddr_read(addr, size, NULL));
+
+	return (badaddr_read(addr, size, NULL));
 }
 
 int
@@ -485,58 +452,24 @@ badaddr_read(void *addr, size_t size, void *rptr)
 	return (rv);
 }
 
-#endif	/* NAPECS > 0 || NCIA > 0 || NLCA > 0 || NTCASIC > 0 */
-
-int netisr;
-
-void
-netintr()
-{
-	int n;
-
-	while ((n = netisr) != 0) {
-		atomic_clearbits_int(&netisr, n);
-
-#define	DONETISR(bit, fn)						\
-		do {							\
-			if (n & (1 << (bit)))				\
-				fn();					\
-		} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-	}
-}
-
-struct alpha_soft_intr alpha_soft_intrs[SI_NSOFT];
-
-/* XXX For legacy software interrupts. */
-struct alpha_soft_intrhand *softnet_intrhand, *softclock_intrhand;
+volatile unsigned long ssir;
 
 /*
- * softintr_init:
+ * spl0:
  *
- *	Initialize the software interrupt system.
+ *	Lower interrupt priority to IPL 0 -- must check for
+ *	software interrupts.
  */
 void
-softintr_init()
+spl0(void)
 {
-	struct alpha_soft_intr *asi;
-	int i;
 
-	for (i = 0; i < SI_NSOFT; i++) {
-		asi = &alpha_soft_intrs[i];
-		TAILQ_INIT(&asi->softintr_q);
-		simple_lock_init(&asi->softintr_slock);
-		asi->softintr_siq = i;
+	if (ssir) {
+		(void) alpha_pal_swpipl(ALPHA_PSL_IPL_SOFT);
+		softintr_dispatch();
 	}
 
-	/* XXX Establish legacy software interrupt handlers. */
-	softnet_intrhand = softintr_establish(IPL_SOFTNET,
-	    (void (*)(void *))netintr, NULL);
-	softclock_intrhand = softintr_establish(IPL_SOFTCLOCK,
-	    (void (*)(void *))softclock, NULL);
+	(void) alpha_pal_swpipl(ALPHA_PSL_IPL_0);
 }
 
 /*
@@ -545,150 +478,63 @@ softintr_init()
  *	Process pending software interrupts.
  */
 void
-softintr_dispatch()
+softintr_dispatch(void)
 {
-	struct alpha_soft_intr *asi;
-	struct alpha_soft_intrhand *sih;
-	u_int64_t n, i;
 
-	while ((n = atomic_loadlatch_ulong(&ssir, 0)) != 0) {
-		for (i = 0; i < SI_NSOFT; i++) {
-			if ((n & (1 << i)) == 0)
-				continue;
-	
-			asi = &alpha_soft_intrs[i];
-
-			for (;;) {
-				(void) alpha_pal_swpipl(ALPHA_PSL_IPL_HIGH);
-				simple_lock(&asi->softintr_slock);
-
-				sih = TAILQ_FIRST(&asi->softintr_q);
-				if (sih != NULL) {
-					TAILQ_REMOVE(&asi->softintr_q, sih,
-					    sih_q);
-					sih->sih_pending = 0;
-				}
-
-				simple_unlock(&asi->softintr_slock);
-				(void) alpha_pal_swpipl(ALPHA_PSL_IPL_SOFT);
-
-				if (sih == NULL)
-					break;
-
-				uvmexp.softs++;
-				(*sih->sih_fn)(sih->sih_arg);
-			}
-		}
-	}
+	/* XXX Nothing until alpha gets __HAVE_FAST_SOFTINTS */
 }
 
-static int
-ipl2si(int ipl)
-{
-	int si;
-
-	switch (ipl) {
-	case IPL_TTY:			/* XXX */
-	case IPL_SOFTSERIAL:
-		si = SI_SOFTSERIAL;
-		break;
-	case IPL_SOFTNET:
-		si = SI_SOFTNET;
-		break;
-	case IPL_SOFTCLOCK:
-		si = SI_SOFTCLOCK;
-		break;
-	case IPL_SOFT:
-		si = SI_SOFT;
-		break;
-	default:
-		panic("ipl2si: %d", ipl);
-	}
-	return si;
-}
-
+#ifdef __HAVE_FAST_SOFTINTS
 /*
- * softintr_establish:		[interface]
+ * softint_trigger:
  *
- *	Register a software interrupt handler.
- */
-void *
-softintr_establish(int ipl, void (*func)(void *), void *arg)
-{
-	struct alpha_soft_intr *asi;
-	struct alpha_soft_intrhand *sih;
-	int si;
-
-	si = ipl2si(ipl);
-	asi = &alpha_soft_intrs[si];
-
-	sih = malloc(sizeof(*sih), M_DEVBUF, M_NOWAIT);
-	if (__predict_true(sih != NULL)) {
-		sih->sih_intrhead = asi;
-		sih->sih_fn = func;
-		sih->sih_arg = arg;
-		sih->sih_pending = 0;
-	}
-	return (sih);
-}
-
-/*
- * softintr_disestablish:	[interface]
- *
- *	Unregister a software interrupt handler.
+ *	Trigger a soft interrupt.
  */
 void
-softintr_disestablish(void *arg)
+softint_trigger(uintptr_t machdep)
 {
-	struct alpha_soft_intrhand *sih = arg;
-	struct alpha_soft_intr *asi = sih->sih_intrhead;
-	int s;
 
-	s = splhigh();
-	simple_lock(&asi->softintr_slock);
-	if (sih->sih_pending) {
-		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
-		sih->sih_pending = 0;
-	}
-	simple_unlock(&asi->softintr_slock);
-	splx(s);
-
-	free(sih, M_DEVBUF);
-}
-
-int
-_splraise(int s)
-{
-	int cur = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
-	return (s > cur ? alpha_pal_swpipl(s) : cur);
-}
-
-#ifdef DIAGNOSTIC
-void
-splassert_check(int wantipl, const char *func)
-{
-	int curipl = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
-
-	/*
-	 * Tell soft interrupts apart from regular levels.
-	 */
-	if (wantipl < 0)
-		wantipl = IPL_SOFTINT;
-
-	/*
-	 * Depending on the system, hardware interrupts may occur either
-	 * at level 3 or level 4. Avoid false positives in the former case.
-	 */
-	if (curipl == ALPHA_PSL_IPL_IO - 1)
-		curipl = ALPHA_PSL_IPL_IO;
-
-	if (curipl < wantipl) {
-		splassert_fail(wantipl, curipl, func);
-		/*
-		 * If splassert_ctl is set to not panic, raise the ipl
-		 * in a feeble attempt to reduce damage.
-		 */
-		alpha_pal_swpipl(wantipl);
-	}
+	/* XXX Needs to be per-CPU */
+	atomic_or_ulong(&ssir, 1 << (x))
 }
 #endif
+
+/*
+ * cpu_intr_p:
+ *
+ *	Return non-zero if executing in interrupt context.
+ */
+bool
+cpu_intr_p(void)
+{
+
+	return curcpu()->ci_intrdepth != 0;
+}
+
+/*
+ * Security sensitive rate limiting printf
+ */
+void
+rlprintf(struct timeval *t, const char *fmt, ...)
+{
+	va_list ap;
+	static const struct timeval msgperiod[1] = {{ 5, 0 }};
+
+	if (ratecheck(t, msgperiod))
+		vprintf(fmt, ap);
+}
+
+const static uint8_t ipl2psl_table[] = {
+	[IPL_NONE] = ALPHA_PSL_IPL_0,
+	[IPL_SOFTCLOCK] = ALPHA_PSL_IPL_SOFT,
+	[IPL_VM] = ALPHA_PSL_IPL_IO,
+	[IPL_CLOCK] = ALPHA_PSL_IPL_CLOCK,
+	[IPL_HIGH] = ALPHA_PSL_IPL_HIGH,
+};
+
+ipl_cookie_t
+makeiplcookie(ipl_t ipl)
+{
+
+	return (ipl_cookie_t){._psl = ipl2psl_table[ipl]};
+}

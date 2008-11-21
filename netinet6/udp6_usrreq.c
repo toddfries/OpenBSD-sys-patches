@@ -1,4 +1,4 @@
-/*	$NetBSD: udp6_usrreq.c,v 1.75 2006/07/23 22:06:13 ad Exp $	*/
+/*	$NetBSD: udp6_usrreq.c,v 1.86 2008/05/04 07:22:15 thorpej Exp $	*/
 /*	$KAME: udp6_usrreq.c,v 1.86 2001/05/27 17:33:00 itojun Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: udp6_usrreq.c,v 1.75 2006/07/23 22:06:13 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udp6_usrreq.c,v 1.86 2008/05/04 07:22:15 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -94,6 +94,7 @@ __KERNEL_RCSID(0, "$NetBSD: udp6_usrreq.c,v 1.75 2006/07/23 22:06:13 ad Exp $");
 #include <netinet6/in6_pcb.h>
 #include <netinet/icmp6.h>
 #include <netinet6/udp6_var.h>
+#include <netinet6/udp6_private.h>
 #include <netinet6/ip6protosw.h>
 #include <netinet/in_offload.h>
 
@@ -108,14 +109,15 @@ __KERNEL_RCSID(0, "$NetBSD: udp6_usrreq.c,v 1.75 2006/07/23 22:06:13 ad Exp $");
  */
 
 extern struct inpcbtable udbtable;
-struct	udp6stat udp6stat;
 
-static	void udp6_notify __P((struct in6pcb *, int));
+percpu_t *udp6stat_percpu;
+
+static	void udp6_notify(struct in6pcb *, int);
 
 void
-udp6_init()
+udp6_init(void)
 {
-	/* initialization done in udp_input() due to initialization order */
+	/* initialization done in udp_init() due to initialization order */
 }
 
 /*
@@ -123,30 +125,25 @@ udp6_init()
  * just wake up so that he can collect error status.
  */
 static	void
-udp6_notify(in6p, errno)
-	struct in6pcb *in6p;
-	int errno;
+udp6_notify(struct in6pcb *in6p, int errno)
 {
 	in6p->in6p_socket->so_error = errno;
 	sorwakeup(in6p->in6p_socket);
 	sowwakeup(in6p->in6p_socket);
 }
 
-void
-udp6_ctlinput(cmd, sa, d)
-	int cmd;
-	struct sockaddr *sa;
-	void *d;
+void *
+udp6_ctlinput(int cmd, const struct sockaddr *sa, void *d)
 {
 	struct udphdr uh;
 	struct ip6_hdr *ip6;
-	struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
+	const struct sockaddr_in6 *sa6 = (const struct sockaddr_in6 *)sa;
 	struct mbuf *m;
 	int off;
 	void *cmdarg;
 	struct ip6ctlparam *ip6cp = NULL;
 	const struct sockaddr_in6 *sa6_src = NULL;
-	void (*notify) __P((struct in6pcb *, int)) = udp6_notify;
+	void (*notify)(struct in6pcb *, int) = udp6_notify;
 	struct udp_portonly {
 		u_int16_t uh_sport;
 		u_int16_t uh_dport;
@@ -154,10 +151,10 @@ udp6_ctlinput(cmd, sa, d)
 
 	if (sa->sa_family != AF_INET6 ||
 	    sa->sa_len != sizeof(struct sockaddr_in6))
-		return;
+		return NULL;
 
 	if ((unsigned)cmd >= PRC_NCMDS)
-		return;
+		return NULL;
 	if (PRC_IS_REDIRECT(cmd))
 		notify = in6_rtchange, d = NULL;
 	else if (cmd == PRC_HOSTDEAD)
@@ -167,7 +164,7 @@ udp6_ctlinput(cmd, sa, d)
 		notify = in6_rtchange;
 	}
 	else if (inet6ctlerrmap[cmd] == 0)
-		return;
+		return NULL;
 
 	/* if the parameter is from icmp6, decode it. */
 	if (d != NULL) {
@@ -195,11 +192,11 @@ udp6_ctlinput(cmd, sa, d)
 		if (m->m_pkthdr.len < off + sizeof(*uhp)) {
 			if (cmd == PRC_MSGSIZE)
 				icmp6_mtudisc_update((struct ip6ctlparam *)d, 0);
-			return;
+			return NULL;
 		}
 
 		bzero(&uh, sizeof(uh));
-		m_copydata(m, off, sizeof(*uhp), (caddr_t)&uh);
+		m_copydata(m, off, sizeof(*uhp), (void *)&uh);
 
 		if (cmd == PRC_MSGSIZE) {
 			int valid = 0;
@@ -252,17 +249,15 @@ udp6_ctlinput(cmd, sa, d)
 		(void) in6_pcbnotify(&udbtable, sa, 0,
 		    (const struct sockaddr *)sa6_src, 0, cmd, cmdarg, notify);
 	}
+	return NULL;
 }
 
 extern	int udp6_sendspace;
 extern	int udp6_recvspace;
 
 int
-udp6_usrreq(so, req, m, addr6, control, l)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *addr6, *control;
-	struct lwp *l;
+udp6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr6,
+    struct mbuf *control, struct lwp *l)
 {
 	struct	in6pcb *in6p = sotoin6pcb(so);
 	int	error = 0;
@@ -279,17 +274,21 @@ udp6_usrreq(so, req, m, addr6, control, l)
 	 *  and AF_INET6 socket for AF_INET6 addrs.
 	 */
 	if (req == PRU_CONTROL)
-		return (in6_control(so, (u_long)m, (caddr_t)addr6,
-				   (struct ifnet *)control, l));
+		return in6_control(so, (u_long)m, (void *)addr6,
+				   (struct ifnet *)control, l);
 
 	if (req == PRU_PURGEIF) {
+		mutex_enter(softnet_lock);
 		in6_pcbpurgeif0(&udbtable, (struct ifnet *)control);
 		in6_purgeif((struct ifnet *)control);
 		in6_pcbpurgeif(&udbtable, (struct ifnet *)control);
-		return (0);
+		mutex_exit(softnet_lock);
+		return 0;
 	}
 
-	if (in6p == NULL && req != PRU_ATTACH) {
+	if (req == PRU_ATTACH)
+		sosetlock(so);
+	else if (in6p == NULL) {
 		error = EINVAL;
 		goto release;
 	}
@@ -327,10 +326,6 @@ udp6_usrreq(so, req, m, addr6, control, l)
 		splx(s);
 		break;
 
-	case PRU_LISTEN:
-		error = EOPNOTSUPP;
-		break;
-
 	case PRU_CONNECT:
 		if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
 			error = EISCONN;
@@ -343,14 +338,6 @@ udp6_usrreq(so, req, m, addr6, control, l)
 			soisconnected(so);
 		break;
 
-	case PRU_CONNECT2:
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_ACCEPT:
-		error = EOPNOTSUPP;
-		break;
-
 	case PRU_DISCONNECT:
 		if (IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
 			error = ENOTCONN;
@@ -358,7 +345,7 @@ udp6_usrreq(so, req, m, addr6, control, l)
 		}
 		s = splsoftnet();
 		in6_pcbdisconnect(in6p);
-		bzero((caddr_t)&in6p->in6p_laddr, sizeof(in6p->in6p_laddr));
+		bzero((void *)&in6p->in6p_laddr, sizeof(in6p->in6p_laddr));
 		splx(s);
 		so->so_state &= ~SS_ISCONNECTED;		/* XXX */
 		in6_pcbstate(in6p, IN6P_BOUND);		/* XXX */
@@ -369,7 +356,10 @@ udp6_usrreq(so, req, m, addr6, control, l)
 		break;
 
 	case PRU_SEND:
-		return (udp6_output(in6p, m, addr6, control, l));
+		s = splsoftnet();
+		error = udp6_output(in6p, m, addr6, control, l);
+		splx(s);
+		return error;
 
 	case PRU_ABORT:
 		soisdisconnected(so);
@@ -388,8 +378,11 @@ udp6_usrreq(so, req, m, addr6, control, l)
 		/*
 		 * stat: don't bother with a blocksize
 		 */
-		return (0);
+		return 0;
 
+	case PRU_LISTEN:
+	case PRU_CONNECT2:
+	case PRU_ACCEPT:
 	case PRU_SENDOOB:
 	case PRU_FASTTIMO:
 	case PRU_SLOWTIMO:
@@ -400,18 +393,25 @@ udp6_usrreq(so, req, m, addr6, control, l)
 
 	case PRU_RCVD:
 	case PRU_RCVOOB:
-		return (EOPNOTSUPP);	/* do not free mbuf's */
+		return EOPNOTSUPP;	/* do not free mbuf's */
 
 	default:
 		panic("udp6_usrreq");
 	}
 
 release:
-	if (control)
+	if (control != NULL)
 		m_freem(control);
-	if (m)
+	if (m != NULL)
 		m_freem(m);
-	return (error);
+	return error;
+}
+
+static int
+sysctl_net_inet6_udp6_stats(SYSCTLFN_ARGS)
+{
+
+	return (NETSTAT_SYSCTL(udp6stat_percpu, UDP6_NSTATS));
 }
 
 SYSCTL_SETUP(sysctl_net_inet6_udp6_setup, "sysctl net.inet6.udp6 subtree setup")
@@ -465,7 +465,15 @@ SYSCTL_SETUP(sysctl_net_inet6_udp6_setup, "sysctl net.inet6.udp6 subtree setup")
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRUCT, "stats",
 		       SYSCTL_DESCR("UDPv6 statistics"),
-		       NULL, 0, &udp6stat, sizeof(udp6stat),
+		       sysctl_net_inet6_udp6_stats, 0, NULL, 0,
 		       CTL_NET, PF_INET6, IPPROTO_UDP, UDP6CTL_STATS,
 		       CTL_EOL);
+}
+
+void
+udp6_statinc(u_int stat)
+{
+
+	KASSERT(stat < UDP6_NSTATS);
+	UDP6_STATINC(stat);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: twareg.h,v 1.7 2007/10/19 12:00:56 ad Exp $ */
+/*	$NetBSD: twareg.h,v 1.10 2008/09/08 23:36:54 gmcgarry Exp $ */
 /*	$wasabi: twareg.h,v 1.14 2006/07/28 18:29:51 wrstuden Exp $ */
 
 /*-
@@ -82,6 +82,7 @@
 #define	TWA_RESPONSE_QUEUE_OFFSET		0xC
 #define	TWA_COMMAND_QUEUE_OFFSET_LOW		0x20
 #define	TWA_COMMAND_QUEUE_OFFSET_HIGH		0x24
+#define	TWA_RESPONSE_QUEUE_LARGE_OFFSET		0x30
 
 #if defined(_KERNEL)
 #define TWA_WRITE_REGISTER(sc, offset, val)	\
@@ -101,12 +102,24 @@
 	} while (0)
 #endif
 
+#define TWA_WRITE_9650_COMMAND_QUEUE_HIGH(sc, val)			\
+	do {								\
+		TWA_WRITE_REGISTER(sc, TWA_COMMAND_QUEUE_OFFSET_HIGH,	\
+				(uint32_t)(((uint64_t)val)>>32));	\
+	} while (0)
+
+#define TWA_WRITE_9650_COMMAND_QUEUE_LOW(sc, val)			\
+	do {								\
+		TWA_WRITE_REGISTER(sc, TWA_COMMAND_QUEUE_OFFSET_LOW,	\
+				(uint32_t)(val));			\
+	} while (0)
+
 /* Control register bit definitions. */
-#define TWA_CONTROL_CLEAR_SBUF_WRITE_ERROR	0x00000008
 #define TWA_CONTROL_ISSUE_HOST_INTERRUPT	0x00000020
 #define TWA_CONTROL_DISABLE_INTERRUPTS		0x00000040
 #define TWA_CONTROL_ENABLE_INTERRUPTS		0x00000080
 #define TWA_CONTROL_ISSUE_SOFT_RESET		0x00000100
+#define TWA_CONTROL_CLEAR_ERROR_STATUS		0x00000200
 #define TWA_CONTROL_UNMASK_RESPONSE_INTERRUPT	0x00004000
 #define TWA_CONTROL_UNMASK_COMMAND_INTERRUPT	0x00008000
 #define TWA_CONTROL_MASK_RESPONSE_INTERRUPT	0x00010000
@@ -119,7 +132,6 @@
 
 /* Status register bit definitions. */
 #define TWA_STATUS_ROM_BIOS_IN_SBUF		0x00000002
-#define TWA_STATUS_SBUF_WRITE_ERROR		0x00000008
 #define TWA_STATUS_COMMAND_QUEUE_EMPTY		0x00001000
 #define TWA_STATUS_MICROCONTROLLER_READY	0x00002000
 #define TWA_STATUS_RESPONSE_QUEUE_EMPTY		0x00004000
@@ -155,6 +167,7 @@
 
 #define TWA_PCI_CONFIG_CLEAR_PARITY_ERROR	0xc100
 #define TWA_PCI_CONFIG_CLEAR_PCI_ABORT		0x2000
+#define TWA_9550SX_DRAIN_COMPLETE		0xffff
 
 /* Command packet opcodes. */
 #define TWA_OP_NOP			0x00
@@ -189,6 +202,8 @@
 /* Misc defines. */
 #define TWA_ALIGNMENT			0x4
 #define TWA_MAX_UNITS			16
+#define TWA_9650_MAX_UNITS		32
+#define TWA_9690_MAX_UNITS		32
 #define TWA_INIT_MESSAGE_CREDITS	0x100
 #define TWA_SHUTDOWN_MESSAGE_CREDITS	0x001
 #define TWA_64BIT_SG_ADDRESSES		0x00000001
@@ -213,7 +228,7 @@
 #define TWA_MAX_RESET_TRIES		3
 #define TWA_SECTOR_SIZE			0x200	/* generic I/O bufffer */
 #define TWA_SENSE_DATA_LENGTH		18
-
+#define TWA_MICROSECOND                 1000000
 #define TWA_ERROR_LOGICAL_UNIT_NOT_SUPPORTED	0x010a
 #define TWA_ERROR_UNIT_OFFLINE			0x0128
 #define TWA_ERROR_MORE_DATA			0x0231
@@ -226,7 +241,7 @@ struct twa_sg {
 	uint32_t	xx_address_xx;	/* Fail if userland tries to use this */
 #endif
 	uint32_t	length;
-} __attribute__ ((packed));
+} __packed;
 
 
 /* 7000 structures. */
@@ -245,7 +260,7 @@ struct twa_command_init_connect {
 	uint16_t	fw_branch;
 	uint16_t	fw_build;
 	uint32_t	result;
-}__attribute__ ((packed));
+}__packed;
 
 struct twa_command_download_firmware {
 	uint8_t		opcode:5;	/* TWA_DOWNLOAD_FIRMWARE */
@@ -257,7 +272,7 @@ struct twa_command_download_firmware {
 	uint8_t		flags;
 	uint16_t	param;
 	uint8_t		sgl[1];
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_reset_firmware {
@@ -270,7 +285,7 @@ struct twa_command_reset_firmware {
 	uint8_t		flags;
 	uint8_t		res2;
 	uint8_t		param;
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_io {
@@ -285,7 +300,7 @@ struct twa_command_io {
 	uint16_t	block_count;
 	uint32_t	lba;
 	struct twa_sg	sgl[TWA_MAX_SG_ELEMENTS];
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_hotswap {
@@ -302,7 +317,7 @@ struct twa_command_hotswap {
 #define TWA_OP_HOTSWAP_ADD_CBOD		0x01	/* add CBOD to empty port */
 #define TWA_OP_HOTSWAP_ADD_SPARE	0x02	/* add spare to empty port */
 	uint8_t		aport;
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_param {
@@ -316,7 +331,7 @@ struct twa_command_param {
 	uint8_t		flags;
 	uint16_t	param_count;
 	uint8_t		sgl[1];
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_rebuildunit {
@@ -335,7 +350,7 @@ struct twa_command_rebuildunit {
 #define TWA_OP_REBUILDUNIT_STARTUNIT	5	/* rebuild src_unit (not supported) */
 	uint8_t		cs:1;			/* request state change on src_unit */
 	uint8_t		logical_subunit;	/* for RAID10 rebuild of logical subunit */
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_ata {
@@ -356,7 +371,7 @@ struct twa_command_ata {
 	uint8_t		drive_head;
 	uint8_t		command;
 	struct twa_sg	sgl[TWA_MAX_ATA_SG_ELEMENTS];
-} __attribute__ ((packed));
+} __packed;
 
 
 struct twa_command_generic {
@@ -374,7 +389,7 @@ struct twa_command_generic {
 #define TWA_FLAGS_FATAL		0x03
 #define TWA_FLAGS_PERCENTAGE	(1<<8)	/* bits 0-6 indicate completion percentage */
 	uint16_t	count;		/* block count, parameter count, message credits */
-} __attribute__ ((packed));
+} __packed;
 
 /* Command packet header. */
 #pragma pack(1)
@@ -395,7 +410,7 @@ struct twa_command_header {
 		uint16_t	reserved;
 		uint8_t		size_sense;
 	} header_desc;
-} __attribute__ ((packed));
+} __packed;
 #pragma pack()
 
 
@@ -407,7 +422,7 @@ union twa_command_7k {
 	struct twa_command_param		param;
 	struct twa_command_generic		generic;
 	uint8_t padding[1024 - sizeof(struct twa_command_header)];
-} __attribute__ ((packed));
+} __packed;
 
 
 /* 9000 structures. */
@@ -426,7 +441,7 @@ struct twa_command_9k {
 	uint8_t		cdb[16];
 	struct twa_sg	sg_list[TWA_MAX_SG_ELEMENTS];
 	uint8_t		padding[32];
-} __attribute__ ((packed));
+} __packed;
 
 
 
@@ -437,7 +452,7 @@ struct twa_command_packet {
 		union twa_command_7k	cmd_pkt_7k;
 		struct twa_command_9k 	cmd_pkt_9k;
 	} command;
-} __attribute__ ((packed));
+} __packed;
 
 
 /* Response queue entry. */
@@ -448,7 +463,7 @@ union twa_response_queue {
 		uint32_t	undefined_2:20;
 	} u;
 	uint32_t	value;
-} __attribute__ ((packed));
+} __packed;
 
 
 #define TWA_AEN_QUEUE_EMPTY		0x00
@@ -496,6 +511,6 @@ struct twa_param_9k {
 	uint16_t	parameter_size_bytes;
 	uint16_t	parameter_actual_size_bytes;
 	uint8_t		data[1];
-} __attribute__ ((packed));
+} __packed;
 
 #endif	/* !_PCI_TWAREG_H_ */

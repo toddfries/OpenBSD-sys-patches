@@ -1,4 +1,5 @@
-/*	$OpenBSD: spif.c,v 1.13 2006/03/04 13:00:55 miod Exp $	*/
+/*	$NetBSD: spif.c,v 1.18 2008/06/11 21:25:31 drochner Exp $	*/
+/*	$OpenBSD: spif.c,v 1.12 2003/10/03 16:44:51 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2002 Jason L. Wright (jason@thought.net)
@@ -36,86 +37,82 @@
  * based heavily on Iain Hibbert's driver for the MAGMA cards
  */
 
+/* Ported to NetBSD 2.0 by Hauke Fath */
+
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: spif.c,v 1.18 2008/06/11 21:25:31 drochner Exp $");
+
+#include "spif.h"
+#if NSPIF > 0
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/device.h>
-#include <sys/kernel.h>
 #include <sys/file.h>
-#include <sys/errno.h>
 #include <sys/ioctl.h>
-#include <sys/mbuf.h>
-#include <sys/socket.h>
-#include <sys/syslog.h>
 #include <sys/malloc.h>
 #include <sys/tty.h>
+#include <sys/time.h>
+#include <sys/kernel.h>
+#include <sys/syslog.h>
 #include <sys/conf.h>
+#include <sys/errno.h>
+#include <sys/kauth.h>
+#include <sys/intr.h>
 
+#include <sys/bus.h>
 #include <machine/autoconf.h>
+#include <machine/promlib.h>
+
 #include <dev/sbus/sbusvar.h>
-#include <dev/sbus/spifreg.h>
+
 #include <dev/sbus/spifvar.h>
+#include <dev/sbus/spifreg.h>
 
-int	spifmatch(struct device *, void *, void *);
-void	spifattach(struct device *, struct device *, void *);
 
-int	sttymatch(struct device *, void *, void *);
-void	sttyattach(struct device *, struct device *, void *);
-int	sttyopen(dev_t, int, int, struct proc *);
-int	sttyclose(dev_t, int, int, struct proc *);
-int	sttyread(dev_t, struct uio *, int);
-int	sttywrite(dev_t, struct uio *, int);
-int	sttyioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	sttystop(struct tty *, int);
+/* Autoconfig stuff */
 
-int	spifstcintr(void *);
-int	spifstcintr_mx(struct spif_softc *, int *);
-int	spifstcintr_tx(struct spif_softc *, int *);
-int	spifstcintr_rx(struct spif_softc *, int *);
-int	spifstcintr_rxexception(struct spif_softc *, int *);
-void	spifsoftintr(void *);
+CFATTACH_DECL(spif, sizeof(struct spif_softc),
+    spif_match, spif_attach, NULL, NULL);
 
-int	stty_param(struct tty *, struct termios *);
-struct tty *sttytty(dev_t);
-int	stty_modem_control(struct stty_port *, int, int);
-void	stty_write_ccr(struct spif_softc *, u_int8_t);
-int	stty_compute_baud(speed_t, int, u_int8_t *, u_int8_t *);
-void	stty_start(struct tty *);
+CFATTACH_DECL(stty, sizeof(struct stty_softc),
+    stty_match, stty_attach, NULL, NULL);
 
-int	sbppmatch(struct device *, void *, void *);
-void	sbppattach(struct device *, struct device *, void *);
-int	sbppopen(dev_t, int, int, struct proc *);
-int	sbppclose(dev_t, int, int, struct proc *);
-int	sbppread(dev_t, struct uio *, int);
-int	sbppwrite(dev_t, struct uio *, int);
-int	sbpp_rw(dev_t, struct uio *);
-int	spifppcintr(void *);
-int	sbpppoll(dev_t, int, struct proc *);
-int	sbppioctl(dev_t, u_long, caddr_t, int, struct proc *);
+CFATTACH_DECL(sbpp, sizeof(struct sbpp_softc),
+    sbpp_match, sbpp_attach, NULL, NULL);
 
-struct cfattach spif_ca = {
-	sizeof (struct spif_softc), spifmatch, spifattach
+extern struct cfdriver spif_cd;
+extern struct cfdriver stty_cd;
+extern struct cfdriver sbpp_cd;
+
+dev_type_open(stty_open);
+dev_type_close(stty_close);
+dev_type_read(stty_read);
+dev_type_write(stty_write);
+dev_type_ioctl(stty_ioctl);
+dev_type_stop(stty_stop);
+dev_type_tty(stty_tty);
+dev_type_poll(stty_poll);
+
+const struct cdevsw stty_cdevsw = {
+	stty_open, stty_close, stty_read, stty_write, stty_ioctl,
+	stty_stop, stty_tty, stty_poll, nommap, ttykqfilter, D_TTY
 };
 
-struct cfdriver spif_cd = {
-	NULL, "spif", DV_DULL
+dev_type_open(sbpp_open);
+dev_type_close(sbpp_close);
+dev_type_read(sbpp_read);
+dev_type_write(sbpp_write);
+dev_type_ioctl(sbpp_ioctl);
+dev_type_poll(sbpp_poll);
+
+const struct cdevsw sbpp_cdevsw = {
+	sbpp_open, sbpp_close, sbpp_read, sbpp_write, sbpp_ioctl,
+	nostop, notty, sbpp_poll, nommap, nokqfilter,
 };
 
-struct cfattach stty_ca = {
-	sizeof(struct stty_softc), sttymatch, sttyattach
-};
-
-struct cfdriver stty_cd = {
-	NULL, "stty", DV_TTY
-};
-
-struct cfattach sbpp_ca = {
-	sizeof(struct sbpp_softc), sbppmatch, sbppattach
-};
-
-struct cfdriver sbpp_cd = {
-	NULL, "sbpp", DV_DULL
-};
 
 /* normal STC access */
 #define	STC_WRITE(sc,r,v)	\
@@ -144,26 +141,27 @@ struct cfdriver sbpp_cd = {
 
 #define	DTR_READ(sc,port)	((sc)->sc_ttys->sc_port[(port)].sp_dtr)
 
+
 int
-spifmatch(parent, vcf, aux)
+spif_match(parent, vcf, aux)
 	struct device *parent;
-	void *vcf, *aux;
+	struct cfdata *vcf;
+	void *aux;
 {
-	struct cfdata *cf = vcf;
 	struct sbus_attach_args *sa = aux;
 
-	if (strcmp(cf->cf_driver->cd_name, sa->sa_name) &&
+	if (strcmp(vcf->cf_name, sa->sa_name) &&
 	    strcmp("SUNW,spif", sa->sa_name))
 		return (0);
 	return (1);
 }
 
-void    
-spifattach(parent, self, aux)
+void
+spif_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
-	struct spif_softc *sc = (struct spif_softc *)self;
+	struct spif_softc *sc = device_private(self);
 	struct sbus_attach_args *sa = aux;
 
 	if (sa->sa_nintr != 2) {
@@ -177,9 +175,9 @@ spifattach(parent, self, aux)
 	}
 
 	sc->sc_bustag = sa->sa_bustag;
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
-	    sa->sa_reg[0].sbr_offset, sa->sa_reg[0].sbr_size,
-	    0, 0, &sc->sc_regh) != 0) {
+	if (sbus_bus_map(sa->sa_bustag, sa->sa_slot,
+	    sa->sa_offset, sa->sa_size,
+	    0, &sc->sc_regh) != 0) {
 		printf(": can't map registers\n");
 		return;
 	}
@@ -209,22 +207,20 @@ spifattach(parent, self, aux)
 	}
 
 	sc->sc_ppcih = bus_intr_establish(sa->sa_bustag,
-	    sa->sa_intr[PARALLEL_INTR].sbi_pri, IPL_TTY, 0, spifppcintr, sc,
-	    self->dv_xname);
+	    sa->sa_intr[PARALLEL_INTR].oi_pri, IPL_SERIAL, spif_ppcintr, sc);
 	if (sc->sc_ppcih == NULL) {
 		printf(": failed to establish ppc interrupt\n");
 		goto fail_unmapregs;
 	}
 
 	sc->sc_stcih = bus_intr_establish(sa->sa_bustag,
-	    sa->sa_intr[SERIAL_INTR].sbi_pri, IPL_TTY, 0, spifstcintr, sc,
-	    self->dv_xname);
+	    sa->sa_intr[SERIAL_INTR].oi_pri, IPL_SERIAL, spif_stcintr, sc);
 	if (sc->sc_stcih == NULL) {
 		printf(": failed to establish stc interrupt\n");
 		goto fail_unmapregs;
 	}
 
-	sc->sc_softih = softintr_establish(IPL_TTY, spifsoftintr, sc);
+	sc->sc_softih = softint_establish(SOFTINT_SERIAL, spif_softintr, sc);
 	if (sc->sc_softih == NULL) {
 		printf(": can't get soft intr\n");
 		goto fail_unmapregs;
@@ -232,9 +228,9 @@ spifattach(parent, self, aux)
 
 	sc->sc_node = sa->sa_node;
 
-	sc->sc_rev = getpropint(sc->sc_node, "revlev", 0);
+	sc->sc_rev = prom_getpropint(sc->sc_node, "revlev", 0);
 
-	sc->sc_osc = getpropint(sc->sc_node, "verosc", 0);
+	sc->sc_osc = prom_getpropint(sc->sc_node, "verosc", 0);
 	switch (sc->sc_osc) {
 	case SPIF_OSC10:
 		sc->sc_osc = 10000000;
@@ -268,32 +264,33 @@ spifattach(parent, self, aux)
 	printf(": rev %x chiprev %x osc %sMHz\n",
 	    sc->sc_rev, sc->sc_rev2, clockfreq(sc->sc_osc));
 
-	(void)config_found(self, sttymatch, NULL);
-	(void)config_found(self, sbppmatch, NULL);
+	(void)config_found(self, stty_match, NULL);
+	(void)config_found(self, sbpp_match, NULL);
 
 	return;
 
 fail_unmapregs:
-	bus_space_unmap(sa->sa_bustag, sc->sc_regh, sa->sa_reg[0].sbr_size);
+	bus_space_unmap(sa->sa_bustag, sc->sc_regh, sa->sa_size);
 }
 
 int
-sttymatch(parent, vcf, aux)
+stty_match(parent, vcf, aux)
 	struct device *parent;
-	void *vcf, *aux;
+	struct cfdata *vcf;
+	void *aux;
 {
-	struct spif_softc *sc = (struct spif_softc *)parent;
+	struct spif_softc *sc = device_private(parent);
 
-	return (aux == sttymatch && sc->sc_ttys == NULL);
+	return (aux == stty_match && sc->sc_ttys == NULL);
 }
 
 void
-sttyattach(parent, dev, aux)
+stty_attach(parent, dev, aux)
 	struct device *parent, *dev;
 	void *aux;
 {
-	struct spif_softc *sc = (struct spif_softc *)parent;
-	struct stty_softc *ssc = (struct stty_softc *)dev;
+	struct spif_softc *sc = device_private(parent);
+	struct stty_softc *ssc = device_private(dev);
 	int port;
 
 	sc->sc_ttys = ssc;
@@ -326,11 +323,7 @@ sttyattach(parent, dev, aux)
 }
 
 int
-sttyopen(dev, flags, mode, p)
-	dev_t dev;
-	int flags;
-	int mode;
-	struct proc *p;
+stty_open(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct spif_softc *csc;
 	struct stty_softc *sc;
@@ -338,13 +331,9 @@ sttyopen(dev, flags, mode, p)
 	struct tty *tp;
 	int card = SPIF_CARD(dev);
 	int port = SPIF_PORT(dev);
-	int s;
 
-	if (card >= stty_cd.cd_ndevs || card >= spif_cd.cd_ndevs)
-		return (ENXIO);
-
-	sc = stty_cd.cd_devs[card];
-	csc = spif_cd.cd_devs[card];
+	sc = device_lookup_private(&stty_cd, card);
+	csc = device_lookup_private(&spif_cd, card);
 	if (sc == NULL || csc == NULL)
 		return (ENXIO);
 
@@ -355,9 +344,11 @@ sttyopen(dev, flags, mode, p)
 	tp = sp->sp_tty;
 	tp->t_dev = dev;
 
-	if (!ISSET(tp->t_state, TS_ISOPEN)) {
-		SET(tp->t_state, TS_WOPEN);
+	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN, tp))
+		return (EBUSY);
 
+	mutex_spin_enter(&tty_lock);
+	if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0) {
 		ttychars(tp);
 		tp->t_iflag = TTYDEF_IFLAG;
 		tp->t_oflag = TTYDEF_OFLAG;
@@ -372,8 +363,6 @@ sttyopen(dev, flags, mode, p)
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 
 		sp->sp_rput = sp->sp_rget = sp->sp_rbuf;
-
-		s = spltty();
 
 		STC_WRITE(csc, STC_CAR, sp->sp_channel);
 		stty_write_ccr(csc, CD180_CCR_CMD_RESET|CD180_CCR_RESETCHAN);
@@ -390,48 +379,34 @@ sttyopen(dev, flags, mode, p)
 		else
 			CLR(tp->t_state, TS_CARR_ON);
 	}
-	else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
-		return (EBUSY);
-	} else {
-		s = spltty();
-	}
 
 	if (!ISSET(flags, O_NONBLOCK)) {
 		while (!ISSET(tp->t_cflag, CLOCAL) &&
 		    !ISSET(tp->t_state, TS_CARR_ON)) {
 			int error;
-
-			SET(tp->t_state, TS_WOPEN);
-			error = ttysleep(tp, &tp->t_rawq, TTIPRI | PCATCH,
-			    "sttycd", 0);
+			error = ttysleep(tp, &tp->t_rawcv, true, 0);
 			if (error != 0) {
-				splx(s);
-				CLR(tp->t_state, TS_WOPEN);
+				mutex_spin_exit(&tty_lock);
 				return (error);
 			}
 		}
 	}
+	mutex_spin_exit(&tty_lock);
 
-	splx(s);
-
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*tp->t_linesw->l_open)(dev, tp));
 }
 
 int
-sttyclose(dev, flags, mode, p)
-	dev_t dev;
-	int flags;
-	int mode;
-	struct proc *p;
+stty_close(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct stty_softc *sc = stty_cd.cd_devs[SPIF_CARD(dev)];
+	struct stty_softc *sc = device_lookup_private(&stty_cd, SPIF_CARD(dev));
 	struct stty_port *sp = &sc->sc_port[SPIF_PORT(dev)];
 	struct spif_softc *csc = sp->sp_sc;
 	struct tty *tp = sp->sp_tty;
 	int port = SPIF_PORT(dev);
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*tp->t_linesw->l_close)(tp, flags);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) || !ISSET(tp->t_state, TS_ISOPEN)) {
@@ -447,24 +422,20 @@ sttyclose(dev, flags, mode, p)
 }
 
 int
-sttyioctl(dev, cmd, data, flags, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flags;
-	struct proc *p;
+stty_ioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 {
-	struct stty_softc *stc = stty_cd.cd_devs[SPIF_CARD(dev)];
+	struct stty_softc *stc = device_lookup_private(&stty_cd,
+						       SPIF_CARD(dev));
 	struct stty_port *sp = &stc->sc_port[SPIF_PORT(dev)];
 	struct spif_softc *sc = sp->sp_sc;
 	struct tty *tp = sp->sp_tty;
 	int error;
 
-	error = (*linesw[tp->t_line].l_ioctl)(tp, cmd, data, flags, p);
+	error = (*tp->t_linesw->l_ioctl)(tp, cmd, data, flags, l);
 	if (error >= 0)
 		return (error);
 
-	error = ttioctl(tp, cmd, data, flags, p);
+	error = ttioctl(tp, cmd, data, flags, l);
 	if (error >= 0)
 		return (error);
 
@@ -505,7 +476,8 @@ sttyioctl(dev, cmd, data, flags, p)
 		*((int *)data) = sp->sp_openflags;
 		break;
 	case TIOCSFLAGS:
-		if (suser(p, 0))
+		if (kauth_authorize_device_tty(l->l_cred,
+		    KAUTH_DEVICE_TTY_PRIVSET, tp))
 			error = EPERM;
 		else
 			sp->sp_openflags = *((int *)data) &
@@ -576,11 +548,10 @@ stty_modem_control(sp, bits, how)
 }
 
 int
-stty_param(tp, t)
-	struct tty *tp;
-	struct termios *t;
+stty_param(struct tty *tp, struct termios *t)
 {
-	struct stty_softc *st = stty_cd.cd_devs[SPIF_CARD(tp->t_dev)];
+	struct stty_softc *st = device_lookup_private(&stty_cd,
+						      SPIF_CARD(tp->t_dev));
 	struct stty_port *sp = &st->sc_port[SPIF_PORT(tp->t_dev)];
 	struct spif_softc *sc = sp->sp_sc;
 	u_int8_t rbprl, rbprh, tbprl, tbprh;
@@ -674,47 +645,49 @@ stty_param(tp, t)
 }
 
 int
-sttyread(dev, uio, flags)
-	dev_t dev;
-	struct uio *uio;
-	int flags;
+stty_read(dev_t dev, struct uio *uio, int flags)
 {
-	struct stty_softc *sc = stty_cd.cd_devs[SPIF_CARD(dev)];
+	struct stty_softc *sc = device_lookup_private(&stty_cd, SPIF_CARD(dev));
 	struct stty_port *sp = &sc->sc_port[SPIF_PORT(dev)];
 	struct tty *tp = sp->sp_tty;
 
-	return ((*linesw[tp->t_line].l_read)(tp, uio, flags));
+	return ((*tp->t_linesw->l_read)(tp, uio, flags));
 }
 
 int
-sttywrite(dev, uio, flags)
-	dev_t dev;
-	struct uio *uio;
-	int flags;
+stty_write(dev_t dev, struct uio *uio, int flags)
 {
-	struct stty_softc *sc = stty_cd.cd_devs[SPIF_CARD(dev)];
+	struct stty_softc *sc = device_lookup_private(&stty_cd, SPIF_CARD(dev));
 	struct stty_port *sp = &sc->sc_port[SPIF_PORT(dev)];
 	struct tty *tp = sp->sp_tty;
 
-	return ((*linesw[tp->t_line].l_write)(tp, uio, flags));
+	return ((*tp->t_linesw->l_write)(tp, uio, flags));
+}
+
+int
+stty_poll(dev_t dev, int events, struct lwp *l)
+{
+	struct stty_softc *sc = device_lookup_private(&stty_cd, SPIF_CARD(dev));
+	struct stty_port *sp = &sc->sc_port[SPIF_PORT(dev)];
+	struct tty *tp = sp->sp_tty;
+
+	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
 
 struct tty *
-sttytty(dev)
-	dev_t dev;
+stty_tty(dev_t dev)
 {
-	struct stty_softc *sc = stty_cd.cd_devs[SPIF_CARD(dev)];
+	struct stty_softc *sc = device_lookup_private(&stty_cd, SPIF_CARD(dev));
 	struct stty_port *sp = &sc->sc_port[SPIF_PORT(dev)];
 
 	return (sp->sp_tty);
 }
 
-int
-sttystop(tp, flags)
-	struct tty *tp;
-	int flags;
+void
+stty_stop(struct tty *tp, int flags)
 {
-	struct stty_softc *sc = stty_cd.cd_devs[SPIF_CARD(tp->t_dev)];
+	struct stty_softc *sc = device_lookup_private(&stty_cd,
+						      SPIF_CARD(tp->t_dev));
 	struct stty_port *sp = &sc->sc_port[SPIF_PORT(tp->t_dev)];
 	int s;
 
@@ -725,14 +698,13 @@ sttystop(tp, flags)
 		SET(sp->sp_flags, STTYF_STOP);
 	}
 	splx(s);
-	return (0);
 }
 
 void
-stty_start(tp)
-	struct tty *tp;
+stty_start(struct tty *tp)
 {
-	struct stty_softc *stc = stty_cd.cd_devs[SPIF_CARD(tp->t_dev)];
+	struct stty_softc *stc = device_lookup_private(&stty_cd,
+						       SPIF_CARD(tp->t_dev));
 	struct stty_port *sp = &stc->sc_port[SPIF_PORT(tp->t_dev)];
 	struct spif_softc *sc = sp->sp_sc;
 	int s;
@@ -740,14 +712,7 @@ stty_start(tp)
 	s = spltty();
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
-		if (tp->t_outq.c_cc) {
+		if (ttypull(tp)) {
 			sp->sp_txc = ndqb(&tp->t_outq, 0);
 			sp->sp_txp = tp->t_outq.c_cf;
 			SET(tp->t_state, TS_BUSY);
@@ -761,7 +726,7 @@ stty_start(tp)
 }
 
 int
-spifstcintr_rxexception(sc, needsoftp)
+spif_stcintr_rxexception(sc, needsoftp)
 	struct spif_softc *sc;
 	int *needsoftp;
 {
@@ -788,7 +753,7 @@ spifstcintr_rxexception(sc, needsoftp)
 }
 
 int
-spifstcintr_rx(sc, needsoftp)
+spif_stcintr_rx(sc, needsoftp)
 	struct spif_softc *sc;
 	int *needsoftp;
 {
@@ -823,7 +788,7 @@ spifstcintr_rx(sc, needsoftp)
 }
 
 int
-spifstcintr_tx(sc, needsoftp)
+spif_stcintr_tx(sc, needsoftp)
 	struct spif_softc *sc;
 	int *needsoftp;
 {
@@ -876,7 +841,7 @@ spifstcintr_tx(sc, needsoftp)
 }
 
 int
-spifstcintr_mx(sc, needsoftp)
+spif_stcintr_mx(sc, needsoftp)
 	struct spif_softc *sc;
 	int *needsoftp;
 {
@@ -896,7 +861,7 @@ spifstcintr_mx(sc, needsoftp)
 }
 
 int
-spifstcintr(vsc)
+spif_stcintr(vsc)
 	void *vsc;
 {
 	struct spif_softc *sc = (struct spif_softc *)vsc;
@@ -906,30 +871,30 @@ spifstcintr(vsc)
 	for (i = 0; i < 8; i++) {
 		ar = ISTC_READ(sc, STC_RRAR) & CD180_GSVR_IMASK;
 		if (ar == CD180_GSVR_RXGOOD)
-			r |= spifstcintr_rx(sc, &needsoft);
+			r |= spif_stcintr_rx(sc, &needsoft);
 		else if (ar == CD180_GSVR_RXEXCEPTION)
-			r |= spifstcintr_rxexception(sc, &needsoft);
+			r |= spif_stcintr_rxexception(sc, &needsoft);
 	}
 
 	for (i = 0; i < 8; i++) {
 		ar = ISTC_READ(sc, STC_TRAR) & CD180_GSVR_IMASK;
 		if (ar == CD180_GSVR_TXDATA)
-			r |= spifstcintr_tx(sc, &needsoft);
+			r |= spif_stcintr_tx(sc, &needsoft);
 	}
 
 	for (i = 0; i < 8; i++) {
 		ar = ISTC_READ(sc, STC_MRAR) & CD180_GSVR_IMASK;
 		if (ar == CD180_GSVR_STATCHG)
-			r |= spifstcintr_mx(sc, &needsoft);
+			r |= spif_stcintr_mx(sc, &needsoft);
 	}
 
 	if (needsoft)
-		softintr_schedule(sc->sc_softih);
+		softint_schedule(sc->sc_softih);
 	return (r);
 }
 
 void
-spifsoftintr(vsc)
+spif_softintr(vsc)
 	void *vsc;
 {
 	struct spif_softc *sc = (struct spif_softc *)vsc;
@@ -960,7 +925,7 @@ spifsoftintr(vsc)
 				if (stat & CD180_RCSR_PE)
 					data |= TTY_PE;
 
-				(*linesw[tp->t_line].l_rint)(data, tp);
+				(*tp->t_linesw->l_rint)(data, tp);
 				r = 1;
 			}
 
@@ -977,14 +942,14 @@ spifsoftintr(vsc)
 				splx(s);
 
 				sp->sp_carrier = msvr & CD180_MSVR_CD;
-				(*linesw[tp->t_line].l_modem)(tp,
+				(*tp->t_linesw->l_modem)(tp,
 				    sp->sp_carrier);
 				r = 1;
 			}
 
 			if (ISSET(flags, STTYF_RING_OVERFLOW)) {
 				log(LOG_WARNING, "%s-%x: ring overflow\n",
-					stc->sc_dev.dv_xname, i);
+					device_xname(&stc->sc_dev), i);
 				r = 1;
 			}
 
@@ -992,7 +957,7 @@ spifsoftintr(vsc)
 				ndflush(&tp->t_outq,
 				    sp->sp_txp - tp->t_outq.c_cf);
 				CLR(tp->t_state, TS_BUSY);
-				(*linesw[tp->t_line].l_start)(tp);
+				(*tp->t_linesw->l_start)(tp);
 				r = 1;
 			}
 		}
@@ -1009,7 +974,7 @@ stty_write_ccr(sc, val)
 	while (STC_READ(sc, STC_CCR) && tries--)
 		/*EMPTY*/;
 	if (tries == 0)
-		printf("%s: ccr timeout\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "ccr timeout\n");
 	STC_WRITE(sc, STC_CCR, val);
 }
 
@@ -1036,22 +1001,23 @@ stty_compute_baud(speed, clock, bprlp, bprhp)
 }
 
 int
-sbppmatch(parent, vcf, aux)
+sbpp_match(parent, vcf, aux)
 	struct device *parent;
-	void *vcf, *aux;
+	struct cfdata *vcf;
+	void *aux;
 {
-	struct spif_softc *sc = (struct spif_softc *)parent;
+	struct spif_softc *sc = device_private(parent);
 
-	return (aux == sbppmatch && sc->sc_bpps == NULL);
+	return (aux == sbpp_match && sc->sc_bpps == NULL);
 }
 
 void
-sbppattach(parent, dev, aux)
+sbpp_attach(parent, dev, aux)
 	struct device *parent, *dev;
 	void *aux;
 {
-	struct spif_softc *sc = (struct spif_softc *)parent;
-	struct sbpp_softc *psc = (struct sbpp_softc *)dev;
+	struct spif_softc *sc = device_private(parent);
+	struct sbpp_softc *psc = device_private(dev);
 	int port;
 
 	sc->sc_bpps = psc;
@@ -1064,34 +1030,34 @@ sbppattach(parent, dev, aux)
 }
 
 int
-sbppopen(dev, flags, mode, p)
+sbpp_open(dev, flags, mode, l)
 	dev_t dev;
 	int flags;
 	int mode;
-	struct proc *p;
+	struct lwp *l;
 {
 	return (ENXIO);
 }
 
 int
-sbppclose(dev, flags, mode, p)
+sbpp_close(dev, flags, mode, l)
 	dev_t dev;
 	int flags;
 	int mode;
-	struct proc *p;
+	struct lwp *l;
 {
 	return (ENXIO);
 }
 
 int
-spifppcintr(v)
+spif_ppcintr(v)
 	void *v;
 {
 	return (0);
 }
 
 int
-sbppread(dev, uio, flags)
+sbpp_read(dev, uio, flags)
 	dev_t dev;
 	struct uio *uio;
 	int flags;
@@ -1100,7 +1066,7 @@ sbppread(dev, uio, flags)
 }
 
 int
-sbppwrite(dev, uio, flags)
+sbpp_write(dev, uio, flags)
 	dev_t dev;
 	struct uio *uio;
 	int flags;
@@ -1117,21 +1083,21 @@ sbpp_rw(dev, uio)
 }
 
 int
-sbpppoll(dev, events, p)
+sbpp_poll(dev, events, l)
 	dev_t dev;
 	int events;
-	struct proc *p;
+	struct lwp *l;
 {
-	return (seltrue(dev, events, p));
+	return (seltrue(dev, events, l));
 }
 
 int
-sbppioctl(dev, cmd, data, flags, p)
+sbpp_ioctl(dev, cmd, data, flags, l)
 	dev_t dev;
 	u_long cmd;
-	caddr_t data;
+	void *data;
 	int flags;
-	struct proc *p;
+	struct lwp *l;
 {
 	int error;
 
@@ -1139,3 +1105,5 @@ sbppioctl(dev, cmd, data, flags, p)
 
 	return (error);
 }
+
+#endif /* NSPIF */

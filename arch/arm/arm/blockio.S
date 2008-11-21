@@ -1,4 +1,3 @@
-/*	$OpenBSD: blockio.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
 /*	$NetBSD: blockio.S,v 1.5 2002/08/15 01:38:16 briggs Exp $	*/
 
 /*
@@ -49,7 +48,7 @@
 
 #include <machine/asm.h>
 
-RCSID("$NetBSD: blockio.S,v 1.4 2001/06/02 11:15:56 bjh21 Exp $")
+RCSID("$NetBSD: blockio.S,v 1.5 2002/08/15 01:38:16 briggs Exp $")
 
 /*
  * Read bytes from an I/O address into a block of memory

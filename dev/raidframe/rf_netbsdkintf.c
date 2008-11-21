@@ -1,6 +1,6 @@
-/*	$NetBSD: rf_netbsdkintf.c,v 1.236 2007/11/13 11:39:42 yamt Exp $	*/
+/*	$NetBSD: rf_netbsdkintf.c,v 1.251 2008/11/18 14:29:55 ad Exp $	*/
 /*-
- * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997, 1998, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -14,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -146,7 +139,12 @@
  ***********************************************************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.236 2007/11/13 11:39:42 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.251 2008/11/18 14:29:55 ad Exp $");
+
+#ifdef _KERNEL_OPT
+#include "opt_raid_autoconfig.h"
+#include "raid.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -162,7 +160,6 @@ __KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.236 2007/11/13 11:39:42 yamt Ex
 #include <sys/vnode.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
-#include <sys/lock.h>
 #include <sys/buf.h>
 #include <sys/bufq.h>
 #include <sys/user.h>
@@ -173,8 +170,7 @@ __KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.236 2007/11/13 11:39:42 yamt Ex
 
 #include <dev/raidframe/raidframevar.h>
 #include <dev/raidframe/raidframeio.h>
-#include "raid.h"
-#include "opt_raid_autoconfig.h"
+
 #include "rf_raid.h"
 #include "rf_copyback.h"
 #include "rf_dag.h"
@@ -198,12 +194,14 @@ int     rf_kdebug_level = 0;
 
 static RF_Raid_t **raidPtrs;	/* global raid device descriptors */
 
+#if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
 RF_DECLARE_STATIC_MUTEX(rf_sparet_wait_mutex)
 
 static RF_SparetWait_t *rf_sparet_wait_queue;	/* requests to install a
 						 * spare table */
 static RF_SparetWait_t *rf_sparet_resp_queue;	/* responses from
 						 * installation process */
+#endif
 
 MALLOC_DEFINE(M_RAIDFRAME, "RAIDframe", "RAIDframe structures");
 
@@ -264,7 +262,7 @@ struct raid_softc {
 int numraid = 0;
 
 extern struct cfdriver raid_cd;
-CFATTACH_DECL(raid, sizeof(struct raid_softc),
+CFATTACH_DECL_NEW(raid, sizeof(struct raid_softc),
     raid_match, raid_attach, raid_detach, NULL);
 
 /*
@@ -359,15 +357,17 @@ raidattach(int num)
 		panic("raidPtrs is NULL!!");
 	}
 
+#if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
 	rf_mutex_init(&rf_sparet_wait_mutex);
 
 	rf_sparet_wait_queue = rf_sparet_resp_queue = NULL;
+#endif
 
 	for (i = 0; i < num; i++)
 		raidPtrs[i] = NULL;
 	rc = rf_BootRaidframe();
 	if (rc == 0)
-		printf("Kernelized RAIDframe activated\n");
+		aprint_normal("Kernelized RAIDframe activated\n");
 	else
 		panic("Serious error booting RAID!!");
 
@@ -378,7 +378,7 @@ raidattach(int num)
 		malloc(num * sizeof(struct raid_softc),
 		       M_RAIDFRAME, M_NOWAIT);
 	if (raid_softc == NULL) {
-		printf("WARNING: no memory for RAIDframe driver\n");
+		aprint_error("WARNING: no memory for RAIDframe driver\n");
 		return;
 	}
 
@@ -390,14 +390,14 @@ raidattach(int num)
 		RF_Malloc(raidPtrs[raidID], sizeof(RF_Raid_t),
 			  (RF_Raid_t *));
 		if (raidPtrs[raidID] == NULL) {
-			printf("WARNING: raidPtrs[%d] is NULL\n", raidID);
+			aprint_error("WARNING: raidPtrs[%d] is NULL\n", raidID);
 			numraid = raidID;
 			return;
 		}
 	}
 
 	if (config_cfattach_attach(raid_cd.cd_name, &raid_ca)) {
-		printf("config_cfattach_attach failed?\n");
+		aprint_error("raidattach: config_cfattach_attach failed?\n");
 	}
 
 #ifdef RAID_AUTOCONFIG
@@ -409,7 +409,7 @@ raidattach(int num)
 	 * sets once all real hardware devices have been found.
 	 */
 	if (config_finalize_register(NULL, rf_autoconfig) != 0)
-		printf("WARNING: unable to register RAIDframe finalizer\n");
+		aprint_error("WARNING: unable to register RAIDframe finalizer\n");
 }
 
 int
@@ -478,9 +478,6 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 				rf_release_all_vps(cset);
 			}
 		} else {
-#ifdef DEBUG
-			printf("raid%d: not enough components\n", raidID);
-#endif
 			/* we're not autoconfiguring this set...
 			   release the associated resources */
 			rf_release_all_vps(cset);
@@ -525,8 +522,8 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 			for (col = 0; col < raidPtrs[raidID]->numCol; col++) {
 				devname = raidPtrs[raidID]->Disks[col].devname;
 				devname += sizeof("/dev/") - 1;
-				if (strncmp(devname, booted_device->dv_xname, 
-					    strlen(booted_device->dv_xname)) != 0)
+				if (strncmp(devname, device_xname(booted_device), 
+					    strlen(device_xname(booted_device))) != 0)
 					continue;
 #ifdef DEBUG
 				printf("raid%d includes boot device %s\n",
@@ -2115,7 +2112,7 @@ rf_DispatchKernelIO(RF_DiskQueue_t *queue, RF_DiskQueueData_t *req)
 			(int) (req->numSector <<
 			    queue->raidPtr->logBytesPerSector),
 			(int) queue->raidPtr->logBytesPerSector));
-		VOP_STRATEGY(bp->b_vp, bp);
+		bdev_strategy(bp);
 
 		break;
 
@@ -2211,7 +2208,9 @@ InitBP(struct buf *bp, struct vnode *b_vp, unsigned rw_flag, dev_t dev,
        struct proc *b_proc)
 {
 	/* bp->b_flags       = B_PHYS | rw_flag; */
-	bp->b_flags = B_CALL | rw_flag;	/* XXX need B_PHYS here too??? */
+	bp->b_flags = rw_flag;	/* XXX need B_PHYS here too??? */
+	bp->b_oflags = 0;
+	bp->b_cflags = 0;
 	bp->b_bcount = numSect << logBytesPerSector;
 	bp->b_bufsize = bp->b_bcount;
 	bp->b_error = 0;
@@ -2225,11 +2224,6 @@ InitBP(struct buf *bp, struct vnode *b_vp, unsigned rw_flag, dev_t dev,
 	bp->b_proc = b_proc;
 	bp->b_iodone = cbFunc;
 	bp->b_private = cbArg;
-	bp->b_vp = b_vp;
-	if ((bp->b_flags & B_READ) == 0) {
-		bp->b_vp->v_numoutput++;
-	}
-
 }
 
 static void
@@ -2659,11 +2653,11 @@ rf_close_component(RF_Raid_t *raidPtr, struct vnode *vp, int auto_configured)
 	if (vp != NULL) {
 		if (auto_configured == 1) {
 			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-			VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+			VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
 			vput(vp);
 
 		} else {
-			(void) vn_close(vp, FREAD | FWRITE, curlwp->l_cred, curlwp);
+			(void) vn_close(vp, FREAD | FWRITE, curlwp->l_cred);
 		}
 	}
 }
@@ -2835,7 +2829,7 @@ oomem:
 		/* cleanup */
 		free(clabel, M_RAIDFRAME);
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
 		vput(vp);
 	}
 	return ac_list;
@@ -2876,6 +2870,11 @@ rf_find_raid_components()
 			continue;
 		}
 
+		/* we don't care about md's... */
+		if (device_is_a(dv, "md")) {
+			continue;
+		}
+
 		/* hdfd is the Atari/Hades floppy driver */
 		if (device_is_a(dv, "hdfd")) {
 			continue;
@@ -2887,7 +2886,7 @@ rf_find_raid_components()
 		}
 
 		/* need to find the device_name_to_block_device_major stuff */
-		bmajor = devsw_name2blk(dv->dv_xname, NULL, 0);
+		bmajor = devsw_name2blk(device_xname(dv), NULL, 0);
 
 		/* get a vnode for the raw partition of this disk */
 
@@ -2898,7 +2897,7 @@ rf_find_raid_components()
 		if (bdevvp(dev, &vp))
 			panic("RAID can't alloc vnode");
 
-		error = VOP_OPEN(vp, FREAD, NOCRED, 0);
+		error = VOP_OPEN(vp, FREAD, NOCRED);
 
 		if (error) {
 			/* "Who cares."  Continue looking
@@ -2910,26 +2909,30 @@ rf_find_raid_components()
 		if (wedge) {
 			struct dkwedge_info dkw;
 			error = VOP_IOCTL(vp, DIOCGWEDGEINFO, &dkw, FREAD,
-			    NOCRED, 0);
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-			VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
-			vput(vp);
+			    NOCRED);
 			if (error) {
 				printf("RAIDframe: can't get wedge info for "
-				    "dev %s (%d)\n", dv->dv_xname, error);
+				    "dev %s (%d)\n", device_xname(dv), error);
+				vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
+				vput(vp);
 				continue;
 			}
 
-			if (strcmp(dkw.dkw_ptype, DKW_PTYPE_RAIDFRAME) != 0)
+			if (strcmp(dkw.dkw_ptype, DKW_PTYPE_RAIDFRAME) != 0) {
+				vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
+				vput(vp);
 				continue;
+			}
 				
 			ac_list = rf_get_component(ac_list, dev, vp,
-			    dv->dv_xname, dkw.dkw_size);
+			    device_xname(dv), dkw.dkw_size);
 			continue;
 		}
 
 		/* Ok, the disk exists.  Go get the disklabel. */
-		error = VOP_IOCTL(vp, DIOCGDINFO, &label, FREAD, NOCRED, 0);
+		error = VOP_IOCTL(vp, DIOCGDINFO, &label, FREAD, NOCRED);
 		if (error) {
 			/*
 			 * XXX can't happen - open() would
@@ -2937,13 +2940,13 @@ rf_find_raid_components()
 			 */
 			if (error != ENOTTY)
 				printf("RAIDframe: can't get label for dev "
-				    "%s (%d)\n", dv->dv_xname, error);
+				    "%s (%d)\n", device_xname(dv), error);
 		}
 
 		/* don't need this any more.  We'll allocate it again
 		   a little later if we really do... */
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
 		vput(vp);
 
 		if (error)
@@ -2960,14 +2963,14 @@ rf_find_raid_components()
 			if (bdevvp(dev, &vp))
 				panic("RAID can't alloc vnode");
 
-			error = VOP_OPEN(vp, FREAD, NOCRED, 0);
+			error = VOP_OPEN(vp, FREAD, NOCRED);
 			if (error) {
 				/* Whatever... */
 				vput(vp);
 				continue;
 			}
 			snprintf(cname, sizeof(cname), "%s%c",
-			    dv->dv_xname, 'a' + i);
+			    device_xname(dv), 'a' + i);
 			ac_list = rf_get_component(ac_list, dev, vp, cname,
 				label.d_partitions[i].p_size);
 		}
@@ -3363,7 +3366,7 @@ rf_release_all_vps(RF_ConfigSet_t *cset)
 		/* Close the vp, and give it back */
 		if (ac->vp) {
 			vn_lock(ac->vp, LK_EXCLUSIVE | LK_RETRY);
-			VOP_CLOSE(ac->vp, FREAD, NOCRED, 0);
+			VOP_CLOSE(ac->vp, FREAD, NOCRED);
 			vput(ac->vp);
 			ac->vp = NULL;
 		}
@@ -3569,7 +3572,7 @@ rf_getdisksize(struct vnode *vp, struct lwp *l, RF_RaidDisk_t *diskPtr)
 	struct dkwedge_info dkw;
 	int error;
 
-	error = VOP_IOCTL(vp, DIOCGPART, &dpart, FREAD, l->l_cred, l);
+	error = VOP_IOCTL(vp, DIOCGPART, &dpart, FREAD, l->l_cred);
 	if (error == 0) {
 		diskPtr->blockSize = dpart.disklab->d_secsize;
 		diskPtr->numBlocks = dpart.part->p_size - rf_protectedSectors;
@@ -3577,7 +3580,7 @@ rf_getdisksize(struct vnode *vp, struct lwp *l, RF_RaidDisk_t *diskPtr)
 		return 0;
 	}
 
-	error = VOP_IOCTL(vp, DIOCGWEDGEINFO, &dkw, FREAD, l->l_cred, l);
+	error = VOP_IOCTL(vp, DIOCGWEDGEINFO, &dkw, FREAD, l->l_cred);
 	if (error == 0) {
 		diskPtr->blockSize = 512;	/* XXX */
 		diskPtr->numBlocks = dkw.dkw_size - rf_protectedSectors;

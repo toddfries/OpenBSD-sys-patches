@@ -1,5 +1,4 @@
-/* $OpenBSD: tc_3000_300.c,v 1.13 2007/11/06 18:20:05 miod Exp $ */
-/* $NetBSD: tc_3000_300.c,v 1.26 2001/07/27 00:25:21 thorpej Exp $ */
+/* $NetBSD: tc_3000_300.c,v 1.27 2002/09/27 15:35:39 provos Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -28,6 +27,10 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: tc_3000_300.c,v 1.27 2002/09/27 15:35:39 provos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -45,10 +48,10 @@
 #include "sfb.h"
 
 #if NSFB > 0
-extern int	sfb_cnattach(tc_addr_t);
+extern int	sfb_cnattach __P((tc_addr_t));
 #endif
 
-int	tc_3000_300_intrnull(void *);
+int	tc_3000_300_intrnull __P((void *));
 
 #define	C(x)	((void *)(u_long)x)
 #define	KV(x)	(ALPHA_PHYS_TO_K0SEG(x))
@@ -82,16 +85,16 @@ int tc_3000_300_nbuiltins =
     sizeof(tc_3000_300_builtins) / sizeof(tc_3000_300_builtins[0]);
 
 struct tcintr {
-	int	(*tci_func)(void *);
+	int	(*tci_func) __P((void *));
 	void	*tci_arg;
-	struct evcount tci_count;
-	char	tci_name[12];
+	struct evcnt tci_evcnt;
 } tc_3000_300_intr[TC_3000_300_NCOOKIES];
 
 void
 tc_3000_300_intr_setup()
 {
 	volatile u_int32_t *imskp;
+	char *cp;
 	u_long i;
 
 	/*
@@ -106,19 +109,36 @@ tc_3000_300_intr_setup()
 	for (i = 0; i < TC_3000_300_NCOOKIES; i++) {
                 tc_3000_300_intr[i].tci_func = tc_3000_300_intrnull;
                 tc_3000_300_intr[i].tci_arg = (void *)i;
-		snprintf(tc_3000_300_intr[i].tci_name,
-		    sizeof tc_3000_300_intr[i].tci_name, "tc slot %u", i);
-		evcount_attach(&tc_3000_300_intr[i].tci_count,
-		    tc_3000_300_intr[i].tci_name, NULL, &evcount_intr);
+		
+		cp = malloc(12, M_DEVBUF, M_NOWAIT);
+		if (cp == NULL)
+			panic("tc_3000_300_intr_setup");
+		sprintf(cp, "slot %lu", i);
+		evcnt_attach_dynamic(&tc_3000_300_intr[i].tci_evcnt,
+		    EVCNT_TYPE_INTR, NULL, "tc", cp);
 	}
+}
+
+const struct evcnt *
+tc_3000_300_intr_evcnt(tcadev, cookie)
+	struct device *tcadev;
+	void *cookie;
+{
+	u_long dev = (u_long)cookie;
+
+#ifdef DIAGNOSTIC
+	/* XXX bounds-check cookie. */
+#endif
+
+	return (&tc_3000_300_intr[dev].tci_evcnt);
 }
 
 void
 tc_3000_300_intr_establish(tcadev, cookie, level, func, arg)
 	struct device *tcadev;
 	void *cookie, *arg;
-	int level;
-	int (*func)(void *);
+	tc_intrlevel_t level;
+	int (*func) __P((void *));
 {
 	volatile u_int32_t *imskp;
 	u_long dev = (u_long)cookie;
@@ -229,10 +249,12 @@ tc_3000_300_iointr(arg, vec)
 
 		ifound = 0;
 
+#define	INCRINTRCNT(slot)	tc_3000_300_intr[slot].tci_evcnt.ev_count++
+
 #define	CHECKINTR(slot, flag)						\
 		if (flag) {						\
 			ifound = 1;					\
-			tc_3000_300_intr[slot].tci_count.ec_count++;	\
+			INCRINTRCNT(slot);				\
 			(*tc_3000_300_intr[slot].tci_func)		\
 			    (tc_3000_300_intr[slot].tci_arg);		\
 		}

@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.69 2006/10/05 14:46:11 tsutsui Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.75 2008/04/28 20:23:38 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.69 2006/10/05 14:46:11 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.75 2008/04/28 20:23:38 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,21 +67,15 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.69 2006/10/05 14:46:11 tsutsui Exp $"
 /*
  * Do general device autoconfiguration,
  * then choose root device (etc.)
- * Called by machdep.c: cpu_startup()
+ * Called by sys/kern/subr_autoconf.c: configure()
  */
 void 
 cpu_configure(void)
 {
 
-	/*
-	 * Install handlers for our "soft" interrupts.
-	 * There might be a better place to do this?
-	 */
-	softintr_init();
-
 	/* General device autoconfiguration. */
 	if (config_rootfound("mainbus", NULL) == NULL)
-		panic("configure: mainbus not found");
+		panic("%s: mainbus not found", __func__);
 
 	/*
 	 * Now that device autoconfiguration is finished,
@@ -111,14 +98,13 @@ cpu_configure(void)
  * setup the confargs for each child match and attach call.
  */
 int 
-bus_scan(struct device *parent, struct cfdata *cf,
-	 const int *ldesc, void *aux)
+bus_scan(struct device *parent, struct cfdata *cf, const int *ldesc, void *aux)
 {
 	struct confargs *ca = aux;
 
 #ifdef	DIAGNOSTIC
 	if (cf->cf_fstate == FSTATE_STAR)
-		panic("bus_scan: FSTATE_STAR");
+		panic("%s: FSTATE_STAR", __func__);
 #endif
 
 	/*
@@ -138,7 +124,7 @@ bus_scan(struct device *parent, struct cfdata *cf,
 	if (config_match(parent, cf, ca) > 0) {
 		config_attach(parent, cf, ca, bus_print);
 	}
-	return (0);
+	return 0;
 }
 
 /*
@@ -162,7 +148,7 @@ bus_print(void *args, const char *name)
 	if (ca->ca_intvec != -1)
 		aprint_normal(" vect 0x%x", ca->ca_intvec);
 
-	return(UNCONF);
+	return UNCONF;
 }
 
 /****************************************************************/
@@ -170,7 +156,6 @@ bus_print(void *args, const char *name)
 /* This takes the args: name, ctlr, unit */
 typedef struct device * (*findfunc_t)(char *, int, int);
 
-static struct device * find_dev_byname(char *);
 static struct device * net_find (char *, int, int);
 #if NSCSIBUS > 0
 static struct device * scsi_find(char *, int, int);
@@ -257,10 +242,7 @@ cpu_rootconf(void)
 static struct device *
 net_find(char *name, int ctlr, int unit)
 {
-	char tname[16];
-
-	sprintf(tname, "%s%d", name, ctlr);
-	return (find_dev_byname(tname));
+	return device_find_by_driver_unit(name, ctlr);
 }
 
 #if NSCSIBUS > 0
@@ -275,24 +257,22 @@ scsi_find(char *name, int ctlr, int unit)
 	struct scsibus_softc *sbsc;
 	struct scsipi_periph *periph;
 	int target, lun;
-	char tname[16];
 
-	sprintf(tname, "scsibus%d", ctlr);
-	scsibus = find_dev_byname(tname);
+	scsibus = device_find_by_driver_unit("scsibus", ctlr);
 	if (scsibus == NULL)
-		return (NULL);
+		return NULL;
 
 	/* Compute SCSI target/LUN from PROM unit. */
 	target = (unit >> 3) & 7;
 	lun = unit & 7;
 
 	/* Find the device at this target/LUN */
-	sbsc = (struct scsibus_softc *)scsibus;
+	sbsc = device_private(scsibus);
 	periph = scsipi_lookup_periph(sbsc->sc_channel, target, lun);
 	if (periph == NULL)
-		return (NULL);
+		return NULL;
 
-	return (periph->periph_dev);
+	return periph->periph_dev;
 }
 #endif	/* NSCSIBUS > 0 */
 
@@ -303,30 +283,7 @@ scsi_find(char *name, int ctlr, int unit)
 static struct device *
 xx_find(char *name, int ctlr, int unit)
 {
-	int diskunit;
-	char tname[16];
-
-	diskunit = (ctlr * 2) + unit;
-	sprintf(tname, "%s%d", name, diskunit);
-	return (find_dev_byname(tname));
-}
-
-/*
- * Given a device name, find its struct device
- * XXX - Move this to some common file?
- */
-static struct device *
-find_dev_byname(char *name)
-{
-	struct device *dv;
-
-	for (dv = alldevs.tqh_first; dv != NULL;
-	    dv = dv->dv_list.tqe_next) {
-		if (!strcmp(dv->dv_xname, name)) {
-			return(dv);
-		}
-	}
-	return (NULL);
+	return device_find_by_driver_unit(name, ctlr * 2 + unit);
 }
 
 /*
@@ -344,7 +301,7 @@ find_dev_byname(char *name)
 int 
 bus_peek(int bustype, int pa, int sz)
 {
-	caddr_t va;
+	void *va;
 	int rv;
 
 	va = bus_tmapin(bustype, pa);
@@ -359,17 +316,17 @@ bus_peek(int bustype, int pa, int sz)
 		rv = peek_long(va);
 		break;
 	default:
-		printf(" bus_peek: invalid size=%d\n", sz);
+		printf(" %s: invalid size=%d\n", __func__, sz);
 		rv = -1;
 	}
 	bus_tmapout(va);
 
-	return (rv);
+	return rv;
 }
 
 /* from hp300: badbaddr() */
 int 
-peek_byte(caddr_t addr)
+peek_byte(void *addr)
 {
 	label_t faultbuf;
 	int x;
@@ -381,11 +338,11 @@ peek_byte(caddr_t addr)
 		x = *(volatile u_char *)addr;
 
 	nofault = NULL;
-	return(x);
+	return x;
 }
 
 int 
-peek_word(caddr_t addr)
+peek_word(void *addr)
 {
 	label_t faultbuf;
 	int x;
@@ -397,11 +354,11 @@ peek_word(caddr_t addr)
 		x = *(volatile u_short *)addr;
 
 	nofault = NULL;
-	return(x);
+	return x;
 }
 
 int 
-peek_long(caddr_t addr)
+peek_long(void *addr)
 {
 	label_t faultbuf;
 	int x;
@@ -412,11 +369,11 @@ peek_long(caddr_t addr)
 	else {
 		x = *(volatile int *)addr;
 		if (x == -1) {
-			printf("peek_long: uh-oh, actually read -1!\n");
+			printf("%s: uh-oh, actually read -1!\n", __func__);
 			x &= 0x7FFFffff; /* XXX */
 		}
 	}
 
 	nofault = NULL;
-	return(x);
+	return x;
 }

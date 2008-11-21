@@ -1,7 +1,7 @@
-/*	$NetBSD: condvar.h,v 1.7 2007/11/06 00:25:48 ad Exp $	*/
+/*	$NetBSD: condvar.h,v 1.10 2008/05/31 13:36:25 ad Exp $	*/
 
 /*-
- * Copyright (c) 2006, 2007 The NetBSD Foundation, Inc.
+ * Copyright (c) 2006, 2007, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,14 +36,14 @@
 
 /*
  * The condition variable implementation is private to kern_condvar.c but
- * the size of a kcondvar_t must remain constant.  cv_waiters is protected
- * both by the interlock passed to cv_wait() (increment only), and the sleep
- * queue lock acquired with sleeptab_lookup() (increment and decrement). 
+ * the size of a kcondvar_t must remain constant.  cv_opaque is protected
+ * both by the interlock passed to cv_wait() (enqueue only), and the sleep
+ * queue lock acquired with sleeptab_lookup() (enqueue and dequeue). 
  * cv_wmesg is static and does not change throughout the life of the CV.
  */
 typedef struct kcondvar {
+	void		*cv_opaque[2];	/* sleep queue */
 	const char	*cv_wmesg;	/* description for /bin/ps */
-	u_int		cv_waiters;	/* number of waiters */
 } kcondvar_t;
 
 #ifdef _KERNEL
@@ -69,6 +62,7 @@ void	cv_broadcast(kcondvar_t *);
 void	cv_wakeup(kcondvar_t *);
 
 bool	cv_has_waiters(kcondvar_t *);
+bool	cv_is_valid(kcondvar_t *);
 
 /* The "lightning bolt", awoken once per second by the clock interrupt. */
 extern kcondvar_t lbolt;

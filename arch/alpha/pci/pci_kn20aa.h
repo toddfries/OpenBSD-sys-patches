@@ -1,5 +1,4 @@
-/*	$OpenBSD: pci_kn20aa.h,v 1.6 2004/06/28 02:28:43 aaron Exp $	*/
-/*	$NetBSD: pci_kn20aa.h,v 1.2 1996/04/13 00:24:35 cgd Exp $	*/
+/* $NetBSD: pci_kn20aa.h,v 1.4 2000/06/05 21:47:27 thorpej Exp $ */
 
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
@@ -28,4 +27,4 @@
  * rights to redistribute these changes.
  */
 
-void	pci_kn20aa_pickintr(struct cia_config *);
+void	pci_kn20aa_pickintr __P((struct cia_config *));

@@ -1,7 +1,30 @@
-/*	$NetBSD: c_nec_eisa.c,v 1.10 2005/11/20 09:21:36 tsutsui Exp $	*/
+/*	$NetBSD: c_nec_eisa.c,v 1.15 2008/05/14 13:29:27 tsutsui Exp $	*/
 
 /*-
- * Copyright (C) 2003 Izumi Tsutsui.
+ * Copyright (c) 2003 Izumi Tsutsui.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*-
  * Copyright (C) 2000 Shuichiro URATA.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: c_nec_eisa.c,v 1.10 2005/11/20 09:21:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: c_nec_eisa.c,v 1.15 2008/05/14 13:29:27 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -81,44 +104,24 @@ struct isabr_config isabr_nec_eisa_conf = {
  * given interrupt priority level.
  */
 static const uint32_t nec_eisa_ipl_sr_bits[_IPL_N] = {
-	0,					/* IPL_NONE */
-
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFT */
-
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFTCLOCK */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTNET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTSERIAL */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2,		/* IPL_BIO */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2,		/* IPL_NET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2,		/* IPL_{TTY,SERIAL} */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3|
-		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/* IPL_{CLOCK,HIGH} */
+	[IPL_NONE] = 0,
+	[IPL_SOFTCLOCK] =
+	    MIPS_SOFT_INT_MASK_0,
+	[IPL_SOFTNET] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1,
+	[IPL_VM] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2,
+	[IPL_SCHED] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3 |
+	    MIPS_INT_MASK_4 |
+	    MIPS_INT_MASK_5,
 };
 
 int
@@ -156,6 +159,11 @@ c_nec_eisa_init(void)
 {
 
 	/*
+	 * Initialize interrupt priority
+	 */
+	ipl_sr_bits = nec_eisa_ipl_sr_bits;
+
+	/*
 	 * Initialize I/O address offset
 	 */
 	arc_bus_space_init(&jazzio_bus, "jazzio",
@@ -170,17 +178,13 @@ c_nec_eisa_init(void)
 	/*
 	 * Initialize wired TLB for I/O space which is used on early stage
 	 */
+	arc_init_wired_map();
 	arc_wired_enter_page(RD94_V_LOCAL_IO_BASE, RD94_P_LOCAL_IO_BASE,
 	    RD94_S_LOCAL_IO_BASE);
 
 	arc_wired_enter_page(RD94_V_EISA_IO, RD94_P_EISA_IO, RD94_S_EISA_IO);
 	arc_wired_enter_page(RD94_V_EISA_MEM, RD94_P_EISA_MEM,
 	    MIPS3_PG_SIZE_MASK_TO_SIZE(MIPS3_PG_SIZE_16M));
-
-	/*
-	 * Initialize interrupt priority
-	 */
-	ipl_sr_bits = nec_eisa_ipl_sr_bits;
 
 	/*
 	 * Disable all interrupts. New masks will be set up

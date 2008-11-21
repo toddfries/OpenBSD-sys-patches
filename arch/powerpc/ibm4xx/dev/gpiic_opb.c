@@ -1,4 +1,4 @@
-/*	$NetBSD: gpiic_opb.c,v 1.4 2006/06/26 18:21:38 drochner Exp $	*/
+/*	$NetBSD: gpiic_opb.c,v 1.6 2008/07/12 02:04:07 tsutsui Exp $	*/
 
 /*
  * Copyright 2002, 2003 Wasabi Systems, Inc.
@@ -41,9 +41,8 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/errno.h>
-#include <sys/lock.h>
-
-#include <machine/cpu.h>
+#include <sys/mutex.h>
+#include <sys/cpu.h>
 
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/i2c_bitbang.h>
@@ -56,9 +55,10 @@ struct gpiic_softc {
 	bus_space_tag_t sc_bust;
 	bus_space_handle_t sc_bush;
 	uint8_t sc_txen;
+	uint8_t sc_tx;
 	struct i2c_controller sc_i2c;
 	struct i2c_bitbang_ops sc_bops;
-	struct lock sc_buslock;
+	kmutex_t sc_buslock;
 };
 
 static int	gpiic_match(struct device *, struct cfdata *, void *);
@@ -103,9 +103,10 @@ gpiic_attach(struct device *parent, struct device *self, void *args)
 
 	bus_space_map(sc->sc_bust, oaa->opb_addr, IIC_NREG, 0, &sc->sc_bush);
 
-	lockinit(&sc->sc_buslock, PRIBIO|PCATCH, "gpiiclk", 0, 0);
+	mutex_init(&sc->sc_buslock, MUTEX_DEFAULT, IPL_NONE);
 
 	sc->sc_txen = 0;
+	sc->sc_tx = IIC_DIRECTCNTL_SCC | IIC_DIRECTCNTL_SDAC;
 	sc->sc_i2c.ic_cookie = sc;
 	sc->sc_i2c.ic_acquire_bus = gpiic_acquire_bus;
 	sc->sc_i2c.ic_release_bus = gpiic_release_bus;
@@ -146,7 +147,8 @@ gpiic_acquire_bus(void *arg, int flags)
 	if (flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&sc->sc_buslock, LK_EXCLUSIVE, NULL));
+	mutex_enter(&sc->sc_buslock);
+	return (0);
 }
 
 static void
@@ -157,7 +159,7 @@ gpiic_release_bus(void *arg, int flags)
 	if (flags & I2C_F_POLL)
 		return;
 
-	(void) lockmgr(&sc->sc_buslock, LK_RELEASE, NULL);
+	mutex_exit(&sc->sc_buslock);
 }
 
 static int
@@ -204,8 +206,18 @@ static void
 gpiic_set_dir(void *arg, uint32_t bits)
 {
 	struct gpiic_softc *sc = arg;
+	uint8_t tx, txen;
 
-	sc->sc_txen = (uint8_t)bits;
+	txen = (uint8_t)bits;
+	if (sc->sc_txen == txen)
+		return;
+
+	sc->sc_txen = txen;
+
+	tx = sc->sc_tx;
+	if (sc->sc_txen == 0)
+		tx |= IIC_DIRECTCNTL_SDAC;
+	bus_space_write_1(sc->sc_bust, sc->sc_bush, IIC_DIRECTCNTL, tx);
 }
 
 static void
@@ -213,10 +225,9 @@ gpiic_set_bits(void *arg, uint32_t bits)
 {
 	struct gpiic_softc *sc = arg;
 
-	if (sc->sc_txen == 0 && (bits & IIC_DIRECTCNTL_SDAC) == 0) {
-		printf("gpiic_set_bits: SDA low with no output enable\n");
+	sc->sc_tx = (uint8_t)bits;
+	if (sc->sc_txen == 0)
 		bits |= IIC_DIRECTCNTL_SDAC;
-	}
 
 	bus_space_write_1(sc->sc_bust, sc->sc_bush, IIC_DIRECTCNTL, bits);
 }
@@ -226,9 +237,6 @@ gpiic_read_bits(void *arg)
 {
 	struct gpiic_softc *sc = arg;
 	uint8_t rv;
-
-	if (sc->sc_txen != 0)
-		printf("gpiic_read_bits: Read in output mode\n");
 
 	rv = bus_space_read_1(sc->sc_bust, sc->sc_bush, IIC_DIRECTCNTL) << 2;
 	rv &= (IIC_DIRECTCNTL_SCC | IIC_DIRECTCNTL_SDAC);

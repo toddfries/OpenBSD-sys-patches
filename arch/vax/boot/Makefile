@@ -1,9 +1,5 @@
-#	$OpenBSD: Makefile,v 1.12 2000/05/25 21:55:09 deraadt Exp $	
-#	$NetBSD: Makefile,v 1.21 1999/03/06 16:36:04 ragge Exp $
+#	$NetBSD: Makefile,v 1.22 2002/03/29 05:45:07 matt Exp $
 #
 
-.if ${MACHINE} == "vax"
-SUBDIR=	boot xxboot
-.endif
-
+SUBDIR=	boot xxboot xxboot_ustarfs
 .include <bsd.subdir.mk>

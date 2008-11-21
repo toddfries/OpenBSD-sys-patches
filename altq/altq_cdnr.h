@@ -1,8 +1,8 @@
-/*	$OpenBSD: altq_cdnr.h,v 1.4 2002/12/16 17:27:20 henning Exp $	*/
-/*	$KAME: altq_cdnr.h,v 1.6 2000/12/14 08:12:45 thorpej Exp $	*/
+/*	$NetBSD: altq_cdnr.h,v 1.5 2006/10/12 19:59:08 peter Exp $	*/
+/*	$KAME: altq_cdnr.h,v 1.9 2003/07/10 12:07:48 kjc Exp $	*/
 
 /*
- * Copyright (C) 1999-2000
+ * Copyright (C) 1999-2002
  *	Sony Computer Science Laboratories Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -63,7 +63,7 @@ struct tc_action {
 #define	tca_next	tca_un.un_next
 
 #define	TCACODE_NONE	0	/* action is not set */
-#define	TCACODE_PASS	1	/* pass this packet */
+#define	TCACODE_PASS	1 	/* pass this packet */
 #define	TCACODE_DROP	2	/* discard this packet */
 #define	TCACODE_RETURN	3	/* do not process this packet */
 #define	TCACODE_MARK	4	/* mark dscp */
@@ -163,6 +163,20 @@ struct cdnr_modify_tswtcm {
 	u_int32_t		avg_interval;	/* averaging interval (msec) */
 };
 
+struct cdnr_add_filter {
+	struct cdnr_interface	iface;
+	u_long			cdnr_handle;
+#ifdef ALTQ3_CLFIER_COMPAT
+	struct flow_filter	filter;
+#endif
+	u_long			filter_handle;	/* return value */
+};
+
+struct cdnr_delete_filter {
+	struct cdnr_interface	iface;
+	u_long			filter_handle;
+};
+
 struct tce_stats {
 	u_long			tce_handle;	/* tc element handle */
 	int			tce_type;	/* e.g., TCETYPE_ELEMENT */
@@ -178,6 +192,24 @@ struct cdnr_get_stats {
 	int			nelements;	/* # of element stats (WR) */
 	struct tce_stats	*tce_stats;	/* pointer to stats array */
 };
+
+#define	CDNR_IF_ATTACH		_IOW('Q', 1, struct cdnr_interface)
+#define	CDNR_IF_DETACH		_IOW('Q', 2, struct cdnr_interface)
+#define	CDNR_ENABLE		_IOW('Q', 3, struct cdnr_interface)
+#define	CDNR_DISABLE		_IOW('Q', 4, struct cdnr_interface)
+#define	CDNR_ADD_FILTER		_IOWR('Q', 10, struct cdnr_add_filter)
+#define	CDNR_DEL_FILTER		_IOW('Q', 11, struct cdnr_delete_filter)
+#define	CDNR_GETSTATS		_IOWR('Q', 12, struct cdnr_get_stats)
+#define	CDNR_ADD_ELEM		_IOWR('Q', 30, struct cdnr_add_element)
+#define	CDNR_DEL_ELEM		_IOW('Q', 31, struct cdnr_delete_element)
+#define	CDNR_ADD_TBM		_IOWR('Q', 32, struct cdnr_add_tbmeter)
+#define	CDNR_MOD_TBM		_IOW('Q', 33, struct cdnr_modify_tbmeter)
+#define	CDNR_TBM_STATS		_IOWR('Q', 34, struct cdnr_tbmeter_stats)
+#define	CDNR_ADD_TCM		_IOWR('Q', 35, struct cdnr_add_trtcm)
+#define	CDNR_MOD_TCM		_IOWR('Q', 36, struct cdnr_modify_trtcm)
+#define	CDNR_TCM_STATS		_IOWR('Q', 37, struct cdnr_tcm_stats)
+#define	CDNR_ADD_TSW		_IOWR('Q', 38, struct cdnr_add_tswtcm)
+#define	CDNR_MOD_TSW		_IOWR('Q', 39, struct cdnr_modify_tswtcm)
 
 #ifndef DSCP_EF
 /* diffserve code points */
@@ -235,7 +267,9 @@ struct top_cdnr {
 	struct ifaltq		*tc_ifq;
 
 	LIST_HEAD(, cdnr_block) tc_elements;
-
+#ifdef ALTQ3_CLFIER_COMPAT
+	struct acc_classifier	tc_classifier;
+#endif
 	struct pktcntr		tc_cnts[TCACODE_MAX+1];
 };
 

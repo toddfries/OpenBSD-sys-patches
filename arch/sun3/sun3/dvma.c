@@ -1,4 +1,4 @@
-/*	$NetBSD: dvma.c,v 1.29 2006/10/01 03:53:27 tsutsui Exp $	*/
+/*	$NetBSD: dvma.c,v 1.34 2008/04/28 20:23:38 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dvma.c,v 1.29 2006/10/01 03:53:27 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dvma.c,v 1.34 2008/04/28 20:23:38 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -91,7 +84,7 @@ dvma_init(void)
 	 * context.
 	 */
 	phys_map = uvm_map_create(pmap_kernel(),
-		DVMA_MAP_BASE, DVMA_MAP_END, 0);
+	    DVMA_MAP_BASE, DVMA_MAP_END, 0);
 	if (phys_map == NULL)
 		panic("unable to create DVMA map");
 
@@ -121,17 +114,17 @@ dvma_init(void)
 void *
 dvma_malloc(size_t bytes)
 {
-    caddr_t new_mem;
-    vsize_t new_size;
+	void *new_mem;
+	vsize_t new_size;
 
-    if (!bytes)
+	if (bytes == 0)
 		return NULL;
-    new_size = m68k_round_page(bytes);
-    new_mem = (caddr_t) uvm_km_alloc(phys_map, new_size, 0, UVM_KMF_WIRED);
-    if (!new_mem)
+	new_size = m68k_round_page(bytes);
+	new_mem = (void *)uvm_km_alloc(phys_map, new_size, 0, UVM_KMF_WIRED);
+	if (new_mem == 0)
 		panic("dvma_malloc: no space in phys_map");
-    /* The pmap code always makes DVMA pages non-cached. */
-    return new_mem;
+	/* The pmap code always makes DVMA pages non-cached. */
+	return new_mem;
 }
 
 /*
@@ -169,7 +162,7 @@ dvma_kvtopa(void *kva, int bustype)
 		break;
 	}
 
-	return(addr & mask);
+	return addr & mask;
 }
 
 /*
@@ -201,7 +194,7 @@ dvma_mapin(void *kva, int len, int canwait /* ignored */)
 	    EX_FAST | EX_NOWAIT | EX_MALLOCOK, &seg_dma);
 	if (error) {
 		splx(s);
-		return (NULL);
+		return NULL;
 	}
 
 #ifdef	DIAGNOSTIC
@@ -231,7 +224,7 @@ dvma_mapin(void *kva, int len, int canwait /* ignored */)
 	seg_dma += seg_off;
 
 	splx(s);
-	return ((caddr_t)seg_dma);
+	return (void *)seg_dma;
 }
 
 /*
@@ -294,13 +287,99 @@ int
 _bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
     bus_size_t buflen, struct proc *p, int flags)
 {
+	vaddr_t kva, dva;
+	vsize_t off, sgsize;
+	paddr_t pa;
+	pmap_t pmap;
+	int error, rv, s;
 
-	panic("_bus_dmamap_load(): not implemented yet.");
+	/*
+	 * Make sure that on error condition we return "no valid mappings".
+	 */
+	map->dm_nsegs = 0;
+	map->dm_mapsize = 0;
+
+	if (buflen > map->_dm_size)
+		return EINVAL;
+
+	kva = (vaddr_t)buf;
+	off = kva & PGOFSET;
+	sgsize = round_page(off + buflen);
+
+	/* Try to allocate DVMA space. */
+	s = splvm();
+	error = extent_alloc(dvma_extent, sgsize, PAGE_SIZE, 0,
+	    EX_FAST | ((flags & BUS_DMA_NOWAIT) == 0 ? EX_WAITOK : EX_NOWAIT),
+	    &dva);
+	splx(s);
+	if (error)
+		return ENOMEM;
+
+	/* Fill in the segment. */
+	map->dm_segs[0].ds_addr = dva + off;
+	map->dm_segs[0].ds_len = buflen;
+	map->dm_segs[0]._ds_va = dva;
+	map->dm_segs[0]._ds_sgsize = sgsize;
+
+	/*
+	 * Now map the DVMA addresses we allocated to point to the
+	 * pages of the caller's buffer.
+	 */
+	if (p != NULL)
+		pmap = p->p_vmspace->vm_map.pmap;
+	else
+		pmap = pmap_kernel();
+
+	while (sgsize > 0) {
+		rv = pmap_extract(pmap, kva, &pa);
+#ifdef DIAGNOSTIC
+		if (rv == false)
+			panic("%s: unmapped VA", __func__);
+#endif
+		pmap_enter(pmap_kernel(), dva, pa | PMAP_NC,
+		    VM_PROT_READ | VM_PROT_WRITE, PMAP_WIRED);
+		kva += PAGE_SIZE;
+		dva += PAGE_SIZE;
+		sgsize -= PAGE_SIZE;
+	}
+
+	map->dm_nsegs = 1;
+	map->dm_mapsize = map->dm_segs[0].ds_len;
+
+	return 0;
 }
 
 void 
 _bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 {
+	bus_dma_segment_t *segs;
+	vaddr_t dva;
+	vsize_t sgsize;
+	int error, s;
 
-	panic("_bus_dmamap_unload(): not implemented yet.");
+#ifdef DIAGNOSTIC
+	if (map->dm_nsegs != 1)
+		panic("%s: invalid nsegs = %d", __func__, map->dm_nsegs);
+#endif
+
+	segs = map->dm_segs;
+	dva = segs[0]._ds_va & ~PGOFSET;
+	sgsize = segs[0]._ds_sgsize;
+
+	/* Unmap the DVMA addresses. */
+	pmap_remove(pmap_kernel(), dva, dva + sgsize);
+	pmap_update(pmap_kernel());
+
+	/* Free the DVMA addresses. */
+	s = splvm();
+	error = extent_free(dvma_extent, dva, sgsize, EX_NOWAIT);
+	splx(s);
+#ifdef DIAGNOSTIC
+	if (error)
+		panic("%s: unable to free DVMA region", __func__);
+#endif
+
+	/* Mark the mappings as invalid. */
+	map->dm_mapsize = 0;
+	map->dm_nsegs = 0;
 }

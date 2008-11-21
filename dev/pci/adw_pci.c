@@ -1,5 +1,4 @@
-/*	$OpenBSD: adw_pci.c,v 1.14 2007/04/10 17:47:55 miod Exp $ */
-/* $NetBSD: adw_pci.c,v 1.7 2000/05/26 15:13:46 dante Exp $	 */
+/* $NetBSD: adw_pci.c,v 1.22 2008/04/28 20:23:54 martin Exp $	 */
 
 /*
  * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
@@ -15,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,27 +40,29 @@
  *	ASB-3940U3W-00	- Bus-Master PCI Ultra3-Wide (253 CDB)
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: adw_pci.c,v 1.22 2008/04/28 20:23:54 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/queue.h>
 #include <sys/device.h>
-#include <sys/timeout.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
 #include <dev/ic/adwlib.h>
-#include <dev/microcode/adw/adwmcode.h>
+#include <dev/ic/adwmcode.h>
 #include <dev/ic/adw.h>
 
 /******************************************************************************/
@@ -76,42 +70,31 @@
 #define PCI_BASEADR_IO        0x10
 
 /******************************************************************************/
-
-int adw_pci_match(struct device *, void *, void *);
-void adw_pci_attach(struct device *, struct device *, void *);
-
-struct cfattach adw_pci_ca =
-{
-	sizeof(ADW_SOFTC), adw_pci_match, adw_pci_attach
-};
-
-const struct pci_matchid adw_pci_devices[] = {
-	{ PCI_VENDOR_ADVSYS, PCI_PRODUCT_ADVSYS_WIDE },
-	{ PCI_VENDOR_ADVSYS, PCI_PRODUCT_ADVSYS_U2W },
-	{ PCI_VENDOR_ADVSYS, PCI_PRODUCT_ADVSYS_U3W },
-};
-
-/******************************************************************************/
 /*
  * Check the slots looking for a board we recognise
- * If we find one, note its address (slot) and call
+ * If we find one, note it's address (slot) and call
  * the actual probe routine to check it out.
  */
-int
-adw_pci_match(parent, match, aux)
-	struct device  *parent;
-	void           *match;
-	void           *aux;
+static int
+adw_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, adw_pci_devices,
-	    sizeof(adw_pci_devices)/sizeof(adw_pci_devices[0])));
+	struct pci_attach_args *pa = aux;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ADVSYS)
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_ADVSYS_WIDE:
+		case PCI_PRODUCT_ADVSYS_U2W:
+		case PCI_PRODUCT_ADVSYS_U3W:
+			return (1);
+		}
+
+	return 0;
 }
 
 
-void
-adw_pci_attach(parent, self, aux)
-	struct device  *parent, *self;
-	void           *aux;
+static void
+adw_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	ADW_SOFTC      *sc = (void *) self;
@@ -119,42 +102,54 @@ adw_pci_attach(parent, self, aux)
 	bus_space_handle_t ioh;
 	pci_intr_handle_t ih;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	pcireg_t	command;
+	u_int32_t       command;
 	const char     *intrstr;
 
+	aprint_naive(": SCSI controller\n");
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ADVSYS)
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_ADVSYS_WIDE:
+			sc->chip_type = ADW_CHIP_ASC3550;
+			aprint_normal(
+			    ": AdvanSys ASB-3940UW-00 SCSI adapter\n");
+			break;
+
+		case PCI_PRODUCT_ADVSYS_U2W:
+			sc->chip_type = ADW_CHIP_ASC38C0800;
+			aprint_normal(
+			    ": AdvanSys ASB-3940U2W-00 SCSI adapter\n");
+			break;
+
+		case PCI_PRODUCT_ADVSYS_U3W:
+			sc->chip_type = ADW_CHIP_ASC38C1600;
+			aprint_normal(
+			    ": AdvanSys ASB-3940U3W-00 SCSI adapter\n");
+			break;
+
+		default:
+			aprint_error(": unknown model!\n");
+			return;
+		}
+
+
 	/*
-	 * Set chip type
+	 * Make sure IO/MEM/MASTER are enabled
 	 */
-	switch (PCI_PRODUCT(pa->pa_id)) {
-	case PCI_PRODUCT_ADVSYS_WIDE:
-		sc->chip_type = ADW_CHIP_ASC3550;
-		break;
+	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
+			PCI_COMMAND_MASTER_ENABLE;
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 
-	case PCI_PRODUCT_ADVSYS_U2W:
-		sc->chip_type = ADW_CHIP_ASC38C0800;
-		break;
-
-	case PCI_PRODUCT_ADVSYS_U3W:
-		sc->chip_type = ADW_CHIP_ASC38C1600;
-		break;
-
-	default:
-		printf("\n%s: unknown model: %d\n", sc->sc_dev.dv_xname,
-		       PCI_PRODUCT(pa->pa_id));
-		return;
-	}
-
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	if ( (command & PCI_COMMAND_PARITY_ENABLE) == 0)
+	if ( (command & PCI_COMMAND_PARITY_ENABLE) == 0) {
 		sc->cfg.control_flag |= CONTROL_FLAG_IGNORE_PERR;
-
+	}
 	/*
 	 * Map Device Registers for I/O
 	 */
 	if (pci_mapreg_map(pa, PCI_BASEADR_IO, PCI_MAPREG_TYPE_IO, 0,
-			   &iot, &ioh, NULL, NULL, 0)) {
-		printf("\n%s: unable to map device registers\n",
-		       sc->sc_dev.dv_xname);
+			   &iot, &ioh, NULL, NULL)) {
+		aprint_error_dev(&sc->sc_dev, "unable to map device registers\n");
 		return;
 	}
 	sc->sc_iot = iot;
@@ -165,7 +160,7 @@ adw_pci_attach(parent, self, aux)
 	 * Initialize the board
 	 */
 	if (adw_init(sc)) {
-		printf("%s: adw_init failed", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "adw_init failed");
 		return;
 	}
 
@@ -173,7 +168,7 @@ adw_pci_attach(parent, self, aux)
 	 * Map Interrupt line
 	 */
 	if (pci_intr_map(pa, &ih)) {
-		printf("\n%s: couldn't map interrupt\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "couldn't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
@@ -181,20 +176,21 @@ adw_pci_attach(parent, self, aux)
 	/*
 	 * Establish Interrupt handler
 	 */
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, adw_intr, sc,
-				       sc->sc_dev.dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, adw_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf("\n%s: couldn't establish interrupt", sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "couldn't establish interrupt");
 		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
+			aprint_normal(" at %s", intrstr);
+		aprint_normal("\n");
 		return;
 	}
-	printf(": %s\n", intrstr);
+	aprint_normal_dev(&sc->sc_dev, "interrupting at %s\n", intrstr);
 
 	/*
 	 * Attach all the sub-devices we can find
 	 */
 	adw_attach(sc);
 }
-/******************************************************************************/
+
+CFATTACH_DECL(adw_pci, sizeof(ADW_SOFTC),
+    adw_pci_match, adw_pci_attach, NULL, NULL);

@@ -1,4 +1,4 @@
-/*	$NetBSD: coda_subr.c,v 1.22 2006/11/16 01:32:41 christos Exp $	*/
+/*	$NetBSD: coda_subr.c,v 1.24 2007/10/10 20:42:21 ad Exp $	*/
 
 /*
  *
@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: coda_subr.c,v 1.22 2006/11/16 01:32:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: coda_subr.c,v 1.24 2007/10/10 20:42:21 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -296,7 +296,7 @@ coda_unmounting(struct mount *whoIam)
 				if (cp->c_flags & (C_LOCKED|C_WANTED)) {
 					printf("coda_unmounting: Unlocking %p\n", cp);
 					cp->c_flags &= ~(C_LOCKED|C_WANTED);
-					wakeup((caddr_t) cp);
+					wakeup((void *) cp);
 				}
 				cp->c_flags |= C_UNMOUNTING;
 			}
@@ -414,7 +414,7 @@ int handleDownCall(int opcode, union outputArgs *out)
 	      vref(CTOV(cp));
 
 	      cp->c_flags &= ~C_VATTR;
-	      if (CTOV(cp)->v_flag & VTEXT)
+	      if (CTOV(cp)->v_iflag & VI_TEXT)
 		  error = coda_vmflush(cp);
 	      CODADEBUG(CODA_ZAPFILE, myprintf((
 		    "zapfile: fid = %s, refcnt = %d, error = %d\n",
@@ -470,7 +470,7 @@ int handleDownCall(int opcode, union outputArgs *out)
 	      cp->c_flags &= ~C_VATTR;
 	      coda_nc_zapfid(&out->coda_purgefid.Fid, IS_DOWNCALL);
 	      if (!(IS_DIR(out->coda_purgefid.Fid))
-		  && (CTOV(cp)->v_flag & VTEXT)) {
+		  && (CTOV(cp)->v_iflag & VI_TEXT)) {
 
 		  error = coda_vmflush(cp);
 	      }

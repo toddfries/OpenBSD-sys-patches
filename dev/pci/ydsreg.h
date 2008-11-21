@@ -1,5 +1,4 @@
-/*	$OpenBSD: ydsreg.h,v 1.5 2004/12/20 12:29:36 deraadt Exp $	*/
-/*	$NetBSD$	*/
+/*	$NetBSD: ydsreg.h,v 1.6 2005/12/11 12:22:51 christos Exp $	*/
 
 /*
  * Copyright (c) 2000, 2001 Kazuki Sakamoto and Minoura Makoto.
@@ -86,8 +85,28 @@
 # define YDS_PCI_EX_LEGACY_IMOD		(0x8000 << 16)
 
 #define	YDS_PCI_DSCTRL		0x48
-# define YDS_DSCTRL_CRST	0x00000001
-# define YDS_DSCTRL_WRST	0x00000004
+# define YDS_DSCTRL_CRST	 0x0001
+# define YDS_DSCTRL_WRST	 0x0004
+# define YDS_DSCTRL_ACLS	 0x0008
+#define YDS_PCI_DSPOWER1	0x4a
+# define YDS_DSPOWER1_DMC	 0x0001
+# define YDS_DSPOWER1_DPLL	 0x0002
+# define YDS_DSPOWER1_JSR	 0x0040
+#define YDS_PCI_DISTDMA		0x4c
+#define YDS_PCI_DSPOWER2	0x4e
+# define YDS_DSPOWER2_CMCD	 0x0001
+# define YDS_DSPOWER2_PSFM	 0x0002
+# define YDS_DSPOWER2_PSSB	 0x0004
+# define YDS_DSPOWER2_PSMPU	 0x0008
+# define YDS_DSPOWER2_PSJOY	 0x0010
+# define YDS_DSPOWER2_PSPCA	 0x0020
+# define YDS_DSPOWER2_PSSRC	 0x0040
+# define YDS_DSPOWER2_PSZV	 0x0080
+# define YDS_DSPOWER2_PSDIT	 0x0100
+# define YDS_DSPOWER2_PSDIR	 0x0200
+# define YDS_DSPOWER2_PSACL	 0x0400
+# define YDS_DSPOWER2_PSIO	 0x0800
+# define YDS_DSPOWER2_PSHWV	 0x1000
 
 #define YDS_PCI_FM_BA		0x60
 #define YDS_PCI_SB_BA		0x62
@@ -159,6 +178,12 @@
 #define	AC97_STAT_DATA2		0x0068
 #define	AC97_STAT_ADDR2		0x006a
 # define AC97_BUSY		0x8000
+#define AC97_SECONDARY_CONF	0x0070
+# define AC97_SECONDARY_RSOC	0x0001
+# define AC97_SECONDARY_PHWV	0x0002
+# define AC97_SECONDARY_SHWV	0x0004
+# define AC97_SECONDARY_4CHEN	0x0010
+# define AC97_SECONDARY_4CHSEL	0x0020
 
 #define	YDS_LEGACY_OUT_VOLUME	0x0080
 #define	YDS_DAC_OUT_VOLUME	0x0084
@@ -245,56 +270,56 @@ typedef enum {
  * play slot
  */
 union play_slot_table {
-	u_int32_t numofplay;
-	u_int32_t slotbase;
+	uint32_t numofplay;
+	uint32_t slotbase;
 };
 
 struct play_slot_ctrl_bank {
-	u_int32_t format;
+	uint32_t format;
 #define	PSLT_FORMAT_STEREO	0x00010000
 #define	PSLT_FORMAT_8BIT	0x80000000
 #define	PSLT_FORMAT_SRC441	0x10000000
 #define PSLT_FORMAT_RCH		0x00000001
-	u_int32_t loopdefault;
-	u_int32_t pgbase;
-	u_int32_t pgloop;
-	u_int32_t pgloopend;
-	u_int32_t pgloopfrac;
-	u_int32_t pgdeltaend;
-	u_int32_t lpfkend;
-	u_int32_t eggainend;
-	u_int32_t lchgainend;
-	u_int32_t rchgainend;
-	u_int32_t effect1gainend;
-	u_int32_t effect2gainend;
-	u_int32_t effect3gainend;
-	u_int32_t lpfq;
-	u_int32_t status;
+	uint32_t loopdefault;
+	uint32_t pgbase;
+	uint32_t pgloop;
+	uint32_t pgloopend;
+	uint32_t pgloopfrac;
+	uint32_t pgdeltaend;
+	uint32_t lpfkend;
+	uint32_t eggainend;
+	uint32_t lchgainend;
+	uint32_t rchgainend;
+	uint32_t effect1gainend;
+	uint32_t effect2gainend;
+	uint32_t effect3gainend;
+	uint32_t lpfq;
+	uint32_t status;
 #define	PSLT_STATUS_DEND	0x00000001
-	u_int32_t numofframes;
-	u_int32_t loopcount;
-	u_int32_t pgstart;
-	u_int32_t pgstartfrac;
-	u_int32_t pgdelta;
-	u_int32_t lpfk;
-	u_int32_t eggain;
-	u_int32_t lchgain;
-	u_int32_t rchgain;
-	u_int32_t effect1gain;
-	u_int32_t effect2gain;
-	u_int32_t effect3gain;
-	u_int32_t lpfd1;
-	u_int32_t lpfd2;
+	uint32_t numofframes;
+	uint32_t loopcount;
+	uint32_t pgstart;
+	uint32_t pgstartfrac;
+	uint32_t pgdelta;
+	uint32_t lpfk;
+	uint32_t eggain;
+	uint32_t lchgain;
+	uint32_t rchgain;
+	uint32_t effect1gain;
+	uint32_t effect2gain;
+	uint32_t effect3gain;
+	uint32_t lpfd1;
+	uint32_t lpfd2;
 };
 
 /*
  * rec slot
  */
 struct rec_slot_ctrl_bank {
-	u_int32_t pgbase;
-	u_int32_t pgloopendadr;
-	u_int32_t pgstartadr;
-	u_int32_t numofloops;
+	uint32_t pgbase;
+	uint32_t pgloopendadr;
+	uint32_t pgstartadr;
+	uint32_t numofloops;
 };
 
 struct rec_slot {
@@ -307,101 +332,10 @@ struct rec_slot {
  * effect slot
  */
 struct effect_slot_ctrl_bank {
-	u_int32_t pgbase;
-	u_int32_t pgloopend;
-	u_int32_t pgstart;
-	u_int32_t temp;
+	uint32_t pgbase;
+	uint32_t pgloopend;
+	uint32_t pgstart;
+	uint32_t temp;
 };
-
-#define N_PLAY_SLOTS		2		/* We use only 2 (R and L) */
-#define	N_PLAY_SLOT_CTRL	2
-#define WORK_SIZE		0x0400
-
-/*
- * softc
- */
-struct yds_dma {
-	bus_dmamap_t map;
-	caddr_t addr;			/* VA */
-	bus_dma_segment_t segs[1];
-	int nsegs;
-	size_t size;
-	struct yds_dma *next;
-};
-
-struct yds_codec_softc {
-	struct device sc_dev;		/* base device */
-	struct yds_softc *sc;
-	int id;
-	int status_data;
-	int status_addr;
-	struct ac97_host_if host_if;
-	struct ac97_codec_if *codec_if;
-};
-
-struct yds_softc {
-	struct device		sc_dev;		/* base device */
-	pci_chipset_tag_t	sc_pc;
-	pcitag_t		sc_pcitag;
-	pcireg_t		sc_id;
-	int			sc_revision;
-	void			*sc_ih;		/* interrupt vectoring */
-	bus_space_tag_t		memt;
-	bus_space_handle_t	memh;
-	bus_dma_tag_t		sc_dmatag;	/* DMA tag */
-	u_int			sc_flags;
-
-	struct yds_codec_softc	sc_codec[2];	/* Primary/Secondary AC97 */
-
-	struct yds_dma		*sc_dmas;	/* List of DMA handles */
-
-	/*
-	 * Play/record status
-	 */
-	struct {
-		void		(*intr)(void *); /* rint/pint */
-		void		*intr_arg;	/* arg for intr */
-		u_int	 	offset;		/* filled up to here */
-		u_int	 	blksize;
-		u_int	 	factor;		/* byte per sample */
-		u_int		length;		/* ring buffer length */
-		struct yds_dma	*dma;		/* DMA handle for ring buf */
-	} sc_play, sc_rec;
-
-	/*
-	 * DSP control data
-	 *
-	 * Work space, play control data table, play slot control data,
-	 * rec slot control data and effect slot control data are
-	 * stored in a single memory segment in this order.
-	 */
-	struct yds_dma			sc_ctrldata;
-	/* KVA and offset in buffer of play ctrl data tbl */
-	u_int32_t			*ptbl;
-	off_t				ptbloff;
-	/* KVA and offset in buffer of rec slot ctrl data */
-	struct rec_slot_ctrl_bank	*rbank;
-	off_t				rbankoff;
-	/* Array of KVA pointers and offset of play slot control data */
-	struct play_slot_ctrl_bank	*pbankp[N_PLAY_SLOT_CTRL_BANK
-					       *N_PLAY_SLOTS];
-	off_t				pbankoff;
-
-	/*
-	 * Legacy support
-	 */
-	bus_space_tag_t		sc_legacy_iot;
-	bus_space_handle_t	sc_opl_ioh;
-	struct device		*sc_mpu;
-	bus_space_handle_t	sc_mpu_ioh;
-
-	/*
-	 * Suspend/resume support
-	 */
-	void			*powerhook;
-	int			suspend;
-};
-#define sc_opl_iot	sc_legacy_iot
-#define sc_mpu_iot	sc_legacy_iot
 
 #endif /* _DEV_PCI_YDSREG_H_ */

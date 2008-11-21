@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciide_cy693_reg.h,v 1.7 2004/10/17 18:16:12 grange Exp $	*/
-/*	$NetBSD: pciide_cy693_reg.h,v 1.4 2000/05/15 08:46:01 bouyer Exp $	*/
+/*	$NetBSD: pciide_cy693_reg.h,v 1.10 2007/12/25 18:33:41 perry Exp $	*/
 
 /*
  * Copyright (c) 1998 Manuel Bouyer.
@@ -15,9 +14,8 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,9 +29,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
-#ifndef _DEV_PCI_PCIIDE_CY693_REG_H_
-#define _DEV_PCI_PCIIDE_CY693_REG_H_
 
 /*
  * Registers definitions for Contaq/Cypress's CY82693U PCI IDE controller.
@@ -66,11 +61,15 @@
 #define CY_CMD_CTRL_IOR_PULSE_OFF(drive)	(4 + 16 * (drive))
 #define CY_CMD_CTRL_IOR_REC_OFF(drive)		(0 + 16 * (drive))
 
-static int8_t cy_pio_pulse[] = {9, 4, 3, 2, 2};
-static int8_t cy_pio_rec[] =   {9, 7, 4, 2, 0};
+static const int8_t cy_pio_pulse[] __unused =
+    {9, 4, 3, 2, 2};
+static const int8_t cy_pio_rec[] __unused =
+    {9, 7, 4, 2, 0};
 #ifdef unused
-static int8_t cy_dma_pulse[] = {7, 2, 2};
-static int8_t cy_dma_rec[] =   {7, 1, 0};
+static const int8_t cy_dma_pulse[] __unused =
+    {7, 2, 2};
+static const int8_t cy_dma_rec[] __unused =
+    {7, 1, 0};
 #endif
 
 /*
@@ -82,19 +81,11 @@ static int8_t cy_dma_rec[] =   {7, 1, 0};
 #define CY_DMA_SIZE 0x2
 
 #define CY_DMA_IDX 0x00
-#define CY_DMA_IDX_PRIMARY     0x30
-#define CY_DMA_IDX_SECONDARY   0x31
-#define CY_DMA_IDX_TIMEOUT     0x32
+#define CY_DMA_IDX_PRIMARY	0x30
+#define CY_DMA_IDX_SECONDARY	0x31
+#define CY_DMA_IDX_TIMEOUT	0x32
 
 #define CY_DMA_DATA 0x01
 /* Multiword DMA transfer, for CY_DMA_IDX_PRIMARY or CY_DMA_IDX_SECONDARY */
-#define CY_DMA_DATA_MODE_MASK  0x03
-#define CY_DMA_DATA_SINGLE     0x04
-
-/* Private data */
-struct pciide_cy {
-	const struct cy82c693_handle *cy_handle;
-	int cy_compatchan;
-};
-
-#endif	/* !_DEV_PCI_PCIIDE_CY693_REG_H_ */
+#define CY_DMA_DATA_MODE_MASK	0x03
+#define CY_DMA_DATA_SINGLE	0x04

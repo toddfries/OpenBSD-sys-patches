@@ -1,8 +1,7 @@
-/*	$OpenBSD: loadfile_machdep.h,v 1.1 2001/09/06 19:31:35 jason Exp $	*/
-/*	$NetBSD: loadfile_machdep.h,v 1.3 2000/08/16 08:16:58 mrg Exp $	 */
+/*	$NetBSD: loadfile_machdep.h,v 1.3 2008/04/28 20:23:37 martin Exp $	*/
 
 /*-
- * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 2005 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,31 +29,30 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define BOOT_ELF
-#ifdef __sparc_v9__
-#define ELFSIZE 64
-#else
-#define ELFSIZE 32
-#endif
-
 #define LOAD_KERNEL	LOAD_ALL
 #define COUNT_KERNEL	COUNT_ALL
 
 #ifdef _STANDALONE
-#define LOADADDR(a)		(((u_long)(a) & 0x0fffffff) + offset)
+#define LOADADDR(a)		((long)(a))
 #define ALIGNENTRY(a)		((u_long)(a))
-#define READ(f, b, c)		read((f), (void *)LOADADDR(b), (c))
-#define BCOPY(s, d, c)		memcpy((void *)LOADADDR(d), (void *)(s), (c))
-#define BZERO(d, c)		memset((void *)LOADADDR(d), 0, (c))
+#define READ(f, b, c)		sparc64_read((f), (void *)LOADADDR(b), (c))
+#define BCOPY(s, d, c)		sparc64_memcpy((void *)LOADADDR(d), \
+					(void *)(s), (c))
+#define BZERO(d, c)		sparc64_memset((void *)LOADADDR(d), 0, (c))
 #define	WARN(a)			(void)(printf a, \
 				    printf((errno ? ": %s\n" : "\n"), \
 				    strerror(errno)))
 #define PROGRESS(a)		(void) printf a
 #define ALLOC(a)		alloc(a)
-#define FREE(a, b)		free(a, b)
+#define DEALLOC(a, b)		dealloc(a, b)
 #define OKMAGIC(a)		((a) == OMAGIC)
+
+extern ssize_t sparc64_read(int, void *, size_t);
+extern void* sparc64_memcpy(void *, const void *, size_t);
+extern void* sparc64_memset(void *, int, size_t);
+
 #else
-#define LOADADDR(a)		(((u_long)(a)) + offset)
+#define LOADADDR(a)		(((u_long)(a)) + (u_long)offset)
 #define ALIGNENTRY(a)		((u_long)(a))
 #define READ(f, b, c)		read((f), (void *)LOADADDR(b), (c))
 #define BCOPY(s, d, c)		memcpy((void *)LOADADDR(d), (void *)(s), (c))

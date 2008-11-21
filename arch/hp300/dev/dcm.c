@@ -1,9 +1,35 @@
-/*	$OpenBSD: dcm.c,v 1.29 2008/01/23 16:37:56 jsing Exp $	*/
-/*	$NetBSD: dcm.c,v 1.41 1997/05/05 20:59:16 thorpej Exp $	*/
+/*	$NetBSD: dcm.c,v 1.81 2008/06/13 09:41:15 cegger Exp $	*/
+
+/*-
+ * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
- * Copyright (c) 1995, 1996, 1997 Jason R. Thorpe.  All rights reserved.
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -39,6 +65,45 @@
  *
  *	@(#)dcm.c	8.4 (Berkeley) 1/12/94
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * from Utah: $Hdr: dcm.c 1.29 92/01/21$
+ *
+ *	@(#)dcm.c	8.4 (Berkeley) 1/12/94
+ */
 
 /*
  * TODO:
@@ -49,6 +114,12 @@
 /*
  *  98642/MUX
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dcm.c,v 1.81 2008/06/13 09:41:15 cegger Exp $");
+
+#include "opt_kgdb.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/ioctl.h>
@@ -61,24 +132,23 @@
 #include <sys/syslog.h>
 #include <sys/time.h>
 #include <sys/device.h>
+#include <sys/kauth.h>
 
-#include <machine/autoconf.h>
 #include <machine/bus.h>
-#include <machine/cpu.h>
-#include <machine/intr.h>
 
 #include <dev/cons.h>
 
-#include <hp300/dev/dioreg.h>
 #include <hp300/dev/diovar.h>
 #include <hp300/dev/diodevs.h>
 #include <hp300/dev/dcmreg.h>
+
+#include "ioconf.h"
 
 #ifndef DEFAULT_BAUD_RATE
 #define DEFAULT_BAUD_RATE 9600
 #endif
 
-const struct speedtab dcmspeedtab[] = {
+static const struct speedtab dcmspeedtab[] = {
 	{	0,	BR_0		},
 	{	50,	BR_50		},
 	{	75,	BR_75		},
@@ -108,25 +178,14 @@ const struct speedtab dcmspeedtab[] = {
 #define DIS_PERCHAR	1
 #define DIS_RESET	2
 
-int	dcmistype = -1;		/* -1 == dynamic, 0 == timer, 1 == perchar */
-int     dcminterval = 5;	/* interval (secs) between checks */
+static int	dcmistype = -1; /* -1 == dynamic, 0 == timer, 1 == perchar */
+static int     dcminterval = 5;	/* interval (secs) between checks */
 struct	dcmischeme {
 	int	dis_perchar;	/* non-zero if interrupting per char */
 	long	dis_time;	/* last time examined */
 	int	dis_intr;	/* recv interrupts during last interval */
 	int	dis_char;	/* characters read during last interval */
 };
-
-/*
- * Stuff for DCM console support.  This could probably be done a little
- * better.
- */
-static	struct dcmdevice *dcm_cn = NULL;	/* pointer to hardware */
-static	int dcmconsinit;			/* has been initialized */
-
-int	dcmdefaultrate = DEFAULT_BAUD_RATE;
-int	dcmconbrdbusy = 0;
-int	dcmmajor;
 
 #ifdef KGDB
 /*
@@ -170,8 +229,8 @@ struct	dcmstats {
 };
 #endif
 
-#define DCMUNIT(x)		(minor(x) & 0x7f)
-#define DCMCUA(x)		(minor(x) & 0x80)
+#define DCMUNIT(x)		(minor(x) & 0x7ffff)
+#define	DCMDIALOUT(x)		(minor(x) & 0x80000)
 #define	DCMBOARD(x)		(((x) >> 2) & 0x3f)
 #define DCMPORT(x)		((x) & 3)
 
@@ -201,7 +260,7 @@ struct	dcmstats {
  *		"SR"	23	 4	RTS	(often not needed)
  */
 #define hp2dce_in(ibits)	(iconv[(ibits) & 0xf])
-static char iconv[16] = {
+static const char iconv[16] = {
 	0,		MI_DM,		MI_CTS,		MI_CTS|MI_DM,
 	MI_CD,		MI_CD|MI_DM,	MI_CD|MI_CTS,	MI_CD|MI_CTS|MI_DM,
 	MI_RI,		MI_RI|MI_DM,	MI_RI|MI_CTS,	MI_RI|MI_CTS|MI_DM,
@@ -216,15 +275,17 @@ static char iconv[16] = {
 #define	NDCMPORT	4
 
 struct	dcm_softc {
-	struct	device sc_dev;		/* generic device glue */
-	struct	isr sc_isr;
+	device_t sc_dev;		/* generic device glue */
+
+	bus_space_tag_t sc_bst;
+	bus_space_handle_t sc_bsh;
+
 	struct	dcmdevice *sc_dcm;	/* pointer to hardware */
 	struct	tty *sc_tty[NDCMPORT];	/* our tty instances */
 	struct	modemreg *sc_modem[NDCMPORT]; /* modem control */
 	char	sc_mcndlast[NDCMPORT];	/* XXX last modem status for port */
 	short	sc_softCAR;		/* mask of ports with soft-carrier */
 	struct	dcmischeme sc_scheme;	/* interrupt scheme for board */
-	u_char	sc_cua;			/* callout mode */
 
 	/*
 	 * Mask of soft-carrier bits in config flags.
@@ -246,70 +307,101 @@ struct	dcm_softc {
 #endif
 };
 
-cdev_decl(dcm);
+static int	dcmintr(void *);
+static void	dcmpint(struct dcm_softc *, int, int);
+static void	dcmrint(struct dcm_softc *);
+static void	dcmreadbuf(struct dcm_softc *, int);
+static void	dcmxint(struct dcm_softc *, int);
+static void	dcmmint(struct dcm_softc *, int, int);
 
-int	dcmintr(void *);
-void	dcmpint(struct dcm_softc *, int, int);
-void	dcmrint(struct dcm_softc *);
-void	dcmreadbuf(struct dcm_softc *, int);
-void	dcmxint(struct dcm_softc *, int);
-void	dcmmint(struct dcm_softc *, int, int);
+static int	dcmparam(struct tty *, struct termios *);
+static void	dcmstart(struct tty *);
+static int	dcmmctl(dev_t, int, int);
+static void	dcmsetischeme(int, int);
+static void	dcminit(struct dcmdevice *, int, int);
 
-int	dcmparam(struct tty *, struct termios *);
-void	dcmstart(struct tty *);
-int	dcmstop(struct tty *, int);
-int	dcmmctl(dev_t, int, int);
-void	dcmsetischeme(int, int);
-void	dcminit(struct dcmdevice *, int, int);
+static int	dcmselftest(struct dcm_softc *);
 
-int	dcmselftest(struct dcm_softc *);
+static int	dcmcngetc(dev_t);
+static void	dcmcnputc(dev_t, int);
 
-int	dcm_console_scan(int, caddr_t, void *);
-cons_decl(dcm);
+int	dcmcnattach(bus_space_tag_t, bus_addr_t, int);
 
-int	dcmmatch(struct device *, void *, void *);
-void	dcmattach(struct device *, struct device *, void *);
+static int	dcmmatch(device_t, cfdata_t, void *);
+static void	dcmattach(device_t, device_t, void *);
 
-struct cfattach dcm_ca = {
-	sizeof(struct dcm_softc), dcmmatch, dcmattach
+CFATTACH_DECL_NEW(dcm, sizeof(struct dcm_softc),
+    dcmmatch, dcmattach, NULL, NULL);
+
+/*
+ * Stuff for DCM console support.  This could probably be done a little
+ * better.
+ */
+static	struct dcmdevice *dcm_cn = NULL;	/* pointer to hardware */
+static	int dcmconsinit;			/* has been initialized */
+#if 0
+static	int dcm_lastcnpri = CN_DEAD; 	/* XXX last priority */
+#endif
+
+static struct consdev dcm_cons = {
+	NULL,
+	NULL,
+	dcmcngetc,
+	dcmcnputc,
+	nullcnpollc,
+	NULL,
+	NULL,
+	NULL,
+	NODEV,
+	CN_REMOTE
+};
+int	dcmconscode;
+int	dcmdefaultrate = DEFAULT_BAUD_RATE;
+int	dcmconbrdbusy = 0;
+
+static dev_type_open(dcmopen);
+static dev_type_close(dcmclose);
+static dev_type_read(dcmread);
+static dev_type_write(dcmwrite);
+static dev_type_ioctl(dcmioctl);
+static dev_type_stop(dcmstop);
+static dev_type_tty(dcmtty);
+static dev_type_poll(dcmpoll);
+
+const struct cdevsw dcm_cdevsw = {
+	dcmopen, dcmclose, dcmread, dcmwrite, dcmioctl,
+	dcmstop, dcmtty, dcmpoll, nommap, ttykqfilter, D_TTY
 };
 
-struct cfdriver dcm_cd = {
-	NULL, "dcm", DV_TTY
-};
-
-int
-dcmmatch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+static int
+dcmmatch(device_t parent, cfdata_t cf, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
 	switch (da->da_id) {
 	case DIO_DEVICE_ID_DCM:
 	case DIO_DEVICE_ID_DCMREM:
-		return (1);
+		return 1;
 	}
 
-	return (0);
+	return 0;
 }
 
-void
-dcmattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+static void
+dcmattach(device_t parent, device_t self, void *aux)
 {
-	struct dcm_softc *sc = (struct dcm_softc *)self;
+	struct dcm_softc *sc = device_private(self);
 	struct dio_attach_args *da = aux;
 	struct dcmdevice *dcm;
-	int brd = self->dv_unit;
+	int brd = device_unit(self);
 	int scode = da->da_scode;
-	int i, mbits, code, ipl;
+	int i, mbits, code;
 
+	sc->sc_dev = self;
 	sc->sc_flags = 0;
 
-	if (scode == conscode) {
-		dcm = (struct dcmdevice *)conaddr;
+	if (scode == dcmconscode) {
+		dcm = dcm_cn;
 		sc->sc_flags |= DCM_ISCONSOLE;
 
 		/*
@@ -317,44 +409,39 @@ dcmattach(parent, self, aux)
 		 * the console probe, so we have to fixup cn_dev here.
 		 * Note that we always assume port 1 on the board.
 		 */
-		cn_tab->cn_dev = makedev(dcmmajor, (brd << 2) | DCMCONSPORT);
+		cn_tab->cn_dev = makedev(cdevsw_lookup_major(&dcm_cdevsw),
+		    (brd << 2) | DCMCONSPORT);
 	} else {
-		dcm = (struct dcmdevice *)iomap(dio_scodetopa(da->da_scode),
-		    da->da_size);
-		if (dcm == NULL) {
-			printf("\n%s: can't map registers\n",
-			    sc->sc_dev.dv_xname);
+		sc->sc_bst = da->da_bst;
+		if (bus_space_map(sc->sc_bst, da->da_addr, da->da_size,
+		    BUS_SPACE_MAP_LINEAR, &sc->sc_bsh)) {
+			aprint_error(": can't map registers\n");
 			return;
 		}
+		dcm = bus_space_vaddr(sc->sc_bst, sc->sc_bsh);
 	}
 
 	sc->sc_dcm = dcm;
-
-	ipl = DIO_IPL(dcm);
-	printf(" ipl %d", ipl);
 
 	/*
 	 * XXX someone _should_ fix this; the self test screws
 	 * autoconfig messages.
 	 */
 	if ((sc->sc_flags & DCM_ISCONSOLE) && dcmselftest(sc)) {
-		printf("\n%s: self-test failed\n", sc->sc_dev.dv_xname);
+		aprint_normal("\n");
+		aprint_error_dev(self, "self-test failed\n");
 		return;
 	}
 
 	/* Extract configuration info from flags. */
-	sc->sc_softCAR = self->dv_cfdata->cf_flags & DCM_SOFTCAR;
-	sc->sc_flags |= self->dv_cfdata->cf_flags & DCM_FLAGMASK;
+	sc->sc_softCAR = device_cfdata(self)->cf_flags & DCM_SOFTCAR;
+	sc->sc_flags |= device_cfdata(self)->cf_flags & DCM_FLAGMASK;
 
 	/* Mark our unit as configured. */
 	sc->sc_flags |= DCM_ACTIVE;
 
 	/* Establish the interrupt handler. */
-	sc->sc_isr.isr_func = dcmintr;
-	sc->sc_isr.isr_arg = sc;
-	sc->sc_isr.isr_ipl = ipl;
-	sc->sc_isr.isr_priority = IPL_TTY;
-	dio_intr_establish(&sc->sc_isr, self->dv_xname);
+	(void)dio_intr_establish(dcmintr, sc, da->da_ipl, IPL_TTY);
 
 	if (dcmistype == DIS_TIMER)
 		dcmsetischeme(brd, DIS_RESET|DIS_TIMER);
@@ -396,12 +483,12 @@ dcmattach(parent, self, aux)
 	if (sc->sc_flags & DCM_ISCONSOLE) {
 		dcmconsinit = 0;
 		sc->sc_softCAR |= (1 << DCMCONSPORT);
-		printf(": console on port %d\n", DCMCONSPORT);
+		aprint_normal(": console on port %d\n", DCMCONSPORT);
 	} else
-		printf("\n");
+		aprint_normal("\n");
 
 #ifdef KGDB
-	if (major(kgdb_dev) == dcmmajor &&
+	if (cdevsw_lookup(kgdb_dev) == &dcm_cdevsw &&
 	    DCMBOARD(DCMUNIT(kgdb_dev)) == brd) {
 		if (dcmconsole == DCMUNIT(kgdb_dev))	/* XXX fixme */
 			kgdb_dev = NODEV; /* can't debug over console port */
@@ -414,12 +501,12 @@ dcmattach(parent, self, aux)
 			dcminit(dcm, DCMPORT(DCMUNIT(kgdb_dev)),
 			    kgdb_rate);
 			if (kgdb_debug_init) {
-				printf("%s port %d: ", sc->sc_dev.dv_xname,
+				aprint_normal_dev(self, "port %d: ",
 				    DCMPORT(DCMUNIT(kgdb_dev)));
 				kgdb_connect(1);
 			} else
-				printf("%s port %d: kgdb enabled\n",
-				    sc->sc_dev.dv_xname,
+				aprint_normal_dev(self,
+				    "port %d: kgdb enabled\n",
 				    DCMPORT(DCMUNIT(kgdb_dev)));
 		}
 		/* end could be replaced */
@@ -429,11 +516,8 @@ dcmattach(parent, self, aux)
 }
 
 /* ARGSUSED */
-int
-dcmopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+static int
+dcmopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct dcm_softc *sc;
 	struct tty *tp;
@@ -444,25 +528,29 @@ dcmopen(dev, flag, mode, p)
 	brd = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	if (brd >= dcm_cd.cd_ndevs || port >= NDCMPORT ||
-	    (sc = dcm_cd.cd_devs[brd]) == NULL)
-		return (ENXIO);
+	sc = device_lookup_private(&dcm_cd, brd);
+	if (sc == NULL)
+		return ENXIO;
 
 	if ((sc->sc_flags & DCM_ACTIVE) == 0)
-		return (ENXIO);
+		return ENXIO;
 
-	s = spltty();
 	if (sc->sc_tty[port] == NULL) {
 		tp = sc->sc_tty[port] = ttymalloc();
+		tty_attach(tp);
 	} else
 		tp = sc->sc_tty[port];
-	splx(s);
 
 	tp->t_oproc = dcmstart;
 	tp->t_param = dcmparam;
 	tp->t_dev = dev;
 
-	if ((tp->t_state & TS_ISOPEN) == 0) {
+	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN, tp))
+		return (EBUSY);
+
+	s = spltty();
+
+	if ((tp->t_state & TS_ISOPEN) == 0 && tp->t_wopen == 0) {
 		/*
 		 * Sanity clause: reset the card on first open.
 		 * The card might be left in an inconsistent state
@@ -470,7 +558,6 @@ dcmopen(dev, flag, mode, p)
 		 */
 		dcminit(sc->sc_dcm, port, dcmdefaultrate);
 
-		tp->t_state |= TS_WOPEN;
 		ttychars(tp);
 		tp->t_iflag = TTYDEF_IFLAG;
 		tp->t_oflag = TTYDEF_OFLAG;
@@ -478,88 +565,49 @@ dcmopen(dev, flag, mode, p)
 		tp->t_lflag = TTYDEF_LFLAG;
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 
-		s = spltty();
-
 		(void) dcmparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
-		return (EBUSY);
-	else
-		s = spltty();
 
-	/* Set modem control state. */
-	mbits = MO_ON;
-	if (sc->sc_flags & DCM_STDDCE)
-		mbits |= MO_SR;		/* pin 23, could be used as RTS */
+		/* Set modem control state. */
+		mbits = MO_ON;
+		if (sc->sc_flags & DCM_STDDCE)
+			mbits |= MO_SR;	/* pin 23, could be used as RTS */
 
-	(void) dcmmctl(dev, mbits, DMSET);	/* enable port */
+		(void) dcmmctl(dev, mbits, DMSET);	/* enable port */
 
-	/* Set soft-carrier if so configured. */
-	if ((sc->sc_softCAR & (1 << port)) || DCMCUA(dev) ||
-	    (dcmmctl(dev, MO_OFF, DMGET) & MI_CD))
-		tp->t_state |= TS_CARR_ON;
-
-	if (DCMCUA(dev)) {
-		if (tp->t_state & TS_ISOPEN) {
-			/* Ah, but someone already is dialed in... */
-			splx(s);
-			return (EBUSY);
-		}
-		sc->sc_cua = 1;		/* We go into CUA mode */
+		/* Set soft-carrier if so configured. */
+		if ((sc->sc_softCAR & (1 << port)) ||
+		    (dcmmctl(dev, MO_OFF, DMGET) & MI_CD))
+			tp->t_state |= TS_CARR_ON;
 	}
+
+	splx(s);
 
 #ifdef DEBUG
 	if (dcmdebug & DDB_MODEM)
 		printf("%s: dcmopen port %d softcarr %c\n",
-		       sc->sc_dev.dv_xname, port,
-		       (tp->t_state & TS_CARR_ON) ? '1' : '0');
+		    device_xname(sc->sc_dev), port,
+		    (tp->t_state & TS_CARR_ON) ? '1' : '0');
 #endif
 
-	/* Wait for carrier if necessary. */
-	if (flag & O_NONBLOCK) {
-		if (!DCMCUA(dev) && sc->sc_cua) {
-			/* Opening TTY non-blocking... but the CUA is busy */
-			splx(s);
-			return (EBUSY);
-		}
-	} else {
-		while (sc->sc_cua ||
-		    ((tp->t_cflag & CLOCAL) == 0 &&
-		    (tp->t_state & TS_CARR_ON) == 0)) {
-			tp->t_state |= TS_WOPEN;
-			error = ttysleep(tp, (caddr_t)&tp->t_rawq,
-			    TTIPRI | PCATCH, ttopen, 0);
-			if (!DCMCUA(dev) && sc->sc_cua && error == EINTR)
-				continue;
-			if (error) {
-				if (DCMCUA(dev))
-					sc->sc_cua = 0;
-				splx(s);
-				return (error);
-			}
-			if (!DCMCUA(dev) && sc->sc_cua)
-				continue;
-		}
-	}
-	splx(s);
+	error = ttyopen(tp, DCMDIALOUT(dev), (flag & O_NONBLOCK));
+	if (error)
+		goto bad;
 
 #ifdef DEBUG
 	if (dcmdebug & DDB_OPENCLOSE)
 		printf("%s port %d: dcmopen: st %x fl %x\n",
-			sc->sc_dev.dv_xname, port, tp->t_state, tp->t_flags);
+		    device_xname(sc->sc_dev), port, tp->t_state, tp->t_flags);
 #endif
-	if (error == 0)
-		error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*tp->t_linesw->l_open)(dev, tp);
 
-	return (error);
+ bad:
+	return error;
 }
 
 /*ARGSUSED*/
-int
-dcmclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+static int
+dcmclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	int s, unit, board, port;
 	struct dcm_softc *sc;
@@ -569,36 +617,33 @@ dcmclose(dev, flag, mode, p)
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd,board);
 	tp = sc->sc_tty[port];
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*tp->t_linesw->l_close)(tp, flag);
 
 	s = spltty();
 
-	if (tp->t_cflag & HUPCL || tp->t_state & TS_WOPEN ||
+	if (tp->t_cflag & HUPCL || tp->t_wopen != 0 ||
 	    (tp->t_state & TS_ISOPEN) == 0)
 		(void) dcmmctl(dev, MO_OFF, DMSET);
 #ifdef DEBUG
 	if (dcmdebug & DDB_OPENCLOSE)
 		printf("%s port %d: dcmclose: st %x fl %x\n",
-			sc->sc_dev.dv_xname, port, tp->t_state, tp->t_flags);
+		    device_xname(sc->sc_dev), port, tp->t_state, tp->t_flags);
 #endif
-	sc->sc_cua = 0;
 	splx(s);
 	ttyclose(tp);
 #if 0
+	tty_detach(tp);
 	ttyfree(tp);
 	sc->sc_tty[port] == NULL;
 #endif
-	return (0);
+	return 0;
 }
 
-int
-dcmread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+static int
+dcmread(dev_t dev, struct uio *uio, int flag)
 {
 	int unit, board, port;
 	struct dcm_softc *sc;
@@ -608,17 +653,14 @@ dcmread(dev, uio, flag)
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd,board);
 	tp = sc->sc_tty[port];
 
-	return ((*linesw[tp->t_line].l_read)(tp, uio, flag));
+	return (*tp->t_linesw->l_read)(tp, uio, flag);
 }
 
-int
-dcmwrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+static int
+dcmwrite(dev_t dev, struct uio *uio, int flag)
 {
 	int unit, board, port;
 	struct dcm_softc *sc;
@@ -628,15 +670,31 @@ dcmwrite(dev, uio, flag)
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd, board);
 	tp = sc->sc_tty[port];
 
-	return ((*linesw[tp->t_line].l_write)(tp, uio, flag));
+	return (*tp->t_linesw->l_write)(tp, uio, flag);
 }
 
-struct tty *
-dcmtty(dev)
-	dev_t dev;
+static int
+dcmpoll(dev_t dev, int events, struct lwp *l)
+{
+	int unit, board, port;
+	struct dcm_softc *sc;
+	struct tty *tp;
+
+	unit = DCMUNIT(dev);
+	board = DCMBOARD(unit);
+	port = DCMPORT(unit);
+
+	sc = device_lookup_private(&dcm_cd, board);
+	tp = sc->sc_tty[port];
+
+	return (*tp->t_linesw->l_poll)(tp, events, l);
+}
+
+static struct tty *
+dcmtty(dev_t dev)
 {
 	int unit, board, port;
 	struct dcm_softc *sc;
@@ -645,19 +703,18 @@ dcmtty(dev)
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd, board);
 
-	return (sc->sc_tty[port]);
+	return sc->sc_tty[port];
 }
 
-int
-dcmintr(arg)
-	void *arg;
+static int
+dcmintr(void *arg)
 {
 	struct dcm_softc *sc = arg;
 	struct dcmdevice *dcm = sc->sc_dcm;
 	struct dcmischeme *dis = &sc->sc_scheme;
-	int brd = sc->sc_dev.dv_unit;
+	int brd = device_unit(sc->sc_dev);
 	int code, i;
 	int pcnd[4], mcode, mcnd[4];
 
@@ -668,9 +725,8 @@ dcmintr(arg)
 	SEM_LOCK(dcm);
 	if ((dcm->dcm_ic & IC_IR) == 0) {
 		SEM_UNLOCK(dcm);
-		return (0);
+		return 0;
 	}
-
 	for (i = 0; i < 4; i++) {
 		pcnd[i] = dcm->dcm_icrtab[i].dcm_data;
 		dcm->dcm_icrtab[i].dcm_data = 0;
@@ -688,10 +744,10 @@ dcmintr(arg)
 #ifdef DEBUG
 	if (dcmdebug & DDB_INTR) {
 		printf("%s: dcmintr: iir %x pc %x/%x/%x/%x ",
-		       sc->sc_dev.dv_xname, code, pcnd[0], pcnd[1],
-		       pcnd[2], pcnd[3]);
+		    device_xname(sc->sc_dev), code, pcnd[0], pcnd[1],
+		    pcnd[2], pcnd[3]);
 		printf("miir %x mc %x/%x/%x/%x\n",
-		       mcode, mcnd[0], mcnd[1], mcnd[2], mcnd[3]);
+		    mcode, mcnd[0], mcnd[1], mcnd[2], mcnd[3]);
 	}
 #endif
 	if (code & IIR_TIMEO)
@@ -726,7 +782,7 @@ dcmintr(arg)
 	 * See if it is time to check/change the interrupt rate.
 	 */
 	if (dcmistype < 0 &&
-	    (i = time.tv_sec - dis->dis_time) >= dcminterval) {
+	    (i = time_second - dis->dis_time) >= dcminterval) {
 		/*
 		 * If currently per-character and averaged over 70 interrupts
 		 * per-second (66 is threshold of 600 baud) in last interval,
@@ -750,9 +806,9 @@ dcmintr(arg)
 			dcmrint(sc);
 		}
 		dis->dis_intr = dis->dis_char = 0;
-		dis->dis_time = time.tv_sec;
+		dis->dis_time = time_second;
 	}
-	return (1);
+	return 1;
 }
 
 /*
@@ -760,10 +816,8 @@ dcmintr(arg)
  *	First, it might be a special character (exception interrupt);
  *	Second, it may be a buffer empty (transmit interrupt);
  */
-void
-dcmpint(sc, port, code)
-	struct dcm_softc *sc;
-	int port, code;
+static void
+dcmpint(struct dcm_softc *sc, int port, int code)
 {
 
 	if (code & IT_SPEC)
@@ -772,9 +826,8 @@ dcmpint(sc, port, code)
 		dcmxint(sc, port);
 }
 
-void
-dcmrint(sc)
-	struct dcm_softc *sc;
+static void
+dcmrint(struct dcm_softc *sc)
 {
 	int port;
 
@@ -782,10 +835,8 @@ dcmrint(sc)
 		dcmreadbuf(sc, port);
 }
 
-void
-dcmreadbuf(sc, port)
-	struct dcm_softc *sc;
-	int port;
+static void
+dcmreadbuf(struct dcm_softc *sc, int port)
 {
 	struct dcmdevice *dcm = sc->sc_dcm;
 	struct dcmpreg *pp = dcm_preg(dcm, port);
@@ -805,7 +856,11 @@ dcmreadbuf(sc, port)
 
 	if ((tp->t_state & TS_ISOPEN) == 0) {
 #ifdef KGDB
-		if ((makedev(dcmmajor, minor(tp->t_dev)) == kgdb_dev) &&
+		int maj;
+
+		maj = cdevsw_lookup_major(&dcm_cdevsw);
+
+		if ((makedev(maj, minor(tp->t_dev)) == kgdb_dev) &&
 		    (head = pp->r_head & RX_MASK) != (pp->r_tail & RX_MASK) &&
 		    dcm->dcm_rfifos[3-port][head>>1].data_char == FRAME_START) {
 			pp->r_head = (head + 2) & RX_MASK;
@@ -836,10 +891,11 @@ dcmreadbuf(sc, port)
 
 #ifdef DEBUG
 		if (dcmdebug & DDB_INPUT)
-			printf("%s port %d: dcmreadbuf: c%x('%c') s%x f%x h%x t%x\n",
-			       sc->sc_dev.dv_xname, port,
-			       c&0xFF, c, stat&0xFF,
-			       tp->t_flags, head, pp->r_tail);
+			printf("%s port %d: "
+			    "dcmreadbuf: c%x('%c') s%x f%x h%x t%x\n",
+			    device_xname(sc->sc_dev), port,
+			    c&0xFF, c, stat&0xFF,
+			    tp->t_flags, head, pp->r_tail);
 #endif
 		/*
 		 * Check for and handle errors
@@ -847,9 +903,10 @@ dcmreadbuf(sc, port)
 		if (stat & RD_MASK) {
 #ifdef DEBUG
 			if (dcmdebug & (DDB_INPUT|DDB_SIOERR))
-				printf("%s port %d: dcmreadbuf: err: c%x('%c') s%x\n",
-				       sc->sc_dev.dv_xname, port,
-				       stat, c&0xFF, c);
+				printf("%s port %d: "
+				    "dcmreadbuf: err: c%x('%c') s%x\n",
+				    device_xname(sc->sc_dev), port,
+				    stat, c&0xFF, c);
 #endif
 			if (stat & (RD_BD | RD_FE))
 				c |= TTY_FE;
@@ -858,13 +915,13 @@ dcmreadbuf(sc, port)
 			else if (stat & RD_OVF)
 				log(LOG_WARNING,
 				    "%s port %d: silo overflow\n",
-				    sc->sc_dev.dv_xname, port);
+				    device_xname(sc->sc_dev), port);
 			else if (stat & RD_OE)
 				log(LOG_WARNING,
 				    "%s port %d: uart overflow\n",
-				    sc->sc_dev.dv_xname, port);
+				    device_xname(sc->sc_dev), port);
 		}
-		(*linesw[tp->t_line].l_rint)(c, tp);
+		(*tp->t_linesw->l_rint)(c, tp);
 	}
 	sc->sc_scheme.dis_char += nch;
 
@@ -877,10 +934,8 @@ dcmreadbuf(sc, port)
 #endif
 }
 
-void
-dcmxint(sc, port)
-	struct dcm_softc *sc;
-	int port;
+static void
+dcmxint(struct dcm_softc *sc, int port)
 {
 	struct tty *tp;
 
@@ -891,31 +946,30 @@ dcmxint(sc, port)
 	tp->t_state &= ~TS_BUSY;
 	if (tp->t_state & TS_FLUSH)
 		tp->t_state &= ~TS_FLUSH;
-	(*linesw[tp->t_line].l_start)(tp);
+	(*tp->t_linesw->l_start)(tp);
 }
 
-void
-dcmmint(sc, port, mcnd)
-	struct dcm_softc *sc;
-	int port, mcnd;
+static void
+dcmmint(struct dcm_softc *sc, int port, int mcnd)
 {
 	int delta;
 	struct tty *tp;
 	struct dcmdevice *dcm = sc->sc_dcm;
 
+#ifdef DEBUG
+	if (dcmdebug & DDB_MODEM)
+		printf("%s port %d: dcmmint: mcnd %x mcndlast %x\n",
+		    device_xname(sc->sc_dev), port, mcnd,
+		    sc->sc_mcndlast[port]);
+#endif
+	delta = mcnd ^ sc->sc_mcndlast[port];
+	sc->sc_mcndlast[port] = mcnd;
 	tp = sc->sc_tty[port];
 	if (tp == NULL || (tp->t_state & TS_ISOPEN) == 0)
 		return;
 
-#ifdef DEBUG
-	if (dcmdebug & DDB_MODEM)
-		printf("%s port %d: dcmmint: mcnd %x mcndlast %x\n",
-		       sc->sc_dev.dv_xname, port, mcnd, sc->sc_mcndlast[port]);
-#endif
-	delta = mcnd ^ sc->sc_mcndlast[port];
-	sc->sc_mcndlast[port] = mcnd;
 	if ((delta & MI_CTS) && (tp->t_state & TS_ISOPEN) &&
-	    (tp->t_flags & CCTS_OFLOW)) {
+	    (tp->t_cflag & CCTS_OFLOW)) {
 		if (mcnd & MI_CTS) {
 			tp->t_state &= ~TS_TTSTOP;
 			ttstart(tp);
@@ -924,9 +978,9 @@ dcmmint(sc, port, mcnd)
 	}
 	if (delta & MI_CD) {
 		if (mcnd & MI_CD)
-			(void)(*linesw[tp->t_line].l_modem)(tp, 1);
+			(void)(*tp->t_linesw->l_modem)(tp, 1);
 		else if ((sc->sc_softCAR & (1 << port)) == 0 &&
-		    (*linesw[tp->t_line].l_modem)(tp, 0) == 0) {
+		    (*tp->t_linesw->l_modem)(tp, 0) == 0) {
 			sc->sc_modem[port]->mdmout = MO_OFF;
 			SEM_LOCK(dcm);
 			dcm->dcm_modemchng |= (1 << port);
@@ -937,13 +991,8 @@ dcmmint(sc, port, mcnd)
 	}
 }
 
-int
-dcmioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+static int
+dcmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct dcm_softc *sc;
 	struct tty *tp;
@@ -954,21 +1003,23 @@ dcmioctl(dev, cmd, data, flag, p)
 	port = DCMPORT(unit);
 	board = DCMBOARD(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd, board);
 	dcm = sc->sc_dcm;
 	tp = sc->sc_tty[port];
 
 #ifdef DEBUG
 	if (dcmdebug & DDB_IOCTL)
 		printf("%s port %d: dcmioctl: cmd %lx data %x flag %x\n",
-		       sc->sc_dev.dv_xname, port, cmd, *data, flag);
+		    device_xname(sc->sc_dev), port, cmd, *(int *)data, flag);
 #endif
-	error = (*linesw[tp->t_line].l_ioctl)(tp, cmd, data, flag, p);
-	if (error >= 0)
-		return (error);
-	error = ttioctl(tp, cmd, data, flag, p);
-	if (error >= 0)
-		return (error);
+
+	error = (*tp->t_linesw->l_ioctl)(tp, cmd, data, flag, l);
+	if (error != EPASSTHROUGH)
+		return error;
+
+	error = ttioctl(tp, cmd, data, flag, l);
+	if (error != EPASSTHROUGH)
+		return error;
 
 	switch (cmd) {
 	case TIOCSBRK:
@@ -1032,8 +1083,8 @@ dcmioctl(dev, cmd, data, flag, p)
 	case TIOCSFLAGS: {
 		int userbits;
 
-		error = suser(p, 0);
-		if (error)
+		if (kauth_authorize_device_tty(l->l_cred,
+		    KAUTH_DEVICE_TTY_PRIVSET, tp))
 			return (EPERM);
 
 		userbits = *(int *)data;
@@ -1050,15 +1101,13 @@ dcmioctl(dev, cmd, data, flag, p)
 	}
 
 	default:
-		return (ENOTTY);
+		return EPASSTHROUGH;
 	}
-	return (0);
+	return 0;
 }
 
-int
-dcmparam(tp, t)
-	struct tty *tp;
-	struct termios *t;
+static int
+dcmparam(struct tty *tp, struct termios *t)
 {
 	struct dcm_softc *sc;
 	struct dcmdevice *dcm;
@@ -1069,19 +1118,19 @@ dcmparam(tp, t)
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd, board);
 	dcm = sc->sc_dcm;
 
 	/* check requested parameters */
-        if (ospeed < 0 || (t->c_ispeed && t->c_ispeed != t->c_ospeed))
-                return (EINVAL);
-        /* and copy to tty */
-        tp->t_ispeed = t->c_ispeed;
-        tp->t_ospeed = t->c_ospeed;
-        tp->t_cflag = cflag;
+	if (ospeed < 0 || (t->c_ispeed && t->c_ispeed != t->c_ospeed))
+		return EINVAL;
+	/* and copy to tty */
+	tp->t_ispeed = t->c_ispeed;
+	tp->t_ospeed = t->c_ospeed;
+	tp->t_cflag = cflag;
 	if (ospeed == 0) {
-		(void) dcmmctl(DCMUNIT(tp->t_dev), MO_OFF, DMSET);
-		return (0);
+		(void)dcmmctl(DCMUNIT(tp->t_dev), MO_OFF, DMSET);
+		return 0;
 	}
 
 	mode = 0;
@@ -1107,9 +1156,10 @@ dcmparam(tp, t)
 		mode |= LC_1STOP;
 #ifdef DEBUG
 	if (dcmdebug & DDB_PARAM)
-		printf("%s port %d: dcmparam: cflag %x mode %x speed %d uperch %d\n",
-		       sc->sc_dev.dv_xname, port, cflag, mode, tp->t_ospeed,
-		       DCM_USPERCH(tp->t_ospeed));
+		printf("%s port %d: "
+		    "dcmparam: cflag %x mode %x speed %d uperch %d\n",
+		    device_xname(sc->sc_dev), port, cflag, mode, tp->t_ospeed,
+		    DCM_USPERCH(tp->t_ospeed));
 #endif
 
 	/*
@@ -1131,12 +1181,11 @@ dcmparam(tp, t)
 	 * XXX why do we do this?
 	 */
 	DELAY(16 * DCM_USPERCH(tp->t_ospeed));
-	return (0);
+	return 0;
 }
 
-void
-dcmstart(tp)
-	struct tty *tp;
+static void
+dcmstart(struct tty *tp)
 {
 	struct dcm_softc *sc;
 	struct dcmdevice *dcm;
@@ -1156,7 +1205,7 @@ dcmstart(tp)
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[board];
+	sc = device_lookup_private(&dcm_cd, board);
 	dcm = sc->sc_dcm;
 
 	s = spltty();
@@ -1166,19 +1215,12 @@ dcmstart(tp)
 #ifdef DEBUG
 	if (dcmdebug & DDB_OUTPUT)
 		printf("%s port %d: dcmstart: state %x flags %x outcc %d\n",
-		       sc->sc_dev.dv_xname, port, tp->t_state, tp->t_flags,
-		       tp->t_outq.c_cc);
+		    device_xname(sc->sc_dev), port, tp->t_state, tp->t_flags,
+		    tp->t_outq.c_cc);
 #endif
 	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state&TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
-	if (tp->t_outq.c_cc == 0) {
+	if (!ttypull(tp)) {
 #ifdef DCMSTATS
 		dsp->xempty++;
 #endif
@@ -1248,7 +1290,8 @@ again:
 #ifdef DEBUG
 	if (dcmdebug & DDB_INTR)
 		printf("%s port %d: dcmstart: head %x tail %x outqcc %d\n",
-		    sc->sc_dev.dv_xname, port, head, tail, tp->t_outq.c_cc);
+		    device_xname(sc->sc_dev), port, head, tail,
+		    tp->t_outq.c_cc);
 #endif
 out:
 #ifdef DCMSTATS
@@ -1264,10 +1307,8 @@ out:
 /*
  * Stop output on a line.
  */
-int
-dcmstop(tp, flag)
-	struct tty *tp;
-	int flag;
+static void
+dcmstop(struct tty *tp, int flag)
 {
 	int s;
 
@@ -1278,16 +1319,13 @@ dcmstop(tp, flag)
 			tp->t_state |= TS_FLUSH;
 	}
 	splx(s);
-	return (0);
 }
 
 /*
  * Modem control
  */
 int
-dcmmctl(dev, bits, how)
-	dev_t dev;
-	int bits, how;
+dcmmctl(dev_t dev, int bits, int how)
 {
 	struct dcm_softc *sc;
 	struct dcmdevice *dcm;
@@ -1297,13 +1335,13 @@ dcmmctl(dev, bits, how)
 	brd = DCMBOARD(unit);
 	port = DCMPORT(unit);
 
-	sc = dcm_cd.cd_devs[brd];
+	sc = device_lookup_private(&dcm_cd, brd);
 	dcm = sc->sc_dcm;
 
 #ifdef DEBUG
 	if (dcmdebug & DDB_MODEM)
 		printf("%s port %d: dcmmctl: bits 0x%x how %x\n",
-		       sc->sc_dev.dv_xname, port, bits, how);
+		    device_xname(sc->sc_dev), port, bits, how);
 #endif
 
 	s = spltty();
@@ -1338,17 +1376,16 @@ dcmmctl(dev, bits, how)
 		DELAY(10); /* delay until done */
 		splx(s);
 	}
-	return (bits);
+	return bits;
 }
 
 /*
  * Set board to either interrupt per-character or at a fixed interval.
  */
-void
-dcmsetischeme(brd, flags)
-	int brd, flags;
+static void
+dcmsetischeme(int brd, int flags)
 {
-	struct dcm_softc *sc = dcm_cd.cd_devs[brd];
+	struct dcm_softc *sc = device_lookup_private(&dcm_cd, brd);
 	struct dcmdevice *dcm = sc->sc_dcm;
 	struct dcmischeme *dis = &sc->sc_scheme;
 	int i;
@@ -1358,11 +1395,11 @@ dcmsetischeme(brd, flags)
 #ifdef DEBUG
 	if (dcmdebug & DDB_INTSCHM)
 		printf("%s: dcmsetischeme(%d): cur %d, ints %d, chars %d\n",
-		       sc->sc_dev.dv_xname, perchar, dis->dis_perchar,
-		       dis->dis_intr, dis->dis_char);
+		    device_xname(sc->sc_dev), perchar, dis->dis_perchar,
+		    dis->dis_intr, dis->dis_char);
 	if ((flags & DIS_RESET) == 0 && perchar == dis->dis_perchar) {
-		printf("%s: dcmsetischeme: redundant request %d\n",
-		       sc->sc_dev.dv_xname, perchar);
+		printf("%s: dcmsetischeme: redundent request %d\n",
+		    device_xname(sc->sc_dev), perchar);
 		return;
 	}
 #endif
@@ -1409,10 +1446,8 @@ dcmsetischeme(brd, flags)
 	SEM_UNLOCK(dcm);
 }
 
-void
-dcminit(dcm, port, rate)
-	struct dcmdevice *dcm;
-	int port, rate;
+static void
+dcminit(struct dcmdevice *dcm, int port, int rate)
 {
 	int s, mode;
 
@@ -1447,9 +1482,8 @@ dcminit(dcm, port, rate)
 /*
  * Empirically derived self-test magic
  */
-int
-dcmselftest(sc)
-	struct dcm_softc *sc;
+static int
+dcmselftest(struct dcm_softc *sc)
 {
 	struct dcmdevice *dcm = sc->sc_dcm;
 	int timo = 0;
@@ -1478,8 +1512,8 @@ dcmselftest(sc)
 	if (dcm->dcm_stcon != ST_OK) {
 #if 0
 		if (hd->hp_args->hw_sc != conscode)
-			printf("dcm%d: self test failed: %x\n",
-			       brd, dcm->dcm_stcon);
+			aprint_error_dev(sc->sc_dev, "self test failed: %x\n",
+			    dcm->dcm_stcon);
 #endif
 		goto out;
 	}
@@ -1488,7 +1522,7 @@ dcmselftest(sc)
 
  out:
 	splx(s);
-	return (rv);
+	return rv;
 }
 
 /*
@@ -1496,66 +1530,40 @@ dcmselftest(sc)
  */
 
 int
-dcm_console_scan(scode, va, arg)
-	int scode;
-	caddr_t va;
-	void *arg;
+dcmcnattach(bus_space_tag_t bst, bus_addr_t addr, int scode)
 {
-	struct dcmdevice *dcm = (struct dcmdevice *)va;
-	struct consdev *cp = arg;
-	u_int pri;
+	bus_space_handle_t bsh;
+	void *va;
+	struct dcmdevice *dcm;
+	int maj;
+
+	if (bus_space_map(bst, addr, DIOCSIZE, 0, &bsh))
+		return 1;
+
+	va = bus_space_vaddr(bst, bsh);
+	dcm = (struct dcmdevice *)va;
 
 	switch (dcm->dcm_rsid) {
-	case DCMID:
-		pri = CN_LOWPRI;
-		break;
-
-	case DCMID|DCMCON:
-		pri = CN_HIGHPRI;
-		break;
-
-	default:
-		return (0);
-	}
-
 #ifdef CONSCODE
-	/*
-	 * Raise our priority, if appropriate.
-	 */
-	if (scode == CONSCODE)
-		pri = CN_FORCED;
+	case DCMID:
 #endif
-
-	/* Only raise priority. */
-	if (pri > cp->cn_pri)
-		cp->cn_pri = pri;
-
-	/*
-	 * If our priority is higher than the currently-remembered
-	 * console, stash our priority, for the benefit of dcmcninit().
-	 */
-	if (cn_tab == NULL || cp->cn_pri > cn_tab->cn_pri) {
-		cn_tab = cp;
-		conscode = scode;
-		return (DIO_SIZE(scode, va));
+	case DCMID|DCMCON:
+		break;
+	default:
+		goto error;
 	}
-	return (0);
-}
 
-void
-dcmcnprobe(cp)
-	struct consdev *cp;
-{
+	dcminit(dcm, DCMCONSPORT, dcmdefaultrate);
+	dcmconsinit = 1;
+	dcmconscode = scode;
+	dcm_cn = dcm;
 
 	/* locate the major number */
-	for (dcmmajor = 0; dcmmajor < nchrdev; dcmmajor++)
-		if (cdevsw[dcmmajor].d_open == dcmopen)
-			break;
+	maj = cdevsw_lookup_major(&dcm_cdevsw);
 
 	/* initialize required fields */
-	cp->cn_dev = makedev(dcmmajor, 0);	/* XXX */
-
-	console_scan(dcm_console_scan, cp);
+	cn_tab = &dcm_cons;
+	cn_tab->cn_dev = makedev(maj, 0);
 
 #ifdef KGDB_CHEAT
 	/* XXX this needs to be fixed. */
@@ -1563,7 +1571,7 @@ dcmcnprobe(cp)
 	 * This doesn't currently work, at least not with ite consoles;
 	 * the console hasn't been initialized yet.
 	 */
-	if (major(kgdb_dev) == dcmmajor &&
+	if (major(kgdb_dev) == maj &&
 	    DCMBOARD(DCMUNIT(kgdb_dev)) == DCMBOARD(unit)) {
 		dcminit(dcm_cn, DCMPORT(DCMUNIT(kgdb_dev)), kgdb_rate);
 		if (kgdb_debug_init) {
@@ -1578,29 +1586,18 @@ dcmcnprobe(cp)
 		}
 	}
 #endif
+
+
+	return 0;
+
+error:
+	bus_space_unmap(bst, bsh, DIOCSIZE);
+	return 1;
 }
 
 /* ARGSUSED */
-void
-dcmcninit(cp)
-	struct consdev *cp;
-{
-
-	/*
-	 * We are not interested by the second console pass.
-	 */
-	if (consolepass != 0)
-		return;
-
-	dcm_cn = (struct dcmdevice *)conaddr;
-	dcminit(dcm_cn, DCMCONSPORT, dcmdefaultrate);
-	dcmconsinit = 1;
-}
-
-/* ARGSUSED */
-int
-dcmcngetc(dev)
-	dev_t dev;
+static int
+dcmcngetc(dev_t dev)
 {
 	struct dcmrfifo *fifo;
 	struct dcmpreg *pp;
@@ -1627,17 +1624,15 @@ dcmcngetc(dev)
 	stat = fifo->data_stat;
 	pp->r_head = (head + 2) & RX_MASK;
 	splx(s);
-	return (c);
+	return c;
 }
 
 /*
  * Console kernel output character routine.
  */
 /* ARGSUSED */
-void
-dcmcnputc(dev, c)
-	dev_t dev;
-	int c;
+static void
+dcmcnputc(dev_t dev, int c)
 {
 	struct dcmpreg *pp;
 	unsigned tail;

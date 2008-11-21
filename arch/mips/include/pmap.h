@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.50 2006/02/16 20:17:14 perry Exp $	*/
+/*	$NetBSD: pmap.h,v 1.54 2007/12/26 16:01:34 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -115,7 +115,7 @@ struct segtab {
  */
 typedef struct pmap {
 	int			pm_count;	/* pmap reference count */
-	struct simplelock	pm_lock;	/* lock on pmap */
+	kmutex_t		pm_lock;	/* lock on pmap */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 	unsigned		pm_asid;	/* TLB address space tag */
 	unsigned		pm_asidgen;	/* its generation number */
@@ -149,6 +149,7 @@ extern struct pmap kernel_pmap_store;
 #define pmap_resident_count(pmap) ((pmap)->pm_stats.resident_count)
 
 #define	pmap_update(pmap)	/* nothing (yet) */
+#define pmap_phys_address(x)	mips_ptob(x)
 
 static __inline void
 pmap_remove_all(struct pmap *pmap)
@@ -194,6 +195,10 @@ paddr_t mips_pmap_unmap_poolpage(vaddr_t);
  * Select CCA to use for unmanaged pages.
  */
 #define	PMAP_CCA_FOR_PA(pa)	2		/* uncached */
+
+#if defined(_MIPS_PADDR_T_64BIT) || defined(_LP64)
+#define PMAP_NOCACHE	0x4000000000000000ULL
+#endif
 
 #endif	/* _KERNEL */
 #endif	/* _MIPS_PMAP_H_ */

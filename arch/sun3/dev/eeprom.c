@@ -1,4 +1,4 @@
-/*	$NetBSD: eeprom.c,v 1.28 2005/12/11 12:19:20 christos Exp $	*/
+/*	$NetBSD: eeprom.c,v 1.31 2008/06/28 12:13:38 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: eeprom.c,v 1.28 2005/12/11 12:19:20 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: eeprom.c,v 1.31 2008/06/28 12:13:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -68,39 +61,39 @@ struct eeprom *eeprom_copy; 	/* soft copy. */
 
 static int ee_update(int off, int cnt);
 
-static char *eeprom_va; /* mapping to actual device */
+static uint8_t *eeprom_va; /* mapping to actual device */
 static int ee_size;     /* size of usable part. */
 
 static int ee_busy, ee_want; /* serialization */
 
-static int  eeprom_match(struct device *, struct cfdata *, void *);
-static void eeprom_attach(struct device *, struct device *, void *);
+static int  eeprom_match(device_t, cfdata_t, void *);
+static void eeprom_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(eeprom, sizeof(struct device),
+CFATTACH_DECL_NEW(eeprom, 0,
     eeprom_match, eeprom_attach, NULL, NULL);
 
 static int 
-eeprom_match(struct device *parent, struct cfdata *cf, void *args)
+eeprom_match(device_t parent, cfdata_t cf, void *args)
 {
 	struct confargs *ca = args;
 
 	/* This driver only supports one instance. */
 	if (eeprom_va != NULL)
-		return (0);
+		return 0;
 
 	if (bus_peek(ca->ca_bustype, ca->ca_paddr, 1) == -1)
-		return (0);
+		return 0;
 
-	return (1);
+	return 1;
 }
 
 static void 
-eeprom_attach(struct device *parent, struct device *self, void *args)
+eeprom_attach(device_t parent, device_t self, void *args)
 {
 	struct confargs *ca = args;
-	char *src, *dst, *lim;
+	uint8_t *src, *dst, *lim;
 
-	printf("\n");
+	aprint_normal("\n");
 #ifdef	DIAGNOSTIC
 	if (sizeof(struct eeprom) != EEPROM_SIZE)
 		panic("eeprom struct wrong");
@@ -108,13 +101,13 @@ eeprom_attach(struct device *parent, struct device *self, void *args)
 
 	ee_size = EEPROM_SIZE;
 	eeprom_va = bus_mapin(ca->ca_bustype, ca->ca_paddr, ee_size);
-	if (!eeprom_va)
-		panic("eeprom_attach");
+	if (eeprom_va == NULL)
+		panic("%s: can't map va", __func__);
 
 	/* Keep a "soft" copy of the EEPROM to make access simpler. */
 	eeprom_copy = malloc(ee_size, M_DEVBUF, M_NOWAIT);
-	if (eeprom_copy == 0)
-		panic("eeprom_attach: malloc eeprom_copy");
+	if (eeprom_copy == NULL)
+		panic("%s: malloc eeprom_copy", __func__);
 
 	/*
 	 * On the 3/80, do not touch the last 40 bytes!
@@ -127,11 +120,12 @@ eeprom_attach(struct device *parent, struct device *self, void *args)
 
 	/* Do only byte access in the EEPROM. */
 	src = eeprom_va;
-	dst = (char*) eeprom_copy;
+	dst = (uint8_t *)eeprom_copy;
 	lim = dst + ee_size;
 
-	do *dst++ = *src++;
-	while (dst < lim);
+	do {
+		*dst++ = *src++;
+	} while (dst < lim);
 
 	if (ee_size < EEPROM_SIZE) {
 		/* Clear out the last part. */
@@ -176,31 +170,31 @@ eeprom_uio(struct uio *uio)
 {
 	int cnt, error;
 	int off;	/* NOT off_t */
-	caddr_t va;
+	uint8_t *va;
 
 	if (eeprom_copy == NULL)
-		return (ENXIO);
+		return ENXIO;
 
 	off = uio->uio_offset;
 	if ((off < 0) || (off > EEPROM_SIZE))
-		return (EFAULT);
+		return EFAULT;
 
 	cnt = min(uio->uio_resid, (EEPROM_SIZE - off));
 	if (cnt == 0)
-		return (0);	/* EOF */
+		return 0;	/* EOF */
 
-	va = ((char*)eeprom_copy) + off;
+	va = ((uint8_t *)eeprom_copy) + off;
 	error = uiomove(va, (int)cnt, uio);
 
 	/* If we wrote the rambuf, update the H/W. */
-	if (!error && (uio->uio_rw != UIO_READ)) {
+	if (error == 0 && (uio->uio_rw != UIO_READ)) {
 		error = ee_take();
-		if (!error)
+		if (error == 0)
 			error = ee_update(off, cnt);
 		ee_give();
 	}
 
-	return (error);
+	return error;
 }
 
 /*
@@ -211,8 +205,8 @@ eeprom_uio(struct uio *uio)
 static int
 ee_update(int off, int cnt)
 {
-	volatile char *ep;
-	char *bp;
+	volatile uint8_t *ep;
+	uint8_t *bp;
 	int errcnt;
 
 	if (eeprom_va == NULL)
@@ -226,7 +220,7 @@ ee_update(int off, int cnt)
 	if (cnt > (ee_size - off))
 		cnt = (ee_size - off);
 
-	bp = ((char*)eeprom_copy) + off;
+	bp = ((uint8_t *)eeprom_copy) + off;
 	ep = eeprom_va + off;
 	errcnt = 0;
 
@@ -237,14 +231,14 @@ ee_update(int off, int cnt)
 		 * After some number of writes it just fails!
 		 */
 		if (*ep != *bp) {
-			*ep  = *bp;
+			*ep = *bp;
 			/*
 			 * We have written the EEPROM, so now we must
 			 * sleep for at least 10 milliseconds while
 			 * holding the lock to prevent all access to
 			 * the EEPROM while it recovers.
 			 */
-			(void)tsleep(eeprom_va, PZERO-1, "eeprom", hz/50);
+			(void)tsleep(eeprom_va, PZERO - 1, "eeprom", hz / 50);
 		}
 		/* Make sure the write worked. */
 		if (*ep != *bp)
@@ -253,5 +247,5 @@ ee_update(int off, int cnt)
 		bp++;
 		cnt--;
 	}
-	return (errcnt ? EIO : 0);
+	return errcnt ? EIO : 0;
 }

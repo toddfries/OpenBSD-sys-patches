@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.c,v 1.29 2008/03/20 22:25:29 deraadt Exp $	*/
-/*	$NetBSD: param.c,v 1.16 1996/03/12 03:08:40 mrg Exp $	*/
+/*	$NetBSD: param.c,v 1.59 2008/11/12 14:32:34 ad Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1989 Regents of the University of California.
@@ -37,17 +36,29 @@
  *	@(#)param.c	7.20 (Berkeley) 6/27/91
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: param.c,v 1.59 2008/11/12 14:32:34 ad Exp $");
+
+#include "opt_hz.h"
+#include "opt_rtc_offset.h"
+#include "opt_sysv.h"
+#include "opt_sysvparam.h"
+#include "opt_nmbclusters.h"
+#include "opt_multiprocessor.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/socket.h>
+#include <sys/socketvar.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/file.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 #include <sys/mbuf.h>
 #include <ufs/ufs/quota.h>
 #include <sys/kernel.h>
 #include <sys/utsname.h>
+#include <sys/ksem.h>
 #ifdef SYSVSHM
 #include <machine/vmparam.h>
 #include <sys/shm.h>
@@ -60,60 +71,99 @@
 #endif
 
 /*
+ * PCC cannot handle the 80KB string literal.
+ */
+#if !defined(__PCC__)
+#define CONFIG_FILE
+#include "config_file.h"
+#endif
+
+/*
  * System parameter formulae.
  *
  * This file is copied into each directory where we compile
  * the kernel; it should be modified there to suit local taste
  * if necessary.
  *
- * Compiled with -DHZ=xx -DTIMEZONE=x -DDST=x -DMAXUSERS=xx
+ * Compiled with -DHZ=xx -DRTC_OFFSET=x -DMAXUSERS=xx
  */
 
-#ifndef TIMEZONE
-# define TIMEZONE 0
+#ifdef TIMEZONE
+#error TIMEZONE is an obsolete kernel option.
 #endif
-#ifndef DST
-# define DST 0
+
+#ifdef DST
+#error DST is an obsolete kernel option.
 #endif
+
+#ifndef RTC_OFFSET
+#define RTC_OFFSET 0
+#endif
+
 #ifndef HZ
 #define	HZ 100
 #endif
+
+#ifndef MAXFILES
+#define	MAXFILES	(3 * (NPROC + MAXUSERS) + 80)
+#endif
+
+#ifndef MAXEXEC
+#define	MAXEXEC		16
+#endif
+
 int	hz = HZ;
 int	tick = 1000000 / HZ;
-int	tickadj = 240000 / (60 * HZ);		/* can adjust 240ms in 60s */
-struct	timezone tz = { TIMEZONE, DST };
-#define	NPROC (30 + 16 * MAXUSERS)
-#define	NTEXT (80 + NPROC / 8)			/* actually the object cache */
-#define	NVNODE (NPROC * 2 + NTEXT + 100)	 
-int	desiredvnodes = NVNODE;
+/* can adjust 240ms in 60s */
+int	tickadj = (240000 / (60 * HZ)) ? (240000 / (60 * HZ)) : 1;
+int	rtc_offset = RTC_OFFSET;
 int	maxproc = NPROC;
-int	maxfiles = 5 * (NPROC + MAXUSERS) + 80;
-int	nmbclust = NMBCLUSTERS;
+int	desiredvnodes = NVNODE;
+u_int	maxfiles = MAXFILES;
+int	fscale = FSCALE;	/* kernel uses `FSCALE', user uses `fscale' */
+int	maxexec = MAXEXEC;	/* max number of concurrent exec() calls */
+
+#ifdef MULTIPROCESSOR
+u_int	maxcpus = MAXCPUS;
+size_t	coherency_unit = COHERENCY_UNIT;
+#else
+u_int	maxcpus = 1;
+size_t	coherency_unit = ALIGNBYTES + 1;
+#endif
+
+/*
+ * Various mbuf-related parameters.  These can also be changed at run-time
+ * with sysctl.
+ */
+int	nmbclusters = NMBCLUSTERS;
 
 #ifndef MBLOWAT
-#define MBLOWAT		16
+#define	MBLOWAT		16
 #endif
 int	mblowat = MBLOWAT;
 
 #ifndef MCLLOWAT
-#define MCLLOWAT	8
+#define	MCLLOWAT	8
 #endif
 int	mcllowat = MCLLOWAT;
 
-
-int	fscale = FSCALE;	/* kernel uses `FSCALE', user uses `fscale' */
-
-int	shmseg = 8;
-int	shmmaxpgs = SHMMAXPGS;
 /*
  * Values in support of System V compatible shared memory.	XXX
  */
 #ifdef SYSVSHM
+#ifndef	SHMMAX
 #define	SHMMAX	SHMMAXPGS	/* shminit() performs a `*= PAGE_SIZE' */
+#endif
+#ifndef	SHMMIN
 #define	SHMMIN	1
+#endif
+#ifndef	SHMMNI
 #define	SHMMNI	128		/* <64k, see IPCID_TO_IX in ipc.h */
+#endif
+#ifndef	SHMSEG
 #define	SHMSEG	128
-#define	SHMALL	(SHMMAXPGS)
+#endif
+#define	SHMALL	SHMMAXPGS
 
 struct	shminfo shminfo = {
 	SHMMAX,
@@ -129,6 +179,7 @@ struct	shminfo shminfo = {
  */
 #ifdef SYSVSEM
 struct	seminfo seminfo = {
+	SEMMAP,		/* # of entries in semaphore map */
 	SEMMNI,		/* # of semaphore identifiers */
 	SEMMNS,		/* # of semaphores in system */
 	SEMMNU,		/* # of undo structures in system */
@@ -157,8 +208,12 @@ struct	msginfo msginfo = {
 #endif
 
 /*
- * This has to be allocated somewhere; allocating
- * them here forces loader errors if this file is omitted
- * (if they've been externed everywhere else; hah!).
+ * Actual network mbuf sizes (read-only), for netstat.
  */
-struct	utsname utsname;
+const	int msize = MSIZE;
+const	int mclbytes = MCLBYTES;
+
+/*
+ * Values in support of POSIX semaphores.
+ */
+int	ksem_max = KSEM_MAX;

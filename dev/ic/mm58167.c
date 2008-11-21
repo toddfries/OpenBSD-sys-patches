@@ -1,4 +1,4 @@
-/*	$NetBSD: mm58167.c,v 1.9 2007/10/19 11:59:57 ad Exp $	*/
+/*	$NetBSD: mm58167.c,v 1.11 2008/07/06 13:29:50 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mm58167.c,v 1.9 2007/10/19 11:59:57 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mm58167.c,v 1.11 2008/07/06 13:29:50 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -62,38 +55,37 @@ int mm58167_settime(todr_chip_handle_t, volatile struct timeval *);
  *  MM/DD HH:MM:SS format, even though it doesn't know about
  *  leap years and Feb. 29, thus making it nearly worthless."
  */
-#define mm58167_read(sc, r) bus_space_read_1(sc->mm58167_regt, sc->mm58167_regh, sc-> r)
-#define mm58167_write(sc, r, v) bus_space_write_1(sc->mm58167_regt, sc->mm58167_regh, sc-> r, v)
+#define mm58167_read(sc, r)	\
+	bus_space_read_1(sc->mm58167_regt, sc->mm58167_regh, sc-> r)
+#define mm58167_write(sc, r, v)	\
+	bus_space_write_1(sc->mm58167_regt, sc->mm58167_regh, sc-> r, v)
 
 todr_chip_handle_t
-mm58167_attach(sc)
-	struct mm58167_softc *sc;
+mm58167_attach(struct mm58167_softc *sc)
 {
 	struct todr_chip_handle *handle;
 
-	printf(": mm58167");
+	aprint_normal(": mm58167");
 
 	handle = &sc->_mm58167_todr_handle;
 	memset(handle, 0, sizeof(handle));
 	handle->cookie = sc;
 	handle->todr_gettime = mm58167_gettime;
 	handle->todr_settime = mm58167_settime;
-	return (handle);
+	return handle;
 }
 
 /*
  * Set up the system's time, given a `reasonable' time value.
  */
 int
-mm58167_gettime(handle, tv)
-	todr_chip_handle_t handle;
-	volatile struct timeval *tv;
+mm58167_gettime(todr_chip_handle_t handle, volatile struct timeval *tv)
 {
 	struct mm58167_softc *sc = handle->cookie;
 	struct clock_ymdhms dt_hardware;
 	struct clock_ymdhms dt_reasonable;
 	int s;
-	u_int8_t byte_value;
+	uint8_t byte_value;
 	int leap_year, had_leap_day;
 
 	/* First, read the date out of the chip. */
@@ -110,7 +102,10 @@ mm58167_gettime(handle, tv)
 	 * rippling through while we were reading).
 	 */
 	do {
-#define _MM58167_GET(dt_f, mm_f) byte_value = mm58167_read(sc, mm_f); dt_hardware.dt_f = FROMBCD(byte_value)
+#define _MM58167_GET(dt_f, mm_f)					\
+	byte_value = mm58167_read(sc, mm_f);				\
+	dt_hardware.dt_f = FROMBCD(byte_value)
+
 		_MM58167_GET(dt_mon, mm58167_mon);
 		_MM58167_GET(dt_day, mm58167_day);
 		_MM58167_GET(dt_hour, mm58167_hour);
@@ -132,16 +127,16 @@ mm58167_gettime(handle, tv)
 	 */
 	if (dt_hardware.dt_mon < dt_reasonable.dt_mon ||
 	    (dt_hardware.dt_mon == dt_reasonable.dt_mon &&
-		(dt_hardware.dt_day < dt_reasonable.dt_day ||
-		    (dt_hardware.dt_day == dt_reasonable.dt_day &&
-			(dt_hardware.dt_hour < dt_reasonable.dt_hour ||
-			    (dt_hardware.dt_hour == dt_reasonable.dt_hour &&
-				(dt_hardware.dt_min < dt_reasonable.dt_min ||
-				    (dt_hardware.dt_min == dt_reasonable.dt_min &&
-					(dt_hardware.dt_sec < dt_reasonable.dt_sec))))))))) {
-	  dt_hardware.dt_year = dt_reasonable.dt_year + 1;
+	     (dt_hardware.dt_day < dt_reasonable.dt_day ||
+	      (dt_hardware.dt_day == dt_reasonable.dt_day &&
+	       (dt_hardware.dt_hour < dt_reasonable.dt_hour ||
+	        (dt_hardware.dt_hour == dt_reasonable.dt_hour &&
+	         (dt_hardware.dt_min < dt_reasonable.dt_min ||
+	          (dt_hardware.dt_min == dt_reasonable.dt_min &&
+	           (dt_hardware.dt_sec < dt_reasonable.dt_sec))))))))) {
+		dt_hardware.dt_year = dt_reasonable.dt_year + 1;
 	} else {
-	  dt_hardware.dt_year = dt_reasonable.dt_year;
+		dt_hardware.dt_year = dt_reasonable.dt_year;
 	}
 
 	/* convert the hardware date into a time: */
@@ -166,7 +161,7 @@ mm58167_gettime(handle, tv)
 	 */
 	if (dt_hardware.dt_year > dt_reasonable.dt_year &&
 	    dt_hardware.dt_mon >= 3) {
-	  leap_year = dt_hardware.dt_year;
+		leap_year = dt_hardware.dt_year;
 	}
 
 	/*
@@ -176,8 +171,8 @@ mm58167_gettime(handle, tv)
 	 * day.
 	 */
 	else if (dt_hardware.dt_year > dt_reasonable.dt_year &&
-		 dt_reasonable.dt_mon < 3) {
-	  leap_year = dt_reasonable.dt_year;
+	    dt_reasonable.dt_mon < 3) {
+		leap_year = dt_reasonable.dt_year;
 	}
 
 	/*
@@ -186,16 +181,16 @@ mm58167_gettime(handle, tv)
 	 * past March now.  Check this year for a leap day.
 	 */
 	else if (dt_hardware.dt_year == dt_reasonable.dt_year
-		 && dt_reasonable.dt_mon < 3
-		 && dt_hardware.dt_mon >= 3) {
-	  leap_year = dt_reasonable.dt_year;
+	    && dt_reasonable.dt_mon < 3
+	    && dt_hardware.dt_mon >= 3) {
+		leap_year = dt_reasonable.dt_year;
 	}
 
 	/*
 	 * Otherwise, no leap year to check.
 	 */
 	else {
-	  leap_year = 0;
+		leap_year = 0;
 	}
 
 	/* Do the real leap day check. */
@@ -222,22 +217,20 @@ mm58167_gettime(handle, tv)
 	 * Use NTP to deal.
 	 */
 	if (had_leap_day) {
-	  tv->tv_sec += SECDAY;
-	  todr_settime(handle, tv);
+		tv->tv_sec += SECDAY;
+		todr_settime(handle, tv);
 	}
 
-	return (0);
+	return 0;
 }
 
 int
-mm58167_settime(handle, tv)
-	todr_chip_handle_t handle;
-	volatile struct timeval *tv;
+mm58167_settime(todr_chip_handle_t handle, volatile struct timeval *tv)
 {
 	struct mm58167_softc *sc = handle->cookie;
 	struct clock_ymdhms dt_hardware;
 	int s;
-	u_int8_t byte_value;
+	uint8_t byte_value;
 
 	/* Convert the seconds into ymdhms. */
 	clock_secs_to_ymdhms(tv->tv_sec, &dt_hardware);
@@ -252,7 +245,10 @@ mm58167_settime(handle, tv)
 	mm58167_write(sc, mm58167_go, 0xFF);
 
 	/* Load everything. */
-#define _MM58167_PUT(dt_f, mm_f) byte_value = TOBCD(dt_hardware.dt_f); mm58167_write(sc, mm_f, byte_value)
+#define _MM58167_PUT(dt_f, mm_f)					\
+	byte_value = TOBCD(dt_hardware.dt_f);				\
+	mm58167_write(sc, mm_f, byte_value)
+
 	_MM58167_PUT(dt_mon, mm58167_mon);
 	_MM58167_PUT(dt_day, mm58167_day);
 	_MM58167_PUT(dt_hour, mm58167_hour);
@@ -261,5 +257,5 @@ mm58167_settime(handle, tv)
 #undef _MM58167_PUT
 
 	splx(s);
-	return (0);
+	return 0;
 }

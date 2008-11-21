@@ -30,6 +30,11 @@
  *    Keith Whitwell <keith@tungstengraphics.com>
  */
 
+#include <sys/cdefs.h>
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_drm.h,v 1.14 2006/09/07 23:04:47 anholt Exp $");
+*/
+
 #ifndef __RADEON_DRM_H__
 #define __RADEON_DRM_H__
 
@@ -223,10 +228,10 @@ typedef union {
 #define R300_CMD_CP_DELAY		5
 #define R300_CMD_DMA_DISCARD		6
 #define R300_CMD_WAIT			7
-#	define R300_WAIT_2D		0x1
-#	define R300_WAIT_3D		0x2
-#	define R300_WAIT_2D_CLEAN	0x3
-#	define R300_WAIT_3D_CLEAN	0x4
+#	define R300_WAIT_2D  		0x1
+#	define R300_WAIT_3D  		0x2
+#	define R300_WAIT_2D_CLEAN  	0x3
+#	define R300_WAIT_3D_CLEAN  	0x4
 #define R300_CMD_SCRATCH		8
 
 typedef union {
@@ -417,7 +422,7 @@ typedef struct {
 
 	/* The current cliprects, or a subset thereof.
 	 */
-	struct drm_clip_rect boxes[RADEON_NR_SAREA_CLIPRECTS];
+	drm_clip_rect_t boxes[RADEON_NR_SAREA_CLIPRECTS];
 	unsigned int nbox;
 
 	/* Counters for client-side throttling of rendering clients.
@@ -426,7 +431,7 @@ typedef struct {
 	unsigned int last_dispatch;
 	unsigned int last_clear;
 
-	struct drm_tex_region tex_list[RADEON_NR_TEX_HEAPS][RADEON_NR_TEX_REGIONS +
+	drm_tex_region_t tex_list[RADEON_NR_TEX_HEAPS][RADEON_NR_TEX_REGIONS +
 						       1];
 	unsigned int tex_age[RADEON_NR_TEX_HEAPS];
 	int ctx_owner;
@@ -507,7 +512,8 @@ typedef struct drm_radeon_init {
 		RADEON_INIT_CP = 0x01,
 		RADEON_CLEANUP_CP = 0x02,
 		RADEON_INIT_R200_CP = 0x03,
-		RADEON_INIT_R300_CP = 0x04
+		RADEON_INIT_R300_CP = 0x04,
+		RADEON_INIT_R500_CP = 0x05,
 	} func;
 	unsigned long sarea_priv_offset;
 	int is_pci; /* for overriding only */
@@ -604,7 +610,7 @@ typedef struct drm_radeon_cmd_buffer {
 	int bufsz;
 	char __user *buf;
 	int nbox;
-	struct drm_clip_rect __user *boxes;
+	drm_clip_rect_t __user *boxes;
 } drm_radeon_cmd_buffer_t;
 
 typedef struct drm_radeon_tex_image {
@@ -655,7 +661,6 @@ typedef struct drm_radeon_indirect {
 #define RADEON_PARAM_GART_TEX_HANDLE       10
 #define RADEON_PARAM_SCRATCH_OFFSET        11
 #define RADEON_PARAM_CARD_TYPE             12
-#define RADEON_PARAM_VBLANK_CRTC           13   /* VBLANK CRTC */
 
 typedef struct drm_radeon_getparam {
 	int param;
@@ -710,7 +715,7 @@ typedef struct drm_radeon_setparam {
 
 #define RADEON_SETPARAM_NEW_MEMMAP 4		/* Use new memory map */
 #define RADEON_SETPARAM_PCIGART_TABLE_SIZE 5    /* PCI GART Table Size */
-#define RADEON_SETPARAM_VBLANK_CRTC 6           /* VBLANK CRTC */
+
 /* 1.14: Clients can allocate/free a surface
  */
 typedef struct drm_radeon_surface_alloc {
@@ -723,7 +728,5 @@ typedef struct drm_radeon_surface_free {
 	unsigned int address;
 } drm_radeon_surface_free_t;
 
-#define	DRM_RADEON_VBLANK_CRTC1		1
-#define	DRM_RADEON_VBLANK_CRTC2		2
 
 #endif

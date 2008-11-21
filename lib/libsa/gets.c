@@ -1,5 +1,4 @@
-/*	$OpenBSD: gets.c,v 1.4 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: gets.c,v 1.5.2.1 1995/10/13 19:54:26 pk Exp $	*/
+/*	$NetBSD: gets.c,v 1.10 2007/11/24 13:20:55 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -40,7 +39,7 @@ gets(char *buf)
 	int c;
 	char *lp;
 
-	for (lp = buf;;)
+	for (lp = buf;;) {
 		switch (c = getchar() & 0177) {
 		case '\n':
 		case '\r':
@@ -62,8 +61,8 @@ gets(char *buf)
 				--lp;
 			break;
 #endif
-		case 'r'&037: {
-		char *p;
+		case 'r' & 037: {
+			char *p;
 
 			putchar('\n');
 			for (p = buf; p < lp; ++p)
@@ -73,14 +72,16 @@ gets(char *buf)
 #if AT_ERASE
 		case '@':
 #endif
-		case 'u'&037:
-		case 'w'&037:
+		case 'u' & 037:
+		case 'w' & 037:
 			lp = buf;
 			putchar('\n');
 			break;
 		default:
 			*lp++ = c;
 			putchar(c);
+			break;
 		}
+	}
 	/*NOTREACHED*/
 }

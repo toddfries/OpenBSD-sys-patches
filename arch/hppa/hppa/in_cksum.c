@@ -1,4 +1,6 @@
-/*	$OpenBSD: in_cksum.c,v 1.3 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$NetBSD: in_cksum.c,v 1.7 2005/12/24 22:45:35 perry Exp $	*/
+
+/*	$OpenBSD: in_cksum.c,v 1.1 2001/01/13 00:00:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -15,6 +17,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,6 +35,9 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.7 2005/12/24 22:45:35 perry Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,7 +53,7 @@
  * HPPA version.
  */
 
-#define ADD32	asm volatile(	"ldw 0x00(%1), %%r19! ldw 0x04(%1), %%r20\n\t" \
+#define ADD32	__asm volatile(	"ldw 0x00(%1), %%r19! ldw 0x04(%1), %%r20\n\t" \
 				"add  %0, %%r19, %0 ! addc  %0, %%r20, %0\n\t" \
 				"ldw 0x08(%1), %%r19! ldw 0x0c(%1), %%r20\n\t" \
 				"addc %0, %%r19, %0 ! addc  %0, %%r20, %0\n\t" \
@@ -53,7 +63,7 @@
 				"addc %0, %%r19, %0 ! addc  %0, %%r20, %0\n\t" \
 				"ldo 0x20(%1), %1   ! addc  %0, %%r0 , %0" \
 				: "+r" (sum), "+r" (w) :: "r20", "r19")
-#define ADD16	asm volatile(	"ldw 0x00(%1), %%r19! ldw 0x04(%1), %%r20\n\t" \
+#define ADD16	__asm volatile(	"ldw 0x00(%1), %%r19! ldw 0x04(%1), %%r20\n\t" \
 				"add   %0, %%r19, %0! addc  %0, %%r20, %0\n\t" \
 				"ldw 0x08(%1), %%r19! ldw 0x0c(%1), %%r20\n\t" \
 				"addc  %0, %%r19, %0! addc  %0, %%r20, %0\n\t" \
@@ -62,24 +72,22 @@
 
 #define ADDCARRY	{if (sum > 0xffff) sum -= 0xffff;}
 #define REDUCE		{sum = (sum & 0xffff) + (sum >> 16); ADDCARRY}
-#define ROL		asm volatile ("shd %0, %0, 8, %0" : "+r" (sum))
+#define ROL		__asm volatile ("shd %0, %0, 8, %0" : "+r" (sum))
 #define ADDBYTE		{ROL; sum += *w++; bins++; mlen--;}
-#define ADDSHORT	{sum += *((u_short *)w)++; mlen -= 2;}
-#define ADDWORD	asm volatile(	"ldwm 4(%1), %%r19! add %0, %%r19, %0\n\t" \
+#define ADDSHORT	{sum += *(u_short *)w; w += 2; mlen -= 2;}
+#define ADDWORD	__asm volatile(	"ldwm 4(%1), %%r19! add %0, %%r19, %0\n\t" \
 				"ldo -4(%2), %2   ! addc    %0, 0, %0" \
 				: "+r" (sum), "+r" (w), "+r" (mlen) :: "r19")
 
 int
-in_cksum(m, len)
-	register struct mbuf *m;
-	register int len;
+in_cksum(struct mbuf *m, int len)
 {
-	register u_int sum = 0;
-	register u_int bins = 0;
+	u_int sum = 0;
+	u_int bins = 0;
 
 	for (; m && len; m = m->m_next) {
-		register int mlen = m->m_len;
-		register u_char *w;
+		int mlen = m->m_len;
+		u_char *w;
 
 		if (!mlen)
 			continue;

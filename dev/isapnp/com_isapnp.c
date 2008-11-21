@@ -1,4 +1,4 @@
-/*	$NetBSD: com_isapnp.c,v 1.27 2007/10/19 12:00:30 ad Exp $	*/
+/*	$NetBSD: com_isapnp.c,v 1.29 2008/04/28 20:23:52 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_isapnp.c,v 1.27 2007/10/19 12:00:30 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_isapnp.c,v 1.29 2008/04/28 20:23:52 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -67,15 +60,14 @@ struct com_isapnp_softc {
 	void	*sc_ih;			/* interrupt handler */
 };
 
-int	com_isapnp_match(struct device *, struct cfdata *, void *);
-void	com_isapnp_attach(struct device *, struct device *, void *);
+int	com_isapnp_match(device_t, cfdata_t , void *);
+void	com_isapnp_attach(device_t, device_t, void *);
 
-CFATTACH_DECL(com_isapnp, sizeof(struct com_isapnp_softc),
+CFATTACH_DECL_NEW(com_isapnp, sizeof(struct com_isapnp_softc),
     com_isapnp_match, com_isapnp_attach, NULL, NULL);
 
 int
-com_isapnp_match(struct device *parent, struct cfdata *match,
-    void *aux)
+com_isapnp_match(device_t parent, cfdata_t match, void *aux)
 {
 	int pri, variant;
 
@@ -86,16 +78,16 @@ com_isapnp_match(struct device *parent, struct cfdata *match,
 }
 
 void
-com_isapnp_attach(struct device *parent, struct device *self,
-    void *aux)
+com_isapnp_attach(device_t parent, device_t self, void *aux)
 {
 	struct com_isapnp_softc *isc = device_private(self);
 	struct com_softc *sc = &isc->sc_com;
 	struct isapnp_attach_args *ipa = aux;
 
+	sc->sc_dev = self;
+
 	if (isapnp_config(ipa->ipa_iot, ipa->ipa_memt, ipa)) {
-		printf("%s: error in region allocation\n",
-		       sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "error in region allocation\n");
 		return;
 	}
 

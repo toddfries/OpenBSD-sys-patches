@@ -1,5 +1,4 @@
-/*	$OpenBSD: nfsproto.h,v 1.7 2007/06/06 14:13:42 thib Exp $	*/
-/*	$NetBSD: nfsproto.h,v 1.1 1996/02/18 11:54:06 fvdl Exp $	*/
+/*	$NetBSD: nfsproto.h,v 1.17 2006/12/27 12:10:09 yamt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -47,16 +46,15 @@
  * Constants as defined in the Sun NFS Version 2 and 3 specs.
  * "NFS: Network File System Protocol Specification" RFC1094
  * and in the "NFS: Network File System Version 3 Protocol
- * Specification"
+ * Specification" RFC1813.
  */
 
 #define NFS_PORT	2049
 #define	NFS_PROG	100003
 #define NFS_VER2	2
 #define	NFS_VER3	3
-#define NFS_VER4        4
 #define NFS_V2MAXDATA	8192
-#define	NFS_MAXDGRAMDATA 32768
+#define	NFS_MAXDGRAMDATA (60*1024)
 #define	NFS_MAXDATA	MAXBSIZE
 #define	NFS_MAXPATHLEN	1024
 #define	NFS_MAXNAMLEN	255
@@ -82,6 +80,7 @@
 #define	NFSERR_NOSPC		28
 #define	NFSERR_ROFS		30
 #define	NFSERR_MLINK		31	/* Version 3 only */
+#define	NFSERR_TIMEDOUT		60	/* XXX */
 #define	NFSERR_NAMETOL		63
 #define	NFSERR_NOTEMPTY		66
 #define	NFSERR_DQUOT		69
@@ -96,7 +95,7 @@
 #define	NFSERR_SERVERFAULT	10006
 #define	NFSERR_BADTYPE		10007
 #define	NFSERR_JUKEBOX		10008
-#define NFSERR_TRYLATER		NFSERR_JUKEBOX
+#define	NFSERR_TRYLATER		NFSERR_JUKEBOX
 #define	NFSERR_STALEWRITEVERF	30001	/* Fake return for nfs_commit() */
 
 #define NFSERR_RETVOID		0x20000000 /* Return void, not error */
@@ -114,7 +113,7 @@
 #define NFSX_V2STATFS	20
 
 /* specific to NFS Version 3 */
-#define NFSX_V3FH		(sizeof (fhandle_t)) /* size this server uses */
+#define NFSX_V3FH		(12/*sizeof(fhandle_t)*/+16)
 #define	NFSX_V3FHMAX		64	/* max. allowed by protocol */
 #define NFSX_V3FATTR		84
 #define NFSX_V3SATTR		60	/* max. all fields filled in */
@@ -131,7 +130,7 @@
 /* variants for both versions */
 #define NFSX_FH(v3)		((v3) ? (NFSX_V3FHMAX + NFSX_UNSIGNED) : \
 					NFSX_V2FH)
-#define NFSX_SRVFH(v3)		((v3) ? NFSX_V3FH : NFSX_V2FH)
+#define NFSX_SRVFH(nsfh, v3)	(((v3) ? NFSX_UNSIGNED : 0) + NFSRVFH_SIZE(nsfh))
 #define	NFSX_FATTR(v3)		((v3) ? NFSX_V3FATTR : NFSX_V2FATTR)
 #define NFSX_PREOPATTR(v3)	((v3) ? (7 * NFSX_UNSIGNED) : 0)
 #define NFSX_POSTOPATTR(v3)	((v3) ? (NFSX_V3FATTR + NFSX_UNSIGNED) : 0)
@@ -145,6 +144,7 @@
 #define NFSX_READDIR(v3)	((v3) ? (5 * NFSX_UNSIGNED) : \
 					(2 * NFSX_UNSIGNED))
 #define	NFSX_STATFS(v3)		((v3) ? NFSX_V3STATFS : NFSX_V2STATFS)
+#define	NFSX_FHTOOBIG_P(sz, v3)	((sz) > ((v3) ? NFSX_V3FHMAX : NFSX_V2FH))
 
 /* nfs rpc procedure numbers (before version mapping) */
 #define	NFSPROC_NULL		0
@@ -169,9 +169,8 @@
 #define	NFSPROC_FSINFO		19
 #define	NFSPROC_PATHCONF	20
 #define	NFSPROC_COMMIT		21
-
-#define NFSPROC_NOOP		25
-#define	NFS_NPROCS		26
+#define NFSPROC_NOOP		22
+#define	NFS_NPROCS		23
 
 /* Actual Version 2 procedure numbers */
 #define	NFSV2PROC_NULL		0
@@ -225,8 +224,8 @@
 #define	vtonfsv2_mode(t,m) \
 		txdr_unsigned(((t) == VFIFO) ? MAKEIMODE(VCHR, (m)) : \
 				MAKEIMODE((t), (m)))
-#define vtonfsv3_mode(m)	txdr_unsigned((m) & 07777)
-#define	nfstov_mode(a)		(fxdr_unsigned(u_int16_t, (a))&07777)
+#define vtonfsv3_mode(m)	txdr_unsigned((m) & ALLPERMS)
+#define	nfstov_mode(a)		(fxdr_unsigned(u_int32_t, (a)) & ALLPERMS)
 #define	vtonfsv2_type(a)	txdr_unsigned(nfsv2_type[((int32_t)(a))])
 #define	vtonfsv3_type(a)	txdr_unsigned(nfsv3_type[((int32_t)(a))])
 #define	nfsv2tov_type(a)	nv2tov_type[fxdr_unsigned(u_int32_t,(a))&0x7]
@@ -248,7 +247,9 @@ typedef enum { NFNON=0, NFREG=1, NFDIR=2, NFBLK=3, NFCHR=4, NFLNK=5,
 #define NFS_SMALLFH	64
 #endif
 union nfsfh {
+#ifdef _KERNEL
 	fhandle_t fh_generic;
+#endif
 	u_char    fh_bytes[NFS_SMALLFH];
 };
 typedef union nfsfh nfsfh_t;
@@ -273,6 +274,15 @@ struct nfs_uquad {
 	u_int32_t nfsuquad[2];
 };
 typedef	struct nfs_uquad	nfsuint64;
+
+/*
+ * Used to convert between two u_longs and a u_quad_t.
+ */
+union nfs_quadconvert {
+	u_int32_t lval[2];
+	u_quad_t  qval;
+};
+typedef union nfs_quadconvert	nfsquad_t;
 
 /*
  * NFS Version 3 special file number.

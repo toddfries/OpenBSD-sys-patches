@@ -1,5 +1,4 @@
-/*	$OpenBSD: undefined.h,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
-/*	$NetBSD: undefined.h,v 1.4 2001/12/20 01:20:23 thorpej Exp $	*/
+/*	$NetBSD: undefined.h,v 1.11 2008/03/15 10:16:43 rearnsha Exp $	*/
 
 /*
  * Copyright (c) 1995-1996 Mark Brinicombe.
@@ -51,17 +50,36 @@
 
 #include <sys/queue.h>
 
-typedef int (*undef_handler_t) (unsigned int, unsigned int, trapframe_t *, int);
+typedef int (*undef_handler_t) __P((unsigned int, unsigned int, trapframe_t *, int));
 
-#define FP_COPROC	1
-#define FP_COPROC2	2
-#define MAX_COPROCS	16
+/*
+ * Enumeration of coprocessor numbers.  Values may be duplicated
+ * (the iWMMX coprocessor clashes with the FPA, for example), but
+ * keep this table in numeric order.
+ */
+enum arm_coprocs {
+	FPA_COPROC = 1,
+	FPA_COPROC2 = 2,
+	VFP_COPROC = 10,
+	VFP_COPROC2 = 11,
+	DEBUG_COPROC = 14,
+	SYSTEM_COPROC = 15,
+	/* 
+	 *The following are not really co-processors, but are on the end
+	 * of the unknown instruction table for each coproc.
+	 */
+	CORE_UNKNOWN_HANDLER = 16,
+#ifdef THUMB_CODE
+	THUMB_UNKNOWN_HANDLER = 17,
+#endif
+	NUM_UNKNOWN_HANDLERS	/* Last entry */
+};
 
 /* Prototypes for undefined.c */
 
-void *install_coproc_handler (int, undef_handler_t);
-void remove_coproc_handler (void *);
-void undefined_init (void);
+void *install_coproc_handler __P((int, undef_handler_t));
+void remove_coproc_handler __P((void *));
+void undefined_init __P((void));
 
 /*
  * XXX Stuff below here is for use before malloc() is available.  Most code
@@ -77,7 +95,7 @@ struct undefined_handler {
  * Handlers installed using install_coproc_handler_static shouldn't be
  * removed.
  */
-void install_coproc_handler_static (int, struct undefined_handler *);
+void install_coproc_handler_static __P((int, struct undefined_handler *));
 
 /* Calls up to undefined.c from trap handlers */
 void undefinedinstruction(struct trapframe *);

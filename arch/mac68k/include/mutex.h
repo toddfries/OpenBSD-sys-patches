@@ -1,3 +1,3 @@
-/*	$OpenBSD: mutex.h,v 1.1 2007/02/03 20:08:50 miod Exp $	*/
-/* public domain */
+/*	$NetBSD: mutex.h,v 1.2 2007/02/09 21:55:06 ad Exp $	*/
+
 #include <m68k/mutex.h>

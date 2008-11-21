@@ -1,8 +1,7 @@
-/*	$OpenBSD: tqphy.c,v 1.11 2006/12/27 19:11:09 kettenis Exp $	*/
-/*	$NetBSD: tqphy.c,v 1.9 2000/02/02 23:34:57 thorpej Exp $	*/
+/*	$NetBSD: tqphy.c,v 1.37 2008/11/17 03:04:27 dyoung Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -73,6 +65,9 @@
  * Documentation available at http://www.tsc.tdk.com/lan/78Q2120.pdf .
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tqphy.c,v 1.37 2008/11/17 03:04:27 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -88,61 +83,65 @@
 
 #include <dev/mii/tqphyreg.h>
 
-int	tqphymatch(struct device *, void *, void *);
-void	tqphyattach(struct device *, struct device *, void *);
-int	tqphydetach(struct device *, int);
+static int	tqphymatch(device_t, cfdata_t, void *);
+static void	tqphyattach(device_t, device_t, void *);
 
-struct cfattach tqphy_ca = {
-	sizeof(struct mii_softc), tqphymatch, tqphyattach, mii_phy_detach,
-	    mii_phy_activate
-};
+CFATTACH_DECL_NEW(tqphy, sizeof(struct mii_softc),
+    tqphymatch, tqphyattach, mii_phy_detach, mii_phy_activate);
 
-struct cfdriver tqphy_cd = {
-	NULL, "tqphy", DV_DULL
-};
+static int	tqphy_service(struct mii_softc *, struct mii_data *, int);
+static void	tqphy_status(struct mii_softc *);
 
-int	tqphy_service(struct mii_softc *, struct mii_data *, int);
-void	tqphy_status(struct mii_softc *);
-
-const struct mii_phy_funcs tqphy_funcs = {
+static const struct mii_phy_funcs tqphy_funcs = {
 	tqphy_service, tqphy_status, mii_phy_reset,
 };
 
 static const struct mii_phydesc tqphys[] = {
-	{ MII_OUI_TSC,		MII_MODEL_TSC_78Q2120,
-	  MII_STR_TSC_78Q2120 },
-
-	{ 0,			0,
+	{ MII_OUI_xxTSC,		MII_MODEL_xxTSC_78Q2120,
+	  MII_STR_xxTSC_78Q2120 },
+#if 0
+	{ MII_OUI_xxTSC,		MII_MODEL_TSC_78Q2121,
+	  MII_STR_TSC_78Q2121 },
+#endif
+	{ 0,				0,
 	  NULL },
 };
 
-int
-tqphymatch(struct device *parent, void *match, void *aux)
+static int
+tqphymatch(device_t parent, cfdata_t match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (mii_phy_match(ma, tqphys) != NULL)
+	if (mii_phy_match(ma, tqphys) != NULL) {
+		/* The DIAG register is unreliable on early revisions. */
+		if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxTSC_78Q2120 &&
+		    MII_REV(ma->mii_id2) <= 3)
+			return (0);
 		return (10);
+	}
 
 	return (0);
 }
 
-void
-tqphyattach(struct device *parent, struct device *self, void *aux)
+static void
+tqphyattach(device_t parent, device_t self, void *aux)
 {
-	struct mii_softc *sc = (struct mii_softc *)self;
+	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
 	mpd = mii_phy_match(ma, tqphys);
-	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
+	aprint_naive(": Media interface\n");
+	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
+	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &tqphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	/*
 	 * Apparently, we can't do loopback on this PHY.
@@ -153,18 +152,19 @@ tqphyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+	aprint_normal_dev(self, "");
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
+		aprint_error("no media present");
+	else
 		mii_phy_add_media(sc);
+	aprint_normal("\n");
 }
 
-int
+static int
 tqphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
-
-	if ((sc->mii_dev.dv_flags & DVF_ACTIVE) == 0)
-		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -219,7 +219,7 @@ tqphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	return (0);
 }
 
-void
+static void
 tqphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
@@ -255,11 +255,8 @@ tqphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
-
 		if (diag & DIAG_DPLX)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

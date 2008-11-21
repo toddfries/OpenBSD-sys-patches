@@ -1,5 +1,4 @@
-/*	$OpenBSD: file.h,v 1.24 2006/03/26 17:47:10 mickey Exp $	*/
-/*	$NetBSD: file.h,v 1.11 1995/03/26 20:24:13 jtc Exp $	*/
+/*	$NetBSD: file.h,v 1.65 2008/06/24 10:26:27 gmcgarry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -29,90 +28,107 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)file.h	8.2 (Berkeley) 8/20/94
+ *	@(#)file.h	8.3 (Berkeley) 1/9/95
  */
+
+#ifndef _SYS_FILE_H_
+#define	_SYS_FILE_H_
 
 #include <sys/fcntl.h>
 #include <sys/unistd.h>
 
 #ifdef _KERNEL
+#include <sys/mallocvar.h>
 #include <sys/queue.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
 
 struct proc;
+struct lwp;
 struct uio;
-struct knote;
+struct iovec;
 struct stat;
-struct file;
-
-struct	fileops {
-	int	(*fo_read)(struct file *, off_t *, struct uio *,
-		    struct ucred *);
-	int	(*fo_write)(struct file *, off_t *, struct uio *,
-		    struct ucred *);
-	int	(*fo_ioctl)(struct file *, u_long, caddr_t,
-		    struct proc *);
-	int	(*fo_poll)(struct file *, int, struct proc *);
-	int	(*fo_kqfilter)(struct file *, struct knote *);
-	int	(*fo_stat)(struct file *, struct stat *, struct proc *);
-	int	(*fo_close)(struct file *, struct proc *);
-};
+struct knote;
 
 /*
- * Kernel descriptor table.
- * One entry for each open kernel vnode and socket.
+ * Kernel file descriptor.  One entry for each open kernel vnode and
+ * socket.
  */
 struct file {
-	LIST_ENTRY(file) f_list;/* list of active files */
-	short	f_flag;		/* see fcntl.h */
-#define	DTYPE_VNODE	1	/* file */
-#define	DTYPE_SOCKET	2	/* communications endpoint */
-#define	DTYPE_PIPE	3	/* pipe */
-#define	DTYPE_KQUEUE	4	/* event queue */
-#define	DTYPE_CRYPTO	5	/* crypto */
-#define	DTYPE_SYSTRACE	6	/* system call tracing */
-	short	f_type;		/* descriptor type */
-	long	f_count;	/* reference count */
-	long	f_msgcount;	/* references from message queue */
-	struct	ucred *f_cred;	/* credentials associated with descriptor */
-	struct	fileops *f_ops;
-	off_t	f_offset;
-	void 	*f_data;	/* private data */
-	int	f_iflags;	/* internal flags */
-	int	f_usecount;	/* number of users (temporary references). */
-	u_int64_t f_rxfer;	/* total number of read transfers */
-	u_int64_t f_wxfer;	/* total number of write transfers */
-	u_int64_t f_seek;	/* total independent seek operations */
-	u_int64_t f_rbytes;	/* total bytes read */
-	u_int64_t f_wbytes;	/* total bytes written */
+	off_t		f_offset;	/* first, is 64-bit */
+	kauth_cred_t 	f_cred;		/* creds associated with descriptor */
+	const struct fileops {
+		int	(*fo_read)	(struct file *, off_t *, struct uio *,
+					    kauth_cred_t, int);
+		int	(*fo_write)	(struct file *, off_t *, struct uio *,
+					    kauth_cred_t, int);
+		int	(*fo_ioctl)	(struct file *, u_long, void *);
+		int	(*fo_fcntl)	(struct file *, u_int, void *);
+		int	(*fo_poll)	(struct file *, int);
+		int	(*fo_stat)	(struct file *, struct stat *);
+		int	(*fo_close)	(struct file *);
+		int	(*fo_kqfilter)	(struct file *, struct knote *);
+	} *f_ops;
+	void		*f_data;	/* descriptor data, e.g. vnode/socket */
+	LIST_ENTRY(file) f_list;	/* list of active files */
+	kmutex_t	f_lock;		/* lock on structure */
+	int		f_flag;		/* see fcntl.h */
+	u_int		f_iflags;	/* internal flags; FIF_* */
+#define	DTYPE_VNODE	1		/* file */
+#define	DTYPE_SOCKET	2		/* communications endpoint */
+#define	DTYPE_PIPE	3		/* pipe */
+#define	DTYPE_KQUEUE	4		/* event queue */
+#define	DTYPE_MISC	5		/* misc file descriptor type */
+#define	DTYPE_CRYPTO	6		/* crypto */
+#define	DTYPE_MQUEUE	7		/* message queue */
+#define DTYPE_NAMES \
+    "0", "file", "socket", "pipe", "kqueue", "misc", "crypto", "mqueue"
+	u_int		f_type;		/* descriptor type */
+	u_int		f_advice;	/* access pattern hint; UVM_ADV_* */
+	u_int		f_count;	/* reference count */
+	u_int		f_msgcount;	/* references from message queue */
 };
 
-#define FIF_WANTCLOSE		0x01	/* a close is waiting for usecount */
-#define FIF_LARVAL		0x02	/* not fully constructed, don't use */
+#define FILE_LOCK(fp)	mutex_enter(&(fp)->f_lock)
+#define FILE_UNLOCK(fp)	mutex_exit(&(fp)->f_lock)
 
-#define FILE_IS_USABLE(fp) \
-	(((fp)->f_iflags & (FIF_WANTCLOSE|FIF_LARVAL)) == 0)
-
-#define FREF(fp) do { (fp)->f_usecount++; } while (0)
-#define FRELE(fp) do {					\
-	--(fp)->f_usecount;					\
-	if (((fp)->f_iflags & FIF_WANTCLOSE) != 0)		\
-		wakeup(&(fp)->f_usecount);			\
-} while (0)
-
-#define FILE_SET_MATURE(fp) do {				\
-	(fp)->f_iflags &= ~FIF_LARVAL;				\
-	FRELE(fp);						\
-} while (0)
+/*
+ * Flags for fo_read and fo_write and do_fileread/write/v
+ */
+#define	FOF_UPDATE_OFFSET	0x0001	/* update the file offset */
+#define	FOF_IOV_SYSSPACE	0x0100	/* iov structure in kernel memory */
 
 LIST_HEAD(filelist, file);
-extern struct filelist filehead;	/* head of list of open files */
-extern int maxfiles;			/* kernel limit on number of open files */
-extern int nfiles;			/* actual number of open files */
-extern struct fileops vnops;		/* vnode operations for files */
+extern struct filelist	filehead;	/* head of list of open files */
+extern u_int		maxfiles;	/* kernel limit on # of open files */
+extern u_int		nfiles;		/* actual number of open files */
 
-int     dofileread(struct proc *, int, struct file *, void *, size_t,
-            off_t *, register_t *);
-int     dofilewrite(struct proc *, int, struct file *, const void *,
-            size_t, off_t *, register_t *);
+extern const struct fileops vnops;	/* vnode operations for files */
+
+int	dofileread(int, struct file *, void *, size_t,
+	    off_t *, int, register_t *);
+int	dofilewrite(int, struct file *, const void *,
+	    size_t, off_t *, int, register_t *);
+
+int	do_filereadv(int, const struct iovec *, int, off_t *,
+	    int, register_t *);
+int	do_filewritev(int, const struct iovec *, int, off_t *,
+	    int, register_t *);
+
+int	fsetown(pid_t *, u_long, const void *);
+int	fgetown(pid_t, u_long, void *);
+void	fownsignal(pid_t, int, int, int, void *);
+
+/* Commonly used fileops */
+int	fnullop_fcntl(struct file *, u_int, void *);
+int	fnullop_poll(struct file *, int);
+int	fnullop_kqfilter(struct file *, struct knote *);
+int	fbadop_read(struct file *, off_t *, struct uio *, kauth_cred_t, int);
+int	fbadop_write(struct file *, off_t *, struct uio *, kauth_cred_t, int);
+int	fbadop_ioctl(struct file *, u_long, void *);
+int	fbadop_close(struct file *);
+int	fbadop_stat(struct file *, struct stat *);
 
 #endif /* _KERNEL */
+
+#endif /* _SYS_FILE_H_ */

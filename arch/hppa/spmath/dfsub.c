@@ -1,21 +1,51 @@
-/*	$OpenBSD: dfsub.c,v 1.7 2002/11/29 09:27:34 deraadt Exp $	*/
-/*
-  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
-  To anyone who acknowledges that this file is provided "AS IS"
-  without any express or implied warranty:
-      permission to use, copy, modify, and distribute this file
-  for any purpose is hereby granted without fee, provided that
-  the above copyright notice and this notice appears in all
-  copies, and that the name of Hewlett-Packard Company not be
-  used in advertising or publicity pertaining to distribution
-  of the software without specific, written prior permission.
-  Hewlett-Packard Company makes no representations about the
-  suitability of this software for any purpose.
-*/
-/* @(#)dfsub.c: Revision: 2.8.88.1 Date: 93/12/07 15:05:48 */
+/*	$NetBSD: dfsub.c,v 1.4 2007/02/22 05:46:29 thorpej Exp $	*/
 
-#include "float.h"
-#include "dbl_float.h"
+/*	$OpenBSD: dfsub.c,v 1.4 2001/03/29 03:58:17 mickey Exp $	*/
+
+/*
+ * Copyright 1996 1995 by Open Software Foundation, Inc.
+ *              All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appears in all copies and
+ * that both the copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ *
+ * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN ACTION OF CONTRACT,
+ * NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/*
+ * pmk1.1
+ */
+/*
+ * (c) Copyright 1986 HEWLETT-PACKARD COMPANY
+ *
+ * To anyone who acknowledges that this file is provided "AS IS"
+ * without any express or implied warranty:
+ *     permission to use, copy, modify, and distribute this file
+ * for any purpose is hereby granted without fee, provided that
+ * the above copyright notice and this notice appears in all
+ * copies, and that the name of Hewlett-Packard Company not be
+ * used in advertising or publicity pertaining to distribution
+ * of the software without specific, written prior permission.
+ * Hewlett-Packard Company makes no representations about the
+ * suitability of this software for any purpose.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dfsub.c,v 1.4 2007/02/22 05:46:29 thorpej Exp $");
+
+#include "../spmath/float.h"
+#include "../spmath/dbl_float.h"
 
 /*
  * Double_subtract: subtract two double precision values.
@@ -24,14 +54,14 @@ int
 dbl_fsub(leftptr, rightptr, dstptr, status)
     dbl_floating_point *leftptr, *rightptr, *dstptr;
     unsigned int *status;
-{
+    {
     register unsigned int signless_upper_left, signless_upper_right, save;
     register unsigned int leftp1, leftp2, rightp1, rightp2, extent;
     register unsigned int resultp1 = 0, resultp2 = 0;
 
     register int result_exponent, right_exponent, diff_exponent;
     register int sign_save, jumpsize;
-    register int inexact = FALSE, underflowtrap;
+    register int inexact = false, underflowtrap;
 
     /* Create local copies of the numbers */
     Dbl_copyfromptr(leftptr,leftp1,leftp2);
@@ -183,7 +213,7 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
 		    Dbl_set_sign(leftp1,/*using*/sign_save);
 		    Dbl_setwrapped_exponent(leftp1,result_exponent,unfl);
 		    Dbl_copytoptr(leftp1,leftp2,dstptr);
-		    /* inexact = FALSE */
+		    /* inexact = false */
 		    return(UNDERFLOWEXCEPTION);
 		    }
 		}
@@ -235,7 +265,7 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
 		Dbl_set_sign(resultp1,/*using*/sign_save);
 		Dbl_setwrapped_exponent(resultp1,result_exponent,unfl);
 		Dbl_copytoptr(resultp1,resultp2,dstptr);
-		/* inexact = FALSE */
+		/* inexact = false */
 		return(UNDERFLOWEXCEPTION);
 		}
 	    Dbl_copytoptr(resultp1,resultp2,dstptr);
@@ -279,7 +309,7 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
 	if(Dbl_iszero_hidden(resultp1))
 	    {
 	    /* Handle normalization */
-	    /* A straight forward algorithm would now shift the result
+	    /* A straight foward algorithm would now shift the result
 	     * and extension left until the hidden bit becomes one.  Not
 	     * all of the extension bits need participate in the shift.
 	     * Only the two most significant bits (round and guard) are
@@ -395,7 +425,7 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
 		Dbl_set_sign(resultp1,sign_save);
 		Dbl_setwrapped_exponent(resultp1,result_exponent,unfl);
 		Dbl_copytoptr(resultp1,resultp2,dstptr);
-		/* inexact = FALSE */
+		/* inexact = false */
 		return(UNDERFLOWEXCEPTION);
 		}
 	    /*
@@ -430,7 +460,7 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
   round:
     if(Ext_isnotzero(extent))
 	{
-	inexact = TRUE;
+	inexact = true;
 	switch(Rounding_mode())
 	    {
 	    case ROUNDNEAREST: /* The default. */
@@ -483,7 +513,7 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
 	    }
 	else
 	    {
-	    inexact = TRUE;
+	    inexact = true;
 	    Set_overflowflag();
 	    Dbl_setoverflow(resultp1,resultp2);
 	    }
@@ -497,4 +527,4 @@ dbl_fsub(leftptr, rightptr, dstptr, status)
 		Set_inexactflag();
     }
     return(NOEXCEPTION);
-}
+    }

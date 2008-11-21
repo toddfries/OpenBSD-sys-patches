@@ -1,22 +1,21 @@
-/* $OpenBSD: tcvar.h,v 1.13 2007/11/06 18:20:07 miod Exp $ */
-/* $NetBSD: tcvar.h,v 1.17 2000/06/04 19:15:15 cgd Exp $ */
+/* $NetBSD: tcvar.h,v 1.23 2007/10/19 12:01:20 ad Exp $ */
 
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -35,13 +34,33 @@
  * Definitions for TURBOchannel autoconfiguration.
  */
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 #include <dev/tc/tcreg.h>
 
 /*
  * Machine-dependent definitions.
  */
 #include <machine/tc_machdep.h>
+
+/*
+ * In the long run, the following block will go completely away.
+ * For now, the MI TC code still uses the old TC_IPL_ names
+ * and not the new IPL_ names.
+ */
+#if 1
+/*
+ * Map the new definitions to the old.
+ */
+#include <sys/intr.h>
+
+#define tc_intrlevel_t	int
+
+#define	TC_IPL_NONE	IPL_NONE
+#define	TC_IPL_BIO	IPL_BIO
+#define	TC_IPL_NET	IPL_NET
+#define	TC_IPL_TTY	IPL_TTY
+#define	TC_IPL_CLOCK	IPL_CLOCK
+#endif /* 1 */
 
 struct tc_softc {
 	struct	device sc_dv;
@@ -50,6 +69,7 @@ struct tc_softc {
 	int	sc_nslots;
 	struct tc_slotdesc *sc_slots;
 
+	const struct evcnt *(*sc_intr_evcnt)(struct device *, void *);
 	void	(*sc_intr_establish)(struct device *, void *,
 			int, int (*)(void *), void *);
 	void	(*sc_intr_disestablish)(struct device *, void *);
@@ -60,7 +80,7 @@ struct tc_softc {
  * Arguments used to attach TURBOchannel busses.
  */
 struct tcbus_attach_args {
-	char		*tba_busname;		/* XXX should be common */
+	const char		*tba_busname;	/* XXX should be common */
 	bus_space_tag_t tba_memt;
 
 	/* Bus information */
@@ -69,9 +89,10 @@ struct tcbus_attach_args {
 	struct tc_slotdesc *tba_slots;
 	u_int		tba_nbuiltins;
 	const struct tc_builtin *tba_builtins;
-	
+
 
 	/* TC bus resource management; XXX will move elsewhere eventually. */
+	const struct evcnt *(*tba_intr_evcnt)(struct device *, void *);
 	void	(*tba_intr_establish)(struct device *, void *,
 			int, int (*)(void *), void *);
 	void	(*tba_intr_disestablish)(struct device *, void *);
@@ -108,7 +129,7 @@ struct tc_slotdesc {
  * machine-dependent code to the TURBOchannel bus driver.
  */
 struct tc_builtin {
-	char		*tcb_modname;
+	const char	*tcb_modname;
 	u_int		tcb_slot;
 	tc_offset_t	tcb_offset;
 	void		*tcb_cookie;
@@ -118,20 +139,11 @@ struct tc_builtin {
  * Interrupt establishment functions.
  */
 int	tc_checkslot(tc_addr_t, char *);
-void	tc_devinfo(const char *, char *, size_t);
 void	tcattach(struct device *, struct device *, void *);
+const struct evcnt *tc_intr_evcnt(struct device *, void *);
 void	tc_intr_establish(struct device *, void *, int, int (*)(void *),
 	    void *);
 void	tc_intr_disestablish(struct device *, void *);
-
-/*
- * Easy to remember names for TURBOchannel device locators.
- */
-#define	tccf_slot	cf_loc[0]		/* slot */
-#define	tccf_offset	cf_loc[1]		/* offset */
-
-#define	TCCF_SLOT_UNKNOWN	-1
-#define	TCCF_OFFSET_UNKNOWN	-1
 
 /*
  * Miscellaneous definitions.

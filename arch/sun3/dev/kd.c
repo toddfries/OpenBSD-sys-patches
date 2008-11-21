@@ -1,4 +1,4 @@
-/*	$NetBSD: kd.c,v 1.48 2006/10/05 14:46:11 tsutsui Exp $	*/
+/*	$NetBSD: kd.c,v 1.55 2008/04/28 20:23:37 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kd.c,v 1.48 2006/10/05 14:46:11 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kd.c,v 1.55 2008/04/28 20:23:37 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -92,6 +85,7 @@ static int kdparam(struct tty *, struct termios *);
 static void kdstart(struct tty *);
 static void kd_init(struct kd_softc *);
 static void kd_cons_input(int);
+static void kd_later(void *);
 
 dev_type_open(kdopen);
 dev_type_close(kdclose);
@@ -115,6 +109,8 @@ kd_init(struct kd_softc *kd)
 	struct tty *tp;
 
 	tp = ttymalloc();
+	callout_setfunc(&tp->t_rstrt_ch, kd_later, tp);
+
 	tp->t_oproc = kdstart;
 	tp->t_param = kdparam;
 	tp->t_dev = makedev(cdevsw_lookup_major(&kd_cdevsw), 0);
@@ -244,7 +240,7 @@ kdpoll(dev_t dev, int events, struct lwp *l)
 }
 
 int 
-kdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+kdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct kd_softc *kd;
 	struct tty *tp;
@@ -279,33 +275,32 @@ kdparam(struct tty *tp, struct termios *t)
 }
 
 
-static void kd_later(void*);
 static void kd_putfb(struct tty *);
 
 static void 
 kdstart(struct tty *tp)
 {
 	struct clist *cl;
-	int s;
+	int s1, s2;
 
-	s = spltty();
+	s1 = splsoftclock();
+	s2 = spltty();
 	if (tp->t_state & (TS_BUSY|TS_TTSTOP|TS_TIMEOUT))
 		goto out;
 
 	cl = &tp->t_outq;
-	if (cl->c_cc) {
+	if (ttypull(tp)) {
 		if (kd_is_console) {
 			tp->t_state |= TS_BUSY;
-			if ((s & PSL_IPL) == 0) {
+			if ((s1 & PSL_IPL) == 0) {
 				/* called at level zero - update screen now. */
-				(void) spllowersoftclock();
+				splx(s2);
 				kd_putfb(tp);
-				(void) spltty();
+				s2 = spltty();
 				tp->t_state &= ~TS_BUSY;
 			} else {
 				/* called at interrupt level - do it later */
-				callout_reset(&tp->t_rstrt_ch, 0,
-				    kd_later, tp);
+				callout_schedule(&tp->t_rstrt_ch, 0);
 			}
 		} else {
 			/*
@@ -317,15 +312,9 @@ kdstart(struct tty *tp)
 			ndflush(cl, cl->c_cc);
 		}
 	}
-	if (cl->c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)cl);
-		}
-		selwakeup(&tp->t_wsel);
-	}
 out:
-	splx(s);
+	splx(s2);
+	splx(s1);
 }
 
 /*
@@ -462,7 +451,7 @@ kdcninit(struct consdev *cn)
 	kbd_xlate_init(ks);
 
 	/* Set up initial PROM input channel for /dev/console */
-	prom_cons_channel.cc_dev = NULL;
+	prom_cons_channel.cc_private = NULL;
 	prom_cons_channel.cc_iopen = kd_rom_iopen;
 	prom_cons_channel.cc_iclose = kd_rom_iclose;
 	cons_attach_input(&prom_cons_channel, cn);

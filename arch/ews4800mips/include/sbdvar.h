@@ -1,4 +1,4 @@
-/*	$NetBSD: sbdvar.h,v 1.2 2006/09/08 13:48:12 tsutsui Exp $	*/
+/*	$NetBSD: sbdvar.h,v 1.4 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -93,7 +86,7 @@ void x ## _cache_config(void);						\
 void x ## _wbflush(void);						\
 void x ## _mem_init(void *, void *);					\
 void x ## _intr_init(void);						\
-void * x ## _intr_establish(int, int (*)(void *), void *);		\
+void *x ## _intr_establish(int, int (*)(void *), void *);		\
 void x ## _intr_disestablish(void *);					\
 void x ## _intr(uint32_t, uint32_t, uint32_t, uint32_t);		\
 void x ## _initclocks(void);						\

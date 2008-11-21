@@ -1,5 +1,4 @@
-/* $OpenBSD: lock.h,v 1.1 2007/04/13 08:31:50 martin Exp $	*/
-/* $NetBSD: lock.h,v 1.16 2001/12/17 23:34:57 thorpej Exp $ */
+/* $NetBSD: lock.h,v 1.27 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,16 +37,39 @@
 #ifndef _ALPHA_LOCK_H_
 #define	_ALPHA_LOCK_H_
 
-typedef	__volatile int		__cpu_simple_lock_t;
+#ifdef _KERNEL_OPT
+#include "opt_multiprocessor.h"
+#endif
 
-#define	__SIMPLELOCK_LOCKED	1
-#define	__SIMPLELOCK_UNLOCKED	0
+static __inline int
+__SIMPLELOCK_LOCKED_P(__cpu_simple_lock_t *__ptr)
+{
+	return *__ptr == __SIMPLELOCK_LOCKED;
+}
+
+static __inline int
+__SIMPLELOCK_UNLOCKED_P(__cpu_simple_lock_t *__ptr)
+{
+	return *__ptr == __SIMPLELOCK_UNLOCKED;
+}
+
+static __inline void
+__cpu_simple_lock_clear(__cpu_simple_lock_t *__ptr)
+{
+	*__ptr = __SIMPLELOCK_UNLOCKED;
+}
+
+static __inline void
+__cpu_simple_lock_set(__cpu_simple_lock_t *__ptr)
+{
+	*__ptr = __SIMPLELOCK_LOCKED;
+}
 
 static __inline void
 __cpu_simple_lock_init(__cpu_simple_lock_t *alp)
 {
 
-	__asm __volatile(
+	__asm volatile(
 		"# BEGIN __cpu_simple_lock_init\n"
 		"	stl	$31, %0		\n"
 		"	mb			\n"
@@ -74,7 +89,7 @@ __cpu_simple_lock(__cpu_simple_lock_t *alp)
 	 * some work.
 	 */
 
-	__asm __volatile(
+	__asm volatile(
 		"# BEGIN __cpu_simple_lock\n"
 		"1:	ldl_l	%0, %3		\n"
 		"	bne	%0, 2f		\n"
@@ -99,7 +114,7 @@ __cpu_simple_lock_try(__cpu_simple_lock_t *alp)
 {
 	unsigned long t0, v0;
 
-	__asm __volatile(
+	__asm volatile(
 		"# BEGIN __cpu_simple_lock_try\n"
 		"1:	ldl_l	%0, %4		\n"
 		"	bne	%0, 2f		\n"
@@ -125,7 +140,7 @@ static __inline void
 __cpu_simple_unlock(__cpu_simple_lock_t *alp)
 {
 
-	__asm __volatile(
+	__asm volatile(
 		"# BEGIN __cpu_simple_unlock\n"
 		"	mb			\n"
 		"	stl	$31, %0		\n"
@@ -156,6 +171,26 @@ do {									\
 		splx(__s);						\
 	}								\
 } while (0)
+#define	SPINLOCK_BACKOFF_HOOK	(void)nullop((void *)0)
 #endif /* MULTIPROCESSOR */
+
+static __inline void
+mb_read(void)
+{
+	__asm __volatile("mb" : : : "memory");
+}
+
+static __inline void
+mb_write(void)
+{
+	/* XXX wmb */
+	__asm __volatile("mb" : : : "memory");
+}
+
+static __inline void
+mb_memory(void)
+{
+	__asm __volatile("mb" : : : "memory");
+}
 
 #endif /* _ALPHA_LOCK_H_ */

@@ -1,4 +1,4 @@
-/* $NetBSD: loadfile_ecoff.c,v 1.6 2005/12/11 12:24:46 christos Exp $ */
+/* $NetBSD: loadfile_ecoff.c,v 1.12 2008/04/28 20:24:06 martin Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -58,14 +51,11 @@
 #ifdef BOOT_ECOFF
 
 int
-loadfile_coff(fd, coff, marks, flags)
-	int fd;
-	struct ecoff_exechdr *coff;
-	u_long *marks;
-	int flags;
+loadfile_coff(int fd, struct ecoff_exechdr *coff, u_long *marks, int flags)
 {
 	paddr_t offset = marks[MARK_START];
 	paddr_t minp = ~0, maxp = 0, pos;
+	ssize_t nr;
 
 	/* some ports dont use the offset */
 	offset = offset;
@@ -79,8 +69,12 @@ loadfile_coff(fd, coff, marks, flags)
 	if (coff->a.tsize != 0) {
 		if (flags & LOAD_TEXT) {
 			PROGRESS(("%lu", coff->a.tsize));
-			if (READ(fd, coff->a.text_start, coff->a.tsize) !=
-			    coff->a.tsize) {
+			nr = READ(fd, coff->a.text_start, coff->a.tsize);
+			if (nr == -1) {
+				return 1;
+			}
+			if (nr != coff->a.tsize) {
+				errno = EIO;
 				return 1;
 			}
 		}
@@ -104,8 +98,13 @@ loadfile_coff(fd, coff, marks, flags)
 	if (coff->a.dsize != 0) {
 		if (flags & LOAD_DATA) {
 			PROGRESS(("+%lu", coff->a.dsize));
-			if (READ(fd, coff->a.data_start, coff->a.dsize) !=
-			    coff->a.dsize) {
+			nr = READ(fd, coff->a.data_start, coff->a.dsize);
+			if (nr == -1) {
+				WARN(("read data"));
+				return 1;
+			}
+			if (nr != coff->a.dsize) {
+				errno = EIO;
 				WARN(("read data"));
 				return 1;
 			}
@@ -141,6 +140,7 @@ loadfile_coff(fd, coff, marks, flags)
 	marks[MARK_NSYM] = 1;	/* XXX: Kernel needs >= 0 */
 	marks[MARK_SYM] = LOADADDR(maxp);
 	marks[MARK_END] = LOADADDR(maxp);
+	marks[MARK_DATA] = LOADADDR(coff->a.data_start);
 	return 0;
 }
 

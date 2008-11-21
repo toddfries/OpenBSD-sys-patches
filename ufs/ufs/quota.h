@@ -1,5 +1,4 @@
-/*	$OpenBSD: quota.h,v 1.9 2008/01/05 19:49:26 otto Exp $	*/
-/*	$NetBSD: quota.h,v 1.6 1995/03/26 20:38:17 jtc Exp $	*/
+/*	$NetBSD: quota.h,v 1.25 2007/07/10 09:50:08 hannken Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -35,8 +34,8 @@
  *	@(#)quota.h	8.3 (Berkeley) 8/19/94
  */
 
-#ifndef _QUOTA_
-#define _QUOTA_
+#ifndef	_UFS_UFS_QUOTA_H_
+#define	_UFS_UFS_QUOTA_H_
 
 /*
  * Definitions for disk quotas imposed on the average user
@@ -102,49 +101,23 @@ struct dqblk {
 	u_int32_t dqb_ihardlimit;	/* maximum # allocated inodes + 1 */
 	u_int32_t dqb_isoftlimit;	/* preferred inode limit */
 	u_int32_t dqb_curinodes;	/* current # allocated inodes */
-	time_t	  dqb_btime;		/* time limit for excessive disk use */
-	time_t	  dqb_itime;		/* time limit for excessive files */
+	int32_t	  dqb_btime;		/* time limit for excessive disk use */
+	int32_t	  dqb_itime;		/* time limit for excessive files */
 };
 
 #ifdef _KERNEL
-/*
- * Flags to ufs_quota_{alloc,free}_{blocks,inode}2
- */
-enum ufs_quota_flags {
-	UFS_QUOTA_NOUID = 0x1,		/* Don't change UID quota */
-	UFS_QUOTA_NOGID = 0x2,		/* Don't change GID quota */
-	UFS_QUOTA_FORCE = 0x1000	/* don't check limits - just change it */
-};     /* Change GID */
 
 #include <sys/cdefs.h>
 
-struct dquot;
-struct inode;
-struct mount;
-struct proc;
-struct ucred;
-struct ufsmount;
-struct vnode;
 __BEGIN_DECLS
-#define ufs_quota_alloc_blocks(i, c, cr) ufs_quota_alloc_blocks2(i, c, cr, 0)
-#define ufs_quota_free_blocks(i, c, cr) ufs_quota_free_blocks2(i, c, cr, 0)
-#define ufs_quota_alloc_inode(i, cr) ufs_quota_alloc_inode2(i, cr, 0)
-#define ufs_quota_free_inode(i, cr) ufs_quota_free_inode2(i, cr, 0)
-int     ufs_quota_alloc_blocks2(struct inode *, daddr64_t, struct ucred *, enum ufs_quota_flags);
-int     ufs_quota_free_blocks2(struct inode *, daddr64_t, struct ucred *, enum ufs_quota_flags);
-int     ufs_quota_alloc_inode2(struct inode *, struct ucred *, enum ufs_quota_flags);
-int     ufs_quota_free_inode2(struct inode *, struct ucred *, enum ufs_quota_flags);
-
-int     ufs_quota_delete(struct inode *);
-
-int	getinoquota(struct inode *);
-int	quotaoff(struct proc *, struct mount *, int);
-int	qsync(struct mount *mp);
-int	ufs_quotactl(struct mount *, int, uid_t, caddr_t, struct proc *);
-
-void    ufs_quota_init(void);
-
+void	dqinit(void);
+void	dqreinit(void);
+void	dqdone(void);
+__END_DECLS
+#else
+__BEGIN_DECLS
+int quotactl(const char *, int , int, void *);
 __END_DECLS
 #endif /* _KERNEL */
 
-#endif /* _QUOTA_ */
+#endif /* !_UFS_UFS_QUOTA_H_ */

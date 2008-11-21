@@ -1,3 +1,5 @@
+/*	$NetBSD: mach64_dma.c,v 1.6 2008/07/08 06:50:22 mrg Exp $	*/
+
 /* mach64_dma.c -- DMA support for mach64 (Rage Pro) driver -*- linux-c -*- */
 /**
  * \file mach64_dma.c
@@ -9,7 +11,7 @@
  * \author Jose Fonseca <j_r_fonseca@yahoo.co.uk>
  */
 
-/*
+/*-
  * Copyright 2000 Gareth Hughes
  * Copyright 2002 Frank C. Earl
  * Copyright 2002-2003 Leif Delgass
@@ -34,6 +36,12 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mach64_dma.c,v 1.6 2008/07/08 06:50:22 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_dma.c,v 1.2 2005/11/28 23:13:53 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "mach64_drm.h"
@@ -53,7 +61,7 @@
  *
  * \param dev_priv pointer to device private data structure.
  * \param entries number of free entries in the FIFO to wait for.
- *
+ * 
  * \returns zero on success, or -EBUSY if the timeout (specificed by
  * drm_mach64_private::usec_timeout) occurs.
  */
@@ -70,7 +78,7 @@ int mach64_do_wait_for_fifo(drm_mach64_private_t * dev_priv, int entries)
 
 	DRM_INFO("%s failed! slots=%d entries=%d\n", __FUNCTION__, slots,
 		 entries);
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 /**
@@ -94,7 +102,7 @@ int mach64_do_wait_for_idle(drm_mach64_private_t * dev_priv)
 	DRM_INFO("%s failed! GUI_STAT=0x%08x\n", __FUNCTION__,
 		 MACH64_READ(MACH64_GUI_STAT));
 	mach64_dump_ring_info(dev_priv);
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 /**
@@ -107,10 +115,10 @@ int mach64_do_wait_for_idle(drm_mach64_private_t * dev_priv)
  *
  * This function should be called before writing new entries to the ring
  * buffer.
- *
+ * 
  * \param dev_priv pointer to device private data structure.
  * \param n number of free entries in the ring buffer to wait for.
- *
+ * 
  * \returns zero on success, or -EBUSY if the timeout (specificed by
  * drm_mach64_private_t::usec_timeout) occurs.
  *
@@ -135,11 +143,11 @@ int mach64_wait_ring(drm_mach64_private_t * dev_priv, int n)
 	/* FIXME: This is being ignored... */
 	DRM_ERROR("failed!\n");
 	mach64_dump_ring_info(dev_priv);
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 /**
- * Wait until all DMA requests have been processed...
+ * Wait until all DMA requests have been processed... 
  *
  * \sa mach64_wait_ring()
  */
@@ -172,7 +180,7 @@ static int mach64_ring_idle(drm_mach64_private_t * dev_priv)
 	DRM_INFO("%s failed! GUI_STAT=0x%08x\n", __FUNCTION__,
 		 MACH64_READ(MACH64_GUI_STAT));
 	mach64_dump_ring_info(dev_priv);
-	return -EBUSY;
+	return DRM_ERR(EBUSY);
 }
 
 /**
@@ -418,7 +426,7 @@ void mach64_dump_engine_info(drm_mach64_private_t * dev_priv)
  * pointed by the ring head.
  */
 static void mach64_dump_buf_info(drm_mach64_private_t * dev_priv,
-				 struct drm_buf * buf)
+				 drm_buf_t * buf)
 {
 	u32 addr = GETBUFADDR(buf);
 	u32 used = buf->used >> 2;
@@ -515,14 +523,14 @@ void mach64_dump_ring_info(drm_mach64_private_t * dev_priv)
 
 	DRM_INFO("\n");
 
-	if (ring->head >= 0 && ring->head < ring->size / sizeof(u32)) {
+	if (/*ring->head >= 0 &&*/ ring->head < ring->size / sizeof(u32)) {
 		struct list_head *ptr;
 		u32 addr = le32_to_cpu(((u32 *) ring->start)[ring->head + 1]);
 
 		list_for_each(ptr, &dev_priv->pending) {
 			drm_mach64_freelist_t *entry =
 			    list_entry(ptr, drm_mach64_freelist_t, list);
-			struct drm_buf *buf = entry->buf;
+			drm_buf_t *buf = entry->buf;
 
 			u32 buf_addr = GETBUFADDR(buf);
 
@@ -572,7 +580,7 @@ void mach64_dump_ring_info(drm_mach64_private_t * dev_priv)
  * DMA operation. It is left here since it so tricky to get DMA operating
  * properly in some architectures and hardware.
  */
-static int mach64_bm_dma_test(struct drm_device * dev)
+static int mach64_bm_dma_test(drm_device_t * dev)
 {
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 	drm_dma_handle_t *cpu_addr_dmah;
@@ -592,7 +600,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 	    drm_pci_alloc(dev, 0x1000, 0x1000, 0xfffffffful);
 	if (!cpu_addr_dmah) {
 		DRM_INFO("data-memory allocation failed!\n");
-		return -ENOMEM;
+		return DRM_ERR(ENOMEM);
 	} else {
 		data = (u32 *) cpu_addr_dmah->vaddr;
 		data_addr = (u32) cpu_addr_dmah->busaddr;
@@ -624,7 +632,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 			mach64_do_engine_reset(dev_priv);
 			DRM_INFO("freeing data buffer memory.\n");
 			drm_pci_free(dev, cpu_addr_dmah);
-			return -EIO;
+			return DRM_ERR(EIO);
 		}
 	}
 
@@ -752,7 +760,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
  * Called during the DMA initialization ioctl to initialize all the necessary
  * software and hardware state for DMA operation.
  */
-static int mach64_do_dma_init(struct drm_device * dev, drm_mach64_init_t * init)
+static int mach64_do_dma_init(drm_device_t * dev, drm_mach64_init_t * init)
 {
 	drm_mach64_private_t *dev_priv;
 	u32 tmp;
@@ -762,7 +770,7 @@ static int mach64_do_dma_init(struct drm_device * dev, drm_mach64_init_t * init)
 
 	dev_priv = drm_alloc(sizeof(drm_mach64_private_t), DRM_MEM_DRIVER);
 	if (dev_priv == NULL)
-		return -ENOMEM;
+		return DRM_ERR(ENOMEM);
 
 	memset(dev_priv, 0, sizeof(drm_mach64_private_t));
 
@@ -792,56 +800,55 @@ static int mach64_do_dma_init(struct drm_device * dev, drm_mach64_init_t * init)
 	INIT_LIST_HEAD(&dev_priv->placeholders);
 	INIT_LIST_HEAD(&dev_priv->pending);
 
-	dev_priv->sarea = drm_getsarea(dev);
+	DRM_GETSAREA();
+
 	if (!dev_priv->sarea) {
 		DRM_ERROR("can not find sarea!\n");
 		dev->dev_private = (void *)dev_priv;
 		mach64_do_cleanup_dma(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 	dev_priv->fb = drm_core_findmap(dev, init->fb_offset);
 	if (!dev_priv->fb) {
 		DRM_ERROR("can not find frame buffer map!\n");
 		dev->dev_private = (void *)dev_priv;
 		mach64_do_cleanup_dma(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 	dev_priv->mmio = drm_core_findmap(dev, init->mmio_offset);
 	if (!dev_priv->mmio) {
 		DRM_ERROR("can not find mmio map!\n");
 		dev->dev_private = (void *)dev_priv;
 		mach64_do_cleanup_dma(dev);
-		return -EINVAL;
-	}
-
-	dev_priv->ring_map = drm_core_findmap(dev, init->ring_offset);
-	if (!dev_priv->ring_map) {
-		DRM_ERROR("can not find ring map!\n");
-		dev->dev_private = (void *)dev_priv;
-		mach64_do_cleanup_dma(dev);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	dev_priv->sarea_priv = (drm_mach64_sarea_t *)
 	    ((u8 *) dev_priv->sarea->handle + init->sarea_priv_offset);
 
 	if (!dev_priv->is_pci) {
+		dev_priv->ring_map = drm_core_findmap(dev, init->ring_offset);
+		if (!dev_priv->ring_map) {
+			DRM_ERROR("can not find ring map!\n");
+			dev->dev_private = (void *)dev_priv;
+			mach64_do_cleanup_dma(dev);
+			return DRM_ERR(EINVAL);
+		}
 		drm_core_ioremap(dev_priv->ring_map, dev);
 		if (!dev_priv->ring_map->handle) {
 			DRM_ERROR("can not ioremap virtual address for"
 				  " descriptor ring\n");
 			dev->dev_private = (void *)dev_priv;
 			mach64_do_cleanup_dma(dev);
-			return -ENOMEM;
+			return DRM_ERR(ENOMEM);
 		}
-		dev->agp_buffer_token = init->buffers_offset;
 		dev->agp_buffer_map =
 		    drm_core_findmap(dev, init->buffers_offset);
 		if (!dev->agp_buffer_map) {
 			DRM_ERROR("can not find dma buffer map!\n");
 			dev->dev_private = (void *)dev_priv;
 			mach64_do_cleanup_dma(dev);
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 		/* there might be a nicer way to do this -
 		   dev isn't passed all the way though the mach64 - DA */
@@ -853,7 +860,7 @@ static int mach64_do_dma_init(struct drm_device * dev, drm_mach64_init_t * init)
 				  " dma buffer\n");
 			dev->dev_private = (void *)dev_priv;
 			mach64_do_cleanup_dma(dev);
-			return -ENOMEM;
+			return DRM_ERR(ENOMEM);
 		}
 		dev_priv->agp_textures =
 		    drm_core_findmap(dev, init->agp_textures_offset);
@@ -861,7 +868,7 @@ static int mach64_do_dma_init(struct drm_device * dev, drm_mach64_init_t * init)
 			DRM_ERROR("can not find agp texture region!\n");
 			dev->dev_private = (void *)dev_priv;
 			mach64_do_cleanup_dma(dev);
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 	}
 
@@ -891,9 +898,27 @@ static int mach64_do_dma_init(struct drm_device * dev, drm_mach64_init_t * init)
 		}
 	}
 
+	/* allocate descriptor memory from pci pool */
+	DRM_DEBUG("Allocating dma descriptor ring\n");
 	dev_priv->ring.size = 0x4000;	/* 16KB */
-	dev_priv->ring.start = dev_priv->ring_map->handle;
-	dev_priv->ring.start_addr = (u32) dev_priv->ring_map->offset;
+
+	if (dev_priv->is_pci) {
+		dev_priv->ring.dmah = drm_pci_alloc(dev, dev_priv->ring.size,
+						     dev_priv->ring.size,
+						     0xfffffffful);
+
+		if (!dev_priv->ring.dmah) {
+			DRM_ERROR("Allocating dma descriptor ring failed\n");
+			return DRM_ERR(ENOMEM);
+		} else {
+			dev_priv->ring.start = dev_priv->ring.dmah->vaddr;
+			dev_priv->ring.start_addr =
+			    (u32) dev_priv->ring.dmah->busaddr;
+		}
+	} else {
+		dev_priv->ring.start = dev_priv->ring_map->handle;
+		dev_priv->ring.start_addr = (u32) dev_priv->ring_map->offset;
+	}
 
 	memset(dev_priv->ring.start, 0, dev_priv->ring.size);
 	DRM_INFO("descriptor ring: cpu addr %p, bus addr: 0x%08x\n",
@@ -974,7 +999,7 @@ int mach64_do_dispatch_pseudo_dma(drm_mach64_private_t * dev_priv)
 	volatile u32 *ring_read;
 	struct list_head *ptr;
 	drm_mach64_freelist_t *entry;
-	struct drm_buf *buf = NULL;
+	drm_buf_t *buf = NULL;
 	u32 *buf_ptr;
 	u32 used, reg, target;
 	int fifo, count, found, ret, no_idle_wait;
@@ -1023,7 +1048,7 @@ int mach64_do_dispatch_pseudo_dma(drm_mach64_private_t * dev_priv)
 			entry = list_entry(ptr, drm_mach64_freelist_t, list);
 			buf = entry->buf;
 			offset = buf_addr - GETBUFADDR(buf);
-			if (offset >= 0 && offset < MACH64_BUFFER_SIZE) {
+			if (/*offset >= 0 &&*/ offset < MACH64_BUFFER_SIZE) {
 				found = 1;
 				break;
 			}
@@ -1035,7 +1060,7 @@ int mach64_do_dispatch_pseudo_dma(drm_mach64_private_t * dev_priv)
 			     head, ring->tail, buf_addr, (eol ? "eol" : ""));
 			mach64_dump_ring_info(dev_priv);
 			mach64_do_engine_reset(dev_priv);
-			return -EINVAL;
+			return DRM_ERR(EINVAL);
 		}
 
 		/* Hand feed the buffer to the card via MMIO, waiting for the fifo
@@ -1117,7 +1142,7 @@ int mach64_do_dispatch_pseudo_dma(drm_mach64_private_t * dev_priv)
 /** \name DMA cleanup */
 /*@{*/
 
-int mach64_do_cleanup_dma(struct drm_device * dev)
+int mach64_do_cleanup_dma(drm_device_t * dev)
 {
 	DRM_DEBUG("%s\n", __FUNCTION__);
 
@@ -1131,14 +1156,18 @@ int mach64_do_cleanup_dma(struct drm_device * dev)
 	if (dev->dev_private) {
 		drm_mach64_private_t *dev_priv = dev->dev_private;
 
-		if (!dev_priv->is_pci) {
+		if (dev_priv->is_pci) {
+			if (dev_priv->ring.dmah) {
+				drm_pci_free(dev, dev_priv->ring.dmah);
+			}
+		} else {
 			if (dev_priv->ring_map)
 				drm_core_ioremapfree(dev_priv->ring_map, dev);
+		}
 
-			if (dev->agp_buffer_map) {
-				drm_core_ioremapfree(dev->agp_buffer_map, dev);
-				dev->agp_buffer_map = NULL;
-			}
+		if (dev->agp_buffer_map) {
+			drm_core_ioremapfree(dev->agp_buffer_map, dev);
+			dev->agp_buffer_map = NULL;
 		}
 
 		mach64_destroy_freelist(dev);
@@ -1158,57 +1187,60 @@ int mach64_do_cleanup_dma(struct drm_device * dev)
 /** \name IOCTL handlers */
 /*@{*/
 
-int mach64_dma_init(struct drm_device *dev, void *data,
-		    struct drm_file *file_priv)
+int mach64_dma_init(DRM_IOCTL_ARGS)
 {
-	drm_mach64_init_t *init = data;
+	DRM_DEVICE;
+	drm_mach64_init_t init;
 
 	DRM_DEBUG("%s\n", __FUNCTION__);
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
-	switch (init->func) {
+	DRM_COPY_FROM_USER_IOCTL(init, (drm_mach64_init_t *) data,
+				 sizeof(init));
+
+	switch (init.func) {
 	case DRM_MACH64_INIT_DMA:
-		return mach64_do_dma_init(dev, init);
+		return mach64_do_dma_init(dev, &init);
 	case DRM_MACH64_CLEANUP_DMA:
 		return mach64_do_cleanup_dma(dev);
 	}
 
-	return -EINVAL;
+	return DRM_ERR(EINVAL);
 }
 
-int mach64_dma_idle(struct drm_device *dev, void *data,
-		    struct drm_file *file_priv)
+int mach64_dma_idle(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 
 	DRM_DEBUG("%s\n", __FUNCTION__);
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	return mach64_do_dma_idle(dev_priv);
 }
 
-int mach64_dma_flush(struct drm_device *dev, void *data,
-		     struct drm_file *file_priv)
+int mach64_dma_flush(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 
 	DRM_DEBUG("%s\n", __FUNCTION__);
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	return mach64_do_dma_flush(dev_priv);
 }
 
-int mach64_engine_reset(struct drm_device *dev, void *data,
-			struct drm_file *file_priv)
+int mach64_engine_reset(DRM_IOCTL_ARGS)
 {
+	DRM_DEVICE;
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 
 	DRM_DEBUG("%s\n", __FUNCTION__);
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	return mach64_do_engine_reset(dev_priv);
 }
@@ -1220,9 +1252,9 @@ int mach64_engine_reset(struct drm_device *dev, void *data,
 /** \name Freelist management */
 /*@{*/
 
-int mach64_init_freelist(struct drm_device * dev)
+int mach64_init_freelist(drm_device_t * dev)
 {
-	struct drm_device_dma *dma = dev->dma;
+	drm_device_dma_t *dma = dev->dma;
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 	drm_mach64_freelist_t *entry;
 	struct list_head *ptr;
@@ -1236,7 +1268,7 @@ int mach64_init_freelist(struct drm_device * dev)
 		     (drm_mach64_freelist_t *)
 		     drm_alloc(sizeof(drm_mach64_freelist_t),
 			       DRM_MEM_BUFLISTS)) == NULL)
-			return -ENOMEM;
+			return DRM_ERR(ENOMEM);
 		memset(entry, 0, sizeof(drm_mach64_freelist_t));
 		entry->buf = dma->buflist[i];
 		ptr = &entry->list;
@@ -1246,7 +1278,7 @@ int mach64_init_freelist(struct drm_device * dev)
 	return 0;
 }
 
-void mach64_destroy_freelist(struct drm_device * dev)
+void mach64_destroy_freelist(drm_device_t * dev)
 {
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 	drm_mach64_freelist_t *entry;
@@ -1304,88 +1336,17 @@ int mach64_do_release_used_buffers(drm_mach64_private_t * dev_priv)
 	return 0;
 }
 
-static int mach64_do_reclaim_completed(drm_mach64_private_t * dev_priv)
+drm_buf_t *mach64_freelist_get(drm_mach64_private_t * dev_priv)
 {
 	drm_mach64_descriptor_ring_t *ring = &dev_priv->ring;
+	drm_mach64_freelist_t *entry;
 	struct list_head *ptr;
 	struct list_head *tmp;
-	drm_mach64_freelist_t *entry;
-	u32 head, tail, ofs;
-
-	mach64_ring_tick(dev_priv, ring);
-	head = ring->head;
-	tail = ring->tail;
-
-	if (head == tail) {
-#if MACH64_EXTRA_CHECKING
-		if (MACH64_READ(MACH64_GUI_STAT) & MACH64_GUI_ACTIVE) {
-			DRM_ERROR("Empty ring with non-idle engine!\n");
-			mach64_dump_ring_info(dev_priv);
-			return -1;
-		}
-#endif
-		/* last pass is complete, so release everything */
-		mach64_do_release_used_buffers(dev_priv);
-		DRM_DEBUG("%s: idle engine, freed all buffers.\n",
-		     __FUNCTION__);
-		if (list_empty(&dev_priv->free_list)) {
-			DRM_ERROR("Freelist empty with idle engine\n");
-			return -1;
-		}
-		return 0;
-	}
-	/* Look for a completed buffer and bail out of the loop
-	 * as soon as we find one -- don't waste time trying
-	 * to free extra bufs here, leave that to do_release_used_buffers
-	 */
-	list_for_each_safe(ptr, tmp, &dev_priv->pending) {
-		entry = list_entry(ptr, drm_mach64_freelist_t, list);
-		ofs = entry->ring_ofs;
-		if (entry->discard &&
-		    ((head < tail && (ofs < head || ofs >= tail)) ||
-		     (head > tail && (ofs < head && ofs >= tail)))) {
-#if MACH64_EXTRA_CHECKING
-			int i;
-
-			for (i = head; i != tail; i = (i + 4) & ring->tail_mask)
-			{
-				u32 o1 = le32_to_cpu(((u32 *) ring->
-						 start)[i + 1]);
-				u32 o2 = GETBUFADDR(entry->buf);
-
-				if (o1 == o2) {
-					DRM_ERROR
-					    ("Attempting to free used buffer: "
-					     "i=%d  buf=0x%08x\n",
-					     i, o1);
-					mach64_dump_ring_info(dev_priv);
-					return -1;
-				}
-			}
-#endif
-			/* found a processed buffer */
-			entry->buf->pending = 0;
-			list_del(ptr);
-			list_add_tail(ptr, &dev_priv->free_list);
-			DRM_DEBUG
-			    ("%s: freed processed buffer (head=%d tail=%d "
-			     "buf ring ofs=%d).\n",
-			     __FUNCTION__, head, tail, ofs);
-			return 0;
-		}
-	}
-
-	return 1;
-}
-
-struct drm_buf *mach64_freelist_get(drm_mach64_private_t * dev_priv)
-{
-	drm_mach64_descriptor_ring_t *ring = &dev_priv->ring;
-	drm_mach64_freelist_t *entry;
-	struct list_head *ptr;
 	int t;
 
 	if (list_empty(&dev_priv->free_list)) {
+		u32 head, tail, ofs;
+
 		if (list_empty(&dev_priv->pending)) {
 			DRM_ERROR
 			    ("Couldn't get buffer - pending and free lists empty\n");
@@ -1397,15 +1358,81 @@ struct drm_buf *mach64_freelist_get(drm_mach64_private_t * dev_priv)
 			return NULL;
 		}
 
+		tail = ring->tail;
 		for (t = 0; t < dev_priv->usec_timeout; t++) {
-			int ret;
+			mach64_ring_tick(dev_priv, ring);
+			head = ring->head;
 
-			ret = mach64_do_reclaim_completed(dev_priv);
-			if (ret == 0)
+			if (head == tail) {
+#if MACH64_EXTRA_CHECKING
+				if (MACH64_READ(MACH64_GUI_STAT) &
+				    MACH64_GUI_ACTIVE) {
+					DRM_ERROR
+					    ("Empty ring with non-idle engine!\n");
+					mach64_dump_ring_info(dev_priv);
+					return NULL;
+				}
+#endif
+				/* last pass is complete, so release everything */
+				mach64_do_release_used_buffers(dev_priv);
+				DRM_DEBUG
+				    ("%s: idle engine, freed all buffers.\n",
+				     __FUNCTION__);
+				if (list_empty(&dev_priv->free_list)) {
+					DRM_ERROR
+					    ("Freelist empty with idle engine\n");
+					return NULL;
+				}
 				goto _freelist_entry_found;
-			if (ret < 0)
-				return NULL;
+			}
+			/* Look for a completed buffer and bail out of the loop
+			 * as soon as we find one -- don't waste time trying
+			 * to free extra bufs here, leave that to do_release_used_buffers
+			 */
+			list_for_each_safe(ptr, tmp, &dev_priv->pending) {
+				entry =
+				    list_entry(ptr, drm_mach64_freelist_t,
+					       list);
+				ofs = entry->ring_ofs;
+				if (entry->discard &&
+				    ((head < tail
+				      && (ofs < head || ofs >= tail))
+				     || (head > tail
+					 && (ofs < head && ofs >= tail)))) {
+#if MACH64_EXTRA_CHECKING
+					int i;
 
+					for (i = head; i != tail;
+					     i = (i + 4) & ring->tail_mask) {
+						u32 o1 =
+						    le32_to_cpu(((u32 *) ring->
+								 start)[i + 1]);
+						u32 o2 = GETBUFADDR(entry->buf);
+
+						if (o1 == o2) {
+							DRM_ERROR
+							    ("Attempting to free used buffer: "
+							     "i=%d  buf=0x%08x\n",
+							     i, o1);
+							mach64_dump_ring_info
+							    (dev_priv);
+							return NULL;
+						}
+					}
+#endif
+					/* found a processed buffer */
+					entry->buf->pending = 0;
+					list_del(ptr);
+					entry->buf->used = 0;
+					list_add_tail(ptr,
+						      &dev_priv->placeholders);
+					DRM_DEBUG
+					    ("%s: freed processed buffer (head=%d tail=%d "
+					     "buf ring ofs=%d).\n",
+					     __FUNCTION__, head, tail, ofs);
+					return entry->buf;
+				}
+			}
 			DRM_UDELAY(1);
 		}
 		mach64_dump_ring_info(dev_priv);
@@ -1424,33 +1451,6 @@ struct drm_buf *mach64_freelist_get(drm_mach64_private_t * dev_priv)
 	return entry->buf;
 }
 
-int mach64_freelist_put(drm_mach64_private_t * dev_priv, struct drm_buf * copy_buf)
-{
-	struct list_head *ptr;
-	drm_mach64_freelist_t *entry;
-
-#if MACH64_EXTRA_CHECKING
-	list_for_each(ptr, &dev_priv->pending) {
-		entry = list_entry(ptr, drm_mach64_freelist_t, list);
-		if (copy_buf == entry->buf) {
-			DRM_ERROR("%s: Trying to release a pending buf\n",
-			     __FUNCTION__);
-			return -EFAULT;
-		}
-	}
-#endif
-	ptr = dev_priv->placeholders.next;
-	entry = list_entry(ptr, drm_mach64_freelist_t, list);
-	copy_buf->pending = 0;
-	copy_buf->used = 0;
-	entry->buf = copy_buf;
-	entry->discard = 1;
-	list_del(ptr);
-	list_add_tail(ptr, &dev_priv->free_list);
-
-	return 0;
-}
-
 /*@}*/
 
 
@@ -1458,73 +1458,76 @@ int mach64_freelist_put(drm_mach64_private_t * dev_priv, struct drm_buf * copy_b
 /** \name DMA buffer request and submission IOCTL handler */
 /*@{*/
 
-static int mach64_dma_get_buffers(struct drm_device *dev,
-				  struct drm_file *file_priv,
-				  struct drm_dma * d)
+static int mach64_dma_get_buffers(DRMFILE filp, drm_device_t * dev,
+				  drm_dma_t * d)
 {
 	int i;
-	struct drm_buf *buf;
+	drm_buf_t *buf;
 	drm_mach64_private_t *dev_priv = dev->dev_private;
 
 	for (i = d->granted_count; i < d->request_count; i++) {
 		buf = mach64_freelist_get(dev_priv);
 #if MACH64_EXTRA_CHECKING
 		if (!buf)
-			return -EFAULT;
+			return DRM_ERR(EFAULT);
 #else
 		if (!buf)
-			return -EAGAIN;
+			return DRM_ERR(EAGAIN);
 #endif
 
-		buf->file_priv = file_priv;
+		buf->filp = filp;
 
 		if (DRM_COPY_TO_USER(&d->request_indices[i], &buf->idx,
 				     sizeof(buf->idx)))
-			return -EFAULT;
+			return DRM_ERR(EFAULT);
 		if (DRM_COPY_TO_USER(&d->request_sizes[i], &buf->total,
 				     sizeof(buf->total)))
-			return -EFAULT;
+			return DRM_ERR(EFAULT);
 
 		d->granted_count++;
 	}
 	return 0;
 }
 
-int mach64_dma_buffers(struct drm_device *dev, void *data,
-		       struct drm_file *file_priv)
+int mach64_dma_buffers(DRM_IOCTL_ARGS)
 {
-	struct drm_device_dma *dma = dev->dma;
-	struct drm_dma *d = data;
+	DRM_DEVICE;
+	drm_device_dma_t *dma = dev->dma;
+	drm_dma_t d;
 	int ret = 0;
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	LOCK_TEST_WITH_RETURN(dev, filp);
+
+	DRM_COPY_FROM_USER_IOCTL(d, (drm_dma_t *) data, sizeof(d));
 
 	/* Please don't send us buffers.
 	 */
-	if (d->send_count != 0) {
+	if (d.send_count != 0) {
 		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return -EINVAL;
+			  DRM_CURRENTPID, d.send_count);
+		return DRM_ERR(EINVAL);
 	}
 
 	/* We'll send you buffers.
 	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
+	if (d.request_count < 0 || d.request_count > dma->buf_count) {
 		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		ret = -EINVAL;
+			  DRM_CURRENTPID, d.request_count, dma->buf_count);
+		ret = DRM_ERR(EINVAL);
 	}
 
-	d->granted_count = 0;
+	d.granted_count = 0;
 
-	if (d->request_count) {
-		ret = mach64_dma_get_buffers(dev, file_priv, d);
+	if (d.request_count) {
+		ret = mach64_dma_get_buffers(filp, dev, &d);
 	}
+
+	DRM_COPY_TO_USER_IOCTL((drm_dma_t *) data, d, sizeof(d));
 
 	return ret;
 }
 
-void mach64_driver_lastclose(struct drm_device * dev)
+void mach64_driver_lastclose(drm_device_t * dev)
 {
 	mach64_do_cleanup_dma(dev);
 }

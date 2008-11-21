@@ -1,5 +1,4 @@
-/*	$OpenBSD: udsbr.c,v 1.19 2007/10/11 18:33:14 deraadt Exp $	*/
-/*	$NetBSD: udsbr.c,v 1.7 2002/07/11 21:14:27 augustss Exp $	*/
+/*	$NetBSD: udsbr.c,v 1.15 2008/05/24 16:40:58 cube Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,6 +37,9 @@
  * FreeBSD driver.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: udsbr.c,v 1.15 2008/05/24 16:40:58 cube Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -60,8 +55,8 @@
 #include <dev/usb/usbdevs.h>
 
 #ifdef UDSBR_DEBUG
-#define DPRINTF(x)	do { if (udsbrdebug) printf x; } while (0)
-#define DPRINTFN(n,x)	do { if (udsbrdebug>(n)) printf x; } while (0)
+#define DPRINTF(x)	if (udsbrdebug) logprintf x
+#define DPRINTFN(n,x)	if (udsbrdebug>(n)) logprintf x
 int	udsbrdebug = 0;
 #else
 #define DPRINTF(x)
@@ -70,10 +65,10 @@ int	udsbrdebug = 0;
 
 #define UDSBR_CONFIG_NO		1
 
-int     udsbr_get_info(void *, struct radio_info *);
-int     udsbr_set_info(void *, struct radio_info *);
+Static	int     udsbr_get_info(void *, struct radio_info *);
+Static	int     udsbr_set_info(void *, struct radio_info *);
 
-struct radio_hw_if udsbr_hw_if = {
+const struct radio_hw_if udsbr_hw_if = {
 	NULL, /* open */
 	NULL, /* close */
 	udsbr_get_info,
@@ -82,50 +77,39 @@ struct radio_hw_if udsbr_hw_if = {
 };
 
 struct udsbr_softc {
- 	struct device		 sc_dev;
-	usbd_device_handle	 sc_udev;
+ 	USBBASEDEVICE		sc_dev;
+	usbd_device_handle	sc_udev;
 
-	char			 sc_mute;
-	char			 sc_vol;
-	u_int32_t		 sc_freq;
+	char			sc_mute;
+	char			sc_vol;
+	u_int32_t		sc_freq;
 
-	struct device		*sc_child;
+	device_t		sc_child;
 
-	char			 sc_dying;
+	char			sc_dying;
 };
 
-int	udsbr_req(struct udsbr_softc *sc, int ureq, int value, int index);
-void	udsbr_start(struct udsbr_softc *sc);
-void	udsbr_stop(struct udsbr_softc *sc);
-void	udsbr_setfreq(struct udsbr_softc *sc, int freq);
-int	udsbr_status(struct udsbr_softc *sc);
+Static	int	udsbr_req(struct udsbr_softc *sc, int ureq, int value,
+			  int index);
+Static	void	udsbr_start(struct udsbr_softc *sc);
+Static	void	udsbr_stop(struct udsbr_softc *sc);
+Static	void	udsbr_setfreq(struct udsbr_softc *sc, int freq);
+Static	int	udsbr_status(struct udsbr_softc *sc);
 
-int udsbr_match(struct device *, void *, void *); 
-void udsbr_attach(struct device *, struct device *, void *); 
-int udsbr_detach(struct device *, int); 
-int udsbr_activate(struct device *, enum devact); 
+int udsbr_match(device_t, cfdata_t, void *);
+void udsbr_attach(device_t, device_t, void *);
+void udsbr_childdet(device_t, device_t);
+int udsbr_detach(device_t, int);
+int udsbr_activate(device_t, enum devact);
+extern struct cfdriver udsbr_cd;
+CFATTACH_DECL2_NEW(udsbr, sizeof(struct udsbr_softc), udsbr_match,
+    udsbr_attach, udsbr_detach, udsbr_activate, NULL, udsbr_childdet);
 
-struct cfdriver udsbr_cd = { 
-	NULL, "udsbr", DV_DULL 
-}; 
-
-const struct cfattach udsbr_ca = { 
-	sizeof(struct udsbr_softc), 
-	udsbr_match, 
-	udsbr_attach, 
-	udsbr_detach, 
-	udsbr_activate, 
-};
-
-int
-udsbr_match(struct device *parent, void *match, void *aux)
+USB_MATCH(udsbr)
 {
-	struct usb_attach_arg	*uaa = aux;
+	USB_MATCH_START(udsbr, uaa);
 
 	DPRINTFN(50,("udsbr_match\n"));
-
-	if (uaa->iface != NULL)
-		return (UMATCH_NONE);
 
 	if (uaa->vendor != USB_VENDOR_CYPRESS ||
 	    uaa->product != USB_PRODUCT_CYPRESS_FMRADIO)
@@ -133,21 +117,26 @@ udsbr_match(struct device *parent, void *match, void *aux)
 	return (UMATCH_VENDOR_PRODUCT);
 }
 
-void
-udsbr_attach(struct device *parent, struct device *self, void *aux)
+USB_ATTACH(udsbr)
 {
-	struct udsbr_softc	*sc = (struct udsbr_softc *)self;
-	struct usb_attach_arg	*uaa = aux;
+	USB_ATTACH_START(udsbr, sc, uaa);
 	usbd_device_handle	dev = uaa->device;
+	char			*devinfop;
 	usbd_status		err;
 
 	DPRINTFN(10,("udsbr_attach: sc=%p\n", sc));
 
+	sc->sc_dev = self;
+
+	devinfop = usbd_devinfo_alloc(dev, 0);
+	USB_ATTACH_SETUP;
+	aprint_normal_dev(self, "%s\n", devinfop);
+	usbd_devinfo_free(devinfop);
+
 	err = usbd_set_config_no(dev, UDSBR_CONFIG_NO, 1);
 	if (err) {
-		printf("%s: setting config no failed\n",
-		    sc->sc_dev.dv_xname);
-		return;
+		aprint_error_dev(self, "setting config no failed\n");
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	sc->sc_udev = dev;
@@ -155,34 +144,41 @@ udsbr_attach(struct device *parent, struct device *self, void *aux)
 	DPRINTFN(10, ("udsbr_attach: %p\n", sc->sc_udev));
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   &sc->sc_dev);
+			   USBDEV(sc->sc_dev));
 
-	sc->sc_child = radio_attach_mi(&udsbr_hw_if, sc, &sc->sc_dev);
+	sc->sc_child = radio_attach_mi(&udsbr_hw_if, sc, USBDEV(sc->sc_dev));
+
+	USB_ATTACH_SUCCESS_RETURN;
 }
 
-int
-udsbr_detach(struct device *self, int flags)
+void
+udsbr_childdet(device_t self, device_t child)
 {
-	struct udsbr_softc *sc = (struct udsbr_softc *)self;
+}
+
+USB_DETACH(udsbr)
+{
+	USB_DETACH_START(udsbr, sc);
 	int rv = 0;
 
 	if (sc->sc_child != NULL)
 		rv = config_detach(sc->sc_child, flags);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   &sc->sc_dev);
+			   USBDEV(sc->sc_dev));
 
 	return (rv);
 }
 
 int
-udsbr_activate(struct device *self, enum devact act)
+udsbr_activate(device_ptr_t self, enum devact act)
 {
-	struct udsbr_softc *sc = (struct udsbr_softc *)self;
+	struct udsbr_softc *sc = device_private(self);
 	int rv = 0;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
+		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -210,8 +206,7 @@ udsbr_req(struct udsbr_softc *sc, int ureq, int value, int index)
 	USETW(req.wLength, 1);
 	err = usbd_do_request(sc->sc_udev, &req, &data);
 	if (err) {
-		printf("%s: request failed err=%d\n", sc->sc_dev.dv_xname,
-		       err);
+		aprint_error_dev(sc->sc_dev, "request failed err=%d\n", err);
 	}
 	return !(data & 1);
 }

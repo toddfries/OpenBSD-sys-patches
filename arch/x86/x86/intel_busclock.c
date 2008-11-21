@@ -1,4 +1,4 @@
-/*	$NetBSD: intel_busclock.c,v 1.4 2008/01/04 21:17:44 ad Exp $	*/
+/*	$NetBSD: intel_busclock.c,v 1.6 2008/11/12 13:00:08 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intel_busclock.c,v 1.4 2008/01/04 21:17:44 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intel_busclock.c,v 1.6 2008/11/12 13:00:08 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,6 +80,19 @@ p3_get_bus_clock(struct cpu_info *ci)
 	switch (CPUID2MODEL(ci->ci_signature)) {
 	case 0x9: /* Pentium M (130 nm, Banias) */
 		bus_clock = 10000;
+		break;
+	case 0xc: /* Atom, model 1 */
+		msr = rdmsr(MSR_FSB_FREQ);
+		bus = (msr >> 0) & 0x7;
+		switch (bus) {
+		case 1:
+			bus_clock = 13333;
+			break;
+		default:
+			aprint_debug("%s: unknown Atom FSB_FREQ "
+			    "value %d", device_xname(ci->ci_dev), bus);
+			goto print_msr;
+		}
 		break;
 	case 0xd: /* Pentium M (90 nm, Dothan) */
 		msr = rdmsr(MSR_FSB_FREQ);

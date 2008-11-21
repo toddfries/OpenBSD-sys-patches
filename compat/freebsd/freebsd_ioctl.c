@@ -1,5 +1,4 @@
-/*	$OpenBSD: freebsd_ioctl.c,v 1.4 2001/02/03 02:45:31 mickey Exp $	*/
-/*	$NetBSD: freebsd_ioctl.c,v 1.1 1995/10/10 01:19:31 mycroft Exp $	*/
+/*	$NetBSD: freebsd_ioctl.c,v 1.15 2007/12/20 23:02:47 dsl Exp $	*/
 
 /*
  * Copyright (c) 1995 Frank van der Linden
@@ -32,29 +31,34 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: freebsd_ioctl.c,v 1.15 2007/12/20 23:02:47 dsl Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
+#include <sys/sockio.h>
 
 #include <sys/syscallargs.h>
 
-#include <compat/freebsd/freebsd_signal.h>
+#include <net/if.h>
+
+#include <compat/sys/sockio.h>
+
 #include <compat/freebsd/freebsd_syscallargs.h>
-#include <compat/freebsd/freebsd_util.h>
+#include <compat/common/compat_util.h>
 #include <compat/freebsd/freebsd_ioctl.h>
 
 #include <compat/ossaudio/ossaudio.h>
 #include <compat/ossaudio/ossaudiovar.h>
 
 /* The FreeBSD and OSS(Linux) encodings of ioctl R/W differ. */
-static void freebsd_to_oss(struct freebsd_sys_ioctl_args *,
+static void freebsd_to_oss(const struct freebsd_sys_ioctl_args *,
 			   struct oss_sys_ioctl_args *);
 
 static void
-freebsd_to_oss(uap, rap)
-struct freebsd_sys_ioctl_args *uap;
-struct oss_sys_ioctl_args *rap;
+freebsd_to_oss(const struct freebsd_sys_ioctl_args *uap, struct oss_sys_ioctl_args *rap)
 {
 	u_long ocmd, ncmd;
 
@@ -71,18 +75,50 @@ struct oss_sys_ioctl_args *rap;
         SCARG(rap, data) = SCARG(uap, data);
 }
 
-int
-freebsd_sys_ioctl(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+
+static void freebsd_to_netbsd_ifioctl(const struct freebsd_sys_ioctl_args *uap,
+				      struct sys_ioctl_args *nap);
+
+static void
+freebsd_to_netbsd_ifioctl(const struct freebsd_sys_ioctl_args *uap, struct sys_ioctl_args *nap)
 {
-	struct freebsd_sys_ioctl_args /* {
+	u_long ocmd, ncmd;
+	ocmd = SCARG(uap, com);
+	switch (ocmd) {
+	case FREEBSD_SIOCALIFADDR:
+		ncmd =SIOCALIFADDR;
+		break;
+	case FREEBSD_SIOCGLIFADDR:
+		ncmd =SIOCGLIFADDR;
+		break;
+	case FREEBSD_SIOCDLIFADDR:
+		ncmd =SIOCDLIFADDR;
+		break;
+	case FREEBSD_SIOCGIFMTU:
+		ncmd = SIOCGIFMTU;
+		break;
+	case FREEBSD_SIOCSIFMTU:
+		ncmd = SIOCSIFMTU;
+		break;
+	default:
+		ncmd = ocmd;
+		break;
+	}
+	SCARG(nap, fd) = SCARG(uap, fd);
+	SCARG(nap, com) = ncmd;
+	SCARG(nap, data) = SCARG(uap, data);
+}
+
+int
+freebsd_sys_ioctl(struct lwp *l, const struct freebsd_sys_ioctl_args *uap, register_t *retval)
+{
+	/* {
 		syscallarg(int) fd;
 		syscallarg(u_long) com;
-		syscallarg(caddr_t) data;
-	} */ *uap = v;
+		syscallarg(void *) data;
+	} */
         struct oss_sys_ioctl_args ap;
+	struct sys_ioctl_args nap;
 
 	/*
 	 * XXX - <sys/cdio.h>'s incompatibility
@@ -96,14 +132,17 @@ freebsd_sys_ioctl(p, v, retval)
 	switch (FREEBSD_IOCGROUP(SCARG(uap, com))) {
 	case 'M':
         	freebsd_to_oss(uap, &ap);
-		return oss_ioctl_mixer(p, &ap, retval);
+		return oss_ioctl_mixer(l, &ap, retval);
 	case 'Q':
         	freebsd_to_oss(uap, &ap);
-		return oss_ioctl_sequencer(p, &ap, retval);
+		return oss_ioctl_sequencer(l, &ap, retval);
 	case 'P':
         	freebsd_to_oss(uap, &ap);
-		return oss_ioctl_audio(p, &ap, retval);
+		return oss_ioctl_audio(l, &ap, retval);
+	case 'i':
+		freebsd_to_netbsd_ifioctl(uap, &nap);
+		return sys_ioctl(l, &nap, retval);
 	default:
-		return sys_ioctl(p, uap, retval);
+		return sys_ioctl(l, (const void *)uap, retval);
 	}
 }

@@ -1,4 +1,3 @@
-/*	$OpenBSD: ka48.h,v 1.3 2006/03/04 19:33:21 miod Exp $	*/
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -34,6 +33,8 @@
  * KA48 (VS4000 VLC) specific definitions. *** INCOMPLETE ! MK-990306 ***
  */
 
+#ifndef _VAX_KA48_H_
+#define _VAX_KA48_H_
 
 /* IPR bits definitions */
 #define	PCSTS_FLUSH		 4
@@ -56,7 +57,9 @@
 
 /* From OpenVMS $IO440DEF & $KA440DEF */
 #define	KA48_PARCTL	0x20080014
-#define	KA48_PARCTL_CPEN	0x00000001	/* CPU Parity Enable? */
+#define	KA48_PARCTL_CPEN	0x00000001	/* CPU Parity Eanble? */
 #define	KA48_PARCTL_NPEN	0x00000100	/* ?? Parity Enable */
 #define	KA48_PARCTL_INVENA	0x01000000	/* Invalid ? Enable */
 #define	KA48_PARCTL_AGS		0x02000000	/* ??? */
+
+#endif /* _VAX_KA48_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: maple.c,v 1.31 2005/12/11 12:17:06 christos Exp $	*/
+/*	$NetBSD: maple.c,v 1.40 2008/10/19 14:05:49 mjf Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: maple.c,v 1.31 2005/12/11 12:17:06 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: maple.c,v 1.40 2008/10/19 14:05:49 mjf Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -109,13 +102,13 @@ __KERNEL_RCSID(0, "$NetBSD: maple.c,v 1.31 2005/12/11 12:17:06 christos Exp $");
 /* interrupt priority level */
 #define	IPL_MAPLE	IPL_BIO
 #define splmaple()	splbio()
+#define IRL_MAPLE       SYSASIC_IRL9
 
 /*
  * Function declarations.
  */
 static int	maplematch(struct device *, struct cfdata *, void *);
 static void	mapleattach(struct device *, struct device *, void *);
-static void	maple_create_event_thread(void *);
 static void	maple_scanbus(struct maple_softc *);
 static char *	maple_unit_name(char *, int port, int subunit);
 static void	maple_begin_txbuf(struct maple_softc *);
@@ -197,7 +190,7 @@ mapleattach(struct device *parent, struct device *self, void *aux)
 
 	sc = (struct maple_softc *)self;
 
-	printf(": %s\n", sysasic_intr_string(IPL_MAPLE));
+	printf(": %s\n", sysasic_intr_string(IRL_MAPLE));
 
 	if (maple_alloc_dma(MAPLE_DMABUF_SIZE, &dmabuffer, &dmabuffer_phys)) {
 		printf("%s: unable to allocate DMA buffers.\n",
@@ -245,22 +238,15 @@ mapleattach(struct device *parent, struct device *self, void *aux)
 	maple_polling = 1;
 	maple_scanbus(sc);
 
-	callout_init(&sc->maple_callout_ch);
+	callout_init(&sc->maple_callout_ch, 0);
 
 	sc->sc_intrhand = sysasic_intr_establish(SYSASIC_EVENT_MAPLE_DMADONE,
-	    IPL_MAPLE, maple_intr, sc);
+	    IPL_MAPLE, IRL_MAPLE, maple_intr, sc);
 
 	config_pending_incr();	/* create thread before mounting root */
-	kthread_create(maple_create_event_thread, sc);
-}
 
-static void
-maple_create_event_thread(void *arg)
-{
-	struct maple_softc *sc = arg;
-
-	if (kthread_create1(maple_event_thread, sc, &sc->event_thread,
-	    "%s", sc->sc_dev.dv_xname) == 0)
+	if (kthread_create(PRI_NONE, 0, NULL, maple_event_thread, sc,
+	    &sc->event_thread, "%s", sc->sc_dev.dv_xname) == 0)
 		return;
 
 	panic("%s: unable to create event thread", sc->sc_dev.dv_xname);
@@ -400,7 +386,7 @@ maple_free_dma(paddr_t paddr, size_t size)
 	TAILQ_INIT(&mlist);
 	for (addr = paddr; addr < paddr + size; addr += PAGE_SIZE) {
 		m = PHYS_TO_VM_PAGE(addr);
-		TAILQ_INSERT_TAIL(&mlist, m, pageq);
+		TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
 	}
 	uvm_pglistfree(&mlist);
 }
@@ -809,9 +795,9 @@ maple_detach_unit_nofix(struct maple_softc *sc, struct maple_unit *u)
 		sc->sc_port_unit_map[port] = 0;
 #if defined(MAPLE_DEBUG) && MAPLE_DEBUG > 2
 		{
-			char buf[16];
+			char buf2[16];
 			printf("%s: queued to probe 3\n",
-			    maple_unit_name(buf, port, u->subunit));
+			    maple_unit_name(buf2, port, u->subunit));
 		}
 #endif
 		TAILQ_INSERT_TAIL(&sc->sc_probeq, u, u_q);
@@ -1436,7 +1422,7 @@ maple_event_thread(void *arg)
 
 #ifdef MAPLE_DEBUG
 	printf("%s: forked event thread, pid %d\n",
-	    sc->sc_dev.dv_xname, sc->event_thread->p_pid);
+	    sc->sc_dev.dv_xname, sc->event_thread->l_proc->p_pid);
 #endif
 
 	/* begin first DMA cycle */
@@ -1617,7 +1603,7 @@ mapleopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct maple_softc *sc;
 
-	sc = device_lookup(&maple_cd, MAPLEBUSUNIT(dev));
+	sc = device_lookup_private(&maple_cd, MAPLEBUSUNIT(dev));
 	if (sc == NULL)			/* make sure it was attached */
 		return ENXIO;
 
@@ -1640,7 +1626,7 @@ mapleclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct maple_softc *sc;
 
-	sc = device_lookup(&maple_cd, MAPLEBUSUNIT(dev));
+	sc = device_lookup_private(&maple_cd, MAPLEBUSUNIT(dev));
 
 	sc->sc_port_units_open[MAPLEPORT(dev)] &= ~(1 << MAPLESUBUNIT(dev));
 
@@ -1649,7 +1635,7 @@ mapleclose(dev_t dev, int flag, int mode, struct lwp *l)
 
 int
 maple_unit_ioctl(struct device *dev, struct maple_unit *u, u_long cmd,
-    caddr_t data, int flag, struct lwp *l)
+    void *data, int flag, struct lwp *l)
 {
 	struct maple_softc *sc = (struct maple_softc *)dev;
 
@@ -1668,12 +1654,12 @@ maple_unit_ioctl(struct device *dev, struct maple_unit *u, u_long cmd,
 }
 
 int
-mapleioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+mapleioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct maple_softc *sc;
 	struct maple_unit *u;
 
-	sc = device_lookup(&maple_cd, MAPLEBUSUNIT(dev));
+	sc = device_lookup_private(&maple_cd, MAPLEBUSUNIT(dev));
 	u = &sc->sc_unit[MAPLEPORT(dev)][MAPLESUBUNIT(dev)];
 
 	return maple_unit_ioctl(&sc->sc_dev, u, cmd, data, flag, l);

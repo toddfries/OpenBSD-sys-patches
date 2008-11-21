@@ -1,4 +1,4 @@
-/*	$NetBSD: spl.S,v 1.4 2002/08/17 16:36:34 thorpej Exp $	*/
+/*	$NetBSD: spl.S,v 1.8 2008/04/27 18:58:44 matt Exp $	*/
 
 /*
  * Copyright (c) 1996-1998 Mark Brinicombe.
@@ -41,79 +41,78 @@
 #include "assym.h"
 #include <arm/arm32/psl.h>
 #include <machine/asm.h>
+#include <machine/cpu.h>
+
+	RCSID("$NetBSD: spl.S,v 1.8 2008/04/27 18:58:44 matt Exp $")
 
 	.text
 	.align	0
 
-.Lcurrent_spl_level:
-	.word	_C_LABEL(current_spl_level)
-
-.Lspl_masks:
-	.word	_C_LABEL(spl_masks)
-
-.Lspl_mask:
-	.word	_C_LABEL(spl_mask)
+.Lcpu_info_store:
+	.word	_C_LABEL(cpu_info_store)
 
 ENTRY(raisespl)
 	mov	r3, r0			/* Save the new value */
-	ldr	r1, .Lcurrent_spl_level	/* Get the current spl level */
-	ldr	r0, [r1]
+	ldr	r1, .Lcpu_info_store	/* Get the current spl level */
+	ldr	r0, [r1, #CI_CPL]
 	cmp	r3, r0
-	movle	pc, lr
+	RETc(le)
 
-	str	r3, [r1]		/* Store the new spl level */
+	stmfd	sp!, {r0, r1, r4, lr}	/* Preserve registers */
 
-	ldr	r2, .Lspl_masks		/* Get the spl mask */
-	ldr	r2, [r2, r3, lsl #2]
+	/* Disable interrupts */
+	mrs	r4, cpsr_all
+	orr	r2, r4, #(I32_bit)
+	msr	cpsr_c, r2
 
-	ldr	r1, .Lspl_mask		/* Store in the current spl mask */
-	str	r2, [r1]
-
-					/* stack alignment is 8 bytes */
-	stmfd	sp!, {r0, lr}		/* Preserve registers */
+	str	r3, [r1, #CI_CPL]	/* Store the new spl level */
 	bl	_C_LABEL(irq_setmasks)	/* Update the actual masks */
-	ldmfd	sp!, {r0, pc}		/* Exit */
+	msr	cpsr_c, r4		/* Restore interrupts */
+
+	ldmfd	sp!, {r0, r1, r4, pc}	/* Restore registers */
 
 ENTRY(lowerspl)
 	mov	r3, r0			/* Save the new value */
-	ldr	r1, .Lcurrent_spl_level	/* Get the current spl level */
-	ldr	r0, [r1]
+	ldr	r1, .Lcpu_info_store	/* Get the current spl level */
+	ldr	r0, [r1, #CI_CPL]
 	cmp	r3, r0
-	movge	pc, lr
+	RETc(ge)
 
-	str	r3, [r1]		/* Store the new spl level */
+	stmfd	sp!, {r0, r1, r4, lr}	/* Preserve registers */
 
-	ldr	r2, .Lspl_masks		/* Get the spl mask */
-	ldr	r2, [r2, r3, lsl #2]
+	/* Disable interrupts */
+	mrs	r4, cpsr_all
+	orr	r2, r4,  #(I32_bit)
+	msr	cpsr_c, r2
 
-	ldr	r1, .Lspl_mask		/* Store in the current spl mask */
-	str	r2, [r1]
+	str	r3, [r1, #CI_CPL]	/* Store the new spl level */
 
-					/* stack alignment is 8 bytes */
-	stmfd	sp!, {r0, lr}		/* Preserve registers */
 	bl	_C_LABEL(irq_setmasks)	/* Update the actual masks */
+	msr	cpsr_all, r4
+#ifdef __HAVE_FAST_SOFTINTS
 	bl	_C_LABEL(dosoftints)	/* Process any pending soft ints */
-	ldmfd	sp!, {r0, pc}		/* Exit */
+#endif
+	ldmfd	sp!, {r0, r1, r4, pc}	/* restore registers */
 
 ENTRY(splx)
-	ldr	r1, .Lcurrent_spl_level	/* Get the current spl level */
 	mov	r3, r0			/* Save the new value */
-	ldr	r0, [r1]
+	ldr	r1, .Lcpu_info_store	/* Get the current spl level */
+	ldr	r0, [r1, #CI_CPL]
 	cmp	r3, r0
-	moveq	pc, lr
+	RETc(eq)
 
-	str	r3, [r1]		/* Store the new spl level */
+	stmfd	sp!, {r0, r1, r4, lr}
 
-	ldr	r2, .Lspl_masks		/* Get the spl mask */
+	/* Disable interrupts */
+	mrs	r4, cpsr_all
+	orr	r2, r4,  #(I32_bit)
+	msr	cpsr_c, r2
 
-	ldr	r1, .Lspl_mask		/* Store in the current spl mask */
-
-	ldr	r2, [r2, r3, lsl #2]	/* Use r4 so available later */
-	
-					/* stack alignment is 8 bytes */
-	stmfd	sp!, {r0, lr}		/* Preserve registers */
-	str	r2, [r1]
+	str	r3, [r1, #CI_CPL]	/* Store the new spl level */
 
 	bl	_C_LABEL(irq_setmasks)	/* Update the actual masks */
+#ifdef __HAVE_FAST_SOFTINTS
 	bl	_C_LABEL(dosoftints)	/* Process any pending soft ints */
-	ldmfd	sp!, {r0, pc}		/* Exit */
+#endif
+	msr	cpsr_c, r4
+	ldmfd	sp!, {r0, r1, r4, pc}

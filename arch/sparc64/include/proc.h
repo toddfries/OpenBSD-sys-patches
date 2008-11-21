@@ -1,4 +1,4 @@
-/*	$NetBSD: proc.h,v 1.2 1999/11/06 20:13:50 eeh Exp $ */
+/*	$NetBSD: proc.h,v 1.11 2007/10/17 19:57:30 garbled Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -40,15 +40,24 @@
  *	@(#)proc.h	8.1 (Berkeley) 6/11/93
  */
 
+#ifndef _SPARC64_PROC_H
+#define _SPARC64_PROC_H
+
+struct mdlwp {
+	struct	trapframe64 *md_tf;	/* trap/syscall registers */
+	struct	fpstate64 *md_fpstate;	/* fpu state, if any; always resident */
+};
 /*
  * Machine-dependent part of the proc structure for SPARC.
  */
 struct mdproc {
-	struct	trapframe64 *md_tf;	/* trap/syscall registers */
-	struct	fpstate64 *md_fpstate;	/* fpu state, if any; always resident */
+	void	(*md_syscall)(struct trapframe64 *, register_t, register_t);
 	u_long	md_flags;
-	__volatile int md_astpending;
 };
 
 /* md_flags */
 #define	MDP_FIXALIGN	0x1		/* Fix unaligned memory accesses */
+
+#define netbsd32_syscall_intern syscall_intern
+
+#endif /* _SPARC64_PROC_H */

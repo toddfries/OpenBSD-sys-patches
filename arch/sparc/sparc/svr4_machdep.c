@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_machdep.c,v 1.13 2005/03/21 22:34:33 miod Exp $	*/
-/*	$NetBSD: svr4_machdep.c,v 1.24 1997/07/29 10:04:45 fair Exp $	 */
+/*	$NetBSD: svr4_machdep.c,v 1.67 2008/11/19 18:36:01 ad Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,49 +15,65 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.67 2008/11/19 18:36:01 ad Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_kgdb.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
+#include <sys/exec.h>
 #include <sys/user.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
-#include <sys/mount.h>
 #include <sys/kernel.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/malloc.h>
-#include <sys/buf.h>
-#include <sys/exec.h>
-
+#include <sys/mount.h>
 #include <sys/syscallargs.h>
+#include <sys/exec_elf.h>
+
 #include <compat/svr4/svr4_types.h>
+#include <compat/svr4/svr4_lwp.h>
 #include <compat/svr4/svr4_ucontext.h>
 #include <compat/svr4/svr4_syscallargs.h>
 #include <compat/svr4/svr4_util.h>
+#include <compat/svr4/svr4_exec.h>
 
 #include <machine/cpu.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
+#include <machine/vmparam.h>
 #include <machine/svr4_machdep.h>
 
-static void svr4_getsiginfo(union svr4_siginfo *, int, u_long, int, caddr_t);
+static void svr4_getsiginfo(union svr4_siginfo *, int, u_long, void *);
+
+void
+svr4_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
+{
+
+	setregs(l, epp, stack);
+}
 
 #ifdef DEBUG
 extern int sigdebug;
@@ -66,17 +84,14 @@ extern int sigpid;
 #endif
 
 #ifdef DEBUG_SVR4
-static void svr4_printcontext(const char *, struct svr4_ucontext *);
+static void svr4_printmcontext(const char *, struct svr4_mcontext *);
 
 static void
-svr4_printcontext(fun, uc)
-	const char *fun;
-	struct svr4_ucontext *uc;
+svr4_printmcontext(const char *fun, struct svr4_mcontext *mc)
 {
-	svr4_greg_t *r = uc->uc_mcontext.greg;
-	struct svr4_sigaltstack *s = &uc->uc_stack;
+	svr4_greg_t *r = mc->greg;
 
-	printf("%s at %p\n", fun, uc);
+	printf("%s at %p\n", fun, mc);
 
 	printf("Regs: ");
 	printf("PSR = 0x%x ", r[SVR4_SPARC_PSR]);
@@ -99,33 +114,24 @@ svr4_printcontext(fun, uc)
 	printf("O6 = 0x%x ",  r[SVR4_SPARC_O6]);
 	printf("O7 = 0x%x ",  r[SVR4_SPARC_O7]);
 	printf("\n");
-
-	printf("Signal Stack: sp %p, size %d, flags 0x%x\n",
-	    s->ss_sp, s->ss_size, s->ss_flags);
-
-	printf("Flags: 0x%lx\n", uc->uc_flags);
 }
 #endif
 
-void
-svr4_getcontext(p, uc, mask, oonstack)
-	struct proc *p;
-	struct svr4_ucontext *uc;
-	int mask, oonstack;
+void *
+svr4_getmcontext(struct lwp *l, struct svr4_mcontext *mc, u_long *flags)
 {
-	struct trapframe *tf = (struct trapframe *)p->p_md.md_tf;
-	svr4_greg_t *r = uc->uc_mcontext.greg;
-	struct svr4_sigaltstack *s = &uc->uc_stack;
+	struct trapframe *tf = (struct trapframe *)l->l_md.md_tf;
+	svr4_greg_t *r = mc->greg;
 #ifdef FPU_CONTEXT
-	svr4_fregset_t *f = &uc->uc_mcontext.freg;
-	struct fpstate *fps = p->p_md.md_fpstate;
+	svr4_fregset_t *f = &mc->freg;
+	struct fpstate *fps = l->l_md.md_fpstate;
 #endif
 
 	write_user_windows();
-	if (rwindow_save(p))
-		sigexit(p, SIGILL);
-
-	bzero(uc, sizeof(struct svr4_ucontext));
+	if (rwindow_save(l)) {
+		mutex_enter(l->l_proc->p_lock);
+		sigexit(l, SIGILL);
+	}
 
 	/*
 	 * Get the general purpose registers
@@ -150,6 +156,8 @@ svr4_getcontext(p, uc, mask, oonstack)
 	r[SVR4_SPARC_O6] = tf->tf_out[6];
 	r[SVR4_SPARC_O7] = tf->tf_out[7];
 
+	*flags |= SVR4_UC_CPU;
+
 #ifdef FPU_CONTEXT
 	/*
 	 * Get the floating point registers
@@ -162,49 +170,32 @@ svr4_getcontext(p, uc, mask, oonstack)
 		size_t sz = f->fp_nqel * f->fp_nqsize;
 		if (sz > sizeof(fps->fs_queue)) {
 #ifdef DIAGNOSTIC
-			printf("svr4_getcontext: fp_queue too large\n");
+			printf("getcontext: fp_queue too large\n");
 #endif
 			return;
 		}
 		if (copyout(fps->fs_queue, f->fp_q, sz) != 0) {
 #ifdef DIAGNOSTIC
-			printf("svr4_getcontext: copy of fp_queue failed %d\n",
+			printf("getcontext: copy of fp_queue failed %d\n",
 			    error);
 #endif
 			return;
 		}
 	}
 	f->fp_busy = 0;	/* XXX: How do we determine that? */
+	*flags |= SVR4_UC_FPU;
 #endif
 
-	/*
-	 * Set the signal stack to something reasonable
-	 */
-	/* XXX: Don't really know what to do with this */
-	s->ss_sp = (char *) ((r[SVR4_SPARC_SP] & ~0xfff) - 8192);
-	s->ss_size = 8192;
-	s->ss_flags = 0;
-
-	/*
-	 * Get the signal mask
-	 */
-	bsd_to_svr4_sigset(&mask, &uc->uc_sigmask);
-
-	/*
-	 * Get the flags
-	 */
-	uc->uc_flags = SVR4_UC_CPU|SVR4_UC_SIGMASK|SVR4_UC_STACK;
 
 #ifdef DEBUG_SVR4
-	svr4_printcontext("getcontext", uc);
+	svr4_printmcontext("getmcontext", mc);
 #endif
+	return (void *)tf->tf_out[6];
 }
 
 
 /*
- * Set to ucontext specified.
- * has been taken.  Reset signal mask and
- * stack state from context.
+ * Set to mcontext specified.
  * Return to previous pc and psl as specified by
  * context left by sendsig. Check carefully to
  * make sure that the user has not modified the
@@ -213,50 +204,42 @@ svr4_getcontext(p, uc, mask, oonstack)
  * This is almost like sigreturn() and it shows.
  */
 int
-svr4_setcontext(p, uc)
-	struct proc *p;
-	struct svr4_ucontext *uc;
+svr4_setmcontext(struct lwp *l, struct svr4_mcontext *mc, u_long flags)
 {
-	struct sigacts *psp = p->p_sigacts;
 	register struct trapframe *tf;
-	svr4_greg_t *r = uc->uc_mcontext.greg;
-	struct svr4_sigaltstack *s = &uc->uc_stack;
-	struct sigaltstack *sf = &psp->ps_sigstk;
-	int mask;
+	svr4_greg_t *r = mc->greg;
 #ifdef FPU_CONTEXT
-	svr4_fregset_t *f = &uc->uc_mcontext.freg;
-	struct fpstate *fps = p->p_md.md_fpstate;
+	svr4_fregset_t *f = &mc->freg;
+	struct fpstate *fps = l->l_md.md_fpstate;
 #endif
 
 #ifdef DEBUG_SVR4
-	svr4_printcontext("setcontext", uc);
+	svr4_printmcontext("setmcontext", mc);
 #endif
 
 	write_user_windows();
-	if (rwindow_save(p))
-		sigexit(p, SIGILL);
+	if (rwindow_save(l)) {
+		mutex_enter(l->l_proc->p_lock);
+		sigexit(l, SIGILL);
+	}
 
 #ifdef DEBUG
 	if (sigdebug & SDB_FOLLOW)
-		printf("svr4_setcontext: %s[%d], svr4_ucontext %p\n",
-		    p->p_comm, p->p_pid, uc);
+		printf("svr4_setmcontext: %s[%d], svr4_mcontext %p\n",
+		    l->l_proc->p_comm, l->l_proc->p_pid, mc);
 #endif
 
-	tf = (struct trapframe *)p->p_md.md_tf;
+	if (flags & SVR4_UC_CPU) {
+		/* Restore register context. */
+		tf = (struct trapframe *)l->l_md.md_tf;
 
-	/*
-	 * Restore register context.
-	 */
-	if (uc->uc_flags & SVR4_UC_CPU) {
 		/*
 		 * Only the icc bits in the psr are used, so it need not be
 		 * verified.  pc and npc must be multiples of 4.  This is all
 		 * that is required; if it holds, just do it.
 		 */
 		if (((r[SVR4_SPARC_PC] | r[SVR4_SPARC_nPC]) & 3) != 0) {
-#ifdef DEBUG_SVR4
-			printf("svr4_setcontext: pc or npc are not multiples of 4!\n");
-#endif
+			printf("pc or npc are not multiples of 4!\n");
 			return EINVAL;
 		}
 
@@ -288,7 +271,7 @@ svr4_setcontext(p, uc)
 
 
 #ifdef FPU_CONTEXT
-	if (uc->uc_flags & SVR4_UC_FPU) {
+	if (flags & SVR4_UC_FPU) {
 		/*
 		 * Set the floating point registers
 		 */
@@ -296,7 +279,7 @@ svr4_setcontext(p, uc)
 		size_t sz = f->fp_nqel * f->fp_nqsize;
 		if (sz > sizeof(fps->fs_queue)) {
 #ifdef DIAGNOSTIC
-			printf("svr4_setcontext: fp_queue too large\n");
+			printf("setmcontext: fp_queue too large\n");
 #endif
 			return EINVAL;
 		}
@@ -304,16 +287,10 @@ svr4_setcontext(p, uc)
 		fps->fs_qsize = f->fp_nqel;
 		fps->fs_fsr = f->fp_fsr;
 		if (f->fp_q != NULL) {
-			size_t sz = f->fp_nqel * f->fp_nqsize;
-			if (sz > sizeof(fps->fs_queue)) {
+			if ((error = copyin(f->fp_q, fps->fs_queue,
+					    f->fp_nqel * f->fp_nqsize)) != 0) {
 #ifdef DIAGNOSTIC
-				printf("svr4_setcontext: fp_queue too large\n");
-#endif
-				return (EINVAL);
-			}
-			if ((error = copyin(f->fp_q, fps->fs_queue, sz)) != 0) {
-#ifdef DIAGNOSTIC
-				printf("svr4_setcontext: copy of fp_queue failed\n");
+				printf("setmcontext: fp_queue copy failed\n");
 #endif
 				return error;
 			}
@@ -321,119 +298,130 @@ svr4_setcontext(p, uc)
 	}
 #endif
 
-	if (uc->uc_flags & SVR4_UC_STACK) {
-		/*
-		 * restore signal stack
-		 */
-		svr4_to_bsd_sigaltstack(s, sf);
-	}
-
-	if (uc->uc_flags & SVR4_UC_SIGMASK) {
-		/*
-		 * restore signal mask
-		 */
-		svr4_to_bsd_sigset(&uc->uc_sigmask, &mask);
-		p->p_sigmask = mask & ~sigcantmask;
-	}
-
-	return EJUSTRETURN;
+	return 0;
 }
 
 /*
- * map the native sig/type code into the svr4 siginfo as best we can
+ * map the trap code into the svr4 siginfo as best we can
  */
 static void
-svr4_getsiginfo(si, sig, code, type, addr)
-	union svr4_siginfo	*si;
-	int			 sig;
-	u_long			 code;
-	int			 type;
-	caddr_t			 addr;
+svr4_getsiginfo(union svr4_siginfo *si, int sig, u_long code, void *addr)
 {
-	si->svr4_si_signo = bsd_to_svr4_sig[sig];
-	si->svr4_si_errno = 0;
-	si->svr4_si_addr  = addr;
+
+	si->si_signo = native_to_svr4_signo[sig];
+	si->si_errno = 0;
+	si->si_addr  = addr;
 	/*
 	 * we can do this direct map as they are the same as all sparc
 	 * architectures.
 	 */
-	si->svr4_si_trap = code;
+	si->si_trap = code;
+	switch (code) {
+	case T_RESET:
+		si->si_code = 0;
+		break;
 
-	si->svr4_si_code = 0;
-	si->svr4_si_trap = 0;
+	case T_TEXTFAULT:
+		si->si_code = SVR4_BUS_ADRALN;
+		break;
 
-	switch (sig) {
-	case SIGSEGV:
-		switch (type) {
-		case SEGV_ACCERR:
-			si->svr4_si_code = SVR4_SEGV_ACCERR;
-			si->svr4_si_trap = SVR4_T_PROTFLT;
-			break;
-		case SEGV_MAPERR:
-			si->svr4_si_code = SVR4_SEGV_MAPERR;
-			si->svr4_si_trap = SVR4_T_SEGNPFLT;
-			break;
-		}
+	case T_ILLINST:
+		si->si_code = SVR4_ILL_ILLOPC;
 		break;
-	case SIGBUS:
-		switch (type) {
-		case BUS_ADRALN:
-			si->svr4_si_code = SVR4_BUS_ADRALN;
-			si->svr4_si_trap = SVR4_T_ALIGNFLT;
-			break;
-		}
+
+	case T_PRIVINST:
+		si->si_code = SVR4_ILL_PRVOPC;
 		break;
-	case SIGTRAP:
-		switch (type) {
-		case TRAP_BRKPT:
-			si->svr4_si_code = SVR4_TRAP_BRKPT;
-			si->svr4_si_trap = SVR4_T_BPTFLT;
-			break;
-		case TRAP_TRACE:
-			si->svr4_si_code = SVR4_TRAP_TRACE;
-			si->svr4_si_trap = SVR4_T_TRCTRAP;
-			break;
-		}
+
+	case T_FPDISABLED:
+		si->si_code = SVR4_FPE_FLTINV;
 		break;
-	case SIGEMT:
-		switch (type) {
-		}
+
+	case T_ALIGN:
+		si->si_code = SVR4_BUS_ADRALN;
 		break;
-	case SIGILL:
-		switch (type) {
-		case ILL_PRVOPC:
-			si->svr4_si_code = SVR4_ILL_PRVOPC;
-			si->svr4_si_trap = SVR4_T_PRIVINFLT;
-			break;
-		case ILL_BADSTK:
-			si->svr4_si_code = SVR4_ILL_BADSTK;
-			si->svr4_si_trap = SVR4_T_STKFLT;
-			break;
-		}
+
+	case T_FPE:
+		si->si_code = SVR4_FPE_FLTINV;
 		break;
-	case SIGFPE:
-		switch (type) {
-		case FPE_INTOVF:
-			si->svr4_si_code = SVR4_FPE_INTOVF;
-			si->svr4_si_trap = SVR4_T_DIVIDE;
-			break;
-		case FPE_FLTDIV:
-			si->svr4_si_code = SVR4_FPE_FLTDIV;
-			si->svr4_si_trap = SVR4_T_DIVIDE;
-			break;
-		case FPE_FLTOVF:
-			si->svr4_si_code = SVR4_FPE_FLTOVF;
-			si->svr4_si_trap = SVR4_T_DIVIDE;
-			break;
-		case FPE_FLTSUB:
-			si->svr4_si_code = SVR4_FPE_FLTSUB;
-			si->svr4_si_trap = SVR4_T_BOUND;
-			break;
-		case FPE_FLTINV:
-			si->svr4_si_code = SVR4_FPE_FLTINV;
-			si->svr4_si_trap = SVR4_T_FPOPFLT;
-			break;
-		}
+
+	case T_DATAFAULT:
+		si->si_code = SVR4_BUS_ADRALN;
+		break;
+
+	case T_TAGOF:
+		si->si_code = SVR4_EMT_TAGOVF;
+		break;
+
+	case T_CPDISABLED:
+		si->si_code = SVR4_FPE_FLTINV;
+		break;
+
+	case T_CPEXCEPTION:
+		si->si_code = SVR4_FPE_FLTINV;
+		break;
+
+	case T_DIV0:
+		si->si_code = SVR4_FPE_INTDIV;
+		break;
+
+	case T_INTOF:
+		si->si_code = SVR4_FPE_INTOVF;
+		break;
+
+	case T_BREAKPOINT:
+		si->si_code = SVR4_TRAP_BRKPT;
+		break;
+
+	/*
+	 * XXX - hardware traps with unknown code
+	 */
+	case T_WINOF:
+	case T_WINUF:
+	case T_L1INT:
+	case T_L2INT:
+	case T_L3INT:
+	case T_L4INT:
+	case T_L5INT:
+	case T_L6INT:
+	case T_L7INT:
+	case T_L8INT:
+	case T_L9INT:
+	case T_L10INT:
+	case T_L11INT:
+	case T_L12INT:
+	case T_L13INT:
+	case T_L14INT:
+	case T_L15INT:
+		si->si_code = 0;
+		break;
+
+	/*
+	 * XXX - software traps with unknown code
+	 */
+	case T_SUN_SYSCALL:
+	case T_FLUSHWIN:
+	case T_CLEANWIN:
+	case T_RANGECHECK:
+	case T_FIXALIGN:
+	case T_SVR4_SYSCALL:
+	case T_BSD_SYSCALL:
+	case T_KGDB_EXEC:
+		si->si_code = 0;
+		break;
+
+	default:
+		si->si_code = 0;
+#ifdef notyet
+		/*
+		 * XXX: in trap.c, code gets passed the address
+		 * of the fault! not the trap code on SEGV!
+		 */
+#ifdef DIAGNOSTIC
+		printf("sig %d code %ld\n", sig, code);
+		panic("svr4_getsiginfo");
+#endif
+#endif
 		break;
 	}
 }
@@ -448,64 +436,63 @@ svr4_getsiginfo(si, sig, code, type, addr)
  * will return to the user pc, psl.
  */
 void
-svr4_sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
+svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 {
-	register struct proc *p = curproc;
+	register struct lwp *l = curlwp;
+	struct proc *p = l->l_proc;
 	register struct trapframe *tf;
 	struct svr4_sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
-	int oonstack, oldsp, newsp, caddr;
+	int onstack, oldsp, newsp, addr, error;
+	int sig = ksi->ksi_signo;
+	u_long code = ksi->ksi_code;
+	sig_t catcher = SIGACTION(p, sig).sa_handler;
 
-	tf = (struct trapframe *)p->p_md.md_tf;
+	tf = (struct trapframe *)l->l_md.md_tf;
 	oldsp = tf->tf_out[6];
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+
+	/* Do we need to jump onto the signal stack? */
+	onstack =
+	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct svr4_sigframe *)(psp->ps_sigstk.ss_sp +
-					      psp->ps_sigstk.ss_size);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
-	} else {
+	if (onstack)
+		fp = (struct svr4_sigframe *)((char *)l->l_sigstk.ss_sp +
+						l->l_sigstk.ss_size);
+	else
 		fp = (struct svr4_sigframe *)oldsp;
-	}
-
-	/*
-	 * Subtract off one signal frame and align.
-	 */
 	fp = (struct svr4_sigframe *) ((int) (fp - 1) & ~7);
 
 	/*
 	 * Build the argument list for the signal handler.
 	 */
-	svr4_getsiginfo(&frame.sf_si, sig, code, type, val.sival_ptr);
-	svr4_getcontext(p, &frame.sf_uc, mask, oonstack);
-	frame.sf_signum = frame.sf_si.svr4_si_signo;
+	svr4_getcontext(l, &frame.sf_uc);
+	svr4_getsiginfo(&frame.sf_si, sig, code, (void *) tf->tf_pc);
+
+	/* Build stack frame for signal trampoline. */
+	frame.sf_signum = frame.sf_si.si_signo;
 	frame.sf_sip = &fp->sf_si;
 	frame.sf_ucp = &fp->sf_uc;
 	frame.sf_handler = catcher;
 
-	DPRINTF(("svr4_sendsig signum=%d si = %x uc = %x handler = %x\n",
+	DPRINTF(("svr4_sendsig signum=%d si = %p uc = %p handler = %p\n",
 	         frame.sf_signum, frame.sf_sip,
 		 frame.sf_ucp, frame.sf_handler));
 	/*
 	 * Modify the signal context to be used by sigreturn.
 	 */
+	sendsig_reset(l, sig);
+	mutex_exit(p->p_lock);
 	frame.sf_uc.uc_mcontext.greg[SVR4_SPARC_SP] = oldsp;
-
 	newsp = (int)fp - sizeof(struct rwindow);
 	write_user_windows();
+	error = (rwindow_save(l) || copyout(&frame, fp, sizeof(frame)) != 0 ||
+	    suword(&((struct rwindow *)newsp)->rw_in[6], oldsp));
+	mutex_enter(p->p_lock);
 
-	if (rwindow_save(p) || copyout(&frame, fp, sizeof(frame)) != 0 ||
-	    copyout(&oldsp, &((struct rwindow *)newsp)->rw_in[6],
-	      sizeof(register_t)) != 0) {
+	if (error) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -514,33 +501,38 @@ svr4_sendsig(catcher, sig, mask, code, type, val)
 		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 			printf("svr4_sendsig: window save or copyout error\n");
 #endif
-		sigexit(p, SIGILL);
+		sigexit(l, SIGILL);
 		/* NOTREACHED */
 	}
 
 	/*
 	 * Build context to run handler in.
 	 */
-	caddr = p->p_sigcode;
+	addr = (int)p->p_sigctx.ps_sigcode;
+	tf->tf_pc = addr;
+	tf->tf_npc = addr + 4;
 	tf->tf_global[1] = (int)catcher;
-
-	tf->tf_pc = caddr;
-	tf->tf_npc = caddr + 4;
 	tf->tf_out[6] = newsp;
+
+	/* Remember that we're now on the signal stack. */
+	if (onstack)
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 
 #define	ADVANCE (n = tf->tf_npc, tf->tf_pc = n, tf->tf_npc = n + 4)
+
 int
-svr4_trap(type, p)
-	int	type;
-	struct proc *p;
+svr4_trap(int type, struct lwp *l)
 {
 	int n;
-	struct trapframe *tf = p->p_md.md_tf;
-	extern struct emul emul_svr4;
+	struct trapframe *tf = l->l_md.md_tf;
+	struct timespec ts;
+	struct timeval tv;
+	struct timeval rtime, stime;
+	uint64_t tm;
 
-	if (p->p_emul != &emul_svr4)
+	if (l->l_proc->p_emul != &emul_svr4)
 		return 0;
 
 	switch (type) {
@@ -557,40 +549,57 @@ svr4_trap(type, p)
 		break;
 
 	case T_SVR4_SETPSR:
-		uprintf("T_SVR4_SETPSR\n");
+		/* Disable for now; it makes things worse */
+#if 0
+		/* I have no clue if this is right!  */
+#define PRESERVE_PSR	(PSR_IMPL|PSR_VER|PSR_PIL|PSR_S|PSR_PS|PSR_ET|PSR_CWP)
+		tf->tf_psr = (tf->tf_psr & ~PRESERVE_PSR) |
+		    (tf->tf_out[0] & PRESERVE_PSR);
+#endif
 		break;
 
 	case T_SVR4_GETHRTIME:
 		/*
-		 * this list like gethrtime(3). To implement this
-		 * correctly we need a timer that does not get affected
-		 * adjtime(), or settimeofday(). For now we use
-		 * microtime, and convert to nanoseconds...
+		 * This is like gethrtime(3), returning the time expressed
+		 * in nanoseconds since an arbitrary time in the past and
+		 * guaranteed to be monotonically increasing, which we
+		 * obtain from nanotime(9).
 		 */
-		/*FALLTHROUGH*/
+		nanouptime(&ts);
+
+		tm = ts.tv_nsec;
+		tm += ts.tv_sec * (uint64_t)1000000000u;
+		tf->tf_out[0] = (tm >> 32) & 0x00000000ffffffffUL;
+		tf->tf_out[1] = tm & 0x00000000ffffffffUL;
+		break;
+
 	case T_SVR4_GETHRVTIME:
 		/*
-		 * This is like gethrvtime(3). Since we don't have lwp
-		 * we massage microtime() output
+		 * This is like gethrvtime(3). returning the LWP's (now:
+		 * proc's) virtual time expressed in nanoseconds. It is
+		 * supposedly guaranteed to be monotonically increasing, but
+		 * for now using the process's real time augmented with its
+		 * current runtime is the best we can do.
 		 */
-		{
-			struct timeval  tv;
+		microtime(&tv); /* XXX should move on to struct bintime */
+		bintime2timeval(&l->l_rtime, &rtime);
+		bintime2timeval(&l->l_stime, &stime);
 
-			microtime(&tv);
-			tf->tf_out[0] = tv.tv_sec;
-			tf->tf_out[1] = tv.tv_usec * 1000;
-		}
+		tm = (rtime.tv_sec + tv.tv_sec - stime.tv_sec) * 1000000ull;
+		tm += rtime.tv_usec + tv.tv_usec;
+		tm -= stime.tv_usec;
+		tm *= 1000u;
+		tf->tf_out[0] = (tm >> 32) & 0x00000000ffffffffUL;
+		tf->tf_out[1] = tm & 0x00000000ffffffffUL;
 		break;
 
 	case T_SVR4_GETHRESTIME:
-		{
-			/* I assume this is like gettimeofday(3) */
-			struct timeval  tv;
-
-			microtime(&tv);
-			tf->tf_out[0] = tv.tv_sec;
-			tf->tf_out[1] = tv.tv_usec;
-		}
+		/*
+		 * This is used by gettimeofday(3), among other things.
+		 */
+		nanotime(&ts);
+		tf->tf_out[0] = ts.tv_sec;
+		tf->tf_out[1] = ts.tv_nsec;
 		break;
 
 	default:
@@ -604,16 +613,24 @@ svr4_trap(type, p)
 /*
  */
 int
-svr4_sys_sysarch(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, register_t *retval)
 {
-	struct svr4_sys_sysarch_args *uap = v;
 
 	switch (SCARG(uap, op)) {
 	default:
 		printf("(sparc) svr4_sysarch(%d)\n", SCARG(uap, op));
 		return EINVAL;
 	}
+}
+
+void
+svr4_md_init(void)
+{
+
+}
+
+void
+svr4_md_fini(void)
+{
+
 }

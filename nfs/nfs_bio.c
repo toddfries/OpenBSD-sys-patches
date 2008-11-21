@@ -1,5 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.46 2007/06/01 23:47:57 deraadt Exp $	*/
-/*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
+/*	$NetBSD: nfs_bio.c,v 1.181 2008/11/19 18:36:09 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -35,6 +34,14 @@
  *	@(#)nfs_bio.c	8.9 (Berkeley) 3/30/95
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: nfs_bio.c,v 1.181 2008/11/19 18:36:09 ad Exp $");
+
+#ifdef _KERNEL_OPT
+#include "opt_nfs.h"
+#include "opt_ddb.h"
+#endif
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/resourcevar.h>
@@ -45,8 +52,11 @@
 #include <sys/mount.h>
 #include <sys/kernel.h>
 #include <sys/namei.h>
+#include <sys/dirent.h>
+#include <sys/kauth.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
@@ -55,32 +65,33 @@
 #include <nfs/nfsnode.h>
 #include <nfs/nfs_var.h>
 
-extern struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 extern int nfs_numasync;
+extern int nfs_commitsize;
 extern struct nfsstats nfsstats;
-struct nfs_bufqhead nfs_bufq;
+
+static int nfs_doio_read __P((struct buf *, struct uio *));
+static int nfs_doio_write __P((struct buf *, struct uio *));
+static int nfs_doio_phys __P((struct buf *, struct uio *));
 
 /*
  * Vnode op for read using bio
  * Any similarity to readip() is purely coincidental
  */
 int
-nfs_bioread(vp, uio, ioflag, cred)
-	struct vnode *vp;
-	struct uio *uio;
-	int ioflag;
-	struct ucred *cred;
+nfs_bioread(struct vnode *vp, struct uio *uio, int ioflag,
+	    kauth_cred_t cred, int cflag)
 {
 	struct nfsnode *np = VTONFS(vp);
-	int biosize, diff;
 	struct buf *bp = NULL, *rabp;
-	struct vattr vattr;
-	struct proc *p;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	daddr64_t lbn, bn, rabn;
-	caddr_t baddr;
-	int got_buf = 0, nra, error = 0, n = 0, on = 0, not_readin;
-	off_t offdiff;
+	struct nfsdircache *ndp = NULL, *nndp = NULL;
+	void *baddr;
+	int got_buf = 0, error = 0, n = 0, on = 0, en, enn;
+	int enough = 0;
+	struct dirent *dp, *pdp, *edp, *ep;
+	off_t curoff = 0;
+	int advice;
+	struct lwp *l = curlwp;
 
 #ifdef DIAGNOSTIC
 	if (uio->uio_rw != UIO_READ)
@@ -88,17 +99,22 @@ nfs_bioread(vp, uio, ioflag, cred)
 #endif
 	if (uio->uio_resid == 0)
 		return (0);
-	if (uio->uio_offset < 0)
+	if (vp->v_type != VDIR && uio->uio_offset < 0)
 		return (EINVAL);
-	p = uio->uio_procp;
-	if ((nmp->nm_flag & (NFSMNT_NFSV3 | NFSMNT_GOTFSINFO)) == NFSMNT_NFSV3)
-		(void)nfs_fsinfo(nmp, vp, cred, p);
-	biosize = nmp->nm_rsize;
+#ifndef NFS_V2_ONLY
+	if ((nmp->nm_flag & NFSMNT_NFSV3) &&
+	    !(nmp->nm_iflag & NFSMNT_GOTFSINFO))
+		(void)nfs_fsinfo(nmp, vp, cred, l);
+#endif
+	if (vp->v_type != VDIR &&
+	    (uio->uio_offset + uio->uio_resid) > nmp->nm_maxfilesize)
+		return (EFBIG);
+
 	/*
 	 * For nfs, cache consistency can only be maintained approximately.
 	 * Although RFC1094 does not specify the criteria, the following is
 	 * believed to be compatible with the reference port.
-	 * For nfs:
+	 *
 	 * If the file's modify time on the server has changed since the
 	 * last read rpc or you have written to the file,
 	 * you may have lost data cache consistency with the
@@ -106,141 +122,287 @@ nfs_bioread(vp, uio, ioflag, cred)
 	 * Then force a getattr rpc to ensure that you have up to date
 	 * attributes.
 	 * NB: This implies that cache data can be read when up to
-	 * NFS_ATTRTIMEO seconds out of date. If you find that you need current
+	 * nfs_attrtimeo seconds out of date. If you find that you need current
 	 * attributes this could be forced by setting n_attrstamp to 0 before
 	 * the VOP_GETATTR() call.
 	 */
-	if (np->n_flag & NMODIFIED) {
-		np->n_attrstamp = 0;
-		error = VOP_GETATTR(vp, &vattr, cred, p);
+
+	if (vp->v_type != VLNK) {
+		error = nfs_flushstalebuf(vp, cred, l,
+		    NFS_FLUSHSTALEBUF_MYWRITE);
 		if (error)
-			return (error);
-		np->n_mtime = vattr.va_mtime.tv_sec;
-	} else {
-		error = VOP_GETATTR(vp, &vattr, cred, p);
-		if (error)
-			return (error);
-		if (np->n_mtime != vattr.va_mtime.tv_sec) {
-			error = nfs_vinvalbuf(vp, V_SAVE, cred, p, 1);
-			if (error)
-				return (error);
-			np->n_mtime = vattr.va_mtime.tv_sec;
-		}
+			return error;
 	}
 
-	/*
-	 * update the cache read creds for this vnode
-	 */
-	if (np->n_rcred)
-		crfree(np->n_rcred);
-	np->n_rcred = cred;
-	crhold(cred);
-
 	do {
-	    if ((vp->v_flag & VROOT) && vp->v_type == VLNK) {
-		    return (nfs_readlinkrpc(vp, uio, cred));
+	    /*
+	     * Don't cache symlinks.
+	     */
+	    if ((vp->v_vflag & VV_ROOT) && vp->v_type == VLNK) {
+		return (nfs_readlinkrpc(vp, uio, cred));
 	    }
-	    baddr = (caddr_t)0;
+	    baddr = (void *)0;
 	    switch (vp->v_type) {
 	    case VREG:
 		nfsstats.biocache_reads++;
-		lbn = uio->uio_offset / biosize;
-		on = uio->uio_offset & (biosize - 1);
-		bn = lbn * (biosize / DEV_BSIZE);
-		not_readin = 1;
 
-		/*
-		 * Start the read ahead(s), as required.
-		 */
-		if (nfs_numasync > 0 && nmp->nm_readahead > 0) {
-		    for (nra = 0; nra < nmp->nm_readahead &&
-			(lbn + 1 + nra) * biosize < np->n_size; nra++) {
-			rabn = (lbn + 1 + nra) * (biosize / DEV_BSIZE);
-			if (!incore(vp, rabn)) {
-			    rabp = nfs_getcacheblk(vp, rabn, biosize, p);
-			    if (!rabp)
-				return (EINTR);
-			    if ((rabp->b_flags & (B_DELWRI | B_DONE)) == 0) {
-				rabp->b_flags |= (B_READ | B_ASYNC);
-				if (nfs_asyncio(rabp)) {
-				    rabp->b_flags |= B_INVAL;
-				    brelse(rabp);
-				}
-			    } else
-				brelse(rabp);
+		advice = IO_ADV_DECODE(ioflag);
+		error = 0;
+		while (uio->uio_resid > 0) {
+			vsize_t bytelen;
+
+			nfs_delayedtruncate(vp);
+			if (np->n_size <= uio->uio_offset) {
+				break;
 			}
+			bytelen =
+			    MIN(np->n_size - uio->uio_offset, uio->uio_resid);
+			error = ubc_uiomove(&vp->v_uobj, uio, bytelen,
+			    advice, UBC_READ | UBC_PARTIALOK |
+			    (UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0));
+			if (error) {
+				/*
+				 * XXXkludge
+				 * the file has been truncated on the server.
+				 * there isn't much we can do.
+				 */
+				if (uio->uio_offset >= np->n_size) {
+					/* end of file */
+					error = 0;
+				} else {
+					break;
+				}
+			}
+		}
+		break;
+
+	    case VLNK:
+		nfsstats.biocache_readlinks++;
+		bp = nfs_getcacheblk(vp, (daddr_t)0, NFS_MAXPATHLEN, l);
+		if (!bp)
+			return (EINTR);
+		if ((bp->b_oflags & BO_DONE) == 0) {
+			bp->b_flags |= B_READ;
+			error = nfs_doio(bp);
+			if (error) {
+				brelse(bp, 0);
+				return (error);
+			}
+		}
+		n = MIN(uio->uio_resid, NFS_MAXPATHLEN - bp->b_resid);
+		got_buf = 1;
+		on = 0;
+		break;
+	    case VDIR:
+diragain:
+		nfsstats.biocache_readdirs++;
+		ndp = nfs_searchdircache(vp, uio->uio_offset,
+			(nmp->nm_flag & NFSMNT_XLATECOOKIE), 0);
+		if (!ndp) {
+			/*
+			 * We've been handed a cookie that is not
+			 * in the cache. If we're not translating
+			 * 32 <-> 64, it may be a value that was
+			 * flushed out of the cache because it grew
+			 * too big. Let the server judge if it's
+			 * valid or not. In the translation case,
+			 * we have no way of validating this value,
+			 * so punt.
+			 */
+			if (nmp->nm_flag & NFSMNT_XLATECOOKIE)
+				return (EINVAL);
+			ndp = nfs_enterdircache(vp, uio->uio_offset,
+				uio->uio_offset, 0, 0);
+		}
+
+		if (NFS_EOFVALID(np) &&
+		    ndp->dc_cookie == np->n_direofoffset) {
+			nfs_putdircache(np, ndp);
+			nfsstats.direofcache_hits++;
+			return (0);
+		}
+
+		bp = nfs_getcacheblk(vp, NFSDC_BLKNO(ndp), NFS_DIRBLKSIZ, l);
+		if (!bp)
+		    return (EINTR);
+		if ((bp->b_oflags & BO_DONE) == 0) {
+		    bp->b_flags |= B_READ;
+		    bp->b_dcookie = ndp->dc_blkcookie;
+		    error = nfs_doio(bp);
+		    if (error) {
+			/*
+			 * Yuck! The directory has been modified on the
+			 * server. Punt and let the userland code
+			 * deal with it.
+			 */
+			nfs_putdircache(np, ndp);
+			brelse(bp, 0);
+			/*
+			 * nfs_request maps NFSERR_BAD_COOKIE to EINVAL.
+			 */
+			if (error == EINVAL) { /* NFSERR_BAD_COOKIE */
+			    nfs_invaldircache(vp, 0);
+			    nfs_vinvalbuf(vp, 0, cred, l, 1);
+			}
+			return (error);
 		    }
 		}
 
 		/*
-		 * If the block is in the cache and has the required data
-		 * in a valid region, just copy it out.
-		 * Otherwise, get the block and write back/read in,
-		 * as required.
+		 * Just return if we hit EOF right away with this
+		 * block. Always check here, because direofoffset
+		 * may have been set by an nfsiod since the last
+		 * check.
+		 *
+		 * also, empty block implies EOF.
 		 */
-		if ((bp = incore(vp, bn)) &&
-		    (bp->b_flags & (B_BUSY | B_WRITEINPROG)) ==
-		    (B_BUSY | B_WRITEINPROG))
-			got_buf = 0;
-		else {
-again:
-			bp = nfs_getcacheblk(vp, bn, biosize, p);
-			if (!bp)
-				return (EINTR);
-			got_buf = 1;
-			if ((bp->b_flags & (B_DONE | B_DELWRI)) == 0) {
-				bp->b_flags |= B_READ;
-				not_readin = 0;
-				error = nfs_doio(bp, p);
-				if (error) {
-				    brelse(bp);
-				    return (error);
+
+		if (bp->b_bcount == bp->b_resid ||
+		    (NFS_EOFVALID(np) &&
+		    ndp->dc_blkcookie == np->n_direofoffset)) {
+			KASSERT(bp->b_bcount != bp->b_resid ||
+			    ndp->dc_blkcookie == bp->b_dcookie);
+			nfs_putdircache(np, ndp);
+			brelse(bp, BC_NOCACHE);
+			return 0;
+		}
+
+		/*
+		 * Find the entry we were looking for in the block.
+		 */
+
+		en = ndp->dc_entry;
+
+		pdp = dp = (struct dirent *)bp->b_data;
+		edp = (struct dirent *)(void *)((char *)bp->b_data + bp->b_bcount -
+		    bp->b_resid);
+		enn = 0;
+		while (enn < en && dp < edp) {
+			pdp = dp;
+			dp = _DIRENT_NEXT(dp);
+			enn++;
+		}
+
+		/*
+		 * If the entry number was bigger than the number of
+		 * entries in the block, or the cookie of the previous
+		 * entry doesn't match, the directory cache is
+		 * stale. Flush it and try again (i.e. go to
+		 * the server).
+		 */
+		if (dp >= edp || (struct dirent *)_DIRENT_NEXT(dp) > edp ||
+		    (en > 0 && NFS_GETCOOKIE(pdp) != ndp->dc_cookie)) {
+#ifdef DEBUG
+		    	printf("invalid cache: %p %p %p off %lx %lx\n",
+				pdp, dp, edp,
+				(unsigned long)uio->uio_offset,
+				(unsigned long)NFS_GETCOOKIE(pdp));
+#endif
+			nfs_putdircache(np, ndp);
+			brelse(bp, 0);
+			nfs_invaldircache(vp, 0);
+			nfs_vinvalbuf(vp, 0, cred, l, 0);
+			goto diragain;
+		}
+
+		on = (char *)dp - (char *)bp->b_data;
+
+		/*
+		 * Cache all entries that may be exported to the
+		 * user, as they may be thrown back at us. The
+		 * NFSBIO_CACHECOOKIES flag indicates that all
+		 * entries are being 'exported', so cache them all.
+		 */
+
+		if (en == 0 && pdp == dp) {
+			dp = _DIRENT_NEXT(dp);
+			enn++;
+		}
+
+		if (uio->uio_resid < (bp->b_bcount - bp->b_resid - on)) {
+			n = uio->uio_resid;
+			enough = 1;
+		} else
+			n = bp->b_bcount - bp->b_resid - on;
+
+		ep = (struct dirent *)(void *)((char *)bp->b_data + on + n);
+
+		/*
+		 * Find last complete entry to copy, caching entries
+		 * (if requested) as we go.
+		 */
+
+		while (dp < ep && (struct dirent *)_DIRENT_NEXT(dp) <= ep) {
+			if (cflag & NFSBIO_CACHECOOKIES) {
+				nndp = nfs_enterdircache(vp, NFS_GETCOOKIE(pdp),
+				    ndp->dc_blkcookie, enn, bp->b_lblkno);
+				if (nmp->nm_flag & NFSMNT_XLATECOOKIE) {
+					NFS_STASHCOOKIE32(pdp,
+					    nndp->dc_cookie32);
 				}
+				nfs_putdircache(np, nndp);
+			}
+			pdp = dp;
+			dp = _DIRENT_NEXT(dp);
+			enn++;
+		}
+		nfs_putdircache(np, ndp);
+
+		/*
+		 * If the last requested entry was not the last in the
+		 * buffer (happens if NFS_DIRFRAGSIZ < NFS_DIRBLKSIZ),
+		 * cache the cookie of the last requested one, and
+		 * set of the offset to it.
+		 */
+
+		if ((on + n) < bp->b_bcount - bp->b_resid) {
+			curoff = NFS_GETCOOKIE(pdp);
+			nndp = nfs_enterdircache(vp, curoff, ndp->dc_blkcookie,
+			    enn, bp->b_lblkno);
+			if (nmp->nm_flag & NFSMNT_XLATECOOKIE) {
+				NFS_STASHCOOKIE32(pdp, nndp->dc_cookie32);
+				curoff = nndp->dc_cookie32;
+			}
+			nfs_putdircache(np, nndp);
+		} else
+			curoff = bp->b_dcookie;
+
+		/*
+		 * Always cache the entry for the next block,
+		 * so that readaheads can use it.
+		 */
+		nndp = nfs_enterdircache(vp, bp->b_dcookie, bp->b_dcookie, 0,0);
+		if (nmp->nm_flag & NFSMNT_XLATECOOKIE) {
+			if (curoff == bp->b_dcookie) {
+				NFS_STASHCOOKIE32(pdp, nndp->dc_cookie32);
+				curoff = nndp->dc_cookie32;
 			}
 		}
-		n = min((unsigned)(biosize - on), uio->uio_resid);
-		offdiff = np->n_size - uio->uio_offset;
-		if (offdiff < (off_t)n)
-			n = (int)offdiff;
-		if (not_readin && n > 0) {
-			if (on < bp->b_validoff || (on + n) > bp->b_validend) {
-				if (!got_buf) {
-				    bp = nfs_getcacheblk(vp, bn, biosize, p);
-				    if (!bp)
-					return (EINTR);
-				    got_buf = 1;
+
+		n = (char *)_DIRENT_NEXT(pdp) - ((char *)bp->b_data + on);
+
+		/*
+		 * If not eof and read aheads are enabled, start one.
+		 * (You need the current block first, so that you have the
+		 *  directory offset cookie of the next block.)
+		 */
+		if (nfs_numasync > 0 && nmp->nm_readahead > 0 &&
+		    !NFS_EOFVALID(np)) {
+			rabp = nfs_getcacheblk(vp, NFSDC_BLKNO(nndp),
+						NFS_DIRBLKSIZ, l);
+			if (rabp) {
+			    if ((rabp->b_oflags & (BO_DONE | BO_DELWRI)) == 0) {
+				rabp->b_dcookie = nndp->dc_cookie;
+				rabp->b_flags |= (B_READ | B_ASYNC);
+				if (nfs_asyncio(rabp)) {
+				    brelse(rabp, BC_INVAL);
 				}
-				bp->b_flags |= B_INVAFTERWRITE;
-				if (bp->b_dirtyend > 0) {
-				    if ((bp->b_flags & B_DELWRI) == 0)
-					panic("nfsbioread");
-				    if (VOP_BWRITE(bp) == EINTR)
-					return (EINTR);
-				} else
-				    brelse(bp);
-				goto again;
+			    } else
+				brelse(rabp, 0);
 			}
 		}
-		diff = (on >= bp->b_validend) ? 0 : (bp->b_validend - on);
-		if (diff < n)
-			n = diff;
-		break;
-	    case VLNK:
-		nfsstats.biocache_readlinks++;
-		bp = nfs_getcacheblk(vp, 0, NFS_MAXPATHLEN, p);
-		if (!bp)
-			return (EINTR);
-		if ((bp->b_flags & B_DONE) == 0) {
-			bp->b_flags |= B_READ;
-			error = nfs_doio(bp, p);
-			if (error) {
-				brelse(bp);
-				return (error);
-			}
-		}
-		n = min(uio->uio_resid, NFS_MAXPATHLEN - bp->b_resid);
+		nfs_putdircache(np, nndp);
 		got_buf = 1;
-		on = 0;
 		break;
 	    default:
 		printf(" nfsbioread: type %x unexpected\n",vp->v_type);
@@ -250,7 +412,7 @@ again:
 	    if (n > 0) {
 		if (!baddr)
 			baddr = bp->b_data;
-		error = uiomove(baddr + on, (int)n, uio);
+		error = uiomove((char *)baddr + on, (int)n, uio);
 	    }
 	    switch (vp->v_type) {
 	    case VREG:
@@ -258,11 +420,16 @@ again:
 	    case VLNK:
 		n = 0;
 		break;
+	    case VDIR:
+		uio->uio_offset = curoff;
+		if (enough)
+			n = 0;
+		break;
 	    default:
 		printf(" nfsbioread: type %x unexpected\n",vp->v_type);
 	    }
 	    if (got_buf)
-		brelse(bp);
+		brelse(bp, 0);
 	} while (error == 0 && uio->uio_resid > 0 && n > 0);
 	return (error);
 }
@@ -271,28 +438,29 @@ again:
  * Vnode op for write using bio
  */
 int
-nfs_write(v)
-	void *v;
+nfs_write(void *v)
 {
-	struct vop_write_args *ap = v;
-	int biosize;
+	struct vop_write_args /* {
+		struct vnode *a_vp;
+		struct uio *a_uio;
+		int  a_ioflag;
+		kauth_cred_t a_cred;
+	} */ *ap = v;
 	struct uio *uio = ap->a_uio;
-	struct proc *p = uio->uio_procp;
+	struct lwp *l = curlwp;
 	struct vnode *vp = ap->a_vp;
 	struct nfsnode *np = VTONFS(vp);
-	struct ucred *cred = ap->a_cred;
-	int ioflag = ap->a_ioflag;
-	struct buf *bp;
-	struct vattr vattr;
+	kauth_cred_t cred = ap->a_cred;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	daddr64_t lbn, bn;
-	int n, on, error = 0, extended = 0, wrotedta = 0, truncated = 0;
+	voff_t oldoff, origoff;
+	vsize_t bytelen;
+	int error = 0;
+	int ioflag = ap->a_ioflag;
+	int extended = 0, wrotedata = 0;
 
 #ifdef DIAGNOSTIC
 	if (uio->uio_rw != UIO_WRITE)
 		panic("nfs_write mode");
-	if (uio->uio_segflg == UIO_USERSPACE && uio->uio_procp != curproc)
-		panic("nfs_write proc");
 #endif
 	if (vp->v_type != VREG)
 		return (EIO);
@@ -300,150 +468,114 @@ nfs_write(v)
 		np->n_flag &= ~NWRITEERR;
 		return (np->n_error);
 	}
-	if ((nmp->nm_flag & (NFSMNT_NFSV3 | NFSMNT_GOTFSINFO)) == NFSMNT_NFSV3)
-		(void)nfs_fsinfo(nmp, vp, cred, p);
-	if (ioflag & (IO_APPEND | IO_SYNC)) {
-		if (np->n_flag & NMODIFIED) {
-			np->n_attrstamp = 0;
-			error = nfs_vinvalbuf(vp, V_SAVE, cred, p, 1);
-			if (error)
-				return (error);
-		}
-		if (ioflag & IO_APPEND) {
-			np->n_attrstamp = 0;
-			error = VOP_GETATTR(vp, &vattr, cred, p);
-			if (error)
-				return (error);
-			uio->uio_offset = np->n_size;
-		}
+#ifndef NFS_V2_ONLY
+	if ((nmp->nm_flag & NFSMNT_NFSV3) &&
+	    !(nmp->nm_iflag & NFSMNT_GOTFSINFO))
+		(void)nfs_fsinfo(nmp, vp, cred, l);
+#endif
+	if (ioflag & IO_APPEND) {
+		NFS_INVALIDATE_ATTRCACHE(np);
+		error = nfs_flushstalebuf(vp, cred, l,
+		    NFS_FLUSHSTALEBUF_MYWRITE);
+		if (error)
+			return (error);
+		uio->uio_offset = np->n_size;
 	}
 	if (uio->uio_offset < 0)
 		return (EINVAL);
+	if ((uio->uio_offset + uio->uio_resid) > nmp->nm_maxfilesize)
+		return (EFBIG);
 	if (uio->uio_resid == 0)
 		return (0);
 	/*
 	 * Maybe this should be above the vnode op call, but so long as
 	 * file servers have no limits, i don't think it matters
 	 */
-	if (p && uio->uio_offset + uio->uio_resid >
-	      p->p_rlimit[RLIMIT_FSIZE].rlim_cur) {
-		psignal(p, SIGXFSZ);
+	if (l && l->l_proc && uio->uio_offset + uio->uio_resid >
+	      l->l_proc->p_rlimit[RLIMIT_FSIZE].rlim_cur) {
+		mutex_enter(proc_lock);
+		psignal(l->l_proc, SIGXFSZ);
+		mutex_exit(proc_lock);
 		return (EFBIG);
 	}
 
-	/*
-	 * update the cache write creds for this node.
-	 */
-	if (np->n_wcred)
-		crfree(np->n_wcred);
-	np->n_wcred = cred;
-	crhold(cred);
-
-	/*
-	 * I use nm_rsize, not nm_wsize so that all buffer cache blocks
-	 * will be the same size within a filesystem. nfs_writerpc will
-	 * still use nm_wsize when sizing the rpc's.
-	 */
-	biosize = nmp->nm_rsize;
+	origoff = uio->uio_offset;
 	do {
-
-		/*
-		 * XXX make sure we aren't cached in the VM page cache
-		 */
-		uvm_vnp_uncache(vp);
+		bool overwrite; /* if we are overwriting whole pages */
+		u_quad_t oldsize;
+		oldoff = uio->uio_offset;
+		bytelen = uio->uio_resid;
 
 		nfsstats.biocache_writes++;
-		lbn = uio->uio_offset / biosize;
-		on = uio->uio_offset & (biosize-1);
-		n = min((unsigned)(biosize - on), uio->uio_resid);
-		bn = lbn * (biosize / DEV_BSIZE);
-again:
-		bp = nfs_getcacheblk(vp, bn, biosize, p);
-		if (!bp)
-			return (EINTR);
+
+		oldsize = np->n_size;
 		np->n_flag |= NMODIFIED;
-		if (uio->uio_offset + n > np->n_size) {
-			np->n_size = uio->uio_offset + n;
-			uvm_vnp_setsize(vp, (u_long)np->n_size);
-			extended = 1;
-		} else if (uio->uio_offset + n < np->n_size)
-			truncated = 1;
-
-		/*
-		 * If the new write will leave a contiguous dirty
-		 * area, just update the b_dirtyoff and b_dirtyend,
-		 * otherwise force a write rpc of the old dirty area.
-		 */
-		if (bp->b_dirtyend > 0 &&
-		    (on > bp->b_dirtyend || (on + n) < bp->b_dirtyoff)) {
-			bp->b_proc = p;
-			if (VOP_BWRITE(bp) == EINTR)
-				return (EINTR);
-			goto again;
+		if (np->n_size < uio->uio_offset + bytelen) {
+			np->n_size = uio->uio_offset + bytelen;
 		}
-
-		error = uiomove((char *)bp->b_data + on, n, uio);
-		if (error) {
-			bp->b_flags |= B_ERROR;
-			brelse(bp);
-			return (error);
-		}
-		if (bp->b_dirtyend > 0) {
-			bp->b_dirtyoff = min(on, bp->b_dirtyoff);
-			bp->b_dirtyend = max((on + n), bp->b_dirtyend);
-		} else {
-			bp->b_dirtyoff = on;
-			bp->b_dirtyend = on + n;
-		}
-		if (bp->b_validend == 0 || bp->b_validend < bp->b_dirtyoff ||
-		    bp->b_validoff > bp->b_dirtyend) {
-			bp->b_validoff = bp->b_dirtyoff;
-			bp->b_validend = bp->b_dirtyend;
-		} else {
-			bp->b_validoff = min(bp->b_validoff, bp->b_dirtyoff);
-			bp->b_validend = max(bp->b_validend, bp->b_dirtyend);
-		}
-
-		wrotedta = 1;
-
-		/*
-		 * Since this block is being modified, it must be written
-		 * again and not just committed.
-		 */
-
-		if (NFS_ISV3(vp)) {
-			rw_enter_write(&np->n_commitlock);
-			if (bp->b_flags & B_NEEDCOMMIT) {
-				bp->b_flags &= ~B_NEEDCOMMIT;
-				nfs_del_tobecommitted_range(vp, bp);
+		overwrite = false;
+		if ((uio->uio_offset & PAGE_MASK) == 0) {
+			if ((vp->v_vflag & VV_MAPPED) == 0 &&
+			    bytelen > PAGE_SIZE) {
+				bytelen = trunc_page(bytelen);
+				overwrite = true;
+			} else if ((bytelen & PAGE_MASK) == 0 &&
+			    uio->uio_offset >= vp->v_size) {
+				overwrite = true;
 			}
-			nfs_del_committed_range(vp, bp);
-			rw_exit_write(&np->n_commitlock);
-		} else 
-			bp->b_flags &= ~B_NEEDCOMMIT;
+		}
+		if (vp->v_size < uio->uio_offset + bytelen) {
+			uvm_vnp_setwritesize(vp, uio->uio_offset + bytelen);
+		}
+		error = ubc_uiomove(&vp->v_uobj, uio, bytelen,
+		    UVM_ADV_RANDOM, UBC_WRITE | UBC_PARTIALOK |
+		    (overwrite ? UBC_FAULTBUSY : 0) |
+		    (UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0));
+		if (error) {
+			uvm_vnp_setwritesize(vp, vp->v_size);
+			if (overwrite && np->n_size != oldsize) {
+				/*
+				 * backout size and free pages past eof.
+				 */
+				np->n_size = oldsize;
+				mutex_enter(&vp->v_interlock);
+				(void)VOP_PUTPAGES(vp, round_page(vp->v_size),
+				    0, PGO_SYNCIO | PGO_FREE);
+			}
+			break;
+		}
+		wrotedata = 1;
 
 		/*
-		 * If the lease is non-cachable or IO_SYNC do bwrite().
+		 * update UVM's notion of the size now that we've
+		 * copied the data into the vnode's pages.
 		 */
-		if (ioflag & IO_SYNC) {
-			bp->b_proc = p;
-			error = VOP_BWRITE(bp);
-			if (error)
-				return (error);
-		} else if ((n + on) == biosize) {
-			bp->b_proc = (struct proc *)0;
-			bp->b_flags |= B_ASYNC;
-			(void)nfs_writebp(bp, 0);
-		} else {
-			bdwrite(bp);
+
+		if (vp->v_size < uio->uio_offset) {
+			uvm_vnp_setsize(vp, uio->uio_offset);
+			extended = 1;
 		}
-	} while (uio->uio_resid > 0 && n > 0);
 
-	if (wrotedta)
-		VN_KNOTE(vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0) |
-		    (truncated ? NOTE_TRUNCATE : 0));
-
-	return (0);
+		if ((oldoff & ~(nmp->nm_wsize - 1)) !=
+		    (uio->uio_offset & ~(nmp->nm_wsize - 1))) {
+			mutex_enter(&vp->v_interlock);
+			error = VOP_PUTPAGES(vp,
+			    trunc_page(oldoff & ~(nmp->nm_wsize - 1)),
+			    round_page((uio->uio_offset + nmp->nm_wsize - 1) &
+				       ~(nmp->nm_wsize - 1)), PGO_CLEANIT);
+		}
+	} while (uio->uio_resid > 0);
+	if (wrotedata)
+		VN_KNOTE(vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0));
+	if (error == 0 && (ioflag & IO_SYNC) != 0) {
+		mutex_enter(&vp->v_interlock);
+		error = VOP_PUTPAGES(vp,
+		    trunc_page(origoff & ~(nmp->nm_wsize - 1)),
+		    round_page((uio->uio_offset + nmp->nm_wsize - 1) &
+			       ~(nmp->nm_wsize - 1)),
+		    PGO_CLEANIT | PGO_SYNCIO);
+	}
+	return error;
 }
 
 /*
@@ -454,20 +586,16 @@ again:
  * NULL.
  */
 struct buf *
-nfs_getcacheblk(vp, bn, size, p)
-	struct vnode *vp;
-	daddr64_t bn;
-	int size;
-	struct proc *p;
+nfs_getcacheblk(struct vnode *vp, daddr_t bn, int size, struct lwp *l)
 {
 	struct buf *bp;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
 
 	if (nmp->nm_flag & NFSMNT_INT) {
 		bp = getblk(vp, bn, size, PCATCH, 0);
-		while (bp == (struct buf *)0) {
-			if (nfs_sigintr(nmp, (struct nfsreq *)0, p))
-				return ((struct buf *)0);
+		while (bp == NULL) {
+			if (nfs_sigintr(nmp, NULL, l))
+				return (NULL);
 			bp = getblk(vp, bn, size, 0, 2 * hz);
 		}
 	} else
@@ -480,59 +608,111 @@ nfs_getcacheblk(vp, bn, size, p)
  * doing the flush, just wait for completion.
  */
 int
-nfs_vinvalbuf(vp, flags, cred, p, intrflg)
-	struct vnode *vp;
-	int flags;
-	struct ucred *cred;
-	struct proc *p;
-	int intrflg;
+nfs_vinvalbuf(struct vnode *vp, int flags, kauth_cred_t cred,
+		struct lwp *l, int intrflg)
 {
 	struct nfsnode *np = VTONFS(vp);
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	int error = 0, slpflag, slptimeo;
+	int error = 0, slptimeo;
+	bool catch;
 
 	if ((nmp->nm_flag & NFSMNT_INT) == 0)
 		intrflg = 0;
 	if (intrflg) {
-		slpflag = PCATCH;
+		catch = true;
 		slptimeo = 2 * hz;
 	} else {
-		slpflag = 0;
+		catch = false;
 		slptimeo = 0;
 	}
 	/*
 	 * First wait for any other process doing a flush to complete.
 	 */
+	mutex_enter(&vp->v_interlock);
 	while (np->n_flag & NFLUSHINPROG) {
 		np->n_flag |= NFLUSHWANT;
-		error = tsleep((caddr_t)&np->n_flag, PRIBIO + 2, "nfsvinval",
-			slptimeo);
-		if (error && intrflg && nfs_sigintr(nmp, (struct nfsreq *)0, p))
-			return (EINTR);
+		error = mtsleep(&np->n_flag, PRIBIO + 2, "nfsvinval",
+			slptimeo, &vp->v_interlock);
+		if (error && intrflg && nfs_sigintr(nmp, NULL, l)) {
+			mutex_exit(&vp->v_interlock);
+			return EINTR;
+		}
 	}
 
 	/*
 	 * Now, flush as required.
 	 */
 	np->n_flag |= NFLUSHINPROG;
-	error = vinvalbuf(vp, flags, cred, p, slpflag, 0);
+	mutex_exit(&vp->v_interlock);
+	error = vinvalbuf(vp, flags, cred, l, catch, 0);
 	while (error) {
-		if (intrflg && nfs_sigintr(nmp, (struct nfsreq *)0, p)) {
-			np->n_flag &= ~NFLUSHINPROG;
-			if (np->n_flag & NFLUSHWANT) {
-				np->n_flag &= ~NFLUSHWANT;
-				wakeup((caddr_t)&np->n_flag);
-			}
-			return (EINTR);
+		if (intrflg && nfs_sigintr(nmp, NULL, l)) {
+			error = EINTR;
+			break;
 		}
-		error = vinvalbuf(vp, flags, cred, p, 0, slptimeo);
+		error = vinvalbuf(vp, flags, cred, l, 0, slptimeo);
 	}
-	np->n_flag &= ~(NMODIFIED | NFLUSHINPROG);
+	mutex_enter(&vp->v_interlock);
+	if (error == 0)
+		np->n_flag &= ~NMODIFIED;
+	np->n_flag &= ~NFLUSHINPROG;
 	if (np->n_flag & NFLUSHWANT) {
 		np->n_flag &= ~NFLUSHWANT;
-		wakeup((caddr_t)&np->n_flag);
+		wakeup(&np->n_flag);
 	}
-	return (0);
+	mutex_exit(&vp->v_interlock);
+	return error;
+}
+
+/*
+ * nfs_flushstalebuf: flush cache if it's stale.
+ *
+ * => caller shouldn't own any pages or buffers which belong to the vnode.
+ */
+
+int
+nfs_flushstalebuf(struct vnode *vp, kauth_cred_t cred, struct lwp *l,
+    int flags)
+{
+	struct nfsnode *np = VTONFS(vp);
+	struct vattr vattr;
+	int error;
+
+	if (np->n_flag & NMODIFIED) {
+		if ((flags & NFS_FLUSHSTALEBUF_MYWRITE) == 0
+		    || vp->v_type != VREG) {
+			error = nfs_vinvalbuf(vp, V_SAVE, cred, l, 1);
+			if (error)
+				return error;
+			if (vp->v_type == VDIR) {
+				nfs_invaldircache(vp, 0);
+			}
+		} else {
+			/*
+			 * XXX assuming writes are ours.
+			 */
+		}
+		NFS_INVALIDATE_ATTRCACHE(np);
+		error = VOP_GETATTR(vp, &vattr, cred);
+		if (error)
+			return error;
+		np->n_mtime = vattr.va_mtime;
+	} else {
+		error = VOP_GETATTR(vp, &vattr, cred);
+		if (error)
+			return error;
+		if (timespeccmp(&np->n_mtime, &vattr.va_mtime, !=)) {
+			if (vp->v_type == VDIR) {
+				nfs_invaldircache(vp, 0);
+			}
+			error = nfs_vinvalbuf(vp, V_SAVE, cred, l, 1);
+			if (error)
+				return error;
+			np->n_mtime = vattr.va_mtime;
+		}
+	}
+
+	return error;
 }
 
 /*
@@ -540,45 +720,450 @@ nfs_vinvalbuf(vp, flags, cred, p, intrflg)
  * This is mainly to avoid queueing async I/O requests when the nfsiods
  * are all hung on a dead server.
  */
+
 int
-nfs_asyncio(bp)
-	struct buf *bp;
+nfs_asyncio(struct buf *bp)
 {
-	int i,s;
+	struct nfs_iod *iod;
+	struct nfsmount *nmp;
+	int slptimeo = 0, error;
+	bool catch = false;
 
 	if (nfs_numasync == 0)
 		return (EIO);
-	for (i = 0; i < NFS_MAXASYNCDAEMON; i++)
-	    if (nfs_iodwant[i]) {
-		if ((bp->b_flags & B_READ) == 0) {
-			bp->b_flags |= B_WRITEINPROG;
+
+	nmp = VFSTONFS(bp->b_vp->v_mount);
+again:
+	if (nmp->nm_flag & NFSMNT_INT)
+		catch = true;
+
+	/*
+	 * Find a free iod to process this request.
+	 */
+
+	mutex_enter(&nfs_iodlist_lock);
+	iod = LIST_FIRST(&nfs_iodlist_idle);
+	if (iod) {
+		/*
+		 * Found one, so wake it up and tell it which
+		 * mount to process.
+		 */
+		LIST_REMOVE(iod, nid_idle);
+		mutex_enter(&iod->nid_lock);
+		mutex_exit(&nfs_iodlist_lock);
+		KASSERT(iod->nid_mount == NULL);
+		iod->nid_mount = nmp;
+		cv_signal(&iod->nid_cv);
+		mutex_enter(&nmp->nm_lock);
+		mutex_exit(&iod->nid_lock);
+		nmp->nm_bufqiods++;
+		if (nmp->nm_bufqlen < 2 * nmp->nm_bufqiods) {
+			cv_broadcast(&nmp->nm_aiocv);
 		}
-	
-		TAILQ_INSERT_TAIL(&nfs_bufq, bp, b_freelist);
-		nfs_iodwant[i] = (struct proc *)0;
-		wakeup((caddr_t)&nfs_iodwant[i]);
+	} else {
+		mutex_exit(&nfs_iodlist_lock);
+		mutex_enter(&nmp->nm_lock);
+	}
+
+	KASSERT(mutex_owned(&nmp->nm_lock));
+
+	/*
+	 * If we have an iod which can process the request, then queue
+	 * the buffer.  However, even if we have an iod, do not initiate
+	 * queue cleaning if curproc is the pageout daemon. if the NFS mount
+	 * is via local loopback, we may put curproc (pagedaemon) to sleep
+	 * waiting for the writes to complete. But the server (ourself)
+	 * may block the write, waiting for its (ie., our) pagedaemon
+	 * to produce clean pages to handle the write: deadlock.
+	 * XXX: start non-loopback mounts straight away?  If "lots free",
+	 * let pagedaemon start loopback writes anyway?
+	 */
+	if (nmp->nm_bufqiods > 0) {
+
+		/*
+		 * Ensure that the queue never grows too large.
+		 */
+		if (curlwp == uvm.pagedaemon_lwp) {
+	  		/* Enque for later, to avoid free-page deadlock */
+		} else while (nmp->nm_bufqlen >= 2 * nmp->nm_bufqiods) {
+			if (catch) {
+				error = cv_timedwait_sig(&nmp->nm_aiocv,
+				    &nmp->nm_lock, slptimeo);
+			} else {
+				error = cv_timedwait(&nmp->nm_aiocv,
+				    &nmp->nm_lock, slptimeo);
+			}
+			if (error) {
+				if (nfs_sigintr(nmp, NULL, curlwp)) {
+					mutex_exit(&nmp->nm_lock);
+					return (EINTR);
+				}
+				if (catch) {
+					catch = false;
+					slptimeo = 2 * hz;
+				}
+			}
+
+			/*
+			 * We might have lost our iod while sleeping,
+			 * so check and loop if necessary.
+			 */
+
+			if (nmp->nm_bufqiods == 0) {
+				mutex_exit(&nmp->nm_lock);
+				goto again;
+			}
+		}
+		TAILQ_INSERT_TAIL(&nmp->nm_bufq, bp, b_freelist);
+		nmp->nm_bufqlen++;
+		mutex_exit(&nmp->nm_lock);
 		return (0);
-	    }
+	}
+	mutex_exit(&nmp->nm_lock);
 
 	/*
-	 * If it is a read or a write already marked B_WRITEINPROG or B_NOCACHE
-	 * return EIO so the process will call nfs_doio() and do it
-	 * synchronously.
+	 * All the iods are busy on other mounts, so return EIO to
+	 * force the caller to process the i/o synchronously.
 	 */
-	if (bp->b_flags & (B_READ | B_WRITEINPROG | B_NOCACHE))
-		return (EIO);
+
+	return (EIO);
+}
+
+/*
+ * nfs_doio for read.
+ */
+static int
+nfs_doio_read(struct buf *bp, struct uio *uiop)
+{
+	struct vnode *vp = bp->b_vp;
+	struct nfsnode *np = VTONFS(vp);
+	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
+	int error = 0;
+
+	uiop->uio_rw = UIO_READ;
+	switch (vp->v_type) {
+	case VREG:
+		nfsstats.read_bios++;
+		error = nfs_readrpc(vp, uiop);
+		if (!error && uiop->uio_resid) {
+			int diff, len;
+
+			/*
+			 * If uio_resid > 0, there is a hole in the file and
+			 * no writes after the hole have been pushed to
+			 * the server yet or the file has been truncated
+			 * on the server.
+			 * Just zero fill the rest of the valid area.
+			 */
+
+			KASSERT(vp->v_size >=
+			    uiop->uio_offset + uiop->uio_resid);
+			diff = bp->b_bcount - uiop->uio_resid;
+			len = uiop->uio_resid;
+			memset((char *)bp->b_data + diff, 0, len);
+			uiop->uio_resid = 0;
+		}
+#if 0
+		if (uiop->uio_lwp && (vp->v_iflag & VI_TEXT) &&
+		    timespeccmp(&np->n_mtime, &np->n_vattr->va_mtime, !=)) {
+		    	mutex_enter(proc_lock);
+			killproc(uiop->uio_lwp->l_proc, "process text file was modified");
+		    	mutex_exit(proc_lock);
+#if 0 /* XXX NJWLWP */
+			uiop->uio_lwp->l_proc->p_holdcnt++;
+#endif
+		}
+#endif
+		break;
+	case VLNK:
+		KASSERT(uiop->uio_offset == (off_t)0);
+		nfsstats.readlink_bios++;
+		error = nfs_readlinkrpc(vp, uiop, np->n_rcred);
+		break;
+	case VDIR:
+		nfsstats.readdir_bios++;
+		uiop->uio_offset = bp->b_dcookie;
+#ifndef NFS_V2_ONLY
+		if (nmp->nm_flag & NFSMNT_RDIRPLUS) {
+			error = nfs_readdirplusrpc(vp, uiop,
+			    curlwp->l_cred);
+			/*
+			 * nfs_request maps NFSERR_NOTSUPP to ENOTSUP.
+			 */
+			if (error == ENOTSUP)
+				nmp->nm_flag &= ~NFSMNT_RDIRPLUS;
+		}
+#else
+		nmp->nm_flag &= ~NFSMNT_RDIRPLUS;
+#endif
+		if ((nmp->nm_flag & NFSMNT_RDIRPLUS) == 0)
+			error = nfs_readdirrpc(vp, uiop,
+			    curlwp->l_cred);
+		if (!error) {
+			bp->b_dcookie = uiop->uio_offset;
+		}
+		break;
+	default:
+		printf("nfs_doio:  type %x unexpected\n", vp->v_type);
+		break;
+	}
+	bp->b_error = error;
+	return error;
+}
+
+/*
+ * nfs_doio for write.
+ */
+static int
+nfs_doio_write(struct buf *bp, struct uio *uiop)
+{
+	struct vnode *vp = bp->b_vp;
+	struct nfsnode *np = VTONFS(vp);
+	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
+	int iomode;
+	bool stalewriteverf = false;
+	int i, npages = (bp->b_bcount + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	struct vm_page **pgs, *spgs[UBC_MAX_PAGES];
+#ifndef NFS_V2_ONLY
+	bool needcommit = true; /* need only COMMIT RPC */
+#else
+	bool needcommit = false; /* need only COMMIT RPC */
+#endif
+	bool pageprotected;
+	struct uvm_object *uobj = &vp->v_uobj;
+	int error;
+	off_t off, cnt;
+
+	if (npages < __arraycount(spgs))
+		pgs = spgs;
+	else {
+		if ((pgs = kmem_alloc(sizeof(*pgs) * npages, KM_NOSLEEP)) ==
+		    NULL)
+			return ENOMEM;
+	}
+
+	if ((bp->b_flags & B_ASYNC) != 0 && NFS_ISV3(vp)) {
+		iomode = NFSV3WRITE_UNSTABLE;
+	} else {
+		iomode = NFSV3WRITE_FILESYNC;
+	}
+
+#ifndef NFS_V2_ONLY
+again:
+#endif
+	rw_enter(&nmp->nm_writeverflock, RW_READER);
+
+	for (i = 0; i < npages; i++) {
+		pgs[i] = uvm_pageratop((vaddr_t)bp->b_data + (i << PAGE_SHIFT));
+		if (pgs[i]->uobject == uobj &&
+		    pgs[i]->offset == uiop->uio_offset + (i << PAGE_SHIFT)) {
+			KASSERT(pgs[i]->flags & PG_BUSY);
+			/*
+			 * this page belongs to our object.
+			 */
+			mutex_enter(&uobj->vmobjlock);
+			/*
+			 * write out the page stably if it's about to
+			 * be released because we can't resend it
+			 * on the server crash.
+			 *
+			 * XXX assuming PG_RELEASE|PG_PAGEOUT won't be
+			 * changed until unbusy the page.
+			 */
+			if (pgs[i]->flags & (PG_RELEASED|PG_PAGEOUT))
+				iomode = NFSV3WRITE_FILESYNC;
+			/*
+			 * if we met a page which hasn't been sent yet,
+			 * we need do WRITE RPC.
+			 */
+			if ((pgs[i]->flags & PG_NEEDCOMMIT) == 0)
+				needcommit = false;
+			mutex_exit(&uobj->vmobjlock);
+		} else {
+			iomode = NFSV3WRITE_FILESYNC;
+			needcommit = false;
+		}
+	}
+	if (!needcommit && iomode == NFSV3WRITE_UNSTABLE) {
+		mutex_enter(&uobj->vmobjlock);
+		for (i = 0; i < npages; i++) {
+			pgs[i]->flags |= PG_NEEDCOMMIT | PG_RDONLY;
+			pmap_page_protect(pgs[i], VM_PROT_READ);
+		}
+		mutex_exit(&uobj->vmobjlock);
+		pageprotected = true; /* pages can't be modified during i/o. */
+	} else
+		pageprotected = false;
 
 	/*
-	 * Just turn the async write into a delayed write, instead of
-	 * doing in synchronously. Hopefully, at least one of the nfsiods
-	 * is currently doing a write for this file and will pick up the
-	 * delayed writes before going back to sleep.
+	 * Send the data to the server if necessary,
+	 * otherwise just send a commit rpc.
 	 */
-	s = splbio();
-	buf_dirty(bp);
-	biodone(bp);
-	splx(s);
-	return (0);
+#ifndef NFS_V2_ONLY
+	if (needcommit) {
+
+		/*
+		 * If the buffer is in the range that we already committed,
+		 * there's nothing to do.
+		 *
+		 * If it's in the range that we need to commit, push the
+		 * whole range at once, otherwise only push the buffer.
+		 * In both these cases, acquire the commit lock to avoid
+		 * other processes modifying the range.
+		 */
+
+		off = uiop->uio_offset;
+		cnt = bp->b_bcount;
+		mutex_enter(&np->n_commitlock);
+		if (!nfs_in_committed_range(vp, off, bp->b_bcount)) {
+			bool pushedrange;
+			if (nfs_in_tobecommitted_range(vp, off, bp->b_bcount)) {
+				pushedrange = true;
+				off = np->n_pushlo;
+				cnt = np->n_pushhi - np->n_pushlo;
+			} else {
+				pushedrange = false;
+			}
+			error = nfs_commit(vp, off, cnt, curlwp);
+			if (error == 0) {
+				if (pushedrange) {
+					nfs_merge_commit_ranges(vp);
+				} else {
+					nfs_add_committed_range(vp, off, cnt);
+				}
+			}
+		} else {
+			error = 0;
+		}
+		mutex_exit(&np->n_commitlock);
+		rw_exit(&nmp->nm_writeverflock);
+		if (!error) {
+			/*
+			 * pages are now on stable storage.
+			 */
+			uiop->uio_resid = 0;
+			mutex_enter(&uobj->vmobjlock);
+			for (i = 0; i < npages; i++) {
+				pgs[i]->flags &= ~(PG_NEEDCOMMIT | PG_RDONLY);
+			}
+			mutex_exit(&uobj->vmobjlock);
+			return 0;
+		} else if (error == NFSERR_STALEWRITEVERF) {
+			nfs_clearcommit(vp->v_mount);
+			goto again;
+		}
+		if (error) {
+			bp->b_error = np->n_error = error;
+			np->n_flag |= NWRITEERR;
+		}
+		goto out;
+	}
+#endif
+	off = uiop->uio_offset;
+	cnt = bp->b_bcount;
+	uiop->uio_rw = UIO_WRITE;
+	nfsstats.write_bios++;
+	error = nfs_writerpc(vp, uiop, &iomode, pageprotected, &stalewriteverf);
+#ifndef NFS_V2_ONLY
+	if (!error && iomode == NFSV3WRITE_UNSTABLE) {
+		/*
+		 * we need to commit pages later.
+		 */
+		mutex_enter(&np->n_commitlock);
+		nfs_add_tobecommitted_range(vp, off, cnt);
+		/*
+		 * if there can be too many uncommitted pages, commit them now.
+		 */
+		if (np->n_pushhi - np->n_pushlo > nfs_commitsize) {
+			off = np->n_pushlo;
+			cnt = nfs_commitsize >> 1;
+			error = nfs_commit(vp, off, cnt, curlwp);
+			if (!error) {
+				nfs_add_committed_range(vp, off, cnt);
+				nfs_del_tobecommitted_range(vp, off, cnt);
+			}
+			if (error == NFSERR_STALEWRITEVERF) {
+				stalewriteverf = true;
+				error = 0; /* it isn't a real error */
+			}
+		} else {
+			/*
+			 * re-dirty pages so that they will be passed
+			 * to us later again.
+			 */
+			mutex_enter(&uobj->vmobjlock);
+			for (i = 0; i < npages; i++) {
+				pgs[i]->flags &= ~PG_CLEAN;
+			}
+			mutex_exit(&uobj->vmobjlock);
+		}
+		mutex_exit(&np->n_commitlock);
+	} else
+#endif
+	if (!error) {
+		/*
+		 * pages are now on stable storage.
+		 */
+		mutex_enter(&np->n_commitlock);
+		nfs_del_committed_range(vp, off, cnt);
+		mutex_exit(&np->n_commitlock);
+		mutex_enter(&uobj->vmobjlock);
+		for (i = 0; i < npages; i++) {
+			pgs[i]->flags &= ~(PG_NEEDCOMMIT | PG_RDONLY);
+		}
+		mutex_exit(&uobj->vmobjlock);
+	} else {
+		/*
+		 * we got an error.
+		 */
+		bp->b_error = np->n_error = error;
+		np->n_flag |= NWRITEERR;
+	}
+
+	rw_exit(&nmp->nm_writeverflock);
+
+
+	if (stalewriteverf) {
+		nfs_clearcommit(vp->v_mount);
+	}
+#ifndef NFS_V2_ONLY
+out:
+#endif
+	if (pgs != spgs)
+		kmem_free(pgs, sizeof(*pgs) * npages);
+	return error;
+}
+
+/*
+ * nfs_doio for B_PHYS.
+ */
+static int
+nfs_doio_phys(struct buf *bp, struct uio *uiop)
+{
+	struct vnode *vp = bp->b_vp;
+	int error;
+
+	uiop->uio_offset = ((off_t)bp->b_blkno) << DEV_BSHIFT;
+	if (bp->b_flags & B_READ) {
+		uiop->uio_rw = UIO_READ;
+		nfsstats.read_physios++;
+		error = nfs_readrpc(vp, uiop);
+	} else {
+		int iomode = NFSV3WRITE_DATASYNC;
+		bool stalewriteverf;
+		struct nfsmount *nmp = VFSTONFS(vp->v_mount);
+
+		uiop->uio_rw = UIO_WRITE;
+		nfsstats.write_physios++;
+		rw_enter(&nmp->nm_writeverflock, RW_READER);
+		error = nfs_writerpc(vp, uiop, &iomode, false, &stalewriteverf);
+		rw_exit(&nmp->nm_writeverflock);
+		if (stalewriteverf) {
+			nfs_clearcommit(bp->b_vp->v_mount);
+		}
+	}
+	bp->b_error = error;
+	return error;
 }
 
 /*
@@ -586,161 +1171,180 @@ nfs_asyncio(bp)
  * synchronously or from an nfsiod.
  */
 int
-nfs_doio(bp, p)
-	struct buf *bp;
-	struct proc *p;
+nfs_doio(struct buf *bp)
 {
-	struct uio *uiop;
-	struct vnode *vp;
-	struct nfsnode *np;
-	struct nfsmount *nmp;
-	int s, error = 0, diff, len, iomode, must_commit = 0;
+	int error;
 	struct uio uio;
+	struct uio *uiop = &uio;
 	struct iovec io;
+	UVMHIST_FUNC("nfs_doio"); UVMHIST_CALLED(ubchist);
 
-	vp = bp->b_vp;
-	np = VTONFS(vp);
-	nmp = VFSTONFS(vp->v_mount);
-	uiop = &uio;
 	uiop->uio_iov = &io;
 	uiop->uio_iovcnt = 1;
-	uiop->uio_segflg = UIO_SYSSPACE;
-	uiop->uio_procp = p;
+	uiop->uio_offset = (((off_t)bp->b_blkno) << DEV_BSHIFT);
+	UIO_SETUP_SYSSPACE(uiop);
+	io.iov_base = bp->b_data;
+	io.iov_len = uiop->uio_resid = bp->b_bcount;
 
 	/*
 	 * Historically, paging was done with physio, but no more...
 	 */
 	if (bp->b_flags & B_PHYS) {
-	    /*
-	     * ...though reading /dev/drum still gets us here.
-	     */
-	    io.iov_len = uiop->uio_resid = bp->b_bcount;
-	    /* mapping was done by vmapbuf() */
-	    io.iov_base = bp->b_data;
-	    uiop->uio_offset = ((off_t)bp->b_blkno) << DEV_BSHIFT;
-	    if (bp->b_flags & B_READ) {
-		uiop->uio_rw = UIO_READ;
-		nfsstats.read_physios++;
-		error = nfs_readrpc(vp, uiop);
-	    } else {
-		iomode = NFSV3WRITE_DATASYNC;
-		uiop->uio_rw = UIO_WRITE;
-		nfsstats.write_physios++;
-		error = nfs_writerpc(vp, uiop, &iomode, &must_commit);
-	    }
-	    if (error) {
-		bp->b_flags |= B_ERROR;
-		bp->b_error = error;
-	    }
+		/*
+		 * ...though reading /dev/drum still gets us here.
+		 */
+		error = nfs_doio_phys(bp, uiop);
 	} else if (bp->b_flags & B_READ) {
-	    io.iov_len = uiop->uio_resid = bp->b_bcount;
-	    io.iov_base = bp->b_data;
-	    uiop->uio_rw = UIO_READ;
-	    switch (vp->v_type) {
-	    case VREG:
-		uiop->uio_offset = ((off_t)bp->b_blkno) << DEV_BSHIFT;
-		nfsstats.read_bios++;
-		error = nfs_readrpc(vp, uiop);
-		if (!error) {
-		    bp->b_validoff = 0;
-		    if (uiop->uio_resid) {
-			/*
-			 * If len > 0, there is a hole in the file and
-			 * no writes after the hole have been pushed to
-			 * the server yet.
-			 * Just zero fill the rest of the valid area.
-			 */
-			diff = bp->b_bcount - uiop->uio_resid;
-			len = np->n_size - ((((off_t)bp->b_blkno) << DEV_BSHIFT)
-				+ diff);
-			if (len > 0) {
-			    len = min(len, uiop->uio_resid);
-			    bzero((char *)bp->b_data + diff, len);
-			    bp->b_validend = diff + len;
-			} else
-			    bp->b_validend = diff;
-		    } else
-			bp->b_validend = bp->b_bcount;
-		}
-		if (p && (vp->v_flag & VTEXT) &&
-		    (np->n_mtime != np->n_vattr.va_mtime.tv_sec)) {
-			uprintf("Process killed due to text file modification\n");
-			psignal(p, SIGKILL);
-		}
-		break;
-	    case VLNK:
-		uiop->uio_offset = (off_t)0;
-		nfsstats.readlink_bios++;
-		error = nfs_readlinkrpc(vp, uiop, curproc->p_ucred);
-		break;
-	    default:
-		printf("nfs_doio:  type %x unexpected\n", vp->v_type);
-		break;
-	    };
-	    if (error) {
-		bp->b_flags |= B_ERROR;
-		bp->b_error = error;
-	    }
+		error = nfs_doio_read(bp, uiop);
 	} else {
-	    io.iov_len = uiop->uio_resid = bp->b_dirtyend
-		- bp->b_dirtyoff;
-	    uiop->uio_offset = ((off_t)bp->b_blkno) * DEV_BSIZE
-		+ bp->b_dirtyoff;
-	    io.iov_base = (char *)bp->b_data + bp->b_dirtyoff;
-	    uiop->uio_rw = UIO_WRITE;
-	    nfsstats.write_bios++;
-	    if ((bp->b_flags & (B_ASYNC | B_NEEDCOMMIT | B_NOCACHE)) == B_ASYNC)
-		iomode = NFSV3WRITE_UNSTABLE;
-	    else
-		iomode = NFSV3WRITE_FILESYNC;
-	    bp->b_flags |= B_WRITEINPROG;
-	    error = nfs_writerpc(vp, uiop, &iomode, &must_commit);
-
-	    rw_enter_write(&np->n_commitlock);
-	    if (!error && iomode == NFSV3WRITE_UNSTABLE) {
-		bp->b_flags |= B_NEEDCOMMIT;
-		nfs_add_tobecommitted_range(vp, bp);
-	    } else {
-		bp->b_flags &= ~B_NEEDCOMMIT;
-		nfs_del_committed_range(vp, bp);
-	    }
-	    rw_exit_write(&np->n_commitlock);
-
-	    bp->b_flags &= ~B_WRITEINPROG;
-
-	    /*
-	     * For an interrupted write, the buffer is still valid and the
-	     * write hasn't been pushed to the server yet, so we can't set
-	     * B_ERROR and report the interruption by setting B_EINTR. For
-	     * the B_ASYNC case, B_EINTR is not relevant, so the rpc attempt
-	     * is essentially a noop.
-	     * For the case of a V3 write rpc not being committed to stable
-	     * storage, the block is still dirty and requires either a commit
-	     * rpc or another write rpc with iomode == NFSV3WRITE_FILESYNC
-	     * before the block is reused. This is indicated by setting the
-	     * B_DELWRI and B_NEEDCOMMIT flags.
-	     */
-	    if (error == EINTR || (!error && (bp->b_flags & B_NEEDCOMMIT))) {
-		    s = splbio();
-		    buf_dirty(bp);
-		    splx(s);
-
-		    if (!(bp->b_flags & B_ASYNC) && error)
-			    bp->b_flags |= B_EINTR;
-	    } else {
-		if (error) {
-		    bp->b_flags |= B_ERROR;
-		    bp->b_error = np->n_error = error;
-		    np->n_flag |= NWRITEERR;
-		}
-		bp->b_dirtyoff = bp->b_dirtyend = 0;
-	    }
+		error = nfs_doio_write(bp, uiop);
 	}
 	bp->b_resid = uiop->uio_resid;
-	if (must_commit)
-		nfs_clearcommit(vp->v_mount);
-	s = splbio();
 	biodone(bp);
-	splx(s);
 	return (error);
+}
+
+/*
+ * Vnode op for VM getpages.
+ */
+
+int
+nfs_getpages(void *v)
+{
+	struct vop_getpages_args /* {
+		struct vnode *a_vp;
+		voff_t a_offset;
+		struct vm_page **a_m;
+		int *a_count;
+		int a_centeridx;
+		vm_prot_t a_access_type;
+		int a_advice;
+		int a_flags;
+	} */ *ap = v;
+
+	struct vnode *vp = ap->a_vp;
+	struct uvm_object *uobj = &vp->v_uobj;
+	struct nfsnode *np = VTONFS(vp);
+	const int npages = *ap->a_count;
+	struct vm_page *pg, **pgs, **opgs, *spgs[UBC_MAX_PAGES];
+	off_t origoffset, len;
+	int i, error;
+	bool v3 = NFS_ISV3(vp);
+	bool write = (ap->a_access_type & VM_PROT_WRITE) != 0;
+	bool locked = (ap->a_flags & PGO_LOCKED) != 0;
+
+	/*
+	 * If we are not locked we are not really using opgs,
+	 * so just initialize it
+	 */
+	if (!locked || npages < __arraycount(spgs))
+		opgs = spgs;
+	else {
+		if ((opgs = kmem_alloc(npages * sizeof(*opgs), KM_NOSLEEP)) ==
+		    NULL)
+			return ENOMEM;
+	}
+
+	/*
+	 * call the genfs code to get the pages.  `pgs' may be NULL
+	 * when doing read-ahead.
+	 */
+	pgs = ap->a_m;
+	if (write && locked && v3) {
+		KASSERT(pgs != NULL);
+#ifdef DEBUG
+
+		/*
+		 * If PGO_LOCKED is set, real pages shouldn't exists
+		 * in the array.
+		 */
+
+		for (i = 0; i < npages; i++)
+			KDASSERT(pgs[i] == NULL || pgs[i] == PGO_DONTCARE);
+#endif
+		memcpy(opgs, pgs, npages * sizeof(struct vm_pages *));
+	}
+	error = genfs_getpages(v);
+	if (error)
+		goto out;
+
+	/*
+	 * for read faults where the nfs node is not yet marked NMODIFIED,
+	 * set PG_RDONLY on the pages so that we come back here if someone
+	 * tries to modify later via the mapping that will be entered for
+	 * this fault.
+	 */
+
+	if (!write && (np->n_flag & NMODIFIED) == 0 && pgs != NULL) {
+		if (!locked) {
+			mutex_enter(&uobj->vmobjlock);
+		}
+		for (i = 0; i < npages; i++) {
+			pg = pgs[i];
+			if (pg == NULL || pg == PGO_DONTCARE) {
+				continue;
+			}
+			pg->flags |= PG_RDONLY;
+		}
+		if (!locked) {
+			mutex_exit(&uobj->vmobjlock);
+		}
+	}
+	if (!write)
+		goto out;
+
+	/*
+	 * this is a write fault, update the commit info.
+	 */
+
+	origoffset = ap->a_offset;
+	len = npages << PAGE_SHIFT;
+
+	if (v3) {
+		if (!locked) {
+			mutex_enter(&np->n_commitlock);
+		} else {
+			if (!mutex_tryenter(&np->n_commitlock)) {
+
+				/*
+				 * Since PGO_LOCKED is set, we need to unbusy
+				 * all pages fetched by genfs_getpages() above,
+				 * tell the caller that there are no pages
+				 * available and put back original pgs array.
+				 */
+
+				mutex_enter(&uvm_pageqlock);
+				uvm_page_unbusy(pgs, npages);
+				mutex_exit(&uvm_pageqlock);
+				*ap->a_count = 0;
+				memcpy(pgs, opgs,
+				    npages * sizeof(struct vm_pages *));
+				error = EBUSY;
+				goto out;
+			}
+		}
+		nfs_del_committed_range(vp, origoffset, len);
+		nfs_del_tobecommitted_range(vp, origoffset, len);
+	}
+	np->n_flag |= NMODIFIED;
+	if (!locked) {
+		mutex_enter(&uobj->vmobjlock);
+	}
+	for (i = 0; i < npages; i++) {
+		pg = pgs[i];
+		if (pg == NULL || pg == PGO_DONTCARE) {
+			continue;
+		}
+		pg->flags &= ~(PG_NEEDCOMMIT | PG_RDONLY);
+	}
+	if (!locked) {
+		mutex_exit(&uobj->vmobjlock);
+	}
+	if (v3) {
+		mutex_exit(&np->n_commitlock);
+	}
+out:
+	if (opgs != spgs)
+		kmem_free(opgs, sizeof(*opgs) * npages);
+	return error;
 }

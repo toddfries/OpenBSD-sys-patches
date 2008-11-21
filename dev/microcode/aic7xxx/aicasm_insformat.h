@@ -1,4 +1,3 @@
-/*	$OpenBSD: aicasm_insformat.h,v 1.4 2003/12/24 23:27:55 krw Exp $	*/
 /*	$NetBSD: aicasm_insformat.h,v 1.1 2003/04/19 19:26:11 fvdl Exp $	*/
 
 /*
@@ -106,7 +105,7 @@ struct instruction {
 	union	ins_formats format;
 	u_int	srcline;
 	struct symbol *patch_label;
-	TAILQ_ENTRY(instruction) links;
+	STAILQ_ENTRY(instruction) links;
 };
 
 #define	AIC_OP_OR	0x0

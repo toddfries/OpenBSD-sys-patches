@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: rscalc - Calculate stream and list lengths
- *              xRevision: 1.75 $
+ *              $Revision: 1.4 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,9 +114,6 @@
  *
  *****************************************************************************/
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rscalc.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #define __RSCALC_C__
 
 #include "acpi.h"
@@ -161,7 +158,7 @@ static UINT8
 AcpiRsCountSetBits (
     UINT16                  BitField)
 {
-    UINT8                   BitsSet;
+    ACPI_NATIVE_UINT        BitsSet;
 
 
     ACPI_FUNCTION_ENTRY ();
@@ -171,10 +168,10 @@ AcpiRsCountSetBits (
     {
         /* Zero the least significant bit that is set */
 
-        BitField &= (BitField - 1);
+        BitField &= (UINT16) (BitField - 1);
     }
 
-    return (BitsSet);
+    return ((UINT8) BitsSet);
 }
 
 
@@ -291,7 +288,7 @@ AcpiRsGetAmlLength (
     ACPI_RS_LENGTH          TotalSize;
 
 
-    ACPI_FUNCTION_TRACE ("RsGetAmlLength");
+    ACPI_FUNCTION_TRACE (RsGetAmlLength);
 
 
     /* Traverse entire list of internal resource descriptors */
@@ -315,6 +312,28 @@ AcpiRsGetAmlLength (
          */
         switch (Resource->Type)
         {
+        case ACPI_RESOURCE_TYPE_IRQ:
+
+            /* Length can be 3 or 2 */
+
+            if (Resource->Data.Irq.DescriptorLength == 2)
+            {
+                TotalSize--;
+            }
+            break;
+
+
+        case ACPI_RESOURCE_TYPE_START_DEPENDENT:
+
+            /* Length can be 1 or 0 */
+
+            if (Resource->Data.Irq.DescriptorLength == 0)
+            {
+                TotalSize--;
+            }
+            break;
+
+
         case ACPI_RESOURCE_TYPE_VENDOR:
             /*
              * Vendor Defined Resource:
@@ -450,7 +469,7 @@ AcpiRsGetListLength (
     UINT8                   MinimumAmlResourceLength;
 
 
-    ACPI_FUNCTION_TRACE ("RsGetListLength");
+    ACPI_FUNCTION_TRACE (RsGetListLength);
 
 
     *SizeNeeded = 0;
@@ -540,7 +559,7 @@ AcpiRsGetListLength (
              * included in the minimum descriptor size (reason for the -1)
              */
             ExtraStructBytes = (Buffer[1] - 1) * sizeof (UINT32);
-                
+
             /* Add the size of the optional ResourceSource */
 
             ExtraStructBytes += AcpiRsStreamOptionLength (
@@ -560,17 +579,17 @@ AcpiRsGetListLength (
          */
         BufferSize = AcpiGbl_ResourceStructSizes[ResourceIndex] +
                         ExtraStructBytes;
-        BufferSize = ACPI_ROUND_UP_TO_NATIVE_WORD (BufferSize);
+        BufferSize = (UINT32) ACPI_ROUND_UP_TO_NATIVE_WORD (BufferSize);
 
         *SizeNeeded += BufferSize;
 
         ACPI_DEBUG_PRINT ((ACPI_DB_RESOURCES,
-            "Type %.2X, Aml %.2X internal %.2X\n", 
+            "Type %.2X, AmlLength %.2X InternalLength %.2X\n",
             AcpiUtGetResourceType (AmlBuffer),
             AcpiUtGetDescriptorLength (AmlBuffer), BufferSize));
 
         /*
-         * Point to the next resource within the AML stream using the length 
+         * Point to the next resource within the AML stream using the length
          * contained in the resource descriptor header
          */
         AmlBuffer += AcpiUtGetDescriptorLength (AmlBuffer);
@@ -614,7 +633,7 @@ AcpiRsGetPciRoutingTableLength (
     UINT32                  TableIndex;
 
 
-    ACPI_FUNCTION_TRACE ("RsGetPciRoutingTableLength");
+    ACPI_FUNCTION_TRACE (RsGetPciRoutingTableLength);
 
 
     NumberOfElements = PackageObject->Package.Count;

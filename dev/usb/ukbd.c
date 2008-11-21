@@ -1,5 +1,4 @@
-/*	$OpenBSD: ukbd.c,v 1.41 2008/05/19 18:09:06 miod Exp $	*/
-/*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
+/*      $NetBSD: ukbd.c,v 1.101 2008/09/09 17:40:40 jmcneill Exp $        */
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,15 +34,18 @@
  * HID spec: http://www.usb.org/developers/devclass_docs/HID1_11.pdf
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ukbd.c,v 1.101 2008/09/09 17:40:40 jmcneill Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
 #include <sys/file.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
@@ -71,9 +66,13 @@
 #include <dev/wscons/wsksymdef.h>
 #include <dev/wscons/wsksymvar.h>
 
+#include "opt_ukbd_layout.h"
+#include "opt_wsdisplay_compat.h"
+#include "opt_ddb.h"
+
 #ifdef UKBD_DEBUG
-#define DPRINTF(x)	do { if (ukbddebug) printf x; } while (0)
-#define DPRINTFN(n,x)	do { if (ukbddebug>(n)) printf x; } while (0)
+#define DPRINTF(x)	if (ukbddebug) logprintf x
+#define DPRINTFN(n,x)	if (ukbddebug>(n)) logprintf x
 int	ukbddebug = 0;
 #else
 #define DPRINTF(x)
@@ -92,7 +91,7 @@ struct ukbd_data {
 #define RELEASE  0x100
 #define CODEMASK 0x0ff
 
-#if defined(WSDISPLAY_COMPAT_RAWKBD)
+#if defined(__NetBSD__) && defined(WSDISPLAY_COMPAT_RAWKBD)
 #define NN 0			/* no translation */
 /*
  * Translate USB keycodes to US keyboard XT scancodes.
@@ -100,7 +99,7 @@ struct ukbd_data {
  *
  * See http://www.microsoft.com/whdc/device/input/Scancode.mspx
  */
-const u_int8_t ukbd_trtab[256] = {
+Static const u_int8_t ukbd_trtab[256] = {
       NN,   NN,   NN,   NN, 0x1e, 0x30, 0x2e, 0x20, /* 00 - 07 */
     0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, /* 08 - 0f */
     0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, /* 10 - 17 */
@@ -113,11 +112,11 @@ const u_int8_t ukbd_trtab[256] = {
     0x7f, 0xd2, 0xc7, 0xc9, 0xd3, 0xcf, 0xd1, 0xcd, /* 48 - 4f */
     0xcb, 0xd0, 0xc8, 0x45, 0xb5, 0x37, 0x4a, 0x4e, /* 50 - 57 */
     0x9c, 0x4f, 0x50, 0x51, 0x4b, 0x4c, 0x4d, 0x47, /* 58 - 5f */
-    0x48, 0x49, 0x52, 0x53, 0x56, 0xdd, 0x84, 0x59, /* 60 - 67 */
-    0x5d, 0x5e, 0x5f,   NN,   NN,   NN,   NN,   NN, /* 68 - 6f */
-      NN,   NN,   NN,   NN, 0x97,   NN, 0x93, 0x95, /* 70 - 77 */
-    0x91, 0x92, 0x94, 0x9a, 0x96, 0x98, 0x99, 0xa0, /* 78 - 7f */
-    0xb0, 0xae,   NN,   NN,   NN, 0x7e,   NN, 0x73, /* 80 - 87 */
+    0x48, 0x49, 0x52, 0x53, 0x56, 0xdd,   NN, 0x59, /* 60 - 67 */
+    0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a,   NN, /* 68 - 6f */
+      NN,   NN,   NN,   NN,   NN,   NN,   NN,   NN, /* 70 - 77 */
+      NN,   NN,   NN,   NN,   NN,   NN,   NN,   NN, /* 78 - 7f */
+      NN,   NN,   NN,   NN,   NN, 0x7e,   NN, 0x73, /* 80 - 87 */
     0x70, 0x7d, 0x79, 0x7b, 0x5c,   NN,   NN,   NN, /* 88 - 8f */
       NN,   NN, 0x78, 0x77, 0x76,   NN,   NN,   NN, /* 90 - 97 */
       NN,   NN,   NN,   NN,   NN,   NN,   NN,   NN, /* 98 - 9f */
@@ -134,81 +133,7 @@ const u_int8_t ukbd_trtab[256] = {
       NN,   NN,   NN,   NN,   NN,   NN,   NN,   NN, /* f0 - f7 */
       NN,   NN,   NN,   NN,   NN,   NN,   NN,   NN, /* f8 - ff */
 };
-#endif /* defined(WSDISPLAY_COMPAT_RAWKBD) */
-
-const kbd_t ukbd_countrylayout[HCC_MAX] = {
-	(kbd_t)-1,
-	(kbd_t)-1,	/* arabic */
-	KB_BE,		/* belgian */
-	(kbd_t)-1,	/* canadian bilingual */
-	KB_CF,		/* canadian french */
-	(kbd_t)-1,	/* czech */
-	KB_DK,		/* danish */
-	(kbd_t)-1,	/* finnish */
-	KB_FR,		/* french */
-	KB_DE,		/* german */
-	(kbd_t)-1,	/* greek */
-	(kbd_t)-1,	/* hebrew */
-	KB_HU,		/* hungary */
-	(kbd_t)-1,	/* international (iso) */
-	KB_IT,		/* italian */
-	KB_JP,		/* japanese (katakana) */
-	(kbd_t)-1,	/* korean */
-	KB_LA,		/* latin american */
-	(kbd_t)-1,	/* netherlands/dutch */
-	KB_NO,		/* norwegian */
-	(kbd_t)-1,	/* persian (farsi) */
-	KB_PL,		/* polish */
-	KB_PT,		/* portuguese */
-	KB_RU,		/* russian */
-	(kbd_t)-1,	/* slovakia */
-	KB_ES,		/* spanish */
-	KB_SF,		/* swiss french */
-	KB_SG,		/* swiss german */
-	(kbd_t)-1,	/* switzerland */
-	(kbd_t)-1,	/* taiwan */
-	KB_TR,		/* turkish Q */
-	KB_UK,		/* uk */
-	KB_US,		/* us */
-	(kbd_t)-1,	/* yugoslavia */
-	(kbd_t)-1	/* turkish F */
-};
-
-#define	SUN_HCC_MIN	0x21
-#define	SUN_HCC_MAX	0x3f
-const kbd_t ukbd_sunlayout[1 + SUN_HCC_MAX - SUN_HCC_MIN] = {
-	KB_US,	/* 021 USA */
-	KB_US,	/* 022 UNIX */
-	KB_FR,	/* 023 France */
-	KB_DK,	/* 024 Denmark */
-	KB_DE,	/* 025 Germany */
-	KB_IT,	/* 026 Italy */
-	KB_NL,	/* 027 The Netherlands */
-	KB_NO,	/* 028 Norway */
-	KB_PT,	/* 029 Portugal */
-	KB_ES,	/* 02a Spain */
-	KB_SV,	/* 02b Sweden */
-	KB_SF,	/* 02c Switzerland/French */
-	KB_SG,	/* 02d Switzerland/German */
-	KB_UK,	/* 02e Great Britain */
-	-1,	/* 02f Korea */
-	-1,	/* 030 Taiwan */
-	KB_JP,	/* 031 Japan */
-	-1,	/* 032 Canada/French */
-	-1,	/* 033 Hungary */
-	-1,	/* 034 Poland */
-	-1,	/* 035 Czech */
-	-1,	/* 036 Russia */
-	-1,	/* 037 Latvia */
-	-1,	/* 038 Turkey-Q5 */
-	-1,	/* 039 Greece */
-	-1,	/* 03a Arabic */
-	-1,	/* 03b Lithuania */
-	-1,	/* 03c Belgium */
-	-1,	/* 03d unaffected */
-	-1,	/* 03e Turkey-F5 */
-	-1,	/* 03f Canada/French */
-};
+#endif /* defined(__NetBSD__) && defined(WSDISPLAY_COMPAT_RAWKBD) */
 
 #define KEY_ERROR 0x01
 
@@ -234,29 +159,32 @@ struct ukbd_softc {
 	int sc_console_keyboard;	/* we are the console keyboard */
 
 	char sc_debounce;		/* for quirk handling */
-	struct timeout sc_delay;		/* for quirk handling */
+	usb_callout_t sc_delay;		/* for quirk handling */
 	struct ukbd_data sc_data;	/* for quirk handling */
 
 	struct hid_location sc_numloc;
 	struct hid_location sc_capsloc;
 	struct hid_location sc_scroloc;
 	int sc_leds;
+#if defined(__NetBSD__)
+	device_t sc_wskbddev;
 
-	struct timeout sc_rawrepeat_ch;
-
-	struct device *sc_wskbddev;
 #if defined(WSDISPLAY_COMPAT_RAWKBD)
+	int sc_rawkbd;
+#if defined(UKBD_REPEAT)
+	usb_callout_t sc_rawrepeat_ch;
 #define REP_DELAY1 400
 #define REP_DELAYN 100
-	int sc_rawkbd;
 	int sc_nrep;
 	char sc_rep[MAXKEYS];
+#endif /* defined(UKBD_REPEAT) */
 #endif /* defined(WSDISPLAY_COMPAT_RAWKBD) */
 
 	int sc_spl;
 	int sc_polling;
 	int sc_npollchar;
 	u_int16_t sc_pollchars[MAXKEYS];
+#endif /* defined(__NetBSD__) */
 
 	u_char sc_dying;
 };
@@ -292,35 +220,32 @@ ukbdtracedump(void)
 #define	UKBD_CHUNK	128	/* chunk size for read */
 #define	UKBD_BSIZE	1020	/* buffer size */
 
-int	ukbd_is_console;
+Static int	ukbd_is_console;
 
-void	ukbd_cngetc(void *, u_int *, int *);
-void	ukbd_cnpollc(void *, int);
-void	ukbd_cnbell(void *, u_int, u_int, u_int);
+Static void	ukbd_cngetc(void *, u_int *, int *);
+Static void	ukbd_cnpollc(void *, int);
 
+#if defined(__NetBSD__)
 const struct wskbd_consops ukbd_consops = {
 	ukbd_cngetc,
 	ukbd_cnpollc,
-	ukbd_cnbell,
+	NULL,	/* bell */
 };
+#endif
 
-const char *ukbd_parse_desc(struct ukbd_softc *sc);
+Static const char *ukbd_parse_desc(struct ukbd_softc *sc);
 
-void	(*ukbd_bell_fn)(void *, u_int, u_int, u_int, int);
-void	*ukbd_bell_fn_arg;
+Static void	ukbd_intr(struct uhidev *addr, void *ibuf, u_int len);
+Static void	ukbd_decode(struct ukbd_softc *sc, struct ukbd_data *ud);
+Static void	ukbd_delayed_decode(void *addr);
 
-void	ukbd_bell(u_int, u_int, u_int, int);
+Static int	ukbd_enable(void *, int);
+Static void	ukbd_set_leds(void *, int);
 
-void	ukbd_intr(struct uhidev *addr, void *ibuf, u_int len);
-void	ukbd_decode(struct ukbd_softc *sc, struct ukbd_data *ud);
-void	ukbd_delayed_decode(void *addr);
-
-int	ukbd_enable(void *, int);
-void	ukbd_set_leds(void *, int);
-
-int	ukbd_ioctl(void *, u_long, caddr_t, int, struct proc *);
-#ifdef WSDISPLAY_COMPAT_RAWKBD
-void	ukbd_rawrepeat(void *v);
+#if defined(__NetBSD__)
+Static int	ukbd_ioctl(void *, u_long, void *, int, struct lwp *);
+#if  defined(WSDISPLAY_COMPAT_RAWKBD) && defined(UKBD_REPEAT)
+Static void	ukbd_rawrepeat(void *v);
 #endif
 
 const struct wskbd_accessops ukbd_accessops = {
@@ -331,32 +256,33 @@ const struct wskbd_accessops ukbd_accessops = {
 
 extern const struct wscons_keydesc ukbd_keydesctab[];
 
-struct wskbd_mapdata ukbd_keymapdata = {
-	ukbd_keydesctab
+const struct wskbd_mapdata ukbd_keymapdata = {
+	ukbd_keydesctab,
+#if defined(UKBD_LAYOUT)
+	UKBD_LAYOUT,
+#elif defined(PCKBD_LAYOUT)
+	PCKBD_LAYOUT,
+#else
+	KB_US,
+#endif
 };
+#endif
 
-int ukbd_match(struct device *, void *, void *); 
-void ukbd_attach(struct device *, struct device *, void *); 
-int ukbd_detach(struct device *, int); 
-int ukbd_activate(struct device *, enum devact); 
+static int ukbd_match(device_t, cfdata_t, void *);
+static void ukbd_attach(device_t, device_t, void *);
+static int ukbd_detach(device_t, int);
+static int ukbd_activate(device_t, enum devact);
+static void ukbd_childdet(device_t, device_t);
 
-struct cfdriver ukbd_cd = { 
-	NULL, "ukbd", DV_DULL 
-}; 
+extern struct cfdriver ukbd_cd;
 
-const struct cfattach ukbd_ca = { 
-	sizeof(struct ukbd_softc), 
-	ukbd_match, 
-	ukbd_attach, 
-	ukbd_detach, 
-	ukbd_activate, 
-};
+CFATTACH_DECL2_NEW(ukbd, sizeof(struct ukbd_softc), ukbd_match, ukbd_attach,
+    ukbd_detach, ukbd_activate, NULL, ukbd_childdet);
 
 int
-ukbd_match(struct device *parent, void *match, void *aux)
+ukbd_match(device_t parent, cfdata_t match, void *aux)
 {
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
+	struct uhidev_attach_arg *uha = aux;
 	int size;
 	void *desc;
 
@@ -369,34 +295,40 @@ ukbd_match(struct device *parent, void *match, void *aux)
 }
 
 void
-ukbd_attach(struct device *parent, struct device *self, void *aux)
+ukbd_attach(device_t parent, device_t self, void *aux)
 {
-	struct ukbd_softc *sc = (struct ukbd_softc *)self;
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usb_hid_descriptor_t *hid;
+	struct ukbd_softc *sc = device_private(self);
+	struct uhidev_attach_arg *uha = aux;
 	u_int32_t qflags;
 	const char *parseerr;
-	kbd_t layout = (kbd_t)-1;
+#if defined(__NetBSD__)
 	struct wskbddev_attach_args a;
+#else
+	int i;
+#endif
 
+	sc->sc_hdev.sc_dev = self;
 	sc->sc_hdev.sc_intr = ukbd_intr;
 	sc->sc_hdev.sc_parent = uha->parent;
 	sc->sc_hdev.sc_report_id = uha->reportid;
 
-	parseerr = ukbd_parse_desc(sc);
-	if (parseerr != NULL) {
-		printf("\n%s: attach failed, %s\n",
-		       sc->sc_hdev.sc_dev.dv_xname, parseerr);
-		return;
+	if (!pmf_device_register(self, NULL, NULL)) {
+		aprint_normal("\n");
+		aprint_error_dev(self, "couldn't establish power handler\n");
 	}
 
-	hid = usbd_get_hid_descriptor(uha->uaa->iface);
+	parseerr = ukbd_parse_desc(sc);
+	if (parseerr != NULL) {
+		aprint_normal("\n");
+		aprint_error_dev(self, "attach failed, %s\n", parseerr);
+		USB_ATTACH_ERROR_RETURN;
+	}
 
 #ifdef DIAGNOSTIC
-	printf(": %d modifier keys, %d key codes",
-	    sc->sc_nmod, sc->sc_nkeycode);
+	aprint_normal(": %d modifier keys, %d key codes", sc->sc_nmod,
+	       sc->sc_nkeycode);
 #endif
+	aprint_normal("\n");
 
 	qflags = usbd_get_quirks(uha->parent->sc_udev)->uq_flags;
 	sc->sc_debounce = (qflags & UQ_SPUR_BUT_UP) != 0;
@@ -412,41 +344,6 @@ ukbd_attach(struct device *parent, struct device *self, void *aux)
 		ukbd_is_console = 0;
 	}
 
-	if (uha->uaa->vendor == USB_VENDOR_SUN &&
-	    (uha->uaa->product == USB_PRODUCT_SUN_KEYBOARD6 ||
-	     uha->uaa->product == USB_PRODUCT_SUN_KEYBOARD7)) {
-		/* Sun keyboard use Sun-style layout codes */
-		if (hid->bCountryCode >= SUN_HCC_MIN &&
-		    hid->bCountryCode <= SUN_HCC_MAX)
-			layout = ukbd_sunlayout[hid->bCountryCode - SUN_HCC_MIN];
-#ifdef DIAGNOSTIC
-		if (hid->bCountryCode != 0)
-			printf(", layout %d", hid->bCountryCode);
-#endif
-	} else {
-		if (uha->uaa->vendor == USB_VENDOR_TOPRE &&
-		    uha->uaa->product == USB_PRODUCT_TOPRE_HHKB) {
-			/* ignore country code on purpose */
-		} else {
-			if (hid->bCountryCode <= HCC_MAX)
-				layout = ukbd_countrylayout[hid->bCountryCode];
-#ifdef DIAGNOSTIC
-			if (hid->bCountryCode != 0)
-				printf(", country code %d", hid->bCountryCode);
-#endif
-		}
-	}
-	if (layout == (kbd_t)-1) {
-#ifdef UKBD_LAYOUT
-		layout = UKBD_LAYOUT;
-#else
-		layout = KB_US;
-#endif
-	}
-	ukbd_keymapdata.layout = layout;
-
-	printf("\n");
-
 	if (sc->sc_console_keyboard) {
 		DPRINTF(("ukbd_attach: console keyboard sc=%p\n", sc));
 		wskbd_cnattach(&ukbd_consops, sc, &ukbd_keymapdata);
@@ -460,10 +357,11 @@ ukbd_attach(struct device *parent, struct device *self, void *aux)
 	a.accessops = &ukbd_accessops;
 	a.accesscookie = sc;
 
-#ifdef WSDISPLAY_COMPAT_RAWKBD
-	timeout_set(&sc->sc_rawrepeat_ch, ukbd_rawrepeat, sc);
+#ifdef UKBD_REPEAT
+	usb_callout_init(sc->sc_rawrepeat_ch);
 #endif
-	timeout_set(&sc->sc_delay, ukbd_delayed_decode, sc);
+
+	usb_callout_init(sc->sc_delay);
 
 	/* Flash the leds; no real purpose, just shows we're alive. */
 	ukbd_set_leds(sc, WSKBD_LED_SCROLL | WSKBD_LED_NUM | WSKBD_LED_CAPS);
@@ -471,6 +369,8 @@ ukbd_attach(struct device *parent, struct device *self, void *aux)
 	ukbd_set_leds(sc, 0);
 
 	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
+
+	USB_ATTACH_SUCCESS_RETURN;
 }
 
 int
@@ -483,8 +383,10 @@ ukbd_enable(void *v, int on)
 
 	/* Should only be called to change state */
 	if (sc->sc_enabled == on) {
-		DPRINTF(("ukbd_enable: %s: bad call on=%d\n",
-			 sc->sc_hdev.sc_dev.dv_xname, on));
+#ifdef DIAGNOSTIC
+		printf("ukbd_enable: %s: bad call on=%d\n",
+		       USBDEVNAME(sc->sc_hdev.sc_dev), on);
+#endif
 		return (EBUSY);
 	}
 
@@ -498,15 +400,25 @@ ukbd_enable(void *v, int on)
 	}
 }
 
-int
-ukbd_activate(struct device *self, enum devact act)
+
+static void
+ukbd_childdet(device_t self, device_t child)
 {
-	struct ukbd_softc *sc = (struct ukbd_softc *)self;
+	struct ukbd_softc *sc = device_private(self);
+
+	KASSERT(sc->sc_wskbddev == child);
+	sc->sc_wskbddev = NULL;
+}
+
+int
+ukbd_activate(device_t self, enum devact act)
+{
+	struct ukbd_softc *sc = device_private(self);
 	int rv = 0;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		break;
+		return (EOPNOTSUPP);
 
 	case DVACT_DEACTIVATE:
 		if (sc->sc_wskbddev != NULL)
@@ -518,12 +430,14 @@ ukbd_activate(struct device *self, enum devact act)
 }
 
 int
-ukbd_detach(struct device *self, int flags)
+ukbd_detach(device_t self, int flags)
 {
-	struct ukbd_softc *sc = (struct ukbd_softc *)self;
+	struct ukbd_softc *sc = device_private(self);
 	int rv = 0;
 
 	DPRINTF(("ukbd_detach: sc=%p flags=%d\n", sc, flags));
+
+	pmf_device_deregister(self);
 
 	if (sc->sc_console_keyboard) {
 #if 0
@@ -545,7 +459,7 @@ ukbd_detach(struct device *self, int flags)
 		 * XXX console, if there are any other keyboards.
 		 */
 		printf("%s: was console keyboard\n",
-		       sc->sc_hdev.sc_dev.dv_xname);
+		       USBDEVNAME(sc->sc_hdev.sc_dev));
 		wskbd_cndetach();
 		ukbd_is_console = 1;
 #endif
@@ -592,7 +506,7 @@ ukbd_intr(struct uhidev *addr, void *ibuf, u_int len)
 		 * We avoid this bug by holding off decoding for 20 ms.
 		 */
 		sc->sc_data = *ud;
-		timeout_add(&sc->sc_delay, hz / 50);
+		usb_callout(sc->sc_delay, hz / 50, ukbd_delayed_decode, sc);
 #ifdef DDB
 	} else if (sc->sc_console_keyboard && !sc->sc_polling) {
 		/*
@@ -602,7 +516,7 @@ ukbd_intr(struct uhidev *addr, void *ibuf, u_int len)
 		 * loses bigtime.
 		 */
 		sc->sc_data = *ud;
-		timeout_add(&sc->sc_delay, 1);
+		usb_callout(sc->sc_delay, 1, ukbd_delayed_decode, sc);
 #endif
 	} else {
 		ukbd_decode(sc, ud);
@@ -634,7 +548,7 @@ ukbd_decode(struct ukbd_softc *sc, struct ukbd_data *ud)
 	 */
 	if (ukbdtrace) {
 		struct ukbdtraceinfo *p = &ukbdtracedata[ukbdtraceindex];
-		p->unit = sc->sc_hdev.sc_dev.dv_unit;
+		p->unit = device_unit(sc->sc_hdev.sc_dev);
 		microtime(&p->tv);
 		p->ud = *ud;
 		if (++ukbdtraceindex >= UKBDTRACESIZE)
@@ -721,12 +635,14 @@ ukbd_decode(struct ukbd_softc *sc, struct ukbd_data *ud)
 			cbuf[j] = c & 0x7f;
 			if (key & RELEASE)
 				cbuf[j] |= 0x80;
+#if defined(UKBD_REPEAT)
 			else {
 				/* remember pressed keys for autorepeat */
 				if (c & 0x80)
 					sc->sc_rep[npress++] = 0xe0;
 				sc->sc_rep[npress++] = c & 0x7f;
 			}
+#endif
 			DPRINTFN(1,("ukbd_intr: raw = %s0x%02x\n",
 				    c & 0x80 ? "0xe0 " : "",
 				    cbuf[j]));
@@ -735,12 +651,14 @@ ukbd_decode(struct ukbd_softc *sc, struct ukbd_data *ud)
 		s = spltty();
 		wskbd_rawinput(sc->sc_wskbddev, cbuf, j);
 		splx(s);
+#ifdef UKBD_REPEAT
+		usb_uncallout(sc->sc_rawrepeat_ch, ukbd_rawrepeat, sc);
 		if (npress != 0) {
 			sc->sc_nrep = npress;
-			timeout_add(&sc->sc_rawrepeat_ch,
-			    hz * REP_DELAY1 / 1000);
-		} else
-			timeout_del(&sc->sc_rawrepeat_ch);
+			usb_callout(sc->sc_rawrepeat_ch,
+			    hz * REP_DELAY1 / 1000, ukbd_rawrepeat, sc);
+		}
+#endif
 		return;
 	}
 #endif
@@ -781,7 +699,7 @@ ukbd_set_leds(void *v, int leds)
 	uhidev_set_report_async(&sc->sc_hdev, UHID_OUTPUT_REPORT, &res, 1);
 }
 
-#ifdef WSDISPLAY_COMPAT_RAWKBD
+#if defined(WSDISPLAY_COMPAT_RAWKBD) && defined(UKBD_REPEAT)
 void
 ukbd_rawrepeat(void *v)
 {
@@ -791,12 +709,14 @@ ukbd_rawrepeat(void *v)
 	s = spltty();
 	wskbd_rawinput(sc->sc_wskbddev, sc->sc_rep, sc->sc_nrep);
 	splx(s);
-	timeout_add(&sc->sc_rawrepeat_ch, hz * REP_DELAYN / 1000);
+	usb_callout(sc->sc_rawrepeat_ch, hz * REP_DELAYN / 1000,
+	    ukbd_rawrepeat, sc);
 }
-#endif
+#endif /* defined(WSDISPLAY_COMPAT_RAWKBD) && defined(UKBD_REPEAT) */
 
 int
-ukbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
+ukbd_ioctl(void *v, u_long cmd, void *data, int flag,
+    struct lwp *l)
 {
 	struct ukbd_softc *sc = v;
 
@@ -810,37 +730,17 @@ ukbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case WSKBDIO_GETLEDS:
 		*(int *)data = sc->sc_leds;
 		return (0);
-	case WSKBDIO_COMPLEXBELL:
-#define d ((struct wskbd_bell_data *)data)
-		ukbd_bell(d->pitch, d->period, d->volume, 0);
-#undef d
-		return (0);
-#ifdef WSDISPLAY_COMPAT_RAWKBD
+#if defined(WSDISPLAY_COMPAT_RAWKBD)
 	case WSKBDIO_SETMODE:
 		DPRINTF(("ukbd_ioctl: set raw = %d\n", *(int *)data));
 		sc->sc_rawkbd = *(int *)data == WSKBD_RAW;
-		timeout_del(&sc->sc_rawrepeat_ch);
+#if defined(UKBD_REPEAT)
+		usb_uncallout(sc->sc_rawrepeat_ch, ukbd_rawrepeat, sc);
+#endif
 		return (0);
 #endif
 	}
-	return (-1);
-}
-
-void
-ukbd_bell(u_int pitch, u_int period, u_int volume, int poll)
-{
-	if (ukbd_bell_fn != NULL)
-		(*ukbd_bell_fn)(ukbd_bell_fn_arg, pitch, period,
-		    volume, poll);
-}
-
-void
-ukbd_hookup_bell(void (*fn)(void *, u_int, u_int, u_int, int), void *arg)
-{
-	if (ukbd_bell_fn == NULL) {
-		ukbd_bell_fn = fn;
-		ukbd_bell_fn_arg = arg;
-	}
+	return (EPASSTHROUGH);
 }
 
 /*
@@ -903,12 +803,6 @@ ukbd_cnpollc(void *v, int on)
 	}
 	usbd_set_polling(dev, on);
 }
-
-void
-ukbd_cnbell(void *v, u_int pitch, u_int period, u_int volume) 
-{
-	ukbd_bell(pitch, period, volume, 1);
-}	
 
 int
 ukbd_cnattach(void)

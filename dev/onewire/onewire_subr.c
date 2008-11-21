@@ -1,4 +1,5 @@
-/*	$OpenBSD: onewire_subr.c,v 1.2 2007/02/28 22:31:32 deraadt Exp $	*/
+/* $NetBSD: onewire_subr.c,v 1.6 2007/12/11 12:36:02 lukem Exp $ */
+/*	$OpenBSD: onewire_subr.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -20,6 +21,9 @@
  * 1-Wire bus miscellaneous routines.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: onewire_subr.c,v 1.6 2007/12/11 12:36:02 lukem Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -29,6 +33,10 @@
 #include <dev/onewire/onewirevar.h>
 
 #ifdef ONEWIREVERBOSE
+struct onewire_family {
+	int		of_type;
+	const char *	of_name;
+};
 #include <dev/onewire/onewiredevs_data.h>
 #endif
 

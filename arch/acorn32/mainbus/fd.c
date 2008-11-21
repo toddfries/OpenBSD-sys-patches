@@ -1,4 +1,4 @@
-/*	$NetBSD: fd.c,v 1.26 2006/04/14 13:09:05 blymn Exp $	*/
+/*	$NetBSD: fd.c,v 1.39 2008/06/12 23:22:36 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -89,7 +82,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.26 2006/04/14 13:09:05 blymn Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.39 2008/06/12 23:22:36 cegger Exp $");
 
 #include "opt_ddb.h"
 
@@ -135,8 +128,8 @@ __KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.26 2006/04/14 13:09:05 blymn Exp $");
 #define FDUNIT(dev)	(minor(dev) / 8)
 #define FDTYPE(dev)	(minor(dev) % 8)
 
-/* XXX misuse a flag to identify format operation */
-#define B_FORMAT B_XXX
+/* (mis)use device use flag to identify format operation */
+#define B_FORMAT B_DEVPRIVATE
 
 enum fdc_state {
 	DEVIDLE = 0,
@@ -399,8 +392,8 @@ fdcattach(parent, self, aux)
 
 	printf("\n");
 
-	callout_init(&fdc->sc_timo_ch); 
-	callout_init(&fdc->sc_intr_ch);
+	callout_init(&fdc->sc_timo_ch, 0); 
+	callout_init(&fdc->sc_intr_ch, 0);
 
 	fdc->sc_ih = intr_claim(pa->pa_irq, IPL_BIO, "fdc",
 	    fdcintr, fdc);
@@ -499,8 +492,8 @@ fdattach(parent, self, aux)
 	struct fd_type *type = fa->fa_deftype;
 	int drive = fa->fa_drive;
 
-	callout_init(&fd->sc_motoron_ch);
-	callout_init(&fd->sc_motoroff_ch);
+	callout_init(&fd->sc_motoron_ch, 0);
+	callout_init(&fd->sc_motoroff_ch, 0);
 
 	/* XXX Allow `flags' to override device type? */
 
@@ -519,8 +512,7 @@ fdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	fd->sc_dk.dk_name = fd->sc_dev.dv_xname;
-	fd->sc_dk.dk_driver = &fddkdriver;
+	disk_init(&fd->sc_dk, fd->sc_dev.dv_xname, &fddkdriver);
 	disk_attach(&fd->sc_dk);
 
 	/* Needed to power off if the motor is on when we halt. */
@@ -568,10 +560,9 @@ fd_dev_to_type(fd, dev)
 }
 
 void
-fdstrategy(bp)
-	register struct buf *bp;	/* IO operation to perform */
+fdstrategy(struct buf *bp)
 {
-	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(bp->b_dev)];
+	struct fd_softc *fd = device_lookup_private(&fd_cd,FDUNIT(bp->b_dev));
 	int sz;
  	int s;
 
@@ -580,7 +571,7 @@ fdstrategy(bp)
 	    ((bp->b_bcount % FDC_BSIZE) != 0 &&
 	     (bp->b_flags & B_FORMAT) == 0)) {
 		bp->b_error = EINVAL;
-		goto bad;
+		goto done;
 	}
 
 	/* If it's a null transfer, return immediately. */
@@ -598,7 +589,7 @@ fdstrategy(bp)
 		if (sz < 0) {
 			/* If past end of disk, return EINVAL. */
 			bp->b_error = EINVAL;
-			goto bad;
+			goto done;
 		}
 		/* Otherwise, truncate request. */
 		bp->b_bcount = sz << DEV_BSHIFT;
@@ -630,8 +621,6 @@ fdstrategy(bp)
 	splx(s);
 	return;
 
-bad:
-	bp->b_flags |= B_ERROR;
 done:
 	/* Toss transfer; we're done early. */
 	bp->b_resid = bp->b_bcount;
@@ -802,21 +791,13 @@ out_fdc(iot, ioh, x)
 }
 
 int
-fdopen(dev, flags, mode, l)
-	dev_t dev;
-	int flags;
-	int mode;
-	struct lwp *l;
+fdopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
- 	int unit;
 	struct fd_softc *fd;
 	struct fd_type *type;
 
-	unit = FDUNIT(dev);
-	if (unit >= fd_cd.cd_ndevs)
-		return ENXIO;
-	fd = fd_cd.cd_devs[unit];
-	if (fd == 0)
+	fd = device_lookup_private(&fd_cd, FDUNIT(dev));
+	if (fd == NULL)
 		return ENXIO;
 	type = fd_dev_to_type(fd, dev);
 	if (type == NULL)
@@ -835,13 +816,9 @@ fdopen(dev, flags, mode, l)
 }
 
 int
-fdclose(dev, flags, mode, l)
-	dev_t dev;
-	int flags;
-	int mode;
-	struct lwp *l;
+fdclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
+	struct fd_softc *fd = device_lookup_private(&fd_cd, FDUNIT(dev));
 
 	fd->sc_flags &= ~FD_OPEN;
 	fd->sc_opts &= ~(FDOPT_NORETRY|FDOPT_SILENT);
@@ -1076,7 +1053,8 @@ loop:
 		fdc->sc_fh.fh_regs = &fdc->sc_fr;
 		fdc->sc_fr.fr_r9 = IOMD_BASE + (IOMD_FIQRQ << 2);
 		fdc->sc_fr.fr_r10 = fd->sc_nbytes;
-		fdc->sc_fr.fr_r11 = (u_int)(bp->b_data + fd->sc_skip);
+		fdc->sc_fr.fr_r11 =
+		    (u_int)((uintptr_t)bp->b_data + fd->sc_skip);
 		fdc->sc_fr.fr_r12 = fdc->sc_drq;
 #ifdef FD_DEBUG
 		printf("fdc-doio:r9=%x r10=%x r11=%x r12=%x data=%x skip=%x\n",
@@ -1315,7 +1293,6 @@ fdcretry(fdc)
 			       fdc->sc_status[5]);
 		}
 
-		bp->b_flags |= B_ERROR;
 		bp->b_error = EIO;
 		fdfinish(fd, bp);
 	}
@@ -1323,14 +1300,9 @@ fdcretry(fdc)
 }
 
 int
-fdioctl(dev, cmd, addr, flag, l)
-	dev_t dev;
-	u_long cmd;
-	caddr_t addr;
-	int flag;
-	struct lwp *l;
+fdioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 {
-	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
+	struct fd_softc *fd = device_lookup_private(&fd_cd, FDUNIT(dev));
 	struct fdformat_parms *form_parms;
 	struct fdformat_cmd *form_cmd;
 	struct ne7_fd_formb *fd_formb;
@@ -1505,22 +1477,19 @@ fdioctl(dev, cmd, addr, flag, l)
 }
 
 int
-fdformat(dev, finfo, l)
-	dev_t dev;
-	struct ne7_fd_formb *finfo;
-	struct lwp *l;
+fdformat(dev_t dev, struct ne7_fd_formb *finfo, struct lwp *l)
 {
-	int rv = 0, s;
-	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
+	int rv = 0;
+	struct fd_softc *fd = device_lookup_private(&fd_cd,FDUNIT(dev));
 	struct fd_type *type = fd->sc_type;
 	struct buf *bp;
 
 	/* set up a buffer header for fdstrategy() */
-	bp = (struct buf *)malloc(sizeof(struct buf), M_TEMP, M_NOWAIT);
+	bp = getiobuf(NULL, false);
 	if(bp == 0)
 		return ENOBUFS;
-	memset((void *)bp, 0, sizeof(struct buf));
-	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
+	bp->b_flags = B_PHYS | B_FORMAT;
+	bp->b_cflags |= BC_BUSY;
 	bp->b_proc = l->l_proc;
 	bp->b_dev = dev;
 
@@ -1532,7 +1501,7 @@ fdformat(dev, finfo, l)
 		       + finfo->head * type->sectrac) * FDC_BSIZE / DEV_BSIZE;
 
 	bp->b_bcount = sizeof(struct fd_idfield_data) * finfo->fd_formb_nsecs;
-	bp->b_data = (caddr_t)finfo;
+	bp->b_data = (void *)finfo;
 
 #ifdef DEBUG
 	printf("fdformat: blkno %llx count %lx\n",
@@ -1543,23 +1512,22 @@ fdformat(dev, finfo, l)
 	fdstrategy(bp);
 
 	/* ...and wait for it to complete */
-	s = splbio();
-	while(!(bp->b_flags & B_DONE)) {
-		rv = tsleep((caddr_t)bp, PRIBIO, "fdform", 20 * hz);
+	/* XXX very dodgy */
+	mutex_enter(bp->b_objlock);
+	while (!(bp->b_oflags & BO_DONE)) {
+		rv = cv_timedwait(&bp->b_done, bp->b_objlock, 20 * hz);
 		if (rv == EWOULDBLOCK)
 			break;
 	}
-	splx(s);
-       
+	mutex_exit(bp->b_objlock);
+
 	if (rv == EWOULDBLOCK) {
 		/* timed out */
 		rv = EIO;
 		biodone(bp);
-	}
-	if(bp->b_flags & B_ERROR) {
+	} else if (bp->b_error != 0)
 		rv = bp->b_error;
-	}
-	free(bp, M_TEMP);
+	putiobuf(bp);
 	return rv;
 }
 
@@ -1611,7 +1579,7 @@ load_memory_disc_from_floppy(md, dev)
 	s = spl0();
 
 	if (fdopen(bp->b_dev, 0, 0, curlwp) != 0) {
-		brelse(bp);		
+		brelse(bp, 0);		
 		printf("Cannot open floppy device\n");
 			return(EINVAL);
 	}
@@ -1631,8 +1599,8 @@ load_memory_disc_from_floppy(md, dev)
 		if (biowait(bp))
 			panic("Cannot load floppy image");
                                                  
-		memcpy((caddr_t)md->md_addr + loop * fd_types[type].sectrac
-		    * DEV_BSIZE, (caddr_t)bp->b_data,
+		memcpy((char *)md->md_addr + loop * fd_types[type].sectrac
+		    * DEV_BSIZE, (void *)bp->b_data,
 		    fd_types[type].sectrac * DEV_BSIZE);
 	}
 	printf("\x08\x08\x08\x08\x08\x08%4dK done\n",
@@ -1640,7 +1608,7 @@ load_memory_disc_from_floppy(md, dev)
         
 	fdclose(bp->b_dev, 0, 0, curlwp);
 
-	brelse(bp);
+	brelse(bp, 0);
 
 	splx(s);
 	return(0);

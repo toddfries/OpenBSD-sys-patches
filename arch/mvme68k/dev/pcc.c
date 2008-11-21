@@ -1,7 +1,36 @@
-/*	$OpenBSD: pcc.c,v 1.15 2005/11/24 22:43:16 miod Exp $ */
+/*	$NetBSD: pcc.c,v 1.30 2008/04/28 20:23:29 martin Exp $	*/
+
+/*-
+ * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe and Steve C. Woodford.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
- * Copyright (c) 1995 Theo de Raadt
+ * Copyright (c) 1995 Charles D. Cranor
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,6 +41,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Charles D. Cranor.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -26,213 +60,269 @@
  */
 
 /*
- * VME147 peripheral channel controller
+ * peripheral channel controller
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pcc.c,v 1.30 2008/04/28 20:23:29 martin Exp $");
+
 #include <sys/param.h>
-#include <sys/conf.h>
-#include <sys/ioctl.h>
-#include <sys/proc.h>
-#include <sys/user.h>
-#include <sys/tty.h>
-#include <sys/uio.h>
-#include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/syslog.h>
-#include <sys/fcntl.h>
+#include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/kcore.h>
+
 #include <machine/cpu.h>
-#include <machine/autoconf.h>
-#include <dev/cons.h>
+#include <machine/bus.h>
 
+#include <mvme68k/dev/mainbus.h>
 #include <mvme68k/dev/pccreg.h>
+#include <mvme68k/dev/pccvar.h>
 
-struct pccsoftc {
-	struct device	sc_dev;
-	vaddr_t		sc_vaddr;
-	paddr_t		sc_paddr;
-	struct pccreg	*sc_pcc;
-	struct intrhand	sc_nmiih;
-};
+#include "ioconf.h"
+
+/*
+ * Autoconfiguration stuff for the PCC chip on mvme147
+ */
 
 void pccattach(struct device *, struct device *, void *);
-int  pccmatch(struct device *, void *, void *);
-int  pccabort(void *);
-int  pcc_print(void *, const char *);
-int  pcc_scan(struct device *, void *, void *);
+int pccmatch(struct device *, struct cfdata *, void *);
+int pccprint(void *, const char *);
 
-struct cfattach pcc_ca = {
-	sizeof(struct pccsoftc), pccmatch, pccattach
+CFATTACH_DECL(pcc, sizeof(struct pcc_softc),
+    pccmatch, pccattach, NULL, NULL);
+
+static int pccintr(void *);
+static int pccsoftintr(void *);
+#ifdef notyet
+static void pccsoftintrassert(void);
+#endif
+
+/*
+ * Structure used to describe a device for autoconfiguration purposes.
+ */
+struct pcc_device {
+	const char *pcc_name;	/* name of device (e.g. "clock") */
+	bus_addr_t pcc_offset;	/* offset from PCC base */
 };
 
-struct cfdriver pcc_cd = {
-	NULL, "pcc", DV_DULL
+/*
+ * Devices that live on the PCC, attached in this order.
+ */
+static const struct pcc_device pcc_devices[] = {
+	{"clock", 0},
+	{"zsc", PCC_ZS0_OFF},
+	{"zsc", PCC_ZS1_OFF},
+	{"le", PCC_LE_OFF},
+	{"wdsc", PCC_WDSC_OFF},
+	{"lpt", PCC_LPT_OFF},
+	{"vmepcc", PCC_VME_OFF},
+	{NULL, 0},
 };
 
-struct pccreg *sys_pcc = NULL;
+static int pcc_vec2intctrl[] = {
+	PCCREG_ACFAIL_INTR_CTRL,/* PCCV_ACFAIL */
+	PCCREG_BUSERR_INTR_CTRL,/* PCCV_BERR */
+	PCCREG_ABORT_INTR_CTRL,	/* PCCV_ABORT */
+	PCCREG_SERIAL_INTR_CTRL,/* PCCV_ZS */
+	PCCREG_LANCE_INTR_CTRL,	/* PCCV_LE */
+	PCCREG_SCSI_INTR_CTRL,	/* PCCV_SCSI */
+	PCCREG_DMA_INTR_CTRL,	/* PCCV_DMA */
+	PCCREG_PRNT_INTR_CTRL,	/* PCCV_PRINTER */
+	PCCREG_TMR1_INTR_CTRL,	/* PCCV_TIMER1 */
+	PCCREG_TMR2_INTR_CTRL,	/* PCCV_TIMER2 */
+	PCCREG_SOFT1_INTR_CTRL,	/* PCCV_SOFT1 */
+	PCCREG_SOFT2_INTR_CTRL	/* PCCV_SOFT2 */
+};
 
+extern phys_ram_seg_t mem_clusters[];
+struct pcc_softc *sys_pcc;
+
+/* The base address of the MVME147 from the VMEbus */
+bus_addr_t pcc_slave_base_addr;
+
+
+/* ARGSUSED */
 int
-pccmatch(parent, vcf, args)
-	struct device *parent;
-	void *vcf, *args;
+pccmatch(struct device *parent, struct cfdata *cf, void *args)
 {
-	struct confargs *ca = args;
+	struct mainbus_attach_args *ma;
 
-	/* the pcc only exist on vme147's */
-	if (cputyp != CPU_147)
-		return (0);
-	return (!badvaddr(IIOV(ca->ca_paddr) + PCCSPACE_PCCCHIP_OFF, 1));
-}
+	ma = args;
 
-int
-pcc_print(args, bus)
-	void *args;
-	const char *bus;
-{
-	struct confargs *ca = args;
-
-	if (ca->ca_offset != -1)
-		printf(" offset 0x%x", ca->ca_offset);
-	if (ca->ca_ipl > 0)
-		printf(" ipl %d", ca->ca_ipl);
-	return (UNCONF);
-}
-
-int
-pcc_scan(parent, child, args)
-	struct device *parent;
-	void *child, *args;
-{
-	struct cfdata *cf = child;
-	struct pccsoftc *sc = (struct pccsoftc *)parent;
-	struct confargs oca;
-
-	bzero(&oca, sizeof oca);
-	oca.ca_offset = cf->cf_loc[0];
-	oca.ca_ipl = cf->cf_loc[1];
-	if (oca.ca_offset != -1) {
-		oca.ca_vaddr = sc->sc_vaddr + oca.ca_offset;
-		oca.ca_paddr = sc->sc_paddr + oca.ca_offset;
-	} else {
-		oca.ca_vaddr = (vaddr_t)-1;
-		oca.ca_paddr = (paddr_t)-1;
-	}	
-	oca.ca_bustype = BUS_PCC;
-	oca.ca_name = cf->cf_driver->cd_name;
-	if ((*cf->cf_attach->ca_match)(parent, cf, &oca) == 0)
-		return (0);
-	config_attach(parent, cf, &oca, pcc_print);
-	return (1);
-}
-
-void
-pccattach(parent, self, args)
-	struct device *parent, *self;
-	void *args;
-{
-	struct confargs *ca = args;
-	struct pccsoftc *sc = (struct pccsoftc *)self;
-
+	/* Only attach one PCC. */
 	if (sys_pcc)
-		panic("pcc already attached!");
+		return 0;
+
+	return strcmp(ma->ma_name, pcc_cd.cd_name) == 0;
+}
+
+/* ARGSUSED */
+void
+pccattach(struct device *parent, struct device *self, void *args)
+{
+	struct mainbus_attach_args *ma;
+	struct pcc_attach_args npa;
+	struct pcc_softc *sc;
+	uint8_t reg;
+	int i;
+
+	ma = args;
+	sc = sys_pcc = (struct pcc_softc *)self;
+
+	/* Get a handle to the PCC's registers. */
+	sc->sc_bust = ma->ma_bust;
+	bus_space_map(sc->sc_bust, ma->ma_offset, PCCREG_SIZE, 0, &sc->sc_bush);
+
+	/* Tell the chip the base interrupt vector */
+	pcc_reg_write(sc, PCCREG_VECTOR_BASE, PCC_VECBASE);
+
+	printf(": Peripheral Channel Controller, "
+	    "rev %d, vecbase 0x%x\n", pcc_reg_read(sc, PCCREG_REVISION),
+	    pcc_reg_read(sc, PCCREG_VECTOR_BASE));
+
+	evcnt_attach_dynamic(&sc->sc_evcnt, EVCNT_TYPE_INTR,
+	    isrlink_evcnt(7), "nmi", "abort sw");
+
+	/* Hook up interrupt handler for abort button, and enable it */
+	pccintr_establish(PCCV_ABORT, pccintr, 7, NULL, &sc->sc_evcnt);
+	pcc_reg_write(sc, PCCREG_ABORT_INTR_CTRL,
+	    PCC_ABORT_IEN | PCC_ABORT_ACK);
 
 	/*
-	 * since we know ourself to land in intiobase land,
-	 * we must adjust our address
+	 * Install a handler for Software Interrupt 1
+	 * and arrange to schedule soft interrupts on demand.
 	 */
-	sc->sc_paddr = ca->ca_paddr;
-	sc->sc_vaddr = IIOV(sc->sc_paddr);
-	sc->sc_pcc = (struct pccreg *)(sc->sc_vaddr + PCCSPACE_PCCCHIP_OFF);
-	sys_pcc = sc->sc_pcc;
+	pccintr_establish(PCCV_SOFT1, pccsoftintr, 1, sc, &sc->sc_evcnt);
+#ifdef notyet
+	_softintr_chipset_assert = pccsoftintrassert;
+#endif
 
-	printf(": rev %d\n", sc->sc_pcc->pcc_chiprev);
+	/* Make sure the global interrupt line is hot. */
+	reg = pcc_reg_read(sc, PCCREG_GENERAL_CONTROL) | PCC_GENCR_IEN;
+	pcc_reg_write(sc, PCCREG_GENERAL_CONTROL, reg);
 
-	sc->sc_nmiih.ih_fn = pccabort;
-	sc->sc_nmiih.ih_ipl = 7;
-	sc->sc_nmiih.ih_wantframe = 1;
-	pccintr_establish(PCCV_ABORT, &sc->sc_nmiih, self->dv_xname);
+	/*
+	 * Calculate the board's VMEbus slave base address, for the
+	 * benefit of the VMEchip driver.
+	 * (Weird that this register is in the PCC ...)
+	 */
+	reg = pcc_reg_read(sc, PCCREG_SLAVE_BASE_ADDR) & PCC_SLAVE_BASE_MASK;
+	pcc_slave_base_addr = (bus_addr_t)reg * mem_clusters[0].size;
 
-	sc->sc_pcc->pcc_vecbase = PCC_VECBASE;
-	sc->sc_pcc->pcc_abortirq = PCC_ABORT_IEN | PCC_ABORT_ACK;
-	sc->sc_pcc->pcc_genctl |= PCC_GENCTL_IEN;
+	/*
+	 * Attach configured children.
+	 */
+	npa._pa_base = ma->ma_offset;
+	for (i = 0; pcc_devices[i].pcc_name != NULL; ++i) {
+		/*
+		 * Note that IPL is filled in by match function.
+		 */
+		npa.pa_name = pcc_devices[i].pcc_name;
+		npa.pa_ipl = -1;
+		npa.pa_dmat = ma->ma_dmat;
+		npa.pa_bust = ma->ma_bust;
+		npa.pa_offset = pcc_devices[i].pcc_offset + ma->ma_offset;
 
-	/* XXX further init of PCC chip? */
+		/* Attach the device if configured. */
+		(void)config_found(self, &npa, pccprint);
+	}
+}
 
-	config_search(pcc_scan, self, args);
+int
+pccprint(void *aux, const char *cp)
+{
+	struct pcc_attach_args *pa;
+
+	pa = aux;
+
+	if (cp)
+		aprint_normal("%s at %s", pa->pa_name, cp);
+
+	aprint_normal(" offset 0x%lx", pa->pa_offset - pa->_pa_base);
+	if (pa->pa_ipl != -1)
+		aprint_normal(" ipl %d", pa->pa_ipl);
+
+	return UNCONF;
 }
 
 /*
- * PCC interrupts land in a PCC_NVEC sized hole starting at PCC_VECBASE
+ * pccintr_establish: establish pcc interrupt
  */
-int
-pccintr_establish(vec, ih, name)
-	int vec;
-	struct intrhand *ih;
-	const char *name;
+void
+pccintr_establish(int pccvec, int (*hand)(void *), int lvl, void *arg,
+    struct evcnt *evcnt)
 {
-#ifdef DIAGNOSTIC
-	if (vec < 0 || vec >= PCC_NVEC)
-		panic("pccintr_establish: illegal vector for %s: 0x%x",
-		    name, vec);
-#endif
 
-	return intr_establish(PCC_VECBASE + vec, ih, name);
-}
-
-int
-pccabort(frame)
-	void *frame;
-{
-#if 0
-	/* XXX wait for it to debounce -- there is something wrong here */
-	while (sys_pcc->pcc_abortirq & PCC_ABORT_ABS)
-		;
-	delay(2);
-#endif
-	sys_pcc->pcc_abortirq = PCC_ABORT_IEN | PCC_ABORT_ACK;
-	nmihand(frame);
-	return (1);
-}
-
-int
-pccspeed(pcc)
-	struct pccreg *pcc;
-{
-	volatile u_short lim = pcc_timer_us2lim(400);
-	volatile u_short tmp;
-	volatile int cnt;
-	int speed;
-
-	pcc->pcc_t1irq = 0;		/* just in case */
-	pcc->pcc_t1pload = 0;
-	pcc->pcc_t1ctl = PCC_TIMERCLEAR;
-	pcc->pcc_t1ctl = PCC_TIMERSTART;
-	
-	cnt = 0;
-	for (;;) {
-		tmp = pcc->pcc_t1count;
-		if (tmp > lim)
-			break;
-		tmp = lim;
-		cnt++;
+#ifdef DEBUG
+	if (pccvec < 0 || pccvec >= PCC_NVEC) {
+		printf("pcc: illegal vector offset: 0x%x\n", pccvec);
+		panic("pccintr_establish");
 	}
+	if (lvl < 1 || lvl > 7) {
+		printf("pcc: illegal interrupt level: %d\n", lvl);
+		panic("pccintr_establish");
+	}
+#endif
 
-	pcc->pcc_t1ctl = PCC_TIMERCLEAR;
-	printf("pccspeed cnt=%d\n", cnt);
+	isrlink_vectored(hand, arg, lvl, pccvec + PCC_VECBASE, evcnt);
+}
 
-	/*
-	 * Empirically determined. Unfortunately, because of various
-	 * memory board effects and such, it is rather unlikely that
-	 * we will find a nice formula.
-	 */
-	if (cnt > 230000)
-		speed = 50;
-	else if (cnt > 210000)
-		speed = 33;
-	else if (cnt > 190000)
-		speed = 25;
-	else if (cnt > 170000)	/* 171163, 170335 */
-		speed = 20;
-	else
-		speed = 16;
-	return (speed);
+void
+pccintr_disestablish(int pccvec)
+{
+
+#ifdef DEBUG
+	if (pccvec < 0 || pccvec >= PCC_NVEC) {
+		printf("pcc: illegal vector offset: 0x%x\n", pccvec);
+		panic("pccintr_disestablish");
+	}
+#endif
+
+	/* Disable the interrupt */
+	pcc_reg_write(sys_pcc, pcc_vec2intctrl[pccvec], PCC_ICLEAR);
+	isrunlink_vectored(pccvec + PCC_VECBASE);
+}
+
+/*
+ * Handle NMI from abort switch.
+ */
+static int
+pccintr(void *frame)
+{
+
+	/* XXX wait until button pops out */
+	pcc_reg_write(sys_pcc, PCCREG_ABORT_INTR_CTRL,
+	    PCC_ABORT_IEN | PCC_ABORT_ACK);
+
+	return nmihand(frame);
+}
+
+#ifdef notyet
+static void
+pccsoftintrassert(void)
+{
+
+	/* Request a software interrupt at ipl 1 */
+	pcc_reg_write(sys_pcc, PCCREG_SOFT1_INTR_CTRL, 1 | PCC_IENABLE);
+}
+#endif
+
+/*
+ * Handle PCC soft interrupt #1
+ */
+static int
+pccsoftintr(void *arg)
+{
+	struct pcc_softc *sc = arg;
+
+	/* Clear the interrupt */
+	pcc_reg_write(sc, PCCREG_SOFT1_INTR_CTRL, 0);
+
+#ifdef notyet
+	/* Call the soft interrupt dispatcher */
+	softintr_dispatch();
+#endif
+
+	return 1;
 }

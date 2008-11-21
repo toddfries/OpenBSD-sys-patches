@@ -1,14 +1,11 @@
-/*	$OpenBSD: autoconf.c,v 1.21 2008/03/30 22:29:09 deraadt Exp $	*/
-/*
- * Copyright (c) 1996, 1997 Per Fogelstrom
- * Copyright (c) 1995 Theo de Raadt
- * Copyright (c) 1988 University of Utah.
- * Copyright (c) 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
+/*	$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:58 joerg Exp $	*/
+
+/*-
+ * Copyright (c) 1990 The Regents of the University of California.
+ * All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
- * the Systems Programming Group of the University of Utah Computer
- * Science Department and Ralph Campbell.
+ * William Jolitz.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,19 +31,20 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * from: Utah Hdr: autoconf.c 1.31 91/01/21
- *
- *	from: @(#)autoconf.c	8.1 (Berkeley) 6/10/93
- *      $Id: autoconf.c,v 1.21 2008/03/30 22:29:09 deraadt Exp $
+ *	@(#)autoconf.c	7.1 (Berkeley) 5/9/91
  */
 
 /*
  * Setup the system to run on the current machine.
  *
- * cpu_configure() is called at boot time.  Available
+ * Configure() is called at boot time and initializes the vba 
+ * device tables and the memory controller monitoring.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:58 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,129 +54,71 @@
 #include <sys/reboot.h>
 #include <sys/device.h>
 
-#include <machine/autoconf.h>
-#include <machine/bugio.h>
+#include <machine/pte.h>
+#include <machine/intr.h>
 
-extern void	dumpconf(void);
-struct device *getdevunit(char *, int);
-void calc_delayconst(void);	/* clock.c */
+static void findroot(void);
 
 /*
- * The following several variables are related to
- * the configuration process, and are used in initializing
- * the machine.
- */
-int	cold = 1;	/* if 1, still working on cold-start */
-int	bootdev;	/* boot device as provided by locore */
-struct device *bootdv = NULL;
-
-/*
- *  Configure all devices found that we know about.
- *  This is done at boot time.
+ * Determine i/o configuration for a machine.
  */
 void
 cpu_configure()
 {
-	(void)splhigh();	/* To be really sure.. */
-	calc_delayconst();
 
-	if (config_rootfound("mainbus", "mainbus") == 0)
-		panic("no mainbus found");
+	if (config_rootfound("mainbus", NULL) == NULL)
+		panic("configure: mainbus not configured");
 
-	ppc_intr_enable(1);
-	spl0();
-
-	/*
-	 * We can not select the root device yet, because we use bugtty
-	 * as the console for now, and it requires the clock to be ticking
-	 * for proper operation (think boot -a ...)
-	 */
-	cold = 0;
+	genppc_cpu_configure();
 }
 
 void
-diskconf(void)
+cpu_rootconf()
 {
-	printf("boot device: %s\n",
-	    (bootdv != NULL) ? bootdv->dv_xname : "<unknown>");
-	setroot(bootdv, 0, RB_USERREQ);
-#if 0
-	dumpconf();
-#endif
+	findroot();
+
+	aprint_normal("boot device: %s\n",
+	    booted_device ? booted_device->dv_xname : "<unknown>");
+
+	setroot(booted_device, booted_partition);
 }
 
-/*
- * Crash dump handling.
- */
-u_long dumpmag = 0x8fca0101;		/* magic number */
-int dumpsize = 0;			/* size of dump in pages */
-long dumplo = -1;			/* blocks */
+u_long	bootdev = 0;		/* should be dev_t, but not until 32 bits */
 
 /*
- * This is called by configure to set dumplo and dumpsize.
- * Dumps always skip the first CLBYTES of disk space
- * in case there might be a disk label stored there.
- * If there is extra space, put dump at the end to
- * reduce the chance that swapping trashes it.
+ * Attempt to find the device from which we were booted.
+ * If we can do so, and not instructed not to do so,
+ * change rootdev to correspond to the load device.
  */
-#if 0
 void
-dumpconf(void)
+findroot(void)
 {
-	int nblks;	/* size of dump area */
+	int unit, part;
+	device_t dv;
+	const char *name;
 
-	if (dumpdev == NODEV ||
-	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
-		return;
-	if (nblks <= ctod(1))
-		return;
-
-	dumpsize = atop(IOM_END + ptoa(dumpmem_high));
-
-	/* Always skip the first CLBYTES, in case there is a label there. */
-	if (dumplo < ctod(1))
-		dumplo = ctod(1);
-
-	/* Put dump at end of partition, and make it fit. */
-	if (dumpsize > dtoc(nblks - dumplo))
-		dumpsize = dtoc(nblks - dumplo);
-	if (dumplo < nblks - ctod(dumpsize))
-		dumplo = nblks - ctod(dumpsize);
-}
+#if 0
+	aprint_normal("howto %x bootdev %x ", boothowto, bootdev);
 #endif
 
-/*
- * find a device matching "name" and unit number
- */
-struct device *
-getdevunit(name, unit)
-	char *name;
-	int unit;
-{
-	struct device *dev = TAILQ_FIRST(&alldevs);
-	char num[10], fullname[16];
-	int lunit;
+	if ((bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
+		return;
 
-	/* compute length of name and decimal expansion of unit number */
-	snprintf(num, sizeof num, "%d", unit);
-	lunit = strlen(num);
-	if (strlen(name) + lunit >= sizeof(fullname) - 1)
-		panic("config_attach: device name too long");
+	name = devsw_blk2name((bootdev >> B_TYPESHIFT) & B_TYPEMASK);
+	if (name == NULL)
+		return;
 
-	strlcpy(fullname, name, sizeof fullname);
-	strlcat(fullname, num, sizeof fullname);
+	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
+	unit = (bootdev >> B_UNITSHIFT) & B_UNITMASK;
 
-	while (strcmp(dev->dv_xname, fullname) != 0) {
-		if ((dev = TAILQ_NEXT(dev, dv_list)) == NULL)
-			return NULL;
+	if ((dv = device_find_by_driver_unit(name, unit)) != NULL) {
+		booted_device = dv;
+		booted_partition = part;
 	}
-	return dev;
 }
 
-struct nam2blk nam2blk[] = {
-	{ "wd",		0 },
-	{ "sd",		2 },
-	{ "rd",		17 },
-	{ "raid",	19 },
-	{ NULL,		-1 }
-};
+void
+device_register(struct device *dev, void *aux)
+{
+	/* do nothing */
+}

@@ -1,4 +1,4 @@
-/*	$NetBSD: sata_subr.c,v 1.8 2006/11/30 23:07:31 bouyer Exp $	*/
+/*	$NetBSD: sata_subr.c,v 1.12 2008/11/18 09:52:10 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,6 +32,8 @@
 /*
  * Common functions for Serial ATA.
  */
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sata_subr.c,v 1.12 2008/11/18 09:52:10 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -60,7 +55,7 @@ sata_speed(uint32_t sstatus)
 		"no negotiated speed",
 		"1.5Gb/s",
 		"3.0Gb/s",
-		"<unknown 3>",
+		"6.0Gb/s",
 		"<unknown 4>",
 		"<unknown 5>",
 		"<unknown 6>",
@@ -119,22 +114,22 @@ sata_reset_interface(struct ata_channel *chp, bus_space_tag_t sata_t,
 	case SStatus_DET_DEV_NE:
 		aprint_error("%s port %d: device connected, but "
 		    "communication not established\n",
-		    chp->ch_atac->atac_dev.dv_xname, chp->ch_channel);
+		    device_xname(chp->ch_atac->atac_dev), chp->ch_channel);
 		break;
 
 	case SStatus_DET_OFFLINE:
 		aprint_error("%s port %d: PHY offline\n",
-		    chp->ch_atac->atac_dev.dv_xname, chp->ch_channel);
+		    device_xname(chp->ch_atac->atac_dev), chp->ch_channel);
 		break;
 
 	case SStatus_DET_DEV:
 		aprint_normal("%s port %d: device present, speed: %s\n",
-		    chp->ch_atac->atac_dev.dv_xname, chp->ch_channel,
+		    device_xname(chp->ch_atac->atac_dev), chp->ch_channel,
 		    sata_speed(sstatus));
 		break;
 	default:
 		aprint_error("%s port %d: unknown SStatus: 0x%08x\n",
-		    chp->ch_atac->atac_dev.dv_xname, chp->ch_channel,
+		    device_xname(chp->ch_atac->atac_dev), chp->ch_channel,
 		    sstatus);
 	}
 	return(sstatus & SStatus_DET_mask);

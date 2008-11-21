@@ -1,11 +1,11 @@
-/*	$OpenBSD: procfs_machdep.c,v 1.7 2007/11/28 17:05:09 tedu Exp $	*/
-/*	$NetBSD: procfs_machdep.c,v 1.6 2001/02/21 21:39:59 jdolecek Exp $	*/
+/*	$NetBSD: procfs_machdep.c,v 1.31 2008/06/11 21:47:46 njoly Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
  * All rights reserved.
  *
- * Written by Frank van der Linden for Wasabi Systems, Inc.
+ * Written by Frank van der Linden and Jason R. Thorpe for
+ * Wasabi Systems, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,25 +36,38 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * NOTE: We simply use the primary CPU's cpuid_level and tsc_freq
+ * here.  Might want to change this later.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: procfs_machdep.c,v 1.31 2008/06/11 21:47:46 njoly Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
 #include <sys/vnode.h>
+#include <sys/proc.h>
+
 #include <miscfs/procfs/procfs.h>
+
 #include <machine/cpu.h>
-#include <machine/cpufunc.h>
+#include <machine/reg.h>
 #include <machine/specialreg.h>
 
 extern int i386_fpu_present, i386_fpu_exception, i386_fpu_fdivbug;
+extern char cpu_model[];
 
 static const char * const i386_features[] = {
 	"fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
-	"cx8", "apic", NULL, "sep", "mtrr", "pge", "mca", "cmov",
-	"pat", "pse36", "pn", "clflush", NULL, "dts", "acpi", "mmx",
-	"fxsr", "sse", "sse2", "ss", "ht", "tm", "ia64", "pbe"
+	"cx8", "apic", "10", "sep", "mtrr", "pge", "mca", "cmov",
+	"pat", "pse36", "pn", "clflush", "20", "dts", "acpi", "mmx",
+	"fxsr", "sse", "sse2", "ss", "ht", "tm", "ia64", "31"
 };
 
+static int procfs_getonecpu(int, struct cpu_info *, char *, int *);
 
 /*
  * Linux-style /proc/cpuinfo.
@@ -63,7 +76,37 @@ static const char * const i386_features[] = {
  * In the multiprocessor case, this should be a loop over all CPUs.
  */
 int
-procfs_getcpuinfstr(char *buf, int *len)
+procfs_getcpuinfstr(char *bf, int *len)
+{
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
+	int i = 0, used = *len, total = *len;
+
+	*len = 0;
+	for (CPU_INFO_FOREACH(cii, ci)) {
+		if (procfs_getonecpu(i++, ci, bf, &used) == 0) {
+			*len += used;
+			total = 0;
+			break;
+		}
+		total -= used;
+		if (total > 0) {
+			bf += used;
+			*bf++ = '\n';
+			*len += used + 1;
+			used = --total;
+			if (used == 0)
+			    break;
+		} else {
+			*len += used;
+			break;
+		}
+	}
+	return total == 0 ? -1 : 0;
+}
+
+static int
+procfs_getonecpu(int xcpu, struct cpu_info *ci, char *bf, int *len)
 {
 	int left, l, i;
 	char featurebuf[256], *p;
@@ -71,12 +114,8 @@ procfs_getcpuinfstr(char *buf, int *len)
 	p = featurebuf;
 	left = sizeof featurebuf;
 	for (i = 0; i < 32; i++) {
-		if ((cpu_feature & (1 << i)) && i386_features[i]) {
+		if (ci->ci_feature_flags & (1 << i)) {
 			l = snprintf(p, left, "%s ", i386_features[i]);
-			if (l == -1)
-				l = 0;
-			else if (l >= left)
-				l = left - 1;
 			left -= l;
 			p += l;
 			if (left <= 0)
@@ -84,7 +123,7 @@ procfs_getcpuinfstr(char *buf, int *len)
 		}
 	}
 
-	p = buf;
+	p = bf;
 	left = *len;
 	l = snprintf(p, left,
 		"processor\t: %d\n"
@@ -93,16 +132,14 @@ procfs_getcpuinfstr(char *buf, int *len)
 		"model\t\t: %d\n"
 		"model name\t: %s\n"
 		"stepping\t: ",
-		0,
-		cpu_vendor,
-		cpuid_level >= 0 ? ((cpu_id >> 8) & 15) : cpu_class + 3,
-		cpuid_level >= 0 ? ((cpu_id >> 4) & 15) : 0,
-		cpu_model
+		xcpu,
+		(char *)ci->ci_vendor,
+		cpuid_level >= 0 ?
+		    ((ci->ci_signature >> 8) & 15) : cpu_class + 3,
+		cpuid_level >= 0 ?
+		    ((ci->ci_signature >> 4) & 15) : 0,
+		cpu_brand_string
 	    );
-	if (l == -1)
-		l = 0;
-	else if (l >= left)
-		l = left - 1;
 
 	left -= l;
 	p += l;
@@ -110,29 +147,26 @@ procfs_getcpuinfstr(char *buf, int *len)
 		return 0;
 
 	if (cpuid_level >= 0)
-		l = snprintf(p, left, "%d\n", cpu_id & 15);
+		l = snprintf(p, left, "%d\n", ci->ci_signature & 15);
 	else
 		l = snprintf(p, left, "unknown\n");
 
-	if (l == -1)
-		l = 0;
-	else if (l >= left)
-		l = left - 1;
 	left -= l;
 	p += l;
 	if (left <= 0)
 		return 0;
 
-	if (cpuspeed != 0)
-		l = snprintf(p, left, "cpu MHz\t\t: %d\n",
-		    cpuspeed);
-	else
+		
+	if (ci->ci_data.cpu_cc_freq != 0) {
+		uint64_t freq, fraq;
+
+		freq = (ci->ci_data.cpu_cc_freq + 4999) / 1000000;
+		fraq = ((ci->ci_data.cpu_cc_freq + 4999) / 10000) % 100;
+		l = snprintf(p, left, "cpu MHz\t\t: %qd.%qd\n",
+		    freq, fraq);
+	} else
 		l = snprintf(p, left, "cpu MHz\t\t: unknown\n");
 
-	if (l == -1)
-		l = 0;
-	else if (l >= left)
-		l = left - 1;
 	left -= l;
 	p += l;
 	if (left <= 0)
@@ -141,7 +175,7 @@ procfs_getcpuinfstr(char *buf, int *len)
 	l = snprintf(p, left,
 		"fdiv_bug\t: %s\n"
 		"fpu\t\t: %s\n"
-		"fpu_exception:\t: %s\n"
+		"fpu_exception\t: %s\n"
 		"cpuid level\t: %d\n"
 		"wp\t\t: %s\n"
 		"flags\t\t: %s\n",
@@ -151,12 +185,78 @@ procfs_getcpuinfstr(char *buf, int *len)
 		cpuid_level,
 		(rcr0() & CR0_WP) ? "yes" : "no",
 		featurebuf);
-	if (l == -1)
-		l = 0;
-	else if (l >= left)
-		l = left - 1;
 
-	*len = (p + l) - buf;
+	if (l > left)
+		return 0;
+	*len = (p + l) - bf;
 
-	return 0;
+	return 1;
 }
+
+#ifdef __HAVE_PROCFS_MACHDEP
+void
+procfs_machdep_allocvp(struct vnode *vp)
+{
+	struct pfsnode *pfs = vp->v_data;
+
+	switch (pfs->pfs_type) {
+	case Pmachdep_xmmregs:	/* /proc/N/xmmregs = -rw------- */
+		pfs->pfs_mode = S_IRUSR|S_IWUSR;
+		vp->v_type = VREG;
+		break;
+
+	default:
+		panic("procfs_machdep_allocvp");
+	}
+}
+
+int
+procfs_machdep_rw(struct lwp *curl, struct lwp *l, struct pfsnode *pfs,
+    struct uio *uio)
+{
+
+	switch (pfs->pfs_type) {
+	case Pmachdep_xmmregs:
+		return (procfs_machdep_doxmmregs(curl, l, pfs, uio));
+
+	default:
+		panic("procfs_machdep_rw");
+	}
+
+	/* NOTREACHED */
+	return (EINVAL);
+}
+
+int
+procfs_machdep_getattr(struct vnode *vp, struct vattr *vap,
+    struct proc *procp)
+{
+	struct pfsnode *pfs = VTOPFS(vp);
+
+	switch (pfs->pfs_type) {
+	case Pmachdep_xmmregs:
+		vap->va_bytes = vap->va_size = sizeof(struct xmmregs);
+		break;
+
+	default:
+		panic("procfs_machdep_getattr");
+	}
+
+	return (0);
+}
+
+int
+procfs_machdep_doxmmregs(struct lwp *curl, struct lwp *l,
+    struct pfsnode *pfs, struct uio *uio)
+{
+
+	return (process_machdep_doxmmregs(curl, l, uio));
+}
+
+int
+procfs_machdep_validxmmregs(struct lwp *l, struct mount *mp)
+{
+
+	return (process_machdep_validxmmregs(l->l_proc));
+}
+#endif

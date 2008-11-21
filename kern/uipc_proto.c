@@ -1,5 +1,4 @@
-/*	$OpenBSD: uipc_proto.c,v 1.4 2003/06/02 23:28:07 millert Exp $	*/
-/*	$NetBSD: uipc_proto.c,v 1.8 1996/02/13 21:10:47 christos Exp $	*/
+/*	$NetBSD: uipc_proto.c,v 1.21 2008/04/24 11:38:36 ad Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -29,17 +28,20 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)uipc_proto.c	8.1 (Berkeley) 6/10/93
+ *	@(#)uipc_proto.c	8.2 (Berkeley) 2/14/95
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uipc_proto.c,v 1.21 2008/04/24 11:38:36 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/protosw.h>
 #include <sys/domain.h>
 #include <sys/mbuf.h>
-#include <sys/un.h> 
+#include <sys/un.h>
 #include <sys/socketvar.h>
-                        
+
 #include <net/if.h>
 #include <net/raw_cb.h>
 
@@ -47,26 +49,35 @@
  * Definitions of protocols supported in the UNIX domain.
  */
 
-extern	struct domain unixdomain;		/* or at least forward */
+DOMAIN_DEFINE(unixdomain);	/* forward define and add to link set */
 
-struct protosw unixsw[] = {
-{ SOCK_STREAM,	&unixdomain,	PF_LOCAL,	PR_CONNREQUIRED|PR_WANTRCVD|PR_RIGHTS,
-  0,		0,		0,		0,
-  uipc_usrreq,
-  0,		0,		0,		0,
-},
-{ SOCK_DGRAM,	&unixdomain,	PF_LOCAL,	PR_ATOMIC|PR_ADDR|PR_RIGHTS,
-  0,		0,		0,		0,
-  uipc_usrreq,
-  0,		0,		0,		0,
-},
-{ 0,		0,		0,		0,
-  raw_input,	0,		raw_ctlinput,	0,
-  raw_usrreq,
-  raw_init,	0,		0,		0,
-}
+const struct protosw unixsw[] = {
+	{
+		.pr_type = SOCK_STREAM,
+		.pr_domain = &unixdomain,
+		.pr_flags = PR_CONNREQUIRED|PR_WANTRCVD|PR_RIGHTS|PR_LISTEN,
+		.pr_ctloutput = uipc_ctloutput,
+		.pr_usrreq = uipc_usrreq,
+	}, {
+		.pr_type = SOCK_DGRAM,
+		.pr_domain = &unixdomain,
+		.pr_flags = PR_ATOMIC|PR_ADDR|PR_RIGHTS,
+		.pr_ctloutput = uipc_ctloutput,
+		.pr_usrreq = uipc_usrreq,
+	}, {
+		.pr_input = raw_input,
+		.pr_ctlinput = raw_ctlinput,
+		.pr_usrreq = raw_usrreq,
+		.pr_init = raw_init,
+	}
 };
 
-struct domain unixdomain =
-    { AF_LOCAL, "unix", 0, unp_externalize, unp_dispose,
-      unixsw, &unixsw[sizeof(unixsw)/sizeof(unixsw[0])] };
+struct domain unixdomain = {
+	.dom_family = AF_LOCAL,
+	.dom_init = uipc_init,
+	.dom_name = "unix",
+	.dom_externalize = unp_externalize,
+	.dom_dispose = unp_dispose,
+	.dom_protosw = unixsw,
+	.dom_protoswNPROTOSW = &unixsw[__arraycount(unixsw)],
+};

@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atmsubr.c,v 1.27 2008/05/07 13:45:35 dlg Exp $       */
+/*      $NetBSD: if_atmsubr.c,v 1.42 2008/06/15 16:37:21 christos Exp $       */
 
 /*
  *
@@ -15,7 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and 
+ *      This product includes software developed by Charles D. Cranor and
  *	Washington University.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
@@ -33,48 +33,17 @@
  */
 
 /*
- *	@(#)COPYRIGHT	1.1 (NRL) January 1995
- * 
- * NRL grants permission for redistribution and use in source and binary
- * forms, with or without modification, of the software and documentation
- * created at NRL provided that the following conditions are met:
- * 
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
- * 4. Neither the name of the NRL nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- * 
- * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
- * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL NRL OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
- * The views and conclusions contained in the software and documentation
- * are those of the authors and should not be interpreted as representing
- * official policies, either expressed or implied, of the US Naval
- * Research Laboratory (NRL).
- */
-
-/*
  * if_atmsubr.c
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_atmsubr.c,v 1.42 2008/06/15 16:37:21 christos Exp $");
+
+#include "opt_inet.h"
+#include "opt_gateway.h"
+#include "opt_natm.h"
+
+#include "bpfilter.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,7 +56,7 @@
 #include <sys/errno.h>
 #include <sys/syslog.h>
 
-#include <machine/cpu.h>
+#include <sys/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -95,20 +64,21 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_atm.h>
+#include <net/ethertypes.h> /* XXX: for ETHERTYPE_* */
+
+#if NBPFILTER > 0
+#include <net/bpf.h>
+#endif
 
 #include <netinet/in.h>
 #include <netinet/if_atm.h>
-#include <netinet/if_ether.h> /* XXX: for ETHERTYPE_* */
+
 #if defined(INET) || defined(INET6)
 #include <netinet/in_var.h>
 #endif
 #ifdef NATM
 #include <netnatm/natm.h>
 #endif
-
-#ifdef INET6
-#include <netinet6/in6_var.h>
-#endif /* INET6 */
 
 #define senderr(e) { error = (e); goto bad;}
 
@@ -128,22 +98,27 @@
  */
 
 int
-atm_output(ifp, m0, dst, rt0)
-	struct ifnet *ifp;
-	struct mbuf *m0;
-	struct sockaddr *dst;
-	struct rtentry *rt0;
+atm_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
+    struct rtentry *rt0)
 {
-	u_int16_t etype = 0;			/* if using LLC/SNAP */
-	int s, error = 0, sz, len;
+	uint16_t etype = 0;			/* if using LLC/SNAP */
+	int error = 0, sz;
 	struct atm_pseudohdr atmdst, *ad;
 	struct mbuf *m = m0;
 	struct rtentry *rt;
 	struct atmllc *atmllc;
-	u_int32_t atm_flags;
+	uint32_t atm_flags;
+	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
+
+	/*
+	 * If the queueing discipline needs packet classification,
+	 * do it before prepending link headers.
+	 */
+	IFQ_CLASSIFY(&ifp->if_snd, m,
+	     (dst != NULL ? dst->sa_family : AF_UNSPEC), &pktattr);
 
 	/*
 	 * check route
@@ -153,7 +128,7 @@ atm_output(ifp, m0, dst, rt0)
 		if ((rt->rt_flags & RTF_UP) == 0) { /* route went down! */
 			if ((rt0 = rt = RTALLOC1(dst, 0)) != NULL)
 				rt->rt_refcnt--;
-			else 
+			else
 				senderr(EHOSTUNREACH);
 		}
 
@@ -188,8 +163,16 @@ atm_output(ifp, m0, dst, rt0)
 				etype = ETHERTYPE_IP;
 			else
 				etype = ETHERTYPE_IPV6;
+# ifdef ATM_PVCEXT
+			if (ifp->if_flags & IFF_POINTOPOINT) {
+				/* pvc subinterface */
+				struct pvcsif *pvcsif = (struct pvcsif *)ifp;
+				atmdst = pvcsif->sif_aph;
+				break;
+			}
+# endif
 			if (!atmresolve(rt, m, dst, &atmdst)) {
-				m = NULL; 
+				m = NULL;
 				/* XXX: atmresolve already free'd it */
 				senderr(EHOSTUNREACH);
 				/* XXX: put ATMARP stuff here */
@@ -198,13 +181,22 @@ atm_output(ifp, m0, dst, rt0)
 			break;
 #endif
 
+		case AF_UNSPEC:
+			/*
+			 * XXX: bpfwrite or output from a pvc shadow if.
+			 * assuming dst contains 12 bytes (atm pseudo
+			 * header (4) + LLC/SNAP (8))
+			 */
+			bcopy(dst->sa_data, &atmdst, sizeof(atmdst));
+			break;
+
 		default:
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-			printf("%s: can't handle af%d\n", ifp->if_xname, 
-			       dst->sa_family);
+			printf("%s: can't handle af%d\n", ifp->if_xname,
+			    dst->sa_family);
 #elif defined(__FreeBSD__) || defined(__bsdi__)
-			printf("%s%d: can't handle af%d\n", ifp->if_name, 
-			       ifp->if_unit, dst->sa_family);
+			printf("%s%d: can't handle af%d\n", ifp->if_name,
+			    ifp->if_unit, dst->sa_family);
 #endif
 			senderr(EAFNOSUPPORT);
 		}
@@ -222,27 +214,13 @@ atm_output(ifp, m0, dst, rt0)
 		*ad = atmdst;
 		if (atm_flags & ATM_PH_LLCSNAP) {
 			atmllc = (struct atmllc *)(ad + 1);
-			bcopy(ATMLLC_HDR, atmllc->llchdr, 
+			bcopy(ATMLLC_HDR, atmllc->llchdr,
 						sizeof(atmllc->llchdr));
-			ATM_LLC_SETTYPE(atmllc, etype); 
+			ATM_LLC_SETTYPE(atmllc, etype);
 		}
 	}
 
-	/*
-	 * Queue message on interface, and start output if interface
-	 * not yet active.
-	 */
-	len = m->m_pkthdr.len;
-	s = splnet();
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error) {
-		splx(s);
-		return (error);
-	}
-	ifp->if_obytes += len;
-	if_start(ifp);
-	splx(s);
-	return (error);
+	return ifq_enqueue(ifp, m ALTQ_COMMA ALTQ_DECL(&pktattr));
 
 bad:
 	if (m)
@@ -255,14 +233,11 @@ bad:
  * the packet is in the mbuf chain m.
  */
 void
-atm_input(ifp, ah, m, rxhand)
-	struct ifnet *ifp;
-	struct atm_pseudohdr *ah;
-	struct mbuf *m;
-	void *rxhand;
+atm_input(struct ifnet *ifp, struct atm_pseudohdr *ah, struct mbuf *m,
+    void *rxhand)
 {
 	struct ifqueue *inq;
-	u_int16_t etype = ETHERTYPE_IP; /* default */
+	uint16_t etype = ETHERTYPE_IP; /* default */
 	int s;
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
@@ -291,8 +266,7 @@ atm_input(ifp, ah, m, rxhand)
 	   */
 	  if (ATM_PH_FLAGS(ah) & ATM_PH_LLCSNAP) {
 	    struct atmllc *alc;
-	    if (m->m_len < sizeof(*alc) &&
-		(m = m_pullup(m, sizeof(*alc))) == NULL)
+	    if (m->m_len < sizeof(*alc) && (m = m_pullup(m, sizeof(*alc))) == 0)
 		  return; /* failed */
 	    alc = mtod(m, struct atmllc *);
 	    if (bcmp(alc, ATMLLC_HDR, 6)) {
@@ -313,12 +287,20 @@ atm_input(ifp, ah, m, rxhand)
 	  switch (etype) {
 #ifdef INET
 	  case ETHERTYPE_IP:
+#ifdef GATEWAY
+		  if (ipflow_fastforward(m))
+			return;
+#endif
 		  schednetisr(NETISR_IP);
 		  inq = &ipintrq;
 		  break;
 #endif /* INET */
 #ifdef INET6
 	  case ETHERTYPE_IPV6:
+#ifdef GATEWAY  
+		if (ip6flow_fastforward(m))
+			return;
+#endif
 		  schednetisr(NETISR_IPV6);
 		  inq = &ip6intrq;
 		  break;
@@ -330,7 +312,11 @@ atm_input(ifp, ah, m, rxhand)
 	}
 
 	s = splnet();
-	IF_INPUT_ENQUEUE(inq, m);
+	if (IF_QFULL(inq)) {
+		IF_DROP(inq);
+		m_freem(m);
+	} else
+		IF_ENQUEUE(inq, m);
 	splx(s);
 }
 
@@ -338,18 +324,51 @@ atm_input(ifp, ah, m, rxhand)
  * Perform common duties while attaching to interface list
  */
 void
-atm_ifattach(ifp)
-	struct ifnet *ifp;
+atm_ifattach(struct ifnet *ifp)
 {
 
 	ifp->if_type = IFT_ATM;
 	ifp->if_addrlen = 0;
 	ifp->if_hdrlen = 0;
+	ifp->if_dlt = DLT_ATM_RFC1483;
 	ifp->if_mtu = ATMMTU;
 	ifp->if_output = atm_output;
+#if 0 /* XXX XXX XXX */
+	ifp->if_input = atm_input;
+#endif
 
 	if_alloc_sadl(ifp);
-#ifdef notyet /* if using ATMARP, store hardware address using the next line */
-	bcopy(ifp->hw_addr, LLADDR(ifp->if_sadl), ifp->if_addrlen);
+	/* XXX Store LLADDR for ATMARP. */
+
+#if NBPFILTER > 0
+	bpfattach(ifp, DLT_ATM_RFC1483, sizeof(struct atmllc));
 #endif
 }
+
+#ifdef ATM_PVCEXT
+
+static int pvc_max_number = 16;	/* max number of PVCs */
+static int pvc_number = 0;	/* pvc unit number */
+
+struct ifnet *
+pvcsif_alloc(void)
+{
+	struct pvcsif *pvcsif;
+
+	if (pvc_number >= pvc_max_number)
+		return (NULL);
+	MALLOC(pvcsif, struct pvcsif *, sizeof(struct pvcsif),
+	       M_DEVBUF, M_WAITOK|M_ZERO);
+	if (pvcsif == NULL)
+		return (NULL);
+
+#ifdef __NetBSD__
+	snprintf(pvcsif->sif_if.if_xname, sizeof(pvcsif->sif_if.if_xname),
+	    "pvc%d", pvc_number++);
+#else
+	pvcsif->sif_if.if_name = "pvc";
+	pvcsif->sif_if.if_unit = pvc_number++;
+#endif
+	return (&pvcsif->sif_if);
+}
+#endif /* ATM_PVCEXT */

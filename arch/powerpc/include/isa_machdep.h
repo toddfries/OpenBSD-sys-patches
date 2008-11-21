@@ -1,4 +1,4 @@
-/*	$NetBSD: isa_machdep.h,v 1.2 2005/12/11 12:18:43 christos Exp $	*/
+/*	$NetBSD: isa_machdep.h,v 1.4 2008/04/28 20:23:32 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -101,17 +94,19 @@ typedef struct powerpc_isa_chipset *isa_chipset_tag_t;
 
 struct device;			/* XXX */
 struct isabus_attach_args;	/* XXX */
+struct pic_ops;			/* XXX */
 
 /*
  * Functions provided to machine-independent ISA code.
  */
-void	isa_attach_hook(struct device *, struct device *,
+void	genppc_isa_attach_hook(struct device *, struct device *,
 	    struct isabus_attach_args *);
-const struct evcnt *isa_intr_evcnt(isa_chipset_tag_t, int);
-void	*isa_intr_establish(isa_chipset_tag_t, int /*irq*/, int /*type*/,
+const struct evcnt *genppc_isa_intr_evcnt(isa_chipset_tag_t, int);
+void	*genppc_isa_intr_establish(isa_chipset_tag_t, int /*irq*/, int /*type*/,
 	    int /*level*/, int (*ih_fun)(void *), void *);
-void	isa_intr_disestablish(isa_chipset_tag_t, void *);
-int	isa_intr_alloc(isa_chipset_tag_t, int, int, int *);
+void	genppc_isa_intr_disestablish(isa_chipset_tag_t, void *);
+int	genppc_isa_intr_alloc(isa_chipset_tag_t, struct pic_ops *, int,
+	    int, int *);
 
 #define	isa_dmainit(ic, bst, dmat, d)					\
 	_isa_dmainit(&(ic)->ic_dmastate, (bst), (dmat), (d))

@@ -1,3 +1,5 @@
+/* $NetBSD: timetc.h,v 1.5 2008/05/08 18:56:58 ad Exp $ */
+
 /*-
  * ----------------------------------------------------------------------------
  * "THE BEER-WARE LICENSE" (Revision 42):
@@ -6,8 +8,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: timetc.h,v 1.2 2006/10/30 20:19:33 otto Exp $
- * $FreeBSD: src/sys/sys/timetc.h,v 1.57 2003/04/10 23:07:24 des Exp $
+ * $FreeBSD: src/sys/sys/timetc.h,v 1.58 2003/08/16 08:23:52 phk Exp $
  */
 
 #ifndef _SYS_TIMETC_H_
@@ -16,6 +17,16 @@
 #ifndef _KERNEL
 #error "no user-serviceable parts inside"
 #endif
+
+/*
+ * max recommended timecounter name length
+ *
+ * it is not a functional limit but names longer
+ * then that will not be controllable via
+ * sysctl. see kern/kern_tc.c for the sysctl
+ * implementation.
+ */
+#define MAX_TCNAMELEN	64
 
 /*-
  * `struct timecounter' is the interface between the hardware which implements
@@ -50,7 +61,7 @@ struct timecounter {
 		/* This mask should mask off any unimplemented bits. */
 	u_int64_t		tc_frequency;
 		/* Frequency of the counter in Hz. */
-	char			*tc_name;
+	const char		*tc_name;
 		/* Name of the timecounter. */
 	int			tc_quality;
 		/*
@@ -58,22 +69,24 @@ struct timecounter {
 		 * another timecounter higher means better.  Negative
 		 * means "only use at explicit request".
 		 */
+
 	void			*tc_priv;
 		/* Pointer to the timecounter's private parts. */
 	struct timecounter	*tc_next;
 		/* Pointer to the next timecounter. */
-	int64_t			tc_freq_adj;
-		/* Current frequency adjustment. */
 };
 
 extern struct timecounter *timecounter;
 
 u_int64_t tc_getfrequency(void);
 void	tc_init(struct timecounter *tc);
+int	tc_detach(struct timecounter *);
 void	tc_setclock(struct timespec *ts);
 void	tc_ticktock(void);
-void	inittimecounter(void);
-int	sysctl_tc(int *, u_int, void *, size_t *, void *, size_t);
-int	tc_adjfreq(int64_t *, int64_t *);
+void	tc_gonebad(struct timecounter *);
+
+#ifdef SYSCTL_DECL
+SYSCTL_DECL(_kern_timecounter);
+#endif
 
 #endif /* !_SYS_TIMETC_H_ */

@@ -1,3 +1,3 @@
-/*	$OpenBSD: setjmp.h,v 1.3 1996/04/28 10:56:32 deraadt Exp $ */
+/*	$NetBSD: setjmp.h,v 1.1.1.1 1995/07/25 23:12:18 chuck Exp $	*/
 
 #include <m68k/setjmp.h>

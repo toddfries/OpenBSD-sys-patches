@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpuconf.h,v 1.3 2006/05/27 20:36:05 miod Exp $	*/
-/*	$NetBSD: cpuconf.h,v 1.7 2003/05/23 00:57:24 ichiro Exp $	*/
+/*	$NetBSD: cpuconf.h,v 1.15 2008/10/14 16:01:22 matt Exp $	*/
 
 /*
  * Copyright (c) 2002 Wasabi Systems, Inc.
@@ -39,44 +38,109 @@
 #ifndef _ARM_CPUCONF_H_
 #define	_ARM_CPUCONF_H_
 
+#if defined(_KERNEL_OPT)
+#include "opt_cputypes.h"
+#endif /* _KERNEL_OPT */
+
+#if defined(CPU_XSCALE_PXA250) || defined(CPU_XSCALE_PXA270)
+#define	__CPU_XSCALE_PXA2XX
+#endif
+
+#ifdef CPU_XSCALE_PXA2X0
+#warning option CPU_XSCALE_PXA2X0 is obsolete. Use CPU_XSCALE_PXA250 and/or CPU_XSCALE_PXA270.
+#endif
+
 /*
  * IF YOU CHANGE THIS FILE, MAKE SURE TO UPDATE THE DEFINITION OF
- * "PMAP_NEEDS_PTE_SYNC" IN <arm/arm/pmap.h> FOR THE CPU TYPE
+ * "PMAP_NEEDS_PTE_SYNC" IN <arm/arm32/pmap.h> FOR THE CPU TYPE
  * YOU ARE ADDING SUPPORT FOR.
  */
 
+#if 0
 /*
- * Determine which ARM architecture versions are configured.
+ * Step 1: Count the number of CPU types configured into the kernel.
  */
-#if (defined(CPU_ARM2) || defined(CPU_ARM250) || defined(CPU_ARM3))
+#if defined(_KERNEL_OPT)
+#define	CPU_NTYPES	(defined(CPU_ARM2) + defined(CPU_ARM250) +	\
+			 defined(CPU_ARM3) +				\
+			 defined(CPU_ARM6) + defined(CPU_ARM7) +	\
+			 defined(CPU_ARM7TDMI) +			\
+			 defined(CPU_ARM8) + defined(CPU_ARM9) +	\
+			 defined(CPU_ARM9E) +				\
+			 defined(CPU_ARM10) +				\
+			 defined(CPU_ARM11) +				\
+			 defined(CPU_ARM1136) +				\
+			 defined(CPU_ARM1176) +				\
+			 defined(CPU_SA110) + defined(CPU_SA1100) +	\
+			 defined(CPU_SA1110) +				\
+			 defined(CPU_FA526) +				\
+			 defined(CPU_IXP12X0) +				\
+			 defined(CPU_XSCALE_80200) +			\
+			 defined(CPU_XSCALE_80321) +			\
+			 defined(__CPU_XSCALE_PXA2XX) +			\
+			 defined(CPU_XSCALE_IXP425))
+#else
+#define	CPU_NTYPES	2
+#endif /* _KERNEL_OPT */
+#endif
+
+/*
+ * Step 2: Determine which ARM architecture versions are configured.
+ */
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_ARM2) || defined(CPU_ARM250) || defined(CPU_ARM3))
 #define	ARM_ARCH_2	1
 #else
 #define	ARM_ARCH_2	0
 #endif
 
-#if (defined(CPU_ARM6) || defined(CPU_ARM7))
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_ARM6) || defined(CPU_ARM7))
 #define	ARM_ARCH_3	1
 #else
 #define	ARM_ARCH_3	0
 #endif
 
-#if (defined(CPU_ARM7TDMI) || defined(CPU_ARM8) || defined(CPU_ARM9) ||	\
-     defined(CPU_ARM10) || defined(CPU_SA110) || defined(CPU_SA1100) || \
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_ARM7TDMI) || defined(CPU_ARM8) || defined(CPU_ARM9) ||	\
+     defined(CPU_SA110) || defined(CPU_SA1100) || defined(CPU_FA526) || \
      defined(CPU_SA1110) || defined(CPU_IXP12X0) || defined(CPU_XSCALE_IXP425))
 #define	ARM_ARCH_4	1
 #else
 #define	ARM_ARCH_4	0
 #endif
 
-#if (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
-     defined(CPU_XSCALE_PXA2X0))
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_ARM9E) || defined(CPU_ARM10) ||			\
+     defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
+     defined(__CPU_XSCALE_PXA2XX))
 #define	ARM_ARCH_5	1
 #else
 #define	ARM_ARCH_5	0
 #endif
 
+#if defined(CPU_ARM11)
+#define ARM_ARCH_6	1
+#else
+#define ARM_ARCH_6	0
+#endif
+
+#define	ARM_NARCH	(ARM_ARCH_2 + ARM_ARCH_3 + ARM_ARCH_4 + \
+			 ARM_ARCH_5 + ARM_ARCH_6)
+#if ARM_NARCH == 0
+#error ARM_NARCH is 0
+#endif
+
+#if ARM_ARCH_5 || ARM_ARCH_6
 /*
- * Define which MMU classes are configured:
+ * We could support Thumb code on v4T, but the lack of clean interworking
+ * makes that hard.
+ */
+#define THUMB_CODE
+#endif
+
+/*
+ * Step 3: Define which MMU classes are configured:
  *
  *	ARM_MMU_MEMC		Prehistoric, external memory controller
  *				and MMU for ARMv2 CPUs.
@@ -89,44 +153,64 @@
  *	ARM_MMU_XSCALE		XScale MMU.  Compatible with generic ARM
  *				MMU, but also has several extensions which
  *				require different PTE layout to use.
+ *
+ *	ARM_MMU_V6		ARM v6 MMU.  Compatible with generic ARM
+ *				MMU, but also has several extensions which
+ *				require different PTE layouts to use.
  */
-#if (defined(CPU_ARM2) || defined(CPU_ARM250) || defined(CPU_ARM3))
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_ARM2) || defined(CPU_ARM250) || defined(CPU_ARM3))
 #define	ARM_MMU_MEMC		1
 #else
 #define	ARM_MMU_MEMC		0
 #endif
 
-#if (defined(CPU_ARM6) || defined(CPU_ARM7) || defined(CPU_ARM7TDMI) ||	\
-     defined(CPU_ARM8) || defined(CPU_ARM9) || defined(CPU_ARM10))
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_ARM6) || defined(CPU_ARM7) || defined(CPU_ARM7TDMI) ||	\
+     defined(CPU_ARM8) || defined(CPU_ARM9) || defined(CPU_ARM9E) ||	\
+     defined(CPU_ARM10) || defined(CPU_FA526))
 #define	ARM_MMU_GENERIC		1
 #else
 #define	ARM_MMU_GENERIC		0
 #endif
 
-#if (defined(CPU_SA110) || defined(CPU_SA1100) || defined(CPU_SA1110) ||\
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_SA110) || defined(CPU_SA1100) || defined(CPU_SA1110) ||\
      defined(CPU_IXP12X0))
 #define	ARM_MMU_SA1		1
 #else
 #define	ARM_MMU_SA1		0
 #endif
 
-#if (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
-     defined(CPU_XSCALE_PXA2X0) || defined(CPU_XSCALE_IXP425))
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
+     defined(__CPU_XSCALE_PXA2XX) || defined(CPU_XSCALE_IXP425))
 #define	ARM_MMU_XSCALE		1
 #else
 #define	ARM_MMU_XSCALE		0
 #endif
 
+#if !defined(_KERNEL_OPT) ||						\
+	 defined(CPU_ARM11)
+#define	ARM_MMU_V6		1
+#else
+#define	ARM_MMU_V6		0
+#endif
+
 #define	ARM_NMMUS		(ARM_MMU_MEMC + ARM_MMU_GENERIC +	\
-				 ARM_MMU_SA1 + ARM_MMU_XSCALE)
+				 ARM_MMU_SA1 + ARM_MMU_XSCALE + ARM_MMU_V6)
+#if ARM_NMMUS == 0
+#error ARM_NMMUS is 0
+#endif
 
 /*
- * Define features that may be present on a subset of CPUs
+ * Step 4: Define features that may be present on a subset of CPUs
  *
  *	ARM_XSCALE_PMU		Performance Monitoring Unit on 80200 and 80321
  */
 
-#if (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321))
+#if !defined(_KERNEL_OPT) ||						\
+    (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321))
 #define ARM_XSCALE_PMU	1
 #else
 #define ARM_XSCALE_PMU	0

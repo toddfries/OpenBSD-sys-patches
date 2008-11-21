@@ -1,4 +1,4 @@
-/*	$NetBSD: j720tp.c,v 1.4 2006/11/12 19:00:42 plunky Exp $	*/
+/*	$NetBSD: j720tp.c,v 1.9 2008/04/28 20:23:21 martin Exp $	*/
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +32,7 @@
 /* Jornada 720 touch-panel driver. */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: j720tp.c,v 1.4 2006/11/12 19:00:42 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: j720tp.c,v 1.9 2008/04/28 20:23:21 martin Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_j720tp.h"
@@ -111,13 +104,13 @@ static int	j720tp_match(struct device *, struct cfdata *, void *);
 static void	j720tp_attach(struct device *, struct device *, void *);
 
 static int	j720tp_wsmouse_enable(void *);
-static int	j720tp_wsmouse_ioctl(void *, u_long, caddr_t, int,
+static int	j720tp_wsmouse_ioctl(void *, u_long, void *, int,
 			struct lwp *);
 static void	j720tp_wsmouse_disable(void *);
 
 static int	j720tp_wskbd_enable(void *, int);
 static void	j720tp_wskbd_set_leds(void *, int);
-static int	j720tp_wskbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+static int	j720tp_wskbd_ioctl(void *, u_long, void *, int, struct lwp *);
 
 static void	j720tp_enable_intr(struct j720tp_softc *);
 static void	j720tp_disable_intr(struct j720tp_softc *);
@@ -245,8 +238,9 @@ j720tp_attach(struct device *parent, struct device *self, void *aux)
 	tpcalib_ioctl(&sc->sc_tpcalib, WSMOUSEIO_SCALIBCOORDS,
 	    __UNCONST(&j720tp_default_calib), 0, 0);
 
+	callout_init(&sc->sc_tpcallout, 0);
+
 	j720tp_wsmouse_disable(sc);
-	callout_init(&sc->sc_tpcallout);
 
 	/* On-screen "hard icons" as a keyboard device. */
 	wska.console = 0;
@@ -278,7 +272,7 @@ j720tp_wsmouse_enable(void *self)
 }
 
 static int
-j720tp_wsmouse_ioctl(void *self, u_long cmd, caddr_t data, int flag,
+j720tp_wsmouse_ioctl(void *self, u_long cmd, void *data, int flag,
     struct lwp *l)
 {
 	struct j720tp_softc *sc = self;
@@ -322,7 +316,7 @@ j720tp_wskbd_set_leds(void *self, int leds)
 }
 
 static int
-j720tp_wskbd_ioctl(void *self, u_long cmd, caddr_t data, int flag,
+j720tp_wskbd_ioctl(void *self, u_long cmd, void *data, int flag,
     struct lwp *l)
 {
 #ifdef WSDISPLAY_COMPAT_RAWKBD

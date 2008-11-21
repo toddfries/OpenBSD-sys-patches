@@ -1,4 +1,4 @@
-/*	$NetBSD: psl.h,v 1.7 2006/12/21 15:55:22 yamt Exp $	*/
+/*	$NetBSD: psl.h,v 1.17 2008/06/11 23:31:35 rafal Exp $	*/
 
 /*
  * Copyright (c) 1995 Mark Brinicombe.
@@ -53,77 +53,42 @@
  * indicate which interrupts are allowed.
  */
 
-#define _SPL_0		0
-#define _SPL_SOFTCLOCK	1
-#define _SPL_SOFTNET	2
-#define _SPL_BIO	3
-#define _SPL_NET	4
-#define _SPL_SOFTSERIAL	5
-#define _SPL_TTY	6
-#define _SPL_VM		7
-#define _SPL_AUDIO	8
-#define _SPL_CLOCK	9
-#define _SPL_STATCLOCK	10
-#define _SPL_HIGH	11
-#define _SPL_SERIAL	12
-#define _SPL_LEVELS	13
-
-#define spl0()		splx(_SPL_0)
-/*#define splsoft()	raisespl(_SPL_SOFT)*/
-#define splsoftnet()	raisespl(_SPL_SOFTNET)
-#define spllowersoftclock() lowerspl(_SPL_SOFTCLOCK)
-#define splsoftclock()	raisespl(_SPL_SOFTCLOCK)
-#define splbio()	raisespl(_SPL_BIO)
-#define splnet()	raisespl(_SPL_NET)
-#define splsoftserial()	raisespl(_SPL_SOFTSERIAL)
-#define spltty()	raisespl(_SPL_TTY)
-#define spllpt()	spltty()
-#define splvm()		raisespl(_SPL_VM)
-#define splaudio()	raisespl(_SPL_AUDIO)
-#define splclock()	raisespl(_SPL_CLOCK)
-#define splstatclock()	raisespl(_SPL_STATCLOCK)
-#define splserial()	raisespl(_SPL_SERIAL)
-#define splhigh()	raisespl(_SPL_HIGH)
-
-#define	splsched()	splhigh()
-#define	spllock()	splhigh()
+#define spl0()		splx(IPL_NONE)
+#define splsoftclock()	raisespl(IPL_SOFTCLOCK)
+#define splsoftbio()	raisespl(IPL_SOFTBIO)
+#define splsoftnet()	raisespl(IPL_SOFTNET)
+#define splsoftserial()	raisespl(IPL_SOFTSERIAL)
+#define splvm()		raisespl(IPL_VM)
+#define splsched()	raisespl(IPL_SCHED)
+#define splhigh()	raisespl(IPL_HIGH)
 
 #ifdef _KERNEL
 #ifndef _LOCORE
-int raisespl	__P((int));
-int lowerspl	__P((int));
-int splx	__P((int));
+int raisespl	(int);
+int lowerspl	(int);
+int splx	(int);
 
-void setsoftast		__P((void));
-void setsoftclock	__P((void));
-void setsoftnet		__P((void));
-void setsoftserial	__P((void));
-void setsoftintr	__P((u_int intrmask));
+#ifdef __HAVE_FAST_SOFTINTS
+void _setsoftintr	(int si);
+#endif
 
-extern int current_spl_level;
-
-extern u_int spl_masks[_SPL_LEVELS + 1];
-extern u_int spl_smasks[_SPL_LEVELS];
-
-typedef int ipl_t;
+typedef uint8_t ipl_t;
 typedef struct {
-	int _spl;
+	uint8_t _ipl;
 } ipl_cookie_t;
-
-int ipl_to_spl(ipl_t);
 
 static inline ipl_cookie_t
 makeiplcookie(ipl_t ipl)
 {
 
-	return (ipl_cookie_t){._spl = ipl_to_spl(ipl)};
+	return (ipl_cookie_t){._ipl = (uint8_t)ipl};
 }
 
 static inline int
 splraiseipl(ipl_cookie_t icookie)
 {
 
-	return raisespl(icookie._spl);
+	return raisespl(icookie._ipl);
 }
 #endif /* _LOCORE */
 #endif /* _KERNEL */

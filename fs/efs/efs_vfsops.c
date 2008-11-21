@@ -1,4 +1,4 @@
-/*	$NetBSD: efs_vfsops.c,v 1.14 2007/12/08 19:29:42 pooka Exp $	*/
+/*	$NetBSD: efs_vfsops.c,v 1.16 2008/09/24 09:37:13 ad Exp $	*/
 
 /*
  * Copyright (c) 2006 Stephen M. Rumble <rumble@ephemeral.org>
@@ -17,7 +17,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: efs_vfsops.c,v 1.14 2007/12/08 19:29:42 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: efs_vfsops.c,v 1.16 2008/09/24 09:37:13 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -31,6 +31,7 @@ __KERNEL_RCSID(0, "$NetBSD: efs_vfsops.c,v 1.14 2007/12/08 19:29:42 pooka Exp $"
 #include <sys/stat.h>
 #include <sys/kauth.h>
 #include <sys/proc.h>
+#include <sys/module.h>
 
 #include <miscfs/genfs/genfs_node.h>
 
@@ -46,6 +47,8 @@ __KERNEL_RCSID(0, "$NetBSD: efs_vfsops.c,v 1.14 2007/12/08 19:29:42 pooka Exp $"
 #include <fs/efs/efs_inode.h>
 #include <fs/efs/efs_subr.h>
 #include <fs/efs/efs_ihash.h>
+
+MODULE(MODULE_CLASS_VFS, efs, NULL);
 
 MALLOC_JUSTDEFINE(M_EFSMNT, "efsmnt", "efs mount structure");
 MALLOC_JUSTDEFINE(M_EFSINO, "efsino", "efs in-core inode structure");
@@ -375,7 +378,6 @@ efs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	eip->ei_dev = emp->em_dev;
 	eip->ei_vp = vp;
 	vp->v_data = eip;
-	vp->v_mount = mp;
 
 	/*
 	 * Place the vnode on the hash chain. Doing so will lock the
@@ -583,4 +585,17 @@ struct vfsops efs_vfsops = {
 /*	.vfs_refcount */
 /*	.vfs_list */
 };
-VFS_ATTACH(efs_vfsops);
+
+static int
+efs_modcmd(modcmd_t cmd, void *arg)
+{
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		return vfs_attach(&efs_vfsops);
+	case MODULE_CMD_FINI:
+		return vfs_detach(&efs_vfsops);
+	default:
+		return ENOTTY;
+	}
+}

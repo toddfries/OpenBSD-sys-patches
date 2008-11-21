@@ -1,7 +1,7 @@
-/*	$NetBSD: cs4231_sbus.c,v 1.35 2007/10/19 12:01:10 ad Exp $	*/
+/*	$NetBSD: cs4231_sbus.c,v 1.42 2008/04/29 18:07:11 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999, 2002 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2002, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cs4231_sbus.c,v 1.35 2007/10/19 12:01:10 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cs4231_sbus.c,v 1.42 2008/04/29 18:07:11 ad Exp $");
 
 #include "audio.h"
 #if NAUDIO > 0
@@ -47,7 +40,6 @@ __KERNEL_RCSID(0, "$NetBSD: cs4231_sbus.c,v 1.35 2007/10/19 12:01:10 ad Exp $");
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-
 #include <sys/bus.h>
 #include <sys/intr.h>
 
@@ -79,6 +71,8 @@ int cs4231_sbus_debug = 0;
 struct cs4231_sbus_softc {
 	struct cs4231_softc sc_cs4231;
 
+	void *sc_pint;
+	void *sc_rint;
 	struct sbusdev sc_sd;			/* sbus device */
 	bus_space_tag_t sc_bt;			/* DMA controller tag */
 	bus_space_handle_t sc_bh;		/* DMA controller registers */
@@ -87,6 +81,8 @@ struct cs4231_sbus_softc {
 
 static int	cs4231_sbus_match(struct device *, struct cfdata *, void *);
 static void	cs4231_sbus_attach(struct device *, struct device *, void *);
+static int	cs4231_sbus_pint(void *);
+static int	cs4231_sbus_rint(void *);
 
 CFATTACH_DECL(audiocs_sbus, sizeof(struct cs4231_sbus_softc),
     cs4231_sbus_match, cs4231_sbus_attach, NULL, NULL);
@@ -165,6 +161,11 @@ cs4231_sbus_attach(struct device *parent, struct device *self, void *aux)
 	sbsc->sc_bt = sc->sc_bustag = sa->sa_bustag;
 	sc->sc_dmatag = sa->sa_dmatag;
 
+	sbsc->sc_pint = sparc_softintr_establish(IPL_VM,
+	    (void *)cs4231_sbus_pint, sc);
+	sbsc->sc_rint = sparc_softintr_establish(IPL_VM,
+	    (void *)cs4231_sbus_rint, sc);
+
 	/*
 	 * Map my registers in, if they aren't already in virtual
 	 * address space.
@@ -175,8 +176,8 @@ cs4231_sbus_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		if (sbus_bus_map(sa->sa_bustag,	sa->sa_slot,
 			sa->sa_offset, sa->sa_size, 0, &bh) != 0) {
-			printf("%s @ sbus: cannot map registers\n",
-				self->dv_xname);
+			aprint_error("%s @ sbus: cannot map registers\n",
+				device_xname(self));
 			return;
 		}
 	}
@@ -192,7 +193,7 @@ cs4231_sbus_attach(struct device *parent, struct device *self, void *aux)
 	/* Establish interrupt channel */
 	if (sa->sa_nintr)
 		bus_intr_establish(sa->sa_bustag,
-				   sa->sa_pri, IPL_AUDIO,
+				   sa->sa_pri, IPL_SCHED,
 				   cs4231_sbus_intr, sbsc);
 
 	audio_attach_mi(&audiocs_sbus_hw_if, sbsc, &sc->sc_ad1848.sc_dev);
@@ -511,14 +512,14 @@ cs4231_sbus_intr(void *arg)
 #endif
 
 	status = ADREAD(&sc->sc_ad1848, AD1848_STATUS);
-	DPRINTF(("%s: status: %s\n", sc->sc_ad1848.sc_dev.dv_xname,
+	DPRINTF(("%s: status: %s\n", device_xname(&sc->sc_ad1848.sc_dev),
 		bitmask_snprintf(status, AD_R2_BITS, bits, sizeof(bits))));
 	if (status & INTERRUPT_STATUS) {
 #ifdef AUDIO_DEBUG
 		int reason;
 
 		reason = ad_read(&sc->sc_ad1848, CS_IRQ_STATUS);
-		DPRINTF(("%s: i24: %s\n", sc->sc_ad1848.sc_dev.dv_xname,
+		DPRINTF(("%s: i24: %s\n", device_xname(&sc->sc_ad1848.sc_dev),
 		  bitmask_snprintf(reason, CS_I24_BITS, bits, sizeof(bits))));
 #endif
 		/* clear ad1848 interrupt */
@@ -536,7 +537,7 @@ cs4231_sbus_intr(void *arg)
 				APC_DMA_CNC, dmasize);
 
 			if (t->t_intr != NULL)
-				(*t->t_intr)(t->t_arg);
+				sparc_softintr_schedule(sbsc->sc_rint);
 			++t->t_intrcnt.ev_count;
 			served = 1;
 		}
@@ -560,7 +561,7 @@ cs4231_sbus_intr(void *arg)
 			}
 
 			if (t->t_intr != NULL)
-				(*t->t_intr)(t->t_arg);
+				sparc_softintr_schedule(sbsc->sc_pint);
 			++t->t_intrcnt.ev_count;
 			served = 1;
 		}
@@ -569,13 +570,41 @@ cs4231_sbus_intr(void *arg)
 	/* got an interrupt we don't know how to handle */
 	if (!served) {
 #ifdef DIAGNOSTIC
-		printf("%s: unhandled csr=%s\n", sc->sc_ad1848.sc_dev.dv_xname,
+		printf("%s: unhandled csr=%s\n", device_xname(&sc->sc_ad1848.sc_dev),
 		       bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits)));
 #endif
 		/* evcnt? */
 	}
 
 	return 1;
+}
+
+static int
+cs4231_sbus_pint(void *cookie)
+{
+	struct cs4231_softc *sc = cookie;
+	struct cs_transfer *t;
+
+	KERNEL_LOCK(1, NULL);
+	t = &sc->sc_playback;
+	if (t->t_intr != NULL)
+		(*t->t_intr)(t->t_arg);
+	KERNEL_UNLOCK_ONE(NULL);
+	return 0;
+}
+
+static int
+cs4231_sbus_rint(void *cookie)
+{
+	struct cs4231_softc *sc = cookie;
+	struct cs_transfer *t;
+
+	KERNEL_LOCK(1, NULL);
+	t = &sc->sc_capture;
+	if (t->t_intr != NULL)
+		(*t->t_intr)(t->t_arg);
+	KERNEL_UNLOCK_ONE(NULL);
+	return 0;
 }
 
 #endif /* NAUDIO > 0 */

@@ -1,4 +1,4 @@
-/*	$NetBSD: disk.c,v 1.2 2006/08/26 14:13:40 tsutsui Exp $	*/
+/*	$NetBSD: disk.c,v 1.6 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -55,7 +48,7 @@ struct devsw dkdevsw = {
 };
 
 struct disk {
-	boolean_t active;
+	bool active;
 	int type;	/* FD/HD */
 	int unit;
 	int format;	/* 2D/2HD */
@@ -65,13 +58,13 @@ struct disk {
 } __disk;
 
 void sector_init(void);
-boolean_t __sector_rw(uint8_t *, int, int, int);
+bool __sector_rw(uint8_t *, int, int, int);
 int __hd_rw(uint8_t *, int, int, int);
 int __fd_2d_rw(uint8_t *, int, int, int);
 int __fd_2hd_rw(uint8_t *, int, int, int);
 void __fd_progress_msg(int);
 
-boolean_t
+bool
 device_attach(int type, int unit, int partition)
 {
 
@@ -85,14 +78,14 @@ device_attach(int type, int unit, int partition)
 
 	__disk.partition = partition;
 
-	__disk.active = TRUE;
+	__disk.active = true;
 	__disk.offset = 0;
 
 	if (partition >= 0) {
 		if (!find_partition_start(__disk.partition, &__disk.offset)) {
 			printf("type %d, unit %d partition %d not found.\n",
 			    __disk.type, __disk.unit, __disk.partition);
-			return FALSE;
+			return false;
 		}
 	}
 	DEVICE_CAPABILITY.active_device = type;
@@ -108,14 +101,14 @@ device_attach(int type, int unit, int partition)
 		} else {
 			printf("unknown floppy disk format %d.\n",
 			    __disk.format);
-			return FALSE;
+			return false;
 		}
 	} else {
 		printf("unknown disk type %d.\n", __disk.type);
-		return FALSE;
+		return false;
 	}
 
-	return TRUE;
+	return true;
 }
 
 int
@@ -140,7 +133,7 @@ dkstrategy(void *devdata, int rw, daddr_t blk, size_t size, void *buf,
 
 	if ((int)size < 0) {
 		printf("%s: invalid request block %d size %d base %d\n",
-		    __FUNCTION__, blk, size, __disk.offset);
+		    __func__, blk, size, __disk.offset);
 		return -1;
 	}
 
@@ -165,42 +158,42 @@ void
 sector_fini(void *self)
 {
 
-	__disk.active = FALSE;
+	__disk.active = false;
 }
 
-boolean_t
+bool
 sector_read_n(void *self, uint8_t *buf, int sector, int count)
 {
 
 	if (!__sector_rw(buf, sector, 0, count))
-		return FALSE;
-	return TRUE;
+		return false;
+	return true;
 }
 
-boolean_t
+bool
 sector_read(void *self, uint8_t *buf, int sector)
 {
 
 	return __sector_rw(buf, sector, 0, 1);
 }
 
-boolean_t
+bool
 sector_write_n(void *self, uint8_t *buf, int sector, int count)
 {
 
 	if (!__sector_rw(buf, sector, 0x1000, count))
-		return FALSE;
-	return TRUE;
+		return false;
+	return true;
 }
 
-boolean_t
+bool
 sector_write(void *self, uint8_t *buf, int sector)
 {
 
 	return __sector_rw(buf, sector, 0x1000, 1);
 }
 
-boolean_t
+bool
 __sector_rw(uint8_t *buf, int block, int flag, int count)
 {
 	int err;
@@ -210,7 +203,7 @@ __sector_rw(uint8_t *buf, int block, int flag, int count)
 
 	if ((err = __disk.rw(buf, block, flag, count)) != 0)
 		printf("%s: type=%d unit=%d offset=%d block=%d err=%d\n",
-		    __FUNCTION__, __disk.type, __disk.unit, __disk.offset,
+		    __func__, __disk.type, __disk.unit, __disk.offset,
 		    block, err);
 
 	return err == 0;
@@ -230,7 +223,7 @@ __fd_2d_rw(uint8_t *buf, int block, int flag, int count)
 	uint32_t pos;
 
 	if (!blk_to_2d_position(block, &pos, &cnt)) {
-		printf("%s: invalid block #%d.\n", __FUNCTION__, block);
+		printf("%s: invalid block #%d.\n", __func__, block);
 		return -1;
 	}
 	__fd_progress_msg(pos);
@@ -250,7 +243,7 @@ __fd_2hd_rw(uint8_t *buf, int block, int flag, int count)
 	uint32_t pos;
 
 	if (!blk_to_2hd_position(block, &pos, &cnt)) {
-		printf("%s: invalid block #%d.\n", __FUNCTION__, block);
+		printf("%s: invalid block #%d.\n", __func__, block);
 		return -1;
 	}
 	__fd_progress_msg(pos);

@@ -1,4 +1,4 @@
-/*	$NetBSD: hpcfb.c,v 1.44 2007/10/29 20:45:57 peter Exp $	*/
+/*	$NetBSD: hpcfb.c,v 1.47 2008/04/06 20:28:36 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1999
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hpcfb.c,v 1.44 2007/10/29 20:45:57 peter Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hpcfb.c,v 1.47 2008/04/06 20:28:36 cegger Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_hpcfb.h"
@@ -55,7 +55,6 @@ __KERNEL_RCSID(0, "$NetBSD: hpcfb.c,v 1.44 2007/10/29 20:45:57 peter Exp $");
 #include <sys/signalvar.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
-#include <sys/lock.h>
 #include <sys/user.h>
 #include <sys/device.h>
 #include <sys/conf.h>
@@ -164,7 +163,6 @@ struct hpcfb_softc {
 	int sc_polling;
 	int sc_mapping;
 	struct proc *sc_thread;
-	struct lock sc_lock;
 	void *sc_wantedscreen;
 	void (*sc_switchcb)(void *, int, int);
 	void *sc_switchcbarg;
@@ -320,11 +318,10 @@ hpcfbattach(struct device *parent,
 	callout_init(&sc->sc_switch_callout, 0);
 
 	/* Add a power hook to power management */
-	sc->sc_powerhook = powerhook_establish(sc->sc_dev.dv_xname,
+	sc->sc_powerhook = powerhook_establish(device_xname(&sc->sc_dev),
 	    hpcfb_power, sc);
 	if (sc->sc_powerhook == NULL)
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "WARNING: unable to establish power hook\n");
 
 	wa.console = hpcfbconsole;
 	wa.scrdata = &hpcfb_screenlist;
@@ -338,14 +335,13 @@ hpcfbattach(struct device *parent,
 	 * Create a kernel thread to scroll,
 	 */
 	if (kthread_create(PRI_NONE, 0, NULL, hpcfb_thread, sc,
-	    &sc->sc_thread, "%s", sc->sc_dev.dv_xname) != 0) {
+	    &sc->sc_thread, "%s", device_xname(&sc->sc_dev)) != 0) {
 		/*
 		 * We were unable to create the HPCFB thread; bail out.
 		 */
 		sc->sc_thread = 0;
-		printf("%s: unable to create thread, kernel "
-		    "hpcfb scroll support disabled\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "unable to create thread, kernel "
+		    "hpcfb scroll support disabled\n");
 	}
 #endif /* HPCFB_JUMP */
 }

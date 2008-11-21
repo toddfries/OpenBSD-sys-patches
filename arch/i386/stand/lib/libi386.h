@@ -1,4 +1,4 @@
-/*	$NetBSD: libi386.h,v 1.23 2005/12/11 12:17:48 christos Exp $	*/
+/*	$NetBSD: libi386.h,v 1.27 2008/11/19 12:36:41 ad Exp $	*/
 
 /*
  * Copyright (c) 1996
@@ -36,8 +36,10 @@ physaddr_t vtophys(void *);
 
 ssize_t pread(int, void *, size_t);
 void startprog(physaddr_t, int, unsigned long *, physaddr_t);
+void multiboot(physaddr_t, physaddr_t, physaddr_t);
 
-int exec_netbsd(const char *, physaddr_t, int);
+int exec_netbsd(const char *, physaddr_t, int, int);
+int exec_multiboot(const char *, char *);
 
 void delay(int);
 int getbasemem(void);
@@ -111,6 +113,7 @@ int congetc(void);
 int conisshift(void);
 int coniskey(void);
 void conputc(int);
+void conclr(void);
 
 int getextmem2(int *);
 int getextmemps2(void *);
@@ -132,3 +135,5 @@ int dosopen(char *);
 int dosread(int, char *, int);
 int dosseek(int, int, int);
 extern int doserrno;	/* in dos_file.S */
+
+void module_add(char *);

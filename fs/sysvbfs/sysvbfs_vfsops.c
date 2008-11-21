@@ -1,4 +1,4 @@
-/*	$NetBSD: sysvbfs_vfsops.c,v 1.7 2007/01/04 15:42:37 elad Exp $	*/
+/*	$NetBSD: sysvbfs_vfsops.c,v 1.26 2008/09/04 12:28:14 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,13 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysvbfs_vfsops.c,v 1.7 2007/01/04 15:42:37 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysvbfs_vfsops.c,v 1.26 2008/09/04 12:28:14 pooka Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/pool.h>
-
 #include <sys/time.h>
 #include <sys/ucred.h>
 #include <sys/mount.h>
@@ -51,6 +43,7 @@ __KERNEL_RCSID(0, "$NetBSD: sysvbfs_vfsops.c,v 1.7 2007/01/04 15:42:37 elad Exp 
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
 #include <sys/kauth.h>
+#include <sys/proc.h>
 
 /* v-node */
 #include <sys/namei.h>
@@ -67,48 +60,50 @@ __KERNEL_RCSID(0, "$NetBSD: sysvbfs_vfsops.c,v 1.7 2007/01/04 15:42:37 elad Exp 
 #define	DPRINTF(arg...)		((void)0)
 #endif
 
-MALLOC_DEFINE(M_SYSVBFS_VFS, "sysvbfs vfs", "sysvbfs vfs structures");
+MALLOC_JUSTDEFINE(M_SYSVBFS_VFS, "sysvbfs vfs", "sysvbfs vfs structures");
 
-POOL_INIT(sysvbfs_node_pool, sizeof(struct sysvbfs_node), 0, 0, 0,
-    "sysvbfs_node_pool", &pool_allocator_nointr);
+struct pool sysvbfs_node_pool;
 
 int sysvbfs_mountfs(struct vnode *, struct mount *, struct lwp *);
 
 int
-sysvbfs_mount(struct mount *mp, const char *path, void *data,
-    struct nameidata *ndp, struct lwp *l)
+sysvbfs_mount(struct mount *mp, const char *path, void *data, size_t *data_len)
 {
-	struct sysvbfs_args args;
+	struct lwp *l = curlwp;
+	struct nameidata nd;
+	struct sysvbfs_args *args = data;
 	struct sysvbfs_mount *bmp = NULL;
 	struct vnode *devvp = NULL;
 	int error;
-	boolean_t update;
+	bool update;
 
-	DPRINTF("%s: mnt_flag=%x\n", __FUNCTION__, mp->mnt_flag);
+	DPRINTF("%s: mnt_flag=%x\n", __func__, mp->mnt_flag);
+
+	if (*data_len < sizeof *args)
+		return EINVAL;
 
 	if (mp->mnt_flag & MNT_GETARGS) {
 		if ((bmp = (void *)mp->mnt_data) == NULL)
 			return EIO;
-		args.fspec = NULL;
-		return copyout(&args, data, sizeof(args));
+		args->fspec = NULL;
+		*data_len = sizeof *args;
+		return 0;
 	}
 
-	if ((error = copyin(data, &args, sizeof(args))) != 0)
-		return error;
 
-	DPRINTF("%s: args.fspec=%s\n", __FUNCTION__, args.fspec);
+	DPRINTF("%s: args->fspec=%s\n", __func__, args->fspec);
 	update = mp->mnt_flag & MNT_UPDATE;
-	if (args.fspec == NULL) {
+	if (args->fspec == NULL) {
 		/* nothing to do. */
 		return EINVAL;
 	}
 
-	if (args.fspec != NULL) {
+	if (args->fspec != NULL) {
 		/* Look up the name and verify that it's sane. */
-		NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, l);
-		if ((error = namei(ndp)) != 0)
+		NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, args->fspec);
+		if ((error = namei(&nd)) != 0)
 			return (error);
-		devvp = ndp->ni_vp;
+		devvp = nd.ni_vp;
 
 		if (!update) {
 			/*
@@ -116,8 +111,7 @@ sysvbfs_mount(struct mount *mp, const char *path, void *data,
 			 */
 			if (devvp->v_type != VBLK)
 				error = ENOTBLK;
-			else if (bdevsw_lookup(devvp->v_specinfo->si_rdev) ==
-			    NULL)
+			else if (bdevsw_lookup(devvp->v_rdev) == NULL)
 				error = ENXIO;
 		} else {
 			/*
@@ -141,7 +135,7 @@ sysvbfs_mount(struct mount *mp, const char *path, void *data,
 		    (mp->mnt_flag & MNT_RDONLY) == 0)
 			accessmode |= VWRITE;
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
-		error = VOP_ACCESS(devvp, accessmode, l->l_cred, l);
+		error = VOP_ACCESS(devvp, accessmode, l->l_cred);
 		VOP_UNLOCK(devvp, 0);
 	}
 
@@ -159,8 +153,8 @@ sysvbfs_mount(struct mount *mp, const char *path, void *data,
 		/* XXX: r/w -> read only */
 	}
 
-	return set_statvfs_info(path, UIO_USERSPACE, args.fspec, UIO_USERSPACE,
-	    mp, l);
+	return set_statvfs_info(path, UIO_USERSPACE, args->fspec, UIO_USERSPACE,
+	    mp->mnt_op->vfs_name, mp, l);
 }
 
 int
@@ -169,12 +163,8 @@ sysvbfs_mountfs(struct vnode *devvp, struct mount *mp, struct lwp *l)
 	kauth_cred_t cred = l->l_cred;
 	struct sysvbfs_mount *bmp;
 	struct partinfo dpart;
-	int error;
+	int error, oflags;
 
-	if ((error = vfs_mountedon(devvp)) != 0)
-		return error;	/* Already mounted */
-	if (vcount(devvp) > 1)
-		return EBUSY;	/* Opened by other */
 	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
 	error = vinvalbuf(devvp, V_SAVE, cred, l, 0, 0);
 	VOP_UNLOCK(devvp, 0);
@@ -182,11 +172,14 @@ sysvbfs_mountfs(struct vnode *devvp, struct mount *mp, struct lwp *l)
 		return error;
 
 	/* Open block device */
-	if ((error = VOP_OPEN(devvp, FREAD, NOCRED, l)) != 0)
+	oflags = FREAD;
+	if ((mp->mnt_flag & MNT_RDONLY) == 0)
+		oflags |= FWRITE;
+	if ((error = VOP_OPEN(devvp, oflags, NOCRED)) != 0)
 		return error;
 
 	/* Get partition information */
-	if ((error = VOP_IOCTL(devvp, DIOCGPART, &dpart, FREAD, cred, l)) != 0)
+	if ((error = VOP_IOCTL(devvp, DIOCGPART, &dpart, FREAD, cred)) != 0)
 		return error;
 
 	bmp = malloc(sizeof(struct sysvbfs_mount), M_SYSVBFS_VFS, M_WAITOK);
@@ -205,7 +198,7 @@ sysvbfs_mountfs(struct vnode *devvp, struct mount *mp, struct lwp *l)
 	mp->mnt_stat.f_fsidx.__fsid_val[1] = makefstype(MOUNT_SYSVBFS);
 	mp->mnt_stat.f_fsid = mp->mnt_stat.f_fsidx.__fsid_val[0];
 	mp->mnt_flag |= MNT_LOCAL;
-	mp->mnt_dev_bshift = BFS_BSIZE;
+	mp->mnt_dev_bshift = BFS_BSHIFT;
 	mp->mnt_fs_bshift = BFS_BSHIFT;
 
 	DPRINTF("fstype=%d dtype=%d bsize=%d\n", dpart.part->p_fstype,
@@ -215,28 +208,28 @@ sysvbfs_mountfs(struct vnode *devvp, struct mount *mp, struct lwp *l)
 }
 
 int
-sysvbfs_start(struct mount *mp, int flags, struct lwp *l)
+sysvbfs_start(struct mount *mp, int flags)
 {
 
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 	/* Nothing to do. */
 	return 0;
 }
 
 int
-sysvbfs_unmount(struct mount *mp, int mntflags, struct lwp *l)
+sysvbfs_unmount(struct mount *mp, int mntflags)
 {
 	struct sysvbfs_mount *bmp = (void *)mp->mnt_data;
 	int error;
 
-	DPRINTF("%s: %p\n", __FUNCTION__, bmp);
+	DPRINTF("%s: %p\n", __func__, bmp);
 
 	if ((error = vflush(mp, NULLVP,
 	    mntflags & MNT_FORCE ? FORCECLOSE : 0)) != 0)
 		return error;
 
 	vn_lock(bmp->devvp, LK_EXCLUSIVE | LK_RETRY);
-	error = VOP_CLOSE(bmp->devvp, FREAD, NOCRED, l);
+	error = VOP_CLOSE(bmp->devvp, FREAD, NOCRED);
 	vput(bmp->devvp);
 
 	sysvbfs_bfs_fini(bmp->bfs);
@@ -254,7 +247,7 @@ sysvbfs_root(struct mount *mp, struct vnode **vpp)
 	struct vnode *vp;
 	int error;
 
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 	if ((error = VFS_VGET(mp, BFS_ROOT_INODE, &vp)) != 0)
 		return error;
 	*vpp = vp;
@@ -263,17 +256,7 @@ sysvbfs_root(struct mount *mp, struct vnode **vpp)
 }
 
 int
-sysvbfs_quotactl(struct mount *mp, int cmd, uid_t uid, void *arg,
-    struct lwp *l)
-{
-
-	DPRINTF("%s:\n", __FUNCTION__);
-	/* Don't support. */
-	return 0;
-}
-
-int
-sysvbfs_statvfs(struct mount *mp, struct statvfs *f, struct lwp *l)
+sysvbfs_statvfs(struct mount *mp, struct statvfs *f)
 {
 	struct sysvbfs_mount *bmp = mp->mnt_data;
 	struct bfs *bfs = bmp->bfs;
@@ -286,7 +269,7 @@ sysvbfs_statvfs(struct mount *mp, struct statvfs *f, struct lwp *l)
 	else
 		free_block = (bfs->data_end >> BFS_BSHIFT) - free_block;
 
-	DPRINTF("%s: %d %d %d\n", __FUNCTION__, bfs->data_start,
+	DPRINTF("%s: %d %d %d\n", __func__, bfs->data_start,
 	    bfs->data_end, free_block);
 
 	f->f_bsize = BFS_BSIZE;
@@ -306,31 +289,31 @@ sysvbfs_statvfs(struct mount *mp, struct statvfs *f, struct lwp *l)
 }
 
 int
-sysvbfs_sync(struct mount *mp, int waitfor, kauth_cred_t cred,
-    struct lwp *l)
+sysvbfs_sync(struct mount *mp, int waitfor, kauth_cred_t cred)
 {
 	struct sysvbfs_mount *bmp = mp->mnt_data;
 	struct sysvbfs_node *bnode;
 	struct vnode *v;
 	int err, error;
 
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 	error = 0;
-	simple_lock(&mntvnode_slock);
+	mutex_enter(&mntvnode_lock);
 	for (bnode = LIST_FIRST(&bmp->bnode_head); bnode != NULL;
 	    bnode = LIST_NEXT(bnode, link)) {
-		simple_unlock(&mntvnode_slock);
 		v = bnode->vnode;
+	    	mutex_enter(&v->v_interlock);
+		mutex_exit(&mntvnode_lock);
 		err = vget(v, LK_EXCLUSIVE | LK_NOWAIT | LK_INTERLOCK);
 		if (err == 0) {
-			err = VOP_FSYNC(v, cred, FSYNC_WAIT, 0, 0, l);
+			err = VOP_FSYNC(v, cred, FSYNC_WAIT, 0, 0);
 			vput(v);
 		}
 		if (err != 0)
 			error = err;
-		simple_lock(&mntvnode_slock);
+		mutex_enter(&mntvnode_lock);
 	}
-	simple_unlock(&mntvnode_slock);
+	mutex_exit(&mntvnode_lock);
 
 	return error;
 }
@@ -345,7 +328,7 @@ sysvbfs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	struct bfs_inode *inode;
 	int error;
 
-	DPRINTF("%s: i-node=%d\n", __FUNCTION__, ino);
+	DPRINTF("%s: i-node=%lld\n", __func__, (long long)ino);
 	/* Lookup requested i-node */
 	if (!bfs_inode_lookup(bfs, ino, &inode)) {
 		DPRINTF("bfs_inode_lookup failed.\n");
@@ -361,7 +344,7 @@ sysvbfs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	/* Allocate v-node. */
 	if ((error = getnewvnode(VT_SYSVBFS, mp, sysvbfs_vnodeop_p, &vp)) !=
 	    0) {
-		DPRINTF("%s: getnewvnode error.\n", __FUNCTION__);
+		DPRINTF("%s: getnewvnode error.\n", __func__);
 		return error;
 	}
 	/* Lock vnode here */
@@ -371,9 +354,9 @@ sysvbfs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	vp->v_data = pool_get(&sysvbfs_node_pool, PR_WAITOK);
 	memset(vp->v_data, 0, sizeof(struct sysvbfs_node));
 	bnode = vp->v_data;
-	simple_lock(&mntvnode_slock);
+	mutex_enter(&mntvnode_lock);
 	LIST_INSERT_HEAD(&bmp->bnode_head, bnode, link);
-	simple_unlock(&mntvnode_slock);
+	mutex_exit(&mntvnode_lock);
 	bnode->vnode = vp;
 	bnode->bmp = bmp;
 	bnode->inode = inode;
@@ -381,14 +364,13 @@ sysvbfs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 
 	if (ino == BFS_ROOT_INODE) {	/* BFS is flat filesystem */
 		vp->v_type = VDIR;
-		vp->v_flag |= VROOT;
+		vp->v_vflag |= VV_ROOT;
 	} else {
 		vp->v_type = VREG;
 	}
-	vp->v_size = bfs_file_size(inode);
 
 	genfs_node_init(vp, &sysvbfs_genfsops);
-	uvm_vnp_setsize(vp, vp->v_size);
+	uvm_vnp_setsize(vp, bfs_file_size(inode));
 	*vpp = vp;
 
 	return 0;
@@ -398,7 +380,7 @@ int
 sysvbfs_fhtovp(struct mount *mp, struct fid *fid, struct vnode **vpp)
 {
 
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 	/* notyet */
 	return EOPNOTSUPP;
 }
@@ -407,17 +389,24 @@ int
 sysvbfs_vptofh(struct vnode *vpp, struct fid *fid, size_t *fh_size)
 {
 
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 	/* notyet */
 	return EOPNOTSUPP;
 }
+
+MALLOC_DECLARE(M_BFS);
+MALLOC_DECLARE(M_SYSVBFS_VNODE);
 
 void
 sysvbfs_init(void)
 {
 
-	/* Nothing to do. */
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
+	malloc_type_attach(M_SYSVBFS_VFS);
+	malloc_type_attach(M_BFS);
+	malloc_type_attach(M_SYSVBFS_VNODE);
+	pool_init(&sysvbfs_node_pool, sizeof(struct sysvbfs_node), 0, 0, 0,
+	    "sysvbfs_node_pool", &pool_allocator_nointr, IPL_NONE);
 }
 
 void
@@ -425,15 +414,18 @@ sysvbfs_reinit(void)
 {
 
 	/* Nothing to do. */
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 }
 
 void
 sysvbfs_done(void)
 {
 
-	DPRINTF("%s:\n", __FUNCTION__);
+	DPRINTF("%s:\n", __func__);
 	pool_destroy(&sysvbfs_node_pool);
+	malloc_type_detach(M_BFS);
+	malloc_type_detach(M_SYSVBFS_VFS);
+	malloc_type_detach(M_SYSVBFS_VNODE);
 }
 
 int

@@ -1,9 +1,8 @@
-/*	$OpenBSD: profile.h,v 1.4 1997/11/30 06:12:33 gene Exp $	*/
-/*	$NetBSD: profile.h,v 1.3 1996/05/05 06:17:55 briggs Exp $	*/
+/*	$NetBSD: profile.h,v 1.4 2001/08/31 04:44:56 simonb Exp $	*/
 
-#ifndef _MAC68K_PROFILE_H_
-#define _MAC68K_PROFILE_H_
+#ifndef _PROFILE_MACHINE_
+#define _PROFILE_MACHINE_
 
 #include <m68k/profile.h>
 
-#endif
+#endif /* _PROFILE_MACHINE_ */

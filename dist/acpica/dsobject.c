@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: dsobject - Dispatcher object management routines
- *              xRevision: 1.129 $
+ *              $Revision: 1.7 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,9 +114,6 @@
  *
  *****************************************************************************/
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dsobject.c,v 1.3 2006/11/16 01:33:31 christos Exp $");
-
 #define __DSOBJECT_C__
 
 #include "acpi.h"
@@ -164,7 +161,7 @@ AcpiDsBuildInternalObject (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE ("DsBuildInternalObject");
+    ACPI_FUNCTION_TRACE (DsBuildInternalObject);
 
 
     *ObjDescPtr = NULL;
@@ -214,6 +211,72 @@ AcpiDsBuildInternalObject (
                 return_ACPI_STATUS (Status);
             }
         }
+
+        /* Special object resolution for elements of a package */
+
+        if ((Op->Common.Parent->Common.AmlOpcode == AML_PACKAGE_OP) ||
+            (Op->Common.Parent->Common.AmlOpcode == AML_VAR_PACKAGE_OP))
+        {
+            /*
+             * Attempt to resolve the node to a value before we insert it into
+             * the package. If this is a reference to a common data type,
+             * resolve it immediately. According to the ACPI spec, package
+             * elements can only be "data objects" or method references.
+             * Attempt to resolve to an Integer, Buffer, String or Package.
+             * If cannot, return the named reference (for things like Devices,
+             * Methods, etc.) Buffer Fields and Fields will resolve to simple
+             * objects (int/buf/str/pkg).
+             *
+             * NOTE: References to things like Devices, Methods, Mutexes, etc.
+             * will remain as named references. This behavior is not described
+             * in the ACPI spec, but it appears to be an oversight.
+             */
+            ObjDesc = ACPI_CAST_PTR (ACPI_OPERAND_OBJECT, Op->Common.Node);
+
+            Status = AcpiExResolveNodeToValue (
+                        ACPI_CAST_INDIRECT_PTR (ACPI_NAMESPACE_NODE, &ObjDesc),
+                        WalkState);
+            if (ACPI_FAILURE (Status))
+            {
+                return_ACPI_STATUS (Status);
+            }
+
+            switch (Op->Common.Node->Type)
+            {
+            /*
+             * For these types, we need the actual node, not the subobject.
+             * However, the subobject did not get an extra reference count above.
+             *
+             * TBD: should ExResolveNodeToValue be changed to fix this?
+             */
+            case ACPI_TYPE_DEVICE:
+            case ACPI_TYPE_THERMAL:
+
+                AcpiUtAddReference (Op->Common.Node->Object);
+
+                /*lint -fallthrough */
+            /*
+             * For these types, we need the actual node, not the subobject.
+             * The subobject got an extra reference count in ExResolveNodeToValue.
+             */
+            case ACPI_TYPE_MUTEX:
+            case ACPI_TYPE_METHOD:
+            case ACPI_TYPE_POWER:
+            case ACPI_TYPE_PROCESSOR:
+            case ACPI_TYPE_EVENT:
+            case ACPI_TYPE_REGION:
+
+                /* We will create a reference object for these types below */
+                break;
+
+            default:
+                /*
+                 * All other types - the node was resolved to an actual
+                 * object, we are done.
+                 */
+                goto Exit;
+            }
+        }
     }
 
     /* Create and init a new internal ACPI object */
@@ -233,8 +296,9 @@ AcpiDsBuildInternalObject (
         return_ACPI_STATUS (Status);
     }
 
+Exit:
     *ObjDescPtr = ObjDesc;
-    return_ACPI_STATUS (AE_OK);
+    return_ACPI_STATUS (Status);
 }
 
 
@@ -267,7 +331,7 @@ AcpiDsBuildInternalBufferObj (
     UINT32                  ByteListLength = 0;
 
 
-    ACPI_FUNCTION_TRACE ("DsBuildInternalBufferObj");
+    ACPI_FUNCTION_TRACE (DsBuildInternalBufferObj);
 
 
     /*
@@ -332,7 +396,7 @@ AcpiDsBuildInternalBufferObj (
     }
     else
     {
-        ObjDesc->Buffer.Pointer = ACPI_MEM_CALLOCATE (
+        ObjDesc->Buffer.Pointer = ACPI_ALLOCATE_ZEROED (
                                         ObjDesc->Buffer.Length);
         if (!ObjDesc->Buffer.Pointer)
         {
@@ -350,7 +414,7 @@ AcpiDsBuildInternalBufferObj (
     }
 
     ObjDesc->Buffer.Flags |= AOPOBJ_DATA_VALID;
-    Op->Common.Node = (ACPI_NAMESPACE_NODE *) ObjDesc;
+    Op->Common.Node = ACPI_CAST_PTR (ACPI_NAMESPACE_NODE, ObjDesc);
     return_ACPI_STATUS (AE_OK);
 }
 
@@ -361,7 +425,8 @@ AcpiDsBuildInternalBufferObj (
  *
  * PARAMETERS:  WalkState       - Current walk state
  *              Op              - Parser object to be translated
- *              PackageLength   - Number of elements in the package
+ *              ElementCount    - Number of elements in the package - this is
+ *                                the NumElements argument to Package()
  *              ObjDescPtr      - Where the ACPI internal object is returned
  *
  * RETURN:      Status
@@ -369,24 +434,37 @@ AcpiDsBuildInternalBufferObj (
  * DESCRIPTION: Translate a parser Op package object to the equivalent
  *              namespace object
  *
+ * NOTE: The number of elements in the package will be always be the NumElements
+ * count, regardless of the number of elements in the package list. If
+ * NumElements is smaller, only that many package list elements are used.
+ * if NumElements is larger, the Package object is padded out with
+ * objects of type Uninitialized (as per ACPI spec.)
+ *
+ * Even though the ASL compilers do not allow NumElements to be smaller
+ * than the Package list length (for the fixed length package opcode), some
+ * BIOS code modifies the AML on the fly to adjust the NumElements, and
+ * this code compensates for that. This also provides compatibility with
+ * other AML interpreters.
+ *
  ******************************************************************************/
 
 ACPI_STATUS
 AcpiDsBuildInternalPackageObj (
     ACPI_WALK_STATE         *WalkState,
     ACPI_PARSE_OBJECT       *Op,
-    UINT32                  PackageLength,
+    UINT32                  ElementCount,
     ACPI_OPERAND_OBJECT     **ObjDescPtr)
 {
     ACPI_PARSE_OBJECT       *Arg;
     ACPI_PARSE_OBJECT       *Parent;
     ACPI_OPERAND_OBJECT     *ObjDesc = NULL;
-    UINT32                  PackageListLength;
     ACPI_STATUS             Status = AE_OK;
     ACPI_NATIVE_UINT        i;
+    UINT16                  Index;
+    UINT16                  ReferenceCount;
 
 
-    ACPI_FUNCTION_TRACE ("DsBuildInternalPackageObj");
+    ACPI_FUNCTION_TRACE (DsBuildInternalPackageObj);
 
 
     /* Find the parent of a possibly nested package */
@@ -415,33 +493,13 @@ AcpiDsBuildInternalPackageObj (
         ObjDesc->Package.Node = Parent->Common.Node;
     }
 
-    ObjDesc->Package.Count = PackageLength;
-
-    /* Count the number of items in the package list */
-
-    Arg = Op->Common.Value.Arg;
-    Arg = Arg->Common.Next;
-    for (PackageListLength = 0; Arg; PackageListLength++)
-    {
-        Arg = Arg->Common.Next;
-    }
-
     /*
-     * The package length (number of elements) will be the greater
-     * of the specified length and the length of the initializer list
+     * Allocate the element array (array of pointers to the individual
+     * objects) based on the NumElements parameter. Add an extra pointer slot
+     * so that the list is always null terminated.
      */
-    if (PackageListLength > PackageLength)
-    {
-        ObjDesc->Package.Count = PackageListLength;
-    }
-
-    /*
-     * Allocate the pointer array (array of pointers to the
-     * individual objects). Add an extra pointer slot so
-     * that the list is always null terminated.
-     */
-    ObjDesc->Package.Elements = ACPI_MEM_CALLOCATE (
-        ((ACPI_SIZE) ObjDesc->Package.Count + 1) * sizeof (void *));
+    ObjDesc->Package.Elements = ACPI_ALLOCATE_ZEROED (
+        ((ACPI_SIZE) ElementCount + 1) * sizeof (void *));
 
     if (!ObjDesc->Package.Elements)
     {
@@ -449,30 +507,101 @@ AcpiDsBuildInternalPackageObj (
         return_ACPI_STATUS (AE_NO_MEMORY);
     }
 
+    ObjDesc->Package.Count = ElementCount;
+
     /*
-     * Initialize all elements of the package
+     * Initialize the elements of the package, up to the NumElements count.
+     * Package is automatically padded with uninitialized (NULL) elements
+     * if NumElements is greater than the package list length. Likewise,
+     * Package is truncated if NumElements is less than the list length.
      */
     Arg = Op->Common.Value.Arg;
     Arg = Arg->Common.Next;
-    for (i = 0; Arg; i++)
+    for (i = 0; Arg && (i < ElementCount); i++)
     {
         if (Arg->Common.AmlOpcode == AML_INT_RETURN_VALUE_OP)
         {
-            /* Object (package or buffer) is already built */
+            if (Arg->Common.Node->Type == ACPI_TYPE_METHOD)
+            {
+                /*
+                 * A method reference "looks" to the parser to be a method
+                 * invocation, so we special case it here
+                 */
+                Arg->Common.AmlOpcode = AML_INT_NAMEPATH_OP;
+                Status = AcpiDsBuildInternalObject (WalkState, Arg,
+                            &ObjDesc->Package.Elements[i]);
+            }
+            else
+            {
+                /* This package element is already built, just get it */
 
-            ObjDesc->Package.Elements[i] =
-                ACPI_CAST_PTR (ACPI_OPERAND_OBJECT, Arg->Common.Node);
+                ObjDesc->Package.Elements[i] =
+                    ACPI_CAST_PTR (ACPI_OPERAND_OBJECT, Arg->Common.Node);
+            }
         }
         else
         {
             Status = AcpiDsBuildInternalObject (WalkState, Arg,
                         &ObjDesc->Package.Elements[i]);
         }
+
+        if (*ObjDescPtr)
+        {
+            /* Existing package, get existing reference count */
+
+            ReferenceCount = (*ObjDescPtr)->Common.ReferenceCount;
+            if (ReferenceCount > 1)
+            {
+                /* Make new element ref count match original ref count */
+
+                for (Index = 0; Index < (ReferenceCount - 1); Index++)
+                {
+                    AcpiUtAddReference ((ObjDesc->Package.Elements[i]));
+                }
+            }
+        }
+
         Arg = Arg->Common.Next;
     }
 
+    /* Check for match between NumElements and actual length of PackageList */
+
+    if (Arg)
+    {
+        /*
+         * NumElements was exhausted, but there are remaining elements in the
+         * PackageList.
+         *
+         * Note: technically, this is an error, from ACPI spec: "It is an error
+         * for NumElements to be less than the number of elements in the
+         * PackageList". However, for now, we just print an error message and
+         * no exception is returned.
+         */
+        while (Arg)
+        {
+            /* Find out how many elements there really are */
+
+            i++;
+            Arg = Arg->Common.Next;
+        }
+
+        ACPI_ERROR ((AE_INFO,
+            "Package List length larger than NumElements count (%X), truncated\n",
+            ElementCount));
+    }
+    else if (i < ElementCount)
+    {
+        /*
+         * Arg list (elements) was exhausted, but we did not reach NumElements count.
+         * Note: this is not an error, the package is padded out with NULLs.
+         */
+        ACPI_DEBUG_PRINT ((ACPI_DB_INFO,
+            "Package List length (%X) smaller than NumElements count (%X), padded with null elements\n",
+            (UINT32) i, ElementCount));
+    }
+
     ObjDesc->Package.Flags |= AOPOBJ_DATA_VALID;
-    Op->Common.Node = (ACPI_NAMESPACE_NODE *) ObjDesc;
+    Op->Common.Node = ACPI_CAST_PTR (ACPI_NAMESPACE_NODE, ObjDesc);
     return_ACPI_STATUS (Status);
 }
 
@@ -501,7 +630,7 @@ AcpiDsCreateNode (
     ACPI_OPERAND_OBJECT     *ObjDesc;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("DsCreateNode", Op);
+    ACPI_FUNCTION_TRACE_PTR (DsCreateNode, Op);
 
 
     /*
@@ -576,7 +705,7 @@ AcpiDsInitObjectFromOp (
     ACPI_STATUS             Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE ("DsInitObjectFromOp");
+    ACPI_FUNCTION_TRACE (DsInitObjectFromOp);
 
 
     ObjDesc = *RetObjDesc;
@@ -597,8 +726,8 @@ AcpiDsInitObjectFromOp (
         /*
          * Defer evaluation of Buffer TermArg operand
          */
-        ObjDesc->Buffer.Node      = (ACPI_NAMESPACE_NODE *)
-                                        WalkState->Operands[0];
+        ObjDesc->Buffer.Node      = ACPI_CAST_PTR (ACPI_NAMESPACE_NODE,
+                                        WalkState->Operands[0]);
         ObjDesc->Buffer.AmlStart  = Op->Named.Data;
         ObjDesc->Buffer.AmlLength = Op->Named.Length;
         break;
@@ -609,8 +738,8 @@ AcpiDsInitObjectFromOp (
         /*
          * Defer evaluation of Package TermArg operand
          */
-        ObjDesc->Package.Node      = (ACPI_NAMESPACE_NODE *)
-                                        WalkState->Operands[0];
+        ObjDesc->Package.Node      = ACPI_CAST_PTR (ACPI_NAMESPACE_NODE,
+                                        WalkState->Operands[0]);
         ObjDesc->Package.AmlStart  = Op->Named.Data;
         ObjDesc->Package.AmlLength = Op->Named.Length;
         break;
@@ -746,6 +875,7 @@ AcpiDsInitObjectFromOp (
                 /* Node was saved in Op */
 
                 ObjDesc->Reference.Node = Op->Common.Node;
+                ObjDesc->Reference.Object = Op->Common.Node->Object;
             }
 
             ObjDesc->Reference.Opcode = Opcode;

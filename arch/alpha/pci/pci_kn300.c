@@ -1,5 +1,4 @@
-/* $OpenBSD: pci_kn300.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
-/* $NetBSD: pci_kn300.c,v 1.28 2005/12/11 12:16:17 christos Exp $ */
+/* $NetBSD: pci_kn300.c,v 1.29 2007/12/03 15:33:08 ad Exp $ */
 
 /*
  * Copyright (c) 1998 by Matthew Jacob
@@ -32,6 +31,9 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: pci_kn300.c,v 1.29 2007/12/03 15:33:08 ad Exp $");
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
@@ -59,12 +61,13 @@
 #include <alpha/pci/siovar.h>
 #endif
 
-int	dec_kn300_intr_map (void *, pcitag_t, int, int, pci_intr_handle_t *);
-
-const char *dec_kn300_intr_string (void *, pci_intr_handle_t);
-void	*dec_kn300_intr_establish (void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void	dec_kn300_intr_disestablish (void *, void *);
+int	dec_kn300_intr_map __P((struct pci_attach_args *,
+	    pci_intr_handle_t *));
+const char *dec_kn300_intr_string __P((void *, pci_intr_handle_t));
+const struct evcnt *dec_kn300_intr_evcnt __P((void *, pci_intr_handle_t));
+void	*dec_kn300_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *));
+void	dec_kn300_intr_disestablish __P((void *, void *));
 
 #define	KN300_PCEB_IRQ	16
 #define	NPIN		4
@@ -76,23 +79,29 @@ static struct alpha_shared_intr *kn300_pci_intr;
 
 static struct mcpcia_config *mcpcia_eisaccp = NULL;
 
-void	kn300_iointr (void *, unsigned long);
-void	kn300_enable_intr (struct mcpcia_config *, int);
-void	kn300_disable_intr (struct mcpcia_config *, int);
+void	kn300_iointr __P((void *, unsigned long));
+void	kn300_enable_intr __P((struct mcpcia_config *, int));
+void	kn300_disable_intr __P((struct mcpcia_config *, int));
 
 void
 pci_kn300_pickintr(ccp, first)
 	struct mcpcia_config *ccp;
 	int first;
 {
+	char *cp;
 	pci_chipset_tag_t pc = &ccp->cc_pc;
 
 	if (first) {
 		int g;
 
-		kn300_pci_intr = alpha_shared_intr_alloc(NIRQ);
+		kn300_pci_intr = alpha_shared_intr_alloc(NIRQ, 16);
 		for (g = 0; g < NIRQ; g++) {
 			alpha_shared_intr_set_maxstrays(kn300_pci_intr, g, 25);
+			cp = alpha_shared_intr_string(kn300_pci_intr, g);
+			sprintf(cp, "irq %d", g);
+			evcnt_attach_dynamic(alpha_shared_intr_evcnt(
+			    kn300_pci_intr, g), EVCNT_TYPE_INTR, NULL,
+			    "kn300", cp);
 			savirqs[g] = (char) -1;
 		}
 	}
@@ -100,6 +109,7 @@ pci_kn300_pickintr(ccp, first)
 	pc->pc_intr_v = ccp;
 	pc->pc_intr_map = dec_kn300_intr_map;
 	pc->pc_intr_string = dec_kn300_intr_string;
+	pc->pc_intr_evcnt = dec_kn300_intr_evcnt;
 	pc->pc_intr_establish = dec_kn300_intr_establish;
 	pc->pc_intr_disestablish = dec_kn300_intr_disestablish;
 
@@ -116,14 +126,14 @@ pci_kn300_pickintr(ccp, first)
 }
 
 int     
-dec_kn300_intr_map(ccv, bustag, buspin, line, ihp)
-	void *ccv;
-	pcitag_t bustag;
-	int buspin, line;
+dec_kn300_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
 	pci_intr_handle_t *ihp;
 {
-	struct mcpcia_config *ccp = ccv; 
-	pci_chipset_tag_t pc = &ccp->cc_pc;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	pci_chipset_tag_t pc = pa->pa_pc;
+	struct mcpcia_config *ccp = (struct mcpcia_config *)pc->pc_intr_v;
 	int device;
 	int mcpcia_irq;
 
@@ -177,40 +187,40 @@ dec_kn300_intr_string(ccv, ih)
 	pci_intr_handle_t ih;
 {
 	static char irqstr[64];
-	int irq;
 
-	irq = ih & 0x3ff;
-	if (irq > NIRQ)
-		panic("dec_kn300_intr_string: bogus kn300 IRQ 0x%x", irq);
-
-	snprintf(irqstr, sizeof irqstr, "kn300 irq %ld", irq);
-
+	sprintf(irqstr, "kn300 irq %ld", ih & 0x3ff);
 	return (irqstr);
 }
 
+const struct evcnt *
+dec_kn300_intr_evcnt(ccv, ih)
+	void *ccv;
+	pci_intr_handle_t ih;
+{
+
+	return (alpha_shared_intr_evcnt(kn300_pci_intr, ih & 0x3ff));
+}
+
 void *
-dec_kn300_intr_establish(ccv, ih, level, func, arg, name)
-        void *ccv, *arg;
+dec_kn300_intr_establish(ccv, ih, level, func, arg)
+        void *ccv;
         pci_intr_handle_t ih;
         int level;
-        int (*func) (void *);
-	char *name;
+        int (*func) __P((void *));
+        void *arg;
 {           
 	struct mcpcia_config *ccp = ccv;
 	void *cookie;
 	int irq;
 
 	irq = ih & 0x3ff;
-	if (irq > NIRQ)
-		panic("dec_kn300_intr_establish: bogus kn300 IRQ 0x%x", irq);
-
 	cookie = alpha_shared_intr_establish(kn300_pci_intr, irq, IST_LEVEL,
 	    level, func, arg, "kn300 irq");
 
 	if (cookie != NULL &&
 	    alpha_shared_intr_firstactive(kn300_pci_intr, irq)) {
 		scb_set(MCPCIA_VEC_PCI + SCB_IDXTOVEC(irq),
-		    kn300_iointr, NULL);
+		    kn300_iointr, NULL, level);
 		alpha_shared_intr_set_private(kn300_pci_intr, irq, ccp);
 		savirqs[irq] = (ih >> 11) & 0x1f;
 		kn300_enable_intr(ccp, savirqs[irq]);

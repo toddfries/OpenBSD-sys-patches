@@ -1,8 +1,6 @@
-/*	$OpenBSD: ext2fs_dir.h,v 1.7 2003/06/02 23:28:22 millert Exp $	*/
-/*	$NetBSD: ext2fs_dir.h,v 1.4 2000/01/28 16:00:23 bouyer Exp $	*/
+/*	$NetBSD: ext2fs_dir.h,v 1.15 2007/12/25 18:33:49 perry Exp $	*/
 
 /*
- * Copyright (c) 1997 Manuel Bouyer.
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -39,15 +37,47 @@
  * Modified for ext2fs by Manuel Bouyer.
  */
 
-#ifndef _EXT2FS_DIR_H_
-#define	_EXT2FS_DIR_H_
+/*
+ * Copyright (c) 1997 Manuel Bouyer.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Manuel Bouyer.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	@(#)dir.h	8.4 (Berkeley) 8/10/94
+ * Modified for ext2fs by Manuel Bouyer.
+ */
+
+#ifndef _UFS_EXT2FS_EXT2FS_DIR_H_
+#define	_UFS_EXT2FS_EXT2FS_DIR_H_
 
 /*
  * Theoretically, directories can be more than 2Gb in length, however, in
  * practice this seems unlikely. So, we define the type doff_t as a 32-bit
  * quantity to keep down the cost of doing lookup on a 32-bit machine.
  */
-#define	doff_t		int32_t
+#define	doff_t			int32_t
 #define	EXT2FS_MAXDIRSIZE	(0x7fffffff)
 
 /*
@@ -84,12 +114,12 @@ struct	ext2fs_direct {
 	u_int16_t e2d_reclen;		/* length of this record */
 	u_int8_t e2d_namlen;		/* length of string in d_name */
 	u_int8_t e2d_type;		/* file type */
-	char	  e2d_name[EXT2FS_MAXNAMLEN];/* name with length <= EXT2FS_MAXNAMLEN */
+	char e2d_name[EXT2FS_MAXNAMLEN];/* name with length<=EXT2FS_MAXNAMLEN */
 };
 
 /* Ext2 directory file types (not the same as FFS. Sigh. */
 #define EXT2_FT_UNKNOWN         0
-#define EXT2_FT_REG_FILE        1 
+#define EXT2_FT_REG_FILE        1
 #define EXT2_FT_DIR             2
 #define EXT2_FT_CHRDEV          3
 #define EXT2_FT_BLKDEV          4
@@ -101,11 +131,9 @@ struct	ext2fs_direct {
 
 #define E2IFTODT(mode)    (((mode) & 0170000) >> 12)
 
-static __inline__ u_int8_t inot2ext2dt(u_int16_t)
-    __attribute__((__unused__));
-static __inline__ u_int8_t
-inot2ext2dt(type)
-	u_int16_t type;
+static __inline u_int8_t inot2ext2dt(u_int16_t) __unused;
+static __inline u_int8_t
+inot2ext2dt(u_int16_t type)
 {
 	switch(type) {
 	case E2IFTODT(EXT2_IFIFO):
@@ -134,8 +162,7 @@ inot2ext2dt(type)
  * without the d_name field, plus enough space for the name without a
  * terminating null byte, rounded up to a 4 byte boundary.
  */
-#define EXT2FS_DIRSIZ(len) \
-   (( 8 + len + 3) &~ 3)
+#define EXT2FS_DIRSIZ(len)	(( 8 + len + 3) & ~3)
 
 /*
  * Template for manipulating directories.  Should use struct direct's,
@@ -154,4 +181,4 @@ struct ext2fs_dirtemplate {
 	char		dotdot_name[4];	/* ditto */
 };
 
-#endif /* !_EXT2FS_DIR_H_ */
+#endif /* !_UFS_EXT2FS_EXT2FS_DIR_H_ */

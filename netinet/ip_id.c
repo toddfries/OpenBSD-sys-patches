@@ -1,80 +1,151 @@
-/*	$OpenBSD: ip_id.c,v 1.21 2008/03/15 04:55:25 djm Exp $ */
+/*	$NetBSD: ip_id.c,v 1.12 2008/02/06 03:20:51 matt Exp $	*/
+/*	$OpenBSD: ip_id.c,v 1.6 2002/03/15 18:19:52 millert Exp $	*/
 
 /*
- * Copyright (c) 2008 Theo de Raadt, Ryan McBride
- * 
- * Slightly different algorithm from the one designed by
- * Matthew Dillon <dillon@backplane.com> for The DragonFly Project
- * 
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Copyright 1998 Niels Provos <provos@citi.umich.edu>
+ * All rights reserved.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Theo de Raadt <deraadt@openbsd.org> came up with the idea of using
+ * such a mathematical system to generate more random (yet non-repeating)
+ * ids to solve the resolver/named problem.  But Niels designed the
+ * actual system based on the constraints.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
- * Random ip sequence number generator.  Use the system PRNG to shuffle
- * the 65536 entry ID space.  We reshuffle the ID we pick out of the array
- * into the previous 32767 cells, providing an guarantee that an ID will not
- * be reused for at least 32768 calls.
+ * seed = random 15bit
+ * n = prime, g0 = generator to n,
+ * j = random so that gcd(j,n-1) == 1
+ * g = g0^j mod n will be a generator again.
+ *
+ * X[0] = random seed.
+ * X[n] = a*X[n-1]+b mod m is a Linear Congruential Generator
+ * with a = 7^(even random) mod m,
+ *      b = random with gcd(b,m) == 1
+ *      m = 31104 and a maximal period of m-1.
+ *
+ * The transaction id is determined by:
+ * id[n] = seed xor (g^X[n] mod n)
+ *
+ * Effectively the id is restricted to the lower 15 bits, thus
+ * yielding two different cycles by toggling the msb on and off.
+ * This avoids reuse issues caused by reseeding.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: ip_id.c,v 1.12 2008/02/06 03:20:51 matt Exp $");
+
+#include "opt_inet.h"
+
 #include <sys/param.h>
-#include <dev/rndvar.h>
+#include <lib/libkern/libkern.h>
 
-static u_int16_t ip_shuffle[65536];
-static int isindex = 0;
+#include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/in_var.h>
 
-u_int16_t ip_randomid(void);
+#define	IPID_MAXID	65535
+#define	IPID_NUMIDS	32768
+
+static struct ipid_state {
+	uint16_t ids_start_slot;
+	uint16_t ids_slots[IPID_MAXID];
+} idstate;
+
+static inline uint32_t
+ipid_random(void)
+{
+	return arc4random();
+}
 
 /*
- * Return a random IP id.  Shuffle the new value we get into the previous half
- * of the ip_shuffle ring (-32767 or swap with ourself), to avoid duplicates
- * occuring too quickly but also still be random.
+ * Initalizes the  
+ * the msb flag. The msb flag is used to generate two distinct
+ * cycles of random numbers and thus avoiding reuse of ids.
  *
- * 0 is a special IP ID -- don't return it.
+ * This function is called from id_randomid() when needed, an
+ * application does not have to worry about it.
  */
-u_int16_t
-ip_randomid(void)
+void
+ip_initid(void)
 {
-	static int ipid_initialized;
-	u_int16_t si, r;
-	int i, i2;
+	size_t i;
 
-	if (!ipid_initialized) {
-		ipid_initialized = 1;
+	idstate.ids_start_slot = ipid_random();
+	for (i = 0; i < __arraycount(idstate.ids_slots); i++)
+		idstate.ids_slots[i] = i;
 
-		/*
-		 * Initialize with a random permutation. Do so using Knuth
-		 * which avoids the exchange in the Durstenfeld shuffle.
-		 * (See "The Art of Computer Programming, Vol 2" 3rd ed, pg. 145).
-		 *
-		 * Even if our PRNG is imperfect at boot time, we have deferred
-		 * doing this until the first packet being sent and now must
-		 * generate an ID.
-		 */
-		for (i = 0; i < sizeof(ip_shuffle)/sizeof(ip_shuffle[0]); ++i) {
-			i2 = arc4random_uniform(i + 1);
-			ip_shuffle[i] = ip_shuffle[i2];
-			ip_shuffle[i2] = i;
-		}
+	/*
+	 * Shuffle the array.
+	 */
+	for (i = __arraycount(idstate.ids_slots); --i > 0;) {
+		size_t k = ipid_random() % (i + 1);
+		uint16_t t = idstate.ids_slots[i];
+		idstate.ids_slots[i] = idstate.ids_slots[k];
+		idstate.ids_slots[k] = t;
 	}
+}
 
-	do {
-		arc4random_bytes(&si, sizeof(si));
-		i = isindex & 0xFFFF;
-		i2 = (isindex - (si & 0x7FFF)) & 0xFFFF;
-		r = ip_shuffle[i];
-		ip_shuffle[i] = ip_shuffle[i2];
-		ip_shuffle[i2] = r;
-		isindex++;
-	} while (r == 0);
+uint16_t
+ip_randomid(uint16_t salt)
+{
+	uint32_t r, k, id;
 
-	return (r);
+	/*
+	 * We need a random number 
+	 */
+	r = ipid_random();
+
+	/*
+	 * We do a modified Fisher-Yates shuffle but only one position at a
+	 * time. Instead of the last entry, we swap with the first entry and
+	 * then advance the start of the window by 1.  The next time that 
+	 * swapped-out entry can be used is at least 32768 iterations in the
+	 * future.
+ 	 *
+	 * The easiest way to visual this is to imagine a card deck with 52
+	 * cards.  First thing we do is split that into two sets, each with
+	 * half of the cards; call them deck A and deck B.  Pick a card
+	 * randomly from deck A and remember it, then place it at the
+	 * bottom of deck B.  Then take the top card from deck B and add it
+	 * to deck A.  Pick another card randomly from deck A and ...
+	 */
+	k = (r & (IPID_NUMIDS-1)) + idstate.ids_start_slot;
+	if (k >= IPID_MAXID)
+		k -= IPID_MAXID;
+
+	id = idstate.ids_slots[k];
+	if (k != idstate.ids_start_slot) {
+		idstate.ids_slots[k] = idstate.ids_slots[idstate.ids_start_slot];
+		idstate.ids_slots[idstate.ids_start_slot] = id;
+	}
+	if (++idstate.ids_start_slot == IPID_MAXID)
+		idstate.ids_start_slot = 0;
+	/*
+	 * Add an optional salt to the id to further obscure it.
+	 */
+	id += salt;
+	if (id >= IPID_MAXID)
+		id -= IPID_MAXID;
+
+	return (uint16_t) htons(id + 1);
 }

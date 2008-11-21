@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_swap.h,v 1.12 2008/04/12 20:37:36 miod Exp $	*/
-/*	$NetBSD: uvm_swap.h,v 1.5 2000/01/11 06:57:51 chs Exp $	*/
+/*	$NetBSD: uvm_swap.h,v 1.17 2008/05/29 14:51:27 mrg Exp $	*/
 
 /*
  * Copyright (c) 1997 Matthew R. Green
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -37,17 +34,23 @@
 #define	SWSLOT_BAD	(-1)
 
 #ifdef _KERNEL
-
-int			uvm_swap_get(struct vm_page *, int, int);
-int			uvm_swap_put(int, struct vm_page **, int, int);
-int			uvm_swap_alloc(int *, boolean_t);
-void			uvm_swap_free(int, int);
-void			uvm_swap_markbad(int, int);
-#ifdef UVM_SWAP_ENCRYPT
-void			uvm_swap_initcrypt_all(void);
-void			uvm_swap_freepages(struct vm_page **, int);
-void			uvm_swap_finicrypt_all(void);
+#if defined(_KERNEL_OPT)
+#include "opt_vmswap.h"
 #endif
+
+struct swapent;
+
+#if defined(VMSWAP)
+int	uvm_swap_get(struct vm_page *, int, int);
+int	uvm_swap_put(int, struct vm_page **, int, int);
+int	uvm_swap_alloc(int *, bool);
+void	uvm_swap_free(int, int);
+void	uvm_swap_markbad(int, int);
+bool	uvm_swapisfull(void);
+#else /* defined(VMSWAP) */
+#define	uvm_swapisfull()	true
+#endif /* defined(VMSWAP) */
+void	uvm_swap_stats(int, struct swapent *, int, register_t *);
 
 #endif /* _KERNEL */
 

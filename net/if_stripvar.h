@@ -1,28 +1,29 @@
-/*	$OpenBSD: if_stripvar.h,v 1.9 2007/11/26 09:28:33 martynas Exp $	*/
-/*	$NetBSD: if_stripvar.h,v 1.2.4.1 1996/08/05 20:37:51 jtc Exp $	*/
+/*	$NetBSD: if_stripvar.h,v 1.19 2007/07/14 21:02:42 ad Exp $	*/
 
 #ifndef _NET_IF_STRIPVAR_H_
 #define _NET_IF_STRIPVAR_H_
+
 /*
- * Definitions for SLIP interface data structures
- * 
- * (This exists so programs like slstats can get at the definition
- *  of sl_softc.)
+ * Definitions for STRIP interface data structures
  */
-struct st_softc {
+struct strip_softc {
 	struct	ifnet sc_if;		/* network-visible interface */
 	int	sc_unit;		/* XXX unit number */
 	struct	ifqueue sc_fastq;	/* interactive output queue */
+	struct	ifqueue sc_inq;		/* input queue */
 	struct	tty *sc_ttyp;		/* pointer to tty structure */
+	struct	callout sc_timo_ch;	/* timeout callout */
 	u_char	*sc_mp;			/* pointer to next available buf char */
 	u_char	*sc_ep;			/* pointer to last available buf char */
-	u_char	*sc_buf;		/* input buffer */
+	u_char	*sc_pktstart;		/* pointer to beginning of packet */
+	struct mbuf *sc_mbuf;		/* input buffer */
 	u_char	*sc_rxbuf;		/* input destuffing buffer */
 	u_char	*sc_txbuf;		/* output stuffing buffer */
 	u_int	sc_flags;		/* see below */
 	long	sc_oqlen;		/* previous output queue size */
 	long	sc_otimeout;		/* number of times output's stalled */
-#if defined(__NetBSD__) || defined(__OpenBSD__)
+	void	*sc_si;			/* softintr handle */
+#ifdef __NetBSD__
 	int	sc_oldbufsize;		/* previous output buffer size */
 	int	sc_oldbufquot;		/* previous output buffer quoting */
 #endif
@@ -37,10 +38,8 @@ struct st_softc {
 
 	long sc_statetimo;		/* When (secs) current state ends */
 
-	caddr_t	sc_bpf;			/* BPF data */
-	struct timeout sc_timo;
-
-	struct timeval sc_lastpacket;	/* for watchdog */
+	struct bintime sc_lastpacket;	/* for watchdog */
+	LIST_ENTRY(strip_softc) sc_iflist;
 };
 
 
@@ -51,18 +50,11 @@ struct st_softc {
 
 /* visible flags */
 #define	SC_COMPRESS	IFF_LINK0	/* compress TCP traffic */
-#define	SC_NOICMP	IFF_LINK1	/* suppress ICMP traffic */
+#define	SC_NOICMP	IFF_LINK1	/* supress ICMP traffic */
 #define	SC_AUTOCOMP	IFF_LINK2	/* auto-enable TCP compression */
 
 #ifdef _KERNEL
-void	stripattach(int n);
-void	stripclose(struct tty *);
-void	stripinput(int, struct tty *);
-int	stripioctl(struct ifnet *, u_long, caddr_t);
-int	stripopen(dev_t, struct tty *);
-int	stripoutput(struct ifnet *,
-	    struct mbuf *, struct sockaddr *, struct rtentry *);
-void	stripstart(struct tty *);
-int	striptioctl(struct tty *, u_long, caddr_t, int);
+void	stripattach(void);
 #endif /* _KERNEL */
-#endif /* _NET_IF_STRIPVAR_H_ */
+
+#endif /* !_NET_IF_STRIPVAR_H_ */

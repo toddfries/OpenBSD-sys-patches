@@ -1,9 +1,9 @@
-/*	$OpenBSD: if_prom.c,v 1.4 2008/03/09 12:03:03 sobrado Exp $	*/
-/*	$NetBSD: if_prom.c,v 1.9 1997/04/06 08:41:26 cgd Exp $	*/
+/* $NetBSD: if_prom.c,v 1.19 2003/03/13 14:15:58 drochner Exp $ */
 
 /*
  * Copyright (c) 1997 Christopher G. Demetriou.  All rights reserved.
- * Copyright (c) 1993 Adam Glass.  All rights reserved.
+ * Copyright (c) 1993 Adam Glass
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,21 +38,14 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 
-#include <include/rpb.h>
-#include <include/prom.h>
-
-#include <lib/libkern/libkern.h>
-#include <lib/libsa/netif.h>
 #include <lib/libsa/stand.h>
+#include <lib/libsa/net.h>
+#include <lib/libsa/netif.h>
+#include <machine/prom.h>
+#include <lib/libkern/libkern.h>
 
-#include "stand/bbinfo.h"
-
-int prom_probe();
-int prom_match();
-void prom_init();
-int prom_get();
-int prom_put();
-void prom_end();
+#include "stand/common/common.h"
+#include "stand/common/bbinfo.h"
 
 extern struct netif_stats	prom_stats[];
 
@@ -60,70 +53,47 @@ struct netif_dif prom_ifs[] = {
 /*	dif_unit	dif_nsel	dif_stats	dif_private	*/
 {	0,		1,		&prom_stats[0],	0,		},
 };
+#define NPROM_IFS (sizeof(prom_ifs) / sizeof(prom_ifs[0]))
 
-struct netif_stats prom_stats[NENTS(prom_ifs)];
+struct netif_stats prom_stats[NPROM_IFS];
 
 struct netbbinfo netbbinfo = {
 	0xfeedbabedeadbeef,			/* magic number */
 	0,					/* set */
-	0, 0, 0, 0, 0, 0,			/* ether address */
+	{0, 0, 0, 0, 0, 0},			/* ether address */
 	0,					/* force */
 	{ 0, },					/* pad2 */
 	0,					/* cksum */
 	0xfeedbeefdeadbabe,			/* magic number */
 };
 
-struct netif_driver prom_netif_driver = {
-	"prom",			/* netif_bname */
-	prom_match,		/* netif_match */
-	prom_probe,		/* netif_probe */
-	prom_init,		/* netif_init */
-	prom_get,		/* netif_get */
-	prom_put,		/* netif_put */
-	prom_end,		/* netif_end */
-	prom_ifs,		/* netif_ifs */
-	NENTS(prom_ifs)		/* netif_nifs */
-};
+int broken_firmware;
 
-int netfd, broken_firmware;
-
-int
-prom_match(nif, machdep_hint)
-	struct netif *nif;
-	void *machdep_hint;
+static int
+prom_match(struct netif *nif, void *machdep_hint)
 {
 
 	return (1);
 }
 
-int
-prom_probe(nif, machdep_hint)
-	struct netif *nif;
-	void *machdep_hint;
+static int
+prom_probe(struct netif *nif, void *machdep_hint)
 {
 
 	return 0;
 }
 
-int
-prom_put(desc, pkt, len)
-	struct iodesc *desc;
-	void *pkt;
-	int len;
+static int
+prom_put(struct iodesc *desc, void *pkt, size_t len)
 {
 
-	prom_write(netfd, len, pkt, 0);
+	prom_write(booted_dev_fd, len, pkt, 0);
 
 	return len;
 }
 
-
-int
-prom_get(desc, pkt, len, timeout)
-	struct iodesc *desc;
-	void *pkt;
-	int len;
-	time_t timeout;
+static int
+prom_get(struct iodesc *desc, void *pkt, size_t len, time_t timeout)
 {
 	prom_return_t ret;
 	time_t t;
@@ -134,9 +104,9 @@ prom_get(desc, pkt, len, timeout)
 	cc = 0;
 	while (((getsecs() - t) < timeout) && !cc) {
 		if (broken_firmware)
-			ret.bits = prom_read(netfd, 0, hate, 0);
+			ret.bits = prom_read(booted_dev_fd, 0, hate, 0);
 		else
-			ret.bits = prom_read(netfd, sizeof hate, hate, 0);
+			ret.bits = prom_read(booted_dev_fd, sizeof hate, hate, 0);
 		if (ret.u.status == 0)
 			cc = ret.u.retval;
 	}
@@ -144,22 +114,16 @@ prom_get(desc, pkt, len, timeout)
 		cc = min(cc, len);
 	else
 		cc = len;
-	bcopy(hate, pkt, cc);
+	memcpy(pkt, hate, cc);
 
 	return cc;
 }
 
-extern char *strchr();
-
-void
-prom_init(desc, machdep_hint)
-	struct iodesc *desc;
-	void *machdep_hint;
+static void
+prom_init(struct iodesc *desc, void *machdep_hint)
 {
-	prom_return_t ret;
-	char devname[64];
-	int devlen, i, netbbinfovalid;
-	char *enet_addr;
+	int i, netbbinfovalid;
+	const char *enet_addr;
 	u_int64_t *qp, csum;
 
 	broken_firmware = 0;
@@ -181,11 +145,8 @@ prom_init(desc, machdep_hint)
 		    ether_sprintf(netbbinfo.ether_addr));
 #endif
 
-	ret.bits = prom_getenv(PROM_E_BOOTED_DEV, devname, sizeof(devname));
-	devlen = ret.u.retval;
-
 	/* Ethernet address is the 9th component of the booted_dev string. */
-	enet_addr = devname;
+	enet_addr = booted_dev_name;
 	for (i = 0; i < 8; i++) {
 		enet_addr = strchr(enet_addr, ' ');
 		if (enet_addr == NULL) {
@@ -218,42 +179,47 @@ prom_init(desc, machdep_hint)
 
 	if (netbbinfovalid && netbbinfo.force) {
 		printf("boot: using hard-coded ethernet address (forced).\n");
-		bcopy(netbbinfo.ether_addr, desc->myea, sizeof desc->myea);
+		memcpy(desc->myea, netbbinfo.ether_addr, sizeof desc->myea);
 	}
 
 gotit:
 	printf("boot: ethernet address: %s\n", ether_sprintf(desc->myea));
-
-	ret.bits = prom_open(devname, devlen + 1);
-	if (ret.u.status) {
-		printf("prom_init: open failed: %d\n", ret.u.status);
-		goto reallypunt;
-	}
-	netfd = ret.u.retval;
 	return;
 
 punt:
 	broken_firmware = 1;
-	if (netbbinfovalid) {
-		printf("boot: using hard-coded ethernet address.\n");
-		bcopy(netbbinfo.ether_addr, desc->myea, sizeof desc->myea);
-		goto gotit;
-	}
+        if (netbbinfovalid) {
+                printf("boot: using hard-coded ethernet address.\n");
+                memcpy(desc->myea, netbbinfo.ether_addr, sizeof desc->myea);
+                goto gotit;
+        }
 
-reallypunt:
 	printf("\n");
-	printf("Boot device name was: \"%s\"\n", devname);
+	printf("Boot device name was: \"%s\"\n", booted_dev_name);
 	printf("\n");
-	printf("Your firmware may be too old to network-boot OpenBSD/alpha,\n");
+	printf("Your firmware may be too old to network-boot NetBSD/alpha,\n");
 	printf("or you might have to hard-code an ethernet address into\n");
 	printf("your network boot block with setnetbootinfo(8).\n");
+
+	booted_dev_close();
 	halt();
 }
 
-void
-prom_end(nif)
-	struct netif *nif;
+static void
+prom_end(struct netif *nif)
 {
 
-	prom_close(netfd);
+	/* nothing to do */
 }
+
+struct netif_driver prom_netif_driver = {
+	"prom",			/* netif_bname */
+	prom_match,		/* netif_match */
+	prom_probe,		/* netif_probe */
+	prom_init,		/* netif_init */
+	prom_get,		/* netif_get */
+	prom_put,		/* netif_put */
+	prom_end,		/* netif_end */
+	prom_ifs,		/* netif_ifs */
+	NPROM_IFS		/* netif_nifs */
+};

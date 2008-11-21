@@ -1,49 +1,86 @@
-#	$OpenBSD: Makefile,v 1.3 2007/11/25 18:25:32 deraadt Exp $
+#	$NetBSD: Makefile,v 1.15 2008/10/20 03:02:07 christos Exp $
 
-.include "${.CURDIR}/../Makefile.inc"
+S=	${.CURDIR}/../../../../
 
-MAN=	pxeboot.8
+BASE?= pxeboot_ia32
+PROG= ${BASE}.bin
+NOMAN=	# defined
+NEWVERSWHAT=	"PXE Boot"
+STARTFILE=	${PXESTART}
+RELOC=		0x0
 
-.if ${MACHINE} == "i386"
-PROG=	pxeboot
-LD?=	ld
-SIZE?=	size
-LDFLAGS+=-nostdlib -Bstatic
-INSTALL_STRIP=
-
-LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
-CLEANFILES+=	crt0.o
-SRCS=	srt0.S
-
-SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c devopen.c net.c open.c
-S	=${.CURDIR}/../../../..
-SADIR=	${.CURDIR}/..
-
-LDADD=	${LIBSA} ${LIBZ}
-DPADD=	${LIBSA} ${LIBZ}
-
-.PATH:	${S}/lib/libkern/arch/i386 ${S}/lib/libkern
-SRCS+=	strlcpy.c moddi3.c divdi3.c qdivrem.c
-
-.PATH:	${S}/stand/boot
-
-${PROG}: $(OBJS) $(DPADD)
-	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS) $(LDADD)
-	@$(SIZE) ${PROG}
-	@if [ -x ${.OBJDIR}/${PROG} ]; then \
-		objcopy -O binary ${PROG} ${.OBJDIR}/.tmp;\
-		mv -f ${.OBJDIR}/.tmp ${.OBJDIR}/${PROG}; \
-		ls -l ${.OBJDIR}/${PROG}; \
-	fi
-
-.else
-NOPROG=
+.if (${BASE} != "pxeboot_ia32")
+.PATH.c: ${.CURDIR}/../pxeboot
+.PATH.S: ${.CURDIR}/../pxeboot
 .endif
 
-.include <bsd.prog.mk>
+SRCS= main.c dev_net.c devopen.c conf.c exec.c pxe.c pxe_call.S
+# use our own nfs implementation
+.PATH: ${.CURDIR}/../libsa
+SRCS+= nfs.c
 
-CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS}
-CPPFLAGS+=-DLINKADDR=${LINKADDR}
-CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD
-#AFLAGS+=-Wa,-R
-# AFLAGS+=-Wa,-a
+PIE_CFLAGS=
+PIE_AFLAGS=
+PIE_LDFLAGS=
+
+.include <bsd.own.mk>
+
+.if ${MACHINE} == "amd64"
+LDFLAGS+=	-Wl,-m,elf_i386
+AFLAGS+=	-m32
+LIBKERN_ARCH=	i386
+KERNMISCMAKEFLAGS="LIBKERN_ARCH=i386"
+.endif
+
+CPPFLAGS+= -DSLOW	# for libz
+
+.if (${BASE} == "pxeboot_ia32")
+# Take config values from patchable header
+CPPFLAGS+= -DSUPPORT_SERIAL=boot_params.bp_consdev
+CPPFLAGS+= -DCONSPEED=boot_params.bp_conspeed
+CPPFLAGS+= -DCONSADDR=boot_params.bp_consaddr
+CPPFLAGS+= -DCONSOLE_KEYMAP=boot_params.bp_keymap
+CPPFLAGS+= -DDIRECT_SERIAL
+# Various serial line configurations
+#CPPFLAGS+= -DSUPPORT_SERIAL=CONSDEV_PC -DDIRECT_SERIAL
+#	or
+#CPPFLAGS+= -DSUPPORT_SERIAL=CONSDEV_COM0KBD
+#	or
+#CPPFLAGS+= -DSUPPORT_SERIAL=CONSDEV_AUTO 
+#	and maybe 
+#CPPFLAGS+= -DDIRECT_SERIAL -DCOMCONS_KEYPRESS -DCONSPEED=57600
+.endif
+
+.if (${BASE} == "pxeboot_ia32_com0")
+CPPFLAGS+= -DSUPPORT_SERIAL=CONSDEV_COM0 -DDIRECT_SERIAL
+.endif
+
+CPPFLAGS+= -DSUPPORT_BOOTP -DSUPPORT_DHCP
+CPPFLAGS+= -DSUPPORT_TFTP
+CPPFLAGS+= -DSUPPORT_NFS
+#CPPFLAGS+= -DNFS_NOSYMLINK
+
+CPPFLAGS+= -DPASS_MEMMAP
+CPPFLAGS+= -DEPIA_HACK
+
+#CFLAGS= -O2 -fomit-frame-pointer -fno-defer-pop
+CFLAGS+= -Wall -Wmissing-prototypes -Wstrict-prototypes -Wno-main
+
+SAMISCCPPFLAGS+= -DHEAP_START=0x10000 -DHEAP_LIMIT=0x30000
+SAMISCMAKEFLAGS+= SA_USE_CREAD=yes	# Read compressed kernels
+
+CPPFLAGS+= -DPASS_BIOSGEOM
+# if you don't use -DPASS_BIOSGEOM, then set I386_INCLUDE_DISK=no
+#I386MISCMAKEFLAGS= I386_INCLUDE_DISK=no
+
+.if (${BASE} == "pxeboot_ia32")
+VERSIONFILE= ${.CURDIR}/version
+.else
+VERSIONFILE= ${.CURDIR}/../pxeboot/version
+.endif
+
+.include "../Makefile.booters"
+
+release: check_RELEASEDIR
+	${HOST_INSTALL_FILE} -m ${BINMODE} ${PROG} \
+		${RELEASEDIR}/${MACHINE}/installation/misc

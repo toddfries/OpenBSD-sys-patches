@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_hme_pci.c,v 1.12 2006/12/21 22:13:36 jason Exp $	*/
-/*	$NetBSD: if_hme_pci.c,v 1.3 2000/12/28 22:59:13 sommerfeld Exp $	*/
+/*	$NetBSD: if_hme_pci.c,v 1.25 2008/05/29 14:51:27 mrg Exp $	*/
 
 /*
  * Copyright (c) 2000 Matthew R. Green
@@ -13,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -33,6 +30,9 @@
  * PCI front-end device driver for the HME ethernet device.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_hme_pci.c,v 1.25 2008/05/29 14:51:27 mrg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/syslog.h>
@@ -42,30 +42,30 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/in_var.h>
-#include <netinet/ip.h>
-#include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
-#ifdef __sparc64__
-#include <machine/autoconf.h>
-#include <dev/ofw/openfirm.h>
-#endif
-#include <machine/cpu.h>
+#include <sys/intr.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
 #include <dev/ic/hmevar.h>
+#ifdef __sparc__
+#include <machine/promlib.h>
+#endif
+
+#ifndef HME_USE_LOCAL_MAC_ADDRESS
+#ifdef __sparc__
+#define HME_USE_LOCAL_MAC_ADDRESS	0	/* use system-wide address */
+#else
+#define HME_USE_LOCAL_MAC_ADDRESS	1
+#endif
+#endif
 
 struct hme_pci_softc {
 	struct	hme_softc	hsc_hme;	/* HME device */
@@ -74,144 +74,91 @@ struct hme_pci_softc {
 	void			*hsc_ih;
 };
 
-int	hmematch_pci(struct device *, void *, void *);
+int	hmematch_pci(struct device *, struct cfdata *, void *);
 void	hmeattach_pci(struct device *, struct device *, void *);
-int	hme_pci_enaddr(struct hme_softc *, struct pci_attach_args *);
 
-struct cfattach hme_pci_ca = {
-	sizeof(struct hme_pci_softc), hmematch_pci, hmeattach_pci
-};
+CFATTACH_DECL(hme_pci, sizeof(struct hme_pci_softc),
+    hmematch_pci, hmeattach_pci, NULL, NULL);
 
 int
-hmematch_pci(parent, vcf, aux)
-	struct device *parent;
-	void *vcf;
-	void *aux;
+hmematch_pci(struct device *parent, struct cfdata *cf,
+    void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SUN && 
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_HME)
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SUN &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_HMENETWORK)
 		return (1);
 
 	return (0);
 }
 
-#define	PCI_EBUS2_BOOTROM	0x10
-#define	PROMHDR_PTR_DATA	0x18
-#define	PROMDATA_PTR_VPD	0x08
-#define	PROMDATA_DATA2		0x0a
-
-static const u_int8_t hme_promhdr[] = { 0x55, 0xaa };
-static const u_int8_t hme_promdat[] = {
-	'P', 'C', 'I', 'R',
-	PCI_VENDOR_SUN & 0xff, PCI_VENDOR_SUN >> 8,
-	PCI_PRODUCT_SUN_HME & 0xff, PCI_PRODUCT_SUN_HME >> 8
-};
-static const u_int8_t hme_promdat2[] = {
-	0x18, 0x00,			/* structure length */
-	0x00,				/* structure revision */
-	0x00,				/* interface revision */
-	PCI_SUBCLASS_NETWORK_ETHERNET,	/* subclass code */
-	PCI_CLASS_NETWORK		/* class code */
-};
-
-int
-hme_pci_enaddr(struct hme_softc *sc, struct pci_attach_args *hpa)
+#if HME_USE_LOCAL_MAC_ADDRESS
+static inline int
+hmepromvalid(u_int8_t* buf)
 {
-	struct pci_attach_args epa;
-	struct pci_vpd *vpd;
-	pcireg_t cl, id;
-	bus_space_handle_t romh;
-	bus_space_tag_t romt;
-	bus_size_t romsize = 0;
-	u_int8_t buf[32];
-	int dataoff, vpdoff;
-
-	/*
-	 * Dig out VPD (vital product data) and acquire Ethernet address.
-	 * The VPD of hme resides in the Boot PROM (PCI FCode) attached
-	 * to the EBus interface.
-	 * ``Writing FCode 3.x Programs'' (newer ones, dated 1997 and later)
-	 * chapter 2 describes the data structure.
-	 */
-
-	/* get a PCI tag for the EBus bridge (function 0 of the same device) */
-	epa = *hpa;
-	epa.pa_tag = pci_make_tag(hpa->pa_pc, hpa->pa_bus, hpa->pa_device, 0);
-	cl = pci_conf_read(epa.pa_pc, epa.pa_tag, PCI_CLASS_REG);
-	id = pci_conf_read(epa.pa_pc, epa.pa_tag, PCI_ID_REG);
-
-	if (PCI_CLASS(cl) != PCI_CLASS_BRIDGE ||
-	    PCI_PRODUCT(id) != PCI_PRODUCT_SUN_EBUS)
-		goto fail;
-
-	if (pci_mapreg_map(&epa, PCI_EBUS2_BOOTROM, PCI_MAPREG_TYPE_MEM, 0,
-	    &romt, &romh, 0, &romsize, 0))
-		goto fail;
-
-	bus_space_read_region_1(romt, romh, 0, buf, sizeof(buf));
-	if (bcmp(buf, hme_promhdr, sizeof(hme_promhdr)))
-		goto fail;
-
-	dataoff = buf[PROMHDR_PTR_DATA] | (buf[PROMHDR_PTR_DATA + 1] << 8);
-	if (dataoff < 0x1c)
-		goto fail;
-
-	bus_space_read_region_1(romt, romh, dataoff, buf, sizeof(buf));
-	if (bcmp(buf, hme_promdat, sizeof(hme_promdat)) ||
-	    bcmp(buf + PROMDATA_DATA2, hme_promdat2, sizeof(hme_promdat2)))
-		goto fail;
-
-	vpdoff = buf[PROMDATA_PTR_VPD] | (buf[PROMDATA_PTR_VPD + 1] << 8);
-	if (vpdoff < 0x1c)
-		goto fail;
-
-	/*
-	 * The VPD of hme is not in PCI 2.2 standard format.  The length
-	 * in the resource header is in big endian, and resources are not
-	 * properly terminated (only one resource and no end tag).
-	 */
-	bus_space_read_region_1(romt, romh, vpdoff, buf, sizeof(buf));
-
-	/* XXX TODO: Get the data from VPD */
-	vpd = (struct pci_vpd *)(buf + 3);
-	if (!PCI_VPDRES_ISLARGE(buf[0]) ||
-	    PCI_VPDRES_LARGE_NAME(buf[0]) != PCI_VPDRES_TYPE_VPD)
-		goto fail;
-	if (vpd->vpd_key0 != 'N' || vpd->vpd_key1 != 'A')
-		goto fail;
-
-	bcopy(buf + 6, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
-	sc->sc_arpcom.ac_enaddr[5] += hpa->pa_device;
-	bus_space_unmap(romt, romh, romsize);
-	return (0);
-
-fail:
-	if (romsize != 0)
-		bus_space_unmap(romt, romh, romsize);
-	return (-1);
+	return buf[0] == 0x18 && buf[1] == 0x00 &&	/* structure length */
+	    buf[2] == 0x00 &&				/* revision */
+	    (buf[3] == 0x00 ||				/* hme */
+	     buf[3] == 0x80) &&				/* qfe */
+	    buf[4] == PCI_SUBCLASS_NETWORK_ETHERNET &&	/* subclass code */
+	    buf[5] == PCI_CLASS_NETWORK;		/* class code */
 }
 
+static inline int
+hmevpdoff(bus_space_tag_t romt, bus_space_handle_t romh, int vpdoff, int dev)
+{
+#define VPDLEN (3 + sizeof(struct pci_vpd) + ETHER_ADDR_LEN)
+	if (bus_space_read_1(romt, romh, vpdoff + VPDLEN) != 0x79 &&
+	    bus_space_read_1(romt, romh, vpdoff + 4 * VPDLEN) == 0x79) {
+		/*
+		 * Use the Nth NA for the Nth HME on
+		 * this SUNW,qfe.
+		 */
+		vpdoff += dev * VPDLEN;
+	}
+	return vpdoff;
+}
+#endif
+
 void
-hmeattach_pci(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+hmeattach_pci(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	struct hme_pci_softc *hsc = (void *)self;
 	struct hme_softc *sc = &hsc->hsc_hme;
 	pci_intr_handle_t ih;
-	/* XXX the following declarations should be elsewhere */
-	extern void myetheraddr(u_char *);
 	pcireg_t csr;
-	const char *intrstr = NULL;
-	bus_size_t size;
-	int type, gotenaddr = 0;
+	const char *intrstr;
+	int type;
+#if HME_USE_LOCAL_MAC_ADDRESS
+	struct pci_attach_args	ebus_pa;
+	pcireg_t		ebus_cl, ebus_id;
+	u_int8_t		*enaddr;
+	bus_space_tag_t		romt;
+	bus_space_handle_t	romh;
+	bus_size_t		romsize;
+	u_int8_t		buf[64];
+	int			dataoff, vpdoff;
+	struct pci_vpd		*vpd;
+	static const u_int8_t promhdr[] = { 0x55, 0xaa };
+#define PROMHDR_PTR_DATA	0x18
+	static const u_int8_t promdat[] = {
+		0x50, 0x43, 0x49, 0x52,		/* "PCIR" */
+		PCI_VENDOR_SUN & 0xff, PCI_VENDOR_SUN >> 8,
+		PCI_PRODUCT_SUN_HMENETWORK & 0xff,
+		PCI_PRODUCT_SUN_HMENETWORK >> 8
+	};
+#define PROMDATA_PTR_VPD	0x08
+#define PROMDATA_DATA2		0x0a
+#endif	/* HME_USE_LOCAL_MAC_ADDRESS */
+
+	printf(": Sun Happy Meal Ethernet, rev. %d\n",
+	    PCI_REVISION(pa->pa_class));
 
 	/*
 	 * enable io/memory-space accesses.  this is kinda of gross; but
-	 * the hme comes up with neither IO space enabled, or memory space.
+	 # the hme comes up with neither IO space enabled, or memory space.
 	 */
 	if (pa->pa_memt)
 		pa->pa_flags |= PCI_FLAGS_MEM_ENABLED;
@@ -246,61 +193,134 @@ hmeattach_pci(parent, self, aux)
 
 #define PCI_HME_BASEADDR	0x10
 	if (pci_mapreg_map(pa, PCI_HME_BASEADDR, type, 0,
-	    &hsc->hsc_memt, &hsc->hsc_memh, NULL, &size, 0) != 0) {
-		printf(": could not map hme registers\n");
+	    &hsc->hsc_memt, &hsc->hsc_memh, NULL, NULL) != 0)
+	{
+		aprint_error_dev(&sc->sc_dev, "unable to map device registers\n");
 		return;
 	}
 	sc->sc_seb = hsc->hsc_memh;
-	bus_space_subregion(sc->sc_bustag, hsc->hsc_memh, 0x2000, 0x2000,
-	    &sc->sc_etx);
-	bus_space_subregion(sc->sc_bustag, hsc->hsc_memh, 0x4000, 0x2000,
-	    &sc->sc_erx);
-	bus_space_subregion(sc->sc_bustag, hsc->hsc_memh, 0x6000, 0x1000,
-	    &sc->sc_mac);
-	bus_space_subregion(sc->sc_bustag, hsc->hsc_memh, 0x7000, 0x1000,
-	    &sc->sc_mif);
-
-	if (hme_pci_enaddr(sc, pa) == 0)
-		gotenaddr = 1;
-
-#ifdef __sparc64__
-	if (!gotenaddr) {
-		if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
-		    sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN) <= 0)
-			myetheraddr(sc->sc_arpcom.ac_enaddr);
-		gotenaddr = 1;
-	}
-#endif
-#ifdef __powerpc__
-	if (!gotenaddr) {
-		pci_ether_hw_addr(pa->pa_pc, sc->sc_arpcom.ac_enaddr);
-		gotenaddr = 1;
-	}
-#endif
-
-	sc->sc_burst = 16;	/* XXX */
-
-	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": couldn't map interrupt\n");
-		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, size);
+	if (bus_space_subregion(hsc->hsc_memt, hsc->hsc_memh, 0x2000,
+	    0x1000, &sc->sc_etx)) {
+		aprint_error_dev(&sc->sc_dev, "unable to subregion ETX registers\n");
 		return;
-	}	
+	}
+	if (bus_space_subregion(hsc->hsc_memt, hsc->hsc_memh, 0x4000,
+	    0x1000, &sc->sc_erx)) {
+		aprint_error_dev(&sc->sc_dev, "unable to subregion ERX registers\n");
+		return;
+	}
+	if (bus_space_subregion(hsc->hsc_memt, hsc->hsc_memh, 0x6000,
+	    0x1000, &sc->sc_mac)) {
+		aprint_error_dev(&sc->sc_dev, "unable to subregion MAC registers\n");
+		return;
+	}
+	if (bus_space_subregion(hsc->hsc_memt, hsc->hsc_memh, 0x7000,
+	    0x1000, &sc->sc_mif)) {
+		aprint_error_dev(&sc->sc_dev, "unable to subregion MIF registers\n");
+		return;
+	}
+
+#if HME_USE_LOCAL_MAC_ADDRESS
+	/*
+	 * Dig out VPD (vital product data) and acquire Ethernet address.
+	 * The VPD of hme resides in the Boot PROM (PCI FCode) attached
+	 * to the EBus interface.
+	 */
+	/*
+	 * ``Writing FCode 3.x Programs'' (newer ones, dated 1997 and later)
+	 * chapter 2 describes the data structure.
+	 */
+
+	enaddr = NULL;
+
+	/* get a PCI tag for the EBus bridge (function 0 of the same device) */
+	ebus_pa = *pa;
+	ebus_pa.pa_tag = pci_make_tag(pa->pa_pc, pa->pa_bus, pa->pa_device, 0);
+
+	ebus_cl = pci_conf_read(ebus_pa.pa_pc, ebus_pa.pa_tag, PCI_CLASS_REG);
+	ebus_id = pci_conf_read(ebus_pa.pa_pc, ebus_pa.pa_tag, PCI_ID_REG);
+
+#define PCI_EBUS2_BOOTROM	0x10
+	if (PCI_CLASS(ebus_cl) == PCI_CLASS_BRIDGE &&
+	    PCI_PRODUCT(ebus_id) == PCI_PRODUCT_SUN_EBUS &&
+	    pci_mapreg_map(&ebus_pa, PCI_EBUS2_BOOTROM, PCI_MAPREG_TYPE_MEM,
+		BUS_SPACE_MAP_CACHEABLE | BUS_SPACE_MAP_PREFETCHABLE,
+		&romt, &romh, 0, &romsize) == 0) {
+
+		/* read PCI Expansion PROM Header */
+		bus_space_read_region_1(romt, romh, 0, buf, sizeof buf);
+		if (memcmp(buf, promhdr, sizeof promhdr) == 0 &&
+		    (dataoff = (buf[PROMHDR_PTR_DATA] |
+			(buf[PROMHDR_PTR_DATA + 1] << 8))) >= 0x1c) {
+
+			/* read PCI Expansion PROM Data */
+			bus_space_read_region_1(romt, romh, dataoff,
+			    buf, sizeof buf);
+			if (memcmp(buf, promdat, sizeof promdat) == 0 &&
+			    hmepromvalid(buf + PROMDATA_DATA2) &&
+			    (vpdoff = (buf[PROMDATA_PTR_VPD] |
+				(buf[PROMDATA_PTR_VPD + 1] << 8))) >= 0x1c) {
+
+				/*
+				 * The VPD of hme is not in PCI 2.2 standard
+				 * format.  The length in the resource header
+				 * is in big endian, and resources are not
+				 * properly terminated (only one resource
+				 * and no end tag).
+				 */
+				vpdoff = hmevpdoff(romt, romh, vpdoff,
+				    pa->pa_device);
+				/* read PCI VPD */
+				bus_space_read_region_1(romt, romh,
+				    vpdoff, buf, sizeof buf);
+				vpd = (void *)(buf + 3);
+				if (PCI_VPDRES_ISLARGE(buf[0]) &&
+				    PCI_VPDRES_LARGE_NAME(buf[0])
+					== PCI_VPDRES_TYPE_VPD &&
+				    /* buf[1] == 0 && buf[2] == 9 && */ /*len*/
+				    vpd->vpd_key0 == 0x4e /* N */ &&
+				    vpd->vpd_key1 == 0x41 /* A */ &&
+				    vpd->vpd_len == ETHER_ADDR_LEN) {
+					/*
+					 * Ethernet address found
+					 */
+					enaddr = buf + 6;
+				}
+			}
+		}
+		bus_space_unmap(romt, romh, romsize);
+	}
+
+	if (enaddr)
+		memcpy(sc->sc_enaddr, enaddr, ETHER_ADDR_LEN);
+	else
+#endif	/* HME_USE_LOCAL_MAC_ADDRESS */
+#ifdef __sparc__
+		prom_getether(PCITAG_NODE(pa->pa_tag), sc->sc_enaddr);
+#else
+		printf("%s: no Ethernet address found\n", device_xname(&sc->sc_dev));
+#endif
+
+	/*
+	 * Map and establish our interrupt.
+	 */
+	if (pci_intr_map(pa, &ih) != 0) {
+		aprint_error_dev(&sc->sc_dev, "unable to map interrupt\n");
+		return;
+	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	hsc->hsc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET,
-	    hme_intr, sc, self->dv_xname);
+	hsc->hsc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET, hme_intr, sc);
 	if (hsc->hsc_ih == NULL) {
-		printf(": couldn't establish interrupt");
+		aprint_error_dev(&sc->sc_dev, "unable to establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, size);
 		return;
 	}
+	printf("%s: interrupting at %s\n", device_xname(&sc->sc_dev), intrstr);
 
-	printf(": %s", intrstr);
+	sc->sc_burst = 16;	/* XXX */
 
-	/*
-	 * call the main configure
-	 */
+	/* Finish off the attach. */
 	hme_config(sc);
 }

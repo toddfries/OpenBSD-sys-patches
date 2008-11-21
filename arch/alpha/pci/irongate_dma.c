@@ -1,5 +1,4 @@
-/*	$OpenBSD: irongate_dma.c,v 1.4 2001/11/06 19:53:13 miod Exp $	*/
-/* $NetBSD: irongate_dma.c,v 1.3 2000/06/29 08:58:47 mrg Exp $ */
+/* $NetBSD: irongate_dma.c,v 1.4 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -50,11 +42,9 @@
  * bounced (this is not unlike the Jensen, actually).
  */
 
-/*
- * XXX - We should define this before including bus.h, but since other stuff
- *       pulls in bus.h we must do this here.
- */
-#define _ALPHA_BUS_DMA_PRIVATE
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: irongate_dma.c,v 1.4 2008/04/28 20:23:11 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,6 +54,7 @@
 
 #include <uvm/uvm_extern.h>
 
+#define _ALPHA_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/pci/pcireg.h>
@@ -74,8 +65,6 @@
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
-
-#include "isadma.h"
 
 bus_dma_tag_t irongate_dma_get_tag(bus_dma_tag_t, alpha_bus_t);
 
@@ -110,7 +99,6 @@ irongate_dma_init(struct irongate_config *icp)
 	t->_dmamem_unmap = _bus_dmamem_unmap;
 	t->_dmamem_mmap = _bus_dmamem_mmap;
 
-#if NISADMA > 0
 	/*
 	 * Initialize the DMA tag used for ISA DMA.
 	 */
@@ -136,7 +124,6 @@ irongate_dma_init(struct irongate_config *icp)
 	t->_dmamem_map = _bus_dmamem_map;
 	t->_dmamem_unmap = _bus_dmamem_unmap;
 	t->_dmamem_mmap = _bus_dmamem_mmap;
-#endif
 
 	/* XXX XXX BEGIN XXX XXX */
 	{							/* XXX */

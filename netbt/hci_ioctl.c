@@ -1,4 +1,3 @@
-/*	$OpenBSD: hci_ioctl.c,v 1.2 2008/02/24 21:34:48 uwe Exp $	*/
 /*	$NetBSD: hci_ioctl.c,v 1.7 2007/11/28 20:16:12 plunky Exp $	*/
 
 /*-
@@ -31,9 +30,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hci_ioctl.c,v 1.7 2007/11/28 20:16:12 plunky Exp $");
+
 #include <sys/param.h>
 #include <sys/domain.h>
 #include <sys/ioctl.h>
+#include <sys/kauth.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
@@ -57,16 +60,16 @@ hci_dump(void)
 	struct rfcomm_session *rs;
 	struct rfcomm_dlc *dlc;
 
-	printf("HCI:\n");
-	TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
-		printf("UNIT %s: flags 0x%4.4x, "
+	uprintf("HCI:\n");
+	SIMPLEQ_FOREACH(unit, &hci_unit_list, hci_next) {
+		uprintf("UNIT %s: flags 0x%4.4x, "
 			"num_cmd=%d, num_acl=%d, num_sco=%d\n",
 			device_xname(unit->hci_dev), unit->hci_flags,
 			unit->hci_num_cmd_pkts,
 			unit->hci_num_acl_pkts,
 			unit->hci_num_sco_pkts);
 		TAILQ_FOREACH(link, &unit->hci_links, hl_next) {
-			printf("+HANDLE #%d: %s "
+			uprintf("+HANDLE #%d: %s "
 			    "raddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x, "
 			    "state %d, refcnt %d\n",
 			    link->hl_handle,
@@ -76,9 +79,9 @@ hci_dump(void)
 		}
 	}
 
-	printf("L2CAP:\n");
+	uprintf("L2CAP:\n");
 	LIST_FOREACH(chan, &l2cap_active_list, lc_ncid) {
-		printf("CID #%d state %d, psm=0x%4.4x, "
+		uprintf("CID #%d state %d, psm=0x%4.4x, "
 		    "laddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x, "
 		    "raddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
 		    chan->lc_lcid, chan->lc_state, chan->lc_raddr.bt_psm,
@@ -87,23 +90,23 @@ hci_dump(void)
 	}
 
 	LIST_FOREACH(chan, &l2cap_listen_list, lc_ncid) {
-		printf("LISTEN psm=0x%4.4x, "
+		uprintf("LISTEN psm=0x%4.4x, "
 		    "laddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
 		    chan->lc_laddr.bt_psm,
 		    BDADDR(chan->lc_laddr.bt_bdaddr));
 	}
 
-	printf("RFCOMM:\n");
+	uprintf("RFCOMM:\n");
 	LIST_FOREACH(rs, &rfcomm_session_active, rs_next) {
 		chan = rs->rs_l2cap;
-		printf("SESSION: state=%d, flags=0x%4.4x, psm 0x%4.4x "
+		uprintf("SESSION: state=%d, flags=0x%4.4x, psm 0x%4.4x "
 		    "laddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x, "
 		    "raddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
 		    rs->rs_state, rs->rs_flags, chan->lc_raddr.bt_psm,
 		    BDADDR(chan->lc_laddr.bt_bdaddr),
 		    BDADDR(chan->lc_raddr.bt_bdaddr));
 		LIST_FOREACH(dlc, &rs->rs_dlcs, rd_next) {
-			printf("+DLC channel=%d, dlci=%d, "
+			uprintf("+DLC channel=%d, dlci=%d, "
 			    "state=%d, flags=0x%4.4x, rxcred=%d, rxsize=%ld, "
 			    "txcred=%d, pending=%d, txqlen=%d\n",
 			    dlc->rd_raddr.bt_channel, dlc->rd_dlci,
@@ -116,12 +119,12 @@ hci_dump(void)
 
 	LIST_FOREACH(rs, &rfcomm_session_listen, rs_next) {
 		chan = rs->rs_l2cap;
-		printf("LISTEN: psm 0x%4.4x, "
+		uprintf("LISTEN: psm 0x%4.4x, "
 		    "laddr=%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
 		    chan->lc_laddr.bt_psm,
 		    BDADDR(chan->lc_laddr.bt_bdaddr));
 		LIST_FOREACH(dlc, &rs->rs_dlcs, rd_next)
-			printf("+DLC channel=%d\n", dlc->rd_laddr.bt_channel);
+			uprintf("+DLC channel=%d\n", dlc->rd_laddr.bt_channel);
 	}
 }
 
@@ -129,7 +132,7 @@ hci_dump(void)
 #endif
 
 int
-hci_ioctl(unsigned long cmd, void *data, struct proc *p)
+hci_ioctl(unsigned long cmd, void *data, struct lwp *l)
 {
 	struct btreq *btr = data;
 	struct hci_unit *unit;
@@ -172,9 +175,9 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 	case SIOCGBTSTATS:
 	case SIOCZBTSTATS:
 	case SIOCSBTSCOMTU:
-		TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
-			if (strncmp(device_xname(unit->hci_dev), btr->btr_name,
-			    HCI_DEVNAME_SIZE) == 0)
+		SIMPLEQ_FOREACH(unit, &hci_unit_list, hci_next) {
+			if (strncmp(device_xname(unit->hci_dev),
+			    btr->btr_name, HCI_DEVNAME_SIZE) == 0)
 				break;
 		}
 
@@ -190,9 +193,9 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 	switch(cmd) {
 	case SIOCNBTINFO:	/* get next info */
 		if (unit)
-			unit = TAILQ_NEXT(unit, hci_next);
+			unit = SIMPLEQ_NEXT(unit, hci_next);
 		else
-			unit = TAILQ_FIRST(&hci_unit_list);
+			unit = SIMPLEQ_FIRST(&hci_unit_list);
 
 		if (unit == NULL) {
 			err = ENXIO;
@@ -219,7 +222,8 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 		break;
 
 	case SIOCSBTFLAGS:	/* set unit flags (privileged) */
-		err = suser(p, 0);
+		err = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL);
 		if (err)
 			break;
 
@@ -244,7 +248,8 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 		break;
 
 	case SIOCSBTPOLICY:	/* set unit link policy (privileged) */
-		err = suser(p, 0);
+		err = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL);
 		if (err)
 			break;
 
@@ -254,7 +259,8 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 		break;
 
 	case SIOCSBTPTYPE:	/* set unit packet types (privileged) */
-		err = suser(p, 0);
+		err = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL);
 		if (err)
 			break;
 
@@ -268,7 +274,8 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 		break;
 
 	case SIOCZBTSTATS:	/* get & reset unit statistics */
-		err = suser(p, 0);
+		err = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL);
 		if (err)
 			break;
 
@@ -282,7 +289,8 @@ hci_ioctl(unsigned long cmd, void *data, struct proc *p)
 		 * sent to USB bluetooth controllers that are not an
 		 * integer number of frame sizes, the USB bus locks up.
 		 */
-		err = suser(p, 0);
+		err = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL);
 		if (err)
 			break;
 

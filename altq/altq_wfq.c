@@ -1,4 +1,4 @@
-/*	$NetBSD: altq_wfq.c,v 1.17 2006/11/16 01:32:37 christos Exp $	*/
+/*	$NetBSD: altq_wfq.c,v 1.19 2008/09/11 17:58:59 joerg Exp $	*/
 /*	$KAME: altq_wfq.c,v 1.14 2005/04/13 03:44:25 suz Exp $	*/
 
 /*
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: altq_wfq.c,v 1.17 2006/11/16 01:32:37 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: altq_wfq.c,v 1.19 2008/09/11 17:58:59 joerg Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_altq.h"
@@ -73,6 +73,7 @@ static int		wfq_ifenqueue(struct ifaltq *, struct mbuf *,
 				      struct altq_pktattr *);
 static u_long		wfq_hash(struct flowinfo *, int);
 static inline u_long	wfq_hashbydstaddr(struct flowinfo *, int);
+static inline u_long	wfq_hashbysrcaddr(struct flowinfo *, int);
 static inline u_long	wfq_hashbysrcport(struct flowinfo *, int);
 static wfq		*wfq_maxqueue(wfq_state_t *);
 static struct mbuf	*wfq_ifdequeue(struct ifaltq *, int);
@@ -364,6 +365,30 @@ wfq_hashbydstaddr(struct flowinfo *flow, int n)
 }
 
 static inline u_long
+wfq_hashbysrcaddr(struct flowinfo *flow, int n)
+{
+	u_long val = 0;
+
+	if (flow != NULL) {
+		if (flow->fi_family == AF_INET) {
+			struct flowinfo_in *fp = (struct flowinfo_in *)flow;
+
+			val = fp->fi_src.s_addr;
+			val = val ^ (val >> 8) ^ (val >> 16) ^ (val >> 24);
+		}
+#ifdef INET6
+		else if (flow->fi_family == AF_INET6) {
+			struct flowinfo_in6 *fp6 = (struct flowinfo_in6 *)flow;
+
+			val = ntohl(fp6->fi6_flowlabel);
+		}
+#endif
+	}
+
+	return (val % n);
+}
+
+static inline u_long
 wfq_hashbysrcport(struct flowinfo *flow, int n)
 {
 	u_long val = 0;
@@ -594,6 +619,13 @@ wfq_config(struct wfq_conf *cf)
 		wfqp->fbmask |= FIMB6_FLABEL;	/* use flowlabel for ipv6 */
 #endif
 		break;
+	case WFQ_HASH_SRCADDR:
+		wfqp->hash_func = wfq_hashbysrcaddr;
+		wfqp->fbmask = FIMB4_DADDR;
+#ifdef INET6
+		wfqp->fbmask |= FIMB6_FLABEL;	/* use flowlabel for ipv6 */
+#endif
+		break;
 	default:
 		error = EINVAL;
 		break;
@@ -634,7 +666,7 @@ wfqclose(dev_t dev, int flag, int fmt,
 }
 
 int
-wfqioctl(dev_t dev, ioctlcmd_t cmd, caddr_t addr, int flag,
+wfqioctl(dev_t dev, ioctlcmd_t cmd, void *addr, int flag,
     struct lwp *l)
 {
 	int	error = 0;

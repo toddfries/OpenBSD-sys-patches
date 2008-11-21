@@ -2,7 +2,7 @@
  *
  * Module Name: evsci - System Control Interrupt configuration and
  *                      legacy to ACPI mode state transition functions
- *              xRevision: 1.99 $
+ *              $Revision: 1.4 $
  *
  ******************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -116,9 +116,6 @@
  *
  *****************************************************************************/
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: evsci.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #include "acpi.h"
 #include "acevents.h"
 
@@ -154,7 +151,7 @@ AcpiEvSciXruptHandler (
     UINT32                  InterruptHandled = ACPI_INTERRUPT_NOT_HANDLED;
 
 
-    ACPI_FUNCTION_TRACE("EvSciXruptHandler");
+    ACPI_FUNCTION_TRACE (EvSciXruptHandler);
 
 
     /*
@@ -174,6 +171,7 @@ AcpiEvSciXruptHandler (
      */
     InterruptHandled |= AcpiEvGpeDetect (GpeXruptList);
 
+    AcpiSciCount++;
     return_UINT32 (InterruptHandled);
 }
 
@@ -198,7 +196,7 @@ AcpiEvGpeXruptHandler (
     UINT32                  InterruptHandled = ACPI_INTERRUPT_NOT_HANDLED;
 
 
-    ACPI_FUNCTION_TRACE("EvGpeXruptHandler");
+    ACPI_FUNCTION_TRACE (EvGpeXruptHandler);
 
 
     /*
@@ -235,11 +233,11 @@ AcpiEvInstallSciHandler (
     UINT32                  Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE ("EvInstallSciHandler");
+    ACPI_FUNCTION_TRACE (EvInstallSciHandler);
 
 
-    Status = AcpiOsInstallInterruptHandler ((UINT32) AcpiGbl_FADT->SciInt,
-                        AcpiEvSciXruptHandler, AcpiGbl_GpeXruptListHead);
+    Status = AcpiOsInstallInterruptHandler ((UINT32) AcpiGbl_FADT.SciInterrupt,
+                AcpiEvSciXruptHandler, AcpiGbl_GpeXruptListHead);
     return_ACPI_STATUS (Status);
 }
 
@@ -270,13 +268,13 @@ AcpiEvRemoveSciHandler (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE ("EvRemoveSciHandler");
+    ACPI_FUNCTION_TRACE (EvRemoveSciHandler);
 
 
     /* Just let the OS remove the handler and disable the level */
 
-    Status = AcpiOsRemoveInterruptHandler ((UINT32) AcpiGbl_FADT->SciInt,
-                                    AcpiEvSciXruptHandler);
+    Status = AcpiOsRemoveInterruptHandler ((UINT32) AcpiGbl_FADT.SciInterrupt,
+                AcpiEvSciXruptHandler);
 
     return_ACPI_STATUS (Status);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: i80321_pci.c,v 1.3 2007/08/06 08:28:09 tom Exp $	*/
-/*	$NetBSD: i80321_pci.c,v 1.7 2005/12/15 01:44:00 briggs Exp $	*/
+/*	$NetBSD: i80321_pci.c,v 1.9 2007/10/17 19:53:43 garbled Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -40,6 +39,9 @@
  * PCI configuration support for i80321 I/O Processor chip.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i80321_pci.c,v 1.9 2007/10/17 19:53:43 garbled Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -54,7 +56,10 @@
 #include <arm/xscale/i80321var.h>
 
 #include <dev/pci/ppbreg.h>
+#include <dev/pci/pciconf.h>
 
+#include "opt_pci.h"
+#include "opt_i80321.h"
 #include "pci.h"
 
 void		i80321_pci_attach_hook(struct device *, struct device *,
@@ -106,9 +111,16 @@ i80321_pci_init(pci_chipset_tag_t pc, void *cookie)
 	    sc->sc_ioout_xlate + sc->sc_ioout_xlate_offset,
 	    sc->sc_ioout_xlate + VERDE_OUT_XLATE_IO_WIN_SIZE - 1,
 	    M_DEVBUF, NULL, 0, EX_NOWAIT);
+
+#ifdef I80321_USE_DIRECT_WIN
+	memext = extent_create("pcimem", VERDE_OUT_DIRECT_WIN_BASE + VERDE_OUT_DIRECT_WIN_SKIP,
+	    VERDE_OUT_DIRECT_WIN_BASE + VERDE_OUT_DIRECT_WIN_SIZE- 1,
+	    M_DEVBUF, NULL, 0, EX_NOWAIT);
+#else
 	memext = extent_create("pcimem", sc->sc_owin[0].owin_xlate_lo,
 	    sc->sc_owin[0].owin_xlate_lo + VERDE_OUT_XLATE_MEM_WIN_SIZE - 1,
 	    M_DEVBUF, NULL, 0, EX_NOWAIT);
+#endif
 
 	aprint_normal("%s: configuring PCI bus\n", sc->sc_dev.dv_xname);
 	pci_configure_bus(pc, ioext, memext, NULL, busno, arm_dcache_align);
@@ -116,6 +128,11 @@ i80321_pci_init(pci_chipset_tag_t pc, void *cookie)
 	extent_destroy(ioext);
 	extent_destroy(memext);
 #endif
+}
+
+void
+pci_conf_interrupt(pci_chipset_tag_t pc, int a, int b, int c, int d, int *p)
+{
 }
 
 void
@@ -182,7 +199,7 @@ i80321_pci_conf_setup(struct i80321_softc *sc, pcitag_t tag, int offset,
 		if (ps->ps_d > (31 - 16))
 			return (1);
 		/*
-		 * NOTE: PCI-X requires that devices update their
+		 * NOTE: PCI-X requires that that devices updated their
 		 * PCIXSR on every config write with the device number
 		 * specified in AD[15:11].  If we don't set this field,
 		 * each device could end of thinking it is at device 0,
@@ -232,12 +249,6 @@ i80321_pci_conf_read(void *v, pcitag_t tag, int offset)
 	}
 
 	PCI_CONF_UNLOCK(s);
-
-#if 0
-	if (rv != 0xffffffff)
-		printf("conf read %x %x %x %x: %x\n",
-		    ps.ps_b, ps.ps_d, ps.ps_f, offset, rv);
-#endif
 
 	return (rv);
 }

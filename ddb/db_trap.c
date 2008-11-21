@@ -1,30 +1,29 @@
-/*	$OpenBSD: db_trap.c,v 1.13 2007/06/04 17:03:04 miod Exp $	*/
-/*	$NetBSD: db_trap.c,v 1.9 1996/02/05 01:57:18 christos Exp $	*/
+/*	$NetBSD: db_trap.c,v 1.24 2007/02/21 22:59:57 thorpej Exp $	*/
 
-/* 
+/*
  * Mach Operating System
- * Copyright (c) 1993,1992,1991,1990 Carnegie Mellon University
+ * Copyright (c) 1991,1990 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
+ *
  * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
- * any improvements or extensions that they make and grant Carnegie Mellon
- * the rights to redistribute these changes.
+ *
+ * any improvements or extensions that they make and grant Carnegie the
+ * rights to redistribute these changes.
  *
  * 	Author: David B. Golub, Carnegie Mellon University
  *	Date:	7/90
@@ -33,11 +32,12 @@
 /*
  * Trap entry point to kernel debugger.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: db_trap.c,v 1.24 2007/02/21 22:59:57 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/systm.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/db_machdep.h>
 
@@ -47,24 +47,49 @@
 #include <ddb/db_output.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
-#include <ddb/db_interface.h>
+
+/*
+ * db_trap_callback can be hooked by MD port code to handle special
+ * cases such as disabling hardware watchdogs while in DDB.
+ */
+void (*db_trap_callback)(int);
+
+int db_trap_type;
 
 void
 db_trap(int type, int code)
 {
-	boolean_t	bkpt;
-	boolean_t	watchpt;
+	bool	bkpt;
+	bool	watchpt;
+
+	db_trap_type = type;
 
 	bkpt = IS_BREAKPOINT_TRAP(type, code);
 	watchpt = IS_WATCHPOINT_TRAP(type, code);
 
+	if (db_trap_callback) db_trap_callback(1);
+
 	if (db_stop_at_pc(DDB_REGS, &bkpt)) {
 		if (db_inst_count) {
-			db_printf("After %d instructions ", db_inst_count);
-			db_printf("(%d loads, %d stores),\n", db_load_count,
-			    db_store_count);
+			db_printf("After %d instructions "
+			    "(%d loads, %d stores),\n",
+			    db_inst_count, db_load_count, db_store_count);
 		}
-		if (bkpt)
+		if (curlwp != NULL) {
+			if (bkpt)
+				db_printf("Breakpoint");
+			else if (watchpt)
+				db_printf("Watchpoint");
+			else
+				db_printf("Stopped");
+			if (curproc == NULL)
+				db_printf("; curlwp = %p,"
+				    " curproc is NULL at\t", curlwp);
+			else
+				db_printf(" in pid %d.%d (%s) at\t",
+				    curproc->p_pid, curlwp->l_lid,
+				    curproc->p_comm);
+		} else if (bkpt)
 			db_printf("Breakpoint at\t");
 		else if (watchpt)
 			db_printf("Watchpoint at\t");
@@ -73,26 +98,11 @@ db_trap(int type, int code)
 		db_dot = PC_REGS(DDB_REGS);
 		db_print_loc_and_inst(db_dot);
 
-		/*
-		 * Just in case we do not have any usable console driver,
-		 * give the user a traceback.
-		 */
-		if (cold) {
-			db_stack_trace_print(db_dot, 0, 10 /* arbitrary */, "",
-			    db_printf);
-		}
-
-		if (panicstr != NULL) {
-			if (db_print_position() != 0)
-				db_printf("\n");
-			db_printf("RUN AT LEAST 'trace' AND 'ps' AND INCLUDE "
-			    "OUTPUT WHEN REPORTING THIS PANIC!\n");
-			db_printf("DO NOT EVEN BOTHER REPORTING THIS WITHOUT "
-			    "INCLUDING THAT INFORMATION!\n");
-		}
-
 		db_command_loop();
 	}
 
 	db_restart_at_pc(DDB_REGS, watchpt);
+
+	if (db_trap_callback)
+		db_trap_callback(0);
 }

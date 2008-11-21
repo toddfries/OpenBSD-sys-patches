@@ -1,5 +1,4 @@
-/* $OpenBSD: osf1_socket.c,v 1.1 2000/08/04 15:47:55 ericj Exp $ */
-/* $NetBSD: osf1_socket.c,v 1.4 1999/05/10 01:58:37 cgd Exp $ */
+/* $NetBSD: osf1_socket.c,v 1.19 2007/12/20 23:03:03 dsl Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -36,17 +35,17 @@
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -58,26 +57,28 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: osf1_socket.c,v 1.19 2007/12/20 23:03:03 dsl Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+#include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/exec.h>
 
 #include <compat/osf1/osf1.h>
 #include <compat/osf1/osf1_syscallargs.h>
-#include <compat/osf1/osf1_util.h>
+#include <compat/common/compat_util.h>
 #include <compat/osf1/osf1_cvt.h>
 
 int
-osf1_sys_recvmsg_xopen(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_recvmsg_xopen(struct lwp *l, const struct osf1_sys_recvmsg_xopen_args *uap, register_t *retval)
 {
 
 	/* XXX */
@@ -85,25 +86,16 @@ osf1_sys_recvmsg_xopen(p, v, retval)
 }
 
 int
-osf1_sys_sendmsg_xopen(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_sendmsg_xopen(struct lwp *l, const struct osf1_sys_sendmsg_xopen_args *uap, register_t *retval)
 {
-	struct osf1_sys_sendmsg_xopen_args *uap = v;
-	struct sys_sendmsg_args a;
 	struct osf1_msghdr_xopen osf_msghdr;
 	struct osf1_iovec_xopen osf_iovec, *osf_iovec_ptr;
 	struct msghdr bsd_msghdr;
-	struct iovec bsd_iovec, *bsd_iovec_ptr;
+	struct iovec *bsd_iovec;
 	unsigned long leftovers;
-	caddr_t sg;
-	unsigned int i;
+	int flags;
+	unsigned int i, iov_len;
 	int error;
-
-	sg = stackgap_init(p->p_emul);
-
-	SCARG(&a, s) = SCARG(uap, s);
 
 	/*
 	 * translate msghdr structure
@@ -116,40 +108,10 @@ osf1_sys_sendmsg_xopen(p, v, retval)
 	if (error != 0)
 		return (error);
 
-        if (STACKGAPLEN < (bsd_msghdr.msg_iovlen * sizeof (struct iovec) +
-	    sizeof (struct msghdr)))
-{
-printf("sendmsg space\n");
-                return (EINVAL);
-}
-
-	SCARG(&a, msg) = stackgap_alloc(&sg, sizeof bsd_msghdr);
-	bsd_msghdr.msg_iov = stackgap_alloc(&sg,
-	    bsd_msghdr.msg_iovlen * sizeof (struct iovec));
-
-	if ((error = copyout(&bsd_msghdr, (caddr_t)SCARG(&a, msg),
-	    sizeof bsd_msghdr)) != 0)
-		return (error);
-
-	osf_iovec_ptr = osf_msghdr.msg_iov;
-	bsd_iovec_ptr = bsd_msghdr.msg_iov;
-	for (i = 0; i < bsd_msghdr.msg_iovlen; i++) {
-		if ((error = copyin(&osf_iovec_ptr[i], &osf_iovec,
-		    sizeof osf_iovec)) != 0)
-			return (error);
-
-                bsd_iovec.iov_base = osf_iovec.iov_base;
-                bsd_iovec.iov_len = osf_iovec.iov_len;
-
-		if ((error = copyout(&bsd_iovec, &bsd_iovec_ptr[i],
-		    sizeof bsd_iovec)) != 0)
-			return (error);
-	}
-
 	/*
 	 * translate flags
 	 */
-	SCARG(&a, flags) = emul_flags_translate(osf1_sendrecv_msg_flags_xtab,
+	flags = emul_flags_translate(osf1_sendrecv_msg_flags_xtab,
 	    SCARG(uap, flags), &leftovers);
 	if (leftovers != 0)
 {
@@ -157,16 +119,31 @@ printf("sendmsg flags leftover: 0x%lx\n", leftovers);
 		return (EINVAL);
 }
 
-	return sys_sendmsg(p, &a, retval);
+	iov_len = bsd_msghdr.msg_iovlen;
+	if (iov_len > IOV_MAX)
+		return EMSGSIZE;
+	bsd_iovec = malloc(iov_len * sizeof (struct iovec), M_IOV, M_WAITOK);
+	bsd_msghdr.msg_iov = bsd_iovec;
+
+	osf_iovec_ptr = osf_msghdr.msg_iov;
+	for (i = 0; i < iov_len; i++) {
+		error = copyin(&osf_iovec_ptr[i], &osf_iovec, sizeof osf_iovec);
+		if (error != 0) {
+			free(bsd_iovec, M_TEMP);
+			return (error);
+		}
+                bsd_iovec[i].iov_base = osf_iovec.iov_base;
+                bsd_iovec[i].iov_len = osf_iovec.iov_len;
+	}
+
+	error = do_sys_sendmsg(l, SCARG(uap, s), &bsd_msghdr, flags, retval);
+	free(bsd_iovec, M_TEMP);
+	return error;
 }
 
 int
-osf1_sys_sendto(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_sendto(struct lwp *l, const struct osf1_sys_sendto_args *uap, register_t *retval)
 {
-	struct osf1_sys_sendto_args *uap = v;
 	struct sys_sendto_args a;
 	unsigned long leftovers;
 
@@ -182,17 +159,13 @@ osf1_sys_sendto(p, v, retval)
 	if (leftovers != 0)
 		return (EINVAL);
 
-	return sys_sendto(p, &a, retval);
+	return sys_sendto(l, &a, retval);
 }
 
 int
-osf1_sys_socket(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_socket(struct lwp *l, const struct osf1_sys_socket_args *uap, register_t *retval)
 {
-	struct osf1_sys_socket_args *uap = v;
-	struct sys_socket_args a;
+	struct compat_30_sys_socket_args a;
 
 	/* XXX TRANSLATE */
 
@@ -203,16 +176,12 @@ osf1_sys_socket(p, v, retval)
 	SCARG(&a, type) = SCARG(uap, type);
 	SCARG(&a, protocol) = SCARG(uap, protocol);
 
-	return sys_socket(p, &a, retval);
+	return compat_30_sys_socket(l, &a, retval);
 }
 
 int
-osf1_sys_socketpair(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_socketpair(struct lwp *l, const struct osf1_sys_socketpair_args *uap, register_t *retval)
 {
-	struct osf1_sys_socketpair_args *uap = v;
 	struct sys_socketpair_args a;
 
 	/* XXX TRANSLATE */
@@ -225,5 +194,5 @@ osf1_sys_socketpair(p, v, retval)
 	SCARG(&a, protocol) = SCARG(uap, protocol);
 	SCARG(&a, rsv) = SCARG(uap, rsv);
 
-	return sys_socketpair(p, &a, retval);
+	return sys_socketpair(l, &a, retval);
 }

@@ -1,45 +1,85 @@
-#	$OpenBSD: Makefile.inc,v 1.12 2003/06/01 17:00:32 deraadt Exp $
-#	$NetBSD: Makefile.inc,v 1.5 1996/09/30 16:01:18 ws Exp $
+#	$NetBSD: Makefile.inc,v 1.19 2006/01/26 14:05:49 christos Exp $
 #
-#	NOTE: $S must correspond to the top of the 'sys' tree
-SADIR=	$S/lib/libsa
+#	Configuration variables (default values are below):
+#
+#	S	must be set to the top of the 'sys' tree.
+#	SADST	may be set to the location of the directory where library
+#		objects are to be built.  Defaults to ${.OBJDIR}/lib/sa.
+#	SA_AS	may be set to 'obj' to build a object from the library's
+#		object files.  (Otherwise, a library will be built.)
+#		Defaults to 'library'.
+#	SAMISCCPPFLAGS
+#		Miscellaneous cpp flags to be passed to the library's Makefile
+#		when building.
+#	SAMISCMAKEFLAGS
+#		Miscellaneous flags to be passed to the library's Makefile when
+#		building.  See library's Makefile for more details about
+#		supported flags and their default values.
 
-SADST?=	lib/sa
-SAREL?=	../../
-SALIB?=	${SADST}/libsa.a
+# Default values:
+SADST?=		${.OBJDIR}/lib/sa
+SA_AS?=		library
+SADOTDIR?= ../../.
+
+SADIR=		${S:S@^.@${SADOTDIR}@:Q}/lib/libsa
+.if (${SA_AS} == "obj")
+SALIB=		${SADST}/libsa.o
+SALIB_PROF=	${SADST}/libsa.po
+.else
+SALIB=		${SADST}/libsa.a
+SALIB_PROF=	${SADST}/libsa_p.a
+.endif
+ZLIBSRCDIR:=	${.PARSEDIR}/../../../common/dist/zlib
+SAMISCCPPFLAGS+=-I${ZLIBSRCDIR}
 
 SAMAKE= \
-	cd ${SADST} && ${MAKE} -f ${SAREL}${SADIR}/Makefile \
-	  CC="${CC}" XCFLAGS="${CFLAGS}" \
-	  AS='${AS}' XAFLAGS='${AFLAGS}' \
-	  LD='${LD}' \
-	  XCPPFLAGS="${CPPFLAGS}" \
-	  SAREL="${SAREL}" \
-	  SADIR="${SADIR}" \
-	  EXTRACFLAGS="${EXTRACFLAGS}"
-.if defined(NO_NET)
-SAMAKE+= NO_NET=""
-.endif
-.if defined(SA_ZLIB)
-SAMAKE+= SA_ZLIB=""
-.endif
-.if defined(USE_LOADFILE)
-SAMAKE+= USE_LOADFILE=""
-.endif
+	cd ${SADST} && ${MAKE} -f ${SADIR:Q}/Makefile \
+	    SADIR=${SADIR:Q} \
+	    CC=${CC:Q} CFLAGS=${CFLAGS:Q} \
+	    AS=${AS:Q} AFLAGS=${AFLAGS:Q} \
+	    LORDER=${LORDER:Q} \
+	    TSORT=${TSORT:Q} \
+	    LD=${LD:Q} STRIP=${STRIP:Q} \
+	    AR=${AR:Q} NM=${NM:Q} \
+	    RANLIB=${RANLIB:Q} SIZE=${SIZE:Q} \
+	    MACHINE=${MACHINE} MACHINE_ARCH=${MACHINE_ARCH:Q} \
+	    SACPPFLAGS=${CPPFLAGS:S@^-I.@-I${SADOTDIR}@g:Q} \
+	    SAMISCCPPFLAGS=${SAMISCCPPFLAGS:Q} \
+	    ${SAMISCMAKEFLAGS}
 
-${SALIB}:		.NOTMAIN __always_make_salib
-	@echo making sure the stand-alone library is up to date...
+${SALIB}:		.NOTMAIN .MAKE __always_make_salib
+	@echo making sure the sa library is up to date...
+.if (${SA_AS} == "library")
 	@${SAMAKE} libsa.a
+.else
+	@${SAMAKE} libsa.o
+.endif
 
-clean::			.NOTMAIN __always_make_salib
-	@echo cleaning the stand-alone library objects
-	@${SAMAKE} clean
-	-rmdir -p ${SADST}
+${SALIB_PROF}:		.NOTMAIN .MAKE __always_make_salib
+	@echo making sure the profiled sa library is up to date...
+.if (${SA_AS} == "library")
+	@${SAMAKE} libsa_p.a
+.else
+	@${SAMAKE} libsa.po
+.endif
 
-depend::		.NOTMAIN __always_make_salib
-	@echo depending the standalone library objects
+clean:			.NOTMAIN cleansalib
+cleansalib:		.NOTMAIN
+	@echo cleaning the sa library objects
+	@if [ -d "${SADST}" ]; then ${SAMAKE} clean; fi
+
+cleandir distclean:	.NOTMAIN cleandirsalib
+cleandirsalib:		.NOTMAIN
+	@echo cleandiring the sa library objects
+	@if [ -d "${SADST}" ]; then ${SAMAKE} cleandir; fi
+
+dependall depend:	.NOTMAIN dependsalib
+dependsalib:		.NOTMAIN .MAKE __always_make_salib
+	@echo depending the sa library objects
 	@${SAMAKE} depend
 
 __always_make_salib:	.NOTMAIN
-	-mkdir -p ${SADST}
+	@mkdir -p ${SADST}
 
+.PHONY: __always_make_salib
+.PHONY: cleansalib cleandirsalib dependsalib

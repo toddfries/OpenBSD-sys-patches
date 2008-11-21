@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_uuid.c,v 1.11 2007/08/26 23:07:16 dyoung Exp $	*/
+/*	$NetBSD: kern_uuid.c,v 1.16 2008/11/18 14:01:03 joerg Exp $	*/
 
 /*
  * Copyright (c) 2002 Marcel Moolenaar
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_uuid.c,v 1.11 2007/08/26 23:07:16 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_uuid.c,v 1.16 2008/11/18 14:01:03 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/endian.h>
@@ -57,9 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: kern_uuid.c,v 1.11 2007/08/26 23:07:16 dyoung Exp $"
  * Note that the generator state is itself an UUID, but the time and clock
  * sequence fields are written in the native byte order.
  */
-
-/* XXX Do we have a similar ASSERT()? */
-#define CTASSERT(x)
 
 CTASSERT(sizeof(struct uuid) == 16);
 
@@ -110,6 +107,7 @@ uuid_node(uint16_t *node)
 	int i, s;
 
 	s = splnet();
+	KERNEL_LOCK(1, NULL);
 	IFNET_FOREACH(ifp) {
 		/* Walk the address list */
 		IFADDR_FOREACH(ifa, ifp) {
@@ -118,11 +116,13 @@ uuid_node(uint16_t *node)
 			    sdl->sdl_type == IFT_ETHER) {
 				/* Got a MAC address. */
 				memcpy(node, CLLADDR(sdl), UUID_NODE_LEN);
+				KERNEL_UNLOCK_ONE(NULL);
 				splx(s);
 				return;
 			}
 		}
 	}
+	KERNEL_UNLOCK_ONE(NULL);
 	splx(s);
 
 	for (i = 0; i < (UUID_NODE_LEN>>1); i++)
@@ -181,14 +181,41 @@ uuid_generate(struct uuid_private *uuid, uint64_t *timep, int count)
 	mutex_exit(&uuid_mutex);
 }
 
-int
-sys_uuidgen(struct lwp *l, void *v, register_t *retval)
+static int
+kern_uuidgen(struct uuid *store, int count, bool to_user)
 {
-	struct sys_uuidgen_args *uap = v;
 	struct uuid_private uuid;
 	uint64_t xtime;
-	int error;
+	int error = 0, i;
 
+	KASSERT(count >= 1);
+
+	/* Generate the base UUID. */
+	uuid_generate(&uuid, &xtime, count);
+
+	/* Set sequence and variant and deal with byte order. */
+	uuid.seq = htobe16(uuid.seq | 0x8000);
+
+	for (i = 0; i < count; xtime++, i++) {
+		/* Set time and version (=1) and deal with byte order. */
+		uuid.time.x.low = (uint32_t)xtime;
+		uuid.time.x.mid = (uint16_t)(xtime >> 32);
+		uuid.time.x.hi = ((uint16_t)(xtime >> 48) & 0xfff) | (1 << 12);
+		if (to_user) {
+			error = copyout(&uuid, store + i, sizeof(uuid));
+			if (error != 0)
+				break;
+		} else {
+			memcpy(store + i, &uuid, sizeof(uuid));
+		}
+	}
+
+	return error;
+}
+
+int
+sys_uuidgen(struct lwp *l, const struct sys_uuidgen_args *uap, register_t *retval)
+{
 	/*
 	 * Limit the number of UUIDs that can be created at the same time
 	 * to some arbitrary number. This isn't really necessary, but I
@@ -198,27 +225,13 @@ sys_uuidgen(struct lwp *l, void *v, register_t *retval)
 	if (SCARG(uap,count) < 1 || SCARG(uap,count) > 2048)
 		return (EINVAL);
 
-	/* XXX: pre-validate accessibility to the whole of the UUID store? */
+	return kern_uuidgen(SCARG(uap, store), SCARG(uap,count), true);
+}
 
-	/* Generate the base UUID. */
-	uuid_generate(&uuid, &xtime, SCARG(uap, count));
-
-	/* Set sequence and variant and deal with byte order. */
-	uuid.seq = htobe16(uuid.seq | 0x8000);
-
-	/* XXX: this should copyout larger chunks at a time. */
-	do {
-		/* Set time and version (=1) and deal with byte order. */
-		uuid.time.x.low = (uint32_t)xtime;
-		uuid.time.x.mid = (uint16_t)(xtime >> 32);
-		uuid.time.x.hi = ((uint16_t)(xtime >> 48) & 0xfff) | (1 << 12);
-		error = copyout(&uuid, SCARG(uap,store), sizeof(uuid));
-		SCARG(uap, store)++;
-		SCARG(uap, count)--;
-		xtime++;
-	} while (SCARG(uap, count) > 0 && error == 0);
-
-	return (error);
+int
+uuidgen(struct uuid *store, int count)
+{
+	return kern_uuidgen(store,count, false);
 }
 
 int
@@ -313,7 +326,7 @@ uuid_dec_be(void const *buf, struct uuid *uuid)
 	int i;
 
 	uuid->time_low = be32dec(p);
-	uuid->time_mid = le16dec(p + 4);
+	uuid->time_mid = be16dec(p + 4);
 	uuid->time_hi_and_version = be16dec(p + 6);
 	uuid->clock_seq_hi_and_reserved = p[8];
 	uuid->clock_seq_low = p[9];

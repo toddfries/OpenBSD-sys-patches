@@ -1,5 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.11 2007/11/09 17:30:55 miod Exp $	*/
-/*	$NetBSD: intr.c,v 1.2 1998/08/25 04:03:56 scottr Exp $	*/
+/*	$NetBSD: intr.c,v 1.28 2008/06/19 13:56:22 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,25 +33,46 @@
  * Link and dispatch interrupts.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.28 2008/06/19 13:56:22 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/vmmeter.h>
-#include <sys/evcount.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <net/netisr.h>
-
-#include <machine/atomic.h>
-#include <machine/cpu.h>
-#include <machine/intr.h>
+#include <machine/psc.h>
+#include <machine/viareg.h>
 
 #define	NISR	8
 #define	ISRLOC	0x18
 
-void	intr_init(void);
-void	netintr(void);
+static int intr_noint(void *);
+
+static int ((*intr_func[NISR])(void *)) = {
+	intr_noint,
+	intr_noint,
+	intr_noint,
+	intr_noint,
+	intr_noint,
+	intr_noint,
+	intr_noint,
+	intr_noint
+};
+static void *intr_arg[NISR] = {
+	(void *)0,
+	(void *)1,
+	(void *)2,
+	(void *)3,
+	(void *)4,
+	(void *)5,
+	(void *)6,
+	(void *)7
+};
 
 #ifdef DEBUG
 int	intr_debug = 0;
@@ -67,95 +80,112 @@ int	intr_debug = 0;
 
 /*
  * Some of the below are not used yet, but might be used someday on the
- * Q700/900/950 where the interrupt controller may be reprogrammed to
- * interrupt on different levels as listed in locore.s
+ * IIfx/Q700/900/950/etc. where the interrupt controller may be reprogrammed
+ * to interrupt on different levels as listed in locore.s
  */
-u_short	mac68k_ttyipl;
-u_short	mac68k_netipl;
-u_short	mac68k_vmipl;
-u_short	mac68k_clockipl;
-u_short	mac68k_statclockipl;
+uint16_t ipl2psl_table[NIPL];
+int idepth;
+volatile int ssir;
 
-struct	intrhand intrs[NISR];
+extern	int intrcnt[];		/* from locore.s */
 
 void	intr_computeipl(void);
 
+#define MAX_INAME_LENGTH 53
+#define STD_INAMES \
+	"spur\0via1\0via2\0unused1\0scc\0unused2\0unused3\0nmi\0clock\0"
+#define AUX_INAMES \
+	"spur\0soft\0via2\0ethernet\0scc\0sound\0via1\0nmi\0clock\0    "
+#define AV_INAMES \
+	"spur\0via1\0via2\0ethernet\0scc\0dsp\0unused1\0nmi\0clock\0   "
+
 void
-intr_init()
+intr_init(void)
 {
-	/* Standard spl(9) interrupt priorities */
-	mac68k_ttyipl = (PSL_S | PSL_IPL1);
+	extern long	intrnames;
+	const char	*inames;
+	char		*g_inames;
 
+	ipl2psl_table[IPL_NONE]       = 0;
+	ipl2psl_table[IPL_SOFTCLOCK]  = PSL_S|PSL_IPL1;
+	ipl2psl_table[IPL_SOFTNET]    = PSL_S|PSL_IPL1;
+	ipl2psl_table[IPL_SOFTSERIAL] = PSL_S|PSL_IPL1;
+	ipl2psl_table[IPL_SOFTBIO]    = PSL_S|PSL_IPL1;
+	ipl2psl_table[IPL_HIGH]       = PSL_S|PSL_IPL7;
+
+	g_inames = (char *) &intrnames;
 	if (mac68k_machine.aux_interrupts) {
-		mac68k_netipl = (PSL_S | PSL_IPL3);
-		mac68k_vmipl = (PSL_S | PSL_IPL6);
-	} else {
-		if (current_mac_model->class == MACH_CLASSAV)
-			mac68k_netipl = (PSL_S | PSL_IPL4);
-		else if (mac68k_machine.sonic)
-			mac68k_netipl = (PSL_S | PSL_IPL3);
-		else
-			mac68k_netipl = (PSL_S | PSL_IPL2);
+		inames = AUX_INAMES;
 
-		mac68k_vmipl = (PSL_S | PSL_IPL2);
+		/* Standard spl(9) interrupt priorities */
+		ipl2psl_table[IPL_VM]        = (PSL_S | PSL_IPL6);
+		ipl2psl_table[IPL_SCHED]     = (PSL_S | PSL_IPL6);
+	} else {
+		inames = STD_INAMES;
+
+		/* Standard spl(9) interrupt priorities */
+		ipl2psl_table[IPL_VM]        = (PSL_S | PSL_IPL2);
+		ipl2psl_table[IPL_SCHED]     = (PSL_S | PSL_IPL3);
+
+		if (current_mac_model->class == MACH_CLASSAV) {
+			inames = AV_INAMES;
+			ipl2psl_table[IPL_VM]    = (PSL_S | PSL_IPL4);
+			ipl2psl_table[IPL_SCHED] = (PSL_S | PSL_IPL4);
+		}
 	}
-	
-	mac68k_clockipl = mac68k_statclockipl = mac68k_vmipl;
+
+	memcpy(g_inames, inames, MAX_INAME_LENGTH);
+
 	intr_computeipl();
+
+	/* Initialize the VIAs */
+	via_init();
+
+	/* Initialize the PSC (if present) */
+	psc_init();
 }
+
 
 /*
  * Compute the interrupt levels for the spl*()
  * calls.  This doesn't have to be fast.
  */
 void
-intr_computeipl()
+intr_computeipl(void)
 {
 	/*
-	 * Enforce `bio <= net <= tty <= imp <= statclock <= clock'
-	 * as defined in spl(9)
+	 * Enforce the following relationship, as defined in spl(9):
+	 * `bio <= net <= tty <= vm <= statclock <= clock <= sched <= serial'
 	 */
-	if ((PSL_S | PSL_IPL2) > mac68k_netipl)
-		mac68k_netipl = (PSL_S | PSL_IPL2);
-	
-	if (mac68k_netipl > mac68k_ttyipl)
-		mac68k_ttyipl = mac68k_netipl;
+	if (ipl2psl_table[IPL_VM] > ipl2psl_table[IPL_SCHED])
+		ipl2psl_table[IPL_SCHED] = ipl2psl_table[IPL_VM];
 
-	if (mac68k_ttyipl > mac68k_vmipl)
-		mac68k_vmipl = mac68k_ttyipl;
-
-	if (mac68k_vmipl > mac68k_statclockipl)
-		mac68k_statclockipl = mac68k_vmipl;
-
-	if (mac68k_statclockipl > mac68k_clockipl)
-		mac68k_clockipl = mac68k_statclockipl;
+	if (ipl2psl_table[IPL_SCHED] > ipl2psl_table[IPL_HIGH])
+		ipl2psl_table[IPL_HIGH] = ipl2psl_table[IPL_SCHED];
 }
 
 /*
  * Establish an autovectored interrupt handler.
  * Called by driver attach functions.
+ *
+ * XXX Warning!  DO NOT use Macintosh ROM traps from an interrupt handler
+ * established by this routine, either directly or indirectly, without
+ * properly saving and restoring all registers.  If not, chaos _will_
+ * ensue!  (sar 19980806)
  */
 void
-intr_establish(int (*func)(void *), void *arg, int ipl, const char *name)
+intr_establish(int (*func)(void *), void *arg, int ipl)
 {
-	struct intrhand *ih;
-
-#ifdef DIAGNOSTIC
-	if (ipl < 0 || ipl >= NISR)
+	if ((ipl < 0) || (ipl >= NISR))
 		panic("intr_establish: bad ipl %d", ipl);
-#endif
-
-	ih = &intrs[ipl];
 
 #ifdef DIAGNOSTIC
-	if (ih->ih_fn != NULL)
-		panic("intr_establish: attempt to share ipl %d", ipl);
+	if (intr_func[ipl] != intr_noint)
+		printf("intr_establish: attempt to share ipl %d\n", ipl);
 #endif
 
-	ih->ih_fn = func;
-	ih->ih_arg = arg;
-	ih->ih_ipl = ipl;
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl, &evcount_intr);
+	intr_func[ipl] = func;
+	intr_arg[ipl] = arg;
 }
 
 /*
@@ -164,92 +194,57 @@ intr_establish(int (*func)(void *), void *arg, int ipl, const char *name)
 void
 intr_disestablish(int ipl)
 {
-	struct intrhand *ih;
-
-#ifdef DIAGNOSTIC
-	if (ipl < 0 || ipl >= NISR)
+	if ((ipl < 0) || (ipl >= NISR))
 		panic("intr_disestablish: bad ipl %d", ipl);
-#endif
 
-	ih = &intrs[ipl];
-
-#ifdef DIAGNOSTIC
-	if (ih->ih_fn == NULL)
-		panic("intr_disestablish: no vector on ipl %d", ipl);
-#endif
-
-	ih->ih_fn = NULL;
-	evcount_detach(&ih->ih_count);
+	intr_func[ipl] = intr_noint;
+	intr_arg[ipl] = (void *)ipl;
 }
 
 /*
  * This is the dispatcher called by the low-level
  * assembly language interrupt routine.
+ *
+ * XXX Note: see the warning in intr_establish()
  */
 void
-intr_dispatch(int evec)	/* format | vector offset */
+intr_dispatch(int evec)		/* format | vector offset */
 {
-	struct intrhand *ih;
 	int ipl, vec;
 
-	vec = (evec & 0x0fff) >> 2;
-	ipl = vec - ISRLOC;
+	idepth++;
+	vec = (evec & 0xfff) >> 2;
 #ifdef DIAGNOSTIC
-	if (ipl < 0 || ipl >= NISR)
+	if ((vec < ISRLOC) || (vec >= (ISRLOC + NISR)))
 		panic("intr_dispatch: bad vec 0x%x", vec);
 #endif
+	ipl = vec - ISRLOC;
 
+	intrcnt[ipl]++;
 	uvmexp.intrs++;
-	ih = &intrs[ipl];
-	if (ih->ih_fn != NULL) {
-		if ((*ih->ih_fn)(ih->ih_arg) != 0)
-			ih->ih_count.ec_count++;
-	} else {
-#if 0
-		printf("spurious interrupt, ipl %d\n", ipl);
-#endif
-	}
+
+	(void)(*intr_func[ipl])(intr_arg[ipl]);
+	idepth--;
 }
 
-int netisr;
-
-void
-netintr()
+/*
+ * Default interrupt handler:  do nothing.
+ */
+static int
+intr_noint(void *arg)
 {
-	int isr;
-
-	while ((isr = netisr) != 0) {
-		atomic_clearbits_int(&netisr, isr);
-		
-#define DONETISR(bit, fn)						\
-		do {							\
-			if (isr & (1 << bit))				\
-				(fn)();					\
-		} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef  DONETISR
-	}
-}
-
-#ifdef DIAGNOSTIC
-void
-splassert_check(int wantipl, const char *func)
-{
-	int oldipl;
-
-	__asm __volatile ("movew sr,%0" : "=&d" (oldipl));
-
-	oldipl = PSLTOIPL(oldipl);
-
-	if (oldipl < wantipl) {
-		splassert_fail(wantipl, oldipl, func);
-		/*
-		 * If the splassert_ctl is set to not panic, raise the ipl
-		 * in a feeble attempt to reduce damage.
-		 */
-		_spl(PSL_S | IPLTOPSL(wantipl));
-	}
-}
+#ifdef DEBUG
+	idepth++;
+	if (intr_debug)
+		printf("intr_noint: ipl %d\n", (int)arg);
+	idepth--;
 #endif
+	return 0;
+}
+
+bool
+cpu_intr_p(void)
+{
+
+	return idepth != 0;
+}

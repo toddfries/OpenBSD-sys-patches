@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_atw_cardbus.c,v 1.14 2006/10/12 16:35:52 grange Exp $	*/
-/*	$NetBSD: if_atw_cardbus.c,v 1.9 2004/07/23 07:07:55 dyoung Exp $	*/
+/* $NetBSD: if_atw_cardbus.c,v 1.24 2008/07/09 20:07:19 joerg Exp $ */
 
 /*-
  * Copyright (c) 1999, 2000, 2003 The NetBSD Foundation, Inc.
@@ -18,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,11 +35,15 @@
  * CardBus bus front-end for the ADMtek ADM8211 802.11 MAC/BBP driver.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_atw_cardbus.c,v 1.24 2008/07/09 20:07:19 joerg Exp $");
+
+#include "opt_inet.h"
 #include "bpfilter.h"
 
 #include <sys/param.h>
-#include <sys/systm.h> 
-#include <sys/mbuf.h>   
+#include <sys/systm.h>
+#include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -56,25 +52,28 @@
 #include <sys/device.h>
 
 #include <machine/endian.h>
- 
+
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
+#include <net/if_ether.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
-
+#include <net80211/ieee80211_netbsd.h>
 #include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>
 
-#if NBPFILTER > 0 
+#if NBPFILTER > 0
 #include <net/bpf.h>
-#endif 
+#endif
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#ifdef INET
+#include <netinet/in.h>
+#include <netinet/if_inarp.h>
+#endif
+
+
+#include <sys/bus.h>
+#include <sys/intr.h>
 
 #include <dev/ic/atwreg.h>
 #include <dev/ic/rf3000reg.h>
@@ -86,6 +85,7 @@
 #include <dev/pci/pcidevs.h>
 
 #include <dev/cardbus/cardbusvar.h>
+#include <dev/pci/pcidevs.h>
 
 /*
  * PCI configuration space registers used by the ADM8211.
@@ -108,64 +108,102 @@ struct atw_cardbus_softc {
 	int	sc_bar_reg;		/* which BAR to use */
 	pcireg_t sc_bar_val;		/* value of the BAR */
 
-	int	sc_intrline;		/* interrupt line */
+	cardbus_intr_line_t sc_intrline; /* interrupt line */
 };
 
-int	atw_cardbus_match(struct device *, void *, void *);
-void	atw_cardbus_attach(struct device *, struct device *, void *);
-int	atw_cardbus_detach(struct device *, int);
+static int	atw_cardbus_match(device_t, cfdata_t, void *);
+static void	atw_cardbus_attach(device_t, device_t, void *);
+static int	atw_cardbus_detach(device_t, int);
 
-struct cfattach atw_cardbus_ca = {
-	sizeof(struct atw_cardbus_softc), atw_cardbus_match, atw_cardbus_attach,
-	    atw_cardbus_detach
+CFATTACH_DECL_NEW(atw_cardbus, sizeof(struct atw_cardbus_softc),
+    atw_cardbus_match, atw_cardbus_attach, atw_cardbus_detach, atw_activate);
+
+static void	atw_cardbus_setup(struct atw_cardbus_softc *);
+
+static int	atw_cardbus_enable(struct atw_softc *);
+static void	atw_cardbus_disable(struct atw_softc *);
+
+static void	atw_cardbus_intr_ack(struct atw_softc *);
+
+static const struct atw_cardbus_product *atw_cardbus_lookup
+   (const struct cardbus_attach_args *);
+
+static const struct atw_cardbus_product {
+	u_int32_t	 acp_vendor;	/* PCI vendor ID */
+	u_int32_t	 acp_product;	/* PCI product ID */
+	const char	*acp_product_name;
+} atw_cardbus_products[] = {
+	{ PCI_VENDOR_ADMTEK,		PCI_PRODUCT_ADMTEK_ADM8211,
+	  "ADMtek ADM8211 802.11 MAC/BBP" },
+
+	{ 0,				0,	NULL },
 };
 
-void	atw_cardbus_setup(struct atw_cardbus_softc *);
-
-int	atw_cardbus_enable(struct atw_softc *);
-void	atw_cardbus_disable(struct atw_softc *);
-void	atw_cardbus_power(struct atw_softc *, int);
-
-const struct cardbus_matchid atw_cardbus_devices[] = {
-	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_ADM8211 },
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CRSHPW796 },
-};
-
-int
-atw_cardbus_match(struct device *parent, void *match, void *aux)
+static const struct atw_cardbus_product *
+atw_cardbus_lookup(const struct cardbus_attach_args *ca)
 {
-	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
-	    atw_cardbus_devices,
-	    sizeof(atw_cardbus_devices)/sizeof(atw_cardbus_devices[0])));
+	const struct atw_cardbus_product *acp;
+
+	for (acp = atw_cardbus_products;
+	     acp->acp_product_name != NULL;
+	     acp++) {
+		if (PCI_VENDOR(ca->ca_id) == acp->acp_vendor &&
+		    PCI_PRODUCT(ca->ca_id) == acp->acp_product)
+			return (acp);
+	}
+	return (NULL);
 }
 
-void
-atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
+static int
+atw_cardbus_match(device_t parent, cfdata_t match, void *aux)
 {
-	struct atw_cardbus_softc *csc = (void *)self;
+	struct cardbus_attach_args *ca = aux;
+
+	if (atw_cardbus_lookup(ca) != NULL)
+		return (1);
+
+	return (0);
+}
+
+static void
+atw_cardbus_attach(device_t parent, device_t self, void *aux)
+{
+	struct atw_cardbus_softc *csc = device_private(self);
 	struct atw_softc *sc = &csc->sc_atw;
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
+	const struct atw_cardbus_product *acp;
 	bus_addr_t adr;
 
+	sc->sc_dev = self;
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
+
+	acp = atw_cardbus_lookup(ca);
+	if (acp == NULL) {
+		printf("\n");
+		panic("atw_cardbus_attach: impossible");
+	}
 
 	/*
 	 * Power management hooks.
 	 */
 	sc->sc_enable = atw_cardbus_enable;
 	sc->sc_disable = atw_cardbus_disable;
-	sc->sc_power = atw_cardbus_power;
+
+	sc->sc_intr_ack = atw_cardbus_intr_ack;
 
 	/* Get revision info. */
 	sc->sc_rev = PCI_REVISION(ca->ca_class);
 
+	printf(": %s, revision %d.%d\n", acp->acp_product_name,
+	    (sc->sc_rev >> 4) & 0xf, sc->sc_rev & 0xf);
+
 #if 0
-	printf(": signature %08x\n%s",
-	    cardbus_conf_read(ct->ct_cc, ct->ct_cf, csc->sc_tag, 0x80),
-	    sc->sc_dev.dv_xname);
+	printf("%s: signature %08x\n", device_xname(self),
+	    (rev >> 4) & 0xf, rev & 0xf,
+	    cardbus_conf_read(ct->ct_cc, ct->ct_cf, csc->sc_tag, 0x80));
 #endif
 
 	/*
@@ -176,8 +214,12 @@ atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	    CARDBUS_MAPREG_TYPE_MEM, 0, &sc->sc_st, &sc->sc_sh, &adr,
 	    &csc->sc_mapsize) == 0) {
 #if 0
-		printf(": atw_cardbus_attach mapped %d bytes mem space\n%s",
-		    csc->sc_mapsize, sc->sc_dev.dv_xname);
+		printf("%s: atw_cardbus_attach mapped %d bytes mem space\n",
+		    device_xname(self), csc->sc_mapsize);
+#endif
+#if rbus
+#else
+		(*ct->ct_cf->cardbus_mem_open)(cc, 0, adr, adr+csc->sc_mapsize);
 #endif
 		csc->sc_cben = CARDBUS_MEM_ENABLE;
 		csc->sc_csr |= CARDBUS_COMMAND_MEM_ENABLE;
@@ -187,15 +229,19 @@ atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	    CARDBUS_MAPREG_TYPE_IO, 0, &sc->sc_st, &sc->sc_sh, &adr,
 	    &csc->sc_mapsize) == 0) {
 #if 0
-		printf(": atw_cardbus_attach mapped %d bytes I/O space\n%s",
-		    csc->sc_mapsize, sc->sc_dev.dv_xname);
+		printf("%s: atw_cardbus_attach mapped %d bytes I/O space\n",
+		    device_xname(self), csc->sc_mapsize);
+#endif
+#if rbus
+#else
+		(*ct->ct_cf->cardbus_io_open)(cc, 0, adr, adr+csc->sc_mapsize);
 #endif
 		csc->sc_cben = CARDBUS_IO_ENABLE;
 		csc->sc_csr |= CARDBUS_COMMAND_IO_ENABLE;
 		csc->sc_bar_reg = ATW_PCI_IOBA;
 		csc->sc_bar_val = adr | CARDBUS_MAPREG_TYPE_IO;
 	} else {
-		printf(": unable to map device registers\n");
+		aprint_error_dev(self, "unable to map device registers\n");
 		return;
 	}
 
@@ -208,8 +254,6 @@ atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	/* Remember which interrupt line. */
 	csc->sc_intrline = ca->ca_intrline;
 
-	printf(": revision %d.%d: irq %d\n",
-	    (sc->sc_rev >> 4) & 0xf, sc->sc_rev & 0xf, csc->sc_intrline);
 #if 0
 	/*
 	 * The CardBus cards will make it to store-and-forward mode as
@@ -232,17 +276,23 @@ atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	Cardbus_function_disable(csc->sc_ct);
 }
 
-int
-atw_cardbus_detach(struct device *self, int flags)
+static void
+atw_cardbus_intr_ack(struct atw_softc *sc)
 {
-	struct atw_cardbus_softc *csc = (void *)self;
+	ATW_WRITE(sc, ATW_FER, ATW_FER_INTR);
+}
+
+static int
+atw_cardbus_detach(device_t self, int flags)
+{
+	struct atw_cardbus_softc *csc = device_private(self);
 	struct atw_softc *sc = &csc->sc_atw;
 	struct cardbus_devfunc *ct = csc->sc_ct;
 	int rv;
 
 #if defined(DIAGNOSTIC)
 	if (ct == NULL)
-		panic("%s: data structure lacks", sc->sc_dev.dv_xname);
+		panic("%s: data structure lacks", device_xname(self));
 #endif
 
 	rv = atw_detach(sc);
@@ -265,10 +315,10 @@ atw_cardbus_detach(struct device *self, int flags)
 	return (0);
 }
 
-int
+static int
 atw_cardbus_enable(struct atw_softc *sc)
 {
-	struct atw_cardbus_softc *csc = (void *) sc;
+	struct atw_cardbus_softc *csc = (struct atw_cardbus_softc *)sc;
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
@@ -287,10 +337,10 @@ atw_cardbus_enable(struct atw_softc *sc)
 	 * Map and establish the interrupt.
 	 */
 	csc->sc_ih = cardbus_intr_establish(cc, cf, csc->sc_intrline, IPL_NET,
-	    atw_intr, sc, sc->sc_dev.dv_xname);
+	    atw_intr, sc);
 	if (csc->sc_ih == NULL) {
-		printf("%s: unable to establish interrupt at %d\n",
-		    sc->sc_dev.dv_xname, csc->sc_intrline);
+		aprint_error_dev(sc->sc_dev,
+				 "unable to establish interrupt\n");
 		Cardbus_function_disable(csc->sc_ct);
 		return (1);
 	}
@@ -298,10 +348,10 @@ atw_cardbus_enable(struct atw_softc *sc)
 	return (0);
 }
 
-void
+static void
 atw_cardbus_disable(struct atw_softc *sc)
 {
-	struct atw_cardbus_softc *csc = (void *) sc;
+	struct atw_cardbus_softc *csc = (struct atw_cardbus_softc *)sc;
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
@@ -314,28 +364,15 @@ atw_cardbus_disable(struct atw_softc *sc)
 	Cardbus_function_disable(ct);
 }
 
-void
-atw_cardbus_power(struct atw_softc *sc, int why)
-{
-	if (why == PWR_RESUME)
-		atw_enable(sc);
-}
-
-void
+static void
 atw_cardbus_setup(struct atw_cardbus_softc *csc)
 {
-#ifdef notyet
-	struct atw_softc *sc = &csc->sc_atw;
-#endif
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 	pcireg_t reg;
 
-#ifdef notyet
-	(void)cardbus_setpowerstate(sc->sc_dev.dv_xname, ct, csc->sc_tag,
-	    PCI_PWR_D0);
-#endif
+	(void)cardbus_set_powerstate(ct, csc->sc_tag, PCI_PWR_D0);
 
 	/* Program the BAR. */
 	cardbus_conf_write(cc, cf, csc->sc_tag, csc->sc_bar_reg,

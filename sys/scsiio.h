@@ -1,5 +1,4 @@
-/*	$OpenBSD: scsiio.h,v 1.8 2006/11/27 18:32:33 dlg Exp $	*/
-/*	$NetBSD: scsiio.h,v 1.3 1994/06/29 06:45:09 cgd Exp $	*/
+/*     $NetBSD: scsiio.h,v 1.12 2007/03/04 06:03:41 christos Exp $        */
 
 #ifndef _SYS_SCSIIO_H_
 #define _SYS_SCSIIO_H_
@@ -15,7 +14,7 @@ typedef struct	scsireq {
 	u_long	timeout;
 	u_char	cmd[16];	/* 12 is actually the max */
 	u_char	cmdlen;
-	caddr_t	databuf;	/* address in user space of buffer */
+	void *	databuf;	/* address in user space of buffer */
 	u_long	datalen;	/* size of user buffer (request) */
 	u_long	datalen_used;	/* size of user buffer (used)*/
 	u_char	sense[SENSEBUFLEN]; /* returned sense will be in here */
@@ -53,27 +52,61 @@ struct	oscsi_addr {
 	int	scbus;		/* -1 if wildcard */
 	int	target;		/* -1 if wildcard */
 	int	lun;		/* -1 if wildcard */
-} ;
-
-struct scsi_addr {
-	int     type;
-#define TYPE_SCSI	0
-#define TYPE_ATAPI	1
-	int	scbus;		/* -1 if wildcard */
-	int	target;		/* -1 if wildcard */
-	int	lun;		/* -1 if wildcard */
 };
 
+struct	scsi_addr {
+	int type;       /* bus type */
+#define TYPE_SCSI 0
+#define TYPE_ATAPI 1
+	union {
+		struct oscsi_addr scsi;
+		struct _atapi {
+			int atbus;  /* -1 if wildcard */
+			int drive;  /* -1 if wildcard */
+		} atapi;
+	} addr;
+};
+
+/*
+ * SCSI device ioctls
+ */
+
+#define SCIOCIDENTIFY	_IOR('Q', 4, struct scsi_addr) /* where are you? */
+#define  OSCIOCIDENTIFY	_IOR('Q', 4, struct oscsi_addr)
+#define SCIOCDECONFIG	_IO('Q', 5)	/* please disappear */
+#define SCIOCRECONFIG	_IO('Q', 6)	/* please check again */
 #define SCIOCRESET	_IO('Q', 7)	/* reset the device */
-#define SCIOCIDENTIFY	_IOR('Q', 9, struct scsi_addr) 
 
-struct sbioc_device {
-	void		*sd_cookie;
-	int		sd_target;
-	int		sd_lun;
+/*
+ * SCSI bus ioctls
+ */
+
+/* Scan bus for new devices. */
+struct scbusioscan_args {
+	int	sa_target;	/* target to scan; -1 for wildcard */
+	int	sa_lun;		/* lun to scan; -1 for wildcard */
 };
+#define	SCBUSIOSCAN	_IOW('U', 0, struct scbusioscan_args)
 
-#define SBIOCPROBE	_IOWR('Q', 127, struct sbioc_device)
-#define SBIOCDETACH	_IOWR('Q', 128, struct sbioc_device)
+#define	SCBUSIORESET	_IO('U', 1)	/* reset SCSI bus */
+
+struct scbusiodetach_args {
+	int	sa_target;	/* target to scan; -1 for wildcard */
+	int	sa_lun;		/* lun to scan; -1 for wildcard */
+};
+#define	SCBUSIODETACH	_IOW('U', 2, struct scbusiodetach_args)
+
+/* enable/disable device properties */
+struct scbusaccel_args {
+	int	sa_target;	/* target to set property on */
+	int	sa_lun;		/* lun to set property on */
+	int	sa_flags;	/* flags to set or clear */
+};
+#define	SC_ACCEL_SYNC	0x01	/* enable sync mode */
+#define	SC_ACCEL_WIDE	0x02	/* enable wide transfers */
+#define	SC_ACCEL_TAGS	0x04	/* enable tagged queuing */
+#define	SCBUSACCEL	_IOW('U', 2, struct scbusaccel_args)
+
+#define	SCBUSIOLLSCAN	_IO('U', 3)	/* perform low-level scan */
 
 #endif /* _SYS_SCSIIO_H_ */

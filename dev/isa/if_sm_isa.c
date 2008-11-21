@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_sm_isa.c,v 1.9 2006/06/17 17:57:00 brad Exp $	*/
-/*	$NetBSD: if_sm_isa.c,v 1.4 1998/07/05 06:49:14 jonathan Exp $	*/
+/*	$NetBSD: if_sm_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "bpfilter.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_sm_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,30 +40,16 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/syslog.h>
-#include <sys/selinfo.h>
-#include <sys/timeout.h>
+#include <sys/select.h>
 #include <sys/device.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/in_var.h>
-#include <netinet/ip.h>
-#include <netinet/if_ether.h>
-#endif
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
-
-#include <machine/intr.h>
-#include <machine/bus.h>
-
-#include <net/if_media.h>
+#include <sys/intr.h>
+#include <sys/bus.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -80,7 +59,7 @@
 
 #include <dev/isa/isavar.h>
 
-int	sm_isa_match(struct device *, void *, void *);
+int	sm_isa_match(struct device *, struct cfdata *, void *);
 void	sm_isa_attach(struct device *, struct device *, void *);
 
 struct sm_isa_softc {
@@ -90,14 +69,12 @@ struct sm_isa_softc {
 	void	*sc_ih;				/* interrupt cookie */
 };
 
-struct cfattach sm_isa_ca = {
-	sizeof(struct sm_isa_softc), sm_isa_match, sm_isa_attach
-};
+CFATTACH_DECL(sm_isa, sizeof(struct sm_isa_softc),
+    sm_isa_match, sm_isa_attach, NULL, NULL);
 
 int
-sm_isa_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+sm_isa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
@@ -106,14 +83,22 @@ sm_isa_match(parent, match, aux)
 	int rv = 0;
 	extern const char *smc91cxx_idstrs[];
 
-	/* Disallow wildcarded values. */
-	if (ia->ia_irq == -1)
+	if (ia->ia_nio < 1)
 		return (0);
-	if (ia->ia_iobase == -1)
+	if (ia->ia_nirq < 1)
+		return (0);
+
+	if (ISA_DIRECT_CONFIG(ia))
+		return (0);
+
+	/* Disallow wildcarded values. */
+	if (ia->ia_io[0].ir_addr == ISA_UNKNOWN_PORT)
+		return (0);
+	if (ia->ia_irq[0].ir_irq == ISA_UNKNOWN_IRQ)
 		return (0);
 
 	/* Map i/o space. */
-	if (bus_space_map(iot, ia->ia_iobase, SMC_IOSIZE, 0, &ioh))
+	if (bus_space_map(iot, ia->ia_io[0].ir_addr, SMC_IOSIZE, 0, &ioh))
 		return (0);
 
 	/* Check that high byte of BANK_SELECT is what we expect. */
@@ -136,7 +121,7 @@ sm_isa_match(parent, match, aux)
 	 */
 	bus_space_write_2(iot, ioh, BANK_SELECT_REG_W, 1);
 	tmp = bus_space_read_2(iot, ioh, BASE_ADDR_REG_W);
-	if (ia->ia_iobase != ((tmp >> 3) & 0x3e0))
+	if (ia->ia_io[0].ir_addr != ((tmp >> 3) & 0x3e0))
 		goto out;
 
 	/*
@@ -151,7 +136,14 @@ sm_isa_match(parent, match, aux)
 	/*
 	 * Assume we have an SMC91Cxx.
 	 */
-	ia->ia_iosize = SMC_IOSIZE;
+	ia->ia_nio = 1;
+	ia->ia_io[0].ir_size = SMC_IOSIZE;
+
+	ia->ia_nirq = 1;
+
+	ia->ia_niomem = 0;
+	ia->ia_ndrq = 0;
+
 	rv = 1;
 
  out:
@@ -160,9 +152,7 @@ sm_isa_match(parent, match, aux)
 }
 
 void
-sm_isa_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+sm_isa_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct sm_isa_softc *isc = (struct sm_isa_softc *)self;
 	struct smc91cxx_softc *sc = &isc->sc_smc;
@@ -173,24 +163,23 @@ sm_isa_attach(parent, self, aux)
 	printf("\n");
 
 	/* Map i/o space. */
-	if (bus_space_map(iot, ia->ia_iobase, ia->ia_iosize, 0, &ioh))
+	if (bus_space_map(iot, ia->ia_io[0].ir_addr, SMC_IOSIZE, 0, &ioh))
 		panic("sm_isa_attach: can't map i/o space");
 
 	sc->sc_bst = iot;
 	sc->sc_bsh = ioh;
 
 	/* should always be enabled */
-	sc->sc_enabled = 1;
+	sc->sc_flags |= SMC_FLAGS_ENABLED;
 
 	/* XXX Should get Ethernet address from EEPROM!! */
 
-	/* Perform generic initialization. */
+	/* Perform generic intialization. */
 	smc91cxx_attach(sc, NULL);
 
 	/* Establish the interrupt handler. */
-	isc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
-	    IPL_NET, smc91cxx_intr, sc, sc->sc_dev.dv_xname);
+	isc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
+	    IST_EDGE, IPL_NET, smc91cxx_intr, sc);
 	if (isc->sc_ih == NULL)
-		printf("%s: couldn't establish interrupt handler\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(&sc->sc_dev, "couldn't establish interrupt handler\n");
 }

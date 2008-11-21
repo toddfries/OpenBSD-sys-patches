@@ -1,4 +1,4 @@
-/*	$NetBSD: scsiconf.c,v 1.243 2007/03/04 06:02:42 christos Exp $	*/
+/*	$NetBSD: scsiconf.c,v 1.250 2008/07/16 18:50:58 drochner Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2004 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -55,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: scsiconf.c,v 1.243 2007/03/04 06:02:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: scsiconf.c,v 1.250 2008/07/16 18:50:58 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -68,7 +61,7 @@ __KERNEL_RCSID(0, "$NetBSD: scsiconf.c,v 1.243 2007/03/04 06:02:42 christos Exp 
 #include <sys/fcntl.h>
 #include <sys/scsiio.h>
 #include <sys/queue.h>
-#include <sys/lock.h>
+#include <sys/simplelock.h>
 
 #include <dev/scsipi/scsi_all.h>
 #include <dev/scsipi/scsipi_all.h>
@@ -101,7 +94,7 @@ static int	scsibusdetach(struct device *, int flags);
 static int	scsibusrescan(struct device *, const char *, const int *);
 static void	scsidevdetached(struct device *, struct device *);
 
-CFATTACH_DECL2(scsibus, sizeof(struct scsibus_softc),
+CFATTACH_DECL2_NEW(scsibus, sizeof(struct scsibus_softc),
     scsibusmatch, scsibusattach, scsibusdetach, scsibusactivate,
     scsibusrescan, scsidevdetached);
 
@@ -166,8 +159,12 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	struct scsipi_channel *chan = aux;
 	struct scsi_initq *scsi_initq;
 
+	if (!pmf_device_register(self, NULL, NULL))
+		aprint_error_dev(self, "couldn't establish power handler\n");
+
+	sc->sc_dev = self;
 	sc->sc_channel = chan;
-	chan->chan_name = sc->sc_dev.dv_xname;
+	chan->chan_name = device_xname(sc->sc_dev);
 
 	aprint_naive(": SCSI bus\n");
 	aprint_normal(": %d target%s, %d lun%s per target\n",
@@ -188,8 +185,7 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	TAILQ_INSERT_TAIL(&scsi_initq_head, scsi_initq, scsi_initq);
         config_pending_incr();
 	if (scsipi_channel_init(chan)) {
-		aprint_error("%s: failed to init channel\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev, "failed to init channel\n");
 		return;
 	}
 }
@@ -205,9 +201,9 @@ scsibus_config(struct scsipi_channel *chan, void *arg)
 #endif
 	if ((chan->chan_flags & SCSIPI_CHAN_NOSETTLE) == 0 &&
 	    SCSI_DELAY > 0) {
-		aprint_normal(
-		    "%s: waiting %d seconds for devices to settle...\n",
-		    sc->sc_dev.dv_xname, SCSI_DELAY);
+		aprint_normal_dev(sc->sc_dev,
+		    "waiting %d seconds for devices to settle...\n",
+		    SCSI_DELAY);
 		/* ...an identifier we know no one will use... */
 		(void) tsleep(scsibus_config, PRIBIO,
 		    "scsidly", SCSI_DELAY * hz);
@@ -285,6 +281,7 @@ scsibusdetach(struct device *self, int flags)
 	struct scsipi_xfer *xs;
 	int error;
 
+	pmf_device_deregister(self);
 
 	/*
 	 * Process outstanding commands (which will never complete as the
@@ -388,14 +385,14 @@ scsibusrescan(struct device *sc, const char *ifattr,
 	KASSERT(ifattr && !strcmp(ifattr, "scsibus"));
 	KASSERT(locators);
 
-	return (scsi_probe_bus((struct scsibus_softc *)sc,
+	return (scsi_probe_bus(device_private(sc),
 		locators[SCSIBUSCF_TARGET], locators[SCSIBUSCF_LUN]));
 }
 
 static void
 scsidevdetached(struct device *sc, struct device *dev)
 {
-	struct scsibus_softc *ssc = (struct scsibus_softc *)sc;
+	struct scsibus_softc *ssc = device_private(sc);
 	struct scsipi_channel *chan = ssc->sc_channel;
 	struct scsipi_periph *periph;
 	int target, lun;
@@ -705,6 +702,8 @@ static const struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_SCANNER, T_FIXED,
 	 "ULTIMA  ", "A6000C          ", ""},     PQUIRK_NOLUNS},
 	{{T_PROCESSOR, T_FIXED,
+	 "ESG-SHV",  "SCA HSBP M15",     ""},     PQUIRK_NOLUNS},
+	{{T_PROCESSOR, T_FIXED,
 	 "SYMBIOS",  "",                 ""},     PQUIRK_NOLUNS},
 	{{T_PROCESSOR, T_FIXED,
 	 "LITRONIC", "PCMCIA          ", ""},     PQUIRK_NOLUNS},
@@ -747,9 +746,9 @@ scsi_probe_device(struct scsibus_softc *sc, int target, int lun)
 	periph = scsipi_alloc_periph(M_NOWAIT);
 	if (periph == NULL) {
 #ifdef	DIAGNOSTIC
-		aprint_error(
-		    "%s: cannot allocate periph for target %d lun %d\n",
-		    sc->sc_dev.dv_xname, target, lun);
+		aprint_error_dev(sc->sc_dev,
+		    "cannot allocate periph for target %d lun %d\n",
+		    target, lun);
 #endif
 		return (ENOMEM);
 	}
@@ -946,7 +945,7 @@ scsi_probe_device(struct scsibus_softc *sc, int target, int lun)
 	locs[SCSIBUSCF_TARGET] = target;
 	locs[SCSIBUSCF_LUN] = lun;
 
-	if ((cf = config_search_loc(config_stdsubmatch, &sc->sc_dev,
+	if ((cf = config_search_loc(config_stdsubmatch, sc->sc_dev,
 	     "scsibus", locs, &sa)) != NULL) {
 		scsipi_insert_periph(chan, periph);
 		/*
@@ -954,10 +953,10 @@ scsi_probe_device(struct scsibus_softc *sc, int target, int lun)
 		 * XXX need it before config_attach() returns.  Must
 		 * XXX assign it in periph driver.
 		 */
-		chld = config_attach_loc(&sc->sc_dev, cf, locs, &sa,
+		chld = config_attach_loc(sc->sc_dev, cf, locs, &sa,
 					 scsibusprint);
 	} else {
-		scsibusprint(&sa, sc->sc_dev.dv_xname);
+		scsibusprint(&sa, device_xname(sc->sc_dev));
 		aprint_normal(" not configured\n");
 		goto bad;
 	}
@@ -978,8 +977,8 @@ scsibusopen(dev_t dev, int flag, int fmt,
 	struct scsibus_softc *sc;
 	int error, unit = minor(dev);
 
-	if (unit >= scsibus_cd.cd_ndevs ||
-	    (sc = scsibus_cd.cd_devs[unit]) == NULL)
+	sc = device_lookup_private(&scsibus_cd, unit);
+	if (sc == NULL)
 		return (ENXIO);
 
 	if (sc->sc_flags & SCSIBUSF_OPEN)
@@ -997,8 +996,9 @@ static int
 scsibusclose(dev_t dev, int flag, int fmt,
     struct lwp *l)
 {
-	struct scsibus_softc *sc = scsibus_cd.cd_devs[minor(dev)];
+	struct scsibus_softc *sc;
 
+	sc = device_lookup_private(&scsibus_cd, minor(dev));
 	scsipi_adapter_delref(sc->sc_channel->chan_adapter);
 
 	sc->sc_flags &= ~SCSIBUSF_OPEN;
@@ -1009,9 +1009,12 @@ scsibusclose(dev_t dev, int flag, int fmt,
 static int
 scsibusioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 {
-	struct scsibus_softc *sc = scsibus_cd.cd_devs[minor(dev)];
-	struct scsipi_channel *chan = sc->sc_channel;
+	struct scsibus_softc *sc;
+	struct scsipi_channel *chan;
 	int error;
+
+	sc = device_lookup_private(&scsibus_cd, minor(dev));
+	chan = sc->sc_channel;
 
 	/*
 	 * Enforce write permission for ioctls that change the

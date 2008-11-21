@@ -1,4 +1,4 @@
-/* $NetBSD: omrasops.c,v 1.3 2002/07/04 14:43:49 junyoung Exp $ */
+/* $NetBSD: omrasops.c,v 1.6 2008/04/28 20:23:26 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: omrasops.c,v 1.3 2002/07/04 14:43:49 junyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: omrasops.c,v 1.6 2008/04/28 20:23:26 martin Exp $");
 
 /*
  * Designed speficically for 'm68k bitorder';
@@ -88,7 +81,7 @@ struct wsdisplay_emulops omfb_emulops = {
 #define	BYTESDONE	(4)
 
 #define	W(p) (*(u_int32_t *)(p))
-#define	R(p) (*(u_int32_t *)((caddr_t)(p) + 0x40000))
+#define	R(p) (*(u_int32_t *)((uint8_t *)(p) + 0x40000))
 
 /*
  * Blit a character at the specified co-ordinates.
@@ -102,7 +95,7 @@ om_putchar(cookie, row, startcol, uc, attr)
 {
 	struct rcons *rc = cookie;
 	struct raster *rap = rc->rc_sp;
-	caddr_t p;
+	uint8_t *p;
 	int scanspan, startx, height, width, align, y;
 	u_int32_t lmask, rmask, glyph, inverse;
 	u_int32_t *g;
@@ -114,7 +107,7 @@ om_putchar(cookie, row, startcol, uc, attr)
 	g = rc->rc_font->chars[uc].r->pixels;
 	inverse = (attr != 0) ? ALL1BITS : ALL0BITS;
 
-	p = (caddr_t)rap->pixels + y * scanspan + ((startx / 32) * 4);
+	p = (uint8_t *)rap->pixels + y * scanspan + ((startx / 32) * 4);
 	align = startx & ALIGNMASK;
 	width = rc->rc_font->width + align;
 	lmask = ALL1BITS >> align;
@@ -131,7 +124,7 @@ om_putchar(cookie, row, startcol, uc, attr)
 		}
 	}
 	else {
-		caddr_t q = p;
+		uint8_t *q = p;
 		u_int32_t lhalf, rhalf;
 
 		while (height > 0) {
@@ -157,7 +150,7 @@ om_erasecols(cookie, row, startcol, ncols, attr)
 {
         struct rcons *rc = cookie;
         struct raster *rap = rc->rc_sp;
-        caddr_t p;
+        uint8_t *p;
         int scanspan, startx, height, width, align, w, y;
         u_int32_t lmask, rmask, fill;
 
@@ -168,7 +161,7 @@ om_erasecols(cookie, row, startcol, ncols, attr)
         w = rc->rc_font->width * ncols;
 	fill = (attr != 0) ? ALL1BITS : ALL0BITS;
 
-	p = (caddr_t)rap->pixels + y * scanspan + ((startx / 32) * 4);
+	p = (uint8_t *)rap->pixels + y * scanspan + ((startx / 32) * 4);
 	align = startx & ALIGNMASK;
 	width = w + align;
 	lmask = ALL1BITS >> align;
@@ -183,7 +176,7 @@ om_erasecols(cookie, row, startcol, ncols, attr)
 		}
 	}
 	else {
-		caddr_t q = p;
+		uint8_t *q = p;
 		while (height > 0) {
 			W(p) = (R(p) & ~lmask) | (fill & lmask);
 			width -= 2 * BLITWIDTH;
@@ -210,7 +203,7 @@ om_eraserows(cookie, startrow, nrows, attr)
 {
 	struct rcons *rc = cookie;
 	struct raster *rap = rc->rc_sp;
-	caddr_t p, q;
+	uint8_t *p, *q;
 	int scanspan, starty, height, width, w;
 	u_int32_t rmask, fill;
 
@@ -220,7 +213,7 @@ om_eraserows(cookie, startrow, nrows, attr)
 	w = rc->rc_font->width * rc->rc_maxcol;
 	fill = (attr == 1) ? ALL1BITS : ALL0BITS;
 
-	p = (caddr_t)rap->pixels + starty * scanspan;
+	p = (uint8_t *)rap->pixels + starty * scanspan;
 	p += (rc->rc_xorigin / 32) * 4;
 	width = w;
         rmask = ALL1BITS << (-width & ALIGNMASK);
@@ -248,7 +241,7 @@ om_copyrows(cookie, srcrow, dstrow, nrows)
 {
         struct rcons *rc = cookie;
         struct raster *rap = rc->rc_sp;
-        caddr_t p, q;
+        uint8_t *p, *q;
 	int scanspan, offset, srcy, height, width, w;
         u_int32_t rmask;
         
@@ -261,7 +254,7 @@ om_copyrows(cookie, srcrow, dstrow, nrows)
 		srcy += height;
 	}
 
-	p = (caddr_t)rap->pixels + srcy * (rap->linelongs * 4);
+	p = (uint8_t *)rap->pixels + srcy * (rap->linelongs * 4);
 	p += (rc->rc_xorigin / 32) * 4;
 	w = rc->rc_font->width * rc->rc_maxcol;
 	width = w;
@@ -291,7 +284,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 {
 	struct rcons *rc = cookie;
 	struct raster *rap = rc->rc_sp;
-	caddr_t sp, dp, basep;
+	uint8_t *sp, *dp, *basep;
 	int scanspan, height, width, align, shift, w, y, srcx, dstx;
 	u_int32_t lmask, rmask;
 
@@ -301,7 +294,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	dstx = rc->rc_xorigin + rc->rc_font->width * dstcol;
 	height = rc->rc_font->height;
 	w = rc->rc_font->width * ncols;
-	basep = (caddr_t)rap->pixels + y * scanspan;
+	basep = (uint8_t *)rap->pixels + y * scanspan;
 
 	align = shift = srcx & ALIGNMASK;
 	width = w + align;
@@ -327,7 +320,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	}
 	/* copy forward (left-to-right) */
 	else if (dstcol < srccol || srccol + ncols < dstcol) {
-		caddr_t sq = sp, dq = dp;
+		uint8_t *sq = sp, *dq = dp;
 
 		w = width;
 		while (height > 0) {
@@ -350,7 +343,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	}
 	/* copy backward (right-to-left) */
 	else {
-		caddr_t sq, dq;
+		uint8_t *sq, *dq;
 
 		sq = (sp += width / 32 * 4);
 		dq = (dp += width / 32 * 4);
@@ -408,7 +401,7 @@ om_cursor(cookie, on, row, col)
 {
 	struct rcons *rc = cookie;
 	struct raster *rap = rc->rc_sp;
-	caddr_t p;
+	uint8_t *p;
 	int scanspan, startx, height, width, align, y;
 	u_int32_t lmask, rmask, image;
 
@@ -430,7 +423,7 @@ om_cursor(cookie, on, row, col)
 	startx = rc->rc_xorigin + rc->rc_font->width * col;
 	height = rc->rc_font->height;
 
-	p = (caddr_t)rap->pixels + y * scanspan + ((startx / 32) * 4);
+	p = (uint8_t *)rap->pixels + y * scanspan + ((startx / 32) * 4);
 	align = startx & ALIGNMASK;
 	width = rc->rc_font->width + align;
 	lmask = ALL1BITS >> align;
@@ -445,7 +438,7 @@ om_cursor(cookie, on, row, col)
 		}
 	}
 	else {
-		caddr_t q = p;
+		uint8_t *q = p;
 
 		while (height > 0) {
 			image = R(p);

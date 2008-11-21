@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ep_mca.c,v 1.18 2007/10/19 12:00:35 ad Exp $	*/
+/*	$NetBSD: if_ep_mca.c,v 1.21 2008/08/27 05:33:47 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,7 +69,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ep_mca.c,v 1.18 2007/10/19 12:00:35 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ep_mca.c,v 1.21 2008/08/27 05:33:47 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -106,10 +99,10 @@ __KERNEL_RCSID(0, "$NetBSD: if_ep_mca.c,v 1.18 2007/10/19 12:00:35 ad Exp $");
 #define MCA_CBIO		0x200	/* Configuration Base IO Address */
 #define MCA_IOSZ		0x10	/* I/O space size */
 
-int ep_mca_match(struct device *, struct cfdata *, void *);
-void ep_mca_attach(struct device *, struct device *, void *);
+int ep_mca_match(device_t , cfdata_t , void *);
+void ep_mca_attach(device_t , device_t , void *);
 
-CFATTACH_DECL(ep_mca, sizeof(struct ep_softc),
+CFATTACH_DECL_NEW(ep_mca, sizeof(struct ep_softc),
     ep_mca_match, ep_mca_attach, NULL, NULL);
 
 const struct ep_mca_product {
@@ -142,8 +135,7 @@ ep_mca_lookup(ma)
 }
 
 int
-ep_mca_match(struct device *parent, struct cfdata *match,
-    void *aux)
+ep_mca_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct mca_attach_args *ma = (struct mca_attach_args *) aux;
 
@@ -154,7 +146,7 @@ ep_mca_match(struct device *parent, struct cfdata *match,
 }
 
 void
-ep_mca_attach(struct device *parent, struct device *self, void *aux)
+ep_mca_attach(device_t parent, device_t self, void *aux)
 {
 	struct ep_softc *sc = device_private(self);
 	struct mca_attach_args *ma = aux;
@@ -194,9 +186,10 @@ ep_mca_attach(struct device *parent, struct device *self, void *aux)
 	iobase = MCA_CBIO + (((pos4 & 0xfc) >> 2) * 0x400);
 	irq = (pos5 & 0x0f);
 
+	sc->sc_dev = self;
 	/* map the pio registers */
 	if (bus_space_map(ma->ma_iot, iobase, MCA_IOSZ, 0, &ioh)) {
-		printf("%s: unable to map i/o space\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev, "unable to map i/o space\n");
 		return;
 	}
 
@@ -225,8 +218,7 @@ ep_mca_attach(struct device *parent, struct device *self, void *aux)
 	/* Map and establish the interrupt. */
 	sc->sc_ih = mca_intr_establish(ma->ma_mc, irq, IPL_NET, epintr, sc);
 	if (sc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt handler\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev, "couldn't establish interrupt handler\n");
 		return;
 	}
 
@@ -251,8 +243,7 @@ ep_mca_attach(struct device *parent, struct device *self, void *aux)
 		media = IFM_10_2;
 		break;
 	default:
-		printf("%s: cannot determine media\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(sc->sc_dev, " cannot determine media\n");
 		return;
 	}
 	ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|media);

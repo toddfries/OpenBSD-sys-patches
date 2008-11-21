@@ -1,5 +1,4 @@
-/*	$OpenBSD: uvm_io.c,v 1.16 2005/11/04 21:48:07 miod Exp $	*/
-/*	$NetBSD: uvm_io.c,v 1.12 2000/06/27 17:29:23 mrg Exp $	*/
+/*	$NetBSD: uvm_io.c,v 1.24 2007/03/04 06:03:48 christos Exp $	*/
 
 /*
  *
@@ -39,6 +38,9 @@
  * uvm_io.c: uvm i/o ops
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uvm_io.c,v 1.24 2007/03/04 06:03:48 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mman.h>
@@ -60,12 +62,12 @@
  */
 
 int
-uvm_io(vm_map_t map, struct uio *uio, int flags)
+uvm_io(struct vm_map *map, struct uio *uio)
 {
 	vaddr_t baseva, endva, pageoffset, kva;
 	vsize_t chunksz, togo, sz;
-	vm_map_entry_t dead_entries;
-	int error, extractflags;
+	struct vm_map_entry *dead_entries;
+	int error;
 
 	/*
 	 * step 0: sanity checks and set up for copy loop.  start with a
@@ -90,12 +92,8 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		togo = togo - (endva - VM_MAXUSER_ADDRESS + 1);
 	pageoffset = baseva & PAGE_MASK;
 	baseva = trunc_page(baseva);
-	chunksz = min(round_page(togo + pageoffset), MAXBSIZE);
+	chunksz = MIN(round_page(togo + pageoffset), trunc_page(MAXPHYS));
 	error = 0;
-
-	extractflags = UVM_EXTRACT_QREF | UVM_EXTRACT_CONTIG;
-	if (flags & UVM_IO_FIXPROT)
-		extractflags |= UVM_EXTRACT_FIXPROT;
 
 	/*
 	 * step 1: main loop...  while we've got data to move
@@ -108,7 +106,8 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		 */
 
 		error = uvm_map_extract(map, baseva, chunksz, kernel_map, &kva,
-		    extractflags);
+			    UVM_EXTRACT_QREF | UVM_EXTRACT_CONTIG |
+			    UVM_EXTRACT_FIXPROT);
 		if (error) {
 
 			/* retry with a smaller chunk... */
@@ -129,34 +128,23 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		sz = chunksz - pageoffset;
 		if (sz > togo)
 			sz = togo;
-		error = uiomove((caddr_t) (kva + pageoffset), sz, uio);
+		error = uiomove((void *) (kva + pageoffset), sz, uio);
 		togo -= sz;
 		baseva += chunksz;
-
 
 		/*
 		 * step 4: unmap the area of kernel memory
 		 */
 
 		vm_map_lock(kernel_map);
-		uvm_unmap_remove(kernel_map, kva, kva+chunksz,
-		    &dead_entries, NULL);
+		uvm_unmap_remove(kernel_map, kva, kva + chunksz, &dead_entries,
+		    NULL, 0);
 		vm_map_unlock(kernel_map);
-
 		if (dead_entries != NULL)
 			uvm_unmap_detach(dead_entries, AMAP_REFALL);
 
-		/*
-		 * We defer checking the error return from uiomove until
-		 * here so that we won't leak memory.
-		 */
 		if (error)
 			break;
 	}
-
-	/*
-	 * done
-	 */
-
 	return (error);
 }

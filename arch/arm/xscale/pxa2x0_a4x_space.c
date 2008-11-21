@@ -1,5 +1,4 @@
-/*	$OpenBSD: pxa2x0_a4x_space.c,v 1.3 2008/05/15 22:17:08 brad Exp $ */
-/*	$NetBSD: pxa2x0_a4x_space.c,v 1.2 2003/07/15 00:24:54 lukem Exp $ */
+/*	$NetBSD: pxa2x0_a4x_space.c,v 1.4 2006/07/28 08:15:29 simonb Exp $ */
 
 /*
  * Copyright (c) 2002  Genetec Corporation.  All rights reserved.
@@ -38,6 +37,9 @@
  * Bus space tag for 8/16-bit devices on 32-bit bus.
  * all registers are located at the address of multiple of 4.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_a4x_space.c,v 1.4 2006/07/28 08:15:29 simonb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -129,6 +131,3 @@ struct bus_space pxa2x0_a4x_bs_tag = {
 	bs_notimpl_bs_c_4,
 	bs_notimpl_bs_c_8,
 };
-
-
-

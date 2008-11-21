@@ -1,4 +1,4 @@
-/*	$NetBSD: isr.c,v 1.22 2005/12/11 12:18:29 christos Exp $ */
+/*	$NetBSD: isr.c,v 1.26 2008/06/26 02:52:03 isaki Exp $ */
 
 /*
  * This file was taken from mvme68k/mvme68k/isr.c
@@ -22,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,20 +41,17 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isr.c,v 1.22 2005/12/11 12:18:29 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isr.c,v 1.26 2008/06/26 02:52:03 isaki Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/vmmeter.h>
 #include <sys/device.h>
+#include <sys/bus.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <net/netisr.h>
-
-#include <machine/bus.h>
-#include <machine/cpu.h>
 
 #include <next68k/next68k/isr.h>
 
@@ -82,6 +72,8 @@ struct	evcnt next68k_irq_evcnt[] = {
 	EVCNT_INITIALIZER(EVCNT_TYPE_INTR, NULL, irqgroupname, "nmi")
 };
 
+int idepth;
+int ssir;
 extern	int intrcnt[];		/* from locore.s. XXXSCW: will go away soon */
 extern	void (*vectab[])(void);
 extern	void badtrap(void);
@@ -275,6 +267,8 @@ isrdispatch_autovec(struct clockframe *frame)
 	} log[256];
 #endif
 
+	idepth++;
+
 	ipl = (frame->vec >> 2) - ISRAUTOVEC;
 
 #ifdef DIAGNOSTIC
@@ -296,6 +290,7 @@ isrdispatch_autovec(struct clockframe *frame)
 		printf("isrdispatch_autovec: ipl %d unexpected\n", ipl);
 		if (++unexpected > 10)
 			panic("too many unexpected interrupts");
+		idepth--;
 		return;
 	}
 
@@ -343,6 +338,15 @@ isrdispatch_autovec(struct clockframe *frame)
 		printf("  *intrmask = 0x%s\n", sbuf);
 	}
 #endif
+
+	idepth--;
+}
+
+bool
+cpu_intr_p(void)
+{
+
+	return idepth != 0;
 }
 
 /*
@@ -386,36 +390,6 @@ isrdispatch_vectored(int ipl, struct clockframe *frame)
 		isr->isr_evcnt->ev_count++;
 }
 
-/*
- * netisr junk...
- * should use an array of chars instead of
- * a bitmask to avoid atomicity locking issues.
- */
-
-void
-netintr(void)
-{
-	int n, s;
-
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
-
-#define DONETISR(bit, fn) do {		\
-		if (n & (1 << bit))	\
-			fn();		\
-		} while (0)
-
-	s = splsoftnet();
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-
-	splx(s);
-}
-
 #if 0
 /* ARGSUSED */
 static int
@@ -425,3 +399,14 @@ spurintr(void *arg)
 	return (1);
 }
 #endif
+
+const uint16_t ipl2psl_table[NIPL] = {
+	[IPL_NONE]       = PSL_S | PSL_IPL0,
+	[IPL_SOFTCLOCK]  = PSL_S | PSL_IPL1,
+	[IPL_SOFTNET]    = PSL_S | PSL_IPL1,
+	[IPL_SOFTSERIAL] = PSL_S | PSL_IPL1,
+	[IPL_SOFTBIO]    = PSL_S | PSL_IPL1,
+	[IPL_VM]         = PSL_S | PSL_IPL6,
+	[IPL_SCHED]      = PSL_S | PSL_IPL7,
+	[IPL_HIGH]       = PSL_S | PSL_IPL7,
+};

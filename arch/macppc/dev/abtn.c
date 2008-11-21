@@ -1,8 +1,6 @@
-/*	$OpenBSD: abtn.c,v 1.11 2006/01/18 23:21:17 miod Exp $	*/
-/*	$NetBSD: abtn.c,v 1.1 1999/07/12 17:48:26 tsubai Exp $	*/
+/*	$NetBSD: abtn.c,v 1.14 2008/06/13 11:54:31 cegger Exp $	*/
 
 /*-
- * Copyright (c) 2002, Miodrag Vallat.
  * Copyright (C) 1999 Tsubai Masanari.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,18 +26,29 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: abtn.c,v 1.14 2008/06/13 11:54:31 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
 
-#include <machine/bus.h>
+#include <macppc/dev/akbdvar.h>
+#include <macppc/dev/adbvar.h>
+#include <macppc/dev/pm_direct.h>
 
-#include <dev/ofw/openfirm.h>
-#include <macppc/macppc/ofw_machdep.h>
-
-#include <dev/adb/adb.h>
-
+#define NVRAM_BRIGHTNESS 0x140e
 #define ABTN_HANDLER_ID 31
+
+#define BUTTON_LOUDER	0x06
+#define BUTTON_SOFTER	0x07
+#define BUTTON_MUTE	0x08
+#define BUTTON_BRIGHTER	0x09
+#define BUTTON_DIMMER	0x0a
+#define BUTTON_EJECT	0x0b
+#define BUTTON_DISPLAY	0x0c
+#define BUTTON_KEYPAD	0x7f
+#define BUTTON_DEPRESS	0x80
 
 struct abtn_softc {
 	struct device sc_dev;
@@ -47,21 +56,23 @@ struct abtn_softc {
 	int origaddr;		/* ADB device type */
 	int adbaddr;		/* current ADB address */
 	int handler_id;
+
+	int brightness;		/* backlight brightness */
+	int volume;		/* speaker volume (not yet) */
 };
 
-int abtn_match(struct device *, void *, void *);
-void abtn_attach(struct device *, struct device *, void *);
-void abtn_adbcomplete(caddr_t, caddr_t, int);
+static int abtn_match __P((struct device *, struct cfdata *, void *));
+static void abtn_attach __P((struct device *, struct device *, void *));
+static void abtn_adbcomplete __P((uint8_t *, uint8_t *, int));
 
-struct cfattach abtn_ca = {
-	sizeof(struct abtn_softc), abtn_match, abtn_attach
-};
-struct cfdriver abtn_cd = {
-	NULL, "abtn", DV_DULL
-};
+CFATTACH_DECL(abtn, sizeof(struct abtn_softc),
+    abtn_match, abtn_attach, NULL, NULL);
 
 int
-abtn_match(struct device *parent, void *cf, void *aux)
+abtn_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct adb_attach_args *aa = aux;
 
@@ -73,71 +84,119 @@ abtn_match(struct device *parent, void *cf, void *aux)
 }
 
 void
-abtn_attach(struct device *parent, struct device *self, void *aux)
+abtn_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct abtn_softc *sc = (struct abtn_softc *)self;
 	struct adb_attach_args *aa = aux;
 	ADBSetInfoBlock adbinfo;
+	int bright;
 
-	printf(": brightness/volume/eject buttons\n");
+	printf("buttons\n");
+
+	bright = pm_read_nvram(NVRAM_BRIGHTNESS);
+	if (bright != 0)
+		pm_set_brightness(bright);
+	sc->brightness = bright;
 
 	sc->origaddr = aa->origaddr;
 	sc->adbaddr = aa->adbaddr;
 	sc->handler_id = aa->handler_id;
 
 	adbinfo.siServiceRtPtr = (Ptr)abtn_adbcomplete;
-	adbinfo.siDataAreaAddr = (caddr_t)sc;
+	adbinfo.siDataAreaAddr = (void *)sc;
 
-	set_adb_info(&adbinfo, sc->adbaddr);
+	SetADBInfo(&adbinfo, sc->adbaddr);
 }
 
+extern struct cfdriver akbd_cd;
+
 void
-abtn_adbcomplete(caddr_t buffer, caddr_t data, int adb_command)
+abtn_adbcomplete(buffer, data, adb_command)
+	uint8_t *buffer, *data;
+	int adb_command;
 {
-	u_int cmd, brightness;
+	struct abtn_softc *sc = (struct abtn_softc *)data;
+	u_int cmd;
+#ifdef FORCE_FUNCTION_KEYS
+	int key = 0;
+#endif
 
 	cmd = buffer[1];
 
+#ifdef FORCE_FUNCTION_KEYS
+	switch (cmd & 0x7f) {
+	case 0x0a: /* f1 */
+		key = 122;
+		break;
+	case 0x09: /* f2 */
+		key = 120;
+		break;
+	case 0x08: /* f3 */
+		key =  99;
+		break;
+	case 0x07: /* f4 */
+		key = 118;
+		break;
+	case 0x06: /* f5 */
+		key =  96;
+		break;
+	case 0x7f: /* f6 */
+		key = 97;
+		break;
+	case 0x0b: /* f12 */
+		key = 111;
+		break;
+	}
+	if (key != 0) {
+		key |= cmd & 0x80;
+		kbd_passup(device_lookup_private(&akbd_cd, 0),key);
+		return;
+	}
+#endif
+
+	if (cmd >= BUTTON_DEPRESS)
+		return;
+
 	switch (cmd) {
-	case 0x0a:	/* decrease brightness */
-		brightness = cons_brightness;
-		if (brightness == MAX_BRIGHTNESS)
-			brightness++;		/* get round values */
-		brightness -= STEP_BRIGHTNESS;
-		of_setbrightness(brightness);
+	case BUTTON_DIMMER:
+		sc->brightness -= 8;
+		if (sc->brightness < 8)
+			sc->brightness = 8;
+		pm_set_brightness(sc->brightness);
+		pm_write_nvram(NVRAM_BRIGHTNESS, sc->brightness);
 		break;
 
-	case 0x09:	/* increase brightness */
-		brightness = cons_brightness + STEP_BRIGHTNESS;
-		of_setbrightness(brightness);
+	case BUTTON_BRIGHTER:
+		sc->brightness += 8;
+		if (sc->brightness > 0x78)
+			sc->brightness = 0x78;
+		pm_set_brightness(sc->brightness);
+		pm_write_nvram(NVRAM_BRIGHTNESS, sc->brightness);
 		break;
 
-#ifdef DEBUG
-	case 0x08:	/* mute */
-	case 0x01:	/* mute, AV hardware */
-	case 0x07:	/* decrease volume */
-	case 0x02:	/* decrease volume, AV hardware */
-	case 0x06:	/* increase volume */
-	case 0x03:	/* increase volume, AV hardware */
-		/* Need callback to do something with these */
+	case BUTTON_MUTE:
+	case BUTTON_SOFTER:
+	case BUTTON_LOUDER:
+		printf("%s: volume setting not implemented\n",
+			sc->sc_dev.dv_xname);
+		break;
+	case BUTTON_DISPLAY:
+		printf("%s: display selection not implemented\n",
+			sc->sc_dev.dv_xname);
+		break;
+	case BUTTON_EJECT:
+		printf("%s: eject not implemented\n",
+			sc->sc_dev.dv_xname);
 		break;
 
-	case 0x0c:	/* mirror display key */
-		/* Need callback to do something with this */
-		break;
-
-	case 0x0b:	/* eject tray */
-		/* Need callback to do something with this */
-		break;
-
-	case 0x7f:	/* numlock */
-		/* Need callback to do something with this */
+	/* The keyboard gets wacky when in keypad mode. */
+	case BUTTON_KEYPAD:
 		break;
 
 	default:
-		if ((cmd & ~0x7f) == 0)
-			printf("unknown ADB button 0x%x\n", cmd);
-		break;
-#endif
+		printf("%s: unknown button 0x%x\n",
+			sc->sc_dev.dv_xname, cmd);
 	}
 }

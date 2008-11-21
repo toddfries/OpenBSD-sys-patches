@@ -1,5 +1,4 @@
-/*	$OpenBSD: i2cvar.h,v 1.10 2006/02/08 23:15:58 dlg Exp $	*/
-/*	$NetBSD: i2cvar.h,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
+/*	$NetBSD: i2cvar.h,v 1.6 2007/07/09 21:00:33 ad Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -47,6 +46,13 @@
 #define	I2C_F_LAST		0x02	/* last byte of read */
 #define	I2C_F_STOP		0x04	/* send stop after byte */
 #define	I2C_F_POLL		0x08	/* poll, don't sleep */
+#define	I2C_F_PEC		0x10	/* smbus packet error checking */
+
+struct ic_intr_list {
+	LIST_ENTRY(ic_intr_list) il_next;
+	int (*il_intr)(void *);
+	void *il_intrarg;
+};
 
 /*
  * This structure provides the interface between the i2c framework
@@ -88,15 +94,22 @@ typedef struct i2c_controller {
 	int	(*ic_initiate_xfer)(void *, i2c_addr_t, int);
 	int	(*ic_read_byte)(void *, uint8_t *, int);
 	int	(*ic_write_byte)(void *, uint8_t, int);
+
+	LIST_HEAD(, ic_intr_list) ic_list;
+	LIST_HEAD(, ic_intr_list) ic_proc_list;
+	volatile int	ic_running;
+	volatile int	ic_pending;
+	struct lwp *ic_intr_thread;
+	const char *ic_devname;
 } *i2c_tag_t;
+
+/* I2C bus types */
+#define	I2C_TYPE_SMBUS	1
 
 /* Used to attach the i2c framework to the controller. */
 struct i2cbus_attach_args {
-	const char *iba_name;		/* bus name ("iic") */
 	i2c_tag_t iba_tag;		/* the controller */
-	void	(*iba_bus_scan)(struct device *, struct i2cbus_attach_args *,
-		    void *);
-	void	*iba_bus_scan_arg;
+	int iba_type;			/* bus type */
 };
 
 /* Used to attach devices on the i2c bus. */
@@ -104,8 +117,7 @@ struct i2c_attach_args {
 	i2c_tag_t	ia_tag;		/* our controller */
 	i2c_addr_t	ia_addr;	/* address of device */
 	int		ia_size;	/* size (for EEPROMs) */
-	char		*ia_name;	/* chip name */
-	void		*ia_cookie;	/* pass extra info from bus to dev */
+	int		ia_type;	/* bus type */
 };
 
 /*
@@ -128,9 +140,6 @@ int	iicbus_print(void *, const char *);
 	(*(ic)->ic_read_byte)((ic)->ic_cookie, (bytep), (flags))
 #define	iic_write_byte(ic, byte, flags)					\
 	(*(ic)->ic_write_byte)((ic)->ic_cookie, (byte), (flags))
-
-void	iic_scan(struct device *, struct i2cbus_attach_args *);
-int	iic_print(void *, const char *);
 #endif /* _I2C_PRIVATE */
 
 /*
@@ -146,9 +155,22 @@ int	iic_exec(i2c_tag_t, i2c_op_t, i2c_addr_t, const void *,
 	    size_t, void *, size_t, int);
 
 int	iic_smbus_write_byte(i2c_tag_t, i2c_addr_t, uint8_t, uint8_t, int);
+int	iic_smbus_write_word(i2c_tag_t, i2c_addr_t, uint8_t, uint16_t, int);
 int	iic_smbus_read_byte(i2c_tag_t, i2c_addr_t, uint8_t, uint8_t *, int);
+int	iic_smbus_read_word(i2c_tag_t, i2c_addr_t, uint8_t, uint16_t *, int);
 int	iic_smbus_receive_byte(i2c_tag_t, i2c_addr_t, uint8_t *, int);
+int	iic_smbus_send_byte(i2c_tag_t, i2c_addr_t, uint8_t, int);
+int	iic_smbus_quick_read(i2c_tag_t, i2c_addr_t, int);
+int	iic_smbus_quick_write(i2c_tag_t, i2c_addr_t, int);
+int	iic_smbus_block_read(i2c_tag_t, i2c_addr_t, uint8_t, uint8_t *,
+	    size_t, int);
+int	iic_smbus_block_write(i2c_tag_t, i2c_addr_t, uint8_t, uint8_t *,
+	    size_t, int);
 
-void	iic_ignore_addr(u_int8_t addr);
+void *	iic_smbus_intr_establish(i2c_tag_t, int (*)(void *), void *);
+void *	iic_smbus_intr_establish_proc(i2c_tag_t, int (*)(void *), void *);
+void	iic_smbus_intr_disestablish(i2c_tag_t, void *);
+void	iic_smbus_intr_disestablish_proc(i2c_tag_t, void *);
+int	iic_smbus_intr(i2c_tag_t);
 
 #endif /* _DEV_I2C_I2CVAR_H_ */

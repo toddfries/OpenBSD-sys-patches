@@ -1,5 +1,7 @@
-/*	$OpenBSD: bktr_card.h,v 1.7 2007/01/08 08:29:37 pedro Exp $	*/
-/* $FreeBSD: src/sys/dev/bktr/bktr_card.h,v 1.4 2000/06/26 09:41:31 roger Exp $ */
+/* $SourceForge: bktr_card.h,v 1.3 2003/03/11 23:11:22 thomasklausner Exp $ */
+
+/*	$NetBSD: bktr_card.h,v 1.5 2005/12/06 23:43:57 wiz Exp $	*/
+/* $FreeBSD: src/sys/dev/bktr/bktr_card.h,v 1.4 2000/06/26 09:41:31 roger Exp$ */
 
 /*
  * This is part of the Driver for Video Capture Cards (Frame grabbers)
@@ -54,12 +56,12 @@
  *  options BKTR_OVERRIDE_CARD  <card type>
  *  eg options BKTR_OVERRIDE CARD=1
  *
- * or using the sysctl  hw.bt848.card
- *  eg sysctl hw.bt848.card=1
+ * or using the sysclt  hw.bt848.card
+ *  eg sysctl -w hw.bt848.card=1
  *
  * where <card type> is one of the following card defines.
  */
- 
+
 #define CARD_UNKNOWN		0
 #define CARD_MIRO		1
 #define CARD_HAUPPAUGE		2
@@ -77,17 +79,13 @@
 #define CARD_ASKEY_DYNALINK_MAGIC_TVIEW	14
 #define CARD_LEADTEK		15
 #define CARD_TERRATVPLUS	16
-#define CARD_TVWONDER		17
-#define CARD_IO_BCTV3		18
-#define CARD_AOPEN_VA1000	19
-#define CARD_ZOLTRIX_GENIE_FM	20
-#define CARD_LEADTEK_XP		21
-#define Bt848_MAX_CARD		22
+#define CARD_TERRATVALUE	17
+#define Bt848_MAX_CARD		18
 
 
-int	signCard( bktr_ptr_t bktr, int offset, int count, u_char *sig );
-void	probeCard( bktr_ptr_t bktr, int verbose, int unit);
+int	signCard(bktr_ptr_t bktr, int offset, int count, u_char* sig);
+void	probeCard(bktr_ptr_t bktr, int verbose, int unit);
 
-int	writeEEProm( bktr_ptr_t bktr, int offset, int count, u_char *data );
-int	readEEProm( bktr_ptr_t bktr, int offset, int count, u_char *data );
+int	writeEEProm(bktr_ptr_t bktr, int offset, int count, u_char *data);
+int	readEEProm(bktr_ptr_t bktr, int offset, int count, u_char *data);
 

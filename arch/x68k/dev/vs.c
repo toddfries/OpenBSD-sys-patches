@@ -1,4 +1,4 @@
-/*	$NetBSD: vs.c,v 1.30 2005/12/11 12:19:37 christos Exp $	*/
+/*	$NetBSD: vs.c,v 1.33 2008/06/25 08:14:59 isaki Exp $	*/
 
 /*
  * Copyright (c) 2001 Tetsuya Isaki. All rights reserved.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vs.c,v 1.30 2005/12/11 12:19:37 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vs.c,v 1.33 2008/06/25 08:14:59 isaki Exp $");
 
 #include "audio.h"
 #include "vs.h"
@@ -67,8 +67,8 @@ extern int audiodebug;
 #define DPRINTF(y,x)
 #endif
 
-static int  vs_match(struct device *, struct cfdata *, void *);
-static void vs_attach(struct device *, struct device *, void *);
+static int  vs_match(device_t, cfdata_t, void *);
+static void vs_attach(device_t, device_t, void *);
 
 static int  vs_dmaintr(void *);
 static int  vs_dmaerrintr(void *);
@@ -104,7 +104,7 @@ static inline void vs_set_po(struct vs_softc *, u_long);
 
 extern struct cfdriver vs_cd;
 
-CFATTACH_DECL(vs, sizeof(struct vs_softc),
+CFATTACH_DECL_NEW(vs, sizeof(struct vs_softc),
     vs_match, vs_attach, NULL, NULL);
 
 static int vs_attached;
@@ -173,7 +173,7 @@ struct {
 };
 
 static int
-vs_match(struct device *parent, struct cfdata *cf, void *aux)
+vs_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct intio_attach_args *ia;
 
@@ -207,14 +207,15 @@ vs_match(struct device *parent, struct cfdata *cf, void *aux)
 }
 
 static void
-vs_attach(struct device *parent, struct device *self, void *aux)
+vs_attach(device_t parent, device_t self, void *aux)
 {
 	struct vs_softc *sc;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	struct intio_attach_args *ia;
 
-	sc = (struct vs_softc *)self;
+	sc = device_private(self);
+	sc->sc_dev = self;
 	ia = aux;
 	vs_attached = 1;
 
@@ -228,7 +229,7 @@ vs_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
 	sc->sc_hw_if = &vs_hw_if;
-	sc->sc_addr = (caddr_t) ia->ia_addr;
+	sc->sc_addr = (void *) ia->ia_addr;
 	sc->sc_dmas = NULL;
 
 	/* XXX */
@@ -241,9 +242,9 @@ vs_attach(struct device *parent, struct device *self, void *aux)
 		ia->ia_dmaintr,   vs_dmaintr, sc,
 		ia->ia_dmaintr+1, vs_dmaerrintr, sc);
 
-	printf("%s: MSM6258V ADPCM voice synthesizer\n", sc->sc_dev.dv_xname);
+	aprint_normal_dev(self, "MSM6258V ADPCM voice synthesizer\n");
 
-	audio_attach_mi(&vs_hw_if, sc, &sc->sc_dev);
+	audio_attach_mi(&vs_hw_if, sc, sc->sc_dev);
 }
 
 /*
@@ -291,7 +292,7 @@ vs_dmaerrintr(void *hdl)
 	struct vs_softc *sc;
 
 	sc = hdl;
-	DPRINTF(1, ("%s: DMA transfer error.\n", sc->sc_dev.dv_xname));
+	DPRINTF(1, ("%s: DMA transfer error.\n", device_xname(sc->sc_dev)));
 	/* XXX */
 	vs_dmaintr(sc);
 
@@ -509,7 +510,7 @@ vs_trigger_output(void *hdl, void *start, void *end, int bsize,
 	sc->sc_pintr = intr;
 	sc->sc_parg  = arg;
 	sc->sc_current.blksize = bsize;
-	sc->sc_current.bufsize = (char*)end - (char*)start;
+	sc->sc_current.bufsize = (char *)end - (char *)start;
 	sc->sc_current.dmap = 0;
 
 	/* Find DMA buffer. */
@@ -518,7 +519,7 @@ vs_trigger_output(void *hdl, void *start, void *end, int bsize,
 		continue;
 	if (vd == NULL) {
 		printf("%s: trigger_output: bad addr %p\n",
-		    sc->sc_dev.dv_xname, start);
+		    device_xname(sc->sc_dev), start);
 		return EINVAL;
 	}
 
@@ -558,7 +559,7 @@ vs_trigger_input(void *hdl, void *start, void *end, int bsize,
 	sc->sc_rintr = intr;
 	sc->sc_rarg  = arg;
 	sc->sc_current.blksize = bsize;
-	sc->sc_current.bufsize = (char*)end - (char*)start;
+	sc->sc_current.bufsize = (char *)end - (char *)start;
 	sc->sc_current.dmap = 0;
 
 	/* Find DMA buffer. */
@@ -567,7 +568,7 @@ vs_trigger_input(void *hdl, void *start, void *end, int bsize,
 		continue;
 	if (vd == NULL) {
 		printf("%s: trigger_output: bad addr %p\n",
-		    sc->sc_dev.dv_xname, start);
+		    device_xname(sc->sc_dev), start);
 		return EINVAL;
 	}
 
@@ -777,7 +778,7 @@ vs_mappage(void *addr, void *mem, off_t off, int prot)
 		continue;
 	if (p == NULL) {
 		printf("%s: mappage: bad addr %p\n",
-		    sc->sc_dev.dv_xname, start);
+		    device_xname(sc->sc_dev), start);
 		return -1;
 	}
 

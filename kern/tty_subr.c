@@ -1,5 +1,4 @@
-/*	$OpenBSD: tty_subr.c,v 1.20 2008/03/31 22:40:34 deraadt Exp $	*/
-/*	$NetBSD: tty_subr.c,v 1.13 1996/02/09 19:00:43 christos Exp $	*/
+/*	$NetBSD: tty_subr.c,v 1.34 2008/07/16 18:27:49 drochner Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Theo de Raadt
@@ -29,6 +28,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tty_subr.c,v 1.34 2008/07/16 18:27:49 drochner Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
@@ -36,25 +38,32 @@
 #include <sys/tty.h>
 #include <sys/malloc.h>
 
+MALLOC_DEFINE(M_TTYS, "ttys", "allocated tty structures");
+
 /*
+ * At compile time, choose:
+ * There are two ways the TTY_QUOTE bit can be stored. If QBITS is
+ * defined we allocate an array of bits -- 1/8th as much memory but
+ * setbit(), clrbit(), and isset() take more CPU. If QBITS is
+ * undefined, we just use an array of bytes.
+ *
  * If TTY_QUOTE functionality isn't required by a line discipline,
  * it can free c_cq and set it to NULL. This speeds things up,
  * and also does not use any extra memory. This is useful for (say)
  * a SLIP line discipline that wants a 32K ring buffer for data
  * but doesn't need quoting.
  */
+#define QBITS
+
+#ifdef QBITS
 #define QMEM(n)		((((n)-1)/NBBY)+1)
+#else
+#define QMEM(n)		(n)
+#endif
 
-void	cinit(void);
-void	clrbits(u_char *, int, int);
-
-/*
- * Initialize clists.
- */
-void
-cinit(void)
-{
-}
+#ifdef QBITS
+static void	clrbits(u_char *, int, int);
+#endif
 
 /*
  * Initialize a particular clist. Ok, they are really ring buffers,
@@ -64,34 +73,38 @@ int
 clalloc(struct clist *clp, int size, int quot)
 {
 
-	clp->c_cs = malloc(size, M_TTYS, M_WAITOK|M_ZERO);
+	clp->c_cs = malloc(size, M_TTYS, M_WAITOK);
+	if (!clp->c_cs)
+		return (-1);
+	memset(clp->c_cs, 0, size);
 
-	if (quot)
-		clp->c_cq = malloc(QMEM(size), M_TTYS, M_WAITOK|M_ZERO);
-	else
+	if(quot) {
+		clp->c_cq = malloc(QMEM(size), M_TTYS, M_WAITOK);
+		if (!clp->c_cq) {
+			free(clp->c_cs, M_TTYS);
+			return (-1);
+		}
+		memset(clp->c_cq, 0, QMEM(size));
+	} else
 		clp->c_cq = (u_char *)0;
 
 	clp->c_cf = clp->c_cl = (u_char *)0;
 	clp->c_ce = clp->c_cs + size;
 	clp->c_cn = size;
 	clp->c_cc = 0;
+
 	return (0);
 }
 
 void
 clfree(struct clist *clp)
 {
-	if (clp->c_cs) {
-		bzero(clp->c_cs, clp->c_cn);
+	if(clp->c_cs)
 		free(clp->c_cs, M_TTYS);
-	}
-	if (clp->c_cq) {
-		bzero(clp->c_cq, QMEM(clp->c_cn));
+	if(clp->c_cq)
 		free(clp->c_cq, M_TTYS);
-	}
 	clp->c_cs = clp->c_cq = (u_char *)0;
 }
-
 
 /*
  * Get a character from a clist.
@@ -107,12 +120,16 @@ getc(struct clist *clp)
 		goto out;
 
 	c = *clp->c_cf & 0xff;
-	*clp->c_cf = 0;
 	if (clp->c_cq) {
+#ifdef QBITS
 		if (isset(clp->c_cq, clp->c_cf - clp->c_cs) )
 			c |= TTY_QUOTE;
-		clrbit(clp->c_cq, clp->c_cl - clp->c_cs);
+#else
+		if (*(clp->c_cf - clp->c_cs + clp->c_cq))
+			c |= TTY_QUOTE;
+#endif
 	}
+	*clp->c_cf = 0; /* wipe out to avoid information disclosure */
 	if (++clp->c_cf == clp->c_ce)
 		clp->c_cf = clp->c_cs;
 	if (--clp->c_cc == 0)
@@ -141,10 +158,7 @@ q_to_b(struct clist *clp, u_char *cp, int count)
 			cc = clp->c_ce - clp->c_cf;
 		if (cc > count)
 			cc = count;
-		bcopy(clp->c_cf, p, cc);
-		bzero(clp->c_cf, cc);
-		if (clp->c_cq)
-			clrbits(clp->c_cq, clp->c_cl - clp->c_cs, cc);
+		memcpy(p, clp->c_cf, cc);
 		count -= cc;
 		p += cc;
 		clp->c_cc -= cc;
@@ -253,7 +267,7 @@ putc(int c, struct clist *clp)
 #if defined(DIAGNOSTIC) || 1
 			printf("putc: required clalloc\n");
 #endif
-			if (clalloc(clp, 1024, 1)) {
+			if(clalloc(clp, 1024, 1)) {
 out:
 				splx(s);
 				return -1;
@@ -265,10 +279,15 @@ out:
 	*clp->c_cl = c & 0xff;
 	i = clp->c_cl - clp->c_cs;
 	if (clp->c_cq) {
+#ifdef QBITS
 		if (c & TTY_QUOTE)
 			setbit(clp->c_cq, i);
 		else
 			clrbit(clp->c_cq, i);
+#else
+		q = clp->c_cq + i;
+		*q = (c & TTY_QUOTE) ? 1 : 0;
+#endif
 	}
 	clp->c_cc++;
 	clp->c_cl++;
@@ -278,20 +297,21 @@ out:
 	return 0;
 }
 
+#ifdef QBITS
 /*
  * optimized version of
  *
  * for (i = 0; i < len; i++)
  *	clrbit(cp, off + len);
  */
-void
+static void
 clrbits(u_char *cp, int off, int len)
 {
 	int sby, sbi, eby, ebi;
 	int i;
 	u_char mask;
 
-	if (len==1) {
+	if(len==1) {
 		clrbit(cp, off);
 		return;
 	}
@@ -314,16 +334,17 @@ clrbits(u_char *cp, int off, int len)
 			cp[i] = 0x00;
 	}
 }
+#endif
 
 /*
  * Copy buffer to clist.
- * Return number of bytes not transferred.
+ * Return number of bytes not transfered.
  */
 int
-b_to_q(u_char *cp, int count, struct clist *clp)
+b_to_q(const u_char *cp, int count, struct clist *clp)
 {
 	int cc;
-	u_char *p = cp;
+	const u_char *p = cp;
 	int s;
 
 	if (count <= 0)
@@ -338,7 +359,7 @@ b_to_q(u_char *cp, int count, struct clist *clp)
 #if defined(DIAGNOSTIC) || 1
 			printf("b_to_q: required clalloc\n");
 #endif
-			if (clalloc(clp, 1024, 1))
+			if(clalloc(clp, 1024, 1))
 				goto out;
 		}
 		clp->c_cf = clp->c_cl = clp->c_cs;
@@ -351,9 +372,14 @@ b_to_q(u_char *cp, int count, struct clist *clp)
 			cc = clp->c_cf - clp->c_cl;
 		if (cc > count)
 			cc = count;
-		bcopy(p, clp->c_cl, cc);
-		if (clp->c_cq)
+		memcpy(clp->c_cl, p, cc);
+		if (clp->c_cq) {
+#ifdef QBITS
 			clrbits(clp->c_cq, clp->c_cl - clp->c_cs, cc);
+#else
+			memset(clp->c_cl - clp->c_cs + clp->c_cq, 0, cc);
+#endif
+		}
 		p += cc;
 		count -= cc;
 		clp->c_cc += cc;
@@ -394,8 +420,13 @@ nextc(struct clist *clp, u_char *cp, int *c)
 		cp = clp->c_cs;
 	*c = *cp & 0xff;
 	if (clp->c_cq) {
+#ifdef QBITS
 		if (isset(clp->c_cq, cp - clp->c_cs))
 			*c |= TTY_QUOTE;
+#else
+		if (*(clp->c_cf - clp->c_cs + clp->c_cq))
+			*c |= TTY_QUOTE;
+#endif
 	}
 	return cp;
 }
@@ -420,9 +451,14 @@ firstc(struct clist *clp, int *c)
 		return NULL;
 	cp = clp->c_cf;
 	*c = *cp & 0xff;
-	if (clp->c_cq) {
+	if(clp->c_cq) {
+#ifdef QBITS
 		if (isset(clp->c_cq, cp - clp->c_cs))
 			*c |= TTY_QUOTE;
+#else
+		if (*(cp - clp->c_cs + clp->c_cq))
+			*c |= TTY_QUOTE;
+#endif
 	}
 	return clp->c_cf;
 }
@@ -448,8 +484,13 @@ unputc(struct clist *clp)
 
 	c = *clp->c_cl & 0xff;
 	if (clp->c_cq) {
+#ifdef QBITS
 		if (isset(clp->c_cq, clp->c_cl - clp->c_cs))
 			c |= TTY_QUOTE;
+#else
+		if (*(clp->c_cf - clp->c_cs + clp->c_cq))
+			c |= TTY_QUOTE;
+#endif
 	}
 	if (clp->c_cc == 0)
 		clp->c_cf = clp->c_cl = (u_char *)0;
@@ -465,28 +506,6 @@ void
 catq(struct clist *from, struct clist *to)
 {
 	int c;
-	int s;
-
-	s = spltty();
-	if (from->c_cc == 0) {	/* nothing to move */
-		splx(s);
-		return;
-	}
-
-	/*
-	 * if `to' queue is empty and the queues are the same max size,
-	 * it is more efficient to just swap the clist structures.
-	 */
-	if (to->c_cc == 0 && from->c_cn == to->c_cn) {
-		struct clist tmp;
-
-		tmp = *from;
-		*from = *to;
-		*to = tmp;
-		splx(s);
-		return;
-	}
-	splx(s);
 
 	while ((c = getc(from)) != -1)
 		putc(c, to);

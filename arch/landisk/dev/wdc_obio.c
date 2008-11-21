@@ -1,5 +1,4 @@
-/*	$OpenBSD: wdc_obio.c,v 1.2 2006/10/28 15:51:33 kettenis Exp $	*/
-/*	$NetBSD: wdc_obio.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
+/*	$NetBSD: wdc_obio.c,v 1.4 2008/04/28 20:23:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2003 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: wdc_obio.c,v 1.4 2008/04/28 20:23:26 martin Exp $");
+
+#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -52,18 +48,18 @@
 
 struct wdc_obio_softc {
 	struct	wdc_softc sc_wdcdev;
-	struct	channel_softc *sc_chanptr;
-	struct	channel_softc sc_channel;
-
+	struct	ata_channel *sc_chanlist[1];
+	struct	ata_channel sc_channel;
+	struct	ata_queue sc_chqueue;
+	struct	wdc_regs sc_wdc_regs;
 	void	*sc_ih;
 };
 
-int	wdc_obio_match(struct device *, void *, void *);
-void	wdc_obio_attach(struct device *, struct device *, void *);
+static int	wdc_obio_probe(device_t, cfdata_t, void *);
+static void	wdc_obio_attach(device_t, device_t, void *);
 
-struct cfattach wdc_obio_ca = {
-	sizeof(struct wdc_obio_softc), wdc_obio_match, wdc_obio_attach
-};
+CFATTACH_DECL_NEW(wdc_obio, sizeof(struct wdc_obio_softc),
+    wdc_obio_probe, wdc_obio_attach, NULL, NULL);
 
 #define	WDC_OBIO_REG_NPORTS	WDC_NREG
 #define	WDC_OBIO_REG_SIZE	(WDC_OBIO_REG_NPORTS * 2)
@@ -71,30 +67,19 @@ struct cfattach wdc_obio_ca = {
 #define	WDC_OBIO_AUXREG_SIZE	(WDC_OBIO_AUXREG_NPORTS * 2)
 #define	WDC_OBIO_AUXREG_OFFSET	0x2c
 
-u_int8_t wdc_obio_read_reg(struct channel_softc *chp,  enum wdc_regs reg);
-void wdc_obio_write_reg(struct channel_softc *chp,  enum wdc_regs reg,
-    u_int8_t val);
-
-struct channel_softc_vtbl wdc_obio_vtbl = {
-	wdc_obio_read_reg,
-	wdc_obio_write_reg,
-	wdc_default_lba48_write_reg,
-	wdc_default_read_raw_multi_2,
-	wdc_default_write_raw_multi_2,
-	wdc_default_read_raw_multi_4,
-	wdc_default_write_raw_multi_4
-};
-
-int
-wdc_obio_match(struct device *parent, void *vcf, void *aux)
+static int
+wdc_obio_probe(device_t parent, cfdata_t cfp, void *aux)
 {
 	struct obio_attach_args *oa = aux;
+	struct ata_channel ch;
+	struct wdc_softc wdc;
+	struct wdc_regs wdr;
+	int result = 0;
+	int i;
 
-	if (oa->oa_nio != 1)
+	if (oa->oa_nio < 1)
 		return (0);
-	if (oa->oa_nirq != 1)
-		return (0);
-	if (oa->oa_niomem != 0)
+	if (oa->oa_nirq < 1)
 		return (0);
 
 	if (oa->oa_io[0].or_addr == IOBASEUNK)
@@ -102,76 +87,96 @@ wdc_obio_match(struct device *parent, void *vcf, void *aux)
 	if (oa->oa_irq[0].or_irq == IRQUNK)
 		return (0);
 
-	/* XXX should probe for hardware */
+	memset(&wdc, 0, sizeof(wdc));
+	memset(&ch, 0, sizeof(ch));
+	ch.ch_atac = &wdc.sc_atac;
+	wdc.regs = &wdr;
 
-	oa->oa_io[0].or_size = WDC_OBIO_REG_SIZE;
+	wdr.cmd_iot = oa->oa_iot;
+	if (bus_space_map(wdr.cmd_iot, oa->oa_io[0].or_addr,
+	    WDC_OBIO_REG_SIZE, 0, &wdr.cmd_baseioh)) {
+		goto out;
+	}
+	for (i = 0; i < WDC_OBIO_REG_NPORTS; i++) {
+		if (bus_space_subregion(wdr.cmd_iot, wdr.cmd_baseioh,
+		    i * 2, (i == 0) ? 2 : 1, &wdr.cmd_iohs[i])) {
+			goto outunmap;
+		}
+	}
+	wdc_init_shadow_regs(&ch);
 
-	return (1);
+	wdr.ctl_iot = oa->oa_iot;
+	if (bus_space_map(wdr.ctl_iot,
+	    oa->oa_io[0].or_addr + WDC_OBIO_AUXREG_OFFSET,
+	    WDC_OBIO_AUXREG_SIZE, 0, &wdr.ctl_ioh)) {
+		goto outunmap;
+	}
+
+	result = wdcprobe(&ch);
+	if (result) {
+		oa->oa_nio = 1;
+		oa->oa_io[0].or_size = WDC_OBIO_REG_SIZE;
+		oa->oa_nirq = 1;
+		oa->oa_niomem = 0;
+	}
+
+	bus_space_unmap(wdr.ctl_iot, wdr.ctl_ioh, WDC_OBIO_AUXREG_SIZE);
+outunmap:
+	bus_space_unmap(wdr.cmd_iot, wdr.cmd_baseioh, WDC_OBIO_REG_SIZE);
+out:
+	return (result);
 }
 
-void
-wdc_obio_attach(struct device *parent, struct device *self, void *aux)
+static void
+wdc_obio_attach(device_t parent, device_t self, void *aux)
 {
-	struct wdc_obio_softc *sc = (void *)self;
+	struct wdc_obio_softc *sc = device_private(self);
 	struct obio_attach_args *oa = aux;
-	struct channel_softc *chp = &sc->sc_channel;
+	struct wdc_regs *wdr;
+	int i;
 
-	printf("\n");
+	aprint_naive("\n");
+	aprint_normal("\n");
 
-	chp->cmd_iot = chp->ctl_iot = oa->oa_iot;
-	chp->_vtbl = &wdc_obio_vtbl;
+	sc->sc_wdcdev.sc_atac.atac_dev = self;
+	sc->sc_wdcdev.regs = wdr = &sc->sc_wdc_regs;
 
-	if (bus_space_map(chp->cmd_iot, oa->oa_io[0].or_addr,
-	    WDC_OBIO_REG_SIZE, 0, &chp->cmd_ioh)
-	 || bus_space_map(chp->ctl_iot,
+	wdr->cmd_iot = oa->oa_iot;
+	wdr->ctl_iot = oa->oa_iot;
+	if (bus_space_map(wdr->cmd_iot, oa->oa_io[0].or_addr,
+	    WDC_OBIO_REG_SIZE, 0, &wdr->cmd_baseioh)
+	 || bus_space_map(wdr->ctl_iot,
 	    oa->oa_io[0].or_addr + WDC_OBIO_AUXREG_OFFSET,
-	    WDC_OBIO_AUXREG_SIZE, 0, &chp->ctl_ioh)) {
-		printf(": couldn't map registers\n");
+	    WDC_OBIO_AUXREG_SIZE, 0, &wdr->ctl_ioh)) {
+		aprint_error_dev(self, "couldn't map registers\n");
 		return;
+	}
+
+	for (i = 0; i < WDC_OBIO_REG_NPORTS; i++) {
+		if (bus_space_subregion(wdr->cmd_iot,
+		      wdr->cmd_baseioh, i * 2, (i == 0) ? 2 : 1,
+		      &wdr->cmd_iohs[i]) != 0) {
+			aprint_error_dev(self,
+			    "couldn't subregion registers\n");
+			return;
+		}
 	}
 
 	sc->sc_ih = obio_intr_establish(oa->oa_irq[0].or_irq, IPL_BIO, wdcintr,
-	    chp, self->dv_xname);
+	    &sc->sc_channel);
 
-	sc->sc_wdcdev.cap |= WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_PREATA;
-	sc->sc_wdcdev.PIO_cap = 0;
-	sc->sc_chanptr = chp;
-	sc->sc_wdcdev.channels = &sc->sc_chanptr;
-	sc->sc_wdcdev.nchannels = 1;
-	chp->channel = 0;
-	chp->wdc = &sc->sc_wdcdev;
+	sc->sc_wdcdev.cap |= WDC_CAPABILITY_PREATA;
+	sc->sc_wdcdev.sc_atac.atac_cap |= ATAC_CAP_DATA16;
+	sc->sc_wdcdev.sc_atac.atac_pio_cap = 0;
+	sc->sc_chanlist[0] = &sc->sc_channel;
+	sc->sc_wdcdev.sc_atac.atac_channels = sc->sc_chanlist;
+	sc->sc_wdcdev.sc_atac.atac_nchannels = 1;
+	sc->sc_channel.ch_channel = 0;
+	sc->sc_channel.ch_atac = &sc->sc_wdcdev.sc_atac;
+	sc->sc_channel.ch_queue = &sc->sc_chqueue;
+	sc->sc_channel.ch_ndrive = 2;
 
-	chp->ch_queue = malloc(sizeof(struct channel_queue), M_DEVBUF,
-	    M_NOWAIT);
-	if (chp->ch_queue == NULL) {
-		printf("%s: can't allocate memory for command queue\n",
-		    self->dv_xname);
-		obio_intr_disestablish(sc->sc_ih);
-		return;
-	}
+	wdc_init_shadow_regs(&sc->sc_channel);
 
-	wdcattach(chp);
-	wdc_print_current_modes(chp);
-}
-
-u_int8_t
-wdc_obio_read_reg(struct channel_softc *chp,  enum wdc_regs reg)
-{
-	if (reg & _WDC_AUX) 
-		return (bus_space_read_1(chp->ctl_iot, chp->ctl_ioh,
-		    (reg & _WDC_REGMASK) << 1));
-	else
-		return (bus_space_read_1(chp->cmd_iot, chp->cmd_ioh,
-		    (reg & _WDC_REGMASK) << 1));
-}
-
-void
-wdc_obio_write_reg(struct channel_softc *chp,  enum wdc_regs reg, u_int8_t val)
-{
-	if (reg & _WDC_AUX) 
-		bus_space_write_1(chp->ctl_iot, chp->ctl_ioh,
-		    (reg & _WDC_REGMASK) << 1, val);
-	else
-		bus_space_write_1(chp->cmd_iot, chp->cmd_ioh,
-		    (reg & _WDC_REGMASK) << 1, val);
+	wdcattach(&sc->sc_channel);
 }

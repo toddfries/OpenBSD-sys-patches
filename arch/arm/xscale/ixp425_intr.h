@@ -1,4 +1,4 @@
-/*	$NetBSD: ixp425_intr.h,v 1.6 2005/12/24 20:06:52 perry Exp $	*/
+/*	$NetBSD: ixp425_intr.h,v 1.8 2008/04/27 18:58:45 matt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -49,8 +49,6 @@
 
 #define IXPREG(reg)     *((volatile u_int32_t*) (reg))
 
-void ixp425_do_pending(void);
-
 static inline void __attribute__((__unused__))
 ixp425_set_intrmask(void)
 {
@@ -59,25 +57,20 @@ ixp425_set_intrmask(void)
 	IXPREG(IXP425_INT_ENABLE) = intr_enabled & IXP425_INT_HWMASK;
 }
 
-#define INT_SWMASK						\
-	((1U << IXP425_INT_bit31) | (1U << IXP425_INT_bit30) |	\
-	 (1U << IXP425_INT_bit14) | (1U << IXP425_INT_bit11))
-
 static inline void __attribute__((__unused__))
-ixp425_splx(int new)
+ixp425_splx(int ipl)
 {
+	extern int ixp425_imask[];
 	extern volatile uint32_t intr_enabled;
-	extern volatile int current_spl_level;
 	extern volatile int ixp425_ipending;
-	extern void ixp425_do_pending(void);
 	int oldirqstate, hwpend;
 
 	/* Don't let the compiler re-order this code with preceding code */
 	__insn_barrier();
 
-	current_spl_level = new;
+	set_curcpl(ipl);
 
-	hwpend = (ixp425_ipending & IXP425_INT_HWMASK) & ~new;
+	hwpend = (ixp425_ipending & IXP425_INT_HWMASK) & ~ixp425_imask[ipl];
 	if (hwpend != 0) {
 		oldirqstate = disable_interrupts(I32_bit);
 		intr_enabled |= hwpend;
@@ -85,19 +78,16 @@ ixp425_splx(int new)
 		restore_interrupts(oldirqstate);
 	}
 
-	if ((ixp425_ipending & INT_SWMASK) & ~new)
-		ixp425_do_pending();
+#ifdef __HAVE_FAST_SOFTINTS
+	cpu_dosoftints();
+#endif
 }
 
 static inline int __attribute__((__unused__))
 ixp425_splraise(int ipl)
 {
-	extern volatile int current_spl_level;
-	extern int ixp425_imask[];
-	int	old;
-
-	old = current_spl_level;
-	current_spl_level |= ixp425_imask[ipl];
+	int old = curcpl();
+	set_curcpl(ipl);
 
 	/* Don't let the compiler re-order this code with subsequent code */
 	__insn_barrier();
@@ -108,11 +98,8 @@ ixp425_splraise(int ipl)
 static inline int __attribute__((__unused__))
 ixp425_spllower(int ipl)
 {
-	extern volatile int current_spl_level;
-	extern int ixp425_imask[];
-	int old = current_spl_level;
-
-	ixp425_splx(ixp425_imask[ipl]);
+	int old = curcpl();
+	ixp425_splx(ipl);
 	return(old);
 }
 
@@ -121,14 +108,12 @@ ixp425_spllower(int ipl)
 #define splx(new)		ixp425_splx(new)
 #define	_spllower(ipl)		ixp425_spllower(ipl)
 #define	_splraise(ipl)		ixp425_splraise(ipl)
-void	_setsoftintr(int);
 
 #else
 
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
-void	_setsoftintr(int);
 
 #endif /* ! EVBARM_SPL_NOINLINE */
 

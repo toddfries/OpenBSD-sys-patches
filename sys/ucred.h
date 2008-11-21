@@ -1,5 +1,4 @@
-/*	$OpenBSD: ucred.h,v 1.6 2003/08/15 20:32:20 tedu Exp $	*/
-/*	$NetBSD: ucred.h,v 1.12 1995/06/01 22:44:50 jtc Exp $	*/
+/*	$NetBSD: ucred.h,v 1.34 2007/08/29 10:32:01 pooka Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -29,37 +28,25 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)ucred.h	8.2 (Berkeley) 1/4/94
+ *	@(#)ucred.h	8.4 (Berkeley) 1/9/95
  */
 
 #ifndef _SYS_UCRED_H_
 #define	_SYS_UCRED_H_
 
+#include <sys/param.h>
+
 /*
  * Credentials.
  */
-struct ucred {
-	u_int	cr_ref;			/* reference count */
-	uid_t	cr_uid;			/* effective user id */
-	gid_t	cr_gid;			/* effective group id */
-	short	cr_ngroups;		/* number of groups */
-	gid_t	cr_groups[NGROUPS];	/* groups */
+
+/* Userland's view of credentials. This should not change */
+struct uucred {
+	unsigned short	cr_unused;		/* not used, compat */
+	uid_t		cr_uid;			/* effective user id */
+	gid_t		cr_gid;			/* effective group id */
+	short		cr_ngroups;		/* number of groups */
+	gid_t		cr_groups[NGROUPS];	/* groups */
 };
-#define NOCRED ((struct ucred *)-1)	/* no credential available */
-#define FSCRED ((struct ucred *)-2)	/* filesystem credential */
-
-#ifdef _KERNEL
-#define	crhold(cr)	(cr)->cr_ref++
-
-#define SUSER_NOACCT	0x1	/* don't mark accounting flags */
-
-struct ucred	*crcopy(struct ucred *cr);
-struct ucred	*crdup(struct ucred *cr);
-void		crfree(struct ucred *cr);
-struct ucred	*crget(void);
-int		suser(struct proc *p, u_int flags);
-int		suser_ucred(struct ucred *cred);
-
-#endif /* _KERNEL */
 
 #endif /* !_SYS_UCRED_H_ */

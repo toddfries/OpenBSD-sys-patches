@@ -1,5 +1,4 @@
-/*	$OpenBSD: lca_pci.c,v 1.9 2006/03/26 20:23:08 brad Exp $	*/
-/* $NetBSD: lca_pci.c,v 1.13 1997/09/02 13:19:35 thorpej Exp $ */
+/* $NetBSD: lca_pci.c,v 1.15 2002/05/15 16:57:42 thorpej Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,6 +27,10 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: lca_pci.c,v 1.15 2002/05/15 16:57:42 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -35,21 +38,19 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/autoconf.h>	/* badaddr proto */
-
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <alpha/pci/lcareg.h>
 #include <alpha/pci/lcavar.h>
 
-void		lca_attach_hook(struct device *, struct device *,
-		    struct pcibus_attach_args *);
-int		lca_bus_maxdevs(void *, int);
-pcitag_t	lca_make_tag(void *, int, int, int);
-void		lca_decompose_tag(void *, pcitag_t, int *, int *,
-		    int *);
-pcireg_t	lca_conf_read(void *, pcitag_t, int);
-void		lca_conf_write(void *, pcitag_t, int, pcireg_t);
+void		lca_attach_hook __P((struct device *, struct device *,
+		    struct pcibus_attach_args *));
+int		lca_bus_maxdevs __P((void *, int));
+pcitag_t	lca_make_tag __P((void *, int, int, int));
+void		lca_decompose_tag __P((void *, pcitag_t, int *, int *,
+		    int *));
+pcireg_t	lca_conf_read __P((void *, pcitag_t, int));
+void		lca_conf_write __P((void *, pcitag_t, int, pcireg_t));
 
 void
 lca_pci_init(pc, v)

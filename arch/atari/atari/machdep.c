@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.140 2006/10/21 05:54:31 mrg Exp $	*/
+/*	$NetBSD: machdep.c,v 1.152 2008/11/12 12:35:57 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.140 2006/10/21 05:54:31 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.152 2008/11/12 12:35:57 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
@@ -101,16 +101,15 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.140 2006/10/21 05:54:31 mrg Exp $");
 #include <sys/vnode.h>
 #include <sys/queue.h>
 #include <sys/mount.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/ksyms.h>
-
+#include <sys/intr.h>
 #include <sys/exec.h>
+#include <sys/cpu.h>
 #if defined(DDB) && defined(__ELF__)
 #include <sys/exec_elf.h>
 #endif
 
-#include <net/netisr.h>
 #undef PS	/* XXX netccitt/pk.h conflict with machine/reg.h? */
 
 #define	MAXMEM	64*1024	/* XXX - from cmap.h */
@@ -122,7 +121,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.140 2006/10/21 05:54:31 mrg Exp $");
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 
-#include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/psl.h>
 #include <machine/pte.h>
@@ -131,22 +129,20 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.140 2006/10/21 05:54:31 mrg Exp $");
 
 #include "ksyms.h"
 
-static void bootsync __P((void));
-static void call_sicallbacks __P((void));
-static void identifycpu __P((void));
-static void netintr __P((void));
-void	straymfpint __P((int, u_short));
-void	straytrap __P((int, u_short));
+static void bootsync(void);
+static void call_sicallbacks(void);
+static void identifycpu(void);
+void	straymfpint(int, u_short);
+void	straytrap(int, u_short);
 
 #ifdef _MILANHW_
-void	nmihandler __P((void));
+void	nmihandler(void);
 #endif
 
-struct vm_map *exec_map = NULL;  
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
-caddr_t	msgbufaddr;
+void *	msgbufaddr;
 vaddr_t	msgbufpa;
 
 int	physmem = MAXMEM;	/* max supported memory, changes to actual */
@@ -175,7 +171,7 @@ struct cpu_info cpu_info_store;
  * to choose and initialize a console.
  */
 void
-consinit()
+consinit(void)
 {
 	int	i;
 
@@ -202,7 +198,7 @@ consinit()
 	 */
 	cninit();
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	{
 		extern int end;
 		extern int *esym;
@@ -226,7 +222,7 @@ consinit()
  * initialize CPU, and do autoconfiguration.
  */
 void
-cpu_startup()
+cpu_startup(void)
 {
 	extern	 int		iomem_malloc_safe;
 		 char		pbuf[9];
@@ -257,24 +253,17 @@ cpu_startup()
 	minaddr = 0;
 
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+				   VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 nmbclusters * mclbytes, VM_MAP_INTRSAFE,
-				 FALSE, NULL);
+				 false, NULL);
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -292,10 +281,7 @@ cpu_startup()
  * Set registers on exec.
  */
 void
-setregs(l, pack, stack)
-	struct lwp *l;
-	struct exec_package *pack;
-	u_long stack;
+setregs(struct lwp *l, struct exec_package *pack, u_long stack)
 {
 	struct frame *frame = (struct frame *)l->l_md.md_regs;
 	
@@ -330,7 +316,7 @@ setregs(l, pack, stack)
 char cpu_model[120];
  
 static void
-identifycpu()
+identifycpu(void)
 {
        const char *mach, *mmu, *fpu, *cpu;
 
@@ -425,12 +411,10 @@ bootsync(void)
 }
 
 void
-cpu_reboot(howto, bootstr)
-	int	howto;
-	char	*bootstr;
+cpu_reboot(int howto, char *bootstr)
 {
 	/* take a snap shot before clobbering any registers */
-	if (curlwp && curlwp->l_addr)
+	if (curlwp->l_addr)
 		savectx(&curlwp->l_addr->u_pcb);
 
 	boothowto = howto;
@@ -442,6 +426,8 @@ cpu_reboot(howto, bootstr)
 	 * asked to the user in case nobody is there....
 	 */
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	splhigh();			/* extreme priority */
 	if(howto & RB_HALT) {
@@ -466,8 +452,7 @@ static vaddr_t	dumpspace;	/* Virt. space to map dumppages	*/
  * Reserve _virtual_ memory to map in the page to be dumped
  */
 vaddr_t
-reserve_dumppages(p)
-vaddr_t	p;
+reserve_dumppages(vaddr_t p)
 {
 	dumpspace = p;
 	return(p + BYTES_PER_DUMP);
@@ -478,7 +463,7 @@ int		dumpsize = 0;		/* also for savecore (pages)	*/
 long		dumplo   = 0;		/* (disk blocks)		*/
 
 void
-cpu_dumpconf()
+cpu_dumpconf(void)
 {
 	const struct bdevsw *bdev;
 	int	nblks, i;
@@ -520,11 +505,11 @@ cpu_dumpconf()
  * the auto-restart code.
  */
 void
-dumpsys()
+dumpsys(void)
 {
 	const struct bdevsw *bdev;
 	daddr_t	blkno;		/* Current block to write	*/
-	int	(*dump) __P((dev_t, daddr_t, caddr_t, size_t));
+	int	(*dump)(dev_t, daddr_t, void *, size_t);
 				/* Dumping function		*/
 	u_long	maddr;		/* PA being dumped		*/
 	int	segbytes;	/* Number of bytes in this seg.	*/
@@ -603,7 +588,7 @@ dumpsys()
 		 */
 		if (maddr != 0) { /* XXX kvtop chokes on this	*/
 			(void)pmap_map(dumpspace, maddr, maddr+n, VM_PROT_READ);
-			error = (*dump)(dumpdev, blkno, (caddr_t)dumpspace, n);
+			error = (*dump)(dumpdev, blkno, (void *)dumpspace, n);
 			if (error)
 				break;
 		}
@@ -638,42 +623,8 @@ dumpsys()
 	delay(5000000);		/* 5 seconds */
 }
 
-/*
- * Return the best possible estimate of the time in the timeval
- * to which tvp points.  We do this by returning the current time
- * plus the amount of time since the last clock interrupt (clock.c:clkread).
- *
- * Check that this time is no less than any previously-reported time,
- * which could happen around the time of a clock adjustment.  Just for fun,
- * we guarantee that the time will be greater than the value obtained by a
- * previous call.
- */
-void microtime(tvp)
-	register struct timeval *tvp;
-{
-	int s = splhigh();
-	static struct timeval lasttime;
-
-	*tvp = time;
-	tvp->tv_usec += clkread();
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	if (tvp->tv_sec == lasttime.tv_sec &&
-	    tvp->tv_usec <= lasttime.tv_usec &&
-	    (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	lasttime = *tvp;
-	splx(s);
-}
-
 void
-straytrap(pc, evec)
-int pc;
-u_short evec;
+straytrap(int pc, u_short evec)
 {
 	static int	prev_evec;
 
@@ -688,44 +639,16 @@ u_short evec;
 }
 
 void
-straymfpint(pc, evec)
-int		pc;
-u_short	evec;
+straymfpint(int pc, u_short evec)
 {
 	printf("unexpected mfp-interrupt (vector offset 0x%x) from 0x%x\n",
 	       evec & 0xFFF, pc);
 }
 
-/*
- * Simulated software interrupt handler
- */
-void
-softint()
-{
-	if(ssir & SIR_NET) {
-		siroff(SIR_NET);
-		uvmexp.softs++;
-		netintr();
-	}
-	if(ssir & SIR_CLOCK) {
-		siroff(SIR_CLOCK);
-		uvmexp.softs++;
-		/* XXXX softclock(&frame.f_stackadj); */
-		softclock(NULL);
-	}
-	if (ssir & SIR_CBACK) {
-		siroff(SIR_CBACK);
-		uvmexp.softs++;
-		call_sicallbacks();
-	}
-}
-
 int	*nofault;
 
 int
-badbaddr(addr, size)
-	register caddr_t addr;
-	int		 size;
+badbaddr(void *addr, int size)
 {
 	register int i;
 	label_t	faultbuf;
@@ -756,25 +679,6 @@ badbaddr(addr, size)
 }
 
 /*
- * Network interrupt handling
- */
-static void
-netintr()
-{
-#define DONETISR(bit, fn) do {			\
-	if (netisr & (1 << bit)) {		\
-		netisr &= ~(1 << bit);		\
-		fn();				\
-	}					\
-} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-}
-
-
-/*
  * this is a handy package to have asynchronously executed
  * function calls executed at very low interrupt priority.
  * Example for use is keyboard repeat, where the repeat 
@@ -783,21 +687,32 @@ netintr()
  * Note: the installed functions are currently called in a
  * LIFO fashion, might want to change this to FIFO
  * later.
+ *
+ * XXX: Some of functions which use this callback should be rewritten
+ * XXX: to use MI softintr(9) directly.
  */
 struct si_callback {
 	struct si_callback *next;
-	void (*function) __P((void *rock1, void *rock2));
+	void (*function)(void *rock1, void *rock2);
 	void *rock1, *rock2;
 };
+static void *si_callback_cookie;
 static struct si_callback *si_callbacks;
 static struct si_callback *si_free;
 #ifdef DIAGNOSTIC
 static int ncbd;	/* number of callback blocks dynamically allocated */
 #endif
 
-void add_sicallback (function, rock1, rock2)
-void	(*function) __P((void *rock1, void *rock2));
-void	*rock1, *rock2;
+void
+init_sicallback(void)
+{
+
+	si_callback_cookie = softint_establish(SOFTINT_NET,
+	    (void (*)(void *))call_sicallbacks, NULL);
+}
+
+void
+add_sicallback(void (*function)(void *, void *), void *rock1, void *rock2)
 {
 	struct si_callback	*si;
 	int			s;
@@ -833,12 +748,21 @@ void	*rock1, *rock2;
 	/*
 	 * and cause a software interrupt (spl1). This interrupt might
 	 * happen immediately, or after returning to a safe enough level.
+	 *
+	 * XXX:
+	 * According to <machine/scu.h> and lev1intr() hander in locore.s,
+	 * at least _ATARIHW_ machines (ATARITT and HADES?) seem to have
+	 * some hardware support which can initiate real hardware interrupt
+	 * at ipl 1 for software interrupt. But as per <machine/mtpr.h>,
+	 * this feature was not used at all on setsoft*() calls and
+	 * traditional hp300 derived ssir (simulated software interrupt
+	 * request) on VAX REI emulation in locore.s is used.
 	 */
-	setsoftcback();
+	softint_schedule(si_callback_cookie);
 }
 
-void rem_sicallback(function)
-void (*function) __P((void *rock1, void *rock2));
+void
+rem_sicallback(void (*function)(void *rock1, void *rock2))
 {
 	struct si_callback	*si, *psi, *nsi;
 	int			s;
@@ -862,12 +786,13 @@ void (*function) __P((void *rock1, void *rock2));
 }
 
 /* purge the list */
-static void call_sicallbacks()
+static void
+call_sicallbacks(void)
 {
 	struct si_callback	*si;
 	int			s;
 	void			*rock1, *rock2;
-	void			(*function) __P((void *, void *));
+	void			(*function)(void *, void *);
 
 	do {
 		s = splhigh ();
@@ -881,7 +806,7 @@ static void call_sicallbacks()
 			rock2    = si->rock2;
 			s = splhigh ();
 			if(si_callbacks)
-				setsoftcback();
+				softint_schedule(si_callback_cookie);
 			si->next = si_free;
 			si_free  = si;
 			splx(s);
@@ -907,10 +832,10 @@ int panicbutton = 1;	/* non-zero if panic buttons are enabled */
 int crashandburn = 0;
 int candbdelay = 50;	/* give em half a second */
 
-void candbtimer __P((void));
+void candbtimer(void);
 
 void
-candbtimer()
+candbtimer(void)
 {
 	crashandburn = 0;
 }
@@ -923,9 +848,7 @@ candbtimer()
  * MID and proceed to new zmagic code ;-)
  */
 int
-cpu_exec_aout_makecmds(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+cpu_exec_aout_makecmds(struct lwp *l, struct exec_package *epp)
 {
 	int error = ENOEXEC;
 #ifdef COMPAT_NOMID
@@ -951,7 +874,7 @@ cpu_exec_aout_makecmds(l, epp)
  * possible.
  */
 void
-nmihandler()
+nmihandler(void)
 {
 	extern unsigned long	plx_status;
 

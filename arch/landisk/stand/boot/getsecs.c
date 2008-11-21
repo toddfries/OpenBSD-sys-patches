@@ -1,6 +1,7 @@
 /*	$NetBSD: getsecs.c,v 1.2 2006/09/11 13:48:57 nonaka Exp $	*/
 
 #include <sys/param.h>
+#include <sys/types.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -8,11 +9,12 @@
 #include <lib/libsa/stand.h>
 #include <lib/libsa/net.h>
 #include <lib/libsa/netif.h>
+#include <lib/libkern/libkern.h>
 
-#include <sh/devreg.h>
-#include <arch/sh/dev/scireg.h>
+#include <sh3/devreg.h>
+#include <sh3/scireg.h>
 
-#include <arch/landisk/dev/rs5c313reg.h>
+#include <dev/ic/rs5c313reg.h>
 
 /**
  * RICOH RS5C313
@@ -32,7 +34,6 @@ rtc_init(void)
 
 	SHREG_SCSPTR = SCSPTR_SPB1IO | SCSPTR_SPB1DT
 		       | SCSPTR_SPB0IO | SCSPTR_SPB0DT;
-	delay(1);
 }
 
 /* control RTC chip enable */
@@ -45,7 +46,6 @@ rtc_ce(int onoff)
 	} else {
 		_reg_write_1(0xb0000003, (0 << 1));
 	}
-	delay(1);
 }
 
 static inline void
@@ -57,7 +57,6 @@ rtc_clk(int onoff)
 	} else {
 		SHREG_SCSPTR &= ~SCSPTR_SPB0DT;
 	}
-	delay(1);
 }
 
 static void
@@ -69,7 +68,6 @@ rtc_dir(int output)
 	} else {
 		SHREG_SCSPTR &= ~SCSPTR_SPB1IO;
 	}
-	delay(1);
 }
 
 /* data-out */
@@ -82,7 +80,6 @@ rtc_do(int onoff)
 	} else {
 		SHREG_SCSPTR &= ~SCSPTR_SPB1DT;
 	}
-	delay(1);
 
 	rtc_clk(0);
 	rtc_clk(1);

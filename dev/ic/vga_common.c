@@ -1,4 +1,4 @@
-/* $NetBSD: vga_common.c,v 1.8 2007/10/19 12:00:04 ad Exp $ */
+/* $NetBSD: vga_common.c,v 1.10 2008/04/08 12:07:27 cegger Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vga_common.c,v 1.8 2007/10/19 12:00:04 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vga_common.c,v 1.10 2008/04/08 12:07:27 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -64,8 +64,8 @@ vga_common_probe(bus_space_tag_t iot, bus_space_tag_t memt)
 
 #ifdef __i386__
 	for (dv = alldevs.tqh_first; dv; dv=dv->dv_list.tqe_next)
-		if (strncmp(dv->dv_xname, "vesafb", 6) == 0) {
-			vesafb = (struct vesafb_softc *)dv;
+		if (strncmp(device_xname(dv), "vesafb", 6) == 0) {
+			vesafb = device_private(dv);
 			if (vesafb->sc_isconsole)
 				goto bad;
 		}

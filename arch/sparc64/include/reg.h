@@ -1,5 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.4 2003/06/02 23:27:56 millert Exp $	*/
-/*	$NetBSD: reg.h,v 1.8 2001/06/19 12:59:16 wiz Exp $ */
+/*	$NetBSD: reg.h,v 1.13 2005/12/11 12:19:10 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,6 +40,36 @@
  *	@(#)reg.h	8.1 (Berkeley) 6/11/93
  */
 
+/*
+ * Copyright (c) 1996-2002 Eduardo Horvath.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the author nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)reg.h	8.1 (Berkeley) 6/11/93
+ */
+
 #ifndef _MACHINE_REG_H_
 #define	_MACHINE_REG_H_
 
@@ -63,13 +92,11 @@ struct trapframe32 {
 /*
  * The v9 trapframe is a bit more complex.  Since we don't get a free 
  * register window with each trap we need some way to keep track of
- * pending traps.  We use tf_fault to save the faulting address for
- * memory faults and tf_kstack to thread trapframes on the kernel
- * stack(s).  If tf_kstack == 0 then this is the lowest level trap;
- * we came from user mode.
+ * pending traps.
  * (The slot tf_global[0] is used to store the %fp when this is used
  * as a clockframe.  This is known as `cheating'.)
  */
+
 struct trapframe64 {
 	int64_t		tf_tstate;	/* tstate register */
 	int64_t		tf_pc;		/* return pc */
@@ -83,9 +110,10 @@ struct trapframe64 {
 	int64_t		tf_global[8];	/* global registers in trap's caller */
 	/* n.b. tf_global[0] is used for fp when this is a clockframe */
 	int64_t		tf_out[8];	/* output registers in trap's caller */
-	int64_t		tf_local[8];	/* local registers in trap's caller */
+	int64_t		tf_local[8];	/* local registers in trap's caller (for debug) */
 	int64_t		tf_in[8];	/* in registers in trap's caller (for debug) */
 };
+
 
 /*
  * Register windows.  Each stack pointer (%o6 aka %sp) in each window
@@ -125,10 +153,8 @@ struct reg64 {
 	int64_t	r_pc;		/* return pc */
 	int64_t	r_npc;		/* return npc */
 	int	r_y;		/* %y register -- 32-bits */
-	int64_t	r_global[8];	/* %g* registers in trap's caller */
-	int64_t	r_out[8];	/* %o* registers in trap's caller */
-	int64_t r_local[8];	/* %l* registers in trap's caller */
-	int64_t r_in[8];	/* %i* registers in trap's caller */
+	int64_t	r_global[8];	/* global registers in trap's caller */
+	int64_t	r_out[8];	/* output registers in trap's caller */
 };
 
 #include <machine/fsr.h>
@@ -189,11 +215,19 @@ struct fpreg32 {
 	int	fr_fsr;			/* %fsr */
 };
 
+#if defined(__arch64__)
 /* Here we gotta do naughty things to let gdb work on 32-bit binaries */
 #define reg		reg64
 #define fpreg		fpreg64
 #define fpstate		fpstate64
 #define trapframe	trapframe64
 #define rwindow		rwindow64
+#else
+#define reg		reg32
+#define fpreg		fpreg32
+#define fpstate		fpstate32
+#define trapframe	trapframe32
+#define rwindow		rwindow32
+#endif
 
 #endif /* _MACHINE_REG_H_ */

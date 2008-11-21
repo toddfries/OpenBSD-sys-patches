@@ -1,5 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.9 2008/05/27 21:08:48 kettenis Exp $	*/
-/*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
+/*	$NetBSD: oosiop.c,v 1.12 2008/03/29 09:11:35 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2001 Shuichiro URATA.  All rights reserved.
@@ -31,13 +30,16 @@
  * NCR53C700 SCSI I/O processor (OOSIOP) driver
  *
  * TODO:
- *   - Better error handling.
+ *   - More better error handling.
  *   - Implement tagged queuing.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: oosiop.c,v 1.12 2008/03/29 09:11:35 tsutsui Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/timeout.h>
+#include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/buf.h>
@@ -46,49 +48,46 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-#include <scsi/scsi_message.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
+#include <dev/scsipi/scsi_message.h>
 
-#include <machine/cpu.h>
-#include <machine/bus.h>
+#include <sys/cpu.h>
+#include <sys/bus.h>
 
 #include <dev/ic/oosiopreg.h>
 #include <dev/ic/oosiopvar.h>
-
-/* 53C700 script */
 #include <dev/microcode/siop/oosiop.out>
 
-int	oosiop_alloc_cb(struct oosiop_softc *, int);
+static int	oosiop_alloc_cb(struct oosiop_softc *, int);
 
-static __inline void oosiop_relocate_io(struct oosiop_softc *, bus_addr_t);
-static __inline void oosiop_relocate_tc(struct oosiop_softc *, bus_addr_t);
-static __inline void oosiop_fixup_select(struct oosiop_softc *, bus_addr_t,
+static inline void oosiop_relocate_io(struct oosiop_softc *, bus_addr_t);
+static inline void oosiop_relocate_tc(struct oosiop_softc *, bus_addr_t);
+static inline void oosiop_fixup_select(struct oosiop_softc *, bus_addr_t,
 		         int);
-static __inline void oosiop_fixup_jump(struct oosiop_softc *, bus_addr_t,
+static inline void oosiop_fixup_jump(struct oosiop_softc *, bus_addr_t,
 		         bus_addr_t);
-static __inline void oosiop_fixup_move(struct oosiop_softc *, bus_addr_t,
+static inline void oosiop_fixup_move(struct oosiop_softc *, bus_addr_t,
 		         bus_size_t, bus_addr_t);
 
-void	oosiop_load_script(struct oosiop_softc *);
-void	oosiop_setup_sgdma(struct oosiop_softc *, struct oosiop_cb *);
-void	oosiop_setup_dma(struct oosiop_softc *);
-void	oosiop_flush_fifo(struct oosiop_softc *);
-void	oosiop_clear_fifo(struct oosiop_softc *);
-void	oosiop_phasemismatch(struct oosiop_softc *);
-void	oosiop_setup_syncxfer(struct oosiop_softc *);
-void	oosiop_set_syncparam(struct oosiop_softc *, int, int, int);
-void	oosiop_minphys(struct buf *);
-int	oosiop_scsicmd(struct scsi_xfer *);
-void	oosiop_done(struct oosiop_softc *, struct oosiop_cb *);
-void	oosiop_timeout(void *);
-void	oosiop_reset(struct oosiop_softc *);
-void	oosiop_reset_bus(struct oosiop_softc *);
-void	oosiop_scriptintr(struct oosiop_softc *);
-void	oosiop_msgin(struct oosiop_softc *, struct oosiop_cb *);
-void	oosiop_setup(struct oosiop_softc *, struct oosiop_cb *);
-void	oosiop_poll(struct oosiop_softc *, struct oosiop_cb *);
-void	oosiop_processintr(struct oosiop_softc *, u_int8_t);
+static void	oosiop_load_script(struct oosiop_softc *);
+static void	oosiop_setup_sgdma(struct oosiop_softc *, struct oosiop_cb *);
+static void	oosiop_setup_dma(struct oosiop_softc *);
+static void	oosiop_flush_fifo(struct oosiop_softc *);
+static void	oosiop_clear_fifo(struct oosiop_softc *);
+static void	oosiop_phasemismatch(struct oosiop_softc *);
+static void	oosiop_setup_syncxfer(struct oosiop_softc *);
+static void	oosiop_set_syncparam(struct oosiop_softc *, int, int, int);
+static void	oosiop_minphys(struct buf *);
+static void	oosiop_scsipi_request(struct scsipi_channel *,
+		    scsipi_adapter_req_t, void *);
+static void	oosiop_done(struct oosiop_softc *, struct oosiop_cb *);
+static void	oosiop_timeout(void *);
+static void	oosiop_reset(struct oosiop_softc *);
+static void	oosiop_reset_bus(struct oosiop_softc *);
+static void	oosiop_scriptintr(struct oosiop_softc *);
+static void	oosiop_msgin(struct oosiop_softc *, struct oosiop_cb *);
 
 /* Trap interrupt code for unexpected data I/O */
 #define	DATAIN_TRAP	0xdead0001
@@ -96,8 +95,8 @@ void	oosiop_processintr(struct oosiop_softc *, u_int8_t);
 
 /* Possible TP and SCF conbination */
 static const struct {
-	u_int8_t	tp;
-	u_int8_t	scf;
+	uint8_t		tp;
+	uint8_t		scf;
 } synctbl[] = {
 	{0, 1},		/* SCLK /  4.0 */
 	{1, 1},		/* SCLK /  5.0 */
@@ -124,28 +123,9 @@ static const struct {
 #define	oosiop_period(sc, tp, scf)					\
 	    (((1000000000 / (sc)->sc_freq) * (tp) * (scf)) / 40)
 
-struct cfdriver oosiop_cd = {
-	NULL, "oosiop", DV_DULL
-};
-
-struct scsi_adapter oosiop_adapter = {
-	oosiop_scsicmd,
-	oosiop_minphys,
-	NULL,
-	NULL
-};
-
-struct scsi_device oosiop_dev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL
-};
-
 void
 oosiop_attach(struct oosiop_softc *sc)
 {
-	struct scsibus_attach_args saa;
 	bus_size_t scrsize;
 	bus_dma_segment_t seg;
 	struct oosiop_cb *cb;
@@ -154,32 +134,32 @@ oosiop_attach(struct oosiop_softc *sc)
 	/*
 	 * Allocate DMA-safe memory for the script and map it.
 	 */
-	scrsize = round_page(sizeof(oosiop_script));
+	scrsize = sizeof(oosiop_script);
 	err = bus_dmamem_alloc(sc->sc_dmat, scrsize, PAGE_SIZE, 0, &seg, 1,
 	    &nseg, BUS_DMA_NOWAIT);
 	if (err) {
-		printf(": failed to allocate script memory, err=%d\n", err);
+		aprint_error(": failed to allocate script memory, err=%d\n",
+		    err);
 		return;
 	}
 	err = bus_dmamem_map(sc->sc_dmat, &seg, nseg, scrsize,
-	    (caddr_t *)&sc->sc_scr, BUS_DMA_NOWAIT | BUS_DMA_COHERENT);
+	    (void **)&sc->sc_scr, BUS_DMA_NOWAIT | BUS_DMA_COHERENT);
 	if (err) {
-		printf(": failed to map script memory, err=%d\n", err);
+		aprint_error(": failed to map script memory, err=%d\n", err);
 		return;
 	}
 	err = bus_dmamap_create(sc->sc_dmat, scrsize, 1, scrsize, 0,
 	    BUS_DMA_NOWAIT, &sc->sc_scrdma);
 	if (err) {
-		printf(": failed to create script map, err=%d\n", err);
+		aprint_error(": failed to create script map, err=%d\n", err);
 		return;
 	}
-	err = bus_dmamap_load_raw(sc->sc_dmat, sc->sc_scrdma,
-	    &seg, nseg, scrsize, BUS_DMA_NOWAIT | BUS_DMA_WRITE);
+	err = bus_dmamap_load(sc->sc_dmat, sc->sc_scrdma, sc->sc_scr, scrsize,
+	    NULL, BUS_DMA_NOWAIT | BUS_DMA_WRITE);
 	if (err) {
-		printf(": failed to load script map, err=%d\n", err);
+		aprint_error(": failed to load script map, err=%d\n", err);
 		return;
 	}
-	bzero(sc->sc_scr, scrsize);
 	sc->sc_scrbase = sc->sc_scrdma->dm_segs[0].ds_addr;
 
 	/* Initialize command block array */
@@ -221,10 +201,10 @@ oosiop_attach(struct oosiop_softc *sc)
 	if (sc->sc_minperiod < 25)
 		sc->sc_minperiod = 25;	/* limit to 10MB/s */
 
-	printf(": NCR53C700%s rev %d, %dMHz\n",
+	aprint_normal(": NCR53C700%s rev %d, %dMHz, SCSI ID %d\n",
 	    sc->sc_chip == OOSIOP_700_66 ? "-66" : "",
 	    oosiop_read_1(sc, OOSIOP_CTEST7) >> 4,
-	    sc->sc_freq / 1000000);
+	    sc->sc_freq / 1000000, sc->sc_id);
 	/*
 	 * Reset all
 	 */
@@ -239,26 +219,33 @@ oosiop_attach(struct oosiop_softc *sc)
 	oosiop_write_4(sc, OOSIOP_DSP, sc->sc_scrbase + Ent_wait_reselect);
 
 	/*
-	 * Fill in the sc_link.
+	 * Fill in the scsipi_adapter.
 	 */
-	sc->sc_link.adapter = &oosiop_adapter;
-	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.device = &oosiop_dev;
-	sc->sc_link.openings = 1;	/* XXX */
-	sc->sc_link.adapter_buswidth = OOSIOP_NTGT;
-	sc->sc_link.adapter_target = sc->sc_id;
-	sc->sc_link.quirks = ADEV_NODOORLOCK;
+	sc->sc_adapter.adapt_dev = sc->sc_dev;
+	sc->sc_adapter.adapt_nchannels = 1;
+	sc->sc_adapter.adapt_openings = OOSIOP_NCB;
+	sc->sc_adapter.adapt_max_periph = 1;
+	sc->sc_adapter.adapt_ioctl = NULL;
+	sc->sc_adapter.adapt_minphys = oosiop_minphys;
+	sc->sc_adapter.adapt_request = oosiop_scsipi_request;
 
-	bzero(&saa, sizeof(saa));
-	saa.saa_sc_link = &sc->sc_link;
+	/*
+	 * Fill in the scsipi_channel.
+	 */
+	sc->sc_channel.chan_adapter = &sc->sc_adapter;
+	sc->sc_channel.chan_bustype = &scsi_bustype;
+	sc->sc_channel.chan_channel = 0;
+	sc->sc_channel.chan_ntargets = OOSIOP_NTGT;
+	sc->sc_channel.chan_nluns = 8;
+	sc->sc_channel.chan_id = sc->sc_id;
 
 	/*
 	 * Now try to attach all the sub devices.
 	 */
-	config_found(&sc->sc_dev, &saa, scsiprint);
+	config_found(sc->sc_dev, &sc->sc_channel, scsiprint);
 }
 
-int
+static int
 oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 {
 	struct oosiop_cb *cb;
@@ -270,7 +257,7 @@ oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 	/*
 	 * Allocate oosiop_cb.
 	 */
-	cb = malloc(sizeof(*cb) * ncb, M_DEVBUF, M_NOWAIT | M_ZERO);
+	cb = malloc(sizeof(struct oosiop_cb) * ncb, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (cb == NULL) {
 		printf(": failed to allocate cb memory\n");
 		return (ENOMEM);
@@ -287,7 +274,7 @@ oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 		return (err);
 	}
 	err = bus_dmamem_map(sc->sc_dmat, &seg, nseg, xfersize,
-	    (caddr_t *)(void *)&xfer, BUS_DMA_NOWAIT | BUS_DMA_COHERENT);
+	    (void **)(void *)&xfer, BUS_DMA_NOWAIT | BUS_DMA_COHERENT);
 	if (err) {
 		printf(": failed to map xfer block memory, err=%d\n", err);
 		return (err);
@@ -301,7 +288,6 @@ oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 			printf(": failed to create cmddma map, err=%d\n", err);
 			return (err);
 		}
-
 		err = bus_dmamap_create(sc->sc_dmat, OOSIOP_MAX_XFER,
 		    OOSIOP_NSG, OOSIOP_DBC_MAX, 0, BUS_DMA_NOWAIT,
 		    &cb->datadma);
@@ -338,14 +324,14 @@ oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 	return (0);
 }
 
-static __inline void
+static inline void
 oosiop_relocate_io(struct oosiop_softc *sc, bus_addr_t addr)
 {
-	u_int32_t dcmd;
+	uint32_t dcmd;
 	int32_t dsps;
 
-	dcmd = letoh32(sc->sc_scr[addr / 4 + 0]);
-	dsps = letoh32(sc->sc_scr[addr / 4 + 1]);
+	dcmd = le32toh(sc->sc_scr[addr / 4 + 0]);
+	dsps = le32toh(sc->sc_scr[addr / 4 + 1]);
 
 	/* convert relative to absolute */
 	if (dcmd & 0x04000000) {
@@ -365,14 +351,14 @@ oosiop_relocate_io(struct oosiop_softc *sc, bus_addr_t addr)
 	sc->sc_scr[addr / 4 + 1] = htole32(dsps + sc->sc_scrbase);
 }
 
-static __inline void
+static inline void
 oosiop_relocate_tc(struct oosiop_softc *sc, bus_addr_t addr)
 {
-	u_int32_t dcmd;
+	uint32_t dcmd;
 	int32_t dsps;
 
-	dcmd = letoh32(sc->sc_scr[addr / 4 + 0]);
-	dsps = letoh32(sc->sc_scr[addr / 4 + 1]);
+	dcmd = le32toh(sc->sc_scr[addr / 4 + 0]);
+	dsps = le32toh(sc->sc_scr[addr / 4 + 1]);
 
 	/* convert relative to absolute */
 	if (dcmd & 0x00800000) {
@@ -392,38 +378,38 @@ oosiop_relocate_tc(struct oosiop_softc *sc, bus_addr_t addr)
 	sc->sc_scr[addr / 4 + 1] = htole32(dsps + sc->sc_scrbase);
 }
 
-static __inline void
+static inline void
 oosiop_fixup_select(struct oosiop_softc *sc, bus_addr_t addr, int id)
 {
-	u_int32_t dcmd;
+	uint32_t dcmd;
 
-	dcmd = letoh32(sc->sc_scr[addr / 4]);
+	dcmd = le32toh(sc->sc_scr[addr / 4]);
 	dcmd &= 0xff00ffff;
 	dcmd |= 0x00010000 << id;
 	sc->sc_scr[addr / 4] = htole32(dcmd);
 }
 
-static __inline void
+static inline void
 oosiop_fixup_jump(struct oosiop_softc *sc, bus_addr_t addr, bus_addr_t dst)
 {
 
 	sc->sc_scr[addr / 4 + 1] = htole32(dst);
 }
 
-static __inline void
+static inline void
 oosiop_fixup_move(struct oosiop_softc *sc, bus_addr_t addr, bus_size_t dbc,
     bus_addr_t dsps)
 {
-	u_int32_t dcmd;
+	uint32_t dcmd;
 
-	dcmd = letoh32(sc->sc_scr[addr / 4]);
+	dcmd = le32toh(sc->sc_scr[addr / 4]);
 	dcmd &= 0xff000000;
 	dcmd |= dbc & 0x00ffffff;
 	sc->sc_scr[addr / 4 + 0] = htole32(dcmd);
 	sc->sc_scr[addr / 4 + 1] = htole32(dsps);
 }
 
-void
+static void
 oosiop_load_script(struct oosiop_softc *sc)
 {
 	int i;
@@ -450,19 +436,20 @@ oosiop_load_script(struct oosiop_softc *sc)
 	OOSIOP_SCRIPT_SYNC(sc, BUS_DMASYNC_PREWRITE);
 }
 
-void
+static void
 oosiop_setup_sgdma(struct oosiop_softc *sc, struct oosiop_cb *cb)
 {
-	struct oosiop_xfer *xfer = cb->xfer;
-	struct scsi_xfer *xs = cb->xs;
-	int i, n, off;
+	int i, n, off, control;
+	struct oosiop_xfer *xfer;
 
 	OOSIOP_XFERSCR_SYNC(sc, cb,
 	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 
 	off = cb->curdp;
+	xfer = cb->xfer;
+	control = cb->xs->xs_control;
 
-	if (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
+	if (control & (XS_CTL_DATA_IN | XS_CTL_DATA_OUT)) {
 		/* Find start segment */
 		for (i = 0; i < cb->datadma->dm_nsegs; i++) {
 			if (off < cb->datadma->dm_segs[i].ds_len)
@@ -471,7 +458,7 @@ oosiop_setup_sgdma(struct oosiop_softc *sc, struct oosiop_cb *cb)
 		}
 
 		/* build MOVE block */
-		if (xs->flags & SCSI_DATA_IN) {
+		if (control & XS_CTL_DATA_IN) {
 			n = 0;
 			while (i < cb->datadma->dm_nsegs) {
 				xfer->datain_scr[n * 2 + 0] =
@@ -488,7 +475,7 @@ oosiop_setup_sgdma(struct oosiop_softc *sc, struct oosiop_cb *cb)
 			xfer->datain_scr[n * 2 + 1] =
 			    htole32(sc->sc_scrbase + Ent_phasedispatch);
 		}
-		if (xs->flags & SCSI_DATA_OUT) {
+		if (control & XS_CTL_DATA_OUT) {
 			n = 0;
 			while (i < cb->datadma->dm_nsegs) {
 				xfer->dataout_scr[n * 2 + 0] =
@@ -506,11 +493,11 @@ oosiop_setup_sgdma(struct oosiop_softc *sc, struct oosiop_cb *cb)
 			    htole32(sc->sc_scrbase + Ent_phasedispatch);
 		}
 	}
-	if ((xs->flags & SCSI_DATA_IN) == 0) {
+	if ((control & XS_CTL_DATA_IN) == 0) {
 		xfer->datain_scr[0] = htole32(0x98080000);
 		xfer->datain_scr[1] = htole32(DATAIN_TRAP);
 	}
-	if ((xs->flags & SCSI_DATA_OUT) == 0) {
+	if ((control & XS_CTL_DATA_OUT) == 0) {
 		xfer->dataout_scr[0] = htole32(0x98080000);
 		xfer->dataout_scr[1] = htole32(DATAOUT_TRAP);
 	}
@@ -521,7 +508,7 @@ oosiop_setup_sgdma(struct oosiop_softc *sc, struct oosiop_cb *cb)
 /*
  * Setup DMA pointer into script.
  */
-void
+static void
 oosiop_setup_dma(struct oosiop_softc *sc)
 {
 	struct oosiop_cb *cb;
@@ -533,7 +520,7 @@ oosiop_setup_dma(struct oosiop_softc *sc)
 	OOSIOP_SCRIPT_SYNC(sc, BUS_DMASYNC_POSTWRITE);
 
 	oosiop_fixup_select(sc, Ent_p_select, cb->id);
-	oosiop_fixup_jump(sc, Ent_p_datain_jump, xferbase + 
+	oosiop_fixup_jump(sc, Ent_p_datain_jump, xferbase +
 	    offsetof(struct oosiop_xfer, datain_scr[0]));
 	oosiop_fixup_jump(sc, Ent_p_dataout_jump, xferbase +
 	    offsetof(struct oosiop_xfer, dataout_scr[0]));
@@ -545,13 +532,13 @@ oosiop_setup_dma(struct oosiop_softc *sc)
 	    offsetof(struct oosiop_xfer, msgout[0]));
 	oosiop_fixup_move(sc, Ent_p_status_move, 1, xferbase +
 	    offsetof(struct oosiop_xfer, status));
-	oosiop_fixup_move(sc, Ent_p_cmdout_move, cb->cmdlen,
+	oosiop_fixup_move(sc, Ent_p_cmdout_move, cb->xs->cmdlen,
 	    cb->cmddma->dm_segs[0].ds_addr);
 
 	OOSIOP_SCRIPT_SYNC(sc, BUS_DMASYNC_PREWRITE);
 }
 
-void
+static void
 oosiop_flush_fifo(struct oosiop_softc *sc)
 {
 
@@ -564,7 +551,7 @@ oosiop_flush_fifo(struct oosiop_softc *sc)
 	    ~OOSIOP_DFIFO_FLF);
 }
 
-void
+static void
 oosiop_clear_fifo(struct oosiop_softc *sc)
 {
 
@@ -577,12 +564,12 @@ oosiop_clear_fifo(struct oosiop_softc *sc)
 	    ~OOSIOP_DFIFO_CLF);
 }
 
-void
+static void
 oosiop_phasemismatch(struct oosiop_softc *sc)
 {
 	struct oosiop_cb *cb;
-	u_int32_t dsp, dbc, n, i, len;
-	u_int8_t dfifo, sstat1;
+	uint32_t dsp, dbc, n, i, len;
+	uint8_t dfifo, sstat1;
 
 	cb = sc->sc_curcb;
 	if (cb == NULL)
@@ -600,7 +587,7 @@ oosiop_phasemismatch(struct oosiop_softc *sc)
 		OOSIOP_DINSCR_SYNC(sc, cb,
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		for (i = 0; i <= n; i++)
-			len += letoh32(cb->xfer->datain_scr[i * 2]) &
+			len += le32toh(cb->xfer->datain_scr[i * 2]) &
 			    0x00ffffff;
 		OOSIOP_DINSCR_SYNC(sc, cb,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
@@ -612,7 +599,7 @@ oosiop_phasemismatch(struct oosiop_softc *sc)
 		OOSIOP_DOUTSCR_SYNC(sc, cb,
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		for (i = 0; i <= n; i++)
-			len += letoh32(cb->xfer->dataout_scr[i * 2]) &
+			len += le32toh(cb->xfer->dataout_scr[i * 2]) &
 			    0x00ffffff;
 		OOSIOP_DOUTSCR_SYNC(sc, cb,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
@@ -624,13 +611,14 @@ oosiop_phasemismatch(struct oosiop_softc *sc)
 		sstat1 = oosiop_read_1(sc, OOSIOP_SSTAT1);
 		if (sstat1 & OOSIOP_SSTAT1_OLF)
 			dbc++;
-		if ((sc->sc_tgt[cb->id].sxfer != 0) && 
+		if ((sc->sc_tgt[cb->id].sxfer != 0) &&
 		    (sstat1 & OOSIOP_SSTAT1_ORF) != 0)
 			dbc++;
 
 		oosiop_clear_fifo(sc);
 	} else {
-		printf("%s: phase mismatch addr=%08x\n", sc->sc_dev.dv_xname,
+		printf("%s: phase mismatch addr=%08x\n",
+		    device_xname(sc->sc_dev),
 		    oosiop_read_4(sc, OOSIOP_DSP) - 8);
 		oosiop_clear_fifo(sc);
 		return;
@@ -643,7 +631,7 @@ oosiop_phasemismatch(struct oosiop_softc *sc)
 	}
 }
 
-void
+static void
 oosiop_setup_syncxfer(struct oosiop_softc *sc)
 {
 	int id;
@@ -655,18 +643,21 @@ oosiop_setup_syncxfer(struct oosiop_softc *sc)
 	oosiop_write_1(sc, OOSIOP_SXFER, sc->sc_tgt[id].sxfer);
 }
 
-void
+static void
 oosiop_set_syncparam(struct oosiop_softc *sc, int id, int period, int offset)
 {
 	int i, p;
+	struct scsipi_xfer_mode xm;
 
-	printf("%s: target %d now using 8 bit ", sc->sc_dev.dv_xname, id);
+	xm.xm_target = id;
+	xm.xm_mode = 0;
+	xm.xm_period = 0;
+	xm.xm_offset = 0;
 
 	if (offset == 0) {
 		/* Asynchronous */
 		sc->sc_tgt[id].scf = 0;
 		sc->sc_tgt[id].sxfer = 0;
-		printf("asynchronous");
 	} else {
 		/* Synchronous */
 		if (sc->sc_chip == OOSIOP_700) {
@@ -677,7 +668,7 @@ oosiop_set_syncparam(struct oosiop_softc *sc, int id, int period, int offset)
 			}
 			if (i == 12) {
 				printf("%s: target %d period too large\n",
-				    sc->sc_dev.dv_xname, id);
+				    device_xname(sc->sc_dev), id);
 				i = 11;	/* XXX */
 			}
 			sc->sc_tgt[id].scf = 0;
@@ -691,19 +682,22 @@ oosiop_set_syncparam(struct oosiop_softc *sc, int id, int period, int offset)
 			}
 			if (i == NSYNCTBL) {
 				printf("%s: target %d period too large\n",
-				    sc->sc_dev.dv_xname, id);
+				    device_xname(sc->sc_dev), id);
 				i = NSYNCTBL - 1;	/* XXX */
 			}
 			sc->sc_tgt[id].scf = synctbl[i].scf;
 			sc->sc_tgt[id].sxfer = (synctbl[i].tp << 4) | offset;
 		}
-		/* XXX print actual ns period... */
-		printf(" synchronous");
+
+		xm.xm_mode |= PERIPH_CAP_SYNC;
+		xm.xm_period = period;
+		xm.xm_offset = offset;
 	}
-	printf(" xfers\n");
+
+	scsipi_async_event(&sc->sc_channel, ASYNC_EVENT_XFER_MODE, &xm);
 }
 
-void
+static void
 oosiop_minphys(struct buf *bp)
 {
 
@@ -712,201 +706,160 @@ oosiop_minphys(struct buf *bp)
 	minphys(bp);
 }
 
-int
-oosiop_scsicmd(struct scsi_xfer *xs)
+static void
+oosiop_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
+    void *arg)
 {
+	struct scsipi_xfer *xs;
 	struct oosiop_softc *sc;
 	struct oosiop_cb *cb;
 	struct oosiop_xfer *xfer;
+	struct scsipi_xfer_mode *xm;
 	int s, err;
 
-	sc = (struct oosiop_softc *)xs->sc_link->adapter_softc;
+	sc = device_private(chan->chan_adapter->adapt_dev);
 
-	s = splbio();
-	cb = TAILQ_FIRST(&sc->sc_free_cb);
-	TAILQ_REMOVE(&sc->sc_free_cb, cb, chain);
+	switch (req) {
+	case ADAPTER_REQ_RUN_XFER:
+		xs = arg;
 
-	cb->xs = xs;
-	cb->xsflags = xs->flags;
-	cb->cmdlen = xs->cmdlen;
-	cb->datalen = 0;
-	cb->flags = 0;
-	cb->id = xs->sc_link->target;
-	cb->lun = xs->sc_link->lun;
-	xfer = cb->xfer;
-
-	/* Setup SCSI command buffer DMA */
-	err = bus_dmamap_load(sc->sc_dmat, cb->cmddma, xs->cmd,
-	    xs->cmdlen, NULL, ((xs->flags & SCSI_NOSLEEP) ?
-	    BUS_DMA_NOWAIT : BUS_DMA_WAITOK) |
-	    BUS_DMA_STREAMING | BUS_DMA_WRITE);
-	if (err) {
-		printf("%s: unable to load cmd DMA map: %d",
-		    sc->sc_dev.dv_xname, err);
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
+		s = splbio();
+		cb = TAILQ_FIRST(&sc->sc_free_cb);
+		TAILQ_REMOVE(&sc->sc_free_cb, cb, chain);
 		splx(s);
-		return (COMPLETE);
-	}
-	bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, xs->cmdlen,
-	    BUS_DMASYNC_PREWRITE);
 
-	/* Setup data buffer DMA */
-	if (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
-		cb->datalen = xs->datalen;
-		err = bus_dmamap_load(sc->sc_dmat, cb->datadma,
-		    xs->data, xs->datalen, NULL,
-		    ((xs->flags & SCSI_NOSLEEP) ?
-		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK) |
-		    BUS_DMA_STREAMING |
-		    ((xs->flags & SCSI_DATA_IN) ? BUS_DMA_READ :
-		    BUS_DMA_WRITE));
+		cb->xs = xs;
+		cb->flags = 0;
+		cb->id = xs->xs_periph->periph_target;
+		cb->lun = xs->xs_periph->periph_lun;
+		cb->curdp = 0;
+		cb->savedp = 0;
+		xfer = cb->xfer;
+
+		/* Setup SCSI command buffer DMA */
+		err = bus_dmamap_load(sc->sc_dmat, cb->cmddma, xs->cmd,
+		    xs->cmdlen, NULL, ((xs->xs_control & XS_CTL_NOSLEEP) ?
+		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK) | BUS_DMA_WRITE);
 		if (err) {
-			printf("%s: unable to load data DMA map: %d",
-			    sc->sc_dev.dv_xname, err);
-			xs->error = XS_DRIVER_STUFFUP;
-			bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
-			scsi_done(xs);
+			printf("%s: unable to load cmd DMA map: %d",
+			    device_xname(sc->sc_dev), err);
+			xs->error = XS_RESOURCE_SHORTAGE;
 			TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
-			splx(s);
-			return (COMPLETE);
+			scsipi_done(xs);
+			return;
 		}
-		bus_dmamap_sync(sc->sc_dmat, cb->datadma,
-		    0, xs->datalen,
-		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-	}
+		bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, xs->cmdlen,
+		    BUS_DMASYNC_PREWRITE);
 
-	xfer->status = SCSI_OOSIOP_NOSTATUS;
-
-	splx(s);
-
-	oosiop_setup(sc, cb);
-
-	/*
-	 * Always initialize timeout so it does not contain trash
-	 * that could confuse timeout_del().
-	 */
-	timeout_set(&xs->stimeout, oosiop_timeout, cb);
-
-	TAILQ_INSERT_TAIL(&sc->sc_cbq, cb, chain);
-
-	if (!sc->sc_active) {
-		/* Abort script to start selection */
-		oosiop_write_1(sc, OOSIOP_ISTAT, OOSIOP_ISTAT_ABRT);
-	}
-	if (xs->flags & SCSI_POLL)
-		oosiop_poll(sc, cb);
-	else {
-		/* start expire timer */
-		timeout_add(&xs->stimeout, (xs->timeout / 1000) * hz);
-	}
-
-	if (xs->flags & (SCSI_POLL | ITSDONE))
-		return (COMPLETE);
-	else
-		return (SUCCESSFULLY_QUEUED);
-}
-
-void
-oosiop_poll(struct oosiop_softc *sc, struct oosiop_cb *cb)
-{
-	struct scsi_xfer *xs = cb->xs;
-	int i, s, to;
-	u_int8_t istat;
-
-	s = splbio();
-	to = xs->timeout / 1000;
-	for (;;) {
-		i = 1000;
-		while (((istat = oosiop_read_1(sc, OOSIOP_ISTAT)) &
-		    (OOSIOP_ISTAT_SIP | OOSIOP_ISTAT_DIP)) == 0) {
-			if (i <= 0) {
-				i = 1000;
-				to--;
-				if (to <= 0) {
-					oosiop_reset(sc);
-					splx(s);
-					return;
-				}
+		/* Setup data buffer DMA */
+		if (xs->xs_control & (XS_CTL_DATA_IN | XS_CTL_DATA_OUT)) {
+			err = bus_dmamap_load(sc->sc_dmat, cb->datadma,
+			    xs->data, xs->datalen, NULL,
+			    ((xs->xs_control & XS_CTL_NOSLEEP) ?
+			    BUS_DMA_NOWAIT : BUS_DMA_WAITOK) |
+			    BUS_DMA_STREAMING |
+			    ((xs->xs_control & XS_CTL_DATA_IN) ? BUS_DMA_READ :
+			    BUS_DMA_WRITE));
+			if (err) {
+				printf("%s: unable to load data DMA map: %d",
+				    device_xname(sc->sc_dev), err);
+				xs->error = XS_RESOURCE_SHORTAGE;
+				bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
+				TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
+				scsipi_done(xs);
+				return;
 			}
-			delay(1000);
-			i--;
+			bus_dmamap_sync(sc->sc_dmat, cb->datadma,
+			    0, xs->datalen,
+			    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 		}
-		oosiop_processintr(sc, istat);
 
-		if (xs->flags & ITSDONE)
-			break;
+		oosiop_setup_sgdma(sc, cb);
+
+		/* Setup msgout buffer */
+		OOSIOP_XFERMSG_SYNC(sc, cb,
+		   BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+		xfer->msgout[0] = MSG_IDENTIFY(cb->lun,
+		    (xs->xs_control & XS_CTL_REQSENSE) == 0);
+		cb->msgoutlen = 1;
+
+		if (sc->sc_tgt[cb->id].flags & TGTF_SYNCNEG) {
+			/* Send SDTR */
+			xfer->msgout[1] = MSG_EXTENDED;
+			xfer->msgout[2] = MSG_EXT_SDTR_LEN;
+			xfer->msgout[3] = MSG_EXT_SDTR;
+			xfer->msgout[4] = sc->sc_minperiod;
+			xfer->msgout[5] = OOSIOP_MAX_OFFSET;
+			cb->msgoutlen = 6;
+			sc->sc_tgt[cb->id].flags &= ~TGTF_SYNCNEG;
+			sc->sc_tgt[cb->id].flags |= TGTF_WAITSDTR;
+		}
+
+		xfer->status = SCSI_OOSIOP_NOSTATUS;
+
+		OOSIOP_XFERMSG_SYNC(sc, cb,
+		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+
+		s = splbio();
+
+		TAILQ_INSERT_TAIL(&sc->sc_cbq, cb, chain);
+
+		if (!sc->sc_active) {
+			/* Abort script to start selection */
+			oosiop_write_1(sc, OOSIOP_ISTAT, OOSIOP_ISTAT_ABRT);
+		}
+		if (xs->xs_control & XS_CTL_POLL) {
+			/* Poll for command completion */
+			while ((xs->xs_status & XS_STS_DONE) == 0) {
+				delay(1000);
+				oosiop_intr(sc);
+			}
+		}
+
+		splx(s);
+
+		return;
+
+	case ADAPTER_REQ_GROW_RESOURCES:
+		return;
+
+	case ADAPTER_REQ_SET_XFER_MODE:
+		xm = arg;
+		if (xm->xm_mode & PERIPH_CAP_SYNC)
+			sc->sc_tgt[xm->xm_target].flags |= TGTF_SYNCNEG;
+		else
+			oosiop_set_syncparam(sc, xm->xm_target, 0, 0);
+
+		return;
 	}
-
-	splx(s);
 }
 
-void
-oosiop_setup(struct oosiop_softc *sc, struct oosiop_cb *cb)
-{
-	struct oosiop_xfer *xfer = cb->xfer;
-
-	cb->curdp = 0;
-	cb->savedp = 0;
-
-	oosiop_setup_sgdma(sc, cb);
-
-	/* Setup msgout buffer */
-	OOSIOP_XFERMSG_SYNC(sc, cb,
-	   BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
-	xfer->msgout[0] = MSG_IDENTIFY(cb->lun,
-	    (cb->xs->cmd->opcode != REQUEST_SENSE));
-	cb->msgoutlen = 1;
-
-	if (sc->sc_tgt[cb->id].flags & TGTF_SYNCNEG) {
-		/* Send SDTR */
-		xfer->msgout[1] = MSG_EXTENDED;
-		xfer->msgout[2] = MSG_EXT_SDTR_LEN;
-		xfer->msgout[3] = MSG_EXT_SDTR;
-		xfer->msgout[4] = sc->sc_minperiod;
-		xfer->msgout[5] = OOSIOP_MAX_OFFSET;
-		cb->msgoutlen = 6;
-		sc->sc_tgt[cb->id].flags &= ~TGTF_SYNCNEG;
-		sc->sc_tgt[cb->id].flags |= TGTF_WAITSDTR;
-	}
-
-	OOSIOP_XFERMSG_SYNC(sc, cb,
-	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-}
-
-void
+static void
 oosiop_done(struct oosiop_softc *sc, struct oosiop_cb *cb)
 {
-	struct scsi_xfer *xs;
-	struct scsi_link *periph;
-	int autosense;
+	struct scsipi_xfer *xs;
 
 	xs = cb->xs;
-	periph = xs->sc_link;
+	if (cb == sc->sc_curcb)
+		sc->sc_curcb = NULL;
+	if (cb == sc->sc_lastcb)
+		sc->sc_lastcb = NULL;
+	sc->sc_tgt[cb->id].nexus = NULL;
 
-	/*
-	 * Record if this is the completion of an auto sense
-	 * scsi command, and then reset the flag so we don't loop
-	 * when such a command fails or times out.
-	 */
-	autosense = cb->flags & CBF_AUTOSENSE;
-	cb->flags &= ~CBF_AUTOSENSE;
+	callout_stop(&xs->xs_callout);
 
-	bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, cb->cmdlen,
+	bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, xs->cmdlen,
 	    BUS_DMASYNC_POSTWRITE);
 	bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
 
-	if (cb->xsflags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
-		bus_dmamap_sync(sc->sc_dmat, cb->datadma, 0, cb->datalen,
-		    (cb->xsflags & SCSI_DATA_IN) ?
-		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
+	if (xs->datalen > 0) {
+		bus_dmamap_sync(sc->sc_dmat, cb->datadma, 0, xs->datalen,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, cb->datadma);
 	}
 
-	timeout_del(&xs->stimeout);
-
 	xs->status = cb->xfer->status;
+	xs->resid = 0;	/* XXX */
 
 	if (cb->flags & CBF_SELTOUT)
 		xs->error = XS_SELTIMEOUT;
@@ -914,22 +867,12 @@ oosiop_done(struct oosiop_softc *sc, struct oosiop_cb *cb)
 		xs->error = XS_TIMEOUT;
 	else switch (xs->status) {
 	case SCSI_OK:
-		if (autosense == 0)
-			xs->error = XS_NOERROR;
-		else
-			xs->error = XS_SENSE;
+		xs->error = XS_NOERROR;
 		break;
 
 	case SCSI_BUSY:
-		xs->error = XS_BUSY;
-		break;
 	case SCSI_CHECK:
-#ifdef notyet
-		if (autosense == 0)
-			cb->flags |= CBF_AUTOSENSE;
-		else
-#endif
-			xs->error = XS_DRIVER_STUFFUP;
+		xs->error = XS_BUSY;
 		break;
 	case SCSI_OOSIOP_NOSTATUS:
 		/* the status byte was not updated, cmd was aborted. */
@@ -941,84 +884,27 @@ oosiop_done(struct oosiop_softc *sc, struct oosiop_cb *cb)
 		break;
 	}
 
-	if ((cb->flags & CBF_AUTOSENSE) == 0) {
-		/* Put it on the free list. */
-FREE:
-		xs->resid = 0;
-		xs->flags |= ITSDONE;
-		scsi_done(xs);
-		TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
+	scsipi_done(xs);
 
-		if (cb == sc->sc_curcb)
-			sc->sc_curcb = NULL;
-		if (cb == sc->sc_lastcb)
-			sc->sc_lastcb = NULL;
-		sc->sc_tgt[cb->id].nexus = NULL;
-	} else {
-		/* Set up REQUEST_SENSE command */
-		struct scsi_sense *cmd = (struct scsi_sense *)xs->cmd;
-		int err;
-
-		bzero(cmd, sizeof(*cmd));
-		cmd->opcode = REQUEST_SENSE;
-		cmd->byte2 = xs->sc_link->lun << 5;
-		cb->cmdlen = cmd->length = sizeof(xs->sense);
-
-		cb->xsflags &= SCSI_POLL | SCSI_NOSLEEP;
-		cb->xsflags |= SCSI_DATA_IN;
-		cb->datalen = sizeof xs->sense;
-
-		/* Setup SCSI command buffer DMA */
-		err = bus_dmamap_load(sc->sc_dmat, cb->cmddma, cmd,
-		    cb->cmdlen, NULL,
-		    BUS_DMA_NOWAIT | BUS_DMA_STREAMING | BUS_DMA_WRITE);
-		if (err) {
-			printf("%s: unable to load REQUEST_SENSE cmd DMA map: %d",
-			    sc->sc_dev.dv_xname, err);
-			xs->error = XS_DRIVER_STUFFUP;
-			goto FREE;
-		}
-		bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, cb->cmdlen,
-		    BUS_DMASYNC_PREWRITE);
-
-		/* Setup data buffer DMA */
-		err = bus_dmamap_load(sc->sc_dmat, cb->datadma,
-		    &xs->sense, sizeof(xs->sense), NULL,
-		    BUS_DMA_NOWAIT | BUS_DMA_STREAMING | BUS_DMA_READ);
-		if (err) {
-			printf("%s: unable to load REQUEST_SENSE data DMA map: %d",
-			    sc->sc_dev.dv_xname, err);
-			xs->error = XS_DRIVER_STUFFUP;
-			bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
-			goto FREE;
-		}
-		bus_dmamap_sync(sc->sc_dmat, cb->datadma,
-		    0, sizeof(xs->sense), BUS_DMASYNC_PREREAD);
-
-		oosiop_setup(sc, cb);
-
-		TAILQ_INSERT_HEAD(&sc->sc_cbq, cb, chain);
-		if ((cb->xs->flags & SCSI_POLL) == 0) {
-			/* start expire timer */
-			timeout_add(&xs->stimeout, (xs->timeout / 1000) * hz);
-		}
-	}
+	/* Put it on the free list. */
+	TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
 }
 
-void
+static void
 oosiop_timeout(void *arg)
 {
-	struct oosiop_cb *cb = arg;
-	struct scsi_xfer *xs = cb->xs;
-	struct oosiop_softc *sc = xs->sc_link->adapter_softc;
+	struct oosiop_cb *cb;
+	struct scsipi_periph *periph;
+	struct oosiop_softc *sc;
 	int s;
 
-	sc_print_addr(xs->sc_link);
-	printf("command 0x%02x timeout on xs %p\n", xs->cmd->opcode, xs);
+	cb = arg;
+	periph = cb->xs->xs_periph;
+	sc = device_private(periph->periph_channel->chan_adapter->adapt_dev);
+	scsipi_printaddr(periph);
+	printf("timed out\n");
 
 	s = splbio();
-
-	oosiop_reset_bus(sc);
 
 	cb->flags |= CBF_TIMEOUT;
 	oosiop_done(sc, cb);
@@ -1026,7 +912,7 @@ oosiop_timeout(void *arg)
 	splx(s);
 }
 
-void
+static void
 oosiop_reset(struct oosiop_softc *sc)
 {
 	int i, s;
@@ -1077,7 +963,7 @@ oosiop_reset(struct oosiop_softc *sc)
 	splx(s);
 }
 
-void
+static void
 oosiop_reset_bus(struct oosiop_softc *sc)
 {
 	int s, i;
@@ -1111,23 +997,15 @@ oosiop_reset_bus(struct oosiop_softc *sc)
 int
 oosiop_intr(struct oosiop_softc *sc)
 {
-	u_int8_t istat;
+	struct oosiop_cb *cb;
+	uint32_t dcmd;
+	int timeout;
+	uint8_t istat, dstat, sstat0;
 
 	istat = oosiop_read_1(sc, OOSIOP_ISTAT);
 
 	if ((istat & (OOSIOP_ISTAT_SIP | OOSIOP_ISTAT_DIP)) == 0)
 		return (0);
-
-	oosiop_processintr(sc, istat);
-	return (1);
-}
-
-void
-oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
-{
-	struct oosiop_cb *cb;
-	u_int32_t dcmd;
-	u_int8_t dstat, sstat0;
 
 	sc->sc_nextdsp = Ent_wait_reselect;
 
@@ -1152,8 +1030,8 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 		if (dstat & OOSIOP_DSTAT_SSI) {
 			sc->sc_nextdsp = oosiop_read_4(sc, OOSIOP_DSP) -
 			    sc->sc_scrbase;
-			printf("%s: single step %08x\n", sc->sc_dev.dv_xname,
-			    sc->sc_nextdsp);
+			printf("%s: single step %08x\n",
+			    device_xname(sc->sc_dev), sc->sc_nextdsp);
 		}
 
 		if (dstat & OOSIOP_DSTAT_SIR) {
@@ -1163,7 +1041,7 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 		}
 
 		if (dstat & OOSIOP_DSTAT_WTD) {
-			printf("%s: DMA time out\n", sc->sc_dev.dv_xname);
+			printf("%s: DMA time out\n", device_xname(sc->sc_dev));
 			oosiop_reset(sc);
 		}
 
@@ -1171,12 +1049,12 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 			dcmd = oosiop_read_4(sc, OOSIOP_DBC);
 			if ((dcmd & 0xf8000000) == 0x48000000) {
 				printf("%s: REQ asserted on WAIT DISCONNECT\n",
-				    sc->sc_dev.dv_xname);
+				    device_xname(sc->sc_dev));
 				sc->sc_nextdsp = Ent_phasedispatch; /* XXX */
 			} else {
 				printf("%s: invalid SCRIPTS instruction "
 				    "addr=%08x dcmd=%08x dsps=%08x\n",
-				    sc->sc_dev.dv_xname,
+				    device_xname(sc->sc_dev),
 				    oosiop_read_4(sc, OOSIOP_DSP) - 8, dcmd,
 				    oosiop_read_4(sc, OOSIOP_DSPS));
 				oosiop_reset(sc);
@@ -1209,7 +1087,8 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 		}
 
 		if (sstat0 & OOSIOP_SSTAT0_SGE) {
-			printf("%s: SCSI gross error\n", sc->sc_dev.dv_xname);
+			printf("%s: SCSI gross error\n",
+			    device_xname(sc->sc_dev));
 			oosiop_reset(sc);
 		}
 
@@ -1217,7 +1096,7 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 			/* XXX */
 			if (sc->sc_curcb) {
 				printf("%s: unexpected disconnect\n",
-				    sc->sc_dev.dv_xname);
+				    device_xname(sc->sc_dev));
 				oosiop_done(sc, sc->sc_curcb);
 			}
 		}
@@ -1226,7 +1105,7 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 			oosiop_reset(sc);
 
 		if (sstat0 & OOSIOP_SSTAT0_PAR)
-			printf("%s: parity error\n", sc->sc_dev.dv_xname);
+			printf("%s: parity error\n", device_xname(sc->sc_dev));
 	}
 
 	/* Start next command if available */
@@ -1241,10 +1120,10 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 		sc->sc_nextdsp = Ent_start_select;
 
 		/* Schedule timeout */
-		if ((cb->xs->flags & SCSI_POLL) == 0) {
-			/* start expire timer */
-			timeout_add(&cb->xs->stimeout,
-			    (cb->xs->timeout / 1000) * hz);
+		if ((cb->xs->xs_control & XS_CTL_POLL) == 0) {
+			timeout = mstohz(cb->xs->timeout) + 1;
+			callout_reset(&cb->xs->xs_callout, timeout,
+			    oosiop_timeout, cb);
 		}
 	}
 
@@ -1252,16 +1131,18 @@ oosiop_processintr(struct oosiop_softc *sc, u_int8_t istat)
 
 	/* Restart script */
 	oosiop_write_4(sc, OOSIOP_DSP, sc->sc_nextdsp + sc->sc_scrbase);
+
+	return (1);
 }
 
-void
+static void
 oosiop_scriptintr(struct oosiop_softc *sc)
 {
 	struct oosiop_cb *cb;
-	u_int32_t icode;
-	u_int32_t dsp;
+	uint32_t icode;
+	uint32_t dsp;
 	int i;
-	u_int8_t sfbr, resid, resmsg;
+	uint8_t sfbr, resid, resmsg;
 
 	cb = sc->sc_curcb;
 	icode = oosiop_read_4(sc, OOSIOP_DSPS);
@@ -1296,7 +1177,7 @@ oosiop_scriptintr(struct oosiop_softc *sc)
 				break;
 		if (i == OOSIOP_NTGT) {
 			printf("%s: missing reselection target id\n",
-			    sc->sc_dev.dv_xname);
+			    device_xname(sc->sc_dev));
 			break;
 		}
 		sc->sc_resid = i;
@@ -1345,29 +1226,29 @@ oosiop_scriptintr(struct oosiop_softc *sc)
 	case A_int_err:
 		/* generic error */
 		dsp = oosiop_read_4(sc, OOSIOP_DSP);
-		printf("%s: script error at 0x%08x\n", sc->sc_dev.dv_xname,
-		    dsp - 8);
+		printf("%s: script error at 0x%08x\n",
+		    device_xname(sc->sc_dev), dsp - 8);
 		sc->sc_curcb = NULL;
 		break;
 
 	case DATAIN_TRAP:
-		printf("%s: unexpected datain\n", sc->sc_dev.dv_xname);
+		printf("%s: unexpected datain\n", device_xname(sc->sc_dev));
 		/* XXX: need to reset? */
 		break;
 
 	case DATAOUT_TRAP:
-		printf("%s: unexpected dataout\n", sc->sc_dev.dv_xname);
+		printf("%s: unexpected dataout\n", device_xname(sc->sc_dev));
 		/* XXX: need to reset? */
 		break;
 
 	default:
-		printf("%s: unknown intr code %08x\n", sc->sc_dev.dv_xname,
-		    icode);
+		printf("%s: unknown intr code %08x\n",
+		    device_xname(sc->sc_dev), icode);
 		break;
 	}
 }
 
-void
+static void
 oosiop_msgin(struct oosiop_softc *sc, struct oosiop_cb *cb)
 {
 	struct oosiop_xfer *xfer;

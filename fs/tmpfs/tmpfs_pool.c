@@ -1,7 +1,7 @@
-/*	$NetBSD: tmpfs_pool.c,v 1.6 2006/11/09 16:20:56 jmmv Exp $	*/
+/*	$NetBSD: tmpfs_pool.c,v 1.14 2008/04/28 20:24:02 martin Exp $	*/
 
 /*
- * Copyright (c) 2005, 2006 The NetBSD Foundation, Inc.
+ * Copyright (c) 2005, 2006, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,10 +35,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tmpfs_pool.c,v 1.6 2006/11/09 16:20:56 jmmv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tmpfs_pool.c,v 1.14 2008/04/28 20:24:02 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/pool.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 
@@ -128,11 +122,11 @@ tmpfs_pool_init(struct tmpfs_pool *tpp, size_t size, const char *what,
 	int cnt;
 
 	cnt = snprintf(tpp->tp_name, sizeof(tpp->tp_name),
-	    "%s_pool_%p", what, tmp);
+	    "%s_tmpfs_%p", what, tmp);
 	KASSERT(cnt < sizeof(tpp->tp_name));
 
 	pool_init(&tpp->tp_pool, size, 0, 0, 0, tpp->tp_name,
-	    &tmpfs_pool_allocator);
+	    &tmpfs_pool_allocator, IPL_NONE);
 	tpp->tp_mount = tmp;
 }
 
@@ -153,19 +147,29 @@ tmpfs_pool_destroy(struct tmpfs_pool *tpp)
 void *
 tmpfs_pool_page_alloc(struct pool *pp, int flags)
 {
-	void *page;
 	struct tmpfs_pool *tpp;
 	struct tmpfs_mount *tmp;
+	unsigned int pages;
+	void *page;
 
 	tpp = (struct tmpfs_pool *)pp;
 	tmp = tpp->tp_mount;
 
-	if (TMPFS_PAGES_MAX(tmp) - tmp->tm_pages_used == 0)
+	pages = atomic_inc_uint_nv(&tmp->tm_pages_used);
+	if (pages >= TMPFS_PAGES_MAX(tmp)) {
+		atomic_dec_uint(&tmp->tm_pages_used);
 		return NULL;
-
-	tmp->tm_pages_used += 1;
-	page = pool_page_alloc_nointr(pp, flags);
-	KASSERT(page != NULL);
+	}
+	/*
+	 * tmpfs never specifies PR_WAITOK as we enforce local limits
+	 * on memory allocation.  However, we should wait for memory
+	 * to become available if under our limit.  XXX The result of
+	 * the TMPFS_PAGES_MAX() check is stale.
+	 */
+	page = pool_page_alloc_nointr(pp, flags | PR_WAITOK);
+	if (page == NULL) {
+		atomic_dec_uint(&tmp->tm_pages_used);
+	}
 
 	return page;
 }
@@ -181,7 +185,7 @@ tmpfs_pool_page_free(struct pool *pp, void *v)
 	tpp = (struct tmpfs_pool *)pp;
 	tmp = tpp->tp_mount;
 
-	tmp->tm_pages_used -= 1;
+	atomic_dec_uint(&tmp->tm_pages_used);
 	pool_page_free_nointr(pp, v);
 }
 

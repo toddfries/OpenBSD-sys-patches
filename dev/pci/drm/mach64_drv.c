@@ -1,3 +1,5 @@
+/*	$NetBSD: mach64_drv.c,v 1.5 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* mach64_drv.c -- ATI Rage 128 driver -*- linux-c -*-
  * Created: Mon Dec 13 09:47:27 1999 by faith@precisioninsight.com
  */
@@ -30,6 +32,12 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mach64_drv.c,v 1.5 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drv.c,v 1.3 2005/12/20 22:44:36 jhb Exp $");
+*/
+
 
 #include <sys/types.h>
 
@@ -39,15 +47,12 @@
 #include "mach64_drv.h"
 #include "drm_pciids.h"
 
-void	mach64_configure(drm_device_t *);
-
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mach64_pciidlist[] = {
 	mach64_PCI_IDS
 };
 
-void
-mach64_configure(drm_device_t *dev)
+static void mach64_configure(drm_device_t *dev)
 {
 	dev->driver.buf_priv_size	= 1; /* No dev_priv */
 	dev->driver.lastclose		= mach64_driver_lastclose;
@@ -117,46 +122,24 @@ DRIVER_MODULE(mach64, pci, mach64_driver, drm_devclass, 0, 0);
 MODULE_DEPEND(mach64, drm, 1, 1, 1);
 
 #elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-int	mach64drm_probe(struct device *, void *, void *);
-void	mach64drm_attach(struct device *, struct device *, void *);
-
-int
-#if defined(__OpenBSD__)
-mach64drm_probe(struct device *parent, void *match, void *aux)
-#else
+static int
 mach64drm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
-	return drm_probe((struct pci_attach_args *)aux, mach64_pciidlist);
+	struct pci_attach_args *pa = aux;
+	return drm_probe(pa, mach64_pciidlist);
 }
 
-void
+static void
 mach64drm_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	drm_device_t *dev = (drm_device_t *)self;
+	drm_device_t *dev = device_private(self);
 
 	mach64_configure(dev);
-	return drm_attach(parent, self, pa, mach64_pciidlist);
+	return drm_attach(self, pa, mach64_pciidlist);
 }
 
-#if defined(__OpenBSD__)
-struct cfattach machdrm_ca = {
-	sizeof(drm_device_t), mach64drm_probe, mach64drm_attach,
-	drm_detach, drm_activate
-};
-
-struct cfdriver machdrm_cd = {
-	0, "machdrm", DV_DULL
-};
-#else
-#ifdef _LKM
-CFDRIVER_DECL(mach64drm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(mach64drm, sizeof(drm_device_t), mach64drm_probe, mach64drm_attach,
+CFATTACH_DECL_NEW(mach64drm, sizeof(drm_device_t), mach64drm_probe, mach64drm_attach,
 	drm_detach, drm_activate);
-#endif
-#endif
 
 #endif

@@ -1,5 +1,4 @@
-/*	$OpenBSD: lockf.h,v 1.7 2005/03/10 17:26:10 tedu Exp $	*/
-/*	$NetBSD: lockf.h,v 1.5 1994/06/29 06:44:33 cgd Exp $	*/
+/*	$NetBSD: lockf.h,v 1.20 2008/11/19 13:34:11 pooka Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -32,53 +31,20 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)lockf.h	8.1 (Berkeley) 6/11/93
+ *	@(#)lockf.h	8.2 (Berkeley) 10/26/94
  */
 
-/*
- * The lockf structure is a kernel structure which contains the information
- * associated with a byte range lock.  The lockf structures are linked into
- * the inode structure. Locks are sorted by the starting byte of the lock for
- * efficiency.
- */
-TAILQ_HEAD(locklist, lockf);
+#ifndef _SYS_LOCKF_H_
+#define _SYS_LOCKF_H_
 
-struct lockf {
-	short	lf_flags;	 /* Lock semantics: F_POSIX, F_FLOCK, F_WAIT */
-	short	lf_type;	 /* Lock type: F_RDLCK, F_WRLCK */
-	off_t	lf_start;	 /* The byte # of the start of the lock */
-	off_t	lf_end;		 /* The byte # of the end of the lock (-1=EOF)*/
-	caddr_t	lf_id;		 /* The id of the resource holding the lock */
-	struct	lockf **lf_head; /* Back pointer to the head of lockf list */
-	struct	lockf *lf_next;	 /* A pointer to the next lock on this inode */
-	struct	locklist lf_blkhd;	/* The list of blocked locks */
-	TAILQ_ENTRY(lockf) lf_block; /* A request waiting for a lock */
-	uid_t	lf_uid;		/* User ID responsible */
-};
+#ifdef _KERNEL
 
-/* Maximum length of sleep chains to traverse to try and detect deadlock. */
-#define MAXDEPTH 50
+#include <sys/vnode.h>
 
-__BEGIN_DECLS
-void	 lf_init(void);
-int	 lf_advlock(struct lockf **,
-	    off_t, caddr_t, int, struct flock *, int);
-int	 lf_clearlock(struct lockf *);
-int	 lf_findoverlap(struct lockf *,
-	    struct lockf *, int, struct lockf ***, struct lockf **);
-struct lockf *
-	 lf_getblock(struct lockf *);
-int	 lf_getlock(struct lockf *, struct flock *);
-int	 lf_setlock(struct lockf *);
-void	 lf_split(struct lockf *, struct lockf *);
-void	 lf_wakelock(struct lockf *);
-__END_DECLS
+struct lockf;
 
-#ifdef LOCKF_DEBUG
-extern int lockf_debug;
+int lf_advlock(struct vop_advlock_args *, struct lockf **, off_t);
+void lf_init(void);
+#endif /* _KERNEL */
 
-__BEGIN_DECLS
-void	lf_print(char *, struct lockf *);
-void	lf_printlist(char *, struct lockf *);
-__END_DECLS
-#endif
+#endif /* !_SYS_LOCKF_H_ */

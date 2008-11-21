@@ -1,6 +1,4 @@
-/*	$OpenBSD: rf_reconutil.h,v 1.3 2002/12/16 07:01:05 tdeval Exp $	*/
-/*	$NetBSD: rf_reconutil.h,v 1.3 1999/02/05 00:06:17 oster Exp $	*/
-
+/*	$NetBSD: rf_reconutil.h,v 1.6 2005/12/11 12:23:37 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,24 +26,26 @@
  * rights to redistribute these changes.
  */
 
-/**************************************************************
- * rf_reconutil.h -- Header file for reconstruction utilities.
- **************************************************************/
+/************************************************************
+ * rf_reconutil.h -- header file for reconstruction utilities
+ ************************************************************/
 
-#ifndef	_RF__RF_RECONUTIL_H_
-#define	_RF__RF_RECONUTIL_H_
+#ifndef _RF__RF_RECONUTIL_H_
+#define _RF__RF_RECONUTIL_H_
 
-#include "rf_types.h"
+#include <dev/raidframe/raidframevar.h>
+
 #include "rf_reconstruct.h"
 
-RF_ReconCtrl_t *rf_MakeReconControl(RF_RaidReconDesc_t *,
-	RF_RowCol_t, RF_RowCol_t, RF_RowCol_t, RF_RowCol_t);
-void rf_FreeReconControl(RF_Raid_t *, RF_RowCol_t);
-RF_HeadSepLimit_t rf_GetDefaultHeadSepLimit(RF_Raid_t *);
-int  rf_GetDefaultNumFloatingReconBuffers(RF_Raid_t *);
-RF_ReconBuffer_t *rf_MakeReconBuffer(RF_Raid_t *,
-	RF_RowCol_t, RF_RowCol_t, RF_RbufType_t);
-void rf_FreeReconBuffer(RF_ReconBuffer_t *);
-void rf_CheckFloatingRbufCount(RF_Raid_t *, int);
+RF_ReconCtrl_t *
+rf_MakeReconControl(RF_RaidReconDesc_t * reconDesc,
+    RF_RowCol_t fcol, RF_RowCol_t scol);
+void    rf_FreeReconControl(RF_Raid_t * raidPtr);
+RF_HeadSepLimit_t rf_GetDefaultHeadSepLimit(RF_Raid_t * raidPtr);
+int     rf_GetDefaultNumFloatingReconBuffers(RF_Raid_t * raidPtr);
+RF_ReconBuffer_t *
+rf_MakeReconBuffer(RF_Raid_t * raidPtr, RF_RowCol_t col, RF_RbufType_t type);
+void    rf_FreeReconBuffer(RF_ReconBuffer_t * rbuf);
+void    rf_CheckFloatingRbufCount(RF_Raid_t * raidPtr, int dolock);
 
-#endif	/* !_RF__RF_RECONUTIL_H_ */
+#endif				/* !_RF__RF_RECONUTIL_H_ */

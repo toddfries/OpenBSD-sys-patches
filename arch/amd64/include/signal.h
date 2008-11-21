@@ -1,5 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2006/01/08 14:20:17 millert Exp $	*/
-/*	$NetBSD: signal.h,v 1.2 2003/04/28 23:16:17 bjh21 Exp $	*/
+/*	$NetBSD: signal.h,v 1.11 2008/11/19 18:35:58 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991 Regents of the University of California.
@@ -35,54 +34,31 @@
 #ifndef _AMD64_SIGNAL_H_
 #define _AMD64_SIGNAL_H_
 
-#include <sys/cdefs.h>
+#ifdef __x86_64__
+
+#include <sys/featuretest.h>
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
+/*
+ * Get the "code" values
+ */
 #include <machine/trap.h>
+#include <machine/fpu.h>
+#include <machine/mcontext.h>
+
+#ifdef _KERNEL_OPT
+#include "opt_compat_netbsd.h"
+#include "opt_compat_netbsd32.h"
 #endif
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
-/*
- * Information pushed on stack when a signal is delivered.
- * This is used by the kernel to restore state following
- * execution of the signal handler.  It is also made available
- * to the handler to allow it to restore state properly if
- * a non-standard exit is performed.
- */
-struct sigcontext {
-	/* plain match trapframe */
-	long	sc_rdi;
-	long	sc_rsi;
-	long	sc_rdx;
-	long	sc_rcx;
-	long	sc_r8;
-	long	sc_r9;
-	long	sc_r10;
-	long	sc_r11;
-	long	sc_r12;
-	long	sc_r13;
-	long	sc_r14;
-	long	sc_r15;
-	long	sc_rbp;
-	long	sc_rbx;
-	long	sc_rax;
-	long	sc_gs;
-	long	sc_fs;
-	long	sc_es;
-	long	sc_ds;
-	long	sc_trapno;
-	long	sc_err;
-	long	sc_rip;
-	long	sc_cs;
-	long	sc_rflags;
-	long	sc_rsp;
-	long	sc_ss;
+#endif	/* _NETBSD_SOURCE */
 
-	struct fxsave64 *sc_fpstate;
-	int	sc_onstack;
-	int	sc_mask;
-};
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#else	/*	__x86_64__	*/
+
+#include <i386/signal.h>
+
+#endif	/*	__x86_64__	*/
+
 #endif	/* !_AMD64_SIGNAL_H_ */

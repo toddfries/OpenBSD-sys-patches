@@ -1,3 +1,4 @@
+/*	$NetBSD: compat_linux.h,v 1.4 2007/10/17 19:58:41 garbled Exp $	*/
 /*	$OpenBSD: compat_linux.h,v 1.5 2006/01/15 17:58:27 deraadt Exp $	*/
 
 /*
@@ -16,32 +17,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#if 0
-
-/* Define these unconditionally to get the .modinfo section. */
-#undef __KERNEL__
-#undef MODULE
-#define __KERNEL__
-#define MODULE
-
-/* Standard headers for Linux LKMs */
-#include <linux/kernel.h>
-#include <linux/modsetver.h>
-#include <linux/module.h>
-
-/*
- * Include Linux 2.4.x headers.
- */
-#include <linux/elf.h>
-#include <linux/errno.h>
-#include <linux/fs.h>
-#include <linux/pagemap.h>
-#include <linux/file.h>
-#include <linux/slab.h>
-#include <asm/mach/map.h>
-
-#else
-
 /*
  * Declare the things that we need from the Linux headers.
  */
@@ -56,9 +31,12 @@
 struct file;
 struct inode;
 
+#define	ELFSIZE	32
+#include <sys/exec_elf.h>
+#include <sys/types.h>
+#include <sys/errno.h>
+
 typedef long loff_t;
-typedef long ssize_t;
-typedef unsigned long size_t;
 
 struct file_operations {
 	struct module *owner;
@@ -84,8 +62,7 @@ struct file_operations {
 #endif /* MAGIC_ROM_PTR */
 };
 
-extern	struct file * open_exec(const char *);
-extern	void fput(struct file *);
+extern	struct file *open_exec(const char *);
 extern	int kernel_read(struct file *, unsigned long, char *, unsigned long);
 extern	int memcmp(const void *, const void *, size_t);
 extern	int register_chrdev(unsigned int, const char *, struct file_operations *);
@@ -93,18 +70,11 @@ extern	int unregister_chrdev(unsigned int, const char *);
 extern	void printk(const char *, ...);
 extern	void *memcpy(void *, const void *, size_t);
 
-/* BSD headers */
-#include <sys/exec_elf.h>
-#include <sys/types.h>
-#include <errno.h>
-
 /* Linux LKM support */
 static const char __module_kernel_version[] __attribute__((section(".modinfo"))) =
 "kernel_version=" UTS_RELEASE;
-#if 1 /* def MODVERSIONS */
 static const char __module_using_checksums[] __attribute__((section(".modinfo"))) =
 "using_checksums=1";
-#endif
 
 /* procfs support */
 struct proc_dir_entry {
@@ -132,5 +102,3 @@ extern	struct proc_dir_entry proc_root;
 extern	struct proc_dir_entry *proc_mknod(const char*, unsigned short,
     struct proc_dir_entry*, unsigned short);
 extern	void remove_proc_entry(const char *, struct proc_dir_entry *);
-
-#endif

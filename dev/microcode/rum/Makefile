@@ -1,36 +1,14 @@
-# $OpenBSD: Makefile,v 1.4 2007/08/01 21:42:43 deraadt Exp $
+#	$NetBSD: Makefile,v 1.1 2006/10/31 22:21:17 joerg Exp $
 
-NOPROG=
-NOMAN=
-CC=${HOSTCC}
+NOMAN=	# defined
 
-# USB capable systems only
-.if (${MACHINE_ARCH} == "powerpc") || (${MACHINE} == "alpha") || \
-    (${MACHINE} == "amd64") || (${MACHINE} == "armish") || \
-    (${MACHINE} == "hppa") || (${MACHINE} == "hppa64") || \
-    (${MACHINE} == "i386") || (${MACHINE} == "sgi") || \
-    (${MACHINE} == "sparc64") || (${MACHINE} == "zaurus") || \
-    (${MACHINE} == "landisk")
+FILES=	rum-rt2573 rum-license
 
-FIRM=	rum-rt2573
+# XXX
+includes:
 
-PROG=	build
+clean:
 
-CLEANFILES+= ${FIRM} ${PROG}
+cleandir:
 
-all: ${FIRM}
-
-${FIRM}: build
-	${.OBJDIR}/build
-
-realinstall:
-
-afterinstall:
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 \
-	    ${FIRM} ${DESTDIR}/etc/firmware
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 \
-	    ${.CURDIR}/rum-license ${DESTDIR}/etc/firmware
-
-.endif
-
-.include <bsd.prog.mk>
+.include <bsd.files.mk>

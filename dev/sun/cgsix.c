@@ -1,4 +1,4 @@
-/*	$NetBSD: cgsix.c,v 1.35 2007/10/19 12:01:18 ad Exp $ */
+/*	$NetBSD: cgsix.c,v 1.38 2008/06/11 21:25:31 drochner Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -85,7 +78,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.35 2007/10/19 12:01:18 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.38 2008/06/11 21:25:31 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -610,9 +603,9 @@ cg6attach(struct cgsix_softc *sc, const char *name, int isconsole)
 	sc->sc_stride = fb->fb_type.fb_width;
 	sc->sc_height = fb->fb_type.fb_height;
 
-	printf("%s: framebuffer size: %d MB\n", sc->sc_dev.dv_xname, 
+	printf("%s: framebuffer size: %d MB\n", device_xname(&sc->sc_dev), 
 	    sc->sc_ramsize >> 20);
-	printf("%s: FBC: %08x\n", sc->sc_dev.dv_xname, fbc->fbc_mode);
+	printf("%s: FBC: %08x\n", device_xname(&sc->sc_dev), fbc->fbc_mode);
 
 #if NWSDISPLAY
 	/* setup rasops and so on for wsdisplay */
@@ -679,7 +672,7 @@ cgsixopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	int unit = minor(dev);
 
-	if (unit >= cgsix_cd.cd_ndevs || cgsix_cd.cd_devs[unit] == NULL)
+	if (device_lookup(&cgsix_cd, unit) == NULL)
 		return ENXIO;
 	return 0;
 }
@@ -687,7 +680,7 @@ cgsixopen(dev_t dev, int flags, int mode, struct lwp *l)
 int
 cgsixclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct cgsix_softc *sc = cgsix_cd.cd_devs[minor(dev)];
+	struct cgsix_softc *sc = device_lookup_private(&cgsix_cd, minor(dev));
 
 	cg6_reset(sc);
 
@@ -706,7 +699,7 @@ cgsixclose(dev_t dev, int flags, int mode, struct lwp *l)
 int
 cgsixioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 {
-	struct cgsix_softc *sc = cgsix_cd.cd_devs[minor(dev)];
+	struct cgsix_softc *sc = device_lookup_private(&cgsix_cd, minor(dev));
 	union cursor_cmap tcm;
 	uint32_t image[32], mask[32];
 	u_int count;
@@ -1022,7 +1015,7 @@ cg6_blank(struct cgsix_softc *sc, int flag)
 static void
 cg6_unblank(struct device *dev)
 {
-	struct cgsix_softc *sc = (struct cgsix_softc *)dev;
+	struct cgsix_softc *sc = device_private(dev);
 
 	cg6_blank(sc, 0);
 }
@@ -1058,7 +1051,7 @@ struct mmo {
 paddr_t
 cgsixmmap(dev_t dev, off_t off, int prot)
 {
-	struct cgsix_softc *sc = cgsix_cd.cd_devs[minor(dev)];
+	struct cgsix_softc *sc = device_lookup_private(&cgsix_cd, minor(dev));
 	struct mmo *mo;
 	u_int u, sz;
 	static struct mmo mmo[] = {

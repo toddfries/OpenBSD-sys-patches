@@ -1,5 +1,4 @@
-/* $OpenBSD: autoconf.h,v 1.12 2001/09/01 05:48:18 jason Exp $ */
-/* $NetBSD: autoconf.h,v 1.19 2000/06/08 03:10:06 thorpej Exp $ */
+/* $NetBSD: autoconf.h,v 1.22 2005/12/11 12:16:16 christos Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,7 +28,7 @@
  */
 
 /*
- * Machine-dependent structures of autoconfiguration
+ * Machine-dependent structures for autoconfiguration
  */
 
 struct mainbus_attach_args {
@@ -109,8 +108,6 @@ struct alpha_variation_table {
 };
 
 #ifdef _KERNEL
-extern struct device *booted_device;
-extern int booted_partition;
 extern struct bootdev_data *bootdev_data;
 extern struct bootinfo_kernel bootinfo;
 

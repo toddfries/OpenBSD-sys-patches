@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.2 2005/12/10 11:45:43 miod Exp $ */
-/*	$NetBSD: if_de.c,v 1.2 2002/05/24 21:41:40 ragge Exp $	*/
+/*	$NetBSD: if_de.c,v 1.4 2006/07/01 05:55:34 mrg Exp $	*/
 
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -39,15 +38,17 @@
 #include <sys/queue.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/if_ether.h>
 
 #include <lib/libsa/netif.h>
 #include <lib/libsa/stand.h>
 
-#include <arch/vax/qbus/if_dereg.h>
+#include "lib/libkern/libkern.h"
+
+#include <dev/qbus/if_dereg.h>
 
 #include "arch/vax/include/sid.h"
 #include "arch/vax/include/rpb.h"
@@ -69,8 +70,8 @@ struct netif_driver de_driver = {
 struct de_cdata {
 	/* the following structures are always mapped in */
         struct  de_pcbb dc_pcbb;        /* port control block */
-        struct  de_ring dc_xrent[NXMT]; /* transmit ring entries */
-        struct  de_ring dc_rrent[NRCV]; /* receive ring entries */
+        struct  de_ring dc_xrent[NXMT]; /* transmit ring entrys */
+        struct  de_ring dc_rrent[NRCV]; /* receive ring entrys */
         struct  de_udbbuf dc_udbbuf;    /* UNIBUS data buffer */
 	char	dc_rbuf[NRCV][ETHER_MAX_LEN];
 	char	dc_xbuf[NXMT][ETHER_MAX_LEN];
@@ -92,7 +93,7 @@ int
 deopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 {
 	int i, cdata, *map, npgs;
-	char eaddr[6];
+	u_char eaddr[6];
 
 	/* point to the device in memory */
 	if (askname == 0) /* Override if autoboot */
@@ -113,7 +114,7 @@ deopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 
 	/* Map in the control structures and buffers */
 	dc = alloc(sizeof(struct de_cdata));
-	(int)pdc = (int)dc & VAX_PGOFSET;
+	pdc = (struct de_cdata *)((int)dc & VAX_PGOFSET);
 	map = (int *)nexaddr + 512;
 	npgs = (sizeof(struct de_cdata) >> VAX_PGSHIFT) + 1;
 	cdata = (int)dc >> VAX_PGSHIFT;

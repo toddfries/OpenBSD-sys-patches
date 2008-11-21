@@ -1,4 +1,4 @@
-/*	$OpenBSD: etherfun.h,v 1.2 1996/04/28 10:49:37 deraadt Exp $ */
+/*	$NetBSD: etherfun.h,v 1.4 2008/01/12 09:54:33 tsutsui Exp $	*/
 
 /*
  *
@@ -44,16 +44,16 @@
 #define OPCODE_REPLY 4     /* Optype is REVARP reply   */
 
 /* ip header */
-#define  IPP_UDP 17	/* IP Protocol is UDP       */
-#define  IP_VERSION 4      /* IP version number	*/
-#define  IP_HLEN 5	 /* IP header length is a fixed 50 bytes */
+#define  IPP_UDP 17        /* IP Protocol is UDP       */
+#define  IP_VERSION 4      /* IP version number        */
+#define  IP_HLEN 5         /* IP header length is a fixed 50 bytes */
 #define N 1536
 
 /* tftp header */
 #define FTPOP_ACKN 4      /* Opcode is acknowledge     */
 #define FTPOP_ERR 5       /* Opcode is Error	       */
 #define FTP_PORT 69       /* Standard TFTP port number */
-#define MSG "\0\1xxxxxxxx.mvme68k\0octet\0" /* implicit NULL */
+#define MSG "\0\1xxxxxxxx.147\0octet\0" /* implicit NULL */
 
 /* data structures */
 
@@ -76,20 +76,20 @@ struct  ether_arp {
 };
 
 struct ip {
-	u_char  ip_v:4,		/* version */
-		ip_hl:4;	/* header length */
-	u_char  ip_tos;		/* type of service */
-	short   ip_len;		/* total length */
-	u_short ip_id;		/* identification */
-	short   ip_off;		/* fragment offset field */
-#define IP_DF 0x4000		/* dont fragment flag */
-#define IP_MF 0x2000		/* more fragments flag */
-#define IP_OFFMASK 0x1fff	/* mask for fragmenting bits */
-	u_char  ip_ttl;		/* time to live */
-	u_char  ip_p;		/* protocol */
-	u_short ip_sum;		/* checksum */
+	u_char  ip_v:4,			/* version */
+		ip_hl:4;		/* header length */
+	u_char  ip_tos;			/* type of service */
+	short   ip_len;			/* total length */
+	u_short ip_id;			/* identification */
+	short   ip_off;			/* fragment offset field */
+#define IP_DF 0x4000			/* dont fragment flag */
+#define IP_MF 0x2000			/* more fragments flag */
+#define IP_OFFMASK 0x1fff		/* mask for fragmenting bits */
+	u_char  ip_ttl;			/* time to live */
+	u_char  ip_p;			/* protocol */
+	u_short ip_sum;			/* checksum */
 	u_char  ip_src[4];
-	u_char  ip_dst[4];	/* source and dest address */
+	u_char  ip_dst[4];		/* source and dest address */
 };
 
 struct udp {
@@ -100,27 +100,27 @@ struct udp {
 };
 
 struct tftph {
-	u_short	op_code;
-	u_short	block;
+	u_short op_code;
+	u_short block;
 };
 
 struct tftphr {
 	struct tftph info;
-	char	data[1];
+	char data[1];
 };
 
 /* globals */
 int last_ack;
-char buf[N];
+u_char buf[N];
 struct ether_header *eh = (struct ether_header *)buf;
-struct ether_arp *rarp = (struct ether_arp *)
-	(buf + sizeof(struct ether_header));
+struct ether_arp *rarp = 
+    (struct ether_arp *)(buf + sizeof(struct ether_header));
 struct ip *iph = (struct ip *)(buf + sizeof(struct ether_header));
-struct udp *udph = (struct udp *)
-	(buf + sizeof(struct ether_header) + sizeof(struct ip));
-char *tftp_r = buf + sizeof(struct ether_header) + sizeof(struct ip) + 
-	sizeof(struct udp);
+struct udp *udph = (struct udp *)(buf + sizeof(struct ether_header) + 
+    sizeof(struct ip));
+u_char *tftp_r = buf + sizeof(struct ether_header) + sizeof(struct ip) + 
+    sizeof(struct udp);
 struct tftph *tftp_a = (struct tftph *)(buf + sizeof(struct ether_header) + 
-	sizeof(struct ip) + sizeof(struct udp));
+    sizeof(struct ip) + sizeof(struct udp));
 struct tftphr *tftp = (struct tftphr *)(buf + sizeof(struct ether_header) + 
-	sizeof(struct ip) + sizeof(struct udp));
+    sizeof(struct ip) + sizeof(struct udp));

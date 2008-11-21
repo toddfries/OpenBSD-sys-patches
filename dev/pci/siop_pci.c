@@ -1,5 +1,4 @@
-/*	$OpenBSD: siop_pci.c,v 1.6 2005/10/08 18:32:28 krw Exp $ */
-/*	$NetBSD: siop_pci.c,v 1.18 2005/06/28 00:28:42 thorpej Exp $	*/
+/*	$NetBSD: siop_pci.c,v 1.21 2006/11/16 01:33:10 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -32,35 +31,34 @@
 
 /* SYM53c8xx PCI-SCSI I/O Processors driver: PCI front-end */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: siop_pci.c,v 1.21 2006/11/16 01:33:10 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsipiconf.h>
 
 #include <dev/ic/siopvar_common.h>
 #include <dev/pci/siop_pci_common.h>
 #include <dev/ic/siopvar.h>
-
-int     siop_pci_match(struct device *, void *, void *);
-void    siop_pci_attach(struct device *, struct device *, void *);
 
 struct siop_pci_softc {
 	struct siop_softc siop;
 	struct siop_pci_common_softc siop_pci;
 };
 
-struct cfattach siop_pci_ca = {
-	sizeof(struct siop_pci_softc), siop_pci_match, siop_pci_attach
-};
-
-int
-siop_pci_match( struct device *parent, void *match, void *aux)
+static int
+siop_pci_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	const struct siop_product_desc *pp;
@@ -72,7 +70,7 @@ siop_pci_match( struct device *parent, void *match, void *aux)
 	return 0;
 }
 
-void
+static void
 siop_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
@@ -84,3 +82,6 @@ siop_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	siop_attach(&sc->siop);
 }
+
+CFATTACH_DECL(siop_pci, sizeof(struct siop_pci_softc),
+    siop_pci_match, siop_pci_attach, NULL, NULL);

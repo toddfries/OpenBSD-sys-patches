@@ -1,4 +1,5 @@
-/*	$OpenBSD: pciide_ite_reg.h,v 1.1 2003/12/20 08:03:55 grange Exp $	*/
+/*	$NetBSD: pciide_ite_reg.h,v 1.2 2005/12/11 12:22:50 christos Exp $	*/
+/*	OpenBSD: pciide_ite_reg.h,v 1.1 2003/12/20 08:03:55 grange Exp 	*/
 /*
  * Copyright (c) 2003 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -14,9 +15,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#ifndef _DEV_PCI_PCIIDE_ITE_REG_H_
-#define _DEV_PCI_PCIIDE_ITE_REG_H_
 
 /*
  * Registers definition for IT8212F
@@ -38,5 +36,3 @@
 
 #define IT_TIM(chan)		((chan) ? 0x58 : 0x54) /* timings */
 #define IT_TIM_UDMA5(drive)		(0x00800000 << (drive) * 8)
-
-#endif	/* !_DEV_PCI_PCIIDE_ITE_REG_H_ */

@@ -1,4 +1,3 @@
-/*	$OpenBSD: lock.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
-/*	$NetBSD: lock.h,v 1.3 2001/11/25 15:55:57 thorpej Exp $	*/
+/*	$NetBSD: lock.h,v 1.1 2006/12/16 05:46:24 ober Exp $	*/
 
 #include <arm/lock.h>

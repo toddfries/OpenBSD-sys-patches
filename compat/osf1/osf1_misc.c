@@ -1,5 +1,4 @@
-/* $OpenBSD: osf1_misc.c,v 1.18 2007/09/15 10:10:37 martin Exp $ */
-/* $NetBSD: osf1_misc.c,v 1.55 2000/06/28 15:39:33 mrg Exp $ */
+/* $NetBSD: osf1_misc.c,v 1.82 2008/04/22 21:29:21 ad Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -36,17 +35,17 @@
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -57,6 +56,13 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: osf1_misc.c,v 1.82 2008/04/22 21:29:21 ad Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_syscall_debug.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,24 +84,25 @@
 #include <sys/socketvar.h>
 #include <sys/resource.h>
 #include <sys/resourcevar.h>
+#include <sys/user.h>
 #include <sys/wait.h>
+
+#include <machine/alpha.h>
+#include <machine/cpuconf.h>
+#include <machine/rpb.h>
+#include <machine/fpu.h>
 
 #include <compat/osf1/osf1.h>
 #include <compat/osf1/osf1_syscallargs.h>
-#include <compat/osf1/osf1_util.h>
+#include <compat/common/compat_util.h>
 #include <compat/osf1/osf1_cvt.h>
 
 #ifdef SYSCALL_DEBUG
 extern int scdebug;
 #endif
 
-const char osf1_emul_path[] = "/emul/osf1";
-
 int
-osf1_sys_classcntl(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_classcntl(struct lwp *l, const struct osf1_sys_classcntl_args *uap, register_t *retval)
 {
 
 	/* XXX */
@@ -103,12 +110,8 @@ osf1_sys_classcntl(p, v, retval)
 }
 
 int
-osf1_sys_reboot(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_reboot(struct lwp *l, const struct osf1_sys_reboot_args *uap, register_t *retval)
 {
-	struct osf1_sys_reboot_args *uap = v;
 	struct sys_reboot_args a;
 	unsigned long leftovers;
 
@@ -118,28 +121,26 @@ osf1_sys_reboot(p, v, retval)
 	if (leftovers != 0)
 		return (EINVAL);
 
-	/* SCARG(&a, bootstr) = NULL; */
+	SCARG(&a, bootstr) = NULL;
 
-	return sys_reboot(p, &a, retval);
+	return sys_reboot(l, &a, retval);
 }
 
 int
-osf1_sys_set_program_attributes(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_set_program_attributes(struct lwp *l, const struct osf1_sys_set_program_attributes_args *uap, register_t *retval)
 {
-	struct osf1_sys_set_program_attributes_args *uap = v;
+	struct proc *p = l->l_proc;
 	segsz_t tsize, dsize;
 
-	tsize = atop(SCARG(uap, tsize));
-	dsize = atop(SCARG(uap, dsize));
+	tsize = btoc(SCARG(uap, tsize));
+	dsize = btoc(SCARG(uap, dsize));
 
 	if (dsize > p->p_rlimit[RLIMIT_DATA].rlim_cur)
 		return (ENOMEM);
 	if (tsize > MAXTSIZ)
 		return (ENOMEM);
 
+	/* XXXSMP unlocked */
 	p->p_vmspace->vm_taddr = SCARG(uap, taddr);
 	p->p_vmspace->vm_tsize = tsize;
 	p->p_vmspace->vm_daddr = SCARG(uap, daddr);
@@ -149,31 +150,131 @@ osf1_sys_set_program_attributes(p, v, retval)
 }
 
 int
-osf1_sys_setsysinfo(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_getsysinfo(struct lwp *l, const struct osf1_sys_getsysinfo_args *uap, register_t *retval)
 {
+	extern int ncpus;
+	int error;
+	int unit;
+	long percpu;
+	long proctype;
+	u_int64_t fpflags;
+	struct osf1_cpu_info cpuinfo;
+	const void *data;
+	size_t datalen;
 
-	/* XXX */
-	return (0);
+	error = 0;
+
+	switch(SCARG(uap, op))
+	{
+	case OSF_GET_MAX_UPROCS:
+		data = &maxproc;
+		datalen = sizeof(maxproc);
+		break;
+	case OSF_GET_PHYSMEM:
+		data = &physmem;
+		datalen = sizeof(physmem);
+		break;
+	case OSF_GET_MAX_CPU:
+	case OSF_GET_CPUS_IN_BOX:
+		data = &ncpus;
+		datalen = sizeof(ncpus);
+		break;
+	case OSF_GET_IEEE_FP_CONTROL:
+		if (((fpflags = alpha_read_fp_c(l)) & IEEE_INHERIT) != 0) {
+			fpflags |= 1ULL << 63;
+			fpflags &= ~IEEE_INHERIT;
+		}
+		data = &fpflags;
+		datalen = sizeof(fpflags);
+		break;
+	case OSF_GET_CPU_INFO:
+		memset(&cpuinfo, 0, sizeof(cpuinfo));
+#ifdef __alpha__
+		unit = alpha_pal_whami();
+#else
+		unit = 0; /* XXX */
+#endif
+		cpuinfo.current_cpu = unit;
+		cpuinfo.cpus_in_box = ncpus;
+		cpuinfo.cpu_type = LOCATE_PCS(hwrpb, unit)->pcs_proc_type;
+		cpuinfo.ncpus = ncpus;
+		cpuinfo.cpus_present = ncpus;
+		cpuinfo.cpus_running = ncpus;
+		cpuinfo.cpu_binding = 1;
+		cpuinfo.cpu_ex_binding = 0;
+		cpuinfo.mhz = hwrpb->rpb_cc_freq / 1000000;
+		data = &cpuinfo;
+		datalen = sizeof(cpuinfo);
+		break;
+	case OSF_GET_PROC_TYPE:
+#ifdef __alpha__
+		unit = alpha_pal_whami();
+		proctype = LOCATE_PCS(hwrpb, unit)->pcs_proc_type;
+#else
+		proctype = 0;	/* XXX */
+#endif
+		data = &proctype;
+		datalen = sizeof(percpu);
+		break;
+	case OSF_GET_HWRPB: /* note -- osf/1 doesn't have rpb_tbhint[8] */
+		data = hwrpb;
+		datalen = hwrpb->rpb_size;
+		break;
+	case OSF_GET_PLATFORM_NAME:
+		data = platform.model;
+		datalen = strlen(platform.model) + 1;
+		break;
+	default:
+		printf("osf1_getsysinfo called with unknown op=%ld\n",
+		       SCARG(uap, op));
+		/* return EINVAL; */
+		return 0;
+	}
+
+	if (SCARG(uap, nbytes) < datalen)
+		return (EINVAL);
+	error = copyout(data, SCARG(uap, buffer), datalen);
+	if (!error)
+		retval[0] = 1;
+	return (error);
 }
 
 int
-osf1_sys_sysinfo(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_setsysinfo(struct lwp *l, const struct osf1_sys_setsysinfo_args *uap, register_t *retval)
 {
-	struct osf1_sys_sysinfo_args *uap = v;
+	u_int64_t temp;
+	int error;
+
+	error = 0;
+
+	switch(SCARG(uap, op)) {
+	case OSF_SET_IEEE_FP_CONTROL:
+
+		if ((error = copyin(SCARG(uap, buffer), &temp, sizeof(temp))))
+			break;
+		if (temp >> 63 != 0)
+			temp |= IEEE_INHERIT;
+		alpha_write_fp_c(l, temp);
+		break;
+	default:
+		uprintf("osf1_setsysinfo called with op=%ld\n", SCARG(uap, op));
+		//error = EINVAL;
+	}
+	retval[0] = 0;
+	return (error);
+}
+
+int
+osf1_sys_sysinfo(struct lwp *l, const struct osf1_sys_sysinfo_args *uap, register_t *retval)
+{
 	const char *string;
+	size_t slen;
 	int error;
 
 	error = 0;
 	switch (SCARG(uap, cmd)) {
 	case OSF1_SI_SYSNAME:
-		goto should_handle;
-		/* string = ostype; */
+		string = ostype;
 		break;
 
 	case OSF1_SI_HOSTNAME:
@@ -181,7 +282,7 @@ osf1_sys_sysinfo(p, v, retval)
 		break;
 
 	case OSF1_SI_RELEASE:
-		string = version;
+		string = osrelease;
 		break;
 
 	case OSF1_SI_VERSION:
@@ -220,36 +321,32 @@ should_handle:
 		printf("osf1_sys_sysinfo(%d, %p, 0x%lx)\n", SCARG(uap, cmd),
 		    SCARG(uap, buf), SCARG(uap,len));
 dont_care:
-		error = EINVAL;
-		break;
+		return (EINVAL);
 	};
 
-	if (error == 0)
-		error = copyoutstr(string, SCARG(uap, buf), SCARG(uap, len),
-		    NULL);
+	slen = strlen(string) + 1;
+	if (SCARG(uap, buf)) {
+		error = copyout(string, SCARG(uap, buf),
+				min(slen, SCARG(uap, len)));
+		if (!error && (SCARG(uap, len) > 0) && (SCARG(uap, len) < slen))
+			subyte(SCARG(uap, buf) + SCARG(uap, len) - 1, 0);
+	}
+	if (!error)
+		retval[0] = slen;
 
 	return (error);
 }
 
 int
-osf1_sys_uname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_uname(struct lwp *l, const struct osf1_sys_uname_args *uap, register_t *retval)
 {
-	struct osf1_sys_uname_args *uap = v;
         struct osf1_utsname u;
         const char *cp;
-	extern char hostname[], machine[];
         char *dp, *ep;
 
-	/* XXX would use stackgap, but our struct utsname is too big! */
-
-	bzero(&u, sizeof(u));
-	strlcpy(u.sysname, ostype, sizeof(u.sysname));
-	strlcpy(u.nodename, hostname, sizeof(u.nodename));
-	strlcpy(u.release, osrelease, sizeof(u.release));
-
+        strncpy(u.sysname, ostype, sizeof(u.sysname));
+        strncpy(u.nodename, hostname, sizeof(u.nodename));
+        strncpy(u.release, osrelease, sizeof(u.release));
         dp = u.version;
         ep = &u.version[sizeof(u.version) - 1];
         for (cp = version; *cp && *cp != '('; cp++)
@@ -261,21 +358,15 @@ osf1_sys_uname(p, v, retval)
         for (; *cp && *cp != ':' && dp < ep; cp++)
                 *dp++ = *cp;
         *dp = '\0';
-
-	strlcpy(u.machine, machine, sizeof(u.machine));
-
-        return (copyout((caddr_t)&u, (caddr_t)SCARG(uap, name), sizeof u));
+        strncpy(u.machine, MACHINE, sizeof(u.machine));
+        return (copyout((void *)&u, (void *)SCARG(uap, name), sizeof u));
 }
 
 int
-osf1_sys_usleep_thread(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_usleep_thread(struct lwp *l, const struct osf1_sys_usleep_thread_args *uap, register_t *retval)
 {
-	struct osf1_sys_usleep_thread_args *uap = v;
 	struct osf1_timeval otv, endotv;
-	struct timeval tv, endtv;
+	struct timeval tv, ntv, endtv;
 	u_long ticks;
 	int error;
 
@@ -290,14 +381,11 @@ osf1_sys_usleep_thread(p, v, retval)
 
 	getmicrotime(&tv);
 
-	tsleep(p, PUSER|PCATCH, "uslpthrd", ticks);	/* XXX */
+	tsleep(l, PUSER|PCATCH, "uslpthrd", ticks);	/* XXX */
 
 	if (SCARG(uap, slept) != NULL) {
-		struct timeval tv2;
-
-		getmicrotime(&tv2);
-		timersub(&tv2, &tv, &endtv);
-
+		getmicrotime(&ntv);
+		timersub(&ntv, &tv, &endtv);
 		if (endtv.tv_sec < 0 || endtv.tv_usec < 0)
 			endtv.tv_sec = endtv.tv_usec = 0;
 
@@ -309,47 +397,36 @@ osf1_sys_usleep_thread(p, v, retval)
 }
 
 int
-osf1_sys_wait4(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_wait4(struct lwp *l, const struct osf1_sys_wait4_args *uap, register_t *retval)
 {
-	struct osf1_sys_wait4_args *uap = v;
-	struct sys_wait4_args a;
 	struct osf1_rusage osf1_rusage;
 	struct rusage netbsd_rusage;
 	unsigned long leftovers;
-	caddr_t sg;
-	int error;
-
-	SCARG(&a, pid) = SCARG(uap, pid);
-	SCARG(&a, status) = SCARG(uap, status);
+	int error, status, was_zombie;
+	int options = SCARG(uap, options);
+	int pid = SCARG(uap, pid);
 
 	/* translate options */
-	SCARG(&a, options) = emul_flags_translate(osf1_wait_options_xtab,
-	    SCARG(uap, options), &leftovers);
+	options = emul_flags_translate(osf1_wait_options_xtab,
+	    options, &leftovers);
 	if (leftovers != 0)
 		return (EINVAL);
 
-	if (SCARG(uap, rusage) == NULL)
-		SCARG(&a, rusage) = NULL;
-	else {
-		sg = stackgap_init(p->p_emul);
-		SCARG(&a, rusage) = stackgap_alloc(&sg, sizeof netbsd_rusage);
+	error = do_sys_wait(l, & pid, &status, options | WOPTSCHECKED,
+	    SCARG(uap, rusage) != NULL ? &netbsd_rusage : NULL, &was_zombie);
+
+	retval[0] = pid;
+	if (pid == 0)
+		return error;
+
+	if (SCARG(uap, rusage)) {
+		osf1_cvt_rusage_from_native(&netbsd_rusage, &osf1_rusage);
+		error = copyout(&osf1_rusage, SCARG(uap, rusage),
+		    sizeof osf1_rusage);
 	}
 
-	error = sys_wait4(p, &a, retval);
+	if (error == 0 && SCARG(uap, status))
+		error = copyout(&status, SCARG(uap, status), sizeof(status));
 
-	if (error == 0 && SCARG(&a, rusage) != NULL) {
-		error = copyin((caddr_t)SCARG(&a, rusage),
-		    (caddr_t)&netbsd_rusage, sizeof netbsd_rusage);
-		if (error == 0) {
-			osf1_cvt_rusage_from_native(&netbsd_rusage,
-			    &osf1_rusage);
-			error = copyout((caddr_t)&osf1_rusage,
-			    (caddr_t)SCARG(uap, rusage), sizeof osf1_rusage);
-		}
-	}
-
-	return (error);
+	return error;
 }

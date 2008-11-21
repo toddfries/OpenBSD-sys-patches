@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ieee1394.h,v 1.6 2005/12/10 23:21:38 elad Exp $	*/
+/*	$NetBSD: if_ieee1394.h,v 1.9 2008/04/28 20:24:09 martin Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,10 +34,10 @@
 
 /* hardware address information for arp / nd */
 struct ieee1394_hwaddr {
-	u_int8_t	iha_uid[8];		/* node unique ID */
-	u_int8_t	iha_maxrec;		/* max_rec in the config ROM */
-	u_int8_t	iha_speed;		/* min of link/PHY speed */
-	u_int8_t	iha_offset[6];		/* unicast FIFO address */
+	uint8_t	iha_uid[8];		/* node unique ID */
+	uint8_t	iha_maxrec;		/* max_rec in the config ROM */
+	uint8_t	iha_speed;		/* min of link/PHY speed */
+	uint8_t	iha_offset[6];		/* unicast FIFO address */
 };
 
 /*
@@ -60,25 +53,25 @@ struct ieee1394_bpfhdr {
 
 /* pseudo header */
 struct ieee1394_header {
-	u_int8_t	ih_uid[8];		/* dst/src uid */
-	u_int8_t	ih_maxrec;		/* dst maxrec for tx */
-	u_int8_t	ih_speed;		/* speed */
-	u_int8_t	ih_offset[6];		/* dst offset */
+	uint8_t	ih_uid[8];		/* dst/src uid */
+	uint8_t	ih_maxrec;		/* dst maxrec for tx */
+	uint8_t	ih_speed;		/* speed */
+	uint8_t	ih_offset[6];		/* dst offset */
 };
 
 /* unfragment encapsulation header */
 struct ieee1394_unfraghdr {
-	u_int16_t	iuh_ft;			/* fragment type == 0 */
-	u_int16_t	iuh_etype;		/* ether_type */
+	uint16_t	iuh_ft;			/* fragment type == 0 */
+	uint16_t	iuh_etype;		/* ether_type */
 };
 
 /* fragmented encapsulation header */
 struct ieee1394_fraghdr {
-	u_int16_t	ifh_ft_size;		/* fragment type, data size-1 */
-	u_int16_t	ifh_etype_off;		/* etype for first fragment */
+	uint16_t	ifh_ft_size;		/* fragment type, data size-1 */
+	uint16_t	ifh_etype_off;		/* etype for first fragment */
 						/* offset for subseq frag */
-	u_int16_t	ifh_dgl;		/* datagram label */
-	u_int16_t	ifh_reserved;
+	uint16_t	ifh_dgl;		/* datagram label */
+	uint16_t	ifh_reserved;
 };
 
 #define	IEEE1394_FT_SUBSEQ	0x8000
@@ -93,33 +86,33 @@ struct ieee1394_fraghdr {
 struct ieee1394_reass_pkt {
 	LIST_ENTRY(ieee1394_reass_pkt) rp_next;
 	struct mbuf	*rp_m;
-	u_int16_t	rp_size;
-	u_int16_t	rp_etype;
-	u_int16_t	rp_off;
-	u_int16_t	rp_dgl;
-	u_int16_t	rp_len;
-	u_int16_t	rp_ttl;
+	uint16_t	rp_size;
+	uint16_t	rp_etype;
+	uint16_t	rp_off;
+	uint16_t	rp_dgl;
+	uint16_t	rp_len;
+	uint16_t	rp_ttl;
 };
 
 struct ieee1394_reassq {
 	LIST_ENTRY(ieee1394_reassq) rq_node;
 	LIST_HEAD(, ieee1394_reass_pkt) rq_pkt;
-	u_int32_t	fr_id;
+	uint32_t	fr_id;
 };
 
 struct ieee1394com {
 	struct ifnet	fc_if;
 	struct ieee1394_hwaddr ic_hwaddr;
-	u_int16_t	ic_dgl;
+	uint16_t	ic_dgl;
 	LIST_HEAD(, ieee1394_reassq) ic_reassq;
 };
 
-const char *ieee1394_sprintf(const u_int8_t *);
-void ieee1394_input(struct ifnet *, struct mbuf *, u_int16_t);
+const char *ieee1394_sprintf(const uint8_t *);
+void ieee1394_input(struct ifnet *, struct mbuf *, uint16_t);
 void ieee1394_ifattach(struct ifnet *, const struct ieee1394_hwaddr *);
 void ieee1394_ifdetach(struct ifnet *);
-int  ieee1394_ioctl(struct ifnet *, u_long, caddr_t);
-struct mbuf * ieee1394_fragment(struct ifnet *, struct mbuf *, int, u_int16_t);
+int  ieee1394_ioctl(struct ifnet *, u_long, void *);
+struct mbuf * ieee1394_fragment(struct ifnet *, struct mbuf *, int, uint16_t);
 void ieee1394_drain(struct ifnet *);
 void ieee1394_watchdog(struct ifnet *);
 #endif /* _KERNEL */

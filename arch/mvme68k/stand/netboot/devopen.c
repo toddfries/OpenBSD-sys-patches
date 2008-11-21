@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.2 2002/03/14 03:15:56 millert Exp $ */
+/*	$NetBSD: devopen.c,v 1.3 2008/01/12 09:54:32 tsutsui Exp $	*/
 
 #include <sys/param.h>
 #include <stand.h>
@@ -14,13 +14,9 @@
  * Pass the PROM device name to open in case it needs it.
  */
 int
-devopen(f, fname, file)
-	struct open_file *f;
-	const char *fname;
-	char **file;
+devopen(struct open_file *f, const char *fname, char **file)
 {
 	struct devsw *dp;
-	char *cp, *path, *devname;
 	int error;
 
 	*file = (char *)fname;
@@ -28,5 +24,5 @@ devopen(f, fname, file)
 	f->f_dev = dp;
 	error = (*dp->dv_open)(f, NULL);
 
-	return (error);
+	return error;
 }

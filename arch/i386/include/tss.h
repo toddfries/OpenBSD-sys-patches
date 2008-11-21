@@ -1,5 +1,4 @@
-/*	$OpenBSD: tss.h,v 1.7 2006/04/27 15:37:53 mickey Exp $	*/
-/*	$NetBSD: tss.h,v 1.6 1995/10/11 04:20:28 mycroft Exp $	*/
+/*	$NetBSD: tss.h,v 1.10 2008/01/05 21:45:00 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -50,7 +49,7 @@ struct i386tss {
 	int	__tss_ss1;
 	int	__tss_esp2;
 	int	__tss_ss2;
-	int	tss_cr3;	/* page directory [pointer] paddr */
+	int	tss_cr3;	/* page directory paddr */
 	int	__tss_eip;
 	int	__tss_eflags;
 	int	__tss_eax; 
@@ -62,13 +61,19 @@ struct i386tss {
 	int	__tss_esi; 
 	int	__tss_edi; 
 	int	__tss_es;
-	int	tss_cs;
+	int	__tss_cs;
 	int	__tss_ss;
 	int	__tss_ds;
 	int	tss_fs;		/* saved segment register */
 	int	tss_gs;		/* saved segment register */
 	int	tss_ldt;	/* LDT selector */
-	int	tss_ioopt;	/* options and I/O permission map offset */
+	int	tss_iobase;	/* options and I/O permission map offset */
 };
 
-#endif /* _I386_TSS_H_ */
+/*
+ * I/O bitmap offset beyond TSS's segment limit means no bitmaps.
+ * (i.e. any I/O attempt generates an exception.)
+ */
+#define	IOMAP_INVALOFF	0xffff
+
+#endif /* #ifndef _I386_TSS_H_ */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: sys_machdep.c,v 1.4 2003/10/15 02:43:09 drahn Exp $	*/
-/*	$NetBSD: sys_machdep.c,v 1.1 1996/09/30 16:34:56 ws Exp $	*/
+/*	$NetBSD: sys_machdep.c,v 1.9 2007/12/22 08:59:02 dsl Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -32,15 +31,19 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.9 2007/12/22 08:59:02 dsl Exp $");
+
 #include <sys/param.h>
+
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
 int
-sys_sysarch(struct proc *p, void *v, register_t *retval)
+sys_sysarch(struct lwp *l, const struct sys_sysarch_args *uap, register_t *retval)
 {
 	/*
 	 * Currently no special system calls
 	 */
-	return EINVAL;
+	return (ENOSYS);
 }

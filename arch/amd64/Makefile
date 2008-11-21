@@ -1,33 +1,34 @@
-#	$OpenBSD: Makefile,v 1.5 2006/09/27 09:13:31 grange Exp $
+#	$NetBSD: Makefile,v 1.5 2008/10/26 02:14:59 mrg Exp $
 
-S=${.CURDIR}/../..
-.include "$S/kern/Make.tags.inc"
+# Makefile for amd64 tags file and boot blocks
 
-NOPROG=	noprog
-NOMAN=	noman
+TAMD64=		${SYSDIR}/arch/amd64/tags
+SAMD64=		${SYSDIR}/arch/amd64/amd64/*.[ch] \
+		${SYSDIR}/arch/amd64/include/*.h \
+		${SYSDIR}/arch/amd64/isa/*.[ch] \
+		${SYSDIR}/arch/amd64/pci/*.[ch]
+AAMD64=		${SYSDIR}/arch/amd64/amd64/*.s ${SYSDIR}/arch/amd64/isa/*.s
 
-SUBDIR=	stand
+# Directories in which to place tags links
+DAMD64=		amd64 isa include pci
 
-TAMD64=	$S/arch/amd64/tags
-SAMD64=	$S/arch/amd64/amd64/*.[ch] \
-	$S/arch/amd64/include/*.h  \
-	$S/arch/amd64/isa/*.[ch] $S/arch/amd64/pci/*.[ch]
-AAMD64=	$S/arch/amd64/amd64/*.[sS] $S/lib/libkern/arch/amd64/*.[sS]
-
-# Directories in which to place amd64 tags links
-DAMD64=	conf amd64 include isa pci
+.include "../../kern/Make.tags.inc"
 
 tags:
-	-ctags -wdtf ${TAMD64} ${COMM} ${SAMD64}
+	rm -f ${TAMD64}
+	-echo ${SAMD64} ${COMM} | xargs ctags -wadtf ${TAMD64}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AAMD64} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
+	    ${TOOL_SED} -e \
+		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 		>> ${TAMD64}
 	sort -o ${TAMD64} ${TAMD64}
 
 links:
 	-for i in ${DAMD64}; do \
-	    (cd $$i && rm -f tags; ln -s ${TAMD64} tags); done
+	    (cd $$i && rm -f tags; ln -s ../tags tags); done
 
-obj:	_SUBDIRUSE
 
-.include <bsd.prog.mk>
+SUBDIR=	compile include ../x86/include ../xen/include \
+	../i386/include ../i386/stand
+
+.include <bsd.subdir.mk>

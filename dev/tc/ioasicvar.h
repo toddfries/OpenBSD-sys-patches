@@ -1,5 +1,4 @@
-/*	$OpenBSD: ioasicvar.h,v 1.7 2004/06/28 02:28:43 aaron Exp $	*/
-/*	$NetBSD: ioasicvar.h,v 1.14 2000/10/17 09:45:49 nisimura Exp $	*/
+/*	$NetBSD: ioasicvar.h,v 1.19 2005/12/11 12:24:00 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
@@ -32,23 +31,18 @@
 #define _DEV_TC_IOASICVAR_H_
 
 struct ioasic_dev {
-	char		*iad_modname;
+	const char	*iad_modname;
 	tc_offset_t	iad_offset;
 	void		*iad_cookie;
 	u_int32_t	iad_intrbits;
 };
 
 struct ioasicdev_attach_args {
-	char	iada_modname[TC_ROM_LLEN];
+	char	iada_modname[TC_ROM_LLEN+1];
 	tc_offset_t iada_offset;
 	tc_addr_t iada_addr;
 	void	*iada_cookie;
 };
-
-/* Device locators. */
-#define	ioasiccf_offset	cf_loc[0]		/* offset */
-
-#define	IOASIC_OFFSET_UNKNOWN	-1
 
 struct ioasic_softc {
 	struct	device sc_dv;
@@ -66,10 +60,10 @@ extern struct cfdriver ioasic_cd;
  */
 extern tc_addr_t ioasic_base;
 
+const struct evcnt *ioasic_intr_evcnt(struct device *, void *);
 void    ioasic_intr_establish(struct device *, void *,
 	    int, int (*)(void *), void *);
 void    ioasic_intr_disestablish(struct device *, void *);
-int	ioasic_submatch(void *, struct ioasicdev_attach_args *);
 void	ioasic_attach_devs(struct ioasic_softc *,
 	    struct ioasic_dev *, int);
 

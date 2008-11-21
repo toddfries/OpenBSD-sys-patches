@@ -1,5 +1,4 @@
-/* $OpenBSD: mcbus.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
-/* $NetBSD: mcbus.c,v 1.19 2007/03/04 05:59:11 christos Exp $ */
+/* $NetBSD: mcbus.c,v 1.20 2008/07/09 21:25:59 joerg Exp $ */
 
 /*
  * Copyright (c) 1998 by Matthew Jacob
@@ -37,6 +36,9 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: mcbus.c,v 1.20 2008/07/09 21:25:59 joerg Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -51,31 +53,27 @@
 
 #include <alpha/pci/mcpciareg.h>
 
-#define KV(_addr)	((caddr_t)ALPHA_PHYS_TO_K0SEG((_addr)))
+#include "locators.h"
+
+#define KV(_addr)	((void *)ALPHA_PHYS_TO_K0SEG((_addr)))
 #define	MCPCIA_EXISTS(mid, gid)	\
 	(!badaddr((void *)KV(MCPCIA_BRIDGE_ADDR(gid, mid)), sizeof (u_int32_t)))
 
+extern struct cfdriver mcbus_cd;
+
 struct mcbus_cpu_busdep mcbus_primary;
 
-int	mcbusmatch (struct device *, void *, void *);
-void	mcbusattach (struct device *, struct device *, void *);
-int	mcbusprint (void *, const char *);
-int	mcbussbm (struct device *, void *, void *);
-
-const	char *mcbus_node_type_str (u_int8_t);
+static int	mcbusmatch(device_t, cfdata_t, void *);
+static void	mcbusattach(device_t, device_t, void *);
+static int	mcbusprint(void *, const char *);
+static const char *mcbus_node_type_str(u_int8_t);
 
 typedef struct {
-	struct device	mcbus_dev;
 	u_int8_t	mcbus_types[MCBUS_MID_MAX];
 } mcbus_softc_t;
 
-struct cfattach mcbus_ca = {
-	sizeof(mcbus_softc_t), mcbusmatch, mcbusattach
-};
-
-struct cfdriver mcbus_cd = {
-        NULL, "mcbus", DV_DULL,
-};
+CFATTACH_DECL_NEW(mcbus, sizeof (mcbus_softc_t),
+    mcbusmatch, mcbusattach, NULL, NULL);
 
 /*
  * Tru64 UNIX (formerly Digital UNIX (formerly DEC OSF/1)) probes for MCPCIAs
@@ -88,41 +86,19 @@ struct cfdriver mcbus_cd = {
  */
 const int mcbus_mcpcia_probe_order[] = { 5, 4, 7, 6 };
 
-extern void mcpcia_config_cleanup (void);
+extern void mcpcia_config_cleanup(void);
 
-int
-mcbusprint(aux, cp)
-	void *aux;
-	const char *cp;
+static int
+mcbusprint(void *aux, const char *cp)
 {
 	struct mcbus_dev_attach_args *tap = aux;
-	printf(" mid %d: %s", tap->ma_mid,
+	aprint_normal(" mid %d: %s", tap->ma_mid,
 	    mcbus_node_type_str(tap->ma_type));
 	return (UNCONF);
 }
 
-int
-mcbussbm(parent, cf, aux)
-	struct device *parent;
-	void *cf;
-	void *aux;
-{
-	struct mcbus_dev_attach_args *tap = aux;
-	struct cfdata *mcf = (struct cfdata *)cf;
-
-	if (mcf->cf_loc[MCBUSCF_MID] != MCBUSCF_MID_DEFAULT &&
-	    mcf->cf_loc[MCBUSCF_MID] != tap->ma_mid) 
-		return (0);
-
-
-	return ((*mcf->cf_attach->ca_match)(parent, mcf, aux));
-}
-
-int
-mcbusmatch(parent, cf, aux)
-	struct device *parent;
-	void *cf;
-	void *aux;
+static int
+mcbusmatch(device_t parent, cfdata_t cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -135,22 +111,19 @@ mcbusmatch(parent, cf, aux)
 	 */
 	if (cputype != ST_DEC_4100)
 		return (0);
-
 	return (1);
 }
 
-void
-mcbusattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+static void
+mcbusattach(device_t parent, device_t self, void *aux)
 {
-	static const char *bcs[CPU_BCacheMask + 1] = {
+	static const char * const bcs[CPU_BCacheMask + 1] = {
 		"No", "1MB", "2MB", "4MB",
 	};
 	struct mcbus_dev_attach_args ta;
-	mcbus_softc_t *mbp = (mcbus_softc_t *)self;
+	mcbus_softc_t *mbp = device_private(self);
 	int i, mid;
+	int locs[MCBUSCF_NLOCS];
 
 	printf(": %s BCache\n", mcbus_primary.mcbus_valid ?
 	    bcs[mcbus_primary.mcbus_bcache] : "Unknown");
@@ -162,34 +135,83 @@ mcbusattach(parent, self, aux)
 	/*
 	 * Find and "configure" memory.
 	 */
-	ta.ma_name = mcbus_cd.cd_name;
+
+	/*
+	 * XXX If we ever support more than one MCBUS, we'll
+	 * XXX have to probe for them, and map them to unit
+	 * XXX numbers.
+	 */
 	ta.ma_gid = MCBUS_GID_FROM_INSTANCE(0);
 	ta.ma_mid = 1;
 	ta.ma_type = MCBUS_TYPE_MEM;
 	mbp->mcbus_types[1] = MCBUS_TYPE_MEM;
-
-	(void) config_found_sm(self, &ta, mcbusprint, mcbussbm);
+	locs[MCBUSCF_MID] = 1;
+	(void) config_found_sm_loc(self, "mcbus", locs, &ta,
+				   mcbusprint, config_stdsubmatch);
 
 	/*
 	 * Now find PCI busses.
 	 */
 	for (i = 0; i < MCPCIA_PER_MCBUS; i++) {
 		mid = mcbus_mcpcia_probe_order[i];
-		ta.ma_name = mcbus_cd.cd_name;
+		/*
+		 * XXX If we ever support more than one MCBUS, we'll
+		 * XXX have to probe for them, and map them to unit
+		 * XXX numbers.
+		 */
 		ta.ma_gid = MCBUS_GID_FROM_INSTANCE(0);
 		ta.ma_mid = mid;
 		ta.ma_type = MCBUS_TYPE_PCI;
+		locs[MCBUSCF_MID] = mid;
 		if (MCPCIA_EXISTS(ta.ma_mid, ta.ma_gid))
-			(void) config_found_sm(self, &ta, mcbusprint,
-					mcbussbm);
+			(void) config_found_sm_loc(self, "mcbus", locs, &ta,
+						   mcbusprint,
+						   config_stdsubmatch);
 	}
 
+#if 0
+	/*
+	 * Deal with hooking CPU instances to MCBUS module ids.
+	 *
+	 * Note that we do this here because it's the read of
+	 * stupid MCPCIA WHOAMI register that can get us the
+	 * module ID and type of the configuring CPU.
+	 */
+
+	if (mcbus_primary.mcbus_valid) {
+		mid = mcbus_primary.mcbus_cpu_mid;
+		printf("%s mid %d: %s %s\n", device_xname(self),
+		    mid, mcbus_node_type_str(MCBUS_TYPE_CPU),
+		    bcs[mcbus_primary.mcbus_bcache & 0x7]);
+		/*
+		 * XXX If we ever support more than one MCBUS, we'll
+		 * XXX have to probe for them, and map them to unit
+		 * XXX numbers.
+		 */
+		ta.ma_gid = MCBUS_GID_FROM_INSTANCE(0);
+		ta.ma_mid = mid;
+		ta.ma_type = MCBUS_TYPE_CPU;
+		mbp->mcbus_types[mid] = MCBUS_TYPE_CPU;
+		locs[MCBUSCF_MID] = mid;
+		(void) config_found_sm_loc(self, "mcbus", locs, &ta,
+					   mcbusprint, config_stdsubmatch);
+	}
+#endif
+
+	/*
+	 * Now clean up after configuring everything.
+	 *
+	 * This is an unfortunate layering violation- but
+	 * we can't enable interrupts until *all* probing
+	 * is done, but the code and knowledge to clean
+	 * up after probing and to enable interrupts is
+	 * down in the MCPCIA layer.
+	 */
 	mcpcia_config_cleanup();
 }
 
-const char *
-mcbus_node_type_str(type)
-	u_int8_t type;
+static const char *
+mcbus_node_type_str(u_int8_t type)
 {
 	switch (type) {
 	case MCBUS_TYPE_RES:

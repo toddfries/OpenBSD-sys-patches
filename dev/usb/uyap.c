@@ -1,5 +1,4 @@
-/*	$OpenBSD: uyap.c,v 1.15 2007/10/11 18:33:15 deraadt Exp $ */
-/*	$NetBSD: uyap.c,v 1.6 2002/07/11 21:14:37 augustss Exp $	*/
+/*	$NetBSD: uyap.c,v 1.14 2008/05/24 16:40:58 cube Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +29,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uyap.c,v 1.14 2008/05/24 16:40:58 cube Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -50,36 +45,20 @@
 
 #include <dev/usb/ezload.h>
 
+const struct ezdata uyap_firmware[] = {
+#include "dev/usb/uyap_firmware.h"
+};
+const struct ezdata *uyap_firmwares[] = { uyap_firmware, NULL };
+
 struct uyap_softc {
-	struct device		sc_dev;		/* base device */
-	usbd_device_handle	sc_udev;
+	USBBASEDEVICE		sc_dev;		/* base device */
 };
 
-int uyap_match(struct device *, void *, void *); 
-void uyap_attach(struct device *, struct device *, void *); 
-int uyap_detach(struct device *, int); 
-int uyap_activate(struct device *, enum devact); 
+USB_DECLARE_DRIVER(uyap);
 
-struct cfdriver uyap_cd = { 
-	NULL, "uyap", DV_DULL 
-}; 
-
-const struct cfattach uyap_ca = { 
-	sizeof(struct uyap_softc), 
-	uyap_match, 
-	uyap_attach, 
-	uyap_detach, 
-	uyap_activate, 
-};
-void uyap_attachhook(void *);
-
-int
-uyap_match(struct device *parent, void *match, void *aux)
+USB_MATCH(uyap)
 {
-	struct usb_attach_arg *uaa = aux;
-
-	if (uaa->iface != NULL)
-		return (UMATCH_NONE);
+	USB_MATCH_START(uyap, uaa);
 
 	/* Match the boot device. */
 	if (uaa->vendor == USB_VENDOR_SILICONPORTALS &&
@@ -89,48 +68,43 @@ uyap_match(struct device *parent, void *match, void *aux)
 	return (UMATCH_NONE);
 }
 
-void
-uyap_attachhook(void *xsc)
+USB_ATTACH(uyap)
 {
-	char *firmwares[] = { "uyap", NULL };
-	struct uyap_softc *sc = xsc;
-	int err;
+	USB_ATTACH_START(uyap, sc, uaa);
+	usbd_device_handle dev = uaa->device;
+	usbd_status err;
+	char *devinfop;
 
-	err = ezload_downloads_and_reset(sc->sc_udev, firmwares);
+	sc->sc_dev = self;
+
+	devinfop = usbd_devinfo_alloc(dev, 0);
+	USB_ATTACH_SETUP;
+	aprint_normal_dev(self, "%s\n", devinfop);
+	usbd_devinfo_free(devinfop);
+
+	aprint_verbose_dev(self, "downloading firmware\n");
+
+	err = ezload_downloads_and_reset(dev, uyap_firmwares);
 	if (err) {
-		printf("%s: download ezdata format firmware error: %s\n",
-		    sc->sc_dev.dv_xname, usbd_errstr(err));
-		return;
+		aprint_error_dev(self, "download ezdata error: %s\n",
+		    usbd_errstr(err));
+		USB_ATTACH_ERROR_RETURN;
 	}
 
-	printf("%s: firmware download complete, disconnecting.\n",
-	    sc->sc_dev.dv_xname);
+	aprint_verbose_dev(self,
+	    "firmware download complete, disconnecting.\n");
+	USB_ATTACH_SUCCESS_RETURN;
 }
 
-void
-uyap_attach(struct device *parent, struct device *self, void *aux)
+USB_DETACH(uyap)
 {
-	struct uyap_softc *sc = (struct uyap_softc *)self;
-	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
+	/*USB_DETACH_START(uyap, sc);*/
 
-	printf("%s: downloading firmware\n", sc->sc_dev.dv_xname);
-
-	sc->sc_udev = dev;
-	if (rootvp == NULL)
-		mountroothook_establish(uyap_attachhook, sc);
-	else
-		uyap_attachhook(sc);
-}
-
-int
-uyap_detach(struct device *self, int flags)
-{
 	return (0);
 }
 
 int
-uyap_activate(struct device *self, enum devact act)
+uyap_activate(device_ptr_t self, enum devact act)
 {
 	return 0;
 }

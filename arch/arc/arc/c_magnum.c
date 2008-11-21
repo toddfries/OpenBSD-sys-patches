@@ -1,4 +1,4 @@
-/*	$NetBSD: c_magnum.c,v 1.14 2006/06/24 03:50:38 tsutsui Exp $	*/
+/*	$NetBSD: c_magnum.c,v 1.19 2008/03/14 16:43:27 tsutsui Exp $	*/
 /*	$OpenBSD: machdep.c,v 1.36 1999/05/22 21:22:19 weingart Exp $	*/
 
 /*
@@ -80,7 +80,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: c_magnum.c,v 1.14 2006/06/24 03:50:38 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: c_magnum.c,v 1.19 2008/03/14 16:43:27 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -121,47 +121,25 @@ struct timer_jazzio_config timer_magnum_conf = {
  * given interrupt priority level.
  */
 static const uint32_t magnum_ipl_sr_bits[_IPL_N] = {
-	0,					/* IPL_NONE */
-
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFT */
-
-	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFTCLOCK */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTNET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTSERIAL */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3,		/* IPL_BIO */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3,		/* IPL_NET */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3,		/* IPL_{TTY,SERIAL} */
-
-	MIPS_SOFT_INT_MASK_0|
-		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0|
-		MIPS_INT_MASK_1|
-		MIPS_INT_MASK_2|
-		MIPS_INT_MASK_3|
-		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/* IPL_{CLOCK,HIGH} */
+	[IPL_NONE] = 0,
+	[IPL_SOFTCLOCK] =
+	    MIPS_SOFT_INT_MASK_0,
+	[IPL_SOFTNET] = 
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1,
+	[IPL_VM] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3,
+	[IPL_SCHED] =
+	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
+	    MIPS_INT_MASK_0 |
+	    MIPS_INT_MASK_1 |
+	    MIPS_INT_MASK_2 |
+	    MIPS_INT_MASK_3 |
+	    MIPS_INT_MASK_4 |
+	    MIPS_INT_MASK_5,
 };
 
 uint32_t
@@ -174,7 +152,7 @@ timer_magnum_intr(uint32_t mask, struct clockframe *cf)
 	hardclock(cf);
 	timer_jazzio_ev.ev_count++;
 
-	return ~MIPS_INT_MASK_4; /* Keep clock interrupts enabled */
+	return MIPS_INT_MASK_4;	/* Keep clock interrupts enabled */
 }
 
 void
@@ -250,6 +228,11 @@ c_magnum_init(void)
 {
 
 	/*
+	 * Initialize interrupt priority
+	 */
+	ipl_sr_bits = magnum_ipl_sr_bits;
+
+	/*
 	 * Initialize I/O address offset
 	 */
 	arc_bus_space_init(&jazzio_bus, "jazzio",
@@ -263,6 +246,7 @@ c_magnum_init(void)
 	/*
 	 * Initialize wired TLB for I/O space which is used on early stage
 	 */
+	arc_init_wired_map();
 	arc_wired_enter_page(R4030_V_LOCAL_IO_BASE, R4030_P_LOCAL_IO_BASE,
 	    R4030_S_LOCAL_IO_BASE);
 	arc_wired_enter_page(PICA_V_INT_SOURCE, PICA_P_INT_SOURCE,
@@ -270,11 +254,6 @@ c_magnum_init(void)
 
 	arc_wired_enter_page(PICA_V_ISA_IO, PICA_P_ISA_IO, PICA_S_ISA_IO);
 	arc_wired_enter_page(PICA_V_ISA_MEM, PICA_P_ISA_MEM, PICA_S_ISA_MEM);
-
-	/*
-	 * Initialize interrupt priority
-	 */
-	ipl_sr_bits = magnum_ipl_sr_bits;
 
 	/*
 	 * Disable all interrupts. New masks will be set up

@@ -1,4 +1,4 @@
-/*	$NetBSD: msdosfs_fat.c,v 1.12 2006/11/25 12:17:30 scw Exp $	*/
+/*	$NetBSD: msdosfs_fat.c,v 1.16 2008/05/16 09:21:59 hannken Exp $	*/
 
 /*-
  * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: msdosfs_fat.c,v 1.12 2006/11/25 12:17:30 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: msdosfs_fat.c,v 1.16 2008/05/16 09:21:59 hannken Exp $");
 
 /*
  * kernel include files.
@@ -259,11 +259,11 @@ pcbmap(dep, findcn, bnp, cnp, sp)
 		fatblock(pmp, byteoffset, &bn, &bsize, &bo);
 		if (bn != bp_bn) {
 			if (bp)
-				brelse(bp);
+				brelse(bp, 0);
 			error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), bsize,
-			    NOCRED, &bp);
+			    NOCRED, 0, &bp);
 			if (error) {
-				brelse(bp);
+				brelse(bp, 0);
 				return (error);
 			}
 			bp_bn = bn;
@@ -271,14 +271,14 @@ pcbmap(dep, findcn, bnp, cnp, sp)
 		prevcn = cn;
 		if (bo >= bsize) {
 			if (bp)
-				brelse(bp);
+				brelse(bp, 0);
 			return (EIO);
 		}
 		KASSERT(bp != NULL);
 		if (FAT32(pmp))
-			cn = getulong(&bp->b_data[bo]);
+			cn = getulong((char *)bp->b_data + bo);
 		else
-			cn = getushort(&bp->b_data[bo]);
+			cn = getushort((char *)bp->b_data + bo);
 		if (FAT12(pmp) && (prevcn & 1))
 			cn >>= 4;
 		cn &= pmp->pm_fatmask;
@@ -286,7 +286,7 @@ pcbmap(dep, findcn, bnp, cnp, sp)
 
 	if (!MSDOSFSEOF(cn, pmp->pm_fatmask)) {
 		if (bp)
-			brelse(bp);
+			brelse(bp, 0);
 		if (bnp)
 			*bnp = cntobn(pmp, cn);
 		if (cnp)
@@ -299,7 +299,7 @@ hiteof:;
 	if (cnp)
 		*cnp = i;
 	if (bp)
-		brelse(bp);
+		brelse(bp, 0);
 	/* update last file cluster entry in the fat cache */
 	fc_setcache(dep, FC_LASTFC, i - 1, prevcn);
 	return (E2BIG);
@@ -401,12 +401,12 @@ updatefats(pmp, bp, fatbn)
 		 *      padded at the end or in the middle?
 		 */
 		if (bread(pmp->pm_devvp, de_bn2kb(pmp, pmp->pm_fsinfo),
-		    pmp->pm_BytesPerSec, NOCRED, &bpn) != 0) {
+		    pmp->pm_BytesPerSec, NOCRED, B_MODIFY, &bpn) != 0) {
 			/*
 			 * Ignore the error, but turn off FSInfo update for the future.
 			 */
 			pmp->pm_fsinfo = 0;
-			brelse(bpn);
+			brelse(bpn, 0);
 		} else {
 			struct fsinfo *fp = (struct fsinfo *)bpn->b_data;
 
@@ -426,7 +426,7 @@ updatefats(pmp, bp, fatbn)
 		 * other fats and then writing them back out.  This could tie up
 		 * the fat for quite a while. Preventing others from accessing it.
 		 * To prevent us from going after the fat quite so much we use
-		 * delayed writes, unless they specfied "synchronous" when the
+		 * delayed writes, unless they specified "synchronous" when the
 		 * filesystem was mounted.  If synch is asked for then use
 		 * bwrite()'s and really slow things down.
 		 */
@@ -584,16 +584,16 @@ fatentry(function, pmp, cn, oldcontents, newcontents)
 	byteoffset = FATOFS(pmp, cn);
 	fatblock(pmp, byteoffset, &bn, &bsize, &bo);
 	if ((error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), bsize, NOCRED,
-	    &bp)) != 0) {
-		brelse(bp);
+	    0, &bp)) != 0) {
+		brelse(bp, 0);
 		return (error);
 	}
 
 	if (function & FAT_GET) {
 		if (FAT32(pmp))
-			readcn = getulong(&bp->b_data[bo]);
+			readcn = getulong((char *)bp->b_data + bo);
 		else
-			readcn = getushort(&bp->b_data[bo]);
+			readcn = getushort((char *)bp->b_data + bo);
 		if (FAT12(pmp) & (cn & 1))
 			readcn >>= 4;
 		readcn &= pmp->pm_fatmask;
@@ -602,7 +602,7 @@ fatentry(function, pmp, cn, oldcontents, newcontents)
 	if (function & FAT_SET) {
 		switch (pmp->pm_fatmask) {
 		case FAT12_MASK:
-			readcn = getushort(&bp->b_data[bo]);
+			readcn = getushort((char *)bp->b_data + bo);
 			if (cn & 1) {
 				readcn &= 0x000f;
 				readcn |= newcontents << 4;
@@ -610,20 +610,20 @@ fatentry(function, pmp, cn, oldcontents, newcontents)
 				readcn &= 0xf000;
 				readcn |= newcontents & 0xfff;
 			}
-			putushort(&bp->b_data[bo], readcn);
+			putushort((char *)bp->b_data + bo, readcn);
 			break;
 		case FAT16_MASK:
-			putushort(&bp->b_data[bo], newcontents);
+			putushort((char *)bp->b_data + bo, newcontents);
 			break;
 		case FAT32_MASK:
 			/*
 			 * According to spec we have to retain the
 			 * high order bits of the fat entry.
 			 */
-			readcn = getulong(&bp->b_data[bo]);
+			readcn = getulong((char *)bp->b_data + bo);
 			readcn &= ~FAT32_MASK;
 			readcn |= newcontents & FAT32_MASK;
-			putulong(&bp->b_data[bo], readcn);
+			putulong((char *)bp->b_data + bo, readcn);
 			break;
 		}
 		updatefats(pmp, bp, bn);
@@ -631,7 +631,7 @@ fatentry(function, pmp, cn, oldcontents, newcontents)
 		pmp->pm_fmod = 1;
 	}
 	if (bp)
-		brelse(bp);
+		brelse(bp, 0);
 	return (0);
 }
 
@@ -668,9 +668,9 @@ fatchain(pmp, start, count, fillwith)
 		byteoffset = FATOFS(pmp, start);
 		fatblock(pmp, byteoffset, &bn, &bsize, &bo);
 		error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), bsize, NOCRED,
-		    &bp);
+		    B_MODIFY, &bp);
 		if (error) {
-			brelse(bp);
+			brelse(bp, 0);
 			return (error);
 		}
 		while (count > 0) {
@@ -678,7 +678,7 @@ fatchain(pmp, start, count, fillwith)
 			newc = --count > 0 ? start : fillwith;
 			switch (pmp->pm_fatmask) {
 			case FAT12_MASK:
-				readcn = getushort(&bp->b_data[bo]);
+				readcn = getushort((char *)bp->b_data + bo);
 				if (start & 1) {
 					readcn &= 0xf000;
 					readcn |= newc & 0xfff;
@@ -686,20 +686,20 @@ fatchain(pmp, start, count, fillwith)
 					readcn &= 0x000f;
 					readcn |= newc << 4;
 				}
-				putushort(&bp->b_data[bo], readcn);
+				putushort((char *)bp->b_data + bo, readcn);
 				bo++;
 				if (!(start & 1))
 					bo++;
 				break;
 			case FAT16_MASK:
-				putushort(&bp->b_data[bo], newc);
+				putushort((char *)bp->b_data + bo, newc);
 				bo += 2;
 				break;
 			case FAT32_MASK:
-				readcn = getulong(&bp->b_data[bo]);
+				readcn = getulong((char *)bp->b_data + bo);
 				readcn &= ~pmp->pm_fatmask;
 				readcn |= newc & pmp->pm_fatmask;
-				putulong(&bp->b_data[bo], readcn);
+				putulong((char *)bp->b_data + bo, readcn);
 				bo += 4;
 				break;
 			}
@@ -910,9 +910,9 @@ freeclusterchain(pmp, cluster)
 			if (bp)
 				updatefats(pmp, bp, lbn);
 			error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), bsize,
-			    NOCRED, &bp);
+			    NOCRED, B_MODIFY, &bp);
 			if (error) {
-				brelse(bp);
+				brelse(bp, 0);
 				return (error);
 			}
 			lbn = bn;
@@ -921,7 +921,7 @@ freeclusterchain(pmp, cluster)
 		KASSERT(bp != NULL);
 		switch (pmp->pm_fatmask) {
 		case FAT12_MASK:
-			readcn = getushort(&bp->b_data[bo]);
+			readcn = getushort((char *)bp->b_data + bo);
 			if (cluster & 1) {
 				cluster = readcn >> 4;
 				readcn &= 0x000f;
@@ -931,15 +931,15 @@ freeclusterchain(pmp, cluster)
 				readcn &= 0xf000;
 				readcn |= MSDOSFSFREE & 0xfff;
 			}
-			putushort(&bp->b_data[bo], readcn);
+			putushort((char *)bp->b_data + bo, readcn);
 			break;
 		case FAT16_MASK:
-			cluster = getushort(&bp->b_data[bo]);
-			putushort(&bp->b_data[bo], MSDOSFSFREE);
+			cluster = getushort((char *)bp->b_data + bo);
+			putushort((char *)bp->b_data + bo, MSDOSFSFREE);
 			break;
 		case FAT32_MASK:
-			cluster = getulong(&bp->b_data[bo]);
-			putulong(&bp->b_data[bo],
+			cluster = getulong((char *)bp->b_data + bo);
+			putulong((char *)bp->b_data + bo,
 				 (MSDOSFSFREE & FAT32_MASK) | (cluster & ~FAT32_MASK));
 			break;
 		}
@@ -982,19 +982,19 @@ fillinusemap(pmp)
 		if (!bo || !bp) {
 			/* Read new FAT block */
 			if (bp)
-				brelse(bp);
+				brelse(bp, 0);
 			fatblock(pmp, byteoffset, &bn, &bsize, NULL);
 			error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), bsize,
-			    NOCRED, &bp);
+			    NOCRED, 0, &bp);
 			if (error) {
-				brelse(bp);
+				brelse(bp, 0);
 				return (error);
 			}
 		}
 		if (FAT32(pmp))
-			readcn = getulong(&bp->b_data[bo]);
+			readcn = getulong((char *)bp->b_data + bo);
 		else
-			readcn = getushort(&bp->b_data[bo]);
+			readcn = getushort((char *)bp->b_data + bo);
 		if (FAT12(pmp) && (cn & 1))
 			readcn >>= 4;
 		readcn &= pmp->pm_fatmask;
@@ -1002,7 +1002,7 @@ fillinusemap(pmp)
 		if (readcn == 0)
 			usemap_free(pmp, cn);
 	}
-	brelse(bp);
+	brelse(bp, 0);
 	return (0);
 }
 

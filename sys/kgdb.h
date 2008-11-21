@@ -1,5 +1,4 @@
-/*	$OpenBSD: kgdb.h,v 1.5 2005/11/13 17:50:45 fgsch Exp $	*/
-/*	$NetBSD: kgdb.h,v 1.5 1998/09/13 14:46:24 christos Exp $	*/
+/*	$NetBSD: kgdb.h,v 1.10 2005/12/11 12:25:20 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -61,9 +60,9 @@
 #define KGDB_CONT	'c'
 #define KGDB_STEP	's'
 #define KGDB_KILL	'k'
+#define KGDB_DETACH	'D'
 #define KGDB_SIGNAL	'?'
 #define KGDB_DEBUG	'd'
-#define KGDB_DETACH	'D'
 
 /*
  * start of frame/end of frame
@@ -78,14 +77,6 @@
 #include <ddb/db_run.h>
 #include <ddb/db_access.h>
 
-#ifndef KGDB_PREPARE
-#define KGDB_PREPARE
-#endif
-
-#ifndef KGDB_ENTER
-#define KGDB_ENTER
-#endif
-
 /*
  * Functions and variables exported from kgdb_stub.c
  */
@@ -93,7 +84,7 @@ extern int kgdb_dev, kgdb_rate, kgdb_active;
 extern int kgdb_debug_init, kgdb_debug_panic;
 extern label_t *kgdb_recover;
 
-void kgdb_attach(int (*)(void *), void (*)(void *, int), void *ioarg);
+void kgdb_attach(int (*)(void *), void (*)(void *, int), void *);
 void kgdb_connect(int);
 void kgdb_panic(void);
 int kgdb_trap(int, db_regs_t *);

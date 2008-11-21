@@ -1,5 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.18 2007/11/30 08:19:43 miod Exp $	*/
-/*	$NetBSD: intr.h,v 1.9 1998/08/12 06:58:42 scottr Exp $	*/
+/*	$NetBSD: intr.h,v 1.31 2008/07/17 16:13:33 tsutsui Exp $	*/
 
 /*
  * Copyright (C) 1997 Scott Reynolds
@@ -35,107 +34,66 @@
 
 #ifdef _KERNEL
 
-/*
- * splnet must block hardware network interrupts
- * splvm must be > spltty
- */
-extern u_short	mac68k_ttyipl;
-extern u_short	mac68k_netipl;
-extern u_short	mac68k_vmipl;
-extern u_short	mac68k_audioipl;
-extern u_short	mac68k_clockipl;
-extern u_short	mac68k_statclockipl;
+/* spl0 requires checking for software interrupts */
+
+#define	IPL_NONE	0
+#define	IPL_SOFTCLOCK	1
+#define	IPL_SOFTBIO	2
+#define	IPL_SOFTNET	3
+#define	IPL_SOFTSERIAL	4
+#define	IPL_VM		5
+#define	IPL_SCHED	6
+#define	IPL_HIGH	7
+#define	NIPL		8
 
 /*
- * Interrupt "levels".  These are a more abstract representation
- * of interrupt levels, and do not have the same meaning as m68k
- * CPU interrupt levels.  They serve two purposes:
- *
- *	- properly order ISRs in the list for that CPU ipl
- *	- compute CPU PSL values for the spl*() calls.
+ * This array contains the appropriate PSL_S|PSL_IPL? values
+ * to raise interrupt priority to the requested level.
  */
-#define	IPL_NONE	0
-#define	IPL_SOFTNET	1
-#define	IPL_SOFTCLOCK	1
-#define	IPL_BIO		2
-#define	IPL_AUDIO	PSLTOIPL(mac68k_audioipl)
-#define	IPL_NET		PSLTOIPL(mac68k_netipl)
-#define	IPL_TTY		PSLTOIPL(mac68k_ttyipl)
-#define	IPL_VM		PSLTOIPL(mac68k_vmipl)
-#define	IPL_CLOCK	PSLTOIPL(mac68k_clockipl)
-#define	IPL_STATCLOCK	PSLTOIPL(mac68k_statclockipl)
-#define	IPL_HIGH	7
+extern uint16_t ipl2psl_table[NIPL];
+
+/* These spl calls are _not_ to be used by machine-independent code. */
+#define	splzs()		splserial()
 
 /*
  * These should be used for:
  * 1) ensuring mutual exclusion (why use processor level?)
  * 2) allowing faster devices to take priority
- *
- * Note that on the Mac, most things are masked at spl1, almost
- * everything at spl2, and everything but the panic switch and
- * power at spl4.
  */
-#define	splsoft()		_splraise(PSL_S | PSL_IPL1)
-#define	splsoftclock()		splsoft()
-#define	splsoftnet()		splsoft()
-#define	spltty()		_splraise(mac68k_ttyipl)
-#define	splbio()		_splraise(PSL_S | PSL_IPL2)
-#define	splnet()		_splraise(mac68k_netipl)
-#define	splvm()			_splraise(mac68k_vmipl)
-#define	splaudio()		_splraise(mac68k_audioipl)
-#define	splclock()		_splraise(mac68k_clockipl)
-#define	splstatclock()		_splraise(mac68k_statclockipl)
-#define	splserial()		_splraise(PSL_S | PSL_IPL4)
-#define	splhigh()		_spl(PSL_S | PSL_IPL7)
-#define	splsched()		splhigh()
-
-/* These spl calls are _not_ to be used by machine-independent code. */
-#define	spladb()		splhigh()
-#define	splzs()			splserial()
 
 /* watch out for side effects */
-#define splx(s)         	((s) & PSL_IPL ? _spl(s) : spl0())
+#define splx(s)         ((s) & PSL_IPL ? _spl(s) : spl0())
 
-/*
- * simulated software interrupt register
- */
-extern volatile u_int8_t ssir;
 
-#define	SIR_NET		0x01
-#define	SIR_CLOCK	0x02
-#define	SIR_SERIAL	0x04
-#define SIR_ADB		0x08
+typedef int ipl_t;
+typedef struct {
+	uint16_t _ipl;
+} ipl_cookie_t;
 
-#define	siron(mask)	\
-	__asm __volatile ( "orb %1,%0" : "=m" (ssir) : "i" (mask))
-#define	siroff(mask)	\
-	__asm __volatile ( "andb %1,%0" : "=m" (ssir) : "ir" (~(mask)))
+static inline ipl_cookie_t
+makeiplcookie(ipl_t ipl)
+{
 
-#define	setsoftnet()	siron(SIR_NET)
-#define	setsoftclock()	siron(SIR_CLOCK)
-#define	setsoftserial()	siron(SIR_SERIAL)
-#define	setsoftadb()	siron(SIR_ADB)
+	return (ipl_cookie_t){._ipl = ipl};
+}
+
+static inline int
+splraiseipl(ipl_cookie_t icookie)
+{
+
+	return _splraise(ipl2psl_table[icookie._ipl]);
+}
+
+#include <sys/spl.h>
 
 /* intr.c */
 void	intr_init(void);
-void	intr_establish(int (*)(void *), void *, int, const char *);
+void	intr_establish(int (*)(void *), void *, int);
 void	intr_disestablish(int);
 void	intr_dispatch(int);
 
 /* locore.s */
 int	spl0(void);
-
-/*
- * Interrupt handler.
- * There is no support for shared interrupts at the moment.
- */
-#include <sys/evcount.h>
-struct intrhand {
-	int		(*ih_fn)(void *);
-	void		*ih_arg;
-	int		ih_ipl;
-	struct evcount	ih_count;
-};
 #endif /* _KERNEL */
 
 #endif /* _MAC68K_INTR_H_ */

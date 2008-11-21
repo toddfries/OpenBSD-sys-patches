@@ -1,8 +1,7 @@
-/*	$OpenBSD: aic7xxx_seeprom.c,v 1.4 2008/05/13 02:24:08 brad Exp $	*/
-/*	$NetBSD: aic7xxx_seeprom.c,v 1.8 2003/05/02 19:12:19 dyoung Exp $	*/
+/*	$NetBSD: aic7xxx_seeprom.c,v 1.12 2007/10/19 11:59:46 ad Exp $	*/
 
-/*       
- * Product specific probe and attach routines for: 
+/*
+ * Product specific probe and attach routines for:
  *      3940, 2940, aic7895, aic7890, aic7880,
  *      aic7870, aic7860 and aic7850 SCSI controllers
  *
@@ -43,14 +42,17 @@
  * POSSIBILITY OF SUCH DAMAGES.
  *
  * This file was originally split off from the PCI code by
- * Jason Thorpe <thorpej@netbsd.org>. This version was split off
+ * Jason Thorpe <thorpej@NetBSD.org>. This version was split off
  * from the FreeBSD source file aic7xxx_pci.c by Frank van der Linden
- * <fvdl@netbsd.org>
- * 
- * $Id: aic7xxx_seeprom.c,v 1.4 2008/05/13 02:24:08 brad Exp $
+ * <fvdl@NetBSD.org>
+ *
+ * $Id: aic7xxx_seeprom.c,v 1.12 2007/10/19 11:59:46 ad Exp $
  *
  * $FreeBSD: src/sys/dev/aic7xxx/aic7xxx_pci.c,v 1.22 2003/01/20 20:44:55 gibbs Exp $
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: aic7xxx_seeprom.c,v 1.12 2007/10/19 11:59:46 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,13 +62,14 @@
 #include <sys/device.h>
 #include <sys/reboot.h>		/* for AB_* needed by bootverbose */
 
-#include <machine/bus.h>
-#include <machine/intr.h>
+#include <sys/bus.h>
+#include <sys/intr.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+#include <dev/scsipi/scsi_all.h>
+#include <dev/scsipi/scsipi_all.h>
+#include <dev/scsipi/scsiconf.h>
 
-#include <dev/ic/aic7xxx_openbsd.h>
+#include <dev/ic/aic7xxx_osm.h>
 #include <dev/ic/aic7xxx_inline.h>
 
 #include <dev/ic/smc93cx6var.h>
@@ -102,9 +105,9 @@ ahc_check_extport(struct ahc_softc *ahc, u_int *sxfrctl1)
 	sd.sd_tag = ahc->tag;
 	sd.sd_bsh = ahc->bsh;
 	sd.sd_regsize = 1;
-	sd.sd_control_offset = SEECTL;		
-	sd.sd_status_offset = SEECTL;		
-	sd.sd_dataout_offset = SEECTL;		
+	sd.sd_control_offset = SEECTL;
+	sd.sd_status_offset = SEECTL;
+	sd.sd_dataout_offset = SEECTL;
 	sc = ahc->seep_config;
 
 	/*
@@ -128,7 +131,7 @@ ahc_check_extport(struct ahc_softc *ahc, u_int *sxfrctl1)
 	have_seeprom = ahc_acquire_seeprom(ahc, &sd);
 	if (have_seeprom) {
 
-		if (bootverbose) 
+		if (bootverbose)
 			printf("%s: Reading SEEPROM...", ahc_name(ahc));
 
 		for (;;) {
@@ -195,7 +198,7 @@ ahc_check_extport(struct ahc_softc *ahc, u_int *sxfrctl1)
 	if (!have_seeprom) {
 		if (bootverbose)
 			printf("%s: No SEEPROM available.\n", ahc_name(ahc));
-		ahc->flags |= AHC_USEDEFAULTS | AHC_NO_BIOS_INIT;
+		ahc->flags |= AHC_USEDEFAULTS;
 		free(ahc->seep_config, M_DEVBUF);
 		ahc->seep_config = NULL;
 		sc = NULL;
@@ -288,7 +291,7 @@ ahc_parse_pci_eeprom(struct ahc_softc *ahc, struct seeprom_config *sc)
 
 			if (sc->device_flags[i] & CFSYNCH)
 				offset = MAX_OFFSET_ULTRA2;
-			else 
+			else
 				offset = 0;
 			ahc_outb(ahc, TARG_OFFSET + i, offset);
 
@@ -359,15 +362,15 @@ configure_termination(struct ahc_softc *ahc,
 		      u_int *sxfrctl1)
 {
 	uint8_t brddat;
-	
+
 	brddat = 0;
 
 	/*
 	 * Update the settings in sxfrctl1 to match the
-	 * termination settings 
+	 * termination settings
 	 */
 	*sxfrctl1 = 0;
-	
+
 	/*
 	 * SEECS must be on for the GALS to latch
 	 * the data properly.  Be sure to leave MS
@@ -542,7 +545,7 @@ configure_termination(struct ahc_softc *ahc,
 				       "termination Enabled\n",
 				       ahc_name(ahc));
 		}
-		
+
 		write_brdctl(ahc, brddat);
 
 	} else {
@@ -660,7 +663,7 @@ aic785X_cable_detect(struct ahc_softc *ahc, int *internal50_present,
 
 	*eeprom_present = (ahc_inb(ahc, SPIOCAP) & EEPROM) ? 1 : 0;
 }
-	
+
 int
 ahc_acquire_seeprom(struct ahc_softc *ahc, struct seeprom_descriptor *sd)
 {
@@ -680,10 +683,10 @@ ahc_acquire_seeprom(struct ahc_softc *ahc, struct seeprom_descriptor *sd)
 	SEEPROM_OUTB(sd, sd->sd_MS);
 	wait = 1000;  /* 1 second timeout in msec */
 	while (--wait && ((SEEPROM_STATUS_INB(sd) & sd->sd_RDY) == 0)) {
-		aic_delay(1000);  /* delay 1 msec */
+		ahc_delay(1000);  /* delay 1 msec */
 	}
 	if ((SEEPROM_STATUS_INB(sd) & sd->sd_RDY) == 0) {
-		SEEPROM_OUTB(sd, 0); 
+		SEEPROM_OUTB(sd, 0);
 		return (0);
 	}
 	return(1);

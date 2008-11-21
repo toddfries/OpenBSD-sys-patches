@@ -1,5 +1,7 @@
-/*	$OpenBSD: procfs_machdep.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
-/*	$NetBSD: procfs_machdep.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
+/*	$NetBSD: procfs_machdep.c,v 1.3 2005/12/11 12:16:41 christos Exp $	*/
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: procfs_machdep.c,v 1.3 2005/12/11 12:16:41 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -8,7 +10,6 @@
 #include <miscfs/procfs/procfs.h>
 
 
-#if 0
 /*
  * Linux-style /proc/cpuinfo.
  * Only used when procfs is mounted with -o linux.
@@ -20,4 +21,3 @@ procfs_getcpuinfstr(char *buf, int *len)
 
 	return 0;
 }
-#endif

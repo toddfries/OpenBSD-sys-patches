@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_swap.c,v 1.15 2005/12/11 12:20:12 christos Exp $ */
+/*	$NetBSD: irix_swap.c,v 1.21 2008/04/28 20:23:42 martin Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_swap.c,v 1.15 2005/12/11 12:20:12 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_swap.c,v 1.21 2008/04/28 20:23:42 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -49,7 +42,6 @@ __KERNEL_RCSID(0, "$NetBSD: irix_swap.c,v 1.15 2005/12/11 12:20:12 christos Exp 
 #include <sys/swap.h>
 #include <sys/vnode.h>
 #include <sys/namei.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_page.h>
@@ -64,15 +56,12 @@ __KERNEL_RCSID(0, "$NetBSD: irix_swap.c,v 1.15 2005/12/11 12:20:12 christos Exp 
 #include <compat/irix/irix_syscallargs.h>
 
 int
-irix_sys_swapctl(l, v, retval)
-	struct lwp *l;
-	void *v;
-	register_t *retval;
+irix_sys_swapctl(struct lwp *l, const struct irix_sys_swapctl_args *uap, register_t *retval)
 {
-	struct irix_sys_swapctl_args /* {
+	/* {
 		syscallarg(int) cmd;
 		syscallarg(void *) arg;
-	} */ *uap = v;
+	} */
 	struct sys_swapctl_args cup;
 	int error = 0;
 
@@ -133,7 +122,7 @@ irix_sys_swapctl(l, v, retval)
 		if ((error = copyin(SCARG(uap, arg), &ist, sizeof(ist))) != 0)
 			return error;
 
-		uise = (struct irix_swapent *)((caddr_t)SCARG(uap, arg) +
+		uise = (struct irix_swapent *)((char *)SCARG(uap, arg) +
 		    sizeof(ist.swt_n));
 
 		len = sizeof(struct swapent) * ist.swt_n;

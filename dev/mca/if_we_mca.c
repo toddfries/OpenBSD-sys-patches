@@ -1,4 +1,4 @@
-/*	$NetBSD: if_we_mca.c,v 1.19 2007/10/19 12:00:35 ad Exp $	*/
+/*	$NetBSD: if_we_mca.c,v 1.21 2008/04/28 20:23:53 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 2001 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -60,7 +53,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_we_mca.c,v 1.19 2007/10/19 12:00:35 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_we_mca.c,v 1.21 2008/04/28 20:23:53 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,11 +80,11 @@ __KERNEL_RCSID(0, "$NetBSD: if_we_mca.c,v 1.19 2007/10/19 12:00:35 ad Exp $");
 #define WD_8003		0x01
 #define WD_ELITE	0x02
 
-int we_mca_probe(struct device *, struct cfdata *, void *);
-void we_mca_attach(struct device *, struct device *, void *);
+int we_mca_probe(device_t, cfdata_t , void *);
+void we_mca_attach(device_t, device_t, void *);
 void we_mca_init_hook(struct we_softc *);
 
-CFATTACH_DECL(we_mca, sizeof(struct we_softc),
+CFATTACH_DECL_NEW(we_mca, sizeof(struct we_softc),
     we_mca_probe, we_mca_attach, NULL, NULL);
 
 /*
@@ -133,8 +126,7 @@ static const int we_mca_irq[] = {
 static const struct we_mca_product *we_mca_lookup(int);
 
 static const struct we_mca_product *
-we_mca_lookup(id)
-	int id;
+we_mca_lookup(int id)
 {
 	const struct we_mca_product *wep;
 
@@ -146,8 +138,7 @@ we_mca_lookup(id)
 }
 
 int
-we_mca_probe(struct device *parent, struct cfdata *cf,
-    void *aux)
+we_mca_probe(device_t parent, cfdata_t cf, void *aux)
 {
 	struct mca_attach_args *ma = aux;
 
@@ -155,7 +146,7 @@ we_mca_probe(struct device *parent, struct cfdata *cf,
 }
 
 void
-we_mca_attach(struct device *parent, struct device *self, void *aux)
+we_mca_attach(device_t parent, device_t self, void *aux)
 {
 	struct we_softc *wsc = device_private(self);
 	struct dp8390_softc *sc = &wsc->sc_dp8390;
@@ -166,6 +157,8 @@ we_mca_attach(struct device *parent, struct device *self, void *aux)
 	const char *typestr;
 	int irq, iobase, maddr;
 	int pos2, pos3, pos5;
+
+	sc->sc_dev = self;
 
 	pos2 = mca_conf_read(ma->ma_mc, ma->ma_slot, 2);
 	pos3 = mca_conf_read(ma->ma_mc, ma->ma_slot, 3);
@@ -220,7 +213,8 @@ we_mca_attach(struct device *parent, struct device *self, void *aux)
 	wep = we_mca_lookup(ma->ma_id);
 #ifdef DIAGNOSTIC
 	if (wep == NULL) {
-		printf("\n%s: where did the card go?\n", sc->sc_dev.dv_xname);
+		aprint_error("\n%s: where did the card go?\n",
+		    device_xname(self));
 		return;
 	}
 #endif
@@ -243,7 +237,7 @@ we_mca_attach(struct device *parent, struct device *self, void *aux)
 	nict = asict = ma->ma_iot;
 	memt = ma->ma_memt;
 
-	printf(" slot %d port %#x-%#x mem %#x-%#x irq %d: %s\n",
+	aprint_normal(" slot %d port %#x-%#x mem %#x-%#x irq %d: %s\n",
 		ma->ma_slot + 1,
 		iobase, iobase + WE_NPORTS - 1,
 		maddr, maddr + sc->mem_size - 1,
@@ -251,15 +245,13 @@ we_mca_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Map the device. */
 	if (bus_space_map(asict, iobase, WE_NPORTS, 0, &asich)) {
-		printf("%s: can't map nic i/o space\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "can't map nic i/o space\n");
 		return;
 	}
 
 	if (bus_space_subregion(asict, asich, WE_NIC_OFFSET, WE_NIC_NPORTS,
 	    &nich)) {
-		printf("%s: can't subregion i/o space\n",
-		    sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "can't subregion i/o space\n");
 		return;
 	}
 
@@ -273,8 +265,7 @@ we_mca_attach(struct device *parent, struct device *self, void *aux)
 	 * Map memory space.
 	 */
 	if (bus_space_map(memt, maddr, sc->mem_size, 0, &memh)) {
-		printf("%s: can't map shared memory %#x-%#x\n",
-		    sc->sc_dev.dv_xname,
+		aprint_error_dev(self, "can't map shared memory %#x-%#x\n",
 		    maddr, maddr + sc->mem_size - 1);
 		return;
 	}
@@ -302,14 +293,13 @@ we_mca_attach(struct device *parent, struct device *self, void *aux)
 	wsc->sc_ih = mca_intr_establish(ma->ma_mc, irq,
 			    IPL_NET, dp8390_intr, sc);
 	if (wsc->sc_ih == NULL) {
-		printf("%s: can't establish interrupt\n", sc->sc_dev.dv_xname);
+		aprint_error_dev(self, "can't establish interrupt\n");
 		return;
 	}
 }
 
 void
-we_mca_init_hook(wsc)
-	struct we_softc *wsc;
+we_mca_init_hook(struct we_softc *wsc)
 {
 	/*
 	 * This quirk really needs to be here, at least for WD8003W/A. Without

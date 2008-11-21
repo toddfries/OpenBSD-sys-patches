@@ -1,8 +1,7 @@
-/*	$OpenBSD: intr.h,v 1.22 2007/11/09 17:46:03 miod Exp $	*/
-/*	$NetBSD: intr.h,v 1.2 1997/07/24 05:43:08 scottr Exp $	*/
+/*	$NetBSD: intr.h,v 1.31 2008/06/22 17:35:14 tsutsui Exp $	*/
 
 /*-
- * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,19 +15,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -40,88 +32,103 @@
 #ifndef _HP300_INTR_H_
 #define	_HP300_INTR_H_
 
-#include <machine/psl.h>
-#include <sys/evcount.h>
+#include <sys/device.h>
 #include <sys/queue.h>
-
-#ifdef _KERNEL
-struct isr {
-	LIST_ENTRY(isr) isr_link;
-	int		(*isr_func)(void *);
-	void		*isr_arg;
-	int		isr_ipl;
-	int		isr_priority;
-	struct evcount	isr_count;
-};
-
-#define NISR		8
+#include <machine/psl.h>
 
 /*
  * Interrupt "levels".  These are a more abstract representation
  * of interrupt levels, and do not have the same meaning as m68k
- * CPU interrupt levels.  They serve two purposes:
+ * CPU interrupt levels.  They serve the following purposes:
  *
  *	- properly order ISRs in the list for that CPU ipl
  *	- compute CPU PSL values for the spl*() calls.
+ *	- used to create cookie for the splraiseipl().
  */
 #define	IPL_NONE	0
-#define	IPL_SOFTNET	1
 #define	IPL_SOFTCLOCK	1
-#define	IPL_BIO		2
-#define	IPL_NET		3
-#define	IPL_TTY		4
+#define	IPL_SOFTBIO	2
+#define	IPL_SOFTNET	3
+#define	IPL_SOFTSERIAL	4
 #define	IPL_VM		5
-#define	IPL_CLOCK	6
-#define	IPL_STATCLOCK	6
+#define	IPL_SCHED	6
 #define	IPL_HIGH	7
+#define	NIPL		8
 
 /*
- * This array contains the appropriate PSL_S|PSL_IPL? values
- * to raise interrupt priority to the requested level.
+ * Convert PSL values to m68k CPU IPLs and vice-versa.
+ * Note: CPU IPL values are different from IPL_* used by splraiseipl().
  */
-extern	unsigned short hp300_varpsl[NISR];
+#define	PSLTOIPL(x)	(((x) >> 8) & 0xf)
+#define	IPLTOPSL(x)	((((x) & 0xf) << 8) | PSL_S)
+
+extern int idepth;
+
+static inline bool
+cpu_intr_p(void) 
+{
+ 
+	return idepth != 0;
+}
+
+extern const uint16_t ipl2psl_table[NIPL];
+
+typedef int ipl_t;
+typedef struct {
+	uint16_t _psl;
+} ipl_cookie_t;
+
+static inline ipl_cookie_t
+makeiplcookie(ipl_t ipl)
+{
+
+	return (ipl_cookie_t){._psl = ipl2psl_table[ipl]};
+}
+
+static inline int
+splraiseipl(ipl_cookie_t icookie)
+{
+
+	return _splraise(icookie._psl);
+}
+
+/* These spl calls are _not_ to be used by machine-independent code. */
+#define	splhil()	splraise1()
+#define	splkbd()	splhil()
 
 /* These spl calls are used by machine-independent code. */
-#define	splsoft()		_splraise(PSL_S | PSL_IPL1)
-#define	splsoftclock()		splsoft()
-#define	splsoftnet()		splsoft()
-#define	splbio()		_splraise(hp300_varpsl[IPL_BIO])
-#define	splnet()		_splraise(hp300_varpsl[IPL_NET])
-#define	spltty()		_splraise(hp300_varpsl[IPL_TTY])
-#define	splclock()		_splraise(PSL_S | PSL_IPL6)
-#define	splstatclock()		_splraise(PSL_S | PSL_IPL6)
-#define	splvm()			_splraise(hp300_varpsl[IPL_VM])
-#define	splhigh()		_spl(PSL_S | PSL_IPL7)
-#define	splsched()		splhigh()
+/* spl0 requires checking for software interrupts */
+#define	splsoftbio()	splraise1()
+#define	splsoftclock()	splraise1()
+#define	splsoftnet()	splraise1()
+#define	splsoftserial()	splraise1()
+#define	splvm()		splraise5()
+#define	splsched()	spl6()
+#define	splhigh()	spl7()
 
 /* watch out for side effects */
-#define	splx(s)			((s) & PSL_IPL ? _spl((s)) : spl0())
+#define	splx(s)		((s) & PSL_IPL ? _spl((s)) : spl0())
 
-/*
- * Simulated software interrupt register.
- */
-extern volatile u_int8_t ssir;
+struct hp300_intrhand {
+	LIST_ENTRY(hp300_intrhand) ih_q;
+	int (*ih_fn)(void *);
+	void *ih_arg;
+	int ih_ipl;
+	int ih_priority;
+};
 
-#define	SIR_NET		0x01
-#define	SIR_CLOCK	0x02
-
-#define	siron(mask)	\
-	__asm __volatile ( "orb %1,%0" : "=m" (ssir) : "i" (mask))
-#define	siroff(mask)	\
-	__asm __volatile ( "andb %1,%0" : "=m" (ssir) : "ir" (~(mask)))
-
-#define	setsoftnet()	siron(SIR_NET)
-#define	setsoftclock()	siron(SIR_CLOCK)
+struct hp300_intr {
+	LIST_HEAD(, hp300_intrhand) hi_q;
+	struct evcnt hi_evcnt;
+};
 
 /* locore.s */
 int	spl0(void);
 
 /* intr.c */
 void	intr_init(void);
-void	intr_establish(struct isr *, const char *);
-void	intr_disestablish(struct isr *);
+void	*intr_establish(int (*)(void *), void *, int, int);
+void	intr_disestablish(void *);
 void	intr_dispatch(int);
-void	intr_printlevels(void);
-#endif /* _KERNEL */
 
 #endif /* _HP300_INTR_H_ */

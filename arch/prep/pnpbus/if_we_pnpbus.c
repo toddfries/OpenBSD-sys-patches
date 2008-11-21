@@ -1,4 +1,4 @@
-/*	$NetBSD: if_we_pnpbus.c,v 1.1 2006/06/23 03:08:41 garbled Exp $	*/
+/*	$NetBSD: if_we_pnpbus.c,v 1.4 2008/04/28 20:23:33 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -56,7 +49,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_we_pnpbus.c,v 1.1 2006/06/23 03:08:41 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_we_pnpbus.c,v 1.4 2008/04/28 20:23:33 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -251,7 +244,7 @@ we_pnpbus_attach(struct device *parent, struct device *self, void *aux)
 			continue;
 		break;
 	}
-	wsc->sc_ih = pnpbus_intr_establish(i, IPL_NET, dp8390_intr, sc,
+	wsc->sc_ih = pnpbus_intr_establish(i, IPL_NET, IST_PNP, dp8390_intr, sc,
 	    &pna->pna_res);
 	if (wsc->sc_ih == NULL)
 		aprint_error("%s: can't establish interrupt\n",
@@ -390,10 +383,11 @@ we_params(asict, asich, typep, memsizep, flagp, is790p)
 	{
 		int i;
 
-		printf("we_params: type = 0x%x, typestr = %s, is16bit = %d, "
-		    "memsize = %d\n", type, typestr, is16bit, memsize);
+		aprint_debug("we_params: type = 0x%x, typestr = %s,"
+		    " is16bit = %d, memsize = %d\n", type, typestr, is16bit,
+		    memsize);
 		for (i = 0; i < 8; i++)
-			printf("     %d -> 0x%x\n", i,
+			aprint_debug("     %d -> 0x%x\n", i,
 			    bus_space_read_1(asict, asich, i));
 	}
 #endif

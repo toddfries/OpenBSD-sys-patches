@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660_vnops.c,v 1.24 2006/11/16 01:33:35 christos Exp $	*/
+/*	$NetBSD: cd9660_vnops.c,v 1.34 2008/05/16 09:21:59 hannken Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cd9660_vnops.c,v 1.24 2006/11/16 01:33:35 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cd9660_vnops.c,v 1.34 2008/05/16 09:21:59 hannken Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -84,77 +84,18 @@ struct isoreaddir {
 int	iso_uiodir(struct isoreaddir *, struct dirent *, off_t);
 int	iso_shipdir(struct isoreaddir *);
 
-#if 0
-/*
- * Mknod vnode call
- *  Actually remap the device number
- */
-int
-cd9660_mknod(ndp, vap, cred, p)
-	struct nameidata *ndp;
-	kauth_cred_t cred;
-	struct vattr *vap;
-	struct proc *p;
-{
-#ifndef	ISODEVMAP
-	PNBUF_PUT(ndp->ni_pnbuf);
-	vput(ndp->ni_dvp);
-	vput(ndp->ni_vp);
-	return (EINVAL);
-#else
-	struct vnode *vp;
-	struct iso_node *ip;
-	struct iso_dnode *dp;
-
-	vp = ndp->ni_vp;
-	ip = VTOI(vp);
-
-	if (ip->i_mnt->iso_ftype != ISO_FTYPE_RRIP
-	    || vap->va_type != vp->v_type
-	    || (vap->va_type != VCHR && vap->va_type != VBLK)) {
-		PNBUF_PUT(ndp->ni_pnbuf);
-		vput(ndp->ni_dvp);
-		vput(ndp->ni_vp);
-		return (EINVAL);
-	}
-
-	dp = iso_dmap(ip->i_dev, ip->i_number, 1);
-	if (ip->inode.iso_rdev == vap->va_rdev ||
-	    vap->va_rdev == (dev_t)VNOVAL) {
-		/* same as the unmapped one, delete the mapping */
-		LIST_REMOVE(dp, d_hash);
-		FREE(dp, M_CACHE);
-	} else
-		/* enter new mapping */
-		dp->d_dev = vap->va_rdev;
-
-	/*
-	 * Remove inode so that it will be reloaded by iget and
-	 * checked to see if it is an alias of an existing entry
-	 * in the inode cache.
-	 */
-	vput(vp);
-	vp->v_type = VNON;
-	vgone(vp);
-	return (0);
-#endif
-}
-#endif
-
 /*
  * Check mode permission on inode pointer. Mode is READ, WRITE or EXEC.
  * The mode is shifted to select the owner/group/other fields. The
  * super user is granted all permissions.
  */
 int
-cd9660_access(v)
-	void *v;
+cd9660_access(void *v)
 {
 	struct vop_access_args /* {
 		struct vnode *a_vp;
 		int  a_mode;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct iso_node *ip = VTOI(vp);
@@ -180,14 +121,12 @@ cd9660_access(v)
 }
 
 int
-cd9660_getattr(v)
-	void *v;
+cd9660_getattr(void *v)
 {
 	struct vop_getattr_args /* {
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
-		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct iso_node *ip = VTOI(vp);
@@ -240,8 +179,7 @@ cd9660_getattr(v)
  * Vnode op for reading.
  */
 int
-cd9660_read(v)
-	void *v;
+cd9660_read(void *v)
 {
 	struct vop_read_args /* {
 		struct vnode *a_vp;
@@ -305,18 +243,18 @@ cd9660_read(v)
 		if (lblktosize(imp, rablock) < ip->i_size) {
 			rasize = blksize(imp, ip, rablock);
 			error = breadn(vp, lbn, size, &rablock,
-				       &rasize, 1, NOCRED, &bp);
+				       &rasize, 1, NOCRED, 0, &bp);
 		} else {
-			error = bread(vp, lbn, size, NOCRED, &bp);
+			error = bread(vp, lbn, size, NOCRED, 0, &bp);
 		}
 		n = MIN(n, size - bp->b_resid);
 		if (error) {
-			brelse(bp);
+			brelse(bp, 0);
 			return (error);
 		}
 
-		error = uiomove(bp->b_data + on, (int)n, uio);
-		brelse(bp);
+		error = uiomove((char *)bp->b_data + on, (int)n, uio);
+		brelse(bp, 0);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
 
 out:
@@ -324,10 +262,7 @@ out:
 }
 
 int
-iso_uiodir(idp, dp, off)
-	struct isoreaddir *idp;
-	struct dirent *dp;
-	off_t off;
+iso_uiodir(struct isoreaddir *idp, struct dirent *dp, off_t off)
 {
 	int error;
 
@@ -356,8 +291,7 @@ iso_uiodir(idp, dp, off)
 }
 
 int
-iso_shipdir(idp)
-	struct isoreaddir *idp;
+iso_shipdir(struct isoreaddir *idp)
 {
 	struct dirent *dp;
 	int cl, sl, assoc;
@@ -413,8 +347,7 @@ iso_shipdir(idp)
  * Vnode op for readdir
  */
 int
-cd9660_readdir(v)
-	void *v;
+cd9660_readdir(void *v)
 {
 	struct vop_readdir_args /* {
 		struct vnode *a_vp;
@@ -459,7 +392,7 @@ cd9660_readdir(v)
 	if (ap->a_ncookies == NULL)
 		idp->cookies = NULL;
 	else {
-		ncookies = uio->uio_resid / 16;
+		ncookies = uio->uio_resid / _DIRENT_MINSIZE((struct dirent *)0);
 		cookies = malloc(ncookies * sizeof(off_t), M_TEMP, M_WAITOK);
 		idp->cookies = cookies;
 		idp->ncookies = ncookies;
@@ -482,7 +415,7 @@ cd9660_readdir(v)
 		 */
 		if ((idp->curroff & bmask) == 0) {
 			if (bp != NULL)
-				brelse(bp);
+				brelse(bp, 0);
 			error = cd9660_blkatoff(vdp, (off_t)idp->curroff,
 					     NULL, &bp);
 			if (error)
@@ -598,7 +531,7 @@ cd9660_readdir(v)
 	}
 
 	if (bp)
-		brelse (bp);
+		brelse(bp, 0);
 
 	uio->uio_offset = idp->uio_off;
 	*ap->a_eofflag = idp->eofflag;
@@ -617,9 +550,9 @@ cd9660_readdir(v)
 typedef struct iso_directory_record ISODIR;
 typedef struct iso_node             ISONODE;
 typedef struct iso_mnt              ISOMNT;
+
 int
-cd9660_readlink(v)
-	void *v;
+cd9660_readlink(void *v)
 {
 	struct vop_readlink_args /* {
 		struct vnode *a_vp;
@@ -634,7 +567,7 @@ cd9660_readlink(v)
 	u_short	symlen;
 	int	error;
 	char	*symname;
-	boolean_t use_pnbuf;
+	bool use_pnbuf;
 
 	ip  = VTOI(ap->a_vp);
 	imp = ip->i_mnt;
@@ -649,16 +582,16 @@ cd9660_readlink(v)
 	error = bread(imp->im_devvp,
 		      (ip->i_number >> imp->im_bshift) <<
 		      (imp->im_bshift - DEV_BSHIFT),
-		      imp->logical_block_size, NOCRED, &bp);
+		      imp->logical_block_size, NOCRED, 0, &bp);
 	if (error) {
-		brelse(bp);
+		brelse(bp, 0);
 		return (EINVAL);
 	}
 
 	/*
 	 * Setup the directory pointer for this inode
 	 */
-	dirp = (ISODIR *)(bp->b_data + (ip->i_number & imp->im_bmask));
+	dirp = (ISODIR *)((char *)bp->b_data + (ip->i_number & imp->im_bmask));
 
 	/*
 	 * Just make sure, we have a right one....
@@ -666,7 +599,7 @@ cd9660_readlink(v)
 	 */
 	if ((ip->i_number & imp->im_bmask) + isonum_711(dirp->length)
 	    > imp->logical_block_size) {
-		brelse(bp);
+		brelse(bp, 0);
 		return (EINVAL);
 	}
 
@@ -689,13 +622,13 @@ cd9660_readlink(v)
 		if (use_pnbuf) {
 			PNBUF_PUT(symname);
 		}
-		brelse(bp);
+		brelse(bp, 0);
 		return (EINVAL);
 	}
 	/*
 	 * Don't forget before you leave from home ;-)
 	 */
-	brelse(bp);
+	brelse(bp, 0);
 
 	/*
 	 * return with the symbolic name to caller's.
@@ -712,8 +645,7 @@ cd9660_readlink(v)
 }
 
 int
-cd9660_link(v)
-	void *v;
+cd9660_link(void *v)
 {
 	struct vop_link_args /* {
 		struct vnode *a_dvp;
@@ -727,8 +659,7 @@ cd9660_link(v)
 }
 
 int
-cd9660_symlink(v)
-	void *v;
+cd9660_symlink(void *v)
 {
 	struct vop_symlink_args /* {
 		struct vnode *a_dvp;
@@ -748,8 +679,7 @@ cd9660_symlink(v)
  * then call the device strategy routine.
  */
 int
-cd9660_strategy(v)
-	void *v;
+cd9660_strategy(void *v)
 {
 	struct vop_strategy_args /* {
 		struct vnode *a_vp;
@@ -767,7 +697,6 @@ cd9660_strategy(v)
 		error = VOP_BMAP(vp, bp->b_lblkno, NULL, &bp->b_blkno, NULL);
 		if (error) {
 			bp->b_error = error;
-			bp->b_flags |= B_ERROR;
 			biodone(bp);
 			return (error);
 		}
@@ -798,8 +727,7 @@ cd9660_print(void *v)
  * Return POSIX pathconf information applicable to cd9660 filesystems.
  */
 int
-cd9660_pathconf(v)
-	void *v;
+cd9660_pathconf(void *v)
 {
 	struct vop_pathconf_args /* {
 		struct vnode *a_vp;
@@ -844,8 +772,7 @@ cd9660_pathconf(v)
  * Allow changing the size for special files (and fifos).
  */
 int
-cd9660_setattr(v)
-	void *v;
+cd9660_setattr(void *v)
 {
 	struct vop_setattr_args /* {
 		struct vnodeop_desc *a_desc;
@@ -891,7 +818,6 @@ cd9660_setattr(v)
 #define	cd9660_create	genfs_eopnotsupp
 #define	cd9660_mknod	genfs_eopnotsupp
 #define	cd9660_write	genfs_eopnotsupp
-#define	cd9660_lease_check	genfs_lease_check
 #define	cd9660_fsync	genfs_nullop
 #define	cd9660_remove	genfs_eopnotsupp
 #define	cd9660_rename	genfs_eopnotsupp
@@ -917,7 +843,6 @@ const struct vnodeopv_entry_desc cd9660_vnodeop_entries[] = {
 	{ &vop_setattr_desc, cd9660_setattr },		/* setattr */
 	{ &vop_read_desc, cd9660_read },		/* read */
 	{ &vop_write_desc, cd9660_write },		/* write */
-	{ &vop_lease_desc, cd9660_lease_check },	/* lease */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, cd9660_ioctl },		/* ioctl */
 	{ &vop_poll_desc, cd9660_poll },		/* poll */
@@ -968,7 +893,6 @@ const struct vnodeopv_entry_desc cd9660_specop_entries[] = {
 	{ &vop_setattr_desc, cd9660_setattr },		/* setattr */
 	{ &vop_read_desc, spec_read },			/* read */
 	{ &vop_write_desc, spec_write },		/* write */
-	{ &vop_lease_desc, spec_lease_check },		/* lease */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, spec_ioctl },		/* ioctl */
 	{ &vop_poll_desc, spec_poll },			/* poll */
@@ -1017,7 +941,6 @@ const struct vnodeopv_entry_desc cd9660_fifoop_entries[] = {
 	{ &vop_setattr_desc, cd9660_setattr },		/* setattr */
 	{ &vop_read_desc, fifo_read },			/* read */
 	{ &vop_write_desc, fifo_write },		/* write */
-	{ &vop_lease_desc, fifo_lease_check },		/* lease */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, fifo_ioctl },		/* ioctl */
 	{ &vop_poll_desc, fifo_poll },			/* poll */

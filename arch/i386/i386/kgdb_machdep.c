@@ -1,5 +1,4 @@
-/*	$OpenBSD: kgdb_machdep.c,v 1.8 2007/02/20 21:15:01 tom Exp $	*/
-/*	$NetBSD: kgdb_machdep.c,v 1.6 1998/08/13 21:36:03 thorpej Exp $	*/
+/*	$NetBSD: kgdb_machdep.c,v 1.18 2008/06/24 16:28:44 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,9 +60,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(DDB)
-#error "Can't build DDB and KGDB together."
-#endif
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.18 2008/06/24 16:28:44 ad Exp $");
+
+#include "opt_ddb.h"
 
 /*
  * Machine-dependent functions for remote KGDB.  Originally written
@@ -92,7 +85,9 @@
  * Determine if the memory at va..(va+len) is valid.
  */
 int
-kgdb_acc(vaddr_t va, size_t len)
+kgdb_acc(va, len)
+	vaddr_t va;
+	size_t len;
 {
 	vaddr_t last_va;
 	pt_entry_t *pte;
@@ -102,10 +97,16 @@ kgdb_acc(vaddr_t va, size_t len)
 	last_va &= ~PGOFSET;
 
 	do {
-		pte = kvtopte(va);
+		if (va < VM_MIN_KERNEL_ADDRESS)
+			pte = vtopte(va);
+		else
+			pte = kvtopte(va);
 		if ((*pte & PG_V) == 0)
 			return (0);
-		va  += NBPG;
+		if (*pte & PG_PS)
+			va = (va & PG_LGFRAME) + NBPD_L2;
+		else
+			va += PAGE_SIZE;
 	} while (va < last_va);
 
 	return (1);
@@ -115,8 +116,9 @@ kgdb_acc(vaddr_t va, size_t len)
  * Translate a trap number into a unix compatible signal value.
  * (gdb only understands unix signal numbers).
  */
-int
-kgdb_signal(int type)
+int 
+kgdb_signal(type)
+	int type;
 {
 	switch (type) {
 	case T_NMI:
@@ -161,7 +163,9 @@ kgdb_signal(int type)
  * understood by gdb.
  */
 void
-kgdb_getregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
+kgdb_getregs(regs, gdb_regs)
+	db_regs_t *regs;
+	kgdb_reg_t *gdb_regs;
 {
 
 	gdb_regs[ 0] = regs->tf_eax;
@@ -185,7 +189,7 @@ kgdb_getregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
 		 */
 		gdb_regs[ 4] = (kgdb_reg_t)&regs->tf_esp; /* kernel stack
 							     pointer */
-		__asm __volatile("movw %%ss,%w0" : "=r" (gdb_regs[11]));
+		gdb_regs[11] = x86_getss();
 	}
 }
 
@@ -193,7 +197,9 @@ kgdb_getregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
  * Reverse the above.
  */
 void
-kgdb_setregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
+kgdb_setregs(regs, gdb_regs)
+	db_regs_t *regs;
+	kgdb_reg_t *gdb_regs;
 {
 
 	regs->tf_eax    = gdb_regs[ 0];
@@ -217,3 +223,39 @@ kgdb_setregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
 		regs->tf_ss  = gdb_regs[11];
 	}
 }	
+
+/*
+ * Trap into kgdb to wait for debugger to connect,
+ * noting on the console why nothing else is going on.
+ */
+void
+kgdb_connect(verbose)
+	int verbose;
+{
+
+	if (kgdb_dev < 0)
+		return;
+
+	if (verbose)
+		printf("kgdb waiting...");
+
+	breakpoint();
+
+	if (verbose)
+		printf("connected.\n");
+
+	kgdb_debug_panic = 1;
+}
+
+/*
+ * Decide what to do on panic.
+ * (This is called by panic, like Debugger())
+ */
+void
+kgdb_panic()
+{
+	if (kgdb_dev >= 0 && kgdb_debug_panic) {
+		printf("entering kgdb\n");
+		kgdb_connect(kgdb_active == 0);
+	}
+}

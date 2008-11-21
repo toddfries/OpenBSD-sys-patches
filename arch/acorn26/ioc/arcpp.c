@@ -1,4 +1,4 @@
-/* $NetBSD: arcpp.c,v 1.7 2006/02/12 10:30:30 bjh21 Exp $ */
+/* $NetBSD: arcpp.c,v 1.9 2008/06/11 22:07:49 cegger Exp $ */
 
 /*-
  * Copyright (c) 2001 Ben Harris
@@ -52,7 +52,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: arcpp.c,v 1.7 2006/02/12 10:30:30 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: arcpp.c,v 1.9 2008/06/11 22:07:49 cegger Exp $");
 
 #include <sys/conf.h>
 #include <sys/device.h>
@@ -180,7 +180,7 @@ arcppopen(dev_t dev, int flag, int mode, struct lwp *l)
 	bus_space_handle_t ioh;
 	int error, s;
 
-	sc = device_lookup(&arcpp_cd, ARCPPUNIT(dev));
+	sc = device_lookup_private(&arcpp_cd, ARCPPUNIT(dev));
 	if (sc == NULL)
 		return ENXIO;
 
@@ -202,7 +202,7 @@ arcppopen(dev_t dev, int flag, int mode, struct lwp *l)
 	/* wait till ready (printer running diagnostics) */
 	irq_enable(sc->sc_bih);
 	/* XXX Is it really appropriate to time out? */
-	error = tsleep((caddr_t)sc, ARCPPPRI | PCATCH, "arcppopen", TIMEOUT);
+	error = tsleep((void *)sc, ARCPPPRI | PCATCH, "arcppopen", TIMEOUT);
 	if (error == EWOULDBLOCK) {
 		sc->sc_state = 0;
 		return EBUSY;
@@ -229,7 +229,7 @@ arcppopen(dev_t dev, int flag, int mode, struct lwp *l)
 int
 arcppclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct arcpp_softc *sc = device_lookup(&arcpp_cd, ARCPPUNIT(dev));
+	struct arcpp_softc *sc = device_lookup_private(&arcpp_cd, ARCPPUNIT(dev));
 
 	if (sc->sc_count)
 		(void) arcpppushbytes(sc);
@@ -256,7 +256,7 @@ arcpppushbytes(sc)
 			arcppintr(sc);
 			splx(s);
 		}
-		error = tsleep((caddr_t)sc, ARCPPPRI | PCATCH, "arcppwr", 0);
+		error = tsleep((void *)sc, ARCPPPRI | PCATCH, "arcppwr", 0);
 		if (error)
 			return error;
 	}
@@ -266,7 +266,7 @@ arcpppushbytes(sc)
 int
 arcppwrite(dev_t dev, struct uio *uio, int flags)
 {
-	struct arcpp_softc *sc = device_lookup(&arcpp_cd, ARCPPUNIT(dev));
+	struct arcpp_softc *sc = device_lookup_private(&arcpp_cd, ARCPPUNIT(dev));
 	size_t n;
 	int error = 0;
 
@@ -318,7 +318,7 @@ arcppintr(void *arg)
 
 	if (sc->sc_count == 0)
 		/* none, wake up the top half to get more */
-		wakeup((caddr_t)sc);
+		wakeup((void *)sc);
 
 	return 1;
 }

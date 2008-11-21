@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_syscall.c,v 1.9 2006/07/19 21:11:39 ad Exp $ */
+/*	$NetBSD: linux_syscall.c,v 1.29 2008/10/21 12:16:59 ad Exp $ */
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,18 +30,19 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_syscall.c,v 1.9 2006/07/19 21:11:39 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_syscall.c,v 1.29 2008/10/21 12:16:59 ad Exp $");
 
+#if defined(_KERNEL_OPT)
 #include "opt_compat_linux.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/signal.h>
-#include <sys/sa.h>
-#include <sys/savar.h>
 #include <sys/syscall.h>
+#include <sys/syscallvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -62,22 +56,16 @@ __KERNEL_RCSID(0, "$NetBSD: linux_syscall.c,v 1.9 2006/07/19 21:11:39 ad Exp $")
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_siginfo.h>
 #include <compat/linux/arch/amd64/linux_siginfo.h>
-#include <compat/linux/arch/amd64/linux_syscall.h>
 #include <compat/linux/arch/amd64/linux_machdep.h>
-#include <compat/linux/common/linux_errno.h>
 
 void linux_syscall_intern(struct proc *);
-static void linux_syscall_plain(struct trapframe *);
-static void linux_syscall_fancy(struct trapframe *);
+static void linux_syscall(struct trapframe *);
 
 void
 linux_syscall_intern(struct proc *p)
 {
 
-	if (trace_is_enabled(p))
-		p->p_md.md_syscall = linux_syscall_fancy;
-	else
-		p->p_md.md_syscall = linux_syscall_plain;
+	p->p_md.md_syscall = linux_syscall;
 }
 
 /*
@@ -86,156 +74,43 @@ linux_syscall_intern(struct proc *p)
  * Like trap(), argument is call by reference.
  */
 static void
-linux_syscall_plain(struct trapframe *frame)
+linux_syscall(struct trapframe *frame)
 {
-	caddr_t params;
 	const struct sysent *callp;
 	struct proc *p;
 	struct lwp *l;
 	int error;
-	size_t argsize, argoff;
-	register_t code, args[9], rval[2], *argp;
+	register_t code, rval[2];
+	#define args (&frame->tf_rdi)
 
-	uvmexp.syscalls++;
 	l = curlwp;
 	p = l->l_proc;
-	LWP_CACHE_CREDS(l, p);
 
 	code = frame->tf_rax;
+
+	LWP_CACHE_CREDS(l, p);
+
 	callp = p->p_emul->e_sysent;
-	argoff = 0;
-	argp = &args[0];
 
 	code &= (LINUX_SYS_NSYSENT - 1);
 	callp += code;
 
-	argsize = (callp->sy_argsize >> 3) + argoff;
-	if (argsize) {
-		switch (MIN(argsize, 6)) {
-		case 6:
-			args[5] = frame->tf_r9;
-		case 5:
-			args[4] = frame->tf_r8;
-		case 4:
-			args[3] = frame->tf_r10;
-		case 3:
-			args[2] = frame->tf_rdx;
-		case 2:	
-			args[1] = frame->tf_rsi;
-		case 1:
-			args[0] = frame->tf_rdi;
-			break;
-		default:
-			panic("impossible syscall argsize");
-		}
-		if (argsize > 6) {
-			argsize -= 6;
-			params = (caddr_t)frame->tf_rsp + sizeof(register_t);
-			error = copyin(params, (caddr_t)&args[6],
-					argsize << 3);
-			if (error != 0)
-				goto bad;
-		}
-	}
+	/*
+	 * Linux system calls have a maximum of 6 arguments, they are
+	 * already adjacent in the syscall trapframe.
+	 */
 
-	rval[0] = 0;
-	rval[1] = 0;
-	KERNEL_PROC_LOCK(l);
-	error = (*callp->sy_call)(l, argp, rval);
-	KERNEL_PROC_UNLOCK(l);
-
-	switch (error) {
-	case 0:
-		frame->tf_rax = rval[0];
-		frame->tf_rflags &= ~PSL_C;	/* carry bit */
-		break;
-	case ERESTART:
-		/*
-		 * The offset to adjust the PC by depends on whether we entered
-		 * the kernel through the trap or call gate.  We pushed the
-		 * size of the instruction into tf_err on entry.
-		 */
-		frame->tf_rip -= frame->tf_err;
-		break;
-	case EJUSTRETURN:
-		/* nothing to do */
-		break;
-	default:
-	bad:
-		frame->tf_rax = native_to_linux_errno[error];
-		frame->tf_rflags |= PSL_C;	/* carry bit */
-		break;
-	}
-
-	userret(l);
-}
-
-static void
-linux_syscall_fancy(struct trapframe *frame)
-{
-	caddr_t params;
-	const struct sysent *callp;
-	struct proc *p;
-	struct lwp *l;
-	int error;
-	size_t argsize, argoff;
-	register_t code, args[9], rval[2], *argp;
-
-	uvmexp.syscalls++;
-	l = curlwp;
-	p = l->l_proc;
-	LWP_CACHE_CREDS(l, p);
-
-	code = frame->tf_rax;
-	callp = p->p_emul->e_sysent;
-	argp = &args[0];
-	argoff = 0;
-
-	code &= (SYS_NSYSENT - 1);
-	callp += code;
-
-	argsize = (callp->sy_argsize >> 3) + argoff;
-	if (argsize) {
-		switch (MIN(argsize, 6)) {
-		case 6:
-			args[5] = frame->tf_r9;
-		case 5:
-			args[4] = frame->tf_r8;
-		case 4:
-			args[3] = frame->tf_r10;
-		case 3:
-			args[2] = frame->tf_rdx;
-		case 2:	
-			args[1] = frame->tf_rsi;
-		case 1:
-			args[0] = frame->tf_rdi;
-			break;
-		default:
-			panic("impossible syscall argsize");
-		}
-		if (argsize > 6) {
-			argsize -= 6;
-			params = (caddr_t)frame->tf_rsp + sizeof(register_t);
-			error = copyin(params, (caddr_t)&args[6],
-					argsize << 3);
-			if (error != 0)
-				goto bad;
-		}
-	}
-
-	KERNEL_PROC_LOCK(l);
-	if ((error = trace_enter(l, code, code, NULL, argp)) != 0)
+	if (__predict_false(p->p_trace_enabled)
+	    && (error = trace_enter(code, args, callp->sy_narg)) != 0)
 		goto out;
 
 	rval[0] = 0;
 	rval[1] = 0;
-	error = (*callp->sy_call)(l, argp, rval);
+	error = sy_call(callp, l, args, rval);
 out:
-	KERNEL_PROC_UNLOCK(l);
 	switch (error) {
 	case 0:
 		frame->tf_rax = rval[0];
-		frame->tf_rflags &= ~PSL_C;	/* carry bit */
 		break;
 	case ERESTART:
 		/*
@@ -249,13 +124,13 @@ out:
 		/* nothing to do */
 		break;
 	default:
-	bad:
-		frame->tf_rax = native_to_linux_errno[error];
-		frame->tf_rflags |= PSL_C;	/* carry bit */
+		error = native_to_linux_errno[error];
+		frame->tf_rax = error;
 		break;
 	}
 
-	trace_exit(l, code, argp, rval, error);
+	if (__predict_false(p->p_trace_enabled))
+		trace_exit(code, rval, error);
 
 	userret(l);
 }

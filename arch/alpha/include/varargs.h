@@ -1,5 +1,4 @@
-/*	$OpenBSD: varargs.h,v 1.5 2003/06/02 23:27:43 millert Exp $	*/
-/*	$NetBSD: varargs.h,v 1.5 1996/10/09 21:13:05 cgd Exp $	*/
+/* $NetBSD: varargs.h,v 1.11 2005/12/11 12:16:16 christos Exp $ */
 
 /*-
  * Copyright (c) 1990, 1993
@@ -42,17 +41,27 @@
 
 #include <machine/stdarg.h>
 
-#if __GNUC__ == 1
+#if !__GNUC_PREREQ__(2, 0)
 #define	__va_ellipsis
 #else
 #define	__va_ellipsis	...
 #endif
 
+#if __GNUC_PREREQ__(2, 96)
+#define	__va_alist_t	__builtin_va_alist_t
+#else
+#define	__va_alist_t	long
+#endif
+
 #define	va_alist	__builtin_va_alist
-#define	va_dcl		long __builtin_va_alist; __va_ellipsis
+#define	va_dcl		__va_alist_t __builtin_va_alist; __va_ellipsis
 
 #undef va_start
+#if __GNUC_PREREQ__(2, 96)
+#define	va_start(ap)	__builtin_varargs_start((ap))
+#else
 #define	va_start(ap) \
-	((ap) = *(va_list *)__builtin_saveregs(), (ap).pad = 0)
+	((ap) = *(va_list *)__builtin_saveregs(), (ap).__pad = 0)
+#endif
 
 #endif /* !_ALPHA_VARARGS_H_ */

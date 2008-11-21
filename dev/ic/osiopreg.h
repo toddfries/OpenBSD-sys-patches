@@ -1,5 +1,4 @@
-/*	$OpenBSD: osiopreg.h,v 1.5 2005/11/21 21:52:47 miod Exp $	*/
-/*	$NetBSD: osiopreg.h,v 1.1 2001/04/30 04:47:51 tsutsui Exp $	*/
+/*	$NetBSD: osiopreg.h,v 1.5 2005/12/11 12:21:28 christos Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -306,7 +305,7 @@
 
 #define OSIOP_CTEST7_CDIS	0x80	/* Cache burst disable */
 #define OSIOP_CTEST7_SC1	0x40	/* Snoop control 1 */
-#define OSIOP_CTEST7_SC0	0x20	/* Snoop control 0 */
+#define OSIOP_CTEST7_SC0	0x20	/* Snoop contorl 0 */
 #define OSIOP_CTEST7_STD	0x10	/* Selection timeout disable */
 #define OSIOP_CTEST7_DFP	0x08	/* DMA FIFO parity bit */
 #define OSIOP_CTEST7_EVP	0x04	/* Even parity (to host bus) */

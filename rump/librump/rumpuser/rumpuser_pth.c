@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser_pth.c,v 1.12 2008/03/11 10:50:16 pooka Exp $	*/
+/*	$NetBSD: rumpuser_pth.c,v 1.19 2008/11/18 12:39:35 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -28,8 +28,11 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/lwp.h>
+#ifdef __linux__
+#define _XOPEN_SOURCE 500
+#define _BSD_SOURCE
+#define _FILE_OFFSET_BITS 64
+#endif
 
 #include <assert.h>
 #include <errno.h>
@@ -37,8 +40,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
-#include "rumpuser.h"
+#include <rump/rumpuser.h>
+
+#include "rumpuser_int.h"
 
 static pthread_key_t curlwpkey;
 static pthread_key_t isintr;
@@ -73,11 +79,12 @@ struct rumpuser_aio *rua_aios[N_AIOS];
 
 struct rumpuser_rw rumpspl;
 
-#ifndef RUMP_WITHOUT_THREADS
 static void *
+/*ARGSUSED*/
 iothread(void *arg)
 {
 	struct rumpuser_aio *rua;
+	rump_biodone_fn biodone = arg;
 
 	NOFAIL_ERRNO(pthread_mutex_lock(&rua_mtx.pthmtx));
 	for (;;) {
@@ -92,23 +99,19 @@ iothread(void *arg)
 
 		if (rua->rua_op)
 			rumpuser_read_bio(rua->rua_fd, rua->rua_data,
-			    rua->rua_dlen, rua->rua_off, rua->rua_bp);
+			    rua->rua_dlen, rua->rua_off, biodone, rua->rua_bp);
 		else
 			rumpuser_write_bio(rua->rua_fd, rua->rua_data,
-			    rua->rua_dlen, rua->rua_off, rua->rua_bp);
+			    rua->rua_dlen, rua->rua_off, biodone, rua->rua_bp);
 
 		free(rua);
 		NOFAIL_ERRNO(pthread_mutex_lock(&rua_mtx.pthmtx));
 	}
 }
-#endif /* RUMP_WITHOUT_THREADS */
 
 int
 rumpuser_thrinit()
 {
-#ifndef RUMP_WITHOUT_THREADS
-	pthread_t iothr;
-#endif
 
 	pthread_mutex_init(&rua_mtx.pthmtx, NULL);
 	pthread_cond_init(&rua_cv.pthcv, NULL);
@@ -117,9 +120,17 @@ rumpuser_thrinit()
 	pthread_key_create(&curlwpkey, NULL);
 	pthread_key_create(&isintr, NULL);
 
-#ifndef RUMP_WITHOUT_THREADS
-	pthread_create(&iothr, NULL, iothread, NULL);
-#endif
+	return 0;
+}
+
+int
+rumpuser_bioinit(rump_biodone_fn biodone)
+{
+	extern int rump_threads;
+	pthread_t iothr;
+
+	if (rump_threads)
+		pthread_create(&iothr, NULL, iothread, biodone);
 
 	return 0;
 }
@@ -171,7 +182,7 @@ void
 rumpuser_mutex_enter(struct rumpuser_mtx *mtx)
 {
 
-	NOFAIL_ERRNO(pthread_mutex_lock(&mtx->pthmtx));
+	KLOCK_WRAP(NOFAIL_ERRNO(pthread_mutex_lock(&mtx->pthmtx)));
 }
 
 int
@@ -216,9 +227,9 @@ rumpuser_rw_enter(struct rumpuser_rw *rw, int write)
 {
 
 	if (write)
-		NOFAIL_ERRNO(pthread_rwlock_wrlock(&rw->pthrw));
+		KLOCK_WRAP(NOFAIL_ERRNO(pthread_rwlock_wrlock(&rw->pthrw)));
 	else
-		NOFAIL_ERRNO(pthread_rwlock_rdlock(&rw->pthrw));
+		KLOCK_WRAP(NOFAIL_ERRNO(pthread_rwlock_rdlock(&rw->pthrw)));
 }
 
 int
@@ -287,7 +298,7 @@ void
 rumpuser_cv_wait(struct rumpuser_cv *cv, struct rumpuser_mtx *mtx)
 {
 
-	NOFAIL_ERRNO(pthread_cond_wait(&cv->pthcv, &mtx->pthmtx));
+	KLOCK_WRAP(NOFAIL_ERRNO(pthread_cond_wait(&cv->pthcv, &mtx->pthmtx)));
 }
 
 int
@@ -303,7 +314,7 @@ rumpuser_cv_timedwait(struct rumpuser_cv *cv, struct rumpuser_mtx *mtx,
 	ts.tv_sec  += ts.tv_nsec / 1000000000;
 	ts.tv_nsec %= 1000000000;
 
-	rv = pthread_cond_timedwait(&cv->pthcv, &mtx->pthmtx, &ts);
+	KLOCK_WRAP(rv = pthread_cond_timedwait(&cv->pthcv, &mtx->pthmtx, &ts));
 	if (rv != 0 && rv != ETIMEDOUT)
 		abort();
 
@@ -324,6 +335,13 @@ rumpuser_cv_broadcast(struct rumpuser_cv *cv)
 {
 
 	NOFAIL_ERRNO(pthread_cond_broadcast(&cv->pthcv));
+}
+
+int
+rumpuser_cv_has_waiters(struct rumpuser_cv *cv)
+{
+
+	return pthread_cond_has_waiters_np(&cv->pthcv);
 }
 
 /*

@@ -1,9 +1,11 @@
-/*	$OpenBSD: svr4_ucontext.h,v 1.2 1996/08/02 20:35:47 niklas Exp $	 */
-/*	$NetBSD: svr4_ucontext.h,v 1.3 1995/08/14 01:13:29 mycroft Exp $	 */
+/*	$NetBSD: svr4_ucontext.h,v 1.9 2008/04/28 20:23:45 martin Exp $	 */
 
-/*
- * Copyright (c) 1994 Christos Zoulas
+/*-
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,19 +15,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef	_SVR4_UCONTEXT_H_
@@ -56,7 +57,9 @@ typedef struct svr4_ucontext {
 	svr4_sigset_t		 uc_sigmask;
 	struct svr4_sigaltstack	 uc_stack;
 	svr4_mcontext_t		 uc_mcontext;
-	long			 uc_pad[5];
+#ifdef SVR4_UC_MACHINE_PAD
+	long			 uc_pad[SVR4_UC_MACHINE_PAD];
+#endif
 } svr4_ucontext_t;
 
 #define SVR4_UC_GETREGSET	0
@@ -73,5 +76,12 @@ struct svr4_sigframe {
 	struct	svr4_ucontext sf_uc;
 	union	svr4_siginfo  sf_si;
 };
+
+
+void *svr4_getmcontext(struct lwp *, struct svr4_mcontext *, u_long *);
+int svr4_setmcontext(struct lwp *, struct svr4_mcontext *, u_long);
+
+void svr4_getcontext(struct lwp *, struct svr4_ucontext *);
+int svr4_setcontext(struct lwp *, struct svr4_ucontext *);
 
 #endif /* !_SVR4_UCONTEXT_H_ */

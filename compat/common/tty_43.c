@@ -1,5 +1,30 @@
-/*	$OpenBSD: tty_43.c,v 1.9 2004/09/19 21:34:42 mickey Exp $	*/
-/*	$NetBSD: tty_43.c,v 1.5 1996/05/20 14:29:17 mark Exp $	*/
+/*	$NetBSD: tty_43.c,v 1.29 2008/11/19 18:36:02 ad Exp $	*/
+
+/*-
+ * Copyright (c) 2008 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -29,28 +54,27 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)tty_compat.c	8.1 (Berkeley) 6/10/93
+ *	@(#)tty_compat.c	8.2 (Berkeley) 1/9/95
  */
 
 /*
  * mapping routines for old line discipline (yuck)
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: tty_43.c,v 1.29 2008/11/19 18:36:02 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
+#include <sys/conf.h>
 #include <sys/tty.h>
 #include <sys/termios.h>
 #include <sys/file.h>
-#include <sys/conf.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/ioctl_compat.h>
-
-/*
- * XXX libcompat files should be included with config attributes
- */
-#ifdef COMPAT_OLDTTY
 
 int ttydebug = 0;
 
@@ -81,26 +105,24 @@ static const int compatspcodes[] = {
 	1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200
 };
 
-int ttcompatgetflags(struct tty *);
-void ttcompatsetflags(struct tty *, struct termios *);
-void ttcompatsetlflags(struct tty *, struct termios *);
+static int ttcompatgetflags(struct tty *);
+static void ttcompatsetflags(struct tty *, struct termios *);
+static void ttcompatsetlflags(struct tty *, struct termios *);
+int	ttcompat(struct tty *, u_long, void *, int, struct lwp *);
 
 /*ARGSUSED*/
 int
-ttcompat(tp, com, data, flag, p)
-	register struct tty *tp;
-	u_long com;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+ttcompat(struct tty *tp, u_long com, void *data, int flag, struct lwp *l)
 {
 
 	switch (com) {
 	case TIOCGETP: {
-		register struct sgttyb *sg = (struct sgttyb *)data;
-		register u_char *cc = tp->t_cc;
-		register int speed;
+		struct sgttyb *sg = (struct sgttyb *)data;
+		u_char *cc;
+		int speed;
 
+		mutex_spin_enter(&tty_lock);
+		cc = tp->t_cc;
 		speed = ttspeedtab(tp->t_ospeed, compatspeeds);
 		sg->sg_ospeed = (speed == -1) ? MAX_SPEED : speed;
 		if (tp->t_ispeed == 0)
@@ -112,15 +134,17 @@ ttcompat(tp, com, data, flag, p)
 		sg->sg_erase = cc[VERASE];
 		sg->sg_kill = cc[VKILL];
 		sg->sg_flags = ttcompatgetflags(tp);
+		mutex_spin_exit(&tty_lock);
 		break;
 	}
 
 	case TIOCSETP:
 	case TIOCSETN: {
-		register struct sgttyb *sg = (struct sgttyb *)data;
+		struct sgttyb *sg = (struct sgttyb *)data;
 		struct termios term;
 		int speed;
 
+		mutex_spin_enter(&tty_lock);
 		term = tp->t_termios;
 		if ((speed = sg->sg_ispeed) > MAX_SPEED || speed < 0)
 			term.c_ispeed = speed;
@@ -134,13 +158,14 @@ ttcompat(tp, com, data, flag, p)
 		term.c_cc[VKILL] = sg->sg_kill;
 		tp->t_flags = (ttcompatgetflags(tp)&0xffff0000) | (sg->sg_flags&0xffff);
 		ttcompatsetflags(tp, &term);
+		mutex_spin_exit(&tty_lock);
 		return (ttioctl(tp, com == TIOCSETP ? TIOCSETAF : TIOCSETA,
-			(caddr_t)&term, flag, p));
+			(void *)&term, flag, l));
 	}
 
 	case TIOCGETC: {
 		struct tchars *tc = (struct tchars *)data;
-		register u_char *cc = tp->t_cc;
+		u_char *cc = tp->t_cc;
 
 		tc->t_intrc = cc[VINTR];
 		tc->t_quitc = cc[VQUIT];
@@ -152,7 +177,7 @@ ttcompat(tp, com, data, flag, p)
 	}
 	case TIOCSETC: {
 		struct tchars *tc = (struct tchars *)data;
-		register u_char *cc = tp->t_cc;
+		u_char *cc = tp->t_cc;
 
 		cc[VINTR] = tc->t_intrc;
 		cc[VQUIT] = tc->t_quitc;
@@ -166,7 +191,7 @@ ttcompat(tp, com, data, flag, p)
 	}
 	case TIOCSLTC: {
 		struct ltchars *ltc = (struct ltchars *)data;
-		register u_char *cc = tp->t_cc;
+		u_char *cc = tp->t_cc;
 
 		cc[VSUSP] = ltc->t_suspc;
 		cc[VDSUSP] = ltc->t_dsuspc;
@@ -178,7 +203,7 @@ ttcompat(tp, com, data, flag, p)
 	}
 	case TIOCGLTC: {
 		struct ltchars *ltc = (struct ltchars *)data;
-		register u_char *cc = tp->t_cc;
+		u_char *cc = tp->t_cc;
 
 		ltc->t_suspc = cc[VSUSP];
 		ltc->t_dsuspc = cc[VDSUSP];
@@ -194,6 +219,7 @@ ttcompat(tp, com, data, flag, p)
 		struct termios term;
 		int flags;
 
+		mutex_spin_enter(&tty_lock);
 		term = tp->t_termios;
 		flags = ttcompatgetflags(tp);
 		switch (com) {
@@ -208,59 +234,72 @@ ttcompat(tp, com, data, flag, p)
 			break;
 		}
 		ttcompatsetlflags(tp, &term);
-		return (ttioctl(tp, TIOCSETA, (caddr_t)&term, flag, p));
+		mutex_spin_exit(&tty_lock);
+		return (ttioctl(tp, TIOCSETA, (void *)&term, flag, l));
 	}
 	case TIOCLGET:
+		mutex_spin_enter(&tty_lock);
 		*(int *)data = ttcompatgetflags(tp)>>16;
+		mutex_spin_exit(&tty_lock);
 		if (ttydebug)
 			printf("CLGET: returning %x\n", *(int *)data);
 		break;
 
 	case OTIOCGETD:
-		*(int *)data = tp->t_line ? tp->t_line : 2;
+		mutex_spin_enter(&tty_lock);
+		*(int *)data = (tp->t_linesw == NULL) ?
+		    2 /* XXX old NTTYDISC */ : tp->t_linesw->l_no;
+		mutex_spin_exit(&tty_lock);
 		break;
 
 	case OTIOCSETD: {
 		int ldisczero = 0;
 
 		return (ttioctl(tp, TIOCSETD,
-			*(int *)data == 2 ? (caddr_t)&ldisczero : data, flag,
-			p));
+			*(int *)data == 2 ? (void *)&ldisczero : data, flag,
+			l));
 	    }
 
 	case OTIOCCONS:
 		*(int *)data = 1;
-		return (ttioctl(tp, TIOCCONS, data, flag, p));
+		return (ttioctl(tp, TIOCCONS, data, flag, l));
 
 	case TIOCHPCL:
+		mutex_spin_enter(&tty_lock);
 		SET(tp->t_cflag, HUPCL);
+		mutex_spin_exit(&tty_lock);
 		break;
 
 	case TIOCGSID:
-		if (tp->t_session == NULL)
+		mutex_enter(proc_lock);
+		if (tp->t_session == NULL) {
+			mutex_exit(proc_lock);
 			return ENOTTY;
-
-		if (tp->t_session->s_leader == NULL)
+		}
+		if (tp->t_session->s_leader == NULL) {
+			mutex_exit(proc_lock);
 			return ENOTTY;
-
+		}
 		*(int *) data =  tp->t_session->s_leader->p_pid;
+		mutex_exit(proc_lock);
 		break;
 
 	default:
-		return (-1);
+		return (EPASSTHROUGH);
 	}
 	return (0);
 }
 
-int
-ttcompatgetflags(tp)
-	register struct tty *tp;
+static int
+ttcompatgetflags(struct tty *tp)
 {
-	register tcflag_t iflag = tp->t_iflag;
-	register tcflag_t lflag = tp->t_lflag;
-	register tcflag_t oflag = tp->t_oflag;
-	register tcflag_t cflag = tp->t_cflag;
-	register int flags = 0;
+	tcflag_t iflag = tp->t_iflag;
+	tcflag_t lflag = tp->t_lflag;
+	tcflag_t oflag = tp->t_oflag;
+	tcflag_t cflag = tp->t_cflag;
+	int flags = 0;
+
+	KASSERT(mutex_owned(&tty_lock));
 
 	if (ISSET(iflag, IXOFF))
 		SET(flags, TANDEM);
@@ -298,8 +337,6 @@ ttcompatgetflags(tp)
 		SET(flags, MDMBUF);
 	if (!ISSET(cflag, HUPCL))
 		SET(flags, NOHANG);
-	if (ISSET(cflag, XCASE) && ISSET(iflag, IUCLC) && ISSET(oflag, OLCUC))
-		SET(flags, LCASE);
 	if (ISSET(oflag, OXTABS))
 		SET(flags, XTABS);
 	if (ISSET(lflag, ECHOE))
@@ -318,16 +355,17 @@ ttcompatgetflags(tp)
 	return (flags);
 }
 
-void
-ttcompatsetflags(tp, t)
-	register struct tty *tp;
-	register struct termios *t;
+static void
+ttcompatsetflags(struct tty *tp, struct termios *t)
 {
-	register int flags = tp->t_flags;
-	register tcflag_t iflag = t->c_iflag;
-	register tcflag_t oflag = t->c_oflag;
-	register tcflag_t lflag = t->c_lflag;
-	register tcflag_t cflag = t->c_cflag;
+	int flags = tp->t_flags;
+
+	KASSERT(mutex_owned(&tty_lock));
+
+	tcflag_t iflag = t->c_iflag;
+	tcflag_t oflag = t->c_oflag;
+	tcflag_t lflag = t->c_lflag;
+	tcflag_t cflag = t->c_cflag;
 
 	if (ISSET(flags, TANDEM))
 		SET(iflag, IXOFF);
@@ -348,20 +386,10 @@ ttcompatsetflags(tp, t)
 		SET(oflag, OXTABS);
 	else
 		CLR(oflag, OXTABS);
-	if (ISSET(flags, LCASE)) {
-		SET(iflag, IUCLC);
-		SET(oflag, OLCUC);
-		SET(cflag, XCASE);
-	}
-	else {
-		CLR(iflag, IUCLC);
-		CLR(oflag, OLCUC);
-		CLR(cflag, XCASE);
-	}
 
 
 	if (ISSET(flags, RAW)) {
-		iflag &= IXOFF|IXANY;
+		iflag &= IXOFF;
 		CLR(lflag, ISIG|ICANON|IEXTEN);
 		CLR(cflag, PARENB);
 	} else {
@@ -393,7 +421,7 @@ ttcompatsetflags(tp, t)
 	}
 
 	if (ISSET(flags, RAW|LITOUT|PASS8)) {
-		CLR(cflag, CSIZE|XCASE);
+		CLR(cflag, CSIZE);
 		SET(cflag, CS8);
 		if (!ISSET(flags, RAW|PASS8))
 			SET(iflag, ISTRIP);
@@ -406,8 +434,6 @@ ttcompatsetflags(tp, t)
 	} else {
 		CLR(cflag, CSIZE);
 		SET(cflag, CS7);
-		if (ISSET(iflag, IUCLC) && ISSET(oflag, OLCUC))
-			SET(cflag, XCASE);
 		SET(iflag, ISTRIP);
 		SET(oflag, OPOST);
 	}
@@ -418,16 +444,16 @@ ttcompatsetflags(tp, t)
 	t->c_cflag = cflag;
 }
 
-void
-ttcompatsetlflags(tp, t)
-	register struct tty *tp;
-	register struct termios *t;
+static void
+ttcompatsetlflags(struct tty *tp, struct termios *t)
 {
-	register int flags = tp->t_flags;
-	register tcflag_t iflag = t->c_iflag;
-	register tcflag_t oflag = t->c_oflag;
-	register tcflag_t lflag = t->c_lflag;
-	register tcflag_t cflag = t->c_cflag;
+	int flags = tp->t_flags;
+	tcflag_t iflag = t->c_iflag;
+	tcflag_t oflag = t->c_oflag;
+	tcflag_t lflag = t->c_lflag;
+	tcflag_t cflag = t->c_cflag;
+
+	KASSERT(mutex_owned(&tty_lock));
 
 	/* Nothing we can do with CRTBS. */
 	if (ISSET(flags, PRTERA))
@@ -459,11 +485,6 @@ ttcompatsetlflags(tp, t)
 		SET(iflag, IXANY);
 	else
 		CLR(iflag, IXANY);
-	if (ISSET(flags, LCASE)) {
-		SET(oflag, OLCUC);
-		SET(iflag, IUCLC);
-		SET(cflag, XCASE);
-	}
 	CLR(lflag, TOSTOP|FLUSHO|PENDIN|NOFLSH);
 	SET(lflag, ISSET(flags, TOSTOP|FLUSHO|PENDIN|NOFLSH));
 
@@ -476,17 +497,13 @@ ttcompatsetlflags(tp, t)
 			CLR(iflag, ISTRIP);
 		if (!ISSET(flags, RAW|LITOUT))
 			SET(oflag, OPOST);
-		else {
+		else
 			CLR(oflag, OPOST);
-			CLR(cflag, XCASE);
-		}
 	} else {
 		CLR(cflag, CSIZE);
 		SET(cflag, CS7);
 		SET(iflag, ISTRIP);
 		SET(oflag, OPOST);
-		if (ISSET(oflag, OLCUC) && ISSET(iflag, IUCLC))
-			SET(cflag, XCASE);
 	}
 
 	t->c_iflag = iflag;
@@ -494,5 +511,3 @@ ttcompatsetlflags(tp, t)
 	t->c_lflag = lflag;
 	t->c_cflag = cflag;
 }
-
-#endif /* COMPAT_OLDTTY */

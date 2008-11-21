@@ -1,9 +1,11 @@
-/*	$OpenBSD: installboot.c,v 1.12 2008/01/30 02:13:04 krw Exp $ */
-/*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
+/*	$NetBSD: installboot.c,v 1.15 2008/04/28 20:23:29 martin Exp $ */
 
-/*
- * Copyright (c) 1994 Paul Kranenburg
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Paul Kranenburg.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,85 +15,89 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Paul Kranenburg.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/param.h>
+#include <sys/cdefs.h>
 #include <sys/mount.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/disklabel.h>
+#include <sys/statvfs.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
 #include <err.h>
-#include <a.out.h>
 #include <fcntl.h>
 #include <nlist.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <util.h>
+#include <sys/disklabel.h>
+
+#include "loadfile.h"
 
 int	verbose, nowrite, hflag;
 char	*boot, *proto, *dev;
-char  cdev[80];
 
 struct nlist nl[] = {
 #define X_BLOCK_SIZE	0
-	{"_block_size"},
 #define X_BLOCK_COUNT	1
-	{"_block_count"},
 #define X_BLOCK_TABLE	2
-	{"_block_table"},
-	{NULL}
+#ifdef __ELF__
+	{ "block_size" },
+	{ "block_count" },
+	{ "block_table" },
+#else
+	{ "_block_size" },
+	{ "_block_count" },
+	{ "_block_table" },
+#endif
+	{ NULL }
 };
 
 int *block_size_p;		/* block size var. in prototype image */
 int *block_count_p;		/* block count var. in prototype image */
-daddr_t	*block_table;	/* block number array in prototype image */
+/* XXX ondisk32 */
+int32_t	*block_table;		/* block number array in prototype image */
 int	maxblocknum;		/* size of this array */
 
 
-char		*loadprotoblocks(char *, long *);
+char		*loadprotoblocks(char *, size_t *);
 int		loadblocknums(char *, int);
 static void	devread(int, void *, daddr_t, size_t, char *);
 static void	usage(void);
 int 		main(int, char *[]);
-static void     vid_to_disklabel(char *, char *);
+
 
 static void
 usage(void)
 {
+
 	fprintf(stderr,
 	    "usage: installboot [-n] [-v] [-h] <boot> <proto> <device>\n");
 	exit(1);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int	c, devfd;
+	int	c;
+	int	devfd;
 	char	*protostore;
-	long	protosize;
+	size_t	protosize;
 
 	while ((c = getopt(argc, argv, "vnh")) != -1) {
 		switch (c) {
@@ -119,18 +125,12 @@ main(argc, argv)
 	boot = argv[optind];
 	proto = argv[optind + 1];
 	dev = argv[optind + 2];
-	strlcpy(cdev, dev, sizeof cdev);
-	cdev[strlen(cdev)-1] = 'c';
 
 	if (verbose) {
 		printf("boot: %s\n", boot);
 		printf("proto: %s\n", proto);
 		printf("device: %s\n", dev);
-		printf("cdevice: %s\n", cdev);
 	}
-
-	/* Insert VID into disklabel */
-	vid_to_disklabel(cdev, proto);
 
 	/* Load proto blocks into core */
 	if ((protostore = loadprotoblocks(proto, &protosize)) == NULL)
@@ -154,10 +154,13 @@ main(argc, argv)
 		return 0;
 
 	/* Write patched proto bootblocks into the superblock */
-	if (protosize > SBSIZE - DEV_BSIZE)
+	if (protosize > SBLOCKSIZE - DEV_BSIZE)
 		errx(1, "proto bootblocks too big");
 
-	if ((devfd = open(cdev, O_RDWR, 0)) < 0)
+	/* The primary bootblock needs to be written to the raw partition */
+	dev[strlen(dev) - 1] = 'a' + RAW_PART;
+
+	if ((devfd = open(dev, O_RDWR, 0)) < 0)
 		err(1, "open: %s", dev);
 
 	if (lseek(devfd, DEV_BSIZE, SEEK_SET) != DEV_BSIZE)
@@ -173,103 +176,59 @@ main(argc, argv)
 }
 
 char *
-loadprotoblocks(fname, size)
-	char *fname;
-	long *size;
+loadprotoblocks(char *fname, size_t *size)
 {
 	int	fd;
-	size_t	tdsize;		/* text+data size */
-	size_t	bbsize;		/* boot block size (block aligned) */
-	char	*bp;
-	struct	nlist *nlp;
-	struct	exec eh;
-	long	off;
+	u_long	marks[MARK_MAX], bp, offs;
 
 	fd = -1;
-	bp = NULL;
 
 	/* Locate block number array in proto file */
 	if (nlist(fname, nl) != 0) {
 		warnx("nlist: %s: symbols not found", fname);
 		return NULL;
 	}
-	/* Validate symbol types (global data). */
-	for (nlp = nl; nlp->n_un.n_name; nlp++) {
-		if (nlp->n_type != (N_DATA | N_EXT)) {
-			warnx("nlist: %s: wrong type", nlp->n_un.n_name);
-			return NULL;
-		}
-	}
 
-	if ((fd = open(fname, O_RDONLY)) < 0) {
-		warn("open: %s", fname);
+	marks[MARK_START] = 0;
+	if ((fd = loadfile(fname, marks, COUNT_TEXT|COUNT_DATA)) == -1)
 		return NULL;
-	}
-	if (read(fd, &eh, sizeof(eh)) != sizeof(eh)) {
-		warn("read: %s", fname);
-		goto bad;
-	}
-	if (N_GETMAGIC(eh) != OMAGIC) {
-		warn("bad magic: 0x%x", eh.a_midmag);
-		goto bad;
-	}
-	/*
-	 * We have to include the exec header in the beginning of
-	 * the buffer, and leave extra space at the end in case
-	 * the actual write to disk wants to skip the header.
-	 */
-	tdsize = eh.a_text + eh.a_data;
-	bbsize = tdsize + sizeof(eh);
-	bbsize = roundup(bbsize, DEV_BSIZE);
+	(void)close(fd);
 
-	/*
-	 * Allocate extra space here because the caller may copy
-	 * the boot block starting at the end of the exec header.
-	 * This prevents reading beyond the end of the buffer.
-	 */
-	if ((bp = calloc(bbsize + sizeof(eh), 1)) == NULL) {
-		warnx("malloc: %s: no memory", fname);
-		goto bad;
-	}
-	/* Copy the exec header and read the rest of the file. */
-	memcpy(bp, &eh, sizeof(eh));
-	if (read(fd, bp+sizeof(eh), tdsize) != tdsize) {
-		warn("read: %s", fname);
-		goto bad;
-	}
+	*size = roundup(marks[MARK_END] - marks[MARK_START], DEV_BSIZE);
+	bp = (u_long)malloc(*size);
 
-	*size = bbsize;	/* aligned to DEV_BSIZE */
+	offs = marks[MARK_START];
+	marks[MARK_START] = bp - offs;
+
+	if ((fd = loadfile(fname, marks, LOAD_TEXT|LOAD_DATA)) == -1)
+		return NULL;
+	(void)close(fd);
 
 	/* Calculate the symbols' locations within the proto file */
-	off = N_DATOFF(eh) - N_DATADDR(eh) - (eh.a_entry - N_TXTADDR(eh));
-	block_size_p  =   (int *) (bp + nl[X_BLOCK_SIZE ].n_value + off);
-	block_count_p =   (int *) (bp + nl[X_BLOCK_COUNT].n_value + off);
-	block_table = (daddr_t *) (bp + nl[X_BLOCK_TABLE].n_value + off);
+	block_size_p  =   (int *)(bp + (nl[X_BLOCK_SIZE ].n_value - offs));
+	block_count_p =   (int *)(bp + (nl[X_BLOCK_COUNT].n_value - offs));
+	/* XXX ondisk32 */
+	block_table = (int32_t *)(bp + (nl[X_BLOCK_TABLE].n_value - offs));
 	maxblocknum = *block_count_p;
 
 	if (verbose) {
-		printf("%s: entry point %#x\n", fname, eh.a_entry);
-		printf("proto bootblock size %ld\n", *size);
-		printf("room for %d filesystem blocks at %#x\n",
-		    maxblocknum, nl[X_BLOCK_TABLE].n_value);
+		printf("%s: entry point %#lx\n", fname, marks[MARK_ENTRY]);
+		printf("proto bootblock size %d\n", *size);
+		printf("room for %d filesystem blocks at %#lx\n",
+			maxblocknum, nl[X_BLOCK_TABLE].n_value);
 	}
 
-	close(fd);
-	if (!hflag)
-		bp += sizeof(struct exec);
-	return bp;
+	return (char *)bp;
 
- bad:
 	if (bp)
-		free(bp);
-	if (fd >= 0)
-		close(fd);
+		free((void *)bp);
 	return NULL;
 }
 
 static void
 devread(int fd, void *buf, daddr_t blk, size_t size, char *msg)
 {
+
 	if (lseek(fd, dbtob(blk), SEEK_SET) != dbtob(blk))
 		err(1, "%s: devread: lseek", msg);
 
@@ -277,18 +236,18 @@ devread(int fd, void *buf, daddr_t blk, size_t size, char *msg)
 		err(1, "%s: devread: read", msg);
 }
 
-static char sblock[SBSIZE];
+static char sblock[SBLOCKSIZE];
 
 int
 loadblocknums(char *boot, int devfd)
 {
 	int		i, fd;
 	struct	stat	statbuf;
-	struct	statfs	statfsbuf;
+	struct	statvfs	statvfsbuf;
 	struct fs	*fs;
 	char		*buf;
 	daddr_t		blk, *ap;
-	struct ufs1_dinode	*ip;
+	struct ufs1_dinode *ip;
 	int		ndb;
 
 	/*
@@ -302,11 +261,13 @@ loadblocknums(char *boot, int devfd)
 	if ((fd = open(boot, O_RDONLY)) < 0)
 		err(1, "open: %s", boot);
 
-	if (fstatfs(fd, &statfsbuf) != 0)
+	if (fstatvfs(fd, &statvfsbuf) != 0)
 		err(1, "statfs: %s", boot);
 
-	if (strncmp(statfsbuf.f_fstypename, "ffs", MFSNAMELEN) &&
-	    strncmp(statfsbuf.f_fstypename, "ufs", MFSNAMELEN) ) {
+	if (strncmp(statvfsbuf.f_fstypename, "ffs",
+	    sizeof(statvfsbuf.f_fstypename)) &&
+	    strncmp(statvfsbuf.f_fstypename, "ufs",
+	    sizeof(statvfsbuf.f_fstypename))) {
 		errx(1, "%s: must be on an FFS filesystem", boot);
 	}
 
@@ -319,14 +280,13 @@ loadblocknums(char *boot, int devfd)
 	close(fd);
 
 	/* Read superblock */
-	devread(devfd, sblock, SBLOCK, SBSIZE, "superblock");
+	devread(devfd, sblock, (daddr_t)(BBSIZE / DEV_BSIZE),
+	    SBLOCKSIZE, "superblock");
 	fs = (struct fs *)sblock;
 
 	/* Sanity-check super-block. */
-
-	if (fs->fs_magic != FS_MAGIC)
-		errx(1, "Bad magic number in superblock");
-
+	if (fs->fs_magic != FS_UFS1_MAGIC)
+		errx(1, "Bad magic number in superblock, must be UFS1");
 	if (fs->fs_inopb <= 0)
 		err(1, "Bad inopb=%d in superblock", fs->fs_inopb);
 
@@ -348,7 +308,7 @@ loadblocknums(char *boot, int devfd)
 	*block_size_p = fs->fs_bsize;
 	if (verbose)
 		printf("Will load %d blocks of size %d each.\n",
-			   ndb, fs->fs_bsize);
+		    ndb, fs->fs_bsize);
 
 	/*
 	 * Get the block numbers; we don't handle fragments
@@ -369,7 +329,8 @@ loadblocknums(char *boot, int devfd)
 	 */
 	blk = fsbtodb(fs, ip->di_ib[0]);
 	devread(devfd, buf, blk, fs->fs_bsize, "indirect block");
-	ap = (daddr_t *)buf;
+	/* XXX ondisk32 */
+	ap = (int32_t *)buf;
 	for (; i < NINDIR(fs) && *ap && ndb; i++, ap++, ndb--) {
 		blk = fsbtodb(fs, *ap);
 		if (verbose)
@@ -378,86 +339,4 @@ loadblocknums(char *boot, int devfd)
 	}
 
 	return 0;
-}
-
-static void
-vid_to_disklabel(char *dkname, char *bootproto)
-{
-	char *specname;
-	int exe_file, f;
-	struct mvmedisklabel *pcpul;
-	struct stat stat;
-	unsigned int exe_addr;
-	unsigned short exe_addr_u;
-	unsigned short exe_addr_l;
-
-	pcpul = (struct mvmedisklabel *)malloc(sizeof(struct mvmedisklabel));
-	bzero(pcpul, sizeof(struct mvmedisklabel));
-
-	if (verbose)
-		printf("modifying vid.\n");
-
-	exe_file = open(bootproto, O_RDONLY, 0444);
-	if (exe_file == -1) {
-		perror(bootproto);
-		exit(2);
-	}
-
-	f = opendev(dkname, O_RDWR, OPENDEV_PART, &specname);
-
-	if (lseek(f, 0, SEEK_SET) < 0 ||
-	    read(f, pcpul, sizeof(struct mvmedisklabel)) !=
-	    sizeof(struct mvmedisklabel))
-		err(4, "%s", specname);
-
-
-	pcpul->version = 1;
-	strncpy(pcpul->vid_id, "M68K", 4);
-
-	fstat(exe_file, &stat);
-
-	/* size in 256 byte blocks round up after a.out header removed */
-
-	pcpul->vid_oss = 2;
-	pcpul->vid_osl = (((stat.st_size -0x20) +511) / 512) *2;
-
-	lseek(exe_file, 0x14, SEEK_SET);
-	read(exe_file, &exe_addr, 4);
-
-	/* check this, it may not work in both endian. */
-	/* No, it doesn't.  Use a big endian machine for now. SPM */
-
-	{
-		union {
-			struct s {
-				unsigned short s1;
-				unsigned short s2;
-			} s;
-			unsigned long l;
-		} a;
-		a.l = exe_addr;
-		pcpul->vid_osa_u = a.s.s1;
-		pcpul->vid_osa_l = a.s.s2;
-
-	}
-	pcpul->vid_cas = 1;
-	pcpul->vid_cal = 1;
-
-	/* do not want to write past end of structure, not null terminated */
-
-	strncpy(pcpul->vid_mot, "MOTOROLA", 8);
-
-	pcpul->cfg_rec = 0x100;
-	pcpul->cfg_psm = 0x200;
-
-	if (!nowrite) {
-		if (lseek(f, 0, SEEK_SET) < 0 ||
-		    write(f, pcpul, sizeof(struct mvmedisklabel)) <
-		    sizeof(struct mvmedisklabel))
-		    	err(4, "%s", specname);
-	}
-	free(pcpul);
-
-	close(exe_file);
-	close(f);
 }

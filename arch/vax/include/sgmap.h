@@ -1,5 +1,4 @@
-/*	$OpenBSD: sgmap.h,v 1.6 2003/11/10 21:05:06 miod Exp $	*/
-/* $NetBSD: sgmap.h,v 1.3 2000/05/17 21:22:18 matt Exp $ */
+/* $NetBSD: sgmap.h,v 1.6 2008/04/28 20:23:39 martin Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,8 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef	_VAX_COMMON_SGMAPVAR_H
-#define	_VAX_COMMON_SGMAPVAR_H
+#ifndef	_VAX_SGMAP_H
+#define	_VAX_SGMAP_H
 
 #include <sys/extent.h>
 #include <machine/bus.h>
@@ -56,33 +48,33 @@
  */
 struct vax_sgmap {
 	struct extent *aps_ex;		/* extent map to manage sgva space */
-	pt_entry_t *aps_pt;		/* page table */
+	struct pte *aps_pt;		/* page table */
 	bus_addr_t aps_sgvabase;	/* base of the sgva space */
 	bus_size_t aps_sgvasize;	/* size of the sgva space */
 	bus_addr_t aps_pa;		/* Address in region */
 	unsigned int aps_flags;		/* flags */
 };
 
-void	vax_sgmap_init(bus_dma_tag_t, struct vax_sgmap *,
-	    const char *, bus_addr_t, bus_size_t, pt_entry_t *, bus_size_t);
+void	vax_sgmap_dmatag_init(bus_dma_tag_t, void *, size_t);
 
-int	vax_sgmap_alloc(bus_dmamap_t, bus_size_t,
-	    struct vax_sgmap *, int);
+void	vax_sgmap_init(bus_dma_tag_t, struct vax_sgmap *, const char *,
+	    bus_addr_t, bus_size_t, struct pte *, bus_size_t);
+
+int	vax_sgmap_alloc(bus_dmamap_t, bus_size_t, struct vax_sgmap *, int);
 void	vax_sgmap_free(bus_dmamap_t, struct vax_sgmap *);
 
-int     vax_sgmap_load(bus_dma_tag_t, bus_dmamap_t, void *, 
-	    bus_size_t, struct proc *, int, struct vax_sgmap *);
+int     vax_sgmap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int, struct vax_sgmap *);
 
-int	vax_sgmap_load_mbuf(bus_dma_tag_t, bus_dmamap_t,
-	    struct mbuf *, int, struct vax_sgmap *);
-   
-int     vax_sgmap_load_uio(bus_dma_tag_t, bus_dmamap_t,
-	    struct uio *, int, struct vax_sgmap *);
-         
-int	vax_sgmap_load_raw(bus_dma_tag_t, bus_dmamap_t,
-	    bus_dma_segment_t *, int, bus_size_t, int, struct vax_sgmap *);
-
-void	vax_sgmap_unload( bus_dma_tag_t, bus_dmamap_t, 
+int	vax_sgmap_load_mbuf(bus_dma_tag_t, bus_dmamap_t, struct mbuf *, int,
 	    struct vax_sgmap *);
+   
+int     vax_sgmap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int,
+	    struct vax_sgmap *);
+         
+int	vax_sgmap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
+	    int, bus_size_t, int, struct vax_sgmap *);
 
-#endif	/* _VAX_COMMON_SGMAPVAR_H */
+void	vax_sgmap_unload(bus_dma_tag_t, bus_dmamap_t, struct vax_sgmap *);
+
+#endif	/* _VAX_SGMAP_H */

@@ -1,4 +1,4 @@
-/* $NetBSD: lunafb.c,v 1.14 2006/04/12 19:38:23 jmmv Exp $ */
+/* $NetBSD: lunafb.c,v 1.16 2008/04/28 20:23:26 martin Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: lunafb.c,v 1.14 2006/04/12 19:38:23 jmmv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lunafb.c,v 1.16 2008/04/28 20:23:26 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -134,7 +127,7 @@ static const struct wsscreen_list omfb_screenlist = {
 	sizeof(_omfb_scrlist) / sizeof(struct wsscreen_descr *), _omfb_scrlist
 };
 
-static int   omfbioctl __P((void *, void *, u_long, caddr_t, int,
+static int   omfbioctl __P((void *, void *, u_long, void *, int,
 		            struct lwp *));
 static paddr_t omfbmmap __P((void *, void *, off_t, int));
 static int   omfb_alloc_screen __P((void *, const struct wsscreen_descr *,
@@ -175,7 +168,7 @@ omfbmatch(parent, cf, aux)
 	if (strcmp(ma->ma_name, fb_cd.cd_name))
 		return (0);
 #if 0	/* XXX badaddr() bombs if no framebuffer is installed */
-	if (badaddr((caddr_t)ma->ma_addr, 4))
+	if (badaddr((void *)ma->ma_addr, 4))
 		return (0);
 #else
 	if (hwplanemask == 0)
@@ -235,7 +228,7 @@ omfbioctl(v, vs, cmd, data, flag, l)
 	void *v;
 	void *vs;
 	u_long cmd;
-	caddr_t data;
+	void *data;
 	int flag;
 	struct lwp *l;
 {

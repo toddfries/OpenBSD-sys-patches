@@ -1,5 +1,4 @@
-/*	$OpenBSD: resource.h,v 1.7 2003/12/11 23:02:30 millert Exp $	*/
-/*	$NetBSD: resource.h,v 1.14 1996/02/09 18:25:27 christos Exp $	*/
+/*	$NetBSD: resource.h,v 1.29 2006/07/23 22:06:14 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -29,11 +28,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)resource.h	8.2 (Berkeley) 1/4/94
+ *	@(#)resource.h	8.4 (Berkeley) 1/9/95
  */
 
 #ifndef _SYS_RESOURCE_H_
 #define	_SYS_RESOURCE_H_
+
+#include <sys/featuretest.h>
+#include <sys/time.h>
 
 /*
  * Process priority specifications to get/setpriority.
@@ -56,8 +58,10 @@ struct	rusage {
 	struct timeval ru_utime;	/* user time used */
 	struct timeval ru_stime;	/* system time used */
 	long	ru_maxrss;		/* max resident set size */
+#ifdef _KERNEL
 #define	ru_first	ru_ixrss
-	long	ru_ixrss;		/* integral shared text memory size */
+#endif
+	long	ru_ixrss;		/* integral shared memory size */
 	long	ru_idrss;		/* integral unshared data " */
 	long	ru_isrss;		/* integral unshared stack " */
 	long	ru_minflt;		/* page reclaims */
@@ -70,7 +74,9 @@ struct	rusage {
 	long	ru_nsignals;		/* signals received */
 	long	ru_nvcsw;		/* voluntary context switches */
 	long	ru_nivcsw;		/* involuntary " */
+#ifdef _KERNEL
 #define	ru_last		ru_nivcsw
+#endif
 };
 
 /*
@@ -85,33 +91,42 @@ struct	rusage {
 #define	RLIMIT_MEMLOCK	6		/* locked-in-memory address space */
 #define	RLIMIT_NPROC	7		/* number of processes */
 #define	RLIMIT_NOFILE	8		/* number of open files */
+#define	RLIMIT_SBSIZE	9		/* maximum size of all socket buffers */
 
-#define	RLIM_NLIMITS	9		/* number of resource limits */
+#if defined(_NETBSD_SOURCE)
+#define	RLIM_NLIMITS	10		/* number of resource limits */
+#endif
 
-#define	RLIM_INFINITY	(((rlim_t)1 << 63) - 1)
-#define	RLIM_SAVED_MAX	RLIM_INFINITY
-#define	RLIM_SAVED_CUR	RLIM_INFINITY
+#define	RLIM_INFINITY	(~((u_quad_t)1 << 63))	/* no limit */
+#define	RLIM_SAVED_MAX	RLIM_INFINITY	/* unrepresentable hard limit */
+#define	RLIM_SAVED_CUR	RLIM_INFINITY	/* unrepresentable soft limit */
 
+#if defined(_KERNEL)
+/* 4.3BSD compatibility rlimit argument structure. */
 struct orlimit {
 	int32_t	rlim_cur;		/* current (soft) limit */
 	int32_t	rlim_max;		/* maximum value for rlim_cur */
 };
+#endif
 
 struct rlimit {
 	rlim_t	rlim_cur;		/* current (soft) limit */
 	rlim_t	rlim_max;		/* maximum value for rlim_cur */
 };
 
+#if defined(_NETBSD_SOURCE)
 /* Load average structure. */
 struct loadavg {
 	fixpt_t	ldavg[3];
 	long	fscale;
 };
+#endif
 
 #ifdef _KERNEL
 extern struct loadavg averunnable;
-int	dosetrlimit(struct proc *, u_int, struct rlimit *);
-int	donice(struct proc *, struct proc *, int);
+struct pcred;
+int	dosetrlimit(struct lwp *, struct proc *, int, struct rlimit *);
+int	donice(struct lwp *, struct proc *, int);
 
 #else
 #include <sys/cdefs.h>

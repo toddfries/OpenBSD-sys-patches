@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_emuldata.h,v 1.12 2006/08/23 19:49:09 manu Exp $	*/
+/*	$NetBSD: linux_emuldata.h,v 1.16 2008/10/26 16:38:22 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998,2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,6 +30,7 @@
  */
 
 #include <compat/linux/common/linux_machdep.h> /* For LINUX_NPTL */
+#include <compat/linux/common/linux_futex.h>
 
 #ifndef _COMMON_LINUX_EMULDATA_H
 #define _COMMON_LINUX_EMULDATA_H
@@ -48,7 +42,7 @@
  * structure.
  */
 struct linux_emuldata_shared {
-	caddr_t	p_break;	/* Processes' idea of break */
+	void *	p_break;	/* Processes' idea of break */
 	int refs;
 	pid_t group_pid;	/* PID of Linux process (group of threads) */
 	/* List of Linux threads (NetBSD processes) in the Linux process */
@@ -58,6 +52,7 @@ struct linux_emuldata_shared {
 };
 
 #define LINUX_LES_INEXITGROUP	0x1	/* thread group doing exit_group() */
+#define LINUX_LES_USE_NPTL	0x2	/* Need to emulate NPTL threads */
 
 struct linux_emuldata {
 #if notyet
@@ -79,6 +74,9 @@ struct linux_emuldata {
 	int flags;		/* See above */
 #endif
 #endif
+
+	struct linux_robust_list_head *robust_futexes;
+
 	/* List of Linux threads (NetBSD processes) in the Linux process */
 	LIST_ENTRY(linux_emuldata) threads;
 	struct proc *proc;	/* backpointer to struct proc */

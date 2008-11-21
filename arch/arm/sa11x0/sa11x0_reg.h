@@ -1,5 +1,4 @@
-/*	$OpenBSD: sa11x0_reg.h,v 1.2 2005/01/02 19:52:36 drahn Exp $ */
-/*	$NetBSD: sa11x0_reg.h,v 1.4 2002/07/19 18:26:56 ichiro Exp $	*/
+/*	$NetBSD: sa11x0_reg.h,v 1.7 2008/04/28 20:23:14 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.  All rights reserved.
@@ -15,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,8 +40,9 @@
 #define SAIPIC_BASE		0x90050000	/* Interrupt Controller */
 #define SAPPC_BASE		0x90060000	/* Peripheral Pin Controller */
 #define SAUDC_BASE		0x80000000	/* USB Device Controller*/
-#define	SACOM1_BASE		0x80010000	/* GPCLK/UART 1 */
-#define SACOM3_HW_BASE		0x80050000	/* UART 3  */
+#define SACOM1_BASE		0x80010000	/* GPCLK/UART 1 */
+#define SACOM2_BASE		0x80030000	/* Infrared Comm. Port (ICP) */
+#define SACOM3_BASE		0x80050000	/* UART 3  */
 #define SAMCP_BASE		0x80060000	/* MCP Controller */
 #define SASSP_BASE		0x80070000	/* Synchronous serial port */
 
@@ -57,7 +50,7 @@
 #define SALCD_BASE		0xB0100000	/* LCD */
 
 /* Register base virtual addresses mapped by initarm() */
-#define SACOM3_BASE             0xd000d000
+#define SACOM3_VBASE		0xd000d000
 
 /* Interrupt controller registers */
 #define SAIPIC_NPORTS		9

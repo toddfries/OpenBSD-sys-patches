@@ -1,6 +1,4 @@
-/* $OpenBSD: ieee80211_rssadapt.h,v 1.4 2007/06/16 13:17:05 damien Exp $ */
-/* $NetBSD: ieee80211_rssadapt.h,v 1.3 2004/05/06 03:03:20 dyoung Exp $ */
-
+/* $NetBSD: ieee80211_rssadapt.h,v 1.6 2005/12/10 23:26:35 elad Exp $ */
 /*-
  * Copyright (c) 2003, 2004 David Young.  All rights reserved.
  *
@@ -30,6 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  */
+
 #ifndef _NET80211_IEEE80211_RSSADAPT_H_
 #define _NET80211_IEEE80211_RSSADAPT_H_
 
@@ -73,7 +72,7 @@ struct ieee80211_rssadapt {
 	u_int32_t		ra_pktrate;
 	/* RSSI threshold for each Tx rate */
 	u_int16_t		ra_rate_thresh[IEEE80211_RSSADAPT_BKTS]
-				    [IEEE80211_RATE_SIZE];
+					      [IEEE80211_RATE_SIZE];
 	struct timeval		ra_last_raise;
 	struct timeval		ra_raise_interval;
 };
@@ -89,18 +88,19 @@ struct ieee80211_rssdesc {
 };
 
 void	ieee80211_rssadapt_updatestats(struct ieee80211_rssadapt *);
-void	ieee80211_rssadapt_input(struct ieee80211com *,
-	    const struct ieee80211_node *, struct ieee80211_rssadapt *, int);
+void	ieee80211_rssadapt_input(struct ieee80211com *, struct ieee80211_node *,
+	    struct ieee80211_rssadapt *, int);
 void	ieee80211_rssadapt_lower_rate(struct ieee80211com *,
-	    const struct ieee80211_node *, struct ieee80211_rssadapt *,
-	    const struct ieee80211_rssdesc *);
+	    struct ieee80211_node *, struct ieee80211_rssadapt *,
+	    struct ieee80211_rssdesc *);
 void	ieee80211_rssadapt_raise_rate(struct ieee80211com *,
-	    struct ieee80211_rssadapt *, const struct ieee80211_rssdesc *);
+	    struct ieee80211_rssadapt *, struct ieee80211_rssdesc *);
 int	ieee80211_rssadapt_choose(struct ieee80211_rssadapt *,
-	    const struct ieee80211_rateset *, const struct ieee80211_frame *,
-	    u_int, int, const char *, int);
+	    struct ieee80211_rateset *, struct ieee80211_frame *, u_int, int,
+	    const char *, int);
 #ifdef IEEE80211_DEBUG
 extern int ieee80211_rssadapt_debug;
 #endif /* IEEE80211_DEBUG */
 
-#endif /* _NET80211_IEEE80211_RSSADAPT_H_ */
+#endif /* !_NET80211_IEEE80211_RSSADAPT_H_ */
+

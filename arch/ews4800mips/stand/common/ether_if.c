@@ -1,4 +1,4 @@
-/*	$NetBSD: ether_if.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
+/*	$NetBSD: ether_if.c,v 1.3 2008/04/28 20:23:18 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,10 +59,10 @@ int ether_get(struct iodesc *, void *, size_t, time_t);
 int ether_put(struct iodesc *, void *, size_t);
 void ether_end(struct netif *);
 
-extern boolean_t lance_init(void);
+extern bool lance_init(void);
 extern void lance_eaddr(uint8_t *);
-extern boolean_t lance_get(void *, size_t);
-extern boolean_t lance_put(void *, size_t);
+extern bool lance_get(void *, size_t);
+extern bool lance_put(void *, size_t);
 
 struct netif_stats ether_stats[1];
 

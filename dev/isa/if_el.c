@@ -1,5 +1,4 @@
-/*    $OpenBSD: if_el.c,v 1.20 2006/03/25 22:41:44 djm Exp $       */
-/*	$NetBSD: if_el.c,v 1.39 1996/05/12 23:52:32 mycroft Exp $	*/
+/*	$NetBSD: if_el.c,v 1.81 2008/11/07 00:20:07 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1994, Matthew E. Kimmel.  Permission is hereby granted
@@ -19,7 +18,12 @@
  *	- Does not currently support multicasts
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_el.c,v 1.81 2008/11/07 00:20:07 dyoung Exp $");
+
+#include "opt_inet.h"
 #include "bpfilter.h"
+#include "rnd.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -29,35 +33,42 @@
 #include <sys/socket.h>
 #include <sys/syslog.h>
 #include <sys/device.h>
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+
+#include <net/if_ether.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#include <netinet/if_ether.h>
+#include <netinet/if_inarp.h>
 #endif
+
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#include <net/bpfdesc.h>
 #endif
 
-#include <machine/cpu.h>
-#include <machine/intr.h>
-#include <machine/pio.h>
+#include <sys/cpu.h>
+#include <sys/intr.h>
+#include <sys/bus.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/if_elreg.h>
 
 /* for debugging convenience */
 #ifdef EL_DEBUG
-#define dprintf(x) printf x
+#define DPRINTF(x) printf x
 #else
-#define dprintf(x)
+#define DPRINTF(x)
 #endif
 
 /*
@@ -67,8 +78,13 @@ struct el_softc {
 	struct device sc_dev;
 	void *sc_ih;
 
-	struct arpcom sc_arpcom;	/* ethernet common */
-	int sc_iobase;			/* base I/O addr */
+	struct ethercom sc_ethercom;	/* ethernet common */
+	bus_space_tag_t sc_iot;		/* bus space identifier */
+	bus_space_handle_t sc_ioh;	/* i/o handle */
+
+#if NRND > 0
+	rndsource_element_t rnd_source;
+#endif
 };
 
 /*
@@ -76,7 +92,7 @@ struct el_softc {
  */
 int elintr(void *);
 void elinit(struct el_softc *);
-int elioctl(struct ifnet *, u_long, caddr_t);
+int elioctl(struct ifnet *, u_long, void *);
 void elstart(struct ifnet *);
 void elwatchdog(struct ifnet *);
 void elreset(struct el_softc *);
@@ -86,16 +102,11 @@ void elread(struct el_softc *, int);
 struct mbuf *elget(struct el_softc *sc, int);
 static inline void el_hardreset(struct el_softc *);
 
-int elprobe(struct device *, void *, void *);
+int elprobe(struct device *, struct cfdata *, void *);
 void elattach(struct device *, struct device *, void *);
 
-struct cfattach el_ca = {
-	sizeof(struct el_softc), elprobe, elattach
-};
-
-struct cfdriver el_cd = {
-	NULL, "el", DV_IFNET
-};
+CFATTACH_DECL(el, sizeof(struct el_softc),
+    elprobe, elattach, NULL, NULL);
 
 /*
  * Probe routine.
@@ -104,42 +115,61 @@ struct cfdriver el_cd = {
  * (XXX - cgd -- needs help)
  */
 int
-elprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+elprobe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
-	struct el_softc *sc = match;
 	struct isa_attach_args *ia = aux;
-	int iobase = ia->ia_iobase;
-	u_char station_addr[ETHER_ADDR_LEN];
-	int i;
+	bus_space_tag_t iot = ia->ia_iot;
+	bus_space_handle_t ioh;
+	int iobase;
+	u_int8_t station_addr[ETHER_ADDR_LEN];
+	u_int8_t i;
+	int rval;
+
+	rval = 0;
+
+	if (ia->ia_nio < 1)
+		return (0);
+	if (ia->ia_nirq < 1)
+		return (0);
+
+	if (ISA_DIRECT_CONFIG(ia))
+		return (0);
+
+	iobase = ia->ia_io[0].ir_addr;
+
+	if (ia->ia_io[0].ir_addr == ISA_UNKNOWN_PORT)
+		return (0);
+	if (ia->ia_irq[0].ir_irq == ISA_UNKNOWN_IRQ)
+		return (0);
 
 	/* First check the base. */
-	if (iobase < 0x280 || iobase > 0x3f0)
+	if (iobase < 0x200 || iobase > 0x3f0)
 		return 0;
 
-	/* Grab some info for our structure. */
-	sc->sc_iobase = iobase;
+	/* Map i/o space. */
+	if (bus_space_map(iot, iobase, 16, 0, &ioh))
+		return 0;
 
 	/*
 	 * Now attempt to grab the station address from the PROM and see if it
 	 * contains the 3com vendor code.
 	 */
-	dprintf(("Probing 3c501 at 0x%x...\n", iobase));
+	DPRINTF(("Probing 3c501 at 0x%x...\n", iobase));
 
 	/* Reset the board. */
-	dprintf(("Resetting board...\n"));
-	outb(iobase+EL_AC, EL_AC_RESET);
+	DPRINTF(("Resetting board...\n"));
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_RESET);
 	delay(5);
-	outb(iobase+EL_AC, 0);
+	bus_space_write_1(iot, ioh, EL_AC, 0);
 
 	/* Now read the address. */
-	dprintf(("Reading station address...\n"));
+	DPRINTF(("Reading station address...\n"));
 	for (i = 0; i < ETHER_ADDR_LEN; i++) {
-		outb(iobase+EL_GPBL, i);
-		station_addr[i] = inb(iobase+EL_EAW);
+		bus_space_write_1(iot, ioh, EL_GPBL, i);
+		station_addr[i] = bus_space_read_1(iot, ioh, EL_EAW);
 	}
-	dprintf(("Address is %s\n", ether_sprintf(station_addr)));
+	DPRINTF(("Address is %s\n", ether_sprintf(station_addr)));
 
 	/*
 	 * If the vendor code is ok, return a 1.  We'll assume that whoever
@@ -147,17 +177,24 @@ elprobe(parent, match, aux)
 	 */
 	if (station_addr[0] != 0x02 || station_addr[1] != 0x60 ||
 	    station_addr[2] != 0x8c) {
-		dprintf(("Bad vendor code.\n"));
-		return 0;
+		DPRINTF(("Bad vendor code.\n"));
+		goto out;
 	}
+	DPRINTF(("Vendor code ok.\n"));
 
-	dprintf(("Vendor code ok.\n"));
-	/* Copy the station address into the arpcom structure. */
-	bcopy(station_addr, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+	ia->ia_nio = 1;
+	ia->ia_io[0].ir_size = 16;
 
-	ia->ia_iosize = 4;	/* XXX */
-	ia->ia_msize = 0;
-	return 1;
+	ia->ia_nirq = 1;
+
+	ia->ia_niomem = 0;
+	ia->ia_ndrq = 0;
+
+	rval = 1;
+
+ out:
+	bus_space_unmap(iot, ioh, 16);
+	return rval;
 }
 
 /*
@@ -166,21 +203,45 @@ elprobe(parent, match, aux)
  * assume that the IRQ given is correct.
  */
 void
-elattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+elattach(struct device *parent, struct device *self, void *aux)
 {
 	struct el_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	bus_space_tag_t iot = ia->ia_iot;
+	bus_space_handle_t ioh;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
+	u_int8_t myaddr[ETHER_ADDR_LEN];
+	u_int8_t i;
 
-	dprintf(("Attaching %s...\n", sc->sc_dev.dv_xname));
+	printf("\n");
+
+	DPRINTF(("Attaching %s...\n", device_xname(&sc->sc_dev)));
+
+	/* Map i/o space. */
+	if (bus_space_map(iot, ia->ia_io[0].ir_addr, 16, 0, &ioh)) {
+		aprint_error_dev(self, "can't map i/o space\n");
+		return;
+	}
+
+	sc->sc_iot = iot;
+	sc->sc_ioh = ioh;
+
+	/* Reset the board. */
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_RESET);
+	delay(5);
+	bus_space_write_1(iot, ioh, EL_AC, 0);
+
+	/* Now read the address. */
+	for (i = 0; i < ETHER_ADDR_LEN; i++) {
+		bus_space_write_1(iot, ioh, EL_GPBL, i);
+		myaddr[i] = bus_space_read_1(iot, ioh, EL_EAW);
+	}
 
 	/* Stop the board. */
 	elstop(sc);
 
 	/* Initialize ifnet structure. */
-	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_start = elstart;
 	ifp->if_ioctl = elioctl;
@@ -189,17 +250,23 @@ elattach(parent, self, aux)
 	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Now we can attach the interface. */
-	dprintf(("Attaching interface...\n"));
+	DPRINTF(("Attaching interface...\n"));
 	if_attach(ifp);
-	ether_ifattach(ifp);
+	ether_ifattach(ifp, myaddr);
 
 	/* Print out some information for the user. */
-	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf("%s: address %s\n", device_xname(self), ether_sprintf(myaddr));
 
-	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
-	    IPL_NET, elintr, sc, sc->sc_dev.dv_xname);
+	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
+	    IST_EDGE, IPL_NET, elintr, sc);
 
-	dprintf(("elattach() finished.\n"));
+#if NRND > 0
+	DPRINTF(("Attaching to random...\n"));
+	rnd_attach_source(&sc->rnd_source, device_xname(&sc->sc_dev),
+			  RND_TYPE_NET, 0);
+#endif
+
+	DPRINTF(("elattach() finished.\n"));
 }
 
 /*
@@ -211,7 +278,7 @@ elreset(sc)
 {
 	int s;
 
-	dprintf(("elreset()\n"));
+	DPRINTF(("elreset()\n"));
 	s = splnet();
 	elstop(sc);
 	elinit(sc);
@@ -226,7 +293,7 @@ elstop(sc)
 	struct el_softc *sc;
 {
 
-	outb(sc->sc_iobase+EL_AC, 0);
+	bus_space_write_1(sc->sc_iot, sc->sc_ioh, EL_AC, 0);
 }
 
 /*
@@ -237,15 +304,17 @@ static inline void
 el_hardreset(sc)
 	struct el_softc *sc;
 {
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 	int i;
 
-	outb(iobase+EL_AC, EL_AC_RESET);
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_RESET);
 	delay(5);
-	outb(iobase+EL_AC, 0);
+	bus_space_write_1(iot, ioh, EL_AC, 0);
 
 	for (i = 0; i < ETHER_ADDR_LEN; i++)
-		outb(iobase+i, sc->sc_arpcom.ac_enaddr[i]);
+		bus_space_write_1(iot, ioh, i,
+		    CLLADDR(sc->sc_ethercom.ec_if.if_sadl)[i]);
 }
 
 /*
@@ -255,27 +324,32 @@ void
 elinit(sc)
 	struct el_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	int iobase = sc->sc_iobase;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 
 	/* First, reset the board. */
 	el_hardreset(sc);
 
 	/* Configure rx. */
-	dprintf(("Configuring rx...\n"));
+	DPRINTF(("Configuring rx...\n"));
 	if (ifp->if_flags & IFF_PROMISC)
-		outb(iobase+EL_RXC, EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB | EL_RXC_DOFLOW | EL_RXC_PROMISC);
+		bus_space_write_1(iot, ioh, EL_RXC,
+		    EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB |
+		    EL_RXC_DOFLOW | EL_RXC_PROMISC);
 	else
-		outb(iobase+EL_RXC, EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB | EL_RXC_DOFLOW | EL_RXC_ABROAD);
-	outb(iobase+EL_RBC, 0);
+		bus_space_write_1(iot, ioh, EL_RXC,
+		    EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB |
+		    EL_RXC_DOFLOW | EL_RXC_ABROAD);
+	bus_space_write_1(iot, ioh, EL_RBC, 0);
 
 	/* Configure TX. */
-	dprintf(("Configuring tx...\n"));
-	outb(iobase+EL_TXC, 0);
+	DPRINTF(("Configuring tx...\n"));
+	bus_space_write_1(iot, ioh, EL_TXC, 0);
 
 	/* Start reception. */
-	dprintf(("Starting reception...\n"));
-	outb(iobase+EL_AC, EL_AC_IRQE | EL_AC_RX);
+	DPRINTF(("Starting reception...\n"));
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_IRQE | EL_AC_RX);
 
 	/* Set flags appropriately. */
 	ifp->if_flags |= IFF_RUNNING;
@@ -295,11 +369,12 @@ elstart(ifp)
 	struct ifnet *ifp;
 {
 	struct el_softc *sc = ifp->if_softc;
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 	struct mbuf *m, *m0;
 	int s, i, off, retries;
 
-	dprintf(("elstart()...\n"));
+	DPRINTF(("elstart()...\n"));
 	s = splnet();
 
 	/* Don't do anything if output is active. */
@@ -325,48 +400,56 @@ elstart(ifp)
 #if NBPFILTER > 0
 		/* Give the packet to the bpf, if any. */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
+			bpf_mtap(ifp->if_bpf, m0);
 #endif
 
 		/* Disable the receiver. */
-		outb(iobase+EL_AC, EL_AC_HOST);
-		outb(iobase+EL_RBC, 0);
+		bus_space_write_1(iot, ioh, EL_AC, EL_AC_HOST);
+		bus_space_write_1(iot, ioh, EL_RBC, 0);
 
 		/* Transfer datagram to board. */
-		dprintf(("el: xfr pkt length=%d...\n", m0->m_pkthdr.len));
-		off = EL_BUFSIZ - max(m0->m_pkthdr.len, ETHER_MIN_LEN);
-		outb(iobase+EL_GPBL, off);
-		outb(iobase+EL_GPBH, off >> 8);
+		DPRINTF(("el: xfr pkt length=%d...\n", m0->m_pkthdr.len));
+		off = EL_BUFSIZ - max(m0->m_pkthdr.len,
+		    ETHER_MIN_LEN - ETHER_CRC_LEN);
+#ifdef DIAGNOSTIC
+		if ((off & 0xffff) != off)
+			printf("%s: bogus off 0x%x\n",
+			    device_xname(&sc->sc_dev), off);
+#endif
+		bus_space_write_1(iot, ioh, EL_GPBL, off & 0xff);
+		bus_space_write_1(iot, ioh, EL_GPBH, (off >> 8) & 0xff);
 
 		/* Copy the datagram to the buffer. */
 		for (m = m0; m != 0; m = m->m_next)
-			outsb(iobase+EL_BUF, mtod(m, caddr_t), m->m_len);
+			bus_space_write_multi_1(iot, ioh, EL_BUF,
+			    mtod(m, u_int8_t *), m->m_len);
 		for (i = 0;
 		    i < ETHER_MIN_LEN - ETHER_CRC_LEN - m0->m_pkthdr.len; i++)
-			outb(iobase+EL_BUF, 0);
-			
+			bus_space_write_1(iot, ioh, EL_BUF, 0);
+
 		m_freem(m0);
 
 		/* Now transmit the datagram. */
 		retries = 0;
 		for (;;) {
-			outb(iobase+EL_GPBL, off);
-			outb(iobase+EL_GPBH, off >> 8);
+			bus_space_write_1(iot, ioh, EL_GPBL, off & 0xff);
+			bus_space_write_1(iot, ioh, EL_GPBH, (off >> 8) & 0xff);
 			if (el_xmit(sc)) {
 				ifp->if_oerrors++;
 				break;
 			}
 			/* Check out status. */
-			i = inb(iobase+EL_TXS);
-			dprintf(("tx status=0x%x\n", i));
+			i = bus_space_read_1(iot, ioh, EL_TXS);
+			DPRINTF(("tx status=0x%x\n", i));
 			if ((i & EL_TXS_READY) == 0) {
-				dprintf(("el: err txs=%x\n", i));
+				DPRINTF(("el: err txs=%x\n", i));
 				if (i & (EL_TXS_COLL | EL_TXS_COLL16)) {
 					ifp->if_collisions++;
 					if ((i & EL_TXC_DCOLL16) == 0 &&
 					    retries < 15) {
 						retries++;
-						outb(iobase+EL_AC, EL_AC_HOST);
+						bus_space_write_1(iot, ioh,
+						    EL_AC, EL_AC_HOST);
 					}
 				} else {
 					ifp->if_oerrors++;
@@ -382,15 +465,15 @@ elstart(ifp)
 		 * Now give the card a chance to receive.
 		 * Gotta love 3c501s...
 		 */
-		(void)inb(iobase+EL_AS);
-		outb(iobase+EL_AC, EL_AC_IRQE | EL_AC_RX);
+		(void)bus_space_read_1(iot, ioh, EL_AS);
+		bus_space_write_1(iot, ioh, EL_AC, EL_AC_IRQE | EL_AC_RX);
 		splx(s);
 		/* Interrupt here. */
 		s = splnet();
 	}
 
-	(void)inb(iobase+EL_AS);
-	outb(iobase+EL_AC, EL_AC_IRQE | EL_AC_RX);
+	(void)bus_space_read_1(iot, ioh, EL_AS);
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_IRQE | EL_AC_RX);
 	ifp->if_flags &= ~IFF_OACTIVE;
 	splx(s);
 }
@@ -404,7 +487,8 @@ static int
 el_xmit(sc)
 	struct el_softc *sc;
 {
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 	int i;
 
 	/*
@@ -413,16 +497,16 @@ el_xmit(sc)
 	 * instead?
 	 */
 
-	dprintf(("el: xmit..."));
-	outb(iobase+EL_AC, EL_AC_TXFRX);
+	DPRINTF(("el: xmit..."));
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_TXFRX);
 	i = 20000;
-	while ((inb(iobase+EL_AS) & EL_AS_TXBUSY) && (i > 0))
+	while ((bus_space_read_1(iot, ioh, EL_AS) & EL_AS_TXBUSY) && (i > 0))
 		i--;
 	if (i == 0) {
-		dprintf(("tx not ready\n"));
+		DPRINTF(("tx not ready\n"));
 		return -1;
 	}
-	dprintf(("%d cycles.\n", 20000 - i));
+	DPRINTF(("%d cycles.\n", 20000 - i));
 	return 0;
 }
 
@@ -433,56 +517,66 @@ int
 elintr(arg)
 	void *arg;
 {
-	register struct el_softc *sc = arg;
-	int iobase = sc->sc_iobase;
-	int rxstat, len;
+	struct el_softc *sc = arg;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
+	u_int8_t rxstat;
+	int len;
 
-	dprintf(("elintr: "));
+	DPRINTF(("elintr: "));
 
 	/* Check board status. */
-	if ((inb(iobase+EL_AS) & EL_AS_RXBUSY) != 0) {
-		(void)inb(iobase+EL_RXC);
-		outb(iobase+EL_AC, EL_AC_IRQE | EL_AC_RX);
+	if ((bus_space_read_1(iot, ioh, EL_AS) & EL_AS_RXBUSY) != 0) {
+		(void)bus_space_read_1(iot, ioh, EL_RXC);
+		bus_space_write_1(iot, ioh, EL_AC, EL_AC_IRQE | EL_AC_RX);
 		return 0;
 	}
 
 	for (;;) {
-		rxstat = inb(iobase+EL_RXS);
+		rxstat = bus_space_read_1(iot, ioh, EL_RXS);
 		if (rxstat & EL_RXS_STALE)
 			break;
 
 		/* If there's an overflow, reinit the board. */
 		if ((rxstat & EL_RXS_NOFLOW) == 0) {
-			dprintf(("overflow.\n"));
+			DPRINTF(("overflow.\n"));
 			el_hardreset(sc);
 			/* Put board back into receive mode. */
-			if (sc->sc_arpcom.ac_if.if_flags & IFF_PROMISC)
-				outb(iobase+EL_RXC, EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB | EL_RXC_DOFLOW | EL_RXC_PROMISC);
+			if (sc->sc_ethercom.ec_if.if_flags & IFF_PROMISC)
+				bus_space_write_1(iot, ioh, EL_RXC,
+				    EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB |
+				    EL_RXC_DOFLOW | EL_RXC_PROMISC);
 			else
-				outb(iobase+EL_RXC, EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB | EL_RXC_DOFLOW | EL_RXC_ABROAD);
-			(void)inb(iobase+EL_AS);
-			outb(iobase+EL_RBC, 0);
+				bus_space_write_1(iot, ioh, EL_RXC,
+				    EL_RXC_AGF | EL_RXC_DSHORT | EL_RXC_DDRIB |
+				    EL_RXC_DOFLOW | EL_RXC_ABROAD);
+			(void)bus_space_read_1(iot, ioh, EL_AS);
+			bus_space_write_1(iot, ioh, EL_RBC, 0);
 			break;
 		}
 
 		/* Incoming packet. */
-		len = inb(iobase+EL_RBL);
-		len |= inb(iobase+EL_RBH) << 8;
-		dprintf(("receive len=%d rxstat=%x ", len, rxstat));
-		outb(iobase+EL_AC, EL_AC_HOST);
+		len = bus_space_read_1(iot, ioh, EL_RBL);
+		len |= bus_space_read_1(iot, ioh, EL_RBH) << 8;
+		DPRINTF(("receive len=%d rxstat=%x ", len, rxstat));
+		bus_space_write_1(iot, ioh, EL_AC, EL_AC_HOST);
 
 		/* Pass data up to upper levels. */
 		elread(sc, len);
 
 		/* Is there another packet? */
-		if ((inb(iobase+EL_AS) & EL_AS_RXBUSY) != 0)
+		if ((bus_space_read_1(iot, ioh, EL_AS) & EL_AS_RXBUSY) != 0)
 			break;
 
-		dprintf(("<rescan> "));
+#if NRND > 0
+		rnd_add_uint32(&sc->rnd_source, rxstat);
+#endif
+
+		DPRINTF(("<rescan> "));
 	}
 
-	(void)inb(iobase+EL_RXC);
-	outb(iobase+EL_AC, EL_AC_IRQE | EL_AC_RX);
+	(void)bus_space_read_1(iot, ioh, EL_RXC);
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_IRQE | EL_AC_RX);
 	return 1;
 }
 
@@ -491,16 +585,16 @@ elintr(arg)
  */
 void
 elread(sc, len)
-	register struct el_softc *sc;
+	struct el_softc *sc;
 	int len;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct mbuf *m;
 
 	if (len <= sizeof(struct ether_header) ||
 	    len > ETHER_MAX_LEN) {
 		printf("%s: invalid packet size %d; dropping\n",
-		    sc->sc_dev.dv_xname, len);
+		    device_xname(&sc->sc_dev), len);
 		ifp->if_ierrors++;
 		return;
 	}
@@ -520,10 +614,10 @@ elread(sc, len)
 	 * If so, hand off the raw packet to BPF.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+		bpf_mtap(ifp->if_bpf, m);
 #endif
 
-	ether_input_mbuf(ifp, m);
+	(*ifp->if_input)(ifp, m);
 }
 
 /*
@@ -536,58 +630,59 @@ elget(sc, totlen)
 	struct el_softc *sc;
 	int totlen;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	int iobase = sc->sc_iobase;
-	struct mbuf *top, **mp, *m;
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
+	struct mbuf *m, *m0, *newm;
 	int len;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
-		return 0;
-	m->m_pkthdr.rcvif = ifp;
-	m->m_pkthdr.len = totlen;
+	MGETHDR(m0, M_DONTWAIT, MT_DATA);
+	if (m0 == 0)
+		return (0);
+	m0->m_pkthdr.rcvif = ifp;
+	m0->m_pkthdr.len = totlen;
 	len = MHLEN;
-	top = 0;
-	mp = &top;
+	m = m0;
 
-	outb(iobase+EL_GPBL, 0);
-	outb(iobase+EL_GPBH, 0);
+	bus_space_write_1(iot, ioh, EL_GPBL, 0);
+	bus_space_write_1(iot, ioh, EL_GPBH, 0);
 
 	while (totlen > 0) {
-		if (top) {
-			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
-				m_freem(top);
-				return 0;
-			}
-			len = MLEN;
-		}
 		if (totlen >= MINCLSIZE) {
 			MCLGET(m, M_DONTWAIT);
-			if (m->m_flags & M_EXT)
-				len = MCLBYTES;
+			if ((m->m_flags & M_EXT) == 0)
+				goto bad;
+			len = MCLBYTES;
 		}
+
 		m->m_len = len = min(totlen, len);
-		insb(iobase+EL_BUF, mtod(m, caddr_t), len);
+		bus_space_read_multi_1(iot, ioh, EL_BUF, mtod(m, u_int8_t *), len);
+
 		totlen -= len;
-		*mp = m;
-		mp = &m->m_next;
+		if (totlen > 0) {
+			MGET(newm, M_DONTWAIT, MT_DATA);
+			if (newm == 0)
+				goto bad;
+			len = MLEN;
+			m = m->m_next = newm;
+		}
 	}
 
-	outb(iobase+EL_RBC, 0);
-	outb(iobase+EL_AC, EL_AC_RX);
+	bus_space_write_1(iot, ioh, EL_RBC, 0);
+	bus_space_write_1(iot, ioh, EL_AC, EL_AC_RX);
 
-	return top;
+	return (m0);
+
+bad:
+	m_freem(m0);
+	return (0);
 }
 
 /*
  * Process an ioctl request. This code needs some work - it looks pretty ugly.
  */
 int
-elioctl(ifp, cmd, data)
-	register struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+elioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct el_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -595,56 +690,55 @@ elioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch (cmd) {
 
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
 
+		elinit(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-			elinit(sc);
-			arp_ifinit(&sc->sc_arpcom, ifa);
+			arp_ifinit(ifp, ifa);
 			break;
 #endif
 		default:
-			elinit(sc);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+		/* XXX re-use ether_ioctl() */
+		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
+		case IFF_RUNNING:
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
 			 */
 			elstop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-		    	   (ifp->if_flags & IFF_RUNNING) == 0) {
+			break;
+		case IFF_UP:
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			elinit(sc);
-		} else {
+			break;
+		default:
 			/*
 			 * Some other important flag might have changed, so
 			 * reset.
 			 */
 			elreset(sc);
+			break;
 		}
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 
@@ -661,8 +755,8 @@ elwatchdog(ifp)
 {
 	struct el_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
-	sc->sc_arpcom.ac_if.if_oerrors++;
+	log(LOG_ERR, "%s: device timeout\n", device_xname(&sc->sc_dev));
+	sc->sc_ethercom.ec_if.if_oerrors++;
 
 	elreset(sc);
 }

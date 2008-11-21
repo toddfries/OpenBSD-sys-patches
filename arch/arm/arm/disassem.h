@@ -1,4 +1,3 @@
-/*	$OpenBSD: disassem.h,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
 /*	$NetBSD: disassem.h,v 1.4 2001/03/04 04:15:58 matt Exp $	*/
 
 /*
@@ -38,9 +37,9 @@
  */
 
 typedef struct {
-	db_expr_t	(*di_readword)(db_expr_t);
-	void	(*di_printaddr)(db_expr_t);	
-	int	(*di_printf)(const char *, ...);
+	u_int	(*di_readword)(u_int);
+	void	(*di_printaddr)(u_int);	
+	void	(*di_printf)(const char *, ...);
 } disasm_interface_t;
 
 /* Prototypes for callable functions */

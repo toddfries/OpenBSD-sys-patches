@@ -1,5 +1,4 @@
-/* $OpenBSD: if_bcereg.h,v 1.3 2006/11/08 01:32:00 brad Exp $ */
-/* $NetBSD: if_bcereg.h,v 1.3 2003/09/29 01:53:02 mrg Exp $	 */
+/* $NetBSD: if_bcereg.h,v 1.4 2005/12/11 12:22:49 christos Exp $	 */
 
 /*
  * Copyright (c) 2003 Clifford Wright. All rights reserved.
@@ -72,10 +71,7 @@
 /* Ethernet MAC Control */
 #define BCE_MACCTL			0x00A8	/* ethernet mac control */
 /* mac control bits */
-#define BCE_EMC_CRC32_ENAB		0x00000001	/* crc32 generation */
-#define BCE_EMC_PDOWN			0x00000004	/* PHY powerdown */
-#define BCE_EMC_EDET			0x00000008	/* PHY energy detect */
-#define BCE_EMC_LED			0x000000e0	/* PHY LED control */
+#define BCE_EMC_CG			0x00000001	/* crc32 generation */
 
 /* DMA Interrupt control */
 #define BCE_DMAI_CTL			0x0100
@@ -144,16 +140,14 @@
 #define BCE_MIREG(x)			((x & 0x1F) << 18)
 #define BCE_MIPHY(x)			((x & 0x1F) << 23)
 
-/* SPROM constants */
-#define BCE_SPROM_BASE			0x1000
-#define BCE_PHY				(BCE_SPROM_BASE + 0x5A) /* MII Address */
-#define	BCE_ENET0			(BCE_SPROM_BASE + 0x4F)
-#define	BCE_ENET1			(BCE_SPROM_BASE + 0x4E)
-#define	BCE_ENET2			(BCE_SPROM_BASE + 0x51)
-#define	BCE_ENET3			(BCE_SPROM_BASE + 0x50)
-#define	BCE_ENET4			(BCE_SPROM_BASE + 0x53)
-#define	BCE_ENET5			(BCE_SPROM_BASE + 0x52)
+/* Magic constants.... */
+#define BCE_MAGIC_PHYEMAC_BASE		0x1000
+#define	 BCE_MAGIC_PHY			(BCE_MAGIC_PHYEMAC_BASE + 90)
+#define	 BCE_MAGIC_ENET0		(BCE_MAGIC_PHYEMAC_BASE + 79)
+#define	 BCE_MAGIC_ENET1		(BCE_MAGIC_PHYEMAC_BASE + 78)
+#define	 BCE_MAGIC_ENET2		(BCE_MAGIC_PHYEMAC_BASE + 81)
+#define	 BCE_MAGIC_ENET3		(BCE_MAGIC_PHYEMAC_BASE + 80)
+#define	 BCE_MAGIC_ENET4		(BCE_MAGIC_PHYEMAC_BASE + 83)
+#define	 BCE_MAGIC_ENET5		(BCE_MAGIC_PHYEMAC_BASE + 82)
 
-#define  SBIM_INBAND_ERROR		0x20000
-#define  SBIM_TIMEOUT			0x40000
-#define  SBIM_ERRORBITS			(SBIM_INBAND_ERROR|SBIM_TIMEOUT)
+#define  SBIM_MAGIC_ERRORBITS		0x60000

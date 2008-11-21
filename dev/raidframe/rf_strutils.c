@@ -1,10 +1,8 @@
-/*	$OpenBSD: rf_strutils.c,v 1.3 2002/12/16 07:01:05 tdeval Exp $	*/
-/*	$NetBSD: rf_strutils.c,v 1.3 1999/02/05 00:06:18 oster Exp $	*/
-
+/*	$NetBSD: rf_strutils.c,v 1.4 2001/11/13 07:11:17 lukem Exp $	*/
 /*
  * rf_strutils.c
  *
- * String-parsing funcs.
+ * String-parsing funcs
  */
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
@@ -39,18 +37,20 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rf_strutils.c,v 1.4 2001/11/13 07:11:17 lukem Exp $");
+
 #include "rf_utils.h"
 
-/* Finds a non-white character in the line. */
-char *
+/* finds a non-white character in the line */
+char   *
 rf_find_non_white(char *p)
 {
 	for (; *p != '\0' && (*p == ' ' || *p == '\t'); p++);
 	return (p);
 }
-
-/* Finds a white character in the line. */
-char *
+/* finds a white character in the line */
+char   *
 rf_find_white(char *p)
 {
 	for (; *p != '\0' && (*p != ' ' && *p != '\t'); p++);

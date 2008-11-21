@@ -1,5 +1,4 @@
-/*	$OpenBSD: sbcvar.h,v 1.8 2006/12/13 21:12:56 miod Exp $	*/
-/*	$NetBSD: sbcvar.h,v 1.1 1997/03/01 20:19:00 scottr Exp $	*/
+/*	$NetBSD: sbcvar.h,v 1.12 2005/12/11 12:18:02 christos Exp $	*/
 
 /*
  * Copyright (C) 1996 Scott Reynolds.  All rights reserved.
@@ -12,11 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Scott Reynolds for
- *      the NetBSD Project.
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -43,20 +38,6 @@
  */
 #define	MAX_DMA_LEN 0x2000
 
-#ifdef SBC_DEBUG
-# define	SBC_DB_INTR	0x01
-# define	SBC_DB_DMA	0x02
-# define	SBC_DB_REG	0x04
-# define	SBC_DB_BREAK	0x08
-# ifndef DDB
-#  define	Debugger()	printf("Debug: sbc.c:%d\n", __LINE__)
-# endif
-# define	SBC_BREAK \
-		do { if (sbc_debug & SBC_DB_BREAK) Debugger(); } while (0)
-#else
-# define	SBC_BREAK
-#endif
-
 /*
  * This structure is used to keep track of PDMA requests.
  */
@@ -75,11 +56,11 @@ struct sbc_pdma_handle {
  */
 struct sbc_softc {
 	struct ncr5380_softc ncr_sc;
-	struct via2hand	sc_ih_drq, sc_ih_irq;
 	volatile struct sbc_regs *sc_regs;
 	volatile vaddr_t	sc_drq_addr;
 	volatile vaddr_t	sc_nodrq_addr;
 	void			(*sc_clrintr)(struct ncr5380_softc *);
+	volatile int		sc_resid;
 	int			sc_options;	/* options for this instance. */
 	struct sbc_pdma_handle sc_pdma[SCI_OPENINGS];
 };
@@ -95,7 +76,7 @@ struct sbc_softc {
  *
  * The options code is based on the sparc 'si' driver's version of
  * the same.
- */
+ */     
 #define	SBC_PDMA	0x01	/* Use PDMA for polled transfers */
 #define	SBC_INTR	0x02	/* Allow SCSI IRQ/DRQ interrupts */
 #define	SBC_RESELECT	0x04	/* Allow disconnect/reselect */
@@ -105,18 +86,17 @@ struct sbc_softc {
 extern int	sbc_debug;
 extern int	sbc_link_flags;
 extern int	sbc_options;
-extern struct scsi_adapter sbc_ops;
-extern struct scsi_device sbc_dev;
 
 int	sbc_pdma_in(struct ncr5380_softc *, int, int, u_char *);
 int	sbc_pdma_out(struct ncr5380_softc *, int, int, u_char *);
-int	sbc_irq_intr(void *);
-int	sbc_drq_intr(void *);
+void	sbc_irq_intr(void *);
+void	sbc_drq_intr(void *);
 void	sbc_dma_alloc(struct ncr5380_softc *);
 void	sbc_dma_free(struct ncr5380_softc *);
 void	sbc_dma_poll(struct ncr5380_softc *);
 void	sbc_dma_setup(struct ncr5380_softc *);
 void	sbc_dma_start(struct ncr5380_softc *);
+void	sbc_dma_eop(struct ncr5380_softc *);
 void	sbc_dma_stop(struct ncr5380_softc *);
 #ifdef SBC_DEBUG
 void	decode_5380_intr(struct ncr5380_softc *);

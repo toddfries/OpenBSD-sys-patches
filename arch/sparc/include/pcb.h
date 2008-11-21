@@ -1,5 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.5 2003/06/02 23:27:54 millert Exp $	*/
-/*	$NetBSD: pcb.h,v 1.4 1995/03/28 18:19:56 jtc Exp $ */
+/*	$NetBSD: pcb.h,v 1.8 2007/03/04 06:00:44 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -40,9 +39,6 @@
  *
  *	@(#)pcb.h	8.1 (Berkeley) 6/11/93
  */
-
-#ifndef _SPARC_PCB_H_
-#define _SPARC_PCB_H_
 
 #include <machine/reg.h>
 
@@ -91,7 +87,7 @@ struct pcb {
 	int	pcb_pc;		/* pc (%o7) when switch() was called */
 	int	pcb_psr;	/* %psr when switch() was called */
 
-	caddr_t	pcb_onfault;	/* for copyin/out */
+	void *	pcb_onfault;	/* for copyin/out */
 
 	int	pcb_uw;		/* user windows inside CPU */
 	int	pcb_wim;	/* log2(%wim) */
@@ -101,7 +97,7 @@ struct pcb {
 	int	pcb_winof;	/* number of window overflow traps */
 	int	pcb_winuf;	/* number of window underflow traps */
 #endif
-	u_int32_t pcb_wcookie;	/* StackGhost cookie (must be unsigned) */
+	int	pcb_pad;	/* pad to doubleword boundary */
 
 	/* the following MUST be aligned on a doubleword boundary */
 	struct	rwindow pcb_rw[PCB_MAXWIN];	/* saved windows */
@@ -114,13 +110,6 @@ struct pcb {
  * stack itself need not be dumped).
  */
 struct md_coredump {
-	struct trapframe	md_tf;
-	struct fpstate		md_fpstate;
-	u_int32_t		md_wcookie;
+	struct	trapframe md_tf;
+	struct	fpstate md_fpstate;
 };
-
-#ifdef _KERNEL
-extern struct pcb *cpcb;
-#endif /* _KERNEL */
-
-#endif

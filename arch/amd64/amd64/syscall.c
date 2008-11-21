@@ -1,5 +1,4 @@
-/*	$OpenBSD: syscall.c,v 1.12 2008/04/07 16:21:26 thib Exp $	*/
-/*	$NetBSD: syscall.c,v 1.1 2003/04/26 18:39:32 fvdl Exp $	*/
+/*	$NetBSD: syscall.c,v 1.44 2008/10/21 12:16:59 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -16,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,19 +29,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.44 2008/10/21 12:16:59 ad Exp $");
+
+#include "opt_sa.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/signal.h>
-#ifdef KTRACE
+#include <sys/sa.h>
+#include <sys/savar.h>
 #include <sys/ktrace.h>
-#endif
-
-#include "systrace.h"
-#include <dev/systrace.h>
-
 #include <sys/syscall.h>
+#include <sys/syscallvar.h>
+#include <sys/syscall_stats.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -57,170 +52,118 @@
 #include <machine/psl.h>
 #include <machine/userret.h>
 
-void syscall(struct trapframe);
+void syscall_intern(struct proc *);
+static void syscall(struct trapframe *);
+
+void
+child_return(void *arg)
+{
+	struct lwp *l = arg;
+	struct trapframe *tf = l->l_md.md_regs;
+
+	tf->tf_rax = 0;
+	tf->tf_rflags &= ~PSL_C;
+
+	userret(l);
+	ktrsysret(SYS_fork, 0, 0);
+}
+
+void
+syscall_intern(struct proc *p)
+{
+
+	p->p_md.md_syscall = syscall;
+}
 
 /*
  * syscall(frame):
  *	System call request from POSIX system call gate interface to kernel.
  * Like trap(), argument is call by reference.
  */
-void
-syscall(struct trapframe frame)
+static void
+syscall(struct trapframe *frame)
 {
-	caddr_t params;
 	const struct sysent *callp;
 	struct proc *p;
+	struct lwp *l;
 	int error;
-	int nsys;
-	size_t argsize, argoff;
-	register_t code, args[9], rval[2], *argp;
-	int lock;
+	register_t code, rval[2];
+	#define args (&frame->tf_rdi)
+	/* Verify that the syscall args will fit in the trapframe space */
+	typedef char foo[offsetof(struct trapframe, tf_arg9)
+		>= sizeof (register_t) * (2 + SYS_MAXSYSARGS - 1) ? 1 : -1];
 
-	uvmexp.syscalls++;
-	p = curproc;
+	l = curlwp;
+	p = l->l_proc;
 
-	code = frame.tf_rax;
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
-	argp = &args[0];
-	argoff = 0;
+	code = frame->tf_rax & (SYS_NSYSENT - 1);
 
-	switch (code) {
-	case SYS_syscall:
-	case SYS___syscall:
-		/*
-		 * Code is first argument, followed by actual args.
-		 */
-		code = frame.tf_rdi;
-		argp = &args[1];
-		argoff = 1;
-		break;
-	default:
-		break;
+	LWP_CACHE_CREDS(l, p);
+
+	callp = p->p_emul->e_sysent + code;
+
+	SYSCALL_COUNT(syscall_counts, code);
+	SYSCALL_TIME_SYS_ENTRY(l, syscall_times, code);
+
+#ifdef KERN_SA
+	if (__predict_false((l->l_savp)
+            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
+		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
+#endif
+	/*
+	 * The first 6 syscall args are passed in rdi, rsi, rdx, r10, r8 and r9
+	 * (rcx gets copied to r10 in the libc stub because the syscall
+	 * instruction overwrites %cx) and are together in the trap frame
+	 * with space following for 4 more entries.
+	 */
+	if (__predict_false(callp->sy_argsize > 6 * 8)) {
+		error = copyin((register_t *)frame->tf_rsp + 1,
+		    &frame->tf_arg6, callp->sy_argsize - 6 * 8);
+		if (error != 0)
+			goto bad;
+		/* Refetch to avoid register spill to stack */
+		code = frame->tf_rax & (SYS_NSYSENT - 1);
 	}
 
-	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
-	else
-		callp += code;
+	if (!__predict_false(p->p_trace_enabled)
+	    || __predict_false(callp->sy_flags & SYCALL_INDIRECT)
+	    || (error = trace_enter(code, args, callp->sy_narg)) == 0) {
+		rval[0] = 0;
+		rval[1] = 0;
+		error = sy_call(callp, l, args, rval);
+	}
 
-	argsize = (callp->sy_argsize >> 3) + argoff;
-	if (argsize) {
-		switch (MIN(argsize, 6)) {
-		case 6:
-			args[5] = frame.tf_r9;
-		case 5:
-			args[4] = frame.tf_r8;
-		case 4:
-			args[3] = frame.tf_r10;
-		case 3:
-			args[2] = frame.tf_rdx;
-		case 2:	
-			args[1] = frame.tf_rsi;
-		case 1:
-			args[0] = frame.tf_rdi;
+	if (__predict_false(p->p_trace_enabled)
+	    && !__predict_false(callp->sy_flags & SYCALL_INDIRECT)) {
+		code = frame->tf_rax & (SYS_NSYSENT - 1);
+		trace_exit(code, rval, error);
+	}
+
+	if (__predict_true(error == 0)) {
+		frame->tf_rax = rval[0];
+		frame->tf_rdx = rval[1];
+		frame->tf_rflags &= ~PSL_C;	/* carry bit */
+	} else {
+		switch (error) {
+		case ERESTART:
+			/*
+			 * The offset to adjust the PC by depends on whether we
+			 * entered the kernel through the trap or call gate.
+			 * We saved the instruction size in tf_err on entry.
+			 */
+			frame->tf_rip -= frame->tf_err;
+			break;
+		case EJUSTRETURN:
+			/* nothing to do */
 			break;
 		default:
-			panic("impossible syscall argsize");
-		}
-		if (argsize > 6) {
-			argsize -= 6;
-			params = (caddr_t)frame.tf_rsp + sizeof(register_t);
-			error = copyin(params, (caddr_t)&args[6],
-					argsize << 3);
-			if (error != 0)
-				goto bad;
+		bad:
+			frame->tf_rax = error;
+			frame->tf_rflags |= PSL_C;	/* carry bit */
+			break;
 		}
 	}
 
-	lock = !(callp->sy_flags & SY_NOLOCK);
-
-#ifdef SYSCALL_DEBUG
-	KERNEL_PROC_LOCK(p);
-	scdebug_call(p, code, argp);
-	KERNEL_PROC_UNLOCK(p);
-#endif
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL)) {
-		KERNEL_PROC_LOCK(p);
-		ktrsyscall(p, code, callp->sy_argsize, argp);
-		KERNEL_PROC_UNLOCK(p);
-	}
-#endif
-	rval[0] = 0;
-	rval[1] = frame.tf_rdx;
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_PROC_LOCK(p);
-		error = systrace_redirect(code, p, argp, rval);
-		KERNEL_PROC_UNLOCK(p);
-	} else
-#endif
-	{
-		if (lock)
-			KERNEL_PROC_LOCK(p);
-		error = (*callp->sy_call)(p, argp, rval);
-		if (lock)
-			KERNEL_PROC_UNLOCK(p);
-	}
-	switch (error) {
-	case 0:
-		frame.tf_rax = rval[0];
-		frame.tf_rdx = rval[1];
-		frame.tf_rflags &= ~PSL_C;	/* carry bit */
-		break;
-	case ERESTART:
-		/*
-		 * The offset to adjust the PC by depends on whether we entered
-		 * the kernel through the trap or call gate.  We pushed the
-		 * size of the instruction into tf_err on entry.
-		 */
-		frame.tf_rip -= frame.tf_err;
-		break;
-	case EJUSTRETURN:
-		/* nothing to do */
-		break;
-	default:
-	bad:
-		frame.tf_rax = error;
-		frame.tf_rflags |= PSL_C;	/* carry bit */
-		break;
-	}
-
-#ifdef SYSCALL_DEBUG
-	KERNEL_PROC_LOCK(p);
-	scdebug_ret(p, code, error, rval);
-	KERNEL_PROC_UNLOCK(p);
-#endif
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_PROC_LOCK(p);
-		ktrsysret(p, code, error, rval[0]);
-		KERNEL_PROC_UNLOCK(p);
-	}
-#endif
-}
-
-void
-child_return(void *arg)
-{
-	struct proc *p = arg;
-	struct trapframe *tf = p->p_md.md_regs;
-
-	tf->tf_rax = 0;
-	tf->tf_rdx = 1;
-	tf->tf_rflags &= ~PSL_C;
-
-	KERNEL_PROC_UNLOCK(p);
-
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_PROC_LOCK(p);
-		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
-		KERNEL_PROC_UNLOCK(p);
-	}
-#endif
+	SYSCALL_TIME_SYS_EXIT(l);
+	userret(l);
 }

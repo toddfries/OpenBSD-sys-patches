@@ -1,4 +1,4 @@
-/*	$NetBSD: fault.c,v 1.62 2006/07/23 22:06:04 ad Exp $	*/
+/*	$NetBSD: fault.c,v 1.72 2008/11/19 06:32:58 matt Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -79,17 +79,20 @@
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
+#include "opt_sa.h"
 
 #include <sys/types.h>
-__KERNEL_RCSID(0, "$NetBSD: fault.c,v 1.62 2006/07/23 22:06:04 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fault.c,v 1.72 2008/11/19 06:32:58 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/savar.h>
 #include <sys/user.h>
 #include <sys/kernel.h>
 #include <sys/kauth.h>
+
+#include <sys/savar.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_stat.h>
@@ -101,7 +104,6 @@ __KERNEL_RCSID(0, "$NetBSD: fault.c,v 1.62 2006/07/23 22:06:04 ad Exp $");
 
 #include <machine/frame.h>
 #include <arm/arm32/katelib.h>
-#include <machine/cpu.h>
 #include <machine/intr.h>
 #if defined(DDB) || defined(KGDB)
 #include <machine/db_machdep.h>
@@ -175,9 +177,7 @@ static inline void
 call_trapsignal(struct lwp *l, ksiginfo_t *ksi)
 {
 
-	KERNEL_PROC_LOCK(l);
 	TRAPSIGNAL(l, ksi);
-	KERNEL_PROC_UNLOCK(l);
 }
 
 static inline int
@@ -199,8 +199,8 @@ data_abort_fixup(trapframe_t *tf, u_int fsr, u_int far, struct lwp *l)
 #ifdef THUMB_CODE
 	if (tf->tf_spsr & PSR_T_bit) {
 		printf("pc = 0x%08x, opcode 0x%04x, 0x%04x, insn = ",
-		    tf->tf_pc, *((u_int16 *)(tf->tf_pc & ~1),
-		    *((u_int16 *)((tf->tf_pc + 2) & ~1));
+		    tf->tf_pc, *((u_int16 *)(tf->tf_pc & ~1)),
+		    *((u_int16 *)((tf->tf_pc + 2) & ~1)));
 	}
 	else
 #endif
@@ -244,11 +244,13 @@ data_abort_handler(trapframe_t *tf)
 	uvmexp.traps++;
 
 	/* Re-enable interrupts if they were enabled previously */
-	if (__predict_true((tf->tf_spsr & I32_bit) == 0))
-		enable_interrupts(I32_bit);
+	KASSERT(!TRAP_USERMODE(tf) || (tf->tf_spsr & IF32_bits) == 0);
+	if (__predict_true((tf->tf_spsr & IF32_bits) != IF32_bits))
+		restore_interrupts(tf->tf_spsr & IF32_bits);
 
-	/* Get the current lwp structure or lwp0 if there is none */
-	l = (curlwp != NULL) ? curlwp : &lwp0;
+	/* Get the current lwp structure */
+	KASSERT(curlwp != NULL);
+	l = curlwp;
 
 	UVMHIST_LOG(maphist, " (pc=0x%x, l=0x%x, far=0x%x, fsr=0x%x)",
 	    tf->tf_pc, l, far, fsr);
@@ -381,10 +383,12 @@ data_abort_handler(trapframe_t *tf)
 		}
 	} else {
 		map = &l->l_proc->p_vmspace->vm_map;
-		if (l->l_flag & L_SA) {
+#ifdef KERN_SA
+		if ((l->l_flag & LW_SA) && (~l->l_pflag & LP_SA_NOBLOCK)) {
 			l->l_savp->savp_faultaddr = (vaddr_t)far;
-			l->l_flag |= L_SA_PAGEFAULT;
+			l->l_pflag |= LP_SA_PAGEFAULT;
 		}
+#endif
 	}
 
 	/*
@@ -445,13 +449,15 @@ data_abort_handler(trapframe_t *tf)
 	last_fault_code = fsr;
 #endif
 	if (pmap_fault_fixup(map->pmap, va, ftype, user)) {
+#ifdef KERN_SA
 		if (map != kernel_map)
-			l->l_flag &= ~L_SA_PAGEFAULT;
+			l->l_pflag &= ~LP_SA_PAGEFAULT;
+#endif
 		UVMHIST_LOG(maphist, " <- ref/mod emul", 0, 0, 0, 0);
 		goto out;
 	}
 
-	if (__predict_false(current_intr_depth > 0)) {
+	if (__predict_false(curcpu()->ci_intr_depth > 0)) {
 		if (pcb->pcb_onfault) {
 			tf->tf_r0 = EINVAL;
 			tf->tf_pc = (register_t)(intptr_t) pcb->pcb_onfault;
@@ -466,8 +472,10 @@ data_abort_handler(trapframe_t *tf)
 	error = uvm_fault(map, va, ftype);
 	pcb->pcb_onfault = onfault;
 
+#ifdef KERN_SA
 	if (map != kernel_map)
-		l->l_flag &= ~L_SA_PAGEFAULT;
+		l->l_pflag &= ~LP_SA_PAGEFAULT;
+#endif
 
 	if (__predict_true(error == 0)) {
 		if (user)
@@ -501,7 +509,7 @@ data_abort_handler(trapframe_t *tf)
 	ksi.ksi_code = (error == EACCES) ? SEGV_ACCERR : SEGV_MAPERR;
 	ksi.ksi_addr = (u_int32_t *)(intptr_t) far;
 	ksi.ksi_trap = fsr;
-	UVMHIST_LOG(maphist, " <- erorr (%d)", error, 0, 0, 0);
+	UVMHIST_LOG(maphist, " <- error (%d)", error, 0, 0, 0);
 
 do_trapsignal:
 	call_trapsignal(l, &ksi);
@@ -787,12 +795,14 @@ prefetch_abort_handler(trapframe_t *tf)
 	 * from user mode so we know interrupts were not disabled.
 	 * But we check anyway.
 	 */
-	if (__predict_true((tf->tf_spsr & I32_bit) == 0))
-		enable_interrupts(I32_bit);
+	KASSERT(!TRAP_USERMODE(tf) || (tf->tf_spsr & IF32_bits) == 0);
+	if (__predict_true((tf->tf_spsr & I32_bit) != IF32_bits))
+		restore_interrupts(tf->tf_spsr & IF32_bits);
 
 	/* See if the CPU state needs to be fixed up */
 	switch (prefetch_abort_fixup(tf)) {
 	case ABORT_FIXUP_RETURN:
+		KASSERT(!TRAP_USERMODE(tf) || (tf->tf_spsr & IF32_bits) == 0);
 		return;
 	case ABORT_FIXUP_FAILED:
 		/* Deliver a SIGILL to the process */
@@ -843,20 +853,25 @@ prefetch_abort_handler(trapframe_t *tf)
 	}
 
 #ifdef DIAGNOSTIC
-	if (__predict_false(current_intr_depth > 0)) {
+	if (__predict_false(l->l_cpu->ci_intr_depth > 0)) {
 		printf("\nNon-emulated prefetch abort with intr_depth > 0\n");
 		dab_fatal(tf, 0, tf->tf_pc, NULL, NULL);
 	}
 #endif
-	if (map != kernel_map && l->l_flag & L_SA) {
+
+#ifdef KERN_SA
+	if (map != kernel_map && (l->l_flag & LW_SA)) {
 		l->l_savp->savp_faultaddr = fault_pc;
-		l->l_flag |= L_SA_PAGEFAULT;
+		l->l_pflag |= LP_SA_PAGEFAULT;
 	}
+#endif
 
 	error = uvm_fault(map, va, VM_PROT_READ);
 
+#ifdef KERN_SA
 	if (map != kernel_map)
-		l->l_flag &= ~L_SA_PAGEFAULT;
+		l->l_pflag &= ~LP_SA_PAGEFAULT;
+#endif
 
 	if (__predict_true(error == 0)) {
 		UVMHIST_LOG (maphist, " <- uvm", 0, 0, 0, 0);
@@ -881,6 +896,7 @@ do_trapsignal:
 	call_trapsignal(l, &ksi);
 
 out:
+	KASSERT(!TRAP_USERMODE(tf) || (tf->tf_spsr & IF32_bits) == 0);
 	userret(l);
 }
 

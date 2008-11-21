@@ -1,5 +1,4 @@
-/*	$OpenBSD: apecs_pci.c,v 1.10 2006/03/26 20:23:08 brad Exp $	*/
-/*	$NetBSD: apecs_pci.c,v 1.10 1996/11/13 21:13:25 cgd Exp $	*/
+/* $NetBSD: apecs_pci.c,v 1.19 2002/05/15 16:57:42 thorpej Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,6 +27,10 @@
  * rights to redistribute these changes.
  */
 
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: apecs_pci.c,v 1.19 2002/05/15 16:57:42 thorpej Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -35,21 +38,19 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/autoconf.h>	/* badaddr() proto */
-
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <alpha/pci/apecsreg.h>
 #include <alpha/pci/apecsvar.h>
 
-void		apecs_attach_hook(struct device *, struct device *,
-		    struct pcibus_attach_args *);
-int		apecs_bus_maxdevs(void *, int);
-pcitag_t	apecs_make_tag(void *, int, int, int);
-void		apecs_decompose_tag(void *, pcitag_t, int *, int *,
-		    int *);
-pcireg_t	apecs_conf_read(void *, pcitag_t, int);
-void		apecs_conf_write(void *, pcitag_t, int, pcireg_t);
+void		apecs_attach_hook __P((struct device *, struct device *,
+		    struct pcibus_attach_args *));
+int		apecs_bus_maxdevs __P((void *, int));
+pcitag_t	apecs_make_tag __P((void *, int, int, int));
+void		apecs_decompose_tag __P((void *, pcitag_t, int *, int *,
+		    int *));
+pcireg_t	apecs_conf_read __P((void *, pcitag_t, int));
+void		apecs_conf_write __P((void *, pcitag_t, int, pcireg_t));
 
 void
 apecs_pci_init(pc, v)

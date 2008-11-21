@@ -1,3 +1,4 @@
+/* $NetBSD: lm700x.h,v 1.2 2007/10/19 11:59:55 ad Exp $ */
 /*	$OpenBSD: lm700x.h,v 1.2 2001/12/06 16:28:18 mickey Exp $	*/
 /* $RuOBSD: lm700x.h,v 1.2 2001/10/18 16:51:36 pva Exp $ */
 
@@ -31,7 +32,7 @@
 
 #include <sys/types.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
 
 #define LM700X_REGISTER_LENGTH	24
 

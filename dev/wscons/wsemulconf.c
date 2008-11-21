@@ -1,5 +1,4 @@
-/* $OpenBSD: wsemulconf.c,v 1.6 2006/12/09 20:06:48 miod Exp $ */
-/* $NetBSD: wsemulconf.c,v 1.4 2000/01/05 11:19:37 drochner Exp $ */
+/* $NetBSD: wsemulconf.c,v 1.7 2005/12/11 12:24:12 christos Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -31,7 +30,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "wsdisplay.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: wsemulconf.c,v 1.7 2005/12/11 12:24:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,29 +39,28 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wsksymvar.h>
-#include <dev/wscons/wsemulvar.h>
+#include <dev/wscons/wsemulvar.h>		/* pulls in opt_wsemul.h */
 #include <dev/wscons/wscons_callbacks.h>
 
 static const struct wsemul_ops *wsemul_conf[] = {
 #ifdef WSEMUL_SUN
 	&wsemul_sun_ops,
 #endif
-#ifndef WSEMUL_NO_VT100
+#ifdef WSEMUL_VT100
 	&wsemul_vt100_ops,
 #endif
-#ifdef WSEMUL_DUMB
+#ifndef WSEMUL_NO_DUMB
 	&wsemul_dumb_ops,
 #endif
 	NULL
 };
 
 const struct wsemul_ops *
-wsemul_pick(name)
-	const char *name;
+wsemul_pick(const char *name)
 {
 	const struct wsemul_ops **ops;
 
-	if (name == NULL || *name == '\0') {
+	if (name == NULL) {
 		/* default */
 #ifdef WSEMUL_DEFAULT
 		name = WSEMUL_DEFAULT;
@@ -71,7 +70,7 @@ wsemul_pick(name)
 	}
 
 	for (ops = &wsemul_conf[0]; *ops != NULL; ops++)
-		if (strncmp(name, (*ops)->name, WSEMUL_NAME_SIZE) == 0)
+		if (strcmp(name, (*ops)->name) == 0)
 			break;
 
 	return (*ops);

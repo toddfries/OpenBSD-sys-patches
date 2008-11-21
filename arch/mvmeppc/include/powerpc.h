@@ -1,5 +1,4 @@
-/*	$OpenBSD: powerpc.h,v 1.5 2005/12/17 07:31:26 miod Exp $	*/
-/*	$NetBSD: powerpc.h,v 1.1 1996/09/30 16:34:30 ws Exp $	*/
+/*	$NetBSD: powerpc.h,v 1.3 2005/12/11 12:18:19 christos Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -35,62 +34,18 @@
 #define	_MACHINE_POWERPC_H_
 
 struct mem_region {
-	vaddr_t start;
-	vsize_t size;
+	paddr_t start;
+	psize_t size;
 };
 
-void mem_regions(struct mem_region **, struct mem_region **);
+void mem_regions __P((struct mem_region **, struct mem_region **));
 
 /*
  * These two functions get used solely in boot() in machdep.c.
  *
- * Not sure whether boot itself should be implementation dependent instead.	XXX
+ * Not sure whether boot itself should be implementation dependent instead. XXX
  */
-typedef void (exit_f)(void) /*__attribute__((__noreturn__))*/ ;
-typedef void (boot_f)(char *bootspec) /* __attribute__((__noreturn__))*/ ;
-typedef void (vmon_f)(void);
-
-typedef void (mem_regions_f)(struct mem_region **memp,
-	struct mem_region **availp);
-
-/* firmware interface.
- * regardless of type of firmware used several items
- * are need from firmware to boot up.
- * these include:
- *	memory information
- *	vmsetup for firmware calls.
- *	default character print mechanism ???
- *	firmware exit (return)
- *	firmware boot (reset)
- *	vmon - tell firmware the bsd vm is active.
- */
-
-struct firmware {
-	mem_regions_f	*mem_regions;
-	exit_f		*exit;
-	boot_f		*boot;
-	vmon_f		*vmon;
-
-#ifdef FW_HAS_PUTC
-	boot_f		*putc;
-#endif
-};
-extern  struct firmware *fw;
-
-/* Clock callbacks */
-
-typedef unsigned long (tps_t)(void);
-typedef int (clock_read_t)(int *sec, int *min, int *hour, int *day,
-    int *mon, int *yr);
-typedef int (clock_write_t)(int sec, int min, int hour, int day,
-    int mon, int yr);
-typedef int (time_read_t)(u_int32_t *sec);
-typedef int (time_write_t)(u_int32_t sec);
-
-extern tps_t *tps;
-extern clock_read_t *clock_read;
-extern clock_write_t *clock_write;
-extern time_read_t  *time_read;
-extern time_write_t *time_write;
+void ppc_exit __P((void)) __attribute__((__noreturn__));
+void ppc_boot __P((char *bootspec)) __attribute__((__noreturn__));
 
 #endif	/* _MACHINE_POWERPC_H_ */

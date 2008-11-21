@@ -1,8 +1,10 @@
-#	$OpenBSD: Makefile,v 1.3 1999/04/30 07:28:25 fgsch Exp $
-#	$NetBSD: Makefile.pcmciadevs,v 1.1 1998/07/19 17:28:15 christos Exp $
+#	$NetBSD: Makefile,v 1.7 2001/05/06 03:26:39 ichiro Exp $
 
-AWK=	awk
+# use 'make -f Makefile.pcmciadevs' to make pcmciadevs.h and pcmciadevs_data.h
 
-pcmciadevs.h: pcmciadevs devlist2h.awk
-	/bin/rm -f pcmciadevs.h
-	${AWK} -f devlist2h.awk pcmciadevs
+INCSDIR= /usr/include/dev/pcmcia
+
+# Only install includes which are used by userland
+INCS=	if_cnwioctl.h if_rayreg.h
+
+.include <bsd.kinc.mk>

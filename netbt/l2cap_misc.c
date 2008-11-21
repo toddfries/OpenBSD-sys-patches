@@ -1,5 +1,4 @@
-/*	$OpenBSD: l2cap_misc.c,v 1.3 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: l2cap_misc.c,v 1.5 2007/11/03 17:20:17 plunky Exp $	*/
+/*	$NetBSD: l2cap_misc.c,v 1.6 2008/04/24 11:38:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -31,6 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: l2cap_misc.c,v 1.6 2008/04/24 11:38:37 ad Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
@@ -47,8 +49,10 @@ struct l2cap_channel_list
 struct l2cap_channel_list
 	l2cap_listen_list = LIST_HEAD_INITIALIZER(l2cap_listen_list);
 
-struct pool l2cap_req_pool;
-struct pool l2cap_pdu_pool;
+POOL_INIT(l2cap_req_pool, sizeof(struct l2cap_req), 0, 0, 0, "l2cap_req", NULL,
+    IPL_SOFTNET);
+POOL_INIT(l2cap_pdu_pool, sizeof(struct l2cap_pdu), 0, 0, 0, "l2cap_pdu", NULL,
+    IPL_SOFTNET);
 
 const l2cap_qos_t l2cap_default_qos = {
 	0,			/* flags */
@@ -66,15 +70,6 @@ const l2cap_qos_t l2cap_default_qos = {
 int l2cap_response_timeout = 30;		/* seconds */
 int l2cap_response_extended_timeout = 180;	/* seconds */
 
-void
-l2cap_init(void)
-{
-	pool_init(&l2cap_req_pool, sizeof(struct l2cap_req), 0, 0, 0,
-	    "l2cap_req", NULL);
-	pool_init(&l2cap_pdu_pool, sizeof(struct l2cap_pdu), 0, 0, 0,
-	    "l2cap_pdu", NULL);
-}
-
 /*
  * Set Link Mode on channel
  */
@@ -85,11 +80,10 @@ l2cap_setmode(struct l2cap_channel *chan)
 	KASSERT(chan != NULL);
 	KASSERT(chan->lc_link != NULL);
 
-	DPRINTF("(%s) CID #%d, auth %s, encrypt %s, secure %s\n",
-	    device_xname(chan->lc_link->hl_unit->hci_dev), chan->lc_lcid,
-	    (chan->lc_mode & L2CAP_LM_AUTH ? "yes" : "no"),
-	    (chan->lc_mode & L2CAP_LM_ENCRYPT ? "yes" : "no"),
-	    (chan->lc_mode & L2CAP_LM_SECURE ? "yes" : "no"));
+	DPRINTF("CID #%d, auth %s, encrypt %s, secure %s\n", chan->lc_lcid,
+		(chan->lc_mode & L2CAP_LM_AUTH ? "yes" : "no"),
+		(chan->lc_mode & L2CAP_LM_ENCRYPT ? "yes" : "no"),
+		(chan->lc_mode & L2CAP_LM_SECURE ? "yes" : "no"));
 
 	if (chan->lc_mode & L2CAP_LM_AUTH)
 		chan->lc_link->hl_flags |= HCI_LINK_AUTH_REQ;
@@ -136,8 +130,9 @@ l2cap_request_alloc(struct l2cap_channel *chan, uint8_t code)
 	req->lr_chan = chan;
 	req->lr_link = link;
 
-	timeout_set(&req->lr_rtx, l2cap_rtx, req);
-	timeout_add(&req->lr_rtx, l2cap_response_timeout*hz);
+	callout_init(&req->lr_rtx, 0);
+	callout_setfunc(&req->lr_rtx, l2cap_rtx, req);
+	callout_schedule(&req->lr_rtx, l2cap_response_timeout * hz);
 
 	TAILQ_INSERT_TAIL(&link->hl_reqs, req, lr_next);
 
@@ -168,9 +163,11 @@ l2cap_request_free(struct l2cap_req *req)
 {
 	struct hci_link *link = req->lr_link;
 
-	timeout_del(&req->lr_rtx);
-	if (timeout_triggered(&req->lr_rtx))
+	callout_stop(&req->lr_rtx);
+	if (callout_invoking(&req->lr_rtx))
 		return;
+
+	callout_destroy(&req->lr_rtx);
 
 	TAILQ_REMOVE(&link->hl_reqs, req, lr_next);
 	pool_put(&l2cap_req_pool, req);
@@ -188,9 +185,9 @@ l2cap_rtx(void *arg)
 {
 	struct l2cap_req *req = arg;
 	struct l2cap_channel *chan;
-	int s;
 
-	s = splsoftnet();
+	mutex_enter(bt_lock);
+	callout_ack(&req->lr_rtx);
 
 	chan = req->lr_chan;
 	l2cap_request_free(req);
@@ -200,7 +197,7 @@ l2cap_rtx(void *arg)
 	if (chan && chan->lc_state != L2CAP_CLOSED)
 		l2cap_close(chan, ETIMEDOUT);
 
-	splx(s);
+	mutex_exit(bt_lock);
 }
 
 /*

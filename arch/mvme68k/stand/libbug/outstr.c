@@ -1,4 +1,4 @@
-/*	$OpenBSD: outstr.c,v 1.2 1996/05/16 02:25:42 chuck Exp $ */
+/*	$NetBSD: outstr.c,v 1.3 2008/01/12 09:54:31 tsutsui Exp $	*/
 
 /*
  * bug routines -- assumes that the necessary sections of memory
@@ -10,9 +10,9 @@
 #include "libbug.h"
 
 void
-mvmeprom_outstr(start, end)
-	char *start, *end;
+mvmeprom_outstr(char *start, char *end)
 {
+
 	MVMEPROM_ARG1(end);
 	MVMEPROM_ARG2(start);
 	MVMEPROM_CALL(MVMEPROM_OUTSTR);

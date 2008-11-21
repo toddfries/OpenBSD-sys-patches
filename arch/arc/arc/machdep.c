@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.99 2006/12/21 15:55:22 yamt Exp $	*/
+/*	$NetBSD: machdep.c,v 1.114 2008/11/12 12:35:56 ad Exp $	*/
 /*	$OpenBSD: machdep.c,v 1.36 1999/05/22 21:22:19 weingart Exp $	*/
 
 /*
@@ -78,7 +78,7 @@
 /* from: Utah Hdr: machdep.c 1.63 91/04/24 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.99 2006/12/21 15:55:22 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.114 2008/11/12 12:35:56 ad Exp $");
 
 #include "fs_mfs.h"
 #include "opt_ddb.h"
@@ -105,7 +105,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.99 2006/12/21 15:55:22 yamt Exp $");
 #include <uvm/uvm_extern.h>
 #include <sys/mount.h>
 #include <sys/device.h>
-#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/kcore.h>
 #include <sys/ksyms.h>
@@ -168,13 +167,11 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.99 2006/12/21 15:55:22 yamt Exp $");
 struct cpu_info cpu_info_store;
 
 /* maps for VM objects */
-struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
 int	maxmem;			/* max memory per process */
 int	physmem;		/* max supported memory, changes to actual */
-int	ncpu = 1;		/* At least one CPU in the system */
 int	cpuspeed = 150;		/* approx CPU clock [MHz] */
 vsize_t kseg2iobufsize = 0;	/* to reserve PTEs for KSEG2 I/O space */
 struct arc_bus_space arc_bus_io;/* Bus tag for bus.h macros */
@@ -218,12 +215,6 @@ void arc_sysreset(bus_addr_t, bus_size_t);
 int	safepri = MIPS3_PSL_LOWIPL;
 
 const uint32_t *ipl_sr_bits;
-const uint32_t mips_ipl_si_to_sr[SI_NQUEUES] = {
-	[SI_SOFT] = MIPS_SOFT_INT_MASK_0,
-	[SI_SOFTCLOCK] = MIPS_SOFT_INT_MASK_0,
-	[SI_SOFTNET] = MIPS_SOFT_INT_MASK_1,
-	[SI_SOFTSERIAL] = MIPS_SOFT_INT_MASK_1,
-};
 
 extern char kernel_text[], edata[], end[];
 extern struct user *proc0paddr;
@@ -240,8 +231,9 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 	const char *cp;
 	int i;
 	paddr_t kernstartpfn, kernendpfn, first, last;
-	caddr_t kernend, v;
-#if NKSYMS > 0 || defined(DDB) || defined(LKM)
+	char *kernend;
+	vaddr_t v;
+#if NKSYMS > 0 || defined(DDB) || defined(MODULAR)
 	char *ssym = NULL;
 	char *esym = NULL;
 	struct btinfo_symtab *bi_syms;
@@ -263,7 +255,7 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 		bootinfo_msg = "no bootinfo found. (old bootblocks?)\n";
 
 	/* clear the BSS segment in kernel code */
-#if NKSYM > 0 || defined(DDB) || defined(LKM)
+#if NKSYM > 0 || defined(DDB) || defined(MODULAR)
 	bi_syms = lookup_bootinfo(BTINFO_SYMTAB);
 
 	/* check whether there is valid bootinfo symtab info */
@@ -281,7 +273,7 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 	} else
 #endif
 	{
-		kernend = (caddr_t)mips_round_page(end);
+		kernend = (void *)mips_round_page(end);
 		memset(edata, 0, kernend - edata);
 	}
 
@@ -398,10 +390,8 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 	 *
 	 * XXX - reserve these KVA space after UVM initialization.
 	 */
-
-	arc_init_wired_map();
-
 	(*platform->init)();
+
 	cpuspeed = platform->clock;
 	curcpu()->ci_cpu_freq = platform->clock * 1000000;
 	curcpu()->ci_cycles_per_hz = (curcpu()->ci_cpu_freq + hz / 2) / hz;
@@ -411,7 +401,6 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 		curcpu()->ci_cycles_per_hz /= 2;
 		curcpu()->ci_divisor_delay /= 2;
 	}
-	MIPS_SET_CI_RECIPRICAL(curcpu());
 	sprintf(cpu_model, "%s %s%s",
 	    platform->vendor, platform->model, platform->variant);
 
@@ -424,7 +413,7 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 		kernend += round_page(mfs_initminiroot(kernend));
 #endif
 
-#if NKSYMS || defined(DDB) || defined(LKM)
+#if NKSYMS || defined(DDB) || defined(MODULAR)
 	/* init symbols if present */
 	if (esym)
 		ksyms_init(esym - ssym, ssym, esym);
@@ -506,11 +495,11 @@ mach_init(int argc, char *argv[], u_int bim, void *bip)
 	/*
 	 * Allocate space for proc0's USPACE.
 	 */
-	v = (caddr_t)uvm_pageboot_alloc(USPACE);
+	v = uvm_pageboot_alloc(USPACE);
 	lwp0.l_addr = proc0paddr = (struct user *)v;
 	lwp0.l_md.md_regs = (struct frame *)(v + USPACE) - 1;
-	curpcb = &lwp0.l_addr->u_pcb;
-	curpcb->pcb_context[11] = MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
+	proc0paddr->u_pcb.pcb_context[11] =
+	    MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
 }
 
 void
@@ -589,17 +578,10 @@ cpu_startup(void)
 	minaddr = 0;
 
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
-	 * limits the number of processes exec'ing at any time.
-	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-
-	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, FALSE, NULL);
+	    VM_PHYS_SIZE, 0, false, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -677,6 +659,8 @@ cpu_reboot(int howto, char *bootstr)
 		dumpsys();
 
 	doshutdownhooks();
+
+	pmf_system_shutdown(boothowto);
 
 	if (howto & RB_HALT) {
 		printf("\n");

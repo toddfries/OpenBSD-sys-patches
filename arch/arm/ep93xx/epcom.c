@@ -1,4 +1,4 @@
-/*	$NetBSD: epcom.c,v 1.13 2006/10/01 20:31:49 elad Exp $ */
+/*	$NetBSD: epcom.c,v 1.18 2008/06/11 22:37:21 cegger Exp $ */
 /*
  * Copyright (c) 1998, 1999, 2001, 2002, 2004 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -23,13 +23,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -80,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: epcom.c,v 1.13 2006/10/01 20:31:49 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: epcom.c,v 1.18 2008/06/11 22:37:21 cegger Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -242,7 +235,7 @@ epcom_attach_subr(struct epcom_softc *sc)
 		aprint_normal("%s: console\n", sc->sc_dev.dv_xname);
 	}
 
-	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, epcomsoft, sc);
+	sc->sc_si = softint_establish(SOFTINT_SERIAL, epcomsoft, sc);
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
@@ -264,7 +257,7 @@ static int
 epcomparam(struct tty *tp, struct termios *t)
 {
 	struct epcom_softc *sc
-		= device_lookup(&epcom_cd, COMUNIT(tp->t_dev));
+		= device_lookup_private(&epcom_cd, COMUNIT(tp->t_dev));
 	int s;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -356,7 +349,7 @@ static void
 epcomstart(struct tty *tp)
 {
 	struct epcom_softc *sc
-		= device_lookup(&epcom_cd, COMUNIT(tp->t_dev));
+		= device_lookup_private(&epcom_cd, COMUNIT(tp->t_dev));
 	int s;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -367,16 +360,8 @@ epcomstart(struct tty *tp)
 		goto out;
 	if (sc->sc_tx_stopped)
 		goto out;
-
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	if (!ttypull(tp))
+		goto out;
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -451,7 +436,7 @@ epcomopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int s, s2;
 	int error;
 
-	sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	if (sc == NULL || !ISSET(sc->sc_hwflags, COM_HW_DEV_OK) ||
 		sc->sc_rbuf == NULL)
 		return (ENXIO);
@@ -584,7 +569,7 @@ bad:
 int
 epcomclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct epcom_softc *sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	struct epcom_softc *sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	/* XXX This is for cons.c. */
@@ -612,7 +597,7 @@ epcomclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 epcomread(dev_t dev, struct uio *uio, int flag)
 {
-	struct epcom_softc *sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	struct epcom_softc *sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -624,7 +609,7 @@ epcomread(dev_t dev, struct uio *uio, int flag)
 int
 epcomwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct epcom_softc *sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	struct epcom_softc *sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -636,7 +621,7 @@ epcomwrite(dev_t dev, struct uio *uio, int flag)
 int
 epcompoll(dev_t dev, int events, struct lwp *l)
 {
-	struct epcom_softc *sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	struct epcom_softc *sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -648,16 +633,16 @@ epcompoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 epcomtty(dev_t dev)
 {
-	struct epcom_softc *sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	struct epcom_softc *sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return (tp);
 }
 
 int
-epcomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
+epcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
-	struct epcom_softc *sc = device_lookup(&epcom_cd, COMUNIT(dev));
+	struct epcom_softc *sc = device_lookup_private(&epcom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 	int error;
 	int s;
@@ -715,7 +700,7 @@ void
 epcomstop(struct tty *tp, int flag)
 {
 	struct epcom_softc *sc
-		= device_lookup(&epcom_cd, COMUNIT(tp->t_dev));
+		= device_lookup_private(&epcom_cd, COMUNIT(tp->t_dev));
 	int s;
 
 	s = splserial();
@@ -1144,7 +1129,7 @@ epcomintr(void* arg)
 	}
 
 	/* Wake up the poller. */
-	softintr_schedule(sc->sc_si);
+	softint_schedule(sc->sc_si);
 
 #if 0 /* XXX: broken */
 #if NRND > 0 && defined(RND_COM)

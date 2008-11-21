@@ -1,5 +1,4 @@
-/*	$NetBSD: ka750.h,v 1.8 1997/02/12 17:58:56 ragge Exp $	*/
-/*	$OpenBSD: ka750.h,v 1.8 2000/04/26 03:08:41 bjc Exp $	*/
+/*	$NetBSD: ka750.h,v 1.10 2002/12/01 21:21:45 matt Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -31,6 +30,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _VAX_KA750_H_
+#define _VAX_KA750_H_
+
 #include <machine/nexus.h>
 
 #define V750UCODE(x)    ((x>>8)&255)
@@ -42,3 +44,5 @@
 
 /* 11/750 specific pages needed to be stolen when bootstrapping */
 #define	V750PGS	4
+
+#endif /* _VAX_KA750_H_ */

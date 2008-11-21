@@ -1,4 +1,4 @@
-/*	$NetBSD: mach_iokit.c,v 1.34 2006/03/07 03:32:06 thorpej Exp $ */
+/*	$NetBSD: mach_iokit.c,v 1.36 2008/04/28 20:23:44 martin Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
 
 #include "opt_compat_darwin.h"
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mach_iokit.c,v 1.34 2006/03/07 03:32:06 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mach_iokit.c,v 1.36 2008/04/28 20:23:44 martin Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -89,8 +82,7 @@ static int mach_fill_parent_iterator(struct mach_device_iterator *, int, int,
     struct mach_iokit_devclass *);
 
 int
-mach_io_service_get_matching_services(args)
-	struct mach_trap_args *args;
+mach_io_service_get_matching_services(struct mach_trap_args *args)
 {
 	mach_io_service_get_matching_services_request_t *req = args->smsg;
 	mach_io_service_get_matching_services_reply_t *rep = args->rmsg;
@@ -144,8 +136,7 @@ mach_io_service_get_matching_services(args)
 }
 
 int
-mach_io_iterator_next(args)
-	struct mach_trap_args *args;
+mach_io_iterator_next(struct mach_trap_args *args)
 {
 	mach_io_iterator_next_request_t *req = args->smsg;
 	mach_io_iterator_next_reply_t *rep = args->rmsg;
@@ -185,8 +176,7 @@ mach_io_iterator_next(args)
 }
 
 int
-mach_io_service_open(args)
-	struct mach_trap_args *args;
+mach_io_service_open(struct mach_trap_args *args)
 {
 	mach_io_service_open_request_t *req = args->smsg;
 	mach_io_service_open_reply_t *rep = args->rmsg;
@@ -217,8 +207,7 @@ mach_io_service_open(args)
 }
 
 int
-mach_io_connect_method_scalari_scalaro(args)
-	struct mach_trap_args *args;
+mach_io_connect_method_scalari_scalaro(struct mach_trap_args *args)
 {
 	mach_io_connect_method_scalari_scalaro_request_t *req = args->smsg;
 	struct lwp *l = args->l;
@@ -258,8 +247,7 @@ mach_io_connect_method_scalari_scalaro(args)
 }
 
 int
-mach_io_connect_get_service(args)
-	struct mach_trap_args *args;
+mach_io_connect_get_service(struct mach_trap_args *args)
 {
 	mach_io_connect_get_service_request_t *req = args->smsg;
 	mach_io_connect_get_service_reply_t *rep = args->rmsg;
@@ -296,8 +284,7 @@ mach_io_connect_get_service(args)
 }
 
 int
-mach_io_registry_entry_create_iterator(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_create_iterator(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_create_iterator_request_t *req = args->smsg;
 	mach_io_registry_entry_create_iterator_reply_t *rep = args->rmsg;
@@ -372,8 +359,7 @@ mach_io_registry_entry_create_iterator(args)
 }
 
 int
-mach_io_object_conforms_to(args)
-	struct mach_trap_args *args;
+mach_io_object_conforms_to(struct mach_trap_args *args)
 {
 	mach_io_object_conforms_to_request_t *req = args->smsg;
 	mach_io_object_conforms_to_reply_t *rep = args->rmsg;
@@ -403,8 +389,7 @@ mach_io_object_conforms_to(args)
 }
 
 int
-mach_io_service_add_interest_notification(args)
-	struct mach_trap_args *args;
+mach_io_service_add_interest_notification(struct mach_trap_args *args)
 {
 	mach_io_service_add_interest_notification_request_t *req = args->smsg;
 	mach_io_service_add_interest_notification_reply_t *rep = args->rmsg;
@@ -453,8 +438,7 @@ mach_io_service_add_interest_notification(args)
 }
 
 int
-mach_io_connect_set_notification_port(args)
-	struct mach_trap_args *args;
+mach_io_connect_set_notification_port(struct mach_trap_args *args)
 {
 	mach_io_connect_set_notification_port_request_t *req = args->smsg;
 	mach_io_connect_set_notification_port_reply_t *rep = args->rmsg;
@@ -496,8 +480,7 @@ mach_io_connect_set_notification_port(args)
 }
 
 int
-mach_io_registry_get_root_entry(args)
-	struct mach_trap_args *args;
+mach_io_registry_get_root_entry(struct mach_trap_args *args)
 {
 	mach_io_registry_get_root_entry_request_t *req = args->smsg;
 	mach_io_registry_get_root_entry_reply_t *rep = args->rmsg;
@@ -522,8 +505,7 @@ mach_io_registry_get_root_entry(args)
 }
 
 int
-mach_io_registry_entry_get_child_iterator(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_child_iterator(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_child_iterator_request_t *req = args->smsg;
 	mach_io_registry_entry_get_child_iterator_reply_t *rep = args->rmsg;
@@ -576,8 +558,7 @@ mach_io_registry_entry_get_child_iterator(args)
 }
 
 int
-mach_io_registry_entry_get_name_in_plane(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_name_in_plane(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_name_in_plane_request_t *req = args->smsg;
 	mach_io_registry_entry_get_name_in_plane_reply_t *rep = args->rmsg;
@@ -617,8 +598,7 @@ mach_io_registry_entry_get_name_in_plane(args)
 }
 
 int
-mach_io_object_get_class(args)
-	struct mach_trap_args *args;
+mach_io_object_get_class(struct mach_trap_args *args)
 {
 	mach_io_object_get_class_request_t *req = args->smsg;
 	mach_io_object_get_class_reply_t *rep = args->rmsg;
@@ -640,8 +620,7 @@ mach_io_object_get_class(args)
 }
 
 int
-mach_io_registry_entry_get_location_in_plane(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_location_in_plane(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_location_in_plane_request_t *req =
 	    args->smsg;
@@ -671,8 +650,7 @@ mach_io_registry_entry_get_location_in_plane(args)
 }
 
 int
-mach_io_registry_entry_get_properties(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_properties(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_properties_request_t *req = args->smsg;
 	mach_io_registry_entry_get_properties_reply_t *rep = args->rmsg;
@@ -717,8 +695,7 @@ mach_io_registry_entry_get_properties(args)
 }
 
 int
-mach_io_registry_entry_get_property(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_property(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_property_request_t *req = args->smsg;
 	mach_io_registry_entry_get_property_reply_t *rep = args->rmsg;
@@ -785,8 +762,7 @@ mach_io_registry_entry_get_property(args)
 }
 
 int
-mach_io_registry_entry_get_path(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_path(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_path_request_t *req = args->smsg;
 	mach_io_registry_entry_get_path_reply_t *rep = args->rmsg;
@@ -833,8 +809,7 @@ mach_io_registry_entry_get_path(args)
 }
 
 int
-mach_io_connect_map_memory(args)
-	struct mach_trap_args *args;
+mach_io_connect_map_memory(struct mach_trap_args *args)
 {
 	mach_io_connect_map_memory_request_t *req = args->smsg;
 	struct lwp *l = args->l;
@@ -859,8 +834,7 @@ mach_io_connect_map_memory(args)
 }
 
 int
-mach_io_iterator_reset(args)
-	struct mach_trap_args *args;
+mach_io_iterator_reset(struct mach_trap_args *args)
 {
 	mach_io_iterator_reset_request_t *req = args->smsg;
 	mach_io_iterator_reset_reply_t *rep = args->rmsg;
@@ -891,8 +865,7 @@ mach_io_iterator_reset(args)
 }
 
 int
-mach_io_connect_method_scalari_structo(args)
-	struct mach_trap_args *args;
+mach_io_connect_method_scalari_structo(struct mach_trap_args *args)
 {
 	mach_io_connect_method_scalari_structo_request_t *req = args->smsg;
 	struct lwp *l = args->l;
@@ -928,8 +901,7 @@ mach_io_connect_method_scalari_structo(args)
 }
 
 int
-mach_io_connect_method_structi_structo(args)
-	struct mach_trap_args *args;
+mach_io_connect_method_structi_structo(struct mach_trap_args *args)
 {
 	mach_io_connect_method_structi_structo_request_t *req = args->smsg;
 	struct lwp *l = args->l;
@@ -967,8 +939,7 @@ mach_io_connect_method_structi_structo(args)
 }
 
 int
-mach_io_connect_set_properties(args)
-	struct mach_trap_args *args;
+mach_io_connect_set_properties(struct mach_trap_args *args)
 {
 	mach_io_connect_set_properties_request_t *req = args->smsg;
 	mach_io_connect_set_properties_reply_t *rep = args->rmsg;
@@ -987,8 +958,7 @@ mach_io_connect_set_properties(args)
 }
 
 int
-mach_io_service_close(args)
-	struct mach_trap_args *args;
+mach_io_service_close(struct mach_trap_args *args)
 {
 	mach_io_service_close_request_t *req = args->smsg;
 	mach_io_service_close_reply_t *rep = args->rmsg;
@@ -1009,8 +979,7 @@ mach_io_service_close(args)
 }
 
 int
-mach_io_connect_add_client(args)
-	struct mach_trap_args *args;
+mach_io_connect_add_client(struct mach_trap_args *args)
 {
 	mach_io_connect_add_client_request_t *req = args->smsg;
 	mach_io_connect_add_client_reply_t *rep = args->rmsg;
@@ -1031,8 +1000,7 @@ mach_io_connect_add_client(args)
 }
 
 int
-mach_io_connect_method_scalari_structi(args)
-	struct mach_trap_args *args;
+mach_io_connect_method_scalari_structi(struct mach_trap_args *args)
 {
 	mach_io_connect_method_scalari_structi_request_t *req = args->smsg;
 	struct lwp *l = args->l;
@@ -1073,8 +1041,7 @@ mach_io_connect_method_scalari_structi(args)
 }
 
 int
-mach_io_registry_entry_from_path(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_from_path(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_from_path_request_t *req = args->smsg;
 	mach_io_registry_entry_from_path_reply_t *rep = args->rmsg;
@@ -1127,8 +1094,7 @@ mach_io_registry_entry_from_path(args)
 }
 
 int
-mach_io_registry_entry_get_parent_iterator(args)
-	struct mach_trap_args *args;
+mach_io_registry_entry_get_parent_iterator(struct mach_trap_args *args)
 {
 	mach_io_registry_entry_get_parent_iterator_request_t *req = args->smsg;
 	mach_io_registry_entry_get_parent_iterator_reply_t *rep = args->rmsg;
@@ -1187,8 +1153,7 @@ mach_io_registry_entry_get_parent_iterator(args)
 }
 
 void
-mach_iokit_cleanup_notify(mr)
-	struct mach_right *mr;
+mach_iokit_cleanup_notify(struct mach_right *mr)
 {
 	int i;
 	struct mach_iokit_devclass *mid;
@@ -1202,11 +1167,7 @@ mach_iokit_cleanup_notify(mr)
 }
 
 static int
-mach_fill_child_iterator(mdi, size, index, mid)
-	struct mach_device_iterator *mdi;
-	int size;
-	int index;
-	struct mach_iokit_devclass *mid;
+mach_fill_child_iterator(struct mach_device_iterator *mdi, int size, int index, struct mach_iokit_devclass *mid)
 {
 	struct mach_iokit_devclass **midp;
 	struct mach_iokit_devclass **midq;
@@ -1231,11 +1192,7 @@ mach_fill_child_iterator(mdi, size, index, mid)
 }
 
 static int
-mach_fill_parent_iterator(mdi, size, index, mid)
-	struct mach_device_iterator *mdi;
-	int size;
-	int index;
-	struct mach_iokit_devclass *mid;
+mach_fill_parent_iterator(struct mach_device_iterator *mdi, int size, int index, struct mach_iokit_devclass *mid)
 {
 	struct mach_iokit_devclass **midp;
 

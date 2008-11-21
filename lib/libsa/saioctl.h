@@ -1,5 +1,4 @@
-/*	$OpenBSD: saioctl.h,v 1.3 2003/06/02 23:28:09 millert Exp $	*/
-/*	$NetBSD: saioctl.h,v 1.2 1994/10/26 05:45:04 cgd Exp $	*/
+/*	$NetBSD: saioctl.h,v 1.4 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993

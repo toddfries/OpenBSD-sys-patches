@@ -1,5 +1,4 @@
-/* $OpenBSD: ioasic.c,v 1.13 2007/11/06 18:20:05 miod Exp $ */
-/* $NetBSD: ioasic.c,v 1.34 2000/07/18 06:10:06 thorpej Exp $ */
+/* $NetBSD: ioasic.c,v 1.39 2008/06/13 05:36:50 cegger Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,6 +57,12 @@
  * rights to redistribute these changes.
  */
 
+#include "opt_dec_3000_300.h"
+
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: ioasic.c,v 1.39 2008/06/13 05:36:50 cegger Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
@@ -81,19 +79,14 @@
 #include <dev/tc/ioasicvar.h>
 
 /* Definition of the driver for autoconfig. */
-int	ioasicmatch(struct device *, void *, void *);
-void	ioasicattach(struct device *, struct device *, void *);
+int	ioasicmatch __P((struct device *, struct cfdata *, void *));
+void	ioasicattach __P((struct device *, struct device *, void *));
 
-struct cfattach ioasic_ca = {
-	sizeof(struct ioasic_softc), ioasicmatch, ioasicattach,
-};
+CFATTACH_DECL(ioasic, sizeof(struct ioasic_softc),
+    ioasicmatch, ioasicattach, NULL, NULL);
 
-struct cfdriver ioasic_cd = {
-	NULL, "ioasic", DV_DULL,
-};
-
-int	ioasic_intr(void *);
-int	ioasic_intrnull(void *);
+int	ioasic_intr __P((void *));
+int	ioasic_intrnull __P((void *));
 
 #define	C(x)	((void *)(x))
 
@@ -121,10 +114,9 @@ struct ioasic_dev ioasic_devs[] = {
 int ioasic_ndevs = sizeof(ioasic_devs) / sizeof(ioasic_devs[0]);
 
 struct ioasicintr {
-	int	(*iai_func)(void *);
+	int	(*iai_func) __P((void *));
 	void	*iai_arg;
-	struct evcount iai_count;
-	char	iai_name[16];
+	struct evcnt iai_evcnt;
 } ioasicintrs[IOASIC_NCOOKIES];
 
 tc_addr_t ioasic_base;		/* XXX XXX XXX */
@@ -135,7 +127,8 @@ int ioasicfound;
 int
 ioasicmatch(parent, cfdata, aux)
 	struct device *parent;
-	void *cfdata, *aux;
+	struct cfdata *cfdata;
+	void *aux;
 {
 	struct tc_attach_args *ta = aux;
 
@@ -164,6 +157,8 @@ ioasicattach(parent, self, aux)
 	u_long ssr;
 #endif
 	u_long i, imsk;
+	const struct evcnt *pevcnt;
+	char *cp;
 
 	ioasicfound = 1;
 
@@ -199,15 +194,19 @@ ioasicattach(parent, self, aux)
 	/*
 	 * Set up interrupt handlers.
 	 */
+	pevcnt = tc_intr_evcnt(parent, ta->ta_cookie);
 	for (i = 0; i < IOASIC_NCOOKIES; i++) {
 		ioasicintrs[i].iai_func = ioasic_intrnull;
 		ioasicintrs[i].iai_arg = (void *)i;
-		snprintf(ioasicintrs[i].iai_name,
-		    sizeof ioasicintrs[i].iai_name, "ioasic slot %u", i);
-		evcount_attach(&ioasicintrs[i].iai_count,
-		    ioasicintrs[i].iai_name, NULL, &evcount_intr);
+
+		cp = malloc(12, M_DEVBUF, M_NOWAIT);
+		if (cp == NULL)
+			panic("ioasicattach");
+		sprintf(cp, "slot %lu", i);
+		evcnt_attach_dynamic(&ioasicintrs[i].iai_evcnt,
+		    EVCNT_TYPE_INTR, pevcnt, self->dv_xname, cp);
 	}
-	tc_intr_establish(parent, ta->ta_cookie, IPL_NONE, ioasic_intr, sc);
+	tc_intr_establish(parent, ta->ta_cookie, TC_IPL_NONE, ioasic_intr, sc);
 
 	/*
 	 * Try to configure each device.
@@ -216,13 +215,10 @@ ioasicattach(parent, self, aux)
 }
 
 void
-ioasic_intr_establish(ioa, cookie, level, func, arg)
-	struct device *ioa;
-	void *cookie, *arg;
-	int level;
-	int (*func)(void *);
+ioasic_intr_establish(device_t ioa, void *cookie, tc_intrlevel_t level,
+		int (*func)(void *), void *arg)
 {
-	struct ioasic_softc *sc = (void *)ioasic_cd.cd_devs[0];
+	struct ioasic_softc *sc = device_lookup_private(&ioasic_cd,0);
 	u_long dev, i, imsk;
 
 	dev = (u_long)cookie;
@@ -249,11 +245,9 @@ ioasic_intr_establish(ioa, cookie, level, func, arg)
 }
 
 void
-ioasic_intr_disestablish(ioa, cookie)
-	struct device *ioa;
-	void *cookie;
+ioasic_intr_disestablish(device_t ioa, void *cookie)
 {
-	struct ioasic_softc *sc = (void *)ioasic_cd.cd_devs[0];
+	struct ioasic_softc *sc = device_lookup_private(&ioasic_cd,0);
 	u_long dev, i, imsk;
 
 	dev = (u_long)cookie;
@@ -308,11 +302,13 @@ ioasic_intr(val)
 		osir = sir =
 		    bus_space_read_4(sc->sc_bst, sc->sc_bsh, IOASIC_INTR);
 
+#define	INCRINTRCNT(slot)	ioasicintrs[slot].iai_evcnt.ev_count++
+
 		/* XXX DUPLICATION OF INTERRUPT BIT INFORMATION... */
 #define	CHECKINTR(slot, bits, clear)					\
 		if (sir & (bits)) {					\
 			ifound = 1;					\
-			ioasicintrs[slot].iai_count.ec_count++;		\
+			INCRINTRCNT(slot);				\
 			(*ioasicintrs[slot].iai_func)			\
 			    (ioasicintrs[slot].iai_arg);		\
 			if (clear)					\

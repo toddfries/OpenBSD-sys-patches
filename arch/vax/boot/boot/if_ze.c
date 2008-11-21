@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_ze.c,v 1.5 2006/08/24 22:10:36 miod Exp $ */
 /*	$NetBSD: if_ze.c,v 1.12 2002/05/27 16:54:18 ragge Exp $	*/
 /*
  * Copyright (c) 1998 James R. Maynard III.  All rights reserved.
@@ -37,16 +36,18 @@
 #include <sys/queue.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/if_ether.h>
 
 #include <lib/libsa/netif.h>
 #include <lib/libsa/stand.h>
 #include <lib/libsa/net.h>
 
-#include <arch/vax/if/sgecreg.h>
+#include "lib/libkern/libkern.h"
+
+#include <dev/ic/sgecreg.h>
 
 #include "arch/vax/include/sid.h"
 #include "arch/vax/include/rpb.h"
@@ -56,8 +57,6 @@
 static int ze_get(struct iodesc *, void *, size_t, time_t);
 static int ze_put(struct iodesc *, void *, size_t);
 
-#define ETHER_MIN_LEN 64
-#define ETHER_MAX_LEN 1518
 
 struct netif_driver ze_driver = {
 	0, 0, 0, 0, ze_get, ze_put,
@@ -115,15 +114,14 @@ zeopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 			else
 				ze_myaddr[i] = (nisa_rom[i] & 0x0000ff00) >> 8;
 	}
-	printf("SGEC: Ethernet address %s", ether_sprintf(ze_myaddr));
+	printf("SGEC: Ethernet address %s\n", ether_sprintf(ze_myaddr));
 
 	/* initialize SGEC operating mode */
 	/* disable interrupts here */
 	nicsr0_work = ZE_NICSR0_IPL14 | ZE_NICSR0_SA | ZE_NICSR0_MBO |
 		(ZE_NICSR0_IV_MASK & 0x0108);
-	do {
+	while (addr->ze_nicsr0 != nicsr0_work)
 		addr->ze_nicsr0 = nicsr0_work;
-	} while (addr->ze_nicsr0 != nicsr0_work);
 	if (addr->ze_nicsr5 & ZE_NICSR5_ME)
 		addr->ze_nicsr5 |= ZE_NICSR5_ME;
 	/* reenable interrupts here */
@@ -153,8 +151,6 @@ zeopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 	ze_tdes_list[NXMT].ze_tdr = ZE_TDR_OW;
 	ze_tdes_list[NXMT].ze_bufaddr = (u_char *)ze_tdes_list;
 
-	printf(".");	/* XXX VXT */
-
 	/* Build setup frame. We set the SGEC to do a
 		perfect filter on our own address. */
 	ze_setup_tdes_list = OW_ALLOC(2*sizeof(struct ze_tdes));
@@ -170,16 +166,12 @@ zeopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 	ze_setup_tdes_list[1].ze_tdes1 = ZE_TDES1_CA;
 	ze_setup_tdes_list[1].ze_bufaddr = (u_char *)ze_setup_tdes_list;
 
-	printf(".");	/* XXX VXT */
-
 	/* Start the transmitter and initialize almost everything else. */
 	addr->ze_nicsr4 = ze_setup_tdes_list;
 	addr->ze_nicsr6 = ZE_NICSR6_MBO | ZE_NICSR6_SE | ZE_NICSR6_ST |
 		ZE_NICSR6_DC | ZE_NICSR6_BL_4;
 	while ((addr->ze_nicsr5 & ZE_NICSR5_TS) != ZE_NICSR5_TS_SUSP)
 		;	/* wait for the frame to be processed */
-
-	printf(".");	/* XXX VXT */
 
 	/* Setup frame is done processing, initialize the receiver and
 		point the transmitter to the real tdes list. */
@@ -189,7 +181,6 @@ zeopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 
 	/* And away-y-y we go! */
 
-	printf("\n");
 	net_devinit(f, &ze_driver, ze_myaddr);
 	return 0;
 }

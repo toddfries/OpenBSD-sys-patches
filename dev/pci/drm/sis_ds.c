@@ -1,3 +1,5 @@
+/*	$NetBSD: sis_ds.c,v 1.4 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* sis_ds.c -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by sclin@sis.com.tw
  *
@@ -28,6 +30,12 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sis_ds.c,v 1.4 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/sis_ds.c,v 1.5 2006/04/09 20:45:45 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "sis_ds.h"
@@ -57,18 +65,18 @@ set_t *setInit(void)
 
 int setAdd(set_t * set, ITEM_TYPE item)
 {
-	int free = set->free;
+	int sfree = set->free;
 
-	if (free != -1) {
-		set->list[free].val = item;
-		set->free = set->list[free].free_next;
+	if (sfree != -1) {
+		set->list[sfree].val = item;
+		set->free = set->list[sfree].free_next;
 	} else {
 		return 0;
 	}
 
-	set->list[free].alloc_next = set->alloc;
-	set->alloc = free;
-	set->list[free].free_next = -1;
+	set->list[sfree].alloc_next = set->alloc;
+	set->alloc = sfree;
+	set->list[sfree].free_next = -1;
 
 	return 1;
 }

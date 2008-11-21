@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.4 2005/09/12 23:05:05 miod Exp $	*/
-/*	$NetBSD: param.h,v 1.1 1996/09/30 16:34:28 ws Exp $	*/
+/*	$NetBSD: param.h,v 1.16 2008/02/28 00:18:08 macallan Exp $	*/
 
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -38,14 +37,27 @@
 #endif	/* _LOCORE */
 #endif
 
-#include <powerpc/param.h>
-
 /*
- * Machine dependent constants for macppc (32-bit only currently)
+ * Machine dependent constants for PowerPC (32-bit only currently)
  */
 #define	MACHINE		"macppc"
-#define	_MACHINE	macppc
-
 #define	KERNBASE	0x100000
 
-#define MSGBUFSIZE	(NBPG*2)
+/*
+ * 4KB isn't enough for a full boot message for a macppc system anymore
+ */
+#ifndef MSGBUFSIZE
+#define	MSGBUFSIZE	(3*NBPG)
+#endif
+
+/*
+ * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
+ * logical pages.
+ */
+#define	NKMEMPAGES_MIN_DEFAULT	((8 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT	((48 * 1024 * 1024) >> PAGE_SHIFT)
+
+#include <powerpc/param.h>
+
+/* at this offset we mmap() the PCI IO range in display drivers */
+#define PCI_MAGIC_IO_RANGE	0xf2000000

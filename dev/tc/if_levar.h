@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_levar.h,v 1.7 2003/06/02 23:28:04 millert Exp $	*/
-/*	$NetBSD: if_levar.h,v 1.4 1997/03/15 18:12:07 is Exp $	*/
+/*	$NetBSD: if_levar.h,v 1.7 2005/12/11 12:24:00 christos Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993

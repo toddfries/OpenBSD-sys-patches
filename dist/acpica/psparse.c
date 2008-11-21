@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: psparse - Parser top level AML parse routines
- *              xRevision: 1.163 $
+ *              $Revision: 1.4 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -124,9 +124,6 @@
  * templates in AmlOpInfo[]
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: psparse.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
-
 #include "acpi.h"
 #include "acparser.h"
 #include "acdispat.h"
@@ -227,7 +224,7 @@ AcpiPsCompleteThisOp (
     ACPI_PARSE_OBJECT       *ReplacementOp = NULL;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("PsCompleteThisOp", Op);
+    ACPI_FUNCTION_TRACE_PTR (PsCompleteThisOp, Op);
 
 
     /* Check for null Op, can happen if AML code is corrupt */
@@ -291,6 +288,7 @@ AcpiPsCompleteThisOp (
                 (Op->Common.Parent->Common.AmlOpcode == AML_DATA_REGION_OP)  ||
                 (Op->Common.Parent->Common.AmlOpcode == AML_BUFFER_OP)       ||
                 (Op->Common.Parent->Common.AmlOpcode == AML_PACKAGE_OP)      ||
+                (Op->Common.Parent->Common.AmlOpcode == AML_BANK_FIELD_OP)   ||
                 (Op->Common.Parent->Common.AmlOpcode == AML_VAR_PACKAGE_OP))
             {
                 ReplacementOp = AcpiPsAllocOp (AML_INT_RETURN_VALUE_OP);
@@ -418,7 +416,7 @@ AcpiPsNextParseState (
     ACPI_STATUS             Status = AE_CTRL_PENDING;
 
 
-    ACPI_FUNCTION_TRACE_PTR ("PsNextParseState", Op);
+    ACPI_FUNCTION_TRACE_PTR (PsNextParseState, Op);
 
 
     switch (CallbackStatus)
@@ -437,22 +435,14 @@ AcpiPsNextParseState (
 
         ParserState->Aml = WalkState->AmlLastWhile;
         WalkState->ControlState->Common.Value = FALSE;
-        Status = AcpiDsResultStackPop (WalkState);
-        if (ACPI_SUCCESS (Status))
-        {
-            Status = AE_CTRL_BREAK;
-        }
+        Status = AE_CTRL_BREAK;
         break;
 
 
     case AE_CTRL_CONTINUE:
 
         ParserState->Aml = WalkState->AmlLastWhile;
-        Status = AcpiDsResultStackPop (WalkState);
-        if (ACPI_SUCCESS (Status))
-        {
-            Status = AE_CTRL_CONTINUE;
-        }
+        Status = AE_CTRL_CONTINUE;
         break;
 
 
@@ -475,11 +465,7 @@ AcpiPsNextParseState (
          * Just close out this package
          */
         ParserState->Aml = AcpiPsGetNextPackageEnd (ParserState);
-        Status = AcpiDsResultStackPop (WalkState);
-        if (ACPI_SUCCESS (Status))
-        {
-            Status = AE_CTRL_PENDING;
-        }
+        Status = AE_CTRL_PENDING;
         break;
 
 
@@ -552,7 +538,7 @@ AcpiPsParseAml (
     ACPI_WALK_STATE         *PreviousWalkState;
 
 
-    ACPI_FUNCTION_TRACE ("PsParseAml");
+    ACPI_FUNCTION_TRACE (PsParseAml);
 
     ACPI_DEBUG_PRINT ((ACPI_DB_PARSE,
         "Entered with WalkState=%p Aml=%p size=%X\n",
@@ -565,10 +551,21 @@ AcpiPsParseAml (
     Thread = AcpiUtCreateThreadState ();
     if (!Thread)
     {
+        AcpiDsDeleteWalkState (WalkState);
         return_ACPI_STATUS (AE_NO_MEMORY);
     }
 
     WalkState->Thread = Thread;
+
+    /*
+     * If executing a method, the starting SyncLevel is this method's
+     * SyncLevel
+     */
+    if (WalkState->MethodDesc)
+    {
+        WalkState->Thread->CurrentSyncLevel = WalkState->MethodDesc->Method.SyncLevel;
+    }
+
     AcpiDsPushWalkState (WalkState, Thread);
 
     /*
@@ -606,6 +603,10 @@ AcpiPsParseAml (
              * Transfer control to the called control method
              */
             Status = AcpiDsCallControlMethod (Thread, WalkState, NULL);
+            if (ACPI_FAILURE (Status))
+            {
+                Status = AcpiDsMethodError (Status, WalkState);
+            }
 
             /*
              * If the transfer to the new method method call worked, a new walk
@@ -628,8 +629,12 @@ AcpiPsParseAml (
             /* Check for possible multi-thread reentrancy problem */
 
             if ((Status == AE_ALREADY_EXISTS) &&
-                (!WalkState->MethodDesc->Method.Semaphore))
+                (!WalkState->MethodDesc->Method.Mutex))
             {
+                ACPI_INFO ((AE_INFO,
+                    "Marking method %4.4s as Serialized because of AE_ALREADY_EXISTS error",
+                    WalkState->MethodNode->Name.Ascii));
+
                 /*
                  * Method tried to create an object twice. The probable cause is
                  * that the method cannot handle reentrancy.
@@ -640,7 +645,7 @@ AcpiPsParseAml (
                  * as Serialized.
                  */
                 WalkState->MethodDesc->Method.MethodFlags |= AML_METHOD_SERIALIZED;
-                WalkState->MethodDesc->Method.Concurrency = 1;
+                WalkState->MethodDesc->Method.SyncLevel = 0;
             }
         }
 
@@ -660,22 +665,7 @@ AcpiPsParseAml (
         if (((WalkState->ParseFlags & ACPI_PARSE_MODE_MASK) == ACPI_PARSE_EXECUTE) ||
             (ACPI_FAILURE (Status)))
         {
-            if (WalkState->MethodDesc)
-            {
-                /* Decrement the thread count on the method parse tree */
-
-                if (WalkState->MethodDesc->Method.ThreadCount)
-                {
-                    WalkState->MethodDesc->Method.ThreadCount--;
-                }
-                else
-                {
-                    ACPI_ERROR ((AE_INFO,
-                        "Invalid zero thread count in method"));
-                }
-            }
-
-            AcpiDsTerminateControlMethod (WalkState);
+            AcpiDsTerminateControlMethod (WalkState->MethodDesc, WalkState);
         }
 
         /* Delete this walk state and all linked control states */
@@ -701,6 +691,25 @@ AcpiPsParseAml (
                  */
                 if (!PreviousWalkState->ReturnDesc)
                 {
+                    /*
+                     * In slack mode execution, if there is no return value
+                     * we should implicitly return zero (0) as a default value.
+                     */
+                    if (AcpiGbl_EnableInterpreterSlack &&
+                        !PreviousWalkState->ImplicitReturnObj)
+                    {
+                        PreviousWalkState->ImplicitReturnObj =
+                            AcpiUtCreateInternalObject (ACPI_TYPE_INTEGER);
+                        if (!PreviousWalkState->ImplicitReturnObj)
+                        {
+                            return_ACPI_STATUS (AE_NO_MEMORY);
+                        }
+
+                        PreviousWalkState->ImplicitReturnObj->Integer.Value = 0;
+                    }
+
+                    /* Restart the calling control method */
+
                     Status = AcpiDsRestartControlMethod (WalkState,
                                 PreviousWalkState->ImplicitReturnObj);
                 }

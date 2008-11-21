@@ -1,5 +1,4 @@
-/*	$OpenBSD: dkcksum.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: disklabel.c,v 1.3 1994/10/26 05:44:42 cgd Exp $	*/
+/*	$NetBSD: dkcksum.c,v 1.5 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -39,15 +38,15 @@
 /*
  * Compute checksum for disk label.
  */
-u_int
-dkcksum(struct disklabel *lp)
+int
+dkcksum(const struct disklabel *lp)
 {
-	u_short *start, *end;
+	const u_short *start, *end;
 	u_short sum = 0;
 
-	start = (u_short *)lp;
-	end = (u_short *)&lp->d_partitions[lp->d_npartitions];
+	start = (const void *)lp;
+	end = (const void *)&lp->d_partitions[lp->d_npartitions];
 	while (start < end)
 		sum ^= *start++;
-	return (sum);
+	return sum;
 }

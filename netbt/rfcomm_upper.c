@@ -1,5 +1,4 @@
-/*	$OpenBSD: rfcomm_upper.c,v 1.4 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: rfcomm_upper.c,v 1.10 2007/11/20 20:25:57 plunky Exp $	*/
+/*	$NetBSD: rfcomm_upper.c,v 1.11 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,10 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_upper.c,v 1.11 2008/08/06 15:01:24 plunky Exp $");
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
+#include <sys/socketvar.h>
 #include <sys/systm.h>
 
 #include <netbt/bluetooth.h>
@@ -67,7 +70,7 @@ rfcomm_attach(struct rfcomm_dlc **handle,
 	KASSERT(proto != NULL);
 	KASSERT(upper != NULL);
 
-	dlc = malloc(sizeof(*dlc), M_BLUETOOTH, M_NOWAIT | M_ZERO);
+	dlc = malloc(sizeof(struct rfcomm_dlc), M_BLUETOOTH, M_NOWAIT | M_ZERO);
 	if (dlc == NULL)
 		return ENOMEM;
 
@@ -87,7 +90,8 @@ rfcomm_attach(struct rfcomm_dlc **handle,
 
 	dlc->rd_lmodem = RFCOMM_MSC_RTC | RFCOMM_MSC_RTR | RFCOMM_MSC_DV;
 
-	timeout_set(&dlc->rd_timeout, rfcomm_dlc_timeout, dlc);
+	callout_init(&dlc->rd_timeout, 0);
+	callout_setfunc(&dlc->rd_timeout, rfcomm_dlc_timeout, dlc);
 
 	*handle = dlc;
 	return 0;
@@ -247,7 +251,7 @@ rfcomm_disconnect(struct rfcomm_dlc *dlc, int linger)
 		dlc->rd_state = RFCOMM_DLC_WAIT_DISCONNECT;
 		err = rfcomm_session_send_frame(rs, RFCOMM_FRAME_DISC,
 							dlc->rd_dlci);
-		timeout_add(&dlc->rd_timeout, rfcomm_ack_timeout * hz);
+		callout_schedule(&dlc->rd_timeout, rfcomm_ack_timeout * hz);
 		break;
 
 	case RFCOMM_DLC_WAIT_DISCONNECT:
@@ -287,10 +291,12 @@ rfcomm_detach(struct rfcomm_dlc **handle)
 	 * If callout is invoking we can't free the DLC so
 	 * mark it and let the callout release it.
 	 */
-	if (timeout_triggered(&dlc->rd_timeout))
+	if (callout_invoking(&dlc->rd_timeout))
 		dlc->rd_flags |= RFCOMM_DLC_DETACH;
-	else
+	else {
+		callout_destroy(&dlc->rd_timeout);
 		free(dlc, M_BLUETOOTH);
+	}
 
 	return 0;
 }
@@ -380,7 +386,7 @@ rfcomm_listen(struct rfcomm_dlc *dlc)
  * rfcomm_send(dlc, mbuf)
  *
  * Output data on DLC. This is streamed data, so we add it
- * to our buffer and start the DLC, which will assemble
+ * to our buffer and start the the DLC, which will assemble
  * packets and send them if it can.
  */
 int
@@ -429,19 +435,22 @@ rfcomm_rcvd(struct rfcomm_dlc *dlc, size_t space)
 }
 
 /*
- * rfcomm_setopt(dlc, option, addr)
+ * rfcomm_setopt(dlc, sopt)
  *
  * set DLC options
  */
 int
-rfcomm_setopt(struct rfcomm_dlc *dlc, int opt, void *addr)
+rfcomm_setopt(struct rfcomm_dlc *dlc, const struct sockopt *sopt)
 {
 	int mode, err = 0;
 	uint16_t mtu;
 
-	switch (opt) {
+	switch (sopt->sopt_name) {
 	case SO_RFCOMM_MTU:
-		mtu = *(uint16_t *)addr;
+		err = sockopt_get(sopt, &mtu, sizeof(mtu));
+		if (err)
+			break;
+
 		if (mtu < RFCOMM_MTU_MIN || mtu > RFCOMM_MTU_MAX)
 			err = EINVAL;
 		else if (dlc->rd_state == RFCOMM_DLC_CLOSED)
@@ -452,7 +461,10 @@ rfcomm_setopt(struct rfcomm_dlc *dlc, int opt, void *addr)
 		break;
 
 	case SO_RFCOMM_LM:
-		mode = *(int *)addr;
+		err = sockopt_getint(sopt, &mode);
+		if (err)
+			break;
+
 		mode &= (RFCOMM_LM_SECURE | RFCOMM_LM_ENCRYPT | RFCOMM_LM_AUTH);
 
 		if (mode & RFCOMM_LM_SECURE)
@@ -476,40 +488,37 @@ rfcomm_setopt(struct rfcomm_dlc *dlc, int opt, void *addr)
 }
 
 /*
- * rfcomm_getopt(dlc, option, addr)
+ * rfcomm_getopt(dlc, sopt)
  *
  * get DLC options
  */
 int
-rfcomm_getopt(struct rfcomm_dlc *dlc, int opt, void *addr)
+rfcomm_getopt(struct rfcomm_dlc *dlc, struct sockopt *sopt)
 {
-	struct rfcomm_fc_info *fc;
+	struct rfcomm_fc_info fc;
 
-	switch (opt) {
+	switch (sopt->sopt_name) {
 	case SO_RFCOMM_MTU:
-		*(uint16_t *)addr = dlc->rd_mtu;
-		return sizeof(uint16_t);
+		return sockopt_set(sopt, &dlc->rd_mtu, sizeof(uint16_t));
 
 	case SO_RFCOMM_FC_INFO:
-		fc = addr;
-		memset(fc, 0, sizeof(*fc));
-		fc->lmodem = dlc->rd_lmodem;
-		fc->rmodem = dlc->rd_rmodem;
-		fc->tx_cred = max(dlc->rd_txcred, 0xff);
-		fc->rx_cred = max(dlc->rd_rxcred, 0xff);
+		memset(&fc, 0, sizeof(fc));
+		fc.lmodem = dlc->rd_lmodem;
+		fc.rmodem = dlc->rd_rmodem;
+		fc.tx_cred = max(dlc->rd_txcred, 0xff);
+		fc.rx_cred = max(dlc->rd_rxcred, 0xff);
 		if (dlc->rd_session
 		    && (dlc->rd_session->rs_flags & RFCOMM_SESSION_CFC))
-			fc->cfc = 1;
+			fc.cfc = 1;
 
-		return sizeof(*fc);
+		return sockopt_set(sopt, &fc, sizeof(fc));
 
 	case SO_RFCOMM_LM:
-		*(int *)addr = dlc->rd_mode;
-		return sizeof(int);
+		return sockopt_setint(sopt, dlc->rd_mode);
 
 	default:
 		break;
 	}
 
-	return 0;
+	return ENOPROTOOPT;
 }

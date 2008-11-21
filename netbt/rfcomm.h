@@ -1,5 +1,4 @@
-/*	$OpenBSD: rfcomm.h,v 1.3 2008/05/27 19:41:14 thib Exp $	*/
-/*	$NetBSD: rfcomm.h,v 1.6 2007/11/20 20:25:58 plunky Exp $	*/
+/*	$NetBSD: rfcomm.h,v 1.8 2008/09/08 23:36:55 gmcgarry Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -56,7 +55,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: rfcomm.h,v 1.3 2008/05/27 19:41:14 thib Exp $
+ * $Id: rfcomm.h,v 1.8 2008/09/08 23:36:55 gmcgarry Exp $
  * $FreeBSD: src/sys/netgraph/bluetooth/include/ng_btsocket_rfcomm.h,v 1.4 2005/01/11 01:39:53 emax Exp $
  */
 
@@ -164,7 +163,7 @@ struct rfcomm_cmd_hdr
 	uint8_t		control;
 	uint8_t		length;
 	uint8_t		fcs;
-} __attribute__ ((__packed__));
+} __packed;
 
 /* RFCOMM MSC command */
 struct rfcomm_mcc_msc
@@ -172,7 +171,7 @@ struct rfcomm_mcc_msc
 	uint8_t		address;
 	uint8_t		modem;
 	uint8_t		brk;
-} __attribute__ ((__packed__));
+} __packed;
 
 /* RFCOMM RPN command */
 struct rfcomm_mcc_rpn
@@ -184,14 +183,14 @@ struct rfcomm_mcc_rpn
 	uint8_t		xon_char;
 	uint8_t		xoff_char;
 	uint16_t	param_mask;
-} __attribute__ ((__packed__));
+} __packed;
 
 /* RFCOMM RLS command */
 struct rfcomm_mcc_rls
 {
 	uint8_t		address;
 	uint8_t		status;
-} __attribute__ ((__packed__));
+} __packed;
 
 /* RFCOMM PN command */
 struct rfcomm_mcc_pn
@@ -203,7 +202,7 @@ struct rfcomm_mcc_pn
 	uint16_t	mtu;
 	uint8_t		max_retrans;
 	uint8_t		credits;
-} __attribute__ ((__packed__));
+} __packed;
 
 /* RFCOMM frame parsing macros */
 #define RFCOMM_DLCI(b)			(((b) & 0xfc) >> 2)
@@ -289,7 +288,7 @@ struct rfcomm_session {
 	SIMPLEQ_HEAD(,rfcomm_credit)	 rs_credits;	/* credit notes */
 	LIST_HEAD(,rfcomm_dlc)		 rs_dlcs;	/* DLC list */
 
-	struct timeout			 rs_timeout;	/* timeout */
+	callout_t			 rs_timeout;	/* timeout */
 
 	LIST_ENTRY(rfcomm_session)	 rs_next;	/* next session */
 };
@@ -335,7 +334,7 @@ struct rfcomm_dlc {
 	int			 rd_txcred;  /* transmit credits (unused) */
 	int			 rd_pending; /* packets sent but not complete */
 
-	struct timeout		 rd_timeout; /* timeout */
+	callout_t		 rd_timeout; /* timeout */
 	struct mbuf		*rd_txbuf;   /* transmit buffer */
 
 	const struct btproto	*rd_proto;   /* upper layer callbacks */
@@ -383,6 +382,7 @@ struct rfcomm_dlc {
  */
 
 struct socket;
+struct sockopt;
 
 /* rfcomm_dlc.c */
 struct rfcomm_dlc *rfcomm_dlc_lookup(struct rfcomm_session *, int);
@@ -395,7 +395,6 @@ int rfcomm_dlc_open(struct rfcomm_dlc *);
 void rfcomm_dlc_start(struct rfcomm_dlc *);
 
 /* rfcomm_session.c */
-void rfcomm_init(void);
 struct rfcomm_session *rfcomm_session_alloc(struct rfcomm_session_list *, struct sockaddr_bt *);
 struct rfcomm_session *rfcomm_session_lookup(struct sockaddr_bt *, struct sockaddr_bt *);
 void rfcomm_session_free(struct rfcomm_session *);
@@ -404,9 +403,8 @@ int rfcomm_session_send_uih(struct rfcomm_session *, struct rfcomm_dlc *, int, s
 int rfcomm_session_send_mcc(struct rfcomm_session *, int, uint8_t, void *, int);
 
 /* rfcomm_socket.c */
-int rfcomm_usrreq(struct socket *, int, struct mbuf *, struct mbuf *,
-    struct mbuf *, struct proc *);
-int rfcomm_ctloutput(int, struct socket *, int, int, struct mbuf **);
+int rfcomm_usrreq(struct socket *, int, struct mbuf *, struct mbuf *, struct mbuf *, struct lwp *);
+int rfcomm_ctloutput(int, struct socket *, struct sockopt *);
 
 /* rfcomm_upper.c */
 int rfcomm_attach(struct rfcomm_dlc **, const struct btproto *, void *);
@@ -419,8 +417,8 @@ int rfcomm_detach(struct rfcomm_dlc **);
 int rfcomm_listen(struct rfcomm_dlc *);
 int rfcomm_send(struct rfcomm_dlc *, struct mbuf *);
 int rfcomm_rcvd(struct rfcomm_dlc *, size_t);
-int rfcomm_setopt(struct rfcomm_dlc *, int, void *);
-int rfcomm_getopt(struct rfcomm_dlc *, int, void *);
+int rfcomm_setopt(struct rfcomm_dlc *, const struct sockopt *);
+int rfcomm_getopt(struct rfcomm_dlc *, struct sockopt *);
 
 #endif /* _KERNEL */
 

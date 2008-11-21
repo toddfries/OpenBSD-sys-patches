@@ -1,5 +1,4 @@
-/* $OpenBSD: wskbdvar.h,v 1.2 2002/03/14 01:27:03 millert Exp $ */
-/* $NetBSD: wskbdvar.h,v 1.8 1999/12/01 23:22:59 augustss Exp $ */
+/* $NetBSD: wskbdvar.h,v 1.16 2008/05/01 20:18:19 cegger Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -44,8 +43,7 @@
 struct wskbd_accessops {
 	int	(*enable)(void *, int);
 	void    (*set_leds)(void *, int);
-	int     (*ioctl)(void *v, u_long cmd, caddr_t data, int flag,
-			      struct proc *p);
+	int     (*ioctl)(void *, u_long, void *, int, struct lwp *);
 };
 
 /*
@@ -72,11 +70,11 @@ struct wskbddev_attach_args {
 	void	*accesscookie;				/* access cookie */
 };
 
-#define	WSKBDDEVCF_CONSOLE	0
-#define	wskbddevcf_console	cf_loc[WSKBDDEVCF_CONSOLE]	/* spec'd as console? */
-#define	WSKBDDEVCF_CONSOLE_UNK	-1
+#include "locators.h"
 
-#define	WSKBDDEVCF_MUX		1
+#define	wskbddevcf_console		cf_loc[WSKBDDEVCF_CONSOLE]	/* spec'd as console? */
+#define	WSKBDDEVCF_CONSOLE_UNK		(WSKBDDEVCF_CONSOLE_DEFAULT)
+
 #define	wskbddevcf_mux		cf_loc[WSKBDDEVCF_MUX]
 
 /*
@@ -90,13 +88,22 @@ int	wskbddevprint(void *, const char *);
 /*
  * Callbacks from the keyboard driver to the wskbd interface driver.
  */
-void	wskbd_input(struct device *kbddev, u_int type, int value);
+void	wskbd_input(device_t, u_int, int);
 /* for WSDISPLAY_COMPAT_RAWKBD */
-void	wskbd_rawinput(struct device *, u_char *, int);
+void	wskbd_rawinput(device_t, u_char *, int);
+
+/*
+ * Callbacks for (ACPI) hotkey drivers which generate
+ * keycodes.
+ */
+struct wskbd_softc;
+typedef int (wskbd_hotkey_plugin)(struct wskbd_softc *, void *, u_int, int);
+
+device_t wskbd_hotkey_register(device_t, void *, wskbd_hotkey_plugin *);
 
 /*
  * Console interface.
  */
-int	wskbd_cngetc(dev_t dev);
-void	wskbd_cnpollc(dev_t dev, int poll);
+int	wskbd_cngetc(dev_t);
+void	wskbd_cnpollc(dev_t, int);
 void	wskbd_cnbell(dev_t, u_int, u_int, u_int);

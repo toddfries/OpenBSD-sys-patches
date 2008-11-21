@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_exec.c,v 1.47 2006/11/16 01:32:42 christos Exp $ */
+/*	$NetBSD: darwin_exec.c,v 1.56 2008/11/19 18:36:02 ad Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +31,7 @@
 
 #include "opt_compat_darwin.h" /* For COMPAT_DARWIN in mach_port.h */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_exec.c,v 1.47 2006/11/16 01:32:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_exec.c,v 1.56 2008/11/19 18:36:02 ad Exp $");
 
 #include "opt_syscall_debug.h"
 
@@ -94,7 +87,7 @@ void syscall(void);
 void mach_syscall_intern(struct proc *);
 #endif
 
-const struct emul emul_darwin = {
+struct emul emul_darwin = {
 	"darwin",
 	"/emul/darwin",
 #ifndef __HAVE_MINIMAL_EMUL
@@ -132,6 +125,8 @@ const struct emul emul_darwin = {
 	uvm_default_mapaddr,
 	NULL,
 	NULL,
+	0,
+	NULL,
 };
 
 /*
@@ -139,12 +134,7 @@ const struct emul emul_darwin = {
  * extra information in case of dynamic binding.
  */
 int
-exec_darwin_copyargs(l, pack, arginfo, stackp, argp)
-	struct lwp *l;
-	struct exec_package *pack;
-	struct ps_strings *arginfo;
-	char **stackp;
-	void *argp;
+exec_darwin_copyargs(struct lwp *l, struct exec_package *pack, struct ps_strings *arginfo, char **stackp, void *argp)
 {
 	struct exec_macho_emul_arg *emea;
 	struct exec_macho_object_header *macho_hdr;
@@ -218,24 +208,21 @@ exec_darwin_copyargs(l, pack, arginfo, stackp, argp)
 	*stackp = (char *)cpp;
 
 	/* We don't need this anymore */
-	free(pack->ep_emul_arg, M_EXEC);
+	free(pack->ep_emul_arg, M_TEMP);
 	pack->ep_emul_arg = NULL;
 
 	return 0;
 }
 
 int
-exec_darwin_probe(path)
-	const char **path;
+exec_darwin_probe(const char **path)
 {
 	*path = emul_darwin.e_path;
 	return 0;
 }
 
 static void
-darwin_e_proc_exec(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+darwin_e_proc_exec(struct proc *p, struct exec_package *epp)
 {
 	struct darwin_emuldata *ded;
 
@@ -297,9 +284,7 @@ darwin_e_proc_fork(struct proc *p, struct proc *parent, int forkflags)
 }
 
 static void
-darwin_e_proc_init(p, vmspace)
-	struct proc *p;
-	struct vmspace *vmspace;
+darwin_e_proc_init(struct proc *p, struct vmspace *vmspace)
 {
 	struct darwin_emuldata *ded;
 
@@ -320,23 +305,14 @@ darwin_e_proc_init(p, vmspace)
 }
 
 static void
-darwin_e_proc_exit(p)
-	struct proc *p;
+darwin_e_proc_exit(struct proc *p)
 {
 	struct darwin_emuldata *ded;
 	int error, mode;
-	struct wsdisplay_cmap cmap;
-	u_char *red;
-	u_char *green;
-	u_char *blue;
-	u_char kred[256];
-	u_char kgreen[256];
-	u_char kblue[256];
 	struct lwp *l;
-	caddr_t sg = stackgap_init(p, 0);
 
 	ded = p->p_emuldata;
-	l = proc_representative_lwp(p);
+	l = LIST_FIRST(&p->p_lwps);
 	/*
 	 * mach_init is setting the bootstrap port for other processes.
 	 * If mach_init dies, we want to restore the original bootstrap
@@ -362,11 +338,21 @@ darwin_e_proc_exit(p)
 	if (ded->ded_wsdev != NODEV) {
 		mode = WSDISPLAYIO_MODE_EMUL;
 		error = (*wsdisplay_cdevsw.d_ioctl)(ded->ded_wsdev,
-		    WSDISPLAYIO_SMODE, (caddr_t)&mode, 0, l);
+		    WSDISPLAYIO_SMODE, (void *)&mode, 0, l);
 #ifdef DEBUG_DARWIN
 		if (error != 0)
 			printf("Unable to switch back to text mode\n");
 #endif
+#if 0	/* Comment out stackgap use - this needs to be done another way */
+	    {
+		void *sg = stackgap_init(p, 0);
+		struct wsdisplay_cmap cmap;
+		u_char *red;
+		u_char *green;
+		u_char *blue;
+		u_char kred[256];
+		u_char kgreen[256];
+		u_char kblue[256];
 		red = stackgap_alloc(p, &sg, 256);
 		green = stackgap_alloc(p, &sg, 256);
 		blue = stackgap_alloc(p, &sg, 256);
@@ -389,10 +375,12 @@ darwin_e_proc_exit(p)
 		    ((error = copyout(kgreen, green, 256)) != 0) ||
 		    ((error = copyout(kblue, blue, 256)) != 0))
 			error = (*wsdisplay_cdevsw.d_ioctl)(ded->ded_wsdev,
-			    WSDISPLAYIO_PUTCMAP, (caddr_t)&cmap, 0, l);
+			    WSDISPLAYIO_PUTCMAP, (void *)&cmap, 0, l);
 #ifdef DEBUG_DARWIN
 		if (error != 0)
 			printf("Cannot revert colormap (error %d)\n", error);
+#endif
+	    }
 #endif
 
 	}
@@ -407,9 +395,7 @@ darwin_e_proc_exit(p)
 }
 
 int
-darwin_exec_setup_stack(l, epp)
-	struct lwp *l;
-	struct exec_package *epp;
+darwin_exec_setup_stack(struct lwp *l, struct exec_package *epp)
 {
 	u_long max_stack_size;
 	u_long access_linear_min, access_size;

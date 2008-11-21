@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.16 2006/12/21 15:55:24 yamt Exp $	*/
+/*	$NetBSD: intr.h,v 1.21 2008/06/26 02:52:03 isaki Exp $	*/
 
 /*
  * Copyright (C) 1997 Scott Reynolds
@@ -42,73 +42,50 @@
 /* watch out for side effects */
 #define splx(s)         ((s) & PSL_IPL ? _spl(s) : spl0())
 
+#define splsoftbio()	splraise1()
+#define splsoftnet()    splraise1()
+#define splsoftclock()	splraise1()
+#define splsoftserial()	splraise1()
+#define splvm()         splraise6()
+#define splhigh()       spl7()
+#define splsched()      spl7()
+
+#define spldma()        splraise6()
+
 /****************************************************************/
 
-#define	IPL_HIGH	(PSL_S|PSL_IPL7)
-#define	IPL_SERIAL	(PSL_S|PSL_IPL5)
-#define	IPL_SCHED	(PSL_S|PSL_IPL7)
-#define	IPL_LOCK	(PSL_S|PSL_IPL7)
-#define	IPL_CLOCK	(PSL_S|PSL_IPL3)
-#define	IPL_STATCLOCK	IPL_CLOCK
-#define	IPL_VM		(PSL_S|PSL_IPL6)
-#define	IPL_TTY		(PSL_S|PSL_IPL3)
-#define	IPL_BIO		(PSL_S|PSL_IPL3)
-#define	IPL_NET		(PSL_S|PSL_IPL3)
-#define	IPL_SOFTNET	(PSL_S|PSL_IPL2)
-#define	IPL_SOFTCLOCK	(PSL_S|PSL_IPL1)
 #define	IPL_NONE	0
+#define	IPL_SOFTCLOCK	1
+#define	IPL_SOFTBIO	2
+#define	IPL_SOFTNET	3
+#define	IPL_SOFTSERIAL	4
+#define	IPL_VM		5
+#define	IPL_SCHED	6
+#define	IPL_HIGH	7
+#define	NIPL		8
+
+extern const uint16_t ipl2psl_table[NIPL];
 
 typedef int ipl_t;
 typedef struct {
-	ipl_t _ipl;
+	uint16_t _psl;
 } ipl_cookie_t;
 
 static inline ipl_cookie_t
 makeiplcookie(ipl_t ipl)
 {
 
-	return (ipl_cookie_t){._ipl = ipl};
+	return (ipl_cookie_t){._psl = ipl2psl_table[ipl]};
 }
 
 static inline int
 splraiseipl(ipl_cookie_t icookie)
 {
 
-	return _splraise(icookie._ipl);
+	return _splraise(icookie._psl);
 }
 
-#include <sys/spl.h>
-
-#define spllowersoftclock() spl1()
-
-#define spldma()        _splraise(PSL_S|PSL_IPL6)
-
 /****************************************************************/
-
-/*
- * simulated software interrupt register
- */
-extern volatile u_int8_t ssir;
-
-#define	SIR_NET		0x01
-#define	SIR_CLOCK	0x02
-#define	SIR_SERIAL	0x04
-#define SIR_DTMGR	0x08
-#define SIR_ADB		0x10
-
-#define	siron(mask)	\
-	__asm volatile ( "orb %1,%0" : "=m" (ssir) : "i" (mask))
-#define	siroff(mask)	\
-	__asm volatile ( "andb %1,%0" : "=m" (ssir) : "ir" (~(mask)));
-
-#define	setsoftnet()	siron(SIR_NET)
-#define	setsoftclock()	siron(SIR_CLOCK)
-#define	setsoftserial()	siron(SIR_SERIAL)
-#define	setsoftdtmgr()	siron(SIR_DTMGR)
-#define	setsoftadb()	siron(SIR_ADB)
-
-extern u_long allocate_sir(void (*)(void *),void *);
-extern void init_sir(void);
 
 /* locore.s */
 int	spl0(void);

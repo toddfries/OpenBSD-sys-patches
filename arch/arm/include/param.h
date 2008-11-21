@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.12 2008/05/04 09:57:47 martin Exp $	*/
-/*	$NetBSD: param.h,v 1.9 2002/03/24 03:37:23 thorpej Exp $	*/
+/*	$NetBSD: param.h,v 1.12 2008/08/29 19:08:29 matt Exp $	*/
 
 /*
  * Copyright (c) 1994,1995 Mark Brinicombe.
@@ -36,77 +35,6 @@
 #ifndef	_ARM_PARAM_H_
 #define	_ARM_PARAM_H_
 
-#define MACHINE_ARCH	"arm"
-#define _MACHINE_ARCH	arm
-
-/*
- * Machine dependent constants for ARM6+ processors
- */
-/* These are defined in the Port File before it includes
- * this file. */
-
-#define	PAGE_SHIFT	12		/* LOG2(NBPG) */
-#define	PGSHIFT		12		/* LOG2(NBPG) */
-#define	PAGE_SIZE	(1 << PAGE_SHIFT)	/* bytes/page */
-#define	NBPG		(1 << PAGE_SHIFT)	/* bytes/page */
-#define	PAGE_MASK	(PAGE_SIZE - 1)
-#define PGOFSET		(PAGE_SIZE - 1)
-#define	NPTEPG		(PAGE_SIZE/(sizeof (pt_entry_t)))
-
-#define UPAGES          2               /* pages of u-area */
-#define USPACE          (UPAGES * PAGE_SIZE) /* total size of u-area */
-#define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
-
-#ifndef MSGBUFSIZE
-#define MSGBUFSIZE	PAGE_SIZE	/* default message buffer size */
-#endif
-
-/*
- * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
- * logical pages.
- */
-#define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
-#define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
-
-/* Constants used to divide the USPACE area */
-
-/*
- * The USPACE area contains :
- * 1. the user structure for the process
- * 2. the fp context for FP emulation
- * 3. the kernel (svc) stack
- * 4. the undefined instruction stack
- *
- * The layout of the area looks like this
- *
- * | user area | FP context | undefined stack | kernel stack |
- *
- * The size of the user area is known.
- * The size of the FP context is variable depending of the FP emulator
- * in use and whether there is hardware FP support. However we can put
- * an upper limit on it.
- * The undefined stack needs to be at least 512 bytes. This is a requirement
- * if the FP emulators
- * The kernel stack should be at least 4K is size.
- *
- * The stack top addresses are used to set the stack pointers. The stack bottom
- * addresses at the addresses monitored by the diagnostic code for stack overflows
- *
- */
-
-#define FPCONTEXTSIZE			(0x100)
-#define USPACE_SVC_STACK_TOP		(USPACE)
-#define USPACE_SVC_STACK_BOTTOM		(USPACE_SVC_STACK_TOP - 0x1000)
-#define	USPACE_UNDEF_STACK_TOP		(USPACE_SVC_STACK_BOTTOM - 0x10)
-#define USPACE_UNDEF_STACK_BOTTOM	(sizeof(struct user) + FPCONTEXTSIZE + 10)
-
-#ifdef _KERNEL
-#ifndef _LOCORE
-void	delay (unsigned);
-#define DELAY(x)	delay(x)
-#endif
-#endif
-
 /*
  * Machine dependent constants for all ARM processors
  */
@@ -123,6 +51,31 @@ void	delay (unsigned);
  *	If ELF, MACHINE and MACHINE_ARCH are forced to "arm/armeb".
  */
 
+#if defined(_KERNEL)
+#ifndef MACHINE_ARCH			/* XXX For now */
+#ifndef __ARMEB__
+#define	_MACHINE_ARCH	arm
+#define	MACHINE_ARCH	"arm"
+#else
+#define	_MACHINE_ARCH	armeb
+#define	MACHINE_ARCH	"armeb"
+#endif /* __ARMEB__ */
+#endif /* MACHINE_ARCH */
+#else
+#undef _MACHINE
+#undef MACHINE
+#undef _MACHINE_ARCH
+#undef MACHINE_ARCH
+#define	_MACHINE	arm
+#define	MACHINE		"arm"
+#ifndef __ARMEB__
+#define	_MACHINE_ARCH	arm
+#define	MACHINE_ARCH	"arm"
+#else
+#define	_MACHINE_ARCH	armeb
+#define	MACHINE_ARCH	"armeb"
+#endif /* __ARMEB__ */
+#endif /* !_KERNEL */
 
 #define	MID_MACHINE	MID_ARM6
 
@@ -152,30 +105,29 @@ void	delay (unsigned);
 #define	MAXPHYS		65536		/* max I/O transfer size */
 #endif
 
-/* pages ("clicks") to disk blocks */
-#define	ctod(x)	((x) << (PAGE_SHIFT - DEV_BSHIFT))
-#define	dtoc(x)	((x) >> (PAGE_SHIFT - DEV_BSHIFT))
-/*#define	dtob(x)	((x) << DEV_BSHIFT)*/
-
-#define	btodb(bytes)	 		/* calculates (bytes / DEV_BSIZE) */ \
-	((bytes) >> DEV_BSHIFT)
-#define	dbtob(db)			/* calculates (db * DEV_BSIZE) */ \
-	((db) << DEV_BSHIFT)
-
 /*
  * Constants related to network buffer management.
+ * MCLBYTES must be no larger than NBPG (the software page size), and,
+ * on machines that exchange pages of input or output buffers with mbuf
+ * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
+ * of the hardware page size.
  */
-#define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
+#define	MSIZE		256		/* size of an mbuf */
 
-#define ovbcopy bcopy
+#ifndef MCLSHIFT
+#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
+					/* 2K cluster can hold Ether frame */
+#endif	/* MCLSHIFT */
 
+#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
+
+/*
+ * Compatibility /dev/zero mapping.
+ */
 #ifdef _KERNEL
-#ifdef _LOCORE
-#include <machine/psl.h>
-#else
-#include <sys/param.h>
-#include <machine/cpu.h>
+#ifdef COMPAT_16
+#define	COMPAT_ZERODEV(x)	(x == makedev(0, _DEV_ZERO_oARM))
 #endif
-#endif
+#endif /* _KERNEL */
 
-#endif	/* _ARM_PARAM_H_ */
+#endif /* _ARM_PARAM_H_ */

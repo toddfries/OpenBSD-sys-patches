@@ -1,5 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.6 2006/12/11 20:53:23 deraadt Exp $	*/
-/*	$NetBSD: signal.h,v 1.2 1995/02/16 03:08:08 cgd Exp $	*/
+/* $NetBSD: signal.h,v 1.15 2008/11/19 18:35:57 ad Exp $ */
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -31,11 +30,15 @@
 #ifndef _ALPHA_SIGNAL_H_
 #define	_ALPHA_SIGNAL_H_
 
-#include <sys/cdefs.h>
+#include <sys/featuretest.h>
 
-typedef int	sig_atomic_t;
+typedef long	sig_atomic_t;
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
+#ifdef _KERNEL_OPT
+#include "opt_compat_netbsd.h"
+#include "opt_compat_osf1.h"
+#endif
+
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -46,10 +49,11 @@ typedef int	sig_atomic_t;
  * Note that sc_regs[] and sc_fpregs[]+sc_fpcr are inline
  * representations of 'struct reg' and 'struct fpreg', respectively.
  */
-struct  sigcontext {
-	long	sc_onstack;             /* sigstack state to restore */
-	long	sc_mask;                /* signal mask to restore */
-	long	sc_pc;                  /* pc to restore */
+#if defined(_KERNEL) && (defined(COMPAT_13) || defined(COMPAT_OSF1))
+struct sigcontext13 {
+	long	sc_onstack;		/* sigstack state to restore */
+	long	sc_mask;		/* signal mask to restore (old style) */
+	long	sc_pc;			/* pc to restore */
 	long	sc_ps;			/* ps to restore */
 	unsigned long sc_regs[32];	/* integer register set (see above) */
 #define	sc_sp	sc_regs[R_SP]
@@ -60,5 +64,24 @@ struct  sigcontext {
 	long	sc_reserved[2];		/* XXX */
 	long	sc_xxx[8];		/* XXX */
 };
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#endif /* _KERNEL && (COMPAT_13 || COMPAT_OSF1) */
+
+#if defined(_LIBC) || (defined(_KERNEL) && (defined(COMPAT_16) || defined(COMPAT_OSF1)))
+struct sigcontext {
+	long	sc_onstack;		/* sigstack state to restore */
+	long	__sc_mask13;		/* signal mask to restore (old style) */
+	long	sc_pc;			/* pc to restore */
+	long	sc_ps;			/* ps to restore */
+	unsigned long sc_regs[32];	/* integer register set (see above) */
+#define	sc_sp	sc_regs[R_SP]
+	long	sc_ownedfp;		/* fp has been used */
+	unsigned long sc_fpregs[32];	/* FP register set (see above) */
+	unsigned long sc_fpcr;		/* FP control register (see above) */
+	unsigned long sc_fp_control;	/* FP software control word */
+	long	sc_reserved[2];		/* XXX */
+	long	sc_xxx[8];		/* XXX */
+	sigset_t sc_mask;		/* signal mask to restore (new style) */
+};
+#endif /* _LIBC || _KERNEL */
+
 #endif /* !_ALPHA_SIGNAL_H_*/

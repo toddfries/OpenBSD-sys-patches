@@ -1,7 +1,9 @@
+/*	$NetBSD: mga_warp.c,v 1.4 2008/07/08 06:50:23 mrg Exp $	*/
+
 /* mga_warp.c -- Matrox G200/G400 WARP engine management -*- linux-c -*-
  * Created: Thu Jan 11 21:29:32 2001 by gareth@valinux.com
  */
-/*
+/*-
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
@@ -28,6 +30,12 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: mga_warp.c,v 1.4 2008/07/08 06:50:23 mrg Exp $");
+/*
+__FBSDID("$FreeBSD: src/sys/dev/drm/mga_warp.c,v 1.8 2005/11/28 23:13:53 anholt Exp $");
+*/
+
 #include "drmP.h"
 #include "drm.h"
 #include "mga_drm.h"
@@ -35,6 +43,7 @@
 #include "mga_ucode.h"
 
 #define MGA_WARP_CODE_ALIGN		256	/* in bytes */
+
 #define WARP_UCODE_SIZE( which )					\
 	((sizeof(which) / MGA_WARP_CODE_ALIGN + 1) * MGA_WARP_CODE_ALIGN)
 
@@ -145,7 +154,7 @@ int mga_warp_install_microcode(drm_mga_private_t * dev_priv)
 	if (size > dev_priv->warp->size) {
 		DRM_ERROR("microcode too large! (%u > %lu)\n",
 			  size, dev_priv->warp->size);
-		return -ENOMEM;
+		return DRM_ERR(ENOMEM);
 	}
 
 	switch (dev_priv->chipset) {
@@ -155,7 +164,7 @@ int mga_warp_install_microcode(drm_mga_private_t * dev_priv)
 	case MGA_CARD_TYPE_G200:
 		return mga_warp_install_g200_microcode(dev_priv);
 	default:
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 }
 
@@ -181,7 +190,7 @@ int mga_warp_init(drm_mga_private_t * dev_priv)
 		MGA_WRITE(MGA_WVRTXSZ, 7);
 		break;
 	default:
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	MGA_WRITE(MGA_WMISC, (MGA_WUCODECACHE_ENABLE |
@@ -190,7 +199,7 @@ int mga_warp_init(drm_mga_private_t * dev_priv)
 	if (wmisc != WMISC_EXPECTED) {
 		DRM_ERROR("WARP engine config failed! 0x%x != 0x%x\n",
 			  wmisc, WMISC_EXPECTED);
-		return -EINVAL;
+		return DRM_ERR(EINVAL);
 	}
 
 	return 0;

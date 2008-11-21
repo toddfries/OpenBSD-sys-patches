@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.S,v 1.9 2006/05/08 17:08:34 garbled Exp $	*/
+/*	$NetBSD: locore.S,v 1.11 2008/11/13 10:53:30 ad Exp $	*/
 /*	$OpenBSD: locore.S,v 1.4 1997/01/26 09:06:38 rahnds Exp $	*/
 
 /*
@@ -79,6 +79,8 @@ GLOBAL(endsym)
 	.long	0			/* end symbol table */
 GLOBAL(proc0paddr)
 	.long	0			/* proc0 p_addr */
+GLOBAL(oeacpufeat)
+	.long	0			/* cpu features */
 
 /*
  * This symbol is here for the benefit of kvm_mkdb, and is supposed to
@@ -100,7 +102,7 @@ __start:
 	isync
 
 /* compute end of kernel memory */
-#if NKSYMS || defined(DDB) || defined(LKM) || defined(KERNFS)
+#if NKSYMS || defined(DDB) || defined(MODULAR) || defined(KERNFS)
 	lis	7,_C_LABEL(startsym)@ha
 	addi	7,7,_C_LABEL(startsym)@l
 	stw	3,0(7)

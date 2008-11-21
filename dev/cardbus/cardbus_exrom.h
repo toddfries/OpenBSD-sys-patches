@@ -1,5 +1,4 @@
-/*	$OpenBSD: cardbus_exrom.h,v 1.3 2005/09/12 18:52:49 fgsch Exp $	*/
-/*	$NetBSD: cardbus_exrom.h,v 1.2 1999/12/15 12:28:54 kleink Exp $	*/
+/* $NetBSD: cardbus_exrom.h,v 1.6 2008/04/29 06:53:02 martin Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -19,9 +18,6 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * 3. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,7 +62,8 @@ struct cardbus_rom_image {
 
 SIMPLEQ_HEAD(cardbus_rom_image_head, cardbus_rom_image);
 
-int	cardbus_read_exrom(bus_space_tag_t, bus_space_handle_t,
-	    struct cardbus_rom_image_head *);
+int
+cardbus_read_exrom(bus_space_tag_t, bus_space_handle_t,
+    struct cardbus_rom_image_head *);
 
 #endif /* !_DEV_CARDBUS_CARDBUS_EXROM_H_ */

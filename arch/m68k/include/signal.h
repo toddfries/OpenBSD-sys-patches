@@ -1,5 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2006/01/08 14:20:17 millert Exp $	*/
-/*	$NetBSD: signal.h,v 1.4 1995/01/10 19:01:31 jtc Exp $	*/
+/*	$NetBSD: signal.h,v 1.24 2008/11/19 18:35:59 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991 Regents of the University of California.
@@ -35,18 +34,17 @@
 #ifndef _M68K_SIGNAL_H_
 #define _M68K_SIGNAL_H_
 
-#include <sys/cdefs.h>
+#include <sys/featuretest.h>
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
+#if defined(_NETBSD_SOURCE)
+
 /*
  * Get the "code" values
  */
 #include <machine/trap.h>
-#endif
 
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -54,14 +52,55 @@ typedef int sig_atomic_t;
  * to the handler to allow it to restore state properly if
  * a non-standard exit is performed.
  */
-struct	sigcontext {
+#if defined(__LIBC12_SOURCE__) || defined(_KERNEL)
+struct sigcontext13 {
 	int	sc_onstack;		/* sigstack state to restore */
-	int	sc_mask;		/* signal mask to restore */
+	int	sc_mask;		/* signal mask to restore (old style) */
 	int	sc_sp;			/* sp to restore */
 	int	sc_fp;			/* fp to restore */
 	int	sc_ap;			/* ap to restore */
 	int	sc_pc;			/* pc to restore */
 	int	sc_ps;			/* psl to restore */
 };
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#endif /* __LIBC12_SOURCE__ || _KERNEL */
+
+#if defined(_LIBC) || defined(_KERNEL)
+struct sigcontext {
+	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_mask13;		/* signal mask to restore (old style) */
+	int	sc_sp;			/* sp to restore */
+	int	sc_fp;			/* fp to restore */
+	int	sc_ap;			/* ap to restore */
+	int	sc_pc;			/* pc to restore */
+	int	sc_ps;			/* psl to restore */
+	sigset_t sc_mask;		/* signal mask to restore (new style) */
+};
+#endif /* _LIBC || _KERNEL */
+
+#ifdef _KERNEL
+#include <m68k/cpuframe.h>
+
+/*
+ * Register state saved while kernel delivers a signal.
+ */
+struct sigstate {
+	int	ss_flags;		/* which of the following are valid */
+	struct frame ss_frame;		/* original exception frame */
+	struct fpframe ss_fpstate;	/* 68881/68882 state info */
+};
+
+#define	SS_RTEFRAME	0x01
+#define	SS_FPSTATE	0x02
+#define	SS_USERREGS	0x04
+#endif
+
+#if defined(__M68K_SIGNAL_PRIVATE)
+
+#ifdef _KERNEL
+#define	_SIGSTATE_EXFRAMESIZE(fmt)	exframesize[(fmt)]
+#endif
+
+#endif /* __M68K_SIGNAL_PRIVATE */
+
+#endif	/* _NETBSD_SOURCE */
 #endif	/* !_M68K_SIGNAL_H_ */

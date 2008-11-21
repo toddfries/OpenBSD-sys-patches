@@ -1,5 +1,4 @@
-/*	$OpenBSD: osf1_time.c,v 1.2 2001/07/09 05:15:24 fgsch Exp $	*/
-/*	$NetBSD: osf1_time.c,v 1.1 1999/05/01 05:25:37 cgd Exp $	*/
+/* $NetBSD: osf1_time.c,v 1.16 2007/12/20 23:03:03 dsl Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -31,6 +30,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: osf1_time.c,v 1.16 2007/12/20 23:03:03 dsl Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
@@ -44,196 +46,140 @@
 #include <compat/osf1/osf1_cvt.h>
 
 int
-osf1_sys_gettimeofday(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_gettimeofday(struct lwp *l, const struct osf1_sys_gettimeofday_args *uap, register_t *retval)
 {
-	struct osf1_sys_gettimeofday_args *uap = v;
-	struct sys_gettimeofday_args a;
 	struct osf1_timeval otv;
 	struct osf1_timezone otz;
 	struct timeval tv;
-	struct timezone tz;
 	int error;
-	caddr_t sg;
 
-	sg = stackgap_init(p->p_emul);
-	if (SCARG(uap, tp) == NULL)
-		SCARG(&a, tp) = NULL;
-	else
-		SCARG(&a, tp) = stackgap_alloc(&sg, sizeof tv);
-	if (SCARG(uap, tzp) == NULL)
-		SCARG(&a, tzp) = NULL;
-	else
-		SCARG(&a, tzp) = stackgap_alloc(&sg, sizeof tz);
+	microtime(&tv);
+	memset(&otv, 0, sizeof otv);
+	otv.tv_sec = tv.tv_sec;
+	otv.tv_usec = tv.tv_usec;
+	error = copyout(&otv, SCARG(uap, tp), sizeof otv);
 
-	error = sys_gettimeofday(p, &a, retval);
-
-	if (error == 0 && SCARG(uap, tp) != NULL) {
-		error = copyin((caddr_t)SCARG(&a, tp),
-		    (caddr_t)&tv, sizeof tv);
-		if (error == 0) {
-			memset(&otv, 0, sizeof otv);
-			otv.tv_sec = tv.tv_sec;
-			otv.tv_usec = tv.tv_usec;
-
-			error = copyout((caddr_t)&otv,
-			    (caddr_t)SCARG(uap, tp), sizeof otv);
-		}
-	}
 	if (error == 0 && SCARG(uap, tzp) != NULL) {
-		error = copyin((caddr_t)SCARG(&a, tzp),
-		    (caddr_t)&tz, sizeof tz);
-		if (error == 0) {
-			memset(&otz, 0, sizeof otz);
-			otz.tz_minuteswest = tz.tz_minuteswest;
-			otz.tz_dsttime = tz.tz_dsttime;
-
-			error = copyout((caddr_t)&otz,
-			    (caddr_t)SCARG(uap, tzp), sizeof otz);
-		}
+		memset(&otz, 0, sizeof otz);
+		error = copyout(&otz, SCARG(uap, tzp), sizeof otz);
 	}
 	return (error);
 }
 
 int
-osf1_sys_setitimer(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_setitimer(struct lwp *l, const struct osf1_sys_setitimer_args *uap, register_t *retval)
 {
-	struct osf1_sys_setitimer_args *uap = v;
-	struct sys_setitimer_args a;
 	struct osf1_itimerval o_itv, o_oitv;
 	struct itimerval b_itv, b_oitv;
-	caddr_t sg;
+	int which;
 	int error;
 
 	switch (SCARG(uap, which)) {
 	case OSF1_ITIMER_REAL:
-		SCARG(&a, which) = ITIMER_REAL;
+		which = ITIMER_REAL;
 		break;
 
 	case OSF1_ITIMER_VIRTUAL:
-		SCARG(&a, which) = ITIMER_VIRTUAL;
+		which = ITIMER_VIRTUAL;
 		break;
 
 	case OSF1_ITIMER_PROF:
-		SCARG(&a, which) = ITIMER_PROF;
+		which = ITIMER_PROF;
 		break;
 
 	default:
 		return (EINVAL);
 	}
 
-	sg = stackgap_init(p->p_emul);
-
-	SCARG(&a, itv) = stackgap_alloc(&sg, sizeof b_itv);
-
 	/* get the OSF/1 itimerval argument */
-	error = copyin((caddr_t)SCARG(uap, itv), (caddr_t)&o_itv,
-	    sizeof o_itv);
-	if (error == 0) {
+	error = copyin(SCARG(uap, itv), &o_itv, sizeof o_itv);
+	if (error != 0)
+		return error;
 
-		/* fill in and copy out the NetBSD timeval */
-		memset(&b_itv, 0, sizeof b_itv);
-		b_itv.it_interval.tv_sec = o_itv.it_interval.tv_sec;
-		b_itv.it_interval.tv_usec = o_itv.it_interval.tv_usec;
-		b_itv.it_value.tv_sec = o_itv.it_value.tv_sec;
-		b_itv.it_value.tv_usec = o_itv.it_value.tv_usec;
+	/* fill in and the NetBSD timeval */
+	memset(&b_itv, 0, sizeof b_itv);
+	b_itv.it_interval.tv_sec = o_itv.it_interval.tv_sec;
+	b_itv.it_interval.tv_usec = o_itv.it_interval.tv_usec;
+	b_itv.it_value.tv_sec = o_itv.it_value.tv_sec;
+	b_itv.it_value.tv_usec = o_itv.it_value.tv_usec;
 
-		error = copyout((caddr_t)&b_itv,
-		    (caddr_t)SCARG(&a, itv), sizeof b_itv);
+	if (SCARG(uap, oitv) != NULL) {
+		dogetitimer(l->l_proc, which, &b_oitv);
+		if (error)
+			return error;
 	}
+		
+	error = dosetitimer(l->l_proc, which, &b_itv);
 
-	if (SCARG(uap, oitv) == NULL)
-		SCARG(&a, oitv) = NULL;
-	else
-		SCARG(&a, oitv) = stackgap_alloc(&sg, sizeof b_oitv);
+	if (error == 0 || SCARG(uap, oitv) == NULL)
+		return error;
 
-	if (error == 0)
-		error = sys_setitimer(p, &a, retval);
+	/* fill in and copy out the old timeval */
+	memset(&o_oitv, 0, sizeof o_oitv);
+	o_oitv.it_interval.tv_sec = b_oitv.it_interval.tv_sec;
+	o_oitv.it_interval.tv_usec = b_oitv.it_interval.tv_usec;
+	o_oitv.it_value.tv_sec = b_oitv.it_value.tv_sec;
+	o_oitv.it_value.tv_usec = b_oitv.it_value.tv_usec;
 
-	if (error == 0 && SCARG(uap, oitv) != NULL) {
-		/* get the NetBSD itimerval return value */
-		error = copyin((caddr_t)SCARG(&a, oitv), (caddr_t)&b_oitv,
-		    sizeof b_oitv);
-		if (error == 0) {
-	
-			/* fill in and copy out the NetBSD timeval */
-			memset(&o_oitv, 0, sizeof o_oitv);
-			o_oitv.it_interval.tv_sec = b_oitv.it_interval.tv_sec;
-			o_oitv.it_interval.tv_usec = b_oitv.it_interval.tv_usec;
-			o_oitv.it_value.tv_sec = b_oitv.it_value.tv_sec;
-			o_oitv.it_value.tv_usec = b_oitv.it_value.tv_usec;
-	
-			error = copyout((caddr_t)&o_oitv,
-			    (caddr_t)SCARG(uap, oitv), sizeof o_oitv);
-		}
-	}
-
-	return (error);
+	return copyout(&o_oitv, SCARG(uap, oitv), sizeof o_oitv);
 }
 
 int
-osf1_sys_settimeofday(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+osf1_sys_getitimer(struct lwp *l, const struct osf1_sys_getitimer_args *uap, register_t *retval)
 {
-	struct osf1_sys_settimeofday_args *uap = v;
-	struct sys_settimeofday_args a;
-	struct osf1_timeval otv;
-	struct osf1_timezone otz;
-	struct timeval tv;
-	struct timezone tz;
+	struct osf1_itimerval o_oitv;
+	struct itimerval b_oitv;
+	int which;
 	int error;
-	caddr_t sg;
 
-	sg = stackgap_init(p->p_emul);
+	switch (SCARG(uap, which)) {
+	case OSF1_ITIMER_REAL:
+		which = ITIMER_REAL;
+		break;
+	case OSF1_ITIMER_VIRTUAL:
+		which = ITIMER_VIRTUAL;
+		break;
+	case OSF1_ITIMER_PROF:
+		which = ITIMER_PROF;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	error = dogetitimer(l->l_proc, which, &b_oitv);
+	if (error != 0 || SCARG(uap, itv) == NULL)
+		return error;
+
+	/* fill in and copy out the osf1 timeval */
+	memset(&o_oitv, 0, sizeof o_oitv);
+	o_oitv.it_interval.tv_sec = b_oitv.it_interval.tv_sec;
+	o_oitv.it_interval.tv_usec = b_oitv.it_interval.tv_usec;
+	o_oitv.it_value.tv_sec = b_oitv.it_value.tv_sec;
+	o_oitv.it_value.tv_usec = b_oitv.it_value.tv_usec;
+	return copyout(&o_oitv, SCARG(uap, itv), sizeof o_oitv);
+}
+
+int
+osf1_sys_settimeofday(struct lwp *l, const struct osf1_sys_settimeofday_args *uap, register_t *retval)
+{
+	struct osf1_timeval otv;
+	struct timeval tv, *tvp;
+	int error = 0;
+
 	if (SCARG(uap, tv) == NULL)
-		SCARG(&a, tv) = NULL;
+		tvp = NULL;
 	else {
-		SCARG(&a, tv) = stackgap_alloc(&sg, sizeof tv);
-
 		/* get the OSF/1 timeval argument */
-		error = copyin((caddr_t)SCARG(uap, tv),
-		    (caddr_t)&otv, sizeof otv);
-		if (error == 0) {
+		error = copyin(SCARG(uap, tv), &otv, sizeof otv);
+		if (error != 0)
+			return error;
 
-			/* fill in and copy out the NetBSD timeval */
-			memset(&tv, 0, sizeof tv);
-			tv.tv_sec = otv.tv_sec;
-			tv.tv_usec = otv.tv_usec;
-
-			error = copyout((caddr_t)&tv,
-			    (caddr_t)SCARG(&a, tv), sizeof tv);
-		}
+		tv.tv_sec = otv.tv_sec;
+		tv.tv_usec = otv.tv_usec;
+		tvp = &tv;
 	}
 
-	if (SCARG(uap, tzp) == NULL)
-		SCARG(&a, tzp) = NULL;
-	else {
-		SCARG(&a, tzp) = stackgap_alloc(&sg, sizeof tz);
+	/* NetBSD ignores the timezone field */
 
-		/* get the OSF/1 timeval argument */
-		error = copyin((caddr_t)SCARG(uap, tzp),
-		    (caddr_t)&otz, sizeof otz);
-		if (error == 0) {
-
-			/* fill in and copy out the NetBSD timezone */
-			memset(&tz, 0, sizeof tz);
-			tz.tz_minuteswest = otz.tz_minuteswest;
-			tz.tz_dsttime = otz.tz_dsttime;
-
-			error = copyout((caddr_t)&tz,
-			    (caddr_t)SCARG(&a, tzp), sizeof tz);
-		}
-	}
-
-	if (error == 0)
-		error = sys_settimeofday(p, &a, retval);
-
-	return (error);
+	return settimeofday1(tvp, false, (const void *)SCARG(uap, tzp), l, true);
 }

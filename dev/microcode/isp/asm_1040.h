@@ -1,4 +1,4 @@
-/* $OpenBSD: asm_1040.h,v 1.2 2001/02/12 23:16:57 mjacob Exp $ */
+/* $NetBSD: asm_1040.h,v 1.6 2008/03/11 05:33:30 mjacob Exp $ */
 /*
  * Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000 Qlogic, Inc.
  * All rights reserved.
@@ -35,7 +35,7 @@
 /*
  *	Firmware Version 4.66.00 (14:49 Sep 05, 2000)
  */
-static const u_int16_t isp_1040_risc_code[] = {
+static const uint16_t isp_1040_risc_code[] = {
 	0x0078, 0x1041, 0x0000, 0x2cd0, 0x0000, 0x2043, 0x4f50, 0x5952,
 	0x4947, 0x4854, 0x2031, 0x3939, 0x312c, 0x3139, 0x3932, 0x2c31,
 	0x3939, 0x332c, 0x3139, 0x3934, 0x2051, 0x4c4f, 0x4749, 0x4320,
@@ -1481,7 +1481,7 @@ static const u_int16_t isp_1040_risc_code[] = {
 /*
  *	Firmware Version 7.65.00 (14:17 Jul 20, 1999)
  */
-static const u_int16_t isp_1040_risc_code[] = {
+static const uint16_t isp_1040_risc_code[] = {
 	0x0078, 0x103a, 0x0000, 0x4057, 0x0000, 0x2043, 0x4f50, 0x5952,
 	0x4947, 0x4854, 0x2031, 0x3939, 0x3520, 0x514c, 0x4f47, 0x4943,
 	0x2043, 0x4f52, 0x504f, 0x5241, 0x5449, 0x4f4e, 0x2049, 0x5350,
@@ -3543,3 +3543,7 @@ static const u_int16_t isp_1040_risc_code[] = {
 	0x300c, 0x817e, 0x872b, 0x8772, 0xa8a8, 0x0000, 0xdf21
 };
 #endif
+#ifdef	ISP_1040_RISC_CODE
+#undef	ISP_1040_RISC_CODE
+#endif
+#define	ISP_1040_RISC_CODE (const uint16_t *) isp_1040_risc_code

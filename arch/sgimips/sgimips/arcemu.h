@@ -1,4 +1,4 @@
-/*	$NetBSD: arcemu.h,v 1.6 2005/12/11 12:18:58 christos Exp $	*/
+/*	$NetBSD: arcemu.h,v 1.10 2007/10/17 19:57:05 garbled Exp $	*/
 
 /*
  * Copyright (c) 2004 Steve Rumble 
@@ -35,19 +35,22 @@
 #include <dev/arcbios/arcbios.h>
 #include <dev/arcbios/arcbiosvar.h>
 
-int arcemu_init(void);
+int arcemu_init(const char **env);
 
 #ifdef _ARCEMU_PRIVATE
 
 /* Platform identification */
 static int	arcemu_identify(void);
 
+/* Helper functions */
+static boolean_t extractenv(const char **, const char *, char *, int);
+
 /*
  * IP12 Emulation 
  */
 
 /* Prom Emulators */
-static void	arcemu_ip12_init(void);
+static void	arcemu_ip12_init(const char **);
 static void *	arcemu_ip12_GetPeer(void *);
 static void *	arcemu_ip12_GetChild(void *);
 static const char *	arcemu_ip12_GetEnvironmentVariable(const char *); 
@@ -55,6 +58,10 @@ static void *	arcemu_ip12_GetMemoryDescriptor(void *mem);
 
 static void	arcemu_ip12_eeprom_read(void);
 static void	arcemu_ip12_putc(dev_t, int);
+
+#define ARCEMU_IP12_ENVOK(_x) 			\
+    (MIPS_PHYS_TO_KSEG1((_x)) >= 0xa0380000 &&	\
+     MIPS_PHYS_TO_KSEG1((_x)) <  0xa0400000)
 
 /* ARCBIOS Component Tree. Represented in linear fashion. */
 static struct arcbios_component ip12_tree[] = {

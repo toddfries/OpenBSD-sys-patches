@@ -1,4 +1,4 @@
-/*	$NetBSD: cacheops.h,v 1.11 2005/12/11 12:17:53 christos Exp $	*/
+/*	$NetBSD: cacheops.h,v 1.15 2008/04/28 20:23:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -83,20 +76,12 @@
 
 #elif defined(M68040)
 
-#define	DCFA()		DCFA_40()
-#define	DCFL(pa)	DCFL_40((pa))
-#define	DCFP(pa)	DCFP_40((pa))
 #define	DCIA()		DCIA_40()
 #define	DCIAS(pa)	DCIAS_40((pa))
 #define	DCIS()		DCIS_40()
 #define	DCIU()		DCIU_40()
-#define	DCPA()		DCPA_40()
-#define	DCPL(pa)	DCPL_40((pa))
-#define	DCPP(pa)	DCPP_40((pa))
 #define	ICIA()		ICIA_40()
 #define	ICPA()		ICPA_40()
-#define	ICPL(pa)	ICPL_40((pa))
-#define	ICPP(pa)	ICPP_40((pa))
 #define	PCIA()		PCIA_40()
 #define	TBIA()		TBIA_40()
 #define	TBIAS()		TBIAS_40()
@@ -105,20 +90,12 @@
 
 #elif defined(M68060)
 
-#define	DCFA()		DCFA_60()
-#define	DCFL(pa)	DCFL_60((pa))
-#define	DCFP(pa)	DCFP_60((pa))
 #define	DCIA()		DCIA_60()
 #define	DCIAS(pa)	DCIAS_60((pa))
 #define	DCIS()		DCIS_60()
 #define	DCIU()		DCIU_60()
-#define	DCPA()		DCPA_60()
-#define	DCPL(pa)	DCPL_60((pa))
-#define	DCPP(pa)	DCPP_60((pa))
 #define	ICIA()		ICIA_60()
 #define	ICPA()		ICPA_60()
-#define	ICPL(pa)	ICPL_60((pa))
-#define	ICPP(pa)	ICPP_60((pa))
 #define	PCIA()		PCIA_60()
 #define	TBIA()		TBIA_60()
 #define	TBIAS()		TBIAS_60()
@@ -129,20 +106,12 @@
 
 #else /* M68K_CACHEOPS_NTYPES == 1 */
 
-#define	DCFA()		_DCFA()
-#define	DCFL(pa)	_DCFL((pa))
-#define	DCFP(pa)	_DCFP((pa))
 #define	DCIA()		_DCIA()
 #define	DCIAS(pa)	_DCIAS((pa))
 #define	DCIS()		_DCIS()
 #define	DCIU()		_DCIU()
-#define	DCPA()		_DCPA()
-#define	DCPL(pa)	_DCPL((pa))
-#define	DCPP(pa)	_DCPP((pa))
 #define	ICIA()		_ICIA()
 #define	ICPA()		_ICPA()
-#define	ICPL(pa)	_ICPL((pa))
-#define	ICPP(pa)	_ICPP((pa))
 #define	PCIA()		_PCIA()
 #define	TBIA()		_TBIA()
 #define	TBIAS()		_TBIAS()
@@ -151,24 +120,34 @@
 
 #endif /* M68K_CACHEOPS_NTYPES == 1 */
 
-void	_DCFA(void);
-void	_DCFL(paddr_t);
-void	_DCFP(paddr_t);
 void	_DCIA(void);
 void	_DCIAS(paddr_t);
 void	_DCIS(void);
 void	_DCIU(void);
-void	_DCPA(void);
-void	_DCPL(paddr_t);
-void	_DCPP(paddr_t);
 void	_ICIA(void);
 void	_ICPA(void);
-void	_ICPL(paddr_t);
-void	_ICPP(paddr_t);
 void	_PCIA(void);
 void	_TBIA(void);
 void	_TBIAS(void);
 void	_TBIAU(void);
 void	_TBIS(vaddr_t);
+
+
+#if defined(M68040) || defined(M68060)
+
+/*
+ * These cache ops are identical between M68040 and M68060
+ * and not available on M68020 and M68030 so no need to check cputype.
+ */
+#define	DCFA()		DCFA_40()
+#define	DCPA()		DCPA_40()
+#define	ICPL(pa)	ICPL_40(pa)
+#define	ICPP(pa)	ICPP_40(pa)
+#define	DCPL(pa)	DCPL_40(pa)
+#define	DCPP(pa)	DCPP_40(pa)
+#define	DCFL(pa)	DCFL_40(pa)
+#define	DCFP(pa)	DCFP_40(pa)
+
+#endif
 
 #endif /* _M68K_CACHEOPS_H_ */

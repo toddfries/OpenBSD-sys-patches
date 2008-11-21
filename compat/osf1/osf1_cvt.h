@@ -1,5 +1,4 @@
-/* $OpenBSD: osf1_cvt.h,v 1.1 2000/08/04 15:47:54 ericj Exp $ */
-/* $NetBSD: osf1_cvt.h,v 1.5 1999/05/10 05:58:44 cgd Exp $ */
+/* $NetBSD: osf1_cvt.h,v 1.11 2007/06/16 20:04:28 dsl Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -53,6 +52,7 @@ void	osf1_cvt_flock_from_native(const struct flock *nf,
 				   struct osf1_flock *of);
 int	osf1_cvt_flock_to_native(const struct osf1_flock *of,
 				 struct flock *nf);
+struct msghdr;
 int	osf1_cvt_msghdr_xopen_to_native(const struct osf1_msghdr_xopen *omh,
 					struct msghdr *nmh);
 int	osf1_cvt_pathconf_name_to_native(int oname, int *bnamep);
@@ -62,20 +62,18 @@ void	osf1_cvt_sigaction_from_native(const struct sigaction *nsa,
 				       struct osf1_sigaction *osa);
 int	osf1_cvt_sigaction_to_native(const struct osf1_sigaction *osa,
 				     struct sigaction *nsa);
-void	osf1_cvt_sigaltstack_from_native(const struct sigaltstack *nss,
-					 struct osf1_sigaltstack *oss);
-int	osf1_cvt_sigaltstack_to_native(const struct osf1_sigaltstack *oss,
-				       struct sigaltstack *nss);
 void	osf1_cvt_sigset_from_native(const sigset_t *nss, osf1_sigset_t *oss);
 int	osf1_cvt_sigset_to_native(const osf1_sigset_t *oss, sigset_t *nss);
 void	osf1_cvt_stat_from_native(const struct stat *nst,
 				  struct osf1_stat *ost);
-void	osf1_cvt_statfs_from_native(const struct statfs *nsfs,
+void	osf1_cvt_stat2_from_native(const struct stat *nst,
+				  struct osf1_stat2 *ost);
+void	osf1_cvt_statfs_from_native(const struct statvfs *nsfs,
 				    struct osf1_statfs *osfs);
 
-extern const int osf1_errno_rxlist[];
-extern const int osf1_signal_xlist[];
-extern const int osf1_signal_rxlist[];
+extern const int native_to_osf1_errno[];
+extern const int osf1_to_native_signo[];
+extern const int native_to_osf1_signo[];
 
 extern const struct emul_flags_xtab osf1_access_flags_xtab[];
 extern const struct emul_flags_xtab osf1_fcntl_getsetfd_flags_rxtab[];

@@ -1,5 +1,4 @@
-/* $OpenBSD: cia_dma.c,v 1.8 2007/04/18 16:56:34 martin Exp $ */
-/* $NetBSD: cia_dma.c,v 1.16 2000/06/29 08:58:46 mrg Exp $ */
+/* $NetBSD: cia_dma.c,v 1.22 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,11 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * XXX - We should define this before including bus.h, but since other stuff
- *       pulls in bus.h we must do this here.
- */
-#define _ALPHA_BUS_DMA_PRIVATE
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: cia_dma.c,v 1.22 2008/04/28 20:23:11 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,6 +42,7 @@
 
 #include <uvm/uvm_extern.h>
 
+#define _ALPHA_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/pci/pcireg.h>
@@ -59,24 +50,24 @@
 #include <alpha/pci/ciareg.h>
 #include <alpha/pci/ciavar.h>
 
-bus_dma_tag_t cia_dma_get_tag(bus_dma_tag_t, alpha_bus_t);
+bus_dma_tag_t cia_dma_get_tag __P((bus_dma_tag_t, alpha_bus_t));
 
-int	cia_bus_dmamap_create_direct(bus_dma_tag_t, bus_size_t, int,
-	    bus_size_t, bus_size_t, int, bus_dmamap_t *);
+int	cia_bus_dmamap_create_direct __P((bus_dma_tag_t, bus_size_t, int,
+	    bus_size_t, bus_size_t, int, bus_dmamap_t *));
 
-int	cia_bus_dmamap_load_sgmap(bus_dma_tag_t, bus_dmamap_t, void *,
-	    bus_size_t, struct proc *, int);
+int	cia_bus_dmamap_load_sgmap __P((bus_dma_tag_t, bus_dmamap_t, void *,
+	    bus_size_t, struct proc *, int));
 
-int	cia_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t, bus_dmamap_t,
-	    struct mbuf *, int);
+int	cia_bus_dmamap_load_mbuf_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    struct mbuf *, int));
 
-int	cia_bus_dmamap_load_uio_sgmap(bus_dma_tag_t, bus_dmamap_t,
-	    struct uio *, int);
+int	cia_bus_dmamap_load_uio_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    struct uio *, int));
 
-int	cia_bus_dmamap_load_raw_sgmap(bus_dma_tag_t, bus_dmamap_t,
-	    bus_dma_segment_t *, int, bus_size_t, int);
+int	cia_bus_dmamap_load_raw_sgmap __P((bus_dma_tag_t, bus_dmamap_t,
+	    bus_dma_segment_t *, int, bus_size_t, int));
 
-void	cia_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
+void	cia_bus_dmamap_unload_sgmap __P((bus_dma_tag_t, bus_dmamap_t));
 
 /*
  * Direct-mapped window: 1G at 1G
@@ -93,10 +84,10 @@ void	cia_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
 /* ALCOR/ALGOR2/PYXIS have a 256-byte out-bound DMA prefetch threshold. */
 #define	CIA_SGMAP_PFTHRESH	256
 
-void	cia_tlb_invalidate(void);
-void	cia_broken_pyxis_tlb_invalidate(void);
+void	cia_tlb_invalidate __P((void));
+void	cia_broken_pyxis_tlb_invalidate __P((void));
 
-void	(*cia_tlb_invalidate_fn)(void);
+void	(*cia_tlb_invalidate_fn) __P((void));
 
 #define	CIA_TLB_INVALIDATE()	(*cia_tlb_invalidate_fn)()
 
@@ -330,8 +321,8 @@ cia_bus_dmamap_create_direct(t, size, nsegments, maxsegsz, boundary,
 		 * is greater than 1.  This is because many network
 		 * drivers allocate large contiguous blocks of memory
 		 * for control data structures, even though they won't
-		 * do any single DMA that crosses a page boundary.
-		 *	-- thorpej@netbsd.org, 2/5/2000
+		 * do any single DMA that crosses a page coundary.
+		 *	-- thorpej@NetBSD.org, 2/5/2000
 		 */
 		map->_dm_flags |= DMAMAP_NO_COALESCE;
 	}

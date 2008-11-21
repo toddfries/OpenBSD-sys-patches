@@ -1,8 +1,7 @@
-/*	$OpenBSD: lptvar.h,v 1.3 2002/03/14 01:26:54 millert Exp $ */
-/*	$NetBSD: lpt.c,v 1.42 1996/10/21 22:41:14 thorpej Exp $	*/
+/*	$NetBSD: lptvar.h,v 1.56 2008/03/07 17:15:51 cube Exp $	*/
 
 /*
- * Copyright (c) 1993, 1994 Charles Hannum.
+ * Copyright (c) 1993, 1994 Charles M. Hannum.
  * Copyright (c) 1990 William F. Jolitz, TeleMuse
  * All rights reserved.
  *
@@ -16,25 +15,25 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This software is a component of "386BSD" developed by 
+ *	This software is a component of "386BSD" developed by
  *	William F. Jolitz, TeleMuse.
  * 4. Neither the name of the developer nor the name "386BSD"
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
- * THIS SOFTWARE IS A COMPONENT OF 386BSD DEVELOPED BY WILLIAM F. JOLITZ 
- * AND IS INTENDED FOR RESEARCH AND EDUCATIONAL PURPOSES ONLY. THIS 
- * SOFTWARE SHOULD NOT BE CONSIDERED TO BE A COMMERCIAL PRODUCT. 
- * THE DEVELOPER URGES THAT USERS WHO REQUIRE A COMMERCIAL PRODUCT 
+ * THIS SOFTWARE IS A COMPONENT OF 386BSD DEVELOPED BY WILLIAM F. JOLITZ
+ * AND IS INTENDED FOR RESEARCH AND EDUCATIONAL PURPOSES ONLY. THIS
+ * SOFTWARE SHOULD NOT BE CONSIDERED TO BE A COMMERCIAL PRODUCT.
+ * THE DEVELOPER URGES THAT USERS WHO REQUIRE A COMMERCIAL PRODUCT
  * NOT MAKE USE OF THIS WORK.
  *
  * FOR USERS WHO WISH TO UNDERSTAND THE 386BSD SYSTEM DEVELOPED
- * BY WILLIAM F. JOLITZ, WE RECOMMEND THE USER STUDY WRITTEN 
- * REFERENCES SUCH AS THE  "PORTING UNIX TO THE 386" SERIES 
- * (BEGINNING JANUARY 1991 "DR. DOBBS JOURNAL", USA AND BEGINNING 
- * JUNE 1991 "UNIX MAGAZIN", GERMANY) BY WILLIAM F. JOLITZ AND 
- * LYNNE GREER JOLITZ, AS WELL AS OTHER BOOKS ON UNIX AND THE 
- * ON-LINE 386BSD USER MANUAL BEFORE USE. A BOOK DISCUSSING THE INTERNALS 
+ * BY WILLIAM F. JOLITZ, WE RECOMMEND THE USER STUDY WRITTEN
+ * REFERENCES SUCH AS THE  "PORTING UNIX TO THE 386" SERIES
+ * (BEGINNING JANUARY 1991 "DR. DOBBS JOURNAL", USA AND BEGINNING
+ * JUNE 1991 "UNIX MAGAZIN", GERMANY) BY WILLIAM F. JOLITZ AND
+ * LYNNE GREER JOLITZ, AS WELL AS OTHER BOOKS ON UNIX AND THE
+ * ON-LINE 386BSD USER MANUAL BEFORE USE. A BOOK DISCUSSING THE INTERNALS
  * OF 386BSD ENTITLED "386BSD FROM THE INSIDE OUT" WILL BE AVAILABLE LATE 1992.
  *
  * THIS SOFTWARE IS PROVIDED BY THE DEVELOPER ``AS IS'' AND
@@ -50,33 +49,50 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/timeout.h>
+/*
+ * Device Driver for AT style parallel printer port
+ */
+
+#ifndef _LPT_VAR_H_
+#define _LPT_VAR_H_
+
+#include <sys/callout.h>
 
 struct lpt_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 	void *sc_ih;
-	struct timeout sc_wakeup_tmo;
-
+	callout_t sc_wakeup_ch;
 	size_t sc_count;
-	struct buf *sc_inbuf;
-	u_int8_t *sc_cp;
+	void *sc_sih;
+	void *sc_inbuf;
+	u_char *sc_cp;
 	int sc_spinmax;
-	bus_space_tag_t sc_iot;	/* bus tag */
-	bus_space_handle_t sc_ioh; /* handle to the registers */
-	u_int8_t sc_state;
+	bus_space_tag_t sc_iot;
+	bus_space_handle_t sc_ioh;
+	u_char sc_dev_ok;	/* device attached correctly */
+	u_char sc_state;
 #define	LPT_OPEN	0x01	/* device is open */
 #define	LPT_OBUSY	0x02	/* printer is busy doing output */
 #define	LPT_INIT	0x04	/* waiting to initialize for open */
-	u_int8_t sc_flags;
-#define	LPT_POLLED	0x10	/* configured for polling only */
+	u_char sc_flags;
 #define	LPT_AUTOLF	0x20	/* automatic LF on CR */
 #define	LPT_NOPRIME	0x40	/* don't prime on open */
 #define	LPT_NOINTR	0x80	/* do not use interrupt */
-	u_int8_t sc_control;
-	u_int8_t sc_laststatus;
+	u_char sc_control;
+	u_char sc_laststatus;
 };
 
-int	lptintr(void *);
-int	lpt_port_test(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    bus_size_t, u_int8_t, u_int8_t);
-void	lpt_attach_common(struct lpt_softc *);
+#define LPS_INVERT      (LPS_SELECT|LPS_NERR|LPS_NBSY|LPS_NACK)
+#define LPS_MASK        (LPS_SELECT|LPS_NERR|LPS_NBSY|LPS_NACK|LPS_NOPAPER)
+#define NOT_READY()     ((bus_space_read_1(iot, ioh, lpt_status) ^ LPS_INVERT) & LPS_MASK)
+#define NOT_READY_ERR() lptnotready(bus_space_read_1(iot, ioh, lpt_status), sc)
+
+int lptnotready(u_char, struct lpt_softc *);
+void lptwakeup(void *arg);
+int lptpushbytes(struct lpt_softc *);
+
+void lpt_attach_subr(struct lpt_softc *);
+int lpt_detach_subr(device_t, int);
+int lptintr(void *);
+
+#endif /* _LPT_VAR_H_ */

@@ -1,5 +1,4 @@
-/* $OpenBSD: wsemul_vt100.c,v 1.22 2007/11/27 16:37:27 miod Exp $ */
-/* $NetBSD: wsemul_vt100.c,v 1.13 2000/04/28 21:56:16 mycroft Exp $ */
+/* $NetBSD: wsemul_vt100.c,v 1.30 2006/11/16 01:33:31 christos Exp $ */
 
 /*
  * Copyright (c) 1998
@@ -27,9 +26,10 @@
  *
  */
 
-#ifndef	SMALL_KERNEL
-#define	JUMP_SCROLL
-#endif
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: wsemul_vt100.c,v 1.30 2006/11/16 01:33:31 christos Exp $");
+
+#include "opt_wsmsgattrs.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,13 +44,17 @@
 #include <dev/wscons/ascii.h>
 
 void	*wsemul_vt100_cnattach(const struct wsscreen_descr *, void *,
-				  int, int, long);
+			       int, int, long);
 void	*wsemul_vt100_attach(int console, const struct wsscreen_descr *,
-				  void *, int, int, void *, long);
-void	wsemul_vt100_output(void *cookie, const u_char *data, u_int count,
-				 int);
+			     void *, int, int, void *, long);
+void	wsemul_vt100_output(void *cookie, const u_char *data, u_int count, int);
 void	wsemul_vt100_detach(void *cookie, u_int *crowp, u_int *ccolp);
 void	wsemul_vt100_resetop(void *, enum wsemul_resetops);
+#ifdef WSDISPLAY_CUSTOM_OUTPUT
+static void wsemul_vt100_getmsgattrs(void *, struct wsdisplay_msgattrs *);
+static void wsemul_vt100_setmsgattrs(void *, const struct wsscreen_descr *,
+                                     const struct wsdisplay_msgattrs *);
+#endif /* WSDISPLAY_CUSTOM_OUTPUT */
 
 const struct wsemul_ops wsemul_vt100_ops = {
 	"vt100",
@@ -59,32 +63,42 @@ const struct wsemul_ops wsemul_vt100_ops = {
 	wsemul_vt100_output,
 	wsemul_vt100_translate,
 	wsemul_vt100_detach,
-	wsemul_vt100_resetop
+	wsemul_vt100_resetop,
+#ifdef WSDISPLAY_CUSTOM_OUTPUT
+	wsemul_vt100_getmsgattrs,
+	wsemul_vt100_setmsgattrs,
+#else
+	NULL,
+	NULL,
+#endif
 };
 
 struct wsemul_vt100_emuldata wsemul_vt100_console_emuldata;
 
-void	wsemul_vt100_init(struct wsemul_vt100_emuldata *,
-	    const struct wsscreen_descr *, void *, int, int, long);
-void	wsemul_vt100_jump_scroll(struct wsemul_vt100_emuldata *,
-	    const u_char *, u_int, int);
-void	wsemul_vt100_output_normal(struct wsemul_vt100_emuldata *, u_char, int);
-void	wsemul_vt100_output_c0c1(struct wsemul_vt100_emuldata *, u_char, int);
-void	wsemul_vt100_nextline(struct wsemul_vt100_emuldata *);
+static void wsemul_vt100_init(struct wsemul_vt100_emuldata *,
+			      const struct wsscreen_descr *,
+			      void *, int, int, long);
+
+static void wsemul_vt100_output_normal(struct wsemul_vt100_emuldata *,
+				       u_char, int);
+static void wsemul_vt100_output_c0c1(struct wsemul_vt100_emuldata *,
+				     u_char, int);
+static void wsemul_vt100_nextline(struct wsemul_vt100_emuldata *);
 typedef u_int vt100_handler(struct wsemul_vt100_emuldata *, u_char);
-vt100_handler
-	wsemul_vt100_output_esc,
-	wsemul_vt100_output_csi,
-	wsemul_vt100_output_scs94,
-	wsemul_vt100_output_scs94_percent,
-	wsemul_vt100_output_scs96,
-	wsemul_vt100_output_scs96_percent,
-	wsemul_vt100_output_esc_hash,
-	wsemul_vt100_output_esc_spc,
-	wsemul_vt100_output_string,
-	wsemul_vt100_output_string_esc,
-	wsemul_vt100_output_dcs,
-	wsemul_vt100_output_dcs_dollar;
+
+static vt100_handler
+wsemul_vt100_output_esc,
+wsemul_vt100_output_csi,
+wsemul_vt100_output_scs94,
+wsemul_vt100_output_scs94_percent,
+wsemul_vt100_output_scs96,
+wsemul_vt100_output_scs96_percent,
+wsemul_vt100_output_esc_hash,
+wsemul_vt100_output_esc_spc,
+wsemul_vt100_output_string,
+wsemul_vt100_output_string_esc,
+wsemul_vt100_output_dcs,
+wsemul_vt100_output_dcs_dollar;
 
 #define	VT100_EMUL_STATE_NORMAL		0	/* normal processing */
 #define	VT100_EMUL_STATE_ESC		1	/* got ESC */
@@ -115,11 +129,13 @@ vt100_handler *vt100_output[] = {
 	wsemul_vt100_output_dcs_dollar,
 };
 
-void
+static void
 wsemul_vt100_init(struct wsemul_vt100_emuldata *edp,
-    const struct wsscreen_descr *type, void *cookie, int ccol, int crow,
-    long defattr)
+	const struct wsscreen_descr *type, void *cookie, int ccol, int crow,
+	long defattr)
 {
+	int error;
+
 	edp->emulops = type->textops;
 	edp->emulcookie = cookie;
 	edp->scrcapabilities = type->capabilities;
@@ -127,15 +143,71 @@ wsemul_vt100_init(struct wsemul_vt100_emuldata *edp,
 	edp->ncols = type->ncols;
 	edp->crow = crow;
 	edp->ccol = ccol;
-	edp->defattr = defattr;
+
+	/* The underlying driver has already allocated a default and simple
+	 * attribute for us, which is stored in defattr.  We try to set the
+	 * values specified by the kernel options below, but in case of
+	 * failure we fallback to the value given by the driver. */
+
+	if (type->capabilities & WSSCREEN_WSCOLORS) {
+		edp->msgattrs.default_attrs = WS_DEFAULT_COLATTR |
+		    WSATTR_WSCOLORS;
+		edp->msgattrs.default_bg = WS_DEFAULT_BG;
+		edp->msgattrs.default_fg = WS_DEFAULT_FG;
+
+		edp->msgattrs.kernel_attrs = WS_KERNEL_COLATTR |
+		    WSATTR_WSCOLORS;
+		edp->msgattrs.kernel_bg = WS_KERNEL_BG;
+		edp->msgattrs.kernel_fg = WS_KERNEL_FG;
+	} else {
+		edp->msgattrs.default_attrs = WS_DEFAULT_MONOATTR;
+		edp->msgattrs.default_bg = edp->msgattrs.default_fg = 0;
+
+		edp->msgattrs.kernel_attrs = WS_KERNEL_MONOATTR;
+		edp->msgattrs.kernel_bg = edp->msgattrs.kernel_fg = 0;
+	}
+
+	error = (*edp->emulops->allocattr)(cookie,
+					   edp->msgattrs.default_fg,
+					   edp->msgattrs.default_bg,
+					   edp->msgattrs.default_attrs,
+					   &edp->defattr);
+	if (error) {
+		edp->defattr = defattr;
+		/* XXX This assumes the driver has allocated white on black
+		 * XXX as the default attribute, which is not always true.
+		 * XXX Maybe we need an emulop that, given an attribute,
+		 * XXX (defattr) returns its flags and colors? */
+		edp->msgattrs.default_attrs = 0;
+		edp->msgattrs.default_bg = WSCOL_BLACK;
+		edp->msgattrs.default_fg = WSCOL_WHITE;
+	} else {
+		if (edp->emulops->replaceattr != NULL)
+			(*edp->emulops->replaceattr)(cookie, defattr,
+			                             edp->defattr);
+	}
+
+#if defined(WS_KERNEL_CUSTOMIZED)
+	/* Set up kernel colors, in case they were customized by the user;
+	 * otherwise default to the colors specified for the console.
+	 * In case of failure, we use console colors too; we can assume
+	 * they are good as they have been previously allocated and
+	 * verified. */
+	error = (*edp->emulops->allocattr)(cookie,
+					   edp->msgattrs.kernel_fg,
+					   edp->msgattrs.kernel_bg,
+					   edp->msgattrs.kernel_attrs,
+					   &edp->kernattr);
+	if (error)
+#endif
+	edp->kernattr = edp->defattr;
 }
 
 void *
-wsemul_vt100_cnattach(const struct wsscreen_descr *type, void *cookie, int ccol,
-    int crow, long defattr)
+wsemul_vt100_cnattach(const struct wsscreen_descr *type, void *cookie,
+	int ccol, int crow, long defattr)
 {
 	struct wsemul_vt100_emuldata *edp;
-	int res;
 
 	edp = &wsemul_vt100_console_emuldata;
 	wsemul_vt100_init(edp, type, cookie, ccol, crow, defattr);
@@ -144,41 +216,19 @@ wsemul_vt100_cnattach(const struct wsscreen_descr *type, void *cookie, int ccol,
 #endif
 	edp->cbcookie = NULL;
 
-#ifndef WS_KERNEL_FG
-#define WS_KERNEL_FG WSCOL_WHITE
-#endif
-#ifndef WS_KERNEL_BG
-#define WS_KERNEL_BG WSCOL_BLUE
-#endif
-#ifndef WS_KERNEL_COLATTR
-#define WS_KERNEL_COLATTR 0
-#endif
-#ifndef WS_KERNEL_MONOATTR
-#define WS_KERNEL_MONOATTR 0
-#endif
-	if (type->capabilities & WSSCREEN_WSCOLORS)
-		res = (*edp->emulops->alloc_attr)(cookie,
-		    WS_KERNEL_FG, WS_KERNEL_BG,
-		    WS_KERNEL_COLATTR | WSATTR_WSCOLORS, &edp->kernattr);
-	else
-		res = (*edp->emulops->alloc_attr)(cookie, 0, 0,
-		    WS_KERNEL_MONOATTR, &edp->kernattr);
-	if (res)
-		edp->kernattr = defattr;
-
-	edp->tabs = NULL;
-	edp->dblwid = NULL;
+	edp->tabs = 0;
+	edp->dblwid = 0;
 	edp->dw = 0;
 	edp->dcsarg = 0;
-	edp->isolatin1tab = edp->decgraphtab = edp->dectechtab = NULL;
-	edp->nrctab = NULL;
+	edp->isolatin1tab = edp->decgraphtab = edp->dectechtab = 0;
+	edp->nrctab = 0;
 	wsemul_vt100_reset(edp);
 	return (edp);
 }
 
 void *
 wsemul_vt100_attach(int console, const struct wsscreen_descr *type,
-    void *cookie, int ccol, int crow, void *cbcookie, long defattr)
+	void *cookie, int ccol, int crow, void *cbcookie, long defattr)
 {
 	struct wsemul_vt100_emuldata *edp;
 
@@ -188,9 +238,7 @@ wsemul_vt100_attach(int console, const struct wsscreen_descr *type,
 		KASSERT(edp->console == 1);
 #endif
 	} else {
-		edp = malloc(sizeof *edp, M_DEVBUF, M_NOWAIT);
-		if (edp == NULL)
-			return (NULL);
+		edp = malloc(sizeof *edp, M_DEVBUF, M_WAITOK);
 		wsemul_vt100_init(edp, type, cookie, ccol, crow, defattr);
 #ifdef DIAGNOSTIC
 		edp->console = 0;
@@ -199,7 +247,7 @@ wsemul_vt100_attach(int console, const struct wsscreen_descr *type,
 	edp->cbcookie = cbcookie;
 
 	edp->tabs = malloc(edp->ncols, M_DEVBUF, M_NOWAIT);
-	edp->dblwid = malloc(edp->nrows, M_DEVBUF, M_NOWAIT | M_ZERO);
+	edp->dblwid = malloc(edp->nrows, M_DEVBUF, M_NOWAIT|M_ZERO);
 	edp->dw = 0;
 	edp->dcsarg = malloc(DCS_MAXLEN, M_DEVBUF, M_NOWAIT);
 	edp->isolatin1tab = malloc(128 * sizeof(int), M_DEVBUF, M_NOWAIT);
@@ -218,7 +266,7 @@ wsemul_vt100_detach(void *cookie, u_int *crowp, u_int *ccolp)
 
 	*crowp = edp->crow;
 	*ccolp = edp->ccol;
-#define f(ptr) if (ptr) {free(ptr, M_DEVBUF); ptr = NULL;}
+#define f(ptr) if (ptr) {free(ptr, M_DEVBUF); ptr = 0;}
 	f(edp->tabs)
 	f(edp->dblwid)
 	f(edp->dcsarg)
@@ -247,11 +295,7 @@ wsemul_vt100_resetop(void *cookie, enum wsemul_resetops op)
 		wsemul_vt100_ed(edp, 2);
 		edp->ccol = edp->crow = 0;
 		(*edp->emulops->cursor)(edp->emulcookie,
-		    edp->flags & VTFL_CURSORON, 0, 0);
-		break;
-	case WSEMUL_CLEARCURSOR:
-		(*edp->emulops->cursor)(edp->emulcookie, 0,
-		    edp->crow, edp->ccol);
+					edp->flags & VTFL_CURSORON, 0, 0);
 		break;
 	default:
 		break;
@@ -266,9 +310,9 @@ wsemul_vt100_reset(struct wsemul_vt100_emuldata *edp)
 	edp->state = VT100_EMUL_STATE_NORMAL;
 	edp->flags = VTFL_DECAWM | VTFL_CURSORON;
 	edp->bkgdattr = edp->curattr = edp->defattr;
-	edp->attrflags = 0;
-	edp->fgcol = WSCOL_WHITE;
-	edp->bgcol = WSCOL_BLACK;
+	edp->attrflags = edp->msgattrs.default_attrs;
+	edp->fgcol = edp->msgattrs.default_fg;
+	edp->bgcol = edp->msgattrs.default_bg;
 	edp->scrreg_startrow = 0;
 	edp->scrreg_nrows = edp->nrows;
 	if (edp->tabs) {
@@ -278,7 +322,7 @@ wsemul_vt100_reset(struct wsemul_vt100_emuldata *edp)
 	}
 	edp->dcspos = 0;
 	edp->dcstype = 0;
-	edp->chartab_G[0] = NULL;
+	edp->chartab_G[0] = 0;
 	edp->chartab_G[1] = edp->nrctab; /* ??? */
 	edp->chartab_G[2] = edp->isolatin1tab;
 	edp->chartab_G[3] = edp->isolatin1tab;
@@ -288,11 +332,15 @@ wsemul_vt100_reset(struct wsemul_vt100_emuldata *edp)
 }
 
 /*
+ * now all the state machine bits
+ */
+
+/*
  * Move the cursor to the next line if possible. If the cursor is at
  * the bottom of the scroll area, then scroll it up. If the cursor is
  * at the bottom of the screen then don't move it down.
  */
-void
+static void
 wsemul_vt100_nextline(struct wsemul_vt100_emuldata *edp)
 {
 	if (ROWS_BELOW == 0) {
@@ -306,13 +354,9 @@ wsemul_vt100_nextline(struct wsemul_vt100_emuldata *edp)
 	}
 }
 
-/*
- * now all the state machine bits
- */
-
-void
+static void
 wsemul_vt100_output_normal(struct wsemul_vt100_emuldata *edp, u_char c,
-    int kernel)
+	int kernel)
 {
 	u_int *ct, dc;
 
@@ -339,7 +383,8 @@ wsemul_vt100_output_normal(struct wsemul_vt100_emuldata *edp, u_char c,
 		COPYCOLS(edp->ccol, edp->ccol + 1, COLS_LEFT);
 
 	(*edp->emulops->putchar)(edp->emulcookie, edp->crow,
-	    edp->ccol << edp->dw, dc, kernel ? edp->kernattr : edp->curattr);
+				 edp->ccol << edp->dw, dc,
+				 kernel ? edp->kernattr : edp->curattr);
 
 	if (COLS_LEFT)
 		edp->ccol++;
@@ -347,9 +392,9 @@ wsemul_vt100_output_normal(struct wsemul_vt100_emuldata *edp, u_char c,
 		edp->flags |= VTFL_LASTCHAR;
 }
 
-void
+static void
 wsemul_vt100_output_c0c1(struct wsemul_vt100_emuldata *edp, u_char c,
-    int kernel)
+	int kernel)
 {
 	u_int n;
 
@@ -391,8 +436,7 @@ wsemul_vt100_output_c0c1(struct wsemul_vt100_emuldata *edp, u_char c,
 		break;
 	case ASCII_ESC:
 		if (kernel) {
-			printf("wsemul_vt100_output_c0c1: ESC in kernel "
-			    "output ignored\n");
+			printf("wsemul_vt100_output_c0c1: ESC in kernel output ignored\n");
 			break;	/* ignore the ESC */
 		}
 
@@ -431,7 +475,7 @@ wsemul_vt100_output_c0c1(struct wsemul_vt100_emuldata *edp, u_char c,
 	}
 }
 
-u_int
+static u_int
 wsemul_vt100_output_esc(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	u_int newstate = VT100_EMUL_STATE_NORMAL;
@@ -481,13 +525,13 @@ wsemul_vt100_output_esc(struct wsemul_vt100_emuldata *edp, u_char c)
 		break;
 	case 'E': /* NEL */
 		edp->ccol = 0;
-		/* FALLTHROUGH */
+		/* FALLTHRU */
 	case 'D': /* IND */
 		wsemul_vt100_nextline(edp);
 		break;
 	case 'H': /* HTS */
-		if (edp->tabs != NULL)
-			edp->tabs[edp->ccol] = 1;
+		KASSERT(edp->tabs != 0);
+		edp->tabs[edp->ccol] = 1;
 		break;
 	case '~': /* LS1R */
 		edp->chartab1 = 1;
@@ -560,7 +604,7 @@ wsemul_vt100_output_esc(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (newstate);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_scs94(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	u_int newstate = VT100_EMUL_STATE_NORMAL;
@@ -594,7 +638,7 @@ wsemul_vt100_output_scs94(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (newstate);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_scs94_percent(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	switch (c) {
@@ -611,14 +655,14 @@ wsemul_vt100_output_scs94_percent(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (VT100_EMUL_STATE_NORMAL);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_scs96(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	u_int newstate = VT100_EMUL_STATE_NORMAL;
 	int nrc;
 
 	switch (c) {
-	case '%': /* probably portuguese */
+	case '%': /* probably portugese */
 		newstate = VT100_EMUL_STATE_SCS96_PERCENT;
 		break;
 	case 'A': /* ISO-latin-1 supplemental */
@@ -654,9 +698,8 @@ wsemul_vt100_output_scs96(struct wsemul_vt100_emuldata *edp, u_char c)
 	case '=': /* swiss */
 		nrc = 11;
 setnrc:
-		if (vt100_setnrc(edp, nrc) == 0) /* what table ??? */
-			break;
-		/* else FALLTHROUGH */
+		vt100_setnrc(edp, nrc); /* what table ??? */
+		break;
 	default:
 #ifdef VT100_PRINTUNKNOWN
 		printf("ESC%c%c unknown\n", edp->designating + '-' - 1, c);
@@ -666,25 +709,25 @@ setnrc:
 	return (newstate);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_scs96_percent(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	switch (c) {
-	case '6': /* portuguese */
-		if (vt100_setnrc(edp, 8) == 0)
-			break;
-		/* else FALLTHROUGH */
+	case '6': /* portugese */
+		vt100_setnrc(edp, 8);
+		break;
 	default:
 #ifdef VT100_PRINTUNKNOWN
-		printf("ESC%c%%%c unknown\n", edp->designating + '-' - 1, c);
+		printf("ESC%c%%%c unknown\n", edp->designating + '-', c);
 #endif
 		break;
 	}
 	return (VT100_EMUL_STATE_NORMAL);
 }
 
-u_int
-wsemul_vt100_output_esc_spc(struct wsemul_vt100_emuldata *edp, u_char c)
+static u_int
+wsemul_vt100_output_esc_spc(struct wsemul_vt100_emuldata *edp,
+    u_char c)
 {
 	switch (c) {
 	case 'F': /* 7-bit controls */
@@ -702,7 +745,7 @@ wsemul_vt100_output_esc_spc(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (VT100_EMUL_STATE_NORMAL);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_string(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	if (edp->dcstype && edp->dcspos < DCS_MAXLEN)
@@ -710,7 +753,7 @@ wsemul_vt100_output_string(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (VT100_EMUL_STATE_STRING);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_string_esc(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	if (c == '\\') { /* ST complete */
@@ -720,7 +763,7 @@ wsemul_vt100_output_string_esc(struct wsemul_vt100_emuldata *edp, u_char c)
 		return (VT100_EMUL_STATE_STRING);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_dcs(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	u_int newstate = VT100_EMUL_STATE_DCS;
@@ -769,7 +812,7 @@ wsemul_vt100_output_dcs(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (newstate);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_dcs_dollar(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	switch (c) {
@@ -808,19 +851,21 @@ wsemul_vt100_output_dcs_dollar(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (VT100_EMUL_STATE_STRING);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_esc_hash(struct wsemul_vt100_emuldata *edp, u_char c)
 {
-	int i;
+	int i, j;
 
 	switch (c) {
 	case '5': /*  DECSWL single width, single height */
-		if (edp->dblwid != NULL && edp->dw != 0) {
+		if (edp->dw) {
 			for (i = 0; i < edp->ncols / 2; i++)
 				(*edp->emulops->copycols)(edp->emulcookie,
-				    edp->crow, 2 * i, i, 1);
+							  edp->crow,
+							  2 * i, i, 1);
 			(*edp->emulops->erasecols)(edp->emulcookie, edp->crow,
-			    i, edp->ncols - i, edp->bkgdattr);
+						   i, edp->ncols - i,
+						   edp->bkgdattr);
 			edp->dblwid[edp->crow] = 0;
 			edp->dw = 0;
 		}
@@ -828,26 +873,27 @@ wsemul_vt100_output_esc_hash(struct wsemul_vt100_emuldata *edp, u_char c)
 	case '6': /*  DECDWL double width, single height */
 	case '3': /*  DECDHL double width, double height, top half */
 	case '4': /*  DECDHL double width, double height, bottom half */
-		if (edp->dblwid != NULL && edp->dw == 0) {
+		if (!edp->dw) {
 			for (i = edp->ncols / 2 - 1; i >= 0; i--)
 				(*edp->emulops->copycols)(edp->emulcookie,
-				    edp->crow, i, 2 * i, 1);
+							  edp->crow,
+							  i, 2 * i, 1);
 			for (i = 0; i < edp->ncols / 2; i++)
 				(*edp->emulops->erasecols)(edp->emulcookie,
-				    edp->crow, 2 * i + 1, 1, edp->bkgdattr);
+							   edp->crow,
+							   2 * i + 1, 1,
+							   edp->bkgdattr);
 			edp->dblwid[edp->crow] = 1;
 			edp->dw = 1;
 			if (edp->ccol > (edp->ncols >> 1) - 1)
 				edp->ccol = (edp->ncols >> 1) - 1;
 		}
 		break;
-	case '8': { /* DECALN */
-		int i, j;
+	case '8': /* DECALN */
 		for (i = 0; i < edp->nrows; i++)
 			for (j = 0; j < edp->ncols; j++)
 				(*edp->emulops->putchar)(edp->emulcookie, i, j,
-				    'E', edp->curattr);
-		}
+							 'E', edp->curattr);
 		edp->ccol = 0;
 		edp->crow = 0;
 		break;
@@ -860,7 +906,7 @@ wsemul_vt100_output_esc_hash(struct wsemul_vt100_emuldata *edp, u_char c)
 	return (VT100_EMUL_STATE_NORMAL);
 }
 
-u_int
+static u_int
 wsemul_vt100_output_csi(struct wsemul_vt100_emuldata *edp, u_char c)
 {
 	u_int newstate = VT100_EMUL_STATE_CSI;
@@ -914,24 +960,12 @@ wsemul_vt100_output(void *cookie, const u_char *data, u_int count, int kernel)
 
 	if (edp->flags & VTFL_CURSORON)
 		(*edp->emulops->cursor)(edp->emulcookie, 0,
-		    edp->crow, edp->ccol << edp->dw);
-
+					edp->crow, edp->ccol << edp->dw);
 	for (; count > 0; data++, count--) {
-#ifdef JUMP_SCROLL
-		/*
-		 * If we are at the bottom of the scrolling area, count
-		 * newlines until an escape sequence appears.
-		 */
-		if ((edp->state == VT100_EMUL_STATE_NORMAL || kernel) &&
-		    ROWS_BELOW == 0)
-			wsemul_vt100_jump_scroll(edp, data, count, kernel);
-#endif
-
 		if ((*data & 0x7f) < 0x20) {
 			wsemul_vt100_output_c0c1(edp, *data, kernel);
 			continue;
 		}
-
 		if (edp->state == VT100_EMUL_STATE_NORMAL || kernel) {
 			wsemul_vt100_output_normal(edp, *data, kernel);
 			continue;
@@ -942,75 +976,82 @@ wsemul_vt100_output(void *cookie, const u_char *data, u_int count, int kernel)
 #endif
 		edp->state = vt100_output[edp->state - 1](edp, *data);
 	}
-
 	if (edp->flags & VTFL_CURSORON)
 		(*edp->emulops->cursor)(edp->emulcookie, 1,
-		    edp->crow, edp->ccol << edp->dw);
+					edp->crow, edp->ccol << edp->dw);
 }
 
-#ifdef JUMP_SCROLL
-void
-wsemul_vt100_jump_scroll(struct wsemul_vt100_emuldata *edp, const u_char *data,
-    u_int count, int kernel)
+#ifdef WSDISPLAY_CUSTOM_OUTPUT
+static void
+wsemul_vt100_getmsgattrs(void *cookie, struct wsdisplay_msgattrs *ma)
 {
-	u_char curchar;
-	u_int pos, lines;
+	struct wsemul_vt100_emuldata *edp = cookie;
 
-	lines = 0;
-	pos = edp->ccol;
-	for (; count != 0; data++, count--) {
-		curchar = *data;
-		/*
-		 * Only char for which
-		 * wsemul_vt100_output_c0c1() will switch
-		 * to escape mode, for now.
-		 * Revisit this when this changes...
-		 */
-		if (curchar == ASCII_ESC)
-			break;
+	*ma = edp->msgattrs;
+}
 
-		if (ISSET(edp->flags, VTFL_DECAWM))
-			switch (curchar) {
-			case ASCII_BS:
-				if (pos > 0)
-					pos--;
-				break;
-			case ASCII_CR:
-				pos = 0;
-				break;
-			case ASCII_HT:
-				if (edp->tabs) {
-					pos++;
-					while (pos < NCOLS - 1 &&
-					    edp->tabs[pos] == 0)
-						pos++;
-				} else {
-					pos = (pos + 7) & ~7;
-					if (pos >= NCOLS)
-						pos = NCOLS - 1;
-				}
-				break;
-			default:
-				if ((curchar & 0x7f) < 0x20)
-					break;
-				if (pos++ >= NCOLS) {
-					pos = 0;
-					curchar = ASCII_LF;
-				}
-				break;
-			}
+static void
+wsemul_vt100_setmsgattrs(void *cookie, const struct wsscreen_descr *type,
+                         const struct wsdisplay_msgattrs *ma)
+{
+	int error;
+	long tmp;
+	struct wsemul_vt100_emuldata *edp = cookie;
 
-		if (curchar == ASCII_LF ||
-		    curchar == ASCII_VT ||
-		    curchar == ASCII_FF) {
-			if (++lines >= edp->scrreg_nrows - 1)
-				break;
-		}
+	edp->msgattrs = *ma;
+	if (type->capabilities & WSSCREEN_WSCOLORS) {
+		edp->msgattrs.default_attrs |= WSATTR_WSCOLORS;
+		edp->msgattrs.kernel_attrs |= WSATTR_WSCOLORS;
+	} else {
+		edp->msgattrs.default_bg = edp->msgattrs.kernel_bg = 0;
+		edp->msgattrs.default_fg = edp->msgattrs.kernel_fg = 0;
 	}
 
-	if (lines > 1) {
-		wsemul_vt100_scrollup(edp, lines);
-		edp->crow -= lines;
+	error = (*edp->emulops->allocattr)(edp->emulcookie,
+	                                   edp->msgattrs.default_fg,
+					   edp->msgattrs.default_bg,
+	                                   edp->msgattrs.default_attrs,
+	                                   &tmp);
+#ifdef VT100_DEBUG
+	if (error)
+		printf("vt100: failed to allocate attribute for default "
+		       "messages\n");
+	else
+#endif
+	{
+		if (edp->curattr == edp->defattr) {
+			edp->bkgdattr = edp->curattr = tmp;
+			edp->attrflags = edp->msgattrs.default_attrs;
+			edp->bgcol = edp->msgattrs.default_bg;
+			edp->fgcol = edp->msgattrs.default_fg;
+		} else {
+			edp->savedbkgdattr = edp->savedattr = tmp;
+			edp->savedattrflags = edp->msgattrs.default_attrs;
+			edp->savedbgcol = edp->msgattrs.default_bg;
+			edp->savedfgcol = edp->msgattrs.default_fg;
+		}
+		if (edp->emulops->replaceattr != NULL)
+			(*edp->emulops->replaceattr)(edp->emulcookie,
+			                             edp->defattr, tmp);
+		edp->defattr = tmp;
+	}
+
+	error = (*edp->emulops->allocattr)(edp->emulcookie,
+	                                   edp->msgattrs.kernel_fg,
+					   edp->msgattrs.kernel_bg,
+	                                   edp->msgattrs.kernel_attrs,
+	                                   &tmp);
+#ifdef VT100_DEBUG
+	if (error)
+		printf("vt100: failed to allocate attribute for kernel "
+		       "messages\n");
+	else
+#endif
+	{
+		if (edp->emulops->replaceattr != NULL)
+			(*edp->emulops->replaceattr)(edp->emulcookie,
+			                             edp->kernattr, tmp);
+		edp->kernattr = tmp;
 	}
 }
-#endif
+#endif /* WSDISPLAY_CUSTOM_OUTPUT */

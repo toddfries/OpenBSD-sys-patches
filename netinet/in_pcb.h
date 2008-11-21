@@ -1,5 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.63 2008/05/23 15:51:12 thib Exp $	*/
-/*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
+/*	$NetBSD: in_pcb.h,v 1.45 2007/12/16 18:39:57 elad Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -65,18 +64,7 @@
 #define _NETINET_IN_PCB_H_
 
 #include <sys/queue.h>
-#include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
-#include <netinet/icmp6.h>
-#include <netinet/ip_ipsp.h>
-
-union inpaddru {
-	struct in6_addr iau_addr6;
-	struct {
-		uint8_t pad[12];
-		struct in_addr inaddr;	/* easier transition */
-	} iau_a4u;
-};
+#include <netinet/in_pcb_hdr.h>
 
 /*
  * Common structure pcb for internet protocol implementation.
@@ -86,203 +74,84 @@ union inpaddru {
  * control block.
  */
 struct inpcb {
-	LIST_ENTRY(inpcb) inp_hash;
-	LIST_ENTRY(inpcb) inp_lhash;		/* extra hash for lport */
-	CIRCLEQ_ENTRY(inpcb) inp_queue;
-	struct	  inpcbtable *inp_table;
-	union	  inpaddru inp_faddru;		/* Foreign address. */
-	union	  inpaddru inp_laddru;		/* Local address. */
-#define	inp_faddr	inp_faddru.iau_a4u.inaddr
-#define	inp_faddr6	inp_faddru.iau_addr6
-#define	inp_laddr	inp_laddru.iau_a4u.inaddr
-#define	inp_laddr6	inp_laddru.iau_addr6
+	struct inpcb_hdr inp_head;
+#define inp_hash	inp_head.inph_hash
+#define inp_queue	inp_head.inph_queue
+#define inp_af		inp_head.inph_af
+#define inp_ppcb	inp_head.inph_ppcb
+#define inp_state	inp_head.inph_state
+#define inp_socket	inp_head.inph_socket
+#define inp_table	inp_head.inph_table
+#define inp_sp		inp_head.inph_sp
+	struct	  route inp_route;	/* placeholder for routing entry */
 	u_int16_t inp_fport;		/* foreign port */
 	u_int16_t inp_lport;		/* local port */
-	struct	  socket *inp_socket;	/* back pointer to socket */
-	caddr_t	  inp_ppcb;		/* pointer to per-protocol pcb */
-	union {				/* Route (notice increased size). */
-		struct route ru_route;
-		struct route_in6 ru_route6;
-	} inp_ru;
-#define	inp_route	inp_ru.ru_route
-#define	inp_route6	inp_ru.ru_route6
 	int	  inp_flags;		/* generic IP/datagram flags */
-	union {				/* Header prototype. */
-		struct ip hu_ip;
-		struct ip6_hdr hu_ipv6;
-	} inp_hu;
-#define	inp_ip		inp_hu.hu_ip
-#define	inp_ipv6	inp_hu.hu_ipv6
+	struct	  ip inp_ip;		/* header prototype; should have more */
 	struct	  mbuf *inp_options;	/* IP options */
-	struct ip6_pktopts *inp_outputopts6; /* IP6 options for outgoing packets */
-	int inp_hops;
-	union {
-		struct ip_moptions *mou_mo;    /* IPv4 multicast options */
-		struct ip6_moptions *mou_mo6; /* IPv6 multicast options */
-	} inp_mou;
-#define inp_moptions inp_mou.mou_mo
-#define inp_moptions6 inp_mou.mou_mo6
-	u_char	  inp_seclevel[4];
-#define SL_AUTH           0             /* Authentication level */
-#define SL_ESP_TRANS      1             /* ESP transport level */
-#define SL_ESP_NETWORK    2             /* ESP network (encapsulation) level */
-#define SL_IPCOMP         3             /* Compression level */
-	u_int     inp_secrequire:4,     /* Condensed State from above */
-	          inp_secresult:4;	/* Result from Key Management */
-#define SR_FAILED         1             /* Negotiation failed permanently */
-#define SR_SUCCESS        2             /* SA successfully established */
-#define SR_WAIT           3             /* Waiting for SA */
-	u_char	inp_ip_minttl;		/* minimum TTL or drop */
-	TAILQ_ENTRY(inpcb) inp_tdb_in_next, inp_tdb_out_next;
-	struct tdb     *inp_tdb_in, *inp_tdb_out;
-	struct ipsec_policy *inp_ipo;
-	struct ipsec_ref *inp_ipsec_remotecred;
-	struct ipsec_ref *inp_ipsec_remoteauth;
-#define	inp_flowinfo	inp_hu.hu_ipv6.ip6_flow
-
-	int	in6p_cksum;
-#ifndef _KERNEL
-#define inp_csumoffset	in6p_cksum
-#endif
-	struct	icmp6_filter *inp_icmp6filt;
+	struct	  ip_moptions *inp_moptions; /* IP multicast options */
+	int	  inp_errormtu;		/* MTU of last xmit status = EMSGSIZE */
 };
 
-struct inpcbtable {
-	CIRCLEQ_HEAD(, inpcb) inpt_queue;
-	LIST_HEAD(inpcbhead, inpcb) *inpt_hashtbl, *inpt_lhashtbl;
-	u_long	  inpt_hash, inpt_lhash;
-	u_int16_t inpt_lastport;
-};
+#define	inp_faddr	inp_ip.ip_dst
+#define	inp_laddr	inp_ip.ip_src
 
 /* flags in inp_flags: */
-#define	INP_RECVOPTS	0x001	/* receive incoming IP options */
-#define	INP_RECVRETOPTS	0x002	/* receive IP options for reply */
-#define	INP_RECVDSTADDR	0x004	/* receive IP dst address */
+#define	INP_RECVOPTS		0x01	/* receive incoming IP options */
+#define	INP_RECVRETOPTS		0x02	/* receive IP options for reply */
+#define	INP_RECVDSTADDR		0x04	/* receive IP dst address */
+#define	INP_HDRINCL		0x08	/* user supplies entire IP header */
+#define	INP_HIGHPORT		0x10	/* (unused; FreeBSD compat) */
+#define	INP_LOWPORT		0x20	/* user wants "low" port binding */
+#define	INP_ANONPORT		0x40	/* port chosen for user */
+#define	INP_RECVIF		0x80	/* receive incoming interface */
+/* XXX should move to an UDP control block */
+#define INP_ESPINUDP		0x100	/* ESP over UDP for NAT-T */
+#define INP_ESPINUDP_NON_IKE	0x200	/* ESP over UDP for NAT-T */
+#define	INP_CONTROLOPTS		(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR|\
+				INP_RECVIF)
+#define INP_ESPINUDP_ALL	(INP_ESPINUDP|INP_ESPINUDP_NON_IKE)
+#define INP_NOHEADER		0x400	/* Kernel removes IP header
+					 * before feeding a packet
+					 * to the raw socket user.
+					 * The socket user will
+					 * not supply an IP header.
+					 * Cancels INP_HDRINCL.
+					 */
 
-#define	INP_RXDSTOPTS	INP_RECVOPTS
-#define	INP_RXHOPOPTS	INP_RECVRETOPTS
-#define	INP_RXINFO	INP_RECVDSTADDR
-#define	INP_RXSRCRT	0x010
-#define	INP_HOPLIMIT	0x020
-
-#define	INP_HDRINCL	0x008	/* user supplies entire IP header */
-#define	INP_HIGHPORT	0x010	/* user wants "high" port binding */
-#define	INP_LOWPORT	0x020	/* user wants "low" port binding */
-#define	INP_RECVIF	0x080	/* receive incoming interface */
-#define	INP_RECVTTL	0x040	/* receive incoming IP TTL */
-#define	INP_RECVDSTPORT	0x200	/* receive IP dst addr before rdr */
-
-#define	INP_CONTROLOPTS	(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR| \
-	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL|INP_RECVDSTPORT)
-
-/*
- * These flags' values should be determined by either the transport
- * protocol at PRU_BIND, PRU_LISTEN, PRU_CONNECT, etc, or by in_pcb*().
- */
-#define	INP_IPV6	0x100	/* sotopf(inp->inp_socket) == PF_INET6 */
-
-#if 1	/*KAME*/
-/*
- * Flags in in6p_flags
- * We define KAME's original flags in higher 16 bits as much as possible
- * for compatibility with *bsd*s.
- * XXX: Should IN6P_HIGHPORT and IN6P_LOWPORT be moved as well?
- */
-#define IN6P_HIGHPORT		INP_HIGHPORT	/* user wants "high" port */
-#define IN6P_LOWPORT		INP_LOWPORT	/* user wants "low" port */
-#define IN6P_PKTINFO		0x010000 /* receive IP6 dst and I/F */
-#define IN6P_HOPLIMIT		0x020000 /* receive hoplimit */
-#define IN6P_HOPOPTS		0x040000 /* receive hop-by-hop options */
-#define IN6P_DSTOPTS		0x080000 /* receive dst options after rthdr */
-#define IN6P_RTHDR		0x100000 /* receive routing header */
-#define IN6P_RTHDRDSTOPTS	0x200000 /* receive dstoptions before rthdr */
-#define IN6P_TCLASS		0x400000 /* receive traffic class value */
-#define IN6P_AUTOFLOWLABEL	0x800000 /* attach flowlabel automatically */
-
-#define IN6P_ANONPORT		0x4000000 /* port chosen for user */
-#define IN6P_FAITH		0x8000000 /* accept FAITH'ed connections */
-#define IN6P_RFC2292		0x40000000 /* used RFC2292 API on the socket */
-#define IN6P_MTU		0x80000000 /* receive path MTU */
-
-#define IN6P_MINMTU		0x20000000 /* use minimum MTU */
-
-#define IN6P_CONTROLOPTS	(IN6P_PKTINFO|IN6P_HOPLIMIT|IN6P_HOPOPTS|\
-				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
-				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL|IN6P_RFC2292|\
-				 IN6P_MTU)
-#endif
-
-#define	INPLOOKUP_WILDCARD	1
-#define	INPLOOKUP_SETLOCAL	2
-#define	INPLOOKUP_IPV6		4
-
-#define	sotoinpcb(so)	((struct inpcb *)(so)->so_pcb)
-
-/* macros for handling bitmap of ports not to allocate dynamically */
-#define	DP_MAPBITS	(sizeof(u_int32_t) * NBBY)
-#define	DP_MAPSIZE	(howmany(IPPORT_RESERVED/2, DP_MAPBITS))
-#define	DP_SET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] |= (1 << ((p) % DP_MAPBITS)))
-#define	DP_CLR(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] &= ~(1 << ((p) % DP_MAPBITS)))
-#define	DP_ISSET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] & (1 << ((p) % DP_MAPBITS)))
-
-/* default values for baddynamicports [see ip_init()] */
-#define	DEFBADDYNAMICPORTS_TCP	{ 587, 749, 750, 751, 871, 0 }
-#define	DEFBADDYNAMICPORTS_UDP	{ 623, 664, 749, 750, 751, 0 }
-
-struct baddynamicports {
-	u_int32_t tcp[DP_MAPSIZE];
-	u_int32_t udp[DP_MAPSIZE];
-};
+#define	sotoinpcb(so)		((struct inpcb *)(so)->so_pcb)
 
 #ifdef _KERNEL
-
-#define sotopf(so)  (so->so_proto->pr_domain->dom_family)
-
-void	 in_losing(struct inpcb *);
-int	 in_pcballoc(struct socket *, void *);
-int	 in_pcbbind(void *, struct mbuf *, struct proc *);
-int	 in_pcbconnect(void *, struct mbuf *);
-void	 in_pcbdetach(void *);
-void	 in_pcbdisconnect(void *);
+void	in_losing(struct inpcb *);
+int	in_pcballoc(struct socket *, void *);
+int	in_pcbbind(void *, struct mbuf *, struct lwp *);
+int	in_pcbconnect(void *, struct mbuf *, struct lwp *);
+void	in_pcbdetach(void *);
+void	in_pcbdisconnect(void *);
+void	in_pcbinit(struct inpcbtable *, int, int);
 struct inpcb *
-	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
-			       u_int, struct in_addr, u_int);
+	in_pcblookup_port(struct inpcbtable *,
+	    struct in_addr, u_int, int);
 struct inpcb *
-	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int,
-	    struct mbuf *);
-#ifdef INET6
+	in_pcblookup_bind(struct inpcbtable *,
+	    struct in_addr, u_int);
 struct inpcb *
-	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
-			       u_int, struct in6_addr *, u_int);
-struct inpcb *
-	 in6_pcblookup_listen(struct inpcbtable *,
-			       struct in6_addr *, u_int, int, struct mbuf *);
-int	 in6_pcbbind(struct inpcb *, struct mbuf *, struct proc *);
-int	 in6_pcbconnect(struct inpcb *, struct mbuf *);
-int	 in6_setsockaddr(struct inpcb *, struct mbuf *);
-int	 in6_setpeeraddr(struct inpcb *, struct mbuf *);
-#endif /* INET6 */
-void	 in_pcbinit(struct inpcbtable *, int);
-struct inpcb *
-	 in_pcblookup(struct inpcbtable *, void *, u_int, void *,
-	    u_int, int);
-void	 in_pcbnotifyall(struct inpcbtable *, struct sockaddr *,
-	    int, void (*)(struct inpcb *, int));
-void	 in_pcbrehash(struct inpcb *);
-void	 in_rtchange(struct inpcb *, int);
-void	 in_setpeeraddr(struct inpcb *, struct mbuf *);
-void	 in_setsockaddr(struct inpcb *, struct mbuf *);
-int	 in_baddynamic(u_int16_t, u_int16_t);
-extern struct sockaddr_in *in_selectsrc(struct sockaddr_in *,
-	struct route *, int, struct ip_moptions *, int *);
+	in_pcblookup_connect(struct inpcbtable *,
+	    struct in_addr, u_int, struct in_addr, u_int);
+int	in_pcbnotify(struct inpcbtable *, struct in_addr, u_int,
+	    struct in_addr, u_int, int, void (*)(struct inpcb *, int));
+void	in_pcbnotifyall(struct inpcbtable *, struct in_addr, int,
+	    void (*)(struct inpcb *, int));
+void	in_pcbpurgeif0(struct inpcbtable *, struct ifnet *);
+void	in_pcbpurgeif(struct inpcbtable *, struct ifnet *);
+void	in_pcbstate(struct inpcb *, int);
+void	in_rtchange(struct inpcb *, int);
+void	in_setpeeraddr(struct inpcb *, struct mbuf *);
+void	in_setsockaddr(struct inpcb *, struct mbuf *);
 struct rtentry *
 	in_pcbrtentry(struct inpcb *);
+extern struct sockaddr_in *in_selectsrc(struct sockaddr_in *,
+	struct route *, int, struct ip_moptions *, int *);
+#endif
 
-/* INET6 stuff */
-int	in6_pcbnotify(struct inpcbtable *, struct sockaddr *,
-	u_int, struct sockaddr *, u_int, int, void *,
-	void (*)(struct inpcb *, int));
-int	in6_selecthlim(struct inpcb *, struct ifnet *);
-int	in6_pcbsetport(struct in6_addr *, struct inpcb *, struct proc *);
-#endif /* _KERNEL */
-#endif /* _NETINET_IN_PCB_H_ */
+#endif /* !_NETINET_IN_PCB_H_ */

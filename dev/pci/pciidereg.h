@@ -1,5 +1,4 @@
-/*	$OpenBSD: pciidereg.h,v 1.7 2004/10/17 08:44:41 grange Exp $	*/
-/*	$NetBSD: pciidereg.h,v 1.6 2000/11/14 18:42:58 thorpej Exp $	*/
+/*	$NetBSD: pciidereg.h,v 1.11 2006/11/24 22:04:25 wiz Exp $	*/
 
 /*
  * Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.
@@ -30,9 +29,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef _DEV_PCI_PCIIDEREG_H_
-#define _DEV_PCI_PCIIDEREG_H_
 
 /*
  * PCI IDE controller register definitions.
@@ -78,7 +74,7 @@
 #define	PCIIDE_COMPAT_CTL_SIZE		1
 #define	PCIIDE_COMPAT_IRQ(chan)		((chan) == 0 ? 14 : 15)
 
-#define	PCIIDE_CHANNEL_NAME(chan)	((chan) == 0 ? "channel 0" : "channel 1")
+#define PCIIDE_CHANNEL_NAME(chan)	((chan) == 0 ? "primary" : "secondary")
 
 /*
  * definitions for IDE DMA
@@ -89,20 +85,20 @@
 #define IDEDMA_SCH_OFFSET 0x08
 #define IDEDMA_NREGS 8
 
-/* Bus master command register (per channel) */
-#define IDEDMA_CMD(chan) (0x00 + IDEDMA_SCH_OFFSET * (chan))
+/* Bus master command register */
+#define IDEDMA_CMD 0x00
 #define IDEDMA_CMD_WRITE 0x08
 #define IDEDMA_CMD_START 0x01
 
-/* Bus master status register (per channel) */
-#define IDEDMA_CTL(chan) (0x02 + IDEDMA_SCH_OFFSET * (chan))
+/* Bus master status register */
+#define IDEDMA_CTL 0x02
 #define IDEDMA_CTL_DRV_DMA(d)	(0x20 << (d))
 #define IDEDMA_CTL_INTR		0x04
 #define IDEDMA_CTL_ERR		0x02
 #define IDEDMA_CTL_ACT		0x01
 
-/* Bus master table pointer register (per channel) */
-#define IDEDMA_TBL(chan) (0x04 + IDEDMA_SCH_OFFSET * (chan))
+/* Bus master table pointer register */
+#define IDEDMA_TBL 0x04
 #define IDEDMA_TBL_MASK 0xfffffffc
 #define IDEDMA_TBL_ALIGN 0x00010000
 
@@ -116,8 +112,3 @@ struct idedma_table {
 
 #define IDEDMA_BYTE_COUNT_MAX 0x00010000 /* Max I/O per table */
 #define IDEDMA_BYTE_COUNT_ALIGN 0x00010000
-
-/* Number of idedma table needed */
-#define NIDEDMA_TABLES (MAXPHYS/PAGE_SIZE + 1)
-
-#endif	/* !_DEV_PCI_PCIIDEREG_H_ */

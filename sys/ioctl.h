@@ -1,5 +1,4 @@
-/*	$OpenBSD: ioctl.h,v 1.8 2003/06/02 23:28:21 millert Exp $	*/
-/*	$NetBSD: ioctl.h,v 1.20 1996/01/30 18:21:47 thorpej Exp $	*/
+/*	$NetBSD: ioctl.h,v 1.35 2008/11/12 12:36:28 ad Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
@@ -62,6 +61,28 @@ struct ttysize {
 #include <sys/filio.h>
 #include <sys/sockio.h>
 
+/*
+ * Passthrough ioctl commands. These are passed through to devices
+ * as they are, it is expected that the device (a module, for example),
+ * will know how to deal with them. One for each emulation, so that
+ * no namespace clashes will occur between them, for devices that
+ * may be dealing with specific ioctls for multiple emulations.
+ */
+
+struct ioctl_pt {
+	unsigned long com;
+	void *data;
+};
+
+#define PTIOCNETBSD	_IOW('Z', 0, struct ioctl_pt)
+#define PTIOCSUNOS	_IOW('Z', 1, struct ioctl_pt)
+#define PTIOCSVR4	_IOW('Z', 2, struct ioctl_pt)
+#define PTIOCLINUX	_IOW('Z', 3, struct ioctl_pt)
+#define PTIOCFREEBSD	_IOW('Z', 4, struct ioctl_pt)
+#define PTIOCOSF1	_IOW('Z', 5, struct ioctl_pt)
+#define PTIOCULTRIX	_IOW('Z', 6, struct ioctl_pt)
+#define PTIOCWIN32	_IOW('Z', 7, struct ioctl_pt)
+
 #ifndef _KERNEL
 
 #include <sys/cdefs.h>
@@ -79,8 +100,18 @@ __END_DECLS
  * Source level -> #define USE_OLD_TTY
  * Kernel level -> options COMPAT_43 or COMPAT_SUNOS or ...
  */
+
+#if defined(_KERNEL_OPT)
+#include "opt_compat_freebsd.h"
+#include "opt_compat_sunos.h"
+#include "opt_compat_svr4.h"
+#include "opt_compat_43.h"
+#include "opt_compat_osf1.h"
+#include "opt_compat_ibcs2.h"
+#endif
+
 #if defined(USE_OLD_TTY) || defined(COMPAT_43) || defined(COMPAT_SUNOS) || \
     defined(COMPAT_SVR4) || defined(COMPAT_FREEBSD) || defined(COMPAT_OSF1) || \
-    defined(COMPAT_LINUX)
+    defined(COMPAT_IBCS2) || defined(MODULAR)
 #include <sys/ioctl_compat.h>
 #endif

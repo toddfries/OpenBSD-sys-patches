@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcereg.h,v 1.3 2007/07/23 16:41:15 mbalmer Exp $ */
+/*	$NetBSD: if_cdcereg.h,v 1.3 2008/05/22 01:21:18 dyoung Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
@@ -42,7 +42,7 @@ struct cdce_type {
 	struct usb_devno	 cdce_dev;
 	u_int16_t		 cdce_flags;
 #define CDCE_ZAURUS	1
-#define CDCE_SWAPUNION	2
+#define CDCE_NO_UNION	2
 };
 
 struct cdce_softc;
@@ -66,15 +66,14 @@ struct cdce_cdata {
 };
 
 struct cdce_softc {
-	struct device		 cdce_dev;
-	struct arpcom		 cdce_arpcom;
-#define GET_IFP(sc) (&(sc)->cdce_arpcom.ac_if)
+	USBBASEDEVICE		 cdce_dev;
+	struct ethercom		 cdce_ec;
+#if NRND > 0
+	rndsource_element_t	 rnd_source;
+#endif
+#define GET_IFP(sc) (&(sc)->cdce_ec.ec_if)
 	usbd_device_handle	 cdce_udev;
 	usbd_interface_handle	 cdce_ctl_iface;
-	int			 cdce_intr_no;
-	usbd_pipe_handle	 cdce_intr_pipe;
-	usb_cdc_notification_t	 cdce_intr_buf;
-	int			 cdce_intr_size;
 	usbd_interface_handle	 cdce_data_iface;
 	int			 cdce_bulkin_no;
 	usbd_pipe_handle	 cdce_bulkin_pipe;

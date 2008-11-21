@@ -1,7 +1,7 @@
-/*	$OpenBSD: disklabel.h,v 1.23 2007/06/20 18:15:43 deraadt Exp $	*/
+/* $NetBSD: disklabel.h,v 1.9 2005/12/11 12:16:16 christos Exp $ */
 
 /*
- * Copyright (c) 1994 Christopher G. Demetriou
+ * Copyright (c) 1994, 1999 Christopher G. Demetriou
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -14,7 +14,8 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Christopher G. Demetriou.
+ *      This product includes software developed by Christopher G. Demetriou
+ *      for the NetBSD Project.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -33,8 +34,20 @@
 #ifndef _MACHINE_DISKLABEL_H_
 #define _MACHINE_DISKLABEL_H_
 
-#define LABELSECTOR		0
-#define LABELOFFSET		64
-#define	MAXPARTITIONS		16		/* number of partitions */
+#define	LABELSECTOR	0			/* sector containing label */
+#define	LABELOFFSET	64			/* offset of label in sector */
+#define	MAXPARTITIONS	8			/* number of partitions */
+#define	RAW_PART	2			/* raw partition: xx?c */
+
+#if HAVE_NBTOOL_CONFIG_H
+#include <nbinclude/sys/dkbad.h>
+#else
+#include <sys/dkbad.h>
+#endif /* HAVE_NBTOOL_CONFIG_H */
+
+/* Just a dummy */
+struct cpu_disklabel {
+	struct dkbad bad;			/* bad-sector information */
+};
 
 #endif /* _MACHINE_DISKLABEL_H_ */

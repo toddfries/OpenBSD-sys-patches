@@ -1,5 +1,4 @@
-/*	$OpenBSD: tcp_debug.h,v 1.7 2003/06/02 23:28:14 millert Exp $	*/
-/*	$NetBSD: tcp_debug.h,v 1.5 1994/06/29 06:38:38 cgd Exp $	*/
+/*	$NetBSD: tcp_debug.h,v 1.17 2007/03/04 06:03:22 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -35,31 +34,42 @@
 #ifndef _NETINET_TCP_DEBUG_H_
 #define _NETINET_TCP_DEBUG_H_
 
-#include <netinet6/tcpipv6.h>
+#if defined(_KERNEL_OPT)
+#include "opt_inet.h"
+#endif
 
 struct	tcp_debug {
 	n_time	td_time;
 	short	td_act;
 	short	td_ostate;
-	caddr_t	td_tcb;
+	void *	td_tcb;
+	int	td_family;
 	struct	tcpiphdr td_ti;
-	struct  tcpipv6hdr td_ti6;
+	struct {
+#ifdef INET6
+		struct ip6_hdr ip6;
+#else
+		u_char ip6_dummy[40];	/* just to keep struct align/size */
+#endif
+		struct tcphdr th;
+	} td_ti6;
 	short	td_req;
 	struct	tcpcb td_cb;
 };
 
-#define	TA_INPUT	0
+#define	TA_INPUT 	0
 #define	TA_OUTPUT	1
 #define	TA_USER		2
 #define	TA_RESPOND	3
 #define	TA_DROP		4
 
 #ifdef TANAMES
-char	*tanames[] =
+const char	*tanames[] =
     { "input", "output", "user", "respond", "drop" };
-#endif /* TANAMES */
+#endif
 
+#ifndef TCP_NDEBUG
 #define	TCP_NDEBUG 100
-extern struct	tcp_debug tcp_debug[];
-extern int	tcp_debx;
-#endif /* _NETINET_TCP_DEBUG_H_ */
+#endif
+
+#endif /* !_NETINET_TCP_DEBUG_H_ */

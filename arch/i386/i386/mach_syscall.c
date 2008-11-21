@@ -1,4 +1,4 @@
-/*	$NetBSD: mach_syscall.c,v 1.20 2006/07/19 21:11:42 ad Exp $	*/
+/*	$NetBSD: mach_syscall.c,v 1.33 2008/10/21 12:16:59 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mach_syscall.c,v 1.20 2006/07/19 21:11:42 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mach_syscall.c,v 1.33 2008/10/21 12:16:59 ad Exp $");
 
 #include "opt_vm86.h"
 
@@ -46,15 +39,17 @@ __KERNEL_RCSID(0, "$NetBSD: mach_syscall.c,v 1.20 2006/07/19 21:11:42 ad Exp $")
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/signal.h>
-#include <sys/savar.h>
 #include <sys/syscall.h>
+#include <sys/syscallvar.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
 #include <machine/psl.h>
 #include <machine/userret.h>
+#include <compat/mach/mach_clock.h>
 #include <compat/mach/mach_syscall.h>
+#include <compat/mach/mach_syscallargs.h>
 
 void mach_syscall_intern(struct proc *);
 void mach_syscall_plain(struct trapframe *);
@@ -82,19 +77,18 @@ void
 mach_syscall_plain(frame)
 	struct trapframe *frame;
 {
-	caddr_t params;
+	char *params;
 	const struct sysent *callp;
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	int error;
 	size_t argsize;
-	register_t code, args[8], rval[2];
+	register_t code, args[MACH_SYS_MAXSYSARGS], rval[2];
 
-	uvmexp.syscalls++;
 	LWP_CACHE_CREDS(l, p);
 
 	code = frame->tf_eax;
-	params = (caddr_t)frame->tf_esp + sizeof(int);
+	params = (char *)frame->tf_esp + sizeof(int);
 
 	switch (code) {
 	case SYS_syscall:
@@ -131,14 +125,16 @@ mach_syscall_plain(frame)
 	callp += code;
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (caddr_t)args, argsize);
+		error = copyin(params, (void *)args, argsize);
 		if (error)
 			goto bad;
 	}
 
 	rval[0] = 0;
 	rval[1] = 0;
-	error = (*callp->sy_call)(l, args, rval);
+	KERNEL_LOCK(1, NULL);
+	error = sy_call(callp, l, args, rval);
+	KERNEL_UNLOCK_ONE(NULL);
 	switch (error) {
 	case 0:
 		frame->tf_eax = rval[0];
@@ -170,20 +166,19 @@ void
 mach_syscall_fancy(frame)
 	struct trapframe *frame;
 {
-	caddr_t params;
+	char *params;
 	const struct sysent *callp;
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	int error;
 	size_t argsize;
-	register_t code, realcode, args[8], rval[2];
+	register_t code, realcode, args[MACH_SYS_MAXSYSARGS], rval[2];
 
-	uvmexp.syscalls++;
 	LWP_CACHE_CREDS(l, p);
 
 	code = frame->tf_eax;
 	realcode = code;
-	params = (caddr_t)frame->tf_esp + sizeof(int);
+	params = (char *)frame->tf_esp + sizeof(int);
 
 	switch (code) {
 	case SYS_syscall:
@@ -219,17 +214,19 @@ mach_syscall_fancy(frame)
 	callp += code;
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (caddr_t)args, argsize);
+		error = copyin(params, (void *)args, argsize);
 		if (error)
 			goto bad;
 	}
 
-	if ((error = trace_enter(l, code, realcode, callp - code, args)) != 0)
+	if ((error = trace_enter(realcode, args, callp->sy_narg)) != 0)
 		goto out;
 
 	rval[0] = 0;
 	rval[1] = 0;
-	error = (*callp->sy_call)(l, args, rval);
+	KERNEL_LOCK(1, NULL);
+	error = sy_call(callp, l, args, rval);
+	KERNEL_UNLOCK_ONE(NULL);
 out:
 	switch (error) {
 	case 0:
@@ -255,7 +252,7 @@ out:
 		break;
 	}
 
-	trace_exit(l, realcode, args, rval, error);
+	trace_exit(realcode, rval, error);
 
 	userret(l);
 }

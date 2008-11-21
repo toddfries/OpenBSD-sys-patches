@@ -1,3 +1,3 @@
-/*	$OpenBSD: cdefs.h,v 1.2 2005/11/24 20:46:49 deraadt Exp $	*/
+/*	$NetBSD: cdefs.h,v 1.1 2006/12/16 05:43:41 ober Exp $	*/
 
 #include <arm/cdefs.h>

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka650.h,v 1.10 2003/06/02 23:27:57 millert Exp $	*/
-/*	$NetBSD: ka650.h,v 1.6 1997/07/26 10:12:43 ragge Exp $	*/
+/*	$NetBSD: ka650.h,v 1.12 2005/12/11 12:19:34 christos Exp $	*/
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -34,9 +33,12 @@
  *	@(#)ka650.h	7.5 (Berkeley) 6/28/90
  */
 
+#ifndef _VAX_KA650_H_
+#define _VAX_KA650_H_
+
 /*
  *
- * Definitions specific to the ka650 (uVAX 3600/3602) cpu card.
+ * Definitions specific to the ka650 (uVAX 3600/3602) CPU card.
  */
 
 /*
@@ -69,7 +71,7 @@
 #define DSER_QPE	0x00000020	/* Q-22 Bus parity Error */
 #define DSER_MEM	0x00000010	/* Main mem err due to ext dev DMA */
 #define DSER_LOST	0x00000008	/* Lost error: DSER <7,5,4,0> set */
-#define DSER_NOGRANT	0x00000004	/* No Grant timeout on cpu demand R/W */
+#define DSER_NOGRANT	0x00000004	/* No Grant timeout on CPU demand R/W */
 #define DSER_DNXM	0x00000001	/* DMA NXM */
 #define DSER_CLEAR 	(DSER_QNXM | DSER_QPE | DSER_MEM |  \
 			 DSER_LOST | DSER_NOGRANT | DSER_DNXM)
@@ -197,7 +199,7 @@ struct ka650_ssc {
 
 /*
  * Inter Processor Communication Register
- * To determine if memory error was from QBUS device DMA (as opposed to cpu).
+ * To determine if memory error was from QBUS device DMA (as opposed to CPU).
  */
 struct ka650_ipcr {
 	u_long	pad[80];
@@ -205,7 +207,7 @@ struct ka650_ipcr {
 };
 #define KA650_IPCR	0x20001e00
 
-#endif /* _LOCORE */
+#endif	/* _LOCORE */
 
 /*
  * Physical start address of the Qbus memory.
@@ -239,3 +241,5 @@ struct ka650_ipcr {
 #define	GETSYSSUBT(x)	((x >> 8) & 0xff)
 #define	GETFRMREV(x)	((x >> 16) & 0xff)
 #define	GETCODREV(x)	(x & 0xff)
+
+#endif /* _VAX_KA650_H_ */

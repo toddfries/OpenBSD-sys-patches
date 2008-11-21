@@ -1,5 +1,33 @@
-/*	$OpenBSD: i82586reg.h,v 1.3 2003/10/21 18:58:49 jmc Exp $	*/
-/*	$NetBSD: i82586reg.h,v 1.5 1995/04/04 01:59:34 mycroft Exp $	*/
+/*	$NetBSD: i82586reg.h,v 1.13 2008/04/28 20:23:50 martin Exp $	*/
+
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Paul Kranenburg.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*-
  * Copyright (c) 1992, University of Vermont and State Agricultural College.
@@ -43,20 +71,54 @@
  * chip written by Russ Nelson and others.
  */
 
-struct ie_en_addr {
-	u_char data[6];
-};
+/*
+ * NOTE, the structure definitions in here are for reference only.
+ * We use integer offsets exclusively to access the i82586 data structures.
+ */
 
 /*
- * This is the master configuration block.  It tells the hardware where all
- * the rest of the stuff is.
+ * The i82596 has a hardware port that can be used to command the
+ * chip to perform special functions.  For all but IE_PORT_RESET,
+ * a 16-byte aligned memory address is ORed into the port command.
  */
-struct ie_sys_conf_ptr {
-	u_short mbz;			/* must be zero */
-	u_char ie_bus_use;		/* true if 8-bit only */
-	u_char mbz2[5];			/* must be zero */
-	caddr_t ie_iscp_ptr;		/* 24-bit physaddr of ISCP */
+#define IE_PORT_RESET		0x00	/* software reset */
+#define IE_PORT_SELF_TEST	0x01	/* self-test */
+#define IE_PORT_ALT_SCP		0x02	/* set alternate SCP address */
+#define IE_PORT_DUMP		0x03	/* dump state */
+
+/*
+ * This is the master configuration block.
+ * It tells the hardware where all the rest of the stuff is.
+ *-
+struct __ie_sys_conf_ptr {
+	u_int16_t	mbz;			// must be zero
+	u_int8_t	ie_bus_use;		// true if 8-bit only
+	u_int8_t	mbz2[5];		// must be zero
+	u_int32_t	ie_iscp_ptr;		// 24-bit physaddr of ISCP
 };
+ */
+#define IE_SCP_SZ		12
+#define IE_SCP_BUS_USE(base)	((base) + 2)
+#define IE_SCP_ISCP(base)	((base) + 8)
+
+/*
+ * SYSBUS byte flags.  Most are specific to the i82596, and so
+ * far we always run an i82596 in i82586-compatible mode.
+ */
+#define IE_SYSBUS_16BIT		(0x0 << 0)
+#define IE_SYSBUS_8BIT		(0x1 << 0)
+#define IE_SYSBUS_596_82586	(0x0 << 1)
+#define IE_SYSBUS_596_32SEG	(0x1 << 1)
+#define IE_SYSBUS_596_LINEAR	(0x2 << 1)
+#define IE_SYSBUS_596_TRGINT	(0x0 << 3)
+#define IE_SYSBUS_596_TRGEXT	(0x1 << 3)
+#define IE_SYSBUS_596_NOLOCK	(0x0 << 4)
+#define IE_SYSBUS_596_LOCK	(0x1 << 4)
+#define IE_SYSBUS_596_INTHIGH	(0x0 << 4)
+#define IE_SYSBUS_596_INTLOW	(0x1 << 5)
+#define IE_SYSBUS_596_RSVD_SET	(0x1 << 6)
+#define IE_SYSBUS_596_LE	(0x0 << 7)
+#define IE_SYSBUS_596_BE	(0x1 << 7)
 
 /*
  * Note that this is wired in hardware; the SCP is always located here, no
@@ -68,42 +130,57 @@ struct ie_sys_conf_ptr {
  * The tells the hardware where all the rest of the stuff is, too.
  * FIXME: some of these should be re-commented after we figure out their
  * REAL function.
- */
-struct ie_int_sys_conf_ptr {
-	u_char ie_busy;			/* zeroed after init */
-	u_char mbz;
-	u_short ie_scb_offset;		/* 16-bit physaddr of next struct */
-	caddr_t ie_base;		/* 24-bit physaddr for all 16-bit vars */
+ *-
+struct __ie_int_sys_conf_ptr {
+	u_int8_t	ie_busy;	// zeroed after init
+	u_int8_t	mbz;
+	u_int16_t	ie_scb_offset;	// 16-bit physaddr of next struct
+	void *		ie_base;	// 24-bit physaddr for all 16-bit vars
 };
+ */
+#define IE_ISCP_SZ		8
+#define IE_ISCP_BUSY(base)	((base) + 0)
+#define IE_ISCP_SCB(base)	((base) + 2)
+#define IE_ISCP_BASE(base)	((base) + 4)
 
 /*
  * This FINALLY tells the hardware what to do and where to put it.
- */
-struct ie_sys_ctl_block {
-	u_short ie_status;		/* status word */
-	u_short ie_command;		/* command word */
-	u_short ie_command_list;	/* 16-pointer to command block list */
-	u_short ie_recv_list;		/* 16-pointer to receive frame list */
-	u_short ie_err_crc;		/* CRC errors */
-	u_short ie_err_align;		/* Alignment errors */
-	u_short ie_err_resource;	/* Resource errors */
-	u_short ie_err_overrun;		/* Overrun errors */
+ *-
+struct __ie_sys_ctl_block {
+	u_int16_t ie_status;		// status word
+	u_int16_t ie_command;		// command word
+	u_int16_t ie_command_list;	// 16-pointer to command block list
+	u_int16_t ie_recv_list;		// 16-pointer to receive frame list
+	u_int16_t ie_err_crc;		// CRC errors
+	u_int16_t ie_err_align;		// Alignment errors
+	u_int16_t ie_err_resource;	// Resource errors
+	u_int16_t ie_err_overrun;	// Overrun errors
 };
+ */
+#define IE_SCB_SZ		16
+#define IE_SCB_STATUS(base)	((base) + 0)
+#define IE_SCB_CMD(base)	((base) + 2)
+#define IE_SCB_CMDLST(base)	((base) + 4)
+#define IE_SCB_RCVLST(base)	((base) + 6)
+#define IE_SCB_ERRCRC(base)	((base) + 8)
+#define IE_SCB_ERRALN(base)	((base) + 10)
+#define IE_SCB_ERRRES(base)	((base) + 12)
+#define IE_SCB_ERROVR(base)	((base) + 14)
 
 /* Command values */
-#define IE_RU_COMMAND	0x0070	/* mask for RU command */
-#define IE_RU_NOP	0	/* for completeness */
-#define IE_RU_START	0x0010	/* start receive unit command */
-#define IE_RU_ENABLE	0x0020	/* enable receiver command */
-#define IE_RU_DISABLE	0x0030	/* disable receiver command */
-#define IE_RU_ABORT	0x0040	/* abort current receive operation */
+#define IE_RUC_MASK	0x0070	/* mask for RU command */
+#define IE_RUC_NOP	0	/* for completeness */
+#define IE_RUC_START	0x0010	/* start receive unit command */
+#define IE_RUC_RESUME	0x0020	/* resume a suspended receiver command */
+#define IE_RUC_SUSPEND	0x0030	/* suspend receiver command */
+#define IE_RUC_ABORT	0x0040	/* abort current receive operation */
 
-#define IE_CU_COMMAND	0x0700	/* mask for CU command */
-#define IE_CU_NOP	0	/* included for completeness */
-#define IE_CU_START	0x0100	/* do-command command */
-#define IE_CU_RESUME	0x0200	/* resume a suspended cmd list */
-#define IE_CU_STOP	0x0300	/* SUSPEND was already taken */
-#define IE_CU_ABORT	0x0400	/* abort current command */
+#define IE_CUC_MASK	0x0700	/* mask for CU command */
+#define IE_CUC_NOP	0	/* included for completeness */
+#define IE_CUC_START	0x0100	/* do-command command */
+#define IE_CUC_RESUME	0x0200	/* resume a suspended cmd list */
+#define IE_CUC_SUSPEND	0x0300	/* suspend current command */
+#define IE_CUC_ABORT	0x0400	/* abort current command */
 
 #define IE_ACK_COMMAND	0xf000	/* mask for ACK command */
 #define IE_ACK_CX	0x8000	/* ack IE_ST_CX */
@@ -111,7 +188,7 @@ struct ie_sys_ctl_block {
 #define IE_ACK_CNA	0x2000	/* ack IE_ST_CNA */
 #define IE_ACK_RNR	0x1000	/* ack IE_ST_RNR */
 
-#define IE_ACTION_COMMAND(x) (((x) & IE_CU_COMMAND) == IE_CU_START)
+#define IE_ACTION_COMMAND(x) (((x) & IE_CUC_MASK) == IE_CUC_START)
 				/* is this command an action command? */
 
 /* Status values */
@@ -121,58 +198,98 @@ struct ie_sys_ctl_block {
 #define IE_ST_CNA	0x2000	/* all commands completed */
 #define IE_ST_RNR	0x1000	/* receive not ready */
 
-#define IE_CU_STATUS	0x700	/* mask for command unit status */
-#define IE_CU_ACTIVE	0x200	/* command unit is active */
-#define IE_CU_SUSPEND	0x100	/* command unit is suspended */
+#define IE_CUS_MASK	0x0700	/* mask for command unit status */
+#define IE_CUS_ACTIVE	0x0200	/* command unit is active */
+#define IE_CUS_SUSPEND	0x0100	/* command unit is suspended */
 
-#define IE_RU_STATUS	0x70	/* mask for receiver unit status */
-#define IE_RU_SUSPEND	0x10	/* receiver is suspended */
-#define IE_RU_NOSPACE	0x20	/* receiver has no resources */
-#define IE_RU_READY	0x40	/* receiver is ready */
+#define IE_RUS_MASK	0x0070	/* mask for receiver unit status */
+#define IE_RUS_SUSPEND	0x0010	/* receiver is suspended */
+#define IE_RUS_NOSPACE	0x0020	/* receiver has no resources */
+#define IE_RUS_READY	0x0040	/* receiver is ready */
 
 /*
  * This is filled in partially by the chip, partially by us.
- */
-struct ie_recv_frame_desc {
-	u_short ie_fd_status;		/* status for this frame */
-	u_short ie_fd_last;		/* end of frame list flag */
-	u_short ie_fd_next;		/* 16-pointer to next RFD */
-	u_short ie_fd_buf_desc;		/* 16-pointer to list of buffer desc's */
-	struct ie_en_addr dest;		/* destination ether */
-	struct ie_en_addr src;		/* source ether */
-	u_short ie_length;		/* 802 length/Ether type */
-	u_short mbz;			/* must be zero */
+ *-
+struct __ie_recv_frame_desc {
+	u_int16_t	ie_fd_status;	// status for this frame
+	u_int16_t	ie_fd_last;	// end of frame list flag
+	u_int16_t	ie_fd_next;	// 16-pointer to next RFD
+	u_int16_t	ie_fd_buf_desc;	// 16-pointer to list of buffer descs
+	struct __ie_en_addr dest;	// destination ether
+	struct __ie_en_addr src;	// source ether
+	u_int16_t	ie_length;	// 802 length/Ether type
+	u_short		mbz;		// must be zero
 };
+ */
+#define IE_RFRAME_SZ			24
+#define IE_RFRAME_ADDR(base,i)		((base) + (i) * IE_RFRAME_SZ)
+#define IE_RFRAME_STATUS(b,i)		(IE_RFRAME_ADDR(b,i) + 0)
+#define IE_RFRAME_LAST(b,i)		(IE_RFRAME_ADDR(b,i) + 2)
+#define IE_RFRAME_NEXT(b,i)		(IE_RFRAME_ADDR(b,i) + 4)
+#define IE_RFRAME_BUFDESC(b,i)		(IE_RFRAME_ADDR(b,i) + 6)
+#define IE_RFRAME_EDST(b,i)		(IE_RFRAME_ADDR(b,i) + 8)
+#define IE_RFRAME_ESRC(b,i)		(IE_RFRAME_ADDR(b,i) + 14)
+#define IE_RFRAME_ELEN(b,i)		(IE_RFRAME_ADDR(b,i) + 20)
 
-#define IE_FD_LAST	0x8000	/* last rfd in list */
+/* "last" bits */
+#define IE_FD_EOL	0x8000	/* last rfd in list */
 #define IE_FD_SUSP	0x4000	/* suspend RU after receipt */
 
+/* status field bits */
 #define IE_FD_COMPLETE	0x8000	/* frame is complete */
 #define IE_FD_BUSY	0x4000	/* frame is busy */
-#define IE_FD_OK	0x2000	/* frame is bad */
+#define IE_FD_OK	0x2000	/* frame is ok */
+#define IE_FD_CRC	0x0800	/* CRC error */
+#define IE_FD_ALGN	0x0400	/* Alignment error */
 #define IE_FD_RNR	0x0200	/* receiver out of resources here */
+#define IE_FD_OVR	0x0100	/* DMA overrun */
+#define IE_FD_SHORT	0x0080	/* Short frame */
+#define IE_FD_NOEOF	0x0040	/* no EOF (?) */
+#define IE_FD_ERRMASK		/* all error bits */ \
+	(IE_FD_CRC|IE_FD_ALGN|IE_FD_RNR|IE_FD_OVR|IE_FD_SHORT|IE_FD_NOEOF)
+#define IE_FD_STATUSBITS	\
+	"\20\20COMPLT\17BUSY\16OK\14CRC\13ALGN\12RNR\11OVR\10SHORT\7NOEOF"
 
 /*
  * linked list of buffers...
- */
-struct ie_recv_buf_desc {
-	u_short ie_rbd_actual;		/* status for this buffer */
-	u_short ie_rbd_next;		/* 16-pointer to next RBD */
-	caddr_t ie_rbd_buffer;		/* 24-pointer to buffer for this RBD */
-	u_short ie_rbd_length;		/* length of the buffer */
-	u_short mbz;			/* must be zero */
+ *-
+struct __ie_recv_buf_desc {
+	u_int16_t	ie_rbd_status;	// status for this buffer
+	u_int16_t	ie_rbd_next;	// 16-pointer to next RBD
+	void *		ie_rbd_buffer;	// 24-pointer to buffer for this RBD
+	u_int16_t	ie_rbd_length;	// length of the buffer
+	u_int16_t	mbz;		// must be zero
 };
+ */
+#define IE_RBD_SZ			12
+#define IE_RBD_ADDR(base,i)		((base) + (i) * IE_RBD_SZ)
+#define IE_RBD_STATUS(b,i)		(IE_RBD_ADDR(b,i) + 0)
+#define IE_RBD_NEXT(b,i)		(IE_RBD_ADDR(b,i) + 2)
+#define IE_RBD_BUFADDR(b,i)		(IE_RBD_ADDR(b,i) + 4)
+#define IE_RBD_BUFLEN(b,i)		(IE_RBD_ADDR(b,i) + 8)
 
-#define IE_RBD_LAST	0x8000	/* last buffer */
-#define IE_RBD_USED	0x4000	/* this buffer has data */
+/* RBD status fields */
+#define IE_RBD_LAST	0x8000		/* last buffer */
+#define IE_RBD_USED	0x4000		/* this buffer has data */
+#define IE_RBD_CNTMASK	0x3fff		/* byte count of buffer data */
+
+/* RDB `End Of List' flag; encoded in `buffer length' field */
+#define IE_RBD_EOL	0x8000		/* last buffer */
+
+
 /*
  * All commands share this in common.
- */
-struct ie_cmd_common {
-	u_short ie_cmd_status;		/* status of this command */
-	u_short ie_cmd_cmd;		/* command word */
-	u_short ie_cmd_link;		/* link to next command */
+ *-
+struct __ie_cmd_common {
+	u_int16_t ie_cmd_status;	// status of this command
+	u_int16_t ie_cmd_cmd;		// command word
+	u_int16_t ie_cmd_link;		// link to next command
 };
+ */
+#define IE_CMD_COMMON_SZ		6
+#define IE_CMD_COMMON_STATUS(base)	((base) + 0)
+#define IE_CMD_COMMON_CMD(base)		((base) + 2)
+#define IE_CMD_COMMON_LINK(base)	((base) + 4)
 
 #define IE_STAT_COMPL	0x8000	/* command is completed */
 #define IE_STAT_BUSY	0x4000	/* command is running now */
@@ -193,17 +310,41 @@ struct ie_cmd_common {
 #define IE_CMD_INTR	0x2000	/* post an interrupt after completion */
 
 /*
- * This is the command to transmit a frame.
+ * No-op commands; just like COMMON but "indexable"
  */
-struct ie_xmit_cmd {
-	struct ie_cmd_common com;	/* common part */
-#define ie_xmit_status com.ie_cmd_status
+#define IE_CMD_NOP_SZ			IE_CMD_COMMON_SZ
+#define IE_CMD_NOP_ADDR(base,i)		((base) + (i) * IE_CMD_NOP_SZ)
+#define IE_CMD_NOP_STATUS(b,i)		(IE_CMD_NOP_ADDR(b,i) + 0)
+#define IE_CMD_NOP_CMD(b,i)		(IE_CMD_NOP_ADDR(b,i) + 2)
+#define IE_CMD_NOP_LINK(b,i)		(IE_CMD_NOP_ADDR(b,i) + 4)
 
-	u_short ie_xmit_desc;		/* 16-pointer to buffer descriptor */
-	struct ie_en_addr ie_xmit_addr; /* destination address */
 
-	u_short ie_xmit_length;		/* 802.3 length/Ether type field */
+/*
+ * This is the command to transmit a frame.
+ *-
+struct __ie_xmit_cmd {
+	struct __ie_cmd_common	com;		// common part
+#define __ie_xmit_status	com.ie_cmd_status
+
+	u_int16_t	ie_xmit_desc;		// pointer to buffer descriptor
+	struct __ie_en_addr ie_xmit_addr;	// destination address
+	u_int16_t	ie_xmit_length;		// 802.3 length/Ether type field
 };
+ */
+#define IE_CMD_XMIT_SZ			(IE_CMD_COMMON_SZ + 10)
+#define IE_CMD_XMIT_ADDR(base,i)	((base) + (i) * IE_CMD_XMIT_SZ)
+#define IE_CMD_XMIT_STATUS(b,i)		\
+	(IE_CMD_XMIT_ADDR(b,i) + 0)	/* == CMD_COMMON_STATUS */
+#define IE_CMD_XMIT_CMD(b,i)		\
+	(IE_CMD_XMIT_ADDR(b,i) + 2)	/* == CMD_COMMON_CMD */
+#define IE_CMD_XMIT_LINK(b,i)		\
+	(IE_CMD_XMIT_ADDR(b,i) + 4)	/* == CMD_COMMON_LINK */
+#define IE_CMD_XMIT_DESC(b,i)		\
+	(IE_CMD_XMIT_ADDR(b,i) + IE_CMD_COMMON_SZ + 0)
+#define IE_CMD_XMIT_EADDR(b,i)		\
+	(IE_CMD_XMIT_ADDR(b,i) + IE_CMD_COMMON_SZ + 2)
+#define IE_CMD_XMIT_LEN(b,i)		\
+	(IE_CMD_XMIT_ADDR(b,i) + IE_CMD_COMMON_SZ + 8)
 
 #define IE_XS_MAXCOLL  	0x000f	/* number of collisions during transmit */
 #define IE_XS_EXCMAX	0x0020	/* exceeded maximum number of collisions */
@@ -216,75 +357,101 @@ struct ie_xmit_cmd {
 
 /*
  * This is a buffer descriptor for a frame to be transmitted.
- */
-
-struct ie_xmit_buf {
-	u_short ie_xmit_flags;		/* see below */
-	u_short ie_xmit_next;		/* 16-pointer to next desc. */
-	caddr_t ie_xmit_buf;		/* 24-pointer to the actual buffer */
+ *-
+struct __ie_xmit_buf {
+	u_int16_t ie_xmit_flags;	// see below
+	u_int16_t ie_xmit_next;		// 16-pointer to next desc
+	void *ie_xmit_buf;		// 24-pointer to the actual buffer
 };
+ */
+#define IE_XBD_SZ			8
+#define IE_XBD_ADDR(base,i)		((base) + (i) * IE_XBD_SZ)
+#define IE_XBD_FLAGS(b,i)		(IE_XBD_ADDR(b,i) + 0)
+#define IE_XBD_NEXT(b,i)		(IE_XBD_ADDR(b,i) + 2)
+#define IE_XBD_BUF(b,i)			(IE_XBD_ADDR(b,i) + 4)
 
-#define IE_XMIT_LAST 0x8000	/* this TBD is the last one */
-/* The rest of the `flags' word is actually the length. */
+#define IE_TBD_EOL	0x8000		/* this TBD is the last one */
+#define IE_TBD_CNTMASK	0x3fff		/* The rest of the `flags' word
+					   is actually the length. */
+
 
 /*
  * Multicast setup command.
- */
+ *-
+struct __ie_mcast_cmd {
+	struct __ie_cmd_common	com;	// common part
+#define ie_mcast_status		com.ie_cmd_status
 
-#define MAXMCAST 250		/* must fit in transmit buffer */
-
-struct ie_mcast_cmd {
-	struct ie_cmd_common com;	/* common part */
-#define ie_mcast_status com.ie_cmd_status
-
-	u_short ie_mcast_bytes;	/* size (in bytes) of multicast addresses */
-	struct ie_en_addr ie_mcast_addrs[MAXMCAST + 1];	/* space for them */
+	// size (in bytes) of multicast addresses
+	u_short		ie_mcast_bytes;
+	struct __ie_en_addr ie_mcast_addrs[IE_MAXMCAST + 1];// space for them
 };
+ */
+#define IE_CMD_MCAST_SZ			(IE_CMD_COMMON_SZ + 2 /* + XXX */)
+#define IE_CMD_MCAST_BYTES(base)	((base) + IE_CMD_COMMON_SZ + 0)
+#define IE_CMD_MCAST_MADDR(base)	((base) + IE_CMD_COMMON_SZ + 2)
 
 /*
  * Time Domain Reflectometer command.
- */
-
-struct ie_tdr_cmd {
-	struct ie_cmd_common com;	/* common part */
+ *-
+struct __ie_tdr_cmd {
+	struct __ie_cmd_common com;	// common part
 #define ie_tdr_status com.ie_cmd_status
-
-	u_short ie_tdr_time;		/* error bits and time */
+	u_short ie_tdr_time;		// error bits and time
 };
+ */
+#define IE_CMD_TDR_SZ		(IE_CMD_COMMON_SZ + 2)
+#define IE_CMD_TDR_TIME(base)	((base) + IE_CMD_COMMON_SZ + 0)
 
 #define IE_TDR_SUCCESS	0x8000	/* TDR succeeded without error */
 #define IE_TDR_XCVR	0x4000	/* detected a transceiver problem */
-#define IE_TDR_OPEN	0x2000	/* detected an open */
-#define IE_TDR_SHORT	0x1000	/* TDR detected a short */
+#define IE_TDR_OPEN	0x2000	/* detected an incorrect termination ("open") */
+#define IE_TDR_SHORT	0x1000	/* TDR detected a short circuit */
 #define IE_TDR_TIME	0x07ff	/* mask for reflection time */
 
 /*
  * Initial Address Setup command
- */
-struct ie_iasetup_cmd {
-	struct ie_cmd_common com;
+ *-
+struct __ie_iasetup_cmd {
+	struct __ie_cmd_common com;
 #define ie_iasetup_status com.ie_cmd_status
-
-	struct ie_en_addr ie_address;
+	struct __ie_en_addr ie_address;
 };
+ */
+#define IE_CMD_IAS_SZ		(IE_CMD_COMMON_SZ + 6)
+#define IE_CMD_IAS_EADDR(base)	((base) + IE_CMD_COMMON_SZ + 0)
 
 /*
  * Configuration command
- */
-struct ie_config_cmd {
-	struct ie_cmd_common com;	/* common part */
+ *-
+struct __ie_config_cmd {
+	struct __ie_cmd_common com;	// common part
 #define ie_config_status com.ie_cmd_status
 
-	u_char ie_config_count;		/* byte count (0x0c) */
-	u_char ie_fifo;			/* fifo (8) */
-	u_char ie_save_bad;		/* save bad frames (0x40) */
-	u_char ie_addr_len;		/* address length (0x2e) (AL-LOC == 1) */
-	u_char ie_priority;		/* priority and backoff (0x0) */
-	u_char ie_ifs;			/* inter-frame spacing (0x60) */
-	u_char ie_slot_low;		/* slot time, LSB (0x0) */
-	u_char ie_slot_high;		/* slot time, MSN, and retries (0xf2) */
-	u_char ie_promisc;		/* 1 if promiscuous, else 0 */
-	u_char ie_crs_cdt;		/* CSMA/CD parameters (0x0) */
-	u_char ie_min_len;		/* min frame length (0x40) */
-	u_char ie_junk;			/* stuff for 82596 (0xff) */
+	u_int8_t ie_config_count;	// byte count (0x0c)
+	u_int8_t ie_fifo;		// fifo (8)
+	u_int8_t ie_save_bad;		// save bad frames (0x40)
+	u_int8_t ie_addr_len;		// address length (0x2e) (AL-LOC == 1)
+	u_int8_t ie_priority;		// priority and backoff (0x0)
+	u_int8_t ie_ifs;		// inter-frame spacing (0x60)
+	u_int8_t ie_slot_low;		// slot time, LSB (0x0)
+	u_int8_t ie_slot_high;		// slot time, MSN, and retries (0xf2)
+	u_int8_t ie_promisc;		// 1 if promiscuous, else 0
+	u_int8_t ie_crs_cdt;		// CSMA/CD parameters (0x0)
+	u_int8_t ie_min_len;		// min frame length (0x40)
+	u_int8_t ie_junk;		// stuff for 82596 (0xff)
 };
+ */
+#define IE_CMD_CFG_SZ			(IE_CMD_COMMON_SZ + 12)
+#define IE_CMD_CFG_CNT(base)		((base) + IE_CMD_COMMON_SZ + 0)
+#define IE_CMD_CFG_FIFO(base)		((base) + IE_CMD_COMMON_SZ + 1)
+#define IE_CMD_CFG_SAVEBAD(base)	((base) + IE_CMD_COMMON_SZ + 2)
+#define IE_CMD_CFG_ADDRLEN(base)	((base) + IE_CMD_COMMON_SZ + 3)
+#define IE_CMD_CFG_PRIORITY(base)	((base) + IE_CMD_COMMON_SZ + 4)
+#define IE_CMD_CFG_IFS(base)		((base) + IE_CMD_COMMON_SZ + 5)
+#define IE_CMD_CFG_SLOT_LOW(base)	((base) + IE_CMD_COMMON_SZ + 6)
+#define IE_CMD_CFG_SLOT_HIGH(base)	((base) + IE_CMD_COMMON_SZ + 7)
+#define IE_CMD_CFG_PROMISC(base)	((base) + IE_CMD_COMMON_SZ + 8)
+#define IE_CMD_CFG_CRSCDT(base)		((base) + IE_CMD_COMMON_SZ + 9)
+#define IE_CMD_CFG_MINLEN(base)		((base) + IE_CMD_COMMON_SZ + 10)
+#define IE_CMD_CFG_JUNK(base)		((base) + IE_CMD_COMMON_SZ + 11)

@@ -1,5 +1,4 @@
-/*	$OpenBSD: ibcs2_stat.h,v 1.2 1996/08/02 20:35:11 niklas Exp $	*/
-/*	$NetBSD: ibcs2_stat.h,v 1.2 1994/10/26 02:53:03 cgd Exp $	*/
+/*	$NetBSD: ibcs2_stat.h,v 1.4 2007/03/10 21:40:24 dsl Exp $	*/
 
 /*
  * Copyright (c) 1994 Scott Bartram
@@ -50,8 +49,6 @@ struct ibcs2_stat {
 	ibcs2_time_t	st_ctim;
 };
 
-#define ibcs2_stat_len	(sizeof(struct ibcs2_stat))
-
 #define IBCS2_S_IFMT		0xf000
 #define IBCS2_S_IFIFO		0x1000
 #define IBCS2_S_IFCHR		0x2000
@@ -73,7 +70,7 @@ struct ibcs2_stat {
 #define IBCS2_S_IXUSR		0x0040
 #define IBCS2_S_IRWXG		0x0038
 #define IBCS2_S_IRGRP		0x0020
-#define IBCS2_S_IWGRP		0x000f
+#define IBCS2_S_IWGRP		0x0010
 #define IBCS2_S_IXGRP		0x0008
 #define IBCS2_S_IRWXO		0x0007
 #define IBCS2_S_IROTH		0x0004

@@ -1,6 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: installboot.sh,v 1.1 1997/07/14 08:14:42 downsj Exp $
-#	$NetBSD: installboot.sh,v 1.2 1994/10/26 07:27:26 cgd Exp $
+#	$NetBSD: installboot.sh,v 1.3 2005/12/11 12:17:23 christos Exp $
 
 # compatibility with old installboot program
 #
@@ -23,5 +22,5 @@ then
 	echo "${2}: device must be a char special file"
 	exit 1
 fi
-/sbin/disklabel -B -b $1 $2
+/usr/sbin/installboot $2 $1
 exit $?

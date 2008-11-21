@@ -1,5 +1,4 @@
-/*	$OpenBSD: hp300spu.h,v 1.7 2005/09/27 22:05:37 miod Exp $	*/
-/*	$NetBSD: hp300spu.h,v 1.2 1997/05/01 05:26:48 thorpej Exp $	*/
+/*	$NetBSD: hp300spu.h,v 1.13 2008/04/28 20:23:19 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -16,19 +15,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -57,7 +49,7 @@
 #define	HP_400		8	/* 50MHz 68030+32K external cache */
 #define	HP_380		9	/* 25MHz 68040 */
 #define	HP_425		10	/* 25MHz 68040 */
-#define HP_433		11	/* 33MHz 68040 */
+#define	HP_433		11	/* 33MHz 68040 */
 #define	HP_385		12	/* 33MHz 68040 */
 #define	HP_362		13	/* 25MHz 68030 */
 #define	HP_382		14	/* 25MHz 68040 */
@@ -71,9 +63,9 @@
 #define	MMUID_425_S	7	/* 425s - 25MHz Strider */
 #define	MMUID_433_T	4	/* 433t - 33MHz Trailways */
 #define	MMUID_433_S	6	/* 433s - 33MHz Strider */
-#define MMUID_425_E	9	/* 425e - 25MHz Woody */
+#define	MMUID_425_E	9	/* 425e - 25MHz Woody */
 
-#define	MMUID_SHIFT	8	/* right shift by this... */
+#define	MMUID_SHIFT	8	/* left shift by this... */
 #define	MMUID_MASK	0xff	/* ...and mask with this to get mmuid */
 
 #if defined (_KERNEL) && !defined(_LOCORE)
@@ -81,5 +73,61 @@ extern	int machineid;		/* CPU model */
 extern	int cpuspeed;		/* CPU speed, in MHz */
 extern	int mmuid;		/* MMU id */
 #endif /* _KERNEL && ! _LOCORE */
+
+#ifdef _KERNEL
+
+/*
+ * This section associates hp300 model configurations with certain
+ * combindations of CPU, MMU, and cache.
+ */
+
+/*
+ * Pull in user-defined SPU configuration options.
+ */
+#if defined(_KERNEL_OPT)
+#include "opt_spuconf.h"
+#endif
+
+/*
+ * CPU configuration.
+ */
+#if defined(HP320) || defined(HP330) || defined(HP350)
+#define M68020
+#endif
+
+#if defined(HP340) || defined(HP345) || defined(HP360) || defined(HP362) || \
+    defined(HP370) || defined(HP375) || defined(HP400)
+#define M68030
+#endif
+
+#if defined(HP380) || defined(HP382) || defined(HP385) || defined(HP425) || \
+    defined(HP433)
+#define M68040
+#endif
+
+/*
+ * MMU configuration.
+ */
+#if defined(HP320) || defined(HP350)
+#define M68K_MMU_HP
+#endif
+
+#if defined(HP330) || defined(M68030) || defined(M68040)
+#define	M68K_MMU_MOTOROLA
+#endif
+
+/*
+ * Cache configuration.
+ */
+#if defined(M68K_MMU_HP)
+#define	CACHE_HAVE_VAC
+#define M68K_VAC
+#endif
+
+#if defined(HP345) || defined(HP370) || defined(HP375) || defined(HP400)
+#define	CACHE_HAVE_PAC
+#endif
+
+#endif /* _KERNEL */
 
 #endif /* _HP300_HP300SPU_H_ */

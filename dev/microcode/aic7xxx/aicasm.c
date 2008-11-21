@@ -1,4 +1,5 @@
-/* $OpenBSD: aicasm.c,v 1.14 2005/10/04 23:46:14 krw Exp $ */
+/*	$NetBSD: aicasm.c,v 1.6 2005/12/11 12:22:18 christos Exp $	*/
+
 /*
  * Aic7xxx SCSI host adapter firmware asssembler
  *
@@ -38,11 +39,12 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aicasm.c,v 1.14 2005/10/04 23:46:14 krw Exp $
- *
- * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm.c,v 1.37 2004/03/12 21:45:25 trhodes Exp $
+ * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm.c,v 1.35 2002/08/31 06:39:40 gibbs Exp $
  */
+
 #include <sys/cdefs.h>
+__RCSID("$NetBSD: aicasm.c,v 1.6 2005/12/11 12:22:18 christos Exp $");
+
 #include <sys/types.h>
 #include <sys/mman.h>
 
@@ -66,14 +68,14 @@
 #include "aicasm_insformat.h"
 
 typedef struct patch {
-	TAILQ_ENTRY(patch) links;
+	STAILQ_ENTRY(patch) links;
 	int		patch_func;
 	u_int		begin;
 	u_int		skip_instr;
 	u_int		skip_patch;
 } patch_t;
 
-TAILQ_HEAD(patch_list, patch) patches;
+STAILQ_HEAD(patch_list, patch) patches;
 
 static void usage(void);
 static void back_patch(void);
@@ -99,7 +101,7 @@ FILE *regdiagfile;
 int   src_mode;
 int   dst_mode;
 
-static TAILQ_HEAD(,instruction) seq_program;
+static STAILQ_HEAD(,instruction) seq_program;
 struct cs_tailq cs_tailq;
 struct scope_list scope_stack;
 symlist_t patch_functions;
@@ -125,9 +127,9 @@ main(int argc, char *argv[])
 	char *inputfilename;
 	scope_t *sentinal;
 
-	TAILQ_INIT(&patches);
+	STAILQ_INIT(&patches);
 	SLIST_INIT(&search_path);
-	TAILQ_INIT(&seq_program);
+	STAILQ_INIT(&seq_program);
 	TAILQ_INIT(&cs_tailq);
 	SLIST_INIT(&scope_stack);
 
@@ -145,7 +147,7 @@ main(int argc, char *argv[])
 	yydebug = 0;
 	mmdebug = 0;
 #endif
-	while ((ch = getopt(argc, argv, "d:i:l:n:o:p:r:I:X")) != -1) {
+	while ((ch = getopt(argc, argv, "d:i:l:n:o:p:r:I:")) != -1) {
 		switch(ch) {
 		case 'd':
 #if DEBUG
@@ -246,9 +248,6 @@ main(int argc, char *argv[])
 			}
 			break;
 		}
-		case 'X':
-			/* icc version of -nostdinc */
-			break;
 		case '?':
 		default:
 			usage();
@@ -314,7 +313,7 @@ usage()
 {
 
 	(void)fprintf(stderr,
-"usage: %-16s [-nostdinc|-X] [-I-] [-I directory] [-o output_file]\n"
+"usage: %-16s [-nostdinc] [-I-] [-I directory] [-o output_file]\n"
 "	[-r register_output_file [-p register_diag_file -i includefile]]\n"
 "	[-l program_list_file]\n"
 "	input_file\n", appname);
@@ -326,9 +325,9 @@ back_patch()
 {
 	struct instruction *cur_instr;
 
-	for (cur_instr = TAILQ_FIRST(&seq_program);
+	for (cur_instr = STAILQ_FIRST(&seq_program);
 	     cur_instr != NULL;
-	     cur_instr = TAILQ_NEXT(cur_instr, links)) {
+	     cur_instr = STAILQ_NEXT(cur_instr, links)) {
 		if (cur_instr->patch_label != NULL) {
 			struct ins_format3 *f3_instr;
 			u_int address;
@@ -367,13 +366,13 @@ output_code()
 " *\n"
 "%s */\n", versions);
 
-	fprintf(ofile, "static const uint8_t seqprog[] = {\n");
-	for (cur_instr = TAILQ_FIRST(&seq_program);
+	fprintf(ofile, "static uint8_t seqprog[] = {\n");
+	for (cur_instr = STAILQ_FIRST(&seq_program);
 	     cur_instr != NULL;
-	     cur_instr = TAILQ_NEXT(cur_instr, links)) {
+	     cur_instr = STAILQ_NEXT(cur_instr, links)) {
 
 		fprintf(ofile, "%s\t0x%02x, 0x%02x, 0x%02x, 0x%02x",
-			cur_instr == TAILQ_FIRST(&seq_program) ? "" : ",\n",
+			cur_instr == STAILQ_FIRST(&seq_program) ? "" : ",\n",
 #if BYTE_ORDER == LITTLE_ENDIAN
 			cur_instr->format.bytes[0],
 			cur_instr->format.bytes[1],
@@ -420,18 +419,18 @@ output_code()
 	}
 
 	fprintf(ofile,
-"static const struct patch {\n"
+"static struct patch {\n"
 "	%spatch_func_t		*patch_func;\n"
 "	uint32_t		 begin		:10,\n"
 "				 skip_instr	:10,\n"
 "				 skip_patch	:12;\n"
 "} patches[] = {\n", prefix);
 
-	for (cur_patch = TAILQ_FIRST(&patches);
+	for (cur_patch = STAILQ_FIRST(&patches);
 	     cur_patch != NULL;
-	     cur_patch = TAILQ_NEXT(cur_patch,links)) {
+	     cur_patch = STAILQ_NEXT(cur_patch,links)) {
 		fprintf(ofile, "%s\t{ %spatch%d_func, %d, %d, %d }",
-			cur_patch == TAILQ_FIRST(&patches) ? "" : ",\n",
+			cur_patch == STAILQ_FIRST(&patches) ? "" : ",\n",
 			prefix,
 			cur_patch->patch_func, cur_patch->begin,
 			cur_patch->skip_instr, cur_patch->skip_patch);
@@ -440,7 +439,7 @@ output_code()
 	fprintf(ofile, "\n};\n\n");
 
 	fprintf(ofile,
-"static const struct cs {\n"
+"static struct cs {\n"
 "	uint16_t	begin;\n"
 "	uint16_t	end;\n"
 "} critical_sections[] = {\n");
@@ -456,7 +455,8 @@ output_code()
 	fprintf(ofile, "\n};\n\n");
 
 	fprintf(ofile,
-"#define NUM_CRITICAL_SECTIONS (sizeof(critical_sections) / sizeof(*critical_sections))\n");
+"static const int num_critical_sections = sizeof(critical_sections)\n"
+"				       / sizeof(*critical_sections);\n");
 
 	fprintf(stderr, "%s: %d instructions used\n", appname, instrcount);
 }
@@ -517,7 +517,7 @@ emit_patch(scope_t *scope, int patch)
 	}
 	new_patch->skip_instr = pinfo->skip_instr;
 	new_patch->skip_patch = pinfo->skip_patch;
-	TAILQ_INSERT_TAIL(&patches, new_patch, links);
+	STAILQ_INSERT_TAIL(&patches, new_patch, links);
 }
 
 void
@@ -598,10 +598,10 @@ output_listing(char *ifilename)
 	}
 
 	/* Now output the listing */
-	cur_patch = TAILQ_FIRST(&patches);
-	for (cur_instr = TAILQ_FIRST(&seq_program);
+	cur_patch = STAILQ_FIRST(&patches);
+	for (cur_instr = STAILQ_FIRST(&seq_program);
 	     cur_instr != NULL;
-	     cur_instr = TAILQ_NEXT(cur_instr, links), instrcount++) {
+	     cur_instr = STAILQ_NEXT(cur_instr, links), instrcount++) {
 
 		if (check_patch(&cur_patch, instrcount,
 				&skip_addr, func_values) == 0) {
@@ -613,10 +613,10 @@ output_listing(char *ifilename)
 
 		while (line < cur_instr->srcline) {
 			fgets(buf, sizeof(buf), ifile);
-				fprintf(listfile, "             \t%s", buf);
+				fprintf(listfile, "\t\t%s", buf);
 				line++;
 		}
-		fprintf(listfile, "%04x %02x%02x%02x%02x", instrptr,
+		fprintf(listfile, "%03x %02x%02x%02x%02x", instrptr,
 #if BYTE_ORDER == LITTLE_ENDIAN
 			cur_instr->format.bytes[0],
 			cur_instr->format.bytes[1],
@@ -628,23 +628,14 @@ output_listing(char *ifilename)
 			cur_instr->format.bytes[1],
 			cur_instr->format.bytes[0]);
 #endif
-		/*
-		 * Macro expansions can cause several instructions
-		 * to be output for a single source line.  Only
-		 * advance the line once in these cases.
-		 */
-		if (line == cur_instr->srcline) {
-			fgets(buf, sizeof(buf), ifile);
-			fprintf(listfile, "\t%s", buf);
-			line++;
-		} else {
-			fprintf(listfile, "\n");
-		}
+		fgets(buf, sizeof(buf), ifile);
+		fprintf(listfile, "\t%s", buf);
+		line++;
 		instrptr++;
 	}
 	/* Dump the remainder of the file */
 	while(fgets(buf, sizeof(buf), ifile) != NULL)
-		fprintf(listfile, "             %s", buf);
+		fprintf(listfile, "\t\t%s", buf);
 
 	fclose(ifile);
 }
@@ -666,13 +657,13 @@ check_patch(patch_t **start_patch, int start_instr,
 			for (skip = cur_patch->skip_patch;
 			     skip > 0 && cur_patch != NULL;
 			     skip--)
-				cur_patch = TAILQ_NEXT(cur_patch, links);
+				cur_patch = STAILQ_NEXT(cur_patch, links);
 		} else {
 			/* Accepted this patch.  Advance to the next
 			 * one and wait for our intruction pointer to
 			 * hit this point.
 			 */
-			cur_patch = TAILQ_NEXT(cur_patch, links);
+			cur_patch = STAILQ_NEXT(cur_patch, links);
 		}
 	}
 
@@ -742,7 +733,7 @@ seq_alloc()
 	if (new_instr == NULL)
 		stop("Unable to malloc instruction object", EX_SOFTWARE);
 	memset(new_instr, 0, sizeof(*new_instr));
-	TAILQ_INSERT_TAIL(&seq_program, new_instr, links);
+	STAILQ_INSERT_TAIL(&seq_program, new_instr, links);
 	new_instr->srcline = yylineno;
 	return new_instr;
 }

@@ -1,8 +1,7 @@
-/*	$OpenBSD: dptvar.h,v 1.2 2002/03/14 01:26:54 millert Exp $	*/
-/*	$NetBSD: dptvar.h,v 1.5 1999/10/23 16:26:32 ad Exp $	*/
+/*	$NetBSD: dptvar.h,v 1.14 2007/03/04 06:01:54 christos Exp $	*/
 
 /*
- * Copyright (c) 1999 Andy Doran <ad@NetBSD.org>
+ * Copyright (c) 1999, 2000, 2001 Andrew Doran <ad@NetBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,18 +29,28 @@
 
 #ifndef _IC_DPTVAR_H_
 #define _IC_DPTVAR_H_ 1
-#ifdef _KERNEL
+
+/* Software parameters */
+#define DPT_SG_SIZE        	17
+#define	DPT_MAX_XFER		65536
+#define DPT_MAX_CCBS		256
+#define DPT_ABORT_TIMEOUT	2000	/* milliseconds */
+#define DPT_SCRATCH_SIZE	256	/* bytes */
 
 #define	CCB_OFF(sc,m)	((u_long)(m) - (u_long)((sc)->sc_ccbs))
 
-#define CCB_ALLOC	0x01	/* CCB allocated */
-#define CCB_ABORT	0x02	/* abort has been issued on this CCB */
-#define CCB_INTR	0x04	/* HBA interrupted for this CCB */
-#define CCB_PRIVATE	0x08	/* ours; don't talk to scsipi when done */ 
+#define CCB_ABORT	0x01	/* abort has been issued on this CCB */
+#define CCB_INTR	0x02	/* HBA interrupted for this CCB */
+#define CCB_PRIVATE	0x04	/* ours; don't talk to scsipi when done */
+#define CCB_WAIT	0x08	/* sleeping on completion */
 
 struct dpt_ccb {
+	/* Data that will be touched by the HBA */
 	struct eata_cp	ccb_eata_cp;		/* EATA command packet */
 	struct eata_sg	ccb_sg[DPT_SG_SIZE];	/* SG element list */
+	struct scsi_sense_data ccb_sense;	/* SCSI sense data on error */
+
+	/* Data that will not be touched by the HBA */
 	volatile int	ccb_flg;		/* CCB flags */
 	int		ccb_timeout;		/* timeout in ms */
 	u_int32_t	ccb_ccbpa;		/* physical addr of this CCB */
@@ -49,80 +58,40 @@ struct dpt_ccb {
 	int		ccb_hba_status;		/* from status packet */
 	int		ccb_scsi_status;	/* from status packet */
 	int		ccb_id;			/* unique ID of this CCB */
-	TAILQ_ENTRY(dpt_ccb) ccb_chain;		/* link to next CCB */
-#ifdef __NetBSD__
-	struct scsipi_sense_data ccb_sense;	/* SCSI sense data on error */
+	SLIST_ENTRY(dpt_ccb) ccb_chain;		/* link to next CCB */
 	struct scsipi_xfer *ccb_xs;		/* initiating SCSI command */
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	struct scsi_sense_data ccb_sense;
-	struct scsi_xfer *ccb_xs;
-#endif /* __OpenBSD__ */
+	struct eata_sp	*ccb_savesp;		/* saved status packet */
 };
 
 struct dpt_softc {
-	struct device sc_dv;		/* generic device data */
+	struct device	sc_dv;		/* generic device data */
+	struct scsipi_adapter sc_adapt;	/* scsipi adapter */
+	struct scsipi_channel sc_chans[3]; /* each channel */
 	bus_space_handle_t sc_ioh;	/* bus space handle */
-#ifdef __NetBSD__
-	struct scsipi_adapter sc_adapter;/* scsipi adapter */
-	struct scsipi_link sc_link[3];	/* prototype link for each channel */
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	struct scsi_adapter sc_adapter;/* scsipi adapter */
-	struct scsi_link sc_link[3];	/* prototype link for each channel */
-#endif /* __OpenBSD__ */
-	struct eata_cfg sc_ec;		/* EATA configuration data */
 	bus_space_tag_t	sc_iot;		/* bus space tag */
 	bus_dma_tag_t	sc_dmat;	/* bus DMA tag */
-	bus_dmamap_t	sc_dmamap_ccb;	/* maps the CCBs */
+	bus_dmamap_t	sc_dmamap;	/* maps the CCBs */
 	void	 	*sc_ih;		/* interrupt handler cookie */
-	void		*sc_sdh;	/* shutdown hook */
 	struct dpt_ccb	*sc_ccbs;	/* all our CCBs */
-	struct eata_sp	*sc_statpack;	/* EATA status packet */
-	int		sc_spoff;	/* status packet offset in dmamap */
-	u_int32_t	sc_sppa;	/* status packet physical address */
-	caddr_t		sc_scr;		/* scratch area */
-	int		sc_scrlen;	/* scratch area length */
+	struct eata_sp	*sc_stp;	/* EATA status packet */
+	int		sc_stpoff;	/* status packet offset in dmamap */
+	u_int32_t	sc_stppa;	/* status packet physical address */
+	void *		sc_scr;		/* scratch area */
 	int		sc_scroff;	/* scratch area offset in dmamap */
 	u_int32_t	sc_scrpa;	/* scratch area physical address */
 	int		sc_hbaid[3];	/* ID of HBA on each channel */
 	int		sc_nccbs;	/* number of CCBs available */
-	int		sc_open;	/* device is open */
-	TAILQ_HEAD(, dpt_ccb) sc_free_ccb;/* free ccb list */
-#ifdef __NetBSD__
-	TAILQ_HEAD(, scsipi_xfer) sc_queue;/* pending commands */
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-	LIST_HEAD(, scsi_xfer) sc_queue;/* pending commands */
-	struct scsi_xfer *sc_queuelast;
-#endif /* __NetBSD__ */
+	SLIST_HEAD(, dpt_ccb) sc_ccb_free;/* free ccb list */
+	struct eata_cfg sc_ec;		/* EATA configuration data */
+	int		sc_uactive;	/* user command active */
+	int		sc_bustype;	/* SysInfo bus type */
+	int		sc_isadrq;	/* ISA DRQ */
+	int		sc_isairq;	/* ISA IRQ */
+	int		sc_isaport;	/* ISA port */
 };
 
+void	dpt_init(struct dpt_softc *, const char *);
 int	dpt_intr(void *);
 int	dpt_readcfg(struct dpt_softc *);
-void	dpt_init(struct dpt_softc *, const char *);
-void	dpt_shutdown(void *);
-void	dpt_timeout(void *);
-void	dpt_minphys(struct buf *);
-#ifdef __NetBSD__
-int	dpt_scsi_cmd(struct scsipi_xfer *);
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-int	dpt_scsi_cmd(struct scsi_xfer *);
-#endif /* __OpenBSD__ */
-int	dpt_wait(struct dpt_softc *, u_int8_t, u_int8_t, int);
-int	dpt_poll(struct dpt_softc *, struct dpt_ccb *);
-int	dpt_cmd(struct dpt_softc *, struct eata_cp *, u_int32_t, int, int);
-void	dpt_hba_inquire(struct dpt_softc *, struct eata_inquiry_data **);
-void	dpt_reset_ccb(struct dpt_softc *, struct dpt_ccb *);
-void	dpt_free_ccb(struct dpt_softc *, struct dpt_ccb *);
-void	dpt_done_ccb(struct dpt_softc *, struct dpt_ccb *);
-int	dpt_init_ccb(struct dpt_softc *, struct dpt_ccb *);
-int	dpt_create_ccbs(struct dpt_softc *, struct dpt_ccb *, int);
-struct dpt_ccb	*dpt_alloc_ccb(struct dpt_softc *, int);
-#ifdef DEBUG
-void	dpt_dump_sp(struct eata_sp *);
-#endif
 
-#endif	/* _KERNEL */
 #endif	/* !defined _IC_DPTVAR_H_ */

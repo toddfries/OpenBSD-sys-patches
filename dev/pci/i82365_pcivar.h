@@ -1,5 +1,4 @@
-/*	$OpenBSD: i82365_pcivar.h,v 1.5 2002/03/14 03:16:06 millert Exp $ */
-/*	$NetBSD: i82365_pcivar.h,v 1.2 2000/02/22 16:04:47 thorpej Exp $	*/
+/*	$NetBSD: i82365_pcivar.h,v 1.6 2008/04/28 20:23:54 martin Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -13,13 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,17 +31,17 @@ struct pcic_pci_softc {
 	void *intr_est;			/* XXX */
 };
 
-/* 
+/*
  * Establish/disestablish interrupts for PCMCIA functions.
  */
 
 void *pcic_pci_machdep_intr_est(pci_chipset_tag_t);
 
 void *pcic_pci_machdep_pcic_intr_establish(struct pcic_softc *,
-					   int (*)(void *));
+						int (*)(void *));
 
 void *pcic_pci_machdep_chip_intr_establish(pcmcia_chipset_handle_t,
-					   struct pcmcia_function *,
-					   int, int (*)(void *),
-					   void *, char *);
+						struct pcmcia_function *,
+						int, int (*)(void *),
+						void *);
 void pcic_pci_machdep_chip_intr_disestablish(pcmcia_chipset_handle_t, void *);

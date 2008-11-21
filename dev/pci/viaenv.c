@@ -1,5 +1,4 @@
-/*	$OpenBSD: viaenv.c,v 1.11 2007/05/14 00:37:18 jsg Exp $	*/
-/*	$NetBSD: viaenv.c,v 1.9 2002/10/02 16:51:59 thorpej Exp $	*/
+/*	$NetBSD: viaenv.c,v 1.29 2008/04/30 14:07:14 ad Exp $	*/
 
 /*
  * Copyright (c) 2000 Johan Danielsson
@@ -33,28 +32,31 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* driver for the hardware monitoring part of the VIA VT82C686A */
+/*
+ * Driver for the hardware monitoring and power management timer 
+ * in the VIA VT82C686A and VT8231 South Bridges.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: viaenv.c,v 1.29 2008/04/30 14:07:14 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/queue.h>
-#include <sys/sensors.h>
-#include <sys/timeout.h>
-#ifdef __HAVE_TIMECOUNTER
-#include <sys/timetc.h>
-#endif
+#include <sys/device.h>
 
-#include <machine/bus.h>
+#include <sys/bus.h>
+#include <dev/ic/acpipmtimer.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
+#include <dev/sysmon/sysmonvar.h>
+
 #ifdef VIAENV_DEBUG
 unsigned int viaenv_debug = 0;
-#define DPRINTF(X) do { if(viaenv_debug) printf X ; } while(0)
+#define DPRINTF(X) do { if (viaenv_debug) printf X ; } while(0)
 #else
 #define DPRINTF(X)
 #endif
@@ -62,61 +64,47 @@ unsigned int viaenv_debug = 0;
 #define VIANUMSENSORS 10	/* three temp, two fan, five voltage */
 
 struct viaenv_softc {
-	struct device sc_dev;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 	bus_space_handle_t sc_pm_ioh;
 
 	int     sc_fan_div[2];	/* fan RPM divisor */
 
-	struct ksensor sc_data[VIANUMSENSORS];
-	struct ksensordev sc_sensordev;
+	struct sysmon_envsys *sc_sme;
+	envsys_data_t sc_sensor[VIANUMSENSORS];
+
+	struct timeval sc_lastread;
 };
 
-int  viaenv_match(struct device *, void *, void *);
-void viaenv_attach(struct device *, struct device *, void *);
+/* autoconf(9) glue */
+static int 	viaenv_match(device_t, cfdata_t, void *);
+static void 	viaenv_attach(device_t, device_t, void *);
 
-int  val_to_uK(unsigned int);
-int  val_to_rpm(unsigned int, int);
-long val_to_uV(unsigned int, int);
-void viaenv_refresh_sensor_data(struct viaenv_softc *);
-void viaenv_refresh(void *);
+CFATTACH_DECL_NEW(viaenv, sizeof(struct viaenv_softc),
+    viaenv_match, viaenv_attach, NULL, NULL);
 
-#ifdef __HAVE_TIMECOUNTER
-u_int viaenv_get_timecount(struct timecounter *tc);
+/* envsys(4) glue */
+static void viaenv_refresh(struct sysmon_envsys *, envsys_data_t *);
 
-struct timecounter viaenv_timecounter = {
-	viaenv_get_timecount,	/* get_timecount */
-	0,			/* no poll_pps */
-	0xffffff,		/* counter_mask */
-	3579545,		/* frequency */
-	"VIAPM",		/* name */
-	1000			/* quality */
-};
-#endif	/* __HAVE_TIMECOUNTER */
+static int val_to_uK(unsigned int);
+static int val_to_rpm(unsigned int, int);
+static long val_to_uV(unsigned int, int);
 
-struct cfattach viaenv_ca = {
-	sizeof(struct viaenv_softc),
-	viaenv_match,
-	viaenv_attach
-};
-
-struct cfdriver viaenv_cd = {
-	NULL, "viaenv", DV_DULL
-};
-
-struct timeout viaenv_timeout;
-
-const struct pci_matchid viaenv_devices[] = {
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C686A_SMB },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8231_PWR }
-};
-
-int
-viaenv_match(struct device *parent, void *match, void *aux)
+static int
+viaenv_match(device_t parent, cfdata_t match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, viaenv_devices,
-	    sizeof(viaenv_devices) / sizeof(viaenv_devices[0])));
+	struct pci_attach_args *pa = aux;
+
+	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_VIATECH)
+		return 0;
+
+	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_VIATECH_VT82C686A_SMB:
+	case PCI_PRODUCT_VIATECH_VT8231_PWR:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 /*
@@ -162,7 +150,7 @@ static const long val_to_temp[] = {
 };
 
 /* use above table to convert values to temperatures in micro-Kelvins */
-int
+static int
 val_to_uK(unsigned int val)
 {
 	int     i = val / 4;
@@ -178,7 +166,7 @@ val_to_uK(unsigned int val)
 	    val_to_temp[i + 1] * j) * 2500 /* really: / 4 * 10000 */ ;
 }
 
-int
+static int
 val_to_rpm(unsigned int val, int div)
 {
 
@@ -188,7 +176,7 @@ val_to_rpm(unsigned int val, int div)
 	return 1350000 / val / div;
 }
 
-long
+static long
 val_to_uV(unsigned int val, int index)
 {
 	static const long mult[] =
@@ -217,168 +205,197 @@ val_to_uV(unsigned int val, int index)
 #define VIAENV_GENCFG_TMR32	(1 << 11)	/* 32-bit PM timer */
 #define VIAENV_GENCFG_PMEN	(1 << 15)	/* enable PM I/O space */
 #define VIAENV_PMBASE	0x48	/* power management I/O space base */
-#define VIAENV_PMSIZE	128	/* power management I/O space size */
+#define VIAENV_PMSIZE	128	/* HWM and power management I/O space size */
 #define VIAENV_PM_TMR	0x08	/* PM timer */
+#define VIAENV_HWMON_CONF	0x70	/* HWMon I/O base */
+#define VIAENV_HWMON_CTL	0x74	/* HWMon control register */
 
-void
-viaenv_refresh_sensor_data(struct viaenv_softc *sc)
+static void
+viaenv_refresh_sensor_data(struct viaenv_softc *sc, envsys_data_t *edata)
 {
+	static const struct timeval onepointfive =  { 1, 500000 };
+	static int old_sensor = -1;
+	struct timeval t, utv;
+	uint8_t v, v2;
 	int i;
-	u_int8_t v, v2;
+
+	/* Read new values at most once every 1.5 seconds. */
+	timeradd(&sc->sc_lastread, &onepointfive, &t);
+	getmicrouptime(&utv);
+	i = timercmp(&utv, &t, >);
+	if (i)
+		sc->sc_lastread = utv;
+
+	if (i == 0 && old_sensor == edata->sensor)
+		return;
+
+	old_sensor = edata->sensor;
 
 	/* temperature */
-	v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TIRQ);
-	v2 = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TSENS1);
-	DPRINTF(("TSENS1 = %d\n", (v2 << 2) | (v >> 6)));
-	sc->sc_data[0].value = val_to_uK((v2 << 2) | (v >> 6));
+	if (edata->sensor == 0) {
+		v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TIRQ);
+		v2 = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TSENS1);
+		DPRINTF(("TSENS1 = %d\n", (v2 << 2) | (v >> 6)));
+		edata->value_cur = val_to_uK((v2 << 2) | (v >> 6));
+		edata->state = ENVSYS_SVALID;
+	} else if (edata->sensor == 1) {
+		v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TLOW);
+		v2 = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TSENS2);
+		DPRINTF(("TSENS2 = %d\n", (v2 << 2) | ((v >> 4) & 0x3)));
+		edata->value_cur = val_to_uK((v2 << 2) | ((v >> 4) & 0x3));
+		edata->state = ENVSYS_SVALID;
+	} else if (edata->sensor == 2) {
+		v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TLOW);
+		v2 = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TSENS3);
+		DPRINTF(("TSENS3 = %d\n", (v2 << 2) | (v >> 6)));
+		edata->value_cur = val_to_uK((v2 << 2) | (v >> 6));
+		edata->state = ENVSYS_SVALID;
+	} else if (edata->sensor > 2 && edata->sensor < 5) {
+		/* fans */
+		v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_FANCONF);
 
-	v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TLOW);
-	v2 = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TSENS2);
-	DPRINTF(("TSENS2 = %d\n", (v2 << 2) | ((v >> 4) & 0x3)));
-	sc->sc_data[1].value = val_to_uK((v2 << 2) | ((v >> 4) & 0x3));
+		sc->sc_fan_div[0] = 1 << ((v >> 4) & 0x3);
+		sc->sc_fan_div[1] = 1 << ((v >> 6) & 0x3);
 
-	v2 = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_TSENS3);
-	DPRINTF(("TSENS3 = %d\n", (v2 << 2) | (v >> 6)));
-	sc->sc_data[2].value = val_to_uK((v2 << 2) | (v >> 6));
-
-	v = bus_space_read_1(sc->sc_iot, sc->sc_ioh, VIAENV_FANCONF);
-
-	sc->sc_fan_div[0] = 1 << ((v >> 4) & 0x3);
-	sc->sc_fan_div[1] = 1 << ((v >> 6) & 0x3);
-
-	/* fan */
-	for (i = 3; i <= 4; i++) {
 		v = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
-		    VIAENV_FAN1 + i - 3);
-		DPRINTF(("FAN%d = %d / %d\n", i - 3, v,
-		    sc->sc_fan_div[i - 3]));
-		sc->sc_data[i].value = val_to_rpm(v, sc->sc_fan_div[i - 3]);
-	}
-
-	/* voltage */
-	for (i = 5; i <= 9; i++) {
+		    VIAENV_FAN1 + edata->sensor - 3);
+		DPRINTF(("FAN%d = %d / %d\n", edata->sensor - 3, v,
+		    sc->sc_fan_div[edata->sensor - 3]));
+		edata->value_cur = val_to_rpm(v,
+		    sc->sc_fan_div[edata->sensor - 3]);
+		edata->state = ENVSYS_SVALID;
+	} else {
 		v = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
-		    VIAENV_VSENS1 + i - 5);
-		DPRINTF(("V%d = %d\n", i - 5, v));
-		sc->sc_data[i].value = val_to_uV(v, i - 5);
+		    VIAENV_VSENS1 + edata->sensor - 5);
+		DPRINTF(("V%d = %d\n", edata->sensor - 5, v));
+		edata->value_cur = val_to_uV(v, edata->sensor - 5);
+		edata->state = ENVSYS_SVALID;
 	}
 }
 
-void
-viaenv_attach(struct device * parent, struct device * self, void *aux)
+static void
+viaenv_attach(device_t parent, device_t self, void *aux)
 {
-	struct viaenv_softc *sc = (struct viaenv_softc *) self;
+	struct viaenv_softc *sc = device_private(self);
 	struct pci_attach_args *pa = aux;
 	pcireg_t iobase, control;
 	int i;
 
-	iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x70);
-	control = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x74);
-	if ((iobase & 0xff80) == 0 || (control & 1) == 0) {
-		printf(": HWM disabled");
+	aprint_naive("\n");
+	aprint_normal(": VIA Technologies ");
+	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_VIATECH_VT82C686A_SMB:
+		aprint_normal("VT82C686A Hardware Monitor\n");
+		break;
+	case PCI_PRODUCT_VIATECH_VT8231_PWR:
+		aprint_normal("VT8231 Hardware Monitor\n");
+		break;
+	default:
+		aprint_normal("Unknown Hardware Monitor\n");
+		break;
+	}
+
+	iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_HWMON_CONF);
+	DPRINTF(("%s: iobase 0x%x\n", device_xname(self), iobase));
+	control = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_HWMON_CTL);
+
+	/* Check if the Hardware Monitor enable bit is set */
+	if ((control & 1) == 0) {
+		aprint_normal_dev(self, "Hardware Monitor disabled\n");
 		goto nohwm;
 	}
+
+	/* Map Hardware Monitor I/O space */
 	sc->sc_iot = pa->pa_iot;
-	if (bus_space_map(sc->sc_iot, iobase & 0xff80, 128, 0, &sc->sc_ioh)) {
-		printf(": failed to map HWM I/O space");
+	if (bus_space_map(sc->sc_iot, iobase & 0xff80,
+	    VIAENV_PMSIZE, 0, &sc->sc_ioh)) {
+		aprint_error_dev(self, "failed to map I/O space\n");
 		goto nohwm;
 	}
 
-	for (i = 0; i <= 2; i++) {
-		sc->sc_data[i].type = SENSOR_TEMP;
+	for (i = 0; i < 3; i++)
+		sc->sc_sensor[i].units = ENVSYS_STEMP;
+
+#define COPYDESCR(x, y) 				\
+	do {						\
+		strlcpy((x), (y), sizeof(x));		\
+	} while (0)
+
+	COPYDESCR(sc->sc_sensor[0].desc, "TSENS1");
+	COPYDESCR(sc->sc_sensor[1].desc, "TSENS2");
+	COPYDESCR(sc->sc_sensor[2].desc, "TSENS3");
+
+	for (i = 3; i < 5; i++)
+		sc->sc_sensor[i].units = ENVSYS_SFANRPM;
+	
+	COPYDESCR(sc->sc_sensor[3].desc, "FAN1");
+	COPYDESCR(sc->sc_sensor[4].desc, "FAN2");
+
+	for (i = 5; i < 10; i++)
+		sc->sc_sensor[i].units = ENVSYS_SVOLTS_DC;
+
+	COPYDESCR(sc->sc_sensor[5].desc, "VSENS1");	/* CPU core (2V) */
+	COPYDESCR(sc->sc_sensor[6].desc, "VSENS2");	/* NB core? (2.5V) */
+	COPYDESCR(sc->sc_sensor[7].desc, "Vcore");	/* Vcore (3.3V) */
+	COPYDESCR(sc->sc_sensor[8].desc, "VSENS3");	/* VSENS3 (5V) */
+	COPYDESCR(sc->sc_sensor[9].desc, "VSENS4");	/* VSENS4 (12V) */
+
+#undef COPYDESCR
+
+	sc->sc_sme = sysmon_envsys_create();
+
+	/* Initialize sensors */
+	for (i = 0; i < VIANUMSENSORS; i++) {
+		if (sysmon_envsys_sensor_attach(sc->sc_sme,
+						&sc->sc_sensor[i])) {
+			sysmon_envsys_destroy(sc->sc_sme);
+			return;
+		}
 	}
 
-	for (i = 3; i <= 4; i++) {
-		sc->sc_data[i].type = SENSOR_FANRPM;
+	/*
+	 * Hook into the System Monitor.
+	 */
+	sc->sc_sme->sme_name = device_xname(self);
+	sc->sc_sme->sme_cookie = sc;
+	sc->sc_sme->sme_refresh = viaenv_refresh;
+
+	if (sysmon_envsys_register(sc->sc_sme)) {
+		aprint_error_dev(self, "unable to register with sysmon\n");
+		sysmon_envsys_destroy(sc->sc_sme);
+		return;
 	}
-
-	for (i = 5; i <= 9; ++i) {
-		sc->sc_data[i].type = SENSOR_VOLTS_DC;
-	}
-	strlcpy(sc->sc_data[5].desc, "VSENS1",
-	    sizeof(sc->sc_data[5].desc));	/* CPU core (2V) */
-	strlcpy(sc->sc_data[6].desc, "VSENS2",
-	    sizeof(sc->sc_data[6].desc));	/* NB core? (2.5V) */
-	strlcpy(sc->sc_data[7].desc, "Vcore",
-	    sizeof(sc->sc_data[7].desc));	/* Vcore (3.3V) */
-	strlcpy(sc->sc_data[8].desc, "VSENS3",
-	    sizeof(sc->sc_data[8].desc));	/* VSENS3 (5V) */
-	strlcpy(sc->sc_data[9].desc, "VSENS4",
-	    sizeof(sc->sc_data[9].desc));	/* VSENS4 (12V) */
-
-	/* Get initial set of sensor values. */
-	viaenv_refresh_sensor_data(sc);
-
-	/* Register sensors with sysctl */
-	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
-	    sizeof(sc->sc_sensordev.xname));
-	for (i = 0; i < VIANUMSENSORS; ++i)
-		sensor_attach(&sc->sc_sensordev, &sc->sc_data[i]);
-	sensordev_install(&sc->sc_sensordev);
-
-	/* Refresh sensors data every 1.5 seconds */
-	timeout_set(&viaenv_timeout, viaenv_refresh, sc);
-	timeout_add(&viaenv_timeout, (15 * hz) / 10);
 
 nohwm:
-#ifdef __HAVE_TIMECOUNTER
 	/* Check if power management I/O space is enabled */
 	control = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_GENCFG);
 	if ((control & VIAENV_GENCFG_PMEN) == 0) {
-		printf(": PM disabled");
-		goto nopm;
-	}
+                aprint_normal_dev(self,
+		    "Power Managament controller disabled\n");
+                goto nopm;
+        }
 
-	/* Map power management I/O space */
-	iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_PMBASE);
-	if (bus_space_map(sc->sc_iot, PCI_MAPREG_IO_ADDR(iobase),
-	    VIAENV_PMSIZE, 0, &sc->sc_pm_ioh)) {
-		printf(": failed to map PM I/O space");
-		goto nopm;
-	}
+        /* Map power management I/O space */
+        iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_PMBASE);
+        if (bus_space_map(sc->sc_iot, PCI_MAPREG_IO_ADDR(iobase),
+            VIAENV_PMSIZE, 0, &sc->sc_pm_ioh)) {
+                aprint_error_dev(self, "failed to map PM I/O space\n");
+                goto nopm;
+        }
 
-	/* Check for 32-bit PM timer */
-	if (control & VIAENV_GENCFG_TMR32)
-		viaenv_timecounter.tc_counter_mask = 0xffffffff;
-
-	/* Register new timecounter */
-	viaenv_timecounter.tc_priv = sc;
-	tc_init(&viaenv_timecounter);
-
-	printf(": %s-bit timer at %lluHz",
-	    (viaenv_timecounter.tc_counter_mask == 0xffffffff ? "32" : "24"),
-	    (unsigned long long)viaenv_timecounter.tc_frequency);
+	/* Attach our PM timer with the generic acpipmtimer function */
+	acpipmtimer_attach(self, sc->sc_iot, sc->sc_pm_ioh,
+	    VIAENV_PM_TMR,
+	    ((control & VIAENV_GENCFG_TMR32) ? ACPIPMT_32BIT : 0));
 
 nopm:
-#endif	/* __HAVE_TIMECOUNTER */
-	printf("\n");
+	return;
 }
 
-void
-viaenv_refresh(void *arg)
+static void
+viaenv_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
 {
-	struct viaenv_softc *sc = (struct viaenv_softc *)arg;
+	struct viaenv_softc *sc = sme->sme_cookie;
 
-	viaenv_refresh_sensor_data(sc);
-	timeout_add(&viaenv_timeout, (15 * hz) / 10);
+	viaenv_refresh_sensor_data(sc, edata);
 }
-
-#ifdef __HAVE_TIMECOUNTER
-u_int
-viaenv_get_timecount(struct timecounter *tc)
-{
-	struct viaenv_softc *sc = tc->tc_priv;
-	u_int u1, u2, u3;
-
-	u2 = bus_space_read_4(sc->sc_iot, sc->sc_pm_ioh, VIAENV_PM_TMR);
-	u3 = bus_space_read_4(sc->sc_iot, sc->sc_pm_ioh, VIAENV_PM_TMR);
-	do {
-		u1 = u2;
-		u2 = u3;
-		u3 = bus_space_read_4(sc->sc_iot, sc->sc_pm_ioh,
-		    VIAENV_PM_TMR);
-	} while (u1 > u2 || u2 > u3);
-
-	return (u2);
-}
-#endif	/* __HAVE_TIMECOUNTER */

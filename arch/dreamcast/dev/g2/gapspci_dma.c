@@ -1,4 +1,4 @@
-/*	$NetBSD: gapspci_dma.c,v 1.13 2006/08/07 17:36:53 tsutsui Exp $	*/
+/*	$NetBSD: gapspci_dma.c,v 1.16 2008/06/04 12:41:41 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-__KERNEL_RCSID(0, "$NetBSD: gapspci_dma.c,v 1.13 2006/08/07 17:36:53 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gapspci_dma.c,v 1.16 2008/06/04 12:41:41 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,8 +75,8 @@ int	gaps_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 	    int nsegs, int *rsegs, int flags);
 void	gaps_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs);
 int	gaps_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
-	    size_t size, caddr_t *kvap, int flags);
-void	gaps_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva, size_t size);
+	    size_t size, void **kvap, int flags);
+void	gaps_dmamem_unmap(bus_dma_tag_t tag, void *kva, size_t size);
 paddr_t	gaps_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
 	    off_t off, int prot, int flags);
 
@@ -523,9 +516,9 @@ gaps_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	curseg = 0;
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = TAILQ_NEXT(m, pageq);
+	m = TAILQ_NEXT(m, pageq.queue);
 
-	for (; m != NULL; m = TAILQ_NEXT(m, pageq)) {
+	for (; m != NULL; m = TAILQ_NEXT(m, pageq.queue)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 		if (curaddr == (lastaddr + PAGE_SIZE))
 			segs[curseg].ds_len += PAGE_SIZE;
@@ -559,7 +552,7 @@ gaps_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 		     addr < segs[curseg].ds_addr + segs[curseg].ds_len;
 		     addr += PAGE_SIZE) {
 			m = PHYS_TO_VM_PAGE(addr);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq);
+			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
 		}
 	}
 
@@ -568,7 +561,7 @@ gaps_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 
 int
 gaps_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    size_t size, caddr_t *kvap, int flags)
+    size_t size, void **kvap, int flags)
 {
 	vaddr_t va;
 	bus_addr_t addr;
@@ -581,7 +574,7 @@ gaps_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	 * TLB thrashing.
 	 */
 	if (nsegs == 1) {
-		*kvap = (caddr_t)SH3_PHYS_TO_P2SEG(segs[0].ds_addr);
+		*kvap = (void *)SH3_PHYS_TO_P2SEG(segs[0].ds_addr);
 		return 0;
 	}
 
@@ -592,7 +585,7 @@ gaps_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	if (va == 0)
 		return ENOMEM;
 
-	*kvap = (caddr_t)va;
+	*kvap = (void *)va;
 
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
@@ -610,7 +603,7 @@ gaps_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 }
 
 void
-gaps_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
+gaps_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 {
 
 #ifdef DIAGNOSTIC
@@ -621,8 +614,8 @@ gaps_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 	/*
 	 * Nothing to do if we mapped it with P2SEG.
 	 */
-	if (kva >= (caddr_t)SH3_P2SEG_BASE &&
-	    kva <= (caddr_t)SH3_P2SEG_END)
+	if (kva >= (void *)SH3_P2SEG_BASE &&
+	    kva <= (void *)SH3_P2SEG_END)
 		return;
 
 	size = round_page(size);

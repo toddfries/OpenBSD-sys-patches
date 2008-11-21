@@ -1,4 +1,33 @@
-/*	$OpenBSD: if_skreg.h,v 1.48 2008/02/14 05:04:59 brad Exp $	*/
+/* $NetBSD: if_skreg.h,v 1.13 2008/11/18 09:30:43 chris Exp $ */
+
+/*-
+ * Copyright (c) 2003 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+/*	$OpenBSD: if_skreg.h,v 1.10 2003/08/12 05:23:06 nate Exp $	*/
+/*	$OpenBSD: yukonreg.h,v 1.2 2003/08/12 05:23:06 nate Exp $	*/
+/*	$OpenBSD: if_skreg.h,v 1.41 2006/11/23 21:56:32 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -51,6 +80,14 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#ifndef _DEV_PCI_IF_SKREG_H_
+#define _DEV_PCI_IF_SKREG_H_
+
+#include <net/if.h>
+#include <net/if_ether.h>
+#include <net/if_media.h>
+
+
 /*
  * GEnesis registers. The GEnesis chip has a 256-byte I/O window
  * but internally it has a 16K register space. This 16K space is
@@ -62,6 +99,7 @@
  * blocks are actually used. Most registers are 32 bits wide, but
  * there are a few 16-bit and 8-bit ones as well.
  */
+
 
 /* Start of remappable register window. */
 #define SK_WIN_BASE		0x0080
@@ -127,6 +165,7 @@
 #define SK_RAP		0x0000
 #define SK_CSR		0x0004
 #define SK_LED		0x0006
+/* XXX 0x0007 B0_POWER_CTRL */
 #define SK_ISR		0x0008	/* interrupt source */
 #define SK_IMR		0x000C	/* interrupt mask */
 #define SK_IESR		0x0010	/* interrupt hardware error source */
@@ -165,6 +204,8 @@
 #define SK_CSR_BUSCLOCK			0x0200 /* 1 == 33/66 MHz, = 33 */
 #define SK_CSR_ASF_OFF			0x1000
 #define SK_CSR_ASF_ON			0x2000
+#define SK_CSR_WOL_OFF			__BIT(14)
+#define SK_CSR_WOL_ON			__BIT(15)
 
 /* SK_LED register */
 #define SK_LED_GREEN_OFF		0x01
@@ -309,7 +350,7 @@
 #define SK_CHIPVER	0x011B
 #define SK_EPROM0	0x011C
 #define SK_EPROM1	0x011D		/* yukon/genesis */
-#define	SK_Y2_CLKGATE	0x011D		/* yukon 2 */
+#define SK_Y2_CLKGATE	0x011D		/* yukon 2 */
 #define SK_EPROM2	0x011E		/* yukon/genesis */
 #define SK_Y2_HWRES	0x011E		/* yukon 2 */
 #define SK_EPROM3	0x011F
@@ -347,18 +388,16 @@
 #define SK_YUKON_LP		0xB2
 #define SK_YUKON_XL		0xB3
 #define SK_YUKON_EC_U		0xB4
-#define SK_YUKON_EX		0xB5
 #define SK_YUKON_EC		0xB6
 #define SK_YUKON_FE		0xB7
-#define SK_YUKON_FE_P		0xB8
-#define SK_YUKON_SUPR		0xB9
+#define SK_YUKON_FAMILY(x) ((x) & 0xB0)
 
 #define SK_IS_GENESIS(sc) \
     ((sc)->sk_type == SK_GENESIS)
 #define SK_IS_YUKON(sc) \
     ((sc)->sk_type >= SK_YUKON && (sc)->sk_type <= SK_YUKON_LP)
 #define SK_IS_YUKON2(sc) \
-    ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_SUPR)
+    ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_FE)
 
 /* Known revisions in SK_CONFIG */
 #define SK_YUKON_LITE_REV_A0	0x0 /* invented, see test in skc_attach */
@@ -376,6 +415,14 @@
 
 #define SK_YUKON_EC_U_REV_A0	0x1
 #define SK_YUKON_EC_U_REV_A1	0x2
+#define SK_YUKON_EC_U_REV_B0	0x3
+
+#define SK_YUKON_FE_REV_A1	0x1
+#define SK_YUKON_FE_REV_A2	0x3
+
+/* Workaround */
+#define SK_WA_43_418	0x01
+#define SK_WA_4109	0x02
 
 #define SK_IMCTL_IRQ_CLEAR	0x01
 #define SK_IMCTL_STOP		0x02
@@ -383,10 +430,15 @@
 
 /* Number of ticks per usec for interrupt moderation */
 #define SK_IMTIMER_TICKS_GENESIS	53
-#define SK_IMTIMER_TICKS_YUKON		78
+#define SK_IMTIMER_TICKS_YUKON		156
 #define SK_IMTIMER_TICKS_YUKON_EC	125
+#define SK_IMTIMER_TICKS_YUKON_FE	100
+#define SK_IMTIMER_TICKS_YUKON_XL	156
 #define SK_IM_USECS(x)		((x) * imtimer_ticks)
 
+#define SK_IM_MIN	0
+#define SK_IM_DEFAULT	1000
+#define SK_IM_MAX	10000
 /*
  * The SK_EPROM0 register contains a byte that describes the
  * amount of SRAM mounted on the NIC. The value also tells if
@@ -633,27 +685,27 @@
 #define SK_RXQ1_TEST2		0x0440
 #define SK_RXQ1_TEST3		0x0444
 /* yukon-2 only */
-#define SK_RXQ1_Y2_WM		0x0440
-#define SK_RXQ1_Y2_AL		0x0442
-#define SK_RXQ1_Y2_RSP		0x0444
-#define SK_RXQ1_Y2_RSL		0x0446
-#define SK_RXQ1_Y2_RP		0x0448
-#define SK_RXQ1_Y2_RL		0x044A
-#define SK_RXQ1_Y2_WP		0x044C
-#define SK_RXQ1_Y2_WSP		0x044D
-#define SK_RXQ1_Y2_WL		0x044E
-#define SK_RXQ1_Y2_WSL		0x044F
+#define SK_RXQ1_Y2_WM           0x0440
+#define SK_RXQ1_Y2_AL           0x0442
+#define SK_RXQ1_Y2_RSP          0x0444
+#define SK_RXQ1_Y2_RSL          0x0446
+#define SK_RXQ1_Y2_RP           0x0448
+#define SK_RXQ1_Y2_RL           0x044A
+#define SK_RXQ1_Y2_WP           0x044C
+#define SK_RXQ1_Y2_WSP          0x044D
+#define SK_RXQ1_Y2_WL           0x044E
+#define SK_RXQ1_Y2_WSL          0x044F
 /* yukon-2 only (prefetch unit) */
-#define SK_RXQ1_Y2_PREF_CSR	0x0450
-#define SK_RXQ1_Y2_PREF_LIDX	0x0454
-#define SK_RXQ1_Y2_PREF_ADDRLO	0x0458
-#define SK_RXQ1_Y2_PREF_ADDRHI	0x045C
-#define SK_RXQ1_Y2_PREF_GETIDX	0x0460
-#define SK_RXQ1_Y2_PREF_PUTIDX	0x0464
-#define SK_RXQ1_Y2_PREF_FIFOWP	0x0470
-#define SK_RXQ1_Y2_PREF_FIFORP	0x0474
-#define SK_RXQ1_Y2_PREF_FIFOWM	0x0478
-#define SK_RXQ1_Y2_PREF_FIFOLV	0x047C
+#define SK_RXQ1_Y2_PREF_CSR     0x0450
+#define SK_RXQ1_Y2_PREF_LIDX    0x0454
+#define SK_RXQ1_Y2_PREF_ADDRLO  0x0458
+#define SK_RXQ1_Y2_PREF_ADDRHI  0x045C
+#define SK_RXQ1_Y2_PREF_GETIDX  0x0460
+#define SK_RXQ1_Y2_PREF_PUTIDX  0x0464
+#define SK_RXQ1_Y2_PREF_FIFOWP  0x0470
+#define SK_RXQ1_Y2_PREF_FIFORP  0x0474
+#define SK_RXQ1_Y2_PREF_FIFOWM  0x0478
+#define SK_RXQ1_Y2_PREF_FIFOLV  0x047C
 
 /* Block 9 -- RX queue 2 */
 #define SK_RXQ2_BUFCNT		0x0480
@@ -679,27 +731,27 @@
 #define SK_RXQ2_TEST2		0x04C0
 #define SK_RXQ2_TEST3		0x04C4
 /* yukon-2 only */
-#define SK_RXQ2_Y2_WM		0x04C0
-#define SK_RXQ2_Y2_AL		0x04C2
-#define SK_RXQ2_Y2_RSP		0x04C4
-#define SK_RXQ2_Y2_RSL		0x04C6
-#define SK_RXQ2_Y2_RP		0x04C8
-#define SK_RXQ2_Y2_RL		0x04CA
-#define SK_RXQ2_Y2_WP		0x04CC
-#define SK_RXQ2_Y2_WSP		0x04CD
-#define SK_RXQ2_Y2_WL		0x04CE
-#define SK_RXQ2_Y2_WSL		0x04CF
+#define SK_RXQ2_Y2_WM           0x04C0
+#define SK_RXQ2_Y2_AL           0x04C2
+#define SK_RXQ2_Y2_RSP          0x04C4
+#define SK_RXQ2_Y2_RSL          0x04C6
+#define SK_RXQ2_Y2_RP           0x04C8
+#define SK_RXQ2_Y2_RL           0x04CA
+#define SK_RXQ2_Y2_WP           0x04CC
+#define SK_RXQ2_Y2_WSP          0x04CD
+#define SK_RXQ2_Y2_WL           0x04CE
+#define SK_RXQ2_Y2_WSL          0x04CF
 /* yukon-2 only (prefetch unit) */
-#define SK_RXQ2_Y2_PREF_CSR	0x04D0
-#define SK_RXQ2_Y2_PREF_LIDX	0x04D4
-#define SK_RXQ2_Y2_PREF_ADDRLO	0x04D8
-#define SK_RXQ2_Y2_PREF_ADDRHI	0x04DC
-#define SK_RXQ2_Y2_PREF_GETIDX	0x04E0
-#define SK_RXQ2_Y2_PREF_PUTIDX	0x04E4
-#define SK_RXQ2_Y2_PREF_FIFOWP	0x04F0
-#define SK_RXQ2_Y2_PREF_FIFORP	0x04F4
-#define SK_RXQ2_Y2_PREF_FIFOWM	0x04F8
-#define SK_RXQ2_Y2_PREF_FIFOLV	0x04FC
+#define SK_RXQ2_Y2_PREF_CSR     0x04D0
+#define SK_RXQ2_Y2_PREF_LIDX    0x04D4
+#define SK_RXQ2_Y2_PREF_ADDRLO  0x04D8
+#define SK_RXQ2_Y2_PREF_ADDRHI  0x04DC
+#define SK_RXQ2_Y2_PREF_GETIDX  0x04E0
+#define SK_RXQ2_Y2_PREF_PUTIDX  0x04E4
+#define SK_RXQ2_Y2_PREF_FIFOWP  0x04F0
+#define SK_RXQ2_Y2_PREF_FIFORP  0x04F4
+#define SK_RXQ2_Y2_PREF_FIFOWM  0x04F8
+#define SK_RXQ2_Y2_PREF_FIFOLV  0x04FC
 
 #define SK_RXBMU_CLR_IRQ_ERR		0x00000001
 #define SK_RXBMU_CLR_IRQ_EOF		0x00000002
@@ -758,28 +810,17 @@
 #define SK_TXQS1_TEST1		0x063C
 #define SK_TXQS1_TEST2		0x0640
 #define SK_TXQS1_TEST3		0x0644
-/* yukon-2 only */
-#define SK_TXQS1_Y2_WM		0x0640
-#define SK_TXQS1_Y2_AL		0x0642
-#define SK_TXQS1_Y2_RSP		0x0644
-#define SK_TXQS1_Y2_RSL		0x0646
-#define SK_TXQS1_Y2_RP		0x0648
-#define SK_TXQS1_Y2_RL		0x064A
-#define SK_TXQS1_Y2_WP		0x064C
-#define SK_TXQS1_Y2_WSP		0x064D
-#define SK_TXQS1_Y2_WL		0x064E
-#define SK_TXQS1_Y2_WSL		0x064F
 /* yukon-2 only (prefetch unit) */
-#define SK_TXQS1_Y2_PREF_CSR	0x0650
-#define SK_TXQS1_Y2_PREF_LIDX	0x0654
-#define SK_TXQS1_Y2_PREF_ADDRLO	0x0658
-#define SK_TXQS1_Y2_PREF_ADDRHI	0x065C
-#define SK_TXQS1_Y2_PREF_GETIDX	0x0660
-#define SK_TXQS1_Y2_PREF_PUTIDX	0x0664
-#define SK_TXQS1_Y2_PREF_FIFOWP	0x0670
-#define SK_TXQS1_Y2_PREF_FIFORP	0x0674
-#define SK_TXQS1_Y2_PREF_FIFOWM	0x0678
-#define SK_TXQS1_Y2_PREF_FIFOLV	0x067C
+#define SK_TXQS1_Y2_PREF_CSR    0x0650
+#define SK_TXQS1_Y2_PREF_LIDX   0x0654
+#define SK_TXQS1_Y2_PREF_ADDRLO 0x0658
+#define SK_TXQS1_Y2_PREF_ADDRHI 0x065C
+#define SK_TXQS1_Y2_PREF_GETIDX 0x0660 
+#define SK_TXQS1_Y2_PREF_PUTIDX 0x0664
+#define SK_TXQS1_Y2_PREF_FIFOWP 0x0670
+#define SK_TXQS1_Y2_PREF_FIFORP 0x0674
+#define SK_TXQS1_Y2_PREF_FIFOWM 0x0678
+#define SK_TXQS1_Y2_PREF_FIFOLV 0x067C
 
 /* Block 13 -- TX async queue 1 */
 #define SK_TXQA1_BUFCNT		0x0680
@@ -803,27 +844,27 @@
 #define SK_TXQA1_TEST2		0x06C0
 #define SK_TXQA1_TEST3		0x06C4
 /* yukon-2 only */
-#define SK_TXQA1_Y2_WM		0x06C0
-#define SK_TXQA1_Y2_AL		0x06C2
-#define SK_TXQA1_Y2_RSP		0x06C4
-#define SK_TXQA1_Y2_RSL		0x06C6
-#define SK_TXQA1_Y2_RP		0x06C8
-#define SK_TXQA1_Y2_RL		0x06CA
-#define SK_TXQA1_Y2_WP		0x06CC
-#define SK_TXQA1_Y2_WSP		0x06CD
-#define SK_TXQA1_Y2_WL		0x06CE
-#define SK_TXQA1_Y2_WSL		0x06CF
+#define SK_TXQA1_Y2_WM          0x06C0
+#define SK_TXQA1_Y2_AL          0x06C2
+#define SK_TXQA1_Y2_RSP         0x06C4
+#define SK_TXQA1_Y2_RSL         0x06C6
+#define SK_TXQA1_Y2_RP          0x06C8
+#define SK_TXQA1_Y2_RL          0x06CA
+#define SK_TXQA1_Y2_WP          0x06CC
+#define SK_TXQA1_Y2_WSP         0x06CD
+#define SK_TXQA1_Y2_WL          0x06CE
+#define SK_TXQA1_Y2_WSL         0x06CF
 /* yukon-2 only (prefetch unit) */
-#define SK_TXQA1_Y2_PREF_CSR	0x06D0
-#define SK_TXQA1_Y2_PREF_LIDX	0x06D4
-#define SK_TXQA1_Y2_PREF_ADDRLO	0x06D8
-#define SK_TXQA1_Y2_PREF_ADDRHI	0x06DC
-#define SK_TXQA1_Y2_PREF_GETIDX	0x06E0
-#define SK_TXQA1_Y2_PREF_PUTIDX	0x06E4
-#define SK_TXQA1_Y2_PREF_FIFOWP	0x06F0
-#define SK_TXQA1_Y2_PREF_FIFORP	0x06F4
-#define SK_TXQA1_Y2_PREF_FIFOWM	0x06F8
-#define SK_TXQA1_Y2_PREF_FIFOLV	0x06FC
+#define SK_TXQA1_Y2_PREF_CSR    0x06D0
+#define SK_TXQA1_Y2_PREF_LIDX   0x06D4
+#define SK_TXQA1_Y2_PREF_ADDRLO 0x06D8
+#define SK_TXQA1_Y2_PREF_ADDRHI 0x06DC
+#define SK_TXQA1_Y2_PREF_GETIDX 0x06E0
+#define SK_TXQA1_Y2_PREF_PUTIDX 0x06E4
+#define SK_TXQA1_Y2_PREF_FIFOWP 0x06F0
+#define SK_TXQA1_Y2_PREF_FIFORP 0x06F4
+#define SK_TXQA1_Y2_PREF_FIFOWM 0x06F8
+#define SK_TXQA1_Y2_PREF_FIFOLV 0x06FC
 
 /* Block 14 -- TX sync queue 2 */
 #define SK_TXQS2_BUFCNT		0x0700
@@ -847,27 +888,27 @@
 #define SK_TXQS2_TEST2		0x0740
 #define SK_TXQS2_TEST3		0x0744
 /* yukon-2 only */
-#define SK_TXQS2_Y2_WM		0x0740
-#define SK_TXQS2_Y2_AL		0x0742
-#define SK_TXQS2_Y2_RSP		0x0744
-#define SK_TXQS2_Y2_RSL		0x0746
-#define SK_TXQS2_Y2_RP		0x0748
-#define SK_TXQS2_Y2_RL		0x074A
-#define SK_TXQS2_Y2_WP		0x074C
-#define SK_TXQS2_Y2_WSP		0x074D
-#define SK_TXQS2_Y2_WL		0x074E
-#define SK_TXQS2_Y2_WSL		0x074F
+#define SK_TXQS2_Y2_WM          0x0740
+#define SK_TXQS2_Y2_AL          0x0742
+#define SK_TXQS2_Y2_RSP         0x0744
+#define SK_TXQS2_Y2_RSL         0x0746
+#define SK_TXQS2_Y2_RP          0x0748
+#define SK_TXQS2_Y2_RL          0x074A
+#define SK_TXQS2_Y2_WP          0x074C
+#define SK_TXQS2_Y2_WSP         0x074D
+#define SK_TXQS2_Y2_WL          0x074E
+#define SK_TXQS2_Y2_WSL         0x074F
 /* yukon-2 only (prefetch unit) */
-#define SK_TXQS2_Y2_PREF_CSR	0x0750
-#define SK_TXQS2_Y2_PREF_LIDX	0x0754
-#define SK_TXQS2_Y2_PREF_ADDRLO	0x0758
-#define SK_TXQS2_Y2_PREF_ADDRHI	0x075C
-#define SK_TXQS2_Y2_PREF_GETIDX	0x0760
-#define SK_TXQS2_Y2_PREF_PUTIDX	0x0764
-#define SK_TXQS2_Y2_PREF_FIFOWP	0x0770
-#define SK_TXQS2_Y2_PREF_FIFORP	0x0774
-#define SK_TXQS2_Y2_PREF_FIFOWM	0x0778
-#define SK_TXQS2_Y2_PREF_FIFOLV	0x077C
+#define SK_TXQS2_Y2_PREF_CSR    0x0750
+#define SK_TXQS2_Y2_PREF_LIDX   0x0754
+#define SK_TXQS2_Y2_PREF_ADDRLO 0x0758
+#define SK_TXQS2_Y2_PREF_ADDRHI 0x075C
+#define SK_TXQS2_Y2_PREF_GETIDX 0x0760
+#define SK_TXQS2_Y2_PREF_PUTIDX 0x0764
+#define SK_TXQS2_Y2_PREF_FIFOWP 0x0770
+#define SK_TXQS2_Y2_PREF_FIFORP 0x0774
+#define SK_TXQS2_Y2_PREF_FIFOWM 0x0778
+#define SK_TXQS2_Y2_PREF_FIFOLV 0x077C
 
 /* Block 15 -- TX async queue 2 */
 #define SK_TXQA2_BUFCNT		0x0780
@@ -891,27 +932,27 @@
 #define SK_TXQA2_TEST2		0x07C0
 #define SK_TXQA2_TEST3		0x07C4
 /* yukon-2 only */
-#define SK_TXQA2_Y2_WM		0x07C0
-#define SK_TXQA2_Y2_AL		0x07C2
-#define SK_TXQA2_Y2_RSP		0x07C4
-#define SK_TXQA2_Y2_RSL		0x07C6
-#define SK_TXQA2_Y2_RP		0x07C8
-#define SK_TXQA2_Y2_RL		0x07CA
-#define SK_TXQA2_Y2_WP		0x07CC
-#define SK_TXQA2_Y2_WSP		0x07CD
-#define SK_TXQA2_Y2_WL		0x07CE
-#define SK_TXQA2_Y2_WSL		0x07CF
+#define SK_TXQA2_Y2_WM          0x07C0
+#define SK_TXQA2_Y2_AL          0x07C2
+#define SK_TXQA2_Y2_RSP         0x07C4
+#define SK_TXQA2_Y2_RSL         0x07C6
+#define SK_TXQA2_Y2_RP          0x07C8
+#define SK_TXQA2_Y2_RL          0x07CA
+#define SK_TXQA2_Y2_WP          0x07CC
+#define SK_TXQA2_Y2_WSP         0x07CD
+#define SK_TXQA2_Y2_WL          0x07CE
+#define SK_TXQA2_Y2_WSL         0x07CF
 /* yukon-2 only (prefetch unit) */
-#define SK_TXQA2_Y2_PREF_CSR	0x07D0
-#define SK_TXQA2_Y2_PREF_LIDX	0x07D4
-#define SK_TXQA2_Y2_PREF_ADDRLO	0x07D8
-#define SK_TXQA2_Y2_PREF_ADDRHI	0x07DC
-#define SK_TXQA2_Y2_PREF_GETIDX	0x07E0
-#define SK_TXQA2_Y2_PREF_PUTIDX	0x07E4
-#define SK_TXQA2_Y2_PREF_FIFOWP	0x07F0
-#define SK_TXQA2_Y2_PREF_FIFORP	0x07F4
-#define SK_TXQA2_Y2_PREF_FIFOWM	0x07F8
-#define SK_TXQA2_Y2_PREF_FIFOLV	0x07FC
+#define SK_TXQA2_Y2_PREF_CSR    0x07D0
+#define SK_TXQA2_Y2_PREF_LIDX   0x07D4
+#define SK_TXQA2_Y2_PREF_ADDRLO 0x07D8
+#define SK_TXQA2_Y2_PREF_ADDRHI 0x07DC
+#define SK_TXQA2_Y2_PREF_GETIDX 0x07E0
+#define SK_TXQA2_Y2_PREF_PUTIDX 0x07E4
+#define SK_TXQA2_Y2_PREF_FIFOWP 0x07F0
+#define SK_TXQA2_Y2_PREF_FIFORP 0x07F4
+#define SK_TXQA2_Y2_PREF_FIFOWM 0x07F8
+#define SK_TXQA2_Y2_PREF_FIFOLV 0x07FC
 
 #define SK_TXBMU_CLR_IRQ_ERR		0x00000001
 #define SK_TXBMU_CLR_IRQ_EOF		0x00000002
@@ -1010,12 +1051,12 @@
 #define SK_TXRBA2_LVL		0x0BA4
 #define SK_TXRBA2_CTLTST	0x0BA8
 
-#define SK_RBCTL_RESET		0x00000001
-#define SK_RBCTL_UNRESET	0x00000002
-#define SK_RBCTL_OFF		0x00000004
-#define SK_RBCTL_ON		0x00000008
-#define SK_RBCTL_STORENFWD_OFF	0x00000010
-#define SK_RBCTL_STORENFWD_ON	0x00000020
+#define SK_RBCTL_RESET		0x01
+#define SK_RBCTL_UNRESET	0x02
+#define SK_RBCTL_OFF		0x04
+#define SK_RBCTL_ON		0x08
+#define SK_RBCTL_STORENFWD_OFF	0x10
+#define SK_RBCTL_STORENFWD_ON	0x20
 
 /* Block 24 -- RX MAC FIFO 1 regisrers and LINK_SYNC counter */
 #define SK_RXF1_END		0x0C00
@@ -1042,7 +1083,7 @@
 #define SK_RXMF1_THRESHOLD	0x0C44
 #define SK_RXMF1_CTRL_TEST	0x0C48
 #define SK_RXMF1_FLUSH_MASK	0x0C4C
-#define SK_RXMF1_FLUSH_THRESHOLD	0x0C50
+#define SK_RXMF1_FLUSH_THRESHOLD        0x0C50
 #define SK_RXMF1_WRITE_PTR	0x0C60
 #define SK_RXMF1_WRITE_LEVEL	0x0C68
 #define SK_RXMF1_READ_PTR	0x0C70
@@ -1056,7 +1097,7 @@
 #define SK_RFCTL_RD_PTR_TST_OFF	0x00000200	/* Read pointer test off */
 #define SK_RFCTL_RD_PTR_STEP	0x00000100	/* Read pointer increment */
 #define SK_RFCTL_FIFO_FLUSH_ON	0x00000080	/* RX FIFO Flush mode on */
-#define SK_RFCTL_FIFO_FLUSH_OFF	0x00000040	/* RX FIFO Flush mode off */
+#define SK_RFCTL_FIFO_FLUSH_OFF 0x00000040      /* RX FIFO Flsuh mode off */
 #define SK_RFCTL_RX_FIFO_OVER	0x00000020	/* Clear IRQ RX FIFO Overrun */
 #define SK_RFCTL_FRAME_RX_DONE	0x00000010	/* Clear IRQ Frame RX Done */
 #define SK_RFCTL_OPERATION_ON	0x00000008	/* Operational mode on */
@@ -1064,7 +1105,7 @@
 #define SK_RFCTL_RESET_CLEAR	0x00000002	/* MAC FIFO Reset Clear */
 #define SK_RFCTL_RESET_SET	0x00000001	/* MAC FIFO Reset Set */
 
-#define SK_RFCTL_FIFO_THRESHOLD	0x0a	/* flush threshold (default) */
+#define SK_RFCTL_FIFO_THRESHOLD 0x0a    /* flush threshold (default) */
 
 /* Block 25 -- RX MAC FIFO 2 regisrers and LINK_SYNC counter */
 #define SK_RXF2_END		0x0C80
@@ -1196,9 +1237,9 @@
 
 #define SK_DPT_TIMER_MAX	0x00ffffffff	/* 214.75ms at 78.125MHz */
 
-#define SK_DPT_TIMER_CTRL	0x0e08	/* Timer Control 16 bits */
-#define SK_DPT_TCTL_STOP	0x0001	/* Stop Timer */
-#define SK_DPT_TCTL_START	0x0002	/* Start Timer */
+#define SK_DPT_TIMER_CTRL	0x0e08	/* Timer Control 8 bits */
+#define SK_DPT_TCTL_STOP	0x01	/* Stop Timer */
+#define SK_DPT_TCTL_START	0x02	/* Start Timer */
 
 #define SK_DPT_TIMER_TEST	0x0e0a	/* Timer Test 16 bits */
 #define SK_DPT_TTEST_STEP	0x0001	/* Timer Decrement */
@@ -1206,7 +1247,7 @@
 #define SK_DPT_TTEST_ON		0x0004	/* Test Mode On */
 
 #define SK_TSTAMP_COUNT		0x0e14
-#define SK_TSTAMP_CTL 		0x0e18
+#define SK_TSTAMP_CTL		0x0e18
 
 #define SK_TSTAMP_IRQ_CLEAR	0x01
 #define SK_TSTAMP_STOP		0x02
@@ -1247,6 +1288,8 @@
 #define SK_STAT_BMU_OFF		0x00000004
 #define SK_STAT_BMU_ON		0x00000008
 #define SK_STAT_BMU_IRQ_CLEAR	0x00000010
+
+#define SK_STAT_BMU_TXTHIDX_MSK	0x0fff
 
 /* Block 30 -- GMAC/GPHY Control Registers (Yukon Only)*/
 #define SK_GMAC_CTRL		0x0f00	/* GMAC Control Register */
@@ -1459,11 +1502,28 @@
 #define SK_PCI_PWRMGMTCAP	0x004A /* 16 bits */
 #define SK_PCI_PWRMGMTCTRL	0x004C /* 16 bits */
 #define SK_PCI_PME_EVENT	0x004F
+#define SK_PCI_VPD_CAPID	0x0050
+#define SK_PCI_VPD_NEXTPTR	0x0051
+#define SK_PCI_VPD_ADDR		0x0052
+#define SK_PCI_VPD_DATA		0x0054
+#define SK_PCI_OURREG3		0x0080 /* Yukon EC U */
+#define SK_PCI_OURREG4		0x0084
+#define SK_PCI_OURREG5		0x0088
 
-#define SK_Y2_REG1_PHY1_PWRD	0x04000000
-#define SK_Y2_REG1_PHY2_PWRD	0x08000000
 #define SK_Y2_REG1_PHY1_COMA	0x10000000
 #define SK_Y2_REG1_PHY2_COMA	0x20000000
+
+/* SK_PCI_OURREG4 32bits (Yukon-ECU only) */
+#define SK_Y2_REG4_TIMER_VALUE_MSK	(0xff << 16)
+#define SK_Y2_REG4_FORCE_ASPM_REQUEST	__BIT(15)	
+#define SK_Y2_REG4_ASPM_GPHY_LINK_DOWN	__BIT(14)
+#define SK_Y2_REG4_ASPM_INT_FIFO_EMPTY	__BIT(13)
+#define SK_Y2_REG4_ASPM_CLKRUN_REQUEST	__BIT(12)
+#define SK_Y2_REG4_ASPM_FORCE_CLKREQ_ENA	__BIT(4)
+#define SK_Y2_REG4_ASPM_CLKREQ_PAD	__BIT(3)
+#define SK_Y2_REG4_ASPM_A1_MODE_SELECT	__BIT(2)
+#define SK_Y2_REG4_CLK_GATE_PEX_UNIT_ENA	__BIT(1)
+#define SK_Y2_REG4_CLK_GATE_ROOT_COR_ENA	__BIT(0)
 
 #define SK_PSTATE_MASK		0x0003
 #define SK_PSTATE_D0		0x0000
@@ -1472,6 +1532,30 @@
 #define SK_PSTATE_D3		0x0003
 #define SK_PME_EN		0x0010
 #define SK_PME_STATUS		0x8000
+
+/*
+ * VPD flag bit. Set to 0 to initiate a read, will become 1 when
+ * read is complete. Set to 1 to initiate a write, will become 0
+ * when write is finished.
+ */
+#define SK_VPD_FLAG		0x8000
+
+/* VPD structures */
+struct vpd_res {
+	u_int8_t		vr_id;
+	u_int8_t		vr_len;
+	u_int8_t		vr_pad;
+};
+
+struct vpd_key {
+	char			vk_key[2];
+	u_int8_t		vk_len;
+};
+
+#define VPD_RES_ID	0x82	/* ID string */
+#define VPD_RES_READ	0x90	/* start of read only area */
+#define VPD_RES_WRITE	0x81	/* start of read/write area */
+#define VPD_RES_END	0x78	/* end tag */
 
 #define CSR_WRITE_4(sc, reg, val) \
 	bus_space_write_4((sc)->sk_btag, (sc)->sk_bhandle, (reg), (val))
@@ -1490,8 +1574,13 @@
 struct sk_type {
 	u_int16_t		sk_vid;
 	u_int16_t		sk_did;
-	char			*sk_name;
+	const char		*sk_name;
 };
+
+#define SK_ADDR_LO(x)	((u_int64_t) (x) & 0xffffffff)
+#define SK_ADDR_HI(x)	((u_int64_t) (x) >> 32)
+
+#define SK_RING_ALIGN	64
 
 #define SK_ADDR_LO(x)	((u_int64_t) (x) & 0xffffffff)
 #define SK_ADDR_HI(x)	((u_int64_t) (x) >> 32)
@@ -1598,6 +1687,22 @@ struct msk_status_desc {
 #define SK_Y2_STOPC_TXSTAT	0x68
 #define SK_Y2_STOPC_OWN		0x80
 
+#define SK_Y2_ST_TXA1_MSKL	0x00000fff
+#define SK_Y2_ST_TXA1_SHIFT	0
+
+#define SK_Y2_ST_TXA2_MSKL	0xff000000
+#define SK_Y2_ST_TXA2_SHIFTL	24
+#define SK_Y2_ST_TXA2_MSKH	0x000f
+#define SK_Y2_ST_TXA2_SHIFTH	8
+
+#define SK_Y2_ST_TXA1_MSKL	0x00000fff
+#define SK_Y2_ST_TXA1_SHIFT	0
+
+#define SK_Y2_ST_TXA2_MSKL	0xff000000
+#define SK_Y2_ST_TXA2_SHIFTL	24
+#define SK_Y2_ST_TXA2_MSKH	0x000f
+#define SK_Y2_ST_TXA2_SHIFTH	8
+
 #define MSK_TX_RING_CNT		512
 #define MSK_RX_RING_CNT		512
 #define MSK_STATUS_RING_CNT	2048
@@ -1611,9 +1716,9 @@ struct msk_status_desc {
  * receive descriptors.
  */
 #define SK_JUMBO_FRAMELEN	9018
-#define SK_JUMBO_MTU		(SK_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
+#define SK_JUMBO_MTU		(SK_JUMBO_FRAMELEN-ETHER_HDR_LEN-ETHER_CRC_LEN)
 #define SK_MIN_FRAMELEN		(ETHER_MIN_LEN - ETHER_CRC_LEN)
-#define SK_JSLOTS		((SK_RX_RING_CNT / 2) * 3)
+#define SK_JSLOTS		384
 
 #define SK_JRAWLEN	(SK_JUMBO_FRAMELEN + ETHER_ALIGN)
 #define SK_JLEN		SK_JRAWLEN
@@ -1629,6 +1734,7 @@ struct msk_status_desc {
 
 #define SK_MAXUNIT	256
 #define SK_TIMEOUT	1000
+#define ETHER_ALIGN	2
 
 /* YUKON registers */
 
@@ -1785,6 +1891,42 @@ struct msk_status_desc {
 
 #define YU_PAR_MIB_CLR		0x0020	/* MIB Counters Clear Mode */
 #define YU_PAR_LOAD_TSTCNT	0x0010	/* Load count 0xfffffff0 into cntr */
+
+/* Receive status */
+#define YU_RXSTAT_FOFL          0x00000001      /* Rx FIFO overflow */
+#define YU_RXSTAT_CRCERR        0x00000002      /* CRC error */
+#define YU_RXSTAT_FRAGMENT      0x00000008      /* fragment */
+#define YU_RXSTAT_LONGERR       0x00000010      /* too long packet */
+#define YU_RXSTAT_MIIERR        0x00000020      /* MII error */
+#define YU_RXSTAT_BADFC         0x00000040      /* bad flow-control packet */
+#define YU_RXSTAT_GOODFC        0x00000080      /* good flow-control packet */
+#define YU_RXSTAT_RXOK          0x00000100      /* receice OK (Good packet) */
+#define YU_RXSTAT_BROADCAST     0x00000200      /* broadcast packet */
+#define YU_RXSTAT_MULTICAST     0x00000400      /* multicast packet */
+#define YU_RXSTAT_RUNT          0x00000800      /* undersize packet */
+#define YU_RXSTAT_JABBER        0x00001000      /* jabber packet */
+#define YU_RXSTAT_VLAN          0x00002000      /* VLAN packet */
+#define YU_RXSTAT_LENSHIFT      16
+
+#define YU_RXSTAT_BYTES(x)      ((x) >> YU_RXSTAT_LENSHIFT)
+
+/* Receive status */
+#define YU_RXSTAT_FOFL		0x00000001	/* Rx FIFO overflow */
+#define YU_RXSTAT_CRCERR	0x00000002	/* CRC error */
+#define YU_RXSTAT_FRAGMENT	0x00000008	/* fragment */
+#define YU_RXSTAT_LONGERR	0x00000010	/* too long packet */
+#define YU_RXSTAT_MIIERR	0x00000020	/* MII error */
+#define YU_RXSTAT_BADFC		0x00000040	/* bad flow-control packet */
+#define YU_RXSTAT_GOODFC	0x00000080	/* good flow-control packet */
+#define YU_RXSTAT_RXOK		0x00000100	/* receice OK (Good packet) */
+#define YU_RXSTAT_BROADCAST	0x00000200	/* broadcast packet */
+#define YU_RXSTAT_MULTICAST	0x00000400	/* multicast packet */
+#define YU_RXSTAT_RUNT		0x00000800	/* undersize packet */
+#define YU_RXSTAT_JABBER	0x00001000	/* jabber packet */
+#define YU_RXSTAT_VLAN		0x00002000	/* VLAN packet */
+#define YU_RXSTAT_LENSHIFT	16
+
+#define	YU_RXSTAT_BYTES(x)	((x) >> YU_RXSTAT_LENSHIFT)
 
 /* Receive status */
 #define YU_RXSTAT_FOFL		0x00000001	/* Rx FIFO overflow */
@@ -2176,5 +2318,4 @@ struct msk_status_desc {
 #define XM_RESAB_FDMODESEL	0x0020
 #define XM_RESAB_HDMODESEL	0x0040
 #define XM_RESAB_PAUSEBITS	0x0180
-
-#define SK_HASH_BITS		6
+#endif /* _DEV_PCI_IF_SKREG_H_ */

@@ -1,11 +1,10 @@
-/*	$OpenBSD: umidivar.h,v 1.11 2007/06/06 19:25:49 mk Exp $ */
-/*	$NetBSD: umidivar.h,v 1.5 2002/09/12 21:00:42 augustss Exp $	*/
+/*	$NetBSD: umidivar.h,v 1.13 2008/07/08 11:34:43 gmcgarry Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Takuya SHIOZAKI (tshiozak@netbsd.org).
+ * by Takuya SHIOZAKI (tshiozak@NetBSD.org).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,11 +29,6 @@
  */
 
 #define UMIDI_PACKET_SIZE 4
-struct umidi_packet {
-	unsigned	status;
-	unsigned	index;
-	unsigned char	buf[UMIDI_PACKET_SIZE];		/* common/voice packet */
-};
 
 /*
  * hierarchie
@@ -56,10 +43,11 @@ struct umidi_packet {
 /* midi device */
 struct umidi_mididev {
 	struct umidi_softc	*sc;
-	struct device		*mdev;
+	device_t		mdev;
 	/* */
 	struct umidi_jack	*in_jack;
 	struct umidi_jack	*out_jack;
+	char			*label;
 	/* */
 	int			opened;
 	int			flags;
@@ -70,25 +58,22 @@ struct umidi_jack {
 	struct umidi_endpoint	*endpoint;
 	/* */
 	int			cable_number;
-	struct umidi_packet	packet;
 	void			*arg;
 	int			binded;
 	int			opened;
-	SIMPLEQ_ENTRY(umidi_jack) intrq_entry;	
-#ifdef DIAGNOSTIC
-	unsigned 		wait;
-#endif
+	unsigned char		*midiman_ppkt;
 	union {
 		struct {
-			void				(*intr)(void *);
+			void			(*intr)(void *);
 		} out;
 		struct {
-			void				(*intr)(void *, int);
+			void			(*intr)(void *, int);
 		} in;
 	} u;
 };
 
 #define UMIDI_MAX_EPJACKS	16
+typedef unsigned char (*umidi_packet_bufp)[UMIDI_PACKET_SIZE];
 /* endpoint data */
 struct umidi_endpoint {
 	struct umidi_softc	*sc;
@@ -96,23 +81,26 @@ struct umidi_endpoint {
 	int			addr;
 	usbd_pipe_handle	pipe;
 	usbd_xfer_handle	xfer;
-	unsigned char		*buffer;
-	unsigned		packetsize;
+	umidi_packet_bufp	buffer;
+	umidi_packet_bufp	next_slot;
+	u_int32_t               buffer_size;
+	int			num_scheduled;
 	int			num_open;
 	int			num_jacks;
+	int			soliciting;
+	void			*solicit_cookie;
+	int			armed;
 	struct umidi_jack	*jacks[UMIDI_MAX_EPJACKS];
-	unsigned		used;
-	unsigned		busy;
-	unsigned 		pending;
-	SIMPLEQ_HEAD(, umidi_jack) intrq;
+	u_int16_t		this_schedule; /* see UMIDI_MAX_EPJACKS */
+	u_int16_t		next_schedule;
 };
 
 /* software context */
 struct umidi_softc {
-	struct device		sc_dev;
+	USBBASEDEVICE		sc_dev;
 	usbd_device_handle	sc_udev;
 	usbd_interface_handle	sc_iface;
-	struct umidi_quirk	*sc_quirk;
+	const struct umidi_quirk	*sc_quirk;
 
 	int			sc_dying;
 
@@ -130,4 +118,5 @@ struct umidi_softc {
 	int			sc_in_num_endpoints;
 	struct umidi_endpoint	*sc_in_ep;
 	struct umidi_endpoint	*sc_endpoints;
+	int			cblnums_global;
 };

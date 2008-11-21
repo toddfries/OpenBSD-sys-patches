@@ -1,8 +1,8 @@
-/*	$OpenBSD: setjmp.h,v 1.3 2000/04/26 03:08:42 bjc Exp $	*/
-/*	$NetBSD: setjmp.h,v 1.1 1994/12/20 10:37:18 cgd Exp $	*/
+/*	$NetBSD: setjmp.h,v 1.5 2008/08/29 18:25:02 matt Exp $	*/
 
 /*
  * machine/setjmp.h: machine dependent setjmp-related information.
  */
 
-#define	_JBLEN	14		/* size, in longs, of a jmp_buf */
+#define	_JBLEN	24		/* size, in longs, of a jmp_buf */
+/* 11 for sigcontext, 6 for r6-r11, and 7 extra */

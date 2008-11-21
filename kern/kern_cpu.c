@@ -1,7 +1,7 @@
-/*	$NetBSD: kern_cpu.c,v 1.14 2007/11/07 00:23:20 ad Exp $	*/
+/*	$NetBSD: kern_cpu.c,v 1.38 2008/11/06 16:48:51 rmind Exp $	*/
 
 /*-
- * Copyright (c) 2007 The NetBSD Foundation, Inc.
+ * Copyright (c) 2007, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,8 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-
-__KERNEL_RCSID(0, "$NetBSD: kern_cpu.c,v 1.14 2007/11/07 00:23:20 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_cpu.c,v 1.38 2008/11/06 16:48:51 rmind Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,10 +67,15 @@ __KERNEL_RCSID(0, "$NetBSD: kern_cpu.c,v 1.14 2007/11/07 00:23:20 ad Exp $");
 #include <sys/cpu.h>
 #include <sys/cpuio.h>
 #include <sys/proc.h>
+#include <sys/percpu.h>
 #include <sys/kernel.h>
 #include <sys/kauth.h>
 #include <sys/xcall.h>
 #include <sys/pool.h>
+#include <sys/kmem.h>
+#include <sys/select.h>
+#include <sys/namei.h>
+#include <sys/callout.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -98,18 +95,23 @@ const struct cdevsw cpuctl_cdevsw = {
 kmutex_t cpu_lock;
 int	ncpu;
 int	ncpuonline;
+bool	mp_online;
+struct	cpuqueue cpu_queue = CIRCLEQ_HEAD_INITIALIZER(cpu_queue);
+
+static struct cpu_info *cpu_infos[MAXCPUS];
 
 int
 mi_cpu_attach(struct cpu_info *ci)
 {
-	struct schedstate_percpu *spc = &ci->ci_schedstate;
 	int error;
 
 	ci->ci_index = ncpu;
+	cpu_infos[cpu_index(ci)] = ci;
+	CIRCLEQ_INSERT_TAIL(&cpu_queue, ci, ci_data.cpu_qchain);
+	TAILQ_INIT(&ci->ci_data.cpu_ld_locks);
+	__cpu_simple_lock_init(&ci->ci_data.cpu_ld_lock);
 
-	mutex_init(&spc->spc_lwplock, MUTEX_SPIN, IPL_SCHED);
 	sched_cpuattach(ci);
-	uvm_cpu_attach(ci);
 
 	error = create_idle_lwp(ci);
 	if (error != 0) {
@@ -122,9 +124,13 @@ mi_cpu_attach(struct cpu_info *ci)
 	else
 		ci->ci_data.cpu_onproc = ci->ci_data.cpu_idlelwp;
 
+	percpu_init_cpu(ci);
 	softint_init(ci);
+	callout_init_cpu(ci);
 	xc_init_cpu(ci);
 	pool_cache_cpu_init(ci);
+	selsysinit(ci);
+	cache_cpu_init(ci);
 	TAILQ_INIT(&ci->ci_data.cpu_biodone);
 	ncpu++;
 	ncpuonline++;
@@ -152,12 +158,14 @@ cpuctl_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 	mutex_enter(&cpu_lock);
 	switch (cmd) {
 	case IOC_CPU_SETSTATE:
-		error = kauth_authorize_generic(l->l_cred,
-		    KAUTH_GENERIC_ISSUSER, NULL);
+		cs = data;
+		error = kauth_authorize_system(l->l_cred,
+		    KAUTH_SYSTEM_CPU, KAUTH_REQ_SYSTEM_CPU_SETSTATE, cs, NULL,
+		    NULL);
 		if (error != 0)
 			break;
-		cs = data;
-		if ((ci = cpu_lookup(cs->cs_id)) == NULL) {
+		if (cs->cs_id >= __arraycount(cpu_infos) ||
+		    (ci = cpu_lookup(cs->cs_id)) == NULL) {
 			error = ESRCH;
 			break;
 		}
@@ -165,7 +173,7 @@ cpuctl_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 			error = EOPNOTSUPP;
 			break;
 		}
-		error = cpu_setonline(ci, cs->cs_online);
+		error = cpu_setstate(ci, cs->cs_online);
 		break;
 
 	case IOC_CPU_GETSTATE:
@@ -173,7 +181,8 @@ cpuctl_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 		id = cs->cs_id;
 		memset(cs, 0, sizeof(*cs));
 		cs->cs_id = id;
-		if ((ci = cpu_lookup(id)) == NULL) {
+		if (cs->cs_id >= __arraycount(cpu_infos) ||
+		    (ci = cpu_lookup(id)) == NULL) {
 			error = ESRCH;
 			break;
 		}
@@ -194,7 +203,7 @@ cpuctl_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 		if (ci == NULL)
 			error = ESRCH;
 		else
-			*(int *)data = ci->ci_cpuid;
+			*(int *)data = cpu_index(ci);
 		break;
 
 	case IOC_CPU_GETCOUNT:
@@ -211,98 +220,86 @@ cpuctl_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 }
 
 struct cpu_info *
-cpu_lookup(cpuid_t id)
+cpu_lookup(u_int idx)
 {
-	CPU_INFO_ITERATOR cii;
-	struct cpu_info *ci;
+	struct cpu_info *ci = cpu_infos[idx];
 
-	for (CPU_INFO_FOREACH(cii, ci)) {
-		if (ci->ci_cpuid == id)
-			return ci;
-	}
+	KASSERT(idx < __arraycount(cpu_infos));
+	KASSERT(ci == NULL || cpu_index(ci) == idx);
 
-	return NULL;
+	return ci;
 }
 
 static void
 cpu_xc_offline(struct cpu_info *ci)
 {
 	struct schedstate_percpu *spc, *mspc = NULL;
-	struct cpu_info *mci;
+	struct cpu_info *target_ci;
 	struct lwp *l;
 	CPU_INFO_ITERATOR cii;
 	int s;
 
+	/*
+	 * Thread which sent unicast (separate context) is holding
+	 * the cpu_lock for us.
+	 */
 	spc = &ci->ci_schedstate;
 	s = splsched();
 	spc->spc_flags |= SPCF_OFFLINE;
 	splx(s);
 
 	/* Take the first available CPU for the migration */
-	for (CPU_INFO_FOREACH(cii, mci)) {
-		mspc = &mci->ci_schedstate;
+	for (CPU_INFO_FOREACH(cii, target_ci)) {
+		mspc = &target_ci->ci_schedstate;
 		if ((mspc->spc_flags & SPCF_OFFLINE) == 0)
 			break;
 	}
-	KASSERT(mci != NULL);
+	KASSERT(target_ci != NULL);
 
 	/*
-	 * Migrate all non-bound threads to the other CPU.
-	 * Please note, that this runs from the xcall thread, thus handling
-	 * of LSONPROC is not needed.
+	 * Migrate all non-bound threads to the other CPU.  Note that this
+	 * runs from the xcall thread, thus handling of LSONPROC is not needed.
 	 */
-	mutex_enter(&proclist_lock);
-
-	/*
-	 * Note that threads on the runqueue might sleep after this, but
-	 * sched_takecpu() would migrate such threads to the appropriate CPU.
-	 */
+	mutex_enter(proc_lock);
 	LIST_FOREACH(l, &alllwp, l_list) {
+		struct cpu_info *mci;
+
 		lwp_lock(l);
-		if (l->l_cpu == ci && (l->l_stat == LSSLEEP ||
-		    l->l_stat == LSSTOP || l->l_stat == LSSUSPENDED)) {
-			KASSERT((l->l_flag & LW_RUNNING) == 0);
-			l->l_cpu = mci;
-		}
-		lwp_unlock(l);
-	}
-
-	/*
-	 * Runqueues are locked with the global lock if pointers match,
-	 * thus hold only one.  Otherwise, double-lock the runqueues.
-	 */
-	if (spc->spc_mutex == mspc->spc_mutex) {
-		spc_lock(ci);
-	} else if (ci < mci) {
-		spc_lock(ci);
-		spc_lock(mci);
-	} else {
-		spc_lock(mci);
-		spc_lock(ci);
-	}
-
-	/* Handle LSRUN and LSIDL cases */
-	LIST_FOREACH(l, &alllwp, l_list) {
-		if (l->l_cpu != ci || (l->l_flag & LW_BOUND))
+		if (l->l_cpu != ci || (l->l_pflag & (LP_BOUND | LP_INTR))) {
+			lwp_unlock(l);
 			continue;
-		if (l->l_stat == LSRUN && (l->l_flag & LW_INMEM) != 0) {
-			sched_dequeue(l);
-			l->l_cpu = mci;
-			lwp_setlock(l, mspc->spc_mutex);
-			sched_enqueue(l, false);
-		} else if (l->l_stat == LSRUN || l->l_stat == LSIDL) {
-			l->l_cpu = mci;
-			lwp_setlock(l, mspc->spc_mutex);
 		}
+		/* Normal case - no affinity */
+		if ((l->l_flag & LW_AFFINITY) == 0) {
+			lwp_migrate(l, target_ci);
+			continue;
+		}
+		/* Affinity is set, find an online CPU in the set */
+		KASSERT(l->l_affinity != NULL);
+		for (CPU_INFO_FOREACH(cii, mci)) {
+			mspc = &mci->ci_schedstate;
+			if ((mspc->spc_flags & SPCF_OFFLINE) == 0 &&
+			    kcpuset_isset(cpu_index(mci), l->l_affinity))
+				break;
+		}
+		if (mci == NULL) {
+			lwp_unlock(l);
+			mutex_exit(proc_lock);
+			goto fail;
+		}
+		lwp_migrate(l, mci);
 	}
-	if (spc->spc_mutex == mspc->spc_mutex) {
-		spc_unlock(ci);
-	} else {
-		spc_unlock(ci);
-		spc_unlock(mci);
-	}
+	mutex_exit(proc_lock);
 
-	mutex_exit(&proclist_lock);
+#ifdef __HAVE_MD_CPU_OFFLINE
+	cpu_offline_md();
+#endif
+	return;
+fail:
+	/* Just unset the SPCF_OFFLINE flag, caller will check */
+	s = splsched();
+	spc->spc_flags &= ~SPCF_OFFLINE;
+	splx(s);
 }
 
 static void
@@ -318,7 +315,7 @@ cpu_xc_online(struct cpu_info *ci)
 }
 
 int
-cpu_setonline(struct cpu_info *ci, bool online)
+cpu_setstate(struct cpu_info *ci, bool online)
 {
 	struct schedstate_percpu *spc;
 	CPU_INFO_ITERATOR cii;
@@ -340,9 +337,16 @@ cpu_setonline(struct cpu_info *ci, bool online)
 		if ((spc->spc_flags & SPCF_OFFLINE) != 0)
 			return 0;
 		nonline = 0;
+		/*
+		 * Ensure that at least one CPU within the processor set
+		 * stays online.  Revisit this later.
+		 */
 		for (CPU_INFO_FOREACH(cii, ci2)) {
-			nonline += ((ci2->ci_schedstate.spc_flags &
-			    SPCF_OFFLINE) == 0);
+			if ((ci2->ci_schedstate.spc_flags & SPCF_OFFLINE) != 0)
+				continue;
+			if (ci2->ci_schedstate.spc_psid != spc->spc_psid)
+				continue;
+			nonline++;
 		}
 		if (nonline == 1)
 			return EBUSY;
@@ -354,10 +358,11 @@ cpu_setonline(struct cpu_info *ci, bool online)
 	xc_wait(where);
 	if (online) {
 		KASSERT((spc->spc_flags & SPCF_OFFLINE) == 0);
-	} else {
-		KASSERT(spc->spc_flags & SPCF_OFFLINE);
+	} else if ((spc->spc_flags & SPCF_OFFLINE) == 0) {
+		/* If was not set offline, then it is busy */
+		return EBUSY;
 	}
-	spc->spc_lastmod = time_second;
 
+	spc->spc_lastmod = time_second;
 	return 0;
 }

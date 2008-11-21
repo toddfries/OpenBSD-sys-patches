@@ -1,5 +1,4 @@
-/*	$OpenBSD: cpuconf.h,v 1.5 2006/06/15 20:08:29 brad Exp $	*/
-/*	$NetBSD: cpuconf.h,v 1.12 2000/06/08 03:10:06 thorpej Exp $	*/
+/*	$NetBSD: cpuconf.h,v 1.13 2001/07/27 00:25:19 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.

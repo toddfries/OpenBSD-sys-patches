@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.h,v 1.24 2006/10/05 14:46:12 tsutsui Exp $	*/
+/*	$NetBSD: autoconf.h,v 1.26 2008/04/28 20:23:38 martin Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,12 +75,12 @@ extern struct sun68k_bus_space_tag mainbus_space_tag;
 int bus_scan(struct device *, struct cfdata *, const int *, void *);
 int bus_print(void *, const char *);
 int bus_peek(int, int, int);
-void * bus_mapin(int, int, int);
+void *bus_mapin(int, int, int);
 void bus_mapout(void *, int);
-void * bus_tmapin(int, int);
+void *bus_tmapin(int, int);
 void bus_tmapout(void *);
 
 /* Bus-error tolerant access to mapped address. */
-int 	peek_byte(caddr_t);
-int 	peek_word(caddr_t);
-int 	peek_long(caddr_t);
+int 	peek_byte(void *);
+int 	peek_word(void *);
+int 	peek_long(void *);

@@ -1,8 +1,7 @@
-/*	$OpenBSD: bus.h,v 1.9 2007/04/12 12:00:03 miod Exp $	*/
-/*	$NetBSD: bus.h,v 1.14 2000/06/26 04:56:13 simonb Exp $	*/
+/*	$NetBSD: bus.h,v 1.31 2008/04/28 20:23:39 martin Exp $	*/
 
 /*-
- * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997, 1998, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,36 +64,63 @@
 #ifndef _VAX_BUS_H_
 #define _VAX_BUS_H_
 
+#ifdef BUS_SPACE_DEBUG
+#include <sys/systm.h> /* for printf() prototype */
+/*
+ * Macros for sanity-checking the aligned-ness of pointers passed to
+ * bus space ops.  These are not strictly necessary on the VAX, but
+ * could lead to performance improvements, and help catch problems
+ * with drivers that would creep up on other architectures.
+ */
+#define	__BUS_SPACE_ALIGNED_ADDRESS(p, t)				\
+	((((u_long)(p)) & (sizeof(t)-1)) == 0)
+
+#define	__BUS_SPACE_ADDRESS_SANITY(p, t, d)				\
+({									\
+	if (__BUS_SPACE_ALIGNED_ADDRESS((p), t) == 0) {			\
+		printf("%s 0x%lx not aligned to %d bytes %s:%d\n",	\
+		    d, (u_long)(p), sizeof(t), __FILE__, __LINE__);	\
+	}								\
+	(void) 0;							\
+})
+
+#define BUS_SPACE_ALIGNED_POINTER(p, t) __BUS_SPACE_ALIGNED_ADDRESS(p, t)
+#else
+#define	__BUS_SPACE_ADDRESS_SANITY(p,t,d)	(void) 0
+#define BUS_SPACE_ALIGNED_POINTER(p, t) ALIGNED_POINTER(p, t)
+#endif /* BUS_SPACE_DEBUG */
+
 /*
  * Bus address and size types
  */
-typedef u_long bus_addr_t;
-typedef u_long bus_size_t;
+typedef paddr_t bus_addr_t;
+typedef psize_t bus_size_t;
 
 /*
  * Access methods for bus resources and address space.
  */
 typedef	struct vax_bus_space *bus_space_tag_t;
-typedef	u_long bus_space_handle_t;
+typedef	vaddr_t bus_space_handle_t;
 
 struct vax_bus_space {
 	/* cookie */
 	void		*vbs_cookie;
 
 	/* mapping/unmapping */
-	int		(*vbs_map)(void *, bus_addr_t, bus_size_t,
-			    int, bus_space_handle_t *, int);
-	void		(*vbs_unmap)(void *, bus_space_handle_t,
-			    bus_size_t, int);
-	int		(*vbs_subregion)(void *, bus_space_handle_t,
-			    bus_size_t, bus_size_t, bus_space_handle_t *);
+	int		(*vbs_map)(void *, bus_addr_t, bus_size_t, int,
+			    bus_space_handle_t *, int);
+	void		(*vbs_unmap)(void *, bus_space_handle_t, bus_size_t,
+			    int);
+	int		(*vbs_subregion)(void *, bus_space_handle_t, bus_size_t,
+			    bus_size_t, bus_space_handle_t *);
 
 	/* allocation/deallocation */
-	int		(*vbs_alloc)(void *, bus_addr_t, bus_addr_t,
-			    bus_size_t, bus_size_t, bus_size_t, int,
-			    bus_addr_t *, bus_space_handle_t *);
-	void		(*vbs_free)(void *, bus_space_handle_t,
-			    bus_size_t);
+	int		(*vbs_alloc)(void *, bus_addr_t, bus_addr_t, bus_size_t,
+			    bus_size_t, bus_size_t, int, bus_addr_t *,
+			    bus_space_handle_t *);
+	void		(*vbs_free)(void *, bus_space_handle_t, bus_size_t);
+	/* mmap bus space for user */
+	paddr_t		(*vbs_mmap)(void *, bus_addr_t, off_t, int, int);
 };
 
 /*
@@ -167,6 +186,13 @@ struct vax_bus_space {
 	(*(t)->vbs_free)((t)->vbs_cookie, (h), (s))
 
 /*
+ * Mmap bus space for a user application.
+ */
+#define bus_space_mmap(t, a, o, p, f)					\
+	(*(t)->vbs_mmap)((t)->vbs_cookie, (a), (o), (p), (f))
+
+
+/*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset);
  *
@@ -175,13 +201,15 @@ struct vax_bus_space {
  */
 
 #define	bus_space_read_1(t, h, o)					\
-	    (*(volatile u_int8_t *)((h) + (o)))
+	    (*(volatile uint8_t *)((h) + (o)))
 
 #define	bus_space_read_2(t, h, o)					\
-	    (*(volatile u_int16_t *)((h) + (o)))
+	 (__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr"),	\
+	    (*(volatile uint16_t *)((h) + (o))))
 
 #define	bus_space_read_4(t, h, o)					\
-	    (*(volatile u_int32_t *)((h) + (o)))
+	 (__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr"),	\
+	    (*(volatile uint32_t *)((h) + (o))))
 
 #if 0	/* Cause a link error for bus_space_read_8 */
 #define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
@@ -195,66 +223,63 @@ struct vax_bus_space {
  * Read `count' 1, 2, 4, or 8 byte quantities from bus space
  * described by tag/handle/offset and copy into buffer provided.
  */
-static __inline void vax_mem_read_multi_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
-static __inline void vax_mem_read_multi_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int16_t *, size_t);
-static __inline void vax_mem_read_multi_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int32_t *, size_t);
+static __inline void
+	vax_mem_read_multi_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint8_t *, size_t),
+	vax_mem_read_multi_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint16_t *, size_t),
+	vax_mem_read_multi_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint32_t *, size_t);
 
 #define	bus_space_read_multi_1(t, h, o, a, c)				\
 	vax_mem_read_multi_1((t), (h), (o), (a), (c))
 
 #define bus_space_read_multi_2(t, h, o, a, c)				\
-	vax_mem_read_multi_2((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint16_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	vax_mem_read_multi_2((t), (h), (o), (a), (c));		\
+} while (0)
 
 #define bus_space_read_multi_4(t, h, o, a, c)				\
-	vax_mem_read_multi_4((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint32_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	vax_mem_read_multi_4((t), (h), (o), (a), (c));		\
+} while (0)
 
 #if 0	/* Cause a link error for bus_space_read_multi_8 */
 #define	bus_space_read_multi_8	!!! bus_space_read_multi_8 unimplemented !!!
 #endif
 
 static __inline void
-vax_mem_read_multi_1(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int8_t *a;
-	size_t c;
+vax_mem_read_multi_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint8_t *a, size_t c)
 {
 	const bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, a++)
-		*a = *(volatile u_int8_t *)(addr);
+		*a = *(volatile uint8_t *)(addr);
 }
 
 static __inline void
-vax_mem_read_multi_2(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int16_t *a;
-	size_t c;
+vax_mem_read_multi_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint16_t *a, size_t c)
 {
 	const bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, a++)
-		*a = *(volatile u_int16_t *)(addr);
+		*a = *(volatile uint16_t *)(addr);
 }
 
 static __inline void
-vax_mem_read_multi_4(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int32_t *a;
-	size_t c;
+vax_mem_read_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint32_t *a, size_t c)
 {
 	const bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, a++)
-		*a = *(volatile u_int32_t *)(addr);
+		*a = *(volatile uint32_t *)(addr);
 }
 
 /*
@@ -268,20 +293,30 @@ vax_mem_read_multi_4(t, h, o, a, c)
  */
 
 static __inline void vax_mem_read_region_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int8_t *, size_t);
+	bus_space_handle_t, bus_size_t, uint8_t *, size_t);
 static __inline void vax_mem_read_region_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int16_t *, size_t);
+	bus_space_handle_t, bus_size_t, uint16_t *, size_t);
 static __inline void vax_mem_read_region_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int32_t *, size_t);
+	bus_space_handle_t, bus_size_t, uint32_t *, size_t);
 
 #define	bus_space_read_region_1(t, h, o, a, c)				\
-	vax_mem_read_region_1((t), (h), (o), (a), (c))
+do {									\
+	vax_mem_read_region_1((t), (h), (o), (a), (c));		\
+} while (0)
 
 #define bus_space_read_region_2(t, h, o, a, c)				\
-	vax_mem_read_region_2((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint16_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	vax_mem_read_region_2((t), (h), (o), (a), (c));		\
+} while (0)
 
 #define bus_space_read_region_4(t, h, o, a, c)				\
-	vax_mem_read_region_4((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint32_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	vax_mem_read_region_4((t), (h), (o), (a), (c));		\
+} while (0)
 
 #if 0	/* Cause a link error for bus_space_read_region_8 */
 #define	bus_space_read_region_8					\
@@ -289,45 +324,33 @@ static __inline void vax_mem_read_region_4(bus_space_tag_t,
 #endif
 
 static __inline void
-vax_mem_read_region_1(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int8_t *a;
-	size_t c;
+vax_mem_read_region_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint8_t *a, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr++, a++)
-		*a = *(volatile u_int8_t *)(addr);
+		*a = *(volatile uint8_t *)(addr);
 }
 
 static __inline void
-vax_mem_read_region_2(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int16_t *a;
-	size_t c;
+vax_mem_read_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint16_t *a, size_t c)
 {
 	bus_addr_t addr = h + o;
 
-	for (; c != 0; c--, addr++, a++)
-		*a = *(volatile u_int16_t *)(addr);
+	for (; c != 0; c--, addr += 2, a++)
+		*a = *(volatile uint16_t *)(addr);
 }
 
 static __inline void
-vax_mem_read_region_4(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int32_t *a;
-	size_t c;
+vax_mem_read_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint32_t *a, size_t c)
 {
 	bus_addr_t addr = h + o;
 
-	for (; c != 0; c--, addr++, a++)
-		*a = *(volatile u_int32_t *)(addr);
+	for (; c != 0; c--, addr += 4, a++)
+		*a = *(volatile uint32_t *)(addr);
 }
 
 /*
@@ -340,13 +363,21 @@ vax_mem_read_region_4(t, h, o, a, c)
  */
 
 #define	bus_space_write_1(t, h, o, v)					\
-	((void)(*(volatile u_int8_t *)((h) + (o)) = (v)))
+do {									\
+	((void)(*(volatile uint8_t *)((h) + (o)) = (v)));		\
+} while (0)
 
 #define	bus_space_write_2(t, h, o, v)					\
-	((void)(*(volatile u_int16_t *)((h) + (o)) = (v)))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	((void)(*(volatile uint16_t *)((h) + (o)) = (v)));		\
+} while (0)
 
 #define	bus_space_write_4(t, h, o, v)					\
-	((void)(*(volatile u_int32_t *)((h) + (o)) = (v)))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	((void)(*(volatile uint32_t *)((h) + (o)) = (v)));		\
+} while (0)
 
 #if 0	/* Cause a link error for bus_space_write_8 */
 #define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
@@ -360,21 +391,32 @@ vax_mem_read_region_4(t, h, o, a, c)
  * Write `count' 1, 2, 4, or 8 byte quantities from the buffer
  * provided to bus space described by tag/handle/offset.
  */
-static __inline void vax_mem_write_multi_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-static __inline void vax_mem_write_multi_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, const u_int16_t *, size_t);
-static __inline void vax_mem_write_multi_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, const u_int32_t *, size_t);
+static __inline void
+	vax_mem_write_multi_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    const uint8_t *, size_t),
+	vax_mem_write_multi_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    const uint16_t *, size_t),
+	vax_mem_write_multi_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    const uint32_t *, size_t);
 
 #define	bus_space_write_multi_1(t, h, o, a, c)				\
-	vax_mem_write_multi_1((t), (h), (o), (a), (c))
+do {									\
+	vax_mem_write_multi_1((t), (h), (o), (a), (c));		\
+} while (0)
 
 #define bus_space_write_multi_2(t, h, o, a, c)				\
-	vax_mem_write_multi_2((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint16_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	vax_mem_write_multi_2((t), (h), (o), (a), (c));		\
+} while (0)
 
 #define bus_space_write_multi_4(t, h, o, a, c)				\
-	vax_mem_write_multi_4((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint32_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	vax_mem_write_multi_4((t), (h), (o), (a), (c));		\
+} while (0)
 
 #if 0	/* Cause a link error for bus_space_write_multi_8 */
 #define	bus_space_write_multi_8(t, h, o, a, c)				\
@@ -382,45 +424,33 @@ static __inline void vax_mem_write_multi_4(bus_space_tag_t,
 #endif
 
 static __inline void
-vax_mem_write_multi_1(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	const u_int8_t *a;
-	size_t c;
+vax_mem_write_multi_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	const uint8_t *a, size_t c)
 {
 	const bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, a++)
-		*(volatile u_int8_t *)(addr) = *a;
+		*(volatile uint8_t *)(addr) = *a;
 }
 
 static __inline void
-vax_mem_write_multi_2(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	const u_int16_t *a;
-	size_t c;
+vax_mem_write_multi_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	const uint16_t *a, size_t c)
 {
 	const bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, a++)
-		*(volatile u_int16_t *)(addr) = *a;
+		*(volatile uint16_t *)(addr) = *a;
 }
 
 static __inline void
-vax_mem_write_multi_4(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	const u_int32_t *a;
-	size_t c;
+vax_mem_write_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	const uint32_t *a, size_t c)
 {
 	const bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, a++)
-		*(volatile u_int32_t *)(addr) = *a;
+		*(volatile uint32_t *)(addr) = *a;
 }
 
 /*
@@ -431,21 +461,30 @@ vax_mem_write_multi_4(t, h, o, a, c)
  * Write `count' 1, 2, 4, or 8 byte quantities from the buffer provided
  * to bus space described by tag/handle starting at `offset'.
  */
-static __inline void vax_mem_write_region_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, const u_int8_t *, size_t);
-static __inline void vax_mem_write_region_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, const u_int16_t *, size_t);
-static __inline void vax_mem_write_region_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, const u_int32_t *, size_t);
+static __inline void
+	vax_mem_write_region_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    const uint8_t *, size_t),
+	vax_mem_write_region_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    const uint16_t *, size_t),
+	vax_mem_write_region_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    const uint32_t *, size_t);
 
 #define	bus_space_write_region_1(t, h, o, a, c)				\
 	vax_mem_write_region_1((t), (h), (o), (a), (c))
 
 #define bus_space_write_region_2(t, h, o, a, c)				\
-	vax_mem_write_region_2((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint16_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	vax_mem_write_region_2((t), (h), (o), (a), (c));		\
+} while (0)
 
 #define bus_space_write_region_4(t, h, o, a, c)				\
-	vax_mem_write_region_4((t), (h), (o), (a), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((a), uint32_t, "buffer");		\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	vax_mem_write_region_4((t), (h), (o), (a), (c));		\
+} while (0)
 
 #if 0	/* Cause a link error for bus_space_write_region_8 */
 #define	bus_space_write_region_8					\
@@ -453,45 +492,33 @@ static __inline void vax_mem_write_region_4(bus_space_tag_t,
 #endif
 
 static __inline void
-vax_mem_write_region_1(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	const u_int8_t *a;
-	size_t c;
+vax_mem_write_region_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	const uint8_t *a, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr++, a++)
-		*(volatile u_int8_t *)(addr) = *a;
+		*(volatile uint8_t *)(addr) = *a;
 }
 
 static __inline void
-vax_mem_write_region_2(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	const u_int16_t *a;
-	size_t c;
+vax_mem_write_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	const uint16_t *a, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr++, a++)
-		*(volatile u_int16_t *)(addr) = *a;
+		*(volatile uint16_t *)(addr) = *a;
 }
 
 static __inline void
-vax_mem_write_region_4(t, h, o, a, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	const u_int32_t *a;
-	size_t c;
+vax_mem_write_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	const uint32_t *a, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr++, a++)
-		*(volatile u_int32_t *)(addr) = *a;
+		*(volatile uint32_t *)(addr) = *a;
 }
 
 /*
@@ -503,62 +530,57 @@ vax_mem_write_region_4(t, h, o, a, c)
  * by tag/handle/offset `count' times.
  */
 
-static __inline void vax_mem_set_multi_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int8_t, size_t);
-static __inline void vax_mem_set_multi_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int16_t, size_t);
-static __inline void vax_mem_set_multi_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int32_t, size_t);
+static __inline void
+	vax_mem_set_multi_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint8_t, size_t),
+	vax_mem_set_multi_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint16_t, size_t),
+	vax_mem_set_multi_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint32_t, size_t);
 
 #define	bus_space_set_multi_1(t, h, o, v, c)				\
 	vax_mem_set_multi_1((t), (h), (o), (v), (c))
 
 #define	bus_space_set_multi_2(t, h, o, v, c)				\
-	vax_mem_set_multi_2((t), (h), (o), (v), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	vax_mem_set_multi_2((t), (h), (o), (v), (c));		\
+} while (0)
 
 #define	bus_space_set_multi_4(t, h, o, v, c)				\
-	vax_mem_set_multi_4((t), (h), (o), (v), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	vax_mem_set_multi_4((t), (h), (o), (v), (c));		\
+} while (0)
 
 static __inline void
-vax_mem_set_multi_1(t, h, o, v, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int8_t v;
-	size_t c;
+vax_mem_set_multi_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint8_t v, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	while (c--)
-		*(volatile u_int8_t *)(addr) = v;
+		*(volatile uint8_t *)(addr) = v;
 }
 
 static __inline void
-vax_mem_set_multi_2(t, h, o, v, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int16_t v;
-	size_t c;
+vax_mem_set_multi_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint16_t v, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	while (c--)
-		*(volatile u_int16_t *)(addr) = v;
+		*(volatile uint16_t *)(addr) = v;
 }
 
 static __inline void
-vax_mem_set_multi_4(t, h, o, v, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int32_t v;
-	size_t c;
+vax_mem_set_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint32_t v, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	while (c--)
-		*(volatile u_int32_t *)(addr) = v;
+		*(volatile uint32_t *)(addr) = v;
 }
 
 #if 0	/* Cause a link error for bus_space_set_multi_8 */
@@ -574,62 +596,57 @@ vax_mem_set_multi_4(t, h, o, v, c)
  * by tag/handle starting at `offset'.
  */
 
-static __inline void vax_mem_set_region_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int8_t, size_t);
-static __inline void vax_mem_set_region_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int16_t, size_t);
-static __inline void vax_mem_set_region_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int32_t, size_t);
+static __inline void
+	vax_mem_set_region_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint8_t, size_t),
+	vax_mem_set_region_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint16_t, size_t),
+	vax_mem_set_region_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    uint32_t, size_t);
 
 #define	bus_space_set_region_1(t, h, o, v, c)				\
 	vax_mem_set_region_1((t), (h), (o), (v), (c))
 
 #define	bus_space_set_region_2(t, h, o, v, c)				\
-	vax_mem_set_region_2((t), (h), (o), (v), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint16_t, "bus addr");	\
+	vax_mem_set_region_2((t), (h), (o), (v), (c));		\
+} while (0)
 
 #define	bus_space_set_region_4(t, h, o, v, c)				\
-	vax_mem_set_region_4((t), (h), (o), (v), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h) + (o), uint32_t, "bus addr");	\
+	vax_mem_set_region_4((t), (h), (o), (v), (c));		\
+} while (0)
 
 static __inline void
-vax_mem_set_region_1(t, h, o, v, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int8_t v;
-	size_t c;
+vax_mem_set_region_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint8_t v, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr++)
-		*(volatile u_int8_t *)(addr) = v;
+		*(volatile uint8_t *)(addr) = v;
 }
 
 static __inline void
-vax_mem_set_region_2(t, h, o, v, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int16_t v;
-	size_t c;
+vax_mem_set_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint16_t v, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr += 2)
-		*(volatile u_int16_t *)(addr) = v;
+		*(volatile uint16_t *)(addr) = v;
 }
 
 static __inline void
-vax_mem_set_region_4(t, h, o, v, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h;
-	bus_size_t o;
-	u_int32_t v;
-	size_t c;
+vax_mem_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	uint32_t v, size_t c)
 {
 	bus_addr_t addr = h + o;
 
 	for (; c != 0; c--, addr += 4)
-		*(volatile u_int32_t *)(addr) = v;
+		*(volatile uint32_t *)(addr) = v;
 }
 
 #if 0	/* Cause a link error for bus_space_set_region_8 */
@@ -646,33 +663,34 @@ vax_mem_set_region_4(t, h, o, v, c)
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-static __inline void vax_mem_copy_region_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, bus_space_handle_t,
-	bus_size_t, size_t);
-static __inline void vax_mem_copy_region_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, bus_space_handle_t,
-	bus_size_t, size_t);
-static __inline void vax_mem_copy_region_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, bus_space_handle_t,
-	bus_size_t, size_t);
+static __inline void
+	vax_mem_copy_region_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    bus_space_handle_t, bus_size_t, size_t),
+	vax_mem_copy_region_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    bus_space_handle_t, bus_size_t, size_t),
+	vax_mem_copy_region_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    bus_space_handle_t, bus_size_t, size_t);
 
 #define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)			\
 	vax_mem_copy_region_1((t), (h1), (o1), (h2), (o2), (c))
 
 #define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_2((t), (h1), (o1), (h2), (o2), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h1) + (o1), uint16_t, "bus addr 1"); \
+	__BUS_SPACE_ADDRESS_SANITY((h2) + (o2), uint16_t, "bus addr 2"); \
+	vax_mem_copy_region_2((t), (h1), (o1), (h2), (o2), (c));	\
+} while (0)
 
 #define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_4((t), (h1), (o1), (h2), (o2), (c))
+do {									\
+	__BUS_SPACE_ADDRESS_SANITY((h1) + (o1), uint32_t, "bus addr 1"); \
+	__BUS_SPACE_ADDRESS_SANITY((h2) + (o2), uint32_t, "bus addr 2"); \
+	vax_mem_copy_region_4((t), (h1), (o1), (h2), (o2), (c));	\
+} while (0)
 
 static __inline void
-vax_mem_copy_region_1(t, h1, o1, h2, o2, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h1;
-	bus_size_t o1;
-	bus_space_handle_t h2;
-	bus_size_t o2;
-	size_t c;
+vax_mem_copy_region_1(bus_space_tag_t t, bus_space_handle_t h1, bus_size_t o1,
+	bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
 	bus_addr_t addr1 = h1 + o1;
 	bus_addr_t addr2 = h2 + o2;
@@ -680,25 +698,20 @@ vax_mem_copy_region_1(t, h1, o1, h2, o2, c)
 	if (addr1 >= addr2) {
 		/* src after dest: copy forward */
 		for (; c != 0; c--, addr1++, addr2++)
-			*(volatile u_int8_t *)(addr2) =
-			    *(volatile u_int8_t *)(addr1);
+			*(volatile uint8_t *)(addr2) =
+			    *(volatile uint8_t *)(addr1);
 	} else {
 		/* dest after src: copy backwards */
 		for (addr1 += (c - 1), addr2 += (c - 1);
 		    c != 0; c--, addr1--, addr2--)
-			*(volatile u_int8_t *)(addr2) =
-			    *(volatile u_int8_t *)(addr1);
+			*(volatile uint8_t *)(addr2) =
+			    *(volatile uint8_t *)(addr1);
 	}
 }
 
 static __inline void
-vax_mem_copy_region_2(t, h1, o1, h2, o2, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h1;
-	bus_size_t o1;
-	bus_space_handle_t h2;
-	bus_size_t o2;
-	size_t c;
+vax_mem_copy_region_2(bus_space_tag_t t, bus_space_handle_t h1, bus_size_t o1,
+	bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
 	bus_addr_t addr1 = h1 + o1;
 	bus_addr_t addr2 = h2 + o2;
@@ -706,25 +719,20 @@ vax_mem_copy_region_2(t, h1, o1, h2, o2, c)
 	if (addr1 >= addr2) {
 		/* src after dest: copy forward */
 		for (; c != 0; c--, addr1 += 2, addr2 += 2)
-			*(volatile u_int16_t *)(addr2) =
-			    *(volatile u_int16_t *)(addr1);
+			*(volatile uint16_t *)(addr2) =
+			    *(volatile uint16_t *)(addr1);
 	} else {
 		/* dest after src: copy backwards */
 		for (addr1 += 2 * (c - 1), addr2 += 2 * (c - 1);
 		    c != 0; c--, addr1 -= 2, addr2 -= 2)
-			*(volatile u_int16_t *)(addr2) =
-			    *(volatile u_int16_t *)(addr1);
+			*(volatile uint16_t *)(addr2) =
+			    *(volatile uint16_t *)(addr1);
 	}
 }
 
 static __inline void
-vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
-	bus_space_tag_t t;
-	bus_space_handle_t h1;
-	bus_size_t o1;
-	bus_space_handle_t h2;
-	bus_size_t o2;
-	size_t c;
+vax_mem_copy_region_4(bus_space_tag_t t, bus_space_handle_t h1, bus_size_t o1,
+	bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
 	bus_addr_t addr1 = h1 + o1;
 	bus_addr_t addr2 = h2 + o2;
@@ -732,14 +740,14 @@ vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
 	if (addr1 >= addr2) {
 		/* src after dest: copy forward */
 		for (; c != 0; c--, addr1 += 4, addr2 += 4)
-			*(volatile u_int32_t *)(addr2) =
-			    *(volatile u_int32_t *)(addr1);
+			*(volatile uint32_t *)(addr2) =
+			    *(volatile uint32_t *)(addr1);
 	} else {
 		/* dest after src: copy backwards */
 		for (addr1 += 4 * (c - 1), addr2 += 4 * (c - 1);
 		    c != 0; c--, addr1 -= 4, addr2 -= 4)
-			*(volatile u_int32_t *)(addr2) =
-			    *(volatile u_int32_t *)(addr1);
+			*(volatile uint32_t *)(addr2) =
+			    *(volatile uint32_t *)(addr1);
 	}
 }
 
@@ -771,13 +779,14 @@ vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
 #define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
 #define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
+#define	BUS_DMA_STREAMING	0x008	/* hint: sequential, unidirectional */
 #define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x020
 #define	BUS_DMA_BUS3		0x040
 #define	BUS_DMA_BUS4		0x080
-#define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
-#define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_READ		0x100	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
+#define	BUS_DMA_NOCACHE		0x400	/* hint: map non-cached memory */
 
 #define	VAX_BUS_DMA_SPILLPAGE	BUS_DMA_BUS1	/* VS4000 kludge */
 /*
@@ -818,6 +827,8 @@ typedef enum {
 typedef struct vax_bus_dma_tag	*bus_dma_tag_t;
 typedef struct vax_bus_dmamap	*bus_dmamap_t;
 
+#define BUS_DMA_TAG_VALID(t)    ((t) != (bus_dma_tag_t)0)
+
 /*
  *	bus_dma_segment_t
  *
@@ -846,7 +857,7 @@ struct vax_bus_dma_tag {
 	/*
 	 * Some chipsets have a built-in boundary constraint, independent
 	 * of what the device requests.  This allows that boundary to
-	 * be specified.  If the device has a more restrictive contraint,
+	 * be specified.  If the device has a more restrictive constraint,
 	 * the map will use that, otherwise this boundary will be used.
 	 * This value is ignored if 0.
 	 */
@@ -887,11 +898,10 @@ struct vax_bus_dma_tag {
 	 */
 	int	(*_dmamem_alloc)(bus_dma_tag_t, bus_size_t, bus_size_t,
 		    bus_size_t, bus_dma_segment_t *, int, int *, int);
-	void	(*_dmamem_free)(bus_dma_tag_t,
-		    bus_dma_segment_t *, int);
+	void	(*_dmamem_free)(bus_dma_tag_t, bus_dma_segment_t *, int);
 	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, caddr_t *, int);
-	void	(*_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
+		    int, size_t, void **, int);
+	void	(*_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
@@ -926,6 +936,9 @@ struct vax_bus_dma_tag {
 #define	bus_dmamem_mmap(t, sg, n, o, p, f)			\
 	(*(t)->_dmamem_mmap)((t), (sg), (n), (o), (p), (f))
 
+#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
+#define bus_dmatag_destroy(t)
+
 /*
  *	bus_dmamap_t
  *
@@ -933,11 +946,11 @@ struct vax_bus_dma_tag {
  */
 struct vax_bus_dmamap {
 	/*
-	 * PRIVATE MEMBERS: not for use by machine-independent code.
+	 * PRIVATE MEMBERS: not for use my machine-independent code.
 	 */
 	bus_size_t	_dm_size;	/* largest DMA transfer mappable */
 	int		_dm_segcnt;	/* number of segs this map can map */
-	bus_size_t	_dm_maxsegsz;	/* largest possible segment */
+	bus_size_t	_dm_maxmaxsegsz; /* fixed largest possible segment */
 	bus_size_t	_dm_boundary;	/* don't cross this */
 	int		_dm_flags;	/* misc. flags */
 
@@ -953,22 +966,21 @@ struct vax_bus_dmamap {
 	/*
 	 * PUBLIC MEMBERS: these are used by machine-independent code.
 	 */
+	bus_size_t	dm_maxsegsz;	/* largest possible segment */
 	bus_size_t	dm_mapsize;	/* size of the mapping */
 	int		dm_nsegs;	/* # valid segments in mapping */
 	bus_dma_segment_t dm_segs[1];	/* segments; variable length */
 };
 
-#ifdef _VAX_BUS_DMA_PRIVATE
+/*#ifdef _VAX_BUS_DMA_PRIVATE */
 int	_bus_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
 	    bus_size_t, int, bus_dmamap_t *);
 void	_bus_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
 
 int	_bus_dmamap_load(bus_dma_tag_t, bus_dmamap_t,
 	    void *, bus_size_t, struct proc *, int);
-int	_bus_dmamap_load_mbuf(bus_dma_tag_t,
-	    bus_dmamap_t, struct mbuf *, int);
-int	_bus_dmamap_load_uio(bus_dma_tag_t,
-	    bus_dmamap_t, struct uio *, int);
+int	_bus_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t, struct mbuf *, int);
+int	_bus_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
 int	_bus_dmamap_load_raw(bus_dma_tag_t,
 	    bus_dmamap_t, bus_dma_segment_t *, int, bus_size_t, int);
 
@@ -979,14 +991,12 @@ void	_bus_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 int	_bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 	    bus_size_t alignment, bus_size_t boundary,
 	    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags);
-void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs);
+void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs);
 int	_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, caddr_t *kvap, int flags);
-void	_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva,
-	    size_t size);
+	    int nsegs, size_t size, void **kvap, int flags);
+void	_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva, size_t size);
 paddr_t	_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);
-#endif /* _VAX_BUS_DMA_PRIVATE */
+/*#endif*/ /* _VAX_BUS_DMA_PRIVATE */
 
 #endif /* _VAX_BUS_H_ */

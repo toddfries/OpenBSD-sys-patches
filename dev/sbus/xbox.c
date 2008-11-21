@@ -1,8 +1,11 @@
-/*	$OpenBSD: xbox.c,v 1.3 2006/06/02 20:00:56 miod Exp $	*/
+/*	$NetBSD: xbox.c,v 1.15 2008/04/28 20:23:57 martin Exp $ */
 
-/*
- * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Paul Kranenburg.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,157 +16,147 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
- * Driver for the Sun SBus Expansion Subsystem
+ * Sbus expansion box.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: xbox.c,v 1.15 2008/04/28 20:23:57 martin Exp $");
+
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/errno.h>
-#include <sys/ioctl.h>
-#include <sys/syslog.h>
-#include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/systm.h>
+#include <sys/device.h>
 
-#include <machine/autoconf.h>
-#include <machine/bus.h>
-#include <machine/cpu.h>
+#include <sys/bus.h>
 #include <dev/sbus/sbusvar.h>
-
-#include <dev/sbus/xboxreg.h>
 #include <dev/sbus/xboxvar.h>
+#include <machine/autoconf.h>
 
-int	xboxmatch(struct device *, void *, void *);
-void	xboxattach(struct device *, struct device *, void *);
-int	xboxprint(void *, const char *);
-int	xbox_fix_range(struct xbox_softc *sc, struct sbus_softc *sbp);
+/*
+ * Xbox registers definitions.
+ *
+ * The xbox device can operate in two mode: "opaque" and "transparent".
+ * In opaque mode, all accesses to the xbox address space are directed
+ * to the xbox itself. In transparent mode, all accesses are mapped to
+ * the SBus cards in the expansion box.
+ *
+ * To access the xbox registers in transparent mode, you must write
+ * to the "write0" register. The layout of this register appears to
+ * be as follows:
+ *
+ *	bit 31-24: xbox key (identifies device when you cascade them)
+ *	bit 23-12: offset of register to access
+ *	bit 11-0:  value to write
+ *
+ * For instance, to switch to opaque mode:
+ *	(*sc->write0_reg) = (sc->sc_key << 24) | XAC_CTL1_OFFSET;
+ *
+ * (note we're not currently using any of this)
+ */
+#define WRITE0_OFFSET		0
 
-struct cfattach xbox_ca = {
-	sizeof (struct xbox_softc), xboxmatch, xboxattach
+#define XAC_ERR_OFFSET		0x2000
+#define XAC_CTL0_OFFSET		0x10000
+#define XAC_CTL1_OFFSET		0x11000
+#define XAC_ELUA_OFFSET		0x12000
+#define XAC_ELLA_OFFSET		0x13000
+#define XAC_ELE_OFFSET		0x14000
+
+#define XBC_ERR_OFFSET		0x42000
+#define XBC_CTL0_OFFSET		0x50000
+#define XBC_CTL1_OFFSET		0x51000
+#define XBC_ELUA_OFFSET		0x52000
+#define XBC_ELLA_OFFSET		0x53000
+#define XBC_ELE_OFFSET		0x54000
+
+#define XBOX_NREG		13
+
+struct xbox_softc {
+	struct device	sc_dev;		/* base device */
+	int		sc_key;		/* this xbox's unique key */
 };
 
-struct cfdriver xbox_cd = {
-	NULL, "xbox", DV_DULL
-};
+/* autoconfiguration driver */
+int	xbox_match(struct device *, struct cfdata *, void *);
+void	xbox_attach(struct device *, struct device *, void *);
+int	xbox_print( void *, const char *);
+
+CFATTACH_DECL(xbox, sizeof(struct xbox_softc),
+    xbox_match, xbox_attach, NULL, NULL);
 
 int
-xboxmatch(struct device *parent, void *cf, void *aux)
+xbox_print(args, busname)
+	void *args;
+	const char *busname;
+{
+	struct xbox_attach_args *xa = args;
+
+	if (busname)
+		aprint_normal("%s at %s", xa->xa_name, busname);
+	return (UNCONF);
+}
+
+int
+xbox_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct sbus_attach_args *sa = aux;
 
-	if (strcmp("SUNW,xbox", sa->sa_name))
-		return (0);
-
-	return (1);
+	return (strcmp("SUNW,xbox", sa->sa_name) == 0);
 }
 
-void    
-xboxattach(struct device *parent, struct device *self, void *aux)
+/*
+ * Attach an Xbox.
+ */
+void
+xbox_attach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
 {
 	struct xbox_softc *sc = (struct xbox_softc *)self;
 	struct sbus_attach_args *sa = aux;
 	int node = sa->sa_node;
 	struct xbox_attach_args xa;
-	bus_space_handle_t write0;
-	char *s;
+	char *cp;
 
-	s = getpropstring(node, "model");
-	printf(": model %s", s);
+	sc->sc_key = prom_getpropint(node, "write0-key", -1);
 
-	s = getpropstring(node, "child-present");
-	if (strcmp(s, "false") == 0) {
-		printf(": no devices\n");
+	cp = prom_getpropstring(node, "model");
+	printf(": model %s", cp);
+
+	cp = prom_getpropstring(node, "child-present");
+	if (strcmp(cp, "true") != 0) {
+		printf(": no sbus devices\n");
 		return;
 	}
-
-	sc->sc_key = getpropint(node, "write0-key", -1);
-	sc->sc_node = node;
-
-	/*
-	 * Setup transparent access
-	 */
-
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
-	    sa->sa_reg[0].sbr_offset, sa->sa_reg[0].sbr_size, 0, 0,
-	    &write0) != 0) {
-		printf(": couldn't map write 0 register\n");
-		return;
-	}
-
-	bus_space_write_4(sa->sa_bustag, write0, 0,
-	    (sc->sc_key << 24) | XAC_CTL1_OFFSET |
-	    XBOX_CTL1_CSIE | XBOX_CTL1_TRANSPARENT);
-	bus_space_write_4(sa->sa_bustag, write0, 0,
-	    (sc->sc_key << 24) | XBC_CTL1_OFFSET |
-	    XBOX_CTL1_XSIE | XBOX_CTL1_XSBRE | XBOX_CTL1_XSSE);
-	DELAY(100);
-
-	bus_space_unmap(sa->sa_bustag, write0, sa->sa_reg[0].sbr_size);
 
 	printf("\n");
 
-	if (xbox_fix_range(sc, (struct sbus_softc *)parent) != 0)
-		return;
-
+	/*
+	 * Now pretend to be another Sbus.
+	 */
 	bzero(&xa, sizeof xa);
 	xa.xa_name = "sbus";
 	xa.xa_node = node;
 	xa.xa_bustag = sa->sa_bustag;
 	xa.xa_dmatag = sa->sa_dmatag;
 
-	(void)config_found(&sc->sc_dev, (void *)&xa, xboxprint);
-}
-
-/*
- * Fix up our address ranges based on parent address spaces.
- */
-int
-xbox_fix_range(struct xbox_softc *sc, struct sbus_softc *sbp)
-{
-	int error, i, j;
-
-	error = getprop(sc->sc_node, "ranges", sizeof(struct sbus_range),
-	    &sc->sc_nrange, (void **)&sc->sc_range);
-	if (error != 0) {
-		printf("%s: PROM ranges too large\n", sc->sc_dev.dv_xname);
-		return (error);
-	}
-
-	for (i = 0; i < sc->sc_nrange; i++) {
-		for (j = 0; j < sbp->sc_nrange; j++) {
-			if (sc->sc_range[i].pspace == sbp->sc_range[j].cspace) {
-				sc->sc_range[i].poffset +=
-				    sbp->sc_range[j].poffset;
-				sc->sc_range[i].pspace =
-				    sbp->sc_range[j].pspace;
-				break;
-			}
-		}
-	}
-
-	return (0);
-}
-
-int
-xboxprint(void *args, const char *bus)
-{
-	struct xbox_attach_args *xa = args;
-
-	if (bus != NULL)
-		printf("%s at %s", xa->xa_name, bus);
-	return (UNCONF);
+	(void) config_found(&sc->sc_dev, (void *)&xa, xbox_print);
 }

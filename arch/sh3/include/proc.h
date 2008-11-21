@@ -1,4 +1,4 @@
-/*	$NetBSD: proc.h,v 1.11 2006/10/11 16:16:48 he Exp $	*/
+/*	$NetBSD: proc.h,v 1.13 2008/02/15 02:34:46 uwe Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc. All rights reserved.
@@ -51,6 +51,7 @@ struct mdlwp {
 	struct trapframe *md_regs;	/* user context */
 	struct pcb *md_pcb;		/* pcb access address */
 	int md_flags;			/* machine-dependent flags */
+	volatile int md_astpending;	/* AST pending on return to userland */
 	/* u-area PTE: *2 .. SH4 data/address data array access */
 	struct md_upte md_upte[UPAGES * 2];
 };
@@ -62,14 +63,11 @@ struct lwp;
 
 struct mdproc {
 	void (*md_syscall)(struct lwp *, struct trapframe *);
-
-	volatile int md_astpending;	/* AST pending on return to userland */
 };
 
 #ifdef _KERNEL
 #ifndef _LOCORE
 extern void sh_proc0_init(void);
-extern struct md_upte *curupte;	/* SH3 wired u-area hack */
 #endif /* _LOCORE */
 #endif /* _KERNEL */
 #endif /* !_SH3_PROC_H_ */

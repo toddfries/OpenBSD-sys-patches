@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_exec.h,v 1.8 2005/12/11 12:20:14 christos Exp $	*/
+/*	$NetBSD: linux_exec.h,v 1.10 2008/11/17 13:03:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,13 +36,10 @@
 #define LINUX_MID_MACHINE	LINUX_M_I386
 #define LINUX_USRSTACK		0xC0000000
 
-#define LINUX_GCC_SIGNATURE	1
-
 #define LINUX_ELF_AUX_ARGSIZ 	\
 	(howmany(LINUX_ELF_AUX_ENTRIES * sizeof(Aux32Info), sizeof(Elf32_Addr)))
 
 #ifdef _KERNEL
 int linux_exec_setup_stack(struct lwp *, struct exec_package *);
 #endif
-
 #endif /* !_I386_LINUX_EXEC_H */

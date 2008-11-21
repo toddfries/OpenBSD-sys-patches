@@ -1,8 +1,6 @@
-/*	$OpenBSD: sunos_machdep.c,v 1.19 2007/11/02 19:18:54 martin Exp $	*/
-/*	$NetBSD: sunos_machdep.c,v 1.12 1996/10/13 03:19:22 christos Exp $	*/
+/*	$NetBSD: sunos_machdep.c,v 1.36 2008/04/24 18:39:20 ad Exp $	*/
 
 /*
- * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
  * All rights reserved.
  *
@@ -38,6 +36,48 @@
  *
  *	@(#)machdep.c	7.16 (Berkeley) 6/3/91
  */
+/*
+ * Copyright (c) 1988 University of Utah.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * from: Utah $Hdr: machdep.c 1.63 91/04/24$
+ *
+ *	@(#)machdep.c	7.16 (Berkeley) 6/3/91
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: sunos_machdep.c,v 1.36 2008/04/24 18:39:20 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,6 +96,8 @@
 #include <sys/syscallargs.h>
 #include <compat/sunos/sunos.h>
 #include <compat/sunos/sunos_syscallargs.h>
+#include <compat/sys/signal.h>
+#include <compat/sys/signalvar.h>
 
 #include <machine/reg.h>
 
@@ -81,108 +123,99 @@ struct sunos_sigframe {
 	int	sf_code;		/* additional info for handler */
 	struct sunos_sigcontext *sf_scp;/* context pointer for handler */
 	u_int	sf_addr;		/* even more info for handler */
-	struct sunos_sigcontext sf_sc;	/* I don't know if that's what 
+	struct sunos_sigcontext sf_sc;	/* I don't know if that's what
 					   comes here */
 };
 /*
  * much simpler sendsig() for SunOS processes, as SunOS does the whole
  * context-saving in usermode. For now, no hardware information (ie.
- * frames for buserror etc) is saved. This could be fatal, so I take 
+ * frames for buserror etc) is saved. This could be fatal, so I take
  * SIG_DFL for "dangerous" signals.
  */
 void
-sunos_sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
+sunos_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 {
-	register struct proc *p = curproc;
-	register struct sunos_sigframe *fp;
-	struct sunos_sigframe kfp;
-	register struct frame *frame;
-	register struct sigacts *psp = p->p_sigacts;
-	register short ft;
-	int oonstack, fsize;
-
-	frame = (struct frame *)p->p_md.md_regs;
-	ft = frame->f_format;
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	u_long code = KSI_TRAPCODE(ksi);
+	int sig = ksi->ksi_signo;
+	struct lwp *l = curlwp;
+	struct proc *p = l->l_proc;
+	struct frame *frame = (struct frame *)l->l_md.md_regs;
+	int onstack, error;
+	struct sunos_sigframe *fp = getframe(l, sig, &onstack), kf;
+	sig_t catcher = SIGACTION(p, sig).sa_handler;
+	short ft = frame->f_format;
 
 	/*
 	 * if this is a hardware fault (ft >= FMT9), sunos_sendsig
 	 * can't currently handle it. Reset signal actions and
-	 * have the process die unconditionally. 
+	 * have the process die unconditionally.
 	 */
 	if (ft >= FMT9) {
-		sigexit(p, sig);
-		/* NOTREACHED */
+		SIGACTION(p, sig).sa_handler = SIG_DFL;
+		sigdelset(&p->p_sigctx.ps_sigignore, sig);
+		sigdelset(&p->p_sigctx.ps_sigcatch, sig);
+		sigdelset(&l->l_sigmask, sig);
+		mutex_exit(p->p_lock);
+		psignal(p, sig);
+		mutex_enter(p->p_lock);
+		return;
 	}
 
-	/*
-	 * Allocate and validate space for the signal handler
-	 * context. Note that if the stack is in P0 space, the
-	 * call to grow() is a nop, and the useracc() check
-	 * will fail if the process has not already allocated
-	 * the space with a `brk'.
-	 */
-	fsize = sizeof(struct sunos_sigframe);
-	if ((psp->ps_flags & SAS_ALTSTACK) && oonstack == 0 &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sunos_sigframe *)(psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size - sizeof(struct sunos_sigframe));
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
-	} else
-		fp = (struct sunos_sigframe *)frame->f_regs[SP] - 1;
-	if ((vaddr_t)fp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize)) 
-		(void)uvm_grow(p, (unsigned)fp);
+	fp--;
+
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 		printf("sunos_sendsig(%d): sig %d ssp %p usp %p scp %p ft %d\n",
-		       p->p_pid, sig, &oonstack, fp, &fp->sf_sc, ft);
+		       p->p_pid, sig, &onstack, fp, &fp->sf_sc, ft);
 #endif
-	/* 
-	 * Build the argument list for the signal handler.
-	 */
-	kfp.sf_signum = sig;
-	kfp.sf_code = code;
-	kfp.sf_scp = &fp->sf_sc;
-	kfp.sf_addr = (u_int)val.sival_ptr;
 
-	/*
-	 * Build the signal context to be used by sigreturn.
-	 */
-	kfp.sf_sc.sc_onstack = oonstack;
-	kfp.sf_sc.sc_mask = mask;
-	kfp.sf_sc.sc_sp = frame->f_regs[SP];
-	kfp.sf_sc.sc_pc = frame->f_pc;
-	kfp.sf_sc.sc_ps = frame->f_sr;
+	/* Build stack frame for signal trampoline. */
+	kf.sf_signum = sig;
+	kf.sf_code = code;
+	kf.sf_scp = &fp->sf_sc;
+	kf.sf_addr = ~0;		/* means: not computable */
 
-	if (copyout(&kfp, fp, fsize) != 0) {
+	/* Build the signal context to be used by sigreturn. */
+	kf.sf_sc.sc_sp = frame->f_regs[SP];
+	kf.sf_sc.sc_pc = frame->f_pc;
+	kf.sf_sc.sc_ps = frame->f_sr;
+
+	/* Save signal stack. */
+	kf.sf_sc.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK;
+
+	/* Save signal mask. */
+	native_sigset_to_sigset13(mask, &kf.sf_sc.sc_mask);
+
+	sendsig_reset(l, sig);
+	mutex_exit(p->p_lock);
+	error = copyout(&kf, fp, sizeof(kf));
+	mutex_enter(p->p_lock);
+
+	if (error != 0) {
 #ifdef DEBUG
 		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-			printf("sunos_sendsig(%d): copyout failed on sig %d\n",
-			       p->p_pid, sig);
+			printf("sendsig(%d): copyout failed on sig %d\n",
+			    p->p_pid, sig);
 #endif
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
-		sigexit(p, SIGILL);
+		sigexit(l, SIGILL);
 		/* NOTREACHED */
 	}
-
-	frame->f_regs[SP] = (int)fp;
 #ifdef DEBUG
 	if (sigdebug & SDB_FOLLOW)
 		printf("sunos_sendsig(%d): sig %d scp %p sc_sp %x\n",
-		       p->p_pid, sig, &fp->sf_sc,kfp.sf_sc.sc_sp);
+		       p->p_pid, sig, &fp->sf_sc,kf.sf_sc.sc_sp);
 #endif
 
-	/* have the user-level trampoline code sort out what registers it
-	   has to preserve. */
-	frame->f_pc = (u_int) catcher;
+	buildcontext(l, catcher, fp);
+
+	/* Remember that we're now on the signal stack. */
+	if (onstack)
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
+
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 		printf("sunos_sendsig(%d): sig %d returns\n",
@@ -202,15 +235,13 @@ sunos_sendsig(catcher, sig, mask, code, type, val)
  * a machine fault.
  */
 int
-sunos_sys_sigreturn(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sunos_sys_sigreturn(struct lwp *l, const struct sunos_sys_sigreturn_args *uap, register_t *retval)
 {
-	struct sunos_sys_sigreturn_args *uap = v;
-	register struct sunos_sigcontext *scp;
-	register struct frame *frame;
+	struct proc *p = l->l_proc;
+	struct sunos_sigcontext *scp;
+	struct frame *frame;
 	struct sunos_sigcontext tsigc;
+	sigset_t mask;
 
 	scp = (struct sunos_sigcontext *) SCARG(uap, sigcntxp);
 #ifdef DEBUG
@@ -218,29 +249,37 @@ sunos_sys_sigreturn(p, v, retval)
 		printf("sunos_sigreturn: pid %d, scp %p\n", p->p_pid, scp);
 #endif
 	if ((int)scp & 1)
-		return (EINVAL);
-	/*
-	 * Test and fetch the context structure.
-	 * We grab it all at once for speed.
-	 */
-	if (copyin((caddr_t)scp, (caddr_t)&tsigc, sizeof(tsigc)))
-		return (EINVAL);
+		return EINVAL;
+	if (copyin((void *)scp, (void *)&tsigc, sizeof(tsigc)) != 0)
+		return EFAULT;
 	scp = &tsigc;
-	if ((scp->sc_ps & PSL_USERCLR) != 0 ||
-	    (scp->sc_ps & PSL_USERSET) != PSL_USERSET)
-		return (EINVAL);
+
+	/* Make sure the user isn't pulling a fast one on us! */
+	if ((scp->sc_ps & (PSL_MBZ|PSL_IPL|PSL_S)) != 0)
+		return EINVAL;
+
 	/*
 	 * Restore the user supplied information
 	 */
-	if (scp->sc_onstack & 1)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
-	p->p_sigmask = scp->sc_mask &~ sigcantmask;
-	frame = (struct frame *) p->p_md.md_regs;
+
+	frame = (struct frame *) l->l_md.md_regs;
 	frame->f_regs[SP] = scp->sc_sp;
 	frame->f_pc = scp->sc_pc;
 	frame->f_sr = scp->sc_ps;
+
+	mutex_enter(p->p_lock);
+
+	/* Restore signal stack. */
+	if (scp->sc_onstack & SS_ONSTACK)
+		l->l_sigstk.ss_flags |= SS_ONSTACK;
+	else
+		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+
+	/* Restore signal mask. */
+	native_sigset13_to_sigset(&scp->sc_mask, &mask);
+	(void)sigprocmask1(l, SIG_SETMASK, &mask, 0);
+
+	mutex_exit(p->p_lock);
 
 	return EJUSTRETURN;
 }

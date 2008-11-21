@@ -1,5 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.7 2007/05/15 16:38:33 art Exp $	*/
-/*	$NetBSD: vmparam.h,v 1.1 2003/04/26 18:39:49 fvdl Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.18 2008/01/20 13:43:38 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,9 +37,23 @@
 #ifndef _VMPARAM_H_
 #define _VMPARAM_H_
 
+#include <sys/tree.h>
+#include <sys/mutex.h>
+#ifdef _KERNEL_OPT
+#include "opt_xen.h"
+#endif
+
 /*
- * Machine dependent constants for amd64.
+ * Machine dependent constants for 386.
  */
+
+/*
+ * Page size on the amd64 s not variable in the traditional sense.
+ * We override the PAGE_* definitions to compile-time constants.
+ */
+#define	PAGE_SHIFT	12
+#define	PAGE_SIZE	(1 << PAGE_SHIFT)
+#define	PAGE_MASK	(PAGE_SIZE - 1)
 
 /*
  * USRSTACK is the top (end) of the user stack. Immediately above the
@@ -52,15 +65,17 @@
  */
 #define	USRSTACK	VM_MAXUSER_ADDRESS
 
+#define USRSTACK32	VM_MAXUSER_ADDRESS32
+
 /*
  * Virtual memory related constants, all in bytes
  */
 #define	MAXTSIZ		(64*1024*1024)		/* max text size */
 #ifndef DFLDSIZ
-#define	DFLDSIZ		(128*1024*1024)		/* initial data size limit */
+#define	DFLDSIZ		(256*1024*1024)		/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
-#define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
+#define	MAXDSIZ		(8L*1024*1024*1024)	/* max data size */
 #endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(2*1024*1024)		/* initial stack size limit */
@@ -69,13 +84,29 @@
 #define	MAXSSIZ		(32*1024*1024)		/* max stack size */
 #endif
 
-#define STACKGAP_RANDOM	256*1024
+/*
+ * 32bit memory related constants.
+ */
+
+#define MAXTSIZ32	(64*1024*1024)
+#ifndef DFLDSIZ32
+#define	DFLDSIZ32	(256*1024*1024)		/* initial data size limit */
+#endif
+#ifndef MAXDSIZ32
+#define	MAXDSIZ32	(3U*1024*1024*1024)	/* max data size */
+#endif
+#ifndef	DFLSSIZ32
+#define	DFLSSIZ32	(2*1024*1024)		/* initial stack size limit */
+#endif
+#ifndef	MAXSSIZ32
+#define	MAXSSIZ32	(64*1024*1024)		/* max stack size */
+#endif
 
 /*
  * Size of shared memory map
  */
 #ifndef SHMMAXPGS
-#define SHMMAXPGS	8192
+#define SHMMAXPGS	2048
 #endif
 
 /*
@@ -89,17 +120,40 @@
 
 /* user/kernel map constants */
 #define VM_MIN_ADDRESS		0
-#define VM_MAXUSER_ADDRESS	0x00007f7fffffc000
+#define VM_MAXUSER_ADDRESS	0x00007f8000000000
 #define VM_MAX_ADDRESS		0x00007fbfdfeff000
+#ifndef XEN
 #define VM_MIN_KERNEL_ADDRESS	0xffff800000000000
-#define VM_MAX_KERNEL_ADDRESS	0xffff800100000000
+#else /* XEN */
+#define VM_MIN_KERNEL_ADDRESS	0xffffa00000000000
+#endif
+#define VM_MAX_KERNEL_ADDRESS	0xffffff8000000000
 
-#define VM_MAXUSER_ADDRESS32	0xffffc000
+#define VM_MAXUSER_ADDRESS32	0xfffff000
+
+/*
+ * The address to which unspecified mapping requests default
+ */
+#ifdef _KERNEL_OPT
+#include "opt_uvm.h"
+#endif
+#define __USE_TOPDOWN_VM
+#define VM_DEFAULT_ADDRESS(da, sz) \
+	trunc_page(USRSTACK - MAXSSIZ - (sz))
+#define VM_DEFAULT_ADDRESS32(da, sz) \
+	trunc_page(USRSTACK32 - MAXSSIZ32 - (sz))
+
+/*
+ * XXXfvdl we have plenty of KVM now, remove this.
+ */
+#ifndef VM_MAX_KERNEL_BUF
+#define VM_MAX_KERNEL_BUF	(384 * 1024 * 1024)
+#endif
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
-#define VM_PHYSSEG_MAX		16	/* actually we could have this many segments */
+#define VM_PHYSSEG_MAX		10	/* 1 "hole" + 9 free lists */
 #define VM_PHYSSEG_STRAT	VM_PSTRAT_BIGFIRST
 #define VM_PHYSSEG_NOADD		/* can't add RAM after vm_mem_init */
 
@@ -107,14 +161,15 @@
 #define	VM_FREELIST_DEFAULT	0
 #define	VM_FREELIST_FIRST16	1
 
-#define __HAVE_VM_PAGE_MD
-struct pv_entry;
-struct vm_page_md {
-	struct pv_entry *pv_list;
-};
+#include <x86/pmap_pv.h>
 
-#define VM_MDPAGE_INIT(pg) do {		\
-	(pg)->mdpage.pv_list = NULL;	\
-} while (0)
+#define	__HAVE_VM_PAGE_MD
+#define	VM_MDPAGE_INIT(pg) \
+	memset(&(pg)->mdpage, 0, sizeof((pg)->mdpage)); \
+	PMAP_PAGE_INIT(&(pg)->mdpage.mp_pp)
+
+struct vm_page_md {
+	struct pmap_page mp_pp;
+};
 
 #endif /* _VMPARAM_H_ */

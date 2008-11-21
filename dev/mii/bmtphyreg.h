@@ -1,8 +1,11 @@
-/*	$OpenBSD: bmtphyreg.h,v 1.3 2005/02/04 23:23:56 brad Exp $	*/
-/*	$NetBSD: bmtphyreg.h,v 1.1 2001/06/02 21:42:10 thorpej Exp $	*/
+/*	$NetBSD: bmtphyreg.h,v 1.2 2008/04/28 20:23:53 martin Exp $	*/
 
 /*-
- * Copyright (c) 2001 Theo de Raadt
+ * Copyright (c) 2001 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,17 +16,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _DEV_MII_BMTPHYREG_H_
@@ -42,6 +45,7 @@
 #define	AUX_CTL_BASEWANDER_DIS	0x0040	/* disable baseline wander correction */
 #define	AUX_CTL_FEF_EN		0x0020	/* far-end fault enable */
 
+
 #define	MII_BMTPHY_AUX_STS	0x11	/* auxiliary status */
 #define	AUX_STS_FX_MODE		0x0400	/* 100base-FX mode (strap pin) */
 #define	AUX_STS_LOCKED		0x0200	/* descrambler locked */
@@ -55,16 +59,21 @@
 #define	AUX_STS_LOCKERROR	0x0002	/* lock error detected */
 #define	AUX_STS_MLT3ERROR	0x0001	/* MLT3 code error detected */
 
+
 #define	MII_BMTPHY_RXERROR_CTR	0x12	/* 100base-X Rx error counter */
 #define	RXERROR_CTR_MASK	0x00ff
+
 
 #define	MII_BMTPHY_FCS_CTR	0x13	/* 100base-X false carrier counter */
 #define	FCS_CTR_MASK		0x00ff
 
+
 #define	MII_BMTPHY_DIS_CTR	0x14	/* 100base-X disconnect counter */
 #define	DIS_CTR_MASK		0x00ff
 
+
 #define	MII_BMTPHY_PTEST	0x17	/* PTEST */
+
 
 #define	MII_BMTPHY_AUX_CSR	0x18	/* auxiliary control/status */
 #define	AUX_CSR_JABBER_DIS	0x8000	/* jabber disable */
@@ -77,6 +86,7 @@
 #define	AUX_CSR_F100		0x0004	/* force 100base */
 #define	AUX_CSR_SPEED		0x0002	/* 1 = 100, 0 = 10 */
 #define	AUX_CSR_FDX		0x0001	/* full-duplex */
+
 
 #define	MII_BMTPHY_AUX_SS	0x19	/* auxiliary status summary */
 #define	AUX_SS_ACOMP		0x8000	/* auto-negotiation complete */
@@ -100,6 +110,7 @@
 #define	AUX_SS_ANEN		0x0002	/* auto-neg. enabled */
 #define	AUX_SS_JABBER		0x0001	/* jabber detected */
 
+
 #define	MII_BMTPHY_INTR		0x1a	/* interrupt register */
 #define	INTR_FDX_LED		0x8000	/* full-duplex led enable */
 #define	INTR_INTR_EN		0x4000	/* interrupt enable */
@@ -112,8 +123,50 @@
 #define	INTR_LINK_CHANGE	0x0002	/* link change */
 #define	INTR_INTR_STATUS	0x0001	/* interrupt status */
 
+
 #define	MII_BMTPHY_AUX2		0x1b	/* auliliary mode 2 */
 #define	AUX2_BLOCK_RXDV		0x0200	/* block RXDV mode enabled */
 #define	AUX2_ANPDQ		0x0100	/* auto-neg parallel detection Q mode */
+#define	AUX2_TRAFFIC_LED	0x0040	/* traffic meter led enable */
+#define	AUX2_FXMTRCV_LED	0x0020	/* force Tx and Rx LEDs */
+#define	AUX2_HS_TOKEN		0x0010	/* high-speed token ring mode */
+#define	AUX2_AUTO_LP		0x0008	/* auto low-power mode */
+#define	AUX2_TWOLINK_LED	0x0004	/* two link LEDs */
+#define	AUX2_SQE_DIS		0x0002	/* disable SQE pulse */
+
+
+#define	MII_BMTPHY_AUXERR	0x1c	/* auxiliary error */
+#define	AUXERR_MANCHESTER	0x0400	/* Manchester code error */
+#define	AUXERR_EOF		0x0200	/* EOF detection error */
+#define	AUXERR_POLARITY		0x0100	/* polarity inversion */
+#define	AUXERR_ANEG		0x0008	/* autonegotiation enabled */
+#define	AUXERR_F100		0x0004	/* force 100base */
+#define	AUXERR_SPEED		0x0002	/* 1 = 100, 0 = 10 */
+#define	AUXERR_FDX		0x0001	/* full-duplex */
+
+
+#define	MII_BMTPHY_AUXMODE	0x1d	/* auxiliary mode */
+#define	AUXMODE_ACT_LED_DIS	0x0010	/* activity LED disable */
+#define	AUXMODE_LINK_LED_DIS	0x0008	/* link LED disable */
+#define	AUXMODE_BLOCK_TXEN	0x0002	/* enable block TXEN */
+
+
+#define	MII_BMTPHY_AUXMPHY	0x1e	/* auxiliary multiple phy register */
+#define	AUXMPHY_HCD_TX_FDX	0x8000	/* res. is 100baseTX-FDX */
+#define	AUXMPHY_HCD_T4		0x4000	/* res. is 100baseT4 */
+#define	AUXMPHY_HCD_TX		0x2000	/* res. is 100baseTX */
+#define	AUXMPHY_HCD_10T_FDX	0x1000	/* res. is 10baseT-FDX */
+#define	AUXMPHY_HCD_10T		0x0800	/* res. is 10baseT */
+#define	AUXMPHY_RES_ANEG	0x0100	/* restart auto-negotiation */
+#define	AUXMPHY_ANEG_COMP	0x0080	/* auto-negotiation complete */
+#define	AUXMPHY_ACK_COMP	0x0040	/* acknowledge complete */
+#define	AUXMPHY_ACK_DET		0x0020	/* acknowledge detected */
+#define	AUXMPHY_ABILITY_DET	0x0010	/* waiting for LP ability */
+#define	AUXMPHY_SUPER_ISO	0x0008	/* super-isolate mode */
+#define	AUXMPHY_10T_SERIAL	0x0002	/* 10baseT serial mode */
+
+
+#define	MII_BMTPHY_TEST		0x1d	/* Broadcom test register */
+
 
 #endif /* _DEV_MII_BMTPHYREG_H_ */

@@ -1,4 +1,4 @@
-/* $NetBSD: vesafbvar.h,v 1.3 2006/04/24 14:14:38 jmcneill Exp $ */
+/* $NetBSD: vesafbvar.h,v 1.7 2008/07/09 20:40:16 joerg Exp $ */
 
 /*-
  * Copyright (c) 2006 Jared D. McNeill <jmcneill@invisible.ca>
@@ -68,7 +68,7 @@ extern const char _splash_header_data_cmap[64+32][3];
 #define	VESAFB_SHADOW_FB
 
 struct vesafb_softc {
-	struct device sc_dev;
+	device_t sc_dev;
 	int sc_mode;
 	int sc_isconsole;
 	struct vcons_data sc_vd;
@@ -85,11 +85,21 @@ struct vesafb_softc {
 	char *sc_buf;
 	u_char *sc_bits;
 	u_char *sc_shadowbits;
+	u_char *sc_fbstart;
 	u_char sc_cmap_red[256];
 	u_char sc_cmap_green[256];
 	u_char sc_cmap_blue[256];
 	int sc_wsmode;
 	int sc_nscreens;
+	int sc_scrollscreens;
+	uint32_t sc_screensize;
+	uint32_t sc_fbsize;
+	uint32_t sc_fblines;
+	/* display wide buffer settings for VTs */
+	uint8_t *sc_displ_bits;
+	uint8_t *sc_displ_hwbits;
+	/* delegate rasops function if hardware scrolling */
+	void (*sc_orig_copyrows)(void *, int, int, int);
 
 	int sc_pm;
 	uint8_t sc_pmver;

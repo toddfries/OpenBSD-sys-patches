@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu_fmovecr.c,v 1.8 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_fmovecr.c,v 1.10 2003/07/15 02:43:09 lukem Exp $	*/
+/*	$NetBSD: fpu_fmovecr.c,v 1.11 2005/12/11 12:17:52 christos Exp $	*/
 
 /*
  * Copyright (c) 1995  Ken Nakata
@@ -32,11 +31,14 @@
  *	@(#)fpu_fmovecr.c	10/8/95
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: fpu_fmovecr.c,v 1.11 2005/12/11 12:17:52 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <machine/frame.h>
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
 /* XXX: quick consistency check */
 #if (FP_1 != 0x40000)
@@ -98,7 +100,9 @@ fpu_const(fp, offset)
 }
 
 int
-fpu_emul_fmovecr(struct fpemu *fe, struct instruction *insn, int *typ)
+fpu_emul_fmovecr(fe, insn)
+     struct fpemu *fe;
+     struct instruction *insn;
 {
     int dstreg, offset;
     u_int *fpreg;

@@ -1,5 +1,4 @@
-/*	$OpenBSD: umidireg.h,v 1.6 2007/06/09 11:06:53 mbalmer Exp $	*/
-/*	$NetBSD: umidireg.h,v 1.3 2003/12/04 13:57:31 keihan Exp $	*/
+/*	$NetBSD: umidireg.h,v 1.8 2008/05/28 12:59:30 jmcneill Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -15,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,21 +37,28 @@
 #define UMIDI_EMBEDDED	0x01
 #define UMIDI_EXTERNAL	0x02
 
+/* generic, for iteration */
+typedef struct {
+	uByte		bLength;
+	uByte		bDescriptorType;
+	uByte		bDescriptorSubtype;
+} UPACKED umidi_cs_descriptor_t;
+
 typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
 	uByte		bDescriptorSubtype;
 	uWord		bcdMSC;
 	uWord		wTotalLength;
-} __packed umidi_cs_interface_descriptor_t;
+} UPACKED umidi_cs_interface_descriptor_t;
 #define UMIDI_CS_INTERFACE_DESCRIPTOR_SIZE 7
 
 typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
-	uByte		bDescriptorSubType;
+	uByte		bDescriptorSubtype;
 	uByte		bNumEmbMIDIJack;
-} __packed umidi_cs_endpoint_descriptor_t;
+} UPACKED umidi_cs_endpoint_descriptor_t;
 #define UMIDI_CS_ENDPOINT_DESCRIPTOR_SIZE 4
 
 typedef struct {
@@ -68,12 +67,12 @@ typedef struct {
 	uByte		bDescriptorSubtype;
 	uByte		bJackType;
 	uByte		bJackID;
-} __packed umidi_jack_descriptor_t;
+} UPACKED umidi_jack_descriptor_t;
 #define	UMIDI_JACK_DESCRIPTOR_SIZE	5
 
 
 #define TO_D(p) ((usb_descriptor_t *)(p))
-#define NEXT_D(desc) TO_D((caddr_t)(desc)+(desc)->bLength)
+#define NEXT_D(desc) TO_D((char *)(desc)+(desc)->bLength)
 #define TO_IFD(desc) ((usb_interface_descriptor_t *)(desc))
 #define TO_CSIFD(desc) ((umidi_cs_interface_descriptor_t *)(desc))
 #define TO_EPD(desc) ((usb_endpoint_descriptor_t *)(desc))

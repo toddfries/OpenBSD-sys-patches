@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.34 2006/12/24 02:05:55 rumble Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.41 2007/12/15 14:23:14 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2000 Soren S. Jorvang
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.34 2006/12/24 02:05:55 rumble Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.41 2007/12/15 14:23:14 tsutsui Exp $");
 
 #include "opt_ddb.h"
 
@@ -66,8 +66,6 @@ cpu_configure()
 {
 	int s;
 
-	softintr_init();
-
 	s = splhigh();
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("no mainbus found");
@@ -77,10 +75,6 @@ cpu_configure()
 	 * caused by probes for non-existent devices.
 	 */
 	(*platform.bus_reset)();
-
-	printf("biomask %02x netmask %02x ttymask %02x clockmask %02x\n",
-	    ipl2spl_table[IPL_BIO] >> 8, ipl2spl_table[IPL_NET] >> 8, 
-	    ipl2spl_table[IPL_TTY] >> 8, ipl2spl_table[IPL_CLOCK] >> 8);
 
 	/*
 	 * Hardware interrupts will be enabled in cpu_initclocks(9)
@@ -96,7 +90,7 @@ cpu_configure()
  * 'dksc(0,1,0)netbsd'
  */
 void
-makebootdev(char *cp)
+makebootdev(const char *cp)
 {
 	if (booted_protocol != NULL)
 		return;
@@ -192,17 +186,19 @@ device_register(struct device *dev, void *aux)
 		struct pci_attach_args *pa = aux;
 
 		if (BUILTIN_AHC_P(pa)) {
-			prop_bool_t usetd = prop_bool_create(TRUE);
-			KASSERT(usetd != NULL);
-
-			if (prop_dictionary_set(device_properties(dev),
-						"aic7xxx-use-target-defaults",
-						usetd) == FALSE) {
+			if (prop_dictionary_set_bool(device_properties(dev),
+			    "aic7xxx-use-target-defaults", true) == false) {
 				printf("WARNING: unable to set "
 				    "aic7xxx-use-target-defaults property "
 				    "for %s\n", dev->dv_xname);
 			}
-			prop_object_release(usetd);
+
+			if (prop_dictionary_set_bool(device_properties(dev),
+			    "aic7xxx-override-ultra", true) == false) {
+				printf("WARNING: unable to set "
+				    "aic7xxx-override-ultra property for %s\n",
+				    dev->dv_xname);
+			}
 		}
 	}
 
@@ -220,7 +216,7 @@ device_register(struct device *dev, void *aux)
 			KASSERT(gfe_boundary != NULL);
 
 			if (prop_dictionary_set(device_properties(dev),
-			    "tl-dma-page-boundary", gfe_boundary) == FALSE) {
+			    "tl-dma-page-boundary", gfe_boundary) == false) {
 				printf("WARNING: unable to set "
 				    "tl-dma-page-boundary property "
 				    "for %s\n", dev->dv_xname);
@@ -229,7 +225,7 @@ device_register(struct device *dev, void *aux)
 			return;
 		}
 	}
-		
+
 	if (found)
 		return;
 

@@ -1,4 +1,4 @@
-/* $NetBSD: if_xb.c,v 1.14 2005/12/24 20:06:46 perry Exp $ */
+/* $NetBSD: if_xb.c,v 1.19 2008/11/07 00:20:01 dyoung Exp $ */
 
 /* [Notice revision 2.2]
  * Copyright (c) 1997, 1998 Avalon Computer Systems, Inc.
@@ -74,7 +74,7 @@
 #include "opt_avalon_a12.h"		/* Config options headers */
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: if_xb.c,v 1.14 2005/12/24 20:06:46 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_xb.c,v 1.19 2008/11/07 00:20:01 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -99,7 +99,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_xb.c,v 1.14 2005/12/24 20:06:46 perry Exp $");
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
-#include <dev/dec/clockvar.h>
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
@@ -199,9 +199,9 @@ static int  xb_intr __P((void *));
 static void xb_intr_rcv __P((void));
 Static void quickload __P((volatile long *, long *));
 static void xb_init_config __P((struct xb_config *, int));
-static int  xb_output __P((struct ifnet *, struct mbuf *, struct sockaddr *,
-			struct rtentry *));
-static int  xb_ioctl __P((struct ifnet *, u_long, caddr_t));
+static int  xb_output __P((struct ifnet *, struct mbuf *,
+			const struct sockaddr *, struct rtentry *));
+static int  xb_ioctl __P((struct ifnet *, u_long, void *));
 static void xb_stop __P((void));
 static void a12_xbar_setup __P((void));
 
@@ -215,7 +215,6 @@ xbmatch(parent, match, aux)
 	struct cfdata *match;
 	void *aux;
 {
-	struct pcibus_attach_args *pba = aux;
 
 	return	cputype == ST_AVALON_A12
 		&& !xbfound;
@@ -232,7 +231,7 @@ xbattach(parent, self, aux)
 	xbfound = 1;
 	ccp = &xb_configuration;
 	xb_init_config(ccp, 1);
-	printf(": driver %s mtu %d\n", "$Revision: 1.14 $", xbi.if_mtu);
+	printf(": driver %s mtu %lu\n", "$Revision: 1.19 $", xbi.if_mtu);
 }
 
 static void
@@ -366,8 +365,8 @@ int	s = 0;	/* XXX gcc */
 				IF_DROP(&ipintrq);
 			      ++xbi.if_iqdrops;
 			} else {
-				m = m_devget((caddr_t)xb_incoming,
-					(caddr_t)xb_ibp - (caddr_t)xb_incoming,
+				m = m_devget((void *)xb_incoming,
+					(char *)xb_ibp - (char *)xb_incoming,
 					0, &xbi, 0L);
 				if (m) {
 					xbi.if_ibytes += m->m_pkthdr.len;
@@ -420,29 +419,20 @@ xb_stop()
 }
 
 static int
-xb_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+xb_ioctl(struct ifnet *ifp, unsigned long cmd, void *data)
 {
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
 	s = splnet();
 	switch (cmd) {
-	case SIOCSIFADDR:
+	case SIOCINITIFADDR:
 		xbi.if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
-		case AF_INET:
-			xb_init(ifp);
-			break;
-#endif
-		default:
-			xb_init(ifp);
-		}
+		xb_init(ifp);
 		break;
 	case SIOCSIFFLAGS:
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			xb_stop();
@@ -456,7 +446,7 @@ xb_ioctl(ifp, cmd, data)
 			xb_debug = 1;
 		break;
 	default:
-		error = EINVAL;
+		error = ifioctl_common(ifp, cmd, data);
 		break;
 	}
 	splx(s);
@@ -485,15 +475,15 @@ static int
 xb_output(ifp, m0, dst, rt0)
 	struct ifnet *ifp;
 	struct mbuf *m0;
-	struct sockaddr *dst;
+	const struct sockaddr *dst;
 	struct rtentry *rt0;
 {
 	int	i,s;
 	struct	mbuf *m = m0;
-	char	*lladdr;
-	caddr_t	xbh;
+	const char	*lladdr;
+	char	*xbh;
 	long	xbo_framesize;
-	struct	sockaddr_dl *llsa;
+	const struct	sockaddr_dl *llsa;
 	int	xbaddr;
 
 #ifdef DIAGNOSTIC
@@ -509,7 +499,7 @@ xb_output(ifp, m0, dst, rt0)
 	 */
 	if (rt0 == NULL
 	|| (rt0->rt_flags & (RTF_GATEWAY | RTF_LLINFO))
-	|| (llsa = (struct sockaddr_dl *)rt0->rt_gateway) == NULL
+	|| (llsa = satocsdl(rt0->rt_gateway)) == NULL
 	||  llsa->sdl_family != AF_LINK
 	||  llsa->sdl_slen   != 0) {
 	      ++ifp->if_oerrors;
@@ -534,7 +524,7 @@ xb_output(ifp, m0, dst, rt0)
 	 * to emerge on. The address word is eaten by the switch and the
 	 * rest of the packet is routed through.
 	 */
-	lladdr = LLADDR(llsa);
+	lladdr = CLLADDR(llsa);
 	if (llsa->sdl_alen != 1)			/* XXX */
 		DIE();	/* OK someday, but totally unexpected right now */
 	/*
@@ -545,7 +535,7 @@ xb_output(ifp, m0, dst, rt0)
 	M_PREPEND(m, 16 * llsa->sdl_alen + 8, M_DONTWAIT);
 	if (m == NULL)
 		return ENOBUFS;
-	xbh = mtod(m, caddr_t);
+	xbh = mtod(m, char *);
 	for (i=0; i<llsa->sdl_alen; ++i) {
 		xbaddr = (lladdr[i] & 0xff) - 1;
 		if (!(0 <= xbaddr && xbaddr <= 11))	/* XXX */
@@ -636,10 +626,10 @@ xb_put_blk(m)
 		fillin,		/* amount needed to complete a switch word */
 		full,		/* remember to restart on fifo full */
 		len;		/* amount of mbuf left to do */
-	caddr_t	blk;		/* location we are at in mbuf */
+	char	*blk;		/* location we are at in mbuf */
 	static	int fifo_free;	/* current # of switch words free in fifo */
 
-#define	XFERADJ() ((caddr_t)xfertmp+leftover_len)
+#define	XFERADJ() ((char *)xfertmp + leftover_len)
 
 	/* There is always room for the close word */
 
@@ -667,7 +657,7 @@ restart:
 	len = m->m_len;
 	if (len == 0)
 		return 1;	/* clean finish, nothing left over */
-	blk = mtod(m, caddr_t);
+	blk = mtod(m, char *);
 	if (leftover_len) {
 		/* See function intro comment regarding padding */
 		if (leftover_len + len < sizeof leftover) {
@@ -706,7 +696,7 @@ restart:
 		len -= frag_len;
 		blk += frag_len;
 		if (full) {
-			m_adj(m, blk - mtod(m, caddr_t));
+			m_adj(m, blk - mtod(m, char *));
 			goto restart;
 		}
 	}

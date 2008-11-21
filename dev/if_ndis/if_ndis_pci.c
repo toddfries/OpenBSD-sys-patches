@@ -31,6 +31,7 @@
  */
 
 #include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: if_ndis_pci.c,v 1.11 2008/11/12 12:36:12 ad Exp $");
 #ifdef __FreeBSD__
 __FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.8.2.3 2005/03/31 04:24:36 wpaul Exp $");
 #endif
@@ -38,11 +39,7 @@ __FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.8.2.3 2005/03/31 04:24
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#ifdef __FreeBSD__
 #include <sys/module.h>
-#else
-#include <sys/lkm.h>
-#endif
 #include <sys/socket.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
@@ -338,8 +335,7 @@ ndis_attach_pci(dev)
 				    SYS_RES_IOPORT, &sc->ndis_io_rid,
 				    0, ~0, 1, RF_ACTIVE);
 				if (sc->ndis_res_io == NULL) {
-					aprint_error("%s: couldn't map iospace\n",
-						     dev->dv_xname);
+					aprint_error_dev(dev, "couldn't map iospace\n");
 					error = ENXIO;
 					goto fail;
 				}
@@ -347,8 +343,7 @@ ndis_attach_pci(dev)
 			case SYS_RES_MEMORY:
 				if (sc->ndis_res_altmem != NULL &&
 				    sc->ndis_res_mem != NULL) {
-					aprint_error("%s: too many memory resources\n"
-						     dev->dv_xname);
+					aprint_error_dev(dev, "too many memory resources\n");
 					error = ENXIO;
 					goto fail;
 				}
@@ -360,9 +355,8 @@ ndis_attach_pci(dev)
 						&sc->ndis_altmem_rid,
 						0, ~0, 1, RF_ACTIVE);
 					if (sc->ndis_res_altmem == NULL) {
-						aprint_error("%s: couldn't map alt "
-							     "memory\n",
-							     dev->dv_xname);
+						aprint_error_dev(dev, "couldn't map alt "
+							     "memory\n");
 						error = ENXIO;
 						goto fail;
 					}
@@ -374,8 +368,7 @@ ndis_attach_pci(dev)
 						&sc->ndis_mem_rid,
 						0, ~0, 1, RF_ACTIVE);
 					if (sc->ndis_res_mem == NULL) {
-						aprint_error("%s: couldn't map memory\n",
-							     dev->dv_xname);
+						aprint_error_dev(dev, "couldn't map memory\n");
 						error = ENXIO;
 						goto fail;
 					}
@@ -387,8 +380,7 @@ ndis_attach_pci(dev)
 				    SYS_RES_IRQ, &rid, 0, ~0, 1,
 	    			    RF_SHAREABLE | RF_ACTIVE);
 				if (sc->ndis_irq == NULL) {
-					aprint_error("%s: couldn't map interrupt\n"
-						     dev->dv_xname);
+					aprint_error_dev(dev, "couldn't map interrupt\n");
 					error = ENXIO;
 					goto fail;
 				}
@@ -413,8 +405,7 @@ ndis_attach_pci(dev)
 		sc->ndis_irq = bus_alloc_resource(dev, SYS_RES_IRQ,
 		    &rid, 0, ~0, 1, RF_SHAREABLE | RF_ACTIVE);
 		if (sc->ndis_irq == NULL) {
-			aprint_error("%s: couldn't route interrupt\n",
-				     dev->dv_xname);
+			aprint_error_dev(dev, "couldn't route interrupt\n");
 			error = ENXIO;
 			goto fail;
 		}

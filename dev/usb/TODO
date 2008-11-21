@@ -1,5 +1,3 @@
-$OpenBSD: TODO,v 1.15 2007/06/09 12:17:38 mbalmer Exp $
-
 Some things that need to be done:
 ---------------------------------
 
@@ -79,9 +77,6 @@ Change what's done at watchdog timeout inb if_{a,c,k}ue.c; what we have
 now doesn't work because it's done in an interrupt context.
 
 Factor out the common code from the Ethernet drivers and reuse that.
-
-Rewrite HID driver to handle report IDs properly.  Perhaps there should
-be a hiddev to which hid with different IDs can attach?
 
 Get rid of hcpriv.
 

@@ -1,5 +1,5 @@
-/*	$OpenBSD: if_ppp.h,v 1.8 2002/07/01 19:31:34 deraadt Exp $	*/
-/*	$NetBSD: if_ppp.h,v 1.11 1996/03/15 02:28:05 paulus Exp $	*/
+/*	$NetBSD: if_ppp.h,v 1.23 2005/12/11 23:05:25 thorpej Exp $	*/
+/*	Id: if_ppp.h,v 1.16 1997/04/30 05:46:04 paulus Exp 	*/
 
 /*
  * if_ppp.h - Point-to-Point Protocol definitions.
@@ -47,12 +47,6 @@
 #define _NET_IF_PPP_H_
 
 /*
- * Packet sizes
- */
-#define	PPP_MTU		1500	/* Default MTU (size of Info field) */
-#define PPP_MAXMRU	65000	/* Largest MRU we allow */
-
-/*
  * Bit definitions for flags.
  */
 #define SC_COMP_PROT	0x00000001	/* protocol compression (output) */
@@ -68,10 +62,12 @@
 #define SC_LOG_OUTPKT	0x00040000	/* log contents of pkts sent */
 #define SC_LOG_RAWIN	0x00080000	/* log all chars received */
 #define SC_LOG_FLUSH	0x00100000	/* log all chars flushed */
+#define SC_SYNC		0x00200000	/* synchronous HDLC */
 #define SC_RCV_B7_0	0x01000000	/* have rcvd char with bit 7 = 0 */
 #define SC_RCV_B7_1	0x02000000	/* have rcvd char with bit 7 = 1 */
 #define SC_RCV_EVNP	0x04000000	/* have rcvd char with even parity */
 #define SC_RCV_ODDP	0x08000000	/* have rcvd char with odd parity */
+
 #define	SC_MASK		0x0fff00ff	/* bits that user can change */
 
 /*
@@ -114,10 +110,16 @@ struct ifpppcstatsreq {
     struct ppp_comp_stats stats;
 };
 
+struct ppp_rawin {
+    u_char buf[63];
+    u_char count;
+};
+
 /*
  * Ioctl definitions.
  */
 
+#define	PPPIOCGRAWIN	_IOR('t', 91, struct ppp_rawin)	/* get raw input */
 #define	PPPIOCGFLAGS	_IOR('t', 90, int)	/* get configuration flags */
 #define	PPPIOCSFLAGS	_IOW('t', 89, int)	/* set configuration flags */
 #define	PPPIOCGASYNCMAP	_IOR('t', 88, int)	/* get async map */
@@ -135,8 +137,24 @@ struct ifpppcstatsreq {
 #define PPPIOCGNPMODE	_IOWR('t', 76, struct npioctl) /* get NP mode */
 #define PPPIOCSNPMODE	_IOW('t', 75, struct npioctl)  /* set NP mode */
 #define PPPIOCGIDLE	_IOR('t', 74, struct ppp_idle) /* get idle time */
+#ifdef PPP_FILTER
+/*
+ * XXX These are deprecated; they can no longer be used, because they
+ * XXX don't play well with multiple encaps.  The defs are here so that
+ * XXX we can return decent errors to old pppds, and so that new pppds
+ * XXX will work with old kernels.
+ */
 #define PPPIOCSPASS	_IOW('t', 71, struct bpf_program) /* set pass filter */
 #define PPPIOCSACTIVE	_IOW('t', 70, struct bpf_program) /* set active filt */
+
+/*
+ * Use these instead.
+ */
+#define	PPPIOCSIPASS	_IOW('t', 69, struct bpf_program) /* set in pass flt */
+#define	PPPIOCSOPASS	_IOW('t', 68, struct bpf_program) /* set out pass flt */
+#define	PPPIOCSIACTIVE	_IOW('t', 67, struct bpf_program) /* set in act flt */
+#define	PPPIOCSOACTIVE	_IOW('t', 66, struct bpf_program) /* set out act flt */
+#endif /* PPP_FILTER */
 
 /* PPPIOC[GS]MTU are alternatives to SIOC[GS]IFMTU, used under Ultrix */
 #define PPPIOCGMTU	_IOR('t', 73, int)	/* get interface MTU */
@@ -149,10 +167,11 @@ struct ifpppcstatsreq {
 #define SIOCGPPPSTATS	_IOWR('i', 123, struct ifpppstatsreq)
 #define SIOCGPPPCSTATS	_IOWR('i', 122, struct ifpppcstatsreq)
 
-#ifdef _KERNEL
-void pppattach(void);
-int pppoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
-		   struct rtentry *);
-void pppintr(void);
+#if !defined(ifr_mtu)
+#define ifr_mtu	ifr_ifru.ifru_metric
 #endif
-#endif /* _NET_IF_PPP_H_ */
+
+#if defined(_KERNEL) || defined(KERNEL)
+void	pppattach(void);
+#endif
+#endif /* !_NET_IF_PPP_H_ */

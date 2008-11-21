@@ -1,4 +1,4 @@
-/*	$NetBSD: sc_vme.c,v 1.14 2007/10/19 12:01:23 ad Exp $	*/
+/*	$NetBSD: sc_vme.c,v 1.17 2008/07/06 13:29:50 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996,2000,2001 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sc_vme.c,v 1.14 2007/10/19 12:01:23 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sc_vme.c,v 1.17 2008/07/06 13:29:50 tsutsui Exp $");
 
 #include "opt_ddb.h"
 
@@ -112,19 +105,16 @@ __KERNEL_RCSID(0, "$NetBSD: sc_vme.c,v 1.14 2007/10/19 12:01:23 ad Exp $");
 
 int sunsc_vme_options = 0;
 
-static int	sc_vme_match(struct device *, struct cfdata *, void *);
-static void	sc_vme_attach(struct device *, struct device *, void *);
+static int	sc_vme_match(device_t, cfdata_t, void *);
+static void	sc_vme_attach(device_t, device_t, void *);
 static int	sc_vme_intr(void *);
 
 /* Auto-configuration glue. */
-CFATTACH_DECL(sc_vme, sizeof(struct sunscpal_softc),
+CFATTACH_DECL_NEW(sc_vme, sizeof(struct sunscpal_softc),
     sc_vme_match, sc_vme_attach, NULL, NULL);
 
 static int
-sc_vme_match(parent, cf, aux)
-	struct device	*parent;
-	struct cfdata *cf;
-	void *aux;
+sc_vme_match(device_t parent, cfdata_t cf, void *aux)
 {
 	struct vme_attach_args	*va = aux;
 	vme_chipset_tag_t	ct = va->va_vct;
@@ -136,7 +126,7 @@ sc_vme_match(parent, cf, aux)
 	vme_addr = va->r[0].offset;
 
 	if (vme_probe(ct, vme_addr, 1, mod, VME_D8, NULL, 0) != 0)
-		return (0);
+		return 0;
 
 	/*
 	 * If this is a VME SCSI board, we have to determine whether
@@ -144,15 +134,13 @@ sc_vme_match(parent, cf, aux)
 	 * be determined using the fact that the "sc" board occupies
 	 * 4K bytes in VME space but the "si" board occupies 2K bytes.
 	 */
-	return (vme_probe(ct, vme_addr + 0x801, 1, mod, VME_D8, NULL, 0) == 0);
+	return vme_probe(ct, vme_addr + 0x801, 1, mod, VME_D8, NULL, 0) == 0;
 }
 
 static void
-sc_vme_attach(parent, self, aux)
-	struct device	*parent, *self;
-	void		*aux;
+sc_vme_attach(device_t parent, device_t self, void *aux)
 {
-	struct sunscpal_softc	*sc = (struct sunscpal_softc *) self;
+	struct sunscpal_softc	*sc = device_private(self);
 	struct vme_attach_args	*va = aux;
 	vme_chipset_tag_t	ct = va->va_vct;
 	bus_space_tag_t		bt;
@@ -162,13 +150,14 @@ sc_vme_attach(parent, self, aux)
 	vme_am_t		mod;
 	int i;
 
+	sc->sc_dev = self;
 	sc->sunscpal_dmat = va->va_bdt;
 
 	mod = VME_AM_A24 | VME_AM_MBO | VME_AM_SUPER | VME_AM_DATA;
 
 	if (vme_space_map(ct, va->r[0].offset, SCREG_BANK_SZ,
-			  mod, VME_D8, 0, &bt, &bh, &resc) != 0)
-		panic("%s: vme_space_map", sc->sc_dev.dv_xname);
+	    mod, VME_D8, 0, &bt, &bh, &resc) != 0)
+		panic("%s: vme_space_map", device_xname(self));
 
 	sc->sunscpal_regt = bt;
 	sc->sunscpal_regh = bh;
@@ -176,7 +165,7 @@ sc_vme_attach(parent, self, aux)
 	vme_intr_map(ct, va->ilevel, va->ivector, &ih);
 	vme_intr_establish(ct, ih, IPL_BIO, sc_vme_intr, sc);
 
-	printf("\n");
+	aprint_normal("\n");
 
 	/*
 	 * Initialize fields used by the MI code
@@ -199,7 +188,7 @@ sc_vme_attach(parent, self, aux)
 	 * Allocate DMA handles.
 	 */
 	i = SUNSCPAL_OPENINGS * sizeof(struct sunscpal_dma_handle);
-	sc->sc_dma_handles = (struct sunscpal_dma_handle *)malloc(i, M_DEVBUF, M_NOWAIT);
+	sc->sc_dma_handles = malloc(i, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_dma_handles == NULL)
 		panic("sc: DMA handle malloc failed");
 
@@ -208,19 +197,18 @@ sc_vme_attach(parent, self, aux)
 
 		/* Allocate a DMA handle */
 		if (vme_dmamap_create(
-				ct,		/* VME chip tag */
-				SUNSCPAL_MAX_DMA_LEN,	/* size */
-				VME_AM_A24,	/* address modifier */
-				VME_D16,	/* data size */
-				0,		/* swap */
-				1,		/* nsegments */
-				SUNSCPAL_MAX_DMA_LEN,	/* maxsegsz */
-				0,		/* boundary */
-				BUS_DMA_NOWAIT,
-				&sc->sc_dma_handles[i].dh_dmamap) != 0) {
+		    ct,				/* VME chip tag */
+		    SUNSCPAL_MAX_DMA_LEN,	/* size */
+		    VME_AM_A24,			/* address modifier */
+		    VME_D16,			/* data size */
+		    0,				/* swap */
+		    1,				/* nsegments */
+		    SUNSCPAL_MAX_DMA_LEN,	/* maxsegsz */
+		    0,				/* boundary */
+		    BUS_DMA_NOWAIT,
+		    &sc->sc_dma_handles[i].dh_dmamap) != 0) {
 
-			printf("%s: DMA buffer map create error\n",
-				sc->sc_dev.dv_xname);
+			aprint_error_dev(self, "DMA buffer map create error\n");
 			return;
 		}
 	}
@@ -231,10 +219,9 @@ sc_vme_attach(parent, self, aux)
 	SUNSCPAL_WRITE_1(sc, sunscpal_intvec, va->ivector & 0xFF);
 
 	/* Do the common attach stuff. */
-	printf("%s", sc->sc_dev.dv_xname);
-	sunscpal_attach(sc, (device_cfdata(&sc->sc_dev)->cf_flags ?
-			     device_cfdata(&sc->sc_dev)->cf_flags :
-			     sunsc_vme_options));
+	printf("%s", device_xname(self));
+	sunscpal_attach(sc, (device_cfdata(self)->cf_flags ?
+	    device_cfdata(self)->cf_flags : sunsc_vme_options));
 }
 
 static int
@@ -246,12 +233,11 @@ sc_vme_intr(void *arg)
 	claimed = sunscpal_intr(sc);
 #ifdef  DEBUG
 	if (!claimed) {
-        	printf("sc_vme_intr: spurious from SBC\n");
+        	printf("%s: spurious from SBC\n", __func__);
 	}
 #endif
 	/* Yes, we DID cause this interrupt. */
 	claimed = 1;
 
-	return (claimed);
+	return claimed;
 }
-

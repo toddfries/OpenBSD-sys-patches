@@ -1,5 +1,4 @@
-/* $OpenBSD: wsemul_vt100_chars.c,v 1.6 2007/11/27 16:37:27 miod Exp $ */
-/* $NetBSD: wsemul_vt100_chars.c,v 1.4 1999/02/20 18:20:02 drochner Exp $ */
+/* $NetBSD: wsemul_vt100_chars.c,v 1.11 2005/12/11 12:24:12 christos Exp $ */
 
 /*
  * Copyright (c) 1998
@@ -27,6 +26,9 @@
  *
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: wsemul_vt100_chars.c,v 1.11 2005/12/11 12:24:12 christos Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <dev/wscons/wsconsio.h>
@@ -51,7 +53,7 @@ static const u_int16_t decspcgr2uni[128] = {
 	0x0058, 0x0059, 0x005a, 0x005b, 0x005c, 0x005d, 0x005e, 0x00a0,
 /* 6 */	0x25c6, 0x2592, 0x2409, 0x240c, 0x240d, 0x240a, 0x00b0, 0x00b1,
 	_e006U, 0x240b, 0x2518, 0x2510, 0x250c, 0x2514, 0x253c, _e001U,
-	_e002U, _e003U, _e004U, _e005U, 0x251c, 0x2524, 0x2534, 0x252c,
+	_e002U, 0x2500, _e004U, _e005U, 0x251c, 0x2524, 0x2534, 0x252c,
 	0x2502, 0x2264, 0x2265, 0x03c0, 0x2260, 0x00a3, 0x00b7, 0x007f,
 };
 
@@ -79,21 +81,15 @@ vt100_initchartables(struct wsemul_vt100_emuldata *edp)
 {
 	int i;
 
-	if (edp->isolatin1tab != NULL)
-		for (i = 0; i < 128; i++)
-			(*edp->emulops->mapchar)(edp->emulcookie, 128 + i,
-			    &edp->isolatin1tab[i]);
-
-	if (edp->decgraphtab != NULL)
-		for (i = 0; i < 128; i++)
-			(*edp->emulops->mapchar)(edp->emulcookie,
-			    decspcgr2uni[i], &edp->decgraphtab[i]);
-
-	if (edp->dectechtab != NULL)
-		for (i = 0; i < 128; i++)
-			(*edp->emulops->mapchar)(edp->emulcookie,
-			    dectech2uni[i], &edp->dectechtab[i]);
-
+	for (i = 0; i < 128; i++)
+		(*edp->emulops->mapchar)(edp->emulcookie, 128 + i,
+					 &edp->isolatin1tab[i]);
+	for (i = 0; i < 128; i++)
+		(*edp->emulops->mapchar)(edp->emulcookie, decspcgr2uni[i],
+					 &edp->decgraphtab[i]);
+	for (i = 0; i < 128; i++)
+		(*edp->emulops->mapchar)(edp->emulcookie, dectech2uni[i],
+					 &edp->dectechtab[i]);
 	vt100_setnrc(edp, 0);
 }
 
@@ -128,7 +124,7 @@ static const struct {
 	/* norwegian /danish */
 	{{0x0023, 0x0040, 0x00c6, 0x00d8, 0x00c5, 0x005e,
 	0x005f, 0x0060, 0x00e6, 0x00f8, 0x00e5, 0x007e}},
-	/* portuguese */
+	/* portugese */
 	{{0x0023, 0x0040, 0x00c3, 0x00c7, 0x00d5, 0x005e,
 	0x005f, 0x0060, 0x00e3, 0x00e7, 0x00f5, 0x007e}},
 	/* spanish */
@@ -142,22 +138,16 @@ static const struct {
 	0x00e8, 0x00f4, 0x00e4, 0x00f6, 0x00fc, 0x00fb}},
 };
 
-int
+void
 vt100_setnrc(struct wsemul_vt100_emuldata *edp, int nrc)
 {
 	int i;
 
-	if (edp->nrctab == NULL)
-		return (0);
-
-	if (nrc < 0 || nrc >= sizeof(nrctable) / sizeof(nrctable[0]))
-		return (ERANGE);
+	KASSERT(nrc < sizeof(nrctable) / sizeof(nrctable[0]));
 
 	for (i = 0; i < 128; i++)
 		(*edp->emulops->mapchar)(edp->emulcookie, i, &edp->nrctab[i]);
 	for (i = 0; i < 12; i++)
 		(*edp->emulops->mapchar)(edp->emulcookie, nrctable[nrc].c[i],
-		    &edp->nrctab[nrcovlpos[i]]);
-
-	return (0);
+					 &edp->nrctab[nrcovlpos[i]]);
 }

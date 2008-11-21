@@ -1,4 +1,4 @@
-/*	$NetBSD: isr.c,v 1.6 2006/12/21 15:55:22 yamt Exp $	*/
+/*	$NetBSD: isr.c,v 1.10 2008/06/22 16:34:15 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,19 +15,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -41,19 +34,16 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isr.c,v 1.6 2006/12/21 15:55:22 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isr.c,v 1.10 2008/06/22 16:34:15 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 #include <sys/vmmeter.h>
+#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <net/netisr.h>
-
-#include <machine/cpu.h>
 
 #include <cesfic/cesfic/isr.h>
 
@@ -61,8 +51,6 @@ typedef LIST_HEAD(, isr) isr_list_t;
 isr_list_t isr_list[NISR];
 
 extern	int intrcnt[];		/* from locore.s */
-
-void	isrcomputeipl __P((void));
 
 void
 isrinit()
@@ -73,88 +61,6 @@ isrinit()
 	for (i = 0; i < NISR; ++i) {
 		LIST_INIT(&isr_list[i]);
 	}
-}
-
-/*
- * Scan all of the ISRs, recomputing the interrupt levels for the spl*()
- * calls.  This doesn't have to be fast.
- */
-void
-isrcomputeipl()
-{
-	struct isr *isr;
-	int ipl;
-	int biospl, netspl, ttyspl, vmspl;
-
-	/* Start with low values. */
-	biospl = netspl = ttyspl = vmspl = (PSL_S|PSL_IPL3);
-
-	for (ipl = 0; ipl < NISR; ipl++) {
-		for (isr = isr_list[ipl].lh_first; isr != NULL;
-		    isr = isr->isr_link.le_next) {
-			/*
-			 * Bump up the level for a given priority,
-			 * if necessary.
-			 */
-			switch (isr->isr_priority) {
-			case ISRPRI_BIO:
-				if (ipl > PSLTOIPL(biospl))
-					biospl = IPLTOPSL(ipl);
-				break;
-
-			case ISRPRI_NET:
-				if (ipl > PSLTOIPL(netspl))
-					netspl = IPLTOPSL(ipl);
-				break;
-
-			case ISRPRI_TTY:
-			case ISRPRI_TTYNOBUF:
-				if (ipl > PSLTOIPL(ttyspl))
-					ttyspl = IPLTOPSL(ipl);
-				break;
-
-			default:
-				printf("priority = %d\n", isr->isr_priority);
-				panic("isrcomputeipl: bad priority");
-			}
-		}
-	}
-
-	/*
-	 * Enforce `bio <= net <= tty <= vm'
-	 */
-
-	if (netspl < biospl)
-		netspl = biospl;
-
-	if (ttyspl < netspl)
-		ttyspl = netspl;
-
-	if (vmspl < ttyspl)
-		vmspl = ttyspl;
-
-	ipl2spl_table[IPL_BIO] = biospl;
-	ipl2spl_table[IPL_NET] = netspl;
-	ipl2spl_table[IPL_TTY] = ttyspl;
-	ipl2spl_table[IPL_VM] = vmspl;
-}
-
-void
-isrprintlevels()
-{
-
-#ifdef DEBUG
-	printf("psl: bio = 0x%x, net = 0x%x, tty = 0x%x, vm = 0x%x\n",
-	    ipl2spl_table[IPL_BIO],
-	    ipl2spl_table[IPL_NET],
-	    ipl2spl_table[IPL_TTY],
-	    ipl2spl_table[IPL_VM]);
-#endif
-
-	printf("interrupt levels: bio = %d, net = %d, tty = %d\n",
-	    PSLTOIPL(ipl2spl_table[IPL_BIO]),
-	    PSLTOIPL(ipl2spl_table[IPL_NET]),
-	    PSLTOIPL(ipl2spl_table[IPL_TTY]));
 }
 
 /*
@@ -210,7 +116,7 @@ isrlink(func, arg, ipl, priority)
 	list = &isr_list[ipl];
 	if (list->lh_first == NULL) {
 		LIST_INSERT_HEAD(list, newisr, isr_link);
-		goto compute;
+		goto done;
 	}
 
 	/*
@@ -222,7 +128,7 @@ isrlink(func, arg, ipl, priority)
 	    curisr = curisr->isr_link.le_next) {
 		if (newisr->isr_priority > curisr->isr_priority) {
 			LIST_INSERT_BEFORE(curisr, newisr, isr_link);
-			goto compute;
+			goto done;
 		}
 	}
 
@@ -232,9 +138,7 @@ isrlink(func, arg, ipl, priority)
 	 */
 	LIST_INSERT_AFTER(curisr, newisr, isr_link);
 
- compute:
-	/* Compute new interrupt levels. */
-	isrcomputeipl();
+ done:
 	return (newisr);
 }
 
@@ -250,7 +154,6 @@ isrunlink(arg)
 
 	LIST_REMOVE(isr, isr_link);
 	free(isr, M_DEVBUF);
-	isrcomputeipl();
 }
 #endif
 
@@ -258,6 +161,8 @@ isrunlink(arg)
  * This is the dispatcher called by the low-level
  * assembly language interrupt routine.
  */
+static unsigned int idepth;
+ 
 void
 isrdispatch(evec)
 	int evec;		/* format | vector offset */
@@ -275,12 +180,15 @@ isrdispatch(evec)
 	intrcnt[ipl]++;
 	uvmexp.intrs++;
 
+	if (ipl >= IPL_VM)
+		idepth++;
+
 	list = &isr_list[ipl];
 	if (list->lh_first == NULL) {
 		printf("intrhand: ipl %d unexpected\n", ipl);
 		if (++unexpected > 10)
 			panic("isrdispatch: too many unexpected interrupts");
-		return;
+		goto out;
 	}
 
 	handled = 0;
@@ -294,35 +202,26 @@ isrdispatch(evec)
 		panic("isrdispatch: too many stray interrupts");
 	else
 		printf("isrdispatch: stray level %d interrupt\n", ipl);
+
+ out:
+	if (ipl >= IPL_VM)
+		idepth--;
 }
 
-void netintr(void);
-
-void
-netintr()
+bool
+cpu_intr_p(void)
 {
-#define DONETISR(bit, fn) do {			\
-		if (netisr & (1 << bit))	\
-			netisr &= ~(1 << bit);	\
-			fn();			\
-		} while(0)
 
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
+	return idepth != 0;
 }
 
-int ipl2spl_table[NIPLS] = {
-	[IPL_NONE] = PSL_S|PSL_IPL0,
-	[IPL_SOFTCLOCK] = PSL_S|PSL_IPL1,
-	[IPL_SOFTNET] = PSL_S|PSL_IPL1,
-	[IPL_BIO] = PSL_S|PSL_IPL3,
-	[IPL_NET] = PSL_S|PSL_IPL3,
-	[IPL_TTY] = PSL_S|PSL_IPL3,
-	[IPL_VM] = PSL_S|PSL_IPL3,
-	[IPL_CLOCK] = PSL_S|PSL_IPL6,
-	[IPL_STATCLOCK] = PSL_S|PSL_IPL6,
-	[IPL_HIGH] = PSL_S|PSL_IPL6,
-	[IPL_SCHED] = PSL_S|PSL_IPL6,
-	[IPL_LOCK] = PSL_S|PSL_IPL6,
+const uint16_t ipl2psl_table[NIPL] = {
+	[IPL_NONE]       = PSL_S|PSL_IPL0,
+	[IPL_SOFTCLOCK]  = PSL_S|PSL_IPL1,
+	[IPL_SOFTBIO]    = PSL_S|PSL_IPL1,
+	[IPL_SOFTNET]    = PSL_S|PSL_IPL1,
+	[IPL_SOFTSERIAL] = PSL_S|PSL_IPL1,
+	[IPL_VM]         = PSL_S|PSL_IPL4,
+	[IPL_SCHED]      = PSL_S|PSL_IPL6,
+	[IPL_HIGH]       = PSL_S|PSL_IPL7,
 };

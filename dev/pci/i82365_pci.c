@@ -1,5 +1,4 @@
-/*	$OpenBSD: i82365_pci.c,v 1.9 2005/08/09 04:10:11 mickey Exp $ */
-/*	$NetBSD: i82365_pci.c,v 1.11 2000/02/24 03:42:44 itohy Exp $	*/
+/*	$NetBSD: i82365_pci.c,v 1.26 2008/06/26 12:33:17 drochner Exp $	*/
 
 /*
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -34,10 +33,11 @@
  * XXX this driver frontend is *very* i386 dependent and should be relocated
  */
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: i82365_pci.c,v 1.26 2008/06/26 12:33:17 drochner Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
 #include <sys/device.h>
 
 #include <dev/ic/i82365reg.h>
@@ -57,14 +57,13 @@
  */
 #define	PCI_CBIO		0x10	/* Configuration Base IO Address */
 
-int	pcic_pci_match(struct device *, void *, void *);
+int	pcic_pci_match(struct device *, struct cfdata *, void *);
 void	pcic_pci_attach(struct device *, struct device *, void *);
 
-struct cfattach pcic_pci_ca = {
-	sizeof(struct pcic_pci_softc), pcic_pci_match, pcic_pci_attach
-};
+CFATTACH_DECL(pcic_pci, sizeof(struct pcic_pci_softc),
+    pcic_pci_match, pcic_pci_attach, NULL, NULL);
 
-static struct pcmcia_chip_functions pcic_pci_functions = {
+static const struct pcmcia_chip_functions pcic_pci_functions = {
 	pcic_chip_mem_alloc,
 	pcic_chip_mem_free,
 	pcic_chip_mem_map,
@@ -78,46 +77,55 @@ static struct pcmcia_chip_functions pcic_pci_functions = {
 	/* XXX */
 	pcic_isa_chip_intr_establish,
 	pcic_isa_chip_intr_disestablish,
-	pcic_isa_chip_intr_string,
 
 	pcic_chip_socket_enable,
 	pcic_chip_socket_disable,
+	pcic_chip_socket_settype,
+
+	NULL,				/* card_detect */
 };
 
+static void pcic_pci_callback(struct device *);
+
 int
-pcic_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+pcic_pci_match(struct device *parent, struct cfdata  *match,
+    void *aux)
 {
 	struct pci_attach_args *pa = (struct pci_attach_args *) aux;
 
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_CIRRUS &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_CIRRUS_CL_PD6729)
-		return (1);
-	return (0);
+	switch (PCI_VENDOR(pa->pa_id)) {
+	case PCI_VENDOR_CIRRUS:
+		switch(PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_CIRRUS_CL_PD6729:
+			break;
+		default:
+			return (0);
+		}
+		break;
+	default:
+		return (0);
+	}
+	return (1);
 }
 
 void pcic_isa_config_interrupts(struct device *);
 
 void
-pcic_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+pcic_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pcic_softc *sc = (void *) self;
 	struct pcic_pci_softc *psc = (void *) self;
-	struct pcic_handle *h;
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	bus_space_tag_t memt = pa->pa_memt;
 	bus_space_handle_t memh;
-	bus_size_t size;
-	int irq, i;
+	const char *model;
+
+	aprint_naive(": PCMCIA controller\n");
 
 	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0,
-	    &sc->iot, &sc->ioh, NULL, &size, 0)) {
-		printf(": can't map i/o space\n");
+	    &sc->iot, &sc->ioh, NULL, NULL)) {
+		aprint_error(": can't map i/o space\n");
 		return;
 	}
 
@@ -132,14 +140,11 @@ pcic_pci_attach(parent, self, aux)
 	 */
 
 	/* Map mem space. */
-	if (bus_space_map(memt, 0xd0000, 0x10000, 0, &memh)) {
-		printf(": can't map mem space");
-		bus_space_unmap(sc->iot, sc->ioh, size);
-		return;
-	}
+	if (bus_space_map(memt, 0xd0000, 0x4000, 0, &memh))
+		panic("pcic_pci_attach: can't map mem space");
 
 	sc->membase = 0xd0000;
-	sc->subregionmask = (1 << (0x10000 / PCIC_MEM_PAGESIZE)) - 1;
+	sc->subregionmask = (1 << (0x4000 / PCIC_MEM_PAGESIZE)) - 1;
 
 	/* same deal for io allocation */
 
@@ -153,9 +158,23 @@ pcic_pci_attach(parent, self, aux)
 	sc->memt = memt;
 	sc->memh = memh;
 
-	printf("\n");
+	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_CIRRUS_CL_PD6729:
+		model = "Cirrus Logic PD6729 PCMCIA controller";
+		break;
+	default:
+		model = "Model unknown";
+		break;
+	}
+
+	aprint_normal(": %s\n", model);
+
+	/* Enable the card. */
+	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+	    pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG) |
+	    PCI_COMMAND_MASTER_ENABLE);
+
 	pcic_attach(sc);
-	pcic_attach_sockets(sc);
 
 	/*
 	 * Check to see if we're using PCI or ISA interrupts. I don't
@@ -167,47 +186,37 @@ pcic_pci_attach(parent, self, aux)
 		   PCIC_CIRRUS_EXT_CONTROL_1);
 	if ((pcic_read(&sc->handle[0], PCIC_CIRRUS_EXTENDED_DATA) &
 	    PCIC_CIRRUS_EXT_CONTROL_1_PCI_INTR_MASK)) {
-		printf("%s: PCI interrupts not supported\n",
-		       sc->dev.dv_xname);
+		aprint_error_dev(&sc->dev, "PCI interrupts not supported\n");
 		return;
 	}
 
 	psc->intr_est = pcic_pci_machdep_intr_est(pc);
+	sc->irq = -1;
 
-	irq = pcic_intr_find(sc, IST_EDGE);
-
+#if 0
 	/* Map and establish the interrupt. */
-	if (irq) {
-		sc->ih = pcic_pci_machdep_pcic_intr_establish(sc, pcic_intr);
-		if (sc->ih == NULL) {
-			printf("%s: couldnt map interrupt\n", sc->dev.dv_xname);
-			bus_space_unmap(memt, memh, 0x10000);
-			bus_space_unmap(sc->iot, sc->ioh, size);
-			return;
-		}
+	sc->ih = pcic_pci_machdep_pcic_intr_establish(sc, pcic_intr);
+	if (sc->ih == NULL) {
+		aprint_error_dev(&sc->dev, "couldn't map interrupt\n");
+		return;
 	}
-	sc->irq = irq;
+#endif
 
-	if (irq) {
-                printf("%s: irq %d, ", sc->dev.dv_xname, irq);
+	/*
+	 * Defer configuration of children until ISA has had its chance
+	 * to use up whatever IO space and IRQs it wants. XXX This will
+	 * only work if ISA is attached to a pcib, AND the PCI probe finds
+	 * and defers the ISA attachment before this one.
+	 */
+	config_defer(self, pcic_pci_callback);
+	config_interrupts(self, pcic_isa_config_interrupts);
+}
 
-                /* Set up the pcic to interrupt on card detect. */
-                for (i = 0; i < PCIC_NSLOTS; i++) {
-                        h = &sc->handle[i];
-                        if (h->flags & PCIC_FLAG_SOCKETP) {
-                                pcic_write(h, PCIC_CSC_INTR,
-                                    (sc->irq << PCIC_CSC_INTR_IRQ_SHIFT) |
-                                    PCIC_CSC_INTR_CD_ENABLE);
-                                powerhook_establish(pcic_power, h);
-                        }
-                }
-        } else
-                printf("%s: no irq, ", sc->dev.dv_xname);
+static void
+pcic_pci_callback(self)
+	struct device *self;
+{
+	struct pcic_softc *sc = (void *) self;
 
-        printf("polling enabled\n");
-        if (sc->poll_established == 0) {
-                timeout_set(&sc->poll_timeout, pcic_poll_intr, sc);
-                timeout_add(&sc->poll_timeout, hz / 2);
-                sc->poll_established = 1;
-        }
+	pcic_attach_sockets(sc);
 }

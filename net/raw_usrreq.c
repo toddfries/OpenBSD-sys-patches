@@ -1,5 +1,4 @@
-/*	$OpenBSD: raw_usrreq.c,v 1.11 2008/05/23 15:51:12 thib Exp $	*/
-/*	$NetBSD: raw_usrreq.c,v 1.11 1996/02/13 22:00:43 christos Exp $	*/
+/*	$NetBSD: raw_usrreq.c,v 1.35 2008/05/29 17:26:56 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -32,6 +31,9 @@
  *	@(#)raw_usrreq.c	8.1 (Berkeley) 6/10/93
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: raw_usrreq.c,v 1.35 2008/05/29 17:26:56 dyoung Exp $");
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/domain.h>
@@ -40,23 +42,31 @@
 #include <sys/socketvar.h>
 #include <sys/errno.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
+#include <sys/kauth.h>
 
 #include <net/if.h>
 #include <net/route.h>
 #include <net/netisr.h>
 #include <net/raw_cb.h>
 
-#include <sys/stdarg.h>
+#include <machine/stdarg.h>
+
 /*
  * Initialize raw connection block q.
  */
 void
-raw_init()
+raw_init(void)
 {
 
 	LIST_INIT(&rawcb);
 }
 
+static inline int
+equal(const struct sockaddr *a1, const struct sockaddr *a2)
+{
+	return memcmp(a1, a2, a1->sa_len) == 0;
+}
 
 /*
  * Raw protocol input routine.  Find the socket
@@ -71,19 +81,20 @@ raw_input(struct mbuf *m0, ...)
 {
 	struct rawcb *rp;
 	struct mbuf *m = m0;
-	int sockets = 0;
 	struct socket *last;
 	va_list ap;
 	struct sockproto *proto;
 	struct sockaddr *src, *dst;
-	
+
+	KASSERT(mutex_owned(softnet_lock));
+
 	va_start(ap, m0);
 	proto = va_arg(ap, struct sockproto *);
 	src = va_arg(ap, struct sockaddr *);
 	dst = va_arg(ap, struct sockaddr *);
 	va_end(ap);
 
-	last = 0;
+	last = NULL;
 	LIST_FOREACH(rp, &rawcb, rcb_list) {
 		if (rp->rcb_proto.sp_family != proto->sp_family)
 			continue;
@@ -98,75 +109,81 @@ raw_input(struct mbuf *m0, ...)
 		 * Note that if the lengths are not the same
 		 * the comparison will fail at the first byte.
 		 */
-#define	equal(a1, a2) \
-  (bcmp((caddr_t)(a1), (caddr_t)(a2), a1->sa_len) == 0)
 		if (rp->rcb_laddr && !equal(rp->rcb_laddr, dst))
 			continue;
 		if (rp->rcb_faddr && !equal(rp->rcb_faddr, src))
 			continue;
-		if (last) {
+		if (last != NULL) {
 			struct mbuf *n;
-			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
-				if (sbappendaddr(&last->so_rcv, src,
-				    n, (struct mbuf *)0) == 0)
-					/* should notify about lost packet */
-					m_freem(n);
-				else {
-					sorwakeup(last);
-					sockets++;
-				}
+			if ((n = m_copy(m, 0, M_COPYALL)) == NULL)
+				;
+			else if (sbappendaddr(&last->so_rcv, src, n, NULL) == 0)
+				/* should notify about lost packet */
+				m_freem(n);
+			else {
+				sorwakeup(last);
 			}
 		}
 		last = rp->rcb_socket;
 	}
-	if (last) {
-		if (sbappendaddr(&last->so_rcv, src,
-		    m, (struct mbuf *)0) == 0)
-			m_freem(m);
-		else {
-			sorwakeup(last);
-			sockets++;
-		}
-	} else
+	if (last == NULL || sbappendaddr(&last->so_rcv, src, m, NULL) == 0)
 		m_freem(m);
+	else {
+		sorwakeup(last);
+	}
 }
 
 /*ARGSUSED*/
 void *
-raw_ctlinput(cmd, arg, d)
-	int cmd;
-	struct sockaddr *arg;
-	void *d;
+raw_ctlinput(int cmd, const struct sockaddr *arg, void *d)
 {
 
-	if (cmd < 0 || cmd >= PRC_NCMDS)
+	if ((unsigned)cmd >= PRC_NCMDS)
 		return NULL;
 	return NULL;
 	/* INCOMPLETE */
 }
 
+void
+raw_setsockaddr(struct rawcb *rp, struct mbuf *nam)
+{
+
+	nam->m_len = rp->rcb_laddr->sa_len;
+	memcpy(mtod(nam, void *), rp->rcb_laddr, (size_t)nam->m_len);
+}
+
+void
+raw_setpeeraddr(struct rawcb *rp, struct mbuf *nam)
+{
+
+	nam->m_len = rp->rcb_faddr->sa_len;
+	memcpy(mtod(nam, void *), rp->rcb_faddr, (size_t)nam->m_len);
+}
+
 /*ARGSUSED*/
 int
-raw_usrreq(so, req, m, nam, control, p)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *nam, *control;
-	struct proc *p;
+raw_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct lwp *l)
 {
-	struct rawcb *rp = sotorawcb(so);
+	struct rawcb *rp;
+	int s;
 	int error = 0;
-	int len;
 
 	if (req == PRU_CONTROL)
 		return (EOPNOTSUPP);
-	if (control && control->m_len) {
-		error = EOPNOTSUPP;
-		goto release;
-	}
-	if (rp == 0) {
+
+	s = splsoftnet();
+	KERNEL_LOCK(1, NULL);
+	rp = sotorawcb(so);
+#ifdef DIAGNOSTIC
+	if (req != PRU_SEND && req != PRU_SENDOOB && control)
+		panic("raw_usrreq: unexpected control mbuf");
+#endif
+	if (rp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;
 		goto release;
 	}
+
 	switch (req) {
 
 	/*
@@ -175,10 +192,12 @@ raw_usrreq(so, req, m, nam, control, p)
 	 * the appropriate raw interface routine.
 	 */
 	case PRU_ATTACH:
-		if ((so->so_state & SS_PRIV) == 0) {
-			error = EACCES;
+		sosetlock(so);
+		if (l == NULL)
 			break;
-		}
+
+		/* XXX: raw socket permissions are checked in socreate() */
+
 		error = raw_attach(so, (int)(long)nam);
 		break;
 
@@ -187,52 +206,25 @@ raw_usrreq(so, req, m, nam, control, p)
 	 * Flush data or not depending on the options.
 	 */
 	case PRU_DETACH:
-		if (rp == 0) {
-			error = ENOTCONN;
-			break;
-		}
 		raw_detach(rp);
 		break;
 
-#ifdef notdef
 	/*
 	 * If a socket isn't bound to a single address,
 	 * the raw input routine will hand it anything
 	 * within that protocol family (assuming there's
-	 * nothing else around it should go to). 
+	 * nothing else around it should go to).
 	 */
-	case PRU_CONNECT:
-		if (rp->rcb_faddr) {
-			error = EISCONN;
-			break;
-		}
-		nam = m_copym(nam, 0, M_COPYALL, M_WAIT);
-		rp->rcb_faddr = mtod(nam, struct sockaddr *);
-		soisconnected(so);
-		break;
-
 	case PRU_BIND:
-		if (rp->rcb_laddr) {
-			error = EINVAL;			/* XXX */
-			break;
-		}
-		error = raw_bind(so, nam);
-		break;
-#else
+	case PRU_LISTEN:
 	case PRU_CONNECT:
-	case PRU_BIND:
-#endif
 	case PRU_CONNECT2:
 		error = EOPNOTSUPP;
-		goto release;
+		break;
 
 	case PRU_DISCONNECT:
-		if (rp->rcb_faddr == 0) {
-			error = ENOTCONN;
-			break;
-		}
-		raw_disconnect(rp);
 		soisdisconnected(so);
+		raw_disconnect(rp);
 		break;
 
 	/*
@@ -242,31 +234,42 @@ raw_usrreq(so, req, m, nam, control, p)
 		socantsendmore(so);
 		break;
 
+	case PRU_RCVD:
+		error = EOPNOTSUPP;
+		break;
+
 	/*
 	 * Ship a packet out.  The appropriate raw output
 	 * routine handles any massaging necessary.
 	 */
 	case PRU_SEND:
-		if (nam) {
-			if (rp->rcb_faddr) {
-				error = EISCONN;
-				break;
-			}
-			rp->rcb_faddr = mtod(nam, struct sockaddr *);
-		} else if (rp->rcb_faddr == 0) {
-			error = ENOTCONN;
+		if (control && control->m_len) {
+			m_freem(control);
+			m_freem(m);
+			error = EINVAL;
 			break;
 		}
+		if (nam) {
+			if ((so->so_state & SS_ISCONNECTED) != 0) {
+				error = EISCONN;
+				goto die;
+			}
+			error = (*so->so_proto->pr_usrreq)(so, PRU_CONNECT,
+			    NULL, nam, NULL, l);
+			if (error) {
+			die:
+				m_freem(m);
+				break;
+			}
+		} else {
+			if ((so->so_state & SS_ISCONNECTED) == 0) {
+				error = ENOTCONN;
+				goto die;
+			}
+		}
 		error = (*so->so_proto->pr_output)(m, so);
-		m = NULL;
 		if (nam)
-			rp->rcb_faddr = 0;
-		break;
-
-	case PRU_ABORT:
-		raw_disconnect(rp);
-		sofree(so);
-		soisdisconnected(so);
+			raw_disconnect(rp);
 		break;
 
 	case PRU_SENSE:
@@ -279,40 +282,37 @@ raw_usrreq(so, req, m, nam, control, p)
 	 * Not supported.
 	 */
 	case PRU_RCVOOB:
-	case PRU_RCVD:
-		return (EOPNOTSUPP);
+		error = EOPNOTSUPP;
+		break;
 
-	case PRU_LISTEN:
-	case PRU_ACCEPT:
 	case PRU_SENDOOB:
+		m_freem(control);
+		m_freem(m);
 		error = EOPNOTSUPP;
 		break;
 
 	case PRU_SOCKADDR:
-		if (rp->rcb_laddr == 0) {
+		if (rp->rcb_laddr == NULL) {
 			error = EINVAL;
 			break;
 		}
-		len = rp->rcb_laddr->sa_len;
-		bcopy((caddr_t)rp->rcb_laddr, mtod(nam, caddr_t), (unsigned)len);
-		nam->m_len = len;
+		raw_setsockaddr(rp, nam);
 		break;
 
 	case PRU_PEERADDR:
-		if (rp->rcb_faddr == 0) {
+		if (rp->rcb_faddr == NULL) {
 			error = ENOTCONN;
 			break;
 		}
-		len = rp->rcb_faddr->sa_len;
-		bcopy((caddr_t)rp->rcb_faddr, mtod(nam, caddr_t), (unsigned)len);
-		nam->m_len = len;
+		raw_setpeeraddr(rp, nam);
 		break;
 
 	default:
 		panic("raw_usrreq");
 	}
+
 release:
-	if (m != NULL)
-		m_freem(m);
+	KERNEL_UNLOCK_ONE(NULL);
+	splx(s);
 	return (error);
 }

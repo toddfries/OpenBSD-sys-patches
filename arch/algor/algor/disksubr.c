@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.12 2006/11/25 13:09:14 scw Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.17 2008/01/02 11:48:20 ad Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,7 +29,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.12 2006/11/25 13:09:14 scw Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.17 2008/01/02 11:48:20 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -87,7 +87,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 		goto done;
 	}
 
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)((char*)bp->b_data + LABELOFFSET);
 	if (dlp->d_magic == DISKMAGIC) {
 		if (dkcksum(dlp))
 			msg = "NetBSD disk label corrupted";
@@ -105,7 +105,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 		i = 0;
 		do {
 			/* read a bad sector table */
-			bp->b_flags &= ~(B_DONE);
+			bp->b_oflags &= ~(BO_DONE);
 			bp->b_flags |= B_READ;
 			bp->b_blkno = lp->d_secperunit - lp->d_nsectors + i;
 			if (lp->d_secsize > DEV_BSIZE)
@@ -130,12 +130,12 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 				} else
 					msg = "bad sector table corrupted";
 			}
-		} while ((bp->b_flags & B_ERROR) && (i += 2) < 10 &&
+		} while (bp->b_error != 0 && (i += 2) < 10 &&
 			i < lp->d_nsectors);
 	}
 
 done:
-	brelse(bp);
+	brelse(bp, 0);
 	return (msg);
 }
 
@@ -216,15 +216,16 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)((char*)bp->b_data + LABELOFFSET);
 	*dlp = *lp;     /* struct assignment */
 
-	bp->b_flags &= ~(B_READ|B_DONE);
+	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_READ);
 	bp->b_flags |= B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
 
 done:
-	brelse(bp);
+	brelse(bp, 0);
 	return (error); 
 }

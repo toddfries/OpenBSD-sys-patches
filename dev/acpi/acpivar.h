@@ -1,275 +1,329 @@
-/*	$OpenBSD: acpivar.h,v 1.42 2007/12/05 19:17:13 deraadt Exp $	*/
+/*	$NetBSD: acpivar.h,v 1.34 2008/11/17 23:29:49 joerg Exp $	*/
+
 /*
- * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
+ * Copyright 2001 Wasabi Systems, Inc.
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Written by Jason R. Thorpe for Wasabi Systems, Inc.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed for the NetBSD Project by
+ *	Wasabi Systems, Inc.
+ * 4. The name of Wasabi Systems, Inc. may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _DEV_ACPI_ACPIVAR_H_
-#define _DEV_ACPI_ACPIVAR_H_
+/*
+ * This file defines the ACPI interface provided to the rest of the
+ * kernel, as well as the autoconfiguration structures for ACPI
+ * support.
+ */
 
-#include <sys/timeout.h>
-#include <sys/rwlock.h>
-#include <machine/biosvar.h>
+#include <sys/bus.h>
+#include <dev/pci/pcivar.h>
+#include <dev/isa/isavar.h>
 
-/* #define ACPI_DEBUG */
-#ifdef ACPI_DEBUG
-extern int acpi_debug;
-#define dprintf(x...)	  do { if (acpi_debug) printf(x); } while (0)
-#define dnprintf(n,x...)  do { if (acpi_debug > (n)) printf(x); } while (0)
-#else
-#define dprintf(x...)
-#define dnprintf(n,x...)
-#endif
+#include <dev/acpi/acpica.h>
 
-extern int acpi_hasprocfvs;
+#include <dev/sysmon/sysmonvar.h>
 
-#ifdef MULTIPROCESSOR
-#define LAPIC_MAP_SIZE	256
-extern u_int8_t acpi_lapic_flags[LAPIC_MAP_SIZE];
-#endif
-
-struct klist;
-struct acpiec_softc;
-
-struct acpi_attach_args {
-	char		*aaa_name;
-	bus_space_tag_t	 aaa_iot;
-	bus_space_tag_t	 aaa_memt;
-	void		*aaa_table;
-	struct aml_node *aaa_node;
-	const char	*aaa_dev;
+/*
+ * acpibus_attach_args:
+ *
+ *	This structure is used to attach the ACPI "bus".
+ */
+struct acpibus_attach_args {
+	bus_space_tag_t aa_iot;		/* PCI I/O space tag */
+	bus_space_tag_t aa_memt;	/* PCI MEM space tag */
+	pci_chipset_tag_t aa_pc;	/* PCI chipset */
+	int aa_pciflags;		/* PCI bus flags */
+	isa_chipset_tag_t aa_ic;	/* ISA chipset */
 };
 
-struct acpi_mem_map {
-	vaddr_t		 baseva;
-	u_int8_t	*va;
-	size_t		 vsize;
-	paddr_t		 pa;
+/*
+ * Types of switches that ACPI understands.
+ */
+#define	ACPI_SWITCH_POWERBUTTON		0
+#define	ACPI_SWITCH_SLEEPBUTTON		1
+#define	ACPI_SWITCH_LID			2
+#define	ACPI_NSWITCHES			3
+
+/*
+ * acpi_devnode:
+ *
+ *	An ACPI device node.
+ */
+struct acpi_devnode {
+	TAILQ_ENTRY(acpi_devnode) ad_list;
+	ACPI_HANDLE	ad_handle;	/* our ACPI handle */
+	u_int32_t	ad_level;	/* ACPI level */
+	u_int32_t	ad_type;	/* ACPI object type */
+	ACPI_DEVICE_INFO *ad_devinfo;	/* our ACPI device info */
+	struct acpi_scope *ad_scope;	/* backpointer to scope */
+	struct device	*ad_device;	/* pointer to configured device */
+	char		ad_name[5];	/* Human-readable device name */
 };
 
-struct acpi_q {
-	SIMPLEQ_ENTRY(acpi_q)	 q_next;
-	void			*q_table;
-	u_int8_t		 q_data[0];
+/*
+ * acpi_scope:
+ *
+ *	Description of an ACPI scope.
+ */
+struct acpi_scope {
+	TAILQ_ENTRY(acpi_scope) as_list;
+	const char *as_name;		/* scope name */
+	/*
+	 * Device nodes we manage.
+	 */
+	TAILQ_HEAD(, acpi_devnode) as_devnodes;
 };
 
-struct acpi_wakeq {
-	SIMPLEQ_ENTRY(acpi_wakeq)	 q_next;
-	struct aml_node			*q_node;
-	struct aml_value		*q_wakepkg;
-	int				 q_gpe;
-	int				 q_state;
-};
-
-typedef SIMPLEQ_HEAD(, acpi_q) acpi_qhead_t;
-typedef SIMPLEQ_HEAD(, acpi_wakeq) acpi_wakeqhead_t;
-
-#define ACPIREG_PM1A_STS	0x00
-#define ACPIREG_PM1A_EN		0x01
-#define ACPIREG_PM1A_CNT	0x02
-#define ACPIREG_PM1B_STS	0x03
-#define ACPIREG_PM1B_EN		0x04
-#define ACPIREG_PM1B_CNT	0x05
-#define ACPIREG_PM2_CNT		0x06
-#define ACPIREG_PM_TMR		0x07
-#define ACPIREG_GPE0_STS	0x08
-#define ACPIREG_GPE0_EN		0x09
-#define ACPIREG_GPE1_STS	0x0A
-#define ACPIREG_GPE1_EN		0x0B
-#define ACPIREG_SMICMD		0x0C
-#define ACPIREG_MAXREG		0x0D
-
-/* Special registers */
-#define ACPIREG_PM1_STS		0x0E
-#define ACPIREG_PM1_EN		0x0F
-#define ACPIREG_PM1_CNT		0x10
-#define ACPIREG_GPE_STS		0x11
-#define ACPIREG_GPE_EN		0x12
-
-struct acpi_parsestate {
-	u_int8_t		*start;
-	u_int8_t		*end;
-	u_int8_t		*pos;
-};
-
-struct acpi_reg_map {
-	bus_space_handle_t  ioh;
-	int		    addr;
-	int		    size;
-	const char	   *name;
-};
-
-struct acpi_thread {
-	struct acpi_softc   *sc;
-	volatile int	    running;
-};
-
-struct acpi_mutex {
-	struct rwlock		amt_lock;
-#define ACPI_MTX_MAXNAME	5
-	char			amt_name[ACPI_MTX_MAXNAME + 3]; /* only 4 used */
-	int			amt_ref_count;
-	int			amt_timeout;
-	int			amt_synclevel;
-};
-
-struct gpe_block {
-	int  (*handler)(struct acpi_softc *, int, void *);
-	void *arg;
-	int   active;
-};
-
-struct acpi_ac {
-	struct acpiac_softc	*aac_softc;
-	SLIST_ENTRY(acpi_ac)	aac_link;
-};
-
-SLIST_HEAD(acpi_ac_head, acpi_ac);
-
-struct acpi_bat {
-	struct acpibat_softc	*aba_softc;
-	SLIST_ENTRY(acpi_bat)	aba_link;
-};
-
-SLIST_HEAD(acpi_bat_head, acpi_bat);
-
+/*
+ * acpi_softc:
+ *
+ *	Software state of the ACPI subsystem.
+ */
 struct acpi_softc {
-	struct device		sc_dev;
+	device_t sc_dev;		/* base device info */
+	bus_space_tag_t sc_iot;		/* PCI I/O space tag */
+	bus_space_tag_t sc_memt;	/* PCI MEM space tag */
+	pci_chipset_tag_t sc_pc;	/* PCI chipset tag */
+	int sc_pciflags;		/* PCI bus flags */
+	int sc_pci_bus;			/* internal PCI fixup */
+	isa_chipset_tag_t sc_ic;	/* ISA chipset tag */
 
-	bus_space_tag_t		sc_iot;
-	bus_space_tag_t		sc_memt;
-#if 0
-	bus_space_tag_t		sc_pcit;
-	bus_space_tag_t		sc_smbust;
-#endif
-
-	/*
-	 * First-level ACPI tables
-	 */
-	struct acpi_fadt	*sc_fadt;
-	acpi_qhead_t		 sc_tables;
-	acpi_wakeqhead_t	 sc_wakedevs;
+	void *sc_sdhook;		/* shutdown hook */
 
 	/*
-	 * Second-level information from FADT
+	 * Power switch handlers for fixed-feature buttons.
 	 */
-	struct acpi_facs	*sc_facs;	/* Shared with firmware! */
+	struct sysmon_pswitch sc_smpsw_power;
+	struct sysmon_pswitch sc_smpsw_sleep;
 
-	struct klist		*sc_note;
-	struct acpi_reg_map	sc_pmregs[ACPIREG_MAXREG];
-	bus_space_handle_t	sc_ioh_pm1a_evt;
+	/*
+	 * Sleep state to transition to when a given
+	 * switch is activated.
+	 */
+	int sc_switch_sleep[ACPI_NSWITCHES];
 
-	void			*sc_interrupt;
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-	void			*sc_softih;
-#else
-	struct timeout		sc_timeout;
-#endif
+	int sc_sleepstate;		/* current sleep state */
 
-	int			sc_powerbtn;
-	int			sc_sleepbtn;
+	int sc_quirks;
 
-	struct {
-		int slp_typa;
-		int slp_typb;
-	}			sc_sleeptype[6];
-	int			sc_maxgpe;
-	int			sc_lastgpe;
-
-	struct gpe_block	*gpe_table;
-
-	int			sc_wakeup;
-	u_int32_t		sc_gpe_sts;
-	u_int32_t		sc_gpe_en;
-	struct acpi_thread	*sc_thread;
-
-	struct aml_node		*sc_tts;
-	struct aml_node		*sc_pts;
-	struct aml_node		*sc_bfs;
-	struct aml_node		*sc_gts;
-	struct aml_node		*sc_wak;
-	int			sc_state;
-	struct acpiec_softc	*sc_ec;		/* XXX assume single EC */
-
-	struct acpi_ac_head	sc_ac;
-	struct acpi_bat_head	sc_bat;
-
-	struct timeout		sc_dev_timeout;
-	int			sc_poll;
-
-	int			sc_revision;
+	/*
+	 * Scopes we manage.
+	 */
+	TAILQ_HEAD(, acpi_scope) sc_scopes;
 };
 
-#define GPE_NONE  0x00
-#define GPE_LEVEL 0x01
-#define GPE_EDGE  0x02
-
-struct acpi_table {
-	int	offset;
-	size_t	size;
-	void	*table;
+/*
+ * acpi_attach_args:
+ *
+ *	Used to attach a device instance to the acpi "bus".
+ */
+struct acpi_attach_args {
+	struct acpi_devnode *aa_node;	/* ACPI device node */
+	bus_space_tag_t aa_iot;		/* PCI I/O space tag */
+	bus_space_tag_t aa_memt;	/* PCI MEM space tag */
+	pci_chipset_tag_t aa_pc;	/* PCI chipset tag */
+	int aa_pciflags;		/* PCI bus flags */
+	isa_chipset_tag_t aa_ic;	/* ISA chipset */
 };
 
-#define	ACPI_IOC_GETFACS	_IOR('A', 0, struct acpi_facs)
-#define	ACPI_IOC_GETTABLE	_IOWR('A', 1, struct acpi_table)
-#define ACPI_IOC_SETSLEEPSTATE	_IOW('A', 2, int)
+/*
+ * ACPI resources:
+ *
+ *	acpi_io		I/O ports
+ *	acpi_iorange	I/O port range
+ *	acpi_mem	memory region
+ *	acpi_memrange	memory range
+ *	acpi_irq	Interrupt Request
+ *	acpi_drq	DMA request
+ */
 
-#define	ACPI_EV_PWRBTN		0x0001	/* Power button was pushed */
-#define	ACPI_EV_SLPBTN		0x0002	/* Sleep button was pushed */
+struct acpi_io {
+	SIMPLEQ_ENTRY(acpi_io) ar_list;
+	int		ar_index;
+	uint32_t	ar_base;
+	uint32_t	ar_length;
+};
 
-#define	ACPI_EVENT_MASK		0x0003
+struct acpi_iorange {
+	SIMPLEQ_ENTRY(acpi_iorange) ar_list;
+	int		ar_index;
+	uint32_t	ar_low;
+	uint32_t	ar_high;
+	uint32_t	ar_length;
+	uint32_t	ar_align;
+};
 
-#define	ACPI_EVENT_COMPOSE(t,i)	(((i) & 0x7fff) << 16 | ((t) & ACPI_EVENT_MASK))
-#define	ACPI_EVENT_TYPE(e)	((e) & ACPI_EVENT_MASK)
-#define	ACPI_EVENT_INDEX(e)	((e) >> 16)
+struct acpi_mem {
+	SIMPLEQ_ENTRY(acpi_mem) ar_list;
+	int		ar_index;
+	uint32_t	ar_base;
+	uint32_t	ar_length;
+};
 
-#if defined(_KERNEL)
-struct   acpi_gas;
-int	 acpi_map_address(struct acpi_softc *, struct acpi_gas *, bus_addr_t, bus_size_t,
-			  bus_space_handle_t *, bus_space_tag_t *);
+struct acpi_memrange {
+	SIMPLEQ_ENTRY(acpi_memrange) ar_list;
+	int		ar_index;
+	uint32_t	ar_low;
+	uint32_t	ar_high;
+	uint32_t	ar_length;
+	uint32_t	ar_align;
+};
 
-int	 acpi_map(paddr_t, size_t, struct acpi_mem_map *);
-void	 acpi_unmap(struct acpi_mem_map *);
-int	 acpi_probe(struct device *, struct cfdata *, struct bios_attach_args *);
-u_int	 acpi_checksum(const void *, size_t);
-void	 acpi_attach_machdep(struct acpi_softc *);
-int	 acpi_interrupt(void *);
-void	 acpi_enter_sleep_state(struct acpi_softc *, int);
-void	 acpi_powerdown(void);
-void	 acpi_resume(struct acpi_softc *);
-void	 acpi_reset(void);
+struct acpi_irq {
+	SIMPLEQ_ENTRY(acpi_irq) ar_list;
+	int		ar_index;
+	uint32_t	ar_irq;
+	uint32_t	ar_type;
+};
 
-#define ACPI_IOREAD 0
-#define ACPI_IOWRITE 1
+struct acpi_drq {
+	SIMPLEQ_ENTRY(acpi_drq) ar_list;
+	int		ar_index;
+	uint32_t	ar_drq;
+};
 
-void acpi_delay(struct acpi_softc *, int64_t);
-int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
+struct acpi_resources {
+	SIMPLEQ_HEAD(, acpi_io) ar_io;
+	int ar_nio;
 
-int	acpi_set_gpehandler(struct acpi_softc *, int,
-	    int (*)(struct acpi_softc *, int, void *), void *, const char *);
-void	acpi_enable_gpe(struct acpi_softc *, u_int32_t);
+	SIMPLEQ_HEAD(, acpi_iorange) ar_iorange;
+	int ar_niorange;
 
-int	acpiec_intr(struct acpiec_softc *);
-void	acpiec_read(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
-void	acpiec_write(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
-void	acpiec_handle_events(struct acpiec_softc *);
+	SIMPLEQ_HEAD(, acpi_mem) ar_mem;
+	int ar_nmem;
 
-int	acpi_read_pmreg(struct acpi_softc *, int, int);
-void	acpi_write_pmreg(struct acpi_softc *, int, int, int);
+	SIMPLEQ_HEAD(, acpi_memrange) ar_memrange;
+	int ar_nmemrange;
 
-void	acpi_poll(void *);
+	SIMPLEQ_HEAD(, acpi_irq) ar_irq;
+	int ar_nirq;
 
-#endif
+	SIMPLEQ_HEAD(, acpi_drq) ar_drq;
+	int ar_ndrq;
+};
 
-#endif	/* !_DEV_ACPI_ACPIVAR_H_ */
+/*
+ * acpi_resource_parse_ops:
+ *
+ *	The client of ACPI resources specifies these operations
+ *	when the resources are parsed.
+ */
+struct acpi_resource_parse_ops {
+	void	(*init)(struct device *, void *, void **);
+	void	(*fini)(struct device *, void *);
+
+	void	(*ioport)(struct device *, void *, uint32_t, uint32_t);
+	void	(*iorange)(struct device *, void *, uint32_t, uint32_t,
+		    uint32_t, uint32_t);
+
+	void	(*memory)(struct device *, void *, uint32_t, uint32_t);
+	void	(*memrange)(struct device *, void *, uint32_t, uint32_t,
+		    uint32_t, uint32_t);
+
+	void	(*irq)(struct device *, void *, uint32_t, uint32_t);
+	void	(*drq)(struct device *, void *, uint32_t);
+
+	void	(*start_dep)(struct device *, void *, int);
+	void	(*end_dep)(struct device *, void *);
+};
+
+extern struct acpi_softc *acpi_softc;
+extern int acpi_active;
+
+extern const struct acpi_resource_parse_ops acpi_resource_parse_ops_default;
+
+int		acpi_check(device_t, const char *);
+int		acpi_probe(void);
+ACPI_PHYSICAL_ADDRESS	acpi_OsGetRootPointer(void);
+int		acpi_match_hid(ACPI_DEVICE_INFO *, const char * const *);
+void		acpi_set_wake_gpe(ACPI_HANDLE);
+void		acpi_clear_wake_gpe(ACPI_HANDLE);
+
+ACPI_STATUS	acpi_eval_integer(ACPI_HANDLE, const char *, ACPI_INTEGER *);
+ACPI_STATUS	acpi_eval_string(ACPI_HANDLE, const char *, char **);
+ACPI_STATUS	acpi_eval_struct(ACPI_HANDLE, const char *, ACPI_BUFFER *);
+
+ACPI_STATUS	acpi_foreach_package_object(ACPI_OBJECT *,
+		    ACPI_STATUS (*)(ACPI_OBJECT *, void *), void *);
+ACPI_STATUS	acpi_get(ACPI_HANDLE, ACPI_BUFFER *,
+		    ACPI_STATUS (*)(ACPI_HANDLE, ACPI_BUFFER *));
+const char*	acpi_name(ACPI_HANDLE);
+
+ACPI_STATUS	acpi_resource_parse(struct device *, ACPI_HANDLE, const char *,
+		    void *, const struct acpi_resource_parse_ops *);
+void		acpi_resource_print(struct device *, struct acpi_resources *);
+void		acpi_resource_cleanup(struct acpi_resources *);
+ACPI_STATUS	acpi_allocate_resources(ACPI_HANDLE);
+
+ACPI_STATUS	acpi_pwr_switch_consumer(ACPI_HANDLE, int);
+
+void *		acpi_pci_link_devbyhandle(ACPI_HANDLE);
+void		acpi_pci_link_add_reference(void *, int, int, int, int);
+int		acpi_pci_link_route_interrupt(void *, int, int *, int *, int *);
+char *		acpi_pci_link_name(void *);
+ACPI_HANDLE	acpi_pci_link_handle(void *);
+void		acpi_pci_link_state(void);
+void		acpi_pci_link_resume(void);
+
+struct acpi_io		*acpi_res_io(struct acpi_resources *, int);
+struct acpi_iorange	*acpi_res_iorange(struct acpi_resources *, int);
+struct acpi_mem		*acpi_res_mem(struct acpi_resources *, int);
+struct acpi_memrange	*acpi_res_memrange(struct acpi_resources *, int);
+struct acpi_irq		*acpi_res_irq(struct acpi_resources *, int);
+struct acpi_drq		*acpi_res_drq(struct acpi_resources *, int);
+
+/*
+ * power state transition
+ */
+ACPI_STATUS	acpi_enter_sleep_state(struct acpi_softc *, int);
+
+/*
+ * quirk handling
+ */
+struct acpi_quirk {
+	const char *aq_tabletype; /* what type of table (FADT, DSDT, etc) */
+	const char *aq_oemid;	/* compared against the table OemId */
+	int aq_oemrev;		/* compared against the table OemRev */
+	int aq_cmpop;		/* how to compare the oemrev number */
+	const char *aq_tabid;	/* compared against the table TableId */
+	int aq_quirks;		/* the actual quirks */
+};
+
+#define AQ_GT		0	/* > */
+#define AQ_LT		1	/* < */
+#define AQ_GTE		2	/* >= */
+#define AQ_LTE		3	/* <= */
+#define AQ_EQ		4	/* == */
+
+#define ACPI_QUIRK_BROKEN	0x00000001	/* totally broken */
+#define ACPI_QUIRK_BADPCI	0x00000002	/* bad PCI hierarchy */
+#define ACPI_QUIRK_BADBBN	0x00000004	/* _BBN broken */
+#define ACPI_QUIRK_IRQ0		0x00000008	/* bad 0->2 irq override */
+
+int acpi_find_quirks(void);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: midway.c,v 1.37 2006/03/25 22:41:43 djm Exp $	*/
+/*	$NetBSD: midway.c,v 1.83 2008/11/07 00:20:02 dyoung Exp $	*/
 /*	(sync'd to midway.c 1.68)	*/
 
 /*
@@ -35,7 +35,7 @@
 
 /*
  *
- * m i d w a y . c   e n i 1 5 5   d r i v e r 
+ * m i d w a y . c   e n i 1 5 5   d r i v e r
  *
  * author: Chuck Cranor <chuck@ccrc.wustl.edu>
  * started: spring, 1996 (written from scratch).
@@ -46,7 +46,31 @@
  *   I would also like to thank Werner for promptly answering email and being
  *   generally helpful.
  */
+/*
+ *  1997/12/02, major update on 1999/04/06 kjc
+ *    new features added:
+ *	- BPF support (link type is DLT_ATM_RFC1483)
+ *	  BPF understands only LLC/SNAP!! (because bpf can't
+ *	  handle variable link header length.)
+ *	  (bpfwrite should work if atm_pseudohdr and LLC/SNAP are prepended.)
+ *	- support vc shaping
+ *	- integrate IPv6 support.
+ *	- support pvc sub interface
+ *
+ *	  initial work on per-pvc-interface for ipv6 was done
+ *	  by Katsushi Kobayashi <ikob@cc.uec.ac.jp> of the WIDE Project.
+ * 	  some of the extensions for pvc subinterfaces are merged from
+ *	  the CAIRN project written by Suresh Bhogavilli (suresh@isi.edu).
+ *
+ *    code cleanup:
+ *	- remove WMAYBE related code.  ENI WMAYBE DMA doesn't work.
+ *	- remove updating if_lastchange for every packet.
+ */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: midway.c,v 1.83 2008/11/07 00:20:02 dyoung Exp $");
+
+#include "opt_natm.h"
 
 #undef	EN_DEBUG
 #undef	EN_DEBUG_RANGE		/* check ranges on en_read/en_write's? */
@@ -54,10 +78,10 @@
 #define	EN_DIAG
 #define	EN_STAT
 #ifndef EN_DMA
-#define EN_DMA		1	/* use dma? */
+#define EN_DMA		1	/* use DMA? */
 #endif
-#define EN_NOTXDMA	0	/* hook to disable tx dma only */
-#define EN_NORXDMA	0	/* hook to disable rx dma only */
+#define EN_NOTXDMA	0	/* hook to disable tx DMA only */
+#define EN_NORXDMA	0	/* hook to disable rx DMA only */
 #define EN_NOWMAYBE	1	/* hook to disable word maybe DMA */
 				/* XXX: WMAYBE doesn't work, needs debugging */
 #define EN_DDBHOOK	1	/* compile in ddb functions */
@@ -75,12 +99,12 @@
  * 	cat /usr/share/misc/termcap
  * "telnet" seems to generate lots of 1023 byte mbufs (which make great
  * use of the byte aligner).   watch "netstat -s" for checksum errors.
- * 
- * I further tested this by adding a function that compared the transmit 
- * data on the card's SRAM with the data in the mbuf chain _after_ the 
+ *
+ * I further tested this by adding a function that compared the transmit
+ * data on the card's SRAM with the data in the mbuf chain _after_ the
  * "transmit DMA complete" interrupt.   using the "telnet" test I got data
  * mismatches where the byte-aligned data should have been.   using ddb
- * and en_dumpmem() I verified that the DTQs fed into the card were 
+ * and en_dumpmem() I verified that the DTQs fed into the card were
  * absolutely correct.   thus, we are forced to concluded that the ENI
  * hardware is buggy.   note that the Adaptec version of the card works
  * just fine with byte DMA.
@@ -108,17 +132,21 @@
 #define INLINE inline
 #endif /* EN_DEBUG */
 
-#include "bpfilter.h"
-
 #ifdef __FreeBSD__
 #include "en.h"
+#endif
+
+#ifdef __NetBSD__
+#include "opt_ddb.h"
+#include "opt_inet.h"
+#else
+#define bitmask_snprintf(q,f,b,l) snprintf((b), (l), "%b", (q), (f))
 #endif
 
 #if NEN > 0 || !defined(__FreeBSD__)
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/types.h>
 #if defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__)
 #include <sys/device.h>
 #endif
@@ -130,24 +158,39 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/queue.h>
+#include <sys/proc.h>
+#include <sys/kauth.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_atm.h>
 
+#ifdef __NetBSD__
 #include <uvm/uvm_extern.h>
+#else
+#include <vm/vm.h>
+#endif
 
-#ifdef INET
+#if defined(INET) || defined(INET6)
+#include <netinet/in.h>
 #include <netinet/if_atm.h>
+#ifdef INET6
+#include <netinet6/in6_var.h>
+#endif
 #endif
 
 #ifdef NATM
+#if !(defined(INET) || defined(INET6))
 #include <netinet/in.h>
+#endif
 #include <netnatm/natm.h>
 #endif
 
 
-#if !defined(__sparc__) && !defined(__FreeBSD__)
-#include <machine/bus.h>
+#if !defined(__FreeBSD__)
+#include <sys/bus.h>
+
 #endif
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
@@ -165,7 +208,7 @@
 #include <dev/en/midwayvar.h>
 #include <vm/pmap.h>			/* for vtophys proto */
 
-/* 
+/*
  * 2.1.x does not have if_softc.   detect this by seeing if IFF_NOTRAILERS
  * is defined, as per kjc.
  */
@@ -177,9 +220,27 @@
 
 #endif	/* __FreeBSD__ */
 
+#ifdef ATM_PVCEXT
+# ifndef NATM
+   /* this is for for __KAME__ */
+#  include <netinet/in.h>
+# endif
+# if defined (__KAME__) && defined(INET6)
+#  include <netinet6/in6_ifattach.h>
+# endif
+#endif /*ATM_PVCEXT*/
+
+#include "bpfilter.h"
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#ifdef __FreeBSD__
+#define BPFATTACH(ifp, dlt, hlen)	bpfattach((ifp), (dlt), (hlen))
+#define BPF_MTAP(ifp, m)		bpf_mtap((ifp), (m))
+#else
+#define BPFATTACH(ifp, dlt, hlen)	bpfattach(&(ifp)->if_bpf, (ifp), (dlt), (hlen))
+#define BPF_MTAP(ifp, m)		bpf_mtap((ifp)->if_bpf, (m))
 #endif
+#endif /* NBPFILTER > 0 */
 
 /*
  * params
@@ -199,7 +260,7 @@
 #define EN_OBTRL	ATM_PH_DRIVER8  /* PDU trailer in last mbuf ! */
 
 #define ENOTHER_FREE	0x01		/* free rxslot */
-#define ENOTHER_DRAIN	0x02		/* almost free (drain DRQ dma) */
+#define ENOTHER_DRAIN	0x02		/* almost free (drain DRQ DMA) */
 #define ENOTHER_RAW	0x04		/* 'raw' access  (aka boodi mode) */
 #define ENOTHER_SWSL	0x08		/* in software service list */
 
@@ -209,9 +270,7 @@ int en_dma = EN_DMA;			/* use DMA (switch off for dbg) */
  * autoconfig attachments
  */
 
-struct cfdriver en_cd = {
-    0, "en", DV_IFNET,
-};
+extern struct cfdriver en_cd;
 
 /*
  * local structures
@@ -236,7 +295,7 @@ struct en_launch {
 
 
 /*
- * dma table (index by # of words)
+ * DMA table (index by # of words)
  *
  * plan A: use WMAYBE
  * plan B: avoid WMAYBE
@@ -272,41 +331,50 @@ static struct en_dmatab en_dma_planB[] = {
 };
 
 static struct en_dmatab *en_dmaplan = en_dma_planA;
-  
+
 /*
  * prototypes
  */
 
-STATIC INLINE	int en_b2sz(int) __attribute__ ((unused));
+STATIC INLINE	int en_b2sz(int) __unused;
 #ifdef EN_DDBHOOK
 		int en_dump(int,int);
 		int en_dumpmem(int,int,int);
 #endif
 STATIC		void en_dmaprobe(struct en_softc *);
-STATIC		int en_dmaprobe_doit(struct en_softc *, u_int8_t *, 
+STATIC		int en_dmaprobe_doit(struct en_softc *, u_int8_t *,
 		    u_int8_t *, int);
-STATIC INLINE	int en_dqneed(struct en_softc *, caddr_t, u_int,
-		    u_int) __attribute__ ((unused));
+STATIC INLINE	int en_dqneed(struct en_softc *, void *, u_int,
+		    u_int) __unused;
 STATIC		void en_init(struct en_softc *);
-STATIC		int en_ioctl(struct ifnet *, EN_IOCTL_CMDT, caddr_t);
-STATIC INLINE	int en_k2sz(int) __attribute__ ((unused));
+STATIC		int en_ioctl(struct ifnet *, EN_IOCTL_CMDT, void *);
+STATIC INLINE	int en_k2sz(int) __unused;
 STATIC		void en_loadvc(struct en_softc *, int);
 STATIC		int en_mfix(struct en_softc *, struct mbuf **,
 		    struct mbuf *);
 STATIC INLINE	struct mbuf *en_mget(struct en_softc *, u_int,
-		    u_int *) __attribute__ ((unused));
+		    u_int *) __unused;
 STATIC INLINE	u_int32_t en_read(struct en_softc *,
-		    u_int32_t) __attribute__ ((unused));
-STATIC		int en_rxctl(struct en_softc *, struct atm_pseudoioctl *,
-		    int);
+		    u_int32_t) __unused;
+STATIC		int en_rxctl(struct en_softc *, struct atm_pseudoioctl *, int);
 STATIC		void en_txdma(struct en_softc *, int);
-STATIC		void en_txlaunch(struct en_softc *, int,
-		    struct en_launch *);
+STATIC		void en_txlaunch(struct en_softc *, int, struct en_launch *);
 STATIC		void en_service(struct en_softc *);
 STATIC		void en_start(struct ifnet *);
-STATIC INLINE	int en_sz2b(int) __attribute__ ((unused));
+STATIC INLINE	int en_sz2b(int) __unused;
 STATIC INLINE	void en_write(struct en_softc *, u_int32_t,
-		    u_int32_t) __attribute__ ((unused));
+		    u_int32_t) __unused;
+
+#ifdef ATM_PVCEXT
+static void rrp_add(struct en_softc *, struct ifnet *);
+static struct ifnet *en_pvcattach(struct ifnet *);
+static int en_txctl(struct en_softc *, int, int, int);
+static int en_pvctx(struct en_softc *, struct pvctxreq *);
+static int en_pvctxget(struct en_softc *, struct pvctxreq *);
+static int en_pcr2txspeed(int);
+static int en_txspeed2pcr(int);
+static struct ifnet *en_vci2ifp(struct en_softc *, int);
+#endif
 
 /*
  * macros/inline
@@ -345,21 +413,21 @@ STATIC INLINE	void en_write(struct en_softc *, u_int32_t,
 
 #define MID_MK_TXQ(SC,CNT,CHAN,END,BCODE) \
 	EN_WRITE((SC), (SC)->dtq_us, \
-		MID_MK_TXQ_ENI((CNT), (CHAN), (END), (BCODE))); 
+		MID_MK_TXQ_ENI((CNT), (CHAN), (END), (BCODE)));
 
 #define MID_MK_RXQ(SC,CNT,VCI,END,BCODE) \
 	EN_WRITE((SC), (SC)->drq_us, \
-		MID_MK_RXQ_ENI((CNT), (VCI), (END), (BCODE))); 
+		MID_MK_RXQ_ENI((CNT), (VCI), (END), (BCODE)));
 
 #elif defined(MIDWAY_ADPONLY)
 
 #define MID_MK_TXQ(SC,CNT,CHAN,END,JK) \
 	EN_WRITE((SC), (SC)->dtq_us, \
-		MID_MK_TXQ_ADP((CNT), (CHAN), (END), (JK))); 
+		MID_MK_TXQ_ADP((CNT), (CHAN), (END), (JK)));
 
 #define MID_MK_RXQ(SC,CNT,VCI,END,JK) \
 	EN_WRITE((SC), (SC)->drq_us, \
-		MID_MK_RXQ_ADP((CNT), (VCI), (END), (JK))); 
+		MID_MK_RXQ_ADP((CNT), (VCI), (END), (JK)));
 
 #else
 
@@ -435,9 +503,8 @@ u_int32_t r;
 {
 
 #ifdef EN_DEBUG_RANGE
-  if (r > MID_MAXOFF || (r % 4)) {
-    panic("en_read: out of range, r=0x%x", r);
-  }
+  if (r > MID_MAXOFF || (r % 4))
+    panic("en_read out of range, r=0x%x", r);
 #endif
 
   return(bus_space_read_4(sc->en_memt, sc->en_base, r));
@@ -455,9 +522,8 @@ u_int32_t r, v;
 
 {
 #ifdef EN_DEBUG_RANGE
-  if (r > MID_MAXOFF || (r % 4)) {
-    panic("en_write: out of range, r=0x%x", r);
-  }
+  if (r > MID_MAXOFF || (r % 4))
+    panic("en_write out of range, r=0x%x", r);
 #endif
 
   bus_space_write_4(sc->en_memt, sc->en_base, r, v);
@@ -541,7 +607,7 @@ int sz;
 STATIC INLINE int en_dqneed(sc, data, len, tx)
 
 struct en_softc *sc;
-caddr_t data;
+void *data;
 u_int len, tx;
 
 {
@@ -553,7 +619,7 @@ u_int len, tx;
 #endif /* !MIDWAY_ADPONLY */
       return(1);	/* adaptec can DMA anything in one go */
 #endif
-    
+
 #if !defined(MIDWAY_ADPONLY)
     result = 0;
     if (len < EN_MINDMA) {
@@ -567,7 +633,7 @@ u_int len, tx;
         result++;
         sz = min(len, sizeof(u_int32_t) - needalign);
         len -= sz;
-        data += sz;
+        data = (char *)data + sz;
       }
     }
 
@@ -586,7 +652,7 @@ u_int len, tx;
       len -= sz;
       result++;			/* best shot */
     }
-    
+
     if (len) {
       result++;			/* clean up */
       if (tx && (len % sizeof(u_int32_t)) != 0)
@@ -622,13 +688,13 @@ u_int totlen, *drqneed;
   m->m_len = MHLEN;
   top = NULL;
   mp = &top;
-  
+
   /* if (top != NULL) then we've already got 1 mbuf on the chain */
   while (totlen > 0) {
     if (top) {
       MGET(m, M_DONTWAIT, MT_DATA);
       if (!m) {
-	m_freem(top);	
+	m_freem(top);
 	return(NULL);	/* out of mbufs */
       }
       m->m_len = MLEN;
@@ -710,28 +776,29 @@ done_probe:
 
   reg = EN_READ(sc, MID_RESID);
 
-  printf("%s: ATM midway v%d, board IDs %d.%d, %s%s%s, %ldKB on-board RAM\n",
-	sc->sc_dev.dv_xname, MID_VER(reg), MID_MID(reg), MID_DID(reg), 
+  aprint_normal_dev(&sc->sc_dev, 
+      "ATM midway v%d, board IDs %d.%d, %s%s%s, %ldKB on-board RAM\n",
+	MID_VER(reg), MID_MID(reg), MID_DID(reg),
 	(MID_IS_SABRE(reg)) ? "sabre controller, " : "",
 	(MID_IS_SUNI(reg)) ? "SUNI" : "Utopia",
 	(!MID_IS_SUNI(reg) && MID_IS_UPIPE(reg)) ? " (pipelined)" : "",
-	sc->en_obmemsz / 1024);
+	(u_long)sc->en_obmemsz / 1024);
 
   if (sc->is_adaptec) {
     if (sc->bestburstlen == 64 && sc->alburst == 0)
-      printf("%s: passed 64 byte DMA test\n", sc->sc_dev.dv_xname);
+      aprint_normal_dev(&sc->sc_dev, "passed 64 byte DMA test\n");
     else
-      printf("%s: FAILED DMA TEST: burst=%d, alburst=%d\n", 
-	    sc->sc_dev.dv_xname, sc->bestburstlen, sc->alburst);
+      aprint_error_dev(&sc->sc_dev, "FAILED DMA TEST: burst=%d, alburst=%d\n",
+	    sc->bestburstlen, sc->alburst);
   } else {
-    printf("%s: maximum DMA burst length = %d bytes%s\n", sc->sc_dev.dv_xname,
+    aprint_normal_dev(&sc->sc_dev, "maximum DMA burst length = %d bytes%s\n",
 	  sc->bestburstlen, (sc->alburst) ? " (must align)" : "");
   }
 
 #if 0		/* WMAYBE doesn't work, don't complain about it */
   /* check if en_dmaprobe disabled wmaybe */
   if (en_dmaplan == en_dma_planB)
-    printf("%s: note: WMAYBE DMA has been disabled\n", sc->sc_dev.dv_xname);
+    aprint_normal_dev(&sc->sc_dev, "note: WMAYBE DMA has been disabled\n");
 #endif
 
   /*
@@ -739,13 +806,14 @@ done_probe:
    */
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-  bcopy(sc->sc_dev.dv_xname, sc->enif.if_xname, IFNAMSIZ);
+  strlcpy(sc->enif.if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
 #endif
 #if !defined(MISSING_IF_SOFTC)
   sc->enif.if_softc = sc;
 #endif
   ifp->if_flags = IFF_SIMPLEX|IFF_NOTRAILERS;
   ifp->if_ioctl = en_ioctl;
+  ifp->if_output = atm_output;
   ifp->if_start = en_start;
   IFQ_SET_READY(&ifp->if_snd);
 
@@ -764,7 +832,7 @@ done_probe:
   ptr = roundup(ptr, EN_TXSZ * 1024);	/* align */
   sz = sz - (ptr - sav);
   if (EN_TXSZ*1024 * EN_NTX > sz) {
-    printf("%s: EN_NTX/EN_TXSZ too big\n", sc->sc_dev.dv_xname);
+    aprint_error_dev(&sc->sc_dev, "EN_NTX/EN_TXSZ too big\n");
     return;
   }
   for (lcv = 0 ; lcv < EN_NTX ; lcv++) {
@@ -774,10 +842,13 @@ done_probe:
     sz -= (EN_TXSZ * 1024);
     sc->txslot[lcv].stop = ptr;
     sc->txslot[lcv].nref = 0;
-    bzero(&sc->txslot[lcv].indma, sizeof(sc->txslot[lcv].indma));
-    bzero(&sc->txslot[lcv].q, sizeof(sc->txslot[lcv].q));
+#ifdef ATM_PVCEXT
+    sc->txrrp = NULL;
+#endif
+    memset(&sc->txslot[lcv].indma, 0, sizeof(sc->txslot[lcv].indma));
+    memset(&sc->txslot[lcv].q, 0, sizeof(sc->txslot[lcv].q));
 #ifdef EN_DEBUG
-    printf("%s: tx%d: start 0x%x, stop 0x%x\n", sc->sc_dev.dv_xname, lcv,
+    aprint_debug_dev(&sc->sc_dev, "tx%d: start 0x%x, stop 0x%x\n", lcv,
 		sc->txslot[lcv].start, sc->txslot[lcv].stop);
 #endif
   }
@@ -787,11 +858,11 @@ done_probe:
   sz = sz - (ptr - sav);
   sc->en_nrx = sz / (EN_RXSZ * 1024);
   if (sc->en_nrx <= 0) {
-    printf("%s: EN_NTX/EN_TXSZ/EN_RXSZ too big\n", sc->sc_dev.dv_xname);
+    aprint_error_dev(&sc->sc_dev, "EN_NTX/EN_TXSZ/EN_RXSZ too big\n");
     return;
   }
 
-  /* 
+  /*
    * ensure that there is always one VC slot on the service list free
    * so that we can tell the difference between a full and empty list.
    */
@@ -801,8 +872,8 @@ done_probe:
   for (lcv = 0 ; lcv < sc->en_nrx ; lcv++) {
     sc->rxslot[lcv].rxhand = NULL;
     sc->rxslot[lcv].oth_flags = ENOTHER_FREE;
-    bzero(&sc->rxslot[lcv].indma, sizeof(sc->rxslot[lcv].indma));
-    bzero(&sc->rxslot[lcv].q, sizeof(sc->rxslot[lcv].q));
+    memset(&sc->rxslot[lcv].indma, 0, sizeof(sc->rxslot[lcv].indma));
+    memset(&sc->rxslot[lcv].q, 0, sizeof(sc->rxslot[lcv].q));
     midvloc = sc->rxslot[lcv].start = ptr;
     ptr += (EN_RXSZ * 1024);
     sz -= (EN_RXSZ * 1024);
@@ -811,11 +882,11 @@ done_probe:
     midvloc = (midvloc & ~((EN_RXSZ*1024) - 1)) >> 2; /* mask, cvt to words */
     midvloc = midvloc >> MIDV_LOCTOPSHFT;  /* we only want the top 11 bits */
     midvloc = (midvloc & MIDV_LOCMASK) << MIDV_LOCSHIFT;
-    sc->rxslot[lcv].mode = midvloc | 
+    sc->rxslot[lcv].mode = midvloc |
 	(en_k2sz(EN_RXSZ) << MIDV_SZSHIFT) | MIDV_TRASH;
 
 #ifdef EN_DEBUG
-    printf("%s: rx%d: start 0x%x, stop 0x%x, mode 0x%x\n", sc->sc_dev.dv_xname,
+    aprint_debug_dev(&sc->sc_dev, "rx%d: start 0x%x, stop 0x%x, mode 0x%x\n",
 	lcv, sc->rxslot[lcv].start, sc->rxslot[lcv].stop, sc->rxslot[lcv].mode);
 #endif
   }
@@ -829,21 +900,23 @@ done_probe:
 #endif
   sc->need_drqs = sc->need_dtqs = 0;
 
-  printf("%s: %d %dKB receive buffers, %d %dKB transmit buffers allocated\n",
-	sc->sc_dev.dv_xname, sc->en_nrx, EN_RXSZ, EN_NTX, EN_TXSZ);
+  aprint_normal_dev(&sc->sc_dev,
+	"%d %dKB receive buffers, %d %dKB transmit buffers allocated\n",
+	sc->en_nrx, EN_RXSZ, EN_NTX, EN_TXSZ);
+
+  aprint_normal_dev(&sc->sc_dev, "End Station Identifier (mac address) %s\n",
+        ether_sprintf(sc->macaddr));
 
   /*
    * final commit
    */
 
   if_attach(ifp);
-  atm_ifattach(ifp); 
+  atm_ifattach(ifp);
 
-
-#if NBPFILTER > 0
-  bpfattach(&ifp->if_bpf, ifp, DLT_ATM_RFC1483, sizeof(struct atmllc));
+#ifdef ATM_PVCEXT
+  rrp_add(sc, ifp);
 #endif
-
 }
 
 
@@ -858,7 +931,7 @@ done_probe:
  * typical findings:
  * sparc1: bestburstlen=4, alburst=0 (ick, broken DMA!)
  * sparc2: bestburstlen=64, alburst=1
- * p166:   bestburstlen=64, alburst=0 
+ * p166:   bestburstlen=64, alburst=0
  */
 
 STATIC void en_dmaprobe(sc)
@@ -904,12 +977,12 @@ struct en_softc *sc;
    */
   if (sc->is_adaptec) {
     /* XXX, actually don't need a DMA plan: adaptec is smarter than that */
-    en_dmaplan = en_dma_planB; 
+    en_dmaplan = en_dma_planB;
     return;
   }
 
   /*
-   * test that WMAYBE dma works like we think it should 
+   * test that WMAYBE DMA works like we think it should
    * (i.e. no alignment restrictions on host address other than alburst)
    */
 
@@ -923,8 +996,8 @@ struct en_softc *sc;
   }
   if (EN_NOWMAYBE || fail) {
     if (fail)
-      printf("%s: WARNING: WMAYBE DMA test failed %d time(s)\n", 
-	sc->sc_dev.dv_xname, fail);
+      aprint_error_dev(&sc->sc_dev, "WARNING: WMAYBE DMA test failed %d time(s)\n",
+	fail);
     en_dmaplan = en_dma_planB;		/* fall back to plan B */
   }
 
@@ -956,7 +1029,7 @@ int wmtry;
 
   midvloc = ((MID_BUFOFF - MID_RAMOFF) / sizeof(u_int32_t)) >> MIDV_LOCTOPSHFT;
   EN_WRITE(sc, MIDX_PLACE(0), MIDX_MKPLACE(en_k2sz(1), midvloc));
-  EN_WRITE(sc, MID_VC(0), (midvloc << MIDV_LOCSHIFT) 
+  EN_WRITE(sc, MID_VC(0), (midvloc << MIDV_LOCSHIFT)
 		| (en_k2sz(1) << MIDV_SZSHIFT) | MIDV_TRASH);
   EN_WRITE(sc, MID_DST_RP(0), 0);
   EN_WRITE(sc, MID_WP_ST_CNT(0), 0);
@@ -971,12 +1044,12 @@ int wmtry;
   /*
    * try it now . . .  DMA it out, then DMA it back in and compare
    *
-   * note: in order to get the dma stuff to reverse directions it wants
-   * the "end" flag set!   since we are not dma'ing valid data we may
+   * note: in order to get the DMA stuff to reverse directions it wants
+   * the "end" flag set!   since we are not DMA'ing valid data we may
    * get an ident mismatch interrupt (which we will ignore).
    *
    * note: we've got two different tests rolled up in the same loop
-   * if (wmtry) 
+   * if (wmtry)
    *   then we are doing a wmaybe test and wmtry is a byte count
    *   else we are doing a burst test
    */
@@ -984,9 +1057,9 @@ int wmtry;
   for (lcv = 8 ; lcv <= MIDDMA_MAXBURST ; lcv = lcv * 2) {
 
     /* zero SRAM and dest buffer */
-    for (cnt = 0 ; cnt < 1024; cnt += 4) 
+    for (cnt = 0 ; cnt < 1024; cnt += 4)
       EN_WRITE(sc, MID_BUFOFF+cnt, 0);	/* zero memory */
-    for (cnt = 0 ; cnt < 68  ; cnt++) 
+    for (cnt = 0 ; cnt < 68  ; cnt++)
       dp[cnt] = 0;
 
     if (wmtry) {
@@ -1001,22 +1074,22 @@ int wmtry;
       EN_WRITE(sc, sc->dtq_chip, MID_MK_TXQ_ADP(lcv, 0, MID_DMA_END, 0));
     else
       EN_WRITE(sc, sc->dtq_chip, MID_MK_TXQ_ENI(count, 0, MID_DMA_END, bcode));
-    EN_WRITE(sc, sc->dtq_chip+4, vtophys(sp));
+    EN_WRITE(sc, sc->dtq_chip+4, vtophys((vaddr_t)sp));
     EN_WRITE(sc, MID_DMA_WRTX, MID_DTQ_A2REG(sc->dtq_chip+8));
     cnt = 1000;
     while (EN_READ(sc, MID_DMA_RDTX) == MID_DTQ_A2REG(sc->dtq_chip)) {
       DELAY(1);
       cnt--;
       if (cnt == 0) {
-	printf("%s: unexpected timeout in tx DMA test\n", sc->sc_dev.dv_xname);
+	aprint_error_dev(&sc->sc_dev, "unexpected timeout in tx DMA test\n");
 	return(retval);		/* timeout, give up */
       }
     }
     EN_WRAPADD(MID_DTQOFF, MID_DTQEND, sc->dtq_chip, 8);
-    reg = EN_READ(sc, MID_INTACK); 
+    reg = EN_READ(sc, MID_INTACK);
     if ((reg & MID_INT_DMA_TX) != MID_INT_DMA_TX) {
-      printf("%s: unexpected status in tx DMA test: 0x%x\n", 
-		sc->sc_dev.dv_xname, reg);
+      aprint_error_dev(&sc->sc_dev, "unexpected status in tx DMA test: 0x%x\n",
+		reg);
       return(retval);
     }
     EN_WRITE(sc, MID_MAST_CSR, MID_MCSR_ENDMA);   /* re-enable DMA (only) */
@@ -1027,31 +1100,31 @@ int wmtry;
       EN_WRITE(sc, sc->drq_chip, MID_MK_RXQ_ADP(lcv, 0, MID_DMA_END, 0));
     else
       EN_WRITE(sc, sc->drq_chip, MID_MK_RXQ_ENI(count, 0, MID_DMA_END, bcode));
-    EN_WRITE(sc, sc->drq_chip+4, vtophys(dp));
+    EN_WRITE(sc, sc->drq_chip+4, vtophys((vaddr_t)dp));
     EN_WRITE(sc, MID_DMA_WRRX, MID_DRQ_A2REG(sc->drq_chip+8));
     cnt = 1000;
     while (EN_READ(sc, MID_DMA_RDRX) == MID_DRQ_A2REG(sc->drq_chip)) {
       DELAY(1);
       cnt--;
       if (cnt == 0) {
-	printf("%s: unexpected timeout in rx DMA test\n", sc->sc_dev.dv_xname);
+	aprint_error_dev(&sc->sc_dev, "unexpected timeout in rx DMA test\n");
 	return(retval);		/* timeout, give up */
       }
     }
     EN_WRAPADD(MID_DRQOFF, MID_DRQEND, sc->drq_chip, 8);
-    reg = EN_READ(sc, MID_INTACK); 
+    reg = EN_READ(sc, MID_INTACK);
     if ((reg & MID_INT_DMA_RX) != MID_INT_DMA_RX) {
-      printf("%s: unexpected status in rx DMA test: 0x%x\n", 
-		sc->sc_dev.dv_xname, reg);
+      aprint_error_dev(&sc->sc_dev, "unexpected status in rx DMA test: 0x%x\n",
+		reg);
       return(retval);
     }
     EN_WRITE(sc, MID_MAST_CSR, MID_MCSR_ENDMA);   /* re-enable DMA (only) */
 
     if (wmtry) {
-      return(bcmp(sp, dp, wmtry));  /* wmtry always exits here, no looping */
+      return(memcmp(sp, dp, wmtry));  /* wmtry always exits here, no looping */
     }
-  
-    if (bcmp(sp, dp, lcv))
+
+    if (memcmp(sp, dp, lcv))
       return(retval);		/* failed, use last value */
 
     retval = lcv;
@@ -1076,11 +1149,11 @@ STATIC int en_ioctl(ifp, cmd, data)
 
 struct ifnet *ifp;
 EN_IOCTL_CMDT cmd;
-caddr_t data;
+void *data;
 
 {
 #ifdef MISSING_IF_SOFTC
-    struct en_softc *sc = (struct en_softc *) en_cd.cd_devs[ifp->if_unit];
+    struct en_softc *sc = (struct en_softc *)device_lookup_private(&en_cd, ifp->if_unit);
 #else
     struct en_softc *sc = (struct en_softc *) ifp->if_softc;
 #endif
@@ -1121,34 +1194,51 @@ caddr_t data;
 		}
 #ifdef EN_DEBUG
 		printf("%s: rxvci%d: turn %s raw (boodi) mode\n",
-			sc->sc_dev.dv_xname, ario->npcb->npcb_vci,
+			device_xname(&sc->sc_dev), ario->npcb->npcb_vci,
 			(ario->rawvalue) ? "on" : "off");
 #endif
 		break;
 #endif
-	case SIOCSIFADDR: 
+	case SIOCINITIFADDR:
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
-		if (ifa->ifa_addr->sa_family == AF_INET) {
-			en_reset(sc);
-			en_init(sc);
-			ifa->ifa_rtrequest = atm_rtrequest; /* ??? */
-			break;
-		}
-#endif /* INET */
-		/* what to do if not INET? */
 		en_reset(sc);
 		en_init(sc);
+		switch (ifa->ifa_addr->sa_family) {
+#ifdef INET
+		case AF_INET:
+			ifa->ifa_rtrequest = atm_rtrequest; /* ??? */
+			break;
+#endif
+#ifdef INET6
+		case AF_INET6:
+			ifa->ifa_rtrequest = atm_rtrequest; /* ??? */
+			break;
+#endif
+		default:
+			/* what to do if not INET? */
+			break;
+		}
 		break;
 
-	case SIOCGIFADDR: 
+	case SIOCSIFFLAGS:
+		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
+			break;
+#ifdef ATM_PVCEXT
+	  	/* point-2-point pvc is allowed to change if_flags */
+		if (((ifp->if_flags & IFF_UP) && !(ifp->if_flags & IFF_RUNNING))
+		||  (!(ifp->if_flags & IFF_UP) && (ifp->if_flags & IFF_RUNNING))) {
+			en_reset(sc);
+			en_init(sc);
+		}
+#else
 		error = EINVAL;
+#endif
 		break;
 
-	case SIOCSIFFLAGS: 
-		error = EINVAL;
-		break;
-
+#if defined(SIOCSIFMTU)		/* ??? copied from if_de */
+#if !defined(ifr_mtu)
+#define ifr_mtu ifr_metric
+#endif
 	case SIOCSIFMTU:
 	    /*
 	     * Set the interface MTU.
@@ -1159,14 +1249,93 @@ caddr_t data;
 		break;
 	    }
 #endif
-	    ifp->if_mtu = ifr->ifr_mtu;
+	    if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET) {
+		error = 0;
 		/* XXXCDC: do we really need to reset on MTU size change? */
-	    en_reset(sc);
-	    en_init(sc);
+		en_reset(sc);
+		en_init(sc);
+	    }
 	    break;
+#endif /* SIOCSIFMTU */
 
-	default: 
-	    error = EINVAL;
+#ifdef ATM_PVCEXT
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+		if (ifp == &sc->enif || ifr == 0) {
+			error = EAFNOSUPPORT;	/* XXX */
+			break;
+		}
+		switch (ifreq_getaddr(cmd, ifr)->sa_family) {
+#ifdef INET
+		case AF_INET:
+			break;
+#endif
+#ifdef INET6
+		case AF_INET6:
+			break;
+#endif
+		default:
+			error = EAFNOSUPPORT;
+			break;
+		}
+		break;
+
+	case SIOCGPVCSIF:
+		if (ifp != &sc->enif) {
+#ifdef __NetBSD__
+		  strlcpy(ifr->ifr_name, sc->enif.if_xname,
+		      sizeof(ifr->ifr_name));
+#else
+		  snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s%d",
+			  sc->enif.if_name, sc->enif.if_unit);
+#endif
+		}
+		else
+		  error = EINVAL;
+		break;
+
+	case SIOCSPVCSIF:
+		if (ifp == &sc->enif) {
+		  struct ifnet *sifp;
+
+		  if ((error = kauth_authorize_generic(curlwp->l_cred,
+		     KAUTH_GENERIC_ISSUSER, NULL)) != 0)
+		    break;
+
+		  if ((sifp = en_pvcattach(ifp)) != NULL) {
+#ifdef __NetBSD__
+		    strlcpy(ifr->ifr_name, sifp->if_xname,
+		        sizeof(ifr->ifr_name));
+#else
+		    snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s%d",
+		        sifp->if_name, sifp->if_unit);
+#endif
+#if defined(__KAME__) && defined(INET6)
+		    /* get EUI64 for PVC, from ATM hardware interface */
+		    in6_ifattach(sifp, ifp);
+#endif
+		  }
+		  else
+		    error = ENOMEM;
+		}
+		else
+		  error = EINVAL;
+		break;
+
+	case SIOCGPVCTX:
+		error = en_pvctxget(sc, (struct pvctxreq *)data);
+		break;
+
+	case SIOCSPVCTX:
+		if ((error = kauth_authorize_generic(curlwp->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL)) == 0)
+			error = en_pvctx(sc, (struct pvctxreq *)data);
+		break;
+
+#endif /* ATM_PVCEXT */
+
+	default:
+	    error = ifioctl_common(ifp, cmd, data);
 	    break;
     }
     splx(s);
@@ -1192,7 +1361,7 @@ int on;
   flags = ATM_PH_FLAGS(&pi->aph);
 
 #ifdef EN_DEBUG
-  printf("%s: %s vpi=%d, vci=%d, flags=%d\n", sc->sc_dev.dv_xname,
+  printf("%s: %s vpi=%d, vci=%d, flags=%d\n", device_xname(&sc->sc_dev),
 	(on) ? "enable" : "disable", ATM_PH_VPI(&pi->aph), vci, flags);
 #endif
 
@@ -1252,7 +1421,7 @@ int on;
   sc->txvc2slot[vci] = 0;
 
   /* if stuff is still going on we are going to have to drain it out */
-  if (sc->rxslot[slot].indma.ifq_head || 
+  if (sc->rxslot[slot].indma.ifq_head ||
 		sc->rxslot[slot].q.ifq_head ||
 		(sc->rxslot[slot].oth_flags & ENOTHER_SWSL) != 0) {
     sc->rxslot[slot].oth_flags |= ENOTHER_DRAIN;
@@ -1263,7 +1432,7 @@ int on;
   }
   splx(s);		/* enable enintr() */
 #ifdef EN_DEBUG
-  printf("%s: rx%d: VCI %d is now %s\n", sc->sc_dev.dv_xname, slot, vci,
+  printf("%s: rx%d: VCI %d is now %s\n", device_xname(&sc->sc_dev), slot, vci,
 	(sc->rxslot[slot].oth_flags & ENOTHER_DRAIN) ? "draining" : "free");
 #endif
   return(0);
@@ -1285,7 +1454,7 @@ struct en_softc *sc;
   int lcv, slot;
 
 #ifdef EN_DEBUG
-  printf("%s: reset\n", sc->sc_dev.dv_xname);
+  printf("%s: reset\n", device_xname(&sc->sc_dev));
 #endif
 
   if (sc->en_busreset)
@@ -1293,7 +1462,7 @@ struct en_softc *sc;
   EN_WRITE(sc, MID_RESID, 0x0);	/* reset hardware */
 
   /*
-   * recv: dump any mbufs we are dma'ing into, if DRAINing, then a reset
+   * recv: dump any mbufs we are DMA'ing into, if DRAINing, then a reset
    * will free us!
    */
 
@@ -1303,13 +1472,13 @@ struct en_softc *sc;
     slot = sc->rxvc2slot[lcv];
     while (1) {
       IF_DEQUEUE(&sc->rxslot[slot].indma, m);
-      if (m == NULL) 
+      if (m == NULL)
 	break;		/* >>> exit 'while(1)' here <<< */
       m_freem(m);
     }
     while (1) {
       IF_DEQUEUE(&sc->rxslot[slot].q, m);
-      if (m == NULL) 
+      if (m == NULL)
 	break;		/* >>> exit 'while(1)' here <<< */
       m_freem(m);
     }
@@ -1318,7 +1487,7 @@ struct en_softc *sc;
       sc->rxslot[slot].oth_flags = ENOTHER_FREE;
       sc->rxvc2slot[lcv] = RX_NONE;
 #ifdef EN_DEBUG
-  printf("%s: rx%d: VCI %d is now free\n", sc->sc_dev.dv_xname, slot, lcv);
+  printf("%s: rx%d: VCI %d is now free\n", device_xname(&sc->sc_dev), slot, lcv);
 #endif
     }
   }
@@ -1330,13 +1499,13 @@ struct en_softc *sc;
   for (lcv = 0 ; lcv < EN_NTX ; lcv++) {
     while (1) {
       IF_DEQUEUE(&sc->txslot[lcv].indma, m);
-      if (m == NULL) 
+      if (m == NULL)
 	break;		/* >>> exit 'while(1)' here <<< */
       m_freem(m);
     }
     while (1) {
       IF_DEQUEUE(&sc->txslot[lcv].q, m);
-      if (m == NULL) 
+      if (m == NULL)
 	break;		/* >>> exit 'while(1)' here <<< */
       m_freem(m);
     }
@@ -1358,27 +1527,50 @@ struct en_softc *sc;
 {
   int vc, slot;
   u_int32_t loc;
+#ifdef ATM_PVCEXT
+    struct pvcsif *pvcsif;
+#endif
 
   if ((sc->enif.if_flags & IFF_UP) == 0) {
+#ifdef ATM_PVCEXT
+    LIST_FOREACH(pvcsif, &sc->sif_list, sif_links) {
+      if (pvcsif->sif_if.if_flags & IFF_UP) {
+	/*
+	 * down the device only when there is no active pvc subinterface.
+	 * if there is, we have to go through the init sequence to reflect
+	 * the software states to the device.
+	 */
+	goto up;
+      }
+    }
+#endif
 #ifdef EN_DEBUG
-    printf("%s: going down\n", sc->sc_dev.dv_xname);
+    printf("%s: going down\n", device_xname(&sc->sc_dev));
 #endif
     en_reset(sc);			/* to be safe */
     sc->enif.if_flags &= ~IFF_RUNNING;	/* disable */
     return;
   }
 
+#ifdef ATM_PVCEXT
+ up:
+#endif
 #ifdef EN_DEBUG
-  printf("%s: going up\n", sc->sc_dev.dv_xname);
+  printf("%s: going up\n", device_xname(&sc->sc_dev));
 #endif
   sc->enif.if_flags |= IFF_RUNNING;	/* enable */
+#ifdef ATM_PVCEXT
+  LIST_FOREACH(pvcsif, &sc->sif_list, sif_links) {
+    pvcsif->sif_if.if_flags |= IFF_RUNNING;
+  }
+#endif
 
   if (sc->en_busreset)
     sc->en_busreset(sc);
   EN_WRITE(sc, MID_RESID, 0x0);		/* reset */
 
   /*
-   * init obmem data structures: vc tab, dma q's, slist.
+   * init obmem data structures: vc tab, DMA q's, slist.
    *
    * note that we set drq_free/dtq_free to one less than the total number
    * of DTQ/DRQs present.   we do this because the card uses the condition
@@ -1391,20 +1583,20 @@ struct en_softc *sc;
    * keep that interrupt from messing us up.
    */
 
-  for (vc = 0 ; vc < MID_N_VC ; vc++) 
+  for (vc = 0 ; vc < MID_N_VC ; vc++)
     en_loadvc(sc, vc);
 
-  bzero(&sc->drq, sizeof(sc->drq));
+  memset(&sc->drq, 0, sizeof(sc->drq));
   sc->drq_free = MID_DRQ_N - 1;		/* N - 1 */
   sc->drq_chip = MID_DRQ_REG2A(EN_READ(sc, MID_DMA_RDRX));
-  EN_WRITE(sc, MID_DMA_WRRX, MID_DRQ_A2REG(sc->drq_chip)); 
+  EN_WRITE(sc, MID_DMA_WRRX, MID_DRQ_A2REG(sc->drq_chip));
 						/* ensure zero queue */
   sc->drq_us = sc->drq_chip;
 
-  bzero(&sc->dtq, sizeof(sc->dtq));
+  memset(&sc->dtq, 0, sizeof(sc->dtq));
   sc->dtq_free = MID_DTQ_N - 1;		/* N - 1 */
   sc->dtq_chip = MID_DTQ_REG2A(EN_READ(sc, MID_DMA_RDTX));
-  EN_WRITE(sc, MID_DMA_WRTX, MID_DRQ_A2REG(sc->dtq_chip)); 
+  EN_WRITE(sc, MID_DMA_WRTX, MID_DRQ_A2REG(sc->dtq_chip));
 						/* ensure zero queue */
   sc->dtq_us = sc->dtq_chip;
 
@@ -1412,8 +1604,8 @@ struct en_softc *sc;
   sc->swsl_size = sc->swsl_head = sc->swsl_tail = 0;
 
 #ifdef EN_DEBUG
-  printf("%s: drq free/chip: %d/0x%x, dtq free/chip: %d/0x%x, hwslist: 0x%x\n", 
-    sc->sc_dev.dv_xname, sc->drq_free, sc->drq_chip, 
+  printf("%s: drq free/chip: %d/0x%x, dtq free/chip: %d/0x%x, hwslist: 0x%x\n",
+    device_xname(&sc->sc_dev), sc->drq_free, sc->drq_chip,
     sc->dtq_free, sc->dtq_chip, sc->hwslistp);
 #endif
 
@@ -1427,7 +1619,7 @@ struct en_softc *sc;
     loc = loc >> MIDV_LOCTOPSHFT;	/* top 11 bits */
     EN_WRITE(sc, MIDX_PLACE(slot), MIDX_MKPLACE(en_k2sz(EN_TXSZ), loc));
 #ifdef EN_DEBUG
-    printf("%s: tx%d: place 0x%x\n", sc->sc_dev.dv_xname,  slot,
+    printf("%s: tx%d: place 0x%x\n", device_xname(&sc->sc_dev),  slot,
 	EN_READ(sc, MIDX_PLACE(slot)));
 #endif
   }
@@ -1457,7 +1649,7 @@ int vc;
 {
   int slot;
   u_int32_t reg = EN_READ(sc, MID_VC(vc));
-  
+
   reg = MIDV_SETMODE(reg, MIDV_TRASH);
   EN_WRITE(sc, MID_VC(vc), reg);
   DELAY(27);
@@ -1472,7 +1664,7 @@ int vc;
   sc->rxslot[slot].cur = sc->rxslot[slot].start;
 
 #ifdef EN_DEBUG
-    printf("%s: rx%d: assigned to VCI %d\n", sc->sc_dev.dv_xname, slot, vc);
+    printf("%s: rx%d: assigned to VCI %d\n", device_xname(&sc->sc_dev), slot, vc);
 #endif
 }
 
@@ -1488,7 +1680,7 @@ struct ifnet *ifp;
 
 {
 #ifdef MISSING_IF_SOFTC
-    struct en_softc *sc = (struct en_softc *) en_cd.cd_devs[ifp->if_unit];
+    struct en_softc *sc = (struct en_softc *)device_lookup_private(&en_cd, ifp->if_unit);
 #else
     struct en_softc *sc = (struct en_softc *) ifp->if_softc;
 #endif
@@ -1503,7 +1695,7 @@ struct ifnet *ifp;
 
     /*
      * remove everything from interface queue since we handle all queueing
-     * locally ... 
+     * locally ...
      */
 
     while (1) {
@@ -1511,7 +1703,7 @@ struct ifnet *ifp;
       IFQ_DEQUEUE(&ifp->if_snd, m);
       if (m == NULL)
 	return;		/* EMPTY: >>> exit here <<< */
-    
+
       /*
        * calculate size of packet (in bytes)
        * also, if we are not doing transmit DMA we eliminate all stupid
@@ -1555,16 +1747,16 @@ struct ifnet *ifp;
       atm_vpi = ATM_PH_VPI(ap);
       atm_vci = ATM_PH_VCI(ap);
       atm_flags = ATM_PH_FLAGS(ap) & ~(EN_OBHDR|EN_OBTRL);
-      aal = ((atm_flags & ATM_PH_AAL5) != 0) 
+      aal = ((atm_flags & ATM_PH_AAL5) != 0)
 			? MID_TBD_AAL5 : MID_TBD_NOAAL5;
 
       /*
        * check that vpi/vci is one we can use
        */
 
-      if (atm_vpi || atm_vci > MID_N_VC) {
-	printf("%s: output vpi=%d, vci=%d out of card range, dropping...\n", 
-		sc->sc_dev.dv_xname, atm_vpi, atm_vci);
+      if (atm_vpi || atm_vci >= MID_N_VC) {
+	printf("%s: output vpi=%d, vci=%d out of card range, dropping...\n",
+		device_xname(&sc->sc_dev), atm_vpi, atm_vci);
 	m_freem(m);
 	continue;
       }
@@ -1590,8 +1782,8 @@ struct ifnet *ifp;
 
 #ifdef EN_DEBUG
       printf("%s: txvci%d: mlen=%d, got=%d, need=%d, toadd=%d, cell#=%d\n",
-	sc->sc_dev.dv_xname, atm_vci, mlen, got, need, toadd, cellcnt);
-      printf("     leading_space=%d, trailing_space=%d\n", 
+	device_xname(&sc->sc_dev), atm_vci, mlen, got, need, toadd, cellcnt);
+      printf("     leading_space=%d, trailing_space=%d\n",
 	M_LEADINGSPACE(m), M_TRAILINGSPACE(lastm));
 #endif
 
@@ -1618,18 +1810,18 @@ struct ifnet *ifp;
 	atm_flags |= EN_OBHDR;
       }
 
-      if (toadd && (lastm->m_flags & M_EXT) == 0 && 
+      if (toadd && (lastm->m_flags & M_EXT) == 0 &&
 					M_TRAILINGSPACE(lastm) >= toadd) {
 	cp = mtod(lastm, u_int8_t *) + lastm->m_len;
 	lastm->m_len += toadd;
 	mlen += toadd;
 	if (aal == MID_TBD_AAL5) {
-	  bzero(cp, toadd - MID_PDU_SIZE);
+	  memset(cp, 0, toadd - MID_PDU_SIZE);
 	  dat = (u_int32_t *)(cp + toadd - MID_PDU_SIZE);
 	  /* make sure the PDU is in proper byte order */
 	  *dat = htonl(MID_PDU_MK1(0, 0, got));
 	} else {
-	  bzero(cp, toadd);
+	  memset(cp, 0, toadd);
 	}
 	atm_flags |= EN_OBTRL;
       }
@@ -1646,7 +1838,7 @@ struct ifnet *ifp;
 	EN_COUNT(sc->txmbovr);
 	m_freem(m);
 #ifdef EN_DEBUG
-	printf("%s: tx%d: buffer space shortage\n", sc->sc_dev.dv_xname,
+	printf("%s: tx%d: buffer space shortage\n", device_xname(&sc->sc_dev),
 		txchan);
 #endif
 	continue;
@@ -1656,9 +1848,9 @@ struct ifnet *ifp;
 
 #ifdef EN_DEBUG
       printf("%s: tx%d: VPI=%d, VCI=%d, FLAGS=0x%x, speed=0x%x\n",
-	sc->sc_dev.dv_xname, txchan, atm_vpi, atm_vci, atm_flags, 
+	device_xname(&sc->sc_dev), txchan, atm_vpi, atm_vci, atm_flags,
 	sc->txspeed[atm_vci]);
-      printf("     adjusted mlen=%d, mbsize=%d\n", mlen, 
+      printf("     adjusted mlen=%d, mbsize=%d\n", mlen,
 		sc->txslot[txchan].mbsize);
 #endif
 
@@ -1673,6 +1865,8 @@ struct ifnet *ifp;
 /*
  * en_mfix: fix a stupid mbuf
  */
+
+#ifndef __FreeBSD__
 
 STATIC int en_mfix(sc, mm, prev)
 
@@ -1689,7 +1883,7 @@ struct mbuf **mm, *prev;
 
   EN_COUNT(sc->mfix);			/* count # of calls */
 #ifdef EN_DEBUG
-  printf("%s: mfix mbuf m_data=%p, m_len=%d\n", sc->sc_dev.dv_xname,
+  printf("%s: mfix mbuf m_data=%p, m_len=%d\n", device_xname(&sc->sc_dev),
 	m->m_data, m->m_len);
 #endif
 
@@ -1698,9 +1892,9 @@ struct mbuf **mm, *prev;
 
   if (off) {
     if ((m->m_flags & M_EXT) == 0) {
-      bcopy(d, d - off, m->m_len);   /* ALIGN! (with costly data copy...) */
+      memmove(d - off, d, m->m_len);   /* ALIGN! (with costly data copy...) */
       d -= off;
-      m->m_data = (caddr_t)d;
+      m->m_data = (void *)d;
     } else {
       /* can't write to an M_EXT mbuf since it may be shared */
       MGET(new, M_DONTWAIT, MT_DATA);
@@ -1714,7 +1908,7 @@ struct mbuf **mm, *prev;
         EN_COUNT(sc->mfixfail);
         return(0);
       }
-      bcopy(d, new->m_data, m->m_len);	/* ALIGN! (with costly data copy...) */
+      memcpy(new->m_data, d, m->m_len);	/* ALIGN! (with costly data copy...) */
       new->m_len = m->m_len;
       new->m_next = m->m_next;
       if (prev)
@@ -1730,7 +1924,7 @@ struct mbuf **mm, *prev;
 
   d = mtod(m, u_char *) + m->m_len;
   off = sizeof(u_int32_t) - off;
-  
+
   nxt = m->m_next;
   while (off--) {
     for ( ; nxt != NULL && nxt->m_len == 0 ; nxt = nxt->m_next)
@@ -1742,12 +1936,141 @@ struct mbuf **mm, *prev;
     cp = mtod(nxt, u_char *);
     *d++ = *cp++;
     m->m_len++;
-    nxt->m_len--; 
-    nxt->m_data = (caddr_t)cp;
+    nxt->m_len--;
+    nxt->m_data = (void *)cp;
   }
   return(1);
 }
 
+#else /* __FreeBSD__ */
+
+STATIC int en_makeexclusive(struct en_softc *, struct mbuf **, struct mbuf *);
+
+STATIC int en_makeexclusive(sc, mm, prev)
+    struct en_softc *sc;
+    struct mbuf **mm, *prev;
+{
+    struct mbuf *m, *new;
+
+    m = *mm;
+
+    if (m->m_flags & M_EXT) {
+	if (m->m_ext.ext_free) {
+	    /* external buffer isn't an ordinary mbuf cluster! */
+	    aprint_error_dev(&sc->sc_dev, "mfix: special buffer! can't make a copy!\n");
+	    return (0);
+	}
+
+	if (mclrefcnt[mtocl(m->m_ext.ext_buf)] > 1) {
+	    /* make a real copy of the M_EXT mbuf since it is shared */
+	    MGET(new, M_DONTWAIT, MT_DATA);
+	    if (!new) {
+		EN_COUNT(sc->mfixfail);
+		return(0);
+	    }
+	    if (m->m_flags & M_PKTHDR)
+		M_COPY_PKTHDR(new, m);
+	    MCLGET(new, M_DONTWAIT);
+	    if ((new->m_flags & M_EXT) == 0) {
+		m_free(new);
+		EN_COUNT(sc->mfixfail);
+		return(0);
+	    }
+	    memcpy(new->m_data, m->m_data, m->m_len);
+	    new->m_len = m->m_len;
+	    new->m_next = m->m_next;
+	    if (prev)
+		prev->m_next = new;
+	    m_free(m);
+	    *mm = new;
+	}
+	else {
+	    /* the buffer is not shared, align the data offset using
+	       this buffer. */
+	    u_char *d = mtod(m, u_char *);
+	    int off = ((u_long)d) % sizeof(u_int32_t);
+
+	    if (off > 0) {
+		memmove(d - off, d, m->m_len);
+		m->m_data = (void *)d - off;
+	    }
+	}
+    }
+    return (1);
+}
+
+STATIC int en_mfix(sc, mm, prev)
+
+struct en_softc *sc;
+struct mbuf **mm, *prev;
+
+{
+  struct mbuf *m;
+  u_char *d, *cp;
+  int off;
+  struct mbuf *nxt;
+
+  m = *mm;
+
+  EN_COUNT(sc->mfix);			/* count # of calls */
+#ifdef EN_DEBUG
+  printf("%s: mfix mbuf m_data=0x%x, m_len=%d\n", device_xname(&sc->sc_dev),
+	m->m_data, m->m_len);
+#endif
+
+  d = mtod(m, u_char *);
+  off = ((unsigned long) d) % sizeof(u_int32_t);
+
+  if (off) {
+    if ((m->m_flags & M_EXT) == 0) {
+      memmove(d - off, d, m->m_len);   /* ALIGN! (with costly data copy...) */
+      d -= off;
+      m->m_data = (void *)d;
+    } else {
+      /* can't write to an M_EXT mbuf since it may be shared */
+      if (en_makeexclusive(sc, &m, prev) == 0)
+	  return (0);
+      *mm = m;	/* note: 'd' now invalid */
+    }
+  }
+
+  off = m->m_len % sizeof(u_int32_t);
+  if (off == 0)
+    return(1);
+
+  if (m->m_flags & M_EXT) {
+      /* can't write to an M_EXT mbuf since it may be shared */
+      if (en_makeexclusive(sc, &m, prev) == 0)
+	  return (0);
+      *mm = m;	/* note: 'd' now invalid */
+  }
+
+  d = mtod(m, u_char *) + m->m_len;
+  off = sizeof(u_int32_t) - off;
+
+  nxt = m->m_next;
+  while (off--) {
+    if (nxt != NULL && nxt->m_len == 0) {
+	/* remove an empty mbuf.  this avoids odd byte padding to an empty
+	   last mbuf.  */
+	m->m_next = nxt = m_free(nxt);
+    }
+    if (nxt == NULL) {		/* out of data, zero fill */
+      *d++ = 0;
+      continue;			/* next "off" */
+    }
+    cp = mtod(nxt, u_char *);
+    *d++ = *cp++;
+    m->m_len++;
+    nxt->m_len--;
+    nxt->m_data = (void *)cp;
+  }
+  if (nxt != NULL && nxt->m_len == 0)
+      m->m_next = m_free(nxt);
+  return(1);
+}
+
+#endif /* __FreeBSD__ */
 
 /*
  * en_txdma: start transmit DMA, if possible
@@ -1764,9 +2087,12 @@ int chan;
   struct en_launch launch;
   int datalen = 0, dtqneed, len, ncells;
   u_int8_t *cp;
+  struct ifnet *ifp;
+
+  memset(&launch, 0, sizeof launch);	/* XXX gcc */
 
 #ifdef EN_DEBUG
-  printf("%s: tx%d: starting...\n", sc->sc_dev.dv_xname, chan);
+  printf("%s: tx%d: starting...\n", device_xname(&sc->sc_dev), chan);
 #endif
 
   /*
@@ -1787,14 +2113,14 @@ again:
 
   if (launch.t == NULL) {
 #ifdef EN_DEBUG
-    printf("%s: tx%d: ...done!\n", sc->sc_dev.dv_xname, chan);
+    printf("%s: tx%d: ...done!\n", device_xname(&sc->sc_dev), chan);
 #endif
     return;	/* >>> exit here if no data waiting for DMA <<< */
   }
 
   /*
    * get flags, vci
-   * 
+   *
    * note: launch.need = # bytes we need to get on the card
    *	   dtqneed = # of DTQs we need for this packet
    *       launch.mlen = # of bytes in in mbuf chain (<= launch.need)
@@ -1803,12 +2129,12 @@ again:
   ap = mtod(launch.t, struct atm_pseudohdr *);
   launch.atm_vci = ATM_PH_VCI(ap);
   launch.atm_flags = ATM_PH_FLAGS(ap);
-  launch.aal = ((launch.atm_flags & ATM_PH_AAL5) != 0) ? 
+  launch.aal = ((launch.atm_flags & ATM_PH_AAL5) != 0) ?
 		MID_TBD_AAL5 : MID_TBD_NOAAL5;
 
   /*
    * XXX: have to recompute the length again, even though we already did
-   * it in en_start().   might as well compute dtqneed here as well, so 
+   * it in en_start().   might as well compute dtqneed here as well, so
    * this isn't that bad.
    */
 
@@ -1816,7 +2142,7 @@ again:
     dtqneed = 1;		/* header still needs to be added */
     launch.need = MID_TBD_SIZE;	/* not included with mbuf */
   } else {
-    dtqneed = 0;		/* header on-board, dma with mbuf */
+    dtqneed = 0;		/* header on-board, DMA with mbuf */
     launch.need = 0;
   }
 
@@ -1833,10 +2159,10 @@ again:
     if (len == 0)
       continue;			/* atm_pseudohdr alone in first mbuf */
 
-    dtqneed += en_dqneed(sc, (caddr_t) cp, len, 1);
+    dtqneed += en_dqneed(sc, (void *) cp, len, 1);
   }
 
-  if ((launch.need % sizeof(u_int32_t)) != 0) 
+  if ((launch.need % sizeof(u_int32_t)) != 0)
     dtqneed++;			/* need DTQ to FLUSH internal buffer */
 
   if ((launch.atm_flags & EN_OBTRL) == 0) {
@@ -1850,7 +2176,7 @@ again:
   /*
    * finish calculation of launch.need (need to figure out how much padding
    * we will need).   launch.need includes MID_TBD_SIZE, but we need to
-   * remove that to so we can round off properly.     we have to add 
+   * remove that to so we can round off properly.     we have to add
    * MID_TBD_SIZE back in after calculating ncells.
    */
 
@@ -1860,7 +2186,7 @@ again:
 
   if (launch.need > EN_TXSZ * 1024) {
     printf("%s: tx%d: packet larger than xmit buffer (%d > %d)\n",
-      sc->sc_dev.dv_xname, chan, launch.need, EN_TXSZ * 1024);
+      device_xname(&sc->sc_dev), chan, launch.need, EN_TXSZ * 1024);
     goto dequeue_drop;
   }
 
@@ -1874,11 +2200,11 @@ again:
   if (launch.need >= sc->txslot[chan].bfree) {
     EN_COUNT(sc->txoutspace);
 #ifdef EN_DEBUG
-    printf("%s: tx%d: out of transmit space\n", sc->sc_dev.dv_xname, chan);
+    printf("%s: tx%d: out of transmit space\n", device_xname(&sc->sc_dev), chan);
 #endif
     return;		/* >>> exit here if out of obmem buffer space <<< */
   }
-  
+
   /*
    * ensure we have enough dtqs to go, if not, wait for more.
    */
@@ -1890,7 +2216,7 @@ again:
     sc->need_dtqs = 1;
     EN_COUNT(sc->txdtqout);
 #ifdef EN_DEBUG
-    printf("%s: tx%d: out of transmit DTQs\n", sc->sc_dev.dv_xname, chan);
+    printf("%s: tx%d: out of transmit DTQs\n", device_xname(&sc->sc_dev), chan);
 #endif
     return;		/* >>> exit here if out of dtqs <<< */
   }
@@ -1910,7 +2236,14 @@ again:
    */
 
   EN_COUNT(sc->launch);
-  sc->enif.if_opackets++;
+#ifdef ATM_PVCEXT
+  /* if there's a subinterface for this vci, override ifp. */
+  ifp = en_vci2ifp(sc, launch.atm_vci);
+#else
+  ifp = &sc->enif;
+#endif
+  ifp->if_opackets++;
+
   if ((launch.atm_flags & EN_OBHDR) == 0) {
     EN_COUNT(sc->lheader);
     /* store tbd1/tbd2 in host byte order */
@@ -1922,31 +2255,28 @@ again:
     launch.pdu1 = MID_PDU_MK1(0, 0, datalen);  /* host byte order */
   }
 
-#if NBPFILTER > 0
-	if (sc->enif.if_bpf != NULL) {
-		/*
-		 * adjust the top of the mbuf to skip the TBD if present
-		 * before passing the packet to bpf.
-		 * Also remove padding and the PDU trailer. Assume both of
-		 * them to be in the same mbuf. pktlen, m_len and m_data
-		 * are not needed anymore so we can change them.
-		 */
-		int size = sizeof(struct atm_pseudohdr);
-		if (launch.atm_flags & EN_OBHDR)
-			size += MID_TBD_SIZE;
-	
-		launch.t->m_data += size;
-		launch.t->m_len -= size;
-
-		bpf_mtap(sc->enif.if_bpf, launch.t, BPF_DIRECTION_OUT);
-
-		launch.t->m_data -= size;
-		launch.t->m_len += size;
-	}
-#endif
-
   en_txlaunch(sc, chan, &launch);
-  
+
+#if NBPFILTER > 0
+  if (ifp->if_bpf) {
+      /*
+       * adjust the top of the mbuf to skip the pseudo atm header
+       * (and TBD, if present) before passing the packet to bpf,
+       * restore it afterwards.
+       */
+      int size = sizeof(struct atm_pseudohdr);
+      if (launch.atm_flags & EN_OBHDR)
+	  size += MID_TBD_SIZE;
+
+      launch.t->m_data += size;
+      launch.t->m_len -= size;
+
+      BPF_MTAP(ifp, launch.t);
+
+      launch.t->m_data -= size;
+      launch.t->m_len += size;
+  }
+#endif /* NBPFILTER > 0 */
   /*
    * do some housekeeping and get the next packet
    */
@@ -1974,7 +2304,7 @@ dequeue_drop:
 
 
 /*
- * en_txlaunch: launch an mbuf into the dma pool!
+ * en_txlaunch: launch an mbuf into the DMA pool!
  */
 
 STATIC void en_txlaunch(sc, chan, l)
@@ -2016,16 +2346,16 @@ struct en_launch *l;
  addtail = (l->atm_flags & EN_OBTRL) == 0;	/* add a tail? */
 
 #ifdef EN_DIAG
-  if ((need - MID_TBD_SIZE) % MID_ATMDATASZ) 
-    printf("%s: tx%d: bogus transmit needs (%d)\n", sc->sc_dev.dv_xname, chan,
+  if ((need - MID_TBD_SIZE) % MID_ATMDATASZ)
+    printf("%s: tx%d: bogus transmit needs (%d)\n", device_xname(&sc->sc_dev), chan,
 		need);
 #endif
 #ifdef EN_DEBUG
   printf("%s: tx%d: launch mbuf %p!   cur=0x%x[%d], need=%d, addtail=%d\n",
-	sc->sc_dev.dv_xname, chan, l->t, cur, (cur-start)/4, need, addtail);
+	device_xname(&sc->sc_dev), chan, l->t, cur, (cur-start)/4, need, addtail);
   count = EN_READ(sc, MIDX_PLACE(chan));
   printf("     HW: base_address=0x%x, size=%d, read=%d, descstart=%d\n",
-	MIDX_BASE(count), MIDX_SZ(count), EN_READ(sc, MIDX_READPTR(chan)), 
+	MIDX_BASE(count), MIDX_SZ(count), EN_READ(sc, MIDX_READPTR(chan)),
 	EN_READ(sc, MIDX_DESCSTART(chan)));
 #endif
 
@@ -2036,7 +2366,7 @@ struct en_launch *l;
 
   if ((l->atm_flags & EN_OBHDR) == 0) {
 #ifdef EN_DEBUG
-    printf("%s: tx%d: insert header 0x%x 0x%x\n", sc->sc_dev.dv_xname,
+    printf("%s: tx%d: insert header 0x%x 0x%x\n", device_xname(&sc->sc_dev),
 	chan, l->tbd1, l->tbd2);
 #endif
     EN_WRITE(sc, cur, l->tbd1);
@@ -2064,7 +2394,7 @@ struct en_launch *l;
     if (l->nodma || (len < EN_MINDMA &&
        (len % 4) == 0 && ((unsigned long) data % 4) == 0 && (cur % 4) == 0)) {
 
-      /* 
+      /*
        * roundup len: the only time this will change the value of len
        * is when l->nodma is true, tmp is the last mbuf, and there is
        * a non-word number of bytes to transmit.   in this case it is
@@ -2082,8 +2412,8 @@ struct en_launch *l;
       }
       need -= len;
 #ifdef EN_DEBUG
-      printf("%s: tx%d: copied %d bytes (%d left, cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, len, need, cur);
+      printf("%s: tx%d: copied %d bytes (%d left, cur now 0x%x)\n",
+		device_xname(&sc->sc_dev), chan, len, need, cur);
 #endif
       continue;		/* continue on to next mbuf */
     }
@@ -2093,7 +2423,7 @@ struct en_launch *l;
       EN_DTQADD(sc, WORD_IDX(start,cur), chan, MIDDMA_JK, 0, 0, 0);
 #ifdef EN_DEBUG
       printf("%s: tx%d: dtq_sync: advance pointer to %d\n",
-		sc->sc_dev.dv_xname, chan, cur);
+		device_xname(&sc->sc_dev), chan, cur);
 #endif
     }
 
@@ -2108,7 +2438,7 @@ struct en_launch *l;
       if (cnt && M_TRAILINGSPACE(tmp) >= cnt)
         len += cnt;			/* pad for FLUSH */
     }
-      
+
 #if !defined(MIDWAY_ENIONLY)
 
     /*
@@ -2121,13 +2451,13 @@ struct en_launch *l;
       EN_WRAPADD(start, stop, cur, len);
 #ifdef EN_DEBUG
       printf("%s: tx%d: adp_dma %d bytes (%d left, cur now 0x%x)\n",
-              sc->sc_dev.dv_xname, chan, len, need, cur);
+              device_xname(&sc->sc_dev), chan, len, need, cur);
 #endif
       end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, len, chan, 0, vtophys(data), l->mlen, end);
+      EN_DTQADD(sc, len, chan, 0, vtophys((vaddr_t)data), l->mlen, end);
       if (end)
         goto done;
-      dma = cur;	/* update dma pointer */
+      dma = cur;	/* update DMA pointer */
       continue;
     }
 #endif /* !MIDWAY_ENIONLY */
@@ -2155,18 +2485,18 @@ struct en_launch *l;
       EN_WRAPADD(start, stop, cur, cnt);
 #ifdef EN_DEBUG
       printf("%s: tx%d: small al_dma %d bytes (%d left, cur now 0x%x)\n",
-              sc->sc_dev.dv_xname, chan, cnt, need, cur);
+              device_xname(&sc->sc_dev), chan, cnt, need, cur);
 #endif
       len -= cnt;
       end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, count, chan, bcode, vtophys(data), l->mlen, end);
+      EN_DTQADD(sc, count, chan, bcode, vtophys((vaddr_t)data), l->mlen, end);
       if (end)
         goto done;
       data = (u_int32_t *) ((u_char *)data + cnt);
     }
 
     /* do we need to do a DMA op to align? */
-    if (sc->alburst && 
+    if (sc->alburst &&
 	(needalign = (((unsigned long) data) & sc->bestburstmask)) != 0
 	&& len >= sizeof(u_int32_t)) {
       cnt = sc->bestburstlen - needalign;
@@ -2183,12 +2513,12 @@ struct en_launch *l;
       need -= cnt;
       EN_WRAPADD(start, stop, cur, cnt);
 #ifdef EN_DEBUG
-      printf("%s: tx%d: al_dma %d bytes (%d left, cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, cnt, need, cur);
+      printf("%s: tx%d: al_dma %d bytes (%d left, cur now 0x%x)\n",
+		device_xname(&sc->sc_dev), chan, cnt, need, cur);
 #endif
       len -= cnt;
       end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, count, chan, bcode, vtophys(data), l->mlen, end);
+      EN_DTQADD(sc, count, chan, bcode, vtophys((vaddr_t)data), l->mlen, end);
       if (end)
         goto done;
       data = (u_int32_t *) ((u_char *)data + cnt);
@@ -2202,12 +2532,12 @@ struct en_launch *l;
       need -= cnt;
       EN_WRAPADD(start, stop, cur, cnt);
 #ifdef EN_DEBUG
-      printf("%s: tx%d: best_dma %d bytes (%d left, cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, cnt, need, cur);
+      printf("%s: tx%d: best_dma %d bytes (%d left, cur now 0x%x)\n",
+		device_xname(&sc->sc_dev), chan, cnt, need, cur);
 #endif
       len -= cnt;
       end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, count, chan, bcode, vtophys(data), l->mlen, end);
+      EN_DTQADD(sc, count, chan, bcode, vtophys((vaddr_t)data), l->mlen, end);
       if (end)
         goto done;
       data = (u_int32_t *) ((u_char *)data + cnt);
@@ -2222,12 +2552,12 @@ struct en_launch *l;
       need -= cnt;
       EN_WRAPADD(start, stop, cur, cnt);
 #ifdef EN_DEBUG
-      printf("%s: tx%d: cleanup_dma %d bytes (%d left, cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, cnt, need, cur);
+      printf("%s: tx%d: cleanup_dma %d bytes (%d left, cur now 0x%x)\n",
+		device_xname(&sc->sc_dev), chan, cnt, need, cur);
 #endif
       len -= cnt;
       end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, count, chan, bcode, vtophys(data), l->mlen, end);
+      EN_DTQADD(sc, count, chan, bcode, vtophys((vaddr_t)data), l->mlen, end);
       if (end)
         goto done;
       data = (u_int32_t *) ((u_char *)data + cnt);
@@ -2247,22 +2577,22 @@ struct en_launch *l;
       EN_WRAPADD(start, stop, cur, len);
 #ifdef EN_DEBUG
       printf("%s: tx%d: byte cleanup_dma %d bytes (%d left, cur now 0x%x)\n",
-              sc->sc_dev.dv_xname, chan, len, need, cur);
+		device_xname(&sc->sc_dev), chan, len, need, cur);
 #endif
       end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, count, chan, bcode, vtophys(data), l->mlen, end);
+      EN_DTQADD(sc, count, chan, bcode, vtophys((vaddr_t)data), l->mlen, end);
       if (end)
         goto done;
     }
 
-    dma = cur;		/* update dma pointer */
+    dma = cur;		/* update DMA pointer */
 #endif /* !MIDWAY_ADPONLY */
 
   } /* next mbuf, please */
 
   /*
    * all mbuf data has been copied out to the obmem (or set up to be DMAd).
-   * if the trailer or padding needs to be put in, do it now.  
+   * if the trailer or padding needs to be put in, do it now.
    *
    * NOTE: experimental results reveal the following fact:
    *   if you DMA "X" bytes to the card, where X is not a multiple of 4,
@@ -2285,11 +2615,11 @@ struct en_launch *l;
       bcode = (sc->is_adaptec) ? 0 : MIDDMA_BYTE;
       EN_COUNT(sc->tailflush);
       EN_WRAPADD(start, stop, cur, pad);
-      EN_DTQADD(sc, pad, chan, bcode, vtophys(l->t->m_data), 0, 0);
+      EN_DTQADD(sc, pad, chan, bcode, vtophys((vaddr_t)l->t->m_data), 0, 0);
       need -= pad;
 #ifdef EN_DEBUG
-      printf("%s: tx%d: pad/FLUSH dma %d bytes (%d left, cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, pad, need, cur);
+      printf("%s: tx%d: pad/FLUSH DMA %d bytes (%d left, cur now 0x%x)\n",
+		device_xname(&sc->sc_dev), chan, pad, need, cur);
 #endif
     }
 
@@ -2298,8 +2628,8 @@ struct en_launch *l;
     if (l->aal == MID_TBD_AAL5)
       pad -= 2;
 #ifdef EN_DEBUG
-      printf("%s: tx%d: padding %d bytes (cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, pad * sizeof(u_int32_t), cur);
+      printf("%s: tx%d: padding %d bytes (cur now 0x%x)\n",
+		device_xname(&sc->sc_dev), chan, pad * sizeof(u_int32_t), cur);
 #endif
     while (pad--) {
       EN_WRITEDAT(sc, cur, 0);	/* no byte order issues with zero */
@@ -2313,7 +2643,7 @@ struct en_launch *l;
 
   if (addtail || dma != cur) {
    /* write final descriptor  */
-    EN_DTQADD(sc, WORD_IDX(start,cur), chan, MIDDMA_JK, 0, 
+    EN_DTQADD(sc, WORD_IDX(start,cur), chan, MIDDMA_JK, 0,
 				l->mlen, MID_DMA_END);
     /* dma = cur; */ 	/* not necessary since we are done */
   }
@@ -2322,8 +2652,8 @@ done:
   /* update current pointer */
   sc->txslot[chan].cur = cur;
 #ifdef EN_DEBUG
-      printf("%s: tx%d: DONE!   cur now = 0x%x\n", 
-		sc->sc_dev.dv_xname, chan, cur);
+      printf("%s: tx%d: DONE!   cur now = 0x%x\n",
+		device_xname(&sc->sc_dev), chan, cur);
 #endif
 
   return;
@@ -2342,16 +2672,22 @@ void *arg;
   struct en_softc *sc = (struct en_softc *) arg;
   struct mbuf *m;
   struct atm_pseudohdr ah;
+  struct ifnet *ifp;
   u_int32_t reg, kick, val, mask, chip, vci, slot, dtq, drq;
   int lcv, idx, need_softserv = 0;
 
   reg = EN_READ(sc, MID_INTACK);
 
-  if ((reg & MID_INT_ANY) == 0) 
+  if ((reg & MID_INT_ANY) == 0)
     EN_INTR_RET(0); /* not us */
 
 #ifdef EN_DEBUG
-  printf("%s: interrupt=0x%b\n", sc->sc_dev.dv_xname, reg, MID_INTBITS);
+  {
+    char sbuf[256];
+
+    bitmask_snprintf(reg, MID_INTBITS, sbuf, sizeof(sbuf));
+    printf("%s: interrupt=0x%s\n", device_xname(&sc->sc_dev), sbuf);
+  }
 #endif
 
   /*
@@ -2359,11 +2695,18 @@ void *arg;
    */
 
   if ((reg & (MID_INT_IDENT|MID_INT_LERR|MID_INT_DMA_ERR|MID_INT_SUNI)) != 0) {
-    printf("%s: unexpected interrupt=0x%b, resetting card\n", 
-	sc->sc_dev.dv_xname, reg, MID_INTBITS);
+    char sbuf[256];
+
+    bitmask_snprintf(reg, MID_INTBITS, sbuf, sizeof(sbuf));
+    printf("%s: unexpected interrupt=0x%s, resetting card\n",
+           device_xname(&sc->sc_dev), sbuf);
 #ifdef EN_DEBUG
 #ifdef DDB
+#ifdef __FreeBSD__
+    Debugger("en: unexpected error");
+#else
     Debugger();
+#endif
 #endif	/* DDB */
     sc->enif.if_flags &= ~IFF_RUNNING; /* FREEZE! */
 #else
@@ -2397,7 +2740,7 @@ void *arg;
 	  sc->txslot[lcv].bfree = (val + (EN_TXSZ*1024)) - sc->txslot[lcv].cur;
 #ifdef EN_DEBUG
 	printf("%s: tx%d: transmit done.   %d bytes now free in buffer\n",
-		sc->sc_dev.dv_xname, lcv, sc->txslot[lcv].bfree);
+		device_xname(&sc->sc_dev), lcv, sc->txslot[lcv].bfree);
 #endif
       }
     }
@@ -2416,7 +2759,7 @@ void *arg;
       kick = MID_NTX_CH - 1;		/* assume power of 2, kick all! */
       sc->need_dtqs = 0;		/* recalculated in "kick" loop below */
 #ifdef EN_DEBUG
-      printf("%s: cleared need DTQ condition\n", sc->sc_dev.dv_xname);
+      printf("%s: cleared need DTQ condition\n", device_xname(&sc->sc_dev));
 #endif
     }
     while (idx != val) {
@@ -2428,14 +2771,14 @@ void *arg;
 	if (!m) panic("enintr: dtqsync");
 	sc->txslot[slot].mbsize -= EN_DQ_LEN(dtq);
 #ifdef EN_DEBUG
-	printf("%s: tx%d: free %d dma bytes, mbsize now %d\n",
-		sc->sc_dev.dv_xname, slot, EN_DQ_LEN(dtq), 
+	printf("%s: tx%d: free %d DMA bytes, mbsize now %d\n",
+		device_xname(&sc->sc_dev), slot, EN_DQ_LEN(dtq),
 		sc->txslot[slot].mbsize);
 #endif
 	m_freem(m);
       }
       EN_WRAPADD(0, MID_DTQ_N, idx, 1);
-    }
+    };
     sc->dtq_chip = MID_DTQ_REG2A(val);	/* sync softc */
   }
 
@@ -2446,7 +2789,7 @@ void *arg;
 
   if (kick) {
 #ifdef EN_DEBUG
-  printf("%s: tx kick mask = 0x%x\n", sc->sc_dev.dv_xname, kick);
+  printf("%s: tx kick mask = 0x%x\n", device_xname(&sc->sc_dev), kick);
 #endif
     for (mask = 1, lcv = 0 ; lcv < EN_NTX ; lcv++, mask = mask * 2) {
       if ((kick & mask) && sc->txslot[lcv].q.ifq_head) {
@@ -2476,10 +2819,9 @@ void *arg;
           m = NULL;
         } else {
 	  IF_DEQUEUE(&sc->rxslot[slot].indma, m);
-	  if (!m) {
+	  if (!m)
 	    panic("enintr: drqsync: %s: lost mbuf in slot %d!",
-		sc->sc_dev.dv_xname, slot);
-	  }
+		  device_xname(&sc->sc_dev), slot);
         }
 	/* do something with this mbuf */
 	if (sc->rxslot[slot].oth_flags & ENOTHER_DRAIN) {  /* drain? */
@@ -2494,7 +2836,7 @@ void *arg;
 	    sc->rxslot[slot].atm_vci = RX_NONE;
 	    sc->rxvc2slot[vci] = RX_NONE;
 #ifdef EN_DEBUG
-	    printf("%s: rx%d: VCI %d now free\n", sc->sc_dev.dv_xname,
+	    printf("%s: rx%d: VCI %d now free\n", device_xname(&sc->sc_dev),
 			slot, vci);
 #endif
 	  }
@@ -2504,29 +2846,38 @@ void *arg;
 	  ATM_PH_SETVCI(&ah, sc->rxslot[slot].atm_vci);
 #ifdef EN_DEBUG
 	  printf("%s: rx%d: rxvci%d: atm_input, mbuf %p, len %d, hand %p\n",
-		sc->sc_dev.dv_xname, slot, sc->rxslot[slot].atm_vci, m,
+		device_xname(&sc->sc_dev), slot, sc->rxslot[slot].atm_vci, m,
 		EN_DQ_LEN(drq), sc->rxslot[slot].rxhand);
 #endif
-	  sc->enif.if_ipackets++;
 
-#if NBPFILTER > 0
-	  if (sc->enif.if_bpf)
-		bpf_mtap(sc->enif.if_bpf, m, BPF_DIRECTION_IN);
+#ifdef ATM_PVCEXT
+	  /* if there's a subinterface for this vci, override ifp. */
+	  ifp = en_vci2ifp(sc, sc->rxslot[slot].atm_vci);
+	  ifp->if_ipackets++;
+	  m->m_pkthdr.rcvif = ifp;	/* XXX */
+#else
+	  ifp = &sc->enif;
+	  ifp->if_ipackets++;
 #endif
 
-	  atm_input(&sc->enif, &ah, m, sc->rxslot[slot].rxhand);
+#if NBPFILTER > 0
+	  if (ifp->if_bpf)
+	    BPF_MTAP(ifp, m);
+#endif
+
+	  atm_input(ifp, &ah, m, sc->rxslot[slot].rxhand);
 	}
 
       }
       EN_WRAPADD(0, MID_DRQ_N, idx, 1);
-    }
+    };
     sc->drq_chip = MID_DRQ_REG2A(val);	/* sync softc */
 
     if (sc->need_drqs) {	/* true if we had a DRQ shortage */
       need_softserv = 1;
       sc->need_drqs = 0;
 #ifdef EN_DEBUG
-	printf("%s: cleared need DRQ condition\n", sc->sc_dev.dv_xname);
+	printf("%s: cleared need DRQ condition\n", device_xname(&sc->sc_dev));
 #endif
     }
   }
@@ -2546,8 +2897,8 @@ void *arg;
       slot = sc->rxvc2slot[vci];
       if (slot == RX_NONE) {
 #ifdef EN_DEBUG
-	printf("%s: unexpected rx interrupt on VCI %d\n", 
-		sc->sc_dev.dv_xname, vci);
+	printf("%s: unexpected rx interrupt on VCI %d\n",
+		device_xname(&sc->sc_dev), vci);
 #endif
 	EN_WRITE(sc, MID_VC(vci), MIDV_TRASH);  /* rx off, damn it! */
 	continue;				/* next */
@@ -2556,7 +2907,7 @@ void *arg;
       EN_COUNT(sc->hwpull);
 
 #ifdef EN_DEBUG
-      printf("%s: pulled VCI %d off hwslist\n", sc->sc_dev.dv_xname, vci);
+      printf("%s: pulled VCI %d off hwslist\n", device_xname(&sc->sc_dev), vci);
 #endif
 
       /* add it to the software service list (if needed) */
@@ -2568,10 +2919,10 @@ void *arg;
 	EN_WRAPADD(0, MID_SL_N, sc->swsl_tail, 1);
 	sc->swsl_size++;
 #ifdef EN_DEBUG
-      printf("%s: added VCI %d to swslist\n", sc->sc_dev.dv_xname, vci);
+      printf("%s: added VCI %d to swslist\n", device_xname(&sc->sc_dev), vci);
 #endif
       }
-    }
+    };
   }
 
   /*
@@ -2588,7 +2939,7 @@ void *arg;
   if (reg & MID_INT_DMA_OVR) {
     EN_COUNT(sc->dmaovr);
 #ifdef EN_DEBUG
-    printf("%s: MID_INT_DMA_OVR\n", sc->sc_dev.dv_xname);
+    printf("%s: MID_INT_DMA_OVR\n", device_xname(&sc->sc_dev));
 #endif
   }
   reg = EN_READ(sc, MID_STAT);
@@ -2610,10 +2961,10 @@ void *arg;
  *    out of DRQs we must defer processing until some DRQs become free.
  *    so we must remember to look at this RX VCI/slot later, but we can't
  *    put it back on the hardware service list (since that isn't allowed).
- *    so we instead save it on the software service list.   it would be nice 
+ *    so we instead save it on the software service list.   it would be nice
  *    if we could peek at the VCI on top of the hwservice list without removing
  *    it, however this leads to a race condition: if we peek at it and
- *    decide we are done with it new data could come in before we have a 
+ *    decide we are done with it new data could come in before we have a
  *    chance to remove it from the hwslist.   by the time we get it out of
  *    the list the interrupt for the new data will be lost.   oops!
  *
@@ -2627,13 +2978,13 @@ struct en_softc *sc;
   struct mbuf *m, *tmp;
   u_int32_t cur, dstart, rbd, pdu, *sav, dma, bcode, count, *data, *datastop;
   u_int32_t start, stop, cnt, needalign;
-  int slot, raw, aal5, llc, vci, fill, mlen, tlen, drqneed, need, needfill, end;
+  int slot, raw, aal5, vci, fill, mlen, tlen, drqneed, need, needfill, end;
 
   aal5 = 0;		/* Silence gcc */
 next_vci:
   if (sc->swsl_size == 0) {
 #ifdef EN_DEBUG
-    printf("%s: en_service done\n", sc->sc_dev.dv_xname);
+    printf("%s: en_service done\n", device_xname(&sc->sc_dev));
 #endif
     return;		/* >>> exit here if swsl now empty <<< */
   }
@@ -2659,7 +3010,7 @@ next_vci:
 
 #ifdef EN_DEBUG
   printf("%s: rx%d: service vci=%d raw=%d start/stop/cur=0x%x 0x%x 0x%x\n",
-	sc->sc_dev.dv_xname, slot, vci, raw, start, stop, cur);
+	device_xname(&sc->sc_dev), slot, vci, raw, start, stop, cur);
 #endif
 
 same_vci:
@@ -2669,13 +3020,13 @@ same_vci:
   /* check to see if there is any data at all */
   if (dstart == cur) {
 defer:					/* defer processing */
-    EN_WRAPADD(0, MID_SL_N, sc->swsl_head, 1); 
+    EN_WRAPADD(0, MID_SL_N, sc->swsl_head, 1);
     sc->rxslot[slot].oth_flags &= ~ENOTHER_SWSL;
     sc->swsl_size--;
 					/* >>> remove from swslist <<< */
 #ifdef EN_DEBUG
-    printf("%s: rx%d: remove vci %d from swslist\n", 
-		sc->sc_dev.dv_xname, slot, vci);
+    printf("%s: rx%d: remove vci %d from swslist\n",
+	device_xname(&sc->sc_dev), slot, vci);
 #endif
     goto next_vci;
   }
@@ -2701,19 +3052,23 @@ defer:					/* defer processing */
 
     /* normal mode */
     aal5 = (sc->rxslot[slot].atm_flags & ATM_PH_AAL5);
-    llc = (aal5 && (sc->rxslot[slot].atm_flags & ATM_PH_LLCSNAP)) ? 1 : 0;
     rbd = EN_READ(sc, cur);
-    if (MID_RBD_ID(rbd) != MID_RBD_STDID) 
+    if (MID_RBD_ID(rbd) != MID_RBD_STDID)
       panic("en_service: id mismatch");
 
     if (rbd & MID_RBD_T) {
       mlen = 0;			/* we've got trash */
       fill = MID_RBD_SIZE;
       EN_COUNT(sc->ttrash);
+#ifdef EN_DEBUG
+      printf("RX overflow lost %d cells!\n", MID_RBD_CNT(rbd));
+#endif
     } else if (!aal5) {
       mlen = MID_RBD_SIZE + MID_CHDR_SIZE + MID_ATMDATASZ; /* 1 cell (ick!) */
       fill = 0;
     } else {
+      struct ifnet *ifp;
+
       tlen = (MID_RBD_CNT(rbd) * MID_ATMDATASZ) + MID_RBD_SIZE;
       pdu = cur + tlen - MID_PDU_SIZE;
       if (pdu >= stop)
@@ -2721,12 +3076,29 @@ defer:					/* defer processing */
       pdu = EN_READ(sc, pdu);	/* get PDU in correct byte order */
       fill = tlen - MID_RBD_SIZE - MID_PDU_LEN(pdu);
       if (fill < 0 || (rbd & MID_RBD_CRCERR) != 0) {
-        printf("%s: %s, dropping frame\n", sc->sc_dev.dv_xname,
-	    (rbd & MID_RBD_CRCERR) ? "CRC error" : "invalid AAL5 PDU length");
-        printf("%s: got %d cells (%d bytes), AAL5 len is %d bytes (pdu=0x%x)\n",
-	  sc->sc_dev.dv_xname, MID_RBD_CNT(rbd), tlen - MID_RBD_SIZE,
-		MID_PDU_LEN(pdu), pdu);
+	static int first = 1;
+
+	if (first) {
+	  printf("%s: %s, dropping frame\n", device_xname(&sc->sc_dev),
+		 (rbd & MID_RBD_CRCERR) ?
+		 "CRC error" : "invalid AAL5 PDU length");
+	  printf("%s: got %d cells (%d bytes), AAL5 len is %d bytes (pdu=0x%x)\n",
+		 device_xname(&sc->sc_dev), MID_RBD_CNT(rbd),
+		 tlen - MID_RBD_SIZE, MID_PDU_LEN(pdu), pdu);
+#ifndef EN_DEBUG
+	  printf("CRC error report disabled from now on!\n");
+	  first = 0;
+#endif
+	}
 	fill = tlen;
+
+#ifdef ATM_PVCEXT
+	ifp = en_vci2ifp(sc, vci);
+#else
+	ifp = &sc->enif;
+#endif
+	ifp->if_ierrors++;
+
       }
       mlen = tlen - fill;
     }
@@ -2740,20 +3112,20 @@ defer:					/* defer processing */
    *  1. it is possible that we've already allocated an mbuf for this pkt
    *	 but ran out of DRQs, in which case we saved the allocated mbuf on
    *	 "q".
-   *  2. if we save an mbuf in "q" we store the "cur" (pointer) in the front 
+   *  2. if we save an mbuf in "q" we store the "cur" (pointer) in the front
    *     of the mbuf as an identity (that we can check later), and we also
    *     store drqneed (so we don't have to recompute it).
    *  3. after this block of code, if m is still NULL then we ran out of mbufs
    */
-  
+
   m = sc->rxslot[slot].q.ifq_head;
   drqneed = 1;
   if (m) {
     sav = mtod(m, u_int32_t *);
     if (sav[0] != cur) {
 #ifdef EN_DEBUG
-      printf("%s: rx%d: q'ed mbuf %p not ours\n", 
-		sc->sc_dev.dv_xname, slot, m);
+      printf("%s: rx%d: q'ed mbuf %p not ours\n",
+		device_xname(&sc->sc_dev), slot, m);
 #endif
       m = NULL;			/* wasn't ours */
       EN_COUNT(sc->rxqnotus);
@@ -2762,8 +3134,8 @@ defer:					/* defer processing */
       IF_DEQUEUE(&sc->rxslot[slot].q, m);
       drqneed = sav[1];
 #ifdef EN_DEBUG
-      printf("%s: rx%d: recovered q'ed mbuf %p (drqneed=%d)\n", 
-	sc->sc_dev.dv_xname, slot, m, drqneed);
+      printf("%s: rx%d: recovered q'ed mbuf %p (drqneed=%d)\n",
+	device_xname(&sc->sc_dev), slot, m, drqneed);
 #endif
     }
   }
@@ -2775,22 +3147,22 @@ defer:					/* defer processing */
       mlen = 0;
       EN_COUNT(sc->rxmbufout);
 #ifdef EN_DEBUG
-      printf("%s: rx%d: out of mbufs\n", sc->sc_dev.dv_xname, slot);
+      printf("%s: rx%d: out of mbufs\n", device_xname(&sc->sc_dev), slot);
 #endif
     }
 #ifdef EN_DEBUG
-    printf("%s: rx%d: allocate mbuf %p, mlen=%d, drqneed=%d\n", 
-	sc->sc_dev.dv_xname, slot, m, mlen, drqneed);
+    printf("%s: rx%d: allocate mbuf %p, mlen=%d, drqneed=%d\n",
+	device_xname(&sc->sc_dev), slot, m, mlen, drqneed);
 #endif
   }
 
 #ifdef EN_DEBUG
   printf("%s: rx%d: VCI %d, mbuf_chain %p, mlen %d, fill %d\n",
-	sc->sc_dev.dv_xname, slot, vci, m, mlen, fill);
+	device_xname(&sc->sc_dev), slot, vci, m, mlen, fill);
 #endif
 
   /*
-   * now check to see if we've got the DRQs needed.    if we are out of 
+   * now check to see if we've got the DRQs needed.    if we are out of
    * DRQs we must quit (saving our mbuf, if we've got one).
    */
 
@@ -2800,7 +3172,7 @@ defer:					/* defer processing */
     if (m == NULL) {
       EN_COUNT(sc->rxoutboth);
 #ifdef EN_DEBUG
-      printf("%s: rx%d: out of DRQs *and* mbufs!\n", sc->sc_dev.dv_xname, slot);
+      printf("%s: rx%d: out of DRQs *and* mbufs!\n", device_xname(&sc->sc_dev), slot);
 #endif
       return;		/* >>> exit here if out of both mbufs and DRQs <<< */
     }
@@ -2810,13 +3182,13 @@ defer:					/* defer processing */
     IF_ENQUEUE(&sc->rxslot[slot].q, m);
     EN_COUNT(sc->rxdrqout);
 #ifdef EN_DEBUG
-    printf("%s: rx%d: out of DRQs\n", sc->sc_dev.dv_xname, slot);
+    printf("%s: rx%d: out of DRQs\n", device_xname(&sc->sc_dev), slot);
 #endif
     return;		/* >>> exit here if out of DRQs <<< */
   }
 
   /*
-   * at this point all resources have been allocated and we are commited 
+   * at this point all resources have been allocated and we are commited
    * to servicing this slot.
    *
    * dma = last location we told chip about
@@ -2840,9 +3212,9 @@ defer:					/* defer processing */
 
 #ifdef EN_DEBUG
     printf("%s: rx%d: load mbuf %p, m_len=%d, m_data=%p, tlen=%d\n",
-	sc->sc_dev.dv_xname, slot, tmp, tmp->m_len, tmp->m_data, tlen);
+	device_xname(&sc->sc_dev), slot, tmp, tmp->m_len, tmp->m_data, tlen);
 #endif
-    
+
     /* copy data */
     if (EN_NORXDMA || !en_dma || tlen < EN_MINDMA) {
       datastop = (u_int32_t *)((u_char *) data + tlen);
@@ -2855,7 +3227,7 @@ defer:					/* defer processing */
       need -= tlen;
 #ifdef EN_DEBUG
       printf("%s: rx%d: vci%d: copied %d bytes (%d left)\n",
-		sc->sc_dev.dv_xname, slot, vci, tlen, need);
+		device_xname(&sc->sc_dev), slot, vci, tlen, need);
 #endif
       continue;
     }
@@ -2865,28 +3237,28 @@ defer:					/* defer processing */
       EN_DRQADD(sc, WORD_IDX(start,cur), vci, MIDDMA_JK, 0, 0, 0, 0);
 #ifdef EN_DEBUG
       printf("%s: rx%d: vci%d: drq_sync: advance pointer to %d\n",
-		sc->sc_dev.dv_xname, slot, vci, cur);
+		device_xname(&sc->sc_dev), slot, vci, cur);
 #endif
     }
 
 #if !defined(MIDWAY_ENIONLY)
-     
+
     /*
      * the adaptec DMA engine is smart and handles everything for us.
-     */ 
-  
+     */
+
     if (sc->is_adaptec) {
       need -= tlen;
       EN_WRAPADD(start, stop, cur, tlen);
 #ifdef EN_DEBUG
       printf("%s: rx%d: vci%d: adp_dma %d bytes (%d left)\n",
-		sc->sc_dev.dv_xname, slot, vci, tlen, need);
+		device_xname(&sc->sc_dev), slot, vci, tlen, need);
 #endif
       end = (need == 0 && !fill) ? MID_DMA_END : 0;
-      EN_DRQADD(sc, tlen, vci, 0, vtophys(data), mlen, slot, end);
+      EN_DRQADD(sc, tlen, vci, 0, vtophys((vaddr_t)data), mlen, slot, end);
       if (end)
         goto done;
-      dma = cur;	/* update dma pointer */
+      dma = cur;	/* update DMA pointer */
       continue;
     }
 #endif /* !MIDWAY_ENIONLY */
@@ -2915,14 +3287,14 @@ defer:					/* defer processing */
       EN_WRAPADD(start, stop, cur, cnt);
 #ifdef EN_DEBUG
       printf("%s: rx%d: vci%d: al_dma %d bytes (%d left)\n",
-		sc->sc_dev.dv_xname, slot, vci, cnt, need);
+		device_xname(&sc->sc_dev), slot, vci, cnt, need);
 #endif
       tlen -= cnt;
       end = (need == 0 && !fill) ? MID_DMA_END : 0;
-      EN_DRQADD(sc, count, vci, bcode, vtophys(data), mlen, slot, end);
+      EN_DRQADD(sc, count, vci, bcode, vtophys((vaddr_t)data), mlen, slot, end);
       if (end)
         goto done;
-      data = (u_int32_t *)((u_char *) data + cnt);   
+      data = (u_int32_t *)((u_char *) data + cnt);
     }
 
     /* do we need a max-sized burst? */
@@ -2934,14 +3306,14 @@ defer:					/* defer processing */
       EN_WRAPADD(start, stop, cur, cnt);
 #ifdef EN_DEBUG
       printf("%s: rx%d: vci%d: best_dma %d bytes (%d left)\n",
-		sc->sc_dev.dv_xname, slot, vci, cnt, need);
+		device_xname(&sc->sc_dev), slot, vci, cnt, need);
 #endif
       tlen -= cnt;
       end = (need == 0 && !fill) ? MID_DMA_END : 0;
-      EN_DRQADD(sc, count, vci, bcode, vtophys(data), mlen, slot, end);
+      EN_DRQADD(sc, count, vci, bcode, vtophys((vaddr_t)data), mlen, slot, end);
       if (end)
         goto done;
-      data = (u_int32_t *)((u_char *) data + cnt);   
+      data = (u_int32_t *)((u_char *) data + cnt);
     }
 
     /* do we need to do a cleanup burst? */
@@ -2953,15 +3325,15 @@ defer:					/* defer processing */
       EN_WRAPADD(start, stop, cur, tlen);
 #ifdef EN_DEBUG
       printf("%s: rx%d: vci%d: cleanup_dma %d bytes (%d left)\n",
-		sc->sc_dev.dv_xname, slot, vci, tlen, need);
+		device_xname(&sc->sc_dev), slot, vci, tlen, need);
 #endif
       end = (need == 0 && !fill) ? MID_DMA_END : 0;
-      EN_DRQADD(sc, count, vci, bcode, vtophys(data), mlen, slot, end);
+      EN_DRQADD(sc, count, vci, bcode, vtophys((vaddr_t)data), mlen, slot, end);
       if (end)
         goto done;
     }
 
-    dma = cur;		/* update dma pointer */
+    dma = cur;		/* update DMA pointer */
 
 #endif /* !MIDWAY_ADPONLY */
 
@@ -2972,10 +3344,10 @@ defer:					/* defer processing */
 #ifdef EN_DEBUG
       if (fill)
         printf("%s: rx%d: vci%d: skipping %d bytes of fill\n",
-		sc->sc_dev.dv_xname, slot, vci, fill);
+		device_xname(&sc->sc_dev), slot, vci, fill);
       else
         printf("%s: rx%d: vci%d: syncing chip from 0x%x to 0x%x [cur]\n",
-		sc->sc_dev.dv_xname, slot, vci, dma, cur);
+		device_xname(&sc->sc_dev), slot, vci, dma, cur);
 #endif
     EN_WRAPADD(start, stop, cur, fill);
     EN_DRQADD(sc, WORD_IDX(start,cur), vci, MIDDMA_JK, 0, mlen,
@@ -3004,8 +3376,8 @@ done:
   sc->rxslot[slot].cur = cur;		/* update master copy of 'cur' */
 
 #ifdef EN_DEBUG
-  printf("%s: rx%d: vci%d: DONE!   cur now =0x%x\n", 
-	sc->sc_dev.dv_xname, slot, vci, cur);
+  printf("%s: rx%d: vci%d: DONE!   cur now =0x%x\n",
+	device_xname(&sc->sc_dev), slot, vci, cur);
 #endif
 
   goto same_vci;	/* get next packet in this slot */
@@ -3041,13 +3413,15 @@ int unit, level;
   u_int32_t ptr, reg;
 
   for (lcv = 0 ; lcv < en_cd.cd_ndevs ; lcv++) {
-    sc = (struct en_softc *) en_cd.cd_devs[lcv];
+    char sbuf[256];
+
+    sc = device_lookup_private(&en_cd, lcv);
     if (sc == NULL) continue;
     if (unit != -1 && unit != lcv)
       continue;
 
-    printf("dumping device %s at level 0x%b\n", sc->sc_dev.dv_xname, level,
-			END_BITS);
+    bitmask_snprintf(level, END_BITS, sbuf, sizeof(sbuf));
+    printf("dumping device %s at level 0x%s\n", device_xname(&sc->sc_dev), sbuf);
 
     if (sc->dtq_us == 0) {
       printf("<hasn't been en_init'd yet>\n");
@@ -3058,17 +3432,17 @@ int unit, level;
       printf("  en_stats:\n");
       printf("    %d mfix (%d failed); %d/%d head/tail byte DMAs, %d flushes\n",
 	   sc->mfix, sc->mfixfail, sc->headbyte, sc->tailbyte, sc->tailflush);
-      printf("    %d rx dma overflow interrupts\n", sc->dmaovr);
-      printf("    %d times we ran out of TX space and stalled\n", 
+      printf("    %d rx DMA overflow interrupts\n", sc->dmaovr);
+      printf("    %d times we ran out of TX space and stalled\n",
 							sc->txoutspace);
       printf("    %d times we ran out of DTQs\n", sc->txdtqout);
       printf("    %d times we launched a packet\n", sc->launch);
       printf("    %d times we launched without on-board header\n", sc->lheader);
       printf("    %d times we launched without on-board tail\n", sc->ltail);
       printf("    %d times we pulled the hw service list\n", sc->hwpull);
-      printf("    %d times we pushed a vci on the sw service list\n", 
+      printf("    %d times we pushed a vci on the sw service list\n",
 								sc->swadd);
-      printf("    %d times RX pulled an mbuf from Q that wasn't ours\n", 
+      printf("    %d times RX pulled an mbuf from Q that wasn't ours\n",
 							 sc->rxqnotus);
       printf("    %d times RX pulled a good mbuf from Q\n", sc->rxqus);
       printf("    %d times we ran out of mbufs *and* DRQs\n", sc->rxoutboth);
@@ -3089,21 +3463,28 @@ int unit, level;
     }
 
     if (level & END_MREGS) {
+      char ybuf[256];
+
       printf("mregs:\n");
       printf("resid = 0x%x\n", EN_READ(sc, MID_RESID));
-      printf("interrupt status = 0x%b\n", 
-				EN_READ(sc, MID_INTSTAT), MID_INTBITS);
-      printf("interrupt enable = 0x%b\n", 
-				EN_READ(sc, MID_INTENA), MID_INTBITS);
-      printf("mcsr = 0x%b\n", EN_READ(sc, MID_MAST_CSR), MID_MCSRBITS);
+
+      bitmask_snprintf(EN_READ(sc, MID_INTSTAT), MID_INTBITS, ybuf, sizeof(ybuf));
+      printf("interrupt status = 0x%s\n", ybuf);
+
+      bitmask_snprintf(EN_READ(sc, MID_INTENA), MID_INTBITS, ybuf, sizeof(ybuf));
+      printf("interrupt enable = 0x%s\n", ybuf);
+
+      bitmask_snprintf(EN_READ(sc, MID_MAST_CSR), MID_MCSRBITS, ybuf, sizeof(ybuf));
+      printf("mcsr = 0x%s\n", ybuf);
+
       printf("serv_write = [chip=%d] [us=%d]\n", EN_READ(sc, MID_SERV_WRITE),
 			MID_SL_A2REG(sc->hwslistp));
-      printf("dma addr = 0x%x\n", EN_READ(sc, MID_DMA_ADDR));
+      printf("DMA addr = 0x%x\n", EN_READ(sc, MID_DMA_ADDR));
       printf("DRQ: chip[rd=0x%x,wr=0x%x], sc[chip=0x%x,us=0x%x]\n",
-	MID_DRQ_REG2A(EN_READ(sc, MID_DMA_RDRX)), 
+	MID_DRQ_REG2A(EN_READ(sc, MID_DMA_RDRX)),
 	MID_DRQ_REG2A(EN_READ(sc, MID_DMA_WRRX)), sc->drq_chip, sc->drq_us);
       printf("DTQ: chip[rd=0x%x,wr=0x%x], sc[chip=0x%x,us=0x%x]\n",
-	MID_DTQ_REG2A(EN_READ(sc, MID_DMA_RDTX)), 
+	MID_DTQ_REG2A(EN_READ(sc, MID_DMA_RDTX)),
 	MID_DTQ_REG2A(EN_READ(sc, MID_DMA_WRTX)), sc->dtq_chip, sc->dtq_us);
 
       printf("  unusal txspeeds: ");
@@ -3128,8 +3509,8 @@ int unit, level;
 		(sc->txslot[slot].cur - sc->txslot[slot].start)/4);
 	printf("mbsize=%d, bfree=%d\n", sc->txslot[slot].mbsize,
 		sc->txslot[slot].bfree);
-        printf("txhw: base_address=0x%x, size=%d, read=%d, descstart=%d\n",
-	  MIDX_BASE(EN_READ(sc, MIDX_PLACE(slot))), 
+        printf("txhw: base_address=0x%lx, size=%d, read=%d, descstart=%d\n",
+	  (u_long)MIDX_BASE(EN_READ(sc, MIDX_PLACE(slot))),
 	  MIDX_SZ(EN_READ(sc, MIDX_PLACE(slot))),
 	  EN_READ(sc, MIDX_READPTR(slot)), EN_READ(sc, MIDX_DESCSTART(slot)));
       }
@@ -3139,10 +3520,10 @@ int unit, level;
       printf("  recv slots:\n");
       for (slot = 0 ; slot < sc->en_nrx; slot++) {
 	printf("rx%d: vci=%d: start/stop/cur=0x%x/0x%x/0x%x ", slot,
-	  sc->rxslot[slot].atm_vci, sc->rxslot[slot].start, 
+	  sc->rxslot[slot].atm_vci, sc->rxslot[slot].start,
 	  sc->rxslot[slot].stop, sc->rxslot[slot].cur);
-	printf("mode=0x%x, atm_flags=0x%x, oth_flags=0x%x\n", 
-	sc->rxslot[slot].mode, sc->rxslot[slot].atm_flags, 
+	printf("mode=0x%x, atm_flags=0x%x, oth_flags=0x%x\n",
+	sc->rxslot[slot].mode, sc->rxslot[slot].atm_flags,
 		sc->rxslot[slot].oth_flags);
         printf("RXHW: mode=0x%x, DST_RP=0x%x, WP_ST_CNT=0x%x\n",
 	  EN_READ(sc, MID_VC(sc->rxslot[slot].atm_vci)),
@@ -3152,12 +3533,12 @@ int unit, level;
     }
 
     if (level & END_DTQ) {
-      printf("  dtq [need_dtqs=%d,dtq_free=%d]:\n", 
+      printf("  dtq [need_dtqs=%d,dtq_free=%d]:\n",
 					sc->need_dtqs, sc->dtq_free);
       ptr = sc->dtq_chip;
       while (ptr != sc->dtq_us) {
         reg = EN_READ(sc, ptr);
-        printf("\t0x%x=[cnt=%d, chan=%d, end=%d, type=%d @ 0x%x]\n", 
+        printf("\t0x%x=[cnt=%d, chan=%d, end=%d, type=%d @ 0x%x]\n",
 	    sc->dtq[MID_DTQ_A2REG(ptr)], MID_DMA_CNT(reg), MID_DMA_TXCHAN(reg),
 	    (reg & MID_DMA_END) != 0, MID_DMA_TYPE(reg), EN_READ(sc, ptr+4));
         EN_WRAPADD(MID_DTQOFF, MID_DTQEND, ptr, 8);
@@ -3165,12 +3546,12 @@ int unit, level;
     }
 
     if (level & END_DRQ) {
-      printf("  drq [need_drqs=%d,drq_free=%d]:\n", 
+      printf("  drq [need_drqs=%d,drq_free=%d]:\n",
 					sc->need_drqs, sc->drq_free);
       ptr = sc->drq_chip;
       while (ptr != sc->drq_us) {
         reg = EN_READ(sc, ptr);
-	printf("\t0x%x=[cnt=%d, chan=%d, end=%d, type=%d @ 0x%x]\n", 
+	printf("\t0x%x=[cnt=%d, chan=%d, end=%d, type=%d @ 0x%x]\n",
 	  sc->drq[MID_DRQ_A2REG(ptr)], MID_DMA_CNT(reg), MID_DMA_RXVCI(reg),
 	  (reg & MID_DMA_END) != 0, MID_DMA_TYPE(reg), EN_READ(sc, ptr+4));
 	EN_WRAPADD(MID_DRQOFF, MID_DRQEND, ptr, 8);
@@ -3179,12 +3560,11 @@ int unit, level;
 
     if (level & END_SWSL) {
       printf(" swslist [size=%d]: ", sc->swsl_size);
-      for (cnt = sc->swsl_head ; cnt != sc->swsl_tail ; 
+      for (cnt = sc->swsl_head ; cnt != sc->swsl_tail ;
 			cnt = (cnt + 1) % MID_SL_N)
         printf("0x%x ", sc->swslist[cnt]);
       printf("\n");
     }
-
   }
   return(0);
 }
@@ -3201,8 +3581,8 @@ int unit, addr, len;
   struct en_softc *sc;
   u_int32_t reg;
 
-  if (unit < 0 || unit >= en_cd.cd_ndevs ||
-	(sc = (struct en_softc *) en_cd.cd_devs[unit]) == NULL) {
+  sc = device_lookup_private(&en_cd, unit);
+  if (sc == NULL) {
     printf("invalid unit number: %d\n", unit);
     return(0);
   }
@@ -3221,5 +3601,422 @@ int unit, addr, len;
 }
 #endif
 
+#ifdef ATM_PVCEXT
+/*
+ * ATM PVC extension: shaper control and pvc subinterfaces
+ */
+
+/*
+ * the list of the interfaces sharing the physical device.
+ * in order to avoid starvation, the interfaces are scheduled in
+ * a round-robin fashion when en_start is called from tx complete
+ * interrupts.
+ */
+static void rrp_add(sc, ifp)
+	struct en_softc *sc;
+	struct ifnet *ifp;
+{
+	struct rrp *head, *p, *new;
+
+	head = sc->txrrp;
+	if ((p = head) != NULL) {
+		while (1) {
+			if (p->ifp == ifp) {
+				/* an entry for this ifp already exits */
+				p->nref++;
+				return;
+			}
+			if (p->next == head)
+				break;
+			p = p->next;
+		}
+	}
+
+	/* create a new entry */
+	MALLOC(new, struct rrp *, sizeof(struct rrp), M_DEVBUF, M_WAITOK);
+	if (new == NULL) {
+		printf("en_rrp_add: malloc failed!\n");
+		return;
+	}
+
+	new->ifp = ifp;
+	new->nref = 1;
+
+	if (p == NULL) {
+		/* this is the only one in the list */
+		new->next = new;
+		sc->txrrp = new;
+	}
+	else {
+		/* add the new entry at the tail of the list */
+		new->next = p->next;
+		p->next = new;
+	}
+}
+
+#if 0 /* not used */
+static void rrp_delete(sc, ifp)
+	struct en_softc *sc;
+	struct ifnet *ifp;
+{
+	struct rrp *head, *p, *prev;
+
+	head = sc->txrrp;
+
+	prev = head;
+	if (prev == NULL) {
+		printf("rrp_delete: no list!\n");
+		return;
+	}
+	p = prev->next;
+
+	while (1) {
+		if (p->ifp == ifp) {
+			p->nref--;
+			if (p->nref > 0)
+				return;
+			/* remove this entry */
+			if (p == prev) {
+				/* this is the only entry in the list */
+				sc->txrrp = NULL;
+			}
+			else {
+				prev->next = p->next;
+				if (head == p)
+					sc->txrrp = p->next;
+			}
+			FREE(p, M_DEVBUF);
+		}
+		prev = p;
+		p = prev->next;
+		if (prev == head) {
+			printf("rrp_delete: no matching entry!\n");
+			return;
+		}
+	}
+}
+#endif
+
+static struct ifnet *
+en_vci2ifp(sc, vci)
+	struct en_softc *sc;
+	int vci;
+{
+	struct pvcsif *pvcsif;
+
+	LIST_FOREACH(pvcsif, &sc->sif_list, sif_links) {
+		if (vci == pvcsif->sif_vci)
+			return (&pvcsif->sif_if);
+	}
+	return (&sc->enif);
+}
+
+/*
+ * create and attach per pvc subinterface
+ * (currently detach is not supported)
+ */
+static struct ifnet *
+en_pvcattach(ifp)
+	struct ifnet *ifp;
+{
+	struct en_softc *sc = (struct en_softc *) ifp->if_softc;
+	struct ifnet *pvc_ifp;
+	int s;
+
+	if ((pvc_ifp = pvcsif_alloc()) == NULL)
+		return (NULL);
+
+	pvc_ifp->if_softc = sc;
+	pvc_ifp->if_ioctl = en_ioctl;
+	pvc_ifp->if_start = en_start;
+	pvc_ifp->if_flags = (IFF_POINTOPOINT|IFF_MULTICAST) |
+		(ifp->if_flags & (IFF_RUNNING|IFF_SIMPLEX|IFF_NOTRAILERS));
+
+	s = splnet();
+	LIST_INSERT_HEAD(&sc->sif_list, (struct pvcsif *)pvc_ifp, sif_links);
+	if_attach(pvc_ifp);
+	atm_ifattach(pvc_ifp);
+
+#ifdef ATM_PVCEXT
+	rrp_add(sc, pvc_ifp);
+#endif
+	splx(s);
+
+	return (pvc_ifp);
+}
+
+
+/* txspeed conversion derived from linux drivers/atm/eni.c
+   by Werner Almesberger, EPFL LRC */
+static const int pre_div[] = { 4,16,128,2048 };
+
+static int en_pcr2txspeed(pcr)
+	int pcr;
+{
+	int pre, res, div;
+
+	if (pcr == 0 || pcr > 347222)
+		pre = res = 0;	/* max rate */
+	else {
+		for (pre = 0; pre < 3; pre++)
+			if (25000000/pre_div[pre]/64 <= pcr)
+				break;
+		div = pre_div[pre]*(pcr);
+#if 1
+		/*
+		 * the shaper value should be rounded down,
+		 * instead of rounded up.
+		 * (which means "res" should be rounded up.)
+		 */
+		res = (25000000 + div -1)/div - 1;
+#else
+		res = 25000000/div-1;
+#endif
+		if (res < 0)
+			res = 0;
+		if (res > 63)
+			res = 63;
+	}
+	return ((pre << 6) + res);
+}
+
+static int en_txspeed2pcr(txspeed)
+	int txspeed;
+{
+	int pre, res, pcr;
+
+	pre = (txspeed >> 6) & 0x3;
+	res = txspeed & 0x3f;
+	pcr = 25000000 / pre_div[pre] / (res+1);
+	return (pcr);
+}
+
+/*
+ * en_txctl selects a hardware transmit channel and sets the shaper value.
+ * en_txctl should be called after enabling the vc by en_rxctl
+ * since it assumes a transmit channel is already assigned by en_rxctl
+ * to the vc.
+ */
+static int en_txctl(sc, vci, joint_vci, pcr)
+	struct en_softc *sc;
+	int vci;
+	int joint_vci;
+	int pcr;
+{
+	int txspeed, txchan, s;
+
+	if (pcr)
+		txspeed = en_pcr2txspeed(pcr);
+	else
+		txspeed = 0;
+
+	s = splnet();
+	txchan = sc->txvc2slot[vci];
+	sc->txslot[txchan].nref--;
+
+	/* select a slot */
+	if (joint_vci != 0)
+		/* use the same channel */
+		txchan = sc->txvc2slot[joint_vci];
+	else if (pcr == 0)
+		txchan = 0;
+	else {
+		for (txchan = 1; txchan < EN_NTX; txchan++) {
+			if (sc->txslot[txchan].nref == 0)
+				break;
+		}
+	}
+	if (txchan == EN_NTX) {
+#if 1
+		/* no free slot! */
+		splx(s);
+		return (ENOSPC);
+#else
+		/*
+		 * to allow multiple vc's to share a slot,
+		 * use a slot with the smallest reference count
+		 */
+		int slot = 1;
+		txchan = 1;
+		for (slot = 2; slot < EN_NTX; slot++)
+			if (sc->txslot[slot].nref < sc->txslot[txchan].nref)
+				txchan = slot;
+#endif
+	}
+
+	sc->txvc2slot[vci] = txchan;
+	sc->txslot[txchan].nref++;
+
+	/* set the shaper parameter */
+	sc->txspeed[vci] = (u_int8_t)txspeed;
+
+	splx(s);
+#ifdef EN_DEBUG
+	printf("VCI:%d PCR set to %d, tx channel %d\n", vci, pcr, txchan);
+	if (joint_vci != 0)
+		printf("  slot shared with VCI:%d\n", joint_vci);
+#endif
+	return (0);
+}
+
+static int en_pvctx(sc, pvcreq)
+	struct en_softc *sc;
+	struct pvctxreq *pvcreq;
+{
+	struct ifnet *ifp;
+	struct atm_pseudoioctl api;
+	struct atm_pseudohdr *pvc_aph, *pvc_joint;
+	int vci, joint_vci, pcr;
+	int error = 0;
+
+	/* check vpi:vci values */
+	pvc_aph = &pvcreq->pvc_aph;
+	pvc_joint = &pvcreq->pvc_joint;
+
+	vci = ATM_PH_VCI(pvc_aph);
+	joint_vci = ATM_PH_VCI(pvc_joint);
+	pcr = pvcreq->pvc_pcr;
+
+	if (ATM_PH_VPI(pvc_aph) != 0 || vci >= MID_N_VC ||
+	    ATM_PH_VPI(pvc_joint) != 0 || joint_vci >= MID_N_VC)
+		return (EADDRNOTAVAIL);
+
+	if ((ifp = ifunit(pvcreq->pvc_ifname)) == NULL)
+		return (ENXIO);
+
+	if (pcr < 0) {
+		/* negative pcr means disable the vc. */
+		if (sc->rxvc2slot[vci] == RX_NONE)
+			/* already disabled */
+			return 0;
+
+		ATM_PH_FLAGS(&api.aph) = 0;
+		ATM_PH_VPI(&api.aph) = 0;
+		ATM_PH_SETVCI(&api.aph, vci);
+		api.rxhand = NULL;
+
+		error = en_rxctl(sc, &api, 0);
+
+		if (error == 0 && &sc->enif != ifp) {
+			/* clear vc info of this subinterface */
+			struct pvcsif *pvcsif = (struct pvcsif *)ifp;
+
+			ATM_PH_SETVCI(&api.aph, 0);
+			pvcsif->sif_aph = api.aph;
+			pvcsif->sif_vci = 0;
+		}
+		return (error);
+	}
+
+	if (&sc->enif == ifp) {
+		/* called for an en interface */
+		if (sc->rxvc2slot[vci] == RX_NONE) {
+			/* vc is not active */
+#ifdef __NetBSD__
+			printf("%s: en_pvctx: rx not active! vci=%d\n",
+			       ifp->if_xname, vci);
+#else
+			printf("%s%d: en_pvctx: rx not active! vci=%d\n",
+			       ifp->if_name, ifp->if_unit, vci);
+#endif
+			return (EINVAL);
+		}
+	}
+	else {
+		/* called for a pvc subinterface */
+		struct pvcsif *pvcsif = (struct pvcsif *)ifp;
+
+#ifdef __NetBSD__
+    		strlcpy(pvcreq->pvc_ifname, sc->enif.if_xname,
+		    sizeof(pvcreq->pvc_ifname));
+#else
+    		snprintf(pvcreq->pvc_ifname, sizeof(pvcreq->pvc_ifname), "%s%d",
+		    sc->enif.if_name, sc->enif.if_unit);
+#endif
+		ATM_PH_FLAGS(&api.aph) =
+			(ATM_PH_FLAGS(pvc_aph) & (ATM_PH_AAL5|ATM_PH_LLCSNAP));
+		ATM_PH_VPI(&api.aph) = 0;
+		ATM_PH_SETVCI(&api.aph, vci);
+		api.rxhand = NULL;
+		pvcsif->sif_aph = api.aph;
+		pvcsif->sif_vci = ATM_PH_VCI(&api.aph);
+
+		if (sc->rxvc2slot[vci] == RX_NONE) {
+			/* vc is not active, enable rx */
+			error = en_rxctl(sc, &api, 1);
+			if (error)
+				return error;
+		}
+		else {
+			/* vc is already active, update aph in softc */
+			sc->rxslot[sc->rxvc2slot[vci]].atm_flags =
+				ATM_PH_FLAGS(&api.aph);
+		}
+	}
+
+	error = en_txctl(sc, vci, joint_vci, pcr);
+
+	if (error == 0) {
+		if (sc->txspeed[vci] != 0)
+			pvcreq->pvc_pcr = en_txspeed2pcr(sc->txspeed[vci]);
+		else
+			pvcreq->pvc_pcr = 0;
+	}
+
+	return error;
+}
+
+static int en_pvctxget(sc, pvcreq)
+	struct en_softc *sc;
+	struct pvctxreq *pvcreq;
+{
+	struct pvcsif *pvcsif;
+	struct ifnet *ifp;
+	int vci, slot;
+
+	if ((ifp = ifunit(pvcreq->pvc_ifname)) == NULL)
+		return (ENXIO);
+
+	if (ifp == &sc->enif) {
+		/* physical interface: assume vci is specified */
+		struct atm_pseudohdr *pvc_aph;
+
+		pvc_aph = &pvcreq->pvc_aph;
+		vci = ATM_PH_VCI(pvc_aph);
+		if ((slot = sc->rxvc2slot[vci]) == RX_NONE)
+			ATM_PH_FLAGS(pvc_aph) = 0;
+		else
+			ATM_PH_FLAGS(pvc_aph) = sc->rxslot[slot].atm_flags;
+		ATM_PH_VPI(pvc_aph) = 0;
+	}
+	else {
+		/* pvc subinterface */
+#ifdef __NetBSD__
+		strlcpy(pvcreq->pvc_ifname, sc->enif.if_xname,
+		    sizeof(pvcreq->pvc_ifname));
+#else
+		snprintf(pvcreq->pvc_ifname, sizeof(pvcreq->pvc_ifname), "%s%d",
+		    sc->enif.if_name, sc->enif.if_unit);
+#endif
+
+		pvcsif = (struct pvcsif *)ifp;
+		pvcreq->pvc_aph = pvcsif->sif_aph;
+		vci = pvcsif->sif_vci;
+	}
+
+	if ((slot = sc->rxvc2slot[vci]) == RX_NONE) {
+		/* vc is not active */
+		ATM_PH_FLAGS(&pvcreq->pvc_aph) = 0;
+		pvcreq->pvc_pcr = -1;
+	}
+	else if (sc->txspeed[vci])
+		pvcreq->pvc_pcr = en_txspeed2pcr(sc->txspeed[vci]);
+	else
+		pvcreq->pvc_pcr = 0;
+
+	return (0);
+}
+
+#endif /* ATM_PVCEXT */
 
 #endif /* NEN > 0 || !defined(__FreeBSD__) */

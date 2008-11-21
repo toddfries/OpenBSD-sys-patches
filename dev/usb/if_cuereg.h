@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_cuereg.h,v 1.10 2007/06/10 10:15:35 mbalmer Exp $ */
 /*	$NetBSD: if_cuereg.h,v 1.14 2001/01/21 22:09:24 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -118,6 +117,7 @@
 #define CUE_MCAST_TABLE_LEN			64
 
 #define CUE_TIMEOUT		1000
+#define ETHER_ALIGN		2
 #define CUE_BUFSZ		1536
 #define CUE_MIN_FRAMELEN	60
 #define CUE_RX_FRAMES		1
@@ -165,12 +165,20 @@ struct cue_cdata {
 };
 
 struct cue_softc {
-	struct device		cue_dev;
+	USBBASEDEVICE		cue_dev;
 
+#if defined(__FreeBSD__) || defined(__OpenBSD__)
 	struct arpcom		arpcom;
 #define GET_IFP(sc) (&(sc)->arpcom.ac_if)
+#elif defined(__NetBSD__)
+	struct ethercom		cue_ec;
+#if NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
+#define GET_IFP(sc) (&(sc)->cue_ec.ec_if)
+#endif
 
-	struct timeout		cue_stat_ch;
+	usb_callout_t		cue_stat_ch;
 
 	usbd_device_handle	cue_udev;
 	usbd_interface_handle	cue_iface;

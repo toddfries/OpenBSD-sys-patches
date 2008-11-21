@@ -1,5 +1,4 @@
-/*	$OpenBSD: ataio.h,v 1.5 2003/09/26 21:43:32 miod Exp $	*/
-/*	$NetBSD: ataio.h,v 1.2 1998/11/23 22:58:23 kenh Exp $	*/
+/*	$NetBSD: ataio.h,v 1.8 2007/03/04 06:03:40 christos Exp $	*/
 
 #ifndef _SYS_ATAIO_H_
 #define _SYS_ATAIO_H_
@@ -16,10 +15,10 @@ typedef struct	atareq {
 	u_char	head;		/* head number */
 	u_short	cylinder;	/* cylinder/lba address */
 
-	caddr_t	databuf;	/* pointer to I/O data buffer */
+	void *	databuf;	/* Pointer to I/O data buffer */
 	u_long	datalen;	/* length of data buffer */
-	int	timeout;	/* command timeout */
-	u_char	retsts;		/* return status for the command */
+	int	timeout;	/* Command timeout */
+	u_char	retsts;		/* the return status for the command */
 	u_char	error;		/* error bits */
 } atareq_t;
 
@@ -36,13 +35,21 @@ typedef struct	atareq {
 
 #define ATAIOCCOMMAND	_IOWR('Q', 8, atareq_t)
 
-typedef struct atagettrace {
-	unsigned int	buf_size;	/* length of data buffer */
-	void		*buf;		/* pointer to data buffer */
-	unsigned int	bytes_copied;	/* number of bytes copied to buffer */
-	unsigned int	bytes_left;	/* number of bytes left */
-} atagettrace_t;
+/*
+ * ATA bus IOCTL
+ */
+/* Scan bus for new devices. */
+struct atabusioscan_args {
+	int	at_dev;		/* device to scan, -1 for wildcard */
+};
+#define ATABUSIOSCAN	_IOW('A', 50, struct atabusioscan_args)
 
-#define ATAIOGETTRACE	_IOWR('Q', 27, struct atagettrace)
+#define ATABUSIORESET	_IO('A', 51) /* reset ATA bus */
+
+struct atabusiodetach_args {
+	int	at_dev;		/* device to detach; -1 for wildcard */
+};
+#define ATABUSIODETACH	_IOW('A', 52, struct atabusiodetach_args)
+
 
 #endif /* _SYS_ATAIO_H_ */

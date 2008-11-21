@@ -1,4 +1,4 @@
-/*	$NetBSD: if_sip.c,v 1.132 2008/04/10 19:13:37 cegger Exp $	*/
+/*	$NetBSD: if_sip.c,v 1.135 2008/11/07 00:20:07 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -80,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_sip.c,v 1.132 2008/04/10 19:13:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_sip.c,v 1.135 2008/11/07 00:20:07 dyoung Exp $");
 
 #include "bpfilter.h"
 #include "rnd.h"
@@ -566,6 +559,7 @@ sip_init_rxdesc(struct sip_softc *sc, int x)
 
 #define SIP_TIMEOUT 1000
 
+static int	sip_ifflags_cb(struct ethercom *);
 static void	sipcom_start(struct ifnet *);
 static void	sipcom_watchdog(struct ifnet *);
 static int	sipcom_ioctl(struct ifnet *, u_long, void *);
@@ -998,7 +992,7 @@ sipcom_attach(device_t parent, device_t self, void *aux)
 	int i, rseg, error;
 	const struct sip_product *sip;
 	u_int8_t enaddr[ETHER_ADDR_LEN];
-	pcireg_t pmreg;
+	pcireg_t csr;
 	pcireg_t memtype;
 	bus_size_t tx_dmamap_size;
 	int ntxsegs_alloc;
@@ -1088,17 +1082,16 @@ sipcom_attach(device_t parent, device_t self, void *aux)
 	 * Make sure bus mastering is enabled.  Also make sure
 	 * Write/Invalidate is enabled if we're allowed to use it.
 	 */
-	pmreg = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	csr = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	if (pa->pa_flags & PCI_FLAGS_MWI_OKAY)
-		pmreg |= PCI_COMMAND_INVALIDATE_ENABLE;
+		csr |= PCI_COMMAND_INVALIDATE_ENABLE;
 	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-	    pmreg | PCI_COMMAND_MASTER_ENABLE);
+	    csr | PCI_COMMAND_MASTER_ENABLE);
 
 	/* power up chip */
-	if ((error = pci_activate(pa->pa_pc, pa->pa_tag, self, NULL)) &&
-	    error != EOPNOTSUPP) {
-		aprint_error_dev(&sc->sc_dev, "cannot activate %d\n",
-		    error);
+	error = pci_activate(pa->pa_pc, pa->pa_tag, self, pci_activate_null);
+	if (error != 0 && error != EOPNOTSUPP) {
+		aprint_error_dev(&sc->sc_dev, "cannot activate %d\n", error);
 		return;
 	}
 
@@ -1291,6 +1284,7 @@ sipcom_attach(device_t parent, device_t self, void *aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp, enaddr);
+	ether_set_ifflags_cb(&sc->sc_ethercom, sip_ifflags_cb);
 	sc->sc_prev.ec_capenable = sc->sc_ethercom.ec_capenable;
 	sc->sc_prev.is_vlan = VLAN_ATTACHED(&(sc)->sc_ethercom);
 	sc->sc_prev.if_capenable = ifp->if_capenable;
@@ -1727,6 +1721,30 @@ sipcom_watchdog(struct ifnet *ifp)
 	sipcom_start(ifp);
 }
 
+/* If the interface is up and running, only modify the receive
+ * filter when setting promiscuous or debug mode.  Otherwise fall
+ * through to ether_ioctl, which will reset the chip.
+ */
+static int
+sip_ifflags_cb(struct ethercom *ec)
+{
+#define COMPARE_EC(sc) (((sc)->sc_prev.ec_capenable			\
+			 == (sc)->sc_ethercom.ec_capenable)		\
+			&& ((sc)->sc_prev.is_vlan ==			\
+			    VLAN_ATTACHED(&(sc)->sc_ethercom) ))
+#define COMPARE_IC(sc, ifp) ((sc)->sc_prev.if_capenable == (ifp)->if_capenable)
+	struct ifnet *ifp = &ec->ec_if;
+	struct sip_softc *sc = ifp->if_softc;
+	int change = ifp->if_flags ^ sc->sc_if_flags;
+
+	if ((change & ~(IFF_CANTCHANGE|IFF_DEBUG)) != 0 || !COMPARE_EC(sc) ||
+	    !COMPARE_IC(sc, ifp))
+		return ENETRESET;
+	/* Set up the receive filter. */
+	(*sc->sc_model->sip_variant->sipv_set_filter)(sc);
+	return 0;
+}
+
 /*
  * sip_ioctl:		[ifnet interface function]
  *
@@ -1770,34 +1788,7 @@ sipcom_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 			}
 			sc->sc_flowflags = ifr->ifr_media & IFM_ETH_FMASK;
 		}
-		goto ethioctl;
-	case SIOCSIFFLAGS:
-		/* If the interface is up and running, only modify the receive
-		 * filter when setting promiscuous or debug mode.  Otherwise
-		 * fall through to ether_ioctl, which will reset the chip.
-		 */
-
-#define COMPARE_EC(sc) (((sc)->sc_prev.ec_capenable			\
-			 == (sc)->sc_ethercom.ec_capenable)		\
-			&& ((sc)->sc_prev.is_vlan ==			\
-			    VLAN_ATTACHED(&(sc)->sc_ethercom) ))
-
-#define COMPARE_IC(sc, ifp) ((sc)->sc_prev.if_capenable == (ifp)->if_capenable)
-
-#define RESETIGN (IFF_CANTCHANGE|IFF_DEBUG)
-		if (((ifp->if_flags & (IFF_UP|IFF_RUNNING))
-		    == (IFF_UP|IFF_RUNNING))
-		    && ((ifp->if_flags & (~RESETIGN))
-		    == (sc->sc_if_flags & (~RESETIGN)))
-		    && COMPARE_EC(sc) && COMPARE_IC(sc, ifp)) {
-			/* Set up the receive filter. */
-			(*sc->sc_model->sip_variant->sipv_set_filter)(sc);
-			error = 0;
-			break;
-#undef RESETIGN
-		}
-		/* FALLTHROUGH */
-	ethioctl:
+		/*FALLTHROUGH*/
 	default:
 		if ((error = ether_ioctl(ifp, cmd, data)) != ENETRESET)
 			break;
@@ -1838,6 +1829,9 @@ sipcom_intr(void *arg)
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	u_int32_t isr;
 	int handled = 0;
+
+	if (!device_is_active(&sc->sc_dev))
+		return 0;
 
 	/* Disable interrupts. */
 	bus_space_write_4(sc->sc_st, sc->sc_sh, SIP_IER, 0);

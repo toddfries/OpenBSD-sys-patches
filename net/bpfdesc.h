@@ -1,5 +1,4 @@
-/*	$OpenBSD: bpfdesc.h,v 1.17 2006/03/25 22:41:47 djm Exp $	*/
-/*	$NetBSD: bpfdesc.h,v 1.11 1995/09/27 18:30:42 thorpej Exp $	*/
+/*	$NetBSD: bpfdesc.h,v 1.28 2008/04/24 15:35:30 ad Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1993
@@ -35,12 +34,16 @@
  * SUCH DAMAGE.
  *
  *	@(#)bpfdesc.h	8.1 (Berkeley) 6/10/93
+ *
+ * @(#) Header: bpfdesc.h,v 1.14 96/06/16 22:28:07 leres Exp  (LBL)
  */
 
 #ifndef _NET_BPFDESC_H_
 #define _NET_BPFDESC_H_
 
-#include <sys/selinfo.h>
+#include <sys/callout.h>
+#include <sys/selinfo.h>		/* for struct selinfo */
+#include <net/if.h>			/* for IFNAMSIZ */
 
 /*
  * Descriptor associated with each open bpf file.
@@ -56,39 +59,66 @@ struct bpf_d {
 	 *   fbuf (free) - When read is done, put cluster here.
 	 * On receiving, if sbuf is full and fbuf is 0, packet is dropped.
 	 */
-	caddr_t		bd_sbuf;	/* store slot */
-	caddr_t		bd_hbuf;	/* hold slot */
-	caddr_t		bd_fbuf;	/* free slot */
-	int		bd_slen;	/* current length of store buffer */
-	int		bd_hlen;	/* current length of hold buffer */
+	void *		bd_sbuf;	/* store slot */
+	void *		bd_hbuf;	/* hold slot */
+	void *		bd_fbuf;	/* free slot */
+	int 		bd_slen;	/* current length of store buffer */
+	int 		bd_hlen;	/* current length of hold buffer */
 
 	int		bd_bufsize;	/* absolute length of buffers */
 
 	struct bpf_if *	bd_bif;		/* interface descriptor */
 	u_long		bd_rtout;	/* Read timeout in 'ticks' */
-	u_long		bd_rdStart;	/* when the read started */
-	struct bpf_insn *bd_rfilter; 	/* read filter code */
-	struct bpf_insn *bd_wfilter; 	/* write filter code */
+	struct bpf_insn *bd_filter; 	/* filter code */
 	u_long		bd_rcount;	/* number of packets received */
 	u_long		bd_dcount;	/* number of packets dropped */
+	u_long		bd_ccount;	/* number of packets captured */
 
 	u_char		bd_promisc;	/* true if listening promiscuously */
 	u_char		bd_state;	/* idle, waiting, or timed out */
 	u_char		bd_immediate;	/* true to return on packet arrival */
-	u_char		bd_locked;	/* true if descriptor is locked */
-	u_char		bd_fildrop;	/* true if filtered packets will be dropped */
-	u_char		bd_dirfilt;	/* direction filter */
-	int		bd_hdrcmplt;	/* false to fill in src lladdr automatically */
+	int		bd_hdrcmplt;	/* false to fill in src lladdr */
+	int		bd_seesent;	/* true if bpf should see sent packets */
 	int		bd_async;	/* non-zero if packet reception should generate signal */
-	int		bd_sig;		/* signal to send upon packet reception */
 	pid_t		bd_pgid;	/* process or group id for signal */
-	uid_t		bd_siguid;	/* uid for process that set pgid */
-	uid_t		bd_sigeuid;	/* euid for process that set pgid */
-	u_int		bd_ref;		/* reference count */
+#if BSD < 199103
+	u_char		bd_selcoll;	/* true if selects collide */
+	int		bd_timedout;
+	struct proc *	bd_selproc;	/* process that last selected us */
+#else
+	u_char		bd_pad;		/* explicit alignment */
 	struct selinfo	bd_sel;		/* bsd select info */
-	int		bd_unit;	/* logical unit number */
-	LIST_ENTRY(bpf_d) bd_list;	/* descriptor list */
+#endif
+	callout_t	bd_callout;	/* for BPF timeouts with select */
+	pid_t		bd_pid;		/* corresponding PID */
+	LIST_ENTRY(bpf_d) bd_list;	/* list of all BPF's */
+	void		*bd_sih;	/* soft interrupt handle */
 };
+
+
+/* Values for bd_state */
+#define BPF_IDLE	0		/* no select in progress */
+#define BPF_WAITING	1		/* waiting for read timeout in select */
+#define BPF_TIMED_OUT	2		/* read timeout has expired in select */
+
+/*
+ * Description associated with the external representation of each
+ * open bpf file.
+ */
+struct bpf_d_ext {
+	int32_t		bde_bufsize;
+	uint8_t		bde_promisc;
+	uint8_t		bde_state;
+	uint8_t		bde_immediate;
+	int32_t		bde_hdrcmplt;
+	int32_t		bde_seesent;
+	pid_t		bde_pid;
+	uint64_t	bde_rcount;		/* number of packets received */
+	uint64_t	bde_dcount;		/* number of packets dropped */
+	uint64_t	bde_ccount;		/* number of packets captured */
+	char		bde_ifname[IFNAMSIZ];
+};
+
 
 /*
  * Descriptor associated with each attached hardware interface.
@@ -103,6 +133,7 @@ struct bpf_if {
 };
 
 #ifdef _KERNEL
-int	 bpf_setf(struct bpf_d *, struct bpf_program *, int);
-#endif /* _KERNEL */
-#endif /* _NET_BPFDESC_H_ */
+int	 bpf_setf __P((struct bpf_d *, struct bpf_program *));
+#endif
+
+#endif /* !_NET_BPFDESC_H_ */

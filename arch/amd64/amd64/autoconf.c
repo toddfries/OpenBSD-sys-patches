@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.27 2008/05/26 22:49:58 deraadt Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.21 2008/05/11 15:32:20 ad Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,37 +37,26 @@
 /*
  * Setup the system to run on the current machine.
  *
- * cpu_configure() is called at boot time and initializes the vba 
+ * Configure() is called at boot time and initializes the vba 
  * device tables and the memory controller monitoring.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
+ *
+ * Lots of this is now in x86/x86/x86_autoconf.c
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.21 2008/05/11 15:32:20 ad Exp $");
+
+#include "opt_multiprocessor.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/dkstat.h>
-#include <sys/disklabel.h>
-#include <sys/conf.h>
-#include <sys/device.h>
-#include <sys/malloc.h>
-#include <sys/vnode.h>
-#include <sys/fcntl.h>
-#include <sys/dkio.h>
-#include <sys/reboot.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
-
-#include <net/if.h>
-#include <net/if_types.h>
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
+#include <sys/cpu.h>
 
 #include <machine/pte.h>
-#include <machine/cpu.h>
-#include <machine/biosvar.h>
-
-#include <dev/cons.h>
+#include <machine/cpufunc.h>
 
 #include "ioapic.h"
 #include "lapic.h"
@@ -81,112 +69,46 @@
 #include <machine/i82489var.h>
 #endif
 
-#if 0
 #include "bios32.h"
 #if NBIOS32 > 0
 #include <machine/bios32.h>
-#endif
+/* XXX */
+extern void platform_init(void);
 #endif
 
-int	cold = 1;	/* if 1, still working on cold-start */
-extern dev_t bootdev;
+#include <x86/x86/tsc.h>
 
 /*
  * Determine i/o configuration for a machine.
  */
 void
-cpu_configure(void)
+cpu_configure()
 {
+
+	startrtclock();
+
 #if NBIOS32 > 0
 	bios32_init();
+	platform_init();
 #endif
 
 	x86_64_proc0_tss_ldt_init();
 
-	startrtclock();
-
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
 
+#ifdef INTRDEBUG
 	intr_printconfig();
+#endif
 
 #if NIOAPIC > 0
-	lapic_set_lvt();
 	ioapic_enable();
 #endif
 
 #ifdef MULTIPROCESSOR
-	cpu_init_idle_pcbs();
+	cpu_init_idle_lwps();
 #endif
 
-	lcr8(0);
 	spl0();
-	cold = 0;
+	lcr8(0);
 }
-
-void
-device_register(struct device *dev, void *aux)
-{
-}
-
-/*
- * Now that we are fully operational, we can checksum the
- * disks, and using some heuristics, hopefully are able to
- * always determine the correct root disk.
- */
-void
-diskconf(void)
-{
-	int majdev, unit, part = 0;
-	struct device *bootdv = NULL;
-	dev_t tmpdev;
-	char buf[128];
-	extern bios_bootmac_t *bios_bootmac;
-
-	dkcsumattach();
-
-	if ((bootdev & B_MAGICMASK) == (u_int)B_DEVMAGIC) {
-		majdev = B_TYPE(bootdev);
-		unit = B_UNIT(bootdev);
-		part = B_PARTITION(bootdev);
-		snprintf(buf, sizeof buf, "%s%d%c", findblkname(majdev),
-		    unit, part + 'a');
-		bootdv = parsedisk(buf, strlen(buf), part, &tmpdev);
-	}
-
-	if (bios_bootmac) {
-		struct ifnet *ifp;
-
-		for (ifp = TAILQ_FIRST(&ifnet); ifp != NULL;
-		    ifp = TAILQ_NEXT(ifp, if_list)) {
-			if ((ifp->if_type == IFT_ETHER ||
-			    ifp->if_type == IFT_FDDI) &&
-			    bcmp(bios_bootmac->mac,
-			    ((struct arpcom *)ifp)->ac_enaddr,
-			    ETHER_ADDR_LEN) == 0)
-				break;
-		}
-		if (ifp) {
-#if defined(NFSCLIENT)
-			printf("PXE boot MAC address %s, interface %s\n",
-			    ether_sprintf(bios_bootmac->mac), ifp->if_xname);
-			bootdv = parsedisk(ifp->if_xname, strlen(ifp->if_xname),
-			    0, &tmpdev);
-			part = 0;
-#endif
-		} else
-			printf("PXE boot MAC address %s, interface %s\n",
-			    ether_sprintf(bios_bootmac->mac), "unknown");
-	}
-
-	setroot(bootdv, part, RB_USERREQ);
-	dumpconf();
-}
-
-struct nam2blk nam2blk[] = {
-	{ "wd",		0 },
-	{ "sd",		4 },
-	{ "rd",		17 },
-	{ "raid",	19 },
-	{ NULL,		-1 }
-};

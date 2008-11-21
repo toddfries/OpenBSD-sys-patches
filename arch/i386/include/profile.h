@@ -1,5 +1,4 @@
-/*	$OpenBSD: profile.h,v 1.10 2005/01/07 02:03:17 pascoe Exp $	*/
-/*	$NetBSD: profile.h,v 1.6 1995/03/28 18:17:08 jtc Exp $	*/
+/*	$NetBSD: profile.h,v 1.33 2007/12/20 23:46:13 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -32,36 +31,107 @@
  *	@(#)profile.h	8.1 (Berkeley) 6/11/93
  */
 
+#ifdef _KERNEL_OPT
+#include "opt_multiprocessor.h"
+#endif
+
+#ifdef _KERNEL
+#include <machine/cpufunc.h>
+#include <machine/lock.h>
+#endif
+
 #define	_MCOUNT_DECL static __inline void _mcount
 
+#ifdef __ELF__
+#define MCOUNT_ENTRY	"__mcount"
+#define MCOUNT_COMPAT	__weak_alias(mcount, __mcount)
+#else
+#define MCOUNT_ENTRY	"mcount"
+#define MCOUNT_COMPAT	/* nothing */
+#endif
+
 #define	MCOUNT \
-extern void mcount(void) __asm("__mcount");				\
-__weak_alias(mcount,__mcount);						\
+MCOUNT_COMPAT								\
+extern void mcount(void) __asm(MCOUNT_ENTRY)				\
+	__attribute__((__no_instrument_function__));			\
 void									\
-mcount()								\
+mcount(void)								\
 {									\
 	int selfpc, frompcindex;					\
+	int eax, ecx, edx;						\
+									\
+	__asm volatile("movl %%eax,%0" : "=g" (eax));			\
+	__asm volatile("movl %%ecx,%0" : "=g" (ecx));			\
+	__asm volatile("movl %%edx,%0" : "=g" (edx));			\
 	/*								\
 	 * find the return address for mcount,				\
 	 * and the return address for mcount's caller.			\
 	 *								\
 	 * selfpc = pc pushed by mcount call				\
 	 */								\
-	__asm __volatile ("movl 4(%%ebp),%0" : "=r" (selfpc));		\
+	__asm volatile("movl 4(%%ebp),%0" : "=r" (selfpc));		\
 	/*								\
 	 * frompcindex = pc pushed by call into self.			\
 	 */								\
-	__asm __volatile ("movl (%%ebp),%0;movl 4(%0),%0" :		\
-	    "+r" (frompcindex));					\
-	_mcount(frompcindex, selfpc);					\
+	__asm volatile("movl (%%ebp),%0;movl 4(%0),%0"			\
+	    : "=r" (frompcindex));					\
+	_mcount((u_long)frompcindex, (u_long)selfpc);			\
+									\
+	__asm volatile("movl %0,%%edx" : : "g" (edx));			\
+	__asm volatile("movl %0,%%ecx" : : "g" (ecx));			\
+	__asm volatile("movl %0,%%eax" : : "g" (eax));			\
 }
 
 #ifdef _KERNEL
-/*
- * We inline the code that splhigh and splx would do here as otherwise we would
- * call recursively into mcount() as machdep.c is compiled with -pg on a 
- * profiling build.
- */
-#define	MCOUNT_ENTER	_SPLRAISE(s, IPL_HIGH); __splbarrier()
-#define	MCOUNT_EXIT	__splbarrier(); _SPLX(s)
+#ifdef MULTIPROCESSOR
+__cpu_simple_lock_t __mcount_lock;
+
+static inline void
+MCOUNT_ENTER_MP(void)
+{
+	__cpu_simple_lock(&__mcount_lock);
+	__insn_barrier();
+}
+
+static inline void
+MCOUNT_EXIT_MP(void)
+{
+	__insn_barrier();
+	__mcount_lock = __SIMPLELOCK_UNLOCKED;
+}
+#else
+#define MCOUNT_ENTER_MP()
+#define MCOUNT_EXIT_MP()
+#endif
+
+static inline void
+mcount_disable_intr(void)
+{
+	__asm volatile("cli");
+}
+
+static inline u_long
+mcount_read_psl(void)
+{
+	u_long	ef;
+
+	__asm volatile("pushfl; popl %0" : "=r" (ef));
+	return (ef);
+}
+
+static inline void
+mcount_write_psl(u_long ef)
+{
+	__asm volatile("pushl %0; popfl" : : "r" (ef));
+}
+
+#define	MCOUNT_ENTER							\
+	s = (int)mcount_read_psl();					\
+	mcount_disable_intr();						\
+	MCOUNT_ENTER_MP();
+
+#define	MCOUNT_EXIT							\
+	MCOUNT_EXIT_MP();						\
+	mcount_write_psl(s);
+
 #endif /* _KERNEL */

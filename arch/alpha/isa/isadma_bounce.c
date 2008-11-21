@@ -1,5 +1,4 @@
-/*	$OpenBSD: isadma_bounce.c,v 1.7 2007/10/06 23:12:17 krw Exp $	*/
-/* $NetBSD: isadma_bounce.c,v 1.3 2000/06/29 09:02:57 mrg Exp $ */
+/* $NetBSD: isadma_bounce.c,v 1.8 2008/04/28 20:23:11 martin Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2000 The NetBSD Foundation, Inc.
@@ -17,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +30,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define _ALPHA_BUS_DMA_PRIVATE
+#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
+
+__KERNEL_RCSID(0, "$NetBSD: isadma_bounce.c,v 1.8 2008/04/28 20:23:11 martin Exp $");
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/syslog.h>
@@ -47,6 +42,7 @@
 #include <sys/proc.h>
 #include <sys/mbuf.h>
 
+#define _ALPHA_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/isa/isareg.h>
@@ -55,11 +51,6 @@
 #include <uvm/uvm_extern.h>
 
 extern	paddr_t avail_end;
-
-/*
- * ISA can only DMA to 0-16M.
- */
-#define	ISA_DMA_BOUNCE_THRESHOLD	(16 * 1024 * 1024)
 
 /*
  * Cookie used by bouncing ISA DMA.  A pointer to one of these is stashed
@@ -97,9 +88,9 @@ struct isadma_bounce_cookie {
 #define	ID_BUFTYPE_UIO		3
 #define	ID_BUFTYPE_RAW		4
 
-int	isadma_bounce_alloc_bouncebuf(bus_dma_tag_t, bus_dmamap_t,
-	    bus_size_t, int);
-void	isadma_bounce_free_bouncebuf(bus_dma_tag_t, bus_dmamap_t);
+int	isadma_bounce_alloc_bouncebuf __P((bus_dma_tag_t, bus_dmamap_t,
+	    bus_size_t, int));
+void	isadma_bounce_free_bouncebuf __P((bus_dma_tag_t, bus_dmamap_t));
 
 /*
  * Create an ISA DMA map.
@@ -155,11 +146,12 @@ isadma_bounce_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	/*
 	 * Allocate our cookie.
 	 */
-	if ((cookiestore = malloc(cookiesize, M_DEVBUF, (flags & BUS_DMA_NOWAIT)
-	    ? (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO))) == NULL) {
+	if ((cookiestore = malloc(cookiesize, M_DMAMAP,
+	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL) {
 		error = ENOMEM;
 		goto out;
 	}
+	memset(cookiestore, 0, cookiesize);
 	cookie = (struct isadma_bounce_cookie *)cookiestore;
 	cookie->id_flags = cookieflags;
 	map->_dm_cookie = cookie;
@@ -178,7 +170,7 @@ isadma_bounce_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
  out:
 	if (error) {
 		if (map->_dm_cookie != NULL)
-			free(map->_dm_cookie, M_DEVBUF);
+			free(map->_dm_cookie, M_DMAMAP);
 		_bus_dmamap_destroy(t, map);
 	}
 	return (error);
@@ -198,7 +190,7 @@ isadma_bounce_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 	if (cookie->id_flags & ID_HAS_BOUNCE)
 		isadma_bounce_free_bouncebuf(t, map);
 
-	free(cookie, M_DEVBUF);
+	free(cookie, M_DMAMAP);
 	_bus_dmamap_destroy(t, map);
 }
 
@@ -385,9 +377,12 @@ isadma_bounce_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 	_bus_dmamap_unload(t, map);
 }
 
+/*
+ * Synchronize an ISA DMA map.
+ */
 void
 isadma_bounce_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
-	bus_size_t len, int ops)
+    bus_size_t len, int ops)
 {
 	struct isadma_bounce_cookie *cookie = map->_dm_cookie;
 
@@ -480,7 +475,7 @@ isadma_bounce_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 				minlen = len < m->m_len - moff ?
 				    len : m->m_len - moff;
 
-				memcpy(mtod(m, caddr_t) + moff,
+				memcpy(mtod(m, char *) + moff,
 				    (char *)cookie->id_bouncebuf + offset,
 				    minlen);
 
@@ -509,8 +504,8 @@ isadma_bounce_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 		break;
 
 	default:
-		panic("isadma_bounce_dmamap_sync: unknown buffer type %d",
-		    cookie->id_buftype);
+		printf("unknown buffer type %d\n", cookie->id_buftype);
+		panic("isadma_bounce_dmamap_sync");
 	}
 
 	/* Drain the write buffer. */
@@ -555,7 +550,7 @@ isadma_bounce_alloc_bouncebuf(bus_dma_tag_t t, bus_dmamap_t map,
 		goto out;
 	error = _bus_dmamem_map(t, cookie->id_bouncesegs,
 	    cookie->id_nbouncesegs, cookie->id_bouncebuflen,
-	    (caddr_t *)&cookie->id_bouncebuf, flags);
+	    (void **)&cookie->id_bouncebuf, flags);
 
  out:
 	if (error) {

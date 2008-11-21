@@ -1,5 +1,4 @@
-/*	$OpenBSD: anreg.h,v 1.12 2007/10/05 23:23:55 jsg Exp $	*/
-/*	$NetBSD: anreg.h,v 1.11 2005/01/15 11:01:46 dyoung Exp $	*/
+/*	$NetBSD: anreg.h,v 1.15 2007/12/25 18:33:38 perry Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -36,11 +35,6 @@
 
 #ifndef _DEV_IC_ANREG_H
 #define	_DEV_IC_ANREG_H
-
-/*
- * Size of Aironet I/O space.
- */
-#define AN_IOSIZ		0x40
 
 /*
  * Hermes register definitions and what little I know about them.
@@ -409,7 +403,7 @@ struct an_rid_caps {
 	u_int16_t		an_req_hw_support;	/* 0x80 */
 	/* extended capabilities */
 	u_int16_t		an_ext_softcaps;	/* 0x82 */
-	u_int16_t		an_spare[34];
+	u_int16_t		an_spare[94];
 } __packed;
 
 #define	AN_REGDOMAIN_USA	0

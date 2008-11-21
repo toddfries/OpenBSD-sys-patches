@@ -1,38 +1,29 @@
-#	$OpenBSD: Makefile,v 1.7 2005/05/24 20:12:02 uwe Exp $
-#	$NetBSD: Makefile,v 1.3 1995/02/27 16:36:07 cgd Exp $
+# $NetBSD: Makefile,v 1.13 2008/10/25 22:27:36 apb Exp $
 
 # Makefile for alpha tags file and boot blocks
 
-S=${.CURDIR}/../..
-.include "$S/kern/Make.tags.inc"
+TALPHA=	../alpha/tags
+SALPHA=	../alpha/alpha/*.[ch] ../alpha/include/*.h \
+	../alpha/pci/*.[ch] ../alpha/tlsb/*.[ch] ../alpha/tc/*.[ch]
+AALPHA=	../alpha/alpha/*.S
 
-NOPROG=	noprog
-NOMAN=	noman
+# Directories in which to place tags links
+DALPHA=	tc include
 
-SUBDIR=	stand
-
-TALPHA=	$S/arch/alpha/tags
-SALPHA=	$S/arch/alpha/alpha/*.[ch] $S/arch/alpha/include/*.h \
-	$S/arch/alpha/tc/*.[ch] $S/arch/alpha/dev/*.[ch] \
-	$S/arch/alpha/eisa/*.[ch] $S/arch/alpha/isa/*.[ch] \
-	$S/arch/alpha/pci/*.[ch]
-AALPHA=	$S/arch/alpha/alpha/*.[sS] $S/arch/alpha/pci/*.[Ss] \
-	$S/lib/libkern/arch/alpha/*.[sS]
-
-# Directories in which to place alpha tags links
-DALPHA=	alpha eisa isa dev pci tc include
+.include "../../kern/Make.tags.inc"
 
 tags:
-	-ctags -wdtf ${TALPHA} ${COMM} ${SALPHA}
+	-ctags -wdtf ${TALPHA} ${SALPHA} ${COMM} 
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AALPHA} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
-		>> ${TALPHA}
+	    ${TOOL_SED} "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    >> ${TALPHA}
 	sort -o ${TALPHA} ${TALPHA}
 
 links:
 	-for i in ${DALPHA}; do \
-	    (cd $$i && { rm -f tags; ln -s ${TALPHA} tags; }) done
+	    cd $$i && rm -f tags; ln -s ../tags tags; done
 
-obj: _SUBDIRUSE
 
-.include <bsd.prog.mk>
+SUBDIR=	compile include stand
+
+.include <bsd.subdir.mk>
