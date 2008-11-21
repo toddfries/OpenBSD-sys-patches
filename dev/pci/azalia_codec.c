@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.65 2008/11/17 00:42:53 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.67 2008/11/19 21:49:44 naddy Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -881,6 +881,35 @@ azalia_generic_mixer_init(codec_t *this)
 		}
 	}
 
+	/* sense pins */
+	for (i = 0; i < this->nsense_pins; i++) {
+		FOR_EACH_WIDGET(this, j) {
+			if (this->w[j].nid == this->sense_pins[i])
+				break;
+		}
+		if (j == this->wend) {
+			DPRINTF(("%s: sense pin %2.2x not found\n",
+			    __func__, this->sense_pins[i]));
+			continue;
+		}
+
+		MIXER_REG_PROLOG;
+		m->nid = this->w[j].nid;
+		snprintf(d->label.name, sizeof(d->label.name), "%s_sense",
+		    this->w[j].name);
+		d->type = AUDIO_MIXER_ENUM;
+		d->mixer_class = AZ_CLASS_OUTPUT;
+		m->target = AZ_TARGET_PINSENSE;
+		d->un.e.num_mem = 2;
+		d->un.e.member[0].ord = 0;
+		strlcpy(d->un.e.member[0].label.name, "unplugged",
+		    MAX_AUDIO_DEV_LEN);
+		d->un.e.member[1].ord = 1;
+		strlcpy(d->un.e.member[1].label.name, "plugged",
+		    MAX_AUDIO_DEV_LEN);
+		this->nmixers++;
+	}
+
 	/* if the codec has multiple DAC groups, create "inputs.usingdac" */
 	if (this->dacs.ngroups > 1) {
 		MIXER_REG_PROLOG;
@@ -1367,6 +1396,15 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target, mixer_ctrl_
 		mc->un.ord = result & CORB_EAPD_EAPD ? 1 : 0;
 	}
 
+	/* sense pin */
+	else if (target == AZ_TARGET_PINSENSE) {
+		err = this->comresp(this, nid, CORB_GET_PIN_SENSE,
+		    0, &result);
+		if (err)
+			return err;
+		mc->un.ord = result & CORB_PS_PRESENCE ? 1 : 0;
+	}
+
 	else {
 		printf("%s: internal error in %s: target=%x\n",
 		    XNAME(this), __func__, target);
@@ -1648,6 +1686,10 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_
 			return err;
 	}
 
+	else if (target == AZ_TARGET_PINSENSE) {
+		/* do nothing, control is read only */
+	}
+
 	else {
 		printf("%s: internal error in %s: target=%x\n",
 		    XNAME(this), __func__, target);
@@ -1856,7 +1898,7 @@ azalia_alc880_init_dacgroup(codec_t *this)
 		 {1, {0x06}}}};	/* digital */
 	static const convgroupset_t adcs = {
 		-1, 2,
-		{{2, {0x08, 0x09}}, /* analog 4ch */
+		{{3, {0x07, 0x08, 0x09}}, /* analog 6ch */
 		 {1, {0x0a}}}};	/* digital */
 
 	this->dacs = dacs;
@@ -1873,9 +1915,8 @@ azalia_alc882_init_dacgroup(codec_t *this)
 {
 	static const convgroupset_t dacs = {
 		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
+		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
 		 {1, {0x06}}}};	/* digital */
-		/* don't support for 0x25 dac */
 	static const convgroupset_t adcs = {
 		-1, 2,
 		{{3, {0x07, 0x08, 0x09}}, /* analog 6ch */
@@ -1896,9 +1937,8 @@ azalia_alc883_init_dacgroup(codec_t *this)
 {
 	static const convgroupset_t dacs = {
 		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
+		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
 		 {1, {0x06}}}}; /* digital */
-
 	static const convgroupset_t adcs = {
 		-1, 2,
 		{{2, {0x08, 0x09}}, /* analog 4ch */
@@ -1918,9 +1958,8 @@ azalia_alc885_init_dacgroup(codec_t *this)
 {
 	static const convgroupset_t dacs = {
 		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
+		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
 		 {1, {0x06}}}};	/* digital */
-		/* don't support for 0x25 dac */
 	static const convgroupset_t adcs = {
 		-1, 2,
 		{{3, {0x07, 0x08, 0x09}},	/* analog 6ch */
@@ -1940,9 +1979,8 @@ azalia_alc888_init_dacgroup(codec_t *this)
 {
 	static const convgroupset_t dacs = {
 		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
+		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
 		 {1, {0x06}}}};	/* digital */
-		/* don't support for 0x25 dac */
 		/* ALC888S has another SPDIF-out 0x10 */
 	static const convgroupset_t adcs = {
 		-1, 2,
