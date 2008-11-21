@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.456 2004/06/25 11:04:03 itojun Exp $ */
+/*	$OpenBSD: pf.c,v 1.625 2008/10/28 22:57:01 mpf Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -58,7 +58,6 @@
 #include <net/if_types.h>
 #include <net/bpf.h>
 #include <net/route.h>
-#include <net/netisr.h>
 #include <net/radix_mpath.h>
 
 #include <netinet/in.h>
@@ -5643,8 +5642,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 {
 	struct pfi_kif		*kif;
 	u_short			 action, reason = 0, log = 0;
-	struct mbuf		*m = *m0, *n;
-	struct mbuf		*frag;
+	struct mbuf		*m = *m0;
 	struct ip		*h;
 	struct pf_rule		*a = NULL, *r = &pf_default_rule, *tr, *nr;
 	struct pf_state		*s = NULL;
@@ -5684,15 +5682,8 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.pf.flags & PF_TAG_GENERATED)
 		return (PF_PASS);
 
-	/*
-	 * We do IP header normalization and packet reassembly here.
-	 * due to KAME mbuf handling rule, pf_normalize_ip6 may lose mbuf,
-	 * so keep a copy here.
-	 */
-	frag = NULL;
-	n = m_copym(*m0, 0, M_COPYALL, M_DONTWAIT);
-	m = *m0;
-	if (pf_normalize_ip6(m0, dir, kif, &reason, &pd, &frag) != PF_PASS) {
+	/* We do IP header normalization and packet reassembly here */
+	if (pf_normalize_ip(m0, dir, kif, &reason, &pd) != PF_PASS) {
 		action = PF_DROP;
 		goto done;
 	}
@@ -5702,18 +5693,10 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	off = h->ip_hl << 2;
 	if (off < (int)sizeof(*h)) {
 		action = PF_DROP;
-		if (!*m0)
-			*m0 = n;
-		else
-			m_freem(n);
 		REASON_SET(&reason, PFRES_SHORT);
 		log = 1;
 		goto done;
 	}
-	if (!*m0)
-		*m0 = n;
-	else
-		m_freem(n);
 
 	pd.src = (struct pf_addr *)&h->ip_src;
 	pd.dst = (struct pf_addr *)&h->ip_dst;
@@ -5967,7 +5950,6 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	struct pfi_kif		*kif;
 	u_short			 action, reason = 0, log = 0;
 	struct mbuf		*m = *m0, *n = NULL;
-	struct mbuf		*frag;
 	struct ip6_hdr		*h;
 	struct pf_rule		*a = NULL, *r = &pf_default_rule, *tr, *nr;
 	struct pf_state		*s = NULL;
@@ -6007,26 +5989,11 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.pf.flags & PF_TAG_GENERATED)
 		return (PF_PASS);
 
-	/*
-	 * We do IP header normalization and packet reassembly here.
-	 * due to KAME mbuf handling rule, pf_normalize_ip6 may lose mbuf,
-	 * so keep a copy here.
-	 */
-	frag = NULL;
-	n = m_copym(*m0, 0, M_COPYALL, M_DONTWAIT);
-	m = *m0;
-	if (pf_normalize_ip6(m0, dir, kif, &reason, &pd, &frag) != PF_PASS) {
+	/* We do IP header normalization and packet reassembly here */
+	if (pf_normalize_ip6(m0, dir, kif, &reason, &pd) != PF_PASS) {
 		action = PF_DROP;
-		if (!*m0)
-			*m0 = n;
-		else
-			m_freem(n);
 		goto done;
 	}
-	if (!*m0)
-		*m0 = n;
-	else
-		m_freem(n);
 	m = *m0;	/* pf_normalize messes with m0 */
 	h = mtod(m, struct ip6_hdr *);
 
@@ -6059,6 +6026,12 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	pd.proto = h->ip6_nxt;
 	do {
 		switch (pd.proto) {
+		case IPPROTO_FRAGMENT:
+			action = pf_test_fragment(&r, dir, kif, m, h,
+			    &pd, &a, &ruleset);
+			if (action == PF_DROP)
+				REASON_SET(&reason, PFRES_FRAG);
+			goto done;
 		case IPPROTO_ROUTING: {
 			struct ip6_rthdr rthdr;
 
@@ -6111,7 +6084,6 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 			/* goto the next header */
 			break;
 		}
-		case IPPROTO_FRAGMENT:
 		default:
 			terminal++;
 			break;
@@ -6338,77 +6310,6 @@ done:
 		/* pf_route6 can free the mbuf causing *m0 to become NULL */
 		pf_route6(m0, r, dir, kif->pfik_ifp, s, &pd);
 
-	/*
-	 * it's the tricky part - how to return value is different by caller
-	 */
-	switch (dir) {
-	case PF_IN:
-		if (frag) {
-			int s;
-			struct mbuf *q, *r;
-			struct m_tag *mtag;
-
-			if (action != PF_PASS) {
-				for (q = frag; q; q = r) {
-					r = q->m_nextpkt;
-					q->m_nextpkt = NULL;
-					m_freem(q);
-					q = NULL;
-				}
-				return (action);
-			}
-
-			for (q = frag; q; q = r) {
-				r = q->m_nextpkt;
-				q->m_nextpkt = NULL;
-
-				mtag = m_tag_get(PF_TAG_FRAGCACHE,
-				    0, M_NOWAIT);
-				if (mtag == NULL) {
-					s = splsoftnet();
-					IF_DROP(&ip6intrq);
-					splx(s);
-					m_freem(q);
-					q = NULL;
-					continue;
-				}
-				m_tag_prepend(q, mtag);
-
-				s = splsoftnet();
-				IF_ENQUEUE(&ip6intrq, q);
-				q = NULL;
-				splx(s);
-			}
-			schednetisr(NETISR_IPV6);
-
-			m_freem(*m0);
-			*m0 = NULL;
-		}
-		return (PF_PASS);
-
-	case PF_OUT:
-		if (frag) {
-			struct mbuf *q, *r;
-			for (q = frag; q; q = r) {
-				r = q->m_nextpkt;
-				q->m_nextpkt = NULL;
-				m_freem(q);
-				q = NULL;
-			}
-		}
-		break;
-
-	case PF_FORWARD:
-		if (action == PF_PASS) {
-			if (frag) {
-				m_freem(*m0);
-				*m0 = NULL;
-				*m0 = frag;
-			} else
-				(*m0)->m_nextpkt = NULL;
-		}
-		break;
-	}
 	return (action);
 }
 #endif /* INET6 */
