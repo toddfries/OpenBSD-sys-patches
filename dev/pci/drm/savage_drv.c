@@ -33,15 +33,9 @@
 
 int	savagedrm_probe(struct device *, void *, void *);
 void	savagedrm_attach(struct device *, struct device *, void *);
-int	savagedrm_detach(struct device *, int);
 int	savagedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-int	savagedrm_probe(struct device *, void *, void *);
-void	savagedrm_attach(struct device *, struct device *, void *);
-int	savagedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
-
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t savagedrm_pciidlist[] = {
+static drm_pci_id_list_t savage_pciidlist[] = {
 	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE3D, S3_SAVAGE3D},
 	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE3D_M, S3_SAVAGE3D},
 	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE4, S3_SAVAGE4},

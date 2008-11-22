@@ -1,5 +1,5 @@
-/*	$OpenBSD: hci_event.c,v 1.7 2008/02/24 21:34:48 uwe Exp $	*/
-/*	$NetBSD: hci_event.c,v 1.14 2008/02/10 17:40:54 plunky Exp $	*/
+/*	$OpenBSD: hci_event.c,v 1.8 2008/11/22 04:42:58 uwe Exp $	*/
+/*	$NetBSD: hci_event.c,v 1.18 2008/04/24 11:38:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -60,6 +60,7 @@ static void hci_cmd_read_local_features(struct hci_unit *, struct mbuf *);
 static void hci_cmd_read_local_ver(struct hci_unit *, struct mbuf *);
 static void hci_cmd_read_local_commands(struct hci_unit *, struct mbuf *);
 static void hci_cmd_reset(struct hci_unit *, struct mbuf *);
+static void hci_cmd_create_con(struct hci_unit *unit, uint8_t status);
 
 #ifdef BLUETOOTH_DEBUG
 int bluetooth_debug;
@@ -230,8 +231,7 @@ hci_event(struct mbuf *m, struct hci_unit *unit)
 /*
  * Command Status
  *
- * Update our record of num_cmd_pkts then post-process any pending commands
- * and optionally restart cmd output on the unit.
+ * Restart command queue and post-process any pending commands
  */
 static void
 hci_event_command_status(struct hci_unit *unit, struct mbuf *m)
@@ -242,43 +242,42 @@ hci_event_command_status(struct hci_unit *unit, struct mbuf *m)
 	m_copydata(m, 0, sizeof(ep), (caddr_t)&ep);
 	m_adj(m, sizeof(ep));
 
+	ep.opcode = letoh16(ep.opcode);
+
 	DPRINTFN(1, "(%s) opcode (%03x|%04x) status = 0x%x num_cmd_pkts = %d\n",
 		device_xname(unit->hci_dev),
-		HCI_OGF(letoh16(ep.opcode)), HCI_OCF(letoh16(ep.opcode)),
+		HCI_OGF(ep.opcode), HCI_OCF(ep.opcode),
 		ep.status,
 		ep.num_cmd_pkts);
 
-	if (ep.status > 0)
-		printf("%s: CommandStatus opcode (%03x|%04x) failed (status=0x%02x)\n",
-		    device_xname(unit->hci_dev), HCI_OGF(letoh16(ep.opcode)),
-		    HCI_OCF(letoh16(ep.opcode)), ep.status);
-
-	unit->hci_num_cmd_pkts = ep.num_cmd_pkts;
+	hci_num_cmds(unit, ep.num_cmd_pkts);
 
 	/*
 	 * post processing of pending commands
 	 */
-	switch(letoh16(ep.opcode)) {
+	switch(ep.opcode) {
 	case HCI_CMD_CREATE_CON:
 		hci_cmd_create_con(unit, ep.status);
 		break;
 
-	default:
+ 	default:
 		if (ep.status == 0)
 			break;
-		aprintf_error_dev(unit->hci_dev,
+
+		DPRINTFN(1,
 		    "CommandStatus opcode (%03x|%04x) failed (status=0x%02x)\n",
-		    HCI_OGF(letoh16(ep.opcode)), HCI_OCF(letoh16(ep.opcode)),
+		    device_xname(unit->hci_dev),
+		    HCI_OGF(ep.opcode), HCI_OCF(ep.opcode),
 		    ep.status);
-		break;
+
+ 		break;
 	}
 }
 
 /*
  * Command Complete
  *
- * Update our record of num_cmd_pkts then handle the completed command,
- * and optionally restart cmd output on the unit.
+ * Restart command queue and handle the completed command
  */
 static void
 hci_event_command_compl(struct hci_unit *unit, struct mbuf *m)
@@ -294,6 +293,8 @@ hci_event_command_compl(struct hci_unit *unit, struct mbuf *m)
 	    device_xname(unit->hci_dev), HCI_OGF(letoh16(ep.opcode)),
 	    HCI_OCF(letoh16(ep.opcode)), ep.num_cmd_pkts);
 
+	hci_num_cmds(unit, ep.num_cmd_pkts);
+
 	/*
 	 * I am not sure if this is completely correct, it is not guaranteed
 	 * that a command_complete packet will contain the status though most
@@ -304,8 +305,6 @@ hci_event_command_compl(struct hci_unit *unit, struct mbuf *m)
 		printf("%s: CommandComplete opcode (%03x|%04x) failed (status=0x%02x)\n",
 		    device_xname(unit->hci_dev), HCI_OGF(letoh16(ep.opcode)),
 		    HCI_OCF(letoh16(ep.opcode)), rp.status);
-
-	unit->hci_num_cmd_pkts = ep.num_cmd_pkts;
 
 	/*
 	 * post processing of completed commands
@@ -337,11 +336,6 @@ hci_event_command_compl(struct hci_unit *unit, struct mbuf *m)
 
 	default:
 		break;
-	}
-
-	while (unit->hci_num_cmd_pkts > 0 && !IF_IS_EMPTY(&unit->hci_cmdwait)) {
-		IF_DEQUEUE(&unit->hci_cmdwait, m);
-		hci_output_cmd(unit, m);
 	}
 }
 
@@ -849,7 +843,7 @@ hci_cmd_read_bdaddr(struct hci_unit *unit, struct mbuf *m)
 
 	unit->hci_flags &= ~BTF_INIT_BDADDR;
 
-	wakeup(unit);
+	wakeup(&unit->hci_init);
 }
 
 /*
@@ -877,7 +871,7 @@ hci_cmd_read_buffer_size(struct hci_unit *unit, struct mbuf *m)
 
 	unit->hci_flags &= ~BTF_INIT_BUFFER_SIZE;
 
-	wakeup(unit);
+	wakeup(&unit->hci_init);
 }
 
 /*
@@ -965,7 +959,7 @@ hci_cmd_read_local_features(struct hci_unit *unit, struct mbuf *m)
 
 	unit->hci_flags &= ~BTF_INIT_FEATURES;
 
-	wakeup(unit);
+	wakeup(&unit->hci_init);
 
 	DPRINTFN(1, "%s: lmp_mask %4.4x, acl_mask %4.4x, sco_mask %4.4x\n",
 		device_xname(unit->hci_dev), unit->hci_lmp_mask,
@@ -994,7 +988,7 @@ hci_cmd_read_local_ver(struct hci_unit *unit, struct mbuf *m)
 
 	if (rp.hci_version < HCI_SPEC_V12) {
 		unit->hci_flags &= ~BTF_INIT_COMMANDS;
-		wakeup(unit);
+		wakeup(&unit->hci_init);
 		return;
 	}
 
@@ -1022,7 +1016,7 @@ hci_cmd_read_local_commands(struct hci_unit *unit, struct mbuf *m)
 	unit->hci_flags &= ~BTF_INIT_COMMANDS;
 	memcpy(unit->hci_cmds, rp.commands, HCI_COMMANDS_SIZE);
 
-	wakeup(unit);
+	wakeup(&unit->hci_init);
 }
 
 /*
@@ -1091,27 +1085,27 @@ hci_cmd_reset(struct hci_unit *unit, struct mbuf *m)
 static void
 hci_cmd_create_con(struct hci_unit *unit, uint8_t status)
 {
-       struct hci_link *link;
+	struct hci_link *link;
 
-       TAILQ_FOREACH(link, &unit->hci_links, hl_next) {
-               if ((link->hl_flags & HCI_LINK_CREATE_CON) == 0)
-                       continue;
+	TAILQ_FOREACH(link, &unit->hci_links, hl_next) {
+		if ((link->hl_flags & HCI_LINK_CREATE_CON) == 0)
+			continue;
 
-               link->hl_flags &= ~HCI_LINK_CREATE_CON;
+		link->hl_flags &= ~HCI_LINK_CREATE_CON;
 
-               switch(status) {
-               case 0x00:      /* success */
-                       break;
+		switch(status) {
+		case 0x00:	/* success */
+			break;
 
-               case 0x0c:      /* "Command Disallowed" */
-                       hci_link_free(link, EBUSY);
-                       break;
+		case 0x0c:	/* "Command Disallowed" */
+			hci_link_free(link, EBUSY);
+			break;
 
-               default:        /* some other trouble */
-                       hci_link_free(link, EPROTO);
-                       break;
-               }
+		default:	/* some other trouble */
+			hci_link_free(link, /*EPROTO*/ECONNABORTED);
+			break;
+		}
 
-               return;
-       }
+		return;
+	}
 }

@@ -33,18 +33,25 @@
 #include "drm.h"
 #include "i915_drm.h"
 #include "i915_drv.h"
+<<<<<<< HEAD:dev/pci/drm/i915_drv.c
 
 int	inteldrm_probe(struct device *, void *, void *);
 void	inteldrm_attach(struct device *, struct device *, void *);
 int	inteldrm_detach(struct device *, int);
 int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
+=======
+>>>>>>> origin/master:dev/pci/drm/i915_drv.c
 
 int	i915drm_probe(struct device *, void *, void *);
 void	i915drm_attach(struct device *, struct device *, void *);
 int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
+<<<<<<< HEAD:dev/pci/drm/i915_drv.c
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t inteldrm_pciidlist[] = {
+=======
+static drm_pci_id_list_t i915_pciidlist[] = {
+>>>>>>> origin/master:dev/pci/drm/i915_drv.c
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
 	    CHIP_I830|CHIP_M},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,

@@ -143,8 +143,8 @@ static int i915_dma_cleanup(struct drm_device * dev)
 	}
 
 	/* Clear the HWS virtual address at teardown */
-	if (I915_NEED_GFX_HWS(dev))
-		i915_free_hws(dev_priv, dev->pa.pa_dmat);
+	if (I915_NEED_GFX_HWS(dev_priv))
+		i915_free_hws(dev);
 
 	return 0;
 }
@@ -764,7 +764,7 @@ int i915_set_status_page(struct drm_device *dev, void *data,
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	drm_i915_hws_addr_t *hws = data;
 
-	if (!I915_NEED_GFX_HWS(dev))
+	if (!I915_NEED_GFX_HWS(dev_priv))
 		return EINVAL;
 
 	if (!dev_priv) {
@@ -811,8 +811,10 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	dev->dev_private = (void *)dev_priv;
 
+	dev_priv->flags = flags;
+
 	/* Add register map (needed for suspend/resume) */
-	bar = vga_pci_bar_info(dev->vga_softc, (IS_I9XX(dev) ? 0 : 1));
+	bar = vga_pci_bar_info(dev->vga_softc, (IS_I9XX(dev_priv) ? 0 : 1));
 	if (bar == NULL) {
 		printf(": can't get BAR info\n");
 		return (EINVAL);
@@ -826,7 +828,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	}
 
 	/* Init HWS */
-	if (!I915_NEED_GFX_HWS(dev)) {
+	if (!I915_NEED_GFX_HWS(dev_priv)) {
 		ret = i915_init_phys_hws(dev);
 		if (ret != 0)
 			return ret;
