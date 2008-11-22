@@ -29,15 +29,22 @@
 #include "drmP.h"
 #include "sis_drm.h"
 #include "sis_drv.h"
-#include "drm_pciids.h"
 
 int	sisdrm_probe(struct device *, void *, void *);
 void	sisdrm_attach(struct device *, struct device *, void *);
 int	sisdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t sis_pciidlist[] = {
-	sis_PCI_IDS
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6330},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_7300},
+	{PCI_VENDOR_XGI, PCI_PRODUCT_XGI_VOLARI_V3XT},
+#if 0 /* do these actually EXIST? */
+	{PCI_VENDOR_XGI, 0x0042, SIS_CHIP_315},
+#endif
+	{0, 0, 0}
 };
 
 static const struct drm_driver_info sis_driver = {
