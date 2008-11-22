@@ -35,18 +35,25 @@
 #include "drm.h"
 #include "r128_drm.h"
 #include "r128_drv.h"
+<<<<<<< HEAD:dev/pci/drm/r128_drv.c
 
 int	ragedrm_probe(struct device *, void *, void *);
 void	ragedrm_attach(struct device *, struct device *, void *);
 int	ragedrm_detach(struct device *, int);
 int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
+=======
+>>>>>>> origin/master:dev/pci/drm/r128_drv.c
 
 int	r128drm_probe(struct device *, void *, void *);
 void	r128drm_attach(struct device *, struct device *, void *);
 int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
+<<<<<<< HEAD:dev/pci/drm/r128_drv.c
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t ragedrm_pciidlist[] = {
+=======
+static drm_pci_id_list_t r128_pciidlist[] = {
+>>>>>>> origin/master:dev/pci/drm/r128_drv.c
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_LE},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_M3},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_MF},

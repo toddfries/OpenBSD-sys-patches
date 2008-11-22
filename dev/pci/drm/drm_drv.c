@@ -124,6 +124,9 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	mtx_init(&dev->drw_lock, IPL_NONE);
 	mtx_init(&dev->lock.spinlock, IPL_NONE);
 
+	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
+	    PCI_PRODUCT(pa->pa_id), idlist);
+
 	TAILQ_INIT(&dev->maplist);
 
 	drm_mem_init();
@@ -138,6 +141,14 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	if (dev->handle_ext == NULL) {
 		DRM_ERROR("Failed to initialise handle extent\n");
 		goto error;
+	}
+
+	if (dev->driver->load != NULL) {
+		int retcode;
+
+		retcode = dev->driver->load(dev, id_entry->driver_private);
+		if (retcode != 0)
+			goto error;
 	}
 
 	if (dev->driver->flags & DRIVER_AGP) {

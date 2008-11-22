@@ -35,16 +35,7 @@
 #include "tdfx_drv.h"
 #include "drmP.h"
 
-struct tdfxdrm_softc {
-	struct device	 dev;
-	struct device	*drmdev;
-};
-
-int	tdfxdrm_probe(struct device *, void *, void *);
-void	tdfxdrm_attach(struct device *, struct device *, void *);
-
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t tdfxdrm_pciidlist[] = {
+static drm_pci_id_list_t tdfx_pciidlist[] = {
 	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_BANSHEE},
 	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO32000},
 	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO3},

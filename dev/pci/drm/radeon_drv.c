@@ -36,17 +36,11 @@
 
 int	radeondrm_probe(struct device *, void *, void *);
 void	radeondrm_attach(struct device *, struct device *, void *);
-int	radeondrm_detach(struct device *, int);
-int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
-
-int	radeondrm_probe(struct device *, void *, void *);
-void	radeondrm_attach(struct device *, struct device *, void *);
 int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int radeon_no_wb;
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t radeondrm_pciidlist[] = {
+static drm_pci_id_list_t radeon_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_M241P,
 	    CHIP_RV380|RADEON_IS_MOBILITY},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X300M24,

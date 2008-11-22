@@ -38,16 +38,10 @@
 #include "mach64_drm.h"
 #include "mach64_drv.h"
 
-int	machdrm_probe(struct device *, void *, void *);
-void	machdrm_attach(struct device *, struct device *, void *);
-int	machdrm_detach(struct device *, int);
-int	machdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
-
 int	mach64drm_probe(struct device *, void *, void *);
 void	mach64drm_attach(struct device *, struct device *, void *);
 int	machdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mach64_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GI},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GP},
