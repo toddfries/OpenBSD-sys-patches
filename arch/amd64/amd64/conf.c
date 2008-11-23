@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.22 2008/06/10 07:12:24 mglocker Exp $	*/
+/*	$OpenBSD: conf.c,v 1.23 2008/11/22 21:26:47 oga Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.

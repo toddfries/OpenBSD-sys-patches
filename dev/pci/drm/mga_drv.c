@@ -44,7 +44,6 @@ int	mgadrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 #define MGA_DEFAULT_USEC_TIMEOUT	10000
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mgadrm_pciidlist[] = {
 	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_PCI,
 	    MGA_CARD_TYPE_G200},
@@ -154,10 +153,14 @@ mgadrm_attach(struct device *parent, struct device *self, void *aux)
 		printf(": couldn't get BAR info\n");
 		return;
 	}
-	dev_priv->mmio_base = bar->base;
-	dev_priv->mmio_size = bar->size;
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, bar->size, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
 
-	dev_priv->drmdev = drm_attach_mi(&mga_driver, pa, parent, self);
+	dev_priv->drmdev = drm_attach_mi(&mga_driver, pa, self);
 }
 
 int
@@ -169,6 +172,9 @@ mgadrm_detach(struct device *self, int flags)
 		config_detach(dev_priv->drmdev, flags);
 		dev_priv->drmdev = NULL;
 	}
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
 
 	return (0);
 }

@@ -43,7 +43,6 @@ struct tdfxdrm_softc {
 int	tdfxdrm_probe(struct device *, void *, void *);
 void	tdfxdrm_attach(struct device *, struct device *, void *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t tdfxdrm_pciidlist[] = {
 	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_BANSHEE},
 	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO32000},
@@ -79,7 +78,7 @@ tdfxdrm_attach(struct device *parent, struct device *self, void *aux)
 	struct tdfxdrm_softc	*dev_priv = (struct tdfxdrm_softc *)self;
 	struct pci_attach_args	*pa = aux;
 
-	dev_priv->drmdev = drm_attach_mi(&tdfxdrm_driver, pa, parent, self);
+	dev_priv->drmdev = drm_attach_mi(&tdfxdrm_driver, pa, self);
 }
 
 struct cfattach tdfxdrm_ca = {

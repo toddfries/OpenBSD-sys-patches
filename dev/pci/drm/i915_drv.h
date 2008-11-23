@@ -77,10 +77,14 @@ struct mem_block {
 };
 
 typedef struct drm_i915_private {
-	struct device	dev;
-	struct device	*drmdev;
+	struct device		 dev;
+	struct device		*drmdev;
 	bus_dma_tag_t		 dmat;
-	struct vga_pci_bar *regs;
+
+	u_long			 flags;
+	u_int16_t		 pci_device;
+
+	struct vga_pci_bar	*regs;
 	drm_local_map_t *sarea;
 
 	drm_i915_sarea_t *sarea_priv;
@@ -98,7 +102,6 @@ typedef struct drm_i915_private {
 	int current_page;
 	int page_flipping;
 
-	wait_queue_head_t irq_queue;
 	atomic_t irq_received;
 	/* Protects user_irq_refcount and irq_mask reg */
 	DRM_SPINTYPE user_irq_lock;
@@ -108,7 +111,6 @@ typedef struct drm_i915_private {
 	u_int32_t irq_mask_reg;
 	u_int32_t pipestat[2];
 
-	u_long flags;
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
@@ -224,8 +226,6 @@ typedef struct drm_i915_private {
 
 				/* i915_dma.c */
 extern void i915_kernel_lost_context(struct drm_device * dev);
-extern int i915_driver_load(struct drm_device *, unsigned long flags);
-extern int i915_driver_unload(struct drm_device *);
 extern void i915_driver_lastclose(struct drm_device * dev);
 extern void i915_driver_preclose(struct drm_device *dev,
 				 struct drm_file *file_priv);
@@ -242,7 +242,6 @@ extern int i915_quiescent(struct drm_device *dev);
 
 int	i915_init_phys_hws(drm_i915_private_t *, bus_dma_tag_t);
 void	i915_free_hws(drm_i915_private_t *, bus_dma_tag_t);
-
 
 /* i915_irq.c */
 extern int i915_irq_emit(struct drm_device *dev, void *data,
@@ -1724,28 +1723,28 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 /* Chipset type macros */
 
-#define IS_I830(dev) ((dev_priv)->flags & CHIP_I830)
-#define IS_845G(dev) ((dev_priv)->flags & CHIP_I845G)
-#define IS_I85X(dev) ((dev_priv)->flags & CHIP_I85X)
-#define IS_I865G(dev) ((dev_priv)->flags & CHIP_I865G)
+#define IS_I830(dev_priv) ((dev_priv)->flags & CHIP_I830)
+#define IS_845G(dev_priv) ((dev_priv)->flags & CHIP_I845G)
+#define IS_I85X(dev_priv) ((dev_priv)->flags & CHIP_I85X)
+#define IS_I865G(dev_priv) ((dev_priv)->flags & CHIP_I865G)
 
-#define IS_I915G(dev) ((dev_priv)->flags & CHIP_I915G)
-#define IS_I915GM(dev) ((dev_priv)->flags & CHIP_I915GM)
-#define IS_I945G(dev) ((dev)->flags & CHIP_I945G)
-#define IS_I945GM(dev) ((dev_priv)->flags & CHIP_I945GM)
-#define IS_I965G(dev) ((dev_priv)->flags & CHIP_I965)
-#define IS_I965GM(dev) ((dev_priv)->flags & CHIP_I965GM)
+#define IS_I915G(dev_priv) ((dev_priv)->flags & CHIP_I915G)
+#define IS_I915GM(dev_priv) ((dev_priv)->flags & CHIP_I915GM)
+#define IS_I945G(dev_priv) ((dev)->flags & CHIP_I945G)
+#define IS_I945GM(dev_priv) ((dev_priv)->flags & CHIP_I945GM)
+#define IS_I965G(dev_priv) ((dev_priv)->flags & CHIP_I965)
+#define IS_I965GM(dev_priv) ((dev_priv)->flags & CHIP_I965GM)
 
-#define IS_GM45(dev) ((dev_priv)->flags & CHIP_GM45)
-#define IS_G4X(dev) ((dev_priv)->flags & CHIP_G4X)
+#define IS_GM45(dev_priv) ((dev_priv)->flags & CHIP_GM45)
+#define IS_G4X(dev_priv) ((dev_priv)->flags & CHIP_G4X)
 
-#define IS_G33(dev)    ((dev_priv)->flags & CHIP_G33)
+#define IS_G33(dev_priv)    ((dev_priv)->flags & CHIP_G33)
 
-#define IS_I9XX(dev) ((dev_priv)->flags & CHIP_I9XX)
+#define IS_I9XX(dev_priv) ((dev_priv)->flags & CHIP_I9XX)
 
-#define IS_MOBILE(dev) (dev_priv->flags & CHIP_M)
+#define IS_MOBILE(dev_priv) (dev_priv->flags & CHIP_M)
 
-#define I915_NEED_GFX_HWS(dev) (dev_priv->flags & CHIP_HWS)
+#define I915_NEED_GFX_HWS(dev_priv) (dev_priv->flags & CHIP_HWS)
 
 #define PRIMARY_RINGBUFFER_SIZE         (128*1024)
 

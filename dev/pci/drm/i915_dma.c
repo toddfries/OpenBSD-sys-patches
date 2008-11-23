@@ -143,7 +143,7 @@ static int i915_dma_cleanup(struct drm_device * dev)
 	}
 
 	/* Clear the HWS virtual address at teardown */
-	if (I915_NEED_GFX_HWS(dev))
+	if (I915_NEED_GFX_HWS(dev_priv))
 		i915_free_hws(dev_priv, dev->pa.pa_dmat);
 
 	return 0;
@@ -712,10 +712,7 @@ int i915_getparam(struct drm_device *dev, void *data,
 		value = READ_BREADCRUMB(dev_priv);
 		break;
 	case I915_PARAM_CHIPSET_ID:
-		value = dev->pci_device;
-		break;
-	case I915_PARAM_HAS_GEM:
-		value = 0;
+		value = dev_priv->pci_device;
 		break;
 	default:
 		DRM_ERROR("Unknown parameter %d\n", param->param);
@@ -764,7 +761,7 @@ int i915_set_status_page(struct drm_device *dev, void *data,
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	drm_i915_hws_addr_t *hws = data;
 
-	if (!I915_NEED_GFX_HWS(dev))
+	if (!I915_NEED_GFX_HWS(dev_priv))
 		return EINVAL;
 
 	if (!dev_priv) {
@@ -796,60 +793,6 @@ int i915_set_status_page(struct drm_device *dev, void *data,
 	DRM_DEBUG("load hws HWS_PGA with gfx mem 0x%x\n",
 			dev_priv->status_gfx_addr);
 	DRM_DEBUG("load hws at %p\n", dev_priv->hw_status_page);
-	return 0;
-}
-
-int i915_driver_load(struct drm_device *dev, unsigned long flags)
-{
-	struct drm_i915_private *dev_priv;
-	struct vga_pci_bar	*bar;
-	int			 ret;
-
-	dev_priv = drm_calloc(1, sizeof(drm_i915_private_t), DRM_MEM_DRIVER);
-	if (dev_priv == NULL)
-		return ENOMEM;
-
-	dev->dev_private = (void *)dev_priv;
-
-	/* Add register map (needed for suspend/resume) */
-	bar = vga_pci_bar_info(dev->vga_softc, (IS_I9XX(dev) ? 0 : 1));
-	if (bar == NULL) {
-		printf(": can't get BAR info\n");
-		return (EINVAL);
-	}
-
-	dev_priv->regs = vga_pci_bar_map(dev->vga_softc,
-	    bar->addr, bar->size, 0);
-	if (dev_priv->regs == NULL) {
-		printf(": can't map mmio space\n");
-		return (ENOMEM);
-	}
-
-	/* Init HWS */
-	if (!I915_NEED_GFX_HWS(dev)) {
-		ret = i915_init_phys_hws(dev);
-		if (ret != 0)
-			return ret;
-	}
-
-	mtx_init(&dev_priv->user_irq_lock, IPL_BIO);
-
-	return ret;
-}
-
-int i915_driver_unload(struct drm_device *dev)
-{
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	i915_free_hws(dev);
-
-	if (dev_priv->regs != NULL)
-		vga_pci_bar_unmap(dev_priv->regs);
-
-	DRM_SPINUNINIT(&dev_priv->user_irq_lock);
-
-	drm_free(dev->dev_private, sizeof(drm_i915_private_t), DRM_MEM_DRIVER);
-
 	return 0;
 }
 

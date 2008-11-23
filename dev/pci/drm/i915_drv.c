@@ -39,11 +39,6 @@ void	inteldrm_attach(struct device *, struct device *, void *);
 int	inteldrm_detach(struct device *, int);
 int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-int	i915drm_probe(struct device *, void *, void *);
-void	i915drm_attach(struct device *, struct device *, void *);
-int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
-
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
 	    CHIP_I830|CHIP_M},
@@ -132,16 +127,15 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
 	drm_pci_id_list_t	*id_entry;
-	int			 mmio_bar;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), inteldrm_pciidlist);
 	dev_priv->flags = id_entry->driver_private;
-
-	mmio_bar = IS_I9XX(dev_priv) ? 0 : 1;
+	dev_priv->pci_device = PCI_PRODUCT(pa->pa_id);
 
 	/* Add register map (needed for suspend/resume) */
-	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, mmio_bar);
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent,
+	    (IS_I9XX(dev_priv) ? 0 : 1));
 	if (bar == NULL) {
 		printf(": can't get BAR info\n");
 		return;
@@ -164,7 +158,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	mtx_init(&dev_priv->user_irq_lock, IPL_BIO);
 
-	dev_priv->drmdev = drm_attach_mi(&inteldrm_driver, pa, parent, self);
+	dev_priv->drmdev = drm_attach_mi(&inteldrm_driver, pa, self);
 }
 
 int

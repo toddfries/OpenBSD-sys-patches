@@ -1,5 +1,5 @@
 # $NetBSD: files.drm,v 1.2 2007/03/28 11:29:37 jmcneill Exp $
-# $OpenBSD: files.drm,v 1.6 2008/11/17 00:40:04 oga Exp $
+# $OpenBSD: files.drm,v 1.7 2008/11/22 21:26:48 oga Exp $
 
 # direct rendering modules
 define drmbase {}
