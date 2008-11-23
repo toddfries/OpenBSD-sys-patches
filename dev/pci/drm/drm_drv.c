@@ -57,13 +57,12 @@ int	 drmprint(void *, const char *);
 
 struct device *
 drm_attach_mi(const struct drm_driver_info *driver, struct pci_attach_args *pa,
-    struct device *vga, struct device *dev)
+    struct device *dev)
 {
 	struct drm_attach_args arg;
 
 	arg.driver = driver;
 	arg.pa = pa;
-	arg.vga = (struct vga_pci_softc *)vga;
 
 	printf("\n");
 	return (config_found(dev, &arg, drmprint));
@@ -107,7 +106,6 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 
 	dev->dev_private = parent;
 	dev->driver = da->driver;
-	dev->vga_softc = da->vga;
 
 	/* needed for pci_mapreg_* */
 	memcpy(&dev->pa, pa, sizeof(dev->pa));
@@ -117,15 +115,10 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	dev->pci_bus = pa->pa_bus;
 	dev->pci_slot = pa->pa_device;
 	dev->pci_func = pa->pa_function;
-	dev->pci_vendor = PCI_VENDOR(dev->pa.pa_id);
-	dev->pci_device = PCI_PRODUCT(dev->pa.pa_id);
 
 	rw_init(&dev->dev_lock, "drmdevlk");
 	mtx_init(&dev->drw_lock, IPL_NONE);
 	mtx_init(&dev->lock.spinlock, IPL_NONE);
-
-	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
-	    PCI_PRODUCT(pa->pa_id), idlist);
 
 	TAILQ_INIT(&dev->maplist);
 
@@ -141,14 +134,6 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	if (dev->handle_ext == NULL) {
 		DRM_ERROR("Failed to initialise handle extent\n");
 		goto error;
-	}
-
-	if (dev->driver->load != NULL) {
-		int retcode;
-
-		retcode = dev->driver->load(dev, id_entry->driver_private);
-		if (retcode != 0)
-			goto error;
 	}
 
 	if (dev->driver->flags & DRIVER_AGP) {
