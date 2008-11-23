@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.103 2008/11/22 14:42:29 art Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.102 2008/11/21 17:35:52 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -881,6 +881,8 @@ dumpsys()
 	delay(5000000);         /* 5 seconds */
 
 }
+
+int imask[IPL_NUM];
 
 int imask[IPL_NUM];
 
