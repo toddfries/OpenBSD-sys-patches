@@ -124,6 +124,27 @@ extern int ppc_configed_intr_cnt;
 extern struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 void softnet(int isr);
 
+#define	SI_TO_IRQBIT(x) (1 << ((x)+(30-SI_SOFTTTY)))
+
+#define	SI_SOFT			0	/* for IPL_SOFT */
+#define	SI_SOFTCLOCK		1	/* for IPL_SOFTCLOCK */
+#define	SI_SOFTNET		2	/* for IPL_SOFTNET */
+#define	SI_SOFTTTY		3	/* for IPL_SOFTSERIAL */
+
+#define	SI_NQUEUES		4
+
+#define SI_QUEUENAMES {		\
+	"generic",		\
+	"clock",		\
+	"net",			\
+	"serial",		\
+}
+
+#define PPC_IPI_NOP		0
+#define PPC_IPI_DDB		1
+
+void ppc_send_ipi(struct cpu_info *, int);
+
 #define PPC_IPI_NOP		0
 #define PPC_IPI_DDB		1
 
