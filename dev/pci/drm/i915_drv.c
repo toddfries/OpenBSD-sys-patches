@@ -34,11 +34,12 @@
 #include "i915_drm.h"
 #include "i915_drv.h"
 
-int	i915drm_probe(struct device *, void *, void *);
-void	i915drm_attach(struct device *, struct device *, void *);
+int	inteldrm_probe(struct device *, void *, void *);
+void	inteldrm_attach(struct device *, struct device *, void *);
+int	inteldrm_detach(struct device *, int);
 int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-static drm_pci_id_list_t i915_pciidlist[] = {
+static drm_pci_id_list_t inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
 	    CHIP_I830|CHIP_M},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
@@ -88,9 +89,8 @@ static drm_pci_id_list_t i915_pciidlist[] = {
 	{0, 0, 0}
 };
 
-static const struct drm_driver_info i915_driver = {
+static const struct drm_driver_info inteldrm_driver = {
 	.buf_priv_size		= 1,	/* No dev_priv */
-	.load			= i915_driver_load,
 	.ioctl			= inteldrm_ioctl,
 	.preclose		= i915_driver_preclose,
 	.lastclose		= i915_driver_lastclose,
@@ -115,25 +115,75 @@ static const struct drm_driver_info i915_driver = {
 };
 
 int
-i915drm_probe(struct device *parent, void *match, void *aux)
+inteldrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, i915_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, inteldrm_pciidlist);
 }
 
 void
-i915drm_attach(struct device *parent, struct device *self, void *aux)
+inteldrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	struct drm_i915_private	*dev_priv = (struct drm_i915_private *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
+	drm_pci_id_list_t	*id_entry;
 
-	dev->driver = &i915_driver;
+	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
+	    PCI_PRODUCT(pa->pa_id), inteldrm_pciidlist);
+	dev_priv->flags = id_entry->driver_private;
+	dev_priv->pci_device = PCI_PRODUCT(pa->pa_id);
 
-	drm_attach(parent, self, pa, i915_pciidlist);
+	/* Add register map (needed for suspend/resume) */
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent,
+	    (IS_I9XX(dev_priv) ? 0 : 1));
+	if (bar == NULL) {
+		printf(": can't get BAR info\n");
+		return;
+	}
+
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, bar->size, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	/* Init HWS */
+	if (!I915_NEED_GFX_HWS(dev_priv)) {
+		if (i915_init_phys_hws(dev_priv, pa->pa_dmat) != 0) {
+			printf(": couldn't initialize hardware status page\n");
+			return;
+		}
+	}
+
+	mtx_init(&dev_priv->user_irq_lock, IPL_BIO);
+
+	dev_priv->drmdev = drm_attach_mi(&inteldrm_driver, pa, self);
+}
+
+int
+inteldrm_detach(struct device *self, int flags)
+{
+	struct drm_i915_private *dev_priv = (struct drm_i915_private *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	i915_free_hws(dev_priv, dev_priv->dmat);
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
+
+	DRM_SPINUNINIT(&dev_priv->user_irq_lock);
+
+	return (0);
 }
 
 struct cfattach inteldrm_ca = {
-	sizeof(struct drm_device), i915drm_probe, i915drm_attach,
-	drm_detach, drm_activate
+	sizeof(struct drm_i915_private), inteldrm_probe, inteldrm_attach,
+	inteldrm_detach
 };
 
 struct cfdriver inteldrm_cd = {

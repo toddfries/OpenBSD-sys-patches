@@ -1240,15 +1240,15 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
 		if (dev_priv->cp_ring != NULL) {
-			drm_core_ioremapfree(dev_priv->cp_ring, dev);
+			drm_core_ioremapfree(dev_priv->cp_ring);
 			dev_priv->cp_ring = NULL;
 		}
 		if (dev_priv->ring_rptr != NULL) {
-			drm_core_ioremapfree(dev_priv->ring_rptr, dev);
+			drm_core_ioremapfree(dev_priv->ring_rptr);
 			dev_priv->ring_rptr = NULL;
 		}
 		if (dev->agp_buffer_map != NULL) {
-			drm_core_ioremapfree(dev->agp_buffer_map, dev);
+			drm_core_ioremapfree(dev->agp_buffer_map);
 			dev->agp_buffer_map = NULL;
 		}
 	} else
@@ -1264,7 +1264,7 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
 
 		if (dev_priv->gart_info.gart_table_location == DRM_ATI_GART_FB)
 		{
-			drm_core_ioremapfree(&dev_priv->gart_info.mapping, dev);
+			drm_core_ioremapfree(&dev_priv->gart_info.mapping);
 			dev_priv->gart_info.addr = 0;
 		}
 	}
@@ -1426,17 +1426,15 @@ void radeon_do_release(struct drm_device * dev)
 		}
 
 		/* Disable *all* interrupts */
-		if (dev_priv->mmio)	/* remove this after permanent addmaps */
-			RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
 
-		if (dev_priv->mmio) {	/* remove all surfaces */
-			for (i = 0; i < RADEON_MAX_SURFACES; i++) {
-				RADEON_WRITE(RADEON_SURFACE0_INFO + 16 * i, 0);
-				RADEON_WRITE(RADEON_SURFACE0_LOWER_BOUND +
-					     16 * i, 0);
-				RADEON_WRITE(RADEON_SURFACE0_UPPER_BOUND +
-					     16 * i, 0);
-			}
+		/* remove all surfaces */
+		for (i = 0; i < RADEON_MAX_SURFACES; i++) {
+			RADEON_WRITE(RADEON_SURFACE0_INFO + 16 * i, 0);
+			RADEON_WRITE(RADEON_SURFACE0_LOWER_BOUND +
+				     16 * i, 0);
+			RADEON_WRITE(RADEON_SURFACE0_UPPER_BOUND +
+				     16 * i, 0);
 		}
 
 		/* Free memory heap structures */
@@ -1714,51 +1712,6 @@ int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_
 	return ret;
 }
 
-int radeon_driver_load(struct drm_device *dev, unsigned long flags)
-{
-	drm_radeon_private_t *dev_priv;
-	int ret = 0;
-
-	dev_priv = drm_calloc(1, sizeof(drm_radeon_private_t), DRM_MEM_DRIVER);
-	if (dev_priv == NULL)
-		return ENOMEM;
-
-	dev->dev_private = (void *)dev_priv;
-	dev_priv->flags = flags;
-
-	switch (flags & RADEON_FAMILY_MASK) {
-	case CHIP_R100:
-	case CHIP_RV200:
-	case CHIP_R200:
-	case CHIP_R300:
-	case CHIP_R350:
-	case CHIP_R420:
-	case CHIP_R423:
-	case CHIP_RV410:
-	case CHIP_RV515:
-	case CHIP_R520:
-	case CHIP_RV570:
-	case CHIP_R580:
-		dev_priv->flags |= RADEON_HAS_HIERZ;
-		break;
-	default:
-		/* all other chips have no hierarchical z buffer */
-		break;
-	}
-
-	dev_priv->chip_family = flags & RADEON_FAMILY_MASK;
-	if (drm_device_is_agp(dev))
-		dev_priv->flags |= RADEON_IS_AGP;
-	else if (drm_device_is_pcie(dev))
-		dev_priv->flags |= RADEON_IS_PCIE;
-	else
-		dev_priv->flags |= RADEON_IS_PCI;
-
-	DRM_DEBUG("%s card detected\n",
-		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" : (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
-	return ret;
-}
-
 /* Create mappings for registers and framebuffer so userland doesn't necessarily
  * have to find them.
  */
@@ -1770,29 +1723,10 @@ int radeon_driver_firstopen(struct drm_device *dev)
 
 	dev_priv->gart_info.table_size = RADEON_PCIGART_TABLE_SIZE;
 
-	ret = drm_addmap(dev, drm_get_resource_start(dev, 2),
-			 drm_get_resource_len(dev, 2), _DRM_REGISTERS,
-			 _DRM_READ_ONLY, &dev_priv->mmio);
+	ret = drm_addmap(dev, dev_priv->fb_aper_offset, dev_priv->fb_aper_size,
+	    _DRM_FRAME_BUFFER, _DRM_WRITE_COMBINING, &map);
 	if (ret != 0)
 		return ret;
 
-	dev_priv->fb_aper_offset = drm_get_resource_start(dev, 0);
-	ret = drm_addmap(dev, dev_priv->fb_aper_offset,
-			 drm_get_resource_len(dev, 0), _DRM_FRAME_BUFFER,
-			 _DRM_WRITE_COMBINING, &map);
-	if (ret != 0)
-		return ret;
-
-	return 0;
-}
-
-int radeon_driver_unload(struct drm_device *dev)
-{
-	drm_radeon_private_t *dev_priv = dev->dev_private;
-
-	DRM_DEBUG("\n");
-	drm_free(dev_priv, sizeof(*dev_priv), DRM_MEM_DRIVER);
-
-	dev->dev_private = NULL;
 	return 0;
 }
