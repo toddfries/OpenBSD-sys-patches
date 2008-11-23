@@ -156,12 +156,7 @@ extern int ppc_configed_intr_cnt;
 extern struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 void softnet(int isr);
 
-<<<<<<< HEAD:arch/powerpc/include/intr.h
-<<<<<<< HEAD:arch/powerpc/include/intr.h
 #define	SI_TO_IRQBIT(x) (1 << ((x)+(30-SI_SOFTTTY)))
-=======
-#define	SI_TO_IRQBIT(x) (1 << (x))
->>>>>>> ppcirqfix:arch/powerpc/include/intr.h
 
 #define	SI_SOFT			0	/* for IPL_SOFT */
 #define	SI_SOFTCLOCK		1	/* for IPL_SOFTCLOCK */
@@ -186,10 +181,6 @@ void ppc_send_ipi(struct cpu_info *, int);
 #define PPC_IPI_DDB		1
 
 void ppc_send_ipi(struct cpu_info *, int);
-<<<<<<< HEAD:arch/powerpc/include/intr.h
->>>>>>> master:arch/powerpc/include/intr.h
-=======
->>>>>>> ppcirqfix:arch/powerpc/include/intr.h
 
 #endif /* _LOCORE */
 #endif /* _POWERPC_INTR_H_ */
