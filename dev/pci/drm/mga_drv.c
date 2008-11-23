@@ -42,13 +42,9 @@ int	mgadrm_detach(struct device *, int);
 int	mga_driver_device_is_agp(struct drm_device * );
 int	mgadrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-<<<<<<< HEAD:dev/pci/drm/mga_drv.c
-static drm_pci_id_list_t mga_pciidlist[] = {
-=======
 #define MGA_DEFAULT_USEC_TIMEOUT	10000
 
 static drm_pci_id_list_t mgadrm_pciidlist[] = {
->>>>>>> drm:dev/pci/drm/mga_drv.c
 	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_PCI,
 	    MGA_CARD_TYPE_G200},
 	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_AGP,
