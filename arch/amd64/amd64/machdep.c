@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.82 2008/08/12 18:27:22 weingart Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.85 2008/11/22 18:12:32 art Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -726,11 +726,17 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-#ifdef MULTIPROCESSOR
-	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
-		x86_send_ipi(p->p_cpu, X86_IPI_NOP);
-#endif
+	cpu_unidle(p->p_cpu);
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		x86_send_ipi(ci, X86_IPI_NOP);
+}
+#endif
 
 int	waittime = -1;
 struct pcb dumppcb;
@@ -1305,6 +1311,17 @@ init_x86_64(paddr_t first_avail)
 		e1 = trunc_page(bmp->addr + bmp->size);
 		s2 = e2 = 0; s3 = e3 = 0; s4 = e4 = 0;
 
+		/*
+		 * XXX Some buggy ACPI BIOSes use memory that they
+		 * declare as free.  Typically the affected memory
+		 * areas are small blocks between areas reserved for
+		 * ACPI and other BIOS goo.  So skip areas smaller
+		 * than 1 MB above the 16 MB boundary (to avoid
+		 * affecting legacy stuff).
+		 */
+		if (s1 > 16*1024*1024 && (e1 - s1) < 1*1024*1024)
+			continue;
+
 		/* Check and adjust our segment(s) */
 		/* Nuke page zero */
 		if (s1 < avail_start) {
@@ -1732,14 +1749,18 @@ void
 need_resched(struct cpu_info *ci)
 {
 	ci->ci_want_resched = 1;
-	if ((ci)->ci_curproc != NULL)
-		aston((ci)->ci_curproc);
+
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc) {
+		aston(ci->ci_curproc);
+		if (ci != curcpu())
+			cpu_unidle(ci);
+	}
 }
 
 /*
  * Allocate an IDT vector slot within the given range.
  * XXX needs locking to avoid MP allocation races.
- * XXXfvdl share idt code
  */
 
 int

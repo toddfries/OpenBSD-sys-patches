@@ -30,123 +30,191 @@
 #include "drm.h"
 #include "savage_drm.h"
 #include "savage_drv.h"
-#include "drm_pciids.h"
-
-void	savage_configure(struct drm_device *);
-
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t savage_pciidlist[] = {
-	savage_PCI_IDS
-};
-
-void
-savage_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= sizeof(drm_savage_buf_priv_t);
-	dev->driver.load		= savage_driver_load;
-	dev->driver.firstopen		= savage_driver_firstopen;
-	dev->driver.lastclose		= savage_driver_lastclose;
-	dev->driver.unload		= savage_driver_unload;
-	dev->driver.reclaim_buffers_locked = savage_reclaim_buffers;
-	dev->driver.dma_ioctl		= savage_bci_buffers;
-
-	dev->driver.ioctls		= savage_ioctls;
-	dev->driver.max_ioctl		= savage_max_ioctl;
-
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-	dev->driver.use_pci_dma		= 1;
-	dev->driver.use_dma		= 1;
-}
-
-#ifdef __FreeBSD__
-static int
-savage_probe(device_t dev)
-{
-	return drm_probe(dev, savage_pciidlist);
-}
-
-static int
-savage_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	savage_configure(dev);
-	return drm_attach(nbdev, savage_pciidlist);
-}
-
-static device_method_t savage_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		savage_probe),
-	DEVMETHOD(device_attach,	savage_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
-};
-
-static driver_t savage_driver = {
-	"drm",
-	savage_methods,
-	sizeof(struct drm_device)
-};
-
-extern devclass_t drm_devclass;
-#if __FreeBSD_version >= 700010
-DRIVER_MODULE(savage, vgapci, savage_driver, drm_devclass, 0, 0);
-#else
-DRIVER_MODULE(savage, pci, savage_driver, drm_devclass, 0, 0);
-#endif
-MODULE_DEPEND(savage, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 
 int	savagedrm_probe(struct device *, void *, void *);
 void	savagedrm_attach(struct device *, struct device *, void *);
+int	savagedrm_detach(struct device *, int);
+int	savagedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
+
+static drm_pci_id_list_t savagedrm_pciidlist[] = {
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE3D, S3_SAVAGE3D},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE3D_M, S3_SAVAGE3D},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE4, S3_SAVAGE4},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE4_2, S3_SAVAGE4},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE_MXMV, S3_SAVAGE_MX},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE_MX, S3_SAVAGE_MX},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE_IXMV, S3_SAVAGE_MX},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE_IX, S3_SAVAGE_MX},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_MX128, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_MX64, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_MX64C, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_IX128SDR, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_IX128DDR, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_IX64SDR, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_IX64DDR, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_IXCSDR, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SUPERSAVAGE_IXCDDR, S3_SUPERSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_PROSAVAGE_PM133, S3_PROSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_PROSAVAGE_KM133, S3_PROSAVAGE},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_TWISTER, S3_TWISTER},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_TWISTER_K, S3_TWISTER},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_PROSAVAGE_DDR, S3_PROSAVAGEDDR},
+	{PCI_VENDOR_S3, PCI_PRODUCT_S3_PROSAVAGE_DDR_K, S3_PROSAVAGEDDR},
+	{0, 0, 0}
+};
+
+static const struct drm_driver_info savagedrm_driver = {
+	.buf_priv_size		= sizeof(drm_savage_buf_priv_t),
+	.firstopen		= savage_driver_firstopen,
+	.lastclose		= savage_driver_lastclose,
+	.reclaim_buffers_locked = savage_reclaim_buffers,
+	.dma_ioctl		= savage_bci_buffers,
+
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
+
+	.flags			= DRIVER_AGP | DRIVER_MTRR | DRIVER_PCI_DMA |
+				    DRIVER_DMA,
+};
 
 int
-#if defined(__OpenBSD__)
 savagedrm_probe(struct device *parent, void *match, void *aux)
-#else
-savagedrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
-	return drm_probe((struct pci_attach_args *)aux, savage_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, savagedrm_pciidlist);
 }
 
 void
 savagedrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_savage_private_t	*dev_priv = (drm_savage_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
+	drm_pci_id_list_t	*id_entry;
+	unsigned long		 mmio_base;
 
-	savage_configure(dev);
-	return drm_attach(parent, self, pa, savage_pciidlist);
+	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
+	    PCI_PRODUCT(pa->pa_id), savagedrm_pciidlist);
+	dev_priv->chipset = (enum savage_family)id_entry->driver_private;
+
+	if (S3_SAVAGE3D_SERIES(dev_priv->chipset)) {
+		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 0);	
+		if (bar == NULL) {
+			printf(": can't find fb info\n");
+			return;
+		}
+		dev_priv->fb_base = bar->base;
+		dev_priv->fb_size = SAVAGE_FB_SIZE_S3;
+		mmio_base = dev_priv->fb_base + dev_priv->fb_size;
+		dev_priv->aperture_base = dev_priv->fb_base +
+		    SAVAGE_APERTURE_OFFSET;
+		/* this should always be true */
+		if (bar->size != 0x08000000) {
+			printf(": strange pci resource len $08lx\n", bar->size);
+			return;
+		}
+	} else if (dev_priv->chipset != S3_SUPERSAVAGE &&
+		   dev_priv->chipset != S3_SAVAGE2000) {
+		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 0);	
+		if (bar == NULL) {
+			printf(": can't find mmio info\n");
+			return;
+		}
+		mmio_base = bar->base;
+
+		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 1);	
+		if (bar == NULL) {
+			printf(": can't find fb info\n");
+			return;
+		}
+		dev_priv->fb_base = bar->base;
+		dev_priv->fb_size = SAVAGE_FB_SIZE_S4;
+		dev_priv->aperture_base = dev_priv->fb_base +
+		    SAVAGE_APERTURE_OFFSET;
+		/* this should always be true */
+		if (bar->size != 0x08000000) {
+			printf(": strange pci resource len $08lx\n", bar->size);
+			return;
+		}
+	} else {
+		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 0);	
+		if (bar == NULL) {
+			printf(": can't find mmio info\n");
+			return;
+		}
+		mmio_base = bar->base;
+		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 1);	
+		if (bar == NULL) {
+			printf(": can't find fb info\n");
+			return;
+		}
+		dev_priv->fb_base = bar->base;
+		dev_priv->fb_size = bar->size;
+		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);	
+		if (bar == NULL) {
+			printf(": can't find aperture info\n");
+			return;
+		}
+		dev_priv->aperture_base = bar->base;
+	}
+
+	if (bus_space_map(pa->pa_memt, mmio_base, SAVAGE_MMIO_SIZE,
+	    BUS_SPACE_MAP_LINEAR, &dev_priv->bsh) != 0) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+	dev_priv->bst = pa->pa_memt;
+
+	dev_priv->drmdev = drm_attach_mi(&savagedrm_driver, pa, self);
 }
 
-#if defined(__OpenBSD__)
+int
+savagedrm_detach(struct device *self, int flags)
+{
+	drm_savage_private_t	*dev_priv = (drm_savage_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	bus_space_unmap(dev_priv->bst, dev_priv->bsh, SAVAGE_MMIO_SIZE);
+
+	return (0);
+}
+
 struct cfattach savagedrm_ca = {
-	sizeof(struct drm_device), savagedrm_probe, savagedrm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_savage_private_t), savagedrm_probe, savagedrm_attach,
+	savagedrm_detach
 };
 
 struct cfdriver savagedrm_cd = {
 	0, "savagedrm", DV_DULL
 };
-#else
-#ifdef _LKM
-CFDRIVER_DECL(savagedrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(savagedrm, sizeof(struct drm_device), savagedrm_probe,
-    savagedrm_attach, drm_detach, drm_activate);
-#endif
-#endif
 
-#endif
+int
+savagedrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_SAVAGE_CMDBUF:
+			return (savage_bci_cmdbuf(dev, data, file_priv));
+		case DRM_IOCTL_SAVAGE_EVENT_EMIT:
+			return (savage_bci_event_emit(dev, data, file_priv));
+		case DRM_IOCTL_SAVAGE_EVENT_WAIT:
+			return (savage_bci_event_wait(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_SAVAGE_INIT:
+			return (savage_bci_init(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+}

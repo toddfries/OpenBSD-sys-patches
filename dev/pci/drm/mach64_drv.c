@@ -37,128 +37,144 @@
 #include "drm.h"
 #include "mach64_drm.h"
 #include "mach64_drv.h"
-#include "drm_pciids.h"
 
-void	mach64_configure(struct drm_device *);
+int	machdrm_probe(struct device *, void *, void *);
+void	machdrm_attach(struct device *, struct device *, void *);
+int	machdrm_detach(struct device *, int);
+int	machdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mach64_pciidlist[] = {
-	mach64_PCI_IDS
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GI},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GQ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGEPRO},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GD},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LI},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LQ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LB},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LD},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GO},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGEXL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GS},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GN},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE_PM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64LS},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_1},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LN},
+	{0, 0, 0}
 };
 
-void
-mach64_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= 1; /* No dev_priv */
-	dev->driver.lastclose		= mach64_driver_lastclose;
-	dev->driver.get_vblank_counter	= mach64_get_vblank_counter;
-	dev->driver.enable_vblank	= mach64_enable_vblank;
-	dev->driver.disable_vblank	= mach64_disable_vblank;
-	dev->driver.irq_preinstall	= mach64_driver_irq_preinstall;
-	dev->driver.irq_postinstall	= mach64_driver_irq_postinstall;
-	dev->driver.irq_uninstall	= mach64_driver_irq_uninstall;
-	dev->driver.irq_handler		= mach64_driver_irq_handler;
-	dev->driver.dma_ioctl		= mach64_dma_buffers;
+static const struct drm_driver_info machdrm_driver = {
+	.buf_priv_size		= 1, /* No dev_priv */
+	.ioctl			= machdrm_ioctl,
+	.lastclose		= mach64_driver_lastclose,
+	.get_vblank_counter	= mach64_get_vblank_counter,
+	.enable_vblank		= mach64_enable_vblank,
+	.disable_vblank		= mach64_disable_vblank,
+	.irq_preinstall		= mach64_driver_irq_preinstall,
+	.irq_postinstall	= mach64_driver_irq_postinstall,
+	.irq_uninstall		= mach64_driver_irq_uninstall,
+	.irq_handler		= mach64_driver_irq_handler,
+	.dma_ioctl		= mach64_dma_buffers,
 
-	dev->driver.ioctls		= mach64_ioctls;
-	dev->driver.max_ioctl		= mach64_max_ioctl;
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
 
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-	dev->driver.use_pci_dma		= 1;
-	dev->driver.use_dma		= 1;
-	dev->driver.use_irq		= 1;
-	dev->driver.use_vbl_irq		= 1;
-}
-
-#ifdef __FreeBSD__
-static int
-mach64_probe(device_t dev)
-{
-	return drm_probe(dev, mach64_pciidlist);
-}
-
-static int
-mach64_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	mach64_configure(dev);
-	return drm_attach(nbdev, mach64_pciidlist);
-}
-
-static device_method_t mach64_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		mach64_probe),
-	DEVMETHOD(device_attach,	mach64_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
+	.flags			= DRIVER_AGP | DRIVER_MTRR | DRIVER_PCI_DMA |
+				    DRIVER_DMA | DRIVER_SG | DRIVER_IRQ,
 };
-
-static driver_t mach64_driver = {
-	"drm",
-	mach64_methods,
-	sizeof(struct drm_device)
-};
-
-extern devclass_t drm_devclass;
-#if __FreeBSD_version >= 700010
-DRIVER_MODULE(mach64, vgapci, mach64_driver, drm_devclass, 0, 0);
-#else
-DRIVER_MODULE(mach64, pci, mach64_driver, drm_devclass, 0, 0);
-#endif
-MODULE_DEPEND(mach64, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-int	mach64drm_probe(struct device *, void *, void *);
-void	mach64drm_attach(struct device *, struct device *, void *);
 
 int
-#if defined(__OpenBSD__)
-mach64drm_probe(struct device *parent, void *match, void *aux)
-#else
-mach64drm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
+machdrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, mach64_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, mach64_pciidlist);
 }
 
 void
-mach64drm_attach(struct device *parent, struct device *self, void *aux)
+machdrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_mach64_private_t	*dev_priv = (drm_mach64_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
 
-	mach64_configure(dev);
-	return drm_attach(parent, self, pa, mach64_pciidlist);
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);
+	if (bar == NULL) {
+		printf(": can't get BAR info\n");
+		return;
+	}
+
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, bar->size, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	dev_priv->drmdev = drm_attach_mi(&machdrm_driver, pa, self);
 }
 
-#if defined(__OpenBSD__)
+int
+machdrm_detach(struct device *self, int flags)
+{
+	drm_mach64_private_t *dev_priv = (drm_mach64_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
+
+	return (0);
+}
+
 struct cfattach machdrm_ca = {
-	sizeof(struct drm_device), mach64drm_probe, mach64drm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_mach64_private_t), machdrm_probe, machdrm_attach,
+	machdrm_detach
 };
 
 struct cfdriver machdrm_cd = {
 	0, "machdrm", DV_DULL
 };
-#else
-#ifdef _LKM
-CFDRIVER_DECL(mach64drm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(mach64drm, sizeof(struct drm_device), mach64drm_probe,
-    mach64drm_attach, drm_detach, drm_activate);
-#endif
-#endif
 
-#endif
+int
+machdrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_MACH64_CLEAR:
+			return (mach64_dma_clear(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_SWAP:
+			return (mach64_dma_swap(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_IDLE:
+			return (mach64_dma_idle(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_RESET:
+			return (mach64_engine_reset(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_VERTEX:
+			return (mach64_dma_vertex(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_BLIT:
+			return (mach64_dma_blit(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_FLUSH:
+			return (mach64_dma_flush(dev, data, file_priv));
+		case DRM_IOCTL_MACH64_GETPARAM:
+			return (mach64_get_param(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_MACH64_INIT:
+			return (mach64_dma_init(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+}

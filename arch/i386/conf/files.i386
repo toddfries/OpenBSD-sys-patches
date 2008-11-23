@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.182 2008/07/08 05:22:00 dlg Exp $
+#	$OpenBSD: files.i386,v 1.185 2008/11/22 17:45:20 oga Exp $
 #
 # new style config file for i386 architecture
 #
@@ -11,6 +11,7 @@ maxusers 2 16 100
 major	{ccd = 16}
 
 file	arch/i386/i386/autoconf.c
+file	arch/i386/i386/bus_space.c
 file	arch/i386/i386/conf.c
 file	arch/i386/i386/db_disasm.c	ddb
 file	arch/i386/i386/db_interface.c	ddb
@@ -35,7 +36,6 @@ file	arch/i386/i386/powernow-k7.c	!small_kernel
 file	arch/i386/i386/powernow-k8.c	!small_kernel
 file	arch/i386/i386/process_machdep.c
 file	arch/i386/i386/procfs_machdep.c	procfs
-file	arch/i386/i386/random.s
 file	arch/i386/i386/sys_machdep.c
 file	arch/i386/i386/trap.c
 file	arch/i386/i386/vm_machdep.c
@@ -100,15 +100,14 @@ file	arch/i386/pci/pci_machdep.c		pci
 file	arch/i386/pci/pciide_machdep.c		pciide
 file	arch/i386/pci/pcic_pci_machdep.c	pcic_pci
 
-# AGP devices
-device agp: agp_ali, agp_amd, agp_i810, agp_intel, agp_sis, agp_via
-attach agp at agpbus
-file	arch/i386/pci/agp_machdep.c	agp
-
 # PCI-Host bridge chipsets
-device  pchb: pcibus
+device  pchb: pcibus, agpbus
 attach	pchb at pci
 file	arch/i386/pci/pchb.c		pchb
+
+# AGP bridge support. most attach at pchb
+include "dev/pci/files.agp"
+file	arch/i386/pci/agp_machdep.c	agp
 
 # AMD Elan SC520 System Controller (PCI-Host bridge)
 device	elansc: gpiobus

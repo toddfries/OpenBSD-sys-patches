@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.17 2008/04/27 15:59:49 drahn Exp $
+#	$OpenBSD: genassym.cf,v 1.19 2008/11/21 17:35:52 deraadt Exp $
 #
 # Copyright (c) 1982, 1990 The Regents of the University of California.
 # All rights reserved.

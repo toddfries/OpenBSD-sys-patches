@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ex.c,v 1.32 2007/10/21 03:02:09 brad Exp $	*/
+/*	$OpenBSD: if_ex.c,v 1.34 2008/11/22 13:14:35 oga Exp $	*/
 /*
  * Copyright (c) 1997, Donald A. Schmidt
  * Copyright (c) 1996, Javier Martín Rueda (jmrueda@diatel.upm.es)
@@ -136,14 +136,16 @@ struct cfdriver ex_cd = {
 #define CSR_READ_2(sc, off) \
 	bus_space_read_2((sc)->sc_iot, (sc)->sc_ioh, (off))
 #define CSR_READ_MULTI_2(sc, off, addr, count) \
-	bus_space_read_multi_2((sc)->sc_iot, (sc)->sc_ioh, (off), (addr), (count))
+	bus_space_read_multi_2((sc)->sc_iot, (sc)->sc_ioh, (off),	\
+	    (u_int16_t *)(addr), (count))
 
 #define CSR_WRITE_1(sc, off, value) \
 	bus_space_write_1((sc)->sc_iot, (sc)->sc_ioh, (off), (value))
 #define CSR_WRITE_2(sc, off, value) \
 	bus_space_write_2((sc)->sc_iot, (sc)->sc_ioh, (off), (value))
 #define CSR_WRITE_MULTI_2(sc, off, addr, count) \
-	bus_space_write_multi_2((sc)->sc_iot, (sc)->sc_ioh, (off), (addr), (count))
+	bus_space_write_multi_2((sc)->sc_iot, (sc)->sc_ioh, (off),	\
+	    (u_int16_t *)(addr), (count))
 
 int 
 ex_look_for_card(struct isa_attach_args *ia, struct ex_softc *sc)
@@ -744,11 +746,6 @@ ex_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(cmd) {
 	case SIOCSIFADDR:
 		DODEBUG(Start_End, printf("SIOCSIFADDR"););
@@ -792,13 +789,10 @@ ex_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->ifmedia, cmd);
 		break;
 	default:
-		DODEBUG(Start_End, printf("unknown"););
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
 	splx(s);
-
 	DODEBUG(Start_End, printf("\nex_ioctl: finish\n"););
 	return(error);
 }

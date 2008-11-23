@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.173 2008/06/12 16:15:05 claudio Exp $	*/
+/*	$OpenBSD: if.c,v 1.175 2008/11/21 18:01:30 claudio Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -636,6 +636,7 @@ do { \
 	/* Announce that the interface is gone. */
 	rt_ifannouncemsg(ifp, IFAN_DEPARTURE);
 
+	ifindex2ifnet[ifp->if_index] = NULL;
 	splx(s);
 }
 
@@ -1913,7 +1914,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 #else
 			rn = NULL;
 #endif
@@ -1928,7 +1929,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 #else
 			rn = NULL;
 #endif

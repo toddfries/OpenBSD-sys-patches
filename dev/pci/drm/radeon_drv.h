@@ -123,6 +123,7 @@ enum radeon_family {
 	CHIP_RV350,
 	CHIP_RV380,
 	CHIP_R420,
+	CHIP_R423,
 	CHIP_RV410,
 	CHIP_RS400,
 	CHIP_RS480,
@@ -220,7 +221,10 @@ struct radeon_virt_surface {
 #define RADEON_PURGE_EMITED	(1 < 1)
 
 typedef struct drm_radeon_private {
+	struct device		 dev;
+	struct device		*drmdev;
 
+	struct vga_pci_bar	*regs;
 	drm_radeon_ring_buffer_t ring;
 	drm_radeon_sarea_t *sarea_priv;
 
@@ -279,7 +283,6 @@ typedef struct drm_radeon_private {
 	unsigned long gart_textures_offset;
 
 	drm_local_map_t *sarea;
-	drm_local_map_t *mmio;
 	drm_local_map_t *cp_ring;
 	drm_local_map_t *ring_rptr;
 	drm_local_map_t *gart_textures;
@@ -288,7 +291,6 @@ typedef struct drm_radeon_private {
 	struct mem_block *fb_heap;
 
 	/* SW interrupt */
-	wait_queue_head_t swi_queue;
 	atomic_t swi_emitted;
 	int vblank_crtc;
 	uint32_t irq_enable_reg;
@@ -310,6 +312,7 @@ typedef struct drm_radeon_private {
 	/* starting from here on, data is preserved accross an open */
 	uint32_t flags;		/* see radeon_chip_flags */
 	unsigned long fb_aper_offset;
+	unsigned long fb_aper_size;
 
 	int num_gb_pipes;
 	int track_flush;
@@ -328,8 +331,6 @@ typedef struct drm_radeon_kcmd_buffer {
 } drm_radeon_kcmd_buffer_t;
 
 extern int radeon_no_wb;
-extern struct drm_ioctl_desc radeon_ioctls[];
-extern int radeon_max_ioctl;
 
 /* Check whether the given hardware address is inside the framebuffer or the
  * GART area.
@@ -357,6 +358,21 @@ extern int radeon_engine_reset(struct drm_device *dev, void *data, struct drm_fi
 extern int radeon_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern u32 radeon_read_fb_location(drm_radeon_private_t *dev_priv);
+
+extern int radeon_surface_alloc(struct drm_device *, void *, struct drm_file *);
+extern int radeon_surface_free(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_swap(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_clear(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_vertex(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_indices(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_texture(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_flip(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_stipple(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_indirect(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_vertex2(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_cmdbuf(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_getparam(struct drm_device *, void *, struct drm_file *);
+extern int radeon_cp_setparam(struct drm_device *, void *, struct drm_file *);
 
 extern void radeon_freelist_reset(struct drm_device * dev);
 extern struct drm_buf *radeon_freelist_get(struct drm_device * dev);
@@ -388,8 +404,6 @@ extern void radeon_driver_irq_uninstall(struct drm_device * dev);
 extern int radeon_vblank_crtc_get(struct drm_device *dev);
 extern int radeon_vblank_crtc_set(struct drm_device *dev, int64_t value);
 
-extern int radeon_driver_load(struct drm_device *dev, unsigned long flags);
-extern int radeon_driver_unload(struct drm_device *dev);
 extern int radeon_driver_firstopen(struct drm_device *dev);
 extern void radeon_driver_preclose(struct drm_device * dev,
 				   struct drm_file *file_priv);
@@ -430,8 +444,31 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
 #	define RADEON_SCISSOR_1_ENABLE		(1 << 29)
 #	define RADEON_SCISSOR_2_ENABLE		(1 << 30)
 
+/*
+ * PCIE radeons (rv370/rv380, rv410, r423/r430/r480, r5xxx)
+ * don't have an explicit bus mastering disable bit. It's handled
+ * by the PCI D-states. PMI_BM_DIS disables D-state bus master
+ * handling, but not bus mastering itself.
+ */
 #define RADEON_BUS_CNTL			0x0030
+/* r1xx, r2xx, r300, r(v)350, r420/r481, rs400/rs480 */
 #	define RADEON_BUS_MASTER_DIS		(1 << 6)
+/* rs600/rs690/rs740 */
+#	define RS600_BUS_MASTER_DIS		(1 << 14)
+#	define RS600_MSI_REARM			(1 << 20)
+/* see RS480_MSI_REARM in AIC_CNTL for rs480 */
+
+#define RADEON_BUS_CNTL1		0x0034
+#	define RADEON_PMI_BM_DIS		(1 << 2)
+#	define RADEON_PMI_INT_DIS		(1 << 3)
+
+#define RV370_BUS_CNTL			0x004c
+#	define RV370_PMI_BM_DIS			(1 << 5)
+#	define RV370_PMI_INT_DIS		(1 << 6)
+
+#define RADEON_MSI_REARM_EN		0x0160
+/* rv370/rv380, rv410, r423/r430/r480, r5xx */
+#	define	RV370_MSI_REARM_EN		(1 << 0)
 
 #define RADEON_CLOCK_CNTL_DATA		0x000c
 #	define RADEON_PLL_WR_EN			(1 << 7)
@@ -911,6 +948,7 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
 
 #define RADEON_AIC_CNTL			0x01d0
 #	define RADEON_PCIGART_TRANSLATE_EN	(1 << 0)
+#	define RS400_MSI_REARM			(1 << 3)
 #define RADEON_AIC_STAT			0x01d4
 #define RADEON_AIC_PT_BASE		0x01d8
 #define RADEON_AIC_LO_ADDR		0x01dc
@@ -1189,10 +1227,14 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
 
 #define RADEON_PCIGART_TABLE_SIZE      (32*1024)
 
-#define RADEON_READ(reg)    DRM_READ32(  dev_priv->mmio, (reg) )
-#define RADEON_WRITE(reg,val)  DRM_WRITE32( dev_priv->mmio, (reg), (val) )
-#define RADEON_READ8(reg)	DRM_READ8(  dev_priv->mmio, (reg) )
-#define RADEON_WRITE8(reg,val)	DRM_WRITE8( dev_priv->mmio, (reg), (val) )
+#define RADEON_READ(reg)	bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define RADEON_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
+#define RADEON_READ8(reg)	bus_space_read_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define RADEON_WRITE8(reg,val)	bus_space_write_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 
 #define RADEON_WRITE_PLL( addr, val )					\
 do {									\

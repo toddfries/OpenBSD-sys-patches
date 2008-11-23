@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.48 2008/09/16 04:20:42 drahn Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.52 2008/11/21 17:35:52 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>

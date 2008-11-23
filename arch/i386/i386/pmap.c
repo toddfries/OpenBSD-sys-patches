@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.123 2008/06/14 18:09:47 hshoexer Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.128 2008/11/14 20:43:54 weingart Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -578,7 +578,7 @@ pmap_exec_account(struct pmap *pm, vaddr_t va,
 	if (pm == pmap_kernel())
 		return;
 
-	if (curproc == NULL || curproc->p_vmspace == NULL ||
+	if (curproc->p_vmspace == NULL ||
 	    pm != vm_map_pmap(&curproc->p_vmspace->vm_map))
 		return;
 
@@ -664,11 +664,10 @@ setcslimit(struct pmap *pm, struct trapframe *tf, struct pcb *pcb,
 	setsegment(&pm->pm_codeseg, 0, atop(limit),
 	    SDT_MEMERA, SEL_UPL, 1, 1);
 
-	/* And update the GDT and LDT since we may be called by the
+	/* And update the GDT since we may be called by the
 	 * trap handler (cpu_switch won't get a chance).
 	 */
-	curcpu()->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-	    pm->pm_codeseg;
+	curcpu()->ci_gdt[GUCODE_SEL].sd = pm->pm_codeseg;
 
 	pcb->pcb_cs = tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 }
@@ -1547,6 +1546,7 @@ pmap_release(struct pmap *pmap)
 	 * APTE space because we do that in pmap_unmap_ptes().
 	 */
 	uvm_km_free(kernel_map, (vaddr_t)pmap->pm_pdir, NBPG);
+	pmap->pm_pdir = NULL;
 
 #ifdef USER_LDT
 	if (pmap->pm_flags & PMF_USER_LDT) {
@@ -1654,7 +1654,7 @@ pmap_ldt_cleanup(struct proc *p)
 /*
  * pmap_activate: activate a process' pmap (fill in %cr3 and LDT info)
  *
- * => called from cpu_switch()
+ * => called from cpu_switchto()
  * => if proc is the curproc, then load it into the MMU
  */
 
@@ -1677,10 +1677,9 @@ pmap_activate(struct proc *p)
 	if (p == curproc) {
 		/*
 		 * Set the correct descriptor value (i.e. with the
-		 * correct code segment X limit) in the GDT and the LDT.
+		 * correct code segment X limit) in the GDT.
 		 */
-		self->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-		    pmap->pm_codeseg;
+		self->ci_gdt[GUCODE_SEL].sd = pmap->pm_codeseg;
 
 		lcr3(pcb->pcb_cr3);
 		lldt(pcb->pcb_ldt_sel);
@@ -1955,8 +1954,8 @@ pmap_remove_pte(struct pmap *pmap, struct vm_page *ptp, pt_entry_t *pte,
 	if ((flags & PMAP_REMOVE_SKIPWIRED) && (*pte & PG_W))
 		return (FALSE);
 
-	opte = *pte;			/* save the old PTE */
-	*pte = 0;			/* zap! */
+	/* atomically save the old PTE and zap! it */
+	opte = i386_atomic_testset_ul(pte, 0);
 
 	pmap_exec_account(pmap, va, opte, 0);
 

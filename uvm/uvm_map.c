@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.103 2008/07/25 12:05:04 art Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.108 2008/11/10 18:11:59 oga Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -98,6 +98,7 @@ static struct timeval uvm_kmapent_last_warn_time;
 static struct timeval uvm_kmapent_warn_rate = { 10, 0 };
 
 struct uvm_cnt uvm_map_call, map_backmerge, map_forwmerge;
+struct uvm_cnt map_nousermerge;
 struct uvm_cnt uvm_mlk_call, uvm_mlk_hint;
 const char vmmapbsy[] = "vmmapbsy";
 
@@ -389,6 +390,7 @@ uvm_mapent_alloc(struct vm_map *map)
 {
 	struct vm_map_entry *me, *ne;
 	int s, i;
+	int slowdown;
 	UVMHIST_FUNC("uvm_mapent_alloc"); UVMHIST_CALLED(maphist);
 
 	if (map->flags & VM_MAP_INTRSAFE || cold) {
@@ -396,7 +398,7 @@ uvm_mapent_alloc(struct vm_map *map)
 		simple_lock(&uvm.kentry_lock);
 		me = uvm.kentry_free;
 		if (me == NULL) {
-			ne = uvm_km_getpage(0);
+			ne = uvm_km_getpage(0, &slowdown);
 			if (ne == NULL)
 				panic("uvm_mapent_alloc: cannot allocate map "
 				    "entry");
@@ -538,6 +540,7 @@ uvm_map_init(void)
 	UVMCNT_INIT(map_backmerge, UVMCNT_CNT, 0, "# uvm_map() back merges", 0);
 	UVMCNT_INIT(map_forwmerge, UVMCNT_CNT, 0, "# uvm_map() missed forward",
 	    0);
+	UVMCNT_INIT(map_nousermerge, UVMCNT_CNT, 0, "# back merges skipped", 0);
 	UVMCNT_INIT(uvm_mlk_call,  UVMCNT_CNT, 0, "# map lookup calls", 0);
 	UVMCNT_INIT(uvm_mlk_hint,  UVMCNT_CNT, 0, "# map lookup hint hits", 0);
 
@@ -834,12 +837,19 @@ uvm_map_p(struct vm_map *map, vaddr_t *startp, vsize_t size,
 			goto step3;
 		}
 
+		/*
+		 * Only merge kernel mappings, but keep track
+		 * of how much we skipped.
+		 */
+		if (map != kernel_map && map != kmem_map) {
+			UVMCNT_INCR(map_nousermerge);
+			goto step3;
+		}
+
 		if (prev_entry->aref.ar_amap) {
 			error = amap_extend(prev_entry, size);
-			if (error) {
-				vm_map_unlock(map);
-				return (error);
-			}
+			if (error)
+				goto step3;
 		}
 
 		UVMCNT_INCR(map_backmerge);
@@ -1067,7 +1077,7 @@ uvm_map_lookup_entry(struct vm_map *map, vaddr_t address,
 }
 
 /*
- * Checks if address pointed to be phint fits into the empty
+ * Checks if address pointed to by phint fits into the empty
  * space before the vm_map_entry after.  Takes aligment and
  * offset into consideration.
  */
@@ -3198,32 +3208,6 @@ uvmspace_share(p1, p2)
 {
 	p2->p_vmspace = p1->p_vmspace;
 	p1->p_vmspace->vm_refcnt++;
-}
-
-/*
- * uvmspace_unshare: ensure that process "p" has its own, unshared, vmspace
- *
- * - XXX: no locking on vmspace
- */
-
-void
-uvmspace_unshare(p)
-	struct proc *p; 
-{
-	struct vmspace *nvm, *ovm = p->p_vmspace;
-
-	if (ovm->vm_refcnt == 1)
-		/* nothing to do: vmspace isn't shared in the first place */
-		return;
-
-	/* make a new vmspace, still holding old one */
-	nvm = uvmspace_fork(ovm);
-
-	pmap_deactivate(p);		/* unbind old vmspace */
-	p->p_vmspace = nvm; 
-	pmap_activate(p);		/* switch to new vmspace */
-
-	uvmspace_free(ovm);		/* drop reference to old vmspace */
 }
 
 /*

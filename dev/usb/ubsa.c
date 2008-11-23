@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.36 2008/07/20 14:24:49 yuo Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.40 2008/11/21 21:10:03 fkr Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -219,12 +219,12 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
 	/* Option Vodafone Mobile Connect 3G */
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
-	/* Option GlobeTrotter 3G FUSION */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION },
 	/* Option GlobeTrotter 3G QUAD */
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
 	/* Option GlobeTrotter 3G QUAD PLUS */
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS },
+	/* Option GlobeTrotter MAX 3.6/7.2 */
+	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTMAX36 },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
 	/* Qualcomm Inc. ZTE CMDMA MSM modem */

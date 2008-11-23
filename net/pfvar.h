@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.278 2008/09/09 13:56:39 henning Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.280 2008/10/08 06:24:50 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -765,12 +765,12 @@ struct pf_state {
 	u_int8_t		 state_flags;
 #define	PFSTATE_ALLOWOPTS	0x01
 #define	PFSTATE_SLOPPY		0x02
+#define	PFSTATE_PFLOW		0x04
 	u_int8_t		 timeout;
 	u_int8_t		 sync_flags;
 #define	PFSTATE_NOSYNC		0x01
 #define	PFSTATE_FROMSYNC	0x02
 #define	PFSTATE_STALE		0x04
-#define	PFSTATE_PFLOW		0x08
 };
 
 /*
@@ -1005,7 +1005,6 @@ struct pfr_kentry {
 	u_int8_t		 pfrke_net;
 	u_int8_t		 pfrke_not;
 	u_int8_t		 pfrke_mark;
-	u_int8_t		 pfrke_intrpool;
 };
 #define pfrke_counters	u.pfrke_counters
 #define pfrke_route	u.pfrke_route

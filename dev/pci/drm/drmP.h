@@ -111,10 +111,7 @@
 
 #define __OS_HAS_AGP	1
 
-#define wait_queue_head_t	atomic_t
 #define DRM_WAKEUP(w)		wakeup((void *)w)
-#define DRM_WAKEUP_INT(w)	wakeup(w)
-#define DRM_INIT_WAITQUEUE(queue) do {(void)(queue);} while (0)
 
 #define DRM_CURPROC		curproc
 #define DRM_CURRENTPID		curproc->p_pid
@@ -130,10 +127,9 @@
 } while (0)
 #define DRM_SPINUNLOCK_IRQRESTORE(u, irqflags) DRM_SPINUNLOCK(u)
 #define DRM_SPINLOCK_ASSERT(l)	DRM_NOOP
-#define DRM_LOCK()		DRM_SPINLOCK(&dev->dev_lock)
-#define DRM_UNLOCK()		DRM_SPINUNLOCK(&dev->dev_lock)
+#define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
+#define DRM_UNLOCK()		rw_exit_write(&dev->dev_lock)
 #define DRM_MAXUNITS	8
-extern struct drm_device *drm_units[];
 
 /* Deal with netbsd code where only the print statements differ */
 #define printk printf
@@ -152,13 +148,10 @@ enum {
 #define DRM_AGP_MEM		struct agp_memory_info
 
 /* D_CLONE only supports one device, this will be fixed eventually */
+#define drm_get_device_from_kdev(_kdev) drm_cd.cd_devs[0]
+#if 0
 #define drm_get_device_from_kdev(_kdev)			\
-	drm_units[0]
-
-#if 0 /* D_CLONE only supports on device for now */
-#define drm_get_device_from_kdev(_kdev) 		\
-	(minor(kdev) < DRM_MAXUNITS) ?			\
-	    drm_units[minor(kdev)] : NULL
+	(minor(_kdev) < drm_cd.cd_ndevs) ? drm_cd.cd_devs[minor(_kdev)] : NULL
 #endif
 
 
@@ -210,7 +203,7 @@ typedef u_int8_t u8;
 
 #define DRM_VERIFYAREA_READ( uaddr, size )				\
 	(!uvm_map_checkprot(&(curproc->p_vmspace->vm_map),		\
-		    (vaddr_t)uaddr, (vaddr_t)uaddr+size, UVM_PROT_READ))
+	    (vaddr_t)uaddr, (vaddr_t)uaddr+size, UVM_PROT_READ))
 
 #define DRM_COPY_TO_USER(user, kern, size) \
 	copyout(kern, user, size)
@@ -238,27 +231,21 @@ do {									\
 	}								\
 } while (0)
 
-/* Returns -errno to shared code */
-#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
-ret = 0;							\
-while ( ret == 0 ) {						\
-	DRM_UNLOCK();						\
-	DRM_SPINLOCK(&dev->irq_lock);				\
-	if (condition) {					\
-		DRM_SPINUNLOCK(&dev->irq_lock);			\
-		break;						\
-	}							\
-	ret = -msleep(&(queue), &dev->irq_lock,		 	\
-	     PZERO | PCATCH, "drmwtq", (timeout));		\
-	DRM_SPINUNLOCK(&dev->irq_lock);				\
-	DRM_LOCK();						\
-}
+#define DRM_WAIT_ON( ret, queue, timeout, condition )	\
+DRM_SPINLOCK(&dev->irq_lock);				\
+while ( ret == 0 ) {					\
+	if (condition)					\
+		break;					\
+	ret = msleep(&(queue), &dev->irq_lock,	 	\
+	     PZERO | PCATCH, "drmwtq", (timeout));	\
+}							\
+DRM_SPINUNLOCK(&dev->irq_lock)
 
 #define DRM_ERROR(fmt, arg...) \
 	printf("error: [" DRM_NAME ":pid%d:%s] *ERROR* " fmt,		\
 	    DRM_CURRENTPID, __func__ , ## arg)
 
-#define DRM_INFO(fmt, arg...)  printf("info: [" DRM_NAME "] " fmt , ## arg)
+#define DRM_INFO(fmt, arg...)  printf("%s: " fmt, dev_priv->dev.dv_xname, ## arg)
 
 #undef DRM_DEBUG
 #define DRM_DEBUG(fmt, arg...) do {					\
@@ -272,10 +259,10 @@ typedef struct drm_pci_id_list
 	int vendor;
 	int device;
 	long driver_private;
-	char *name;
 } drm_pci_id_list_t;
 
 struct drm_file;
+struct drm_device;
 
 #define DRM_AUTH	0x1
 #define DRM_MASTER	0x2
@@ -285,12 +272,6 @@ typedef struct drm_ioctl_desc {
 	int (*func)(struct drm_device *, void *, struct drm_file *);
 	int flags;
 } drm_ioctl_desc_t;
-/**
- * Creates a driver or general drm_ioctl_desc array entry for the given
- * ioctl, for use by drm_ioctl().
- */
-#define DRM_IOCTL_DEF(ioctl, func, flags) \
-	[DRM_IOCTL_NR(ioctl)] = {ioctl, func, flags}
 
 struct drm_magic_entry {
 	drm_magic_t	       magic;
@@ -303,6 +284,7 @@ typedef struct drm_buf {
 	int		  total;       /* Buffer size			     */
 	int		  used;	       /* Amount of buffer in use (for DMA)  */
 	unsigned long	  offset;      /* Byte offset (used internally)	     */
+	void 		  *address;    /* KVA of buffer			     */
 	unsigned long	  bus_address; /* Bus address of buffer		     */
 	__volatile__ int  pending;     /* On hardware DMA queue		     */
 	struct drm_file   *file_priv;  /* Unique identifier of holding process */
@@ -344,8 +326,8 @@ struct drm_lock_data {
 	struct drm_hw_lock	*hw_lock;	/* Hardware lock */
 	/* Unique identifier of holding process (NULL is kernel) */
 	struct drm_file		*file_priv;
-	int			 lock_queue;	/* Queue of blocked processes */
 	unsigned long	 	 lock_time;	/* Time of last lock */
+	struct mutex		 spinlock;
 };
 
 /* This structure, in the struct drm_device, is always initialized while
@@ -412,7 +394,6 @@ typedef TAILQ_HEAD(drm_map_list, drm_local_map) drm_map_list_t;
 
 typedef struct drm_local_map {
 	TAILQ_ENTRY(drm_local_map)	 link;	/* Link for map list */
-	struct vga_pci_bar		*bsr;	/* Vga BAR, if applicable */
 	drm_dma_handle_t		*dmah;	/* Handle to DMA mem */
 	void				*handle;/* KVA, if mapped */
 	bus_space_tag_t			 bst;	/* Tag for mapped pci mem */
@@ -428,7 +409,6 @@ typedef struct drm_local_map {
 struct drm_vblank {
 	u_int32_t	last_vblank;	/* Last vblank we recieved */
 	atomic_t	vbl_count;	/* Number of interrupts */
-	int		vbl_queue;	/* sleep on this when waiting */
 	atomic_t	vbl_refcount;	/* Number of users */
 	int		vbl_enabled;	/* Enabled? */
 	int		vbl_inmodeset;	/* is the DDX currently modesetting */
@@ -456,13 +436,13 @@ struct drm_ati_pcigart_info {
 };
 
 struct drm_driver_info {
-	int	(*load)(struct drm_device *, unsigned long);
 	int	(*firstopen)(struct drm_device *);
 	int	(*open)(struct drm_device *, struct drm_file *);
+	int	(*ioctl)(struct drm_device*, u_long, caddr_t,
+		    struct drm_file *);
 	void	(*preclose)(struct drm_device *, struct drm_file *);
 	void	(*postclose)(struct drm_device *, struct drm_file *);
 	void	(*lastclose)(struct drm_device *);
-	int	(*unload)(struct drm_device *);
 	void	(*reclaim_buffers_locked)(struct drm_device *,
 		    struct drm_file *);
 	int	(*dma_ioctl)(struct drm_device *, void *, struct drm_file *);
@@ -477,8 +457,6 @@ struct drm_driver_info {
 	int	(*enable_vblank)(struct drm_device *, int);
 	void	(*disable_vblank)(struct drm_device *, int);
 
-	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
-
 	/**
 	 * Called by \c drm_device_is_agp.  Typically used to determine if a
 	 * card is really attached to AGP or not.
@@ -492,9 +470,6 @@ struct drm_driver_info {
 	 */
 	int	(*device_is_agp) (struct drm_device * dev);
 
-	drm_ioctl_desc_t *ioctls;
-	int	max_ioctl;
-
 	int	buf_priv_size;
 
 	int	major;
@@ -504,19 +479,16 @@ struct drm_driver_info {
 	const char *desc;		/* Longer driver name		   */
 	const char *date;		/* Date of last major changes.	   */
 
-	unsigned use_agp :1;
-	unsigned require_agp :1;
-	unsigned use_sg :1;
-	unsigned use_dma :1;
-	unsigned use_pci_dma :1;
-	unsigned use_dma_queue :1;
-	unsigned use_irq :1;
-	unsigned use_vbl_irq :1;
-	unsigned use_mtrr :1;
-};
+#define DRIVER_AGP		0x1
+#define DRIVER_AGP_REQUIRE	0x2
+#define DRIVER_MTRR		0x4
+#define DRIVER_DMA		0x8
+#define DRIVER_PCI_DMA		0x10
+#define DRIVER_SG		0x20
+#define DRIVER_IRQ		0x40
 
-/* Length for the array of resource pointers for drm_get_resource_*. */
-#define DRM_MAX_PCI_RESOURCE	3
+	u_int	flags;
+};
 
 /** 
  * DRM device functions structure
@@ -524,23 +496,17 @@ struct drm_driver_info {
 struct drm_device {
 	struct device	  device; /* softc is an extension of struct device */
 
-	struct drm_driver_info driver;
-	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
-
-	u_int16_t pci_device;		/* PCI device id */
-	u_int16_t pci_vendor;		/* PCI vendor id */
+	const struct drm_driver_info *driver;
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
 	int		  unique_len;	/* Length of unique field	   */
-	struct vga_pci_softc *vga_softc;
 	
 	int		  if_version;	/* Highest interface version set */
 				/* Locks */
 	DRM_SPINTYPE	  dma_lock;	/* protects dev->dma */
 	DRM_SPINTYPE	  irq_lock;	/* protects irq condition checks */
-	DRM_SPINTYPE	  dev_lock;	/* protects everything else */
+	struct rwlock	  dev_lock;	/* protects everything else */
 	DRM_SPINTYPE	  drw_lock;
-	DRM_SPINTYPE	  tsk_lock;
 
 				/* Usage Counters */
 	int		  open_count;	/* Outstanding files open	   */
@@ -567,9 +533,6 @@ struct drm_device {
 	int		  unit;		/* drm unit number */
 	void		  *irqh;	/* Handle from bus_setup_intr      */
 
-	/* Storage of resource pointers for drm_get_resource_* */
-	struct vga_pci_bar	  *pcir[DRM_MAX_PCI_RESOURCE];
-
 	int		  pci_domain;
 	int		  pci_bus;
 	int		  pci_slot;
@@ -589,24 +552,25 @@ struct drm_device {
 	drm_sg_mem_t		*sg;  /* Scatter gather memory */
 	atomic_t		*ctx_bitmap;
 	void			*dev_private;
-	unsigned int		 agp_buffer_token;
 	drm_local_map_t		*agp_buffer_map;
 
 	u_int		  drw_no;
 	/* RB tree of drawable infos */
 	RB_HEAD(drawable_tree, bsd_drm_drawable_info) drw_head;
+};
 
-	void		  (*locked_task_call)(struct drm_device *);
+struct drm_attach_args {
+	const struct drm_driver_info	*driver;
+	struct pci_attach_args		*pa;
+	struct vga_pci_softc		*vga;
 };
 
 extern int	drm_debug_flag;
 
 /* Device setup support (drm_drv.c) */
-int	drm_probe(struct pci_attach_args *, drm_pci_id_list_t * );
-void	drm_attach(struct device *, struct device *,
-	    struct pci_attach_args *, drm_pci_id_list_t *);
-int	drm_detach(struct device *, int );
-int	drm_activate(struct device *, enum devact);
+int	drm_pciprobe(struct pci_attach_args *, drm_pci_id_list_t * );
+struct device	*drm_attach_mi(const struct drm_driver_info *,
+		     struct pci_attach_args *pa, struct device *);
 dev_type_ioctl(drmioctl);
 dev_type_open(drmopen);
 dev_type_close(drmclose);
@@ -615,9 +579,9 @@ dev_type_poll(drmpoll);
 dev_type_mmap(drmmmap);
 extern drm_local_map_t	*drm_getsarea(struct drm_device *);
 
+drm_pci_id_list_t *drm_find_description(int , int , drm_pci_id_list_t *);
+
 /* File operations helpers (drm_fops.c) */
-int		 drm_open_helper(dev_t, int, int, struct proc *,
-		     struct drm_device *);
 struct drm_file	*drm_find_file_by_minor(struct drm_device *, int);
 
 /* Memory management support (drm_memory.c) */
@@ -645,18 +609,16 @@ void	drm_write32(drm_local_map_t *, unsigned long, u_int32_t);
 
 /* Locking IOCTL support (drm_lock.c) */
 int	drm_lock_take(struct drm_lock_data *, unsigned int);
-int	drm_lock_transfer(struct drm_lock_data *, unsigned int);
 int	drm_lock_free(struct drm_lock_data *, unsigned int);
 
 /* Buffer management support (drm_bufs.c) */
-unsigned long drm_get_resource_start(struct drm_device *, unsigned int);
-unsigned long drm_get_resource_len(struct drm_device *, unsigned int);
 void	drm_rmmap(struct drm_device *, drm_local_map_t *);
+void	drm_rmmap_locked(struct drm_device *, drm_local_map_t *);
 int	drm_order(unsigned long);
 drm_local_map_t
 	*drm_find_matching_map(struct drm_device *, drm_local_map_t *);
 int	drm_addmap(struct drm_device *, unsigned long, unsigned long,
-	    enum drm_map_type, enum drm_lock_flags, drm_local_map_t **);
+	    enum drm_map_type, enum drm_map_flags, drm_local_map_t **);
 int	drm_addbufs_pci(struct drm_device *, struct drm_buf_desc *);
 int	drm_addbufs_sg(struct drm_device *, struct drm_buf_desc *);
 int	drm_addbufs_agp(struct drm_device *, struct drm_buf_desc *);
@@ -686,7 +648,6 @@ void	drm_handle_vblank(struct drm_device *, int);
 
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
 int	drm_device_is_agp(struct drm_device *);
-int	drm_device_is_pcie(struct drm_device *);
 struct drm_agp_head *drm_agp_init(void);
 void	drm_agp_takedown(struct drm_device *);
 int	drm_agp_acquire(struct drm_device *);
@@ -760,7 +721,6 @@ int	drm_dma(struct drm_device *, void *, struct drm_file *);
 /* IRQ support (drm_irq.c) */
 int	drm_control(struct drm_device *, void *, struct drm_file *);
 int	drm_wait_vblank(struct drm_device *, void *, struct drm_file *);
-void	drm_locked_tasklet(struct drm_device *, void (*)(struct drm_device *));
 
 /* AGP/GART support (drm_agpsupport.c) */
 int	drm_agp_acquire_ioctl(struct drm_device *, void *, struct drm_file *);
@@ -777,9 +737,9 @@ int	drm_sg_alloc_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_free(struct drm_device *, void *, struct drm_file *);
 
 /* consistent PCI memory functions (drm_pci.c) */
-drm_dma_handle_t *drm_pci_alloc(struct drm_device *, size_t, size_t,
+drm_dma_handle_t *drm_pci_alloc(bus_dma_tag_t, size_t, size_t,
 		      dma_addr_t);
-void	drm_pci_free(struct drm_device *, drm_dma_handle_t *);
+void	drm_pci_free(bus_dma_tag_t, drm_dma_handle_t *);
 
 /* Inline replacements for DRM_IOREMAP macros */
 #define drm_core_ioremap_wc drm_core_ioremap
@@ -787,7 +747,7 @@ static __inline__ void drm_core_ioremap(struct drm_local_map *map, struct drm_de
 {
 	map->handle = drm_ioremap(dev, map);
 }
-static __inline__ void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
+static __inline__ void drm_core_ioremapfree(struct drm_local_map *map)
 {
 	if ( map->handle && map->size )
 		drm_ioremapfree(map);
@@ -797,12 +757,13 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 {
 	drm_local_map_t *map;
 
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+	DRM_LOCK();
 	TAILQ_FOREACH(map, &dev->maplist, link) {
 		if (offset == map->ext)
-			return map;
+			break;
 	}
-	return NULL;
+	DRM_UNLOCK();
+	return (map);
 }
 
 #endif /* __KERNEL__ */

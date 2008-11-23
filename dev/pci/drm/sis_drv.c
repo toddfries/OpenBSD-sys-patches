@@ -29,117 +29,100 @@
 #include "drmP.h"
 #include "sis_drm.h"
 #include "sis_drv.h"
-#include "drm_pciids.h"
-
-void	sis_configure(struct drm_device *);
-
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t sis_pciidlist[] = {
-	sis_PCI_IDS
-};
-
-void
-sis_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= 1; /* No dev_priv */
-	dev->driver.context_ctor	= sis_init_context;
-	dev->driver.context_dtor	= sis_final_context;
-
-	dev->driver.ioctls		= sis_ioctls;
-	dev->driver.max_ioctl		= sis_max_ioctl;
-
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-}
-
-#ifdef __FreeBSD__
-static int
-sis_probe(device_t dev)
-{
-	return drm_probe(dev, sis_pciidlist);
-}
-
-static int
-sis_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	sis_configure(dev);
-	return drm_attach(nbdev, sis_pciidlist);
-}
-
-static device_method_t sis_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		sis_probe),
-	DEVMETHOD(device_attach,	sis_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
-};
-
-static driver_t sis_driver = {
-	"drm",
-	sis_methods,
-	sizeof(struct drm_device)
-};
-
-extern devclass_t drm_devclass;
-#if __FreeBSD_version >= 700010
-DRIVER_MODULE(sisdrm, vgapci, sis_driver, drm_devclass, 0, 0);
-#else
-DRIVER_MODULE(sisdrm, pci, sis_driver, drm_devclass, 0, 0);
-#endif
-MODULE_DEPEND(sisdrm, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 
 int	sisdrm_probe(struct device *, void *, void *);
 void	sisdrm_attach(struct device *, struct device *, void *);
+int	sisdrm_detach(struct device *, int);
+int	sisdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
+
+static drm_pci_id_list_t sis_pciidlist[] = {
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6330},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_7300},
+	{PCI_VENDOR_XGI, 0x0042, SIS_CHIP_315},
+	{PCI_VENDOR_XGI, PCI_PRODUCT_XGI_VOLARI_V3XT},
+	{0, 0, 0}
+};
+
+static const struct drm_driver_info sis_driver = {
+	.buf_priv_size		= 1, /* No dev_priv */
+	.ioctl			= sisdrm_ioctl,
+	.context_ctor		= sis_init_context,
+	.context_dtor		= sis_final_context,
+
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
+
+	.flags			= DRIVER_AGP | DRIVER_MTRR,
+};
 
 int
-#if defined(__OpenBSD__)
 sisdrm_probe(struct device *parent, void *match, void *aux)
-#else
-sisdrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
-	return drm_probe((struct pci_attach_args *)aux, sis_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, sis_pciidlist);
 }
 
 void
 sisdrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_sis_private_t	*dev_priv = (drm_sis_private_t *)self;
+	struct pci_attach_args	*pa = aux;
 
-	sis_configure(dev);
-	return drm_attach(parent, self, pa, sis_pciidlist);
+	dev_priv->drmdev = drm_attach_mi(&sis_driver, pa, self);
 }
 
-#if defined(__OpenBSD__)
+int
+sisdrm_detach(struct device *self, int flags)
+{
+	drm_sis_private_t *dev_priv = (drm_sis_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	return (0);
+}
+
 struct cfattach sisdrm_ca = {
-	sizeof(struct drm_device), sisdrm_probe, sisdrm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_sis_private_t), sisdrm_probe, sisdrm_attach,
+	sisdrm_detach
 };
 
 struct cfdriver sisdrm_cd = {
 	0, "sisdrm", DV_DULL
 };
-#else
-#ifdef _LKM
-CFDRIVER_DECL(sisdrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(sisdrm, sizeof(struct drm_device), sisdrm_probe, sisdrm_attach, 
-	drm_detach, drm_activate);
-#endif
-#endif
 
-#endif
+int
+sisdrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_SIS_FB_ALLOC:
+			return (sis_fb_alloc(dev, data, file_priv));
+		case DRM_IOCTL_SIS_FB_FREE:
+			return (sis_fb_free(dev, data, file_priv));
+		case DRM_IOCTL_SIS_AGP_ALLOC:
+			return (sis_ioctl_agp_alloc(dev, data, file_priv));
+		case DRM_IOCTL_SIS_AGP_FREE:
+			return (sis_ioctl_agp_free(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_SIS_AGP_INIT:
+			return (sis_ioctl_agp_init(dev, data, file_priv));
+		case DRM_IOCTL_SIS_FB_INIT:
+			return (sis_fb_init(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+}

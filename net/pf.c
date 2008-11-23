@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.620 2008/09/10 09:10:17 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.626 2008/11/21 18:01:30 claudio Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -841,7 +841,7 @@ pf_state_insert(struct pfi_kif *kif, struct pf_state_key *skw,
 	pf_status.fcounters[FCNT_STATE_INSERT]++;
 	pf_status.states++;
 	pfi_kif_ref(kif, PFI_KIF_REF_STATE);
-#if NPFSYNC
+#if NPFSYNC > 0
 	pfsync_insert_state(s);
 #endif
 	return (0);
@@ -1092,11 +1092,11 @@ pf_unlink_state(struct pf_state *cur)
 		    TH_RST|TH_ACK, 0, 0, 0, 1, cur->tag, NULL, NULL);
 	}
 	RB_REMOVE(pf_state_tree_id, &tree_id, cur);
-#if NPFLOW
+#if NPFLOW > 0
 	if (cur->state_flags & PFSTATE_PFLOW)
 		export_pflow(cur);
 #endif
-#if NPFSYNC
+#if NPFSYNC > 0
 	if (cur->creatorid == pf_status.hostid)
 		pfsync_delete_state(cur);
 #endif
@@ -1110,7 +1110,7 @@ pf_unlink_state(struct pf_state *cur)
 void
 pf_free_state(struct pf_state *cur)
 {
-#if NPFSYNC
+#if NPFSYNC > 0
 	if (pfsyncif != NULL &&
 	    (pfsyncif->sc_bulk_send_next == cur ||
 	    pfsyncif->sc_bulk_terminator == cur))
@@ -1294,6 +1294,12 @@ pf_print_state_parts(struct pf_state *s,
 	dir = s ? s->direction : 0;
 
 	switch (proto) {
+	case IPPROTO_IPV4:
+		printf("IPv4");
+		break;
+	case IPPROTO_IPV6:
+		printf("IPv6");
+		break;
 	case IPPROTO_TCP:
 		printf("TCP");
 		break;
@@ -1304,7 +1310,7 @@ pf_print_state_parts(struct pf_state *s,
 		printf("ICMP");
 		break;
 	case IPPROTO_ICMPV6:
-		printf("ICMPV6");
+		printf("ICMPv6");
 		break;
 	default:
 		printf("%u", skw->proto);
@@ -2963,6 +2969,7 @@ void
 pf_set_rt_ifp(struct pf_state *s, struct pf_addr *saddr)
 {
 	struct pf_rule *r = s->rule.ptr;
+	struct pf_src_node *sn = NULL;
 
 	s->rt_kif = NULL;
 	if (!r->rt || r->rt == PF_FASTROUTE)
@@ -2970,15 +2977,13 @@ pf_set_rt_ifp(struct pf_state *s, struct pf_addr *saddr)
 	switch (s->key[PF_SK_WIRE]->af) {
 #ifdef INET
 	case AF_INET:
-		pf_map_addr(AF_INET, r, saddr, &s->rt_addr, NULL,
-		    &s->nat_src_node);
+		pf_map_addr(AF_INET, r, saddr, &s->rt_addr, NULL, &sn);
 		s->rt_kif = r->rpool.cur->kif;
 		break;
 #endif /* INET */
 #ifdef INET6
 	case AF_INET6:
-		pf_map_addr(AF_INET6, r, saddr, &s->rt_addr, NULL,
-		    &s->nat_src_node);
+		pf_map_addr(AF_INET6, r, saddr, &s->rt_addr, NULL, &sn);
 		s->rt_kif = r->rpool.cur->kif;
 		break;
 #endif /* INET6 */
@@ -3036,7 +3041,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	int			 match = 0;
 	int			 state_icmp = 0;
 	u_int16_t		 sport, dport;
-	u_int16_t		 nport = 0;
 	u_int16_t		 bproto_sum = 0, bip_sum;
 	u_int8_t		 icmptype = 0, icmpcode = 0;
 
@@ -3097,7 +3101,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_FILTER].active.ptr);
 
-	nport = sport;
 	/* check packet for BINAT/NAT/RDR */
 	if ((nr = pf_get_translation(pd, m, off, direction, kif, &nsn,
 	    &skw, &sks, &sk, &nk, saddr, daddr, sport, dport)) != NULL) {
@@ -5104,6 +5107,12 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif)
 		break;
 #ifdef INET6
 	case AF_INET6:
+		/*
+		 * Skip check for addresses with embedded interface scope,
+		 * as they would always match anyway.
+		 */
+		if (IN6_IS_SCOPE_EMBED(&addr->v6))
+			goto out;
 		dst6 = (struct sockaddr_in6 *)&ro.ro_dst;
 		dst6->sin6_family = AF_INET6;
 		dst6->sin6_len = sizeof(*dst6);
@@ -5144,7 +5153,7 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif)
 
 			if (kif->pfik_ifp == ifp)
 				ret = 1;
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 		} while (check_mpath == 1 && rn != NULL && ret == 0);
 	} else
 		ret = 0;
@@ -5404,7 +5413,6 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	struct ifnet		*ifp = NULL;
 	struct pf_addr		 naddr;
 	struct pf_src_node	*sn = NULL;
-	int			 error = 0;
 
 	if (m == NULL || *m == NULL || r == NULL ||
 	    (dir != PF_IN && dir != PF_OUT) || oifp == NULL)
@@ -5487,7 +5495,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if (IN6_IS_SCOPE_EMBED(&dst->sin6_addr))
 		dst->sin6_addr.s6_addr16[1] = htons(ifp->if_index);
 	if ((u_long)m0->m_pkthdr.len <= ifp->if_mtu) {
-		error = nd6_output(ifp, ifp, m0, dst, NULL);
+		nd6_output(ifp, ifp, m0, dst, NULL);
 	} else {
 		in6_ifstat_inc(ifp, ifs6_in_toobig);
 		if (r->rt != PF_DUPTO)
@@ -5731,7 +5739,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		action = pf_test_state_tcp(&s, dir, kif, m, off, h, &pd,
 		    &reason);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -5761,7 +5769,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		}
 		action = pf_test_state_udp(&s, dir, kif, m, off, h, &pd);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -5785,7 +5793,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		action = pf_test_state_icmp(&s, dir, kif, m, off, h, &pd,
 		    &reason);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -5800,7 +5808,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	default:
 		action = pf_test_state_other(&s, dir, kif, m, &pd);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -6104,7 +6112,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		action = pf_test_state_tcp(&s, dir, kif, m, off, h, &pd,
 		    &reason);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -6134,7 +6142,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		}
 		action = pf_test_state_udp(&s, dir, kif, m, off, h, &pd);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -6158,7 +6166,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		action = pf_test_state_icmp(&s, dir, kif,
 		    m, off, h, &pd, &reason);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
@@ -6173,7 +6181,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	default:
 		action = pf_test_state_other(&s, dir, kif, m, &pd);
 		if (action == PF_PASS) {
-#if NPFSYNC
+#if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
 			r = s->rule.ptr;

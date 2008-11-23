@@ -1,4 +1,4 @@
-/* $OpenBSD: acpithinkpad.c,v 1.11 2008/06/11 04:42:09 marco Exp $ */
+/* $OpenBSD: acpithinkpad.c,v 1.13 2008/11/06 23:41:28 marco Exp $ */
 /*
  * Copyright (c) 2008 joshua stein <jcs@openbsd.org>
  *
@@ -69,6 +69,9 @@
 #define	THINKPAD_TABLET_PEN_INSERTED	0x00b
 #define	THINKPAD_TABLET_PEN_REMOVED	0x00c
 
+/* type 6 events */
+#define	THINKPAD_POWER_CHANGED		0x030
+
 /* type 7 events */
 #define	THINKPAD_SWITCH_WIRELESS	0x000
 
@@ -100,6 +103,8 @@ struct cfdriver acpithinkpad_cd = {
 	NULL, "acpithinkpad", DV_DULL
 };
 
+const char *acpithinkpad_hids[] = { ACPI_DEV_THINKPAD, 0 };
+
 int
 thinkpad_match(struct device *parent, void *match, void *aux)
 {
@@ -108,9 +113,7 @@ thinkpad_match(struct device *parent, void *match, void *aux)
 	struct aml_value	res;
 	int			rv = 0;
 
-	if (aa->aaa_name == NULL ||
-	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
-	    aa->aaa_table != NULL)
+	if (!acpi_matchhids(aa, acpithinkpad_hids, cf->cf_driver->cd_name))
 		return (0);
 
 	if (aml_evalname((struct acpi_softc *)parent, aa->aaa_node,
@@ -270,6 +273,13 @@ thinkpad_hotkey(struct aml_node *node, int notify_type, void *arg)
 			case THINKPAD_BRIGHTNESS_CHANGED:
 			case THINKPAD_TABLET_PEN_INSERTED:
 			case THINKPAD_TABLET_PEN_REMOVED:
+				handled = 1;
+				break;
+			}
+			break;
+		case 6:
+			switch (event) {
+			case THINKPAD_POWER_CHANGED:
 				handled = 1;
 				break;
 			}

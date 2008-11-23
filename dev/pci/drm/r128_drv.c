@@ -35,130 +35,178 @@
 #include "drm.h"
 #include "r128_drm.h"
 #include "r128_drv.h"
-#include "drm_pciids.h"
 
-void r128_configure(struct drm_device *);
+int	ragedrm_probe(struct device *, void *, void *);
+void	ragedrm_attach(struct device *, struct device *, void *);
+int	ragedrm_detach(struct device *, int);
+int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t r128_pciidlist[] = {
-	r128_PCI_IDS
+static drm_pci_id_list_t ragedrm_pciidlist[] = {
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_LE},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_M3},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_MF},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_ML},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PA},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PB},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PC},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PD},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PE},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE_FURY},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PG},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PH},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PI},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PJ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PK},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PN},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PO},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PQ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PR},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PS},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PT},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PU},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PV},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PW},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PX},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_GL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE_MAGNUM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_RG},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_RK},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_VR},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_SM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_TF},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_TL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_TR},
+	{0, 0, 0}
 };
 
-void
-r128_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= sizeof(drm_r128_buf_priv_t);
-	dev->driver.preclose		= r128_driver_preclose;
-	dev->driver.lastclose		= r128_driver_lastclose;
-	dev->driver.get_vblank_counter	= r128_get_vblank_counter;
-	dev->driver.enable_vblank 	= r128_enable_vblank;
-	dev->driver.disable_vblank	= r128_disable_vblank;
-	dev->driver.irq_preinstall	= r128_driver_irq_preinstall;
-	dev->driver.irq_postinstall	= r128_driver_irq_postinstall;
-	dev->driver.irq_uninstall	= r128_driver_irq_uninstall;
-	dev->driver.irq_handler		= r128_driver_irq_handler;
-	dev->driver.dma_ioctl		= r128_cce_buffers;
+static const struct drm_driver_info ragedrm_driver = {
+	.buf_priv_size		= sizeof(drm_r128_buf_priv_t),
+	.ioctl			= ragedrm_ioctl,
+	.preclose		= r128_driver_preclose,
+	.lastclose		= r128_driver_lastclose,
+	.get_vblank_counter	= r128_get_vblank_counter,
+	.enable_vblank 		= r128_enable_vblank,
+	.disable_vblank		= r128_disable_vblank,
+	.irq_preinstall		= r128_driver_irq_preinstall,
+	.irq_postinstall	= r128_driver_irq_postinstall,
+	.irq_uninstall		= r128_driver_irq_uninstall,
+	.irq_handler		= r128_driver_irq_handler,
+	.dma_ioctl		= r128_cce_buffers,
 
-	dev->driver.ioctls		= r128_ioctls;
-	dev->driver.max_ioctl		= r128_max_ioctl;
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
 
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-	dev->driver.use_pci_dma		= 1;
-	dev->driver.use_sg		= 1;
-	dev->driver.use_dma		= 1;
-	dev->driver.use_irq		= 1;
-	dev->driver.use_vbl_irq		= 1;
-}
-
-#ifdef __FreeBSD__
-static int
-r128_probe(device_t dev)
-{
-	return drm_probe(dev, r128_pciidlist);
-}
-
-static int
-r128_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	r128_configure(dev);
-	return drm_attach(nbdev, r128_pciidlist);
-}
-
-static device_method_t r128_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		r128_probe),
-	DEVMETHOD(device_attach,	r128_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
+	.flags			= DRIVER_AGP | DRIVER_MTRR | DRIVER_SG |
+				    DRIVER_DMA | DRIVER_IRQ,
 };
-
-static driver_t r128_driver = {
-	"drm",
-	r128_methods,
-	sizeof(struct drm_device)
-};
-
-extern devclass_t drm_devclass;
-#if __FreeBSD_version >= 700010
-DRIVER_MODULE(r128, vgapci, r128_driver, drm_devclass, 0, 0);
-#else
-DRIVER_MODULE(r128, pci, r128_driver, drm_devclass, 0, 0);
-#endif
-MODULE_DEPEND(r128, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-int	r128drm_probe(struct device *, void *, void *);
-void	r128drm_attach(struct device *, struct device *, void *);
 
 int
-#if defined(__OpenBSD__)
-r128drm_probe(struct device *parent, void *match, void *aux)
-#else
-r128drm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
+ragedrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, r128_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, ragedrm_pciidlist);
 }
 
 void
-r128drm_attach(struct device *parent, struct device *self, void *aux)
+ragedrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_r128_private_t	*dev_priv = (drm_r128_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
 
-	r128_configure(dev);
-	return drm_attach(parent, self, pa, r128_pciidlist);
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);
+	if (bar == NULL) {
+		printf(": can't get BAR info\n");
+		return;
+	}
+
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, bar->size, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	dev_priv->drmdev = drm_attach_mi(&ragedrm_driver, pa, self);
 }
 
-#if defined(__OpenBSD__)
+int
+ragedrm_detach(struct device *self, int flags)
+{
+	drm_r128_private_t	*dev_priv = (drm_r128_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
+
+	return (0);
+}
+
 struct cfattach ragedrm_ca = {
-	sizeof(struct drm_device), r128drm_probe, r128drm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_r128_private_t), ragedrm_probe, ragedrm_attach,
+	ragedrm_detach
 };
 
 struct cfdriver ragedrm_cd = {
 	0, "ragedrm", DV_DULL
 };
-#else
-#ifdef _LKM
-CFDRIVER_DECL(r128drm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(r128drm, sizeof(struct drm_device), r128drm_probe, r128drm_attach,
-	drm_detach, drm_activate);
-#endif
-#endif
 
-#endif
+int
+ragedrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_R128_CCE_IDLE:
+			return (r128_cce_idle(dev, data, file_priv));
+		case DRM_IOCTL_R128_RESET:
+			return (r128_engine_reset(dev, data, file_priv));
+		case DRM_IOCTL_R128_FULLSCREEN:
+			return (r128_fullscreen(dev, data, file_priv));
+		case DRM_IOCTL_R128_SWAP:
+			return (r128_cce_swap(dev, data, file_priv));
+		case DRM_IOCTL_R128_FLIP:
+			return (r128_cce_flip(dev, data, file_priv));
+		case DRM_IOCTL_R128_CLEAR:
+			return (r128_cce_clear(dev, data, file_priv));
+		case DRM_IOCTL_R128_VERTEX:
+			return (r128_cce_vertex(dev, data, file_priv));
+		case DRM_IOCTL_R128_INDICES:
+			return (r128_cce_indices(dev, data, file_priv));
+		case DRM_IOCTL_R128_BLIT:
+			return (r128_cce_blit(dev, data, file_priv));
+		case DRM_IOCTL_R128_DEPTH:
+			return (r128_cce_depth(dev, data, file_priv));
+		case DRM_IOCTL_R128_STIPPLE:
+			return (r128_cce_stipple(dev, data, file_priv));
+		case DRM_IOCTL_R128_GETPARAM:
+			return (r128_getparam(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_R128_INIT:
+			return (r128_cce_init(dev, data, file_priv));
+		case DRM_IOCTL_R128_CCE_START:
+			return (r128_cce_start(dev, data, file_priv));
+		case DRM_IOCTL_R128_CCE_STOP:
+			return (r128_cce_stop(dev, data, file_priv));
+		case DRM_IOCTL_R128_CCE_RESET:
+			return (r128_cce_reset(dev, data, file_priv));
+		case DRM_IOCTL_R128_INDIRECT:
+			return (r128_cce_indirect(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+}

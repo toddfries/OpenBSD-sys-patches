@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.65 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.67 2008/10/14 18:01:53 naddy Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -734,11 +734,6 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc_if->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -794,12 +789,10 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc_if->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1709,14 +1702,13 @@ msk_rxeof(struct sk_if_softc *sc_if, u_int16_t len, u_int32_t rxstat)
 	 */
 	if (msk_newbuf(sc_if, cur, NULL, dmamap) == ENOBUFS) {
 		struct mbuf		*m0;
-		m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-		    total_len + ETHER_ALIGN, 0, ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
+		    ifp, NULL);
 		msk_newbuf(sc_if, cur, m, dmamap);
 		if (m0 == NULL) {
 			ifp->if_ierrors++;
 			return;
 		}
-		m_adj(m0, ETHER_ALIGN);
 		m = m0;
 	} else {
 		m->m_pkthdr.rcvif = ifp;

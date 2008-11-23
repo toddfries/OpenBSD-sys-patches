@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ray.c,v 1.34 2006/08/18 08:17:07 jsg Exp $	*/
+/*	$OpenBSD: if_ray.c,v 1.36 2008/11/21 16:53:05 oga Exp $	*/
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*
@@ -353,9 +353,11 @@ int ray_user_update_params(struct ray_softc *,
     struct ray_param_req *);
 
 #define	ray_read_region(sc,off,p,c) \
-	bus_space_read_region_1((sc)->sc_memt, (sc)->sc_memh, (off), (p), (c))
+	bus_space_read_region_1((sc)->sc_memt, (sc)->sc_memh, (off),	\
+	    (u_int8_t *)(p), (c))
 #define	ray_write_region(sc,off,p,c) \
-	bus_space_write_region_1((sc)->sc_memt, (sc)->sc_memh, (off), (p), (c))
+	bus_space_write_region_1((sc)->sc_memt, (sc)->sc_memh, (off),	\
+	    (u_int8_t *)(p), (c))
 
 #ifdef RAY_DO_SIGLEV
 void ray_update_siglev(struct ray_softc *, u_int8_t *, u_int8_t);
@@ -943,10 +945,9 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ray_softc *sc;
 	struct ifreq *ifr;
 	struct ifaddr *ifa;
-	int error, error2, s, i;
+	int error = 0, error2, s, i;
 
 	sc = ifp->if_softc;
-	error = 0;
 
 	ifr = (struct ifreq *)data;
 
@@ -954,11 +955,6 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	RAY_DPRINTF(("%s: ioctl: cmd 0x%lx data 0x%lx\n", ifp->if_xname,
 	    cmd, (long)data));
-
-	if ((error = ether_ioctl(ifp, &sc->sc_ec, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1076,15 +1072,12 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 #endif
 	default:
-		RAY_DPRINTF(("%s: ioctl: unknown\n", ifp->if_xname));
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
 	}
 
 	RAY_DPRINTF(("%s: ioctl: returns %d\n", ifp->if_xname, error));
 
 	splx(s);
-
 	return (error);
 }
 

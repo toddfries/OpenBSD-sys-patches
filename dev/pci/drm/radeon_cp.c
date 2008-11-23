@@ -207,7 +207,7 @@ static int radeon_do_pixcache_flush(drm_radeon_private_t * dev_priv)
 	DRM_ERROR("failed!\n");
 	radeon_status(dev_priv);
 #endif
-	return -EBUSY;
+	return EBUSY;
 }
 
 static int radeon_do_wait_for_fifo(drm_radeon_private_t * dev_priv, int entries)
@@ -231,7 +231,7 @@ static int radeon_do_wait_for_fifo(drm_radeon_private_t * dev_priv, int entries)
 	DRM_ERROR("failed!\n");
 	radeon_status(dev_priv);
 #endif
-	return -EBUSY;
+	return EBUSY;
 }
 
 static int radeon_do_wait_for_idle(drm_radeon_private_t * dev_priv)
@@ -260,7 +260,7 @@ static int radeon_do_wait_for_idle(drm_radeon_private_t * dev_priv)
 	DRM_ERROR("failed!\n");
 	radeon_status(dev_priv);
 #endif
-	return -EBUSY;
+	return EBUSY;
 }
 
 static void radeon_init_pipes(drm_radeon_private_t * dev_priv)
@@ -358,6 +358,7 @@ static void radeon_cp_load_microcode(drm_radeon_private_t * dev_priv)
 				     R300_cp_microcode[i][0]);
 		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) ||
+		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R423) ||	
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV410)) {
 		DRM_INFO("Loading R400 Microcode\n");
 		for (i = 0; i < 256; i++) {
@@ -628,9 +629,6 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 		     dev_priv->ring.size_l2qw);
 #endif
 
-	/* Start with assuming that writeback doesn't work */
-	dev_priv->writeback_works = 0;
-
 	/* Initialize the scratch register pointer.  This will cause
 	 * the scratch register values to be written out to memory
 	 * whenever they are updated.
@@ -648,8 +646,35 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 	RADEON_WRITE(RADEON_SCRATCH_UMSK, 0x7);
 
 	/* Turn on bus mastering */
-	tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RADEON_BUS_MASTER_DIS;
-	RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
+	case CHIP_RS690:
+		/* rs600/rs690 */
+		tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RS600_BUS_MASTER_DIS;
+		RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+		break;
+	case CHIP_R100:
+	case CHIP_RV100:
+	case CHIP_RS100:
+	case CHIP_RV200:
+	case CHIP_RS200:
+	case CHIP_R200:
+	case CHIP_RV250:
+	case CHIP_RS300:
+	case CHIP_RV280:
+	case CHIP_R300:
+	case CHIP_R350:
+	case CHIP_RV350:
+	case CHIP_R420:
+	case CHIP_RS400:
+	case CHIP_RS480:
+		/* r1xx, r2xx, r300, r(v)350, r420/r481, rs400/rs480 */
+		tmp = RADEON_READ(RADEON_BUS_CNTL) & ~RADEON_BUS_MASTER_DIS;
+		RADEON_WRITE(RADEON_BUS_CNTL, tmp);
+		break;
+	default:
+		/* PCIE cards appear not to need this */
+		break;
+	}
 
 	dev_priv->sarea_priv->last_frame = dev_priv->scratch[0] = 0;
 	RADEON_WRITE(RADEON_LAST_FRAME_REG, dev_priv->sarea_priv->last_frame);
@@ -860,7 +885,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	if ((dev_priv->flags & RADEON_NEW_MEMMAP) && !dev_priv->new_memmap) {
 		DRM_ERROR("Cannot initialise DRM on this card\nThis card requires a new X.org DDX for 3D\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	if (init->is_pci && (dev_priv->flags & RADEON_IS_AGP))
@@ -878,7 +903,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	if ((!(dev_priv->flags & RADEON_IS_AGP)) && !dev->sg) {
 		DRM_ERROR("PCI GART memory not allocated!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	dev_priv->usec_timeout = init->usec_timeout;
@@ -886,7 +911,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	    dev_priv->usec_timeout > RADEON_MAX_USEC_TIMEOUT) {
 		DRM_DEBUG("TIMEOUT problem!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	/* Enable vblank on CRTC1 for older X servers
@@ -904,7 +929,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	    (init->cp_mode != RADEON_CSQ_PRIBM_INDBM)) {
 		DRM_DEBUG("BAD cp_mode (%x)!\n", init->cp_mode);
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	switch (init->fb_bpp) {
@@ -972,27 +997,26 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	if (!dev_priv->sarea) {
 		DRM_ERROR("could not find sarea!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	dev_priv->cp_ring = drm_core_findmap(dev, init->ring_offset);
 	if (!dev_priv->cp_ring) {
 		DRM_ERROR("could not find cp ring region!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 	dev_priv->ring_rptr = drm_core_findmap(dev, init->ring_rptr_offset);
 	if (!dev_priv->ring_rptr) {
 		DRM_ERROR("could not find ring read pointer!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
-	dev->agp_buffer_token = init->buffers_offset;
 	dev->agp_buffer_map = drm_core_findmap(dev, init->buffers_offset);
 	if (!dev->agp_buffer_map) {
 		DRM_ERROR("could not find dma buffer region!\n");
 		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	if (init->gart_textures_offset) {
@@ -1001,7 +1025,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		if (!dev_priv->gart_textures) {
 			DRM_ERROR("could not find GART texture region!\n");
 			radeon_do_cleanup_cp(dev);
-			return -EINVAL;
+			return EINVAL;
 		}
 	}
 
@@ -1019,7 +1043,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 		    !dev->agp_buffer_map->handle) {
 			DRM_ERROR("could not find ioremap agp regions!\n");
 			radeon_do_cleanup_cp(dev);
-			return -EINVAL;
+			return EINVAL;
 		}
 	} else
 #endif
@@ -1173,19 +1197,22 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 				DRM_ERROR
 				    ("Cannot use PCI Express without GART in FB memory\n");
 				radeon_do_cleanup_cp(dev);
-				return -EINVAL;
+				return EINVAL;
 			}
 		}
 
 		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
 			DRM_ERROR("failed to init PCI GART!\n");
 			radeon_do_cleanup_cp(dev);
-			return -ENOMEM;
+			return ENOMEM;
 		}
 
 		/* Turn on PCI GART */
 		radeon_set_pcigart(dev_priv, 1);
 	}
+
+	/* Start with assuming that writeback doesn't work */
+	dev_priv->writeback_works = 0;
 
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv);
@@ -1213,15 +1240,15 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
 		if (dev_priv->cp_ring != NULL) {
-			drm_core_ioremapfree(dev_priv->cp_ring, dev);
+			drm_core_ioremapfree(dev_priv->cp_ring);
 			dev_priv->cp_ring = NULL;
 		}
 		if (dev_priv->ring_rptr != NULL) {
-			drm_core_ioremapfree(dev_priv->ring_rptr, dev);
+			drm_core_ioremapfree(dev_priv->ring_rptr);
 			dev_priv->ring_rptr = NULL;
 		}
 		if (dev->agp_buffer_map != NULL) {
-			drm_core_ioremapfree(dev->agp_buffer_map, dev);
+			drm_core_ioremapfree(dev->agp_buffer_map);
 			dev->agp_buffer_map = NULL;
 		}
 	} else
@@ -1237,7 +1264,7 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
 
 		if (dev_priv->gart_info.gart_table_location == DRM_ATI_GART_FB)
 		{
-			drm_core_ioremapfree(&dev_priv->gart_info.mapping, dev);
+			drm_core_ioremapfree(&dev_priv->gart_info.mapping);
 			dev_priv->gart_info.addr = 0;
 		}
 	}
@@ -1260,7 +1287,7 @@ static int radeon_do_resume_cp(struct drm_device * dev)
 
 	if (!dev_priv) {
 		DRM_ERROR("Called with no initialization\n");
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	DRM_DEBUG("Starting radeon_do_resume_cp()\n");
@@ -1305,7 +1332,7 @@ int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_pri
 		return radeon_do_cleanup_cp(dev);
 	}
 
-	return -EINVAL;
+	return EINVAL;
 }
 
 int radeon_cp_start(struct drm_device *dev, void *data, struct drm_file *file_priv)
@@ -1390,8 +1417,7 @@ void radeon_do_release(struct drm_device * dev)
 				mtx_sleep(&ret, &dev->dev_lock, PZERO, "rdnrel",
 				       1);
 #else
-				msleep(&ret, &dev->dev_lock, PZERO,
-				    "rdnrel", 1);
+				tsleep(&ret, PZERO, "rdnrel", 1);
 #endif
 #endif
 			}
@@ -1400,17 +1426,15 @@ void radeon_do_release(struct drm_device * dev)
 		}
 
 		/* Disable *all* interrupts */
-		if (dev_priv->mmio)	/* remove this after permanent addmaps */
-			RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
 
-		if (dev_priv->mmio) {	/* remove all surfaces */
-			for (i = 0; i < RADEON_MAX_SURFACES; i++) {
-				RADEON_WRITE(RADEON_SURFACE0_INFO + 16 * i, 0);
-				RADEON_WRITE(RADEON_SURFACE0_LOWER_BOUND +
-					     16 * i, 0);
-				RADEON_WRITE(RADEON_SURFACE0_UPPER_BOUND +
-					     16 * i, 0);
-			}
+		/* remove all surfaces */
+		for (i = 0; i < RADEON_MAX_SURFACES; i++) {
+			RADEON_WRITE(RADEON_SURFACE0_INFO + 16 * i, 0);
+			RADEON_WRITE(RADEON_SURFACE0_LOWER_BOUND +
+				     16 * i, 0);
+			RADEON_WRITE(RADEON_SURFACE0_UPPER_BOUND +
+				     16 * i, 0);
 		}
 
 		/* Free memory heap structures */
@@ -1433,7 +1457,7 @@ int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_pr
 
 	if (!dev_priv) {
 		DRM_DEBUG("called before init done\n");
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	radeon_do_cp_reset(dev_priv);
@@ -1626,7 +1650,7 @@ int radeon_wait_ring(drm_radeon_private_t * dev_priv, int n)
 	radeon_status(dev_priv);
 	DRM_ERROR("failed!\n");
 #endif
-	return -EBUSY;
+	return EBUSY;
 }
 
 static int radeon_cp_get_buffers(struct drm_device *dev,
@@ -1639,16 +1663,16 @@ static int radeon_cp_get_buffers(struct drm_device *dev,
 	for (i = d->granted_count; i < d->request_count; i++) {
 		buf = radeon_freelist_get(dev);
 		if (!buf)
-			return -EBUSY;	/* NOTE: broken client */
+			return EBUSY;	/* NOTE: broken client */
 
 		buf->file_priv = file_priv;
 
 		if (DRM_COPY_TO_USER(&d->request_indices[i], &buf->idx,
 				     sizeof(buf->idx)))
-			return -EFAULT;
+			return EFAULT;
 		if (DRM_COPY_TO_USER(&d->request_sizes[i], &buf->total,
 				     sizeof(buf->total)))
-			return -EFAULT;
+			return EFAULT;
 
 		d->granted_count++;
 	}
@@ -1668,7 +1692,7 @@ int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_
 	if (d->send_count != 0) {
 		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
 			  DRM_CURRENTPID, d->send_count);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	/* We'll send you buffers.
@@ -1676,7 +1700,7 @@ int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_
 	if (d->request_count < 0 || d->request_count > dma->buf_count) {
 		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
 			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	d->granted_count = 0;
@@ -1685,50 +1709,6 @@ int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_
 		ret = radeon_cp_get_buffers(dev, file_priv, d);
 	}
 
-	return ret;
-}
-
-int radeon_driver_load(struct drm_device *dev, unsigned long flags)
-{
-	drm_radeon_private_t *dev_priv;
-	int ret = 0;
-
-	dev_priv = drm_calloc(1, sizeof(drm_radeon_private_t), DRM_MEM_DRIVER);
-	if (dev_priv == NULL)
-		return -ENOMEM;
-
-	dev->dev_private = (void *)dev_priv;
-	dev_priv->flags = flags;
-
-	switch (flags & RADEON_FAMILY_MASK) {
-	case CHIP_R100:
-	case CHIP_RV200:
-	case CHIP_R200:
-	case CHIP_R300:
-	case CHIP_R350:
-	case CHIP_R420:
-	case CHIP_RV410:
-	case CHIP_RV515:
-	case CHIP_R520:
-	case CHIP_RV570:
-	case CHIP_R580:
-		dev_priv->flags |= RADEON_HAS_HIERZ;
-		break;
-	default:
-		/* all other chips have no hierarchical z buffer */
-		break;
-	}
-
-	dev_priv->chip_family = flags & RADEON_FAMILY_MASK;
-	if (drm_device_is_agp(dev))
-		dev_priv->flags |= RADEON_IS_AGP;
-	else if (drm_device_is_pcie(dev))
-		dev_priv->flags |= RADEON_IS_PCIE;
-	else
-		dev_priv->flags |= RADEON_IS_PCI;
-
-	DRM_DEBUG("%s card detected\n",
-		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" : (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
 	return ret;
 }
 
@@ -1743,29 +1723,10 @@ int radeon_driver_firstopen(struct drm_device *dev)
 
 	dev_priv->gart_info.table_size = RADEON_PCIGART_TABLE_SIZE;
 
-	ret = drm_addmap(dev, drm_get_resource_start(dev, 2),
-			 drm_get_resource_len(dev, 2), _DRM_REGISTERS,
-			 _DRM_READ_ONLY, &dev_priv->mmio);
+	ret = drm_addmap(dev, dev_priv->fb_aper_offset, dev_priv->fb_aper_size,
+	    _DRM_FRAME_BUFFER, _DRM_WRITE_COMBINING, &map);
 	if (ret != 0)
 		return ret;
 
-	dev_priv->fb_aper_offset = drm_get_resource_start(dev, 0);
-	ret = drm_addmap(dev, dev_priv->fb_aper_offset,
-			 drm_get_resource_len(dev, 0), _DRM_FRAME_BUFFER,
-			 _DRM_WRITE_COMBINING, &map);
-	if (ret != 0)
-		return ret;
-
-	return 0;
-}
-
-int radeon_driver_unload(struct drm_device *dev)
-{
-	drm_radeon_private_t *dev_priv = dev->dev_private;
-
-	DRM_DEBUG("\n");
-	drm_free(dev_priv, sizeof(*dev_priv), DRM_MEM_DRIVER);
-
-	dev->dev_private = NULL;
 	return 0;
 }
