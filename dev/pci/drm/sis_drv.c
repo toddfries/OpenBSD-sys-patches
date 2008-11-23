@@ -32,6 +32,7 @@
 
 int	sisdrm_probe(struct device *, void *, void *);
 void	sisdrm_attach(struct device *, struct device *, void *);
+int	sisdrm_detach(struct device *, int);
 int	sisdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 static drm_pci_id_list_t sis_pciidlist[] = {
@@ -40,10 +41,8 @@ static drm_pci_id_list_t sis_pciidlist[] = {
 	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6300},
 	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6330},
 	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_7300},
-	{PCI_VENDOR_XGI, PCI_PRODUCT_XGI_VOLARI_V3XT},
-#if 0 /* do these actually EXIST? */
 	{PCI_VENDOR_XGI, 0x0042, SIS_CHIP_315},
-#endif
+	{PCI_VENDOR_XGI, PCI_PRODUCT_XGI_VOLARI_V3XT},
 	{0, 0, 0}
 };
 
@@ -75,7 +74,7 @@ sisdrm_attach(struct device *parent, struct device *self, void *aux)
 	drm_sis_private_t	*dev_priv = (drm_sis_private_t *)self;
 	struct pci_attach_args	*pa = aux;
 
-	dev_priv->drmdev = drm_attach_mi(&sis_driver, pa, parent, self);
+	dev_priv->drmdev = drm_attach_mi(&sis_driver, pa, self);
 }
 
 int

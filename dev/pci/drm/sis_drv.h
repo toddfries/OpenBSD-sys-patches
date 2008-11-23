@@ -77,6 +77,7 @@ extern void sis_lastclose(struct drm_device *dev);
 typedef struct drm_sis_private {
 	struct device	 dev;
 	struct device	*drmdev;
+
 	memHeap_t	*AGPHeap;
 	memHeap_t	*FBHeap;
 } drm_sis_private_t;
