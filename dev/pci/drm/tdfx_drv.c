@@ -54,8 +54,6 @@ static drm_pci_id_list_t tdfxdrm_pciidlist[] = {
 };
 
 static const struct drm_driver_info tdfxdrm_driver = {
-	.buf_priv_size	= 1, /* No dev_priv */
-
 	.name		= DRIVER_NAME,
 	.desc		= DRIVER_DESC,
 	.date		= DRIVER_DATE,
@@ -78,7 +76,8 @@ tdfxdrm_attach(struct device *parent, struct device *self, void *aux)
 	struct tdfxdrm_softc	*dev_priv = (struct tdfxdrm_softc *)self;
 	struct pci_attach_args	*pa = aux;
 
-	dev_priv->drmdev = drm_attach_mi(&tdfxdrm_driver, pa, self);
+	/* never agp */
+	dev_priv->drmdev = drm_attach_pci(&tdfxdrm_driver, pa, 0, self);
 }
 
 struct cfattach tdfxdrm_ca = {

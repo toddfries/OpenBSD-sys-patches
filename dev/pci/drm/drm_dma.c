@@ -60,7 +60,7 @@ drm_cleanup_buf(struct drm_device *dev, drm_buf_entry_t *entry)
 
 	if (entry->seg_count) {
 		for (i = 0; i < entry->seg_count; i++)
-			drm_pci_free(dev->pa.pa_dmat, entry->seglist[i]);
+			drm_pci_free(dev->dmat, entry->seglist[i]);
 		drm_free(entry->seglist, entry->seg_count *
 		    sizeof(*entry->seglist), DRM_MEM_BUFS);
 
@@ -68,12 +68,8 @@ drm_cleanup_buf(struct drm_device *dev, drm_buf_entry_t *entry)
 	}
 
    	if (entry->buf_count) {
-	   	for (i = 0; i < entry->buf_count; i++) {
-			drm_free(entry->buflist[i].dev_private,
-			    dev->driver->buf_priv_size, DRM_MEM_BUFS);
-		}
 		drm_free(entry->buflist, entry->buf_count *
-		    sizeof(*entry->buflist), DRM_MEM_BUFS);
+		    dev->driver->buf_priv_size, DRM_MEM_BUFS);
 
 		entry->buf_count = 0;
 	}

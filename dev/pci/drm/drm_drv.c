@@ -55,14 +55,32 @@ int	 drm_detach(struct device *, int);
 int	 drm_activate(struct device *, enum devact);
 int	 drmprint(void *, const char *);
 
+/*
+ * attach drm to a pci-based driver.
+ *
+ * This function does all the pci-specific calculations for the 
+ * drm_attach_args.
+ */
 struct device *
-drm_attach_mi(const struct drm_driver_info *driver, struct pci_attach_args *pa,
-    struct device *dev)
+drm_attach_pci(const struct drm_driver_info *driver, struct pci_attach_args *pa,
+    int is_agp, struct device *dev)
 {
 	struct drm_attach_args arg;
 
 	arg.driver = driver;
-	arg.pa = pa;
+	arg.dmat = pa->pa_dmat;
+	arg.bst = pa->pa_memt;
+	arg.irq = pa->pa_intrline;
+	arg.is_agp = is_agp;
+
+	arg.busid_len = 20;
+	arg.busid = malloc(arg.busid_len + 1, M_DRM, M_NOWAIT);
+	if (arg.busid == NULL) {
+		printf(": no memory for drm\n");
+		return (NULL);
+	}
+	snprintf(arg.busid, arg.busid_len, "pci:%04x:%02x:%02x.%1x",
+	    pa->pa_domain, pa->pa_bus, pa->pa_device, pa->pa_function);
 
 	printf("\n");
 	return (config_found(dev, &arg, drmprint));
@@ -102,28 +120,28 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct drm_device	*dev = (struct drm_device *)self;
 	struct drm_attach_args	*da = aux;
-	struct pci_attach_args	*pa = da->pa;
 
 	dev->dev_private = parent;
 	dev->driver = da->driver;
 
-	/* needed for pci_mapreg_* */
-	memcpy(&dev->pa, pa, sizeof(dev->pa));
-
-	dev->irq = pa->pa_intrline;
-	dev->pci_domain = 0;
-	dev->pci_bus = pa->pa_bus;
-	dev->pci_slot = pa->pa_device;
-	dev->pci_func = pa->pa_function;
+	dev->dmat = da->dmat;
+	dev->bst = da->bst;
+	dev->irq = da->irq;
+	dev->unique = da->busid;
+	dev->unique_len = da->busid_len;
 
 	rw_init(&dev->dev_lock, "drmdevlk");
 	mtx_init(&dev->drw_lock, IPL_NONE);
 	mtx_init(&dev->lock.spinlock, IPL_NONE);
 
 	TAILQ_INIT(&dev->maplist);
-
-	drm_mem_init();
 	TAILQ_INIT(&dev->files);
+
+	if (dev->driver->vblank_pipes != 0 && drm_vblank_init(dev,
+	    dev->driver->vblank_pipes)) {
+		printf(": failed to allocate vblank data\n");
+		goto error;
+	}
 
 	/*
 	 * the dma buffers api is just weird. offset 1Gb to ensure we don't
@@ -137,7 +155,7 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (dev->driver->flags & DRIVER_AGP) {
-		if (drm_device_is_agp(dev))
+		if (da->is_agp)
 			dev->agp = drm_agp_init();
 		if (dev->driver->flags & DRIVER_AGP_REQUIRE &&
 		    dev->agp == NULL) {
@@ -167,9 +185,13 @@ drm_detach(struct device *self, int flags)
 {
 	struct drm_device *dev = (struct drm_device *)self;
 
+	drm_lastclose(dev);
+
 	drm_ctxbitmap_cleanup(dev);
 
 	extent_destroy(dev->handle_ext);
+
+	drm_vblank_cleanup(dev);
 
 	if (dev->agp && dev->agp->mtrr) {
 		int retcode;
@@ -179,14 +201,12 @@ drm_detach(struct device *self, int flags)
 		DRM_DEBUG("mtrr_del = %d", retcode);
 	}
 
-	drm_lastclose(dev);
 
 	if (dev->agp != NULL) {
 		drm_free(dev->agp, sizeof(*dev->agp), DRM_MEM_AGPLISTS);
 		dev->agp = NULL;
 	}
 
-	drm_mem_uninit();
 	return 0;
 }
 
@@ -293,12 +313,6 @@ drm_lastclose(struct drm_device *dev)
 	drm_dma_takedown(dev);
 
 	DRM_LOCK();
-	if (dev->unique != NULL) {
-		drm_free(dev->unique, dev->unique_len + 1,  DRM_MEM_DRIVER);
-		dev->unique = NULL;
-		dev->unique_len = 0;
-	}
-
 	/* Clear pid list */
 	while ((pt = SPLAY_ROOT(&dev->magiclist)) != NULL) {
 		SPLAY_REMOVE(drm_magic_tree, &dev->magiclist, pt);
@@ -382,8 +396,9 @@ drmopen(dev_t kdev, int flags, int fmt, struct proc *p)
 		DRM_UNLOCK();
 	}
 
-
-	priv = drm_calloc(1, sizeof(*priv), DRM_MEM_FILES);
+	/* always allocate at least enough space for our data */
+	priv = drm_calloc(1, max(dev->driver->file_priv_size,
+	    sizeof(*priv)), DRM_MEM_FILES);
 	if (priv == NULL) {
 		ret = ENOMEM;
 		goto err;
@@ -420,7 +435,8 @@ drmopen(dev_t kdev, int flags, int fmt, struct proc *p)
 	return (0);
 
 free_priv:
-	drm_free(priv, sizeof(*priv), DRM_MEM_FILES);
+	drm_free(priv, max(dev->driver->file_priv_size,
+	    sizeof(*priv)), DRM_MEM_FILES);
 err:
 	DRM_LOCK();
 	--dev->open_count;
@@ -439,16 +455,15 @@ drmclose(dev_t kdev, int flags, int fmt, struct proc *p)
 
 	DRM_LOCK();
 	file_priv = drm_find_file_by_minor(dev, minor(kdev));
-	if (!file_priv) {
-		DRM_UNLOCK();
+	DRM_UNLOCK();
+	if (file_priv == NULL) {
 		DRM_ERROR("can't find authenticator\n");
 		retcode = EINVAL;
 		goto done;
 	}
-	DRM_UNLOCK();
 
-	if (dev->driver->preclose != NULL)
-		dev->driver->preclose(dev, file_priv);
+	if (dev->driver->close != NULL)
+		dev->driver->close(dev, file_priv);
 
 	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
 	    DRM_CURRENTPID, (long)&dev->device, dev->open_count);
@@ -497,12 +512,10 @@ drmclose(dev_t kdev, int flags, int fmt, struct proc *p)
 
 	dev->buf_pgid = 0;
 
-	if (dev->driver->postclose != NULL)
-		dev->driver->postclose(dev, file_priv);
-
 	DRM_LOCK();
 	TAILQ_REMOVE(&dev->files, file_priv, link);
-	drm_free(file_priv, sizeof(*file_priv), DRM_MEM_FILES);
+	drm_free(file_priv, max(dev->driver->file_priv_size, 
+	    sizeof(*file_priv)), DRM_MEM_FILES);
 
 done:
 	if (--dev->open_count == 0) {
@@ -561,15 +574,16 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 		return (drm_getmagic(dev, data, file_priv));
 	case DRM_IOCTL_GET_MAP:
 		return (drm_getmap(dev, data, file_priv));
-	case DRM_IOCTL_GET_CLIENT:
-		return (drm_getclient(dev, data, file_priv));
-	case DRM_IOCTL_GET_STATS:
-		return (drm_getstats(dev, data, file_priv));
 	case DRM_IOCTL_WAIT_VBLANK:
 		return (drm_wait_vblank(dev, data, file_priv));
 	case DRM_IOCTL_MODESET_CTL:
 		return (drm_modeset_ctl(dev, data, file_priv));
 
+	/* removed */
+	case DRM_IOCTL_GET_CLIENT:
+		/*FALLTHROUGH*/
+	case DRM_IOCTL_GET_STATS:
+		return (EINVAL);
 	/*
 	 * no-oped ioctls, we don't check permissions on them because
 	 * they do nothing. they'll be removed as soon as userland is
@@ -618,8 +632,6 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_setversion(dev, data, file_priv));
 		case DRM_IOCTL_IRQ_BUSID:
 			return (drm_irq_by_busid(dev, data, file_priv));
-		case DRM_IOCTL_SET_UNIQUE:
-			return (drm_setunique(dev, data, file_priv));
 		case DRM_IOCTL_AUTH_MAGIC:
 			return (drm_authmagic(dev, data, file_priv));
 		case DRM_IOCTL_ADD_MAP:
@@ -656,6 +668,13 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_sg_free(dev, data, file_priv));
 		case DRM_IOCTL_UPDATE_DRAW:
 			return (drm_update_draw(dev, data, file_priv));
+		case DRM_IOCTL_SET_UNIQUE:
+		/*
+		 * Deprecated in DRM version 1.1, and will return EBUSY
+		 * when setversion has
+		 * requested version 1.1 or greater.
+		 */
+			return (EBUSY);
 		}
 	}
 	if (dev->driver->ioctl != NULL)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.78 2008/10/18 12:11:30 kettenis Exp $	*/
+/*	$OpenBSD: param.h,v 1.80 2008/11/24 12:57:37 dlg Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -140,7 +140,7 @@
 					/* 2K cluster can hold Ether frame */
 #define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
 #define	MCLOFSET	(MCLBYTES - 1)
-
+#define MCLPOOLS	7		/* number of cluster pools */
 
 /*
  * File system parameters and macros.
@@ -196,6 +196,8 @@
 #if !defined(offsetof) && defined(_KERNEL)
 #define offsetof(s, e) ((size_t)&((s *)0)->e)
 #endif
+
+#define nitems(_a)	(sizeof((_a)) / sizeof((_a)[0]))
 
 /*
  * Constants for setting the parameters of the kernel memory allocator.
