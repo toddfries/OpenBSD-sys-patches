@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.109 2008/11/24 12:57:37 dlg Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.113 2008/11/24 15:14:33 claudio Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -195,19 +195,6 @@ struct mbuf {
 #define	M_WAIT		M_WAITOK
 
 /*
- * mbuf utility macros:
- *
- *	MBUFLOCK(code)
- * prevents a section of code from from being interrupted by network
- * drivers.
- */
-#define	MBUFLOCK(code) do {						\
-	int ms = splvm();						\
-	{ code }							\
-	splx(ms);							\
-} while (/* CONSTCOND */ 0)
-
-/*
  * mbuf allocation/deallocation macros:
  *
  *	MGET(struct mbuf *m, int how, int type)
@@ -242,12 +229,14 @@ struct mbuf {
 
 #define	MCLISREFERENCED(m)	((m)->m_ext.ext_nextref != (m))
 
-#define	_MCLADDREFERENCE(o, n)	do {					\
+#define	MCLADDREFERENCE(o, n)	do {					\
+		int ms =  splvm();					\
 		(n)->m_flags |= ((o)->m_flags & (M_EXT|M_CLUSTER));	\
 		(n)->m_ext.ext_nextref = (o)->m_ext.ext_nextref;	\
 		(n)->m_ext.ext_prevref = (o);				\
 		(o)->m_ext.ext_nextref = (n);				\
 		(n)->m_ext.ext_nextref->m_ext.ext_prevref = (n);	\
+		splx(ms);						\
 		MCLREFDEBUGN((n), __FILE__, __LINE__);			\
 	} while (/* CONSTCOND */ 0)
 
@@ -258,13 +247,8 @@ struct mbuf {
 		MCLREFDEBUGN((m), NULL, 0);				\
 	} while (/* CONSTCOND */ 0)
 
-#define	MCLADDREFERENCE(o, n)	MBUFLOCK(_MCLADDREFERENCE((o), (n));)
-
 /*
  * Macros for mbuf external storage.
- *
- * MEXTMALLOC allocates external storage and adds it to
- * a normal mbuf; the flag M_EXT is set upon success.
  *
  * MEXTADD adds pre-allocated external storage to
  * a normal mbuf; the flag M_EXT is set.
@@ -272,21 +256,6 @@ struct mbuf {
  * MCLGET allocates and adds an mbuf cluster to a normal mbuf;
  * the flag M_EXT is set upon success.
  */
-#define	MEXTMALLOC(m, size, how) do {					\
-	(m)->m_ext.ext_buf =						\
-	    (caddr_t)malloc((size), mbtypes[(m)->m_type], (how));	\
-	if ((m)->m_ext.ext_buf != NULL) {				\
-		(m)->m_data = (m)->m_ext.ext_buf;			\
-		(m)->m_flags |= M_EXT;					\
-		(m)->m_flags &= ~M_CLUSTER;				\
-		(m)->m_ext.ext_size = (size);				\
-		(m)->m_ext.ext_free = NULL;				\
-		(m)->m_ext.ext_arg = NULL;				\
-		(m)->m_ext.ext_type = mbtypes[(m)->m_type];		\
-		MCLINITREFERENCE(m);					\
-	}								\
-} while (/* CONSTCOND */ 0)
-
 #define	MEXTADD(m, buf, size, type, free, arg) do {			\
 	(m)->m_data = (m)->m_ext.ext_buf = (caddr_t)(buf);		\
 	(m)->m_flags |= M_EXT;						\
@@ -300,18 +269,6 @@ struct mbuf {
 
 #define MCLGET(m, how) m_clget((m), (how), NULL, MCLBYTES)
 #define MCLGETI(m, how, ifp, l) m_clget((m), (how), (ifp), (l))
-
-/*
- * Reset the data pointer on an mbuf.
- */
-#define	MRESETDATA(m) do {						\
-	if ((m)->m_flags & M_EXT)					\
-		(m)->m_data = (m)->m_ext.ext_buf;			\
-	else if ((m)->m_flags & M_PKTHDR)				\
-		(m)->m_data = (m)->m_pktdat;				\
-	else								\
-		(m)->m_data = (m)->m_dat;				\
-} while (/* CONSTCOND */ 0)
 
 /*
  * MFREE(struct mbuf *m, struct mbuf *n)
@@ -407,15 +364,6 @@ struct mbuf {
 		(m) = m_prepend((m), (plen), (how));			\
 	if ((m) && (m)->m_flags & M_PKTHDR)				\
 		(m)->m_pkthdr.len += (plen);				\
-} while (/* CONSTCOND */ 0)
-
-/* change mbuf to new type */
-#define MCHTYPE(m, t) do {						\
-	MBUFLOCK(							\
-		mbstat.m_mtypes[(m)->m_type]--;				\
-		mbstat.m_mtypes[t]++;					\
-	);								\
-	(m)->m_type = t;						\
 } while (/* CONSTCOND */ 0)
 
 /* length to m_copy to copy all */
