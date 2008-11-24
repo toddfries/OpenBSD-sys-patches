@@ -94,6 +94,7 @@ savagedrm_attach(struct device *parent, struct device *self, void *aux)
 	struct vga_pci_bar	*bar;
 	drm_pci_id_list_t	*id_entry;
 	unsigned long		 mmio_base;
+	int			 is_agp;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), savagedrm_pciidlist);
@@ -111,8 +112,9 @@ savagedrm_attach(struct device *parent, struct device *self, void *aux)
 		dev_priv->aperture_base = dev_priv->fb_base +
 		    SAVAGE_APERTURE_OFFSET;
 		/* this should always be true */
-		if (bar->size != 0x08000000) {
-			printf(": strange pci resource len $08lx\n", bar->size);
+		if (bar->maxsize != 0x08000000) {
+			printf(": strange pci resource len $08lx\n",
+			    bar->maxsize);
 			return;
 		}
 	} else if (dev_priv->chipset != S3_SUPERSAVAGE &&
@@ -134,8 +136,9 @@ savagedrm_attach(struct device *parent, struct device *self, void *aux)
 		dev_priv->aperture_base = dev_priv->fb_base +
 		    SAVAGE_APERTURE_OFFSET;
 		/* this should always be true */
-		if (bar->size != 0x08000000) {
-			printf(": strange pci resource len $08lx\n", bar->size);
+		if (bar->maxsize != 0x08000000) {
+			printf(": strange pci resource len $08lx\n",
+			    bar->maxsize);
 			return;
 		}
 	} else {
@@ -151,7 +154,7 @@ savagedrm_attach(struct device *parent, struct device *self, void *aux)
 			return;
 		}
 		dev_priv->fb_base = bar->base;
-		dev_priv->fb_size = bar->size;
+		dev_priv->fb_size = bar->maxsize;
 		bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);	
 		if (bar == NULL) {
 			printf(": can't find aperture info\n");
@@ -167,7 +170,10 @@ savagedrm_attach(struct device *parent, struct device *self, void *aux)
 	}
 	dev_priv->bst = pa->pa_memt;
 
-	dev_priv->drmdev = drm_attach_mi(&savagedrm_driver, pa, self);
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&savagedrm_driver, pa, is_agp, self);
 }
 
 int
